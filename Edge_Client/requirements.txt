@@ -1,0 +1,11 @@
+requests
+SpeechRecognition
+faster-whisper
+opencv-python
+colorama
+pyvts
+pygame
+ultralytics
+pyaudio
+fastapi
+uvicorn

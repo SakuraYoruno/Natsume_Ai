@@ -1,0 +1,33 @@
+# --- 全局通用 ---
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+venv/
+.env
+*.ast
+*.bat
+.DS_Store
+
+# --- 🔒 Host_Brain (大脑端) 忽略项 ---
+# 忽略 SQLite 数据库 (包含实时状态)
+Host_Brain/data/
+Natsume_Brain/data/*.db
+Natsume_Brain/data/*.sqlite3
+
+# 忽略向量数据库 (体积巨大)Host_Brain
+Host_Brain/core/data/chroma_db/
+
+# 忽略日志
+Host_Brain/core/data/logs/
+
+# 忽略 BERT/LLM 模型缓存
+Host_Brain/core/models/
+*.bin
+*.pth
+
+# --- 🔒 Edge_Client (客户端) 忽略项 ---
+# 忽略客户端临时的录音文件
+Edge_Client/temp_audio/
+*.wav
+*.mp3

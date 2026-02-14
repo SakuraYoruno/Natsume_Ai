@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: doc-audience-lint
+        name: 文档受众门禁（防混写）
+        entry: python tools/doc_audience_lint.py .
+        language: system
+        pass_filenames: false
+        files: \.md$
