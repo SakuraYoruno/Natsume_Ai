@@ -1,0 +1,85 @@
+# 受众：CODEX
+# 标题：node_registry（模型节点注册表：provider/model_id/契约版本）
+# 版本：v1.0
+# 说明：node_id 固定；model_id 尽量使用可 pin 的字符串；任何变更必须 bump model_profile_id 并写入审计。
+
+nodes:
+  core_reasoner_primary:
+    role: core
+    provider: openai
+    model_id: gpt-5.2
+    output_contract: CoreDraft.v1
+    max_output_tokens: 420
+    temperature: 0.35
+
+  core_reasoner_secondary:
+    role: core_backup
+    provider: openai
+    model_id: gpt-5-mini
+    output_contract: CoreDraft.v1
+    max_output_tokens: 280
+    temperature: 0.20
+
+  planner_constraints:
+    role: planner
+    provider: openai
+    model_id: gpt-5.2-pro
+    output_contract: CoreDraft.v1
+    max_output_tokens: 320
+    temperature: 0.15
+
+  tool_planner:
+    role: tool_planner
+    provider: qwen
+    model_id: qwen3.5-plus-2026-02-15
+    output_contract: CoreDraft.v1
+    max_output_tokens: 320
+    temperature: 0.20
+
+  safety_verifier:
+    role: verifier_safety
+    provider: openai
+    model_id: gpt-4.1-mini
+    output_contract: Verifier.v1
+    max_output_tokens: 220
+    temperature: 0.0
+
+  consistency_verifier:
+    role: verifier_consistency
+    provider: gemini
+    model_id: gemini-2.5-flash-lite
+    output_contract: Verifier.v1
+    max_output_tokens: 220
+    temperature: 0.0
+
+  renderer_ja_c_style:
+    role: renderer_ja
+    provider: gemini
+    model_id: gemini-2.5-flash
+    output_contract: RenderDraft.v1
+    max_output_tokens: 360
+    temperature: 0.55
+
+  workbench_translate:
+    role: workbench_translate
+    provider: gemini
+    model_id: gemini-2.5-pro
+    output_contract: CoreDraft.v1
+    max_output_tokens: 900
+    temperature: 0.20
+
+  workbench_code_assist:
+    role: workbench_code
+    provider: deepseek
+    model_id: deepseek-chat
+    output_contract: CoreDraft.v1
+    max_output_tokens: 900
+    temperature: 0.20
+
+host:
+  host_fallback_policy:
+    role: rule_engine_or_tiny_model
+    constraints:
+      no_local_gpu: true
+      target_ttft_ms: 800
+      must_not_claim_execution: true

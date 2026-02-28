@@ -1,10 +1,10 @@
 受众：MASTER
-
 标题：产品需求文档（PRD）
+
 # Natsume Ai 产品需求文档（PRD）
-版本：v1.0（可验收基线）  
-基线白皮书：v1.0（意识主权架构）  
-适用架构：Host_Brain（Python） + Dify（LLM Agent） + Natsume_Body（Edge） +（可选）Cloud Exocortex + ClawdBot
+版本：v1.4（可验收基线）
+基线白皮书：v1.3（意识主权宪法与人格设定）  
+适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
 
 ---
 
@@ -14,16 +14,54 @@
 实现细节（模块边界、接口、Schema、日志、测试落地方式）以《开发实现规格（DevSpec）》为准；白皮书负责“宪法/不可破坏约束”；理论文档负责“原理与推导”。
 
 本 PRD 的强制使用规则（面向实现与验收，而非工具）：
-1) 每个代码改动必须引用 1+ 个需求编号（例如 FR-GOV-003），并给出明确验收方法（命令/用例/断言）。  
+1) 每个代码改动必须引用 1+ 个需求编号（例如 FR-GOV-003），并给出明确验收方法（用例/断言/测试编号）。  
 2) 任何“执行事实/写入事实/确认事实”的对外表述，必须可追溯到 Host 的审计链摘要字段；否则视为缺陷。  
 3) 对外输出结构必须稳定：成功/拒绝/降级都必须返回可解析结构，并带可统计的拒绝码/故障码（reason_code）。
+
+### 0.1 PRD、产品文档与任务列表的关系（强制口径）
+
+本项目文档分层固定为：白皮书（法律）→ PRD（需求）→ DevSpec（实现规格）→ DevTasks（任务卡）→ 测试与审计回放（证据）。
+
+1）白皮书（docs/10_whitepaper/）
+- 定义不可变边界、不变量、真相层级与叙事禁令。
+- 只回答“什么永远不允许/什么算事实”，不回答“做什么/怎么做”。
+
+2）PRD（本文件）
+- 定义“做什么 + 验收”，并以 FR-域-编号（例如 FR-GOV-003）编号。
+- 任何需求必须可验收（输入/输出/观测点），但不得写实现步骤与工程落点细节。
+
+3）DevSpec（docs/30_devspec/DevSpec.md）
+- 定义“怎么做 + 如何验证（测试点/日志点/契约点）”。
+- 负责把 FR-… 映射到：模块边界、Schema、reason_code、审计字段、测试编号 T-… 等可执行工程契约。
+
+4）DevTasks（docs/30_devspec/DevTasks.md）
+- DevTasks 是“任务列表”，以 TASK-编号 表示最小可交付工作单元。
+- 每条 TASK 必须反向引用：覆盖哪些 FR-…、落在 DevSpec 哪些章节、对应哪些测试编号 T-…（验收断言）。
+- 任务列表不应从 PRD/白皮书直接生成；必须从 DevSpec 的工程契约拆解而来（避免把“法律/需求”误当“实现细节”）。
+
+5）Trace（docs/60_trace/requirements_trace.md）
+- 用于审阅覆盖关系：白皮书/PRD → DevSpec → DevTasks → Tests → Invariants。
+- Trace 只做“指向”，不承载实现内容。
+
+### 0.2 需求成熟度与进入开发门槛（DoR/DoD）
+
+本项目的“需求是否可开发”不是主观判断，而是看追溯链是否闭合。
+DoR（Definition of Ready：进入开发门槛） 
+- FR-… 需求条目具备明确的“输入/输出/拒绝条件（含 reason_code）/验收标准”。 
+- 需求不依赖实现细节措辞（避免把“怎么做”写进 PRD）。 
+- 需求已在 Trace 中登记，并标记覆盖状态（至少达到“PRD_READY”）。
+
+DoD（Definition of Done：完成门槛）
+- DevSpec 对应章节已给出工程契约：Schema、审计字段、拒绝码映射、日志点、（必要时）静态扫描断言。 
+- 该 FR 至少绑定 1 个测试编号 T-…（回归断言明确）。 
+- Trace 状态至少达到“SPEC_READY”；当任务卡与测试用例齐备后可进入“TASK_READY/TEST_READY”。
 
 ---
 
 ## 1. 产品定义
 
 ### 1.1 一句话定义
-Natsume Ai 是一个“意识主权”的本地智能体：LLM 负责叙事与意图草案，Host 负责裁决与执行，所有动作必须票据化并可审计回放。
+Natsume Ai 是一个“意识主权”的本地智能体：语义内核（LLM）负责叙事与意图草案，Host 负责裁决与执行，所有动作必须票据化并可审计回放。
 
 ### 1.2 用户与使用场景
 - 主用户：Master（本地开发者），在 Host 机器上调试与运行；Edge 负责“身体”侧能力（语音/视觉/微信接收/头像驱动）。
@@ -45,18 +83,52 @@ Natsume Ai 是一个“意识主权”的本地智能体：LLM 负责叙事与�
 ## 2. 范围与非目标
 
 ### 2.1 v1.0 范围（MVP→可运行闭环）
-- 语言→意图：Dify 生成叙事 + Intent 草案；Host 负责解析与严格校验。  
+- 语言→意图：语义内核生成叙事 + Intent 草案；Host 负责解析与严格校验。  
 - 裁决→执行：Governor gate + tokenized execution；Skills 统一入口；可观测审计链。  
-- 成长闭环：Bond SSOT（Neo4j）+ clearance/trust snapshot（SQLite 派生缓存）+ Episodic（向量）+ Style Canon（Host 主权）。  
+- 成长闭环：Bond SSOT（Neo4j）+ clearance/trust snapshot（SQLite 派生缓存）+ Episodic（向量）+ Style Canon（Host 主权）+ World Canon（Host 主权最小权威内容集合，用于一致性引用；非执行事实）。  
 - 降级与故障：阶段化状态机 + 统一故障码 + 面向用户的克制提示。  
 - LSP：Artifact Vault + Undo Token + manifest + GC（可审计）。  
-- 视觉红线：视觉熔断与 UI 定位置信度门槛。
+- 视觉红线：视觉熔断与 UI 定位置信度门槛。  
+- Flow 配置资产：LangGraph Flow（图/配置）版本化与环境指针（dev/staging/prod）可追溯。
 
 ### 2.2 明确非目标（v1.0 不做）
 - 不做跨用户多租户与云端账号体系。  
 - 不做高风险自动化（系统配置大规模修改/支付/账号绑定）；仅允许拒绝或引导。  
-- 不把剧情当事实的“世界观知识库”；Canon 仅作为风格范式库（tone_only）。  
-- 不把 Dify 作为主权存储；Dify 只能消费 Host context_pack 并产出 intent_draft。
+- 不做把“剧情/叙事”当执行事实的世界观大库；仅维护最小 World Canon（系统术语/设定/关键不变量），用于一致性引用与冲突裁决，但永远不具备执行事实效力；Style Canon 仍仅用于风格范式（tone_only）。  
+- 不把任何 LLM 组件作为主权存储；语义内核只能消费 Host context_pack 并产出 intent_draft（草案）。
+
+### 2.3 系统服务清单（必须实现，缺一不可）
+说明：以下为本项目必须实现的“服务项清单”。允许存在“运行时暂不可用/未配置/降级”的情况，但必须满足：
+- 接口与健康状态可观测；
+- 降级必须返回稳定结构与可统计的 reason_code / stage；
+- 不得伪造“已执行/已保存/已确认”的事实口径。
+
+Host 端（主权与中枢）
+- 编排入口服务（Host Orchestrator API：对外 chat 入口 + 事件汇聚）
+- Governor / Rule Engine（唯一裁决点）
+- Token Service（approval/confirm/undo 票据签发与校验）
+- Audit / Ledger Writer（审计写入器）
+- SQLite Ledger（最小事实账本）
+- Neo4j Bond SSOT（关系域 SSOT）
+- Episodic Vector Store（向量库）
+- 文本嵌入模型服务（Embedding）
+- 重排模型服务（Reranker）
+- 召回与融合服务（Recall/Fusion：TopK evidence pack）
+- 屏幕采集与屏幕监控服务（Screen Capture/Monitor）
+- OCR/识图服务（按需推理）
+- 摄像头采集与识别服务（Camera Capture + Vision Inference）
+- ClawdBot（视觉 UI 代理：计划草案 + 红线熔断）
+- Cloud LLM Gateway + AIRLOCK（外部模型出入口与脱敏隔离）
+- Observability（日志/指标/追踪与面板）
+
+Edge 端（身体侧能力）
+- Edge RPC Server（Host↔Edge 调用与事件上送）
+- ASR 服务（faster-whisper large-v3，流式/分段）
+- TTS 服务（GPT-SoVITS，全 GPU 常驻）
+- Audio Playback / Speaker Queue（播报队列与可打断）
+- VTS / Live2D 控制服务（VTube Studio talk gate + 表情映射）
+- Edge 兜底小模型服务（Ollama 3B 量化，默认卸载，低频触发）
+- Edge 资源闸门服务（GPU/音频任务互斥与优先级：ASR>播放>TTS合成>兜底LLM）
 
 ---
 
@@ -65,8 +137,8 @@ Natsume Ai 是一个“意识主权”的本地智能体：LLM 负责叙事与�
 ### 3.1 普通对话（不执行）
 1) 用户输入  
 2) Host 读取 Hard Snapshot + Bond Summary +（可选）Episodic/Canon 召回  
-3) Host 打包 context_pack → Dify  
-4) Dify 输出 narrative + intent_draft（可为空）  
+3) Host 打包 context_pack → 语义内核（LLM）  
+4) 语义内核输出 narrative + intent_draft（可为空）  
 5) Host QA（伪执行/语言/Canon-as-fact/格式漂移）  
 6) Host 写入审计与历史（失败也需可观测记录）  
 7) 输出给用户：稳定结构 + narrative +（可选）intent 草案/裁决结果摘要
@@ -74,23 +146,38 @@ Natsume Ai 是一个“意识主权”的本地智能体：LLM 负责叙事与�
 用户体验目标：回复稳定、像她、但不会“假装已经做了”。
 
 ### 3.2 执行请求（需要 Skill）
-1) Dify 提出 intent_draft  
+1) 语义内核提出 intent_draft  
 2) Host：lenient parse → strict validate → governor adjudicate  
 3) 若 APPROVE：下发 approval_token，执行 Skill，记录 skill_exec_log  
 4) 若 REJECT：返回 reason_code + user_facing_hint，并记录 system_event  
 5) 用户看到的“执行结果”只能来自审计摘要字段（而非叙事自述）
 
-### 3.3 高风险确认（confirm_token）
+### 3.3 冷启动与依赖不可用（No API Key / Service Temporarily Unavailable）
+目标：在未配置云端 API Key 或任一服务暂不可用时，系统仍必须完成闭环：稳定输出 + 可观测降级 + 可回放审计索引。
+
+黑盒流程（用户可感知）：
+1. 用户输入
+2. Host 识别当前不可用服务与能力矩阵（含 sys_mode/Gaming 门控）
+3. 输出：稳定结构（可解析 JSON）+ 克制叙事（不得伪造“已执行/已保存/已确认”）+ 明确降级标记（quality.stage / reason_code）
+4. 审计：至少写入 proposal/decision 的索引（执行可为空）
+
+验收：
+- 无 API Key：必须输出可解析结构，且 quality.stage 明确体现降级点；不得出现伪执行宣告。
+- 任一服务暂不可用：必须输出可解析结构；若拒绝则 reason_code 必须稳定可统计（同版本同类缺失同码）。
+- 可回放：至少能用 request_id 串联到 intent_draft（可为空）与 governor decision（不可为空）。
+- 不得把“服务不可用/未触发”当作“事实为空”的结论输出（例如不得把“向量库不可用”说成“我没有任何相关记忆”）。
+
+### 3.4 高风险确认（confirm_token）
 - 对 risk_level=4 / irreversible / account/payment/system-settings：必须两步确认  
   - 第一次：只返回 CONFIRM_REQUIRED + 引导（不执行）  
   - 第二次：携带 confirm_token 才可能 APPROVE
 
-### 3.4 可撤销动作（undo_token + manifest）
+### 3.5 可撤销动作（undo_token + manifest）
 - 对 reversible=true 的动作：默认必须产出 manifest + artifacts，并返回 undo_token  
 - Undo 本身也走 Governor（较低风险）  
 - 删除默认 move-to-quarantine；真删除必须 confirm_token
 
-### 3.5 故障降级（用户体验口径）
+### 3.6 故障降级（用户体验口径）
 - 依赖失败/超时：仍返回可解析结构 + 降级提示（克制，不暴露内部组件名）  
 - 降级最多追问 1 个关键问题  
 - 不产生“需要执行才能成立”的承诺句
@@ -100,12 +187,12 @@ Natsume Ai 是一个“意识主权”的本地智能体：LLM 负责叙事与�
 ## 4. 功能需求（Functional Requirements）
 
 说明：每条需求必须具备“描述 + 关键约束 + 验收标准”。  
-命名约定：FR-域-编号（域：CORE / INTENT / GOV / TOKEN / SKILL / AUDIT / AIRLOCK / VISION / BOND / MEMORY / CANON / MODE / LSP / UX / OBS）
+命名约定：FR-域-编号（域：CORE / FLOW / INTENT / GOV / TOKEN / SKILL / AUDIT / AIRLOCK / VISION / BOND / MEMORY / CANON / MODE / LSP / UX / OBS）
 
 ### 4.1 核心链路与输出稳定（CORE）
 
 FR-CORE-001 单向链强制  
-- 描述：执行路径必须严格为 Dify(intent草案) → Host(governor) → Skill(exec) → Audit。  
+- 描述：执行路径必须严格为 语义内核(intent草案) → Host(governor) → Skill(exec) → Audit。  
 - 关键约束：任何技能执行必须经由 Skills Loader；不得旁路。  
 - 验收：旁路尝试被拒绝并记录；无法绕过 token 校验触发实际执行。
 
@@ -117,7 +204,32 @@ FR-CORE-003 叙事与事实分离
 - 描述：叙事层不得自造执行事实；执行事实只来自审计链摘要字段。  
 - 验收：回归集中出现“已执行/已保存/已确认”等事实句时，必须可指向审计摘要字段；否则 QA 拦截并重写/降级。
 
-### 4.2 Intent 规范与校验（INTENT）
+FR-CORE-004 冷启动可用性（无 API Key/外部依赖）
+- 描述：在未配置任何云端 API Key、且外部依赖（例如向量库/图数据库/边缘端等）不可用的情况下，系统仍必须能完成“输入→（可降级叙事）→审计记录→稳定输出”的最小闭环。
+- 关键约束：
+  - 不得因依赖缺失导致输出不可解析或结构漂移；
+  - 不得伪造“已执行/已保存/已确认”等完成性事实； 
+  - 对缺失依赖必须显式降级并可观测（stage 与 reason_code 可统计）。
+- 验收：
+  - 无云端 API Key：输出结构稳定，quality.stage 明确标注降级点；
+  - 外部依赖不可用：输出结构稳定，decision=REJECT（或降级）时 reason_code 稳定为 DEPENDENCY_UNAVAILABLE（或更精确子类）；
+  - Triptych 仍可回放：至少能在审计索引中定位到本次请求的 proposal/decision（执行可为空）。
+
+### 4.2 Flow 配置资产（FLOW）
+
+FR-FLOW-001 Flow 资产版本化与追溯  
+- 描述：Flow（LangGraph 图/配置）属于可部署配置资产，必须版本化管理，以支持行为变更可对照、可回滚、可审计追溯。  
+- 关键约束：  
+  - Flow 导出物必须归档在仓库固定位置（flows/exports），并可按环境唯一确定“当前生效版本”；  
+  - 必须存在一个“当前生效指针”（flows/active.pointer，按 dev/staging/prod）与一个“追溯索引”（docs/60_trace/flows/index.md，按环境列出当前生效版本与变更摘要）；  
+  - 指针与索引不得互相矛盾；任一缺失/不一致视为配置不合规。  
+- 验收：  
+  - 任意一次 Flow 变更，都能在仓库中定位到对应导出文件；  
+  - 可从“当前生效指针”与“追溯索引”唯一确定各环境生效版本；  
+  - 回滚时切换回旧导出文件后，索引可指回对应版本并保留变更摘要；  
+  - 对应回归测试编号：T-Flow-01、T-Flow-02（配置资产一致性）。
+
+### 4.3 Intent 规范与校验（INTENT）
 
 FR-INTENT-001 固定 Schema 与 allowlist  
 - 描述：Host 只接受固定 Schema（schema_version、id、ts_ms、session_id、seq、type、action、target、args、nonce）。type/action/target 必须 allowlist。  
@@ -131,7 +243,7 @@ FR-INTENT-003 重放与顺序保护
 - 描述：intent_id 去重、seq 单调、ts 过期窗口、nonce 缓存。  
 - 验收：重复 id → REPLAY_DETECTED；seq 乱序/回滚 → SEQ_INVALID；过期 → EXPIRED_INTENT。
 
-### 4.3 Governor 裁决与拒绝码（GOV）
+### 4.4 Governor 裁决与拒绝码（GOV）
 
 FR-GOV-001 Gate 体系可配置且可审计  
 - 描述：至少包含 Trust/Energy/SysMode/RateLimit/Scope/Safety/Airlock Gate；规则版本化。  
@@ -145,7 +257,7 @@ FR-GOV-003 APPROVE 必有 approval_token_ref
 - 描述：没有 token_ref 的批准不允许进入执行；Skills 必须拒绝。  
 - 验收：模拟 governor 漏发 token_ref，Skills 仍拒绝并记录 SKILL_TOKEN_MISSING。
 
-### 4.4 Tokenized Execution（TOKEN）
+### 4.5 Tokenized Execution（TOKEN）
 
 FR-TOKEN-001 approval_token 绑定约束  
 - 描述：token 必须绑定 intent_id、skill_name、session_id/seq、短 TTL，且带签名。  
@@ -159,7 +271,9 @@ FR-TOKEN-003 undo_token + manifest 作为可撤销契约
 - 描述：reversible=true 的执行必须产生 undo_token 与 manifest_ref；未产出视为不合规。  
 - 验收：缺 manifest_ref 的 reversible 执行被拒绝或升级 confirm；撤销可回放。
 
-### 4.5 Skills 体系（SKILL）
+### 4.6 能力载体与工具平面（SKILL/TOOL）
+
+#### 4.6.1 Skills 体系（SKILL）
 
 FR-SKILL-001 SkillMeta 强制声明  
 - 描述：每个 skill 必须声明 clearance_level、risk_level、scopes、reversible、requires_visual_audit、requires_confirm_token、allow/deny list 等。  
@@ -167,13 +281,27 @@ FR-SKILL-001 SkillMeta 强制声明
 
 FR-SKILL-002 统一执行入口  
 - 描述：业务代码不得直接 import impl；只能通过 loader/registry 执行，并强制 token 校验。  
-- 验收：CI 静态扫描 + 运行时断言双生效；违规 import 触发失败。
+- 验收：静态扫描 + 运行时断言双生效；违规 import 触发失败。
 
 FR-SKILL-003 幂等与重试边界  
 - 描述：同一 intent_id 执行必须幂等（复用结果或拒绝重复），避免重复副作用。  
 - 验收：重复触发同一 intent_id 不产生第二次真实动作；日志可证明。
 
-### 4.6 审计链与回放（AUDIT）
+#### 4.6.2 工具平面（TOOL）
+
+FR-TOOL-001 工具元数据 Top-K 暴露（渐进式加载）
+- 描述：每轮仅向语义内核暴露 tool_meta_pack（候选工具的最小元数据 Top-K 子集）；不得暴露全量工具列表与实现细节；WRITE 默认不进入可见集。
+- 验收：同一轮上下文中工具元数据数量有硬上限；在未满足条件时 WRITE 工具不出现在 tool_meta_pack；违规触发可统计 reason_code（如 TOOL_VISIBILITY_POLICY_VIOLATION）。
+
+FR-TOOL-002 tool_visibility_hash 追责
+- 描述：Host 必须记录“该轮模型看见了哪些工具元数据”的 tool_visibility_hash，并与 intent_log/llm_call_log 关联，支持事后追责。
+- 验收：每次产生 intent_draft 时，审计链可定位到 tool_visibility_hash；缺失则视为合规失败并拒绝进入执行路径。
+
+FR-TOOL-003 ToolBroker 单入口与 WRITE Token gating
+- 描述：所有工具执行必须经 ToolBroker 单入口；WRITE 类工具必须在 Governor=APPROVE 且 token 合法时才可执行，并产生 evidence_ref 串联到审计链。
+- 验收：任何绕过 ToolBroker 的执行都被阻断；WRITE 无 token 必拒绝且可统计；成功执行必须生成可回放的 evidence_ref。
+
+### 4.7 审计链与回放（AUDIT）
 
 FR-AUDIT-001 三联画日志（Triptych）  
 - 描述：intent_log / governor_log / skill_exec_log 必须完整，并可串联。  
@@ -187,7 +315,7 @@ FR-AUDIT-003 QA 违规记录
 - 描述：伪执行宣告、Canon-as-fact、语言政策违规等必须进入 qa_violation_log。  
 - 验收：回归触发一次违规，可在日志面板检索并回放原文与处理结果。
 
-### 4.7 外脑气闸（AIRLOCK）
+### 4.8 外脑气闸（AIRLOCK）
 
 FR-AIRLOCK-001 出站净化报告  
 - 描述：外发 payload 必须最小化并生成 sanitization_report；不得外发硬状态原始值/宪法全文/规则细节。  
@@ -197,7 +325,7 @@ FR-AIRLOCK-002 入站隔离与分类
 - 描述：外部返回内容必须分类（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN），不得直通执行。  
 - 验收：外部内容触发执行前必须被重构为 Intent 并通过 Governor；否则阻断（EXTERNAL_DATA_GATE）。
 
-### 4.8 视觉熔断与 ClawdBot（VISION）
+### 4.9 视觉熔断与 ClawdBot（VISION）
 
 FR-VISION-001 视觉红线熔断  
 - 描述：支付/系统设置/删除/账号等红线场景，门禁不足必须拒绝（VISUAL_REDLINE）。  
@@ -207,7 +335,19 @@ FR-VISION-002 定位置信度门槛
 - 描述：UI 元素定位 confidence < 0.80 必须停止并返回 UI_ELEMENT_NOT_FOUND。  
 - 验收：模拟低置信度定位，不发生任何点击；clawd_action_log 记录完整。
 
-### 4.9 关系系统（BOND）
+FR-VISION-003 屏幕监控与 OCR 触发门控（Gaming 不触发）
+- 描述：屏幕监控与 OCR/识图仅在允许的 sys_mode 下触发；Gaming 模式必须禁止触发（含定时轮询与被动触发），不得对用户输出“我看到了屏幕内容”的无证据宣告。
+- 验收：Gaming 模式下任意屏幕监控/OCR 请求均被拒绝或降级（带稳定 reason_code）；非 Gaming 模式触发时输出结构化结果（text_blocks/bbox/conf/source_ref）并可回放。
+
+FR-VISION-004 摄像头识别事件化与证据引用
+- 描述：摄像头识别必须以事件化结果输出（objects/events + confidence + evidence_ref），不得以自然语言替代证据引用；低置信度必须显式标注。
+- 验收：任一摄像头识别事件可追溯到 evidence_ref；证据缺失时必须降级/拒绝并给出 reason_code。
+
+FR-VISION-005 ClawdBot 必须依赖结构化视觉输入
+- 描述：ClawdBot 的 UI 行为规划必须消费结构化视觉输入（OCR/检测结果与截图证据指针），不得直接凭空给出点击步骤；置信度不足必须熔断。
+- 验收：缺结构化视觉输入时不得进入可执行 UI 行为路径；熔断可审计。
+
+### 4.10 关系系统（BOND）
 
 FR-BOND-001 Neo4j 作为 SSOT  
 - 描述：Bond 六维在 Neo4j，任何组件不得双写；SQLite 仅存 snapshot 派生缓存。  
@@ -217,11 +357,11 @@ FR-BOND-002 Event 驱动更新
 - 描述：Bond 变化只能由事件驱动，事件必须含 etype、intensity、evidence_refs。  
 - 验收：缺 evidence_refs 的 bond 更新被拒绝并记录 BOND_UPDATE_INVALID。
 
-FR-BOND-003 给 Dify 的 Bond Summary 降采样  
-- 描述：Dify 不得获得数值；只拿 stage/trend/capability_hint。  
-- 验收：Dify 输出出现“信任值=xx”等数值宣称，QA 必拦截。
+FR-BOND-003 给语义内核的 Bond Summary 降采样  
+- 描述：语义内核不得获得数值；只拿 stage/trend/capability_hint。  
+- 验收：输出出现“信任值=xx”等数值宣称，QA 必拦截。
 
-### 4.10 记忆系统（MEMORY）
+### 4.11 记忆系统（MEMORY）
 
 FR-MEM-001 Episodic 写入门禁与证据链  
 - 描述：写入必须有 evidence_refs；默认不写入“纯叙事输出”。  
@@ -230,8 +370,19 @@ FR-MEM-001 Episodic 写入门禁与证据链
 FR-MEM-002 衰减、合并、删除可审计  
 - 描述：条目有 decay_profile；合并保留证据链；删除需 intent+governor。  
 - 验收：合并后原条目保留 merged_into；删除能追溯原因与流程。
+FR-MEM-003 文本嵌入服务（Embedding）必须存在且可降级
+- 描述：必须提供可调用的 embedding 服务接口与健康状态；不可用时必须稳定降级并可观测，不得把“服务不可用”伪装成“记忆为空”的事实结论。
+- 验收：embedding 不可用/超时时，输出结构稳定且 reason_code 可统计；审计链可回放。
 
-### 4.11 风格骨架库（CANON）
+FR-MEM-004 重排服务（Reranker）必须存在且可降级
+- 描述：必须提供可调用的 reranker 服务接口与健康状态；不可用时必须稳定降级（例如退化为召回顺序或轻量排序），并显式标注降级阶段。
+- 验收：reranker 不可用时，仍能输出 TopK evidence pack（字段稳定）且带 stage/reason_code。
+
+FR-MEM-005 召回融合输出必须为“证据包”（evidence pack）
+- 描述：Host 的召回融合必须输出结构化 evidence pack（候选、分数、摘要、来源指针、置信度），供后续回答与审计引用；不得仅输出自然语言“我找到了…”.
+- 验收：同版本下 evidence pack 字段结构稳定；任何“完成性/事实性表述”必须能引用 evidence pack 或审计摘要字段。
+
+### 4.12 风格骨架库（CANON）
 
 FR-CANON-001 Canon 仅用于口吻，不得覆盖事实  
 - 描述：Canon 条目必须标记 tone_only/unsafe_as_fact；召回与注入字段隔离。  
@@ -239,9 +390,21 @@ FR-CANON-001 Canon 仅用于口吻，不得覆盖事实
 
 FR-CANON-002 Host 主权与更新流程  
 - 描述：Canon SSOT 在 Host；更新必须走 Evolution/白名单 + 审计。  
-- 验收：Dify 无法直接写 Canon；任何 Canon 更新都有提案与审计记录。
+- 验收：任何解释器无法直接写 Canon；任何 Canon 更新都有提案与审计记录。
 
-### 4.12 sys_mode 与路由（MODE）
+FR-WCANON-001 World Canon 最小权威内容集合（可引用、非执行事实）  
+- 描述：Host 侧维护 World Canon（系统术语、架构设定、关键不变量、必要世界观条目）；用于跨会话一致性引用与冲突裁决，但不构成执行事实。  
+- 验收：叙事引用 World Canon 时必须使用“设定/引用口径”；任何“已执行/已保存/已确认”仍必须引用审计链，否则 QA 拦截。
+
+FR-WCANON-002 World Canon 版本化与更新可审计  
+- 描述：World Canon 更新必须走提案/白名单或 Evolution 流程，并在审计链中可回放（变更前后 hash/version 可追溯）。  
+- 验收：任意 World Canon 变更都能在 canon_change_log/canon_proposal_log（或语义等价日志）中定位到来源与证据引用。
+
+FR-WCANON-003 注入分槽隔离（authoritative.world_canon）  
+- 描述：World Canon 必须以独立槽位注入 context_pack（与 style_pack/episodic/facts 分离），并携带 evidence_level=CANON_REFERENCE_ONLY。  
+- 验收：混槽注入视为缺陷；回归集中出现“Canon 当事实/当执行事实”时必须被拦截并记录违规事件。
+
+### 4.13 sys_mode 与路由（MODE）
 
 FR-MODE-001 三模式行为差异  
 - 描述：Normal/Gaming/Sleep 影响能力矩阵、输出节奏、资源预算。  
@@ -251,7 +414,11 @@ FR-MODE-002 来源可审计
 - 描述：sys_mode 切换必须有来源证据（观测/用户授权/定时策略）。  
 - 验收：每次切换写 hard_state_log（原因、证据摘要），可回放。
 
-### 4.13 LSP（本地沙盒剖面）（LSP）
+FR-MODE-003 Gaming 模式视觉链路门控
+- 描述：Gaming 模式下禁止屏幕监控/OCR；同时禁止任何依赖屏幕帧的 ClawdBot UI 自动化链路；仅允许低风险对话与语音外显。
+- 验收：进入 Gaming 后，屏幕监控/OCR/Clawd UI 动作均被稳定拒绝或降级；退出 Gaming 后按规则恢复且审计可回放。
+
+### 4.14 LSP（本地沙盒剖面）（LSP）
 
 FR-LSP-001 Artifact Vault 可寻址可 GC  
 - 描述：截图/关键帧/回滚材料进入 Vault，具 hash 与 policy_profile_id；GC 可审计且不得删有效 undo 窗口内材料。  
@@ -261,7 +428,7 @@ FR-LSP-002 manifest 作为回滚清单
 - 描述：可逆变更产出 manifest（before/after/path/hash/refs/rollback_steps/digest）。  
 - 验收：manifest digest 不匹配时，Undo 必拒绝。
 
-### 4.14 交互与故障处理（UX）
+### 4.15 交互与故障处理（UX）
 
 FR-UX-001 阶段化状态机与降级  
 - 描述：S0..S8 每阶段有失败分支与 reason_code；降级最多追问 1 个关键问题。  
@@ -271,7 +438,7 @@ FR-UX-002 Host 最小叙事模板库
 - 描述：LLM 不可用/不合规时，Host 输出最低风格且不伪执行的模板（不暴露内部组件名）。  
 - 验收：关闭 LLM 或强制超时，仍输出合规模板；不产生执行 intent。
 
-### 4.15 可观测与运维（OBS）
+### 4.16 可观测与运维（OBS）
 
 FR-OBS-001 关键指标与面板  
 - 描述：展示拒绝原因分布、伪执行命中次数、召回概览、Hard Snapshot、最近链路摘要。  
@@ -280,6 +447,44 @@ FR-OBS-001 关键指标与面板
 FR-OBS-002 开发/生产模式差异  
 - 描述：开发模式可显示内部 debug trace；生产模式默认隐藏，仅留 user_facing_hint。  
 - 验收：切换模式后输出差异符合预期；不影响裁决与审计事实。
+
+### 4.17 通道与外显（CHANNEL/AVATAR）
+
+FR-CHANNEL-001 微信通道 I/O 事件化与审计串联
+- 描述：微信收发必须被建模为确定性的通道事件（inbound/outbound），并写入可追溯审计链；LLM 不得自行决定“是否发送/发给谁/发什么”。
+- 验收：任一出站消息都能在审计链中追溯到 thread_key 与 request_id；失败必须可解释（reason_code + stage），且可回放到同一 intent_id。
+
+FR-AVATAR-001 外显驱动确定性映射（VTS）
+- 描述：外显（VTube Studio 等）只能使用固定枚举 emotion_tag→expression_id 的确定性映射；拒绝模型提交自由动作参数或未知 tag。
+- 验收：非法 emotion_tag/自由动作参数被拒绝并产生可统计 reason_code；合法触发可回放到固定映射表（同版本同输入输出一致）。
+
+### 4.18 MCP Providers 接入（MCP）
+
+FR-MCP-001 MCP provider 元数据同步 + 受治理调用（READ/WRITE 分级）
+- 描述：MCP provider 暴露的工具必须先同步为 ToolMeta（仅元数据），并按 READ/WRITE 分级纳入治理；所有 MCP 调用必须经 ToolBroker 单入口并串联审计字段（provider_id/tool_id/request_id/evidence_ref）。
+- 验收：MCP WRITE 在无 token 或未 APPROVE 时必拒绝且可统计；所有 MCP 调用都可追溯到 intent/governor/skill_exec 记录，并满足 AIRLOCK 出站最小化要求。
+
+### 4.19 语音链路（VOICE）
+
+FR-VOICE-001 ASR 事件化上送（Edge→Host）
+- 描述：Edge ASR（large-v3）必须上送事件化转写（流式或分段），包含时间戳与置信度；可选 alternates（N-best）用于检索提示。
+- 验收：转写事件结构稳定；低置信度显式标注；可回放。
+
+FR-VOICE-002 TTS 合成与播报队列（Host→Edge）
+- 描述：Edge TTS（GPT-SoVITS，全 GPU 常驻）必须提供“合成+播报队列”统一能力；Host 只下发最终口径文本与情绪标签。
+- 验收：播报事件可关联 request_id；失败可解释（reason_code/stage）；不出现伪执行宣告。
+
+FR-VOICE-003 强交互可打断（Barge-in）
+- 描述：用户开口时可打断当前播报，优先保证 ASR 继续上送；打断不构成任何执行事实或写入事实。
+- 验收：打断立即生效；审计记录打断事件；ASR 不被阻塞。
+
+FR-VOICE-004 Edge 兜底小模型（Ollama 3B 量化）默认卸载、低频触发
+- 描述：兜底小模型作为草案能力（在场回应/输入清洗/摘要压缩/检索提示），默认卸载、按需加载；不可用时快速失败并回退到 Host 兜底口径。
+- 验收：任何兜底输出均标记为 draft-only；不得包含裁决或执行事实宣告；不可用时 reason_code 可统计。
+
+FR-VOICE-005 Edge 资源闸门（优先级与互斥）
+- 描述：Edge 必须实施资源闸门，避免 ASR/TTS/兜底LLM 峰值叠加导致不稳定；优先级：ASR > 播放 > TTS 合成 > 兜底 LLM。
+- 验收：压力下仍保证 ASR；资源不足时降级行为可观测且可回放。
 
 ---
 
@@ -291,7 +496,7 @@ NFR-SEC-001 本地优先与最小暴露
 
 NFR-REL-001 降级可用性  
 - 要求：依赖故障不崩溃；输出结构稳定；关键链路可观测。  
-- 验收：故障注入矩阵全通过（DB/Neo4j/Chroma/Dify/Edge 超时或不可用）。
+- 验收：故障注入矩阵全通过（DB/Neo4j/Chroma/Cloud Exocortex/Edge 超时或不可用）。
 
 NFR-PERF-001 响应时延预算（本地目标）  
 - 要求：普通对话可接受；执行链路可解释；超时可控并可降级。  
@@ -308,16 +513,19 @@ NFR-MAINT-001 可回归与可迁移
 要求：
 - 每条 FR 必须在 DevSpec 中有对应实现章节（接口/Schema/日志/测试落地）。  
 - 每条 FR 至少对应 1 条可自动化回归测试（或最小合规测试编号 T-xx）。  
-- CI 必须具备：静态扫描（禁止旁路）+ 单元/集成/故障注入测试。
+- CI 必须具备：静态扫描（禁止旁路）+ 单元/集成/故障注入测试。  
+- 配置资产也必须可追溯：包括但不限于 Flow 资产（LangGraph 图/配置）及其环境指针；它们必须能映射到具体需求编号与验收用例。  
+- docs/60_trace/ 下应存在“索引文件”指向当前生效 Flow（例如 docs/60_trace/flows/index.md），以避免“仓库里有很多配置但不知道用哪一个”。
 
 说明：
 - 映射表由 `docs/60_trace/requirements_trace.md`（或等价）维护；PRD 只定义规则与编号体系。
+- Trace 既追溯“代码实现”，也追溯“可部署配置资产”；当行为变化来自 Flow，而非 Host 代码时，仍必须有 ReqID 与验收记录可引用。
 
 ---
 
 ## 7. 里程碑（按“可验收能力包”交付）
 
-M1 主权闭环（最小可运行）：FR-CORE/INTENT/GOV/TOKEN/SKILL/AUDIT（基础）  
+M1 主权闭环（最小可运行）：FR-CORE/FLOW/INTENT/GOV/TOKEN/SKILL/AUDIT（基础）  
 M2 成长闭环（关系+记忆+风格）：FR-BOND/MEM/CANON  
 M3 LSP（可撤销默认）：FR-LSP + 可逆能力接入  
 M4 体验包（低风险）：桌面留言/梦境/Focus Mode（均需 SkillMeta + 审计）  
@@ -326,7 +534,7 @@ M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单  
-- 验收脚本/回归测试清单  
+- 回归测试清单（测试编号 + 预期断言）  
 - 风险回顾（新增 scope / 票据 / 红线变化）  
 - 文档更新（PRD/DevSpec/白皮书差异说明）
 

@@ -1,10 +1,13 @@
 受众：PROJECT
 标题：Project Tasks（只产出文档，不涉及代码）
 
+版本：v1.0
+日期：2026-02-28
+
 任务规则：
-- 只修改 docs/10_whitepaper、docs/20_prd、docs/60_trace（以及你产出的文档本身）
-- 不要生成“请去实现/请提交/请跑测试”这种句子
-- 每次输出必须给出：变更点列表 + 受影响章节 + 版本号策略建议
+- 只修改 docs/ 目录下的文档体系（白皮书/PRD/DevSpec/DevTasks/AGENTS/Project/Trace），以及你产出的文档本身；不得触碰仓库代码与运行资产。
+- 不要生成“指令性句式/终端指令片段”（尤其是让实现层去执行的口吻）。
+- 每次输出必须给出：变更点列表 + 受影响章节/条目（可直接粘贴替换） + 版本号策略建议。
 
 TASK-P001：把白皮书中的“工程实现细节”迁移到 DevSpec（文档层迁移）
 - 输入：docs/10_whitepaper/whitepaper_constitution_persona.md
@@ -21,6 +24,6 @@ TASK-P002：PRD 扩写标准化
   - 验收标准（可测试）
 
 TASK-P003：Trace 覆盖率维护
-- 输出 requirements_trace.md/.csv，列出每条需求至少对应：
+- 输出 requirements_trace.md（可选：requirements_trace.csv 作为表格视图），列出每条需求至少对应：
   - DevSpec 章节
   - 最小测试编号（T-xx）

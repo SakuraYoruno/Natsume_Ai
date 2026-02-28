@@ -1,232 +1,859 @@
-受众：CODEX
-标题：开发规格 DevSpec — 模板（工程落地）
+受众：CODEX  
+标题：开发规格 DevSpec（从零可重建：目录骨架与契约落点）
 
 本文只写“怎么做”与“如何验证”，不写产品愿景。
-# Natsume Ai 产品开发文档（Dev Spec）
-版本：v1.0
-日期：2026-02-14
-适用架构：Host_Brain（Python） + Dify（LLM Agent） + Natsume_Body（Edge） +（可选）Cloud Exocortex + ClawdBot
 
-本文件用于“让 Codex 直接开工”，目标是把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。  
-注意：本文件不讨论叙事创作与世界观文本；那些属于《白皮书（宪法与人格）》与《理论文档》。
+# Natsume Ai 产品开发文档（Dev Spec）
+版本：v1.4
+日期：2026-02-28
+适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
+
+本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。  
+目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
 
 ---
 
 ## 0. 术语与硬约束（执行口径）
-0.1 单向链：Dify → Host Governor → Skills/Actuators → Audit  
+
+0.1 单向链：语义内核（LLM 草案） → Host Governor → Skills/Actuators → Audit  
 0.2 事实：仅以审计链（intent/governor/skill_exec）与硬状态/SSOT 为准。  
 0.3 任何执行必须携带 approval_token；高风险必须 confirm_token；可逆变更默认要求 undo_token+manifest。  
-0.4 Dify 永远不执行、不裁决、不宣称已执行；所有“已完成/已保存/已确认”只能引用 Host 审计摘要字段。
+0.4 任一 LLM 节点永远不执行、不裁决、不宣称已执行；所有“已完成/已保存/已确认”只能引用 Host 审计摘要字段。  
+
+0.5 文档关系与追溯口径（DevSpec 必须遵守）  
+DevSpec 的上游是 PRD 的 FR-需求编号；下游是 DevTasks 的 TASK-任务编号与 tests 的 T-编号。  
+
+强制追溯链：  
+FR-…（PRD：做什么+验收）  
+→ DevSpec 章节（怎么做+如何验证）  
+→ T-…（测试编号：断言点/日志点/契约点）  
+→ TASK-…（任务卡：最小交付单元，引用 FR/T/章节）  
+
+DevSpec 写作规则（工程契约级）：  
+1）每个可实现的规格条目必须声明“覆盖的 FR 编号（1+）”。  
+2）每个关键契约点必须分配“测试编号 T-…”，并写清楚验证口径（输入/输出/审计字段/拒绝码）。  
+3）任何会产生写入（审计/关系/记忆/Canon/Vault）的动作，必须写明 evidence_refs 的来源与记录位置（Ledger 表）。  
+4）DevTasks 的拆分来源只能是 DevSpec：任务卡不允许直接引用白皮书/PRD 来臆造实现细节。  
 
 ---
 
-## 1. 代码仓库结构（建议标准）
-仓库单一 mono-repo（在 Host 侧用 Codex 生成两端代码并 Git 提交，Edge 拉取）：
+## 1. 代码仓库结构（从零可重建完整版）
 
-- `host_brain/`
-  - `app/`
-    - `main.py`（HTTP API / CLI 入口）
-    - `config.py`
-  - `core/`
-    - `context_pack.py`（打包：hard_snapshot + bond_summary + retrieval + recent_events）
-    - `qa.py`（输出合规：伪执行/语言/Canon-as-fact 等）
-    - `metabolism.py`（energy/mood/sys_mode 演化）
-  - `governor/`
-    - `rules.py`（R1–R7；引用 SkillMeta、snapshot）
-    - `schemas.py`（Intent/GovernorOutput/Token/Manifest Pydantic）
-    - `decision.py`（裁决入口）
-  - `skills/`
-    - `registry.py`（SkillMeta 注册）
-    - `loader.py`（唯一合法执行入口：token 校验、幂等、审计写入）
-    - `impl/`（具体技能实现；只能被 loader import）
-  - `bond/`
-    - `bond_dynamics.py`（唯一写 Neo4j）
-    - `event_sampler.py`
-    - `neo4j_client.py`
-  - `memory/`
-    - `episodic.py`（Chroma 写入/召回）
-    - `canon_store.py`（Style Canon 主权存储：文件/向量均可）
-  - `audit/`
-    - `sqlite_ledger.py`（append-only ledger + 索引表）
-    - `logs.py`（JSONL 或 SQLite 表结构封装）
-- `edge_client/`
-  - `senses/`（ears/eyes）
-  - `actuators/`（mouth/speaker/avatar）
-  - `rpc/`（Edge gRPC/HTTP 服务端 + Host client）
-  - `config.py`
-- `dify/`
-  - `chatflow/`（导出 JSON / YAML）
-  - `prompts/`（仅用于 Dify 的约束提示与 JSON 输出模板）
-- `docs/`
-  - `whitepaper_constitution_persona.md`
-  - `prd.md`
-  - `devspec.md`
-  - `theory.md`
-  - `AGENTS.md`（给 Codex 的工程指令）
-- `tests/`
-  - `contract/`（Schema/validator/gates）
-  - `e2e/`（最小合规测试 T-xx）
-  - `fixtures/`（回归样例 intents、bad outputs）
+本节是“唯一目录真相”。任何新模块、脚本与资产必须落到这里的某个目录下，并满足：  
+- 单写者原则：SSOT 存储的写入能力只能出现在指定模块；  
+- 分槽隔离：facts / world_canon / style_canon / episodic / artifacts 不混用；  
+- 可审计：所有重要写入都能指回 SQLite Ledger 的 evidence_refs；  
+- 可回放：最小链路能按审计日志复现关键决策与执行结果。  
 
-强制：CI 静态扫描禁止旁路 import（见 8.2）。
+仓库单一 mono-repo（Host 侧生成两端代码并版本化；Edge 拉取同一仓库）：  
+
+### 1.1 根目录（Repo Root）
+
+约束：目录树是“唯一真相”。任何新增模块必须先在此登记；任何契约资产（Flow/ModelPlane/Contracts）必须有稳定落点。
+
+```aiignore
+/
+├─ README.md
+├─ LICENSE
+├─ .editorconfig
+├─ .gitattributes
+├─ .gitignore
+├─ .pre-commit-config.yaml # 文档受众门禁/格式门禁（不在本文描述命令）
+├─ configs/
+│  └─ model_plane/
+│     ├─ node_registry.yaml
+│     └─ model_profiles.yaml
+├─ prompts/
+│  ├─ CODEX_PROMPT.md # Codex 入口提示词（输出格式/行为约束）
+│  ├─ PROJECT_PROMPT.md # Project 入口提示词（只写文档、不改代码）
+│  └─ llm_contract/
+│     ├─ core_output_contract.json # LLM→Host Strict JSON 输出契约示例（结构示例，不是实现）
+│     └─ refusal_templates.md # 统一拒绝叙事范式（非事实）
+├─ docs/
+│  ├─ 00_DOCMAP.md
+│  ├─ 10_whitepaper/
+│  │  └─ whitepaper_constitution_persona.md
+│  ├─ 15_theory/
+│  │  └─ Theory.md
+│  ├─ 20_prd/
+│  │  └─ PRD.md
+│  ├─ 30_devspec/
+│  │  ├─ DevSpec.md
+│  │  ├─ DevTasks.md
+│  │  └─ ModelPlane.md
+│  ├─ 40_agents/
+│  │  └─ AGENTS.md
+│  ├─ 50_project/
+│  │  ├─ PROJECT_BRIEF.md
+│  │  ├─ PROJECT_TASKS.md
+│  │  └─ WORKSHEET_Project_Codex_Git_Flow.md
+│  └─ 60_trace/
+│     ├─ requirements_trace.md
+│     └─ requirements_trace.csv
+├─ flows/
+│  ├─ exports/ # Flow 导出物归档（图/配置原件）
+│  └─ active.pointer # 当前生效版本指针（dev/staging/prod → exports 内路径）
+├─ host_brain/
+│  ├─ pyproject.toml # 或 requirements*；必须可复现依赖版本
+│  ├─ app/
+│  │  ├─ main.py # HTTP API 入口（健康检查/链路入口）
+│  │  └─ config.py # 配置加载（分层：defaults/local/secret）
+│  ├─ core/
+│  │  ├─ context_pack.py # Host→LLM 输入打包（分槽隔离）
+│  │  ├─ qa.py # 输出合规：Strict JSON/伪执行/Canon-as-fact
+│  │  ├─ metabolism.py # energy/mood/sys_mode 演化（硬状态）
+│  │  ├─ ids.py # intent_id/event_id/request_id 生成规则
+│  │  └─ errors.py # reason_code 与错误对象（稳定枚举）
+│  ├─ governor/
+│  │  ├─ schemas.py # Intent/GovernorOutput/Token/Manifest（Schema/验证器）
+│  │  ├─ rules.py # R1–R7 Gate（trust/energy/sys_mode/scope/safety/airlock）
+│  │  ├─ decision.py # 裁决入口：输入→校验→决策→写审计
+│  │  └─ tokens.py # approval/confirm/undo 票据绑定与校验规则
+│  ├─ skills/
+│  │  ├─ registry.py # SkillMeta 注册（clearance/risk/scope/reversible）
+│  │  ├─ loader.py # 唯一合法执行入口：token 校验、幂等、审计写入
+│  │  └─ impl/ # 具体技能实现（只允许 loader import）
+│  ├─ tools/
+│  │  ├─ catalog.py # ToolMeta SSOT（仅元数据）
+│  │  ├─ selector.py # Top-K 工具候选选择（tool_meta_pack）
+│  │  ├─ broker.py # ToolBroker：工具执行单入口（token+审计）
+│  │  └─ mcp_adapter.py # MCP provider→ToolMeta 映射与治理入口
+│  ├─ audit/
+│  │  ├─ sqlite_ledger.py # Ledger SSOT：intent/governor/skill_exec + 索引
+│  │  ├─ migrations/ # SQLite 表结构迁移描述（不可手写漂移）
+│  │  └─ retention.py # 保留/归档/GC 策略（动作必须可审计）
+│  ├─ bond/
+│  │  ├─ neo4j_client.py
+│  │  ├─ bond_dynamics.py # 唯一写 Neo4j（Bond SSOT 单写者）
+│  │  ├─ summarizer.py # Bond Summary 派生（不得写回 SSOT）
+│  │  └─ migrations/ # Neo4j 约束/索引描述
+│  ├─ memory/
+│  │  ├─ episodic.py # 向量库写入/召回（必须 evidence_refs）
+│  │  ├─ chroma_client.py # 向量库客户端封装（写入仅 episodic.py）
+│  │  ├─ canon_style_store.py # Style Canon SSOT（版本化、tone_only）
+│  │  ├─ canon_world_store.py # World Canon SSOT（最小权威内容集合）
+│  │  └─ canon_sync.py # Canon 扫描/索引同步（写入需留痕）
+│  ├─ canon/
+│  │  ├─ style/ # Style Canon 资产（模板/范式，非事实）
+│  │  └─ world/ # World Canon 条目资产（设定/术语/不变量）
+│  ├─ lsp/
+│  │  ├─ vault.py # Artifact Vault：manifest/undo/GC（单写者）
+│  │  └─ policies/ # Vault policy profiles（保留/脱敏/生命周期）
+│  ├─ airlock/
+│  │  ├─ sanitizer.py # 出站脱敏报告生成（必须可审计）
+│  │  └─ quarantine.py # 入站隔离区（不得直通执行）
+│  ├─ channels/
+│  │  ├─ wechat.py # 微信 I/O 事件化与审计串联
+│  │  └─ vts.py # emotion_tag→expression_id 固定映射与 talk gate
+│  └─ integrations/
+│     └─ llm_gateway.py # LLM 调用封装（blocking/streaming 统一入口）
+├─ edge_client/
+│  ├─ pyproject.toml
+│  ├─ senses/ # ears/eyes：采集与摘要（不裁决）
+│  ├─ actuators/ # mouth/speaker/avatar：执行器（不裁决）
+│  ├─ rpc/ # Host↔Edge RPC（只接受带票据的执行请求）
+│  ├─ proofs/ # before/after 证据采集（写入 Vault 的原始材料来源）
+│  └─ config.py
+├─ tests/
+│  ├─ contract/ # Schema/validator/gates/静态扫描（快速、无外部依赖优先）
+│  ├─ e2e/ # 最小链路：Host→LLM stub→Governor→Skill stub→Audit
+│  ├─ fixtures/ # intents、坏输出、日志回放样例
+│  └─ TESTPLAN.md # 只列 T-xx：用例→断言点→输入输出（不写命令）
+├─ tools/
+│  ├─ static_scan/ # 单写者/旁路调用/受众门禁扫描规则
+│  ├─ doc_lint/ # 文档头部受众/标题校验规则
+│  └─ replay/ # 审计回放与最小复现工具（只读）
+└─ .github/
+   └─ workflows/ # CI 定义（只描述应检查什么，不在本文给命令）
+```
+
+### 1.2 从零重建的最小基线（M0–M3）
+目的：保证“空仓库也能按阶段交付”。每阶段都必须具备可审计、可验证的产物。
+
+M0：骨架可解析（不接外部依赖也能闭环）
+交付物：
+- Intent Schema（最小字段）+ GovernorOutput Schema（decision/reason_code/rule_trace）
+- SQLite Ledger（intent_log/governor_log/skill_exec_log 最小三联表）
+- LLM stub（或固定样例输入输出）可驱动 Host 完整链路
+
+验证点：
+- 任意输入最终输出保持 Strict JSON 可解析；
+- 拒绝必带 reason_code；
+- skill_exec 只在 APPROVE 且 token 合法时出现。
+
+M1：Governor 可治理（门禁可回归）
+交付物：
+- R1–R7 Gate 的规则骨架（即使阈值未调优也必须可观测）
+- approval/confirm/undo 的绑定字段与校验逻辑（含幂等）
+
+验证点：
+- 同一路径同版本下 reason_code 稳定；
+- 缺票据/越权 scope/禁用 sys_mode 触发明确拒绝并写审计。
+
+M2：六库分工落地（写入边界可静态验证）
+交付物：
+- bond_dynamics（Neo4j 单写者）+ bond_update_log 留痕
+- episodic（向量库单写者）+ memory_ops_log 生命周期留痕
+- canon_style_store / canon_world_store（版本化、变更留痕）
+- vault（manifest/undo/GC 约束与审计）
+
+验证点：
+- 任意非单写者模块无法写入对应 SSOT（可由静态扫描报告证明）；
+- episodic/world/style 的注入分槽隔离且不会被 QA 误当事实。
+
+M3：Edge 联调（证据材料可回放）
+交付物：
+- Host↔Edge RPC 契约：只接受带票据的执行请求
+- proofs→Vault：before/after 证据能形成 manifest 串联到 intent_id
+
+验证点：
+- UI/视觉相关能力在证据缺失时必须降级/拒绝；
+- Vault GC 不破坏 undo 窗口（策略可审计）。
+
+### 1.2.1 冷启动策略（NoKey/Service Unavailable：服务必须存在，允许暂不可用）
+目标：在“无云端 API Key / 任一服务暂不可用”的条件下，仍能交付最小闭环：输出可解析、审计可回放、无伪执行宣告。
+
+A）交付边界（项目范围口径）
+- 所有服务项为“必须实现、缺一不可”（见 PRD 2.3）。  
+- 允许存在“运行时暂不可用/未配置/降级”的情况，但必须：
+  - 有稳定接口与健康状态；
+  - 降级时输出结构稳定且 reason_code/stage 可统计；
+  - 不得把“不可用/未触发”伪装为“事实为空”。
+
+B）冷启动最低形态（从零可重建）
+- SQLite Ledger：必须可写入最小三联画；缺失则无法称为可回放系统。
+- Neo4j Bond SSOT / Episodic 向量库：必须存在对应的连接层与健康状态；不可用时对外只输出降级口径（空/默认），并记录 stage/reason_code。
+- Style/World Canon / Vault：必须以版本化资产形态存在；可为空但不得导致系统伪造设定或伪造事实。
+- Cloud Exocortex：必须存在 gateway + airlock；无 key 时必须进入“外脑不可用”降级路径，且不影响结构稳定。
+- Edge（语音/外显）：必须存在 RPC 与能力端点；不可用时 Host 进入“无身体模式”降级路径，仍保持结构稳定与审计可回放。
+
+C）可观测（必须）
+- 任一服务不可用不得导致崩溃；必须输出可解析结构，并在 quality.stage 标注失败发生的阶段。
+- 同类缺失在同版本下 reason_code 稳定可统计。
+- 任何 LLM（含 Edge 兜底模型）输出仍必须满足 Strict JSON 契约，并受 QA（伪执行、Canon-as-fact、格式漂移）约束。
+
+### 1.3 必须不进仓库的内容（从零重建的可复现前提）
+- 任何 secret（API key、token、个人账号凭据）：只能以“模板文件 + 本地覆盖”的方式存在。
+- artifacts（二进制截图/音频等）：默认不进 Git，必须通过 Vault manifest 可追溯其来源与生命周期。
+- local overrides（本地路径、设备 ID）：必须独立于可复现配置层，不得写死在代码与文档正文中。
+
+### 1.4 目录职责红线（从零重建时最易踩坑）
+- flows/ 只存 Flow 导出物与指针；不存“事实源”与“执行脚本”。
+- host_brain/audit/ 是“发生过什么”的索引枢纽；任何写入 SSOT 的动作必须能指回它。
+- host_brain/canon/world/ 的条目可被引用用于一致性，但不得用于宣告已执行；此类宣告只认审计链。
+- tests/contract 负责契约稳定性；tests/e2e 负责最小闭环；两者都不应依赖真实外部环境才能跑通其断言逻辑（通过 stub/fixtures 达成）。
+
+### 1.5 配置资产：Flow 资产（LangGraph 图/配置）与指针契约（可部署 SSOT）
+定位：Flow 资产属于“可部署配置资产”，其行为变化必须可版本化、可回滚、可追溯；但它不承载执行事实，执行事实仍以审计链为准。
+
+目录与文件（语义固定）：
+- 导出物归档目录：flows/exports/（仅保存 Flow 导出物原件）
+- 当前生效指针：flows/active.pointer（必须为单个合法 JSON 对象）
+- 审计索引（文档层）：docs/60_trace/flows/index.md（按环境给出“当前生效版本”与变更摘要）
+
+active.pointer 格式（必须）：
+- 结构：按环境映射到 exports 内的相对路径（或文件名），键集合固定为 dev/staging/prod。
+- 约束：
+  - 指向的文件必须存在于 flows/exports/ 下；
+  - 任一环境缺失键或指向越界（不在 exports 下）视为配置不合规；
+  - docs/60_trace/flows/index.md 的“当前生效版本”必须与 active.pointer 一致（允许 index 额外记录导出时间/摘要，但不允许指向不同文件）。
+
+最小回归测试编号（配置资产）：
+- T-Flow-01：active.pointer 合法性与指针存在性（结构/键集合/路径范围/目标文件存在）
+- T-Flow-02：Trace 索引一致性（index.md 的按环境生效版本与 active.pointer 完全一致）
 
 ---
 
 ## 2. 运行时进程拓扑与通信
-2.1 Host 进程（主权裁决）
-- 对外提供：`POST /v1/chat`（用户输入 → 输出 narrative + intent_draft + quality）
-- 对内依赖：SQLite、Neo4j、Chroma、（可选）Cloud Exocortex、Edge RPC、Dify HTTP
 
-2.2 Edge 进程（身体/执行）
-- 对外提供（给 Host）：`POST /rpc/screenshot`、`POST /rpc/play_audio`、`POST /rpc/ui_action`（若启用 ClawdBot 也可在 Edge 或 Host 侧）
+## 2. 运行时进程拓扑与通信
 
-2.3 Dify（Ego）
-- Host 调用 Dify：`POST /v1/dify/chat`（封装为 Host 的客户端模块）
-- Dify 输出：严格 JSON（narrative + intent_draft），不得调用工具。
+2.1 Host 进程（主权裁决与统一编排）
+- 对外提供：`POST /v1/chat`（用户输入 → 输出 narrative（rendered_ja） + intent_draft + quality；可选 debug.core_narrative_zh）
+- 统一编排：所有 Agent 与链路编排仅在 Host 发生；Edge 端组件仅作为“远程能力提供者”被调用（draft-only，不具终审权）。
+- 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Neo4j Bond SSOT、Episodic 向量库、Embedding、Reranker、Recall/Fusion、Screen Capture、OCR/Vision、ClawdBot、Cloud Gateway + AIRLOCK、Observability。
+- 运行时不可用：任一服务不可用必须可观测降级并保持输出结构稳定（不得伪执行）。
+
+2.2 Edge 进程（身体能力：语音链与外显）
+- 对外提供（给 Host）：RPC 能力端点（示例命名，具体路径以 edge_client/rpc 统一注册表为准）：
+  - asr：上送转写事件（asr_chunk：text/timestamps/confidence/alternates 可选）
+  - speak：接收 Host 的最终文本并完成 TTS+播放（支持 barge-in 打断）
+  - vts：talk gate 与 emotion_tag→expression_id 固定映射触发
+  - fallback_llm：兜底草案能力（默认卸载、低频触发、draft-only）
+  - health：返回 Edge 能力矩阵与当前资源状态（含 GPU 显存与队列状态）
+- 资源闸门（必须）：Edge 侧必须实施任务优先级与互斥策略，防止 ASR/TTS/兜底LLM 高峰叠加导致不稳定；优先级为 ASR>播放>TTS合成>兜底LLM。
+
+2.3 Cloud Exocortex
+- Host 调用外部模型：统一经 `integrations/llm_gateway.py` 出站（经 AIRLOCK 脱敏）
+- 外部输出：严格 JSON（narrative + intent_draft 或渲染文本），一律降权为草案，不得直通执行
 
 2.4 通信安全（最小实现）
 - Host→Edge：每次请求带 `request_id` + `HMAC(signature)`（共享密钥）+ `ts_ms` + `nonce`
 - Edge 维护 nonce 缓存窗口，拒绝重放（REPLAY_DETECTED）。
 
+2.5 Edge 兜底 LLM 的接入方式（工具化，不作为 Agent）
+- 定位：Edge 兜底 LLM 不是 Agent，不参与主链路裁决；仅提供 draft-only 能力：
+  - presence（在场回应草案）
+  - asr_compile（转写清洗与候选）
+  - retrieval_hints（检索提示：rewrite/keywords/entities/constraints）
+  - context_compress（滚动摘要）
+- 输出约束：所有输出必须为单个合法 JSON；必须带 draft_only=true；不得包含决策字段（allow/deny/confirm_required 等）；不得包含任何执行事实宣告。
+- 失败策略：Edge 兜底 LLM 不可用/加载失败必须快速失败并返回稳定错误码；Host 侧必须回退到规则/模板兜底，不阻塞语音主链。
+
 ---
 
 ## 3. Schema：Intent（必须强类型）
-### 3.1 Intent JSON Schema（概念）
-Intent 是 Host 可裁决的请求对象。Host 只接受一个 JSON 对象（不接受数组/任意 JSON）。
 
-最小字段：
-- `schema_version`：`"natsume.intent.v1"`
-- `id`：ULID/UUID
-- `ts_ms`：int
-- `session_id`：string
-- `seq`：int（单调递增）
-- `type`：enum
-- `action`：enum（allowlist）
-- `target`：enum（allowlist）
-- `args`：object（按 action 强校验）
-- `nonce`：string
+定位：Intent 是“语言→代码”的唯一边界对象，是 Host Governor 可裁决的请求对象。LLM 只能提出 intent_draft（草案）；Host 只接受强类型 Intent（允许宽松解析修语法，但禁止补语义）。
 
-### 3.2 Pydantic 模型（实现要求）
-- 使用 Pydantic v2（或 dataclasses+jsonschema 亦可），但必须提供：
-  - `validate_lenient(text)->Intent|None`（宽松解析：只修语法不补语义）
-  - `validate_strict(obj)->Intent`（严格校验：字段/类型/枚举/args/重放/时效）
-- 宽松解析失败：`INTENT_PARSE_FAILED`
-- 严格校验失败（字段/枚举/类型）：`INTENT_SCHEMA_INVALID`
-- args 校验失败：`INTENT_ARGS_INVALID`
+覆盖需求：FR-INTENT-001~003  
+回归口径：T-18~T-22
+
+### 3.1 Intent 最小字段（固定 JSON 对象）
+Host 只接受“单个 JSON 对象”，不接受数组/多段文本。最小字段如下（字段名语义固定）：
+- schema_version：固定字符串（如 "natsume.intent.v1"）
+- id：全局唯一（ULID/UUID 均可；必须可审计回放）
+- ts_ms：毫秒时间戳（用于过期窗）
+- session_id：会话标识
+- seq：会话内单调递增（防乱序/回滚）
+- type：枚举（意图类别）
+- action：枚举（Host allowlist）
+- target：枚举（Host allowlist）
+- args：object（按 action 强类型校验）
+- nonce：随机串（防重放；需缓存窗口）
+
+硬约束：
+- type/action/target 必须 allowlist；任何未知值一律 REJECT（INTENT_SCHEMA_INVALID）。
+- args 必须按 action 的 ArgsModel 校验；失败一律 REJECT（INTENT_ARGS_INVALID）。
+- seq 必须单调递增；乱序/回滚一律 REJECT（SEQ_INVALID）。
+- id/nonce 必须做重放保护；重复一律 REJECT（REPLAY_DETECTED）。
+- ts_ms 超出过期窗口一律 REJECT（EXPIRED_INTENT）。
+
+### 3.2 两阶段校验（必须）
+阶段 A：lenient parse（只修语法，不补语义）
+- 目标：把“可疑但可能是 JSON”变成“可解析 JSON 对象”，只做语法层修复。
+- 允许：去掉前后缀噪声、修复多余逗号/引号等纯语法问题，使其成为单个 JSON 对象。
+- 禁止：臆造 action/target/type/args；禁止“猜测用户意图”来补字段。
+失败映射：INTENT_PARSE_FAILED
+
+阶段 B：strict validate（强类型/枚举/参数契约/重放/时效）
+- 字段/类型/枚举：失败→INTENT_SCHEMA_INVALID
+- args：失败→INTENT_ARGS_INVALID
+- 重放：失败→REPLAY_DETECTED
+- seq：失败→SEQ_INVALID
+- 过期：失败→EXPIRED_INTENT
 
 ### 3.3 args 参数契约（每个 action 一份）
-每个 action 在 `governor/schemas.py` 内有对应 `ArgsModel`，并在 registry 中绑定：
+每个 action 都必须在 schemas.py（或等价模块）中绑定 ArgsModel，并声明：
 - required_keys / optional_keys
 - 类型、范围、长度、正则
-- 路径安全（base_dir 约束，禁止 `..`）
-- 域名 allowlist / 分类策略（出站气闸）
+- 路径安全（如 base_dir 约束；禁止 `..`）
+- 域名 allowlist / data_classification（配合 AIRLOCK）
+
+### 3.4 审计字段（Intent 层必须写入）
+Intent 进入 Governor 前，至少要在 intent_log（或等价审计表）记录：
+- raw_text（原始草案/原始输入片段摘要）
+- normalized_json（宽松解析后的 JSON）
+- session_id / seq / ts_ms / nonce
+- parse_stage：LENIENT_OK / LENIENT_FAIL
+- lint_result：字段缺失/枚举越界/args 失败的结构化摘要（不得写成自然语言结论）
 
 ---
 
 ## 4. Schema：GovernorOutput（Host→上层）
-### 4.1 输出字段（必须）
-- `decision`：`APPROVE|REJECT`
-- `reason_code`：仅当 `decision=REJECT` 必须存在（见白皮书 6.4 枚举）
-- `rule_trace`：命中的 Gate 列表（R1–R7）+ 阈值 + 快照摘要
-- `tokens`：
-  - APPROVE：至少 `approval_token_ref`
-  - REJECT：不得下发 `approval_token_ref`
-- `snapshot_refs`：hard_state/bond_snapshot 的版本号或 hash
 
-### 4.2 输出断言（运行时必须）
-- REJECT 缺 reason_code 或 rule_trace：拦截并记录 `GOVERNOR_OUTPUT_INVALID`
-- APPROVE 缺 approval_token_ref：Skills 必须拒绝执行并记录 `SKILL_TOKEN_MISSING`
+定位：GovernorOutput 是 Host 对“是否允许执行”的对外稳定契约。它不是提示工程产物，必须可回放、可统计、可回归。
+
+覆盖需求：FR-GOV-001~003、FR-CORE-002  
+回归口径：T-14~T-17（含 T-14/T-15）
+
+### 4.1 输出字段（结构固定）
+GovernorOutput 必须为单个 JSON 对象，字段语义固定：
+- decision：APPROVE | REJECT
+- reason_code：仅当 decision=REJECT 必须存在（稳定枚举）
+- rule_trace：命中的 Gate 列表（R1–R7）+ 阈值摘要 + 快照摘要（可定位）
+- tokens：
+  - APPROVE：必须含 approval_token_ref（可选含 confirm_token_ref/undo_token_ref）
+  - REJECT：不得下发 approval_token_ref
+- snapshot_refs：hard_state/bond_snapshot（版本号或 hash）
+- quality（建议）：stage（S0..S8）/ degraded（bool）/ notes（短枚举）
+
+### 4.2 运行时断言（必须拦截）
+- decision=REJECT 且缺 reason_code → 视为 GOVERNOR_OUTPUT_INVALID（不得对外透出“无 reason_code 的拒绝”）
+- decision=REJECT 且缺 rule_trace → 同上（必须可定位命中门禁）
+- decision=APPROVE 且缺 approval_token_ref → Skills/执行入口必须拒绝并记录 SKILL_TOKEN_MISSING
+
+### 4.3 rule_trace 最小结构（建议固定字段）
+每条 Gate 记录至少包含：
+- gate_id：R1..R7
+- hit：true/false
+- threshold_summary：阈值摘要（不泄露敏感原值）
+- snapshot_summary：输入快照摘要（桶化）
+- reason_hint：短枚举（用于统计，不用自然语言）
 
 ---
 
 ## 5. Token：approval/confirm/undo（票据化执行）
-### 5.1 approval_token（短 TTL）
-建议字段：
-- `token_id`, `intent_id`, `session_id`, `seq`, `skill_name`, `issued_ts_ms`, `expiry_ts_ms`, `nonce`, `sig`
-要求：
-- token 绑定 `intent_id + skill_name + session_id + seq`
-- TTL 默认 60–300 秒（配置项）
-- 使用 HMAC-SHA256（单机）或 Ed25519（可选）
+
+定位：把“授权”从语言变成可验证数据结构。Skills/ToolBroker 只信 token，不信叙事。
+
+覆盖需求：FR-TOKEN-001~003  
+回归口径：T-34~T-38
+
+### 5.1 approval_token（短 TTL，可执行许可）
+建议字段（语义固定）：
+- token_id
+- intent_id
+- session_id
+- seq
+- skill_name（或 tool_id）
+- issued_ts_ms / expiry_ts_ms
+- nonce
+- sig（签名）
+
+绑定约束（必须）：
+- token 必须绑定 intent_id + skill_name + session_id + seq
+- 过期必须拒绝（TOKEN_INVALID）
+- 串用（换 skill/换 intent/换会话）必须拒绝（TOKEN_INVALID）
 
 ### 5.2 confirm_token（高风险二次提交）
-- 由 Host 交互流程产生（按钮/二次输入校验 hash）
-- 必须绑定 `intent_id + skill_name`
-- TTL 更短（例如 60 秒）
-- 仅用于 risk_level=4 / irreversible / payment/account/system-settings
+触发条件（至少覆盖）：
+- risk_level=4 或 irreversible=true 或 scope 涉及 account/payment/system-settings/delete 等红线
+规则：
+- confirm_token 只能由 Host 确认流程生成；任何“口头确认/模型自述确认”无效。
+- 缺 confirm_token 时必须 REJECT：CONFIRM_REQUIRED（不得进入执行路径）
 
-### 5.3 undo_token + manifest（可撤销默认）
-- reversible skill 执行必须产出 `undo_token_ref` 和 `manifest_ref`
-- manifest 必含 `integrity_digest`（sha256）和 `items[]`（before/after/hash/artifact_refs）
+### 5.3 undo_token + manifest（可撤销契约）
+适用：
+- reversible=true 的执行默认必须产出 undo_token_ref 与 manifest_ref
+manifest 最小字段（语义固定）：
+- manifest_id / intent_id / integrity_digest（sha256）
+- items[]：before/after/path/hash/artifact_refs（可按能力裁剪）
+- policy_profile_id / ts_ms
+
+拒绝口径：
+- reversible=true 但缺 manifest_ref → 视为不合规：UNDO_REQUIRED（或更精确的内部错误码；对外必须可统计）
+- manifest digest 不匹配 → 撤销必须拒绝（TOKEN_INVALID 或 MANIFEST_INVALID 的稳定子类，二选一但必须固定）
 
 ---
 
 ## 6. Skills：注册、执行、幂等与审计
-### 6.1 SkillMeta（强制字段）
-字段与白皮书一致：`name, clearance_level, min_trust, energy_cost, risk_level, reversible, scopes, requires_visual_audit, requires_confirm_token, data_classification, allowlist, denylist, rate_limit`
 
-注册方式：
-- `skills/registry.py` 中 `register(skill_name, meta, impl_callable)`
-- CI 检查：每个 impl 必须有 meta，且 meta 字段完整
+定位：Skills 是能力载体，只做执行不做裁决；唯一合法入口必须是 loader（或等价执行门），强制 token 校验、幂等与审计。
 
-### 6.2 执行入口（唯一）
-`skills/loader.py: execute(intent, approval_token, confirm_token?, undo_token?) -> SkillResult`
+覆盖需求：FR-SKILL-001~003、FR-AUDIT-001  
+回归口径：T-15、T-34~T-38（以及后续 T-Skill-xx）
 
-必须做：
-- token 验证（签名/过期/绑定一致）
-- 幂等：同一 intent_id 若已成功执行，返回缓存结果或拒绝重做（策略配置）
-- 写入 `skill_exec_log`（包含 artifacts、undo_ref、result_digest）
+### 6.1 SkillMeta（强制字段，注册即校验）
+每个 skill 必须声明并可静态扫描：
+- name
+- clearance_level（L0–L4）
+- risk_level（0–4）
+- reversible（true/false）
+- scopes（process/filesystem/network/ui/camera/mic/account/payment…）
+- requires_visual_audit（true/false）
+- requires_confirm_token（true/false）
+- data_classification（NONE/INTERNAL/EXTERNAL_KNOWLEDGE）
+建议字段：
+- rate_limit、allowlist、denylist、energy_cost、min_trust
 
-### 6.3 ClawdBot（UI 自动化）作为 Skill
-- `clawd_ui_action` 必须 `requires_visual_audit=true`
-- 每一步写 `clawd_action_log`：before/after 截图引用、target_desc、confidence
-- confidence < 0.80：停止并 reason_code=`UI_ELEMENT_NOT_FOUND`
-- 红线场景：门禁不足 → `VISUAL_REDLINE`
+注册期断言（必须）：
+- 缺强制字段：注册失败（不得运行时“带病上线”）
+- risk_level 与 requires_confirm_token 口径不一致：视为配置不合规（必须可审计）
+
+### 6.2 唯一执行入口（强制）
+执行入口（语义固定）：
+- 输入：Intent + approval_token（可选 confirm_token/undo_token，按 SkillMeta 要求）
+- 输出：SkillResult（结构化对象，必须可写入 skill_exec_log）
+
+入口必须做的事（不可省略）：
+1）token 校验：签名/过期/绑定一致
+2）门禁复核：至少复核 scope/confirm_token 要求（与 Governor 决策一致）
+3）幂等：同一 intent_id 不得产生第二次真实副作用（策略可“复用结果”或“拒绝重复”但必须固定）
+4）审计写入：skill_exec_log 必须包含 intent_id、skill_name、approval_token_ref、result_digest、artifacts/manifest_ref/undo_ref（如适用）
+
+### 6.3 幂等策略（必须可证明）
+幂等证明口径（必须能被回放验证）：
+- 重复 intent_id：不产生第二次执行事实
+- 日志能显示“命中幂等”的原因（例如 reused_result / already_executed）
+
+### 6.4 审计三联画串联键（必须一致）
+- intent_log：提议（proposal）
+- governor_log：裁决（decision）
+- skill_exec_log：执行（fact）
+
+串联键至少包含：
+- request_id（或 turn_id）
+- intent_id
+- approval_token_ref（若执行发生）
 
 ---
 
-## 7. Context Pack：Host→Dify 的输入契约
-Host 打包 context_pack（JSON）给 Dify，字段建议：
+## 7. Context Pack：Host→LLM 的输入契约
+Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、权威内容、风格资产、召回线索”分槽隔离，防止混用导致越权叙事。
 
-- `hard_snapshot`：energy/mood/sys_mode/safety_bucket（不含敏感原值）
-- `bond_summary`：stage/trend/capability_hint（不含具体 trust 数值）
-- `retrieval`：
-  - `episodic`：[{summary_cn,tags,ts,evidence_refs}]
-  - `style_canon`：[{kind,triggers,template,constraints}]（tone_only）
-- `recent_events`：[{kind,reason_code,ts,summary}]
-- `constraints`：
-  - `no_false_execution_claim=true`
-  - `tone_policy`（短句/……/称呼）
-  - `language_policy`（若仍要求日语则写这里；如果你已改为中文口吻则同步修改）
-  - `intent_output_schema`：强制输出 JSON 结构
+字段建议（分槽强隔离）：
+- hard_snapshot：energy_bucket/mood_bucket/sys_mode/safety_bucket（不含敏感原值）
+- bond_summary：stage/trend/capability_hint（不含具体 trust 数值）
+- authoritative：
+  - world_canon：[{doc_id,title,version,tags,excerpt,evidence_level}]
+    - evidence_level 固定枚举：CANON_REFERENCE_ONLY（明确非执行事实）
+- retrieval：
+  - episodic：[{summary_cn,tags,ts,evidence_refs}]
+- style_pack：
+  - style_canon：[{canon_id,version,kind,triggers,template,constraints}]（tone_only=true, unsafe_as_fact=true）
+- recent_events：[{kind,reason_code,ts,summary,evidence_refs}]
+- constraints：
+  - strict_json_output=true
+  - no_false_execution_claim=true
+  - no_canon_as_fact=true
+  - tone_policy（短句/……/称呼）
+  - intent_output_schema（强制输出 JSON 结构）
 
-要求：
-- style_canon 必须与 facts 分字段隔离
-- Dify 不得自行检索，不得扩展召回
+硬约束：
+- world_canon、style_canon、episodic、recent_events 必须分字段隔离；任何混槽视为合规缺陷。
+- LLM 不得自行检索，不得扩展召回；只消费 Host 给定 pack。
+- 叙事引用 world_canon 必须使用“引用/设定口径”而非“执行事实口径”。
 
 ---
 
-## 8. Audit：SQLite Ledger 与日志表（最低实现）
-### 8.1 推荐表
-- `chat_history`：turn_id, ts_ms, user_text, assistant_text, session_id, seq
-- `intent_log`：intent_id, raw_text, normalized_json, session_id, seq, ts_ms
-- `governor_log`：intent_id, decision, reason_code, rule_trace_json, snapshot_refs_json, token_refs_json, ts_ms
-- `skill_exec_log`：intent_id, skill_name, approval_token_ref, result_status, result_code, result_digest, artifacts_json, undo_ref, ts_ms
-- `airlock_log`：direction, destination, sanitization_report_json / quarantine_json, ts_ms, request_id
-- `clawd_action_log`：step_id, intent_id, before_artifact, after_artifact, action_json, confidence, ts_ms
-- `bond_update_log`：event_id, etype, intensity, before_json, after_json, rule_version, evidence_refs_json, ts_ms
-- `evolution_log`：proposal_id, before_json, after_json, locks_json, ts_ms
-- `error_log`：stage, reason_code, detail_json, ts_ms, request_id
+## 8. Data Stores：SQLite Ledger / Neo4j Bond SSOT / Episodic 向量库 / Style Canon / World Canon / Artifact Vault（具体实现契约）
 
-### 8.2 静态扫描规则（CI 必须）
-禁止旁路 import：
-- 任何非 `skills/loader.py` import `skills/impl/*`
-- 任何非 `bond/bond_dynamics.py` import `bond/neo4j_client.py`
-- 任何业务层直接调用 Edge RPC（必须封装为 Skill impl）
+定位：本章把“六库分工”写成可验证的工程契约：谁写谁读、SSOT 边界、Schema 口径、跨库引用与合规断言。任何偏离必须能被静态扫描或回归测试发现。
+
+覆盖需求：FR-AUDIT-001~003、FR-BOND-001~003、FR-MEM-001~002、FR-CANON-001~002、FR-WCANON-001~003、FR-LSP-001~002、FR-AIRLOCK-001~002  
+回归口径：T-14/T-15、T-72~T-76、T-Canon-01~02、T-WCanon-01~03、T-Vault-01~02、T-39/T-40
+
+### 8.0 责任分配（条目式，必须对齐）
+
+本节是“六库分工”的工程契约口径：定义事实效力、SSOT 单写者、允许读取者、以及跨库最小引用键。  
+任何偏离必须能被静态扫描或回归测试捕获（见 8.8 与对应 T-xx）。
+
+1）SQLite Ledger（审计账本与索引枢纽）
+- 事实效力：最高（审计事实与回放索引）
+- SSOT 单写者：host_brain/audit/sqlite_ledger.py
+- 允许读取者：Host 全域（只读查询与回放）
+- 最小跨库引用键：request_id、intent_id、event_id、evidence_refs
+
+2）Neo4j（Bond 关系域 SSOT）
+- 事实效力：关系结构域 SSOT（非执行事实）
+- SSOT 单写者：host_brain/bond/bond_dynamics.py
+- 允许读取者：Host（图查询/summary 派生；summarizer 不得写回）
+- 最小跨库引用键：event_id + evidence_refs
+
+3）Episodic 向量库（经历召回线索）
+- 事实效力：无裁决权（相似性线索）
+- SSOT 单写者：host_brain/memory/episodic.py
+- 允许读取者：Host（召回；不得以此做裁决依据）
+- 最小跨库引用键：memory_id + evidence_refs
+
+4）Style Canon Store（风格资产：tone_only）
+- 事实效力：仅口吻（不得提供事实）
+- SSOT 单写者：host_brain/memory/canon_style_store.py
+- 允许读取者：Host（注入 style_pack；不得混槽）
+- 最小跨库引用键：canon_id + version + hash
+
+5）World Canon Store（最小权威内容集合：可引用、非执行事实）
+- 事实效力：权威内容引用（用于一致性与冲突裁决；非执行事实）
+- SSOT 单写者：host_brain/memory/canon_world_store.py
+- 允许读取者：Host（注入 authoritative.world_canon；不得混槽）
+- 最小跨库引用键：doc_id + version + hash
+
+6）Artifact Vault（证据/回滚材料）
+- 事实效力：证据材料仓（支撑可回放与可撤销）
+- SSOT 单写者：host_brain/lsp/vault.py
+- 允许读取者：Host（引用/展示/回滚；GC 受策略约束）
+- 最小跨库引用键：artifact_id + hash + manifest_id
+
+### 8.1 SQLite Ledger（审计账本与索引枢纽）
+最低三联画表（必须存在，语义固定）：
+- intent_log（proposal）：记录“模型/规则引擎提出了什么 intent_draft”
+- governor_log（decision）：记录“Host 如何裁决（APPROVE/REJECT + reason_code + rule_trace）”
+- skill_exec_log（fact）：记录“执行实际发生了什么（或未发生）”
+
+建议的最小字段口径（必须语义等价）：
+
+A）intent_log
+- request_id、intent_id、session_id、seq、ts_ms
+- proposer_node_id（如 core_reasoner_primary / tool_planner / host_fallback_policy）
+- model_snapshot（provider + model_id 或等价快照标识）
+- prompt_profile_id（引用/哈希）
+- tool_visibility_hash（本轮暴露的工具元数据子集哈希；无则为空）
+- proposed_intent_draft_json（原文）
+- lint_result_json（schema/args 校验摘要；禁止自然语言“结论句”替代）
+
+B）governor_log
+- intent_id、decision、reason_code（REJECT 必填）、rule_trace_json（必填）
+- token_refs_json（APPROVE 必含 approval_token_ref）
+- snapshot_refs_json（hard/bond snapshot 版本号或 hash）
+- ts_ms、stage（S0..S8）
+
+C）skill_exec_log
+- intent_id、skill_name、approval_token_ref
+- result_status/result_code、result_digest
+- artifacts_json（可为空）、manifest_ref（可为空）、undo_ref（可为空）
+- ts_ms
+
+运行时断言（必须）：
+- decision=REJECT → reason_code 非空且来自稳定枚举；缺失视为 GOVERNOR_OUTPUT_INVALID（不得对外透出）。
+- 任意 skill_exec_log 行必须能关联 governor_log（同 intent_id）且 approval_token_ref 可核验。
+- 任意写入类事件（Bond/Memory/Canon/Vault/Airlock/Clawd）都必须具备 evidence_refs（至少 1 个 intent_id 或 event_id 引用）。
+
+### 8.2 Neo4j Bond SSOT（关系域唯一真相）
+定位：Neo4j 只承载“关系结构与因果路径”，不得承载执行事实；执行事实仍以 Ledger 为准。
+
+写入边界：
+- 唯一写入者：bond/bond_dynamics.py
+- summarizer.py 只能派生 summary，不得写回 SSOT
+
+最小图模型（语义稳定，可扩展）：
+- 节点：User、Session、Event、Topic、CapabilityHint
+- 关系：HAS_EVENT / ABOUT / AFFECTS 等（具体命名可变，但必须可回放映射）
+- Event 必须携带 event_id 与 evidence_refs（或可等价追溯到 SQLite 的 bond_update_log）
+
+回归口径：
+- 非 bond_dynamics 尝试写 Neo4j 必须被静态扫描/运行时断言拦截（T-SSOT-01）。
+- Bond Summary 不得包含敏感数值（例如 trust=xx），只能 stage/trend/capability_hint（T-Bond-01）。
+
+### 8.3 Episodic 向量库（经历召回线索，不具备裁决权）
+定位：只用于相似性召回；不得当事实源。
+
+写入边界：
+- 唯一写入者：memory/episodic.py
+- 必须 evidence_refs：无证据不得写入（防幻觉固化）
+
+条目元数据最小字段（必须语义等价）：
+- memory_id、ts_ms、text_hash、decay_profile_id
+- evidence_refs（必须）
+- merged_into（可空）、deleted_at（可空）
+- visibility（internal/user_visible）
+- embedding_model_id
+
+生命周期（必须审计）：
+- write/merge/decay/delete 必须写入 memory_ops_log（或等价表），并带 evidence_refs
+- merge 必须保留“来源条目→目标条目”的可追溯关系
+
+回归口径：
+- T-Mem-01：无 evidence_refs 写入必失败且可解释
+- T-Mem-02：merge/decay/delete 均可在 memory_ops_log 回放
+
+8.3.1 RETRIEVAL（Embedding / Rerank / Evidence Pack）
+覆盖需求：FR-MEM-003~005、FR-AUDIT-001、FR-CORE-002。
+
+契约点（必须语义等价）：
+- Embedding 接口必须存在：输入 text，输出 {embedding_vector, embedding_model_id, latency_ms, status}
+- Reranker 接口必须存在：输入 {query, candidates[]}，输出 {scores[], rerank_model_id, latency_ms, status}
+- Evidence Pack（融合输出）字段固定：{query, topk[], degraded?, stage, reason_code?}
+  - topk[] 最小字段：{doc_id, source_ref, snippet, score, confidence, metadata?}
+
+回归测试编号（新增，必须）：
+- T-Ret-01：embedding 不可用时的降级口径（不得伪装为空事实）+ reason_code 稳定
+- T-Ret-02：reranker 不可用时的降级口径 + evidence pack 结构仍稳定
+- T-Ret-03：evidence pack 字段稳定 + 可回放引用（可用于回答与审计）
+
+### 8.4 Style Canon Store（风格资产：tone_only）
+定位：只决定“怎么说”，不得当事实注入。
+
+写入边界：
+- 唯一写入者：memory/canon_style_store.py（必须经白名单/Evolution 或等价流程）
+- 任意变更必须写 canon_change_log（或等价表）
+
+条目字段（最小）：
+- canon_id、version、hash
+- tone_only=true、unsafe_as_fact=true
+- content（模板/范式）、tags、updated_by（proposal_id）、ts_ms
+
+注入隔离：
+- 只能进入 context_pack.style_pack；不得与 facts/world_canon/episodic 混槽（T-CP-01）。
+
+### 8.5 World Canon Store（最小权威内容集合：可引用、非执行事实）
+定位：稳定“内容一致性”，用于设定/术语/不变量引用与冲突裁决；不构成执行事实。
+
+写入边界：
+- 唯一写入者：memory/canon_world_store.py（必须经白名单/Evolution 或等价流程）
+- 任意变更必须写 canon_change_log 与 canon_proposal_log（或语义等价）
+
+推荐双层形态（本地优先、可审计）：
+- 内容资产层（文件 SSOT）：host_brain/canon/world/ 下条目文件，至少包含 doc_id、version、title、tags、body
+- 索引层（SQLite）：world_canon_doc（doc_id/version/hash/status/source_path/updated_ts）
+
+同步契约：
+- canon_sync 负责扫描文件→计算 hash→更新索引；任何变更必须写 canon_change_log（canon_kind=world）
+
+引用口径（必须）：
+- 输出中引用 world_canon 必须使用“设定/引用口径”，不得升级为“已执行/已保存/已确认”
+- 任何完成性表述必须引用审计链摘要字段，否则 QA 拦截（与 9 章联动）
+
+### 8.6 Artifact Vault（证据与可逆材料仓）
+定位：保存截图/关键帧/脱敏报告/回滚材料等资产，支撑撤销与 UI 行为可回放。
+
+写入边界：
+- 唯一写入者：lsp/vault.py（经 Skill 执行产出）
+- manifest 必须可索引到 intent_id，并能关联 undo_token_ref（若 reversible=true）
+
+manifest 最小字段（必须语义等价）：
+- manifest_id、intent_id、integrity_digest（sha256）
+- items[]：{artifact_id, kind, hash, created_ts, evidence_refs}
+- policy_profile_id、ts_ms
+- undo_ref（可空，若 reversible=true 则必填）
+
+GC 约束：
+- 不得删除有效 undo 窗口材料
+- 每次 GC 必须写 vault_gc_log（含 policy_profile_id、deleted_artifact_ids、evidence_refs）
+
+### 8.7 Airlock（出站净化/入站隔离）与日志口径
+出站必须产生：
+- sanitization_report_json（removed_fields/redactions/payload_digest）
+- airlock_log.direction=EGRESS，且含 request_id
+
+入站必须隔离与分类：
+- 分类枚举：FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN
+- 任何入站内容不得直通执行；必须转成 Intent 并过 Governor，否则 EXTERNAL_DATA_GATE
+
+### 8.8 静态扫描断言（单写者/旁路禁止，必须可回归）
+必须覆盖的禁止项（口径级）：
+- 非 skills/loader 不得直接调用 skills/impl
+- 非 bond/bond_dynamics 不得持有/调用 Neo4j 写入能力
+- 非 memory/episodic 不得持有/调用向量库写入能力
+- 非 memory/canon_style_store 不得持有/调用 Style Canon 写入能力
+- 非 memory/canon_world_store 不得持有/调用 World Canon 写入能力
+- 非 lsp/vault 不得持有/调用 Vault 写入能力
+
+回归口径：
+- T-SSOT-01：静态扫描能发现并阻断上述旁路路径（测试只断言“命中规则”，不依赖真实外部服务）。
+
+### 8.9 Tools（Tool Catalog/Selector/Broker：渐进式可见性与单入口执行）
+
+定位：把“工具选择”与“工具执行”拆成可审计、可回归的工程契约。模型只看到候选工具的最小元数据子集（tool_meta_pack），任何副作用工具执行必须经 ToolBroker 单入口并受 Governor/Token 治理。
+
+覆盖需求：FR-TOOL-001~003、FR-SKILL-002、FR-AUDIT-001、NFR-SEC-001。
+
+8.9.1 ToolMeta（仅元数据）最小字段（必须语义等价）
+- tool_id（稳定 ID）、name、desc
+- args_schema_hash（参数 Schema 哈希；禁止上行完整实现细节）
+- side_effect_level：READ|WRITE|EXEC
+- auth_level：NONE|APPROVAL|CONFIRM
+- domain_tags（用于 Top-K 选择）
+- version（工具元数据版本）
+
+8.9.2 tool_meta_pack（Top-K 可见工具子集）
+- 语义：每轮仅暴露 Top-K 个 ToolMeta；默认不包含 WRITE；即使包含也不等价于可执行。
+- 必须可追溯：tool_visibility_hash 必须与 intent_log（proposal）/llm_call_log 串联。
+
+8.9.3 tool_visibility_hash（可追责口径）
+- 计算材料：按稳定排序的（tool_id + args_schema_hash + side_effect_level + version）序列计算摘要。
+- 记录位置：intent_log.tool_visibility_hash + llm_call_log.tool_visibility_hash（二者至少其一，且可关联到同一 request_id/intent_id）。
+
+8.9.4 ToolBroker（工具执行单入口）
+- 输入契约（概念级）：{intent_id, tool_id, args, approval_token_ref?, confirm_token_ref?}
+- 输出契约（概念级）：{status, evidence_ref, tool_result_digest, ts_ms}
+- 约束：
+  - WRITE/EXEC：必须 Governor=APPROVE 且 token 合法；否则拒绝并写入可统计 reason_code。
+  - 任一成功执行必须产出 evidence_ref，且可在审计链中回放到 skill_exec_log（或等价事实日志）。
+
+8.9.5 回归测试编号（必须）
+- T-Tool-01：ToolMeta 字段完整性与“仅元数据”约束（不得混入执行实现细节）
+- T-Tool-02：Top-K 子集与 WRITE 默认不可见（策略稳定、可统计）
+- T-Tool-03：ToolBroker 单入口与 WRITE Token gating（无 token 必拒绝，成功必有 evidence_ref 串联）
+
+### 8.10 MCP（provider→ToolMeta 映射 + 受治理调用）
+
+定位：把 MCP provider 纳入工具元数据体系与审计链；对 MCP 的 READ/WRITE 调用施加同等治理，不允许“外部工具直通执行”。
+
+覆盖需求：FR-MCP-001、FR-TOOL-001~003、FR-AIRLOCK-001、FR-AUDIT-001。
+
+契约点（必须语义等价）：
+- provider_id、provider_version → ToolMeta.version
+- provider_tool_id → ToolMeta.tool_id（需命名空间隔离，避免与本地工具冲突）
+- side_effect_level：READ/WRITE 分级；WRITE 必须走 Token gating
+- 审计字段：provider_id/tool_id/request_id/evidence_ref（可回放链路）
+
+回归测试编号（必须）：
+- T-MCP-01：provider→ToolMeta 同步稳定性 + WRITE 无 token 必拒绝 + 审计串联完整
+
+### 8.11 Channels（微信）与 Avatar（VTS 外显）治理契约
+
+定位：把“通道 I/O”与“外显驱动”纳入确定性映射与审计链，拒绝模型自由指定隐式参数（收件人/自由动作/任意 expression_id）。
+
+覆盖需求：FR-CHANNEL-001、FR-AVATAR-001、FR-AUDIT-001、NFR-SEC-001。
+
+8.11.1 微信通道（I/O 事件化）
+- 入站：inbound event 必须生成稳定 thread_key/message_id/request_id，并写入 channel_io_log（或等价日志）。
+- 出站：outbound event 必须绑定 intent_id；发送失败必须以 reason_code + stage 可解释。
+- 禁止：LLM 不得直接决定“发给谁/发什么”，只能提出 intent_draft，由 Governor 裁决与票据化执行。
+
+回归测试编号：
+- T-Channel-01：入站去重（重复消息不重复触发执行）、出站可追溯（thread_key/request_id/intent_id 串联）
+
+8.11.2 VTS 外显（确定性映射）
+- 固定映射：emotion_tag→expression_id（同版本固定），且必须可审计回放。
+- talk gate：start/stop_talking 只允许由系统事件触发（例如播放队列状态），不得由模型任意触发。
+- 拒绝：未知 emotion_tag 或自由动作参数必须拒绝并留痕。
+
+回归测试编号：
+- T-Avatar-01：固定映射一致性 + 非法 tag 拒绝 + 可回放审计字段
+
+8.11.3 VOICE（语音链路：ASR/TTS/打断/兜底模型）
+覆盖需求：FR-VOICE-001~005、FR-AUDIT-001、NFR-SEC-001。
+
+契约点（必须语义等价）：
+- ASR 上送事件（asr_chunk）：{request_id, ts_ms, text, t_start_ms, t_end_ms, confidence, alternates?}
+- 播报请求（speak）：{request_id, text, emotion_tag, voice_profile_id?, priority?}
+- 打断事件（barge_in）：{request_id, reason, ts_ms}
+- 兜底模型端点输出：必须单个合法 JSON，且 draft_only=true；不得出现 decision/allow/deny/confirm_required 等裁决字段；不得出现任何执行事实宣告。
+
+回归测试编号（新增，必须）：
+- T-Voice-01：asr_chunk 字段结构稳定 + 低置信度显式标注 + 可回放
+- T-Voice-02：speak→合成→播报事件串联 request_id + 失败 reason_code/stage
+- T-Voice-03：Barge-in 生效（播报停止/降级）+ ASR 不中断 + 审计有记录
+- T-Voice-04：Edge 兜底 LLM draft-only 输出约束 + 不可用快速失败回退
+- T-Voice-05：资源闸门优先级（ASR 优先）+ 峰值互斥行为可观测
+
+## 8.12 VISION（屏幕监控/OCR/摄像头：Gaming 门控 + 事件化 + 证据引用）
+
+覆盖需求：FR-VISION-003~004、FR-MODE-001~002、FR-AUDIT-001~002。  
+回归口径：（新增）T-VisionGate-01、T-Vision-01、T-Vision-02。
+
+### 8.12.1 屏幕监控与 OCR（按需触发）
+定位：屏幕监控与 OCR/识图属于“按需推理能力”，必须受 sys_mode/Gaming 门控，且结果必须结构化、可回放、可引用证据；不得以自然语言替代证据引用。
+
+契约点（必须语义等价）：
+- 触发门控：
+  - sys_mode=GAMING：禁止触发任何屏幕监控/OCR（含定时轮询与被动触发）；必须拒绝或稳定降级，并返回可统计 reason_code。
+  - 非 GAMING：允许按需触发，但必须产出结构化输出，并可追溯 source_ref。
+- OCR 输出结构（最小字段集）：
+  - {request_id, ts_ms, source_ref, engine_id, text_blocks[]}
+  - text_blocks[]：{text, bbox, conf}
+  - 约束：bbox 坐标系必须固定；conf 必须显式给出；source_ref 必须可回放到证据材料（Vault artifact/manifest/evidence_ref 之一，取其一但口径必须固定）。
+- 失败/降级口径：
+  - Engine 不可用/超时：不得伪装为“没有文字/看不到内容”；必须以 reason_code + quality.stage 明确标注降级阶段。
+
+回归测试编号（新增，必须）：
+- T-VisionGate-01：Gaming 模式下任意屏幕监控/OCR 请求均被拒绝或降级（reason_code 稳定可统计）；不得出现“我看到了屏幕内容”的无证据宣告。
+- T-Vision-01：非 Gaming 下 OCR 输出结构稳定（text_blocks/bbox/conf/source_ref）；source_ref 可回放引用。
+
+### 8.12.2 摄像头识别（事件化输出 + evidence_ref）
+定位：摄像头识别必须输出事件化结构，并与审计链串联；低置信度必须显式标注；证据缺失时必须稳定拒绝/降级。
+
+契约点（必须语义等价）：
+- camera_event 输出结构（最小字段集）：
+  - {request_id, ts_ms, evidence_ref, objects[]}
+  - objects[]：{label, conf, bbox?}
+  - 约束：evidence_ref 必须能回放到证据材料（Vault artifact/manifest/evidence_ref 之一，取其一但口径必须固定）。
+- 低置信度策略：
+  - conf 低于阈值时必须显式标注（例如 low_confidence=true 或以 reason_code/notes 枚举表示），不得“强断言”。
+
+回归测试编号（新增，必须）：
+- T-Vision-02：摄像头识别事件可回放并指向 evidence_ref；证据缺失时稳定降级/拒绝且 reason_code 可统计。
+
+### 8.12.3 reason_code 与审计串联（VISION 专用）
+- VISION 相关拒绝/降级必须具备稳定 reason_code（枚举化），并在 quality.stage 标注失败阶段。
+- 所有 VISION 结果必须可串联到 request_id/intent_id（至少其一），并可由审计回放定位到证据引用（source_ref/evidence_ref）。
 
 ---
 
 ## 9. QA：输出合规模块（Host 必须）
-`core/qa.py` 负责对 Dify 输出做“合规检查与重写一次”：
+`core/qa.py` 负责对 LLM 输出做“合规检查与重写一次”：
 - 伪执行宣告（FALSE_EXECUTION_CLAIM）
 - Canon 当事实（CANON_AS_FACT_VIOLATION）
 - 非法语言/口吻（LANGUAGE_POLICY_VIOLATION / TONE_POLICY_VIOLATION）
@@ -238,8 +865,9 @@ Host 打包 context_pack（JSON）给 Dify，字段建议：
 ---
 
 ## 10. 最小可交付里程碑（MVP→LSP）
+
 ### M0（可跑通）
-- Host `/v1/chat`：输入→调用 Dify→QA→输出
+- Host `/v1/chat`：输入→调用 LLM stub/fixtures→QA→输出
 - Intent 宽松解析 + 严格校验
 - Governor REJECT/APPROVE + reason_code + token_ref
 - Skills 框架：至少实现 `narrative_only`（不执行）与 `memory_recall`（只读）
@@ -249,7 +877,7 @@ Host 打包 context_pack（JSON）给 Dify，字段建议：
 - approval_token 验证
 - 重放保护：id/seq/ts/nonce
 - reason_code 枚举与测试（T-16/T-17）
-- CI 静态扫描禁止旁路
+- 静态扫描禁止旁路
 
 ### M2（Edge 接入）
 - Host↔Edge RPC：screenshot/play_audio
@@ -263,6 +891,7 @@ Host 打包 context_pack（JSON）给 Dify，字段建议：
 ---
 
 ## 11. 合规测试（从白皮书映射）
+
 Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建议按编号直接落地：
 - T-14/T-15 Governor 输出契约
 - T-18~T-22 Intent 校验与重放
@@ -270,10 +899,14 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - T-41~T-43 视觉熔断
 - T-67~T-71 降级与 QA
 - T-72~T-76 生命周期与 SSOT
+- T-Canon-01~T-Canon-02 Style Canon 版本化与 Canon-as-fact 拦截
+- T-WCanon-01~T-WCanon-03 World Canon 索引同步/引用注入/非执行事实口径回归
+- T-Flow-01~T-Flow-02 配置资产（Flow）：指针合法性 + Trace 索引一致性
 
 ---
 
 ## 12. Codex 执行说明
+
 你在每次让 Codex 改代码前，必须提供：
 - 目标里程碑（M0/M1/M2/M3）
 - 要改的文件列表（全文件替换优先）
@@ -281,120 +914,180 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - 不变量（例如 I1/I8/I9）不可破坏
 - 输出格式：必须给出变更摘要 + 变更文件列表 + 下一步建议
 
-（更完整的 Codex 行为规范在 `docs/AGENTS.md`。）
+（更完整的 Codex 行为规范在 `docs/40_agents/AGENTS.md`。）
 
+---
 
-## 13. 实施检查清单（Codex 执行用）
+## 13. 环境与配置（dev/test/prod）
 
-### 13.1 总览（体系结构与数据流）
-目标：确保任何实现都不破坏“单向链 + 审计即事实”。
+定位：本章定义“环境枚举、配置来源优先级、敏感信息边界、外部依赖隔离口径”。不包含任何命令行或执行步骤。
 
+覆盖需求：NFR-SEC-001、NFR-REL-001、NFR-MAINT-001（以及 ModelPlane/AIRLOCK 相关落点）  
+回归口径：T-Perf-01、T-Gaming-01、T-39/T-40、T-Flow-01/02（配置一致性）
+
+### 13.1 环境枚举（语义固定）
+- NATSUME_ENV=dev：本地开发（允许 stub/fixtures；更详细日志；允许关闭部分外部依赖但必须可降级）
+- NATSUME_ENV=test：自动化测试（强制隔离外部依赖；使用临时库/临时目录；不得访问真实密钥）
+- NATSUME_ENV=prod：真实运行（最小暴露；严格门禁默认；危险能力默认关闭或需显式授权）
+
+### 13.2 配置来源优先级（从高到低）
+1) 环境变量（运行时注入）  
+2) 本地覆盖配置（仅 dev/test，且不得入库）  
+3) 仓库内默认配置（安全默认值；必须能跑最小闭环）  
+
+硬约束：
+- 任何 secret（API key、token、账号凭据）不得出现在仓库文本文件中；只能以键名存在（例如 OPENAI_API_KEY）。
+- 任何出网 endpoint 只能在 secret/环境层提供；仓库内仅允许 provider 名称与模型标识（见 ModelPlane 配置资产）。
+
+### 13.3 配置资产入口（与文档/Trace 的关系）
+- Flow 配置资产：flows/exports + flows/active.pointer；其一致性由 docs/60_trace/flows/index.md 指向并可回归（T-Flow-01/02）。
+- ModelPlane 配置资产：configs/model_plane/node_registry.yaml + model_profiles.yaml；其变更必须 bump model_profile_id，并写入 llm_call_log（或等价审计字段）。
+- LLM 输出契约资产：prompts/llm_contract/*（contract 示例与拒绝范式）；不得当需求来源，只当契约/回归输入源。
+
+### 13.4 外部依赖隔离要求（test 环境强制）
+- test 环境不得连接真实 Neo4j、真实向量库、真实云端模型服务；必须使用 stub/fixtures 或替身实现。
+- 出网相关模块必须支持“airlock stub”：仍产生 airlock_log 结构化记录，但不会真实发送。
+- ClawdBot/UI 类能力在 test 环境必须默认禁用或模拟（只验证日志/契约与红线熔断口径）。
+
+### 13.5 Gaming 模式资源策略（显存被游戏占用）
+- Host 不得依赖本地 GPU 模型；只允许规则引擎/模板/CPU tiny model（如存在）。
+- 云端调用允许继续，但必须受超时退化策略约束，避免沉默（T-Perf-01、T-Gaming-01）。
+- 渲染优先走云端 renderer；云不可用时退化为 Host 最小日文模板（不得加料）。
+
+---
+
+## 14. 实施检查清单（Codex 执行用）
+
+### 14.1 总览（体系结构与数据流）
 必须清晰表达并在实现中保持一致的事实：
-- 单向链：输入 → Dify（narrative + intent_draft）→ Host（Governor 裁决）→ Skills/Actuators（执行）→ Audit（事实）
-- “事实来源”：仅审计链（intent/governor/skill_exec）+ Hard State/SSOT；Dify 叙事不构成事实
+- 单向链：输入 → LLM（narrative + intent_draft 草案）→ Host（Governor 裁决）→ Skills/Actuators（执行）→ Audit（事实）
+- “事实来源”：仅审计链（intent/governor/skill_exec）+ Hard State/SSOT；LLM 叙事不构成事实
 
-落地物料（工程侧）：
-- 一个可读的“运行时链路图”（可以是 docs 内一个简图段落，不是代码）
-- `Host /v1/chat` 的输入输出契约（见本文件第 2、4、7 章）
-
-验收点（最小）：
-- 任意“已执行/已保存/已确认”类表达必须来自 Host 审计摘要字段（见第 0、9 章）
-
-
-### 13.2 模块边界（可静态扫描验证）
-目标：把“谁能做什么”写死到工程结构里，避免旁路。
-
+### 14.2 模块边界（可静态扫描验证）
 边界定义（必须满足）：
 - Host：Hard State / Governor / RAG 主权 / Audit / Bond Dynamics / Evolution
-- Dify：只负责叙事生成 + Intent 草案（禁止执行、禁止裁决、禁止宣称事实）
+- LLM：只负责叙事生成 + Intent 草案（禁止执行、禁止裁决、禁止宣称事实）
 - Edge：感知/执行端（RPC + 签名 + 重放保护），不得有裁决逻辑
 
-落地物料（工程侧）：
-- 静态扫描规则清单（CI 失败条件），必须覆盖：
-  - 非 `skills/loader` 直接 import `skills/impl`
-  - 非 `bond_dynamics` 直接使用 Neo4j 写入能力
-  - 业务层绕过 Skills 直连 Edge RPC
+### 14.3 协议与 Schema（强类型 + 可回放）
 
-验收点（最小）：
-- CI 中“旁路 import”用例必须能触发失败（对应第 8.2）
+目标：把“语言→行为”的唯一入口限定为强类型对象，并能稳定拒绝、稳定审计、稳定回放。
 
+必须存在且保持一致的契约（最小集）：
+1）Intent（见第 3 章）
+- lenient parse：只修语法不补语义；失败 INTENT_PARSE_FAILED
+- strict validate：字段/类型/枚举/args/重放/时效；失败映射 INTENT_SCHEMA_INVALID / INTENT_ARGS_INVALID / REPLAY_DETECTED / SEQ_INVALID / EXPIRED_INTENT
+- allowlist：type/action/target
 
-### 13.3 协议与 Schema（强类型 + 可回放）
-目标：把“语言 → 行为”的唯一入口限定为强类型对象，并能稳定拒绝、稳定审计、稳定回放。
+2）GovernorOutput（见第 4 章）
+- decision/reason_code/rule_trace/tokens/snapshot_refs 结构固定
+- REJECT 必带 reason_code + rule_trace
+- APPROVE 必带 approval_token_ref；缺失必须触发执行入口拒绝（SKILL_TOKEN_MISSING）
 
-必须存在的契约（工程必备）：
-- Intent：
-  - lenient parse（只修语法不补语义）
-  - strict validate（字段/类型/枚举/args/重放/时效）
-  - action/target/type allowlist
-- Governor 输出：
-  - `decision/reason_code/rule_trace/tokens/snapshot_refs` 结构固定
-  - REJECT 必带 reason_code + rule_trace
-  - APPROVE 必带 approval_token_ref
-- 审计日志：
-  - 最少 intent_log / governor_log / skill_exec_log 三表（或等价 JSONL）
+3）Token/Manifest（见第 5 章）
+- approval_token：绑定 intent_id + skill_name + session_id + seq + TTL
+- confirm_token：高风险二次提交证明（不得用语言确认替代）
+- undo_token + manifest：可逆默认（digest 必须可核验）
 
-落地物料（工程侧）：
-- Intent / GovernorOutput / Token / Manifest 的结构化定义（Pydantic 或等价）
-- reason_code 枚举的引用位置与使用约束（统一入口）
+验收点（口径）：
+- T-18~T-22（Intent）
+- T-14~T-17（GovernorOutput）
+- T-34~T-38（Token/Undo）
 
-验收点（最小）：
-- T-14/T-15（Governor 输出契约）
-- T-18~T-22（Intent 校验与重放）
+### 14.4 关键规则与算法（可版本化、可回归）
 
-
-### 13.4 关键规则与算法（可版本化、可回归）
 目标：把裁决与授权的关键逻辑做成“版本化规则”，而不是散落在业务代码里。
 
 必须实现且可版本化的规则族：
-- Governor Gates（R1–R7）：
-  - trust / energy / sys_mode / rate_limit / scope_policy / safety / airlock
-- Token 体系：
-  - approval_token：绑定 intent_id + skill_name + session_id + seq + TTL
-  - confirm_token：高风险二次提交证明
-  - undo_token + manifest：可逆默认（LSP）
+1）Governor Gates（R1–R7）
+- trust / energy / sys_mode / rate_limit / scope_policy / safety / airlock
+- 每次裁决必须产出 rule_trace（包含命中门、阈值摘要、快照摘要）
 
-落地物料（工程侧）：
-- 每条 Gate 的阈值与命中输出必须可追溯到 rule_trace（规则版本号建议写入 trace）
-- Token 的绑定字段与校验规则必须列为“不可破坏约束”（写在 DevSpec 票据章节即可）
+2）工具与执行门禁
+- WRITE 类副作用能力必须经 Token（必要时 confirm_token）
+- 工具可见性必须渐进式加载（Top-K 元数据子集）并记录 tool_visibility_hash
 
-验收点（最小）：
-- T-34~T-38（Token/confirm/undo 强制与校验）
+3）幂等与重放
+- intent_id 幂等：重复 intent 不得产生第二次副作用
+- seq/nonce/ts_ms：重放窗、乱序、过期均可解释拒绝
 
+验收点（口径）：
+- T-Gov-01（rule_trace 可定位）
+- T-SSOT-01（旁路禁止/单写者）
+- T-Tool-01~03（若 Tool 平面已纳入 DevTasks）
+- T-18~T-22（重放/顺序/过期）
 
-### 13.5 失败与降级（状态机 + 一次重写）
-目标：链路任何阶段坏掉，系统也必须输出“稳定结构 + 明确 reason_code”，且绝不编造事实。
+### 14.5 失败与降级（状态机 + 一次重写）
+
+目标：链路任何阶段失败，系统也必须输出“稳定结构 + 明确 reason_code”，且绝不编造事实。
 
 必须有的机制：
-- 分阶段状态机（S0~S8）+ 每阶段：
-  - 成功条件 / 失败条件 / 降级策略 / 记录位置 / reason_code
-- QA 模块：
-  - 伪执行宣告 / Canon-as-fact / 语言口吻 / JSON 漂移
-  - 允许重写一次，失败则落 Host 最小模板库
+1）分阶段状态机（S0..S8，或语义等价）
+- 每阶段定义：成功条件/失败条件/降级策略/审计记录位置/对外 reason_code
 
-落地物料（工程侧）：
-- “降级原因可观测”：error_log 或 quality 字段必须能看到阶段与 reason_code
-- “模板库触发条件”：避免误触（见你第 9、26 章的原则已写得很像了）
+2）QA 模块（见第 9 章）
+- 拦截：伪执行宣告、Canon-as-fact、口吻/语言违规、JSON 漂移
+- 允许重写 1 次；仍失败必须降级到 Host 最小模板输出（不得承诺执行）
 
-验收点（最小）：
+3）依赖不可用（DB/Neo4j/Vector/Cloud）
+- 不崩溃：仍输出可解析结构
+- 可观测：error_log/quality.stage 可定位失败点
+- 更保守：执行类能力默认拒绝或降级为草案
+
+验收点（口径）：
 - T-67~T-71（降级与 QA）
+- T-Perf-01（超时退化与在场回应）
+- T-39/T-40（airlock 失败路径）
 
+### 14.6 验收测试落地方式（T-xx → tests/contract + tests/e2e）
 
-### 13.6 验收测试落地方式（T-xx → tests/contract + tests/e2e）
-目标：把白皮书的 T-xx 变成可执行测试集合，作为 Codex 每次改动的“必过门”。
+目标：把 DevSpec 的“契约与断言”落成两类回归：契约测试（快速）+ 最小闭环（可回放）。
 
-建议分层：
-- contract tests：schema、validator、token 校验、旁路扫描（快速、无外部依赖）
-- e2e tests：最小链路（Host → Dify stub → Governor → Skill stub → Audit）
+1）contract tests（快速、无外部依赖优先）
+必须覆盖：
+- Schema/Enum：Intent、GovernorOutput、Token、Manifest、reason_code 枚举稳定
+- 指针一致性：Flow active.pointer 与 Trace 索引一致性（T-Flow-01/02）
+- 单写者与旁路禁止：静态扫描断言（T-SSOT-01）
+- LLM 输出契约 lint：Strict JSON（T-LLM-01）
 
-必须覆盖的最小集合：
+2）e2e tests（最小闭环）
+最小链路口径：
+- Host 输入 → LLM stub/fixtures → QA →（可选）Governor → Skill stub → Audit
+必须断言：
+- 三联画可串联：intent_log → governor_log →（可选）skill_exec_log
+- REJECT 必带 reason_code
+- APPROVE 必带 approval_token_ref；无 token 不得执行
+
+建议最小覆盖集（随里程碑扩展）：
 - T-14/T-15
 - T-18~T-22
 - T-34~T-38
-- T-41~T-43（若启用 UI/Clawd）
 - T-67~T-71
-- T-72~T-76（当你开始做生命周期与 SSOT 严格性时）
+- T-Flow-01~02
 
-落地物料（工程侧）：
-- `tests/e2e/TESTPLAN.md`（只列“编号 → 用例 → 断言点 → 触发方式”，不需要代码）
-- `fixtures/`（最小 intents、坏输出样例）
+### 14.7 新增验收测试编号（VOICE/VISION/RETRIEVAL/EDGE）
+以下测试编号用于覆盖本次对话新增的服务项清单与语音/视觉/检索链路契约（不写命令，仅定义断言点）：
+
+- T-80（VOICE-ASR）：ASR 上送事件结构稳定（timestamps/confidence/alternates）；低置信度显式标注；可回放。
+- T-81（VOICE-TTS）：Host 下发文本→Edge 合成播报；失败返回 reason_code/stage；播报事件可与 request_id 串联。
+- T-82（VOICE-BARGEIN）：播报中用户开口触发打断；播放停止/降级；ASR 继续上送；审计记录打断事件。
+- T-83（EDGE-FALLBACK-LLM）：兜底 LLM 输出为 draft-only JSON；不得出现执行事实宣告；不可用时快速失败并触发 Host 兜底口径。
+- T-84（VISION-SCREEN-GATE）：Gaming 模式禁止屏幕监控/OCR/Clawd UI；非 Gaming 模式按需触发并事件化审计。
+- T-85（RETRIEVAL-PIPE）：embedding+rerrank+recall/fusion 输出 TopK evidence pack 字段稳定；缺任一服务时降级口径与 reason_code 稳定。
+- T-86（BOND-NEO4J）：Neo4j 单写者边界生效；bond_summary 派生不含执行事实；不可用时降级口径稳定。
+- T-87（OBS-RESOURCE）：Edge 语音链与 GPU 显存指标可观测；异常峰值可定位 stage 与组件。
+
+---
+
+## 附录 A：覆盖关系与状态（以 Trace 为准）
+
+本文件不再维护“PRD→DevSpec→DevTasks→Tests”的覆盖矩阵，以避免重复维护导致的状态过期与冲突。  
+覆盖关系的唯一真相源是 Trace：docs/60_trace/requirements_trace.md。
+
+本文件（DevSpec）只承担两件事：
+1) 把 FR 需求落成可审阅的工程契约（接口/Schema/错误码/日志点/测试点编号 T-xx）。
+2) 给出“如何验证”的断言口径（T-xx 的输入/输出/拒绝码/审计字段）。
+
+状态使用建议（Trace 侧枚举为准）：
+- PRD_READY / SPEC_READY / TASK_READY / TEST_READY / DONE：用于表达链路成熟度。
+- SPEC_GAP / TASK_GAP / TEST_GAP：用于明确“缺口在哪里”，便于下一轮补齐。
