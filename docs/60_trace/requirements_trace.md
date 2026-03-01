@@ -270,6 +270,15 @@
 - 当前进展（2026-03-01）：已落地 embedding runtime config（provider/model_id/dim/timeout_ms/node_selector）加载与节点路由选择，覆盖 unavailable/timeout/dim drift 三类失败映射（`RETR_EMBED_*`）并将 expected_dim/actual_dim 写入 retrieval_event_log 便于审计回放。
 - 覆盖状态：DONE
 
+## R-29
+- 系统级需求：Reranker 多提供方路由与分数稳定化可解析、可降级、可审计；异常分数范围必须稳定回退
+- PRD 需求编号（FR）：FR-MEM-004, FR-OBS-001
+- DevSpec 落点：DevSpec 8.3.1/13
+- DevTasks（TASK）：TASK-0055
+- 验收测试（T-xx）：T-Ret-02, T-Rerank-01
+- 当前进展（2026-03-01）：已落地 reranker runtime config（provider/model_id/top_k/timeout_ms/node_selector）与节点路由选择，覆盖 model_down/timeout/invalid_score_range 三类失败映射（`RETR_RERANK_*`），并固化分数归一化 + fallback 规则及 `expected_top_k` 审计字段。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

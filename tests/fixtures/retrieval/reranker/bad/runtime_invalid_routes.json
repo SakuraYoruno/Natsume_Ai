@@ -1,0 +1,7 @@
+{
+  "env": {
+    "RETR_RERANK_ENABLED": "true",
+    "RETR_RERANK_DEFAULT_ROUTE": "host_default",
+    "RETR_RERANK_ROUTES_JSON": "[\"host_default\", {\"provider\":\"heuristic\"}]"
+  }
+}

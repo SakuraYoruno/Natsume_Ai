@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import math
+import os
 from time import perf_counter
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    CONFIG_REQUIRED_MISSING,
+    CONFIG_VALUE_INVALID,
     RETR_RERANK_INPUT_INVALID,
     RETR_RERANK_TIMEOUT,
     RETR_RERANK_UNAVAILABLE,
@@ -17,14 +22,89 @@ from host_brain.core.ids import now_ms
 
 
 S_RET_RERANK = "S_RET_RERANK"
+S_RET_RERANK_CONFIG = "S_RET_RERANK_CONFIG"
 RET_OP_RERANK = "RERANK"
 
 STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 
 RERANK_MODEL_ID = "heuristic-rerank-v1"
+DEFAULT_RERANK_PROVIDER = "heuristic"
+DEFAULT_RERANK_ROUTE = "default"
+DEFAULT_RERANK_TOP_K = 5
+DEFAULT_RERANK_TIMEOUT_MS = 500
+DEFAULT_NODE_SELECTOR = "default"
 
 RerankProvider = Callable[[str, list[dict[str, Any]]], tuple[list[float], str]]
+
+
+@dataclass(frozen=True)
+class RerankRouteConfig:
+    route_id: str
+    provider: str
+    model_id: str
+    top_k: int
+    timeout_ms: int
+    node_selector: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "route_id": self.route_id,
+            "provider": self.provider,
+            "model_id": self.model_id,
+            "top_k": int(self.top_k),
+            "timeout_ms": int(self.timeout_ms),
+            "node_selector": self.node_selector,
+        }
+
+
+@dataclass(frozen=True)
+class RerankRuntimeConfig:
+    enabled: bool
+    default_route: str
+    routes: dict[str, RerankRouteConfig]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "default_route": self.default_route,
+            "routes": {
+                route_id: route.as_dict()
+                for route_id, route in sorted(self.routes.items())
+            },
+        }
+
+
+@dataclass(frozen=True)
+class RerankConfigIssue:
+    reason_code: str
+    detail: str
+    field: str | None = None
+
+
+@dataclass(frozen=True)
+class RerankConfigLoadResult:
+    success: bool
+    stage: str
+    reason_code: str | None
+    config: RerankRuntimeConfig | None
+    issues: tuple[RerankConfigIssue, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "config": (self.config.as_dict() if self.config is not None else None),
+            "issues": [
+                {
+                    "reason_code": issue.reason_code,
+                    "detail": issue.detail,
+                    "field": issue.field,
+                }
+                for issue in self.issues
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -45,11 +125,19 @@ class RerankerServiceContract:
         *,
         ledger: SQLiteLedger | None = None,
         provider: RerankProvider | None = None,
+        provider_registry: Mapping[str, RerankProvider] | None = None,
+        runtime_config: RerankRuntimeConfig | None = None,
+        node_id: str | None = None,
         available: bool = True,
-        timeout_ms: int = 500,
+        timeout_ms: int = DEFAULT_RERANK_TIMEOUT_MS,
     ) -> None:
         self.ledger = ledger
         self.provider = provider or _default_rerank_provider
+        self.provider_registry: dict[str, RerankProvider] = dict(provider_registry or {})
+        if DEFAULT_RERANK_PROVIDER not in self.provider_registry:
+            self.provider_registry[DEFAULT_RERANK_PROVIDER] = self.provider
+        self.runtime_config = runtime_config or _default_runtime_config(timeout_ms=timeout_ms)
+        self.node_id = (str(node_id).strip() if node_id is not None else None)
         self.available = bool(available)
         self.timeout_ms = int(timeout_ms)
 
@@ -65,102 +153,170 @@ class RerankerServiceContract:
         ts_ms: int | None = None,
     ) -> RerankerResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
-        timeout_value = int(timeout_ms if timeout_ms is not None else self.timeout_ms)
+        route = resolve_reranker_route(self.runtime_config, node_id=self.node_id)
+        timeout_value = int(timeout_ms if timeout_ms is not None else route.timeout_ms or self.timeout_ms)
         normalized_query = str(query or "").strip()
         normalized_candidates = _normalize_candidates(candidates)
-        topk_value = _coerce_top_k(top_k, len(normalized_candidates))
+        requested_top_k = (route.top_k if top_k is None else int(top_k))
+        topk_value = _coerce_top_k(requested_top_k, len(normalized_candidates))
 
         if not normalized_query or not normalized_candidates:
             fallback_scores = _build_fallback_scores(normalized_candidates)
-            topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_INPUT_INVALID,
                 detail="reranker input invalid: query and candidates are required",
                 latency_ms=0,
-                model_id=RERANK_MODEL_ID,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
                 query=normalized_query,
                 scores=fallback_scores,
-                topk=topk,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
+                ts_ms=now_value,
+            )
+
+        if not self.runtime_config.enabled:
+            fallback_scores = _build_fallback_scores(normalized_candidates)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=RETR_RERANK_UNAVAILABLE,
+                detail="reranker runtime disabled by config",
+                latency_ms=0,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
+                query=normalized_query,
+                scores=fallback_scores,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
                 ts_ms=now_value,
             )
 
         if not self.available:
             fallback_scores = _build_fallback_scores(normalized_candidates)
-            topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_UNAVAILABLE,
                 detail="reranker unavailable; fallback to recall order",
                 latency_ms=0,
-                model_id=RERANK_MODEL_ID,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
                 query=normalized_query,
                 scores=fallback_scores,
-                topk=topk,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
                 ts_ms=now_value,
             )
 
+        selected_provider = self.provider_registry.get(route.provider, self.provider)
         start = perf_counter()
         try:
-            scores, model_id = self.provider(normalized_query, normalized_candidates)
+            scores, model_id = selected_provider(normalized_query, normalized_candidates)
         except TimeoutError:
             latency_ms = int(round((perf_counter() - start) * 1000))
             fallback_scores = _build_fallback_scores(normalized_candidates)
-            topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_TIMEOUT,
                 detail=f"reranker timeout>{timeout_value}ms",
                 latency_ms=latency_ms,
-                model_id=RERANK_MODEL_ID,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
                 query=normalized_query,
                 scores=fallback_scores,
-                topk=topk,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
                 ts_ms=now_value,
             )
         except Exception as exc:
             latency_ms = int(round((perf_counter() - start) * 1000))
             fallback_scores = _build_fallback_scores(normalized_candidates)
-            topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_UNAVAILABLE,
                 detail=f"reranker provider unavailable: {exc}",
                 latency_ms=latency_ms,
-                model_id=RERANK_MODEL_ID,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
                 query=normalized_query,
                 scores=fallback_scores,
-                topk=topk,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
                 ts_ms=now_value,
             )
 
         latency_ms = int(round((perf_counter() - start) * 1000))
         if latency_ms > timeout_value:
             fallback_scores = _build_fallback_scores(normalized_candidates)
-            topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_TIMEOUT,
                 detail=f"reranker slow: {latency_ms}ms>{timeout_value}ms",
                 latency_ms=latency_ms,
-                model_id=str(model_id or RERANK_MODEL_ID),
+                model_id=str(model_id or route.model_id),
+                provider=route.provider,
+                route_id=route.route_id,
                 query=normalized_query,
                 scores=fallback_scores,
-                topk=topk,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
                 ts_ms=now_value,
             )
 
-        normalized_scores = _normalize_scores(scores, len(normalized_candidates))
+        normalized_scores, has_invalid_score = _normalize_scores(scores, len(normalized_candidates))
+        if has_invalid_score:
+            fallback_scores = _build_fallback_scores(normalized_candidates)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=RETR_RERANK_INPUT_INVALID,
+                detail="reranker invalid score range; fallback to recall order",
+                latency_ms=latency_ms,
+                model_id=str(model_id or route.model_id),
+                provider=route.provider,
+                route_id=route.route_id,
+                query=normalized_query,
+                scores=fallback_scores,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
+                ts_ms=now_value,
+            )
+
         topk = _build_topk(normalized_candidates, normalized_scores, topk_value)
         output = {
             "query": normalized_query,
             "scores": normalized_scores,
-            "rerank_model_id": str(model_id or RERANK_MODEL_ID),
+            "rerank_model_id": str(model_id or route.model_id),
+            "provider": route.provider,
+            "route_id": route.route_id,
+            "node_id": self.node_id,
+            "node_selector": route.node_selector,
+            "expected_top_k": topk_value,
             "latency_ms": latency_ms,
             "status": STATUS_OK,
             "stage": S_RET_RERANK,
@@ -178,6 +334,10 @@ class RerankerServiceContract:
                 "query_length": len(normalized_query),
                 "candidate_count": len(normalized_candidates),
                 "topk_count": len(topk),
+                "expected_top_k": topk_value,
+                "provider": route.provider,
+                "route_id": route.route_id,
+                "node_selector": route.node_selector,
                 "latency_ms": latency_ms,
                 "output_status": STATUS_OK,
             },
@@ -201,15 +361,24 @@ class RerankerServiceContract:
         detail: str,
         latency_ms: int,
         model_id: str,
+        provider: str,
+        route_id: str,
         query: str,
         scores: list[float],
         topk: list[dict[str, Any]],
+        expected_top_k: int,
+        node_selector: str,
         ts_ms: int,
     ) -> RerankerResult:
         output = {
             "query": query,
             "scores": list(scores),
             "rerank_model_id": str(model_id),
+            "provider": str(provider),
+            "route_id": str(route_id),
+            "node_id": self.node_id,
+            "node_selector": str(node_selector),
+            "expected_top_k": int(expected_top_k),
             "latency_ms": int(latency_ms),
             "status": STATUS_DEGRADED,
             "stage": S_RET_RERANK,
@@ -227,6 +396,10 @@ class RerankerServiceContract:
                 "query_length": len(query),
                 "candidate_count": len(scores),
                 "topk_count": len(topk),
+                "expected_top_k": int(expected_top_k),
+                "provider": str(provider),
+                "route_id": str(route_id),
+                "node_selector": str(node_selector),
                 "latency_ms": int(latency_ms),
                 "output_status": STATUS_DEGRADED,
             },
@@ -277,6 +450,97 @@ class RerankerServiceContract:
             )
 
 
+def load_reranker_runtime_config(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> RerankConfigLoadResult:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    issues: list[RerankConfigIssue] = []
+    enabled = _parse_bool(merged.get("RETR_RERANK_ENABLED"), default=True)
+    default_route = str(merged.get("RETR_RERANK_DEFAULT_ROUTE") or DEFAULT_RERANK_ROUTE).strip()
+    routes = _parse_routes(merged=merged, default_route=default_route, issues=issues)
+
+    if not default_route:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="RETR_RERANK_DEFAULT_ROUTE is required",
+                field="RETR_RERANK_DEFAULT_ROUTE",
+            )
+        )
+    if default_route and default_route not in routes:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail=f"default route not found in routes: {default_route}",
+                field="RETR_RERANK_DEFAULT_ROUTE",
+            )
+        )
+    if not routes:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="reranker routes are required",
+                field="RETR_RERANK_ROUTES_JSON",
+            )
+        )
+
+    if issues:
+        return RerankConfigLoadResult(
+            success=False,
+            stage=S_RET_RERANK_CONFIG,
+            reason_code=issues[0].reason_code,
+            config=None,
+            issues=tuple(issues),
+        )
+
+    config = RerankRuntimeConfig(
+        enabled=bool(enabled),
+        default_route=default_route,
+        routes=routes,
+    )
+    return RerankConfigLoadResult(
+        success=True,
+        stage=S_RET_RERANK_CONFIG,
+        reason_code=None,
+        config=config,
+        issues=(),
+    )
+
+
+def resolve_reranker_route(config: RerankRuntimeConfig, *, node_id: str | None) -> RerankRouteConfig:
+    if node_id is not None and str(node_id).strip():
+        node = str(node_id).strip()
+        for route_id in sorted(config.routes.keys()):
+            route = config.routes[route_id]
+            if _node_selector_match(route.node_selector, node):
+                return route
+    return config.routes[config.default_route]
+
+
+def build_reranker_dependency_status(result: RerankerResult | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(result, RerankerResult):
+        status = result.status
+        reason_code = result.reason_code
+        detail = result.detail
+    else:
+        status = str(result.get("status") or "")
+        reason_code = result.get("reason_code")
+        detail = str(result.get("detail") or "reranker degraded")
+
+    if status == STATUS_OK:
+        return {"available": True, "detail": "reranker dependency healthy"}
+    return {
+        "available": False,
+        "unavailable_kind": "dependency",
+        "detail": f"{reason_code}: {detail}",
+    }
+
+
 def _default_rerank_provider(
     query: str,
     candidates: list[dict[str, Any]],
@@ -291,8 +555,189 @@ def _default_rerank_provider(
         overlap = len(query_tokens.intersection(candidate_tokens))
         lexical_score = float(overlap) / float(denominator)
         recall_bias = _fallback_score_by_rank(idx, len(candidates)) * 0.01
-        scores.append(round(lexical_score + recall_bias, 6))
+        scores.append(round(min(1.0, lexical_score + recall_bias), 6))
     return scores, RERANK_MODEL_ID
+
+
+def _parse_routes(
+    *,
+    merged: Mapping[str, Any],
+    default_route: str,
+    issues: list[RerankConfigIssue],
+) -> dict[str, RerankRouteConfig]:
+    routes_raw = merged.get("RETR_RERANK_ROUTES_JSON")
+    if routes_raw is None or not str(routes_raw).strip():
+        fallback = {
+            default_route: {
+                "provider": str(merged.get("RETR_RERANK_PROVIDER") or DEFAULT_RERANK_PROVIDER),
+                "model_id": str(merged.get("RETR_RERANK_MODEL_ID") or RERANK_MODEL_ID),
+                "top_k": merged.get("RETR_RERANK_TOP_K", DEFAULT_RERANK_TOP_K),
+                "timeout_ms": merged.get("RETR_RERANK_TIMEOUT_MS", DEFAULT_RERANK_TIMEOUT_MS),
+                "node_selector": str(merged.get("RETR_RERANK_NODE_SELECTOR") or DEFAULT_NODE_SELECTOR),
+            }
+        }
+        return _coerce_routes(route_dict=fallback, field_name="RETR_RERANK_ROUTES_JSON", issues=issues)
+
+    try:
+        payload = json.loads(str(routes_raw))
+    except json.JSONDecodeError:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail="RETR_RERANK_ROUTES_JSON must be JSON object mapping route->config",
+                field="RETR_RERANK_ROUTES_JSON",
+            )
+        )
+        return {}
+    return _coerce_routes(route_dict=payload, field_name="RETR_RERANK_ROUTES_JSON", issues=issues)
+
+
+def _coerce_routes(
+    *,
+    route_dict: Any,
+    field_name: str,
+    issues: list[RerankConfigIssue],
+) -> dict[str, RerankRouteConfig]:
+    if not isinstance(route_dict, dict):
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name} must be JSON object mapping route->config",
+                field=field_name,
+            )
+        )
+        return {}
+
+    routes: dict[str, RerankRouteConfig] = {}
+    for raw_route_id, raw_route in route_dict.items():
+        route_id = str(raw_route_id or "").strip()
+        if not route_id:
+            issues.append(
+                RerankConfigIssue(
+                    reason_code=CONFIG_VALUE_INVALID,
+                    detail=f"{field_name} contains empty route id",
+                    field=field_name,
+                )
+            )
+            continue
+        route = _coerce_route(route_id=route_id, raw_route=raw_route, field_name=field_name, issues=issues)
+        if route is not None:
+            routes[route_id] = route
+    return routes
+
+
+def _coerce_route(
+    *,
+    route_id: str,
+    raw_route: Any,
+    field_name: str,
+    issues: list[RerankConfigIssue],
+) -> RerankRouteConfig | None:
+    if not isinstance(raw_route, Mapping):
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name}.{route_id} must be object",
+                field=f"{field_name}.{route_id}",
+            )
+        )
+        return None
+
+    provider = str(raw_route.get("provider") or "").strip()
+    model_id = str(raw_route.get("model_id") or "").strip()
+    node_selector = str(raw_route.get("node_selector") or "").strip()
+
+    top_k = _coerce_positive_int(
+        raw_value=raw_route.get("top_k"),
+        field=f"{field_name}.{route_id}.top_k",
+        issues=issues,
+    )
+    timeout_ms = _coerce_positive_int(
+        raw_value=raw_route.get("timeout_ms"),
+        field=f"{field_name}.{route_id}.timeout_ms",
+        issues=issues,
+    )
+
+    if not provider:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail=f"{field_name}.{route_id}.provider is required",
+                field=f"{field_name}.{route_id}.provider",
+            )
+        )
+    if not model_id:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail=f"{field_name}.{route_id}.model_id is required",
+                field=f"{field_name}.{route_id}.model_id",
+            )
+        )
+    if not node_selector:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail=f"{field_name}.{route_id}.node_selector is required",
+                field=f"{field_name}.{route_id}.node_selector",
+            )
+        )
+    if top_k is None or timeout_ms is None or not provider or not model_id or not node_selector:
+        return None
+
+    return RerankRouteConfig(
+        route_id=route_id,
+        provider=provider,
+        model_id=model_id,
+        top_k=top_k,
+        timeout_ms=timeout_ms,
+        node_selector=node_selector,
+    )
+
+
+def _default_runtime_config(*, timeout_ms: int) -> RerankRuntimeConfig:
+    route = RerankRouteConfig(
+        route_id=DEFAULT_RERANK_ROUTE,
+        provider=DEFAULT_RERANK_PROVIDER,
+        model_id=RERANK_MODEL_ID,
+        top_k=DEFAULT_RERANK_TOP_K,
+        timeout_ms=int(timeout_ms),
+        node_selector=DEFAULT_NODE_SELECTOR,
+    )
+    return RerankRuntimeConfig(
+        enabled=True,
+        default_route=DEFAULT_RERANK_ROUTE,
+        routes={DEFAULT_RERANK_ROUTE: route},
+    )
+
+
+def _coerce_positive_int(
+    *,
+    raw_value: Any,
+    field: str,
+    issues: list[RerankConfigIssue],
+) -> int | None:
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field} must be integer > 0",
+                field=field,
+            )
+        )
+        return None
+    if value <= 0:
+        issues.append(
+            RerankConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field} must be integer > 0",
+                field=field,
+            )
+        )
+        return None
+    return value
 
 
 def _normalize_candidates(candidates: list[dict[str, Any]] | Any) -> list[dict[str, Any]]:
@@ -315,20 +760,28 @@ def _normalize_candidates(candidates: list[dict[str, Any]] | Any) -> list[dict[s
     return normalized
 
 
-def _normalize_scores(raw_scores: list[float] | tuple[float, ...] | Any, size: int) -> list[float]:
+def _normalize_scores(raw_scores: list[float] | tuple[float, ...] | Any, size: int) -> tuple[list[float], bool]:
     defaults = [_fallback_score_by_rank(index, size) for index in range(size)]
     if not isinstance(raw_scores, (list, tuple)):
-        return defaults
+        return defaults, True
+
     normalized: list[float] = []
+    has_invalid = False
     for index in range(size):
         if index < len(raw_scores):
             try:
-                normalized.append(round(float(raw_scores[index]), 6))
+                value = float(raw_scores[index])
+                if not math.isfinite(value):
+                    raise ValueError("non-finite")
+                if value < 0.0 or value > 1.0:
+                    has_invalid = True
+                value = min(1.0, max(0.0, value))
+                normalized.append(round(value, 6))
                 continue
             except (TypeError, ValueError):
-                pass
+                has_invalid = True
         normalized.append(defaults[index])
-    return normalized
+    return normalized, has_invalid
 
 
 def _build_fallback_scores(candidates: list[dict[str, Any]]) -> list[float]:
@@ -346,7 +799,7 @@ def _coerce_top_k(value: int | None, candidate_count: int) -> int:
         return 0
     if isinstance(value, int) and value > 0:
         return min(value, candidate_count)
-    return min(5, candidate_count)
+    return min(DEFAULT_RERANK_TOP_K, candidate_count)
 
 
 def _build_topk(
@@ -385,3 +838,27 @@ def _score_to_confidence(score: float) -> float:
 
 def _tokenize(text: str) -> list[str]:
     return [token for token in re.split(r"[^\w]+", text.lower()) if token]
+
+
+def _node_selector_match(selector: str, node_id: str) -> bool:
+    tokens = [item.strip().lower() for item in str(selector).split(",") if item.strip()]
+    if not tokens:
+        return False
+    node = str(node_id).strip().lower()
+    for token in tokens:
+        if token in {"*", "all"}:
+            return True
+        if token == node:
+            return True
+    return False
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)

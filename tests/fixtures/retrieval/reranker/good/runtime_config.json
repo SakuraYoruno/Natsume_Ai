@@ -1,0 +1,7 @@
+{
+  "env": {
+    "RETR_RERANK_ENABLED": "true",
+    "RETR_RERANK_DEFAULT_ROUTE": "host_default",
+    "RETR_RERANK_ROUTES_JSON": "{\"host_default\":{\"provider\":\"heuristic\",\"model_id\":\"heuristic-rerank-v1\",\"top_k\":5,\"timeout_ms\":500,\"node_selector\":\"default,host-01\"},\"gpu_route\":{\"provider\":\"mock_cross_encoder\",\"model_id\":\"bge-reranker-large\",\"top_k\":3,\"timeout_ms\":800,\"node_selector\":\"node-gpu-01\"}}"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "request_id": "req_rerank_rt_002",
+  "node_id": "node-gpu-01",
+  "query": "natsume memory retrieval",
+  "candidates": [
+    {
+      "doc_id": "doc_001",
+      "source_ref": "source://doc/001",
+      "snippet": "Natsume memory architecture",
+      "metadata": {
+        "kind": "design"
+      }
+    },
+    {
+      "doc_id": "doc_002",
+      "source_ref": "source://doc/002",
+      "snippet": "Fallback and degrade strategy",
+      "metadata": {
+        "kind": "ops"
+      }
+    }
+  ]
+}
