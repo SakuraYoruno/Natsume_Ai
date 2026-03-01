@@ -234,6 +234,15 @@
 - 当前进展（2026-03-01）：已落地 `provider/node_id/scope/secret_ref/rotation_epoch/status` Key Profile 解析，支持 Host/Edge `*_KEY_REF` 运行时装配，scope mismatch/expired/missing secret 稳定拒绝；快照仅暴露 `*_key_ref` 且密钥值保持 `<redacted>`。
 - 覆盖状态：DONE
 
+## R-25
+- 系统级需求：LangChain/LangGraph 风格图编排收口，执行结果与失败分类可回放且不绕过治理审计
+- PRD 需求编号（FR）：FR-CORE-001, FR-CORE-004, FR-AUDIT-001
+- DevSpec 落点：DevSpec 6/8.9/10
+- DevTasks（TASK）：TASK-0051
+- 验收测试（T-xx）：T-Orch-01, T-Audit-01
+- 当前进展（2026-03-01）：已落地图编排运行时契约（配置校验 + 执行 + fallback），输出稳定封装（graph_status/reason_code/stage/replay_ref），并覆盖 missing-node/invalid-edge/timeout/dependency-down 四类失败映射与可回放 trace。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

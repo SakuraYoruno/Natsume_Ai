@@ -1,0 +1,42 @@
+{
+  "request_id": "req_orch_004",
+  "graph": {
+    "graph_id": "graph.timeout.v1",
+    "version": "v1",
+    "entry_node": "plan",
+    "node_bindings": [
+      {
+        "node_id": "plan",
+        "handler_id": "handler.plan",
+        "required": true
+      },
+      {
+        "node_id": "retrieve",
+        "handler_id": "handler.timeout",
+        "required": true
+      },
+      {
+        "node_id": "respond",
+        "handler_id": "handler.respond",
+        "required": true
+      }
+    ],
+    "edges": [
+      {
+        "from": "plan",
+        "to": "retrieve"
+      },
+      {
+        "from": "retrieve",
+        "to": "respond"
+      }
+    ],
+    "fallback_edges": [
+      {
+        "from": "retrieve",
+        "to": "respond"
+      }
+    ]
+  },
+  "expected_reason_code": "ORCH_TIMEOUT"
+}

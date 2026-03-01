@@ -27,7 +27,8 @@
 21. `bond/`: Bond fixtures for SSOT single-writer updates, summary derivation/injection (`event_id/evidence_refs` replay refs), missing-evidence rejection, and static-scan non-single-writer violations (`T-50~T-54`, `T-74~T-75`, `T-SSOT-01`).
 22. `config/`: Host/Edge layered config fixtures for cold-start defaults, invalid env/value/required-key rejection mapping, key-profile `secret_ref` resolution (missing/scope-mismatch/expired), env snapshot redaction/diff/audit replay rows, and deterministic runtime-status bridging (`T-Config-01`, `T-Config-02`, `T-Key-01`).
 23. `llm_gateway/`: gateway fixtures for sanitized egress payload, provider draft responses, format drift, and provider-unavailable degrade paths with AIRLOCK + QA enforcement.
-24. `migrations/`: SQLite/Bond migration fixtures for idempotent apply, missing catalog gap detection, schema drift, and rollback guard scenarios (`T-Migrate-01`).
-25. `ci/`: delivery gate fixtures for doc audience/title lint failures and static-scan non-single-writer violations (`T-CI-01`).
-26. `release/`: release checklist and rollback map fixtures for `M0~M3` deployable assets, checksum drift/missing asset negatives, and rollback target resolution (`T-Release-01`).
-27. `drill/`: production drill fixtures for `cold_start_no_key`, `provider_down`, and `rollback_conflict`, with deterministic scenario report fields (`scenario_id/status/reason_code_chain/replay_ref`) and failure classification/disposition (`T-Drill-01`).
+24. `orchestration/`: graph runtime fixtures for `graph_id/version/entry_node/node_bindings/edges/fallback_edges`, including missing-handler, invalid-edge, timeout fallback, and dependency-down fallback scenarios (`T-Orch-01`).
+25. `migrations/`: SQLite/Bond migration fixtures for idempotent apply, missing catalog gap detection, schema drift, and rollback guard scenarios (`T-Migrate-01`).
+26. `ci/`: delivery gate fixtures for doc audience/title lint failures and static-scan non-single-writer violations (`T-CI-01`).
+27. `release/`: release checklist and rollback map fixtures for `M0~M3` deployable assets, checksum drift/missing asset negatives, and rollback target resolution (`T-Release-01`).
+28. `drill/`: production drill fixtures for `cold_start_no_key`, `provider_down`, and `rollback_conflict`, with deterministic scenario report fields (`scenario_id/status/reason_code_chain/replay_ref`) and failure classification/disposition (`T-Drill-01`).

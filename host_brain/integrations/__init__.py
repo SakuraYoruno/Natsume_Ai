@@ -12,6 +12,16 @@ from host_brain.integrations.llm_gateway import (
     GatewayResult,
     LlmGatewayContract,
 )
+from host_brain.integrations.graph_runtime import (
+    S_ORCH_RUN,
+    S_ORCH_VALIDATE,
+    STATUS_FAILED as ORCH_STATUS_FAILED,
+    STATUS_DEGRADED as ORCH_STATUS_DEGRADED,
+    STATUS_OK as ORCH_STATUS_OK,
+    GraphRunResult,
+    GraphRuntimeContract,
+    validate_graph_config,
+)
 
 __all__ = [
     "PROVIDER_DISABLED",
@@ -24,4 +34,12 @@ __all__ = [
     "STATUS_OK",
     "GatewayResult",
     "LlmGatewayContract",
+    "S_ORCH_RUN",
+    "S_ORCH_VALIDATE",
+    "ORCH_STATUS_FAILED",
+    "ORCH_STATUS_DEGRADED",
+    "ORCH_STATUS_OK",
+    "GraphRunResult",
+    "GraphRuntimeContract",
+    "validate_graph_config",
 ]
