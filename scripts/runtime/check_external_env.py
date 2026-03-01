@@ -197,6 +197,9 @@ def build_report() -> dict[str, Any]:
         "langchain",
         "langchain_openai",
         "langgraph",
+        "sentence_transformers",
+        "transformers",
+        "torch",
     ]
     package_rows = [_module_status(name) for name in package_names]
     required_missing = [row["name"] for row in package_rows if not row["installed"]]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import json
 import os
 from time import perf_counter
@@ -33,7 +34,7 @@ DEFAULT_EMBED_DIM = 16
 DEFAULT_EMBED_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
 
-EmbeddingProvider = Callable[[str], tuple[list[float], str]]
+EmbeddingProvider = Callable[..., tuple[list[float], str]]
 
 
 @dataclass(frozen=True)
@@ -204,10 +205,26 @@ class EmbeddingServiceContract:
                 ts_ms=now_value,
             )
 
-        selected_provider = self.provider_registry.get(route.provider, self.provider)
+        selected_provider = self.provider_registry.get(route.provider)
+        if selected_provider is None:
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=RETR_EMBED_UNAVAILABLE,
+                detail=f"embedding provider not registered: {route.provider}",
+                latency_ms=0,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
+                expected_dim=route.dim,
+                vector=[],
+                text=normalized,
+                node_selector=route.node_selector,
+                ts_ms=now_value,
+            )
         start = perf_counter()
         try:
-            vector, model_id = selected_provider(normalized)
+            vector, model_id = _invoke_embedding_provider(selected_provider, normalized, route)
         except TimeoutError:
             latency_ms = int(round((perf_counter() - start) * 1000))
             return self._degrade(
@@ -512,6 +529,27 @@ def build_embedding_dependency_status(result: EmbeddingResult | Mapping[str, Any
     }
 
 
+def build_embedding_provider_registry(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+    openai_api_key: str | None = None,
+) -> dict[str, EmbeddingProvider]:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    registry: dict[str, EmbeddingProvider] = {
+        DEFAULT_EMBED_PROVIDER: lambda text, _route=None: embed_text(text),
+    }
+    embed_device = str(merged.get("RETR_EMBED_DEVICE") or "cpu").strip() or "cpu"
+    registry["sentence_transformers"] = _build_sentence_transformers_embedding_provider(device=embed_device)
+    resolved_key = str(openai_api_key or merged.get("OPENAI_API_KEY") or "").strip()
+    if resolved_key:
+        registry["openai"] = _build_openai_embedding_provider(api_key=resolved_key)
+    return registry
+
+
 def _parse_routes(
     *,
     merged: Mapping[str, Any],
@@ -721,3 +759,77 @@ def _normalize_vector(raw: list[float] | tuple[float, ...] | Any) -> list[float]
     if not isinstance(raw, (list, tuple)):
         return []
     return [float(value) for value in raw]
+
+
+def _invoke_embedding_provider(
+    provider: EmbeddingProvider,
+    text: str,
+    route: EmbeddingRouteConfig,
+) -> tuple[list[float], str]:
+    if _provider_accepts_route(provider):
+        return provider(text, route)
+    return provider(text)
+
+
+def _provider_accepts_route(provider: EmbeddingProvider) -> bool:
+    try:
+        signature = inspect.signature(provider)
+    except (TypeError, ValueError):
+        return True
+    positional = 0
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    return positional >= 2
+
+
+def _build_openai_embedding_provider(*, api_key: str) -> EmbeddingProvider:
+    key = str(api_key or "").strip()
+
+    def _provider(text: str, route: EmbeddingRouteConfig | None = None) -> tuple[list[float], str]:
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY missing for openai embedding provider")
+        model_id = str(route.model_id).strip() if route is not None else "text-embedding-3-large"
+        try:
+            from openai import OpenAI
+        except Exception as exc:  # pragma: no cover - guarded by runtime dependency check
+            raise RuntimeError(f"openai package unavailable: {exc}") from exc
+        client = OpenAI(api_key=key)
+        response = client.embeddings.create(model=model_id, input=text)
+        if not response.data:
+            raise RuntimeError("openai embeddings response has no data")
+        vector = [float(value) for value in response.data[0].embedding]
+        return vector, model_id
+
+    return _provider
+
+
+def _build_sentence_transformers_embedding_provider(*, device: str) -> EmbeddingProvider:
+    cache: dict[str, Any] = {}
+    runtime_device = str(device or "cpu").strip() or "cpu"
+
+    def _provider(text: str, route: EmbeddingRouteConfig | None = None) -> tuple[list[float], str]:
+        model_id = str(route.model_id).strip() if route is not None else "sentence-transformers/all-MiniLM-L6-v2"
+        if not model_id:
+            model_id = "sentence-transformers/all-MiniLM-L6-v2"
+        try:
+            from sentence_transformers import SentenceTransformer
+        except Exception as exc:  # pragma: no cover - guarded by runtime dependency check
+            raise RuntimeError(f"sentence-transformers package unavailable: {exc}") from exc
+
+        model = cache.get(model_id)
+        if model is None:
+            model = SentenceTransformer(model_name_or_path=model_id, device=runtime_device)
+            cache[model_id] = model
+
+        raw_vector = model.encode(text, normalize_embeddings=True)
+        if hasattr(raw_vector, "tolist"):
+            vector_values = raw_vector.tolist()
+        else:
+            vector_values = list(raw_vector)
+        vector = [float(value) for value in vector_values]
+        return vector, model_id
+
+    return _provider

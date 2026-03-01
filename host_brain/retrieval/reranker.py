@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import json
 import math
 import os
@@ -35,7 +36,7 @@ DEFAULT_RERANK_TOP_K = 5
 DEFAULT_RERANK_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
 
-RerankProvider = Callable[[str, list[dict[str, Any]]], tuple[list[float], str]]
+RerankProvider = Callable[..., tuple[list[float], str]]
 
 
 @dataclass(frozen=True)
@@ -220,10 +221,34 @@ class RerankerServiceContract:
                 ts_ms=now_value,
             )
 
-        selected_provider = self.provider_registry.get(route.provider, self.provider)
+        selected_provider = self.provider_registry.get(route.provider)
+        if selected_provider is None:
+            fallback_scores = _build_fallback_scores(normalized_candidates)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=RETR_RERANK_UNAVAILABLE,
+                detail=f"reranker provider not registered: {route.provider}",
+                latency_ms=0,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
+                query=normalized_query,
+                scores=fallback_scores,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
+                ts_ms=now_value,
+            )
         start = perf_counter()
         try:
-            scores, model_id = selected_provider(normalized_query, normalized_candidates)
+            scores, model_id = _invoke_rerank_provider(
+                selected_provider,
+                normalized_query,
+                normalized_candidates,
+                route,
+            )
         except TimeoutError:
             latency_ms = int(round((perf_counter() - start) * 1000))
             fallback_scores = _build_fallback_scores(normalized_candidates)
@@ -539,6 +564,23 @@ def build_reranker_dependency_status(result: RerankerResult | Mapping[str, Any])
         "unavailable_kind": "dependency",
         "detail": f"{reason_code}: {detail}",
     }
+
+
+def build_reranker_provider_registry(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> dict[str, RerankProvider]:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    registry: dict[str, RerankProvider] = {
+        DEFAULT_RERANK_PROVIDER: _default_rerank_provider,
+    }
+    device = str(merged.get("RETR_RERANK_DEVICE") or "cpu").strip() or "cpu"
+    registry["cross_encoder"] = _build_cross_encoder_provider(device=device)
+    return registry
 
 
 def _default_rerank_provider(
@@ -862,3 +904,64 @@ def _parse_bool(value: Any, *, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _invoke_rerank_provider(
+    provider: RerankProvider,
+    query: str,
+    candidates: list[dict[str, Any]],
+    route: RerankRouteConfig,
+) -> tuple[list[float], str]:
+    if _provider_accepts_route(provider):
+        return provider(query, candidates, route)
+    return provider(query, candidates)
+
+
+def _provider_accepts_route(provider: RerankProvider) -> bool:
+    try:
+        signature = inspect.signature(provider)
+    except (TypeError, ValueError):
+        return True
+    positional = 0
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    return positional >= 3
+
+
+def _build_cross_encoder_provider(*, device: str) -> RerankProvider:
+    cache: dict[str, Any] = {}
+    runtime_device = str(device or "cpu").strip() or "cpu"
+
+    def _provider(
+        query: str,
+        candidates: list[dict[str, Any]],
+        route: RerankRouteConfig | None = None,
+    ) -> tuple[list[float], str]:
+        model_id = str(route.model_id).strip() if route is not None else "BAAI/bge-reranker-large"
+        try:
+            from sentence_transformers import CrossEncoder
+        except Exception as exc:  # pragma: no cover - guarded by runtime dependency check
+            raise RuntimeError(f"sentence-transformers package unavailable: {exc}") from exc
+
+        model = cache.get(model_id)
+        if model is None:
+            model = CrossEncoder(model_name_or_path=model_id, device=runtime_device)
+            cache[model_id] = model
+
+        pairs = [
+            [query, str(candidate.get("snippet") or candidate.get("text") or "")]
+            for candidate in candidates
+        ]
+        raw_scores = model.predict(pairs)
+        normalized_scores = [_sigmoid(float(value)) for value in raw_scores]
+        return normalized_scores, model_id
+
+    return _provider
+
+
+def _sigmoid(value: float) -> float:
+    clipped = max(-50.0, min(50.0, float(value)))
+    return round(1.0 / (1.0 + math.exp(-clipped)), 6)

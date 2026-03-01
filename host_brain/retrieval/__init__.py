@@ -54,8 +54,10 @@ from host_brain.retrieval.recall_fusion import (
 from host_brain.retrieval.pipeline import (
     RET_OP_PIPELINE,
     S_RET_PIPELINE,
+    ChromaHttpSearchClient,
     RetrievalPipelineContract,
     RetrievalPipelineResult,
+    build_retrieval_pipeline_from_env,
 )
 
 __all__ = [
@@ -97,6 +99,8 @@ __all__ = [
     "resolve_recall_routes",
     "RetrievalPipelineContract",
     "RetrievalPipelineResult",
+    "ChromaHttpSearchClient",
+    "build_retrieval_pipeline_from_env",
     "RerankConfigIssue",
     "RerankConfigLoadResult",
     "RerankRouteConfig",
