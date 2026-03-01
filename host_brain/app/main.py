@@ -185,6 +185,7 @@ def build_env_readiness_report(
 
     graph = _normalize_graph_runtime_status(graph_runtime)
     drill_rows = _normalize_drill_summary_rows(drill_summaries)
+    orchestration_control_coverage = _build_orchestration_control_coverage(drill_rows)
     dependency_matrix = _build_dependency_matrix(
         startup_report=startup_report,
         graph_runtime=graph,
@@ -212,6 +213,7 @@ def build_env_readiness_report(
         "dependency_matrix": dependency_matrix,
         "dependency_summary": dependency_summary,
         "drill_summary": drill_rows,
+        "orchestration_control_coverage": orchestration_control_coverage,
         "startup_report": startup_report,
         "node_deployment": node_report,
         "readiness_status": readiness_status,
@@ -258,13 +260,36 @@ def _normalize_drill_summary_rows(raw_rows: list[dict[str, Any]] | None) -> list
         rows.append(
             {
                 "scenario_id": scenario_id,
+                "stage": str(raw.get("stage") or "").strip(),
                 "status": status,
                 "reason_code_chain": reason_chain,
                 "replay_ref": replay_ref,
+                "model_profile_id": (str(raw.get("model_profile_id") or "").strip() or None),
             }
         )
     rows.sort(key=lambda row: str(row["scenario_id"]))
     return rows
+
+
+def _build_orchestration_control_coverage(drill_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    required_scenarios = [
+        "drill.orch.missing_profile",
+        "drill.orch.selector_no_candidate",
+        "drill.orch.param_drift",
+        "drill.orch.approval_token_missing",
+        "drill.dependency.provider_down",
+    ]
+    scenario_ids = {str(row.get("scenario_id") or "").strip() for row in drill_rows if str(row.get("scenario_id") or "").strip()}
+    covered = [scenario for scenario in required_scenarios if scenario in scenario_ids]
+    missing = [scenario for scenario in required_scenarios if scenario not in scenario_ids]
+    status = "COVERED" if not missing else "PARTIAL"
+    return {
+        "status": status,
+        "required_total": len(required_scenarios),
+        "covered_count": len(covered),
+        "missing_scenarios": missing,
+        "scenario_total": len(scenario_ids),
+    }
 
 
 def _build_dependency_matrix(

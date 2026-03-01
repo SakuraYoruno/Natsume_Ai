@@ -1,0 +1,28 @@
+{
+  "scenario_id": "drill.orch.missing_profile",
+  "scenario_kind": "model_profile_missing",
+  "request_id": "req_drill_orch_001",
+  "graph": {
+    "graph_id": "graph.drill.missing_profile.v1",
+    "version": "v1",
+    "entry_node": "respond",
+    "model_profile_id": "missing_profile_v999",
+    "node_bindings": [
+      {
+        "node_id": "respond",
+        "task": "CHAT",
+        "required": true
+      }
+    ],
+    "edges": [],
+    "fallback_edges": []
+  },
+  "payload": {
+    "input": "hello"
+  },
+  "expected": {
+    "status": "FAILED",
+    "stage": "S_ORCH_VALIDATE",
+    "reason_code": "ORCH_NODE_MISSING"
+  }
+}

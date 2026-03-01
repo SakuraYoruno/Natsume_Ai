@@ -300,6 +300,25 @@ BOND_UPDATE_COLUMNS = (
     "ts_ms",
 )
 
+
+MODEL_CONTROL_COLUMNS = (
+    "request_id",
+    "node_id",
+    "model_node_id",
+    "model_profile_id",
+    "provider",
+    "model_id",
+    "expected_param_hash",
+    "actual_param_hash",
+    "drift_detected",
+    "approval_token_ref",
+    "evidence_ref",
+    "reason_code",
+    "status",
+    "stage",
+    "ts_ms",
+)
+
 JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "intent_log": {"normalized_json", "proposed_intent_draft_json", "lint_result"},
     "governor_log": {"rule_trace", "tokens", "snapshot_refs"},
@@ -320,6 +339,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "retrieval_event_log": {"payload"},
     "vision_event_log": {"payload"},
     "bond_update_log": {"evidence_refs", "payload"},
+    "model_control_log": set(),
 }
 
 
@@ -348,6 +368,10 @@ class SQLiteLedger:
     @property
     def skill_exec_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("skill_exec_log")
+
+    @property
+    def model_control_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("model_control_log")
 
     @property
     def error_log(self) -> list[dict[str, Any]]:
@@ -444,6 +468,10 @@ class SQLiteLedger:
         if not payload.get("event_id"):
             payload["event_id"] = f"evt_{uuid.uuid4().hex}"
         self._insert("skill_exec_log", payload)
+
+    def log_model_control(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in MODEL_CONTROL_COLUMNS}
+        self._insert("model_control_log", payload)
 
     def log_error(self, *, request_id: str | None, stage: str, reason_code: str, detail: str) -> None:
         self._insert(
@@ -659,6 +687,7 @@ class SQLiteLedger:
         intents = self._fetch_by_request("intent_log", request_id)
         governors = self._fetch_by_request("governor_log", request_id)
         skills = self._fetch_by_request("skill_exec_log", request_id)
+        model_controls = self._fetch_by_request("model_control_log", request_id)
 
         if not intents:
             return {
@@ -669,6 +698,7 @@ class SQLiteLedger:
                 "intent_log": [],
                 "governor_log": governors,
                 "skill_exec_log": skills,
+                "model_control_log": model_controls,
             }
 
         if not governors:
@@ -680,6 +710,7 @@ class SQLiteLedger:
                 "intent_log": intents,
                 "governor_log": [],
                 "skill_exec_log": skills,
+                "model_control_log": model_controls,
             }
 
         latest_governor = sorted(governors, key=lambda r: int(r.get("ts_ms") or 0))[-1]
@@ -695,6 +726,7 @@ class SQLiteLedger:
             "intent_log": intents,
             "governor_log": governors,
             "skill_exec_log": skills,
+            "model_control_log": model_controls,
         }
 
     def get_event(self, evidence_ref: str) -> dict[str, Any] | None:
@@ -762,6 +794,25 @@ class SQLiteLedger:
                     result_digest TEXT,
                     evidence_ref TEXT,
                     manifest_ref TEXT,
+                    ts_ms INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS model_control_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT,
+                    node_id TEXT,
+                    model_node_id TEXT,
+                    model_profile_id TEXT,
+                    provider TEXT,
+                    model_id TEXT,
+                    expected_param_hash TEXT,
+                    actual_param_hash TEXT,
+                    drift_detected INTEGER,
+                    approval_token_ref TEXT,
+                    evidence_ref TEXT,
+                    reason_code TEXT,
+                    status TEXT,
+                    stage TEXT,
                     ts_ms INTEGER
                 );
 
@@ -1056,6 +1107,8 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_skill_request ON skill_exec_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_skill_intent_id ON skill_exec_log(intent_id);
                 CREATE INDEX IF NOT EXISTS idx_skill_evidence_ref ON skill_exec_log(evidence_ref);
+                CREATE INDEX IF NOT EXISTS idx_model_control_request ON model_control_log(request_id);
+                CREATE INDEX IF NOT EXISTS idx_model_control_profile ON model_control_log(model_profile_id);
                 CREATE INDEX IF NOT EXISTS idx_canon_proposal_target ON canon_proposal_log(canon_kind, target_id);
                 CREATE INDEX IF NOT EXISTS idx_canon_change_target ON canon_change_log(canon_kind, target_id);
                 CREATE INDEX IF NOT EXISTS idx_memory_ops_memory_id ON memory_ops_log(memory_id);
