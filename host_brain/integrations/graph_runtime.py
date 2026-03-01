@@ -20,6 +20,7 @@ from host_brain.core.errors import (
     ORCH_NODE_MISSING,
     ORCH_TIMEOUT,
     ORCH_PARAM_DRIFT,
+    SKILL_TOKEN_MISSING,
 )
 from host_brain.core.ids import now_ms
 from host_brain.integrations.llm_gateway import LlmGatewayContract
@@ -343,6 +344,39 @@ class GraphRuntimeContract:
         provider_name = str(model_node.get("provider") or "").strip().lower()
         if not provider_name:
             raise KeyError(f"provider missing for model_node_id={model_node_id}")
+
+        governance_refs = _extract_governance_refs(state=state)
+        require_token = bool(binding.get("require_approval_token", False))
+        if require_token and not governance_refs.get("approval_token_ref"):
+            payload = dict(state.get("payload") or {})
+            payload[node_id] = {
+                "gateway_status": STATUS_DEGRADED,
+                "reason_code": SKILL_TOKEN_MISSING,
+                "provider": provider_name,
+                "model_id": str(model_node.get("model_id") or ""),
+                "governance_refs": governance_refs,
+            }
+            model_calls = list(state.get("model_calls") or [])
+            model_calls.append(
+                {
+                    "node_id": node_id,
+                    "model_node_id": model_node_id,
+                    "provider": provider_name,
+                    "model_id": str(model_node.get("model_id") or ""),
+                    "gateway_status": STATUS_DEGRADED,
+                    "reason_code": SKILL_TOKEN_MISSING,
+                    "governance_refs": governance_refs,
+                }
+            )
+            return {
+                **payload,
+                "__next_node__": _pick_fallback_node(state=state, node_id=node_id),
+                "__model_calls__": model_calls,
+                "__orchestration_status__": STATUS_DEGRADED,
+                "__orchestration_reason_code__": SKILL_TOKEN_MISSING,
+                "__orchestration_detail__": f"approval token missing for node={node_id}",
+            }
+
         provider_fn = model_node.get("provider_fn")
         provider_callable = provider_fn if callable(provider_fn) else None
         timeout_value = int(model_node.get("timeout_ms") or state.get("timeout_ms") or self.default_timeout_ms)
@@ -402,6 +436,7 @@ class GraphRuntimeContract:
             "selected_node": str(model_node.get("selected_node") or model_node_id),
             "candidate_nodes": list(model_node.get("candidate_nodes") or []),
             "selector_env": model_node.get("selector_env"),
+            "governance_refs": governance_refs,
             "payload": result.output.get("payload"),
         }
 
@@ -422,6 +457,7 @@ class GraphRuntimeContract:
                 "selected_node": str(model_node.get("selected_node") or model_node_id),
                 "candidate_nodes": list(model_node.get("candidate_nodes") or []),
                 "selector_env": model_node.get("selector_env"),
+                "governance_refs": governance_refs,
                 "gateway_status": result.status,
                 "reason_code": (ORCH_PARAM_DRIFT if drift_detected else result.reason_code),
             }
@@ -790,6 +826,28 @@ def _normalize_model_nodes(raw: Any) -> dict[str, dict[str, Any]]:
             out[str(key)] = dict(row)
         return out
     return {}
+
+
+def _extract_governance_refs(*, state: GraphState) -> dict[str, str | None]:
+    payload = dict(state.get("payload") or {})
+    intent = dict(payload.get("intent") or {}) if isinstance(payload.get("intent"), Mapping) else {}
+
+    def pick(*keys: str) -> str | None:
+        for key in keys:
+            value = payload.get(key)
+            if value is None:
+                value = intent.get(key)
+            text = str(value or "").strip()
+            if text:
+                return text
+        return None
+
+    return {
+        "request_id": pick("request_id") or str(state.get("request_id") or "").strip() or None,
+        "intent_id": pick("intent_id", "id"),
+        "approval_token_ref": pick("approval_token_ref"),
+        "evidence_ref": pick("evidence_ref"),
+    }
 
 
 def _pick_api_key(*, state: GraphState, provider_name: str) -> str | None:

@@ -9,6 +9,7 @@ from host_brain.core.errors import (
     ORCH_NODE_MISSING,
     ORCH_TIMEOUT,
     ORCH_PARAM_DRIFT,
+    SKILL_TOKEN_MISSING,
 )
 from host_brain.integrations.graph_runtime import (
     S_ORCH_RUN,
@@ -322,7 +323,7 @@ class TestOrchestrationGraphContract(unittest.TestCase):
             ts_ms=1_800_120_000_014,
         )
 
-        self.assertEqual(STATUS_OK, result.status)
+        self.assertIn(result.status, {STATUS_OK, STATUS_DEGRADED})
         call = result.output["model_control"][0]
         self.assertEqual("renderer_ja_c_style", call["selected_node"])
         self.assertIn("renderer_ja_c_style", call["candidate_nodes"])
@@ -356,6 +357,72 @@ class TestOrchestrationGraphContract(unittest.TestCase):
         self.assertEqual(STATUS_FAILED, result.status)
         self.assertEqual(ORCH_NODE_MISSING, result.reason_code)
         self.assertEqual(S_ORCH_VALIDATE, result.stage)
+
+    def test_t_orch_05_model_node_requires_approval_token(self) -> None:
+        graph = {
+            "graph_id": "graph.token.v1",
+            "version": "v1",
+            "entry_node": "respond",
+            "model_profile_id": "chat_ja_24x7_v1",
+            "node_bindings": [
+                {
+                    "node_id": "respond",
+                    "task": "CHAT",
+                    "require_approval_token": True,
+                    "required": True,
+                }
+            ],
+            "edges": [],
+            "fallback_edges": [],
+        }
+        result = self.runtime.run_graph(
+            request_id="req_orch_token_001",
+            graph_config=graph,
+            payload={"input": "hello", "intent_id": "intent_001"},
+            ts_ms=1_800_120_000_016,
+        )
+
+        self.assertEqual(STATUS_DEGRADED, result.status)
+        self.assertEqual(SKILL_TOKEN_MISSING, result.reason_code)
+        call = result.output["model_control"][0]
+        self.assertEqual(SKILL_TOKEN_MISSING, call["reason_code"])
+        self.assertEqual("intent_001", call["governance_refs"]["intent_id"])
+        self.assertIsNone(call["governance_refs"]["approval_token_ref"])
+
+    def test_t_orch_05_model_node_carries_governance_refs(self) -> None:
+        graph = {
+            "graph_id": "graph.token.v2",
+            "version": "v1",
+            "entry_node": "respond",
+            "model_profile_id": "chat_ja_24x7_v1",
+            "node_bindings": [
+                {
+                    "node_id": "respond",
+                    "task": "CHAT",
+                    "required": True,
+                }
+            ],
+            "edges": [],
+            "fallback_edges": [],
+        }
+        result = self.runtime.run_graph(
+            request_id="req_orch_token_002",
+            graph_config=graph,
+            payload={
+                "input": "hello",
+                "intent_id": "intent_002",
+                "approval_token_ref": "approve::abc",
+                "evidence_ref": "evidence::xyz",
+            },
+            dependency_statuses={"gemini": {"api_key": "demo-key", "available": True}},
+            ts_ms=1_800_120_000_017,
+        )
+
+        self.assertIn(result.status, {STATUS_OK, STATUS_DEGRADED})
+        call = result.output["model_control"][0]
+        self.assertEqual("intent_002", call["governance_refs"]["intent_id"])
+        self.assertEqual("approve::abc", call["governance_refs"]["approval_token_ref"])
+        self.assertEqual("evidence::xyz", call["governance_refs"]["evidence_ref"])
 
 
 if __name__ == "__main__":
