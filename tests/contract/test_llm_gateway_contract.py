@@ -11,6 +11,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.qa import REASON_FORMAT_DRIFT, find_forbidden_keys
 from host_brain.integrations.llm_gateway import (
+    PROVIDER_DEEPSEEK,
     S_LLM_GATEWAY_EGRESS,
     S_LLM_GATEWAY_PROVIDER,
     S_LLM_GATEWAY_QA,
@@ -95,6 +96,40 @@ class TestLlmGatewayContract(unittest.TestCase):
         self.assertEqual(STATUS_DEGRADED, result.status)
         self.assertEqual(S_LLM_GATEWAY_PROVIDER, result.stage)
         self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.reason_code)
+        self.assertTrue(result.output["draft_only"])
+        self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.output["reason_code"])
+        self.assertTrue(
+            any(
+                row["stage"] == S_LLM_GATEWAY_PROVIDER
+                and row["reason_code"] == SERVICE_UNAVAILABLE_COLD_START
+                for row in ledger.error_log
+            ),
+            msg=ledger.error_log,
+        )
+        ledger.close()
+
+    def test_gateway_provider_unavailable_deepseek_cold_start_degrades(self) -> None:
+        prompt = _load_json(FIXTURES / "good" / "prompt_payload.json")
+        ledger = SQLiteLedger(db_path=":memory:")
+
+        gateway = LlmGatewayContract(
+            ledger=ledger,
+            provider_name=PROVIDER_DEEPSEEK,
+            api_key=None,
+            available=True,
+        )
+        result = gateway.generate(
+            request_id="req_llm_gateway_005",
+            model_profile_id="mp.deepseek.v1",
+            prompt_payload=prompt,
+            ts_ms=1_800_030_000_004,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(STATUS_DEGRADED, result.status)
+        self.assertEqual(S_LLM_GATEWAY_PROVIDER, result.stage)
+        self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.reason_code)
+        self.assertEqual("deepseek", result.output["provider"])
         self.assertTrue(result.output["draft_only"])
         self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.output["reason_code"])
         self.assertTrue(

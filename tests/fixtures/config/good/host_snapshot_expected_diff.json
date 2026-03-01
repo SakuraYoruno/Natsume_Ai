@@ -3,6 +3,8 @@
     "cold_start_allowed",
     "enable_retrieval",
     "env",
+    "llm_api_key",
+    "llm_api_key_set",
     "openai_api_key",
     "openai_api_key_set"
   ]

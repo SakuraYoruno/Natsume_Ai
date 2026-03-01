@@ -1,6 +1,7 @@
 """Integrations package exports."""
 
 from host_brain.integrations.llm_gateway import (
+    PROVIDER_DEEPSEEK,
     PROVIDER_DISABLED,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
@@ -24,6 +25,7 @@ from host_brain.integrations.graph_runtime import (
 )
 
 __all__ = [
+    "PROVIDER_DEEPSEEK",
     "PROVIDER_DISABLED",
     "PROVIDER_MOCK",
     "PROVIDER_OPENAI",

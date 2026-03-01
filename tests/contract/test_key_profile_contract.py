@@ -141,6 +141,59 @@ class TestKeyProfileContract(unittest.TestCase):
             statuses["host.integrations.llm_gateway"]["unavailable_kind"],
         )
 
+    def test_t_key_01_deepseek_key_ref_is_resolved_for_node_09(self) -> None:
+        runtime = {
+            "current_epoch": 20260301,
+            "host_node_id": "natsu-node-09",
+            "profiles": [
+                {
+                    "provider": "deepseek",
+                    "node_id": "natsu-node-09",
+                    "scope": "host.llm",
+                    "secret_ref": "sec://deepseek/natsu-node-09",
+                    "rotation_epoch": 20270101,
+                    "status": "active",
+                }
+            ],
+            "secret_store": {
+                "sec://deepseek/natsu-node-09": "sk-deepseek-demo-value",
+            },
+        }
+        env = {
+            "NATSUME_ENV": "prod",
+            "HOST_LLM_PROVIDER": "deepseek",
+            "HOST_COLD_START_ALLOWED": "false",
+            "DEEPSEEK_API_KEY_REF": "sec://deepseek/natsu-node-09",
+        }
+        result = load_host_config(
+            env=env,
+            key_profiles=runtime["profiles"],
+            secret_store=runtime["secret_store"],
+            node_id=runtime["host_node_id"],
+            current_epoch=runtime["current_epoch"],
+        )
+        self.assertTrue(result.success, msg=result.as_dict())
+        assert result.config is not None
+        self.assertEqual("deepseek", result.config.llm_provider)
+        self.assertTrue(result.config.deepseek_api_key)
+        self.assertEqual("sec://deepseek/natsu-node-09", result.config.deepseek_api_key_ref)
+        self.assertTrue(result.config.llm_api_key)
+        self.assertEqual("sec://deepseek/natsu-node-09", result.config.llm_api_key_ref)
+        self.assertEqual("resolved", result.config.key_profile_status)
+
+        snapshot = export_host_config_snapshot(
+            env=env,
+            key_profiles=runtime["profiles"],
+            secret_store=runtime["secret_store"],
+            node_id=runtime["host_node_id"],
+            current_epoch=runtime["current_epoch"],
+        )
+        self.assertTrue(snapshot.success, msg=snapshot.as_dict())
+        assert snapshot.snapshot is not None
+        self.assertEqual("<redacted>", snapshot.snapshot["values"]["deepseek_api_key"])
+        self.assertEqual("<redacted>", snapshot.snapshot["values"]["llm_api_key"])
+        self.assertIn("DEEPSEEK_API_KEY", snapshot.snapshot["redacted_keys"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,7 @@ STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 
 PROVIDER_OPENAI = "openai"
+PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_MOCK = "mock"
 PROVIDER_DISABLED = "disabled"
 
@@ -198,8 +199,9 @@ class LlmGatewayContract:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
         if self.provider_name == PROVIDER_DISABLED:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
-        if self.provider_name == PROVIDER_OPENAI and not self.api_key:
-            return False, SERVICE_UNAVAILABLE_COLD_START, "OPENAI_API_KEY missing"
+        if self.provider_name in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK} and not self.api_key:
+            missing_key = "OPENAI_API_KEY" if self.provider_name == PROVIDER_OPENAI else "DEEPSEEK_API_KEY"
+            return False, SERVICE_UNAVAILABLE_COLD_START, f"{missing_key} missing"
         return True, "", ""
 
     def _degrade(
@@ -291,4 +293,3 @@ def _default_mock_provider(_payload: dict[str, Any]) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
-
