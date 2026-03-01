@@ -1,0 +1,13 @@
+{
+  "scenario_id": "drill.cold_start.no_key",
+  "scenario_kind": "cold_start_no_key",
+  "request_id": "req_drill_001",
+  "model_profile_id": "mp.openai.v1",
+  "prompt_payload_ref": "tests/fixtures/llm_gateway/good/prompt_payload.json",
+  "available": true,
+  "expected": {
+    "status": "DEGRADED",
+    "stage": "S_LLM_GATEWAY_PROVIDER",
+    "reason_code": "SERVICE_UNAVAILABLE_COLD_START"
+  }
+}

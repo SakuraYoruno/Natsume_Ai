@@ -42,6 +42,9 @@
 - T-70：故障降级仍输出合法 JSON。
 - T-71：超时降级仍输出合法 JSON。
 
+## T-Drill
+- T-Drill-01：生产演练包必须对 `cold_start_no_key/provider_down/rollback_conflict` 输出可解析单 JSON 结果，并稳定包含 `scenario_id/status/reason_code_chain/replay_ref` 与故障分类处置口径。
+
 ## T-Canon
 - T-Canon-01：Style Canon 版本化写入并记录 proposal/change（含前后 version/hash）。
 - T-Canon-02：Style Canon 仅注入 style_pack 且禁止执行事实宣告。

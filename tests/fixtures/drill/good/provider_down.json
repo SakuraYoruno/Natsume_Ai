@@ -1,0 +1,13 @@
+{
+  "scenario_id": "drill.dependency.provider_down",
+  "scenario_kind": "provider_down",
+  "request_id": "req_drill_002",
+  "model_profile_id": "mp.mock.v1",
+  "provider_name": "mock",
+  "prompt_payload_ref": "tests/fixtures/llm_gateway/good/prompt_payload.json",
+  "expected": {
+    "status": "DEGRADED",
+    "stage": "S_LLM_GATEWAY_PROVIDER",
+    "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY"
+  }
+}

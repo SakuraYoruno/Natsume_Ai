@@ -207,6 +207,15 @@
 - 当前进展（2026-03-01）：TASK-0033/TASK-0034 已完成，并通过 T-VisionGate-01/T-Vision-01/T-Vision-02 契约回归。
 - 覆盖状态：DONE
 
+## R-22
+- 系统级需求：生产演练包覆盖冷启动/依赖不可用/回滚冲突，故障态输出与审计链保持可回放和可统计
+- PRD 需求编号（FR）：FR-CORE-004, FR-AUDIT-001, FR-OBS-001
+- DevSpec 落点：DevSpec 1.2.1/10/14.5
+- DevTasks（TASK）：TASK-0048
+- 验收测试（T-xx）：T-67~T-71, T-Drill-01
+- 当前进展（2026-03-01）：已落地三类演练场景（NoKey/provider down/rollback conflict）与统一演练报告结构（scenario_id/status/reason_code_chain/replay_ref）；故障分类与处置口径已固化，回放链路可由 request_id 稳定复盘。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：
