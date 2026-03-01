@@ -1,8 +1,8 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.3
-日期：2026-02-28
+版本：v1.4
+日期：2026-03-01
 
 本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
@@ -432,3 +432,112 @@ TASK-XXXX 标题
   - requirements_trace 中 R-01/R-02/R-03/R-04/R-08/R-11/R-12 至少达到 TEST_READY（目标 DONE）。
 - 涉及文件路径：tests/e2e/；tests/contract/；tests/fixtures/；host_brain/governor/；host_brain/skills/；host_brain/audit/；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：FR-CORE-001~004；FR-INTENT-001~003；FR-GOV-001~003；FR-TOKEN-001~003；FR-AUDIT-001；T-14~T-22；T-34~T-38；T-Audit-01；T-67~T-71。
+
+---
+
+## 4. 增量任务清单（交付与运维收口）
+
+### TASK-0042 启动编排收口：Host/Edge 服务启动清单 + 依赖探针
+- 任务描述：把 Host/Edge 的启动入口收口为可观测编排，启动时输出统一服务状态快照并标注不可用原因。
+- 输入：DevSpec 2/10/13；PRD FR-CORE-004、FR-OBS-001。
+- 输出：
+  - 统一启动清单结构（service_id/owner/required/status/reason_code/stage）；
+  - 启动阶段健康快照输出（可序列化 JSON）；
+  - 服务不可用时的稳定降级映射与审计写入点；
+  - fixtures：启动时依赖缺失/端口冲突/配置缺失样例。
+- 验收标准：
+  - 启动阶段健康快照结构稳定且可解析；
+  - 同类启动失败在同版本下 reason_code/stage 稳定；
+  - 回归覆盖 `T-Svc-01` 与（新增）`T-Boot-01`。
+- 涉及文件路径：host_brain/app/main.py；host_brain/core/services.py；edge_client/rpc/health.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Svc-01；（新增）T-Boot-01。
+
+### TASK-0043 迁移执行器收口：SQLite/Bond Schema Version Guard + 幂等迁移
+- 任务描述：落地统一迁移执行器与 schema 版本守卫，确保数据库升级/回退有确定性审计口径。
+- 输入：DevSpec 8.1/8.2/14.2；PRD FR-AUDIT-001、FR-BOND-001、NFR-MAINT-001。
+- 输出：
+  - SQLite 与 Bond 迁移执行入口（幂等执行、版本检查）；
+  - 迁移执行审计结构（migration_id/status/reason_code/latency_ms）；
+  - schema 漂移检测失败的稳定拒绝码映射；
+  - fixtures：重复迁移、缺迁移、版本倒退样例。
+- 验收标准：
+  - 重复执行迁移不产生重复副作用；
+  - schema 漂移可被稳定检测并可审计；
+  - 回归覆盖 `T-Audit-01`、`T-SSOT-01` 与（新增）`T-Migrate-01`。
+- 涉及文件路径：host_brain/audit/migrations/；host_brain/bond/migrations/；host_brain/audit/sqlite_ledger.py；tools/static_scan/；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001；FR-BOND-001；NFR-MAINT-001；T-Audit-01；T-SSOT-01；（新增）T-Migrate-01。
+
+### TASK-0044 回放工具链收口：request_id 单键回放报告
+- 任务描述：补齐回放工具链，支持基于 request_id 生成单次执行链路报告并输出缺链原因。
+- 输入：DevSpec 8.1/14.6；PRD FR-AUDIT-001~003。
+- 输出：
+  - 回放报告结构（intent/governor/skill_exec/error/qa_violation 聚合）；
+  - 缺链检测与缺失原因枚举；
+  - 回放输出的稳定摘要字段（status/reason_code_chain/evidence_refs）；
+  - fixtures：完整链、缺 skill_exec、缺 token_ref 样例。
+- 验收标准：
+  - 给定 request_id 可生成稳定结构报告；
+  - 缺链时必须可解释并带稳定 reason_code；
+  - 回归覆盖 `T-Audit-03` 与（新增）`T-Replay-01`。
+- 涉及文件路径：tools/replay/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001~003；T-Audit-03；（新增）T-Replay-01。
+
+### TASK-0045 交付门禁收口：contract/e2e/static-scan/doc-audience 四合一 CI
+- 任务描述：建立统一交付门禁，将契约测试、e2e、静态扫描与文档受众门禁纳入同一回归入口。
+- 输入：DevSpec 11/14.6；AGENTS 2.4；PRD NFR-MAINT-001。
+- 输出：
+  - CI 门禁分组与失败分类口径（contract/e2e/static_scan/doc_gate）；
+  - 文档受众门禁与标题门禁的自动校验；
+  - 失败报告结构（job_id/check_id/reason_code/failed_artifact）；
+  - fixtures：文档门禁失败、静态扫描失败样例。
+- 验收标准：
+  - 四类门禁均可独立失败并给出可解释报告；
+  - 同类门禁失败在同版本下输出结构稳定；
+  - 回归覆盖（新增）`T-CI-01`。
+- 涉及文件路径：.github/workflows/；tools/doc_lint/；tools/static_scan/；docs/40_agents/AGENTS.md；tests/contract/；tests/fixtures/。
+- 关联需求/测试：NFR-MAINT-001；（新增）T-CI-01。
+
+### TASK-0046 环境快照冻结：dev/test/prod 配置导出与审计追踪
+- 任务描述：为 dev/test/prod 生成脱敏配置快照并写入审计引用，保证环境差异可追溯且不泄露 secrets。
+- 输入：DevSpec 13.1~13.4；PRD FR-CORE-004、FR-OBS-001。
+- 输出：
+  - 环境快照结构（env/version/digest/override_sources/redacted_keys）；
+  - 配置快照写入与读取接口；
+  - 快照比对输出（added/removed/changed keys）；
+  - fixtures：跨环境差异与敏感键脱敏样例。
+- 验收标准：
+  - 任一环境可生成脱敏快照且 digest 稳定；
+  - 快照比对结果可审计并可回放；
+  - 回归覆盖 `T-Config-01` 与（新增）`T-Config-02`。
+- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Config-01；（新增）T-Config-02。
+
+### TASK-0047 发布清单收口：M0~M3 可部署资产与回滚映射
+- 任务描述：沉淀 M0~M3 的发布资产清单与回滚映射，确保每次发布都有可核对的最小交付面。
+- 输入：DevSpec 10/14.1；PRD FR-OBS-001、NFR-MAINT-001。
+- 输出：
+  - 发布清单结构（milestone/assets/checksums/required_services）；
+  - 回滚映射结构（release_id/rollback_target/impact_scope）；
+  - 与 Flow 指针和配置快照的交叉校验规则；
+  - fixtures：缺资产、checksum 漂移、回滚目标不存在样例。
+- 验收标准：
+  - M0~M3 每个里程碑均可生成一致的发布清单；
+  - 回滚映射可定位受影响范围并可审计；
+  - 回归覆盖（新增）`T-Release-01` 与 `T-Flow-02`。
+- 涉及文件路径：docs/50_project/；docs/60_trace/flows/index.md；flows/active.pointer；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-OBS-001；NFR-MAINT-001；T-Flow-02；（新增）T-Release-01。
+
+### TASK-0048 生产演练收口：冷启动/依赖不可用/回滚三场景演练包
+- 任务描述：建立三类故障演练包（冷启动、依赖不可用、回滚），验证降级输出与审计链在故障态仍稳定可回放。
+- 输入：DevSpec 1.2.1/10/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-OBS-001。
+- 输出：
+  - 演练场景定义与输入样例；
+  - 演练报告结构（scenario_id/status/reason_code_chain/replay_ref）；
+  - 演练失败分类与处置口径（不含操作命令）；
+  - fixtures：NoKey、provider down、回滚冲突样例。
+- 验收标准：
+  - 三类演练均输出可解析单 JSON 结果；
+  - 故障态下 reason_code/stage 稳定且可统计；
+  - 回归覆盖 `T-67~T-71` 与（新增）`T-Drill-01`。
+- 涉及文件路径：tests/e2e/；tests/fixtures/；tools/replay/；host_brain/audit/；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-OBS-001；T-67~T-71；（新增）T-Drill-01。
