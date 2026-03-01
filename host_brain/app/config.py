@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.config_snapshot import (
+    build_config_snapshot,
+    collect_redacted_keys,
+    redact_secret,
+    resolve_override_sources,
+    S_CONFIG_SNAPSHOT,
+)
 from host_brain.core.errors import (
     CONFIG_ENV_INVALID,
     CONFIG_REQUIRED_MISSING,
@@ -21,6 +28,21 @@ ALLOWED_ENVS = {ENV_DEV, ENV_TEST, ENV_PROD}
 ALLOWED_LLM_PROVIDERS = {"openai", "mock", "disabled"}
 
 S_HOST_CONFIG = "S_HOST_CONFIG"
+HOST_SNAPSHOT_COMPONENT = "host"
+
+HOST_FIELD_TO_ENV_KEY = {
+    "env": "NATSUME_ENV",
+    "llm_provider": "HOST_LLM_PROVIDER",
+    "openai_api_key_set": "OPENAI_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+    "llm_timeout_ms": "HOST_LLM_TIMEOUT_MS",
+    "llm_max_retries": "HOST_LLM_MAX_RETRIES",
+    "cold_start_allowed": "HOST_COLD_START_ALLOWED",
+    "enable_retrieval": "HOST_ENABLE_RETRIEVAL",
+    "enable_vision": "HOST_ENABLE_VISION",
+    "enable_edge_rpc": "HOST_ENABLE_EDGE_RPC",
+}
+HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY"}
 
 
 @dataclass(frozen=True)
@@ -70,6 +92,31 @@ class HostConfigLoadResult:
             "stage": self.stage,
             "reason_code": self.reason_code,
             "config": self.config.as_dict() if self.config is not None else None,
+            "issues": [
+                {
+                    "reason_code": issue.reason_code,
+                    "detail": issue.detail,
+                    "field": issue.field,
+                }
+                for issue in self.issues
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class ConfigSnapshotExportResult:
+    success: bool
+    stage: str
+    reason_code: str | None
+    snapshot: dict[str, Any] | None
+    issues: tuple[ConfigIssue, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "snapshot": dict(self.snapshot) if self.snapshot is not None else None,
             "issues": [
                 {
                     "reason_code": issue.reason_code,
@@ -181,6 +228,52 @@ def load_host_config(
     )
 
 
+def export_host_config_snapshot(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> ConfigSnapshotExportResult:
+    env_layer = dict(env or os.environ)
+    overrides = dict(local_overrides or {})
+
+    load_result = load_host_config(env=env_layer, local_overrides=overrides)
+    if not load_result.success or load_result.config is None:
+        return ConfigSnapshotExportResult(
+            success=False,
+            stage=S_CONFIG_SNAPSHOT,
+            reason_code=load_result.reason_code,
+            snapshot=None,
+            issues=load_result.issues,
+        )
+
+    config = load_result.config
+    values = config.as_dict()
+    values["openai_api_key"] = redact_secret(config.openai_api_key)
+
+    snapshot = build_config_snapshot(
+        component=HOST_SNAPSHOT_COMPONENT,
+        env=config.env,
+        values=values,
+        override_sources=resolve_override_sources(
+            field_to_env_key=HOST_FIELD_TO_ENV_KEY,
+            env_layer=env_layer,
+            local_overrides=overrides,
+        ),
+        redacted_keys=collect_redacted_keys(
+            secret_env_keys=HOST_SECRET_ENV_KEYS,
+            env_layer=env_layer,
+            local_overrides=overrides,
+        ),
+    )
+    return ConfigSnapshotExportResult(
+        success=True,
+        stage=S_CONFIG_SNAPSHOT,
+        reason_code=None,
+        snapshot=snapshot,
+        issues=(),
+    )
+
+
 def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]:
     statuses: dict[str, dict[str, Any]] = {}
 
@@ -288,4 +381,3 @@ def _parse_int(
         )
         return int(default)
     return parsed
-

@@ -225,6 +225,23 @@ MIGRATION_COLUMNS = (
     "ts_ms",
 )
 
+CONFIG_SNAPSHOT_COLUMNS = (
+    "request_id",
+    "component",
+    "env",
+    "version",
+    "digest",
+    "override_sources",
+    "redacted_keys",
+    "snapshot_json",
+    "diff_json",
+    "status",
+    "reason_code",
+    "stage",
+    "detail",
+    "ts_ms",
+)
+
 VOICE_EVENT_COLUMNS = (
     "request_id",
     "session_id",
@@ -298,6 +315,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "clawd_action_log": set(),
     "service_health_log": set(),
     "migration_log": set(),
+    "config_snapshot_log": {"override_sources", "redacted_keys", "snapshot_json", "diff_json"},
     "voice_event_log": {"payload"},
     "retrieval_event_log": {"payload"},
     "vision_event_log": {"payload"},
@@ -386,6 +404,10 @@ class SQLiteLedger:
     @property
     def migration_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("migration_log")
+
+    @property
+    def config_snapshot_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("config_snapshot_log")
 
     @property
     def voice_event_log(self) -> list[dict[str, Any]]:
@@ -526,6 +548,10 @@ class SQLiteLedger:
     def log_migration(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in MIGRATION_COLUMNS}
         self._insert("migration_log", payload)
+
+    def log_config_snapshot(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in CONFIG_SNAPSHOT_COLUMNS}
+        self._insert("config_snapshot_log", payload)
 
     def log_voice_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in VOICE_EVENT_COLUMNS}
@@ -929,6 +955,24 @@ class SQLiteLedger:
                     ts_ms INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS config_snapshot_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT,
+                    component TEXT,
+                    env TEXT,
+                    version TEXT,
+                    digest TEXT,
+                    override_sources TEXT,
+                    redacted_keys TEXT,
+                    snapshot_json TEXT,
+                    diff_json TEXT,
+                    status TEXT,
+                    reason_code TEXT,
+                    stage TEXT,
+                    detail TEXT,
+                    ts_ms INTEGER
+                );
+
                 CREATE TABLE IF NOT EXISTS voice_event_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_id TEXT,
@@ -1039,6 +1083,10 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_migration_scope ON migration_log(scope);
                 CREATE INDEX IF NOT EXISTS idx_migration_id ON migration_log(migration_id);
                 CREATE INDEX IF NOT EXISTS idx_migration_ts ON migration_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_config_snapshot_request ON config_snapshot_log(request_id);
+                CREATE INDEX IF NOT EXISTS idx_config_snapshot_component ON config_snapshot_log(component, env);
+                CREATE INDEX IF NOT EXISTS idx_config_snapshot_digest ON config_snapshot_log(digest);
+                CREATE INDEX IF NOT EXISTS idx_config_snapshot_ts ON config_snapshot_log(ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_request ON voice_event_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_session ON voice_event_log(session_id);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_type ON voice_event_log(event_type);

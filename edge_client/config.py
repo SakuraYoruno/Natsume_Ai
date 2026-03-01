@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.core.config_snapshot import (
+    build_config_snapshot,
+    collect_redacted_keys,
+    redact_secret,
+    resolve_override_sources,
+    S_CONFIG_SNAPSHOT,
+)
 from host_brain.core.errors import (
     CONFIG_ENV_INVALID,
     CONFIG_REQUIRED_MISSING,
@@ -19,6 +26,25 @@ ENV_PROD = "prod"
 ALLOWED_ENVS = {ENV_DEV, ENV_TEST, ENV_PROD}
 
 S_EDGE_CONFIG = "S_EDGE_CONFIG"
+EDGE_SNAPSHOT_COMPONENT = "edge"
+
+EDGE_FIELD_TO_ENV_KEY = {
+    "env": "NATSUME_ENV",
+    "rpc_host": "EDGE_RPC_HOST",
+    "rpc_port": "EDGE_RPC_PORT",
+    "hmac_shared_key_set": "EDGE_HMAC_SHARED_KEY",
+    "hmac_shared_key": "EDGE_HMAC_SHARED_KEY",
+    "allow_insecure_auth": "EDGE_ALLOW_INSECURE_AUTH",
+    "rpc_gateway_enabled": "EDGE_RPC_GATEWAY_ENABLED",
+    "asr_enabled": "EDGE_ASR_ENABLED",
+    "tts_enabled": "EDGE_TTS_ENABLED",
+    "barge_in_enabled": "EDGE_BARGE_IN_ENABLED",
+    "fallback_llm_enabled": "EDGE_FALLBACK_LLM_ENABLED",
+    "resource_gate_enabled": "EDGE_RESOURCE_GATE_ENABLED",
+    "max_vram_mb": "EDGE_MAX_VRAM_MB",
+    "max_queue_length": "EDGE_MAX_QUEUE_LENGTH",
+}
+EDGE_SECRET_ENV_KEYS = {"EDGE_HMAC_SHARED_KEY"}
 
 
 @dataclass(frozen=True)
@@ -76,6 +102,31 @@ class EdgeConfigLoadResult:
             "stage": self.stage,
             "reason_code": self.reason_code,
             "config": self.config.as_dict() if self.config is not None else None,
+            "issues": [
+                {
+                    "reason_code": issue.reason_code,
+                    "detail": issue.detail,
+                    "field": issue.field,
+                }
+                for issue in self.issues
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class ConfigSnapshotExportResult:
+    success: bool
+    stage: str
+    reason_code: str | None
+    snapshot: dict[str, Any] | None
+    issues: tuple[ConfigIssue, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "snapshot": dict(self.snapshot) if self.snapshot is not None else None,
             "issues": [
                 {
                     "reason_code": issue.reason_code,
@@ -187,6 +238,52 @@ def load_edge_config(
         stage=S_EDGE_CONFIG,
         reason_code=None,
         config=config,
+        issues=(),
+    )
+
+
+def export_edge_config_snapshot(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> ConfigSnapshotExportResult:
+    env_layer = dict(env or os.environ)
+    overrides = dict(local_overrides or {})
+
+    load_result = load_edge_config(env=env_layer, local_overrides=overrides)
+    if not load_result.success or load_result.config is None:
+        return ConfigSnapshotExportResult(
+            success=False,
+            stage=S_CONFIG_SNAPSHOT,
+            reason_code=load_result.reason_code,
+            snapshot=None,
+            issues=load_result.issues,
+        )
+
+    config = load_result.config
+    values = config.as_dict()
+    values["hmac_shared_key"] = redact_secret(config.hmac_shared_key)
+
+    snapshot = build_config_snapshot(
+        component=EDGE_SNAPSHOT_COMPONENT,
+        env=config.env,
+        values=values,
+        override_sources=resolve_override_sources(
+            field_to_env_key=EDGE_FIELD_TO_ENV_KEY,
+            env_layer=env_layer,
+            local_overrides=overrides,
+        ),
+        redacted_keys=collect_redacted_keys(
+            secret_env_keys=EDGE_SECRET_ENV_KEYS,
+            env_layer=env_layer,
+            local_overrides=overrides,
+        ),
+    )
+    return ConfigSnapshotExportResult(
+        success=True,
+        stage=S_CONFIG_SNAPSHOT,
+        reason_code=None,
+        snapshot=snapshot,
         issues=(),
     )
 
@@ -317,4 +414,3 @@ def _parse_int(
         )
         return int(default)
     return parsed
-
