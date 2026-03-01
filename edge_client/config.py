@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from host_brain.core.config_snapshot import (
     build_config_snapshot,
@@ -18,6 +18,7 @@ from host_brain.core.errors import (
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
 )
+from host_brain.core.key_profiles import resolve_secret_from_profiles
 
 
 ENV_DEV = "dev"
@@ -34,6 +35,8 @@ EDGE_FIELD_TO_ENV_KEY = {
     "rpc_port": "EDGE_RPC_PORT",
     "hmac_shared_key_set": "EDGE_HMAC_SHARED_KEY",
     "hmac_shared_key": "EDGE_HMAC_SHARED_KEY",
+    "hmac_shared_key_ref": "EDGE_HMAC_SHARED_KEY_REF",
+    "key_profile_status": "EDGE_HMAC_SHARED_KEY_REF",
     "allow_insecure_auth": "EDGE_ALLOW_INSECURE_AUTH",
     "rpc_gateway_enabled": "EDGE_RPC_GATEWAY_ENABLED",
     "asr_enabled": "EDGE_ASR_ENABLED",
@@ -60,6 +63,8 @@ class EdgeConfig:
     rpc_host: str
     rpc_port: int
     hmac_shared_key: str | None
+    hmac_shared_key_ref: str | None
+    key_profile_status: str | None
     allow_insecure_auth: bool
     rpc_gateway_enabled: bool
     asr_enabled: bool
@@ -76,6 +81,8 @@ class EdgeConfig:
             "rpc_host": self.rpc_host,
             "rpc_port": self.rpc_port,
             "hmac_shared_key_set": bool(self.hmac_shared_key),
+            "hmac_shared_key_ref": self.hmac_shared_key_ref,
+            "key_profile_status": self.key_profile_status,
             "allow_insecure_auth": self.allow_insecure_auth,
             "rpc_gateway_enabled": self.rpc_gateway_enabled,
             "asr_enabled": self.asr_enabled,
@@ -142,6 +149,10 @@ def load_edge_config(
     *,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
+    key_profiles: Sequence[Mapping[str, Any]] | None = None,
+    secret_store: Mapping[str, Any] | None = None,
+    node_id: str = "edge.default",
+    current_epoch: int | None = None,
 ) -> EdgeConfigLoadResult:
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
@@ -199,6 +210,32 @@ def load_edge_config(
         default=(runtime_env != ENV_PROD),
     )
     hmac_shared_key = _as_optional_text(merged.get("EDGE_HMAC_SHARED_KEY"))
+    hmac_shared_key_ref = _as_optional_text(merged.get("EDGE_HMAC_SHARED_KEY_REF"))
+    key_profile_status: str | None = None
+    if not hmac_shared_key and hmac_shared_key_ref:
+        resolved = resolve_secret_from_profiles(
+            provider="edge_hmac",
+            node_id=str(node_id),
+            scope="edge.rpc.auth",
+            key_profiles=key_profiles,
+            secret_store=secret_store,
+            current_epoch=int(current_epoch if current_epoch is not None else 0),
+        )
+        if resolved.success:
+            hmac_shared_key = resolved.secret_value
+            hmac_shared_key_ref = resolved.secret_ref or hmac_shared_key_ref
+            key_profile_status = "resolved"
+        else:
+            key_profile_status = "degraded"
+            if runtime_env == ENV_PROD and not allow_insecure_auth:
+                issues.append(
+                    ConfigIssue(
+                        reason_code=str(resolved.reason_code or CONFIG_REQUIRED_MISSING),
+                        detail=str(resolved.detail),
+                        field="EDGE_HMAC_SHARED_KEY_REF",
+                    )
+                )
+
     if runtime_env == ENV_PROD and not hmac_shared_key and not allow_insecure_auth:
         issues.append(
             ConfigIssue(
@@ -223,6 +260,8 @@ def load_edge_config(
         rpc_host=rpc_host,
         rpc_port=rpc_port,
         hmac_shared_key=hmac_shared_key,
+        hmac_shared_key_ref=hmac_shared_key_ref,
+        key_profile_status=key_profile_status,
         allow_insecure_auth=bool(allow_insecure_auth),
         rpc_gateway_enabled=bool(rpc_gateway_enabled),
         asr_enabled=bool(asr_enabled),
@@ -246,11 +285,22 @@ def export_edge_config_snapshot(
     *,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
+    key_profiles: Sequence[Mapping[str, Any]] | None = None,
+    secret_store: Mapping[str, Any] | None = None,
+    node_id: str = "edge.default",
+    current_epoch: int | None = None,
 ) -> ConfigSnapshotExportResult:
     env_layer = dict(env or os.environ)
     overrides = dict(local_overrides or {})
 
-    load_result = load_edge_config(env=env_layer, local_overrides=overrides)
+    load_result = load_edge_config(
+        env=env_layer,
+        local_overrides=overrides,
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        node_id=node_id,
+        current_epoch=current_epoch,
+    )
     if not load_result.success or load_result.config is None:
         return ConfigSnapshotExportResult(
             success=False,
@@ -264,6 +314,15 @@ def export_edge_config_snapshot(
     values = config.as_dict()
     values["hmac_shared_key"] = redact_secret(config.hmac_shared_key)
 
+    redacted_keys = collect_redacted_keys(
+        secret_env_keys=EDGE_SECRET_ENV_KEYS,
+        env_layer=env_layer,
+        local_overrides=overrides,
+    )
+    if config.hmac_shared_key and "EDGE_HMAC_SHARED_KEY" not in redacted_keys:
+        redacted_keys.append("EDGE_HMAC_SHARED_KEY")
+        redacted_keys = sorted(redacted_keys)
+
     snapshot = build_config_snapshot(
         component=EDGE_SNAPSHOT_COMPONENT,
         env=config.env,
@@ -273,11 +332,7 @@ def export_edge_config_snapshot(
             env_layer=env_layer,
             local_overrides=overrides,
         ),
-        redacted_keys=collect_redacted_keys(
-            secret_env_keys=EDGE_SECRET_ENV_KEYS,
-            env_layer=env_layer,
-            local_overrides=overrides,
-        ),
+        redacted_keys=redacted_keys,
     )
     return ConfigSnapshotExportResult(
         success=True,

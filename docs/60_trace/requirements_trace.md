@@ -225,6 +225,15 @@
 - 当前进展（2026-03-01）：已落地九节点清单契约（node_id/region/role/services/health_endpoint/key_profile_id）、primary/secondary 服务映射、缺服务/角色冲突拒绝与 probe timeout 稳定映射。
 - 覆盖状态：DONE
 
+## R-24
+- 系统级需求：多节点 Key Profile 引用化加载与脱敏快照联动（不落盘明文 secret），缺 key 场景维持稳定降级
+- PRD 需求编号（FR）：FR-CORE-004, FR-OBS-001, NFR-MAINT-001
+- DevSpec 落点：DevSpec 13.1~13.4
+- DevTasks（TASK）：TASK-0050
+- 验收测试（T-xx）：T-Key-01, T-Config-02
+- 当前进展（2026-03-01）：已落地 `provider/node_id/scope/secret_ref/rotation_epoch/status` Key Profile 解析，支持 Host/Edge `*_KEY_REF` 运行时装配，scope mismatch/expired/missing secret 稳定拒绝；快照仅暴露 `*_key_ref` 且密钥值保持 `<redacted>`。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

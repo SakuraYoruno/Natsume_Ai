@@ -1,0 +1,27 @@
+{
+  "current_epoch": 20260301,
+  "host_node_id": "natsu-node-01",
+  "edge_node_id": "natsu-node-06",
+  "profiles": [
+    {
+      "provider": "openai",
+      "node_id": "natsu-node-01",
+      "scope": "host.llm",
+      "secret_ref": "sec://openai/natsu-node-01",
+      "rotation_epoch": 20270101,
+      "status": "active"
+    },
+    {
+      "provider": "edge_hmac",
+      "node_id": "natsu-node-06",
+      "scope": "edge.rpc.auth",
+      "secret_ref": "sec://edge/natsu-node-06",
+      "rotation_epoch": 20270101,
+      "status": "active"
+    }
+  ],
+  "secret_store": {
+    "sec://openai/natsu-node-01": "sk-runtime-demo-value",
+    "sec://edge/natsu-node-06": "edge-hmac-runtime-value"
+  }
+}

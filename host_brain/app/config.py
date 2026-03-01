@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from host_brain.core.config_snapshot import (
     build_config_snapshot,
@@ -18,6 +18,7 @@ from host_brain.core.errors import (
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
 )
+from host_brain.core.key_profiles import resolve_secret_from_profiles
 
 
 ENV_DEV = "dev"
@@ -35,6 +36,8 @@ HOST_FIELD_TO_ENV_KEY = {
     "llm_provider": "HOST_LLM_PROVIDER",
     "openai_api_key_set": "OPENAI_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
+    "openai_api_key_ref": "OPENAI_API_KEY_REF",
+    "key_profile_status": "OPENAI_API_KEY_REF",
     "llm_timeout_ms": "HOST_LLM_TIMEOUT_MS",
     "llm_max_retries": "HOST_LLM_MAX_RETRIES",
     "cold_start_allowed": "HOST_COLD_START_ALLOWED",
@@ -57,6 +60,8 @@ class HostConfig:
     env: str
     llm_provider: str
     openai_api_key: str | None
+    openai_api_key_ref: str | None
+    key_profile_status: str | None
     llm_timeout_ms: int
     llm_max_retries: int
     cold_start_allowed: bool
@@ -69,6 +74,8 @@ class HostConfig:
             "env": self.env,
             "llm_provider": self.llm_provider,
             "openai_api_key_set": bool(self.openai_api_key),
+            "openai_api_key_ref": self.openai_api_key_ref,
+            "key_profile_status": self.key_profile_status,
             "llm_timeout_ms": self.llm_timeout_ms,
             "llm_max_retries": self.llm_max_retries,
             "cold_start_allowed": self.cold_start_allowed,
@@ -132,6 +139,10 @@ def load_host_config(
     *,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
+    key_profiles: Sequence[Mapping[str, Any]] | None = None,
+    secret_store: Mapping[str, Any] | None = None,
+    node_id: str = "host.default",
+    current_epoch: int | None = None,
 ) -> HostConfigLoadResult:
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
@@ -196,6 +207,32 @@ def load_host_config(
     )
 
     openai_api_key = _as_optional_text(merged.get("OPENAI_API_KEY"))
+    openai_api_key_ref = _as_optional_text(merged.get("OPENAI_API_KEY_REF"))
+    key_profile_status: str | None = None
+    if llm_provider == "openai" and not openai_api_key and openai_api_key_ref:
+        resolved = resolve_secret_from_profiles(
+            provider="openai",
+            node_id=str(node_id),
+            scope="host.llm",
+            key_profiles=key_profiles,
+            secret_store=secret_store,
+            current_epoch=int(current_epoch if current_epoch is not None else 0),
+        )
+        if resolved.success:
+            openai_api_key = resolved.secret_value
+            openai_api_key_ref = resolved.secret_ref or openai_api_key_ref
+            key_profile_status = "resolved"
+        else:
+            key_profile_status = "degraded"
+            if not cold_start_allowed:
+                issues.append(
+                    ConfigIssue(
+                        reason_code=str(resolved.reason_code or CONFIG_REQUIRED_MISSING),
+                        detail=str(resolved.detail),
+                        field="OPENAI_API_KEY_REF",
+                    )
+                )
+
     if llm_provider == "openai" and not openai_api_key and not cold_start_allowed:
         issues.append(
             ConfigIssue(
@@ -212,6 +249,8 @@ def load_host_config(
         env=runtime_env,
         llm_provider=llm_provider,
         openai_api_key=openai_api_key,
+        openai_api_key_ref=openai_api_key_ref,
+        key_profile_status=key_profile_status,
         llm_timeout_ms=llm_timeout_ms,
         llm_max_retries=llm_max_retries,
         cold_start_allowed=bool(cold_start_allowed),
@@ -232,11 +271,22 @@ def export_host_config_snapshot(
     *,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
+    key_profiles: Sequence[Mapping[str, Any]] | None = None,
+    secret_store: Mapping[str, Any] | None = None,
+    node_id: str = "host.default",
+    current_epoch: int | None = None,
 ) -> ConfigSnapshotExportResult:
     env_layer = dict(env or os.environ)
     overrides = dict(local_overrides or {})
 
-    load_result = load_host_config(env=env_layer, local_overrides=overrides)
+    load_result = load_host_config(
+        env=env_layer,
+        local_overrides=overrides,
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        node_id=node_id,
+        current_epoch=current_epoch,
+    )
     if not load_result.success or load_result.config is None:
         return ConfigSnapshotExportResult(
             success=False,
@@ -250,6 +300,15 @@ def export_host_config_snapshot(
     values = config.as_dict()
     values["openai_api_key"] = redact_secret(config.openai_api_key)
 
+    redacted_keys = collect_redacted_keys(
+        secret_env_keys=HOST_SECRET_ENV_KEYS,
+        env_layer=env_layer,
+        local_overrides=overrides,
+    )
+    if config.openai_api_key and "OPENAI_API_KEY" not in redacted_keys:
+        redacted_keys.append("OPENAI_API_KEY")
+        redacted_keys = sorted(redacted_keys)
+
     snapshot = build_config_snapshot(
         component=HOST_SNAPSHOT_COMPONENT,
         env=config.env,
@@ -259,11 +318,7 @@ def export_host_config_snapshot(
             env_layer=env_layer,
             local_overrides=overrides,
         ),
-        redacted_keys=collect_redacted_keys(
-            secret_env_keys=HOST_SECRET_ENV_KEYS,
-            env_layer=env_layer,
-            local_overrides=overrides,
-        ),
+        redacted_keys=redacted_keys,
     )
     return ConfigSnapshotExportResult(
         success=True,
