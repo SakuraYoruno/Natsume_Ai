@@ -213,6 +213,18 @@ SERVICE_HEALTH_COLUMNS = (
     "ts_ms",
 )
 
+MIGRATION_COLUMNS = (
+    "request_id",
+    "scope",
+    "migration_id",
+    "status",
+    "reason_code",
+    "stage",
+    "detail",
+    "latency_ms",
+    "ts_ms",
+)
+
 VOICE_EVENT_COLUMNS = (
     "request_id",
     "session_id",
@@ -285,6 +297,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "avatar_action_log": set(),
     "clawd_action_log": set(),
     "service_health_log": set(),
+    "migration_log": set(),
     "voice_event_log": {"payload"},
     "retrieval_event_log": {"payload"},
     "vision_event_log": {"payload"},
@@ -369,6 +382,10 @@ class SQLiteLedger:
     @property
     def service_health_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("service_health_log")
+
+    @property
+    def migration_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("migration_log")
 
     @property
     def voice_event_log(self) -> list[dict[str, Any]]:
@@ -505,6 +522,10 @@ class SQLiteLedger:
     def log_service_health(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SERVICE_HEALTH_COLUMNS}
         self._insert("service_health_log", payload)
+
+    def log_migration(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in MIGRATION_COLUMNS}
+        self._insert("migration_log", payload)
 
     def log_voice_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in VOICE_EVENT_COLUMNS}
@@ -895,6 +916,19 @@ class SQLiteLedger:
                     ts_ms INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS migration_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT,
+                    scope TEXT,
+                    migration_id TEXT,
+                    status TEXT,
+                    reason_code TEXT,
+                    stage TEXT,
+                    detail TEXT,
+                    latency_ms INTEGER,
+                    ts_ms INTEGER
+                );
+
                 CREATE TABLE IF NOT EXISTS voice_event_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_id TEXT,
@@ -1001,6 +1035,10 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_service_health_request ON service_health_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_service_health_service_id ON service_health_log(service_id);
                 CREATE INDEX IF NOT EXISTS idx_service_health_ts ON service_health_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_migration_request ON migration_log(request_id);
+                CREATE INDEX IF NOT EXISTS idx_migration_scope ON migration_log(scope);
+                CREATE INDEX IF NOT EXISTS idx_migration_id ON migration_log(migration_id);
+                CREATE INDEX IF NOT EXISTS idx_migration_ts ON migration_log(ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_request ON voice_event_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_session ON voice_event_log(session_id);
                 CREATE INDEX IF NOT EXISTS idx_voice_event_type ON voice_event_log(event_type);

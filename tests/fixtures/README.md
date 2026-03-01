@@ -27,3 +27,4 @@
 21. `bond/`: Bond fixtures for SSOT single-writer updates, summary derivation/injection (`event_id/evidence_refs` replay refs), missing-evidence rejection, and static-scan non-single-writer violations (`T-50~T-54`, `T-74~T-75`, `T-SSOT-01`).
 22. `config/`: Host/Edge layered config fixtures for cold-start defaults, invalid env/value/required-key rejection mapping, and deterministic runtime-status to service-health bridging (`T-Config-01`).
 23. `llm_gateway/`: gateway fixtures for sanitized egress payload, provider draft responses, format drift, and provider-unavailable degrade paths with AIRLOCK + QA enforcement.
+24. `migrations/`: SQLite/Bond migration fixtures for idempotent apply, missing catalog gap detection, schema drift, and rollback guard scenarios (`T-Migrate-01`).

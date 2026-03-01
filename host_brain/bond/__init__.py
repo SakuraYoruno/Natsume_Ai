@@ -7,6 +7,12 @@ from host_brain.bond.bond_dynamics import (
     BondDynamicsWriter,
     BondUpdateResult,
 )
+from host_brain.bond.migration_runner import (
+    S_MIGRATION_BOND,
+    BondMigrationRunner,
+    BondMigrationBatchResult,
+    BondMigrationRecord,
+)
 from host_brain.bond.neo4j_client import (
     BOND_WRITER_ID,
     REL_ABOUT,
@@ -27,8 +33,12 @@ __all__ = [
     "REL_AFFECTS",
     "REL_HAS_EVENT",
     "S_BOND_UPDATE",
+    "S_MIGRATION_BOND",
     "STATUS_OK",
     "STATUS_REJECTED",
+    "BondMigrationRunner",
+    "BondMigrationBatchResult",
+    "BondMigrationRecord",
     "BondDynamicsWriter",
     "BondUpdateResult",
     "InMemoryNeo4jBondClient",
