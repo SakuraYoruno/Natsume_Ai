@@ -1,0 +1,12 @@
+{
+  "stage": "S_RELEASE_CHECKLIST",
+  "release_id": "rel-m3-2026-03-01",
+  "rollback_target": "rel-m2-2026-03-01",
+  "impact_scope": [
+    "host.audit.sqlite_ledger",
+    "host.vision.screen_ocr",
+    "host.vision.camera_recognizer"
+  ],
+  "milestone": "M3",
+  "ts_ms": 1800080000000
+}

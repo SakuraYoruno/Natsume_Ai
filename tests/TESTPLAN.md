@@ -124,3 +124,6 @@
 
 ## T-CI
 - T-CI-01: Unified CI delivery gate must classify failures across `contract/e2e/static_scan/doc_gate` with deterministic report fields (`job_id/check_id/reason_code/failed_artifact`).
+
+## T-Release
+- T-Release-01: Release checklist for `M0~M3` must remain deterministic (`milestone/assets/checksums/required_services`), rollback mapping must resolve `release_id/rollback_target/impact_scope`, and flow pointer cross-check must remain consistent with `T-Flow-02`.

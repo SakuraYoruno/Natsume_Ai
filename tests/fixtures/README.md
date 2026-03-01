@@ -29,3 +29,4 @@
 23. `llm_gateway/`: gateway fixtures for sanitized egress payload, provider draft responses, format drift, and provider-unavailable degrade paths with AIRLOCK + QA enforcement.
 24. `migrations/`: SQLite/Bond migration fixtures for idempotent apply, missing catalog gap detection, schema drift, and rollback guard scenarios (`T-Migrate-01`).
 25. `ci/`: delivery gate fixtures for doc audience/title lint failures and static-scan non-single-writer violations (`T-CI-01`).
+26. `release/`: release checklist and rollback map fixtures for `M0~M3` deployable assets, checksum drift/missing asset negatives, and rollback target resolution (`T-Release-01`).

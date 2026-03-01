@@ -1,0 +1,27 @@
+{
+  "stage": "S_RELEASE_CHECKLIST",
+  "status": "READY",
+  "reason_code": null,
+  "milestone": "M2",
+  "release_id": "rel-m2-checksum-drift",
+  "assets": [
+    "tests/fixtures/release/assets/m2/manifest.txt"
+  ],
+  "checksums": {
+    "tests/fixtures/release/assets/m2/manifest.txt": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "required_services": [
+    "host.audit.sqlite_ledger",
+    "host.integrations.llm_gateway"
+  ],
+  "flow_refs": {
+    "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
+    "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
+    "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json"
+  },
+  "config_snapshot_refs": [
+    "cfg_snap::sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cfg_snap::sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "ts_ms": 1800080000002
+}
