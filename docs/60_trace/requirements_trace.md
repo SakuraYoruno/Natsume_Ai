@@ -279,6 +279,15 @@
 - 当前进展（2026-03-01）：已落地 reranker runtime config（provider/model_id/top_k/timeout_ms/node_selector）与节点路由选择，覆盖 model_down/timeout/invalid_score_range 三类失败映射（`RETR_RERANK_*`），并固化分数归一化 + fallback 规则及 `expected_top_k` 审计字段。
 - 覆盖状态：DONE
 
+## R-30
+- 系统级需求：外部依赖联调就绪报告必须统一输出可审计基线（节点/密钥/服务/图编排/演练摘要），并对缺依赖保持稳定降级分类
+- PRD 需求编号（FR）：FR-CORE-004, FR-OBS-001, NFR-MAINT-001
+- DevSpec 落点：DevSpec 10/11/14.5
+- DevTasks（TASK）：TASK-0056
+- 验收测试（T-xx）：T-Svc-01, T-Boot-01, T-Drill-01, T-EnvReady-01
+- 当前进展（2026-03-01）：已落地环境联调就绪报告（`env/node_count/key_profiles/services/graph_runtime/readiness_status`），汇总 dependency matrix 与演练摘要（`scenario_id/status/reason_code_chain/replay_ref`），并稳定区分 partial-ready（DEGRADED）与 critical-down（FAILED）场景。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

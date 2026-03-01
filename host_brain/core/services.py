@@ -37,6 +37,7 @@ S_SERVICE_HEALTH = "S_SERVICE_HEALTH"
 S_SERVICE_BOOTSTRAP = "S_SERVICE_BOOTSTRAP"
 S_INFRA_NODE_CATALOG = "S_INFRA_NODE_CATALOG"
 S_INFRA_NODE_PROBE = "S_INFRA_NODE_PROBE"
+S_ENV_READY = "S_ENV_READY"
 
 KIND_COLD_START = "cold_start"
 KIND_DEPENDENCY = "dependency"
@@ -610,6 +611,44 @@ def normalize_dependency_probes(
             "detail": detail,
         }
     return statuses, rows
+
+
+def summarize_dependency_rows(rows: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:
+    if not rows:
+        return {
+            "total": 0,
+            "unavailable": 0,
+            "reason_counts": {},
+            "unavailable_ids": [],
+        }
+
+    reason_counts: dict[str, int] = {}
+    unavailable_ids: list[str] = []
+    unavailable_count = 0
+    total = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        total += 1
+        available = bool(row.get("available", True))
+        component_id = str(row.get("service_id") or row.get("component_id") or "").strip()
+        reason_code = str(row.get("reason_code") or "").strip()
+        if available:
+            continue
+        unavailable_count += 1
+        if component_id:
+            unavailable_ids.append(component_id)
+        if reason_code:
+            reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
+
+    unavailable_ids = sorted(set(unavailable_ids))
+    reason_counts = {key: reason_counts[key] for key in sorted(reason_counts.keys())}
+    return {
+        "total": total,
+        "unavailable": unavailable_count,
+        "reason_counts": reason_counts,
+        "unavailable_ids": unavailable_ids,
+    }
 
 
 def normalize_startup_issues(
