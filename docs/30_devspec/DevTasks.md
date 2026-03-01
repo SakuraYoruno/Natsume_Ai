@@ -541,3 +541,127 @@ TASK-XXXX 标题
   - 回归覆盖 `T-67~T-71` 与（新增）`T-Drill-01`。
 - 涉及文件路径：tests/e2e/；tests/fixtures/；tools/replay/；host_brain/audit/；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-OBS-001；T-67~T-71；（新增）T-Drill-01。
+
+---
+
+## 5. 增量任务清单（外部环境与服务可用性收口）
+
+### TASK-0049 云节点编排收口：九节点角色/服务矩阵与探针映射
+- 任务描述：沉淀 9 个云节点的统一编排矩阵（角色、承载服务、健康探针、降级策略），确保多节点运行面可审计。
+- 输入：DevSpec 10/13；PRD FR-CORE-004、FR-OBS-001。
+- 输出：
+  - 节点清单结构（node_id/region/role/services/health_endpoint/key_profile_id）；
+  - 节点-服务映射与最小冗余策略（primary/secondary）；
+  - 节点健康探针输出结构（node_status/reason_code/stage/detail）；
+  - fixtures：节点缺服务、角色冲突、探针超时样例。
+- 验收标准：
+  - 9 节点清单结构稳定且可解析；
+  - 同类节点故障在同版本下 reason_code/stage 稳定；
+  - 回归覆盖（新增）`T-Infra-01`。
+- 涉及文件路径：configs/deploy/；host_brain/core/services.py；tests/contract/；tests/fixtures/services/；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；（新增）T-Infra-01。
+
+### TASK-0050 密钥装配收口：多节点 LLM/API Key Profile 与引用化加载
+- 任务描述：建立跨节点密钥配置 Profile 与引用化加载机制，保证“有 key 可用、无 key 降级、全程不落盘明文”。
+- 输入：DevSpec 13.1~13.4；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
+- 输出：
+  - 密钥配置结构（provider/node_id/scope/secret_ref/rotation_epoch/status）；
+  - 运行时密钥解析与脱敏快照联动（仅输出 secret_ref 与 redacted 字段）；
+  - 缺失 key 的稳定降级映射（cold_start/dependency）；
+  - fixtures：missing key、scope 不匹配、过期 profile 样例。
+- 验收标准：
+  - 代码与配置仓库不出现明文 secret；
+  - 无 key 场景保持 draft_only 降级并有稳定 reason_code；
+  - 回归覆盖（新增）`T-Key-01` 与 `T-Config-02`。
+- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；configs/secrets/；tests/contract/；tests/fixtures/config/。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；（新增）T-Key-01；T-Config-02。
+
+### TASK-0051 编排框架收口：LangChain/LangGraph 运行图装配与降级路径
+- 任务描述：接入 LangChain/LangGraph 运行编排，形成可配置图执行入口并保持治理链（Governor/Token/Audit）不被旁路。
+- 输入：DevSpec 6/8.9/10；PRD FR-CORE-001、FR-CORE-004、FR-AUDIT-001。
+- 输出：
+  - 图编排配置结构（graph_id/version/node_bindings/edges/fallback_edges）；
+  - 编排执行结果结构（graph_status/reason_code/stage/replay_ref）；
+  - 编排失败分类（节点缺失/边冲突/超时/依赖不可用）；
+  - fixtures：missing node、invalid edge、graph timeout 样例。
+- 验收标准：
+  - 编排结果保持单 JSON 且可回放；
+  - 编排失败不绕过治理链并有稳定 reason_code；
+  - 回归覆盖（新增）`T-Orch-01` 与 `T-Audit-01`。
+- 涉及文件路径：host_brain/integrations/；host_brain/tools/；host_brain/audit/；tests/contract/；tests/e2e/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-001；FR-CORE-004；FR-AUDIT-001；（新增）T-Orch-01；T-Audit-01。
+
+### TASK-0052 图数据库收口：Neo4j 外部部署配置与启动探针
+- 任务描述：补齐 Neo4j 外部化连接配置、连通探针与失败映射，确保 Bond SSOT 在生产依赖下可观测可降级。
+- 输入：DevSpec 8.2/10/13；PRD FR-BOND-001~003、FR-OBS-001。
+- 输出：
+  - Neo4j 配置结构（uri/database/auth_ref/pool/tls/enabled）；
+  - 启动探针输出与失败分类（auth_failed/schema_drift/leader_unavailable）；
+  - 迁移入口与探针结果的审计串联字段；
+  - fixtures：鉴权失败、schema 漂移、节点不可达样例。
+- 验收标准：
+  - Neo4j 配置可解析且缺项可稳定拒绝；
+  - 依赖不可用场景 reason_code/stage 稳定可统计；
+  - 回归覆盖 `T-50~T-54`、`T-Migrate-01` 与（新增）`T-Neo4j-01`。
+- 涉及文件路径：host_brain/bond/neo4j_client.py；host_brain/bond/migration_runner.py；host_brain/core/services.py；tests/contract/；tests/fixtures/bond/；tests/fixtures/services/。
+- 关联需求/测试：FR-BOND-001~003；FR-OBS-001；T-50~T-54；T-Migrate-01；（新增）T-Neo4j-01。
+
+### TASK-0053 向量库收口：ChromaDB 外部部署配置与集合治理
+- 任务描述：补齐 ChromaDB 外部化配置与集合治理策略，确保 episodic/retrieval 在生产形态下可探测、可降级、可审计。
+- 输入：DevSpec 8.3.1/10/13；PRD FR-MEM-003~005、FR-OBS-001。
+- 输出：
+  - Chroma 配置结构（endpoint/tenant/database/collection_profiles/vector_dim）；
+  - 集合初始化与维度校验规则；
+  - 依赖不可用时的降级输出与 reason_code 映射；
+  - fixtures：collection 缺失、vector dim 不匹配、endpoint down 样例。
+- 验收标准：
+  - Chroma 配置与集合治理输出结构稳定；
+  - 故障态可降级且审计链可回放；
+  - 回归覆盖 `T-Ret-03` 与（新增）`T-Chroma-01`。
+- 涉及文件路径：host_brain/memory/chroma_client.py；host_brain/retrieval/evidence_pack.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；tests/fixtures/services/。
+- 关联需求/测试：FR-MEM-003~005；FR-OBS-001；T-Ret-03；（新增）T-Chroma-01。
+
+### TASK-0054 嵌入模型收口：Embedding 服务路由与版本化配置
+- 任务描述：建立嵌入模型的多提供方路由与版本化配置，保证不同节点下的 embedding 行为、降级与审计口径一致。
+- 输入：DevSpec 8.3.1/13；PRD FR-MEM-003、FR-OBS-001。
+- 输出：
+  - 嵌入模型配置结构（provider/model_id/dim/timeout_ms/node_selector）；
+  - 运行时路由与失败映射（unavailable/timeout/input_invalid）；
+  - 维度漂移检测口径与审计字段；
+  - fixtures：model unavailable、timeout、dim drift 样例。
+- 验收标准：
+  - Embedding 输出契约在多提供方下结构稳定；
+  - 同类失败映射 `RETR_EMBED_*` 稳定；
+  - 回归覆盖 `T-Ret-01` 与（新增）`T-Embed-01`。
+- 涉及文件路径：host_brain/retrieval/embedding.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；configs/models/。
+- 关联需求/测试：FR-MEM-003；FR-OBS-001；T-Ret-01；（新增）T-Embed-01。
+
+### TASK-0055 重排模型收口：Reranker 服务路由与分数稳定化
+- 任务描述：建立重排模型的服务路由与分数稳定化策略，保证候选重排在依赖异常下仍可解释并可回放。
+- 输入：DevSpec 8.3.1/13；PRD FR-MEM-004、FR-OBS-001。
+- 输出：
+  - 重排模型配置结构（provider/model_id/top_k/timeout_ms/node_selector）；
+  - 分数归一化与异常回退规则；
+  - 失败分类（model_down/timeout/invalid_score_range）；
+  - fixtures：model down、timeout、bad score 样例。
+- 验收标准：
+  - Reranker 输出契约字段稳定且可审计；
+  - 同类失败映射 `RETR_RERANK_*` 稳定；
+  - 回归覆盖 `T-Ret-02` 与（新增）`T-Rerank-01`。
+- 涉及文件路径：host_brain/retrieval/reranker.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；configs/models/。
+- 关联需求/测试：FR-MEM-004；FR-OBS-001；T-Ret-02；（新增）T-Rerank-01。
+
+### TASK-0056 联调验收收口：外部依赖就绪报告与可用性基线
+- 任务描述：形成外部依赖联调验收包，统一输出“节点/密钥/编排框架/Neo4j/Chroma/Embedding/Reranker”就绪基线与故障口径。
+- 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
+- 输出：
+  - 联调就绪报告结构（env/node_count/key_profiles/services/graph_runtime/readiness_status）；
+  - 关键依赖探针矩阵与失败分类汇总；
+  - 演练摘要输出（scenario_id/status/reason_code_chain/replay_ref）；
+  - fixtures：部分就绪、关键依赖不可用样例。
+- 验收标准：
+  - 联调报告为可解析单 JSON 且字段稳定；
+  - 缺依赖时系统保持降级与审计可回放，不出现伪执行宣告；
+  - 回归覆盖 `T-Svc-01`、`T-Boot-01`、`T-Drill-01` 与（新增）`T-EnvReady-01`。
+- 涉及文件路径：host_brain/app/main.py；host_brain/core/services.py；tools/replay/；tests/e2e/；tests/fixtures/services/；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；T-Svc-01；T-Boot-01；T-Drill-01；（新增）T-EnvReady-01。
