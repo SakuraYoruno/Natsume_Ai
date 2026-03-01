@@ -1,0 +1,10 @@
+{
+  "probe": {
+    "reachable": true,
+    "auth_ok": true,
+    "schema_ok": false,
+    "leader_ok": true,
+    "detail": "constraint mismatch against expected migration state"
+  },
+  "expected_reason_code": "NEO4J_SCHEMA_DRIFT"
+}

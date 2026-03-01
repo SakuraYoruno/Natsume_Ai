@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-from host_brain.core.errors import BOND_EVIDENCE_REQUIRED, BOND_SINGLE_WRITER_VIOLATION
+from host_brain.core.errors import (
+    BOND_EVIDENCE_REQUIRED,
+    BOND_SINGLE_WRITER_VIOLATION,
+    CONFIG_REQUIRED_MISSING,
+    CONFIG_VALUE_INVALID,
+    NEO4J_AUTH_FAILED,
+    NEO4J_LEADER_UNAVAILABLE,
+    NEO4J_SCHEMA_DRIFT,
+)
 
 
 BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
@@ -14,6 +23,64 @@ BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
 REL_HAS_EVENT = "HAS_EVENT"
 REL_ABOUT = "ABOUT"
 REL_AFFECTS = "AFFECTS"
+
+S_NEO4J_CONFIG = "S_NEO4J_CONFIG"
+S_NEO4J_PROBE = "S_NEO4J_PROBE"
+
+NEO4J_STATUS_UP = "UP"
+NEO4J_STATUS_DOWN = "DOWN"
+
+
+@dataclass(frozen=True)
+class Neo4jConfigIssue:
+    reason_code: str
+    detail: str
+    field: str | None = None
+
+
+@dataclass(frozen=True)
+class Neo4jRuntimeConfig:
+    enabled: bool
+    uri: str
+    database: str
+    auth_ref: str | None
+    pool_size: int
+    tls_enabled: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "uri": self.uri,
+            "database": self.database,
+            "auth_ref": self.auth_ref,
+            "pool_size": self.pool_size,
+            "tls_enabled": self.tls_enabled,
+        }
+
+
+@dataclass(frozen=True)
+class Neo4jConfigLoadResult:
+    success: bool
+    stage: str
+    reason_code: str | None
+    config: Neo4jRuntimeConfig | None
+    issues: tuple[Neo4jConfigIssue, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "config": (self.config.as_dict() if self.config is not None else None),
+            "issues": [
+                {
+                    "reason_code": issue.reason_code,
+                    "detail": issue.detail,
+                    "field": issue.field,
+                }
+                for issue in self.issues
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -26,6 +93,174 @@ class BondEventRecord:
     evidence_refs: tuple[str, ...]
     payload: dict[str, Any]
     ts_ms: int
+
+
+def load_neo4j_runtime_config(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> Neo4jConfigLoadResult:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    issues: list[Neo4jConfigIssue] = []
+    runtime_env = str(merged.get("NATSUME_ENV") or "dev").strip().lower()
+
+    enabled = _parse_bool(merged.get("BOND_NEO4J_ENABLED"), default=True)
+    uri = str(merged.get("BOND_NEO4J_URI") or "bolt://127.0.0.1:7687").strip()
+    database = str(merged.get("BOND_NEO4J_DATABASE") or "neo4j").strip()
+    auth_ref = _as_optional_text(merged.get("BOND_NEO4J_AUTH_REF"))
+    pool_size = _parse_int(
+        merged.get("BOND_NEO4J_POOL_SIZE"),
+        default=50,
+        min_value=1,
+        max_value=1000,
+        field_name="BOND_NEO4J_POOL_SIZE",
+        issues=issues,
+    )
+    tls_enabled = _parse_bool(
+        merged.get("BOND_NEO4J_TLS_ENABLED"),
+        default=(runtime_env == "prod"),
+    )
+
+    if enabled and not uri:
+        issues.append(
+            Neo4jConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="BOND_NEO4J_URI required when BOND_NEO4J_ENABLED=true",
+                field="BOND_NEO4J_URI",
+            )
+        )
+    if enabled and not database:
+        issues.append(
+            Neo4jConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="BOND_NEO4J_DATABASE required when BOND_NEO4J_ENABLED=true",
+                field="BOND_NEO4J_DATABASE",
+            )
+        )
+    if enabled and not auth_ref:
+        issues.append(
+            Neo4jConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="BOND_NEO4J_AUTH_REF required when BOND_NEO4J_ENABLED=true",
+                field="BOND_NEO4J_AUTH_REF",
+            )
+        )
+
+    if issues:
+        return Neo4jConfigLoadResult(
+            success=False,
+            stage=S_NEO4J_CONFIG,
+            reason_code=issues[0].reason_code,
+            config=None,
+            issues=tuple(issues),
+        )
+
+    config = Neo4jRuntimeConfig(
+        enabled=bool(enabled),
+        uri=uri,
+        database=database,
+        auth_ref=auth_ref,
+        pool_size=pool_size,
+        tls_enabled=bool(tls_enabled),
+    )
+    return Neo4jConfigLoadResult(
+        success=True,
+        stage=S_NEO4J_CONFIG,
+        reason_code=None,
+        config=config,
+        issues=(),
+    )
+
+
+def build_neo4j_probe_report(
+    *,
+    config: Neo4jRuntimeConfig,
+    request_id: str | None,
+    probe: Mapping[str, Any] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    probe_data = dict(probe or {})
+    if not config.enabled:
+        return {
+            "request_id": request_id,
+            "stage": S_NEO4J_PROBE,
+            "status": NEO4J_STATUS_DOWN,
+            "reason_code": NEO4J_LEADER_UNAVAILABLE,
+            "failure_class": "leader_unavailable",
+            "detail": "neo4j disabled by config",
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+
+    reachable = bool(probe_data.get("reachable", True))
+    auth_ok = bool(probe_data.get("auth_ok", True))
+    schema_ok = bool(probe_data.get("schema_ok", True))
+    leader_ok = bool(probe_data.get("leader_ok", True))
+
+    if not reachable or not leader_ok:
+        return {
+            "request_id": request_id,
+            "stage": S_NEO4J_PROBE,
+            "status": NEO4J_STATUS_DOWN,
+            "reason_code": NEO4J_LEADER_UNAVAILABLE,
+            "failure_class": "leader_unavailable",
+            "detail": str(probe_data.get("detail") or "neo4j leader unavailable"),
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+    if not auth_ok:
+        return {
+            "request_id": request_id,
+            "stage": S_NEO4J_PROBE,
+            "status": NEO4J_STATUS_DOWN,
+            "reason_code": NEO4J_AUTH_FAILED,
+            "failure_class": "auth_failed",
+            "detail": str(probe_data.get("detail") or "neo4j authentication failed"),
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+    if not schema_ok:
+        return {
+            "request_id": request_id,
+            "stage": S_NEO4J_PROBE,
+            "status": NEO4J_STATUS_DOWN,
+            "reason_code": NEO4J_SCHEMA_DRIFT,
+            "failure_class": "schema_drift",
+            "detail": str(probe_data.get("detail") or "neo4j schema drift detected"),
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+
+    return {
+        "request_id": request_id,
+        "stage": S_NEO4J_PROBE,
+        "status": NEO4J_STATUS_UP,
+        "reason_code": None,
+        "failure_class": None,
+        "detail": str(probe_data.get("detail") or "neo4j probe ok"),
+        "config": config.as_dict(),
+        "ts_ms": int(ts_ms if ts_ms is not None else 0),
+    }
+
+
+def build_neo4j_dependency_status(probe_report: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(probe_report.get("status") or "").strip().upper()
+    if status == NEO4J_STATUS_UP:
+        return {
+            "available": True,
+            "detail": "neo4j dependency healthy",
+        }
+    return {
+        "available": False,
+        "unavailable_kind": "dependency",
+        "detail": (
+            f"{probe_report.get('reason_code')}: "
+            f"{str(probe_report.get('detail') or 'neo4j probe failed')}"
+        ),
+    }
 
 
 class InMemoryNeo4jBondClient:
@@ -218,6 +453,56 @@ def _normalize_evidence_refs(value: list[str] | tuple[str, ...] | Any) -> list[s
         if ref:
             refs.append(ref)
     return refs
+
+
+def _as_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if text else None
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int(
+    value: Any,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+    field_name: str,
+    issues: list[Neo4jConfigIssue],
+) -> int:
+    if value is None or str(value).strip() == "":
+        return int(default)
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        issues.append(
+            Neo4jConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name} must be integer",
+                field=field_name,
+            )
+        )
+        return int(default)
+    if parsed < min_value or parsed > max_value:
+        issues.append(
+            Neo4jConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name} must be in range [{min_value}, {max_value}]",
+                field=field_name,
+            )
+        )
+        return int(default)
+    return parsed
 
 
 def _load_constraint_statements(paths: list[str | Path]) -> list[str]:

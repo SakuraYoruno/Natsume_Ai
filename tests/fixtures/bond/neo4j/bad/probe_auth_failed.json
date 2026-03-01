@@ -1,0 +1,10 @@
+{
+  "probe": {
+    "reachable": true,
+    "auth_ok": false,
+    "schema_ok": true,
+    "leader_ok": true,
+    "detail": "invalid neo4j credentials"
+  },
+  "expected_reason_code": "NEO4J_AUTH_FAILED"
+}

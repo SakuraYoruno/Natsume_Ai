@@ -1,0 +1,10 @@
+{
+  "probe": {
+    "reachable": false,
+    "auth_ok": true,
+    "schema_ok": true,
+    "leader_ok": false,
+    "detail": "cluster leader unreachable"
+  },
+  "expected_reason_code": "NEO4J_LEADER_UNAVAILABLE"
+}

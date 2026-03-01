@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path
 from time import perf_counter
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
@@ -237,6 +237,31 @@ class BondMigrationRunner:
                 latest_version=latest_version,
             ),
             records=tuple(run_records),
+        )
+
+    def apply_migrations_with_probe(
+        self,
+        *,
+        probe_report: Mapping[str, Any],
+        request_id: str | None = None,
+        ts_ms: int | None = None,
+    ) -> BondMigrationBatchResult:
+        now_value = int(ts_ms if ts_ms is not None else now_ms())
+        probe_status = str(probe_report.get("status") or "").strip().upper()
+        if probe_status == "UP":
+            return self.apply_migrations(request_id=request_id, ts_ms=now_value)
+
+        reason_code = str(probe_report.get("reason_code") or MIGRATION_EXEC_FAILED)
+        detail = str(probe_report.get("detail") or "neo4j probe failed before migration")
+        assets = self._discover_assets()
+        latest_version = assets[-1].migration_id if assets else 0
+        return self._fail(
+            request_id=request_id,
+            migration_id="neo4j_probe",
+            reason_code=reason_code,
+            detail=detail,
+            ts_ms=now_value,
+            latest_version=latest_version,
         )
 
     def read_migration_log(self) -> list[dict[str, Any]]:

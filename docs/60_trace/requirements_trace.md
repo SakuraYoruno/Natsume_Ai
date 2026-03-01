@@ -243,6 +243,15 @@
 - 当前进展（2026-03-01）：已落地图编排运行时契约（配置校验 + 执行 + fallback），输出稳定封装（graph_status/reason_code/stage/replay_ref），并覆盖 missing-node/invalid-edge/timeout/dependency-down 四类失败映射与可回放 trace。
 - 覆盖状态：DONE
 
+## R-26
+- 系统级需求：Neo4j 外部部署配置与启动探针可解析、可降级、可审计；探针失败与迁移执行具备链路关联
+- PRD 需求编号（FR）：FR-BOND-001~003, FR-OBS-001
+- DevSpec 落点：DevSpec 8.2/10/13
+- DevTasks（TASK）：TASK-0052
+- 验收测试（T-xx）：T-50~T-54, T-Migrate-01, T-Neo4j-01
+- 当前进展（2026-03-01）：已落地 Neo4j runtime config（uri/database/auth_ref/pool/tls/enabled）与探针输出，auth/schema/leader 三类失败映射稳定；迁移执行新增 probe 前置联动并写入 migration_log（neo4j_probe）。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：
