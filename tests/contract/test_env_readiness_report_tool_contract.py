@@ -60,9 +60,11 @@ class TestEnvReadinessReportToolContract(unittest.TestCase):
         drill_rows = [
             {
                 "scenario_id": "drill.dependency.provider_down",
+                "stage": "S_LLM_GATEWAY_PROVIDER",
                 "status": "DEGRADED",
                 "reason_code_chain": ["SERVICE_UNAVAILABLE_DEPENDENCY"],
                 "replay_ref": "request::req_drill_001",
+                "model_profile_id": "mp.mock.v1",
             }
         ]
 
@@ -103,6 +105,8 @@ class TestEnvReadinessReportToolContract(unittest.TestCase):
             self.assertIn("dependency_summary", report)
             self.assertIn("graph_runtime", report)
             self.assertIn("drill_summary", report)
+            self.assertIn("orchestration_control_coverage", report)
+            self.assertEqual("PARTIAL", report["orchestration_control_coverage"]["status"])
             self.assertEqual("req_envready_tool_001", report["request_id"])
             self.assertEqual(1_800_170_000_100, report["ts_ms"])
             json.loads(json.dumps(report, ensure_ascii=False))

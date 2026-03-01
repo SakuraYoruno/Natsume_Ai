@@ -7,5 +7,6 @@
     "host.integrations.llm_gateway"
   ],
   "milestone": "M3",
-  "ts_ms": 1800080000003
+  "ts_ms": 1800080000003,
+  "model_plane_asset_digest": "sha256:e75f0d8e5d3bb56508d281ad9ee62806783bf7ef059bc6ae99328b56400358ad"
 }

@@ -1,4 +1,4 @@
-"""Production failure drill runner for cold-start/dependency/rollback scenarios."""
+"""Production failure drill runner for cold-start/dependency/rollback and orchestration scenarios."""
 
 from __future__ import annotations
 
@@ -17,10 +17,14 @@ from host_brain.audit.drill import (
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    ORCH_NODE_MISSING,
+    ORCH_PARAM_DRIFT,
     RELEASE_ROLLBACK_TARGET_MISSING,
     SERVICE_UNAVAILABLE_COLD_START,
     SERVICE_UNAVAILABLE_DEPENDENCY,
+    SKILL_TOKEN_MISSING,
 )
+from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.integrations.llm_gateway import (
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
@@ -37,6 +41,10 @@ from tools.replay.request_replay import build_request_replay_report
 SCENARIO_COLD_START_NO_KEY = "cold_start_no_key"
 SCENARIO_PROVIDER_DOWN = "provider_down"
 SCENARIO_ROLLBACK_CONFLICT = "rollback_conflict"
+SCENARIO_MODEL_PROFILE_MISSING = "model_profile_missing"
+SCENARIO_SELECTOR_NO_CANDIDATE = "selector_no_candidate"
+SCENARIO_PARAM_DRIFT = "param_drift"
+SCENARIO_APPROVAL_TOKEN_MISSING = "approval_token_missing"
 
 DRILL_SCENARIO_INVALID = "DRILL_SCENARIO_INVALID"
 
@@ -94,6 +102,19 @@ def run_drill_scenario(
         if scenario_kind == SCENARIO_ROLLBACK_CONFLICT:
             return _run_rollback_conflict(
                 root=repo_root,
+                scenario=scenario,
+                scenario_id=scenario_id,
+                request_id=request_id,
+                ledger=ledger,
+                ts_ms=now_value,
+            )
+        if scenario_kind in {
+            SCENARIO_MODEL_PROFILE_MISSING,
+            SCENARIO_SELECTOR_NO_CANDIDATE,
+            SCENARIO_PARAM_DRIFT,
+            SCENARIO_APPROVAL_TOKEN_MISSING,
+        }:
+            return _run_orchestration_case(
                 scenario=scenario,
                 scenario_id=scenario_id,
                 request_id=request_id,
@@ -173,6 +194,7 @@ def _run_cold_start_no_key(
     ts_ms: int,
 ) -> dict[str, Any]:
     prompt = _load_prompt(root=root, scenario=scenario)
+    model_profile_id = str(scenario.get("model_profile_id") or "mp.openai.v1")
     gateway = LlmGatewayContract(
         ledger=ledger,
         provider_name=PROVIDER_OPENAI,
@@ -181,7 +203,7 @@ def _run_cold_start_no_key(
     )
     result = gateway.generate(
         request_id=request_id,
-        model_profile_id=str(scenario.get("model_profile_id") or "mp.openai.v1"),
+        model_profile_id=model_profile_id,
         prompt_payload=prompt,
         ts_ms=ts_ms,
     )
@@ -198,7 +220,7 @@ def _run_cold_start_no_key(
         [result.output.get("reason_code")],
         replay["summary"]["reason_code_chain"],
     )
-    return build_drill_result(
+    row = build_drill_result(
         scenario_id=scenario_id,
         status=result.status,
         stage=result.stage,
@@ -210,6 +232,8 @@ def _run_cold_start_no_key(
         replay_report=replay,
         ts_ms=ts_ms,
     )
+    row["model_profile_id"] = model_profile_id
+    return row
 
 
 def _run_provider_down(
@@ -223,6 +247,7 @@ def _run_provider_down(
 ) -> dict[str, Any]:
     prompt = _load_prompt(root=root, scenario=scenario)
     provider_name = str(scenario.get("provider_name") or PROVIDER_MOCK).strip().lower()
+    model_profile_id = str(scenario.get("model_profile_id") or "mp.mock.v1")
     api_key = str(scenario.get("api_key") or "").strip() or None
     gateway = LlmGatewayContract(
         ledger=ledger,
@@ -232,7 +257,7 @@ def _run_provider_down(
     )
     result = gateway.generate(
         request_id=request_id,
-        model_profile_id=str(scenario.get("model_profile_id") or "mp.mock.v1"),
+        model_profile_id=model_profile_id,
         prompt_payload=prompt,
         ts_ms=ts_ms,
     )
@@ -249,7 +274,7 @@ def _run_provider_down(
         [result.output.get("reason_code")],
         replay["summary"]["reason_code_chain"],
     )
-    return build_drill_result(
+    row = build_drill_result(
         scenario_id=scenario_id,
         status=result.status,
         stage=result.stage,
@@ -261,6 +286,79 @@ def _run_provider_down(
         replay_report=replay,
         ts_ms=ts_ms,
     )
+    row["model_profile_id"] = model_profile_id
+    return row
+
+
+def _run_orchestration_case(
+    *,
+    scenario: dict[str, Any],
+    scenario_id: str,
+    request_id: str,
+    ledger: SQLiteLedger,
+    ts_ms: int,
+) -> dict[str, Any]:
+    graph_config = dict(scenario.get("graph") or {})
+    payload = dict(scenario.get("payload") or {})
+
+    for model_node in (graph_config.get("model_nodes") or {}).values():
+        if not isinstance(model_node, dict):
+            continue
+        provider_fn = model_node.get("provider_fn")
+        if isinstance(provider_fn, str):
+            model_node["provider_fn"] = lambda _payload: json.dumps(
+                {"narrative": {"text": "drill"}, "intent_draft": {}, "meta": {"draft_only": True}},
+                ensure_ascii=False,
+            )
+    dependency_statuses = dict(scenario.get("dependency_statuses") or {})
+    model_profile_id = str(graph_config.get("model_profile_id") or "").strip() or None
+
+    runtime = GraphRuntimeContract(ledger=ledger)
+    result = runtime.run_graph(
+        request_id=request_id,
+        graph_config=graph_config,
+        payload=payload,
+        dependency_statuses=dependency_statuses,
+        ts_ms=ts_ms,
+    )
+    reason_code = str(result.reason_code or _default_reason_for_scenario(scenario_kind=str(scenario.get("scenario_kind") or "")))
+    replay = _build_replay_with_reject(
+        ledger=ledger,
+        request_id=request_id,
+        reason_code=reason_code,
+        stage=result.stage,
+        ts_ms=ts_ms,
+    )
+    chain = normalize_reason_code_chain(
+        [reason_code],
+        [result.reason_code],
+        list((result.output or {}).get("reason_code_chain") or []),
+        replay["summary"]["reason_code_chain"],
+    )
+    detail = str(result.detail or "orchestration drill executed")
+    row = build_drill_result(
+        scenario_id=scenario_id,
+        status=result.status,
+        stage=result.stage,
+        reason_code=reason_code,
+        reason_code_chain=chain,
+        replay_ref=f"request::{request_id}",
+        detail=detail,
+        payload=dict(result.output or {}),
+        replay_report=replay,
+        ts_ms=ts_ms,
+    )
+    row["model_profile_id"] = model_profile_id or result.output.get("model_profile_id")
+    return row
+
+
+def _default_reason_for_scenario(*, scenario_kind: str) -> str:
+    normalized = str(scenario_kind or "").strip().lower()
+    if normalized == SCENARIO_PARAM_DRIFT:
+        return ORCH_PARAM_DRIFT
+    if normalized == SCENARIO_APPROVAL_TOKEN_MISSING:
+        return SKILL_TOKEN_MISSING
+    return ORCH_NODE_MISSING
 
 
 def _run_rollback_conflict(

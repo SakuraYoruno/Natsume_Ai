@@ -25,6 +25,7 @@ def build_request_replay_report(*, ledger: SQLiteLedger, request_id: str) -> dic
     intent_rows = _by_request(ledger.intent_log, request_id)
     governor_rows = _by_request(ledger.governor_log, request_id)
     skill_rows = _by_request(ledger.skill_exec_log, request_id)
+    model_rows = _by_request(ledger.model_control_log, request_id)
     error_rows = _by_request(ledger.error_log, request_id)
     qa_rows = _by_request(ledger.qa_violation_log, request_id)
 
@@ -63,6 +64,7 @@ def build_request_replay_report(*, ledger: SQLiteLedger, request_id: str) -> dic
             "intent_count": len(intent_rows),
             "governor_count": len(governor_rows),
             "skill_exec_count": len(skill_rows),
+            "model_control_count": len(model_rows),
             "error_count": len(error_rows),
             "qa_violation_count": len(qa_rows),
             "reason_code_chain": reason_code_chain,
@@ -73,6 +75,7 @@ def build_request_replay_report(*, ledger: SQLiteLedger, request_id: str) -> dic
             "intent_log": intent_rows,
             "governor_log": governor_rows,
             "skill_exec_log": skill_rows,
+            "model_control_log": model_rows,
         },
         "error_log": error_rows,
         "qa_violation_log": qa_rows,
