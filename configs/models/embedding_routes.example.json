@@ -1,0 +1,18 @@
+{
+  "routes": {
+    "host_default": {
+      "provider": "builtin_hash",
+      "model_id": "hash-embed-v1",
+      "dim": 16,
+      "timeout_ms": 500,
+      "node_selector": "default,host-01"
+    },
+    "gpu_route": {
+      "provider": "openai",
+      "model_id": "text-embedding-3-large",
+      "dim": 3072,
+      "timeout_ms": 900,
+      "node_selector": "node-gpu-01"
+    }
+  }
+}

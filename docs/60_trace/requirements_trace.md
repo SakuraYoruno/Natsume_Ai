@@ -261,6 +261,15 @@
 - 当前进展（2026-03-01）：已落地 Chroma runtime config（endpoint/tenant/database/collection_profiles/default_collection）与探针输出，endpoint down/collection missing/vector dim mismatch 三类失败映射稳定；集合治理在 upsert/search 维度校验中保持可回放拒绝口径。
 - 覆盖状态：DONE
 
+## R-28
+- 系统级需求：Embedding 多提供方路由与版本化配置可解析、可降级、可审计；节点选择与向量维度漂移口径稳定
+- PRD 需求编号（FR）：FR-MEM-003, FR-OBS-001
+- DevSpec 落点：DevSpec 8.3.1/13
+- DevTasks（TASK）：TASK-0054
+- 验收测试（T-xx）：T-Ret-01, T-Embed-01
+- 当前进展（2026-03-01）：已落地 embedding runtime config（provider/model_id/dim/timeout_ms/node_selector）加载与节点路由选择，覆盖 unavailable/timeout/dim drift 三类失败映射（`RETR_EMBED_*`）并将 expected_dim/actual_dim 写入 retrieval_event_log 便于审计回放。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

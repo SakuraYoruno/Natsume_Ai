@@ -1,0 +1,7 @@
+{
+  "env": {
+    "RETR_EMBED_ENABLED": "true",
+    "RETR_EMBED_DEFAULT_ROUTE": "host_default",
+    "RETR_EMBED_ROUTES_JSON": "{\"host_default\":{\"provider\":\"builtin_hash\",\"model_id\":\"hash-embed-v1\",\"dim\":16,\"timeout_ms\":500,\"node_selector\":\"default,host-01\"},\"gpu_route\":{\"provider\":\"mock_openai\",\"model_id\":\"text-embedding-3-large\",\"dim\":16,\"timeout_ms\":900,\"node_selector\":\"node-gpu-01\"}}"
+  }
+}
