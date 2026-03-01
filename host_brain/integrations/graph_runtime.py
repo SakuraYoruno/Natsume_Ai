@@ -536,6 +536,13 @@ class GraphRuntimeContract:
                 reason_code=reason_code,
                 detail=detail,
             )
+        self._log_model_control_rows(
+            request_id=request_id,
+            model_profile_id=model_profile_id,
+            model_calls=model_calls,
+            stage=stage,
+            ts_ms=ts_ms,
+        )
         output = {
             "request_id": request_id,
             "graph_id": str(graph_config.get("graph_id") or ""),
@@ -558,6 +565,39 @@ class GraphRuntimeContract:
             detail=detail,
             output=output,
         )
+
+    def _log_model_control_rows(
+        self,
+        *,
+        request_id: str,
+        model_profile_id: str | None,
+        model_calls: list[dict[str, Any]],
+        stage: str,
+        ts_ms: int,
+    ) -> None:
+        if self.ledger is None or not hasattr(self.ledger, "log_model_control"):
+            return
+        for call in model_calls:
+            refs = dict(call.get("governance_refs") or {})
+            self.ledger.log_model_control(
+                {
+                    "request_id": request_id,
+                    "node_id": call.get("node_id"),
+                    "model_node_id": call.get("model_node_id"),
+                    "model_profile_id": (call.get("model_profile_id") or model_profile_id),
+                    "provider": call.get("provider"),
+                    "model_id": call.get("model_id"),
+                    "expected_param_hash": call.get("expected_param_hash"),
+                    "actual_param_hash": call.get("actual_param_hash"),
+                    "drift_detected": bool(call.get("drift_detected", False)),
+                    "approval_token_ref": refs.get("approval_token_ref"),
+                    "evidence_ref": refs.get("evidence_ref"),
+                    "reason_code": call.get("reason_code"),
+                    "status": call.get("gateway_status"),
+                    "stage": stage,
+                    "ts_ms": int(ts_ms),
+                }
+            )
 
     def _log_error(self, *, request_id: str, stage: str, reason_code: str, detail: str) -> None:
         if self.ledger is None:

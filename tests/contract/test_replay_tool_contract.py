@@ -85,6 +85,26 @@ class TestReplayToolContract(unittest.TestCase):
             }
         )
 
+        self.ledger.log_model_control(
+            {
+                "request_id": request_id,
+                "node_id": "respond",
+                "model_node_id": "renderer_ja_c_style",
+                "model_profile_id": "chat_ja_24x7_v1",
+                "provider": "gemini",
+                "model_id": "gemini-2.5-flash",
+                "expected_param_hash": "h1",
+                "actual_param_hash": "h1",
+                "drift_detected": False,
+                "approval_token_ref": "approval::replay::001",
+                "evidence_ref": "evidence::replay::001",
+                "reason_code": None,
+                "status": "OK",
+                "stage": "S_ORCH_RUN",
+                "ts_ms": self.now_ms + 2,
+            }
+        )
+
         report = self.replay_module.build_request_replay_report(ledger=self.ledger, request_id=request_id)
         self.assertEqual("S_REPLAY_REPORT", report["stage"])
         self.assertEqual(fixture["expected_status"], report["status"])
@@ -93,11 +113,13 @@ class TestReplayToolContract(unittest.TestCase):
         self.assertEqual(1, report["summary"]["intent_count"])
         self.assertEqual(1, report["summary"]["governor_count"])
         self.assertEqual(1, report["summary"]["skill_exec_count"])
+        self.assertEqual(1, report["summary"]["model_control_count"])
         self.assertEqual(["evidence::replay::001"], report["summary"]["evidence_refs"])
         self.assertEqual([], report["issues"])
         self.assertIsInstance(report["triptych"]["intent_log"], list)
         self.assertIsInstance(report["triptych"]["governor_log"], list)
         self.assertIsInstance(report["triptych"]["skill_exec_log"], list)
+        self.assertIsInstance(report["triptych"]["model_control_log"], list)
         json.loads(json.dumps(report, ensure_ascii=False))
 
     def test_t_replay_01_missing_skill_exec_is_diagnosed(self) -> None:

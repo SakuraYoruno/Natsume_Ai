@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -13,6 +14,9 @@ from host_brain.core.errors import (
     RELEASE_CHECKSUM_DRIFT,
     RELEASE_CONFIG_SNAPSHOT_INVALID,
     RELEASE_FLOW_POINTER_MISMATCH,
+    RELEASE_MODEL_PLANE_DIGEST_MISMATCH,
+    RELEASE_MODEL_PLANE_VERSION_INVALID,
+    RELEASE_ROLLBACK_DIGEST_MISSING,
     RELEASE_ROLLBACK_TARGET_MISSING,
 )
 from host_brain.core.ids import now_ms
@@ -24,6 +28,9 @@ STATUS_FAILED = "FAILED"
 ALLOWED_MILESTONES = {"M0", "M1", "M2", "M3"}
 ALLOWED_FLOW_ENVS = ("dev", "staging", "prod")
 CHECKSUM_PREFIX = "sha256:"
+MODEL_PLANE_PROFILES_PATH = "configs/model_plane/model_profiles.yaml"
+MODEL_PLANE_NODE_REGISTRY_PATH = "configs/model_plane/node_registry.yaml"
+_VERSION_PATTERN = re.compile(r"^\s*#\s*版本\s*[：:]\s*(\S+)\s*$")
 
 
 def build_release_checklist(
@@ -36,6 +43,7 @@ def build_release_checklist(
     config_snapshot_refs: Iterable[str],
     active_pointer_path: str | Path = "flows/active.pointer",
     include_active_flow_assets: bool = True,
+    include_model_plane_assets: bool = True,
     ts_ms: int | None = None,
 ) -> dict[str, Any]:
     repo_root = Path(root).resolve()
@@ -50,8 +58,14 @@ def build_release_checklist(
             flow_path = str(flow_refs[env])
             if flow_path not in asset_list:
                 asset_list.append(flow_path)
-        asset_list.sort()
 
+    model_plane = _load_model_plane_meta(repo_root) if include_model_plane_assets else None
+    if model_plane is not None:
+        for rel_path in model_plane["assets"]:
+            if rel_path not in asset_list:
+                asset_list.append(rel_path)
+
+    asset_list.sort()
     checksums: dict[str, str | None] = {}
     for rel_path in asset_list:
         abs_path = repo_root / rel_path
@@ -67,6 +81,7 @@ def build_release_checklist(
         "checksums": checksums,
         "required_services": sorted({str(service) for service in required_services}),
         "flow_refs": {env: str(flow_refs[env]) for env in ALLOWED_FLOW_ENVS},
+        "model_plane": model_plane,
         "config_snapshot_refs": sorted({str(ref) for ref in config_snapshot_refs}),
         "ts_ms": int(ts_ms if ts_ms is not None else now_ms()),
     }
@@ -78,6 +93,7 @@ def build_rollback_mapping(
     rollback_target: str,
     impact_scope: Iterable[str],
     milestone: str,
+    model_plane_asset_digest: str | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any]:
     return {
@@ -86,6 +102,9 @@ def build_rollback_mapping(
         "rollback_target": str(rollback_target),
         "impact_scope": sorted({str(item) for item in impact_scope}),
         "milestone": str(milestone).strip().upper(),
+        "model_plane_asset_digest": (
+            str(model_plane_asset_digest).strip() if model_plane_asset_digest else None
+        ),
         "ts_ms": int(ts_ms if ts_ms is not None else now_ms()),
     }
 
@@ -97,6 +116,7 @@ def validate_release_bundle(
     rollback_mapping: Mapping[str, Any],
     known_release_ids: set[str] | None = None,
     known_config_snapshot_refs: set[str] | None = None,
+    known_model_plane_digests: set[str] | None = None,
     active_pointer_path: str | Path = "flows/active.pointer",
     flow_index_path: str | Path = "docs/60_trace/flows/index.md",
 ) -> dict[str, Any]:
@@ -149,6 +169,37 @@ def validate_release_bundle(
                     detail=f"checksum drift: expected={expected}, actual={actual}",
                 )
             )
+
+    expected_model_plane = dict(checklist.get("model_plane") or {})
+    current_model_plane = _load_model_plane_meta(repo_root)
+    if expected_model_plane:
+        _validate_model_plane_meta(
+            issues=issues,
+            expected_model_plane=expected_model_plane,
+            current_model_plane=current_model_plane,
+            known_model_plane_digests=known_model_plane_digests,
+        )
+
+    rollback_digest = str(rollback_mapping.get("model_plane_asset_digest") or "").strip()
+    if not rollback_digest:
+        issues.append(
+            _issue(
+                reason_code=RELEASE_ROLLBACK_DIGEST_MISSING,
+                failed_artifact="rollback_mapping.model_plane_asset_digest",
+                detail="rollback mapping must bind model_plane_asset_digest",
+            )
+        )
+    elif rollback_digest != current_model_plane["asset_digest"]:
+        issues.append(
+            _issue(
+                reason_code=RELEASE_MODEL_PLANE_DIGEST_MISMATCH,
+                failed_artifact="rollback_mapping.model_plane_asset_digest",
+                detail=(
+                    "rollback mapping digest mismatch: "
+                    f"expected={current_model_plane['asset_digest']}, actual={rollback_digest}"
+                ),
+            )
+        )
 
     config_snapshot_refs = [str(ref) for ref in checklist.get("config_snapshot_refs", [])]
     if not config_snapshot_refs:
@@ -242,6 +293,7 @@ def build_release_matrix(
             config_snapshot_refs=list(raw.get("config_snapshot_refs") or []),
             active_pointer_path=active_pointer_path,
             include_active_flow_assets=bool(raw.get("include_active_flow_assets", True)),
+            include_model_plane_assets=bool(raw.get("include_model_plane_assets", True)),
             ts_ms=raw.get("ts_ms"),
         )
         rows.append(checklist)
@@ -269,6 +321,75 @@ def _load_active_pointer(path: Path) -> dict[str, str]:
 def _digest_file(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return CHECKSUM_PREFIX + digest
+
+
+def _load_model_plane_meta(root: Path) -> dict[str, Any]:
+    profile_path = root / MODEL_PLANE_PROFILES_PATH
+    registry_path = root / MODEL_PLANE_NODE_REGISTRY_PATH
+    profile_text = profile_path.read_text(encoding="utf-8")
+    registry_text = registry_path.read_text(encoding="utf-8")
+
+    profile_version = _extract_version_tag(profile_text)
+    registry_version = _extract_version_tag(registry_text)
+
+    digest = hashlib.sha256()
+    digest.update(profile_text.encode("utf-8"))
+    digest.update(b"\n---\n")
+    digest.update(registry_text.encode("utf-8"))
+    return {
+        "profile_version": profile_version,
+        "node_registry_version": registry_version,
+        "asset_digest": CHECKSUM_PREFIX + digest.hexdigest(),
+        "assets": [MODEL_PLANE_PROFILES_PATH, MODEL_PLANE_NODE_REGISTRY_PATH],
+    }
+
+
+def _extract_version_tag(text: str) -> str:
+    for line in text.splitlines():
+        match = _VERSION_PATTERN.match(line)
+        if match:
+            return match.group(1)
+    return "unknown"
+
+
+def _validate_model_plane_meta(
+    *,
+    issues: list[dict[str, Any]],
+    expected_model_plane: Mapping[str, Any],
+    current_model_plane: Mapping[str, Any],
+    known_model_plane_digests: set[str] | None,
+) -> None:
+    expected_digest = str(expected_model_plane.get("asset_digest") or "")
+    current_digest = str(current_model_plane.get("asset_digest") or "")
+    if expected_digest != current_digest:
+        issues.append(
+            _issue(
+                reason_code=RELEASE_MODEL_PLANE_DIGEST_MISMATCH,
+                failed_artifact="model_plane.asset_digest",
+                detail=f"model_plane digest mismatch: expected={expected_digest}, actual={current_digest}",
+            )
+        )
+
+    for key in ("profile_version", "node_registry_version"):
+        expected = str(expected_model_plane.get(key) or "")
+        actual = str(current_model_plane.get(key) or "")
+        if expected != actual:
+            issues.append(
+                _issue(
+                    reason_code=RELEASE_MODEL_PLANE_VERSION_INVALID,
+                    failed_artifact=f"model_plane.{key}",
+                    detail=f"model_plane version mismatch: expected={expected}, actual={actual}",
+                )
+            )
+
+    if known_model_plane_digests is not None and current_digest not in known_model_plane_digests:
+        issues.append(
+            _issue(
+                reason_code=RELEASE_MODEL_PLANE_VERSION_INVALID,
+                failed_artifact="model_plane.asset_digest",
+                detail="model_plane digest not found in known digest set",
+            )
+        )
 
 
 def _normalize(path: str | Path) -> str:

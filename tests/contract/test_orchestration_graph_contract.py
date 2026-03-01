@@ -227,6 +227,11 @@ class TestOrchestrationGraphContract(unittest.TestCase):
         self.assertTrue(call["param_hash"])
         self.assertEqual(1200, call["timeout_ms"])
 
+        ledger_rows = self.ledger.model_control_log
+        self.assertEqual(1, len(ledger_rows))
+        self.assertEqual("chat_ja_24x7_v1", ledger_rows[0]["model_profile_id"])
+        self.assertEqual(call["actual_param_hash"], ledger_rows[0]["actual_param_hash"])
+
     def test_t_orch_02_missing_model_profile_rejected_at_validate_stage(self) -> None:
         graph = {
             "graph_id": "graph.model_plane.v2",
@@ -388,6 +393,7 @@ class TestOrchestrationGraphContract(unittest.TestCase):
         self.assertEqual(SKILL_TOKEN_MISSING, call["reason_code"])
         self.assertEqual("intent_001", call["governance_refs"]["intent_id"])
         self.assertIsNone(call["governance_refs"]["approval_token_ref"])
+        self.assertEqual(SKILL_TOKEN_MISSING, self.ledger.model_control_log[0]["reason_code"])
 
     def test_t_orch_05_model_node_carries_governance_refs(self) -> None:
         graph = {
