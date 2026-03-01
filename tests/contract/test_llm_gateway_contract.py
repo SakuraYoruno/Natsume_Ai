@@ -12,6 +12,8 @@ from host_brain.core.errors import (
 from host_brain.core.qa import REASON_FORMAT_DRIFT, find_forbidden_keys
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
+    PROVIDER_GEMINI,
+    PROVIDER_QWEN,
     S_LLM_GATEWAY_EGRESS,
     S_LLM_GATEWAY_PROVIDER,
     S_LLM_GATEWAY_QA,
@@ -141,6 +143,33 @@ class TestLlmGatewayContract(unittest.TestCase):
             msg=ledger.error_log,
         )
         ledger.close()
+
+    def test_gateway_provider_unavailable_qwen_or_gemini_cold_start_degrades(self) -> None:
+        prompt = _load_json(FIXTURES / "good" / "prompt_payload.json")
+        for provider_name, profile_id in (
+            (PROVIDER_QWEN, "mp.qwen.v1"),
+            (PROVIDER_GEMINI, "mp.gemini.v1"),
+        ):
+            ledger = SQLiteLedger(db_path=":memory:")
+            gateway = LlmGatewayContract(
+                ledger=ledger,
+                provider_name=provider_name,
+                api_key=None,
+                available=True,
+            )
+            result = gateway.generate(
+                request_id=f"req_llm_gateway_{provider_name}",
+                model_profile_id=profile_id,
+                prompt_payload=prompt,
+                ts_ms=1_800_030_000_005,
+            )
+            self.assertFalse(result.success)
+            self.assertEqual(STATUS_DEGRADED, result.status)
+            self.assertEqual(S_LLM_GATEWAY_PROVIDER, result.stage)
+            self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.reason_code)
+            self.assertEqual(provider_name, result.output["provider"])
+            self.assertTrue(result.output["draft_only"])
+            ledger.close()
 
     def test_gateway_egress_blocked_returns_airlock_reason(self) -> None:
         payload = _load_json(FIXTURES / "bad" / "egress_blocked_payload.json")

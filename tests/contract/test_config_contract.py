@@ -107,6 +107,20 @@ class TestConfigContract(unittest.TestCase):
         self.assertEqual(CONFIG_REQUIRED_MISSING, result.reason_code)
         self.assertTrue(any(issue.field == "DEEPSEEK_API_KEY" for issue in result.issues))
 
+    def test_t_config_01_host_prod_missing_qwen_or_gemini_key_rejected(self) -> None:
+        for provider, expected_field in (("qwen", "QWEN_API_KEY"), ("gemini", "GEMINI_API_KEY")):
+            result = load_host_config(
+                env={
+                    "NATSUME_ENV": "prod",
+                    "HOST_LLM_PROVIDER": provider,
+                    "HOST_COLD_START_ALLOWED": "false",
+                }
+            )
+            self.assertFalse(result.success)
+            self.assertEqual(S_HOST_CONFIG, result.stage)
+            self.assertEqual(CONFIG_REQUIRED_MISSING, result.reason_code)
+            self.assertTrue(any(issue.field == expected_field for issue in result.issues))
+
     def test_t_config_01_edge_invalid_port_rejected(self) -> None:
         fixture = _load_json(FIXTURES / "bad" / "edge_invalid_port.json")
         result = load_edge_config(env=fixture["env"])

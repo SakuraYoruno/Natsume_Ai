@@ -194,6 +194,77 @@ class TestKeyProfileContract(unittest.TestCase):
         self.assertEqual("<redacted>", snapshot.snapshot["values"]["llm_api_key"])
         self.assertIn("DEEPSEEK_API_KEY", snapshot.snapshot["redacted_keys"])
 
+    def test_t_key_01_qwen_and_gemini_key_ref_are_resolved(self) -> None:
+        test_cases = [
+            (
+                "qwen",
+                "natsu-node-04",
+                "QWEN_API_KEY_REF",
+                "sec://qwen/natsu-node-04",
+                "qwen_api_key",
+                "QWEN_API_KEY",
+            ),
+            (
+                "gemini",
+                "natsu-node-06",
+                "GEMINI_API_KEY_REF",
+                "sec://gemini/natsu-node-06",
+                "gemini_api_key",
+                "GEMINI_API_KEY",
+            ),
+        ]
+        for provider, node_id, ref_key, secret_ref, key_field, redacted_key in test_cases:
+            runtime = {
+                "current_epoch": 20260301,
+                "host_node_id": node_id,
+                "profiles": [
+                    {
+                        "provider": provider,
+                        "node_id": node_id,
+                        "scope": "host.llm",
+                        "secret_ref": secret_ref,
+                        "rotation_epoch": 20270101,
+                        "status": "active",
+                    }
+                ],
+                "secret_store": {
+                    secret_ref: f"sk-{provider}-demo-value",
+                },
+            }
+            env = {
+                "NATSUME_ENV": "prod",
+                "HOST_LLM_PROVIDER": provider,
+                "HOST_COLD_START_ALLOWED": "false",
+                ref_key: secret_ref,
+            }
+            result = load_host_config(
+                env=env,
+                key_profiles=runtime["profiles"],
+                secret_store=runtime["secret_store"],
+                node_id=runtime["host_node_id"],
+                current_epoch=runtime["current_epoch"],
+            )
+            self.assertTrue(result.success, msg=result.as_dict())
+            assert result.config is not None
+            self.assertEqual(provider, result.config.llm_provider)
+            self.assertTrue(getattr(result.config, key_field))
+            self.assertTrue(result.config.llm_api_key)
+            self.assertEqual(secret_ref, result.config.llm_api_key_ref)
+            self.assertEqual("resolved", result.config.key_profile_status)
+
+            snapshot = export_host_config_snapshot(
+                env=env,
+                key_profiles=runtime["profiles"],
+                secret_store=runtime["secret_store"],
+                node_id=runtime["host_node_id"],
+                current_epoch=runtime["current_epoch"],
+            )
+            self.assertTrue(snapshot.success, msg=snapshot.as_dict())
+            assert snapshot.snapshot is not None
+            self.assertEqual("<redacted>", snapshot.snapshot["values"][key_field])
+            self.assertEqual("<redacted>", snapshot.snapshot["values"]["llm_api_key"])
+            self.assertIn(redacted_key, snapshot.snapshot["redacted_keys"])
+
 
 if __name__ == "__main__":
     unittest.main()

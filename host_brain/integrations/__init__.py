@@ -3,8 +3,10 @@
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_DISABLED,
+    PROVIDER_GEMINI,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
+    PROVIDER_QWEN,
     S_LLM_GATEWAY_EGRESS,
     S_LLM_GATEWAY_PROVIDER,
     S_LLM_GATEWAY_QA,
@@ -27,8 +29,10 @@ from host_brain.integrations.graph_runtime import (
 __all__ = [
     "PROVIDER_DEEPSEEK",
     "PROVIDER_DISABLED",
+    "PROVIDER_GEMINI",
     "PROVIDER_MOCK",
     "PROVIDER_OPENAI",
+    "PROVIDER_QWEN",
     "S_LLM_GATEWAY_EGRESS",
     "S_LLM_GATEWAY_PROVIDER",
     "S_LLM_GATEWAY_QA",

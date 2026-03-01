@@ -27,6 +27,8 @@ STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 
 PROVIDER_OPENAI = "openai"
+PROVIDER_QWEN = "qwen"
+PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_MOCK = "mock"
 PROVIDER_DISABLED = "disabled"
@@ -199,8 +201,14 @@ class LlmGatewayContract:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
         if self.provider_name == PROVIDER_DISABLED:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
-        if self.provider_name in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK} and not self.api_key:
-            missing_key = "OPENAI_API_KEY" if self.provider_name == PROVIDER_OPENAI else "DEEPSEEK_API_KEY"
+        provider_to_env_key = {
+            PROVIDER_OPENAI: "OPENAI_API_KEY",
+            PROVIDER_QWEN: "QWEN_API_KEY",
+            PROVIDER_GEMINI: "GEMINI_API_KEY",
+            PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        }
+        if self.provider_name in provider_to_env_key and not self.api_key:
+            missing_key = provider_to_env_key[self.provider_name]
             return False, SERVICE_UNAVAILABLE_COLD_START, f"{missing_key} missing"
         return True, "", ""
 
