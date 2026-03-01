@@ -216,6 +216,15 @@
 - 当前进展（2026-03-01）：已落地三类演练场景（NoKey/provider down/rollback conflict）与统一演练报告结构（scenario_id/status/reason_code_chain/replay_ref）；故障分类与处置口径已固化，回放链路可由 request_id 稳定复盘。
 - 覆盖状态：DONE
 
+## R-23
+- 系统级需求：九节点部署编排可审计，节点-服务覆盖完整，节点探针故障映射稳定可统计
+- PRD 需求编号（FR）：FR-CORE-004, FR-OBS-001
+- DevSpec 落点：DevSpec 10/13
+- DevTasks（TASK）：TASK-0049
+- 验收测试（T-xx）：T-Infra-01
+- 当前进展（2026-03-01）：已落地九节点清单契约（node_id/region/role/services/health_endpoint/key_profile_id）、primary/secondary 服务映射、缺服务/角色冲突拒绝与 probe timeout 稳定映射。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

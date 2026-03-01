@@ -21,7 +21,7 @@
 15. `mcp/`: provider tool sync fixtures (READ/WRITE classification, metadata validation, and governed invocation paths).
 16. `channels/`: WeChat ingress/egress and VTS avatar fixtures (duplicate ingress, failed egress ack, invalid emotion tags, and free-form action blocking).
 17. `vision/`: vision fixtures for ClawdBot UI guardrails, screen OCR contracts, and camera recognition events (gaming gate blocks, structured OCR output, evidence_ref replay linkage, and low-confidence marking).
-18. `services/`: service unavailable matrix fixtures for registry/health degradation reason_code mapping and request-level audit logging.
+18. `services/`: service unavailable matrix fixtures for registry/health degradation reason_code mapping and request-level audit logging, plus nine-node deployment fixtures (`node_id/region/role/services/health_endpoint/key_profile_id`) for missing-service/role-conflict/probe-timeout scenarios (`T-Infra-01`).
 19. `voice/`: Edge voice RPC fixtures for `asr_chunk/speak/barge_in`, fallback LLM contracts (`presence/asr_compile/retrieval_hints/context_compress`), and resource-gate pressure scenarios (priority/mutex with vram/queue metrics).
 20. `retrieval/`: embedding/rerank/evidence-pack fixtures for stable retrieval contract outputs, degrade reason_code mapping, and retrieval_event_log audit linkage.
 21. `bond/`: Bond fixtures for SSOT single-writer updates, summary derivation/injection (`event_id/evidence_refs` replay refs), missing-evidence rejection, and static-scan non-single-writer violations (`T-50~T-54`, `T-74~T-75`, `T-SSOT-01`).

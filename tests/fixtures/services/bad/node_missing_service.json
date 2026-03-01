@@ -1,0 +1,121 @@
+{
+  "request_id": "req_infra_002",
+  "expected_node_count": 9,
+  "required_services": [
+    "host.audit.sqlite_ledger",
+    "host.governor.decision",
+    "host.skills.loader",
+    "host.integrations.llm_gateway",
+    "host.retrieval.embedding",
+    "host.retrieval.reranker",
+    "host.vision.screen_ocr",
+    "host.vision.camera_recognizer",
+    "edge.rpc.gateway",
+    "edge.rpc.asr",
+    "edge.rpc.tts",
+    "edge.rpc.barge_in",
+    "edge.rpc.fallback_llm",
+    "edge.rpc.resource_gate"
+  ],
+  "nodes": [
+    {
+      "node_id": "natsu-node-01",
+      "region": "us-east-1",
+      "role": "orchestrator",
+      "services": [
+        "host.governor.decision",
+        "host.skills.loader",
+        "host.integrations.llm_gateway"
+      ],
+      "health_endpoint": "https://node01.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-01"
+    },
+    {
+      "node_id": "natsu-node-02",
+      "region": "us-east-1",
+      "role": "audit",
+      "services": [
+        "host.audit.sqlite_ledger"
+      ],
+      "health_endpoint": "https://node02.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-02"
+    },
+    {
+      "node_id": "natsu-node-03",
+      "region": "us-west-1",
+      "role": "llm",
+      "services": [
+        "host.integrations.llm_gateway"
+      ],
+      "health_endpoint": "https://node03.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-03"
+    },
+    {
+      "node_id": "natsu-node-04",
+      "region": "us-west-1",
+      "role": "retrieval",
+      "services": [
+        "host.retrieval.embedding",
+        "host.retrieval.reranker"
+      ],
+      "health_endpoint": "https://node04.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-04"
+    },
+    {
+      "node_id": "natsu-node-05",
+      "region": "us-west-1",
+      "role": "vision",
+      "services": [
+        "host.vision.screen_ocr"
+      ],
+      "health_endpoint": "https://node05.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-05"
+    },
+    {
+      "node_id": "natsu-node-06",
+      "region": "us-east-1",
+      "role": "edge_gateway",
+      "services": [
+        "edge.rpc.gateway",
+        "edge.rpc.resource_gate"
+      ],
+      "health_endpoint": "https://node06.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-06"
+    },
+    {
+      "node_id": "natsu-node-07",
+      "region": "us-east-1",
+      "role": "edge_voice",
+      "services": [
+        "edge.rpc.asr",
+        "edge.rpc.tts"
+      ],
+      "health_endpoint": "https://node07.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-07"
+    },
+    {
+      "node_id": "natsu-node-08",
+      "region": "us-central-1",
+      "role": "edge_realtime",
+      "services": [
+        "edge.rpc.barge_in",
+        "edge.rpc.fallback_llm"
+      ],
+      "health_endpoint": "https://node08.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-08"
+    },
+    {
+      "node_id": "natsu-node-09",
+      "region": "us-central-1",
+      "role": "standby",
+      "services": [
+        "host.integrations.llm_gateway",
+        "host.retrieval.embedding",
+        "edge.rpc.gateway"
+      ],
+      "health_endpoint": "https://node09.natsume.ai/healthz",
+      "key_profile_id": "kpf-node-09"
+    }
+  ],
+  "expected_reason_code": "INFRA_NODE_MISSING_SERVICE"
+}
