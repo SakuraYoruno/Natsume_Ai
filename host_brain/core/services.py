@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from edge_client.rpc import edge_required_services
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -26,8 +26,11 @@ STATUS_DEGRADED = "DEGRADED"
 
 HEALTH_UP = "UP"
 HEALTH_DEGRADED = "DEGRADED"
+BOOT_READY = "READY"
+BOOT_DEGRADED = "DEGRADED"
 
 S_SERVICE_HEALTH = "S_SERVICE_HEALTH"
+S_SERVICE_BOOTSTRAP = "S_SERVICE_BOOTSTRAP"
 
 KIND_COLD_START = "cold_start"
 KIND_DEPENDENCY = "dependency"
@@ -72,6 +75,24 @@ class ServiceRegistry:
 
     def get(self, service_id: str) -> ServiceSpec | None:
         return self._services.get(service_id)
+
+
+@dataclass(frozen=True)
+class StartupIssue:
+    scope: str
+    stage: str
+    reason_code: str
+    detail: str
+    field: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "scope": self.scope,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "field": self.field,
+        }
 
 
 class ServiceHealthReporter:
@@ -122,6 +143,7 @@ class ServiceHealthReporter:
                 "required": spec.required,
                 "status": status,
                 "reason_code": reason_code,
+                "stage": S_SERVICE_HEALTH,
                 "detail": line_detail,
             }
             services_out.append(row)
@@ -161,11 +183,70 @@ class ServiceHealthReporter:
                 "required": int(bool(row["required"])),
                 "status": row["status"],
                 "reason_code": row["reason_code"],
-                "stage": S_SERVICE_HEALTH,
+                "stage": row["stage"],
                 "detail": row["detail"],
                 "ts_ms": ts_ms,
             }
         )
+
+
+class ServiceStartupOrchestrator:
+    """Boot-time orchestration that merges config/runtime/probe statuses."""
+
+    def __init__(self, *, registry: ServiceRegistry, ledger: SQLiteLedger | None = None) -> None:
+        self.registry = registry
+        self.ledger = ledger
+        self.health_reporter = ServiceHealthReporter(registry=registry, ledger=ledger)
+
+    def build_startup_report(
+        self,
+        *,
+        request_id: str,
+        runtime_statuses: Mapping[str, Any] | None = None,
+        dependency_probes: Mapping[str, Any] | None = None,
+        startup_issues: Sequence[StartupIssue | Mapping[str, Any]] | None = None,
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        now_value = int(ts_ms if ts_ms is not None else now_ms())
+        probe_statuses, probe_rows = normalize_dependency_probes(dependency_probes)
+
+        merged_statuses: dict[str, Any] = {}
+        if runtime_statuses:
+            merged_statuses.update(dict(runtime_statuses))
+        merged_statuses.update(probe_statuses)
+
+        health_report = self.health_reporter.build_report(
+            request_id=request_id,
+            runtime_statuses=merged_statuses,
+            ts_ms=now_value,
+        )
+        normalized_issues = normalize_startup_issues(startup_issues)
+        boot_status = BOOT_READY
+        if normalized_issues or int(health_report["summary"]["required_unavailable"]) > 0:
+            boot_status = BOOT_DEGRADED
+
+        return {
+            "request_id": request_id,
+            "stage": S_SERVICE_BOOTSTRAP,
+            "reason_code": pick_startup_reason(
+                issues=normalized_issues,
+                service_reason=health_report.get("reason_code"),
+            ),
+            "summary": {
+                "boot_status": boot_status,
+                "issue_count": len(normalized_issues),
+                "probe_total": len(probe_rows),
+                "probe_unavailable": sum(1 for row in probe_rows if not row["available"]),
+                "required_total": int(health_report["summary"]["required_total"]),
+                "required_unavailable": int(health_report["summary"]["required_unavailable"]),
+                "optional_unavailable": int(health_report["summary"]["optional_unavailable"]),
+            },
+            "startup_issues": normalized_issues,
+            "dependency_probes": probe_rows,
+            "services": health_report["services"],
+            "service_health": health_report,
+            "ts_ms": now_value,
+        }
 
 
 def build_default_service_registry() -> ServiceRegistry:
@@ -199,6 +280,90 @@ def map_unavailable_reason(unavailable_kind: str | None) -> str:
     if not key:
         return SERVICE_UNAVAILABLE_GENERIC
     return REASON_BY_KIND.get(key, SERVICE_UNAVAILABLE_GENERIC)
+
+
+def build_owner_unavailable_statuses(
+    *,
+    registry: ServiceRegistry,
+    owner: str,
+    unavailable_kind: str,
+    detail: str,
+) -> dict[str, dict[str, Any]]:
+    statuses: dict[str, dict[str, Any]] = {}
+    for spec in registry.all():
+        if spec.owner != owner:
+            continue
+        statuses[spec.service_id] = {
+            "available": False,
+            "unavailable_kind": unavailable_kind,
+            "detail": str(detail),
+        }
+    return statuses
+
+
+def normalize_dependency_probes(
+    probes: Mapping[str, Any] | None,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    if not isinstance(probes, Mapping):
+        return {}, []
+
+    statuses: dict[str, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+    for service_id in sorted(str(key) for key in probes.keys()):
+        runtime = _normalize_runtime_status(probes.get(service_id))
+        available = bool(runtime["available"])
+        unavailable_kind = runtime["unavailable_kind"]
+        detail = runtime["detail"] or ("probe healthy" if available else "probe unavailable")
+        row = {
+            "service_id": service_id,
+            "available": available,
+            "unavailable_kind": unavailable_kind,
+            "reason_code": None if available else map_unavailable_reason(unavailable_kind),
+            "detail": detail,
+        }
+        rows.append(row)
+        statuses[service_id] = {
+            "available": available,
+            "unavailable_kind": unavailable_kind,
+            "detail": detail,
+        }
+    return statuses, rows
+
+
+def normalize_startup_issues(
+    issues: Sequence[StartupIssue | Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if not issues:
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for raw in issues:
+        if isinstance(raw, StartupIssue):
+            normalized.append(raw.as_dict())
+            continue
+        if not isinstance(raw, Mapping):
+            continue
+        reason_code = str(raw.get("reason_code") or "").strip()
+        if not reason_code:
+            continue
+        normalized.append(
+            {
+                "scope": str(raw.get("scope") or "startup"),
+                "stage": str(raw.get("stage") or S_SERVICE_BOOTSTRAP),
+                "reason_code": reason_code,
+                "detail": str(raw.get("detail") or "startup issue"),
+                "field": (str(raw.get("field")) if raw.get("field") is not None else None),
+            }
+        )
+    return normalized
+
+
+def pick_startup_reason(*, issues: Sequence[Mapping[str, Any]], service_reason: str | None) -> str | None:
+    for issue in issues:
+        reason = str(issue.get("reason_code") or "").strip()
+        if reason:
+            return reason
+    return str(service_reason) if service_reason else None
 
 
 def _normalize_runtime_status(raw: Any) -> dict[str, Any]:

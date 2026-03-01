@@ -12,7 +12,7 @@ from host_brain.app.config import (
     build_host_runtime_statuses,
     load_host_config,
 )
-from host_brain.app.main import build_service_health_report
+from host_brain.app.main import build_service_health_report, build_startup_report
 
 __all__ = [
     "ALLOWED_ENVS",
@@ -26,4 +26,5 @@ __all__ = [
     "build_host_runtime_statuses",
     "load_host_config",
     "build_service_health_report",
+    "build_startup_report",
 ]

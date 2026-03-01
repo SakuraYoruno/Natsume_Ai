@@ -12,7 +12,12 @@ from edge_client.rpc.fallback_llm import (
     EdgeFallbackResult,
     EdgeFallbackRpcContract,
 )
-from edge_client.rpc.health import EDGE_REQUIRED_SERVICES, EdgeServiceSpec, edge_required_services
+from edge_client.rpc.health import (
+    EDGE_REQUIRED_SERVICES,
+    EdgeServiceSpec,
+    build_edge_transport_probe_statuses,
+    edge_required_services,
+)
 from edge_client.rpc.resource_gate import (
     EVENT_VOICE_RESOURCE_GATE,
     S_VOICE_RESOURCE_GATE,
@@ -44,6 +49,7 @@ __all__ = [
     "EDGE_REQUIRED_SERVICES",
     "EdgeServiceSpec",
     "edge_required_services",
+    "build_edge_transport_probe_statuses",
     "EVENT_VOICE_RESOURCE_GATE",
     "S_VOICE_RESOURCE_GATE",
     "STATUS_ADMITTED",
