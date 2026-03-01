@@ -52,6 +52,7 @@
 - docs/50_project/PROJECT_BRIEF.md  
 - docs/50_project/PROJECT_TASKS.md  
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md  
+- docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md  
   用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；不包含终端指令片段。  
   读者：Project（主要）、MASTER。实现层不应把它当任务来源。
 
