@@ -726,3 +726,47 @@ TASK-XXXX 标题
   - 回归覆盖（新增）`T-Orch-05` 与 `T-Tool-04`。
 - 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/governor/decision.py；host_brain/governor/tokens.py；host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-CORE-001；FR-TOOL-003；FR-AUDIT-001；（新增）T-Orch-05；（新增）T-Tool-04；I1/I8/I9。
+
+### TASK-0061 审计归档收口：model_control 入库与 request 级回放透出
+- 任务描述：把编排输出中的 `model_control` 与治理锚点写入审计存储并接入 request 级回放，形成“参数签名—票据—执行状态”的可检索闭环。
+- 输入：DevSpec 10/11；PRD FR-AUDIT-001、FR-CORE-001。
+- 输出：
+  - 审计表字段扩展（request_id/node_id/model_profile_id/provider/model_id/expected_param_hash/actual_param_hash/drift_detected/approval_token_ref/evidence_ref）；
+  - 回放工具输出扩展（按 request_id 聚合 model_control 与治理锚点）；
+  - fixtures：audit row 缺关键字段、回放缺链路、hash 漂移入库样例。
+- 验收标准：
+  - 任意一次模型调用可通过 request_id 回放到参数签名与票据锚点；
+  - 漂移与票据缺失在回放报告中具备稳定 reason_code 与阶段字段；
+  - 回归覆盖（新增）`T-Audit-06`、`T-Replay-02`。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；tools/replay/；host_brain/integrations/graph_runtime.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001；FR-CORE-001；（新增）T-Audit-06；（新增）T-Replay-02。
+
+### TASK-0062 配置治理收口：model_plane 版本签名与发布门禁联动
+- 任务描述：将 model_plane 资产纳入发布门禁，固化“配置版本→参数签名→生效环境”的一致性校验，避免灰度期间配置漂移不可控。
+- 输入：DevSpec 1.5/14.5；PRD FR-FLOW-001、FR-OBS-001、NFR-MAINT-001。
+- 输出：
+  - model_plane 版本清单（profile_version/node_registry_version/asset_digest）；
+  - 发布前一致性校验（active pointer 与 model_plane digest 对齐）；
+  - 回滚映射（版本回退时签名一致性检查）；
+  - fixtures：digest mismatch、stale pointer、rollback digest 缺失样例。
+- 验收标准：
+  - 发布门禁可阻断 model_plane 与 active 配置不一致；
+  - 回滚路径可验证签名一致且可审计；
+  - 回归覆盖（新增）`T-Flow-03`、`T-Release-01`。
+- 涉及文件路径：flows/active.pointer；configs/model_plane/；host_brain/release/；tests/contract/；tests/fixtures/；docs/60_trace/flows/index.md。
+- 关联需求/测试：FR-FLOW-001；FR-OBS-001；NFR-MAINT-001；（新增）T-Flow-03；（新增）T-Release-01。
+
+### TASK-0063 联调验收补齐：编排主控全链路演练与故障注入矩阵
+- 任务描述：补齐“编排主控 + model_plane + Governor/Token + Audit”联调演练矩阵，形成可复现实战故障包与验收报告模板。
+- 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-TOOL-003。
+- 输出：
+  - 演练场景矩阵（profile 缺失、selector 无候选、param drift、approval token missing、provider down）；
+  - 标准化报告结构（scenario_id/stage/status/reason_code_chain/replay_ref/model_profile_id）；
+  - 故障注入 fixtures 与期望断言文档；
+  - 环境就绪报告补充字段（orchestration_control_coverage）。
+- 验收标准：
+  - 五类核心故障场景均可稳定复现并输出单 JSON 报告；
+  - 每个场景可通过回放工具定位到 request_id 与关键审计字段；
+  - 回归覆盖（新增）`T-Drill-02`、`T-EnvReady-03`、`T-Orch-06`。
+- 涉及文件路径：tests/e2e/；tests/fixtures/drill/；host_brain/app/main.py；tools/replay/；host_brain/integrations/graph_runtime.py；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-TOOL-003；（新增）T-Drill-02；（新增）T-EnvReady-03；（新增）T-Orch-06。
