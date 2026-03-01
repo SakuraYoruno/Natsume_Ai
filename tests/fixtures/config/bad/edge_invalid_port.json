@@ -1,0 +1,7 @@
+{
+  "env": {
+    "NATSUME_ENV": "dev",
+    "EDGE_RPC_HOST": "127.0.0.1",
+    "EDGE_RPC_PORT": "abc"
+  }
+}

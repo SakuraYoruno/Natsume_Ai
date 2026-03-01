@@ -1,0 +1,9 @@
+{
+  "request_id": "req_vision_cam_001",
+  "intent_id": "intent_vision_cam_001",
+  "payload": {
+    "evidence_ref": "evd://camera/frame_001",
+    "frame_text": "person:0.91\ncat:0.42",
+    "timeout_ms": 500
+  }
+}

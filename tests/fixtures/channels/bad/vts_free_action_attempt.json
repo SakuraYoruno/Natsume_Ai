@@ -1,0 +1,10 @@
+{
+  "request_id": "req_avatar_003",
+  "trigger": "LLM",
+  "emotion_tag": "happy",
+  "raw_expression_id": "exp_custom_777",
+  "raw_action_params": {
+    "speed": 3.0,
+    "strength": 0.95
+  }
+}

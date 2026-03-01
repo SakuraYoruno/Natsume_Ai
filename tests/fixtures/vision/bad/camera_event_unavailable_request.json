@@ -1,0 +1,9 @@
+{
+  "request_id": "req_vision_cam_003",
+  "intent_id": "intent_vision_cam_003",
+  "payload": {
+    "evidence_ref": "evd://camera/frame_003",
+    "frame_text": "dog:0.77",
+    "timeout_ms": 500
+  }
+}

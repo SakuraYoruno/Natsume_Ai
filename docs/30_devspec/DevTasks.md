@@ -187,7 +187,6 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/airlock/sanitizer.py；host_brain/airlock/quarantine.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-AIRLOCK-001~002；T-39~T-40；I10。
 
-[DevTasks.md] 替换 TASK-0017~TASK-0021 区块（完整替换该区块）
 ### TASK-0017 Tool Catalog：工具元数据 SSOT（仅元数据）+ Top-K 选择 + tool_visibility_hash
 - 任务描述：建立工具目录的元数据 SSOT 与 Top-K 候选选择，确保模型每轮只见候选工具子集，并可产出 tool_visibility_hash。
 - 输入：DevSpec 8.9（Tools：Tool Catalog/Selector/Broker）；PRD FR-TOOL-001~002。
@@ -358,3 +357,78 @@ TASK-XXXX 标题
   - T-CP-01 不回归（Bond Summary 不进入错误槽位）。
 - 涉及文件路径：host_brain/bond/summarizer.py；host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-BOND-003；T-74~T-75；T-CP-01。
+
+### TASK-0037 配置分层收口：Host/Edge config 从占位改为可复现配置入口
+- 任务描述：补齐 Host 与 Edge 的配置加载契约（env/local/default 分层、冷启动默认值、敏感项占位），替换当前 placeholder，实现可复现配置入口。
+- 输入：DevSpec 1.2.1/13（环境与配置分层）；PRD FR-CORE-004、FR-OBS-001。
+- 输出：
+  - Host 配置对象（`NATSUME_ENV`、服务开关、降级开关、超时/重试口径）；
+  - Edge 配置对象（RPC 端点、能力矩阵、资源闸门默认值）；
+  - 配置验证失败的稳定 reason_code/stage 映射；
+  - fixtures：无 key / 缺配置 / 非法配置样例。
+- 验收标准：
+  - 冷启动场景输出结构稳定且可解析；
+  - 同类配置缺失在同版本下 reason_code/stage 稳定；
+  - contract 断言可覆盖 Host/Edge 关键配置项与默认值。
+- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Svc-01；T-67~T-71；（新增）T-Config-01。
+
+### TASK-0038 LLM Gateway 收口：统一出站入口 + AIRLOCK 绑定 + 不可用降级
+- 任务描述：补齐 `integrations/llm_gateway.py` 的统一调用契约，强制经过 AIRLOCK 出站净化与入站隔离口径，并在云端不可用时稳定降级。
+- 输入：DevSpec 2.3/8.7/9/13；PRD FR-AIRLOCK-001~002、FR-CORE-002~004、FR-AUDIT-003。
+- 输出：
+  - gateway 请求/响应标准结构（request_id/model_profile_id/draft_only/latency）；
+  - 与 airlock_log/error_log 串联的审计记录点；
+  - 不可用/超时/格式漂移的 reason_code/stage 映射；
+  - fixtures：provider down、timeout、格式漂移、入站隔离样例。
+- 验收标准：
+  - 出站未净化必拒绝并记录 AIRLOCK_BLOCKED_EGRESS；
+  - 入站不可信内容不得直通执行；
+  - 云端不可用时仍输出单 JSON 且 quality.stage/reason_code 可统计。
+- 涉及文件路径：host_brain/integrations/llm_gateway.py；host_brain/airlock/；host_brain/core/qa.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AIRLOCK-001~002；FR-CORE-002~004；T-39~T-40；T-67~T-71；T-LLM-01。
+
+### TASK-0039 Metabolism 收口：Hard State 演化与 Governor 快照引用
+- 任务描述：补齐 `core/metabolism.py` 的硬状态演化契约（energy/mood/sys_mode/safety），并保证 Governor 输出可引用稳定 snapshot。
+- 输入：DevSpec 0/4/6/14.2；PRD FR-GOV-001、FR-CORE-001。
+- 输出：
+  - 硬状态快照结构与更新规则；
+  - Governor 决策中的 snapshot_refs 对齐口径；
+  - 异常输入的拒绝/降级 reason_code；
+  - fixtures：边界状态、非法状态迁移、快照缺失样例。
+- 验收标准：
+  - rule_trace 能定位命中门禁与快照摘要；
+  - snapshot_refs 与状态演化一致且可回放；
+  - 同输入同版本下决策摘要稳定。
+- 涉及文件路径：host_brain/core/metabolism.py；host_brain/governor/rules.py；host_brain/governor/decision.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-GOV-001；FR-CORE-001；T-Gov-01；T-14~T-17；（新增）T-Meta-01。
+
+### TASK-0040 Audit Retention 收口：保留/归档/GC 策略与回放窗口保护
+- 任务描述：补齐 `audit/retention.py` 的保留与 GC 契约，确保历史裁剪不破坏回放链路与 undo 窗口。
+- 输入：DevSpec 8.1/8.6/13；PRD FR-AUDIT-001~003、FR-LSP-002。
+- 输出：
+  - retention 策略配置与执行结果结构；
+  - 被清理/被阻断对象的审计记录口径；
+  - 与 manifest/undo 窗口联动的保护规则；
+  - fixtures：过期日志、undo 窗口内对象、阻断样例。
+- 验收标准：
+  - 回放链路关键键（request_id/intent_id/evidence_ref）不被破坏；
+  - undo 窗口内对象不会被 GC 删除；
+  - 执行与阻断均有可统计审计记录。
+- 涉及文件路径：host_brain/audit/retention.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001~003；FR-LSP-002；T-Audit-01；T-Vault-02；（新增）T-Audit-RET-01。
+
+### TASK-0041 主链收口回归：Intent→Governor→Skill→Audit 全链一致性与拒绝码稳定
+- 任务描述：围绕仍处于 TASK_READY 的核心链路需求，补齐 e2e 回归与 trace 对齐，完成单向链事实闭环与拒绝码稳定性收口。
+- 输入：DevSpec 3/4/5/6/8.1/9/14；PRD FR-CORE-001~004、FR-INTENT-001~003、FR-GOV-001~003、FR-TOKEN-001~003、FR-AUDIT-001。
+- 输出：
+  - e2e 场景：正常执行/拒绝/重放/过期/缺票据/降级；
+  - 回放断言：intent_log→governor_log→skill_exec_log 串联完整；
+  - reason_code 稳定性断言（同类输入同版本一致）；
+  - trace 更新材料（未完成项→DONE 的证据链接）。
+- 验收标准：
+  - T-14~T-22、T-34~T-38、T-Audit-01、T-67~T-71 回归通过；
+  - 同类拒绝码稳定可统计；
+  - requirements_trace 中 R-01/R-02/R-03/R-04/R-08/R-11/R-12 至少达到 TEST_READY（目标 DONE）。
+- 涉及文件路径：tests/e2e/；tests/contract/；tests/fixtures/；host_brain/governor/；host_brain/skills/；host_brain/audit/；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-001~004；FR-INTENT-001~003；FR-GOV-001~003；FR-TOKEN-001~003；FR-AUDIT-001；T-14~T-22；T-34~T-38；T-Audit-01；T-67~T-71。

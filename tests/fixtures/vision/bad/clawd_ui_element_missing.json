@@ -1,0 +1,14 @@
+{
+  "request_id": "req_clawd_004",
+  "intent_id": "intent_clawd_004",
+  "target_desc": "Confirm dialog button",
+  "action_name": "click",
+  "confidence": 0.95,
+  "element_found": false,
+  "redline_detected": false,
+  "before_snapshot": "before:dialog not found",
+  "after_snapshot": "after:clicked",
+  "evidence_refs": [
+    "evt_clawd_004"
+  ]
+}

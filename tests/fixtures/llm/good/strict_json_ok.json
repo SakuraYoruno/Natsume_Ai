@@ -1,0 +1,14 @@
+{
+  "narrative": {
+    "text": "已收到请求，等待治理裁决。"
+  },
+  "intent_draft": {
+    "skill_name": "read_only_status",
+    "args": {
+      "scope": "system"
+    }
+  },
+  "meta": {
+    "draft_only": true
+  }
+}

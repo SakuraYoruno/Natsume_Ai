@@ -1,0 +1,20 @@
+{
+  "write_a": {
+    "text": "Observed mission board updates at dawn.",
+    "evidence_refs": ["evt_write_a"]
+  },
+  "write_b": {
+    "text": "Spoke with the quartermaster about supply routes.",
+    "evidence_refs": ["evt_write_b"]
+  },
+  "merge": {
+    "evidence_refs": ["evt_merge"]
+  },
+  "decay": {
+    "decay_profile_id": "slow_decay",
+    "evidence_refs": ["evt_decay"]
+  },
+  "delete": {
+    "evidence_refs": ["evt_delete"]
+  }
+}

@@ -11,36 +11,40 @@
 - PRD 需求编号（FR）：FR-CORE-001, FR-AUDIT-001, FR-SKILL-001
 - 来源：whitepaper 5/10/13
 - DevSpec 落点：DevSpec 0/6/8.1/9
-- DevTasks（TASK）：TASK-0010,TASK-0011,TASK-0012
+- DevTasks（TASK）：TASK-0010,TASK-0011,TASK-0012,TASK-0041
 - 验收测试（T-xx）：T-14,T-15,T-34,T-67
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：主链 contract + e2e 已落地（APPROVE 执行闭环、门禁拒绝、降级路径），并通过回归。
+- 覆盖状态：DONE
 
 ## R-02
 - 系统级需求：统一拒绝码 reason_code 且可统计
 - PRD 需求编号（FR）：FR-GOV-001~003
 - 来源：whitepaper 7
 - DevSpec 落点：DevSpec 4/8.1/9
-- DevTasks（TASK）：TASK-0007,TASK-0008,TASK-0012
+- DevTasks（TASK）：TASK-0007,TASK-0008,TASK-0012,TASK-0041
 - 验收测试（T-xx）：T-14,T-16,T-17
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：Governor 输出契约与拒绝码稳定性已由 contract/e2e 回归覆盖并通过。
+- 覆盖状态：DONE
 
 ## R-03
 - 系统级需求：Intent 解析/校验/重放保护
 - PRD 需求编号（FR）：FR-INTENT-001~003
 - 来源：whitepaper 8/13(I7)
 - DevSpec 落点：DevSpec 3
-- DevTasks（TASK）：TASK-0005
+- DevTasks（TASK）：TASK-0005,TASK-0041
 - 验收测试（T-xx）：T-18~T-22
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：T-18~T-22（宽松解析/严格校验/重放/顺序/过期）与 e2e 重放/过期场景均已通过。
+- 覆盖状态：DONE
 
 ## R-04
 - 系统级需求：票据化执行：approval/confirm/undo（语言不构成授权）
 - PRD 需求编号（FR）：FR-TOKEN-001~003
 - 来源：whitepaper 9/13(I6,I11)
 - DevSpec 落点：DevSpec 5/6
-- DevTasks（TASK）：TASK-0009,TASK-0010,TASK-0015
+- DevTasks（TASK）：TASK-0009,TASK-0010,TASK-0015,TASK-0041
 - 验收测试（T-xx）：T-34~T-38
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：Token 绑定与缺票据拒绝路径已由 contract/e2e 覆盖并通过。
+- 覆盖状态：DONE
 
 ## R-05
 - 系统级需求：ClawdBot 视觉熔断：红线/置信度/审计证据链
@@ -49,34 +53,37 @@
 - DevSpec 落点：DevSpec 6.3/8.1/8.6
 - DevTasks（TASK）：TASK-0022
 - 验收测试（T-xx）：T-41~T-43
-- 覆盖状态：TASK_READY
+- 覆盖状态：DONE
 
 ## R-06
 - 系统级需求：SSOT：Neo4j Bond 单写者；summary 仅派生
 - PRD 需求编号（FR）：FR-BOND-001~003
 - 来源：PRD 4.10
 - DevSpec 落点：DevSpec 8.2
-- DevTasks（TASK）：TASK-0023（服务健康注册表承接）,TASK-0035,TASK-0036
+- DevTasks（TASK）：TASK-0035,TASK-0036
 - 验收测试（T-xx）：T-50~T-54,T-74~T-75,T-SSOT-01
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：TASK-0035/TASK-0036 已完成，Bond 单写者、summary 派生与 context_pack 注入口径已落地，并通过 T-50~T-54、T-74~T-75、T-SSOT-01 回归。
+- 覆盖状态：DONE
 
 ## R-07
 - 系统级需求：气闸：出站脱敏/入站隔离，不得直通执行
 - PRD 需求编号（FR）：FR-AIRLOCK-001~002
 - 来源：PRD 4.8
 - DevSpec 落点：DevSpec 8.7
-- DevTasks（TASK）：TASK-0016
+- DevTasks（TASK）：TASK-0016,TASK-0038
 - 验收测试（T-xx）：T-39,T-40
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：AIRLOCK 出站净化/入站隔离与 gateway 绑定已完成，T-39/T-40 回归通过。
+- 覆盖状态：DONE
 
 ## R-08
 - 系统级需求：输出结构稳定：成功/拒绝/降级都可解析
 - PRD 需求编号（FR）：FR-CORE-002, FR-GOV-001
 - 来源：whitepaper 4.2/13(I13)
 - DevSpec 落点：DevSpec 2/9
-- DevTasks（TASK）：TASK-0001,TASK-0002
+- DevTasks（TASK）：TASK-0001,TASK-0002,TASK-0038,TASK-0041
 - 验收测试（T-xx）：T-14,T-15
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：成功/拒绝/降级输出均保持单 JSON，可由 QA 与 e2e 降级路径验证。
+- 覆盖状态：DONE
 
 ## R-09
 - 系统级需求：Canon 不得当事实；引用口径固定
@@ -85,34 +92,38 @@
 - DevSpec 落点：DevSpec 8.4/8.5
 - DevTasks（TASK）：TASK-0013,TASK-0014
 - 验收测试（T-xx）：T-Canon-01~03
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：Style/World Canon 契约、索引同步、Canon-as-fact 拦截回归通过。
+- 覆盖状态：DONE
 
 ## R-10
 - 系统级需求：静态扫描断言：旁路与单写者边界可回归
 - PRD 需求编号（FR）：NFR-MAINT-001
 - 来源：DevSpec 8.8
 - DevSpec 落点：DevSpec 8.8
-- DevTasks（TASK）：TASK-0012
+- DevTasks（TASK）：TASK-0035
 - 验收测试（T-xx）：T-SSOT-01
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：bond 单写者静态扫描已落地（tools/static_scan/bond_ssot_scan.py），并通过 T-SSOT-01 回归。
+- 覆盖状态：DONE
 
 ## R-11
 - 系统级需求：审计链三表最小闭环 + 可回放
 - PRD 需求编号（FR）：FR-AUDIT-001~003
 - 来源：whitepaper 10 / PRD 4.7
 - DevSpec 落点：DevSpec 8.1/9
-- DevTasks（TASK）：TASK-0011
+- DevTasks（TASK）：TASK-0011,TASK-0041
 - 验收测试（T-xx）：T-Audit-01~03
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：Triptych 串联、请求回放与 retention 保护口径已实现并通过回归。
+- 覆盖状态：DONE
 
 ## R-12
 - 系统级需求：Intent responsibility：proposal/decision/fact 分离
 - PRD 需求编号（FR）：FR-AUDIT-001（及 PRD 中 intent responsibility 条目）
 - 来源：whitepaper 10 / PRD
 - DevSpec 落点：DevSpec audit 契约
-- DevTasks（TASK）：TASK-0006,TASK-0011
+- DevTasks（TASK）：TASK-0006,TASK-0011,TASK-0041
 - 验收测试（T-xx）：T-Intent-01,T-Intent-02
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：intent proposal/decision/exec 三类记录已分离并可串联回放，契约回归通过。
+- 覆盖状态：DONE
 
 ## R-13
 - 系统级需求：工具平面渐进式加载：仅元数据 Top-K 暴露；WRITE 默认不可见；ToolBroker 单入口 + evidence_ref
@@ -121,7 +132,7 @@
 - DevSpec 落点：DevSpec 8.9
 - DevTasks（TASK）：TASK-0017,TASK-0018
 - 验收测试（T-xx）：T-Tool-01~03
-- 覆盖状态：TASK_READY
+- 覆盖状态：DONE
 
 ## R-14
 - 系统级需求：通道与外显受治理：微信 I/O 审计 + VTS 确定性映射
@@ -130,16 +141,17 @@
 - DevSpec 落点：DevSpec 8.11
 - DevTasks（TASK）：TASK-0020,TASK-0021
 - 验收测试（T-xx）：T-Channel-01,T-Avatar-01
-- 覆盖状态：TASK_READY
+- 覆盖状态：DONE
 
 ## R-15
 - 系统级需求：Vault：manifest/undo/GC 审计闭环（不破坏 undo 窗口）
 - PRD 需求编号（FR）：FR-LSP-001~002
 - 来源：PRD 4.14
 - DevSpec 落点：DevSpec 8.6
-- DevTasks（TASK）：TASK-0015
+- DevTasks（TASK）：TASK-0015,TASK-0040
 - 验收测试（T-xx）：T-Vault-01~02
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：Vault manifest/undo/GC 与 retention 联动保护已完成，T-Vault-01~02 回归通过。
+- 覆盖状态：DONE
 
 ## R-16
 - 系统级需求：MCP 受治理接入：provider 元数据同步 + READ/WRITE 分级 + 审计串联
@@ -148,10 +160,7 @@
 - DevSpec 落点：DevSpec 8.10
 - DevTasks（TASK）：TASK-0019
 - 验收测试（T-xx）：T-MCP-01
-- 覆盖状态：TASK_READY
-
-【文件：docs/60_trace/requirements_trace.md】
-【替换条目】R-17（用以下内容整体替换原 R-17）
+- 覆盖状态：DONE
 
 ## R-17
 - 系统级需求：冷启动/依赖不可用的闭环可用性：结构稳定 + 可观测降级 + 可回放审计（不得伪执行）
@@ -160,7 +169,7 @@
 - DevSpec 落点：DevSpec 1.2.1/2.1
 - DevTasks（TASK）：TASK-0000,TASK-0001,TASK-0023
 - 验收测试（T-xx）：T-LLM-01,T-14,T-15,T-67~T-71,T-Svc-01
-- 覆盖状态：TASK_READY
+- 覆盖状态：DONE
 
 ## R-18
 - 系统级需求：语音主链（ASR→Host编排→TTS）事件化、可打断、可回放
@@ -168,7 +177,8 @@
 - DevSpec 落点：DevSpec 8.11.3
 - DevTasks（TASK）：TASK-0024~TASK-0027
 - 验收测试（T-xx）：T-Voice-01~T-Voice-03
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：TASK-0024~TASK-0027 已完成；T-Voice-01~T-Voice-03 已通过回归。
+- 覆盖状态：DONE
 
 ## R-19
 - 系统级需求：Edge 兜底 LLM 默认卸载、draft-only、快速失败回退
@@ -176,7 +186,8 @@
 - DevSpec 落点：DevSpec 8.11.3
 - DevTasks（TASK）：TASK-0028~TASK-0029
 - 验收测试（T-xx）：T-Voice-04~T-Voice-05
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：TASK-0028/TASK-0029 已完成并通过 T-Voice-04/T-Voice-05 契约回归。
+- 覆盖状态：DONE
 
 ## R-20
 - 系统级需求：检索链（Embedding/Rerank/Evidence Pack）接口稳定与降级可观测
@@ -184,7 +195,8 @@
 - DevSpec 落点：DevSpec 8.3.1
 - DevTasks（TASK）：TASK-0030~TASK-0032
 - 验收测试（T-xx）：T-Ret-01~T-Ret-03
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：TASK-0030/TASK-0031/TASK-0032 已完成，并通过 T-Ret-01/T-Ret-02/T-Ret-03 契约回归。
+- 覆盖状态：DONE
 
 ## R-21
 - 系统级需求：屏幕监控/OCR Gaming 门控 + 摄像头识别事件化与证据引用
@@ -192,7 +204,8 @@
 - DevSpec 落点：DevSpec 8.12
 - DevTasks（TASK）：TASK-0033~TASK-0034
 - 验收测试（T-xx）：T-VisionGate-01,T-Vision-01~02
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-01）：TASK-0033/TASK-0034 已完成，并通过 T-VisionGate-01/T-Vision-01/T-Vision-02 契约回归。
+- 覆盖状态：DONE
 
 ---
 

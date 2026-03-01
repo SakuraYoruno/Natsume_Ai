@@ -1,0 +1,32 @@
+{
+  "hard_snapshot": {
+    "session_id": "s_demo",
+    "sys_mode": "normal"
+  },
+  "bond_summary": {
+    "stage": "warm",
+    "trend": "up",
+    "capability_hint": "safe_read_only"
+  },
+  "authoritative": [
+    {
+      "slot": "retrieval",
+      "kind": "policy",
+      "source": "world_canon/rules",
+      "content": "只允许草案。",
+      "tone": "excited"
+    }
+  ],
+  "retrieval": [],
+  "style_pack": {
+    "tone": "calm",
+    "language": "zh-CN"
+  },
+  "constraints": {
+    "must": [
+      "single_json_output"
+    ],
+    "must_not": []
+  },
+  "tool_meta_pack": []
+}

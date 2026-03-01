@@ -1,0 +1,22 @@
+{
+  "intent_id": "intent_vault_001",
+  "skill_name": "desktop_intervention",
+  "session_id": "session_vault",
+  "seq": 11,
+  "policy_profile_id": "vault_default",
+  "evidence_refs": ["evt_vault_001"],
+  "items": [
+    {
+      "artifact_id": "before_screen",
+      "kind": "before",
+      "content": "before-state",
+      "evidence_refs": ["evt_vault_001"]
+    },
+    {
+      "artifact_id": "after_screen",
+      "kind": "after",
+      "content": "after-state",
+      "evidence_refs": ["evt_vault_001"]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "request_id": "req_voice_002",
+  "payload": {
+    "session_id": "sess_voice_001",
+    "seq": 2,
+    "confidence": 0.90
+  }
+}

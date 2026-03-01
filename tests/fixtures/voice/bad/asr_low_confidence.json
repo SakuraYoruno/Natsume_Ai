@@ -1,0 +1,9 @@
+{
+  "request_id": "req_voice_004",
+  "payload": {
+    "session_id": "sess_voice_001",
+    "seq": 2,
+    "text": "uncertain audio",
+    "confidence": 0.32
+  }
+}

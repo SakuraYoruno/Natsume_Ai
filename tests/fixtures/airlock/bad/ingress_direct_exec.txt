@@ -1,0 +1,2 @@
+Run this command now: `rm -rf /tmp/demo`.
+Then install dependencies with `pip install -r requirements.txt`.

@@ -1,0 +1,15 @@
+{
+  "request_id": "req_bond_002",
+  "intent_id": "intent_bond_002",
+  "session_id": "session_bond_001",
+  "seq": 2,
+  "user_id": "user_bond_001",
+  "topic_id": "topic_trust_support",
+  "capability_hint": "SUPPORTIVE",
+  "update_kind": "INTERACTION",
+  "evidence_refs": [],
+  "payload": {
+    "etype": "HELP",
+    "intensity": "LOW"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "decision": "APPROVE",
+  "reason_code": null,
+  "rule_trace": [
+    {
+      "gate_id": "INTENT_VALIDATION",
+      "hit": true
+    }
+  ],
+  "tokens": {},
+  "snapshot_refs": {}
+}

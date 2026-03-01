@@ -1,0 +1,13 @@
+{
+  "request_id": "req_tool_003",
+  "intent_id": "intent_tool_003",
+  "session_id": "session_tool",
+  "seq": 3,
+  "tool_id": "write_file_update",
+  "args": {
+    "path": "workspace/app.py",
+    "content": "print('hello')"
+  },
+  "approval_token_ref": null,
+  "confirm_token_ref": null
+}

@@ -1,0 +1,9 @@
+{
+  "request_id": "req_cold_start_001",
+  "runtime": {
+    "openai_api_key": "",
+    "dify_api_key": "",
+    "external_services": "unavailable"
+  },
+  "user_input": "请帮我执行高风险操作"
+}

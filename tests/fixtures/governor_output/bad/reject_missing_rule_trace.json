@@ -1,0 +1,6 @@
+{
+  "decision": "REJECT",
+  "reason_code": "INTENT_SCHEMA_INVALID",
+  "tokens": {},
+  "snapshot_refs": {}
+}

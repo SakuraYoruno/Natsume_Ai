@@ -1,0 +1,9 @@
+{
+  "request_id": "req_rerank_004",
+  "payload": {
+    "query": "   ",
+    "top_k": 3,
+    "timeout_ms": 500,
+    "candidates": []
+  }
+}

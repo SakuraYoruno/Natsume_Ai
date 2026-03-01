@@ -1,0 +1,13 @@
+{
+  "id": "read_system_status",
+  "name": "ReadSystemStatus",
+  "desc": "Read host system status snapshot.",
+  "schema_hash": "sha256:tool_schema_read_system_status_v1",
+  "side_effect_level": "READ",
+  "auth_level": "NONE",
+  "domain_tags": ["system", "status"],
+  "version": "1.0.0",
+  "args": {
+    "scope": "host"
+  }
+}

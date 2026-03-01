@@ -1,0 +1,9 @@
+﻿[project]
+name = "host-brain"
+version = "0.0.1"
+description = "Natsume Host Brain skeleton"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CoreLLMOutputContract",
+  "type": "object",
+  "required": [
+    "narrative",
+    "intent_draft",
+    "meta"
+  ],
+  "properties": {
+    "narrative": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "intent_draft": {
+      "type": "object",
+      "required": [
+        "skill_name",
+        "args"
+      ],
+      "properties": {
+        "skill_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "draft_only"
+      ],
+      "properties": {
+        "draft_only": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

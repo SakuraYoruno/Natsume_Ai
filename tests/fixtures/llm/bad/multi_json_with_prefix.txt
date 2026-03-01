@@ -1,0 +1,3 @@
+prefix text that should be rejected
+{"a":1}
+{"b":2}

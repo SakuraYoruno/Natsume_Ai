@@ -1,0 +1,29 @@
+{
+  "request_id": "req_evp_001",
+  "intent_id": "intent_evp_001",
+  "payload": {
+    "query": "natsume retrieval evidence pack",
+    "topk": [
+      {
+        "doc_id": "doc_alpha",
+        "source_ref": "memo://alpha",
+        "snippet": "alpha snippet for retrieval evidence",
+        "score": 0.92,
+        "confidence": 0.92,
+        "metadata": {
+          "bucket": "episodic"
+        }
+      },
+      {
+        "doc_id": "doc_beta",
+        "source_ref": "memo://beta",
+        "snippet": "beta snippet for replay citation",
+        "score": 0.73,
+        "confidence": 0.73,
+        "metadata": {
+          "bucket": "canon"
+        }
+      }
+    ]
+  }
+}

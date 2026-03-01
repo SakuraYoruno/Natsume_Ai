@@ -1,0 +1,6 @@
+{
+  "env": {
+    "NATSUME_ENV": "qa",
+    "HOST_LLM_PROVIDER": "openai"
+  }
+}

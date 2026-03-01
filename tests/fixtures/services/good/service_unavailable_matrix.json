@@ -1,0 +1,15 @@
+{
+  "request_id": "req_svc_001",
+  "runtime_statuses": {
+    "host.integrations.llm_gateway": {
+      "available": false,
+      "unavailable_kind": "cold_start",
+      "detail": "OPENAI_API_KEY missing"
+    },
+    "edge.rpc.gateway": {
+      "available": false,
+      "unavailable_kind": "edge_rpc",
+      "detail": "edge rpc transport timeout"
+    }
+  }
+}

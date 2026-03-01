@@ -1,0 +1,7 @@
+{
+  "request_id": "req_ret_002",
+  "payload": {
+    "text": "embedding unavailable should degrade with stable reason",
+    "timeout_ms": 500
+  }
+}

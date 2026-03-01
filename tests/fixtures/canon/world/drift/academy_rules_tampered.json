@@ -1,0 +1,11 @@
+{
+  "doc_id": "academy_rules",
+  "version": 1,
+  "status": "active",
+  "title": "Academy Rules",
+  "tags": ["setting", "academy"],
+  "body": "Tampered world canon payload for drift check.",
+  "updated_by": "proposal_world_seed",
+  "ts_ms": 1700000000000,
+  "hash": "drifted"
+}

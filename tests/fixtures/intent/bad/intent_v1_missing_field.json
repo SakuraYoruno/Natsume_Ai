@@ -1,0 +1,13 @@
+{
+  "schema_version": "natsume.intent.v1",
+  "id": "intent_fixture_bad_missing_001",
+  "ts_ms": 1767225600000,
+  "session_id": "s_fixture",
+  "seq": 1,
+  "type": "skill_call",
+  "action": "read_only_status",
+  "args": {
+    "scope": "system"
+  },
+  "nonce": "nonce_fixture_bad_001"
+}

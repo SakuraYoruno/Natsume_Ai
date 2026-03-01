@@ -1,0 +1,14 @@
+{
+  "narrative": {
+    "text": "这是外部模型返回的草案。"
+  },
+  "intent_draft": {
+    "skill_name": "narrative_only",
+    "args": {},
+    "draft_only": true
+  },
+  "meta": {
+    "draft_only": true,
+    "provider": "mock"
+  }
+}

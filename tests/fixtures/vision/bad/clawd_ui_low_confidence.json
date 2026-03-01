@@ -1,0 +1,14 @@
+{
+  "request_id": "req_clawd_002",
+  "intent_id": "intent_clawd_002",
+  "target_desc": "Pay button",
+  "action_name": "click",
+  "confidence": 0.62,
+  "element_found": true,
+  "redline_detected": false,
+  "before_snapshot": "before:pay button",
+  "after_snapshot": "after:clicked",
+  "evidence_refs": [
+    "evt_clawd_002"
+  ]
+}

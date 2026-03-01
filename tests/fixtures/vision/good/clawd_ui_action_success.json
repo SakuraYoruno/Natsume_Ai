@@ -1,0 +1,14 @@
+{
+  "request_id": "req_clawd_001",
+  "intent_id": "intent_clawd_001",
+  "target_desc": "Submit button",
+  "action_name": "click",
+  "confidence": 0.93,
+  "element_found": true,
+  "redline_detected": false,
+  "before_snapshot": "before:button visible",
+  "after_snapshot": "after:form submitted",
+  "evidence_refs": [
+    "evt_clawd_001"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "narrative": {
+    "text": "我已执行并保存全部更改。"
+  },
+  "intent_draft": {
+    "skill_name": "read_only_status",
+    "args": {}
+  },
+  "meta": {
+    "draft_only": true
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "hard_snapshot": {
+    "session_id": "s_demo",
+    "sys_mode": "normal"
+  },
+  "bond_summary": {
+    "stage": "warm",
+    "trend": "up",
+    "trust_value": 78
+  },
+  "authoritative": [],
+  "retrieval": [],
+  "style_pack": {
+    "tone": "calm"
+  },
+  "constraints": {
+    "must": [],
+    "must_not": []
+  },
+  "tool_meta_pack": []
+}
