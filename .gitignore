@@ -77,3 +77,5 @@ edge_client/temp_audio/
 # --- local runtime services ---
 /runtime/
 configs/secrets/secret_store.runtime.local.json
+configs/runtime/local_services.env
+configs/secrets/key_profiles.runtime.json

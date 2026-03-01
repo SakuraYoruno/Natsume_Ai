@@ -113,6 +113,12 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $EnvFile = Join-Path $repoRoot "configs\runtime\local_services.env"
 }
+if (-not (Test-Path -Path $EnvFile)) {
+  $fallbackEnvFile = Join-Path $repoRoot "configs\runtime\local_services.env.example"
+  if (Test-Path -Path $fallbackEnvFile) {
+    $EnvFile = $fallbackEnvFile
+  }
+}
 
 $runtimeRoot = Join-Path $repoRoot "runtime"
 $neoRoot = Join-Path $runtimeRoot "neo4j"

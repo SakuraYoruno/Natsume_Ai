@@ -44,9 +44,12 @@ from tools.replay.production_drill import run_drill_suite
 
 ROOT = REPO_ROOT
 DEFAULT_ENV_FILE = ROOT / "configs" / "runtime" / "local_services.env"
+DEFAULT_ENV_FALLBACK_FILE = ROOT / "configs" / "runtime" / "local_services.env.example"
 DEFAULT_NODE_INVENTORY = ROOT / "configs" / "deploy" / "node_inventory_9.json"
 DEFAULT_KEY_PROFILES = ROOT / "configs" / "secrets" / "key_profiles.runtime.json"
+DEFAULT_KEY_PROFILES_FALLBACK = ROOT / "configs" / "secrets" / "key_profiles.example.json"
 DEFAULT_SECRET_STORE = ROOT / "configs" / "secrets" / "secret_store.runtime.local.json"
+DEFAULT_SECRET_STORE_FALLBACK = ROOT / "configs" / "secrets" / "secret_store.runtime.example.json"
 DEFAULT_GRAPH_CONFIG = ROOT / "tests" / "fixtures" / "orchestration" / "good" / "graph_main.json"
 DEFAULT_OUTPUT = ROOT / "runtime" / "reports" / "env_readiness_report.json"
 
@@ -430,6 +433,13 @@ def main() -> int:
     secret_store_file = Path(args.secret_store)
     graph_file = Path(args.graph_config)
     output_file = Path(args.output)
+
+    if not env_file.exists() and DEFAULT_ENV_FALLBACK_FILE.exists():
+        env_file = DEFAULT_ENV_FALLBACK_FILE
+    if not key_profiles_file.exists() and DEFAULT_KEY_PROFILES_FALLBACK.exists():
+        key_profiles_file = DEFAULT_KEY_PROFILES_FALLBACK
+    if not secret_store_file.exists() and DEFAULT_SECRET_STORE_FALLBACK.exists():
+        secret_store_file = DEFAULT_SECRET_STORE_FALLBACK
 
     env_values = _normalize_runtime_env(env_file_values=_read_env_file(env_file))
     node_inventory_payload = _load_json(node_inventory_file)

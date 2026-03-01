@@ -13,7 +13,9 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_ENV_FILE = ROOT / "configs" / "runtime" / "local_services.env"
+LOCAL_ENV_FALLBACK_FILE = ROOT / "configs" / "runtime" / "local_services.env.example"
 LOCAL_SECRET_STORE = ROOT / "configs" / "secrets" / "secret_store.runtime.local.json"
+LOCAL_SECRET_STORE_FALLBACK = ROOT / "configs" / "secrets" / "secret_store.runtime.example.json"
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -187,8 +189,12 @@ def _probe_chroma(env_values: dict[str, str]) -> dict[str, Any]:
 def build_report() -> dict[str, Any]:
     env_values = _read_env_file(LOCAL_ENV_FILE)
     if not env_values:
+        env_values = _read_env_file(LOCAL_ENV_FALLBACK_FILE)
+    if not env_values:
         env_values = dict(os.environ)
     secret_store = _read_json_file(LOCAL_SECRET_STORE)
+    if not secret_store:
+        secret_store = _read_json_file(LOCAL_SECRET_STORE_FALLBACK)
 
     package_names = [
         "pytest",
