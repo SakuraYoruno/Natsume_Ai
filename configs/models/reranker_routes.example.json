@@ -1,4 +1,5 @@
 {
+  "default_route": "host_default",
   "routes": {
     "host_default": {
       "provider": "heuristic",
