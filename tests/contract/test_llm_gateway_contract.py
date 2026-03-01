@@ -13,7 +13,6 @@ from host_brain.core.qa import REASON_FORMAT_DRIFT, find_forbidden_keys
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
-    PROVIDER_QWEN,
     S_LLM_GATEWAY_EGRESS,
     S_LLM_GATEWAY_PROVIDER,
     S_LLM_GATEWAY_QA,
@@ -144,10 +143,10 @@ class TestLlmGatewayContract(unittest.TestCase):
         )
         ledger.close()
 
-    def test_gateway_provider_unavailable_qwen_or_gemini_cold_start_degrades(self) -> None:
+    def test_gateway_provider_unavailable_deepseek_or_gemini_cold_start_degrades(self) -> None:
         prompt = _load_json(FIXTURES / "good" / "prompt_payload.json")
         for provider_name, profile_id in (
-            (PROVIDER_QWEN, "mp.qwen.v1"),
+            (PROVIDER_DEEPSEEK, "mp.deepseek.v1"),
             (PROVIDER_GEMINI, "mp.gemini.v1"),
         ):
             ledger = SQLiteLedger(db_path=":memory:")

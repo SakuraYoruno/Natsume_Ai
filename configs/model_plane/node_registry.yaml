@@ -30,8 +30,8 @@ nodes:
 
   tool_planner:
     role: tool_planner
-    provider: qwen
-    model_id: qwen3.5-plus-2026-02-15
+    provider: deepseek
+    model_id: deepseek-chat
     output_contract: CoreDraft.v1
     max_output_tokens: 320
     temperature: 0.20

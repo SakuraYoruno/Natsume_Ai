@@ -353,7 +353,6 @@ def build_runtime_env_readiness_report(
     current_epoch = int(key_profiles_payload.get("current_epoch") or 0)
 
     _resolve_ref_secret(runtime_env, ref_key="OPENAI_API_KEY_REF", value_key="OPENAI_API_KEY", secret_store=secret_store)
-    _resolve_ref_secret(runtime_env, ref_key="QWEN_API_KEY_REF", value_key="QWEN_API_KEY", secret_store=secret_store)
     _resolve_ref_secret(runtime_env, ref_key="GEMINI_API_KEY_REF", value_key="GEMINI_API_KEY", secret_store=secret_store)
     _resolve_ref_secret(runtime_env, ref_key="DEEPSEEK_API_KEY_REF", value_key="DEEPSEEK_API_KEY", secret_store=secret_store)
     _resolve_ref_secret(runtime_env, ref_key="EDGE_HMAC_SHARED_KEY_REF", value_key="EDGE_HMAC_SHARED_KEY", secret_store=secret_store)

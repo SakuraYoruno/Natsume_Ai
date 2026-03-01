@@ -27,7 +27,6 @@ STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 
 PROVIDER_OPENAI = "openai"
-PROVIDER_QWEN = "qwen"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_MOCK = "mock"
@@ -203,7 +202,6 @@ class LlmGatewayContract:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
         provider_to_env_key = {
             PROVIDER_OPENAI: "OPENAI_API_KEY",
-            PROVIDER_QWEN: "QWEN_API_KEY",
             PROVIDER_GEMINI: "GEMINI_API_KEY",
             PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         }

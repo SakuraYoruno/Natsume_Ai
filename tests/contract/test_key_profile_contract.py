@@ -194,15 +194,15 @@ class TestKeyProfileContract(unittest.TestCase):
         self.assertEqual("<redacted>", snapshot.snapshot["values"]["llm_api_key"])
         self.assertIn("DEEPSEEK_API_KEY", snapshot.snapshot["redacted_keys"])
 
-    def test_t_key_01_qwen_and_gemini_key_ref_are_resolved(self) -> None:
+    def test_t_key_01_deepseek_and_gemini_key_ref_are_resolved(self) -> None:
         test_cases = [
             (
-                "qwen",
+                "deepseek",
                 "natsu-node-04",
-                "QWEN_API_KEY_REF",
-                "sec://qwen/natsu-node-04",
-                "qwen_api_key",
-                "QWEN_API_KEY",
+                "DEEPSEEK_API_KEY_REF",
+                "sec://deepseek/natsu-node-04",
+                "deepseek_api_key",
+                "DEEPSEEK_API_KEY",
             ),
             (
                 "gemini",

@@ -102,7 +102,7 @@
 
 4）tool_planner（role=tool_planner）
 - 用途：在 tool_meta_pack 子集内选择工具与参数草案（不得执行）
-- provider/model_id：qwen / qwen3.5-plus-2026-02-15（pin）
+- provider/model_id：deepseek / deepseek-chat（pin）
 - 输出：CoreDraft.v1（intent_draft 必含 tool_id + args 草案）
 
 5）safety_verifier（role=verifier_safety）
