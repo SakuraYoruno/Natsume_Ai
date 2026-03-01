@@ -304,9 +304,11 @@ def _build_graph_runtime_status(
 
 def _build_drill_summary_rows() -> list[dict[str, Any]]:
     fixture_paths = [
-        Path("tests/fixtures/drill/good/cold_start_no_key.json"),
         Path("tests/fixtures/drill/good/provider_down.json"),
-        Path("tests/fixtures/drill/bad/rollback_conflict.json"),
+        Path("tests/fixtures/drill/bad/orch_missing_profile.json"),
+        Path("tests/fixtures/drill/bad/orch_selector_no_candidate.json"),
+        Path("tests/fixtures/drill/bad/orch_param_drift.json"),
+        Path("tests/fixtures/drill/bad/orch_approval_token_missing.json"),
     ]
     suite = run_drill_suite(root=ROOT, scenario_fixtures=fixture_paths, ts_ms=now_ms())
     rows: list[dict[str, Any]] = []
@@ -314,9 +316,11 @@ def _build_drill_summary_rows() -> list[dict[str, Any]]:
         rows.append(
             {
                 "scenario_id": str(row.get("scenario_id") or ""),
+                "stage": str(row.get("stage") or ""),
                 "status": str(row.get("status") or ""),
                 "reason_code_chain": list(row.get("reason_code_chain") or []),
                 "replay_ref": str(row.get("replay_ref") or ""),
+                "model_profile_id": (str(row.get("model_profile_id") or "").strip() or None),
             }
         )
     return rows

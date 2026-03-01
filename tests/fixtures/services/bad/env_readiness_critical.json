@@ -47,7 +47,9 @@
       "reason_code_chain": [
         "RELEASE_ROLLBACK_TARGET_MISSING"
       ],
-      "replay_ref": "request::req_drill_002"
+      "replay_ref": "request::req_drill_002",
+      "stage": "S_RELEASE_CHECKLIST",
+      "model_profile_id": null
     }
   ]
 }
