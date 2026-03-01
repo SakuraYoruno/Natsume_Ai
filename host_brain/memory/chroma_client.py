@@ -5,10 +5,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any
+import json
+import os
+from typing import Any, Mapping
+
+from host_brain.core.errors import (
+    CHROMA_COLLECTION_MISSING,
+    CHROMA_ENDPOINT_UNAVAILABLE,
+    CHROMA_VECTOR_DIM_MISMATCH,
+    CONFIG_REQUIRED_MISSING,
+    CONFIG_VALUE_INVALID,
+)
 
 
 EMBEDDING_MODEL_ID = "hash-embed-v1"
+S_CHROMA_CONFIG = "S_CHROMA_CONFIG"
+S_CHROMA_PROBE = "S_CHROMA_PROBE"
+
+CHROMA_STATUS_UP = "UP"
+CHROMA_STATUS_DOWN = "DOWN"
+DEFAULT_COLLECTION = "episodic"
 
 
 @dataclass(frozen=True)
@@ -17,13 +33,73 @@ class ChromaEntry:
     text: str
     embedding: tuple[float, ...]
     metadata: dict[str, Any]
+    collection: str
+
+
+@dataclass(frozen=True)
+class ChromaConfigIssue:
+    reason_code: str
+    detail: str
+    field: str | None = None
+
+
+@dataclass(frozen=True)
+class ChromaRuntimeConfig:
+    enabled: bool
+    endpoint: str
+    tenant: str
+    database: str
+    collection_profiles: dict[str, int]
+    default_collection: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "endpoint": self.endpoint,
+            "tenant": self.tenant,
+            "database": self.database,
+            "collection_profiles": dict(self.collection_profiles),
+            "default_collection": self.default_collection,
+        }
+
+
+@dataclass(frozen=True)
+class ChromaConfigLoadResult:
+    success: bool
+    stage: str
+    reason_code: str | None
+    config: ChromaRuntimeConfig | None
+    issues: tuple[ChromaConfigIssue, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "stage": self.stage,
+            "reason_code": self.reason_code,
+            "config": (self.config.as_dict() if self.config is not None else None),
+            "issues": [
+                {
+                    "reason_code": issue.reason_code,
+                    "detail": issue.detail,
+                    "field": issue.field,
+                }
+                for issue in self.issues
+            ],
+        }
 
 
 class InMemoryChromaClient:
     """Dependency-free vector index for contract-level tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        collection_profiles: Mapping[str, int] | None = None,
+        default_collection: str = DEFAULT_COLLECTION,
+    ) -> None:
         self._items: dict[str, ChromaEntry] = {}
+        self._collection_profiles: dict[str, int] = dict(collection_profiles or {default_collection: 16})
+        self._default_collection = str(default_collection or DEFAULT_COLLECTION)
 
     def upsert(
         self,
@@ -32,24 +108,41 @@ class InMemoryChromaClient:
         text: str,
         embedding: list[float],
         metadata: dict[str, Any] | None = None,
+        collection: str | None = None,
     ) -> None:
-        self._items[memory_id] = ChromaEntry(
+        collection_name = str(collection or self._default_collection)
+        self._validate_collection_embedding(collection_name, embedding)
+        key = _row_key(collection_name, memory_id)
+        self._items[key] = ChromaEntry(
             memory_id=memory_id,
             text=text,
             embedding=tuple(float(v) for v in embedding),
             metadata=dict(metadata or {}),
+            collection=collection_name,
         )
 
-    def delete(self, memory_id: str) -> None:
-        self._items.pop(memory_id, None)
+    def delete(self, memory_id: str, *, collection: str | None = None) -> None:
+        key = _row_key(str(collection or self._default_collection), memory_id)
+        self._items.pop(key, None)
 
-    def get(self, memory_id: str) -> ChromaEntry | None:
-        return self._items.get(memory_id)
+    def get(self, memory_id: str, *, collection: str | None = None) -> ChromaEntry | None:
+        key = _row_key(str(collection or self._default_collection), memory_id)
+        return self._items.get(key)
 
-    def search(self, *, query_embedding: list[float], top_k: int = 5) -> list[dict[str, Any]]:
+    def search(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int = 5,
+        collection: str | None = None,
+    ) -> list[dict[str, Any]]:
+        collection_name = str(collection or self._default_collection)
         q = tuple(float(v) for v in query_embedding)
+        self._validate_collection_embedding(collection_name, q)
         scored: list[tuple[float, ChromaEntry]] = []
         for item in self._items.values():
+            if item.collection != collection_name:
+                continue
             score = _cosine_similarity(q, item.embedding)
             scored.append((score, item))
         scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -62,9 +155,29 @@ class InMemoryChromaClient:
                     "text": item.text,
                     "score": score,
                     "metadata": dict(item.metadata),
+                    "collection": item.collection,
                 }
             )
         return results
+
+    def validate_collection(self, collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
+        collection_name = str(collection or "").strip()
+        if not collection_name:
+            return False, CHROMA_COLLECTION_MISSING
+        expected_dim = self._collection_profiles.get(collection_name)
+        if expected_dim is None:
+            return False, CHROMA_COLLECTION_MISSING
+        if vector_dim is not None and int(vector_dim) != int(expected_dim):
+            return False, CHROMA_VECTOR_DIM_MISMATCH
+        return True, None
+
+    def _validate_collection_embedding(self, collection: str, embedding: list[float] | tuple[float, ...]) -> None:
+        ok, reason = self.validate_collection(collection, vector_dim=len(embedding))
+        if ok:
+            return
+        if reason == CHROMA_COLLECTION_MISSING:
+            raise ValueError(CHROMA_COLLECTION_MISSING)
+        raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
 
 
 def embed_text(text: str, *, dim: int = 16) -> tuple[list[float], str]:
@@ -79,6 +192,167 @@ def embed_text(text: str, *, dim: int = 16) -> tuple[list[float], str]:
     return values, EMBEDDING_MODEL_ID
 
 
+def load_chroma_runtime_config(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> ChromaConfigLoadResult:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    issues: list[ChromaConfigIssue] = []
+    enabled = _parse_bool(merged.get("CHROMA_ENABLED"), default=True)
+    endpoint = str(merged.get("CHROMA_ENDPOINT") or "http://127.0.0.1:8000").strip()
+    tenant = str(merged.get("CHROMA_TENANT") or "default_tenant").strip()
+    database = str(merged.get("CHROMA_DATABASE") or "default_database").strip()
+    default_collection = str(merged.get("CHROMA_DEFAULT_COLLECTION") or DEFAULT_COLLECTION).strip()
+    profiles_text = str(
+        merged.get("CHROMA_COLLECTION_PROFILES_JSON")
+        or json.dumps({DEFAULT_COLLECTION: 16}, ensure_ascii=False)
+    ).strip()
+
+    profiles = _parse_collection_profiles(
+        profiles_text,
+        field_name="CHROMA_COLLECTION_PROFILES_JSON",
+        issues=issues,
+    )
+
+    if enabled and not endpoint:
+        issues.append(
+            ChromaConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail="CHROMA_ENDPOINT required when CHROMA_ENABLED=true",
+                field="CHROMA_ENDPOINT",
+            )
+        )
+    if enabled and default_collection not in profiles:
+        issues.append(
+            ChromaConfigIssue(
+                reason_code=CHROMA_COLLECTION_MISSING,
+                detail=f"default collection not found in profiles: {default_collection}",
+                field="CHROMA_DEFAULT_COLLECTION",
+            )
+        )
+
+    if issues:
+        return ChromaConfigLoadResult(
+            success=False,
+            stage=S_CHROMA_CONFIG,
+            reason_code=issues[0].reason_code,
+            config=None,
+            issues=tuple(issues),
+        )
+
+    config = ChromaRuntimeConfig(
+        enabled=bool(enabled),
+        endpoint=endpoint,
+        tenant=tenant,
+        database=database,
+        collection_profiles=profiles,
+        default_collection=default_collection,
+    )
+    return ChromaConfigLoadResult(
+        success=True,
+        stage=S_CHROMA_CONFIG,
+        reason_code=None,
+        config=config,
+        issues=(),
+    )
+
+
+def build_chroma_probe_report(
+    *,
+    config: ChromaRuntimeConfig,
+    request_id: str | None,
+    probe: Mapping[str, Any] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    probe_data = dict(probe or {})
+    if not config.enabled:
+        return {
+            "request_id": request_id,
+            "stage": S_CHROMA_PROBE,
+            "status": CHROMA_STATUS_DOWN,
+            "reason_code": CHROMA_ENDPOINT_UNAVAILABLE,
+            "failure_class": "endpoint_down",
+            "detail": "chroma disabled by config",
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+
+    reachable = bool(probe_data.get("reachable", True))
+    if not reachable:
+        return {
+            "request_id": request_id,
+            "stage": S_CHROMA_PROBE,
+            "status": CHROMA_STATUS_DOWN,
+            "reason_code": CHROMA_ENDPOINT_UNAVAILABLE,
+            "failure_class": "endpoint_down",
+            "detail": str(probe_data.get("detail") or "chroma endpoint unavailable"),
+            "config": config.as_dict(),
+            "ts_ms": int(ts_ms if ts_ms is not None else 0),
+        }
+
+    collections = probe_data.get("collections")
+    if isinstance(collections, Mapping):
+        for name, expected_dim in sorted(config.collection_profiles.items()):
+            observed = collections.get(name)
+            if observed is None:
+                return {
+                    "request_id": request_id,
+                    "stage": S_CHROMA_PROBE,
+                    "status": CHROMA_STATUS_DOWN,
+                    "reason_code": CHROMA_COLLECTION_MISSING,
+                    "failure_class": "collection_missing",
+                    "detail": f"collection missing: {name}",
+                    "config": config.as_dict(),
+                    "ts_ms": int(ts_ms if ts_ms is not None else 0),
+                }
+            observed_dim = int(observed.get("vector_dim", -1)) if isinstance(observed, Mapping) else -1
+            if observed_dim != int(expected_dim):
+                return {
+                    "request_id": request_id,
+                    "stage": S_CHROMA_PROBE,
+                    "status": CHROMA_STATUS_DOWN,
+                    "reason_code": CHROMA_VECTOR_DIM_MISMATCH,
+                    "failure_class": "vector_dim_mismatch",
+                    "detail": (
+                        f"vector dim mismatch for {name}: expected={int(expected_dim)}, got={int(observed_dim)}"
+                    ),
+                    "config": config.as_dict(),
+                    "ts_ms": int(ts_ms if ts_ms is not None else 0),
+                }
+
+    return {
+        "request_id": request_id,
+        "stage": S_CHROMA_PROBE,
+        "status": CHROMA_STATUS_UP,
+        "reason_code": None,
+        "failure_class": None,
+        "detail": str(probe_data.get("detail") or "chroma probe ok"),
+        "config": config.as_dict(),
+        "ts_ms": int(ts_ms if ts_ms is not None else 0),
+    }
+
+
+def build_chroma_dependency_status(probe_report: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(probe_report.get("status") or "").strip().upper()
+    if status == CHROMA_STATUS_UP:
+        return {
+            "available": True,
+            "detail": "chroma dependency healthy",
+        }
+    return {
+        "available": False,
+        "unavailable_kind": "dependency",
+        "detail": (
+            f"{probe_report.get('reason_code')}: "
+            f"{str(probe_report.get('detail') or 'chroma probe failed')}"
+        ),
+    }
+
+
 def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -88,3 +362,83 @@ def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+def _parse_collection_profiles(
+    raw_text: str,
+    *,
+    field_name: str,
+    issues: list[ChromaConfigIssue],
+) -> dict[str, int]:
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        issues.append(
+            ChromaConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name} must be JSON object mapping collection->vector_dim",
+                field=field_name,
+            )
+        )
+        return {DEFAULT_COLLECTION: 16}
+    if not isinstance(data, dict):
+        issues.append(
+            ChromaConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=f"{field_name} must be JSON object mapping collection->vector_dim",
+                field=field_name,
+            )
+        )
+        return {DEFAULT_COLLECTION: 16}
+
+    profiles: dict[str, int] = {}
+    for raw_name, raw_dim in data.items():
+        name = str(raw_name or "").strip()
+        if not name:
+            issues.append(
+                ChromaConfigIssue(
+                    reason_code=CONFIG_VALUE_INVALID,
+                    detail=f"{field_name} contains empty collection name",
+                    field=field_name,
+                )
+            )
+            continue
+        try:
+            dim = int(str(raw_dim).strip())
+        except (TypeError, ValueError):
+            issues.append(
+                ChromaConfigIssue(
+                    reason_code=CONFIG_VALUE_INVALID,
+                    detail=f"{field_name} vector dim for {name} must be integer",
+                    field=field_name,
+                )
+            )
+            continue
+        if dim <= 0:
+            issues.append(
+                ChromaConfigIssue(
+                    reason_code=CONFIG_VALUE_INVALID,
+                    detail=f"{field_name} vector dim for {name} must be > 0",
+                    field=field_name,
+                )
+            )
+            continue
+        profiles[name] = dim
+    if not profiles:
+        profiles[DEFAULT_COLLECTION] = 16
+    return profiles
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _row_key(collection: str, memory_id: str) -> str:
+    return f"{str(collection).strip()}::{str(memory_id).strip()}"

@@ -252,6 +252,15 @@
 - 当前进展（2026-03-01）：已落地 Neo4j runtime config（uri/database/auth_ref/pool/tls/enabled）与探针输出，auth/schema/leader 三类失败映射稳定；迁移执行新增 probe 前置联动并写入 migration_log（neo4j_probe）。
 - 覆盖状态：DONE
 
+## R-27
+- 系统级需求：ChromaDB 外部部署配置与集合治理可解析、可降级、可审计；collection 缺失与向量维度漂移可稳定拦截
+- PRD 需求编号（FR）：FR-MEM-003~005, FR-OBS-001
+- DevSpec 落点：DevSpec 8.3.1/10/13
+- DevTasks（TASK）：TASK-0053
+- 验收测试（T-xx）：T-Ret-03, T-Chroma-01
+- 当前进展（2026-03-01）：已落地 Chroma runtime config（endpoint/tenant/database/collection_profiles/default_collection）与探针输出，endpoint down/collection missing/vector dim mismatch 三类失败映射稳定；集合治理在 upsert/search 维度校验中保持可回放拒绝口径。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：

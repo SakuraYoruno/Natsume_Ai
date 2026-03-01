@@ -1,0 +1,10 @@
+{
+  "env": {
+    "CHROMA_ENABLED": "true",
+    "CHROMA_ENDPOINT": "https://chroma.natsume.ai",
+    "CHROMA_TENANT": "tenant_natsume",
+    "CHROMA_DATABASE": "memory_prod",
+    "CHROMA_DEFAULT_COLLECTION": "episodic",
+    "CHROMA_COLLECTION_PROFILES_JSON": "{\"episodic\":16,\"world\":32}"
+  }
+}
