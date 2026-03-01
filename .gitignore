@@ -73,3 +73,7 @@ host_brain/core/data/logs/
 edge_client/temp_audio/
 *.wav
 *.mp3
+
+# --- local runtime services ---
+/runtime/
+configs/secrets/secret_store.runtime.local.json
