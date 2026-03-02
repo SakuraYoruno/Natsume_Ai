@@ -408,6 +408,106 @@
 - 当前进展（2026-03-02）：已增强 Host VTS 通道 `resolve_vts_expression`：新增 `edge_available` 参数，Edge 不可达时返回 `status=DEGRADED` + neutral 备选表情（exp_neutral_01）+ `VTS_DEGRADED_FALLBACK` reason_code；未知 emotion_tag 映射时同样降级到 neutral（而非原先直接 REJECTED）；`success=True` 表示有有效 fallback 输出；新增 `STATUS_DEGRADED` 常量、`DEGRADED_FALLBACK_EXPRESSION_TAG/ID` 常量；降级详情写入 `avatar_action_log` 可审计回溯；Edge 不可达优先级高于 free action 检查；已知 tag/空 tag/free action 行为完全不变；talk gate 不受影响。新增 1 个错误码（VTS_DEGRADED_FALLBACK）、2 个 fixtures（Edge 不可达/未知 tag 降级）。T-VTS-Degraded-01（30+ 项）全部通过。
 - 覆盖状态：DONE
 
+## R-43
+- 系统级需求：LangGraph 读取 model_plane 并统一下发 LLM 参数——model_profile_id 绑定、model_node 自动解析、model_control 输出
+- PRD 需求编号（FR）：FR-CORE-001, FR-CORE-004
+- 来源：DevTasks TASK-0057
+- DevSpec 落点：DevSpec 6/8.9
+- DevTasks（TASK）：TASK-0057
+- 验收测试（T-xx）：T-Orch-01, T-Orch-02
+- 当前进展（2026-03-02）：graph_model_resolve.py 已实现 model_plane 配置加载（model_profiles.yaml/node_registry.yaml）→ model_node 自动解析 → model_profile_id 绑定到 graph_config → model_control 输出。T-Orch-02（model_plane profile loading / missing profile rejected）已在 test_orchestration_graph_contract.py 中通过。
+- 覆盖状态：DONE
+
+## R-44
+- 系统级需求：参数签名防漂移——build_model_param_hash + expected vs actual 校验 + 漂移降级
+- PRD 需求编号（FR）：FR-CORE-001, FR-CORE-004
+- 来源：DevTasks TASK-0058
+- DevSpec 落点：DevSpec 6/8.9
+- DevTasks（TASK）：TASK-0058
+- 验收测试（T-xx）：T-Orch-03
+- 当前进展（2026-03-02）：graph_contract.py 的 build_model_param_hash 基于 provider/model_id/temperature/max_output_tokens/timeout_ms 产出确定性哈希；graph_executor.py 在执行时比对 expected_param_hash vs actual_param_hash，漂移时返回 STATUS_DEGRADED + ORCH_PARAM_DRIFT，并写入 model_control_log。T-Orch-03（param drift degraded）已通过。
+- 覆盖状态：DONE
+
+## R-45
+- 系统级需求：确定性 profile→node 选择器与环境约束矩阵——node_allowlist + env + 候选筛选
+- PRD 需求编号（FR）：FR-CORE-001
+- 来源：DevTasks TASK-0059
+- DevSpec 落点：DevSpec 6/8.9/13
+- DevTasks（TASK）：TASK-0059
+- 验收测试（T-xx）：T-Orch-04
+- 当前进展（2026-03-02）：graph_model_resolve.py 的 _pick_candidate_node 已实现 env/node_allowlist 过滤 + 确定性选择（按 node_id 排序取首个），无候选时拒绝 ORCH_NODE_MISSING。T-Orch-04（deterministic selector + no candidate rejected）已通过。
+- 覆盖状态：DONE
+
+## R-46
+- 系统级需求：模型调用与 Governor/Token 审批锚点串联——governance_refs 提取 + require_approval_token 检查
+- PRD 需求编号（FR）：FR-CORE-001, FR-TOKEN-001
+- 来源：DevTasks TASK-0060
+- DevSpec 落点：DevSpec 5/6
+- DevTasks（TASK）：TASK-0060
+- 验收测试（T-xx）：T-Orch-05
+- 当前进展（2026-03-02）：graph_executor.py 的 extract_governance_refs 从 payload 提取 intent_id/approval_token_ref/evidence_ref 并注入 model_control 输出；require_approval_token=True 时检查 approval_token_ref，缺失则返回 SKILL_TOKEN_MISSING 降级。T-Orch-05 已通过。
+- 覆盖状态：DONE
+
+## R-47
+- 系统级需求：model_control 审计入库与 request 级回放透出——model_control_log 完整性 + trace_request 聚合
+- PRD 需求编号（FR）：FR-AUDIT-001
+- 来源：DevTasks TASK-0061
+- DevSpec 落点：DevSpec 8.1/9
+- DevTasks（TASK）：TASK-0061
+- 验收测试（T-xx）：T-Audit-06, T-Replay-02
+- 当前进展（2026-03-02）：model_control_log 写入 request_id/model_profile_id/provider/model_id/actual_param_hash/expected_param_hash/drift_detected/reason_code/approval_token_ref/evidence_ref；trace_request 聚合 model_control_log 条目支持 request 级回放。新增 T-Audit-06（6 项）+ T-Replay-02（4 项），全部通过。
+- 覆盖状态：DONE
+
+## R-48
+- 系统级需求：model_plane 版本签名与发布门禁联动——release checklist 含 model_plane digest + 版本号可解析
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：DevTasks TASK-0062
+- DevSpec 落点：DevSpec 6/10
+- DevTasks（TASK）：TASK-0062
+- 验收测试（T-xx）：T-Flow-03, T-Release-01
+- 当前进展（2026-03-02）：release_manifest.py 已支持 include_model_plane_assets=True 时纳入 model_plane 资产并计算 sha256 checksum。新增 T-Flow-03（5 项），全部通过。
+- 覆盖状态：DONE
+
+## R-49
+- 系统级需求：编排主控全链路演练与故障注入矩阵——五类核心故障场景可复现 + 审计可回放
+- PRD 需求编号（FR）：FR-CORE-004, FR-AUDIT-001
+- 来源：DevTasks TASK-0063
+- DevSpec 落点：DevSpec 6/10/14.5
+- DevTasks（TASK）：TASK-0063
+- 验收测试（T-xx）：T-Drill-02, T-EnvReady-03, T-Orch-06
+- 当前进展（2026-03-02）：覆盖 5 类核心故障场景（profile 缺失/无候选/param drift/token missing/provider down）。新增 T-Drill-02（5 项）+ T-EnvReady-03（2 项）+ T-Orch-06（2 项），全部通过。
+- 覆盖状态：DONE
+
+## R-50
+- 系统级需求：沙箱安全升级 subprocess→Docker 容器级隔离——Docker 后端 + 自动降级 + 安全标志 + 审计串联
+- PRD 需求编号（FR）：FR-AIRLOCK-002
+- 来源：DevTasks TASK-0077
+- DevSpec 落点：DevSpec 8.7
+- DevTasks（TASK）：TASK-0077
+- 验收测试（T-xx）：T-39, T-40, T-Sandbox-01, T-Sandbox-Docker-01
+- 当前进展（2026-03-02）：新增 docker_sandbox.py（Docker 容器执行）；SandboxConfig 新增 isolation_backend；Docker 不可用自动降级到 subprocess + SANDBOX_CONTAINER_UNAVAILABLE。新增 1 个错误码 + 2 个 fixtures。T-Sandbox-Docker-01（21 项）全部通过。
+- 覆盖状态：DONE
+
+## R-51
+- 系统级需求：跨端时间线 SQL 优化——按时间窗口过滤 + 分页查询
+- PRD 需求编号（FR）：FR-OBS-001
+- 来源：DevTasks TASK-0078
+- DevSpec 落点：DevSpec 10/11
+- DevTasks（TASK）：TASK-0078
+- 验收测试（T-xx）：T-Obs-03, T-Timeline-Perf-01
+- 当前进展（2026-03-02）：fetch_by_time_range + count_by_time_range 已实现。test_timeline_perf_contract.py 已覆盖。
+- 覆盖状态：DONE
+
+## R-52
+- 系统级需求：部署文档 + 环境清单补充
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：DevTasks TASK-0083
+- DevSpec 落点：DevSpec 10/13
+- DevTasks（TASK）：TASK-0083
+- 验收测试（T-xx）：无（文档更新）
+- 当前进展（2026-03-02）：ENV_EXTERNAL_SERVICES_CHECKLIST.md v1.1 已更新：新增 Docker 沙箱/VTS DEGRADED/Model Plane 发布门禁/跨端时间线优化。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
