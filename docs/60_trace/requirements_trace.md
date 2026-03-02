@@ -363,9 +363,9 @@
 - PRD 需求编号（FR）：FR-OBS-001, FR-AUDIT-001
 - 来源：DevTasks TASK-0072（跨端时间线聚合）
 - DevSpec 落点：DevSpec 10/11
-- DevTasks（TASK）：TASK-0072
-- 验收测试（T-xx）：T-Obs-01, T-Obs-03
-- 当前进展（2026-03-02）：已落地跨端时间线聚合模块 `host_brain/observability/cross_timeline.py`：EdgeEventReport（Edge 标准化上报结构）、CrossTimelineAggregator（Host 审计+Edge 上报合并、按 ts_ms 排序、source=host/edge 标记）、时间漂移检测（可配置容忍阈值 DEFAULT_CLOCK_DRIFT_TOLERANCE_MS=5000ms）、Edge 缺失时 HOST_ONLY 降级+TIMELINE_EDGE_EVENTS_MISSING 告警、漂移超限时 PARTIAL 状态+TIMELINE_CLOCK_DRIFT_DETECTED 告警、按 session_id 备选关联、无效 Edge 事件静默过滤、跨 request_id 事件隔离。新增 3 个错误码（TIMELINE_EDGE_EVENTS_MISSING/TIMELINE_CLOCK_DRIFT_DETECTED/TIMELINE_SESSION_NOT_FOUND）；新增 3 个 fixtures（混合正常/时间交叉/Edge缺失）。T-Obs-03（27 项）全部通过；T-Obs-01（2 项）无回归。
+- DevTasks（TASK）：TASK-0072,TASK-0079
+- 验收测试（T-xx）：T-Obs-01, T-Obs-03, T-RPC-Event-01
+- 当前进展（2026-03-02）：已落地跨端时间线聚合模块 `host_brain/observability/cross_timeline.py`：EdgeEventReport（Edge 标准化上报结构）、CrossTimelineAggregator（Host 审计+Edge 上报合并、按 ts_ms 排序、source=host/edge 标记）、时间漂移检测（可配置容忍阈值 DEFAULT_CLOCK_DRIFT_TOLERANCE_MS=5000ms）、Edge 缺失时 HOST_ONLY 降级+TIMELINE_EDGE_EVENTS_MISSING 告警、漂移超限时 PARTIAL 状态+TIMELINE_CLOCK_DRIFT_DETECTED 告警、按 session_id 备选关联、无效 Edge 事件静默过滤、跨 request_id 事件隔离。TASK-0079 新增 Edge→Host RPC 事件批量上报通道（`edge_client/rpc/event_reporter.py` + `POST /v1/edge/events`），支持事件 Schema 校验、批量写入审计链、网络中断本地缓存（最多 1000 条/10MB）、恢复后自动补发、指数退避重试。新增 3 个错误码（RPC_EVENT_SCHEMA_INVALID/RPC_EVENT_BATCH_PARTIAL_FAIL/RPC_EVENT_NETWORK_UNAVAILABLE）；新增 3 个 fixtures（正常/部分失败/网络中断）。T-RPC-Event-01（30+ 项）全部通过；T-Obs-03（27 项）无回归。
 - 覆盖状态：DONE
 
 ## R-39
