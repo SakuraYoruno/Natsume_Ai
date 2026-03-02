@@ -21,6 +21,8 @@ from host_brain.core.errors import (
     VTS_API_ERROR,
     VTS_CONNECTION_FAILED,
     VTS_EXPRESSION_TIMEOUT,
+    VTS_RECONNECTED,
+    VTS_RECONNECT_EXHAUSTED,
 )
 from host_brain.core.ids import new_request_id, now_ms
 
@@ -56,14 +58,38 @@ VTS_MOUTH_OPEN_VALUE = 1.0
 VTS_MOUTH_CLOSE_VALUE = 0.0
 
 
+# ── 重连配置常量 ──
+DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
+DEFAULT_RECONNECT_BASE_DELAY_S = 1.0
+DEFAULT_RECONNECT_MAX_DELAY_S = 16.0
+
+
 class VtsState(str, Enum):
     """VTS driver lifecycle states."""
     DISCONNECTED = "DISCONNECTED"
     CONNECTING = "CONNECTING"
     CONNECTED = "CONNECTED"
     AUTHENTICATED = "AUTHENTICATED"
+    RECONNECTING = "RECONNECTING"
     ERROR = "ERROR"
     SHUTDOWN = "SHUTDOWN"
+
+
+@dataclass
+class ReconnectConfig:
+    """VTS WebSocket 自动重连配置。"""
+    max_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
+    base_delay_s: float = DEFAULT_RECONNECT_BASE_DELAY_S
+    max_delay_s: float = DEFAULT_RECONNECT_MAX_DELAY_S
+    auto_reconnect: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "max_attempts": self.max_attempts,
+            "base_delay_s": self.base_delay_s,
+            "max_delay_s": self.max_delay_s,
+            "auto_reconnect": self.auto_reconnect,
+        }
 
 
 @dataclass
@@ -75,6 +101,7 @@ class VtsConfig:
     plugin_developer: str = DEFAULT_VTS_PLUGIN_DEVELOPER
     token_path: str = DEFAULT_VTS_TOKEN_PATH
     api_timeout_s: float = DEFAULT_API_TIMEOUT_S
+    reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +111,7 @@ class VtsConfig:
             "plugin_developer": self.plugin_developer,
             "token_path": self.token_path,
             "api_timeout_s": self.api_timeout_s,
+            "reconnect": self.reconnect.as_dict(),
         }
 
 
@@ -131,6 +159,13 @@ class VTubeStudioDriver:
         self._connection_error: str | None = None
         self._current_expression: str | None = None
         self._talking = False
+        # ── 重连状态 ──
+        self._reconnect_attempts = 0
+        self._total_reconnects = 0
+        self._total_reconnect_failures = 0
+        self._reconnect_thread: threading.Thread | None = None
+        self._reconnect_events: list[dict[str, Any]] = []
+        self._shutdown_event = threading.Event()
 
     @property
     def state(self) -> VtsState:
@@ -205,6 +240,7 @@ class VTubeStudioDriver:
     def disconnect(self) -> VtsDriverResult:
         """Disconnect from VTube Studio."""
         with self._lock:
+            self._shutdown_event.set()
             self._vts = None
             self._state = VtsState.DISCONNECTED
             self._talking = False
@@ -383,6 +419,146 @@ class VTubeStudioDriver:
 
         return result
 
+    # -----------------------------------------------------------------
+    # WebSocket 自动重连（TASK-0080）
+    # -----------------------------------------------------------------
+
+    def _reconnect_loop(self) -> None:
+        """指数退避 WebSocket 自动重连循环。
+
+        在独立线程中运行。重连成功后恢复 neutral 表情并上报
+        VTS_RECONNECTED 事件；全部失败后进入 DISCONNECTED 并上报
+        VTS_RECONNECT_EXHAUSTED。
+        """
+        rc = self._config.reconnect
+        delay = rc.base_delay_s
+        self._reconnect_attempts = 0
+
+        with self._lock:
+            self._state = VtsState.RECONNECTING
+
+        logger.info(
+            "VTS reconnect loop started (max_attempts=%d, base_delay=%.1fs)",
+            rc.max_attempts, rc.base_delay_s,
+        )
+
+        for attempt in range(1, rc.max_attempts + 1):
+            if self._shutdown_event.is_set():
+                logger.info("VTS reconnect cancelled by shutdown")
+                return
+
+            self._reconnect_attempts = attempt
+            logger.info(
+                "VTS reconnect attempt %d/%d (delay=%.1fs)",
+                attempt, rc.max_attempts, delay,
+            )
+
+            try:
+                result = self.connect()
+                if result.success:
+                    # 重连成功——恢复 neutral
+                    self._total_reconnects += 1
+                    neutral_result = self.reset_to_neutral()
+                    event = {
+                        "event": VTS_RECONNECTED,
+                        "attempt": attempt,
+                        "ts_ms": now_ms(),
+                        "detail": f"reconnected after {attempt} attempt(s)",
+                        "neutral_restored": neutral_result.success,
+                    }
+                    self._reconnect_events.append(event)
+                    logger.info(
+                        "VTS reconnected after %d attempt(s)", attempt,
+                    )
+                    return
+            except Exception as exc:
+                logger.warning(
+                    "VTS reconnect attempt %d failed: %s", attempt, exc,
+                )
+
+            # 等待退避时间（可被 shutdown 中断）
+            if self._shutdown_event.wait(timeout=min(delay, rc.max_delay_s)):
+                logger.info("VTS reconnect cancelled by shutdown during wait")
+                return
+            delay = min(delay * 2, rc.max_delay_s)
+
+        # 全部重连失败
+        self._total_reconnect_failures += 1
+        with self._lock:
+            self._state = VtsState.DISCONNECTED
+
+        event = {
+            "event": VTS_RECONNECT_EXHAUSTED,
+            "attempts": rc.max_attempts,
+            "ts_ms": now_ms(),
+            "detail": f"all {rc.max_attempts} reconnect attempts exhausted",
+        }
+        self._reconnect_events.append(event)
+        logger.error(
+            "VTS reconnect exhausted after %d attempts", rc.max_attempts,
+        )
+
+    def trigger_reconnect(self) -> VtsDriverResult:
+        """触发 WebSocket 自动重连（非阻塞）。
+
+        通常由 API 调用失败时自动触发，也可手动调用。
+        如果已在重连中则返回 no-op。
+        """
+        rc = self._config.reconnect
+        if not rc.auto_reconnect:
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_CONNECTION_FAILED,
+                detail="auto_reconnect is disabled",
+                action="trigger_reconnect",
+            )
+
+        with self._lock:
+            if self._state == VtsState.RECONNECTING:
+                return VtsDriverResult(
+                    success=True,
+                    reason_code=None,
+                    detail="reconnect already in progress",
+                    action="trigger_reconnect",
+                )
+            if self._state == VtsState.SHUTDOWN:
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail="driver is shutdown",
+                    action="trigger_reconnect",
+                )
+
+        self._shutdown_event.clear()
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            name="vts-reconnect",
+            daemon=True,
+        )
+        self._reconnect_thread.start()
+
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="reconnect started",
+            action="trigger_reconnect",
+        )
+
+    def _maybe_trigger_reconnect(self, reason: str) -> None:
+        """API 调用失败时检查是否需要自动重连。"""
+        rc = self._config.reconnect
+        if not rc.auto_reconnect:
+            return
+        if self._state in (VtsState.RECONNECTING, VtsState.SHUTDOWN):
+            return
+        logger.warning("VTS connection lost (%s), triggering reconnect", reason)
+        self.trigger_reconnect()
+
+    @property
+    def reconnect_events(self) -> list[dict[str, Any]]:
+        """返回重连事件日志（可写入审计）。"""
+        return list(self._reconnect_events)
+
     def health(self) -> dict[str, Any]:
         """Return VTS driver health snapshot."""
         return {
@@ -392,6 +568,13 @@ class VTubeStudioDriver:
             "config": self._config.as_dict(),
             "connection_error": self._connection_error,
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
+            "reconnect": {
+                "total_reconnects": self._total_reconnects,
+                "total_reconnect_failures": self._total_reconnect_failures,
+                "reconnect_attempts": self._reconnect_attempts,
+                "reconnecting": self._state == VtsState.RECONNECTING,
+                "reconnect_events_count": len(self._reconnect_events),
+            },
         }
 
 
