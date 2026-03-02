@@ -203,6 +203,7 @@ cp .env.example .env
 |------|------|
 | `Nastume_ENV` | 运行环境（dev/staging/prod） |
 | `OPENAI_API_KEY` | OpenAI API 密钥 |
+| `HOST_APP_HOST/PORT` | Host HTTP 服务绑定地址 |
 | `BOND_NEO4J_URI` | Neo4j 连接地址 |
 | `CHROMA_ENDPOINT` | ChromaDB 服务地址 |
 | `EDGE_RPC_HOST/PORT` | Edge RPC 通信地址 |
@@ -233,11 +234,21 @@ python scripts/runtime/check_external_env.py
 pytest tests/
 ```
 
-### 7. 启动 Edge 网关（调试/本地运行）
+### 7. 启动 Host 端（含依赖服务）
+
+```powershell
+# 拉起 Neo4j + Chroma + Host API
+.\scripts\runtime\start_host_side.ps1
+```
+
+### 8. 启动 Edge 网关（调试/本地运行）
 
 ```powershell
 # 前台启动（调试）
 python -m edge_client
+
+# 统一入口（推荐）
+.\scripts\runtime\start_edge_side.ps1
 
 # 后台启动（带 pid/log）
 .\scripts\runtime\start_edge.ps1
@@ -337,6 +348,7 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | 🔧 DevSpec | `docs/30_devspec/` | 开发规范 + 任务清单（怎么做） |
 | 🤖 AGENTS | `docs/40_agents/` | 实现层代理行为规范 |
 | 📊 项目管理 | `docs/50_project/` | 工作表 / 发布 / 环境检查 |
+| 🧩 外置服务配置 | `docs/50_project/ExternalServices_Config.md` | 全部外置服务清单与配置方式 |
 | 🔗 Trace | `docs/60_trace/` | 可追溯性矩阵 |
 
 ---
