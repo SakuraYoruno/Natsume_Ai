@@ -1,0 +1,121 @@
+{
+  "scenario": "cross_timeline_time_interleaved",
+  "description": "Host/Edge 时间交叉：Edge 事件时间戳穿插在 Host 事件之间，且有轻微时钟漂移（在容忍范围内）",
+  "request_id": "req_cross_002",
+  "session_id": "sess_cross_002",
+  "host_events": {
+    "intent_log": {
+      "request_id": "req_cross_002",
+      "thread_id": "thread_cross_002",
+      "turn_id": "turn_cross_002",
+      "intent_id": "intent_cross_002",
+      "session_id": "sess_cross_002",
+      "seq": 1,
+      "ts_ms": 1800050001000,
+      "nonce": "nonce_cross_002",
+      "parse_stage": "S_INTENT_PARSE",
+      "raw_text": "weather check",
+      "normalized_json": {"id": "intent_cross_002"},
+      "proposer_node_id": "core_reasoner_primary",
+      "model_snapshot": "test-model",
+      "prompt_profile_id": "default",
+      "tool_visibility_hash": "",
+      "proposed_intent_draft_json": {"id": "intent_cross_002"},
+      "lint_result": {"ok": true}
+    },
+    "governor_log": {
+      "request_id": "req_cross_002",
+      "thread_id": "thread_cross_002",
+      "turn_id": "turn_cross_002",
+      "intent_id": "intent_cross_002",
+      "decision": "APPROVE",
+      "reason_code": null,
+      "rule_trace": [],
+      "tokens": {"approval_token_ref": "approval::cross_002"},
+      "snapshot_refs": {},
+      "stage": "S_GOVERNOR",
+      "ts_ms": 1800050002000
+    },
+    "voice_event_log": {
+      "request_id": "req_cross_002",
+      "session_id": "sess_cross_002",
+      "event_type": "SPEAK",
+      "direction": "HOST_TO_EDGE",
+      "seq": 1,
+      "status": "ACCEPTED",
+      "reason_code": null,
+      "stage": "S_VOICE_SPEAK_EGRESS",
+      "payload": {"text": "weather info"},
+      "detail": "speak accepted",
+      "ts_ms": 1800050004000
+    }
+  },
+  "edge_events": [
+    {
+      "event_type": "ASR_CHUNK",
+      "ts_ms": 1800050000500,
+      "request_id": "req_cross_002",
+      "session_id": "sess_cross_002",
+      "direction": "EDGE_TO_HOST",
+      "seq": 1,
+      "status": "ACCEPTED",
+      "stage": "S_VOICE_ASR_INGRESS",
+      "detail": "asr before host intent",
+      "payload": {"text": "weather", "confidence": 0.92}
+    },
+    {
+      "event_type": "VOICE_RESOURCE_GATE",
+      "ts_ms": 1800050001500,
+      "request_id": "req_cross_002",
+      "session_id": "sess_cross_002",
+      "direction": "EDGE_TO_HOST",
+      "seq": 0,
+      "status": "ADMITTED",
+      "stage": "S_VOICE_RESOURCE_GATE",
+      "detail": "admitted by gate policy",
+      "payload": {"task": "ASR_INGRESS"}
+    },
+    {
+      "event_type": "TTS_SYNTH",
+      "ts_ms": 1800050003000,
+      "request_id": "req_cross_002",
+      "session_id": "sess_cross_002",
+      "direction": "HOST_TO_EDGE",
+      "seq": 1,
+      "status": "COMPLETED",
+      "stage": "S_VOICE_TTS_SYNTH",
+      "detail": "synthesis completed",
+      "payload": {"duration_ms": 800}
+    },
+    {
+      "event_type": "VTS_TALK_GATE",
+      "ts_ms": 1800050003500,
+      "request_id": "req_cross_002",
+      "session_id": "sess_cross_002",
+      "direction": "EDGE_TO_HOST",
+      "seq": 1,
+      "status": "TALK_START",
+      "stage": "S_AVATAR_TALK_GATE",
+      "detail": "talk gate opened",
+      "payload": {"action": "TALK_START"}
+    }
+  ],
+  "expected": {
+    "status": "COMPLETE",
+    "host_event_count": 3,
+    "edge_event_count": 4,
+    "edge_missing": false,
+    "clock_drift_detected": false,
+    "timeline_total": 7,
+    "timeline_sorted_by_ts": true,
+    "interleaved_order": [
+      "edge:ASR_CHUNK@500",
+      "host:intent_log@1000",
+      "edge:VOICE_RESOURCE_GATE@1500",
+      "host:governor_log@2000",
+      "edge:TTS_SYNTH@3000",
+      "edge:VTS_TALK_GATE@3500",
+      "host:voice_event_log@4000"
+    ]
+  }
+}

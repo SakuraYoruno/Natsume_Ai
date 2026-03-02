@@ -358,6 +358,16 @@
 - 当前进展（2026-03-02）：已落地"微信→Host编排→Governor→VTS表情+语音→审计"三条路径 E2E 测试：正常路径（微信入站→APPROVE→Skill执行→VTS表情HAPPY→语音TTS_PLAY→审计COMPLETE）、拒绝路径（TRUST_LOW→REJECT→无执行→COMPLETE_REJECTED）、降级路径（VTS_CONNECTION_FAILED+TTS_MODEL_UNAVAILABLE→DEGRADED记录→仅文本回复→COMPLETE）；审计串联键 request_id 从 channel_io_log→intent_log→governor_log→skill_exec_log→avatar_action_log→voice_event_log 完整可回放；重复消息去重、出站失败审计、VTS表情映射全量验证、无效emotion拒绝、三路径fixture结构稳定性均已覆盖。T-E2E-WeChat-01（19项）全部通过；现有 E2E 测试（9项）无回归。
 - 覆盖状态：DONE
 
+## R-38
+- 系统级需求：跨端事件时间线——Host/Edge 统一 request_id/session_id 关联视图，合并排序+时间漂移容忍+Edge缺失标注
+- PRD 需求编号（FR）：FR-OBS-001, FR-AUDIT-001
+- 来源：DevTasks TASK-0072（跨端时间线聚合）
+- DevSpec 落点：DevSpec 10/11
+- DevTasks（TASK）：TASK-0072
+- 验收测试（T-xx）：T-Obs-01, T-Obs-03
+- 当前进展（2026-03-02）：已落地跨端时间线聚合模块 `host_brain/observability/cross_timeline.py`：EdgeEventReport（Edge 标准化上报结构）、CrossTimelineAggregator（Host 审计+Edge 上报合并、按 ts_ms 排序、source=host/edge 标记）、时间漂移检测（可配置容忍阈值 DEFAULT_CLOCK_DRIFT_TOLERANCE_MS=5000ms）、Edge 缺失时 HOST_ONLY 降级+TIMELINE_EDGE_EVENTS_MISSING 告警、漂移超限时 PARTIAL 状态+TIMELINE_CLOCK_DRIFT_DETECTED 告警、按 session_id 备选关联、无效 Edge 事件静默过滤、跨 request_id 事件隔离。新增 3 个错误码（TIMELINE_EDGE_EVENTS_MISSING/TIMELINE_CLOCK_DRIFT_DETECTED/TIMELINE_SESSION_NOT_FOUND）；新增 3 个 fixtures（混合正常/时间交叉/Edge缺失）。T-Obs-03（27 项）全部通过；T-Obs-01（2 项）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
