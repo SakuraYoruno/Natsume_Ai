@@ -579,7 +579,7 @@ _panel_html_mtime: float = 0.0
 
 
 @app.get("/panel")
-async def panel_page():
+async def panel_page() -> Response:
     """链路可视化面板入口 — 返回 HTML 页面（带缓存）"""
     global _panel_html_cache, _panel_html_mtime
     panel_path = os.path.join(os.path.dirname(__file__), "static", "panel.html")
@@ -602,7 +602,7 @@ async def panel_page():
 # 根路径重定向到文档
 # ---------------------------------------------------------------------------
 @app.get("/")
-async def root():
+async def root() -> Response:
     """根路径重定向到API文档"""
     return Response(status_code=status.HTTP_307_TEMPORARY_REDIRECT, headers={"Location": "/docs"})
 
