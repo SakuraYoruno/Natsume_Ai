@@ -8,26 +8,26 @@
 
 ## 0. 任务列表与其它文档的关系（强制）
 
-白皮书：法律与禁令，不产出任务。  
-PRD：需求与验收，不产出任务。  
-DevSpec：工程契约与验证口径，是任务拆解的唯一来源。  
-DevTasks：任务卡清单，是 Codex 的唯一工作入口。  
+白皮书：法律与禁令，不产出任务。
+PRD：需求与验收，不产出任务。
+DevSpec：工程契约与验证口径，是任务拆解的唯一来源。
+DevTasks：任务卡清单，是 Codex 的唯一工作入口。
 Trace：审阅覆盖关系，不作为任务来源。
 
 ### 1. 编号规范
 
-需求编号（PRD）：FR-域-编号（例：FR-GOV-003）  
-测试编号（DevSpec/TESTPLAN）：T-编号（例：T-18）  
+需求编号（PRD）：FR-域-编号（例：FR-GOV-003）
+测试编号（DevSpec/TESTPLAN）：T-编号（例：T-18）
 任务编号（DevTasks）：TASK-四位数字（例：TASK-0123）
 
 ### 2. 任务卡格式（每条必须完整）
 
-TASK-XXXX 标题  
-任务描述：一句话说明要达成的工程结果（不写命令，不写工作流指挥）。  
-输入：已有模块/既有数据结构/既有文档章节。  
-输出：新增/修改的接口、Schema、日志点、测试点、文档更新点。  
-验收标准：必须可验证，优先引用 T-编号；并写明关键断言点（字段/拒绝码/审计记录）。  
-涉及文件路径：列出将触达的路径（允许新增文件路径，但不写任何命令）。  
+TASK-XXXX 标题
+任务描述：一句话说明要达成的工程结果（不写命令，不写工作流指挥）。
+输入：已有模块/既有数据结构/既有文档章节。
+输出：新增/修改的接口、Schema、日志点、测试点、文档更新点。
+验收标准：必须可验证，优先引用 T-编号；并写明关键断言点（字段/拒绝码/审计记录）。
+涉及文件路径：列出将触达的路径（允许新增文件路径，但不写任何命令）。
 关联需求/测试：FR-…；T-…；（可选）不变量 I-…
 
 ---
@@ -38,15 +38,15 @@ TASK-XXXX 标题
 - 任务描述：把 DevSpec 目录骨架与关键入口文件落到仓库中，确保后续任务有稳定落点；并保证“无 secrets 也可进入冷启动（M0）开发态”的配置占位存在。
 - 输入：DevSpec 1.1（目录树）、DevSpec 1.4（目录职责红线）、DevSpec 1.2.1（冷启动策略）。
 - 输出：
-  - 缺失目录与关键占位文件； 
-  - Flow 指针文件（flows/active.pointer）； 
-  - Flow Trace 索引（docs/60_trace/flows/index.md）； 
-  - TESTPLAN 占位（tests/TESTPLAN.md）； 
-  - secret 模板文件（例如 .env.example 或等价模板文件：只包含变量名与示例，不含真实密钥），用于支撑“未配置 API Key 的冷启动形态”。 
+  - 缺失目录与关键占位文件；
+  - Flow 指针文件（flows/active.pointer）；
+  - Flow Trace 索引（docs/60_trace/flows/index.md）；
+  - TESTPLAN 占位（tests/TESTPLAN.md）；
+  - secret 模板文件（例如 .env.example 或等价模板文件：只包含变量名与示例，不含真实密钥），用于支撑“未配置 API Key 的冷启动形态”。
 - 验收标准：
-  - 目录与文件存在性可审阅； 
+  - 目录与文件存在性可审阅；
   - active.pointer 为单个合法 JSON，包含 dev/staging/prod 三键；
-  - flows/index.md 含按环境行； 
+  - flows/index.md 含按环境行；
   - secret 模板文件不包含真实密钥，且能表达“未配置 key 时系统进入降级/替代路径”的配置口径（不要求可用性结论，但要求口径明确）。
 - 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/TESTPLAN.md；prompts/llm_contract/；host_brain/；edge_client/；tools/**；（可选）.env.example。
 - 关联需求/测试：FR-FLOW-001；FR-CORE-004；T-Flow-01、T-Flow-02。
@@ -55,14 +55,14 @@ TASK-XXXX 标题
 - 任务描述：建立 tests/contract、tests/e2e、tests/fixtures 的结构与最小断言模板，确保后续每个任务都有可挂载的测试落点；并补齐冷启动所需的 fixtures（无 key / 依赖缺失 / 输出仍稳定）。
 - 输入：DevSpec 11（合规测试口径）、DevSpec 1.1（tests 目录约定）、DevSpec 1.2.1（冷启动策略）。
 - 输出：
-  - TESTPLAN 编号表模板； 
-  - contract 测试占位（按 Schema/枚举/指针一致性分组）； 
-  - e2e 最小链路测试占位； 
-  - fixtures（good/bad intent、bad llm output、replay logs）目录结构； 
+  - TESTPLAN 编号表模板；
+  - contract 测试占位（按 Schema/枚举/指针一致性分组）；
+  - e2e 最小链路测试占位；
+  - fixtures（good/bad intent、bad llm output、replay logs）目录结构；
   - 冷启动 fixtures：至少包含 “无 API Key/外部依赖不可用” 的样例输入与期望输出结构（重点是 stage 与 reason_code 口径，而不是执行成功）。
 - 验收标准：
-  - TESTPLAN 中存在编号段落（T-Flow/T-Intent/T-LLM/T-Audit/T-QA 等至少列出占位条目）； 
-  - fixtures 目录具备最小样例文件（可为空内容但命名与字段结构明确）； 
+  - TESTPLAN 中存在编号段落（T-Flow/T-Intent/T-LLM/T-Audit/T-QA 等至少列出占位条目）；
+  - fixtures 目录具备最小样例文件（可为空内容但命名与字段结构明确）；
   - 冷启动 fixtures 体现：输出仍为单个合法 JSON、且具备 quality.stage 与 reason_code（当适用）。
 - 涉及文件路径：tests/TESTPLAN.md；tests/contract/；tests/e2e/；tests/fixtures/**。
 - 关联需求/测试：FR-CORE-002；FR-CORE-004；T-Flow-01~02（至少落占位）；T-14、T-15（至少落占位）；T-LLM-01（至少落占位）。
@@ -791,3 +791,207 @@ TASK-XXXX 标题
   - 回归覆盖（新增）`T-Obs-01`、`T-Obs-02`。
 - 涉及文件路径：host_brain/app/main.py；tests/contract/test_observability_timeline_contract.py；tests/contract/test_runtime_monitoring_contract.py；docs/30_devspec/DevTasks.md。
 - 关联需求/测试：FR-OBS-001；FR-AUDIT-001；（新增）T-Obs-01；（新增）T-Obs-02；I1/I8/I9。
+
+---
+
+## 6. 增量任务清单（审阅报告缺口补齐：服务化/可视化/设备集成/工程改善）
+
+> 来源：full_code_review_report_2026-03-02.md 第五节"关键缺口与改进建议"。
+> 按优先级排列：P0（高）→ P1（中）→ P2（低）。
+
+### TASK-0065 HTTP 服务框架落地：FastAPI 路由绑定 + 健康检查 + 链路入口（P0）
+- 任务描述：将现有函数聚合层（`main.py` 中的 `build_service_health_report`、`build_startup_report`、`build_env_readiness_report` 等）绑定到 FastAPI 路由，形成可直接 `python -m host_brain` 启动的 HTTP 服务，对外暴露 `POST /v1/chat`（链路入口）与 `GET /health`（健康检查），并保证 Governor/Token/Audit 治理链不被旁路。
+- 输入：DevSpec 2.1（Host 进程："对外提供 `POST /v1/chat`"）；DevSpec 1.1（`host_brain/app/main.py` 定义为"HTTP API 入口"）；PRD 2.1（"编排入口服务 Host Orchestrator API：对外 chat 入口 + 事件汇聚"）。
+- 输出：
+  - FastAPI Application 实例与路由注册（`/v1/chat`、`/health`、`/readiness`、`/metrics`）；
+  - 请求→编排→输出的标准 JSON 响应结构（复用已有 `quality.stage`/`reason_code` 口径）；
+  - 启动生命周期钩子（startup/shutdown）串联服务探针与审计写入；
+  - 中间件层：request_id 注入、CORS（可配置）、异常兜底（保持单 JSON 输出）；
+  - `pyproject.toml` / `requirements.txt` 新增 `fastapi`、`uvicorn` 依赖并锁定版本；
+  - fixtures：正常请求、缺字段、服务不可用场景样例。
+- 验收标准：
+  - `python -m host_brain` 可启动 HTTP 服务并响应 `/health`；
+  - `POST /v1/chat` 输入后经 Governor 裁决并返回单 JSON 响应（含 narrative/intent_draft/quality）；
+  - 异常/降级场景仍输出可解析单 JSON 且 reason_code 稳定；
+  - 不引入旁路执行路径（所有执行仍经 Governor/Token/Skills）；
+  - 回归覆盖（新增）`T-HTTP-01`（路由可达性与响应结构）、`T-HTTP-02`（异常兜底与降级输出）。
+- 涉及文件路径：host_brain/app/main.py；host_brain/app/config.py；host_brain/pyproject.toml（或 requirements.txt）；tests/contract/；tests/e2e/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-001；FR-CORE-002；FR-CORE-004；FR-OBS-001；（新增）T-HTTP-01；T-HTTP-02。
+
+### TASK-0066 链路可视化面板：审计数据 Web UI 呈现与 request 级排障（P0）
+- 任务描述：基于 TASK-0064 落地的只读观测 API，构建最小可用的 Web UI 面板，支持按 request_id/session_id 检索链路时间线、查看 Governor 裁决详情、审计事件聚合，降低排障对人工查表的依赖；UI 为只读，不新增任何执行入口。
+- 输入：DevSpec 10/11（可观测性）；TASK-0064 输出的 request 级观测报告契约；PRD FR-OBS-001（"关键指标与面板"）。
+- 输出：
+  - 前端页面（可选 React/Vue/纯 HTML+JS，以最小可运行为准）；
+  - 页面功能：request_id 搜索、时间线可视化、source 过滤、reason_code 统计图表；
+  - 与 Host API 的集成（`GET /v1/observe/{request_id}` 或等价端点）；
+  - 静态资源打包与部署口径（可嵌入 FastAPI static files 或独立部署）；
+  - fixtures：示例观测报告数据。
+- 验收标准：
+  - 输入 request_id 后可在浏览器看到链路时间线与 source 分布；
+  - 空结果/错误 request_id 有友好提示且不崩溃；
+  - 面板不引入任何执行入口（纯只读）；
+  - 回归覆盖（新增）`T-UI-01`（面板可渲染与 API 联通）。
+- 涉及文件路径：host_brain/app/main.py；host_brain/app/static/（或 frontend/）；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-OBS-001；FR-OBS-002；（新增）T-UI-01。
+
+### TASK-0067 Edge ASR 设备集成：faster-whisper 实际 SDK 对接与事件桥接（P0）
+- 任务描述：将 Edge 端 ASR 从契约层定义推进到实际 faster-whisper（large-v3）SDK 对接，形成"麦克风输入→ faster-whisper 转写→ asr_chunk 事件上送"的完整链路，并保持与已有 RPC 契约（TASK-0024/TASK-0025）的结构兼容。
+- 输入：DevSpec 8.11.3（VOICE 契约：asr_chunk 字段）；TASK-0024/TASK-0025 输出的 RPC 端点与事件 Schema；PRD FR-VOICE-001。
+- 输出：
+  - faster-whisper 模型加载与推理封装（GPU 常驻）；
+  - 音频流采集与分片策略（VAD 或固定窗口）；
+  - 转写结果→ asr_chunk 事件映射（text/timestamps/confidence/alternates）；
+  - 资源闸门（TASK-0029）集成：ASR 优先级最高；
+  - 模型不可用/GPU OOM 的稳定降级与 reason_code 映射；
+  - `requirements.txt` 新增 `faster-whisper`、`sounddevice`（或等价）依赖；
+  - fixtures：音频样本（短/长/静音/低信噪比）。
+- 验收标准：
+  - 实际麦克风输入可产出结构稳定的 asr_chunk 事件；
+  - 低置信度显式标注；GPU 不可用时快速失败并有稳定 reason_code；
+  - 与已有 T-Voice-01 契约兼容；
+  - 回归覆盖（新增）`T-ASR-HW-01`（实际设备链路可达性）。
+- 涉及文件路径：edge_client/senses/asr.py；edge_client/rpc/voice.py；edge_client/rpc/resource_gate.py；edge_client/requirements.txt；tests/contract/；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-001；T-Voice-01；（新增）T-ASR-HW-01。
+
+### TASK-0068 Edge TTS/VTS 设备集成：GPT-SoVITS 合成 + VTube Studio SDK 对接（P0）
+- 任务描述：将 Edge 端 TTS 与 VTS 从契约层定义推进到实际 SDK 对接，形成"Host 下发文本→ GPT-SoVITS 合成→播放队列→ VTube Studio 口型/表情驱动"的完整链路，保持与已有 RPC 契约（TASK-0026/TASK-0021）的结构兼容。
+- 输入：DevSpec 8.11.3（VOICE 契约）、DevSpec 8.11.2（VTS 外显）；TASK-0026/TASK-0021 输出的 RPC 端点与事件 Schema；PRD FR-VOICE-002、FR-AVATAR-001。
+- 输出：
+  - GPT-SoVITS 模型加载与推理封装（GPU 常驻，全量不量化）；
+  - 合成结果→播放队列→音频设备输出链路；
+  - VTube Studio API 连接封装：talk gate（TALK_START/TALK_END）与 emotion_tag→expression_id 映射驱动；
+  - barge-in 打断时的合成中止与 VTS 恢复策略；
+  - 模型不可用/VTS 连接断开的稳定降级与 reason_code 映射；
+  - `requirements.txt` 新增 `pyvts`（或等价 VTS SDK）依赖；
+  - fixtures：合成失败/VTS 断连/barge-in 场景样例。
+- 验收标准：
+  - Host 下发文本可在 Edge 完成合成并播放音频；
+  - VTS 口型与表情随播放联动，停止时恢复默认表情；
+  - 合成失败/VTS 断连场景有稳定 reason_code 且审计可回放；
+  - 与已有 T-Voice-02、T-Avatar-01 契约兼容；
+  - 回归覆盖（新增）`T-TTS-HW-01`（TTS 实际合成链路）、`T-VTS-HW-01`（VTS 实际驱动链路）。
+- 涉及文件路径：edge_client/actuators/speech.py；edge_client/rpc/voice.py；host_brain/channels/vts.py；edge_client/requirements.txt；tests/contract/；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-002；FR-AVATAR-001；T-Voice-02；T-Avatar-01；（新增）T-TTS-HW-01；T-VTS-HW-01。
+
+### TASK-0069 graph_runtime 拆分：契约层/执行层/降级层分离（P1）
+- 任务描述：将 `integrations/graph_runtime.py`（当前 942 行单文件）按职责拆分为契约层（配置校验/Schema）、执行层（节点执行/边路由）、降级层（fallback/timeout/dependency 处理），降低单文件复杂度并提升可测试性，拆分后行为与输出结构必须与拆分前保持一致。
+- 输入：DevSpec 6/8.9/10；TASK-0051 输出的图编排契约；现有 `graph_runtime.py` 实现。
+- 输出：
+  - `integrations/graph_contract.py`：图配置 Schema 校验、节点/边合法性验证；
+  - `integrations/graph_executor.py`：节点执行、依赖检查、边路由；
+  - `integrations/graph_fallback.py`：超时/依赖不可用/节点缺失的统一降级处理；
+  - `integrations/graph_runtime.py`：缩减为编排入口（串联三层），保持对外接口不变；
+  - 拆分前后输出结构（graph_status/reason_code/stage/fallback_map/dependency_statuses）完全一致；
+  - fixtures：拆分前后回归对比数据。
+- 验收标准：
+  - 拆分后 T-Orch-01 及所有现有图编排相关测试无回归；
+  - 单文件行数控制在 300 行以内；
+  - 各层可独立单测且依赖注入清晰；
+  - 回归覆盖（新增）`T-Orch-Refactor-01`（拆分前后输出一致性）。
+- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/graph_contract.py（新增）；host_brain/integrations/graph_executor.py（新增）；host_brain/integrations/graph_fallback.py（新增）；tests/contract/；tests/fixtures/orchestration/。
+- 关联需求/测试：FR-CORE-001；FR-CORE-004；T-Orch-01；（新增）T-Orch-Refactor-01。
+
+### TASK-0070 SQLite Ledger 并发优化：WAL 模式启用与写入吞吐基准（P1）
+- 任务描述：为 SQLite Ledger 启用 WAL（Write-Ahead Logging）模式，提升高并发场景下的读写吞吐，并建立写入性能基准测试，为后续是否需要迁移到外部审计存储提供数据依据。
+- 输入：DevSpec 8.1（Ledger SSOT）；TASK-0011 输出的 Triptych 三联画表；审阅报告 P1-5 建议。
+- 输出：
+  - SQLite 连接初始化时启用 `PRAGMA journal_mode=WAL` 与推荐配置（`synchronous=NORMAL`、`wal_autocheckpoint`）；
+  - 并发读写保护策略（连接池/写锁/重试口径）；
+  - 写入性能基准测试脚本（单线程/多线程/混合读写场景）；
+  - 基准报告结构（scenario/ops_per_sec/p95_latency_ms/wal_size）；
+  - WAL 模式启用失败的降级策略（回退 DELETE 模式并记录 reason_code）；
+  - fixtures：高并发写入样例。
+- 验收标准：
+  - WAL 模式启用后现有审计链测试无回归；
+  - 性能基准可量化并输出稳定报告结构；
+  - WAL 启用失败不阻塞系统启动（降级并可审计）；
+  - 回归覆盖 T-Audit-01 与（新增）`T-Audit-WAL-01`（WAL 模式下审计链完整性）。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/app/config.py；tools/bench/（新增）；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001；T-Audit-01；（新增）T-Audit-WAL-01。
+
+### TASK-0071 E2E 补充：微信入站→Governor→VTS/语音→审计 一体化场景（P1）
+- 任务描述：补充"微信消息入站→Host 编排→Governor 裁决→VTS 表情驱动 + 语音播报→审计链写入"的端到端测试场景，覆盖正常执行、拒绝、降级三种路径，验证跨模块串联与输出稳定性。
+- 输入：DevSpec 8.11.1/8.11.2/8.11.3；TASK-0020（微信通道）、TASK-0021（VTS）、TASK-0024~0027（语音链路）、TASK-0041（主链回归）。
+- 输出：
+  - E2E 场景定义：正常（微信→chat→VTS表情+语音播报→审计）、拒绝（Governor 拒绝→无执行→审计）、降级（VTS 不可用→仅文本→审计）；
+  - 每个场景的输入 fixtures 与期望输出断言；
+  - 审计串联验证：request_id 可从 channel_io_log→governor_log→avatar_action_log/voice_event_log 串联；
+  - 跨端模拟策略（Edge mock 或 stub）。
+- 验收标准：
+  - 三种路径 E2E 测试通过；
+  - 审计链串联键（request_id/thread_key）完整可回放；
+  - VTS/语音不可用时输出结构稳定且 reason_code 可解释；
+  - 回归覆盖（新增）`T-E2E-WeChat-01`（微信→Governor→VTS/语音全链路）。
+- 涉及文件路径：tests/e2e/test_wechat_vts_voice_e2e.py（新增）；tests/fixtures/channel/；tests/fixtures/voice/；host_brain/channels/；host_brain/governor/；host_brain/audit/。
+- 关联需求/测试：FR-CHANNEL-001；FR-AVATAR-001；FR-VOICE-001~003；T-Channel-01；T-Avatar-01；T-Voice-01~03；（新增）T-E2E-WeChat-01。
+
+### TASK-0072 跨端事件时间线：Host/Edge 统一 request_id/session_id 关联视图（P1）
+- 任务描述：建立 Host 与 Edge 事件的统一时间线聚合机制，支持按 request_id 或 session_id 关联两端事件（Host 审计 + Edge RPC/资源/语音事件），输出可排序时间线，为排障与性能分析提供数据底座。
+- 输入：DevSpec 10/11；TASK-0064 输出的 Host 端观测报告；TASK-0024~0029 输出的 Edge 端事件结构。
+- 输出：
+  - Edge 端事件上报结构（event_type/ts_ms/request_id/session_id/payload）；
+  - Host 端事件聚合器：合并 Host 审计事件 + Edge 上报事件，按 ts_ms 排序；
+  - 统一时间线输出结构（timeline[]，含 source=host/edge 标记）；
+  - 时间漂移容忍策略（Edge/Host 时钟不完全同步时的排序口径）；
+  - fixtures：Host/Edge 混合事件、时间交叉、Edge 事件缺失样例。
+- 验收标准：
+  - 给定 request_id 可输出 Host+Edge 合并时间线；
+  - Edge 事件缺失时 Host 时间线仍完整且标注缺失来源；
+  - 时间线排序稳定且可回放；
+  - 回归覆盖（新增）`T-Obs-03`（跨端时间线聚合与排序稳定性）。
+- 涉及文件路径：host_brain/app/main.py；edge_client/rpc/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
+- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；T-Obs-01；（新增）T-Obs-03。
+
+### TASK-0073 Rate Limit 持久化：R4 滑动窗口外部存储适配（P2）
+- 任务描述：将 Governor R4 Rate Limit Gate 的滑动窗口计数器从当前内存实现改为可插拔存储适配（内存/Redis/SQLite），支持集群模式下的共享限流，并保持单机模式零外部依赖。
+- 输入：DevSpec 6（R4 Rate Limit Gate）；TASK-0008 输出的 R4 Gate 契约。
+- 输出：
+  - Rate Limit 存储接口（抽象层：`incr`/`get_count`/`reset`/`ttl`）；
+  - 三种实现：InMemory（默认）、SQLite（单机持久化）、Redis（集群模式）；
+  - 配置项：`RATE_LIMIT_BACKEND=memory|sqlite|redis`；
+  - Redis 不可用时降级到 InMemory 并记录 reason_code；
+  - fixtures：窗口滑动/过期/并发竞争样例。
+- 验收标准：
+  - 切换 backend 后 R4 Gate 行为一致（同输入同结果）；
+  - Redis 不可用时稳定降级且 rule_trace 可标注 backend 信息；
+  - 现有 T-Gov-01 无回归；
+  - 回归覆盖（新增）`T-Gov-R4-01`（Rate Limit 多 backend 一致性）。
+- 涉及文件路径：host_brain/governor/rules.py；host_brain/governor/rate_limit_store.py（新增）；host_brain/app/config.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-GOV-001；T-Gov-01；（新增）T-Gov-R4-01。
+
+### TASK-0074 Camera Events 扩展：多检测器注册 + 多模态事件聚合（P2）
+- 任务描述：将当前基础摄像头事件识别扩展为多检测器注册与多模态事件聚合（人脸/物体/手势/场景），每个检测器独立输出置信度与 evidence_ref，聚合后输出统一事件结构。
+- 输入：DevSpec 8.12；TASK-0034 输出的 camera_event 结构；PRD FR-VISION-004。
+- 输出：
+  - 检测器注册表结构（detector_id/type/model_id/confidence_threshold/enabled）；
+  - 多检测器并行执行与结果聚合策略；
+  - 聚合事件结构（detections[]{detector_id/type/label/confidence/bbox?/evidence_ref}）；
+  - 检测器不可用时的部分降级策略（可用检测器正常输出，不可用检测器标注 reason_code）；
+  - fixtures：多检测器混合、部分不可用、全不可用样例。
+- 验收标准：
+  - 多检测器并行输出结构稳定且各自 evidence_ref 独立；
+  - 部分检测器不可用时输出仍合法且降级可解释；
+  - 现有 T-Vision-02 无回归；
+  - 回归覆盖（新增）`T-Vision-03`（多检测器注册与聚合稳定性）。
+- 涉及文件路径：host_brain/vision/camera_events.py；host_brain/vision/detector_registry.py（新增）；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/vision/。
+- 关联需求/测试：FR-VISION-004；T-Vision-02；（新增）T-Vision-03。
+
+### TASK-0075 Airlock DRAFT_CODE 沙箱执行：隔离运行环境 + 结果审计（P2）
+- 任务描述：将 Airlock 入站隔离中 DRAFT_CODE 分类从"仅标记"推进到实际沙箱执行能力（隔离进程/资源限制/超时保护），执行结果作为草案证据写入审计链，不直接影响主链路状态。
+- 输入：DevSpec 8.7（Airlock 入站隔离）；TASK-0016 输出的 quarantine 分类契约；PRD FR-AIRLOCK-002。
+- 输出：
+  - 沙箱执行环境封装（subprocess/容器/限时限资源）；
+  - 执行结果结构（sandbox_id/status/stdout/stderr/exit_code/duration_ms/resource_usage）；
+  - 沙箱结果→审计写入（sandbox_exec_log）与 evidence_ref 串联；
+  - 安全约束：无网络/无文件系统写入（或仅临时目录）/资源上限/超时强杀；
+  - 沙箱不可用时稳定拒绝（SANDBOX_UNAVAILABLE）；
+  - fixtures：正常执行/超时/恶意代码/资源超限样例。
+- 验收标准：
+  - DRAFT_CODE 可在沙箱中执行并产出结构化结果；
+  - 超时/资源超限场景强制终止且 reason_code 稳定；
+  - 沙箱执行不影响主进程状态且不引入旁路执行路径；
+  - 现有 T-39/T-40 无回归；
+  - 回归覆盖（新增）`T-Sandbox-01`（沙箱执行与安全边界）。
+- 涉及文件路径：host_brain/airlock/sandbox.py（新增）；host_brain/airlock/quarantine.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/airlock/。
+- 关联需求/测试：FR-AIRLOCK-002；T-39；T-40；（新增）T-Sandbox-01。

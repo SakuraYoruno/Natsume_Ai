@@ -1,0 +1,16 @@
+{
+  "message": "这是一个带无效intent的请求",
+  "session_id": "test-session-bad-002",
+  "intent_draft": {
+    "schema_version": "INVALID_VERSION",
+    "id": "intent::bad-002",
+    "ts_ms": 1709280000000,
+    "session_id": "test-session-bad-002",
+    "seq": 1,
+    "type": "query",
+    "action": "read_only_status",
+    "target": "host",
+    "args": {"scope": "host"},
+    "nonce": "nonce::bad-002"
+  }
+}

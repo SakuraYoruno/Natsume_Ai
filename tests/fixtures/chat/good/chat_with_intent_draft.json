@@ -1,0 +1,17 @@
+{
+  "message": "查看当前系统状态",
+  "session_id": "test-session-002",
+  "thread_id": "thread-wechat-002",
+  "intent_draft": {
+    "schema_version": "natsume.intent.v1",
+    "id": "intent::test-002",
+    "ts_ms": 1709280000000,
+    "session_id": "test-session-002",
+    "seq": 1,
+    "type": "query",
+    "action": "read_only_status",
+    "target": "host",
+    "args": {"scope": "host"},
+    "nonce": "nonce::test-002"
+  }
+}
