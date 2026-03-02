@@ -1,0 +1,12 @@
+{
+  "request_id": "req_vts_hw_001",
+  "scenario": "vts_disconnected",
+  "description": "VTS not connected - expression should be queued but talk gate degrades gracefully",
+  "emotion_tag": "HAPPY",
+  "expected": {
+    "success_degraded": true,
+    "reason_code": "VTS_CONNECTION_FAILED",
+    "expression_id": "exp_happy_01",
+    "detail_contains": "queued"
+  }
+}

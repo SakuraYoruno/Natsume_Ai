@@ -7,6 +7,7 @@ dependencies = [
   "faster-whisper>=1.0.0,<2",
   "sounddevice>=0.4.6,<1",
   "numpy>=1.24,<3",
+  "pyvts>=0.3.0,<1",
 ]
 
 [project.optional-dependencies]

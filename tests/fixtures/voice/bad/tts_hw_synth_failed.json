@@ -1,0 +1,17 @@
+{
+  "request_id": "req_tts_hw_002",
+  "scenario": "synth_failed_model_unavailable",
+  "description": "TTS synthesis fails because GPT-SoVITS model is not available",
+  "payload": {
+    "session_id": "sess_tts_hw_002",
+    "utterance_id": "utt_002",
+    "text": "テスト音声",
+    "voice_profile": "default",
+    "seq": 1
+  },
+  "expected": {
+    "success": false,
+    "reason_codes": ["TTS_MODEL_UNAVAILABLE", "TTS_GPU_OOM"],
+    "detail_contains": "not available"
+  }
+}
