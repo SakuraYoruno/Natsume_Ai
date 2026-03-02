@@ -1,0 +1,19 @@
+{
+  "description": "Docker 容器沙箱正常执行 fixture",
+  "scenario": "docker_sandbox_normal",
+  "input": {
+    "code": "print('hello from docker')",
+    "isolation_backend": "docker",
+    "timeout_s": 10,
+    "request_id": "req_docker_fx_001"
+  },
+  "expected": {
+    "status": "OK",
+    "exit_code": 0,
+    "reason_code": null,
+    "stdout_contains": "hello from docker",
+    "resource_usage_contains": {
+      "isolation_backend": "docker"
+    }
+  }
+}
