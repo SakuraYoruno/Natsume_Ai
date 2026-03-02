@@ -1,0 +1,33 @@
+{
+  "description": "ASR 麦克风设备断开→自动恢复成功 fixture",
+  "scenario": "asr_device_recovery_success",
+  "initial_state": {
+    "asr_state": "STREAMING",
+    "device_index": 0,
+    "session_id": "asr_test_001"
+  },
+  "trigger": {
+    "event": "ASR_DEVICE_ERROR",
+    "reason": "device_disconnected",
+    "ts_ms": 1709308800000
+  },
+  "recovery_config": {
+    "max_attempts": 5,
+    "base_delay_s": 1.0,
+    "max_delay_s": 8.0,
+    "auto_recover": true,
+    "try_alternate_devices": true
+  },
+  "mock_failures_before_success": 2,
+  "expected": {
+    "final_state": "READY",
+    "recovery_event": "ASR_DEVICE_RECOVERED",
+    "recovery_attempts": 3,
+    "running": true,
+    "audit_event": {
+      "event": "ASR_DEVICE_RECOVERED",
+      "attempt": 3,
+      "detail": "device recovered after 3 attempt(s) on original_device_0"
+    }
+  }
+}
