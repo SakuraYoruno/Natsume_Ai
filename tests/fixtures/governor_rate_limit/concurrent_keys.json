@@ -1,0 +1,23 @@
+{
+  "scenario": "rate_limit_concurrent_keys",
+  "description": "并发竞争：多个 key 独立计数互不干扰",
+  "config": {
+    "backend": "memory",
+    "window_ms": 10000,
+    "max_requests": 2
+  },
+  "events": [
+    {"key": "user_A", "ts_ms": 300000, "expected_count": 1, "expected_hit": false},
+    {"key": "user_B", "ts_ms": 300000, "expected_count": 1, "expected_hit": false},
+    {"key": "user_A", "ts_ms": 301000, "expected_count": 2, "expected_hit": false},
+    {"key": "user_B", "ts_ms": 302000, "expected_count": 2, "expected_hit": false},
+    {"key": "user_A", "ts_ms": 303000, "expected_count": 3, "expected_hit": true},
+    {"key": "user_B", "ts_ms": 303000, "expected_count": 3, "expected_hit": true}
+  ],
+  "expected": {
+    "user_A_final_hit": true,
+    "user_B_final_hit": true,
+    "keys_isolated": true,
+    "backend": "memory"
+  }
+}

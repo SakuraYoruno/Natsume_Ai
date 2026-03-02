@@ -368,6 +368,16 @@
 - 当前进展（2026-03-02）：已落地跨端时间线聚合模块 `host_brain/observability/cross_timeline.py`：EdgeEventReport（Edge 标准化上报结构）、CrossTimelineAggregator（Host 审计+Edge 上报合并、按 ts_ms 排序、source=host/edge 标记）、时间漂移检测（可配置容忍阈值 DEFAULT_CLOCK_DRIFT_TOLERANCE_MS=5000ms）、Edge 缺失时 HOST_ONLY 降级+TIMELINE_EDGE_EVENTS_MISSING 告警、漂移超限时 PARTIAL 状态+TIMELINE_CLOCK_DRIFT_DETECTED 告警、按 session_id 备选关联、无效 Edge 事件静默过滤、跨 request_id 事件隔离。新增 3 个错误码（TIMELINE_EDGE_EVENTS_MISSING/TIMELINE_CLOCK_DRIFT_DETECTED/TIMELINE_SESSION_NOT_FOUND）；新增 3 个 fixtures（混合正常/时间交叉/Edge缺失）。T-Obs-03（27 项）全部通过；T-Obs-01（2 项）无回归。
 - 覆盖状态：DONE
 
+## R-39
+- 系统级需求：Rate Limit 持久化——R4 滑动窗口可插拔存储适配（InMemory/SQLite/Redis），Redis 不可用时稳定降级，rule_trace 标注 backend
+- PRD 需求编号（FR）：FR-GOV-001
+- 来源：DevTasks TASK-0073（Rate Limit 持久化）
+- DevSpec 落点：DevSpec 6
+- DevTasks（TASK）：TASK-0073
+- 验收测试（T-xx）：T-Gov-01, T-Gov-R4-01
+- 当前进展（2026-03-02）：已落地 Rate Limit 可插拔存储层 `host_brain/governor/rate_limit_store.py`：RateLimitStore 抽象接口（incr/get_count/reset/ttl）、InMemoryRateLimitStore（滑动窗口 dict 实现，线程安全）、SQLiteRateLimitStore（WAL 模式持久化）、RedisRateLimitStore（Sorted Set 集群限流）、DegradingRateLimitStore（主后端不可用自动降级到 InMemory）、RateLimitChecker（封装 check/check_only/reset）、create_rate_limit_store 工厂函数。R4 Gate 增强输出 backend/degraded/degraded_from 信息到 threshold_summary/snapshot_summary，向后兼容（不传新字段时行为不变）。新增 HOST_RATE_LIMIT_BACKEND/HOST_RATE_LIMIT_WINDOW_MS/HOST_RATE_LIMIT_MAX_REQUESTS 三个配置项。新增 2 个错误码（RATE_LIMIT_BACKEND_DEGRADED/RATE_LIMIT_BACKEND_UNAVAILABLE）；新增 3 个 fixtures（窗口滑动/窗口过期/并发竞争）。InMemory 与 SQLite 同输入同结果已验证。T-Gov-R4-01（47 项）全部通过；T-Gov-01（2 项）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。

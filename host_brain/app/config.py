@@ -62,6 +62,9 @@ HOST_FIELD_TO_ENV_KEY = {
     "enable_retrieval": "HOST_ENABLE_RETRIEVAL",
     "enable_vision": "HOST_ENABLE_VISION",
     "enable_edge_rpc": "HOST_ENABLE_EDGE_RPC",
+    "rate_limit_backend": "HOST_RATE_LIMIT_BACKEND",
+    "rate_limit_window_ms": "HOST_RATE_LIMIT_WINDOW_MS",
+    "rate_limit_max_requests": "HOST_RATE_LIMIT_MAX_REQUESTS",
 }
 HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"}
 
@@ -92,6 +95,9 @@ class HostConfig:
     enable_retrieval: bool
     enable_vision: bool
     enable_edge_rpc: bool
+    rate_limit_backend: str
+    rate_limit_window_ms: int
+    rate_limit_max_requests: int
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +118,9 @@ class HostConfig:
             "enable_retrieval": self.enable_retrieval,
             "enable_vision": self.enable_vision,
             "enable_edge_rpc": self.enable_edge_rpc,
+            "rate_limit_backend": self.rate_limit_backend,
+            "rate_limit_window_ms": self.rate_limit_window_ms,
+            "rate_limit_max_requests": self.rate_limit_max_requests,
         }
 
 
@@ -235,6 +244,28 @@ def load_host_config(
         merged.get("HOST_ENABLE_EDGE_RPC"),
         default=True,
     )
+    rate_limit_backend = _as_text(
+        merged.get("HOST_RATE_LIMIT_BACKEND"), "memory",
+    ).lower()
+    if rate_limit_backend not in {"memory", "sqlite", "redis"}:
+        # 无效值静默降级到 memory（不阻断配置加载）
+        rate_limit_backend = "memory"
+    rate_limit_window_ms = _parse_int(
+        merged.get("HOST_RATE_LIMIT_WINDOW_MS"),
+        default=60_000,
+        field_name="HOST_RATE_LIMIT_WINDOW_MS",
+        min_value=1_000,
+        max_value=600_000,
+        issues=issues,
+    )
+    rate_limit_max_requests = _parse_int(
+        merged.get("HOST_RATE_LIMIT_MAX_REQUESTS"),
+        default=30,
+        field_name="HOST_RATE_LIMIT_MAX_REQUESTS",
+        min_value=1,
+        max_value=10_000,
+        issues=issues,
+    )
 
     openai_api_key = _as_optional_text(merged.get("OPENAI_API_KEY"))
     openai_api_key_ref = _as_optional_text(merged.get("OPENAI_API_KEY_REF"))
@@ -321,6 +352,9 @@ def load_host_config(
         enable_retrieval=bool(enable_retrieval),
         enable_vision=bool(enable_vision),
         enable_edge_rpc=bool(enable_edge_rpc),
+        rate_limit_backend=rate_limit_backend,
+        rate_limit_window_ms=int(rate_limit_window_ms),
+        rate_limit_max_requests=int(rate_limit_max_requests),
     )
     return HostConfigLoadResult(
         success=True,
