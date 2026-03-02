@@ -1,0 +1,449 @@
+{
+  "schema_version": "1.0.0",
+  "generated_on": "2026-03-02",
+  "project": "Nastume_Ai",
+  "notes": [
+    "No secrets are stored in this file.",
+    "Use *_REF fields and secret store files for credentials.",
+    "Service defaults are extracted from runtime configs and startup scripts."
+  ],
+  "runtime_services": [
+    {
+      "service_id": "host.api",
+      "name": "Host Brain FastAPI",
+      "required": true,
+      "owner": "host",
+      "bind": {
+        "host_env": "HOST_APP_HOST",
+        "port_env": "HOST_APP_PORT",
+        "default_host": "127.0.0.1",
+        "default_port": 18080
+      },
+      "startup": {
+        "script": "scripts/runtime/start_host_side.ps1",
+        "command": "python -m host_brain --host ${HOST_APP_HOST} --port ${HOST_APP_PORT}"
+      },
+      "healthcheck": {
+        "type": "http",
+        "path": "/health",
+        "url_template": "http://${HOST_APP_HOST}:${HOST_APP_PORT}/health"
+      },
+      "depends_on": [
+        "neo4j",
+        "chroma",
+        "llm.providers",
+        "retrieval.embedding",
+        "retrieval.reranker",
+        "edge.rpc.gateway"
+      ],
+      "config_sources": [
+        ".env.example",
+        "host_brain/__main__.py",
+        "scripts/runtime/start_host_side.ps1"
+      ]
+    },
+    {
+      "service_id": "edge.rpc.gateway",
+      "name": "Edge FastAPI RPC Gateway",
+      "required": true,
+      "owner": "edge",
+      "bind": {
+        "host_env": "EDGE_RPC_HOST",
+        "port_env": "EDGE_RPC_PORT",
+        "default_host": "127.0.0.1",
+        "default_port": 17800
+      },
+      "startup": {
+        "script": "scripts/runtime/start_edge_side.ps1",
+        "command": "python -m edge_client"
+      },
+      "healthcheck": {
+        "type": "http",
+        "path": "/v1/edge/health",
+        "url_template": "http://${EDGE_RPC_HOST}:${EDGE_RPC_PORT}/v1/edge/health"
+      },
+      "depends_on": [
+        "edge.rpc.auth_key",
+        "edge.asr.faster_whisper",
+        "edge.tts.gpt_sovits",
+        "edge.avatar.vtube_studio",
+        "edge.fallback_llm.local"
+      ],
+      "config_sources": [
+        ".env.example",
+        "edge_client/config.py",
+        "edge_client/__main__.py",
+        "scripts/runtime/start_edge.ps1"
+      ]
+    }
+  ],
+  "external_dependencies": [
+    {
+      "service_id": "neo4j",
+      "name": "Neo4j Graph Database",
+      "required": true,
+      "category": "database",
+      "endpoint": {
+        "uri_env": "BOND_NEO4J_URI",
+        "default_uri": "bolt://127.0.0.1:7687",
+        "database_env": "BOND_NEO4J_DATABASE",
+        "default_database": "neo4j"
+      },
+      "auth": {
+        "credential_ref_env": "BOND_NEO4J_AUTH_REF",
+        "tls_enabled_env": "BOND_NEO4J_TLS_ENABLED",
+        "pool_size_env": "BOND_NEO4J_POOL_SIZE"
+      },
+      "local_paths": [
+        "runtime/neo4j/neo4j-community-*",
+        "%USERPROFILE%/.Neo4jDesktop2/Data/dbmss/*"
+      ],
+      "startup_scripts": [
+        "scripts/runtime/start_local_services.ps1",
+        "scripts/runtime/stop_local_services.ps1"
+      ],
+      "startup_requirements": {
+        "neo4j_home_candidates": [
+          "runtime/neo4j/neo4j-community-*",
+          "manual parameter: start_host_side.ps1 -Neo4jHome <path>"
+        ],
+        "java_home_candidates": [
+          "JAVA_HOME",
+          "C:/Program Files/Microsoft/jdk-21.0.10.7-hotspot"
+        ]
+      },
+      "healthcheck": {
+        "type": "tcp",
+        "port": 7687
+      },
+      "config_sources": [
+        ".env.example",
+        "configs/runtime/local_services.env.example"
+      ]
+    },
+    {
+      "service_id": "chroma",
+      "name": "Chroma Vector Database",
+      "required": true,
+      "category": "vector_database",
+      "endpoint": {
+        "endpoint_env": "CHROMA_ENDPOINT",
+        "default_endpoint": "http://127.0.0.1:8000",
+        "tenant_env": "CHROMA_TENANT",
+        "database_env": "CHROMA_DATABASE",
+        "default_collection_env": "CHROMA_DEFAULT_COLLECTION"
+      },
+      "collection_profiles_env": "CHROMA_COLLECTION_PROFILES_JSON",
+      "local_paths": [
+        "runtime/chroma/data"
+      ],
+      "startup_scripts": [
+        "scripts/runtime/start_local_services.ps1",
+        "scripts/runtime/stop_local_services.ps1"
+      ],
+      "startup_requirements": {
+        "chroma_executable_candidates": [
+          "PATH: chroma",
+          "C:/Program Files/Python311/Scripts/chroma.exe"
+        ],
+        "chroma_data_path": "runtime/chroma/data"
+      },
+      "healthcheck": {
+        "type": "http",
+        "path": "/api/v2/heartbeat",
+        "url_template": "${CHROMA_ENDPOINT}/api/v2/heartbeat"
+      },
+      "config_sources": [
+        ".env.example",
+        "configs/runtime/local_services.env.example"
+      ]
+    },
+    {
+      "service_id": "llm.providers",
+      "name": "Host LLM Providers",
+      "required": true,
+      "category": "llm_api",
+      "selector_env": "HOST_LLM_PROVIDER",
+      "allowed_values": [
+        "openai",
+        "gemini",
+        "deepseek",
+        "mock",
+        "disabled"
+      ],
+      "provider_credentials": {
+        "openai": [
+          "OPENAI_API_KEY",
+          "OPENAI_API_KEY_REF"
+        ],
+        "gemini": [
+          "GEMINI_API_KEY",
+          "GEMINI_API_KEY_REF"
+        ],
+        "deepseek": [
+          "DEEPSEEK_API_KEY",
+          "DEEPSEEK_API_KEY_REF"
+        ]
+      },
+      "model_examples": {
+        "openai": [
+          "gpt-5.2",
+          "gpt-5-mini",
+          "gpt-5.2-pro",
+          "gpt-4.1-mini"
+        ],
+        "gemini": [
+          "gemini-2.5-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-2.5-pro"
+        ],
+        "deepseek": [
+          "deepseek-chat"
+        ]
+      },
+      "config_sources": [
+        ".env.example",
+        "host_brain/app/config.py",
+        "configs/model_plane/node_registry.yaml"
+      ]
+    },
+    {
+      "service_id": "retrieval.embedding",
+      "name": "Embedding Route Providers",
+      "required": true,
+      "category": "retrieval_model",
+      "route_env_keys": [
+        "RETR_EMBED_ENABLED",
+        "RETR_EMBED_DEFAULT_ROUTE",
+        "RETR_EMBED_ROUTES_JSON",
+        "RETR_EMBED_DEVICE"
+      ],
+      "model_examples": [
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "text-embedding-3-large"
+      ],
+      "route_examples_file": "configs/models/embedding_routes.example.json",
+      "config_sources": [
+        ".env.example",
+        "configs/runtime/local_services.env.example",
+        "configs/models/embedding_routes.example.json"
+      ]
+    },
+    {
+      "service_id": "retrieval.reranker",
+      "name": "Reranker Route Providers",
+      "required": true,
+      "category": "retrieval_model",
+      "route_env_keys": [
+        "RETR_RERANK_ENABLED",
+        "RETR_RERANK_DEFAULT_ROUTE",
+        "RETR_RERANK_ROUTES_JSON",
+        "RETR_RERANK_DEVICE"
+      ],
+      "model_examples": [
+        "BAAI/bge-reranker-base",
+        "BAAI/bge-reranker-large"
+      ],
+      "route_examples_file": "configs/models/reranker_routes.example.json",
+      "config_sources": [
+        ".env.example",
+        "configs/runtime/local_services.env.example",
+        "configs/models/reranker_routes.example.json"
+      ]
+    },
+    {
+      "service_id": "retrieval.recall",
+      "name": "Recall Route Configuration",
+      "required": true,
+      "category": "retrieval_route",
+      "route_env_keys": [
+        "RETR_RECALL_ENABLED",
+        "RETR_RECALL_DEFAULT_ROUTE",
+        "RETR_RECALL_ROUTES_JSON"
+      ],
+      "collection_examples": [
+        "episodic",
+        "canon"
+      ],
+      "route_examples_file": "configs/models/recall_routes.example.json",
+      "config_sources": [
+        ".env.example",
+        "configs/runtime/local_services.env.example",
+        "configs/models/recall_routes.example.json"
+      ]
+    },
+    {
+      "service_id": "edge.rpc.auth_key",
+      "name": "Edge RPC HMAC Shared Key",
+      "required": true,
+      "category": "security_secret",
+      "env_keys": [
+        "EDGE_HMAC_SHARED_KEY",
+        "EDGE_HMAC_SHARED_KEY_REF",
+        "EDGE_ALLOW_INSECURE_AUTH"
+      ],
+      "notes": [
+        "In production, disable insecure auth and provide key or key ref.",
+        "In dev/test, insecure auth can be enabled while keeping schema checks."
+      ],
+      "config_sources": [
+        ".env.example",
+        "edge_client/config.py"
+      ]
+    },
+    {
+      "service_id": "edge.asr.faster_whisper",
+      "name": "Edge ASR Runtime",
+      "required": true,
+      "category": "edge_voice_runtime",
+      "sdk": "faster-whisper",
+      "model": {
+        "name": "large-v3",
+        "device": "cuda",
+        "compute_type": "float16",
+        "language_default": "ja"
+      },
+      "config_toggle_env": "EDGE_ASR_ENABLED",
+      "health_component": "asr",
+      "config_sources": [
+        ".env.example",
+        "edge_client/senses/asr.py",
+        "edge_client/config.py"
+      ]
+    },
+    {
+      "service_id": "edge.tts.gpt_sovits",
+      "name": "Edge TTS Runtime",
+      "required": true,
+      "category": "edge_voice_runtime",
+      "sdk": "gpt-sovits",
+      "model": {
+        "default_model_path": "models/gpt_sovits",
+        "device": "cuda",
+        "sample_rate": 32000,
+        "language_default": "ja"
+      },
+      "config_toggle_env": "EDGE_TTS_ENABLED",
+      "health_component": "tts",
+      "config_sources": [
+        ".env.example",
+        "edge_client/actuators/tts_engine.py",
+        "edge_client/config.py"
+      ]
+    },
+    {
+      "service_id": "edge.avatar.vtube_studio",
+      "name": "VTube Studio Integration",
+      "required": false,
+      "category": "avatar_realtime",
+      "endpoint": {
+        "default_host": "localhost",
+        "default_port": 8001,
+        "token_path": ".vts_token"
+      },
+      "plugin": {
+        "name": "NastumeAi",
+        "developer": "Nastume"
+      },
+      "health_component": "vts",
+      "config_sources": [
+        "edge_client/actuators/vts_driver.py"
+      ]
+    },
+    {
+      "service_id": "edge.fallback_llm.local",
+      "name": "Edge Fallback LLM Runtime",
+      "required": false,
+      "category": "edge_llm_runtime",
+      "toggle_env": "EDGE_FALLBACK_LLM_ENABLED",
+      "model": {
+        "default_model_id": "ollama:3b-q4",
+        "runtime_mode": "draft_only"
+      },
+      "notes": [
+        "When disabled, fallback endpoint fast-fails with VOICE_FALLBACK_UNAVAILABLE.",
+        "Enabled mode still outputs draft-only content and cannot bypass host governance."
+      ],
+      "config_sources": [
+        ".env.example",
+        "edge_client/config.py",
+        "edge_client/runtime/bootstrap.py",
+        "edge_client/rpc/fallback_llm.py"
+      ]
+    },
+    {
+      "service_id": "host.rate_limit.redis",
+      "name": "Host Rate Limit Redis Backend",
+      "required": false,
+      "category": "optional_backend",
+      "activated_when": "HOST_RATE_LIMIT_BACKEND=redis",
+      "endpoint": {
+        "default_url": "redis://localhost:6379/0",
+        "key_prefix_default": "Nastume:ratelimit:"
+      },
+      "notes": [
+        "If Redis is unavailable, runtime degrades to in-memory backend with stable reason code.",
+        "No dedicated env key is currently exposed for redis_url in host config."
+      ],
+      "healthcheck": {
+        "type": "tcp",
+        "port": 6379
+      },
+      "config_sources": [
+        "host_brain/app/config.py",
+        "host_brain/governor/rate_limit_store.py"
+      ]
+    },
+    {
+      "service_id": "sandbox.docker_runtime",
+      "name": "Sandbox Docker Isolation Backend",
+      "required": false,
+      "category": "runtime_isolation",
+      "activated_when": "SANDBOX_ISOLATION_BACKEND=docker",
+      "runtime": {
+        "engine": "Docker Engine",
+        "min_version_hint": "20+"
+      },
+      "env_keys": [
+        "SANDBOX_ISOLATION_BACKEND",
+        "SANDBOX_TIMEOUT_S",
+        "SANDBOX_MAX_CODE_BYTES",
+        "SANDBOX_DOCKER_IMAGE"
+      ],
+      "notes": [
+        "When docker backend is unavailable, runtime should degrade to subprocess mode.",
+        "Use non-network and read-only options for isolation in container mode."
+      ],
+      "config_sources": [
+        "docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md",
+        "host_brain/airlock/sandbox.py",
+        "host_brain/airlock/docker_sandbox.py"
+      ]
+    },
+    {
+      "service_id": "secret.profile_store",
+      "name": "Key Profile and Secret Store",
+      "required": true,
+      "category": "secret_management",
+      "files": [
+        "configs/secrets/key_profiles.runtime.json",
+        "configs/secrets/secret_store.runtime.local.json"
+      ],
+      "examples": [
+        "configs/secrets/key_profiles.example.json",
+        "configs/secrets/secret_store.runtime.example.json"
+      ],
+      "used_by": [
+        "host.llm.providers",
+        "edge.rpc.auth_key",
+        "neo4j.auth_ref"
+      ],
+      "config_sources": [
+        "configs/secrets/key_profiles.example.json",
+        "configs/secrets/secret_store.runtime.example.json",
+        "host_brain/app/config.py",
+        "edge_client/config.py"
+      ]
+    }
+  ]
+}
