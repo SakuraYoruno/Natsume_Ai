@@ -288,6 +288,16 @@
 - 当前进展（2026-03-01）：已落地环境联调就绪报告（`env/node_count/key_profiles/services/graph_runtime/readiness_status`），汇总 dependency matrix 与演练摘要（`scenario_id/status/reason_code_chain/replay_ref`），并稳定区分 partial-ready（DEGRADED）与 critical-down（FAILED）场景。
 - 覆盖状态：DONE
 
+## R-31
+- 系统级需求：HTTP 服务框架落地（FastAPI 路由绑定 + POST /v1/chat 链路入口 + 健康检查 + CORS + 生命周期钩子 + /metrics），所有执行仍经 Governor/Token/Skills，不引入旁路
+- PRD 需求编号（FR）：FR-CORE-001, FR-CORE-002, FR-CORE-004, FR-OBS-001
+- 来源：审阅报告 2026-03-02 P0-1（HTTP 服务框架缺失）
+- DevSpec 落点：DevSpec 1.1/2.1
+- DevTasks（TASK）：TASK-0065
+- 验收测试（T-xx）：T-HTTP-01, T-HTTP-02
+- 当前进展（2026-03-02）：已落地 FastAPI Application（`host_brain/app/fastapi_app.py`）：POST /v1/chat（走 IntentDecisionEngine 全链裁决）、GET /health、GET /ready、GET /metrics、POST /observability/trace；中间件含 request_id 注入 + CORS + 异常兜底；startup/shutdown 生命周期钩子串联服务探针与审计；`python -m host_brain` 可启动 HTTP 服务。T-HTTP-01（12 项路由可达性与响应结构）、T-HTTP-02（异常兜底与降级输出）全部通过。
+- 覆盖状态：DONE
+
 ---
 
 覆盖状态枚举建议：
