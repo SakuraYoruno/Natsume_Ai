@@ -16,7 +16,7 @@
 12. `vault/`：manifest/undo/GC 的正反例与 digest 失配样例。
 
 注意：fixtures 仅提供样例结构，不代表真实执行成功。
-13. `airlock/`: egress sanitization and ingress quarantine fixtures (missing report, direct-execution ingress sample, fact sample).
+13. `airlock/`: egress sanitization, ingress quarantine fixtures (missing report, direct-execution ingress sample, fact sample), and DRAFT_CODE sandbox execution fixtures (normal exec, timeout, malicious code, resource exceeded for `T-Sandbox-01`).
 14. `tools/`: tool catalog metadata fixtures (mixed READ/WRITE and metadata-only contract negatives).
 15. `mcp/`: provider tool sync fixtures (READ/WRITE classification, metadata validation, and governed invocation paths).
 16. `channels/`: WeChat ingress/egress and VTS avatar fixtures (duplicate ingress, failed egress ack, invalid emotion tags, and free-form action blocking).

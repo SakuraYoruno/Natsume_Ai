@@ -1,0 +1,10 @@
+{
+  "request_id": "req_sandbox_002",
+  "intent_id": "intent_sandbox_002",
+  "description": "超时场景：无限循环脚本，应被强制终止",
+  "payload": {
+    "code": "import time\nwhile True:\n    time.sleep(0.1)\n",
+    "language": "python",
+    "timeout_s": 2
+  }
+}

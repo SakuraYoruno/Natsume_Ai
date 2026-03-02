@@ -66,6 +66,9 @@
 - T-39: Egress must include sanitization_report_json (removed_fields/redactions/payload_digest), otherwise reject with AIRLOCK_BLOCKED_EGRESS and log airlock_log.
 - T-40: Ingress content must be quarantined and classified (FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN) and never directly execute.
 
+## T-Sandbox
+- T-Sandbox-01: DRAFT_CODE sandbox execution must produce structured results (sandbox_id/status/exit_code/stdout/stderr/duration_ms/evidence_ref/code_digest), enforce timeout kill and resource limits with stable reason_code, maintain process isolation (no main-process side effects), and write sandbox_exec_log for audit replay; existing T-39/T-40 must not regress.
+
 ## T-Tool
 - T-Tool-01: ToolMeta pack is metadata-only (no execution payload), with required fields and context-pack validation compatibility.
 - T-Tool-02: Top-K selection only exposes a subset and hides WRITE tools by default; tool_visibility_hash is deterministic for same input.

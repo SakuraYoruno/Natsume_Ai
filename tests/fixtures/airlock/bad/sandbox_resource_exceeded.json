@@ -1,0 +1,10 @@
+{
+  "request_id": "req_sandbox_004",
+  "intent_id": "intent_sandbox_004",
+  "description": "资源超限场景：代码体积超过限制",
+  "payload": {
+    "code_note": "实际测试中动态生成超大代码字符串",
+    "language": "python",
+    "max_code_bytes": 64
+  }
+}
