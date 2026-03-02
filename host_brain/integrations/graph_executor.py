@@ -40,7 +40,7 @@ class GraphExecutor:
         self._default_timeout_ms = default_timeout_ms
         self._ledger = ledger
 
-    def compile_runtime_graph(self):
+    def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
         graph.add_node("step", RunnableLambda(self._run_single_step))
         graph.add_node("finish", RunnableLambda(lambda state: state))

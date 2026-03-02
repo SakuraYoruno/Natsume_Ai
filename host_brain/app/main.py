@@ -905,4 +905,5 @@ if __name__ == "__main__":
         monitoring_profile=monitor_profile,
         console_profile=console_profile,
     )
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    _main_logger = logging.getLogger(LOGGER_NAME_RUNTIME_MONITOR)
+    _main_logger.info(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

@@ -6,3 +6,7 @@ langchain-openai>=1.1.0,<2
 langgraph>=1.0.0,<2
 fastapi>=0.104.0,<1
 uvicorn[standard]>=0.24.0,<1
+
+# ── 可选依赖（Optional Dependencies） ──
+# redis：Rate Limit 存储后端（R4 Gate Backend），仅在启用 Redis 后端时需要
+# redis>=5.0.0,<6

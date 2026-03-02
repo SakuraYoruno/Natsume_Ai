@@ -18,11 +18,44 @@ import uuid
 from typing import Any
 
 from host_brain.core.errors import (
+    AUDIT_TABLE_NAME_INVALID,
     AUDIT_WAL_CHECKPOINT_FAILED,
     AUDIT_WAL_FAILED,
     TRACE_MISSING_GOVERNOR,
     TRACE_MISSING_INTENT,
 )
+
+# ---------------------------------------------------------------------------
+# 表名白名单（硬编码允许表名集合，用于 _fetch_all 安全校验）
+# ---------------------------------------------------------------------------
+_ALLOWED_TABLES: frozenset[str] = frozenset({
+    "intent_log",
+    "governor_log",
+    "skill_exec_log",
+    "model_control_log",
+    "error_log",
+    "qa_violation_log",
+    "canon_proposal_log",
+    "canon_change_log",
+    "world_canon_doc",
+    "memory_ops_log",
+    "vault_manifest_index",
+    "vault_gc_log",
+    "airlock_log",
+    "channel_io_log",
+    "avatar_action_log",
+    "clawd_action_log",
+    "service_health_log",
+    "migration_log",
+    "config_snapshot_log",
+    "voice_event_log",
+    "retrieval_event_log",
+    "vision_event_log",
+    "bond_update_log",
+    "sandbox_exec_log",
+    "replay_guard",
+    "session_seq_guard",
+})
 from host_brain.core.ids import now_ms
 
 logger = logging.getLogger(__name__)
@@ -429,6 +462,8 @@ class SQLiteLedger:
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
+        # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
+        self._column_cache: dict[str, set[str]] = {}
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._ensure_schema()
@@ -1394,6 +1429,16 @@ class SQLiteLedger:
             raise last_exc
 
     def _fetch_all(self, table: str) -> list[dict[str, Any]]:
+        # 表名白名单校验（F-16: 拒绝非法表名防止 SQL 注入）
+        if table not in _ALLOWED_TABLES:
+            logger.warning(
+                "Rejected _fetch_all for invalid table name: %s (reason_code=%s)",
+                table,
+                AUDIT_TABLE_NAME_INVALID,
+            )
+            raise ValueError(
+                f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
+            )
         if self._table_has_column(table, "id"):
             rows = self._conn.execute(f"SELECT * FROM {table} ORDER BY id ASC").fetchall()
         elif self._table_has_column(table, "doc_id"):
@@ -1429,5 +1474,8 @@ class SQLiteLedger:
         return data
 
     def _table_has_column(self, table: str, column: str) -> bool:
-        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
-        return any(str(row["name"]) == column for row in rows)
+        # F-06: 使用表结构缓存，避免每次调用 PRAGMA table_info
+        if table not in self._column_cache:
+            rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            self._column_cache[table] = {str(row["name"]) for row in rows}
+        return column in self._column_cache[table]
