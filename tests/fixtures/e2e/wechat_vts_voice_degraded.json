@@ -1,0 +1,40 @@
+{
+  "scenario": "wechat_vts_voice_degraded",
+  "description": "微信入站→Host编排→Governor APPROVE→Skill执行→VTS不可用（降级仅文本）→审计链标注降级reason_code",
+  "wechat_ingress": {
+    "message_id": "wx_e2e_msg_003",
+    "from_user_id": "wx_user_e2e_003",
+    "to_user_id": "natsume_bot",
+    "content": "给我讲个笑话"
+  },
+  "intent_overrides": {
+    "id": "intent_e2e_wechat_003",
+    "nonce": "nonce_e2e_wechat_003",
+    "seq": 1,
+    "action": "read_only_status",
+    "type": "skill_call",
+    "target": "host"
+  },
+  "vts_emotion": {
+    "emotion_tag": "HAPPY",
+    "trigger": "LLM"
+  },
+  "vts_unavailable": true,
+  "voice_event": {
+    "event_type": "TTS_PLAY",
+    "direction": "EGRESS"
+  },
+  "voice_unavailable": true,
+  "expected": {
+    "wechat_accepted": true,
+    "governor_decision": "APPROVE",
+    "skill_status": "SUCCESS",
+    "vts_degraded": true,
+    "vts_reason_code": "VTS_CONNECTION_FAILED",
+    "voice_degraded": true,
+    "voice_reason_code": "TTS_MODEL_UNAVAILABLE",
+    "egress_sent": true,
+    "audit_trace_status": "COMPLETE",
+    "audit_tables_present": ["channel_io_log", "intent_log", "governor_log", "skill_exec_log", "avatar_action_log", "voice_event_log"]
+  }
+}

@@ -348,6 +348,16 @@
 - 当前进展（2026-03-02）：已增强 SQLite Ledger WAL 配置：启用 synchronous=NORMAL + wal_autocheckpoint=1000 + busy_timeout=5000ms + cache_size=2000KB；新增 WalConfig 可配置数据类；写入层增加 threading.Lock 写锁 + 3 次重试策略（防 database is locked）；新增 wal_health() 健康快照（wal_status/journal_mode/synchronous/degradation_reason/wal_size_pages）；新增 checkpoint(mode) 手动检查点（PASSIVE/FULL/RESTART/TRUNCATE）；close() 自动执行 PASSIVE checkpoint；WAL 激活失败时降级到 DELETE 模式并记录 AUDIT_WAL_FAILED；新增 2 个错误码（AUDIT_WAL_FAILED/AUDIT_WAL_CHECKPOINT_FAILED）；新增性能基准测试脚本 tools/bench/ledger_bench.py（单线程/多线程/混合读写三场景，输出 JSON 结构化报告含 ops_per_sec/p95_latency_ms/wal_size）；新增 2 个 fixtures（并发写入/降级）。T-Audit-WAL-01（24 项）全部通过；T-Audit-01/T-Audit-Ret-01（4 项）无回归。
 - 覆盖状态：DONE
 
+## R-37
+- 系统级需求：微信入站→Governor→VTS/语音→审计 一体化 E2E 场景覆盖（正常/拒绝/降级三条路径），审计串联键可回放
+- PRD 需求编号（FR）：FR-CHANNEL-001, FR-AVATAR-001, FR-VOICE-001~003, FR-AUDIT-001
+- 来源：DevTasks TASK-0071（E2E 补充）
+- DevSpec 落点：DevSpec 8.11.1/8.11.2/8.11.3/8.1
+- DevTasks（TASK）：TASK-0071
+- 验收测试（T-xx）：T-Channel-01, T-Avatar-01, T-Voice-01~03, T-E2E-WeChat-01
+- 当前进展（2026-03-02）：已落地"微信→Host编排→Governor→VTS表情+语音→审计"三条路径 E2E 测试：正常路径（微信入站→APPROVE→Skill执行→VTS表情HAPPY→语音TTS_PLAY→审计COMPLETE）、拒绝路径（TRUST_LOW→REJECT→无执行→COMPLETE_REJECTED）、降级路径（VTS_CONNECTION_FAILED+TTS_MODEL_UNAVAILABLE→DEGRADED记录→仅文本回复→COMPLETE）；审计串联键 request_id 从 channel_io_log→intent_log→governor_log→skill_exec_log→avatar_action_log→voice_event_log 完整可回放；重复消息去重、出站失败审计、VTS表情映射全量验证、无效emotion拒绝、三路径fixture结构稳定性均已覆盖。T-E2E-WeChat-01（19项）全部通过；现有 E2E 测试（9项）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
