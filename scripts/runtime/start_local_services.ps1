@@ -149,13 +149,48 @@ $neoPid = Get-ListeningPid -Port $neo4jPort
 
 if (-not $neoPid) {
   if (-not $Neo4jHome) {
-    $candidates = Get-ChildItem -Path $neoRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "neo4j-community-*" } | Sort-Object LastWriteTime -Descending
+    $candidateHomes = @()
+
+    $runtimeCandidates = @(
+      Get-ChildItem -Path $neoRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.Name -like "neo4j-community-*" -and
+          (Test-Path (Join-Path $_.FullName "bin\neo4j.bat"))
+        }
+    )
+    if ($runtimeCandidates.Count -gt 0) {
+      $candidateHomes += $runtimeCandidates
+    }
+
+    $desktopDataRoot = Join-Path $env:USERPROFILE ".Neo4jDesktop2\Data\dbmss"
+    if (Test-Path -Path $desktopDataRoot) {
+      $desktopDataCandidates = @(
+        Get-ChildItem -Path $desktopDataRoot -Directory -ErrorAction SilentlyContinue |
+          Where-Object { Test-Path (Join-Path $_.FullName "bin\neo4j.bat") }
+      )
+      if ($desktopDataCandidates.Count -gt 0) {
+        $candidateHomes += $desktopDataCandidates
+      }
+    }
+
+    $desktopCacheRoot = Join-Path $env:USERPROFILE ".Neo4jDesktop2\Cache\dbmss"
+    if (Test-Path -Path $desktopCacheRoot) {
+      $desktopCacheCandidates = @(
+        Get-ChildItem -Path $desktopCacheRoot -Directory -ErrorAction SilentlyContinue |
+          Where-Object { Test-Path (Join-Path $_.FullName "bin\neo4j.bat") }
+      )
+      if ($desktopCacheCandidates.Count -gt 0) {
+        $candidateHomes += $desktopCacheCandidates
+      }
+    }
+
+    $candidates = @($candidateHomes | Sort-Object LastWriteTime -Descending)
     if ($candidates.Count -gt 0) {
-      $Neo4jHome = $candidates[0].FullName
+      $Neo4jHome = [string]$candidates[0].FullName
     }
   }
   if (-not $Neo4jHome -or -not (Test-Path $Neo4jHome)) {
-    throw "Neo4j home not found. Expected extracted folder under runtime\\neo4j\\neo4j-community-*"
+    throw "Neo4j home not found. Expected runtime\\neo4j\\neo4j-community-* or Neo4j Desktop dbmss folder. You can also pass -Neo4jHome explicitly."
   }
 
   $neo4jBat = Join-Path $Neo4jHome "bin\neo4j.bat"

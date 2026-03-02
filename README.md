@@ -241,6 +241,8 @@ pytest tests/
 .\scripts\runtime\start_host_side.ps1
 ```
 
+默认会自动探测 Neo4j Desktop 目录（`~/.Neo4jDesktop2/Data/dbmss/*`）；也可用 `-Neo4jHome` 手工指定。
+
 ### 8. 启动 Edge 网关（调试/本地运行）
 
 ```powershell

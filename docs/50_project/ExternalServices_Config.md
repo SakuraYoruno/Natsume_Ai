@@ -58,6 +58,8 @@
 .\scripts\runtime\start_host_side.ps1 -Neo4jHome "C:\path\to\neo4j-home"
 ```
 
+默认情况下，脚本会自动探测 `~/.Neo4jDesktop2/Data/dbmss/*` 与 `~/.Neo4jDesktop2/Cache/dbmss/*`。
+
 若本机无 `JAVA_HOME`，脚本会尝试 `C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot`。
 
 ### 3.2 Edge 端
