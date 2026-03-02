@@ -1,6 +1,15 @@
 """Edge senses exports."""
 
-from edge_client.senses.asr import emit_asr_chunk
+from edge_client.senses.asr import (
+    AsrConfig,
+    AsrResult,
+    AsrService,
+    AsrState,
+    AudioStreamCapture,
+    TranscriptionSegment,
+    WhisperModelManager,
+    emit_asr_chunk,
+)
 from edge_client.senses.fallback_llm import (
     build_retrieval_hints,
     check_fallback_presence,
@@ -9,6 +18,13 @@ from edge_client.senses.fallback_llm import (
 )
 
 __all__ = [
+    "AsrConfig",
+    "AsrResult",
+    "AsrService",
+    "AsrState",
+    "AudioStreamCapture",
+    "TranscriptionSegment",
+    "WhisperModelManager",
     "emit_asr_chunk",
     "check_fallback_presence",
     "compile_asr_draft",

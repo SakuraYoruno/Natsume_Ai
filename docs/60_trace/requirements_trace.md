@@ -308,6 +308,16 @@
 - 当前进展（2026-03-02）：已落地链路可视化面板：后端 API（`/api/ui/timeline`、`/api/ui/status-distribution`、`/api/ui/request/{id}`、`/api/ui/link-topology`、`/api/ui/search-requests`）提供时间线聚合、状态分布、请求详情、链路拓扑、搜索 5 大数据接口；前端面板（`/panel`）为纯 HTML+CSS+JS 单页面，含 request_id 搜索、时间线可视化、source 过滤、reason_code 统计图表；嵌入 FastAPI static files；面板纯只读无任何执行入口。T-UI-01（13 项：面板渲染、API 联通、空结果处理、只读安全性）全部通过。
 - 覆盖状态：DONE
 
+## R-33
+- 系统级需求：Edge ASR 设备集成（faster-whisper large-v3 SDK 对接 + 音频采集 + VAD + asr_chunk 事件桥接），GPU 常驻优先、不可用时稳定降级
+- PRD 需求编号（FR）：FR-VOICE-001, FR-VOICE-005
+- 来源：审阅报告 2026-03-02 P0-3（Edge ASR 设备集成缺失）
+- DevSpec 落点：DevSpec 8.11.3
+- DevTasks（TASK）：TASK-0067
+- 验收测试（T-xx）：T-Voice-01, T-ASR-HW-01
+- 当前进展（2026-03-02）：已落地完整 ASR 设备集成：WhisperModelManager（GPU 常驻 + CUDA→CPU 自动降级 + 线程安全加载/卸载）、AudioStreamCapture（sounddevice 麦克风采集 + 分片回调）、AsrService（音频缓冲→VAD→转写→asr_chunk RPC 事件映射编排器）；新增 5 个 ASR 硬件层错误码（ASR_MODEL_UNAVAILABLE/ASR_GPU_OOM/ASR_DEVICE_ERROR/ASR_VAD_NO_SPEECH/ASR_STREAM_INTERRUPTED）；新增 5 个 fixtures（短/长语音 + 静音 + 低信噪比 + GPU OOM）；保持 emit_asr_chunk 向后兼容；pyproject.toml 新增 faster-whisper/sounddevice/numpy 依赖。T-ASR-HW-01（28 项：模型生命周期/音频采集/配置/结果结构/事件映射/向后兼容/错误码稳定性/资源闸门集成/健康快照/fixture 验证）全部通过。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
