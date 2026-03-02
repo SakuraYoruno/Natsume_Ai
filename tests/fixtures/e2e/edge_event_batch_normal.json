@@ -1,0 +1,44 @@
+{
+  "description": "Edge→Host 正常批量上报 fixture：3 条有效事件",
+  "events": [
+    {
+      "event_type": "ASR_CHUNK",
+      "ts_ms": 1709308800000,
+      "request_id": "req_edge_001",
+      "session_id": "sess_edge_001",
+      "source": "edge",
+      "direction": "EDGE_TO_HOST",
+      "seq": 1,
+      "status": "OK",
+      "payload": {"text": "hello", "confidence": 0.95, "final": true}
+    },
+    {
+      "event_type": "TTS_SYNTH",
+      "ts_ms": 1709308801000,
+      "request_id": "req_edge_001",
+      "session_id": "sess_edge_001",
+      "source": "edge",
+      "direction": "EDGE_TO_HOST",
+      "seq": 2,
+      "status": "OK",
+      "payload": {"utterance_id": "utt_001", "duration_ms": 1200}
+    },
+    {
+      "event_type": "VTS_EXPRESSION",
+      "ts_ms": 1709308802000,
+      "request_id": "req_edge_001",
+      "session_id": "sess_edge_001",
+      "source": "edge",
+      "direction": "EDGE_TO_HOST",
+      "seq": 3,
+      "status": "OK",
+      "payload": {"expression_id": "HAPPY", "emotion_tag": "happy"}
+    }
+  ],
+  "expected": {
+    "success": true,
+    "total": 3,
+    "accepted": 3,
+    "rejected": 0
+  }
+}

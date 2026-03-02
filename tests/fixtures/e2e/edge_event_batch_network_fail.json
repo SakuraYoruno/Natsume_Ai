@@ -1,0 +1,43 @@
+{
+  "description": "Edge→Host 网络中断缓存 fixture：模拟 transport 失败后事件被缓存",
+  "events": [
+    {
+      "event_type": "BARGE_IN",
+      "ts_ms": 1709308800000,
+      "request_id": "req_edge_003",
+      "session_id": "sess_edge_003",
+      "source": "edge",
+      "direction": "EDGE_TO_HOST",
+      "seq": 1,
+      "status": "OK",
+      "payload": {"source": "user_voice", "active_utterance_id": "utt_003"}
+    },
+    {
+      "event_type": "ASR_CHUNK",
+      "ts_ms": 1709308801000,
+      "request_id": "req_edge_003",
+      "session_id": "sess_edge_003",
+      "source": "edge",
+      "direction": "EDGE_TO_HOST",
+      "seq": 2,
+      "status": "OK",
+      "payload": {"text": "stop", "confidence": 0.88, "final": true}
+    }
+  ],
+  "simulate_network_failure": true,
+  "expected_after_failure": {
+    "success": false,
+    "total": 2,
+    "accepted": 0,
+    "rejected": 2,
+    "reason_code": "RPC_EVENT_NETWORK_UNAVAILABLE",
+    "cache_size": 2
+  },
+  "expected_after_recovery": {
+    "success": true,
+    "total": 2,
+    "accepted": 2,
+    "rejected": 0,
+    "cache_size": 0
+  }
+}

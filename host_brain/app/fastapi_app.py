@@ -28,9 +28,14 @@ from host_brain.app.main import (
     emit_runtime_bootstrap_logs,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import (
+    RPC_EVENT_BATCH_PARTIAL_FAIL,
+    RPC_EVENT_SCHEMA_INVALID,
+)
 from host_brain.core.ids import new_request_id
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
+from host_brain.observability.cross_timeline import build_cross_timeline
 from host_brain.app.web_ui import router as web_ui_router
 
 
@@ -92,6 +97,23 @@ class MetricsResponse(BaseModel):
     total_rejections: int = Field(..., description="Governor拒绝数")
     total_errors: int = Field(..., description="错误数")
     reason_code_distribution: Dict[str, int] = Field(default_factory=dict, description="拒绝码分布")
+    timestamp: int = Field(..., description="响应时间戳(毫秒)")
+
+
+class EdgeEventsRequest(BaseModel):
+    """POST /v1/edge/events 请求体 — Edge 端事件批量上报"""
+    events: List[Dict[str, Any]] = Field(..., description="Edge 事件列表")
+
+
+class EdgeEventsResponse(BaseModel):
+    """POST /v1/edge/events 响应体"""
+    success: bool = Field(..., description="是否全部接受")
+    total: int = Field(..., description="收到事件总数")
+    accepted: int = Field(..., description="成功写入数")
+    rejected: int = Field(..., description="拒绝数")
+    reason_code: Optional[str] = Field(None, description="部分失败/全失败原因")
+    detail: Optional[str] = Field(None, description="描述")
+    rejected_indices: List[int] = Field(default_factory=list, description="被拒绝的事件索引")
     timestamp: int = Field(..., description="响应时间戳(毫秒)")
 
 
@@ -596,6 +618,90 @@ async def panel_page() -> Response:
             _panel_html_cache = f.read()
         _panel_html_mtime = mtime
     return Response(content=_panel_html_cache, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# TASK-0079: Edge→Host 事件批量上报端点
+# ---------------------------------------------------------------------------
+@app.post("/v1/edge/events", response_model=EdgeEventsResponse)
+async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
+    """接收 Edge 端批量上报的事件，校验并写入审计链。
+
+    TASK-0079: 打通 Edge→Host 事件上报通道。
+    事件通过 cross_timeline 的 EdgeEventReport 结构化解析后写入审计。
+    """
+    ts_ms = int(time.time() * 1000)
+    raw_events = request_body.events
+
+    if not raw_events:
+        return EdgeEventsResponse(
+            success=True, total=0, accepted=0, rejected=0,
+            detail="empty batch", timestamp=ts_ms,
+        )
+
+    # 逐条校验必需字段
+    required_fields = {"event_type", "ts_ms", "request_id", "session_id"}
+    accepted_count = 0
+    rejected_indices: list[int] = []
+    ledger = get_ledger()
+
+    for idx, raw in enumerate(raw_events):
+        if not isinstance(raw, dict):
+            rejected_indices.append(idx)
+            continue
+        missing = required_fields - set(raw.keys())
+        event_type = str(raw.get("event_type") or "").strip()
+        request_id = str(raw.get("request_id") or "").strip()
+        session_id = str(raw.get("session_id") or "").strip()
+        ts_val = raw.get("ts_ms")
+
+        if missing or not event_type or not request_id or not session_id or not isinstance(ts_val, (int, float)):
+            rejected_indices.append(idx)
+            continue
+
+        # 写入 voice_event_log（Edge 事件统一入表）
+        try:
+            ledger.log_voice_event({
+                "request_id": request_id,
+                "session_id": session_id,
+                "event_type": event_type,
+                "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
+                "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
+                "status": str(raw.get("status") or "RECEIVED"),
+                "reason_code": str(raw.get("reason_code") or "").strip() or None,
+                "stage": str(raw.get("stage") or "").strip() or None,
+                "detail": str(raw.get("detail") or "").strip() or None,
+                "payload": raw.get("payload") or {},
+                "ts_ms": int(ts_val),
+            })
+            accepted_count += 1
+        except Exception as exc:
+            _logger.warning("Failed to write edge event %d: %s", idx, exc)
+            rejected_indices.append(idx)
+
+    rejected_count = len(rejected_indices)
+    total = len(raw_events)
+
+    if rejected_count == 0:
+        reason_code = None
+        detail = f"all {total} events accepted"
+    elif accepted_count == 0:
+        reason_code = RPC_EVENT_SCHEMA_INVALID
+        detail = f"all {total} events rejected"
+    else:
+        reason_code = RPC_EVENT_BATCH_PARTIAL_FAIL
+        detail = f"accepted {accepted_count}, rejected {rejected_count} of {total}"
+
+    return EdgeEventsResponse(
+        success=(rejected_count == 0),
+        total=total,
+        accepted=accepted_count,
+        rejected=rejected_count,
+        reason_code=reason_code,
+        detail=detail,
+        rejected_indices=rejected_indices,
+        timestamp=ts_ms,
+    )
 
 
 # ---------------------------------------------------------------------------
