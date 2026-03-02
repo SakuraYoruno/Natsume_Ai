@@ -317,6 +317,24 @@ BOND_UPDATE_COLUMNS = (
 )
 
 
+SANDBOX_EXEC_COLUMNS = (
+    "request_id",
+    "intent_id",
+    "sandbox_id",
+    "status",
+    "exit_code",
+    "reason_code",
+    "evidence_ref",
+    "code_digest",
+    "stdout_preview",
+    "stderr_preview",
+    "duration_ms",
+    "resource_usage",
+    "truncated_stdout",
+    "truncated_stderr",
+    "ts_ms",
+)
+
 MODEL_CONTROL_COLUMNS = (
     "request_id",
     "node_id",
@@ -356,6 +374,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "vision_event_log": {"payload"},
     "bond_update_log": {"evidence_refs", "payload"},
     "model_control_log": set(),
+    "sandbox_exec_log": {"resource_usage"},
 }
 
 
@@ -505,6 +524,10 @@ class SQLiteLedger:
     @property
     def bond_update_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("bond_update_log")
+
+    @property
+    def sandbox_exec_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("sandbox_exec_log")
 
     # -------------------------------------------------------------------
     # WAL lifecycle
@@ -754,6 +777,10 @@ class SQLiteLedger:
     def log_bond_update(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in BOND_UPDATE_COLUMNS}
         self._insert("bond_update_log", payload)
+
+    def log_sandbox_exec(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in SANDBOX_EXEC_COLUMNS}
+        self._insert("sandbox_exec_log", payload)
 
     def get_vault_manifest(self, manifest_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
@@ -1244,6 +1271,25 @@ class SQLiteLedger:
                     ts_ms INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS sandbox_exec_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT,
+                    intent_id TEXT,
+                    sandbox_id TEXT,
+                    status TEXT,
+                    exit_code INTEGER,
+                    reason_code TEXT,
+                    evidence_ref TEXT,
+                    code_digest TEXT,
+                    stdout_preview TEXT,
+                    stderr_preview TEXT,
+                    duration_ms INTEGER,
+                    resource_usage TEXT,
+                    truncated_stdout INTEGER,
+                    truncated_stderr INTEGER,
+                    ts_ms INTEGER
+                );
+
                 CREATE TABLE IF NOT EXISTS replay_guard (
                     intent_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
@@ -1314,6 +1360,10 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_bond_update_event ON bond_update_log(event_id);
                 CREATE INDEX IF NOT EXISTS idx_bond_update_user ON bond_update_log(user_id);
                 CREATE INDEX IF NOT EXISTS idx_bond_update_ts ON bond_update_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_sandbox_exec_request ON sandbox_exec_log(request_id);
+                CREATE INDEX IF NOT EXISTS idx_sandbox_exec_sandbox_id ON sandbox_exec_log(sandbox_id);
+                CREATE INDEX IF NOT EXISTS idx_sandbox_exec_evidence ON sandbox_exec_log(evidence_ref);
+                CREATE INDEX IF NOT EXISTS idx_sandbox_exec_ts ON sandbox_exec_log(ts_ms);
                 """
             )
 

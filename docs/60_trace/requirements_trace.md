@@ -388,6 +388,16 @@
 - 当前进展（2026-03-02）：已落地多检测器注册表（DetectorConfig: detector_id/type/model_id/confidence_threshold/enabled/timeout_ms）、DetectorRegistry（线程安全注册/注销/列表/快照）、MultiDetectorAggregator（并行执行 + 结果聚合：OK/PARTIAL/ALL_FAILED 三态）；CameraRecognitionServiceContract 新增 detect_multi() 方法与原 detect() 完全兼容；新增 3 个错误码（VISION_DETECTOR_UNAVAILABLE/VISION_DETECTOR_TIMEOUT/VISION_DETECTOR_ALL_FAILED）；新增 3 个 fixtures（多检测器混合/部分不可用/全不可用）。T-Vision-03（25 项：注册表 CRUD 7项 + 聚合器 9项 + 集成 6项 + 回归 3项）全部通过；T-Vision-02（原有）无回归。
 - 覆盖状态：DONE
 
+## R-41
+- 系统级需求：Airlock DRAFT_CODE 沙箱执行——隔离运行环境（subprocess + 临时目录）+ 超时强杀 + 资源限制 + 结构化结果审计
+- PRD 需求编号（FR）：FR-AIRLOCK-002
+- 来源：DevSpec 8.7 / TASK-0016
+- DevSpec 落点：DevSpec 8.7
+- DevTasks（TASK）：TASK-0075
+- 验收测试（T-xx）：T-39, T-40, T-Sandbox-01
+- 当前进展（2026-03-02）：已落地 DRAFT_CODE 沙箱执行器 `host_brain/airlock/sandbox.py`：SandboxConfig（timeout_s/max_stdout_bytes/max_stderr_bytes/max_code_bytes/python_executable/allow_network/allow_fs_write/enabled）、SandboxExecResult（sandbox_id/status/exit_code/stdout/stderr/duration_ms/reason_code/evidence_ref/resource_usage/code_digest/truncated_stdout/truncated_stderr）、SandboxExecutor（execute 方法：subprocess 隔离 + 临时目录 + 超时强杀 + 输出截断 + 审计写入）。新增 sandbox_exec_log 审计表（15 字段 + 4 索引）到 SQLiteLedger。新增 4 个错误码（SANDBOX_UNAVAILABLE/SANDBOX_TIMEOUT/SANDBOX_RESOURCE_EXCEEDED/SANDBOX_EXEC_FAILED）。新增 4 个 fixtures（正常执行/超时/恶意代码/资源超限）。T-Sandbox-01（20 项）全部通过；T-39/T-40（原有）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。

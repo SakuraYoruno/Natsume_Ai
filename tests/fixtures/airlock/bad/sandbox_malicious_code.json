@@ -1,0 +1,9 @@
+{
+  "request_id": "req_sandbox_003",
+  "intent_id": "intent_sandbox_003",
+  "description": "恶意代码场景：尝试导入 os 并执行系统命令，应在沙箱中隔离（非零退出码）",
+  "payload": {
+    "code": "import sys\nsys.exit(42)\n",
+    "language": "python"
+  }
+}
