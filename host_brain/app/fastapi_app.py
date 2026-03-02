@@ -107,7 +107,12 @@ class ErrorResponse(BaseModel):
 # 运行时指标收集器（内存，用于 /metrics 端点）
 # ---------------------------------------------------------------------------
 class _RuntimeMetrics:
-    """进程内运行时指标收集（轻量级内存实现）。"""
+    """进程内运行时指标收集（轻量级内存实现）。
+
+    注意：计数器依赖 CPython GIL 保证单进程内线程安全，
+    但多 worker 模式下各 worker 独立计数（指标为 per-worker 视图）。
+    如需全局指标，请改用外部存储（Redis/Prometheus）。
+    """
 
     def __init__(self) -> None:
         self.start_time: float = time.time()
@@ -196,14 +201,18 @@ if os.path.isdir(_static_dir):
 # ---------------------------------------------------------------------------
 # CORS 中间件（可配置）
 # ---------------------------------------------------------------------------
-_cors_origins = os.environ.get("NATSUME_CORS_ORIGINS", "*").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS 默认关闭：生产环境必须显式设置 NATSUME_CORS_ORIGINS
+# 例如 NATSUME_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
+_cors_origins_raw = os.environ.get("NATSUME_CORS_ORIGINS", "").strip()
+if _cors_origins_raw:
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # ---------------------------------------------------------------------------
 # 全局依赖
@@ -214,10 +223,16 @@ _logger = logging.getLogger("natsume.fastapi")
 
 
 def get_ledger() -> SQLiteLedger:
-    """获取SQLite账本实例（延迟初始化，支持跨线程访问）"""
+    """获取SQLite账本实例（延迟初始化，支持跨线程访问）。
+
+    持久化路径通过环境变量 NATSUME_AUDIT_DB 配置，
+    默认使用文件路径 host_brain/data/audit.sqlite3。
+    设置 NATSUME_AUDIT_DB=:memory: 可使用内存数据库（仅测试）。
+    """
     global _ledger
     if _ledger is None:
-        _ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+        db_path = os.environ.get("NATSUME_AUDIT_DB", "host_brain/data/audit.sqlite3")
+        _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
 
 
@@ -558,20 +573,29 @@ async def metrics() -> MetricsResponse:
 # ---------------------------------------------------------------------------
 # Web UI 面板入口（TASK-0066: 链路可视化面板）
 # ---------------------------------------------------------------------------
+# 面板 HTML 缓存（避免每次请求读磁盘）
+_panel_html_cache: Optional[str] = None
+_panel_html_mtime: float = 0.0
+
+
 @app.get("/panel")
 async def panel_page():
-    """链路可视化面板入口 — 返回 HTML 页面"""
+    """链路可视化面板入口 — 返回 HTML 页面（带缓存）"""
+    global _panel_html_cache, _panel_html_mtime
     panel_path = os.path.join(os.path.dirname(__file__), "static", "panel.html")
-    if os.path.isfile(panel_path):
-        with open(panel_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        return Response(content=html_content, media_type="text/html")
-    else:
+    if not os.path.isfile(panel_path):
         return Response(
             content="<html><body><h1>Panel not found</h1><p>Static file panel.html missing.</p></body></html>",
             media_type="text/html",
             status_code=404,
         )
+    # 检查文件是否更新（开发模式热刷新友好）
+    mtime = os.path.getmtime(panel_path)
+    if _panel_html_cache is None or mtime != _panel_html_mtime:
+        with open(panel_path, "r", encoding="utf-8") as f:
+            _panel_html_cache = f.read()
+        _panel_html_mtime = mtime
+    return Response(content=_panel_html_cache, media_type="text/html")
 
 
 # ---------------------------------------------------------------------------
