@@ -1,0 +1,42 @@
+{
+  "description": "Edge→Host 部分失败 fixture：2 条有效 + 1 条缺 request_id + 1 条非 dict",
+  "events": [
+    {
+      "event_type": "ASR_CHUNK",
+      "ts_ms": 1709308800000,
+      "request_id": "req_edge_002",
+      "session_id": "sess_edge_002",
+      "source": "edge",
+      "seq": 1,
+      "status": "OK",
+      "payload": {"text": "test", "confidence": 0.9}
+    },
+    {
+      "event_type": "SPEAK",
+      "ts_ms": 1709308801000,
+      "session_id": "sess_edge_002",
+      "source": "edge",
+      "seq": 2,
+      "payload": {}
+    },
+    "not_a_dict",
+    {
+      "event_type": "TTS_SYNTH",
+      "ts_ms": 1709308802000,
+      "request_id": "req_edge_002",
+      "session_id": "sess_edge_002",
+      "source": "edge",
+      "seq": 3,
+      "status": "OK",
+      "payload": {"utterance_id": "utt_002"}
+    }
+  ],
+  "expected": {
+    "success": false,
+    "total": 4,
+    "accepted": 2,
+    "rejected": 2,
+    "reason_code": "RPC_EVENT_BATCH_PARTIAL_FAIL",
+    "rejected_indices": [1, 2]
+  }
+}

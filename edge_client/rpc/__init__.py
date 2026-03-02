@@ -1,5 +1,13 @@
 """Edge RPC exports."""
 
+from edge_client.rpc.event_reporter import (
+    BatchReportResult,
+    EdgeEventCache,
+    EdgeEventReporter,
+    EventReportItem,
+    validate_batch,
+    validate_event,
+)
 from edge_client.rpc.fallback_llm import (
     EVENT_FALLBACK_ASR_COMPILE,
     EVENT_FALLBACK_CONTEXT_COMPRESS,
@@ -46,6 +54,12 @@ from edge_client.rpc.voice import (
 )
 
 __all__ = [
+    "BatchReportResult",
+    "EdgeEventCache",
+    "EdgeEventReporter",
+    "EventReportItem",
+    "validate_batch",
+    "validate_event",
     "EDGE_REQUIRED_SERVICES",
     "EdgeServiceSpec",
     "edge_required_services",
