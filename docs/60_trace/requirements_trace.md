@@ -323,9 +323,9 @@
 - PRD 需求编号（FR）：FR-VOICE-002, FR-AVATAR-001
 - 来源：审阅报告 2026-03-02 P0-3（Edge TTS/VTS 设备集成缺失）
 - DevSpec 落点：DevSpec 8.11.3, DevSpec 8.11.2
-- DevTasks（TASK）：TASK-0068
-- 验收测试（T-xx）：T-Voice-02, T-Avatar-01, T-TTS-HW-01, T-VTS-HW-01
-- 当前进展（2026-03-02）：已落地完整 TTS/VTS 设备集成：SoVITSModelManager（GPU 常驻 + 线程安全加载/卸载 + GPU OOM 报告）、AudioPlaybackDevice（sounddevice 音频输出 + 打断停止）、make_sovits_synthesizer/make_audio_playback_starter（SpeechPlaybackQueue 兼容回调工厂）；VTubeStudioDriver（WebSocket 连接/认证 + talk gate TALK_START/TALK_END + emotion_tag→expression_id 确定性映射 + barge-in 恢复 reset_to_neutral + 断连降级队列）；新增 6 个 TTS/VTS 硬件层错误码（TTS_MODEL_UNAVAILABLE/TTS_GPU_OOM/TTS_SYNTH_TIMEOUT/VTS_CONNECTION_FAILED/VTS_API_ERROR/VTS_EXPRESSION_TIMEOUT）；新增 4 个 fixtures（合成成功 + 合成失败 + VTS 断连 + barge-in 恢复）；Edge/Host 表情映射表一致性已验证。T-TTS-HW-01（25 项）+ T-VTS-HW-01（30 项）共 55 项全部通过；现有 T-Voice-02/T-Avatar-01（8 项）无回归。pyproject.toml 新增 pyvts 依赖。
+- DevTasks（TASK）：TASK-0068,TASK-0080
+- 验收测试（T-xx）：T-Voice-02, T-Avatar-01, T-TTS-HW-01, T-VTS-HW-01, T-VTS-Reconnect-01
+- 当前进展（2026-03-02）：已落地完整 TTS/VTS 设备集成：SoVITSModelManager（GPU 常驻 + 线程安全加载/卸载 + GPU OOM 报告）、AudioPlaybackDevice（sounddevice 音频输出 + 打断停止）、make_sovits_synthesizer/make_audio_playback_starter（SpeechPlaybackQueue 兼容回调工厂）；VTubeStudioDriver（WebSocket 连接/认证 + talk gate TALK_START/TALK_END + emotion_tag→expression_id 确定性映射 + barge-in 恢复 reset_to_neutral + 断连降级队列）；新增 6 个 TTS/VTS 硬件层错误码（TTS_MODEL_UNAVAILABLE/TTS_GPU_OOM/TTS_SYNTH_TIMEOUT/VTS_CONNECTION_FAILED/VTS_API_ERROR/VTS_EXPRESSION_TIMEOUT）；新增 4 个 fixtures（合成成功 + 合成失败 + VTS 断连 + barge-in 恢复）；Edge/Host 表情映射表一致性已验证。TASK-0080 新增 VTS WebSocket 自动重连机制：ReconnectConfig（max_attempts/base_delay_s/max_delay_s/auto_reconnect 可配置）、_reconnect_loop（指数退避 1s→2s→4s→8s→16s 上限，最多 10 次）、trigger_reconnect（非阻塞后台线程启动）、重连成功自动恢复 neutral 表情并上报 VTS_RECONNECTED、重连耗尽进入 DISCONNECTED 并上报 VTS_RECONNECT_EXHAUSTED、shutdown_event 可中断重连、health 快照含 reconnect 统计；新增 2 个重连错误码（VTS_RECONNECTED/VTS_RECONNECT_EXHAUSTED）、2 个 fixtures（成功/耗尽）。T-VTS-Reconnect-01（30+ 项）全部通过；T-TTS-HW-01（25 项）+ T-VTS-HW-01（30 项）+ T-Voice-02/T-Avatar-01（8 项）无回归。
 - 覆盖状态：DONE
 
 ## R-35
