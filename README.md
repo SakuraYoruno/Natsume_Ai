@@ -8,6 +8,7 @@
 ![LangGraph](https://img.shields.io/badge/LangGraph-1.0+-00ADD8?logo=chainlink&logoColor=white)
 ![Neo4j](https://img.shields.io/badge/Neo4j-6.x-4581C3?logo=neo4j&logoColor=white)
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-1.4+-FF6F00?logo=google-chrome&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)
 ![License](https://img.shields.io/badge/License-Pending-lightgrey)
 
 </div>
@@ -67,27 +68,28 @@
 ```
 Natsume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
-│   ├── app/                 #    应用入口、配置、健康检查
-│   ├── airlock/             #    气闸隔离层（外部数据脱敏/隔离）
-│   ├── audit/               #    审计链（SQLite Ledger + 日志迁移）
-│   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学）
+│   ├── app/                 #    应用入口（FastAPI + Web UI 面板 + 配置 + 健康检查）
+│   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
+│   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
+│   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 迁移）
 │   ├── canon/               #    正典系统（Style Canon / World Canon）
-│   ├── channels/            #    渠道适配（VTS / 微信）
-│   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA）
-│   ├── governor/            #    治理引擎（决策、规则、Schema、Token）
-│   ├── integrations/        #    集成层（LangGraph 运行时 / LLM 网关）
+│   ├── channels/            #    渠道适配（VTS DEGRADED 降级 / 微信 I/O）
+│   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
+│   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
+│   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关）
 │   ├── lsp/                 #    密钥与策略（Vault / Policies）
-│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆）
-│   ├── release/             #    发布清单管理
-│   ├── retrieval/           #    检索链（Embedding / 召回融合 / 重排）
-│   ├── skills/              #    技能系统（加载器 / 注册表 / 实现）
-│   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配）
-│   └── vision/              #    视觉链（摄像头事件 / 屏幕 OCR）
+│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步）
+│   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测）
+│   ├── release/             #    发布清单管理（model_plane digest 门禁）
+│   ├── retrieval/           #    检索链（Embedding / 召回融合 / 重排 / Evidence Pack）
+│   ├── skills/              #    技能系统（加载器 / 注册表 / ClawdBot UI 实现）
+│   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
+│   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 │
 ├── edge_client/             # 🎙️ Edge 边缘客户端
-│   ├── actuators/           #    执行器（语音合成 TTS）
-│   ├── senses/              #    感知层（语音识别 ASR）
-│   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控）
+│   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连）
+│   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD）
+│   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控 / 事件上报）
 │   └── proofs/              #    资源证明与门控
 │
 ├── configs/                 # ⚙️ 配置中心
@@ -125,9 +127,10 @@ Natsume_Ai/
 │   └── fixtures/            #    测试夹具
 │
 ├── tools/                   # 🔧 开发工具
+│   ├── bench/               #    性能基准测试（Ledger WAL 读写吞吐）
 │   ├── doc_lint/            #    文档检查与交付门禁
-│   ├── replay/              #    审计回放工具
-│   └── static_scan/         #    静态扫描工具
+│   ├── replay/              #    审计回放工具（请求回放 + 生产演练）
+│   └── static_scan/         #    静态扫描工具（Bond SSOT 单写者检查）
 │
 ├── .github/workflows/       # 🚀 CI/CD（GitHub Actions）
 ├── .env.example             # 环境变量模板
@@ -150,7 +153,9 @@ Natsume_Ai/
 | **语音识别** | faster-whisper large-v3 | Edge 端 ASR（流式/分段） |
 | **语音合成** | GPT-SoVITS | Edge 端 TTS（全 GPU 常驻） |
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
-| **审计存储** | SQLite | 本地审计链（Triptych 三联画） |
+| **HTTP 框架** | FastAPI | Host 服务入口 + Web UI 面板 + REST API |
+| **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级） |
+| **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表） |
 | **CI/CD** | GitHub Actions | 交付门禁（delivery-gates） |
 
 ---
@@ -201,6 +206,8 @@ cp .env.example .env
 | `BOND_NEO4J_URI` | Neo4j 连接地址 |
 | `CHROMA_ENDPOINT` | ChromaDB 服务地址 |
 | `EDGE_RPC_HOST/PORT` | Edge RPC 通信地址 |
+| `SANDBOX_ISOLATION_BACKEND` | 沙箱后端（subprocess/docker） |
+| `HOST_RATE_LIMIT_BACKEND` | 限流后端（memory/sqlite/redis） |
 
 > 完整配置说明请参考 [.env.example](.env.example)
 
@@ -253,7 +260,7 @@ pytest tests/
 
 ### Governor 治理引擎
 
-7 大门禁规则：Trust Gate → Energy Gate → SysMode Gate → Rate Limit → Scope Policy → Safety Gate → External Data Gate
+7 大门禁规则：Trust Gate → Energy Gate → SysMode Gate → Rate Limit（可插拔存储：InMemory/SQLite/Redis） → Scope Policy → Safety Gate → External Data Gate
 
 ### sys_mode 系统模式
 
@@ -262,6 +269,24 @@ pytest tests/
 | **Normal** | 完整链路，门禁允许范围内全能力 |
 | **Gaming** | 不打扰优先，禁用视觉/UI 自动化 |
 | **Sleep** | 低干预，禁止执行类技能，仅记录与延后 |
+
+### 编排四层架构（Graph Runtime）
+
+graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可测试：
+- **graph_contract.py** — Schema 验证与共享类型
+- **graph_executor.py** — LangGraph 步进执行引擎（含漂移检测 + 票据联动）
+- **graph_fallback.py** — 超时/依赖不可用统一降级处理
+- **graph_model_resolve.py** — Model Plane 配置解析与节点路由
+
+---
+
+## 📊 项目状态
+
+- **需求追溯**：R-01 ~ R-52（52 条系统级需求全部 DONE）
+- **开发任务**：TASK-0000 ~ TASK-0083（全部完成）
+- **测试覆盖**：80+ 契约测试文件，500+ 断言点
+- **审计表**：21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log 等）
+- **错误码**：70+ 统一 reason_code（可统计、可回放）
 
 ---
 
