@@ -1,0 +1,15 @@
+{
+  "request_id": "req_asr_hw_005",
+  "scenario": "gpu_oom",
+  "description": "GPU OOM scenario - model should fallback to CPU or fail gracefully",
+  "model_config": {
+    "model_size": "large-v3",
+    "device": "cuda",
+    "compute_type": "float16"
+  },
+  "expected": {
+    "success": false,
+    "reason_codes": ["ASR_GPU_OOM", "ASR_MODEL_UNAVAILABLE"],
+    "detail_contains": "model load failed"
+  }
+}

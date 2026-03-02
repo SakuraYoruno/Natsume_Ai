@@ -1,0 +1,22 @@
+{
+  "request_id": "req_asr_hw_002",
+  "scenario": "long_speech",
+  "description": "Long speech segment (10+ seconds), multiple sentences",
+  "payload": {
+    "session_id": "sess_asr_hw_002",
+    "text": "Today we will discuss the implementation of the voice pipeline. The ASR service captures audio from the microphone and sends transcription events.",
+    "seq": 1,
+    "confidence": 0.88,
+    "t_start_ms": 0,
+    "t_end_ms": 12000,
+    "alternates": [
+      {"text": "Today we will discuss the implementation", "confidence": 0.90}
+    ],
+    "final": true
+  },
+  "expected": {
+    "success": true,
+    "reason_code": null,
+    "low_confidence": false
+  }
+}

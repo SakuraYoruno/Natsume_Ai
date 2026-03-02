@@ -1,0 +1,20 @@
+{
+  "request_id": "req_asr_hw_003",
+  "scenario": "silence",
+  "description": "Silent audio input - VAD should detect no speech",
+  "payload": {
+    "session_id": "sess_asr_hw_003",
+    "text": "[ASR_VAD_NO_SPEECH]",
+    "seq": 1,
+    "confidence": 0.0,
+    "t_start_ms": 0,
+    "t_end_ms": 3000,
+    "alternates": [],
+    "final": true
+  },
+  "expected": {
+    "success": true,
+    "reason_code": "ASR_VAD_NO_SPEECH",
+    "low_confidence": true
+  }
+}
