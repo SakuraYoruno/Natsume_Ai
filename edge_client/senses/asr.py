@@ -589,6 +589,7 @@ class AsrService:
         config: AsrConfig | None = None,
         model_manager: WhisperModelManager | None = None,
         audio_capture: AudioStreamCapture | None = None,
+        rpc_event_callback: Callable[[str, VoiceRpcResult], None] | None = None,
     ) -> None:
         self._config = config or AsrConfig()
         self._rpc = rpc
@@ -604,6 +605,7 @@ class AsrService:
         self._audio_buffer: list[Any] = []
         self._buffer_start_ts: int = 0
         self._running = False
+        self._rpc_event_callback = rpc_event_callback
         # ── 设备恢复状态 ──
         self._recovery_thread: threading.Thread | None = None
         self._recovery_attempts = 0
@@ -616,6 +618,12 @@ class AsrService:
     @property
     def state(self) -> AsrState:
         return self._model.state
+
+    def set_rpc_event_callback(
+        self,
+        callback: Callable[[str, VoiceRpcResult], None] | None,
+    ) -> None:
+        self._rpc_event_callback = callback
 
     def start_session(self, session_id: str | None = None) -> AsrResult:
         """Initialize ASR model and start audio capture for a session."""
@@ -1002,11 +1010,17 @@ class AsrService:
             payload["text"] = f"[{reason_code}]"
             payload["confidence"] = 0.0
 
-        return self._rpc.asr_chunk(
+        rpc_result = self._rpc.asr_chunk(
             request_id=request_id,
             payload=payload,
             ts_ms=ts_ms,
         )
+        if self._rpc_event_callback is not None:
+            try:
+                self._rpc_event_callback(request_id, rpc_result)
+            except Exception as exc:  # pragma: no cover - callback safety
+                logger.warning("ASR rpc event callback failed: %s", exc)
+        return rpc_result
 
 
 # ---------------------------------------------------------------------------

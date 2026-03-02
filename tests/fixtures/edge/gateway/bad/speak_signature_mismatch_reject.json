@@ -1,0 +1,12 @@
+{
+  "request_id": "req_edge_gateway_002",
+  "ts_ms": 1800101000000,
+  "nonce": "nonce-edge-gateway-002",
+  "signature": "invalid-signature",
+  "payload": {
+    "session_id": "sess_edge_gateway_002",
+    "utterance_id": "utt_edge_gateway_002",
+    "text": "signature mismatch",
+    "seq": 2
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "ts_ms": 1800100000000,
+  "nonce": "nonce-edge-002",
+  "signature": "placeholder",
+  "payload": {
+    "op": "speak",
+    "session_id": "sess_edge_002"
+  }
+}

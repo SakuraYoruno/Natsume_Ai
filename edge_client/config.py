@@ -30,7 +30,7 @@ S_EDGE_CONFIG = "S_EDGE_CONFIG"
 EDGE_SNAPSHOT_COMPONENT = "edge"
 
 EDGE_FIELD_TO_ENV_KEY = {
-    "env": "Nastume_ENV",
+    "env": "NASTUME_ENV",
     "rpc_host": "EDGE_RPC_HOST",
     "rpc_port": "EDGE_RPC_PORT",
     "hmac_shared_key_set": "EDGE_HMAC_SHARED_KEY",
@@ -38,6 +38,8 @@ EDGE_FIELD_TO_ENV_KEY = {
     "hmac_shared_key_ref": "EDGE_HMAC_SHARED_KEY_REF",
     "key_profile_status": "EDGE_HMAC_SHARED_KEY_REF",
     "allow_insecure_auth": "EDGE_ALLOW_INSECURE_AUTH",
+    "rpc_auth_window_ms": "EDGE_RPC_AUTH_WINDOW_MS",
+    "rpc_nonce_window_ms": "EDGE_RPC_NONCE_WINDOW_MS",
     "rpc_gateway_enabled": "EDGE_RPC_GATEWAY_ENABLED",
     "asr_enabled": "EDGE_ASR_ENABLED",
     "tts_enabled": "EDGE_TTS_ENABLED",
@@ -66,6 +68,8 @@ class EdgeConfig:
     hmac_shared_key_ref: str | None
     key_profile_status: str | None
     allow_insecure_auth: bool
+    rpc_auth_window_ms: int
+    rpc_nonce_window_ms: int
     rpc_gateway_enabled: bool
     asr_enabled: bool
     tts_enabled: bool
@@ -84,6 +88,8 @@ class EdgeConfig:
             "hmac_shared_key_ref": self.hmac_shared_key_ref,
             "key_profile_status": self.key_profile_status,
             "allow_insecure_auth": self.allow_insecure_auth,
+            "rpc_auth_window_ms": self.rpc_auth_window_ms,
+            "rpc_nonce_window_ms": self.rpc_nonce_window_ms,
             "rpc_gateway_enabled": self.rpc_gateway_enabled,
             "asr_enabled": self.asr_enabled,
             "tts_enabled": self.tts_enabled,
@@ -157,9 +163,10 @@ def load_edge_config(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    env_lookup = _normalize_env_lookup(merged)
 
     issues: list[ConfigIssue] = []
-    runtime_env = _as_text(merged.get("Nastume_ENV"), ENV_DEV).lower()
+    runtime_env = _as_text(_env_get(env_lookup, "Nastume_ENV"), ENV_DEV).lower()
     if runtime_env not in ALLOWED_ENVS:
         issues.append(
             ConfigIssue(
@@ -170,7 +177,7 @@ def load_edge_config(
         )
         return _failure(issues)
 
-    rpc_host = _as_text(merged.get("EDGE_RPC_HOST"), "127.0.0.1")
+    rpc_host = _as_text(_env_get(env_lookup, "EDGE_RPC_HOST"), "127.0.0.1")
     if not rpc_host:
         issues.append(
             ConfigIssue(
@@ -181,7 +188,7 @@ def load_edge_config(
         )
 
     rpc_port = _parse_int(
-        merged.get("EDGE_RPC_PORT"),
+        _env_get(env_lookup, "EDGE_RPC_PORT"),
         default=17800,
         field_name="EDGE_RPC_PORT",
         min_value=1,
@@ -189,7 +196,7 @@ def load_edge_config(
         issues=issues,
     )
     max_vram_mb = _parse_int(
-        merged.get("EDGE_MAX_VRAM_MB"),
+        _env_get(env_lookup, "EDGE_MAX_VRAM_MB"),
         default=4096,
         field_name="EDGE_MAX_VRAM_MB",
         min_value=512,
@@ -197,7 +204,7 @@ def load_edge_config(
         issues=issues,
     )
     max_queue_length = _parse_int(
-        merged.get("EDGE_MAX_QUEUE_LENGTH"),
+        _env_get(env_lookup, "EDGE_MAX_QUEUE_LENGTH"),
         default=8,
         field_name="EDGE_MAX_QUEUE_LENGTH",
         min_value=1,
@@ -206,11 +213,27 @@ def load_edge_config(
     )
 
     allow_insecure_auth = _parse_bool(
-        merged.get("EDGE_ALLOW_INSECURE_AUTH"),
+        _env_get(env_lookup, "EDGE_ALLOW_INSECURE_AUTH"),
         default=(runtime_env != ENV_PROD),
     )
-    hmac_shared_key = _as_optional_text(merged.get("EDGE_HMAC_SHARED_KEY"))
-    hmac_shared_key_ref = _as_optional_text(merged.get("EDGE_HMAC_SHARED_KEY_REF"))
+    rpc_auth_window_ms = _parse_int(
+        _env_get(env_lookup, "EDGE_RPC_AUTH_WINDOW_MS"),
+        default=15_000,
+        field_name="EDGE_RPC_AUTH_WINDOW_MS",
+        min_value=1_000,
+        max_value=300_000,
+        issues=issues,
+    )
+    rpc_nonce_window_ms = _parse_int(
+        _env_get(env_lookup, "EDGE_RPC_NONCE_WINDOW_MS"),
+        default=120_000,
+        field_name="EDGE_RPC_NONCE_WINDOW_MS",
+        min_value=1_000,
+        max_value=3_600_000,
+        issues=issues,
+    )
+    hmac_shared_key = _as_optional_text(_env_get(env_lookup, "EDGE_HMAC_SHARED_KEY"))
+    hmac_shared_key_ref = _as_optional_text(_env_get(env_lookup, "EDGE_HMAC_SHARED_KEY_REF"))
     key_profile_status: str | None = None
     if not hmac_shared_key and hmac_shared_key_ref:
         resolved = resolve_secret_from_profiles(
@@ -245,12 +268,12 @@ def load_edge_config(
             )
         )
 
-    rpc_gateway_enabled = _parse_bool(merged.get("EDGE_RPC_GATEWAY_ENABLED"), default=True)
-    asr_enabled = _parse_bool(merged.get("EDGE_ASR_ENABLED"), default=True)
-    tts_enabled = _parse_bool(merged.get("EDGE_TTS_ENABLED"), default=True)
-    barge_in_enabled = _parse_bool(merged.get("EDGE_BARGE_IN_ENABLED"), default=True)
-    fallback_llm_enabled = _parse_bool(merged.get("EDGE_FALLBACK_LLM_ENABLED"), default=False)
-    resource_gate_enabled = _parse_bool(merged.get("EDGE_RESOURCE_GATE_ENABLED"), default=True)
+    rpc_gateway_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RPC_GATEWAY_ENABLED"), default=True)
+    asr_enabled = _parse_bool(_env_get(env_lookup, "EDGE_ASR_ENABLED"), default=True)
+    tts_enabled = _parse_bool(_env_get(env_lookup, "EDGE_TTS_ENABLED"), default=True)
+    barge_in_enabled = _parse_bool(_env_get(env_lookup, "EDGE_BARGE_IN_ENABLED"), default=True)
+    fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=False)
+    resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
 
     if issues:
         return _failure(issues)
@@ -263,6 +286,8 @@ def load_edge_config(
         hmac_shared_key_ref=hmac_shared_key_ref,
         key_profile_status=key_profile_status,
         allow_insecure_auth=bool(allow_insecure_auth),
+        rpc_auth_window_ms=int(rpc_auth_window_ms),
+        rpc_nonce_window_ms=int(rpc_nonce_window_ms),
         rpc_gateway_enabled=bool(rpc_gateway_enabled),
         asr_enabled=bool(asr_enabled),
         tts_enabled=bool(tts_enabled),
@@ -292,6 +317,8 @@ def export_edge_config_snapshot(
 ) -> ConfigSnapshotExportResult:
     env_layer = dict(env or os.environ)
     overrides = dict(local_overrides or {})
+    env_lookup = _normalize_env_lookup(env_layer)
+    overrides_lookup = _normalize_env_lookup(overrides)
 
     load_result = load_edge_config(
         env=env_layer,
@@ -316,8 +343,8 @@ def export_edge_config_snapshot(
 
     redacted_keys = collect_redacted_keys(
         secret_env_keys=EDGE_SECRET_ENV_KEYS,
-        env_layer=env_layer,
-        local_overrides=overrides,
+        env_layer=env_lookup,
+        local_overrides=overrides_lookup,
     )
     if config.hmac_shared_key and "EDGE_HMAC_SHARED_KEY" not in redacted_keys:
         redacted_keys.append("EDGE_HMAC_SHARED_KEY")
@@ -329,8 +356,8 @@ def export_edge_config_snapshot(
         values=values,
         override_sources=resolve_override_sources(
             field_to_env_key=EDGE_FIELD_TO_ENV_KEY,
-            env_layer=env_layer,
-            local_overrides=overrides,
+            env_layer=env_lookup,
+            local_overrides=overrides_lookup,
         ),
         redacted_keys=redacted_keys,
     )
@@ -424,6 +451,28 @@ def _as_text(value: Any, default: str) -> str:
 def _as_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text if text else None
+
+
+def _normalize_env_lookup(values: Mapping[str, Any]) -> dict[str, Any]:
+    lookup: dict[str, Any] = {}
+    for raw_key, raw_value in values.items():
+        key = str(raw_key)
+        lookup[key] = raw_value
+        lookup[key.upper()] = raw_value
+        lookup[key.lower()] = raw_value
+    return lookup
+
+
+def _env_get(lookup: Mapping[str, Any], key: str) -> Any:
+    if key in lookup:
+        return lookup.get(key)
+    upper = key.upper()
+    if upper in lookup:
+        return lookup.get(upper)
+    lower = key.lower()
+    if lower in lookup:
+        return lookup.get(lower)
+    return None
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:

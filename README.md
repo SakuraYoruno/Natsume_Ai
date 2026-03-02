@@ -233,6 +233,40 @@ python scripts/runtime/check_external_env.py
 pytest tests/
 ```
 
+### 7. 启动 Edge 网关（调试/本地运行）
+
+```powershell
+# 前台启动（调试）
+python -m edge_client
+
+# 后台启动（带 pid/log）
+.\scripts\runtime\start_edge.ps1
+
+# 停止
+.\scripts\runtime\stop_edge.ps1
+```
+
+#### Edge 最小可运行门槛
+
+- 必需配置：
+  - `Nastume_ENV` 必须为 `dev/test/prod` 之一
+  - `EDGE_RPC_HOST` 非空，`EDGE_RPC_PORT` 在 `1~65535`
+  - `EDGE_RPC_GATEWAY_ENABLED=true`（至少开放网关与 health）
+- 鉴权门槛：
+  - `dev/test`：允许 `EDGE_ALLOW_INSECURE_AUTH=true` 且无 HMAC key
+  - `prod`：必须配置 `EDGE_HMAC_SHARED_KEY` 或 `EDGE_HMAC_SHARED_KEY_REF`，并设置 `EDGE_ALLOW_INSECURE_AUTH=false`
+- 通过标准：
+  - `GET /v1/edge/health` 返回 `success=true`，且 capability matrix 与开关一致（`T-Edge-Health-01`）
+  - `python -m edge_client` 可稳定启动/关闭，不遗留僵尸进程或失效 pid 文件（`T-Edge-Start-01`）
+
+#### Edge 故障回退模式
+
+| 回退模式 | 配置开关 | 预期行为 | 覆盖口径 |
+|------|------|------|------|
+| 仅 health（health-only） | `EDGE_ASR_ENABLED=false`<br>`EDGE_TTS_ENABLED=false`<br>`EDGE_BARGE_IN_ENABLED=false`<br>`EDGE_FALLBACK_LLM_ENABLED=false`<br>`EDGE_RPC_GATEWAY_ENABLED=true` | 保留 `/v1/edge/health`；语音/回退端点全部拒绝并返回稳定 reason_code | `T-Edge-Health-01`、`T-Edge-RPC-02` |
+| 禁用 speak | `EDGE_TTS_ENABLED=false`<br>`EDGE_BARGE_IN_ENABLED=false` | `/v1/edge/speak` 与 `/v1/edge/barge_in` 拒绝；health 与其他能力保持可用 | `T-Edge-RPC-02` |
+| 禁用 ASR 上行 | `EDGE_ASR_ENABLED=false` | 停止 ASR 采集与上送；TTS/health 可继续运行；事件链路不产生新的 ASR 上行事件 | `T-Edge-Voice-01`、`T-RPC-Event-01` |
+
 ---
 
 ## 📐 核心概念

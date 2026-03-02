@@ -1,8 +1,8 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.4
-日期：2026-03-01
+版本：v1.6
+日期：2026-03-02
 
 本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
@@ -1145,3 +1145,118 @@ TASK-XXXX 标题
   - 文档符合受众门禁格式（受众：MASTER）。
 - 涉及文件路径：docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
 - 关联需求/测试：NFR-REL-001；NFR-SEC-001。
+
+### TASK-0084 Edge RPC Gateway 最小运行进程（P1 Edge 运行时）
+- 任务描述：实现 Edge 侧最小可运行 RPC 网关进程，对 Host 暴露能力端点并完成签名/重放校验与契约化响应，确保“只执行、不裁决”。
+- 输入：DevSpec 2.2（Edge RPC 能力端点）；DevSpec 2.4（Host→Edge HMAC + nonce + ts_ms）；DevSpec 14.2（Edge 边界）；TASK-0087 输出的鉴权与 schema；edge_client/config.py；edge_client/rpc/*。
+- 前置依赖：TASK-0087（鉴权中间件）；TASK-0085（runtime 装配接口）。
+- 输出：
+  - `edge_client/app/fastapi_app.py`（新增）：提供 `POST /v1/edge/speak`、`POST /v1/edge/barge_in`、`POST /v1/edge/vts`、`POST /v1/edge/fallback/{presence|asr_compile|retrieval_hints|context_compress}`、`GET /v1/edge/health`（路由细节与参数以 edge_client/rpc 契约为准；asr 上送由 TASK-0088 统一上行实现）。
+  - 统一响应结构：`{success,status,reason_code,detail,event,ts_ms}`，所有端点仅返回此结构。
+  - 端点实现仅调用 edge_client/rpc 契约对象与 runtime 装配对象，不引入 Host 裁决逻辑与副作用外推。
+  - `edge_client/pyproject.toml`：补充 FastAPI/uvicorn 依赖（Edge 侧 RPC 运行时）。
+  - fixtures：端点缺字段/非法 payload/服务被 config 禁用的样例。
+- 验收标准：
+  - 被禁用能力端点返回稳定的不可用状态（reason_code 可统计）；
+  - 所有 RPC 端点输出结构稳定（success/status/reason_code/detail/event），且拒绝原因与契约一致；
+  - 回归覆盖（新增）`T-Edge-RPC-02`（端点契约）。
+- 涉及文件路径：edge_client/app/fastapi_app.py（新增）；edge_client/pyproject.toml；tests/contract/test_edge_rpc_gateway_contract.py（新增）；tests/fixtures/edge/。
+- 关联需求/测试：FR-VOICE-002~004；T-Edge-RPC-02。
+
+### TASK-0085 Edge 运行时装配 + 健康快照（P1 Edge 观测）
+- 任务描述：补齐 Edge 运行时装配器与健康快照聚合，返回能力矩阵与资源状态（显存/队列/活动任务）。
+- 输入：DevSpec 2.2（health 能力矩阵与资源状态）；DevSpec 2.5（fallback LLM 约束）；edge_client/config.py；edge_client/senses/asr.py；edge_client/actuators/tts_engine.py；edge_client/actuators/vts_driver.py；edge_client/actuators/speech.py；edge_client/rpc/resource_gate.py；edge_client/rpc/fallback_llm.py。
+- 前置依赖：TASK-0087（配置与安全字段统一）。
+- 输出：
+  - `edge_client/runtime/bootstrap.py`（新增）：根据 `EdgeConfig` 装配 ASR/TTS/VTS/Fallback/ResourceGate，统一生命周期与开关。
+  - `edge_client/runtime/health.py`（新增）：聚合 `build_edge_runtime_statuses` + 各组件 `health()` + ResourceGate `snapshot()` + 队列深度，输出稳定 health schema。
+  - health schema 必含：`services`（能力矩阵）、`resources`（vram_total_mb/vram_used_mb/queue_depth）、`components`（asr/tts/vts/fallback/resource_gate 详细状态）、`config_snapshot`（脱敏）。
+  - `edge_client/app/fastapi_app.py` 的 `/v1/edge/health` 使用上述聚合结果。
+  - fixtures：ASR/TTS 关闭、fallback 关闭、resource_gate 关闭的健康快照样例。
+- 验收标准：
+  - 配置开关与健康矩阵一致（禁用即不可用）；fallback 默认不可用；
+  - 健康输出包含 services/资源/组件状态/配置快照，字段稳定且可审计；
+  - 回归覆盖（新增）`T-Edge-Health-01`（能力矩阵与资源快照）。
+- 涉及文件路径：edge_client/runtime/bootstrap.py（新增）；edge_client/runtime/health.py（新增）；edge_client/app/fastapi_app.py；edge_client/config.py；tests/contract/test_edge_health_contract.py（新增）；tests/fixtures/edge/。
+- 关联需求/测试：FR-VOICE-001~005；T-Edge-Health-01。
+
+### TASK-0086 Edge 启动入口 + 本地启动脚本（P2 运维）
+- 任务描述：提供 Edge 的标准启动入口与本地脚本，确保可按环境变量直接启动/停止，且优雅释放音频与 VTS 连接。
+- 输入：DevSpec 2.2（Edge 进程职责）；DevSpec 2.4（通信安全）；TASK-0085 输出的 runtime 装配；edge_client/config.py；README.md（运行指引）。
+- 前置依赖：TASK-0084（RPC 网关）；TASK-0085（runtime 生命周期）。
+- 输出：
+  - `edge_client/__main__.py`（新增）：加载 EdgeConfig，初始化 runtime/bootstrap 并启动 RPC 网关；
+  - `scripts/runtime/start_edge.ps1` / `scripts/runtime/stop_edge.ps1`（新增）：本地启动/停止 Edge 进程；
+  - README.md：新增 Edge 启动说明与必要环境变量提示（含 `EDGE_RPC_HOST/PORT`、`EDGE_ALLOW_INSECURE_AUTH`、`EDGE_HMAC_SHARED_KEY(_REF)`）。
+- 验收标准：
+  - `python -m edge_client` 可在 `EDGE_RPC_HOST/PORT` 启动服务并输出脱敏配置快照；
+  - Ctrl+C 能优雅关闭（ASR 音频流、TTS 播放、VTS 连接关闭，无资源泄漏）；
+  - 回归覆盖（新增）`T-Edge-Start-01`（启动/关闭最小烟测）。
+- 涉及文件路径：edge_client/__main__.py（新增）；edge_client/runtime/bootstrap.py；scripts/runtime/start_edge.ps1（新增）；scripts/runtime/stop_edge.ps1（新增）；README.md；tests/contract/test_edge_bootstrap_contract.py（新增）。
+- 关联需求/测试：FR-VOICE-001~005；T-Edge-Start-01。
+
+### TASK-0087 Edge RPC 请求包络 + 鉴权与重放保护（P1 Edge 安全）
+- 任务描述：定义 Edge RPC 统一请求包络与鉴权/重放校验策略，提供稳定的拒绝 reason_code 与可回归 fixtures。
+- 输入：DevSpec 2.4（HMAC + nonce + ts_ms + 重放窗口）；DevSpec 14.3（强类型 Schema）；edge_client/config.py；host_brain/core/errors.py。
+- 前置依赖：无（Edge 阶段基线任务）。
+- 输出：
+  - `edge_client/app/schemas.py`（新增）：定义 `EdgeRpcEnvelope`（request_id/ts_ms/nonce/signature/payload）与 `EdgeRpcResponse`（success/status/reason_code/detail/event/ts_ms）。
+  - `edge_client/rpc/auth.py`（新增）：实现 HMAC 校验、时间窗校验、nonce 重放缓存；提供可注入的 `now_ms()` 与缓存清理策略。
+  - `edge_client/config.py`：新增鉴权相关配置项（如 `EDGE_RPC_AUTH_WINDOW_MS`/`EDGE_RPC_NONCE_WINDOW_MS`），并进入 config snapshot。
+  - `host_brain/core/errors.py`：新增鉴权/Schema 失败类 reason_code（如 `EDGE_RPC_SCHEMA_INVALID`/`EDGE_RPC_AUTH_INVALID`/`EDGE_RPC_AUTH_EXPIRED`），与 `REPLAY_DETECTED` 并列。
+  - fixtures：缺字段/签名错误/ts_ms 过期/nonce 重放/允许不鉴权（dev/test）样例。
+- 验收标准：
+  - 缺字段稳定返回 `EDGE_RPC_SCHEMA_INVALID`；签名错误返回 `EDGE_RPC_AUTH_INVALID`；ts_ms 过期返回 `EDGE_RPC_AUTH_EXPIRED`；nonce 重放返回 `REPLAY_DETECTED`；
+  - `EDGE_ALLOW_INSECURE_AUTH=true` 时仍校验 schema，但允许跳过签名校验并记录降级字段；
+  - 回归覆盖（新增）`T-Edge-RPC-01`（鉴权与重放）。
+- 涉及文件路径：edge_client/app/schemas.py（新增）；edge_client/rpc/auth.py（新增）；edge_client/config.py；host_brain/core/errors.py；tests/contract/test_edge_rpc_auth_contract.py（新增）；tests/fixtures/edge/。
+- 关联需求/测试：FR-CORE-002；NFR-SEC-001；T-Edge-RPC-01。
+
+### TASK-0088 Edge 语音上行编排与事件上送（P1 Edge 语音）
+- 任务描述：补齐 Edge 语音链路的编排层，将 ASR 事件稳定上送到 Host，并与 TTS 播放/打断/VTS 表情联动。
+- 输入：DevSpec 2.2（asr/speak/barge-in/vts/health）；DevSpec 2.5（fallback 约束）；edge_client/senses/asr.py；edge_client/actuators/speech.py；edge_client/actuators/tts_engine.py；edge_client/actuators/vts_driver.py；edge_client/rpc/event_reporter.py；edge_client/rpc/voice.py。
+- 前置依赖：TASK-0079（Edge→Host 事件上报）；TASK-0084（RPC 网关）；TASK-0085（runtime 装配）。
+- 输出：
+  - `edge_client/runtime/voice_pipeline.py`（新增）：封装 ASR→事件上送、TTS 队列、barge-in 打断、VTS talk gate 联动。
+  - ASR 上行：使用 `EdgeEventReporter` 将 asr_chunk 作为 EdgeEvent 批量上送（对接 Host `POST /v1/edge/events`），附带 vram/queue 指标（若可用）。
+  - 播放联动：TTS 播放开始触发 VTS talk_start，结束/打断触发 talk_end 或 neutral 复位。
+  - 资源闸门：speak/tts/playback/llm 使用 `VoiceResourceGate`，优先级与互斥符合 DevSpec。
+  - fixtures：ASR 正常上送/网络中断缓存/恢复补发；barge-in 打断播放与 VTS 复位。
+- 验收标准：
+  - ASR 事件可通过 Edge→Host 事件通道稳定上送并通过 schema 校验；
+  - barge-in 可打断播放并记录 `VOICE_INTERRUPTED`，VTS 进入结束态；
+  - 资源闸门生效时返回稳定拒绝 reason_code；
+  - 回归覆盖（新增）`T-Edge-Voice-01`（ASR 上送与缓存补发）与 `T-Edge-Voice-02`（barge-in 与 VTS 联动）。
+- 涉及文件路径：edge_client/runtime/voice_pipeline.py（新增）；edge_client/runtime/bootstrap.py；edge_client/actuators/speech.py；edge_client/rpc/event_reporter.py；tests/contract/test_edge_voice_pipeline_contract.py（新增）；tests/fixtures/edge/。
+- 关联需求/测试：FR-VOICE-001~003；FR-VOICE-005；T-Edge-Voice-01；T-Edge-Voice-02。
+
+### TASK-0089 Edge Contract 测试矩阵补齐与 fixtures 命名规范（P1 QA）
+- 任务描述：将 Edge 新增任务（0084~0088）的验收断言固化为可追溯 contract 测试矩阵，并统一 fixtures 命名与目录分层，避免后续测试口径漂移。
+- 输入：TASK-0084~0088 的输出契约；tests/TESTPLAN.md；tests/contract 既有风格。
+- 前置依赖：TASK-0084~0088（功能接口已落地）。
+- 输出：
+  - `tests/contract/` 新增或完善测试文件：`test_edge_rpc_auth_contract.py`、`test_edge_rpc_gateway_contract.py`、`test_edge_health_contract.py`、`test_edge_bootstrap_contract.py`、`test_edge_voice_pipeline_contract.py`。
+  - fixtures 命名规范：`tests/fixtures/edge/{auth|gateway|health|voice}/{good|bad}/*.json`，文件名采用 `场景_期望.json`（例：`expired_ts_reject.json`）。
+  - 覆盖映射：每个 `T-Edge-*` 编号至少有一个成功样例和一个拒绝/降级样例。
+  - `tests/TESTPLAN.md` 同步登记 `T-Edge-RPC-01`、`T-Edge-RPC-02`、`T-Edge-Health-01`、`T-Edge-Start-01`、`T-Edge-Voice-01`、`T-Edge-Voice-02` 的断言口径。
+- 验收标准：
+  - `DevTasks` 中所有 `T-Edge-*` 编号在 `TESTPLAN` 可检索且语义一致；
+  - 合同测试可覆盖鉴权失败、schema 失败、能力禁用、启动关闭、事件补发与打断联动；
+  - fixtures 目录结构与命名规范稳定，新增场景不破坏既有回放路径。
+- 涉及文件路径：tests/contract/；tests/fixtures/edge/；tests/TESTPLAN.md；docs/30_devspec/DevTasks.md。
+- 关联需求/测试：FR-CORE-002；FR-VOICE-001~005；T-Edge-RPC-01；T-Edge-RPC-02；T-Edge-Health-01；T-Edge-Start-01；T-Edge-Voice-01；T-Edge-Voice-02。
+
+### TASK-0090 Edge 交付顺序与回滚口径固化（P2 交付）
+- 任务描述：固化 Edge 任务分批交付顺序、失败回滚策略与最小可运行门槛，确保 0084~0089 可逐批上线且可快速回退。
+- 输入：TASK-0084~0089；docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md；README.md。
+- 前置依赖：TASK-0089（测试矩阵完成）。
+- 输出：
+  - 交付批次定义（建议）：`Batch-A`=0087+0085、`Batch-B`=0084+0086、`Batch-C`=0088+0089；
+  - 每批回滚口径：回滚触发条件、保留资产（fixtures/audit）、回滚后可用能力矩阵；
+  - README 增加“Edge 最小可运行门槛”与“故障回退模式（仅 health / 禁用 speak / 禁用 asr 上行）”说明。
+- 验收标准：
+  - 任一批次失败时有明确回滚目标与可验证健康状态；
+  - 回滚不破坏审计回放链和 `T-RPC-Event-01` 既有能力；
+  - 交付文档与 `DevTasks`/`TESTPLAN` 编号一致。
+- 涉及文件路径：docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md；README.md；docs/30_devspec/DevTasks.md；tests/TESTPLAN.md。
+- 关联需求/测试：NFR-REL-001；FR-CORE-004；T-Edge-Start-01；T-RPC-Event-01。
