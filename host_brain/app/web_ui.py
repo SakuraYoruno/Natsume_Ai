@@ -110,8 +110,8 @@ async def get_timeline_aggregation(
         return TimelineAggregationResponse(**timeline_data)
 
     except Exception as e:
-        logger.error(f"获取时间线聚合数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取时间线数据失败: {str(e)}")
+        logger.error(f"Failed to get timeline aggregation: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get timeline data")
 
 @router.get("/status-distribution", response_model=StatusDistributionResponse)
 async def get_status_distribution(
@@ -141,8 +141,8 @@ async def get_status_distribution(
         return StatusDistributionResponse(**distribution_data)
 
     except Exception as e:
-        logger.error(f"获取状态分布数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取状态分布数据失败: {str(e)}")
+        logger.error(f"Failed to get status distribution: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get status distribution data")
 
 @router.get("/request/{request_id}", response_model=RequestDetailResponse)
 async def get_request_detail(request_id: str):
@@ -156,15 +156,15 @@ async def get_request_detail(request_id: str):
         )
 
         if not request_detail:
-            raise HTTPException(status_code=404, detail="请求不存在")
+            raise HTTPException(status_code=404, detail="Request not found")
 
         return RequestDetailResponse(**request_detail)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取请求详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取请求详情失败: {str(e)}")
+        logger.error(f"Failed to get request detail: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get request detail")
 
 @router.get("/link-topology", response_model=LinkTopologyResponse)
 async def get_link_topology(
@@ -190,8 +190,8 @@ async def get_link_topology(
         return LinkTopologyResponse(**topology_data)
 
     except Exception as e:
-        logger.error(f"获取链路拓扑数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取链路拓扑数据失败: {str(e)}")
+        logger.error(f"Failed to get link topology: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get link topology data")
 
 @router.get("/search-requests")
 async def search_requests(
@@ -226,5 +226,5 @@ async def search_requests(
         }
 
     except Exception as e:
-        logger.error(f"搜索请求记录失败: {e}")
-        raise HTTPException(status_code=500, detail=f"搜索请求记录失败: {str(e)}")
+        logger.error(f"Failed to search requests: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search requests")
