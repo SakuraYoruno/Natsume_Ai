@@ -15,6 +15,22 @@ from edge_client.actuators.speech import (
     request_barge_in,
     request_speak,
 )
+from edge_client.actuators.tts_engine import (
+    AudioPlaybackDevice,
+    SoVITSModelManager,
+    TtsConfig,
+    TtsState,
+    TtsSynthResult,
+    make_audio_playback_starter,
+    make_sovits_synthesizer,
+)
+from edge_client.actuators.vts_driver import (
+    EMOTION_TO_EXPRESSION_ID,
+    VtsConfig,
+    VtsDriverResult,
+    VtsState,
+    VTubeStudioDriver,
+)
 
 __all__ = [
     "EVENT_TTS_QUEUED",
@@ -30,4 +46,16 @@ __all__ = [
     "SpeechQueueResult",
     "request_barge_in",
     "request_speak",
+    "AudioPlaybackDevice",
+    "SoVITSModelManager",
+    "TtsConfig",
+    "TtsState",
+    "TtsSynthResult",
+    "make_audio_playback_starter",
+    "make_sovits_synthesizer",
+    "EMOTION_TO_EXPRESSION_ID",
+    "VtsConfig",
+    "VtsDriverResult",
+    "VtsState",
+    "VTubeStudioDriver",
 ]

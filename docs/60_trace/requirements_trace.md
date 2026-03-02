@@ -318,6 +318,16 @@
 - 当前进展（2026-03-02）：已落地完整 ASR 设备集成：WhisperModelManager（GPU 常驻 + CUDA→CPU 自动降级 + 线程安全加载/卸载）、AudioStreamCapture（sounddevice 麦克风采集 + 分片回调）、AsrService（音频缓冲→VAD→转写→asr_chunk RPC 事件映射编排器）；新增 5 个 ASR 硬件层错误码（ASR_MODEL_UNAVAILABLE/ASR_GPU_OOM/ASR_DEVICE_ERROR/ASR_VAD_NO_SPEECH/ASR_STREAM_INTERRUPTED）；新增 5 个 fixtures（短/长语音 + 静音 + 低信噪比 + GPU OOM）；保持 emit_asr_chunk 向后兼容；pyproject.toml 新增 faster-whisper/sounddevice/numpy 依赖。T-ASR-HW-01（28 项：模型生命周期/音频采集/配置/结果结构/事件映射/向后兼容/错误码稳定性/资源闸门集成/健康快照/fixture 验证）全部通过。
 - 覆盖状态：DONE
 
+## R-34
+- 系统级需求：Edge TTS/VTS 设备集成（GPT-SoVITS 合成 + 播放队列 + VTube Studio talk gate/表情驱动 + barge-in 恢复策略），GPU 常驻、不可用时稳定降级
+- PRD 需求编号（FR）：FR-VOICE-002, FR-AVATAR-001
+- 来源：审阅报告 2026-03-02 P0-3（Edge TTS/VTS 设备集成缺失）
+- DevSpec 落点：DevSpec 8.11.3, DevSpec 8.11.2
+- DevTasks（TASK）：TASK-0068
+- 验收测试（T-xx）：T-Voice-02, T-Avatar-01, T-TTS-HW-01, T-VTS-HW-01
+- 当前进展（2026-03-02）：已落地完整 TTS/VTS 设备集成：SoVITSModelManager（GPU 常驻 + 线程安全加载/卸载 + GPU OOM 报告）、AudioPlaybackDevice（sounddevice 音频输出 + 打断停止）、make_sovits_synthesizer/make_audio_playback_starter（SpeechPlaybackQueue 兼容回调工厂）；VTubeStudioDriver（WebSocket 连接/认证 + talk gate TALK_START/TALK_END + emotion_tag→expression_id 确定性映射 + barge-in 恢复 reset_to_neutral + 断连降级队列）；新增 6 个 TTS/VTS 硬件层错误码（TTS_MODEL_UNAVAILABLE/TTS_GPU_OOM/TTS_SYNTH_TIMEOUT/VTS_CONNECTION_FAILED/VTS_API_ERROR/VTS_EXPRESSION_TIMEOUT）；新增 4 个 fixtures（合成成功 + 合成失败 + VTS 断连 + barge-in 恢复）；Edge/Host 表情映射表一致性已验证。T-TTS-HW-01（25 项）+ T-VTS-HW-01（30 项）共 55 项全部通过；现有 T-Voice-02/T-Avatar-01（8 项）无回归。pyproject.toml 新增 pyvts 依赖。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
