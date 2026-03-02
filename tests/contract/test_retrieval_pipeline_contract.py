@@ -35,7 +35,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         result = pipeline.run(
             request_id="req_pipe_001",
             intent_id="intent_pipe_001",
-            query="natsume retrieval pipeline",
+            query="Nastume retrieval pipeline",
             top_k=2,
             ts_ms=self.now_ms,
         )
@@ -65,7 +65,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         result = pipeline.run(
             request_id="req_pipe_002",
             intent_id="intent_pipe_002",
-            query="natsume retrieval pipeline",
+            query="Nastume retrieval pipeline",
             top_k=2,
             ts_ms=self.now_ms + 1,
         )
@@ -84,7 +84,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         result = pipeline.run(
             request_id="req_pipe_003",
             intent_id="intent_pipe_003",
-            query="natsume retrieval pipeline",
+            query="Nastume retrieval pipeline",
             top_k=2,
             ts_ms=self.now_ms + 2,
         )
@@ -211,7 +211,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         )
 
     def _seed_collections(self) -> None:
-        query = "natsume retrieval pipeline"
+        query = "Nastume retrieval pipeline"
         emb_query, _ = embed_text(query)
 
         self.chroma.upsert(

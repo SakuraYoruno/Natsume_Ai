@@ -26,7 +26,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 
-logger = logging.getLogger("natsume.edge.event_reporter")
+logger = logging.getLogger("Nastume.edge.event_reporter")
 
 # ── 配置常量 ──
 MAX_CACHE_EVENTS = 1_000

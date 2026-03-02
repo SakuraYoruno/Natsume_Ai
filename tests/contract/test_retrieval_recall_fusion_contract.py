@@ -60,7 +60,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             node_id="host-01",
             available=True,
         )
-        query = "natsume retrieval fusion"
+        query = "Nastume retrieval fusion"
         query_embedding, _ = embed_text(query)
 
         result = svc.recall(
@@ -130,7 +130,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             node_id="host-01",
             available=True,
         )
-        query = "natsume retrieval fusion"
+        query = "Nastume retrieval fusion"
         query_embedding, _ = embed_text(query)
 
         result = svc.recall(
@@ -156,7 +156,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
         self.assertIn(CHROMA_COLLECTION_MISSING, reason_codes)
 
     def _seed_collections(self) -> None:
-        query = "natsume retrieval fusion"
+        query = "Nastume retrieval fusion"
         emb_query, _ = embed_text(query)
 
         emb_episodic, _ = embed_text("episodic memory around retrieval fusion")

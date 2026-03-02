@@ -634,7 +634,7 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
         """T-E2E-WeChat-01.13: 微信出站失败时审计记录包含 reason_code。"""
         request_id = "req_e2e_wc_013"
         egress = send_wechat_message(
-            thread_key="wechat::test_user::natsume_bot",
+            thread_key="wechat::test_user::Nastume_bot",
             message_id="wx_fail_msg_013",
             content="test failure",
             ledger=self.ledger,

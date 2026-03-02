@@ -22,7 +22,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_request_id, now_ms
 
-logger = logging.getLogger("natsume.edge.tts")
+logger = logging.getLogger("Nastume.edge.tts")
 
 # ---------------------------------------------------------------------------
 # Constants

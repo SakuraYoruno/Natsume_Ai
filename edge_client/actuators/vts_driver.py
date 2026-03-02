@@ -26,7 +26,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_request_id, now_ms
 
-logger = logging.getLogger("natsume.edge.vts")
+logger = logging.getLogger("Nastume.edge.vts")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,8 +34,8 @@ logger = logging.getLogger("natsume.edge.vts")
 
 DEFAULT_VTS_HOST = "localhost"
 DEFAULT_VTS_PORT = 8001
-DEFAULT_VTS_PLUGIN_NAME = "NatsumeAi"
-DEFAULT_VTS_PLUGIN_DEVELOPER = "natsume"
+DEFAULT_VTS_PLUGIN_NAME = "NastumeAi"
+DEFAULT_VTS_PLUGIN_DEVELOPER = "Nastume"
 DEFAULT_VTS_TOKEN_PATH = ".vts_token"
 DEFAULT_API_TIMEOUT_S = 5.0
 

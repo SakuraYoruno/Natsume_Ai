@@ -97,7 +97,7 @@ class TestConfigContract(unittest.TestCase):
     def test_t_config_01_host_prod_missing_deepseek_key_rejected(self) -> None:
         result = load_host_config(
             env={
-                "NATSUME_ENV": "prod",
+                "Nastume_ENV": "prod",
                 "HOST_LLM_PROVIDER": "deepseek",
                 "HOST_COLD_START_ALLOWED": "false",
             }
@@ -111,7 +111,7 @@ class TestConfigContract(unittest.TestCase):
         for provider, expected_field in (("deepseek", "DEEPSEEK_API_KEY"), ("gemini", "GEMINI_API_KEY")):
             result = load_host_config(
                 env={
-                    "NATSUME_ENV": "prod",
+                    "Nastume_ENV": "prod",
                     "HOST_LLM_PROVIDER": provider,
                     "HOST_COLD_START_ALLOWED": "false",
                 }

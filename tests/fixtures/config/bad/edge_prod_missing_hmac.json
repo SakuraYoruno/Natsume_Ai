@@ -1,6 +1,6 @@
 {
   "env": {
-    "NATSUME_ENV": "prod",
+    "Nastume_ENV": "prod",
     "EDGE_RPC_HOST": "0.0.0.0",
     "EDGE_RPC_PORT": "17800",
     "EDGE_ALLOW_INSECURE_AUTH": "false"

@@ -27,7 +27,7 @@
         "host.skills.loader",
         "host.integrations.llm_gateway"
       ],
-      "health_endpoint": "https://node01.natsume.ai/healthz",
+      "health_endpoint": "https://node01.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-01"
     },
     {
@@ -37,7 +37,7 @@
       "services": [
         "host.audit.sqlite_ledger"
       ],
-      "health_endpoint": "https://node02.natsume.ai/healthz",
+      "health_endpoint": "https://node02.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-02"
     },
     {
@@ -47,7 +47,7 @@
       "services": [
         "host.integrations.llm_gateway"
       ],
-      "health_endpoint": "https://node03.natsume.ai/healthz",
+      "health_endpoint": "https://node03.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-03"
     },
     {
@@ -58,7 +58,7 @@
         "host.retrieval.embedding",
         "host.retrieval.reranker"
       ],
-      "health_endpoint": "https://node04.natsume.ai/healthz",
+      "health_endpoint": "https://node04.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-04"
     },
     {
@@ -68,7 +68,7 @@
       "services": [
         "host.vision.screen_ocr"
       ],
-      "health_endpoint": "https://node05.natsume.ai/healthz",
+      "health_endpoint": "https://node05.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-05"
     },
     {
@@ -79,7 +79,7 @@
         "edge.rpc.gateway",
         "edge.rpc.resource_gate"
       ],
-      "health_endpoint": "https://node06.natsume.ai/healthz",
+      "health_endpoint": "https://node06.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-06"
     },
     {
@@ -90,7 +90,7 @@
         "edge.rpc.asr",
         "edge.rpc.tts"
       ],
-      "health_endpoint": "https://node07.natsume.ai/healthz",
+      "health_endpoint": "https://node07.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-07"
     },
     {
@@ -101,7 +101,7 @@
         "edge.rpc.barge_in",
         "edge.rpc.fallback_llm"
       ],
-      "health_endpoint": "https://node08.natsume.ai/healthz",
+      "health_endpoint": "https://node08.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-08"
     },
     {
@@ -113,7 +113,7 @@
         "host.retrieval.embedding",
         "edge.rpc.gateway"
       ],
-      "health_endpoint": "https://node09.natsume.ai/healthz",
+      "health_endpoint": "https://node09.Nastume.ai/healthz",
       "key_profile_id": "kpf-node-09"
     }
   ],

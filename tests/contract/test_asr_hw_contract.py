@@ -23,7 +23,7 @@ import pytest
 # Ensure PYTHONPATH includes project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-os.environ.setdefault("NATSUME_AUDIT_DB", ":memory:")
+os.environ.setdefault("Nastume_AUDIT_DB", ":memory:")
 
 from host_brain.core.errors import (
     ASR_DEVICE_ERROR,

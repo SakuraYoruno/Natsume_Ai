@@ -1,12 +1,12 @@
 {
   "request_id": "req_rerank_rt_001",
   "node_id": "node-gpu-01",
-  "query": "natsume memory retrieval",
+  "query": "Nastume memory retrieval",
   "candidates": [
     {
       "doc_id": "doc_001",
       "source_ref": "source://doc/001",
-      "snippet": "Natsume memory architecture",
+      "snippet": "Nastume memory architecture",
       "metadata": {
         "kind": "design"
       }

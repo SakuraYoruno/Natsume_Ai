@@ -27,7 +27,7 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id, now_ms
 from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 
-logger = logging.getLogger("natsume.edge.asr")
+logger = logging.getLogger("Nastume.edge.asr")
 
 # ---------------------------------------------------------------------------
 # Constants

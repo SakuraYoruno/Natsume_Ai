@@ -175,7 +175,7 @@ def strict_validate_intent(normalized_json: dict[str, Any]) -> tuple[IntentEnvel
         lint["schema"].append(f"action not allowed: {normalized_json['action']}")
     if normalized_json["target"] not in TARGET_ALLOWLIST:
         lint["schema"].append(f"target not allowed: {normalized_json['target']}")
-    if normalized_json["schema_version"] != "natsume.intent.v1":
+    if normalized_json["schema_version"] != "Nastume.intent.v1":
         lint["schema"].append(
             f"schema_version not allowed: {normalized_json['schema_version']}"
         )
