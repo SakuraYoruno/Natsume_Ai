@@ -378,6 +378,16 @@
 - 当前进展（2026-03-02）：已落地 Rate Limit 可插拔存储层 `host_brain/governor/rate_limit_store.py`：RateLimitStore 抽象接口（incr/get_count/reset/ttl）、InMemoryRateLimitStore（滑动窗口 dict 实现，线程安全）、SQLiteRateLimitStore（WAL 模式持久化）、RedisRateLimitStore（Sorted Set 集群限流）、DegradingRateLimitStore（主后端不可用自动降级到 InMemory）、RateLimitChecker（封装 check/check_only/reset）、create_rate_limit_store 工厂函数。R4 Gate 增强输出 backend/degraded/degraded_from 信息到 threshold_summary/snapshot_summary，向后兼容（不传新字段时行为不变）。新增 HOST_RATE_LIMIT_BACKEND/HOST_RATE_LIMIT_WINDOW_MS/HOST_RATE_LIMIT_MAX_REQUESTS 三个配置项。新增 2 个错误码（RATE_LIMIT_BACKEND_DEGRADED/RATE_LIMIT_BACKEND_UNAVAILABLE）；新增 3 个 fixtures（窗口滑动/窗口过期/并发竞争）。InMemory 与 SQLite 同输入同结果已验证。T-Gov-R4-01（47 项）全部通过；T-Gov-01（2 项）无回归。
 - 覆盖状态：DONE
 
+## R-40
+- 系统级需求：Camera 多检测器注册与多模态事件聚合——检测器注册表 + 并行执行 + 聚合输出 + 部分降级稳定分类
+- PRD 需求编号（FR）：FR-VISION-004
+- 来源：DevSpec 8.12 / TASK-0034
+- DevSpec 落点：DevSpec 8.12
+- DevTasks（TASK）：TASK-0074
+- 验收测试（T-xx）：T-Vision-02, T-Vision-03
+- 当前进展（2026-03-02）：已落地多检测器注册表（DetectorConfig: detector_id/type/model_id/confidence_threshold/enabled/timeout_ms）、DetectorRegistry（线程安全注册/注销/列表/快照）、MultiDetectorAggregator（并行执行 + 结果聚合：OK/PARTIAL/ALL_FAILED 三态）；CameraRecognitionServiceContract 新增 detect_multi() 方法与原 detect() 完全兼容；新增 3 个错误码（VISION_DETECTOR_UNAVAILABLE/VISION_DETECTOR_TIMEOUT/VISION_DETECTOR_ALL_FAILED）；新增 3 个 fixtures（多检测器混合/部分不可用/全不可用）。T-Vision-03（25 项：注册表 CRUD 7项 + 聚合器 9项 + 集成 6项 + 回归 3项）全部通过；T-Vision-02（原有）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。

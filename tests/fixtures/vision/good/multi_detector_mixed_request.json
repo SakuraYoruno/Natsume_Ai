@@ -1,0 +1,35 @@
+{
+  "request_id": "req_vision_multi_001",
+  "intent_id": "intent_vision_multi_001",
+  "description": "多检测器混合请求：face + object + gesture 三个检测器并行执行",
+  "payload": {
+    "evidence_ref": "evd://camera/frame_multi_001",
+    "frame_data": "person:0.92\ncat:0.45\nwave:0.78",
+    "detectors": [
+      {
+        "detector_id": "det-face-v1",
+        "type": "face",
+        "model_id": "face-recog-v1",
+        "confidence_threshold": 0.6,
+        "enabled": true,
+        "timeout_ms": 500
+      },
+      {
+        "detector_id": "det-object-v1",
+        "type": "object",
+        "model_id": "yolo-v8",
+        "confidence_threshold": 0.5,
+        "enabled": true,
+        "timeout_ms": 500
+      },
+      {
+        "detector_id": "det-gesture-v1",
+        "type": "gesture",
+        "model_id": "gesture-v2",
+        "confidence_threshold": 0.7,
+        "enabled": true,
+        "timeout_ms": 500
+      }
+    ]
+  }
+}

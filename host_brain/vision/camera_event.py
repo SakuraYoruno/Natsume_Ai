@@ -184,6 +184,169 @@ class CameraRecognitionServiceContract:
             output=output,
         )
 
+    def detect_multi(
+        self,
+        *,
+        request_id: str,
+        evidence_ref: str,
+        frame_data: str,
+        intent_id: str | None = None,
+        ts_ms: int | None = None,
+        aggregator: Any = None,
+        detectors: Any = None,
+    ) -> CameraEventResult:
+        """多检测器聚合检测入口。
+
+        委托 MultiDetectorAggregator 并行执行所有已注册检测器，
+        将聚合结果封装为与 detect() 一致的 CameraEventResult 输出结构。
+        """
+        from host_brain.vision.detector_registry import (
+            MultiDetectorAggregator,
+            AGG_STATUS_OK,
+            AGG_STATUS_PARTIAL,
+            AGG_STATUS_ALL_FAILED,
+            VISION_DETECTOR_ALL_FAILED,
+        )
+
+        now_value = int(ts_ms if ts_ms is not None else now_ms())
+        evidence_value = str(evidence_ref or "").strip()
+
+        if not _valid_ref(evidence_value):
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=VISION_CAMERA_EVIDENCE_REQUIRED,
+                detail="multi-detect requires replayable evidence_ref",
+                evidence_ref=evidence_value,
+                detector_id="multi",
+                objects=[],
+                latency_ms=0,
+                ts_ms=now_value,
+            )
+
+        if aggregator is None or not isinstance(aggregator, MultiDetectorAggregator):
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=VISION_CAMERA_UNAVAILABLE,
+                detail="no MultiDetectorAggregator provided",
+                evidence_ref=evidence_value,
+                detector_id="multi",
+                objects=[],
+                latency_ms=0,
+                ts_ms=now_value,
+            )
+
+        agg_event = aggregator.run(
+            evidence_ref=evidence_value,
+            frame_data=str(frame_data or ""),
+            detectors=detectors,
+        )
+
+        if agg_event.status == AGG_STATUS_ALL_FAILED:
+            self._log_event(
+                request_id=request_id,
+                intent_id=intent_id,
+                status=STATUS_DEGRADED,
+                reason_code=agg_event.reason_code or VISION_DETECTOR_ALL_FAILED,
+                evidence_ref=evidence_value,
+                detail="all detectors failed",
+                payload={
+                    "mode": "multi",
+                    "total_detectors": agg_event.total_detectors,
+                    "ok_detectors": 0,
+                    "failed_detectors": agg_event.failed_detectors,
+                    "latency_ms": agg_event.latency_ms,
+                },
+                ts_ms=now_value,
+            )
+            output = {
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "ts_ms": now_value,
+                "evidence_ref": evidence_value,
+                "mode": "multi",
+                "detections": [],
+                "detector_results": agg_event.detector_results,
+                "failed_detectors": agg_event.failed_detectors,
+                "status": STATUS_DEGRADED,
+                "stage": S_VISION_CAMERA,
+                "reason_code": agg_event.reason_code,
+                "degraded": True,
+                "latency_ms": agg_event.latency_ms,
+                "summary": {
+                    "total_detectors": agg_event.total_detectors,
+                    "ok_detectors": 0,
+                    "failed_detector_count": agg_event.failed_detector_count,
+                    "total_detections": 0,
+                    "low_confidence_count": 0,
+                },
+            }
+            return CameraEventResult(
+                success=False,
+                status=STATUS_DEGRADED,
+                reason_code=agg_event.reason_code,
+                stage=S_VISION_CAMERA,
+                detail="all detectors failed",
+                output=output,
+            )
+
+        # OK 或 PARTIAL
+        is_partial = agg_event.status == AGG_STATUS_PARTIAL
+        status_out = STATUS_DEGRADED if is_partial else STATUS_OK
+        success_out = not is_partial
+
+        self._log_event(
+            request_id=request_id,
+            intent_id=intent_id,
+            status=status_out,
+            reason_code=None,
+            evidence_ref=evidence_value,
+            detail=f"multi-detect completed ({agg_event.status})",
+            payload={
+                "mode": "multi",
+                "total_detectors": agg_event.total_detectors,
+                "ok_detectors": agg_event.ok_detectors,
+                "failed_detector_count": agg_event.failed_detector_count,
+                "total_detections": agg_event.total_detections,
+                "low_confidence_count": agg_event.low_confidence_count,
+                "latency_ms": agg_event.latency_ms,
+            },
+            ts_ms=now_value,
+        )
+
+        output = {
+            "request_id": request_id,
+            "intent_id": intent_id,
+            "ts_ms": now_value,
+            "evidence_ref": evidence_value,
+            "mode": "multi",
+            "detections": agg_event.detections,
+            "detector_results": agg_event.detector_results,
+            "failed_detectors": agg_event.failed_detectors,
+            "status": status_out,
+            "stage": S_VISION_CAMERA,
+            "reason_code": None,
+            "degraded": is_partial,
+            "latency_ms": agg_event.latency_ms,
+            "summary": {
+                "total_detectors": agg_event.total_detectors,
+                "ok_detectors": agg_event.ok_detectors,
+                "failed_detector_count": agg_event.failed_detector_count,
+                "total_detections": agg_event.total_detections,
+                "low_confidence_count": agg_event.low_confidence_count,
+            },
+        }
+
+        return CameraEventResult(
+            success=success_out,
+            status=status_out,
+            reason_code=None,
+            stage=S_VISION_CAMERA,
+            detail=f"multi-detect completed ({agg_event.status})",
+            output=output,
+        )
+
     def _degrade(
         self,
         *,
