@@ -1,0 +1,40 @@
+{
+  "description": "ASR 默认设备失败→备用设备自动切换 fixture",
+  "scenario": "asr_device_alternate_switch",
+  "initial_state": {
+    "asr_state": "STREAMING",
+    "device_index": 0,
+    "session_id": "asr_test_003"
+  },
+  "trigger": {
+    "event": "ASR_DEVICE_ERROR",
+    "reason": "device_disconnected",
+    "ts_ms": 1709308800000
+  },
+  "recovery_config": {
+    "max_attempts": 3,
+    "base_delay_s": 0.01,
+    "max_delay_s": 0.05,
+    "auto_recover": true,
+    "try_alternate_devices": true
+  },
+  "available_devices": [
+    {"index": 0, "name": "Default Microphone", "max_input_channels": 1},
+    {"index": 2, "name": "USB Audio Device", "max_input_channels": 2}
+  ],
+  "mock_original_device_fails": true,
+  "mock_alternate_device_succeeds": 2,
+  "expected": {
+    "final_state": "READY",
+    "recovery_event": "ASR_DEVICE_RECOVERED",
+    "device_switched": true,
+    "new_device_index": 2,
+    "new_device_name": "USB Audio Device",
+    "running": true,
+    "audit_event": {
+      "event": "ASR_DEVICE_RECOVERED",
+      "device_index": 2,
+      "device_name": "USB Audio Device"
+    }
+  }
+}

@@ -17,6 +17,8 @@ from typing import Any, Callable
 
 from host_brain.core.errors import (
     ASR_DEVICE_ERROR,
+    ASR_DEVICE_RECOVERED,
+    ASR_DEVICE_RECOVERY_EXHAUSTED,
     ASR_GPU_OOM,
     ASR_MODEL_UNAVAILABLE,
     ASR_STREAM_INTERRUPTED,
@@ -43,6 +45,11 @@ DEFAULT_SILENCE_DURATION_S = 0.8
 DEFAULT_MIN_SPEECH_DURATION_S = 0.3
 DEFAULT_MAX_SPEECH_DURATION_S = 30.0
 
+# ── 设备恢复常量 ──
+DEFAULT_RECOVERY_MAX_ATTEMPTS = 5
+DEFAULT_RECOVERY_BASE_DELAY_S = 1.0
+DEFAULT_RECOVERY_MAX_DELAY_S = 8.0
+
 
 class AsrState(str, Enum):
     """ASR service lifecycle states."""
@@ -50,8 +57,28 @@ class AsrState(str, Enum):
     LOADING = "LOADING"
     READY = "READY"
     STREAMING = "STREAMING"
+    RECOVERING = "RECOVERING"
     ERROR = "ERROR"
     SHUTDOWN = "SHUTDOWN"
+
+
+@dataclass
+class DeviceRecoveryConfig:
+    """ASR 麦克风设备自动恢复配置。"""
+    max_attempts: int = DEFAULT_RECOVERY_MAX_ATTEMPTS
+    base_delay_s: float = DEFAULT_RECOVERY_BASE_DELAY_S
+    max_delay_s: float = DEFAULT_RECOVERY_MAX_DELAY_S
+    auto_recover: bool = True
+    try_alternate_devices: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "max_attempts": self.max_attempts,
+            "base_delay_s": self.base_delay_s,
+            "max_delay_s": self.max_delay_s,
+            "auto_recover": self.auto_recover,
+            "try_alternate_devices": self.try_alternate_devices,
+        }
 
 
 @dataclass
@@ -70,6 +97,7 @@ class AsrConfig:
     max_speech_duration_s: float = DEFAULT_MAX_SPEECH_DURATION_S
     language: str = "ja"
     initial_prompt: str | None = None
+    recovery: DeviceRecoveryConfig = field(default_factory=DeviceRecoveryConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +113,7 @@ class AsrConfig:
             "min_speech_duration_s": self.min_speech_duration_s,
             "max_speech_duration_s": self.max_speech_duration_s,
             "language": self.language,
+            "recovery": self.recovery.as_dict(),
         }
 
 
@@ -150,6 +179,8 @@ class WhisperModelManager:
         self._lock = threading.Lock()
         self._actual_device: str = self._config.device
         self._load_error: str | None = None
+        # ── 设备恢复状态（仅跟踪，WhisperModelManager 不执行恢复） ──
+        self._recovery_count = 0
 
     @property
     def state(self) -> AsrState:
@@ -359,6 +390,7 @@ class WhisperModelManager:
             "device": self._actual_device,
             "config_device": self._config.device,
             "load_error": self._load_error,
+            "recovery_count": self._recovery_count,
         }
 
     def _device_fallback_chain(self) -> list[str]:
@@ -391,6 +423,7 @@ class AudioStreamCapture:
         self._channels = channels
         self._chunk_duration_s = chunk_duration_s
         self._device_index = device_index
+        self._original_device_index = device_index
         self._stream: Any = None
         self._running = False
         self._lock = threading.Lock()
@@ -495,6 +528,36 @@ class AudioStreamCapture:
                     detail=f"error stopping stream: {e}",
                 )
 
+    def set_device_index(self, device_index: int | None) -> None:
+        """切换音频设备索引（需先 stop 再 start）。"""
+        self._device_index = device_index
+
+    @staticmethod
+    def enumerate_input_devices() -> list[dict[str, Any]]:
+        """列举所有可用音频输入设备。
+
+        返回 [{"index": int, "name": str, "max_input_channels": int, ...}]
+        静默失败时返回空列表。
+        """
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+            result: list[dict[str, Any]] = []
+            if isinstance(devices, dict):
+                devices = [devices]
+            for i, d in enumerate(devices):
+                if isinstance(d, dict) and d.get("max_input_channels", 0) > 0:
+                    result.append({
+                        "index": i,
+                        "name": d.get("name", ""),
+                        "max_input_channels": d.get("max_input_channels", 0),
+                        "default_samplerate": d.get("default_samplerate", 0),
+                    })
+            return result
+        except Exception as exc:
+            logger.warning("Failed to enumerate audio devices: %s", exc)
+            return []
+
     def health(self) -> dict[str, Any]:
         """Return audio capture health snapshot."""
         return {
@@ -503,6 +566,7 @@ class AudioStreamCapture:
             "channels": self._channels,
             "chunk_duration_s": self._chunk_duration_s,
             "device_index": self._device_index,
+            "original_device_index": self._original_device_index,
         }
 
 
@@ -540,6 +604,14 @@ class AsrService:
         self._audio_buffer: list[Any] = []
         self._buffer_start_ts: int = 0
         self._running = False
+        # ── 设备恢复状态 ──
+        self._recovery_thread: threading.Thread | None = None
+        self._recovery_attempts = 0
+        self._total_recoveries = 0
+        self._total_recovery_failures = 0
+        self._recovery_events: list[dict[str, Any]] = []
+        self._shutdown_event = threading.Event()
+        self._last_callback: Callable[[Any, int], None] | None = None
 
     @property
     def state(self) -> AsrState:
@@ -559,6 +631,7 @@ class AsrService:
             return load_result
 
         # Start audio capture
+        self._last_callback = self._on_audio_chunk
         capture_result = self._audio.start(callback=self._on_audio_chunk)
         if not capture_result.success:
             return capture_result
@@ -574,6 +647,7 @@ class AsrService:
     def stop_session(self) -> AsrResult:
         """Stop audio capture and flush remaining buffer."""
         self._running = False
+        self._shutdown_event.set()
         # Flush any remaining audio
         self._flush_buffer(final=True)
         result = self._audio.stop()
@@ -664,7 +738,189 @@ class AsrService:
             "model": self._model.health(),
             "audio": self._audio.health(),
             "config": self._config.as_dict(),
+            "recovery": {
+                "total_recoveries": self._total_recoveries,
+                "total_recovery_failures": self._total_recovery_failures,
+                "recovery_attempts": self._recovery_attempts,
+                "recovering": self._model.state == AsrState.RECOVERING,
+                "recovery_events_count": len(self._recovery_events),
+            },
         }
+
+    # -----------------------------------------------------------------
+    # 麦克风设备自动恢复（TASK-0081）
+    # -----------------------------------------------------------------
+
+    def _device_recovery_loop(self) -> None:
+        """指数退避设备恢复循环。
+
+        在独立线程中运行。先尝试重新打开原始设备，若失败则枚举
+        备用输入设备逐一尝试。恢复成功后上报 ASR_DEVICE_RECOVERED，
+        全部失败后上报 ASR_DEVICE_RECOVERY_EXHAUSTED。
+        """
+        rc = self._config.recovery
+        delay = rc.base_delay_s
+        self._recovery_attempts = 0
+
+        with self._lock:
+            prev_state = self._model.state
+
+        self._model._state = AsrState.RECOVERING
+
+        logger.info(
+            "ASR device recovery started (max_attempts=%d, base_delay=%.1fs)",
+            rc.max_attempts, rc.base_delay_s,
+        )
+
+        for attempt in range(1, rc.max_attempts + 1):
+            if self._shutdown_event.is_set():
+                logger.info("ASR device recovery cancelled by shutdown")
+                return
+
+            self._recovery_attempts = attempt
+
+            # ── 尝试设备列表：原始设备优先，然后备用 ──
+            devices_to_try = self._build_device_candidates(rc)
+
+            for dev_info in devices_to_try:
+                dev_idx = dev_info["index"]
+                dev_name = dev_info.get("name", f"device_{dev_idx}")
+
+                logger.info(
+                    "ASR recovery attempt %d/%d, device=%s (index=%s, delay=%.1fs)",
+                    attempt, rc.max_attempts, dev_name, dev_idx, delay,
+                )
+
+                try:
+                    # 先停再重新打开
+                    self._audio.stop()
+                    self._audio.set_device_index(dev_idx)
+
+                    if self._last_callback is not None:
+                        start_result = self._audio.start(callback=self._last_callback)
+                    else:
+                        start_result = self._audio.start(callback=self._on_audio_chunk)
+
+                    if start_result.success:
+                        self._total_recoveries += 1
+                        self._model._state = AsrState.READY
+                        self._running = True
+
+                        event = {
+                            "event": ASR_DEVICE_RECOVERED,
+                            "attempt": attempt,
+                            "device_index": dev_idx,
+                            "device_name": dev_name,
+                            "ts_ms": now_ms(),
+                            "detail": f"device recovered after {attempt} attempt(s) on {dev_name}",
+                        }
+                        self._recovery_events.append(event)
+                        logger.info(
+                            "ASR device recovered after %d attempt(s) on %s",
+                            attempt, dev_name,
+                        )
+                        return
+                except Exception as exc:
+                    logger.warning(
+                        "ASR recovery attempt %d device %s failed: %s",
+                        attempt, dev_name, exc,
+                    )
+
+            # 本轮所有设备均失败，等待退避时间
+            if self._shutdown_event.wait(timeout=min(delay, rc.max_delay_s)):
+                logger.info("ASR device recovery cancelled by shutdown during wait")
+                return
+            delay = min(delay * 2, rc.max_delay_s)
+
+        # 全部恢复失败
+        self._total_recovery_failures += 1
+        self._model._state = AsrState.ERROR
+        self._running = False
+
+        event = {
+            "event": ASR_DEVICE_RECOVERY_EXHAUSTED,
+            "attempts": rc.max_attempts,
+            "ts_ms": now_ms(),
+            "detail": f"all {rc.max_attempts} device recovery attempts exhausted",
+        }
+        self._recovery_events.append(event)
+        logger.error(
+            "ASR device recovery exhausted after %d attempts", rc.max_attempts,
+        )
+
+    def _build_device_candidates(
+        self, rc: DeviceRecoveryConfig,
+    ) -> list[dict[str, Any]]:
+        """构建设备候选列表：原始设备优先，然后备用设备。"""
+        original_idx = self._audio._original_device_index
+        candidates: list[dict[str, Any]] = [
+            {"index": original_idx, "name": f"original_device_{original_idx}"},
+        ]
+
+        if rc.try_alternate_devices:
+            available = AudioStreamCapture.enumerate_input_devices()
+            for dev in available:
+                if dev["index"] != original_idx:
+                    candidates.append(dev)
+
+        return candidates
+
+    def trigger_device_recovery(self) -> AsrResult:
+        """触发设备自动恢复（非阻塞）。
+
+        通常由 audio stream error 自动触发，也可手动调用。
+        如果已在恢复中则返回 no-op。
+        """
+        rc = self._config.recovery
+        if not rc.auto_recover:
+            return AsrResult(
+                success=False,
+                reason_code=ASR_DEVICE_ERROR,
+                detail="auto_recover is disabled",
+            )
+
+        if self._model.state == AsrState.RECOVERING:
+            return AsrResult(
+                success=True,
+                reason_code=None,
+                detail="device recovery already in progress",
+            )
+
+        if self._model.state == AsrState.SHUTDOWN:
+            return AsrResult(
+                success=False,
+                reason_code=ASR_DEVICE_ERROR,
+                detail="service is shutdown",
+            )
+
+        self._shutdown_event.clear()
+        self._recovery_thread = threading.Thread(
+            target=self._device_recovery_loop,
+            name="asr-device-recovery",
+            daemon=True,
+        )
+        self._recovery_thread.start()
+
+        return AsrResult(
+            success=True,
+            reason_code=None,
+            detail="device recovery started",
+        )
+
+    def _maybe_trigger_recovery(self, reason: str) -> None:
+        """音频流错误时检查是否需要自动恢复。"""
+        rc = self._config.recovery
+        if not rc.auto_recover:
+            return
+        if self._model.state in (AsrState.RECOVERING, AsrState.SHUTDOWN):
+            return
+        logger.warning("ASR device error (%s), triggering recovery", reason)
+        self.trigger_device_recovery()
+
+    @property
+    def recovery_events(self) -> list[dict[str, Any]]:
+        """返回设备恢复事件日志（可写入审计）。"""
+        return list(self._recovery_events)
 
     # -- Internal --
 
