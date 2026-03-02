@@ -10,6 +10,8 @@ from host_brain.core.errors import (
     AVATAR_FREE_ACTION_BLOCKED,
     AVATAR_TAG_INVALID,
     AVATAR_TRIGGER_INVALID,
+    VTS_CONNECTION_FAILED,
+    VTS_DEGRADED_FALLBACK,
 )
 from host_brain.core.ids import new_request_id, now_ms
 
@@ -19,6 +21,7 @@ S_AVATAR_EXPRESSION_MAP = "S_AVATAR_EXPRESSION_MAP"
 
 STATUS_APPLIED = "APPLIED"
 STATUS_REJECTED = "REJECTED"
+STATUS_DEGRADED = "DEGRADED"
 
 TALK_START = "TALK_START"
 TALK_END = "TALK_END"
@@ -34,6 +37,9 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
     "SURPRISED": "exp_surprised_01",
     "THINKING": "exp_thinking_01",
 }
+
+DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"
+DEGRADED_FALLBACK_EXPRESSION_ID = EMOTION_TO_EXPRESSION_ID[DEGRADED_FALLBACK_EXPRESSION_TAG]
 
 
 @dataclass(frozen=True)
@@ -101,11 +107,32 @@ def resolve_vts_expression(
     raw_expression_id: str | None = None,
     raw_action_params: dict[str, Any] | None = None,
     ts_ms: int | None = None,
+    edge_available: bool = True,
 ) -> VTSActionResult:
-    """Resolve emotion tag to fixed expression mapping and block free actions."""
+    """Resolve emotion tag to fixed expression mapping and block free actions.
+
+    当 ``edge_available=False`` 或映射失败但有 neutral 降级备选时，返回
+    ``status=DEGRADED`` + neutral 表情，而非直接 REJECTED；审计写入降级详情。
+    """
 
     req_id = request_id or new_request_id()
     now_value = int(ts_ms if ts_ms is not None else now_ms())
+
+    # ── Edge 不可达 → DEGRADED ──
+    if not edge_available:
+        return _log_result(
+            ledger=ledger,
+            request_id=req_id,
+            trigger=trigger,
+            emotion_tag=_normalize_emotion_tag(emotion_tag) or DEGRADED_FALLBACK_EXPRESSION_TAG,
+            expression_id=DEGRADED_FALLBACK_EXPRESSION_ID,
+            status=STATUS_DEGRADED,
+            reason_code=VTS_DEGRADED_FALLBACK,
+            stage=S_AVATAR_EXPRESSION_MAP,
+            detail="edge not available, degraded to neutral fallback",
+            ts_ms=now_value,
+        )
+
     if raw_expression_id or raw_action_params:
         return _log_result(
             ledger=ledger,
@@ -137,16 +164,17 @@ def resolve_vts_expression(
 
     expression_id = EMOTION_TO_EXPRESSION_ID.get(normalized_tag)
     if not expression_id:
+        # ── 映射未知 → DEGRADED（neutral 备选） ──
         return _log_result(
             ledger=ledger,
             request_id=req_id,
             trigger=trigger,
             emotion_tag=normalized_tag,
-            expression_id=None,
-            status=STATUS_REJECTED,
-            reason_code=AVATAR_TAG_INVALID,
+            expression_id=DEGRADED_FALLBACK_EXPRESSION_ID,
+            status=STATUS_DEGRADED,
+            reason_code=VTS_DEGRADED_FALLBACK,
             stage=S_AVATAR_EXPRESSION_MAP,
-            detail=f"unsupported emotion_tag: {normalized_tag}",
+            detail=f"unsupported emotion_tag '{normalized_tag}', degraded to neutral fallback",
             ts_ms=now_value,
         )
 
@@ -198,7 +226,7 @@ def _log_result(
         }
     )
     return VTSActionResult(
-        success=status == STATUS_APPLIED,
+        success=status in (STATUS_APPLIED, STATUS_DEGRADED),
         request_id=request_id,
         trigger=str(trigger),
         emotion_tag=emotion_tag,
