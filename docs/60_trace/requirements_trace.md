@@ -328,6 +328,16 @@
 - 当前进展（2026-03-02）：已落地完整 TTS/VTS 设备集成：SoVITSModelManager（GPU 常驻 + 线程安全加载/卸载 + GPU OOM 报告）、AudioPlaybackDevice（sounddevice 音频输出 + 打断停止）、make_sovits_synthesizer/make_audio_playback_starter（SpeechPlaybackQueue 兼容回调工厂）；VTubeStudioDriver（WebSocket 连接/认证 + talk gate TALK_START/TALK_END + emotion_tag→expression_id 确定性映射 + barge-in 恢复 reset_to_neutral + 断连降级队列）；新增 6 个 TTS/VTS 硬件层错误码（TTS_MODEL_UNAVAILABLE/TTS_GPU_OOM/TTS_SYNTH_TIMEOUT/VTS_CONNECTION_FAILED/VTS_API_ERROR/VTS_EXPRESSION_TIMEOUT）；新增 4 个 fixtures（合成成功 + 合成失败 + VTS 断连 + barge-in 恢复）；Edge/Host 表情映射表一致性已验证。T-TTS-HW-01（25 项）+ T-VTS-HW-01（30 项）共 55 项全部通过；现有 T-Voice-02/T-Avatar-01（8 项）无回归。pyproject.toml 新增 pyvts 依赖。
 - 覆盖状态：DONE
 
+## R-35
+- 系统级需求：graph_runtime 拆分为契约层/执行层/降级层/模型解析层，单文件行数≤300，对外接口与输出结构完全不变
+- PRD 需求编号（FR）：FR-CORE-001, FR-CORE-004
+- 来源：审阅报告 2026-03-02 P1-4（graph_runtime 单文件复杂度过高）
+- DevSpec 落点：DevSpec 6/8.9/10
+- DevTasks（TASK）：TASK-0069
+- 验收测试（T-xx）：T-Orch-01, T-Orch-Refactor-01
+- 当前进展（2026-03-02）：已将 graph_runtime.py（943行）拆分为 5 个模块：graph_contract.py（214行，Schema/验证/共享类型）、graph_executor.py（186行，LangGraph 步进执行引擎）、graph_fallback.py（152行，降级/超时/依赖不可用统一处理）、graph_model_resolve.py（170行，Model Plane 配置解析与节点路由）、graph_runtime.py（281行，编排入口壳，串联三层）。所有文件均≤300行。对外接口（GraphRuntimeContract.run_graph/register_node_handler/validate_graph_config）签名完全不变。输出结构（graph_status/reason_code/stage/replay_ref/runtime_backend/model_control/graph_trace/payload）与拆分前完全一致。T-Orch-01~05（13项）无回归；T-Orch-Refactor-01（21项：输出一致性6项+各层独立单测10项+模块行数限制5项）全部通过。新增 fixture graph_refactor_baseline.json。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
