@@ -1,0 +1,36 @@
+{
+  "scenario": "wechat_vts_voice_normal",
+  "description": "微信入站→Host编排→Governor APPROVE→VTS表情驱动+语音播报→审计链完整串联",
+  "wechat_ingress": {
+    "message_id": "wx_e2e_msg_001",
+    "from_user_id": "wx_user_e2e_001",
+    "to_user_id": "natsume_bot",
+    "content": "今天天气怎么样？"
+  },
+  "intent_overrides": {
+    "id": "intent_e2e_wechat_001",
+    "nonce": "nonce_e2e_wechat_001",
+    "seq": 1,
+    "action": "read_only_status",
+    "type": "skill_call",
+    "target": "host"
+  },
+  "vts_emotion": {
+    "emotion_tag": "HAPPY",
+    "trigger": "LLM"
+  },
+  "voice_event": {
+    "event_type": "TTS_PLAY",
+    "direction": "EGRESS"
+  },
+  "expected": {
+    "wechat_accepted": true,
+    "governor_decision": "APPROVE",
+    "skill_status": "SUCCESS",
+    "vts_status": "APPLIED",
+    "vts_expression_id": "exp_happy_01",
+    "voice_status": "COMPLETED",
+    "audit_trace_status": "COMPLETE",
+    "audit_tables_present": ["channel_io_log", "intent_log", "governor_log", "skill_exec_log", "avatar_action_log", "voice_event_log"]
+  }
+}
