@@ -26,6 +26,11 @@ class GateSnapshot:
     scope_allowlist: tuple[str, ...]
     safety_flag: bool
     airlock_blocked: bool
+    # Rate Limit 扩展字段（由 RateLimitChecker 提供，向后兼容）
+    rate_limit_backend: str | None = None
+    rate_limit_degraded: bool = False
+    rate_limit_degraded_from: str | None = None
+    rate_limit_reason_code: str | None = None
 
 
 def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -70,6 +75,11 @@ def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
         allowlist = default_allowlist
     safety_flag = bool(raw.get("safety_flag", False))
     airlock_blocked = bool(raw.get("airlock_blocked", False))
+    # Rate Limit 扩展字段
+    rl_backend = raw.get("rate_limit_backend")
+    rl_degraded = bool(raw.get("rate_limit_degraded", False))
+    rl_degraded_from = raw.get("rate_limit_degraded_from")
+    rl_reason_code = raw.get("rate_limit_reason_code")
     return GateSnapshot(
         trust_level=trust_level,
         energy_level=energy_level,
@@ -79,6 +89,10 @@ def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
         scope_allowlist=allowlist,
         safety_flag=safety_flag,
         airlock_blocked=airlock_blocked,
+        rate_limit_backend=str(rl_backend) if rl_backend else None,
+        rate_limit_degraded=rl_degraded,
+        rate_limit_degraded_from=str(rl_degraded_from) if rl_degraded_from else None,
+        rate_limit_reason_code=str(rl_reason_code) if rl_reason_code else None,
     )
 
 
@@ -120,11 +134,30 @@ def _r3_sys_mode_gate(snapshot: GateSnapshot) -> dict[str, Any]:
 
 def _r4_rate_limit_gate(snapshot: GateSnapshot) -> dict[str, Any]:
     hit = snapshot.rate_limit_hit
+    # 从快照中获取 Rate Limit 详情（如果由 RateLimitChecker 提供）
+    rl_backend = snapshot.rate_limit_backend
+    rl_degraded = snapshot.rate_limit_degraded
+    rl_degraded_from = snapshot.rate_limit_degraded_from
+    rl_reason_code = snapshot.rate_limit_reason_code
+
+    threshold_summary: dict[str, Any] = {"window": "global_bucket_window"}
+    if rl_backend:
+        threshold_summary["backend"] = rl_backend
+    if rl_degraded:
+        threshold_summary["degraded"] = True
+        threshold_summary["degraded_from"] = rl_degraded_from
+
+    snapshot_summary: dict[str, Any] = {"rate_limit_hit": hit}
+    if rl_backend:
+        snapshot_summary["backend"] = rl_backend
+    if rl_degraded and rl_reason_code:
+        snapshot_summary["degraded_reason_code"] = rl_reason_code
+
     return {
         "gate_id": "R4_RATE_LIMIT",
         "hit": hit,
-        "threshold_summary": {"window": "global_bucket_window"},
-        "snapshot_summary": {"rate_limit_hit": snapshot.rate_limit_hit},
+        "threshold_summary": threshold_summary,
+        "snapshot_summary": snapshot_summary,
         "reason_hint": RATE_LIMITED if hit else "PASS",
     }
 
