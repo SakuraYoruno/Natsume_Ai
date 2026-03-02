@@ -346,12 +346,12 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
 class SQLiteLedger:
     """Audit ledger persisted by sqlite3."""
 
-    def __init__(self, db_path: str | Path = "host_brain/data/audit.sqlite3") -> None:
+    def __init__(self, db_path: str | Path = "host_brain/data/audit.sqlite3", *, check_same_thread: bool = True) -> None:
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self._conn = sqlite3.connect(self.db_path)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode = WAL;")
         self._conn.execute("PRAGMA foreign_keys = ON;")

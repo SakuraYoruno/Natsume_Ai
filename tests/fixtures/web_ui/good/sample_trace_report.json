@@ -1,0 +1,65 @@
+{
+    "request_id": "req_sample_001",
+    "trace_status": "OK",
+    "timeline_total": 5,
+    "sources": {
+        "governor_log": 1,
+        "intent_log": 1,
+        "retrieval_event_log": 1,
+        "service_health_log": 1,
+        "skill_exec_log": 1
+    },
+    "timeline": [
+        {
+            "event_id": "intent_log:1",
+            "source": "intent_log",
+            "stage": "S_INTENT_PARSED",
+            "status": null,
+            "reason_code": null,
+            "intent_id": "intent::req_sample_001",
+            "ts_ms": 1709300000000,
+            "detail": "query"
+        },
+        {
+            "event_id": "governor_log:1",
+            "source": "governor_log",
+            "stage": "S_GOV_COMPLETE",
+            "status": "APPROVE",
+            "reason_code": null,
+            "intent_id": "intent::req_sample_001",
+            "ts_ms": 1709300000100,
+            "detail": null
+        },
+        {
+            "event_id": "skill_exec_log:1",
+            "source": "skill_exec_log",
+            "stage": "S_EXEC_DONE",
+            "status": "OK",
+            "reason_code": null,
+            "intent_id": "intent::req_sample_001",
+            "ts_ms": 1709300000200,
+            "detail": "narrative_only"
+        },
+        {
+            "event_id": "retrieval_event_log:1",
+            "source": "retrieval_event_log",
+            "stage": null,
+            "status": "OK",
+            "reason_code": null,
+            "intent_id": null,
+            "ts_ms": 1709300000050,
+            "detail": "embedding_search"
+        },
+        {
+            "event_id": "service_health_log:1",
+            "source": "service_health_log",
+            "stage": null,
+            "status": "OK",
+            "reason_code": null,
+            "intent_id": null,
+            "ts_ms": 1709300000010,
+            "detail": "probe_ok"
+        }
+    ],
+    "timestamp": 1709300001000
+}
