@@ -43,7 +43,7 @@ class RateLimitConfig:
     sqlite_db_path: str = ":memory:"
     # Redis 配置
     redis_url: str = "redis://localhost:6379/0"
-    redis_key_prefix: str = "natsume:ratelimit:"
+    redis_key_prefix: str = "Nastume:ratelimit:"
     redis_timeout_ms: int = 1_000
 
 
@@ -263,7 +263,7 @@ class RedisRateLimitStore(RateLimitStore):
         *,
         window_ms: int = DEFAULT_WINDOW_MS,
         redis_url: str = "redis://localhost:6379/0",
-        key_prefix: str = "natsume:ratelimit:",
+        key_prefix: str = "Nastume:ratelimit:",
         timeout_ms: int = 1_000,
     ) -> None:
         self._window_ms = int(window_ms)

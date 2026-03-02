@@ -1,6 +1,6 @@
 {
   "env": {
-    "NATSUME_ENV": "dev",
+    "Nastume_ENV": "dev",
     "EDGE_RPC_HOST": "127.0.0.1",
     "EDGE_RPC_PORT": "17800",
     "EDGE_ASR_ENABLED": "true",

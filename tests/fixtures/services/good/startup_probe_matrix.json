@@ -1,14 +1,14 @@
 {
   "request_id": "req_boot_001",
   "host_env": {
-    "NATSUME_ENV": "dev",
+    "Nastume_ENV": "dev",
     "HOST_LLM_PROVIDER": "openai",
     "HOST_COLD_START_ALLOWED": "true",
     "HOST_ENABLE_RETRIEVAL": "true",
     "HOST_ENABLE_VISION": "true"
   },
   "edge_env": {
-    "NATSUME_ENV": "dev",
+    "Nastume_ENV": "dev",
     "EDGE_RPC_GATEWAY_ENABLED": "true",
     "EDGE_FALLBACK_LLM_ENABLED": "false",
     "EDGE_ASR_ENABLED": "true",

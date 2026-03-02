@@ -3,14 +3,14 @@
   "env": "prod",
   "node_inventory_ref": "tests/fixtures/services/good/node_inventory_9.json",
   "host_env": {
-    "NATSUME_ENV": "prod",
+    "Nastume_ENV": "prod",
     "HOST_LLM_PROVIDER": "openai",
     "HOST_COLD_START_ALLOWED": "false",
     "HOST_ENABLE_RETRIEVAL": "true",
     "HOST_ENABLE_VISION": "true"
   },
   "edge_env": {
-    "NATSUME_ENV": "prod",
+    "Nastume_ENV": "prod",
     "EDGE_RPC_GATEWAY_ENABLED": "true",
     "EDGE_FALLBACK_LLM_ENABLED": "true",
     "EDGE_ASR_ENABLED": "true",

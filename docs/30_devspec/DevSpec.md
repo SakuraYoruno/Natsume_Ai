@@ -3,10 +3,10 @@
 
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
-# Natsume Ai 产品开发文档（Dev Spec）
+# Nastume Ai 产品开发文档（Dev Spec）
 版本：v1.4
 日期：2026-02-28
-适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
+适用架构：Host_Brain（Python，含 LangGraph 编排） + Nastume_Body（Edge） + Cloud Exocortex + ClawdBot
 
 本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。  
 目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
@@ -311,7 +311,7 @@ active.pointer 格式（必须）：
 
 ### 3.1 Intent 最小字段（固定 JSON 对象）
 Host 只接受“单个 JSON 对象”，不接受数组/多段文本。最小字段如下（字段名语义固定）：
-- schema_version：固定字符串（如 "natsume.intent.v1"）
+- schema_version：固定字符串（如 "Nastume.intent.v1"）
 - id：全局唯一（ULID/UUID 均可；必须可审计回放）
 - ts_ms：毫秒时间戳（用于过期窗）
 - session_id：会话标识
@@ -886,7 +886,7 @@ GC 约束：
 ### M3（LSP）
 - undo_token+manifest
 - Artifact Vault + vault_log + GC
-- DesktopIntervention（仅 Natsume_Space，可撤销）
+- DesktopIntervention（仅 Nastume_Space，可撤销）
 
 ---
 
@@ -926,9 +926,9 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 回归口径：T-Perf-01、T-Gaming-01、T-39/T-40、T-Flow-01/02（配置一致性）
 
 ### 13.1 环境枚举（语义固定）
-- NATSUME_ENV=dev：本地开发（允许 stub/fixtures；更详细日志；允许关闭部分外部依赖但必须可降级）
-- NATSUME_ENV=test：自动化测试（强制隔离外部依赖；使用临时库/临时目录；不得访问真实密钥）
-- NATSUME_ENV=prod：真实运行（最小暴露；严格门禁默认；危险能力默认关闭或需显式授权）
+- Nastume_ENV=dev：本地开发（允许 stub/fixtures；更详细日志；允许关闭部分外部依赖但必须可降级）
+- Nastume_ENV=test：自动化测试（强制隔离外部依赖；使用临时库/临时目录；不得访问真实密钥）
+- Nastume_ENV=prod：真实运行（最小暴露；严格门禁默认；危险能力默认关闭或需显式授权）
 
 ### 13.2 配置来源优先级（从高到低）
 1) 环境变量（运行时注入）  

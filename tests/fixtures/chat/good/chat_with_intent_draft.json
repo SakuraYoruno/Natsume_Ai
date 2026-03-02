@@ -3,7 +3,7 @@
   "session_id": "test-session-002",
   "thread_id": "thread-wechat-002",
   "intent_draft": {
-    "schema_version": "natsume.intent.v1",
+    "schema_version": "Nastume.intent.v1",
     "id": "intent::test-002",
     "ts_ms": 1709280000000,
     "session_id": "test-session-002",

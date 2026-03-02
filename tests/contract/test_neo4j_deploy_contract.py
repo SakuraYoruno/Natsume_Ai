@@ -39,7 +39,7 @@ class TestNeo4jDeployContract(unittest.TestCase):
         self.assertEqual(S_NEO4J_CONFIG, result.stage)
         assert result.config is not None
         self.assertTrue(result.config.enabled)
-        self.assertEqual("neo4j+s://bond-cluster.natsume.ai:7687", result.config.uri)
+        self.assertEqual("neo4j+s://bond-cluster.Nastume.ai:7687", result.config.uri)
         self.assertEqual("bond", result.config.database)
         self.assertEqual("sec://neo4j/bond-admin", result.config.auth_ref)
         self.assertEqual(64, result.config.pool_size)

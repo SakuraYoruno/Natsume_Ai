@@ -1,6 +1,6 @@
 {
   "env": {
-    "NATSUME_ENV": "prod",
+    "Nastume_ENV": "prod",
     "HOST_LLM_PROVIDER": "openai",
     "HOST_COLD_START_ALLOWED": "false",
     "OPENAI_API_KEY_REF": "sec://openai/natsu-node-01"

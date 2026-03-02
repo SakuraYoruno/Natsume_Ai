@@ -7,7 +7,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 class TestSQLitePersistenceContract(unittest.TestCase):
     def test_persistent_triptych_and_guards_survive_reopen(self) -> None:
-        fd, db_path = tempfile.mkstemp(prefix="natsume_audit_", suffix=".sqlite3")
+        fd, db_path = tempfile.mkstemp(prefix="Nastume_audit_", suffix=".sqlite3")
         os.close(fd)
         try:
             ledger_a = SQLiteLedger(db_path=db_path)
@@ -185,7 +185,7 @@ class TestSQLitePersistenceContract(unittest.TestCase):
                     "request_id": "req_persist_001",
                     "channel": "wechat",
                     "direction": "INGRESS",
-                    "thread_key": "wechat::wx_user_1001::natsume_bot",
+                    "thread_key": "wechat::wx_user_1001::Nastume_bot",
                     "message_id": "wx_msg_001",
                     "user_id": "wx_user_1001",
                     "status": "RECEIVED",

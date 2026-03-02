@@ -1,5 +1,5 @@
 {
-  "schema_version": "natsume.intent.v1",
+  "schema_version": "Nastume.intent.v1",
   "id": "intent_fixture_valid_001",
   "ts_ms": 1767225600000,
   "session_id": "s_fixture",

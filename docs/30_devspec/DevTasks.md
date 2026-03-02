@@ -362,7 +362,7 @@ TASK-XXXX 标题
 - 任务描述：补齐 Host 与 Edge 的配置加载契约（env/local/default 分层、冷启动默认值、敏感项占位），替换当前 placeholder，实现可复现配置入口。
 - 输入：DevSpec 1.2.1/13（环境与配置分层）；PRD FR-CORE-004、FR-OBS-001。
 - 输出：
-  - Host 配置对象（`NATSUME_ENV`、服务开关、降级开关、超时/重试口径）；
+  - Host 配置对象（`Nastume_ENV`、服务开关、降级开关、超时/重试口径）；
   - Edge 配置对象（RPC 端点、能力矩阵、资源闸门默认值）；
   - 配置验证失败的稳定 reason_code/stage 映射；
   - fixtures：无 key / 缺配置 / 非法配置样例。

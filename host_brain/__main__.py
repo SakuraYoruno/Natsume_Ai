@@ -1,4 +1,4 @@
-"""Main module entry for Natsume AI host brain."""
+"""Main module entry for Nastume AI host brain."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from host_brain.core.ids import new_request_id
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="Natsume AI Host Brain - AI agent orchestration runtime"
+        description="Nastume AI Host Brain - AI agent orchestration runtime"
     )
 
     parser.add_argument(
@@ -71,7 +71,7 @@ def setup_logging(log_level: str) -> None:
 
 def run_startup_check(db_path: str) -> bool:
     """运行启动健康检查"""
-    logger = logging.getLogger("natsume.startup")
+    logger = logging.getLogger("Nastume.startup")
     request_id = new_request_id()
 
     try:
@@ -113,10 +113,10 @@ def main() -> int:
 
     # 配置日志
     setup_logging(args.log_level)
-    logger = logging.getLogger("natsume.main")
+    logger = logging.getLogger("Nastume.main")
 
     # 设置环境变量
-    os.environ.setdefault("NATSUME_ENV", "production")
+    os.environ.setdefault("Nastume_ENV", "production")
 
     # 运行启动检查（如果启用）
     if args.startup_check:
@@ -134,7 +134,7 @@ def main() -> int:
 
     # 启动FastAPI服务器
     logger.info(
-        "Starting Natsume AI Host Brain server",
+        "Starting Nastume AI Host Brain server",
         extra={
             "host": args.host,
             "port": args.port,

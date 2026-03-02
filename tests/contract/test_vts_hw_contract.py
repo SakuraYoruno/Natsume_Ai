@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-os.environ.setdefault("NATSUME_AUDIT_DB", ":memory:")
+os.environ.setdefault("Nastume_AUDIT_DB", ":memory:")
 
 from host_brain.core.errors import (
     AVATAR_FREE_ACTION_BLOCKED,
@@ -267,7 +267,7 @@ class TestVtsConfig:
         cfg = VtsConfig()
         assert cfg.host == "localhost"
         assert cfg.port == 8001
-        assert cfg.plugin_name == "NatsumeAi"
+        assert cfg.plugin_name == "NastumeAi"
 
     def test_as_dict_completeness(self):
         cfg = VtsConfig()

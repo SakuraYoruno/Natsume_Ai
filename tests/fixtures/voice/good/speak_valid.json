@@ -6,6 +6,6 @@
     "utterance_id": "utt_001",
     "text": "Testing speech output",
     "interruptible": true,
-    "voice_profile": "natsume_default"
+    "voice_profile": "Nastume_default"
   }
 }

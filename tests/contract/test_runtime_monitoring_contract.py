@@ -19,7 +19,7 @@ class TestRuntimeMonitoringContract(unittest.TestCase):
         profile = build_agent_monitoring_profile(
             env={
                 "LANGSMITH_TRACING": "true",
-                "LANGSMITH_PROJECT": "natsume-dev",
+                "LANGSMITH_PROJECT": "Nastume-dev",
                 "LANGSMITH_API_KEY": "",
             }
         )

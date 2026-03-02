@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-# 🌸 Natsume Ai
+# 🌸 Nastume Ai
 
 **意识主权 AI 伴侣系统 — Host-Edge 分体架构**
 
@@ -17,7 +17,7 @@
 
 ## 📖 项目简介
 
-**Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统。不同于传统的对话 AI，本项目以"法律在先、人格可控、执行可审计"为核心原则，构建了一套 **Host-Edge 分体架构**：
+**Nastume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统。不同于传统的对话 AI，本项目以"法律在先、人格可控、执行可审计"为核心原则，构建了一套 **Host-Edge 分体架构**：
 
 - **Host Brain（主脑）**：运行在服务端，负责终审裁决、状态治理、审计链、检索增强（RAG）、技能编排与关系图谱等核心能力
 - **Edge Client（边缘端）**：运行在本地设备，负责语音链路（ASR/TTS）、VTube Studio 驱动、兜底小模型等感知与执行能力
@@ -66,7 +66,7 @@
 ## 📁 项目结构
 
 ```
-Natsume_Ai/
+Nastume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
 │   ├── app/                 #    应用入口（FastAPI + Web UI 面板 + 配置 + 健康检查）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
@@ -172,8 +172,8 @@ Natsume_Ai/
 ### 1. 克隆仓库
 
 ```bash
-git clone <repo-url> Natsume_Ai
-cd Natsume_Ai
+git clone <repo-url> Nastume_Ai
+cd Nastume_Ai
 ```
 
 ### 2. 安装依赖
@@ -201,7 +201,7 @@ cp .env.example .env
 
 | 变量 | 说明 |
 |------|------|
-| `NATSUME_ENV` | 运行环境（dev/staging/prod） |
+| `Nastume_ENV` | 运行环境（dev/staging/prod） |
 | `OPENAI_API_KEY` | OpenAI API 密钥 |
 | `BOND_NEO4J_URI` | Neo4j 连接地址 |
 | `CHROMA_ENDPOINT` | ChromaDB 服务地址 |

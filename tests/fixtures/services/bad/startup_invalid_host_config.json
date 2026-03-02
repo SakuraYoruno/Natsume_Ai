@@ -1,10 +1,10 @@
 {
   "request_id": "req_boot_002",
   "host_env": {
-    "NATSUME_ENV": "invalid_env"
+    "Nastume_ENV": "invalid_env"
   },
   "edge_env": {
-    "NATSUME_ENV": "dev"
+    "Nastume_ENV": "dev"
   },
   "dependency_probes": {}
 }

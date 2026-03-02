@@ -4,7 +4,7 @@
   "wechat_ingress": {
     "message_id": "wx_e2e_msg_002",
     "from_user_id": "wx_user_e2e_002",
-    "to_user_id": "natsume_bot",
+    "to_user_id": "Nastume_bot",
     "content": "帮我删除所有数据"
   },
   "intent_overrides": {

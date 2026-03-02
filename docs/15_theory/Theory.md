@@ -1,7 +1,7 @@
 受众：PROJECT
 标题：理论文档（Theory：架构原理与理论框架）
 
-# Natsume Ai 理论文档（Theory Paper）
+# Nastume Ai 理论文档（Theory Paper）
 版本：v1.1.1
 适用：本地优先部署（Host_Brain + Edge + 可选 Cloud/ClawdBot）
 定位：解释“为什么这样设计、理论上要保证什么、怎样判定系统没有跑偏”，用于指导实现与评审。

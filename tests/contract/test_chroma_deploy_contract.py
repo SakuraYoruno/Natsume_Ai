@@ -36,8 +36,8 @@ class TestChromaDeployContract(unittest.TestCase):
         self.assertEqual(S_CHROMA_CONFIG, result.stage)
         assert result.config is not None
         self.assertTrue(result.config.enabled)
-        self.assertEqual("https://chroma.natsume.ai", result.config.endpoint)
-        self.assertEqual("tenant_natsume", result.config.tenant)
+        self.assertEqual("https://chroma.Nastume.ai", result.config.endpoint)
+        self.assertEqual("tenant_Nastume", result.config.tenant)
         self.assertEqual("memory_prod", result.config.database)
         self.assertEqual({"episodic": 16, "world": 32}, result.config.collection_profiles)
         self.assertEqual("episodic", result.config.default_collection)

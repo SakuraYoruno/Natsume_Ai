@@ -30,7 +30,7 @@ S_EDGE_CONFIG = "S_EDGE_CONFIG"
 EDGE_SNAPSHOT_COMPONENT = "edge"
 
 EDGE_FIELD_TO_ENV_KEY = {
-    "env": "NATSUME_ENV",
+    "env": "Nastume_ENV",
     "rpc_host": "EDGE_RPC_HOST",
     "rpc_port": "EDGE_RPC_PORT",
     "hmac_shared_key_set": "EDGE_HMAC_SHARED_KEY",
@@ -159,13 +159,13 @@ def load_edge_config(
         merged.update(dict(local_overrides))
 
     issues: list[ConfigIssue] = []
-    runtime_env = _as_text(merged.get("NATSUME_ENV"), ENV_DEV).lower()
+    runtime_env = _as_text(merged.get("Nastume_ENV"), ENV_DEV).lower()
     if runtime_env not in ALLOWED_ENVS:
         issues.append(
             ConfigIssue(
                 reason_code=CONFIG_ENV_INVALID,
-                detail=f"NATSUME_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
-                field="NATSUME_ENV",
+                detail=f"Nastume_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
+                field="Nastume_ENV",
             )
         )
         return _failure(issues)
