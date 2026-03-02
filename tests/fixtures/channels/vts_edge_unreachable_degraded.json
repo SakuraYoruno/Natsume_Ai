@@ -1,0 +1,20 @@
+{
+  "description": "VTS Edge 不可达 → DEGRADED 降级到 neutral fixture",
+  "scenario": "vts_edge_unreachable_degraded",
+  "input": {
+    "emotion_tag": "HAPPY",
+    "trigger": "LLM",
+    "edge_available": false,
+    "request_id": "req_vts_deg_001"
+  },
+  "expected": {
+    "success": true,
+    "status": "DEGRADED",
+    "reason_code": "VTS_DEGRADED_FALLBACK",
+    "emotion_tag": "HAPPY",
+    "expression_id": "exp_neutral_01",
+    "stage": "S_AVATAR_EXPRESSION_MAP",
+    "detail_contains": "edge not available",
+    "audit_logged": true
+  }
+}
