@@ -1,6 +1,8 @@
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +67,29 @@ class TestCIGateContract(unittest.TestCase):
             self.assertIsInstance(row["failed_artifact"], str)
         self.assertTrue(any(row["check_id"] == "doc_gate" for row in report["failures"]))
         self.assertTrue(any(row["check_id"] == "static_scan" for row in report["failures"]))
+
+    def test_t_ci_01_unittest_failure_includes_output_tail(self) -> None:
+        fake_proc = subprocess.CompletedProcess(
+            args=["python", "-m", "unittest"],
+            returncode=1,
+            stdout="line-a\nline-b\nline-c",
+            stderr="traceback line 1\ntraceback line 2",
+        )
+        with mock.patch.object(self.delivery_gate.subprocess, "run", return_value=fake_proc):
+            report = self.delivery_gate._run_unittest_check(
+                check_id="contract",
+                reason_code="CI_CONTRACT_FAILED",
+                target="tests/contract",
+                command=["python", "-m", "unittest", "discover"],
+                cwd=ROOT,
+            )
+        self.assertEqual("failed", report["status"])
+        self.assertEqual(1, report["metrics"]["exit_code"])
+        self.assertIn("line-c", report["metrics"]["stdout_tail"])
+        self.assertIn("traceback line 2", report["metrics"]["stderr_tail"])
+        failure = report["failures"][0]
+        self.assertIn("line-c", failure["stdout_tail"])
+        self.assertIn("traceback line 2", failure["stderr_tail"])
 
 
 if __name__ == "__main__":

@@ -71,7 +71,9 @@
       "reason_code_chain": [
         "SERVICE_UNAVAILABLE_DEPENDENCY"
       ],
-      "replay_ref": "request::req_drill_001"
+      "replay_ref": "request::req_drill_001",
+      "stage": "S_LLM_GATEWAY_PROVIDER",
+      "model_profile_id": null
     }
   ]
 }

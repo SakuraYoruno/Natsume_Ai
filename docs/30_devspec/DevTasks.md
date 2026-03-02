@@ -665,3 +665,108 @@ TASK-XXXX 标题
   - 回归覆盖 `T-Svc-01`、`T-Boot-01`、`T-Drill-01` 与（新增）`T-EnvReady-01`。
 - 涉及文件路径：host_brain/app/main.py；host_brain/core/services.py；tools/replay/；tests/e2e/；tests/fixtures/services/；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；T-Svc-01；T-Boot-01；T-Drill-01；（新增）T-EnvReady-01。
+
+### TASK-0057 主控闭环收口：LangGraph 读取 model_plane 并统一下发 LLM 参数
+- 任务描述：将 `configs/model_plane/{model_profiles,node_registry}` 作为编排主控配置源，落实“由 LangGraph 选择节点并由 LangChain/Gateway 执行”的单入口闭环，消除模型参数散落在测试/调用方注入的状态。
+- 输入：DevSpec 6/8.9/10/13；PRD FR-CORE-001、FR-CORE-004、FR-AUDIT-001。
+- 输出：
+  - model_plane 解析器与运行时快照结构（profile_id/node_id/provider/model_id/temperature/max_output_tokens/timeout_ms）；
+  - `GraphRuntimeContract` 对 `model_profile_id` 的强约束加载路径（缺 profile、缺 node、参数非法时稳定拒绝）；
+  - LLM 调用审计扩展字段（profile_id/node_id/provider/model_id/param_hash），保证可回放比对；
+  - fixtures：missing profile、missing node、provider mismatch、param drift 样例。
+- 验收标准：
+  - 编排运行不得依赖外部临时注入 `provider_fn/model_nodes` 才可执行；
+  - 模型节点参数由 model_plane 单点决定并在输出/审计中可追溯；
+  - 编排失败保持单 JSON 且 reason_code 稳定，不绕过 Governor/Token/Audit；
+  - 回归覆盖（新增）`T-Orch-02`、`T-Key-02` 与 `T-Audit-04`。
+- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/llm_gateway.py；host_brain/app/config.py；host_brain/audit/sqlite_ledger.py；configs/model_plane/；tests/contract/；tests/e2e/；tests/fixtures/orchestration/。
+- 关联需求/测试：FR-CORE-001；FR-CORE-004；FR-AUDIT-001；T-Orch-01；（新增）T-Orch-02；T-Key-01；（新增）T-Key-02；（新增）T-Audit-04。
+
+### TASK-0058 参数签名收口：model_plane 参数哈希与防漂移校验
+- 任务描述：对 model_plane 下发参数建立稳定 `param_hash` 与运行时校验，避免 provider/model_id/温度/token_cap 在执行链路发生不可审计漂移。
+- 输入：DevSpec 10/13；PRD FR-CORE-004、FR-AUDIT-001。
+- 输出：
+  - 参数签名规则（provider/model_id/temperature/max_output_tokens/timeout_ms 的 canonical 序列化与 hash）；
+  - 编排执行期参数防漂移校验（期望签名 vs 实际签名）；
+  - 审计字段扩展（expected_param_hash/actual_param_hash/drift_detected）；
+  - fixtures：hash mismatch、missing hash、tampered params 样例。
+- 验收标准：
+  - 任意模型调用均可输出稳定 `param_hash` 并可回放；
+  - 发现漂移时稳定拒绝或降级且 reason_code 可统计；
+  - 回归覆盖（新增）`T-Orch-03` 与 `T-Audit-05`。
+- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/llm_gateway.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/orchestration/。
+- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；（新增）T-Orch-03；（新增）T-Audit-05。
+
+### TASK-0059 路由治理收口：profile→node 选择器与环境约束矩阵
+- 任务描述：实现 model_profile 到 node 的确定性选择器，并把 env/node_selector/availability 约束纳入主流程路由，确保同输入同环境得到同路由结果。
+- 输入：DevSpec 6/13；PRD FR-CORE-001、FR-OBS-001。
+- 输出：
+  - profile→node 选择器契约（输入：profile/env/task；输出：selected_node/reason_code）；
+  - 环境约束矩阵（dev/staging/prod 与 node_selector/availability 的解析口径）；
+  - 审计字段（selected_node/candidate_nodes/reject_reason）；
+  - fixtures：no candidate、multi candidate tie-break、env mismatch 样例。
+- 验收标准：
+  - 选择器结果确定性且可解释；
+  - 无候选时稳定降级并保持单 JSON 输出；
+  - 回归覆盖（新增）`T-Orch-04` 与 `T-EnvReady-02`。
+- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/core/services.py；host_brain/app/main.py；tests/contract/；tests/e2e/；tests/fixtures/orchestration/；tests/fixtures/services/。
+- 关联需求/测试：FR-CORE-001；FR-OBS-001；（新增）T-Orch-04；（新增）T-EnvReady-02。
+
+### TASK-0060 票据联动收口：模型调用与 Governor/Token 审批锚点串联
+- 任务描述：将模型调用（尤其可能触发高风险意图草案的节点）与 Governor/Token 审批锚点串联，形成“模型建议→治理决策→执行入口”的可回放闭环。
+- 输入：DevSpec 8.9/10；PRD FR-TOOL-003、FR-AUDIT-001、FR-CORE-001。
+- 输出：
+  - 模型调用到治理链路的串联键（request_id/intent_id/approval_token_ref/evidence_ref）；
+  - 审批前后阶段字段（precheck_stage/governor_stage/execution_stage）；
+  - 拒绝码映射（missing_token/invalid_token/governor_reject）；
+  - fixtures：model suggests write/no token、token expired、governor reject 样例。
+- 验收标准：
+  - 高风险路径不得因模型节点成功而绕过 Governor/Token；
+  - 外部“已执行”叙事必须可指向 evidence_ref；
+  - 回归覆盖（新增）`T-Orch-05` 与 `T-Tool-04`。
+- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/governor/decision.py；host_brain/governor/tokens.py；host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
+- 关联需求/测试：FR-CORE-001；FR-TOOL-003；FR-AUDIT-001；（新增）T-Orch-05；（新增）T-Tool-04；I1/I8/I9。
+
+### TASK-0061 审计归档收口：model_control 入库与 request 级回放透出
+- 任务描述：把编排输出中的 `model_control` 与治理锚点写入审计存储并接入 request 级回放，形成“参数签名—票据—执行状态”的可检索闭环。
+- 输入：DevSpec 10/11；PRD FR-AUDIT-001、FR-CORE-001。
+- 输出：
+  - 审计表字段扩展（request_id/node_id/model_profile_id/provider/model_id/expected_param_hash/actual_param_hash/drift_detected/approval_token_ref/evidence_ref）；
+  - 回放工具输出扩展（按 request_id 聚合 model_control 与治理锚点）；
+  - fixtures：audit row 缺关键字段、回放缺链路、hash 漂移入库样例。
+- 验收标准：
+  - 任意一次模型调用可通过 request_id 回放到参数签名与票据锚点；
+  - 漂移与票据缺失在回放报告中具备稳定 reason_code 与阶段字段；
+  - 回归覆盖（新增）`T-Audit-06`、`T-Replay-02`。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；tools/replay/；host_brain/integrations/graph_runtime.py；tests/contract/；tests/fixtures/。
+- 关联需求/测试：FR-AUDIT-001；FR-CORE-001；（新增）T-Audit-06；（新增）T-Replay-02。
+
+### TASK-0062 配置治理收口：model_plane 版本签名与发布门禁联动
+- 任务描述：将 model_plane 资产纳入发布门禁，固化“配置版本→参数签名→生效环境”的一致性校验，避免灰度期间配置漂移不可控。
+- 输入：DevSpec 1.5/14.5；PRD FR-FLOW-001、FR-OBS-001、NFR-MAINT-001。
+- 输出：
+  - model_plane 版本清单（profile_version/node_registry_version/asset_digest）；
+  - 发布前一致性校验（active pointer 与 model_plane digest 对齐）；
+  - 回滚映射（版本回退时签名一致性检查）；
+  - fixtures：digest mismatch、stale pointer、rollback digest 缺失样例。
+- 验收标准：
+  - 发布门禁可阻断 model_plane 与 active 配置不一致；
+  - 回滚路径可验证签名一致且可审计；
+  - 回归覆盖（新增）`T-Flow-03`、`T-Release-01`。
+- 涉及文件路径：flows/active.pointer；configs/model_plane/；host_brain/release/；tests/contract/；tests/fixtures/；docs/60_trace/flows/index.md。
+- 关联需求/测试：FR-FLOW-001；FR-OBS-001；NFR-MAINT-001；（新增）T-Flow-03；（新增）T-Release-01。
+
+### TASK-0063 联调验收补齐：编排主控全链路演练与故障注入矩阵
+- 任务描述：补齐“编排主控 + model_plane + Governor/Token + Audit”联调演练矩阵，形成可复现实战故障包与验收报告模板。
+- 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-TOOL-003。
+- 输出：
+  - 演练场景矩阵（profile 缺失、selector 无候选、param drift、approval token missing、provider down）；
+  - 标准化报告结构（scenario_id/stage/status/reason_code_chain/replay_ref/model_profile_id）；
+  - 故障注入 fixtures 与期望断言文档；
+  - 环境就绪报告补充字段（orchestration_control_coverage）。
+- 验收标准：
+  - 五类核心故障场景均可稳定复现并输出单 JSON 报告；
+  - 每个场景可通过回放工具定位到 request_id 与关键审计字段；
+  - 回归覆盖（新增）`T-Drill-02`、`T-EnvReady-03`、`T-Orch-06`。
+- 涉及文件路径：tests/e2e/；tests/fixtures/drill/；host_brain/app/main.py；tools/replay/；host_brain/integrations/graph_runtime.py；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-TOOL-003；（新增）T-Drill-02；（新增）T-EnvReady-03；（新增）T-Orch-06。

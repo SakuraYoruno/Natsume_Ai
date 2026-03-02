@@ -59,6 +59,9 @@ class TestEnvReadinessE2E(unittest.TestCase):
         self.assertEqual(1, len(report["drill_summary"]))
         self.assertEqual("drill.dependency.provider_down", report["drill_summary"][0]["scenario_id"])
         self.assertEqual("request::req_drill_001", report["drill_summary"][0]["replay_ref"])
+        self.assertIn("stage", report["drill_summary"][0])
+        self.assertIn("model_profile_id", report["drill_summary"][0])
+        self.assertEqual("PARTIAL", report["orchestration_control_coverage"]["status"])
 
         json.loads(json.dumps(report, ensure_ascii=False))
 
@@ -89,6 +92,7 @@ class TestEnvReadinessE2E(unittest.TestCase):
         self.assertTrue(any(not row["available"] for row in report["dependency_matrix"]))
         self.assertEqual("FAILED", report["drill_summary"][0]["status"])
         self.assertEqual("drill.rollback.conflict", report["drill_summary"][0]["scenario_id"])
+        self.assertEqual("PARTIAL", report["orchestration_control_coverage"]["status"])
         json.loads(json.dumps(report, ensure_ascii=False))
 
 

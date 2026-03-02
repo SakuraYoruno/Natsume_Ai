@@ -198,13 +198,19 @@ def _run_unittest_check(
         errors="replace",
         check=False,
     )
+    stdout_tail = _tail_text(proc.stdout)
+    stderr_tail = _tail_text(proc.stderr)
     if proc.returncode == 0:
         return {
             "check_id": check_id,
             "status": "passed",
             "reason_code": None,
             "failures": [],
-            "metrics": {"exit_code": 0},
+            "metrics": {
+                "exit_code": 0,
+                "stdout_tail": stdout_tail,
+                "stderr_tail": stderr_tail,
+            },
         }
 
     return {
@@ -218,10 +224,29 @@ def _run_unittest_check(
                 "failed_artifact": target,
                 "message": f"{check_id} unittest discovery failed",
                 "exit_code": int(proc.returncode),
+                "stdout_tail": stdout_tail,
+                "stderr_tail": stderr_tail,
             }
         ],
-        "metrics": {"exit_code": int(proc.returncode)},
+        "metrics": {
+            "exit_code": int(proc.returncode),
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+        },
     }
+
+
+def _tail_text(raw: str | None, *, max_lines: int = 40, max_chars: int = 4000) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    tail = "\n".join(lines)
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
 
 
 def _load_doc_gate_module():
