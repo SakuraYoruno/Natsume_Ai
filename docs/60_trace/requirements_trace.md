@@ -298,9 +298,17 @@
 - 当前进展（2026-03-02）：已落地 FastAPI Application（`host_brain/app/fastapi_app.py`）：POST /v1/chat（走 IntentDecisionEngine 全链裁决）、GET /health、GET /ready、GET /metrics、POST /observability/trace；中间件含 request_id 注入 + CORS + 异常兜底；startup/shutdown 生命周期钩子串联服务探针与审计；`python -m host_brain` 可启动 HTTP 服务。T-HTTP-01（12 项路由可达性与响应结构）、T-HTTP-02（异常兜底与降级输出）全部通过。
 - 覆盖状态：DONE
 
----
+## R-32
+- 系统级需求：链路可视化面板（Web UI 呈现审计数据、request 级排障、source 过滤、reason_code 统计图表），纯只读不引入执行入口
+- PRD 需求编号（FR）：FR-OBS-001, FR-OBS-002
+- 来源：审阅报告 2026-03-02 P0-2（链路可视化面板缺失）
+- DevSpec 落点：DevSpec 10/11
+- DevTasks（TASK）：TASK-0066
+- 验收测试（T-xx）：T-UI-01
+- 当前进展（2026-03-02）：已落地链路可视化面板：后端 API（`/api/ui/timeline`、`/api/ui/status-distribution`、`/api/ui/request/{id}`、`/api/ui/link-topology`、`/api/ui/search-requests`）提供时间线聚合、状态分布、请求详情、链路拓扑、搜索 5 大数据接口；前端面板（`/panel`）为纯 HTML+CSS+JS 单页面，含 request_id 搜索、时间线可视化、source 过滤、reason_code 统计图表；嵌入 FastAPI static files；面板纯只读无任何执行入口。T-UI-01（13 项：面板渲染、API 联通、空结果处理、只读安全性）全部通过。
+- 覆盖状态：DONE
 
-覆盖状态枚举建议：
+---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
 - TASK_READY：DevTasks 已拆齐并引用 FR/T/章节，具备可执行验收断言口径；实现与测试落地仍可能未完成。

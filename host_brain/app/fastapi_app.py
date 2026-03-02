@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from host_brain.app.main import (
@@ -30,6 +31,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
+from host_brain.app.web_ui import router as web_ui_router
 
 
 # HTTP契约模型定义
@@ -180,6 +182,18 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
+# 注册 Web UI API 路由（TASK-0066: 链路可视化面板后端）
+# ---------------------------------------------------------------------------
+app.include_router(web_ui_router, prefix="/api")
+
+# ---------------------------------------------------------------------------
+# 挂载静态文件目录（TASK-0066: 前端面板页面）
+# ---------------------------------------------------------------------------
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+# ---------------------------------------------------------------------------
 # CORS 中间件（可配置）
 # ---------------------------------------------------------------------------
 _cors_origins = os.environ.get("NATSUME_CORS_ORIGINS", "*").split(",")
@@ -200,10 +214,10 @@ _logger = logging.getLogger("natsume.fastapi")
 
 
 def get_ledger() -> SQLiteLedger:
-    """获取SQLite账本实例（延迟初始化）"""
+    """获取SQLite账本实例（延迟初始化，支持跨线程访问）"""
     global _ledger
     if _ledger is None:
-        _ledger = SQLiteLedger(db_path=":memory:")
+        _ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
     return _ledger
 
 
@@ -539,6 +553,25 @@ async def metrics() -> MetricsResponse:
         reason_code_distribution=dict(_metrics.reason_code_counts),
         timestamp=int(time.time() * 1000),
     )
+
+
+# ---------------------------------------------------------------------------
+# Web UI 面板入口（TASK-0066: 链路可视化面板）
+# ---------------------------------------------------------------------------
+@app.get("/panel")
+async def panel_page():
+    """链路可视化面板入口 — 返回 HTML 页面"""
+    panel_path = os.path.join(os.path.dirname(__file__), "static", "panel.html")
+    if os.path.isfile(panel_path):
+        with open(panel_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return Response(content=html_content, media_type="text/html")
+    else:
+        return Response(
+            content="<html><body><h1>Panel not found</h1><p>Static file panel.html missing.</p></body></html>",
+            media_type="text/html",
+            status_code=404,
+        )
 
 
 # ---------------------------------------------------------------------------

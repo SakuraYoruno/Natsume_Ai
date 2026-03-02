@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Natsume AI — 链路可视化面板</title>
+    <style>
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #1a1d2e;
+            --bg-card: #222640;
+            --text-primary: #e8e6e3;
+            --text-secondary: #a0a4b8;
+            --accent: #6c63ff;
+            --accent-hover: #8b83ff;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --danger: #f87171;
+            --border: #2d3154;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        /* 顶部导航 */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        .header .badge {
+            background: var(--accent);
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .header .readonly-tag {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            border: 1px solid var(--border);
+        }
+        /* 搜索区 */
+        .search-section {
+            padding: 20px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+        .search-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            max-width: 900px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus { border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text-secondary); }
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: var(--border); color: var(--text-primary); }
+        /* 主内容 */
+        .main-content {
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .card-full { grid-column: 1 / -1; }
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        /* 统计概览 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            grid-column: 1 / -1;
+        }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .stat-success .stat-value { color: var(--success); }
+        .stat-warning .stat-value { color: var(--warning); }
+        .stat-danger .stat-value { color: var(--danger); }
+        .stat-info .stat-value { color: var(--accent); }
+        /* 时间线 */
+        .timeline-container {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .timeline-item {
+            display: flex;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(45, 49, 84, 0.5);
+            font-size: 13px;
+            align-items: flex-start;
+        }
+        .timeline-item:last-child { border-bottom: none; }
+        .timeline-ts {
+            min-width: 100px;
+            color: var(--text-secondary);
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+        }
+        .timeline-source {
+            min-width: 120px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-align: center;
+        }
+        .source-intent { background: rgba(108, 99, 255, 0.2); color: #a5a0ff; }
+        .source-governor { background: rgba(52, 211, 153, 0.2); color: #34d399; }
+        .source-skill { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .source-error { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+        .source-channel { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+        .source-default { background: rgba(160, 164, 184, 0.2); color: #a0a4b8; }
+        .timeline-detail {
+            flex: 1;
+            color: var(--text-primary);
+        }
+        .timeline-status {
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .status-approve { color: var(--success); }
+        .status-reject { color: var(--danger); }
+        .status-unknown { color: var(--text-secondary); }
+        /* Source 过滤器 */
+        .filter-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .chip {
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+        .chip.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        .chip:hover { border-color: var(--accent); }
+        /* reason_code 分布 */
+        .bar-chart { display: flex; flex-direction: column; gap: 8px; }
+        .bar-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .bar-label {
+            min-width: 180px;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .bar-track {
+            flex: 1;
+            height: 20px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s;
+        }
+        .bar-count {
+            min-width: 40px;
+            font-size: 12px;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        /* 空状态/加载/错误 */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state p { font-size: 14px; }
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+        .error-msg {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: var(--danger);
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .main-content { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .search-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🌸 Natsume AI</h1>
+        <span class="badge">链路可视化面板</span>
+        <span class="readonly-tag">🔒 只读模式</span>
+    </div>
+
+    <div class="search-section">
+        <div class="search-row">
+            <input
+                type="text"
+                class="search-input"
+                id="searchInput"
+                placeholder="输入 request_id 查询链路详情…"
+                autocomplete="off"
+            />
+            <button class="btn btn-primary" onclick="searchRequest()">🔍 查询</button>
+            <button class="btn btn-secondary" onclick="loadMetrics()">📊 刷新指标</button>
+        </div>
+    </div>
+
+    <!-- 统计概览 -->
+    <div class="main-content">
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card stat-info">
+                <div class="stat-value" id="statTotal">—</div>
+                <div class="stat-label">总请求</div>
+            </div>
+            <div class="stat-card stat-success">
+                <div class="stat-value" id="statChat">—</div>
+                <div class="stat-label">Chat 请求</div>
+            </div>
+            <div class="stat-card stat-danger">
+                <div class="stat-value" id="statReject">—</div>
+                <div class="stat-label">拒绝次数</div>
+            </div>
+            <div class="stat-card stat-warning">
+                <div class="stat-value" id="statUptime">—</div>
+                <div class="stat-label">运行时长(秒)</div>
+            </div>
+        </div>
+
+        <!-- 时间线 -->
+        <div class="card card-full">
+            <div class="card-title">📋 请求链路时间线</div>
+            <div id="errorMsg" style="display:none;"></div>
+            <div class="filter-chips" id="filterChips"></div>
+            <div class="timeline-container" id="timelineContainer">
+                <div class="empty-state">
+                    <div class="icon">🔍</div>
+                    <p>输入 request_id 查询链路时间线</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- reason_code 分布 -->
+        <div class="card">
+            <div class="card-title">📊 reason_code 分布</div>
+            <div id="reasonCodeChart">
+                <div class="empty-state">
+                    <div class="icon">📈</div>
+                    <p>加载指标后显示分布</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Source 分布 -->
+        <div class="card">
+            <div class="card-title">🏷️ Source 分布</div>
+            <div id="sourceChart">
+                <div class="empty-state">
+                    <div class="icon">🏷️</div>
+                    <p>查询链路后显示来源分布</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 全局状态 ---
+        let currentTimeline = [];
+        let activeFilters = new Set();
+        const API_BASE = window.location.origin;
+
+        // --- 工具函数 ---
+        function formatTs(tsMs) {
+            if (!tsMs) return '—';
+            const d = new Date(tsMs);
+            return d.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        }
+
+        function getSourceClass(source) {
+            if (source.includes('intent')) return 'source-intent';
+            if (source.includes('governor')) return 'source-governor';
+            if (source.includes('skill') || source.includes('exec')) return 'source-skill';
+            if (source.includes('error') || source.includes('qa_violation')) return 'source-error';
+            if (source.includes('channel') || source.includes('voice') || source.includes('avatar')) return 'source-channel';
+            return 'source-default';
+        }
+
+        function getStatusClass(status) {
+            if (!status) return 'status-unknown';
+            const s = status.toUpperCase();
+            if (s === 'APPROVE' || s === 'OK' || s === 'SUCCESS') return 'status-approve';
+            if (s === 'REJECT' || s === 'FAILED' || s === 'ERROR') return 'status-reject';
+            return 'status-unknown';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.className = 'error-msg';
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMsg').style.display = 'none';
+        }
+
+        // --- 查询请求链路 ---
+        async function searchRequest() {
+            const input = document.getElementById('searchInput').value.trim();
+            if (!input) return;
+
+            hideError();
+            const container = document.getElementById('timelineContainer');
+            container.innerHTML = '<div class="loading">⏳ 加载中...</div>';
+
+            try {
+                const resp = await fetch(`${API_BASE}/observability/trace`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request_id: input })
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                currentTimeline = data.timeline || [];
+
+                // 渲染 source 过滤器
+                renderFilterChips(data.sources || {});
+                // 渲染时间线
+                renderTimeline(currentTimeline);
+                // 渲染 source 分布
+                renderSourceChart(data.sources || {});
+
+            } catch (e) {
+                showError(`查询失败: ${e.message}`);
+                container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${e.message}</p></div>`;
+            }
+        }
+
+        // --- 渲染时间线 ---
+        function renderTimeline(items) {
+            const container = document.getElementById('timelineContainer');
+            if (!items || items.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>该 request_id 无链路事件</p></div>';
+                return;
+            }
+
+            // 按 filter 过滤
+            let filtered = items;
+            if (activeFilters.size > 0) {
+                filtered = items.filter(item => activeFilters.has(item.source));
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>当前过滤条件下无匹配事件</p></div>';
+                return;
+            }
+
+            let html = '';
+            for (const item of filtered) {
+                const statusCls = getStatusClass(item.status);
+                const sourceCls = getSourceClass(item.source || '');
+                html += `
+                    <div class="timeline-item">
+                        <div class="timeline-ts">${formatTs(item.ts_ms)}</div>
+                        <div class="timeline-source ${sourceCls}">${(item.source || '').replace(/_log$/, '')}</div>
+                        <div class="timeline-detail">
+                            <span class="timeline-status ${statusCls}">${item.status || '—'}</span>
+                            ${item.reason_code ? `<code style="color:var(--warning);font-size:12px;">${item.reason_code}</code>` : ''}
+                            ${item.detail ? `<span style="color:var(--text-secondary);font-size:12px;margin-left:6px;">${item.detail}</span>` : ''}
+                        </div>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        // --- Source 过滤器 ---
+        function renderFilterChips(sources) {
+            const container = document.getElementById('filterChips');
+            activeFilters.clear();
+            if (!sources || Object.keys(sources).length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            let html = '<span class="chip active" onclick="toggleAllFilters()">全部</span>';
+            for (const [source, count] of Object.entries(sources)) {
+                html += `<span class="chip" data-source="${source}" onclick="toggleFilter(this, '${source}')">${source.replace(/_log$/, '')} (${count})</span>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function toggleFilter(chip, source) {
+            chip.classList.toggle('active');
+            if (activeFilters.has(source)) {
+                activeFilters.delete(source);
+            } else {
+                activeFilters.add(source);
+            }
+            // 取消 "全部" 按钮
+            const allChip = document.querySelector('.filter-chips .chip:first-child');
+            if (activeFilters.size === 0) {
+                allChip.classList.add('active');
+            } else {
+                allChip.classList.remove('active');
+            }
+            renderTimeline(currentTimeline);
+        }
+
+        function toggleAllFilters() {
+            activeFilters.clear();
+            document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
+            document.querySelector('.filter-chips .chip:first-child').classList.add('active');
+            renderTimeline(currentTimeline);
+        }
+
+        // --- Source 分布图 ---
+        function renderSourceChart(sources) {
+            const container = document.getElementById('sourceChart');
+            if (!sources || Object.keys(sources).length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">🏷️</div><p>无数据</p></div>';
+                return;
+            }
+            const total = Object.values(sources).reduce((a, b) => a + b, 0);
+            const colors = ['#6c63ff', '#34d399', '#fbbf24', '#f87171', '#60a5fa', '#c084fc', '#fb923c', '#a3e635'];
+            let html = '<div class="bar-chart">';
+            let i = 0;
+            for (const [source, count] of Object.entries(sources).sort((a, b) => b[1] - a[1])) {
+                const pct = total > 0 ? (count / total * 100) : 0;
+                const color = colors[i % colors.length];
+                html += `
+                    <div class="bar-row">
+                        <div class="bar-label">${source.replace(/_log$/, '')}</div>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width:${pct}%;background:${color};"></div>
+                        </div>
+                        <div class="bar-count">${count}</div>
+                    </div>`;
+                i++;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // --- reason_code 分布图 ---
+        function renderReasonCodeChart(distribution) {
+            const container = document.getElementById('reasonCodeChart');
+            if (!distribution || Object.keys(distribution).length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>无拒绝记录</p></div>';
+                return;
+            }
+            const total = Object.values(distribution).reduce((a, b) => a + b, 0);
+            const colors = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399', '#60a5fa', '#c084fc'];
+            let html = '<div class="bar-chart">';
+            let i = 0;
+            for (const [code, count] of Object.entries(distribution).sort((a, b) => b[1] - a[1])) {
+                const pct = total > 0 ? (count / total * 100) : 0;
+                const color = colors[i % colors.length];
+                html += `
+                    <div class="bar-row">
+                        <div class="bar-label">${code}</div>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width:${pct}%;background:${color};"></div>
+                        </div>
+                        <div class="bar-count">${count}</div>
+                    </div>`;
+                i++;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // --- 加载 /metrics ---
+        async function loadMetrics() {
+            try {
+                const resp = await fetch(`${API_BASE}/metrics`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                document.getElementById('statTotal').textContent = data.total_requests ?? '—';
+                document.getElementById('statChat').textContent = data.total_chat_requests ?? '—';
+                document.getElementById('statReject').textContent = data.total_rejections ?? '—';
+                document.getElementById('statUptime').textContent = data.uptime_seconds ?? '—';
+                renderReasonCodeChart(data.reason_code_distribution || {});
+            } catch (e) {
+                console.error('加载指标失败:', e);
+            }
+        }
+
+        // --- 回车键搜索 ---
+        document.getElementById('searchInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') searchRequest();
+        });
+
+        // --- 初始化加载指标 ---
+        loadMetrics();
+    </script>
+</body>
+</html>
