@@ -220,6 +220,8 @@ class CrossTimelineAggregator:
         request_id: str | None = None,
         session_id: str | None = None,
         edge_events: list[dict[str, Any]] | None = None,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
     ) -> CrossTimelineResult:
         """按 request_id 或 session_id 聚合 Host+Edge 事件。
 
@@ -248,8 +250,8 @@ class CrossTimelineAggregator:
                 status="HOST_ONLY",
             )
 
-        # Step 1: 收集 Host 审计事件
-        host_entries = self._collect_host_events(req_id, sess_id)
+        # Step 1: 收集 Host 审计事件（支持时间窗口过滤）
+        host_entries = self._collect_host_events(req_id, sess_id, start_ms=start_ms, end_ms=end_ms)
 
         # Step 2: 解析 Edge 上报事件
         edge_entries = self._collect_edge_events(edge_events or [], req_id, sess_id)
@@ -290,7 +292,12 @@ class CrossTimelineAggregator:
         )
 
     def _collect_host_events(
-        self, request_id: str, session_id: str,
+        self,
+        request_id: str,
+        session_id: str,
+        *,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
     ) -> list[UnifiedTimelineEntry]:
         """从 Host 审计 ledger 收集事件。"""
         entries: list[UnifiedTimelineEntry] = []
@@ -303,6 +310,7 @@ class CrossTimelineAggregator:
                 entries.extend(self._host_rows_to_entries(rows, table_name, request_id))
 
         # 从各审计表按 request_id 或 session_id 补充
+        # TASK-0078: 使用 fetch_by_time_range 替代全量加载，解决性能隐患
         supplementary_tables = (
             "channel_io_log",
             "avatar_action_log",
@@ -314,7 +322,13 @@ class CrossTimelineAggregator:
             "config_snapshot_log",
         )
         for table_name in supplementary_tables:
-            log_list = getattr(self.ledger, table_name, [])
+            # 使用时间窗口查询代替全量内存加载
+            log_list = self.ledger.fetch_by_time_range(
+                table_name,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                limit=10_000,
+            )
             if request_id:
                 rows = [
                     dict(row) for row in log_list
@@ -465,8 +479,13 @@ def build_cross_timeline(
     session_id: str | None = None,
     edge_events: list[dict[str, Any]] | None = None,
     clock_drift_tolerance_ms: int = DEFAULT_CLOCK_DRIFT_TOLERANCE_MS,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
 ) -> dict[str, Any]:
-    """便捷入口：构建跨端统一时间线并返回可序列化的 dict。"""
+    """便捷入口：构建跨端统一时间线并返回可序列化的 dict。
+
+    TASK-0078: 新增 start_ms/end_ms 时间窗口参数，避免全量内存加载。
+    """
     aggregator = CrossTimelineAggregator(
         ledger=ledger,
         clock_drift_tolerance_ms=clock_drift_tolerance_ms,
@@ -475,5 +494,7 @@ def build_cross_timeline(
         request_id=request_id,
         session_id=session_id,
         edge_events=edge_events,
+        start_ms=start_ms,
+        end_ms=end_ms,
     )
     return result.to_dict()
