@@ -54,6 +54,7 @@ class SandboxConfig:
     allow_network: bool = False
     allow_fs_write: bool = False  # True 则允许写临时目录
     enabled: bool = True
+    isolation_backend: str = "subprocess"  # subprocess / docker / nsjail
 
 
 @dataclass(frozen=True)
@@ -203,15 +204,87 @@ class SandboxExecutor:
             return result
 
         timeout_s = min(self.config.timeout_s, MAX_TIMEOUT_S)
-        result = self._run_subprocess(
+
+        # 根据 isolation_backend 选择执行后端
+        if self.config.isolation_backend == "docker":
+            result = self._run_docker(
+                code=code,
+                sandbox_id=sandbox_id,
+                evidence_ref=evidence_ref,
+                code_digest=code_digest,
+                timeout_s=timeout_s,
+            )
+        else:
+            result = self._run_subprocess(
+                code=code,
+                sandbox_id=sandbox_id,
+                evidence_ref=evidence_ref,
+                code_digest=code_digest,
+                timeout_s=timeout_s,
+            )
+        self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
+        return result
+
+    def _run_docker(
+        self,
+        *,
+        code: str,
+        sandbox_id: str,
+        evidence_ref: str,
+        code_digest: str,
+        timeout_s: int,
+    ) -> SandboxExecResult:
+        """在 Docker 容器中执行代码。
+
+        容器级隔离：
+        - 只读挂载代码到容器内临时目录
+        - 无网络（--network=none）
+        - 资源限制（CPU/内存/超时）
+        - 输出采集与截断
+
+        Docker 不可用时自动降级到 subprocess 后端。
+        """
+        from host_brain.airlock.docker_sandbox import run_in_docker, is_docker_available
+        from host_brain.core.errors import SANDBOX_CONTAINER_UNAVAILABLE
+
+        if not is_docker_available():
+            # Docker 不可用 → 降级到 subprocess
+            fallback_result = self._run_subprocess(
+                code=code,
+                sandbox_id=sandbox_id,
+                evidence_ref=evidence_ref,
+                code_digest=code_digest,
+                timeout_s=timeout_s,
+            )
+            # 标记降级来源
+            return SandboxExecResult(
+                sandbox_id=fallback_result.sandbox_id,
+                status=fallback_result.status,
+                exit_code=fallback_result.exit_code,
+                stdout=fallback_result.stdout,
+                stderr=fallback_result.stderr,
+                duration_ms=fallback_result.duration_ms,
+                reason_code=fallback_result.reason_code or SANDBOX_CONTAINER_UNAVAILABLE,
+                evidence_ref=fallback_result.evidence_ref,
+                code_digest=fallback_result.code_digest,
+                resource_usage={
+                    **fallback_result.resource_usage,
+                    "isolation_backend": "subprocess",
+                    "degraded_from": "docker",
+                },
+                truncated_stdout=fallback_result.truncated_stdout,
+                truncated_stderr=fallback_result.truncated_stderr,
+            )
+
+        return run_in_docker(
             code=code,
             sandbox_id=sandbox_id,
             evidence_ref=evidence_ref,
             code_digest=code_digest,
             timeout_s=timeout_s,
+            max_stdout_bytes=self.config.max_stdout_bytes,
+            max_stderr_bytes=self.config.max_stderr_bytes,
         )
-        self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
-        return result
 
     def _run_subprocess(
         self,

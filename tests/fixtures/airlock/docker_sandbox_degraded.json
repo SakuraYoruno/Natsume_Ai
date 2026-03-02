@@ -1,0 +1,19 @@
+{
+  "description": "Docker 不可用降级到 subprocess fixture",
+  "scenario": "docker_sandbox_degraded",
+  "input": {
+    "code": "print('degraded')",
+    "isolation_backend": "docker",
+    "docker_available": false,
+    "timeout_s": 10,
+    "request_id": "req_docker_fx_002"
+  },
+  "expected": {
+    "status": "OK",
+    "reason_code": "SANDBOX_CONTAINER_UNAVAILABLE",
+    "resource_usage_contains": {
+      "isolation_backend": "subprocess",
+      "degraded_from": "docker"
+    }
+  }
+}
