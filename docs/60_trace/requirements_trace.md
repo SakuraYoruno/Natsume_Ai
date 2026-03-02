@@ -313,9 +313,9 @@
 - PRD 需求编号（FR）：FR-VOICE-001, FR-VOICE-005
 - 来源：审阅报告 2026-03-02 P0-3（Edge ASR 设备集成缺失）
 - DevSpec 落点：DevSpec 8.11.3
-- DevTasks（TASK）：TASK-0067
-- 验收测试（T-xx）：T-Voice-01, T-ASR-HW-01
-- 当前进展（2026-03-02）：已落地完整 ASR 设备集成：WhisperModelManager（GPU 常驻 + CUDA→CPU 自动降级 + 线程安全加载/卸载）、AudioStreamCapture（sounddevice 麦克风采集 + 分片回调）、AsrService（音频缓冲→VAD→转写→asr_chunk RPC 事件映射编排器）；新增 5 个 ASR 硬件层错误码（ASR_MODEL_UNAVAILABLE/ASR_GPU_OOM/ASR_DEVICE_ERROR/ASR_VAD_NO_SPEECH/ASR_STREAM_INTERRUPTED）；新增 5 个 fixtures（短/长语音 + 静音 + 低信噪比 + GPU OOM）；保持 emit_asr_chunk 向后兼容；pyproject.toml 新增 faster-whisper/sounddevice/numpy 依赖。T-ASR-HW-01（28 项：模型生命周期/音频采集/配置/结果结构/事件映射/向后兼容/错误码稳定性/资源闸门集成/健康快照/fixture 验证）全部通过。
+- DevTasks（TASK）：TASK-0067,TASK-0081
+- 验收测试（T-xx）：T-Voice-01, T-ASR-HW-01, T-ASR-Recovery-01
+- 当前进展（2026-03-02）：已落地完整 ASR 设备集成：WhisperModelManager（GPU 常驻 + CUDA→CPU 自动降级 + 线程安全加载/卸载）、AudioStreamCapture（sounddevice 麦克风采集 + 分片回调）、AsrService（音频缓冲→VAD→转写→asr_chunk RPC 事件映射编排器）；新增 5 个 ASR 硬件层错误码（ASR_MODEL_UNAVAILABLE/ASR_GPU_OOM/ASR_DEVICE_ERROR/ASR_VAD_NO_SPEECH/ASR_STREAM_INTERRUPTED）；新增 5 个 fixtures（短/长语音 + 静音 + 低信噪比 + GPU OOM）；保持 emit_asr_chunk 向后兼容；pyproject.toml 新增 faster-whisper/sounddevice/numpy 依赖。TASK-0081 新增 ASR 麦克风设备自动恢复机制：DeviceRecoveryConfig（max_attempts/base_delay_s/max_delay_s/auto_recover/try_alternate_devices 可配置）、_device_recovery_loop（指数退避 1s→2s→4s→8s 上限，最多 5 次）、trigger_device_recovery（非阻塞后台线程启动）、备用设备自动切换（原始设备失败→enumerate_input_devices→逐一尝试）、恢复成功上报 ASR_DEVICE_RECOVERED、恢复耗尽进入 ERROR 并上报 ASR_DEVICE_RECOVERY_EXHAUSTED、shutdown_event 可中断恢复、health 快照含 recovery 统计；AudioStreamCapture 新增 set_device_index/enumerate_input_devices/original_device_index；新增 2 个恢复错误码（ASR_DEVICE_RECOVERED/ASR_DEVICE_RECOVERY_EXHAUSTED）、3 个 fixtures（成功/耗尽/备用设备切换）。T-ASR-Recovery-01（30+ 项）全部通过；T-ASR-HW-01（28 项）无回归。
 - 覆盖状态：DONE
 
 ## R-34
