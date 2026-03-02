@@ -1,8 +1,8 @@
 受众：PROJECT
-标题：外部环境与服务实装清单（九节点 / 密钥 / 图编排 / Neo4j / Chroma / Embedding / Reranker）
+标题：外部环境与服务实装清单（九节点 / 密钥 / 图编排 / Neo4j / Chroma / Embedding / Reranker / 沙箱 / VTS）
 
-版本：v1.0
-日期：2026-03-01
+版本：v1.1
+日期：2026-03-02
 定位：用于把“已完成的代码契约”落地为“可运行环境”。本清单只描述字段与验收口径，不包含任何终端操作片段。
 
 ---
@@ -112,11 +112,45 @@
 
 ---
 
-## 6. 关联资产
+## 6. 新增组件环境要求（v1.1）
+
+### 6.1 沙箱执行器（Docker 隔离后端）
+- 变量组：`SANDBOX_ISOLATION_BACKEND`（subprocess/docker）、`SANDBOX_TIMEOUT_S`、`SANDBOX_MAX_CODE_BYTES`、`SANDBOX_DOCKER_IMAGE`
+- 依赖：Docker Engine 20+ 或兼容 OCI 运行时
+- 验收口径：
+  - Docker 可用时执行在容器内完成（--network=none, --read-only, 资源限制）
+  - Docker 不可用时自动降级到 subprocess 后端并上报 `SANDBOX_CONTAINER_UNAVAILABLE`
+  - 降级结果 resource_usage 含 `degraded_from=docker`
+
+### 6.2 VTS DEGRADED 状态
+- Edge 不可达时 Host VTS 通道自动降级到 neutral 表情（exp_neutral_01）
+- 变量组：无新增（通过 `edge_available` 参数自动检测）
+- 验收口径：
+  - Edge 断连时 `status=DEGRADED` + `VTS_DEGRADED_FALLBACK` reason_code
+  - 未知 emotion_tag 映射时同样降级到 neutral（而非直接 REJECTED）
+  - 降级详情写入 `avatar_action_log` 可审计回溯
+
+### 6.3 Model Plane 发布门禁
+- 发布 checklist 包含 model_plane 资产 digest 校验
+- 变量组：无新增（通过 `build_release_checklist(include_model_plane_assets=True)` 参数控制）
+- 验收口径：
+  - model_profiles.yaml 和 node_registry.yaml 的 sha256 摘要在 checklist 中可查
+  - digest mismatch 时 checklist 状态 FAILED + `RELEASE_MODEL_PLANE_DIGEST_MISMATCH`
+
+### 6.4 跨端时间线 SQL 优化
+- SQLite Ledger 新增 `fetch_by_time_range` 和 `count_by_time_range` 方法
+- 支持按时间窗口过滤 + 分页查询，优化跨端时间线聚合性能
+- 无新增环境变量
+
+---
+
+## 7. 关联资产
 
 - 节点清单：`configs/deploy/node_inventory_9.json`
 - 密钥模板：`configs/secrets/key_profiles.example.json`
 - Embedding 路由模板：`configs/models/embedding_routes.example.json`
 - Reranker 路由模板：`configs/models/reranker_routes.example.json`
+- Model Plane：`configs/model_plane/model_profiles.yaml`、`configs/model_plane/node_registry.yaml`
 - Flow 指针：`flows/active.pointer`
+- Docker 沙箱：`host_brain/airlock/docker_sandbox.py`
 - Trace：`docs/60_trace/requirements_trace.md`
