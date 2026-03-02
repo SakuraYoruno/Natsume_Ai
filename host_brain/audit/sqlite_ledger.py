@@ -1,15 +1,31 @@
-"""SQLite-backed ledger with triptych schema and replay-friendly indexes."""
+"""SQLite-backed ledger with triptych schema, WAL mode, and replay-friendly indexes.
+
+WAL (Write-Ahead Logging) mode is enabled by default for improved concurrent
+read/write throughput. When WAL activation fails (e.g. read-only filesystem),
+the ledger degrades to DELETE journal mode and logs AUDIT_WAL_FAILED.
+"""
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 import json
 import sqlite3
+import threading
+import time
 import uuid
 from typing import Any
 
-from host_brain.core.errors import TRACE_MISSING_GOVERNOR, TRACE_MISSING_INTENT
+from host_brain.core.errors import (
+    AUDIT_WAL_CHECKPOINT_FAILED,
+    AUDIT_WAL_FAILED,
+    TRACE_MISSING_GOVERNOR,
+    TRACE_MISSING_INTENT,
+)
 from host_brain.core.ids import now_ms
+
+logger = logging.getLogger(__name__)
 
 
 INTENT_COLUMNS = (
@@ -343,17 +359,58 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
 }
 
 
-class SQLiteLedger:
-    """Audit ledger persisted by sqlite3."""
+# ---------------------------------------------------------------------------
+# WAL Configuration
+# ---------------------------------------------------------------------------
 
-    def __init__(self, db_path: str | Path = "host_brain/data/audit.sqlite3", *, check_same_thread: bool = True) -> None:
+@dataclass(frozen=True)
+class WalConfig:
+    """WAL-related PRAGMA tunables."""
+    journal_mode: str = "WAL"
+    synchronous: str = "NORMAL"
+    wal_autocheckpoint: int = 1000
+    busy_timeout_ms: int = 5000
+    cache_size_kb: int = 2000
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "journal_mode": self.journal_mode,
+            "synchronous": self.synchronous,
+            "wal_autocheckpoint": self.wal_autocheckpoint,
+            "busy_timeout_ms": self.busy_timeout_ms,
+            "cache_size_kb": self.cache_size_kb,
+        }
+
+
+DEFAULT_WAL_CONFIG = WalConfig()
+
+# 写入重试策略
+WRITE_RETRY_MAX = 3
+WRITE_RETRY_DELAY_S = 0.05
+
+
+class SQLiteLedger:
+    """Audit ledger persisted by sqlite3 with WAL mode and concurrent write protection."""
+
+    def __init__(
+        self,
+        db_path: str | Path = "host_brain/data/audit.sqlite3",
+        *,
+        check_same_thread: bool = True,
+        wal_config: WalConfig | None = None,
+    ) -> None:
         self.db_path = str(db_path)
+        self._wal_config = wal_config or DEFAULT_WAL_CONFIG
+        self._write_lock = threading.Lock()
+        self._wal_status: str = "UNKNOWN"
+        self._wal_degradation_reason: str | None = None
+
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode = WAL;")
+        self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._ensure_schema()
 
@@ -449,7 +506,108 @@ class SQLiteLedger:
     def bond_update_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("bond_update_log")
 
+    # -------------------------------------------------------------------
+    # WAL lifecycle
+    # -------------------------------------------------------------------
+
+    def _apply_wal_config(self) -> None:
+        """Apply WAL PRAGMA configuration. Degrade gracefully on failure."""
+        cfg = self._wal_config
+        try:
+            result = self._conn.execute("PRAGMA journal_mode = WAL;").fetchone()
+            actual_mode = str(result[0]).upper() if result else "UNKNOWN"
+            if actual_mode != "WAL":
+                self._wal_status = "DEGRADED"
+                self._wal_degradation_reason = f"journal_mode returned {actual_mode}, expected WAL"
+                logger.warning("WAL activation failed: %s", self._wal_degradation_reason)
+                return
+            self._conn.execute(f"PRAGMA synchronous = {cfg.synchronous};")
+            self._conn.execute(f"PRAGMA wal_autocheckpoint = {cfg.wal_autocheckpoint};")
+            self._conn.execute(f"PRAGMA busy_timeout = {cfg.busy_timeout_ms};")
+            self._conn.execute(f"PRAGMA cache_size = -{cfg.cache_size_kb};")
+            self._wal_status = "ACTIVE"
+            self._wal_degradation_reason = None
+        except Exception as exc:
+            self._wal_status = "DEGRADED"
+            self._wal_degradation_reason = str(exc)
+            logger.warning("WAL configuration failed, degrading to DELETE mode: %s", exc)
+            try:
+                self._conn.execute("PRAGMA journal_mode = DELETE;")
+            except Exception:
+                pass
+
+    def wal_health(self) -> dict[str, Any]:
+        """Return WAL health snapshot for observability."""
+        wal_size: int | None = None
+        try:
+            row = self._conn.execute("PRAGMA wal_checkpoint(PASSIVE);").fetchone()
+            if row:
+                wal_size = int(row[1]) if row[1] is not None else None
+        except Exception:
+            pass
+
+        journal_mode = "UNKNOWN"
+        try:
+            row = self._conn.execute("PRAGMA journal_mode;").fetchone()
+            if row:
+                journal_mode = str(row[0]).upper()
+        except Exception:
+            pass
+
+        synchronous = "UNKNOWN"
+        try:
+            row = self._conn.execute("PRAGMA synchronous;").fetchone()
+            sync_map = {0: "OFF", 1: "NORMAL", 2: "FULL", 3: "EXTRA"}
+            if row:
+                synchronous = sync_map.get(int(row[0]), str(row[0]))
+        except Exception:
+            pass
+
+        return {
+            "wal_status": self._wal_status,
+            "journal_mode": journal_mode,
+            "synchronous": synchronous,
+            "degradation_reason": self._wal_degradation_reason,
+            "wal_config": self._wal_config.as_dict(),
+            "wal_size_pages": wal_size,
+            "db_path": self.db_path,
+        }
+
+    def checkpoint(self, mode: str = "PASSIVE") -> dict[str, Any]:
+        """Trigger a WAL checkpoint. Returns checkpoint result."""
+        allowed_modes = {"PASSIVE", "FULL", "RESTART", "TRUNCATE"}
+        mode = str(mode).upper().strip()
+        if mode not in allowed_modes:
+            mode = "PASSIVE"
+        try:
+            row = self._conn.execute(f"PRAGMA wal_checkpoint({mode});").fetchone()
+            blocked = int(row[0]) if row else -1
+            total = int(row[1]) if row and row[1] is not None else 0
+            checkpointed = int(row[2]) if row and row[2] is not None else 0
+            return {
+                "status": "OK",
+                "mode": mode,
+                "blocked": blocked,
+                "total_frames": total,
+                "checkpointed_frames": checkpointed,
+                "reason_code": None,
+            }
+        except Exception as exc:
+            return {
+                "status": "FAILED",
+                "mode": mode,
+                "blocked": -1,
+                "total_frames": 0,
+                "checkpointed_frames": 0,
+                "reason_code": AUDIT_WAL_CHECKPOINT_FAILED,
+                "detail": str(exc),
+            }
+
     def close(self) -> None:
+        try:
+            self.checkpoint("PASSIVE")
+        except Exception:
+            pass
         try:
             self._conn.close()
         except Exception:
@@ -1168,8 +1326,22 @@ class SQLiteLedger:
         placeholders = ", ".join("?" for _ in keys)
         columns = ", ".join(keys)
         sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
-        with self._conn:
-            self._conn.execute(sql, serialized)
+
+        last_exc: Exception | None = None
+        for attempt in range(WRITE_RETRY_MAX):
+            try:
+                with self._write_lock:
+                    with self._conn:
+                        self._conn.execute(sql, serialized)
+                return
+            except sqlite3.OperationalError as exc:
+                if "database is locked" in str(exc).lower() and attempt < WRITE_RETRY_MAX - 1:
+                    last_exc = exc
+                    time.sleep(WRITE_RETRY_DELAY_S * (attempt + 1))
+                    continue
+                raise
+        if last_exc is not None:
+            raise last_exc
 
     def _fetch_all(self, table: str) -> list[dict[str, Any]]:
         if self._table_has_column(table, "id"):

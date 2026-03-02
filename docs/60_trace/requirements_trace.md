@@ -338,6 +338,16 @@
 - 当前进展（2026-03-02）：已将 graph_runtime.py（943行）拆分为 5 个模块：graph_contract.py（214行，Schema/验证/共享类型）、graph_executor.py（186行，LangGraph 步进执行引擎）、graph_fallback.py（152行，降级/超时/依赖不可用统一处理）、graph_model_resolve.py（170行，Model Plane 配置解析与节点路由）、graph_runtime.py（281行，编排入口壳，串联三层）。所有文件均≤300行。对外接口（GraphRuntimeContract.run_graph/register_node_handler/validate_graph_config）签名完全不变。输出结构（graph_status/reason_code/stage/replay_ref/runtime_backend/model_control/graph_trace/payload）与拆分前完全一致。T-Orch-01~05（13项）无回归；T-Orch-Refactor-01（21项：输出一致性6项+各层独立单测10项+模块行数限制5项）全部通过。新增 fixture graph_refactor_baseline.json。
 - 覆盖状态：DONE
 
+## R-36
+- 系统级需求：SQLite Ledger WAL 模式优化（推荐 PRAGMA 配置 + 并发写入保护 + 写入重试 + WAL 健康快照 + checkpoint + 降级策略 + 性能基准测试脚本）
+- PRD 需求编号（FR）：FR-AUDIT-001, FR-OBS-001
+- 来源：审阅报告 2026-03-02 P1-5（SQLite Ledger 并发优化建议）
+- DevSpec 落点：DevSpec 8.1/9/10
+- DevTasks（TASK）：TASK-0070
+- 验收测试（T-xx）：T-Audit-01, T-Audit-WAL-01
+- 当前进展（2026-03-02）：已增强 SQLite Ledger WAL 配置：启用 synchronous=NORMAL + wal_autocheckpoint=1000 + busy_timeout=5000ms + cache_size=2000KB；新增 WalConfig 可配置数据类；写入层增加 threading.Lock 写锁 + 3 次重试策略（防 database is locked）；新增 wal_health() 健康快照（wal_status/journal_mode/synchronous/degradation_reason/wal_size_pages）；新增 checkpoint(mode) 手动检查点（PASSIVE/FULL/RESTART/TRUNCATE）；close() 自动执行 PASSIVE checkpoint；WAL 激活失败时降级到 DELETE 模式并记录 AUDIT_WAL_FAILED；新增 2 个错误码（AUDIT_WAL_FAILED/AUDIT_WAL_CHECKPOINT_FAILED）；新增性能基准测试脚本 tools/bench/ledger_bench.py（单线程/多线程/混合读写三场景，输出 JSON 结构化报告含 ops_per_sec/p95_latency_ms/wal_size）；新增 2 个 fixtures（并发写入/降级）。T-Audit-WAL-01（24 项）全部通过；T-Audit-01/T-Audit-Ret-01（4 项）无回归。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
