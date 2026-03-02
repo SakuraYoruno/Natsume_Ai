@@ -622,11 +622,15 @@ def build_webui_timeline_aggregation(
     _filters = dict(filters or {})
     interval_ms = _parse_interval_ms(interval)
 
-    # 从 intent_log 获取全部请求记录
+    # TASK-0078: 使用 fetch_by_time_range 替代全量加载，按时间窗口查询
     all_rows = [
         dict(row)
-        for row in getattr(ledger, "intent_log", [])
-        if start_time <= int(row.get("ts_ms") or 0) <= end_time
+        for row in ledger.fetch_by_time_range(
+            "intent_log",
+            start_ms=start_time,
+            end_ms=end_time,
+            limit=10_000,
+        )
     ]
 
     # 按状态/类型过滤
@@ -686,10 +690,15 @@ def build_webui_status_distribution(
     """统计时间范围内各状态（APPROVE/REJECT/DEGRADED等）的分布。"""
 
     _filters = dict(filters or {})
+    # TASK-0078: 使用 fetch_by_time_range 替代全量加载
     all_rows = [
         dict(row)
-        for row in getattr(ledger, "intent_log", [])
-        if start_time <= int(row.get("ts_ms") or 0) <= end_time
+        for row in ledger.fetch_by_time_range(
+            "intent_log",
+            start_ms=start_time,
+            end_ms=end_time,
+            limit=10_000,
+        )
     ]
 
     if "request_type" in _filters:
@@ -846,10 +855,15 @@ def search_webui_requests(
     """按关键词搜索请求记录（request_id/reason_code/type 模糊匹配）。"""
 
     keyword = str(query or "").strip().lower()
+    # TASK-0078: 使用 fetch_by_time_range 替代全量加载
     all_rows = [
         dict(row)
-        for row in getattr(ledger, "intent_log", [])
-        if start_time <= int(row.get("ts_ms") or 0) <= end_time
+        for row in ledger.fetch_by_time_range(
+            "intent_log",
+            start_ms=start_time,
+            end_ms=end_time,
+            limit=10_000,
+        )
     ]
 
     if keyword:

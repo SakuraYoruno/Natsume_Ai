@@ -81,7 +81,9 @@ async def get_timeline_aggregation(
     end_time: datetime = Query(..., description="结束时间"),
     interval: str = Query("1h", description="聚合间隔: 1m,5m,15m,1h,1d"),
     status: Optional[str] = Query(None, description="状态过滤"),
-    request_type: Optional[str] = Query(None, description="请求类型过滤")
+    request_type: Optional[str] = Query(None, description="请求类型过滤"),
+    limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
+    offset: int = Query(0, ge=0, description="分页偏移量"),
 ):
     """获取时间线聚合数据"""
     try:
@@ -117,7 +119,9 @@ async def get_timeline_aggregation(
 async def get_status_distribution(
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
-    request_type: Optional[str] = Query(None, description="请求类型过滤")
+    request_type: Optional[str] = Query(None, description="请求类型过滤"),
+    limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
+    offset: int = Query(0, ge=0, description="分页偏移量"),
 ):
     """获取状态分布统计数据"""
     try:
@@ -170,7 +174,9 @@ async def get_request_detail(request_id: str):
 async def get_link_topology(
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
-    min_connections: int = Query(1, description="最小连接数阈值")
+    min_connections: int = Query(1, description="最小连接数阈值"),
+    limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
+    offset: int = Query(0, ge=0, description="分页偏移量"),
 ):
     """获取链路拓扑数据"""
     try:
@@ -198,8 +204,10 @@ async def search_requests(
     query: str = Query(..., description="搜索关键词"),
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
-    page: int = Query(1, description="页码"),
-    page_size: int = Query(20, description="每页大小")
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页大小"),
+    limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
+    offset: int = Query(0, ge=0, description="分页偏移量"),
 ):
     """搜索请求记录"""
     try:

@@ -1399,6 +1399,14 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_sandbox_exec_sandbox_id ON sandbox_exec_log(sandbox_id);
                 CREATE INDEX IF NOT EXISTS idx_sandbox_exec_evidence ON sandbox_exec_log(evidence_ref);
                 CREATE INDEX IF NOT EXISTS idx_sandbox_exec_ts ON sandbox_exec_log(ts_ms);
+
+                CREATE INDEX IF NOT EXISTS idx_intent_ts ON intent_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_governor_ts ON governor_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_skill_exec_ts ON skill_exec_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_model_control_ts ON model_control_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_error_ts ON error_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_qa_violation_ts ON qa_violation_log(ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_memory_ops_ts ON memory_ops_log(ts_ms);
                 """
             )
 
@@ -1427,6 +1435,87 @@ class SQLiteLedger:
                 raise
         if last_exc is not None:
             raise last_exc
+
+    def fetch_by_time_range(
+        self,
+        table: str,
+        *,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """按时间窗口查询审计表，返回 ts_ms 在 [start_ms, end_ms] 范围的行。
+
+        参数化查询，表名白名单校验（防 SQL 注入）。
+        若表无 ts_ms 列则退化到全量查询 + limit/offset。
+        """
+        if table not in _ALLOWED_TABLES:
+            logger.warning(
+                "Rejected fetch_by_time_range for invalid table name: %s (reason_code=%s)",
+                table,
+                AUDIT_TABLE_NAME_INVALID,
+            )
+            raise ValueError(
+                f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
+            )
+
+        limit = max(1, min(limit, 10_000))  # 硬上限 10000
+        offset = max(0, offset)
+
+        has_ts = self._table_has_column(table, "ts_ms")
+        has_id = self._table_has_column(table, "id")
+
+        if has_ts and (start_ms is not None or end_ms is not None):
+            conditions: list[str] = []
+            params: list[Any] = []
+            if start_ms is not None:
+                conditions.append("ts_ms >= ?")
+                params.append(int(start_ms))
+            if end_ms is not None:
+                conditions.append("ts_ms <= ?")
+                params.append(int(end_ms))
+            where_clause = " AND ".join(conditions)
+            order = "ts_ms ASC" if has_ts else ("id ASC" if has_id else "rowid ASC")
+            sql = f"SELECT * FROM {table} WHERE {where_clause} ORDER BY {order} LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            rows = self._conn.execute(sql, params).fetchall()
+        else:
+            order = "ts_ms ASC" if has_ts else ("id ASC" if has_id else "rowid ASC")
+            sql = f"SELECT * FROM {table} ORDER BY {order} LIMIT ? OFFSET ?"
+            rows = self._conn.execute(sql, [limit, offset]).fetchall()
+
+        return [self._decode_row(table, row) for row in rows]
+
+    def count_by_time_range(
+        self,
+        table: str,
+        *,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+    ) -> int:
+        """统计时间窗口内的行数（用于分页 total）。"""
+        if table not in _ALLOWED_TABLES:
+            raise ValueError(
+                f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
+            )
+        has_ts = self._table_has_column(table, "ts_ms")
+        if has_ts and (start_ms is not None or end_ms is not None):
+            conditions: list[str] = []
+            params: list[Any] = []
+            if start_ms is not None:
+                conditions.append("ts_ms >= ?")
+                params.append(int(start_ms))
+            if end_ms is not None:
+                conditions.append("ts_ms <= ?")
+                params.append(int(end_ms))
+            where_clause = " AND ".join(conditions)
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {where_clause}", params
+            ).fetchone()
+        else:
+            row = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        return int(row[0]) if row else 0
 
     def _fetch_all(self, table: str) -> list[dict[str, Any]]:
         # 表名白名单校验（F-16: 拒绝非法表名防止 SQL 注入）
