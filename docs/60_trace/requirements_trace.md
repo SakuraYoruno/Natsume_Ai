@@ -398,6 +398,16 @@
 - 当前进展（2026-03-02）：已落地 DRAFT_CODE 沙箱执行器 `host_brain/airlock/sandbox.py`：SandboxConfig（timeout_s/max_stdout_bytes/max_stderr_bytes/max_code_bytes/python_executable/allow_network/allow_fs_write/enabled）、SandboxExecResult（sandbox_id/status/exit_code/stdout/stderr/duration_ms/reason_code/evidence_ref/resource_usage/code_digest/truncated_stdout/truncated_stderr）、SandboxExecutor（execute 方法：subprocess 隔离 + 临时目录 + 超时强杀 + 输出截断 + 审计写入）。新增 sandbox_exec_log 审计表（15 字段 + 4 索引）到 SQLiteLedger。新增 4 个错误码（SANDBOX_UNAVAILABLE/SANDBOX_TIMEOUT/SANDBOX_RESOURCE_EXCEEDED/SANDBOX_EXEC_FAILED）。新增 4 个 fixtures（正常执行/超时/恶意代码/资源超限）。T-Sandbox-01（20 项）全部通过；T-39/T-40（原有）无回归。
 - 覆盖状态：DONE
 
+## R-42
+- 系统级需求：Host VTS 通道 DEGRADED 状态——Edge 不可达/映射未知时 neutral 降级备选 + 审计可回溯
+- PRD 需求编号（FR）：FR-AVATAR-001
+- 来源：DevTasks TASK-0082（VTS DEGRADED 扩展）
+- DevSpec 落点：DevSpec 8.11.2
+- DevTasks（TASK）：TASK-0082
+- 验收测试（T-xx）：T-Avatar-01, T-VTS-HW-01, T-E2E-WeChat-01, T-VTS-Degraded-01
+- 当前进展（2026-03-02）：已增强 Host VTS 通道 `resolve_vts_expression`：新增 `edge_available` 参数，Edge 不可达时返回 `status=DEGRADED` + neutral 备选表情（exp_neutral_01）+ `VTS_DEGRADED_FALLBACK` reason_code；未知 emotion_tag 映射时同样降级到 neutral（而非原先直接 REJECTED）；`success=True` 表示有有效 fallback 输出；新增 `STATUS_DEGRADED` 常量、`DEGRADED_FALLBACK_EXPRESSION_TAG/ID` 常量；降级详情写入 `avatar_action_log` 可审计回溯；Edge 不可达优先级高于 free action 检查；已知 tag/空 tag/free action 行为完全不变；talk gate 不受影响。新增 1 个错误码（VTS_DEGRADED_FALLBACK）、2 个 fixtures（Edge 不可达/未知 tag 降级）。T-VTS-Degraded-01（30+ 项）全部通过。
+- 覆盖状态：DONE
+
 ---
 - PRD_READY：PRD 已完备（FR + 验收已清晰），但 DevSpec 尚未给出可审阅的工程契约与测试编号。
 - SPEC_READY：DevSpec 已给出工程契约与测试编号（T-xx）且可被拆解为任务；但 DevTasks 可能尚未拆齐。
