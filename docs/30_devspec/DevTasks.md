@@ -770,3 +770,24 @@ TASK-XXXX 标题
   - 回归覆盖（新增）`T-Drill-02`、`T-EnvReady-03`、`T-Orch-06`。
 - 涉及文件路径：tests/e2e/；tests/fixtures/drill/；host_brain/app/main.py；tools/replay/；host_brain/integrations/graph_runtime.py；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-TOOL-003；（新增）T-Drill-02；（新增）T-EnvReady-03；（新增）T-Orch-06。
+
+### TASK-0064 运行链路可视化补齐（只读观测 API + request 时间线聚合）
+- 任务描述：补齐“无可视化界面难以监控链路细节”的缺口，先落地只读观测接口，输出 request 级链路时间线与来源汇总，作为后续 UI 面板的数据底座；并将 Agent 监测方向切到 LangSmith，同时在系统启动时输出详细数据流日志并支持本地监控控制台窗口（best-effort）。
+- 输入：DevSpec 10/11；现有审计链（intent/governor/skill_exec/channel/avatar/clawd/voice/retrieval/vision/service_health）。
+- 输出：
+  - request 级观测报告契约（request_id/trace_status/trace_stage/trace_reason_code/timeline_total/sources/timeline）；
+  - 时间线聚合规则（按 ts_ms 与 source 稳定排序）；
+  - Agent 监测配置契约（LangSmith provider/status/reason_code/project/endpoint）；
+  - 启动期数据流日志打印（startup/readiness/monitoring profile/console profile）；
+  - 本地监控控制台窗口（spawn best-effort，默认 inline）；
+  - 只读约束：不新增执行入口、不改 Governor/Token/Audit 决策链；
+  - 回归测试（新增）`T-Obs-01`、`T-Obs-02`。
+- 验收标准：
+  - 任意 request_id 可输出可解析单 JSON 时间线报告；
+  - sources 统计与 timeline 条目一致且稳定可回放；
+  - 空 request_id 被稳定拒绝（输入契约错误）；
+  - LangSmith tracing 关闭/缺 key 时输出稳定 status+reason_code；
+  - 监控控制台在不支持 spawn 的平台稳定降级为 inline 模式；
+  - 回归覆盖（新增）`T-Obs-01`、`T-Obs-02`。
+- 涉及文件路径：host_brain/app/main.py；tests/contract/test_observability_timeline_contract.py；tests/contract/test_runtime_monitoring_contract.py；docs/30_devspec/DevTasks.md。
+- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；（新增）T-Obs-01；（新增）T-Obs-02；I1/I8/I9。
