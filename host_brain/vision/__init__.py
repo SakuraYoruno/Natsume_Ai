@@ -19,6 +19,21 @@ from host_brain.vision.camera_event import (
     CameraEventResult,
     CameraRecognitionServiceContract,
 )
+from host_brain.vision.detector_registry import (
+    AGG_STATUS_ALL_FAILED,
+    AGG_STATUS_OK,
+    AGG_STATUS_PARTIAL,
+    DETECTOR_TYPE_FACE,
+    DETECTOR_TYPE_GESTURE,
+    DETECTOR_TYPE_OBJECT,
+    DETECTOR_TYPE_SCENE,
+    AggregatedCameraEvent,
+    DetectionItem,
+    DetectorConfig,
+    DetectorRegistry,
+    DetectorResult,
+    MultiDetectorAggregator,
+)
 
 __all__ = [
     "BBOX_SPACE",
@@ -36,4 +51,17 @@ __all__ = [
     "CameraRecognitionServiceContract",
     "ScreenOcrResult",
     "ScreenOcrServiceContract",
+    "AGG_STATUS_ALL_FAILED",
+    "AGG_STATUS_OK",
+    "AGG_STATUS_PARTIAL",
+    "DETECTOR_TYPE_FACE",
+    "DETECTOR_TYPE_GESTURE",
+    "DETECTOR_TYPE_OBJECT",
+    "DETECTOR_TYPE_SCENE",
+    "AggregatedCameraEvent",
+    "DetectionItem",
+    "DetectorConfig",
+    "DetectorRegistry",
+    "DetectorResult",
+    "MultiDetectorAggregator",
 ]

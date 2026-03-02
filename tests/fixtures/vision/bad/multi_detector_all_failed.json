@@ -1,0 +1,38 @@
+{
+  "request_id": "req_vision_multi_003",
+  "intent_id": "intent_vision_multi_003",
+  "description": "全部检测器不可用：face 异常，object 超时，gesture 无 provider",
+  "payload": {
+    "evidence_ref": "evd://camera/frame_multi_003",
+    "frame_data": "person:0.65",
+    "detectors": [
+      {
+        "detector_id": "det-face-v1",
+        "type": "face",
+        "model_id": "face-recog-v1",
+        "confidence_threshold": 0.6,
+        "enabled": true,
+        "timeout_ms": 500,
+        "scenario": "error"
+      },
+      {
+        "detector_id": "det-object-v1",
+        "type": "object",
+        "model_id": "yolo-v8",
+        "confidence_threshold": 0.5,
+        "enabled": true,
+        "timeout_ms": 500,
+        "scenario": "timeout"
+      },
+      {
+        "detector_id": "det-gesture-v1",
+        "type": "gesture",
+        "model_id": "gesture-v2",
+        "confidence_threshold": 0.7,
+        "enabled": true,
+        "timeout_ms": 500,
+        "scenario": "no_provider"
+      }
+    ]
+  }
+}
