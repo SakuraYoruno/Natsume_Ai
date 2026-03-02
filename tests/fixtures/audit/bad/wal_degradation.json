@@ -1,0 +1,10 @@
+{
+  "scenario": "wal_degradation",
+  "description": "WAL degradation fixture: WAL cannot be activated, system degrades to DELETE mode",
+  "expected": {
+    "wal_status": "DEGRADED",
+    "system_still_functional": true,
+    "writes_still_succeed": true,
+    "degradation_reason_present": true
+  }
+}
