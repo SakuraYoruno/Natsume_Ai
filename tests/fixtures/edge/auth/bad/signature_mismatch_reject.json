@@ -1,0 +1,11 @@
+{
+  "request_id": "req_edge_auth_003",
+  "ts_ms": 1800100000000,
+  "nonce": "nonce-edge-003",
+  "signature": "invalid-signature",
+  "payload": {
+    "op": "speak",
+    "session_id": "sess_edge_003",
+    "text": "voice test"
+  }
+}

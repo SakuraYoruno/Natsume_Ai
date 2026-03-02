@@ -139,3 +139,32 @@ reason_code（涉及拒绝/降级必须列出）:
 验收（测试编号 T-xx + 关键断言点）:
 回滚（目标基线版本标识 + 受影响的数据/契约口径）:
 备注（可选，<=5 行）:
+```
+
+## 4. Edge 交付批次与回滚口径（TASK-0090）
+
+发布顺序必须固定为 `Batch-A -> Batch-B -> Batch-C`，每个批次发布前先打基线锚点（示例：`edge-pre-batch-a`）。
+
+### 4.1 交付批次定义
+
+| 批次 | 包含任务 | 发布目标 | 最小验收口径 |
+|---|---|---|---|
+| Batch-A | TASK-0087 + TASK-0085 | 先稳定 runtime 装配、health/capability 面 | `T-Edge-Health-01`、`T-Edge-Start-01` |
+| Batch-B | TASK-0084 + TASK-0086 | 上线 RPC 网关鉴权与启动/停止 runbook | `T-Edge-RPC-01`、`T-Edge-RPC-02`、`T-Edge-Start-01` |
+| Batch-C | TASK-0088 + TASK-0089 | 上线语音上行编排、barge-in 联动与 fixture 矩阵 | `T-Edge-Voice-01`、`T-Edge-Voice-02`、`T-Edge-Fixture-01`、`T-RPC-Event-01` |
+
+### 4.2 批次回滚口径
+
+| 批次 | 回滚触发条件 | 回滚动作 | 必须保留资产 | 回滚后能力矩阵 | 回滚后验收 |
+|---|---|---|---|---|---|
+| Batch-A | `/v1/edge/health` 连续 3 次失败；或 `python -m edge_client` 启动即退出 | 回退到 `edge-pre-batch-a`，并切到 health-only 模式 | `tests/fixtures/edge/**`、`tests/contract/test_edge_*`、`runtime/edge/logs/*` | 仅 `health` 可用；`speak/barge_in/fallback/asr` 关闭 | `T-Edge-Health-01`、`T-Edge-Start-01` |
+| Batch-B | 鉴权错误率异常上升；合法请求大量返回 `EDGE_RPC_AUTH_INVALID`/`REPLAY_DETECTED`；或网关拒绝码不稳定 | 先执行配置回退（`EDGE_RPC_GATEWAY_ENABLED=false` 或 health-only），再回退到 `edge-pre-batch-b` | 同上 + `host_brain` 侧 `voice_event_log` 审计链 | 保留 health；关闭所有业务端点，避免脏请求进入 | `T-Edge-Health-01`、`T-Edge-RPC-01`、`T-Edge-RPC-02` |
+| Batch-C | 语音上行积压不可恢复；barge-in 不生效；VTS talk gate 终态不一致 | 先按故障面切换“禁用 ASR 上行”或“禁用 speak”，再回退到 `edge-pre-batch-c` | 同上 + `EdgeEventReporter` 缓存与补发审计痕迹 | 可降级保留 `health` + 单向能力（仅 TTS 或仅非语音） | `T-Edge-Voice-01`、`T-Edge-Voice-02`、`T-RPC-Event-01` |
+
+### 4.3 回滚执行检查单
+
+1. 执行回退前记录：当前 `release_id/baseline_tag`、触发条件、首个失败 `reason_code`。
+2. 执行配置降级：优先切换 `README` 定义的回退模式（health-only / 禁用 speak / 禁用 ASR 上行）。
+3. 执行代码回退：切回对应批次基线并重启 Edge 进程。
+4. 复核可用性：最少复跑 `T-Edge-Start-01` + 本批对应 `T-Edge-*`，并确认 `T-RPC-Event-01` 回放链不回退损坏。
+5. 存档证据：把日志、触发时间窗、验收结果写入发布记录，保证可追溯。

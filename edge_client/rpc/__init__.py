@@ -1,5 +1,12 @@
 """Edge RPC exports."""
 
+from edge_client.rpc.auth import (
+    S_EDGE_RPC_AUTH,
+    EdgeRpcAuthResult,
+    NonceReplayCache,
+    build_edge_rpc_signature,
+    validate_edge_rpc_auth,
+)
 from edge_client.rpc.event_reporter import (
     BatchReportResult,
     EdgeEventCache,
@@ -54,6 +61,11 @@ from edge_client.rpc.voice import (
 )
 
 __all__ = [
+    "S_EDGE_RPC_AUTH",
+    "EdgeRpcAuthResult",
+    "NonceReplayCache",
+    "build_edge_rpc_signature",
+    "validate_edge_rpc_auth",
     "BatchReportResult",
     "EdgeEventCache",
     "EdgeEventReporter",

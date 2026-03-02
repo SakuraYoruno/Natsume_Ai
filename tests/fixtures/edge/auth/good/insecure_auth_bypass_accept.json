@@ -1,0 +1,10 @@
+{
+  "request_id": "req_edge_auth_005",
+  "ts_ms": 1800100000000,
+  "nonce": "nonce-edge-005",
+  "signature": "invalid-signature-but-allowed",
+  "payload": {
+    "op": "health",
+    "session_id": "sess_edge_005"
+  }
+}

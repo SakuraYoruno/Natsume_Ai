@@ -141,6 +141,18 @@
 - T-Voice-04: Edge fallback LLM endpoints (`presence/asr_compile/retrieval_hints/context_compress`) must keep `draft_only=true`, reject decision fields and false execution claims, and return stable fast-fail reason_code/stage when unavailable.
 - T-Voice-05: Resource gate enforces priority `ASR > PLAYBACK > TTS_SYNTH > FALLBACK_LLM` with mutex under pressure, exposes `vram/queue` metrics in gate events, and keeps preempt/reject decisions replayable.
 
+## T-RPC
+- T-RPC-Event-01: Edge->Host event reporting protocol must keep deterministic schema (`event_type/source/ts_ms/payload/evidence_ref`), support cache/retry/backfill on network interruption, and preserve replay linkage after recovery.
+
+## T-Edge
+- T-Edge-RPC-01: Edge RPC envelope authentication/replay protection must enforce schema + HMAC + ts window + nonce uniqueness with stable reason_code mapping (`EDGE_RPC_SCHEMA_INVALID`/`EDGE_RPC_AUTH_INVALID`/`EDGE_RPC_AUTH_EXPIRED`/`REPLAY_DETECTED`), and support dev/test insecure-auth fallback without breaking schema checks.
+- T-Edge-RPC-02: Edge RPC gateway endpoints must return deterministic response envelope (`success/status/reason_code/detail/event/ts_ms`) and reject disabled capability calls with auditable reason_code/stage.
+- T-Edge-Health-01: Edge health endpoint must expose stable capability matrix + resource snapshot + component health + redacted config snapshot, consistent with config switches and fallback defaults.
+- T-Edge-Start-01: `python -m edge_client` startup/shutdown must be deterministic (bind host/port, emit config snapshot, graceful close of ASR/TTS/VTS resources) and leave no stale runtime lock/process state.
+- T-Edge-Voice-01: Edge ASR upstream pipeline must batch-report events to Host with retry/cache/backfill semantics, preserving deterministic schema and replay linkage during network interruption and recovery.
+- T-Edge-Voice-02: Edge barge-in + VTS linkage must deterministically interrupt playback, produce `VOICE_INTERRUPTED`-class audit evidence, and restore talk gate/expression terminal state.
+- T-Edge-Fixture-01: Edge fixture naming must follow `tests/fixtures/edge/{auth|gateway|health|voice}/{good|bad}/scenario_expectation.json` with expectation suffix in `{accept|reject|degraded}` and each `T-Edge-*` id mapped to success + reject/degraded samples.
+
 ## T-Vision
 - T-VisionGate-01: Gaming mode must block screen-monitor/OCR requests with stable reason_code/stage and auditable event linkage; response must not claim unsupported visual observations.
 - T-Vision-01: Non-gaming OCR output must remain schema-stable (`request_id/ts_ms/source_ref/engine_id/text_blocks[]` with `text/bbox/conf`) and source_ref must be replayable via vision_event_log.
