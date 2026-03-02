@@ -995,3 +995,153 @@ TASK-XXXX 标题
   - 回归覆盖（新增）`T-Sandbox-01`（沙箱执行与安全边界）。
 - 涉及文件路径：host_brain/airlock/sandbox.py（新增）；host_brain/airlock/quarantine.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/airlock/。
 - 关联需求/测试：FR-AIRLOCK-002；T-39；T-40；（新增）T-Sandbox-01。
+
+---
+
+## 阶段 8：质量加固 + 风险消除 + Edge 集成深化
+
+> 说明：本阶段任务来源于代码审阅报告（full_code_review_report_2026-03-02.md）、风险注册表（risk_registry.md）、以及 P1/P2 后续行动汇总。按优先级排列：先修复代码质量微调（可立即执行），再推进安全升级与 Edge 集成深化。
+
+### TASK-0076 代码质量微调：裸 print / 类型标注 / SQL 安全 / 表结构缓存 / 可选依赖文档（P2）
+- 任务描述：集中处理代码审阅报告中的 P2 发现项（F-13~F-16, F-12），确保代码质量零遗留。
+- 输入：代码审阅报告 §七 P2 发现项（F-13/F-14/F-15/F-16/F-12）。
+- 输出：
+  - `main.py:908` 裸 `print()` → `logger.info()`（F-13）；
+  - `graph_executor.py:43` 补充返回类型标注 `-> None`（F-14）；
+  - `fastapi_app.py:582,605` 两个 async handler 补充返回类型标注（F-15）；
+  - `sqlite_ledger.py._fetch_all()` 增加表名白名单校验（硬编码允许表名集合，拒绝非法表名并记录 `AUDIT_TABLE_NAME_INVALID`）（F-16）；
+  - `sqlite_ledger.py._table_has_column()` 增加表结构缓存（`_column_cache: dict[str, set[str]]`），避免每次调用 PRAGMA（F-06）；
+  - `requirements.txt` 增加注释标注 `redis` 为可选依赖（F-12）。
+- 验收标准：
+  - 零裸 `print()` 残留；
+  - 所有公开函数/方法有返回类型标注；
+  - `_fetch_all` 传入非法表名时抛出 ValueError 或返回空并记录 reason_code；
+  - `_table_has_column` 首次调用后缓存命中率 = 100%（同表重复调用不触发 PRAGMA）；
+  - 现有 494 项测试无回归；
+  - 回归覆盖（新增）`T-Quality-01`（代码质量加固断言）。
+- 涉及文件路径：host_brain/app/main.py；host_brain/integrations/graph_executor.py；host_brain/app/fastapi_app.py；host_brain/audit/sqlite_ledger.py；requirements.txt；tests/contract/test_quality_contract.py（新增）。
+- 关联需求/测试：NFR-MAINT-001；FR-AUDIT-001；（新增）T-Quality-01。
+
+### TASK-0077 沙箱安全升级：subprocess → Docker/nsjail 容器级隔离（P1 安全）
+- 任务描述：将 DRAFT_CODE 沙箱从当前 subprocess + 临时目录隔离，升级为容器级隔离（优先 Docker，备选 nsjail），确保恶意代码无法读取/写入主机文件系统、无法访问网络。
+- 输入：risk_registry.md R41-1/R41-2；DevSpec 8.7；TASK-0075 输出的 `sandbox.py`。
+- 输出：
+  - `SandboxConfig` 新增 `isolation_backend` 字段（`subprocess`/`docker`/`nsjail`），默认 `subprocess`（向后兼容）；
+  - Docker 后端实现：自动构建最小沙箱镜像 + 只读挂载代码 + 无网络 + 资源限制（CPU/内存/超时） + 输出采集；
+  - nsjail 后端实现（可选/备选）：seccomp + 用户 namespace + 只读根文件系统；
+  - 容器后端不可用时自动降级到 subprocess 后端 + `SANDBOX_CONTAINER_UNAVAILABLE` reason_code；
+  - 跨平台验证（Windows：仅 subprocess；Linux：Docker 优先）；
+  - fixtures：Docker 隔离成功/Docker 不可用降级/恶意文件读取被拒。
+- 验收标准：
+  - Docker 后端下恶意代码无法读取主机文件系统（`/etc/passwd` 等）；
+  - Docker 不可用时稳定降级到 subprocess 后端且 reason_code 可统计；
+  - 现有 T-Sandbox-01 无回归；
+  - 回归覆盖（新增）`T-Sandbox-02`（容器级隔离安全边界）。
+- 涉及文件路径：host_brain/airlock/sandbox.py；host_brain/airlock/docker_sandbox.py（新增）；host_brain/core/errors.py；tests/contract/test_sandbox_docker_contract.py（新增）；tests/fixtures/airlock/。
+- 关联需求/测试：FR-AIRLOCK-002；T-Sandbox-01；（新增）T-Sandbox-02。
+
+### TASK-0078 跨端时间线 SQL 优化：按时间窗口过滤 + 分页查询（P1 性能）
+- 任务描述：解决 `cross_timeline.py` 和 `web_ui.py` 全量内存加载审计表的性能隐患，为 SQLiteLedger 增加按时间窗口过滤的查询方法，并在时间线聚合与面板 API 中使用。
+- 输入：risk_registry.md R38-3/R32-2；代码审阅报告 F-03。
+- 输出：
+  - `sqlite_ledger.py` 新增 `fetch_by_time_range(table, start_ms, end_ms, limit, offset)` 方法（参数化查询，表名白名单校验）；
+  - `cross_timeline.py` 的 Host 审计表遍历改为按时间窗口查询；
+  - `web_ui.py` 的 API 端点支持 `?start_ms=&end_ms=&limit=&offset=` 分页参数；
+  - fixtures：大量数据分页/空窗口/窗口越界样例。
+- 验收标准：
+  - 10000 条审计记录下时间线聚合耗时 < 100ms（基准测试口径）；
+  - 面板 API 支持分页且默认 limit=100；
+  - 现有 T-Obs-03 / T-UI-01 无回归；
+  - 回归覆盖（新增）`T-Obs-04`（时间窗口查询与分页）。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/observability/cross_timeline.py；host_brain/app/web_ui.py；tests/contract/test_timeline_perf_contract.py（新增）；tests/fixtures/observability/。
+- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；T-Obs-03；T-UI-01；（新增）T-Obs-04。
+
+### TASK-0079 Edge→Host RPC 事件批量上报接口（P1 跨端集成）
+- 任务描述：实现 Edge→Host 的事件批量上报 RPC 通道，将当前模拟 Edge 事件的测试方式升级为可对接真实 RPC 的实现。
+- 输入：risk_registry.md R38-1/R37-1；TASK-0072 输出的 `EdgeEventReport` 结构；DevSpec 7.3。
+- 输出：
+  - `edge_client/rpc/event_reporter.py`（新增）：批量事件上报客户端，支持重试 + 批次控制 + 网络异常降级；
+  - `host_brain/app/fastapi_app.py` 新增 `POST /v1/edge/events` 端点：接收 `EdgeEventReport[]`，写入审计并返回确认；
+  - 事件上报协议结构（JSON Schema：event_type/source/ts_ms/payload/evidence_ref）；
+  - 网络不可用时 Edge 端缓存事件并在恢复后批量补发；
+  - fixtures：正常批量上报/部分失败/网络中断缓存。
+- 验收标准：
+  - Edge 事件可通过 HTTP 批量上报到 Host 并写入审计链；
+  - 网络中断时 Edge 端缓存事件（最多 1000 条或 10MB），恢复后自动补发；
+  - 上报事件与 `cross_timeline.py` 无缝对接；
+  - 现有 T-Obs-03 / T-E2E-WeChat-01 无回归；
+  - 回归覆盖（新增）`T-RPC-Event-01`（Edge→Host 事件上报协议）。
+- 涉及文件路径：edge_client/rpc/event_reporter.py（新增）；host_brain/app/fastapi_app.py；host_brain/observability/cross_timeline.py；tests/contract/test_rpc_event_contract.py（新增）；tests/fixtures/e2e/。
+- 关联需求/测试：FR-VOICE-001；FR-AUDIT-001；T-Obs-03；T-E2E-WeChat-01；（新增）T-RPC-Event-01。
+
+### TASK-0080 VTS WebSocket 自动重连机制（P1 Edge 网络）
+- 任务描述：为 VTubeStudioDriver 添加 WebSocket 自动重连策略（指数退避 + 最大重试次数 + 健康状态上报），解决网络抖动导致的断连不恢复问题。
+- 输入：risk_registry.md R34-2；TASK-0068 输出的 `vts_driver.py`。
+- 输出：
+  - `vts_driver.py` 新增 `_reconnect_loop()` 方法：指数退避（1s→2s→4s→8s→16s 上限）+ 最大重试 10 次；
+  - 重连成功后自动恢复 `neutral` 表情状态并上报 `VTS_RECONNECTED` 事件；
+  - 重连全部失败后进入 `DISCONNECTED` 状态并上报 `VTS_RECONNECT_EXHAUSTED` reason_code；
+  - 重连事件写入 `avatar_action_log` 可审计；
+  - fixtures：断连→重连成功/断连→重连耗尽。
+- 验收标准：
+  - 模拟 WebSocket 断连后自动触发重连；
+  - 重连成功后表情映射恢复正常；
+  - 超过最大重试次数后稳定进入 DISCONNECTED 状态且 reason_code 可统计；
+  - 现有 T-VTS-HW-01 无回归；
+  - 回归覆盖（新增）`T-VTS-Reconnect-01`（WebSocket 自动重连与状态恢复）。
+- 涉及文件路径：edge_client/actuators/vts_driver.py；host_brain/core/errors.py；tests/contract/test_vts_reconnect_contract.py（新增）；tests/fixtures/channels/。
+- 关联需求/测试：FR-AVATAR-001；T-VTS-HW-01；（新增）T-VTS-Reconnect-01。
+
+### TASK-0081 ASR 麦克风设备自动恢复策略（P1 Edge 音频）
+- 任务描述：为 ASR 音频采集添加设备异常自动恢复策略（重连重试 + 设备切换 + 健康状态上报），解决驱动异常时无法自动恢复的问题。
+- 输入：risk_registry.md R33-2；TASK-0067 输出的 `asr.py`。
+- 输出：
+  - `asr.py` 新增 `_device_recovery_loop()` 方法：检测 `ASR_DEVICE_ERROR` / `ASR_STREAM_INTERRUPTED` 后自动尝试重新打开音频流；
+  - 指数退避重试（1s→2s→4s→8s 上限）+ 最大重试 5 次；
+  - 支持设备列表枚举 + 备用设备自动切换（如默认设备失败，尝试其他可用设备）；
+  - 恢复成功上报 `ASR_DEVICE_RECOVERED` 事件；恢复失败上报 `ASR_DEVICE_RECOVERY_EXHAUSTED`；
+  - fixtures：设备断开→恢复/设备断开→恢复失败/备用设备切换。
+- 验收标准：
+  - 模拟设备异常后自动触发恢复流程；
+  - 恢复成功后 ASR 采集正常继续；
+  - 超过最大重试次数后稳定报告 `ASR_DEVICE_RECOVERY_EXHAUSTED`；
+  - 现有 T-ASR-HW-01 无回归；
+  - 回归覆盖（新增）`T-ASR-Recovery-01`（麦克风设备自动恢复）。
+- 涉及文件路径：edge_client/senses/asr.py；host_brain/core/errors.py；tests/contract/test_asr_recovery_contract.py（新增）；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-001；FR-VOICE-005；T-ASR-HW-01；（新增）T-ASR-Recovery-01。
+
+### TASK-0082 Host VTS 通道 DEGRADED 状态扩展（P2）
+- 任务描述：为 Host 端 VTS 通道模块（`vts.py`）增加 `DEGRADED` 状态支持，使 E2E 链路中的降级场景可通过正规通道表达，而非直接写审计表绕过。
+- 输入：risk_registry.md R37-2；TASK-0071 输出的 E2E 测试发现。
+- 输出：
+  - `vts.py` 的 `resolve_vts_expression()` 返回结构新增 `status=DEGRADED` 枚举值（在 Edge 不可达/表情映射失败但有降级备选时触发）；
+  - 降级时使用 `neutral` 作为备选表情 + `VTS_DEGRADED_FALLBACK` reason_code；
+  - 审计写入 `avatar_action_log` 记录降级详情；
+  - fixtures：Edge 不可达→DEGRADED/映射未知→DEGRADED。
+- 验收标准：
+  - Edge 不可达时 `resolve_vts_expression` 返回 `DEGRADED` + neutral 备选；
+  - `avatar_action_log` 可回溯降级原因；
+  - 现有 T-VTS-HW-01 / T-E2E-WeChat-01 无回归；
+  - 回归覆盖（新增）`T-VTS-Degraded-01`（VTS DEGRADED 状态契约）。
+- 涉及文件路径：host_brain/channels/vts.py；host_brain/core/errors.py；tests/contract/test_vts_degraded_contract.py（新增）；tests/fixtures/channels/。
+- 关联需求/测试：FR-AVATAR-001；T-VTS-HW-01；T-E2E-WeChat-01；（新增）T-VTS-Degraded-01。
+
+### TASK-0083 部署文档 + 环境清单补充（P2 运维）
+- 任务描述：基于风险注册表中所有部署相关的后续行动，补充部署文档与环境清单，确保生产部署前所有环境要求已明确。
+- 输入：risk_registry.md 全文；代码审阅报告 §七。
+- 输出：
+  - `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md` 更新：
+    - SQLite 存储介质要求（本地磁盘，禁止 NFS/网络文件系统）（R36-1）；
+    - Redis 可选依赖说明与配置指引（R39-1）；
+    - Docker 环境要求（沙箱容器级隔离）（R41-2）；
+    - Edge GPU VRAM 最低要求（≥4GB CUDA 可用）+ 资源闸门配置（R33-1/R34-1）；
+    - VTS WebSocket 网络要求与超时配置（R34-2）；
+    - WAL checkpoint 定时策略建议（R36-3）；
+    - 进程管理器（systemd/supervisor）守护建议（R31-2）。
+  - 环境清单中每项标注：必需/可选/建议、关联风险编号、配置路径。
+- 验收标准：
+  - 所有 P1 风险的部署前置条件在环境清单中有对应条目；
+  - 每项环境要求有验证方法（检查命令/健康端点/配置项）；
+  - 文档符合受众门禁格式（受众：MASTER）。
+- 涉及文件路径：docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
+- 关联需求/测试：NFR-REL-001；NFR-SEC-001。
