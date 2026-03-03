@@ -69,10 +69,37 @@
 `dev/test` 可用 `EDGE_ALLOW_INSECURE_AUTH=true`；`prod` 需配置 `EDGE_HMAC_SHARED_KEY` 或 `EDGE_HMAC_SHARED_KEY_REF`，并关闭 insecure auth。
 3. 配置能力开关：`EDGE_ASR_ENABLED`、`EDGE_TTS_ENABLED`、`EDGE_BARGE_IN_ENABLED`。
 4. 可选：开启 Edge 兜底 LLM（草案模式）`EDGE_FALLBACK_LLM_ENABLED=true`。
-5. 执行：
+5. 可选：若 VTube Studio 通过 Steam 安装，可启用一键拉起：
+`EDGE_VTS_AUTOSTART=true`、`EDGE_VTS_STEAM_APP_ID=1325860`、`EDGE_VTS_AUTOSTART_WAIT_SECONDS=35`。
+6. 执行：
 
 ```powershell
 .\scripts\runtime\start_edge_side.ps1
+```
+
+### 3.5 双端分离一键编排（可选）
+
+- 同机双端一键启动：
+
+```powershell
+.\scripts\runtime\start_distributed_services.ps1 -EdgeMode local -HostStartupCheck
+```
+
+- Host 远程拉起 Edge（SSH）：
+
+```powershell
+.\scripts\runtime\start_distributed_services.ps1 `
+  -EdgeMode ssh `
+  -EdgeSshHost "192.168.1.20" `
+  -EdgeSshUser "edgeuser" `
+  -EdgeRepoPath "D:/Nastume_Ai" `
+  -EdgeHealthUrl "http://192.168.1.20:17800/v1/edge/health"
+```
+
+- 一键停止双端（可选同时停本地 Neo4j/Chroma）：
+
+```powershell
+.\scripts\runtime\stop_distributed_services.ps1 -EdgeMode local -StopLocalServices
 ```
 
 ### 3.3 模型与检索路由
@@ -116,6 +143,7 @@
 - ASR：`faster-whisper`，默认模型 `large-v3`，默认设备 `cuda`
 - TTS：`GPT-SoVITS`，默认模型路径 `models/gpt_sovits`，默认设备 `cuda`
 - VTS：默认 `localhost:8001`，token 文件 `.vts_token`
+- VTS（Steam 自动启动，可选）：`EDGE_VTS_AUTOSTART` / `EDGE_VTS_STEAM_APP_ID` / `EDGE_VTS_AUTOSTART_WAIT_SECONDS`
 
 ### 4.5 Edge Fallback LLM（可选）
 
@@ -175,6 +203,7 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 6379
 ```powershell
 .\scripts\runtime\stop_local_services.ps1
 .\scripts\runtime\stop_edge.ps1
+.\scripts\runtime\stop_host_side.ps1
 ```
 
 ---

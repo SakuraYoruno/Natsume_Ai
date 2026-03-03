@@ -1,0 +1,159 @@
+[CmdletBinding()]
+param(
+  [string]$EnvFile = "",
+  [string]$PidFile = "",
+  [int]$Port = 0
+)
+
+$ErrorActionPreference = "Stop"
+
+function Read-EnvFile {
+  param([string]$Path)
+  $values = @{}
+  if (-not (Test-Path -Path $Path)) {
+    return $values
+  }
+  foreach ($line in Get-Content -Path $Path -Encoding UTF8) {
+    $raw = [string]$line
+    $trimmed = $raw.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+    $sep = $trimmed.IndexOf("=")
+    if ($sep -lt 1) {
+      continue
+    }
+    $key = $trimmed.Substring(0, $sep).Trim()
+    $value = $trimmed.Substring($sep + 1).Trim()
+    if ($key) {
+      $values[$key] = $value
+    }
+  }
+  return $values
+}
+
+function Get-ListeningPid {
+  param([int]$ProbePort)
+  $conn = Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -eq $conn) {
+    return $null
+  }
+  return [int]$conn.OwningProcess
+}
+
+function Is-HostProcess {
+  param([int]$ProcessId)
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    return $false
+  }
+  $cmd = [string]$procInfo.CommandLine
+  if (-not $cmd) {
+    return $false
+  }
+  if ($cmd -like "*-m host_brain*") {
+    return $true
+  }
+  if ($cmd -like "*host_brain.app.fastapi_app*") {
+    return $true
+  }
+  return $false
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $true
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+  $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($left) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+    Start-Sleep -Milliseconds 500
+    $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  }
+  return ($null -eq $left)
+}
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+if (-not $EnvFile) {
+  $defaultEnv = Join-Path $repoRoot ".env"
+  $fallbackEnv = Join-Path $repoRoot ".env.example"
+  if (Test-Path -Path $defaultEnv) {
+    $EnvFile = $defaultEnv
+  } else {
+    $EnvFile = $fallbackEnv
+  }
+}
+
+if (-not $PidFile) {
+  $PidFile = Join-Path $repoRoot "runtime\host\host.pid"
+}
+
+$envValues = Read-EnvFile -Path $EnvFile
+if ($Port -le 0) {
+  if ($envValues.ContainsKey("HOST_APP_PORT")) {
+    $Port = [int]$envValues["HOST_APP_PORT"]
+  } elseif ($env:HOST_APP_PORT) {
+    $Port = [int]$env:HOST_APP_PORT
+  } else {
+    $Port = 18080
+  }
+}
+
+$stopped = $false
+$hostPid = $null
+$detail = ""
+
+if (Test-Path -Path $PidFile) {
+  $pidText = (Get-Content -Path $PidFile -Raw -Encoding ascii).Trim()
+  if ($pidText) {
+    $hostPid = [int]$pidText
+    $ok = Stop-ProcessTree -ProcessId $hostPid
+    if ($ok) {
+      $stopped = $true
+      $detail = "host process stopped via pid file"
+    } else {
+      $detail = "failed to stop host process from pid file"
+    }
+  } else {
+    $detail = "host pid file is empty"
+  }
+  Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+}
+
+if (-not $stopped) {
+  $listeningPid = Get-ListeningPid -ProbePort $Port
+  if ($null -ne $listeningPid) {
+    if (Is-HostProcess -ProcessId $listeningPid) {
+      $ok = Stop-ProcessTree -ProcessId $listeningPid
+      if ($ok) {
+        $stopped = $true
+        $hostPid = $listeningPid
+        $detail = "host process stopped by port probe"
+      } else {
+        $detail = "failed to stop host process by port probe"
+      }
+    } else {
+      $hostPid = $listeningPid
+      $detail = "port $Port is occupied by non-host pid $listeningPid"
+    }
+  } elseif (-not $detail) {
+    $detail = "host not running"
+  }
+}
+
+$result = [ordered]@{
+  side = "host"
+  status = if ($stopped) { "stopped" } else { "not_running" }
+  pid = $hostPid
+  pid_file = $PidFile
+  port = $Port
+  detail = $detail
+}
+$result | ConvertTo-Json -Depth 6
