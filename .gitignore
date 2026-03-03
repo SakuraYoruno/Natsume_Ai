@@ -80,3 +80,7 @@ edge_client/temp_audio/
 configs/runtime/local_services.env
 configs/secrets/secret_store.runtime.local.json
 configs/secrets/key_profiles.runtime.json
+
+# --- local VTS / GPT-SoVITS runtime artifacts ---
+.vts_token
+GPT_SoVITS/
