@@ -1,0 +1,18 @@
+{
+  "scenario": "gaming_blocks_medium",
+  "description": "Gaming 模式下 MEDIUM 优先级任务被拦截",
+  "task_config": {
+    "task_id": "test_dream_gen",
+    "trigger_mode": "interval",
+    "trigger_config": {"seconds": 900},
+    "intent_template": {"skill_name": "dream_generator", "args": {}},
+    "priority": "MEDIUM",
+    "enabled": true,
+    "max_consecutive_failures": 3
+  },
+  "sys_mode": "gaming",
+  "expected": {
+    "status": "REJECTED",
+    "reason_code": "SYSMODE_FORBIDDEN"
+  }
+}

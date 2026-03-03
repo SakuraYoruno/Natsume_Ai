@@ -53,6 +53,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "vision_event_log",
     "bond_update_log",
     "sandbox_exec_log",
+    "scheduler_event_log",
     "replay_guard",
     "session_seq_guard",
 })
@@ -368,6 +369,18 @@ SANDBOX_EXEC_COLUMNS = (
     "ts_ms",
 )
 
+SCHEDULER_EVENT_COLUMNS = (
+    "event_id",
+    "task_id",
+    "trigger_ts",
+    "intent_id",
+    "status",
+    "reason_code",
+    "mode_at_trigger",
+    "error_detail",
+    "ts_ms",
+)
+
 MODEL_CONTROL_COLUMNS = (
     "request_id",
     "node_id",
@@ -408,6 +421,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "bond_update_log": {"evidence_refs", "payload"},
     "model_control_log": set(),
     "sandbox_exec_log": {"resource_usage"},
+    "scheduler_event_log": set(),
 }
 
 
@@ -816,6 +830,10 @@ class SQLiteLedger:
     def log_sandbox_exec(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SANDBOX_EXEC_COLUMNS}
         self._insert("sandbox_exec_log", payload)
+
+    def log_scheduler_event(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in SCHEDULER_EVENT_COLUMNS}
+        self._insert("scheduler_event_log", payload)
 
     def get_vault_manifest(self, manifest_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
