@@ -1,51 +1,51 @@
-受众：CODEX  
+受众：CODEX
 标题：开发规格 DevSpec（从零可重建：目录骨架与契约落点）
 
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
 # Nastume Ai 产品开发文档（Dev Spec）
-版本：v1.4
-日期：2026-02-28
+版本：v1.5
+日期：2026-03-03
 适用架构：Host_Brain（Python，含 LangGraph 编排） + Nastume_Body（Edge） + Cloud Exocortex + ClawdBot
 
-本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。  
+本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。
 目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
 
 ---
 
 ## 0. 术语与硬约束（执行口径）
 
-0.1 单向链：语义内核（LLM 草案） → Host Governor → Skills/Actuators → Audit  
-0.2 事实：仅以审计链（intent/governor/skill_exec）与硬状态/SSOT 为准。  
-0.3 任何执行必须携带 approval_token；高风险必须 confirm_token；可逆变更默认要求 undo_token+manifest。  
-0.4 任一 LLM 节点永远不执行、不裁决、不宣称已执行；所有“已完成/已保存/已确认”只能引用 Host 审计摘要字段。  
+0.1 单向链：语义内核（LLM 草案） → Host Governor → Skills/Actuators → Audit
+0.2 事实：仅以审计链（intent/governor/skill_exec）与硬状态/SSOT 为准。
+0.3 任何执行必须携带 approval_token；高风险必须 confirm_token；可逆变更默认要求 undo_token+manifest。
+0.4 任一 LLM 节点永远不执行、不裁决、不宣称已执行；所有“已完成/已保存/已确认”只能引用 Host 审计摘要字段。
 
-0.5 文档关系与追溯口径（DevSpec 必须遵守）  
-DevSpec 的上游是 PRD 的 FR-需求编号；下游是 DevTasks 的 TASK-任务编号与 tests 的 T-编号。  
+0.5 文档关系与追溯口径（DevSpec 必须遵守）
+DevSpec 的上游是 PRD 的 FR-需求编号；下游是 DevTasks 的 TASK-任务编号与 tests 的 T-编号。
 
-强制追溯链：  
-FR-…（PRD：做什么+验收）  
-→ DevSpec 章节（怎么做+如何验证）  
-→ T-…（测试编号：断言点/日志点/契约点）  
-→ TASK-…（任务卡：最小交付单元，引用 FR/T/章节）  
+强制追溯链：
+FR-…（PRD：做什么+验收）
+→ DevSpec 章节（怎么做+如何验证）
+→ T-…（测试编号：断言点/日志点/契约点）
+→ TASK-…（任务卡：最小交付单元，引用 FR/T/章节）
 
-DevSpec 写作规则（工程契约级）：  
-1）每个可实现的规格条目必须声明“覆盖的 FR 编号（1+）”。  
-2）每个关键契约点必须分配“测试编号 T-…”，并写清楚验证口径（输入/输出/审计字段/拒绝码）。  
-3）任何会产生写入（审计/关系/记忆/Canon/Vault）的动作，必须写明 evidence_refs 的来源与记录位置（Ledger 表）。  
-4）DevTasks 的拆分来源只能是 DevSpec：任务卡不允许直接引用白皮书/PRD 来臆造实现细节。  
+DevSpec 写作规则（工程契约级）：
+1）每个可实现的规格条目必须声明“覆盖的 FR 编号（1+）”。
+2）每个关键契约点必须分配“测试编号 T-…”，并写清楚验证口径（输入/输出/审计字段/拒绝码）。
+3）任何会产生写入（审计/关系/记忆/Canon/Vault）的动作，必须写明 evidence_refs 的来源与记录位置（Ledger 表）。
+4）DevTasks 的拆分来源只能是 DevSpec：任务卡不允许直接引用白皮书/PRD 来臆造实现细节。
 
 ---
 
 ## 1. 代码仓库结构（从零可重建完整版）
 
-本节是“唯一目录真相”。任何新模块、脚本与资产必须落到这里的某个目录下，并满足：  
-- 单写者原则：SSOT 存储的写入能力只能出现在指定模块；  
-- 分槽隔离：facts / world_canon / style_canon / episodic / artifacts 不混用；  
-- 可审计：所有重要写入都能指回 SQLite Ledger 的 evidence_refs；  
-- 可回放：最小链路能按审计日志复现关键决策与执行结果。  
+本节是“唯一目录真相”。任何新模块、脚本与资产必须落到这里的某个目录下，并满足：
+- 单写者原则：SSOT 存储的写入能力只能出现在指定模块；
+- 分槽隔离：facts / world_canon / style_canon / episodic / artifacts 不混用；
+- 可审计：所有重要写入都能指回 SQLite Ledger 的 evidence_refs；
+- 可回放：最小链路能按审计日志复现关键决策与执行结果。
 
-仓库单一 mono-repo（Host 侧生成两端代码并版本化；Edge 拉取同一仓库）：  
+仓库单一 mono-repo（Host 侧生成两端代码并版本化；Edge 拉取同一仓库）：
 
 ### 1.1 根目录（Repo Root）
 
@@ -214,7 +214,7 @@ M3：Edge 联调（证据材料可回放）
 目标：在“无云端 API Key / 任一服务暂不可用”的条件下，仍能交付最小闭环：输出可解析、审计可回放、无伪执行宣告。
 
 A）交付边界（项目范围口径）
-- 所有服务项为“必须实现、缺一不可”（见 PRD 2.3）。  
+- 所有服务项为“必须实现、缺一不可”（见 PRD 2.3）。
 - 允许存在“运行时暂不可用/未配置/降级”的情况，但必须：
   - 有稳定接口与健康状态；
   - 降级时输出结构稳定且 reason_code/stage 可统计；
@@ -306,7 +306,7 @@ active.pointer 格式（必须）：
 
 定位：Intent 是“语言→代码”的唯一边界对象，是 Host Governor 可裁决的请求对象。LLM 只能提出 intent_draft（草案）；Host 只接受强类型 Intent（允许宽松解析修语法，但禁止补语义）。
 
-覆盖需求：FR-INTENT-001~003  
+覆盖需求：FR-INTENT-001~003
 回归口径：T-18~T-22
 
 ### 3.1 Intent 最小字段（固定 JSON 对象）
@@ -364,7 +364,7 @@ Intent 进入 Governor 前，至少要在 intent_log（或等价审计表）记�
 
 定位：GovernorOutput 是 Host 对“是否允许执行”的对外稳定契约。它不是提示工程产物，必须可回放、可统计、可回归。
 
-覆盖需求：FR-GOV-001~003、FR-CORE-002  
+覆盖需求：FR-GOV-001~003、FR-CORE-002
 回归口径：T-14~T-17（含 T-14/T-15）
 
 ### 4.1 输出字段（结构固定）
@@ -397,7 +397,7 @@ GovernorOutput 必须为单个 JSON 对象，字段语义固定：
 
 定位：把“授权”从语言变成可验证数据结构。Skills/ToolBroker 只信 token，不信叙事。
 
-覆盖需求：FR-TOKEN-001~003  
+覆盖需求：FR-TOKEN-001~003
 回归口径：T-34~T-38
 
 ### 5.1 approval_token（短 TTL，可执行许可）
@@ -441,7 +441,7 @@ manifest 最小字段（语义固定）：
 
 定位：Skills 是能力载体，只做执行不做裁决；唯一合法入口必须是 loader（或等价执行门），强制 token 校验、幂等与审计。
 
-覆盖需求：FR-SKILL-001~003、FR-AUDIT-001  
+覆盖需求：FR-SKILL-001~003、FR-AUDIT-001
 回归口径：T-15、T-34~T-38（以及后续 T-Skill-xx）
 
 ### 6.1 SkillMeta（强制字段，注册即校验）
@@ -521,12 +521,12 @@ Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、
 
 定位：本章把“六库分工”写成可验证的工程契约：谁写谁读、SSOT 边界、Schema 口径、跨库引用与合规断言。任何偏离必须能被静态扫描或回归测试发现。
 
-覆盖需求：FR-AUDIT-001~003、FR-BOND-001~003、FR-MEM-001~002、FR-CANON-001~002、FR-WCANON-001~003、FR-LSP-001~002、FR-AIRLOCK-001~002  
+覆盖需求：FR-AUDIT-001~003、FR-BOND-001~003、FR-MEM-001~002、FR-CANON-001~002、FR-WCANON-001~003、FR-LSP-001~002、FR-AIRLOCK-001~002
 回归口径：T-14/T-15、T-72~T-76、T-Canon-01~02、T-WCanon-01~03、T-Vault-01~02、T-39/T-40
 
 ### 8.0 责任分配（条目式，必须对齐）
 
-本节是“六库分工”的工程契约口径：定义事实效力、SSOT 单写者、允许读取者、以及跨库最小引用键。  
+本节是“六库分工”的工程契约口径：定义事实效力、SSOT 单写者、允许读取者、以及跨库最小引用键。
 任何偏离必须能被静态扫描或回归测试捕获（见 8.8 与对应 T-xx）。
 
 1）SQLite Ledger（审计账本与索引枢纽）
@@ -811,7 +811,7 @@ GC 约束：
 
 ## 8.12 VISION（屏幕监控/OCR/摄像头：Gaming 门控 + 事件化 + 证据引用）
 
-覆盖需求：FR-VISION-003~004、FR-MODE-001~002、FR-AUDIT-001~002。  
+覆盖需求：FR-VISION-003~004、FR-MODE-001~002、FR-AUDIT-001~002。
 回归口径：（新增）T-VisionGate-01、T-Vision-01、T-Vision-02。
 
 ### 8.12.1 屏幕监控与 OCR（按需触发）
@@ -922,7 +922,7 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 
 定位：本章定义“环境枚举、配置来源优先级、敏感信息边界、外部依赖隔离口径”。不包含任何命令行或执行步骤。
 
-覆盖需求：NFR-SEC-001、NFR-REL-001、NFR-MAINT-001（以及 ModelPlane/AIRLOCK 相关落点）  
+覆盖需求：NFR-SEC-001、NFR-REL-001、NFR-MAINT-001（以及 ModelPlane/AIRLOCK 相关落点）
 回归口径：T-Perf-01、T-Gaming-01、T-39/T-40、T-Flow-01/02（配置一致性）
 
 ### 13.1 环境枚举（语义固定）
@@ -931,9 +931,9 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - Nastume_ENV=prod：真实运行（最小暴露；严格门禁默认；危险能力默认关闭或需显式授权）
 
 ### 13.2 配置来源优先级（从高到低）
-1) 环境变量（运行时注入）  
-2) 本地覆盖配置（仅 dev/test，且不得入库）  
-3) 仓库内默认配置（安全默认值；必须能跑最小闭环）  
+1) 环境变量（运行时注入）
+2) 本地覆盖配置（仅 dev/test，且不得入库）
+3) 仓库内默认配置（安全默认值；必须能跑最小闭环）
 
 硬约束：
 - 任何 secret（API key、token、账号凭据）不得出现在仓库文本文件中；只能以键名存在（例如 OPENAI_API_KEY）。
@@ -1077,11 +1077,279 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - T-86（BOND-NEO4J）：Neo4j 单写者边界生效；bond_summary 派生不含执行事实；不可用时降级口径稳定。
 - T-87（OBS-RESOURCE）：Edge 语音链与 GPU 显存指标可观测；异常峰值可定位 stage 与组件。
 
+### 14.8 新增验收测试编号（M4 体验包：SCHEDULER/DESKTOP/DREAM/DIARY/PROACTIVE/FOCUS）
+
+以下测试编号用于覆盖 M4 体验包新增功能的契约与行为断言：
+
+- T-Sched-01（SCHEDULER 注册与触发）：调度器注册/注销/触发可回放；system_initiated_intent 带 proposer_node_id=scheduler；触发频率符合配置。
+- T-Sched-02（SCHEDULER 模式门控）：Gaming 模式拦截低优先级任务（SYSMODE_FORBIDDEN）；Sleep 模式仅允许白名单任务；Focus 子模式暂停非紧急任务。
+- T-Sched-03（SCHEDULER 健康与降级）：连续失败自动暂停（SCHED_TASK_SUSPENDED）；健康快照可读取。
+- T-Desktop-01（桌面留言创建与撤销）：文件创建成功 + manifest 完整（before/after/path/hash）；undo 恢复原状态；路径穿越拒绝（SCOPE_VIOLATION）。
+- T-Desktop-02（桌面留言 QA）：内容含伪执行句时 QA 拦截并重写；写入审计链完整。
+- T-Dream-01（梦境生成与标签）：Sleep/空闲触发成功；写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；Normal 非空闲拒绝。
+- T-Dream-02（梦境非事实约束）：召回梦境时 evidence_level=NARRATIVE_ONLY 存在；QA 不升级为事实。
+- T-Diary-01（日记生成闭环）：定时触发成功；文件创建 + Episodic 写入；无当日对话时不伪造。
+- T-Diary-02（日记 manifest 与撤销）：日记文件 manifest 完整；undo 可回滚。
+- T-Proactive-01（主动对话触发与门控）：空闲触发成功 + 审计链完整；Gaming 拒绝；频率超限拒绝（RATE_LIMIT_EXCEEDED）。
+- T-Proactive-02（主动对话内容约束）：内容不含执行 intent；推送失败静默降级不重试。
+- T-Focus-01（Focus Mode 切换）：进入/退出可审计；主动对话被拦截；用户主动提问正常响应；退出后调度器恢复。
+
 ---
 
-## 附录 A：覆盖关系与状态（以 Trace 为准）
+## 15. M4 体验包工程契约（SCHEDULER/DESKTOP/DREAM/DIARY/PROACTIVE/FOCUS）
 
-本文件不再维护“PRD→DevSpec→DevTasks→Tests”的覆盖矩阵，以避免重复维护导致的状态过期与冲突。  
+定位：本章定义 M4 体验包的工程实现契约——调度器基础组件 + 5 个体验功能的 Skill 定义、触发策略、content_pack 注入、QA 约束与审计口径。
+
+覆盖需求：FR-SCHED-001~002、FR-DESKTOP-001~002、FR-DREAM-001~002、FR-DIARY-001~002、FR-PROACTIVE-001~002、FR-FOCUS-001。
+回归口径：T-Sched-01~03、T-Desktop-01~02、T-Dream-01~02、T-Diary-01~02、T-Proactive-01~02、T-Focus-01。
+
+### 15.1 Scheduler（定时调度器）
+
+落点：`host_brain/scheduler/` 目录（新增）。
+
+15.1.1 核心组件
+- `scheduler.py`：调度器主体（基于 APScheduler 或等价轻量库），支持 cron/interval/once 三种触发模式。
+- `task_registry.py`：调度任务注册表（task_id/trigger_config/intent_template/priority/mode_allowlist/enabled/max_consecutive_failures）。
+- `health.py`：任务健康快照（task_id/last_run_ts/next_run_ts/status/error_count/suspended_reason）。
+
+15.1.2 Intent 生成约定
+- 每次触发生成 `system_initiated_intent`，字段与用户 Intent 完全一致，但 `proposer_node_id=scheduler`。
+- Intent 进入与用户请求相同的编排入口（`/v1/chat` 内部路径或等价编排调度函数），走 Governor→Token→Skill→Audit。
+
+15.1.3 sys_mode 门控矩阵
+
+| 任务优先级 | Normal | Sleep | Gaming | Focus（Normal子模式） |
+|-----------|--------|-------|--------|---------------------|
+| HIGH（如日记） | ✅ | ✅ | ❌ | ✅ |
+| MEDIUM（如梦境） | ✅ | ✅ | ❌ | ❌ |
+| LOW（如主动对话） | ✅ | 仅问候 | ❌ | ❌ |
+
+15.1.4 审计字段
+- `scheduler_event_log`（新增审计表）：task_id/trigger_ts/intent_id/status/reason_code/mode_at_trigger/error_detail。
+
+### 15.2 Desktop Note Skill（桌面留言）
+
+落点：`host_brain/skills/impl/desktop_note.py`（新增）。
+
+15.2.1 SkillMeta
+```
+name: desktop_note
+clearance_level: L1
+risk_level: 2
+reversible: true
+scopes: [filesystem]
+requires_visual_audit: false
+requires_confirm_token: false
+data_classification: INTERNAL
+rate_limit: 10/hour
+energy_cost: low
+```
+
+15.2.2 执行契约
+- 输入 args：{action: create|update|delete, filename: str, content: str, base_dir_key: str}
+- base_dir_key 映射到配置中的安全基目录（如 `NATSUME_DESKTOP_DIR`）；路径穿越检查（`..`/symlink 拒绝）。
+- create/update：写入文件 → 产出 manifest（before_hash/after_hash/path）+ undo_token。
+- delete：move-to-quarantine（Vault quarantine/），不真删；真删需 confirm_token。
+- 内容经 QA 校验（不得含伪执行句）。
+
+15.2.3 reason_code 映射
+- 路径穿越：SCOPE_VIOLATION
+- 基目录不可写：SKILL_EXEC_FAILED（子类 FS_WRITE_FAILED）
+- QA 拦截：FALSE_EXECUTION_CLAIM（重写后重试 1 次）
+
+### 15.3 Dream Skill（梦境生成）
+
+落点：`host_brain/skills/impl/dream_generator.py`（新增）。
+
+15.3.1 SkillMeta
+```
+name: dream_generator
+clearance_level: L0
+risk_level: 1
+reversible: true
+scopes: [memory]
+requires_visual_audit: false
+requires_confirm_token: false
+data_classification: INTERNAL
+rate_limit: 2/day
+energy_cost: medium
+```
+
+15.3.2 执行契约
+- 触发条件由 Scheduler 判定（sys_mode=SLEEP 或 idle_duration ≥ 阈值）。
+- 读取当日 Episodic Memory（按 ts_ms 过滤当日条目，TopK=20）。
+- 打包 context_pack（含 bond_summary + 当日 episodic 摘要）→ LLM 生成梦境叙事。
+- 写入 Episodic：category=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]。
+- manifest：memory_before_count/memory_after_count/dream_id/hash。
+
+15.3.3 内容标签与口径
+- 写入时必须标注 `evidence_level=NARRATIVE_ONLY`。
+- 召回时 context_pack 的 retrieval.episodic 槽位需保留此标注，QA 据此判断"不可升级为事实"。
+
+### 15.4 Diary Skill（日记生成）
+
+落点：`host_brain/skills/impl/diary_writer.py`（新增）。
+
+15.4.1 SkillMeta
+```
+name: diary_writer
+clearance_level: L0
+risk_level: 1
+reversible: true
+scopes: [memory, filesystem]
+requires_visual_audit: false
+requires_confirm_token: false
+data_classification: INTERNAL
+rate_limit: 1/day
+energy_cost: medium
+```
+
+15.4.2 执行契约
+- 每日定时触发（如 23:00），由 Scheduler 发起。
+- 汇总当日对话：读取 intent_log + governor_log（当日 ts_ms 范围）+ Episodic 当日条目。
+- 检查是否有实质对话内容（非空判定）：无对话 → 跳过并记录 SCHED_NO_CONTENT（不伪造日记）。
+- 有对话 → 打包 context_pack → LLM 生成日记叙事 → 双写：
+  - 本地文件：`{base_dir}/diary/{YYYY-MM-DD}.md`，产出 file manifest。
+  - Episodic Memory：category=diary, evidence_refs=[intent_id, file_path]。
+- QA 校验：日记内容不得含伪执行句。
+
+15.4.3 Evolution 提案（可选扩展）
+- 日记 LLM 输出可选包含 `drift_suggestion` 字段。
+- 若存在：生成 canon_proposal → 写入 canon_proposal_log → 待 Host 白名单/Evolution 审核。
+- 不存在：跳过（默认路径）。
+
+### 15.5 Proactive Conversation Skill（主动对话）
+
+落点：`host_brain/skills/impl/proactive_talk.py`（新增）。
+
+15.5.1 SkillMeta
+```
+name: proactive_talk
+clearance_level: L0
+risk_level: 1
+reversible: false
+scopes: [dialogue]
+requires_visual_audit: false
+requires_confirm_token: false
+data_classification: NONE
+rate_limit: 3/hour
+energy_cost: low
+```
+
+15.5.2 触发策略（Scheduler 任务配置）
+- 条件组合（AND 逻辑）：
+  - idle_duration ≥ 阈值（默认 30 分钟，可配置）
+  - bond.stage ≥ threshold（默认 familiar 以上）
+  - sys_mode ∈ [NORMAL]（Gaming/Sleep/Focus 均禁止或仅极低频问候）
+  - 当前小时 ∈ active_hours（默认 8:00~23:00）
+- 频率限制：每小时最多 3 次（ Rate Limit R4 Gate 生效）。
+
+15.5.3 执行契约
+- 打包 context_pack（含 bond_summary + 最近 episodic + 当前时间段信息）→ LLM 生成主动对话草案。
+- QA 校验：内容仅限问候/关心/回忆引用/提醒口径；含执行 intent → 拦截重写。
+- 推送路径：
+  - Edge 可达 → RPC speak（语音）或 text push；
+  - 微信通道可用 → 通过 wechat outbound 推送；
+  - 均不可达 → 静默降级（记录 DEPENDENCY_UNAVAILABLE），不重试推送（防骚扰）。
+- 审计：proactive_event_log（新增或复用 skill_exec_log）记录触发条件快照、推送结果、reason_code。
+
+### 15.6 Focus Mode（专注模式状态扩展）
+
+落点：`host_brain/core/metabolism.py`（扩展现有 sys_mode 状态机）。
+
+15.6.1 状态定义
+- Focus 为 Normal 的子模式：{sys_mode: NORMAL, sub_mode: FOCUS}。
+- 进入条件：用户指令 / 定时策略 / 日历事件（均需 evidence）。
+- 退出条件：用户指令 / 定时策略到期 / 超时自动退出。
+
+15.6.2 能力矩阵影响
+- 主动对话：❌ 暂停（SYSMODE_FORBIDDEN）
+- 梦境/日记等非紧急调度任务：❌ 暂停
+- 桌面留言（用户请求触发）：✅ 允许
+- 用户主动提问：✅ 正常响应
+- 通知推送：❌ 静默
+
+15.6.3 审计
+- 进入/退出写 hard_state_log（原因、证据摘要、持续时长）。
+- 被拦截的调度任务写 scheduler_event_log（reason_code=SYSMODE_FORBIDDEN_FOCUS）。
+
+---
+
+## 16. 性能预算与时延可观测（NFR-PERF-001）
+
+定位：本章定义"响应时延预算"的工程契约——采集方式、阈值口径、超时退化策略与可观测报告结构，使 NFR-PERF-001 从 PRD 的定性描述变为可验证的工程基线。
+
+覆盖需求：NFR-PERF-001。
+回归口径：T-Perf-01（时延预算基准与超时退化）。
+
+### 16.1 时延预算定义（基准机器口径）
+
+基准机器：Host 侧 i7-12700 / 32GB RAM / SSD；Edge 侧 RTX 3060 12GB VRAM（或等价）。
+
+| 链路阶段 | 指标 | p50 目标 | p95 目标 | 超时硬限 |
+|----------|------|---------|---------|---------|
+| 普通对话（无执行） | 用户输入→Host 输出 narrative | ≤ 2000ms | ≤ 5000ms | 10000ms |
+| 执行链路（含 Skill） | 用户输入→skill_exec_log 写入 | ≤ 3000ms | ≤ 8000ms | 15000ms |
+| 检索链路（Embedding+Rerank+Fusion） | query→evidence_pack 输出 | ≤ 500ms | ≤ 1500ms | 3000ms |
+| LLM 外部调用（单次） | request→response | ≤ 1500ms | ≤ 4000ms | 8000ms |
+| Ledger 写入（单条） | write→commit | ≤ 5ms | ≤ 20ms | 100ms |
+| Edge ASR（单段转写） | audio_chunk→asr_chunk | ≤ 300ms | ≤ 800ms | 2000ms |
+| Edge TTS（合成+播放启动） | text→audio_start | ≤ 500ms | ≤ 1500ms | 3000ms |
+
+约束：
+- 阈值为指导性基线（非硬门禁），超出 p95 时必须在 quality.stage 中标注 PERF_DEGRADED 并记录 reason_code=PERF_TIMEOUT 或更精确子类。
+- 超时硬限到达时必须触发超时退化策略（见 16.2），不得无限阻塞。
+
+### 16.2 超时退化策略
+
+- LLM 调用超时：进入 Host 最小模板输出（不伪执行），quality.stage 标注 LLM_TIMEOUT，reason_code=PERF_LLM_TIMEOUT。
+- 检索链路超时：返回空 evidence_pack（字段稳定）+ quality.stage=RETRIEVAL_TIMEOUT，reason_code=PERF_RETRIEVAL_TIMEOUT。
+- Skill 执行超时：Governor 批准后执行超时，记录 skill_exec_log（result_status=TIMEOUT）+ reason_code=PERF_SKILL_TIMEOUT，返回降级输出。
+- Edge 超时（ASR/TTS）：Host 侧标注 DEPENDENCY_TIMEOUT，不阻塞主输出。
+
+### 16.3 时延采集与报告结构
+
+采集点（必须）：
+- Host 主链路：request_start_ms / llm_call_start_ms / llm_call_end_ms / governor_start_ms / governor_end_ms / skill_start_ms / skill_end_ms / response_end_ms。
+- 检索链路：embed_start_ms / embed_end_ms / rerank_start_ms / rerank_end_ms / fusion_end_ms。
+- Edge 链路：asr_start_ms / asr_end_ms / tts_start_ms / tts_audio_start_ms。
+
+采集写入位置：
+- 每次请求在审计链扩展字段中记录 `latency_breakdown`（JSON 对象，含上述时间戳对）。
+- 定期聚合报告（由 bench 脚本或观测面板按时间窗口输出 p50/p95/p99 统计）。
+
+报告结构（最小字段）：
+```
+{
+  "report_ts": "ISO8601",
+  "window_ms": 3600000,
+  "sample_count": 100,
+  "stages": {
+    "e2e_chat": {"p50_ms": ..., "p95_ms": ..., "p99_ms": ..., "timeout_count": ...},
+    "llm_call": {"p50_ms": ..., "p95_ms": ..., "p99_ms": ..., "timeout_count": ...},
+    "retrieval": {"p50_ms": ..., "p95_ms": ..., "p99_ms": ..., "timeout_count": ...},
+    "ledger_write": {"p50_ms": ..., "p95_ms": ..., "p99_ms": ..., "timeout_count": ...}
+  }
+}
+```
+
+### 16.4 新增验收测试编号
+
+- T-Perf-01（性能预算基准与超时退化）：
+  - 在基准机器上运行 bench 脚本，验证各阶段 p50/p95 是否在目标范围内；
+  - 模拟 LLM/检索/Skill 超时场景，验证退化策略生效（输出结构稳定 + quality.stage 标注超时阶段 + reason_code 可统计）；
+  - Ledger 写入性能基准（复用 ledger_bench.py）满足 p95 ≤ 20ms。
+
+### 16.5 新增错误码
+
+- PERF_TIMEOUT：通用时延超限
+- PERF_LLM_TIMEOUT：LLM 调用超时
+- PERF_RETRIEVAL_TIMEOUT：检索链路超时
+- PERF_SKILL_TIMEOUT：Skill 执行超时
+
+---
+
+本文件不再维护"PRD→DevSpec→DevTasks→Tests"的覆盖矩阵，以避免重复维护导致的状态过期与冲突。
 覆盖关系的唯一真相源是 Trace：docs/60_trace/requirements_trace.md。
 
 本文件（DevSpec）只承担两件事：
