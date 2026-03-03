@@ -1040,3 +1040,70 @@ def emit_asr_chunk(
         payload=payload,
         ts_ms=ts_ms,
     )
+
+
+# ---------------------------------------------------------------------------
+# M10-B: Canon 热词注入（ASR 热词 ← World Canon SSOT）
+# ---------------------------------------------------------------------------
+
+def inject_canon_hotwords(
+    host_url: str,
+    *,
+    max_words: int = 200,
+    timeout_s: float = 2.0,
+) -> int:
+    """从 Host `GET /canon/hotwords` 拉取热词并注入到 ASR 引擎。
+
+    M10-B FR-WCANON-001：Edge ASR 感知层扩展，将 World Canon 关键词注入热词表，
+    提升专有名词（人名/地名/术语）的语音识别准确率。
+
+    Args:
+        host_url: Host Brain 服务地址（例如 "http://localhost:8000"）。
+        max_words: 最大热词数量（默认 200）。
+        timeout_s: HTTP 请求超时秒数（默认 2.0s）。
+
+    Returns:
+        成功注入的热词数量。Host 不可达或热词列表为空时返回 0（降级，不抛异常）。
+    """
+    try:
+        import urllib.request
+        import json as _json
+
+        url = f"{host_url.rstrip('/')}/canon/hotwords?max_words={max_words}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                logger.warning(
+                    "inject_canon_hotwords: unexpected status %d from %s",
+                    resp.status, url,
+                )
+                return 0
+            data = _json.loads(resp.read().decode("utf-8"))
+
+        hotwords: list[str] = data.get("hotwords", [])
+        if not hotwords:
+            return 0
+
+        # 注入到模块级热词缓存（供 ASR 引擎在下次初始化时读取）
+        _CANON_HOTWORDS_CACHE.clear()
+        _CANON_HOTWORDS_CACHE.extend(hotwords)
+
+        logger.info(
+            "inject_canon_hotwords: injected %d hotwords from %s",
+            len(hotwords), host_url,
+        )
+        return len(hotwords)
+
+    except Exception as exc:
+        logger.warning("inject_canon_hotwords: failed to fetch hotwords: %s", exc)
+        return 0
+
+
+# 模块级热词缓存（供 ASR 引擎读取，线程安全：仅追加/清空，不并发修改）
+_CANON_HOTWORDS_CACHE: list[str] = []
+
+
+def get_canon_hotwords() -> list[str]:
+    """返回当前缓存的 Canon 热词列表（只读副本）。"""
+    return list(_CANON_HOTWORDS_CACHE)

@@ -844,3 +844,85 @@
 - 验收测试（T-xx）：T-REL-01
 - 当前进展（2026-03-03）：generate_m8_manifest() 实现 git hash + migration hashes + 测试通过数 + 性能基线快照 + 服务注册表快照；release/manifests/m8_release.json 已生成（15 migration 文件）；T-REL-01 全部通过（17 tests）。
 - 覆盖状态：DONE
+
+## R-85
+- 系统级需求：World Canon 文件 SSOT + 最小种子条目——在 host_brain/canon/world/ 下建立 World Canon 文件 SSOT，写入系统术语/架构不变量/人格核心设定各 1 条种子条目，所有条目 evidence_level=CANON_REFERENCE_ONLY，body 不含完成性表述
+- PRD 需求编号（FR）：FR-WCANON-001
+- 来源：PRD §4（FR）；PRD M9
+- DevSpec 落点：DevSpec §19.1.1
+- DevTasks（TASK）：TASK-0111
+- 验收测试（T-xx）：T-WCanon-04（前置）
+- 当前进展（2026-03-03）：wc-001-system-terms.json / wc-002-architecture-invariants.json / wc-003-persona-core.json 三个种子条目已创建，evidence_level=CANON_REFERENCE_ONLY，body QA 校验通过；tests/fixtures/canon/world/ fixture 副本已就绪；T-WCanon-04 前置条件满足。
+- 覆盖状态：DONE
+
+## R-86
+- 系统级需求：world_canon_doc 表 + canon_sync 幂等同步——SQLite Ledger 新增 world_canon_doc 表与 canon_proposal_log 表，canon_sync.py 实现幂等扫描（相同 hash 不重复写 change_log，失败记录 CANON_SYNC_FAILED）
+- PRD 需求编号（FR）：FR-WCANON-002
+- 来源：PRD §4（FR）；PRD M9
+- DevSpec 落点：DevSpec §19.1.2；DevSpec §19.1.4
+- DevTasks（TASK）：TASK-0112
+- 验收测试（T-xx）：T-WCanon-04
+- 当前进展（2026-03-03）：host_brain/audit/migrations/0015_world_canon_doc.sql + 0016_canon_proposal_log.sql 已创建；canon_sync.py 扩展 sync_world_canon() 幂等扫描逻辑；errors.py 新增 CANON_SYNC_FAILED / WCANON_SLOT_VIOLATION / WCANON_PROPOSAL_INVALID；T-WCanon-04 全部通过。
+- 覆盖状态：DONE
+
+## R-87
+- 系统级需求：context_pack 分槽 + QA 拦截 Canon-as-fact——context_pack.py 新增 authoritative.world_canon 独立槽位（Top-K，evidence_level=CANON_REFERENCE_ONLY），qa.py 拦截"World Canon 内容 + 完成性表述"组合并记录 CANON_AS_FACT_VIOLATION
+- PRD 需求编号（FR）：FR-WCANON-003；FR-WCANON-001；FR-CANON-001
+- 来源：PRD §4（FR）；PRD M9
+- DevSpec 落点：DevSpec §19.1.3
+- DevTasks（TASK）：TASK-0113
+- 验收测试（T-xx）：T-WCanon-05；T-WCanon-06
+- 当前进展（2026-03-03）：context_pack.py 扩展 build_world_canon_slot()，World Canon 条目仅注入 authoritative.world_canon 槽位；qa.py 扩展 check_canon_as_fact()，叙事含"Canon 内容 + 完成性表述"时拦截并记录 CANON_AS_FACT_VIOLATION，重写失败降级为 Host 最小模板；T-WCanon-05/T-WCanon-06 全部通过。
+- 覆盖状态：DONE
+
+## R-88
+- 系统级需求：World Canon Evolution 提案审核流程——提案写入 canon_proposal_log（status=pending），审核通过后触发 canon_sync.py 更新文件 SSOT，所有状态变更写 canon_change_log（含变更前后 hash）
+- PRD 需求编号（FR）：FR-WCANON-002
+- 来源：PRD §4（FR）；PRD M9
+- DevSpec 落点：DevSpec §19.1.4
+- DevTasks（TASK）：TASK-0114
+- 验收测试（T-xx）：T-WCanon-07
+- 当前进展（2026-03-03）：canon_world_store.py 扩展 submit_proposal()（写入 canon_proposal_log，status=pending）与 approve_proposal()（状态改为 approved，触发 sync，写 change_log）；非白名单流程不得直接修改 status（contract 断言）；T-WCanon-07 全部通过。
+- 覆盖状态：DONE
+
+## R-89
+- 系统级需求：日记 drift_suggestion 关联——diary_writer.py 提取 LLM 输出中的可选 drift_suggestion 字段，经 QA 校验后写入 canon_proposal_log（proposer=diary_writer，source_intent_id=日记 intent_id）；校验失败则丢弃并记录 WCANON_PROPOSAL_INVALID，不阻塞日记写入
+- PRD 需求编号（FR）：FR-DIARY-002
+- 来源：PRD §4（FR）；PRD M9
+- DevSpec 落点：DevSpec §19.2
+- DevTasks（TASK）：TASK-0115
+- 验收测试（T-xx）：T-Diary-03；T-Diary-04
+- 当前进展（2026-03-03）：diary_writer.py 扩展 _extract_drift_suggestion() + _submit_evolution_proposal()；errors.py 新增 DIARY_EVOLUTION_PROPOSAL_SKIPPED；drift_suggestion 合规时 canon_proposal_log 写入成功，source_intent_id 可追溯；含伪执行句时提案丢弃，日记正常写入；T-Diary-03/T-Diary-04 全部通过。
+- 覆盖状态：DONE
+
+---
+
+## M10-A Canon 治理 API（R-90~R-91）
+
+## R-90
+- 系统级需求：Canon 提案审核 REST API——将 M9 已落地的 submit_proposal() / approve_proposal_with_content() 暴露为 REST 端点（GET/POST /canon/proposals + approve/reject + GET /canon/documents），支持 Master 通过 HTTP 接口查询、提交、审核、拒绝 World Canon Evolution 提案；所有写操作审计串联（proposer_node_id 含 request_id）；幂等性（重复 proposal_id 返回 409 + WCANON_PROPOSAL_DUPLICATE）；结构稳定（含 reason_code）
+- PRD 需求编号（FR）：FR-WCANON-002
+- 来源：PRD §4（FR）；PRD M10-A
+- DevSpec 落点：DevSpec §20.2~20.4
+- DevTasks（TASK）：TASK-0117；TASK-0118；TASK-0119
+- 验收测试（T-xx）：T-Canon-API-01~08
+- 当前进展（2026-03-03）：host_brain/app/canon_routes.py 新增（7 个端点）；host_brain/memory/canon_world_store.py 扩展 reject_proposal()；host_brain/audit/sqlite_ledger.py 扩展 list_proposals()；host_brain/app/fastapi_app.py 注册 canon_router；host_brain/core/errors.py 新增 WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID；tests/contract/test_canon_api_contract.py 新增（10 tests，T-Canon-API-01~08 全部通过）；1041 tests passed。
+- 覆盖状态：DONE
+
+## R-91
+- 系统级需求：M10-A 发布清单锁定——生成 M10-A release manifest（git hash + migration hashes + world_canon_asset_hashes + test_passed_count=1041 + generated_at）
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：PRD §5（NFR）；PRD M10-A
+- DevSpec 落点：DevSpec §20
+- DevTasks（TASK）：TASK-0120
+- 验收测试（T-xx）：T-REL-01（复用）
+- 当前进展（2026-03-03）：requirements_trace.md 补写 R-90~R-91；DevTasks.md M10-A 状态更新为 DONE；PRD.md M10-A 状态更新为 DONE；1041 tests passed。
+- 覆盖状态：DONE
+
+| R-92 | FR-WCANON-001 | WorldCanonStore.extract_hotwords() | host_brain/memory/canon_world_store.py | T-Canon-HW-01~03 | DONE | M10-B |
+| R-93 | NFR-PERF-001 | GET /canon/hotwords 延迟 < 200ms | host_brain/app/canon_routes.py | T-Canon-HW-API-01~02 | DONE | M10-B |
+| R-94 | FR-ASR-001 | inject_canon_hotwords() 热词注入 | edge_client/senses/asr.py | T-ASR-HW-01~03 | DONE | M10-B |
+
+| R-95 | FR-MEM-001 | MemoryDistillationEngine.distill_top_k() | host_brain/memory/distillation.py | T-Distill-01~03 | DONE | M10-C |
+| R-96 | FR-MEM-002 | semantic_memory 表 + CRUD（log/get/list） | host_brain/audit/sqlite_ledger.py | T-Distill-04 | DONE | M10-C |
+| R-97 | FR-MEM-003 | context_pack.semantic_slot 可选分槽 + build_semantic_slot() | host_brain/core/context_pack.py | T-Distill-05~06 | DONE | M10-C |

@@ -2009,3 +2009,204 @@ GET /obs/metrics
 | T-WCanon-07 | FR-WCANON-002 | Evolution 提案写入/审核/变更 hash 可回放 |
 | T-Diary-03 | FR-DIARY-002 | 提案写入 + source_intent_id 串联 |
 | T-Diary-04 | FR-DIARY-002 | 提案 QA 拦截 + 日记正常写入 |
+
+---
+
+## §20 M10-A Canon 治理 API（FR-WCANON-002 扩展）
+
+> 对应 PRD M10-A（P0）：Canon 提案审核 REST API。
+> 将 M9 已落地的 `submit_proposal()` / `approve_proposal_with_content()` 暴露为可操作的 REST 端点，
+> 支持 Master 通过 HTTP 接口查询、提交、审核、拒绝 World Canon Evolution 提案。
+
+---
+
+### 20.1 设计原则
+
+1. **Host 主权不变**：所有写操作仍经 API-level 权限门控（`proposer_node_id` 强制标注来源），不引入旁路。
+2. **审计串联**：每个 API 调用产生 `request_id`，写操作必须将 `request_id` 写入 `canon_proposal_log.proposer_node_id`（格式：`api.canon_proposals::{request_id}`）。
+3. **幂等性**：`POST /canon/proposals`（提交提案）对相同 `proposal_id` 幂等（重复提交返回 409 + WCANON_PROPOSAL_DUPLICATE，不重复写入）。
+4. **结构稳定**：成功/拒绝/降级均返回统一 JSON 结构（`CanonProposalResponse`），含 `reason_code`。
+5. **只读端点无副作用**：`GET /canon/proposals` / `GET /canon/proposals/{proposal_id}` / `GET /canon/documents` 不修改任何状态。
+
+---
+
+### 20.2 REST 端点规格
+
+#### 20.2.1 端点清单
+
+| 方法 | 路径 | 描述 | 副作用 |
+|------|------|------|--------|
+| GET | `/canon/proposals` | 列出提案（分页，可按 status 过滤） | 无 |
+| POST | `/canon/proposals` | 提交新提案（status=pending） | 写 canon_proposal_log |
+| GET | `/canon/proposals/{proposal_id}` | 查询单个提案详情 | 无 |
+| POST | `/canon/proposals/{proposal_id}/approve` | 审核通过提案（触发 SSOT 写入） | 写 SSOT + canon_change_log |
+| POST | `/canon/proposals/{proposal_id}/reject` | 拒绝提案（status=rejected，不写 SSOT） | 写 canon_proposal_log（status 更新） |
+| GET | `/canon/documents` | 列出当前 World Canon 文档（SSOT 快照） | 无 |
+| GET | `/canon/documents/{doc_id}` | 查询单个 World Canon 文档 | 无 |
+
+#### 20.2.2 请求/响应 Schema
+
+**CanonProposalSubmitRequest**（POST /canon/proposals）：
+```json
+{
+  "proposal_id": "string（调用方生成，唯一）",
+  "target_doc_id": "string（目标 World Canon 文档 ID）",
+  "proposed_title": "string",
+  "proposed_tags": ["string"],
+  "proposed_body": "string（不得含完成性表述）",
+  "proposer_node_id": "string（可选，默认 api.canon_proposals）",
+  "summary": "string（可选，不超过 200 字）"
+}
+```
+
+**CanonProposalApproveRequest**（POST /canon/proposals/{id}/approve）：
+```json
+{
+  "proposed_title": "string",
+  "proposed_tags": ["string"],
+  "proposed_body": "string",
+  "approver_node_id": "string（可选，默认 api.canon_proposals.approve）"
+}
+```
+
+**CanonProposalRejectRequest**（POST /canon/proposals/{id}/reject）：
+```json
+{
+  "reason": "string（拒绝原因，不超过 200 字）",
+  "rejector_node_id": "string（可选）"
+}
+```
+
+**CanonProposalResponse**（统一响应结构）：
+```json
+{
+  "proposal_id": "string",
+  "target_doc_id": "string",
+  "status": "pending | approved | rejected | APPLIED",
+  "proposer_node_id": "string",
+  "summary": "string",
+  "proposed_hash": "string",
+  "base_version": "int",
+  "proposed_version": "int",
+  "ts_ms": "int",
+  "request_id": "string",
+  "reason_code": "string | null",
+  "timestamp": "int"
+}
+```
+
+**CanonDocumentResponse**（World Canon 文档响应）：
+```json
+{
+  "doc_id": "string",
+  "version": "int",
+  "hash": "string",
+  "status": "string",
+  "title": "string",
+  "tags": ["string"],
+  "body": "string",
+  "updated_by": "string",
+  "ts_ms": "int",
+  "source_path": "string",
+  "request_id": "string",
+  "timestamp": "int"
+}
+```
+
+**CanonProposalListResponse**（列表响应）：
+```json
+{
+  "items": ["CanonProposalResponse"],
+  "total": "int",
+  "page": "int",
+  "page_size": "int",
+  "request_id": "string",
+  "timestamp": "int"
+}
+```
+
+#### 20.2.3 错误码映射
+
+| HTTP 状态码 | reason_code | 触发场景 |
+|------------|-------------|---------|
+| 400 | WCANON_PROPOSAL_INVALID | 请求字段不合规（缺必填字段，或 body 含完成性表述） |
+| 404 | WCANON_PROPOSAL_NOT_FOUND | 提案 ID 不存在 |
+| 404 | WCANON_DOC_NOT_FOUND | World Canon 文档 ID 不存在 |
+| 409 | WCANON_PROPOSAL_DUPLICATE | 相同 proposal_id 已存在（幂等返回已有记录） |
+| 422 | WCANON_PROPOSAL_STATUS_INVALID | 提案 status 不是 pending（不可审核/拒绝） |
+| 500 | CANON_SYNC_FAILED | SSOT 文件写入失败 |
+
+---
+
+### 20.3 路由注册方式
+
+- 新建 `host_brain/app/canon_routes.py`，使用 `fastapi.APIRouter(prefix="/canon", tags=["canon"])`；
+- 在 `fastapi_app.py` 中 `app.include_router(canon_router)` 注册（路由自带 `/canon` 前缀）；
+- 路由依赖 `WorldCanonStore`（通过 `get_canon_store()` 依赖注入，延迟初始化，`world_root` 从环境变量 `Nastume_WORLD_CANON_ROOT` 读取，默认 `host_brain/canon/world`）；
+- 路由依赖 `SQLiteLedger`（复用 `get_ledger()`）。
+
+---
+
+### 20.4 审计串联要求
+
+- 每个写操作（POST /canon/proposals、approve、reject）必须：
+  - 生成 `request_id`（`new_request_id()`）；
+  - 将 `request_id` 写入 `canon_proposal_log.proposer_node_id`（格式：`api.canon_proposals::{request_id}`）；
+  - approve 时写 `canon_change_log`（通过 `upsert_document()` 内部完成）；
+  - reject 时写 `system_event_log`（event_type=WCANON_PROPOSAL_REJECTED，含 proposal_id + reason）。
+- 只读操作（GET）不写审计，但必须在响应中携带 `request_id`。
+
+---
+
+### 20.5 `reject_proposal()` 方法扩展（canon_world_store.py）
+
+M9 的 `WorldCanonStore` 缺少 `reject_proposal()` 方法，M10-A 需要补充：
+
+```python
+def reject_proposal(
+    self,
+    proposal_id: str,
+    *,
+    reason: str = "",
+    rejector_node_id: str = "api.canon_proposals.reject",
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    reject_ts = int(ts_ms if ts_ms is not None else now_ms())
+    proposal = self.ledger.get_proposal(proposal_id)
+    if proposal is None:
+        raise KeyError(f"proposal not found: {proposal_id}")
+    current_status = str(proposal.get("status", ""))
+    if current_status != "pending":
+        raise PermissionError(
+            f"proposal {proposal_id!r} cannot be rejected: "
+            f"current status is {current_status!r}, expected 'pending'"
+        )
+    self.ledger.update_proposal_status(proposal_id, new_status="rejected", ts_ms=reject_ts)
+    return {**proposal, "status": "rejected", "ts_ms": reject_ts, "reject_reason": reason}
+```
+
+---
+
+### 20.6 回归测试编号（M10-A 新增）
+
+| 编号 | 覆盖需求 | 断言口径 |
+|------|---------|---------|
+| T-Canon-API-01 | FR-WCANON-002 | POST /canon/proposals 提交成功，status=pending，proposal_id 可查询 |
+| T-Canon-API-02 | FR-WCANON-002 | POST /canon/proposals 重复 proposal_id 返回 409 + WCANON_PROPOSAL_DUPLICATE |
+| T-Canon-API-03 | FR-WCANON-002 | POST /canon/proposals body 含完成性表述返回 400 + WCANON_PROPOSAL_INVALID |
+| T-Canon-API-04 | FR-WCANON-002 | POST /canon/proposals/{id}/approve 审核通过，SSOT 文件更新，canon_change_log 可回放 |
+| T-Canon-API-05 | FR-WCANON-002 | POST /canon/proposals/{id}/approve 对非 pending 提案返回 422 + WCANON_PROPOSAL_STATUS_INVALID |
+| T-Canon-API-06 | FR-WCANON-002 | POST /canon/proposals/{id}/reject 拒绝成功，status=rejected，SSOT 不变 |
+| T-Canon-API-07 | FR-WCANON-002 | GET /canon/proposals 分页列表，status 过滤正确 |
+| T-Canon-API-08 | FR-WCANON-001 | GET /canon/documents 返回当前 SSOT 快照（3 个种子条目） |
+
+---
+
+### 20.7 M10-A 新增错误码汇总
+
+| 错误码 | 触发场景 |
+|--------|---------|
+| WCANON_PROPOSAL_NOT_FOUND | 提案 ID 不存在 |
+| WCANON_DOC_NOT_FOUND | World Canon 文档 ID 不存在 |
+| WCANON_PROPOSAL_DUPLICATE | 相同 proposal_id 已存在 |
+| WCANON_PROPOSAL_STATUS_INVALID | 提案 status 不允许当前操作（非 pending） |

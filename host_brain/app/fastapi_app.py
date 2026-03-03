@@ -37,6 +37,7 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
 from host_brain.observability.cross_timeline import build_cross_timeline
 from host_brain.app.web_ui import router as web_ui_router
+from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 
 
 # HTTP契约模型定义
@@ -214,6 +215,11 @@ app = FastAPI(
 app.include_router(web_ui_router, prefix="/api")
 
 # ---------------------------------------------------------------------------
+# 注册 Canon 治理 API 路由（M10-A TASK-0118: Canon 提案审核 REST API）
+# ---------------------------------------------------------------------------
+app.include_router(canon_router)
+
+# ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -256,6 +262,10 @@ def get_ledger() -> SQLiteLedger:
         db_path = os.environ.get("Nastume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
+
+
+# 注入 ledger provider 到 canon_routes（消除循环导入风险，P1-R118-2）
+_set_canon_ledger_provider(get_ledger)
 
 
 def get_intent_engine() -> IntentDecisionEngine:

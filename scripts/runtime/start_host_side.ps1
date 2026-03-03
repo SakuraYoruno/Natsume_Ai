@@ -287,6 +287,24 @@ try {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
+# ── M9 TASK-0112: World Canon Sync 健康探测 ──────────────────────────────
+$canonSyncStatus = "ok"
+
+# 探测 /health/canon_sync（若端点不存在则视为 degraded，非阻断）
+$canonSyncHealthUrl = "http://$probeHost`:$Port/health/canon_sync"
+try {
+  $canonSyncResp = Invoke-WebRequest -Uri $canonSyncHealthUrl -UseBasicParsing -TimeoutSec 5
+  if ($canonSyncResp.StatusCode -lt 200 -or $canonSyncResp.StatusCode -ge 300) {
+    $canonSyncStatus = "degraded"
+    $startupWarnings += "STARTUP_CANON_SYNC_DEGRADED"
+  }
+} catch {
+  # /health/canon_sync 端点不存在时视为 degraded（非阻断，M9 可选探测）
+  $canonSyncStatus = "degraded"
+  $startupWarnings += "STARTUP_CANON_SYNC_DEGRADED"
+}
+# ────────────────────────────────────────────────────────────────────────────
+
 $result = [ordered]@{
   side = "host"
   status = "started"
@@ -301,6 +319,7 @@ $result = [ordered]@{
   local_services = $localServices
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus
+  canon_sync_status = $canonSyncStatus
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10

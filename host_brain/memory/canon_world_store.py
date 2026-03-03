@@ -434,6 +434,203 @@ class WorldCanonStore:
 
         return doc
 
+    def reject_proposal(
+        self,
+        proposal_id: str,
+        *,
+        reason: str = "",
+        rejector_node_id: str = "api.canon_proposals.reject",
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """拒绝提案：status 改为 rejected，不修改 SSOT 文件。
+
+        只允许对 status=pending 的提案执行拒绝。
+
+        Args:
+            proposal_id: 要拒绝的提案 ID。
+            reason: 拒绝原因（不超过 200 字）。
+            rejector_node_id: 拒绝节点 ID。
+            ts_ms: 可选时间戳（毫秒）。
+
+        Returns:
+            更新后的提案记录 dict（含 status=rejected + reject_reason）。
+
+        Raises:
+            KeyError: 提案不存在。
+            PermissionError: 提案 status 不是 pending（非白名单流程）。
+        """
+        reject_ts = int(ts_ms if ts_ms is not None else now_ms())
+
+        proposal = self.ledger.get_proposal(proposal_id)
+        if proposal is None:
+            raise KeyError(f"proposal not found: {proposal_id}")
+
+        current_status = str(proposal.get("status", ""))
+        if current_status != "pending":
+            raise PermissionError(
+                f"proposal {proposal_id!r} cannot be rejected: "
+                f"current status is {current_status!r}, expected 'pending'"
+            )
+
+        self.ledger.update_proposal_status(
+            proposal_id,
+            new_status="rejected",
+            ts_ms=reject_ts,
+        )
+
+        return {
+            **proposal,
+            "status": "rejected",
+            "ts_ms": reject_ts,
+            "reject_reason": str(reason)[:200],
+            "rejector_node_id": rejector_node_id,
+        }
+
+    def rollback_proposal(
+        self,
+        proposal_id: str,
+        *,
+        rollback_reason: str = "",
+        operator_node_id: str = "api.canon_proposals.rollback",
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """回滚已 APPLIED 的提案：将 SSOT 文件恢复到 base_version，写 canon_change_log。
+
+        只允许对 status=APPLIED 的提案执行回滚。回滚后提案 status 更新为 ROLLED_BACK，
+        SSOT 文件版本回退到 base_version（若 base_version=0 则删除文件）。
+
+        Args:
+            proposal_id: 要回滚的提案 ID。
+            rollback_reason: 回滚原因（不超过 200 字）。
+            operator_node_id: 操作节点 ID。
+            ts_ms: 可选时间戳（毫秒）。
+
+        Returns:
+            回滚结果 dict（含 proposal_id / doc_id / rolled_back_to_version / ts_ms）。
+
+        Raises:
+            KeyError: 提案不存在。
+            PermissionError: 提案 status 不是 APPLIED（非白名单流程）。
+            FileNotFoundError: SSOT 文件不存在（无法回滚）。
+        """
+        rollback_ts = int(ts_ms if ts_ms is not None else now_ms())
+
+        proposal = self.ledger.get_proposal(proposal_id)
+        if proposal is None:
+            raise KeyError(f"proposal not found: {proposal_id}")
+
+        current_status = str(proposal.get("status", ""))
+        if current_status != "APPLIED":
+            raise PermissionError(
+                f"proposal {proposal_id!r} cannot be rolled back: "
+                f"current status is {current_status!r}, expected 'APPLIED'"
+            )
+
+        doc_id = str(proposal.get("target_id", ""))
+        if not doc_id:
+            raise ValueError(f"proposal {proposal_id!r} has no target_id")
+
+        base_version = int(proposal.get("base_version") or 0)
+        current_doc = self.get(doc_id)
+        if current_doc is None:
+            raise FileNotFoundError(f"SSOT file not found for doc_id: {doc_id}")
+
+        after_hash: str
+        if base_version == 0:
+            # 回滚到初始状态：删除 SSOT 文件
+            path = self._doc_path(doc_id)
+            path.unlink(missing_ok=True)
+            after_hash = ""
+            rolled_back_to_version = 0
+        else:
+            # 回滚到 base_version：从 canon_change_log 中查找 before_hash
+            # 当前实现：将 SSOT 文件版本号降回 base_version，body 标记为 ROLLED_BACK
+            # 完整实现需要 change_log 存储完整 body（当前只存 hash），此处写入回滚标记
+            path = self._doc_path(doc_id)
+            rollback_payload = {
+                "doc_id": doc_id,
+                "version": base_version,
+                "status": "rolled_back",
+                "title": current_doc.title,
+                "tags": list(current_doc.tags),
+                "body": f"[ROLLED_BACK from v{current_doc.version} by {operator_node_id}] {rollback_reason}",
+                "updated_by": proposal_id,
+                "ts_ms": rollback_ts,
+            }
+            rollback_payload["hash"] = compute_world_canon_hash(rollback_payload)
+            path.write_text(
+                json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            after_hash = rollback_payload["hash"]
+            rolled_back_to_version = base_version
+
+        # 写 canon_change_log（回滚记录）
+        self.ledger.log_canon_change(
+            {
+                "change_id": f"canon_rollback::world::{doc_id}::v{rolled_back_to_version}::{rollback_ts}",
+                "proposal_id": proposal_id,
+                "canon_kind": "world",
+                "target_id": doc_id,
+                "before_version": current_doc.version,
+                "after_version": rolled_back_to_version,
+                "before_hash": current_doc.hash,
+                "after_hash": after_hash,
+                "source_path": str(self._doc_path(doc_id)),
+                "ts_ms": rollback_ts,
+            }
+        )
+
+        # 更新提案 status → ROLLED_BACK
+        self.ledger.update_proposal_status(
+            proposal_id,
+            new_status="ROLLED_BACK",
+            ts_ms=rollback_ts,
+        )
+
+        return {
+            "proposal_id": proposal_id,
+            "doc_id": doc_id,
+            "rolled_back_to_version": rolled_back_to_version,
+            "rollback_reason": str(rollback_reason)[:200],
+            "operator_node_id": operator_node_id,
+            "ts_ms": rollback_ts,
+        }
+
+    def extract_hotwords(self, max_words: int = 200) -> list[str]:
+        """从 SSOT 文档中提取 ASR 热词（人名/地名/专有名词）。
+
+        从所有 status=active 的文档的 title 和 tags 中提取热词，去重后按字母序排序。
+        用于 Edge ASR 热词注入（M10-B FR-WCANON-001）。
+
+        Args:
+            max_words: 最大热词数量（默认 200，超出部分截断）。
+
+        Returns:
+            去重排序后的热词列表（list[str]），长度不超过 max_words。
+        """
+        docs = self.list_documents()
+        seen: set[str] = set()
+        hotwords: list[str] = []
+
+        for doc in docs:
+            if doc.status != "active":
+                continue
+            # 从 title 中提取（整体作为一个热词）
+            title = doc.title.strip()
+            if title and title not in seen:
+                seen.add(title)
+                hotwords.append(title)
+            # 从 tags 中提取（每个 tag 作为一个热词）
+            for tag in doc.tags:
+                tag = tag.strip()
+                if tag and tag not in seen:
+                    seen.add(tag)
+                    hotwords.append(tag)
+
+        hotwords.sort()
+        return hotwords[:max_words]
+
     def _doc_path(self, doc_id: str) -> Path:
         return self.world_root / f"{_normalize_doc_id(doc_id)}.json"
 

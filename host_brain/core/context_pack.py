@@ -27,6 +27,11 @@ EXPECTED_SLOTS: dict[str, type] = {
     "tool_meta_pack": list,
 }
 
+# M10-C: 可选槽位（不强制要求，存在时验证格式）
+OPTIONAL_SLOTS: dict[str, type] = {
+    "semantic_slot": list,  # 语义记忆槽位（记忆蒸馏结果）
+}
+
 
 @dataclass(frozen=True)
 class ContextPackViolation:
@@ -82,7 +87,7 @@ def validate_context_pack(context_pack: dict[str, Any]) -> ContextPackValidation
             )
 
     for slot_name in context_pack.keys():
-        if slot_name not in EXPECTED_SLOTS:
+        if slot_name not in EXPECTED_SLOTS and slot_name not in OPTIONAL_SLOTS:
             result.add(CP_UNKNOWN_SLOT, f"unknown slot is not allowed: {slot_name}", slot=slot_name)
 
     if not result.valid:
@@ -93,6 +98,9 @@ def validate_context_pack(context_pack: dict[str, Any]) -> ContextPackValidation
     _validate_style_pack_slot(context_pack["style_pack"], result)
     _validate_bond_summary_slot(context_pack["bond_summary"], result)
     _validate_tool_meta_pack_slot(context_pack["tool_meta_pack"], result)
+    # M10-C: semantic_slot 可选，存在时验证格式
+    if "semantic_slot" in context_pack:
+        _validate_semantic_slot(context_pack["semantic_slot"], result)
     return result
 
 
@@ -363,6 +371,69 @@ def build_world_canon_slot(
                 "unsafe_as_fact": True,
                 "reference_mode": "citation_only",
                 "citation": f"world_canon:{doc.doc_id}@v{doc.version}:{doc.hash[:12]}",
+            }
+        )
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# M10-C: 语义记忆槽位（记忆蒸馏结果注入）
+# ---------------------------------------------------------------------------
+
+def _validate_semantic_slot(
+    semantic_slot: list[Any], result: ContextPackValidationResult
+) -> None:
+    """验证 semantic_slot 分槽格式。"""
+    for index, item in enumerate(semantic_slot):
+        if not isinstance(item, dict):
+            result.add(
+                CP_SLOT_TYPE_INVALID,
+                f"semantic_slot[{index}] must be object, got {type(item).__name__}",
+                slot="semantic_slot",
+            )
+            continue
+        # 必须包含 semantic_id 和 summary
+        if "semantic_id" not in item:
+            result.add(
+                CP_SLOT_TYPE_INVALID,
+                f"semantic_slot[{index}] missing required field: semantic_id",
+                slot="semantic_slot",
+            )
+        if "summary" not in item:
+            result.add(
+                CP_SLOT_TYPE_INVALID,
+                f"semantic_slot[{index}] missing required field: summary",
+                slot="semantic_slot",
+            )
+
+
+def build_semantic_slot(
+    *,
+    ledger: "SQLiteLedger",
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """从 semantic_memory 表中取 Top-K 最新语义记忆，构建 semantic_slot 列表。
+
+    Args:
+        ledger: SQLite 审计账本（读取 semantic_memory 表）。
+        top_k: 最多注入条目数（默认 5）。
+
+    Returns:
+        list[dict]，可直接赋值给 context_pack["semantic_slot"]。
+    """
+    items, _ = ledger.list_semantic_memories(limit=top_k, offset=0)
+    entries: list[dict[str, Any]] = []
+    for item in items:
+        entries.append(
+            {
+                "slot": "semantic_slot",
+                "semantic_id": item["semantic_id"],
+                "summary": item["summary"],
+                "distill_strategy": item.get("distill_strategy", "merge_top_k"),
+                "confidence": item.get("confidence", 0.0),
+                "tags": list(item.get("tags", [])),
+                "source_count": len(item.get("source_memory_ids", [])),
+                "ts_ms": item.get("ts_ms", 0),
             }
         )
     return entries
