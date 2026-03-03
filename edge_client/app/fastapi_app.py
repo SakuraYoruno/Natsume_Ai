@@ -328,7 +328,7 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
         request_id=envelope.request_id,
         payload=envelope.payload,
         ts_ms=envelope.ts_ms,
-        auto_start=False,
+        auto_start=True,
     )
     result = pipeline_result.queue_result
     return EdgeGatewayResult(
