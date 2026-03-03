@@ -43,8 +43,8 @@ from tools.replay.production_drill import run_drill_suite
 
 
 ROOT = REPO_ROOT
-DEFAULT_ENV_FILE = ROOT / "configs" / "runtime" / "local_services.env"
-DEFAULT_ENV_FALLBACK_FILE = ROOT / "configs" / "runtime" / "local_services.env.example"
+DEFAULT_ENV_FILE = ROOT / ".env"
+DEFAULT_ENV_FALLBACK_FILE = ROOT / ".env.example"
 DEFAULT_NODE_INVENTORY = ROOT / "configs" / "deploy" / "node_inventory_9.json"
 DEFAULT_KEY_PROFILES = ROOT / "configs" / "secrets" / "key_profiles.runtime.json"
 DEFAULT_KEY_PROFILES_FALLBACK = ROOT / "configs" / "secrets" / "key_profiles.example.json"

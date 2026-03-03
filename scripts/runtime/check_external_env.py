@@ -12,8 +12,8 @@ from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[2]
-LOCAL_ENV_FILE = ROOT / "configs" / "runtime" / "local_services.env"
-LOCAL_ENV_FALLBACK_FILE = ROOT / "configs" / "runtime" / "local_services.env.example"
+LOCAL_ENV_FILE = ROOT / ".env"
+LOCAL_ENV_FALLBACK_FILE = ROOT / ".env.example"
 LOCAL_SECRET_STORE = ROOT / "configs" / "secrets" / "secret_store.runtime.local.json"
 LOCAL_SECRET_STORE_FALLBACK = ROOT / "configs" / "secrets" / "secret_store.runtime.example.json"
 

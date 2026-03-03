@@ -6,7 +6,6 @@ import argparse
 import logging
 import os
 import sys
-from typing import Optional
 
 from host_brain.app.fastapi_app import app
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
@@ -19,16 +18,22 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Nastume AI Host Brain - AI agent orchestration runtime"
     )
+    default_host = str(os.environ.get("HOST_APP_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    default_port = _env_int(os.environ.get("HOST_APP_PORT"), default=8000, min_value=1, max_value=65535)
+    default_log_level = str(os.environ.get("HOST_APP_LOG_LEVEL") or "INFO").strip().upper() or "INFO"
+    if default_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        default_log_level = "INFO"
+    default_db_path = str(os.environ.get("Nastume_AUDIT_DB") or ":memory:").strip() or ":memory:"
 
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
+        default=default_host,
         help="Host address to bind (default: 0.0.0.0)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
+        default=default_port,
         help="Port to bind (default: 8000)",
     )
     parser.add_argument(
@@ -39,12 +44,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
+        default=default_log_level,
         help="Log level (default: INFO)",
     )
     parser.add_argument(
         "--db-path",
-        default=":memory:",
+        default=default_db_path,
         help="SQLite database path (default: :memory:)",
     )
     parser.add_argument(
@@ -105,6 +110,16 @@ def run_startup_check(db_path: str) -> bool:
             extra={"request_id": request_id, "error": str(exc)},
         )
         return False
+
+
+def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> int:
+    if value is None or str(value).strip() == "":
+        return int(default)
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        return int(default)
+    return min(max(parsed, min_value), max_value)
 
 
 def main() -> int:

@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
@@ -62,6 +62,55 @@ class SandboxConfig:
     require_container: bool = False
 
 
+def load_sandbox_config(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> SandboxConfig:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    isolation_backend = str(
+        merged.get("SANDBOX_ISOLATION_BACKEND", ISOLATION_BACKEND_SUBPROCESS)
+    ).strip().lower()
+    if isolation_backend not in _SUPPORTED_ISOLATION_BACKENDS:
+        isolation_backend = ISOLATION_BACKEND_SUBPROCESS
+
+    return SandboxConfig(
+        timeout_s=_env_int(
+            merged.get("SANDBOX_TIMEOUT_S"),
+            default=DEFAULT_TIMEOUT_S,
+            min_value=1,
+            max_value=MAX_TIMEOUT_S,
+        ),
+        max_stdout_bytes=_env_int(
+            merged.get("SANDBOX_MAX_STDOUT_BYTES"),
+            default=DEFAULT_MAX_STDOUT_BYTES,
+            min_value=1024,
+            max_value=64 * 1024 * 1024,
+        ),
+        max_stderr_bytes=_env_int(
+            merged.get("SANDBOX_MAX_STDERR_BYTES"),
+            default=DEFAULT_MAX_STDERR_BYTES,
+            min_value=1024,
+            max_value=64 * 1024 * 1024,
+        ),
+        max_code_bytes=_env_int(
+            merged.get("SANDBOX_MAX_CODE_BYTES"),
+            default=DEFAULT_MAX_CODE_BYTES,
+            min_value=1024,
+            max_value=1024 * 1024,
+        ),
+        python_executable=str(merged.get("SANDBOX_PYTHON_EXECUTABLE") or "python").strip() or "python",
+        allow_network=_env_bool(merged.get("SANDBOX_ALLOW_NETWORK"), default=False),
+        allow_fs_write=_env_bool(merged.get("SANDBOX_ALLOW_FS_WRITE"), default=False),
+        enabled=_env_bool(merged.get("SANDBOX_ENABLED"), default=True),
+        isolation_backend=isolation_backend,
+        require_container=_env_bool(merged.get("SANDBOX_REQUIRE_CONTAINER"), default=False),
+    )
+
+
 @dataclass(frozen=True)
 class SandboxExecResult:
     sandbox_id: str
@@ -110,6 +159,27 @@ def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
     return truncated, True
 
 
+def _env_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _env_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    if value is None or str(value).strip() == "":
+        return int(default)
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        return int(default)
+    return min(max(parsed, min_value), max_value)
+
+
 def _is_production_env() -> bool:
     env = str(os.environ.get("Nastume_ENV", "")).strip().lower()
     return env in _PROD_ENV_VALUES
@@ -122,7 +192,7 @@ class SandboxExecutor:
         config: Optional[SandboxConfig] = None,
         ledger: Optional[SQLiteLedger] = None,
     ) -> None:
-        self.config = config or SandboxConfig()
+        self.config = config or load_sandbox_config()
         self.ledger = ledger
 
     def execute(

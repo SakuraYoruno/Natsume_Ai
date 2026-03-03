@@ -11,11 +11,12 @@
 from __future__ import annotations
 
 import abc
+import os
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.core.errors import (
     RATE_LIMIT_BACKEND_DEGRADED,
@@ -45,6 +46,56 @@ class RateLimitConfig:
     redis_url: str = "redis://localhost:6379/0"
     redis_key_prefix: str = "Nastume:ratelimit:"
     redis_timeout_ms: int = 1_000
+
+
+def load_rate_limit_config(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> RateLimitConfig:
+    merged: dict[str, Any] = dict(env or os.environ)
+    if local_overrides:
+        merged.update(dict(local_overrides))
+
+    backend = str(merged.get("HOST_RATE_LIMIT_BACKEND") or BACKEND_MEMORY).strip().lower()
+    if backend not in ALLOWED_BACKENDS:
+        backend = BACKEND_MEMORY
+
+    sqlite_db_path = (
+        str(merged.get("HOST_RATE_LIMIT_SQLITE_DB_PATH") or "").strip()
+        or str(merged.get("Nastume_AUDIT_DB") or "").strip()
+        or ":memory:"
+    )
+
+    return RateLimitConfig(
+        backend=backend,
+        window_ms=_parse_int(
+            merged.get("HOST_RATE_LIMIT_WINDOW_MS"),
+            default=DEFAULT_WINDOW_MS,
+            min_value=1000,
+            max_value=3_600_000,
+        ),
+        max_requests=_parse_int(
+            merged.get("HOST_RATE_LIMIT_MAX_REQUESTS"),
+            default=DEFAULT_MAX_REQUESTS,
+            min_value=1,
+            max_value=1_000_000,
+        ),
+        sqlite_db_path=sqlite_db_path,
+        redis_url=str(merged.get("HOST_RATE_LIMIT_REDIS_URL") or "redis://localhost:6379/0").strip()
+        or "redis://localhost:6379/0",
+        redis_key_prefix=str(
+            merged.get("HOST_RATE_LIMIT_REDIS_KEY_PREFIX")
+            or "Nastume:ratelimit:"
+        ).strip()
+        or "Nastume:ratelimit:",
+        redis_timeout_ms=_parse_int(
+            merged.get("HOST_RATE_LIMIT_REDIS_TIMEOUT_MS"),
+            default=1_000,
+            min_value=50,
+            max_value=60_000,
+        ),
+    )
 
 
 @dataclass
@@ -437,7 +488,7 @@ def create_rate_limit_store(config: RateLimitConfig | None = None) -> RateLimitS
     - sqlite：返回 SQLiteRateLimitStore
     - redis：尝试创建 RedisRateLimitStore，失败时降级到 InMemory
     """
-    cfg = config or RateLimitConfig()
+    cfg = config or load_rate_limit_config()
     backend = str(cfg.backend).strip().lower()
 
     if backend == BACKEND_MEMORY:
@@ -587,13 +638,23 @@ class RateLimitChecker:
 
 def create_rate_limit_checker(config: RateLimitConfig | None = None) -> RateLimitChecker:
     """便捷入口：按配置创建 Rate Limit 检查器。"""
-    cfg = config or RateLimitConfig()
+    cfg = config or load_rate_limit_config()
     store = create_rate_limit_store(cfg)
     return RateLimitChecker(
         store=store,
         max_requests=cfg.max_requests,
         window_ms=cfg.window_ms,
     )
+
+
+def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    if value is None or str(value).strip() == "":
+        return int(default)
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        return int(default)
+    return min(max(parsed, min_value), max_value)
 
 
 def _now_ms() -> int:

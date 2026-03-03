@@ -111,12 +111,12 @@ function Wait-Http {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
-  $EnvFile = Join-Path $repoRoot "configs\runtime\local_services.env"
-}
-if (-not (Test-Path -Path $EnvFile)) {
-  $fallbackEnvFile = Join-Path $repoRoot "configs\runtime\local_services.env.example"
-  if (Test-Path -Path $fallbackEnvFile) {
-    $EnvFile = $fallbackEnvFile
+  $defaultEnv = Join-Path $repoRoot ".env"
+  $fallbackEnv = Join-Path $repoRoot ".env.example"
+  if (Test-Path -Path $defaultEnv) {
+    $EnvFile = $defaultEnv
+  } else {
+    $EnvFile = $fallbackEnv
   }
 }
 
