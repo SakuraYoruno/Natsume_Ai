@@ -641,6 +641,7 @@ M4 体验包（低风险）：FR-SCHED（调度器前置）+ FR-DESKTOP（桌面
 M5 视觉自动化（高门槛）：FR-VISION 全量验收 — **DONE**（2026-03-02）
 M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）— **DONE**（2026-03-02）
 M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **DONE**（2026-03-03：914 passed，OBS/MCP/VOICE 全量实现）
+M8 运行时集成闭环：NFR-PERF-001（性能基线采集）+ NFR-REL-001（故障注入矩阵全通过）+ FR-CORE-004（冷启动端到端可验收）+ 运行时脚本集成（OBS/MCP 新模块接入 start_host_side.ps1）— **PRD_READY**（2026-03-03：需求已清晰，待 DevSpec 工程契约）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单

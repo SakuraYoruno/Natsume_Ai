@@ -1574,3 +1574,75 @@ TASK-XXXX 标题
   - T-VOICE-05 全部通过。
 - 涉及文件路径：edge_client/resource/resource_gate.py（新增）；edge_client/resource/__init__.py（新增）；host_brain/core/errors.py；tests/contract/test_resource_gate_contract.py（新增）；tests/fixtures/voice/。
 - 关联需求/测试：FR-VOICE-005；T-VOICE-05。
+
+---
+
+## M8 运行时集成闭环（TASK-0107~0110）
+
+> 对应 DevSpec §18；PRD M8（NFR-PERF-001、NFR-REL-001、FR-CORE-004）。
+> 所有任务当前状态：TASK_READY。
+
+### TASK-0107 运行时脚本集成：start_host_side.ps1 接入 OBS/MCP 健康探测（M8 P0）
+- 任务描述：扩展 `start_host_side.ps1`，在 `/health` 通过后额外探测 `/obs/metrics` 与 `MCPToolRegistry.health_check()`，将 OBS/MCP 子系统健康状态写入启动结果 JSON，不可用时输出 `startup_warnings` 但不阻断启动。
+- 输入：DevSpec §18.1.1；scripts/runtime/start_host_side.ps1（现有）；host_brain/obs/routes.py；host_brain/mcp/tool_registry.py。
+- 输出：
+  - `scripts/runtime/start_host_side.ps1` 扩展：新增 `/obs/metrics` HTTP 探测逻辑 + `MCPToolRegistry` SQLite 可写性检查；
+  - 启动结果 JSON 新增字段：`obs_status`（ok/degraded）、`mcp_registry_status`（ok/degraded）、`startup_warnings`（列表）；
+  - `host_brain/core/errors.py` 扩展：`STARTUP_OBS_DEGRADED`、`STARTUP_MCP_DEGRADED` 错误码；
+  - `tests/contract/test_startup_integration_contract.py`（新增）：T-RT-01 验收测试（启动结果 JSON 字段完整性 + OBS/MCP 状态可观测）；
+  - `tests/fixtures/runtime/`（新增）：startup_ok.json / startup_obs_degraded.json / startup_mcp_degraded.json。
+- 验收标准：
+  - 正常启动：`obs_status=ok`、`mcp_registry_status=ok`、`startup_warnings=[]`；
+  - OBS 不可用：`obs_status=degraded`、`startup_warnings` 含 `STARTUP_OBS_DEGRADED`，进程仍启动；
+  - MCP SQLite 不可写：`mcp_registry_status=degraded`、`startup_warnings` 含 `STARTUP_MCP_DEGRADED`，进程仍启动；
+  - T-RT-01 全部通过。
+- 涉及文件路径：scripts/runtime/start_host_side.ps1；host_brain/core/errors.py；tests/contract/test_startup_integration_contract.py（新增）；tests/fixtures/runtime/。
+- 关联需求/测试：NFR-REL-001；T-RT-01。
+
+### TASK-0108 端到端 Smoke Test：冷启动闭环 + 执行链路 + 故障注入矩阵（M8 P0）
+- 任务描述：实现三个端到端 Smoke 测试场景：① 冷启动最小闭环（无外部依赖）、② 执行链路（approval_token + undo）、③ 故障注入矩阵（Neo4j/Chroma/LLM/Edge 各自不可用时输出结构稳定）。
+- 输入：DevSpec §18.2.1；host_brain/app/fastapi_app.py；host_brain/audit/sqlite_ledger.py；host_brain/governor/decision.py；host_brain/skills/loader.py；host_brain/lsp/vault.py。
+- 输出：
+  - `tests/e2e/test_cold_start_e2e.py`（新增）：T-E2E-01（冷启动最小闭环）；
+  - `tests/e2e/test_exec_chain_e2e.py`（新增）：T-E2E-02（执行链路 + undo）；
+  - `tests/e2e/test_fault_injection_e2e.py`（新增）：T-E2E-03（故障注入矩阵：Neo4j/Chroma/LLM/Edge）；
+  - `tests/fixtures/e2e/`（新增）：cold_start_input.json / exec_chain_input.json / fault_injection_matrix.json。
+- 验收标准：
+  - T-E2E-01：无外部依赖下响应为合法 JSON，`quality.stage` 含降级标记，SQLite 有 intent_log + governor_log，无伪执行宣告；
+  - T-E2E-02：执行链路完整（APPROVE→token→exec→manifest），undo 后文件恢复，vault_gc_log 不删有效 undo 窗口材料；
+  - T-E2E-03：4 种故障注入下输出结构均稳定，`reason_code` 均可统计；
+  - T-E2E-01~03 全部通过。
+- 涉及文件路径：tests/e2e/test_cold_start_e2e.py（新增）；tests/e2e/test_exec_chain_e2e.py（新增）；tests/e2e/test_fault_injection_e2e.py（新增）；tests/fixtures/e2e/。
+- 关联需求/测试：FR-CORE-004；NFR-REL-001；T-E2E-01~03。
+
+### TASK-0109 性能基线采集：p50/p95 时延指标 + /obs/metrics 扩展（M8 P1）
+- 任务描述：在 `MetricsCollector` 中新增 `latency_baseline` 聚合逻辑，从 `retrieval_event_log`/`governor_log`/`skill_exec_log` 计算 p50/p95，并在 `/obs/metrics` 响应中暴露；新增 `PERF_BASELINE_STALE` 错误码（采样数据超 24h 未更新）。
+- 输入：DevSpec §18.3.1；host_brain/obs/metrics.py（现有 MetricsCollector）；host_brain/audit/sqlite_ledger.py（retrieval_event_log/governor_log/skill_exec_log）。
+- 输出：
+  - `host_brain/obs/metrics.py` 扩展：`collect_latency_baseline()` 方法，计算 p50/p95 并返回 `latency_baseline` 字典；
+  - `host_brain/obs/routes.py` 扩展：`/obs/metrics` 响应中包含 `latency_baseline` 字段；
+  - `host_brain/core/errors.py` 扩展：`PERF_BASELINE_STALE` 错误码；
+  - `tests/contract/test_perf_baseline_contract.py`（新增）：T-PERF-01 验收测试（字段结构稳定 + 采样计数 > 0 + 时延值合理范围）；
+  - `tests/fixtures/obs/` 扩展：metrics_with_latency.json。
+- 验收标准：
+  - `latency_baseline` 字段包含 retrieval_p50_ms/retrieval_p95_ms/governor_p50_ms/governor_p95_ms/skill_exec_p50_ms/skill_exec_p95_ms/sampled_at/sample_count；
+  - `sample_count > 0` 时时延值为正整数；
+  - `sample_count = 0` 时字段为 null 或含 `PERF_BASELINE_STALE` 标记；
+  - T-PERF-01 全部通过。
+- 涉及文件路径：host_brain/obs/metrics.py；host_brain/obs/routes.py；host_brain/core/errors.py；tests/contract/test_perf_baseline_contract.py（新增）；tests/fixtures/obs/。
+- 关联需求/测试：NFR-PERF-001；T-PERF-01。
+
+### TASK-0110 发布清单锁定：M8 release manifest（M8 P1）
+- 任务描述：基于 `host_brain/release/release_manifest.py`，生成 M8 发布清单，锁定 git commit hash、所有 migration 文件 hash、测试通过数、性能基线快照、服务注册表快照，输出到 `release/manifests/m8_release.json`。
+- 输入：DevSpec §18.4.1；host_brain/release/release_manifest.py（现有）；host_brain/audit/migrations/（所有 SQL 文件）；host_brain/bond/migrations/（所有 Cypher 文件）；host_brain/core/services.py（服务注册表）。
+- 输出：
+  - `host_brain/release/release_manifest.py` 扩展：新增 `generate_m8_manifest()` 方法，聚合上述字段；
+  - `release/manifests/m8_release.json`（新增）：M8 发布清单文件；
+  - `tests/contract/test_release_manifest_contract.py`（新增）：T-REL-01 验收测试（字段完整性 + hash 格式合法 + migration 文件数量与实际一致）；
+  - `tests/fixtures/release/`（新增）：m8_manifest_expected.json。
+- 验收标准：
+  - `m8_release.json` 包含：git_commit_hash/migration_hashes（按文件名索引）/test_passed_count/latency_baseline_snapshot/service_registry_snapshot/generated_at；
+  - `migration_hashes` 中文件数量与 `host_brain/audit/migrations/` + `host_brain/bond/migrations/` 实际文件数一致；
+  - T-REL-01 全部通过。
+- 涉及文件路径：host_brain/release/release_manifest.py；release/manifests/m8_release.json（新增）；tests/contract/test_release_manifest_contract.py（新增）；tests/fixtures/release/。
+- 关联需求/测试：NFR-MAINT-001；T-REL-01。

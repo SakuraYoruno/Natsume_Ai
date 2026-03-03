@@ -800,3 +800,47 @@
 - 验收测试（T-xx）：T-VOICE-05
 - 当前进展（2026-03-03）：VoiceResourceGate P1>P2>P3>P4 优先级矩阵 + 抢占写 RESOURCE_GATE_PREEMPTED + 健康快照已实现，T-VOICE-05 全部通过（6 tests）。
 - 覆盖状态：DONE
+
+---
+
+## M8 运行时集成闭环（R-81~R-84）
+
+## R-81
+- 系统级需求：运行时脚本集成——start_host_side.ps1 启动后探测 /obs/metrics 与 MCPToolRegistry 健康状态，结果写入启动 JSON（obs_status/mcp_registry_status/startup_warnings）
+- PRD 需求编号（FR）：NFR-REL-001
+- 来源：PRD §5（NFR）；PRD M8
+- DevSpec 落点：DevSpec §18.1.1
+- DevTasks（TASK）：TASK-0107
+- 验收测试（T-xx）：T-RT-01
+- 当前进展（2026-03-03）：DevSpec §18.1.1 工程契约已完备，TASK-0107 已拆解，待实现。
+- 覆盖状态：TASK_READY
+
+## R-82
+- 系统级需求：端到端 Smoke Test——冷启动最小闭环（无外部依赖）+ 执行链路（approval_token+undo）+ 故障注入矩阵（Neo4j/Chroma/LLM/Edge 各自不可用时输出结构稳定）
+- PRD 需求编号（FR）：FR-CORE-004；NFR-REL-001
+- 来源：PRD §4.1；PRD §5；PRD M8
+- DevSpec 落点：DevSpec §18.2.1
+- DevTasks（TASK）：TASK-0108
+- 验收测试（T-xx）：T-E2E-01~03
+- 当前进展（2026-03-03）：DevSpec §18.2.1 工程契约已完备，TASK-0108 已拆解，待实现。
+- 覆盖状态：TASK_READY
+
+## R-83
+- 系统级需求：性能基线采集——/obs/metrics 新增 latency_baseline 字段（retrieval/governor/skill_exec 的 p50/p95），采样数据过期时标注 PERF_BASELINE_STALE
+- PRD 需求编号（FR）：NFR-PERF-001
+- 来源：PRD §5（NFR）；PRD M8
+- DevSpec 落点：DevSpec §18.3.1
+- DevTasks（TASK）：TASK-0109
+- 验收测试（T-xx）：T-PERF-01
+- 当前进展（2026-03-03）：DevSpec §18.3.1 工程契约已完备，TASK-0109 已拆解，待实现。
+- 覆盖状态：TASK_READY
+
+## R-84
+- 系统级需求：发布清单锁定——生成 M8 release manifest（git hash + migration hashes + 测试通过数 + 性能基线快照 + 服务注册表快照）
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：PRD §5（NFR）；PRD M8
+- DevSpec 落点：DevSpec §18.4.1
+- DevTasks（TASK）：TASK-0110
+- 验收测试（T-xx）：T-REL-01
+- 当前进展（2026-03-03）：DevSpec §18.4.1 工程契约已完备，TASK-0110 已拆解，待实现。
+- 覆盖状态：TASK_READY
