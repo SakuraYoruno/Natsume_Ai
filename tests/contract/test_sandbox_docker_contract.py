@@ -99,6 +99,22 @@ class TestDockerDegradation:
         assert result.resource_usage.get("degraded_from") == "docker"
         assert result.resource_usage.get("isolation_backend") == "subprocess"
 
+    def test_docker_backend_required_mode_no_degrade(self) -> None:
+        config = SandboxConfig(isolation_backend="docker", require_container=True, timeout_s=5)
+        ledger = SQLiteLedger(db_path=":memory:")
+        executor = SandboxExecutor(config=config, ledger=ledger)
+
+        with patch("host_brain.airlock.docker_sandbox.is_docker_available", return_value=False):
+            result = executor.execute(
+                'print("hello")',
+                request_id="req_docker_required_001",
+                ts_ms=NOW_MS,
+            )
+
+        assert result.status == SANDBOX_STATUS_UNAVAILABLE
+        assert result.reason_code == SANDBOX_CONTAINER_UNAVAILABLE
+        assert "required" in result.stderr.lower()
+
     def test_docker_backend_degrades_audit_logged(self) -> None:
         """降级事件写入 sandbox_exec_log。"""
         config = SandboxConfig(isolation_backend="docker", timeout_s=5)

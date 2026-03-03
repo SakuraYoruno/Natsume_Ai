@@ -26,8 +26,7 @@ from host_brain.core.errors import (
 )
 
 # ---------------------------------------------------------------------------
-# 表名白名单（硬编码允许表名集合，用于 _fetch_all 安全校验）
-# ---------------------------------------------------------------------------
+# 琛ㄥ悕鐧藉悕鍗曪紙纭 紪鐮佸厑璁歌〃鍚嶉泦鍚堬紝鐢ㄤ簬 _fetch_all 瀹夊叏鏍￠獙锛?# ---------------------------------------------------------------------------
 _ALLOWED_TABLES: frozenset[str] = frozenset({
     "intent_log",
     "governor_log",
@@ -121,6 +120,7 @@ CANON_PROPOSAL_COLUMNS = (
     "base_version",
     "proposed_version",
     "proposed_hash",
+    "source_intent_id",
     "proposer_node_id",
     "summary",
     "status",
@@ -450,7 +450,7 @@ class WalConfig:
 
 DEFAULT_WAL_CONFIG = WalConfig()
 
-# 写入重试策略
+# 鍐欏叆閲嶈瘯绛栫暐
 WRITE_RETRY_MAX = 3
 WRITE_RETRY_DELAY_S = 0.05
 
@@ -476,8 +476,9 @@ class SQLiteLedger:
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
-        # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
+        # 琛ㄧ粨鏋勭紦瀛橈細閬垮厤姣忔  _table_has_column 璋冪敤 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
+        self._column_cache_lock = threading.Lock()
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._ensure_schema()
@@ -729,7 +730,7 @@ class SQLiteLedger:
 
     def log_canon_proposal(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in CANON_PROPOSAL_COLUMNS}
-        # INSERT OR IGNORE：proposal_id UNIQUE 约束下幂等写入，已存在则跳过
+        # INSERT OR IGNORE锛歱roposal_id UNIQUE 绾︽潫涓嬪箓绛夊啓鍏ワ紝宸插瓨鍦ㄥ垯璺宠繃
         cols = [k for k, v in payload.items() if v is not None or k in ("proposal_id", "canon_kind", "target_id", "status", "ts_ms")]
         placeholders = ", ".join("?" for _ in cols)
         col_names = ", ".join(cols)
@@ -742,16 +743,14 @@ class SQLiteLedger:
                 )
 
     # ---------------------------------------------------------------------------
-    # M10-C: 语义记忆 CRUD
+    # M10-C: 璇 箟璁板繂 CRUD
     # ---------------------------------------------------------------------------
 
     def log_semantic_memory(self, row: dict[str, Any]) -> None:
-        """写入语义记忆条目（INSERT OR IGNORE，幂等）。
-
+        """鍐欏叆璇 箟璁板繂鏉＄洰锛圛NSERT OR IGNORE锛屽箓绛夛級銆?
         Args:
-            row: 包含 semantic_id / summary / source_memory_ids / source_hash /
-                 distill_strategy / confidence / tags / ts_ms / operator_node_id 的字典。
-        """
+            row: 鍖呭惈 semantic_id / summary / source_memory_ids / source_hash /
+                 distill_strategy / confidence / tags / ts_ms / operator_node_id 鐨勫瓧鍏搞€?        """
         import json as _json
 
         source_ids = row.get("source_memory_ids", [])
@@ -779,11 +778,9 @@ class SQLiteLedger:
                 )
 
     def get_semantic_memory_by_source_hash(self, source_hash: str) -> dict[str, Any] | None:
-        """按 source_hash 查询语义记忆（幂等检查用）。
-
+        """鎸?source_hash 鏌ヨ 璇 箟璁板繂锛堝箓绛夋 鏌ョ敤锛夈€?
         Returns:
-            语义记忆字典，或 None（不存在）。
-        """
+            璇 箟璁板繂瀛楀吀锛屾垨 None锛堜笉瀛樺湪锛夈€?        """
         row = self._conn.execute(
             "SELECT * FROM semantic_memory WHERE source_hash = ? AND deleted_at IS NULL LIMIT 1",
             (str(source_hash),),
@@ -798,11 +795,9 @@ class SQLiteLedger:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """列出语义记忆（分页，按 ts_ms 降序）。
-
+        """鍒楀嚭璇 箟璁板繂锛堝垎椤碉紝鎸?ts_ms 闄嶅簭锛夈€?
         Returns:
-            (items, total) 元组。
-        """
+            (items, total) 鍏冪粍銆?        """
         total_row = self._conn.execute(
             "SELECT COUNT(*) FROM semantic_memory WHERE deleted_at IS NULL"
         ).fetchone()
@@ -817,11 +812,11 @@ class SQLiteLedger:
         return items, total
 
     def _row_to_semantic_memory(self, row: Any) -> dict[str, Any]:
-        """将 sqlite3.Row 转换为语义记忆字典。"""
+        """Convert a semantic_memory sqlite row into a Python dict."""
         import json as _json
 
         d = dict(row)
-        # 反序列化 JSON 字段
+        # 鍙嶅簭鍒楀寲 JSON 瀛楁 
         for json_field in ("source_memory_ids", "tags"):
             raw = d.get(json_field, "[]")
             try:
@@ -835,7 +830,7 @@ class SQLiteLedger:
         self._insert("canon_change_log", payload)
 
     def get_proposal(self, proposal_id: str) -> dict[str, Any] | None:
-        """按 proposal_id 查询 canon_proposal_log 最新一条记录。"""
+        """Get the latest canon_proposal_log row by proposal_id."""
         row = self._conn.execute(
             "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
             (proposal_id,),
@@ -854,21 +849,7 @@ class SQLiteLedger:
         offset: int = 0,
         after_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """分页查询 canon_proposal_log（支持 cursor-based 分页，F-38 R112-2）。
-
-        Args:
-            status: 按 status 过滤（pending / approved / rejected / APPLIED），None 表示不过滤。
-            canon_kind: 按 canon_kind 过滤（world / style），None 表示不过滤。
-            target_doc_id: 按 target_id 过滤，None 表示不过滤。
-            limit: 每页条数（最大 100）。
-            offset: 偏移量（兼容旧接口；after_id 优先）。
-            after_id: Cursor-based 分页游标（上一页最后一条记录的 id）。
-                传入时忽略 offset，使用 `id < after_id` 条件，避免深页码性能退化。
-                首页不传（None），后续页传上一页最后一条的 id。
-
-        Returns:
-            (items, total)：items 为当前页记录列表（按 id DESC），total 为满足条件的总记录数。
-        """
+        """List canon_proposal_log records with optional filters and pagination."""
         limit = min(int(limit), 100)
         offset = max(int(offset), 0)
 
@@ -885,7 +866,7 @@ class SQLiteLedger:
             conditions.append("target_id = ?")
             params.append(str(target_doc_id))
 
-        # F-38：cursor-based 分页（after_id 优先于 offset）
+        # F-38: cursor-based pagination (after_id takes precedence over offset).
         use_cursor = after_id is not None
         if use_cursor:
             conditions.append("id < ?")
@@ -910,7 +891,7 @@ class SQLiteLedger:
                 params + [limit, offset],
             ).fetchall()
 
-        # 注入 row_id 字段（供 cursor-based 分页使用，_decode_row 会 pop("id")）
+        # Inject row_id for cursor-based pagination (_decode_row strips id).
         items: list[dict[str, Any]] = []
         for row in rows:
             raw_id = row["id"] if "id" in row.keys() else None
@@ -927,11 +908,7 @@ class SQLiteLedger:
         new_status: str,
         ts_ms: int | None = None,
     ) -> bool:
-        """更新 canon_proposal_log 中指定 proposal_id 的 status 字段。
-
-        只允许从 pending 流转到 approved / rejected，或从 approved 流转到 APPLIED。
-        返回 True 表示更新成功，False 表示未找到记录。
-        """
+        """Update proposal status and timestamp by proposal_id."""
         update_ts = int(ts_ms if ts_ms is not None else now_ms())
         with self._write_lock:
             with self._conn:
@@ -1285,7 +1262,8 @@ class SQLiteLedger:
                     target_id TEXT,
                     base_version INTEGER,
                     proposed_version INTEGER,
-                    proposed_hash TEXT,
+                    proposed_hash    TEXT,
+                    source_intent_id TEXT,
                     proposer_node_id TEXT,
                     summary TEXT,
                     status TEXT,
@@ -1578,7 +1556,7 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_canon_change_target ON canon_change_log(canon_kind, target_id);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_canon_change_id_unique ON canon_change_log(change_id);
 
-                -- M10-C: 语义记忆表（记忆蒸馏结果）
+                -- M10-C: semantic memory table (distillation result).
                 CREATE TABLE IF NOT EXISTS semantic_memory (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                     semantic_id         TEXT NOT NULL,
@@ -1690,11 +1668,7 @@ class SQLiteLedger:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """按时间窗口查询审计表，返回 ts_ms 在 [start_ms, end_ms] 范围的行。
-
-        参数化查询，表名白名单校验（防 SQL 注入）。
-        若表无 ts_ms 列则退化到全量查询 + limit/offset。
-        """
+        """Fetch rows from a table by optional ts_ms window with pagination."""
         if table not in _ALLOWED_TABLES:
             logger.warning(
                 "Rejected fetch_by_time_range for invalid table name: %s (reason_code=%s)",
@@ -1705,7 +1679,7 @@ class SQLiteLedger:
                 f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
             )
 
-        limit = max(1, min(limit, 10_000))  # 硬上限 10000
+        limit = max(1, min(limit, 10_000))  # 纭 笂闄?10000
         offset = max(0, offset)
 
         has_ts = self._table_has_column(table, "ts_ms")
@@ -1739,7 +1713,7 @@ class SQLiteLedger:
         start_ms: int | None = None,
         end_ms: int | None = None,
     ) -> int:
-        """统计时间窗口内的行数（用于分页 total）。"""
+        """Count rows in a table by optional ts_ms window."""
         if table not in _ALLOWED_TABLES:
             raise ValueError(
                 f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
@@ -1761,9 +1735,8 @@ class SQLiteLedger:
         else:
             row = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
         return int(row[0]) if row else 0
-
     def _fetch_all(self, table: str) -> list[dict[str, Any]]:
-        # 表名白名单校验（F-16: 拒绝非法表名防止 SQL 注入）
+        # F-16: validate table names with whitelist to prevent SQL injection.
         if table not in _ALLOWED_TABLES:
             logger.warning(
                 "Rejected _fetch_all for invalid table name: %s (reason_code=%s)",
@@ -1782,6 +1755,7 @@ class SQLiteLedger:
         return [self._decode_row(table, row) for row in rows]
 
     def _fetch_by_request(self, table: str, request_id: str) -> list[dict[str, Any]]:
+
         rows = self._conn.execute(
             f"SELECT * FROM {table} WHERE request_id = ? ORDER BY id ASC",
             (request_id,),
@@ -1808,8 +1782,15 @@ class SQLiteLedger:
         return data
 
     def _table_has_column(self, table: str, column: str) -> bool:
-        # F-06: 使用表结构缓存，避免每次调用 PRAGMA table_info
-        if table not in self._column_cache:
-            rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
-            self._column_cache[table] = {str(row["name"]) for row in rows}
-        return column in self._column_cache[table]
+        # F-06: cache table schema metadata and protect cache fill in concurrent access.
+        cached = self._column_cache.get(table)
+        if cached is None:
+            with self._column_cache_lock:
+                cached = self._column_cache.get(table)
+                if cached is None:
+                    rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+                    cached = {str(row["name"]) for row in rows}
+                    self._column_cache[table] = cached
+        return cached is not None and column in cached
+
+

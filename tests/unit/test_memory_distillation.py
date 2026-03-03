@@ -225,3 +225,36 @@ def test_build_semantic_slot(engine, episodic, ledger):
     assert "confidence" in entry
     assert isinstance(entry["tags"], list)
     assert isinstance(entry["source_count"], int)
+
+
+def test_distill_top_k_concurrent_idempotent(tmp_path):
+    """F-41: concurrent distillation with same source_hash should persist exactly once."""
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import MagicMock
+
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+    from host_brain.memory.distillation import MemoryDistillationEngine
+
+    ledger = SQLiteLedger(db_path=str(tmp_path / "concurrent.sqlite3"), check_same_thread=False)
+    episodic = MagicMock()
+    episodic.recall.return_value = [
+        {"memory_id": "mem_a", "text": "A", "score": 0.9},
+        {"memory_id": "mem_b", "text": "B", "score": 0.8},
+    ]
+    engine = MemoryDistillationEngine(episodic_store=episodic, ledger=ledger)
+
+    def _run_once() -> str | None:
+        result = engine.distill_top_k(query_text="same query", top_k=2)
+        assert result.success is True
+        return result.semantic_id
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _idx: _run_once(), range(20)))
+
+        items, total = ledger.list_semantic_memories(limit=10, offset=0)
+        assert total == 1
+        persisted_id = items[0]["semantic_id"]
+        assert all(sid == persisted_id for sid in results)
+    finally:
+        ledger.close()

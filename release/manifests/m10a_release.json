@@ -27,7 +27,7 @@
     "host_brain/canon/world/wc-003-persona-core.json": "sha256:5308caa1fcf9a41b38eda99b8bd6a14704c41889e0a9e7b1e49cf6245601df47"
   },
   "world_canon_asset_count": 3,
-  "canon_routes_hash": "sha256:e1c9d3a5ad782dfcf17f319d4915f810785386c689652e99b1e6dc1d079a4f79",
+  "canon_routes_hash": "sha256:a06c940dbcd2545bcbca3f5ce33932781967430b7c304164fc7e51449f79bdda",
   "test_passed_count": 1041,
   "latency_baseline_snapshot": {
     "retrieval_p50_ms": null,
@@ -124,5 +124,7 @@
     }
   ],
   "generated_at": "2026-03-03T08:52:40.060000+00:00",
-  "ts_ms": 1772527960060
+  "ts_ms": 1772527960060,
+  "canon_world_store_hash": "sha256:66d166ea6f0207db729e5bef30cad4172a625d4faf65b8f86b72bad7717cbfb9",
+  "sqlite_ledger_hash": "sha256:73f9fcc6cdb3cd1c728f4fefa815f39ccdac99dd48fbdbea326333532dc476ec"
 }

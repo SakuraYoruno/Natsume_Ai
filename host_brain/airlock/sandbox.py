@@ -1,67 +1,71 @@
-"""AIRLOCK DRAFT_CODE sandbox execution with isolation, resource limits, and audit trail.
-
-提供沙箱执行环境封装（subprocess 隔离 + 超时 + 资源限制），
-将 DRAFT_CODE 在隔离进程中执行并产出结构化结果（SandboxExecResult），
-结果作为草案证据写入审计链（sandbox_exec_log），不直接影响主链路状态。
-"""
+﻿"""AIRLOCK DRAFT_CODE sandbox execution with isolation and audit logging."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
+import signal
 import subprocess
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Optional
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
-    SANDBOX_UNAVAILABLE,
-    SANDBOX_TIMEOUT,
-    SANDBOX_RESOURCE_EXCEEDED,
+    SANDBOX_CONTAINER_UNAVAILABLE,
     SANDBOX_EXEC_FAILED,
+    SANDBOX_RESOURCE_EXCEEDED,
+    SANDBOX_TIMEOUT,
+    SANDBOX_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
 
 
-# ── 沙箱状态常量 ──
 SANDBOX_STATUS_OK = "OK"
 SANDBOX_STATUS_TIMEOUT = "TIMEOUT"
 SANDBOX_STATUS_RESOURCE_EXCEEDED = "RESOURCE_EXCEEDED"
 SANDBOX_STATUS_EXEC_FAILED = "EXEC_FAILED"
 SANDBOX_STATUS_UNAVAILABLE = "UNAVAILABLE"
 
-# ── 默认限制 ──
 DEFAULT_TIMEOUT_S = 10
 MAX_TIMEOUT_S = 30
-DEFAULT_MAX_STDOUT_BYTES = 64 * 1024   # 64 KB
-DEFAULT_MAX_STDERR_BYTES = 16 * 1024   # 16 KB
-DEFAULT_MAX_CODE_BYTES = 32 * 1024     # 32 KB
+DEFAULT_MAX_STDOUT_BYTES = 64 * 1024
+DEFAULT_MAX_STDERR_BYTES = 16 * 1024
+DEFAULT_MAX_CODE_BYTES = 32 * 1024
+
+ISOLATION_BACKEND_SUBPROCESS = "subprocess"
+ISOLATION_BACKEND_DOCKER = "docker"
+ISOLATION_BACKEND_AUTO = "auto"
+_SUPPORTED_ISOLATION_BACKENDS = frozenset(
+    {
+        ISOLATION_BACKEND_SUBPROCESS,
+        ISOLATION_BACKEND_DOCKER,
+        ISOLATION_BACKEND_AUTO,
+    }
+)
+_PROD_ENV_VALUES = frozenset({"prod", "production"})
 
 
 @dataclass(frozen=True)
 class SandboxConfig:
-    """沙箱执行配置。"""
     timeout_s: int = DEFAULT_TIMEOUT_S
     max_stdout_bytes: int = DEFAULT_MAX_STDOUT_BYTES
     max_stderr_bytes: int = DEFAULT_MAX_STDERR_BYTES
     max_code_bytes: int = DEFAULT_MAX_CODE_BYTES
     python_executable: str = "python"
     allow_network: bool = False
-    allow_fs_write: bool = False  # True 则允许写临时目录
+    allow_fs_write: bool = False
     enabled: bool = True
-    isolation_backend: str = "subprocess"  # subprocess / docker / nsjail
+    isolation_backend: str = ISOLATION_BACKEND_SUBPROCESS
+    require_container: bool = False
 
 
 @dataclass(frozen=True)
 class SandboxExecResult:
-    """沙箱执行结构化结果。"""
     sandbox_id: str
-    status: str  # OK / TIMEOUT / RESOURCE_EXCEEDED / EXEC_FAILED / UNAVAILABLE
+    status: str
     exit_code: Optional[int]
     stdout: str
     stderr: str
@@ -99,7 +103,6 @@ def _digest_code(code: str) -> str:
 
 
 def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
-    """截断文本到最大字节数，返回 (截断后文本, 是否被截断)。"""
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= max_bytes:
         return text, False
@@ -107,17 +110,12 @@ def _truncate(text: str, max_bytes: int) -> tuple[str, bool]:
     return truncated, True
 
 
+def _is_production_env() -> bool:
+    env = str(os.environ.get("Nastume_ENV", "")).strip().lower()
+    return env in _PROD_ENV_VALUES
+
+
 class SandboxExecutor:
-    """DRAFT_CODE 沙箱执行器。
-
-    安全约束：
-    - 代码在隔离子进程中执行（subprocess）
-    - 超时强杀（SIGKILL / terminate）
-    - 输出截断防内存膨胀
-    - 默认禁止网络和文件系统写入（通过临时目录隔离）
-    - 不影响主进程状态，不引入旁路执行路径
-    """
-
     def __init__(
         self,
         *,
@@ -136,24 +134,11 @@ class SandboxExecutor:
         language: str = "python",
         ts_ms: Optional[int] = None,
     ) -> SandboxExecResult:
-        """在沙箱中执行 DRAFT_CODE 并返回结构化结果。
-
-        Args:
-            code: 要执行的代码文本
-            request_id: 关联的请求 ID（用于审计串联）
-            intent_id: 关联的 intent ID（用于审计串联）
-            language: 代码语言（当前仅支持 python）
-            ts_ms: 时间戳（毫秒）
-
-        Returns:
-            SandboxExecResult 结构化执行结果
-        """
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         sandbox_id = _generate_sandbox_id()
         code_digest = _digest_code(code)
         evidence_ref = f"sandbox://{sandbox_id}"
 
-        # 沙箱未启用
         if not self.config.enabled:
             result = SandboxExecResult(
                 sandbox_id=sandbox_id,
@@ -169,9 +154,8 @@ class SandboxExecutor:
             self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
             return result
 
-        # 代码大小检查
         code_bytes = len(code.encode("utf-8", errors="replace"))
-        if code_bytes > self.config.max_code_bytes:
+        if code_bytes > int(self.config.max_code_bytes):
             result = SandboxExecResult(
                 sandbox_id=sandbox_id,
                 status=SANDBOX_STATUS_RESOURCE_EXCEEDED,
@@ -182,12 +166,11 @@ class SandboxExecutor:
                 reason_code=SANDBOX_RESOURCE_EXCEEDED,
                 evidence_ref=evidence_ref,
                 code_digest=code_digest,
-                resource_usage={"code_bytes": code_bytes, "max_code_bytes": self.config.max_code_bytes},
+                resource_usage={"code_bytes": code_bytes, "max_code_bytes": int(self.config.max_code_bytes)},
             )
             self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
             return result
 
-        # 语言检查
         if language != "python":
             result = SandboxExecResult(
                 sandbox_id=sandbox_id,
@@ -203,10 +186,31 @@ class SandboxExecutor:
             self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
             return result
 
-        timeout_s = min(self.config.timeout_s, MAX_TIMEOUT_S)
+        timeout_s = max(1, min(int(self.config.timeout_s), MAX_TIMEOUT_S))
+        backend = self._resolve_backend()
+        container_required = self._container_is_required()
 
-        # 根据 isolation_backend 选择执行后端
-        if self.config.isolation_backend == "docker":
+        if container_required and backend != ISOLATION_BACKEND_DOCKER:
+            result = SandboxExecResult(
+                sandbox_id=sandbox_id,
+                status=SANDBOX_STATUS_UNAVAILABLE,
+                exit_code=None,
+                stdout="",
+                stderr=f"container isolation required, backend={backend}",
+                duration_ms=0,
+                reason_code=SANDBOX_CONTAINER_UNAVAILABLE,
+                evidence_ref=evidence_ref,
+                code_digest=code_digest,
+                resource_usage={
+                    "isolation_backend": backend,
+                    "container_required": True,
+                    "platform": os.name,
+                },
+            )
+            self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
+            return result
+
+        if backend == ISOLATION_BACKEND_DOCKER:
             result = self._run_docker(
                 code=code,
                 sandbox_id=sandbox_id,
@@ -221,9 +225,25 @@ class SandboxExecutor:
                 evidence_ref=evidence_ref,
                 code_digest=code_digest,
                 timeout_s=timeout_s,
+                backend=backend,
             )
         self._log_result(result, request_id=request_id, intent_id=intent_id, ts_ms=now_value)
         return result
+
+    def _resolve_backend(self) -> str:
+        backend = str(self.config.isolation_backend or ISOLATION_BACKEND_SUBPROCESS).strip().lower()
+        if backend not in _SUPPORTED_ISOLATION_BACKENDS:
+            backend = ISOLATION_BACKEND_SUBPROCESS
+        if backend == ISOLATION_BACKEND_AUTO:
+            if self._container_is_required():
+                return ISOLATION_BACKEND_DOCKER
+            return ISOLATION_BACKEND_SUBPROCESS
+        return backend
+
+    def _container_is_required(self) -> bool:
+        if self.config.require_container:
+            return True
+        return _is_production_env()
 
     def _run_docker(
         self,
@@ -234,29 +254,34 @@ class SandboxExecutor:
         code_digest: str,
         timeout_s: int,
     ) -> SandboxExecResult:
-        """在 Docker 容器中执行代码。
-
-        容器级隔离：
-        - 只读挂载代码到容器内临时目录
-        - 无网络（--network=none）
-        - 资源限制（CPU/内存/超时）
-        - 输出采集与截断
-
-        Docker 不可用时自动降级到 subprocess 后端。
-        """
-        from host_brain.airlock.docker_sandbox import run_in_docker, is_docker_available
-        from host_brain.core.errors import SANDBOX_CONTAINER_UNAVAILABLE
+        from host_brain.airlock.docker_sandbox import is_docker_available, run_in_docker
 
         if not is_docker_available():
-            # Docker 不可用 → 降级到 subprocess
+            if self._container_is_required():
+                return SandboxExecResult(
+                    sandbox_id=sandbox_id,
+                    status=SANDBOX_STATUS_UNAVAILABLE,
+                    exit_code=None,
+                    stdout="",
+                    stderr="docker backend required but unavailable",
+                    duration_ms=0,
+                    reason_code=SANDBOX_CONTAINER_UNAVAILABLE,
+                    evidence_ref=evidence_ref,
+                    code_digest=code_digest,
+                    resource_usage={
+                        "isolation_backend": ISOLATION_BACKEND_DOCKER,
+                        "container_required": True,
+                    },
+                )
+
             fallback_result = self._run_subprocess(
                 code=code,
                 sandbox_id=sandbox_id,
                 evidence_ref=evidence_ref,
                 code_digest=code_digest,
                 timeout_s=timeout_s,
+                backend=ISOLATION_BACKEND_SUBPROCESS,
             )
-            # 标记降级来源
             return SandboxExecResult(
                 sandbox_id=fallback_result.sandbox_id,
                 status=fallback_result.status,
@@ -269,8 +294,8 @@ class SandboxExecutor:
                 code_digest=fallback_result.code_digest,
                 resource_usage={
                     **fallback_result.resource_usage,
-                    "isolation_backend": "subprocess",
-                    "degraded_from": "docker",
+                    "isolation_backend": ISOLATION_BACKEND_SUBPROCESS,
+                    "degraded_from": ISOLATION_BACKEND_DOCKER,
                 },
                 truncated_stdout=fallback_result.truncated_stdout,
                 truncated_stderr=fallback_result.truncated_stderr,
@@ -294,9 +319,10 @@ class SandboxExecutor:
         evidence_ref: str,
         code_digest: str,
         timeout_s: int,
+        backend: str = ISOLATION_BACKEND_SUBPROCESS,
     ) -> SandboxExecResult:
-        """在临时目录中通过 subprocess 执行代码。"""
         tmpdir = None
+        proc: Optional[subprocess.Popen[bytes]] = None
         try:
             tmpdir = tempfile.mkdtemp(prefix=f"sandbox_{sandbox_id}_")
             script_path = os.path.join(tmpdir, "sandbox_script.py")
@@ -304,44 +330,51 @@ class SandboxExecutor:
                 f.write(code)
 
             env = os.environ.copy()
-            # 安全隔离：清理危险环境变量
-            for key in ("HOME", "USERPROFILE", "PATH"):
-                # 保留 PATH 以便找到 python 执行文件，但可根据需求进一步限制
-                pass
-
             if not self.config.allow_network:
-                # 标记禁网（实际网络隔离在生产中由容器/namespace 提供；
-                # 此处通过环境变量告知被执行脚本，并在测试中验证合规性）
                 env["SANDBOX_NO_NETWORK"] = "1"
-
             if not self.config.allow_fs_write:
                 env["SANDBOX_NO_FS_WRITE"] = "1"
 
-            # 限制工作目录为临时目录
             start_time = time.perf_counter()
             try:
-                proc = subprocess.run(
+                popen_kwargs: dict[str, Any] = {
+                    "cwd": tmpdir,
+                    "env": env,
+                    "stdout": subprocess.PIPE,
+                    "stderr": subprocess.PIPE,
+                }
+                if os.name == "nt":
+                    popen_kwargs["creationflags"] = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+                else:
+                    popen_kwargs["start_new_session"] = True
+
+                proc = subprocess.Popen(
                     [self.config.python_executable, script_path],
-                    capture_output=True,
-                    timeout=timeout_s,
-                    cwd=tmpdir,
-                    env=env,
-                    text=False,  # 以 bytes 返回，方便截断
+                    **popen_kwargs,
                 )
-            except subprocess.TimeoutExpired:
-                duration_ms = int(round((time.perf_counter() - start_time) * 1000))
-                return SandboxExecResult(
-                    sandbox_id=sandbox_id,
-                    status=SANDBOX_STATUS_TIMEOUT,
-                    exit_code=None,
-                    stdout="",
-                    stderr=f"execution timed out after {timeout_s}s",
-                    duration_ms=duration_ms,
-                    reason_code=SANDBOX_TIMEOUT,
-                    evidence_ref=evidence_ref,
-                    code_digest=code_digest,
-                    resource_usage={"timeout_s": timeout_s},
-                )
+
+                try:
+                    raw_stdout, raw_stderr = proc.communicate(timeout=timeout_s)
+                except subprocess.TimeoutExpired:
+                    self._terminate_subprocess(proc)
+                    duration_ms = int(round((time.perf_counter() - start_time) * 1000))
+                    return SandboxExecResult(
+                        sandbox_id=sandbox_id,
+                        status=SANDBOX_STATUS_TIMEOUT,
+                        exit_code=None,
+                        stdout="",
+                        stderr=f"execution timed out after {timeout_s}s",
+                        duration_ms=duration_ms,
+                        reason_code=SANDBOX_TIMEOUT,
+                        evidence_ref=evidence_ref,
+                        code_digest=code_digest,
+                        resource_usage={
+                            "timeout_s": timeout_s,
+                            "timeout_enforcement": "popen_communicate",
+                            "platform": os.name,
+                            "isolation_backend": backend,
+                        },
+                    )
             except FileNotFoundError:
                 duration_ms = int(round((time.perf_counter() - start_time) * 1000))
                 return SandboxExecResult(
@@ -371,9 +404,8 @@ class SandboxExecutor:
 
             duration_ms = int(round((time.perf_counter() - start_time) * 1000))
 
-            # 解码和截断输出
-            raw_stdout = proc.stdout or b""
-            raw_stderr = proc.stderr or b""
+            raw_stdout = raw_stdout or b""
+            raw_stderr = raw_stderr or b""
             stdout_text = raw_stdout.decode("utf-8", errors="replace")
             stderr_text = raw_stderr.decode("utf-8", errors="replace")
             stdout_text, trunc_out = _truncate(stdout_text, self.config.max_stdout_bytes)
@@ -383,13 +415,17 @@ class SandboxExecutor:
                 "stdout_bytes": len(raw_stdout),
                 "stderr_bytes": len(raw_stderr),
                 "timeout_s": timeout_s,
+                "timeout_enforcement": "popen_communicate",
+                "platform": os.name,
+                "isolation_backend": backend,
             }
 
-            if proc.returncode != 0:
+            return_code = int(proc.returncode or 0)
+            if return_code != 0:
                 return SandboxExecResult(
                     sandbox_id=sandbox_id,
                     status=SANDBOX_STATUS_EXEC_FAILED,
-                    exit_code=proc.returncode,
+                    exit_code=return_code,
                     stdout=stdout_text,
                     stderr=stderr_text,
                     duration_ms=duration_ms,
@@ -429,10 +465,10 @@ class SandboxExecutor:
                 code_digest=code_digest,
             )
         finally:
-            # 清理临时目录
             if tmpdir is not None:
                 try:
                     import shutil
+
                     shutil.rmtree(tmpdir, ignore_errors=True)
                 except Exception:
                     pass
@@ -445,24 +481,51 @@ class SandboxExecutor:
         intent_id: Optional[str],
         ts_ms: int,
     ) -> None:
-        """写入审计日志 sandbox_exec_log。"""
         if self.ledger is None:
             return
 
-        self.ledger.log_sandbox_exec({
-            "request_id": request_id,
-            "intent_id": intent_id,
-            "sandbox_id": result.sandbox_id,
-            "status": result.status,
-            "exit_code": result.exit_code,
-            "reason_code": result.reason_code,
-            "evidence_ref": result.evidence_ref,
-            "code_digest": result.code_digest,
-            "stdout_preview": result.stdout[:256] if result.stdout else "",
-            "stderr_preview": result.stderr[:256] if result.stderr else "",
-            "duration_ms": result.duration_ms,
-            "resource_usage": result.resource_usage,
-            "truncated_stdout": int(result.truncated_stdout),
-            "truncated_stderr": int(result.truncated_stderr),
-            "ts_ms": ts_ms,
-        })
+        self.ledger.log_sandbox_exec(
+            {
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "sandbox_id": result.sandbox_id,
+                "status": result.status,
+                "exit_code": result.exit_code,
+                "reason_code": result.reason_code,
+                "evidence_ref": result.evidence_ref,
+                "code_digest": result.code_digest,
+                "stdout_preview": result.stdout[:256] if result.stdout else "",
+                "stderr_preview": result.stderr[:256] if result.stderr else "",
+                "duration_ms": result.duration_ms,
+                "resource_usage": result.resource_usage,
+                "truncated_stdout": int(result.truncated_stdout),
+                "truncated_stderr": int(result.truncated_stderr),
+                "ts_ms": ts_ms,
+            }
+        )
+
+    @staticmethod
+    def _terminate_subprocess(proc: subprocess.Popen[bytes]) -> None:
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    capture_output=True,
+                    timeout=2,
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                os.killpg(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+            except Exception:
+                pass
+
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            proc.communicate(timeout=1)
+        except Exception:
+            pass

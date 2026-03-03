@@ -135,6 +135,14 @@
 - 依赖：Docker Engine 20+（建议）
 - 失败策略：容器不可用时降级到 subprocess，不中断主流程。
 
+### 4.8 SQLite Ledger 存储介质要求（WAL）
+
+- 默认行为：`host_brain/audit/sqlite_ledger.py` 启用 `journal_mode=WAL` 以提升并发读写吞吐。
+- 介质要求：Ledger 数据文件必须放在本地磁盘（NTFS/ext4/xfs 等本地文件系统）。
+- 不推荐介质：NFS/SMB/网络盘等网络文件系统；这类环境可能导致 WAL 失败或锁语义异常。
+- 失败策略：WAL 激活失败时会降级到 `DELETE` 模式并记录 `AUDIT_WAL_FAILED`，系统可继续运行但性能/并发能力下降。
+- 部署建议：生产环境优先本地 SSD；如必须使用网络存储，应预先压测并监控 WAL 相关告警。
+
 ---
 
 ## 5. 验证方式
@@ -157,7 +165,12 @@ Invoke-WebRequest http://127.0.0.1:17800/v1/edge/health
 Test-NetConnection -ComputerName 127.0.0.1 -Port 6379
 ```
 
-4. 本地依赖停止：
+4. SQLite WAL 介质检查：
+
+- 确认 Ledger 路径位于本地文件系统（非 NFS/网络盘）。
+- 启动后检查日志中无 `AUDIT_WAL_FAILED`。
+
+5. 本地依赖停止：
 
 ```powershell
 .\scripts\runtime\stop_local_services.ps1

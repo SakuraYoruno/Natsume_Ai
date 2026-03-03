@@ -1974,3 +1974,173 @@ TASK-XXXX 标题
   - 全量测试 1062 passed，0 failed。
 - 涉及文件路径：tests/unit/test_memory_distillation.py（新增）；release/manifests/m10c_release.json（新增）；host_brain/release/release_manifest.py；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：T-Distill-01~06。
+
+---
+
+## M10-D — P1/P2 收口与发布（DONE，2026-03-03）
+
+### TASK-0130 F-41 修复：distill_top_k() 并发保护（蒸馏级别锁）
+- 状态：DONE（2026-03-03）
+- 任务描述：在 `memory/distillation.py` 为 `distill_top_k()` 增加线程并发保护，避免并发蒸馏同一 source 集合时产生 source_hash 竞态。
+- 输入：risk_registry.md（R-MC-02）；host_brain/memory/distillation.py；tests/unit/test_memory_distillation.py。
+- 输出：
+  - `host_brain/memory/distillation.py` 扩展：`MemoryDistillationEngine` 增加蒸馏级别互斥锁（threading.Lock）；
+  - `distill_top_k()` 关键区增加“锁内二次幂等检查 + 写入后回读确认”；
+  - `tests/unit/test_memory_distillation.py` 扩展：新增并发回归测试（多线程同源蒸馏）。
+- 验收标准：
+  - 并发场景下同一 source_hash 最终仅落库一次；
+  - 不出现重复 semantic_memory 记录；
+  - 并发测试稳定通过。
+- 涉及文件路径：host_brain/memory/distillation.py；tests/unit/test_memory_distillation.py。
+- 关联需求/测试：FR-MEM-001；T-Distill-07（并发补充）。
+
+### TASK-0131 F-06 修复：_table_has_column 表结构缓存（线程安全）
+- 状态：DONE（2026-03-03）
+- 任务描述：为 `SQLiteLedger._table_has_column()` 增加线程安全的列结构缓存，降低重复 PRAGMA 查询开销。
+- 输入：risk_registry.md（R119-3）；host_brain/audit/sqlite_ledger.py；tests/contract/test_quality_contract.py。
+- 输出：
+  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `_column_cache_lock` 与双检锁缓存填充；
+  - `_table_has_column()` 命中缓存时不再重复查询 `PRAGMA table_info`；
+  - `tests/contract/test_quality_contract.py` 扩展：并发缓存行为断言测试。
+- 验收标准：
+  - 首次调用填充缓存，后续命中缓存；
+  - 并发调用场景仅发生一次 PRAGMA 查询；
+  - 质量契约测试通过。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；tests/contract/test_quality_contract.py。
+- 关联需求/测试：NFR-PERF-001；T-Quality-01（F-06 子项）。
+
+### TASK-0132 F-35/F-36 收口：approve/reject 审计原子性增强
+- 状态：DONE（2026-03-03）
+- 任务描述：收口 `canon_routes.py` 中 approve/reject 的非原子风险，减少非事务窗口并将审计写入失败升级为错误返回。
+- 输入：risk_registry.md（R119-1/R119-2）；host_brain/app/canon_routes.py。
+- 输出：
+  - `approve_proposal` 去除“二次 DB 读取依赖”，以前置读取结果构造响应；
+  - `reject_proposal` 中 `log_system_event` 失败从 warning 升级为 error + HTTP 500；
+  - 响应头补充 `X-Reason-Code: CANON_SYNC_FAILED`（审计失败可观测）。
+- 验收标准：
+  - approve 路径不再存在额外二次读取窗口；
+  - reject 审计写入失败不再静默吞掉；
+  - Canon API 契约测试通过。
+- 涉及文件路径：host_brain/app/canon_routes.py；tests/contract/test_canon_api_contract.py。
+- 关联需求/测试：FR-WCANON-002；T-Canon-API-04~06。
+
+### TASK-0133 F-37 修复：M10-A 清单补锁核心文件 hash
+- 状态：DONE（2026-03-03）
+- 任务描述：扩展 `m10a_release.json` 锁定范围，补齐 `canon_world_store.py` 与 `sqlite_ledger.py` hash。
+- 输入：risk_registry.md（R120-1）；host_brain/release/release_manifest.py；release/manifests/m10a_release.json。
+- 输出：
+  - `generate_m10a_manifest()` 增加 `canon_world_store_hash`、`sqlite_ledger_hash` 字段；
+  - `release/manifests/m10a_release.json` 写入新增 hash 字段并更新值。
+- 验收标准：
+  - m10a 清单包含新增锁定字段；
+  - 字段值为合法 sha256 摘要；
+  - 发布契约检查通过。
+- 涉及文件路径：host_brain/release/release_manifest.py；release/manifests/m10a_release.json。
+- 关联需求/测试：NFR-MAINT-001；T-REL-01（扩展口径）。
+
+### TASK-0134 F-39 修复：source_intent_id 端到端完整性校验
+- 状态：DONE（2026-03-03）
+- 任务描述：补齐 diary evolution proposal 的 `source_intent_id` 从提交到落库链路，防止跨表关联断链。
+- 输入：risk_registry.md（R115-1）；host_brain/memory/canon_world_store.py；host_brain/audit/sqlite_ledger.py；host_brain/skills/impl/diary_writer.py。
+- 输出：
+  - `canon_proposal_log` schema 增加 `source_intent_id`；
+  - `submit_proposal(..., source_intent_id=...)` 参数贯通；
+  - `diary_writer` 在提案提交时传入 diary intent_id；
+  - 迁移脚本与契约测试同步更新。
+- 验收标准：
+  - proposal 记录可回溯到源 intent_id；
+  - diary evolution 契约测试同时验证返回值与 DB 落库字段；
+  - 无 source_intent_id 时保持向后兼容。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0002_canon_schema.sql；host_brain/audit/migrations/0016_canon_proposal_log.sql；host_brain/memory/canon_world_store.py；host_brain/skills/impl/diary_writer.py；tests/contract/test_diary_evolution_contract.py。
+- 关联需求/测试：FR-DIARY-002；T-Diary-03；T-Diary-04。
+
+### TASK-0135 F-12 收口：requirements 可选 Redis 依赖说明
+- 状态：DONE（2026-03-03）
+- 任务描述：在 `requirements.txt` 明确 Redis 为可选依赖，仅在启用 Redis rate-limit backend 时安装。
+- 输入：risk_registry.md（R121-1）；requirements.txt；tests/contract/test_quality_contract.py。
+- 输出：
+  - `requirements.txt` 增加 Optional Dependencies 注释块（redis 可选说明）；
+  - 质量契约补充断言（要求存在“redis + 可选”说明）。
+- 验收标准：
+  - requirements 文本含 redis 与 optional/可选标识；
+  - 不强制默认安装 redis；
+  - 对应质量契约测试通过。
+- 涉及文件路径：requirements.txt；tests/contract/test_quality_contract.py。
+- 关联需求/测试：NFR-MAINT-001；T-Quality-01（F-12 子项）。
+
+### TASK-0136 M10-D 收口：追踪补写 + 第六版审查报告 + 发布清单
+- 状态：DONE（2026-03-03）
+- 任务描述：完成 M10-D 文档与发布链路收口：补写 `R-98~R-104`，生成第六版审查报告，生成 `m10d_release.json`。
+- 输入：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-03-v5.md；host_brain/release/release_manifest.py。
+- 输出：
+  - `docs/60_trace/requirements_trace.md` 扩展：R-98~R-104；
+  - `docs/40_agents/full_code_review_report_2026-03-03-v6.md`（新增）；
+  - `host_brain/release/release_manifest.py` 扩展：`generate_m10d_manifest()`；
+  - `release/manifests/m10d_release.json`（新增）。
+- 验收标准：
+  - 需求追踪新增条目完整，状态为 DONE；
+  - 第六版报告更新剩余 P1/P2 发现与修复进展；
+  - m10d_release.json 包含 milestone/git hash/migration hashes/核心文件 hash/test_passed_count/generated_at。
+- 涉及文件路径：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-03-v6.md；host_brain/release/release_manifest.py；release/manifests/m10d_release.json。
+- 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
+
+### TASK-0137 F-04 跟进：Redis 后端真实集成测试落地
+- 状态：TEST_READY（2026-03-03）
+- 任务描述：为 `RedisRateLimitStore` 增加真实 Redis 环境集成测试，验证共享计数与 checker 行为，消除“仅降级路径覆盖”的验证缺口。
+- 输入：risk_registry.md（R39-1）；host_brain/governor/rate_limit_store.py；tests/contract/test_governor_rate_limit_contract.py。
+- 输出：
+  - `tests/integration/test_rate_limit_redis_integration.py`（新增）：
+    - 真实 Redis 后端 `check/check_only/reset/ttl` 验证；
+    - 双实例共享计数一致性验证；
+    - 通过 `NASTUME_TEST_REDIS_URL` 环境变量启用，缺省自动 skip（不影响默认 CI）。
+- 验收标准：
+  - 配置 `NASTUME_TEST_REDIS_URL` 且 Redis 可达时，集成测试通过；
+  - 未配置或 Redis 不可达时，测试稳定 skip；
+  - 不引入默认测试链路不稳定性。
+- 涉及文件路径：tests/integration/test_rate_limit_redis_integration.py（新增）。
+- 关联需求/测试：FR-GOV-001；T-Gov-R4-Redis-01（集成补充）。
+
+### TASK-0138 F-05 跟进：WAL/NFS 部署文档显式约束
+- 状态：DONE（2026-03-03）
+- 任务描述：在部署文档中显式补充 SQLite WAL 与 NFS 不兼容风险及验收口径，避免生产部署踩坑。
+- 输入：risk_registry.md（R36-1）；docs/50_project/ExternalServices_Config.md；docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
+- 输出：
+  - `ExternalServices_Config.md` 新增 SQLite WAL 存储介质要求（本地磁盘优先，NFS/SMB 禁用建议）；
+  - `ENV_EXTERNAL_SERVICES_CHECKLIST.md` 新增部署前强校验条目（journal_mode/WAL 与 `AUDIT_WAL_FAILED` 告警口径）。
+- 验收标准：
+  - 部署文档明确“Ledger 主库禁止 NFS/网络文件系统”；
+  - 明确 WAL 失败降级语义与运维检查方法；
+  - 与 risk_registry 的 R36-1 对齐。
+- 涉及文件路径：docs/50_project/ExternalServices_Config.md；docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
+- 关联需求/测试：NFR-REL-001；NFR-MAINT-001。
+
+### TASK-0139 F-01/F-02 收口：Sandbox 容器硬隔离 + 跨平台超时一致化
+- 状态：DONE（2026-03-03）
+- 任务描述：收口 `airlock/sandbox.py` 在部署环境的两项 P1 风险：生产环境容器硬隔离约束（F-01）与 Windows/Linux 超时终止语义一致化（F-02）。
+- 输入：risk_registry.md（F-01/F-02）；host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
+- 输出：
+  - `host_brain/airlock/sandbox.py` 扩展：`SandboxConfig.require_container`、`isolation_backend=auto`、生产环境容器必选判定；
+  - 容器必选且不可用时返回 `UNAVAILABLE + SANDBOX_CONTAINER_UNAVAILABLE`（禁止降级到 subprocess）；
+  - subprocess 路径统一采用 `Popen.communicate(timeout=...)` + 平台感知终止（Windows `taskkill /T /F`，Linux/Unix `killpg`）；
+  - `resource_usage` 补充 `timeout_enforcement/platform/isolation_backend` 诊断字段。
+- 验收标准：
+  - 生产环境或 `require_container=True` 时，不满足容器隔离必须硬失败；
+  - 超时路径在 Windows/Linux 返回一致语义（TIMEOUT + SANDBOX_TIMEOUT）；
+  - T-Sandbox-01 与 T-Sandbox-Docker-01 回归通过（含新增断言）。
+- 涉及文件路径：host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
+- 关联需求/测试：FR-AIRLOCK-002；T-Sandbox-01；T-Sandbox-Docker-01。
+
+### TASK-0140 F-11 收口：WeChat→Edge 真实 RPC 端到端验证
+- 状态：DONE（2026-03-03）
+- 任务描述：补齐 F-11 验证缺口：E2E 测试不再直接写 Ledger 模拟 Edge，而是经 Host `POST /v1/edge/events` 真实 RPC 入口写入语音事件。
+- 输入：risk_registry.md（F-11）；host_brain/app/fastapi_app.py；edge_client/rpc/event_reporter.py；tests/e2e fixtures。
+- 输出：
+  - `tests/e2e/test_wechat_vts_voice_rpc_e2e.py`（新增）：覆盖 WeChat 入站 → Governor APPROVE → Skill 执行 → EdgeEventReporter 通过 HTTP 上报 `ASR_CHUNK/TTS_PLAY`；
+  - E2E 断言补充：`voice_event_log` 真实落库 + `trace_request` 链路完整；
+  - 测试侧 Ledger 连接调整为 `check_same_thread=False`，保证 TestClient 跨线程写库稳定。
+- 验收标准：
+  - 事件上报通过真实 `/v1/edge/events` 入口（非直接调用 Ledger）；
+  - `ASR_CHUNK` 与 `TTS_PLAY` 均可在审计表中回放；
+  - 聚焦 E2E+RPC+Sandbox + manifest 回归通过（102 passed）。
+- 涉及文件路径：tests/e2e/test_wechat_vts_voice_rpc_e2e.py（新增）；host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
+- 关联需求/测试：FR-CHANNEL-001；FR-VOICE-001；T-E2E-RPC-01。
