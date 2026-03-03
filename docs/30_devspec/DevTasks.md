@@ -1431,7 +1431,7 @@ TASK-XXXX 标题
 ## M7 可观测 + MCP + 语音深化（TASK-0099~0106）
 
 > 对应 DevSpec §17；PRD §4.16（FR-OBS）、§4.18（FR-MCP）、§4.19（FR-VOICE）。
-> 所有任务当前状态：TASK_READY。
+> 所有任务当前状态：DONE（2026-03-03 实现，914 passed）。
 
 ### TASK-0099 可观测指标面板：/obs/metrics 接口 + request_id 串联（M7 P0）
 - 任务描述：实现 `/obs/metrics` HTTP 接口，聚合 Governor 裁决计数、伪执行拦截次数、检索 p50/p95、Hard Snapshot staleness、最近链路摘要，并保证所有指标可通过 request_id 串联到 SQLite Ledger。
