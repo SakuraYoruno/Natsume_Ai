@@ -1,4 +1,4 @@
-"""Release checklist and rollback mapping contracts for M0~M3 delivery."""
+"""Release checklist and rollback mapping contracts for M0~M6 delivery."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from host_brain.core.ids import now_ms
 S_RELEASE_CHECKLIST = "S_RELEASE_CHECKLIST"
 STATUS_READY = "READY"
 STATUS_FAILED = "FAILED"
-ALLOWED_MILESTONES = {"M0", "M1", "M2", "M3"}
+ALLOWED_MILESTONES = {"M0", "M1", "M2", "M3", "M4", "M5", "M6"}
 ALLOWED_FLOW_ENVS = ("dev", "staging", "prod")
 CHECKSUM_PREFIX = "sha256:"
 MODEL_PLANE_PROFILES_PATH = "configs/model_plane/model_profiles.yaml"
@@ -49,7 +49,20 @@ def build_release_checklist(
     repo_root = Path(root).resolve()
     normalized_milestone = str(milestone).strip().upper()
     if normalized_milestone not in ALLOWED_MILESTONES:
-        raise ValueError(f"milestone must be one of {sorted(ALLOWED_MILESTONES)}")
+        return {
+            "stage": S_RELEASE_CHECKLIST,
+            "status": STATUS_FAILED,
+            "reason_code": "RELEASE_MILESTONE_INVALID",
+            "milestone": normalized_milestone,
+            "release_id": str(release_id),
+            "assets": [],
+            "checksums": {},
+            "required_services": [],
+            "flow_refs": {},
+            "model_plane": None,
+            "config_snapshot_refs": [],
+            "ts_ms": int(ts_ms if ts_ms is not None else now_ms()),
+        }
 
     flow_refs = _load_active_pointer(repo_root / active_pointer_path)
     asset_list = sorted({str(item).replace("\\", "/") for item in assets})

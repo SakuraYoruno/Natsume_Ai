@@ -434,8 +434,8 @@ class VTubeStudioDriver:
         delay = rc.base_delay_s
         self._reconnect_attempts = 0
 
-        with self._lock:
-            self._state = VtsState.RECONNECTING
+        # 注意：state 已由 trigger_reconnect 在 lock 内设置为 RECONNECTING
+        # 此处无需重复设置，避免竞态
 
         logger.info(
             "VTS reconnect loop started (max_attempts=%d, base_delay=%.1fs)",
@@ -471,10 +471,18 @@ class VTubeStudioDriver:
                         "VTS reconnected after %d attempt(s)", attempt,
                     )
                     return
+                else:
+                    # connect 失败，确保 state 保持 RECONNECTING
+                    with self._lock:
+                        if self._state != VtsState.SHUTDOWN:
+                            self._state = VtsState.RECONNECTING
             except Exception as exc:
                 logger.warning(
                     "VTS reconnect attempt %d failed: %s", attempt, exc,
                 )
+                with self._lock:
+                    if self._state != VtsState.SHUTDOWN:
+                        self._state = VtsState.RECONNECTING
 
             # 等待退避时间（可被 shutdown 中断）
             if self._shutdown_event.wait(timeout=min(delay, rc.max_delay_s)):
@@ -528,6 +536,8 @@ class VTubeStudioDriver:
                     detail="driver is shutdown",
                     action="trigger_reconnect",
                 )
+            # 在 lock 内提前设置 RECONNECTING，避免线程启动前的竞态
+            self._state = VtsState.RECONNECTING
 
         self._shutdown_event.clear()
         self._reconnect_thread = threading.Thread(

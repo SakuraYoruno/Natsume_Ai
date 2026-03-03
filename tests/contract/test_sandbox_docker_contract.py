@@ -87,7 +87,7 @@ class TestDockerDegradation:
         ledger = SQLiteLedger(db_path=":memory:")
         executor = SandboxExecutor(config=config, ledger=ledger)
 
-        with patch("host_brain.airlock.sandbox.is_docker_available", return_value=False):
+        with patch("host_brain.airlock.docker_sandbox.is_docker_available", return_value=False):
             result = executor.execute(
                 'print("hello")',
                 request_id="req_docker_001",
@@ -105,7 +105,7 @@ class TestDockerDegradation:
         ledger = SQLiteLedger(db_path=":memory:")
         executor = SandboxExecutor(config=config, ledger=ledger)
 
-        with patch("host_brain.airlock.sandbox.is_docker_available", return_value=False):
+        with patch("host_brain.airlock.docker_sandbox.is_docker_available", return_value=False):
             executor.execute(
                 'print("audit")',
                 request_id="req_docker_002",

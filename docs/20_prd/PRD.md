@@ -637,9 +637,10 @@ NFR-MAINT-001 可回归与可迁移
 M1 主权闭环（最小可运行）：FR-CORE/FLOW/INTENT/GOV/TOKEN/SKILL/AUDIT（基础）— **DONE**（2026-03-01）
 M2 成长闭环（关系+记忆+风格）：FR-BOND/MEM/CANON — **DONE**（2026-03-01）
 M3 LSP（可撤销默认）：FR-LSP + 可逆能力接入 — **DONE**（2026-03-02）
-M4 体验包（低风险）：FR-SCHED（调度器前置）+ FR-DESKTOP（桌面留言）/ FR-DREAM（梦境）/ FR-DIARY（日记）/ FR-PROACTIVE（主动对话）/ FR-FOCUS（Focus Mode）（均需 SkillMeta + 审计）— **TASK_READY**（2026-03-03：DevSpec/DevTasks 已完备，待实现）
+M4 体验包（低风险）：FR-SCHED（调度器前置）+ FR-DESKTOP（桌面留言）/ FR-DREAM（梦境）/ FR-DIARY（日记）/ FR-PROACTIVE（主动对话）/ FR-FOCUS（Focus Mode）（均需 SkillMeta + 审计）— **DONE**（2026-03-03）
 M5 视觉自动化（高门槛）：FR-VISION 全量验收 — **DONE**（2026-03-02）
 M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）— **DONE**（2026-03-02）
+M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **PRD_READY**（2026-03-03：需求已清晰，待 DevSpec 工程契约）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单

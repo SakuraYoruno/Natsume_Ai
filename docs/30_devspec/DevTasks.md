@@ -1425,3 +1425,152 @@ TASK-XXXX 标题
   - T-Perf-01 全部通过。
 - 涉及文件路径：host_brain/core/latency.py（新增）；host_brain/core/errors.py；host_brain/audit/sqlite_ledger.py；tools/bench/e2e_latency_bench.py（新增）；tools/bench/retrieval_latency_bench.py（新增）；tests/contract/test_latency_contract.py（新增）；tests/fixtures/perf/。
 - 关联需求/测试：NFR-PERF-001；T-Perf-01；T-Audit-01。
+
+---
+
+## M7 可观测 + MCP + 语音深化（TASK-0099~0106）
+
+> 对应 DevSpec §17；PRD §4.16（FR-OBS）、§4.18（FR-MCP）、§4.19（FR-VOICE）。
+> 所有任务当前状态：TASK_READY。
+
+### TASK-0099 可观测指标面板：/obs/metrics 接口 + request_id 串联（M7 P0）
+- 任务描述：实现 `/obs/metrics` HTTP 接口，聚合 Governor 裁决计数、伪执行拦截次数、检索 p50/p95、Hard Snapshot staleness、最近链路摘要，并保证所有指标可通过 request_id 串联到 SQLite Ledger。
+- 输入：DevSpec §17.1.1；host_brain/audit/sqlite_ledger.py；host_brain/governor/rules.py；host_brain/core/metabolism.py。
+- 输出：
+  - `host_brain/obs/metrics.py`（新增）：MetricsCollector 类，从 Ledger 聚合各项指标；
+  - `host_brain/obs/__init__.py`（新增）：包初始化；
+  - `host_brain/obs/routes.py`（新增）：Flask/FastAPI 路由 `GET /obs/metrics`，返回 DevSpec §17.1.1 定义的 JSON 结构；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `query_governor_stats()`、`query_recent_chains(n)` 查询方法；
+  - `tests/contract/test_obs_metrics_contract.py`（新增）：T-OBS-01 验收测试（结构稳定 + request_id 串联可回放）；
+  - `tests/fixtures/obs/`（新增）：metrics 查询 fixtures。
+- 验收标准：
+  - `/obs/metrics` 返回结构与 DevSpec §17.1.1 完全一致；
+  - `governor_decisions` 计数与 Ledger 中 `governor_decision_log` 一致；
+  - `recent_chains` 中每条记录的 `request_id` 可在 Ledger 中找到对应审计行；
+  - T-OBS-01 全部通过。
+- 涉及文件路径：host_brain/obs/metrics.py（新增）；host_brain/obs/__init__.py（新增）；host_brain/obs/routes.py（新增）；host_brain/audit/sqlite_ledger.py；tests/contract/test_obs_metrics_contract.py（新增）；tests/fixtures/obs/。
+- 关联需求/测试：FR-OBS-001；T-OBS-01。
+
+### TASK-0100 可观测模式差异：dev/prod 模式切换 + debug_trace 字段控制（M7 P1）
+- 任务描述：实现 `OBS_MODE=dev|prod` 环境变量控制，dev 模式下 `/obs/metrics` 额外返回 `debug_trace`（含 LLM intent_draft、Governor 规则命中路径、Skill 执行参数），prod 模式下不返回。
+- 输入：DevSpec §17.1.2；TASK-0099 输出的 MetricsCollector + routes.py。
+- 输出：
+  - `host_brain/obs/metrics.py` 扩展：`ObsMode` 枚举（DEV/PROD）+ `get_obs_mode()` 读取环境变量；
+  - `host_brain/obs/routes.py` 扩展：根据 ObsMode 决定是否附加 `debug_trace` 字段；
+  - `host_brain/core/errors.py` 扩展：新增 `OBS_MODE_INVALID` 错误码；
+  - `tests/contract/test_obs_mode_contract.py`（新增）：T-OBS-02 验收测试（切换模式后 debug_trace 字段按预期出现/消失；不影响裁决与审计事实）；
+  - `tests/fixtures/obs/` 扩展：dev_mode_response.json / prod_mode_response.json。
+- 验收标准：
+  - `OBS_MODE=dev` 时 `debug_trace` 字段存在且包含 intent_draft/rules_hit/skill_params；
+  - `OBS_MODE=prod` 时 `debug_trace` 字段为 null 或不存在；
+  - 切换模式不影响 Governor 裁决结果与 Ledger 审计写入；
+  - T-OBS-02 全部通过。
+- 涉及文件路径：host_brain/obs/metrics.py；host_brain/obs/routes.py；host_brain/core/errors.py；tests/contract/test_obs_mode_contract.py（新增）；tests/fixtures/obs/。
+- 关联需求/测试：FR-OBS-002；T-OBS-02。
+
+### TASK-0101 MCP ToolMeta 注册表：同步 + 分级 + 变更留痕（M7 P0）
+- 任务描述：实现 MCP provider 工具元数据（ToolMeta）的同步注册表，包含 access_level/risk_level/reversible 分级字段，变更写 `mcp_sync_log`（可回放）。
+- 输入：DevSpec §17.2.1；host_brain/audit/sqlite_ledger.py；host_brain/skills/registry.py。
+- 输出：
+  - `host_brain/mcp/__init__.py`（新增）：包初始化；
+  - `host_brain/mcp/tool_registry.py`（新增）：ToolMeta 数据类 + MCPToolRegistry 注册表（SQLite 持久化 `mcp_tool_registry` 表）；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_tool_registry` 表 + `mcp_sync_log` 表 + `log_mcp_sync()` 方法；
+  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql`（新增）：建表 SQL；
+  - `tests/contract/test_mcp_registry_contract.py`（新增）：ToolMeta 注册/更新/变更留痕验收测试；
+  - `tests/fixtures/mcp/`（新增）：tool_meta_read.json / tool_meta_write.json / sync_log.json。
+- 验收标准：
+  - ToolMeta 注册后可按 provider_id/tool_id 查询；
+  - 更新 ToolMeta 时 `mcp_sync_log` 写入变更记录（含 before/after diff）；
+  - `access_level`/`risk_level`/`reversible` 字段完整且类型正确；
+  - 注册表测试全部通过。
+- 涉及文件路径：host_brain/mcp/__init__.py（新增）；host_brain/mcp/tool_registry.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql（新增）；tests/contract/test_mcp_registry_contract.py（新增）；tests/fixtures/mcp/。
+- 关联需求/测试：FR-MCP-001；T-MCP-01~03。
+
+### TASK-0102 MCP ToolBroker：单入口调用 + Governor 门禁 + Token 治理 + 审计（M7 P0）
+- 任务描述：实现 ToolBroker 单入口，强制 `intent_draft.mcp_call → ToolBroker → Governor gate → Token（WRITE 必须）→ MCP SDK → Audit` 调用链，WRITE 无 token 拒绝，provider 不可达降级。
+- 输入：DevSpec §17.2.2；TASK-0101 输出的 MCPToolRegistry；host_brain/governor/rules.py；host_brain/core/token_ledger.py；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/mcp/tool_broker.py`（新增）：ToolBroker 类，实现完整调用链；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_exec_log` 表 + `log_mcp_exec()` 方法；
+  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql` 扩展：`mcp_exec_log` 建表 SQL；
+  - `host_brain/core/errors.py` 扩展：`MCP_TOOL_NOT_REGISTERED`、`MCP_WRITE_TOKEN_REQUIRED`、`MCP_PROVIDER_UNAVAILABLE` 错误码；
+  - `tests/contract/test_mcp_broker_contract.py`（新增）：T-MCP-01~03 验收测试；
+  - `tests/fixtures/mcp/` 扩展：write_no_token.json / read_no_token.json / provider_unavailable.json。
+- 验收标准：
+  - WRITE 无 token → `MCP_WRITE_TOKEN_REQUIRED` 拒绝 + `mcp_exec_log` 写入 decision=REJECT；
+  - READ 无 token → 正常执行 + `mcp_exec_log` 写入 decision=APPROVE；
+  - provider 不可达 → `MCP_PROVIDER_UNAVAILABLE` 降级 + 输出结构稳定；
+  - T-MCP-01~03 全部通过。
+- 涉及文件路径：host_brain/mcp/tool_broker.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql；host_brain/core/errors.py；tests/contract/test_mcp_broker_contract.py（新增）；tests/fixtures/mcp/。
+- 关联需求/测试：FR-MCP-001；T-MCP-01~03。
+
+### TASK-0103 ASR 事件化上送：事件 Schema + 低置信度标注 + 审计（M7 P1）
+- 任务描述：实现 ASR 事件化上送协议（Edge→Host RPC），包含 confidence/is_final/alternates 字段，低置信度（<0.6）标注 `low_confidence=true`，事件写 `voice_event_log`。
+- 输入：DevSpec §17.3.1；edge_client/actuators/vts_driver.py（参考 RPC 模式）；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/voice/__init__.py`（新增）：包初始化；
+  - `host_brain/voice/asr_handler.py`（新增）：ASREvent 数据类 + ASRHandler（接收事件、低置信度标注、写 voice_event_log）；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `voice_event_log` 表 + `log_voice_event()` 方法；
+  - `host_brain/audit/migrations/0016_voice_event_schema.sql`（新增）：建表 SQL；
+  - `host_brain/core/errors.py` 扩展：`ASR_LOW_CONFIDENCE`、`ASR_UNAVAILABLE` 错误码；
+  - `tests/contract/test_asr_contract.py`（新增）：T-VOICE-01 验收测试；
+  - `tests/fixtures/voice/`（新增）：asr_high_confidence.json / asr_low_confidence.json / asr_unavailable.json。
+- 验收标准：
+  - confidence ≥ 0.6 → 正常处理，`voice_event_log` 写入 `low_confidence=false`；
+  - confidence < 0.6 → `low_confidence=true` + `reason_code=ASR_LOW_CONFIDENCE`；
+  - ASR 不可用 → `ASR_UNAVAILABLE` + 输出结构稳定；
+  - T-VOICE-01 全部通过。
+- 涉及文件路径：host_brain/voice/__init__.py（新增）；host_brain/voice/asr_handler.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0016_voice_event_schema.sql（新增）；host_brain/core/errors.py；tests/contract/test_asr_contract.py（新增）；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-001；T-VOICE-01。
+
+### TASK-0104 TTS 合成播报队列：优先级队列 + 打断 + 失败可解释（M7 P1）
+- 任务描述：实现 TTS 下发协议（Host→Edge RPC）与播报队列，按 priority 排序，`interruptible=true` 的任务可被 Barge-in 打断，播报完成/打断后写 `voice_event_log`。
+- 输入：DevSpec §17.3.2；TASK-0103 输出的 voice_event_log；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/voice/tts_queue.py`（新增）：TTSTask 数据类 + TTSQueue（优先级队列 + 打断逻辑）；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：`log_voice_event()` 支持 TTS 事件类型；
+  - `host_brain/core/errors.py` 扩展：`TTS_QUEUE_FULL`、`TTS_INTERRUPTED` 错误码；
+  - `tests/contract/test_tts_contract.py`（新增）：T-VOICE-02 验收测试；
+  - `tests/fixtures/voice/` 扩展：tts_normal.json / tts_queue_full.json / tts_interrupted.json。
+- 验收标准：
+  - 高优先级任务插队后先执行；
+  - `interruptible=true` 任务被打断后写 `TTS_INTERRUPTED` + 审计可回放；
+  - 队列满时返回 `TTS_QUEUE_FULL` + 输出结构稳定；
+  - T-VOICE-02 全部通过。
+- 涉及文件路径：host_brain/voice/tts_queue.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/test_tts_contract.py（新增）；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-002；T-VOICE-02。
+
+### TASK-0105 Barge-in 打断 + Edge 兜底小模型（M7 P2）
+- 任务描述：实现 Barge-in 打断协议（ASR 检测到用户开口 → Edge 发 barge_in → Host 发 tts_interrupt）；实现 Edge 兜底小模型（Host 不可用时 draft_only 输出，默认卸载按需加载）。
+- 输入：DevSpec §17.3.3~17.3.4；TASK-0103/0104 输出的 ASRHandler + TTSQueue；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/voice/barge_in.py`（新增）：BargeInHandler（接收 barge_in 事件 → 触发 tts_interrupt → 写 voice_event_log）；
+  - `edge_client/fallback/fallback_model.py`（新增）：FallbackModel（draft_only 标记 + 按需加载 + 不可用快速失败）；
+  - `host_brain/core/errors.py` 扩展：`FALLBACK_MODEL_UNAVAILABLE`、`FALLBACK_OUTPUT_DRAFT_ONLY` 错误码；
+  - `tests/contract/test_barge_in_contract.py`（新增）：T-VOICE-03 验收测试；
+  - `tests/contract/test_fallback_model_contract.py`（新增）：T-VOICE-04 验收测试；
+  - `tests/fixtures/voice/` 扩展：barge_in_event.json / fallback_draft.json / fallback_unavailable.json。
+- 验收标准：
+  - Barge-in 触发后 TTS 立即打断 + 审计记录 `BARGE_IN_INTERRUPTED`；
+  - 兜底输出标记 `draft_only=true`，不含裁决或执行事实宣告；
+  - 兜底不可用时 `FALLBACK_MODEL_UNAVAILABLE` 快速失败；
+  - T-VOICE-03/T-VOICE-04 全部通过。
+- 涉及文件路径：host_brain/voice/barge_in.py（新增）；edge_client/fallback/fallback_model.py（新增）；host_brain/core/errors.py；tests/contract/test_barge_in_contract.py（新增）；tests/contract/test_fallback_model_contract.py（新增）；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-003；FR-VOICE-004；T-VOICE-03；T-VOICE-04。
+
+### TASK-0106 Edge 资源闸门：优先级矩阵 + 健康快照 + 抢占可观测（M7 P2）
+- 任务描述：实现 Edge 资源闸门，按 P1（ASR）> P2（播放）> P3（TTS 合成）> P4（兜底 LLM）优先级矩阵管理资源，低优先级任务被抢占时写 `RESOURCE_GATE_PREEMPTED`，健康快照可观测。
+- 输入：DevSpec §17.3.5；TASK-0103~0105 输出的 ASRHandler/TTSQueue/BargeInHandler/FallbackModel。
+- 输出：
+  - `edge_client/resource/resource_gate.py`（新增）：ResourceGate（优先级矩阵 + 抢占逻辑 + 健康快照）；
+  - `edge_client/resource/__init__.py`（新增）：包初始化；
+  - `host_brain/core/errors.py` 扩展：`RESOURCE_GATE_PREEMPTED` 错误码；
+  - `tests/contract/test_resource_gate_contract.py`（新增）：T-VOICE-05 验收测试；
+  - `tests/fixtures/voice/` 扩展：resource_gate_snapshot.json / preemption_event.json。
+- 验收标准：
+  - P4 任务在 P1 活跃时被抢占，写 `RESOURCE_GATE_PREEMPTED`；
+  - ASR（P1）在压力下不被抢占；
+  - 健康快照结构与 DevSpec §17.3.5 一致；
+  - T-VOICE-05 全部通过。
+- 涉及文件路径：edge_client/resource/resource_gate.py（新增）；edge_client/resource/__init__.py（新增）；host_brain/core/errors.py；tests/contract/test_resource_gate_contract.py（新增）；tests/fixtures/voice/。
+- 关联需求/测试：FR-VOICE-005；T-VOICE-05。
