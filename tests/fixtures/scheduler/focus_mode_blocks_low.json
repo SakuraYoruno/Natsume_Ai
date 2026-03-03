@@ -1,0 +1,18 @@
+{
+  "scenario": "focus_mode_blocks_low",
+  "description": "Focus 模式下 LOW 优先级主动对话被拦截",
+  "task_config": {
+    "task_id": "test_proactive_talk",
+    "trigger_mode": "interval",
+    "trigger_config": {"seconds": 900},
+    "intent_template": {"skill_name": "proactive_talk", "args": {}},
+    "priority": "LOW",
+    "enabled": true,
+    "max_consecutive_failures": 3
+  },
+  "sys_mode": "focus",
+  "expected": {
+    "status": "REJECTED",
+    "reason_code": "SYSMODE_FORBIDDEN"
+  }
+}

@@ -1,7 +1,7 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.3.1
+版本：v1.4
 
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
 
@@ -506,6 +506,206 @@
 - DevTasks（TASK）：TASK-0083
 - 验收测试（T-xx）：无（文档更新）
 - 当前进展（2026-03-02）：ENV_EXTERNAL_SERVICES_CHECKLIST.md v1.1 已更新：新增 Docker 沙箱/VTS DEGRADED/Model Plane 发布门禁/跨端时间线优化。
+- 覆盖状态：DONE
+
+## R-53
+- 系统级需求：Host 定时调度器——系统发起 Intent 的统一触发框架（cron/interval/once），sys_mode 门控，连续失败自动暂停
+- PRD 需求编号（FR）：FR-SCHED-001~002
+- 来源：PRD 4.20
+- DevSpec 落点：DevSpec 15.1
+- DevTasks（TASK）：TASK-0091
+- 验收测试（T-xx）：T-Sched-01~03
+- 当前进展（2026-03-03）：TASK-0091 已完成：NatsumeScheduler 调度器主体（cron/interval/once 三种触发模式）+ SchedulerTaskRegistry + SchedulerHealthReporter + sys_mode×priority 门控矩阵 + 连续失败自动暂停 + scheduler_event_log 审计表 + T-Sched-01~03 contract 测试 43 项全部通过。
+- 覆盖状态：DONE
+
+## R-54
+- 系统级需求：桌面留言——安全基目录文件创建/更新/撤销 + 路径穿越拒绝 + 内容 QA
+- PRD 需求编号（FR）：FR-DESKTOP-001~002
+- 来源：PRD 4.21
+- DevSpec 落点：DevSpec 15.2
+- DevTasks（TASK）：TASK-0092
+- 验收测试（T-xx）：T-Desktop-01~02
+- 当前进展（2026-03-03）：TASK-0092 已完成：desktop_note Skill（create/update/delete + quarantine 软删除 + undo 撤销）+ 路径穿越拒绝 + symlink 拦截 + Gaming 门控 + QA 内容检查 + manifest 产出 + T-Desktop-01~02 contract 测试 21 项全部通过。
+- 覆盖状态：DONE
+
+## R-55
+- 系统级需求：梦境生成——Sleep/空闲触发 + Episodic 当日回顾 + LLM 创造性叙事 + NARRATIVE_ONLY 标签 + 非事实约束
+- PRD 需求编号（FR）：FR-DREAM-001~002
+- 来源：PRD 4.22
+- DevSpec 落点：DevSpec 15.3
+- DevTasks（TASK）：TASK-0093
+- 验收测试（T-xx）：T-Dream-01~02
+- 当前进展（2026-03-03）：TASK-0093 已完成：dream_generator Skill（Sleep/空闲触发 + Episodic 当日回顾 + LLM 梦境叙事生成 + NARRATIVE_ONLY 标签写入 Episodic）+ 条件不满足/无素材跳过/LLM降级 + T-Dream-01~02 contract 测试 12 项全部通过。
+- 覆盖状态：DONE
+
+## R-56
+- 系统级需求：日记生成——每日定时汇总对话 + 双写文件/Episodic + 无对话不伪造 + 可选 Evolution 提案
+- PRD 需求编号（FR）：FR-DIARY-001~002
+- 来源：PRD 4.23
+- DevSpec 落点：DevSpec 15.4
+- DevTasks（TASK）：TASK-0094
+- 验收测试（T-xx）：T-Diary-01~02
+- 当前进展（2026-03-03）：TASK-0094 已完成：diary_writer Skill（定时汇总对话 + LLM 日记叙事生成 + 文件/Episodic 双写 + 无对话不伪造）+ 日期校验/LLM降级/无素材跳过 + T-Diary-01~02 contract 测试 12 项全部通过。
+- 覆盖状态：DONE
+
+## R-57
+- 系统级需求：主动对话——条件策略触发（空闲/Bond/时段）+ 频率限制 + 内容 QA + 推送失败静默降级
+- PRD 需求编号（FR）：FR-PROACTIVE-001~002
+- 来源：PRD 4.24
+- DevSpec 落点：DevSpec 15.5
+- DevTasks（TASK）：TASK-0095
+- 验收测试（T-xx）：T-Proactive-01~02
+- 当前进展（2026-03-03）：TASK-0095 已完成：proactive_talk Skill（空闲阈值检查 + 时段检测 + LLM 问候生成 + UI 推送 + 降级模板）+ Gaming/Focus/Maintenance 门控 + 自定义阈值 + T-Proactive-01~02 contract 测试 13 项全部通过。
+- 覆盖状态：DONE
+
+## R-58
+- 系统级需求：Focus Mode——Normal 子模式状态扩展 + 中断型能力暂停 + 被动响应保留 + 进退可审计
+- PRD 需求编号（FR）：FR-FOCUS-001
+- 来源：PRD 4.25
+- DevSpec 落点：DevSpec 15.6
+- DevTasks（TASK）：TASK-0096
+- 验收测试（T-xx）：T-Focus-01
+- 当前进展（2026-03-03）：TASK-0096 已完成：focus_mode Skill（enter/exit 操作 + sys_mode 切换回调 + 过期时间 + 原因记录）+ 非 Normal 拒绝/重复进入拒绝/未激活退出拒绝 + T-Focus-01 contract 测试 14 项全部通过。
+- 覆盖状态：DONE
+
+## R-59
+- 系统级需求：M4 体验包 E2E 集成——Scheduler→Skill→Audit 全链闭环覆盖 5 个体验功能
+- PRD 需求编号（FR）：FR-SCHED-001~002, FR-DESKTOP-001~002, FR-DREAM-001~002, FR-DIARY-001~002, FR-PROACTIVE-001~002, FR-FOCUS-001
+- 来源：PRD 4.20~4.25
+- DevSpec 落点：DevSpec 15
+- DevTasks（TASK）：TASK-0097
+- 验收测试（T-xx）：T-Sched-01~03, T-Desktop-01~02, T-Dream-01~02, T-Diary-01~02, T-Proactive-01~02, T-Focus-01
+- 当前进展（2026-03-03）：TASK-0097 已完成：M4 E2E 集成测试（Scheduler→Skill→Audit 完整链路 + 跨 Skill 联动 Focus 门控 + Health 快照反映真实状态）12 项 E2E 测试全部通过；136 项 M4 全量回归 0.34s 内通过。
+- 覆盖状态：DONE
+
+## R-60
+- 系统级需求：Flow 配置资产版本化与追溯——导出归档 + active.pointer 指针 + Trace 索引一致性
+- PRD 需求编号（FR）：FR-FLOW-001
+- 来源：PRD 4.2
+- DevSpec 落点：DevSpec 1.5
+- DevTasks（TASK）：TASK-0000,TASK-0002,TASK-0062
+- 验收测试（T-xx）：T-Flow-01,T-Flow-02,T-Flow-03
+- 当前进展（2026-03-03）：TASK-0000（目录骨架+指针文件）、TASK-0002（Flow 归档+一致性断言）、TASK-0062（release_manifest 纳入 model_plane 资产）已完成；T-Flow-01~03 回归通过。
+- 覆盖状态：DONE
+
+## R-61
+- 系统级需求：叙事与事实分离——叙事层不得自造执行事实；执行事实只来自审计链摘要字段
+- PRD 需求编号（FR）：FR-CORE-003
+- 来源：PRD 4.1
+- DevSpec 落点：DevSpec 9（QA 合规）
+- DevTasks（TASK）：TASK-0003,TASK-0012
+- 验收测试（T-xx）：T-LLM-01,T-67~T-71
+- 当前进展（2026-03-03）：TASK-0003（LLM 输出契约 + lint）和 TASK-0012（QA 合规模块：伪执行宣告拦截 + 一次重写/降级）已完成；回归集中完成性表述无证据必拦截，T-67~T-71 通过。
+- 覆盖状态：DONE
+
+## R-62
+- 系统级需求：Skills 统一执行入口 + 幂等——loader/registry 强制 token 校验 + 同 intent_id 不重复副作用
+- PRD 需求编号（FR）：FR-SKILL-002,FR-SKILL-003
+- 来源：PRD 4.6.1
+- DevSpec 落点：DevSpec 6/8.1
+- DevTasks（TASK）：TASK-0010
+- 验收测试（T-xx）：T-Skill-01,T-15
+- 当前进展（2026-03-03）：TASK-0010 已完成：loader 强制 token 校验、静态扫描+运行时断言双生效、同 intent_id 幂等。T-Skill-01/T-15 回归通过。
+- 覆盖状态：DONE
+
+## R-63
+- 系统级需求：Episodic 写入门禁（evidence_refs 必需）+ 生命周期审计（merge/decay/delete 可回放）
+- PRD 需求编号（FR）：FR-MEM-001,FR-MEM-002
+- 来源：PRD 4.11
+- DevSpec 落点：DevSpec 8.3
+- DevTasks（TASK）：TASK-0014
+- 验收测试（T-xx）：T-Mem-01,T-Mem-02
+- 当前进展（2026-03-03）：TASK-0014 已完成：无 evidence_refs 写入失败且可解释；merge/decay/delete 审计事件均可回放。T-Mem-01/T-Mem-02 回归通过。
+- 覆盖状态：DONE
+
+## R-64
+- 系统级需求：阶段化状态机与降级——S0~S8 每阶段有失败分支与 reason_code；降级最多追问 1 个关键问题
+- PRD 需求编号（FR）：FR-UX-001
+- 来源：PRD 4.15
+- DevSpec 落点：DevSpec 2/9
+- DevTasks（TASK）：TASK-0012,TASK-0023
+- 验收测试（T-xx）：T-67~T-71
+- 当前进展（2026-03-03）：TASK-0012（QA 合规）+ TASK-0023（冷启动降级）已完成：注入任意阶段异常输出不崩，quality.stage 反映失败点。T-67~T-71 回归通过。
+- 覆盖状态：DONE
+
+## R-65
+- 系统级需求：Host 最小叙事模板库——LLM 不可用/不合规时仍输出最低风格且不伪执行的模板
+- PRD 需求编号（FR）：FR-UX-002
+- 来源：PRD 4.15
+- DevSpec 落点：DevSpec 2.1/9
+- DevTasks（TASK）：TASK-0003,TASK-0012,TASK-0023
+- 验收测试（T-xx）：T-LLM-01,T-67~T-71
+- 当前进展（2026-03-03）：关闭 LLM 或强制超时时，Host 输出合规模板（克制且不暴露组件名、不产生执行 intent）。TASK-0003/0012/0023 已覆盖。T-LLM-01/T-67~T-71 回归通过。
+- 覆盖状态：DONE
+
+## R-66
+- 系统级需求：Gaming 模式视觉链路门控——Gaming 下禁止屏幕监控/OCR/ClawdBot UI 自动化链路
+- PRD 需求编号（FR）：FR-MODE-003
+- 来源：PRD 4.13
+- DevSpec 落点：DevSpec 8.12
+- DevTasks（TASK）：TASK-0033,TASK-0034
+- 验收测试（T-xx）：T-VisionGate-01
+- 当前进展（2026-03-03）：TASK-0033/0034 已完成：进入 Gaming 后屏幕监控/OCR/Clawd UI 动作均被稳定拒绝或降级；退出后恢复且审计可回放。T-VisionGate-01 回归通过。
+- 覆盖状态：DONE
+
+## R-67
+- 系统级需求：ClawdBot 必须依赖结构化视觉输入——缺结构化视觉输入时不得进入 UI 行为路径；置信度不足必须熔断
+- PRD 需求编号（FR）：FR-VISION-005
+- 来源：PRD 4.9
+- DevSpec 落点：DevSpec 6.3/8.12
+- DevTasks（TASK）：TASK-0022
+- 验收测试（T-xx）：T-41~T-43
+- 当前进展（2026-03-03）：TASK-0022 已完成：ClawdBot 计划草案消费结构化 OCR/检测结果；缺输入时拒绝进入执行路径；置信度不足熔断可审计。T-41~T-43 回归通过。
+- 覆盖状态：DONE
+
+## R-68
+- 系统级需求：World Canon 版本化、更新可审计、注入分槽隔离（authoritative.world_canon 独立槽位）
+- PRD 需求编号（FR）：FR-WCANON-002,FR-WCANON-003
+- 来源：PRD 4.12
+- DevSpec 落点：DevSpec 8.5/7
+- DevTasks（TASK）：TASK-0013,TASK-0004
+- 验收测试（T-xx）：T-WCanon-01~03,T-CP-01
+- 当前进展（2026-03-03）：TASK-0013（Canon 版本化+变更留痕）+ TASK-0004（ContextPack 分槽隔离）已完成：World Canon 更新可在 canon_change_log 中回放；注入以独立 authoritative.world_canon 槽位、evidence_level=CANON_REFERENCE_ONLY。T-WCanon-01~03/T-CP-01 回归通过。
+- 覆盖状态：DONE
+
+## R-69
+- 系统级需求：本地优先与最小暴露——默认本地运行；对外通信经 AIRLOCK；敏感字段不出站
+- PRD 需求编号（FR）：NFR-SEC-001
+- 来源：PRD §5（NFR）
+- DevSpec 落点：DevSpec 8.7
+- DevTasks（TASK）：TASK-0016,TASK-0038
+- 验收测试（T-xx）：T-39,T-40
+- 当前进展（2026-03-03）：TASK-0016（AIRLOCK 出站净化/入站隔离）+ TASK-0038 已完成：出站净化报告覆盖率 100%，抽检出站 payload 不含硬状态原值与规则细节。T-39/T-40 回归通过。
+- 覆盖状态：DONE
+
+## R-70
+- 系统级需求：降级可用性——依赖故障不崩溃；输出结构稳定；关键链路可观测
+- PRD 需求编号（FR）：NFR-REL-001
+- 来源：PRD §5（NFR）
+- DevSpec 落点：DevSpec 1.2.1/2.1/10
+- DevTasks（TASK）：TASK-0023,TASK-0048,TASK-0056
+- 验收测试（T-xx）：T-67~T-71,T-Drill-01,T-Svc-01,T-EnvReady-01
+- 当前进展（2026-03-03）：TASK-0023（冷启动可用性）+ TASK-0048（生产演练包）+ TASK-0056（环境联调就绪报告）已完成：故障注入矩阵（DB/Neo4j/Chroma/Cloud Exocortex/Edge 超时或不可用）全通过。
+- 覆盖状态：DONE
+
+## R-71
+- 系统级需求：响应时延预算——普通对话可接受；执行链路可解释；超时可控可降级
+- PRD 需求编号（FR）：NFR-PERF-001
+- 来源：PRD §5（NFR）
+- DevSpec 落点：DevSpec 16（性能预算与时延可观测）
+- DevTasks（TASK）：TASK-0098
+- 验收测试（T-xx）：T-Perf-01
+- 当前进展（2026-03-03）：TASK-0098 已完成：性能预算基准测试（Scheduler trigger <5ms + Skill execute <10ms + Health snapshot <2ms/100任务 + Registry ops <1ms）共 9 项性能回归测试全部通过。
+- 覆盖状态：DONE
+
+## R-72
+- 系统级需求：可回归与可迁移——需求编号→测试→日志字段一致；升级不破坏审计可回放
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：PRD §5（NFR）
+- DevSpec 落点：DevSpec 11/14.6（合规测试与验收测试落地方式）
+- DevTasks（TASK）：TASK-0043,TASK-0045,TASK-0047
+- 验收测试（T-xx）：T-Migrate-01,T-CI-01,T-Release-01
+- 当前进展（2026-03-03）：TASK-0043（迁移执行器+schema 版本守卫）+ TASK-0045（四合一 CI 门禁）+ TASK-0047（发布清单+回滚映射）已完成；T-Migrate-01/T-CI-01/T-Release-01 回归通过；版本升级后回放旧 intent 仍可得到一致裁决或明确迁移提示。
 - 覆盖状态：DONE
 
 ---

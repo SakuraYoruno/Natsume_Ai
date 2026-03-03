@@ -1,0 +1,12 @@
+{
+  "scenario": "create_success",
+  "description": "创建文件成功",
+  "args": {
+    "action": "create",
+    "filename": "hello.txt",
+    "content": "今天天气真好~",
+    "base_dir": "__TEST_DIR__"
+  },
+  "context": {"sys_mode": "normal"},
+  "expected": {"status": "EXECUTED", "reason_code": null}
+}

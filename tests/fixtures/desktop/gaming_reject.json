@@ -1,0 +1,12 @@
+{
+  "scenario": "gaming_reject",
+  "description": "Gaming 模式下桌面留言被拒绝",
+  "args": {
+    "action": "create",
+    "filename": "note.txt",
+    "content": "test",
+    "base_dir": "__TEST_DIR__"
+  },
+  "context": {"sys_mode": "gaming"},
+  "expected": {"status": "REJECTED", "reason_code": "SYSMODE_FORBIDDEN"}
+}
