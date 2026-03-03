@@ -1587,3 +1587,129 @@ GET /obs/metrics
 状态使用建议（Trace 侧枚举为准）：
 - PRD_READY / SPEC_READY / TASK_READY / TEST_READY / DONE：用于表达链路成熟度。
 - SPEC_GAP / TASK_GAP / TEST_GAP：用于明确"缺口在哪里"，便于下一轮补齐。
+
+---
+
+## §18 M8 运行时集成闭环
+
+> 对应 PRD M8；覆盖 NFR-PERF-001、NFR-REL-001、FR-CORE-004。
+> 目标：让 M1~M7 所有已实现模块真正能被一键启动、端到端联通，并建立可回归的性能基线与故障注入矩阵。
+
+### 18.1 运行时脚本集成（TASK-0107）
+
+#### 18.1.1 start_host_side.ps1 集成 OBS 路由与 MCP Broker（NFR-REL-001）
+
+**当前缺口**：`start_host_side.ps1` 启动 `host_brain` 进程后，`/obs/metrics` 路由与 `MCPToolBroker` 已在代码中实现，但启动脚本的健康检查仅探测 `/health`，未验证 OBS 与 MCP 子系统是否正常初始化。
+
+**工程契约**：
+- `start_host_side.ps1` 在 `/health` 通过后，额外探测 `/obs/metrics`（期望 HTTP 200）；
+- 若 `/obs/metrics` 返回非 200，启动脚本输出 `obs_status=degraded`（不阻断启动，但写入 `startup_warnings`）；
+- 启动结果 JSON 新增字段：`obs_status`（ok/degraded）、`mcp_registry_status`（ok/degraded）；
+- `mcp_registry_status` 通过调用 `MCPToolRegistry.health_check()` 判断（SQLite 可写即 ok）。
+
+**输出结构扩展**：
+```json
+{
+  "side": "host",
+  "status": "started",
+  "pid": 12345,
+  "obs_status": "ok",
+  "mcp_registry_status": "ok",
+  "startup_warnings": []
+}
+```
+
+**错误码**：`STARTUP_OBS_DEGRADED`、`STARTUP_MCP_DEGRADED`
+
+**验收测试编号**：T-RT-01（启动脚本集成：OBS/MCP 子系统健康状态可观测）
+
+---
+
+### 18.2 端到端 Smoke Test（TASK-0108）
+
+#### 18.2.1 冷启动端到端最小闭环（FR-CORE-004）
+
+**目标**：在无外部依赖（无 API Key、无 Neo4j、无 Chroma）的情况下，验证系统能完成"输入→降级叙事→审计记录→稳定输出"的最小闭环。
+
+**测试场景**（T-E2E-01）：
+1. 启动 `host_brain`（仅 SQLite，无外部服务）；
+2. 发送 `POST /chat`（普通对话，无执行 intent）；
+3. 断言：
+   - 响应为合法 JSON，`quality.stage` 包含降级标记；
+   - `reason_code` 不为空（若有拒绝）；
+   - SQLite 中存在对应 `request_id` 的 `intent_log` 与 `governor_log` 记录；
+   - 响应不含伪执行宣告（`FALSE_EXECUTION_CLAIM` 检查）。
+
+**测试场景**（T-E2E-02）：执行链路 Smoke（有 approval_token）：
+1. 发送执行 intent（`action=desktop_note`，`risk_level=2`）；
+2. 断言：Governor APPROVE → approval_token 签发 → skill_exec_log 写入 → manifest_ref 存在；
+3. 发送 undo（携带 undo_token）→ 断言文件恢复 + vault_gc_log 不删有效 undo 窗口材料。
+
+**测试场景**（T-E2E-03）：故障注入矩阵（NFR-REL-001）：
+- 注入 Neo4j 不可用 → 输出结构稳定，`reason_code=DEPENDENCY_UNAVAILABLE`；
+- 注入 Chroma 不可用 → 输出结构稳定，evidence pack 降级但字段存在；
+- 注入 Cloud LLM 超时 → 输出最小模板，不产生执行 intent；
+- 注入 Edge RPC 不可达 → 语音链路降级，`ASR_UNAVAILABLE` 可统计。
+
+**验收测试编号**：T-E2E-01~03
+
+---
+
+### 18.3 性能基线采集（TASK-0109）
+
+#### 18.3.1 p50/p95 响应时延基线（NFR-PERF-001）
+
+**采集方式**：在 `host_brain/obs/metrics.py` 的 `MetricsCollector` 中，从 `retrieval_event_log` 聚合检索链路时延；从 `governor_log` 聚合裁决时延；从 `skill_exec_log` 聚合执行时延。
+
+**基线指标**（本地基准机器，无外部依赖）：
+
+| 链路段 | p50 目标 | p95 目标 |
+|--------|---------|---------|
+| 检索链路（embedding + rerank + fusion） | ≤ 200ms | ≤ 500ms |
+| Governor 裁决（含 rule_trace） | ≤ 20ms | ≤ 50ms |
+| Skill 执行（desktop_note，本地文件） | ≤ 100ms | ≤ 300ms |
+| 完整对话链路（无 LLM，降级模式） | ≤ 500ms | ≤ 1500ms |
+
+**输出**：`/obs/metrics` 响应中新增 `latency_baseline` 字段：
+```json
+{
+  "latency_baseline": {
+    "retrieval_p50_ms": 180,
+    "retrieval_p95_ms": 420,
+    "governor_p50_ms": 12,
+    "governor_p95_ms": 38,
+    "skill_exec_p50_ms": 85,
+    "skill_exec_p95_ms": 210,
+    "sampled_at": "2026-03-03T12:00:00Z",
+    "sample_count": 100
+  }
+}
+```
+
+**验收测试编号**：T-PERF-01（基线字段结构稳定 + 采样计数 > 0 + 时延值合理范围）
+
+---
+
+### 18.4 发布清单与版本锁定（TASK-0110）
+
+#### 18.4.1 M8 发布清单（release manifest）
+
+**目标**：在 `host_brain/release/release_manifest.py` 基础上，生成 M8 发布清单，锁定：
+- 当前 git commit hash；
+- 所有 migration 文件的 hash（SQLite + Neo4j）；
+- 测试通过数（914 + M8 新增）；
+- 性能基线快照（来自 T-PERF-01）；
+- 服务注册表快照（所有 required=true 服务的 status）。
+
+**输出文件**：`release/manifests/m8_release.json`
+
+**验收测试编号**：T-REL-01（发布清单字段完整性 + hash 可验证）
+
+---
+
+### 18.5 M8 新增错误码汇总
+
+- `STARTUP_OBS_DEGRADED`：启动时 OBS 子系统不可用
+- `STARTUP_MCP_DEGRADED`：启动时 MCP 注册表不可用
+- `E2E_SMOKE_FAILED`：端到端 Smoke 测试失败（仅用于 CI 报告）
+- `PERF_BASELINE_STALE`：性能基线采样数据过期（超过 24h 未更新）
