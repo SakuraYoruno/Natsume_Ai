@@ -728,8 +728,8 @@
 - DevSpec 落点：DevSpec §17.1.1
 - DevTasks（TASK）：TASK-0099
 - 验收测试（T-xx）：T-OBS-01
-- 当前进展（2026-03-03）：DevSpec §17.1.1 工程契约已完备（接口 Schema/指标采集点/日志字段对齐），TASK-0099 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：host_brain/obs/metrics.py（MetricsCollector）+ routes.py 已实现，T-OBS-01 全部通过（11 tests），914 passed。
+- 覆盖状态：DONE
 
 ## R-74
 - 系统级需求：可观测模式差异——dev 模式返回 debug_trace（LLM intent_draft/Governor 规则命中/Skill 参数），prod 模式不返回；切换不影响裁决与审计事实
@@ -738,8 +738,8 @@
 - DevSpec 落点：DevSpec §17.1.2
 - DevTasks（TASK）：TASK-0100
 - 验收测试（T-xx）：T-OBS-02
-- 当前进展（2026-03-03）：DevSpec §17.1.2 工程契约已完备（OBS_MODE 枚举/debug_trace 字段控制/错误码），TASK-0100 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：ObsMode 枚举 + get_obs_mode() + dev/prod 模式切换已实现，T-OBS-02 全部通过，切换不影响裁决与审计事实。
+- 覆盖状态：DONE
 
 ## R-75
 - 系统级需求：MCP ToolMeta 注册表——provider 工具先同步元数据（access_level/risk_level/reversible），变更写 mcp_sync_log 可回放，不得直接调用未注册工具
@@ -748,8 +748,8 @@
 - DevSpec 落点：DevSpec §17.2.1
 - DevTasks（TASK）：TASK-0101
 - 验收测试（T-xx）：T-MCP-01~03
-- 当前进展（2026-03-03）：DevSpec §17.2.1 工程契约已完备（ToolMeta Schema/同步规则/变更留痕），TASK-0101 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：host_brain/mcp/tool_registry.py（MCPToolRegistry + mcp_sync_log diff）已实现，T-MCP-01 全部通过，变更留痕可回放。
+- 覆盖状态：DONE
 
 ## R-76
 - 系统级需求：MCP ToolBroker 单入口——WRITE 无 token 拒绝，provider 不可达降级，调用链完整审计（mcp_exec_log）
@@ -758,8 +758,8 @@
 - DevSpec 落点：DevSpec §17.2.2
 - DevTasks（TASK）：TASK-0102
 - 验收测试（T-xx）：T-MCP-01~03
-- 当前进展（2026-03-03）：DevSpec §17.2.2 工程契约已完备（调用链/审计字段/门禁规则/错误码），TASK-0102 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：host_brain/mcp/tool_broker.py（MCPToolBroker 单入口）已实现，WRITE 无 token 拒绝/provider 不可达降级/完整审计，T-MCP-02~03 全部通过。
+- 覆盖状态：DONE
 
 ## R-77
 - 系统级需求：ASR 事件化上送——confidence/is_final/alternates 字段，低置信度（<0.6）标注 low_confidence=true，事件写 voice_event_log
@@ -768,8 +768,8 @@
 - DevSpec 落点：DevSpec §17.3.1
 - DevTasks（TASK）：TASK-0103
 - 验收测试（T-xx）：T-VOICE-01
-- 当前进展（2026-03-03）：DevSpec §17.3.1 工程契约已完备（事件 Schema/低置信度标注/错误码），TASK-0103 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：VoiceRpcContract.asr_chunk() 已实现低置信度标注，T-VOICE-01 全部通过（6 tests），voice_event_log 审计可回放。
+- 覆盖状态：DONE
 
 ## R-78
 - 系统级需求：TTS 合成播报队列——按 priority 排序，interruptible=true 可被 Barge-in 打断，播报完成/打断后写 voice_event_log
@@ -778,8 +778,8 @@
 - DevSpec 落点：DevSpec §17.3.2
 - DevTasks（TASK）：TASK-0104
 - 验收测试（T-xx）：T-VOICE-02
-- 当前进展（2026-03-03）：DevSpec §17.3.2 工程契约已完备（下发 Schema/队列规则/错误码），TASK-0104 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：SpeechPlaybackQueue 优先级队列 + 打断逻辑已实现，T-VOICE-02 全部通过（5 tests），TTS_INTERRUPTED 审计可回放。
+- 覆盖状态：DONE
 
 ## R-79
 - 系统级需求：Barge-in 打断（ASR 开口→tts_interrupt，不构成执行事实）+ Edge 兜底小模型（Host 不可用时 draft_only 输出，默认卸载按需加载）
@@ -788,8 +788,8 @@
 - DevSpec 落点：DevSpec §17.3.3~17.3.4
 - DevTasks（TASK）：TASK-0105
 - 验收测试（T-xx）：T-VOICE-03,T-VOICE-04
-- 当前进展（2026-03-03）：DevSpec §17.3.3~17.3.4 工程契约已完备（打断协议/兜底标记/错误码），TASK-0105 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：SpeechPlaybackQueue.handle_barge_in() + EdgeFallbackRpcContract（draft_only/快速失败）已实现，T-VOICE-03/04 全部通过（8 tests）。
+- 覆盖状态：DONE
 
 ## R-80
 - 系统级需求：Edge 资源闸门——P1（ASR）> P2（播放）> P3（TTS 合成）> P4（兜底 LLM）优先级矩阵，低优先级被抢占写 RESOURCE_GATE_PREEMPTED，健康快照可观测
@@ -798,6 +798,5 @@
 - DevSpec 落点：DevSpec §17.3.5
 - DevTasks（TASK）：TASK-0106
 - 验收测试（T-xx）：T-VOICE-05
-- 当前进展（2026-03-03）：DevSpec §17.3.5 工程契约已完备（优先级矩阵/健康快照 Schema/错误码），TASK-0106 已拆解，待实现。
-- 覆盖状态：TASK_READY
-- TEST_GAP：任务已具备，但缺关键测试点/fixtures/日志断言，导致无法形成稳定回归。
+- 当前进展（2026-03-03）：VoiceResourceGate P1>P2>P3>P4 优先级矩阵 + 抢占写 RESOURCE_GATE_PREEMPTED + 健康快照已实现，T-VOICE-05 全部通过（6 tests）。
+- 覆盖状态：DONE

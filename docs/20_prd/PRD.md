@@ -640,7 +640,7 @@ M3 LSP（可撤销默认）：FR-LSP + 可逆能力接入 — **DONE**（2026-03
 M4 体验包（低风险）：FR-SCHED（调度器前置）+ FR-DESKTOP（桌面留言）/ FR-DREAM（梦境）/ FR-DIARY（日记）/ FR-PROACTIVE（主动对话）/ FR-FOCUS（Focus Mode）（均需 SkillMeta + 审计）— **DONE**（2026-03-03）
 M5 视觉自动化（高门槛）：FR-VISION 全量验收 — **DONE**（2026-03-02）
 M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）— **DONE**（2026-03-02）
-M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **PRD_READY**（2026-03-03：需求已清晰，待 DevSpec 工程契约）
+M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **DONE**（2026-03-03：914 passed，OBS/MCP/VOICE 全量实现）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单
