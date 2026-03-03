@@ -729,7 +729,106 @@ class SQLiteLedger:
 
     def log_canon_proposal(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in CANON_PROPOSAL_COLUMNS}
-        self._insert("canon_proposal_log", payload)
+        # INSERT OR IGNORE：proposal_id UNIQUE 约束下幂等写入，已存在则跳过
+        cols = [k for k, v in payload.items() if v is not None or k in ("proposal_id", "canon_kind", "target_id", "status", "ts_ms")]
+        placeholders = ", ".join("?" for _ in cols)
+        col_names = ", ".join(cols)
+        values = [payload[c] for c in cols]
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(
+                    f"INSERT OR IGNORE INTO canon_proposal_log ({col_names}) VALUES ({placeholders})",
+                    values,
+                )
+
+    # ---------------------------------------------------------------------------
+    # M10-C: 语义记忆 CRUD
+    # ---------------------------------------------------------------------------
+
+    def log_semantic_memory(self, row: dict[str, Any]) -> None:
+        """写入语义记忆条目（INSERT OR IGNORE，幂等）。
+
+        Args:
+            row: 包含 semantic_id / summary / source_memory_ids / source_hash /
+                 distill_strategy / confidence / tags / ts_ms / operator_node_id 的字典。
+        """
+        import json as _json
+
+        source_ids = row.get("source_memory_ids", [])
+        tags = row.get("tags", [])
+        payload = {
+            "semantic_id": str(row.get("semantic_id", "")),
+            "summary": str(row.get("summary", "")),
+            "source_memory_ids": _json.dumps(list(source_ids), ensure_ascii=False),
+            "source_hash": str(row.get("source_hash", "")),
+            "distill_strategy": str(row.get("distill_strategy", "merge_top_k")),
+            "confidence": float(row.get("confidence", 0.0)),
+            "tags": _json.dumps(list(tags), ensure_ascii=False),
+            "ts_ms": int(row.get("ts_ms", 0)),
+            "operator_node_id": str(row.get("operator_node_id", "distillation_engine")),
+        }
+        cols = list(payload.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        col_names = ", ".join(cols)
+        values = [payload[c] for c in cols]
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(
+                    f"INSERT OR IGNORE INTO semantic_memory ({col_names}) VALUES ({placeholders})",
+                    values,
+                )
+
+    def get_semantic_memory_by_source_hash(self, source_hash: str) -> dict[str, Any] | None:
+        """按 source_hash 查询语义记忆（幂等检查用）。
+
+        Returns:
+            语义记忆字典，或 None（不存在）。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM semantic_memory WHERE source_hash = ? AND deleted_at IS NULL LIMIT 1",
+            (str(source_hash),),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_semantic_memory(row)
+
+    def list_semantic_memories(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """列出语义记忆（分页，按 ts_ms 降序）。
+
+        Returns:
+            (items, total) 元组。
+        """
+        total_row = self._conn.execute(
+            "SELECT COUNT(*) FROM semantic_memory WHERE deleted_at IS NULL"
+        ).fetchone()
+        total = int(total_row[0]) if total_row else 0
+
+        rows = self._conn.execute(
+            "SELECT * FROM semantic_memory WHERE deleted_at IS NULL "
+            "ORDER BY ts_ms DESC LIMIT ? OFFSET ?",
+            (int(limit), int(offset)),
+        ).fetchall()
+        items = [self._row_to_semantic_memory(r) for r in rows]
+        return items, total
+
+    def _row_to_semantic_memory(self, row: Any) -> dict[str, Any]:
+        """将 sqlite3.Row 转换为语义记忆字典。"""
+        import json as _json
+
+        d = dict(row)
+        # 反序列化 JSON 字段
+        for json_field in ("source_memory_ids", "tags"):
+            raw = d.get(json_field, "[]")
+            try:
+                d[json_field] = _json.loads(raw) if isinstance(raw, str) else list(raw or [])
+            except (ValueError, TypeError):
+                d[json_field] = []
+        return d
 
     def log_canon_change(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in CANON_CHANGE_COLUMNS}
@@ -744,6 +843,59 @@ class SQLiteLedger:
         if row is None:
             return None
         return self._decode_row("canon_proposal_log", row)
+
+    def list_proposals(
+        self,
+        *,
+        status: str | None = None,
+        canon_kind: str | None = None,
+        target_doc_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """分页查询 canon_proposal_log。
+
+        Args:
+            status: 按 status 过滤（pending / approved / rejected / APPLIED），None 表示不过滤。
+            canon_kind: 按 canon_kind 过滤（world / style），None 表示不过滤。
+            target_doc_id: 按 target_id 过滤，None 表示不过滤。
+            limit: 每页条数（最大 100）。
+            offset: 偏移量。
+
+        Returns:
+            (items, total)：items 为当前页记录列表，total 为满足条件的总记录数。
+        """
+        limit = min(int(limit), 100)
+        offset = max(int(offset), 0)
+
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(str(status))
+        if canon_kind is not None:
+            conditions.append("canon_kind = ?")
+            params.append(str(canon_kind))
+        if target_doc_id is not None:
+            conditions.append("target_id = ?")
+            params.append(str(target_doc_id))
+
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        count_row = self._conn.execute(
+            f"SELECT COUNT(*) FROM canon_proposal_log {where_clause}",
+            params,
+        ).fetchone()
+        total = int(count_row[0]) if count_row else 0
+
+        rows = self._conn.execute(
+            f"SELECT * FROM canon_proposal_log {where_clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+
+        items = [self._decode_row("canon_proposal_log", row) for row in rows]
+        return items, total
 
     def update_proposal_status(
         self,
@@ -1398,7 +1550,28 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_model_control_request ON model_control_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_model_control_profile ON model_control_log(model_profile_id);
                 CREATE INDEX IF NOT EXISTS idx_canon_proposal_target ON canon_proposal_log(canon_kind, target_id);
+                CREATE INDEX IF NOT EXISTS idx_canon_proposal_status ON canon_proposal_log(status);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_canon_proposal_id_unique ON canon_proposal_log(proposal_id);
                 CREATE INDEX IF NOT EXISTS idx_canon_change_target ON canon_change_log(canon_kind, target_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_canon_change_id_unique ON canon_change_log(change_id);
+
+                -- M10-C: 语义记忆表（记忆蒸馏结果）
+                CREATE TABLE IF NOT EXISTS semantic_memory (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    semantic_id         TEXT NOT NULL,
+                    summary             TEXT NOT NULL,
+                    source_memory_ids   TEXT NOT NULL,  -- JSON array
+                    source_hash         TEXT NOT NULL,  -- SHA-256(sorted source_memory_ids)
+                    distill_strategy    TEXT NOT NULL DEFAULT 'merge_top_k',
+                    confidence          REAL NOT NULL DEFAULT 0.0,
+                    tags                TEXT NOT NULL DEFAULT '[]',  -- JSON array
+                    ts_ms               INTEGER NOT NULL,
+                    operator_node_id    TEXT NOT NULL DEFAULT 'distillation_engine',
+                    deleted_at          INTEGER
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_memory_id ON semantic_memory(semantic_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_memory_source_hash ON semantic_memory(source_hash);
+                CREATE INDEX IF NOT EXISTS idx_semantic_memory_ts ON semantic_memory(ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_memory_ops_memory_id ON memory_ops_log(memory_id);
                 CREATE INDEX IF NOT EXISTS idx_memory_ops_request ON memory_ops_log(request_id);
                 CREATE INDEX IF NOT EXISTS idx_vault_manifest_id ON vault_manifest_index(manifest_id);

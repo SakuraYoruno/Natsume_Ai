@@ -642,7 +642,8 @@ M5 视觉自动化（高门槛）：FR-VISION 全量验收 — **DONE**（2026-0
 M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）— **DONE**（2026-03-02）
 M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **DONE**（2026-03-03：914 passed，OBS/MCP/VOICE 全量实现）
 M8 运行时集成闭环：NFR-PERF-001（性能基线采集）+ NFR-REL-001（故障注入矩阵全通过）+ FR-CORE-004（冷启动端到端可验收）+ 运行时脚本集成（OBS/MCP 新模块接入 start_host_side.ps1）— **DONE**（2026-03-03：980 passed，性能基线/故障注入/冷启动/脚本集成全量实现）
-M9 World Canon 闭环 + 日记 Evolution 关联：FR-WCANON-001~003（World Canon 文件 SSOT + 索引同步 + 注入分槽 + Evolution 提案流程）+ FR-DIARY-002（日记→canon_proposal 关联）— **PRD_READY**（2026-03-03：DevSpec §19 + TASK-0111~0115 已就绪）
+M9 World Canon 闭环 + 日记 Evolution 关联：FR-WCANON-001~003（World Canon 文件 SSOT + 索引同步 + 注入分槽 + Evolution 提案流程）+ FR-DIARY-002（日记→canon_proposal 关联）— **DONE**（2026-03-03：1032 passed，World Canon SSOT/同步/分槽/Evolution/日记关联全量实现；R-85~R-89 追踪完成；m9_release.json 已生成）
+M10-A Canon 治理 API：FR-WCANON-002 扩展（Canon 提案审核 REST API：/canon/proposals CRUD + approve/reject 端点 + 审计串联）— **DONE**（2026-03-03：1041 passed，canon_routes.py 7 个端点全量实现；T-Canon-API-01~08 全部通过；R-90~R-91 追踪完成）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单

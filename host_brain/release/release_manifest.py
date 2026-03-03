@@ -507,3 +507,327 @@ def _get_git_commit_hash(repo_root: Path) -> str | None:
         return None
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# M9 TASK-0115（收尾）: M9 发布清单生成
+# ---------------------------------------------------------------------------
+
+M9_MIGRATION_DIRS = (
+    "host_brain/audit/migrations",
+    "host_brain/bond/migrations",
+)
+
+M9_CANON_ASSET_DIRS = (
+    "host_brain/canon/world",
+)
+_CANON_EXTS = frozenset({".json"})
+
+
+def generate_m9_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M9 release manifest.
+
+    Locks:
+    - git commit hash (via .git/HEAD)
+    - migration file hashes（SQL + Cypher，含 M9 新增的 0015/0016）
+    - world_canon_asset_hashes（host_brain/canon/world/*.json 种子条目）
+    - test_passed_count
+    - latency_baseline_snapshot
+    - service_registry_snapshot
+    - generated_at (ISO 8601)
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    # ── git commit hash ──────────────────────────────────────────────────────
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes ────────────────────────────────────────────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M9_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    # ── World Canon 种子条目 hashes ──────────────────────────────────────────
+    world_canon_asset_hashes: dict[str, str] = {}
+    for canon_dir in M9_CANON_ASSET_DIRS:
+        dir_path = repo_root / canon_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _CANON_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            world_canon_asset_hashes[rel] = _digest_file(file_path)
+
+    return {
+        "milestone": "M9",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "world_canon_asset_hashes": world_canon_asset_hashes,
+        "world_canon_asset_count": len(world_canon_asset_hashes),
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }
+
+
+def generate_m10a_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M10-A release manifest.
+
+    M10-A 新增：Canon 治理 REST API（/canon/proposals + /canon/documents）。
+    Locks:
+    - git commit hash (via .git/HEAD)
+    - migration file hashes（SQL + Cypher，含 M9 新增的 0015/0016）
+    - world_canon_asset_hashes（host_brain/canon/world/*.json 种子条目）
+    - canon_routes_hash（host_brain/app/canon_routes.py 文件 hash，锁定 API 实现）
+    - test_passed_count（1041）
+    - latency_baseline_snapshot
+    - service_registry_snapshot（含 host.canon.proposals_api 新服务）
+    - generated_at (ISO 8601)
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    # ── git commit hash ──────────────────────────────────────────────────────
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes（复用 M9 目录，M10-A 无新 migration）────────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M9_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    # ── World Canon 种子条目 hashes ──────────────────────────────────────────
+    world_canon_asset_hashes: dict[str, str] = {}
+    for canon_dir in M9_CANON_ASSET_DIRS:
+        dir_path = repo_root / canon_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _CANON_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            world_canon_asset_hashes[rel] = _digest_file(file_path)
+
+    # ── M10-A 新增：canon_routes.py 文件 hash（锁定 API 实现）────────────────
+    canon_routes_path = repo_root / "host_brain" / "app" / "canon_routes.py"
+    canon_routes_hash = (
+        _digest_file(canon_routes_path) if canon_routes_path.exists() else None
+    )
+
+    return {
+        "milestone": "M10-A",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "world_canon_asset_hashes": world_canon_asset_hashes,
+        "world_canon_asset_count": len(world_canon_asset_hashes),
+        "canon_routes_hash": canon_routes_hash,
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10-B TASK-0125: M10-B 发布清单生成
+# ---------------------------------------------------------------------------
+
+def generate_m10b_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M10-B release manifest.
+
+    M10-B 新增：ASR 热词注入 World Canon 关键词。
+    Locks:
+    - git commit hash (via .git/HEAD)
+    - migration file hashes（SQL + Cypher，含 M10-B 新增的 0017）
+    - world_canon_asset_hashes（host_brain/canon/world/*.json 种子条目）
+    - canon_routes_hash（host_brain/app/canon_routes.py，含 /canon/hotwords 端点）
+    - asr_hash（edge_client/senses/asr.py，含 inject_canon_hotwords）
+    - test_passed_count（1054）
+    - latency_baseline_snapshot
+    - service_registry_snapshot（含 host.canon.hotwords_api 新服务）
+    - generated_at (ISO 8601)
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes ────────────────────────────────────────────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M9_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    # ── World Canon 种子条目 hashes ──────────────────────────────────────────
+    world_canon_asset_hashes: dict[str, str] = {}
+    for canon_dir in M9_CANON_ASSET_DIRS:
+        dir_path = repo_root / canon_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _CANON_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            world_canon_asset_hashes[rel] = _digest_file(file_path)
+
+    # ── M10-B 新增：canon_routes.py + asr.py 文件 hash ──────────────────────
+    canon_routes_path = repo_root / "host_brain" / "app" / "canon_routes.py"
+    canon_routes_hash = (
+        _digest_file(canon_routes_path) if canon_routes_path.exists() else None
+    )
+    asr_path = repo_root / "edge_client" / "senses" / "asr.py"
+    asr_hash = _digest_file(asr_path) if asr_path.exists() else None
+
+    return {
+        "milestone": "M10-B",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "world_canon_asset_hashes": world_canon_asset_hashes,
+        "world_canon_asset_count": len(world_canon_asset_hashes),
+        "canon_routes_hash": canon_routes_hash,
+        "asr_hash": asr_hash,
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10-C: M10-C 发布清单生成
+# ---------------------------------------------------------------------------
+
+def generate_m10c_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M10-C release manifest.
+
+    M10-C 新增：记忆蒸馏系统（MemoryDistillationEngine + semantic_memory 表 + context_pack.semantic_slot）。
+    Locks:
+    - git commit hash (via .git/HEAD)
+    - migration file hashes（SQL + Cypher，含 M10-B 新增的 0017）
+    - world_canon_asset_hashes（host_brain/canon/world/*.json 种子条目）
+    - distillation_hash（host_brain/memory/distillation.py 文件 hash）
+    - context_pack_hash（host_brain/core/context_pack.py 文件 hash，含 semantic_slot）
+    - sqlite_ledger_hash（host_brain/audit/sqlite_ledger.py 文件 hash，含 semantic_memory 表）
+    - test_passed_count（1062）
+    - latency_baseline_snapshot
+    - service_registry_snapshot（含 host.memory.distillation 新服务）
+    - generated_at (ISO 8601)
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes ────────────────────────────────────────────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M9_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    # ── World Canon 种子条目 hashes ──────────────────────────────────────────
+    world_canon_asset_hashes: dict[str, str] = {}
+    for canon_dir in M9_CANON_ASSET_DIRS:
+        dir_path = repo_root / canon_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _CANON_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            world_canon_asset_hashes[rel] = _digest_file(file_path)
+
+    # ── M10-C 新增：distillation.py + context_pack.py + sqlite_ledger.py hash ─
+    distillation_path = repo_root / "host_brain" / "memory" / "distillation.py"
+    distillation_hash = (
+        _digest_file(distillation_path) if distillation_path.exists() else None
+    )
+    context_pack_path = repo_root / "host_brain" / "core" / "context_pack.py"
+    context_pack_hash = (
+        _digest_file(context_pack_path) if context_pack_path.exists() else None
+    )
+    sqlite_ledger_path = repo_root / "host_brain" / "audit" / "sqlite_ledger.py"
+    sqlite_ledger_hash = (
+        _digest_file(sqlite_ledger_path) if sqlite_ledger_path.exists() else None
+    )
+
+    return {
+        "milestone": "M10-C",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "world_canon_asset_hashes": world_canon_asset_hashes,
+        "world_canon_asset_count": len(world_canon_asset_hashes),
+        "distillation_hash": distillation_hash,
+        "context_pack_hash": context_pack_hash,
+        "sqlite_ledger_hash": sqlite_ledger_hash,
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }

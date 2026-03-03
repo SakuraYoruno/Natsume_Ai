@@ -1,0 +1,130 @@
+{
+  "milestone": "M10-C",
+  "git_commit_hash": "94623d56444fa8190ed6708ba92b58517357b592",
+  "migration_hashes": {
+    "host_brain/audit/migrations/0001_triptych.sql": "sha256:b981d4d83038c747883ccc546c5fcb3b55f3a7d39ee65b82ab8d46ba700d003b",
+    "host_brain/audit/migrations/0002_canon_schema.sql": "sha256:d00d5b3ae6e209ca42e78970ea07aa3ac66ec15802ca8fa595b5dce37968b18d",
+    "host_brain/audit/migrations/0003_memory_ops.sql": "sha256:8545307877a1ee793107edd8ad46defab8d4f6f26467e23f2b1e00bc86262bf8",
+    "host_brain/audit/migrations/0004_vault_schema.sql": "sha256:356951a5f35dced99ef8ab9465fde7ab0469c63f4fa213649fc2943b8467fb20",
+    "host_brain/audit/migrations/0005_airlock_schema.sql": "sha256:8e2cc3c3f19a9fc822b58f022f8c2918c24b0bdf112ed85700778c9b6ddb8ea6",
+    "host_brain/audit/migrations/0006_channel_io_schema.sql": "sha256:83d5bed070469724f647e60e3121d8a1cda06ff7d11f031f030fb427b7534330",
+    "host_brain/audit/migrations/0007_avatar_schema.sql": "sha256:fc48814682503608863d8afad8f70c0ddb717d2b872a1db4ba000a182102a8da",
+    "host_brain/audit/migrations/0008_clawd_ui_schema.sql": "sha256:5a3b22b6aa88f55000233172982ef0d1da55abef3470fbed0079523729a95c75",
+    "host_brain/audit/migrations/0009_service_health_schema.sql": "sha256:6d2409ed28016cf260e56d137dd7912cc12b0395f7eae8b7d838837678706bdf",
+    "host_brain/audit/migrations/0010_voice_event_schema.sql": "sha256:95ac838df778e47c7ccc6d8eebba3de18aed742a599897a89c431c62a2a22ef0",
+    "host_brain/audit/migrations/0011_retrieval_event_schema.sql": "sha256:d2cc37a2e5e3106b01202008e6227c3bc9628025b29e376b6f60e4ada97b84f5",
+    "host_brain/audit/migrations/0012_vision_event_schema.sql": "sha256:b30a68c2f7446969dbb422ea296056929e2ab3f3e16969fdb482c20bce708fd3",
+    "host_brain/audit/migrations/0013_bond_update_schema.sql": "sha256:cf02c7533f9ac82ff58297b5fcabcbd927e6e3d93d3043cdb84087886e58de45",
+    "host_brain/audit/migrations/0014_scheduler_event_schema.sql": "sha256:af5344d25d1322f949fc92b467b0f70b7a7a9f2854fcb828748f31e846dd8002",
+    "host_brain/audit/migrations/0015_world_canon_doc.sql": "sha256:5aeda93e413ed065771c0e5dfc3f8fc6196f1f165f7a5566c092283010c8e3f0",
+    "host_brain/audit/migrations/0016_canon_proposal_log.sql": "sha256:93ac7e808bd21cc15e997b95d31f387cc5094b7d6fbf9de97c30598c51d01446",
+    "host_brain/audit/migrations/0017_canon_proposal_log_unique.sql": "sha256:b34c295d90ca5ed270fa43f03f1b1d2233a4e37d6461aedcc5fe629cb5ea976b",
+    "host_brain/bond/migrations/0001_bond_constraints.cypher": "sha256:7d675021f9fd1eab2bf3ecb9c2cf68d6c851a6cd576ca44aba4c32f5408a81d2"
+  },
+  "migration_file_count": 18,
+  "world_canon_asset_hashes": {
+    "host_brain/canon/world/wc-001-system-terms.json": "sha256:950bd22b6e52638f4f78d9628c47988062abd62fd790767fac0fb2730c7c4f11",
+    "host_brain/canon/world/wc-002-architecture-invariants.json": "sha256:de7210e82c429cd04e170ebe585872db0a9eb99aa3f0f9a62193e16b3a2c9b14",
+    "host_brain/canon/world/wc-003-persona-core.json": "sha256:5308caa1fcf9a41b38eda99b8bd6a14704c41889e0a9e7b1e49cf6245601df47"
+  },
+  "world_canon_asset_count": 3,
+  "distillation_hash": "sha256:35f2e388394c7adf720b77e423d877033860a84165ba63ad731b3a83a8799a83",
+  "context_pack_hash": "sha256:2947346adffb47a7193273064302c4ec0a299bc37a3a3c55f6d595f58c417a4a",
+  "sqlite_ledger_hash": "sha256:982e98c186c8ea5128f21daf73d6d785f5386be86c4e572c9b21fe3afb459548",
+  "test_passed_count": 1062,
+  "latency_baseline_snapshot": null,
+  "service_registry_snapshot": [
+    {
+      "service_id": "host.audit.sqlite_ledger",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.governor.decision",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.skills.loader",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.integrations.llm_gateway",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.retrieval.embedding",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.retrieval.reranker",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.vision.screen_ocr",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.vision.camera_recognizer",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.memory.canon_sync",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.canon.proposals_api",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "host.canon.hotwords_api",
+      "owner": "host",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.gateway",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.asr",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.tts",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.barge_in",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.fallback_llm",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "edge.rpc.resource_gate",
+      "owner": "edge",
+      "required": true
+    },
+    {
+      "service_id": "host.memory.distillation",
+      "owner": "host",
+      "required": true
+    }
+  ],
+  "generated_at": "2026-03-03T09:47:20+00:00",
+  "ts_ms": 1772531240000
+}

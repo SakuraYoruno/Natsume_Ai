@@ -3,9 +3,9 @@
 
 # Nastume Ai 全任务风险点汇总（Risk Registry）
 
-版本：v2.0
-日期：2026-03-02
-范围：TASK-0065 ~ TASK-0083（DevTasks 全批次 R-31 ~ R-52，含阶段 8 质量加固）
+版本：v3.0
+日期：2026-03-03
+范围：TASK-0065 ~ TASK-0120（DevTasks 全批次 R-31 ~ R-91，含 M8/M9/M10-A）
 
 ---
 
@@ -331,3 +331,55 @@ TASK-0076~0083 的风险点从 DevTasks.md 阶段 8 任务描述与代码审查�
 - **描述**：代码审查发现的 P2 级微调项（裸 print、类型标注、表名校验、列缓存、依赖说明）以及文档维护。
 - **缓解**：均不影响运行时正确性，可集中批量修复。
 - **建议**：TASK-0076 集中修复代码质量微调；TASK-0083 补充部署文档。建立 CI 流水线防止回归。
+
+---
+
+## 20. M9 World Canon 闭环（TASK-0111~0115 / R-85~R-89）
+
+| # | 风险描述 | 等级 | 缓解措施 | 后续行动 |
+|---|---------|------|---------|---------|
+| R111-1 | World Canon SSOT 文件（.json）直接写入磁盘，并发写入时可能产生文件损坏（无文件锁） | P1 | `upsert_document()` 通过 `_write_lock`（threading.Lock）串行化写入；单进程模型下无并发写入风险 | 多进程部署时需引入文件锁或数据库级写入 |
+| R111-2 | `compute_world_canon_hash()` 使用 JSON 序列化后 SHA-256，字段顺序变化会导致 hash 不一致 | P2 | `json.dumps(sort_keys=True)` 保证字段顺序稳定 | 新增字段时需确保 sort_keys 覆盖 |
+| R112-1 | `canon_sync` 健康探测（/health/canon_sync）失败时标记为 DEGRADED 非阻断，可能掩盖 SSOT 同步失败 | P1 | `STARTUP_CANON_SYNC_DEGRADED` 错误码可统计；start_host_side.ps1 输出 canon_sync_status 字段 | 监控告警需覆盖 STARTUP_CANON_SYNC_DEGRADED |
+| R112-2 | `list_proposals()` 分页查询使用 `LIMIT/OFFSET`，深页码时性能退化 | P2 | 默认 limit=20，实际使用场景页码不深 | 后续可改为 cursor-based 分页 |
+| R113-1 | context_pack 分槽注入（world_canon 槽）在 QA 拦截失败时降级为空槽，可能导致 LLM 输出缺少 Canon 约束 | P1 | `WCANON_SLOT_VIOLATION` 错误码可统计；降级时写 system_event_log | 监控告警需覆盖 WCANON_SLOT_VIOLATION |
+| R114-1 | Evolution 提案审核流程（approve_proposal_with_content）直接修改 SSOT 文件，无回滚机制 | P1 | `canon_change_log` 记录变更前后 hash，可手动回滚；版本号单调递增 | 后续可实现 `rollback_proposal()` 方法 |
+| R115-1 | 日记 drift_suggestion 关联（source_intent_id 串联）依赖 intent_id 在 diary_entry 和 canon_proposal_log 中一致，跨表关联可能因 intent_id 缺失而断链 | P2 | `source_intent_id` 为可选字段，缺失时降级为 None | 后续可增加 intent_id 完整性校验 |
+
+---
+
+## 21. M10-A Canon 治理 API（TASK-0117~0120 / R-90~R-91）
+
+| # | 风险描述 | 等级 | 缓解措施 | 后续行动 |
+|---|---------|------|---------|---------|
+| R117-1 | `reject_proposal()` 对非 pending 提案抛出 PermissionError，API 层映射为 422；但 `approve_proposal_with_content()` 对非 pending 提案的错误类型需确认一致性 | P2 | 两者均使用 PermissionError + WCANON_PROPOSAL_STATUS_INVALID；T-Canon-API-05 已验证 | 确保所有状态转换错误统一使用 PermissionError |
+| R118-1 | `_get_canon_store()` 使用全局单例（`_canon_store`），多线程并发初始化时可能产生竞态条件 | P1 | FastAPI 单进程模型下启动时序保证单例初始化；`world_root` 从环境变量读取 | 多进程部署时需使用进程级单例或依赖注入框架 |
+| R118-2 | `canon_routes.py` 中 `_get_ledger_from_app()` 使用延迟导入（`from host_brain.app.fastapi_app import get_ledger`），循环导入风险存在 | P1 | 延迟导入在函数体内执行，避免模块级循环引用；与 `web_ui.py` 模式一致 | 后续重构时可改为依赖注入参数传递 |
+| R118-3 | POST /canon/proposals 的幂等检查（重复 proposal_id 返回 409）依赖 `ledger.get_proposal()` 查询，高并发时两个请求可能同时通过检查并双写 | P1 | 单进程 + SQLite 串行写入保证原子性；`canon_proposal_log` 无 UNIQUE 约束 | 后续可在 `canon_proposal_log.proposal_id` 上添加 UNIQUE 约束 |
+| R119-1 | approve 端点调用 `approve_proposal_with_content()` 后读取更新后的提案记录（`ledger.get_proposal()`），两次操作之间可能有状态不一致 | P2 | 单进程 + SQLite 串行写入，两次操作之间无并发修改风险 | 多进程部署时需使用事务包裹 |
+| R119-2 | reject 端点写 `system_event_log`（`ledger.log_system_event()`）失败时只记录 warning，不阻断主流程——审计串联可能不完整 | P2 | 主流程（reject_proposal）已成功；审计写入失败不影响业务正确性 | 后续可将审计写入纳入事务，确保原子性 |
+| R120-1 | `m10a_release.json` 中 `canon_routes_hash` 锁定了 API 实现文件，但未锁定 `canon_world_store.py`（含 reject_proposal）和 `sqlite_ledger.py`（含 list_proposals）的 hash | P2 | migration_hashes 已锁定数据库 schema；canon_routes_hash 锁定 API 层 | 后续可扩展 manifest 锁定更多核心文件 hash |
+
+---
+
+## 风险等级统计（更新至 M10-A）
+
+| 等级 | 数量 | 说明 |
+|------|------|------|
+| **P0** | 0 | 无阻断性风险 |
+| **P1** | 21 | 需跟进：M9/M10-A 新增 6 项（SSOT 并发写入、canon_sync 降级掩盖、分槽注入降级、Evolution 无回滚、canon_store 单例竞态、幂等双写）+ 原有 15 项 |
+| **P2** | 35 | 已知边界/可接受：M9/M10-A 新增 7 项 + 原有 28 项 |
+
+---
+
+## M9/M10-A P1 风险按优先级排序（新增，建议跟进顺序）
+
+| 优先级 | 风险编号 | 领域 | 摘要 | 关联 TASK |
+|--------|---------|------|------|----------|
+| 1 | R118-3 | 并发安全 | proposal_id 幂等检查无 UNIQUE 约束，高并发双写风险 | 后续 migration 添加 UNIQUE 约束 |
+| 2 | R118-1 | 并发安全 | canon_store 全局单例多线程竞态 | 多进程部署时需依赖注入 |
+| 3 | R118-2 | 架构 | canon_routes 延迟导入循环引用风险 | 后续重构为依赖注入参数传递 |
+| 4 | R114-1 | 数据安全 | Evolution approve 无回滚机制 | 实现 rollback_proposal() |
+| 5 | R112-1 | 可观测性 | canon_sync DEGRADED 非阻断可能掩盖同步失败 | 监控告警覆盖 STARTUP_CANON_SYNC_DEGRADED |
+| 6 | R113-1 | 可观测性 | context_pack 分槽注入失败降级为空槽 | 监控告警覆盖 WCANON_SLOT_VIOLATION |
+| 7 | R111-1 | 数据安全 | SSOT 文件并发写入无文件锁 | 多进程部署时引入文件锁 |

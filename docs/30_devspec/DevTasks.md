@@ -1653,7 +1653,7 @@ TASK-XXXX 标题
 ## M9 World Canon 闭环 + 日记 Evolution 关联（TASK-0111~0115）
 
 > 对应 DevSpec §19；PRD M9（FR-WCANON-001~003、FR-DIARY-002）。
-> 所有任务当前状态：TASK_READY（2026-03-03）。
+> 所有任务当前状态：DONE（2026-03-03）。
 
 ### TASK-0111 World Canon 条目资产：文件 SSOT + 最小种子条目（M9 P0）
 - 任务描述：在 `host_brain/canon/world/` 下建立 World Canon 文件 SSOT，写入最小种子条目（系统术语/架构设定/关键不变量各 1 条），并确保条目结构符合 DevSpec §19.1.1 的字段约束。
@@ -1736,3 +1736,241 @@ TASK-XXXX 标题
   - T-Diary-03/T-Diary-04 全部通过。
 - 涉及文件路径：host_brain/skills/impl/diary_writer.py；host_brain/core/errors.py；tests/contract/test_diary_evolution_contract.py（新增）；tests/fixtures/diary/。
 - 关联需求/测试：FR-DIARY-002；T-Diary-03；T-Diary-04。
+
+---
+
+## M9 收尾（TASK-0116）
+
+> 对应 M9 文档/追踪/发布清单收尾工作。
+> 所有任务当前状态：DONE（2026-03-03）。
+
+### TASK-0116 M9 收尾：需求追踪补写 + 发布清单生成 + 启动脚本 canon_sync 钩子（M9 收尾）
+- 任务描述：补齐 M9 的三项收尾工作：① requirements_trace.md 补写 R-85~R-89（M9 的 5 条需求追踪条目）；② 生成 M9 发布清单 release/manifests/m9_release.json（类比 M8 的 TASK-0110）；③ start_host_side.ps1 新增 canon_sync 健康探测钩子（/health/canon_sync，非阻断）。
+- 输入：DevSpec §19；requirements_trace.md（现有，末尾为 R-84）；host_brain/release/release_manifest.py（现有 generate_m8_manifest）；scripts/runtime/start_host_side.ps1（现有 M8 探测逻辑）。
+- 输出：
+  - `docs/60_trace/requirements_trace.md` 扩展：新增 M9 章节标题 + R-85~R-89 五条追踪条目（DONE）；
+  - `host_brain/release/release_manifest.py` 扩展：新增 `generate_m9_manifest()` 方法（含 world_canon_asset_hashes 字段）；
+  - `release/manifests/m9_release.json`（新增）：M9 发布清单（17 migration 文件 + 3 个 World Canon 种子条目 hash + 1032 tests passed）；
+  - `scripts/runtime/start_host_side.ps1` 扩展：新增 M9 canon_sync 健康探测块（/health/canon_sync，degraded 非阻断）+ 输出 JSON 新增 `canon_sync_status` 字段。
+- 验收标准：
+  - requirements_trace.md 包含 R-85~R-89，覆盖状态均为 DONE；
+  - m9_release.json 包含：milestone=M9 / git_commit_hash / migration_hashes（17 文件）/ world_canon_asset_hashes（3 文件）/ test_passed_count=1032 / generated_at；
+  - start_host_side.ps1 输出 JSON 含 canon_sync_status 字段；
+  - start_edge.ps1 无需修改（ASR 热词注入为 M10-B 工作）。
+- 涉及文件路径：docs/60_trace/requirements_trace.md；host_brain/release/release_manifest.py；release/manifests/m9_release.json（新增）；scripts/runtime/start_host_side.ps1。
+- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；FR-WCANON-003；FR-DIARY-002；NFR-MAINT-001。
+
+---
+
+## M10-A Canon 治理 API（TASK-0117~0120）
+
+> 对应 DevSpec §20；PRD M10-A（P0）：Canon 提案审核 REST API。
+> 将 M9 已落地的 `submit_proposal()` / `approve_proposal_with_content()` 暴露为可操作的 REST 端点。
+> 所有任务当前状态：DONE（2026-03-03：1041 passed，Canon 治理 API 全量实现）。
+
+### TASK-0117 WorldCanonStore.reject_proposal() 方法补充（M10-A 前置）
+- 任务描述：在 `canon_world_store.py` 中补充 `reject_proposal()` 方法（status 改为 rejected，不修改 SSOT 文件），并在 `errors.py` 中新增 M10-A 错误码（WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID）。
+- 输入：DevSpec §20.5；host_brain/memory/canon_world_store.py（现有，含 submit_proposal/approve_proposal_with_content）；host_brain/core/errors.py（现有）。
+- 输出：
+  - `host_brain/memory/canon_world_store.py` 扩展：`reject_proposal()` 方法（status=rejected，PermissionError 若非 pending）；
+  - `host_brain/core/errors.py` 扩展：WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID 四个错误码；
+  - `tests/contract/test_canon_proposal_reject_contract.py`（新增）：T-Canon-API-06 验收测试（reject 成功 + 非 pending 拒绝）。
+- 验收标准：
+  - reject_proposal() 对 pending 提案成功，status=rejected，SSOT 文件不变；
+  - reject_proposal() 对非 pending 提案抛出 PermissionError（WCANON_PROPOSAL_STATUS_INVALID）；
+  - reject_proposal() 对不存在的 proposal_id 抛出 KeyError（WCANON_PROPOSAL_NOT_FOUND）；
+  - T-Canon-API-06 全部通过。
+- 涉及文件路径：host_brain/memory/canon_world_store.py；host_brain/core/errors.py；tests/contract/test_canon_proposal_reject_contract.py（新增）。
+- 关联需求/测试：FR-WCANON-002；T-Canon-API-06。
+
+### TASK-0118 canon_routes.py：REST 路由实现（GET/POST /canon/proposals + GET /canon/documents）
+- 任务描述：新建 `host_brain/app/canon_routes.py`，实现 DevSpec §20.2.1 的 7 个端点（列出提案、提交提案、查询提案、审核通过、拒绝提案、列出文档、查询文档），并在 `fastapi_app.py` 中注册路由。
+- 输入：DevSpec §20.2~20.4；host_brain/app/fastapi_app.py（现有路由注册方式）；host_brain/memory/canon_world_store.py（TASK-0117 扩展后）；host_brain/audit/sqlite_ledger.py（现有 get_proposal/list_proposals 等方法）。
+- 输出：
+  - `host_brain/app/canon_routes.py`（新增）：7 个端点实现，含 Pydantic 请求/响应模型（CanonProposalSubmitRequest / CanonProposalApproveRequest / CanonProposalRejectRequest / CanonProposalResponse / CanonDocumentResponse / CanonProposalListResponse）；
+  - `host_brain/app/fastapi_app.py` 扩展：`app.include_router(canon_router)` 注册；`get_canon_store()` 依赖注入函数；
+  - 每个写操作生成 `request_id` 并写入 `proposer_node_id`（格式：`api.canon_proposals::{request_id}`）。
+- 验收标准：
+  - GET /canon/proposals 返回分页列表，status 过滤正确（T-Canon-API-07）；
+  - POST /canon/proposals 提交成功，status=pending，proposal_id 可查询（T-Canon-API-01）；
+  - POST /canon/proposals 重复 proposal_id 返回 409 + WCANON_PROPOSAL_DUPLICATE（T-Canon-API-02）；
+  - POST /canon/proposals body 含完成性表述返回 400 + WCANON_PROPOSAL_INVALID（T-Canon-API-03）；
+  - GET /canon/documents 返回当前 SSOT 快照（T-Canon-API-08）；
+  - 所有端点响应结构稳定（含 request_id + timestamp）。
+- 涉及文件路径：host_brain/app/canon_routes.py（新增）；host_brain/app/fastapi_app.py；tests/contract/test_canon_api_contract.py（新增）；tests/fixtures/canon/。
+- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；T-Canon-API-01~03；T-Canon-API-07~08。
+
+### TASK-0119 canon_routes.py：approve/reject 端点 + 审计串联（M10-A P0 核心）
+- 任务描述：实现 `POST /canon/proposals/{proposal_id}/approve` 和 `POST /canon/proposals/{proposal_id}/reject` 端点，确保审计串联（approve 写 canon_change_log，reject 写 system_event_log），并补充对应的 contract 测试。
+- 输入：DevSpec §20.4；host_brain/app/canon_routes.py（TASK-0118 实现后）；host_brain/memory/canon_world_store.py（含 approve_proposal_with_content / reject_proposal）；host_brain/audit/sqlite_ledger.py（含 log_system_event）。
+- 输出：
+  - `host_brain/app/canon_routes.py` 扩展：approve 端点（调用 approve_proposal_with_content，写 canon_change_log）；reject 端点（调用 reject_proposal，写 system_event_log，event_type=WCANON_PROPOSAL_REJECTED）；
+  - `tests/contract/test_canon_api_approve_reject_contract.py`（新增）：T-Canon-API-04（approve 成功 + SSOT 更新 + change_log 可回放）+ T-Canon-API-05（非 pending 提案 approve 返回 422）。
+- 验收标准：
+  - approve 成功：SSOT 文件版本 +1，canon_change_log 含变更前后 hash，response.status=APPLIED（T-Canon-API-04）；
+  - approve 非 pending：返回 422 + WCANON_PROPOSAL_STATUS_INVALID（T-Canon-API-05）；
+  - reject 成功：status=rejected，SSOT 文件不变，system_event_log 含 WCANON_PROPOSAL_REJECTED（T-Canon-API-06 扩展）；
+  - 所有写操作 proposer_node_id 含 request_id（审计串联可验证）。
+- 涉及文件路径：host_brain/app/canon_routes.py；host_brain/audit/sqlite_ledger.py；tests/contract/test_canon_api_approve_reject_contract.py（新增）；tests/fixtures/canon/。
+- 关联需求/测试：FR-WCANON-002；T-Canon-API-04；T-Canon-API-05；T-Canon-API-06。
+
+### TASK-0120 M10-A 发布清单生成 + requirements_trace.md 补写 R-90~R-91
+- 任务描述：补齐 M10-A 的两项收尾工作：① requirements_trace.md 补写 R-90~R-91（M10-A 的 2 条需求追踪条目）；② 在 release_manifest.py 中新增 generate_m10a_manifest()，生成 release/manifests/m10a_release.json。
+- 输入：DevSpec §20；requirements_trace.md（现有，末尾为 R-89）；host_brain/release/release_manifest.py（现有 generate_m9_manifest）。
+- 输出：
+  - `docs/60_trace/requirements_trace.md` 扩展：新增 M10-A 章节标题 + R-90（FR-WCANON-002 Canon 治理 API）+ R-91（NFR-MAINT-001 M10-A 发布清单）；
+  - `host_brain/release/release_manifest.py` 扩展：`generate_m10a_manifest()` 方法；
+  - `release/manifests/m10a_release.json`（新增）：M10-A 发布清单。
+- 验收标准：
+  - requirements_trace.md 包含 R-90~R-91，覆盖状态均为 DONE；
+  - m10a_release.json 包含：milestone=M10-A / git_commit_hash / migration_hashes / test_passed_count / generated_at；
+  - canon_routes.py 端点在 /docs 可见（FastAPI 自动文档）。
+- 涉及文件路径：docs/60_trace/requirements_trace.md；host_brain/release/release_manifest.py；release/manifests/m10a_release.json（新增）。
+- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；NFR-MAINT-001；T-Canon-API-01~08。
+
+
+---
+
+## M10-A 方向 A — P1 风险修复（2026-03-03）
+
+### TASK-0121-P1 P1 风险修复：proposal_id UNIQUE 约束 + 循环导入消除 + rollback 机制
+- 状态：DONE（2026-03-03：1046 passed，P1 三项修复全量落地）
+- 任务描述：修复 risk_registry.md 中 M10-A 新增的三项 P1 风险：R118-3（proposal_id 无 UNIQUE 约束）、R118-2（canon_routes 循环导入）、R114-1（Evolution approve 无回滚机制）。
+- 输入：risk_registry.md R118-3/R118-2/R114-1；host_brain/audit/sqlite_ledger.py；host_brain/app/canon_routes.py；host_brain/app/fastapi_app.py；host_brain/memory/canon_world_store.py。
+- 输出：
+  - `host_brain/audit/migrations/0017_canon_proposal_log_unique.sql`（新增）：UNIQUE INDEX 文档；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：`_ensure_schema` 追加 `idx_canon_proposal_id_unique` + `idx_canon_change_id_unique`；`log_canon_proposal` 改为 `INSERT OR IGNORE`（幂等写入）；
+  - `host_brain/app/canon_routes.py` 重构：`_get_ledger_from_app` 改为外部注入 provider（`set_ledger_provider`），消除延迟导入循环引用；新增 `POST /canon/proposals/{id}/rollback` 端点 + `CanonProposalRollbackRequest/Response` 模型；
+  - `host_brain/app/fastapi_app.py` 扩展：导入 `set_ledger_provider`，在 `get_ledger` 定义后调用 `_set_canon_ledger_provider(get_ledger)`；
+  - `host_brain/memory/canon_world_store.py` 扩展：新增 `rollback_proposal()` 方法（APPLIED→ROLLED_BACK，写 canon_change_log，base_version=0 时删除 SSOT 文件）；
+  - `tests/contract/test_canon_p1_fixes.py`（新增）：T-Canon-P1-01~05（5 个测试）。
+- 验收标准：
+  - 相同 proposal_id 重复写入后数据库只有一条记录（T-Canon-P1-01）；
+  - 直接 import canon_routes 不触发 ImportError（T-Canon-P1-02）；
+  - set_ledger_provider 注入后 _get_ledger_from_app 返回注入实例（T-Canon-P1-03）；
+  - APPLIED 提案可回滚，SSOT 文件删除/降版，status=ROLLED_BACK（T-Canon-P1-04）；
+  - pending/rejected 提案回滚抛 PermissionError（T-Canon-P1-05）；
+  - 全量测试 1046 passed，0 failed。
+- 涉及文件路径：host_brain/audit/migrations/0017_canon_proposal_log_unique.sql（新增）；host_brain/audit/sqlite_ledger.py；host_brain/app/canon_routes.py；host_brain/app/fastapi_app.py；host_brain/memory/canon_world_store.py；tests/contract/test_canon_p1_fixes.py（新增）。
+- 关联需求/测试：risk_registry.md R118-3/R118-2/R114-1；T-Canon-P1-01~05。
+
+---
+
+## M10-B — ASR 热词注入 World Canon 关键词（DONE，2026-03-03）
+
+### TASK-0122 canon_world_store.py：extract_hotwords() 方法
+- 状态：DONE（2026-03-03）
+- 任务描述：在 WorldCanonStore 中新增 `extract_hotwords()` 方法，从 SSOT 文档中提取人名/地名/专有名词作为 ASR 热词列表。
+- 输入：DevSpec §20（M10-B 候选）；host_brain/memory/canon_world_store.py；host_brain/canon/world/*.json（SSOT 文件）。
+- 输出：
+  - `host_brain/memory/canon_world_store.py` 扩展：`extract_hotwords(max_words: int = 200) -> list[str]` 方法，从所有 active 文档的 title/tags 中提取热词，去重排序；
+  - `tests/unit/test_canon_hotwords.py`（新增）：T-Canon-HW-01~03。
+- 验收标准：
+  - extract_hotwords 返回 list[str]，无重复，按字母序排序；
+  - max_words 参数生效（截断超出部分）；
+  - 空 SSOT 目录返回空列表。
+- 涉及文件路径：host_brain/memory/canon_world_store.py；tests/unit/test_canon_hotwords.py（新增）。
+- 关联需求/测试：FR-WCANON-001；T-Canon-HW-01~03。
+
+### TASK-0123 canon_routes.py：GET /canon/hotwords 端点
+- 状态：DONE（2026-03-03）
+- 任务描述：在 canon_routes.py 中新增 `GET /canon/hotwords` 端点，返回当前 World Canon 热词列表（供 Edge ASR 模块拉取）。
+- 输入：DevSpec §20（M10-B）；host_brain/app/canon_routes.py；WorldCanonStore.extract_hotwords()（TASK-0122 实现后）。
+- 输出：
+  - `host_brain/app/canon_routes.py` 扩展：`GET /canon/hotwords` 端点，响应结构 `{hotwords: list[str], total: int, request_id: str, timestamp: int}`；
+  - `tests/contract/test_canon_hotwords_api.py`（新增）：T-Canon-HW-API-01~02。
+- 验收标准：
+  - GET /canon/hotwords 返回 hotwords 列表，total 与列表长度一致；
+  - max_words 查询参数生效（默认 200）。
+- 涉及文件路径：host_brain/app/canon_routes.py；tests/contract/test_canon_hotwords_api.py（新增）。
+- 关联需求/测试：FR-WCANON-001；T-Canon-HW-API-01~02。
+
+### TASK-0124 edge_client/senses/asr.py：热词注入接口扩展
+- 状态：DONE（2026-03-03）
+- 任务描述：在 Edge ASR 模块中扩展热词注入接口，支持从 Host `GET /canon/hotwords` 拉取热词并注入到 ASR 引擎。
+- 输入：DevSpec §20（M10-B）；edge_client/senses/asr.py（现有）；GET /canon/hotwords 端点（TASK-0123 实现后）。
+- 输出：
+  - `edge_client/senses/asr.py` 扩展：`inject_canon_hotwords(host_url: str, max_words: int = 200) -> int` 方法，拉取热词并注入，返回注入词数；
+  - `tests/unit/test_asr_hotword_injection.py`（新增）：T-ASR-HW-01~03（mock HTTP 请求）。
+- 验收标准：
+  - inject_canon_hotwords 成功时返回注入词数 > 0；
+  - Host 不可达时降级（返回 0，不抛异常）；
+  - 热词列表为空时返回 0。
+- 涉及文件路径：edge_client/senses/asr.py；tests/unit/test_asr_hotword_injection.py（新增）。
+- 关联需求/测试：T-ASR-HW-01~03。
+
+### TASK-0125 M10-B 发布清单 + requirements_trace.md 补写 R-92~R-94
+- 状态：DONE（2026-03-03）
+- 任务描述：补齐 M10-B 的收尾工作：① requirements_trace.md 补写 R-92~R-94；② 生成 release/manifests/m10b_release.json；③ release_manifest.py 追加 generate_m10b_manifest()。
+- 输入：DevSpec §20（M10-B）；requirements_trace.md（末尾为 R-91）；host_brain/release/release_manifest.py。
+- 输出：
+  - `docs/60_trace/requirements_trace.md` 扩展：R-92（FR-WCANON-001 extract_hotwords）+ R-93（NFR-PERF-001 热词拉取延迟 < 200ms）+ R-94（FR-ASR-001 inject_canon_hotwords）；
+  - `release/manifests/m10b_release.json`（新增）：M10-B 发布清单，test_passed_count=1054；
+  - `host_brain/release/release_manifest.py` 扩展：`generate_m10b_manifest()` 方法。
+- 验收标准：
+  - requirements_trace.md 包含 R-92~R-94，覆盖状态均为 DONE；
+  - m10b_release.json 包含：milestone=M10-B / git_commit_hash / migration_hashes / asr_hash / test_passed_count=1054 / generated_at；
+  - 全量测试 1054 passed，0 failed。
+- 涉及文件路径：docs/60_trace/requirements_trace.md；release/manifests/m10b_release.json（新增）；host_brain/release/release_manifest.py。
+- 关联需求/测试：FR-WCANON-001；NFR-PERF-001；FR-ASR-001；T-Canon-HW-01~03；T-Canon-HW-API-01~02；T-ASR-HW-01~03。
+
+---
+
+## M10-C — 记忆蒸馏系统（DONE，2026-03-03）
+
+### TASK-0126 memory/distillation.py：MemoryDistillationEngine
+- 状态：DONE（2026-03-03）
+- 任务描述：新建 `host_brain/memory/distillation.py`，实现 `MemoryDistillationEngine` 类，从情节记忆（EpisodicStore）中蒸馏语义记忆（SemanticMemory），写入 SQLite `semantic_memory` 表。
+- 输入：DevSpec §20（M10-C 候选）；host_brain/memory/episodic.py；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/memory/distillation.py`（新增）：`MemoryDistillationEngine` 类，含 `distill_top_k()` 方法（召回 Top-K 情节记忆 → 合并摘要 → 幂等写入 semantic_memory 表 → 写 system_event_log 审计）；`SemanticMemoryRecord` / `DistillResult` 数据类；`_compute_source_hash()` / `_merge_texts()` / `_compute_confidence()` 辅助函数。
+- 验收标准：
+  - distill_top_k 正常蒸馏返回 semantic_id，写入 semantic_memory 表（T-Distill-01）；
+  - 相同 source_memory_ids 重复蒸馏跳过（skipped=True，T-Distill-02）；
+  - 空 EpisodicStore 返回 success=False（T-Distill-03）。
+- 涉及文件路径：host_brain/memory/distillation.py（新增）。
+- 关联需求/测试：T-Distill-01~03。
+
+### TASK-0127 sqlite_ledger.py：semantic_memory 表 + CRUD 方法
+- 状态：DONE（2026-03-03）
+- 任务描述：在 `sqlite_ledger.py` 中新增 `semantic_memory` 表定义（`_ensure_schema`）和三个 CRUD 方法。
+- 输入：DevSpec §20（M10-C）；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `host_brain/audit/sqlite_ledger.py` 扩展：`_ensure_schema` 追加 `semantic_memory` 表（含 semantic_id UNIQUE / source_hash UNIQUE / ts_ms INDEX）；新增 `log_semantic_memory()` / `get_semantic_memory_by_source_hash()` / `list_semantic_memories()` / `_row_to_semantic_memory()` 方法。
+- 验收标准：
+  - log_semantic_memory 幂等写入（INSERT OR IGNORE）；
+  - get_semantic_memory_by_source_hash 按 source_hash 查询；
+  - list_semantic_memories 分页查询正确（T-Distill-04）。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py。
+- 关联需求/测试：T-Distill-04。
+
+### TASK-0128 context_pack.py：semantic_slot 可选分槽
+- 状态：DONE（2026-03-03）
+- 任务描述：在 `context_pack.py` 中新增可选 `semantic_slot` 分槽支持，包含验证函数和构建辅助函数。
+- 输入：DevSpec §20（M10-C）；host_brain/core/context_pack.py。
+- 输出：
+  - `host_brain/core/context_pack.py` 扩展：新增 `OPTIONAL_SLOTS` 字典（含 `semantic_slot: list`）；`validate_context_pack` 扩展：未知槽位检查同时排除 OPTIONAL_SLOTS，存在 semantic_slot 时调用 `_validate_semantic_slot()`；新增 `_validate_semantic_slot()` 函数（校验 semantic_id / summary 必填字段）；新增 `build_semantic_slot()` 辅助函数（从 ledger 构建 semantic_slot 列表）。
+- 验收标准：
+  - 合法 semantic_slot 通过验证（T-Distill-05）；
+  - 缺少 semantic_id/summary 时报 CONTEXT_PACK_TYPE_INVALID（T-Distill-05）；
+  - 不含 semantic_slot 的 context_pack 仍通过验证（T-Distill-05）；
+  - build_semantic_slot 返回格式正确的列表（T-Distill-06）；
+  - 全量测试 1062 passed，0 failed（无回归）。
+- 涉及文件路径：host_brain/core/context_pack.py。
+- 关联需求/测试：T-Distill-05~06。
+
+### TASK-0129 M10-C 测试 + 发布清单
+- 状态：DONE（2026-03-03）
+- 任务描述：补齐 M10-C 的测试文件和发布清单。
+- 输入：DevSpec §20（M10-C）；host_brain/release/release_manifest.py。
+- 输出：
+  - `tests/unit/test_memory_distillation.py`（新增）：T-Distill-01~06（8 个测试）；
+  - `release/manifests/m10c_release.json`（新增）：M10-C 发布清单，test_passed_count=1062；
+  - `host_brain/release/release_manifest.py` 扩展：`generate_m10c_manifest()` 方法（锁定 distillation.py / context_pack.py / sqlite_ledger.py hash）；
+  - `docs/60_trace/requirements_trace.md` 扩展：R-95~R-97（M10-C 语义记忆蒸馏相关需求追踪）。
+- 验收标准：
+  - T-Distill-01~06 全部通过；
+  - m10c_release.json 包含：milestone=M10-C / distillation_hash / context_pack_hash / sqlite_ledger_hash / test_passed_count=1062；
+  - 全量测试 1062 passed，0 failed。
+- 涉及文件路径：tests/unit/test_memory_distillation.py（新增）；release/manifests/m10c_release.json（新增）；host_brain/release/release_manifest.py；docs/60_trace/requirements_trace.md。
+- 关联需求/测试：T-Distill-01~06。
