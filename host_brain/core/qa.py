@@ -16,6 +16,9 @@ VIOLATION_UNKNOWN_FIELD = "LLM_UNKNOWN_FIELD"
 VIOLATION_FALSE_EXECUTION_CLAIM = "FALSE_EXECUTION_CLAIM"
 VIOLATION_CANON_AS_FACT = "CANON_AS_FACT_VIOLATION"
 
+# F-33：context_pack 分槽注入失败告警码（R113-1）
+VIOLATION_WCANON_SLOT = "WCANON_SLOT_VIOLATION"
+
 REASON_FORMAT_DRIFT = "LLM_FORMAT_DRIFT"
 REASON_QA_TIMEOUT = "LLM_QA_TIMEOUT"
 REASON_QA_FAILURE = "LLM_QA_FAILURE"
@@ -434,6 +437,69 @@ def find_forbidden_keys(
 
     walk(value, "")
     return hits
+
+
+# ---------------------------------------------------------------------------
+# F-33：WCANON_SLOT_VIOLATION 告警接口（R113-1）
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class WcanonSlotViolationResult:
+    """check_wcanon_slot_violation() 的结构化返回值。"""
+
+    violated: bool
+    """是否检测到 context_pack 分槽注入失败。"""
+
+    slot_name: str
+    """发生违规的分槽名称。"""
+
+    detail: str
+    """违规详情描述。"""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "violated": self.violated,
+            "slot_name": self.slot_name,
+            "detail": self.detail,
+        }
+
+
+def check_wcanon_slot_violation(
+    slot_name: str,
+    *,
+    detail: str = "",
+    ledger: Any | None = None,
+    request_id: str | None = None,
+) -> WcanonSlotViolationResult:
+    """记录 context_pack 分槽注入失败告警（WCANON_SLOT_VIOLATION）。
+
+    当 context_pack 的 world_canon_slot / semantic_slot 等分槽注入失败时调用，
+    将告警写入 qa_violation 审计表，供监控系统捕获（F-33 / R113-1）。
+
+    Args:
+        slot_name: 发生注入失败的分槽名称（如 "world_canon_slot"）。
+        detail: 失败详情描述（可选）。
+        ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
+        request_id: 可选请求 ID，用于关联审计日志。
+
+    Returns:
+        WcanonSlotViolationResult，含 violated=True 和详情。
+    """
+    violation_detail = detail or f"context_pack slot injection failed: {slot_name}"
+
+    if ledger is not None and hasattr(ledger, "log_qa_violation"):
+        ledger.log_qa_violation(
+            request_id=request_id,
+            code=VIOLATION_WCANON_SLOT,
+            detail=violation_detail,
+            field=slot_name,
+        )
+
+    return WcanonSlotViolationResult(
+        violated=True,
+        slot_name=slot_name,
+        detail=violation_detail,
+    )
 
 
 # ---------------------------------------------------------------------------
