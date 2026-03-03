@@ -8,6 +8,9 @@ SpeechPlaybackQueue as a drop-in Synthesizer callback.
 from __future__ import annotations
 
 import logging
+import os
+import re
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -133,13 +136,14 @@ class SoVITSModelManager:
 
             self._state = TtsState.LOADING
 
-            # 尝试加载 GPT-SoVITS 推理引擎
+            # 灏濊瘯鍔犺浇 GPT-SoVITS 鎺ㄧ悊寮曟搸
             try:
                 model = _load_sovits_model(
                     model_path=self._config.model_path,
                     device=self._config.device,
                     ref_audio_path=self._config.ref_audio_path,
                     ref_text=self._config.ref_text,
+                    language=self._config.language,
                 )
                 self._model = model
                 self._actual_device = self._config.device
@@ -235,7 +239,7 @@ class SoVITSModelManager:
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
 
-            # 计算音频时长
+            # 璁＄畻闊抽鏃堕暱
             duration_s = 0.0
             if audio_data is not None and hasattr(audio_data, "__len__"):
                 duration_s = len(audio_data) / max(sr, 1)
@@ -481,25 +485,433 @@ def _load_sovits_model(
     device: str,
     ref_audio_path: str | None,
     ref_text: str | None,
+    language: str,
 ) -> Any:
-    """Load GPT-SoVITS model. Raises ImportError or RuntimeError."""
-    try:
-        # 尝试导入 GPT-SoVITS 推理模块
-        # 实际项目中此处为 GPT-SoVITS 的 Python SDK 入口
-        from GPT_SoVITS.inference import TTS_Model  # type: ignore[import-not-found]
-    except ImportError:
-        raise ImportError(
-            "GPT-SoVITS inference module not found. "
-            "Ensure GPT-SoVITS is installed and available on PYTHONPATH."
-        )
+    """Load GPT-SoVITS model using legacy or modern SDK backends."""
+    model_root = os.path.abspath(model_path)
 
-    model = TTS_Model(
-        model_path=model_path,
+    # Legacy SDK path: GPT_SoVITS.inference.TTS_Model
+    try:
+        from GPT_SoVITS.inference import TTS_Model  # type: ignore[import-not-found]
+
+        return TTS_Model(
+            model_path=model_path,
+            device=device,
+            ref_audio_path=ref_audio_path,
+            ref_text=ref_text,
+        )
+    except ImportError:
+        pass
+
+    # Modern SDK path: GPT_SoVITS.TTS_infer_pack.TTS
+    return _load_modern_sovits_model(
+        model_root=model_root,
         device=device,
         ref_audio_path=ref_audio_path,
         ref_text=ref_text,
+        language=language,
     )
-    return model
+
+
+def _load_modern_sovits_model(
+    *,
+    model_root: str,
+    device: str,
+    ref_audio_path: str | None,
+    ref_text: str | None,
+    language: str,
+) -> Any:
+    if not os.path.isdir(model_root):
+        raise ImportError(
+            f"GPT-SoVITS model path does not exist: {model_root}. "
+            "Set EDGE_TTS_MODEL_PATH to your GPT-SoVITS root directory."
+        )
+
+    _ensure_modern_sdk_paths(model_root)
+    _ensure_jieba_fast_alias()
+    _configure_modern_sv_path(model_root)
+
+    try:
+        from GPT_SoVITS.TTS_infer_pack.TTS import (  # type: ignore[import-not-found]
+            TTS,
+            TTS_Config,
+        )
+    except ImportError as exc:
+        raise ImportError(
+            "GPT-SoVITS modern SDK not found. "
+            "Ensure EDGE_TTS_MODEL_PATH points to a GPT-SoVITS root directory."
+        ) from exc
+
+    custom_cfg = _build_modern_tts_custom_config(model_root=model_root, device=device)
+    tts = TTS(TTS_Config({"custom": custom_cfg}))
+
+    effective_ref_audio = str(ref_audio_path or "").strip() or None
+    effective_ref_text = str(ref_text or "").strip()
+    if not effective_ref_audio:
+        auto_ref = _find_ref_audio_with_prompt(
+            model_root=model_root,
+            language=language,
+        )
+        if auto_ref is not None:
+            effective_ref_audio, auto_ref_text = auto_ref
+            if not effective_ref_text:
+                effective_ref_text = auto_ref_text
+
+    if not effective_ref_audio:
+        effective_ref_audio = _find_default_ref_audio(model_root)
+    if not effective_ref_audio:
+        raise RuntimeError(
+            "EDGE_TTS_REF_AUDIO_PATH is required when no 3-10s reference wav "
+            "is found under model logs."
+        )
+
+    logger.info(
+        "TTS reference selected: audio=%s prompt_text_chars=%d",
+        effective_ref_audio,
+        len(effective_ref_text),
+    )
+
+    return _ModernSoVITSAdapter(
+        tts=tts,
+        ref_audio_path=effective_ref_audio,
+        ref_text=(effective_ref_text or None),
+        default_language=language,
+    )
+
+
+class _ModernSoVITSAdapter:
+    """Adapter exposing a legacy-like synthesize() API over TTS_infer_pack.TTS."""
+
+    def __init__(
+        self,
+        *,
+        tts: Any,
+        ref_audio_path: str,
+        ref_text: str | None,
+        default_language: str,
+    ) -> None:
+        self._tts = tts
+        self._ref_audio_path = ref_audio_path
+        self._ref_text = (ref_text or "").strip()
+        self._default_language = default_language
+
+    def synthesize(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion: str | None = None,
+    ) -> dict[str, Any]:
+        import numpy as np
+
+        text_lang = self._normalize_language(language or self._default_language)
+        prompt_lang = self._normalize_language(self._default_language)
+        prompt_text = self._ref_text
+
+        inputs = {
+            "text": text,
+            "text_lang": text_lang,
+            "ref_audio_path": self._ref_audio_path,
+            "aux_ref_audio_paths": [],
+            "prompt_text": prompt_text,
+            "prompt_lang": prompt_lang if prompt_text else text_lang,
+            "seed": 42,
+            "parallel_infer": True,
+            "return_fragment": False,
+            "streaming_mode": False,
+            "fragment_interval": 0.0,
+        }
+
+        chunks: list[Any] = []
+        sample_rate = DEFAULT_SAMPLE_RATE
+        for sr_i, audio_i in self._tts.run(inputs):
+            sample_rate = int(sr_i)
+            if audio_i is not None and hasattr(audio_i, "__len__") and len(audio_i) > 0:
+                chunks.append(np.asarray(audio_i))
+
+        if not chunks:
+            raise RuntimeError("GPT-SoVITS produced empty audio.")
+
+        return {
+            "audio": np.concatenate(chunks),
+            "sample_rate": sample_rate,
+        }
+
+    def _normalize_language(self, language: str) -> str:
+        normalized = str(language or "").strip().lower()
+        aliases = {
+            "jp": "ja",
+            "ja-jp": "ja",
+            "zh-cn": "zh",
+            "zh-tw": "zh",
+            "en-us": "en",
+            "en-gb": "en",
+            "ko-kr": "ko",
+        }
+        normalized = aliases.get(normalized, normalized)
+
+        languages = set(getattr(getattr(self._tts, "configs", None), "languages", []) or [])
+        if normalized in languages:
+            return normalized
+        if "auto" in languages:
+            return "auto"
+        if languages:
+            return sorted(languages)[0]
+        return "ja"
+
+
+def _ensure_modern_sdk_paths(model_root: str) -> None:
+    paths = [
+        model_root,
+        os.path.join(model_root, "GPT_SoVITS"),
+        os.path.join(model_root, "GPT_SoVITS", "eres2net"),
+    ]
+    for path in reversed(paths):
+        if path and os.path.isdir(path) and path not in sys.path:
+            sys.path.insert(0, path)
+
+
+def _ensure_jieba_fast_alias() -> None:
+    if "jieba_fast" in sys.modules:
+        return
+    try:
+        import jieba as jieba_fallback
+    except ImportError:
+        return
+    sys.modules["jieba_fast"] = jieba_fallback
+
+
+def _configure_modern_sv_path(model_root: str) -> None:
+    """Patch GPT-SoVITS sv checkpoint path to absolute path when available."""
+    sv_abs = os.path.join(
+        model_root, "GPT_SoVITS", "pretrained_models", "sv", "pretrained_eres2netv2w24s4ep4.ckpt"
+    )
+    if not os.path.isfile(sv_abs):
+        return
+    try:
+        import sv as sv_module  # type: ignore[import-not-found]
+    except Exception:
+        return
+    try:
+        setattr(sv_module, "sv_path", sv_abs)
+    except Exception:
+        return
+
+
+def _build_modern_tts_custom_config(*, model_root: str, device: str) -> dict[str, Any]:
+    t2s_weights_path, vits_weights_path = _resolve_modern_weights(model_root)
+    version = _detect_model_version(t2s_weights_path=t2s_weights_path, vits_weights_path=vits_weights_path)
+
+    bert_base_path = os.path.join(
+        model_root, "GPT_SoVITS", "pretrained_models", "chinese-roberta-wwm-ext-large"
+    )
+    cnhuhbert_base_path = os.path.join(
+        model_root, "GPT_SoVITS", "pretrained_models", "chinese-hubert-base"
+    )
+    if not os.path.isdir(bert_base_path) or not os.path.isdir(cnhuhbert_base_path):
+        raise RuntimeError(
+            "GPT-SoVITS pretrained models are missing. "
+            "Expected chinese-roberta-wwm-ext-large and chinese-hubert-base."
+        )
+
+    return {
+        "device": device,
+        "is_half": "cuda" in str(device).lower(),
+        "version": version,
+        "t2s_weights_path": t2s_weights_path,
+        "vits_weights_path": vits_weights_path,
+        "bert_base_path": bert_base_path,
+        "cnhuhbert_base_path": cnhuhbert_base_path,
+    }
+
+
+def _resolve_modern_weights(model_root: str) -> tuple[str, str]:
+    # 1) Prefer model root config.py assignments (sovits_path/gpt_path).
+    config_path = os.path.join(model_root, "config.py")
+    rel_sovits = _extract_python_string_assignment(config_path, "sovits_path")
+    rel_gpt = _extract_python_string_assignment(config_path, "gpt_path")
+    if rel_sovits and rel_gpt:
+        sovits_abs = os.path.normpath(os.path.join(model_root, rel_sovits))
+        gpt_abs = os.path.normpath(os.path.join(model_root, rel_gpt))
+        if os.path.isfile(sovits_abs) and os.path.isfile(gpt_abs):
+            return gpt_abs, sovits_abs
+
+    # 2) Fallback to first available checkpoints in preferred directories.
+    candidates = [
+        ("GPT_weights_v2ProPlus", ".ckpt"),
+        ("GPT_weights_v2Pro", ".ckpt"),
+        ("GPT_weights_v4", ".ckpt"),
+        ("GPT_weights_v3", ".ckpt"),
+        ("GPT_weights_v2", ".ckpt"),
+        ("GPT_weights", ".ckpt"),
+    ]
+    t2s_weights_path = _find_first_weight(model_root, candidates)
+
+    candidates = [
+        ("SoVITS_weights_v2ProPlus", ".pth"),
+        ("SoVITS_weights_v2Pro", ".pth"),
+        ("SoVITS_weights_v4", ".pth"),
+        ("SoVITS_weights_v3", ".pth"),
+        ("SoVITS_weights_v2", ".pth"),
+        ("SoVITS_weights", ".pth"),
+    ]
+    vits_weights_path = _find_first_weight(model_root, candidates)
+
+    if not t2s_weights_path or not vits_weights_path:
+        raise RuntimeError(
+            "Cannot locate GPT-SoVITS checkpoint files under model path. "
+            "Expected .ckpt in GPT_weights* and .pth in SoVITS_weights*."
+        )
+    return t2s_weights_path, vits_weights_path
+
+
+def _extract_python_string_assignment(path: str, name: str) -> str | None:
+    if not os.path.isfile(path):
+        return None
+    text = ""
+    with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+        text = handle.read()
+    match = re.search(rf"^{name}\s*=\s*['\"]([^'\"]+)['\"]", text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def _find_first_weight(model_root: str, candidates: list[tuple[str, str]]) -> str | None:
+    for folder, suffix in candidates:
+        base = os.path.join(model_root, folder)
+        if not os.path.isdir(base):
+            continue
+        files = sorted(
+            [
+                os.path.join(base, f)
+                for f in os.listdir(base)
+                if f.lower().endswith(suffix.lower())
+            ]
+        )
+        if files:
+            return files[-1]
+    return None
+
+
+def _detect_model_version(*, t2s_weights_path: str, vits_weights_path: str) -> str:
+    probe = f"{t2s_weights_path} {vits_weights_path}".lower()
+    if "v2proplus" in probe:
+        return "v2ProPlus"
+    if "v2pro" in probe:
+        return "v2Pro"
+    if "v4" in probe:
+        return "v4"
+    if "v3" in probe:
+        return "v3"
+    if "v2" in probe:
+        return "v2"
+    return "v1"
+
+
+def _find_ref_audio_with_prompt(*, model_root: str, language: str) -> tuple[str, str] | None:
+    logs_dir = os.path.join(model_root, "logs")
+    if not os.path.isdir(logs_dir):
+        return None
+
+    want_ja = str(language or "").strip().lower().startswith("ja")
+    candidates = _collect_ref_prompt_candidates(
+        logs_dir=logs_dir,
+        require_japanese=want_ja,
+    )
+    if not candidates and want_ja:
+        candidates = _collect_ref_prompt_candidates(
+            logs_dir=logs_dir,
+            require_japanese=False,
+        )
+    if not candidates:
+        return None
+
+    # Prefer clips around ~5 seconds at 32 kHz for stable reference quality.
+    candidates.sort(key=lambda row: (abs(row[2] - 160_000), row[0]))
+    audio_path, prompt_text, _samples = candidates[0]
+    return audio_path, prompt_text
+
+
+def _collect_ref_prompt_candidates(
+    *,
+    logs_dir: str,
+    require_japanese: bool,
+) -> list[tuple[str, str, int]]:
+    pattern = re.compile(r"_(\d{10})_(\d{10})\.wav$", flags=re.IGNORECASE)
+    out: list[tuple[str, str, int]] = []
+
+    for project_name in sorted(os.listdir(logs_dir)):
+        project_root = os.path.join(logs_dir, project_name)
+        if not os.path.isdir(project_root):
+            continue
+
+        text_path = os.path.join(project_root, "2-name2text.txt")
+        wav_dir = os.path.join(project_root, "5-wav32k")
+        if not os.path.isfile(text_path) or not os.path.isdir(wav_dir):
+            continue
+
+        try:
+            with open(text_path, "r", encoding="utf-8", errors="ignore") as handle:
+                for raw_line in handle:
+                    parts = raw_line.rstrip("\n").split("\t")
+                    if len(parts) < 4:
+                        continue
+                    clip_name = parts[0].strip()
+                    prompt_text = parts[3].strip()
+                    if not clip_name or not prompt_text or not clip_name.lower().endswith(".wav"):
+                        continue
+                    if require_japanese and not _looks_japanese_text(prompt_text):
+                        continue
+
+                    match = pattern.search(clip_name)
+                    if not match:
+                        continue
+                    start = int(match.group(1))
+                    end = int(match.group(2))
+                    samples = max(end - start, 0)
+                    if not (96_000 <= samples <= 320_000):
+                        continue
+
+                    audio_path = os.path.normpath(os.path.join(wav_dir, clip_name))
+                    if not os.path.isfile(audio_path):
+                        continue
+                    out.append((audio_path, prompt_text, samples))
+        except OSError:
+            continue
+
+    return out
+
+
+def _looks_japanese_text(text: str) -> bool:
+    return bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff]", str(text)))
+
+
+def _find_default_ref_audio(model_root: str) -> str | None:
+    logs_dir = os.path.join(model_root, "logs")
+    if not os.path.isdir(logs_dir):
+        return None
+
+    pattern = re.compile(r"_(\d{10})_(\d{10})$")
+    fallback: str | None = None
+    for root, _dirs, files in os.walk(logs_dir):
+        for name in sorted(files):
+            if not name.lower().endswith(".wav"):
+                continue
+            path = os.path.join(root, name)
+            if fallback is None:
+                fallback = path
+
+            stem = os.path.splitext(name)[0]
+            match = pattern.search(stem)
+            if not match:
+                continue
+            start = int(match.group(1))
+            end = int(match.group(2))
+            samples = max(end - start, 0)
+            # GPT-SoVITS ref audio requirement: 3~10 seconds (at 32kHz => 96k~320k).
+            if 96_000 <= samples <= 320_000:
+                return path
+
+    return fallback
 
 
 def _synthesize_audio(
@@ -518,7 +930,7 @@ def _synthesize_audio(
 
     t0 = time.monotonic()
 
-    # 调用模型推理
+    # 璋冪敤妯″瀷鎺ㄧ悊
     result = model.synthesize(
         text=text,
         language=language,
@@ -529,7 +941,7 @@ def _synthesize_audio(
     if elapsed > timeout_s:
         raise TimeoutError(f"synthesis took {elapsed:.1f}s > timeout {timeout_s:.1f}s")
 
-    # 提取音频数据
+    # 鎻愬彇闊抽鏁版嵁
     if isinstance(result, dict):
         audio = result.get("audio", np.zeros(1, dtype=np.float32))
         sr = int(result.get("sample_rate", DEFAULT_SAMPLE_RATE))

@@ -28,6 +28,10 @@ from host_brain.core.ids import new_request_id, now_ms
 
 logger = logging.getLogger("Nastume.edge.vts")
 
+_VTS_IO_LOOP: asyncio.AbstractEventLoop | None = None
+_VTS_IO_THREAD: threading.Thread | None = None
+_VTS_IO_LOCK = threading.Lock()
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -608,6 +612,8 @@ def _create_vts_connection(config: VtsConfig) -> Any:
             "authentication_token_path": config.token_path,
         },
         vts_api_info={
+            "name": "VTubeStudioPublicAPI",
+            "version": "1.0",
             "host": config.host,
             "port": config.port,
         },
@@ -623,10 +629,34 @@ def _authenticate_vts(
     token_path: str,
 ) -> None:
     """Authenticate with VTube Studio API."""
-    loop = _get_or_create_event_loop()
-    loop.run_until_complete(vts.connect())
-    loop.run_until_complete(vts.request_authenticate_token())
-    loop.run_until_complete(vts.request_authenticate())
+    async def _auth() -> None:
+        await vts.connect()
+        token = await vts.read_token()
+        if not token:
+            token_request = vts.vts_request.authentication_token()
+            token_response = await vts.request(token_request)
+            token_data = dict(token_response.get("data") or {})
+            token = str(token_data.get("authenticationToken") or "").strip()
+            if not token:
+                raise RuntimeError(_extract_vts_api_error(
+                    token_response,
+                    default="failed to get authentication token",
+                ))
+            vts.authentic_token = token
+            await vts.write_token()
+        else:
+            vts.authentic_token = token
+
+        auth_request = vts.vts_request.authentication(vts.authentic_token)
+        auth_response = await vts.request(auth_request)
+        auth_ok = bool((auth_response.get("data") or {}).get("authenticated"))
+        if not auth_ok:
+            raise RuntimeError(_extract_vts_api_error(
+                auth_response,
+                default="authentication rejected by VTube Studio",
+            ))
+
+    _run_in_vts_loop(_auth(), timeout_s=30.0)
 
 
 def _set_vts_parameter(
@@ -639,8 +669,6 @@ def _set_vts_parameter(
     """Set a VTS input parameter value."""
     if vts is None:
         return
-
-    loop = _get_or_create_event_loop()
 
     async def _set() -> None:
         request = vts.vts_request.BaseRequest(
@@ -659,7 +687,7 @@ def _set_vts_parameter(
             timeout=timeout_s,
         )
 
-    loop.run_until_complete(_set())
+    _run_in_vts_loop(_set(), timeout_s=timeout_s + 1.0)
 
 
 def _trigger_vts_hotkey(
@@ -671,8 +699,6 @@ def _trigger_vts_hotkey(
     """Trigger a VTS hotkey by ID."""
     if vts is None:
         return
-
-    loop = _get_or_create_event_loop()
 
     async def _trigger() -> None:
         request = vts.vts_request.BaseRequest(
@@ -686,17 +712,47 @@ def _trigger_vts_hotkey(
             timeout=timeout_s,
         )
 
-    loop.run_until_complete(_trigger())
+    _run_in_vts_loop(_trigger(), timeout_s=timeout_s + 1.0)
 
 
-def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
-    """Get existing or create new event loop for sync VTS calls."""
-    try:
-        # Python 3.10+：优先获取正在运行的 loop，避免 DeprecationWarning
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    # 无正在运行的 loop，创建新的
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop
+def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
+    """Run coroutine on dedicated VTS IO loop to avoid ASGI loop conflicts."""
+    loop = _ensure_vts_io_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=max(float(timeout_s), 1.0))
+
+
+def _ensure_vts_io_loop() -> asyncio.AbstractEventLoop:
+    global _VTS_IO_LOOP, _VTS_IO_THREAD
+    with _VTS_IO_LOCK:
+        if _VTS_IO_LOOP is not None and not _VTS_IO_LOOP.is_closed():
+            return _VTS_IO_LOOP
+
+        loop = asyncio.new_event_loop()
+
+        def _runner() -> None:
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(
+            target=_runner,
+            name="vts-io-loop",
+            daemon=True,
+        )
+        thread.start()
+        _VTS_IO_LOOP = loop
+        _VTS_IO_THREAD = thread
+        return loop
+
+
+def _extract_vts_api_error(response: Any, *, default: str) -> str:
+    if not isinstance(response, dict):
+        return str(default)
+    data = dict(response.get("data") or {})
+    message = str(data.get("message") or "").strip()
+    error_id = data.get("errorID")
+    if message and error_id is not None:
+        return f"VTS API error {error_id}: {message}"
+    if message:
+        return f"VTS API error: {message}"
+    return str(default)
