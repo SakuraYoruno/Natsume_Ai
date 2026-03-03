@@ -2,7 +2,7 @@
 标题：白皮书（Nastume Ai 意识主权宪法与人格设定）
 
 # Nastume Ai 意识主权宪法与人格设定
-版本：v1.3
+版本：v1.4
 
 定位：本文件只定义“不可变的法律（宪法）+ 可控的人格表达约束”。任何产品功能清单、体验包、实现细节与工程接口，统一移至 PRD 与开发规范。
 
@@ -79,9 +79,11 @@
 
 5）World Canon：主权维护的最小权威内容集合（用于一致性引用与冲突裁决；不具备执行事实效力）
 
-6）Episodic 召回：相似性线索，仅作叙事素材/追问线索，不具备裁决权
+6）NARRATIVE_ONLY 内容（梦境/故事拉/遗产叙事等）：由系统生成的非事实叙事，必须标记 evidence_level=NARRATIVE_ONLY；不得升级为执行事实或记忆事实；召回时必须以“梦境/想象/设定”口径呈现
 
-硬规则：涉及“是否执行/是否保存/是否确认/是否修改状态”的判断，只允许依赖 1–4；第 5–6 项只能用于解释、对齐与追问，不得升级为事实宣告。
+7）Episodic 召回：相似性线索，仅作叙事素材/追问线索，不具备裁决权
+
+硬规则：涉及“是否执行/是否保存/是否确认/是否修改状态”的判断，只允许依赖 1–4；第 5–7 项只能用于解释、对齐与追问，不得升级为事实宣告。
 
 ### 3.2 风格层级（Style Hierarchy）
 用于回答“应该怎么说话、怎么反应才像她”。从高到低：
@@ -241,6 +243,19 @@ H）票据与执行
 - CONFIRM_REQUIRED
 - UNDO_REQUIRED
 
+I）性能与超时
+- PERF_TIMEOUT（通用时延超限）
+- PERF_LLM_TIMEOUT（LLM 调用超时）
+- PERF_RETRIEVAL_TIMEOUT（检索链路超时）
+- PERF_SKILL_TIMEOUT（Skill 执行超时）
+
+J）调度与体验
+- SCHED_TASK_SUSPENDED（调度任务连续失败自动暂停）
+- SCHED_CONDITION_UNMET（触发条件不满足）
+- SCHED_NO_CONTENT（无实质内容可生成）
+- SYSMODE_FORBIDDEN_FOCUS（Focus 子模式禁止）
+- RATE_LIMIT_EXCEEDED（频率超限）
+
 7.5 与叙事回注入绑定（必须）
 拒绝事件进入叙事与关系动力学时必须携带 reason_code：
 - system_event.etype：映射为稳定类型（SKILL_DENIED / POLICY_DENIED / SAFETY_DENIED…）
@@ -311,10 +326,23 @@ Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；叙�
 
 sys_mode 是 Hard State，用于决定资源策略、交互策略、技能可用矩阵。
 - Normal：完整链路（门禁允许范围内）
+  - Focus（Normal 子模式）：暂停中断型能力（主动对话/通知推送/非紧急调度任务），保留被动响应（用户主动提问仍正常处理）；进入/退出必须有来源证据并写 hard_state_log。
 - Gaming：不打扰优先，强限频与禁止视觉/UI 自动化（默认）
-- Sleep：低干预；禁止执行类技能；允许记录与延后
+- Sleep：低干预；禁止执行类技能；允许记录与延后；允许梦境/日记等低风险叙事生成（标记为 NARRATIVE_ONLY）
 
-强制规则：当 sys_mode 禁用某能力时，拒绝必须 reason_code=SYSMODE_FORBIDDEN，并回注入系统事件。
+强制规则：当 sys_mode 禁用某能力时，拒绝必须 reason_code=SYSMODE_FORBIDDEN（或子类 SYSMODE_FORBIDDEN_FOCUS），并回注入系统事件。
+
+### 11.2 系统发起 Intent（Scheduler）宪法约束
+- Host 定时调度器可注册周期性/定时触发的"系统发起 Intent"（proposer_node_id=scheduler）。
+- 系统发起的 Intent 必须与用户发起的请求享有完全相同的治理约束：Governor→Token→Skill→Audit 单向链。
+- 调度器只负责"何时触发"与"触发何种 intent_draft"，不负责裁决或执行。
+- 调度器配置必须版本化、可审计。
+- 连续失败必须自动降级（暂停 + 告警）而非无限重试。
+
+### 11.3 NARRATIVE_ONLY 内容的宪法定位
+- 由调度器或系统能力生成的非事实叙事（如梦境、日记反思、故事拉引用）必须标记 evidence_level=NARRATIVE_ONLY。
+- NARRATIVE_ONLY 内容在真相层级中位于第 6 级（低于 World Canon），不得升级为执行事实或记忆事实。
+- 召回时必须以"梦境/想象/反思"口径呈现；任何将其升级为事实的尝试必须被 QA 拦截（NARRATIVE_ONLY_AS_FACT_VIOLATION）。
 
 ---
 
@@ -354,6 +382,8 @@ I11 可逆环境变更必须产生 undo_token + manifest
 I12 Artifact Vault 必须可寻址、可审计、可 GC（GC 也可审计）
 I13 语义内核/渲染器→Host 输出封装必须可解析为单个 JSON 对象（至少包含 narrative_zh 或 rendered_ja 等约定字段）；任何不可解析/夹带多余文本的输出都不得进入执行路径，只允许拒绝或降级叙事，并留下可审计标记
 I14 工具可见性必须可追溯：当任一 LLM 节点暴露 tool_meta_pack 时，intent_log 必须记录 tool_visibility_hash；WRITE 类工具默认不可见；任何工具执行必须经单入口并受 Governor/Token 约束
+I15 NARRATIVE_ONLY 内容不得升级为执行事实或记忆事实；召回时必须以"梦境/想象/反思"口径呈现
+I16 系统发起 Intent（proposer_node_id=scheduler）必须与用户发起 Intent 享有相同治理约束（Governor→Token→Skill→Audit）
 ---
 
 ## 14. 威胁模型（T1–T5）与控制概览

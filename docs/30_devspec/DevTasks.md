@@ -1,8 +1,8 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.6
-日期：2026-03-02
+版本：v1.7
+日期：2026-03-03
 
 本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
@@ -1146,6 +1146,8 @@ TASK-XXXX 标题
 - 涉及文件路径：docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
 - 关联需求/测试：NFR-REL-001；NFR-SEC-001。
 
+---
+
 ### TASK-0084 Edge RPC Gateway 最小运行进程（P1 Edge 运行时）
 - 任务描述：实现 Edge 侧最小可运行 RPC 网关进程，对 Host 暴露能力端点并完成签名/重放校验与契约化响应，确保“只执行、不裁决”。
 - 输入：DevSpec 2.2（Edge RPC 能力端点）；DevSpec 2.4（Host→Edge HMAC + nonce + ts_ms）；DevSpec 14.2（Edge 边界）；TASK-0087 输出的鉴权与 schema；edge_client/config.py；edge_client/rpc/*。
@@ -1260,3 +1262,166 @@ TASK-XXXX 标题
   - 交付文档与 `DevTasks`/`TESTPLAN` 编号一致。
 - 涉及文件路径：docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md；README.md；docs/30_devspec/DevTasks.md；tests/TESTPLAN.md。
 - 关联需求/测试：NFR-REL-001；FR-CORE-004；T-Edge-Start-01；T-RPC-Event-01。
+
+## 4. M4 体验包任务清单（TASK-0091 ~ TASK-0098）
+
+### TASK-0091 Scheduler 定时调度器基础组件（M4 前置，P0）
+- 任务描述：实现 Host 定时调度器基础组件，支持 cron/interval/once 三种触发模式；调度器触发的 Intent 必须走完整单向链（Governor→Token→Skill→Audit），与用户请求享有相同治理。
+- 输入：DevSpec 15.1；PRD FR-SCHED-001~002。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`（新增）：调度器主体，基于 APScheduler 或等价轻量库；
+  - `host_brain/scheduler/task_registry.py`（新增）：任务注册表（task_id/trigger_config/intent_template/priority/mode_allowlist/enabled/max_consecutive_failures）；
+  - `host_brain/scheduler/health.py`（新增）：任务健康快照（task_id/last_run_ts/next_run_ts/status/error_count/suspended_reason）；
+  - `scheduler_event_log` 审计表（SQLite Ledger 新增）：task_id/trigger_ts/intent_id/status/reason_code/mode_at_trigger/error_detail；
+  - `system_initiated_intent` 生成逻辑：proposer_node_id=scheduler，复用现有 Intent Schema；
+  - sys_mode 门控矩阵实现（HIGH/MEDIUM/LOW 优先级 × Normal/Sleep/Gaming/Focus）；
+  - 连续失败自动暂停策略（max_consecutive_failures 后 status=SUSPENDED + SCHED_TASK_SUSPENDED）；
+  - 新增错误码：SCHED_TASK_SUSPENDED / SCHED_CONDITION_UNMET / SCHED_NO_CONTENT；
+  - fixtures：正常触发/Gaming 拦截/连续失败暂停/Focus 模式暂停。
+- 验收标准：
+  - 调度器注册/注销/触发可回放，审计链中 proposer_node_id=scheduler；
+  - sys_mode=GAMING 时低/中优先级任务被拦截（SYSMODE_FORBIDDEN）；
+  - 连续失败 N 次后自动暂停且 reason_code 可统计；
+  - 健康快照可被 /health 端点或面板读取；
+  - T-Sched-01、T-Sched-02、T-Sched-03 全部通过。
+- 涉及文件路径：host_brain/scheduler/scheduler.py（新增）；host_brain/scheduler/task_registry.py（新增）；host_brain/scheduler/health.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/test_scheduler_contract.py（新增）；tests/fixtures/scheduler/。
+- 关联需求/测试：FR-SCHED-001~002；FR-MODE-001；T-Sched-01~03。
+
+### TASK-0092 Desktop Note Skill 桌面留言（M4 P0）
+- 任务描述：实现桌面留言 Skill，支持在安全基目录下创建/更新/删除文本文件；操作可逆，产出 manifest + undo_token；路径穿越拒绝；内容经 QA 校验。
+- 输入：DevSpec 15.2；PRD FR-DESKTOP-001~002；TASK-0084 输出的 Scheduler（用户触发为主，Scheduler 触发为辅）。
+- 输出：
+  - `host_brain/skills/impl/desktop_note.py`（新增）：桌面留言 Skill handler + SkillMeta 声明；
+  - args 校验：action/filename/content/base_dir_key；路径穿越检查（`..`/symlink 拒绝 → SCOPE_VIOLATION）；
+  - 文件 manifest：before_hash/after_hash/path/artifact_refs；
+  - delete → move-to-quarantine；真删需 confirm_token；
+  - QA 校验集成：内容含伪执行句 → 拦截重写；
+  - 新增配置项：NATSUME_DESKTOP_DIR（安全基目录）；
+  - fixtures：创建成功/路径穿越拒绝/undo 恢复/QA 拦截/Gaming 拒绝。
+- 验收标准：
+  - 文件创建成功 + manifest 完整 + undo 恢复原状态；
+  - 路径穿越 → SCOPE_VIOLATION；Gaming → SYSMODE_FORBIDDEN；
+  - 内容 QA 拦截可回放；
+  - T-Desktop-01、T-Desktop-02 全部通过。
+- 涉及文件路径：host_brain/skills/impl/desktop_note.py（新增）；host_brain/skills/registry.py；host_brain/lsp/vault.py；host_brain/core/qa.py；tests/contract/test_desktop_note_contract.py（新增）；tests/fixtures/desktop/。
+- 关联需求/测试：FR-DESKTOP-001~002；FR-LSP-001~002；T-Desktop-01~02；T-Vault-01。
+
+### TASK-0093 Dream Skill 梦境生成（M4 P1）
+- 任务描述：实现梦境生成 Skill，由调度器在 Sleep/空闲时触发；读取当日 Episodic Memory → LLM 生成梦境叙事 → 写入 Episodic（dream 标签 + NARRATIVE_ONLY）。
+- 输入：DevSpec 15.3；PRD FR-DREAM-001~002；TASK-0084 输出的 Scheduler。
+- 输出：
+  - `host_brain/skills/impl/dream_generator.py`（新增）：梦境 Skill handler + SkillMeta 声明；
+  - Scheduler 任务注册：trigger=Sleep/idle，priority=MEDIUM；
+  - 当日 Episodic 读取逻辑（ts_ms 当日范围过滤，TopK=20）；
+  - context_pack 打包（bond_summary + 当日 episodic 摘要）→ LLM 梦境叙事；
+  - Episodic 写入：category=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]；
+  - manifest：memory_before_count/memory_after_count/dream_id/hash；
+  - QA 校验：不得伪执行/Canon-as-fact；
+  - 召回口径扩展：episodic 中 evidence_level=NARRATIVE_ONLY 标注在 context_pack 透传；
+  - fixtures：Sleep 模式触发成功/Normal 非空闲拒绝/Episodic 不可用降级/梦境召回非事实约束。
+- 验收标准：
+  - 梦境写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；
+  - Normal 非空闲时拒绝（SCHED_CONDITION_UNMET）；
+  - 召回梦境时 QA 确认 evidence_level 标注存在；
+  - T-Dream-01、T-Dream-02 全部通过。
+- 涉及文件路径：host_brain/skills/impl/dream_generator.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/core/context_pack.py；host_brain/core/qa.py；tests/contract/test_dream_contract.py（新增）；tests/fixtures/dream/。
+- 关联需求/测试：FR-DREAM-001~002；FR-MEM-001；FR-SCHED-001；T-Dream-01~02。
+
+### TASK-0094 Diary Skill 日记生成（M4 P1）
+- 任务描述：实现每日日记 Skill，由调度器定时触发；汇总当日对话 → LLM 生成日记叙事 → 双写文件 + Episodic Memory；无对话时跳过不伪造。
+- 输入：DevSpec 15.4；PRD FR-DIARY-001~002；TASK-0084 输出的 Scheduler。
+- 输出：
+  - `host_brain/skills/impl/diary_writer.py`（新增）：日记 Skill handler + SkillMeta 声明；
+  - Scheduler 任务注册：trigger=cron(23:00)，priority=HIGH；
+  - 当日对话汇总逻辑：读取 intent_log + governor_log 当日记录 + Episodic 当日条目；
+  - 无实质对话检测 → 跳过 + SCHED_NO_CONTENT（不伪造日记）；
+  - 有对话 → context_pack → LLM 日记叙事 → 双写：
+    - 本地文件：`{base_dir}/diary/{YYYY-MM-DD}.md`，产出 file manifest；
+    - Episodic Memory：category=diary, evidence_refs=[intent_id, file_path]；
+  - QA 校验：不得含伪执行句；
+  - Evolution 提案（可选）：drift_suggestion → canon_proposal_log；
+  - fixtures：有对话触发成功/无对话跳过/文件 undo 回滚/Evolution 提案写入。
+- 验收标准：
+  - 日记文件创建 + Episodic 写入 + 审计链完整；
+  - 无当日对话时不伪造（SCHED_NO_CONTENT）；
+  - 日记文件 manifest 可撤销；
+  - T-Diary-01、T-Diary-02 全部通过。
+- 涉及文件路径：host_brain/skills/impl/diary_writer.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/contract/test_diary_contract.py（新增）；tests/fixtures/diary/。
+- 关联需求/测试：FR-DIARY-001~002；FR-MEM-001；FR-LSP-001；FR-SCHED-001；T-Diary-01~02。
+
+### TASK-0095 Proactive Talk Skill 主动对话（M4 P1）
+- 任务描述：实现主动对话 Skill，由调度器按条件策略触发；生成问候/关心/提醒内容并通过 Edge RPC 或微信通道推送；频率限制 + 内容 QA + 推送失败静默降级。
+- 输入：DevSpec 15.5；PRD FR-PROACTIVE-001~002；TASK-0084 输出的 Scheduler。
+- 输出：
+  - `host_brain/skills/impl/proactive_talk.py`（新增）：主动对话 Skill handler + SkillMeta 声明；
+  - Scheduler 任务注册：trigger=interval(15min check)，priority=LOW；
+  - 触发条件组合实现：idle_duration + bond.stage + sys_mode + active_hours（AND 逻辑）；
+  - 频率限制集成：Rate Limit R4 Gate（3/hour）；
+  - context_pack 打包（bond_summary + 最近 episodic + 时间段信息）→ LLM 草案；
+  - QA 校验：内容仅限问候/关心/回忆引用/提醒口径；含执行 intent → 拦截；
+  - 推送路径选择：Edge RPC speak > 微信 outbound > 静默降级（不重试）；
+  - 审计：复用 skill_exec_log 记录触发条件快照、推送结果、reason_code；
+  - fixtures：空闲触发成功/Gaming 拒绝/频率超限/Edge 不可达降级/内容 QA 拦截。
+- 验收标准：
+  - 空闲触发 + 推送成功 + 审计链完整；
+  - Gaming → SYSMODE_FORBIDDEN；频率超限 → RATE_LIMIT_EXCEEDED；
+  - 推送失败静默降级不重试；
+  - T-Proactive-01、T-Proactive-02 全部通过。
+- 涉及文件路径：host_brain/skills/impl/proactive_talk.py（新增）；host_brain/skills/registry.py；host_brain/channels/wechat.py；host_brain/core/qa.py；host_brain/governor/rules.py；tests/contract/test_proactive_contract.py（新增）；tests/fixtures/proactive/。
+- 关联需求/测试：FR-PROACTIVE-001~002；FR-SCHED-001；FR-CHANNEL-001；T-Proactive-01~02。
+
+### TASK-0096 Focus Mode 专注模式状态扩展（M4 P1）
+- 任务描述：扩展 sys_mode 状态机，新增 Focus 子模式（Normal 的子状态）；进入后暂停中断型能力（主动对话/通知推送/非紧急调度），保留被动响应；进入/退出可审计。
+- 输入：DevSpec 15.6；PRD FR-FOCUS-001；TASK-0084 输出的 Scheduler 门控矩阵。
+- 输出：
+  - `host_brain/core/metabolism.py` 扩展：新增 sub_mode=FOCUS 状态枚举与切换逻辑；
+  - 进入条件：用户指令 / 定时策略 / 日历事件（需 evidence）；
+  - 退出条件：用户指令 / 定时策略到期 / 超时自动退出（可配置默认时长）；
+  - Governor rules.py 扩展：Focus 子模式下 proactive/dream 等 LOW/MEDIUM 优先级任务 → SYSMODE_FORBIDDEN_FOCUS；
+  - Scheduler 联动：Focus 进入时暂停非紧急任务，退出时恢复；
+  - hard_state_log 审计：进入/退出事件（原因、证据摘要、持续时长）；
+  - scheduler_event_log：被拦截任务写 reason_code=SYSMODE_FORBIDDEN_FOCUS；
+  - fixtures：进入 Focus/主动对话拦截/用户提问正常/退出恢复/超时自动退出。
+- 验收标准：
+  - Focus 进入后主动对话被拦截；用户主动提问正常响应；
+  - 退出后调度器恢复；审计可回放切换事件；
+  - T-Focus-01 全部通过。
+- 涉及文件路径：host_brain/core/metabolism.py；host_brain/governor/rules.py；host_brain/scheduler/scheduler.py；host_brain/audit/sqlite_ledger.py；tests/contract/test_focus_mode_contract.py（新增）；tests/fixtures/focus/。
+- 关联需求/测试：FR-FOCUS-001；FR-MODE-001~002；FR-SCHED-001；T-Focus-01。
+
+### TASK-0097 M4 E2E 集成测试：Scheduler→Skill→Audit 全链闭环验证（M4 P2）
+- 任务描述：为 M4 全部 5 个 Skill（desktop_note/dream_generator/diary_writer/proactive_talk/focus_mode）编写 E2E 集成测试，验证从 Scheduler 触发到 Audit 写入的完整闭环。
+- 输入：TASK-0084~TASK-0089 输出的所有组件。
+- 输出：
+  - `tests/e2e/test_m4_experience_pack.py`（新增）：
+    - 桌面留言 E2E：创建 → 验证文件 → undo → 验证恢复 → 审计串联；
+    - 梦境 E2E：Sleep 触发 → Episodic 写入 dream 标签 → 后续对话召回 → QA 非事实约束；
+    - 日记 E2E：定时触发 → 文件 + Episodic 双写 → 无对话跳过 → 审计串联；
+    - 主动对话 E2E：空闲触发 → 推送成功 → 频率超限拒绝 → Gaming 拒绝 → 审计串联；
+    - Focus Mode E2E：进入 → 主动对话拦截 → 用户提问正常 → 退出恢复 → 审计串联；
+  - 所有 E2E 使用 LLM stub + 本地 fixtures，不依赖真实外部服务。
+- 验收标准：
+  - 5 个功能的 E2E 全部通过；
+  - 现有 E2E 测试无回归；
+  - 审计链串联键（request_id/intent_id/proposer_node_id）完整可回放。
+- 涉及文件路径：tests/e2e/test_m4_experience_pack.py（新增）；tests/fixtures/scheduler/；tests/fixtures/desktop/；tests/fixtures/dream/；tests/fixtures/diary/；tests/fixtures/proactive/；tests/fixtures/focus/。
+- 关联需求/测试：FR-SCHED-001~002；FR-DESKTOP-001~002；FR-DREAM-001~002；FR-DIARY-001~002；FR-PROACTIVE-001~002；FR-FOCUS-001；T-Sched-01~03；T-Desktop-01~02；T-Dream-01~02；T-Diary-01~02；T-Proactive-01~02；T-Focus-01。
+
+### TASK-0098 性能预算基准：全链路时延采集 + p50/p95 报告 + 超时退化验证（P1）
+- 任务描述：实现全链路时延采集点、bench 脚本聚合报告、以及超时退化策略的验证，使 NFR-PERF-001 从定性描述变为可量化基线。
+- 输入：DevSpec 16；PRD NFR-PERF-001；现有 tools/bench/ledger_bench.py（Ledger 层基准）。
+- 输出：
+  - `host_brain/core/latency.py`（新增）：时延采集点注入（request_start_ms → response_end_ms）与 latency_breakdown 结构化输出；
+  - `host_brain/audit/sqlite_ledger.py` 扩展：latency_breakdown JSON 字段写入审计链；
+  - `host_brain/core/errors.py` 扩展：PERF_TIMEOUT / PERF_LLM_TIMEOUT / PERF_RETRIEVAL_TIMEOUT / PERF_SKILL_TIMEOUT 错误码；
+  - `tools/bench/e2e_latency_bench.py`（新增）：全链路 p50/p95/p99 聚合报告脚本（复用 LLM stub + 本地 fixtures）；
+  - `tools/bench/retrieval_latency_bench.py`（新增）：检索链路 p50/p95 聚合报告脚本；
+  - 超时退化策略集成：LLM/检索/Skill 超时时输出结构稳定 + quality.stage 标注 + reason_code 可统计；
+  - fixtures：LLM 超时/检索超时/Skill 超时/正常基准样例。
+- 验收标准：
+  - 基准机器上各阶段 p50/p95 在 DevSpec 16.1 目标范围内；
+  - 模拟超时场景触发退化策略，输出结构稳定且 quality.stage/reason_code 可统计；
+  - Ledger 写入 p95 ≤ 20ms（复用 ledger_bench.py）；
+  - T-Perf-01 全部通过。
+- 涉及文件路径：host_brain/core/latency.py（新增）；host_brain/core/errors.py；host_brain/audit/sqlite_ledger.py；tools/bench/e2e_latency_bench.py（新增）；tools/bench/retrieval_latency_bench.py（新增）；tests/contract/test_latency_contract.py（新增）；tests/fixtures/perf/。
+- 关联需求/测试：NFR-PERF-001；T-Perf-01；T-Audit-01。
