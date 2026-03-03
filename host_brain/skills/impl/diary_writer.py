@@ -12,7 +12,11 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from host_brain.core.errors import SCHED_NO_CONTENT
+from host_brain.core.errors import (
+    SCHED_NO_CONTENT,
+    WCANON_PROPOSAL_INVALID,
+    DIARY_EVOLUTION_PROPOSAL_SKIPPED,
+)
 from host_brain.core.ids import now_ms, new_event_id
 
 logger = logging.getLogger(__name__)
@@ -203,6 +207,28 @@ def execute_diary_writer(
         "file_path": file_result.get("path") if file_result else None,
     }
 
+    # ---------------------------------------------------------------------------
+    # drift_suggestion 提取 + Evolution 提案写入（FR-DIARY-002 / TASK-0115）
+    # ---------------------------------------------------------------------------
+    evolution_proposal: dict[str, Any] | None = None
+    canon_world_store = ctx.get("canon_world_store")
+
+    if llm_generator and isinstance(llm_result, dict):
+        drift_suggestion = llm_result.get("drift_suggestion")
+        if drift_suggestion:
+            evolution_proposal = _submit_evolution_proposal(
+                drift_suggestion=drift_suggestion,
+                intent_id=intent_id or event_id,
+                canon_world_store=canon_world_store,
+                ledger=ctx.get("ledger"),
+            )
+        else:
+            logger.debug(
+                "diary_writer: no drift_suggestion in LLM output, skipping evolution proposal "
+                "(reason_code=%s)",
+                DIARY_EVOLUTION_PROPOSAL_SKIPPED,
+            )
+
     return {
         "status": STATUS_EXECUTED,
         "event_id": event_id,
@@ -212,7 +238,130 @@ def execute_diary_writer(
         "diary_entry": diary_entry,
         "file_result": file_result,
         "memory_result": memory_result,
+        "evolution_proposal": evolution_proposal,
         "request_id": request_id,
         "intent_id": intent_id,
         "ts_ms": ts,
     }
+
+
+# ---------------------------------------------------------------------------
+# 私有辅助函数（TASK-0115）
+# ---------------------------------------------------------------------------
+
+def _extract_drift_suggestion(
+    drift_suggestion: Any,
+) -> tuple[str, str, str] | None:
+    """从 LLM 输出的 drift_suggestion 字段提取并校验内容。
+
+    Args:
+        drift_suggestion: LLM 输出中的 drift_suggestion 字段（任意类型）。
+
+    Returns:
+        (doc_id, suggested_body, reason) 三元组；字段不合规时返回 None。
+    """
+    if not isinstance(drift_suggestion, dict):
+        logger.debug("diary_writer: drift_suggestion is not a dict, skipping")
+        return None
+
+    doc_id = str(drift_suggestion.get("doc_id", "")).strip()
+    suggested_body = str(drift_suggestion.get("suggested_body", "")).strip()
+    reason = str(drift_suggestion.get("reason", "")).strip()
+
+    if not doc_id:
+        logger.debug("diary_writer: drift_suggestion missing doc_id, skipping")
+        return None
+    if not suggested_body:
+        logger.debug("diary_writer: drift_suggestion missing suggested_body, skipping")
+        return None
+    if len(reason) > 200:
+        reason = reason[:200]
+
+    # QA 校验：suggested_body 不得含完成性表述
+    from host_brain.core.qa import check_canon_as_fact, FALSE_EXECUTION_PATTERNS
+    for pattern in FALSE_EXECUTION_PATTERNS:
+        if pattern.search(suggested_body):
+            logger.warning(
+                "diary_writer: drift_suggestion.suggested_body contains execution claim, "
+                "discarding (reason_code=%s)",
+                WCANON_PROPOSAL_INVALID,
+            )
+            return None
+
+    return doc_id, suggested_body, reason
+
+
+def _submit_evolution_proposal(
+    *,
+    drift_suggestion: Any,
+    intent_id: str,
+    canon_world_store: Any | None,
+    ledger: Any | None = None,
+) -> dict[str, Any] | None:
+    """提取 drift_suggestion 并写入 canon_proposal_log。
+
+    Args:
+        drift_suggestion: LLM 输出中的 drift_suggestion 字段。
+        intent_id: 日记 intent_id（用于 source_intent_id 串联）。
+        canon_world_store: WorldCanonStore 实例（可选）。
+        ledger: SQLiteLedger 实例（可选，用于记录 WCANON_PROPOSAL_INVALID）。
+
+    Returns:
+        写入成功时返回提案 dict；跳过或失败时返回 None。
+    """
+    extracted = _extract_drift_suggestion(drift_suggestion)
+    if extracted is None:
+        # 字段不合规，记录 WCANON_PROPOSAL_INVALID
+        if ledger is not None and hasattr(ledger, "log_error"):
+            ledger.log_error(
+                request_id=intent_id,
+                stage="diary_evolution",
+                reason_code=WCANON_PROPOSAL_INVALID,
+                detail="drift_suggestion field invalid or contains execution claim",
+            )
+        return None
+
+    doc_id, suggested_body, reason = extracted
+
+    if canon_world_store is None:
+        logger.debug(
+            "diary_writer: canon_world_store not available, skipping evolution proposal "
+            "(reason_code=%s)",
+            DIARY_EVOLUTION_PROPOSAL_SKIPPED,
+        )
+        return None
+
+    proposal_id = f"diary-{intent_id}-{doc_id}"
+    try:
+        row = canon_world_store.submit_proposal(
+            proposal_id=proposal_id,
+            target_doc_id=doc_id,
+            proposed_title=f"日记 Evolution 提案：{doc_id}",
+            proposed_tags=None,
+            proposed_body=suggested_body,
+            proposer_node_id="diary_writer",
+            summary=reason or f"diary evolution proposal for {doc_id}",
+        )
+        # 将 source_intent_id 注入返回 dict（用于审计串联）
+        row["source_intent_id"] = intent_id
+        logger.info(
+            "diary_writer: evolution proposal submitted (proposal_id=%s, doc_id=%s)",
+            proposal_id,
+            doc_id,
+        )
+        return row
+    except Exception as exc:
+        logger.warning(
+            "diary_writer: evolution proposal submission failed: %s "
+            "(reason_code=%s)",
+            exc,
+            WCANON_PROPOSAL_INVALID,
+        )
+        if ledger is not None and hasattr(ledger, "log_error"):
+            ledger.log_error(
+                request_id=intent_id,
+                stage="diary_evolution",
+                reason_code=WCANON_PROPOSAL_INVALID,
+                detail=str(exc),
+            )
+        return None
