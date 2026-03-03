@@ -1580,7 +1580,7 @@ TASK-XXXX 标题
 ## M8 运行时集成闭环（TASK-0107~0110）
 
 > 对应 DevSpec §18；PRD M8（NFR-PERF-001、NFR-REL-001、FR-CORE-004）。
-> 所有任务当前状态：TASK_READY。
+> 所有任务当前状态：DONE（2026-03-03）。
 
 ### TASK-0107 运行时脚本集成：start_host_side.ps1 接入 OBS/MCP 健康探测（M8 P0）
 - 任务描述：扩展 `start_host_side.ps1`，在 `/health` 通过后额外探测 `/obs/metrics` 与 `MCPToolRegistry.health_check()`，将 OBS/MCP 子系统健康状态写入启动结果 JSON，不可用时输出 `startup_warnings` 但不阻断启动。

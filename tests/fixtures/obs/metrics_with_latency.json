@@ -1,0 +1,32 @@
+{
+  "request_id": "req-obs-latency-001",
+  "ts_ms": 1709467200000,
+  "obs_mode": "dev",
+  "governor_decisions": {
+    "total": 100,
+    "approved": 85,
+    "rejected": 12,
+    "degraded": 3,
+    "pseudo_exec_blocked": 2
+  },
+  "retrieval_latency": {
+    "p50_ms": 180,
+    "p95_ms": 420,
+    "sample_count": 100
+  },
+  "hard_snapshot_staleness_ms": 5000,
+  "recent_chains": [],
+  "latency_baseline": {
+    "retrieval_p50_ms": 180,
+    "retrieval_p95_ms": 420,
+    "governor_p50_ms": 12,
+    "governor_p95_ms": 38,
+    "skill_exec_p50_ms": 85,
+    "skill_exec_p95_ms": 210,
+    "sampled_at": "2026-03-03T12:00:00+00:00",
+    "sample_count": 100,
+    "stale": false,
+    "stale_reason_code": null
+  },
+  "debug_trace": null
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -416,3 +417,93 @@ def _issue(*, reason_code: str, failed_artifact: str, detail: str) -> dict[str, 
         "failed_artifact": str(failed_artifact),
         "detail": str(detail),
     }
+
+
+# ---------------------------------------------------------------------------
+# M8 TASK-0110: M8 发布清单生成
+# ---------------------------------------------------------------------------
+
+M8_MIGRATION_DIRS = (
+    "host_brain/audit/migrations",
+    "host_brain/bond/migrations",
+)
+_MIGRATION_EXTS = frozenset({".sql", ".cypher"})
+
+
+def generate_m8_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M8 release manifest.
+
+    Locks:
+    - git commit hash (via git rev-parse HEAD)
+    - migration file hashes (SQL + Cypher)
+    - test_passed_count
+    - latency_baseline_snapshot (from T-PERF-01)
+    - service_registry_snapshot (from ServiceRegistry.all())
+    - generated_at (ISO 8601)
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    # ── git commit hash ──────────────────────────────────────────────────────
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes ────────────────────────────────────────────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M8_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    return {
+        "milestone": "M8",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }
+
+
+def _get_git_commit_hash(repo_root: Path) -> str | None:
+    """Read git commit hash from .git/HEAD (no subprocess dependency)."""
+    try:
+        head_file = repo_root / ".git" / "HEAD"
+        if not head_file.exists():
+            return None
+        head_content = head_file.read_text(encoding="utf-8").strip()
+        # 直接 commit hash（detached HEAD）
+        if not head_content.startswith("ref:"):
+            return head_content if len(head_content) == 40 else None
+        # ref: refs/heads/<branch>
+        ref_path = head_content.split("ref:", 1)[1].strip()
+        ref_file = repo_root / ".git" / ref_path
+        if ref_file.exists():
+            return ref_file.read_text(encoding="utf-8").strip()
+        # packed-refs fallback
+        packed_refs = repo_root / ".git" / "packed-refs"
+        if packed_refs.exists():
+            for line in packed_refs.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.endswith(ref_path):
+                    parts = line.split()
+                    if parts:
+                        return parts[0]
+        return None
+    except Exception:
+        return None

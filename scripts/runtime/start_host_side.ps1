@@ -254,6 +254,39 @@ if (-not (Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds)) {
 $hostPid = [int]$proc.Id
 Set-Content -Path $pidFile -Value ([string]$hostPid) -Encoding ascii
 
+# ── M8 TASK-0107: OBS / MCP 子系统健康探测 ──────────────────────────────
+$obsStatus = "ok"
+$mcpRegistryStatus = "ok"
+$startupWarnings = @()
+
+# 探测 /obs/metrics（期望 HTTP 200）
+$obsMetricsUrl = "http://$probeHost`:$Port/obs/metrics"
+try {
+  $obsResp = Invoke-WebRequest -Uri $obsMetricsUrl -UseBasicParsing -TimeoutSec 5
+  if ($obsResp.StatusCode -lt 200 -or $obsResp.StatusCode -ge 300) {
+    $obsStatus = "degraded"
+    $startupWarnings += "STARTUP_OBS_DEGRADED"
+  }
+} catch {
+  $obsStatus = "degraded"
+  $startupWarnings += "STARTUP_OBS_DEGRADED"
+}
+
+# 探测 MCP 注册表（通过 /health/mcp 端点，若不存在则降级）
+$mcpHealthUrl = "http://$probeHost`:$Port/health/mcp"
+try {
+  $mcpResp = Invoke-WebRequest -Uri $mcpHealthUrl -UseBasicParsing -TimeoutSec 5
+  if ($mcpResp.StatusCode -lt 200 -or $mcpResp.StatusCode -ge 300) {
+    $mcpRegistryStatus = "degraded"
+    $startupWarnings += "STARTUP_MCP_DEGRADED"
+  }
+} catch {
+  # /health/mcp 端点不存在时视为降级（非阻断）
+  $mcpRegistryStatus = "degraded"
+  $startupWarnings += "STARTUP_MCP_DEGRADED"
+}
+# ────────────────────────────────────────────────────────────────────────────
+
 $result = [ordered]@{
   side = "host"
   status = "started"
@@ -266,5 +299,8 @@ $result = [ordered]@{
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices
+  obs_status = $obsStatus
+  mcp_registry_status = $mcpRegistryStatus
+  startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10

@@ -692,12 +692,11 @@ def _trigger_vts_hotkey(
 def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
     """Get existing or create new event loop for sync VTS calls."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop
+        # Python 3.10+：优先获取正在运行的 loop，避免 DeprecationWarning
+        return asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
+        pass
+    # 无正在运行的 loop，创建新的
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop

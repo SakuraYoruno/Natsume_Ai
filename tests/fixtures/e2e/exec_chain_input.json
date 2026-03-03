@@ -1,0 +1,16 @@
+{
+  "request_id": "req-exec-chain-001",
+  "session_id": "sess-exec-001",
+  "user_input": "帮我在桌面创建一个名为 test_note.txt 的文件，内容是 hello",
+  "intent": {
+    "action": "desktop_note",
+    "args": {
+      "filename": "test_note.txt",
+      "content": "hello"
+    },
+    "risk_level": 2
+  },
+  "approval_token": "tok-approval-exec-001",
+  "undo_token": "tok-undo-exec-001",
+  "_comment": "执行链路输入：approval_token + undo 场景"
+}

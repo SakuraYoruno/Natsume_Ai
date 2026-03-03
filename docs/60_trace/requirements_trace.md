@@ -812,8 +812,8 @@
 - DevSpec 落点：DevSpec §18.1.1
 - DevTasks（TASK）：TASK-0107
 - 验收测试（T-xx）：T-RT-01
-- 当前进展（2026-03-03）：DevSpec §18.1.1 工程契约已完备，TASK-0107 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：start_host_side.ps1 新增 /obs/metrics + /health/mcp 探测，obs_status/mcp_registry_status/startup_warnings 写入启动 JSON；errors.py 新增 STARTUP_OBS_DEGRADED/STARTUP_MCP_DEGRADED/E2E_SMOKE_FAILED/PERF_BASELINE_STALE；T-RT-01 全部通过（26 tests）。
+- 覆盖状态：DONE
 
 ## R-82
 - 系统级需求：端到端 Smoke Test——冷启动最小闭环（无外部依赖）+ 执行链路（approval_token+undo）+ 故障注入矩阵（Neo4j/Chroma/LLM/Edge 各自不可用时输出结构稳定）
@@ -822,8 +822,8 @@
 - DevSpec 落点：DevSpec §18.2.1
 - DevTasks（TASK）：TASK-0108
 - 验收测试（T-xx）：T-E2E-01~03
-- 当前进展（2026-03-03）：DevSpec §18.2.1 工程契约已完备，TASK-0108 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：T-E2E-01（冷启动最小闭环）、T-E2E-02（approval_token+undo 执行链路）、T-E2E-03（故障注入矩阵 4 场景）全部通过（22 tests）；fixtures: cold_start_input.json / exec_chain_input.json / fault_injection_matrix.json。
+- 覆盖状态：DONE
 
 ## R-83
 - 系统级需求：性能基线采集——/obs/metrics 新增 latency_baseline 字段（retrieval/governor/skill_exec 的 p50/p95），采样数据过期时标注 PERF_BASELINE_STALE
@@ -832,8 +832,8 @@
 - DevSpec 落点：DevSpec §18.3.1
 - DevTasks（TASK）：TASK-0109
 - 验收测试（T-xx）：T-PERF-01
-- 当前进展（2026-03-03）：DevSpec §18.3.1 工程契约已完备，TASK-0109 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：MetricsCollector.collect_latency_baseline() 实现 retrieval/governor/skill_exec p50/p95 采集；collect() 返回值新增 latency_baseline 字段；T-PERF-01 全部通过（12 tests）。
+- 覆盖状态：DONE
 
 ## R-84
 - 系统级需求：发布清单锁定——生成 M8 release manifest（git hash + migration hashes + 测试通过数 + 性能基线快照 + 服务注册表快照）
@@ -842,5 +842,5 @@
 - DevSpec 落点：DevSpec §18.4.1
 - DevTasks（TASK）：TASK-0110
 - 验收测试（T-xx）：T-REL-01
-- 当前进展（2026-03-03）：DevSpec §18.4.1 工程契约已完备，TASK-0110 已拆解，待实现。
-- 覆盖状态：TASK_READY
+- 当前进展（2026-03-03）：generate_m8_manifest() 实现 git hash + migration hashes + 测试通过数 + 性能基线快照 + 服务注册表快照；release/manifests/m8_release.json 已生成（15 migration 文件）；T-REL-01 全部通过（17 tests）。
+- 覆盖状态：DONE

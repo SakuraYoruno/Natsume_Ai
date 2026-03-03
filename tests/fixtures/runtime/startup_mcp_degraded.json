@@ -1,0 +1,16 @@
+{
+  "side": "host",
+  "status": "started",
+  "pid": 12345,
+  "pid_file": "runtime/host/host.pid",
+  "host": "127.0.0.1",
+  "port": 18080,
+  "health_url": "http://127.0.0.1:18080/health",
+  "env_file": ".env",
+  "stdout_log": "runtime/host/logs/host.stdout.log",
+  "stderr_log": "runtime/host/logs/host.stderr.log",
+  "local_services": null,
+  "obs_status": "ok",
+  "mcp_registry_status": "degraded",
+  "startup_warnings": ["STARTUP_MCP_DEGRADED"]
+}
