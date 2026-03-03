@@ -18,6 +18,7 @@ from host_brain.airlock.sandbox import (
     SandboxConfig,
     SandboxExecResult,
     SandboxExecutor,
+    load_sandbox_config,
 )
 from host_brain.airlock.sanitizer import (
     EgressGateResult,
@@ -48,4 +49,5 @@ __all__ = [
     "SandboxConfig",
     "SandboxExecResult",
     "SandboxExecutor",
+    "load_sandbox_config",
 ]

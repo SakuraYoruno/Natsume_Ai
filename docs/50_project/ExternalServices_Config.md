@@ -20,8 +20,8 @@
 |---|---|---|---|
 | `host.api` | 运行时服务（Host） | 是 | `.env` (`HOST_APP_HOST/PORT`), `scripts/runtime/start_host_side.ps1` |
 | `edge.rpc.gateway` | 运行时服务（Edge） | 是 | `.env` (`EDGE_RPC_HOST/PORT`), `scripts/runtime/start_edge_side.ps1` |
-| `neo4j` | 图数据库 | 是 | `.env` (`BOND_NEO4J_*`), `configs/runtime/local_services.env` |
-| `chroma` | 向量数据库 | 是 | `.env` (`CHROMA_*`), `configs/runtime/local_services.env` |
+| `neo4j` | 图数据库 | 是 | `.env` (`BOND_NEO4J_*`) |
+| `chroma` | 向量数据库 | 是 | `.env` (`CHROMA_*`) |
 | `llm.providers` | 外部 LLM API | 是 | `.env` (`HOST_LLM_PROVIDER`, `*_API_KEY(_REF)`) |
 | `retrieval.embedding` | Embedding 路由 | 是 | `.env` (`RETR_EMBED_*`), `configs/models/embedding_routes.example.json` |
 | `retrieval.reranker` | Reranker 路由 | 是 | `.env` (`RETR_RERANK_*`), `configs/models/reranker_routes.example.json` |

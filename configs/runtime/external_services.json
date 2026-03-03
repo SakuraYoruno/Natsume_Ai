@@ -117,8 +117,7 @@
         "port": 7687
       },
       "config_sources": [
-        ".env.example",
-        "configs/runtime/local_services.env.example"
+        ".env.example"
       ]
     },
     {
@@ -154,8 +153,7 @@
         "url_template": "${CHROMA_ENDPOINT}/api/v2/heartbeat"
       },
       "config_sources": [
-        ".env.example",
-        "configs/runtime/local_services.env.example"
+        ".env.example"
       ]
     },
     {
@@ -225,7 +223,6 @@
       "route_examples_file": "configs/models/embedding_routes.example.json",
       "config_sources": [
         ".env.example",
-        "configs/runtime/local_services.env.example",
         "configs/models/embedding_routes.example.json"
       ]
     },
@@ -247,7 +244,6 @@
       "route_examples_file": "configs/models/reranker_routes.example.json",
       "config_sources": [
         ".env.example",
-        "configs/runtime/local_services.env.example",
         "configs/models/reranker_routes.example.json"
       ]
     },
@@ -268,7 +264,6 @@
       "route_examples_file": "configs/models/recall_routes.example.json",
       "config_sources": [
         ".env.example",
-        "configs/runtime/local_services.env.example",
         "configs/models/recall_routes.example.json"
       ]
     },

@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from edge_client.actuators.speech import SpeechPlaybackQueue
 from edge_client.actuators.tts_engine import (
     AudioPlaybackDevice,
     SoVITSModelManager,
+    TtsConfig,
     make_audio_playback_starter,
     make_sovits_synthesizer,
 )
-from edge_client.actuators.vts_driver import VTubeStudioDriver
+from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
-from edge_client.rpc.event_reporter import EdgeEventReporter
+from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
-from edge_client.senses.asr import AsrService
+from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
 
 
 @dataclass
@@ -95,13 +97,68 @@ class EdgeRuntime:
 def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     """Build runtime components from validated edge configuration."""
 
-    resource_gate = VoiceResourceGate() if config.resource_gate_enabled else None
+    env_lookup = _normalize_env_lookup(os.environ)
+    resource_gate = (
+        VoiceResourceGate(
+            vram_soft_limit_ratio=_parse_float(
+                _env_get(env_lookup, "EDGE_RESOURCE_GATE_VRAM_SOFT_LIMIT_RATIO"),
+                default=0.90,
+                min_value=0.1,
+                max_value=1.0,
+            ),
+            max_fallback_queue_depth=_parse_int(
+                _env_get(env_lookup, "EDGE_RESOURCE_GATE_MAX_FALLBACK_QUEUE_DEPTH"),
+                default=1,
+                min_value=0,
+                max_value=1024,
+            ),
+        )
+        if config.resource_gate_enabled
+        else None
+    )
     voice_rpc = VoiceRpcContract(
         resource_gate=resource_gate,
     )
 
-    tts_model = SoVITSModelManager() if config.tts_enabled else None
-    playback_device = AudioPlaybackDevice() if config.tts_enabled else None
+    tts_cfg = TtsConfig(
+        model_path=_as_text(_env_get(env_lookup, "EDGE_TTS_MODEL_PATH"), "models/gpt_sovits"),
+        device=_as_text(_env_get(env_lookup, "EDGE_TTS_DEVICE"), "cuda"),
+        sample_rate=_parse_int(
+            _env_get(env_lookup, "EDGE_TTS_SAMPLE_RATE"),
+            default=32000,
+            min_value=8000,
+            max_value=96000,
+        ),
+        max_text_length=_parse_int(
+            _env_get(env_lookup, "EDGE_TTS_MAX_TEXT_LENGTH"),
+            default=500,
+            min_value=1,
+            max_value=20000,
+        ),
+        synth_timeout_s=_parse_float(
+            _env_get(env_lookup, "EDGE_TTS_SYNTH_TIMEOUT_S"),
+            default=30.0,
+            min_value=0.1,
+            max_value=600.0,
+        ),
+        ref_audio_path=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_AUDIO_PATH")),
+        ref_text=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_TEXT")),
+        language=_as_text(_env_get(env_lookup, "EDGE_TTS_LANGUAGE"), "ja"),
+    )
+    tts_playback_device_index = _parse_optional_int(
+        _env_get(env_lookup, "EDGE_TTS_PLAYBACK_DEVICE_INDEX"),
+        min_value=0,
+        max_value=4096,
+    )
+    tts_model = SoVITSModelManager(config=tts_cfg) if config.tts_enabled else None
+    playback_device = (
+        AudioPlaybackDevice(
+            sample_rate=tts_cfg.sample_rate,
+            device_index=tts_playback_device_index,
+        )
+        if config.tts_enabled
+        else None
+    )
     synthesizer = make_sovits_synthesizer(tts_model) if tts_model is not None else None
     playback_starter = (
         make_audio_playback_starter(playback_device)
@@ -119,10 +176,87 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         resource_gate=resource_gate,
         available=config.fallback_llm_enabled,
         default_unloaded=(not config.fallback_llm_enabled),
+        model_id=_as_text(_env_get(env_lookup, "EDGE_FALLBACK_LLM_MODEL_ID"), "ollama:3b-q4"),
     )
 
-    vts_driver = VTubeStudioDriver()
-    event_reporter = EdgeEventReporter()
+    vts_cfg = VtsConfig(
+        host=_as_text(_env_get(env_lookup, "EDGE_VTS_HOST"), "localhost"),
+        port=_parse_int(
+            _env_get(env_lookup, "EDGE_VTS_PORT"),
+            default=8001,
+            min_value=1,
+            max_value=65535,
+        ),
+        plugin_name=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_NAME"), "NastumeAi"),
+        plugin_developer=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_DEVELOPER"), "Nastume"),
+        token_path=_as_text(_env_get(env_lookup, "EDGE_VTS_TOKEN_PATH"), ".vts_token"),
+        api_timeout_s=_parse_float(
+            _env_get(env_lookup, "EDGE_VTS_API_TIMEOUT_S"),
+            default=5.0,
+            min_value=0.1,
+            max_value=300.0,
+        ),
+        reconnect=ReconnectConfig(
+            max_attempts=_parse_int(
+                _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),
+                default=10,
+                min_value=1,
+                max_value=1000,
+            ),
+            base_delay_s=_parse_float(
+                _env_get(env_lookup, "EDGE_VTS_RECONNECT_BASE_DELAY_S"),
+                default=1.0,
+                min_value=0.1,
+                max_value=300.0,
+            ),
+            max_delay_s=_parse_float(
+                _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_DELAY_S"),
+                default=16.0,
+                min_value=0.1,
+                max_value=3600.0,
+            ),
+            auto_reconnect=_parse_bool(
+                _env_get(env_lookup, "EDGE_VTS_RECONNECT_AUTO"),
+                default=True,
+            ),
+        ),
+    )
+
+    vts_driver = VTubeStudioDriver(config=vts_cfg)
+    event_reporter = EdgeEventReporter(
+        cache=EdgeEventCache(
+            max_events=_parse_int(
+                _env_get(env_lookup, "EDGE_EVENT_REPORT_MAX_CACHE_EVENTS"),
+                default=1000,
+                min_value=1,
+                max_value=1_000_000,
+            ),
+            max_bytes=_parse_int(
+                _env_get(env_lookup, "EDGE_EVENT_REPORT_MAX_CACHE_BYTES"),
+                default=10 * 1024 * 1024,
+                min_value=1024,
+                max_value=1024 * 1024 * 1024,
+            ),
+        ),
+        max_retry=_parse_int(
+            _env_get(env_lookup, "EDGE_EVENT_REPORT_MAX_RETRY_ATTEMPTS"),
+            default=5,
+            min_value=1,
+            max_value=1000,
+        ),
+        base_delay_s=_parse_float(
+            _env_get(env_lookup, "EDGE_EVENT_REPORT_BASE_RETRY_DELAY_S"),
+            default=1.0,
+            min_value=0.0,
+            max_value=3600.0,
+        ),
+        max_delay_s=_parse_float(
+            _env_get(env_lookup, "EDGE_EVENT_REPORT_MAX_RETRY_DELAY_S"),
+            default=30.0,
+            min_value=0.0,
+            max_value=3600.0,
+        ),
+    )
     voice_pipeline = EdgeVoicePipeline(
         voice_rpc=voice_rpc,
         speech_queue=speech_queue,
@@ -130,7 +264,108 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         vts_driver=vts_driver,
         resource_gate=resource_gate,
     )
-    asr_service = AsrService(rpc=voice_rpc) if config.asr_enabled else None
+    asr_cfg = AsrConfig(
+        model_size=_as_text(_env_get(env_lookup, "EDGE_ASR_MODEL_SIZE"), "large-v3"),
+        device=_as_text(_env_get(env_lookup, "EDGE_ASR_DEVICE"), "cuda"),
+        compute_type=_as_text(_env_get(env_lookup, "EDGE_ASR_COMPUTE_TYPE"), "float16"),
+        beam_size=_parse_int(
+            _env_get(env_lookup, "EDGE_ASR_BEAM_SIZE"),
+            default=5,
+            min_value=1,
+            max_value=64,
+        ),
+        sample_rate=_parse_int(
+            _env_get(env_lookup, "EDGE_ASR_SAMPLE_RATE"),
+            default=16000,
+            min_value=8000,
+            max_value=96000,
+        ),
+        channels=_parse_int(
+            _env_get(env_lookup, "EDGE_ASR_CHANNELS"),
+            default=1,
+            min_value=1,
+            max_value=8,
+        ),
+        chunk_duration_s=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_CHUNK_DURATION_S"),
+            default=0.5,
+            min_value=0.05,
+            max_value=10.0,
+        ),
+        vad_threshold=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_VAD_THRESHOLD"),
+            default=0.5,
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        silence_duration_s=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_SILENCE_DURATION_S"),
+            default=0.8,
+            min_value=0.05,
+            max_value=10.0,
+        ),
+        min_speech_duration_s=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_MIN_SPEECH_DURATION_S"),
+            default=0.3,
+            min_value=0.05,
+            max_value=10.0,
+        ),
+        max_speech_duration_s=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_MAX_SPEECH_DURATION_S"),
+            default=30.0,
+            min_value=1.0,
+            max_value=600.0,
+        ),
+        language=_as_text(_env_get(env_lookup, "EDGE_ASR_LANGUAGE"), "ja"),
+        initial_prompt=_as_optional_text(_env_get(env_lookup, "EDGE_ASR_INITIAL_PROMPT")),
+        recovery=DeviceRecoveryConfig(
+            max_attempts=_parse_int(
+                _env_get(env_lookup, "EDGE_ASR_RECOVERY_MAX_ATTEMPTS"),
+                default=5,
+                min_value=1,
+                max_value=100,
+            ),
+            base_delay_s=_parse_float(
+                _env_get(env_lookup, "EDGE_ASR_RECOVERY_BASE_DELAY_S"),
+                default=1.0,
+                min_value=0.1,
+                max_value=120.0,
+            ),
+            max_delay_s=_parse_float(
+                _env_get(env_lookup, "EDGE_ASR_RECOVERY_MAX_DELAY_S"),
+                default=8.0,
+                min_value=0.1,
+                max_value=600.0,
+            ),
+            auto_recover=_parse_bool(
+                _env_get(env_lookup, "EDGE_ASR_RECOVERY_AUTO"),
+                default=True,
+            ),
+            try_alternate_devices=_parse_bool(
+                _env_get(env_lookup, "EDGE_ASR_RECOVERY_TRY_ALTERNATE_DEVICES"),
+                default=True,
+            ),
+        ),
+    )
+    asr_audio_capture = AudioStreamCapture(
+        sample_rate=asr_cfg.sample_rate,
+        channels=asr_cfg.channels,
+        chunk_duration_s=asr_cfg.chunk_duration_s,
+        device_index=_parse_optional_int(
+            _env_get(env_lookup, "EDGE_ASR_DEVICE_INDEX"),
+            min_value=0,
+            max_value=4096,
+        ),
+    )
+    asr_service = (
+        AsrService(
+            rpc=voice_rpc,
+            config=asr_cfg,
+            audio_capture=asr_audio_capture,
+        )
+        if config.asr_enabled
+        else None
+    )
     if asr_service is not None:
         asr_service.set_rpc_event_callback(voice_pipeline.on_asr_rpc_result)
 
@@ -147,3 +382,78 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
     )
+
+
+def _normalize_env_lookup(values: Mapping[str, Any]) -> dict[str, Any]:
+    lookup: dict[str, Any] = {}
+    for raw_key, raw_value in values.items():
+        key = str(raw_key)
+        lookup[key] = raw_value
+        lookup[key.upper()] = raw_value
+        lookup[key.lower()] = raw_value
+    return lookup
+
+
+def _env_get(lookup: Mapping[str, Any], key: str) -> Any:
+    if key in lookup:
+        return lookup.get(key)
+    upper = key.upper()
+    if upper in lookup:
+        return lookup.get(upper)
+    lower = key.lower()
+    if lower in lookup:
+        return lookup.get(lower)
+    return None
+
+
+def _as_text(value: Any, default: str) -> str:
+    text = str(value or "").strip()
+    return text if text else str(default)
+
+
+def _as_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if text else None
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    if value is None or str(value).strip() == "":
+        return int(default)
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        return int(default)
+    return min(max(parsed, min_value), max_value)
+
+
+def _parse_optional_int(value: Any, *, min_value: int, max_value: int) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        return None
+    if parsed < min_value or parsed > max_value:
+        return None
+    return parsed
+
+
+def _parse_float(value: Any, *, default: float, min_value: float, max_value: float) -> float:
+    if value is None or str(value).strip() == "":
+        return float(default)
+    try:
+        parsed = float(str(value).strip())
+    except ValueError:
+        return float(default)
+    return min(max(parsed, min_value), max_value)
