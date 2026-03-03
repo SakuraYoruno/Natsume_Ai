@@ -1,0 +1,12 @@
+{
+  "provider_id": "github",
+  "tool_id": "search_issues",
+  "name": "Search Issues",
+  "description": "Search GitHub issues",
+  "access_level": "PUBLIC",
+  "risk_level": "LOW",
+  "reversible": true,
+  "version": "1.0.0",
+  "schema_hash": "",
+  "domain_tags": ["mcp", "github"]
+}

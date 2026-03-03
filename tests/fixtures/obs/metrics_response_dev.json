@@ -1,0 +1,37 @@
+{
+  "request_id": "req_obs_001",
+  "ts_ms": 1800000000100,
+  "obs_mode": "dev",
+  "governor_decisions": {
+    "total": 1,
+    "approved": 1,
+    "rejected": 0,
+    "degraded": 0,
+    "pseudo_exec_blocked": 0
+  },
+  "retrieval_latency": {
+    "p50_ms": 42,
+    "p95_ms": 42,
+    "sample_count": 1
+  },
+  "hard_snapshot_staleness_ms": null,
+  "recent_chains": [
+    {
+      "request_id": "req_obs_001",
+      "intent_id": "intent_obs_001",
+      "ts_ms": 1800000000000,
+      "decision": "APPROVE",
+      "reason_code": null,
+      "skill_name": "proactive_talk"
+    }
+  ],
+  "debug_trace": {
+    "intent_draft": {"action": "chat", "args": {"text": "hello"}},
+    "rules_hit": [],
+    "skill_params": {
+      "skill_name": "proactive_talk",
+      "result_status": "SUCCESS",
+      "result_code": null
+    }
+  }
+}
