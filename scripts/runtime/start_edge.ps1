@@ -71,6 +71,68 @@ function Wait-Port {
   return $false
 }
 
+function Parse-Bool {
+  param(
+    [object]$Value,
+    [bool]$Default = $false
+  )
+  if ($null -eq $Value) {
+    return [bool]$Default
+  }
+  $text = ([string]$Value).Trim().ToLowerInvariant()
+  if (-not $text) {
+    return [bool]$Default
+  }
+  if ($text -in @("1", "true", "yes", "on")) {
+    return $true
+  }
+  if ($text -in @("0", "false", "no", "off")) {
+    return $false
+  }
+  return [bool]$Default
+}
+
+function Start-VtsViaSteam {
+  param(
+    [string]$SteamAppId
+  )
+  if (-not $SteamAppId) {
+    return [ordered]@{
+      status = "launch_failed"
+      detail = "EDGE_VTS_STEAM_APP_ID is empty"
+      steam_uri = $null
+    }
+  }
+
+  $steamUri = "steam://rungameid/$SteamAppId"
+
+  try {
+    Start-Process -FilePath $steamUri -ErrorAction Stop | Out-Null
+    return [ordered]@{
+      status = "launched"
+      detail = "launched via steam protocol handler"
+      steam_uri = $steamUri
+    }
+  } catch {
+    $firstError = $_.Exception.Message
+    try {
+      Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "start", "", $steamUri) -WindowStyle Hidden -ErrorAction Stop | Out-Null
+      return [ordered]@{
+        status = "launched"
+        detail = "launched via cmd start fallback"
+        steam_uri = $steamUri
+      }
+    } catch {
+      $secondError = $_.Exception.Message
+      return [ordered]@{
+        status = "launch_failed"
+        detail = "steam launch failed: $firstError | fallback failed: $secondError"
+        steam_uri = $steamUri
+      }
+    }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
@@ -102,6 +164,38 @@ if ($envValues.ContainsKey("EDGE_RPC_PORT")) {
   $port = [int]$envValues["EDGE_RPC_PORT"]
 } elseif ($env:EDGE_RPC_PORT) {
   $port = [int]$env:EDGE_RPC_PORT
+}
+
+$vtsPort = 8001
+if ($envValues.ContainsKey("VTS_API_PORT")) {
+  $vtsPort = [int]$envValues["VTS_API_PORT"]
+} elseif ($env:VTS_API_PORT) {
+  $vtsPort = [int]$env:VTS_API_PORT
+}
+
+$vtsAutoStart = $false
+if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART")) {
+  $vtsAutoStart = Parse-Bool -Value $envValues["EDGE_VTS_AUTOSTART"] -Default $false
+} elseif ($env:EDGE_VTS_AUTOSTART) {
+  $vtsAutoStart = Parse-Bool -Value $env:EDGE_VTS_AUTOSTART -Default $false
+}
+
+$vtsSteamAppId = "1325860"  # VTube Studio on Steam
+if ($envValues.ContainsKey("EDGE_VTS_STEAM_APP_ID")) {
+  $value = [string]$envValues["EDGE_VTS_STEAM_APP_ID"]
+  if ($value.Trim()) { $vtsSteamAppId = $value.Trim() }
+} elseif ($env:EDGE_VTS_STEAM_APP_ID) {
+  $value = [string]$env:EDGE_VTS_STEAM_APP_ID
+  if ($value.Trim()) { $vtsSteamAppId = $value.Trim() }
+}
+
+$vtsAutoStartWaitSeconds = 35
+if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
+  $candidate = [int]$envValues["EDGE_VTS_AUTOSTART_WAIT_SECONDS"]
+  if ($candidate -gt 0) { $vtsAutoStartWaitSeconds = $candidate }
+} elseif ($env:EDGE_VTS_AUTOSTART_WAIT_SECONDS) {
+  $candidate = [int]$env:EDGE_VTS_AUTOSTART_WAIT_SECONDS
+  if ($candidate -gt 0) { $vtsAutoStartWaitSeconds = $candidate }
 }
 
 if (Test-Path -Path $pidFile) {
@@ -176,6 +270,8 @@ $edgeHost = "127.0.0.1"
 $asrStatus = "ok"
 $ttsStatus = "ok"
 $vtsStatus = "ok"
+$vtsAutoStartStatus = "skipped"
+$vtsAutoStartDetail = "EDGE_VTS_AUTOSTART disabled"
 $startupWarnings = @()
 
 # ASR 健康探测（/health/asr 或 /asr/health）
@@ -202,12 +298,35 @@ try {
   $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
 }
 
-# VTS 健康探测（VTube Studio API 端口，默认 8001）
-$vtsPort = 8001
-if ($envValues.ContainsKey("VTS_API_PORT")) { $vtsPort = [int]$envValues["VTS_API_PORT"] }
+# VTS 自启动（可选）：通过 Steam 拉起 VTube Studio
+if ($vtsAutoStart) {
+  $existingVtsPid = Get-ListeningPid -Port $vtsPort
+  if ($existingVtsPid) {
+    $vtsAutoStartStatus = "already_running"
+    $vtsAutoStartDetail = "vts already listening on port $vtsPort (pid=$existingVtsPid)"
+  } else {
+    $launch = Start-VtsViaSteam -SteamAppId $vtsSteamAppId
+    $vtsAutoStartStatus = [string]$launch.status
+    $vtsAutoStartDetail = [string]$launch.detail
+    if ($vtsAutoStartStatus -eq "launched") {
+      if (Wait-Port -Port $vtsPort -TimeoutSeconds $vtsAutoStartWaitSeconds) {
+        $vtsAutoStartStatus = "ready"
+        $vtsAutoStartDetail = "vts listens on port $vtsPort after steam launch"
+      } else {
+        $vtsAutoStartStatus = "launch_timeout"
+        $vtsAutoStartDetail = "steam launch requested but port $vtsPort not ready within $vtsAutoStartWaitSeconds seconds"
+      }
+    }
+  }
+}
+
+# VTS 健康探测（VTube Studio API 端口）
 $vtsConn = Get-NetTCPConnection -LocalPort $vtsPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($null -eq $vtsConn) {
-  $vtsStatus = "degraded"; $startupWarnings += "STARTUP_VTS_DEGRADED"
+  $vtsStatus = "degraded"
+  if (-not ($startupWarnings -contains "STARTUP_VTS_DEGRADED")) {
+    $startupWarnings += "STARTUP_VTS_DEGRADED"
+  }
 }
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -222,6 +341,10 @@ $result = [ordered]@{
   asr_status = $asrStatus
   tts_status = $ttsStatus
   vts_status = $vtsStatus
+  vts_port = $vtsPort
+  vts_autostart_enabled = $vtsAutoStart
+  vts_autostart_status = $vtsAutoStartStatus
+  vts_autostart_detail = $vtsAutoStartDetail
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4
