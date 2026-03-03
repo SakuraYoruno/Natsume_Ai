@@ -735,6 +735,37 @@ class SQLiteLedger:
         payload = {key: row.get(key) for key in CANON_CHANGE_COLUMNS}
         self._insert("canon_change_log", payload)
 
+    def get_proposal(self, proposal_id: str) -> dict[str, Any] | None:
+        """按 proposal_id 查询 canon_proposal_log 最新一条记录。"""
+        row = self._conn.execute(
+            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._decode_row("canon_proposal_log", row)
+
+    def update_proposal_status(
+        self,
+        proposal_id: str,
+        *,
+        new_status: str,
+        ts_ms: int | None = None,
+    ) -> bool:
+        """更新 canon_proposal_log 中指定 proposal_id 的 status 字段。
+
+        只允许从 pending 流转到 approved / rejected，或从 approved 流转到 APPLIED。
+        返回 True 表示更新成功，False 表示未找到记录。
+        """
+        update_ts = int(ts_ms if ts_ms is not None else now_ms())
+        with self._write_lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    "UPDATE canon_proposal_log SET status = ?, ts_ms = ? WHERE proposal_id = ?",
+                    (new_status, update_ts, proposal_id),
+                )
+        return cursor.rowcount > 0
+
     def upsert_world_canon_doc(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in WORLD_CANON_DOC_COLUMNS}
         if not payload.get("doc_id"):
