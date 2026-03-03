@@ -1,0 +1,13 @@
+{
+  "proposal_id": "test-proposal-wc001-v2",
+  "canon_kind": "world",
+  "target_id": "wc-001-system-terms",
+  "base_version": 1,
+  "proposed_version": 2,
+  "proposer_node_id": "test.canon_evolution",
+  "summary": "补充 Host Brain 与 Edge Client 的协作约束说明",
+  "status": "pending",
+  "proposed_title": "系统核心术语表（修订版）",
+  "proposed_tags": ["system", "terms", "architecture", "revision"],
+  "proposed_body": "Host Brain 是夏目的核心认知节点，负责意图解析、记忆管理和 Canon 治理。Edge Client 是夏目的感知与表达节点，负责 ASR/TTS/VTS 驱动及 RPC 上报。两者通过 RPC 协议协作，Host Brain 为单写者，Edge Client 为只读引用方。"
+}

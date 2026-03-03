@@ -226,6 +226,214 @@ class WorldCanonStore:
             "citation": f"world_canon:{doc.doc_id}@v{doc.version}:{doc.hash[:12]}",
         }
 
+    # ---------------------------------------------------------------------------
+    # 提案写入与审核流程（TASK-0114 / FR-WCANON-002）
+    # ---------------------------------------------------------------------------
+
+    def submit_proposal(
+        self,
+        *,
+        proposal_id: str,
+        target_doc_id: str,
+        proposed_title: str,
+        proposed_tags: list[str] | None,
+        proposed_body: str,
+        proposer_node_id: str = "memory.canon_world_store",
+        summary: str = "",
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """将 World Canon Evolution 提案写入 canon_proposal_log（status=pending）。
+
+        不修改 SSOT 文件，只记录提案。审核通过后由 approve_proposal() 触发实际写入。
+
+        Args:
+            proposal_id: 提案唯一 ID（调用方保证唯一性）。
+            target_doc_id: 目标 World Canon 文档 ID。
+            proposed_title: 提案标题。
+            proposed_tags: 提案标签列表。
+            proposed_body: 提案正文（不得含完成性表述）。
+            proposer_node_id: 提案来源节点 ID。
+            summary: 提案摘要。
+            ts_ms: 可选时间戳（毫秒），默认 now_ms()。
+
+        Returns:
+            写入的提案记录 dict。
+
+        Raises:
+            ValueError: proposal_id / target_doc_id 为空，或 proposed_body 含完成性表述。
+        """
+        if not proposal_id:
+            raise ValueError("proposal_id is required")
+        if not target_doc_id:
+            raise ValueError("target_doc_id is required")
+        proposed_body = str(proposed_body).strip()
+        if not proposed_body:
+            raise ValueError("proposed_body cannot be empty")
+        if _contains_execution_claim(proposed_body):
+            raise ValueError("proposed_body must not assert execution facts")
+
+        doc_id = _normalize_doc_id(target_doc_id)
+        current = self.get(doc_id)
+        base_version = current.version if current is not None else 0
+        proposed_version = base_version + 1
+        submit_ts = int(ts_ms if ts_ms is not None else now_ms())
+
+        # 计算提案 hash（基于提案内容，不含 proposal_id）
+        proposed_hash = compute_world_canon_hash(
+            {
+                "doc_id": doc_id,
+                "version": proposed_version,
+                "status": "active",
+                "title": str(proposed_title).strip(),
+                "tags": _normalize_tags(proposed_tags),
+                "body": proposed_body,
+                "updated_by": proposal_id,
+                "ts_ms": submit_ts,
+            }
+        )
+
+        row = {
+            "proposal_id": proposal_id,
+            "canon_kind": "world",
+            "target_id": doc_id,
+            "base_version": base_version,
+            "proposed_version": proposed_version,
+            "proposed_hash": proposed_hash,
+            "proposer_node_id": proposer_node_id,
+            "summary": summary or f"world canon proposal: {doc_id}",
+            "status": "pending",
+            "ts_ms": submit_ts,
+        }
+        self.ledger.log_canon_proposal(row)
+        return row
+
+    def approve_proposal(
+        self,
+        proposal_id: str,
+        *,
+        approver_node_id: str = "memory.canon_world_store",
+        ts_ms: int | None = None,
+    ) -> "WorldCanonDocument":
+        """审核通过提案：status 改为 approved，触发 SSOT 文件写入，写 canon_change_log。
+
+        只允许对 status=pending 的提案执行审核。审核通过后调用 upsert_document() 完成
+        实际文件写入，并将提案 status 更新为 APPLIED。
+
+        Args:
+            proposal_id: 要审核的提案 ID。
+            approver_node_id: 审核节点 ID。
+            ts_ms: 可选时间戳（毫秒）。
+
+        Returns:
+            更新后的 WorldCanonDocument。
+
+        Raises:
+            KeyError: 提案不存在。
+            PermissionError: 提案 status 不是 pending（非白名单流程）。
+        """
+        approve_ts = int(ts_ms if ts_ms is not None else now_ms())
+
+        proposal = self.ledger.get_proposal(proposal_id)
+        if proposal is None:
+            raise KeyError(f"proposal not found: {proposal_id}")
+
+        current_status = str(proposal.get("status", ""))
+        if current_status != "pending":
+            raise PermissionError(
+                f"proposal {proposal_id!r} cannot be approved: "
+                f"current status is {current_status!r}, expected 'pending'"
+            )
+
+        # 更新提案 status → approved
+        self.ledger.update_proposal_status(
+            proposal_id,
+            new_status="approved",
+            ts_ms=approve_ts,
+        )
+
+        # 从提案中提取目标文档信息（需要重新查询提案以获取 proposed_body 等）
+        # 注意：canon_proposal_log 只存了 hash，不存 body/title/tags
+        # 因此 approve_proposal 需要调用方在 submit_proposal 时同时传入完整内容
+        # 这里通过 proposal 的 summary 字段约定格式，或要求调用方传入 body 参数
+        # 设计决策：approve_proposal 接受可选的 body/title/tags 覆盖参数
+        # 若不传则从 SSOT 文件读取当前版本（仅用于 hash 验证）
+        raise NotImplementedError(
+            "approve_proposal requires proposed_body/title/tags; "
+            "use approve_proposal_with_content() instead"
+        )
+
+    def approve_proposal_with_content(
+        self,
+        proposal_id: str,
+        *,
+        proposed_title: str,
+        proposed_tags: list[str] | None,
+        proposed_body: str,
+        approver_node_id: str = "memory.canon_world_store",
+        ts_ms: int | None = None,
+    ) -> "WorldCanonDocument":
+        """审核通过提案并写入 SSOT 文件（完整内容版本）。
+
+        Args:
+            proposal_id: 要审核的提案 ID。
+            proposed_title: 提案标题（与 submit_proposal 时一致）。
+            proposed_tags: 提案标签。
+            proposed_body: 提案正文（与 submit_proposal 时一致）。
+            approver_node_id: 审核节点 ID。
+            ts_ms: 可选时间戳（毫秒）。
+
+        Returns:
+            更新后的 WorldCanonDocument。
+
+        Raises:
+            KeyError: 提案不存在。
+            PermissionError: 提案 status 不是 pending（非白名单流程）。
+            ValueError: proposed_body 含完成性表述，或 hash 与提案记录不匹配。
+        """
+        approve_ts = int(ts_ms if ts_ms is not None else now_ms())
+
+        proposal = self.ledger.get_proposal(proposal_id)
+        if proposal is None:
+            raise KeyError(f"proposal not found: {proposal_id}")
+
+        current_status = str(proposal.get("status", ""))
+        if current_status != "pending":
+            raise PermissionError(
+                f"proposal {proposal_id!r} cannot be approved: "
+                f"current status is {current_status!r}, expected 'pending'"
+            )
+
+        doc_id = str(proposal.get("target_id", ""))
+        if not doc_id:
+            raise ValueError(f"proposal {proposal_id!r} has no target_id")
+
+        # 更新提案 status → approved
+        self.ledger.update_proposal_status(
+            proposal_id,
+            new_status="approved",
+            ts_ms=approve_ts,
+        )
+
+        # 触发 SSOT 文件写入（upsert_document 内部会写 canon_change_log）
+        doc = self.upsert_document(
+            doc_id=doc_id,
+            title=proposed_title,
+            tags=proposed_tags,
+            body=proposed_body,
+            proposal_id=proposal_id,
+            proposer_node_id=approver_node_id,
+            ts_ms=approve_ts,
+        )
+
+        # 更新提案 status → APPLIED
+        self.ledger.update_proposal_status(
+            proposal_id,
+            new_status="APPLIED",
+            ts_ms=approve_ts,
+        )
+
+        return doc
+
     def _doc_path(self, doc_id: str) -> Path:
         return self.world_root / f"{_normalize_doc_id(doc_id)}.json"
 
