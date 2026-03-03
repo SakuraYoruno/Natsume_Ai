@@ -7,13 +7,18 @@ from host_brain.channels.vts import (
     S_AVATAR_EXPRESSION_MAP,
     S_AVATAR_TALK_GATE,
     STATUS_APPLIED,
+    STATUS_DEGRADED,
     STATUS_REJECTED,
     TALK_END,
     TALK_START,
     request_talk_gate,
     resolve_vts_expression,
 )
-from host_brain.core.errors import AVATAR_FREE_ACTION_BLOCKED, AVATAR_TAG_INVALID
+from host_brain.core.errors import (
+    AVATAR_FREE_ACTION_BLOCKED,
+    AVATAR_TAG_INVALID,
+    VTS_DEGRADED_FALLBACK,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -107,11 +112,13 @@ class TestAvatarContract(unittest.TestCase):
             ts_ms=self.now_ms + 5,
         )
 
-        self.assertFalse(invalid.success)
-        self.assertEqual(STATUS_REJECTED, invalid.status)
-        self.assertEqual(AVATAR_TAG_INVALID, invalid.reason_code)
+        # 未知 tag（dance_mode）→ DEGRADED 降级到 neutral（success=True，有 reason_code）
+        self.assertTrue(invalid.success)
+        self.assertEqual(STATUS_DEGRADED, invalid.status)
+        self.assertEqual(VTS_DEGRADED_FALLBACK, invalid.reason_code)
         self.assertEqual(S_AVATAR_EXPRESSION_MAP, invalid.stage)
 
+        # 自由动作参数 → 始终 REJECTED（success=False）
         self.assertFalse(blocked.success)
         self.assertEqual(STATUS_REJECTED, blocked.status)
         self.assertEqual(AVATAR_FREE_ACTION_BLOCKED, blocked.reason_code)
@@ -119,7 +126,7 @@ class TestAvatarContract(unittest.TestCase):
 
         self.assertEqual(2, len(self.ledger.avatar_action_log))
         first, second = self.ledger.avatar_action_log
-        self.assertEqual(AVATAR_TAG_INVALID, first["reason_code"])
+        self.assertEqual(VTS_DEGRADED_FALLBACK, first["reason_code"])
         self.assertEqual(AVATAR_FREE_ACTION_BLOCKED, second["reason_code"])
 
 

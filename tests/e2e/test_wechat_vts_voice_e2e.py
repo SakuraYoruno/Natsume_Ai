@@ -30,6 +30,7 @@ from host_brain.channels.wechat import (
 from host_brain.channels.vts import (
     EMOTION_TO_EXPRESSION_ID,
     STATUS_APPLIED,
+    STATUS_DEGRADED,
     STATUS_REJECTED,
     TALK_END,
     TALK_START,
@@ -40,6 +41,7 @@ from host_brain.core.errors import (
     AVATAR_TAG_INVALID,
     TRUST_LOW,
     VTS_CONNECTION_FAILED,
+    VTS_DEGRADED_FALLBACK,
     TTS_MODEL_UNAVAILABLE,
 )
 from host_brain.core.ids import new_request_id
@@ -666,16 +668,17 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             self.assertEqual(expected_expr, result.expression_id, f"{emotion_tag} 表情 ID 不匹配")
 
     def test_15_vts_invalid_emotion_rejected_in_e2e(self) -> None:
-        """T-E2E-WeChat-01.15: E2E 链路中无效 emotion_tag 被拒绝。"""
+        """T-E2E-WeChat-01.15: E2E 链路中无效 emotion_tag 降级到 neutral（DEGRADED）。"""
         result = resolve_vts_expression(
             emotion_tag="INVALID_EMOTION",
             ledger=self.ledger,
             request_id="req_e2e_vts_invalid",
             ts_ms=self.now_ms,
         )
-        self.assertFalse(result.success)
-        self.assertEqual(STATUS_REJECTED, result.status)
-        self.assertEqual(AVATAR_TAG_INVALID, result.reason_code)
+        # 未知 tag 降级到 neutral fallback（success=True，reason_code=VTS_DEGRADED_FALLBACK）
+        self.assertTrue(result.success)
+        self.assertEqual(STATUS_DEGRADED, result.status)
+        self.assertEqual(VTS_DEGRADED_FALLBACK, result.reason_code)
 
     # ─────────────────────────────────────────────
     # Fixture 验证

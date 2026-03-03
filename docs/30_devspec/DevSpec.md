@@ -1349,13 +1349,241 @@ energy_cost: low
 
 ---
 
+## 17. M7 可观测 + MCP + 语音深化（工程契约）
+
+> 对应 PRD §4.16（FR-OBS）、§4.18（FR-MCP）、§4.19（FR-VOICE）。
+> 当前状态：PRD_READY → 本章节完成后进入 SPEC_READY。
+
+---
+
+### 17.1 可观测与运维（FR-OBS-001/002）
+
+#### 17.1.1 关键指标面板（FR-OBS-001）
+
+**指标采集点（必须）**：
+- `governor_decision_total`：按 decision（APPROVE/REJECT/CONFIRM_REQUIRED）+ reason_code 分组计数。
+- `pseudo_exec_violation_total`：QA 拦截的伪执行宣告次数（reason_code=PSEUDO_EXEC_VIOLATION）。
+- `retrieval_evidence_count`：每次召回融合的 evidence 候选数（p50/p95）。
+- `hard_snapshot_age_ms`：Hard Snapshot 距上次更新的时间差（可观测 staleness）。
+- `chain_summary_count`：最近 N 条链路摘要（request_id/intent_id/decision/stage/ts_ms）。
+
+**面板接口**：
+```
+GET /obs/metrics
+→ {
+    "governor_decisions": {"APPROVE": int, "REJECT": int, "CONFIRM_REQUIRED": int},
+    "top_reject_codes": [{"reason_code": str, "count": int}],
+    "pseudo_exec_violations": int,
+    "retrieval_p50": float,
+    "hard_snapshot_age_ms": int,
+    "recent_chains": [{"request_id": str, "decision": str, "stage": str, "ts_ms": int}]
+  }
+```
+
+**日志字段对齐**：所有指标必须可通过 `request_id` / `intent_id` 串联到 SQLite Ledger。
+
+**验收测试编号**：T-OBS-01（指标面板结构稳定 + request_id 串联可回放）
+
+#### 17.1.2 开发/生产模式差异（FR-OBS-002）
+
+**模式切换**：通过 `OBS_MODE=dev|prod` 环境变量控制（或 config 字段）。
+
+**行为差异**：
+- `dev` 模式：`/obs/metrics` 额外返回 `debug_trace`（含 LLM 原始 intent_draft、Governor 规则命中路径、Skill 执行参数）。
+- `prod` 模式：`debug_trace` 字段不返回（或返回 null）；仅保留 `user_facing_hint`。
+
+**错误码**：
+- `OBS_MODE_INVALID`：obs_mode 值不合法。
+
+**验收测试编号**：T-OBS-02（切换模式后 debug_trace 字段按预期出现/消失；不影响裁决与审计事实）
+
+---
+
+### 17.2 MCP Provider 治理（FR-MCP-001）
+
+#### 17.2.1 ToolMeta 同步与分级
+
+**ToolMeta Schema**：
+```json
+{
+  "provider_id": "string",
+  "tool_id": "string",
+  "name": "string",
+  "description": "string",
+  "access_level": "READ | WRITE",
+  "risk_level": 1,
+  "reversible": true,
+  "requires_token": false,
+  "schema_version": "string",
+  "synced_at_ms": 0
+}
+```
+
+**同步规则**：
+- MCP provider 暴露的工具必须先同步为 ToolMeta（仅元数据），不得直接调用。
+- ToolMeta 写入 `mcp_tool_registry`（SQLite 表），变更写 `mcp_sync_log`（可回放）。
+
+#### 17.2.2 ToolBroker 单入口
+
+**调用链**：`intent_draft.mcp_call → ToolBroker → Governor gate → Token（WRITE 必须）→ MCP SDK → Audit`
+
+**审计字段**（写入 `mcp_exec_log`）：
+```json
+{
+  "request_id": "string",
+  "intent_id": "string",
+  "provider_id": "string",
+  "tool_id": "string",
+  "access_level": "READ | WRITE",
+  "decision": "APPROVE | REJECT",
+  "reason_code": "string | null",
+  "evidence_ref": "string",
+  "ts_ms": 0
+}
+```
+
+**门禁规则**：
+- `access_level=WRITE` 且无 approval_token → `reason_code=TOKEN_REQUIRED`，拒绝。
+- `access_level=WRITE` 且 token 未 APPROVE → `reason_code=TOKEN_NOT_APPROVED`，拒绝。
+- AIRLOCK 出站最小化：MCP 调用参数必须经 AIRLOCK 脱敏（敏感字段不出站）。
+
+**错误码**：
+- `MCP_TOOL_NOT_REGISTERED`：工具未在 ToolMeta 注册。
+- `MCP_WRITE_TOKEN_REQUIRED`：WRITE 操作缺少 token。
+- `MCP_PROVIDER_UNAVAILABLE`：provider 不可达，降级。
+
+**验收测试编号**：
+- T-MCP-01（WRITE 无 token → TOKEN_REQUIRED 拒绝 + 审计可回放）
+- T-MCP-02（READ 无 token → 正常执行 + 审计可回放）
+- T-MCP-03（provider 不可达 → MCP_PROVIDER_UNAVAILABLE 降级 + 结构稳定）
+
+---
+
+### 17.3 语音链路深化（FR-VOICE-001~005）
+
+#### 17.3.1 ASR 事件化上送（FR-VOICE-001）
+
+**事件 Schema**（Edge→Host RPC）：
+```json
+{
+  "event_type": "asr_transcript",
+  "request_id": "string",
+  "session_id": "string",
+  "text": "string",
+  "confidence": 0.95,
+  "is_final": true,
+  "ts_start_ms": 0,
+  "ts_end_ms": 0,
+  "alternates": []
+}
+```
+
+**约束**：
+- `confidence < 0.6` 时必须显式标注 `low_confidence=true`，Host 可选择降级处理。
+- 事件写入 `voice_event_log`（含 request_id 串联）。
+
+**错误码**：`ASR_LOW_CONFIDENCE`、`ASR_UNAVAILABLE`
+
+**验收测试编号**：T-VOICE-01（ASR 事件结构稳定 + 低置信度标注 + 审计可回放）
+
+#### 17.3.2 TTS 合成与播报队列（FR-VOICE-002）
+
+**下发 Schema**（Host→Edge RPC）：
+```json
+{
+  "request_id": "string",
+  "intent_id": "string",
+  "text": "string",
+  "emotion_tag": "NEUTRAL | HAPPY | SAD | ANGRY | SURPRISED | THINKING",
+  "priority": 1,
+  "interruptible": true
+}
+```
+
+**播报队列规则**：
+- 队列按 priority 排序；同优先级 FIFO。
+- `interruptible=true` 的任务可被 Barge-in 打断。
+- 播报完成/打断后写 `voice_event_log`（含 reason_code 若失败）。
+
+**错误码**：`TTS_MODEL_UNAVAILABLE`、`TTS_QUEUE_FULL`、`TTS_INTERRUPTED`
+
+**验收测试编号**：T-VOICE-02（TTS 下发结构稳定 + 队列优先级 + 失败可解释）
+
+#### 17.3.3 强交互可打断 Barge-in（FR-VOICE-003）
+
+**触发条件**：ASR 检测到用户开口（`is_speaking=true`）时，Edge 立即发送 `barge_in` 事件。
+
+**Host 处理**：
+- 收到 `barge_in` → 向 Edge 发送 `tts_interrupt` 指令 → 写 `voice_event_log`（event_type=barge_in）。
+- 打断不构成任何执行事实或写入事实（reason_code=BARGE_IN_INTERRUPTED）。
+
+**验收测试编号**：T-VOICE-03（打断立即生效 + 审计记录 + ASR 不被阻塞）
+
+#### 17.3.4 Edge 兜底小模型（FR-VOICE-004）
+
+**触发条件**：Host 主链路不可用（Cloud LLM 超时/不可达）且 Edge 兜底模型已加载。
+
+**约束**：
+- 兜底输出必须标记 `draft_only=true`，不得包含裁决或执行事实宣告。
+- 默认卸载（`ollama_loaded=false`），按需加载（触发后 ≤30s 内可用）。
+- 不可用时 `reason_code=FALLBACK_MODEL_UNAVAILABLE`，快速失败回退到 Host 兜底口径。
+
+**错误码**：`FALLBACK_MODEL_UNAVAILABLE`、`FALLBACK_OUTPUT_DRAFT_ONLY`
+
+**验收测试编号**：T-VOICE-04（兜底输出标记 draft_only + 不可用时快速失败 + 结构稳定）
+
+#### 17.3.5 Edge 资源闸门（FR-VOICE-005）
+
+**优先级矩阵**：
+
+| 优先级 | 任务 | 抢占规则 |
+|--------|------|---------|
+| P1（最高）| ASR 采集 | 不可被抢占 |
+| P2 | 音频播放 | 可被 P1 打断 |
+| P3 | TTS 合成 | 可被 P1/P2 打断 |
+| P4（最低）| 兜底 LLM 推理 | 可被任意高优先级抢占 |
+
+**资源闸门 Schema**（健康快照）：
+```json
+{
+  "asr_active": true,
+  "playback_active": false,
+  "tts_synthesizing": false,
+  "fallback_llm_loaded": false,
+  "gpu_utilization_pct": 45,
+  "current_priority": "P1"
+}
+```
+
+**错误码**：`RESOURCE_GATE_PREEMPTED`（低优先级任务被抢占）
+
+**验收测试编号**：T-VOICE-05（压力下 ASR 优先保证 + 低优先级降级可观测）
+
+---
+
+### 17.4 M7 新增错误码汇总
+
+- `OBS_MODE_INVALID`：obs_mode 值不合法
+- `MCP_TOOL_NOT_REGISTERED`：MCP 工具未注册
+- `MCP_WRITE_TOKEN_REQUIRED`：MCP WRITE 缺少 token
+- `MCP_PROVIDER_UNAVAILABLE`：MCP provider 不可达
+- `ASR_LOW_CONFIDENCE`：ASR 置信度低于阈值
+- `ASR_UNAVAILABLE`：ASR 服务不可用
+- `TTS_QUEUE_FULL`：TTS 播报队列已满
+- `TTS_INTERRUPTED`：TTS 被 Barge-in 打断
+- `FALLBACK_MODEL_UNAVAILABLE`：Edge 兜底模型不可用
+- `FALLBACK_OUTPUT_DRAFT_ONLY`：兜底输出仅为草案
+- `RESOURCE_GATE_PREEMPTED`：资源闸门抢占
+
+---
+
 本文件不再维护"PRD→DevSpec→DevTasks→Tests"的覆盖矩阵，以避免重复维护导致的状态过期与冲突。
 覆盖关系的唯一真相源是 Trace：docs/60_trace/requirements_trace.md。
 
 本文件（DevSpec）只承担两件事：
 1) 把 FR 需求落成可审阅的工程契约（接口/Schema/错误码/日志点/测试点编号 T-xx）。
-2) 给出“如何验证”的断言口径（T-xx 的输入/输出/拒绝码/审计字段）。
+2) 给出"如何验证"的断言口径（T-xx 的输入/输出/拒绝码/审计字段）。
 
 状态使用建议（Trace 侧枚举为准）：
 - PRD_READY / SPEC_READY / TASK_READY / TEST_READY / DONE：用于表达链路成熟度。
-- SPEC_GAP / TASK_GAP / TEST_GAP：用于明确“缺口在哪里”，便于下一轮补齐。
+- SPEC_GAP / TASK_GAP / TEST_GAP：用于明确"缺口在哪里"，便于下一轮补齐。

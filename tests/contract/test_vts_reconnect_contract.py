@@ -139,7 +139,8 @@ class TestReconnectSuccess:
             )
 
         driver.connect = mock_connect
-        driver._reconnect_loop()
+        with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
+            driver._reconnect_loop()
 
         assert driver.state == VtsState.AUTHENTICATED
         last_event = driver.reconnect_events[-1]
