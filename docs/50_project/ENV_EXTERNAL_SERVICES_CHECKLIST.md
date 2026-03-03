@@ -142,6 +142,19 @@
 - 支持按时间窗口过滤 + 分页查询，优化跨端时间线聚合性能
 - 无新增环境变量
 
+### 6.5 SQLite WAL 存储介质要求（部署前强校验）
+- 约束来源：`risk_registry.md` R36-1（WAL 在 NFS/网络文件系统上不稳定或不支持）
+- 部署要求：
+  - `SQLite Ledger` 数据文件必须落在本地磁盘文件系统（NTFS/ext4/xfs）。
+  - 禁止将 Ledger 主库放在 NFS/SMB/网络盘映射路径。
+- 失败口径：
+  - WAL 激活失败时系统会降级到 `journal_mode=DELETE` 并记录 `AUDIT_WAL_FAILED`；
+  - 降级不阻断启动，但并发性能下降，且需运维介入。
+- 验收口径：
+  - 启动后日志中无 `AUDIT_WAL_FAILED`；
+  - `wal_health`（或等价健康快照）显示 `journal_mode=WAL`；
+  - 发生降级时必须有告警与处置记录。
+
 ---
 
 ## 7. 关联资产

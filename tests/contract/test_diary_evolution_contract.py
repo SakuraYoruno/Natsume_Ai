@@ -127,6 +127,15 @@ class TestDiaryEvolutionT03(unittest.TestCase):
             msg="source_intent_id 应等于日记 intent_id",
         )
 
+        persisted = self.ledger.get_proposal(proposal["proposal_id"])
+        self.assertIsNotNone(persisted)
+        self.assertEqual(
+            persisted.get("source_intent_id"),
+            self.intent_id,
+            msg="canon_proposal_log.source_intent_id should persist to DB",
+        )
+
+
     def test_t_diary_03c_proposal_status_pending(self) -> None:
         """写入的提案 status=pending。"""
         result = self._run_diary(self.fixture)

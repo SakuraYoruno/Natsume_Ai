@@ -261,6 +261,7 @@ class WorldCanonStore:
         proposed_tags: list[str] | None,
         proposed_body: str,
         proposer_node_id: str = "memory.canon_world_store",
+        source_intent_id: str | None = None,
         summary: str = "",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
@@ -321,6 +322,7 @@ class WorldCanonStore:
             "base_version": base_version,
             "proposed_version": proposed_version,
             "proposed_hash": proposed_hash,
+            "source_intent_id": source_intent_id,
             "proposer_node_id": proposer_node_id,
             "summary": summary or f"world canon proposal: {doc_id}",
             "status": "pending",
@@ -367,12 +369,6 @@ class WorldCanonStore:
             )
 
         # 更新提案 status → approved
-        self.ledger.update_proposal_status(
-            proposal_id,
-            new_status="approved",
-            ts_ms=approve_ts,
-        )
-
         # 从提案中提取目标文档信息（需要重新查询提案以获取 proposed_body 等）
         # 注意：canon_proposal_log 只存了 hash，不存 body/title/tags
         # 因此 approve_proposal 需要调用方在 submit_proposal 时同时传入完整内容
@@ -430,12 +426,6 @@ class WorldCanonStore:
             raise ValueError(f"proposal {proposal_id!r} has no target_id")
 
         # 更新提案 status → approved
-        self.ledger.update_proposal_status(
-            proposal_id,
-            new_status="approved",
-            ts_ms=approve_ts,
-        )
-
         # 触发 SSOT 文件写入（upsert_document 内部会写 canon_change_log）
         doc = self.upsert_document(
             doc_id=doc_id,

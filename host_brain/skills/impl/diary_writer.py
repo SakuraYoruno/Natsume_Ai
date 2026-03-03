@@ -340,6 +340,7 @@ def _submit_evolution_proposal(
             proposed_tags=None,
             proposed_body=suggested_body,
             proposer_node_id="diary_writer",
+            source_intent_id=intent_id,
             summary=reason or f"diary evolution proposal for {doc_id}",
         )
         # 将 source_intent_id 注入返回 dict（用于审计串联）

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS canon_proposal_log (
     base_version     INTEGER,
     proposed_version INTEGER,
     proposed_hash    TEXT,
+    source_intent_id TEXT,
     proposer_node_id TEXT,
     summary          TEXT,
     status           TEXT    NOT NULL,

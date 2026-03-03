@@ -334,9 +334,11 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
         )
 
         # 读取更新后的提案记录
-        updated_row = ledger.get_proposal(proposal_id) or {}
-        updated_row["target_id"] = doc.doc_id
-        return _proposal_row_to_response(updated_row, request_id)
+        response_row = dict(existing)
+        response_row["target_id"] = doc.doc_id
+        response_row["status"] = "APPLIED"
+        response_row["ts_ms"] = ts_ms
+        return _proposal_row_to_response(response_row, request_id)
 
     except HTTPException:
         raise
@@ -399,7 +401,16 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
                 "ts_ms": ts_ms,
             })
         except Exception as audit_exc:
-            _logger.warning("Failed to write system_event_log for reject: %s", audit_exc)
+            _logger.error(
+                "reject_proposal audit write failed: %s",
+                audit_exc,
+                extra={"request_id": request_id},
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="reject audit log write failed",
+                headers={"X-Reason-Code": CANON_SYNC_FAILED},
+            )
 
         return _proposal_row_to_response(row, request_id)
 

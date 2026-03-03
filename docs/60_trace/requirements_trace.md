@@ -926,3 +926,15 @@
 | R-95 | FR-MEM-001 | MemoryDistillationEngine.distill_top_k() | host_brain/memory/distillation.py | T-Distill-01~03 | DONE | M10-C |
 | R-96 | FR-MEM-002 | semantic_memory 表 + CRUD（log/get/list） | host_brain/audit/sqlite_ledger.py | T-Distill-04 | DONE | M10-C |
 | R-97 | FR-MEM-003 | context_pack.semantic_slot 可选分槽 + build_semantic_slot() | host_brain/core/context_pack.py | T-Distill-05~06 | DONE | M10-C |
+
+| R-98 | FR-MEM-001 | distill_top_k() 并发保护（蒸馏级别锁 + 锁内幂等复检） | host_brain/memory/distillation.py | T-Distill-07 | DONE | M10-D |
+| R-99 | NFR-PERF-001 | _table_has_column() 线程安全缓存（减少 PRAGMA） | host_brain/audit/sqlite_ledger.py | T-Quality-01(F-06) | DONE | M10-D |
+| R-100 | FR-WCANON-002 | approve/reject 审计原子性增强（reject 审计失败硬失败） | host_brain/app/canon_routes.py | T-Canon-API-04~06 | DONE | M10-D |
+| R-101 | NFR-MAINT-001 | m10a_release 清单补锁 canon_world_store/sqlite_ledger hash | host_brain/release/release_manifest.py; release/manifests/m10a_release.json | T-REL-01(扩展) | DONE | M10-D |
+| R-102 | FR-DIARY-002 | source_intent_id 端到端完整性落库与回归断言 | host_brain/memory/canon_world_store.py; host_brain/audit/sqlite_ledger.py; host_brain/skills/impl/diary_writer.py | T-Diary-03~04 | DONE | M10-D |
+| R-103 | NFR-MAINT-001 | requirements.txt Redis 可选依赖声明 | requirements.txt | T-Quality-01(F-12) | DONE | M10-D |
+| R-104 | NFR-MAINT-001 | M10-D 发布收口（v6 审查报告 + m10d_release.json） | docs/40_agents/full_code_review_report_2026-03-03-v6.md; release/manifests/m10d_release.json | T-REL-01(扩展) | DONE | M10-D |
+| R-105 | FR-GOV-001 | Redis RateLimit 后端真实集成验证（环境变量启用） | tests/integration/test_rate_limit_redis_integration.py | T-Gov-R4-Redis-01 | TEST_READY | M10-D |
+| R-106 | NFR-REL-001 | SQLite WAL/NFS 部署约束文档化（本地磁盘强约束） | docs/50_project/ExternalServices_Config.md; docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md | T-Deploy-WAL-01(文档验收) | DONE | M10-D |
+| R-107 | FR-AIRLOCK-002 | Sandbox 容器硬隔离 + 跨平台超时一致化（F-01/F-02） | host_brain/airlock/sandbox.py; tests/contract/test_sandbox_contract.py; tests/contract/test_sandbox_docker_contract.py | T-Sandbox-01; T-Sandbox-Docker-01 | DONE | M10-D |
+| R-108 | FR-CHANNEL-001, FR-VOICE-001 | WeChat→Edge 真实 RPC 端到端事件链路（F-11） | tests/e2e/test_wechat_vts_voice_rpc_e2e.py | T-E2E-RPC-01 | DONE | M10-D |

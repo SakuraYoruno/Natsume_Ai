@@ -113,6 +113,36 @@ def test_fetch_all_rejects_invalid_table_name() -> None:
         ledger.close()
 
 
+def test_table_has_column_cache_thread_safe() -> None:
+    """F-06: concurrent cache fill should trigger one PRAGMA table_info query."""
+    import threading
+
+    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+    traces: list[str] = []
+    try:
+        ledger._column_cache.clear()
+        ledger._conn.set_trace_callback(lambda sql: traces.append(str(sql)))
+
+        barrier = threading.Barrier(8)
+
+        def _worker() -> None:
+            barrier.wait()
+            assert ledger._table_has_column("intent_log", "request_id") is True
+
+        threads = [threading.Thread(target=_worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        pragma_calls = [
+            sql for sql in traces if "pragma table_info(intent_log)" in sql.lower()
+        ]
+        assert len(pragma_calls) == 1
+    finally:
+        ledger.close()
+
+
 def test_fetch_all_accepts_valid_table_name() -> None:
     """F-16: _fetch_all 传入合法表名时正常返回。"""
     ledger = SQLiteLedger(db_path=":memory:")

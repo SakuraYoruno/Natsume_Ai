@@ -17,6 +17,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from host_brain.airlock.quarantine import (
     CLASS_DRAFT_CODE,
@@ -39,6 +40,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     AIRLOCK_BLOCKED_EGRESS,
     AIRLOCK_BLOCKED_INGRESS,
+    SANDBOX_CONTAINER_UNAVAILABLE as E_SANDBOX_CONTAINER_UNAVAILABLE,
     SANDBOX_EXEC_FAILED as E_SANDBOX_EXEC_FAILED,
     SANDBOX_RESOURCE_EXCEEDED as E_SANDBOX_RESOURCE_EXCEEDED,
     SANDBOX_TIMEOUT as E_SANDBOX_TIMEOUT,
@@ -170,6 +172,8 @@ class TestSandboxTimeout(unittest.TestCase):
         self.assertEqual(E_SANDBOX_TIMEOUT, result.reason_code)
         self.assertIsNone(result.exit_code)
         self.assertIn("timed out", result.stderr)
+        self.assertEqual("popen_communicate", result.resource_usage.get("timeout_enforcement"))
+        self.assertIn("platform", result.resource_usage)
 
     def test_timeout_audit(self) -> None:
         """超时场景审计记录。"""
@@ -335,6 +339,22 @@ class TestSandboxUnavailable(unittest.TestCase):
         self.assertEqual(SANDBOX_STATUS_UNAVAILABLE, result.status)
         self.assertEqual(E_SANDBOX_UNAVAILABLE, result.reason_code)
         self.assertIn("unsupported language", result.stderr)
+
+    def test_prod_env_requires_container_isolation(self) -> None:
+        config = SandboxConfig(
+            python_executable=sys.executable,
+        )
+        executor = SandboxExecutor(config=config, ledger=self.ledger)
+        with patch.dict("os.environ", {"Nastume_ENV": "production"}, clear=False):
+            result = executor.execute(
+                code="print('hello')\n",
+                request_id="req_prod_container",
+                ts_ms=self.now_ms,
+            )
+
+        self.assertEqual(SANDBOX_STATUS_UNAVAILABLE, result.status)
+        self.assertEqual(E_SANDBOX_CONTAINER_UNAVAILABLE, result.reason_code)
+        self.assertIn("container isolation required", result.stderr)
 
     def test_unavailable_audit(self) -> None:
         """不可用场景也写审计日志。"""
