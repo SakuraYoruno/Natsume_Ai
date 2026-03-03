@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import PERF_BASELINE_STALE
 from host_brain.core.ids import now_ms
 
 
@@ -55,6 +57,7 @@ class MetricsCollector:
         retrieval_stats = self._query_retrieval_stats()
         snapshot_staleness = self._query_snapshot_staleness()
         recent_chains = self._query_recent_chains(recent_chains_n)
+        latency_baseline = self.collect_latency_baseline(ts_ms=collected_ts)
 
         payload: dict[str, Any] = {
             "request_id": request_id,
@@ -64,6 +67,7 @@ class MetricsCollector:
             "retrieval_latency": retrieval_stats,
             "hard_snapshot_staleness_ms": snapshot_staleness,
             "recent_chains": recent_chains,
+            "latency_baseline": latency_baseline,
             "debug_trace": None,
         }
 
@@ -247,4 +251,102 @@ class MetricsCollector:
             "intent_draft": intent_draft,
             "rules_hit": rules_hit,
             "skill_params": skill_params,
+        }
+
+    # ------------------------------------------------------------------
+    # M8 TASK-0109: 性能基线采集
+    # ------------------------------------------------------------------
+
+    def collect_latency_baseline(
+        self,
+        *,
+        ts_ms: int | None = None,
+        stale_threshold_ms: int = 24 * 60 * 60 * 1000,  # 24h
+    ) -> dict[str, Any]:
+        """Compute p50/p95 latency baseline from retrieval/governor/skill_exec logs.
+
+        Returns a latency_baseline dict with:
+          retrieval_p50_ms, retrieval_p95_ms,
+          governor_p50_ms, governor_p95_ms,
+          skill_exec_p50_ms, skill_exec_p95_ms,
+          sampled_at, sample_count, stale (bool)
+        """
+        now_value = int(ts_ms if ts_ms is not None else now_ms())
+
+        # ── 检索链路时延（来自 retrieval_event_log.payload.latency_ms）──
+        retrieval_lats: list[int] = []
+        try:
+            for r in self.ledger.retrieval_event_log:
+                payload = r.get("payload") or {}
+                if isinstance(payload, dict):
+                    lat = payload.get("latency_ms")
+                    if isinstance(lat, (int, float)) and lat >= 0:
+                        retrieval_lats.append(int(lat))
+        except Exception:
+            pass
+
+        # ── Governor 裁决时延（来自 governor_log.latency_ms，若无则跳过）──
+        governor_lats: list[int] = []
+        try:
+            for r in self.ledger.governor_log:
+                lat = r.get("latency_ms")
+                if isinstance(lat, (int, float)) and lat >= 0:
+                    governor_lats.append(int(lat))
+        except Exception:
+            pass
+
+        # ── Skill 执行时延（来自 skill_exec_log.latency_ms，若无则跳过）──
+        skill_lats: list[int] = []
+        try:
+            for r in self.ledger.skill_exec_log:
+                lat = r.get("latency_ms")
+                if isinstance(lat, (int, float)) and lat >= 0:
+                    skill_lats.append(int(lat))
+        except Exception:
+            pass
+
+        def _percentile(lats: list[int], pct: float) -> int | None:
+            if not lats:
+                return None
+            s = sorted(lats)
+            idx = min(int(len(s) * pct), len(s) - 1)
+            return s[idx]
+
+        sample_count = len(retrieval_lats) + len(governor_lats) + len(skill_lats)
+
+        # 判断是否过期：若 sample_count=0 或最新采样时间超过阈值，标记 stale
+        stale = sample_count == 0
+
+        # 尝试从 retrieval_event_log 获取最新采样时间
+        latest_sample_ts: int | None = None
+        try:
+            all_ts = [
+                int(r.get("ts_ms") or 0)
+                for r in self.ledger.retrieval_event_log
+                if r.get("ts_ms")
+            ]
+            if all_ts:
+                latest_sample_ts = max(all_ts)
+                if (now_value - latest_sample_ts) > stale_threshold_ms:
+                    stale = True
+        except Exception:
+            pass
+
+        sampled_at = (
+            datetime.fromtimestamp(latest_sample_ts / 1000, tz=timezone.utc).isoformat()
+            if latest_sample_ts
+            else datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+        )
+
+        return {
+            "retrieval_p50_ms": _percentile(retrieval_lats, 0.50),
+            "retrieval_p95_ms": _percentile(retrieval_lats, 0.95),
+            "governor_p50_ms": _percentile(governor_lats, 0.50),
+            "governor_p95_ms": _percentile(governor_lats, 0.95),
+            "skill_exec_p50_ms": _percentile(skill_lats, 0.50),
+            "skill_exec_p95_ms": _percentile(skill_lats, 0.95),
+            "sampled_at": sampled_at,
+            "sample_count": sample_count,
+            "stale": stale,
+            "stale_reason_code": PERF_BASELINE_STALE if stale else None,
         }

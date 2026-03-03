@@ -171,6 +171,46 @@ if (-not (Wait-Port -Port $port -TimeoutSeconds $WaitSeconds)) {
 $edgePid = [int]$proc.Id
 Set-Content -Path $pidFile -Value ([string]$edgePid) -Encoding ascii
 
+# ── M8 TASK-0107: Edge 子系统健康探测（ASR / TTS / VTS）────────────────────
+$edgeHost = "127.0.0.1"
+$asrStatus = "ok"
+$ttsStatus = "ok"
+$vtsStatus = "ok"
+$startupWarnings = @()
+
+# ASR 健康探测（/health/asr 或 /asr/health）
+$asrPort = 17801
+if ($envValues.ContainsKey("EDGE_ASR_PORT")) { $asrPort = [int]$envValues["EDGE_ASR_PORT"] }
+try {
+  $asrResp = Invoke-WebRequest -Uri "http://$edgeHost`:$asrPort/health" -UseBasicParsing -TimeoutSec 5
+  if ($asrResp.StatusCode -lt 200 -or $asrResp.StatusCode -ge 300) {
+    $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+  }
+} catch {
+  $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+}
+
+# TTS 健康探测
+$ttsPort = 17802
+if ($envValues.ContainsKey("EDGE_TTS_PORT")) { $ttsPort = [int]$envValues["EDGE_TTS_PORT"] }
+try {
+  $ttsResp = Invoke-WebRequest -Uri "http://$edgeHost`:$ttsPort/health" -UseBasicParsing -TimeoutSec 5
+  if ($ttsResp.StatusCode -lt 200 -or $ttsResp.StatusCode -ge 300) {
+    $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+  }
+} catch {
+  $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+}
+
+# VTS 健康探测（VTube Studio API 端口，默认 8001）
+$vtsPort = 8001
+if ($envValues.ContainsKey("VTS_API_PORT")) { $vtsPort = [int]$envValues["VTS_API_PORT"] }
+$vtsConn = Get-NetTCPConnection -LocalPort $vtsPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $vtsConn) {
+  $vtsStatus = "degraded"; $startupWarnings += "STARTUP_VTS_DEGRADED"
+}
+# ────────────────────────────────────────────────────────────────────────────
+
 $result = [ordered]@{
   status = "started"
   pid = $edgePid
@@ -179,5 +219,9 @@ $result = [ordered]@{
   env_file = $EnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
+  asr_status = $asrStatus
+  tts_status = $ttsStatus
+  vts_status = $vtsStatus
+  startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4

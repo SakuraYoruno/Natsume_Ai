@@ -115,6 +115,7 @@ class TestObsMetricsContract(unittest.TestCase):
             "request_id", "ts_ms", "obs_mode",
             "governor_decisions", "retrieval_latency",
             "hard_snapshot_staleness_ms", "recent_chains", "debug_trace",
+            "latency_baseline",  # M8 TASK-0109 新增
         }
         self.assertEqual(required_keys, set(result.keys()))
 
