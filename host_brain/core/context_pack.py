@@ -306,3 +306,63 @@ def _iter_values(value: Any) -> Iterable[Any]:
             yield from _iter_values(item)
         return
     yield value
+
+
+# ---------------------------------------------------------------------------
+# World Canon 独立槽位注入（TASK-0113 / FR-WCANON-001）
+# ---------------------------------------------------------------------------
+
+def build_world_canon_slot(
+    *,
+    world_root: "str | Path | None" = None,
+    top_k: int = 5,
+    status_filter: str = "active",
+) -> list[dict[str, Any]]:
+    """从 World Canon SSOT 目录扫描 Top-K active 条目，构建 authoritative.world_canon 槽位列表。
+
+    返回的每个条目均带有：
+    - slot="authoritative"
+    - kind="world_canon"
+    - evidence_level="CANON_REFERENCE_ONLY"
+    - unsafe_as_fact=True（提醒下游不得作为执行事实断言）
+
+    Args:
+        world_root: World Canon SSOT 目录路径，默认 host_brain/canon/world。
+        top_k: 最多注入条目数，默认 5。
+        status_filter: 只注入指定 status 的条目，默认 "active"。
+
+    Returns:
+        list[dict]，可直接 extend 到 context_pack["authoritative"]。
+    """
+    from pathlib import Path as _Path
+    from host_brain.memory.canon_world_store import WorldCanonStore
+
+    root = _Path(world_root) if world_root is not None else _Path("host_brain/canon/world")
+    store = WorldCanonStore(world_root=root, ledger=None)  # type: ignore[arg-type]
+    docs, _issues = store.scan_documents()
+
+    # 过滤 status，按 ts_ms 降序取 Top-K
+    filtered = [d for d in docs if d.status == status_filter]
+    filtered.sort(key=lambda d: d.ts_ms, reverse=True)
+    selected = filtered[:top_k]
+
+    entries: list[dict[str, Any]] = []
+    for doc in selected:
+        entries.append(
+            {
+                "slot": "authoritative",
+                "kind": "world_canon",
+                "doc_id": doc.doc_id,
+                "version": doc.version,
+                "hash": doc.hash,
+                "status": doc.status,
+                "title": doc.title,
+                "tags": list(doc.tags),
+                "content": doc.body,
+                "evidence_level": "CANON_REFERENCE_ONLY",
+                "unsafe_as_fact": True,
+                "reference_mode": "citation_only",
+                "citation": f"world_canon:{doc.doc_id}@v{doc.version}:{doc.hash[:12]}",
+            }
+        )
+    return entries

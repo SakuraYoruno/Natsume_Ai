@@ -434,3 +434,68 @@ def find_forbidden_keys(
 
     walk(value, "")
     return hits
+
+
+# ---------------------------------------------------------------------------
+# Canon-as-fact 公开检测接口（TASK-0113 / FR-WCANON-003）
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CanonAsFactResult:
+    """check_canon_as_fact() 的结构化返回值。"""
+
+    violated: bool
+    """是否检测到 Canon-as-fact 违规。"""
+
+    violations: list[QAViolation]
+    """所有 CANON_AS_FACT_VIOLATION 条目。"""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "violated": self.violated,
+            "violations": [
+                {"code": v.code, "detail": v.detail, "field": v.field}
+                for v in self.violations
+            ],
+        }
+
+
+def check_canon_as_fact(
+    narrative_text: str,
+    *,
+    ledger: Any | None = None,
+    request_id: str | None = None,
+) -> CanonAsFactResult:
+    """检测叙事文本中是否存在"Canon 内容 + 完成性表述"组合（Canon-as-fact 违规）。
+
+    规则：文本同时满足以下两个条件时触发 CANON_AS_FACT_VIOLATION：
+    1. 包含 Canon 标记词（world canon / canon / 世界观 / 设定 / 正典）；
+    2. 包含完成性表述（已执行 / 执行完成 / 已保存 / confirmed / executed 等）。
+
+    Args:
+        narrative_text: 待检测的叙事文本（字符串）。
+        ledger: 可选 SQLiteLedger，用于记录违规到 qa_violation 表。
+        request_id: 可选请求 ID，用于关联审计日志。
+
+    Returns:
+        CanonAsFactResult，含 violated 标志和 violations 列表。
+    """
+    result = LintResult(payload=None)
+    # 构造最小 payload 供内部检测函数使用
+    _validate_canon_as_fact({"narrative": {"text": narrative_text}}, result)
+
+    violations = [v for v in result.violations if v.code == VIOLATION_CANON_AS_FACT]
+
+    if violations and ledger is not None and hasattr(ledger, "log_qa_violation"):
+        for v in violations:
+            ledger.log_qa_violation(
+                request_id=request_id,
+                code=v.code,
+                detail=v.detail,
+                field=v.field,
+            )
+
+    return CanonAsFactResult(
+        violated=bool(violations),
+        violations=violations,
+    )
