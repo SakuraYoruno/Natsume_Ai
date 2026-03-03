@@ -1044,7 +1044,66 @@ def emit_asr_chunk(
 
 # ---------------------------------------------------------------------------
 # M10-B: Canon 热词注入（ASR 热词 ← World Canon SSOT）
+# M10-E: _CANON_HOTWORDS_CACHE 增加 TTL 自动失效（F-42）
 # ---------------------------------------------------------------------------
+
+class _HotwordsCache:
+    """带 TTL 自动失效的热词缓存（M10-E F-42）。
+
+    线程安全：使用 threading.Lock 保护读写操作。
+    TTL 到期后，get() 返回空列表，下次 inject_canon_hotwords() 调用时自动刷新。
+    """
+
+    def __init__(self, ttl_s: float = 300.0) -> None:
+        """
+        Args:
+            ttl_s: 缓存有效期（秒），默认 300s（5 分钟）。
+        """
+        self._hotwords: list[str] = []
+        self._ttl_s = ttl_s
+        self._updated_at: float = 0.0
+        self._lock = threading.Lock()
+
+    def set(self, hotwords: list[str]) -> None:
+        """更新热词列表并重置 TTL 计时。"""
+        with self._lock:
+            self._hotwords = list(hotwords)
+            self._updated_at = time.monotonic()
+
+    def get(self) -> list[str]:
+        """返回热词列表只读副本；TTL 到期时返回空列表。"""
+        with self._lock:
+            if self._is_expired():
+                return []
+            return list(self._hotwords)
+
+    def clear(self) -> None:
+        """清空缓存并重置计时。"""
+        with self._lock:
+            self._hotwords = []
+            self._updated_at = 0.0
+
+    def is_valid(self) -> bool:
+        """返回缓存是否在有效期内且非空。"""
+        with self._lock:
+            return bool(self._hotwords) and not self._is_expired()
+
+    def age_s(self) -> float:
+        """返回缓存已存活秒数（0 表示从未更新）。"""
+        with self._lock:
+            if self._updated_at == 0.0:
+                return 0.0
+            return time.monotonic() - self._updated_at
+
+    def _is_expired(self) -> bool:
+        """内部：判断是否已过期（调用方需持有锁）。"""
+        if self._updated_at == 0.0:
+            return True
+        return (time.monotonic() - self._updated_at) > self._ttl_s
+
+
+# 模块级热词缓存（TTL=300s，M10-E F-42）
+_CANON_HOTWORDS_CACHE = _HotwordsCache(ttl_s=300.0)
 
 def inject_canon_hotwords(
     host_url: str,
@@ -1085,13 +1144,12 @@ def inject_canon_hotwords(
         if not hotwords:
             return 0
 
-        # 注入到模块级热词缓存（供 ASR 引擎在下次初始化时读取）
-        _CANON_HOTWORDS_CACHE.clear()
-        _CANON_HOTWORDS_CACHE.extend(hotwords)
+        # 注入到模块级热词缓存（M10-E：TTL 自动失效，300s 后过期）
+        _CANON_HOTWORDS_CACHE.set(hotwords)
 
         logger.info(
-            "inject_canon_hotwords: injected %d hotwords from %s",
-            len(hotwords), host_url,
+            "inject_canon_hotwords: injected %d hotwords from %s (TTL=%.0fs)",
+            len(hotwords), host_url, _CANON_HOTWORDS_CACHE._ttl_s,
         )
         return len(hotwords)
 
@@ -1100,10 +1158,12 @@ def inject_canon_hotwords(
         return 0
 
 
-# 模块级热词缓存（供 ASR 引擎读取，线程安全：仅追加/清空，不并发修改）
-_CANON_HOTWORDS_CACHE: list[str] = []
+# 模块级热词缓存已在上方 _HotwordsCache 类定义处初始化（M10-E F-42）
 
 
 def get_canon_hotwords() -> list[str]:
-    """返回当前缓存的 Canon 热词列表（只读副本）。"""
-    return list(_CANON_HOTWORDS_CACHE)
+    """返回当前缓存的 Canon 热词列表（只读副本）。
+
+    TTL 到期后返回空列表，下次 inject_canon_hotwords() 调用时自动刷新。
+    """
+    return _CANON_HOTWORDS_CACHE.get()

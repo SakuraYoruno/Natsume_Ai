@@ -1,4 +1,4 @@
-"""记忆蒸馏引擎（M10-C）。
+"""记忆蒸馏引擎（M10-C/D）。
 
 将情节记忆（EpisodicStore）中的高频/高权重片段蒸馏为语义记忆（SemanticMemory），
 写入 SQLite `semantic_memory` 表，供 context_pack.semantic_slot 分槽注入。
@@ -7,6 +7,7 @@
 - 蒸馏是只读扫描 + 写入语义记忆，不修改情节记忆原始数据。
 - 蒸馏结果幂等：相同 source_memory_ids 组合的蒸馏结果不重复写入。
 - 每次蒸馏写 system_event_log 审计记录。
+- M10-D：_merge_texts() 支持接入 LLM 摘要 API（LlmSummaryClient 协议）。
 """
 
 from __future__ import annotations
@@ -14,11 +15,43 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 from host_brain.memory.episodic import EpisodicStore
+
+
+# ---------------------------------------------------------------------------
+# M10-D：LLM 摘要客户端协议（F-40）
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class LlmSummaryClient(Protocol):
+    """LLM 摘要客户端协议。
+
+    任何实现了 summarize() 方法的对象均可作为 LLM 摘要客户端传入。
+    典型实现：OpenAI / LocalLLM / FallbackLLM 适配器。
+    """
+
+    def summarize(
+        self,
+        texts: list[str],
+        *,
+        query_text: str,
+        max_tokens: int = 200,
+    ) -> str:
+        """\u5c06多条文本摘要为一条语义摘要。
+
+        Args:
+            texts: 待摘要的文本列表。
+            query_text: 查询主题（用于引导摘要方向）。
+            max_tokens: 摘要最大 token 数（默认 200）。
+
+        Returns:
+            摘要文本字符串。失败时应抛出异常，由调用方降级处理。
+        """
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +126,7 @@ class MemoryDistillationEngine:
         tags: list[str] | None = None,
         operator_node_id: str = "distillation_engine",
         ts_ms: int | None = None,
+        llm_client: LlmSummaryClient | None = None,
     ) -> DistillResult:
         """从情节记忆中召回 Top-K 条目，合并蒸馏为一条语义记忆。
 
@@ -103,6 +137,8 @@ class MemoryDistillationEngine:
             tags: 语义记忆标签列表（可选）。
             operator_node_id: 操作节点 ID（审计用）。
             ts_ms: 可选时间戳（毫秒）。
+            llm_client: 可选 LLM 摘要客户端（M10-D F-40）。
+                传入时使用 LLM 生成摘要；不传入时降级为文本拼接。
 
         Returns:
             DistillResult，含 semantic_id 和蒸馏详情。
@@ -136,9 +172,21 @@ class MemoryDistillationEngine:
                 skipped=True,
             )
 
-        # 3. 合并蒸馏：拼接 Top-K 文本，生成摘要
+        # 3. 合并蒸馏：优先使用 LLM 摘要，降级为文本拼接（M10-D F-40）
         texts = [r["text"] for r in recalled]
-        summary = _merge_texts(texts, query_text=query_text)
+        if llm_client is not None:
+            try:
+                summary = llm_client.summarize(
+                    texts,
+                    query_text=query_text,
+                    max_tokens=200,
+                )
+                distill_strategy = "llm_summary"
+            except Exception:
+                # LLM 摘要失败时降级为文本拼接
+                summary = _merge_texts(texts, query_text=query_text)
+        else:
+            summary = _merge_texts(texts, query_text=query_text)
 
         # 4. 生成 semantic_id
         import uuid

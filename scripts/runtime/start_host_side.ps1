@@ -287,8 +287,9 @@ try {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
-# ── M9 TASK-0112: World Canon Sync 健康探测 ──────────────────────────────
+# ── M9 TASK-0112: World Canon Sync 健康探测（F-32 告警覆盖）────────────────
 $canonSyncStatus = "ok"
+$canonSyncDetail = ""
 
 # 探测 /health/canon_sync（若端点不存在则视为 degraded，非阻断）
 $canonSyncHealthUrl = "http://$probeHost`:$Port/health/canon_sync"
@@ -296,12 +297,32 @@ try {
   $canonSyncResp = Invoke-WebRequest -Uri $canonSyncHealthUrl -UseBasicParsing -TimeoutSec 5
   if ($canonSyncResp.StatusCode -lt 200 -or $canonSyncResp.StatusCode -ge 300) {
     $canonSyncStatus = "degraded"
+    $canonSyncDetail = "HTTP $($canonSyncResp.StatusCode) from $canonSyncHealthUrl"
     $startupWarnings += "STARTUP_CANON_SYNC_DEGRADED"
   }
 } catch {
   # /health/canon_sync 端点不存在时视为 degraded（非阻断，M9 可选探测）
   $canonSyncStatus = "degraded"
+  $canonSyncDetail = "endpoint unreachable: $($_.Exception.Message)"
   $startupWarnings += "STARTUP_CANON_SYNC_DEGRADED"
+}
+
+# F-32：canon_sync DEGRADED 时写入结构化告警日志（供监控系统捕获）
+if ($canonSyncStatus -eq "degraded") {
+  $alertPayload = [ordered]@{
+    alert_code   = "STARTUP_CANON_SYNC_DEGRADED"
+    severity     = "WARNING"
+    ts_utc       = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+    host         = $BindHost
+    port         = $Port
+    detail       = $canonSyncDetail
+    action       = "canon_sync may be stale; world canon hotwords and slot injection may be outdated"
+    remediation  = "check /health/canon_sync endpoint and canon_sync.py logs"
+  }
+  $alertJson = $alertPayload | ConvertTo-Json -Depth 5
+  $alertLogPath = Join-Path $LogDir "startup_alerts.jsonl"
+  Add-Content -Path $alertLogPath -Value $alertJson -Encoding UTF8
+  Write-Warning "[STARTUP_CANON_SYNC_DEGRADED] $canonSyncDetail"
 }
 # ────────────────────────────────────────────────────────────────────────────
 

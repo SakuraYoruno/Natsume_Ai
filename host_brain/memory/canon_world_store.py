@@ -11,6 +11,15 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 
+# F-34：跨进程文件锁（R111-1）
+# filelock 为可选依赖；单进程部署时降级为 threading.Lock（已有 _write_lock）
+try:
+    from filelock import FileLock as _FileLock  # type: ignore[import-untyped]
+    _FILELOCK_AVAILABLE = True
+except ImportError:
+    _FileLock = None  # type: ignore[assignment,misc]
+    _FILELOCK_AVAILABLE = False
+
 
 WORLD_EXECUTION_FACT_TOKENS = (
     "已执行",
@@ -79,6 +88,9 @@ class WorldCanonStore:
         self.world_root = Path(world_root)
         self.world_root.mkdir(parents=True, exist_ok=True)
         self.ledger = ledger or SQLiteLedger()
+        # F-34：跨进程文件锁目录（R111-1）
+        self._lock_dir = self.world_root / ".locks"
+        self._lock_dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, doc_id: str) -> WorldCanonDocument | None:
         path = self._doc_path(doc_id)
@@ -162,10 +174,20 @@ class WorldCanonStore:
         payload["hash"] = compute_world_canon_hash(payload)
 
         path = self._doc_path(doc_id)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        # F-34：多进程部署时使用跨进程文件锁保护 SSOT 文件写入（R111-1）
+        lock_path = self._lock_dir / f"{_normalize_doc_id(doc_id)}.lock"
+        if _FILELOCK_AVAILABLE and _FileLock is not None:
+            with _FileLock(str(lock_path), timeout=10):
+                path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+        else:
+            # 单进程降级：直接写入（_write_lock 已在 SQLiteLedger 层保护 DB 写入）
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
 
         self.ledger.log_canon_proposal(
             {

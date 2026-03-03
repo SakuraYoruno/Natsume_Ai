@@ -852,18 +852,22 @@ class SQLiteLedger:
         target_doc_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        after_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """分页查询 canon_proposal_log。
+        """分页查询 canon_proposal_log（支持 cursor-based 分页，F-38 R112-2）。
 
         Args:
             status: 按 status 过滤（pending / approved / rejected / APPLIED），None 表示不过滤。
             canon_kind: 按 canon_kind 过滤（world / style），None 表示不过滤。
             target_doc_id: 按 target_id 过滤，None 表示不过滤。
             limit: 每页条数（最大 100）。
-            offset: 偏移量。
+            offset: 偏移量（兼容旧接口；after_id 优先）。
+            after_id: Cursor-based 分页游标（上一页最后一条记录的 id）。
+                传入时忽略 offset，使用 `id < after_id` 条件，避免深页码性能退化。
+                首页不传（None），后续页传上一页最后一条的 id。
 
         Returns:
-            (items, total)：items 为当前页记录列表，total 为满足条件的总记录数。
+            (items, total)：items 为当前页记录列表（按 id DESC），total 为满足条件的总记录数。
         """
         limit = min(int(limit), 100)
         offset = max(int(offset), 0)
@@ -881,6 +885,12 @@ class SQLiteLedger:
             conditions.append("target_id = ?")
             params.append(str(target_doc_id))
 
+        # F-38：cursor-based 分页（after_id 优先于 offset）
+        use_cursor = after_id is not None
+        if use_cursor:
+            conditions.append("id < ?")
+            params.append(int(after_id))
+
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
         count_row = self._conn.execute(
@@ -889,12 +899,25 @@ class SQLiteLedger:
         ).fetchone()
         total = int(count_row[0]) if count_row else 0
 
-        rows = self._conn.execute(
-            f"SELECT * FROM canon_proposal_log {where_clause} ORDER BY id DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        ).fetchall()
+        if use_cursor:
+            rows = self._conn.execute(
+                f"SELECT * FROM canon_proposal_log {where_clause} ORDER BY id DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                f"SELECT * FROM canon_proposal_log {where_clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
 
-        items = [self._decode_row("canon_proposal_log", row) for row in rows]
+        # 注入 row_id 字段（供 cursor-based 分页使用，_decode_row 会 pop("id")）
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            raw_id = row["id"] if "id" in row.keys() else None
+            decoded = self._decode_row("canon_proposal_log", row)
+            if raw_id is not None:
+                decoded["row_id"] = int(raw_id)
+            items.append(decoded)
         return items, total
 
     def update_proposal_status(
