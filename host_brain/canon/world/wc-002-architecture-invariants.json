@@ -1,0 +1,15 @@
+{
+  "body": "单写者原则：每个 Canon 文档只能通过 WorldCanonStore.upsert_document 写入，禁止直接修改文件。审计不可篡改：所有 canon_change_log 条目写入后不得删除或修改，仅允许追加。分槽隔离：World Canon 条目只能注入 context_pack.authoritative.world_canon 槽位，不得与 style_pack、retrieval.episodic 或 recent_events 混槽。幂等同步：canon_sync 对相同 hash 的条目重复扫描不产生重复 change_log 条目。",
+  "doc_id": "wc-002-architecture-invariants",
+  "hash": "5c67a32960090b597d12a950f0890d9f857a51c8aff95643d7aca7f422747297",
+  "status": "active",
+  "tags": [
+    "architecture",
+    "invariant",
+    "constraint"
+  ],
+  "title": "架构不变量",
+  "ts_ms": 1741000000001,
+  "updated_by": "seed_init",
+  "version": 1
+}
