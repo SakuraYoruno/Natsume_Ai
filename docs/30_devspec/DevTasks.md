@@ -2443,5 +2443,18 @@ TASK-XXXX 标题
   - `tests/unit/test_bond_stage_engine.py`（T-BOND-STAGE-01~09，30 passed）；
   - `tests/integration/test_bond_routes_api.py`（T-BOND-API-01~08，18 passed）。
 - 验收标准：T-BOND-STAGE-01~09 + T-BOND-API-01~08 全部通过；Bond Summary 不含数值（FR-BOND-003）；evidence_refs 为空时 422（FR-BOND-002）；晋级/降级写入审计链。
-- 关联需求/测试：FR-BOND-001/002/003；T-BOND-STAGE-01~09；T-BOND-API-01~08。
+- 关联需求：FR-BOND-001/002/003；T-BOND-STAGE-01~09；T-BOND-API-01~08。
+
+---
+
+### TASK-0163 M13-B 长期记忆蒸馏强化
+- 状态：DONE（2026-03-04，long_term_distiller.py NEW；T-DISTILL-B-01~10 36 passed）
+- 任务描述：实现 LongTermMemoryDistiller（EpisodicMemory→语义记忆蒸馏→Canon pending 提案）+ 调度器 CRON 任务工厂（每日 03:00）。
+- 输入：FR-MEM-DISTILL-001/002；DevSpec §26（新增）；MemoryDistillationEngine（M10-C/D）；WorldCanonStore（M10-B）；NatsumeScheduler（M11）。
+- 输出：
+  - `host_brain/memory/long_term_distiller.py`（LongTermMemoryDistiller + DistillationCycleResult + make_distillation_task_config）；
+  - `tests/unit/test_long_term_distiller.py`（T-DISTILL-B-01~10，36 passed）。
+- 验收标准：T-DISTILL-B-01~10 全部通过；蒸馏结果只生成 pending 提案不直接写 SSOT（FR-MEM-DISTILL-001）；每次循环最多 5 个提案（FR-MEM-DISTILL-002）；幂等保护；调度器 CRON 任务配置合法；全量测试 1324 passed。
+- 关联需求/测试：FR-MEM-DISTILL-001/002；T-DISTILL-B-01~10。
+
 

@@ -1,7 +1,12 @@
-feat(M13-A/TASK-0162): Bond 阶段积分 + 自动晋级引擎 + REST API
+feat(M13-B/TASK-0163): 长期记忆蒸馏强化引擎
 
-BondStageEngine: 6 阶段 STRANGER→SOULMATE，积分累积/晋级/降级/趋势/审计串联
-Bond REST API: /bond/health /bond/users /bond/stage /bond/summary /bond/event
-fastapi_app.py: 注册 bond_router + BondStageEngine 全局单例
-测试: T-BOND-STAGE-01~09 (30) + T-BOND-API-01~08 (18) = 48 passed
-全量测试: 1288 passed, 2 skipped，无回归
+LongTermMemoryDistiller: EpisodicMemory→语义记忆蒸馏→Canon pending 提案
+- 按主题列表依次蒸馏，每次循环最多 5 个提案（FR-MEM-DISTILL-002）
+- 蒸馏结果只生成 pending 提案，不直接写 Canon SSOT（FR-MEM-DISTILL-001）
+- 幂等保护：相同 semantic_id 不重复生成提案
+- 提案正文不含完成性表述（WorldCanonStore 约束）
+- 单个主题异常不影响其他主题（容错）
+- 写入 distillation_cycle_log 审计链
+- make_distillation_task_config(): 每日 03:00 CRON 任务，LOW 优先级，normal/sleep 模式允许
+测试: T-DISTILL-B-01~10 (36 passed)
+全量测试: 1324 passed, 2 skipped，无回归
