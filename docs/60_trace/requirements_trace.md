@@ -942,3 +942,6 @@
 | R-110 | NFR-SEC-001 | F-16 _fetch_by_request 表名白名单校验补全（P2 收口） | host_brain/audit/sqlite_ledger.py | T-Quality-01(F-16扩展) | DONE | P2-收口 |
 | R-111 | NFR-MAINT-001 | F-13/F-14/F-15/F-25/F-38 P2 已修复核查确认 | host_brain/app/main.py; host_brain/integrations/graph_executor.py; host_brain/app/fastapi_app.py; edge_client/actuators/vts_driver.py; host_brain/audit/sqlite_ledger.py | — | DONE | P2-收口 |
 | R-112 | NFR-REL-001, NFR-MAINT-001 | F-04/F-07/F-08 设备验证包标记 BLOCKED_ENV（单机 SQLite 部署暂缓；多实例/真机部署前执行） | docs/30_devspec/DevTasks.md | — | BLOCKED_ENV | 设备验证包 |
+| R-113 | FR-SCHED-001/002 | M11-A DevSpec §21~§23 工程契约拆解（调度器/桌面留言/梦境/日记/主动对话/Focus Mode） | docs/30_devspec/DevSpec.md §21~§23 | T-SCHED-01~07；T-DESK-01~08；T-DREAM-01~05；T-DIARY-01~05；T-PROACT-01~06；T-FOCUS-01~04 | DONE | M11-A |
+| R-114 | FR-SCHED-001/002 | M11-A T-SCHED-01~07 单元测试（NatsumeScheduler：触发/sys_mode 门控/连续失败暂停/健康快照/注销/intent 字段） | tests/unit/test_scheduler_engine.py | T-SCHED-01~07 | DONE | M11-A |
+| R-115 | FR-SCHED-001/002 | M11-A Scheduler REST API（8 个端点：/scheduler/tasks CRUD + enable/disable + /scheduler/health） | host_brain/scheduler/scheduler_routes.py；host_brain/app/fastapi_app.py | T-SCHED-05 | DONE | M11-A |

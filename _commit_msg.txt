@@ -1,8 +1,4 @@
-feat(M11-A): DevSpec §21~§23 工程契约 + T-SCHED-01~07 单元测试 + M11 错误码
+docs: M11-A PRD 里程碑更新 + requirements_trace R-113~R-115
 
-- docs/30_devspec/DevSpec.md: 追加 §21（调度器）§22（桌面留言）§23（梦境/日记/主动对话/Focus Mode）工程契约
-- docs/30_devspec/DevTasks.md: 追加 TASK-0147~0153（M11-A~F 任务卡）
-- host_brain/core/errors.py: 新增 M11 错误码（SCHED_TASK_NOT_FOUND/DUPLICATE/CONFIG_INVALID/SCOPE_VIOLATION/DESKTOP_MSG_*/RATE_LIMIT_EXCEEDED/FOCUS_*）
-- tests/unit/test_scheduler_engine.py: T-SCHED-01~07 全量单元测试（12 passed）
-
-全量测试：1102 passed, 2 skipped
+- docs/20_prd/PRD.md: M11 PLANNED → IN PROGRESS；M11-A DONE；M11-B~F IMPL_DONE/TEST_PENDING
+- docs/60_trace/requirements_trace.md: 追加 R-113~R-115（DevSpec §21~§23 工程契约 + T-SCHED-01~07 + REST API）
