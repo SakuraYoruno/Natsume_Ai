@@ -1,1 +1,7 @@
-docs(M12): DevTasks TASK-0155~0160 DONE + PRD M12-A~D DONE
+feat(M13-A/TASK-0162): Bond 阶段积分 + 自动晋级引擎 + REST API
+
+BondStageEngine: 6 阶段 STRANGER→SOULMATE，积分累积/晋级/降级/趋势/审计串联
+Bond REST API: /bond/health /bond/users /bond/stage /bond/summary /bond/event
+fastapi_app.py: 注册 bond_router + BondStageEngine 全局单例
+测试: T-BOND-STAGE-01~09 (30) + T-BOND-API-01~08 (18) = 48 passed
+全量测试: 1288 passed, 2 skipped，无回归

@@ -2428,3 +2428,20 @@ TASK-XXXX 标题
 - 输出：`host_brain/release/manifests/m12_release.json`。
 - 验收标准：manifest 可被 release_manifest.py 验证；全量测试 ≥1190 passed。
 - 关联需求：NFR-REL-001。
+
+---
+
+## M13 任务卡（Bond 阶段自动晋级 + 长期记忆蒸馏强化）
+
+### TASK-0162 M13-A Bond 阶段积分 + 自动晋级引擎
+- 状态：DONE（2026-03-04，bond_stage_engine.py NEW；bond_routes.py NEW；T-BOND-STAGE-01~09 30 passed；T-BOND-API-01~08 18 passed）
+- 任务描述：实现 BondStageEngine（积分累积/阶段晋级/降级/趋势/审计串联）+ Bond REST API（/bond/stage /bond/summary /bond/event /bond/users /bond/health）。
+- 输入：FR-BOND-001/002/003；DevSpec §25（新增）。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`（BondStageEngine + BondScoreState + StageTransitionResult）；
+  - `host_brain/app/bond_routes.py`（Bond REST API 5 端点）；
+  - `tests/unit/test_bond_stage_engine.py`（T-BOND-STAGE-01~09，30 passed）；
+  - `tests/integration/test_bond_routes_api.py`（T-BOND-API-01~08，18 passed）。
+- 验收标准：T-BOND-STAGE-01~09 + T-BOND-API-01~08 全部通过；Bond Summary 不含数值（FR-BOND-003）；evidence_refs 为空时 422（FR-BOND-002）；晋级/降级写入审计链。
+- 关联需求/测试：FR-BOND-001/002/003；T-BOND-STAGE-01~09；T-BOND-API-01~08。
+
