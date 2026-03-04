@@ -658,10 +658,10 @@ M11-E 主动对话：FR-PROACTIVE-001/002（DevSpec §23.3 工程契约 + proact
 M11-F Focus Mode：FR-FOCUS-001（DevSpec §23.4 工程契约 + focus_mode.py 已实现；T-FOCUS-01~04 单元测试全部通过）— **DONE**（2026-03-04）
 
 M12 ToolBroker + 上下文压缩 + Reranker 强化：
-M12-A ToolBroker 单入口 + tool_visibility_hash：FR-TOOL-001/002/003（ToolBroker 单入口 + WRITE Token gating + tool_visibility_hash 审计串联）— **PLANNED**
-M12-B 多轮对话上下文压缩：FR-MEM-005 扩展（ContextCompressor：滑动窗口 + 摘要压缩 + evidence pack 结构化输出）— **PLANNED**
-M12-C Reranker 服务强化：FR-MEM-004（RerankerService 健康状态 + 降级策略 + evidence pack 字段稳定性）— **PLANNED**
-M12-D 技能热加载：FR-SKILL-001/002 扩展（SkillRegistry 热加载 + 版本化 + 运行时一致性检查）— **PLANNED**
+M12-A ToolBroker 单入口 + tool_visibility_hash：FR-TOOL-001/002/003（ToolBroker 单入口 + WRITE Token gating + tool_visibility_hash 审计串联）— **DONE**（2026-03-04）
+M12-B 多轮对话上下文压缩：FR-MEM-005 扩展（ContextCompressor：sliding_window/summary/hybrid + EvidencePack 构建）— **DONE**（2026-03-04）
+M12-C Reranker 服务强化：FR-MEM-004（RerankerServiceContract 健康状态 + 降级策略 + EvidencePack stage 字段）— **DONE**（2026-03-04）
+M12-D 技能热加载：FR-SKILL-001/002 扩展（SkillHotLoader + SkillVersionRegistry：热加载/回滚/一致性检查/审计）— **DONE**（2026-03-04）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单

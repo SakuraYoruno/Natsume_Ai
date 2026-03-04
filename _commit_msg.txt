@@ -1,7 +1,1 @@
-docs(M12): PRD M12 规划 + DevSpec §24 工程契约 + DevTasks TASK-0154~0161
-
-- docs/20_prd/PRD.md: 追加 M12-A~D 里程碑规划（ToolBroker/ContextCompressor/Reranker/SkillHotLoader）
-- docs/30_devspec/DevSpec.md: 追加 §24.1~§24.4 工程契约（接口/Schema/错误码/测试编号 T-TOOL-01~06/T-CTX-01~05/T-RERANK-01~04/T-HOTLOAD-01~05）
-- docs/30_devspec/DevTasks.md: 追加 TASK-0154~0161（M12 任务卡，含前置/ToolBroker/ContextCompressor/Reranker/SkillHotLoader/错误码/发布清单）
-
-全量测试：1164 passed, 2 skipped（无回归）
+docs(M12): DevTasks TASK-0155~0160 DONE + PRD M12-A~D DONE

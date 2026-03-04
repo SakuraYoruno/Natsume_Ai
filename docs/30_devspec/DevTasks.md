@@ -2361,7 +2361,7 @@ TASK-XXXX 标题
 - 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
 
 ### TASK-0155 M12-A-1：ToolBroker 核心实现
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，broker.py/catalog.py/selector.py/mcp_adapter.py 已有完整实现；T-TOOL-01~06 17 passed）
 - 任务描述：实现 `ToolBroker`（单入口）+ `ToolMetaRegistry`（注册表）+ `ToolVisibility`（hash 计算）。
 - 输入：DevSpec §24.1。
 - 输出：
@@ -2383,7 +2383,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-TOOL-003；T-TOOL-02/T-TOOL-05。
 
 ### TASK-0157 M12-B-1：ContextCompressor 实现
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，context_compressor.py NEW；T-CTX-01~05 17 passed）
 - 任务描述：实现 `ContextCompressor`（sliding_window/summary/hybrid 三策略）+ `EvidencePack` 构建。
 - 输入：DevSpec §24.2。
 - 输出：
@@ -2393,7 +2393,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-MEM-005；T-CTX-01~05。
 
 ### TASK-0158 M12-C-1：RerankerService 强化
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，reranker.py/evidence_pack.py 已有完整实现；T-RERANK-01~04 11 passed）
 - 任务描述：强化 `RerankerService`（health() + 降级策略 + evidence_pack rerank_stage 字段）。
 - 输入：DevSpec §24.3；现有 `host_brain/retrieval/reranker.py`。
 - 输出：
@@ -2403,7 +2403,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-MEM-004；T-RERANK-01~04。
 
 ### TASK-0159 M12-D-1：SkillHotLoader 实现
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，hot_loader.py NEW；T-HOTLOAD-01~05 17 passed）
 - 任务描述：实现 `SkillHotLoader`（热加载/回滚/版本注册）+ `SkillVersionRegistry`。
 - 输入：DevSpec §24.4。
 - 输出：
@@ -2414,7 +2414,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-SKILL-001/002；T-HOTLOAD-01~05。
 
 ### TASK-0160 M12 错误码补全
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，errors.py 新增 TOOL_*/CTX_*/RETR_RERANK_STAGE_MISSING/HOTLOAD_*）
 - 任务描述：在 `core/errors.py` 中补充 M12 新增错误码（TOOL_*/CTX_*/RERANK_*/HOTLOAD_*）。
 - 输入：DevSpec §24.1.5；TASK-0155~0159。
 - 输出：`host_brain/core/errors.py`（新增 M12 错误码）。
