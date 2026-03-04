@@ -1,7 +1,7 @@
 """
-TraceNodeBuilder — M18-C
+TraceNodeBuilder — M18-C / M19-E
 从多源审计日志聚合构建结构化节点列表，支持树形结构。
-FR-OBS-010 / TASK-0190
+FR-OBS-010 / TASK-0190 / TASK-0197
 """
 from __future__ import annotations
 
@@ -50,6 +50,8 @@ def _truncate_io(data: Any) -> tuple[Any, bool]:
 class TraceNodeBuilder:
     """
     从 SQLite Ledger 多源日志聚合构建单次请求的节点树。
+    BUG-BE-002: 各 _fetch_* 方法改为 SQL 级 request_id 过滤（通过 fetch_by_request_id）。
+    WARN-BE-005: _infer_parent_ids 改为基于 node_type 的树形推断，支持并行分支。
     """
 
     def __init__(self, ledger):
@@ -82,7 +84,7 @@ class TraceNodeBuilder:
         # 按 start_ts_ms 排序
         nodes.sort(key=lambda n: n.get("start_ts_ms") or 0)
 
-        # 推断父子关系（简单线性链：每个节点的 parent 是前一个节点）
+        # WARN-BE-005: 基于 node_type 的树形 parent 推断（支持并行分支）
         self._infer_parent_ids(nodes)
 
         # 推断整体状态
@@ -101,14 +103,27 @@ class TraceNodeBuilder:
         }
 
     # ------------------------------------------------------------------
-    # 各日志表的节点提取
+    # BUG-BE-002: 各日志表的节点提取 — 改为 SQL 级 request_id 过滤
     # ------------------------------------------------------------------
-    def _fetch_intent_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
+    def _fetch_by_request_id(self, table: str, request_id: str) -> List[Dict]:
+        """
+        优先使用 ledger.fetch_by_request_id（SQL 级过滤）；
+        若不存在则降级为 fetch_by_time_range + 内存过滤（兼容旧 ledger）。
+        """
+        if hasattr(self._ledger, "fetch_by_request_id"):
+            try:
+                return self._ledger.fetch_by_request_id(table, request_id)
+            except Exception:
+                pass
+        # 降级：全量拉取后内存过滤（兼容旧版 ledger）
         try:
-            rows = [r for r in self._ledger.fetch_by_time_range("intent_log", 0, int(time.time() * 1000))
-                    if r.get("request_id") == request_id]
+            rows = self._ledger.fetch_by_time_range(table, start_ms=0, end_ms=int(time.time() * 1000))
+            return [r for r in rows if r.get("request_id") == request_id]
         except Exception:
             return []
+
+    def _fetch_intent_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
+        rows = self._fetch_by_request_id("intent_log", request_id)
         result = []
         for r in rows:
             inp, inp_trunc = _truncate_io(_safe_json(r.get("raw_input"))) if include_io else (None, False)
@@ -132,11 +147,7 @@ class TraceNodeBuilder:
         return result
 
     def _fetch_governor_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
-        try:
-            rows = [r for r in self._ledger.fetch_by_time_range("governor_log", 0, int(time.time() * 1000))
-                    if r.get("request_id") == request_id]
-        except Exception:
-            return []
+        rows = self._fetch_by_request_id("governor_log", request_id)
         result = []
         for r in rows:
             decision = r.get("decision", "")
@@ -160,11 +171,7 @@ class TraceNodeBuilder:
         return result
 
     def _fetch_skill_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
-        try:
-            rows = [r for r in self._ledger.fetch_by_time_range("skill_exec_log", 0, int(time.time() * 1000))
-                    if r.get("request_id") == request_id]
-        except Exception:
-            return []
+        rows = self._fetch_by_request_id("skill_exec_log", request_id)
         result = []
         for r in rows:
             inp, _ = _truncate_io(_safe_json(r.get("args"))) if include_io else (None, False)
@@ -187,11 +194,7 @@ class TraceNodeBuilder:
         return result
 
     def _fetch_llm_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
-        try:
-            rows = [r for r in self._ledger.fetch_by_time_range("llm_node_call_log", 0, int(time.time() * 1000))
-                    if r.get("request_id") == request_id]
-        except Exception:
-            return []
+        rows = self._fetch_by_request_id("llm_node_call_log", request_id)
         result = []
         for r in rows:
             inp, _ = _truncate_io(_safe_json(r.get("input_messages"))) if include_io else (None, False)
@@ -216,11 +219,7 @@ class TraceNodeBuilder:
         return result
 
     def _fetch_voice_nodes(self, request_id: str, include_io: bool) -> List[Dict]:
-        try:
-            rows = [r for r in self._ledger.fetch_by_time_range("voice_event_log", 0, int(time.time() * 1000))
-                    if r.get("request_id") == request_id]
-        except Exception:
-            return []
+        rows = self._fetch_by_request_id("voice_event_log", request_id)
         result = []
         for r in rows:
             etype = str(r.get("event_type", "")).upper()
@@ -251,7 +250,58 @@ class TraceNodeBuilder:
 
     @staticmethod
     def _infer_parent_ids(nodes: List[Dict]) -> None:
-        """简单线性链：每个节点的 parent 是前一个节点（按时间排序后）。"""
-        for i, node in enumerate(nodes):
-            if i > 0 and node.get("parent_node_id") is None:
-                node["parent_node_id"] = nodes[i - 1]["node_id"]
+        """
+        WARN-BE-005: 基于 node_type 的树形 parent 推断，支持并行分支。
+
+        规则：
+        - intent  节点：无 parent（根节点）
+        - governor 节点：parent 为最近的 intent 节点
+        - skill / llm 节点：parent 为最近的 governor 节点
+        - asr / tts / vts 节点：parent 为 start_ts_ms 最近的 skill 节点
+        - 其他节点：parent 为前一个节点（兜底线性链）
+
+        支持多个节点共享同一 parent（并行分支）。
+        """
+        # 按 node_type 分组，记录各类型节点（已按 start_ts_ms 排序）
+        intent_nodes:   List[Dict] = [n for n in nodes if n["node_type"] == "intent"]
+        governor_nodes: List[Dict] = [n for n in nodes if n["node_type"] == "governor"]
+        skill_nodes:    List[Dict] = [n for n in nodes if n["node_type"] == "skill"]
+
+        def _nearest_before(candidates: List[Dict], ts: Optional[int]) -> Optional[str]:
+            """找到 start_ts_ms <= ts 的最近节点 node_id。"""
+            if not candidates:
+                return None
+            if ts is None:
+                return candidates[-1]["node_id"]
+            best = None
+            for c in candidates:
+                c_ts = c.get("start_ts_ms") or 0
+                if c_ts <= ts:
+                    best = c["node_id"]
+            return best or candidates[0]["node_id"]
+
+        for node in nodes:
+            if node.get("parent_node_id") is not None:
+                continue  # 已有 parent，跳过
+
+            ntype = node["node_type"]
+            ts = node.get("start_ts_ms")
+
+            if ntype == "intent":
+                node["parent_node_id"] = None
+
+            elif ntype == "governor":
+                node["parent_node_id"] = _nearest_before(intent_nodes, ts)
+
+            elif ntype in ("skill", "llm"):
+                node["parent_node_id"] = _nearest_before(governor_nodes, ts)
+
+            elif ntype in ("asr", "tts", "vts"):
+                # parent 为 start_ts_ms 最近的 skill 节点
+                node["parent_node_id"] = _nearest_before(skill_nodes, ts)
+
+            else:
+                # 兜底：线性链（前一个节点）
+                idx = nodes.index(node)
+                if idx > 0:
+                    node["parent_node_id"] = nodes[idx - 1]["node_id"]

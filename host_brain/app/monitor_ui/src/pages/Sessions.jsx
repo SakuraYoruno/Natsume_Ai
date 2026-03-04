@@ -19,7 +19,9 @@ export default function Sessions() {
   const [status, setStatus] = useState('')
   const [timeRange, setTimeRange] = useState('24h')
 
-  const load = useCallback(async (p = page) => {
+  // WARN-FE-005: load 接受 pageNum 参数，避免闭包陈旧值问题
+  const load = useCallback(async (pageNum) => {
+    const p = pageNum ?? page
     setLoading(true)
     setError(null)
     try {
@@ -131,9 +133,9 @@ export default function Sessions() {
       <div className="flex items-center justify-between text-sm text-gray-500">
         <span>共 {total} 条</span>
         <div className="flex items-center gap-1">
-          <button className="btn-secondary px-2 py-1 text-xs" disabled={page <= 1} onClick={() => { setPage(page - 1); load(page - 1) }}>上一页</button>
+          <button className="btn-secondary px-2 py-1 text-xs" disabled={page <= 1} onClick={() => { const p = page - 1; setPage(p); load(p) }}>上一页</button>
           <span className="px-2">{page} / {totalPages}</span>
-          <button className="btn-secondary px-2 py-1 text-xs" disabled={page >= totalPages} onClick={() => { setPage(page + 1); load(page + 1) }}>下一页</button>
+          <button className="btn-secondary px-2 py-1 text-xs" disabled={page >= totalPages} onClick={() => { const p = page + 1; setPage(p); load(p) }}>下一页</button>
         </div>
       </div>
     </div>

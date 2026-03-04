@@ -40,10 +40,11 @@ export function fetchSessions(params = {}) {
 
 /**
  * 获取指定 request_id 的结构化节点列表
+ * WARN-FE-006: 路径修正为 /obs/trace/{requestId}（去掉 /nodes 后缀）
  * @param {string} requestId
  */
 export function fetchTraceNodes(requestId) {
-  return request(`/obs/trace/${encodeURIComponent(requestId)}/nodes`)
+  return request(`/obs/trace/${encodeURIComponent(requestId)}`)
 }
 
 // ===== Metrics =====

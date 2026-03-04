@@ -31,7 +31,11 @@ export default function Overview() {
   }, [load, pollingEnabled, pollingInterval])
 
   const services = data?.services ?? []
-  const summary = data?.summary ?? {}
+  // BUG-FE-001: 直接读取顶层字段（total/up/degraded/down），而非 data?.summary
+  const total    = data?.total    ?? '—'
+  const up       = data?.up       ?? '—'
+  const degraded = data?.degraded ?? '—'
+  const down     = data?.down     ?? '—'
 
   return (
     <div className="space-y-6">
@@ -50,10 +54,10 @@ export default function Overview() {
       {/* 汇总统计行 */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: '总服务数', value: summary.total ?? '—', color: 'text-gray-800' },
-          { label: '健康',     value: summary.healthy  ?? '—', color: 'text-green-600' },
-          { label: '降级',     value: summary.degraded ?? '—', color: 'text-orange-500' },
-          { label: '故障',     value: summary.error    ?? '—', color: 'text-red-500'   },
+          { label: '总服务数', value: total,    color: 'text-gray-800'   },
+          { label: '健康(Up)', value: up,       color: 'text-green-600'  },
+          { label: '降级',     value: degraded, color: 'text-orange-500' },
+          { label: '故障',     value: down,     color: 'text-red-500'    },
         ].map(({ label, value, color }) => (
           <div key={label} className="card p-4 text-center">
             <div className={`text-2xl font-bold ${color}`}>{value}</div>
@@ -73,11 +77,11 @@ export default function Overview() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
           {services.map((svc) => (
             <ServiceCard
-              key={svc.name}
-              name={svc.name}
-              status={svc.status}
-              latency={svc.latency}
-              detail={svc.detail}
+              key={svc.service_id ?? svc.display_name}
+              name={svc.display_name}
+              status={svc.status?.toLowerCase()}
+              latency={svc.p95_ms != null ? `${svc.p95_ms}ms` : undefined}
+              detail={svc.call_count != null ? `${svc.call_count} 次` : undefined}
             />
           ))}
         </div>
