@@ -41,6 +41,7 @@ from host_brain.app.canon_routes import router as canon_router, set_ledger_provi
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
 from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
+from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.broker import ToolBroker
 from host_brain.governor.tokens import TokenService
@@ -242,6 +243,11 @@ app.include_router(tool_router)
 app.include_router(bond_router)
 
 # ---------------------------------------------------------------------------
+# 注册 Observability REST API 路由（M18: 监控面板后端数据接口）
+# ---------------------------------------------------------------------------
+app.include_router(obs_router)
+
+# ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -253,7 +259,10 @@ if os.path.isdir(_static_dir):
 # ---------------------------------------------------------------------------
 # CORS 默认关闭：生产环境必须显式设置 Nastume_CORS_ORIGINS
 # 例如 Nastume_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
-_cors_origins_raw = os.environ.get("Nastume_CORS_ORIGINS", "").strip()
+_cors_origins_raw = os.environ.get(
+    "Nastume_CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+).strip()
 if _cors_origins_raw:
     _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
     app.add_middleware(
@@ -291,6 +300,9 @@ def get_ledger() -> SQLiteLedger:
 
 # 注入 ledger provider 到 canon_routes（消除循环导入风险，P1-R118-2）
 _set_canon_ledger_provider(get_ledger)
+
+# 注入 ledger provider 到 obs_routes（M18）
+_set_obs_ledger_provider(get_ledger)
 
 
 def get_tool_catalog() -> ToolCatalog:

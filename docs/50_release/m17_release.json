@@ -1,0 +1,87 @@
+{
+  "milestone": "M17",
+  "release_date": "2026-03-04",
+  "release_ready": true,
+  "all_pages_functional": true,
+  "zero_js_errors": true,
+  "design_review_passed": true,
+  "tasks": {
+    "TASK-0182": {
+      "title": "M17-A 前端架构重建",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/monitor_ui/package.json",
+        "host_brain/app/monitor_ui/vite.config.js",
+        "host_brain/app/monitor_ui/tailwind.config.js",
+        "host_brain/app/monitor_ui/postcss.config.js",
+        "host_brain/app/monitor_ui/index.html",
+        "host_brain/app/monitor_ui/src/main.jsx",
+        "host_brain/app/monitor_ui/src/App.jsx",
+        "host_brain/app/monitor_ui/src/index.css",
+        "host_brain/app/monitor_ui/src/store/useAppStore.js",
+        "host_brain/app/monitor_ui/src/api/obs.js",
+        "host_brain/app/monitor_ui/src/components/Layout.jsx",
+        "host_brain/app/monitor_ui/src/components/StatusBadge.jsx",
+        "host_brain/app/monitor_ui/src/components/ServiceCard.jsx"
+      ]
+    },
+    "TASK-0183": {
+      "title": "M17-B 全服务健康总览页",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/monitor_ui/src/pages/Overview.jsx"
+      ]
+    },
+    "TASK-0184": {
+      "title": "M17-C 会话列表页",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/monitor_ui/src/pages/Sessions.jsx"
+      ]
+    },
+    "TASK-0185": {
+      "title": "M17-D Dify 风格链路可视化页（React Flow + Dagre）",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/monitor_ui/src/pages/Trace.jsx",
+        "host_brain/app/monitor_ui/src/components/trace/CustomNode.jsx",
+        "host_brain/app/monitor_ui/src/components/trace/NodeDetailPanel.jsx",
+        "host_brain/app/monitor_ui/src/utils/traceLayout.js"
+      ]
+    },
+    "TASK-0186": {
+      "title": "M17-E 指标大盘页（ECharts）",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/monitor_ui/src/pages/Metrics.jsx",
+        "host_brain/app/monitor_ui/src/components/charts/LineChart.jsx",
+        "host_brain/app/monitor_ui/src/components/charts/BarChart.jsx"
+      ]
+    }
+  },
+  "build_output": "host_brain/app/static/monitor/",
+  "tech_stack": {
+    "react": "18.3.1",
+    "vite": "5.4.21",
+    "tailwindcss": "3.4.16",
+    "react_router": "6.28.0",
+    "react_flow": "12.3.6",
+    "echarts": "5.5.1",
+    "zustand": "5.0.2",
+    "lucide_react": "0.468.0",
+    "dagre": "@dagrejs/dagre"
+  },
+  "pages": [
+    {"route": "/overview", "status": "functional", "features": ["服务健康卡片网格", "汇总统计行", "30s 自动轮询", "mock 降级"]},
+    {"route": "/sessions", "status": "functional", "features": ["会话表格", "过滤栏", "分页控件", "点击跳转 Trace"]},
+    {"route": "/trace",    "status": "functional", "features": ["React Flow 节点图", "Dagre 自动布局", "CustomNode 卡片", "NodeDetailPanel 侧边面板", "JSON 折叠展开", "mock 数据支持"]},
+    {"route": "/metrics",  "status": "functional", "features": ["请求量折线图", "拒绝率折线图", "reason_code 条形图", "延迟 P50/P95 柱状图", "时间范围选择器", "mock 降级"]}
+  ],
+  "quality_gates": {
+    "npm_run_build": "PASS",
+    "zero_lint_errors": true,
+    "design_dify_style": true,
+    "no_emoji_icons": true,
+    "no_dark_theme": true
+  }
+}

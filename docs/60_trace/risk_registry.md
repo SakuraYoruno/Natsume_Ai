@@ -383,3 +383,61 @@ TASK-0076~0083 的风险点从 DevTasks.md 阶段 8 任务描述与代码审查�
 | 5 | R112-1 | 可观测性 | canon_sync DEGRADED 非阻断可能掩盖同步失败 | 监控告警覆盖 STARTUP_CANON_SYNC_DEGRADED |
 | 6 | R113-1 | 可观测性 | context_pack 分槽注入失败降级为空槽 | 监控告警覆盖 WCANON_SLOT_VIOLATION |
 | 7 | R111-1 | 数据安全 | SSOT 文件并发写入无文件锁 | 多进程部署时引入文件锁 |
+
+---
+
+## 22. M17 前端 SPA（监控面板）
+
+| # | 风险描述 | 等级 | 缓解措施 | 后续行动 |
+|---|---------|------|---------|---------|
+| BUG-FE-001 | `Overview.jsx` 汇总统计行读取不存在的 `data.summary` 字段，API 实际返回顶层 `total/up/degraded/down`，导致 4 个统计卡片始终显示 `—` | P0 | 无缓解，功能性 Bug | 修正字段读取路径：`data?.total` 等顶层字段 |
+| WARN-FE-006 | `api/obs.js` 中 `fetchTraceNodes` 调用路径为 `/obs/trace/{id}/nodes`，后端路由为 `/obs/trace/{id}`（无 `/nodes` 后缀），当前 Mock 分支掩盖此问题 | P1 | Mock 数据降级掩盖，切换真实 API 后立即 404 | 修正前端 API 调用路径，或后端补充 `/nodes` 子路由 |
+| WARN-FE-004 | `ServiceCard` 组件接收 `name/status/latency/detail` 属性，API 返回 `service_id/display_name/status/p95_ms/call_count`，字段名不匹配 | P1 | 服务卡片内容无法正确渲染 | 对齐 ServiceCard props 与 API 响应字段名 |
+| WARN-FE-005 | `Sessions.jsx` 翻页时 `load` 的 `useCallback` 依赖 `page` 闭包陈旧值，翻页请求页码可能不正确 | P1 | 翻页功能异常 | 将 `page` 作为参数传入 `load` 而非依赖闭包 |
+| WARN-FE-001 | `zustand` 实际版本 `5.0.2`，DevSpec §29.2 约定 `4.x`，版本偏差 | P2 | 当前代码使用基础 `create` 无 API 破坏 | 更新 DevSpec 版本约定为 5.x |
+| WARN-FE-002 | Sessions → Trace 跳转实际使用路径参数 `/trace/:requestId`，DevSpec 约定为 hash query `#trace?rid=xxx` | P2 | 功能等价，仅文档不一致 | 更新 DevSpec §29.3.2 以反映实际实现 |
+| WARN-FE-003 | `useAppStore.js` 缺少 `lastPolledAt` 和 `pollingError` 两个契约字段，轮询错误通过组件本地 state 管理 | P2 | 多页面无法共享轮询状态 | 补充 Store 字段，将轮询错误提升到全局 |
+| WARN-FE-007 | Metrics 页 Mock 降级使用 `Math.random()` 生成数据，无"数据来源：模拟"标注，可能误导运维 | P2 | 防御性设计合理，仅缺少标注 | Mock 降级时显示明显的模拟数据标注 |
+
+---
+
+## 23. M18 后端 API 扩展（obs 模块）
+
+| # | 风险描述 | 等级 | 缓解措施 | 后续行动 |
+|---|---------|------|---------|---------|
+| BUG-BE-001 | `obs_routes.py` Trace 降级路径访问 `ledger.governor_log`（不存在的属性），应使用 `ledger.fetch_by_time_range("governor_log", ...)`，当前降级路径触发时抛出 `AttributeError` → 500 | P0 | 无缓解，降级路径 500 | 改为 `ledger.fetch_by_time_range("governor_log", 0, _now_ms())` |
+| BUG-BE-002 | `trace_node_builder.py` 四个 `_fetch_*_nodes` 方法均拉取全量审计日志（`ts_start=0`）后内存过滤 `request_id`，无时间范围约束 | P1 | 当前数据量小未暴露 | 增加 `request_id` 直接 SQL 过滤，或限制时间窗口 |
+| WARN-BE-001 | `obs_routes.py` 的 `/obs/services/health` 端点与 `ServiceHealthAggregator` 类完全独立实现，服务列表不一致（Route 层 15 个 vs Service 层 15 个但分组不同） | P1 | Route 层功能更弱，维护成本高 | Route 层改为调用 `ServiceHealthAggregator` |
+| WARN-BE-002 | `obs_routes.py` 的 `/obs/sessions` 端点与 `SessionQueryService` 类完全独立实现，Service 层支持更多过滤参数 | P1 | 功能不一致，维护成本高 | Route 层改为调用 `SessionQueryService` |
+| WARN-BE-003 | `obs_routes.py` 的 `/obs/metrics/timeseries` 端点与 `MetricsTimeseriesService` 类完全独立实现，Service 层支持降采样和 reason_code 分布 | P1 | 功能不一致，维护成本高 | Route 层改为调用 `MetricsTimeseriesService` |
+| WARN-BE-005 | `trace_node_builder.py` 的 `_infer_parent_ids` 使用简单线性链推断 parent，不支持并行分支结构，DevSpec §29.6.1 要求支持分支/并行 | P1 | Trace 图并行节点布局错误 | 改为基于 `node_type` 和时间戳的树形推断 |
+| WARN-BE-004 | `ServiceHealthResult.to_dict()` 返回字段名 `name`，DevSpec §29.8.1 约定字段名为 `service_name` | P2 | 前端解析可能失败 | 修正 `to_dict()` 返回字段名 |
+| WARN-BE-006 | `session_query.py` 的 `_fmt_ts` 使用本地时区 `datetime.fromtimestamp`，跨时区部署时显示错误时间 | P2 | 单机部署无影响 | 改为 UTC 时间或 ISO 8601 格式 |
+| WARN-BE-007 | `metrics_timeseries.py` 的 `_compute_latency_dist` 仅有 `Overall` 维度，无法按 ASR/TTS/LLM 分解延迟，不满足 DevSpec §29.7.1 多服务维度要求 | P2 | 功能不完整 | 从各服务审计表分别聚合 P50/P95 |
+| WARN-TEST-001 | `test_trace_node_builder.py` T-OBS-TRACE-03 未验证并行分支场景，测试通过不代表并行分支逻辑正确 | P2 | 测试覆盖不足 | 补充并行分支测试用例 |
+| WARN-TEST-002 | `obs_routes.py` 4 个端点无集成测试，Route 层与 Service 层重复实现差异未被覆盖 | P2 | 测试覆盖缺口 | 补充 Route 层集成测试 |
+
+---
+
+## 风险等级统计（更新至 M17/M18）
+
+| 等级 | 数量 | 说明 |
+|------|------|------|
+| **P0** | 2 | M17/M18 新增：BUG-FE-001（Overview 统计卡片）、BUG-BE-001（Trace 降级路径 500） |
+| **P1** | 27 | M17/M18 新增 6 项（Trace API 路径不匹配、ServiceCard 字段名、Sessions 翻页、全量数据加载、Route/Service 三组平行实现、并行分支不支持）+ 原有 21 项 |
+| **P2** | 43 | M17/M18 新增 8 项 + 原有 35 项 |
+
+---
+
+## M17/M18 P0/P1 风险按优先级排序（新增，建议跟进顺序）
+
+| 优先级 | 风险编号 | 领域 | 摘要 | 建议行动 |
+|--------|---------|------|------|----------|
+| 1 | BUG-BE-001 | 后端 Bug | Trace 降级路径 AttributeError → 500 | 修正为 `fetch_by_time_range` 调用 |
+| 2 | BUG-FE-001 | 前端 Bug | Overview 统计卡片始终显示 `—` | 修正字段读取路径 |
+| 3 | WARN-FE-006 | 前后端对齐 | Trace API 路径不匹配，切换真实 API 后 404 | 对齐前端调用路径或补充后端子路由 |
+| 4 | WARN-BE-001~003 | 架构 | Route 层与 Service 层三组平行实现 | Route 层改为调用 Service 层 |
+| 5 | BUG-BE-002 | 性能 | TraceNodeBuilder 全量数据加载无时间约束 | 增加 SQL 级 request_id 过滤 |
+| 6 | WARN-FE-004 | 前后端对齐 | ServiceCard 字段名不匹配 | 对齐 props 与 API 响应字段名 |
+| 7 | WARN-FE-005 | 前端 Bug | Sessions 翻页闭包陈旧值 | 将 page 作为参数传入 |
+| 8 | WARN-BE-005 | 功能缺失 | Trace 并行分支不支持 | 改为树形 parent 推断 |

@@ -27,6 +27,9 @@ venv/
 env/
 ENV/
 
+# --- Node.js ---
+node_modules/
+
 # --- Build / package artifacts ---
 build/
 dist/

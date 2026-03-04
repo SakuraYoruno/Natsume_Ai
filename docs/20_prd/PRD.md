@@ -448,6 +448,112 @@ FR-OBS-002 开发/生产模式差异
 - 描述：开发模式可显示内部 debug trace；生产模式默认隐藏，仅留 user_facing_hint。
 - 验收：切换模式后输出差异符合预期；不影响裁决与审计事实。
 
+FR-OBS-003 监控面板 v3 前端架构（多页面 SPA + Dify 简约风格）
+- 描述：将现有单页 panel.html 重建为多页面 SPA 架构，采用 Dify 风格简约设计系统（白色/浅灰背景、蓝色主色调、卡片式布局、左侧导航栏）；CSS/JS 完全分离，支持页面路由切换（Overview / Sessions / Trace / Metrics）。
+- 关键约束：
+  - 纯原生 HTML/CSS/JS（无构建工具依赖），可直接由 FastAPI StaticFiles 托管；
+  - 引入 Bootstrap Icons 作为图标库；
+  - 左侧固定导航栏，顶部面包屑，主内容区自适应；
+  - 响应式布局（≥1024px 双栏，<1024px 单栏）。
+- 验收：
+  - 四个页面均可正常渲染且无 JS 报错；
+  - 导航切换流畅，URL hash 路由可书签；
+  - 在 1280×800 和 1920×1080 分辨率下布局正常。
+
+FR-OBS-004 全服务健康总览页（Overview）
+- 描述：展示双端（Host + Edge）所有服务的实时健康状态，包括：ASR、TTS、VTS/Live2D、LLM Gateway、Neo4j、SQLite Ledger、Chroma/向量库、Scheduler、Bond Engine、Memory Distiller、MCP Provider 等；每个服务以卡片形式展示状态（UP/DOWN/DEGRADED）、响应延迟、版本号、最后检查时间。
+- 关键约束：
+  - 30 秒自动轮询，支持手动刷新；
+  - 服务状态变化时卡片颜色/图标即时更新；
+  - 顶部汇总行：总服务数 / 健康数 / 降级数 / 故障数。
+- 验收：
+  - 所有已注册服务均出现在总览页；
+  - DOWN 状态服务卡片显示红色边框 + 错误摘要；
+  - 轮询失败时显示"上次已知状态"而非崩溃。
+
+FR-OBS-005 会话列表页（Sessions）
+- 描述：展示历史会话列表，支持按时间范围、状态（OK/REJECT/ERROR）、关键词搜索过滤；每行显示 request_id、时间戳、状态、耗时、来源通道；支持分页（每页 20 条）。
+- 关键约束：
+  - 点击任意会话行跳转到链路可视化页（Trace 页）并自动加载该 request_id；
+  - 支持 URL 参数传递 request_id（?rid=xxx）；
+  - 列表支持按时间倒序排列。
+- 验收：
+  - 列表正常分页，翻页不丢失过滤条件；
+  - 点击跳转后 Trace 页自动展示对应链路；
+  - 搜索关键词高亮显示。
+
+FR-OBS-006 Dify 风格链路可视化页（Trace）
+- 描述：以节点流图方式展示单次请求的完整链路，参考 Dify Workflow 编排视图风格（只读展示，不可编辑）：
+  - 每个节点为圆角卡片，显示节点名称（Intent / Governor / Skill / ASR / TTS / VTS 等）、状态图标、耗时；
+  - 节点间用有向连线连接，表示执行顺序；
+  - 点击节点展开侧边面板，显示该节点的入参（input）、出参（output）、状态、reason_code、时间戳；
+  - 支持节点状态颜色区分：成功（绿）/ 拒绝（红）/ 降级（橙）/ 运行中（蓝动画）。
+- 关键约束：
+  - 节点布局自动计算（从左到右，支持分支/并行节点）；
+  - 入参/出参以 JSON 格式化展示，支持折叠/展开；
+  - 支持全屏模式；
+  - 节点数量 ≤50 时渲染流畅（无卡顿）。
+- 验收：
+  - 给定 request_id 后节点图正确渲染；
+  - 点击节点侧边面板正确显示入参/出参；
+  - 并行节点（如 ASR+TTS 同时）以分支形式展示；
+  - 空链路时显示友好空状态。
+
+FR-OBS-007 指标大盘页（Metrics）
+- 描述：展示系统级指标趋势，包括：请求量趋势（折线图）、拒绝率趋势（折线图）、reason_code 分布（横向条形图）、各服务响应延迟分布（P50/P95 柱状图）、Edge 服务资源使用趋势（ASR/TTS 队列深度）。
+- 关键约束：
+  - 时间范围选择器：最近 1h / 6h / 24h / 7d；
+  - 图表使用 Canvas 原生绘制（无第三方图表库依赖）；
+  - 数据点不足时显示"数据采集中"占位。
+- 验收：
+  - 切换时间范围后图表数据正确更新；
+  - 图表在 HiDPI 屏幕下清晰（devicePixelRatio 支持）；
+  - 无数据时不崩溃，显示友好提示。
+
+FR-OBS-008 全服务健康聚合 API
+- 描述：提供 GET /obs/services/health 端点，聚合返回双端所有已注册服务的健康状态快照，包含：service_id、name、side（host/edge）、status（UP/DOWN/DEGRADED）、latency_ms、version、last_check_ts、error_summary（可选）。
+- 关键约束：
+  - 响应时间 ≤500ms（并发探测，非串行）；
+  - 单个服务探测失败不影响其他服务返回；
+  - 支持 ?side=host|edge 过滤参数。
+- 验收：
+  - 所有已注册服务均出现在响应中；
+  - 单服务超时时该服务 status=DOWN，其余正常返回；
+  - 响应结构稳定（字段不随服务状态变化而缺失）。
+
+FR-OBS-009 会话列表 API
+- 描述：提供 GET /obs/sessions 端点，返回分页会话列表，支持过滤参数：start_time、end_time、status（OK/REJECT/ERROR）、channel（voice/wechat/api）、keyword（模糊匹配 request_id/intent）；每条记录包含：request_id、session_id、ts_ms、status、duration_ms、channel、reason_code（若拒绝）。
+- 关键约束：
+  - 分页参数：page（默认1）、page_size（默认20，最大100）；
+  - 响应包含 total_count 用于前端分页渲染；
+  - 查询性能：10 万条记录下 p95 ≤200ms。
+- 验收：
+  - 过滤参数组合正确生效；
+  - total_count 与实际数据一致；
+  - 空结果时返回 results=[] 而非 404。
+
+FR-OBS-010 链路节点详情 API
+- 描述：提供 GET /obs/trace/{request_id}/nodes 端点，返回指定请求的结构化节点列表，每个节点包含：node_id、node_type（intent/governor/skill/asr/tts/vts/llm/memory/bond 等）、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input（JSON）、output（JSON）、reason_code（可选）、parent_node_id（支持树形结构）、side（host/edge）。
+- 关键约束：
+  - 节点顺序按 start_ts_ms 排序；
+  - input/output 字段大小限制 ≤64KB（超出截断并标注 truncated=true）；
+  - 支持 ?include_io=false 参数跳过入参/出参（用于列表预览）。
+- 验收：
+  - 给定有效 request_id 返回完整节点列表；
+  - 节点 parent_node_id 正确反映执行树结构；
+  - 不存在的 request_id 返回 404 + 稳定错误结构。
+
+FR-OBS-011 指标时序 API
+- 描述：提供 GET /obs/metrics/timeseries 端点，返回多维度时序数据，支持参数：metric（request_count/reject_rate/latency_p50/latency_p95/reason_code_dist）、interval（1m/5m/1h）、start_time、end_time；响应格式：{metric, interval, data_points: [{ts, value}], unit}。
+- 关键约束：
+  - 数据点数量上限 1000（超出自动降采样）；
+  - 无数据区间返回 null 值点（不跳过），保证时序连续性；
+  - 支持多 metric 批量查询（?metric=request_count,reject_rate）。
+- 验收：
+  - 时序数据点时间间隔与 interval 参数一致；
+  - 降采样后数据点数量 ≤1000；
+  - 批量查询返回 {metrics: {metric_name: {data_points: [...]}}} 结构。
+
 ### 4.17 通道与外显（CHANNEL/AVATAR）
 
 FR-CHANNEL-001 微信通道 I/O 事件化与审计串联
@@ -708,6 +814,21 @@ M16-A Canon 治理 API 强化：FR-CANON-GOV-001（canon_routes.py 依赖注入�
 M16-B 长期记忆检索强化：FR-MEM-PAGE-001（list_proposals() cursor-based 分页 + 深页码性能优化）— **DONE**
 M16-C 调度器任务持久化：FR-SCHED-PERSIST-001（NatsumeScheduler CRON 任务 SQLite 持久化 + 重启后自动恢复）— **DONE**
 M16-D M16 发布清单 — **DONE**
+
+M17 监控面板 v3 — 全服务监控 + Dify 风格链路可视化（前端重建）：
+M17-A 前端架构重建：FR-OBS-003（多页面 SPA 架构 + 左侧导航 + Dify 简约风格设计系统）— **DONE**（2026-03-04）
+M17-B 全服务健康总览页：FR-OBS-004（双端所有服务状态卡片：ASR/TTS/VTS/LLM/Neo4j/SQLite/Chroma/Scheduler 等 + 实时健康轮询）— **DONE**（2026-03-04）
+M17-C 会话列表页：FR-OBS-005（会话列表 + 搜索过滤 + 分页 + 状态徽章）— **DONE**（2026-03-04）
+M17-D Dify 风格链路可视化页：FR-OBS-006（节点流图展示：每个节点卡片含状态/耗时/入参/出参展开面板 + 连线动画）— **DONE**（2026-03-04）
+M17-E 指标大盘页：FR-OBS-007（请求趋势图 + 拒绝率趋势 + reason_code 分布 + 服务延迟分布）— **DONE**（2026-03-04）
+M17-F M17 发布清单 — **DONE**（2026-03-04：React+Vite SPA 构建成功；四页面全量可用；m17_release.json 已生成）
+
+M18 监控面板 v3 后端 API 扩展（为 M17 提供数据支撑）：
+M18-A 全服务健康聚合 API：FR-OBS-008（GET /obs/services/health — 聚合双端所有服务健康状态 + 延迟 + 版本）— **DONE**（2026-03-04）
+M18-B 会话列表 API：FR-OBS-009（GET /obs/sessions — 分页会话列表 + 过滤 + 统计摘要）— **DONE**（2026-03-04）
+M18-C 链路节点详情 API：FR-OBS-010（GET /obs/trace/{request_id}/nodes — 结构化节点列表含入参/出参/耗时/状态）— **DONE**（2026-03-04）
+M18-D 指标时序 API：FR-OBS-011（GET /obs/metrics/timeseries — 多维度时序数据：请求量/拒绝率/延迟分位数）— **DONE**（2026-03-04）
+M18-E M18 发布清单 — **DONE**（2026-03-04：26 个新增测试全部通过；1577 全量通过；m18_release.json 已生成）
 
 ---
 

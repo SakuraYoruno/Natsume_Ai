@@ -1015,6 +1015,58 @@ class SQLiteLedger:
         payload = {key: row.get(key) for key in SANDBOX_EXEC_COLUMNS}
         self._insert("sandbox_exec_log", payload)
 
+    # M18-A: LLM 云节点调用记录
+    def log_llm_node_call(self, row: dict[str, Any]) -> None:
+        """记录单次 LLM 云节点调用（被动监控埋点）。
+
+        必填字段：request_id / node_id / provider / model_id / status / ts_ms
+        可选字段：reason_code / latency_ms / input_digest / output_digest
+        """
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "node_id": str(row.get("node_id") or ""),
+            "provider": str(row.get("provider") or ""),
+            "model_id": str(row.get("model_id") or ""),
+            "status": str(row.get("status") or "OK"),
+            "reason_code": row.get("reason_code"),
+            "latency_ms": row.get("latency_ms"),
+            "input_digest": row.get("input_digest"),
+            "output_digest": row.get("output_digest"),
+            "ts_ms": int(row.get("ts_ms") or 0),
+        }
+        self._insert("llm_node_call_log", payload)
+
+    # M18-A: LangGraph 会话链路追踪
+    def log_graph_run_trace(self, row: dict[str, Any]) -> None:
+        """记录一次完整的 LangGraph 会话链路（每次 graph run 结束后写入）。
+
+        必填字段：request_id / status / ts_ms
+        可选字段：session_id / total_latency_ms / reason_code / node_count / nodes_json / edges_json
+        """
+        import json as _json
+        nodes = row.get("nodes_json")
+        edges = row.get("edges_json")
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "session_id": row.get("session_id"),
+            "total_latency_ms": row.get("total_latency_ms"),
+            "status": str(row.get("status") or "OK"),
+            "reason_code": row.get("reason_code"),
+            "node_count": row.get("node_count"),
+            "nodes_json": _json.dumps(nodes, ensure_ascii=False) if isinstance(nodes, (list, dict)) else nodes,
+            "edges_json": _json.dumps(edges, ensure_ascii=False) if isinstance(edges, (list, dict)) else edges,
+            "ts_ms": int(row.get("ts_ms") or 0),
+        }
+        # 使用 INSERT OR REPLACE 支持幂等写入（同一 request_id 覆盖）
+        keys = list(payload.keys())
+        serialized = [self._encode_value("graph_run_trace", k, payload[k]) for k in keys]
+        placeholders = ", ".join("?" for _ in keys)
+        columns = ", ".join(keys)
+        sql = f"INSERT OR REPLACE INTO graph_run_trace ({columns}) VALUES ({placeholders})"
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(sql, serialized)
+
     def log_scheduler_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SCHEDULER_EVENT_COLUMNS}
         self._insert("scheduler_event_log", payload)
@@ -1758,6 +1810,47 @@ class SQLiteLedger:
                     ON scheduler_tasks (enabled);
                 CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_trigger_mode
                     ON scheduler_tasks (trigger_mode);
+
+                -- M18-A: LLM 云节点调用记录表（被动监控，每次 generate() 写入）
+                CREATE TABLE IF NOT EXISTS llm_node_call_log (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id      TEXT NOT NULL,
+                    node_id         TEXT NOT NULL,
+                    provider        TEXT NOT NULL,
+                    model_id        TEXT NOT NULL,
+                    status          TEXT NOT NULL,
+                    reason_code     TEXT,
+                    latency_ms      INTEGER,
+                    input_digest    TEXT,
+                    output_digest   TEXT,
+                    ts_ms           INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_llm_node_call_request
+                    ON llm_node_call_log (request_id);
+                CREATE INDEX IF NOT EXISTS idx_llm_node_call_node_id
+                    ON llm_node_call_log (node_id);
+                CREATE INDEX IF NOT EXISTS idx_llm_node_call_ts
+                    ON llm_node_call_log (ts_ms);
+
+                -- M18-A: LangGraph 会话链路追踪表（每次 graph run 写入完整节点链路）
+                CREATE TABLE IF NOT EXISTS graph_run_trace (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id      TEXT NOT NULL UNIQUE,
+                    session_id      TEXT,
+                    total_latency_ms INTEGER,
+                    status          TEXT NOT NULL,
+                    reason_code     TEXT,
+                    node_count      INTEGER,
+                    nodes_json      TEXT,
+                    edges_json      TEXT,
+                    ts_ms           INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_graph_run_trace_request
+                    ON graph_run_trace (request_id);
+                CREATE INDEX IF NOT EXISTS idx_graph_run_trace_session
+                    ON graph_run_trace (session_id);
+                CREATE INDEX IF NOT EXISTS idx_graph_run_trace_ts
+                    ON graph_run_trace (ts_ms);
                 """
             )
 
