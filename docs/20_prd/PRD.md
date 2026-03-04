@@ -644,6 +644,12 @@ M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异
 M8 运行时集成闭环：NFR-PERF-001（性能基线采集）+ NFR-REL-001（故障注入矩阵全通过）+ FR-CORE-004（冷启动端到端可验收）+ 运行时脚本集成（OBS/MCP 新模块接入 start_host_side.ps1）— **DONE**（2026-03-03：980 passed，性能基线/故障注入/冷启动/脚本集成全量实现）
 M9 World Canon 闭环 + 日记 Evolution 关联：FR-WCANON-001~003（World Canon 文件 SSOT + 索引同步 + 注入分槽 + Evolution 提案流程）+ FR-DIARY-002（日记→canon_proposal 关联）— **DONE**（2026-03-03：1032 passed，World Canon SSOT/同步/分槽/Evolution/日记关联全量实现；R-85~R-89 追踪完成；m9_release.json 已生成）
 M10-A Canon 治理 API：FR-WCANON-002 扩展（Canon 提案审核 REST API：/canon/proposals CRUD + approve/reject 端点 + 审计串联）— **DONE**（2026-03-03：1041 passed，canon_routes.py 7 个端点全量实现；T-Canon-API-01~08 全部通过；R-90~R-91 追踪完成）
+M10-B ASR 热词注入：FR-ASR-001（WorldCanonStore.extract_hotwords + GET /canon/hotwords + inject_canon_hotwords）— **DONE**（2026-03-03：1054 passed；R-92~R-94 追踪完成）
+M10-C 记忆蒸馏系统：FR-MEM-001~003（MemoryDistillationEngine.distill_top_k + semantic_memory 表 + context_pack.semantic_slot）— **DONE**（2026-03-03：1062 passed；R-95~R-97 追踪完成）
+M10-D P1/P2 收口：F-41/F-06/F-35/F-36/F-37/F-39/F-12/F-05/F-01/F-02/F-11 全部修复 + Edge 端优化（TTS/VTS/ASR 全链路贯通）— **DONE**（2026-03-04：1090 passed；R-98~R-108 追踪完成；m10d_release.json 已生成）
+M10-E _CANON_HOTWORDS_CACHE TTL 自动失效：FR-ASR-001 + NFR-PERF-001（_HotwordsCache 类 TTL=300s + T-HW-TTL-01~05）— **DONE**（2026-03-04：1090 passed；R-109 追踪完成；m10e_release.json 已生成）
+M10-P2 P2 代码质量收口：F-16 _fetch_by_request 白名单校验补全 + F-13/F-14/F-15/F-25/F-38 已修复核查 + F-04/F-07/F-08 设备验证包标记 BLOCKED_ENV — **DONE**（2026-03-04：1090 passed；R-110~R-112 追踪完成）
+M11 调度器 + 桌面留言 + 梦境 + 日记 + 主动对话 + Focus Mode：FR-SCHED-001/002 + FR-DESKTOP-001/002 + FR-DREAM-001/002 + FR-DIARY-001 + FR-PROACTIVE-001/002 + FR-FOCUS-001 — **PLANNED**（待 DevSpec §21~§23 工程契约拆解后开发）
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单

@@ -816,7 +816,7 @@ class SQLiteLedger:
         import json as _json
 
         d = dict(row)
-        # 鍙嶅簭鍒楀寲 JSON 瀛楁 
+        # 鍙嶅簭鍒楀寲 JSON 瀛楁
         for json_field in ("source_memory_ids", "tags"):
             raw = d.get(json_field, "[]")
             try:
@@ -1755,7 +1755,11 @@ class SQLiteLedger:
         return [self._decode_row(table, row) for row in rows]
 
     def _fetch_by_request(self, table: str, request_id: str) -> list[dict[str, Any]]:
-
+        # F-16: validate table name with whitelist to prevent SQL injection.
+        if table not in _ALLOWED_TABLES:
+            raise ValueError(
+                f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
+            )
         rows = self._conn.execute(
             f"SELECT * FROM {table} WHERE request_id = ? ORDER BY id ASC",
             (request_id,),
