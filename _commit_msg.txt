@@ -1,11 +1,8 @@
-chore(P2): P2 代码质量收口 + 设备验证包 BLOCKED_ENV + M11 规划框架
+feat(M11-A): DevSpec §21~§23 工程契约 + T-SCHED-01~07 单元测试 + M11 错误码
 
-- host_brain/audit/sqlite_ledger.py: _fetch_by_request 补充表名白名单校验（F-16 遗漏）
-- docs/30_devspec/DevTasks.md:
-  - TASK-0137 状态改为 BLOCKED_ENV（F-04 Redis 验证暂缓）
-  - 新增 TASK-0144~0146（P2 收口任务）
-  - 新增 M11 规划框架（M11-A~F）
-- docs/60_trace/requirements_trace.md: 新增 R-110~R-112（P2 收口 + BLOCKED_ENV）
-- docs/20_prd/PRD.md: 补充 M10-B/C/D/E/P2 里程碑状态 + M11 PLANNED
+- docs/30_devspec/DevSpec.md: 追加 §21（调度器）§22（桌面留言）§23（梦境/日记/主动对话/Focus Mode）工程契约
+- docs/30_devspec/DevTasks.md: 追加 TASK-0147~0153（M11-A~F 任务卡）
+- host_brain/core/errors.py: 新增 M11 错误码（SCHED_TASK_NOT_FOUND/DUPLICATE/CONFIG_INVALID/SCOPE_VIOLATION/DESKTOP_MSG_*/RATE_LIMIT_EXCEEDED/FOCUS_*）
+- tests/unit/test_scheduler_engine.py: T-SCHED-01~07 全量单元测试（12 passed）
 
-全量测试：1090 passed, 2 skipped
+全量测试：1102 passed, 2 skipped

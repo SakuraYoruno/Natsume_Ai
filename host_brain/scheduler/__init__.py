@@ -8,6 +8,7 @@ from host_brain.scheduler.task_registry import (
 )
 from host_brain.scheduler.scheduler import NatsumeScheduler
 from host_brain.scheduler.health import SchedulerHealthReporter
+from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers
 
 __all__ = [
     "SchedulerTaskConfig",
@@ -16,4 +17,6 @@ __all__ = [
     "TaskPriority",
     "NatsumeScheduler",
     "SchedulerHealthReporter",
+    "scheduler_router",
+    "set_scheduler_providers",
 ]
