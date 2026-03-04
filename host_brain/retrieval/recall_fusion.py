@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import sqlite3
 from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -33,6 +34,10 @@ DEFAULT_RECALL_COLLECTION = "episodic"
 DEFAULT_RECALL_TOP_K = 8
 DEFAULT_RECALL_SCORE_WEIGHT = 1.0
 DEFAULT_NODE_SELECTOR = "default"
+
+# 混合检索默认权重（TASK-0202）
+DEFAULT_VECTOR_WEIGHT: float = 0.7
+DEFAULT_FTS_WEIGHT: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -123,12 +128,27 @@ class RecallFusionServiceContract:
         runtime_config: RecallRuntimeConfig | None = None,
         node_id: str | None = None,
         available: bool = True,
+        use_hybrid: bool = True,
+        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+        fts_weight: float = DEFAULT_FTS_WEIGHT,
+        fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
         self.chroma = chroma_client or InMemoryChromaClient()
         self.runtime_config = runtime_config or _default_runtime_config()
         self.node_id = str(node_id).strip() if node_id is not None else None
         self.available = bool(available)
+        self.use_hybrid = bool(use_hybrid)
+        self.vector_weight = float(vector_weight)
+        self.fts_weight = float(fts_weight)
+        # 初始化 FTS5 检索器（如果启用混合检索）
+        self._fts_searcher: FullTextSearcher | None = None
+        if self.use_hybrid:
+            try:
+                self._fts_searcher = FullTextSearcher(db_path=fts_db_path)
+            except Exception:
+                # FTS5 不可用时降级为纯向量检索
+                self._fts_searcher = None
 
     def recall(
         self,
@@ -254,6 +274,13 @@ class RecallFusionServiceContract:
             fused_candidates.values(),
             key=lambda row: (-float(row["score"]), str(row["doc_id"]), str(row["source_ref"])),
         )
+
+        # 混合检索：叠加 FTS5 全文检索结果（TASK-0202）
+        if self.use_hybrid and self._fts_searcher is not None:
+            candidates = self._apply_hybrid_fusion(
+                vector_candidates=candidates,
+                query=normalized_query,
+            )
 
         if not candidates:
             reason_code = route_errors[0]["reason_code"] if route_errors else RETR_RECALL_UNAVAILABLE
@@ -761,3 +788,272 @@ def _normalize_vector(raw: list[float] | tuple[float, ...] | Any) -> list[float]
     if not isinstance(raw, (list, tuple)):
         return []
     return [float(value) for value in raw]
+
+
+# ── FullTextSearcher（TASK-0202）────────────────────────────────────────────
+
+class FullTextSearcher:
+    """基于 SQLite FTS5 的全文检索器。
+
+    使用 episodic_fts 虚拟表（由 0021_episodic_fts5.sql 迁移创建）进行全文检索。
+    支持中文字符边界分割（unicode61 tokenizer）。
+    """
+
+    def __init__(self, *, db_path: str | None = None) -> None:
+        """初始化 FTS5 检索器。
+
+        Args:
+            db_path: SQLite 数据库路径。None 时使用内存数据库（仅用于测试）。
+
+        Raises:
+            RuntimeError: 如果 FTS5 虚拟表不可用。
+        """
+        self._db_path = db_path or ":memory:"
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._ensure_fts_table()
+
+    def _ensure_fts_table(self) -> None:
+        """确保 episodic_fts 虚拟表存在（若不存在则创建）。"""
+        try:
+            self._conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(
+                    memory_id UNINDEXED,
+                    content,
+                    tokenize = "unicode61"
+                )
+                """
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            raise RuntimeError(f"FTS5 虚拟表创建失败（SQLite 可能不支持 FTS5）: {exc}") from exc
+
+    def index_memory(self, *, memory_id: str, content: str) -> None:
+        """将一条 Episodic 记忆写入 FTS5 索引。
+
+        Args:
+            memory_id: 记忆唯一 ID。
+            content: 记忆文本内容。
+        """
+        # 先删除旧记录（幂等写入）
+        self._conn.execute("DELETE FROM episodic_fts WHERE memory_id = ?", (memory_id,))
+        self._conn.execute(
+            "INSERT INTO episodic_fts(memory_id, content) VALUES (?, ?)",
+            (memory_id, str(content or "")),
+        )
+        self._conn.commit()
+
+    def search(self, query: str, *, top_k: int = 8) -> list[dict[str, Any]]:
+        """全文检索，返回匹配的记忆列表。
+
+        Args:
+            query: 检索查询文本。
+            top_k: 最多返回条数。
+
+        Returns:
+            候选列表，每条含 doc_id / snippet / fts_score（归一化到 [0, 1]）。
+        """
+        if not str(query or "").strip():
+            return []
+        try:
+            # FTS5 使用 bm25() 函数计算相关性分数（负值，越小越相关）
+            rows = self._conn.execute(
+                """
+                SELECT memory_id, content, bm25(episodic_fts) AS bm25_score
+                FROM episodic_fts
+                WHERE episodic_fts MATCH ?
+                ORDER BY bm25_score
+                LIMIT ?
+                """,
+                (str(query), int(top_k)),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # FTS5 查询语法错误或表不存在时降级返回空
+            return []
+
+        if not rows:
+            return []
+
+        # 将 bm25 负分归一化到 [0, 1]（最相关 → 1.0）
+        raw_scores = [float(row["bm25_score"]) for row in rows]
+        min_score = min(raw_scores)
+        max_score = max(raw_scores)
+        score_range = abs(max_score - min_score) if max_score != min_score else 1.0
+
+        results: list[dict[str, Any]] = []
+        for row, raw_score in zip(rows, raw_scores):
+            # bm25 分数为负，越小（绝对值越大）越相关
+            normalized = round((raw_score - max_score) / (-score_range) if score_range > 0 else 1.0, 6)
+            normalized = max(0.0, min(1.0, normalized))
+            results.append({
+                "doc_id": str(row["memory_id"]),
+                "snippet": str(row["content"])[:512],
+                "fts_score": normalized,
+            })
+        return results
+
+    def close(self) -> None:
+        """关闭数据库连接。"""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+
+# ── HybridFusionStrategy（TASK-0202）────────────────────────────────────────
+
+class HybridFusionStrategy:
+    """向量检索 + 全文检索混合融合策略。
+
+    融合公式：final_score = vector_score × vector_weight + fts_score × fts_weight
+    要求：vector_weight + fts_weight == 1.0（否则抛出 ValueError）。
+    """
+
+    def __init__(
+        self,
+        *,
+        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+        fts_weight: float = DEFAULT_FTS_WEIGHT,
+    ) -> None:
+        """初始化混合融合策略。
+
+        Args:
+            vector_weight: 向量检索权重（默认 0.7）。
+            fts_weight: 全文检索权重（默认 0.3）。
+
+        Raises:
+            ValueError: 如果 vector_weight + fts_weight != 1.0。
+        """
+        total = round(float(vector_weight) + float(fts_weight), 6)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"vector_weight + fts_weight 必须等于 1.0，当前为 {total}"
+            )
+        self.vector_weight = float(vector_weight)
+        self.fts_weight = float(fts_weight)
+
+    def fuse(
+        self,
+        *,
+        vector_candidates: list[dict[str, Any]],
+        fts_candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """融合向量检索和全文检索结果。
+
+        Args:
+            vector_candidates: 向量检索候选列表（含 doc_id / score 字段）。
+            fts_candidates: 全文检索候选列表（含 doc_id / fts_score 字段）。
+
+        Returns:
+            融合后的候选列表，按 final_score 降序排列，同 doc_id 去重保留最高分。
+        """
+        # 构建 doc_id → 候选 映射
+        fused: dict[str, dict[str, Any]] = {}
+
+        # 处理向量检索结果
+        for cand in vector_candidates:
+            doc_id = str(cand.get("doc_id") or "")
+            if not doc_id:
+                continue
+            vector_score = float(cand.get("score") or 0.0)
+            entry = dict(cand)
+            entry["vector_score"] = vector_score
+            entry["fts_score"] = 0.0
+            entry["score"] = round(vector_score * self.vector_weight, 6)
+            fused[doc_id] = entry
+
+        # 处理全文检索结果，与向量结果融合
+        for fts_cand in fts_candidates:
+            doc_id = str(fts_cand.get("doc_id") or "")
+            if not doc_id:
+                continue
+            fts_score = float(fts_cand.get("fts_score") or 0.0)
+            if doc_id in fused:
+                # 已有向量结果，叠加全文分数
+                existing = fused[doc_id]
+                vector_score = float(existing.get("vector_score") or 0.0)
+                final_score = round(
+                    vector_score * self.vector_weight + fts_score * self.fts_weight,
+                    6,
+                )
+                existing["fts_score"] = fts_score
+                existing["score"] = final_score
+                # 更新 metadata 中的融合信息
+                metadata = dict(existing.get("metadata") or {})
+                metadata["fts_score"] = fts_score
+                metadata["hybrid_fused"] = True
+                existing["metadata"] = metadata
+            else:
+                # 仅全文命中，无向量结果
+                snippet = str(fts_cand.get("snippet") or "")
+                entry = {
+                    "doc_id": doc_id,
+                    "source_ref": f"memory://episodic/{doc_id}",
+                    "snippet": snippet,
+                    "score": round(fts_score * self.fts_weight, 6),
+                    "confidence": round(fts_score * self.fts_weight, 6),
+                    "vector_score": 0.0,
+                    "fts_score": fts_score,
+                    "metadata": {
+                        "fts_score": fts_score,
+                        "hybrid_fused": True,
+                        "matched_routes": ["fts"],
+                    },
+                    "evidence_ref": f"evd://episodic/{doc_id}",
+                }
+                fused[doc_id] = entry
+
+        # 按 final_score 降序排列
+        return sorted(
+            fused.values(),
+            key=lambda row: (-float(row["score"]), str(row["doc_id"])),
+        )
+
+
+# ── RecallFusionServiceContract 混合检索方法（TASK-0202）────────────────────
+
+def _apply_hybrid_fusion_impl(
+    self: "RecallFusionServiceContract",
+    *,
+    vector_candidates: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]]:
+    """在 RecallFusionServiceContract 中执行混合融合。
+
+    Args:
+        vector_candidates: 向量检索候选列表。
+        query: 检索查询文本。
+
+    Returns:
+        融合后的候选列表（FTS5 不可用时返回原向量候选）。
+    """
+    if self._fts_searcher is None:
+        return vector_candidates
+
+    try:
+        fts_results = self._fts_searcher.search(query, top_k=DEFAULT_RECALL_TOP_K)
+    except Exception:
+        # FTS5 检索失败时降级为纯向量
+        return vector_candidates
+
+    if not fts_results:
+        return vector_candidates
+
+    # 校验权重
+    try:
+        strategy = HybridFusionStrategy(
+            vector_weight=self.vector_weight,
+            fts_weight=self.fts_weight,
+        )
+    except ValueError:
+        return vector_candidates
+
+    return strategy.fuse(
+        vector_candidates=vector_candidates,
+        fts_candidates=fts_results,
+    )
+
+
+# 将混合融合方法绑定到 RecallFusionServiceContract
+RecallFusionServiceContract._apply_hybrid_fusion = _apply_hybrid_fusion_impl  # type: ignore[attr-defined]

@@ -33,6 +33,15 @@ from host_brain.scheduler.health import (
     STATUS_OK,
     STATUS_SUSPENDED,
 )
+from host_brain.scheduler.health_check_prompt import (
+    DEFAULT_HEARTBEAT_PROMPT,
+    HEARTBEAT_EVENT_TYPE_ALERT,
+    HEARTBEAT_EVENT_TYPE_OK,
+    LLM_UNAVAILABLE_RESPONSE,
+    MAX_RESPONSE_CHARS,
+    parse_heartbeat_response,
+    truncate_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +385,115 @@ class NatsumeScheduler:
             logger.error("Failed to log scheduler event for %s: %s", task_id, exc)
 
     # ── 管理接口 ──
+
+    # ── 心跳健康检测（TASK-0200）──
+
+    def register_agent_health_check(
+        self,
+        *,
+        interval_seconds: int = 1800,
+        heartbeat_prompt: str | None = None,
+        max_response_chars: int = MAX_RESPONSE_CHARS,
+        llm_caller: Any | None = None,
+    ) -> None:
+        """注册 AgentHealthCheck 定时任务（默认 30 分钟间隔）。
+
+        Args:
+            interval_seconds: 心跳检测间隔（秒），默认 1800（30 分钟）。
+            heartbeat_prompt: 自定义 Heartbeat Prompt，None 时使用默认模板。
+            max_response_chars: 回复最大字符数，超出部分截断后写入审计。
+            llm_caller: 可调用对象 (prompt: str) -> str，用于向 LLM 发送心跳 Prompt。
+                        None 时跳过 LLM 调用，直接写入 HEARTBEAT_ALERT（LLM 不可用降级）。
+        """
+        self._heartbeat_prompt = str(heartbeat_prompt or DEFAULT_HEARTBEAT_PROMPT)
+        self._heartbeat_max_chars = int(max_response_chars)
+        self._heartbeat_llm_caller = llm_caller
+
+        task = SchedulerTaskConfig(
+            task_id="agent_health_check",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": interval_seconds},
+            intent_template={"skill_name": "agent_health_check"},
+            priority=TaskPriority.MEDIUM,
+            enabled=True,
+            max_consecutive_failures=5,
+        )
+        # 注册任务（若已存在则跳过）
+        if self._registry.get("agent_health_check") is None:
+            self._registry.register(task)
+        if self._running:
+            self._schedule_task(task)
+        logger.info("AgentHealthCheck task registered (interval=%ds)", interval_seconds)
+
+    def _run_agent_health_check(self) -> dict[str, Any]:
+        """执行一次心跳检测：发送 Prompt → 解析回复 → 静默过滤或推送告警。"""
+        prompt = getattr(self, "_heartbeat_prompt", DEFAULT_HEARTBEAT_PROMPT)
+        max_chars = getattr(self, "_heartbeat_max_chars", MAX_RESPONSE_CHARS)
+        llm_caller = getattr(self, "_heartbeat_llm_caller", None)
+        ts = now_ms()
+
+        # 调用 LLM
+        raw_response: str
+        if llm_caller is not None:
+            try:
+                raw_response = str(llm_caller(prompt))
+            except Exception as exc:
+                logger.warning("AgentHealthCheck LLM call failed: %s", exc)
+                raw_response = LLM_UNAVAILABLE_RESPONSE
+        else:
+            raw_response = LLM_UNAVAILABLE_RESPONSE
+
+        # 解析状态
+        state = parse_heartbeat_response(raw_response)
+        truncated = truncate_response(raw_response, max_chars)
+
+        if state == "OK":
+            # 静默丢弃，不写入任何审计记录
+            logger.debug("AgentHealthCheck: HEARTBEAT_OK — silent discard")
+            return {"status": HEARTBEAT_EVENT_TYPE_OK, "ts_ms": ts}
+
+        # 推送 HEARTBEAT_ALERT
+        logger.warning("AgentHealthCheck: HEARTBEAT_ALERT — raw_response=%r", truncated)
+        self._log_heartbeat_alert(raw_response=truncated, ts_ms=ts)
+        return {"status": HEARTBEAT_EVENT_TYPE_ALERT, "raw_response": truncated, "ts_ms": ts}
+
+    def _log_heartbeat_alert(self, *, raw_response: str, ts_ms: int) -> None:
+        """将 HEARTBEAT_ALERT 写入审计 Ledger（复用 scheduler_event_log 表）。"""
+        if self._ledger is None:
+            return
+        try:
+            self._ledger.log_scheduler_event({
+                "event_id": f"hb_alert_{uuid.uuid4().hex}",
+                "task_id": "agent_health_check",
+                "trigger_ts": ts_ms,
+                "intent_id": None,
+                "status": HEARTBEAT_EVENT_TYPE_ALERT,
+                "reason_code": HEARTBEAT_EVENT_TYPE_ALERT,
+                "mode_at_trigger": self._get_sys_mode(),
+                "error_detail": raw_response,
+                "ts_ms": ts_ms,
+            })
+        except Exception as exc:
+            logger.error("Failed to log heartbeat alert: %s", exc)
+
+    def list_health(self) -> list[dict[str, Any]]:
+        """返回所有已注册任务的健康状态列表（含 agent_health_check）。
+
+        Returns:
+            每个任务的健康状态字典，含 task_id / status / error_count / last_run_ts。
+        """
+        result: list[dict[str, Any]] = []
+        for task in self._registry.enabled_tasks():
+            state = self._health.get_task_state(task.task_id) if hasattr(self._health, "get_task_state") else {}
+            result.append({
+                "task_id": task.task_id,
+                "status": state.get("status", STATUS_OK) if state else STATUS_OK,
+                "error_count": self._error_counts.get(task.task_id, 0),
+                "last_run_ts": self._last_run_ts.get(task.task_id),
+                "enabled": task.enabled,
+                "trigger_mode": task.trigger_mode.value,
+            })
+        return result
 
     def reset_error_count(self, task_id: str) -> None:
         """重置某任务的连续错误计数（用于手动恢复暂停任务）。"""

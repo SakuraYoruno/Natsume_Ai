@@ -3024,7 +3024,7 @@ TASK-XXXX 标题
 - 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001；BUG-BE-001；BUG-BE-002；BUG-FE-001。
 
 ### TASK-0200 M20-A：AgentHealthCheck — SchedulerEngine 心跳精神状态检测
-- 状态：TODO
+- 状态：DONE
 - 任务描述：在 `SchedulerEngine` 中注册 `agent_health_check` 定时任务（默认间隔 30 分钟），向 LLM 节点发送 Heartbeat Prompt，依据回复内容判断 Agent 精神状态；回复含 `HEARTBEAT_OK` 则静默丢弃，否则推送 `HEARTBEAT_ALERT` 事件至审计 Ledger 并写入可观测日志。
 - 输入：
   - `host_brain/scheduler/scheduler.py`（SchedulerEngine 现有实现）；
@@ -3051,7 +3051,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-001；FR-OBS-008；T-HB-01~05。
 
 ### TASK-0201 M20-B：ContextCompressor 压缩前静默保存（COMPRESS_BEFORE_SAVE）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：在 `ContextCompressor` 触发压缩（`summary` / `hybrid` 策略）前，先将当前对话中的重要信息静默写入 Episodic 记忆库，防止压缩操作导致关键上下文永久丢失；并在审计字段中增加 `COMPRESS_BEFORE_SAVE` 事件记录，标记压缩前保存的时机与内容摘要。
 - 输入：
   - `host_brain/memory/context_compressor.py`（ContextCompressor 现有实现）；
@@ -3078,7 +3078,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-MEM-005；T-CTX-01~09。
 
 ### TASK-0202 M20-C：Episodic 混合检索增强（向量 70% + 全文 BM25/FTS5 30%）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：在 `recall_fusion.py` 的 Episodic 检索管线中叠加全文检索（SQLite FTS5 或 BM25 算法），与现有向量检索结果按权重融合（向量 70%、全文 30%，权重可配置），提升对专有名词、人名、地名等语义向量不擅长内容的召回率；同时处理跨块语义断裂问题（相邻分块合并策略）。
 - 输入：
   - `host_brain/retrieval/recall_fusion.py`（现有向量检索融合实现）；

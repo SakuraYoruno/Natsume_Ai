@@ -20,6 +20,9 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_event_id, now_ms
 
+# 压缩前静默保存审计事件类型（TASK-0201）
+COMPRESS_BEFORE_SAVE_EVENT_TYPE: str = "COMPRESS_BEFORE_SAVE"
+
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -78,6 +81,10 @@ SummaryProvider = Callable[[list[dict[str, Any]]], str]
 
 # ── ContextCompressor ─────────────────────────────────────────────────────────
 
+# EpisodicWriter 类型：接收 text + evidence_refs，写入 Episodic 记忆
+EpisodicWriter = Callable[[str, list[str]], Any]
+
+
 class ContextCompressor:
     """多轮对话上下文压缩服务。"""
 
@@ -87,10 +94,16 @@ class ContextCompressor:
         summary_provider: SummaryProvider | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         recent_turns: int = DEFAULT_RECENT_TURNS,
+        pre_compress_save_enabled: bool = True,
+        episodic_writer: EpisodicWriter | None = None,
+        ledger: Any | None = None,
     ) -> None:
         self._summary_provider = summary_provider
         self._max_tokens = max(1, int(max_tokens))
         self._recent_turns = max(1, int(recent_turns))
+        self._pre_compress_save_enabled = bool(pre_compress_save_enabled)
+        self._episodic_writer = episodic_writer
+        self._ledger = ledger
 
     def compress(
         self,
@@ -98,8 +111,16 @@ class ContextCompressor:
         *,
         max_tokens: int | None = None,
         strategy: Literal["sliding_window", "summary", "hybrid"] = STRATEGY_HYBRID,
+        session_id: str | None = None,
     ) -> CompressedContext:
-        """压缩多轮对话上下文。"""
+        """压缩多轮对话上下文。
+
+        Args:
+            turns: 多轮对话列表。
+            max_tokens: 最大 token 预算，None 时使用初始化配置。
+            strategy: 压缩策略（sliding_window / summary / hybrid）。
+            session_id: 会话 ID，用于 COMPRESS_BEFORE_SAVE 审计字段。
+        """
         limit = int(max_tokens) if max_tokens is not None else self._max_tokens
         normalized = _normalize_turns(turns)
 
@@ -112,6 +133,10 @@ class ContextCompressor:
                 degraded=True,
                 reason_code=CTX_COMPRESS_INPUT_INVALID,
             )
+
+        # 压缩前静默保存（仅 summary / hybrid 策略触发，TASK-0201）
+        if strategy in (STRATEGY_SUMMARY, STRATEGY_HYBRID):
+            self._pre_compress_save(normalized, strategy=strategy, session_id=session_id)
 
         if strategy == STRATEGY_SLIDING:
             return self._sliding_window(normalized, limit)
@@ -179,6 +204,69 @@ class ContextCompressor:
             degraded=compressed.degraded,
             reason_code=compressed.reason_code,
         )
+
+    # ── 压缩前静默保存（TASK-0201）────────────────────────────────────────────
+
+    def _pre_compress_save(
+        self,
+        turns: list[dict[str, Any]],
+        *,
+        strategy: str,
+        session_id: str | None,
+    ) -> int:
+        """压缩前将对话中的重要片段静默写入 Episodic 记忆库。
+
+        Args:
+            turns: 已归一化的对话轮次列表。
+            strategy: 当前压缩策略名称（用于审计字段）。
+            session_id: 会话 ID（用于审计字段）。
+
+        Returns:
+            实际写入的片段数量（0 表示未写入或功能已禁用）。
+        """
+        if not self._pre_compress_save_enabled:
+            return 0
+        if self._episodic_writer is None:
+            return 0
+        if not turns:
+            return 0
+
+        saved_count = 0
+        # 提取所有 assistant 轮次作为重要片段（含 evidence_refs 占位）
+        for idx, turn in enumerate(turns):
+            role = str(turn.get("role") or "user")
+            content = str(turn.get("content") or "").strip()
+            if not content:
+                continue
+            # 仅保存 assistant 回复（含有实质性信息的轮次）
+            if role != "assistant":
+                continue
+            evidence_ref = f"compress://pre_save/{session_id or 'unknown'}/turn_{idx:03d}"
+            try:
+                self._episodic_writer(content, [evidence_ref])
+                saved_count += 1
+            except Exception:
+                pass  # 静默失败，不影响压缩主流程
+
+        # 写入 COMPRESS_BEFORE_SAVE 审计事件
+        if self._ledger is not None and hasattr(self._ledger, "log_scheduler_event"):
+            try:
+                from host_brain.core.ids import now_ms as _now_ms
+                self._ledger.log_scheduler_event({
+                    "event_id": f"cbs_{new_event_id()}",
+                    "task_id": "context_compressor",
+                    "trigger_ts": _now_ms(),
+                    "intent_id": None,
+                    "status": COMPRESS_BEFORE_SAVE_EVENT_TYPE,
+                    "reason_code": COMPRESS_BEFORE_SAVE_EVENT_TYPE,
+                    "mode_at_trigger": session_id or "unknown",
+                    "error_detail": f"saved_count={saved_count} strategy={strategy}",
+                    "ts_ms": _now_ms(),
+                })
+            except Exception:
+                pass  # 审计失败不影响主流程
+
+        return saved_count
 
     # ── 内部策略 ──────────────────────────────────────────────────────────────
 

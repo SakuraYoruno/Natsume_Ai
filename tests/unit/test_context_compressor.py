@@ -222,3 +222,127 @@ class TestLLMUnavailableFallback:
         # 最近轮次仍被保留
         if result.turns:
             assert "turn 7" in result.turns[-1]["content"]
+
+
+# ── T-CTX-06~09: 压缩前静默保存（COMPRESS_BEFORE_SAVE，TASK-0201）────────────
+
+class TestPreCompressSave:
+    """T-CTX-06~09: ContextCompressor 压缩前静默保存验收测试。"""
+
+    def _make_episodic_writer(self):
+        """返回 (writer_callable, saved_records_list)。"""
+        saved: list[tuple[str, list[str]]] = []
+
+        def _writer(text: str, evidence_refs: list[str]) -> None:
+            saved.append((text, evidence_refs))
+
+        return _writer, saved
+
+    def _make_mock_ledger(self):
+        """返回 (ledger, events_list)。"""
+        events: list[dict] = []
+
+        class _MockLedger:
+            def log_scheduler_event(self, row: dict) -> None:
+                events.append(dict(row))
+
+        return _MockLedger(), events
+
+    # T-CTX-06: summary 策略触发压缩时，_pre_compress_save 被调用
+    def test_summary_strategy_triggers_pre_save(self):
+        writer, saved = self._make_episodic_writer()
+        ledger, events = self._make_mock_ledger()
+        compressor = ContextCompressor(
+            summary_provider=_mock_summary_provider,
+            episodic_writer=writer,
+            ledger=ledger,
+            pre_compress_save_enabled=True,
+        )
+        # 构造含 assistant 轮次的对话
+        turns = [
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好！我是夏目，有什么可以帮你的？"},
+            {"role": "user", "content": "今天天气怎么样？"},
+            {"role": "assistant", "content": "今天天气晴朗，适合出行。"},
+        ]
+        compressor.compress(turns, strategy=STRATEGY_SUMMARY, session_id="sess_001")
+
+        # 至少写入 1 条 Episodic 记录（assistant 轮次）
+        assert len(saved) >= 1
+
+    # T-CTX-06 补充：保存内容含有效 evidence_refs
+    def test_pre_save_records_contain_evidence_refs(self):
+        writer, saved = self._make_episodic_writer()
+        compressor = ContextCompressor(
+            summary_provider=_mock_summary_provider,
+            episodic_writer=writer,
+            pre_compress_save_enabled=True,
+        )
+        turns = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "这是一个重要的回答，包含关键信息。"},
+        ]
+        compressor.compress(turns, strategy=STRATEGY_SUMMARY, session_id="sess_002")
+
+        assert len(saved) >= 1
+        text, evidence_refs = saved[0]
+        assert len(evidence_refs) >= 1
+        assert all(isinstance(ref, str) and ref for ref in evidence_refs)
+
+    # T-CTX-07: 审计 Ledger 中存在 COMPRESS_BEFORE_SAVE 记录
+    def test_audit_ledger_compress_before_save_event(self):
+        writer, saved = self._make_episodic_writer()
+        ledger, events = self._make_mock_ledger()
+        compressor = ContextCompressor(
+            summary_provider=_mock_summary_provider,
+            episodic_writer=writer,
+            ledger=ledger,
+            pre_compress_save_enabled=True,
+        )
+        turns = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "重要回答内容。"},
+        ]
+        compressor.compress(turns, strategy=STRATEGY_SUMMARY, session_id="sess_003")
+
+        # 审计 Ledger 中应有 COMPRESS_BEFORE_SAVE 事件
+        assert len(events) >= 1
+        event = events[0]
+        assert event["status"] == "COMPRESS_BEFORE_SAVE"
+        assert "sess_003" in str(event.get("mode_at_trigger") or "")
+
+    # T-CTX-08: pre_compress_save_enabled=False 时跳过保存
+    def test_pre_compress_save_disabled_skips_write(self):
+        writer, saved = self._make_episodic_writer()
+        ledger, events = self._make_mock_ledger()
+        compressor = ContextCompressor(
+            summary_provider=_mock_summary_provider,
+            episodic_writer=writer,
+            ledger=ledger,
+            pre_compress_save_enabled=False,
+        )
+        turns = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "回答内容。"},
+        ]
+        compressor.compress(turns, strategy=STRATEGY_SUMMARY, session_id="sess_004")
+
+        # 禁用时不写入任何记录
+        assert len(saved) == 0
+        assert len(events) == 0
+
+    # T-CTX-09: sliding_window 策略不触发 _pre_compress_save
+    def test_sliding_window_does_not_trigger_pre_save(self):
+        writer, saved = self._make_episodic_writer()
+        ledger, events = self._make_mock_ledger()
+        compressor = ContextCompressor(
+            episodic_writer=writer,
+            ledger=ledger,
+            pre_compress_save_enabled=True,
+        )
+        turns = _make_turns(5)
+        compressor.compress(turns, strategy=STRATEGY_SLIDING, session_id="sess_005")
+
+        # sliding_window 不触发保存
+        assert len(saved) == 0
+        assert len(events) == 0
