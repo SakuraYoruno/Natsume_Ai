@@ -1,5 +1,5 @@
 {
-  "Nastume_ENV": "test",
+  "Natsume_ENV": "test",
   "EDGE_RPC_HOST": "127.0.0.1",
   "EDGE_RPC_PORT": "18888",
   "EDGE_ALLOW_INSECURE_AUTH": "true",

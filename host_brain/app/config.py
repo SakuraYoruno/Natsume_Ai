@@ -44,7 +44,7 @@ S_HOST_CONFIG = "S_HOST_CONFIG"
 HOST_SNAPSHOT_COMPONENT = "host"
 
 HOST_FIELD_TO_ENV_KEY = {
-    "env": "Nastume_ENV",
+    "env": "Natsume_ENV",
     "llm_provider": "HOST_LLM_PROVIDER",
     "openai_api_key_set": "OPENAI_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
@@ -188,13 +188,13 @@ def load_host_config(
         merged.update(dict(local_overrides))
 
     issues: list[ConfigIssue] = []
-    runtime_env = _as_text(merged.get("Nastume_ENV"), ENV_DEV).lower()
+    runtime_env = _as_text(merged.get("Natsume_ENV"), ENV_DEV).lower()
     if runtime_env not in ALLOWED_ENVS:
         issues.append(
             ConfigIssue(
                 reason_code=CONFIG_ENV_INVALID,
-                detail=f"Nastume_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
-                field="Nastume_ENV",
+                detail=f"Natsume_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
+                field="Natsume_ENV",
             )
         )
         return _failure(issues)

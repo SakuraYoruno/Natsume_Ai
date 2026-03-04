@@ -92,7 +92,7 @@
   -EdgeMode ssh `
   -EdgeSshHost "192.168.1.20" `
   -EdgeSshUser "edgeuser" `
-  -EdgeRepoPath "D:/Nastume_Ai" `
+  -EdgeRepoPath "D:/Natsume_Ai" `
   -EdgeHealthUrl "http://192.168.1.20:17800/v1/edge/health"
 ```
 

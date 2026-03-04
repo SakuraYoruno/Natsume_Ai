@@ -1,6 +1,6 @@
 {
   "env": {
-    "Nastume_ENV": "test",
+    "Natsume_ENV": "test",
     "EDGE_RPC_GATEWAY_ENABLED": "true",
     "EDGE_ASR_ENABLED": "false",
     "EDGE_TTS_ENABLED": "false",

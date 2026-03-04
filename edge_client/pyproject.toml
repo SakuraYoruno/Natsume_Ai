@@ -1,7 +1,7 @@
 [project]
 name = "edge-client"
 version = "0.0.1"
-description = "Nastume Edge Client skeleton"
+description = "Natsume Edge Client skeleton"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111.0,<1",

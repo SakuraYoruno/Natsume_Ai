@@ -1,10 +1,10 @@
 受众：MASTER
 标题：产品需求文档（PRD）
 
-# Nastume Ai 产品需求文档（PRD）
+# Natsume Ai 产品需求文档（PRD）
 版本：v1.4.1（可验收基线）
 基线白皮书：v1.4（意识主权宪法与人格设定）
-适用架构：Host_Brain（Python，含 LangGraph 编排） + Nastume_Body（Edge） + Cloud Exocortex + ClawdBot
+适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
 
 ---
 
@@ -61,7 +61,7 @@ DoD（Definition of Done：完成门槛）
 ## 1. 产品定义
 
 ### 1.1 一句话定义
-Nastume Ai 是一个“意识主权”的本地智能体：语义内核（LLM）负责叙事与意图草案，Host 负责裁决与执行，所有动作必须票据化并可审计回放。
+Natsume Ai 是一个“意识主权”的本地智能体：语义内核（LLM）负责叙事与意图草案，Host 负责裁决与执行，所有动作必须票据化并可审计回放。
 
 ### 1.2 用户与使用场景
 - 主用户：Master（本地开发者），在 Host 机器上调试与运行；Edge 负责“身体”侧能力（语音/视觉/微信接收/头像驱动）。

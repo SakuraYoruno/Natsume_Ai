@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("Nastume.obs.health")
+logger = logging.getLogger("Natsume.obs.health")
 
 # ---------------------------------------------------------------------------
 # 服务注册表

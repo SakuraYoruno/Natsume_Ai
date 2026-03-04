@@ -1,5 +1,5 @@
 {
-  "schema_version": "Nastume.release.v1",
+  "schema_version": "Natsume.release.v1",
   "milestone": "M13",
   "release_name": "Bond 阶段晋级 + 长期记忆蒸馏 + Bond 端到端联动",
   "git_commit": "22ab33c",

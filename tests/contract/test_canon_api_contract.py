@@ -39,7 +39,7 @@ def tmp_world_root(tmp_path: Path) -> Path:
         "status": "active",
         "title": "系统术语",
         "tags": ["system", "terms"],
-        "body": "Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事，Host 负责裁决。",
+        "body": "Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事，Host 负责裁决。",
         "updated_by": "seed",
         "ts_ms": 1700000000000,
     }
@@ -73,7 +73,7 @@ def test_submit_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger) -
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=["system", "terms", "v2"],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
         proposer_node_id="api.canon_proposals::req-001",
         summary="扩展系统术语定义",
     )
@@ -99,7 +99,7 @@ def test_submit_proposal_duplicate(store: WorldCanonStore, ledger: SQLiteLedger)
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-dup",
     )
     # 第二次提交相同 proposal_id，ledger 中已存在
@@ -123,7 +123,7 @@ def test_submit_proposal_execution_claim_rejected(store: WorldCanonStore) -> Non
             target_doc_id="wc-001-system-terms",
             proposed_title="系统术语 v2",
             proposed_tags=[],
-            proposed_body="Nastume Ai 已执行所有任务，执行完成。",
+            proposed_body="Natsume Ai 已执行所有任务，执行完成。",
             proposer_node_id="api.canon_proposals::req-bad",
         )
     # 错误码常量存在
@@ -142,7 +142,7 @@ def test_approve_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger) 
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=["system", "terms"],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
         proposer_node_id="api.canon_proposals::req-approve",
     )
 
@@ -151,7 +151,7 @@ def test_approve_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger) 
         "prop-approve",
         proposed_title="系统术语 v2",
         proposed_tags=["system", "terms"],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
         approver_node_id="api.canon_proposals.approve::req-approve",
     )
 
@@ -183,14 +183,14 @@ def test_approve_non_pending_proposal_rejected(store: WorldCanonStore) -> None:
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-applied",
     )
     store.approve_proposal_with_content(
         "prop-already-applied",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         approver_node_id="api.canon_proposals.approve::req-applied",
     )
 
@@ -200,7 +200,7 @@ def test_approve_non_pending_proposal_rejected(store: WorldCanonStore) -> None:
             "prop-already-applied",
             proposed_title="系统术语 v2",
             proposed_tags=[],
-            proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+            proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
             approver_node_id="api.canon_proposals.approve::req-applied-2",
         )
     assert WCANON_PROPOSAL_STATUS_INVALID == "WCANON_PROPOSAL_STATUS_INVALID"
@@ -221,7 +221,7 @@ def test_reject_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger, t
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-reject",
     )
 
@@ -250,14 +250,14 @@ def test_reject_non_pending_proposal_rejected(store: WorldCanonStore) -> None:
         target_doc_id="wc-001-system-terms",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-reject-applied",
     )
     store.approve_proposal_with_content(
         "prop-reject-applied",
         proposed_title="系统术语 v2",
         proposed_tags=[],
-        proposed_body="Nastume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
+        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         approver_node_id="api.canon_proposals.approve::req-reject-applied",
     )
 
@@ -278,7 +278,7 @@ def test_list_proposals_pagination(store: WorldCanonStore, ledger: SQLiteLedger)
             target_doc_id="wc-001-system-terms",
             proposed_title=f"系统术语 v{i+2}",
             proposed_tags=[],
-            proposed_body=f"Nastume Ai 是一个意识主权本地智能体，版本 {i+2}，语义内核负责叙事草案，Host 负责裁决。",
+            proposed_body=f"Natsume Ai 是一个意识主权本地智能体，版本 {i+2}，语义内核负责叙事草案，Host 负责裁决。",
             proposer_node_id=f"api.canon_proposals::req-list-{i}",
         )
 

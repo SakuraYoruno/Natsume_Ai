@@ -10,7 +10,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("Nastume.obs.metrics")
+logger = logging.getLogger("Natsume.obs.metrics")
 
 # 支持的 metric 类型
 VALID_METRICS = frozenset([

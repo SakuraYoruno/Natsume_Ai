@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("Nastume.obs.trace")
+logger = logging.getLogger("Natsume.obs.trace")
 
 # 节点类型映射（日志表 → node_type）
 _LOG_TABLE_TO_NODE_TYPE: Dict[str, str] = {

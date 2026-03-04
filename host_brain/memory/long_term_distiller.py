@@ -26,7 +26,7 @@ from host_brain.core.ids import new_request_id, now_ms
 from host_brain.memory.distillation import MemoryDistillationEngine, LlmSummaryClient
 from host_brain.memory.canon_world_store import WorldCanonStore
 
-_logger = logging.getLogger("Nastume.long_term_distiller")
+_logger = logging.getLogger("Natsume.long_term_distiller")
 
 # 每次蒸馏循环最多生成的 Canon 提案数（FR-MEM-DISTILL-002）
 MAX_PROPOSALS_PER_CYCLE = 5

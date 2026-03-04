@@ -362,7 +362,7 @@ TASK-XXXX 标题
 - 任务描述：补齐 Host 与 Edge 的配置加载契约（env/local/default 分层、冷启动默认值、敏感项占位），替换当前 placeholder，实现可复现配置入口。
 - 输入：DevSpec 1.2.1/13（环境与配置分层）；PRD FR-CORE-004、FR-OBS-001。
 - 输出：
-  - Host 配置对象（`Nastume_ENV`、服务开关、降级开关、超时/重试口径）；
+  - Host 配置对象（`Natsume_ENV`、服务开关、降级开关、超时/重试口径）；
   - Edge 配置对象（RPC 端点、能力矩阵、资源闸门默认值）；
   - 配置验证失败的稳定 reason_code/stage 映射；
   - fixtures：无 key / 缺配置 / 非法配置样例。
@@ -3022,6 +3022,92 @@ TASK-XXXX 标题
   - zero_regressions=true；
   - total_tests_passed ≥ 1598。
 - 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001；BUG-BE-001；BUG-BE-002；BUG-FE-001。
+
+### TASK-0200 M20-A：AgentHealthCheck — SchedulerEngine 心跳精神状态检测
+- 状态：TODO
+- 任务描述：在 `SchedulerEngine` 中注册 `agent_health_check` 定时任务（默认间隔 30 分钟），向 LLM 节点发送 Heartbeat Prompt，依据回复内容判断 Agent 精神状态；回复含 `HEARTBEAT_OK` 则静默丢弃，否则推送 `HEARTBEAT_ALERT` 事件至审计 Ledger 并写入可观测日志。
+- 输入：
+  - `host_brain/scheduler/scheduler.py`（SchedulerEngine 现有实现）；
+  - `host_brain/audit/sqlite_ledger.py`（审计写入接口）；
+  - DevSpec §21.4（SchedulerEngine 接口契约）；
+  - FR-OBS-001（关键指标与面板）。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`：新增 `AgentHealthCheckTask` 任务工厂，含 Heartbeat Prompt 模板（可配置）、最大回复字符限制（默认 300）、静默过滤逻辑（`HEARTBEAT_OK` 丢弃）、异常推送逻辑（写入 `heartbeat_alert` 审计事件）；
+  - `host_brain/scheduler/health_check_prompt.py`（新增）：Heartbeat Prompt 模板常量与 `parse_heartbeat_response(text) -> Literal["OK", "ALERT"]` 解析函数；
+  - `host_brain/audit/sqlite_ledger.py`：新增 `heartbeat_events` 表迁移引用（或复用现有 `scheduler_events` 表，增加 `event_type=HEARTBEAT_ALERT` 枚举值）；
+  - `tests/unit/test_agent_health_check.py`（新增）：T-HB-01~05（正常回复静默、异常回复推送、自定义 Prompt、字符截断、LLM 不可用降级）。
+- 验收标准：
+  - T-HB-01：回复含 `HEARTBEAT_OK` 时，`heartbeat_events` 表无新增记录，且不触发任何推送；
+  - T-HB-02：回复不含 `HEARTBEAT_OK` 时，`heartbeat_events` 表写入一条 `event_type=HEARTBEAT_ALERT` 记录，含 `ts_ms`、`raw_response`（截断至 300 字符）、`task_id`；
+  - T-HB-03：LLM 不可用（超时/异常）时，降级写入 `HEARTBEAT_ALERT`，`raw_response` 为 `"LLM_UNAVAILABLE"`，不抛出未捕获异常；
+  - T-HB-04：`parse_heartbeat_response` 对含 `HEARTBEAT_OK` 的任意大小写变体均返回 `"OK"`；
+  - T-HB-05：任务注册后可通过 `SchedulerEngine.list_health()` 查询到 `agent_health_check` 任务状态；
+  - 全量测试 ≥1598 passed，0 failed（在 M19 基线上新增）。
+- 涉及文件路径：
+  - `host_brain/scheduler/scheduler.py`；
+  - `host_brain/scheduler/health_check_prompt.py`（新增）；
+  - `host_brain/audit/sqlite_ledger.py`；
+  - `tests/unit/test_agent_health_check.py`（新增）。
+- 关联需求/测试：FR-OBS-001；FR-OBS-008；T-HB-01~05。
+
+### TASK-0201 M20-B：ContextCompressor 压缩前静默保存（COMPRESS_BEFORE_SAVE）
+- 状态：TODO
+- 任务描述：在 `ContextCompressor` 触发压缩（`summary` / `hybrid` 策略）前，先将当前对话中的重要信息静默写入 Episodic 记忆库，防止压缩操作导致关键上下文永久丢失；并在审计字段中增加 `COMPRESS_BEFORE_SAVE` 事件记录，标记压缩前保存的时机与内容摘要。
+- 输入：
+  - `host_brain/memory/context_compressor.py`（ContextCompressor 现有实现）；
+  - `host_brain/memory/episodic.py`（EpisodicStore 写入接口）；
+  - `host_brain/audit/sqlite_ledger.py`（审计写入接口）；
+  - DevSpec §24.2.2（ContextCompressor 接口）；
+  - FR-MEM-005（召回融合输出必须为证据包）。
+- 输出：
+  - `host_brain/memory/context_compressor.py`：在 `compress()` 方法中，当策略为 `summary` 或 `hybrid` 且消息数超过压缩阈值时，先调用 `_pre_compress_save(messages, episodic_writer)` 提取并写入重要片段（含 `evidence_refs`），再执行压缩；新增 `pre_compress_save_enabled: bool`（默认 `True`）配置项；
+  - `host_brain/audit/sqlite_ledger.py`：新增 `COMPRESS_BEFORE_SAVE` 审计事件类型（或复用现有 `memory_events` 表，增加 `event_type` 枚举值），记录字段：`ts_ms`、`session_id`、`saved_count`（保存片段数）、`strategy`（压缩策略名）；
+  - `tests/unit/test_context_compressor.py`：新增 T-CTX-06~08（压缩前保存触发、保存内容含 evidence_refs、pre_compress_save_enabled=False 时跳过保存）。
+- 验收标准：
+  - T-CTX-06：`summary` 策略触发压缩时，`_pre_compress_save` 被调用，Episodic 写入至少 1 条记录，且该记录含有效 `evidence_refs`；
+  - T-CTX-07：审计 Ledger 中存在 `event_type=COMPRESS_BEFORE_SAVE` 记录，含 `session_id`、`saved_count ≥ 1`、`strategy="summary"`；
+  - T-CTX-08：`pre_compress_save_enabled=False` 时，`_pre_compress_save` 不被调用，Episodic 无新增记录；
+  - T-CTX-09：`sliding_window` 策略不触发 `_pre_compress_save`（仅截断，无需保存）；
+  - 原有 T-CTX-01~05 全部继续通过；
+  - 全量测试 ≥1603 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/memory/context_compressor.py`；
+  - `host_brain/memory/episodic.py`（只读接口，不修改，仅调用）；
+  - `host_brain/audit/sqlite_ledger.py`；
+  - `tests/unit/test_context_compressor.py`。
+- 关联需求/测试：FR-MEM-005；T-CTX-01~09。
+
+### TASK-0202 M20-C：Episodic 混合检索增强（向量 70% + 全文 BM25/FTS5 30%）
+- 状态：TODO
+- 任务描述：在 `recall_fusion.py` 的 Episodic 检索管线中叠加全文检索（SQLite FTS5 或 BM25 算法），与现有向量检索结果按权重融合（向量 70%、全文 30%，权重可配置），提升对专有名词、人名、地名等语义向量不擅长内容的召回率；同时处理跨块语义断裂问题（相邻分块合并策略）。
+- 输入：
+  - `host_brain/retrieval/recall_fusion.py`（现有向量检索融合实现）；
+  - `host_brain/retrieval/pipeline.py`（检索管线）；
+  - `host_brain/memory/episodic.py`（EpisodicStore，含 SQLite 存储层）；
+  - `host_brain/audit/sqlite_ledger.py`（SQLite 连接复用）；
+  - FR-MEM-005（召回融合输出必须为证据包）；
+  - FR-MEM-003（文本嵌入服务必须存在且可降级）。
+- 输出：
+  - `host_brain/retrieval/recall_fusion.py`：新增 `FullTextSearcher` 类（基于 SQLite FTS5 虚拟表）+ `HybridFusionStrategy`（向量分数 × 0.7 + 全文分数 × 0.3，权重通过 `vector_weight` / `fts_weight` 参数可配置）；融合后结果去重（按 `doc_id`），保留最高分；
+  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（新增）：为 Episodic 记忆表的 `content` 字段创建 FTS5 虚拟表（`episodic_fts`），支持中文分词（`unicode61` tokenizer）；
+  - `host_brain/retrieval/pipeline.py`：`RetrievalPipeline` 新增 `use_hybrid: bool`（默认 `True`）配置项，`False` 时退化为纯向量检索（向后兼容）；
+  - `tests/unit/test_recall_fusion_hybrid.py`（新增）：T-RCL-HYB-01~06（纯向量、纯全文、混合融合、权重配置、去重、FTS5 不可用降级为纯向量）。
+- 验收标准：
+  - T-RCL-HYB-01：混合检索对专有名词查询（如人名"夏目"）的召回结果中，全文检索命中条目的最终分数 ≥ 纯向量检索同条目分数（体现全文权重贡献）；
+  - T-RCL-HYB-02：`use_hybrid=False` 时，`FullTextSearcher` 不被调用，结果与原有纯向量检索一致（向后兼容）；
+  - T-RCL-HYB-03：同一 `doc_id` 在向量和全文结果中均命中时，融合后只保留一条，分数为加权融合值；
+  - T-RCL-HYB-04：FTS5 虚拟表不可用（迁移未执行）时，自动降级为纯向量检索，不抛出未捕获异常；
+  - T-RCL-HYB-05：`vector_weight + fts_weight` 不等于 1.0 时，抛出 `ValueError`（配置校验）；
+  - T-RCL-HYB-06：融合结果仍为合法 `EvidencePack`（含 `doc_id`、`score`、`source_ref`、`content`）；
+  - 原有 Episodic 检索相关测试全部继续通过；
+  - 全量测试 ≥1609 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/retrieval/recall_fusion.py`；
+  - `host_brain/retrieval/pipeline.py`；
+  - `host_brain/memory/episodic.py`（只读接口，不修改）；
+  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（新增）；
+  - `tests/unit/test_recall_fusion_hybrid.py`（新增）。
+- 关联需求/测试：FR-MEM-003；FR-MEM-005；T-RCL-HYB-01~06。
 
 
 

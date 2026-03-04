@@ -32,7 +32,7 @@ from host_brain.tools.broker import (
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
 
-_logger = logging.getLogger("Nastume.tool_routes")
+_logger = logging.getLogger("Natsume.tool_routes")
 
 # ---------------------------------------------------------------------------
 # 路由实例

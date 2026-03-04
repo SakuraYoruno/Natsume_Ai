@@ -160,7 +160,7 @@ class TestKeyProfileContract(unittest.TestCase):
             },
         }
         env = {
-            "Nastume_ENV": "prod",
+            "Natsume_ENV": "prod",
             "HOST_LLM_PROVIDER": "deepseek",
             "HOST_COLD_START_ALLOWED": "false",
             "DEEPSEEK_API_KEY_REF": "sec://deepseek/natsu-node-09",
@@ -232,7 +232,7 @@ class TestKeyProfileContract(unittest.TestCase):
                 },
             }
             env = {
-                "Nastume_ENV": "prod",
+                "Natsume_ENV": "prod",
                 "HOST_LLM_PROVIDER": provider,
                 "HOST_COLD_START_ALLOWED": "false",
                 ref_key: secret_ref,

@@ -345,7 +345,7 @@ class TestSandboxUnavailable(unittest.TestCase):
             python_executable=sys.executable,
         )
         executor = SandboxExecutor(config=config, ledger=self.ledger)
-        with patch.dict("os.environ", {"Nastume_ENV": "production"}, clear=False):
+        with patch.dict("os.environ", {"Natsume_ENV": "production"}, clear=False):
             result = executor.execute(
                 code="print('hello')\n",
                 request_id="req_prod_container",

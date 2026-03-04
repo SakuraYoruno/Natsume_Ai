@@ -1,14 +1,14 @@
 {
   "request_id": "req_rerank_001",
   "payload": {
-    "query": "Nastume retrieval ranking contract",
+    "query": "Natsume retrieval ranking contract",
     "top_k": 2,
     "timeout_ms": 500,
     "candidates": [
       {
         "doc_id": "doc_alpha",
         "source_ref": "memo://alpha",
-        "snippet": "retrieval ranking contract for Nastume assistant",
+        "snippet": "retrieval ranking contract for Natsume assistant",
         "metadata": {
           "bucket": "episodic"
         }

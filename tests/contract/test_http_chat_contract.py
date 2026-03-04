@@ -111,7 +111,7 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
             "message": "查看状态",
             "session_id": "test-session-with-draft",
             "intent_draft": {
-                "schema_version": "Nastume.intent.v1",
+                "schema_version": "Natsume.intent.v1",
                 "id": f"intent::chat-test-{ts_ms}",
                 "ts_ms": ts_ms,
                 "session_id": "test-session-with-draft",

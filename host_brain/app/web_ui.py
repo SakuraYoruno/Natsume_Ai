@@ -20,7 +20,7 @@ from host_brain.app.main import (
     search_webui_requests
 )
 
-logger = logging.getLogger("Nastume.web_ui")
+logger = logging.getLogger("Natsume.web_ui")
 
 # Web UI API路由
 router = APIRouter(prefix="/ui", tags=["web-ui"])

@@ -1,5 +1,5 @@
 {
-  "schema_version": "Nastume.release.v1",
+  "schema_version": "Natsume.release.v1",
   "milestone": "M15",
   "release_name": "Voice Pipeline Deepening - ASR/TTS/Barge-in/FallbackModel/ResourceGate",
   "git_commit": "e6d3e67",

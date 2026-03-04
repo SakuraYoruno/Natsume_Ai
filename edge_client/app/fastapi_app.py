@@ -67,7 +67,7 @@ def create_edge_fastapi_app(
         runtime_value.close()
 
     app = FastAPI(
-        title="Nastume Edge RPC Gateway",
+        title="Natsume Edge RPC Gateway",
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",

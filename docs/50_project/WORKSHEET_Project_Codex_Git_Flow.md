@@ -1,7 +1,7 @@
 受众：PROJECT
 标题：WORKSHEET（Project×Codex×Git×Flow 协作工作表）
 
-# Nastume Ai 分工单（Project × Codex × Git × Flow）
+# Natsume Ai 分工单（Project × Codex × Git × Flow）
 
 版本：v1.1.1
 适用范围：Host_Brain + Edge_Client +（可选）Cloud Exocortex + ClawdBot +（可选）MCP Providers  

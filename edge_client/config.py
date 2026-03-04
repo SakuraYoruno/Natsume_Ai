@@ -166,13 +166,13 @@ def load_edge_config(
     env_lookup = _normalize_env_lookup(merged)
 
     issues: list[ConfigIssue] = []
-    runtime_env = _as_text(_env_get(env_lookup, "Nastume_ENV"), ENV_DEV).lower()
+    runtime_env = _as_text(_env_get(env_lookup, "Natsume_ENV"), ENV_DEV).lower()
     if runtime_env not in ALLOWED_ENVS:
         issues.append(
             ConfigIssue(
                 reason_code=CONFIG_ENV_INVALID,
-                detail=f"Nastume_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
-                field="Nastume_ENV",
+                detail=f"Natsume_ENV must be one of {sorted(ALLOWED_ENVS)}, got {runtime_env}",
+                field="Natsume_ENV",
             )
         )
         return _failure(issues)

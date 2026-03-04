@@ -76,7 +76,7 @@ class TestChannelContract(unittest.TestCase):
 
     def test_t_channel_01_egress_failure_ack_has_reason_and_stage(self) -> None:
         result = send_wechat_message(
-            thread_key="wechat::wx_user_1001::Nastume_bot",
+            thread_key="wechat::wx_user_1001::Natsume_bot",
             message_id="wx_out_001",
             content="测试回复",
             ledger=self.ledger,
@@ -97,7 +97,7 @@ class TestChannelContract(unittest.TestCase):
         row = self.ledger.channel_io_log[0]
         self.assertEqual(DIRECTION_EGRESS, row["direction"])
         self.assertEqual("req_channel_003", row["request_id"])
-        self.assertEqual("wechat::wx_user_1001::Nastume_bot", row["thread_key"])
+        self.assertEqual("wechat::wx_user_1001::Natsume_bot", row["thread_key"])
         self.assertEqual("wx_out_001", row["message_id"])
         self.assertEqual(STATUS_FAILED, row["status"])
         self.assertEqual(CHANNEL_SEND_FAILED, row["reason_code"])

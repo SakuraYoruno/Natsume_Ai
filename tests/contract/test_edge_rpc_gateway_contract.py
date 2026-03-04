@@ -51,7 +51,7 @@ class TestEdgeRpcGatewayContract(unittest.TestCase):
     def _build_client(self, *, tts_enabled: bool = True) -> TestClient:
         config_result = load_edge_config(
             env={
-                "Nastume_ENV": "test",
+                "Natsume_ENV": "test",
                 "EDGE_ALLOW_INSECURE_AUTH": "false",
                 "EDGE_HMAC_SHARED_KEY": "edge-shared-key",
                 "EDGE_RPC_GATEWAY_ENABLED": "true",

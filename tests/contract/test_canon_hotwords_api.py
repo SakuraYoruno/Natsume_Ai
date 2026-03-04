@@ -10,15 +10,15 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("Nastume_AUDIT_DB", ":memory:")
-os.environ.setdefault("Nastume_WORLD_CANON_ROOT", "")  # 由 fixture 覆盖
+os.environ.setdefault("Natsume_AUDIT_DB", ":memory:")
+os.environ.setdefault("Natsume_WORLD_CANON_ROOT", "")  # 由 fixture 覆盖
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     """创建带有预置文档的 TestClient。"""
-    monkeypatch.setenv("Nastume_AUDIT_DB", ":memory:")
-    monkeypatch.setenv("Nastume_WORLD_CANON_ROOT", str(tmp_path / "world"))
+    monkeypatch.setenv("Natsume_AUDIT_DB", ":memory:")
+    monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(tmp_path / "world"))
 
     # 重置模块级单例，确保 fixture 隔离
     import host_brain.app.canon_routes as cr

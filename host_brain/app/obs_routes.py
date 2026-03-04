@@ -23,7 +23,7 @@ from host_brain.obs.service_health_aggregator import ServiceHealthAggregator
 from host_brain.obs.session_query import SessionQueryService
 from host_brain.obs.metrics_timeseries import MetricsTimeseriesService
 
-logger = logging.getLogger("Nastume.obs")
+logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
 

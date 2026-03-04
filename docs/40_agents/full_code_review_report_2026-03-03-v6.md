@@ -1,7 +1,7 @@
 受众：CODEX
 标题：全面代码审阅报告（第六版，2026-03-03）
 
-# 🔍 Nastume Ai 全面代码审阅报告
+# 🔍 Natsume Ai 全面代码审阅报告
 
 > **生成日期**：2026-03-03（第六版，M10-D 收口）
 > **审阅范围**：M10-D 收口改动（F-41/F-06/F-35/F-36/F-37/F-39/F-12）+ 环境验证补齐（F-01/F-02/F-11）
@@ -21,7 +21,7 @@
 | F-39 | `memory/episodic.py` / canon proposal 链路 | ✅ DONE | `source_intent_id` 从 diary 提案提交贯通到 DB 落库与测试断言 |
 | F-12 | `requirements.txt` | ✅ DONE | 明确 `redis` 为可选依赖（Optional Dependencies） |
 | F-05 | 部署文档 | ✅ DONE | 明确 SQLite WAL 仅建议本地磁盘，NFS/网络盘禁止作为 Ledger 主库 |
-| F-01 | `airlock/sandbox.py` | ✅ DONE | 增加生产容器硬隔离约束（`require_container`/`Nastume_ENV`），容器不可用时硬失败 |
+| F-01 | `airlock/sandbox.py` | ✅ DONE | 增加生产容器硬隔离约束（`require_container`/`Natsume_ENV`），容器不可用时硬失败 |
 | F-02 | `airlock/sandbox.py` | ✅ DONE | subprocess 超时路径统一为 `Popen.communicate(timeout)` + 平台感知终止策略 |
 | F-11 | E2E 测试 | ✅ DONE | 新增真实 Edge RPC 入口 E2E（通过 `/v1/edge/events` 上报 ASR/TTS 事件） |
 

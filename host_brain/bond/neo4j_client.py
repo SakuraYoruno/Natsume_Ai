@@ -105,7 +105,7 @@ def load_neo4j_runtime_config(
         merged.update(dict(local_overrides))
 
     issues: list[Neo4jConfigIssue] = []
-    runtime_env = str(merged.get("Nastume_ENV") or "dev").strip().lower()
+    runtime_env = str(merged.get("Natsume_ENV") or "dev").strip().lower()
 
     enabled = _parse_bool(merged.get("BOND_NEO4J_ENABLED"), default=True)
     uri = str(merged.get("BOND_NEO4J_URI") or "bolt://127.0.0.1:7687").strip()

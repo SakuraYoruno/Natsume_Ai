@@ -1,7 +1,7 @@
 受众：MASTER
 标题：全任务风险点汇总（Risk Registry）
 
-# Nastume Ai 全任务风险点汇总（Risk Registry）
+# Natsume Ai 全任务风险点汇总（Risk Registry）
 
 版本：v3.0
 日期：2026-03-03

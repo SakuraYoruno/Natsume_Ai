@@ -44,7 +44,7 @@ class RateLimitConfig:
     sqlite_db_path: str = ":memory:"
     # Redis 配置
     redis_url: str = "redis://localhost:6379/0"
-    redis_key_prefix: str = "Nastume:ratelimit:"
+    redis_key_prefix: str = "Natsume:ratelimit:"
     redis_timeout_ms: int = 1_000
 
 
@@ -63,7 +63,7 @@ def load_rate_limit_config(
 
     sqlite_db_path = (
         str(merged.get("HOST_RATE_LIMIT_SQLITE_DB_PATH") or "").strip()
-        or str(merged.get("Nastume_AUDIT_DB") or "").strip()
+        or str(merged.get("Natsume_AUDIT_DB") or "").strip()
         or ":memory:"
     )
 
@@ -86,9 +86,9 @@ def load_rate_limit_config(
         or "redis://localhost:6379/0",
         redis_key_prefix=str(
             merged.get("HOST_RATE_LIMIT_REDIS_KEY_PREFIX")
-            or "Nastume:ratelimit:"
+            or "Natsume:ratelimit:"
         ).strip()
-        or "Nastume:ratelimit:",
+        or "Natsume:ratelimit:",
         redis_timeout_ms=_parse_int(
             merged.get("HOST_RATE_LIMIT_REDIS_TIMEOUT_MS"),
             default=1_000,
@@ -314,7 +314,7 @@ class RedisRateLimitStore(RateLimitStore):
         *,
         window_ms: int = DEFAULT_WINDOW_MS,
         redis_url: str = "redis://localhost:6379/0",
-        key_prefix: str = "Nastume:ratelimit:",
+        key_prefix: str = "Natsume:ratelimit:",
         timeout_ms: int = 1_000,
     ) -> None:
         self._window_ms = int(window_ms)

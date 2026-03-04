@@ -187,7 +187,7 @@ def generate_release_manifest(workspace: str, output_path: str) -> dict:
 
     # 4) 构建清单
     manifest = {
-        "schema_version": "Nastume.release.v1",
+        "schema_version": "Natsume.release.v1",
         "milestone": "M12",
         "release_name": "ToolBroker + ContextCompressor + Reranker + SkillHotLoader",
         "git_commit": get_git_commit(),

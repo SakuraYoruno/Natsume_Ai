@@ -13,7 +13,7 @@ from edge_client.config import load_edge_config
 from edge_client.runtime import build_edge_runtime
 
 
-LOGGER = logging.getLogger("Nastume.edge.main")
+LOGGER = logging.getLogger("Natsume.edge.main")
 
 
 def main() -> int:

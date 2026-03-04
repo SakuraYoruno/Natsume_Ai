@@ -181,7 +181,7 @@ def _env_int(value: Any, *, default: int, min_value: int, max_value: int) -> int
 
 
 def _is_production_env() -> bool:
-    env = str(os.environ.get("Nastume_ENV", "")).strip().lower()
+    env = str(os.environ.get("Natsume_ENV", "")).strip().lower()
     return env in _PROD_ENV_VALUES
 
 

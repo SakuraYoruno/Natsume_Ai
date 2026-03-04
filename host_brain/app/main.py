@@ -30,7 +30,7 @@ from host_brain.core.services import (
 )
 
 
-LOGGER_NAME_RUNTIME_MONITOR = "Nastume.runtime.monitor"
+LOGGER_NAME_RUNTIME_MONITOR = "Natsume.runtime.monitor"
 OBS_LANGSMITH_DISABLED = "OBS_LANGSMITH_DISABLED"
 OBS_LANGSMITH_UNAVAILABLE = "OBS_LANGSMITH_UNAVAILABLE"
 OBS_LANGSMITH_API_KEY_MISSING = "OBS_LANGSMITH_API_KEY_MISSING"
@@ -378,12 +378,12 @@ def build_runtime_console_profile(
 
     try:
         if system_name.startswith("windows"):
-            subprocess.Popen(["cmd", "/c", "start", "cmd", "/k", "title Nastume Runtime Monitor && echo runtime monitor attached"])
+            subprocess.Popen(["cmd", "/c", "start", "cmd", "/k", "title Natsume Runtime Monitor && echo runtime monitor attached"])
             profile.update({"console_mode": "spawn", "spawned": True})
             return profile
 
         if shutil.which("xterm"):
-            subprocess.Popen(["xterm", "-T", "Nastume Runtime Monitor", "-e", "bash", "-lc", "echo runtime monitor attached; exec bash"])
+            subprocess.Popen(["xterm", "-T", "Natsume Runtime Monitor", "-e", "bash", "-lc", "echo runtime monitor attached; exec bash"])
             profile.update({"console_mode": "spawn", "spawned": True})
             return profile
 
@@ -912,7 +912,7 @@ if __name__ == "__main__":
     report = build_startup_report(runtime_statuses={}, dependency_probes={})
     monitor_profile = build_agent_monitoring_profile()
     console_profile = build_runtime_console_profile(
-        spawn_console=(str(os.environ.get("Nastume_RUNTIME_MONITOR_CONSOLE") or "").strip().lower() in {"1", "true", "yes", "on"})
+        spawn_console=(str(os.environ.get("Natsume_RUNTIME_MONITOR_CONSOLE") or "").strip().lower() in {"1", "true", "yes", "on"})
     )
     emit_runtime_bootstrap_logs(
         startup_report=report,

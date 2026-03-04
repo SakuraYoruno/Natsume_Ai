@@ -1,4 +1,4 @@
-"""Main module entry for Nastume AI host brain."""
+"""Main module entry for Natsume AI host brain."""
 
 from __future__ import annotations
 
@@ -16,14 +16,14 @@ from host_brain.core.ids import new_request_id
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="Nastume AI Host Brain - AI agent orchestration runtime"
+        description="Natsume AI Host Brain - AI agent orchestration runtime"
     )
     default_host = str(os.environ.get("HOST_APP_HOST") or "0.0.0.0").strip() or "0.0.0.0"
     default_port = _env_int(os.environ.get("HOST_APP_PORT"), default=8000, min_value=1, max_value=65535)
     default_log_level = str(os.environ.get("HOST_APP_LOG_LEVEL") or "INFO").strip().upper() or "INFO"
     if default_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
         default_log_level = "INFO"
-    default_db_path = str(os.environ.get("Nastume_AUDIT_DB") or ":memory:").strip() or ":memory:"
+    default_db_path = str(os.environ.get("Natsume_AUDIT_DB") or ":memory:").strip() or ":memory:"
 
     parser.add_argument(
         "--host",
@@ -76,7 +76,7 @@ def setup_logging(log_level: str) -> None:
 
 def run_startup_check(db_path: str) -> bool:
     """运行启动健康检查"""
-    logger = logging.getLogger("Nastume.startup")
+    logger = logging.getLogger("Natsume.startup")
     request_id = new_request_id()
 
     try:
@@ -128,10 +128,10 @@ def main() -> int:
 
     # 配置日志
     setup_logging(args.log_level)
-    logger = logging.getLogger("Nastume.main")
+    logger = logging.getLogger("Natsume.main")
 
     # 设置环境变量
-    os.environ.setdefault("Nastume_ENV", "production")
+    os.environ.setdefault("Natsume_ENV", "production")
 
     # 运行启动检查（如果启用）
     if args.startup_check:
@@ -149,7 +149,7 @@ def main() -> int:
 
     # 启动FastAPI服务器
     logger.info(
-        "Starting Nastume AI Host Brain server",
+        "Starting Natsume AI Host Brain server",
         extra={
             "host": args.host,
             "port": args.port,

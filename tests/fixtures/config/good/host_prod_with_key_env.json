@@ -1,6 +1,6 @@
 {
   "env": {
-    "Nastume_ENV": "prod",
+    "Natsume_ENV": "prod",
     "HOST_LLM_PROVIDER": "openai",
     "HOST_LLM_TIMEOUT_MS": "12000",
     "HOST_LLM_MAX_RETRIES": "1",

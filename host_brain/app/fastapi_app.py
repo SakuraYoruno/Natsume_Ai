@@ -1,4 +1,4 @@
-"""FastAPI web application entry for Nastume AI host brain.
+"""FastAPI web application entry for Natsume AI host brain.
 
 TASK-0065: HTTP 服务框架落地 — FastAPI 路由绑定 + 健康检查 + 链路入口。
 提供 POST /v1/chat（编排入口）、GET /health、GET /ready、GET /metrics，
@@ -184,7 +184,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     Startup: 初始化 Ledger、执行启动探针、写入审计。
     Shutdown: 刷新审计缓冲。
     """
-    _logger.info("Nastume AI Host Brain starting up ...")
+    _logger.info("Natsume AI Host Brain starting up ...")
     ledger = get_ledger()
     try:
         report = build_startup_report(
@@ -201,7 +201,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
     yield  # 服务运行阶段
 
-    _logger.info("Nastume AI Host Brain shutting down ...")
+    _logger.info("Natsume AI Host Brain shutting down ...")
     # 刷新审计缓冲（当前 SQLite 同步写入，此处预留扩展点）
 
 
@@ -209,7 +209,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 # FastAPI 应用实例
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="Nastume AI Host Brain",
+    title="Natsume AI Host Brain",
     description="AI agent orchestration runtime with deterministic execution and audit trails",
     version="0.1.0",
     docs_url="/docs",
@@ -257,10 +257,10 @@ if os.path.isdir(_static_dir):
 # ---------------------------------------------------------------------------
 # CORS 中间件（可配置）
 # ---------------------------------------------------------------------------
-# CORS 默认关闭：生产环境必须显式设置 Nastume_CORS_ORIGINS
-# 例如 Nastume_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
+# CORS 默认关闭：生产环境必须显式设置 Natsume_CORS_ORIGINS
+# 例如 Natsume_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
 _cors_origins_raw = os.environ.get(
-    "Nastume_CORS_ORIGINS",
+    "Natsume_CORS_ORIGINS",
     "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
 ).strip()
 if _cors_origins_raw:
@@ -281,19 +281,19 @@ _intent_engine: Optional[IntentDecisionEngine] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
-_logger = logging.getLogger("Nastume.fastapi")
+_logger = logging.getLogger("Natsume.fastapi")
 
 
 def get_ledger() -> SQLiteLedger:
     """获取SQLite账本实例（延迟初始化，支持跨线程访问）。
 
-    持久化路径通过环境变量 Nastume_AUDIT_DB 配置，
+    持久化路径通过环境变量 Natsume_AUDIT_DB 配置，
     默认使用文件路径 host_brain/data/audit.sqlite3。
-    设置 Nastume_AUDIT_DB=:memory: 可使用内存数据库（仅测试）。
+    设置 Natsume_AUDIT_DB=:memory: 可使用内存数据库（仅测试）。
     """
     global _ledger
     if _ledger is None:
-        db_path = os.environ.get("Nastume_AUDIT_DB", "host_brain/data/audit.sqlite3")
+        db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
 
@@ -593,7 +593,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         intent_draft = request_body.intent_draft
         if intent_draft is None:
             intent_draft = {
-                "schema_version": "Nastume.intent.v1",
+                "schema_version": "Natsume.intent.v1",
                 "id": f"intent::{request_id}",
                 "ts_ms": ts_ms,
                 "session_id": session_id,

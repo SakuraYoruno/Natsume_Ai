@@ -3,11 +3,11 @@
   "payload": {
     "session_id": "sess_voice_001",
     "seq": 1,
-    "text": "hello Nastume",
+    "text": "hello Natsume",
     "confidence": 0.91,
     "alternates": [
       {
-        "text": "hello Nastume",
+        "text": "hello Natsume",
         "confidence": 0.91
       },
       {

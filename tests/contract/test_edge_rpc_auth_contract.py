@@ -187,7 +187,7 @@ class TestEdgeRpcAuthConfigContract(unittest.TestCase):
     def test_t_edge_rpc_01_config_fields_parseable(self) -> None:
         result = load_edge_config(
             env={
-                "Nastume_ENV": "test",
+                "Natsume_ENV": "test",
                 "EDGE_RPC_AUTH_WINDOW_MS": "20000",
                 "EDGE_RPC_NONCE_WINDOW_MS": "240000",
             }
@@ -201,7 +201,7 @@ class TestEdgeRpcAuthConfigContract(unittest.TestCase):
     def test_t_edge_rpc_01_invalid_auth_window_rejected(self) -> None:
         result = load_edge_config(
             env={
-                "Nastume_ENV": "test",
+                "Natsume_ENV": "test",
                 "EDGE_RPC_AUTH_WINDOW_MS": "10",
             }
         )

@@ -6,6 +6,6 @@
     "utterance_id": "utt_voice_fail",
     "text": "this one should fail synthesis",
     "interruptible": true,
-    "voice_profile": "Nastume_default"
+    "voice_profile": "Natsume_default"
   }
 }

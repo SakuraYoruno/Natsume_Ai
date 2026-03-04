@@ -1,5 +1,5 @@
 {
-  "schema_version": "Nastume.release.v1",
+  "schema_version": "Natsume.release.v1",
   "milestone": "M12",
   "release_name": "ToolBroker + ContextCompressor + Reranker + SkillHotLoader",
   "git_commit": "c122227",

@@ -21,7 +21,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
 
-_logger = logging.getLogger("Nastume.bond_stage_engine")
+_logger = logging.getLogger("Natsume.bond_stage_engine")
 
 # ---------------------------------------------------------------------------
 # 阶段枚举（有序）

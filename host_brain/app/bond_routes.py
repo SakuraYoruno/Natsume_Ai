@@ -28,7 +28,7 @@ from host_brain.bond.bond_stage_engine import (
 )
 from host_brain.core.ids import new_request_id
 
-_logger = logging.getLogger("Nastume.bond_routes")
+_logger = logging.getLogger("Natsume.bond_routes")
 
 # ---------------------------------------------------------------------------
 # 路由实例

@@ -34,7 +34,7 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.memory.canon_world_store import WorldCanonStore
 
-_logger = logging.getLogger("Nastume.canon_routes")
+_logger = logging.getLogger("Natsume.canon_routes")
 
 # ---------------------------------------------------------------------------
 # 路由实例（prefix 由 fastapi_app.py 注册时指定）
@@ -65,7 +65,7 @@ def _get_canon_store(ledger: SQLiteLedger) -> WorldCanonStore:
     if _canon_store is None:
         with _canon_store_lock:
             if _canon_store is None:  # double-checked locking
-                world_root = os.environ.get("Nastume_WORLD_CANON_ROOT", "host_brain/canon/world")
+                world_root = os.environ.get("Natsume_WORLD_CANON_ROOT", "host_brain/canon/world")
                 _canon_store = WorldCanonStore(world_root=world_root, ledger=ledger)
     return _canon_store
 

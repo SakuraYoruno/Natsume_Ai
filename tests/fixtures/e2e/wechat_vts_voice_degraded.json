@@ -4,7 +4,7 @@
   "wechat_ingress": {
     "message_id": "wx_e2e_msg_003",
     "from_user_id": "wx_user_e2e_003",
-    "to_user_id": "Nastume_bot",
+    "to_user_id": "Natsume_bot",
     "content": "给我讲个笑话"
   },
   "intent_overrides": {

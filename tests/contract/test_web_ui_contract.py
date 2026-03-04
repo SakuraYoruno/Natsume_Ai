@@ -56,7 +56,7 @@ class TestPanelRendering:
         resp = client.get("/panel")
         if resp.status_code == 200:
             body = resp.text
-            assert "Nastume AI" in body
+            assert "Natsume AI" in body
             assert "request_id" in body.lower() or "searchInput" in body
             assert "只读" in body or "readonly" in body.lower()
 

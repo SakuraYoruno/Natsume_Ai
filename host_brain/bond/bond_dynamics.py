@@ -15,7 +15,7 @@ from host_brain.core.ids import now_ms
 if TYPE_CHECKING:
     from host_brain.bond.bond_stage_engine import BondStageEngine, StageTransitionResult
 
-_logger = logging.getLogger("Nastume.bond_dynamics")
+_logger = logging.getLogger("Natsume.bond_dynamics")
 
 
 S_BOND_UPDATE = "S_BOND_UPDATE"

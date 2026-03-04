@@ -381,7 +381,7 @@ class TestConfigLoading(unittest.TestCase):
         """T-Gov-R4-01.31: 默认 backend=memory。"""
         from host_brain.app.config import load_host_config
         result = load_host_config(env={
-            "Nastume_ENV": "dev",
+            "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
         })
@@ -392,7 +392,7 @@ class TestConfigLoading(unittest.TestCase):
         """T-Gov-R4-01.32: HOST_RATE_LIMIT_BACKEND=sqlite 解析正确。"""
         from host_brain.app.config import load_host_config
         result = load_host_config(env={
-            "Nastume_ENV": "dev",
+            "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
             "HOST_RATE_LIMIT_BACKEND": "sqlite",
@@ -404,7 +404,7 @@ class TestConfigLoading(unittest.TestCase):
         """T-Gov-R4-01.33: HOST_RATE_LIMIT_BACKEND=redis 解析正确。"""
         from host_brain.app.config import load_host_config
         result = load_host_config(env={
-            "Nastume_ENV": "dev",
+            "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
             "HOST_RATE_LIMIT_BACKEND": "redis",
@@ -416,7 +416,7 @@ class TestConfigLoading(unittest.TestCase):
         """T-Gov-R4-01.34: 无效 backend 值降级到 memory（带警告）。"""
         from host_brain.app.config import load_host_config
         result = load_host_config(env={
-            "Nastume_ENV": "dev",
+            "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
             "HOST_RATE_LIMIT_BACKEND": "unknown",
@@ -429,7 +429,7 @@ class TestConfigLoading(unittest.TestCase):
         """T-Gov-R4-01.35: window_ms 和 max_requests 可配置。"""
         from host_brain.app.config import load_host_config
         result = load_host_config(env={
-            "Nastume_ENV": "dev",
+            "Natsume_ENV": "dev",
             "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
             "HOST_RATE_LIMIT_WINDOW_MS": "30000",

@@ -12,7 +12,7 @@ try:
 
     # Test basic FastAPI app properties
     assert hasattr(app, 'title'), "App should have title attribute"
-    assert app.title == "Nastume AI Host Brain", f"App title should be 'Nastume AI Host Brain', got '{app.title}'"
+    assert app.title == "Natsume AI Host Brain", f"App title should be 'Natsume AI Host Brain', got '{app.title}'"
     print("[OK] FastAPI app properties are correct")
 
     # Test routes

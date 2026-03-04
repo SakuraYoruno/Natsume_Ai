@@ -23,7 +23,7 @@ from host_brain.governor.rate_limit_store import (
 
 
 def _build_prefix() -> str:
-    return f"Nastume:test:ratelimit:{uuid.uuid4().hex}:"
+    return f"Natsume:test:ratelimit:{uuid.uuid4().hex}:"
 
 
 @pytest.fixture(scope="module")

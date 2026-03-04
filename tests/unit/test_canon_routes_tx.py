@@ -247,7 +247,7 @@ class TestRejectAuditNonFatal:
         with patch("host_brain.app.canon_routes._get_canon_store", return_value=mock_store):
             from host_brain.app.canon_routes import CanonProposalRejectRequest
             req = CanonProposalRejectRequest(reason="test reject")
-            with caplog.at_level(logging.WARNING, logger="Nastume.canon_routes"):
+            with caplog.at_level(logging.WARNING, logger="Natsume.canon_routes"):
                 asyncio.get_event_loop().run_until_complete(
                     cr.reject_proposal("p-tx-04b", req)
                 )

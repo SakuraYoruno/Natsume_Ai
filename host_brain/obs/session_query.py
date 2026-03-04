@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("Nastume.obs.session")
+logger = logging.getLogger("Natsume.obs.session")
 
 
 class SessionQueryService:

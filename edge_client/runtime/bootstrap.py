@@ -187,8 +187,8 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             min_value=1,
             max_value=65535,
         ),
-        plugin_name=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_NAME"), "NastumeAi"),
-        plugin_developer=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_DEVELOPER"), "Nastume"),
+        plugin_name=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_NAME"), "NatsumeAi"),
+        plugin_developer=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_DEVELOPER"), "Natsume"),
         token_path=_as_text(_env_get(env_lookup, "EDGE_VTS_TOKEN_PATH"), ".vts_token"),
         api_timeout_s=_parse_float(
             _env_get(env_lookup, "EDGE_VTS_API_TIMEOUT_S"),

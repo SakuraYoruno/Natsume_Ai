@@ -404,7 +404,7 @@ def build_runtime_env_readiness_report(
     nodes = list(node_inventory_payload.get("nodes") or [])
     expected_node_count = int(node_inventory_payload.get("expected_node_count") or len(nodes))
     return build_env_readiness_report(
-        env=str(runtime_env.get("Nastume_ENV") or "dev"),
+        env=str(runtime_env.get("Natsume_ENV") or "dev"),
         node_inventory=nodes,
         expected_node_count=expected_node_count,
         key_profiles=profiles,

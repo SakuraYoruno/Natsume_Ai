@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "generated_on": "2026-03-02",
-  "project": "Nastume_Ai",
+  "project": "Natsume_Ai",
   "notes": [
     "No secrets are stored in this file.",
     "Use *_REF fields and secret store files for credentials.",
@@ -337,8 +337,8 @@
         "token_path": ".vts_token"
       },
       "plugin": {
-        "name": "NastumeAi",
-        "developer": "Nastume"
+        "name": "NatsumeAi",
+        "developer": "Natsume"
       },
       "health_component": "vts",
       "config_sources": [
@@ -374,7 +374,7 @@
       "activated_when": "HOST_RATE_LIMIT_BACKEND=redis",
       "endpoint": {
         "default_url": "redis://localhost:6379/0",
-        "key_prefix_default": "Nastume:ratelimit:"
+        "key_prefix_default": "Natsume:ratelimit:"
       },
       "notes": [
         "If Redis is unavailable, runtime degrades to in-memory backend with stable reason code.",
