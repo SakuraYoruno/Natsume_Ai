@@ -89,7 +89,6 @@ class ChromaConfigLoadResult:
 
 
 class InMemoryChromaClient:
-    """Dependency-free vector index for contract-level tests."""
 
     def __init__(
         self,
