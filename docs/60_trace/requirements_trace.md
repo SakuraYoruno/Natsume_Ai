@@ -950,3 +950,35 @@
 | R-118 | FR-DIARY-001/002 | M11-D T-DIARY-01~05 单元测试（日记：文件+Episodic双写/无内容/IO降级/Episodic降级/Evolution提案） | tests/unit/test_diary_skill.py | T-DIARY-01~05 | DONE | M11-D |
 | R-119 | FR-PROACTIVE-001/002 | M11-E T-PROACT-01~06 单元测试（主动对话：空闲触发/Gaming/频率/QA/Edge降级/Sleep） | tests/unit/test_proactive_skill.py | T-PROACT-01~06 | DONE | M11-E |
 | R-120 | FR-FOCUS-001 | M11-F T-FOCUS-01~04 单元测试（Focus Mode：主动对话拦截/enter/exit/审计字段） | tests/unit/test_focus_mode.py | T-FOCUS-01~04 | DONE | M11-F |
+
+## M12 ToolBroker + ContextCompressor + Reranker + SkillHotLoader（R-121~R-125）
+
+| R-121 | FR-TOOL-001/002/003 | ToolBroker 单入口（broker.py/catalog.py/selector.py/mcp_adapter.py）+ tool_visibility_hash 审计串联 + WRITE Token gating（无 token 返回 403 + TOOL_TOKEN_MISSING） | host_brain/tools/broker.py; host_brain/tools/catalog.py; host_brain/tools/selector.py; host_brain/tools/mcp_adapter.py | T-TOOL-01~06 | DONE | M12-A |
+| R-122 | FR-TOOL-003 | ToolBroker REST API（GET /tools/meta-pack + POST /tools/execute）注册到 fastapi_app.py | host_brain/app/tool_routes.py; host_brain/app/fastapi_app.py | T-TOOL-API-01~05 | DONE | M12-A |
+| R-123 | FR-MEM-005 | ContextCompressor（sliding_window/summary/hybrid 三策略）+ EvidencePack 构建；LLM 不可用时降级为 sliding_window | host_brain/memory/context_compressor.py | T-CTX-01~05 | DONE | M12-B |
+| R-124 | FR-MEM-004 | RerankerService 强化（health() + 降级策略 + evidence_pack rerank_stage 字段）；不可用时降级且 stage 标注 | host_brain/retrieval/reranker.py; host_brain/retrieval/evidence_pack.py | T-RERANK-01~04 | DONE | M12-C |
+| R-125 | FR-SKILL-001/002 | SkillHotLoader（热加载/回滚/版本注册）+ SkillVersionRegistry；热加载失败时旧版本保持不变 | host_brain/skills/hot_loader.py | T-HOTLOAD-01~05 | DONE | M12-D |
+
+## M13 Bond 阶段自动晋级 + 长期记忆蒸馏强化（R-126~R-130）
+
+| R-126 | FR-BOND-001/002/003 | BondStageEngine：积分累积/阶段晋级/降级/趋势/审计串联（晋级/降级写入审计链）；BondScoreState + StageTransitionResult | host_brain/bond/bond_stage_engine.py | T-BOND-STAGE-01~09 | DONE | M13-A |
+| R-127 | FR-BOND-001/002/003 | Bond REST API 5 端点（/bond/stage /bond/summary /bond/event /bond/users /bond/health）；Bond Summary 不含数值（FR-BOND-003）；evidence_refs 为空时 422（FR-BOND-002） | host_brain/app/bond_routes.py | T-BOND-API-01~08 | DONE | M13-A |
+| R-128 | FR-MEM-DISTILL-001/002 | LongTermMemoryDistiller（EpisodicMemory→语义记忆蒸馏→Canon pending 提案）；蒸馏结果只生成 pending 提案不直接写 SSOT；每次循环最多 5 个提案；幂等保护 | host_brain/memory/long_term_distiller.py | T-DISTILL-B-01~10 | DONE | M13-B |
+| R-129 | FR-MEM-DISTILL-001/002 | make_distillation_task_config()：调度器 CRON 任务工厂（每日 03:00）；配置合法性验证 | host_brain/memory/long_term_distiller.py | T-DISTILL-B-09~10 | DONE | M13-B |
+| R-130 | FR-BOND-001/002 | BondDynamicsWriter.apply_update 接入 BondStageEngine.apply_event（可选注入 stage_engine=None 向后兼容）；stage_engine 异常非致命；event 新增 stage_transition 字段 | host_brain/bond/bond_dynamics.py | T-BOND-INTEG-01~08 | DONE | M13-C |
+
+## M14 通道 + 外显 + MCP 治理收口（R-131~R-135）
+
+| R-131 | FR-CHANNEL-001 | WeChatChannelEvent（inbound/outbound）+ receive_wechat_event_v2()：inbound 建模为确定性通道事件，写入审计链（channel_io_log），含 thread_key/request_id 可追溯；reason_code 可统计 | host_brain/channels/wechat.py | T-CHAN-01~02；T-CHAN-AUDIT-01~02 | DONE | M14-A |
+| R-132 | FR-CHANNEL-001 | send_wechat_message_authorized()：outbound 三重校验（thread_key/intent_id/approval_token）；失败返回 reason_code + stage；写入审计链；LLM 不得自行决定发送 | host_brain/channels/wechat.py；host_brain/core/errors.py（CHANNEL_SEND_UNAUTHORIZED/CHANNEL_INTENT_MISSING/CHANNEL_THREAD_KEY_MISSING） | T-CHAN-03~05；T-CHAN-AUDIT-03 | DONE | M14-A |
+| R-133 | FR-AVATAR-001 | VTSExpressionMap.resolve()：emotion_tag→expression_id 固定枚举映射（EmotionTag + EXPRESSION_MAP）；非法 tag → VTS_TAG_UNKNOWN；自由动作参数 → VTS_EXPRESSION_INVALID；同版本同输入输出一致（可回放） | edge_client/actuators/vts_expression_map.py；host_brain/core/errors.py（VTS_TAG_UNKNOWN/VTS_EXPRESSION_INVALID/VTS_INTENSITY_OUT_OF_RANGE/VTS_DURATION_INVALID） | T-VTS-01~05 | DONE | M14-B |
+| R-134 | FR-MCP-001 | MCPAdapter.sync_provider_tools()：同步 MCP provider 工具为 ToolMeta 列表（含 READ/WRITE 分级）；MCPAdapter.execute_mcp_tool()：WRITE 必须有 approval_token_ref（MCP_WRITE_UNAUTHORIZED）；出站经 AIRLOCK 净化（SanitizationReport）；缺 sanitization_report → AIRLOCK_BLOCKED_EGRESS；执行无 evidence_ref → MCP_AUDIT_REF_MISSING | host_brain/tools/mcp_adapter.py（ToolMeta + SanitizationReport + sync_provider_tools + execute_mcp_tool + _airlock_sanitize） | T-MCP-GOV-01~05；T-MCP-AUDIT-01~03 | DONE | M14-C |
+| R-135 | NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001 | M14 发布清单锁定（m14_release.json）：4 个核心文件 hash；79 个 M14 测试通过；1421 全量通过；release_ready=true；audit_chain_verified=true | docs/50_release/m14_release.json | T-REL-01（复用） | DONE | M14-D |
+
+## M15 语音链路深化收口（R-136~R-140）
+
+| R-136 | FR-VOICE-001 | ASRTranscriptEvent（frozen dataclass）：text/confidence/ts_start_ms/ts_end_ms/is_final/alternates（最多3个）/evidence_ref（必填）/low_confidence（confidence<0.6时True）/reason_code（ASR_LOW_CONFIDENCE）；build_asr_transcript_event 工厂函数：缺 evidence_ref 拒绝构建；alternates 超出截断 | edge_client/senses/asr.py（ASRTranscriptEvent + build_asr_transcript_event + LOW_CONFIDENCE_THRESHOLD + MAX_ALTERNATES） | T-ASR-EVT-01~05 | DONE | M15-A |
+| R-137 | FR-VOICE-002 | TTSPlaybackEvent（frozen dataclass）：request_id（必填）/intent_id/text/emotion_tag/status（queued/playing/done/interrupted/failed）/reason_code/stage/ts_ms/evidence_ref（必填）；build_tts_playback_event 工厂函数：缺 request_id/evidence_ref 或 status 非法 → VOICE_SCHEMA_INVALID；Host 只下发最终口径文本与情绪标签 | edge_client/actuators/tts_engine.py（TTSPlaybackEvent + build_tts_playback_event） | T-TTS-QUEUE-01~05 | DONE | M15-B |
+| R-138 | FR-VOICE-003 | BargeInEvent（frozen dataclass）：session_id/interrupted_request_id（必填）/trigger_ts_ms/asr_continued（默认True）/evidence_ref（必填）；打断不构成执行事实（无 intent_draft/execution_claim/decision 字段）；ASR 不被阻塞（asr_continued=True）；缺 interrupted_request_id/evidence_ref → VOICE_SCHEMA_INVALID | edge_client/actuators/tts_engine.py（BargeInEvent + build_barge_in_event） | T-BARGE-01~04 | DONE | M15-C |
+| R-139 | FR-VOICE-004 | FallbackModelGate：默认卸载（is_available=False）/按需加载（load()/unload()）/generate() 输出永远 draft_only=True；不可用时快速失败（FALLBACK_MODEL_UNAVAILABLE）；task_type 非法 → VOICE_SCHEMA_INVALID；不得包含裁决或执行事实宣告（as_dict 无 decision/execution_claim/intent_draft 字段） | edge_client/fallback_model.py（FallbackModelGate + FallbackOutput + VALID_TASK_TYPES） | T-FALLBACK-01~05 | DONE | M15-D |
+| R-140 | FR-VOICE-005；NFR-REL-001 | ResourcePreemptionEvent（frozen dataclass）：preemptor/preempted/reason_code=RESOURCE_GATE_PREEMPTED/ts_ms/evidence_ref（必填）；build_resource_preemption_event 工厂函数：preemptor/preempted 必须是合法 TASK_* 常量；VoiceResourceGate 优先级 ASR>PLAYBACK>TTS_SYNTH>FALLBACK_LLM；压力下 ASR 始终保证；M15 发布清单（m15_release.json）：1534 全量通过；release_ready=true | edge_client/rpc/resource_gate.py（ResourcePreemptionEvent + build_resource_preemption_event）；docs/50_release/m15_release.json | T-RGATE-01~05 | DONE | M15-E/F |

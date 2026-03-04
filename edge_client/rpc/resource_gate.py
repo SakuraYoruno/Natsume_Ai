@@ -47,6 +47,71 @@ class ResourceGateDecision:
     event: dict[str, Any]
 
 
+# ---------------------------------------------------------------------------
+# M15-E: ResourcePreemptionEvent（优先级抢占审计事件）
+# ---------------------------------------------------------------------------
+
+from host_brain.core.errors import RESOURCE_GATE_PREEMPTED as _RESOURCE_GATE_PREEMPTED  # noqa: E402
+
+
+@dataclass(frozen=True)
+class ResourcePreemptionEvent:
+    """
+    资源抢占审计事件（M15-E）。
+    - 写入审计链（barge_in_log / voice_event_log）
+    - 含 preemptor/preempted/reason_code/evidence_ref
+    """
+    event_id: str
+    preemptor: str                  # 抢占者（"ASR" | "PLAYBACK" | "TTS_SYNTH" | "FALLBACK_LLM"）
+    preempted: str                  # 被抢占者
+    reason_code: str                # RESOURCE_GATE_PREEMPTED
+    ts_ms: int
+    evidence_ref: str               # 审计链引用
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "preemptor": self.preemptor,
+            "preempted": self.preempted,
+            "reason_code": self.reason_code,
+            "ts_ms": self.ts_ms,
+            "evidence_ref": self.evidence_ref,
+        }
+
+
+def build_resource_preemption_event(
+    *,
+    preemptor: str,
+    preempted: str,
+    evidence_ref: str,
+    event_id: str | None = None,
+    ts_ms: int | None = None,
+) -> ResourcePreemptionEvent:
+    """
+    工厂函数：构建 ResourcePreemptionEvent。
+    - preemptor/preempted 必须是合法的 TASK_* 常量
+    - evidence_ref 必填
+    """
+    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
+
+    valid_tasks = set(TASK_PRIORITY.keys())
+    if preemptor not in valid_tasks:
+        raise ValueError(f"invalid preemptor task: {preemptor!r}")
+    if preempted not in valid_tasks:
+        raise ValueError(f"invalid preempted task: {preempted!r}")
+    if not evidence_ref or not str(evidence_ref).strip():
+        raise ValueError("ResourcePreemptionEvent requires evidence_ref")
+
+    return ResourcePreemptionEvent(
+        event_id=event_id or _new_request_id(),
+        preemptor=str(preemptor),
+        preempted=str(preempted),
+        reason_code=_RESOURCE_GATE_PREEMPTED,
+        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        evidence_ref=str(evidence_ref),
+    )
+
+
 class VoiceResourceGate:
     """Deterministic resource gate with priority/mutex and auditable decisions."""
 

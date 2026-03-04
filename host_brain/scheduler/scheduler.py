@@ -63,12 +63,14 @@ class NatsumeScheduler:
         intent_dispatcher: IntentDispatcher | None = None,
         get_sys_mode: Callable[[], str] | None = None,
         ledger: Any | None = None,
+        persist_tasks: bool = True,
     ) -> None:
         self._registry = registry
         self._health = health_reporter
         self._dispatcher = intent_dispatcher
         self._get_sys_mode = get_sys_mode or (lambda: "normal")
         self._ledger = ledger
+        self._persist_tasks = persist_tasks  # F-40：是否启用任务持久化
 
         # 运行时状态
         self._running = False
@@ -90,6 +92,11 @@ class NatsumeScheduler:
             return
         self._running = True
         self._shutdown_event.clear()
+
+        # F-40 修复：重启后从 DB 恢复持久化任务
+        if self._persist_tasks and self._ledger is not None:
+            self._load_persisted_tasks()
+
         logger.info("Scheduler starting, %d enabled tasks", len(self._registry.enabled_tasks()))
 
         # 启动 interval/once 定时器
@@ -378,3 +385,92 @@ class NatsumeScheduler:
 
     def get_error_count(self, task_id: str) -> int:
         return self._error_counts.get(task_id, 0)
+
+    # ── 持久化接口（F-40 修复）──
+
+    def register_task(self, task: SchedulerTaskConfig) -> None:
+        """注册任务并持久化到 DB（F-40 修复：重启后可自动恢复）。
+
+        Args:
+            task: 要注册的任务配置。
+        """
+        self._registry.register(task)
+        if self._persist_tasks and self._ledger is not None:
+            self._persist_task(task)
+        if self._running and task.enabled:
+            self._schedule_task(task)
+        logger.info("Scheduler task registered and persisted: %s", task.task_id)
+
+    def unregister_task(self, task_id: str) -> bool:
+        """注销任务并从 DB 删除持久化记录。
+
+        Returns:
+            True 如果任务存在并被注销，False 如果任务不存在。
+        """
+        existed = self._registry.get(task_id) is not None
+        if not existed:
+            return False
+        # 取消定时器
+        timer = self._timers.pop(task_id, None)
+        if timer:
+            timer.cancel()
+        self._registry.unregister(task_id)
+        if self._persist_tasks and self._ledger is not None:
+            try:
+                self._ledger.delete_persisted_scheduler_task(task_id)
+            except Exception as exc:
+                logger.warning("Failed to delete persisted task %s: %s", task_id, exc)
+        logger.info("Scheduler task unregistered: %s", task_id)
+        return True
+
+    def _persist_task(self, task: SchedulerTaskConfig) -> None:
+        """将任务配置写入 scheduler_tasks 表。"""
+        try:
+            self._ledger.persist_scheduler_task({
+                "task_id": task.task_id,
+                "task_name": getattr(task, "task_name", task.task_id),
+                "trigger_mode": task.trigger_mode.value,
+                "trigger_config": task.trigger_config,
+                "intent_template": task.intent_template,
+                "priority": task.priority.value,
+                "enabled": int(task.enabled),
+                "max_consecutive_failures": task.max_consecutive_failures,
+                "registered_at": now_ms(),
+                "registered_by": "scheduler",
+            })
+        except Exception as exc:
+            logger.warning("Failed to persist scheduler task %s: %s", task.task_id, exc)
+
+    def _load_persisted_tasks(self) -> None:
+        """从 DB 加载持久化任务并注册到 registry（重启恢复）。"""
+        try:
+            rows = self._ledger.load_persisted_scheduler_tasks()
+        except Exception as exc:
+            logger.warning("Failed to load persisted scheduler tasks: %s", exc)
+            return
+
+        loaded = 0
+        for row in rows:
+            task_id = row.get("task_id")
+            if not task_id:
+                continue
+            # 如果 registry 中已有该任务（启动时手动注册的），跳过
+            if self._registry.get(task_id) is not None:
+                continue
+            try:
+                task = SchedulerTaskConfig(
+                    task_id=task_id,
+                    trigger_mode=TriggerMode(row["trigger_mode"]),
+                    trigger_config=row.get("trigger_config", {}),
+                    intent_template=row.get("intent_template", {}),
+                    priority=TaskPriority(row.get("priority", "NORMAL")),
+                    enabled=bool(row.get("enabled", 1)),
+                    max_consecutive_failures=int(row.get("max_consecutive_failures", 3)),
+                )
+                self._registry.register(task)
+                loaded += 1
+            except Exception as exc:
+                logger.warning("Failed to restore persisted task %s: %s", task_id, exc)
+
+        if loaded:
+            logger.info("Scheduler restored %d persisted tasks from DB", loaded)

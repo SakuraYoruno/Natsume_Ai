@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +45,7 @@ router = APIRouter(prefix="/canon", tags=["canon"])
 # 依赖注入（外部注入 ledger provider，消除循环导入风险 P1-R118-2）
 # ---------------------------------------------------------------------------
 _canon_store: Optional[WorldCanonStore] = None
+_canon_store_lock = threading.Lock()  # F-28 修复：防止多线程竞态
 _ledger_provider: Optional[Any] = None  # Callable[[], SQLiteLedger]，由 fastapi_app 注册时注入
 
 
@@ -58,10 +60,13 @@ def set_ledger_provider(provider: Any) -> None:
 
 
 def _get_canon_store(ledger: SQLiteLedger) -> WorldCanonStore:
+    """获取 WorldCanonStore 单例（F-28 修复：加锁防止多线程竞态）。"""
     global _canon_store
     if _canon_store is None:
-        world_root = os.environ.get("Nastume_WORLD_CANON_ROOT", "host_brain/canon/world")
-        _canon_store = WorldCanonStore(world_root=world_root, ledger=ledger)
+        with _canon_store_lock:
+            if _canon_store is None:  # double-checked locking
+                world_root = os.environ.get("Nastume_WORLD_CANON_ROOT", "host_brain/canon/world")
+                _canon_store = WorldCanonStore(world_root=world_root, ledger=ledger)
     return _canon_store
 
 
@@ -194,8 +199,14 @@ async def list_proposals(
     target_doc_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    after_id: Optional[int] = None,
 ) -> CanonProposalListResponse:
-    """列出 World Canon 提案（分页，可按 status/canon_kind/target_doc_id 过滤）。"""
+    """列出 World Canon 提案（分页，可按 status/canon_kind/target_doc_id 过滤）。
+
+    支持两种分页模式：
+    - OFFSET 分页：page + page_size（默认，适合小数据集）
+    - Cursor 分页：after_id（F-38 修复，深页码 O(1) 性能，推荐大数据集使用）
+    """
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     page = max(1, page)
@@ -210,6 +221,7 @@ async def list_proposals(
             target_doc_id=target_doc_id,
             limit=page_size,
             offset=offset,
+            after_id=after_id,
         )
         items = [_proposal_row_to_response(row, request_id) for row in items_raw]
         return CanonProposalListResponse(
@@ -324,14 +336,16 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
             )
 
         approver_node_id = body.approver_node_id or f"api.canon_proposals.approve::{request_id}"
-        doc = store.approve_proposal_with_content(
-            proposal_id=proposal_id,
-            proposed_title=body.proposed_title,
-            proposed_tags=body.proposed_tags,
-            proposed_body=body.proposed_body,
-            approver_node_id=approver_node_id,
-            ts_ms=ts_ms,
-        )
+        # F-35 修复：approve 操作（DB 状态更新 + SSOT 写入）包裹在事务上下文中
+        with ledger.transaction():
+            doc = store.approve_proposal_with_content(
+                proposal_id=proposal_id,
+                proposed_title=body.proposed_title,
+                proposed_tags=body.proposed_tags,
+                proposed_body=body.proposed_body,
+                approver_node_id=approver_node_id,
+                ts_ms=ts_ms,
+            )
 
         # 读取更新后的提案记录
         response_row = dict(existing)
@@ -392,6 +406,7 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
         )
 
         # 写 system_event_log（审计串联）
+        # F-36 修复：审计写入失败只记录 warning，不阻断主流程（reject 本身已成功）
         try:
             ledger.log_system_event({
                 "request_id": request_id,
@@ -401,15 +416,10 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
                 "ts_ms": ts_ms,
             })
         except Exception as audit_exc:
-            _logger.error(
-                "reject_proposal audit write failed: %s",
+            _logger.warning(
+                "reject_proposal audit write failed (non-fatal): %s",
                 audit_exc,
                 extra={"request_id": request_id},
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="reject audit log write failed",
-                headers={"X-Reason-Code": CANON_SYNC_FAILED},
             )
 
         return _proposal_row_to_response(row, request_id)

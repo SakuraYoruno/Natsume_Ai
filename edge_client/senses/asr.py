@@ -127,6 +127,100 @@ class TranscriptionSegment:
     words: list[dict[str, Any]] = field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# M15-A: ASRTranscriptEvent（确定性 ASR 事件 + 审计串联）
+# ---------------------------------------------------------------------------
+
+LOW_CONFIDENCE_THRESHOLD = 0.6
+MAX_ALTERNATES = 3
+
+
+@dataclass(frozen=True)
+class ASRTranscriptEvent:
+    """
+    ASR 转写事件（M15-A）。
+    - 低置信度显式标注（low_confidence=True + reason_code=ASR_LOW_CONFIDENCE）
+    - 每个事件携带 evidence_ref（可追溯）
+    - alternates 最多 3 个（N-best）
+    """
+    event_id: str
+    session_id: str
+    segment_id: str
+    text: str
+    confidence: float               # 0.0~1.0
+    ts_start_ms: int
+    ts_end_ms: int
+    is_final: bool
+    alternates: tuple[str, ...]     # N-best（最多 3 个）
+    evidence_ref: str               # 审计链引用（必填）
+    low_confidence: bool            # confidence < LOW_CONFIDENCE_THRESHOLD 时为 True
+    reason_code: str | None         # 低置信度时填 ASR_LOW_CONFIDENCE
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "session_id": self.session_id,
+            "segment_id": self.segment_id,
+            "text": self.text,
+            "confidence": self.confidence,
+            "ts_start_ms": self.ts_start_ms,
+            "ts_end_ms": self.ts_end_ms,
+            "is_final": self.is_final,
+            "alternates": list(self.alternates),
+            "evidence_ref": self.evidence_ref,
+            "low_confidence": self.low_confidence,
+            "reason_code": self.reason_code,
+        }
+
+
+def build_asr_transcript_event(
+    *,
+    session_id: str,
+    segment_id: str,
+    text: str,
+    confidence: float,
+    ts_start_ms: int,
+    ts_end_ms: int,
+    is_final: bool = True,
+    alternates: list[str] | None = None,
+    evidence_ref: str | None = None,
+    event_id: str | None = None,
+) -> ASRTranscriptEvent:
+    """
+    工厂函数：构建 ASRTranscriptEvent。
+
+    - evidence_ref 必填（缺失时抛出 ValueError）
+    - alternates 最多 3 个（超出时截断）
+    - 低置信度自动标注 low_confidence=True + reason_code=ASR_LOW_CONFIDENCE
+    """
+    from host_brain.core.errors import ASR_LOW_CONFIDENCE as _ASR_LOW_CONFIDENCE
+    from host_brain.core.ids import new_request_id as _new_request_id
+
+    if not evidence_ref or not str(evidence_ref).strip():
+        raise ValueError("ASRTranscriptEvent requires evidence_ref")
+
+    # alternates 截断到最多 3 个
+    safe_alternates = tuple((alternates or [])[:MAX_ALTERNATES])
+
+    low_conf = float(confidence) < LOW_CONFIDENCE_THRESHOLD
+    code = _ASR_LOW_CONFIDENCE if low_conf else None
+
+    return ASRTranscriptEvent(
+        event_id=event_id or _new_request_id(),
+        session_id=str(session_id),
+        segment_id=str(segment_id),
+        text=str(text),
+        confidence=float(confidence),
+        ts_start_ms=int(ts_start_ms),
+        ts_end_ms=int(ts_end_ms),
+        is_final=bool(is_final),
+        alternates=safe_alternates,
+        evidence_ref=str(evidence_ref),
+        low_confidence=low_conf,
+        reason_code=code,
+    )
+
+
 @dataclass
 class AsrResult:
     """Result of a single ASR transcription attempt."""

@@ -1,4 +1,7 @@
-﻿<div align="center">
+受众：PROJECT
+标题：Nastume Ai 项目说明
+
+<div align="center">
 
 # 🌸 Nastume Ai
 
