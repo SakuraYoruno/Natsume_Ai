@@ -40,9 +40,11 @@ from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
 from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
+from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.broker import ToolBroker
 from host_brain.governor.tokens import TokenService
+from host_brain.bond.bond_stage_engine import BondStageEngine
 
 
 # HTTP契约模型定义
@@ -235,6 +237,11 @@ app.include_router(scheduler_router)
 app.include_router(tool_router)
 
 # ---------------------------------------------------------------------------
+# 注册 Bond 阶段 REST API 路由（M13-A: Bond 阶段积分 + 自动晋级）
+# ---------------------------------------------------------------------------
+app.include_router(bond_router)
+
+# ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -264,6 +271,7 @@ _ledger: Optional[SQLiteLedger] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
+_bond_stage_engine: Optional[BondStageEngine] = None
 _logger = logging.getLogger("Nastume.fastapi")
 
 
@@ -312,6 +320,18 @@ _set_tool_providers(
     catalog_provider=get_tool_catalog,
     ledger_provider=get_ledger,
 )
+
+
+def get_bond_stage_engine() -> BondStageEngine:
+    """获取 BondStageEngine 单例（延迟初始化）。"""
+    global _bond_stage_engine
+    if _bond_stage_engine is None:
+        _bond_stage_engine = BondStageEngine(ledger=get_ledger())
+    return _bond_stage_engine
+
+
+# 注入 bond engine provider 到 bond_routes（M13-A）
+_set_bond_engine_provider(get_bond_stage_engine)
 
 
 def get_intent_engine() -> IntentDecisionEngine:

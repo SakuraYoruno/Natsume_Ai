@@ -663,7 +663,8 @@ M12-B 多轮对话上下文压缩：FR-MEM-005 扩展（ContextCompressor：slid
 M12-C Reranker 服务强化：FR-MEM-004（RerankerServiceContract 健康状态 + 降级策略 + EvidencePack stage 字段）— **DONE**（2026-03-04）
 M12-D 技能热加载：FR-SKILL-001/002 扩展（SkillHotLoader + SkillVersionRegistry：热加载/回滚/一致性检查/审计）— **DONE**（2026-03-04）
 
-每个里程碑交付必须包含：
+M13 Bond 阶段自动晋级 + 长期记忆蒸馏强化：
+M13-A Bond 阶段积分 + 自动晋级：FR-BOND-001/002/003 扩展（BondStageEngine：积分累积/阶段晋级/降级/趋势/审计串联 + Bond REST API：/bond/stage /bond/summary /bond/event /bond/users /bond/health）— **DONE**（2026-03-04）
 - 完成的需求编号清单
 - 回归测试清单（测试编号 + 预期断言）
 - 风险回顾（新增 scope / 票据 / 红线变化）
