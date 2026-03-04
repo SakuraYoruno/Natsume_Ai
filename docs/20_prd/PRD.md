@@ -704,10 +704,10 @@ M15-E Edge 资源闸门强化：FR-VOICE-005（ResourcePreemptionEvent：优先�
 M15-F M15 发布清单 — **DONE**（2026-03-04：1534 passed；m15_release.json 已生成）
 
 M16 Canon 治理强化 + 记忆检索优化 + 调度器持久化：
-M16-A Canon 治理 API 强化：FR-CANON-GOV-001（canon_routes.py 依赖注入重构 + approve/reject 事务包裹 + _get_canon_store 竞态修复）— **PLANNED**
-M16-B 长期记忆检索强化：FR-MEM-PAGE-001（list_proposals() cursor-based 分页 + 深页码性能优化）— **PLANNED**
-M16-C 调度器任务持久化：FR-SCHED-PERSIST-001（NatsumeScheduler CRON 任务 SQLite 持久化 + 重启后自动恢复）— **PLANNED**
-M16-D M16 发布清单 — **PLANNED**
+M16-A Canon 治理 API 强化：FR-CANON-GOV-001（canon_routes.py 依赖注入重构 + approve/reject 事务包裹 + _get_canon_store 竞态修复）— **DONE**
+M16-B 长期记忆检索强化：FR-MEM-PAGE-001（list_proposals() cursor-based 分页 + 深页码性能优化）— **DONE**
+M16-C 调度器任务持久化：FR-SCHED-PERSIST-001（NatsumeScheduler CRON 任务 SQLite 持久化 + 重启后自动恢复）— **DONE**
+M16-D M16 发布清单 — **DONE**
 
 ---
 
