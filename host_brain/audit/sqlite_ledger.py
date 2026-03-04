@@ -53,6 +53,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "bond_update_log",
     "sandbox_exec_log",
     "scheduler_event_log",
+    "scheduler_tasks",
     "replay_guard",
     "session_seq_guard",
 })
@@ -1159,6 +1160,114 @@ class SQLiteLedger:
             return None
         return self._decode_row("skill_exec_log", row)
 
+    def persist_scheduler_task(self, task_config: dict[str, Any]) -> None:
+        """持久化调度器任务配置到 scheduler_tasks 表（F-40 修复）。
+
+        Args:
+            task_config: 包含 task_id/task_name/trigger_mode/trigger_config/
+                         intent_template/priority/enabled/max_consecutive_failures 的字典。
+        """
+        import json
+        ts = int(task_config.get("registered_at", now_ms()))
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT INTO scheduler_tasks
+                  (task_id, task_name, trigger_mode, trigger_config, intent_template,
+                   priority, enabled, max_consecutive_failures, registered_at, updated_at,
+                   registered_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                  task_name=excluded.task_name,
+                  trigger_mode=excluded.trigger_mode,
+                  trigger_config=excluded.trigger_config,
+                  intent_template=excluded.intent_template,
+                  priority=excluded.priority,
+                  enabled=excluded.enabled,
+                  max_consecutive_failures=excluded.max_consecutive_failures,
+                  updated_at=excluded.updated_at,
+                  registered_by=excluded.registered_by
+                """,
+                (
+                    str(task_config["task_id"]),
+                    str(task_config.get("task_name", task_config["task_id"])),
+                    str(task_config["trigger_mode"]),
+                    json.dumps(task_config.get("trigger_config", {}), ensure_ascii=False),
+                    json.dumps(task_config.get("intent_template", {}), ensure_ascii=False),
+                    str(task_config.get("priority", "NORMAL")),
+                    int(task_config.get("enabled", 1)),
+                    int(task_config.get("max_consecutive_failures", 3)),
+                    ts,
+                    ts,
+                    str(task_config.get("registered_by", "scheduler")),
+                ),
+            )
+            self._conn.commit()
+
+    def load_persisted_scheduler_tasks(self) -> list[dict[str, Any]]:
+        """从 scheduler_tasks 表加载所有持久化任务配置（F-40 修复）。
+
+        Returns:
+            任务配置字典列表，trigger_config 和 intent_template 已反序列化为 dict。
+        """
+        import json
+        rows = self._conn.execute(
+            "SELECT * FROM scheduler_tasks ORDER BY id ASC"
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            try:
+                d["trigger_config"] = json.loads(d.get("trigger_config", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["trigger_config"] = {}
+            try:
+                d["intent_template"] = json.loads(d.get("intent_template", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["intent_template"] = {}
+            result.append(d)
+        return result
+
+    def delete_persisted_scheduler_task(self, task_id: str) -> bool:
+        """从 scheduler_tasks 表删除指定任务（任务注销时调用）。
+
+        Returns:
+            True 如果删除了记录，False 如果记录不存在。
+        """
+        with self._write_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM scheduler_tasks WHERE task_id = ?",
+                (str(task_id),),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def transaction(self):
+        """上下文管理器：将多个 DB 操作包裹在单个 SQLite 事务中（F-35 修复）。
+
+        用法::
+
+            with ledger.transaction():
+                ledger.update_proposal_status(...)
+                ledger.log_canon_change(...)
+
+        事务内任何异常都会触发 ROLLBACK，正常退出则 COMMIT。
+        """
+        import contextlib
+
+        @contextlib.contextmanager
+        def _tx():
+            with self._write_lock:
+                self._conn.execute("BEGIN")
+                try:
+                    yield
+                    self._conn.execute("COMMIT")
+                except Exception:
+                    self._conn.execute("ROLLBACK")
+                    raise
+
+        return _tx()
+
     def _ensure_schema(self) -> None:
         with self._conn:
             self._conn.executescript(
@@ -1630,6 +1739,25 @@ class SQLiteLedger:
                 CREATE INDEX IF NOT EXISTS idx_error_ts ON error_log(ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_qa_violation_ts ON qa_violation_log(ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_memory_ops_ts ON memory_ops_log(ts_ms);
+
+                CREATE TABLE IF NOT EXISTS scheduler_tasks (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id         TEXT NOT NULL UNIQUE,
+                    task_name       TEXT NOT NULL,
+                    trigger_mode    TEXT NOT NULL,
+                    trigger_config  TEXT NOT NULL,
+                    intent_template TEXT NOT NULL,
+                    priority        TEXT NOT NULL DEFAULT 'NORMAL',
+                    enabled         INTEGER NOT NULL DEFAULT 1,
+                    max_consecutive_failures INTEGER NOT NULL DEFAULT 3,
+                    registered_at   INTEGER NOT NULL,
+                    updated_at      INTEGER NOT NULL,
+                    registered_by   TEXT NOT NULL DEFAULT 'scheduler'
+                );
+                CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_enabled
+                    ON scheduler_tasks (enabled);
+                CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_trigger_mode
+                    ON scheduler_tasks (trigger_mode);
                 """
             )
 

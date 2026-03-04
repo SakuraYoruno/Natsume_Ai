@@ -34,6 +34,10 @@ SKIP_DIR_NAMES = {
     "venv",
     "__pycache__",
     "node_modules",
+    ".pytest_cache",
+    ".tox",
+    ".mypy_cache",
+    ".ruff_cache",
 }
 SKIP_SUBSTRINGS = ("/tests/fixtures/",)
 

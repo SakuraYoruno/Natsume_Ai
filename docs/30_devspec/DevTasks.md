@@ -2479,4 +2479,186 @@ TASK-XXXX 标题
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
 - 关联需求/测试：M13-A/B/C/D 全部 DONE。
 
+---
+
+## M14 任务卡（通道 + 外显 + MCP 治理收口）
+
+### TASK-0166 M14 前置：DevSpec §27 工程契约拆解
+- 状态：DONE（2026-03-04，DevSpec §25/§26/§27 NEW）
+- 任务描述：拆解 M14-A~C 工程契约（WeChat 通道事件化 / VTS 外显映射 / MCP 治理），写入 DevSpec §27。
+- 输入：PRD FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
+- 输出：DevSpec §27.1~§27.3（接口/Schema/错误码/测试编号）。
+- 验收标准：DevSpec §27 完整，含 T-CHAN-01~05 / T-VTS-01~05 / T-MCP-GOV-01~05。
+- 关联需求：FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
+
+### TASK-0167 M14-A 微信通道 I/O 事件化
+- 状态：DONE（2026-03-04）
+- 任务描述：将微信收发建模为确定性通道事件（inbound/outbound），写入可追溯审计链；LLM 不得自行决定"是否发送/发给谁/发什么"。
+- 输入：DevSpec §27.1；现有 edge_client/channels/wechat.py（或等价模块）。
+- 输出：
+  - `host_brain/channels/wechat_channel.py`（WeChatChannelEvent：inbound/outbound + thread_key + request_id + audit 串联）；
+  - `host_brain/core/errors.py`（新增 CHANNEL_* 错误码）；
+  - `tests/unit/test_wechat_channel.py`（T-CHAN-01~05）；
+  - `tests/integration/test_wechat_channel_audit.py`（T-CHAN-AUDIT-01~03）。
+- 验收标准：
+  - T-CHAN-01~05 全部通过；
+  - 任一出站消息可在审计链追溯到 thread_key + request_id；
+  - 失败必须可解释（reason_code + stage）；
+  - 全量测试 ≥1350 passed。
+- 关联需求/测试：FR-CHANNEL-001；T-CHAN-01~05；T-CHAN-AUDIT-01~03。
+
+### TASK-0168 M14-B VTS 外显确定性映射
+- 状态：DONE（2026-03-04）
+- 任务描述：实现 emotion_tag→expression_id 固定枚举映射；拒绝非法 tag 或自由动作参数；同版本同输入输出一致。
+- 输入：DevSpec §27.2；现有 edge_client/actuators/vts_driver.py。
+- 输出：
+  - `edge_client/actuators/vts_expression_map.py`（VTSExpressionMap：枚举映射表 + 校验）；
+  - `edge_client/actuators/vts_driver.py`（强化：接入 VTSExpressionMap + 非法 tag 拒绝）；
+  - `host_brain/core/errors.py`（新增 VTS_EXPRESSION_INVALID / VTS_TAG_UNKNOWN）；
+  - `tests/unit/test_vts_expression_map.py`（T-VTS-01~05）。
+- 验收标准：
+  - T-VTS-01~05 全部通过；
+  - 非法 emotion_tag/自由动作参数被拒绝并产生可统计 reason_code；
+  - 合法触发可回放到固定映射表（同版本同输入输出一致）；
+  - 全量测试 ≥1360 passed。
+- 关联需求/测试：FR-AVATAR-001；T-VTS-01~05。
+
+### TASK-0169 M14-C MCP Provider 治理完整验收
+- 状态：DONE（2026-03-04）
+- 任务描述：完整验收 MCP provider 元数据同步 + READ/WRITE 分级 + ToolBroker 单入口 + 审计串联 + AIRLOCK 出站最小化。
+- 输入：DevSpec §27.3；现有 host_brain/tools/mcp_adapter.py；ToolBroker（M12-A）。
+- 输出：
+  - `host_brain/tools/mcp_adapter.py`（强化：provider_id/tool_id/request_id/evidence_ref 审计串联 + AIRLOCK 出站最小化）；
+  - `tests/unit/test_mcp_governance.py`（T-MCP-GOV-01~05）；
+  - `tests/integration/test_mcp_audit_chain.py`（T-MCP-AUDIT-01~03）。
+- 验收标准：
+  - T-MCP-GOV-01~05 全部通过；
+  - MCP WRITE 在无 token 或未 APPROVE 时必拒绝且可统计；
+  - 所有 MCP 调用可追溯到 intent/governor/skill_exec 记录；
+  - 满足 AIRLOCK 出站最小化要求；
+  - 全量测试 ≥1370 passed。
+- 关联需求/测试：FR-MCP-001；T-MCP-GOV-01~05；T-MCP-AUDIT-01~03。
+
+### TASK-0170 M14-D M14 发布清单
+- 状态：DONE（2026-03-04，m14_release.json NEW）
+- 任务描述：生成 M14 发布清单（m14_release.json），记录 M14-A~C 核心文件 hash + 测试通过数 + 质量门禁。
+- 输入：TASK-0166~0169 全部 DONE。
+- 输出：`docs/50_release/m14_release.json`。
+- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
+- 关联需求：NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
+
+---
+
+## M15 任务卡（语音链路深化完整验收）
+
+### TASK-0171 M15 前置：DevSpec §28 工程契约拆解
+- 状态：DONE（2026-03-04，DevSpec §28 NEW）
+- 任务描述：拆解 M15-A~E 工程契约（ASR 事件化 / TTS 播报队列 / Barge-in / 兜底模型 / 资源闸门），写入 DevSpec §28。
+- 输入：PRD FR-VOICE-001~005。
+- 输出：DevSpec §28.1~§28.6（接口/Schema/错误码/测试编号）。
+- 验收标准：DevSpec §28 完整，含 T-ASR-EVT-01~05 / T-TTS-QUEUE-01~05 / T-BARGE-01~04 / T-FALLBACK-01~05 / T-RGATE-01~05。
+- 关联需求：FR-VOICE-001~005。
+
+### TASK-0172 M15-A ASR 事件化上送强化
+- 状态：DONE（2026-03-04）
+- 任务描述：强化 ASRTranscriptEvent Schema（alternates + evidence_ref + low_confidence 显式标注）；低置信度必须标注 reason_code=ASR_LOW_CONFIDENCE。
+- 输入：DevSpec §28.1；现有 edge_client/senses/asr.py。
+- 输出：
+  - `edge_client/senses/asr.py`（ASRTranscriptEvent 强化：alternates/evidence_ref/low_confidence）；
+  - `tests/unit/test_asr_event_emitter.py`（T-ASR-EVT-01~05）。
+- 验收标准：T-ASR-EVT-01~05 全部通过；低置信度显式标注；全量测试 ≥1430 passed。
+- 关联需求/测试：FR-VOICE-001；T-ASR-EVT-01~05。
+
+### TASK-0173 M15-B TTS 播报队列强化
+- 状态：DONE（2026-03-04）
+- 任务描述：强化 TTSPlaybackEvent Schema（request_id 关联 + 失败 reason_code + stage）；Host 只下发最终口径文本与情绪标签。
+- 输入：DevSpec §28.2；现有 edge_client/actuators/tts_engine.py。
+- 输出：
+  - `edge_client/actuators/tts_engine.py`（TTSPlaybackEvent 强化：request_id/reason_code/stage）；
+  - `tests/unit/test_tts_playback_queue.py`（T-TTS-QUEUE-01~05）。
+- 验收标准：T-TTS-QUEUE-01~05 全部通过；播报事件可关联 request_id；全量测试 ≥1435 passed。
+- 关联需求/测试：FR-VOICE-002；T-TTS-QUEUE-01~05。
+
+### TASK-0174 M15-C Barge-in 可打断强化
+- 状态：DONE（2026-03-04）
+- 任务描述：强化 interrupt() 方法，补充 BargeInEvent 审计记录；打断不构成执行事实；ASR 不被阻塞。
+- 输入：DevSpec §28.3；现有 edge_client/actuators/tts_engine.py。
+- 输出：
+  - `edge_client/actuators/tts_engine.py`（interrupt() 强化：BargeInEvent 写入审计链）；
+  - `tests/unit/test_barge_in.py`（T-BARGE-01~04）。
+- 验收标准：T-BARGE-01~04 全部通过；打断事件可追溯；全量测试 ≥1439 passed。
+- 关联需求/测试：FR-VOICE-003；T-BARGE-01~04。
+
+### TASK-0175 M15-D Edge 兜底小模型门控
+- 状态：DONE（2026-03-04）
+- 任务描述：实现 FallbackModelGate（默认卸载/按需加载/draft_only 标记/快速失败）；不可用时不阻塞主流程。
+- 输入：DevSpec §28.4。
+- 输出：
+  - `edge_client/fallback_model.py`（FallbackModelGate + FallbackOutput）；
+  - `tests/unit/test_fallback_model_gate.py`（T-FALLBACK-01~05）。
+- 验收标准：T-FALLBACK-01~05 全部通过；输出永远 draft_only=True；全量测试 ≥1444 passed。
+- 关联需求/测试：FR-VOICE-004；T-FALLBACK-01~05。
+
+### TASK-0176 M15-E Edge 资源闸门强化
+- 状态：DONE（2026-03-04）
+- 任务描述：强化 EdgeResourceGate，补充优先级抢占审计（ResourcePreemptionEvent）；压力下保证 ASR。
+- 输入：DevSpec §28.5；现有 edge_client/resource_gate.py（或等价模块）。
+- 输出：
+  - `edge_client/resource_gate.py`（ResourcePreemptionEvent + 优先级抢占审计）；
+  - `tests/unit/test_edge_resource_gate.py`（T-RGATE-01~05）。
+- 验收标准：T-RGATE-01~05 全部通过；ASR 始终保证；全量测试 ≥1449 passed。
+- 关联需求/测试：FR-VOICE-005；T-RGATE-01~05。
+
+### TASK-0177 M15-F M15 发布清单
+- 状态：DONE（2026-03-04，m15_release.json NEW）
+- 任务描述：生成 M15 发布清单（m15_release.json），记录 M15-A~E 核心文件 hash + 测试通过数 + 质量门禁。
+- 输入：TASK-0171~0176 全部 DONE。
+- 输出：`docs/50_release/m15_release.json`。
+- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1445。
+- 关联需求：NFR-REL-001；FR-VOICE-001~005。
+
+---
+
+## M16 Canon 治理强化 + 记忆检索优化 + 调度器持久化
+
+### TASK-0178 M16-A Canon 治理 API 强化
+- 状态：DONE
+- 任务描述：重构 canon_routes.py，修复 _get_canon_store() 全局单例竞态（F-28）；修复 _get_ledger_from_app() 延迟导入循环引用风险（F-29）；approve/reject 端点两次 DB 操作改为事务包裹（F-35）；reject 审计写入失败纳入事务确保原子性（F-36）。
+- 输入：DevSpec §20；现有 host_brain/app/canon_routes.py；F-28/F-29/F-35/F-36 发现项。
+- 输出：
+  - `host_brain/app/canon_routes.py`（依赖注入重构 + 事务包裹）；
+  - `tests/unit/test_canon_routes_tx.py`（T-CANON-TX-01~06）。
+- 验收标准：T-CANON-TX-01~06 全部通过；approve/reject 操作原子性保证；全量测试 ≥1539 passed。
+- 关联需求/测试：FR-CANON-GOV-001；T-CANON-TX-01~06。
+
+### TASK-0179 M16-B 长期记忆检索强化
+- 状态：DONE
+- 任务描述：重构 canon_world_store.py 的 list_proposals()，改为 cursor-based 分页（F-38）；补充 cursor 参数（after_id）；深页码性能从 O(N) 降为 O(1)。
+- 输入：DevSpec §21；现有 host_brain/memory/canon_world_store.py；F-38 发现项。
+- 输出：
+  - `host_brain/memory/canon_world_store.py`（list_proposals() cursor-based 分页）；
+  - `tests/unit/test_canon_cursor_pagination.py`（T-CURSOR-01~05）。
+- 验收标准：T-CURSOR-01~05 全部通过；after_id 参数可选（向后兼容）；全量测试 ≥1544 passed。
+- 关联需求/测试：FR-MEM-PAGE-001；T-CURSOR-01~05。
+
+### TASK-0180 M16-C 调度器任务持久化
+- 状态：DONE
+- 任务描述：实现 NatsumeScheduler CRON 任务 SQLite 持久化（F-40）；进程重启后自动从 DB 恢复任务注册；新增 scheduler_tasks 表（migration 0018）。
+- 输入：DevSpec §22；现有 host_brain/scheduler/scheduler.py；F-40 发现项。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`（持久化 + 重启恢复）；
+  - `host_brain/audit/migrations/0018_scheduler_tasks.sql`（scheduler_tasks 表）；
+  - `tests/unit/test_scheduler_persistence.py`（T-SCHED-PERSIST-01~05）。
+- 验收标准：T-SCHED-PERSIST-01~05 全部通过；重启后任务自动恢复；全量测试 ≥1549 passed。
+- 关联需求/测试：FR-SCHED-PERSIST-001；T-SCHED-PERSIST-01~05。
+
+### TASK-0181 M16-D M16 发布清单
+- 状态：DONE
+- 任务描述：生成 M16 发布清单（m16_release.json），记录 M16-A~C 核心文件 hash + 测试通过数 + 质量门禁。
+- 输入：TASK-0178~0180 全部 DONE。
+- 输出：`docs/50_release/m16_release.json`。
+- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1549。
+- 关联需求：NFR-REL-001；FR-CANON-GOV-001；FR-MEM-PAGE-001；FR-SCHED-PERSIST-001。
+
+
 

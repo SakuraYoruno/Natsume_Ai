@@ -253,3 +253,32 @@ HOTLOAD_SKILL_NOT_FOUND = "HOTLOAD_SKILL_NOT_FOUND"                  # 热加载
 HOTLOAD_META_INVALID = "HOTLOAD_META_INVALID"                        # SkillMeta 字段缺失，拒绝加载
 HOTLOAD_VERSION_NOT_FOUND = "HOTLOAD_VERSION_NOT_FOUND"              # 回滚目标版本不存在
 HOTLOAD_ROLLBACK_FAILED = "HOTLOAD_ROLLBACK_FAILED"                  # 回滚执行失败
+
+# ── M13-A: Bond 阶段引擎 ──
+BOND_STAGE_UNKNOWN = "BOND_STAGE_UNKNOWN"                            # 未知 stage 值
+BOND_EVENT_INVALID = "BOND_EVENT_INVALID"                            # 事件格式不合规
+BOND_UPDATE_INVALID = "BOND_UPDATE_INVALID"                          # 缺 evidence_refs 的 Bond 更新
+
+# ── M13-B: 长期记忆蒸馏 ──
+DISTILL_INPUT_INVALID = "DISTILL_INPUT_INVALID"                      # 蒸馏输入无效
+DISTILL_PROPOSAL_DUPLICATE = "DISTILL_PROPOSAL_DUPLICATE"            # 重复提案（幂等保护）
+DISTILL_MAX_PROPOSALS_EXCEEDED = "DISTILL_MAX_PROPOSALS_EXCEEDED"    # 超出最大提案数
+
+# ── M14-A: 微信通道 I/O 事件化 ──
+CHANNEL_SEND_UNAUTHORIZED = "CHANNEL_SEND_UNAUTHORIZED"              # outbound 无 approval_token
+CHANNEL_INTENT_MISSING = "CHANNEL_INTENT_MISSING"                    # outbound 无 intent_id
+CHANNEL_PAYLOAD_INVALID = "CHANNEL_PAYLOAD_INVALID"                  # 消息内容格式不合规
+CHANNEL_THREAD_KEY_MISSING = "CHANNEL_THREAD_KEY_MISSING"            # 缺 thread_key
+CHANNEL_AUDIT_WRITE_FAILED = "CHANNEL_AUDIT_WRITE_FAILED"            # 审计链写入失败（非致命）
+
+# ── M14-B: VTS 外显确定性映射 ──
+VTS_TAG_UNKNOWN = "VTS_TAG_UNKNOWN"                                  # emotion_tag 不在枚举中
+VTS_EXPRESSION_INVALID = "VTS_EXPRESSION_INVALID"                    # 自由动作参数或非法 expression_id
+VTS_INTENSITY_OUT_OF_RANGE = "VTS_INTENSITY_OUT_OF_RANGE"            # intensity 不在 0.0~1.0
+VTS_DURATION_INVALID = "VTS_DURATION_INVALID"                        # duration_ms ≤ 0
+
+# ── M14-C: MCP Provider 治理 ──
+MCP_WRITE_UNAUTHORIZED = "MCP_WRITE_UNAUTHORIZED"                    # WRITE 工具无 approval_token 或未 APPROVE
+MCP_PROVIDER_SYNC_FAILED = "MCP_PROVIDER_SYNC_FAILED"                # provider 元数据同步失败
+MCP_TOOL_NOT_FOUND = "MCP_TOOL_NOT_FOUND"                            # tool_id 不在已同步列表
+MCP_AUDIT_REF_MISSING = "MCP_AUDIT_REF_MISSING"                      # 执行无 evidence_ref

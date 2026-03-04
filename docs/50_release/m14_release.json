@@ -1,0 +1,82 @@
+{
+  "schema_version": "Nastume.release.v1",
+  "milestone": "M14",
+  "release_name": "WeChat Channel + VTS Expression Map + MCP Governance",
+  "git_commit": "f30c0f1",
+  "generated_at": "2026-03-04T12:37:20Z",
+  "ts_ms": 1772594240000,
+  "milestones": [
+    {
+      "id": "M14-A",
+      "name": "微信通道 I/O 事件化",
+      "fr_refs": ["FR-CHANNEL-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0167"]
+    },
+    {
+      "id": "M14-B",
+      "name": "VTS 外显确定性映射",
+      "fr_refs": ["FR-AVATAR-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0168"]
+    },
+    {
+      "id": "M14-C",
+      "name": "MCP Provider 治理完整验收",
+      "fr_refs": ["FR-MCP-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0169"]
+    },
+    {
+      "id": "M14-D",
+      "name": "M14 发布清单",
+      "fr_refs": ["NFR-REL-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0170"]
+    }
+  ],
+  "core_files": {
+    "total": 4,
+    "missing": 0,
+    "missing_files": [],
+    "hashes": {
+      "host_brain/channels/wechat.py": "d78a825dc01b70fe0ba91c03298b8c586fbb46477317224c2c66008b4d612314",
+      "edge_client/actuators/vts_expression_map.py": "4f840c120ecfdf164e9bf5ef7d64a3804600d798d02660245cc790a189a7cf51",
+      "edge_client/actuators/vts_driver.py": "e102d5f82224070eb0522ba9f5fcb30a85630d18d5500486ab998d1f7fcc2e11",
+      "host_brain/tools/mcp_adapter.py": "3ab6d11199302d7d9de940fa00461d17b4b6805ded0c06430f0f9e363b163a9e"
+    }
+  },
+  "test_results": {
+    "m14_tests": {
+      "files": [
+        "tests/unit/test_wechat_channel.py",
+        "tests/unit/test_vts_expression_map.py",
+        "tests/unit/test_mcp_governance.py",
+        "tests/integration/test_wechat_channel_audit.py",
+        "tests/integration/test_mcp_audit_chain.py"
+      ],
+      "passed": 79,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success": true,
+      "summary": "79 passed in 0.30s"
+    },
+    "all_tests": {
+      "passed": 1421,
+      "failed": 0,
+      "skipped": 2,
+      "errors": 0,
+      "success": true,
+      "summary": "1421 passed, 2 skipped in 18.28s"
+    }
+  },
+  "quality_gates": {
+    "all_core_files_present": true,
+    "m14_tests_pass": true,
+    "all_tests_pass": true,
+    "zero_regressions": true,
+    "audit_chain_verified": true
+  },
+  "release_ready": true
+}

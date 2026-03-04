@@ -1,0 +1,96 @@
+{
+  "schema_version": "Nastume.release.v1",
+  "milestone": "M15",
+  "release_name": "Voice Pipeline Deepening - ASR/TTS/Barge-in/FallbackModel/ResourceGate",
+  "git_commit": "e6d3e67",
+  "generated_at": "2026-03-04T14:03:00Z",
+  "ts_ms": 1772600580000,
+  "milestones": [
+    {
+      "id": "M15-A",
+      "name": "ASR 事件化上送强化",
+      "fr_refs": ["FR-VOICE-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0172"]
+    },
+    {
+      "id": "M15-B",
+      "name": "TTS 播报队列强化",
+      "fr_refs": ["FR-VOICE-002"],
+      "status": "DONE",
+      "tasks": ["TASK-0173"]
+    },
+    {
+      "id": "M15-C",
+      "name": "Barge-in 可打断强化",
+      "fr_refs": ["FR-VOICE-003"],
+      "status": "DONE",
+      "tasks": ["TASK-0174"]
+    },
+    {
+      "id": "M15-D",
+      "name": "Edge 兜底小模型门控",
+      "fr_refs": ["FR-VOICE-004"],
+      "status": "DONE",
+      "tasks": ["TASK-0175"]
+    },
+    {
+      "id": "M15-E",
+      "name": "Edge 资源闸门强化",
+      "fr_refs": ["FR-VOICE-005"],
+      "status": "DONE",
+      "tasks": ["TASK-0176"]
+    },
+    {
+      "id": "M15-F",
+      "name": "M15 发布清单",
+      "fr_refs": ["NFR-REL-001"],
+      "status": "DONE",
+      "tasks": ["TASK-0177"]
+    }
+  ],
+  "core_files": {
+    "total": 4,
+    "missing": 0,
+    "missing_files": [],
+    "hashes": {
+      "edge_client/senses/asr.py": "computed_on_release",
+      "edge_client/actuators/tts_engine.py": "computed_on_release",
+      "edge_client/fallback_model.py": "computed_on_release",
+      "edge_client/rpc/resource_gate.py": "computed_on_release"
+    }
+  },
+  "test_results": {
+    "m15_tests": {
+      "files": [
+        "tests/unit/test_asr_event_emitter.py",
+        "tests/unit/test_tts_playback_queue.py",
+        "tests/unit/test_barge_in.py",
+        "tests/unit/test_fallback_model_gate.py",
+        "tests/unit/test_edge_resource_gate.py"
+      ],
+      "passed": 113,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success": true,
+      "summary": "113 passed in 0.22s"
+    },
+    "all_tests": {
+      "passed": 1534,
+      "failed": 0,
+      "skipped": 2,
+      "errors": 0,
+      "success": true,
+      "summary": "1534 passed, 2 skipped in 17.87s"
+    }
+  },
+  "quality_gates": {
+    "all_core_files_present": true,
+    "m15_tests_pass": true,
+    "all_tests_pass": true,
+    "zero_regressions": true,
+    "audit_chain_verified": true
+  },
+  "release_ready": true
+}

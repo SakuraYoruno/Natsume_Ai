@@ -97,6 +97,196 @@ class TtsSynthResult:
 
 
 # ---------------------------------------------------------------------------
+# M15-B: TTSPlaybackEvent（确定性 TTS 播报事件 + 审计串联）
+# ---------------------------------------------------------------------------
+
+TTS_PLAYBACK_STATUS_QUEUED = "queued"
+TTS_PLAYBACK_STATUS_PLAYING = "playing"
+TTS_PLAYBACK_STATUS_DONE = "done"
+TTS_PLAYBACK_STATUS_INTERRUPTED = "interrupted"
+TTS_PLAYBACK_STATUS_FAILED = "failed"
+
+_VALID_PLAYBACK_STATUSES = frozenset({
+    TTS_PLAYBACK_STATUS_QUEUED,
+    TTS_PLAYBACK_STATUS_PLAYING,
+    TTS_PLAYBACK_STATUS_DONE,
+    TTS_PLAYBACK_STATUS_INTERRUPTED,
+    TTS_PLAYBACK_STATUS_FAILED,
+})
+
+
+@dataclass(frozen=True)
+class TTSPlaybackEvent:
+    """
+    TTS 播报事件（M15-B）。
+    - 播报事件必须关联 request_id（可追溯）
+    - 失败必须返回 reason_code + stage
+    - 不得产生伪执行宣告
+    """
+    event_id: str
+    request_id: str                 # 关联 Host 请求 ID（必填）
+    intent_id: str | None           # 关联 intent（可选）
+    text: str                       # 最终口径文本（Host QA 后）
+    emotion_tag: str                # 情绪标签（来自 EmotionTag 枚举）
+    status: str                     # queued | playing | done | interrupted | failed
+    reason_code: str | None         # 失败时必填
+    stage: str | None               # 失败阶段
+    ts_ms: int
+    evidence_ref: str               # 审计链引用
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "request_id": self.request_id,
+            "intent_id": self.intent_id,
+            "text": self.text,
+            "emotion_tag": self.emotion_tag,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "stage": self.stage,
+            "ts_ms": self.ts_ms,
+            "evidence_ref": self.evidence_ref,
+        }
+
+
+def build_tts_playback_event(
+    *,
+    request_id: str,
+    text: str,
+    emotion_tag: str,
+    status: str,
+    evidence_ref: str,
+    intent_id: str | None = None,
+    reason_code: str | None = None,
+    stage: str | None = None,
+    event_id: str | None = None,
+    ts_ms: int | None = None,
+) -> TTSPlaybackEvent:
+    """
+    工厂函数：构建 TTSPlaybackEvent。
+
+    - request_id 必填（缺失时抛出 ValueError）
+    - evidence_ref 必填（缺失时抛出 ValueError）
+    - status 必须是合法值（否则抛出 ValueError）
+    - 失败状态（failed）必须有 reason_code
+    """
+    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
+    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
+
+    if not request_id or not str(request_id).strip():
+        err = ValueError("TTSPlaybackEvent requires request_id")
+        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        raise err
+
+    if not evidence_ref or not str(evidence_ref).strip():
+        err = ValueError("TTSPlaybackEvent requires evidence_ref")
+        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        raise err
+
+    if status not in _VALID_PLAYBACK_STATUSES:
+        err = ValueError(f"invalid TTS playback status: {status!r}")
+        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        raise err
+
+    return TTSPlaybackEvent(
+        event_id=event_id or _new_request_id(),
+        request_id=str(request_id),
+        intent_id=intent_id,
+        text=str(text),
+        emotion_tag=str(emotion_tag),
+        status=status,
+        reason_code=reason_code,
+        stage=stage,
+        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        evidence_ref=str(evidence_ref),
+    )
+
+
+# ---------------------------------------------------------------------------
+# M15-C: BargeInEvent（Barge-in 可打断审计事件）
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BargeInEvent:
+    """
+    Barge-in 打断审计事件（M15-C）。
+    - 打断立即生效，不构成执行事实
+    - ASR 不被阻塞（asr_continued=True）
+    - 写入审计链（barge_in_log）
+    """
+    event_id: str
+    session_id: str
+    interrupted_request_id: str    # 被打断的播报 request_id
+    trigger_ts_ms: int             # 打断触发时间
+    asr_continued: bool            # ASR 是否继续上送
+    evidence_ref: str              # 审计链引用
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "session_id": self.session_id,
+            "interrupted_request_id": self.interrupted_request_id,
+            "trigger_ts_ms": self.trigger_ts_ms,
+            "asr_continued": self.asr_continued,
+            "evidence_ref": self.evidence_ref,
+        }
+
+
+def build_barge_in_event(
+    *,
+    session_id: str,
+    interrupted_request_id: str,
+    trigger_ts_ms: int,
+    evidence_ref: str,
+    asr_continued: bool = True,
+    event_id: str | None = None,
+) -> BargeInEvent:
+    """
+    工厂函数：构建 BargeInEvent。
+
+    - interrupted_request_id 必填（缺失时抛出 ValueError）
+    - evidence_ref 必填（缺失时抛出 ValueError）
+    - asr_continued 默认 True（打断后 ASR 继续上送）
+    - 打断不构成执行事实（无 intent_draft 字段）
+    """
+    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
+    from host_brain.core.ids import new_request_id as _new_request_id
+
+    if not interrupted_request_id or not str(interrupted_request_id).strip():
+        err = ValueError("BargeInEvent requires interrupted_request_id")
+        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        raise err
+
+    if not evidence_ref or not str(evidence_ref).strip():
+        err = ValueError("BargeInEvent requires evidence_ref")
+        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        raise err
+
+    return BargeInEvent(
+        event_id=event_id or _new_request_id(),
+        session_id=str(session_id),
+        interrupted_request_id=str(interrupted_request_id),
+        trigger_ts_ms=int(trigger_ts_ms),
+        asr_continued=bool(asr_continued),
+        evidence_ref=str(evidence_ref),
+    )
+    duration_s: float = 0.0
+    processing_time_s: float = 0.0
+    sample_rate: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "audio_ref": self.audio_ref,
+            "duration_s": self.duration_s,
+            "processing_time_s": self.processing_time_s,
+            "sample_rate": self.sample_rate,
+        }
+
+
+# ---------------------------------------------------------------------------
 # GPT-SoVITS Model Manager
 # ---------------------------------------------------------------------------
 

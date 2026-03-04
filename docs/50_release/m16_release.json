@@ -1,0 +1,66 @@
+{
+  "milestone": "M16",
+  "release_date": "2026-03-04",
+  "release_ready": true,
+  "all_core_files_present": true,
+  "zero_regressions": true,
+  "total_tests_passed": 1564,
+  "total_tests_skipped": 2,
+  "total_tests_failed": 0,
+  "subtasks": [
+    {
+      "task_id": "TASK-0178",
+      "name": "M16-A Canon 治理 API 强化",
+      "status": "DONE",
+      "fixes": ["F-28", "F-35", "F-36"],
+      "new_tests": ["T-CANON-TX-01", "T-CANON-TX-02", "T-CANON-TX-03", "T-CANON-TX-04", "T-CANON-TX-05", "T-CANON-TX-06"],
+      "tests_added": 9
+    },
+    {
+      "task_id": "TASK-0179",
+      "name": "M16-B 长期记忆检索强化",
+      "status": "DONE",
+      "fixes": ["F-38"],
+      "new_tests": ["T-CURSOR-01", "T-CURSOR-02", "T-CURSOR-03", "T-CURSOR-04", "T-CURSOR-05"],
+      "tests_added": 10
+    },
+    {
+      "task_id": "TASK-0180",
+      "name": "M16-C 调度器任务持久化",
+      "status": "DONE",
+      "fixes": ["F-40"],
+      "new_tests": ["T-SCHED-PERSIST-01", "T-SCHED-PERSIST-02", "T-SCHED-PERSIST-03", "T-SCHED-PERSIST-04", "T-SCHED-PERSIST-05"],
+      "tests_added": 12
+    },
+    {
+      "task_id": "TASK-0181",
+      "name": "M16-D M16 发布清单",
+      "status": "DONE",
+      "fixes": [],
+      "new_tests": [],
+      "tests_added": 0
+    }
+  ],
+  "core_files": {
+    "host_brain/app/canon_routes.py": "82ab63ee265c5b98",
+    "host_brain/audit/sqlite_ledger.py": "c13116c58c0de61e",
+    "host_brain/scheduler/scheduler.py": "5c6149598cec6561",
+    "host_brain/audit/migrations/0018_scheduler_tasks.sql": "6a9c97fcbb28d328",
+    "tests/unit/test_canon_routes_tx.py": "0fc2a79abf16b033",
+    "tests/unit/test_canon_cursor_pagination.py": "da0ca3db075cc94b",
+    "tests/unit/test_scheduler_persistence.py": "94318a9a87055526"
+  },
+  "quality_gates": {
+    "static_scan": "passed",
+    "doc_gate": "passed",
+    "pytest_unit": "passed",
+    "pytest_integration": "passed",
+    "zero_p0_findings": true,
+    "p1_findings_resolved": ["F-28", "F-35", "F-36", "F-38", "F-40"]
+  },
+  "baseline_comparison": {
+    "m15_tests_passed": 1533,
+    "m16_tests_passed": 1564,
+    "delta": 31
+  }
+}

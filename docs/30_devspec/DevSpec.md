@@ -2927,3 +2927,937 @@ class SkillHotLoader:
 | T-HOTLOAD-03 | rollback_skill 回滚到指定版本 |
 | T-HOTLOAD-04 | 热加载写 skill_reload_log（审计） |
 | T-HOTLOAD-05 | 运行时一致性检查：SkillMeta 字段缺失 → 拒绝加载 |
+
+---
+
+## §25 M13 工程契约（Bond 阶段自动晋级 + 长期记忆蒸馏强化）
+
+### §25.1 M13-A Bond 阶段积分 + 自动晋级（FR-BOND-001/002/003）
+
+#### 25.1.1 模块边界
+
+```
+host_brain/bond/
+  bond_stage_engine.py    ← BondStageEngine（NEW）
+host_brain/app/
+  bond_routes.py          ← Bond REST API 5 端点（NEW）
+```
+
+#### 25.1.2 BondStageEngine 接口
+
+```python
+@dataclass(frozen=True)
+class BondScoreState:
+    stage: str                          # "stranger" | "acquaintance" | "friend" | "close_friend" | "soulmate"
+    score: float                        # 内部积分（不暴露给语义内核）
+    trend: Literal["rising", "stable", "falling"]
+    last_event_ts: int
+    audit_ref: str                      # 最近一次审计链引用
+
+@dataclass(frozen=True)
+class StageTransitionResult:
+    previous_stage: str
+    new_stage: str
+    delta: float
+    transition_type: Literal["upgrade", "downgrade", "stable"]
+    audit_ref: str
+    ts_ms: int
+
+class BondStageEngine:
+    def apply_event(
+        self,
+        event: dict,                    # etype / intensity / evidence_refs
+        current_state: BondScoreState,
+    ) -> tuple[BondScoreState, StageTransitionResult]:
+        """应用 Bond 事件，返回新状态与晋级/降级结果；晋级/降级写入审计链。"""
+
+    def get_summary(
+        self,
+        state: BondScoreState,
+    ) -> dict:
+        """返回给语义内核的 Bond Summary（仅 stage/trend/capability_hint，不含数值）。"""
+
+    def get_trend(self, history: list[BondScoreState]) -> str:
+        """计算趋势（rising/stable/falling）。"""
+```
+
+#### 25.1.3 Bond REST API 端点
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/bond/stage` | GET | 返回当前 Bond 阶段状态（不含数值） |
+| `/bond/summary` | GET | 返回给语义内核的 Bond Summary |
+| `/bond/event` | POST | 提交 Bond 事件（需 evidence_refs） |
+| `/bond/users` | GET | 列出所有用户的 Bond 状态 |
+| `/bond/health` | GET | 健康检查 |
+
+#### 25.1.4 审计字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `stage_transition` | dict | 晋级/降级结果（previous/new/delta/type） |
+| `audit_ref` | str | 审计链引用 |
+| `evidence_refs` | list[str] | 触发事件的证据引用 |
+| `ts_ms` | int | 时间戳 |
+
+#### 25.1.5 错误码
+
+| 错误码 | 触发条件 |
+|--------|---------|
+| `BOND_UPDATE_INVALID` | 缺 evidence_refs 的 Bond 更新 |
+| `BOND_STAGE_UNKNOWN` | 未知 stage 值 |
+| `BOND_EVENT_INVALID` | 事件格式不合规 |
+
+#### 25.1.6 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-BOND-STAGE-01 | apply_event 积分累积，stage 不变 |
+| T-BOND-STAGE-02 | 积分超阈值 → 自动晋级，写审计链 |
+| T-BOND-STAGE-03 | 积分低于阈值 → 自动降级，写审计链 |
+| T-BOND-STAGE-04 | get_summary 不含数值（FR-BOND-003） |
+| T-BOND-STAGE-05 | 缺 evidence_refs → BOND_UPDATE_INVALID |
+| T-BOND-STAGE-06 | get_trend 返回 rising/stable/falling |
+| T-BOND-STAGE-07 | 边界：score=0 不降级到 stranger 以下 |
+| T-BOND-STAGE-08 | 边界：score=max 不晋级到 soulmate 以上 |
+| T-BOND-STAGE-09 | 审计链可追溯 stage_transition 字段 |
+| T-BOND-API-01 | GET /bond/stage 返回结构稳定 |
+| T-BOND-API-02 | GET /bond/summary 不含数值 |
+| T-BOND-API-03 | POST /bond/event 成功，返回 stage_transition |
+| T-BOND-API-04 | POST /bond/event 缺 evidence_refs → 422 |
+| T-BOND-API-05 | GET /bond/users 返回列表结构稳定 |
+| T-BOND-API-06 | GET /bond/health 返回 status/latency_ms |
+| T-BOND-API-07 | Bond Summary 不含数值（FR-BOND-003 API 层验收） |
+| T-BOND-API-08 | 非法 event 格式 → 422 + reason_code |
+
+---
+
+### §25.2 M13-B 长期记忆蒸馏强化（FR-MEM-DISTILL-001/002）
+
+#### 25.2.1 模块边界
+
+```
+host_brain/memory/
+  long_term_distiller.py  ← LongTermMemoryDistiller（NEW）
+```
+
+#### 25.2.2 LongTermMemoryDistiller 接口
+
+```python
+@dataclass(frozen=True)
+class DistillationProposal:
+    proposal_id: str
+    source_episodic_ids: list[str]      # 来源 EpisodicMemory ID
+    semantic_summary: str               # 语义摘要
+    confidence: float
+    evidence_refs: list[str]
+    status: Literal["pending", "approved", "rejected"]
+    ts_ms: int
+
+class LongTermMemoryDistiller:
+    def distill(
+        self,
+        episodic_memories: list[dict],
+        *,
+        max_proposals: int = 5,         # 每次最多 5 个提案
+    ) -> list[DistillationProposal]:
+        """将 EpisodicMemory 蒸馏为语义记忆提案（pending 状态，不直接写 Canon SSOT）。"""
+
+    def is_duplicate(
+        self,
+        proposal: DistillationProposal,
+        existing: list[DistillationProposal],
+    ) -> bool:
+        """幂等保护：检查是否已存在相同提案。"""
+
+def make_distillation_task_config(
+    *,
+    cron: str = "0 3 * * *",           # 每日 03:00
+    max_proposals: int = 5,
+    enabled: bool = True,
+) -> dict:
+    """生成调度器 CRON 任务配置（工厂函数）。"""
+```
+
+#### 25.2.3 关键约束
+
+- 蒸馏结果只生成 `pending` 提案，**不直接写 Canon SSOT**（FR-MEM-DISTILL-001 红线）
+- 每次循环最多 5 个提案（防止批量污染）
+- 幂等保护：同一 source_episodic_ids 组合不重复生成提案
+- 提案必须携带 `evidence_refs`（来源 EpisodicMemory ID）
+
+#### 25.2.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-DISTILL-B-01 | distill 返回 pending 提案列表，不写 Canon |
+| T-DISTILL-B-02 | 提案 status=pending（不直接写 SSOT） |
+| T-DISTILL-B-03 | 每次最多 5 个提案（max_proposals 边界） |
+| T-DISTILL-B-04 | 幂等：相同 source_episodic_ids 不重复生成 |
+| T-DISTILL-B-05 | 提案含 evidence_refs（来源 EpisodicMemory ID） |
+| T-DISTILL-B-06 | episodic_memories 为空 → 返回空列表 |
+| T-DISTILL-B-07 | 语义摘要不伪造事实（confidence 字段可观测） |
+| T-DISTILL-B-08 | is_duplicate 正确识别重复提案 |
+| T-DISTILL-B-09 | make_distillation_task_config 返回合法 CRON 配置 |
+| T-DISTILL-B-10 | make_distillation_task_config 非法参数 → 抛出 ValueError |
+
+---
+
+### §25.3 M13-C Bond 事件端到端集成（FR-BOND-001/002）
+
+#### 25.3.1 模块边界
+
+```
+host_brain/bond/
+  bond_dynamics.py        ← BondDynamicsWriter（已有，需强化）
+```
+
+#### 25.3.2 BondDynamicsWriter 强化接口
+
+```python
+class BondDynamicsWriter:
+    def __init__(
+        self,
+        *,
+        stage_engine: BondStageEngine | None = None,  # 可选注入，向后兼容
+    ): ...
+
+    def apply_update(
+        self,
+        event: dict,
+        *,
+        user_id: str,
+    ) -> dict:
+        """
+        应用 Bond 更新：
+        1. 写 Neo4j SSOT（原有逻辑）
+        2. 若 stage_engine 已注入，调用 apply_event 并将 stage_transition 写入 event 结果
+        3. stage_engine 异常时非致命（降级，记录 warn，不中断主流程）
+        """
+```
+
+#### 25.3.3 event 结果新增字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `stage_transition` | dict \| None | 晋级/降级结果；stage_engine=None 时为 None |
+| `stage_engine_error` | str \| None | stage_engine 异常时的错误摘要（非致命） |
+
+#### 25.3.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-BOND-INTEG-01 | apply_update 成功，event 含 stage_transition |
+| T-BOND-INTEG-02 | stage_engine=None → stage_transition=None（向后兼容） |
+| T-BOND-INTEG-03 | stage_engine 异常 → 非致命，主流程继续 |
+| T-BOND-INTEG-04 | stage_transition 写入审计链 |
+| T-BOND-INTEG-05 | 缺 evidence_refs → BOND_UPDATE_INVALID（FR-BOND-002） |
+| T-BOND-INTEG-06 | 端到端：Bond 事件 → 晋级 → 审计链可追溯 |
+| T-BOND-INTEG-07 | 端到端：Bond 事件 → 降级 → 审计链可追溯 |
+| T-BOND-INTEG-08 | 旧调用路径（无 stage_engine）零影响 |
+
+---
+
+## §26 M13 发布清单工程契约
+
+### §26.1 发布清单 Schema
+
+```json
+{
+  "milestone": "M13",
+  "release_date": "2026-03-04",
+  "release_ready": true,
+  "milestones": {
+    "M13-A": "DONE",
+    "M13-B": "DONE",
+    "M13-C": "DONE",
+    "M13-D": "DONE"
+  },
+  "core_files": {
+    "host_brain/bond/bond_stage_engine.py": "<sha256>",
+    "host_brain/app/bond_routes.py": "<sha256>",
+    "host_brain/memory/long_term_distiller.py": "<sha256>",
+    "host_brain/bond/bond_dynamics.py": "<sha256>"
+  },
+  "test_summary": {
+    "m13_tests_passed": 102,
+    "total_tests_passed": 1342,
+    "skipped": 2,
+    "failed": 0
+  },
+  "quality_gates": {
+    "all_core_files_present": true,
+    "zero_regressions": true,
+    "audit_chain_verified": true
+  }
+}
+```
+
+### §26.2 质量门禁
+
+| 门禁项 | 要求 |
+|--------|------|
+| `release_ready` | 必须为 true |
+| `all_core_files_present` | 所有核心文件 hash 已填写 |
+| `zero_regressions` | failed=0 |
+| `audit_chain_verified` | 审计链字段可追溯 |
+
+---
+
+## §27 M14 工程契约（通道 + 外显 + MCP 治理收口）
+
+### §27.1 M14-A 微信通道 I/O 事件化（FR-CHANNEL-001）
+
+#### 27.1.1 模块边界
+
+```
+host_brain/channels/
+  wechat_channel.py       ← WeChatChannelEvent（NEW）
+host_brain/core/
+  errors.py               ← 新增 CHANNEL_* 错误码
+tests/unit/
+  test_wechat_channel.py  ← T-CHAN-01~05
+tests/integration/
+  test_wechat_channel_audit.py  ← T-CHAN-AUDIT-01~03
+```
+
+#### 27.1.2 WeChatChannelEvent Schema
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+
+class ChannelEventType(str, Enum):
+    INBOUND  = "inbound"    # 用户→Host
+    OUTBOUND = "outbound"   # Host→用户
+
+@dataclass(frozen=True)
+class WeChatChannelEvent:
+    event_id: str                           # UUID
+    event_type: ChannelEventType
+    thread_key: str                         # 会话线程标识（可追溯）
+    request_id: str                         # 关联 Host 请求 ID
+    intent_id: str | None                   # 关联 intent（outbound 必填）
+    payload: dict                           # 消息内容（净化后）
+    audit_ref: str                          # 审计链引用
+    ts_ms: int
+    reason_code: str | None = None          # 失败时必填
+    stage: str | None = None                # 失败阶段
+```
+
+#### 27.1.3 通道事件处理接口
+
+```python
+class WeChatChannelHandler:
+    def receive(
+        self,
+        raw_payload: dict,
+        *,
+        thread_key: str,
+        request_id: str,
+    ) -> WeChatChannelEvent:
+        """
+        接收微信 inbound 消息，建模为 WeChatChannelEvent。
+        - 写入审计链（channel_event_log）
+        - 返回结构化事件（不含原始敏感字段）
+        """
+
+    def send(
+        self,
+        message: dict,
+        *,
+        thread_key: str,
+        request_id: str,
+        intent_id: str,
+        approval_token: str,
+    ) -> WeChatChannelEvent:
+        """
+        发送微信 outbound 消息。
+        - LLM 不得自行决定"是否发送/发给谁/发什么"
+        - 必须有 approval_token（WRITE 操作）
+        - 写入审计链（channel_event_log）
+        - 失败必须返回 reason_code + stage
+        """
+```
+
+#### 27.1.4 审计字段（channel_event_log）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `event_id` | str | 通道事件唯一 ID |
+| `event_type` | str | inbound / outbound |
+| `thread_key` | str | 会话线程标识 |
+| `request_id` | str | 关联 Host 请求 ID |
+| `intent_id` | str \| None | 关联 intent（outbound 必填） |
+| `audit_ref` | str | 审计链引用 |
+| `reason_code` | str \| None | 失败时必填 |
+| `stage` | str \| None | 失败阶段 |
+| `ts_ms` | int | 时间戳 |
+
+#### 27.1.5 错误码
+
+| 错误码 | 触发条件 |
+|--------|---------|
+| `CHANNEL_SEND_UNAUTHORIZED` | outbound 无 approval_token |
+| `CHANNEL_INTENT_MISSING` | outbound 无 intent_id |
+| `CHANNEL_PAYLOAD_INVALID` | 消息内容格式不合规 |
+| `CHANNEL_THREAD_KEY_MISSING` | 缺 thread_key |
+| `CHANNEL_AUDIT_WRITE_FAILED` | 审计链写入失败（非致命，降级） |
+
+#### 27.1.6 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-CHAN-01 | receive 成功，返回 WeChatChannelEvent（inbound），写审计链 |
+| T-CHAN-02 | send 成功，返回 WeChatChannelEvent（outbound），写审计链 |
+| T-CHAN-03 | send 无 approval_token → CHANNEL_SEND_UNAUTHORIZED |
+| T-CHAN-04 | send 无 intent_id → CHANNEL_INTENT_MISSING |
+| T-CHAN-05 | 缺 thread_key → CHANNEL_THREAD_KEY_MISSING |
+| T-CHAN-AUDIT-01 | outbound 事件可在审计链追溯到 thread_key + request_id |
+| T-CHAN-AUDIT-02 | inbound 事件可在审计链追溯到 thread_key + request_id |
+| T-CHAN-AUDIT-03 | 失败事件含 reason_code + stage，可回放到 intent_id |
+
+---
+
+### §27.2 M14-B VTS 外显确定性映射（FR-AVATAR-001）
+
+#### 27.2.1 模块边界
+
+```
+edge_client/actuators/
+  vts_expression_map.py   ← VTSExpressionMap（NEW）
+  vts_driver.py           ← 强化：接入 VTSExpressionMap（已有）
+host_brain/core/
+  errors.py               ← 新增 VTS_* 错误码
+tests/unit/
+  test_vts_expression_map.py  ← T-VTS-01~05
+```
+
+#### 27.2.2 VTSExpressionMap Schema
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+
+class EmotionTag(str, Enum):
+    """固定枚举 emotion_tag（不允许自由扩展）"""
+    NEUTRAL   = "neutral"
+    HAPPY     = "happy"
+    SAD       = "sad"
+    ANGRY     = "angry"
+    SURPRISED = "surprised"
+    FEARFUL   = "fearful"
+    DISGUSTED = "disgusted"
+    EXCITED   = "excited"
+    CALM      = "calm"
+
+# 固定映射表（同版本同输入输出一致）
+EXPRESSION_MAP: dict[EmotionTag, str] = {
+    EmotionTag.NEUTRAL:   "exp_neutral_01",
+    EmotionTag.HAPPY:     "exp_happy_01",
+    EmotionTag.SAD:       "exp_sad_01",
+    EmotionTag.ANGRY:     "exp_angry_01",
+    EmotionTag.SURPRISED: "exp_surprised_01",
+    EmotionTag.FEARFUL:   "exp_fearful_01",
+    EmotionTag.DISGUSTED: "exp_disgusted_01",
+    EmotionTag.EXCITED:   "exp_excited_01",
+    EmotionTag.CALM:      "exp_calm_01",
+}
+
+@dataclass(frozen=True)
+class ExpressionTrigger:
+    emotion_tag: EmotionTag
+    expression_id: str                  # 来自 EXPRESSION_MAP
+    intensity: float                    # 0.0~1.0
+    duration_ms: int
+    request_id: str
+    ts_ms: int
+
+class VTSExpressionMap:
+    def resolve(
+        self,
+        emotion_tag: str,
+        *,
+        intensity: float = 1.0,
+        duration_ms: int = 2000,
+        request_id: str,
+    ) -> ExpressionTrigger:
+        """
+        将 emotion_tag 映射为 ExpressionTrigger。
+        - 非法 tag → VTS_TAG_UNKNOWN
+        - 自由动作参数（非枚举值）→ VTS_EXPRESSION_INVALID
+        - 同版本同输入输出一致（可回放）
+        """
+
+    def list_tags(self) -> list[str]:
+        """返回所有合法 emotion_tag 枚举值。"""
+```
+
+#### 27.2.3 VTSDriver 强化要点
+
+- 接入 `VTSExpressionMap.resolve()`，不再接受原始字符串 tag
+- 非法 tag/自由动作参数在 `resolve()` 阶段拒绝，不进入 VTS 调用
+- 触发记录写入 `vts_trigger_log`（含 expression_id/intensity/request_id）
+
+#### 27.2.4 错误码
+
+| 错误码 | 触发条件 |
+|--------|---------|
+| `VTS_TAG_UNKNOWN` | emotion_tag 不在枚举中 |
+| `VTS_EXPRESSION_INVALID` | 自由动作参数或非法 expression_id |
+| `VTS_INTENSITY_OUT_OF_RANGE` | intensity 不在 0.0~1.0 |
+| `VTS_DURATION_INVALID` | duration_ms ≤ 0 |
+
+#### 27.2.5 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-VTS-01 | resolve 合法 tag → 返回 ExpressionTrigger，expression_id 固定 |
+| T-VTS-02 | 非法 emotion_tag → VTS_TAG_UNKNOWN |
+| T-VTS-03 | 自由动作参数（非枚举值）→ VTS_EXPRESSION_INVALID |
+| T-VTS-04 | 同版本同输入输出一致（可回放映射表） |
+| T-VTS-05 | list_tags 返回所有合法枚举值 |
+
+---
+
+### §27.3 M14-C MCP Provider 治理完整验收（FR-MCP-001）
+
+#### 27.3.1 模块边界
+
+```
+host_brain/tools/
+  mcp_adapter.py          ← 强化：审计串联 + AIRLOCK 出站最小化（已有）
+tests/unit/
+  test_mcp_governance.py  ← T-MCP-GOV-01~05
+tests/integration/
+  test_mcp_audit_chain.py ← T-MCP-AUDIT-01~03
+```
+
+#### 27.3.2 MCP 调用审计字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `provider_id` | str | MCP provider 唯一标识 |
+| `tool_id` | str | 工具唯一标识 |
+| `request_id` | str | 关联 Host 请求 ID |
+| `intent_id` | str | 关联 intent |
+| `evidence_ref` | str | 执行证据引用 |
+| `access_level` | str | READ / WRITE |
+| `approval_token_ref` | str \| None | WRITE 必填 |
+| `airlock_sanitized` | bool | 是否经过 AIRLOCK 净化 |
+| `ts_ms` | int | 时间戳 |
+
+#### 27.3.3 AIRLOCK 出站最小化要求
+
+- 出站 payload 必须经 AIRLOCK 净化（移除硬状态原始值/宪法全文/规则细节）
+- 每次出站生成 `sanitization_report`（removed_fields/redactions/payload_digest）
+- 缺失 `sanitization_report` → 拒绝出站（`AIRLOCK_BLOCKED_EGRESS`）
+
+#### 27.3.4 MCP ToolMeta 同步接口
+
+```python
+class MCPAdapter:
+    def sync_provider_tools(
+        self,
+        provider_id: str,
+        *,
+        provider_url: str,
+    ) -> list[ToolMeta]:
+        """
+        同步 MCP provider 暴露的工具为 ToolMeta 列表。
+        - 仅同步元数据，不执行
+        - 按 READ/WRITE 分级
+        - 写入 tool_sync_log（审计）
+        """
+
+    def execute_mcp_tool(
+        self,
+        tool_id: str,
+        args: dict,
+        *,
+        request_id: str,
+        intent_id: str,
+        approval_token: str | None = None,
+    ) -> dict:
+        """
+        执行 MCP 工具（必须经 ToolBroker 单入口）。
+        - WRITE 必须有 approval_token
+        - 出站经 AIRLOCK 净化
+        - 写入 mcp_call_log（审计）
+        """
+```
+
+#### 27.3.5 错误码
+
+| 错误码 | 触发条件 |
+|--------|---------|
+| `MCP_WRITE_UNAUTHORIZED` | WRITE 工具无 approval_token 或未 APPROVE |
+| `MCP_PROVIDER_SYNC_FAILED` | provider 元数据同步失败 |
+| `MCP_TOOL_NOT_FOUND` | tool_id 不在已同步列表 |
+| `MCP_AUDIT_REF_MISSING` | 执行无 evidence_ref |
+| `AIRLOCK_BLOCKED_EGRESS` | 出站缺 sanitization_report |
+
+#### 27.3.6 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-MCP-GOV-01 | sync_provider_tools 成功，返回 ToolMeta 列表（含 READ/WRITE 分级） |
+| T-MCP-GOV-02 | WRITE 工具无 approval_token → MCP_WRITE_UNAUTHORIZED |
+| T-MCP-GOV-03 | WRITE 工具未 APPROVE → MCP_WRITE_UNAUTHORIZED |
+| T-MCP-GOV-04 | 出站缺 sanitization_report → AIRLOCK_BLOCKED_EGRESS |
+| T-MCP-GOV-05 | 执行无 evidence_ref → MCP_AUDIT_REF_MISSING |
+| T-MCP-AUDIT-01 | MCP 调用可追溯到 intent/governor/skill_exec 记录 |
+| T-MCP-AUDIT-02 | MCP WRITE 调用含 approval_token_ref + evidence_ref |
+| T-MCP-AUDIT-03 | AIRLOCK 净化报告可回放（removed_fields/payload_digest） |
+
+---
+
+### §27.4 M14-D 发布清单工程契约
+
+#### 27.4.1 发布清单 Schema
+
+```json
+{
+  "milestone": "M14",
+  "release_date": "TBD",
+  "release_ready": false,
+  "milestones": {
+    "M14-A": "PLANNED",
+    "M14-B": "PLANNED",
+    "M14-C": "PLANNED",
+    "M14-D": "PLANNED"
+  },
+  "core_files": {
+    "host_brain/channels/wechat_channel.py": "",
+    "edge_client/actuators/vts_expression_map.py": "",
+    "edge_client/actuators/vts_driver.py": "",
+    "host_brain/tools/mcp_adapter.py": ""
+  },
+  "test_summary": {
+    "m14_tests_passed": 0,
+    "total_tests_passed": 0,
+    "skipped": 0,
+    "failed": 0
+  },
+  "quality_gates": {
+    "all_core_files_present": false,
+    "zero_regressions": false,
+    "audit_chain_verified": false
+  }
+}
+```
+
+#### 27.4.2 质量门禁（M14 验收标准）
+
+| 门禁项 | 要求 |
+|--------|------|
+| `release_ready` | 必须为 true |
+| `all_core_files_present` | 4 个核心文件 hash 已填写 |
+| `zero_regressions` | failed=0 |
+| `total_tests_passed` | ≥ 1370 |
+| `audit_chain_verified` | 通道/外显/MCP 审计链字段可追溯 |
+
+---
+
+## §28 M15 工程契约（语音链路深化完整验收）
+
+### §28.1 M15-A ASR 事件化上送强化（FR-VOICE-001）
+
+#### 28.1.1 模块边界
+
+```
+edge_client/senses/
+  asr.py                  ← ASREventEmitter 强化（已有，需补 alternates + evidence_ref）
+tests/unit/
+  test_asr_event_emitter.py  ← T-ASR-EVT-01~05（NEW）
+```
+
+#### 28.1.2 ASRTranscriptEvent Schema（强化）
+
+```python
+@dataclass(frozen=True)
+class ASRTranscriptEvent:
+    event_id: str
+    session_id: str
+    segment_id: str
+    text: str
+    confidence: float               # 0.0~1.0
+    ts_start_ms: int
+    ts_end_ms: int
+    is_final: bool
+    alternates: list[str]           # N-best（可选，最多 3 个）
+    evidence_ref: str               # 审计链引用（必填）
+    low_confidence: bool            # confidence < 0.6 时为 True
+    reason_code: str | None         # 低置信度时填 ASR_LOW_CONFIDENCE
+```
+
+#### 28.1.3 关键约束
+
+- 低置信度（confidence < 0.6）必须显式标注 `low_confidence=True` + `reason_code=ASR_LOW_CONFIDENCE`
+- 每个事件必须携带 `evidence_ref`（可追溯）
+- `alternates` 最多 3 个（防止过度暴露）
+- 流式/分段均适用同一 Schema
+
+#### 28.1.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-ASR-EVT-01 | 正常转写事件，confidence ≥ 0.6，low_confidence=False |
+| T-ASR-EVT-02 | 低置信度，confidence < 0.6，low_confidence=True，reason_code=ASR_LOW_CONFIDENCE |
+| T-ASR-EVT-03 | alternates 最多 3 个（边界：4 个时截断） |
+| T-ASR-EVT-04 | evidence_ref 必填（缺失时拒绝构建） |
+| T-ASR-EVT-05 | is_final=True 时事件可回放（含 ts_start_ms/ts_end_ms） |
+
+---
+
+### §28.2 M15-B TTS 播报队列强化（FR-VOICE-002）
+
+#### 28.2.1 模块边界
+
+```
+edge_client/actuators/
+  tts_engine.py           ← TTSPlaybackQueue 强化（已有，需补 request_id 关联 + 失败 reason_code）
+tests/unit/
+  test_tts_playback_queue.py  ← T-TTS-QUEUE-01~05（NEW）
+```
+
+#### 28.2.2 TTSPlaybackEvent Schema（强化）
+
+```python
+@dataclass(frozen=True)
+class TTSPlaybackEvent:
+    event_id: str
+    request_id: str                 # 关联 Host 请求 ID（必填）
+    intent_id: str | None           # 关联 intent（可选）
+    text: str                       # 最终口径文本（Host QA 后）
+    emotion_tag: str                # 情绪标签（来自 EmotionTag 枚举）
+    status: str                     # "queued" | "playing" | "done" | "interrupted" | "failed"
+    reason_code: str | None         # 失败时必填
+    stage: str | None               # 失败阶段
+    ts_ms: int
+    evidence_ref: str               # 审计链引用
+```
+
+#### 28.2.3 关键约束
+
+- Host 只下发最终口径文本与情绪标签（不含执行事实宣告）
+- 播报事件必须关联 `request_id`（可追溯）
+- 失败必须返回 `reason_code` + `stage`（TTS_QUEUE_FULL / TTS_SYNTH_FAILED / TTS_PLAYBACK_FAILED）
+- 不得产生伪执行宣告
+
+#### 28.2.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-TTS-QUEUE-01 | 正常入队，status=queued，evidence_ref 存在 |
+| T-TTS-QUEUE-02 | 播报完成，status=done，request_id 可追溯 |
+| T-TTS-QUEUE-03 | 队列满，status=failed，reason_code=TTS_QUEUE_FULL |
+| T-TTS-QUEUE-04 | 合成失败，status=failed，reason_code=TTS_SYNTH_FAILED |
+| T-TTS-QUEUE-05 | 缺 request_id → 拒绝入队（VOICE_SCHEMA_INVALID） |
+
+---
+
+### §28.3 M15-C Barge-in 可打断强化（FR-VOICE-003）
+
+#### 28.3.1 模块边界
+
+```
+edge_client/actuators/
+  tts_engine.py           ← interrupt() 方法强化（已有，需补审计记录）
+tests/unit/
+  test_barge_in.py        ← T-BARGE-01~04（NEW）
+```
+
+#### 28.3.2 BargeInEvent Schema
+
+```python
+@dataclass(frozen=True)
+class BargeInEvent:
+    event_id: str
+    session_id: str
+    interrupted_request_id: str     # 被打断的播报 request_id
+    trigger_ts_ms: int              # 打断触发时间
+    asr_continued: bool             # ASR 是否继续上送
+    evidence_ref: str               # 审计链引用
+```
+
+#### 28.3.3 关键约束
+
+- 打断立即生效（不等待当前句子播完）
+- 打断不构成任何执行事实或写入事实
+- ASR 不被阻塞（打断后 ASR 继续上送）
+- 打断事件写入审计链（barge_in_log）
+
+#### 28.3.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-BARGE-01 | 打断立即生效，interrupted_request_id 可追溯 |
+| T-BARGE-02 | 打断后 ASR 继续上送（asr_continued=True） |
+| T-BARGE-03 | 打断不产生执行事实（无 intent_draft） |
+| T-BARGE-04 | 打断事件写入审计链（evidence_ref 存在） |
+
+---
+
+### §28.4 M15-D Edge 兜底小模型门控（FR-VOICE-004）
+
+#### 28.4.1 模块边界
+
+```
+edge_client/
+  fallback_model.py       ← FallbackModelGate（NEW）
+tests/unit/
+  test_fallback_model_gate.py  ← T-FALLBACK-01~05（NEW）
+```
+
+#### 28.4.2 FallbackModelGate 接口
+
+```python
+@dataclass(frozen=True)
+class FallbackOutput:
+    output_id: str
+    text: str
+    draft_only: bool = True         # 永远为 True（不得包含裁决或执行事实）
+    reason_code: str | None = None  # 不可用时填 FALLBACK_MODEL_UNAVAILABLE
+    stage: str | None = None
+    evidence_ref: str | None = None
+
+class FallbackModelGate:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        task_type: str,             # "scene_response" | "input_clean" | "summary" | "retrieval_hint"
+        request_id: str,
+        ts_ms: int | None = None,
+    ) -> FallbackOutput:
+        """
+        调用兜底小模型（Ollama 3B 量化）。
+        - 输出永远标记为 draft_only=True
+        - 不可用时快速失败（FALLBACK_MODEL_UNAVAILABLE）
+        - 不得包含裁决或执行事实宣告
+        """
+
+    def is_available(self) -> bool:
+        """检查兜底模型是否可用（已加载）。"""
+
+    def load(self) -> bool:
+        """按需加载兜底模型（默认卸载）。"""
+
+    def unload(self) -> None:
+        """卸载兜底模型（释放资源）。"""
+```
+
+#### 28.4.3 关键约束
+
+- 默认卸载，按需加载（不常驻 GPU）
+- 输出永远标记为 `draft_only=True`
+- 不可用时快速失败（不阻塞主流程）
+- 不得包含裁决或执行事实宣告
+
+#### 28.4.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-FALLBACK-01 | generate 成功，draft_only=True |
+| T-FALLBACK-02 | 不可用时快速失败，reason_code=FALLBACK_MODEL_UNAVAILABLE |
+| T-FALLBACK-03 | 输出不含裁决/执行事实宣告（QA 断言） |
+| T-FALLBACK-04 | load/unload 生命周期正确 |
+| T-FALLBACK-05 | task_type 非法 → VOICE_SCHEMA_INVALID |
+
+---
+
+### §28.5 M15-E Edge 资源闸门强化（FR-VOICE-005）
+
+#### 28.5.1 模块边界
+
+```
+edge_client/
+  resource_gate.py        ← EdgeResourceGate 强化（已有，需补优先级抢占审计）
+tests/unit/
+  test_edge_resource_gate.py  ← T-RGATE-01~05（NEW）
+```
+
+#### 28.5.2 ResourcePreemptionEvent Schema
+
+```python
+@dataclass(frozen=True)
+class ResourcePreemptionEvent:
+    event_id: str
+    preemptor: str                  # 抢占者（"ASR" | "PLAYBACK" | "TTS" | "FALLBACK_LLM"）
+    preempted: str                  # 被抢占者
+    reason_code: str                # RESOURCE_GATE_PREEMPTED
+    ts_ms: int
+    evidence_ref: str
+```
+
+#### 28.5.3 优先级规则（固定）
+
+```
+ASR > PLAYBACK > TTS_SYNTH > FALLBACK_LLM
+```
+
+#### 28.5.4 关键约束
+
+- 压力下仍保证 ASR（最高优先级）
+- 资源不足时降级行为可观测（ResourcePreemptionEvent 写入审计链）
+- 抢占事件含 preemptor/preempted/reason_code
+
+#### 28.5.5 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-RGATE-01 | ASR 抢占 TTS_SYNTH，ResourcePreemptionEvent 写入审计链 |
+| T-RGATE-02 | ASR 抢占 FALLBACK_LLM，reason_code=RESOURCE_GATE_PREEMPTED |
+| T-RGATE-03 | PLAYBACK 抢占 TTS_SYNTH（ASR 不在运行时） |
+| T-RGATE-04 | 压力下 ASR 始终保证（不被任何任务抢占） |
+| T-RGATE-05 | 抢占事件含 preemptor/preempted/evidence_ref |
+
+---
+
+### §28.6 M15 发布清单工程契约
+
+#### 28.6.1 发布清单 Schema
+
+```json
+{
+  "milestone": "M15",
+  "release_date": "TBD",
+  "release_ready": false,
+  "milestones": {
+    "M15-A": "PLANNED",
+    "M15-B": "PLANNED",
+    "M15-C": "PLANNED",
+    "M15-D": "PLANNED",
+    "M15-E": "PLANNED",
+    "M15-F": "PLANNED"
+  },
+  "core_files": {
+    "edge_client/senses/asr.py": "",
+    "edge_client/actuators/tts_engine.py": "",
+    "edge_client/fallback_model.py": "",
+    "edge_client/resource_gate.py": ""
+  },
+  "test_summary": {
+    "m15_tests_passed": 0,
+    "total_tests_passed": 0,
+    "skipped": 0,
+    "failed": 0
+  },
+  "quality_gates": {
+    "all_core_files_present": false,
+    "zero_regressions": false,
+    "audit_chain_verified": false
+  }
+}
+```
+
+#### 28.6.2 质量门禁（M15 验收标准）
+
+| 门禁项 | 要求 |
+|--------|------|
+| `release_ready` | 必须为 true |
+| `all_core_files_present` | 4 个核心文件 hash 已填写 |
+| `zero_regressions` | failed=0 |
+| `total_tests_passed` | ≥ 1445 |
+| `audit_chain_verified` | ASR/TTS/Barge-in/兜底/资源闸门审计链字段可追溯 |

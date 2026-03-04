@@ -665,10 +665,49 @@ M12-D 技能热加载：FR-SKILL-001/002 扩展（SkillHotLoader + SkillVersionR
 
 M13 Bond 阶段自动晋级 + 长期记忆蒸馏强化：
 M13-A Bond 阶段积分 + 自动晋级：FR-BOND-001/002/003 扩展（BondStageEngine：积分累积/阶段晋级/降级/趋势/审计串联 + Bond REST API：/bond/stage /bond/summary /bond/event /bond/users /bond/health）— **DONE**（2026-03-04）
-- 完成的需求编号清单
-- 回归测试清单（测试编号 + 预期断言）
-- 风险回顾（新增 scope / 票据 / 红线变化）
-- 文档更新（PRD/DevSpec/白皮书差异说明）
+M13-B 长期记忆蒸馏强化：FR-MEM-DISTILL-001/002（LongTermMemoryDistiller：EpisodicMemory→语义记忆蒸馏→Canon pending 提案 + 调度器 CRON 任务工厂 03:00）— **DONE**（2026-03-04）
+M13-C Bond 事件端到端集成：FR-BOND-001/002（BondDynamicsWriter.apply_update 接入 BondStageEngine.apply_event；可选注入；stage_transition 字段）— **DONE**（2026-03-04）
+M13-D M13 发布清单：m13_release.json（4 核心文件 hash；102 M13 测试通过；1342 全量通过；release_ready=true）— **DONE**（2026-03-04）
+
+**完成的需求编号清单**：FR-BOND-001、FR-BOND-002、FR-BOND-003、FR-MEM-DISTILL-001、FR-MEM-DISTILL-002（R-121~R-130）
+
+**回归测试清单**：
+- T-BOND-STAGE-01~09（BondStageEngine：积分累积/晋级/降级/趋势/审计/边界）→ 30 passed
+- T-BOND-API-01~08（Bond REST API：/bond/stage /bond/summary /bond/event /bond/users /bond/health）→ 18 passed
+- T-DISTILL-B-01~10（LongTermMemoryDistiller：蒸馏/幂等/提案上限/CRON 配置）→ 36 passed
+- T-BOND-INTEG-01~08（BondDynamicsWriter + BondStageEngine 端到端联动；向后兼容；异常非致命）→ 18 passed
+- 全量回归：1342 passed，2 skipped，0 failed
+
+**风险回顾**：
+- 新增 scope：Bond 阶段引擎（bond_stage_engine.py）+ 长期记忆蒸馏（long_term_distiller.py）均为新模块，不修改现有 SSOT 写路径，风险低
+- 红线：蒸馏结果只生成 pending 提案，不直接写 Canon SSOT（FR-MEM-DISTILL-001 约束保持）；Bond 阶段晋级写入审计链（FR-BOND-001 约束保持）
+- 向后兼容：BondDynamicsWriter 可选注入 stage_engine=None，旧调用路径零影响
+
+**文档更新**：
+- PRD.md：M13-A~D 状态更新为 DONE；本收口条目填写完成
+- DevTasks.md：TASK-0162~0165 状态均为 DONE；M14 任务卡（TASK-0166~0170）已写入
+- requirements_trace.md：R-121~R-130 已补写（M12 R-121~R-125；M13 R-126~R-130）
+- docs/50_release/m13_release.json：已生成（release_ready=true）
+
+M14 通道 + 外显 + MCP 治理收口：
+M14-A 微信通道 I/O 事件化：FR-CHANNEL-001（WeChat inbound/outbound 建模为确定性通道事件 + 审计串联 + thread_key/request_id 可追溯）— **DONE**（2026-03-04）
+M14-B VTS 外显确定性映射：FR-AVATAR-001（emotion_tag→expression_id 固定枚举映射 + 非法 tag 拒绝 + 可回放映射表）— **DONE**（2026-03-04）
+M14-C MCP Provider 治理完整验收：FR-MCP-001（MCP provider 元数据同步 + READ/WRITE 分级 + ToolBroker 单入口 + 审计串联 + AIRLOCK 出站最小化）— **DONE**（2026-03-04）
+M14-D M14 发布清单 — **DONE**（2026-03-04：1421 passed；m14_release.json 已生成）
+
+M15 语音链路深化完整验收：
+M15-A ASR 事件化上送强化：FR-VOICE-001（ASRTranscriptEvent：alternates + evidence_ref + low_confidence 显式标注）— **DONE**（2026-03-04）
+M15-B TTS 播报队列强化：FR-VOICE-002（TTSPlaybackEvent：request_id 关联 + 失败 reason_code + stage）— **DONE**（2026-03-04）
+M15-C Barge-in 可打断强化：FR-VOICE-003（BargeInEvent 审计记录 + ASR 不被阻塞）— **DONE**（2026-03-04）
+M15-D Edge 兜底小模型门控：FR-VOICE-004（FallbackModelGate：默认卸载/按需加载/draft_only 标记/快速失败）— **DONE**（2026-03-04）
+M15-E Edge 资源闸门强化：FR-VOICE-005（ResourcePreemptionEvent：优先级抓占审计 + ASR 始终保证）— **DONE**（2026-03-04）
+M15-F M15 发布清单 — **DONE**（2026-03-04：1534 passed；m15_release.json 已生成）
+
+M16 Canon 治理强化 + 记忆检索优化 + 调度器持久化：
+M16-A Canon 治理 API 强化：FR-CANON-GOV-001（canon_routes.py 依赖注入重构 + approve/reject 事务包裹 + _get_canon_store 竞态修复）— **PLANNED**
+M16-B 长期记忆检索强化：FR-MEM-PAGE-001（list_proposals() cursor-based 分页 + 深页码性能优化）— **PLANNED**
+M16-C 调度器任务持久化：FR-SCHED-PERSIST-001（NatsumeScheduler CRON 任务 SQLite 持久化 + 重启后自动恢复）— **PLANNED**
+M16-D M16 发布清单 — **PLANNED**
 
 ---
 
