@@ -2373,7 +2373,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-TOOL-001/002/003；T-TOOL-01~06。
 
 ### TASK-0156 M12-A-2：ToolBroker REST API
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，tool_routes.py NEW；T-TOOL-API-01~05 15 passed）
 - 任务描述：实现 `tool_routes.py`（GET /tools/meta-pack + POST /tools/execute）并注册到 fastapi_app.py。
 - 输入：DevSpec §24.1.3；TASK-0155。
 - 输出：
@@ -2422,7 +2422,7 @@ TASK-XXXX 标题
 - 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
 
 ### TASK-0161 M12 发布清单
-- 状态：PLANNED
+- 状态：DONE（2026-03-04，scripts/generate_m12_release.py NEW；docs/50_release/m12_release.json 生成；11 核心文件 0 缺失；1240 passed；release_ready=true）
 - 任务描述：生成 `m12_release.json`（含 M12-A~D 核心文件 hash + 测试通过数）。
 - 输入：TASK-0155~0160 全部 DONE。
 - 输出：`host_brain/release/manifests/m12_release.json`。

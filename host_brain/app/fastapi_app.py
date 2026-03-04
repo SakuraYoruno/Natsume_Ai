@@ -39,6 +39,10 @@ from host_brain.observability.cross_timeline import build_cross_timeline
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
+from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
+from host_brain.tools.catalog import ToolCatalog
+from host_brain.tools.broker import ToolBroker
+from host_brain.governor.tokens import TokenService
 
 
 # HTTP契约模型定义
@@ -226,6 +230,11 @@ app.include_router(canon_router)
 app.include_router(scheduler_router)
 
 # ---------------------------------------------------------------------------
+# 注册 ToolBroker REST API 路由（M12-A TASK-0156: 工具元数据包 + 执行入口）
+# ---------------------------------------------------------------------------
+app.include_router(tool_router)
+
+# ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -253,6 +262,8 @@ if _cors_origins_raw:
 # ---------------------------------------------------------------------------
 _ledger: Optional[SQLiteLedger] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
+_tool_catalog: Optional[ToolCatalog] = None
+_tool_broker: Optional[ToolBroker] = None
 _logger = logging.getLogger("Nastume.fastapi")
 
 
@@ -272,6 +283,35 @@ def get_ledger() -> SQLiteLedger:
 
 # 注入 ledger provider 到 canon_routes（消除循环导入风险，P1-R118-2）
 _set_canon_ledger_provider(get_ledger)
+
+
+def get_tool_catalog() -> ToolCatalog:
+    """获取 ToolCatalog 单例（延迟初始化）。"""
+    global _tool_catalog
+    if _tool_catalog is None:
+        _tool_catalog = ToolCatalog()
+    return _tool_catalog
+
+
+def get_tool_broker() -> ToolBroker:
+    """获取 ToolBroker 单例（延迟初始化）。"""
+    global _tool_broker
+    if _tool_broker is None:
+        token_service = TokenService()
+        _tool_broker = ToolBroker(
+            catalog=get_tool_catalog(),
+            token_service=token_service,
+            ledger=get_ledger(),
+        )
+    return _tool_broker
+
+
+# 注入 tool providers 到 tool_routes（M12-A TASK-0156）
+_set_tool_providers(
+    broker_provider=get_tool_broker,
+    catalog_provider=get_tool_catalog,
+    ledger_provider=get_ledger,
+)
 
 
 def get_intent_engine() -> IntentDecisionEngine:

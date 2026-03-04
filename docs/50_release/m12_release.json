@@ -1,0 +1,117 @@
+{
+  "schema_version": "Nastume.release.v1",
+  "milestone": "M12",
+  "release_name": "ToolBroker + ContextCompressor + Reranker + SkillHotLoader",
+  "git_commit": "c122227",
+  "generated_at": "2026-03-04T03:25:31Z",
+  "ts_ms": 1772594731229,
+  "milestones": [
+    {
+      "id": "M12-A",
+      "name": "ToolBroker 单入口 + tool_visibility_hash",
+      "fr_refs": [
+        "FR-TOOL-001",
+        "FR-TOOL-002",
+        "FR-TOOL-003"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0155",
+        "TASK-0156"
+      ]
+    },
+    {
+      "id": "M12-B",
+      "name": "多轮对话上下文压缩（ContextCompressor）",
+      "fr_refs": [
+        "FR-MEM-005"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0157"
+      ]
+    },
+    {
+      "id": "M12-C",
+      "name": "Reranker 服务强化 + EvidencePack",
+      "fr_refs": [
+        "FR-MEM-004"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0158"
+      ]
+    },
+    {
+      "id": "M12-D",
+      "name": "Skill 热加载 + 版本管理",
+      "fr_refs": [
+        "FR-SKILL-001",
+        "FR-SKILL-002"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0159"
+      ]
+    },
+    {
+      "id": "M12-E",
+      "name": "错误码补全 + Migration 0017",
+      "fr_refs": [],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0160"
+      ]
+    }
+  ],
+  "core_files": {
+    "total": 11,
+    "missing": 0,
+    "missing_files": [],
+    "hashes": {
+      "host_brain/tools/broker.py": "4fe259769943e3283cacab022975aed30066555b73ad3ec59246bffedc9f80b8",
+      "host_brain/tools/catalog.py": "64296d0ae82f2f3dc7c0d797bdf500f68570da0b26ad995b94d766cf8af415db",
+      "host_brain/tools/selector.py": "3f1b58b9cb17e12fd4b0354d3b2041acd742a8b9bf9550d1fd1ef03e7ceb0d7b",
+      "host_brain/tools/mcp_adapter.py": "0e27512b6790084348064385776bc8a035337696ed2c6962b081435caeb7ed2a",
+      "host_brain/app/tool_routes.py": "81ed0b51c2de49a4bcda036539c50d3e7562e0cfdb5b4c35a8675fe29077e2b1",
+      "host_brain/memory/context_compressor.py": "629eba018c853bb6f39c8a0bf31af9af0ef58ecdbc3ef0328d7f99cdb044b977",
+      "host_brain/retrieval/reranker.py": "d0f0fc70bdbb4d1b155ae08037e5e20f3a3c10b13d69df7620978de062efcb51",
+      "host_brain/retrieval/evidence_pack.py": "c118729760a91e500d980c3dc29a2e26e9a6a165ee076b661dbbd584ab1a4c39",
+      "host_brain/skills/hot_loader.py": "5b6234f7f00e1a6397f21d9d24268d6e037eb4168d7298d611740a09df505b61",
+      "host_brain/core/errors.py": "7cfee63251a8ad1117e34c87b314c7c59adeb23fc45c1aabdf02cbe33517d3b9",
+      "host_brain/audit/migrations/0017_canon_proposal_id_unique.sql": "8953e0d77783043084bc9702e59aa53ed7ae90a40e469039d795a5c6c93ae993"
+    }
+  },
+  "test_results": {
+    "m12_tests": {
+      "files": [
+        "tests/unit/test_tool_broker.py",
+        "tests/unit/test_reranker_service.py",
+        "tests/unit/test_context_compressor.py",
+        "tests/unit/test_skill_hot_loader.py",
+        "tests/integration/test_tool_routes_api.py"
+      ],
+      "passed": 77,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success": true,
+      "summary": "77 passed, 2 warnings in 0.34s"
+    },
+    "all_tests": {
+      "passed": 1240,
+      "failed": 0,
+      "skipped": 2,
+      "errors": 0,
+      "success": true,
+      "summary": "1240 passed, 2 skipped, 2 warnings in 15.15s"
+    }
+  },
+  "quality_gates": {
+    "all_core_files_present": true,
+    "m12_tests_pass": true,
+    "all_tests_pass": true,
+    "zero_regressions": true
+  },
+  "release_ready": true
+}
