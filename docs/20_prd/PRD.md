@@ -649,7 +649,13 @@ M10-C 记忆蒸馏系统：FR-MEM-001~003（MemoryDistillationEngine.distill_top
 M10-D P1/P2 收口：F-41/F-06/F-35/F-36/F-37/F-39/F-12/F-05/F-01/F-02/F-11 全部修复 + Edge 端优化（TTS/VTS/ASR 全链路贯通）— **DONE**（2026-03-04：1090 passed；R-98~R-108 追踪完成；m10d_release.json 已生成）
 M10-E _CANON_HOTWORDS_CACHE TTL 自动失效：FR-ASR-001 + NFR-PERF-001（_HotwordsCache 类 TTL=300s + T-HW-TTL-01~05）— **DONE**（2026-03-04：1090 passed；R-109 追踪完成；m10e_release.json 已生成）
 M10-P2 P2 代码质量收口：F-16 _fetch_by_request 白名单校验补全 + F-13/F-14/F-15/F-25/F-38 已修复核查 + F-04/F-07/F-08 设备验证包标记 BLOCKED_ENV — **DONE**（2026-03-04：1090 passed；R-110~R-112 追踪完成）
-M11 调度器 + 桌面留言 + 梦境 + 日记 + 主动对话 + Focus Mode：FR-SCHED-001/002 + FR-DESKTOP-001/002 + FR-DREAM-001/002 + FR-DIARY-001 + FR-PROACTIVE-001/002 + FR-FOCUS-001 — **PLANNED**（待 DevSpec §21~§23 工程契约拆解后开发）
+M11 调度器 + 桌面留言 + 梦境 + 日记 + 主动对话 + Focus Mode：FR-SCHED-001/002 + FR-DESKTOP-001/002 + FR-DREAM-001/002 + FR-DIARY-001 + FR-PROACTIVE-001/002 + FR-FOCUS-001 — **IN PROGRESS**（2026-03-04）
+M11-A 定时调度器：FR-SCHED-001/002（DevSpec §21 工程契约 + NatsumeScheduler + SchedulerTaskRegistry + SchedulerHealthReporter + REST API 8 端点 + T-SCHED-01~07）— **DONE**（2026-03-04：1102 passed；R-113~R-115 追踪完成）
+M11-B 桌面留言：FR-DESKTOP-001/002（DevSpec §22 工程契约 + desktop_note.py 已实现；待补充 T-DESK-01~08 单元测试）— **IMPL_DONE / TEST_PENDING**
+M11-C 梦境：FR-DREAM-001/002（DevSpec §23.1 工程契约 + dream_generator.py 已实现；待补充 T-DREAM-01~05 单元测试）— **IMPL_DONE / TEST_PENDING**
+M11-D 日记：FR-DIARY-001/002（DevSpec §23.2 工程契约 + diary_writer.py 已实现；待补充 T-DIARY-01~05 单元测试）— **IMPL_DONE / TEST_PENDING**
+M11-E 主动对话：FR-PROACTIVE-001/002（DevSpec §23.3 工程契约 + proactive_talk.py 已实现；待补充 T-PROACT-01~06 单元测试）— **IMPL_DONE / TEST_PENDING**
+M11-F Focus Mode：FR-FOCUS-001（DevSpec §23.4 工程契约 + focus_mode.py 已实现；待补充 T-FOCUS-01~04 单元测试）— **IMPL_DONE / TEST_PENDING**
 
 每个里程碑交付必须包含：
 - 完成的需求编号清单
