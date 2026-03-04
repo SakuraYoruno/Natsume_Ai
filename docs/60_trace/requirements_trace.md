@@ -945,3 +945,8 @@
 | R-113 | FR-SCHED-001/002 | M11-A DevSpec §21~§23 工程契约拆解（调度器/桌面留言/梦境/日记/主动对话/Focus Mode） | docs/30_devspec/DevSpec.md §21~§23 | T-SCHED-01~07；T-DESK-01~08；T-DREAM-01~05；T-DIARY-01~05；T-PROACT-01~06；T-FOCUS-01~04 | DONE | M11-A |
 | R-114 | FR-SCHED-001/002 | M11-A T-SCHED-01~07 单元测试（NatsumeScheduler：触发/sys_mode 门控/连续失败暂停/健康快照/注销/intent 字段） | tests/unit/test_scheduler_engine.py | T-SCHED-01~07 | DONE | M11-A |
 | R-115 | FR-SCHED-001/002 | M11-A Scheduler REST API（8 个端点：/scheduler/tasks CRUD + enable/disable + /scheduler/health） | host_brain/scheduler/scheduler_routes.py；host_brain/app/fastapi_app.py | T-SCHED-05 | DONE | M11-A |
+| R-116 | FR-DESKTOP-001/002 | M11-B T-DESK-01~08 单元测试（桌面留言：create/undo/路径穿越/Gaming/IO错误/QA/quarantine/审计） | tests/unit/test_desktop_note_skill.py | T-DESK-01~08 | DONE | M11-B |
+| R-117 | FR-DREAM-001/002 | M11-C T-DREAM-01~05 单元测试（梦境：Sleep触发/Normal无空闲/Episodic降级/NARRATIVE_ONLY/Gaming） | tests/unit/test_dream_skill.py | T-DREAM-01~05 | DONE | M11-C |
+| R-118 | FR-DIARY-001/002 | M11-D T-DIARY-01~05 单元测试（日记：文件+Episodic双写/无内容/IO降级/Episodic降级/Evolution提案） | tests/unit/test_diary_skill.py | T-DIARY-01~05 | DONE | M11-D |
+| R-119 | FR-PROACTIVE-001/002 | M11-E T-PROACT-01~06 单元测试（主动对话：空闲触发/Gaming/频率/QA/Edge降级/Sleep） | tests/unit/test_proactive_skill.py | T-PROACT-01~06 | DONE | M11-E |
+| R-120 | FR-FOCUS-001 | M11-F T-FOCUS-01~04 单元测试（Focus Mode：主动对话拦截/enter/exit/审计字段） | tests/unit/test_focus_mode.py | T-FOCUS-01~04 | DONE | M11-F |

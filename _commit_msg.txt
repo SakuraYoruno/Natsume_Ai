@@ -1,4 +1,7 @@
-docs: M11-A PRD 里程碑更新 + requirements_trace R-113~R-115
+docs: M11 DONE - PRD/DevTasks/requirements_trace 状态更新
 
-- docs/20_prd/PRD.md: M11 PLANNED → IN PROGRESS；M11-A DONE；M11-B~F IMPL_DONE/TEST_PENDING
-- docs/60_trace/requirements_trace.md: 追加 R-113~R-115（DevSpec §21~§23 工程契约 + T-SCHED-01~07 + REST API）
+- docs/20_prd/PRD.md: M11 整体 DONE；M11-B~F 全部 DONE（2026-03-04）
+- docs/30_devspec/DevTasks.md: TASK-0151~0153 状态更新（测试通过信息补充）
+- docs/60_trace/requirements_trace.md: 追加 R-116~R-120（M11-B~F 测试追踪）
+
+全量测试：1164 passed, 2 skipped

@@ -2310,7 +2310,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-SCHED-001/002；T-SCHED-01~07。
 
 ### TASK-0151 M11-B-1：DesktopMessageSkill 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/desktop_note.py 已有完整实现；待补充 T-DESK-01~08 单元测试）
+- 状态：DONE（2026-03-04，host_brain/skills/impl/desktop_note.py 已有完整实现；tests/unit/test_desktop_note_skill.py T-DESK-01~08 全部通过）
 - 任务描述：实现 `DesktopMessageSkill`（create/update/delete/undo）+ 安全路径校验 + manifest 生成。
 - 输入：DevSpec §22.1~§22.6。
 - 输出：
@@ -2323,7 +2323,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-DESKTOP-001/002；T-DESK-01~08。
 
 ### TASK-0152 M11-C/D-1：DreamSkill + DiarySkill 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/dream_generator.py + diary_writer.py 已有完整实现；待补充 T-DREAM-01~05 + T-DIARY-01~05 单元测试）
+- 状态：DONE（2026-03-04，host_brain/skills/impl/dream_generator.py + diary_writer.py 已有完整实现；tests/unit/test_dream_skill.py T-DREAM-01~05 + tests/unit/test_diary_skill.py T-DIARY-01~05 全部通过）
 - 任务描述：实现 `DreamSkill`（Episodic 读取 → LLM 生成 → 写入 Episodic）+ `DiarySkill`（当日对话读取 → LLM 生成 → 写文件 + Episodic）。
 - 输入：DevSpec §23.1~§23.2。
 - 输出：
@@ -2336,7 +2336,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-DREAM-001/002；FR-DIARY-001/002；T-DREAM-01~05；T-DIARY-01~05。
 
 ### TASK-0153 M11-E/F-1：ProactiveSkill + Focus Mode 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/proactive_talk.py + focus_mode.py 已有完整实现；待补充 T-PROACT-01~06 + T-FOCUS-01~04 单元测试）
+- 状态：DONE（2026-03-04，host_brain/skills/impl/proactive_talk.py + focus_mode.py 已有完整实现；tests/unit/test_proactive_skill.py T-PROACT-01~06 + tests/unit/test_focus_mode.py T-FOCUS-01~04 全部通过）
 - 任务描述：实现 `ProactiveSkill`（条件校验 → LLM 生成 → 推送）+ `SysModeEnum.FOCUS` 扩展 + Focus Mode 行为矩阵。
 - 输入：DevSpec §23.3~§23.4。
 - 输出：
