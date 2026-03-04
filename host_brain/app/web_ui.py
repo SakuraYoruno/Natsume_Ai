@@ -149,7 +149,7 @@ async def get_status_distribution(
         raise HTTPException(status_code=500, detail="Failed to get status distribution data")
 
 @router.get("/request/{request_id}", response_model=RequestDetailResponse)
-async def get_request_detail(request_id: str):
+async def get_request_detail(request_id: str) -> dict:
     """获取请求详情"""
     try:
         ledger = get_ledger()

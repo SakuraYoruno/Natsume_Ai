@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,7 +171,7 @@ _metrics = _RuntimeMetrics()
 # 生命周期钩子
 # ---------------------------------------------------------------------------
 @asynccontextmanager
-async def lifespan(application: FastAPI):
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown 生命周期钩子。
 
     Startup: 初始化 Ledger、执行启动探针、写入审计。
@@ -325,7 +325,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 # 中间件：请求ID注入和审计
 @app.middleware("http")
-async def add_request_id_and_audit(request: Request, call_next):
+async def add_request_id_and_audit(request: Request, call_next: Callable) -> Response:
     """为每个请求注入唯一ID并记录审计日志"""
     request_id = new_request_id()
     request.state.request_id = request_id
