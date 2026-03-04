@@ -87,9 +87,9 @@
   用途：Flow 导出物与环境指针（exports/ + active.pointer）；由 Trace（docs/60_trace/flows/index.md）指向当前生效版本。
   读者：MASTER、实现层（按 DevSpec/DevTasks 约束维护与回归）。
 
-- configs/model_plane/
-  用途：模型平面机器可读配置（node_registry / model_profiles 等），用于版本化、审计回放与成本/延迟治理。
-  读者：MASTER、实现层（按 ModelPlane/DevSpec 契约实现与回归）。
+- 根目录 .env / .env.example
+  用途：运行时单一配置源（`.env`）与示例/降级模板（`.env.example`）；用于 Host/Edge/Neo4j/Chroma/Retrieval 统一配置。
+  读者：MASTER、实现层（按 DevSpec 与运行脚本约束实现与回归）。
 
 ---
 

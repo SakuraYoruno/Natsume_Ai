@@ -222,7 +222,9 @@ cp .env.example .env
 | `SANDBOX_ISOLATION_BACKEND` | 沙箱后端（subprocess/docker） |
 | `HOST_RATE_LIMIT_BACKEND` | 限流后端（memory/sqlite/redis） |
 
-> 完整配置说明请参考 [.env.example](.env.example)
+> 配置架构：运行时单一配置源为根目录 `.env`，当 `.env` 缺失时脚本会回退读取 `.env.example`（示例/降级模板）。
+>  
+> 完整变量清单请参考 [.env.example](.env.example)。
 
 ### 4. 启动本地服务
 

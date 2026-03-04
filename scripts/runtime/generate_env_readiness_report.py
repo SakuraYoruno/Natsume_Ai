@@ -71,6 +71,8 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
     for encoding in ("utf-8", "utf-8-sig"):
         try:
             return json.loads(path.read_text(encoding=encoding))
@@ -449,9 +451,22 @@ def main() -> int:
 
     env_values = _normalize_runtime_env(env_file_values=_read_env_file(env_file))
     node_inventory_payload = _load_json(node_inventory_file)
+    if not node_inventory_payload:
+        node_inventory_payload = {"nodes": [], "expected_node_count": 0}
     key_profiles_payload = _load_json(key_profiles_file)
     secret_store_payload = _load_json(secret_store_file)
     graph_payload = _load_json(graph_file)
+    if not graph_payload:
+        graph_payload = {
+            "graph": {
+                "graph_id": "env.readiness.default",
+                "version": "v1",
+                "entry_node": "plan",
+                "node_bindings": [{"node_id": "plan", "handler_id": "noop"}],
+                "edges": [],
+                "fallback_edges": [],
+            }
+        }
 
     report = build_runtime_env_readiness_report(
         env_values=env_values,
