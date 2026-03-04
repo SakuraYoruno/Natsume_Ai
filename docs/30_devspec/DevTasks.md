@@ -2085,7 +2085,7 @@ TASK-XXXX 标题
 - 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
 
 ### TASK-0137 F-04 跟进：Redis 后端真实集成测试落地
-- 状态：TEST_READY（2026-03-03）
+- 状态：BLOCKED_ENV（2026-03-04，暂缓——单机 SQLite 部署无需 Redis；多实例部署前执行）
 - 任务描述：为 `RedisRateLimitStore` 增加真实 Redis 环境集成测试，验证共享计数与 checker 行为，消除“仅降级路径覆盖”的验证缺口。
 - 输入：risk_registry.md（R39-1）；host_brain/governor/rate_limit_store.py；tests/contract/test_governor_rate_limit_contract.py。
 - 输出：
@@ -2195,3 +2195,64 @@ TASK-XXXX 标题
   - m10e_release.json 包含 milestone/git hash/migration hashes/核心文件 hash/test_passed_count/generated_at。
 - 涉及文件路径：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-04-v7.md；host_brain/release/release_manifest.py；release/manifests/m10e_release.json。
 - 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
+
+---
+
+## P2 代码质量收口（F-13~F-27 批次）
+
+### TASK-0144 P2 代码质量收口：F-16 _fetch_by_request 白名单校验补全
+- 状态：DONE（2026-03-04）
+- 任务描述：`_fetch_by_request()` 缺少表名白名单校验（F-16 遗漏），补充 `_ALLOWED_TABLES` 检查，与 `_fetch_all`/`fetch_by_time_range`/`count_by_time_range` 保持一致。
+- 输入：risk_registry.md（R76-4）；host_brain/audit/sqlite_ledger.py。
+- 输出：
+  - `_fetch_by_request()` 函数头部增加 `if table not in _ALLOWED_TABLES: raise ValueError(...)` 校验；
+  - 注释标注 `# F-16: validate table name with whitelist to prevent SQL injection`。
+- 验收标准：
+  - 传入非白名单表名时抛出 `ValueError`（含 `AUDIT_TABLE_NAME_INVALID`）；
+  - 全量测试 1090 passed, 2 skipped（无回归）。
+- 涉及文件路径：host_brain/audit/sqlite_ledger.py。
+- 关联需求/测试：NFR-SEC-001；T-Quality-01（F-16 扩展）。
+
+### TASK-0145 P2 状态确认：F-13/F-14/F-15/F-25/F-38 已修复核查
+- 状态：DONE（2026-03-04）
+- 任务描述：核查 P2 发现项中已在历次开发中修复的条目，更新 risk_registry.md 状态。
+- 核查结论：
+  - F-13（裸 print）：main.py 中已无 print() 调用，已修复 ✅；
+  - F-14（compile_runtime_graph 类型标注）：已有 `-> Any` 标注，已修复 ✅；
+  - F-15（fastapi_app.py handler 类型标注）：所有 async handler 均有返回类型标注，已修复 ✅；
+  - F-25（asyncio.get_event_loop DeprecationWarning）：vts_driver.py 已改为 `asyncio.new_event_loop()`，已修复 ✅；
+  - F-38（list_proposals cursor-based 分页）：已实现 `after_id` cursor 分页，已修复 ✅。
+- 涉及文件路径：host_brain/app/main.py；host_brain/integrations/graph_executor.py；host_brain/app/fastapi_app.py；edge_client/actuators/vts_driver.py；host_brain/audit/sqlite_ledger.py。
+- 关联需求/测试：NFR-MAINT-001。
+
+### TASK-0146 P2 文档记录：F-18/F-19/F-20/F-26/F-27 已知边界确认
+- 状态：DONE（2026-03-04）
+- 任务描述：将剩余 P2 已知边界项记录为"已知限制/后续优化方向"，不阻塞当前发布。
+- 已知边界确认：
+  - F-18（SQLite 高并发读写瓶颈）：当前单机部署可接受；中期可引入 PostgreSQL 或只读副本；
+  - F-19（WAL checkpoint 监控）：已有 close() 自动 PASSIVE checkpoint；长期运行需监控 WAL 文件大小；
+  - F-20（sandbox 仅支持 Python）：非 Python 语言稳定拒绝 + reason_code 可统计；按需扩展；
+  - F-26（Docker 镜像构建依赖网络）：支持预构建镜像本地加载；部署文档已标注；
+  - F-27（nsjail 非 Linux 不可用）：仅作为 Linux 备选；部署文档已标注平台要求。
+- 涉及文件路径：docs/60_trace/risk_registry.md（状态更新）。
+- 关联需求/测试：NFR-REL-001；NFR-MAINT-001。
+
+---
+
+## M11 规划框架（待开发）
+
+### M11 里程碑概览
+
+基于 PRD.md 中尚未实现的功能需求，M11 规划如下：
+
+| 子里程碑 | 核心需求 | 优先级 | 前置条件 |
+|---------|---------|--------|---------|
+| M11-A | FR-SCHED-001/002（定时调度器统一入口 + 健康状态） | P1 | M10-E DONE |
+| M11-B | FR-DESKTOP-001/002（桌面留言文件创建与撤销） | P1 | M11-A DONE |
+| M11-C | FR-DREAM-001/002（梦境生成 + 可回溯） | P2 | M11-A DONE |
+| M11-D | FR-DIARY-001（日记生成每日定时汇总） | P2 | M11-A DONE |
+| M11-E | FR-PROACTIVE-001/002（主动对话触发策略） | P2 | M11-A DONE |
+| M11-F | FR-FOCUS-001（Focus Mode 状态切换） | P3 | M11-E DONE |
+
+> 注：PRD.md 里程碑 M4 已标记 DONE（2026-03-03），但 DevSpec/DevTasks 层面 M11 对应的任务卡尚未拆解。
+> M11 开发前需先完成 DevSpec §21（调度器）+ §22（桌面留言）+ §23（梦境/日记/主动对话）的工程契约拆解。

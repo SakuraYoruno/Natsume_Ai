@@ -939,3 +939,6 @@
 | R-107 | FR-AIRLOCK-002 | Sandbox 容器硬隔离 + 跨平台超时一致化（F-01/F-02） | host_brain/airlock/sandbox.py; tests/contract/test_sandbox_contract.py; tests/contract/test_sandbox_docker_contract.py | T-Sandbox-01; T-Sandbox-Docker-01 | DONE | M10-D |
 | R-108 | FR-CHANNEL-001, FR-VOICE-001 | WeChat→Edge 真实 RPC 端到端事件链路（F-11） | tests/e2e/test_wechat_vts_voice_rpc_e2e.py | T-E2E-RPC-01 | DONE | M10-D |
 | R-109 | FR-ASR-001, NFR-PERF-001 | _CANON_HOTWORDS_CACHE TTL 自动失效（F-42）——_HotwordsCache 类（线程安全，TTL=300s）+ inject_canon_hotwords 更新缓存 + get_canon_hotwords 返回副本 | edge_client/senses/asr.py; tests/unit/test_hotwords_cache_ttl.py | T-HW-TTL-01~05 | DONE | M10-E |
+| R-110 | NFR-SEC-001 | F-16 _fetch_by_request 表名白名单校验补全（P2 收口） | host_brain/audit/sqlite_ledger.py | T-Quality-01(F-16扩展) | DONE | P2-收口 |
+| R-111 | NFR-MAINT-001 | F-13/F-14/F-15/F-25/F-38 P2 已修复核查确认 | host_brain/app/main.py; host_brain/integrations/graph_executor.py; host_brain/app/fastapi_app.py; edge_client/actuators/vts_driver.py; host_brain/audit/sqlite_ledger.py | — | DONE | P2-收口 |
+| R-112 | NFR-REL-001, NFR-MAINT-001 | F-04/F-07/F-08 设备验证包标记 BLOCKED_ENV（单机 SQLite 部署暂缓；多实例/真机部署前执行） | docs/30_devspec/DevTasks.md | — | BLOCKED_ENV | 设备验证包 |
