@@ -72,6 +72,9 @@ S_BOND_STAGE = "S_BOND_STAGE"
 TRANSITION_STATUS_PROMOTED = "PROMOTED"
 TRANSITION_STATUS_DEMOTED = "DEMOTED"
 TRANSITION_STATUS_STABLE = "STABLE"
+UPDATE_KIND_INIT = "INIT"
+UPDATE_KIND_STAGE_TRANSITION = "STAGE_TRANSITION"
+STATUS_SUCCESS = "SUCCESS"
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +255,9 @@ class BondStageEngine:
 
     def _get_or_create_state(self, user_id: str) -> BondScoreState:
         if user_id not in self._states:
-            self._states[user_id] = BondScoreState(user_id=user_id)
+            state = BondScoreState(user_id=user_id)
+            self._states[user_id] = state
+            self._log_initial_state(state)
         return self._states[user_id]
 
     def _compute_stage(self, total_score: int) -> str:
@@ -286,11 +291,80 @@ class BondStageEngine:
             "detail": result.detail,
             "ts_ms": result.ts_ms,
         }
-        if hasattr(self._ledger, "log_bond_stage_transition"):
-            self._ledger.log_bond_stage_transition(record)
-        elif hasattr(self._ledger, "log_system_event"):
-            self._ledger.log_system_event(
+        log_bond_stage_transition = getattr(self._ledger, "log_bond_stage_transition", None)
+        if callable(log_bond_stage_transition):
+            log_bond_stage_transition(record)
+            return
+
+        log_bond_update = getattr(self._ledger, "log_bond_update", None)
+        if callable(log_bond_update):
+            state = self._states.get(result.user_id)
+            capability_hint = state.capability_hint() if state is not None else ""
+            log_bond_update(
+                {
+                    "request_id": request_id,
+                    "intent_id": None,
+                    "session_id": None,
+                    "seq": None,
+                    "event_id": result.transition_id,
+                    "user_id": result.user_id,
+                    "topic_id": None,
+                    "capability_hint": capability_hint,
+                    "update_kind": UPDATE_KIND_STAGE_TRANSITION,
+                    "status": STATUS_SUCCESS,
+                    "reason_code": None,
+                    "stage": S_BOND_STAGE,
+                    "evidence_refs": list(result.evidence_refs),
+                    "payload": {
+                        "from_stage": result.from_stage,
+                        "to_stage": result.to_stage,
+                        "transition_status": result.transition_status,
+                        "score_delta": result.score_delta,
+                        "total_score": result.total_score,
+                    },
+                    "detail": result.detail,
+                    "ts_ms": result.ts_ms,
+                }
+            )
+            return
+
+        log_system_event = getattr(self._ledger, "log_system_event", None)
+        if callable(log_system_event):
+            log_system_event(
                 request_id=request_id,
                 event_type="BOND_STAGE_TRANSITION",
                 payload=record,
             )
+
+    def _log_initial_state(self, state: BondScoreState) -> None:
+        if self._ledger is None:
+            return
+        log_bond_update = getattr(self._ledger, "log_bond_update", None)
+        if not callable(log_bond_update):
+            return
+        request_id = new_request_id()
+        ts_ms = int(now_ms())
+        log_bond_update(
+            {
+                "request_id": request_id,
+                "intent_id": None,
+                "session_id": None,
+                "seq": None,
+                "event_id": f"bond_init_{request_id}",
+                "user_id": state.user_id,
+                "topic_id": None,
+                "capability_hint": state.capability_hint(),
+                "update_kind": UPDATE_KIND_INIT,
+                "status": STATUS_SUCCESS,
+                "reason_code": None,
+                "stage": S_BOND_STAGE,
+                "evidence_refs": [],
+                "payload": {
+                    "current_stage": state.current_stage,
+                    "total_score": state.total_score,
+                    "event_count": state.event_count,
+                },
+                "detail": "Initialized bond state with default values",
+                "ts_ms": ts_ms,
+            }
+        )

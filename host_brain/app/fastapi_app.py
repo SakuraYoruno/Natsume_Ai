@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
@@ -29,13 +30,23 @@ from host_brain.app.main import (
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    CANON_SYNC_FAILED,
     RPC_EVENT_BATCH_PARTIAL_FAIL,
     RPC_EVENT_SCHEMA_INVALID,
+    STARTUP_MCP_DEGRADED,
 )
 from host_brain.core.ids import new_request_id
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
+from host_brain.mcp.tool_registry import MCPToolRegistry
+from host_brain.memory.canon_sync import detect_world_version_drift
+from host_brain.obs.metrics import MetricsCollector
+from host_brain.obs.routes import build_obs_metrics_response
 from host_brain.observability.cross_timeline import build_cross_timeline
+from host_brain.retrieval.pipeline import (
+    RetrievalPipelineContract,
+    build_retrieval_pipeline_from_env,
+)
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
@@ -281,6 +292,8 @@ _intent_engine: Optional[IntentDecisionEngine] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
+_retrieval_pipeline: Optional[RetrievalPipelineContract] = None
+_obs_metrics_collector: Optional[MetricsCollector] = None
 _logger = logging.getLogger("Natsume.fastapi")
 
 
@@ -296,6 +309,89 @@ def get_ledger() -> SQLiteLedger:
         db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
+
+
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _load_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            loaded = json.loads(path.read_text(encoding=encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(loaded, dict):
+            return loaded
+    return None
+
+
+def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None, str | None]:
+    configured = str(os.environ.get("HOST_NODE_INVENTORY_PATH") or "").strip()
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend(
+        [
+            Path("configs/deploy/node_inventory_9.json"),
+            Path("tests/fixtures/services/good/node_inventory_9.json"),
+        ]
+    )
+
+    for path in candidates:
+        payload = _load_json_file(path)
+        if payload is None:
+            continue
+        raw_nodes = payload.get("nodes")
+        if not isinstance(raw_nodes, list):
+            continue
+        nodes: list[dict[str, Any]] = [dict(row) for row in raw_nodes if isinstance(row, dict)]
+        expected = payload.get("expected_node_count")
+        expected_count: int | None = None
+        if isinstance(expected, int):
+            expected_count = int(expected)
+        elif expected is not None:
+            try:
+                expected_count = int(str(expected).strip())
+            except (TypeError, ValueError):
+                expected_count = None
+        return nodes, expected_count, str(path)
+    return [], None, None
+
+
+def _get_runtime_node_id() -> str:
+    return str(
+        os.environ.get("HOST_RETR_NODE_ID")
+        or os.environ.get("Natsume_HOST_NODE_ID")
+        or "natsu-node-01"
+    ).strip() or "natsu-node-01"
+
+
+def get_retrieval_pipeline() -> RetrievalPipelineContract:
+    global _retrieval_pipeline
+    if _retrieval_pipeline is None:
+        _retrieval_pipeline = build_retrieval_pipeline_from_env(
+            env=os.environ,
+            ledger=get_ledger(),
+            node_id=_get_runtime_node_id(),
+        )
+    return _retrieval_pipeline
+
+
+def get_obs_metrics_collector() -> MetricsCollector:
+    global _obs_metrics_collector
+    if _obs_metrics_collector is None:
+        _obs_metrics_collector = MetricsCollector(ledger=get_ledger())
+    return _obs_metrics_collector
 
 
 # 注入 ledger provider 到 canon_routes（消除循环导入风险，P1-R118-2）
@@ -486,12 +582,17 @@ async def environment_readiness() -> ReadinessResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
+        node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
         readiness_report = build_env_readiness_report(
-            env="production",
+            env=str(os.environ.get("Natsume_ENV") or "dev"),
+            node_inventory=node_inventory,
+            expected_node_count=expected_node_count,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,
         )
+        if inventory_path:
+            readiness_report["node_inventory_path"] = inventory_path
 
         readiness_status = readiness_report.get("readiness_status", "FAILED")
 
@@ -508,6 +609,92 @@ async def environment_readiness() -> ReadinessResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Environment readiness check failed",
         )
+
+
+@app.get("/obs/metrics")
+async def obs_metrics(request_id: Optional[str] = None) -> Dict[str, Any]:
+    """M8 启动探针使用的 /obs/metrics HTTP 路由。"""
+    ts_ms = int(time.time() * 1000)
+    payload = build_obs_metrics_response(
+        collector=get_obs_metrics_collector(),
+        request_id=request_id,
+        ts_ms=ts_ms,
+    )
+    payload["timestamp"] = ts_ms
+    return payload
+
+
+@app.get("/health/mcp", response_model=HealthResponse)
+async def mcp_health_check() -> HealthResponse:
+    """MCP 注册表健康检查（探针对齐）。"""
+    ts_ms = int(time.time() * 1000)
+    db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+    status_text = "OK"
+    reason_code = None
+    detail = "mcp registry reachable"
+    tool_count = 0
+    registry: MCPToolRegistry | None = None
+    try:
+        registry = MCPToolRegistry(db_path=db_path, check_same_thread=False)
+        tool_count = len(registry.list_all())
+        if tool_count == 0:
+            status_text = "DEGRADED"
+            reason_code = STARTUP_MCP_DEGRADED
+            detail = "mcp registry reachable but no tools registered"
+    except Exception as exc:
+        status_text = "DEGRADED"
+        reason_code = STARTUP_MCP_DEGRADED
+        detail = str(exc)
+    finally:
+        if registry is not None:
+            registry.close()
+    return HealthResponse(
+        status=status_text,
+        version="0.1.0",
+        timestamp=ts_ms,
+        details={
+            "db_path": db_path,
+            "tool_count": tool_count,
+            "reason_code": reason_code,
+            "detail": detail,
+        },
+    )
+
+
+@app.get("/health/canon_sync", response_model=HealthResponse)
+async def canon_sync_health_check() -> HealthResponse:
+    """World Canon 同步健康检查（探针对齐）。"""
+    ts_ms = int(time.time() * 1000)
+    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
+    status_text = "OK"
+    reason_code = None
+    detail = "canon sync healthy"
+    drift_count = 0
+    drift_sample: list[dict[str, Any]] = []
+    try:
+        drifts = detect_world_version_drift(world_root=world_root, ledger=get_ledger())
+        drift_count = len(drifts)
+        if drift_count > 0:
+            status_text = "DEGRADED"
+            reason_code = CANON_SYNC_FAILED
+            detail = "world canon version drift detected"
+            drift_sample = [dict(row) for row in drifts[:5]]
+    except Exception as exc:
+        status_text = "DEGRADED"
+        reason_code = CANON_SYNC_FAILED
+        detail = str(exc)
+    return HealthResponse(
+        status=status_text,
+        version="0.1.0",
+        timestamp=ts_ms,
+        details={
+            "world_root": world_root,
+            "drift_count": drift_count,
+            "drift_sample": drift_sample,
+            "reason_code": reason_code,
+            "detail": detail,
+        },
+    )
 
 
 @app.post("/observability/trace", response_model=ObservabilityResponse)
@@ -622,8 +809,55 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             approval_token_ref = tokens.get("approval_token_ref")
 
         # 3) 构造叙事输出
+        retrieval_summary: Dict[str, Any] = {}
         if decision == DECISION_APPROVE:
-            narrative = f"[已裁决通过] 用户输入: {request_body.message}"
+            retrieval_enabled = _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True)
+            if retrieval_enabled:
+                try:
+                    retrieval_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
+                except ValueError:
+                    retrieval_top_k = 5
+                retrieval_top_k = max(1, min(retrieval_top_k, 20))
+                retrieval_result = get_retrieval_pipeline().run(
+                    request_id=request_id,
+                    query=request_body.message,
+                    intent_id=intent_id,
+                    top_k=retrieval_top_k,
+                    ts_ms=ts_ms,
+                )
+                recall_output = dict(retrieval_result.output.get("recall") or {})
+                rerank_output = dict(retrieval_result.output.get("rerank") or {})
+                evidence_pack = dict(retrieval_result.output.get("evidence_pack") or {})
+                retrieval_summary = {
+                    "status": retrieval_result.status,
+                    "reason_code": retrieval_result.reason_code,
+                    "route_count": len(recall_output.get("routes") or []),
+                    "candidate_count": int(recall_output.get("candidate_count") or 0),
+                    "rerank_topk": len(rerank_output.get("topk") or []),
+                    "evidence_refs": list(evidence_pack.get("evidence_refs") or []),
+                    "reason_chain": list(retrieval_result.output.get("reason_chain") or []),
+                    "degraded": bool(retrieval_result.output.get("degraded", False)),
+                }
+                narrative = (
+                    f"[已裁决通过] 用户输入: {request_body.message}\n"
+                    f"[检索] routes={retrieval_summary['route_count']} "
+                    f"candidates={retrieval_summary['candidate_count']} "
+                    f"topk={retrieval_summary['rerank_topk']}"
+                )
+                if retrieval_summary["degraded"]:
+                    reason_code = reason_code or str(retrieval_result.reason_code or "")
+            else:
+                retrieval_summary = {
+                    "status": "SKIPPED",
+                    "reason_code": "HOST_RETRIEVAL_DISABLED",
+                    "route_count": 0,
+                    "candidate_count": 0,
+                    "rerank_topk": 0,
+                    "evidence_refs": [],
+                    "reason_chain": ["HOST_RETRIEVAL_DISABLED"],
+                    "degraded": True,
+                }
+                narrative = f"[已裁决通过] 用户输入: {request_body.message}\n[检索] disabled"
             quality = {"stage": "S_COMPLETE", "reason_code": None}
         else:
             narrative = f"[已拒绝] 原因: {reason_code or 'UNKNOWN'}"
@@ -642,6 +876,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "intent_id": intent_id,
                 "governor_stage": governor_result.get("stage"),
                 "thread_id": request_body.thread_id,
+                "retrieval": retrieval_summary,
             },
             timestamp=ts_ms,
         )

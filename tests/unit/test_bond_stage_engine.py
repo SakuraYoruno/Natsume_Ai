@@ -17,6 +17,8 @@ from host_brain.bond.bond_stage_engine import (
     TRANSITION_STATUS_DEMOTED,
     TRANSITION_STATUS_PROMOTED,
     TRANSITION_STATUS_STABLE,
+    UPDATE_KIND_INIT,
+    UPDATE_KIND_STAGE_TRANSITION,
     BondScoreState,
     BondStageEngine,
     StageTransitionResult,
@@ -35,6 +37,19 @@ def engine_with_ledger():
     from unittest.mock import MagicMock
     ledger = MagicMock()
     ledger.log_bond_stage_transition = MagicMock()
+    return BondStageEngine(ledger=ledger), ledger
+
+
+@pytest.fixture
+def engine_with_update_ledger():
+    class BondUpdateOnlyLedger:
+        def __init__(self):
+            self.rows = []
+
+        def log_bond_update(self, row):
+            self.rows.append(row)
+
+    ledger = BondUpdateOnlyLedger()
     return BondStageEngine(ledger=ledger), ledger
 
 
@@ -58,6 +73,22 @@ class TestInitialState:
     def test_initial_trend_is_stable(self, engine):
         state = engine.get_state("user_001")
         assert state.trend() == "STABLE"
+
+    def test_initial_state_persisted_to_bond_update_log(self, engine_with_update_ledger):
+        engine, ledger = engine_with_update_ledger
+        engine.get_state("user_init")
+        assert len(ledger.rows) == 1
+        row = ledger.rows[0]
+        assert row["user_id"] == "user_init"
+        assert row["update_kind"] == UPDATE_KIND_INIT
+        assert row["payload"]["total_score"] == 0
+        assert row["payload"]["current_stage"] == STAGE_STRANGER
+
+    def test_initial_state_persisted_only_once_per_user(self, engine_with_update_ledger):
+        engine, ledger = engine_with_update_ledger
+        engine.get_state("user_once")
+        engine.get_state("user_once")
+        assert len(ledger.rows) == 1
 
 
 # ── T-BOND-STAGE-02: 积分累积与阶段晋级 ──────────────────────────────────────
@@ -326,6 +357,19 @@ class TestAuditLogging:
         for field in ("user_id", "from_stage", "to_stage", "transition_status",
                       "score_delta", "total_score", "ts_ms"):
             assert field in call_args, f"missing field: {field}"
+
+    def test_transition_falls_back_to_bond_update_log(self, engine_with_update_ledger):
+        engine, ledger = engine_with_update_ledger
+        engine.apply_event(
+            user_id="user_021",
+            update_kind="INTERACTION",
+            evidence_refs=["evt::001"],
+        )
+        assert len(ledger.rows) == 2
+        row = ledger.rows[-1]
+        assert row["update_kind"] == UPDATE_KIND_STAGE_TRANSITION
+        assert row["payload"]["transition_status"] == TRANSITION_STATUS_STABLE
+        assert row["payload"]["total_score"] == DEFAULT_SCORE_MAP["INTERACTION"]
 
 
 # ── T-BOND-STAGE-08: 多用户隔离 ──────────────────────────────────────────────
