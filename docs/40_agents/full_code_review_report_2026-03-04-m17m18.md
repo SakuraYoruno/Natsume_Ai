@@ -242,3 +242,34 @@ M17/M18 整体架构设计合理，技术栈选型符合契约，后端 Service 
 1. **Route 层与 Service 层脱节**：`obs_routes.py` 未复用 Service 层，导致三组平行实现，且 Route 层功能更弱；
 2. **前后端字段名对齐不足**：Overview 页 `summary` 字段、ServiceCard 字段名、Trace API 路径均存在前后端不一致；
 3. **全量数据加载**：`TraceNodeBuilder` 无时间范围约束，存在生产环境性能风险。
+
+---
+
+## 七、M19 修复状态（2026-03-04）
+
+> M19 里程碑已完成，所有 P0/P1 缺陷已修复并通过测试。
+
+| 缺陷编号 | 描述 | 修复状态 | 修复方式 | 关联 TASK |
+|---------|------|---------|---------|----------|
+| BUG-BE-001 | Trace 降级路径 `AttributeError` → 500 | ✅ CLOSED | `obs_routes.py` 降级路径改用 `ledger.fetch_by_time_range("governor_log", start_ms=0, end_ms=...)` 方法调用 | TASK-0193 |
+| BUG-FE-001 | Overview 统计卡片始终显示 `—` | ✅ CLOSED | `Overview.jsx` 改为读取顶层字段 `data?.total / up / degraded / down` | TASK-0194 |
+| WARN-FE-004 | ServiceCard 字段名不匹配 | ✅ CLOSED | `Overview.jsx` 传参改为 `display_name / p95_ms / call_count`；`ServiceCard.jsx` 支持大写 status（UP/DEGRADED/DOWN） | TASK-0194 |
+| WARN-FE-005 | Sessions 翻页闭包陈旧值 | ✅ CLOSED | `Sessions.jsx` `load` 函数接受 `pageNum` 参数，翻页时传入新页码而非依赖闭包 | TASK-0195 |
+| WARN-FE-006 | Trace API 路径 `/nodes` 后缀不匹配 | ✅ CLOSED | `api/obs.js` `fetchTraceNodes` 路径改为 `/obs/trace/${requestId}`（去掉 `/nodes` 后缀） | TASK-0195 |
+| WARN-BE-001 | `/obs/services/health` 与 `ServiceHealthAggregator` 平行实现 | ✅ CLOSED | `obs_routes.py` 端点重构为调用 `ServiceHealthAggregator.aggregate()` | TASK-0196 |
+| WARN-BE-002 | `/obs/sessions` 与 `SessionQueryService` 平行实现 | ✅ CLOSED | `obs_routes.py` 端点重构为调用 `SessionQueryService.query()` | TASK-0196 |
+| WARN-BE-003 | `/obs/metrics/timeseries` 与 `MetricsTimeseriesService` 平行实现 | ✅ CLOSED | `obs_routes.py` 端点重构为调用 `MetricsTimeseriesService.query()` | TASK-0196 |
+| BUG-BE-002 | `TraceNodeBuilder` 全量数据加载 | ✅ CLOSED | 新增 `fetch_by_request_id` SQL 级过滤方法；`TraceNodeBuilder` 优先使用 SQL 过滤，降级时限制内存过滤 | TASK-0197 |
+| WARN-BE-005 | Trace 并行分支 parent 推断错误 | ✅ CLOSED | `_infer_parent_ids` 改为基于 `node_type` 的树形推断：intent→根，governor→intent，skill/llm→governor，asr/tts→skill | TASK-0197 |
+| WARN-TEST-001 | T-OBS-TRACE-03 未覆盖并行分支 | ✅ CLOSED | 更新 T-OBS-TRACE-03 断言为树形验证；新增 T-OBS-TRACE-09（并行 skill 共享 governor parent）、T-OBS-TRACE-10（ASR/TTS parent 为 skill） | TASK-0198 |
+| WARN-TEST-002 | `obs_routes.py` 无集成测试 | ✅ CLOSED | 新增 `tests/integration/test_obs_routes_integration.py`，覆盖 4 端点 × 4 场景（T-OBS-ROUTE-INT-01~16） | TASK-0198 |
+
+### M19 测试结果
+
+| 指标 | 数值 |
+|------|------|
+| 新增测试用例 | 29（T-OBS-ROUTE-TRACE-FALLBACK-01~03 + T-OBS-TRACE-09~10 + T-OBS-ROUTE-INT-01~16 + T-OBS-TRACE-03 更新） |
+| 全量测试通过 | 1609 passed |
+| 回归失败 | 0（2 个 contract 测试失败为 M19 前已存在的旧问题） |
+| P0 缺陷关闭 | 2/2 |
+| P1 缺陷关闭 | 8/8（WARN-BE-001~003、BUG-BE-002、WARN-FE-004~006、WARN-BE-005） |
