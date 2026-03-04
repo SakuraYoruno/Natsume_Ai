@@ -938,3 +938,4 @@
 | R-106 | NFR-REL-001 | SQLite WAL/NFS 部署约束文档化（本地磁盘强约束） | docs/50_project/ExternalServices_Config.md; docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md | T-Deploy-WAL-01(文档验收) | DONE | M10-D |
 | R-107 | FR-AIRLOCK-002 | Sandbox 容器硬隔离 + 跨平台超时一致化（F-01/F-02） | host_brain/airlock/sandbox.py; tests/contract/test_sandbox_contract.py; tests/contract/test_sandbox_docker_contract.py | T-Sandbox-01; T-Sandbox-Docker-01 | DONE | M10-D |
 | R-108 | FR-CHANNEL-001, FR-VOICE-001 | WeChat→Edge 真实 RPC 端到端事件链路（F-11） | tests/e2e/test_wechat_vts_voice_rpc_e2e.py | T-E2E-RPC-01 | DONE | M10-D |
+| R-109 | FR-ASR-001, NFR-PERF-001 | _CANON_HOTWORDS_CACHE TTL 自动失效（F-42）——_HotwordsCache 类（线程安全，TTL=300s）+ inject_canon_hotwords 更新缓存 + get_canon_hotwords 返回副本 | edge_client/senses/asr.py; tests/unit/test_hotwords_cache_ttl.py | T-HW-TTL-01~05 | DONE | M10-E |
