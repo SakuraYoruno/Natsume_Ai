@@ -2695,3 +2695,235 @@ class SysModeEnum(str, Enum):
 | DESKTOP_MSG_UNDO_INVALID | undo_token 无效/过期/manifest 不匹配 |
 | DESKTOP_MSG_NOT_FOUND | 目标文件不存在 |
 | RATE_LIMIT_EXCEEDED | 主动对话频率超限 |
+
+---
+
+## §24 M12 工程契约（PLANNED）
+
+### §24.1 M12-A ToolBroker 单入口 + tool_visibility_hash（FR-TOOL-001/002/003）
+
+#### 24.1.1 模块边界
+
+```
+host_brain/tools/
+  tool_broker.py          ← ToolBroker 单入口（NEW）
+  tool_meta_registry.py   ← ToolMeta 注册表（NEW）
+  tool_visibility.py      ← tool_visibility_hash 计算与审计（NEW）
+```
+
+#### 24.1.2 ToolMeta Schema
+
+```python
+@dataclass(frozen=True)
+class ToolMeta:
+    tool_id: str                    # 唯一标识
+    provider_id: str                # MCP provider 或 internal
+    name: str                       # 展示名
+    description: str                # 功能描述（暴露给 LLM）
+    access_level: Literal["READ", "WRITE"]
+    requires_token: bool            # WRITE 必须为 True
+    clearance_level: int            # 0~4
+    risk_level: int                 # 0~4
+    scopes: list[str]
+    reversible: bool
+    version: str
+```
+
+#### 24.1.3 ToolBroker 接口
+
+```python
+class ToolBroker:
+    def get_tool_meta_pack(
+        self,
+        context: dict,
+        top_k: int = 5,
+    ) -> ToolMetaPack:
+        """返回当前轮次可见的 Top-K 工具元数据（不含 WRITE 默认）。"""
+
+    def execute_tool(
+        self,
+        tool_id: str,
+        args: dict,
+        context: dict,
+    ) -> ToolExecResult:
+        """执行工具（WRITE 必须有 approval_token）。"""
+
+    def compute_visibility_hash(
+        self,
+        tool_meta_pack: ToolMetaPack,
+    ) -> str:
+        """计算 tool_visibility_hash（SHA-256 of sorted tool_ids）。"""
+```
+
+#### 24.1.4 tool_visibility_hash 审计字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `tool_visibility_hash` | str | SHA-256(sorted tool_ids) |
+| `tool_count` | int | 本轮可见工具数量 |
+| `write_tools_visible` | bool | 是否包含 WRITE 工具 |
+| `request_id` | str | 关联请求 |
+| `intent_id` | str | 关联 intent |
+| `ts_ms` | int | 时间戳 |
+
+#### 24.1.5 错误码
+
+| 错误码 | 触发条件 |
+|--------|---------|
+| `TOOL_VISIBILITY_POLICY_VIOLATION` | WRITE 工具出现在未授权上下文 |
+| `TOOL_TOKEN_MISSING` | WRITE 工具无 approval_token |
+| `TOOL_NOT_FOUND` | tool_id 不在注册表 |
+| `TOOL_EXEC_FAILED` | 工具执行异常 |
+| `TOOL_EVIDENCE_REF_MISSING` | WRITE 执行无 evidence_ref |
+
+#### 24.1.6 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-TOOL-01 | get_tool_meta_pack 默认不含 WRITE 工具 |
+| T-TOOL-02 | WRITE 工具无 token → TOOL_TOKEN_MISSING |
+| T-TOOL-03 | tool_visibility_hash 可重现（同输入同输出） |
+| T-TOOL-04 | tool_visibility_hash 写入审计链 |
+| T-TOOL-05 | MCP WRITE 无 APPROVE → 拒绝且可统计 |
+| T-TOOL-06 | 绕过 ToolBroker 直接执行 → 阻断 |
+
+---
+
+### §24.2 M12-B 多轮对话上下文压缩（FR-MEM-005 扩展）
+
+#### 24.2.1 模块边界
+
+```
+host_brain/memory/
+  context_compressor.py   ← ContextCompressor（NEW）
+```
+
+#### 24.2.2 ContextCompressor 接口
+
+```python
+class ContextCompressor:
+    def compress(
+        self,
+        turns: list[dict],
+        *,
+        max_tokens: int = 2048,
+        strategy: Literal["sliding_window", "summary", "hybrid"] = "hybrid",
+    ) -> CompressedContext:
+        """压缩多轮对话上下文，返回结构化 evidence pack。"""
+
+    def build_evidence_pack(
+        self,
+        compressed: CompressedContext,
+        episodic_hits: list[dict],
+        canon_slots: dict,
+    ) -> EvidencePack:
+        """构建结构化 evidence pack（候选/分数/摘要/来源指针/置信度）。"""
+```
+
+#### 24.2.3 EvidencePack Schema
+
+```python
+@dataclass(frozen=True)
+class EvidencePack:
+    pack_id: str
+    request_id: str
+    intent_id: str
+    candidates: list[EvidenceCandidate]   # TopK 候选
+    total_tokens: int
+    strategy: str
+    ts_ms: int
+    hash: str                              # SHA-256(candidates)
+```
+
+#### 24.2.4 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-CTX-01 | sliding_window 截断超出 max_tokens 的轮次 |
+| T-CTX-02 | summary 策略生成摘要且不伪造事实 |
+| T-CTX-03 | hybrid 策略优先保留最近 N 轮 + 摘要历史 |
+| T-CTX-04 | evidence_pack 字段结构稳定（同版本同输入） |
+| T-CTX-05 | LLM 不可用时降级为 sliding_window |
+
+---
+
+### §24.3 M12-C Reranker 服务强化（FR-MEM-004）
+
+#### 24.3.1 模块边界
+
+```
+host_brain/retrieval/
+  reranker.py             ← RerankerService（已有，需强化）
+```
+
+#### 24.3.2 RerankerService 接口强化
+
+```python
+class RerankerService:
+    def rerank(
+        self,
+        query: str,
+        candidates: list[dict],
+        *,
+        top_k: int = 5,
+        fallback: Literal["recall_order", "lightweight"] = "recall_order",
+    ) -> RerankResult:
+        """重排候选，不可用时降级并显式标注 stage。"""
+
+    def health(self) -> dict:
+        """返回健康状态（status/latency_ms/last_error）。"""
+```
+
+#### 24.3.3 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-RERANK-01 | 正常重排返回 TopK，字段稳定 |
+| T-RERANK-02 | Reranker 不可用 → 降级为 recall_order，stage 标注 |
+| T-RERANK-03 | health() 返回结构稳定 |
+| T-RERANK-04 | evidence_pack 含 rerank_stage 字段 |
+
+---
+
+### §24.4 M12-D 技能热加载（FR-SKILL-001/002 扩展）
+
+#### 24.4.1 模块边界
+
+```
+host_brain/skills/
+  hot_loader.py           ← SkillHotLoader（NEW）
+  version_registry.py     ← SkillVersionRegistry（NEW）
+```
+
+#### 24.4.2 SkillHotLoader 接口
+
+```python
+class SkillHotLoader:
+    def reload_skill(
+        self,
+        skill_name: str,
+        *,
+        version: str | None = None,
+    ) -> SkillReloadResult:
+        """热加载指定 Skill（不重启服务）。"""
+
+    def list_versions(self, skill_name: str) -> list[SkillVersion]:
+        """列出已注册的 Skill 版本。"""
+
+    def rollback_skill(
+        self,
+        skill_name: str,
+        target_version: str,
+    ) -> SkillReloadResult:
+        """回滚到指定版本。"""
+```
+
+#### 24.4.3 测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-HOTLOAD-01 | reload_skill 成功，新版本生效 |
+| T-HOTLOAD-02 | reload_skill 失败，旧版本保持不变 |
+| T-HOTLOAD-03 | rollback_skill 回滚到指定版本 |
+| T-HOTLOAD-04 | 热加载写 skill_reload_log（审计） |
+| T-HOTLOAD-05 | 运行时一致性检查：SkillMeta 字段缺失 → 拒绝加载 |

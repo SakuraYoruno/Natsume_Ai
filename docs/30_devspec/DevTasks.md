@@ -2347,3 +2347,84 @@ TASK-XXXX 标题
 - 验收标准：T-PROACT-01~06 + T-FOCUS-01~04 全部通过；全量测试 ≥1125 passed。
 - 涉及文件路径：host_brain/skills/proactive/；host_brain/core/sys_mode.py；tests/unit/test_proactive_skill.py；tests/unit/test_focus_mode.py。
 - 关联需求/测试：FR-PROACTIVE-001/002；FR-FOCUS-001；T-PROACT-01~06；T-FOCUS-01~04。
+
+---
+
+## M12 任务卡（PLANNED）
+
+### TASK-0154 M12 前置：DevSpec §24 工程契约拆解
+- 状态：DONE（2026-03-04，DevSpec §24.1~§24.4 已写入）
+- 任务描述：拆解 M12-A~D 工程契约（ToolBroker/ContextCompressor/Reranker/SkillHotLoader），写入 DevSpec §24。
+- 输入：PRD FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002 扩展。
+- 输出：DevSpec §24.1~§24.4（接口/Schema/错误码/测试编号）。
+- 验收标准：DevSpec §24 完整，含 T-TOOL-01~06 / T-CTX-01~05 / T-RERANK-01~04 / T-HOTLOAD-01~05。
+- 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
+
+### TASK-0155 M12-A-1：ToolBroker 核心实现
+- 状态：PLANNED
+- 任务描述：实现 `ToolBroker`（单入口）+ `ToolMetaRegistry`（注册表）+ `ToolVisibility`（hash 计算）。
+- 输入：DevSpec §24.1。
+- 输出：
+  - `host_brain/tools/tool_broker.py`；
+  - `host_brain/tools/tool_meta_registry.py`；
+  - `host_brain/tools/tool_visibility.py`；
+  - `host_brain/core/errors.py`（新增 TOOL_* 错误码）。
+- 验收标准：T-TOOL-01~06 全部通过；全量测试 ≥1170 passed。
+- 关联需求/测试：FR-TOOL-001/002/003；T-TOOL-01~06。
+
+### TASK-0156 M12-A-2：ToolBroker REST API
+- 状态：PLANNED
+- 任务描述：实现 `tool_routes.py`（GET /tools/meta-pack + POST /tools/execute）并注册到 fastapi_app.py。
+- 输入：DevSpec §24.1.3；TASK-0155。
+- 输出：
+  - `host_brain/tools/tool_routes.py`；
+  - `host_brain/app/fastapi_app.py`（注册 tool_router）。
+- 验收标准：API 端点可调用；WRITE 无 token 返回 403 + TOOL_TOKEN_MISSING。
+- 关联需求/测试：FR-TOOL-003；T-TOOL-02/T-TOOL-05。
+
+### TASK-0157 M12-B-1：ContextCompressor 实现
+- 状态：PLANNED
+- 任务描述：实现 `ContextCompressor`（sliding_window/summary/hybrid 三策略）+ `EvidencePack` 构建。
+- 输入：DevSpec §24.2。
+- 输出：
+  - `host_brain/memory/context_compressor.py`；
+  - `tests/unit/test_context_compressor.py`（T-CTX-01~05）。
+- 验收标准：T-CTX-01~05 全部通过；LLM 不可用时降级为 sliding_window。
+- 关联需求/测试：FR-MEM-005；T-CTX-01~05。
+
+### TASK-0158 M12-C-1：RerankerService 强化
+- 状态：PLANNED
+- 任务描述：强化 `RerankerService`（health() + 降级策略 + evidence_pack rerank_stage 字段）。
+- 输入：DevSpec §24.3；现有 `host_brain/retrieval/reranker.py`。
+- 输出：
+  - `host_brain/retrieval/reranker.py`（强化）；
+  - `tests/unit/test_reranker_service.py`（T-RERANK-01~04）。
+- 验收标准：T-RERANK-01~04 全部通过；不可用时降级且 stage 标注。
+- 关联需求/测试：FR-MEM-004；T-RERANK-01~04。
+
+### TASK-0159 M12-D-1：SkillHotLoader 实现
+- 状态：PLANNED
+- 任务描述：实现 `SkillHotLoader`（热加载/回滚/版本注册）+ `SkillVersionRegistry`。
+- 输入：DevSpec §24.4。
+- 输出：
+  - `host_brain/skills/hot_loader.py`；
+  - `host_brain/skills/version_registry.py`；
+  - `tests/unit/test_skill_hot_loader.py`（T-HOTLOAD-01~05）。
+- 验收标准：T-HOTLOAD-01~05 全部通过；热加载失败时旧版本保持不变。
+- 关联需求/测试：FR-SKILL-001/002；T-HOTLOAD-01~05。
+
+### TASK-0160 M12 错误码补全
+- 状态：PLANNED
+- 任务描述：在 `core/errors.py` 中补充 M12 新增错误码（TOOL_*/CTX_*/RERANK_*/HOTLOAD_*）。
+- 输入：DevSpec §24.1.5；TASK-0155~0159。
+- 输出：`host_brain/core/errors.py`（新增 M12 错误码）。
+- 验收标准：所有 M12 错误码常量存在且有注释。
+- 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
+
+### TASK-0161 M12 发布清单
+- 状态：PLANNED
+- 任务描述：生成 `m12_release.json`（含 M12-A~D 核心文件 hash + 测试通过数）。
+- 输入：TASK-0155~0160 全部 DONE。
+- 输出：`host_brain/release/manifests/m12_release.json`。
+- 验收标准：manifest 可被 release_manifest.py 验证；全量测试 ≥1190 passed。
+- 关联需求：NFR-REL-001。
