@@ -19,6 +19,9 @@ from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.obs.service_health_aggregator import ServiceHealthAggregator
+from host_brain.obs.session_query import SessionQueryService
+from host_brain.obs.metrics_timeseries import MetricsTimeseriesService
 
 logger = logging.getLogger("Nastume.obs")
 
@@ -207,68 +210,85 @@ class LlmNodesResponse(BaseModel):
 @router.get("/services/health", response_model=ServicesHealthResponse)
 async def get_services_health(
     window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
+    side: Optional[str] = Query(None, description="过滤端：host|edge"),
 ):
-    """全服务健康聚合：边缘服务 + 9 个 LLM 云节点。"""
+    """WARN-BE-001: 调用 ServiceHealthAggregator.aggregate() 而非内联聚合逻辑。"""
     ledger = _get_ledger()
     since_ms = _now_ms() - window_minutes * 60 * 1000
-    services: List[ServiceHealthItem] = []
 
-    # 1) 边缘服务：从 voice_event_log 聚合
-    try:
-        rows = ledger.fetch_by_time_range("voice_event_log", since_ms, _now_ms())
-    except Exception:
-        rows = []
+    # 使用 ledger 数据构建探测函数注册表（被动监控）
+    probe_registry = _build_probe_registry(ledger, since_ms)
+    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
+    result = await aggregator.aggregate(side_filter=side)
 
-    for svc in _EDGE_SERVICES:
-        svc_rows = [r for r in rows if str(r.get("event_type", "")).upper().startswith(svc)]
-        health = _compute_node_health(svc_rows)
+    # 将 ServiceHealthAggregator 返回的通用结构映射到 ServicesHealthResponse
+    services = []
+    for svc in result.get("services", []):
         services.append(ServiceHealthItem(
-            service_id=svc.lower(),
-            service_type="edge",
-            display_name=svc,
-            status=health["status"],
-            success_rate=health["success_rate"],
-            p95_ms=health["p95_ms"],
-            last_call_ts=health["last_call_ts"],
-            call_count=health.get("call_count", 0),
+            service_id=svc["service_id"],
+            service_type=svc.get("side", "edge"),
+            display_name=svc.get("name", svc["service_id"]),
+            status=svc["status"],
+            p95_ms=svc.get("latency_ms"),
+            last_call_ts=svc.get("last_check_ts"),
+            call_count=None,
         ))
-
-    # 2) LLM 云节点：从 llm_node_call_log 聚合
-    try:
-        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", since_ms, _now_ms())
-    except Exception:
-        llm_rows = []
-
-    for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
-        health = _compute_node_health(node_rows)
-        services.append(ServiceHealthItem(
-            service_id=node_id,
-            service_type="llm_node",
-            display_name=node_id.replace("_", " ").title(),
-            role=meta["role"],
-            provider=meta["provider"],
-            model_id=meta["model_id"],
-            status=health["status"],
-            success_rate=health["success_rate"],
-            p95_ms=health["p95_ms"],
-            last_call_ts=health["last_call_ts"],
-            call_count=health.get("call_count", 0),
-        ))
-
-    counts = {"UP": 0, "DEGRADED": 0, "DOWN": 0, "UNKNOWN": 0}
-    for s in services:
-        counts[s.status] = counts.get(s.status, 0) + 1
 
     return ServicesHealthResponse(
-        total=len(services),
-        up=counts["UP"],
-        degraded=counts["DEGRADED"],
-        down=counts["DOWN"],
-        unknown=counts["UNKNOWN"],
+        total=result["total"],
+        up=result["up"],
+        degraded=result["degraded"],
+        down=result["down"],
+        unknown=result["unknown"],
         services=services,
         timestamp=_now_ms(),
     )
+
+
+def _build_probe_registry(ledger, since_ms: int) -> dict:
+    """基于 ledger 历史数据构建被动探测函数注册表。"""
+    import asyncio
+    from host_brain.obs.service_health_aggregator import ServiceHealthResult
+
+    # 预加载所需数据
+    try:
+        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=_now_ms())
+    except Exception:
+        voice_rows = []
+    try:
+        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
+    except Exception:
+        llm_rows = []
+
+    registry = {}
+
+    # 边缘服务探测
+    for svc in _EDGE_SERVICES:
+        svc_rows = [r for r in voice_rows if str(r.get("event_type", "")).upper().startswith(svc)]
+        health = _compute_node_health(svc_rows)
+        _status = health["status"]
+        _p95 = health["p95_ms"]
+        _last = health["last_call_ts"]
+
+        async def _make_edge_probe(s=_status, p=_p95, l=_last, sid=svc.lower()):
+            return ServiceHealthResult(sid, sid, "edge", s, latency_ms=p, last_check_ts=l)
+
+        registry[svc.lower()] = _make_edge_probe
+
+    # LLM 节点探测
+    for node_id, meta in _LLM_NODE_REGISTRY.items():
+        node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
+        health = _compute_node_health(node_rows)
+        _status = health["status"]
+        _p95 = health["p95_ms"]
+        _last = health["last_call_ts"]
+
+        async def _make_llm_probe(s=_status, p=_p95, l=_last, nid=node_id, m=meta):
+            return ServiceHealthResult(nid, m["role"], "host", s, latency_ms=p, last_check_ts=l)
+
+        registry[node_id] = _make_llm_probe
+
+    return registry
 
 # ---------------------------------------------------------------------------
 # GET /obs/sessions
@@ -277,67 +297,40 @@ async def get_services_health(
 async def get_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = Query(None, description="状态过滤: OK/FAIL"),
+    status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(60, ge=1, le=10080),
+    keyword: Optional[str] = Query(None),
 ):
-    """会话列表，按时间倒序，支持分页和状态过滤。"""
+    """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
     ledger = _get_ledger()
+    svc = SessionQueryService(ledger)
     since_ms = _now_ms() - window_minutes * 60 * 1000
-
-    try:
-        # 从 governor_log 获取会话列表（每个 request_id 一条）
-        rows = ledger.fetch_by_time_range("governor_log", since_ms, _now_ms())
-    except Exception:
-        rows = []
-
-    # 从 graph_run_trace 获取链路信息
-    try:
-        trace_rows = ledger.fetch_by_time_range("graph_run_trace", since_ms, _now_ms())
-        trace_map = {r["request_id"]: r for r in trace_rows}
-    except Exception:
-        trace_map = {}
-
-    # 去重（同一 request_id 取最新）
-    seen: Dict[str, Dict] = {}
-    for r in rows:
-        rid = r.get("request_id", "")
-        if rid not in seen or r.get("ts_ms", 0) > seen[rid].get("ts_ms", 0):
-            seen[rid] = r
-
-    items_raw = sorted(seen.values(), key=lambda x: x.get("ts_ms", 0), reverse=True)
-
-    # 状态过滤
-    if status:
-        filter_status = status.upper()
-        if filter_status == "OK":
-            items_raw = [r for r in items_raw if r.get("decision") == "APPROVE"]
-        elif filter_status == "FAIL":
-            items_raw = [r for r in items_raw if r.get("decision") != "APPROVE"]
-
-    total = len(items_raw)
-    offset = (page - 1) * page_size
-    page_items = items_raw[offset: offset + page_size]
-
-    items = []
-    for r in page_items:
-        rid = r.get("request_id", "")
-        trace = trace_map.get(rid, {})
-        decision = r.get("decision", "")
-        items.append(SessionItem(
-            request_id=rid,
-            session_id=r.get("session_id") or trace.get("session_id"),
-            ts_ms=r.get("ts_ms", 0),
-            status="OK" if decision == "APPROVE" else "FAIL",
-            decision=decision,
-            reason_code=r.get("reason_code"),
-            node_count=trace.get("node_count"),
-            total_latency_ms=trace.get("total_latency_ms"),
-        ))
-
-    return SessionsResponse(
-        total=total,
+    result = svc.query(
         page=page,
         page_size=page_size,
+        status=status,
+        keyword=keyword,
+        start_time=since_ms,
+        end_time=_now_ms(),
+    )
+
+    items = [
+        SessionItem(
+            request_id=r["request_id"],
+            session_id=r.get("session_id"),
+            ts_ms=r.get("ts_ms", 0),
+            status=r.get("status", "error").upper(),
+            decision=r.get("decision"),
+            reason_code=r.get("reason_code"),
+            total_latency_ms=r.get("duration_ms"),
+        )
+        for r in result.get("items", [])
+    ]
+
+    return SessionsResponse(
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
         items=items,
         timestamp=_now_ms(),
     )
@@ -361,13 +354,17 @@ async def get_trace(request_id: str):
         row = None
 
     if row is None:
-        # 降级：从 governor_log 构造最小链路
+        # 降级：从 governor_log 构造最小链路（使用方法调用而非属性访问，避免 AttributeError）
         try:
-            gov_rows = [r for r in ledger.governor_log if r.get("request_id") == request_id]
+            all_gov = ledger.fetch_by_time_range("governor_log", start_ms=0, end_ms=_now_ms())
+            gov_rows = [r for r in all_gov if r.get("request_id") == request_id]
         except Exception:
             gov_rows = []
         if not gov_rows:
-            raise HTTPException(status_code=404, detail=f"Trace not found: {request_id}")
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "request_id": request_id},
+            )
 
         gov = gov_rows[-1]
         nodes = [
@@ -432,83 +429,44 @@ async def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
 ):
-    """多维度时序数据：请求量/拒绝/错误/平均延迟。"""
+    """WARN-BE-003: 调用 MetricsTimeseriesService.query() 而非内联聚合逻辑。"""
     ledger = _get_ledger()
+    svc = MetricsTimeseriesService(ledger)
     now = _now_ms()
-    since_ms = now - range_minutes * 60 * 1000
+    start_time = now - range_minutes * 60 * 1000
+    interval_map = {1: "1m", 5: "5m", 60: "1h"}
+    interval = interval_map.get(interval_minutes, "5m")
+
+    result = svc.query(
+        start_time=start_time,
+        end_time=now,
+        interval=interval,
+    )
+
+    # 将 MetricsTimeseriesService 返回的通用结构映射到 MetricsTimeseriesResponse
+    timeseries = result.get("timeseries", {})
+    timestamps = timeseries.get("timestamps", [])
+    totals = timeseries.get("total", [])
+    rej_rates = timeseries.get("rejection_rate", [])
     interval_ms = interval_minutes * 60 * 1000
 
-    try:
-        gov_rows = ledger.fetch_by_time_range("governor_log", since_ms, now)
-    except Exception:
-        gov_rows = []
-
-    try:
-        err_rows = ledger.fetch_by_time_range("error_log", since_ms, now)
-    except Exception:
-        err_rows = []
-
-    try:
-        trace_rows = ledger.fetch_by_time_range("graph_run_trace", since_ms, now)
-    except Exception:
-        trace_rows = []
-
-    # 构建时间桶
-    num_buckets = max(1, range_minutes // interval_minutes)
-    buckets: List[Dict[str, Any]] = []
-    for i in range(num_buckets):
-        bucket_start = since_ms + i * interval_ms
-        buckets.append({
-            "ts_ms": bucket_start,
-            "requests": 0,
-            "rejections": 0,
-            "errors": 0,
-            "latencies": [],
-        })
-
-    def _bucket_idx(ts: int) -> int:
-        idx = int((ts - since_ms) / interval_ms)
-        return max(0, min(idx, num_buckets - 1))
-
-    for r in gov_rows:
-        ts = r.get("ts_ms", 0)
-        if ts < since_ms:
-            continue
-        idx = _bucket_idx(ts)
-        buckets[idx]["requests"] += 1
-        if r.get("decision") != "APPROVE":
-            buckets[idx]["rejections"] += 1
-
-    for r in err_rows:
-        ts = r.get("ts_ms", 0)
-        if ts < since_ms:
-            continue
-        idx = _bucket_idx(ts)
-        buckets[idx]["errors"] += 1
-
-    for r in trace_rows:
-        ts = r.get("ts_ms", 0)
-        lat = r.get("total_latency_ms")
-        if ts < since_ms or lat is None:
-            continue
-        idx = _bucket_idx(ts)
-        buckets[idx]["latencies"].append(lat)
-
     points = []
-    for b in buckets:
-        lats = b["latencies"]
-        avg_lat = round(sum(lats) / len(lats), 1) if lats else None
+    for i, ts_label in enumerate(timestamps):
+        req = totals[i] if i < len(totals) else 0
+        rej_rate_val = rej_rates[i] if i < len(rej_rates) else 0.0
+        rej = int(req * rej_rate_val / 100) if req > 0 else 0
         points.append(TimeseriesPoint(
-            ts_ms=b["ts_ms"],
-            requests=b["requests"],
-            rejections=b["rejections"],
-            errors=b["errors"],
-            avg_latency_ms=avg_lat,
+            ts_ms=start_time + i * interval_ms,
+            requests=req,
+            rejections=rej,
+            errors=0,
+            avg_latency_ms=None,
         ))
 
-    total_req = sum(b["requests"] for b in buckets)
-    total_rej = sum(b["rejections"] for b in buckets)
-    rej_rate = round(total_rej / total_req * 100, 2) if total_req > 0 else 0.0
+    summary = result.get("summary", {})
+    total_req = summary.get("total_requests", 0)
+    total_rej = summary.get("total_rejections", 0)
+    rej_rate = summary.get("rejection_rate", 0.0)
 
     return MetricsTimeseriesResponse(
         range_ms=range_minutes * 60 * 1000,
@@ -532,7 +490,7 @@ async def get_llm_nodes(
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:
-        rows = ledger.fetch_by_time_range("llm_node_call_log", since_ms, _now_ms())
+        rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
     except Exception:
         rows = []
 

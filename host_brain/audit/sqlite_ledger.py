@@ -1880,6 +1880,33 @@ class SQLiteLedger:
         if last_exc is not None:
             raise last_exc
 
+    def fetch_by_request_id(self, table: str, request_id: str) -> list[dict[str, Any]]:
+        """按 request_id 直接过滤查询（SQL 级，BUG-BE-002 修复）。
+
+        比 fetch_by_time_range + 内存过滤更高效，避免全量数据加载。
+        支持所有含 request_id 列的表（白名单校验）。
+
+        Args:
+            table: 表名（必须在 _ALLOWED_TABLES 或 obs 扩展表白名单中）
+            request_id: 请求 ID
+
+        Returns:
+            匹配的行列表，按 id ASC 排序。
+        """
+        _obs_tables = frozenset({
+            "llm_node_call_log",
+            "graph_run_trace",
+        })
+        if table not in _ALLOWED_TABLES and table not in _obs_tables:
+            raise ValueError(
+                f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
+            )
+        rows = self._conn.execute(
+            f"SELECT * FROM {table} WHERE request_id = ? ORDER BY id ASC",
+            (str(request_id),),
+        ).fetchall()
+        return [self._decode_row(table, row) for row in rows]
+
     def fetch_by_time_range(
         self,
         table: str,
