@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import uuid
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.neo4j_client import BOND_WRITER_ID, InMemoryNeo4jBondClient
 from host_brain.core.errors import BOND_EVIDENCE_REQUIRED, BOND_SINGLE_WRITER_VIOLATION
 from host_brain.core.ids import now_ms
+
+if TYPE_CHECKING:
+    from host_brain.bond.bond_stage_engine import BondStageEngine, StageTransitionResult
+
+_logger = logging.getLogger("Nastume.bond_dynamics")
 
 
 S_BOND_UPDATE = "S_BOND_UPDATE"
@@ -29,16 +35,21 @@ class BondUpdateResult:
 
 
 class BondDynamicsWriter:
-    """Only legal write path into Bond SSOT graph."""
+    """Only legal write path into Bond SSOT graph.
+
+    M13-C：支持可选注入 BondStageEngine，apply_update 成功后自动触发阶段积分计算。
+    """
 
     def __init__(
         self,
         *,
         ledger: SQLiteLedger | None = None,
         neo4j_client: InMemoryNeo4jBondClient | None = None,
+        stage_engine: "BondStageEngine | None" = None,
     ) -> None:
         self.ledger = ledger
         self.neo4j_client = neo4j_client or InMemoryNeo4jBondClient()
+        self._stage_engine = stage_engine
 
     def apply_update(
         self,
@@ -107,6 +118,32 @@ class BondDynamicsWriter:
                 ts_ms=now_value,
             )
 
+        # M13-C：触发 BondStageEngine 积分计算（可选）
+        stage_transition: "StageTransitionResult | None" = None
+        if self._stage_engine is not None:
+            try:
+                stage_transition = self._stage_engine.apply_event(
+                    user_id=str(user_id),
+                    update_kind=str(update_kind),
+                    evidence_refs=refs,
+                    request_id=request_id,
+                    ts_ms=now_value,
+                )
+                _logger.debug(
+                    "BondStageEngine applied: user=%s %s (delta=%+d, total=%d)",
+                    user_id,
+                    stage_transition.transition_status,
+                    stage_transition.score_delta,
+                    stage_transition.total_score,
+                    extra={"request_id": request_id},
+                )
+            except Exception as exc:
+                _logger.warning(
+                    "BondStageEngine.apply_event failed (non-fatal): %s",
+                    exc,
+                    extra={"request_id": request_id},
+                )
+
         event = {
             "request_id": request_id,
             "intent_id": intent_id,
@@ -124,6 +161,17 @@ class BondDynamicsWriter:
             "status": STATUS_OK,
             "reason_code": None,
             "ts_ms": now_value,
+            "stage_transition": (
+                {
+                    "from_stage": stage_transition.from_stage,
+                    "to_stage": stage_transition.to_stage,
+                    "transition_status": stage_transition.transition_status,
+                    "score_delta": stage_transition.score_delta,
+                    "total_score": stage_transition.total_score,
+                }
+                if stage_transition is not None
+                else None
+            ),
         }
         self._log_update(
             request_id=request_id,
