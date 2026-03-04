@@ -75,16 +75,17 @@ Nastume_Ai/
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 迁移）
-│   ├── canon/               #    正典系统（Style Canon / World Canon）
+│   ├── canon/               #    正典系统（Style Canon / World Canon，治理 API 事务化）
 │   ├── channels/            #    渠道适配（VTS DEGRADED 降级 / 微信 I/O）
 │   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
 │   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
 │   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关）
 │   ├── lsp/                 #    密钥与策略（Vault / Policies）
-│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步）
+│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步 / cursor-based 分页）
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
 │   ├── retrieval/           #    检索链（Embedding / 召回融合 / 重排 / Evidence Pack）
+│   ├── scheduler/           #    调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
 │   ├── skills/              #    技能系统（加载器 / 注册表 / ClawdBot UI 实现）
 │   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
 │   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
@@ -93,7 +94,9 @@ Nastume_Ai/
 │   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连）
 │   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD）
 │   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控 / 事件上报）
-│   └── proofs/              #    资源证明与门控
+│   ├── proofs/              #    资源证明与门控
+│   ├── fallback_model.py    #    兜底小模型门控（FallbackModelGate，draft_only 标记）
+│   └── resource_gate.py     #    资源闸门（优先级抢占 + ResourcePreemptionEvent 审计）
 │
 ├── configs/                 # ⚙️ 配置中心
 │   ├── deploy/              #    部署配置（节点清单）
@@ -158,7 +161,8 @@ Nastume_Ai/
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
 | **HTTP 框架** | FastAPI | Host 服务入口 + Web UI 面板 + REST API |
 | **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级） |
-| **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表） |
+| **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表 + scheduler_tasks 持久化）|
+| **调度器** | APScheduler + SQLite | CRON 任务持久化，进程重启自动恢复 |
 | **CI/CD** | GitHub Actions | 交付门禁（delivery-gates） |
 
 ---
@@ -332,11 +336,26 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 
 ## 📊 项目状态
 
-- **需求追溯**：R-01 ~ R-52（52 条系统级需求全部 DONE）
-- **开发任务**：TASK-0000 ~ TASK-0083（全部完成）
-- **测试覆盖**：80+ 契约测试文件，500+ 断言点
-- **审计表**：21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log 等）
-- **错误码**：70+ 统一 reason_code（可统计、可回放）
+| 维度 | 状态 |
+|------|------|
+| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED 等全部 DONE |
+| **开发任务** | TASK-0000 ~ TASK-0181（M1 ~ M16 全部完成）|
+| **测试覆盖** | 1564 passed，2 skipped，0 failed（含 unit / contract / e2e）|
+| **审计表** | 21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log / scheduler_tasks 等）|
+| **错误码** | 70+ 统一 reason_code（可统计、可回放）|
+| **发布清单** | M14 / M15 / M16 release.json 已归档（`docs/50_release/`）|
+
+### 里程碑进度
+
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| M1 ~ M10 | 仓库骨架 / Governor / Audit / Bond / Canon / Memory / Retrieval / Skills / Vision / Observability | ✅ DONE |
+| M11 | LangGraph 四层编排重构 | ✅ DONE |
+| M12 | Edge Client 基础链路（ASR/TTS/VTS/RPC/资源门控）| ✅ DONE |
+| M13 | 调度器 + Rate Limit 持久化 + 发布门禁 | ✅ DONE |
+| M14 | 代码审查缺陷修复（F-01 ~ F-27）| ✅ DONE |
+| M15 | 语音链路深化（ASR 事件化 / TTS 队列 / Barge-in / 兜底模型 / 资源闸门）| ✅ DONE |
+| M16 | Canon 治理 API 强化 / 长期记忆分页 / 调度器任务持久化 | ✅ DONE |
 
 ---
 
