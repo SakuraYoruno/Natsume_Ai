@@ -2210,3 +2210,488 @@ def reject_proposal(
 | WCANON_DOC_NOT_FOUND | World Canon 文档 ID 不存在 |
 | WCANON_PROPOSAL_DUPLICATE | 相同 proposal_id 已存在 |
 | WCANON_PROPOSAL_STATUS_INVALID | 提案 status 不允许当前操作（非 pending） |
+
+---
+
+## §21 定时调度器（Scheduler）工程契约
+
+### 21.1 模块边界
+
+```
+host_brain/scheduler/
+├── __init__.py
+├── scheduler_engine.py      # SchedulerEngine：任务注册/注销/触发/健康状态
+├── scheduler_models.py      # ScheduledTask、TaskHealth、SchedulerConfig Schema
+├── scheduler_store.py       # SQLite 持久化（scheduler_tasks 表）
+└── scheduler_routes.py      # FastAPI 路由：/scheduler/tasks CRUD + /scheduler/health
+```
+
+### 21.2 核心 Schema
+
+#### ScheduledTask
+```python
+@dataclass
+class ScheduledTask:
+    task_id: str                    # UUID，唯一标识
+    name: str                       # 任务名称（可读）
+    cron_expr: str | None           # cron 表达式（如 "0 23 * * *"）
+    interval_seconds: int | None    # 周期触发（秒），与 cron_expr 二选一
+    intent_type: str                # 触发的 intent type（allowlist 校验）
+    intent_action: str              # 触发的 intent action
+    intent_args: dict               # 触发时附带的 args
+    sys_mode_allowlist: list[str]   # 允许触发的 sys_mode（如 ["NORMAL", "SLEEP"]）
+    priority: str                   # "HIGH" / "NORMAL" / "LOW"
+    enabled: bool                   # 是否启用
+    created_at: str                 # ISO8601
+    updated_at: str                 # ISO8601
+    config_version: int             # 配置版本号（每次更新递增）
+```
+
+#### TaskHealth
+```python
+@dataclass
+class TaskHealth:
+    task_id: str
+    status: str                     # "RUNNING" / "PAUSED" / "SUSPENDED" / "DISABLED"
+    last_run_ts: str | None         # 上次触发时间
+    next_run_ts: str | None         # 下次预计触发时间
+    last_result: str | None         # "SUCCESS" / "FAILED" / "SKIPPED"
+    error_count: int                # 连续失败次数
+    suspended_reason: str | None    # 暂停原因（如 "SCHED_TASK_SUSPENDED"）
+```
+
+### 21.3 SQLite 表：scheduler_tasks
+
+```sql
+CREATE TABLE IF NOT EXISTS scheduler_tasks (
+    task_id         TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    cron_expr       TEXT,
+    interval_seconds INTEGER,
+    intent_type     TEXT NOT NULL,
+    intent_action   TEXT NOT NULL,
+    intent_args     TEXT NOT NULL DEFAULT '{}',   -- JSON
+    sys_mode_allowlist TEXT NOT NULL DEFAULT '["NORMAL"]',  -- JSON array
+    priority        TEXT NOT NULL DEFAULT 'NORMAL',
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    status          TEXT NOT NULL DEFAULT 'RUNNING',
+    last_run_ts     TEXT,
+    next_run_ts     TEXT,
+    last_result     TEXT,
+    error_count     INTEGER NOT NULL DEFAULT 0,
+    suspended_reason TEXT,
+    config_version  INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+```
+
+### 21.4 SchedulerEngine 接口契约
+
+```python
+class SchedulerEngine:
+    def register_task(self, task: ScheduledTask) -> None:
+        """注册任务；task_id 重复则 raise SCHED_TASK_DUPLICATE"""
+
+    def unregister_task(self, task_id: str) -> None:
+        """注销任务；不存在则 raise SCHED_TASK_NOT_FOUND"""
+
+    def enable_task(self, task_id: str) -> None: ...
+    def disable_task(self, task_id: str) -> None: ...
+
+    def get_health(self, task_id: str) -> TaskHealth: ...
+    def list_health(self) -> list[TaskHealth]: ...
+
+    def tick(self, current_ts: float, current_sys_mode: str) -> list[str]:
+        """
+        调度心跳：检查所有 enabled 任务，返回本次触发的 task_id 列表。
+        - sys_mode 不在 allowlist → SKIPPED（不触发，不计入 error_count）
+        - 触发后生成 system_initiated_intent 并推入 intent_queue
+        - 连续失败 MAX_ERROR_COUNT 次 → status=SUSPENDED + 写 scheduler_config_log
+        """
+
+    def _build_system_intent(self, task: ScheduledTask) -> dict:
+        """
+        构造 system_initiated_intent：
+        - proposer_node_id = "scheduler"
+        - intent_id = uuid4()
+        - type = task.intent_type
+        - action = task.intent_action
+        - args = task.intent_args
+        - source_task_id = task.task_id
+        """
+```
+
+### 21.5 sys_mode 门控规则
+
+| sys_mode | HIGH 优先级任务 | NORMAL 优先级任务 | LOW 优先级任务 |
+|---------|--------------|----------------|--------------|
+| NORMAL  | ✅ 触发 | ✅ 触发 | ✅ 触发 |
+| GAMING  | ✅ 触发 | ❌ SYSMODE_FORBIDDEN | ❌ SYSMODE_FORBIDDEN |
+| SLEEP   | ✅ 触发（白名单） | ❌ SYSMODE_FORBIDDEN | ❌ SYSMODE_FORBIDDEN |
+| FOCUS   | ✅ 触发 | ❌ SYSMODE_FORBIDDEN（proactive/dream 类） | ❌ SYSMODE_FORBIDDEN |
+
+> SLEEP 模式下 HIGH 优先级白名单：`["diary_generate", "dream_generate"]`
+
+### 21.6 REST API 端点
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /scheduler/tasks | 注册新任务 |
+| GET  | /scheduler/tasks | 列出所有任务（含健康状态） |
+| GET  | /scheduler/tasks/{task_id} | 获取单个任务详情 |
+| PATCH | /scheduler/tasks/{task_id} | 更新任务配置（config_version 递增） |
+| DELETE | /scheduler/tasks/{task_id} | 注销任务 |
+| POST | /scheduler/tasks/{task_id}/enable | 启用任务 |
+| POST | /scheduler/tasks/{task_id}/disable | 禁用任务 |
+| GET  | /scheduler/health | 所有任务健康快照 |
+
+### 21.7 审计字段
+
+- `scheduler_config_log`：任务注册/注销/配置变更/暂停事件，字段：`task_id / event_type / config_version / reason / ts`
+- `system_initiated_intent`：调度触发的 intent，字段：`proposer_node_id="scheduler" / source_task_id / intent_id / ts`
+
+### 21.8 错误码
+
+| 错误码 | 触发场景 |
+|--------|---------|
+| SCHED_TASK_NOT_FOUND | task_id 不存在 |
+| SCHED_TASK_DUPLICATE | task_id 已存在 |
+| SCHED_TASK_SUSPENDED | 连续失败超限，任务自动暂停 |
+| SCHED_CONDITION_UNMET | 触发条件不满足（非 sys_mode 原因） |
+| SCHED_CONFIG_INVALID | cron_expr/interval_seconds 格式错误或两者均为空 |
+
+### 21.9 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-SCHED-01 | FR-SCHED-001 | 注册任务后 tick() 在正确时间触发，生成 system_initiated_intent |
+| T-SCHED-02 | FR-SCHED-001 | sys_mode=GAMING 时 NORMAL 优先级任务被跳过（SYSMODE_FORBIDDEN） |
+| T-SCHED-03 | FR-SCHED-001 | sys_mode=SLEEP 时 HIGH 优先级白名单任务正常触发 |
+| T-SCHED-04 | FR-SCHED-002 | 连续失败 MAX_ERROR_COUNT 次后 status=SUSPENDED，写 scheduler_config_log |
+| T-SCHED-05 | FR-SCHED-002 | /scheduler/health 返回所有任务健康快照，字段完整 |
+| T-SCHED-06 | FR-SCHED-001 | 注销任务后 tick() 不再触发 |
+| T-SCHED-07 | FR-SCHED-001 | system_initiated_intent 中 proposer_node_id="scheduler" 且 source_task_id 正确 |
+
+---
+
+## §22 桌面留言（Desktop Message）工程契约
+
+### 22.1 模块边界
+
+```
+host_brain/skills/desktop_message/
+├── __init__.py
+├── desktop_message_skill.py    # DesktopMessageSkill：create/update/delete/undo
+├── desktop_message_models.py   # DesktopMessageArgs、DesktopMessageManifest Schema
+└── path_validator.py           # 安全路径校验（base_dir allowlist + 路径穿越检测）
+```
+
+### 22.2 SkillMeta 声明
+
+```python
+DESKTOP_MESSAGE_SKILL_META = SkillMeta(
+    skill_name="desktop_message",
+    clearance_level="L1",
+    risk_level=2,
+    scopes=["filesystem"],
+    reversible=True,
+    requires_visual_audit=False,
+    requires_confirm_token=False,   # 低风险，不需要二次确认
+    allow_list=["create", "update", "delete", "undo"],
+    deny_list=[],
+)
+```
+
+### 22.3 核心 Schema
+
+#### DesktopMessageArgs
+```python
+@dataclass
+class DesktopMessageArgs:
+    action: str          # "create" / "update" / "delete" / "undo"
+    filename: str        # 文件名（不含路径，仅文件名部分）
+    content: str | None  # 留言内容（create/update 时必填）
+    undo_token: str | None  # undo 时必填
+```
+
+#### DesktopMessageManifest
+```python
+@dataclass
+class DesktopMessageManifest:
+    manifest_id: str
+    skill_name: str = "desktop_message"
+    action: str
+    file_path: str          # 绝对路径（已校验）
+    before_hash: str | None # 操作前文件 SHA256（不存在时为 None）
+    after_hash: str | None  # 操作后文件 SHA256（删除时为 None）
+    before_content: str | None
+    after_content: str | None
+    undo_token: str
+    reversible: bool = True
+    ts: str                 # ISO8601
+    request_id: str
+    intent_id: str
+```
+
+### 22.4 安全路径校验规则
+
+```python
+BASE_DIR_ALLOWLIST = [
+    Path.home() / "Desktop",
+    Path.home() / "Documents" / "Natsume_Messages",
+]
+
+def validate_path(filename: str, base_dir: Path) -> Path:
+    """
+    1. 拒绝包含 '..' 的 filename → SCOPE_VIOLATION
+    2. 拒绝绝对路径 filename → SCOPE_VIOLATION
+    3. 拒绝符号链接 → SCOPE_VIOLATION
+    4. 解析后路径必须以 base_dir 开头 → SCOPE_VIOLATION
+    5. 文件名长度 ≤ 255 字节 → SCOPE_VIOLATION
+    """
+```
+
+### 22.5 执行流程
+
+```
+create/update:
+  1. validate_path(filename, base_dir)
+  2. 读取 before_content（文件不存在时 before_hash=None）
+  3. QA 检查 content（不得含伪执行句）
+  4. 写入文件
+  5. 计算 after_hash
+  6. 生成 manifest + undo_token
+  7. 写入 skill_exec_log（含 manifest_ref）
+
+delete:
+  1. validate_path(filename, base_dir)
+  2. 读取 before_content + before_hash
+  3. move-to-quarantine（不真删）
+  4. 生成 manifest（after_hash=None）+ undo_token
+  5. 写入 skill_exec_log
+
+undo:
+  1. 校验 undo_token（TTL + manifest_ref 匹配）
+  2. 读取 manifest（before_content/before_hash）
+  3. 恢复文件（create→删除；update→写回 before_content；delete→从 quarantine 恢复）
+  4. 写入 skill_exec_log（undo 事件）
+```
+
+### 22.6 错误码
+
+| 错误码 | 触发场景 |
+|--------|---------|
+| SCOPE_VIOLATION | 路径越界/路径穿越/符号链接 |
+| SYSMODE_FORBIDDEN | Gaming 模式下触发 |
+| SKILL_EXEC_FAILED | 文件系统不可写/IO 错误 |
+| DESKTOP_MSG_QA_REJECTED | 内容含伪执行句，QA 拦截 |
+| DESKTOP_MSG_UNDO_INVALID | undo_token 无效/过期/manifest 不匹配 |
+| DESKTOP_MSG_NOT_FOUND | delete/update 时文件不存在 |
+
+### 22.7 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-DESK-01 | FR-DESKTOP-001 | create 成功，manifest 含 before(None)/after/path/hash |
+| T-DESK-02 | FR-DESKTOP-001 | undo_token 调用后文件恢复原状态 |
+| T-DESK-03 | FR-DESKTOP-001 | 路径越界（含 ..）→ SCOPE_VIOLATION |
+| T-DESK-04 | FR-DESKTOP-001 | Gaming 模式 → SYSMODE_FORBIDDEN |
+| T-DESK-05 | FR-DESKTOP-001 | 文件系统不可写 → SKILL_EXEC_FAILED + reason_code |
+| T-DESK-06 | FR-DESKTOP-002 | 内容含伪执行句 → DESKTOP_MSG_QA_REJECTED |
+| T-DESK-07 | FR-DESKTOP-001 | delete 默认 move-to-quarantine，undo 可恢复 |
+| T-DESK-08 | FR-DESKTOP-002 | 写入审计可追溯原始草案与最终内容 |
+
+---
+
+## §23 梦境/日记/主动对话/Focus Mode 工程契约
+
+### 23.1 梦境（Dream）模块边界
+
+```
+host_brain/skills/dream/
+├── __init__.py
+├── dream_skill.py          # DreamSkill：generate（读 Episodic → LLM → 写 Episodic）
+└── dream_models.py         # DreamArgs、DreamEntry Schema
+```
+
+#### DreamEntry Schema
+```python
+@dataclass
+class DreamEntry:
+    entry_id: str
+    category: str = "dream"
+    evidence_level: str = "NARRATIVE_ONLY"
+    content: str                    # LLM 生成的梦境叙事
+    source_episodic_ids: list[str]  # 来源 Episodic 条目 ID
+    ts: str                         # ISO8601
+    request_id: str
+    intent_id: str
+    reversible: bool = True
+    undo_token: str | None = None
+```
+
+#### 触发条件校验
+```python
+def check_dream_precondition(sys_mode: str, idle_duration_s: float, config: dict) -> bool:
+    """
+    sys_mode in ["SLEEP"] OR idle_duration_s >= config["idle_threshold_s"]
+    AND sys_mode NOT IN ["GAMING"]
+    """
+```
+
+#### 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-DREAM-01 | FR-DREAM-001 | Sleep 模式触发，梦境写入 Episodic，category=dream |
+| T-DREAM-02 | FR-DREAM-001 | Normal 模式无空闲 → SCHED_CONDITION_UNMET |
+| T-DREAM-03 | FR-DREAM-001 | Episodic 不可用 → DEPENDENCY_UNAVAILABLE，不伪造 |
+| T-DREAM-04 | FR-DREAM-002 | 召回梦境时 evidence_level=NARRATIVE_ONLY 标注存在 |
+| T-DREAM-05 | FR-DREAM-001 | Gaming 模式 → SYSMODE_FORBIDDEN |
+
+---
+
+### 23.2 日记（Diary）模块边界
+
+```
+host_brain/skills/diary/
+├── __init__.py
+├── diary_skill.py          # DiarySkill：generate（读当日对话 → LLM → 写文件 + Episodic）
+└── diary_models.py         # DiaryArgs、DiaryEntry、DiaryManifest Schema
+```
+
+#### DiaryManifest Schema
+```python
+@dataclass
+class DiaryManifest:
+    manifest_id: str
+    skill_name: str = "diary"
+    date: str                       # YYYY-MM-DD
+    file_path: str                  # 绝对路径（安全基目录内）
+    before_hash: str | None
+    after_hash: str
+    episodic_entry_ids: list[str]   # 写入的 Episodic 条目 ID
+    canon_proposal_ids: list[str]   # 可选：关联的 canon_proposal（FR-DIARY-002）
+    undo_token: str
+    reversible: bool = True
+    ts: str
+    request_id: str
+    intent_id: str
+```
+
+#### 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-DIARY-01 | FR-DIARY-001 | 每日 23:00 触发，日记文件创建成功，Episodic 写入成功 |
+| T-DIARY-02 | FR-DIARY-001 | 无当日对话 → 输出"无内容"，不伪造日记 |
+| T-DIARY-03 | FR-DIARY-001 | 文件系统不可用 → SKILL_EXEC_FAILED，不伪造 |
+| T-DIARY-04 | FR-DIARY-001 | Episodic 不可用 → DEPENDENCY_UNAVAILABLE，文件仍可写入（降级） |
+| T-DIARY-05 | FR-DIARY-002 | 日记含设定漂移建议时，生成 canon_proposal 并写入 canon_proposal_log |
+
+---
+
+### 23.3 主动对话（Proactive）模块边界
+
+```
+host_brain/skills/proactive/
+├── __init__.py
+├── proactive_skill.py      # ProactiveSkill：trigger（条件校验 → LLM 生成 → 推送）
+└── proactive_models.py     # ProactiveArgs、ProactiveEvent Schema
+```
+
+#### 触发条件校验
+```python
+def check_proactive_precondition(
+    idle_duration_s: float,
+    bond_stage: str,
+    sys_mode: str,
+    hourly_count: int,
+    config: dict,
+) -> tuple[bool, str | None]:
+    """
+    Returns (can_trigger, reason_code_if_blocked)
+    - sys_mode == "GAMING" → (False, "SYSMODE_FORBIDDEN")
+    - hourly_count >= config["max_per_hour"] → (False, "RATE_LIMIT_EXCEEDED")
+    - idle_duration_s < config["idle_threshold_s"] → (False, "SCHED_CONDITION_UNMET")
+    - bond_stage not in config["bond_stage_allowlist"] → (False, "SCHED_CONDITION_UNMET")
+    """
+```
+
+#### 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-PROACT-01 | FR-PROACTIVE-001 | 空闲触发，用户端收到主动消息，审计链完整 |
+| T-PROACT-02 | FR-PROACTIVE-001 | Gaming → SYSMODE_FORBIDDEN |
+| T-PROACT-03 | FR-PROACTIVE-001 | 频率超限 → RATE_LIMIT_EXCEEDED |
+| T-PROACT-04 | FR-PROACTIVE-002 | 内容含执行 intent → QA 拦截 |
+| T-PROACT-05 | FR-PROACTIVE-002 | Edge 不可达 → 静默降级，不重试（DEPENDENCY_UNAVAILABLE） |
+| T-PROACT-06 | FR-PROACTIVE-001 | Sleep 模式 → 仅允许低频问候（bond_stage 白名单） |
+
+---
+
+### 23.4 Focus Mode 工程契约
+
+#### sys_mode 扩展
+
+Focus Mode 作为 `sys_mode` 的子状态，在 `SysModeEnum` 中新增 `FOCUS`：
+
+```python
+class SysModeEnum(str, Enum):
+    NORMAL = "NORMAL"
+    GAMING = "GAMING"
+    SLEEP = "SLEEP"
+    FOCUS = "FOCUS"   # 新增
+```
+
+#### 行为矩阵
+
+| 能力 | FOCUS 模式行为 |
+|------|--------------|
+| 用户主动对话 | ✅ 正常响应 |
+| 主动对话（Proactive） | ❌ SYSMODE_FORBIDDEN |
+| 梦境生成（Dream） | ❌ SYSMODE_FORBIDDEN |
+| 日记生成（Diary） | ❌ SYSMODE_FORBIDDEN（推迟到退出 Focus 后） |
+| 通知推送 | ❌ 静默 |
+| Scheduler 非紧急任务 | ❌ SYSMODE_FORBIDDEN |
+
+#### 切换审计
+
+```python
+# hard_state_log 字段
+{
+    "event_type": "SYS_MODE_CHANGE",
+    "from_mode": "NORMAL",
+    "to_mode": "FOCUS",
+    "source": "user_command" | "scheduled_policy" | "calendar_event",
+    "evidence_summary": str,
+    "ts": str,
+    "request_id": str,
+}
+```
+
+#### 测试编号
+
+| 测试编号 | 关联需求 | 断言描述 |
+|---------|---------|---------|
+| T-FOCUS-01 | FR-FOCUS-001 | 进入 Focus 后主动对话被拦截（SYSMODE_FORBIDDEN） |
+| T-FOCUS-02 | FR-FOCUS-001 | 用户主动提问正常响应 |
+| T-FOCUS-03 | FR-FOCUS-001 | 退出 Focus 后调度器恢复 |
+| T-FOCUS-04 | FR-FOCUS-001 | 切换事件写入 hard_state_log，字段完整 |
+
+### 23.5 §21~§23 新增错误码汇总
+
+| 错误码 | 触发场景 |
+|--------|---------|
+| SCHED_TASK_NOT_FOUND | 调度任务 ID 不存在 |
+| SCHED_TASK_DUPLICATE | 调度任务 ID 已存在 |
+| SCHED_TASK_SUSPENDED | 连续失败超限，任务自动暂停 |
+| SCHED_CONDITION_UNMET | 触发条件不满足（非 sys_mode 原因） |
+| SCHED_CONFIG_INVALID | cron_expr/interval_seconds 格式错误 |
+| SCOPE_VIOLATION | 路径越界/路径穿越/符号链接 |
+| DESKTOP_MSG_QA_REJECTED | 桌面留言内容含伪执行句 |
+| DESKTOP_MSG_UNDO_INVALID | undo_token 无效/过期/manifest 不匹配 |
+| DESKTOP_MSG_NOT_FOUND | 目标文件不存在 |
+| RATE_LIMIT_EXCEEDED | 主动对话频率超限 |
