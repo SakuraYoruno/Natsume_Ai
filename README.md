@@ -12,6 +12,7 @@
 ![Neo4j](https://img.shields.io/badge/Neo4j-6.x-4581C3?logo=neo4j&logoColor=white)
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-1.4+-FF6F00?logo=google-chrome&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=white)
 ![License](https://img.shields.io/badge/License-Pending-lightgrey)
 
 </div>
@@ -71,7 +72,7 @@
 ```
 Nastume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
-│   ├── app/                 #    应用入口（FastAPI + Web UI 面板 + 配置 + 健康检查）
+│   ├── app/                 #    应用入口（FastAPI + 监控面板 API + 配置 + 健康检查）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 迁移）
@@ -97,6 +98,11 @@ Nastume_Ai/
 │   ├── proofs/              #    资源证明与门控
 │   ├── fallback_model.py    #    兜底小模型门控（FallbackModelGate，draft_only 标记）
 │   └── resource_gate.py     #    资源闸门（优先级抢占 + ResourcePreemptionEvent 审计）
+│
+├── monitor_ui/              # 🖥️ 监控面板前端（React + Vite SPA，M17）
+│   ├── src/                 #    源码（Overview / Sessions / Trace / Metrics 四页）
+│   ├── dist/                #    构建产物（由 FastAPI 静态托管于 /static/monitor/）
+│   └── package.json         #    前端依赖清单
 │
 ├── configs/                 # ⚙️ 配置中心
 │   ├── deploy/              #    部署配置（节点清单）
@@ -159,7 +165,9 @@ Nastume_Ai/
 | **语音识别** | faster-whisper large-v3 | Edge 端 ASR（流式/分段） |
 | **语音合成** | GPT-SoVITS | Edge 端 TTS（全 GPU 常驻） |
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
-| **HTTP 框架** | FastAPI | Host 服务入口 + Web UI 面板 + REST API |
+| **HTTP 框架** | FastAPI | Host 服务入口 + 监控面板 API + REST API |
+| **前端框架** | React 18 + Vite | 监控面板 SPA（Overview / Sessions / Trace / Metrics）|
+| **链路可视化** | React Flow | Dify 风格链路节点图（M17）|
 | **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级） |
 | **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表 + scheduler_tasks 持久化）|
 | **调度器** | APScheduler + SQLite | CRON 任务持久化，进程重启自动恢复 |
@@ -338,12 +346,12 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 
 | 维度 | 状态 |
 |------|------|
-| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED 等全部 DONE |
-| **开发任务** | TASK-0000 ~ TASK-0181（M1 ~ M16 全部完成）|
-| **测试覆盖** | 1564 passed，2 skipped，0 failed（含 unit / contract / e2e）|
+| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS 等全部 DONE |
+| **开发任务** | TASK-0000 ~ TASK-0192（M1 ~ M18 全部完成）|
+| **测试覆盖** | 1577 passed，2 skipped，0 failed（含 unit / contract / e2e）|
 | **审计表** | 21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log / scheduler_tasks 等）|
 | **错误码** | 70+ 统一 reason_code（可统计、可回放）|
-| **发布清单** | M14 / M15 / M16 release.json 已归档（`docs/50_release/`）|
+| **发布清单** | M14 ~ M18 release.json 已归档（`docs/50_release/`）|
 
 ### 里程碑进度
 
@@ -356,6 +364,8 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | M14 | 代码审查缺陷修复（F-01 ~ F-27）| ✅ DONE |
 | M15 | 语音链路深化（ASR 事件化 / TTS 队列 / Barge-in / 兜底模型 / 资源闸门）| ✅ DONE |
 | M16 | Canon 治理 API 强化 / 长期记忆分页 / 调度器任务持久化 | ✅ DONE |
+| M17 | 监控面板 v3 前端重建（React + Vite SPA：Overview / Sessions / Trace / Metrics）| ✅ DONE |
+| M18 | 监控面板 v3 后端 API 扩展（健康聚合 / 会话列表 / 链路节点详情 / 指标时序）| ✅ DONE |
 
 ---
 
