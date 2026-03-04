@@ -2886,5 +2886,142 @@ TASK-XXXX 标题
 - 验收标准：release_ready=true；all_api_endpoints_tested=true；frontend_api_integration_verified=true；zero_regressions=true；total_tests_passed ≥ 1575。
 - 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001。
 
+---
+
+## M19 审查报告缺陷修复（P0/P1）（TODO）
+
+> 目标：修复 M17/M18 代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中识别的全部 P0 级 Bug 和 P1 级架构问题，消除前后端字段名不一致、Route/Service 层脱节、全量数据加载等核心缺陷，提升监控面板可靠性与可维护性。
+> 依赖：M17、M18 全部 DONE。
+> 关联审查项：BUG-BE-001、BUG-BE-002、BUG-FE-001、WARN-FE-004、WARN-FE-005、WARN-FE-006、WARN-BE-001~003、WARN-BE-005、WARN-TEST-001~002。
+
+### TASK-0193 M19-A 修复 Trace 降级路径 AttributeError（BUG-BE-001）
+- 状态：TODO
+- 任务描述：
+  修复 `obs_routes.py` 中 `GET /obs/trace/{request_id}` 端点的降级路径（`row is None` 分支）：将直接属性访问 `ledger.governor_log` 改为正确的方法调用 `ledger.fetch_by_time_range("governor_log", 0, _now_ms())`，消除 `AttributeError` → 500 错误。同步检查同一端点中其他可能的直接属性访问，确保全部改为方法调用。
+- 输入：`host_brain/app/obs_routes.py`；`host_brain/audit/sqlite_ledger.py`（确认可用方法签名）；审查报告 BUG-BE-001。
+- 输出：
+  - `host_brain/app/obs_routes.py`（降级路径修复）；
+  - `tests/unit/test_obs_routes_trace_fallback.py`（T-OBS-ROUTE-TRACE-FALLBACK-01~03：验证降级路径正常返回、不存在 request_id 返回 404、ledger 方法调用正确）。
+- 验收标准：
+  - 降级路径（`row is None`）触发时不抛出 `AttributeError`，返回正常 JSON 响应；
+  - 不存在的 request_id 返回 404 + `{"error": "not_found", "request_id": "..."}`；
+  - T-OBS-ROUTE-TRACE-FALLBACK-01~03 全部通过；
+  - 全量测试 ≥1580 passed，0 failed。
+- 关联需求/测试：FR-OBS-010；BUG-BE-001；T-OBS-ROUTE-TRACE-FALLBACK-01~03。
+
+### TASK-0194 M19-B 修复 Overview 页字段名对齐（BUG-FE-001 + WARN-FE-004）
+- 状态：TODO
+- 任务描述：
+  修复前端 Overview 页两处字段名不匹配问题：
+  1. **BUG-FE-001**：`Overview.jsx` 汇总统计行将 `data?.summary` 改为直接读取顶层字段 `data?.total / data?.up / data?.degraded / data?.down`，并将显示标签从 `healthy` 对齐为 `up`；
+  2. **WARN-FE-004**：`ServiceCard.jsx` 组件 props 从 `name / latency / detail` 对齐为 `display_name / p95_ms / call_count`，同步更新 `Overview.jsx` 中传递给 `ServiceCard` 的属性映射。
+  修复后重新构建前端产物（`npm run build`），更新 `static/monitor/` 下的构建产物。
+- 输入：`monitor_ui/src/pages/Overview.jsx`；`monitor_ui/src/components/ServiceCard.jsx`；`host_brain/app/obs_routes.py`（确认 `ServicesHealthResponse` 字段）；审查报告 BUG-FE-001、WARN-FE-004。
+- 输出：
+  - `monitor_ui/src/pages/Overview.jsx`（字段读取修复）；
+  - `monitor_ui/src/components/ServiceCard.jsx`（props 字段名对齐）；
+  - `monitor_ui/dist/`（重新构建产物）；
+  - `host_brain/app/static/monitor/`（更新静态文件）。
+- 验收标准：
+  - Overview 页顶部 4 个统计卡片（Total / Up / Degraded / Down）正确显示数值，不再显示 `—`；
+  - ServiceCard 正确渲染 `display_name`、`p95_ms`、`call_count` 字段；
+  - 前端构建无报错（`npm run build` 0 errors）；
+  - 全量 Python 测试 ≥1580 passed，0 failed（前端修复不影响后端测试）。
+- 关联需求/测试：FR-OBS-003；FR-OBS-008；BUG-FE-001；WARN-FE-004。
+
+### TASK-0195 M19-C 修复 Trace API 路径 + Sessions 翻页闭包（WARN-FE-006 + WARN-FE-005）
+- 状态：TODO
+- 任务描述：
+  修复前端两处功能性问题：
+  1. **WARN-FE-006**：`monitor_ui/src/api/obs.js` 中 `fetchTraceNodes` 的调用路径从 `/obs/trace/${requestId}/nodes` 修正为 `/obs/trace/${requestId}`，与后端路由对齐；同步移除 Mock 分支中 `id.startsWith('mock')` 的特殊处理，改为统一的 `requestId === 'mock'` 开关；
+  2. **WARN-FE-005**：`Sessions.jsx` 翻页逻辑中，将 `load` 函数的 `useCallback` 依赖从 `[page, ...]` 改为接受 `pageNum` 参数，翻页时调用 `load(page + 1)` 传入新页码，消除闭包陈旧值问题。
+  修复后重新构建前端产物。
+- 输入：`monitor_ui/src/api/obs.js`；`monitor_ui/src/pages/Sessions.jsx`；`monitor_ui/src/pages/Trace.jsx`；审查报告 WARN-FE-006、WARN-FE-005。
+- 输出：
+  - `monitor_ui/src/api/obs.js`（Trace API 路径修正）；
+  - `monitor_ui/src/pages/Sessions.jsx`（翻页闭包修复）；
+  - `monitor_ui/dist/`（重新构建产物）；
+  - `host_brain/app/static/monitor/`（更新静态文件）。
+- 验收标准：
+  - `fetchTraceNodes` 调用路径为 `/obs/trace/{requestId}`（无 `/nodes` 后缀）；
+  - Sessions 页翻页时请求的 `page` 参数与点击的页码一致（无闭包陈旧值）；
+  - 前端构建无报错；
+  - 全量 Python 测试 ≥1580 passed，0 failed。
+- 关联需求/测试：FR-OBS-006；FR-OBS-009；WARN-FE-006；WARN-FE-005。
+
+### TASK-0196 M19-D 重构 obs_routes.py 调用 Service 层（WARN-BE-001~003）
+- 状态：TODO
+- 任务描述：
+  消除 `obs_routes.py` 与 Service 层的三组平行实现，将 Route 层改为调用已有 Service 层：
+  1. **WARN-BE-001**：`GET /obs/services/health` 端点改为调用 `ServiceHealthAggregator.aggregate(side=side)`，删除路由层内联的聚合逻辑；
+  2. **WARN-BE-002**：`GET /obs/sessions` 端点改为调用 `SessionQueryService.query(filters, page, page_size)`，删除路由层内联的查询逻辑；
+  3. **WARN-BE-003**：`GET /obs/metrics/timeseries` 端点改为调用 `MetricsTimeseriesService.query(metrics, interval, start_time, end_time)`，删除路由层内联的聚合逻辑。
+  重构后确保响应结构与原有结构兼容（前端无需修改），并补充必要的依赖注入（通过 `request.app.state` 或参数传递 `ledger` 实例）。
+- 输入：`host_brain/app/obs_routes.py`；`host_brain/obs/service_health_aggregator.py`；`host_brain/obs/session_query.py`；`host_brain/obs/metrics_timeseries.py`；审查报告 WARN-BE-001~003。
+- 输出：
+  - `host_brain/app/obs_routes.py`（三个端点重构为调用 Service 层，删除内联逻辑）；
+  - `host_brain/obs/service_health_aggregator.py`（如需调整接口签名以适配路由层调用）；
+  - `host_brain/obs/session_query.py`（如需调整接口签名）；
+  - `host_brain/obs/metrics_timeseries.py`（如需调整接口签名）。
+- 验收标准：
+  - `obs_routes.py` 三个端点不再包含内联业务逻辑，仅做参数解析 + Service 调用 + 响应序列化；
+  - 原有 T-OBS-HEALTH-01~06、T-OBS-SESS-01~06、T-OBS-TS-01~06 全部继续通过；
+  - 响应结构与重构前兼容（字段名、类型不变）；
+  - 全量测试 ≥1580 passed，0 failed。
+- 关联需求/测试：FR-OBS-008~011；WARN-BE-001；WARN-BE-002；WARN-BE-003；NFR-MAINT-001。
+
+### TASK-0197 M19-E 修复 TraceNodeBuilder 全量加载 + 并行分支推断（BUG-BE-002 + WARN-BE-005）
+- 状态：TODO
+- 任务描述：
+  修复 `trace_node_builder.py` 的两个核心问题：
+  1. **BUG-BE-002**：`_fetch_intent_nodes`、`_fetch_governor_nodes`、`_fetch_skill_nodes`、`_fetch_voice_nodes` 四个方法改为按 `request_id` 直接过滤查询（在 SQL 层过滤而非全量加载后内存过滤）。需在 `SQLiteLedger` 中新增 `fetch_by_request_id(table, request_id)` 方法（或扩展现有 `fetch_by_time_range` 支持 `request_id` 过滤参数），并在 `sqlite_ledger.py` 中为相关表的 `request_id` 列补充索引（migration 文件）；
+  2. **WARN-BE-005**：`_infer_parent_ids` 改为基于 `node_type` 的树形推断：`intent` 节点无 parent；`governor` 节点 parent 为 `intent`；`skill` / `llm` 节点 parent 为 `governor`；`asr` / `tts` / `vts` 节点 parent 为对应的 `skill` 节点（按 `start_ts_ms` 最近匹配）；支持多个节点共享同一 parent（并行分支）。
+- 输入：`host_brain/obs/trace_node_builder.py`；`host_brain/audit/sqlite_ledger.py`；审查报告 BUG-BE-002、WARN-BE-005；DevSpec §29.6.1。
+- 输出：
+  - `host_brain/obs/trace_node_builder.py`（SQL 级过滤 + 树形 parent 推断）；
+  - `host_brain/audit/sqlite_ledger.py`（新增 `fetch_by_request_id` 方法）；
+  - `host_brain/audit/migrations/0020_trace_request_id_index.sql`（request_id 索引）；
+  - `tests/unit/test_trace_node_builder.py`（更新 T-OBS-TRACE-03 断言，补充并行分支测试用例 T-OBS-TRACE-09~10）。
+- 验收标准：
+  - `_fetch_*_nodes` 方法不再拉取全量数据，仅返回指定 `request_id` 的行；
+  - 并行分支场景（两个 skill 节点共享同一 governor parent）正确推断 parent_node_id；
+  - T-OBS-TRACE-01~10 全部通过；
+  - 全量测试 ≥1582 passed，0 failed。
+- 关联需求/测试：FR-OBS-010；BUG-BE-002；WARN-BE-005；T-OBS-TRACE-01~10。
+
+### TASK-0198 M19-F 补充 obs_routes.py 集成测试（WARN-TEST-001~002）
+- 状态：TODO
+- 任务描述：
+  补充两类测试覆盖缺口：
+  1. **WARN-TEST-002**：为 `obs_routes.py` 的 4 个端点新增集成测试（使用 FastAPI `TestClient`），覆盖正常路径、参数过滤、边界条件（空结果、不存在 ID、参数缺失）；
+  2. **WARN-TEST-001**：更新 `test_trace_node_builder.py` 中 T-OBS-TRACE-03，补充并行分支断言（两个节点共享同一 parent_node_id）；新增 T-OBS-TRACE-09（并行 skill 节点 parent 均为 governor）和 T-OBS-TRACE-10（ASR/TTS 节点 parent 为对应 skill 节点）。
+  集成测试使用内存 SQLite（`:memory:`）+ 预置 fixture 数据，不依赖真实服务。
+- 输入：`host_brain/app/obs_routes.py`（M19-D 重构后）；`host_brain/obs/`（M19-E 修复后）；`tests/unit/test_trace_node_builder.py`；审查报告 WARN-TEST-001~002。
+- 输出：
+  - `tests/integration/test_obs_routes_integration.py`（T-OBS-ROUTE-INT-01~16：4 个端点 × 4 个场景）；
+  - `tests/unit/test_trace_node_builder.py`（更新 T-OBS-TRACE-03，新增 T-OBS-TRACE-09~10）。
+- 验收标准：
+  - T-OBS-ROUTE-INT-01~16 全部通过；
+  - T-OBS-TRACE-03、09、10 全部通过；
+  - 全量测试 ≥1598 passed，0 failed；
+  - `obs_routes.py` 4 个端点的集成测试覆盖率 ≥80%。
+- 关联需求/测试：FR-OBS-008~011；WARN-TEST-001；WARN-TEST-002；T-OBS-ROUTE-INT-01~16；T-OBS-TRACE-09~10。
+
+### TASK-0199 M19-G M19 发布清单
+- 状态：TODO
+- 任务描述：生成 M19 发布清单（m19_release.json），记录 M19-A~F 修复文件清单 + 测试通过数 + 质量门禁；同步更新代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中各修复项状态为 FIXED；更新 risk_registry.md 中对应风险条目状态为 MITIGATED。
+- 输入：TASK-0193~0198 全部 DONE。
+- 输出：
+  - `docs/50_release/m19_release.json`；
+  - `docs/40_agents/full_code_review_report_2026-03-04-m17m18.md`（修复项状态更新）；
+  - `docs/60_trace/risk_registry.md`（P0/P1 风险条目状态更新为 MITIGATED）。
+- 验收标准：
+  - release_ready=true；
+  - all_p0_bugs_fixed=true（BUG-BE-001、BUG-FE-001 均已修复）；
+  - all_p1_issues_resolved=true；
+  - zero_regressions=true；
+  - total_tests_passed ≥ 1598。
+- 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001；BUG-BE-001；BUG-BE-002；BUG-FE-001。
+
 
 
