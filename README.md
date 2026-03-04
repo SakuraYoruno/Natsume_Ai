@@ -73,6 +73,8 @@
 Natsume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
 │   ├── app/                 #    应用入口（FastAPI + 监控面板 API + 配置 + 健康检查）
+│   │   ├── monitor_ui/      #    监控面板前端源码（React + Vite SPA）
+│   │   └── static/monitor/  #    监控面板构建产物（FastAPI 静态托管）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 迁移）
@@ -98,11 +100,6 @@ Natsume_Ai/
 │   ├── proofs/              #    资源证明与门控
 │   ├── fallback_model.py    #    兜底小模型门控（FallbackModelGate，draft_only 标记）
 │   └── resource_gate.py     #    资源闸门（优先级抢占 + ResourcePreemptionEvent 审计）
-│
-├── monitor_ui/              # 🖥️ 监控面板前端（React + Vite SPA，M17）
-│   ├── src/                 #    源码（Overview / Sessions / Trace / Metrics 四页）
-│   ├── dist/                #    构建产物（由 FastAPI 静态托管于 /static/monitor/）
-│   └── package.json         #    前端依赖清单
 │
 ├── configs/                 # ⚙️ 配置中心
 │   ├── deploy/              #    部署配置（节点清单）
@@ -347,11 +344,11 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | 维度 | 状态 |
 |------|------|
 | **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS 等全部 DONE |
-| **开发任务** | TASK-0000 ~ TASK-0192（M1 ~ M18 全部完成）|
-| **测试覆盖** | 1577 passed，2 skipped，0 failed（含 unit / contract / e2e）|
+| **开发任务** | TASK-0000 ~ TASK-0202（M1 ~ M20 已落地；其中 TASK-0137 为 BLOCKED_ENV）|
+| **测试覆盖** | 最新发布基线：1609 passed，0 failed（见 `docs/50_release/m19_release.json`）|
 | **审计表** | 21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log / scheduler_tasks 等）|
 | **错误码** | 70+ 统一 reason_code（可统计、可回放）|
-| **发布清单** | M14 ~ M18 release.json 已归档（`docs/50_release/`）|
+| **发布清单** | M12 ~ M19 release.json 已归档（`docs/50_release/`）|
 
 ### 里程碑进度
 
@@ -366,6 +363,8 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | M16 | Canon 治理 API 强化 / 长期记忆分页 / 调度器任务持久化 | ✅ DONE |
 | M17 | 监控面板 v3 前端重建（React + Vite SPA：Overview / Sessions / Trace / Metrics）| ✅ DONE |
 | M18 | 监控面板 v3 后端 API 扩展（健康聚合 / 会话列表 / 链路节点详情 / 指标时序）| ✅ DONE |
+| M19 | M17/M18 审查缺陷修复（P0/P1 修复、obs 路由重构、集成测试补齐）| ✅ DONE |
+| M20 | Agent 心跳健康检测 + 压缩前静默保存 + Episodic 混合检索增强 | ✅ DONE |
 
 ---
 

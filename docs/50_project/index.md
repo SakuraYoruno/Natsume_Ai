@@ -1,7 +1,8 @@
 受众：MASTER
 标题：Flow 资产追溯索引（按环境）
 
-版本：v0.1
+版本：v0.2
+日期：2026-03-04
 定位：记录 flows/active.pointer 指向的“当前生效 Flow 导出物”，以及最小变更摘要；用于与 active.pointer 形成双锚点，支撑 T-Flow-02（索引一致性）回归口径。
 
 引用：
@@ -21,24 +22,24 @@
 ## 2. 当前生效版本（应与 flows/active.pointer 完全一致）
 
 ### 2.1 dev
-- current_export：<填入 flows/exports 下的相对路径或文件名>
-- updated_ts：<YYYY-MM-DD>
-- change_summary：<一句话，≤80 字>
+- current_export：flows/exports/2026-02-28_dev_skeleton/flow.json
+- updated_ts：2026-02-28
+- change_summary：bootstrap skeleton flow（dev）
 - refs：FR-FLOW-001；TASK-0002；T-Flow-01~02
 
 ### 2.2 staging
-- current_export：<填入 flows/exports 下的相对路径或文件名>
-- updated_ts：<YYYY-MM-DD>
-- change_summary：<一句话，≤80 字>
+- current_export：flows/exports/2026-02-28_staging_skeleton/flow.json
+- updated_ts：2026-02-28
+- change_summary：bootstrap skeleton flow（staging）
 - refs：FR-FLOW-001；TASK-0002；T-Flow-01~02
 
 ### 2.3 prod
-- current_export：<填入 flows/exports 下的相对路径或文件名>
-- updated_ts：<YYYY-MM-DD>
-- change_summary：<一句话，≤80 字>
+- current_export：flows/exports/2026-02-28_prod_skeleton/flow.json
+- updated_ts：2026-02-28
+- change_summary：bootstrap skeleton flow（prod）
 - refs：FR-FLOW-001；TASK-0002；T-Flow-01~02
 
 ---
 
 ## 3. 变更记录（可选但建议）
-- <YYYY-MM-DD>：<环境>：<current_export 变化：old → new>（refs：TASK-xxxx / T-Flow-xx）
+- 2026-03-04：dev/staging/prod：补全 current_export 与 active.pointer 一致性占位信息（refs：TASK-0002 / T-Flow-01~02）

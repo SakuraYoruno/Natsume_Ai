@@ -47,7 +47,7 @@
   "api_endpoints": [
     {"endpoint": "GET /obs/services/health", "status": "implemented", "module": "obs_routes.py + service_health_aggregator.py"},
     {"endpoint": "GET /obs/sessions",        "status": "implemented", "module": "obs_routes.py + session_query.py"},
-    {"endpoint": "GET /obs/trace/{request_id}/nodes", "status": "implemented", "module": "obs_routes.py + trace_node_builder.py"},
+    {"endpoint": "GET /obs/trace/{request_id}", "status": "implemented", "module": "obs_routes.py + trace_node_builder.py"},
     {"endpoint": "GET /obs/metrics/timeseries", "status": "implemented", "module": "obs_routes.py + metrics_timeseries.py"}
   ],
   "new_modules": [

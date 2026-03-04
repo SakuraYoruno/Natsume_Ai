@@ -4035,7 +4035,7 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 - 有向连线：React Flow 内置 Edge，支持分支合并，箭头样式。
 - 节点点击侧边面板（NodeDetailPanel）：展示 input/output（JSON 格式化 + 折叠/展开）、status、reason_code、时间戳、side（Host/Edge）、model_id（LLM 节点）。
 - 顶部工具栏：request_id 输入框 + 查询按钮 + 全屏切换。
-- 对接 `GET /obs/trace/{request_id}/nodes` API。
+- 对接 `GET /obs/trace/{request_id}` API。
 
 #### 29.6.2 验收测试编号
 
@@ -4163,7 +4163,7 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 
 #### 29.8.3 链路节点详情 API（§OBS-V3-API-003）
 
-**端点**：`GET /obs/trace/{request_id}/nodes`
+**端点**：`GET /obs/trace/{request_id}`
 
 **查询参数**：`include_io`（默认 true；false 时不返回 input/output 字段）
 
@@ -4277,3 +4277,4 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 | `frontend_api_integration_verified` | 前端切换真实 API 验证通过 |
 | `zero_regressions` | failed=0 |
 | `total_tests_passed` | ≥ 1575 |
+

@@ -533,7 +533,7 @@ FR-OBS-009 会话列表 API
   - 空结果时返回 results=[] 而非 404。
 
 FR-OBS-010 链路节点详情 API
-- 描述：提供 GET /obs/trace/{request_id}/nodes 端点，返回指定请求的结构化节点列表，每个节点包含：node_id、node_type（intent/governor/skill/asr/tts/vts/llm/memory/bond 等）、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input（JSON）、output（JSON）、reason_code（可选）、parent_node_id（支持树形结构）、side（host/edge）。
+- 描述：提供 GET /obs/trace/{request_id} 端点，返回指定请求的结构化节点列表，每个节点包含：node_id、node_type（intent/governor/skill/asr/tts/vts/llm/memory/bond 等）、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input（JSON）、output（JSON）、reason_code（可选）、parent_node_id（支持树形结构）、side（host/edge）。
 - 关键约束：
   - 节点顺序按 start_ts_ms 排序；
   - input/output 字段大小限制 ≤64KB（超出截断并标注 truncated=true）；
@@ -826,7 +826,7 @@ M17-F M17 发布清单 — **DONE**（2026-03-04：React+Vite SPA 构建成功�
 M18 监控面板 v3 后端 API 扩展（为 M17 提供数据支撑）：
 M18-A 全服务健康聚合 API：FR-OBS-008（GET /obs/services/health — 聚合双端所有服务健康状态 + 延迟 + 版本）— **DONE**（2026-03-04）
 M18-B 会话列表 API：FR-OBS-009（GET /obs/sessions — 分页会话列表 + 过滤 + 统计摘要）— **DONE**（2026-03-04）
-M18-C 链路节点详情 API：FR-OBS-010（GET /obs/trace/{request_id}/nodes — 结构化节点列表含入参/出参/耗时/状态）— **DONE**（2026-03-04）
+M18-C 链路节点详情 API：FR-OBS-010（GET /obs/trace/{request_id} — 结构化节点列表含入参/出参/耗时/状态）— **DONE**（2026-03-04）
 M18-D 指标时序 API：FR-OBS-011（GET /obs/metrics/timeseries — 多维度时序数据：请求量/拒绝率/延迟分位数）— **DONE**（2026-03-04）
 M18-E M18 发布清单 — **DONE**（2026-03-04：26 个新增测试全部通过；1577 全量通过；m18_release.json 已生成）
 
@@ -845,3 +845,4 @@ M18-E M18 发布清单 — **DONE**（2026-03-04：26 个新增测试全部通�
 
 建议每个需求条目落地后，都在 Trace 表中写：
 - FR-xxx ↔ DevSpec 章节 ↔ 测试编号（T-xx） ↔ 日志字段/表
+

@@ -2751,7 +2751,7 @@ TASK-XXXX 标题
   3. **有向连线**：React Flow 内置 Edge，支持分支合并，箭头样式；
   4. **节点点击侧边面板**（NodeDetailPanel 组件）：展示 input/output（JSON 格式化 + 折叠/展开）、status、reason_code、时间戳、side（Host/Edge）、model_id（LLM 节点）；
   5. **顶部工具栏**：request_id 输入框 + 查询按钮 + 全屏切换（Lucide React 图标）；
-  6. 对接 `/obs/trace/{request_id}/nodes` API（开发阶段使用 mock，含完整 ASR→LLM×N→TTS→VTS 链路）。
+  6. 对接 `/obs/trace/{request_id}` API（开发阶段使用 mock，含完整 ASR→LLM×N→TTS→VTS 链路）。
 - 输入：TASK-0182 完成；DevSpec §OBS-V3-004；FR-OBS-006；React Flow 文档。
 - 输出：
   - `host_brain/app/monitor_ui/src/pages/Trace.jsx`（完整实现，含 React Flow 画布）；
@@ -2844,10 +2844,10 @@ TASK-XXXX 标题
 ### TASK-0190 M18-C 链路节点详情 API
 - 状态：DONE
 - 任务描述：
-  实现 `GET /obs/trace/{request_id}/nodes` 端点，从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建结构化节点列表；每个节点包含 node_id、node_type、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input、output、reason_code、parent_node_id、side；支持 `?include_io=false` 参数；input/output 超 64KB 截断并标注 truncated=true。
+  实现 `GET /obs/trace/{request_id}` 端点，从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建结构化节点列表；每个节点包含 node_id、node_type、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input、output、reason_code、parent_node_id、side；支持 `?include_io=false` 参数；input/output 超 64KB 截断并标注 truncated=true。
 - 输入：DevSpec §OBS-V3-API-003；FR-OBS-010；现有审计链 schema（intent_log/governor_log/skill_exec_log）。
 - 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/trace/{request_id}/nodes` 端点）；
+  - `host_brain/app/obs_routes.py`（新增 `/obs/trace/{request_id}` 端点）；
   - `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder：多源日志聚合 + 节点树构建）；
   - `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）。
 - 验收标准：
@@ -3108,6 +3108,7 @@ TASK-XXXX 标题
   - `host_brain/audit/migrations/0021_episodic_fts5.sql`（新增）；
   - `tests/unit/test_recall_fusion_hybrid.py`（新增）。
 - 关联需求/测试：FR-MEM-003；FR-MEM-005；T-RCL-HYB-01~06。
+
 
 
 

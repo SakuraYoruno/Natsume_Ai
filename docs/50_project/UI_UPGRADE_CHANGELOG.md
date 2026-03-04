@@ -92,7 +92,7 @@
 |------|------|
 | `GET /obs/services/health` | 聚合双端所有服务健康状态 |
 | `GET /obs/sessions` | 分页会话列表 + 过滤 |
-| `GET /obs/trace/{request_id}/nodes` | 结构化节点列表（含入参/出参） |
+| `GET /obs/trace/{request_id}` | 结构化节点列表（含入参/出参） |
 | `GET /obs/metrics/timeseries` | 多维度时序数据 |
 
 ### 文件变更（规划）
