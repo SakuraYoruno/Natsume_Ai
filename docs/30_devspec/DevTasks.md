@@ -2254,5 +2254,96 @@ TASK-XXXX 标题
 | M11-E | FR-PROACTIVE-001/002（主动对话触发策略） | P2 | M11-A DONE |
 | M11-F | FR-FOCUS-001（Focus Mode 状态切换） | P3 | M11-E DONE |
 
-> 注：PRD.md 里程碑 M4 已标记 DONE（2026-03-03），但 DevSpec/DevTasks 层面 M11 对应的任务卡尚未拆解。
 > M11 开发前需先完成 DevSpec §21（调度器）+ §22（桌面留言）+ §23（梦境/日记/主动对话）的工程契约拆解。
+
+---
+
+## M11-A 定时调度器（Scheduler）任务卡
+
+### TASK-0147 M11-A-1：DevSpec §21~§23 工程契约拆解
+- 状态：DONE（2026-03-04）
+- 任务描述：在 DevSpec.md 中追加 §21（调度器）、§22（桌面留言）、§23（梦境/日记/主动对话/Focus Mode）工程契约，包含模块边界、Schema、SQLite 表、接口契约、错误码、测试编号。
+- 输入：PRD.md §4.20~§4.25（FR-SCHED/FR-DESKTOP/FR-DREAM/FR-DIARY/FR-PROACTIVE/FR-FOCUS）。
+- 输出：DevSpec.md §21~§23 完整工程契约。
+- 涉及文件路径：docs/30_devspec/DevSpec.md。
+- 关联需求/测试：FR-SCHED-001/002；FR-DESKTOP-001/002；FR-DREAM-001/002；FR-DIARY-001；FR-PROACTIVE-001/002；FR-FOCUS-001。
+
+### TASK-0148 M11-A-2：SchedulerEngine 核心实现
+- 状态：TODO
+- 任务描述：实现 `SchedulerEngine`（任务注册/注销/tick/健康状态）+ `SchedulerStore`（SQLite 持久化）+ `ScheduledTask`/`TaskHealth` Schema。
+- 输入：DevSpec §21.1~§21.5。
+- 输出：
+  - `host_brain/scheduler/scheduler_engine.py`：`SchedulerEngine` 类，含 `register_task / unregister_task / enable_task / disable_task / tick / get_health / list_health / _build_system_intent`；
+  - `host_brain/scheduler/scheduler_models.py`：`ScheduledTask`、`TaskHealth`、`SchedulerConfig` dataclass；
+  - `host_brain/scheduler/scheduler_store.py`：`SchedulerStore`（SQLite CRUD，`scheduler_tasks` 表）；
+  - `host_brain/scheduler/__init__.py`：导出 `SchedulerEngine`。
+- 验收标准：
+  - T-SCHED-01：注册任务后 tick() 在正确时间触发，生成 system_initiated_intent；
+  - T-SCHED-02：sys_mode=GAMING 时 NORMAL 优先级任务被跳过；
+  - T-SCHED-03：sys_mode=SLEEP 时 HIGH 优先级白名单任务正常触发；
+  - T-SCHED-04：连续失败 MAX_ERROR_COUNT 次后 status=SUSPENDED；
+  - T-SCHED-06：注销任务后 tick() 不再触发；
+  - T-SCHED-07：system_initiated_intent 中 proposer_node_id="scheduler"。
+- 涉及文件路径：host_brain/scheduler/scheduler_engine.py；host_brain/scheduler/scheduler_models.py；host_brain/scheduler/scheduler_store.py；host_brain/scheduler/__init__.py。
+- 关联需求/测试：FR-SCHED-001；T-SCHED-01/02/03/04/06/07。
+
+### TASK-0149 M11-A-3：Scheduler REST API + 健康端点
+- 状态：TODO
+- 任务描述：实现 `/scheduler/tasks` CRUD + `/scheduler/health` 端点，接入 FastAPI 路由。
+- 输入：DevSpec §21.6；TASK-0148 完成。
+- 输出：
+  - `host_brain/scheduler/scheduler_routes.py`：8 个端点（POST/GET/PATCH/DELETE tasks + enable/disable + GET health）；
+  - `host_brain/app/fastapi_app.py`：注册 scheduler_router。
+- 验收标准：
+  - T-SCHED-05：/scheduler/health 返回所有任务健康快照，字段完整；
+  - 全量测试无回归（≥1090 passed）。
+- 涉及文件路径：host_brain/scheduler/scheduler_routes.py；host_brain/app/fastapi_app.py。
+- 关联需求/测试：FR-SCHED-002；T-SCHED-05。
+
+### TASK-0150 M11-A-4：Scheduler 单元测试
+- 状态：TODO
+- 任务描述：编写 T-SCHED-01~07 全量单元测试。
+- 输入：DevSpec §21.9；TASK-0148/0149 完成。
+- 输出：`tests/unit/test_scheduler_engine.py`（T-SCHED-01~07，含 sys_mode 门控、连续失败暂停、system_initiated_intent 字段校验）。
+- 验收标准：T-SCHED-01~07 全部通过；全量测试 ≥1097 passed（新增 7 个）。
+- 涉及文件路径：tests/unit/test_scheduler_engine.py。
+- 关联需求/测试：FR-SCHED-001/002；T-SCHED-01~07。
+
+### TASK-0151 M11-B-1：DesktopMessageSkill 实现
+- 状态：TODO（前置：TASK-0148 DONE）
+- 任务描述：实现 `DesktopMessageSkill`（create/update/delete/undo）+ 安全路径校验 + manifest 生成。
+- 输入：DevSpec §22.1~§22.6。
+- 输出：
+  - `host_brain/skills/desktop_message/desktop_message_skill.py`；
+  - `host_brain/skills/desktop_message/desktop_message_models.py`；
+  - `host_brain/skills/desktop_message/path_validator.py`；
+  - `tests/unit/test_desktop_message_skill.py`（T-DESK-01~08）。
+- 验收标准：T-DESK-01~08 全部通过；全量测试 ≥1105 passed。
+- 涉及文件路径：host_brain/skills/desktop_message/；tests/unit/test_desktop_message_skill.py。
+- 关联需求/测试：FR-DESKTOP-001/002；T-DESK-01~08。
+
+### TASK-0152 M11-C/D-1：DreamSkill + DiarySkill 实现
+- 状态：TODO（前置：TASK-0148 DONE）
+- 任务描述：实现 `DreamSkill`（Episodic 读取 → LLM 生成 → 写入 Episodic）+ `DiarySkill`（当日对话读取 → LLM 生成 → 写文件 + Episodic）。
+- 输入：DevSpec §23.1~§23.2。
+- 输出：
+  - `host_brain/skills/dream/dream_skill.py`；
+  - `host_brain/skills/diary/diary_skill.py`；
+  - `tests/unit/test_dream_skill.py`（T-DREAM-01~05）；
+  - `tests/unit/test_diary_skill.py`（T-DIARY-01~05）。
+- 验收标准：T-DREAM-01~05 + T-DIARY-01~05 全部通过；全量测试 ≥1115 passed。
+- 涉及文件路径：host_brain/skills/dream/；host_brain/skills/diary/；tests/unit/test_dream_skill.py；tests/unit/test_diary_skill.py。
+- 关联需求/测试：FR-DREAM-001/002；FR-DIARY-001/002；T-DREAM-01~05；T-DIARY-01~05。
+
+### TASK-0153 M11-E/F-1：ProactiveSkill + Focus Mode 实现
+- 状态：TODO（前置：TASK-0148 DONE）
+- 任务描述：实现 `ProactiveSkill`（条件校验 → LLM 生成 → 推送）+ `SysModeEnum.FOCUS` 扩展 + Focus Mode 行为矩阵。
+- 输入：DevSpec §23.3~§23.4。
+- 输出：
+  - `host_brain/skills/proactive/proactive_skill.py`；
+  - `host_brain/core/sys_mode.py`（新增 FOCUS 枚举值）；
+  - `tests/unit/test_proactive_skill.py`（T-PROACT-01~06）；
+  - `tests/unit/test_focus_mode.py`（T-FOCUS-01~04）。
+- 验收标准：T-PROACT-01~06 + T-FOCUS-01~04 全部通过；全量测试 ≥1125 passed。
+- 涉及文件路径：host_brain/skills/proactive/；host_brain/core/sys_mode.py；tests/unit/test_proactive_skill.py；tests/unit/test_focus_mode.py。
+- 关联需求/测试：FR-PROACTIVE-001/002；FR-FOCUS-001；T-PROACT-01~06；T-FOCUS-01~04。
