@@ -2457,4 +2457,26 @@ TASK-XXXX 标题
 - 验收标准：T-DISTILL-B-01~10 全部通过；蒸馏结果只生成 pending 提案不直接写 SSOT（FR-MEM-DISTILL-001）；每次循环最多 5 个提案（FR-MEM-DISTILL-002）；幂等保护；调度器 CRON 任务配置合法；全量测试 1324 passed。
 - 关联需求/测试：FR-MEM-DISTILL-001/002；T-DISTILL-B-01~10。
 
+---
+
+### TASK-0164 M13-C Bond 事件与 BondDynamicsWriter 端到端集成
+- 状态：DONE（2026-03-04，bond_dynamics.py 更新；T-BOND-INTEG-01~08 18 passed）
+- 任务描述：将 BondStageEngine.apply_event 接入 BondDynamicsWriter.apply_update 成功路径，实现端到端联动；可选注入（stage_engine=None 向后兼容）；stage_engine 异常不影响主流程（非致命）；event 中新增 stage_transition 字段。
+- 输入：BondDynamicsWriter（M13-A 前）；BondStageEngine（M13-A）。
+- 输出：
+  - `host_brain/bond/bond_dynamics.py`（新增 stage_engine 可选注入 + apply_event 调用）；
+  - `tests/integration/test_bond_dynamics_stage_integration.py`（T-BOND-INTEG-01~08，18 passed）。
+- 验收标准：T-BOND-INTEG-01~08 全部通过；向后兼容（无 stage_engine 时正常工作）；stage_engine 异常非致命；全量测试 1342 passed。
+- 关联需求/测试：FR-BOND-001/002；T-BOND-INTEG-01~08。
+
+---
+
+### TASK-0165 M13-D M13 发布清单
+- 状态：DONE（2026-03-04，m13_release.json NEW）
+- 任务描述：生成 M13 发布清单，记录所有里程碑状态、核心文件 SHA-256 hash、测试通过数、质量门禁。
+- 输入：M13-A/B/C 全部完成；全量测试 1342 passed。
+- 输出：`docs/50_release/m13_release.json`（4 个里程碑 DONE；4 个核心文件 hash；102 个 M13 测试通过；1342 全量通过）。
+- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
+- 关联需求/测试：M13-A/B/C/D 全部 DONE。
+
 

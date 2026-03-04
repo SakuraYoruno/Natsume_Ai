@@ -1,0 +1,98 @@
+{
+  "schema_version": "Nastume.release.v1",
+  "milestone": "M13",
+  "release_name": "Bond 阶段晋级 + 长期记忆蒸馏 + Bond 端到端联动",
+  "git_commit": "22ab33c",
+  "generated_at": "2026-03-04T11:53:00Z",
+  "ts_ms": 1772601180000,
+  "milestones": [
+    {
+      "id": "M13-A",
+      "name": "Bond 阶段积分 + 自动晋级引擎 + REST API",
+      "fr_refs": [
+        "FR-BOND-001",
+        "FR-BOND-002",
+        "FR-BOND-003"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0162"
+      ]
+    },
+    {
+      "id": "M13-B",
+      "name": "长期记忆蒸馏强化（EpisodicMemory → Canon 提案）",
+      "fr_refs": [
+        "FR-MEM-DISTILL-001",
+        "FR-MEM-DISTILL-002"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0163"
+      ]
+    },
+    {
+      "id": "M13-C",
+      "name": "Bond 事件与 BondDynamicsWriter 端到端集成",
+      "fr_refs": [
+        "FR-BOND-001",
+        "FR-BOND-002"
+      ],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0164"
+      ]
+    },
+    {
+      "id": "M13-D",
+      "name": "M13 发布清单",
+      "fr_refs": [],
+      "status": "DONE",
+      "tasks": [
+        "TASK-0165"
+      ]
+    }
+  ],
+  "core_files": {
+    "total": 4,
+    "missing": 0,
+    "missing_files": [],
+    "hashes": {
+      "host_brain/bond/bond_stage_engine.py": "8d617fd809effcdb4c783e829260a08c33889149122c06bd7150310ca3d7e5ee",
+      "host_brain/app/bond_routes.py": "97b6d493ab6ad46dd42067ab393ade843e9b01d2d4b1e6fc26952f14b3a3b5a8",
+      "host_brain/bond/bond_dynamics.py": "14576fe8af900d7292a9b8468cbaa2462767e21216b91471135710c99cd6b227",
+      "host_brain/memory/long_term_distiller.py": "b5c2e028430ad069eb5085e9764dc0f615a60595c90859435c53bc1d641e7728"
+    }
+  },
+  "test_results": {
+    "m13_tests": {
+      "files": [
+        "tests/unit/test_bond_stage_engine.py",
+        "tests/integration/test_bond_routes_api.py",
+        "tests/unit/test_long_term_distiller.py",
+        "tests/integration/test_bond_dynamics_stage_integration.py"
+      ],
+      "passed": 102,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success": true,
+      "summary": "30 + 18 + 36 + 18 = 102 passed"
+    },
+    "all_tests": {
+      "passed": 1342,
+      "failed": 0,
+      "skipped": 2,
+      "errors": 0,
+      "success": true,
+      "summary": "1342 passed, 2 skipped, 2 warnings in 15.72s"
+    }
+  },
+  "quality_gates": {
+    "all_core_files_present": true,
+    "m13_tests_pass": true,
+    "all_tests_pass": true,
+    "zero_regressions": true
+  },
+  "release_ready": true
+}
