@@ -38,6 +38,7 @@ from host_brain.governor.schemas import DECISION_APPROVE
 from host_brain.observability.cross_timeline import build_cross_timeline
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
+from host_brain.scheduler.scheduler_routes import router as scheduler_router
 
 
 # HTTP契约模型定义
@@ -218,6 +219,11 @@ app.include_router(web_ui_router, prefix="/api")
 # 注册 Canon 治理 API 路由（M10-A TASK-0118: Canon 提案审核 REST API）
 # ---------------------------------------------------------------------------
 app.include_router(canon_router)
+
+# ---------------------------------------------------------------------------
+# 注册 Scheduler REST API 路由（M11-A TASK-0149: 定时调度器任务管理）
+# ---------------------------------------------------------------------------
+app.include_router(scheduler_router)
 
 # ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
