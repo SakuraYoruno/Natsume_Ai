@@ -1,0 +1,12 @@
+{
+  "backend": "http",
+  "collection": "canon",
+  "collection_count": 4,
+  "docs_synced": 4,
+  "issues": [],
+  "issues_count": 0,
+  "style_docs_synced": 1,
+  "success": true,
+  "vector_dim": 384,
+  "world_docs_synced": 3
+}
