@@ -2888,14 +2888,14 @@ TASK-XXXX 标题
 
 ---
 
-## M19 审查报告缺陷修复（P0/P1）（TODO）
+## M19 审查报告缺陷修复（P0/P1）（DONE）
 
 > 目标：修复 M17/M18 代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中识别的全部 P0 级 Bug 和 P1 级架构问题，消除前后端字段名不一致、Route/Service 层脱节、全量数据加载等核心缺陷，提升监控面板可靠性与可维护性。
 > 依赖：M17、M18 全部 DONE。
 > 关联审查项：BUG-BE-001、BUG-BE-002、BUG-FE-001、WARN-FE-004、WARN-FE-005、WARN-FE-006、WARN-BE-001~003、WARN-BE-005、WARN-TEST-001~002。
 
 ### TASK-0193 M19-A 修复 Trace 降级路径 AttributeError（BUG-BE-001）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   修复 `obs_routes.py` 中 `GET /obs/trace/{request_id}` 端点的降级路径（`row is None` 分支）：将直接属性访问 `ledger.governor_log` 改为正确的方法调用 `ledger.fetch_by_time_range("governor_log", 0, _now_ms())`，消除 `AttributeError` → 500 错误。同步检查同一端点中其他可能的直接属性访问，确保全部改为方法调用。
 - 输入：`host_brain/app/obs_routes.py`；`host_brain/audit/sqlite_ledger.py`（确认可用方法签名）；审查报告 BUG-BE-001。
@@ -2910,7 +2910,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-010；BUG-BE-001；T-OBS-ROUTE-TRACE-FALLBACK-01~03。
 
 ### TASK-0194 M19-B 修复 Overview 页字段名对齐（BUG-FE-001 + WARN-FE-004）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   修复前端 Overview 页两处字段名不匹配问题：
   1. **BUG-FE-001**：`Overview.jsx` 汇总统计行将 `data?.summary` 改为直接读取顶层字段 `data?.total / data?.up / data?.degraded / data?.down`，并将显示标签从 `healthy` 对齐为 `up`；
@@ -2930,7 +2930,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-003；FR-OBS-008；BUG-FE-001；WARN-FE-004。
 
 ### TASK-0195 M19-C 修复 Trace API 路径 + Sessions 翻页闭包（WARN-FE-006 + WARN-FE-005）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   修复前端两处功能性问题：
   1. **WARN-FE-006**：`monitor_ui/src/api/obs.js` 中 `fetchTraceNodes` 的调用路径从 `/obs/trace/${requestId}/nodes` 修正为 `/obs/trace/${requestId}`，与后端路由对齐；同步移除 Mock 分支中 `id.startsWith('mock')` 的特殊处理，改为统一的 `requestId === 'mock'` 开关；
@@ -2950,7 +2950,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-006；FR-OBS-009；WARN-FE-006；WARN-FE-005。
 
 ### TASK-0196 M19-D 重构 obs_routes.py 调用 Service 层（WARN-BE-001~003）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   消除 `obs_routes.py` 与 Service 层的三组平行实现，将 Route 层改为调用已有 Service 层：
   1. **WARN-BE-001**：`GET /obs/services/health` 端点改为调用 `ServiceHealthAggregator.aggregate(side=side)`，删除路由层内联的聚合逻辑；
@@ -2971,7 +2971,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-008~011；WARN-BE-001；WARN-BE-002；WARN-BE-003；NFR-MAINT-001。
 
 ### TASK-0197 M19-E 修复 TraceNodeBuilder 全量加载 + 并行分支推断（BUG-BE-002 + WARN-BE-005）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   修复 `trace_node_builder.py` 的两个核心问题：
   1. **BUG-BE-002**：`_fetch_intent_nodes`、`_fetch_governor_nodes`、`_fetch_skill_nodes`、`_fetch_voice_nodes` 四个方法改为按 `request_id` 直接过滤查询（在 SQL 层过滤而非全量加载后内存过滤）。需在 `SQLiteLedger` 中新增 `fetch_by_request_id(table, request_id)` 方法（或扩展现有 `fetch_by_time_range` 支持 `request_id` 过滤参数），并在 `sqlite_ledger.py` 中为相关表的 `request_id` 列补充索引（migration 文件）；
@@ -2990,7 +2990,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-010；BUG-BE-002；WARN-BE-005；T-OBS-TRACE-01~10。
 
 ### TASK-0198 M19-F 补充 obs_routes.py 集成测试（WARN-TEST-001~002）
-- 状态：TODO
+- 状态：DONE
 - 任务描述：
   补充两类测试覆盖缺口：
   1. **WARN-TEST-002**：为 `obs_routes.py` 的 4 个端点新增集成测试（使用 FastAPI `TestClient`），覆盖正常路径、参数过滤、边界条件（空结果、不存在 ID、参数缺失）；
