@@ -681,31 +681,13 @@ async def metrics() -> MetricsResponse:
 
 
 # ---------------------------------------------------------------------------
-# Web UI 面板入口（TASK-0066: 链路可视化面板）
+# Web UI 面板入口（M17: 已升级为 React SPA，旧 panel.html 已移除）
 # ---------------------------------------------------------------------------
-# 面板 HTML 缓存（避免每次请求读磁盘）
-_panel_html_cache: Optional[str] = None
-_panel_html_mtime: float = 0.0
-
-
 @app.get("/panel")
-async def panel_page() -> Response:
-    """链路可视化面板入口 — 返回 HTML 页面（带缓存）"""
-    global _panel_html_cache, _panel_html_mtime
-    panel_path = os.path.join(os.path.dirname(__file__), "static", "panel.html")
-    if not os.path.isfile(panel_path):
-        return Response(
-            content="<html><body><h1>Panel not found</h1><p>Static file panel.html missing.</p></body></html>",
-            media_type="text/html",
-            status_code=404,
-        )
-    # 检查文件是否更新（开发模式热刷新友好）
-    mtime = os.path.getmtime(panel_path)
-    if _panel_html_cache is None or mtime != _panel_html_mtime:
-        with open(panel_path, "r", encoding="utf-8") as f:
-            _panel_html_cache = f.read()
-        _panel_html_mtime = mtime
-    return Response(content=_panel_html_cache, media_type="text/html")
+async def panel_page():
+    """监控面板入口 — 重定向到 M17 React SPA"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/monitor/index.html", status_code=301)
 
 
 # ---------------------------------------------------------------------------
