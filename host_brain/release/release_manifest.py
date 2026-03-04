@@ -931,3 +931,90 @@ def generate_m10d_manifest(
         "generated_at": generated_at,
         "ts_ms": now_value,
     }
+
+
+# ---------------------------------------------------------------------------
+# M10-E: _CANON_HOTWORDS_CACHE TTL 自动失效（F-42）发布清单生成
+# ---------------------------------------------------------------------------
+
+def generate_m10e_manifest(
+    *,
+    root: str | Path,
+    test_passed_count: int,
+    latency_baseline_snapshot: dict[str, Any] | None = None,
+    service_registry_snapshot: list[dict[str, Any]] | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    """Generate M10-E release manifest.
+
+    M10-E 新增：_CANON_HOTWORDS_CACHE 增加 TTL 自动失效（F-42）。
+    - _HotwordsCache 类：线程安全 TTL 缓存（默认 300s）
+    - inject_canon_hotwords() 更新缓存并记录 TTL 日志
+    - get_canon_hotwords() 返回 TTL 内的热词副本
+
+    Locks:
+    - git commit hash
+    - migration file hashes（与 M10-D 相同，M10-E 无新 migration）
+    - world_canon_asset_hashes
+    - asr_hash（edge_client/senses/asr.py，含 _HotwordsCache + TTL 实现）
+    - hotwords_cache_ttl_test_hash（tests/unit/test_hotwords_cache_ttl.py）
+    - devtasks_hash / requirements_trace_hash / review_report_hash
+    - test_passed_count（1090）
+    - generated_at
+    """
+    repo_root = Path(root).resolve()
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    generated_at = datetime.fromtimestamp(now_value / 1000, tz=timezone.utc).isoformat()
+
+    git_commit_hash = _get_git_commit_hash(repo_root)
+
+    # ── migration file hashes（M10-E 无新 migration，复用 M10-D 目录）─────────
+    migration_hashes: dict[str, str] = {}
+    for migration_dir in M9_MIGRATION_DIRS:
+        dir_path = repo_root / migration_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _MIGRATION_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            migration_hashes[rel] = _digest_file(file_path)
+
+    # ── World Canon 种子条目 hashes ──────────────────────────────────────────
+    world_canon_asset_hashes: dict[str, str] = {}
+    for canon_dir in M9_CANON_ASSET_DIRS:
+        dir_path = repo_root / canon_dir
+        if not dir_path.is_dir():
+            continue
+        for file_path in sorted(dir_path.iterdir()):
+            if file_path.suffix.lower() not in _CANON_EXTS:
+                continue
+            rel = _normalize(file_path.relative_to(repo_root))
+            world_canon_asset_hashes[rel] = _digest_file(file_path)
+
+    def _optional_hash(rel_path: str) -> str | None:
+        abs_path = repo_root / rel_path
+        return _digest_file(abs_path) if abs_path.exists() else None
+
+    return {
+        "milestone": "M10-E",
+        "git_commit_hash": git_commit_hash,
+        "migration_hashes": migration_hashes,
+        "migration_file_count": len(migration_hashes),
+        "world_canon_asset_hashes": world_canon_asset_hashes,
+        "world_canon_asset_count": len(world_canon_asset_hashes),
+        "asr_hash": _optional_hash("edge_client/senses/asr.py"),
+        "hotwords_cache_ttl_test_hash": _optional_hash(
+            "tests/unit/test_hotwords_cache_ttl.py"
+        ),
+        "devtasks_hash": _optional_hash("docs/30_devspec/DevTasks.md"),
+        "requirements_trace_hash": _optional_hash("docs/60_trace/requirements_trace.md"),
+        "review_report_hash": _optional_hash(
+            "docs/40_agents/full_code_review_report_2026-03-04-v7.md"
+        ),
+        "test_passed_count": int(test_passed_count),
+        "latency_baseline_snapshot": latency_baseline_snapshot,
+        "service_registry_snapshot": service_registry_snapshot or [],
+        "generated_at": generated_at,
+        "ts_ms": now_value,
+    }

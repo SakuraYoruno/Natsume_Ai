@@ -2144,3 +2144,54 @@ TASK-XXXX 标题
   - 聚焦 E2E+RPC+Sandbox + manifest 回归通过（102 passed）。
 - 涉及文件路径：tests/e2e/test_wechat_vts_voice_rpc_e2e.py（新增）；host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
 - 关联需求/测试：FR-CHANNEL-001；FR-VOICE-001；T-E2E-RPC-01。
+
+---
+
+## M10-E：_CANON_HOTWORDS_CACHE 增加 TTL 自动失效（F-42）
+
+### TASK-0141 asr.py：_HotwordsCache 类实现（TTL 自动失效）
+- 状态：DONE（2026-03-04）
+- 任务描述：在 `edge_client/senses/asr.py` 中新增 `_HotwordsCache` 类，为模块级热词缓存增加 TTL 自动失效机制，避免 SSOT 更新后缓存长期不刷新。
+- 输入：risk_registry.md（F-42）；edge_client/senses/asr.py（M10-B 实现）。
+- 输出：
+  - `_HotwordsCache` 类：`set()/get()/clear()/is_valid()/age_s()` 方法，`threading.Lock` 保护，TTL 默认 300s；
+  - `_CANON_HOTWORDS_CACHE = _HotwordsCache(ttl_s=300.0)` 模块级实例；
+  - `inject_canon_hotwords()` 更新：注入后调用 `_CANON_HOTWORDS_CACHE.set(hotwords)` 并记录 TTL 日志；
+  - `get_canon_hotwords()` 更新：调用 `_CANON_HOTWORDS_CACHE.get()` 返回 TTL 内副本。
+- 验收标准：
+  - TTL 未到期时 `get()` 返回完整热词列表；
+  - TTL 到期后 `get()` 返回空列表；
+  - `clear()` 立即使缓存失效；
+  - 多线程并发 `set()` 不引发竞态。
+- 涉及文件路径：edge_client/senses/asr.py。
+- 关联需求/测试：FR-ASR-001；NFR-PERF-001；T-HW-TTL-01~05。
+
+### TASK-0142 tests：test_hotwords_cache_ttl.py（T-HW-TTL-01~05）
+- 状态：DONE（2026-03-04）
+- 任务描述：新增 `_HotwordsCache` TTL 专项测试，覆盖 TTL 有效期内/到期后行为、`is_valid()` 状态转换、`clear()` 立即失效、并发写入安全。
+- 输入：edge_client/senses/asr.py（TASK-0141 实现后）。
+- 输出：
+  - `tests/unit/test_hotwords_cache_ttl.py`（新增）：T-HW-TTL-01~05（5 tests）；
+  - 使用 `unittest.mock.patch("time.monotonic")` 模拟时间推进，无需真实等待。
+- 验收标准：
+  - 5 个测试用例全部通过；
+  - 不依赖真实时间等待（mock time.monotonic）；
+  - 全量测试 1090 passed, 2 skipped。
+- 涉及文件路径：tests/unit/test_hotwords_cache_ttl.py（新增）。
+- 关联需求/测试：FR-ASR-001；T-HW-TTL-01~05。
+
+### TASK-0143 M10-E 发布收口（v7 审查报告 + m10e_release.json）
+- 状态：DONE（2026-03-04）
+- 任务描述：生成 M10-E 发布清单与第七版审查报告，完成 M10-E 里程碑收口。
+- 输入：TASK-0141~0142 完成后；release_manifest.py；docs/60_trace/requirements_trace.md。
+- 输出：
+  - `release/manifests/m10e_release.json`（新增）：锁定 asr.py hash + test_hotwords_cache_ttl.py hash + test_passed_count=1090；
+  - `docs/40_agents/full_code_review_report_2026-03-04-v7.md`（新增）：第七版审查报告；
+  - `docs/60_trace/requirements_trace.md` 扩展：R-109（F-42 TTL 缓存）状态 DONE；
+  - `docs/30_devspec/DevTasks.md` M10-E 状态更新为 DONE。
+- 验收标准：
+  - 需求追踪新增 R-109 条目完整，状态为 DONE；
+  - 第七版报告更新 M10-E 改动与 Edge 优化成果；
+  - m10e_release.json 包含 milestone/git hash/migration hashes/核心文件 hash/test_passed_count/generated_at。
+- 涉及文件路径：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-04-v7.md；host_brain/release/release_manifest.py；release/manifests/m10e_release.json。
+- 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
