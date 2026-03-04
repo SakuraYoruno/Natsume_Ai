@@ -1,0 +1,112 @@
+{
+  "milestone": "M19",
+  "title": "审查报告 P0/P1 缺陷修复",
+  "date": "2026-03-04",
+  "release_ready": true,
+  "all_p0_bugs_fixed": true,
+  "all_p1_issues_resolved": true,
+  "zero_regressions": true,
+  "total_tests_passed": 1609,
+  "new_tests_added": 29,
+  "tasks": [
+    {
+      "task_id": "TASK-0193",
+      "label": "M19-A",
+      "title": "修复 Trace 降级路径 AttributeError（BUG-BE-001）",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/app/obs_routes.py"
+      ],
+      "tests_added": [
+        "tests/unit/test_obs_routes_trace_fallback.py (T-OBS-ROUTE-TRACE-FALLBACK-01~03)"
+      ]
+    },
+    {
+      "task_id": "TASK-0194",
+      "label": "M19-B",
+      "title": "修复 Overview 字段名对齐（BUG-FE-001 + WARN-FE-004）",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/app/monitor_ui/src/pages/Overview.jsx",
+        "host_brain/app/monitor_ui/src/components/ServiceCard.jsx"
+      ],
+      "tests_added": []
+    },
+    {
+      "task_id": "TASK-0195",
+      "label": "M19-C",
+      "title": "修复 Trace API 路径 + Sessions 翻页闭包（WARN-FE-006 + WARN-FE-005）",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/app/monitor_ui/src/api/obs.js",
+        "host_brain/app/monitor_ui/src/pages/Sessions.jsx"
+      ],
+      "tests_added": []
+    },
+    {
+      "task_id": "TASK-0196",
+      "label": "M19-D",
+      "title": "重构 obs_routes.py 调用 Service 层（WARN-BE-001~003）",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/app/obs_routes.py"
+      ],
+      "tests_added": []
+    },
+    {
+      "task_id": "TASK-0197",
+      "label": "M19-E",
+      "title": "修复 TraceNodeBuilder 全量加载 + 并行分支推断（BUG-BE-002 + WARN-BE-005）",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/obs/trace_node_builder.py",
+        "host_brain/audit/sqlite_ledger.py"
+      ],
+      "tests_added": [
+        "tests/unit/test_trace_node_builder.py (T-OBS-TRACE-09~10, T-OBS-TRACE-03 updated)"
+      ]
+    },
+    {
+      "task_id": "TASK-0198",
+      "label": "M19-F",
+      "title": "补充集成测试（WARN-TEST-001~002）",
+      "status": "DONE",
+      "files_changed": [
+        "tests/unit/test_trace_node_builder.py",
+        "tests/integration/__init__.py",
+        "tests/integration/test_obs_routes_integration.py"
+      ],
+      "tests_added": [
+        "tests/integration/test_obs_routes_integration.py (T-OBS-ROUTE-INT-01~16)"
+      ]
+    },
+    {
+      "task_id": "TASK-0199",
+      "label": "M19-G",
+      "title": "M19 发布清单 + 文档更新",
+      "status": "DONE",
+      "files_changed": [
+        "docs/30_devspec/DevTasks.md",
+        "docs/40_agents/full_code_review_report_2026-03-04-m17m18.md",
+        "docs/60_trace/risk_registry.md",
+        "docs/50_release/m19_release.json"
+      ],
+      "tests_added": []
+    }
+  ],
+  "defects_closed": {
+    "P0": ["BUG-BE-001", "BUG-FE-001"],
+    "P1": ["WARN-BE-001", "WARN-BE-002", "WARN-BE-003", "BUG-BE-002", "WARN-FE-004", "WARN-FE-005", "WARN-FE-006", "WARN-BE-005"],
+    "P2_closed": ["WARN-TEST-001", "WARN-TEST-002"]
+  },
+  "defects_remaining": {
+    "P2": ["WARN-FE-001", "WARN-FE-002", "WARN-FE-003", "WARN-FE-007", "WARN-BE-004", "WARN-BE-006", "WARN-BE-007"]
+  },
+  "quality_gates": {
+    "total_tests_passed_ge_1598": true,
+    "p0_bugs_fixed": true,
+    "p1_issues_resolved": true,
+    "zero_regressions": true,
+    "integration_tests_added": true
+  }
+}

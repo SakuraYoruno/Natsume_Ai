@@ -3008,7 +3008,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-OBS-008~011；WARN-TEST-001；WARN-TEST-002；T-OBS-ROUTE-INT-01~16；T-OBS-TRACE-09~10。
 
 ### TASK-0199 M19-G M19 发布清单
-- 状态：TODO
+- 状态：DONE
 - 任务描述：生成 M19 发布清单（m19_release.json），记录 M19-A~F 修复文件清单 + 测试通过数 + 质量门禁；同步更新代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中各修复项状态为 FIXED；更新 risk_registry.md 中对应风险条目状态为 MITIGATED。
 - 输入：TASK-0193~0198 全部 DONE。
 - 输出：
