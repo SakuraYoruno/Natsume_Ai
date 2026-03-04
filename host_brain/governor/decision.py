@@ -273,7 +273,7 @@ def _is_expired(*, ts_ms: int, now_ms_value: int, ttl_ms: int) -> bool:
     return now_ms_value - ts_ms > ttl_ms
 
 
-def _hard_state_from_snapshot(governance_snapshot: dict[str, Any] | None):
+def _hard_state_from_snapshot(governance_snapshot: dict[str, Any] | None) -> dict:
     if isinstance(governance_snapshot, dict):
         raw_state = governance_snapshot.get("hard_state")
         if isinstance(raw_state, dict):
