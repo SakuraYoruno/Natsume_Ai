@@ -1,0 +1,72 @@
+{
+  "milestone": "M18",
+  "release_date": "2026-03-04",
+  "release_ready": true,
+  "all_api_endpoints_tested": true,
+  "frontend_api_integration_verified": true,
+  "zero_regressions": true,
+  "total_tests_passed": 1577,
+  "tasks": {
+    "TASK-0188": {
+      "title": "M18-A 全服务健康聚合 API",
+      "status": "DONE",
+      "files": [
+        "host_brain/obs/service_health_aggregator.py",
+        "tests/unit/test_service_health_aggregator.py"
+      ],
+      "tests": "T-OBS-HEALTH-01~06 (6/6 passed)"
+    },
+    "TASK-0189": {
+      "title": "M18-B 会话列表 API",
+      "status": "DONE",
+      "files": [
+        "host_brain/obs/session_query.py",
+        "tests/unit/test_session_query.py"
+      ],
+      "tests": "T-OBS-SESS-01~06 (6/6 passed)"
+    },
+    "TASK-0190": {
+      "title": "M18-C 链路节点详情 API",
+      "status": "DONE",
+      "files": [
+        "host_brain/obs/trace_node_builder.py",
+        "tests/unit/test_trace_node_builder.py"
+      ],
+      "tests": "T-OBS-TRACE-01~08 (8/8 passed)"
+    },
+    "TASK-0191": {
+      "title": "M18-D 指标时序 API",
+      "status": "DONE",
+      "files": [
+        "host_brain/obs/metrics_timeseries.py",
+        "tests/unit/test_metrics_timeseries.py"
+      ],
+      "tests": "T-OBS-TS-01~06 (6/6 passed)"
+    }
+  },
+  "api_endpoints": [
+    {"endpoint": "GET /obs/services/health", "status": "implemented", "module": "obs_routes.py + service_health_aggregator.py"},
+    {"endpoint": "GET /obs/sessions",        "status": "implemented", "module": "obs_routes.py + session_query.py"},
+    {"endpoint": "GET /obs/trace/{request_id}/nodes", "status": "implemented", "module": "obs_routes.py + trace_node_builder.py"},
+    {"endpoint": "GET /obs/metrics/timeseries", "status": "implemented", "module": "obs_routes.py + metrics_timeseries.py"}
+  ],
+  "new_modules": [
+    "host_brain/obs/service_health_aggregator.py",
+    "host_brain/obs/session_query.py",
+    "host_brain/obs/trace_node_builder.py",
+    "host_brain/obs/metrics_timeseries.py"
+  ],
+  "test_summary": {
+    "new_tests": 26,
+    "total_passed": 1577,
+    "total_skipped": 2,
+    "total_failed": 0
+  },
+  "quality_gates": {
+    "all_new_tests_pass": true,
+    "no_regression": true,
+    "total_tests_gte_1575": true,
+    "response_structure_stable": true,
+    "timeout_protection": true
+  }
+}

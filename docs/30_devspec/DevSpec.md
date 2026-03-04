@@ -4,8 +4,8 @@
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
 # Nastume Ai 产品开发文档（Dev Spec）
-版本：v1.5
-日期：2026-03-03
+版本：v1.6
+日期：2026-03-04
 适用架构：Host_Brain（Python，含 LangGraph 编排） + Nastume_Body（Edge） + Cloud Exocortex + ClawdBot
 
 本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。
@@ -3861,3 +3861,419 @@ ASR > PLAYBACK > TTS_SYNTH > FALLBACK_LLM
 | `zero_regressions` | failed=0 |
 | `total_tests_passed` | ≥ 1445 |
 | `audit_chain_verified` | ASR/TTS/Barge-in/兜底/资源闸门审计链字段可追溯 |
+
+---
+
+## 29. M17/M18 监控面板 v3 工程契约（前端 SPA + 后端 API 扩展）
+
+> 对应 PRD §4.20（FR-OBS-003~011）。
+> 当前状态：DONE（2026-03-04：React+Vite SPA 四页面全量可用；26 个新增后端测试全部通过；1577 全量通过，2 skipped，0 failed）。
+
+---
+
+### 29.1 总体定位与约束
+
+**目标**：将现有 `panel.html` 单页重建为专业运维监控 SPA，参考 Dify 简约风格，实现双端全服务监控 + 节点链路可视化展示。
+
+**覆盖需求**：FR-OBS-003~011。
+**回归口径**：T-OBS-V3-ARCH-01~03、T-OBS-V3-OVW-01~05、T-OBS-V3-SESS-01~05、T-OBS-V3-TRACE-01~08、T-OBS-V3-METRICS-01~05、T-OBS-HEALTH-01~06、T-OBS-SESS-01~06、T-OBS-TRACE-01~08、T-OBS-TS-01~06。
+
+**硬约束**：
+- 前端产出物（`host_brain/app/static/monitor/`）由 FastAPI StaticFiles 托管，无需 Node.js 运行时。
+- 生产构建：`npm run build` 产出物提交到仓库；开发模式：`npm run dev`（Vite dev server 代理 `/obs/*` 到 FastAPI）。
+- 设计风格：Dify 简约白色风格（背景 `#F9FAFB`，主色 `#2970FF`，卡片圆角 `8px`，字体 Inter）；**严格禁用大面积高饱和度渐变与廉价发光阴影**；**禁止使用 Emoji 作为图标**。
+
+---
+
+### 29.2 技术栈约定（M17 强制执行）
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| React | 18.x | 组件化开发，所有页面均为 React 组件 |
+| Vite | 5.x | 快速构建；`npm run build` 产出静态文件由 FastAPI StaticFiles 托管 |
+| Tailwind CSS | 3.x | 原子化样式；实现 Dify 简约白色风格 |
+| React Router | 6.x | 4 个核心页面的 History/Hash 路由切换 |
+| React Flow | latest | Trace 节点流图（Dify Workflow 同款底层库，原生支持节点卡片、有向连线、分支/并行布局） |
+| Apache ECharts | 5.x | Metrics 时序折线图、柱状图、条形图 |
+| Zustand | 4.x | 全局状态管理（30s 轮询状态 + 全局时间范围过滤） |
+| Lucide React | latest | 统一专业的纯色 SVG 图标 |
+
+**项目结构约定（语义固定）**：
+- 源码目录：`host_brain/app/monitor_ui/`（React 项目根，含 `package.json` / `vite.config.js`）
+- 构建产出：`host_brain/app/static/monitor/`（FastAPI StaticFiles 托管，入口为 `index.html`）
+
+---
+
+### 29.3 前端架构契约（M17-A：§OBS-V3-001）
+
+覆盖需求：FR-OBS-003。
+回归口径：T-OBS-V3-ARCH-01~03。
+
+#### 29.3.1 核心文件落点（语义固定）
+
+```
+host_brain/app/monitor_ui/
+  package.json                          ← 依赖声明（react/vite/tailwind/react-router/reactflow/echarts/zustand/lucide-react）
+  vite.config.js                        ← 构建配置（产出到 ../static/monitor/）
+  tailwind.config.js                    ← Dify 设计 token
+  src/
+    main.jsx                            ← React 入口
+    App.jsx                             ← 根组件 + React Router 路由配置
+    store/index.js                      ← Zustand store（轮询状态 + 时间范围过滤）
+    components/
+      Layout.jsx                        ← 左侧固定导航栏 + 顶部面包屑 + 主内容区布局框架
+      trace/
+        CustomNode.jsx                  ← 自定义节点卡片组件（React Flow）
+        NodeDetailPanel.jsx             ← 节点详情侧边面板
+      charts/
+        LineChart.jsx                   ← ECharts 折线图封装（可复用）
+        BarChart.jsx                    ← ECharts 柱状/条形图封装（可复用）
+    pages/
+      Overview.jsx                      ← 全服务健康总览页
+      Sessions.jsx                      ← 会话列表页
+      Trace.jsx                         ← Dify 风格链路可视化页（React Flow）
+      Metrics.jsx                       ← 指标大盘页（ECharts）
+    utils/
+      traceLayout.js                    ← Dagre 自动布局工具函数
+host_brain/app/static/monitor/          ← npm run build 产出（提交到仓库）
+```
+
+#### 29.3.2 路由契约（4 个核心页面）
+
+| 路由路径 | 页面组件 | 功能 |
+|---------|---------|------|
+| `/` 或 `/overview` | `Overview.jsx` | 全服务健康总览 |
+| `/sessions` | `Sessions.jsx` | 会话列表 + 过滤 + 分页 |
+| `/trace` | `Trace.jsx` | 链路节点可视化（React Flow） |
+| `/metrics` | `Metrics.jsx` | 指标大盘（ECharts） |
+
+#### 29.3.3 Zustand Store 契约（最小字段）
+
+```javascript
+{
+  // 轮询状态
+  pollingEnabled: boolean,          // 是否开启 30s 自动轮询
+  lastPolledAt: number | null,      // 上次轮询时间戳（ms）
+  pollingError: string | null,      // 轮询错误信息
+
+  // 全局时间范围过滤
+  timeRange: '1h' | '6h' | '24h' | '7d',
+
+  // 当前选中的 request_id（Sessions → Trace 跳转传递）
+  selectedRequestId: string | null,
+}
+```
+
+#### 29.3.4 验收测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-OBS-V3-ARCH-01 | `npm run dev` 启动无报错，四个页面均可通过路由切换 |
+| T-OBS-V3-ARCH-02 | `npm run build` 成功产出，FastAPI 可正常托管 |
+| T-OBS-V3-ARCH-03 | 左侧导航高亮当前页；1280×800 分辨率下布局正常，无横向滚动条 |
+
+---
+
+### 29.4 全服务健康总览页契约（M17-B：§OBS-V3-002）
+
+覆盖需求：FR-OBS-004。
+回归口径：T-OBS-V3-OVW-01~05。
+
+#### 29.4.1 页面功能契约
+
+- 顶部汇总统计行：总服务数 / 健康数 / 降级数 / 故障数（与卡片数量严格一致）。
+- 服务卡片网格：每卡片含服务名、侧（Host/Edge）、状态徽章（UP/DOWN/DEGRADED）、响应延迟、最后检查时间、错误摘要（DOWN 时展示）。
+- 30 秒自动轮询 `GET /obs/services/health`；轮询失败时显示"上次已知状态 HH:MM:SS"，不崩溃。
+- DOWN 状态卡片显示红色边框 + 错误摘要；DEGRADED 显示橙色边框。
+
+#### 29.4.2 验收测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-OBS-V3-OVW-01 | 所有已注册服务（≥12 个）均出现在总览页 |
+| T-OBS-V3-OVW-02 | DOWN 状态卡片显示红色边框 + 错误摘要 |
+| T-OBS-V3-OVW-03 | 轮询失败时显示"上次已知状态 HH:MM:SS"，不崩溃 |
+| T-OBS-V3-OVW-04 | 顶部汇总数字与卡片数量一致 |
+| T-OBS-V3-OVW-05 | `?side=host|edge` 过滤参数正确生效 |
+
+---
+
+### 29.5 会话列表页契约（M17-C：§OBS-V3-003）
+
+覆盖需求：FR-OBS-005。
+回归口径：T-OBS-V3-SESS-01~05。
+
+#### 29.5.1 页面功能契约
+
+- 顶部过滤栏：时间范围选择器 + 状态下拉（OK/REJECT/ERROR）+ 关键词搜索。
+- 表格列：request_id / 时间 / 状态 / 耗时 / 通道 / reason_code。
+- 底部分页控件（每页 20 条），翻页不丢失过滤条件。
+- 点击行跳转到 Trace 页并传递 request_id（URL hash 变为 `#trace?rid=xxx`）。
+- 空结果时显示友好空状态（非报错）。
+
+#### 29.5.2 验收测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-OBS-V3-SESS-01 | 列表正常分页（每页 20 条），翻页不丢失过滤条件 |
+| T-OBS-V3-SESS-02 | 点击行后 URL hash 变为 `#trace?rid=xxx`，Trace 页自动加载 |
+| T-OBS-V3-SESS-03 | 状态过滤（OK/REJECT/ERROR）正确生效 |
+| T-OBS-V3-SESS-04 | 空结果时显示友好空状态（非报错） |
+| T-OBS-V3-SESS-05 | total_count 与实际数据一致 |
+
+---
+
+### 29.6 链路可视化页契约（M17-D：§OBS-V3-004）
+
+覆盖需求：FR-OBS-006。
+回归口径：T-OBS-V3-TRACE-01~08。
+
+#### 29.6.1 页面功能契约
+
+- React Flow 画布：自动布局（从左到右，Dagre 布局算法），支持分支/并行，支持缩放/平移。
+- 自定义节点卡片（CustomNode）：圆角矩形，含 Lucide React 节点类型图标、节点名称、状态颜色（绿/红/橙/蓝动画）、耗时标签、Provider 徽章（LLM 节点专属）。
+- 有向连线：React Flow 内置 Edge，支持分支合并，箭头样式。
+- 节点点击侧边面板（NodeDetailPanel）：展示 input/output（JSON 格式化 + 折叠/展开）、status、reason_code、时间戳、side（Host/Edge）、model_id（LLM 节点）。
+- 顶部工具栏：request_id 输入框 + 查询按钮 + 全屏切换。
+- 对接 `GET /obs/trace/{request_id}/nodes` API。
+
+#### 29.6.2 验收测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-OBS-V3-TRACE-01 | 给定 request_id 后节点图正确渲染（≤50 节点流畅，无卡顿） |
+| T-OBS-V3-TRACE-02 | 点击节点侧边面板正确显示 input/output |
+| T-OBS-V3-TRACE-03 | 并行节点以分支形式展示（不重叠，Dagre 布局正确） |
+| T-OBS-V3-TRACE-04 | JSON 折叠/展开功能正常 |
+| T-OBS-V3-TRACE-05 | 全屏模式可用 |
+| T-OBS-V3-TRACE-06 | 空链路时显示友好空状态 |
+| T-OBS-V3-TRACE-07 | LLM 节点卡片显示 Provider 徽章（OpenAI/Gemini/DeepSeek 颜色区分） |
+| T-OBS-V3-TRACE-08 | input/output 超 64KB 时 truncated=true 标注存在 |
+
+---
+
+### 29.7 指标大盘页契约（M17-E：§OBS-V3-005）
+
+覆盖需求：FR-OBS-007。
+回归口径：T-OBS-V3-METRICS-01~05。
+
+#### 29.7.1 页面功能契约
+
+- 时间范围选择器（1h / 6h / 24h / 7d，Zustand 状态驱动）。
+- 请求量趋势折线图（ECharts Canvas）。
+- 拒绝率趋势折线图（ECharts Canvas）。
+- reason_code 分布横向条形图（ECharts Canvas）。
+- 各服务响应延迟 P50/P95 柱状图（ECharts Canvas）。
+- 对接 `GET /obs/metrics/timeseries` API。
+
+#### 29.7.2 验收测试编号
+
+| 编号 | 描述 |
+|------|------|
+| T-OBS-V3-METRICS-01 | 切换时间范围后图表数据正确更新（Zustand 状态驱动） |
+| T-OBS-V3-METRICS-02 | 图表在 HiDPI 屏幕下清晰（ECharts 内置 devicePixelRatio 支持） |
+| T-OBS-V3-METRICS-03 | 无数据时显示"数据采集中"占位，不崩溃 |
+| T-OBS-V3-METRICS-04 | 四种图表类型均正确渲染 |
+| T-OBS-V3-METRICS-05 | 降采样后数据点数量 ≤1000 |
+
+---
+
+### 29.8 后端 API 扩展契约（M18：§OBS-V3-API-001~004）
+
+覆盖需求：FR-OBS-008~011。
+回归口径：T-OBS-HEALTH-01~06、T-OBS-SESS-01~06、T-OBS-TRACE-01~08、T-OBS-TS-01~06。
+
+#### 29.8.1 全服务健康聚合 API（§OBS-V3-API-001）
+
+**端点**：`GET /obs/services/health`
+
+**功能**：并发探测双端所有已注册服务健康状态；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host|edge` 过滤。
+
+**已注册服务（最小集）**：
+- Host 侧（8 个）：LLM Gateway、Neo4j、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider
+- Edge 侧（5 个）：ASR、TTS、VTS、Audio Playback、Edge RPC
+
+**响应结构（最小字段，语义固定）**：
+```json
+{
+  "ts_ms": 1709500000000,
+  "total": 13,
+  "healthy": 12,
+  "degraded": 1,
+  "down": 0,
+  "services": [
+    {
+      "service_id": "neo4j",
+      "service_name": "Neo4j Bond SSOT",
+      "side": "host",
+      "status": "UP",
+      "latency_ms": 12,
+      "last_checked_ts_ms": 1709500000000,
+      "error_summary": null
+    }
+  ]
+}
+```
+
+**约束**：
+- 响应时间 ≤500ms（并发探测）。
+- 响应结构稳定（字段不随服务状态变化而缺失）。
+- 单服务超时时该服务 `status=DOWN`，其余正常返回。
+
+**落点**：
+- `host_brain/app/obs_routes.py`（新增端点）
+- `host_brain/obs/service_health_aggregator.py`（ServiceHealthAggregator）
+- `tests/unit/test_service_health_aggregator.py`（T-OBS-HEALTH-01~06）
+
+#### 29.8.2 会话列表 API（§OBS-V3-API-002）
+
+**端点**：`GET /obs/sessions`
+
+**查询参数**：`start_time`、`end_time`、`status`、`channel`、`keyword`、`page`、`page_size`
+
+**响应结构（最小字段）**：
+```json
+{
+  "total_count": 100,
+  "page": 1,
+  "page_size": 20,
+  "results": [
+    {
+      "request_id": "01HXXX",
+      "ts_ms": 1709500000000,
+      "status": "APPROVE",
+      "duration_ms": 1234,
+      "channel": "wechat",
+      "reason_code": null
+    }
+  ]
+}
+```
+
+**约束**：
+- 空结果时返回 `results=[]` 而非 404。
+- `total_count` 与实际数据一致。
+- 过滤参数组合正确生效。
+
+**落点**：
+- `host_brain/app/obs_routes.py`（新增端点）
+- `host_brain/obs/session_query.py`（SessionQueryService）
+- `host_brain/audit/migrations/0019_obs_sessions_index.sql`（查询索引）
+- `tests/unit/test_session_query.py`（T-OBS-SESS-01~06）
+
+#### 29.8.3 链路节点详情 API（§OBS-V3-API-003）
+
+**端点**：`GET /obs/trace/{request_id}/nodes`
+
+**查询参数**：`include_io`（默认 true；false 时不返回 input/output 字段）
+
+**节点结构（最小字段，语义固定）**：
+```json
+{
+  "request_id": "01HXXX",
+  "nodes": [
+    {
+      "node_id": "node_001",
+      "node_type": "LLM",
+      "node_name": "core_reasoner_primary",
+      "status": "SUCCESS",
+      "start_ts_ms": 1709500000000,
+      "end_ts_ms": 1709500001500,
+      "duration_ms": 1500,
+      "input": {},
+      "output": {},
+      "truncated": false,
+      "reason_code": null,
+      "parent_node_id": null,
+      "side": "host",
+      "model_id": "gpt-4o"
+    }
+  ]
+}
+```
+
+**约束**：
+- 不存在的 `request_id` 返回 404 + 稳定错误结构。
+- `input`/`output` 超 64KB 截断并标注 `truncated=true`。
+- `parent_node_id` 正确反映执行树结构。
+- 数据来源：从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建。
+
+**落点**：
+- `host_brain/app/obs_routes.py`（新增端点）
+- `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder）
+- `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）
+
+#### 29.8.4 指标时序 API（§OBS-V3-API-004）
+
+**端点**：`GET /obs/metrics/timeseries`
+
+**查询参数**：`metrics`（逗号分隔，支持批量）、`interval`（1m/5m/1h）、`start_time`、`end_time`
+
+**支持的指标维度**：`request_count`、`reject_rate`、`latency_p50`、`latency_p95`、`reason_code_dist`
+
+**响应结构（最小字段）**：
+```json
+{
+  "interval": "5m",
+  "start_time": "2026-03-04T00:00:00Z",
+  "end_time": "2026-03-04T06:00:00Z",
+  "metrics": {
+    "request_count": {
+      "data_points": [
+        {"ts_ms": 1709500000000, "value": 42}
+      ]
+    },
+    "reject_rate": {
+      "data_points": [
+        {"ts_ms": 1709500000000, "value": 0.05}
+      ]
+    }
+  }
+}
+```
+
+**约束**：
+- 数据点上限 1000（超出自动降采样）。
+- 无数据区间返回 `null` 值点保证时序连续性。
+- 批量查询返回 `{metrics: {metric_name: {data_points: [...]}}}` 结构。
+
+**落点**：
+- `host_brain/app/obs_routes.py`（新增端点）
+- `host_brain/obs/metrics_timeseries.py`（MetricsTimeseriesService）
+- `tests/unit/test_metrics_timeseries.py`（T-OBS-TS-01~06）
+
+---
+
+### 29.9 M17/M18 新增错误码汇总
+
+| 错误码 | 触发场景 |
+|--------|---------|
+| `OBS_SERVICE_HEALTH_TIMEOUT` | 单服务健康探测超时（≤200ms 硬限） |
+| `OBS_SESSION_QUERY_INVALID` | 会话列表查询参数非法（时间范围/分页越界） |
+| `OBS_TRACE_NOT_FOUND` | 指定 request_id 不存在于审计链 |
+| `OBS_TRACE_IO_TRUNCATED` | 节点 input/output 超 64KB 被截断（非错误，标注字段） |
+| `OBS_METRICS_INTERVAL_INVALID` | 时序查询 interval 参数非法（非 1m/5m/1h） |
+| `OBS_METRICS_DOWNSAMPLE_APPLIED` | 数据点超 1000 触发降采样（非错误，标注字段） |
+
+---
+
+### 29.10 M17/M18 发布清单质量门禁
+
+**M17 质量门禁**：
+
+| 门禁项 | 要求 |
+|--------|------|
+| `release_ready` | 必须为 true |
+| `all_pages_functional` | 四页面全量可用（Overview/Sessions/Trace/Metrics） |
+| `zero_js_errors` | 浏览器控制台无 JS 错误 |
+| `design_review_passed` | 符合 Dify 简约白色风格 |
+
+**M18 质量门禁**：
+
+| 门禁项 | 要求 |
+|--------|------|
+| `release_ready` | 必须为 true |
+| `all_api_endpoints_tested` | 4 个新增端点测试全部通过 |
+| `frontend_api_integration_verified` | 前端切换真实 API 验证通过 |
+| `zero_regressions` | failed=0 |
+| `total_tests_passed` | ≥ 1575 |

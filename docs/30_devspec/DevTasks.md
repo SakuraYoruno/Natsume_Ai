@@ -1,8 +1,8 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.7
-日期：2026-03-03
+版本：v1.8
+日期：2026-03-04
 
 本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
@@ -2659,6 +2659,232 @@ TASK-XXXX 标题
 - 输出：`docs/50_release/m16_release.json`。
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1549。
 - 关联需求：NFR-REL-001；FR-CANON-GOV-001；FR-MEM-PAGE-001；FR-SCHED-PERSIST-001。
+
+---
+
+## M17 监控面板 v3 — 全服务监控 + Dify 风格链路可视化（前端重建）（DONE，2026-03-04）
+
+> 目标：将现有 panel.html 单页重建为专业运维监控 SPA，参考 Dify 简约风格，实现双端全服务监控 + 节点链路可视化展示。
+> 依赖：M18 后端 API（可并行开发，前端先用 mock 数据）。
+> 所有任务当前状态：DONE（2026-03-04：React+Vite SPA 构建成功；四页面全量可用；m17_release.json 已生成）。
+
+### 核心技术栈约定（M17 强制执行）
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| **React** | 18.x | 组件化开发，所有页面均为 React 组件 |
+| **Vite** | 5.x | 快速构建；`npm run build` 产出静态文件由 FastAPI StaticFiles 托管 |
+| **Tailwind CSS** | 3.x | 原子化样式；实现 Dify 简约白色风格；**严格禁用大面积高饱和度渐变与廉价发光阴影** |
+| **React Router** | 6.x | 4 个核心页面的 History/Hash 路由切换 |
+| **React Flow** | latest | Trace 节点流图（Dify Workflow 同款底层库，原生支持节点卡片、有向连线、分支/并行布局） |
+| **Apache ECharts** | 5.x | Metrics 时序折线图、柱状图、条形图；性能优秀，抗锯齿效果佳 |
+| **Zustand** | 4.x | 全局状态管理（30s 轮询状态 + 全局时间范围过滤）；轻量，无 Redux 样板代码 |
+| **Lucide React** | latest | 统一专业的纯色 SVG 图标；**禁止使用 Emoji 作为图标** |
+
+**项目结构约定：**
+- 源码目录：`host_brain/app/monitor_ui/`（React 项目根，含 `package.json` / `vite.config.js`）
+- 构建产出：`host_brain/app/static/monitor/`（FastAPI StaticFiles 托管，入口为 `index.html`）
+- 开发模式：`npm run dev`（Vite dev server，代理 `/obs/*` 到 FastAPI）
+- 生产构建：`npm run build`（产出物提交到仓库，无需 Node.js 运行时）
+
+### TASK-0182 M17-A 前端架构重建（React + Vite 项目初始化 + 设计系统 + 路由 + 布局框架）
+- 状态：DONE
+- 任务描述：
+  初始化 React 18 + Vite 5 项目（`host_brain/app/monitor_ui/`）；配置 Tailwind CSS（Dify 设计 token：背景 `#F9FAFB`，主色 `#2970FF`，卡片圆角 `8px`，字体 Inter）；配置 React Router 6（4 个页面路由）；建立左侧固定导航栏（Lucide React 图标）+ 顶部面包屑 + 主内容区布局框架；配置 Zustand store（轮询状态 + 时间范围过滤）；配置 Vite 构建产出到 `host_brain/app/static/monitor/`；所有页面先用 mock 数据占位。
+- 输入：DevSpec §OBS-V3-001；FR-OBS-003；Dify 设计参考（白色简约风格）；技术栈约定（见上方）。
+- 输出：
+  - `host_brain/app/monitor_ui/package.json`（依赖声明：react/vite/tailwind/react-router/reactflow/echarts/zustand/lucide-react）；
+  - `host_brain/app/monitor_ui/vite.config.js`（构建配置，产出到 `../static/monitor/`）；
+  - `host_brain/app/monitor_ui/tailwind.config.js`（Dify 设计 token）；
+  - `host_brain/app/monitor_ui/src/main.jsx`（React 入口）；
+  - `host_brain/app/monitor_ui/src/App.jsx`（根组件 + React Router 路由配置）；
+  - `host_brain/app/monitor_ui/src/store/index.js`（Zustand store）；
+  - `host_brain/app/monitor_ui/src/components/Layout.jsx`（导航栏 + 布局框架）；
+  - `host_brain/app/monitor_ui/src/pages/Overview.jsx`（mock 占位）；
+  - `host_brain/app/monitor_ui/src/pages/Sessions.jsx`（mock 占位）；
+  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`（mock 占位）；
+  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`（mock 占位）；
+  - `host_brain/app/static/monitor/`（`npm run build` 产出，提交到仓库）。
+- 验收标准：
+  - `npm run dev` 启动无报错，四个页面均可通过路由切换；
+  - `npm run build` 成功产出，FastAPI 可正常托管；
+  - 左侧导航高亮当前页，Lucide React 图标正常显示；
+  - 在 1280×800 分辨率下布局正常，无横向滚动条；
+  - 设计风格符合 Dify 简约白色风格（非深色主题，无高饱和度渐变）。
+- 关联需求/测试：FR-OBS-003；T-OBS-V3-ARCH-01~03。
+
+### TASK-0183 M17-B 全服务健康总览页（Overview Page）
+- 状态：DONE
+- 任务描述：
+  实现 Overview 页面，展示双端所有服务健康状态卡片网格；顶部汇总统计行（总服务数/健康/降级/故障）；每个服务卡片含：服务名、侧（Host/Edge）、状态徽章（UP/DOWN/DEGRADED）、响应延迟、最后检查时间、错误摘要（DOWN 时展示）；30 秒自动轮询 `/obs/services/health`（M18-A 提供，开发阶段使用 mock）。
+- 输入：TASK-0182 完成；DevSpec §OBS-V3-002；FR-OBS-004。
+- 输出：
+  - `host_brain/app/static/pages/overview.js`（完整实现，对接真实 API）；
+  - 服务卡片组件（内联于 overview.js）。
+- 验收标准：
+  - 所有已注册服务（≥12 个）均出现在总览页；
+  - DOWN 状态卡片显示红色边框 + 错误摘要；
+  - 轮询失败时显示"上次已知状态 HH:MM:SS"；
+  - 顶部汇总数字与卡片数量一致。
+- 关联需求/测试：FR-OBS-004；T-OBS-V3-OVW-01~05。
+
+### TASK-0184 M17-C 会话列表页（Sessions Page）
+- 状态：DONE
+- 任务描述：
+  实现 Sessions 页面，展示历史会话列表；顶部过滤栏（时间范围选择器 + 状态下拉 + 关键词搜索）；表格展示（request_id / 时间 / 状态 / 耗时 / 通道 / reason_code）；底部分页控件；点击行跳转到 Trace 页并传递 request_id；对接 `/obs/sessions` API（开发阶段使用 mock）。
+- 输入：TASK-0182 完成；DevSpec §OBS-V3-003；FR-OBS-005。
+- 输出：
+  - `host_brain/app/static/pages/sessions.js`（完整实现，对接真实 API）。
+- 验收标准：
+  - 列表正常分页（每页 20 条），翻页不丢失过滤条件；
+  - 点击行后 URL hash 变为 `#trace?rid=xxx`，Trace 页自动加载；
+  - 状态过滤（OK/REJECT/ERROR）正确生效；
+  - 空结果时显示友好空状态（非报错）。
+- 关联需求/测试：FR-OBS-005；T-OBS-V3-SESS-01~05。
+
+### TASK-0185 M17-D Dify 风格链路可视化页（Trace Page — React Flow）
+- 状态：DONE
+- 任务描述：
+  基于 **React Flow** 实现 Trace 页面核心功能——节点流图可视化：
+  1. **React Flow 画布**：自动布局（从左到右，Dagre 布局算法），支持分支/并行，支持缩放/平移；
+  2. **自定义节点卡片**（CustomNode 组件）：圆角矩形，含 Lucide React 节点类型图标、节点名称、状态颜色（绿/红/橙/蓝动画）、耗时标签、Provider 徽章（LLM 节点专属）；
+  3. **有向连线**：React Flow 内置 Edge，支持分支合并，箭头样式；
+  4. **节点点击侧边面板**（NodeDetailPanel 组件）：展示 input/output（JSON 格式化 + 折叠/展开）、status、reason_code、时间戳、side（Host/Edge）、model_id（LLM 节点）；
+  5. **顶部工具栏**：request_id 输入框 + 查询按钮 + 全屏切换（Lucide React 图标）；
+  6. 对接 `/obs/trace/{request_id}/nodes` API（开发阶段使用 mock，含完整 ASR→LLM×N→TTS→VTS 链路）。
+- 输入：TASK-0182 完成；DevSpec §OBS-V3-004；FR-OBS-006；React Flow 文档。
+- 输出：
+  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`（完整实现，含 React Flow 画布）；
+  - `host_brain/app/monitor_ui/src/components/trace/CustomNode.jsx`（自定义节点卡片组件）；
+  - `host_brain/app/monitor_ui/src/components/trace/NodeDetailPanel.jsx`（节点详情侧边面板）；
+  - `host_brain/app/monitor_ui/src/utils/traceLayout.js`（Dagre 自动布局工具函数）。
+- 验收标准：
+  - 给定 request_id 后节点图正确渲染（≤50 节点流畅，无卡顿）；
+  - 点击节点侧边面板正确显示 input/output；
+  - 并行节点以分支形式展示（不重叠，Dagre 布局正确）；
+  - JSON 折叠/展开功能正常；
+  - 全屏模式可用；
+  - 空链路时显示友好空状态；
+  - LLM 节点卡片显示 Provider 徽章（OpenAI/Gemini/DeepSeek 颜色区分）。
+- 关联需求/测试：FR-OBS-006；T-OBS-V3-TRACE-01~08。
+
+### TASK-0186 M17-E 指标大盘页（Metrics Page）
+- 状态：DONE
+- 任务描述：
+  实现 Metrics 页面，包含：
+  1. 时间范围选择器（1h / 6h / 24h / 7d）；
+  2. 请求量趋势折线图（Canvas）；
+  3. 拒绝率趋势折线图（Canvas）；
+  4. reason_code 分布横向条形图（Canvas）；
+  5. 各服务响应延迟 P50/P95 柱状图（Canvas）；
+  6. 对接 `/obs/metrics/timeseries` API（开发阶段使用 mock）。
+- 输入：TASK-0182 完成；DevSpec §OBS-V3-005；FR-OBS-007；Apache ECharts 文档。
+- 输出：
+  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`（完整实现，含 ECharts 图表组件）；
+  - `host_brain/app/monitor_ui/src/components/charts/LineChart.jsx`（ECharts 折线图封装组件，可复用）；
+  - `host_brain/app/monitor_ui/src/components/charts/BarChart.jsx`（ECharts 柱状/条形图封装组件，可复用）。
+- 验收标准：
+  - 切换时间范围后图表数据正确更新（Zustand 状态驱动）；
+  - 图表在 HiDPI 屏幕下清晰（ECharts 内置 devicePixelRatio 支持）；
+  - 无数据时显示"数据采集中"占位，不崩溃；
+  - 四种图表类型均正确渲染。
+- 关联需求/测试：FR-OBS-007；T-OBS-V3-METRICS-01~05。
+
+### TASK-0187 M17-F M17 发布清单
+- 状态：DONE
+- 任务描述：生成 M17 发布清单（m17_release.json），记录 M17-A~E 核心文件清单 + 页面功能验收状态 + 质量门禁。
+- 输入：TASK-0182~0186 全部 DONE。
+- 输出：`docs/50_release/m17_release.json`。
+- 验收标准：release_ready=true；all_pages_functional=true；zero_js_errors=true；design_review_passed=true。
+- 关联需求：FR-OBS-003~007；NFR-MAINT-001。
+
+---
+
+## M18 监控面板 v3 后端 API 扩展（DONE，2026-03-04）
+
+> 目标：为 M17 前端提供完整的数据支撑 API，扩展现有 observability 路由，新增全服务健康聚合、会话列表、链路节点详情、指标时序四类端点。
+> 依赖：M17 可并行开发（前端先用 mock）；M18 完成后前端切换真实 API。
+> 所有任务当前状态：DONE（2026-03-04：26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；m18_release.json 已生成）。
+
+### TASK-0188 M18-A 全服务健康聚合 API
+- 状态：DONE
+- 任务描述：
+  实现 `GET /obs/services/health` 端点，并发探测双端所有已注册服务健康状态（Host 侧：LLM Gateway、Neo4j、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider；Edge 侧：ASR、TTS、VTS、Audio Playback、Edge RPC）；聚合返回统一结构；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host|edge` 过滤。
+- 输入：DevSpec §OBS-V3-API-001；FR-OBS-008；现有 `host_brain/app/obs_routes.py`（或等价）。
+- 输出：
+  - `host_brain/app/obs_routes.py`（新增 `/obs/services/health` 端点）；
+  - `host_brain/obs/service_health_aggregator.py`（ServiceHealthAggregator：并发探测 + 结果聚合）；
+  - `tests/unit/test_service_health_aggregator.py`（T-OBS-HEALTH-01~06）。
+- 验收标准：
+  - T-OBS-HEALTH-01~06 全部通过；
+  - 单服务超时时该服务 status=DOWN，其余正常返回；
+  - 响应时间 ≤500ms（并发探测）；
+  - 响应结构稳定（字段不随服务状态变化而缺失）；
+  - 全量测试 ≥1555 passed。
+- 关联需求/测试：FR-OBS-008；T-OBS-HEALTH-01~06。
+
+### TASK-0189 M18-B 会话列表 API
+- 状态：DONE
+- 任务描述：
+  实现 `GET /obs/sessions` 端点，从 SQLite Ledger 查询会话列表；支持过滤参数：start_time、end_time、status、channel、keyword；分页参数：page、page_size；响应包含 total_count；查询性能优化（必要时补充索引）。
+- 输入：DevSpec §OBS-V3-API-002；FR-OBS-009；现有 SQLite Ledger schema。
+- 输出：
+  - `host_brain/app/obs_routes.py`（新增 `/obs/sessions` 端点）；
+  - `host_brain/obs/session_query.py`（SessionQueryService：过滤 + 分页 + 性能优化）；
+  - `host_brain/audit/migrations/0019_obs_sessions_index.sql`（sessions 查询索引）；
+  - `tests/unit/test_session_query.py`（T-OBS-SESS-01~06）。
+- 验收标准：
+  - T-OBS-SESS-01~06 全部通过；
+  - 过滤参数组合正确生效；
+  - total_count 与实际数据一致；
+  - 空结果时返回 results=[] 而非 404；
+  - 全量测试 ≥1561 passed。
+- 关联需求/测试：FR-OBS-009；T-OBS-SESS-01~06。
+
+### TASK-0190 M18-C 链路节点详情 API
+- 状态：DONE
+- 任务描述：
+  实现 `GET /obs/trace/{request_id}/nodes` 端点，从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建结构化节点列表；每个节点包含 node_id、node_type、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input、output、reason_code、parent_node_id、side；支持 `?include_io=false` 参数；input/output 超 64KB 截断并标注 truncated=true。
+- 输入：DevSpec §OBS-V3-API-003；FR-OBS-010；现有审计链 schema（intent_log/governor_log/skill_exec_log）。
+- 输出：
+  - `host_brain/app/obs_routes.py`（新增 `/obs/trace/{request_id}/nodes` 端点）；
+  - `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder：多源日志聚合 + 节点树构建）；
+  - `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）。
+- 验收标准：
+  - T-OBS-TRACE-01~08 全部通过；
+  - 给定有效 request_id 返回完整节点列表；
+  - parent_node_id 正确反映执行树结构；
+  - 不存在的 request_id 返回 404 + 稳定错误结构；
+  - input/output 超限时 truncated=true 标注存在；
+  - 全量测试 ≥1569 passed。
+- 关联需求/测试：FR-OBS-010；T-OBS-TRACE-01~08。
+
+### TASK-0191 M18-D 指标时序 API
+- 状态：DONE
+- 任务描述：
+  实现 `GET /obs/metrics/timeseries` 端点，支持多维度时序数据查询（request_count / reject_rate / latency_p50 / latency_p95 / reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time、多 metric 批量查询；数据点上限 1000（超出自动降采样）；无数据区间返回 null 值点保证时序连续性。
+- 输入：DevSpec §OBS-V3-API-004；FR-OBS-011；现有 SQLite Ledger 审计数据。
+- 输出：
+  - `host_brain/app/obs_routes.py`（新增 `/obs/metrics/timeseries` 端点）；
+  - `host_brain/obs/metrics_timeseries.py`（MetricsTimeseriesService：时序聚合 + 降采样 + 批量查询）；
+  - `tests/unit/test_metrics_timeseries.py`（T-OBS-TS-01~06）。
+- 验收标准：
+  - T-OBS-TS-01~06 全部通过；
+  - 时序数据点时间间隔与 interval 参数一致；
+  - 降采样后数据点数量 ≤1000；
+  - 批量查询返回 {metrics: {metric_name: {data_points: [...]}}} 结构；
+  - 全量测试 ≥1575 passed。
+- 关联需求/测试：FR-OBS-011；T-OBS-TS-01~06。
+
+### TASK-0192 M18-E M18 发布清单
+- 状态：DONE
+- 任务描述：生成 M18 发布清单（m18_release.json），记录 M18-A~D 核心文件 hash + 测试通过数 + 质量门禁；同时更新 UI_UPGRADE_CHANGELOG.md 记录 v3.0 变更。
+- 输入：TASK-0188~0191 全部 DONE；TASK-0182~0186 全部 DONE（M17 前端切换真实 API 验证）。
+- 输出：
+  - `docs/50_release/m18_release.json`；
+  - `docs/50_project/UI_UPGRADE_CHANGELOG.md`（v3.0 条目）。
+- 验收标准：release_ready=true；all_api_endpoints_tested=true；frontend_api_integration_verified=true；zero_regressions=true；total_tests_passed ≥ 1575。
+- 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001。
 
 
 

@@ -1,0 +1,152 @@
+"""
+SessionQueryService — M18-B
+从 SQLite Ledger 查询会话列表，支持分页 + 过滤。
+FR-OBS-009 / TASK-0189
+"""
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("Nastume.obs.session")
+
+
+class SessionQueryService:
+    """
+    从 SQLite Ledger 的 governor_log 聚合会话列表。
+    支持过滤：start_time / end_time / status / channel / keyword
+    支持分页：page / page_size
+    """
+
+    def __init__(self, ledger):
+        self._ledger = ledger
+
+    # ------------------------------------------------------------------
+    # 公共接口
+    # ------------------------------------------------------------------
+    def query(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        channel: Optional[str] = None,
+        keyword: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        time_range: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        查询会话列表。
+        :param page: 页码（从 1 开始）
+        :param page_size: 每页条数（最大 100）
+        :param status: 'ok' | 'rejected' | 'error'（不区分大小写）
+        :param channel: 通道过滤（voice/wechat/api）
+        :param keyword: 模糊匹配 request_id
+        :param start_time: 起始时间戳（ms）
+        :param end_time: 结束时间戳（ms）
+        :param time_range: '1h'|'6h'|'24h'|'7d'（与 start/end_time 互斥，优先级低）
+        :return: {total, page, page_size, items}
+        """
+        now_ms = int(time.time() * 1000)
+
+        # 时间范围解析
+        if start_time is None and time_range:
+            _range_map = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}
+            seconds = _range_map.get(time_range, 86400)
+            start_time = now_ms - seconds * 1000
+        if end_time is None:
+            end_time = now_ms
+
+        # 从 governor_log 拉取数据
+        try:
+            rows = self._ledger.fetch_by_time_range("governor_log", start_time or 0, end_time)
+        except Exception as exc:
+            logger.warning("SessionQuery: 读取 governor_log 失败 — %s", exc)
+            rows = []
+
+        # 去重（同一 request_id 取最新记录）
+        seen: Dict[str, Dict] = {}
+        for r in rows:
+            rid = r.get("request_id", "")
+            if not rid:
+                continue
+            if rid not in seen or r.get("ts_ms", 0) > seen[rid].get("ts_ms", 0):
+                seen[rid] = r
+
+        items_raw = sorted(seen.values(), key=lambda x: x.get("ts_ms", 0), reverse=True)
+
+        # 过滤
+        items_raw = self._apply_filters(items_raw, status, channel, keyword)
+
+        total = len(items_raw)
+        page_size = min(max(1, page_size), 100)
+        page = max(1, page)
+        offset = (page - 1) * page_size
+        page_items = items_raw[offset: offset + page_size]
+
+        return {
+            "total":     total,
+            "page":      page,
+            "page_size": page_size,
+            "items":     [self._format_item(r) for r in page_items],
+            "timestamp": now_ms,
+        }
+
+    # ------------------------------------------------------------------
+    # 内部方法
+    # ------------------------------------------------------------------
+    def _apply_filters(
+        self,
+        items: List[Dict],
+        status: Optional[str],
+        channel: Optional[str],
+        keyword: Optional[str],
+    ) -> List[Dict]:
+        if status:
+            s = status.lower()
+            if s == "ok":
+                items = [r for r in items if r.get("decision") == "APPROVE"]
+            elif s == "rejected":
+                items = [r for r in items if r.get("decision") == "REJECT"]
+            elif s == "error":
+                items = [r for r in items if r.get("decision") not in ("APPROVE", "REJECT")]
+
+        if channel:
+            items = [r for r in items if r.get("channel", "").lower() == channel.lower()]
+
+        if keyword:
+            kw = keyword.lower()
+            items = [r for r in items if kw in r.get("request_id", "").lower()]
+
+        return items
+
+    @staticmethod
+    def _format_item(r: Dict) -> Dict[str, Any]:
+        decision = r.get("decision", "")
+        if decision == "APPROVE":
+            status = "ok"
+        elif decision == "REJECT":
+            status = "rejected"
+        else:
+            status = "error"
+
+        return {
+            "request_id":   r.get("request_id", ""),
+            "session_id":   r.get("session_id"),
+            "ts_ms":        r.get("ts_ms", 0),
+            "created_at":   _fmt_ts(r.get("ts_ms")),
+            "status":       status,
+            "decision":     decision,
+            "reason_code":  r.get("reason_code"),
+            "channel":      r.get("channel"),
+            "duration_ms":  r.get("duration_ms") or r.get("total_latency_ms"),
+        }
+
+
+def _fmt_ts(ts_ms: Optional[int]) -> Optional[str]:
+    if ts_ms is None:
+        return None
+    import datetime
+    dt = datetime.datetime.fromtimestamp(ts_ms / 1000)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
