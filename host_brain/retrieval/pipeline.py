@@ -10,7 +10,10 @@ from urllib.parse import urlparse
 from host_brain.app.config import load_host_config
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
+from host_brain.lsp.vault import ArtifactVault
 from host_brain.memory.chroma_client import ChromaRuntimeConfig, load_chroma_runtime_config
+from host_brain.memory.canon_style_store import StyleCanonStore
+from host_brain.memory.canon_world_store import WorldCanonStore
 from host_brain.retrieval.embedding import (
     EmbeddingServiceContract,
     build_embedding_provider_registry,
@@ -329,6 +332,13 @@ def build_retrieval_pipeline_from_env(
     reranker_registry = build_reranker_provider_registry(env=merged)
 
     chroma_client = ChromaHttpSearchClient.from_runtime_config(chroma_cfg_result.config)
+    style_root = str(merged.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
+    world_root = str(merged.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
+    vault_root = str(merged.get("Natsume_VAULT_ROOT") or "host_brain/data/vault").strip()
+
+    style_store = StyleCanonStore(style_root=style_root, ledger=ledger)
+    world_store = WorldCanonStore(world_root=world_root, ledger=ledger)
+    artifact_vault = ArtifactVault(root_dir=vault_root, ledger=ledger)
 
     embedding_service = EmbeddingServiceContract(
         ledger=ledger,
@@ -340,6 +350,9 @@ def build_retrieval_pipeline_from_env(
     recall_service = RecallFusionServiceContract(
         ledger=ledger,
         chroma_client=chroma_client,
+        style_store=style_store,
+        world_store=world_store,
+        artifact_vault=artifact_vault,
         runtime_config=recall_cfg_result.config,
         node_id=node_id,
         available=True,

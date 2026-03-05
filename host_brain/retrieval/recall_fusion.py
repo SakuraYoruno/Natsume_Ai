@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import re
 import sqlite3
 from typing import Any, Mapping
 
@@ -31,9 +32,28 @@ STATUS_DEGRADED = "DEGRADED"
 
 DEFAULT_RECALL_ROUTE = "default"
 DEFAULT_RECALL_COLLECTION = "episodic"
+DEFAULT_RECALL_STORE_ID = "episodic_vector"
 DEFAULT_RECALL_TOP_K = 8
 DEFAULT_RECALL_SCORE_WEIGHT = 1.0
 DEFAULT_NODE_SELECTOR = "default"
+
+STORE_SQLITE_LEDGER = "sqlite_ledger"
+STORE_NEO4J_BOND = "neo4j_bond"
+STORE_EPISODIC_VECTOR = "episodic_vector"
+STORE_STYLE_CANON = "style_canon"
+STORE_WORLD_CANON = "world_canon"
+STORE_ARTIFACT_VAULT = "artifact_vault"
+
+SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset(
+    {
+        STORE_SQLITE_LEDGER,
+        STORE_NEO4J_BOND,
+        STORE_EPISODIC_VECTOR,
+        STORE_STYLE_CANON,
+        STORE_WORLD_CANON,
+        STORE_ARTIFACT_VAULT,
+    }
+)
 
 # 混合检索默认权重（TASK-0202）
 DEFAULT_VECTOR_WEIGHT: float = 0.7
@@ -43,7 +63,8 @@ DEFAULT_FTS_WEIGHT: float = 0.3
 @dataclass(frozen=True)
 class RecallRouteConfig:
     route_id: str
-    collection: str
+    store_id: str
+    collection: str | None
     top_k: int
     score_weight: float
     node_selector: str
@@ -51,6 +72,7 @@ class RecallRouteConfig:
     def as_dict(self) -> dict[str, Any]:
         return {
             "route_id": self.route_id,
+            "store_id": self.store_id,
             "collection": self.collection,
             "top_k": int(self.top_k),
             "score_weight": float(self.score_weight),
@@ -125,6 +147,10 @@ class RecallFusionServiceContract:
         *,
         ledger: SQLiteLedger | None = None,
         chroma_client: InMemoryChromaClient | None = None,
+        neo4j_client: Any | None = None,
+        style_store: Any | None = None,
+        world_store: Any | None = None,
+        artifact_vault: Any | None = None,
         runtime_config: RecallRuntimeConfig | None = None,
         node_id: str | None = None,
         available: bool = True,
@@ -135,6 +161,10 @@ class RecallFusionServiceContract:
     ) -> None:
         self.ledger = ledger
         self.chroma = chroma_client or InMemoryChromaClient()
+        self.neo4j = neo4j_client
+        self.style_store = style_store
+        self.world_store = world_store
+        self.artifact_vault = artifact_vault
         self.runtime_config = runtime_config or _default_runtime_config()
         self.node_id = str(node_id).strip() if node_id is not None else None
         self.available = bool(available)
@@ -149,6 +179,259 @@ class RecallFusionServiceContract:
             except Exception:
                 # FTS5 不可用时降级为纯向量检索
                 self._fts_searcher = None
+
+    def _search_route(
+        self,
+        *,
+        route: RecallRouteConfig,
+        query: str,
+        query_embedding: list[float],
+    ) -> list[dict[str, Any]]:
+        store_id = str(route.store_id or STORE_EPISODIC_VECTOR).strip().lower()
+        if store_id == STORE_EPISODIC_VECTOR:
+            collection = str(route.collection or DEFAULT_RECALL_COLLECTION)
+            return self.chroma.search(
+                query_embedding=query_embedding,
+                top_k=int(route.top_k),
+                collection=collection,
+            )
+        if store_id == STORE_SQLITE_LEDGER:
+            return self._search_sqlite_ledger(query=query, top_k=int(route.top_k))
+        if store_id == STORE_NEO4J_BOND:
+            return self._search_neo4j_bond(query=query, top_k=int(route.top_k))
+        if store_id == STORE_STYLE_CANON:
+            return self._search_style_canon(query=query, top_k=int(route.top_k))
+        if store_id == STORE_WORLD_CANON:
+            return self._search_world_canon(query=query, top_k=int(route.top_k))
+        if store_id == STORE_ARTIFACT_VAULT:
+            return self._search_artifact_vault(query=query, top_k=int(route.top_k))
+        raise RuntimeError(f"unsupported recall store_id: {store_id}")
+
+    def _search_sqlite_ledger(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+        if self.ledger is None:
+            raise RuntimeError("sqlite ledger unavailable")
+        rows = list(self.ledger.intent_log)
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            raw_text = str(row.get("raw_text") or "").strip()
+            normalized = row.get("normalized_json")
+            normalized_text = (
+                json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+                if isinstance(normalized, Mapping)
+                else str(normalized or "")
+            )
+            text = f"{raw_text}\n{normalized_text}".strip()
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            request_id = str(row.get("request_id") or "").strip() or None
+            intent_id = str(row.get("intent_id") or "").strip() or None
+            memory_id = str(intent_id or request_id or f"ledger_{len(scored)}")
+            evidence_refs = _normalize_recall_refs(
+                row.get("evidence_refs"),
+                fallback=(f"intent://{intent_id}" if intent_id else None),
+            )
+            scored.append(
+                (
+                    score,
+                    {
+                        "memory_id": memory_id,
+                        "text": _truncate_text_for_recall(text, limit=512),
+                        "score": score,
+                        "metadata": {
+                            "store_id": STORE_SQLITE_LEDGER,
+                            "request_id": request_id,
+                            "intent_id": intent_id,
+                            "event_id": (str(row.get("event_id") or "").strip() or None),
+                            "evidence_refs": evidence_refs,
+                            "source_ref": f"ledger://intent_log/{memory_id}",
+                            "evidence_ref": evidence_refs[0] if evidence_refs else f"ledger://intent/{memory_id}",
+                        },
+                    },
+                )
+            )
+        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+    def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+        records: list[Mapping[str, Any]] = []
+        events_attr = getattr(self.neo4j, "events", None)
+        if isinstance(events_attr, list):
+            records = [row for row in events_attr if isinstance(row, Mapping)]
+        elif self.ledger is not None:
+            records = [row for row in self.ledger.bond_update_log if isinstance(row, Mapping)]
+        if not records:
+            return []
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in records:
+            payload = row.get("payload")
+            payload_text = (
+                json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                if isinstance(payload, Mapping)
+                else str(payload or "")
+            )
+            text = " ".join(
+                part for part in (
+                    str(row.get("topic_id") or "").strip(),
+                    str(row.get("capability_hint") or "").strip(),
+                    payload_text,
+                )
+                if part
+            )
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            event_id = str(row.get("event_id") or "").strip() or f"bond_event_{len(scored)}"
+            refs = _normalize_recall_refs(
+                row.get("evidence_refs"),
+                fallback=f"evd://bond/{event_id}",
+            )
+            scored.append(
+                (
+                    score,
+                    {
+                        "memory_id": event_id,
+                        "text": _truncate_text_for_recall(text, limit=512),
+                        "score": score,
+                        "metadata": {
+                            "store_id": STORE_NEO4J_BOND,
+                            "event_id": event_id,
+                            "topic_id": str(row.get("topic_id") or "").strip() or None,
+                            "capability_hint": str(row.get("capability_hint") or "").strip() or None,
+                            "evidence_refs": refs,
+                            "source_ref": f"neo4j://bond/event/{event_id}",
+                            "evidence_ref": refs[0],
+                        },
+                    },
+                )
+            )
+        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+    def _search_style_canon(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+        if self.style_store is None:
+            return []
+        entries = getattr(self.style_store, "list_entries", lambda: [])()
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for entry in entries or []:
+            canon_id = str(getattr(entry, "canon_id", "") or "").strip()
+            content = str(getattr(entry, "content", "") or "").strip()
+            tags = list(getattr(entry, "tags", []) or [])
+            text = " ".join([content] + [str(tag) for tag in tags if str(tag).strip()])
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            version = int(getattr(entry, "version", 0) or 0)
+            content_hash = str(getattr(entry, "hash", "") or "").strip() or "unknown"
+            source_ref = f"style_canon://{canon_id}@v{version}"
+            scored.append(
+                (
+                    score,
+                    {
+                        "memory_id": canon_id,
+                        "text": _truncate_text_for_recall(content, limit=512),
+                        "score": score,
+                        "metadata": {
+                            "store_id": STORE_STYLE_CANON,
+                            "canon_id": canon_id,
+                            "version": version,
+                            "hash": content_hash,
+                            "evidence_refs": [source_ref],
+                            "source_ref": source_ref,
+                            "evidence_ref": source_ref,
+                        },
+                    },
+                )
+            )
+        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+    def _search_world_canon(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+        if self.world_store is None:
+            return []
+        docs = getattr(self.world_store, "list_documents", lambda: [])()
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for doc in docs or []:
+            doc_id = str(getattr(doc, "doc_id", "") or "").strip()
+            title = str(getattr(doc, "title", "") or "").strip()
+            body = str(getattr(doc, "body", "") or "").strip()
+            tags = list(getattr(doc, "tags", []) or [])
+            text = " ".join(part for part in [title, body, *[str(tag) for tag in tags]] if part)
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            version = int(getattr(doc, "version", 0) or 0)
+            doc_hash = str(getattr(doc, "hash", "") or "").strip() or "unknown"
+            source_ref = f"world_canon://{doc_id}@v{version}"
+            scored.append(
+                (
+                    score,
+                    {
+                        "memory_id": doc_id,
+                        "text": _truncate_text_for_recall(body or title, limit=512),
+                        "score": score,
+                        "metadata": {
+                            "store_id": STORE_WORLD_CANON,
+                            "doc_id": doc_id,
+                            "version": version,
+                            "hash": doc_hash,
+                            "evidence_refs": [source_ref],
+                            "source_ref": source_ref,
+                            "evidence_ref": source_ref,
+                        },
+                    },
+                )
+            )
+        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+    def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+        if self.ledger is None:
+            return []
+        manifests = [row for row in self.ledger.vault_manifest_index if isinstance(row, Mapping)]
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in manifests:
+            manifest_id = str(row.get("manifest_id") or "").strip()
+            if not manifest_id:
+                continue
+            integrity = str(row.get("integrity_digest") or "").strip()
+            refs = _normalize_recall_refs(
+                row.get("evidence_refs"),
+                fallback=f"vault://manifest/{manifest_id}",
+            )
+            text = " ".join(
+                part
+                for part in (
+                    manifest_id,
+                    str(row.get("intent_id") or "").strip(),
+                    str(row.get("policy_profile_id") or "").strip(),
+                    integrity,
+                    " ".join(refs),
+                )
+                if part
+            )
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            source_ref = f"vault://manifest/{manifest_id}"
+            scored.append(
+                (
+                    score,
+                    {
+                        "memory_id": manifest_id,
+                        "text": _truncate_text_for_recall(text, limit=512),
+                        "score": score,
+                        "metadata": {
+                            "store_id": STORE_ARTIFACT_VAULT,
+                            "manifest_id": manifest_id,
+                            "hash": integrity or None,
+                            "artifact_id": None,
+                            "evidence_refs": refs,
+                            "source_ref": source_ref,
+                            "evidence_ref": refs[0],
+                        },
+                    },
+                )
+            )
+        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
 
     def recall(
         self,
@@ -213,15 +496,16 @@ class RecallFusionServiceContract:
         fused_candidates: dict[str, dict[str, Any]] = {}
         for route in routes:
             try:
-                rows = self.chroma.search(
+                rows = self._search_route(
+                    route=route,
+                    query=normalized_query,
                     query_embedding=normalized_vector,
-                    top_k=int(route.top_k),
-                    collection=route.collection,
                 )
             except Exception as exc:
-                reason_code = _map_route_exception(exc)
+                reason_code = _map_route_exception(exc, store_id=route.store_id)
                 route_error = {
                     "route_id": route.route_id,
+                    "store_id": route.store_id,
                     "collection": route.collection,
                     "reason_code": reason_code,
                     "detail": str(exc),
@@ -230,6 +514,7 @@ class RecallFusionServiceContract:
                 route_rows.append(
                     {
                         "route_id": route.route_id,
+                        "store_id": route.store_id,
                         "collection": route.collection,
                         "status": STATUS_DEGRADED,
                         "reason_code": reason_code,
@@ -242,6 +527,7 @@ class RecallFusionServiceContract:
             route_rows.append(
                 {
                     "route_id": route.route_id,
+                    "store_id": route.store_id,
                     "collection": route.collection,
                     "status": STATUS_OK,
                     "reason_code": None,
@@ -534,6 +820,7 @@ def _parse_routes(
     if routes_raw is None or not str(routes_raw).strip():
         fallback = {
             default_route: {
+                "store_id": str(merged.get("RETR_RECALL_STORE_ID") or DEFAULT_RECALL_STORE_ID),
                 "collection": str(merged.get("RETR_RECALL_COLLECTION") or DEFAULT_RECALL_COLLECTION),
                 "top_k": merged.get("RETR_RECALL_TOP_K", DEFAULT_RECALL_TOP_K),
                 "score_weight": merged.get("RETR_RECALL_SCORE_WEIGHT", DEFAULT_RECALL_SCORE_WEIGHT),
@@ -607,7 +894,9 @@ def _coerce_route(
         )
         return None
 
-    collection = str(raw_route.get("collection") or "").strip()
+    store_id = str(raw_route.get("store_id") or DEFAULT_RECALL_STORE_ID).strip().lower()
+    collection_raw = raw_route.get("collection")
+    collection = str(collection_raw).strip() if collection_raw is not None else ""
     node_selector = str(raw_route.get("node_selector") or "").strip()
     top_k = _coerce_positive_int(
         raw_value=raw_route.get("top_k"),
@@ -620,11 +909,22 @@ def _coerce_route(
         issues=issues,
     )
 
-    if not collection:
+    if store_id not in SUPPORTED_RECALL_STORE_IDS:
+        issues.append(
+            RecallConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail=(
+                    f"{field_name}.{route_id}.store_id must be one of "
+                    f"{sorted(SUPPORTED_RECALL_STORE_IDS)}"
+                ),
+                field=f"{field_name}.{route_id}.store_id",
+            )
+        )
+    if store_id == STORE_EPISODIC_VECTOR and not collection:
         issues.append(
             RecallConfigIssue(
                 reason_code=CONFIG_REQUIRED_MISSING,
-                detail=f"{field_name}.{route_id}.collection is required",
+                detail=f"{field_name}.{route_id}.collection is required for store_id={STORE_EPISODIC_VECTOR}",
                 field=f"{field_name}.{route_id}.collection",
             )
         )
@@ -636,12 +936,14 @@ def _coerce_route(
                 field=f"{field_name}.{route_id}.node_selector",
             )
         )
-    if top_k is None or score_weight is None or not collection or not node_selector:
+    if top_k is None or score_weight is None or not node_selector or store_id not in SUPPORTED_RECALL_STORE_IDS:
         return None
 
+    normalized_collection = collection if collection else store_id
     return RecallRouteConfig(
         route_id=route_id,
-        collection=collection,
+        store_id=store_id,
+        collection=normalized_collection,
         top_k=top_k,
         score_weight=score_weight,
         node_selector=node_selector,
@@ -662,9 +964,11 @@ def _normalize_candidate(
 
     base_score = _coerce_score(raw.get("score"))
     weighted_score = round(base_score * float(route.score_weight), 6)
-    source_ref = str(metadata.get("source_ref") or f"memory://{route.collection}/{memory_id}")
-    evidence_ref = str(metadata.get("evidence_ref") or f"evd://{route.collection}/{memory_id}")
+    collection_for_ref = str(route.collection or route.store_id or DEFAULT_RECALL_COLLECTION)
+    source_ref = str(metadata.get("source_ref") or f"memory://{collection_for_ref}/{memory_id}")
+    evidence_ref = str(metadata.get("evidence_ref") or f"evd://{collection_for_ref}/{memory_id}")
     merged_metadata = dict(metadata)
+    merged_metadata["store_id"] = route.store_id
     merged_metadata["collection"] = route.collection
     merged_metadata["route_id"] = route.route_id
     merged_metadata["route_score_weight"] = float(route.score_weight)
@@ -683,6 +987,56 @@ def _normalize_candidate(
     }
 
 
+def _truncate_text_for_recall(text: str, *, limit: int = 512) -> str:
+    value = str(text or "").strip()
+    if len(value) <= int(limit):
+        return value
+    return value[: max(1, int(limit) - 3)] + "..."
+
+
+def _normalize_recall_refs(raw_refs: Any, *, fallback: str | None = None) -> list[str]:
+    refs: list[str] = []
+    if isinstance(raw_refs, (list, tuple)):
+        for item in raw_refs:
+            cleaned = str(item or "").strip()
+            if cleaned and cleaned not in refs:
+                refs.append(cleaned)
+    elif isinstance(raw_refs, str):
+        cleaned = raw_refs.strip()
+        if cleaned:
+            refs.append(cleaned)
+    if not refs and fallback:
+        fallback_clean = str(fallback).strip()
+        if fallback_clean:
+            refs.append(fallback_clean)
+    return refs
+
+
+def _text_similarity_score(query: str, text: str) -> float:
+    query_tokens = _tokenize_for_similarity(query)
+    if not query_tokens:
+        return 0.0
+    text_tokens = _tokenize_for_similarity(text)
+    if not text_tokens:
+        return 0.0
+    overlap = len(set(query_tokens).intersection(set(text_tokens)))
+    if overlap <= 0:
+        return 0.0
+    return round(max(0.0, min(1.0, overlap / max(1, len(set(query_tokens))))), 6)
+
+
+def _tokenize_for_similarity(text: str) -> list[str]:
+    value = str(text or "").strip().lower()
+    if not value:
+        return []
+    latin_tokens = re.findall(r"[a-z0-9_]+", value)
+    cjk_tokens = re.findall(r"[\u4e00-\u9fff]", value)
+    tokens = [token for token in latin_tokens + cjk_tokens if token]
+    if tokens:
+        return tokens
+    return [value]
+
+
 def _coerce_score(raw_value: Any) -> float:
     try:
         value = float(raw_value)
@@ -691,11 +1045,17 @@ def _coerce_score(raw_value: Any) -> float:
     return round(max(0.0, min(1.0, value)), 6)
 
 
-def _map_route_exception(exc: Exception) -> str:
+def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
+    normalized_store = str(store_id or STORE_EPISODIC_VECTOR).strip().lower()
+    if normalized_store != STORE_EPISODIC_VECTOR:
+        return RETR_RECALL_UNAVAILABLE
     text = str(exc)
     if CHROMA_COLLECTION_MISSING in text:
         return CHROMA_COLLECTION_MISSING
     if CHROMA_VECTOR_DIM_MISMATCH in text:
+        return CHROMA_VECTOR_DIM_MISMATCH
+    text_lc = text.lower()
+    if "expecting embedding with dimension" in text_lc:
         return CHROMA_VECTOR_DIM_MISMATCH
     return CHROMA_ENDPOINT_UNAVAILABLE
 
@@ -703,6 +1063,7 @@ def _map_route_exception(exc: Exception) -> str:
 def _default_runtime_config() -> RecallRuntimeConfig:
     route = RecallRouteConfig(
         route_id=DEFAULT_RECALL_ROUTE,
+        store_id=STORE_EPISODIC_VECTOR,
         collection=DEFAULT_RECALL_COLLECTION,
         top_k=DEFAULT_RECALL_TOP_K,
         score_weight=DEFAULT_RECALL_SCORE_WEIGHT,

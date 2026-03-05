@@ -1,26 +1,77 @@
-# 版本：v1.0
+# 版本：v1.1
 # Model Plane Node Registry — 模型节点注册表
 # 定义 model_node_id → 节点配置，供 graph_model_resolve.py 使用
+# 约束来源：docs/30_devspec/ModelPlane.md §3.1（9 云节点）
 
 nodes:
-  renderer_ja_c_style:
-    description: "日语风格渲染节点（Gemini 2.5 Flash，C-style 人格）"
+  core_reasoner_primary:
+    description: "主语义推理（CoreDraft.v1）"
     provider: gemini
-    model_id: gemini-2.5-flash
-    temperature: 0.7
-    max_output_tokens: 1024
-    node_allowlist_envs:
-      - dev
-      - staging
-      - prod
+    model_id: gemini-2.5-pro
+    temperature: 0.35
+    max_output_tokens: 420
+    node_allowlist_envs: [dev, staging, prod]
 
-  renderer_en_fallback:
-    description: "英语降级渲染节点"
+  core_reasoner_secondary:
+    description: "主推理备选（CoreDraft.v1）"
     provider: gemini
     model_id: gemini-2.5-flash
-    temperature: 0.5
-    max_output_tokens: 512
-    node_allowlist_envs:
-      - dev
-      - staging
-      - prod
+    temperature: 0.30
+    max_output_tokens: 360
+    node_allowlist_envs: [dev, staging, prod]
+
+  planner_constraints:
+    description: "复杂任务约束拆解（CoreDraft.v1）"
+    provider: gemini
+    model_id: gemini-2.5-pro
+    temperature: 0.20
+    max_output_tokens: 300
+    node_allowlist_envs: [dev, staging, prod]
+
+  tool_planner:
+    description: "工具选择与参数草案（CoreDraft.v1）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.20
+    max_output_tokens: 280
+    node_allowlist_envs: [dev, staging, prod]
+
+  safety_verifier:
+    description: "安全与承诺强度校验（Verifier.v1）"
+    provider: gemini
+    model_id: gemini-2.5-flash-lite
+    temperature: 0.10
+    max_output_tokens: 220
+    node_allowlist_envs: [dev, staging, prod]
+
+  consistency_verifier:
+    description: "一致性/混槽/格式漂移校验（Verifier.v1）"
+    provider: gemini
+    model_id: gemini-2.5-flash-lite
+    temperature: 0.10
+    max_output_tokens: 220
+    node_allowlist_envs: [dev, staging, prod]
+
+  renderer_ja_c_style:
+    description: "日文 C 风格渲染（RenderDraft.v1）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.45
+    max_output_tokens: 360
+    node_allowlist_envs: [dev, staging, prod]
+
+  workbench_translate:
+    description: "翻译与术语一致性辅助（CoreDraft.v1）"
+    provider: gemini
+    model_id: gemini-2.5-pro
+    temperature: 0.20
+    max_output_tokens: 320
+    node_allowlist_envs: [dev, staging, prod]
+
+  workbench_code_assist:
+    description: "代码协作草案（CoreDraft.v1）"
+    provider: gemini
+    model_id: gemini-2.5-pro
+    temperature: 0.20
+    max_output_tokens: 340
+    node_allowlist_envs: [dev, staging, prod]

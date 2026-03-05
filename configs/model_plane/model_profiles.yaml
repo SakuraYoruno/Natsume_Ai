@@ -1,32 +1,98 @@
-# 版本：v1.0
+# 版本：v1.1
 # Model Plane Profiles — 模型平面配置文件
 # 定义 model_profile_id → routing 映射，供 graph_model_resolve.py 使用
+# 约束来源：docs/30_devspec/ModelPlane.md §3.1/§4.2
 
 profiles:
   chat_ja_24x7_v1:
-    description: "日语对话主力 profile（24x7 在线，Gemini 2.5 Flash）"
+    description: "聊天主链（六路召回后接九节点 LangGraph + 强制日文渲染）"
     routing:
       CHAT:
         chain:
+          - core_reasoner_primary
+          - core_reasoner_secondary
+          - planner_constraints
+          - tool_planner
+          - safety_verifier
+          - consistency_verifier
           - renderer_ja_c_style
+          - workbench_translate
+          - workbench_code_assist
         timeouts_ms:
-          renderer_ja_c_style: 1200
+          core_reasoner_primary: 12000
+          core_reasoner_secondary: 9000
+          planner_constraints: 8000
+          tool_planner: 8000
+          safety_verifier: 7000
+          consistency_verifier: 7000
+          renderer_ja_c_style: 9000
+          workbench_translate: 10000
+          workbench_code_assist: 10000
+
+      core_reasoner_primary:
+        chain: [core_reasoner_primary]
+        timeouts_ms:
+          core_reasoner_primary: 12000
+
+      core_reasoner_secondary:
+        chain: [core_reasoner_secondary]
+        timeouts_ms:
+          core_reasoner_secondary: 9000
+
+      planner_constraints:
+        chain: [planner_constraints]
+        timeouts_ms:
+          planner_constraints: 8000
+
+      tool_planner:
+        chain: [tool_planner]
+        timeouts_ms:
+          tool_planner: 8000
+
+      safety_verifier:
+        chain: [safety_verifier]
+        timeouts_ms:
+          safety_verifier: 7000
+
+      consistency_verifier:
+        chain: [consistency_verifier]
+        timeouts_ms:
+          consistency_verifier: 7000
+
+      workbench_translate:
+        chain: [workbench_translate]
+        timeouts_ms:
+          workbench_translate: 10000
+
+      workbench_code_assist:
+        chain: [workbench_code_assist]
+        timeouts_ms:
+          workbench_code_assist: 10000
+
+      renderer_ja_c_style:
+        chain: [renderer_ja_c_style]
+        timeouts_ms:
+          renderer_ja_c_style: 9000
+
       SUMMARIZE:
-        chain:
-          - renderer_ja_c_style
+        chain: [core_reasoner_secondary, renderer_ja_c_style]
         timeouts_ms:
-          renderer_ja_c_style: 2000
+          core_reasoner_secondary: 9000
+          renderer_ja_c_style: 9000
+
       PLAN:
-        chain:
-          - renderer_ja_c_style
+        chain: [planner_constraints, renderer_ja_c_style]
         timeouts_ms:
-          renderer_ja_c_style: 1500
+          planner_constraints: 8000
+          renderer_ja_c_style: 9000
 
   chat_en_fallback_v1:
-    description: "英语对话降级 profile"
+    description: "兼容 profile（仍保持日文渲染节点以满足 RenderGuard）"
     routing:
       CHAT:
         chain:
+          - core_reasoner_secondary
           - renderer_ja_c_style
         timeouts_ms:
-          renderer_ja_c_style: 1200
+          core_reasoner_secondary: 9000
+          renderer_ja_c_style: 9000

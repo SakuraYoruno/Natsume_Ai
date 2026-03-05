@@ -225,7 +225,7 @@ class TestOrchestrationGraphContract(unittest.TestCase):
         self.assertEqual("gemini", call["provider"])
         self.assertEqual("gemini-2.5-flash", call["model_id"])
         self.assertTrue(call["param_hash"])
-        self.assertEqual(1200, call["timeout_ms"])
+        self.assertEqual(9000, call["timeout_ms"])
 
         ledger_rows = self.ledger.model_control_log
         self.assertEqual(1, len(ledger_rows))

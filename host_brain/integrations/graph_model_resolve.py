@@ -24,8 +24,18 @@ def resolve_model_nodes(
 ) -> dict[str, dict[str, Any]]:
     """Resolve model nodes from inline config or model plane profiles."""
     explicit = _normalize_model_nodes(graph_config.get("model_nodes"))
+    overrides = _normalize_model_nodes(graph_config.get("model_node_overrides"))
     if explicit:
-        return explicit
+        if not overrides:
+            return explicit
+        merged: dict[str, dict[str, Any]] = {}
+        for key, row in explicit.items():
+            merged_row = dict(row)
+            override_row = overrides.get(key)
+            if isinstance(override_row, Mapping):
+                merged_row.update(dict(override_row))
+            merged[key] = merged_row
+        return merged
     if not model_profile_id:
         return {}
 
@@ -102,6 +112,11 @@ def resolve_model_nodes(
             "candidate_nodes": candidates,
             "selector_env": env_name,
         }
+        _apply_node_overrides(
+            node_config=node_config,
+            overrides=overrides,
+            candidate_ids=[selected_model_node_id, node_id],
+        )
         resolved[selected_model_node_id] = dict(node_config)
         if node_id != selected_model_node_id:
             resolved[node_id] = dict(node_config)
@@ -168,3 +183,16 @@ def _resolve_timeout_ms(
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _apply_node_overrides(
+    *,
+    node_config: dict[str, Any],
+    overrides: Mapping[str, dict[str, Any]],
+    candidate_ids: list[str],
+) -> None:
+    for candidate_id in candidate_ids:
+        override_row = overrides.get(candidate_id)
+        if not isinstance(override_row, Mapping):
+            continue
+        node_config.update(dict(override_row))

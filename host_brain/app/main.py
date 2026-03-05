@@ -477,9 +477,15 @@ def _summarize_sources(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _normalize_graph_runtime_status(raw: dict[str, Any] | None) -> dict[str, Any]:
     row = dict(raw or {})
-    status = str(row.get("status") or "UNKNOWN").strip().upper()
+    if not row:
+        return {
+            "status": "SKIPPED",
+            "reason_code": None,
+            "detail": "graph runtime probe not provided",
+        }
+    status = str(row.get("status") or "SKIPPED").strip().upper()
     reason_code = str(row.get("reason_code") or "").strip() or None
-    detail = str(row.get("detail") or "")
+    detail = str(row.get("detail") or ("graph runtime probe not provided" if status == "SKIPPED" else ""))
     return {
         "status": status,
         "reason_code": reason_code,
@@ -558,12 +564,13 @@ def _build_dependency_matrix(
         )
 
     graph_status = str(graph_runtime.get("status") or "").upper()
+    graph_available = graph_status in {"OK", "SKIPPED"}
     rows.append(
         {
             "component_id": "graph_runtime",
             "service_id": "graph_runtime",
             "component_type": "graph_runtime",
-            "available": (graph_status == "OK"),
+            "available": graph_available,
             "reason_code": graph_runtime.get("reason_code"),
             "detail": str(graph_runtime.get("detail") or ""),
         }

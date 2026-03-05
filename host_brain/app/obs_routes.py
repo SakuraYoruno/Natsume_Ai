@@ -31,15 +31,15 @@ router = APIRouter(prefix="/obs", tags=["observability"])
 # 9 个 LLM 云节点静态注册表（来自 node_registry.yaml）
 # ---------------------------------------------------------------------------
 _LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
-    "core_reasoner_primary":    {"role": "主推理",      "provider": "openai",   "model_id": "gpt-5.2"},
-    "core_reasoner_secondary":  {"role": "备用推理",    "provider": "openai",   "model_id": "gpt-5-mini"},
-    "planner_constraints":      {"role": "规划约束",    "provider": "openai",   "model_id": "gpt-5.2-pro"},
-    "tool_planner":             {"role": "工具规划",    "provider": "deepseek", "model_id": "deepseek-chat"},
-    "safety_verifier":          {"role": "安全验证",    "provider": "openai",   "model_id": "gpt-4.1-mini"},
-    "consistency_verifier":     {"role": "一致性验证",  "provider": "gemini",   "model_id": "gemini-2.5-flash-lite"},
-    "renderer_ja_c_style":      {"role": "日文渲染",    "provider": "gemini",   "model_id": "gemini-2.5-flash"},
-    "workbench_translate":      {"role": "翻译工作台",  "provider": "gemini",   "model_id": "gemini-2.5-pro"},
-    "workbench_code_assist":    {"role": "代码辅助",    "provider": "deepseek", "model_id": "deepseek-chat"},
+    "core_reasoner_primary":    {"role": "主推理",      "provider": "gemini", "model_id": "gemini-2.5-pro"},
+    "core_reasoner_secondary":  {"role": "备用推理",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
+    "planner_constraints":      {"role": "规划约束",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
+    "tool_planner":             {"role": "工具规划",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
+    "safety_verifier":          {"role": "安全验证",    "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
+    "consistency_verifier":     {"role": "一致性验证",  "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
+    "renderer_ja_c_style":      {"role": "日文渲染",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
+    "workbench_translate":      {"role": "翻译工作台",  "provider": "gemini", "model_id": "gemini-2.5-pro"},
+    "workbench_code_assist":    {"role": "代码辅助",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
 }
 
 # 边缘服务列表
