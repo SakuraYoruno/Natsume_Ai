@@ -3109,6 +3109,108 @@ TASK-XXXX 标题
   - `tests/unit/test_recall_fusion_hybrid.py`（新增）。
 - 关联需求/测试：FR-MEM-003；FR-MEM-005；T-RCL-HYB-01~06。
 
+## M21 测试基线修复 + Canon 向量投影追踪 + 发布清单（TASK-0203~0206）
+
+> **里程碑目标**：消除全量测试中 11 个失败用例（P1 根因：`model_profiles.yaml` 缺失导致 `_load_model_plane_meta()` 抛出异常；P2：`panel_page` 缺少返回类型注解 + Web UI contract 假设 SSR）；补写 Canon 向量投影模块的需求追踪与 contract 测试；生成 M21 发布清单，使全量测试达到 ≥1661 passed，0 failed。
+
+### TASK-0203 M21-A：release_manifest.py `_load_model_plane_meta()` 优雅降级修复（P1）
+- 状态：DONE
+- 任务描述：修复 `release_manifest.py` 中 `_load_model_plane_meta()` 方法在 `configs/model_plane/model_profiles.yaml` 文件不存在时直接抛出 `FileNotFoundError` 的问题；改为文件存在性检查，缺失时返回 `None` 并记录 `WARNING`，使 model_plane 节点降级为 `DEGRADED` 而非 `FAILED`，从而恢复 9 个失败用例（4 个 `test_model_plane_release_contract` + 4 个 `test_orchestration_graph_contract` + 1 个 E2E drill）。
+- 输入：
+  - `host_brain/app/release_manifest.py`（`_load_model_plane_meta()` 现有实现）；
+  - `tests/contract/test_model_plane_release_contract.py`（4 个失败用例）；
+  - `tests/contract/test_orchestration_graph_contract.py`（4 个失败用例）；
+  - `tests/e2e/test_production_drill_e2e.py`（1 个失败用例）；
+  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 A/B/E2E 根因分析）。
+- 输出：
+  - `host_brain/app/release_manifest.py`：`_load_model_plane_meta()` 新增 `if not profiles_path.exists(): logger.warning(...); return None` 分支；调用方 `build_checklist()` 对 `None` 返回值做空值保护（跳过 model_plane 条目或填充 `status=DEGRADED`）；
+  - `tests/contract/test_model_plane_release_contract.py`：更新 `test_model_plane_version_parseable` 断言，允许文件不存在时返回 `None`（而非断言 `profiles_path.exists()`）；
+  - `tests/contract/test_orchestration_graph_contract.py`：更新 4 个用例的期望状态，允许 model_plane 节点为 `DEGRADED`（而非 `FAILED`）。
+- 验收标准：
+  - `_load_model_plane_meta()` 在 `model_profiles.yaml` 不存在时不抛出异常，返回 `None` 并写入 WARNING 日志；
+  - `test_model_plane_release_contract.py` 4 个用例全部通过；
+  - `test_orchestration_graph_contract.py` 4 个用例全部通过；
+  - `test_production_drill_e2e.py::test_t_drill_02_five_orchestration_control_scenarios_are_stable` 通过（`failed_count == 2`）；
+  - 全量测试较修复前净增 ≥9 个通过用例，0 新增失败。
+- 涉及文件路径：
+  - `host_brain/app/release_manifest.py`；
+  - `tests/contract/test_model_plane_release_contract.py`；
+  - `tests/contract/test_orchestration_graph_contract.py`；
+  - `tests/e2e/test_production_drill_e2e.py`（仅验证，不修改）。
+- 关联需求/测试：NFR-REL-001；NFR-MAINT-001；T-REL-MANIFEST-01~04；T-ORCH-02/04/05。
+
+### TASK-0204 M21-B：P2 代码质量修复（panel_page 类型注解 + Web UI contract CSR 适配）
+- 状态：DONE
+- 任务描述：修复两个 P2 质量问题：① `fastapi_app.py` 中 `panel_page` 路由函数缺少返回类型注解（`-> HTMLResponse`），导致 `test_quality_contract.py` 静态扫描失败；② `test_web_ui_contract.py` 假设 SSR 内嵌关键词（`request_id` / `searchInput`），与当前 React CSR 架构不符，需更新为检测 SPA 特征（`<div id="root">` 或 JS bundle 文件存在性）。
+- 输入：
+  - `host_brain/app/fastapi_app.py`（`panel_page` 函数现有实现）；
+  - `tests/contract/test_quality_contract.py`（`test_fastapi_panel_page_has_return_annotation` 失败用例）；
+  - `tests/contract/test_web_ui_contract.py`（`test_panel_contains_key_elements` 失败用例）；
+  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 C/D 根因分析）。
+- 输出：
+  - `host_brain/app/fastapi_app.py`：`panel_page` 函数签名添加 `-> HTMLResponse` 返回类型注解；
+  - `tests/contract/test_web_ui_contract.py`：`test_panel_contains_key_elements` 改为检测 `<div id="root">` 存在性（SPA 挂载点）或检测 `static/monitor/index.html` 文件存在性 + `<title>` 标签；移除对 `request_id` / `searchInput` 的 SSR 假设断言。
+- 验收标准：
+  - `test_fastapi_panel_page_has_return_annotation` 通过（`annotations` 含 `return` 键）；
+  - `test_panel_contains_key_elements` 通过（检测 SPA 特征而非 SSR 内嵌内容）；
+  - 原有 `test_quality_contract.py` 其余用例全部继续通过；
+  - 全量测试较修复前净增 ≥2 个通过用例，0 新增失败。
+- 涉及文件路径：
+  - `host_brain/app/fastapi_app.py`；
+  - `tests/contract/test_quality_contract.py`（仅验证，不修改）；
+  - `tests/contract/test_web_ui_contract.py`。
+- 关联需求/测试：FR-OBS-003；NFR-MAINT-001；T-QUALITY-PANEL-01；T-WEBUI-CONTRACT-01。
+
+### TASK-0205 M21-C：Canon 向量投影模块需求追踪补写 + contract 测试补充
+- 状态：DONE
+- 任务描述：为本次拉取新增的 `canon_vector_projection.py` 模块补写需求追踪条目（R-156~R-157），并在 contract 层补充 `test_canon_vector_projection_contract.py`，覆盖投影文档结构、向量 ID 确定性、Chroma 不可用降级、metadata 标量约束（tags 存为逗号分隔字符串）等关键契约点；同步更新 `requirements_trace.md`。
+- 输入：
+  - `host_brain/memory/canon_vector_projection.py`（Canon 向量投影现有实现）；
+  - `tests/unit/test_canon_vector_projection.py`（现有 2 个单元测试）；
+  - `docs/60_trace/CANON_VECTOR_PROJECTION_2026-03-04.md`（实现追踪文档）；
+  - `docs/60_trace/requirements_trace.md`（现有 R-155 为最新条目）；
+  - DevSpec §19（Canon 治理）；FR-CANON-001（Canon 文件 SSOT）。
+- 输出：
+  - `docs/60_trace/requirements_trace.md`：新增 M21-C 小节，补写 R-156（Canon 向量投影核心契约）、R-157（Canon 向量投影运行时脚本与降级策略）；
+  - `tests/contract/test_canon_vector_projection_contract.py`（新增）：
+    - T-CVP-CONTRACT-01：投影文档 `canon_kind` 字段必须为 `style` 或 `world`；
+    - T-CVP-CONTRACT-02：向量 ID 格式确定性（`canon_style::{canon_id}` / `canon_world::{doc_id}`）；
+    - T-CVP-CONTRACT-03：metadata `tags` 字段必须为逗号分隔字符串（非 list），`tags_count` 为整数；
+    - T-CVP-CONTRACT-04：Chroma 不可用时投影操作不抛出未捕获异常，返回降级结果；
+    - T-CVP-CONTRACT-05：投影文档不含 Canon SSOT 写路径（不直接修改 `canon_proposal_log` / `canon_change_log`）；
+    - T-CVP-CONTRACT-06：`--dry-run` 模式不写入 Chroma，仅返回 `docs_collected` 统计。
+- 验收标准：
+  - T-CVP-CONTRACT-01~06 全部通过；
+  - `requirements_trace.md` R-156~R-157 条目完整（含需求来源、实现描述、实现文件、测试编号、状态、里程碑）；
+  - 原有 `test_canon_vector_projection.py` 2 个单元测试继续通过；
+  - 全量测试较修复前净增 ≥6 个通过用例，0 新增失败。
+- 涉及文件路径：
+  - `host_brain/memory/canon_vector_projection.py`（只读，不修改）；
+  - `tests/contract/test_canon_vector_projection_contract.py`（新增）；
+  - `docs/60_trace/requirements_trace.md`（新增 R-156~R-157）。
+- 关联需求/测试：FR-CANON-001；NFR-REL-001；T-CVP-CONTRACT-01~06。
+
+### TASK-0206 M21-D：M21 发布清单
+- 状态：DONE
+- 任务描述：在 TASK-0203~0205 全部 DONE 后，生成 M21 发布清单（`m21_release.json`），记录 M21-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M21 里程碑状态为 DONE；更新 `requirements_trace.md` M21 小节状态。
+- 输入：TASK-0203~0205 全部 DONE；全量测试 ≥1661 passed，0 failed。
+- 输出：
+  - `docs/50_release/m21_release.json`（新增）：含 `release_ready`、`all_p1_fixed`、`all_p2_fixed`、`canon_vector_projection_traced`、`total_tests_passed`、`zero_regressions` 字段；
+  - `docs/20_prd/PRD.md`：M21 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：M21 小节 R-156~R-157 状态更新为 DONE。
+- 验收标准：
+  - `release_ready=true`；
+  - `all_p1_fixed=true`（`_load_model_plane_meta()` 降级修复已验证）；
+  - `all_p2_fixed=true`（`panel_page` 类型注解 + Web UI contract CSR 适配已验证）；
+  - `canon_vector_projection_traced=true`（R-156~R-157 已补写）；
+  - `total_tests_passed ≥ 1661`；
+  - `zero_regressions=true`。
+- 涉及文件路径：
+  - `docs/50_release/m21_release.json`（新增）；
+  - `docs/20_prd/PRD.md`；
+  - `docs/60_trace/requirements_trace.md`。
+- 关联需求：NFR-REL-001；NFR-MAINT-001。
+
 
 
 

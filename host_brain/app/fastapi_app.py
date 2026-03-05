@@ -919,7 +919,7 @@ async def metrics() -> MetricsResponse:
 # Web UI 面板入口（M17: 已升级为 React SPA，旧 panel.html 已移除）
 # ---------------------------------------------------------------------------
 @app.get("/panel")
-async def panel_page():
+async def panel_page() -> "RedirectResponse":
     """监控面板入口 — 重定向到 M17 React SPA"""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/monitor/index.html", status_code=301)

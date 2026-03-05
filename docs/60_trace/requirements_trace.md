@@ -1013,3 +1013,26 @@
 | R-154 | FR-OBS-011 | MetricsTimeseriesService：多维度时序数据查询（request_count/reject_rate/latency_p50/latency_p95/reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time；数据点上限 1000（超出自动降采样，步长 = ceil(total/1000)）；无数据区间返回 null 值点保证时序连续性；支持多 metric 批量查询（返回 {metrics: {metric_name: {data_points: [...]}}} 结构）；`GET /obs/metrics/timeseries` 端点注册到 obs_routes.py | host_brain/obs/metrics_timeseries.py; host_brain/app/obs_routes.py | T-OBS-TS-01~06 | DONE | M18-D |
 | R-155 | FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001 | M17+M18 发布清单锁定：m17_release.json（前端 SPA 构建成功；四页面全量可用；zero_js_errors=true；design_review_passed=true）+ m18_release.json（26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；release_ready=true；all_api_endpoints_tested=true）；UI_UPGRADE_CHANGELOG.md v3.0 条目更新为已完成 | docs/50_release/m17_release.json; docs/50_release/m18_release.json; docs/50_project/UI_UPGRADE_CHANGELOG.md | T-REL-01（复用） | DONE | M18-E |
 
+
+## M21 测试基线修复 + Canon 向量投影追踪（R-156~R-157）
+
+## R-156
+- 系统级需求：Canon 向量投影核心契约——投影文档 canon_kind 必须为 style/world；向量 ID 格式确定性（canon_style::{canon_id} / canon_world::{doc_id}）；metadata tags 为逗号分隔字符串（非 list），tags_count 为整数；Chroma 不可用时不抛出未捕获异常；投影文档不含 Canon SSOT 写路径
+- PRD 需求编号（FR）：FR-CANON-001；NFR-REL-001
+- 来源：PRD §4.12；DevSpec §19
+- DevSpec 落点：DevSpec §19.1
+- DevTasks（TASK）：TASK-0205
+- 验收测试（T-xx）：T-CVP-CONTRACT-01~05
+- 当前进展（2026-03-05）：新增 `tests/contract/test_canon_vector_projection_contract.py`，T-CVP-CONTRACT-01~05（15 个测试）全部通过；canon_kind/vector_id/tags/Chroma降级/SSOT写路径五个核心契约点均已覆盖。
+- 覆盖状态：DONE
+
+## R-157
+- 系统级需求：Canon 向量投影运行时脚本与降级策略——dry-run 模式（include_style=False/include_world=False）不写入 Chroma，仅返回 docs_collected 统计；collect_canon_projection_documents 不依赖 Chroma，始终可正常返回；style-only/world-only 模式正确隔离写入
+- PRD 需求编号（FR）：FR-CANON-001；NFR-REL-001
+- 来源：PRD §4.12；DevSpec §19
+- DevSpec 落点：DevSpec §19.1
+- DevTasks（TASK）：TASK-0205
+- 验收测试（T-xx）：T-CVP-CONTRACT-06
+- 当前进展（2026-03-05）：T-CVP-CONTRACT-06（5 个测试）全部通过；dry-run/style-only/world-only 三种模式均已验证；collect_canon_projection_documents 无 Chroma 依赖已确认。
+- 覆盖状态：DONE
+

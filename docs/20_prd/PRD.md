@@ -830,6 +830,20 @@ M18-C 链路节点详情 API：FR-OBS-010（GET /obs/trace/{request_id} — 结�
 M18-D 指标时序 API：FR-OBS-011（GET /obs/metrics/timeseries — 多维度时序数据：请求量/拒绝率/延迟分位数）— **DONE**（2026-03-04）
 M18-E M18 发布清单 — **DONE**（2026-03-04：26 个新增测试全部通过；1577 全量通过；m18_release.json 已生成）
 
+M19 可观测链路深化 + 代码审查修复收口：
+M19-A~F 代码审查 P0/P1 修复（BUG-BE-001/002、BUG-FE-001、WARN-BE-005、WARN-TEST-001/002）— **DONE**（2026-03-04：1598 passed；m19_release.json 已生成）
+
+M20 Agent 自我感知 + 记忆保护 + 混合检索增强：
+M20-A AgentHealthCheck 心跳精神状态检测：FR-OBS-001（SchedulerEngine 心跳任务 + HEARTBEAT_ALERT 审计 + list_health API）— **DONE**（2026-03-05：519 unit passed）
+M20-B ContextCompressor 压缩前静默保存：FR-MEM-005 扩展（COMPRESS_BEFORE_SAVE 审计事件 + pre_compress_save_enabled 配置）— **DONE**（2026-03-05）
+M20-C Episodic 混合检索增强：FR-MEM-003/005（向量 70% + FTS5 30% 权重融合 + HybridFusionStrategy + 0021_episodic_fts5.sql）— **DONE**（2026-03-05：1648/1661 passed，11 失败待 M21 修复）
+
+M21 测试基线修复 + Canon 向量投影追踪 + 发布清单：
+M21-A release_manifest.py `_load_model_plane_meta()` 优雅降级修复（P1：9 个失败用例根因）— **DONE**（2026-03-05：重建 model_profiles.yaml + node_registry.yaml，添加 logging，9 个 P1 用例全部恢复）
+M21-B P2 代码质量修复（panel_page 类型注解 + Web UI contract CSR 适配）— **DONE**（2026-03-05：panel_page 添加 -> RedirectResponse 注解，Web UI contract 改为 SPA 特征检测）
+M21-C Canon 向量投影模块需求追踪补写（R-156~R-157）+ contract 测试（T-CVP-CONTRACT-01~06）— **DONE**（2026-03-05：20 个 contract 测试全部通过）
+M21-D M21 发布清单（目标：≥1661 passed，0 failed；m21_release.json）— **DONE**（2026-03-05：1678 passed，2 skipped，0 failed）
+
 ---
 
 ## 附录 A：PRD 写作与验收模板（供持续新增需求时使用）

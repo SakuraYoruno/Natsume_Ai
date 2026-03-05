@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+logger = logging.getLogger(__name__)
 
 from host_brain.core.config_snapshot import CONFIG_SNAPSHOT_DIGEST_PREFIX
 from host_brain.core.errors import (
@@ -337,9 +340,23 @@ def _digest_file(path: Path) -> str:
     return CHECKSUM_PREFIX + digest
 
 
-def _load_model_plane_meta(root: Path) -> dict[str, Any]:
+def _load_model_plane_meta(root: Path) -> dict[str, Any] | None:
     profile_path = root / MODEL_PLANE_PROFILES_PATH
     registry_path = root / MODEL_PLANE_NODE_REGISTRY_PATH
+
+    if not profile_path.exists():
+        logger.warning(
+            "_load_model_plane_meta: %s not found, skipping model_plane assets",
+            MODEL_PLANE_PROFILES_PATH,
+        )
+        return None
+    if not registry_path.exists():
+        logger.warning(
+            "_load_model_plane_meta: %s not found, skipping model_plane assets",
+            MODEL_PLANE_NODE_REGISTRY_PATH,
+        )
+        return None
+
     profile_text = profile_path.read_text(encoding="utf-8")
     registry_text = registry_path.read_text(encoding="utf-8")
 

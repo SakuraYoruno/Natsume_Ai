@@ -1,0 +1,32 @@
+# 版本：v1.0
+# Model Plane Profiles — 模型平面配置文件
+# 定义 model_profile_id → routing 映射，供 graph_model_resolve.py 使用
+
+profiles:
+  chat_ja_24x7_v1:
+    description: "日语对话主力 profile（24x7 在线，Gemini 2.5 Flash）"
+    routing:
+      CHAT:
+        chain:
+          - renderer_ja_c_style
+        timeouts_ms:
+          renderer_ja_c_style: 1200
+      SUMMARIZE:
+        chain:
+          - renderer_ja_c_style
+        timeouts_ms:
+          renderer_ja_c_style: 2000
+      PLAN:
+        chain:
+          - renderer_ja_c_style
+        timeouts_ms:
+          renderer_ja_c_style: 1500
+
+  chat_en_fallback_v1:
+    description: "英语对话降级 profile"
+    routing:
+      CHAT:
+        chain:
+          - renderer_ja_c_style
+        timeouts_ms:
+          renderer_ja_c_style: 1200

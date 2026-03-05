@@ -1,0 +1,26 @@
+# 版本：v1.0
+# Model Plane Node Registry — 模型节点注册表
+# 定义 model_node_id → 节点配置，供 graph_model_resolve.py 使用
+
+nodes:
+  renderer_ja_c_style:
+    description: "日语风格渲染节点（Gemini 2.5 Flash，C-style 人格）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.7
+    max_output_tokens: 1024
+    node_allowlist_envs:
+      - dev
+      - staging
+      - prod
+
+  renderer_en_fallback:
+    description: "英语降级渲染节点"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.5
+    max_output_tokens: 512
+    node_allowlist_envs:
+      - dev
+      - staging
+      - prod
