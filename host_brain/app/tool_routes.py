@@ -344,7 +344,7 @@ async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
         # 其他拒绝 → 422
         if result.status == RESULT_REJECTED:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=result.detail.get("result_digest", "tool execution rejected"),
                 headers={"X-Reason-Code": result.result_code},
             )

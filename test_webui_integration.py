@@ -32,8 +32,8 @@ def start_test_server():
         print(f"[ERROR] Failed to start server: {e}")
         return False
 
-def test_webui_routes():
-    """测试Web UI路由"""
+def run_webui_routes_check():
+    """测试Web UI路由（手动集成测试，不在 pytest 全量运行中执行）"""
     base_url = "http://127.0.0.1:8000"
 
     # 测试健康检查端点
@@ -106,6 +106,7 @@ def test_webui_routes():
 
     return True
 
+
 def main():
     """主测试函数"""
     print("Starting Web UI integration test...")
@@ -117,7 +118,7 @@ def main():
     print("[OK] Test server started")
 
     # 测试Web UI路由
-    if not test_webui_routes():
+    if not run_webui_routes_check():
         return False
 
     print("\n[SUCCESS] Web UI integration test passed!")

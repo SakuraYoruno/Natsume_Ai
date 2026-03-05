@@ -3212,5 +3212,42 @@ TASK-XXXX 标题
 - 关联需求：NFR-REL-001；NFR-MAINT-001。
 
 
+## M22 代码质量 Warning 清零 + 发布清单
+
+### TASK-0207 M22-A：HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 修复
+- 状态：DONE
+- 任务描述：FastAPI 新版本将 `HTTP_422_UNPROCESSABLE_ENTITY` 标记为 deprecated，应改为 `HTTP_422_UNPROCESSABLE_CONTENT`。修复 `tool_routes.py`（1 处）和 `scheduler_routes.py`（3 处）共 4 处。
+- 输入：全量测试 4 个 DeprecationWarning（`HTTP_422_UNPROCESSABLE_ENTITY`）。
+- 输出：
+  - `host_brain/app/tool_routes.py`：1 处 `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`；
+  - `host_brain/scheduler/scheduler_routes.py`：3 处 `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`。
+- 验收标准：全量测试无 `HTTP_422_UNPROCESSABLE_ENTITY` DeprecationWarning；0 新增失败。
+- 涉及文件路径：`host_brain/app/tool_routes.py`；`host_brain/scheduler/scheduler_routes.py`。
+- 关联需求：NFR-MAINT-001；代码审查报告 F-15（P2）。
+
+### TASK-0208 M22-B：asyncio.get_event_loop() DeprecationWarning 修复
+- 状态：DONE
+- 任务描述：Python 3.10+ 中 `asyncio.get_event_loop()` 在无当前事件循环时已弃用，应改为 `asyncio.new_event_loop()` + `run_until_complete()` + `close()`。修复 `tests/unit/test_canon_cursor_pagination.py`（2 处）和 `tests/unit/test_canon_routes_tx.py`（4 处）共 6 处。同时将 `test_webui_integration.py` 中的 `test_webui_routes` 重命名为 `run_webui_routes_check`（该函数需要真实 HTTP 服务器，不应被 pytest 自动收集）。
+- 输入：全量测试 2 个 DeprecationWarning（`asyncio.get_event_loop()`）+ 1 个 PytestReturnNotNoneWarning。
+- 输出：
+  - `tests/unit/test_canon_cursor_pagination.py`：2 处 `asyncio.get_event_loop().run_until_complete()` → `asyncio.new_event_loop().run_until_complete()`；
+  - `tests/unit/test_canon_routes_tx.py`：4 处 `asyncio.get_event_loop().run_until_complete()` → `asyncio.new_event_loop().run_until_complete()`；
+  - `test_webui_integration.py`：`test_webui_routes` 重命名为 `run_webui_routes_check`，消除 PytestReturnNotNoneWarning。
+- 验收标准：全量测试 0 warnings；0 新增失败；1677 passed，2 skipped。
+- 涉及文件路径：`tests/unit/test_canon_cursor_pagination.py`；`tests/unit/test_canon_routes_tx.py`；`test_webui_integration.py`。
+- 关联需求：NFR-MAINT-001；代码审查报告 F-25（P2）。
+
+### TASK-0209 M22-C：M22 发布清单
+- 状态：DONE
+- 任务描述：TASK-0207~0208 全部 DONE 后，生成 M22 发布清单（`m22_release.json`），记录 M22-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M22 里程碑状态为 DONE。
+- 输入：TASK-0207~0208 全部 DONE；全量测试 1677 passed，0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m22_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M22 里程碑条目状态更新为 DONE。
+- 验收标准：`release_ready=true`；`zero_warnings=true`；`total_tests_passed=1677`；`zero_regressions=true`。
+- 涉及文件路径：`docs/50_release/m22_release.json`；`docs/20_prd/PRD.md`。
+- 关联需求：NFR-REL-001；NFR-MAINT-001。
+
+
 
 

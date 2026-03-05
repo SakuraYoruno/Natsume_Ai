@@ -114,9 +114,13 @@ class TestApproveTransaction:
                 proposed_tags=[],
                 proposed_body="test body",
             )
-            asyncio.get_event_loop().run_until_complete(
-                cr.approve_proposal("p-tx-02", req)
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    cr.approve_proposal("p-tx-02", req)
+                )
+            finally:
+                loop.close()
 
         assert len(tx_entered) == 1, "approve 应调用 ledger.transaction()"
 
@@ -172,9 +176,13 @@ class TestApproveTransactionRollback:
                 proposed_body="test body",
             )
             with pytest.raises(HTTPException) as exc_info:
-                asyncio.get_event_loop().run_until_complete(
-                    cr.approve_proposal("p-tx-03", req)
-                )
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        cr.approve_proposal("p-tx-03", req)
+                    )
+                finally:
+                    loop.close()
             assert exc_info.value.status_code == 500
 
         assert len(rollback_called) == 1, "异常时应触发事务回滚"
@@ -214,7 +222,7 @@ class TestRejectAuditNonFatal:
             from host_brain.app.canon_routes import CanonProposalRejectRequest
             req = CanonProposalRejectRequest(reason="test reject")
             # 不应抛出异常
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.new_event_loop().run_until_complete(
                 cr.reject_proposal("p-tx-04", req)
             )
             assert result.proposal_id == "p-tx-04"
@@ -248,9 +256,13 @@ class TestRejectAuditNonFatal:
             from host_brain.app.canon_routes import CanonProposalRejectRequest
             req = CanonProposalRejectRequest(reason="test reject")
             with caplog.at_level(logging.WARNING, logger="Natsume.canon_routes"):
-                asyncio.get_event_loop().run_until_complete(
-                    cr.reject_proposal("p-tx-04b", req)
-                )
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        cr.reject_proposal("p-tx-04b", req)
+                    )
+                finally:
+                    loop.close()
             assert any("audit write failed" in r.message for r in caplog.records)
 
 

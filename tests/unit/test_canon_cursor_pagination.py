@@ -185,9 +185,13 @@ class TestListProposalsEndpointCursorParam:
         mock_ledger.list_proposals.return_value = ([], 0)
         cr._ledger_provider = lambda: mock_ledger
 
-        asyncio.get_event_loop().run_until_complete(
-            cr.list_proposals(after_id=42)
-        )
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                cr.list_proposals(after_id=42)
+            )
+        finally:
+            loop.close()
 
         # 验证 after_id 被传递给 ledger.list_proposals
         call_kwargs = mock_ledger.list_proposals.call_args[1]
@@ -202,9 +206,13 @@ class TestListProposalsEndpointCursorParam:
         mock_ledger.list_proposals.return_value = ([], 0)
         cr._ledger_provider = lambda: mock_ledger
 
-        asyncio.get_event_loop().run_until_complete(
-            cr.list_proposals()
-        )
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                cr.list_proposals()
+            )
+        finally:
+            loop.close()
 
         call_kwargs = mock_ledger.list_proposals.call_args[1]
         assert call_kwargs.get("after_id") is None

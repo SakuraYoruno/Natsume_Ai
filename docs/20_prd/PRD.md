@@ -844,6 +844,11 @@ M21-B P2 代码质量修复（panel_page 类型注解 + Web UI contract CSR 适�
 M21-C Canon 向量投影模块需求追踪补写（R-156~R-157）+ contract 测试（T-CVP-CONTRACT-01~06）— **DONE**（2026-03-05：20 个 contract 测试全部通过）
 M21-D M21 发布清单（目标：≥1661 passed，0 failed；m21_release.json）— **DONE**（2026-03-05：1678 passed，2 skipped，0 failed）
 
+M22 代码质量 Warning 清零：
+M22-A HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 修复（tool_routes.py + scheduler_routes.py 共 4 处）— **DONE**（2026-03-05）
+M22-B asyncio.get_event_loop() DeprecationWarning 修复（test_canon_cursor_pagination.py + test_canon_routes_tx.py 共 6 处；test_webui_integration.py test_webui_routes 重命名）— **DONE**（2026-03-05）
+M22-C M22 发布清单（1677 passed，2 skipped，0 failed，0 warnings；m22_release.json）— **DONE**（2026-03-05）
+
 ---
 
 ## 附录 A：PRD 写作与验收模板（供持续新增需求时使用）

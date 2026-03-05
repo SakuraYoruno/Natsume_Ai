@@ -128,7 +128,7 @@ def _parse_trigger_mode(mode_str: str) -> TriggerMode:
         return TriggerMode(mode_str.lower())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"reason_code": SCHED_CONFIG_INVALID, "detail": f"invalid trigger_mode: {mode_str!r}"},
         )
 
@@ -138,7 +138,7 @@ def _parse_priority(priority_str: str) -> TaskPriority:
         return TaskPriority(priority_str.upper())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"reason_code": SCHED_CONFIG_INVALID, "detail": f"invalid priority: {priority_str!r}"},
         )
 
@@ -176,7 +176,7 @@ async def create_task(req: TaskCreateRequest) -> TaskResponse:
         registry.register(task)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"reason_code": SCHED_CONFIG_INVALID, "detail": str(exc)},
         )
 
