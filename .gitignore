@@ -56,6 +56,20 @@ temp/
 .env.*
 !.env.example
 
+# --- data/ runtime artifacts (never commit) ---
+# JDK / Neo4j 安装包及解压目录
+data/install/
+data/jdk*/
+data/neo4j*/
+# ChromaDB 向量数据库运行时文件
+data/chroma_db/
+# 其他数据库文件
+data/*.db
+data/*.sqlite3
+
+# --- models/ 下载的模型文件 (never commit) ---
+models/
+
 # --- host_brain ---
 # Runtime DB and state files
 host_brain/data/
