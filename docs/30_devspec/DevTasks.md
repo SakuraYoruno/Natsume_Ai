@@ -3639,13 +3639,13 @@ TASK-XXXX 标题
 
 ## M26 生产就绪 II — 情感驱动交互 + 端到端集成验证 + 运行时健康加固
 
-- 状态：IN_PROGRESS
+- 状态：DONE（2026-03-05）
 - 目标：在对话链路中引入 emotion_tag 心情参数，驱动 VTS 表情 + TTS 语气联动；将 VTS 热键配置抽离为独立配置文件；建立端到端集成冒烟测试；加固运行时健康检查；LLM 路由配置热更新；VTS 映射表版本回滚。
 - 质量门禁：全量测试 ≥1832 passed（1802 + 30 新增），0 failed，0 warnings，零回归。
 
 ### TASK-0222 M26-A：端到端集成冒烟测试套件
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：建立覆盖"用户输入 → Intent → Governor → Skill → Audit"完整链路的集成冒烟测试，确保各模块联动无断点；新增审计链完整性校验（request_id 串联三联画日志）。
 - 输入：`tests/e2e/` 目录；`tests/contract/` 目录；现有 host_brain 链路代码。
 - 输出：
@@ -3665,7 +3665,7 @@ TASK-XXXX 标题
 
 ### TASK-0223 M26-B：运行时健康检查加固（/health 端点完整性）
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：确保 `/health` 端点聚合所有已注册服务的健康状态，并在服务降级时给出精确的 `reason_code`；新增 `validate_health_response()` 方法校验响应结构完整性。
 - 输入：`host_brain/app/main.py`；`host_brain/obs/health_aggregator.py`（若存在）。
 - 输出：
@@ -3684,7 +3684,7 @@ TASK-XXXX 标题
 
 ### TASK-0224 M26-C：LLM 路由配置热更新 + 审计
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：`LlmGatewayContract` 的路由策略支持热更新（不重启），变更写 `llm_route_config_log`；新增 `update_route_config()` 方法 + `log_llm_route_config_change()` 审计方法。
 - 输入：`host_brain/integrations/llm_gateway.py`；`host_brain/audit/sqlite_ledger.py`。
 - 输出：
@@ -3707,7 +3707,8 @@ TASK-XXXX 标题
 
 ### TASK-0225 M26-D：VTS 映射表热更新 + 版本回滚
 
-- 状态：TODO
+- 状态：CANCELLED（2026-03-05）
+- 取消原因：M24-B 已实现 `save_mapping(version=...)`/`load_mapping(version=...)`/`list_versions()` 完整版本化能力；M26-F 已将热键配置抽离为 `configs/vts/vts_hotkey_config.yaml` 静态文件，运行时不存在动态变更映射表的场景，`rollback_to_version()` 仅为语法糖且无实际使用场景，取消以聚焦更高优先级任务。
 - 任务描述：`VTSMappingStore` 支持映射表热更新（不重启）和版本回滚，变更写 `vts_mapping_change_log`；新增 `rollback_to_version()` 方法 + 版本历史存储。
 - 输入：`host_brain/channels/vts_mapping_store.py`。
 - 输出：
@@ -3884,7 +3885,6 @@ TASK-XXXX 标题
   - `e2e_smoke_suite=true`（端到端冒烟测试套件已建立）；
   - `health_aggregator_validated=true`（健康检查加固已完成）；
   - `llm_route_hot_reload=true`（LLM 路由热更新已实现）；
-  - `vts_mapping_rollback=true`（VTS 映射表版本回滚已实现）；
   - `total_tests_passed ≥ 1835`；
   - `zero_regressions=true`；
   - `zero_warnings=true`。

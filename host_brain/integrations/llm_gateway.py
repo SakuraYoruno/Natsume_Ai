@@ -513,6 +513,89 @@ class LlmGatewayContract:
             detail=detail,
         )
 
+    def update_route_config(
+        self,
+        *,
+        new_config: dict[str, Any],
+        request_id: str | None = None,
+        ts_ms: int | None = None,
+    ) -> None:
+        """M26-C：热更新路由配置（不重启），变更写 llm_route_config_log。
+
+        支持热更新的字段：
+        - provider_name：主模型提供商
+        - available：是否可用
+        - timeout_ms：超时时间
+        - fallback_providers：备用模型列表
+
+        非法配置（非 dict / 含非法字段类型）时抛出 ValueError(INVALID_ROUTE_CONFIG)。
+
+        Args:
+            new_config: 新路由配置字典。
+            request_id: 请求 ID（可选，用于审计串联）。
+            ts_ms: 时间戳（毫秒）。
+        """
+        import hashlib
+        from host_brain.core.ids import new_request_id as _new_req_id
+
+        if not isinstance(new_config, dict):
+            raise ValueError("INVALID_ROUTE_CONFIG: new_config 必须是字典")
+
+        # 校验字段类型
+        if "provider_name" in new_config and not isinstance(new_config["provider_name"], str):
+            raise ValueError("INVALID_ROUTE_CONFIG: provider_name 必须是字符串")
+        if "available" in new_config and not isinstance(new_config["available"], bool):
+            raise ValueError("INVALID_ROUTE_CONFIG: available 必须是布尔值")
+        if "timeout_ms" in new_config and not isinstance(new_config["timeout_ms"], int):
+            raise ValueError("INVALID_ROUTE_CONFIG: timeout_ms 必须是整数")
+        if "fallback_providers" in new_config and not isinstance(new_config["fallback_providers"], list):
+            raise ValueError("INVALID_ROUTE_CONFIG: fallback_providers 必须是列表")
+
+        # 记录变更前 hash
+        before_state = {
+            "provider_name": self.provider_name,
+            "available": self.available,
+            "timeout_ms": self.timeout_ms,
+            "fallback_providers": self.fallback_providers,
+        }
+        before_hash = hashlib.sha256(
+            json.dumps(before_state, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()[:16]
+
+        # 应用新配置（热更新立即生效）
+        if "provider_name" in new_config:
+            self.provider_name = str(new_config["provider_name"])
+        if "available" in new_config:
+            self.available = bool(new_config["available"])
+        if "timeout_ms" in new_config:
+            self.timeout_ms = int(new_config["timeout_ms"])
+        if "fallback_providers" in new_config:
+            self.fallback_providers = list(new_config["fallback_providers"])
+
+        # 记录变更后 hash
+        after_state = {
+            "provider_name": self.provider_name,
+            "available": self.available,
+            "timeout_ms": self.timeout_ms,
+            "fallback_providers": self.fallback_providers,
+        }
+        after_hash = hashlib.sha256(
+            json.dumps(after_state, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()[:16]
+
+        # 写审计日志
+        if self.ledger is not None and hasattr(self.ledger, "log_llm_route_config_change"):
+            try:
+                self.ledger.log_llm_route_config_change({
+                    "request_id": request_id or _new_req_id(),
+                    "before_hash": before_hash,
+                    "after_hash": after_hash,
+                    "changed_fields": json.dumps(list(new_config.keys()), ensure_ascii=False),
+                    "ts_ms": int(ts_ms if ts_ms is not None else now_ms()),
+                })
+            except Exception:
+                pass  # 审计写入失败不影响热更新
+
 
 def _normalize_raw_response(value: Any) -> str:
     if isinstance(value, str):

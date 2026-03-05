@@ -1,0 +1,26 @@
+{
+  "test_id": "T1-1",
+  "service": "host.audit.sqlite_ledger",
+  "operation": "wal_health",
+  "params_in": {
+    "db_path": ":memory:",
+    "check_same_thread": false
+  },
+  "params_out": {
+    "wal_status": "DEGRADED",
+    "journal_mode": "MEMORY",
+    "synchronous": "FULL",
+    "degradation_reason": "journal_mode returned MEMORY, expected WAL",
+    "wal_config": {
+      "journal_mode": "WAL",
+      "synchronous": "NORMAL",
+      "wal_autocheckpoint": 1000,
+      "busy_timeout_ms": 5000,
+      "cache_size_kb": 2000
+    },
+    "wal_size_pages": -1,
+    "db_path": ":memory:"
+  },
+  "status": "PASS",
+  "ts_ms": 1772697641980
+}

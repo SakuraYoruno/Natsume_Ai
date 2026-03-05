@@ -1,119 +1,159 @@
 {
   "milestone": "M26",
-  "title": "生产就绪 II — 情感驱动交互",
   "release_date": "2026-03-05",
-  "status": "DONE",
+  "base_milestone": "M25",
   "release_ready": true,
-  "quality_gates": {
-    "total_tests_passed": 1896,
-    "total_tests_skipped": 10,
-    "total_tests_failed": 0,
-    "new_tests_added": 94,
-    "zero_regressions": true,
-    "zero_warnings": true,
-    "baseline_m25": 1802
-  },
-  "feature_flags": {
-    "emotion_driven_dialogue": true,
-    "mood_emotion_constraint": true,
-    "sub_emotion_driven": true,
-    "emotion_intensity": true,
-    "vts_hotkey_config_extracted": true,
-    "e2e_smoke_suite": false,
-    "health_aggregator_validated": false,
-    "llm_route_hot_reload": false,
-    "vts_mapping_rollback": false
-  },
-  "subtasks": [
+  "emotion_driven_dialogue": true,
+  "mood_emotion_constraint": true,
+  "sub_emotion_driven": true,
+  "emotion_intensity": true,
+  "vts_hotkey_config_extracted": true,
+  "e2e_smoke_suite": true,
+  "health_aggregator_validated": true,
+  "llm_route_hot_reload": true,
+  "vts_mapping_rollback": "CANCELLED",
+  "zero_regressions": true,
+  "zero_warnings": true,
+  "total_tests_passed": 1918,
+  "total_tests_skipped": 10,
+  "total_tests_failed": 0,
+  "net_new_tests": 89,
+  "tasks": [
     {
-      "id": "TASK-0226",
+      "task_id": "TASK-0222",
+      "name": "M26-A 端到端集成冒烟测试套件",
+      "status": "DONE",
+      "files_changed": [
+        "tests/integration/test_e2e_smoke_m26.py",
+        "tests/integration/test_audit_chain_integrity_m26.py"
+      ],
+      "new_tests": 10,
+      "description": "覆盖普通对话/执行/拒绝/降级/重放/过期 6 条链路；审计链完整性校验（request_id 串联三联画日志）"
+    },
+    {
+      "task_id": "TASK-0223",
+      "name": "M26-B 运行时健康检查加固",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/obs/service_health_aggregator.py",
+        "tests/unit/test_health_aggregator_m26.py"
+      ],
+      "new_tests": 6,
+      "description": "新增 validate_health_response() 函数；校验顶层字段完整性 + services 条目字段完整性；T-HEALTH-AGG-01~04 全部通过"
+    },
+    {
+      "task_id": "TASK-0224",
+      "name": "M26-C LLM 路由配置热更新 + 审计",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/integrations/llm_gateway.py",
+        "host_brain/audit/sqlite_ledger.py",
+        "host_brain/audit/migrations/0040_llm_route_config_log.sql",
+        "tests/unit/test_llm_route_config_m26.py"
+      ],
+      "new_tests": 6,
+      "description": "新增 update_route_config() 热更新方法；log_llm_route_config_change() 审计方法；llm_route_config_log 表；幂等迁移脚本；T-LLM-CFG-01~04 全部通过"
+    },
+    {
+      "task_id": "TASK-0225",
+      "name": "M26-D VTS 映射表热更新 + 版本回滚",
+      "status": "CANCELLED",
+      "cancel_reason": "M24-B 已实现完整版本化能力；M26-F 已将热键配置抽离为静态 YAML 文件，运行时无动态变更场景，rollback_to_version() 仅为语法糖",
+      "files_changed": [],
+      "new_tests": 0
+    },
+    {
+      "task_id": "TASK-0226",
       "name": "M26-E 情感驱动对话链路",
       "status": "DONE",
-      "new_tests": 27,
       "files_changed": [
         "prompts/llm_contract/core_output_contract.json",
         "host_brain/core/qa.py",
         "edge_client/rpc/voice.py",
         "edge_client/runtime/voice_pipeline.py",
-        "tests/contract/test_edge_voice_pipeline_contract.py",
-        "tests/unit/test_emotion_driven_dialogue_m26.py"
-      ]
+        "tests/unit/test_emotion_driven_dialogue_m26.py",
+        "tests/contract/test_edge_voice_pipeline_contract.py"
+      ],
+      "new_tests": 27,
+      "description": "emotion_tag 串联 LLM→QA→VTS→TTS；_validate_emotion_tag() + extract_emotion_tag()；speak 事件透传 emotion_tag；enqueue_speak 时先触发 set_expression"
     },
     {
-      "id": "TASK-0227",
+      "task_id": "TASK-0227",
       "name": "M26-F VTS 热键配置文件抽离 + 说明文档",
       "status": "DONE",
-      "new_tests": 10,
       "files_changed": [
         "configs/vts/vts_hotkey_config.yaml",
         "host_brain/channels/vts_mapping_store.py",
         "docs/30_devspec/vts_hotkey_config_guide.md",
         "tests/unit/test_vts_hotkey_config_m26.py"
-      ]
+      ],
+      "new_tests": 4,
+      "description": "宅家少女 49 个热键完整配置；load_from_config_file() 方法；6 分组说明文档"
     },
     {
-      "id": "TASK-0228",
+      "task_id": "TASK-0228",
       "name": "M26-G mood_state → emotion_tag 约束映射",
       "status": "DONE",
-      "new_tests": 23,
       "files_changed": [
         "host_brain/core/metabolism.py",
         "host_brain/core/qa.py",
         "tests/unit/test_mood_emotion_constraint_m26.py"
-      ]
+      ],
+      "new_tests": 4,
+      "description": "MOOD_EMOTION_CONSTRAINTS 常量；mood_to_emotion_constraint() 函数；QA 集成 mood_state 约束校验；防止 critical 状态输出 EXCITED"
     },
     {
-      "id": "TASK-0229",
+      "task_id": "TASK-0229",
       "name": "M26-H sub_emotion 细粒度表情驱动",
       "status": "DONE",
-      "new_tests": 22,
       "files_changed": [
         "prompts/llm_contract/core_output_contract.json",
         "host_brain/channels/vts_mapping_store.py",
-        "edge_client/actuators/vts_driver.py",
         "edge_client/runtime/voice_pipeline.py",
         "tests/unit/test_sub_emotion_m26.py"
-      ]
+      ],
+      "new_tests": 4,
+      "description": "sub_emotion 字段（blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；sub_emotion_to_hotkey() 方法；充分利用 15 个细粒度热键"
     },
     {
-      "id": "TASK-0230",
+      "task_id": "TASK-0230",
       "name": "M26-I emotion_intensity 强度参数",
       "status": "DONE",
-      "new_tests": 12,
       "files_changed": [
         "prompts/llm_contract/core_output_contract.json",
         "edge_client/actuators/tts_engine.py",
         "edge_client/actuators/vts_driver.py",
         "edge_client/runtime/voice_pipeline.py",
         "tests/unit/test_emotion_intensity_m26.py"
-      ]
+      ],
+      "new_tests": 12,
+      "description": "emotion_intensity 0.0~1.0；TTS synthesize() 接收强度参数；VTS set_expression() intensity 影响 duration_ms；QA 截断超范围值"
+    },
+    {
+      "task_id": "TASK-0231",
+      "name": "M26-J M26 发布清单",
+      "status": "DONE",
+      "files_changed": [
+        "docs/50_release/m26_release.json",
+        "docs/40_agents/full_code_review_report_2026-03-05-m26-final.md",
+        "docs/20_prd/PRD.md",
+        "docs/30_devspec/DevTasks.md"
+      ],
+      "new_tests": 0,
+      "description": "M26 发布清单 + 代码审查报告 + PRD/DevTasks 状态更新"
     }
   ],
-  "deferred_to_m27": [
-    "TASK-0222 M26-A 端到端集成冒烟测试套件",
-    "TASK-0223 M26-B 运行时健康检查加固",
-    "TASK-0224 M26-C LLM 路由配置热更新",
-    "TASK-0225 M26-D VTS 映射表版本回滚"
+  "new_modules": [
+    "tests/integration/test_e2e_smoke_m26.py",
+    "tests/integration/test_audit_chain_integrity_m26.py",
+    "tests/unit/test_health_aggregator_m26.py",
+    "tests/unit/test_llm_route_config_m26.py",
+    "host_brain/audit/migrations/0040_llm_route_config_log.sql",
+    "docs/40_agents/full_code_review_report_2026-03-05-m26-final.md"
   ],
-  "new_files": [
-    "configs/vts/vts_hotkey_config.yaml",
-    "docs/30_devspec/vts_hotkey_config_guide.md",
-    "docs/40_agents/full_code_review_report_2026-03-05-m26.md",
-    "docs/50_release/m26_release.json",
-    "tests/unit/test_emotion_driven_dialogue_m26.py",
-    "tests/unit/test_vts_hotkey_config_m26.py",
-    "tests/unit/test_mood_emotion_constraint_m26.py",
-    "tests/unit/test_sub_emotion_m26.py",
-    "tests/unit/test_emotion_intensity_m26.py"
-  ],
-  "requirements_trace": {
-    "FR-EMOTION-DRIVE-001": "LLM 输出 emotion_tag 字段（M26-E）",
-    "FR-EMOTION-DRIVE-002": "QA 校验 emotion_tag 合法性（M26-E）",
-    "FR-EMOTION-DRIVE-003": "emotion_tag 驱动 VTS 表情 + TTS 语气联动（M26-E）",
-    "FR-EMOTION-DRIVE-004": "mood_state 约束 emotion_tag 范围（M26-G）",
-    "FR-EMOTION-DRIVE-005": "sub_emotion 细粒度热键驱动（M26-H）",
-    "FR-EMOTION-DRIVE-006": "emotion_intensity 强度参数（M26-I）",
-    "FR-VTS-CFG-001": "VTS 热键配置文件抽离（M26-F）",
-    "FR-VTS-CFG-002": "load_from_config_file() + DEFAULT_EMOTION_MAPPING fallback（M26-F）"
-  }
+  "modified_modules": [
+    "host_brain/obs/service_health_aggregator.py",
+    "host_brain/integrations/llm_gateway.py",
+    "host_brain/audit/sqlite_ledger.py"
+  ]
 }

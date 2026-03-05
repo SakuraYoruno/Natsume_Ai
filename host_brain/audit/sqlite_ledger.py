@@ -1090,6 +1090,42 @@ class SQLiteLedger:
         }
         self._insert("llm_route_log", payload)
 
+    def log_llm_route_config_change(self, row: dict[str, Any]) -> None:
+        """记录 LLM 路由配置热更新变更（M26-C）。
+
+        必填字段：request_id / before_hash / after_hash / changed_fields / ts_ms
+        """
+        payload = {
+            "request_id":     str(row.get("request_id") or ""),
+            "before_hash":    str(row.get("before_hash") or ""),
+            "after_hash":     str(row.get("after_hash") or ""),
+            "changed_fields": str(row.get("changed_fields") or "[]"),
+            "ts_ms":          int(row.get("ts_ms") or 0),
+        }
+        self._insert("llm_route_config_log", payload)
+
+    def query_llm_route_config_log(
+        self,
+        *,
+        start_ts_ms: int | None = None,
+        end_ts_ms: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """查询 LLM 路由配置变更记录（M26-C）。"""
+        conditions: list[str] = []
+        params: list[Any] = []
+        if start_ts_ms is not None:
+            conditions.append("ts_ms >= ?")
+            params.append(int(start_ts_ms))
+        if end_ts_ms is not None:
+            conditions.append("ts_ms <= ?")
+            params.append(int(end_ts_ms))
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"SELECT * FROM llm_route_config_log {where} ORDER BY ts_ms DESC LIMIT ?"
+        params.append(int(limit))
+        rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
     def query_llm_route_log(
         self,
         *,
@@ -1924,6 +1960,20 @@ class SQLiteLedger:
                     ON llm_route_log (request_id);
                 CREATE INDEX IF NOT EXISTS idx_llm_route_log_ts_ms
                     ON llm_route_log (ts_ms);
+
+                -- M26-C: LLM 路由配置热更新审计表
+                CREATE TABLE IF NOT EXISTS llm_route_config_log (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id     TEXT    NOT NULL,
+                    before_hash    TEXT    NOT NULL,
+                    after_hash     TEXT    NOT NULL,
+                    changed_fields TEXT    NOT NULL,
+                    ts_ms          INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_llm_route_config_log_request_id
+                    ON llm_route_config_log (request_id);
+                CREATE INDEX IF NOT EXISTS idx_llm_route_config_log_ts_ms
+                    ON llm_route_config_log (ts_ms);
                 """
             )
 

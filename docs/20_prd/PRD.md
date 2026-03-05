@@ -983,10 +983,10 @@ M25-E M25 发布清单 **DONE**
 ---
 
 M26 生产就绪 II — 情感驱动交互 + 端到端集成验证 + 运行时健康加固：**DONE（2026-03-05）**
-M26-A 端到端集成冒烟测试套件：FR-CORE-001（覆盖 5 条核心链路 + 审计链完整性校验）**TODO**
-M26-B 运行时健康检查加固（/health 端点完整性）：FR-OBS-008（validate_health_response() + 服务降级 reason_code）**TODO**
-M26-C LLM 路由配置热更新 + 审计：FR-LLM-GW-003（update_route_config() + llm_route_config_log 表 + 迁移脚本）**TODO**
-M26-D VTS 映射表热更新 + 版本回滚：FR-VTS-DRIVE-001（rollback_to_version() + VERSION_NOT_FOUND）**TODO**
+M26-A 端到端集成冒烟测试套件：FR-CORE-001（覆盖 5 条核心链路 + 审计链完整性校验）**DONE（2026-03-05）**
+M26-B 运行时健康检查加固（/health 端点完整性）：FR-OBS-008（validate_health_response\(\) + 服务降级 reason_code）**DONE（2026-03-05）**
+M26-C LLM 路由配置热更新 + 审计：FR-LLM-GW-003（update_route_config\(\) + llm_route_config_log 表 + 迁移脚本）**DONE（2026-03-05）**
+M26-D VTS 映射表热更新 + 版本回滚：FR-VTS-DRIVE-001（rollback_to_version\(\) + VERSION_NOT_FOUND）**CANCELLED（2026-03-05）**
 M26-E 情感驱动对话链路：FR-EMOTION-DRIVE-001~003（LLM 输出 emotion_tag → VTS 表情 + TTS 语气联动）**DONE（2026-03-05）**
 M26-F VTS 热键配置文件抽离 + 说明文档：FR-VTS-CFG-001~002（configs/vts/vts_hotkey_config.yaml + load_from_config_file() + 说明文档）**DONE（2026-03-05）**
 M26-G mood_state → emotion_tag 约束映射：FR-EMOTION-DRIVE-004（MOOD_EMOTION_CONSTRAINTS + mood_to_emotion_constraint() + QA 集成）**DONE（2026-03-05）**

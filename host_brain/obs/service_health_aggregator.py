@@ -179,3 +179,51 @@ class ServiceHealthAggregator:
     def register_probe(self, service_id: str, probe_fn) -> None:
         """注册单个服务的探测函数。"""
         self._probes[service_id] = probe_fn
+
+
+# ---------------------------------------------------------------------------
+# M26-B：validate_health_response() — 响应结构完整性校验
+# ---------------------------------------------------------------------------
+_REQUIRED_TOP_KEYS = {"total", "up", "down", "unknown", "services", "timestamp"}
+_REQUIRED_SERVICE_KEYS = {"service_id", "name", "side", "status"}
+
+
+def validate_health_response(response: Dict[str, Any]) -> bool:
+    """
+    校验 ServiceHealthAggregator.aggregate() 返回的响应结构完整性。
+
+    规则：
+    - 顶层必须包含 total / up / down / unknown / services / timestamp；
+    - services 必须是列表；
+    - 每个 service 条目必须包含 service_id / name / side / status；
+    - 任何字段缺失返回 False，不抛异常。
+
+    :param response: aggregate() 返回的字典
+    :return: True（结构完整）/ False（结构缺失）
+    """
+    if not isinstance(response, dict):
+        return False
+
+    # 校验顶层字段
+    if not _REQUIRED_TOP_KEYS.issubset(response.keys()):
+        missing = _REQUIRED_TOP_KEYS - response.keys()
+        logger.warning("health 响应缺少顶层字段: %s", missing)
+        return False
+
+    # services 必须是列表
+    services = response.get("services")
+    if not isinstance(services, list):
+        logger.warning("health 响应 services 字段不是列表: %s", type(services))
+        return False
+
+    # 校验每个 service 条目
+    for i, svc in enumerate(services):
+        if not isinstance(svc, dict):
+            logger.warning("health 响应 services[%d] 不是字典", i)
+            return False
+        if not _REQUIRED_SERVICE_KEYS.issubset(svc.keys()):
+            missing = _REQUIRED_SERVICE_KEYS - svc.keys()
+            logger.warning("health 响应 services[%d] 缺少字段: %s", i, missing)
+            return False
+
+    return True

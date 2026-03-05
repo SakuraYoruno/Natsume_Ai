@@ -1,0 +1,16 @@
+{
+  "test_id": "T3-3",
+  "service": "host.skills.loader",
+  "operation": "SkillLoader.execute (rejected)",
+  "params_in": {
+    "intent_action": "trial_test_skill",
+    "governor_decision": "REJECT"
+  },
+  "params_out": {
+    "status": "REJECTED",
+    "result_code": "GOVERNOR_REJECTED",
+    "skill_name": "trial_test_skill"
+  },
+  "status": "PASS",
+  "ts_ms": 1772697641980
+}
