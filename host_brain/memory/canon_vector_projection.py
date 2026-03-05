@@ -12,10 +12,17 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
-from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
+from host_brain.core.key_profiles import resolve_secret_from_profiles
+from host_brain.memory.chroma_client import load_chroma_runtime_config
+from host_brain.retrieval.embedding import (
+    EmbeddingServiceContract,
+    build_embedding_provider_registry,
+    load_embedding_runtime_config,
+    resolve_embedding_route,
+)
 
 
 DEFAULT_STYLE_ROOT = "host_brain/canon/style"
@@ -23,6 +30,11 @@ DEFAULT_WORLD_ROOT = "host_brain/canon/world"
 DEFAULT_CANON_COLLECTION = "canon"
 DEFAULT_CHROMA_BACKEND = "http"
 DEFAULT_CHROMA_PATH = "runtime/chroma/data"
+DEFAULT_KEY_PROFILES = Path("configs/secrets/key_profiles.runtime.json")
+DEFAULT_KEY_PROFILES_FALLBACK = Path("configs/secrets/key_profiles.example.json")
+DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
+DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
+DEFAULT_HOST_NODE_ID = "natsu-node-01"
 
 
 @dataclass(frozen=True)
@@ -84,6 +96,10 @@ def sync_canon_vector_index(
     include_world: bool = True,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
+    node_id: str | None = None,
+    key_profiles: Sequence[Mapping[str, Any]] | None = None,
+    secret_store: Mapping[str, Any] | None = None,
+    current_epoch: int | None = None,
     chroma_client: Any | None = None,
 ) -> dict[str, Any]:
     merged_env: dict[str, Any] = dict(env or os.environ)
@@ -95,10 +111,45 @@ def sync_canon_vector_index(
         raise RuntimeError(f"chroma runtime config invalid: {cfg_result.as_dict()}")
     cfg = cfg_result.config
 
+    embed_cfg_result = load_embedding_runtime_config(env=merged_env)
+    if not embed_cfg_result.success or embed_cfg_result.config is None:
+        raise RuntimeError(f"embedding runtime config invalid: {embed_cfg_result.as_dict()}")
+    embed_cfg = embed_cfg_result.config
+    resolved_node_id = _resolve_runtime_node_id(env=merged_env, node_id=node_id)
+    resolved_key_profiles, resolved_secret_store, resolved_epoch = _resolve_key_materials(
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        current_epoch=current_epoch,
+    )
+    resolved_openai_key = _resolve_openai_api_key(
+        env=merged_env,
+        node_id=resolved_node_id,
+        key_profiles=resolved_key_profiles,
+        secret_store=resolved_secret_store,
+        current_epoch=resolved_epoch,
+    )
+    provider_registry = build_embedding_provider_registry(
+        env=merged_env,
+        openai_api_key=resolved_openai_key,
+    )
+    embedding_service = EmbeddingServiceContract(
+        runtime_config=embed_cfg,
+        provider_registry=provider_registry,
+        node_id=resolved_node_id,
+        available=True,
+    )
+    active_route = resolve_embedding_route(embed_cfg, node_id=resolved_node_id)
+
     target_collection = str(collection or DEFAULT_CANON_COLLECTION).strip() or DEFAULT_CANON_COLLECTION
     dim = int(collection_dim) if collection_dim is not None else _resolve_collection_dim(cfg, target_collection)
     if dim <= 0:
         raise ValueError(f"collection_dim must be > 0, got {dim}")
+    if int(active_route.dim) != int(dim):
+        raise ValueError(
+            "embedding/chroma dim mismatch: "
+            f"route_dim={int(active_route.dim)} collection_dim={int(dim)} "
+            f"(route_id={active_route.route_id}, provider={active_route.provider})"
+        )
 
     documents, issues = collect_canon_projection_documents(
         style_root=style_root,
@@ -121,11 +172,26 @@ def sync_canon_vector_index(
     style_count = 0
     world_count = 0
     for row in documents:
-        embedding, model_id = embed_text(row.text, dim=dim)
+        result = embedding_service.embed(
+            request_id=f"canon_sync::{row.vector_id}",
+            text=row.text,
+        )
+        if not result.success:
+            raise RuntimeError(
+                "canon vector embedding failed: "
+                f"vector_id={row.vector_id} reason={result.reason_code} detail={result.detail}"
+            )
+        output = dict(result.output or {})
+        embedding = [float(v) for v in list(output.get("embedding_vector") or [])]
+        model_id = str(output.get("embedding_model_id") or active_route.model_id)
+        provider = str(output.get("provider") or active_route.provider)
+        route_id = str(output.get("route_id") or active_route.route_id)
         ids.append(row.vector_id)
         rows.append(row.text)
         metadata = dict(row.metadata)
         metadata["embedding_model_id"] = model_id
+        metadata["embedding_provider"] = provider
+        metadata["embedding_route_id"] = route_id
         metadata["vector_dim"] = dim
         metadatas.append(metadata)
         vectors.append(embedding)
@@ -155,6 +221,10 @@ def sync_canon_vector_index(
         "collection": target_collection,
         "vector_dim": dim,
         "backend": str(backend),
+        "embedding_provider": active_route.provider,
+        "embedding_model_id": active_route.model_id,
+        "embedding_route_id": active_route.route_id,
+        "embedding_node_id": resolved_node_id,
         "style_docs_synced": style_count,
         "world_docs_synced": world_count,
         "docs_synced": len(ids),
@@ -357,3 +427,87 @@ def _build_chroma_client(*, backend: str, endpoint: str, chroma_path: str | Path
     port = int(parsed.port or 8000)
     ssl = parsed.scheme.lower() == "https"
     return chromadb.HttpClient(host=host, port=port, ssl=ssl)
+
+
+def _resolve_runtime_node_id(*, env: Mapping[str, Any], node_id: str | None) -> str:
+    explicit = str(node_id or "").strip()
+    if explicit:
+        return explicit
+    return str(
+        env.get("HOST_RETR_NODE_ID")
+        or env.get("Natsume_HOST_NODE_ID")
+        or DEFAULT_HOST_NODE_ID
+    ).strip() or DEFAULT_HOST_NODE_ID
+
+
+def _resolve_key_materials(
+    *,
+    key_profiles: Sequence[Mapping[str, Any]] | None,
+    secret_store: Mapping[str, Any] | None,
+    current_epoch: int | None,
+) -> tuple[list[Mapping[str, Any]], dict[str, Any], int]:
+    resolved_profiles: list[Mapping[str, Any]] = list(key_profiles or [])
+    resolved_store: dict[str, Any] = dict(secret_store or {})
+    resolved_epoch = int(current_epoch) if current_epoch is not None else 0
+
+    if not resolved_profiles:
+        payload = _load_json_file(_pick_existing_path(DEFAULT_KEY_PROFILES, DEFAULT_KEY_PROFILES_FALLBACK))
+        raw_profiles = payload.get("profiles")
+        if isinstance(raw_profiles, list):
+            resolved_profiles = [row for row in raw_profiles if isinstance(row, Mapping)]
+        if resolved_epoch <= 0:
+            try:
+                resolved_epoch = int(str(payload.get("current_epoch") or "0").strip())
+            except (TypeError, ValueError):
+                resolved_epoch = 0
+    if not resolved_store:
+        resolved_store = _load_json_file(_pick_existing_path(DEFAULT_SECRET_STORE, DEFAULT_SECRET_STORE_FALLBACK))
+    return resolved_profiles, resolved_store, max(0, int(resolved_epoch))
+
+
+def _resolve_openai_api_key(
+    *,
+    env: Mapping[str, Any],
+    node_id: str,
+    key_profiles: Sequence[Mapping[str, Any]],
+    secret_store: Mapping[str, Any],
+    current_epoch: int,
+) -> str:
+    direct = str(env.get("OPENAI_API_KEY") or "").strip()
+    if direct:
+        return direct
+
+    secret_ref = str(env.get("OPENAI_API_KEY_REF") or "").strip()
+    if not secret_ref:
+        return ""
+
+    resolved = resolve_secret_from_profiles(
+        provider="openai",
+        node_id=str(node_id),
+        scope="host.llm",
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        current_epoch=max(0, int(current_epoch)),
+    )
+    if resolved.success and resolved.secret_value:
+        return str(resolved.secret_value).strip()
+    return str(secret_store.get(secret_ref) or "").strip()
+
+
+def _pick_existing_path(primary: Path, fallback: Path) -> Path:
+    if primary.exists() and primary.is_file():
+        return primary
+    return fallback
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            payload = json.loads(path.read_text(encoding=encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}

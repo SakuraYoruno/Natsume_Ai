@@ -59,6 +59,14 @@ from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.broker import ToolBroker
 from host_brain.governor.tokens import TokenService
 from host_brain.bond.bond_stage_engine import BondStageEngine
+from host_brain.integrations.graph_runtime import GraphRuntimeContract
+from host_brain.integrations.llm_gateway import (
+    PROVIDER_DEEPSEEK,
+    PROVIDER_DISABLED,
+    PROVIDER_GEMINI,
+    PROVIDER_MOCK,
+    PROVIDER_OPENAI,
+)
 
 
 # HTTP契约模型定义
@@ -296,9 +304,238 @@ _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
 _retrieval_pipeline: Optional[RetrievalPipelineContract] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
+_graph_runtime: Optional[GraphRuntimeContract] = None
 _logger = logging.getLogger("Natsume.fastapi")
 
 
+def _resolve_host_llm_model_id(provider_name: str) -> str:
+    provider = str(provider_name or "").strip().lower()
+    override_model = str(os.environ.get("HOST_LLM_MODEL_ID") or "").strip()
+    if override_model:
+        return override_model
+    if provider == PROVIDER_GEMINI:
+        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    if provider == PROVIDER_OPENAI:
+        return str(os.environ.get("HOST_OPENAI_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+    if provider == PROVIDER_DEEPSEEK:
+        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+    return "mock-default"
+
+
+def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 3)]}..."
+
+
+def _render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
+    user_message = _truncate_for_prompt(prompt_payload.get("user_message"), limit=1000)
+    retrieval_raw = prompt_payload.get("retrieval")
+    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, dict) else {}
+    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
+    evidence_items = retrieval.get("evidence_items")
+    rows = evidence_items if isinstance(evidence_items, list) else []
+    evidence_lines: list[str] = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        evidence_ref = _truncate_for_prompt(row.get("evidence_ref") or row.get("source_ref") or "unknown", limit=80)
+        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
+        if not snippet:
+            continue
+        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+    return (
+        "You are the Natsume host narrative generator.\n"
+        "Return exactly one JSON object with top-level keys: narrative, intent_draft, meta.\n"
+        "Required schema:\n"
+        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "Rules:\n"
+        "1. Output JSON only. No markdown. No code fences.\n"
+        "2. Keep draft_only=true.\n"
+        "3. Do not claim execution/saving/confirmation has happened.\n"
+        "4. Reply in Simplified Chinese unless user message is clearly another language.\n"
+        "5. Keep response concise and grounded in user message and evidence.\n\n"
+        f"User message:\n{user_message}\n\n"
+        f"Retrieval status: {retrieval_status}\n"
+        f"Retrieval reason_code: {retrieval_reason}\n"
+        f"Evidence:\n{evidence_block}\n"
+    )
+
+
+def _extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise RuntimeError("provider returned empty content")
+
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    decoder = json.JSONDecoder()
+    try:
+        parsed, _ = decoder.raw_decode(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    first = text.find("{")
+    last = text.rfind("}")
+    if first >= 0 and last > first:
+        snippet = text[first : last + 1]
+        parsed = json.loads(snippet)
+        if isinstance(parsed, dict):
+            return parsed
+    raise RuntimeError("provider content does not contain a valid json object")
+
+
+def _coerce_gateway_payload_json_text(raw_text: str) -> str:
+    parsed = _extract_json_object_from_text(raw_text)
+    narrative_node = parsed.get("narrative")
+    narrative_text = ""
+    if isinstance(narrative_node, dict):
+        narrative_text = str(narrative_node.get("text") or "").strip()
+    elif isinstance(narrative_node, str):
+        narrative_text = narrative_node.strip()
+    if not narrative_text:
+        narrative_text = str(parsed.get("text") or "").strip()
+    if not narrative_text:
+        raise RuntimeError("provider output missing narrative.text")
+
+    intent_draft = parsed.get("intent_draft")
+    if not isinstance(intent_draft, dict):
+        intent_draft = {}
+    meta = parsed.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    safe_meta = dict(meta)
+    safe_meta["draft_only"] = True
+
+    contract_payload = {
+        "narrative": {"text": narrative_text},
+        "intent_draft": intent_draft,
+        "meta": safe_meta,
+    }
+    return json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)
+
+
+def _extract_langchain_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text_value = item.get("text")
+            if text_value is not None:
+                parts.append(str(text_value))
+        return "".join(parts)
+    return str(content)
+
+
+def _build_langchain_chat_provider_fn(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+) -> Callable[[dict[str, Any]], Any]:
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    provider = str(provider_name or "").strip().lower()
+    model_name = str(model_id or "").strip() or "default"
+    base_url: str | None = None
+    if provider == PROVIDER_DEEPSEEK:
+        base_url = str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
+    elif provider == PROVIDER_GEMINI:
+        base_url = str(
+            os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
+        ).strip()
+    else:
+        base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
+
+    llm = ChatOpenAI(
+        model=model_name,
+        api_key=api_key,
+        base_url=base_url,
+        timeout=max(1.0, float(timeout_ms) / 1000.0),
+        max_retries=1,
+        temperature=0.4,
+    )
+    system_prompt = (
+        "You are the Natsume host narrative generator. "
+        "Output exactly one JSON object with keys narrative, intent_draft, meta. "
+        "meta.draft_only must be true."
+    )
+
+    def _provider(prompt_payload: dict[str, Any]) -> str:
+        runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
+        if not isinstance(runtime_payload, dict):
+            runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
+        prompt_text = _render_host_generation_prompt(runtime_payload)
+        response = llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt_text),
+            ]
+        )
+        response_text = _extract_langchain_content_text(getattr(response, "content", ""))
+        return _coerce_gateway_payload_json_text(response_text)
+
+    return _provider
+
+
+def _build_host_mock_provider() -> Callable[[dict[str, Any]], Any]:
+    def _provider(prompt_payload: dict[str, Any]) -> str:
+        runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
+        if not isinstance(runtime_payload, dict):
+            runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
+        user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=120)
+        text = "This is a draft response."
+        if user_message:
+            text = f"Got your message: {user_message}"
+        return json.dumps(
+            {
+                "narrative": {"text": text},
+                "intent_draft": {},
+                "meta": {"draft_only": True, "source": "host_mock_provider"},
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    return _provider
+
+
+def _build_host_provider_fn(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str | None,
+    timeout_ms: int,
+) -> Callable[[dict[str, Any]], Any]:
+    provider = str(provider_name or "").strip().lower()
+    key_value = str(api_key or "").strip()
+    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+        return _build_langchain_chat_provider_fn(
+            provider_name=provider,
+            model_id=model_id,
+            api_key=key_value,
+            timeout_ms=timeout_ms,
+        )
+    return _build_host_mock_provider()
 def get_ledger() -> SQLiteLedger:
     """获取SQLite账本实例（延迟初始化，支持跨线程访问）。
 
@@ -387,6 +624,16 @@ def get_retrieval_pipeline() -> RetrievalPipelineContract:
             node_id=_get_runtime_node_id(),
         )
     return _retrieval_pipeline
+
+
+def get_graph_runtime() -> GraphRuntimeContract:
+    global _graph_runtime
+    if _graph_runtime is None:
+        _graph_runtime = GraphRuntimeContract(
+            ledger=get_ledger(),
+            default_timeout_ms=5_000,
+        )
+    return _graph_runtime
 
 
 def get_obs_metrics_collector() -> MetricsCollector:
@@ -779,23 +1026,134 @@ async def startup_report() -> Dict[str, Any]:
         )
 
 
+def _extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
+    node = dict(payload or {})
+    narrative = node.get("narrative")
+    if isinstance(narrative, dict):
+        text = str(narrative.get("text") or "").strip()
+        if text:
+            return text
+    elif isinstance(narrative, str):
+        text = narrative.strip()
+        if text:
+            return text
+    return ""
+
+
+def _build_chat_generation_prompt_payload(
+    *,
+    request_id: str,
+    session_id: str,
+    thread_id: str | None,
+    user_message: str,
+    retrieval_summary: dict[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "request_id": request_id,
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "user_message": user_message,
+        "retrieval": {
+            "status": retrieval_summary.get("status"),
+            "reason_code": retrieval_summary.get("reason_code"),
+            "route_count": retrieval_summary.get("route_count"),
+            "candidate_count": retrieval_summary.get("candidate_count"),
+            "rerank_topk": retrieval_summary.get("rerank_topk"),
+            "degraded": retrieval_summary.get("degraded"),
+            "evidence_items": retrieval_evidence_items,
+        },
+    }
+
+
+def _resolve_host_llm_runtime() -> dict[str, Any]:
+    config_result = load_host_config()
+    provider_name = str(os.environ.get("HOST_LLM_PROVIDER") or PROVIDER_OPENAI).strip().lower() or PROVIDER_OPENAI
+    timeout_ms = 15_000
+    llm_api_key: str | None = None
+    available = True
+    if config_result.success and config_result.config is not None:
+        provider_name = str(config_result.config.llm_provider or provider_name).strip().lower() or provider_name
+        timeout_ms = int(config_result.config.llm_timeout_ms)
+        llm_api_key = config_result.config.llm_api_key
+        available = (provider_name != PROVIDER_DISABLED)
+    model_id = _resolve_host_llm_model_id(provider_name)
+    provider_fn = _build_host_provider_fn(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=llm_api_key,
+        timeout_ms=timeout_ms,
+    )
+    return {
+        "provider_name": provider_name,
+        "model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "llm_api_key": llm_api_key,
+        "available": available,
+        "provider_fn": provider_fn,
+    }
+
+
+def _build_chat_graph_config(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+) -> dict[str, Any]:
+    return {
+        "graph_id": "host.chat.realtime",
+        "version": "v1",
+        "entry_node": "chat_model",
+        "model_profile_id": "mp.chat.v1",
+        "node_bindings": [
+            {
+                "node_id": "chat_model",
+                "model_node_id": "chat_model",
+                "task": "chat_narrative",
+                "require_approval_token": False,
+            }
+        ],
+        "edges": [],
+        "fallback_edges": [],
+        "model_nodes": {
+            "chat_model": {
+                "provider": provider_name,
+                "model_id": model_id,
+                "temperature": 0.4,
+                "max_output_tokens": 600,
+                "timeout_ms": timeout_ms,
+                "api_key": str(api_key or "").strip() or None,
+                "provider_fn": provider_fn,
+                "available": bool(available),
+            }
+        },
+    }
+
+
+def _extract_chat_graph_gateway_payload(graph_output: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload_root = dict(graph_output.get("payload") or {})
+    chat_node = dict(payload_root.get("chat_model") or {})
+    gateway_payload_raw = chat_node.get("payload")
+    gateway_payload = dict(gateway_payload_raw or {}) if isinstance(gateway_payload_raw, dict) else {}
+    return chat_node, gateway_payload
+
+
 # ---------------------------------------------------------------------------
 # 核心链路入口: POST /v1/chat
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
-    """编排入口 — 用户消息 → Intent 构造 → Governor 裁决 → 输出。
-
-    所有执行仍经 Governor/Token/Skills，不引入旁路。
-    成功/拒绝/降级均返回统一 ChatResponse 结构。
-    """
+    """Orchestration entry: message -> intent draft -> governor -> response."""
     _metrics.inc_chat()
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     ts_ms = int(time.time() * 1000)
     session_id = request_body.session_id or f"session::{request_id}"
 
     try:
-        # 1) 构造 intent_draft（如果用户未提供则构建最小 intent）
+        # 1) Build intent_draft (minimal intent if request did not provide one)
         intent_draft = request_body.intent_draft
         if intent_draft is None:
             intent_draft = {
@@ -811,7 +1169,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "nonce": f"nonce::{request_id}",
             }
 
-        # 2) Governor 裁决（经 Intent 校验 + R1-R7 Gates）
+        # 2) Governor decision (intent validation + R1-R7 gates)
         engine = get_intent_engine()
         governor_result = engine.evaluate_intent(
             raw_intent=intent_draft,
@@ -827,9 +1185,10 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         if isinstance(tokens, dict):
             approval_token_ref = tokens.get("approval_token_ref")
 
-        # 3) 构造叙事输出
         retrieval_summary: Dict[str, Any] = {}
+        llm_summary: Dict[str, Any] = {}
         if decision == DECISION_APPROVE:
+            retrieval_evidence_items: list[dict[str, Any]] = []
             retrieval_enabled = _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True)
             if retrieval_enabled:
                 try:
@@ -847,24 +1206,32 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 recall_output = dict(retrieval_result.output.get("recall") or {})
                 rerank_output = dict(retrieval_result.output.get("rerank") or {})
                 evidence_pack = dict(retrieval_result.output.get("evidence_pack") or {})
+                rerank_topk_items = list(rerank_output.get("topk") or [])
+                for item in rerank_topk_items[:5]:
+                    if not isinstance(item, dict):
+                        continue
+                    snippet = _truncate_for_prompt(item.get("snippet"), limit=240)
+                    if not snippet:
+                        continue
+                    retrieval_evidence_items.append(
+                        {
+                            "evidence_ref": str(item.get("evidence_ref") or "").strip() or str(item.get("doc_id") or ""),
+                            "source_ref": str(item.get("source_ref") or "").strip(),
+                            "snippet": snippet,
+                            "score": item.get("score"),
+                            "confidence": item.get("confidence"),
+                        }
+                    )
                 retrieval_summary = {
                     "status": retrieval_result.status,
                     "reason_code": retrieval_result.reason_code,
                     "route_count": len(recall_output.get("routes") or []),
                     "candidate_count": int(recall_output.get("candidate_count") or 0),
-                    "rerank_topk": len(rerank_output.get("topk") or []),
+                    "rerank_topk": len(rerank_topk_items),
                     "evidence_refs": list(evidence_pack.get("evidence_refs") or []),
                     "reason_chain": list(retrieval_result.output.get("reason_chain") or []),
                     "degraded": bool(retrieval_result.output.get("degraded", False)),
                 }
-                narrative = (
-                    f"[已裁决通过] 用户输入: {request_body.message}\n"
-                    f"[检索] routes={retrieval_summary['route_count']} "
-                    f"candidates={retrieval_summary['candidate_count']} "
-                    f"topk={retrieval_summary['rerank_topk']}"
-                )
-                if retrieval_summary["degraded"]:
-                    reason_code = reason_code or str(retrieval_result.reason_code or "")
             else:
                 retrieval_summary = {
                     "status": "SKIPPED",
@@ -876,10 +1243,82 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                     "reason_chain": ["HOST_RETRIEVAL_DISABLED"],
                     "degraded": True,
                 }
-                narrative = f"[已裁决通过] 用户输入: {request_body.message}\n[检索] disabled"
-            quality = {"stage": "S_COMPLETE", "reason_code": None}
+
+            llm_prompt_payload = _build_chat_generation_prompt_payload(
+                request_id=request_id,
+                session_id=session_id,
+                thread_id=request_body.thread_id,
+                user_message=request_body.message,
+                retrieval_summary=retrieval_summary,
+                retrieval_evidence_items=retrieval_evidence_items,
+            )
+
+            llm_runtime = _resolve_host_llm_runtime()
+            provider_name = str(llm_runtime["provider_name"])
+            model_id = str(llm_runtime["model_id"])
+            timeout_ms = int(llm_runtime["timeout_ms"])
+            llm_api_key = str(llm_runtime.get("llm_api_key") or "").strip()
+            available = bool(llm_runtime["available"])
+            provider_fn = llm_runtime["provider_fn"]
+
+            graph_config = _build_chat_graph_config(
+                provider_name=provider_name,
+                model_id=model_id,
+                timeout_ms=timeout_ms,
+                available=available,
+                api_key=llm_api_key,
+                provider_fn=provider_fn,
+            )
+            dependency_statuses = {
+                "chat_model": {
+                    "available": available,
+                    "detail": "chat model runtime ready" if available else "chat model runtime unavailable",
+                },
+                provider_name: {
+                    "available": available,
+                    "detail": ("provider auth ready" if llm_api_key else "provider key missing"),
+                },
+            }
+
+            graph_result = get_graph_runtime().run_graph(
+                request_id=request_id,
+                graph_config=graph_config,
+                payload=llm_prompt_payload,
+                dependency_statuses=dependency_statuses,
+                ts_ms=ts_ms,
+            )
+
+            graph_output = dict(graph_result.output or {})
+            chat_node, gateway_payload = _extract_chat_graph_gateway_payload(graph_output)
+            gateway_status = str(chat_node.get("gateway_status") or "").strip().upper()
+            gateway_reason = str(chat_node.get("reason_code") or "").strip() or None
+            narrative = _extract_gateway_narrative(gateway_payload)
+            if not narrative:
+                narrative = "Generation unavailable, please retry shortly."
+
+            llm_summary = {
+                "status": (gateway_status or str(graph_result.status)),
+                "reason_code": (gateway_reason or graph_result.reason_code),
+                "stage": str(graph_result.stage),
+                "provider": (chat_node.get("provider") or provider_name),
+                "model_id": (chat_node.get("model_id") or model_id),
+                "model_profile_id": graph_output.get("model_profile_id"),
+                "latency_ms": None,
+                "draft_only": bool(dict(gateway_payload.get("meta") or {}).get("draft_only", True)),
+            }
+
+            retrieval_reason_code = str(retrieval_summary.get("reason_code") or "")
+            if retrieval_summary.get("degraded") and retrieval_reason_code not in {"", "HOST_RETRIEVAL_DISABLED"}:
+                reason_code = reason_code or retrieval_reason_code
+            graph_ok = str(graph_result.status).upper() == "OK"
+            gateway_ok = gateway_status == "OK"
+            if not graph_ok or not gateway_ok:
+                reason_code = reason_code or gateway_reason or str(graph_result.reason_code or "") or "LLM_UNAVAILABLE"
+                quality = {"stage": str(graph_result.stage), "reason_code": reason_code}
+            else:
+                quality = {"stage": "S_COMPLETE", "reason_code": None}
         else:
-            narrative = f"[已拒绝] 原因: {reason_code or 'UNKNOWN'}"
+            narrative = f"[REJECTED] reason: {reason_code or 'UNKNOWN'}"
             quality = {"stage": governor_result.get("stage", "S_GOV_REJECT"), "reason_code": reason_code}
             _metrics.inc_rejection(reason_code or "UNKNOWN")
 
@@ -896,6 +1335,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "governor_stage": governor_result.get("stage"),
                 "thread_id": request_body.thread_id,
                 "retrieval": retrieval_summary,
+                "llm": llm_summary,
             },
             timestamp=ts_ms,
         )
@@ -903,10 +1343,9 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
     except Exception as exc:
         _metrics.inc_error()
         _logger.error("Chat request failed", extra={"request_id": request_id, "error": str(exc)})
-        # 降级输出：结构稳定 + reason_code 可统计
         return ChatResponse(
             request_id=request_id,
-            narrative="[降级] 处理请求时发生内部错误，请稍后重试。",
+            narrative="[DEGRADED] Internal error while processing request.",
             intent_draft=None,
             decision="REJECT",
             reason_code="INTERNAL_SERVER_ERROR",
@@ -917,9 +1356,6 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         )
 
 
-# ---------------------------------------------------------------------------
-# GET /metrics — 运行时指标摘要
-# ---------------------------------------------------------------------------
 @app.get("/metrics", response_model=MetricsResponse)
 async def metrics() -> MetricsResponse:
     """运行时指标摘要 — 拒绝码分布、请求计数、运行时长"""

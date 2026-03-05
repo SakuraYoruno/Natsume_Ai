@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypedDict
 
@@ -196,13 +197,38 @@ def normalize_dependency_status(raw: Any) -> dict[str, Any]:
     return {"available": True, "detail": ""}
 
 
-def pick_api_key(*, state: GraphState, provider_name: str) -> str | None:
-    """Pick API key from dependency_statuses for a given provider."""
+def pick_api_key(*, state: GraphState, provider_name: str, model_node_id: str | None = None) -> str | None:
+    """Pick API key for provider with deterministic fallback order.
+
+    Order:
+    1) model_nodes[model_node_id].api_key
+    2) dependency_statuses[provider_name].api_key
+    3) provider env key (OPENAI_API_KEY/GEMINI_API_KEY/DEEPSEEK_API_KEY)
+    """
+    if model_node_id:
+        model_node = (state.get("model_nodes") or {}).get(str(model_node_id))
+        if isinstance(model_node, Mapping):
+            direct_key = str(model_node.get("api_key") or "").strip()
+            if direct_key:
+                return direct_key
+
     dependency = (state.get("dependency_statuses") or {}).get(provider_name)
     if isinstance(dependency, Mapping):
         raw_key = str(dependency.get("api_key") or "").strip()
         if raw_key:
             return raw_key
+
+    provider_to_env = {
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+    }
+    env_key = provider_to_env.get(str(provider_name or "").strip().lower())
+    if not env_key:
+        return None
+    env_value = str(os.environ.get(env_key) or "").strip()
+    if env_value:
+        return env_value
     return None
 
 

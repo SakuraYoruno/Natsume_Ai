@@ -67,6 +67,11 @@ def parse_args() -> argparse.Namespace:
         default=".env",
         help="Optional env profile to load before sync.",
     )
+    parser.add_argument(
+        "--node-id",
+        default="",
+        help="Optional node id for RETR_EMBED route selection (fallback to env/default).",
+    )
     parser.add_argument("--style-only", action="store_true", help="Sync style canon only.")
     parser.add_argument("--world-only", action="store_true", help="Sync world canon only.")
     parser.add_argument("--dry-run", action="store_true", help="Collect docs and print summary only.")
@@ -127,6 +132,7 @@ def main() -> int:
             include_world=include_world,
             env=env_values,
             local_overrides=overrides,
+            node_id=(str(args.node_id).strip() or None),
         )
     except Exception as exc:
         print(f"[error] sync failed: {exc}", file=sys.stderr)

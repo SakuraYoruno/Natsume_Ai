@@ -125,7 +125,8 @@ class GraphExecutor:
         provider_fn = model_node.get("provider_fn")
         gateway = self._gateway_factory(
             ledger=self._ledger, provider=provider_fn if callable(provider_fn) else None,
-            provider_name=provider_name, api_key=pick_api_key(state=state, provider_name=provider_name),
+            provider_name=provider_name,
+            api_key=pick_api_key(state=state, provider_name=provider_name, model_node_id=model_node_id),
             available=bool(model_node.get("available", True)), timeout_ms=timeout_value)
 
         result = gateway.generate(

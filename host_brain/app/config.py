@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from host_brain.core.config_snapshot import (
@@ -42,6 +44,12 @@ ALLOWED_LLM_PROVIDERS = {
 
 S_HOST_CONFIG = "S_HOST_CONFIG"
 HOST_SNAPSHOT_COMPONENT = "host"
+DEFAULT_KEY_PROFILES = Path("configs/secrets/key_profiles.runtime.json")
+DEFAULT_KEY_PROFILES_FALLBACK = Path("configs/secrets/key_profiles.example.json")
+DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
+DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
+DEFAULT_HOST_NODE_ID = "natsu-node-01"
+DEFAULT_HOST_NODE_ID_SENTINEL = "host.default"
 
 HOST_FIELD_TO_ENV_KEY = {
     "env": "Natsume_ENV",
@@ -186,6 +194,13 @@ def load_host_config(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    resolved_key_profiles, resolved_secret_store, resolved_epoch, resolved_node_id = _resolve_runtime_key_materials(
+        env=merged,
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        node_id=node_id,
+        current_epoch=current_epoch,
+    )
 
     issues: list[ConfigIssue] = []
     runtime_env = _as_text(merged.get("Natsume_ENV"), ENV_DEV).lower()
@@ -290,11 +305,11 @@ def load_host_config(
     if llm_provider in {PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and llm_api_key_ref:
         resolved = resolve_secret_from_profiles(
             provider=llm_provider,
-            node_id=str(node_id),
+            node_id=resolved_node_id,
             scope="host.llm",
-            key_profiles=key_profiles,
-            secret_store=secret_store,
-            current_epoch=int(current_epoch if current_epoch is not None else 0),
+            key_profiles=resolved_key_profiles,
+            secret_store=resolved_secret_store,
+            current_epoch=resolved_epoch,
         )
         if resolved.success:
             llm_api_key = resolved.secret_value
@@ -333,6 +348,12 @@ def load_host_config(
 
     if issues:
         return _failure(issues)
+
+    if env is None:
+        _inject_resolved_llm_key(
+            provider=llm_provider,
+            api_key=llm_api_key,
+        )
 
     config = HostConfig(
         env=runtime_env,
@@ -612,3 +633,114 @@ def _parse_int(
         )
         return int(default)
     return parsed
+
+
+def _resolve_runtime_key_materials(
+    *,
+    env: Mapping[str, Any],
+    key_profiles: Sequence[Mapping[str, Any]] | None,
+    secret_store: Mapping[str, Any] | None,
+    node_id: str | None,
+    current_epoch: int | None,
+) -> tuple[list[Mapping[str, Any]], dict[str, Any], int, str]:
+    resolved_profiles: list[Mapping[str, Any]] = list(key_profiles or [])
+    resolved_store: dict[str, Any] = dict(secret_store or {})
+    resolved_epoch = _coerce_non_negative_int(current_epoch, default=0)
+    key_profiles_payload: dict[str, Any] = {}
+
+    if not resolved_profiles or resolved_epoch <= 0 or _is_default_node_id(node_id):
+        key_profiles_payload = _load_json_file(
+            _pick_existing_path(DEFAULT_KEY_PROFILES, DEFAULT_KEY_PROFILES_FALLBACK),
+        )
+        if not resolved_profiles:
+            raw_profiles = key_profiles_payload.get("profiles")
+            if isinstance(raw_profiles, list):
+                resolved_profiles = [row for row in raw_profiles if isinstance(row, Mapping)]
+        if resolved_epoch <= 0:
+            resolved_epoch = _coerce_non_negative_int(
+                key_profiles_payload.get("current_epoch"),
+                default=0,
+            )
+
+    resolved_node_id = _resolve_runtime_node_id(
+        env=env,
+        node_id=node_id,
+        key_profiles_payload=key_profiles_payload,
+    )
+    if not resolved_store:
+        resolved_store = _load_json_file(
+            _pick_existing_path(DEFAULT_SECRET_STORE, DEFAULT_SECRET_STORE_FALLBACK),
+        )
+    return resolved_profiles, resolved_store, resolved_epoch, resolved_node_id
+
+
+def _resolve_runtime_node_id(
+    *,
+    env: Mapping[str, Any],
+    node_id: str | None,
+    key_profiles_payload: Mapping[str, Any],
+) -> str:
+    explicit = str(node_id or "").strip()
+    if explicit and not _is_default_node_id(explicit):
+        return explicit
+    from_env = str(
+        env.get("HOST_RETR_NODE_ID")
+        or env.get("Natsume_HOST_NODE_ID")
+        or env.get("HOST_NODE_ID")
+        or "",
+    ).strip()
+    if from_env:
+        return from_env
+    from_profiles = str(key_profiles_payload.get("host_node_id") or "").strip()
+    if from_profiles:
+        return from_profiles
+    return DEFAULT_HOST_NODE_ID
+
+
+def _inject_resolved_llm_key(*, provider: str, api_key: str | None) -> None:
+    key_value = str(api_key or "").strip()
+    if not key_value:
+        return
+    provider_to_env_key = {
+        PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_GEMINI: "GEMINI_API_KEY",
+        PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+    }
+    env_key = provider_to_env_key.get(str(provider or "").strip().lower())
+    if not env_key:
+        return
+    if str(os.environ.get(env_key) or "").strip():
+        return
+    os.environ[env_key] = key_value
+
+
+def _is_default_node_id(value: str | None) -> bool:
+    text = str(value or "").strip().lower()
+    return not text or text == DEFAULT_HOST_NODE_ID_SENTINEL
+
+
+def _coerce_non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return int(default)
+    return max(0, parsed)
+
+
+def _pick_existing_path(primary: Path, fallback: Path) -> Path:
+    if primary.exists() and primary.is_file():
+        return primary
+    return fallback
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            payload = json.loads(path.read_text(encoding=encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
