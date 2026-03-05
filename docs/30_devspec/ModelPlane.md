@@ -86,28 +86,28 @@
 3.1 节点清单（v1.1 具体配置）
 1）core_reasoner_primary（role=core）
 - 用途：主语义推理（叙事+意图草案）
-- provider/model_id：openai / gpt-5.2
+- provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1
 - 约束：输出尽量短（避免长叙事占预算）
 
 2）core_reasoner_secondary（role=core_backup）
 - 用途：主模型超时/限流时的备选（更快更省）
-- provider/model_id：openai / gpt-5-mini
+- provider/model_id：gemini / gemini-2.5-flash
 - 输出：CoreDraft.v1
 
 3）planner_constraints（role=planner）
 - 用途：复杂任务约束拆解（偏结构，不写长叙事）
-- provider/model_id：openai / gpt-5.2-pro
+- provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1（narrative_zh 可空）
 
 4）tool_planner（role=tool_planner）
 - 用途：在 tool_meta_pack 子集内选择工具与参数草案（不得执行）
-- provider/model_id：deepseek / deepseek-chat（pin）
+- provider/model_id：gemini / gemini-2.5-flash（pin）
 - 输出：CoreDraft.v1（intent_draft 必含 tool_id + args 草案）
 
 5）safety_verifier（role=verifier_safety）
 - 用途：拦截三类风险：伪执行宣告、承诺升级、证据升级、越权倾向
-- provider/model_id：openai / gpt-4.1-mini
+- provider/model_id：gemini / gemini-2.5-flash-lite
 - 输出：Verifier.v1
 
 6）consistency_verifier（role=verifier_consistency）
@@ -127,7 +127,7 @@
 
 9）workbench_code_assist（role=workbench_code）
 - 用途：代码协作草案（不得宣称已构建/已通过）
-- provider/model_id：deepseek / deepseek-chat
+- provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1
 
 3.2 Host 常驻兜底（不计入云节点，但属于模型平面）
