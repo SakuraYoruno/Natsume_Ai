@@ -1,0 +1,19 @@
+{
+  "test_id": "TC-5",
+  "service": "CHAT_PIPELINE",
+  "operation": "governor_plus_retrieval",
+  "params_in": {
+    "request_id": "req_0220f15d6ca84b5ab1b5e60e4cfb3926",
+    "message": "夏目友人帐的故事"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "retrieval": {
+      "error": "Could not connect to a Chroma server. Are you sure it is running?",
+      "status": "ERROR"
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1772692718064
+}

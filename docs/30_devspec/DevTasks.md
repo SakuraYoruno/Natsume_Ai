@@ -3523,6 +3523,118 @@ TASK-XXXX 标题
   - `docs/60_trace/requirements_trace.md`。
 - 关联需求：NFR-REL-001；NFR-MAINT-001；FR-LLM-GW-001~003；FR-VTS-DRIVE-001~003；FR-WECHAT-001~003。
 
+---
+
+## M25 生产就绪加固 + SQLiteLedger 扩展 + 代码质量收口（TASK-0217~0221）
+
+### TASK-0217 M25-A：SQLiteLedger log_llm_route() 正式方法
+
+- 状态：DONE
+- 任务描述：在 `SQLiteLedger` 中添加 `log_llm_route()` 正式方法 + `llm_route_log` 表 + 迁移脚本 `0039_llm_route_log.sql`；同步更新 `LlmGatewayContract._log_route_decision()` 直接调用 `ledger.log_llm_route()`，不再使用 `hasattr` 检查。
+- 输入：`request_id` / `model_id` / `reason` / `latency_ms` / `fallback_used` / `ts_ms`
+- 输出：
+  - `host_brain/audit/sqlite_ledger.py`：新增 `log_llm_route()` 方法；
+  - `host_brain/audit/migrations/0039_llm_route_log.sql`：新增迁移脚本；
+  - `host_brain/integrations/llm_gateway.py`：`_log_route_decision()` 直接调用 `ledger.log_llm_route()`；
+  - `tests/unit/test_llm_route_log.py`：T-AUDIT-LLM-01~05（5 个测试）。
+- 验收标准：
+  - `log_llm_route()` 写入成功，`llm_route_log` 表有记录（T-AUDIT-LLM-01）；
+  - `fallback_used=True` 时记录正确（T-AUDIT-LLM-02）；
+  - `ledger=None` 时不崩溃（T-AUDIT-LLM-03）；
+  - 迁移脚本幂等（T-AUDIT-LLM-04）；
+  - 时间窗口查询返回正确记录数（T-AUDIT-LLM-05）；
+  - 全量测试 ≥1782 passed，0 failed，0 warnings。
+- 涉及文件路径：
+  - `host_brain/audit/sqlite_ledger.py`；
+  - `host_brain/audit/migrations/0039_llm_route_log.sql`（新增）；
+  - `host_brain/integrations/llm_gateway.py`；
+  - `tests/unit/test_llm_route_log.py`（新增）。
+- 关联需求/测试：FR-AUDIT-LLM-001；FR-AUDIT-LLM-002；T-AUDIT-LLM-01~05。
+
+### TASK-0218 M25-B：WeChatChannelHealth GC + VTSMappingStore 生命周期加固
+
+- 状态：DONE
+- 任务描述：为 `WeChatChannelHealth._outbound_counts` 添加定期 GC 机制（清理超过 `inactive_threshold_s` 无活动的 `thread_key`，写 `wechat_gc_log`）；为 `VTSMappingStore` 添加 `db_path=":memory:"` 时的 WARNING 日志（生产可观测）。
+- 输入：`gc_interval_s`（默认 3600）/ `inactive_threshold_s`（默认 86400）
+- 输出：
+  - `host_brain/channels/wechat_health.py`：新增 `gc_inactive_threads()` 方法 + `_gc_interval_s` / `_inactive_threshold_s` 配置；
+  - `host_brain/channels/vts_mapping_store.py`：`__init__` 中 `db_path=":memory:"` 时写 `logging.warning()`；
+  - `tests/unit/test_channel_gc_m25.py`：T-CHANNEL-GC-01~03 + T-VTS-STORE-01（4 个测试）。
+- 验收标准：
+  - GC 后过期 `thread_key` 被清理（T-CHANNEL-GC-01）；
+  - 活跃 `thread_key` 不被清理（T-CHANNEL-GC-02）；
+  - GC 写审计日志（T-CHANNEL-GC-03）；
+  - `db_path=":memory:"` 时写 WARNING 日志（T-VTS-STORE-01）；
+  - 全量测试 ≥1782 passed，0 failed，0 warnings。
+- 涉及文件路径：
+  - `host_brain/channels/wechat_health.py`；
+  - `host_brain/channels/vts_mapping_store.py`；
+  - `tests/unit/test_channel_gc_m25.py`（新增）。
+- 关联需求/测试：FR-CHANNEL-GC-001；FR-CHANNEL-GC-002；T-CHANNEL-GC-01~03；T-VTS-STORE-01。
+
+### TASK-0219 M25-C：SQLiteLedger _table_has_column 缓存 + main.py print 修复
+
+- 状态：DONE
+- 任务描述：为 `SQLiteLedger._table_has_column()` 添加表结构缓存（`_table_schema_cache: dict[str, set[str]]`），首次查询后缓存，迁移后自动清空；将 `host_brain/app/main.py:908` 的裸 `print()` 替换为 `logger.info()`。
+- 输入：`table_name` / `column_name`
+- 输出：
+  - `host_brain/audit/sqlite_ledger.py`：新增 `_table_schema_cache` + `_invalidate_schema_cache()` + `_table_has_column()` 缓存逻辑；
+  - `host_brain/app/main.py`：`print()` → `logger.info()`；
+  - `tests/unit/test_perf_audit_m25.py`：T-PERF-AUDIT-01~02（2 个测试）。
+- 验收标准：
+  - 第二次调用 `_table_has_column` 不执行 `PRAGMA table_info`（T-PERF-AUDIT-01）；
+  - 迁移后缓存被清空（T-PERF-AUDIT-02）；
+  - `main.py` 无裸 `print()` 调用；
+  - 全量测试 ≥1782 passed，0 failed，0 warnings。
+- 涉及文件路径：
+  - `host_brain/audit/sqlite_ledger.py`；
+  - `host_brain/app/main.py`；
+  - `tests/unit/test_perf_audit_m25.py`（新增）。
+- 关联需求/测试：FR-PERF-AUDIT-001；T-PERF-AUDIT-01~02。
+
+### TASK-0220 M25-D：asyncio.get_event_loop() DeprecationWarning 修复
+
+- 状态：DONE
+- 任务描述：修复 `edge_client/actuators/vts_driver.py:685` 的 `asyncio.get_event_loop()` DeprecationWarning（Python 3.10+），改为 `asyncio.get_running_loop()`（在协程中）或 `asyncio.new_event_loop()`（在非协程中）；全量测试验证 0 warnings。
+- 输入：`edge_client/actuators/vts_driver.py:685`
+- 输出：
+  - `edge_client/actuators/vts_driver.py`：`asyncio.get_event_loop()` → `asyncio.get_running_loop()` 或 `asyncio.new_event_loop()`；
+  - `tests/unit/test_compat_m25.py`：T-COMPAT-01（1 个测试）。
+- 验收标准：
+  - 全量测试运行 0 DeprecationWarning（T-COMPAT-01）；
+  - `vts_driver.py` 无 `asyncio.get_event_loop()` 调用；
+  - 全量测试 ≥1782 passed，0 failed，0 warnings。
+- 涉及文件路径：
+  - `edge_client/actuators/vts_driver.py`；
+  - `tests/unit/test_compat_m25.py`（新增）。
+- 关联需求/测试：FR-COMPAT-001；T-COMPAT-01。
+
+### TASK-0221 M25-E：M25 发布清单
+
+- 状态：DONE
+- 任务描述：TASK-0217~0220 全部 DONE 后，生成 M25 发布清单（`m25_release.json`），记录 M25-A~D 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M25 里程碑状态为 DONE；更新 `requirements_trace.md` M25 小节状态（R-163~R-166）；生成代码审查报告 `full_code_review_report_2026-03-05-m25.md`。
+- 输入：TASK-0217~0220 全部 DONE；全量测试 ≥1794 passed（1782 + 12 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m25_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M25 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M25 小节（R-163~R-166）；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
+- 验收标准：
+  - `release_ready=true`；
+  - `log_llm_route_formal=true`（SQLiteLedger 正式方法已添加）；
+  - `wechat_gc_implemented=true`（GC 机制已实现）；
+  - `table_schema_cache=true`（表结构缓存已实现）；
+  - `zero_deprecation_warnings=true`；
+  - `total_tests_passed ≥ 1794`；
+  - `zero_regressions=true`；
+  - `zero_warnings=true`。
+- 涉及文件路径：
+  - `docs/50_release/m25_release.json`（新增）；
+  - `docs/20_prd/PRD.md`；
+  - `docs/60_trace/requirements_trace.md`；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
+- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-AUDIT-LLM-001~002；FR-CHANNEL-GC-001~002；FR-PERF-AUDIT-001；FR-COMPAT-001。
+
 
 
 

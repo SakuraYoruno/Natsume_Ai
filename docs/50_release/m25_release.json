@@ -1,0 +1,98 @@
+{
+  "milestone": "M25",
+  "title": "生产就绪加固 + SQLiteLedger 扩展 + 代码质量收口",
+  "release_date": "2026-03-05",
+  "release_ready": true,
+  "log_llm_route_formal": true,
+  "wechat_gc_implemented": true,
+  "table_schema_cache": true,
+  "zero_deprecation_warnings": true,
+  "total_tests_passed": 1802,
+  "total_tests_skipped": 10,
+  "total_tests_failed": 0,
+  "zero_regressions": true,
+  "zero_warnings": true,
+  "baseline_from": "M24",
+  "baseline_tests": 1782,
+  "new_tests_added": 20,
+  "tasks": [
+    {
+      "task_id": "TASK-0217",
+      "name": "M25-A：SQLiteLedger log_llm_route() 正式方法",
+      "status": "DONE",
+      "files_modified": [
+        "host_brain/audit/sqlite_ledger.py",
+        "host_brain/integrations/llm_gateway.py"
+      ],
+      "files_added": [
+        "host_brain/audit/migrations/0039_llm_route_log.sql",
+        "tests/unit/test_llm_route_log.py"
+      ],
+      "tests_added": 7,
+      "test_ids": ["T-AUDIT-LLM-01", "T-AUDIT-LLM-02", "T-AUDIT-LLM-03", "T-AUDIT-LLM-04", "T-AUDIT-LLM-05"]
+    },
+    {
+      "task_id": "TASK-0218",
+      "name": "M25-B：WeChatChannelHealth GC + VTSMappingStore 生命周期加固",
+      "status": "DONE",
+      "files_modified": [
+        "host_brain/channels/wechat_health.py",
+        "host_brain/channels/vts_mapping_store.py"
+      ],
+      "files_added": [
+        "tests/unit/test_channel_gc_m25.py"
+      ],
+      "tests_added": 5,
+      "test_ids": ["T-CHANNEL-GC-01", "T-CHANNEL-GC-02", "T-CHANNEL-GC-03", "T-VTS-STORE-01"]
+    },
+    {
+      "task_id": "TASK-0219",
+      "name": "M25-C：SQLiteLedger _table_has_column 缓存 + main.py print 修复",
+      "status": "DONE",
+      "files_modified": [
+        "host_brain/audit/sqlite_ledger.py"
+      ],
+      "files_added": [
+        "tests/unit/test_perf_audit_m25.py"
+      ],
+      "tests_added": 5,
+      "test_ids": ["T-PERF-AUDIT-01", "T-PERF-AUDIT-02"],
+      "notes": "main.py 裸 print() 在 M24 已修复，_table_has_column 缓存已存在，本次新增 _invalidate_schema_cache() 方法"
+    },
+    {
+      "task_id": "TASK-0220",
+      "name": "M25-D：asyncio.get_event_loop() DeprecationWarning 修复",
+      "status": "DONE",
+      "files_modified": [],
+      "files_added": [
+        "tests/unit/test_compat_m25.py"
+      ],
+      "tests_added": 3,
+      "test_ids": ["T-COMPAT-01"],
+      "notes": "asyncio.get_event_loop() 在 M24 已修复为 asyncio.new_event_loop()，本次新增兼容性验证测试"
+    },
+    {
+      "task_id": "TASK-0221",
+      "name": "M25-E：M25 发布清单",
+      "status": "DONE",
+      "files_added": [
+        "docs/50_release/m25_release.json",
+        "docs/40_agents/full_code_review_report_2026-03-05-m25.md"
+      ],
+      "files_modified": [
+        "docs/20_prd/PRD.md",
+        "docs/60_trace/requirements_trace.md"
+      ]
+    }
+  ],
+  "quality_gates": {
+    "total_tests_passed_ge_1794": true,
+    "zero_failed": true,
+    "zero_warnings": true,
+    "zero_regressions": true,
+    "log_llm_route_formal": true,
+    "wechat_gc_implemented": true,
+    "table_schema_cache_with_invalidate": true,
+    "zero_deprecation_warnings": true
+  }
+}

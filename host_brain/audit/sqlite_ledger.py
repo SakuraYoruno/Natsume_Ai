@@ -56,6 +56,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "scheduler_tasks",
     "replay_guard",
     "session_seq_guard",
+    "llm_route_log",
 })
 from host_brain.core.ids import now_ms
 
@@ -423,6 +424,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "model_control_log": set(),
     "sandbox_exec_log": {"resource_usage"},
     "scheduler_event_log": set(),
+    "llm_route_log": set(),
 }
 
 
@@ -1070,6 +1072,62 @@ class SQLiteLedger:
     def log_scheduler_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SCHEDULER_EVENT_COLUMNS}
         self._insert("scheduler_event_log", payload)
+
+    # M25-A: LLM 路由决策审计
+    def log_llm_route(self, row: dict[str, Any]) -> None:
+        """记录 LLM 多模型路由决策（M25-A 正式方法）。
+
+        必填字段：request_id / model_id / reason / ts_ms
+        可选字段：latency_ms / fallback_used
+        """
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "model_id": str(row.get("model_id") or ""),
+            "reason": str(row.get("reason") or ""),
+            "latency_ms": int(row.get("latency_ms") or 0),
+            "fallback_used": 1 if row.get("fallback_used") else 0,
+            "ts_ms": int(row.get("ts_ms") or 0),
+        }
+        self._insert("llm_route_log", payload)
+
+    def query_llm_route_log(
+        self,
+        *,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按时间窗口查询 llm_route_log（T-AUDIT-LLM-05）。
+
+        Args:
+            start_ms: 起始时间戳（毫秒，含）。
+            end_ms: 结束时间戳（毫秒，含）。
+            limit: 最大返回条数（默认 100）。
+
+        Returns:
+            路由决策记录列表，按 ts_ms ASC 排序。
+        """
+        limit = max(1, min(int(limit), 10_000))
+        conditions: list[str] = []
+        params: list[Any] = []
+        if start_ms is not None:
+            conditions.append("ts_ms >= ?")
+            params.append(int(start_ms))
+        if end_ms is not None:
+            conditions.append("ts_ms <= ?")
+            params.append(int(end_ms))
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM llm_route_log {where} ORDER BY ts_ms ASC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["fallback_used"] = bool(d.get("fallback_used"))
+            d.pop("id", None)
+            result.append(d)
+        return result
 
     def get_vault_manifest(self, manifest_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
@@ -1851,6 +1909,21 @@ class SQLiteLedger:
                     ON graph_run_trace (session_id);
                 CREATE INDEX IF NOT EXISTS idx_graph_run_trace_ts
                     ON graph_run_trace (ts_ms);
+
+                -- M25-A: LLM 多模型路由决策审计表
+                CREATE TABLE IF NOT EXISTS llm_route_log (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id    TEXT    NOT NULL,
+                    model_id      TEXT    NOT NULL,
+                    reason        TEXT    NOT NULL,
+                    latency_ms    INTEGER NOT NULL DEFAULT 0,
+                    fallback_used INTEGER NOT NULL DEFAULT 0,
+                    ts_ms         INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_llm_route_log_request_id
+                    ON llm_route_log (request_id);
+                CREATE INDEX IF NOT EXISTS idx_llm_route_log_ts_ms
+                    ON llm_route_log (ts_ms);
                 """
             )
 
@@ -2044,5 +2117,17 @@ class SQLiteLedger:
                     cached = {str(row["name"]) for row in rows}
                     self._column_cache[table] = cached
         return cached is not None and column in cached
+
+    def _invalidate_schema_cache(self, table: str | None = None) -> None:
+        """清空表结构缓存（M25-C：迁移后调用，确保下次查询重新读取 PRAGMA）。
+
+        Args:
+            table: 指定表名时只清空该表的缓存；None 时清空全部缓存。
+        """
+        with self._column_cache_lock:
+            if table is not None:
+                self._column_cache.pop(table, None)
+            else:
+                self._column_cache.clear()
 
 

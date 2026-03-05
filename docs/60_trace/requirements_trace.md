@@ -1092,3 +1092,46 @@
 - 当前进展（2026-03-05）：T-WECHAT-01~16（19 个测试）全部通过；inbound 解析（文本/图片/语音）、outbound 频率限制、降级策略、恢复日志均已验证；全量测试 1782 passed，0 failed，零回归。
 - 覆盖状态：DONE
 
+
+## M25 生产就绪加固 + SQLiteLedger 扩展 + 代码质量收口（R-163~R-166）
+
+## R-163
+- 系统级需求：SQLiteLedger LLM 路由审计扩展——新增 `log_llm_route()` 正式方法（写入 `llm_route_log` 表）；新增 `query_llm_route_log()` 时间窗口查询方法；新增迁移脚本 `0039_llm_route_log.sql`（幂等）；`LlmGatewayContract._log_route_decision()` 直接调用 `ledger.log_llm_route()`，去掉 `hasattr` 检查；`ledger=None` 时不崩溃
+- PRD 需求编号（FR）：FR-AUDIT-LLM-001；FR-AUDIT-LLM-002
+- 来源：PRD §4.29；DevSpec §25
+- DevSpec 落点：DevSpec §25.1
+- DevTasks（TASK）：TASK-0217
+- 验收测试（T-xx）：T-AUDIT-LLM-01~05
+- 当前进展（2026-03-05）：T-AUDIT-LLM-01~05（7 个测试）全部通过；log_llm_route() 写入/读取、fallback_used 记录、null ledger 安全、迁移脚本幂等、时间窗口查询均已验证；全量测试 1802 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-164
+- 系统级需求：WeChatChannelHealth GC 机制——新增 `gc_inactive_threads()` 方法（清理超过 `inactive_threshold_s` 无活动的 `thread_key`，写 `wechat_gc_log`）；新增 `_gc_interval_s` / `_inactive_threshold_s` 配置参数；新增 `_thread_last_active_ms` 活跃时间戳追踪；VTSMappingStore `db_path=":memory:"` 时写 `logging.warning()`（生产可观测）
+- PRD 需求编号（FR）：FR-CHANNEL-GC-001；FR-CHANNEL-GC-002
+- 来源：PRD §4.30；DevSpec §26
+- DevSpec 落点：DevSpec §26.1
+- DevTasks（TASK）：TASK-0218
+- 验收测试（T-xx）：T-CHANNEL-GC-01~03；T-VTS-STORE-01
+- 当前进展（2026-03-05）：T-CHANNEL-GC-01~03（3 个测试）+ T-VTS-STORE-01（2 个测试）全部通过；GC 清理过期 thread_key、保留活跃 thread_key、GC 审计日志、内存模式 WARNING 均已验证；全量测试 1802 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-165
+- 系统级需求：SQLiteLedger 表结构缓存加固——新增 `_invalidate_schema_cache(table=None)` 方法（迁移后清空缓存，支持指定表或全量清空）；`_table_has_column()` 缓存机制已存在（`_column_cache`），本次补充失效接口；`main.py` 裸 `print()` 已在 M24 修复为 `logger.info()`
+- PRD 需求编号（FR）：FR-PERF-AUDIT-001
+- 来源：PRD §4.31；DevSpec §27
+- DevSpec 落点：DevSpec §27.1
+- DevTasks（TASK）：TASK-0219
+- 验收测试（T-xx）：T-PERF-AUDIT-01~02
+- 当前进展（2026-03-05）：T-PERF-AUDIT-01~02（5 个测试）全部通过；缓存命中验证、缓存失效后重新填充、指定表/全量清空均已验证；全量测试 1802 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-166
+- 系统级需求：asyncio 兼容性加固——`edge_client/actuators/vts_driver.py` 无 `asyncio.get_event_loop()` 调用（Python 3.10+ DeprecationWarning）；已使用 `asyncio.new_event_loop()` + `asyncio.run_coroutine_threadsafe()` 替代；全量测试 0 DeprecationWarning
+- PRD 需求编号（FR）：FR-COMPAT-001
+- 来源：PRD §4.32；DevSpec §28
+- DevSpec 落点：DevSpec §28.1
+- DevTasks（TASK）：TASK-0220
+- 验收测试（T-xx）：T-COMPAT-01
+- 当前进展（2026-03-05）：T-COMPAT-01（3 个测试）全部通过；vts_driver.py 无 get_event_loop() 调用、使用推荐 API、整个 edge_client 目录无 DeprecationWarning 来源均已验证；全量测试 1802 passed，0 failed，零回归。
+- 覆盖状态：DONE
+

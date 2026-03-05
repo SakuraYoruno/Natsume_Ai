@@ -31,6 +31,10 @@ DEFAULT_FAILURE_THRESHOLD = 3
 DEFAULT_OUTBOUND_RATE_PER_MINUTE = 10
 # 健康状态刷新间隔（秒）
 HEALTH_REFRESH_INTERVAL_S = 30
+# 默认 GC 间隔（秒）
+DEFAULT_GC_INTERVAL_S = 3600
+# 默认非活跃阈值（秒）：超过此时间无活动的 thread_key 将被 GC 清理
+DEFAULT_INACTIVE_THRESHOLD_S = 86400
 
 
 @dataclass
@@ -70,6 +74,8 @@ class WeChatChannelHealth:
         failure_threshold: int = DEFAULT_FAILURE_THRESHOLD,
         outbound_rate_per_minute: int = DEFAULT_OUTBOUND_RATE_PER_MINUTE,
         ledger: Any = None,
+        gc_interval_s: int = DEFAULT_GC_INTERVAL_S,
+        inactive_threshold_s: int = DEFAULT_INACTIVE_THRESHOLD_S,
     ) -> None:
         """初始化通道健康管理器。
 
@@ -77,11 +83,15 @@ class WeChatChannelHealth:
             failure_threshold: 连续失败阈值（超过后自动降级）。
             outbound_rate_per_minute: 每个 thread_key 每分钟最多推送条数。
             ledger: SQLiteLedger 实例（用于写入恢复日志）。
+            gc_interval_s: GC 执行间隔（秒，默认 3600）。
+            inactive_threshold_s: 非活跃阈值（秒，默认 86400），超过此时间无活动的 thread_key 将被清理。
         """
         self._lock = threading.Lock()
         self._failure_threshold = int(failure_threshold)
         self._outbound_rate_per_minute = int(outbound_rate_per_minute)
         self._ledger = ledger
+        self._gc_interval_s = int(gc_interval_s)
+        self._inactive_threshold_s = int(inactive_threshold_s)
 
         self._status = WECHAT_STATUS_UP
         self._last_recv_ts_ms: int | None = None
@@ -89,8 +99,10 @@ class WeChatChannelHealth:
         self._error_count = 0
         self._degraded_since_ts_ms: int | None = None
 
-        # 频率限制：{thread_key: [(ts_ms, count), ...]}
+        # 频率限制：{thread_key: [ts_ms, ...]}（记录每次推送时间戳）
         self._outbound_counts: dict[str, list[int]] = {}
+        # 每个 thread_key 最后活跃时间戳（ms）
+        self._thread_last_active_ms: dict[str, int] = {}
 
     def record_recv(self, *, ts_ms: int | None = None) -> None:
         """记录收到 inbound 消息（更新 last_recv_ts）。"""
@@ -167,6 +179,7 @@ class WeChatChannelHealth:
             # 允许推送，记录本次时间戳
             counts.append(now_value)
             self._outbound_counts[thread_key] = counts
+            self._thread_last_active_ms[thread_key] = now_value
             return WeChatRateLimitResult(
                 allowed=True,
                 reason_code=None,
@@ -220,3 +233,69 @@ class WeChatChannelHealth:
             })
         except Exception:
             pass  # 恢复日志写入失败不影响主流程
+
+    def gc_inactive_threads(self, *, ts_ms: int | None = None) -> dict[str, Any]:
+        """清理超过 inactive_threshold_s 无活动的 thread_key（M25-B GC 机制）。
+
+        清理 _outbound_counts 和 _thread_last_active_ms 中过期的 thread_key，
+        并写入 wechat_gc_log 审计记录。
+
+        Args:
+            ts_ms: 当前时间戳（毫秒）。None 时使用 now_ms()。
+
+        Returns:
+            GC 结果字典：{
+                "cleaned_count": int,       # 清理的 thread_key 数量
+                "cleaned_keys": list[str],  # 被清理的 thread_key 列表
+                "ts_ms": int,               # GC 执行时间戳
+            }
+        """
+        with self._lock:
+            now_value = int(ts_ms if ts_ms is not None else now_ms())
+            threshold_ms = self._inactive_threshold_s * 1000
+            cutoff_ms = now_value - threshold_ms
+
+            cleaned_keys: list[str] = []
+            all_keys = set(self._outbound_counts.keys()) | set(self._thread_last_active_ms.keys())
+
+            for key in all_keys:
+                last_active = self._thread_last_active_ms.get(key)
+                if last_active is None or last_active < cutoff_ms:
+                    cleaned_keys.append(key)
+
+            for key in cleaned_keys:
+                self._outbound_counts.pop(key, None)
+                self._thread_last_active_ms.pop(key, None)
+
+            result = {
+                "cleaned_count": len(cleaned_keys),
+                "cleaned_keys": sorted(cleaned_keys),
+                "ts_ms": now_value,
+            }
+
+            # 写入 GC 审计日志
+            self._write_gc_log(cleaned_keys=cleaned_keys, ts_ms=now_value)
+            return result
+
+    def _write_gc_log(self, *, cleaned_keys: list[str], ts_ms: int) -> None:
+        """写入 wechat_gc_log 审计记录（通过 ledger.log_channel_io）。"""
+        if self._ledger is None or not cleaned_keys:
+            return
+        try:
+            from host_brain.core.ids import new_request_id
+            self._ledger.log_channel_io({
+                "request_id": new_request_id(),
+                "channel": "wechat",
+                "direction": "GC",
+                "thread_key": "system",
+                "message_id": f"gc_{ts_ms}",
+                "user_id": None,
+                "status": "GC_COMPLETED",
+                "reason_code": None,
+                "stage": "S_CHANNEL_GC",
+                "detail": f"gc cleaned {len(cleaned_keys)} inactive thread_keys: {sorted(cleaned_keys)[:10]}",
+                "payload_digest": None,
+                "ts_ms": ts_ms,
+            })
+        except Exception:
+            pass  # GC 日志写入失败不影响主流程

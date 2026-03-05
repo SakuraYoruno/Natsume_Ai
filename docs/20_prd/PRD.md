@@ -973,9 +973,91 @@ M24-D M24 发布清单
 
 ---
 
-## 附录 A：PRD 写作与验收模板（供持续新增需求时使用）
+M25 生产就绪加固 + SQLiteLedger 扩展 + 代码质量收口：**DONE（2026-03-05）**
+M25-A SQLiteLedger 扩展（log_llm_route 正式方法）：FR-AUDIT-LLM-001（SQLiteLedger.log_llm_route() 正式方法 + llm_route_log 表 + 迁移脚本 + 审计串联）**DONE**
+M25-B WeChatChannelHealth GC + VTSMappingStore 生命周期：FR-CHANNEL-GC-001（_outbound_counts 定期 GC + VTSMappingStore 生产 db_path 强制校验 + 生命周期文档）**DONE**
+M25-C SQLiteLedger _table_has_column 缓存 + main.py print 修复：FR-PERF-AUDIT-001（_table_has_column 表结构缓存 + main.py 裸 print() 替换为 logger.info()）**DONE**
+M25-D asyncio.get_event_loop() DeprecationWarning 修复：FR-COMPAT-001（vts_driver.py:685 改为 asyncio.get_running_loop() + 全量 Warning 清零验证）**DONE**
+M25-E M25 发布清单 **DONE**
 
-新增需求必须包含：
+---
+
+## §4.29 SQLiteLedger LLM 路由审计扩展（FR-AUDIT-LLM-001~002）
+
+### FR-AUDIT-LLM-001：log_llm_route() 正式方法
+
+- 用户故事：作为系统运维，我希望 LLM 多模型路由决策有专用审计表，可追溯每次路由选择（主模型/备用/降级原因/延迟）。
+- 输入：`request_id` / `model_id` / `reason` / `latency_ms` / `fallback_used` / `ts_ms`
+- 输出：写入 `llm_route_log` 表（含 `id` / `request_id` / `model_id` / `reason` / `latency_ms` / `fallback_used` / `ts_ms`）
+- 约束：
+  - 必须有 SQL 迁移脚本（`0039_llm_route_log.sql`）；
+  - `LlmGatewayContract._log_route_decision()` 改为直接调用 `ledger.log_llm_route()`，不再使用 `hasattr` 检查；
+  - 写入失败不影响主流程（`try/except` 兜底）。
+- 验收：
+  - T-AUDIT-LLM-01：`log_llm_route()` 写入成功，`llm_route_log` 表有记录；
+  - T-AUDIT-LLM-02：`fallback_used=True` 时记录正确；
+  - T-AUDIT-LLM-03：`ledger=None` 时不崩溃；
+  - T-AUDIT-LLM-04：迁移脚本幂等（重复执行不报错）。
+
+### FR-AUDIT-LLM-002：llm_route_log 时间窗口查询
+
+- 输入：`start_ts_ms` / `end_ts_ms` / `model_id`（可选过滤）
+- 输出：`llm_route_log` 记录列表（分页，最多 100 条）
+- 约束：使用 `fetch_by_time_range()` 统一接口。
+- 验收：T-AUDIT-LLM-05：时间窗口查询返回正确记录数。
+
+---
+
+## §4.30 通道 GC + 生命周期加固（FR-CHANNEL-GC-001~002）
+
+### FR-CHANNEL-GC-001：WeChatChannelHealth._outbound_counts GC
+
+- 用户故事：作为系统运维，我希望微信通道健康管理器不会因长期运行导致内存泄漏（thread_key 无限增长）。
+- 输入：`gc_interval_s`（GC 间隔，默认 3600 秒）/ `inactive_threshold_s`（不活跃阈值，默认 86400 秒）
+- 输出：定期清理超过 `inactive_threshold_s` 无活动的 `thread_key`，写 `wechat_gc_log`
+- 约束：
+  - GC 不影响正在活跃的 `thread_key`；
+  - GC 操作持有 `_lock`，线程安全；
+  - GC 结果写审计（清理数量 + 时间戳）。
+- 验收：
+  - T-CHANNEL-GC-01：GC 后过期 `thread_key` 被清理；
+  - T-CHANNEL-GC-02：活跃 `thread_key` 不被清理；
+  - T-CHANNEL-GC-03：GC 写审计日志。
+
+### FR-CHANNEL-GC-002：VTSMappingStore 生产 db_path 强制校验
+
+- 输入：`db_path`（生产环境必须非 `:memory:`）
+- 输出：`db_path=":memory:"` 时写 `WARNING` 日志（不阻断，但可观测）
+- 约束：不破坏现有测试（测试中使用 `:memory:` 仍合法）。
+- 验收：T-VTS-STORE-01：`db_path=":memory:"` 时写 WARNING 日志。
+
+---
+
+## §4.31 性能与兼容性加固（FR-PERF-AUDIT-001 / FR-COMPAT-001）
+
+### FR-PERF-AUDIT-001：_table_has_column 表结构缓存
+
+- 用户故事：作为系统运维，我希望 SQLiteLedger 在频繁调用时不因 `PRAGMA table_info` 重复执行而产生性能瓶颈。
+- 输入：`table_name` / `column_name`
+- 输出：缓存表结构信息（`_table_schema_cache: dict[str, set[str]]`），首次查询后缓存，后续直接命中
+- 约束：
+  - 缓存在 `__init__` 时初始化为空字典；
+  - 迁移脚本执行后自动清空缓存（`_invalidate_schema_cache()`）；
+  - 缓存不跨连接共享（实例级别）。
+- 验收：
+  - T-PERF-AUDIT-01：第二次调用 `_table_has_column` 不执行 `PRAGMA table_info`；
+  - T-PERF-AUDIT-02：迁移后缓存被清空。
+
+### FR-COMPAT-001：asyncio.get_event_loop() DeprecationWarning 修复
+
+- 输入：`edge_client/actuators/vts_driver.py:685`
+- 输出：改为 `asyncio.get_running_loop()`（在协程中）或 `asyncio.new_event_loop()`（在非协程中）
+- 约束：修复后全量测试 0 warnings。
+- 验收：T-COMPAT-01：全量测试运行 0 DeprecationWarning。
+
+---
+
+
 - 用户故事：作为……我希望……（可选，但建议保留）
 - 输入/输出（黑盒）：输入是什么；输出结构是什么
 - 约束：风险等级、门禁、模式影响（Normal/Gaming/Sleep）、是否可撤销

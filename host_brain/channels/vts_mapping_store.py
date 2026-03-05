@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 
+
+logger = logging.getLogger(__name__)
 
 # 默认映射表（与 channels/vts.py 保持一致）
 DEFAULT_EMOTION_MAPPING: dict[str, str] = {
@@ -76,6 +79,11 @@ class VTSMappingStore:
             db_path: SQLite 数据库路径。None 时使用内存数据库（仅用于测试）。
         """
         self._db_path = db_path or ":memory:"
+        if self._db_path == ":memory:":
+            logger.warning(
+                "VTSMappingStore 使用内存数据库（db_path=':memory:'），"
+                "重启后映射表数据将丢失，生产环境请指定持久化路径。"
+            )
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()

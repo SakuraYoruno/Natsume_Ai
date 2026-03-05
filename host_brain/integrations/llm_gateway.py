@@ -289,21 +289,18 @@ class LlmGatewayContract:
         fallback_used: bool,
         ts_ms: int,
     ) -> None:
-        """M24-A：写入 llm_route_log（路由决策审计）。"""
-        if self.ledger is None or not hasattr(self.ledger, "log_error"):
+        """M25-A：写入 llm_route_log（路由决策审计，直接调用正式方法）。"""
+        if self.ledger is None:
             return
-        # 复用 log_error 写入路由决策（stage=S_LLM_ROUTE，reason_code=None 表示成功）
-        # 实际生产中应有专用 log_llm_route 方法
         try:
-            if hasattr(self.ledger, "log_llm_route"):
-                self.ledger.log_llm_route({
-                    "request_id": request_id,
-                    "model_id": model_id,
-                    "reason": reason,
-                    "latency_ms": latency_ms,
-                    "fallback_used": fallback_used,
-                    "ts_ms": ts_ms,
-                })
+            self.ledger.log_llm_route({
+                "request_id": request_id,
+                "model_id": model_id,
+                "reason": reason,
+                "latency_ms": latency_ms,
+                "fallback_used": fallback_used,
+                "ts_ms": ts_ms,
+            })
         except Exception:
             pass  # 路由日志写入失败不影响主流程
 
