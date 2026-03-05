@@ -1,0 +1,39 @@
+{
+  "milestone": "M27",
+  "title": "情感链路端到端连通（P0 基础设施修复）",
+  "date": "2026-03-05",
+  "status": "DONE",
+  "tasks": [
+    {"id": "TASK-0232", "label": "M27-A", "title": "GateSnapshot 增加情感字段（OPT-19）", "status": "DONE", "file": "host_brain/governor/rules.py"},
+    {"id": "TASK-0233", "label": "M27-B", "title": "extract_emotion_tag 传入 mood_state（OPT-20）", "status": "DONE", "file": "host_brain/core/qa.py"},
+    {"id": "TASK-0234", "label": "M27-C", "title": "build_governance_snapshot 传递 mood_state 给 GateSnapshot（OPT-22）", "status": "DONE", "file": "host_brain/core/metabolism.py"},
+    {"id": "TASK-0235", "label": "M27-D", "title": "EpisodicRecord 增加情感标注字段（OPT-25）", "status": "DONE", "file": "host_brain/memory/episodic.py"},
+    {"id": "TASK-0236", "label": "M27-E", "title": "BondDynamicsWriter.apply_update 增加情感字段（OPT-26）", "status": "DONE", "file": "host_brain/bond/bond_dynamics.py"},
+    {"id": "TASK-0237", "label": "M27-F", "title": "derive_bond_summary 修复 stage/trend 字段读取（OPT-27）", "status": "DONE", "file": "host_brain/bond/summarizer.py"},
+    {"id": "TASK-0238", "label": "M27-G", "title": "RecallFusionServiceContract 增加情感维度路由（OPT-31）", "status": "DONE", "file": "host_brain/retrieval/recall_fusion.py"},
+    {"id": "TASK-0239", "label": "M27-H", "title": "IntentDecisionEngine 的 governance_snapshot 携带情感状态（OPT-32）", "status": "DONE", "file": "host_brain/governor/decision.py"},
+    {"id": "TASK-0240", "label": "M27-I", "title": "SkillLoader.execute 传递情感状态（OPT-37）", "status": "DONE", "file": "host_brain/skills/loader.py"},
+    {"id": "TASK-0241", "label": "M27-J", "title": "ToolBroker.execute 传递情感状态（OPT-38）", "status": "DONE", "file": "host_brain/tools/broker.py"},
+    {"id": "TASK-0242", "label": "M27-K", "title": "NatsumeScheduler._build_system_intent 携带情感状态（OPT-43）", "status": "DONE", "file": "host_brain/scheduler/scheduler.py"},
+    {"id": "TASK-0243", "label": "M27-L", "title": "M27 发布清单", "status": "DONE", "file": "docs/50_release/m27_release.json"}
+  ],
+  "test_summary": {
+    "total_passed": 884,
+    "total_failed": 0,
+    "m27_new_tests": 35,
+    "test_pass_rate": "100%"
+  },
+  "key_changes": [
+    "GateSnapshot 新增 mood_state/emotion_tag/emotion_intensity 三个情感字段（默认值安全）",
+    "extract_emotion_tag() 新增 mood_state 参数，启用 MOOD_EMOTION_CONSTRAINTS 约束校验",
+    "build_governance_snapshot() 从 HardState 提取情感字段并注入 GateSnapshot",
+    "EpisodicRecord 新增 emotion_tag/emotion_valence/emotion_arousal 情感标注字段",
+    "BondDynamicsWriter.apply_update() 新增 emotion_tag/emotion_intensity 参数，高强度互动加权 1.5x",
+    "derive_bond_summary() 修复从 event['stage'] 读取 Bug，改为从 BondScoreState 直接读取",
+    "RecallFusionServiceContract.recall() 新增 emotion_filter 参数，情感记忆优先排序",
+    "IntentDecisionEngine.evaluate_intent() critical 状态下拒绝 TOOL_CALL/SKILL_EXEC 意图",
+    "SkillLoader.execute() context 注入 emotion_tag/mood_state 默认值",
+    "ToolBroker.execute() context 注入 emotion_tag/mood_state 默认值",
+    "NatsumeScheduler._build_system_intent() 携带 emotion_tag/mood_state 字段"
+  ]
+}

@@ -1135,6 +1135,16 @@
 - 当前进展（2026-03-05）：T-COMPAT-01（3 个测试）全部通过；vts_driver.py 无 get_event_loop() 调用、使用推荐 API、整个 edge_client 目录无 DeprecationWarning 来源均已验证；全量测试 1802 passed，0 failed，零回归。
 - 覆盖状态：DONE
 
+## R-166（M27 情感链路端到端连通）
+- 系统级需求：M27 P0 情感链路修复——GateSnapshot 情感字段、extract_emotion_tag mood_state 约束、build_governance_snapshot 情感透传、EpisodicRecord 情感标注、BondDynamicsWriter 情感加权、derive_bond_summary Bug 修复、RecallFusion 情感路由、IntentDecisionEngine 情感门控、SkillLoader/ToolBroker 情感上下文、NatsumeScheduler 情感意图（11项P0修复）
+- PRD 需求编号（FR）：FR-GOV-EMOTION-001；FR-QA-EMOTION-001；FR-GOV-EMOTION-002；FR-MEM-EMOTION-001；FR-BOND-EMOTION-001；FR-BOND-SUMMARY-001；FR-RECALL-EMOTION-001；FR-GOV-EMOTION-003；FR-SKILL-EMOTION-001；FR-TOOL-EMOTION-001；FR-SCHED-EMOTION-001
+- 来源：SOUL-OPT-2026-03-05 优化19/20/22/25/26/27/31/32/37/38/43
+- DevSpec 落点：DevSpec §M27
+- DevTasks（TASK）：TASK-0232~0243
+- 验收测试（T-xx）：T-GATE-SNAP-01~03；T-EXTRACT-TAG-01~03；T-GOV-SNAP-01~02；T-EPISODIC-EMO-01~04；T-BOND-DYN-EMO-01~03；T-BOND-SUM-01~03；T-RECALL-EMO-01~03；T-INTENT-EMO-01~03；T-SKILL-EMO-01~02；T-TOOL-EMO-01~02；T-SCHED-EMO-01~02
+- 当前进展（2026-03-05）：M27 全部 35 个新增测试通过；全量测试 884 passed，0 failed，零回归；情感链路 P0 断路点全部修复，情感状态从感知层→记忆层→决策层→执行层完整流通。
+- 覆盖状态：DONE
+
 ## R-167（M28 核心情感架构深化）
 - 系统级需求：M28 P1 优化——EmotionVector 情绪连续体、Bond 积分分级、Governor R8 情感门控、VTS 表情映射16种、TTS intensity 修复、全链路情感上下文透传（19项P1优化）
 - PRD 需求编号（FR）：FR-EMOTION-CONTINUUM-001；FR-BOND-GRADE-001；FR-GOV-R8-001；FR-VTS-EXPRESSION-FULL-001；FR-TTS-INTENSITY-001；FR-CONTEXT-SLOTS-001；FR-COMPRESS-EMOTION-001；FR-DISTILL-EMOTION-001；FR-TIMELINE-EMOTION-001；FR-CAMERA-EMOTION-001；FR-TOOL-EMOTION-FILTER-001；FR-RERANK-EMOTION-001；FR-PIPELINE-EMOTION-001；FR-LLM-EMOTION-001；FR-GRAPH-EMOTION-001
