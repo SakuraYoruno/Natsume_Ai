@@ -341,6 +341,87 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 
 ---
 
+## 💜 情感系统（Emotion System）
+
+M21 ~ M29 构建了完整的情感感知与表达体系，是 Natsume Ai 区别于普通对话 AI 的核心能力层。
+
+### 情感链路数据流
+
+```
+用户输入（ASR）
+    │ user_emotion_hint / user_emotion_confidence（M29-P）
+    ▼
+HardStateSnapshot
+    │ mood_state / emotion_tag / emotion_intensity
+    ▼
+build_governance_snapshot（M27-C）
+    │ emotion_ts_ms 时间戳（M29-K）
+    ▼
+GateSnapshot → Governor R8 情感门控（M27-H / M28-D）
+    │ critical 状态拒绝 TOOL_CALL / SKILL_EXEC
+    ▼
+IntentDecision → RecallFusion 情感路由（M27-G）
+    │ emotion_filter 优先排序 / HybridFusion 1.2x 加权（M29-O）
+    ▼
+EpisodicMemory 情感标注召回（M27-D / M29-B）
+    │ 情感上下文 1.3x 加权 / 三档衰减 FAST/SLOW/PERMANENT（M29-I）
+    ▼
+ContextPack → build_emotion_pulse_slot 动态槽位注入（M29-C）
+    │ EmotionVector 降采样 → LLM Prompt
+    ▼
+LLM Gateway 情感感知生成参数（M28-Q / M29-F）
+    │ EXCITED→temperature=0.85 / SAD→0.55
+    ▼
+GraphExecutor 节点情感状态（M28-R）
+    ▼
+SkillLoader / ToolBroker / Scheduler 情感上下文注入（M27-I/J/K）
+    ▼
+BondDynamics 情感加权（M27-E）
+    │ emotion_intensity > 0.7 → 积分 × 1.5
+    ▼
+BondEmotionalTexture VAD 质感层（M29-A）
+    │ 平均回复间隔 / 情感效价 / 亲密温度
+    ▼
+EmotionTimeline 时间线重建（M29-E）
+    ▼
+TTS / VTS 情感表达输出（M28-S / M28-L）
+    │ emotion_intensity 真正传递 / 16 种表情映射
+    ▼
+EdgeEventReporter emotion_tag / emotion_intensity（M29-R）
+MetricsCollector emotion_metrics 情感维度指标（M29-Q）
+```
+
+### 情感状态机（EmotionState）
+
+| 状态 | 说明 | 门控行为 |
+|------|------|----------|
+| `normal` | 正常情感范围 | 无限制 |
+| `tired` | 疲惫状态 | `HAPPY`/`EXCITED` 标签降级为 `NEUTRAL` |
+| `critical` | 临界/崩溃状态 | 拒绝所有 `TOOL_CALL`/`SKILL_EXEC`，返回 `EMOTION_GATE_BLOCKED` |
+
+### 情感核心组件
+
+| 组件 | 模块 | 功能 |
+|------|------|------|
+| **EmotionVector** | `core/metabolism.py` | 情绪连续体（valence/arousal/dominance 三维） |
+| **EmotionTimeline** | `core/metabolism.py` | 情感历史轨迹记录与重建 |
+| **EmotionTrigger** | `core/metabolism.py` | 主动情感触发器（register/evaluate） |
+| **EmotionEcho** | `core/metabolism.py` | 情感回声（Natsume 对用户情感的共鸣响应） |
+| **BondEmotionalTexture** | `bond/bond_stage_engine.py` | VAD 情感质感层（亲密温度/效价/回复间隔） |
+| **BondRiftState** | `bond/bond_stage_engine.py` | 裂痕修复机制（CONFLICT/APOLOGY/COMFORT） |
+| **EmotionPulseSlot** | `core/context_pack.py` | 动态槽位注入（EmotionVector → LLM Prompt） |
+| **EmotionFilter** | `retrieval/recall_fusion.py` | 情感路由与加权融合（1.2x boost） |
+
+### 情感感知降级策略
+
+当情感感知链路不可用时，`build_fallback_output`（M29-M）根据情感状态返回差异化文本：
+- `SAD` → 安慰性回复
+- `ANGRY` → 平静化回复
+- `HAPPY` → 积极回应
+- 其他 → 通用降级文本
+
+---
+
 ## 📊 项目状态
 
 | 维度 | 状态 |
@@ -369,8 +450,8 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | M20 | Agent 心跳健康检测 + 压缩前静默保存 + Episodic 混合检索增强 | ✅ DONE |
 | M21 ~ M26 | 情感系统深化（情感状态机 / 情感记忆 / 情感驱动 Bond / 情感感知 / 情感表达 / 情感治理）| ✅ DONE |
 | M27 | 情感链路端到端连通（P0 基础设施修复：GateSnapshot 情感字段 / extract_emotion_tag 约束 / EpisodicRecord 情感标注 / BondDynamics 情感加权 / RecallFusion 情感路由 / IntentDecision 情感门控 / SkillLoader/ToolBroker/Scheduler 情感上下文）| ✅ DONE |
-| M28 | 核心情感架构深化（BondEmotionalTexture / EmotionTimeline / 主动触发器 / LLM 感知参数 / BondRiftState 裂痕修复 / 情感回声 / 三档衰减配置 / payload 语义标准化）| ✅ DONE |
-| M29 | 情感体验增强（情感质感层 / 情感上下文加权召回 / 动态槽位注入 / bond_summary 语义校验 / 情感感知降级 / 调度心跳情感门控 / 融合策略情感加权 / ASR 情感推断字段 / 指标情感维度 / Edge 事件情感字段）| ✅ DONE |
+| M28 | 核心情感架构深化（EmotionVector 情绪连续体 / emotion_tag 主动注入 / Bond 积分情感分类精化 / Governor R8 情感门控 / BondScoreState 中文化 / ContextCompressor 双通道 / LongTermDistiller 情感蒸馏 / CrossTimeline 情感事件 / VTS 16 种表情映射 / CameraRecognition 情感响应 / ToolMeta 情感适用性 / Reranker 情感感知重排 / RetrievalPipeline 情感上下文 / LlmGateway 情感上下文 / GraphExecutor 情感状态 / SoVITS emotion_intensity 真正传递）| ✅ DONE |
+| M29 | 情感体验增强（BondEmotionalTexture VAD 质感层 / EpisodicMemory 情感加权召回 1.3x / build_emotion_pulse_slot 动态槽位注入 / 主动情感触发器 register/evaluate / EmotionTimeline 时间线重建 / LLM 情感感知生成参数 / BondRiftState 裂痕修复 / compute_emotion_echo 情感回声 / 三档衰减 FAST/SLOW/PERMANENT / payload 语义标准化 / emotion_ts_ms 时间戳 / bond_summary 语义校验 / 情感感知降级 / Scheduler critical 跳过低优先级 / HybridFusion 1.2x 加权 / ASR user_emotion_hint 字段 / MetricsCollector emotion_metrics / EdgeEventReporter 情感字段）| ✅ DONE |
 
 ---
 
@@ -388,7 +469,11 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | 🤖 AGENTS | `docs/40_agents/` | 实现层代理行为规范 |
 | 📊 项目管理 | `docs/50_project/` | 工作表 / 发布 / 环境检查 |
 | 🧩 外置服务配置 | `docs/50_project/ExternalServices_Config.md` | 全部外置服务清单与配置方式 |
+| 📦 发布清单 | `docs/50_release/` | M12 ~ M29 release.json 归档 |
 | 🔗 Trace | `docs/60_trace/` | 可追溯性矩阵 |
+| 🔍 代码审查报告 | `docs/60_trace/code_review_m27_2026-03-05.md` | M27 代码审查报告（35/35 ✅） |
+| ⚠️ 风险登记册 | `docs/60_trace/risk_registry.md` | 项目风险登记与跟踪 |
+| 🧪 测试报告 | `docs/60_trace/test_report_2026-03-05.md` | 最新全量测试报告 |
 
 ---
 
@@ -410,6 +495,23 @@ pre-commit install
 pre-commit run -a
 ```
 
+### 测试分层
+
+| 层级 | 目录 | 说明 |
+|------|------|------|
+| **单元测试** | `tests/unit/` | 各模块独立测试（884 passed，M29 基线）|
+| **契约测试** | `tests/contract/` | 跨模块接口契约验证 |
+| **端到端测试** | `tests/e2e/` | 完整链路集成测试 |
+| **性能基准** | `tools/bench/` | Ledger WAL 读写吞吐基准 |
+| **试运行报告** | `docs/60_trace/trial_run_reports/` | 自动化试运行 JSON 报告（T1~T14 系列）|
+
+### 审计链保障
+
+所有影响现实的动作均写入 SQLite WAL 审计链，支持：
+- **回放**：`tools/replay/` 审计回放工具（请求回放 + 生产演练）
+- **统计**：70+ 统一 reason_code，含 `EMOTION_GATE_BLOCKED` 等情感相关码
+- **保留策略**：`audit/` 模块内置日志迁移与保留策略
+
 ---
 
 ## 🤝 协作约定
@@ -423,3 +525,21 @@ pre-commit run -a
 | **PROJECT** | 文档生产与一致性维护 | `docs/50_project/PROJECT_TASKS.md` |
 
 > ⚠️ 实现层任务来源只能是 `docs/30_devspec/**` 和 `docs/40_agents/**`，其他文档不得作为任务来源。
+
+---
+
+## 📝 变更日志
+
+| 版本 / 里程碑 | 日期 | 核心变更 |
+|--------------|------|----------|
+| **M29** | 2026-03-05 | 情感体验增强：BondEmotionalTexture / EmotionTimeline / 主动触发器 / 情感回声 / 三档衰减 / ASR 情感推断 / 指标情感维度（884 passed）|
+| **M28** | 2026-03-05 | 核心情感架构深化：EmotionVector / Governor R8 / VTS 16 种表情 / LLM 情感参数 / Reranker 情感重排（838 passed）|
+| **M27** | 2026-03-05 | 情感链路端到端连通：GateSnapshot 情感字段 / EpisodicRecord 情感标注 / BondDynamics 情感加权 / IntentDecision R8 门控（35 新增测试）|
+| **M21~M26** | 2026-03 | 情感系统深化：情感状态机 / 情感记忆 / 情感驱动 Bond / 情感感知 / 情感表达 / 情感治理 |
+| **M20** | 2026-03 | Agent 心跳健康检测 / 压缩前静默保存 / Episodic 混合检索增强 |
+| **M19** | 2026-03 | M17/M18 审查缺陷修复（P0/P1 修复、obs 路由重构、集成测试补齐）|
+| **M17~M18** | 2026-03 | 监控面板 v3（React + Vite SPA：Overview / Sessions / Trace / Metrics）+ 后端 API 扩展 |
+| **M15~M16** | 2026-03 | 语音链路深化（ASR 事件化 / TTS 队列 / Barge-in / 兜底模型）/ Canon 治理 API 强化 |
+| **M12~M14** | 2026-03 | Edge Client 基础链路 / 调度器 + Rate Limit 持久化 / 代码审查缺陷修复 |
+| **M11** | 2026-03 | LangGraph 四层编排重构（graph_contract / graph_executor / graph_fallback / graph_model_resolve）|
+| **M1~M10** | 2026-03 | 仓库骨架 / Governor / Audit / Bond / Canon / Memory / Retrieval / Skills / Vision / Observability |
