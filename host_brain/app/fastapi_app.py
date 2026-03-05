@@ -28,6 +28,7 @@ from host_brain.app.main import (
     build_startup_report,
     emit_runtime_bootstrap_logs,
 )
+from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     CANON_SYNC_FAILED,
@@ -554,8 +555,13 @@ async def health_check() -> HealthResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
+        # 先获取真实 runtime_statuses，确保健康检查能反映服务真实状态
+        _host_result = load_host_config()
+        _runtime_statuses: dict[str, Any] = {}
+        if _host_result.success and _host_result.config is not None:
+            _runtime_statuses = build_host_runtime_statuses(_host_result.config)
         health_report = build_service_health_report(
-            runtime_statuses={},
+            runtime_statuses=_runtime_statuses,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,

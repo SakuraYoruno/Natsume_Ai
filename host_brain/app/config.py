@@ -437,6 +437,51 @@ def export_host_config_snapshot(
 def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]:
     statuses: dict[str, dict[str, Any]] = {}
 
+    # --- host.audit.sqlite_ledger ---
+    # 通过 Natsume_AUDIT_DB 环境变量判断账本路径是否可访问
+    import os as _os
+    audit_db_path = str(_os.environ.get("Natsume_AUDIT_DB") or "host_brain/data/audit.sqlite3").strip()
+    if audit_db_path == ":memory:":
+        statuses["host.audit.sqlite_ledger"] = {
+            "available": True,
+            "detail": "sqlite ledger using in-memory db (test mode)",
+        }
+    else:
+        parent_dir = _os.path.dirname(_os.path.abspath(audit_db_path))
+        if _os.path.exists(audit_db_path) or _os.path.isdir(parent_dir):
+            statuses["host.audit.sqlite_ledger"] = {
+                "available": True,
+                "detail": f"sqlite ledger path accessible: {audit_db_path}",
+            }
+        else:
+            statuses["host.audit.sqlite_ledger"] = {
+                "available": False,
+                "unavailable_kind": "dependency",
+                "detail": f"sqlite ledger parent dir not found: {parent_dir}",
+            }
+
+    # --- host.governor.decision ---
+    # Governor 依赖 LLM provider 配置，provider=disabled 时裁决能力降级
+    if config.llm_provider == PROVIDER_DISABLED:
+        statuses["host.governor.decision"] = {
+            "available": False,
+            "unavailable_kind": "dependency",
+            "detail": "governor degraded: HOST_LLM_PROVIDER disabled",
+        }
+    else:
+        statuses["host.governor.decision"] = {
+            "available": True,
+            "detail": "governor decision engine ready",
+        }
+
+    # --- host.skills.loader ---
+    # Skills loader 依赖 env 配置正常加载，env 合法即可用
+    statuses["host.skills.loader"] = {
+        "available": True,
+        "detail": f"skills loader ready (env={config.env})",
+    }
+
+    # --- host.integrations.llm_gateway ---
     provider_to_env_key = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
@@ -461,6 +506,7 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
             "detail": "llm gateway enabled",
         }
 
+    # --- host.retrieval.embedding / host.retrieval.reranker ---
     if not config.enable_retrieval:
         retrieval_down = {
             "available": False,
@@ -469,7 +515,17 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
         }
         statuses["host.retrieval.embedding"] = dict(retrieval_down)
         statuses["host.retrieval.reranker"] = dict(retrieval_down)
+    else:
+        statuses["host.retrieval.embedding"] = {
+            "available": True,
+            "detail": "retrieval embedding enabled",
+        }
+        statuses["host.retrieval.reranker"] = {
+            "available": True,
+            "detail": "retrieval reranker enabled",
+        }
 
+    # --- host.vision.screen_ocr / host.vision.camera_recognizer ---
     if not config.enable_vision:
         vision_down = {
             "available": False,
@@ -478,6 +534,15 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
         }
         statuses["host.vision.screen_ocr"] = dict(vision_down)
         statuses["host.vision.camera_recognizer"] = dict(vision_down)
+    else:
+        statuses["host.vision.screen_ocr"] = {
+            "available": True,
+            "detail": "vision screen_ocr enabled",
+        }
+        statuses["host.vision.camera_recognizer"] = {
+            "available": True,
+            "detail": "vision camera_recognizer enabled",
+        }
 
     return statuses
 
