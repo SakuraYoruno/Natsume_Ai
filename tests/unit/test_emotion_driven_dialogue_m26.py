@@ -175,7 +175,7 @@ class TestVoicePipelineEmotionTagVTS:
             },
         )
 
-        mock_vts.set_expression.assert_called_once_with("HAPPY")
+        mock_vts.set_expression.assert_called_once_with("HAPPY", intensity=0.5)
         mock_vts.talk_start.assert_called_once()
 
 

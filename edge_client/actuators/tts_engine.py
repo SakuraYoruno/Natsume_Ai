@@ -390,6 +390,7 @@ class SoVITSModelManager:
         *,
         language: str | None = None,
         emotion_tag: str | None = None,
+        emotion_intensity: float | None = None,
         voice_profile: str | None = None,
     ) -> TtsSynthResult:
         """Synthesize text to audio using loaded model.
@@ -398,8 +399,13 @@ class SoVITSModelManager:
             text: Text to synthesize.
             language: Override language code.
             emotion_tag: Emotion tag for prosody control.
+            emotion_intensity: 情感强度（0.0~1.0），影响 TTS 语气幅度。缺省为 0.5。
+                               超出范围时截断到 [0.0, 1.0]。
             voice_profile: Voice profile override.
         """
+        # M26-I：emotion_intensity 范围截断（不拒绝，防止链路中断）
+        if emotion_intensity is not None:
+            emotion_intensity = max(0.0, min(1.0, float(emotion_intensity)))
         if self._state != TtsState.READY or self._model is None:
             load_result = self.load()
             if not load_result.success:
@@ -424,6 +430,7 @@ class SoVITSModelManager:
                 text=text.strip(),
                 language=language or self._config.language,
                 emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
                 timeout_s=self._config.synth_timeout_s,
             )
             processing_time = time.monotonic() - t0
@@ -619,10 +626,19 @@ def make_sovits_synthesizer(
         text = str(speak_event.get("text") or "")
         emotion_tag = str(speak_event.get("emotion_tag") or "")
         voice_profile = str(speak_event.get("voice_profile") or "default")
+        # M26-I：透传 emotion_intensity
+        raw_intensity = speak_event.get("emotion_intensity")
+        emotion_intensity: float | None = None
+        if raw_intensity is not None:
+            try:
+                emotion_intensity = float(raw_intensity)
+            except (TypeError, ValueError):
+                emotion_intensity = None
 
         result = engine.synthesize(
             text,
             emotion_tag=emotion_tag or None,
+            emotion_intensity=emotion_intensity,
             voice_profile=voice_profile or None,
         )
 
@@ -1110,6 +1126,7 @@ def _synthesize_audio(
     text: str,
     language: str,
     emotion_tag: str | None,
+    emotion_intensity: float | None = None,
     timeout_s: float,
 ) -> tuple[Any, int]:
     """Run synthesis on model. Returns (audio_ndarray, sample_rate).

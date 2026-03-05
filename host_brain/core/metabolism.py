@@ -188,3 +188,33 @@ def _clamp_int(value: Any, *, low: int, high: int, default: int) -> int:
         return high
     return number
 
+
+# ---------------------------------------------------------------------------
+# M26-G：mood_state → emotion_tag 约束映射（FR-EMOTION-DRIVE-004）
+# ---------------------------------------------------------------------------
+
+# mood_state → 允许的 emotion_tag 列表（第一个为降级默认值）
+MOOD_EMOTION_CONSTRAINTS: dict[str, list[str]] = {
+    "critical": ["NEUTRAL", "SAD"],                              # 能量极低，只允许平静/悲伤
+    "tired":    ["NEUTRAL", "CALM", "SAD"],                      # 疲惫，不允许兴奋/愤怒
+    "calm":     ["NEUTRAL", "CALM", "THINKING"],                 # 平和，允许思考
+    "steady":   ["NEUTRAL", "CALM", "HAPPY", "THINKING", "SAD", "ANGRY"],  # 正常范围
+    "engaged":  ["HAPPY", "EXCITED", "SURPRISED", "THINKING", "NEUTRAL", "ANGRY"],  # 活跃
+}
+
+
+def mood_to_emotion_constraint(mood_state: str) -> list[str]:
+    """返回指定 mood_state 下允许的 emotion_tag 列表。
+
+    列表第一个元素为该 mood_state 下的降级默认值（当 emotion_tag 不在允许范围时使用）。
+
+    Args:
+        mood_state: 系统硬状态（calm/steady/engaged/tired/critical）。
+                    未知值视为 "steady"。
+
+    Returns:
+        允许的 emotion_tag 列表（至少包含 "NEUTRAL"）。
+    """
+    normalized = str(mood_state or "").strip().lower()
+    return list(MOOD_EMOTION_CONSTRAINTS.get(normalized, MOOD_EMOTION_CONSTRAINTS["steady"]))
+

@@ -333,10 +333,14 @@ class VTubeStudioDriver:
                 action=TALK_END,
             )
 
-    def set_expression(self, emotion_tag: str) -> VtsDriverResult:
+    def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
         """Set expression via deterministic emotion_tag → expression_id mapping.
 
         Rejects unknown tags and free-form parameters.
+
+        Args:
+            emotion_tag: 情感标签（枚举值）。
+            intensity: 情感强度（0.0~1.0），影响表情持续时间（M26-I）。缺省为 0.5。
         """
         normalized = str(emotion_tag or "").strip().upper()
         if not normalized:
@@ -422,6 +426,66 @@ class VTubeStudioDriver:
                 pass
 
         return result
+
+    def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
+        """触发指定 VTS 热键（M26-H：sub_emotion 细粒度表情驱动）。
+
+        用于触发 sub_emotion 对应的细粒度热键（如脸红、星星眼、爱心眼等）。
+        VTS 未连接时降级处理（记录日志，不阻断链路）。
+
+        Args:
+            hotkey_id: VTS 热键 ID（对应 configs/vts/vts_hotkey_config.yaml 中的 hotkey_id）。
+
+        Returns:
+            VtsDriverResult，success=True 表示热键触发成功或降级处理。
+        """
+        if not hotkey_id or not str(hotkey_id).strip():
+            return VtsDriverResult(
+                success=False,
+                reason_code=AVATAR_TAG_INVALID,
+                detail="hotkey_id is required",
+                action="trigger_hotkey",
+            )
+
+        normalized_id = str(hotkey_id).strip()
+
+        if self._state != VtsState.AUTHENTICATED:
+            # 降级：记录但不阻断
+            logger.debug("VTS trigger_hotkey degraded (not connected): %s", normalized_id)
+            return VtsDriverResult(
+                success=True,
+                reason_code=VTS_CONNECTION_FAILED,
+                detail=f"hotkey queued (VTS not connected): {normalized_id}",
+                action="trigger_hotkey",
+            )
+
+        try:
+            _trigger_vts_hotkey(
+                vts=self._vts,
+                hotkey_id=normalized_id,
+                timeout_s=self._config.api_timeout_s,
+            )
+            logger.debug("VTS trigger_hotkey: %s", normalized_id)
+            return VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail=f"hotkey triggered: {normalized_id}",
+                action="trigger_hotkey",
+            )
+        except TimeoutError as e:
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_EXPRESSION_TIMEOUT,
+                detail=f"hotkey trigger timeout: {e}",
+                action="trigger_hotkey",
+            )
+        except Exception as e:
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_API_ERROR,
+                detail=f"hotkey trigger error: {e}",
+                action="trigger_hotkey",
+            )
 
     # -----------------------------------------------------------------
     # WebSocket 自动重连（TASK-0080）

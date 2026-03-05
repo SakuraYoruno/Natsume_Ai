@@ -126,7 +126,22 @@ class EdgeVoicePipeline:
             ):
                 # M26-E：先触发 emotion_tag 表情，再开启 talk gate
                 emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-                self.vts_driver.set_expression(emotion_tag)
+                # M26-I：提取 emotion_intensity，超出范围时截断到 [0.0, 1.0]
+                raw_intensity = payload.get("emotion_intensity")
+                intensity = 0.5
+                if raw_intensity is not None:
+                    try:
+                        intensity = max(0.0, min(1.0, float(raw_intensity)))
+                    except (TypeError, ValueError):
+                        intensity = 0.5
+                self.vts_driver.set_expression(emotion_tag, intensity=intensity)
+                # M26-H：若 payload 含 sub_emotion，额外触发对应细粒度热键
+                sub_emotion = payload.get("sub_emotion")
+                if sub_emotion:
+                    from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
+                    hotkey_id = sub_emotion_to_hotkey(sub_emotion)
+                    if hotkey_id:
+                        self.vts_driver.trigger_hotkey(hotkey_id)
                 vts_result = self.vts_driver.talk_start()
 
         success = bool(

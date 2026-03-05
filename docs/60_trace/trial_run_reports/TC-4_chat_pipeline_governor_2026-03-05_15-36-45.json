@@ -1,0 +1,21 @@
+{
+  "test_id": "TC-4",
+  "service": "CHAT_PIPELINE",
+  "operation": "governor_chain",
+  "params_in": {
+    "request_id": "req_70e52d8e61dc4170b5d9b4543a0700bf",
+    "session_id": "session::trial::req_70e52d8e61dc4170b5d9b4543a0700bf",
+    "message": "完整链路试运行测试"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "stage": "S_INTENT_OK",
+    "intent_id": "intent::req_70e52d8e61dc4170b5d9b4543a0700bf",
+    "trace_status": "COMPLETE",
+    "intent_log_count": 1,
+    "governor_log_count": 1
+  },
+  "status": "PASS",
+  "ts_ms": 1772696205395
+}

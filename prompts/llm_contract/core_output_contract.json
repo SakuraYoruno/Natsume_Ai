@@ -31,6 +31,26 @@
             "EXCITED"
           ],
           "description": "情感标签，驱动 VTS 表情 + TTS 语气联动。缺省时使用 NEUTRAL。"
+        },
+        "sub_emotion": {
+          "type": "string",
+          "enum": [
+            "blush",
+            "star_eye",
+            "heart_eye",
+            "cry",
+            "scissors_eye",
+            "dizzy",
+            "disdain",
+            "peace_sign"
+          ],
+          "description": "细粒度情感标签，映射到 VTS 具体热键（可选）。blush=脸红/害羞，star_eye=星星眼/崇拜，heart_eye=爱心眼/喜爱，cry=哭哭/委屈，scissors_eye=剪刀眼/调皮，dizzy=眩晕/混乱，disdain=鄙视脸黑/不屑，peace_sign=比耶/开心。"
+        },
+        "emotion_intensity": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "情感强度（0.0~1.0），影响 TTS 语气幅度和 VTS 表情持续时间。缺省为 0.5（中等强度）。超出范围时 QA 校验截断到合法范围。"
         }
       },
       "additionalProperties": true

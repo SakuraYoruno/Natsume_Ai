@@ -588,13 +588,19 @@ def check_canon_as_fact(
 def _validate_emotion_tag(
     emotion_tag: str | None,
     *,
+    mood_state: str | None = None,
     ledger: Any | None = None,
     request_id: str | None = None,
 ) -> str:
     """校验 emotion_tag 合法性，非法值降级为 NEUTRAL 并写 QA 警告日志。
 
+    若提供 mood_state，还会检查 emotion_tag 是否在当前 mood_state 的允许范围内；
+    不在范围内则降级为该 mood_state 允许范围的第一个值（写 QA 警告日志）。
+
     Args:
         emotion_tag: LLM 输出的情感标签（可为 None 或空字符串）。
+        mood_state: 可选，系统硬状态（calm/steady/engaged/tired/critical）。
+                    提供时启用 mood_state 约束校验。
         ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
         request_id: 可选请求 ID，用于关联审计日志。
 
@@ -605,28 +611,55 @@ def _validate_emotion_tag(
         return DEFAULT_EMOTION_TAG
 
     normalized = str(emotion_tag).strip().upper()
-    if normalized in VALID_EMOTION_TAGS:
-        return normalized
-
-    # 非法值：降级为 NEUTRAL，写 QA 警告日志
-    detail = (
-        f"invalid emotion_tag {emotion_tag!r} downgraded to NEUTRAL; "
-        f"valid values: {sorted(VALID_EMOTION_TAGS)}"
-    )
-    if ledger is not None and hasattr(ledger, "log_qa_violation"):
-        ledger.log_qa_violation(
-            request_id=request_id,
-            code=VIOLATION_INVALID_EMOTION_TAG,
-            detail=detail,
-            field="narrative.emotion_tag",
+    if normalized not in VALID_EMOTION_TAGS:
+        # 非法枚举值：降级为 NEUTRAL，写 QA 警告日志
+        detail = (
+            f"invalid emotion_tag {emotion_tag!r} downgraded to NEUTRAL; "
+            f"valid values: {sorted(VALID_EMOTION_TAGS)}"
         )
-    import logging as _logging
-    _logging.getLogger("Natsume.host.qa").warning(
-        "emotion_tag downgraded: %s -> NEUTRAL (request_id=%s)",
-        emotion_tag,
-        request_id,
-    )
-    return DEFAULT_EMOTION_TAG
+        if ledger is not None and hasattr(ledger, "log_qa_violation"):
+            ledger.log_qa_violation(
+                request_id=request_id,
+                code=VIOLATION_INVALID_EMOTION_TAG,
+                detail=detail,
+                field="narrative.emotion_tag",
+            )
+        import logging as _logging
+        _logging.getLogger("Natsume.host.qa").warning(
+            "emotion_tag downgraded: %s -> NEUTRAL (request_id=%s)",
+            emotion_tag,
+            request_id,
+        )
+        return DEFAULT_EMOTION_TAG
+
+    # mood_state 约束校验（M26-G）
+    if mood_state:
+        from host_brain.core.metabolism import mood_to_emotion_constraint
+        allowed = mood_to_emotion_constraint(mood_state)
+        if normalized not in allowed:
+            fallback = allowed[0] if allowed else DEFAULT_EMOTION_TAG
+            detail = (
+                f"emotion_tag {normalized!r} not allowed under mood_state={mood_state!r}; "
+                f"allowed={allowed}; downgraded to {fallback!r}"
+            )
+            if ledger is not None and hasattr(ledger, "log_qa_violation"):
+                ledger.log_qa_violation(
+                    request_id=request_id,
+                    code=VIOLATION_INVALID_EMOTION_TAG,
+                    detail=detail,
+                    field="narrative.emotion_tag",
+                )
+            import logging as _logging
+            _logging.getLogger("Natsume.host.qa").warning(
+                "emotion_tag mood_state constraint: %s -> %s (mood_state=%s, request_id=%s)",
+                normalized,
+                fallback,
+                mood_state,
+                request_id,
+            )
+            return fallback
+
+    return normalized
 
 
 def extract_emotion_tag(

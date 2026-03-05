@@ -3759,7 +3759,7 @@ TASK-XXXX 标题
 
 ### TASK-0227 M26-F：VTS 热键配置文件抽离 + 说明文档
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：将 VTS 所有热键配置（emotion_tag → expression_id 映射、热键 ID、触发参数等）从代码中抽离为独立的 YAML 配置文件 `configs/vts/vts_hotkey_config.yaml`；`VTSMappingStore` 支持从该配置文件加载初始映射表（替代硬编码的 `DEFAULT_EMOTION_MAPPING`）；新增配置说明文档 `docs/30_devspec/vts_hotkey_config_guide.md`，说明配置格式、字段含义、扩展方式及与 VTSMappingStore 的关联关系。
 - 输入：
   - `host_brain/channels/vts_mapping_store.py`（`DEFAULT_EMOTION_MAPPING` 硬编码）；
@@ -3787,7 +3787,7 @@ TASK-XXXX 标题
 
 ### TASK-0228 M26-G：mood_state → emotion_tag 约束映射（情感系统深化 I）
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：在 `metabolism.py` 中新增 `mood_to_emotion_constraint()` 函数，将系统硬状态（calm/steady/engaged/tired/critical）映射为 emotion_tag 的允许范围；在 QA 校验时检查 emotion_tag 是否在当前 mood_state 的允许范围内，不在则降级到该范围的第一个值（写 QA 警告日志）。实现"系统状态感知"的情感约束，防止能量极低时输出 EXCITED 等不合理情感。
 - 输入：
   - `host_brain/core/metabolism.py`（新增 `mood_to_emotion_constraint()` 函数）；
@@ -3810,7 +3810,7 @@ TASK-XXXX 标题
 
 ### TASK-0229 M26-H：sub_emotion 细粒度表情驱动（情感系统深化 II）
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `sub_emotion`，映射到 `vts_hotkey_config.yaml` 中的具体热键（如 blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；`VTSMappingStore` 新增 `sub_emotion_to_hotkey()` 方法；`voice_pipeline.py` 在触发 `set_expression(emotion_tag)` 后，若 `sub_emotion` 存在则额外触发对应热键，充分利用模型的 15 个细粒度表情。
 - 输入：
   - `prompts/llm_contract/core_output_contract.json`；
@@ -3837,7 +3837,7 @@ TASK-XXXX 标题
 
 ### TASK-0230 M26-I：emotion_intensity 强度参数（情感系统深化 III）
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `emotion_intensity`（float，0.0~1.0），影响 TTS 语气幅度；`SoVITSModelManager.synthesize()` 接收 `emotion_intensity` 参数并传递给底层模型；`VTubeStudioDriver.set_expression()` 接收 `intensity` 参数，影响表情触发的 `duration_ms`（强度越高持续越长）。
 - 输入：
   - `prompts/llm_contract/core_output_contract.json`；
@@ -3866,7 +3866,7 @@ TASK-XXXX 标题
 
 ### TASK-0231 M26-J：M26 发布清单
 
-- 状态：TODO
+- 状态：DONE（2026-03-05）
 - 任务描述：TASK-0222~0230 全部 DONE 后，生成 M26 发布清单（`m26_release.json`），记录 M26-A~I 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M26 里程碑状态为 DONE；更新 `requirements_trace.md` M26 小节（R-167~R-175）；生成代码审查报告 `full_code_review_report_2026-03-05-m26.md`。
 - 输入：TASK-0222~0230 全部 DONE；全量测试 ≥1835 passed（1802 + 33 新增），0 failed，0 warnings。
 - 输出：

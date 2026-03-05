@@ -26,10 +26,15 @@ class _MockVtsDriver:
         self.talk_end_calls = 0
         self.reset_calls = 0
         self.set_expression_calls: list[str] = []
+        self.trigger_hotkey_calls: list[str] = []
 
-    def set_expression(self, emotion_tag: str) -> VtsDriverResult:
+    def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
         self.set_expression_calls.append(emotion_tag)
         return VtsDriverResult(success=True, reason_code=None, detail=f"set_expression:{emotion_tag}", action="set_expression")
+
+    def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
+        self.trigger_hotkey_calls.append(hotkey_id)
+        return VtsDriverResult(success=True, reason_code=None, detail=f"trigger_hotkey:{hotkey_id}", action="trigger_hotkey")
 
     def talk_start(self) -> VtsDriverResult:
         self.talk_start_calls += 1
