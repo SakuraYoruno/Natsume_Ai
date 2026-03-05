@@ -214,3 +214,111 @@ class TestResponseTruncation:
         short_text = "正常回复"
         truncated = truncate_response(short_text, max_chars=300)
         assert truncated == short_text
+
+
+# ── T-HB-07~09: Edge 传输层探针集成（TASK-0211 M23-B）────────────────────────
+
+class TestEdgeTransportProbeIntegration:
+    """T-HB-07~09: edge 传输层探针集成到心跳检测（TASK-0211 M23-B）。"""
+
+    def test_t_hb_07_edge_all_up_no_alert(self):
+        """T-HB-07：edge 传输层探针全部 UP 时，不写入 EDGE_PROBE_ALERT 审计事件。"""
+        from unittest.mock import patch
+
+        ledger = _MockLedger()
+        sched = _make_scheduler(ledger=ledger)
+
+        # 模拟 edge 探针全部 UP（available=True）
+        with patch(
+            "host_brain.scheduler.scheduler._build_edge_probes",
+            return_value={"edge.rpc.gateway": {"available": True, "detail": "healthy"}},
+        ), patch(
+            "host_brain.scheduler.scheduler._EDGE_PROBE_AVAILABLE",
+            True,
+        ):
+            result = sched._check_edge_transport_probes(ts_ms=1000)
+
+        assert result["edge_available"] is True
+        assert result["down_services"] == []
+        # 全部 UP 时不写入 EDGE_PROBE_ALERT
+        edge_alerts = [e for e in ledger.events if e.get("status") == "EDGE_PROBE_ALERT"]
+        assert len(edge_alerts) == 0, "edge 全部 UP 时不应写入 EDGE_PROBE_ALERT"
+
+    def test_t_hb_08_edge_down_writes_alert(self):
+        """T-HB-08：edge 传输层探针有 DOWN 时，写入 EDGE_PROBE_ALERT 审计事件。"""
+        from unittest.mock import patch
+
+        ledger = _MockLedger()
+        sched = _make_scheduler(ledger=ledger)
+
+        # 模拟 edge 探针有 DOWN
+        with patch(
+            "host_brain.scheduler.scheduler._build_edge_probes",
+            return_value={
+                "edge.rpc.gateway": {"available": False, "detail": "transport down"},
+                "edge.rpc.asr": {"available": False, "detail": "transport down"},
+            },
+        ), patch(
+            "host_brain.scheduler.scheduler._EDGE_PROBE_AVAILABLE",
+            True,
+        ):
+            result = sched._check_edge_transport_probes(ts_ms=2000)
+
+        assert result["edge_available"] is False
+        assert len(result["down_services"]) == 2
+        # 有 DOWN 时写入 EDGE_PROBE_ALERT
+        edge_alerts = [e for e in ledger.events if e.get("status") == "EDGE_PROBE_ALERT"]
+        assert len(edge_alerts) == 1, "edge 有 DOWN 时应写入 EDGE_PROBE_ALERT"
+        alert = edge_alerts[0]
+        assert alert["task_id"] == "agent_health_check"
+        assert "edge.rpc.gateway" in str(alert.get("error_detail") or "")
+
+    def test_t_hb_09_edge_probe_exception_no_crash(self):
+        """T-HB-09：build_edge_transport_probe_statuses 抛出异常时，心跳任务不崩溃（降级处理）。"""
+        from unittest.mock import patch
+
+        ledger = _MockLedger()
+        sched = _make_scheduler(ledger=ledger)
+
+        def _failing_probe(**kwargs):
+            raise RuntimeError("edge probe connection refused")
+
+        with patch(
+            "host_brain.scheduler.scheduler._build_edge_probes",
+            side_effect=_failing_probe,
+        ), patch(
+            "host_brain.scheduler.scheduler._EDGE_PROBE_AVAILABLE",
+            True,
+        ):
+            # 不应抛出异常
+            result = sched._check_edge_transport_probes(ts_ms=3000)
+
+        assert result["edge_available"] is None, "异常时 edge_available 应为 None（降级）"
+        assert "error" in result, "异常时结果应含 error 字段"
+        # 不写入 EDGE_PROBE_ALERT（异常降级，不确定状态）
+        edge_alerts = [e for e in ledger.events if e.get("status") == "EDGE_PROBE_ALERT"]
+        assert len(edge_alerts) == 0, "探针异常时不应写入 EDGE_PROBE_ALERT"
+
+    def test_t_hb_07_integrated_in_run_health_check(self):
+        """T-HB-07b：_run_agent_health_check 执行后，edge 探针检查被调用（集成验证）。"""
+        from unittest.mock import patch, MagicMock
+
+        ledger = _MockLedger()
+        sched = _make_scheduler(ledger=ledger)
+        sched._heartbeat_prompt = DEFAULT_HEARTBEAT_PROMPT
+        sched._heartbeat_max_chars = MAX_RESPONSE_CHARS
+        sched._heartbeat_llm_caller = lambda prompt: "HEARTBEAT_OK"
+
+        probe_called = []
+
+        def _mock_check_edge(*, ts_ms):
+            probe_called.append(ts_ms)
+            return {"edge_available": True, "down_services": [], "ts_ms": ts_ms}
+
+        sched._check_edge_transport_probes = _mock_check_edge
+
+        result = sched._run_agent_health_check()
+
+        assert result["status"] == HEARTBEAT_EVENT_TYPE_OK
+        assert len(probe_called) == 1, "_check_edge_transport_probes 应在心跳检查中被调用一次"
+

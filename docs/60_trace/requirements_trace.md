@@ -1036,3 +1036,59 @@
 - 当前进展（2026-03-05）：T-CVP-CONTRACT-06（5 个测试）全部通过；dry-run/style-only/world-only 三种模式均已验证；collect_canon_projection_documents 无 Chroma 依赖已确认。
 - 覆盖状态：DONE
 
+
+## M23 FTS5 中文检索修复 + Edge 心跳探针集成（R-158~R-159）
+
+## R-158
+- 系统级需求：FTS5 中文词组检索修复——FullTextSearcher 新增 _split_chinese_query 静态方法，对中文字符进行字符级分割（CJK 统一汉字范围判断）；index_memory 写入时对中文内容同步分割；search 查询时对中文查询词同步分割；fts_score 归一化 bug 修复（单条命中时 score_range=0 返回 1.0）；修复后 FTS5 中文词组（如"猫咪"、"工作压力"）可正常命中，混合检索（向量 70% + FTS5 30%）FTS5 权重真正生效
+- PRD 需求编号（FR）：FR-MEM-003；FR-MEM-005
+- 来源：PRD §4.11；试运行报告 §10.4/10.13 P2-FTS
+- DevSpec 落点：DevSpec §15（Episodic 混合检索）
+- DevTasks（TASK）：TASK-0210
+- 验收测试（T-xx）：T-FTS-01~06
+- 当前进展（2026-03-05）：新增 `tests/unit/test_full_text_searcher.py`，T-FTS-01~06（21 个测试）全部通过；中文词组查询命中、单字查询、英文不受影响、混合中英文、FTS5 无结果降级、hybrid_fused 验证均已覆盖；全量测试 1731 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-159
+- 系统级需求：Edge 心跳探针集成——build_edge_transport_probe_statuses 从"定义但未被调用"的孤立函数，集成到 /health 端点的 runtime_statuses 构建流程（fastapi_app.py）和 AgentHealthCheck 心跳任务（scheduler.py）中；新增 _check_edge_transport_probes 方法（调用探针、写入 EDGE_PROBE_ALERT 审计事件）和 _log_edge_probe_alert 方法；探针异常时降级处理不崩溃心跳任务
+- PRD 需求编号（FR）：FR-OBS-001；NFR-REL-001
+- 来源：PRD §4.1（FR-OBS-001）；试运行报告 §D.3 遗留问题
+- DevSpec 落点：DevSpec §20（AgentHealthCheck 心跳检测）
+- DevTasks（TASK）：TASK-0211
+- 验收测试（T-xx）：T-HB-07~09；T-HEALTH-EP-01~02
+- 当前进展（2026-03-05）：T-HB-07~09（4 个测试）+ T-HEALTH-EP-01~02（3 个测试）全部通过；edge 全部 UP 不写审计、edge DOWN 写 EDGE_PROBE_ALERT、探针异常降级、/health 端点集成验证均已覆盖；全量测试 1731 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+
+## M24 LLM 网关真实接入 + VTS 表情驱动 + 微信通道完整链路（R-160~R-162）
+
+## R-160
+- 系统级需求：LLM 网关真实接入——新增 LLMHealthProbeResult/LLMRouteResult 数据类；health_probe() 方法（探测主模型可用性，写 llm_call_log）；route_call() 方法（多模型路由：主模型→备用→本地兜底，写 llm_route_log）；_load_api_key_from_env() 从环境变量读取 API Key（不硬编码）；fallback_providers 配置支持；所有模型不可用时稳定降级（LLM_ROUTE_ALL_FAILED）
+- PRD 需求编号（FR）：FR-LLM-GW-001；FR-LLM-GW-002；FR-LLM-GW-003
+- 来源：PRD §4.26；DevSpec §21
+- DevSpec 落点：DevSpec §21.1
+- DevTasks（TASK）：TASK-0213
+- 验收测试（T-xx）：T-LLM-GW-01~15
+- 当前进展（2026-03-05）：T-LLM-GW-01~15（16 个测试）全部通过；API Key 环境变量读取、健康探测、多模型路由降级、AIRLOCK 出站净化完整链路均已验证；全量测试 1782 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-161
+- 系统级需求：VTS 表情驱动完整链路——VTSMappingStore（映射表持久化到 SQLite、版本化管理、vts_mapping_change_log 变更前后 hash/version）；VTSRateLimiter（令牌桶算法、热更新频率配置、vts_rate_limit_log）；emotion_tag 非法时拒绝（AVATAR_INVALID_EMOTION_TAG）；映射表加载失败时抛出（VTS_MAPPING_LOAD_FAILED）；频率超限时写审计（VTS_RATE_LIMIT_EXCEEDED）
+- PRD 需求编号（FR）：FR-VTS-DRIVE-001；FR-VTS-DRIVE-002；FR-VTS-DRIVE-003
+- 来源：PRD §4.27；DevSpec §22
+- DevSpec 落点：DevSpec §22.1
+- DevTasks（TASK）：TASK-0214
+- 验收测试（T-xx）：T-VTS-DRIVE-01~14
+- 当前进展（2026-03-05）：T-VTS-DRIVE-01~14（16 个测试）全部通过；映射表持久化/版本化、频率限制令牌桶、热更新、审计串联均已验证；全量测试 1782 passed，0 failed，零回归。
+- 覆盖状态：DONE
+
+## R-162
+- 系统级需求：微信通道完整链路——WeChatChannelHealth（健康状态管理：last_recv_ts/last_send_ts/status/error_count；连续失败 N 次自动降级 WECHAT_CHANNEL_DEGRADED；降级时 inbound 正常/outbound 阻断；恢复时写 wechat_channel_recovery_log）；每个 thread_key 每分钟最多 N 条频率限制（WECHAT_RATE_LIMIT_EXCEEDED）；手动重置降级状态（reset_for_recovery）
+- PRD 需求编号（FR）：FR-WECHAT-001；FR-WECHAT-002；FR-WECHAT-003
+- 来源：PRD §4.28；DevSpec §23
+- DevSpec 落点：DevSpec §23.1
+- DevTasks（TASK）：TASK-0215
+- 验收测试（T-xx）：T-WECHAT-01~16
+- 当前进展（2026-03-05）：T-WECHAT-01~16（19 个测试）全部通过；inbound 解析（文本/图片/语音）、outbound 频率限制、降级策略、恢复日志均已验证；全量测试 1782 passed，0 failed，零回归。
+- 覆盖状态：DONE
+

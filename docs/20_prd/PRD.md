@@ -688,9 +688,114 @@ FR-PROACTIVE-002 主动对话内容约束与推送通道
   - 内容仅限问候/关心/回忆引用/提醒口径；含执行 intent 时 QA 拦截；
   - 推送通道失败时静默降级且不重试推送（防骚扰）。
 
-### 4.25 Focus Mode（FOCUS）
+### 4.26 LLM 网关真实接入（LLM_GW）
 
-FR-FOCUS-001 Focus Mode 状态切换与能力限制
+FR-LLM-GW-001 Cloud LLM Gateway 真实 API Key 接入与健康检测
+- 描述：Cloud LLM Gateway 必须支持真实 API Key 配置（OpenAI/Anthropic/本地 Ollama 等），并在启动时与心跳任务中探测可用性；不可用时必须稳定降级（DEPENDENCY_UNAVAILABLE）而非崩溃。
+- 关键约束：
+  - API Key 不得硬编码，必须从环境变量或加密配置文件读取；
+  - 健康探测结果必须写入 /health 端点的 runtime_statuses（llm_gateway.status）；
+  - 不可用时输出结构稳定，quality.stage 标注 LLM_UNAVAILABLE；
+  - 不得把"LLM 不可用"伪装成"我没有任何想法"的事实结论。
+- 验收：
+  - 配置有效 API Key 时，LLM 调用成功并写入 llm_call_log；
+  - API Key 缺失/无效时，输出结构稳定，reason_code=LLM_UNAVAILABLE；
+  - 心跳任务探测 LLM 可用性，结果写入 HEARTBEAT_OK/HEARTBEAT_ALERT 审计事件；
+  - 对应测试编号：T-LLM-GW-01~05。
+
+FR-LLM-GW-002 AIRLOCK 出站净化完整链路
+- 描述：所有发往 Cloud LLM 的 payload 必须经 AIRLOCK 出站净化（sanitization_report），移除硬状态原值/宪法全文/规则细节；入站返回内容必须经 AIRLOCK 入站隔离分类（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN）。
+- 关键约束：
+  - 出站净化报告必须包含 removed_fields/redactions/payload_digest；
+  - 入站内容不得直通执行，必须重构为 Intent 并通过 Governor；
+  - 净化失败必须拒绝出站（AIRLOCK_BLOCKED_EGRESS）。
+- 验收：
+  - 每次 LLM 调用都有 sanitization_report 可追溯；
+  - 入站内容触发执行前必须经 Governor 裁决；
+  - 对应测试编号：T-LLM-GW-06~10。
+
+FR-LLM-GW-003 多模型路由与降级策略
+- 描述：LLM Gateway 必须支持多模型路由（主模型/备用模型/本地兜底），按优先级降级；每次路由决策必须写入 llm_route_log（model_id/reason/latency_ms）。
+- 关键约束：
+  - 主模型超时/不可用时自动切换备用模型；
+  - 本地兜底（Ollama）作为最后防线，输出标记 draft_only=true；
+  - 路由策略可配置（config.yaml），变更写 llm_route_config_log。
+- 验收：
+  - 主模型超时时自动切换备用，llm_route_log 记录切换原因；
+  - 所有模型不可用时输出稳定降级结构；
+  - 对应测试编号：T-LLM-GW-11~15。
+
+### 4.27 VTS 表情驱动完整链路（VTS_DRIVE）
+
+FR-VTS-DRIVE-001 emotion_tag→expression_id 映射表持久化与版本化
+- 描述：VTS 表情映射表（emotion_tag→expression_id）必须持久化存储（SQLite 或 JSON 文件），支持版本化管理；映射表变更必须写入 vts_mapping_change_log（变更前后 hash/version）。
+- 关键约束：
+  - 映射表必须有唯一版本号（semver 或 hash）；
+  - 非法 emotion_tag 必须拒绝（AVATAR_INVALID_EMOTION_TAG）；
+  - 映射表加载失败时必须降级（DEPENDENCY_UNAVAILABLE），不得使用硬编码默认值。
+- 验收：
+  - 映射表变更后版本号更新，vts_mapping_change_log 可追溯；
+  - 非法 emotion_tag 被拒绝并产生可统计 reason_code；
+  - 对应测试编号：T-VTS-DRIVE-01~05。
+
+FR-VTS-DRIVE-002 VTS RPC 真实调用链路与审计串联
+- 描述：VTS 表情触发必须通过 Edge RPC 真实调用 VTube Studio API，并将调用结果（expression_id/status/latency_ms）写入 vts_action_log，串联 request_id/intent_id。
+- 关键约束：
+  - VTS RPC 调用失败必须降级（EDGE_RPC_FAILED），不得伪造"表情已触发"；
+  - 每次触发必须有 evidence_ref 指向 vts_action_log；
+  - VTS 不可用时输出结构稳定，reason_code 可统计。
+- 验收：
+  - 正向：VTS 调用成功，vts_action_log 记录完整（expression_id/status/latency_ms/request_id）；
+  - 失败：VTS 不可用时降级，reason_code=EDGE_RPC_FAILED，不伪造；
+  - 对应测试编号：T-VTS-DRIVE-06~10。
+
+FR-VTS-DRIVE-003 表情触发频率限制与队列管理
+- 描述：VTS 表情触发必须有频率限制（每秒最多 N 次，可配置），防止 VTS API 过载；超限时排队或丢弃（可配置策略），并写入 vts_rate_limit_log。
+- 关键约束：
+  - 频率限制配置可热更新（不重启）；
+  - 丢弃策略：FIFO 丢弃最旧请求（默认）或拒绝最新请求（可配置）；
+  - 频率超限时 reason_code=VTS_RATE_LIMIT_EXCEEDED。
+- 验收：
+  - 超限时触发丢弃/拒绝，vts_rate_limit_log 记录；
+  - 频率配置热更新后立即生效；
+  - 对应测试编号：T-VTS-DRIVE-11~14。
+
+### 4.28 微信通道完整链路（WECHAT）
+
+FR-WECHAT-001 微信 inbound 事件解析与审计串联
+- 描述：微信 inbound 消息（文本/图片/语音/事件）必须被解析为标准化 WeChatInboundEvent，并写入 wechat_inbound_log（thread_key/msg_type/content_hash/ts_ms/request_id）；解析失败必须降级（WECHAT_PARSE_FAILED）。
+- 关键约束：
+  - 消息内容不得直通 LLM，必须先经 AIRLOCK 入站隔离分类；
+  - thread_key 必须与 request_id 关联，支持跨会话追溯；
+  - 图片/语音消息必须先经 OCR/ASR 转写，再进入 Intent 流程。
+- 验收：
+  - 文本消息：解析成功，wechat_inbound_log 记录完整；
+  - 图片消息：OCR 转写后进入 Intent 流程，evidence_ref 可追溯；
+  - 解析失败：reason_code=WECHAT_PARSE_FAILED，结构稳定；
+  - 对应测试编号：T-WECHAT-01~06。
+
+FR-WECHAT-002 微信 outbound 推送与频率限制
+- 描述：微信 outbound 消息必须经 AIRLOCK 出站净化后推送，并写入 wechat_outbound_log（thread_key/msg_type/content_hash/ts_ms/request_id/status）；频率限制：每个 thread_key 每分钟最多 N 条（可配置）。
+- 关键约束：
+  - 推送失败必须降级（WECHAT_SEND_FAILED），不得伪造"已发送"；
+  - 频率超限时拒绝推送（RATE_LIMIT_EXCEEDED），不排队（防骚扰）；
+  - 出站内容不得包含硬状态原值/规则细节（AIRLOCK 约束）。
+- 验收：
+  - 正向：推送成功，wechat_outbound_log 记录完整；
+  - 频率超限：拒绝推送，reason_code=RATE_LIMIT_EXCEEDED；
+  - 推送失败：降级，reason_code=WECHAT_SEND_FAILED，不伪造；
+  - 对应测试编号：T-WECHAT-07~12。
+
+FR-WECHAT-003 微信通道健康状态与降级策略
+- 描述：微信通道必须维护健康状态（last_recv_ts/last_send_ts/status/error_count），并暴露到 /health 端点（wechat_channel.status）；连续失败必须自动降级（WECHAT_CHANNEL_DEGRADED）。
+- 关键约束：
+  - 健康状态 30 秒自动刷新；
+  - 降级时仍接受 inbound（只停止 outbound 推送）；
+  - 恢复时自动重置降级状态并写 wechat_channel_recovery_log。
+- 验收：
+  - 连续失败 N 次后状态变为 DEGRADED，/health 端点反映；
+  - 降级期间 inbound 正常处理，outbound 静默丢弃；
+  - 对应测试编号：T-WECHAT-13~16。
 - 描述：Focus Mode 为 sys_mode 的子状态扩展（Normal 的子模式），进入后限制中断型能力（主动对话/通知推送静默），保留被动响应能力（用户主动提问仍可回复）。
 - 关键约束：
   - 进入/退出必须有来源证据（用户指令/定时策略/日历事件），并写 hard_state_log；
@@ -848,6 +953,23 @@ M22 代码质量 Warning 清零：
 M22-A HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 修复（tool_routes.py + scheduler_routes.py 共 4 处）— **DONE**（2026-03-05）
 M22-B asyncio.get_event_loop() DeprecationWarning 修复（test_canon_cursor_pagination.py + test_canon_routes_tx.py 共 6 处；test_webui_integration.py test_webui_routes 重命名）— **DONE**（2026-03-05）
 M22-C M22 发布清单（1677 passed，2 skipped，0 failed，0 warnings；m22_release.json）— **DONE**（2026-03-05）
+
+M23 FTS5 中文检索修复 + Edge 心跳探针集成：
+M23-A FTS5 中文词组检索修复：FR-MEM-003/005（FullTextSearcher._split_chinese_query 字符级分割；index_memory/search 同步分割；fts_score 归一化 bug 修复；T-FTS-01~06）— **DONE**（2026-03-05：21 个新增测试全部通过，FTS5 中文词组命中率从 0% 恢复正常）
+M23-B Edge 心跳探针集成：FR-OBS-001（build_edge_transport_probe_statuses 集成到 /health 端点 + AgentHealthCheck 心跳任务；_check_edge_transport_probes + _log_edge_probe_alert；T-HB-07~09；T-HEALTH-EP-01~02）— **DONE**（2026-03-05：7 个新增测试全部通过，孤立函数已集成）
+M23-C M23 发布清单（1731 passed，10 skipped，0 failed，0 warnings；m23_release.json）— **DONE**（2026-03-05）
+
+M24 LLM 网关真实接入 + VTS 表情驱动完整链路 + 微信通道完整链路：
+M24-A LLM 网关真实接入：FR-LLM-GW-001~003（health_probe/route_call/多模型路由降级/API Key 环境变量/llm_route_log；T-LLM-GW-01~15）— **DONE**（2026-03-05：16 个新增测试全部通过）
+M24-B VTS 表情驱动完整链路：FR-VTS-DRIVE-001~003（VTSMappingStore 持久化版本化/VTSRateLimiter 令牌桶热更新/vts_mapping_change_log/vts_rate_limit_log；T-VTS-DRIVE-01~14）— **DONE**（2026-03-05：16 个新增测试全部通过）
+M24-C 微信通道完整链路：FR-WECHAT-001~003（WeChatChannelHealth 健康状态管理/频率限制/降级策略/恢复日志；T-WECHAT-01~16）— **DONE**（2026-03-05：19 个新增测试全部通过）
+M24-D M24 发布清单（1782 passed，10 skipped，0 failed，0 warnings；m24_release.json）— **DONE**（2026-03-05）
+
+M24 LLM 网关真实接入 + VTS 表情驱动完整链路 + 微信通道完整链路：
+M24-A LLM 网关真实接入：FR-LLM-GW-001~003（Cloud LLM Gateway API Key 接入 + 健康探测 + AIRLOCK 出站净化完整链路 + 多模型路由降级策略；T-LLM-GW-01~15）
+M24-B VTS 表情驱动完整链路：FR-VTS-DRIVE-001~003（emotion_tag→expression_id 映射表持久化 + VTS RPC 真实调用链路 + 频率限制队列管理；T-VTS-DRIVE-01~14）
+M24-C 微信通道完整链路：FR-WECHAT-001~003（inbound 事件解析 + outbound 推送频率限制 + 通道健康状态降级策略；T-WECHAT-01~16）
+M24-D M24 发布清单
 
 ---
 

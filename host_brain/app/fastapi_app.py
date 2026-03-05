@@ -29,6 +29,7 @@ from host_brain.app.main import (
     emit_runtime_bootstrap_logs,
 )
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
+from edge_client.rpc.health import build_edge_transport_probe_statuses
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     CANON_SYNC_FAILED,
@@ -560,6 +561,18 @@ async def health_check() -> HealthResponse:
         _runtime_statuses: dict[str, Any] = {}
         if _host_result.success and _host_result.config is not None:
             _runtime_statuses = build_host_runtime_statuses(_host_result.config)
+        # TASK-0211 M23-B：合并 edge 传输层探针结果
+        # build_edge_transport_probe_statuses 原本定义但未被调用，
+        # 此处集成使 edge 节点运行时状态能反映到 host 侧健康报告中。
+        try:
+            _edge_available = _runtime_statuses.get("edge.rpc.gateway", {}).get("available", True)
+            _edge_probes = build_edge_transport_probe_statuses(available=bool(_edge_available))
+            # edge 探针结果不覆盖已有的 host 侧状态，仅补充 edge 传输层状态
+            for _svc_id, _probe in _edge_probes.items():
+                if _svc_id not in _runtime_statuses:
+                    _runtime_statuses[_svc_id] = _probe
+        except Exception as _edge_exc:
+            _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
         health_report = build_service_health_report(
             runtime_statuses=_runtime_statuses,
             request_id=request_id,

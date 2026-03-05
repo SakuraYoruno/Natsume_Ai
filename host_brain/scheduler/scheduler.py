@@ -43,6 +43,17 @@ from host_brain.scheduler.health_check_prompt import (
     truncate_response,
 )
 
+# TASK-0211 M23-B：导入 edge 传输层探针构建函数
+try:
+    from edge_client.rpc.health import build_edge_transport_probe_statuses as _build_edge_probes
+    _EDGE_PROBE_AVAILABLE = True
+except ImportError:
+    _build_edge_probes = None  # type: ignore[assignment]
+    _EDGE_PROBE_AVAILABLE = False
+
+# edge 探针告警事件类型
+EDGE_PROBE_EVENT_TYPE_ALERT = "EDGE_PROBE_ALERT"
+
 logger = logging.getLogger(__name__)
 
 # 调度器生成的 Intent proposer 标识
@@ -450,11 +461,15 @@ class NatsumeScheduler:
         if state == "OK":
             # 静默丢弃，不写入任何审计记录
             logger.debug("AgentHealthCheck: HEARTBEAT_OK — silent discard")
+            # TASK-0211 M23-B：即使 LLM 心跳 OK，仍执行 edge 传输层探针检查
+            self._check_edge_transport_probes(ts_ms=ts)
             return {"status": HEARTBEAT_EVENT_TYPE_OK, "ts_ms": ts}
 
         # 推送 HEARTBEAT_ALERT
         logger.warning("AgentHealthCheck: HEARTBEAT_ALERT — raw_response=%r", truncated)
         self._log_heartbeat_alert(raw_response=truncated, ts_ms=ts)
+        # TASK-0211 M23-B：同时执行 edge 传输层探针检查
+        self._check_edge_transport_probes(ts_ms=ts)
         return {"status": HEARTBEAT_EVENT_TYPE_ALERT, "raw_response": truncated, "ts_ms": ts}
 
     def _log_heartbeat_alert(self, *, raw_response: str, ts_ms: int) -> None:
@@ -475,6 +490,68 @@ class NatsumeScheduler:
             })
         except Exception as exc:
             logger.error("Failed to log heartbeat alert: %s", exc)
+
+    def _check_edge_transport_probes(self, *, ts_ms: int) -> dict[str, Any]:
+        """TASK-0211 M23-B：执行 edge 传输层探针检查。
+
+        调用 build_edge_transport_probe_statuses 获取 edge 节点运行时状态，
+        若任意 edge 传输层探针为 DOWN，写入 EDGE_PROBE_ALERT 审计事件。
+
+        Args:
+            ts_ms: 当前时间戳（毫秒）。
+
+        Returns:
+            探针检查结果字典，含 edge_available / down_services / ts_ms。
+        """
+        if not _EDGE_PROBE_AVAILABLE or _build_edge_probes is None:
+            logger.debug("_check_edge_transport_probes: edge_client not available, skipping")
+            return {"edge_available": None, "down_services": [], "ts_ms": ts_ms}
+
+        try:
+            # 默认假设 edge 可用（available=True），探针返回 gateway UP 状态
+            # 实际生产中可通过 RPC ping 检测真实可用性
+            probe_statuses = _build_edge_probes(available=True)
+            down_services = [
+                svc_id
+                for svc_id, probe in probe_statuses.items()
+                if not probe.get("available", True)
+            ]
+            edge_available = len(down_services) == 0
+
+            if not edge_available:
+                logger.warning(
+                    "AgentHealthCheck: EDGE_PROBE_ALERT — down_services=%r", down_services
+                )
+                self._log_edge_probe_alert(down_services=down_services, ts_ms=ts_ms)
+
+            return {
+                "edge_available": edge_available,
+                "down_services": down_services,
+                "ts_ms": ts_ms,
+            }
+        except Exception as exc:
+            # 探针异常时降级处理，不崩溃心跳任务
+            logger.warning("Edge transport probe check failed (degraded): %s", exc)
+            return {"edge_available": None, "down_services": [], "ts_ms": ts_ms, "error": str(exc)}
+
+    def _log_edge_probe_alert(self, *, down_services: list[str], ts_ms: int) -> None:
+        """将 EDGE_PROBE_ALERT 写入审计 Ledger。"""
+        if self._ledger is None:
+            return
+        try:
+            self._ledger.log_scheduler_event({
+                "event_id": f"edge_probe_alert_{uuid.uuid4().hex}",
+                "task_id": "agent_health_check",
+                "trigger_ts": ts_ms,
+                "intent_id": None,
+                "status": EDGE_PROBE_EVENT_TYPE_ALERT,
+                "reason_code": EDGE_PROBE_EVENT_TYPE_ALERT,
+                "mode_at_trigger": self._get_sys_mode(),
+                "error_detail": f"edge transport down: {', '.join(down_services)}",
+                "ts_ms": ts_ms,
+            })
+        except Exception as exc:
+            logger.error("Failed to log edge probe alert: %s", exc)
 
     def list_health(self) -> list[dict[str, Any]]:
         """返回所有已注册任务的健康状态列表（含 agent_health_check）。

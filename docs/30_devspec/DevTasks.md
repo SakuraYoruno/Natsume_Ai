@@ -3249,5 +3249,280 @@ TASK-XXXX 标题
 - 关联需求：NFR-REL-001；NFR-MAINT-001。
 
 
+## M23 FTS5 中文检索修复 + Edge 心跳探针集成
+
+### TASK-0210 M23-A：FTS5 中文词组检索修复
+- 状态：DONE
+- 任务描述：试运行报告（附录 10.4/10.13 P2-FTS）发现 `FullTextSearcher.search()` 使用 `unicode61` tokenizer，对中文多字词组（如 `猫咪`、`工作压力`）无法命中 FTS5 索引，导致混合检索（向量 70% + FTS5 30%）实际退化为纯向量检索，FTS5 权重未生效。修复方案：在 `FullTextSearcher.search()` 中对中文查询词进行字符级分割（`" ".join(list(query))`），使 FTS5 MATCH 语法能匹配单字索引；同时在 FTS5 写入时对中文文本同步进行字符级分割写入，保证索引与查询一致。
+- 输入：
+  - `host_brain/retrieval/full_text_searcher.py`（`FullTextSearcher.search()` 和写入逻辑）；
+  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（FTS5 表定义，tokenizer=unicode61）；
+  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §10.4（P2-FTS 问题描述）；
+  - `tests/unit/test_recall_fusion_hybrid.py`（现有 19 个混合检索单元测试）。
+- 输出：
+  - `host_brain/retrieval/full_text_searcher.py`：
+    - `search()` 方法：对中文查询词进行字符级分割，生成 FTS5 MATCH 查询字符串（`" ".join(list(query))`）；
+    - `index_document()` / `index_documents()` 方法：对中文文本同步进行字符级分割后写入 FTS5 索引；
+    - 新增 `_split_chinese_query(text: str) -> str` 私有方法，封装分割逻辑（中文字符逐字分割，非中文保留原词）；
+  - `tests/unit/test_full_text_searcher.py`（新增或扩展）：
+    - T-FTS-01：中文词组查询命中（`猫咪` 查询命中含 `猫咪` 的文档）；
+    - T-FTS-02：中文单字查询命中；
+    - T-FTS-03：英文查询不受影响；
+    - T-FTS-04：混合中英文查询；
+    - T-FTS-05：FTS5 无结果时降级为纯向量（回归保护）；
+    - T-FTS-06：`hybrid_fused=True` 当 FTS5 有命中时（回归保护）。
+- 验收标准：
+  - T-FTS-01~06 全部通过；
+  - 现有 `test_recall_fusion_hybrid.py` 19 个用例全部继续通过（零回归）；
+  - 全量测试较修复前净增 ≥6 个通过用例，0 新增失败；
+  - 试运行追踪脚本重跑时，FTS5 查询 `猫咪` 命中数 ≥1（`hybrid_fused=True`）。
+- 涉及文件路径：
+  - `host_brain/retrieval/full_text_searcher.py`；
+  - `tests/unit/test_full_text_searcher.py`（新增或扩展）。
+- 关联需求/测试：FR-MEM-003；FR-MEM-005；T-FTS-01~06；T-RCL-HYB-02（回归）。
+
+### TASK-0211 M23-B：Edge 心跳探针集成 `build_edge_transport_probe_statuses`
+- 状态：DONE
+- 任务描述：试运行报告（附录 D.3 遗留问题）发现 `build_edge_transport_probe_statuses` 函数已定义但未被任何调用方使用，导致 edge 节点运行时宕机时 host 侧无法感知（edge 服务状态完全依赖配置驱动，不反映运行时真实状态）。修复方案：在 `AgentHealthCheck`（心跳检测）的 edge 健康检查逻辑中集成 `build_edge_transport_probe_statuses`，使 edge 节点运行时探针结果能反映到 host 侧健康报告中；同时在 `/health` 端点的 `runtime_statuses` 构建中合并 edge 传输层探针结果。
+- 输入：
+  - `host_brain/app/config.py`（`build_edge_transport_probe_statuses` 定义位置）；
+  - `host_brain/app/fastapi_app.py`（`/health` 端点，当前只调用 `build_host_runtime_statuses`）；
+  - `host_brain/obs/agent_health_check.py`（`AgentHealthCheck` 心跳检测实现）；
+  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §D.3（遗留问题描述）；
+  - `tests/unit/test_agent_health_check.py`（现有 19 个心跳检测单元测试）。
+- 输出：
+  - `host_brain/app/fastapi_app.py`：
+    - `/health` 端点的 `runtime_statuses` 构建中，合并 `build_edge_transport_probe_statuses` 的探针结果（`_runtime_statuses.update(build_edge_transport_probe_statuses(config))`）；
+    - 补充 `build_edge_transport_probe_statuses` 的导入；
+  - `host_brain/obs/agent_health_check.py`（或新增 `edge_probe_checker.py`）：
+    - 新增 `check_edge_transport_probes()` 方法，调用 `build_edge_transport_probe_statuses` 并将结果写入审计链（`EDGE_PROBE_ALERT` 事件，当任意 edge 传输层探针为 DOWN 时）；
+    - 心跳任务中集成 edge 传输层探针检查（在现有 LLM 心跳检查之后执行）；
+  - `tests/unit/test_agent_health_check.py`（扩展）：
+    - T-HB-07：edge 传输层探针全部 UP 时不写审计；
+    - T-HB-08：edge 传输层探针有 DOWN 时写 EDGE_PROBE_ALERT 审计事件；
+    - T-HB-09：`build_edge_transport_probe_statuses` 抛出异常时心跳任务不崩溃（降级处理）；
+  - `tests/contract/test_health_endpoint_contract.py`（新增或扩展）：
+    - T-HEALTH-EP-01：`/health` 端点返回的 `runtime_statuses` 包含 edge 传输层探针键；
+    - T-HEALTH-EP-02：edge 探针 DOWN 时 `/health` 端点 `boot_status` 为 DEGRADED。
+- 验收标准：
+  - T-HB-07~09 全部通过；
+  - T-HEALTH-EP-01~02 全部通过；
+  - 现有 `test_agent_health_check.py` 19 个用例全部继续通过（零回归）；
+  - `build_edge_transport_probe_statuses` 不再是"定义但未被调用"的孤立函数；
+  - 全量测试较修复前净增 ≥5 个通过用例，0 新增失败。
+- 涉及文件路径：
+  - `host_brain/app/fastapi_app.py`；
+  - `host_brain/obs/agent_health_check.py`；
+  - `host_brain/app/config.py`（只读，不修改）；
+  - `tests/unit/test_agent_health_check.py`（扩展）；
+  - `tests/contract/test_health_endpoint_contract.py`（新增或扩展）。
+- 关联需求/测试：FR-OBS-001；NFR-REL-001；T-HB-07~09；T-HEALTH-EP-01~02。
+
+### TASK-0212 M23-C：M23 发布清单
+- 状态：DONE
+- 任务描述：TASK-0210~0211 全部 DONE 后，生成 M23 发布清单（`m23_release.json`），记录 M23-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M23 里程碑状态为 DONE；更新 `requirements_trace.md` M23 小节状态。
+- 输入：TASK-0210~0211 全部 DONE；全量测试 ≥1688 passed（1677 + 11 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m23_release.json`（新增）：含 `release_ready`、`fts5_chinese_fixed`、`edge_probe_integrated`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
+  - `docs/20_prd/PRD.md`：M23 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M23 小节（R-158~R-159）。
+- 验收标准：
+  - `release_ready=true`；
+  - `fts5_chinese_fixed=true`（FTS5 中文词组检索修复已验证）；
+  - `edge_probe_integrated=true`（`build_edge_transport_probe_statuses` 已集成）；
+  - `total_tests_passed ≥ 1688`；
+  - `zero_regressions=true`；
+  - `zero_warnings=true`。
+- 涉及文件路径：
+  - `docs/50_release/m23_release.json`（新增）；
+  - `docs/20_prd/PRD.md`；
+  - `docs/60_trace/requirements_trace.md`。
+- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-MEM-003；FR-OBS-001。
+
+
+## M24 LLM 网关真实接入 + VTS 表情驱动完整链路 + 微信通道完整链路
+
+### TASK-0213 M24-A：LLM 网关真实接入
+- 状态：DONE
+- 任务描述：实现 Cloud LLM Gateway 的真实 API Key 接入、健康探测、AIRLOCK 出站净化完整链路、多模型路由降级策略。当前 LLM Gateway 仅有 mock/stub 实现，缺少真实 API Key 配置管理、出站净化报告生成、入站内容隔离分类、多模型路由切换等完整链路。
+- 输入：
+  - `host_brain/llm/llm_gateway.py`（当前 LLM Gateway 实现）；
+  - `host_brain/airlock/airlock.py`（AIRLOCK 出站净化实现）；
+  - `host_brain/app/config.py`（配置加载，含 LLM 相关配置）；
+  - `host_brain/scheduler/scheduler.py`（心跳任务，需集成 LLM 健康探测）；
+  - PRD §4.26（FR-LLM-GW-001~003）；
+  - `tests/unit/test_llm_gateway.py`（现有 LLM Gateway 测试）。
+- 输出：
+  - `host_brain/llm/llm_gateway.py`（扩展）：
+    - `LLMGatewayConfig`：支持从环境变量（`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OLLAMA_BASE_URL`）或加密配置文件读取 API Key；
+    - `LLMGateway.health_probe()`：探测主模型/备用模型/本地兜底可用性，返回 `{model_id, status, latency_ms}`；
+    - `LLMGateway.route_call()`：按优先级路由（主模型→备用→本地兜底），写入 `llm_route_log`；
+    - 本地兜底输出标记 `draft_only=true`；
+  - `host_brain/airlock/airlock.py`（扩展）：
+    - `AirlockEgress.sanitize()`：生成完整 `sanitization_report`（`removed_fields/redactions/payload_digest`）；
+    - `AirlockIngress.classify()`：对入站内容分类（`FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN`）；
+    - 净化失败时拒绝出站（`AIRLOCK_BLOCKED_EGRESS`）；
+  - `host_brain/app/fastapi_app.py`（扩展）：
+    - `/health` 端点 `runtime_statuses` 包含 `llm_gateway.status`；
+  - `tests/unit/test_llm_gateway.py`（扩展）：
+    - T-LLM-GW-01：有效 API Key 时 LLM 调用成功，llm_call_log 记录完整；
+    - T-LLM-GW-02：API Key 缺失时输出稳定，reason_code=LLM_UNAVAILABLE；
+    - T-LLM-GW-03：API Key 无效时输出稳定，reason_code=LLM_UNAVAILABLE；
+    - T-LLM-GW-04：心跳探测 LLM 可用性，结果写入审计事件；
+    - T-LLM-GW-05：LLM 不可用时不伪造"我没有任何想法"；
+    - T-LLM-GW-06：出站 payload 有 sanitization_report（removed_fields/redactions/payload_digest）；
+    - T-LLM-GW-07：净化失败时拒绝出站（AIRLOCK_BLOCKED_EGRESS）；
+    - T-LLM-GW-08：入站内容分类正确（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN）；
+    - T-LLM-GW-09：入站内容不直通执行，必须经 Governor；
+    - T-LLM-GW-10：AIRLOCK 出站净化移除硬状态原值；
+    - T-LLM-GW-11：主模型超时时自动切换备用，llm_route_log 记录切换原因；
+    - T-LLM-GW-12：所有模型不可用时输出稳定降级结构；
+    - T-LLM-GW-13：本地兜底输出标记 draft_only=true；
+    - T-LLM-GW-14：路由策略配置变更写 llm_route_config_log；
+    - T-LLM-GW-15：多模型路由决策写入 llm_route_log（model_id/reason/latency_ms）。
+- 验收标准：
+  - T-LLM-GW-01~15 全部通过；
+  - 现有 LLM Gateway 测试全部继续通过（零回归）；
+  - 全量测试净增 ≥15 个通过用例，0 新增失败；
+  - API Key 不硬编码（静态扫描验证）；
+  - AIRLOCK 出站净化覆盖率=100%（每次 LLM 调用都有 sanitization_report）。
+- 涉及文件路径：
+  - `host_brain/llm/llm_gateway.py`；
+  - `host_brain/airlock/airlock.py`；
+  - `host_brain/app/fastapi_app.py`；
+  - `host_brain/app/config.py`（只读，不修改）；
+  - `tests/unit/test_llm_gateway.py`（扩展）。
+- 关联需求/测试：FR-LLM-GW-001；FR-LLM-GW-002；FR-LLM-GW-003；FR-AIRLOCK-001；FR-AIRLOCK-002；T-LLM-GW-01~15。
+
+### TASK-0214 M24-B：VTS 表情驱动完整链路
+- 状态：DONE
+- 任务描述：实现 VTS 表情映射表持久化与版本化、VTS RPC 真实调用链路与审计串联、表情触发频率限制与队列管理。当前 VTS 表情驱动仅有枚举映射定义，缺少映射表持久化存储、版本化管理、RPC 真实调用审计串联、频率限制等完整链路。
+- 输入：
+  - `edge_client/rpc/vts.py`（当前 VTS RPC 实现）；
+  - `host_brain/avatar/vts_driver.py`（VTS 驱动层，含 emotion_tag→expression_id 映射）；
+  - PRD §4.27（FR-VTS-DRIVE-001~003）；
+  - `tests/unit/test_vts_driver.py`（现有 VTS 驱动测试）。
+- 输出：
+  - `host_brain/avatar/vts_mapping_store.py`（新增）：
+    - `VTSMappingStore`：映射表持久化（SQLite 表 `vts_expression_mapping`）；
+    - `load_mapping(version=None)`：按版本加载映射表；
+    - `save_mapping(mapping, version)`：保存映射表并写 `vts_mapping_change_log`；
+    - `get_expression_id(emotion_tag)`：查询映射，非法 tag 抛出 `AVATAR_INVALID_EMOTION_TAG`；
+  - `host_brain/avatar/vts_driver.py`（扩展）：
+    - 集成 `VTSMappingStore`，替换硬编码映射；
+    - `trigger_expression(emotion_tag, request_id, intent_id)`：调用 Edge RPC，写入 `vts_action_log`；
+    - VTS RPC 失败时降级（`EDGE_RPC_FAILED`），不伪造；
+  - `host_brain/avatar/vts_rate_limiter.py`（新增）：
+    - `VTSRateLimiter`：令牌桶算法，每秒最多 N 次（可配置）；
+    - 超限时写 `vts_rate_limit_log`（`reason_code=VTS_RATE_LIMIT_EXCEEDED`）；
+    - 支持热更新频率配置（不重启）；
+  - `tests/unit/test_vts_driver.py`（扩展）：
+    - T-VTS-DRIVE-01：映射表变更后版本号更新，vts_mapping_change_log 可追溯；
+    - T-VTS-DRIVE-02：非法 emotion_tag 被拒绝（AVATAR_INVALID_EMOTION_TAG）；
+    - T-VTS-DRIVE-03：映射表加载失败时降级（DEPENDENCY_UNAVAILABLE）；
+    - T-VTS-DRIVE-04：映射表版本化：同版本同输入输出一致；
+    - T-VTS-DRIVE-05：映射表持久化：重启后可恢复；
+    - T-VTS-DRIVE-06：VTS 调用成功，vts_action_log 记录完整（expression_id/status/latency_ms/request_id）；
+    - T-VTS-DRIVE-07：VTS 不可用时降级，reason_code=EDGE_RPC_FAILED，不伪造；
+    - T-VTS-DRIVE-08：每次触发有 evidence_ref 指向 vts_action_log；
+    - T-VTS-DRIVE-09：VTS RPC 超时时降级，结构稳定；
+    - T-VTS-DRIVE-10：vts_action_log 串联 request_id/intent_id；
+    - T-VTS-DRIVE-11：超限时触发丢弃/拒绝，vts_rate_limit_log 记录；
+    - T-VTS-DRIVE-12：频率配置热更新后立即生效；
+    - T-VTS-DRIVE-13：FIFO 丢弃策略：超限时丢弃最旧请求；
+    - T-VTS-DRIVE-14：频率超限 reason_code=VTS_RATE_LIMIT_EXCEEDED。
+- 验收标准：
+  - T-VTS-DRIVE-01~14 全部通过；
+  - 现有 VTS 驱动测试全部继续通过（零回归）；
+  - 全量测试净增 ≥14 个通过用例，0 新增失败；
+  - 映射表不再硬编码（持久化存储验证）；
+  - VTS RPC 调用 100% 有 vts_action_log 记录。
+- 涉及文件路径：
+  - `host_brain/avatar/vts_mapping_store.py`（新增）；
+  - `host_brain/avatar/vts_driver.py`（扩展）；
+  - `host_brain/avatar/vts_rate_limiter.py`（新增）；
+  - `edge_client/rpc/vts.py`（只读，不修改）；
+  - `tests/unit/test_vts_driver.py`（扩展）。
+- 关联需求/测试：FR-VTS-DRIVE-001；FR-VTS-DRIVE-002；FR-VTS-DRIVE-003；FR-AVATAR-001；T-VTS-DRIVE-01~14。
+
+### TASK-0215 M24-C：微信通道完整链路
+- 状态：DONE
+- 任务描述：实现微信 inbound 事件解析与审计串联、outbound 推送与频率限制、通道健康状态与降级策略。当前微信通道仅有基础事件建模，缺少完整的 inbound 解析（图片/语音/事件消息）、outbound 推送频率限制、通道健康状态管理等完整链路。
+- 输入：
+  - `host_brain/channel/wechat_channel.py`（当前微信通道实现）；
+  - `host_brain/airlock/airlock.py`（AIRLOCK 出站净化）；
+  - `host_brain/app/fastapi_app.py`（/health 端点）；
+  - PRD §4.28（FR-WECHAT-001~003）；
+  - `tests/unit/test_wechat_channel.py`（现有微信通道测试）。
+- 输出：
+  - `host_brain/channel/wechat_channel.py`（扩展）：
+    - `WeChatInboundParser`：解析文本/图片/语音/事件消息为 `WeChatInboundEvent`（`thread_key/msg_type/content_hash/ts_ms/request_id`）；
+    - 图片消息：触发 OCR 转写后进入 Intent 流程，`evidence_ref` 可追溯；
+    - 语音消息：触发 ASR 转写后进入 Intent 流程；
+    - 解析失败：`reason_code=WECHAT_PARSE_FAILED`，结构稳定；
+    - `WeChatOutboundSender`：经 AIRLOCK 净化后推送，写入 `wechat_outbound_log`；
+    - 频率限制：每个 `thread_key` 每分钟最多 N 条（可配置），超限拒绝（`RATE_LIMIT_EXCEEDED`）；
+    - 推送失败：`reason_code=WECHAT_SEND_FAILED`，不伪造；
+  - `host_brain/channel/wechat_health.py`（新增）：
+    - `WeChatChannelHealth`：维护健康状态（`last_recv_ts/last_send_ts/status/error_count`）；
+    - 连续失败 N 次后自动降级（`WECHAT_CHANNEL_DEGRADED`）；
+    - 降级时仍接受 inbound，停止 outbound；
+    - 恢复时写 `wechat_channel_recovery_log`；
+  - `host_brain/app/fastapi_app.py`（扩展）：
+    - `/health` 端点 `runtime_statuses` 包含 `wechat_channel.status`；
+  - `tests/unit/test_wechat_channel.py`（扩展）：
+    - T-WECHAT-01：文本消息解析成功，wechat_inbound_log 记录完整；
+    - T-WECHAT-02：图片消息 OCR 转写后进入 Intent 流程，evidence_ref 可追溯；
+    - T-WECHAT-03：语音消息 ASR 转写后进入 Intent 流程；
+    - T-WECHAT-04：解析失败 reason_code=WECHAT_PARSE_FAILED，结构稳定；
+    - T-WECHAT-05：消息内容不直通 LLM，先经 AIRLOCK 入站隔离；
+    - T-WECHAT-06：thread_key 与 request_id 关联，跨会话可追溯；
+    - T-WECHAT-07：推送成功，wechat_outbound_log 记录完整；
+    - T-WECHAT-08：频率超限拒绝推送，reason_code=RATE_LIMIT_EXCEEDED；
+    - T-WECHAT-09：推送失败降级，reason_code=WECHAT_SEND_FAILED，不伪造；
+    - T-WECHAT-10：出站内容经 AIRLOCK 净化，不含硬状态原值；
+    - T-WECHAT-11：频率限制配置可热更新；
+    - T-WECHAT-12：outbound 推送串联 request_id；
+    - T-WECHAT-13：连续失败 N 次后状态变为 DEGRADED，/health 端点反映；
+    - T-WECHAT-14：降级期间 inbound 正常处理，outbound 静默丢弃；
+    - T-WECHAT-15：恢复时自动重置降级状态，写 wechat_channel_recovery_log；
+    - T-WECHAT-16：健康状态 30 秒自动刷新。
+- 验收标准：
+  - T-WECHAT-01~16 全部通过；
+  - 现有微信通道测试全部继续通过（零回归）；
+  - 全量测试净增 ≥16 个通过用例，0 新增失败；
+  - 微信 outbound 推送 100% 经 AIRLOCK 净化；
+  - 通道健康状态暴露到 /health 端点。
+- 涉及文件路径：
+  - `host_brain/channel/wechat_channel.py`（扩展）；
+  - `host_brain/channel/wechat_health.py`（新增）；
+  - `host_brain/app/fastapi_app.py`（扩展）；
+  - `host_brain/airlock/airlock.py`（只读，不修改）；
+  - `tests/unit/test_wechat_channel.py`（扩展）。
+- 关联需求/测试：FR-WECHAT-001；FR-WECHAT-002；FR-WECHAT-003；FR-CHANNEL-001；FR-AIRLOCK-001；T-WECHAT-01~16。
+
+### TASK-0216 M24-D：M24 发布清单
+- 状态：DONE
+- 任务描述：TASK-0213~0215 全部 DONE 后，生成 M24 发布清单（`m24_release.json`），记录 M24-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M24 里程碑状态为 DONE；更新 `requirements_trace.md` M24 小节状态（R-160~R-165）。
+- 输入：TASK-0213~0215 全部 DONE；全量测试 ≥1776 passed（1731 + 45 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m24_release.json`（新增）：含 `release_ready`、`llm_gateway_integrated`、`vts_drive_complete`、`wechat_channel_complete`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
+  - `docs/20_prd/PRD.md`：M24 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M24 小节（R-160~R-165）。
+- 验收标准：
+  - `release_ready=true`；
+  - `llm_gateway_integrated=true`（LLM 网关真实接入已验证）；
+  - `vts_drive_complete=true`（VTS 表情驱动完整链路已验证）；
+  - `wechat_channel_complete=true`（微信通道完整链路已验证）；
+  - `total_tests_passed ≥ 1776`；
+  - `zero_regressions=true`；
+  - `zero_warnings=true`。
+- 涉及文件路径：
+  - `docs/50_release/m24_release.json`（新增）；
+  - `docs/20_prd/PRD.md`；
+  - `docs/60_trace/requirements_trace.md`。
+- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-LLM-GW-001~003；FR-VTS-DRIVE-001~003；FR-WECHAT-001~003。
+
+
 
 

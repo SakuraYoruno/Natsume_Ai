@@ -282,3 +282,21 @@ MCP_WRITE_UNAUTHORIZED = "MCP_WRITE_UNAUTHORIZED"                    # WRITE 工
 MCP_PROVIDER_SYNC_FAILED = "MCP_PROVIDER_SYNC_FAILED"                # provider 元数据同步失败
 MCP_TOOL_NOT_FOUND = "MCP_TOOL_NOT_FOUND"                            # tool_id 不在已同步列表
 MCP_AUDIT_REF_MISSING = "MCP_AUDIT_REF_MISSING"                      # 执行无 evidence_ref
+
+# ── M24-A: LLM 网关真实接入 ──
+LLM_UNAVAILABLE = "LLM_UNAVAILABLE"                                  # LLM 不可用（API Key 缺失/无效/超时）
+LLM_ROUTE_FALLBACK = "LLM_ROUTE_FALLBACK"                            # 主模型不可用，切换备用模型
+LLM_ROUTE_ALL_FAILED = "LLM_ROUTE_ALL_FAILED"                        # 所有模型不可用，完全降级
+LLM_HEALTH_PROBE_FAILED = "LLM_HEALTH_PROBE_FAILED"                  # 健康探测失败
+
+# ── M24-B: VTS 表情驱动完整链路 ──
+AVATAR_INVALID_EMOTION_TAG = "AVATAR_INVALID_EMOTION_TAG"            # emotion_tag 非法（不在映射表中）
+VTS_RATE_LIMIT_EXCEEDED = "VTS_RATE_LIMIT_EXCEEDED"                  # VTS 触发频率超限
+VTS_MAPPING_LOAD_FAILED = "VTS_MAPPING_LOAD_FAILED"                  # 映射表加载失败
+EDGE_RPC_FAILED = "EDGE_RPC_FAILED"                                  # Edge RPC 调用失败
+
+# ── M24-C: 微信通道完整链路 ──
+WECHAT_PARSE_FAILED = "WECHAT_PARSE_FAILED"                          # 微信消息解析失败
+WECHAT_SEND_FAILED = "WECHAT_SEND_FAILED"                            # 微信消息发送失败
+WECHAT_CHANNEL_DEGRADED = "WECHAT_CHANNEL_DEGRADED"                  # 微信通道降级（连续失败）
+WECHAT_RATE_LIMIT_EXCEEDED = "WECHAT_RATE_LIMIT_EXCEEDED"            # 微信推送频率超限
