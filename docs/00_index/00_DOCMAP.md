@@ -74,8 +74,12 @@
 
 8）理论文档（Theory：论证/原则推导/边界解释）
 - docs/15_theory/Theory.md
-  用途：解释“为什么这样设计”、关键机制的理论依据与判定口径；不作为实现任务清单。
+  用途：解释"为什么这样设计"、关键机制的理论依据与判定口径；不作为实现任务清单。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源（除非 MASTER 任务卡点名引用）。
+
+- docs/15_theory/soul_emotion_optimization_2026-03-05.md
+  用途：灵魂情感架构优化设计留痕文档（2026-03-05）。记录五大优化方向：①情绪连续体 EmotionVector、②Bond 情感质感层、③情感记忆标注、④emotion_pulse 动态槽位、⑤主动情感触发器。含完整伪代码设计方案、优先级排序与安全约束说明。待实施，不作为当前任务来源。
+  读者：MASTER、Project（文档代理）。
 
 9）协作与运行手册（Worksheet：分工/流程/落地节奏）
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md

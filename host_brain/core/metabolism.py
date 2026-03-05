@@ -112,6 +112,10 @@ def build_governance_snapshot(
             "safety_flag": safety_flag,
             "last_event_id": state.last_event_id,
         },
+        # M27-C：情感字段透传到 GateSnapshot（OPT-22）
+        "mood_state": merged.get("mood_state", state.mood_state),
+        "emotion_tag": merged.get("emotion_tag", "NEUTRAL"),
+        "emotion_intensity": float(merged.get("emotion_intensity", 0.5)),
     }
 
 

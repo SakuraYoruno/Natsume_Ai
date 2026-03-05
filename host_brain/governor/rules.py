@@ -31,6 +31,10 @@ class GateSnapshot:
     rate_limit_degraded: bool = False
     rate_limit_degraded_from: str | None = None
     rate_limit_reason_code: str | None = None
+    # M27-A：情感字段（OPT-19）
+    mood_state: str = "steady"
+    emotion_tag: str = "NEUTRAL"
+    emotion_intensity: float = 0.5
 
 
 def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -93,6 +97,9 @@ def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
         rate_limit_degraded=rl_degraded,
         rate_limit_degraded_from=str(rl_degraded_from) if rl_degraded_from else None,
         rate_limit_reason_code=str(rl_reason_code) if rl_reason_code else None,
+        mood_state=str(raw.get("mood_state", "steady")).strip().lower() or "steady",
+        emotion_tag=str(raw.get("emotion_tag", "NEUTRAL")).strip().upper() or "NEUTRAL",
+        emotion_intensity=float(raw.get("emotion_intensity", 0.5)),
     )
 
 

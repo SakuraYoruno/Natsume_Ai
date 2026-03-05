@@ -665,15 +665,19 @@ def _validate_emotion_tag(
 def extract_emotion_tag(
     payload: dict[str, Any],
     *,
+    mood_state: str | None = None,
     ledger: Any | None = None,
     request_id: str | None = None,
 ) -> str:
     """从 LLM 输出 payload 中提取并校验 emotion_tag。
 
     从 `payload["narrative"]["emotion_tag"]` 提取，缺失或非法时返回 "NEUTRAL"。
+    若提供 mood_state，还会检查 emotion_tag 是否在当前 mood_state 的允许范围内。
 
     Args:
         payload: LLM 输出的完整 payload（已通过 lint_llm_output 校验）。
+        mood_state: 可选，系统硬状态（calm/steady/engaged/tired/critical）。
+                    提供时启用 mood_state 约束校验（M27-B OPT-20）。
         ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
         request_id: 可选请求 ID，用于关联审计日志。
 
@@ -682,4 +686,4 @@ def extract_emotion_tag(
     """
     narrative = payload.get("narrative") if isinstance(payload, dict) else None
     raw_tag = narrative.get("emotion_tag") if isinstance(narrative, dict) else None
-    return _validate_emotion_tag(raw_tag, ledger=ledger, request_id=request_id)
+    return _validate_emotion_tag(raw_tag, mood_state=mood_state, ledger=ledger, request_id=request_id)

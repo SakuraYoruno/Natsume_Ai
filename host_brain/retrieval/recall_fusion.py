@@ -158,6 +158,7 @@ class RecallFusionServiceContract:
         query_embedding: list[float] | tuple[float, ...] | Any,
         intent_id: str | None = None,
         ts_ms: int | None = None,
+        emotion_filter: str | None = None,
     ) -> RecallFusionResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
@@ -281,6 +282,18 @@ class RecallFusionServiceContract:
                 vector_candidates=candidates,
                 query=normalized_query,
             )
+
+        # M27-G：情感维度路由（OPT-31）：emotion_filter 非空时，优先召回匹配情感标签的记录
+        if emotion_filter is not None and candidates:
+            matched = [
+                c for c in candidates
+                if c.get("metadata", {}).get("emotion_tag") == emotion_filter
+            ]
+            unmatched = [
+                c for c in candidates
+                if c.get("metadata", {}).get("emotion_tag") != emotion_filter
+            ]
+            candidates = matched + unmatched
 
         if not candidates:
             reason_code = route_errors[0]["reason_code"] if route_errors else RETR_RECALL_UNAVAILABLE

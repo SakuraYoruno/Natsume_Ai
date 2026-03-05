@@ -3895,6 +3895,808 @@ TASK-XXXX 标题
   - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
 - 关联需求：NFR-REL-001；NFR-MAINT-001；FR-EMOTION-DRIVE-001~006；FR-VTS-CFG-001~002；FR-CORE-001；FR-OBS-008；FR-LLM-GW-003；FR-VTS-DRIVE-001。
 
+---
+
+## M27 情感链路端到端连通（P0 基础设施修复）（TASK-0232~0242）
+
+> **目标：** 修复情感信息在全链路中的 11 个 P0 级断路点，使情感状态能从感知层流通到决策层、执行层、记忆层，形成完整的情感闭环。
+> **依据：** SOUL-OPT-2026-03-05 优化19/20/22/25/26/27/31/32/37/38/43
+> **前置：** M26 全部 DONE
+
+### TASK-0232 M27-A：GateSnapshot 增加情感字段（OPT-19）
+
+- 状态：PLANNED
+- 任务描述：`GateSnapshot` 增加 `mood_state`、`emotion_tag`、`emotion_intensity` 三个情感字段，使 Governor R8 门控能感知当前情感状态。
+- 输入：`host_brain/governor/rules.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）。
+- 输出：
+  - `host_brain/governor/rules.py`：`GateSnapshot` dataclass 新增 `mood_state: str`、`emotion_tag: str`、`emotion_intensity: float` 字段（均有默认值）；
+  - `tests/unit/test_gate_snapshot_m27.py`（新增）：T-GATE-SNAP-01~03。
+- 验收标准：
+  - T-GATE-SNAP-01：`GateSnapshot` 可携带 `mood_state="engaged"` 构造成功；
+  - T-GATE-SNAP-02：`GateSnapshot` 不传情感字段时使用默认值，不报错；
+  - T-GATE-SNAP-03：`GateSnapshot` 序列化为 dict 时包含三个情感字段。
+- 涉及文件路径：`host_brain/governor/rules.py`；`tests/unit/test_gate_snapshot_m27.py`。
+- 关联需求/测试：FR-GOV-EMOTION-001；T-GATE-SNAP-01~03。
+
+### TASK-0233 M27-B：extract_emotion_tag 传入 mood_state（OPT-20）
+
+- 状态：PLANNED
+- 任务描述：`qa.py` 中 `extract_emotion_tag()` 调用时传入当前 `mood_state`，使 `MOOD_EMOTION_CONSTRAINTS` 约束校验真正生效。
+- 输入：`host_brain/core/qa.py`；`host_brain/core/metabolism.py`（`mood_state` 来源）。
+- 输出：
+  - `host_brain/core/qa.py`：`extract_emotion_tag(raw_tag, mood_state)` 签名补全 `mood_state` 参数；调用处传入 `hard_state.mood_state`；
+  - `tests/unit/test_extract_emotion_tag_m27.py`（新增）：T-EXTRACT-TAG-01~03。
+- 验收标准：
+  - T-EXTRACT-TAG-01：`mood_state="tired"` 时，`HAPPY` 情感标签被约束为 `calm` 系列；
+  - T-EXTRACT-TAG-02：`mood_state="engaged"` 时，`HAPPY` 情感标签正常通过；
+  - T-EXTRACT-TAG-03：`mood_state=None` 时，不触发约束，行为与旧版一致。
+- 涉及文件路径：`host_brain/core/qa.py`；`tests/unit/test_extract_emotion_tag_m27.py`。
+- 关联需求/测试：FR-QA-EMOTION-001；T-EXTRACT-TAG-01~03。
+
+### TASK-0234 M27-C：build_governance_snapshot 传递 mood_state 给 GateSnapshot（OPT-22）
+
+- 状态：PLANNED
+- 任务描述：`build_governance_snapshot()` 构建 `GateSnapshot` 时，从 `hard_state_summary` 中提取 `mood_state` 并传入，打通情感状态到决策层的传递链路。
+- 输入：`host_brain/governor/decision.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）；TASK-0232（`GateSnapshot` 新字段）。
+- 输出：
+  - `host_brain/governor/decision.py`：`build_governance_snapshot()` 从 `hard_state_summary` 读取 `mood_state`/`emotion_tag`/`emotion_intensity` 并注入 `GateSnapshot`；
+  - `tests/unit/test_governance_snapshot_m27.py`（新增）：T-GOV-SNAP-01~02。
+- 验收标准：
+  - T-GOV-SNAP-01：`hard_state_summary.mood_state="critical"` 时，`GateSnapshot.mood_state` 为 `"critical"`；
+  - T-GOV-SNAP-02：`hard_state_summary` 无情感字段时，`GateSnapshot` 使用默认值，不报错。
+- 涉及文件路径：`host_brain/governor/decision.py`；`tests/unit/test_governance_snapshot_m27.py`。
+- 关联需求/测试：FR-GOV-EMOTION-002；T-GOV-SNAP-01~02。
+
+### TASK-0235 M27-D：EpisodicRecord 增加情感标注字段（OPT-25）
+
+- 状态：PLANNED
+- 任务描述：`EpisodicRecord` 增加 `emotion_tag`、`emotion_valence`、`emotion_arousal` 字段，使情节记忆具备情感标注，支持后续情感检索。
+- 输入：`host_brain/memory/episodic.py`。
+- 输出：
+  - `host_brain/memory/episodic.py`：`EpisodicRecord` dataclass 新增 `emotion_tag: str = "NEUTRAL"`、`emotion_valence: float = 0.0`、`emotion_arousal: float = 0.3` 字段；`save()` 方法持久化新字段；`recall()` 支持按 `emotion_tag` 过滤；
+  - `tests/unit/test_episodic_emotion_m27.py`（新增）：T-EPISODIC-EMO-01~04。
+- 验收标准：
+  - T-EPISODIC-EMO-01：保存含 `emotion_tag="HAPPY"` 的记录后，可按 `emotion_tag` 检索到；
+  - T-EPISODIC-EMO-02：旧记录（无情感字段）读取时使用默认值，不报错；
+  - T-EPISODIC-EMO-03：`recall(emotion_filter="HAPPY")` 只返回 `emotion_tag="HAPPY"` 的记录；
+  - T-EPISODIC-EMO-04：`emotion_valence` 超出 [-1.0, 1.0] 时被截断到合法范围。
+- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_emotion_m27.py`。
+- 关联需求/测试：FR-MEM-EMOTION-001；T-EPISODIC-EMO-01~04。
+
+### TASK-0236 M27-E：BondDynamicsWriter.apply_update 增加情感字段（OPT-26）
+
+- 状态：PLANNED
+- 任务描述：`BondDynamicsWriter.apply_update()` 的 `payload` 增加 `emotion_tag`、`emotion_intensity` 字段，使 Bond 积分感知情感强度，高情感强度互动获得更高积分。
+- 输入：`host_brain/bond/bond_dynamics.py`。
+- 输出：
+  - `host_brain/bond/bond_dynamics.py`：`apply_update()` payload 新增 `emotion_tag: str`、`emotion_intensity: float` 字段；积分计算时 `emotion_intensity > 0.7` 的互动额外加权 1.5x；
+  - `tests/unit/test_bond_dynamics_emotion_m27.py`（新增）：T-BOND-DYN-EMO-01~03。
+- 验收标准：
+  - T-BOND-DYN-EMO-01：`emotion_intensity=0.9` 的 `INTERACTION` 事件积分 ≥ 普通 `INTERACTION` 的 1.5 倍；
+  - T-BOND-DYN-EMO-02：`emotion_intensity` 缺失时使用默认值 0.5，行为与旧版一致；
+  - T-BOND-DYN-EMO-03：`emotion_tag="SAD"` 的 `INTERACTION` 事件不被过滤，正常积分。
+- 涉及文件路径：`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_dynamics_emotion_m27.py`。
+- 关联需求/测试：FR-BOND-EMOTION-001；T-BOND-DYN-EMO-01~03。
+
+### TASK-0237 M27-F：derive_bond_summary 修复 stage/trend 字段读取（OPT-27）
+
+- 状态：PLANNED
+- 任务描述：修复 `bond/summarizer.py` 中 `derive_bond_summary()` 从 `event["stage"]` 读取 Bond 阶段的 Bug，改为从 `BondScoreState` 直接读取，确保注入 LLM 的 `bond_summary.stage` 正确。
+- 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_stage_engine.py`（`BondScoreState`）。
+- 输出：
+  - `host_brain/bond/summarizer.py`：`derive_bond_summary()` 从 `BondScoreState.stage` 读取阶段，从 `BondScoreState.trend()` 读取趋势，不再从 event dict 读取；
+  - `tests/unit/test_bond_summarizer_m27.py`（新增）：T-BOND-SUM-01~03。
+- 验收标准：
+  - T-BOND-SUM-01：`derive_bond_summary()` 返回的 `stage` 为 `"FRIEND"` 而非 `"S_BOND_UPDATE"`；
+  - T-BOND-SUM-02：`derive_bond_summary()` 返回的 `trend` 为中文语义描述（如 `"上升"`）；
+  - T-BOND-SUM-03：`BondScoreState` 为空时，`derive_bond_summary()` 返回默认值，不报错。
+- 涉及文件路径：`host_brain/bond/summarizer.py`；`tests/unit/test_bond_summarizer_m27.py`。
+- 关联需求/测试：FR-BOND-SUMMARY-001；T-BOND-SUM-01~03。
+
+### TASK-0238 M27-G：RecallFusionServiceContract 增加情感维度路由（OPT-31）
+
+- 状态：PLANNED
+- 任务描述：`RecallFusionServiceContract.recall()` 增加 `emotion_filter` 参数，支持情感记忆与普通记忆分池召回，高情感强度记忆优先排序。
+- 输入：`host_brain/retrieval/recall_fusion.py`（或对应 contract 文件）；TASK-0235（`EpisodicRecord` 情感字段）。
+- 输出：
+  - `host_brain/retrieval/recall_fusion.py`：`recall()` 新增 `emotion_filter: str | None = None` 参数；当 `emotion_filter` 非空时，优先召回匹配情感标签的记录；
+  - `tests/unit/test_recall_fusion_emotion_m27.py`（新增）：T-RECALL-EMO-01~03。
+- 验收标准：
+  - T-RECALL-EMO-01：`emotion_filter="HAPPY"` 时，返回结果中 `emotion_tag="HAPPY"` 的记录排在前列；
+  - T-RECALL-EMO-02：`emotion_filter=None` 时，行为与旧版一致；
+  - T-RECALL-EMO-03：无匹配情感记录时，降级为普通语义召回，不返回空列表。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_recall_fusion_emotion_m27.py`。
+- 关联需求/测试：FR-RECALL-EMOTION-001；T-RECALL-EMO-01~03。
+
+### TASK-0239 M27-H：IntentDecisionEngine 的 governance_snapshot 携带情感状态（OPT-32）
+
+- 状态：PLANNED
+- 任务描述：`IntentDecisionEngine.evaluate_intent()` 接收的 `governance_snapshot` 携带情感状态，决策引擎根据情感状态调整意图评估权重（如 `critical` 状态下拒绝高消耗操作）。
+- 输入：`host_brain/governor/decision.py`；TASK-0234（`GateSnapshot` 情感字段已注入）。
+- 输出：
+  - `host_brain/governor/decision.py`：`evaluate_intent()` 读取 `governance_snapshot.mood_state`，`critical` 状态下拒绝 `TOOL_CALL`/`SKILL_EXEC` 类意图；
+  - `tests/unit/test_intent_decision_emotion_m27.py`（新增）：T-INTENT-EMO-01~03。
+- 验收标准：
+  - T-INTENT-EMO-01：`mood_state="critical"` 时，`TOOL_CALL` 意图被拒绝，返回 `reason_code="EMOTION_GATE_BLOCKED"`；
+  - T-INTENT-EMO-02：`mood_state="engaged"` 时，`TOOL_CALL` 意图正常通过；
+  - T-INTENT-EMO-03：`mood_state` 缺失时，不触发情感门控，行为与旧版一致。
+- 涉及文件路径：`host_brain/governor/decision.py`；`tests/unit/test_intent_decision_emotion_m27.py`。
+- 关联需求/测试：FR-GOV-EMOTION-003；T-INTENT-EMO-01~03。
+
+### TASK-0240 M27-I：SkillLoader.execute 传递情感状态（OPT-37）
+
+- 状态：PLANNED
+- 任务描述：`SkillLoader.execute()` 的 `context` 参数增加 `emotion_tag`、`mood_state` 字段，使技能 handler 能感知当前情感状态并调整执行行为。
+- 输入：`host_brain/skills/loader.py`（或对应路径）；TASK-0234（情感状态来源）。
+- 输出：
+  - `host_brain/skills/loader.py`：`execute()` context 新增 `emotion_tag: str`、`mood_state: str` 字段；
+  - `tests/unit/test_skill_loader_emotion_m27.py`（新增）：T-SKILL-EMO-01~02。
+- 验收标准：
+  - T-SKILL-EMO-01：`execute(context={"emotion_tag": "HAPPY", "mood_state": "engaged"})` 正常调用不报错；
+  - T-SKILL-EMO-02：context 无情感字段时，使用默认值，不报错。
+- 涉及文件路径：`host_brain/skills/loader.py`；`tests/unit/test_skill_loader_emotion_m27.py`。
+- 关联需求/测试：FR-SKILL-EMOTION-001；T-SKILL-EMO-01~02。
+
+### TASK-0241 M27-J：ToolBroker.execute 传递情感状态（OPT-38）
+
+- 状态：PLANNED
+- 任务描述：`ToolBroker.execute()` 的 `context` 参数增加 `emotion_tag`、`mood_state` 字段，使工具 handler 能感知当前情感状态。
+- 输入：`host_brain/tools/broker.py`（或对应路径）；TASK-0234（情感状态来源）。
+- 输出：
+  - `host_brain/tools/broker.py`：`execute()` context 新增 `emotion_tag: str`、`mood_state: str` 字段；
+  - `tests/unit/test_tool_broker_emotion_m27.py`（新增）：T-TOOL-EMO-01~02。
+- 验收标准：
+  - T-TOOL-EMO-01：`execute(context={"emotion_tag": "SAD", "mood_state": "tired"})` 正常调用不报错；
+  - T-TOOL-EMO-02：context 无情感字段时，使用默认值，不报错。
+- 涉及文件路径：`host_brain/tools/broker.py`；`tests/unit/test_tool_broker_emotion_m27.py`。
+- 关联需求/测试：FR-TOOL-EMOTION-001；T-TOOL-EMO-01~02。
+
+### TASK-0242 M27-K：NatsumeScheduler._build_system_intent 携带情感状态（OPT-43）
+
+- 状态：PLANNED
+- 任务描述：`NatsumeScheduler._build_system_intent()` 构建调度意图时，从当前 `HardStateSnapshot` 读取情感状态并注入，使调度任务触发时不丢失情感上下文。
+- 输入：`host_brain/scheduler/scheduler.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`：`_build_system_intent()` 新增 `emotion_tag`、`mood_state` 字段注入；
+  - `tests/unit/test_scheduler_emotion_m27.py`（新增）：T-SCHED-EMO-01~02。
+- 验收标准：
+  - T-SCHED-EMO-01：调度意图 dict 包含 `emotion_tag` 和 `mood_state` 字段；
+  - T-SCHED-EMO-02：`HardStateSnapshot` 不可用时，使用默认情感值，不报错。
+- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_scheduler_emotion_m27.py`。
+- 关联需求/测试：FR-SCHED-EMOTION-001；T-SCHED-EMO-01~02。
+
+### TASK-0243 M27-L：M27 发布清单
+
+- 状态：PLANNED
+- 任务描述：TASK-0232~0242 全部 DONE 后，生成 M27 发布清单，记录 P0 情感链路修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M27 里程碑状态为 DONE；生成代码审查报告。
+- 输入：TASK-0232~0242 全部 DONE；全量测试 ≥1857 passed（1835 + 22 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m27_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M27 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M27 小节；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m27.md`（新增）。
+- 验收标准：
+  - `release_ready=true`；
+  - `emotion_gate_connected=true`（GateSnapshot 情感字段已连通）；
+  - `bond_summary_fixed=true`（derive_bond_summary Bug 已修复）；
+  - `episodic_emotion_tagged=true`（情节记忆情感标注已实现）；
+  - `recall_emotion_routed=true`（情感记忆分池召回已实现）；
+  - `total_tests_passed ≥ 1857`；
+  - `zero_regressions=true`。
+- 涉及文件路径：`docs/50_release/m27_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m27.md`。
+- 关联需求：NFR-REL-001；FR-GOV-EMOTION-001~003；FR-MEM-EMOTION-001；FR-BOND-EMOTION-001；FR-BOND-SUMMARY-001；FR-RECALL-EMOTION-001。
+
+---
+
+## M28 核心情感架构深化（P1 优化）（TASK-0244~0262）
+
+> **目标：** 在 M27 P0 连通基础上，深化情感架构的核心能力：情绪连续体、Bond 质感层、情感记忆、Governor 门控、LLM 情感感知、VTS 表情扩展等 20 项 P1 优化。
+> **依据：** SOUL-OPT-2026-03-05 优化1/6/7/8/13/14/16/21/28/29/33/34/35/39/40/41/44/45/46/47
+> **前置：** M27 全部 DONE
+
+### TASK-0244 M28-A：EmotionVector 情绪连续体（OPT-1）
+
+- 状态：PLANNED
+- 任务描述：在 `metabolism.py` 中引入 `EmotionVector` dataclass（VAD 三维模型），替代离散 `mood_state`，支持情绪衰减（`decay()`）和混合（`blend()`），并保留 `to_mood_state()` 向后兼容。
+- 输入：`host_brain/core/metabolism.py`。
+- 输出：
+  - `host_brain/core/metabolism.py`：新增 `EmotionVector` dataclass（`valence/arousal/dominance/ts_ms`）；`decay()`、`blend()`、`to_mood_state()` 方法；`HardStateSnapshot` 新增 `emotion_vector: EmotionVector` 字段；
+  - `tests/unit/test_emotion_vector_m28.py`（新增）：T-EMO-VEC-01~06。
+- 验收标准：
+  - T-EMO-VEC-01：`decay(elapsed_ms=300_000)` 后 `valence` 绝对值 ≤ 原值的 0.55；
+  - T-EMO-VEC-02：`blend(other, weight=0.3)` 结果在两者之间；
+  - T-EMO-VEC-03：`to_mood_state()` 覆盖 calm/steady/engaged/tired/critical 五种输出；
+  - T-EMO-VEC-04：`valence/arousal/dominance` 超出 [-1,1]/[0,1]/[0,1] 时被截断；
+  - T-EMO-VEC-05：`EmotionVector` 不暴露给 LLM（序列化时不含原始数值）；
+  - T-EMO-VEC-06：`HardStateSnapshot` 含 `emotion_vector` 字段，旧代码读取 `mood_state` 不报错。
+- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotion_vector_m28.py`。
+- 关联需求/测试：FR-EMOTION-CONTINUUM-001；T-EMO-VEC-01~06。
+
+### TASK-0245 M28-B：emotion_tag 生成策略主动注入（OPT-6）
+
+- 状态：PLANNED
+- 任务描述：在 `hard_snapshot` 中增加 `allowed_emotion_tags` 和 `emotion_range_hint` 字段，主动告知 LLM 当前允许的情感标签范围，而非只做事后校验。
+- 输入：`host_brain/core/metabolism.py`（`HardStateSnapshot`）；`host_brain/core/qa.py`（`MOOD_EMOTION_CONSTRAINTS`）。
+- 输出：
+  - `host_brain/core/metabolism.py`：`HardStateSnapshot` 新增 `allowed_emotion_tags: list[str]`、`emotion_range_hint: str` 字段，由 `mood_state` 自动推导；
+  - `host_brain/core/qa.py`：`build_hard_snapshot()` 填充上述字段；
+  - `tests/unit/test_emotion_tag_strategy_m28.py`（新增）：T-EMO-TAG-STR-01~03。
+- 验收标准：
+  - T-EMO-TAG-STR-01：`mood_state="tired"` 时，`allowed_emotion_tags` 不含 `EXCITED`/`HAPPY`；
+  - T-EMO-TAG-STR-02：`mood_state="engaged"` 时，`allowed_emotion_tags` 含 `HAPPY`/`EXCITED`；
+  - T-EMO-TAG-STR-03：`emotion_range_hint` 为非空中文描述字符串。
+- 涉及文件路径：`host_brain/core/metabolism.py`；`host_brain/core/qa.py`；`tests/unit/test_emotion_tag_strategy_m28.py`。
+- 关联需求/测试：FR-EMOTION-TAG-STRATEGY-001；T-EMO-TAG-STR-01~03。
+
+### TASK-0246 M28-C：Bond 积分情感事件分类精化（OPT-7）
+
+- 状态：PLANNED
+- 任务描述：新增 `INTERACTION_MINIMAL`/`INTERACTION_ENGAGED`/`INTERACTION_DEEP` 三级互动分类，根据文本长度、情感强度、问号数量自动推断互动质量，替代统一的 `INTERACTION=+1`。
+- 输入：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`：新增三级互动事件枚举及对应积分（MINIMAL=+0.5, ENGAGED=+1, DEEP=+3）；
+  - `host_brain/bond/bond_dynamics.py`：`classify_interaction()` 方法，根据 `text_len`/`emotion_intensity`/`question_count` 自动分级；
+  - `tests/unit/test_bond_interaction_grade_m28.py`（新增）：T-BOND-GRADE-01~04。
+- 验收标准：
+  - T-BOND-GRADE-01：文本长度 < 10 字且无问号 → `INTERACTION_MINIMAL`；
+  - T-BOND-GRADE-02：文本长度 > 50 字或含问号 → `INTERACTION_ENGAGED`；
+  - T-BOND-GRADE-03：`emotion_intensity > 0.8` 且文本长度 > 100 字 → `INTERACTION_DEEP`；
+  - T-BOND-GRADE-04：旧 `INTERACTION` 事件仍可处理，不报错（向后兼容）。
+- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_interaction_grade_m28.py`。
+- 关联需求/测试：FR-BOND-GRADE-001；T-BOND-GRADE-01~04。
+
+### TASK-0247 M28-D：Governor R8 情感感知门控（OPT-8）
+
+- 状态：PLANNED
+- 任务描述：新增 Governor R8 门控规则：用户情感为 `ANGRY`/`FRUSTRATED` 时只允许对话操作；AI `critical` 状态时自动注入简化提示；依赖 TASK-0232/0234 的 `GateSnapshot` 情感字段。
+- 输入：`host_brain/governor/rules.py`；TASK-0232（`GateSnapshot` 情感字段）；TASK-0234（情感状态注入）。
+- 输出：
+  - `host_brain/governor/rules.py`：新增 `R8_EmotionGate` 规则类；`ANGRY`/`FRUSTRATED` 状态下拒绝 `TOOL_CALL`/`SKILL_EXEC`；`critical` 状态下注入 `simplified_prompt=True` 标记；
+  - `tests/unit/test_governor_r8_m28.py`（新增）：T-GOV-R8-01~04。
+- 验收标准：
+  - T-GOV-R8-01：`emotion_tag="ANGRY"` 时，`TOOL_CALL` 被 R8 拒绝，`reason_code="R8_EMOTION_GATE"`；
+  - T-GOV-R8-02：`mood_state="critical"` 时，输出含 `simplified_prompt=True`；
+  - T-GOV-R8-03：`emotion_tag="HAPPY"` 时，R8 不触发，正常通过；
+  - T-GOV-R8-04：R8 拒绝时，审计日志记录情感状态快照。
+- 涉及文件路径：`host_brain/governor/rules.py`；`tests/unit/test_governor_r8_m28.py`。
+- 关联需求/测试：FR-GOV-R8-001；T-GOV-R8-01~04。
+
+### TASK-0248 M28-E：evolve_hard_state 情感事件语义扩展（OPT-13）
+
+- 状态：PLANNED
+- 任务描述：`evolve_hard_state()` 的 `event_kind` 增加情感语义事件类型（`EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`），使情感事件能触发对应的状态演化逻辑。
+- 输入：`host_brain/core/metabolism.py`（`evolve_hard_state()`）。
+- 输出：
+  - `host_brain/core/metabolism.py`：`event_kind` 枚举新增 `EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`；对应演化逻辑（`EMOTION_SPIKE` → `arousal` 上升，`EMOTION_CALM` → 向中性漂移）；
+  - `tests/unit/test_evolve_hard_state_emotion_m28.py`（新增）：T-EVOLVE-EMO-01~03。
+- 验收标准：
+  - T-EVOLVE-EMO-01：`event_kind="EMOTION_SPIKE"` 后，`emotion_vector.arousal` 上升 ≥ 0.1；
+  - T-EVOLVE-EMO-02：`event_kind="EMOTION_CALM"` 后，`emotion_vector.valence` 向 0 漂移；
+  - T-EVOLVE-EMO-03：未知 `event_kind` 不报错，使用默认演化逻辑。
+- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_evolve_hard_state_emotion_m28.py`。
+- 关联需求/测试：FR-METABOLISM-EMOTION-001；T-EVOLVE-EMO-01~03。
+
+### TASK-0249 M28-F：BondScoreState.trend 语义化（OPT-14）
+
+- 状态：PLANNED
+- 任务描述：`BondScoreState.trend()` 返回中文语义描述（`"上升"/"稳定"/"下降"`）而非英文枚举，并增加趋势强度（`"快速上升"/"缓慢下降"`）。
+- 输入：`host_brain/bond/bond_stage_engine.py`（`BondScoreState`）。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`：`trend()` 返回中文语义字符串；新增 `trend_intensity()` 返回趋势强度描述；
+  - `tests/unit/test_bond_trend_semantic_m28.py`（新增）：T-BOND-TREND-01~03。
+- 验收标准：
+  - T-BOND-TREND-01：积分连续上升时，`trend()` 返回 `"上升"` 或 `"快速上升"`；
+  - T-BOND-TREND-02：积分平稳时，`trend()` 返回 `"稳定"`；
+  - T-BOND-TREND-03：`trend()` 返回值为中文字符串，不含英文枚举。
+- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_trend_semantic_m28.py`。
+- 关联需求/测试：FR-BOND-TREND-001；T-BOND-TREND-01~03。
+
+### TASK-0250 M28-G：OPTIONAL_SLOTS 扩展（OPT-16）
+
+- 状态：PLANNED
+- 任务描述：`context_pack.py` 的 `OPTIONAL_SLOTS` 从单一槽位扩展为多槽位架构，支持 `emotion_pulse`/`bond_texture`/`memory_emotion_hint` 等情感槽位动态注入。
+- 输入：`host_brain/core/context_pack.py`。
+- 输出：
+  - `host_brain/core/context_pack.py`：`OPTIONAL_SLOTS` 改为 dict 结构，支持多槽位注册；新增 `register_slot(name, builder_fn)` 方法；`build_context_pack()` 遍历所有已注册槽位；
+  - `tests/unit/test_optional_slots_m28.py`（新增）：T-OPT-SLOTS-01~04。
+- 验收标准：
+  - T-OPT-SLOTS-01：`register_slot("emotion_pulse", fn)` 后，`build_context_pack()` 输出含 `emotion_pulse` 字段；
+  - T-OPT-SLOTS-02：槽位 builder 抛出异常时，该槽位被跳过，不影响其他槽位；
+  - T-OPT-SLOTS-03：未注册槽位不出现在输出中；
+  - T-OPT-SLOTS-04：旧代码调用 `build_context_pack()` 不报错（向后兼容）。
+- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_optional_slots_m28.py`。
+- 关联需求/测试：FR-CONTEXT-SLOTS-001；T-OPT-SLOTS-01~04。
+
+### TASK-0251 M28-H：BondScoreState.to_summary 中文化（OPT-21）
+
+- 状态：PLANNED
+- 任务描述：`BondScoreState.to_summary()` 的 `trend` 字段统一输出中文语义描述，消除英中文枚举混用问题，确保注入 LLM 的 bond_summary 全部为中文。
+- 输入：`host_brain/bond/bond_stage_engine.py`；TASK-0249（`trend()` 中文化）。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`：`to_summary()` 的所有字段值统一为中文；
+  - `tests/unit/test_bond_to_summary_cn_m28.py`（新增）：T-BOND-SUM-CN-01~02。
+- 验收标准：
+  - T-BOND-SUM-CN-01：`to_summary()` 返回 dict 中无英文枚举值；
+  - T-BOND-SUM-CN-02：`to_summary()` 的 `stage` 字段为中文阶段名（如 `"朋友"`）。
+- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_to_summary_cn_m28.py`。
+- 关联需求/测试：FR-BOND-SUMMARY-CN-001；T-BOND-SUM-CN-01~02。
+
+### TASK-0252 M28-I：ContextCompressor 保存用户轮次（OPT-28）
+
+- 状态：PLANNED
+- 任务描述：`ContextCompressor._pre_compress_save()` 改为同时保存 user 和 assistant 轮次，确保用户情感表达不被丢弃，长期记忆为双声道。
+- 输入：`host_brain/memory/context_compressor.py`。
+- 输出：
+  - `host_brain/memory/context_compressor.py`：`_pre_compress_save()` 保存 user + assistant 双轮次；user 轮次携带 `emotion_tag` 字段（若可用）；
+  - `tests/unit/test_context_compressor_user_m28.py`（新增）：T-COMPRESS-USER-01~02。
+- 验收标准：
+  - T-COMPRESS-USER-01：压缩后的记录包含 user 轮次；
+  - T-COMPRESS-USER-02：user 轮次含 `emotion_tag` 字段（若原始数据有）。
+- 涉及文件路径：`host_brain/memory/context_compressor.py`；`tests/unit/test_context_compressor_user_m28.py`。
+- 关联需求/测试：FR-COMPRESS-EMOTION-001；T-COMPRESS-USER-01~02。
+
+### TASK-0253 M28-J：LongTermDistiller 增加情感关系蒸馏主题（OPT-29）
+
+- 状态：PLANNED
+- 任务描述：`LongTermMemoryDistiller` 的蒸馏主题列表增加 `"情感关系史"` 维度，蒸馏出用户与 AI 之间的情感关系演变摘要。
+- 输入：`host_brain/memory/long_term_distiller.py`。
+- 输出：
+  - `host_brain/memory/long_term_distiller.py`：蒸馏主题新增 `"情感关系史"`；对应 prompt 模板；蒸馏结果存入 `emotional_relationship_summary` 字段；
+  - `tests/unit/test_distiller_emotion_m28.py`（新增）：T-DISTILL-EMO-01~02。
+- 验收标准：
+  - T-DISTILL-EMO-01：蒸馏结果包含 `emotional_relationship_summary` 字段；
+  - T-DISTILL-EMO-02：`emotional_relationship_summary` 为非空字符串（mock LLM 返回）。
+- 涉及文件路径：`host_brain/memory/long_term_distiller.py`；`tests/unit/test_distiller_emotion_m28.py`。
+- 关联需求/测试：FR-DISTILL-EMOTION-001；T-DISTILL-EMO-01~02。
+
+### TASK-0254 M28-K：CrossTimelineAggregator 增加情感事件（OPT-33）
+
+- 状态：PLANNED
+- 任务描述：`CrossTimelineAggregator` 的时间线增加情感事件类型（`EMOTION_PEAK`/`EMOTION_SHIFT`），使情感变化在时间线中可见。
+- 输入：`host_brain/obs/cross_timeline.py`（或对应路径）。
+- 输出：
+  - 对应文件：时间线事件类型新增 `EMOTION_PEAK`/`EMOTION_SHIFT`；情感事件携带 `emotion_tag`/`emotion_intensity` 字段；
+  - `tests/unit/test_timeline_emotion_m28.py`（新增）：T-TIMELINE-EMO-01~02。
+- 验收标准：
+  - T-TIMELINE-EMO-01：情感强度 > 0.8 时，自动生成 `EMOTION_PEAK` 事件；
+  - T-TIMELINE-EMO-02：情感标签发生变化时，自动生成 `EMOTION_SHIFT` 事件。
+- 涉及文件路径：`host_brain/obs/cross_timeline.py`；`tests/unit/test_timeline_emotion_m28.py`。
+- 关联需求/测试：FR-TIMELINE-EMOTION-001；T-TIMELINE-EMO-01~02。
+
+### TASK-0255 M28-L：EMOTION_TO_EXPRESSION_ID 扩展至16种（OPT-34）
+
+- 状态：PLANNED
+- 任务描述：`EMOTION_TO_EXPRESSION_ID` 从 6 种扩展至覆盖全部 16 种情感标签，消除 60% 情感状态被降级为 neutral 表情的问题。
+- 输入：`host_brain/channels/vts_mapping_store.py`（或对应路径）；当前 16 种情感标签枚举。
+- 输出：
+  - 对应文件：`EMOTION_TO_EXPRESSION_ID` 补全 10 种缺失情感的表情映射；新增 `EMOTION_FALLBACK_MAP` 处理未知情感；
+  - `tests/unit/test_vts_expression_map_m28.py`（新增）：T-VTS-MAP-01~03。
+- 验收标准：
+  - T-VTS-MAP-01：16 种情感标签均有对应表情 ID，无 `None` 返回；
+  - T-VTS-MAP-02：未知情感标签返回 fallback 表情，不返回 `None`；
+  - T-VTS-MAP-03：`NEUTRAL` 情感映射到中性表情 ID。
+- 涉及文件路径：`host_brain/channels/vts_mapping_store.py`；`tests/unit/test_vts_expression_map_m28.py`。
+- 关联需求/测试：FR-VTS-EXPRESSION-FULL-001；T-VTS-MAP-01~03。
+
+### TASK-0256 M28-M：CameraRecognition 视觉感知触发情感响应（OPT-35）
+
+- 状态：PLANNED
+- 任务描述：`CameraRecognitionServiceContract.detect()` 的视觉识别结果（表情/姿态）触发情感响应，将用户视觉情感信号注入 `EmotionVector`。
+- 输入：`host_brain/senses/camera.py`（或对应路径）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - 对应文件：`detect()` 返回结果新增 `user_emotion_hint: str` 字段；`metabolism.py` 新增 `apply_visual_emotion_hint()` 方法；
+  - `tests/unit/test_camera_emotion_m28.py`（新增）：T-CAM-EMO-01~02。
+- 验收标准：
+  - T-CAM-EMO-01：检测到用户微笑时，`user_emotion_hint="HAPPY"`；
+  - T-CAM-EMO-02：`apply_visual_emotion_hint("HAPPY")` 后，`emotion_vector.valence` 上升。
+- 涉及文件路径：`host_brain/senses/camera.py`；`host_brain/core/metabolism.py`；`tests/unit/test_camera_emotion_m28.py`。
+- 关联需求/测试：FR-CAMERA-EMOTION-001；T-CAM-EMO-01~02。
+
+### TASK-0257 M28-N：ToolMeta 增加情感适用性字段（OPT-39）
+
+- 状态：PLANNED
+- 任务描述：`ToolMeta` 增加 `emotion_requirement: list[str]` 字段，标注工具适用的情感场景，MCP 工具注册时感知情感适用性。
+- 输入：`host_brain/mcp/tool_registry.py`（或对应路径）。
+- 输出：
+  - 对应文件：`ToolMeta` 新增 `emotion_requirement: list[str] = []` 字段；工具选择时过滤不适用当前情感状态的工具；
+  - `tests/unit/test_tool_meta_emotion_m28.py`（新增）：T-TOOL-META-EMO-01~02。
+- 验收标准：
+  - T-TOOL-META-EMO-01：`emotion_requirement=["HAPPY"]` 的工具在 `mood_state="tired"` 时不被选中；
+  - T-TOOL-META-EMO-02：`emotion_requirement=[]` 的工具在任何情感状态下均可被选中。
+- 涉及文件路径：`host_brain/mcp/tool_registry.py`；`tests/unit/test_tool_meta_emotion_m28.py`。
+- 关联需求/测试：FR-TOOL-EMOTION-FILTER-001；T-TOOL-META-EMO-01~02。
+
+### TASK-0258 M28-O：RerankerServiceContract 情感感知重排序（OPT-40）
+
+- 状态：PLANNED
+- 任务描述：`RerankerServiceContract.rerank()` 增加 `emotion_context` 参数，重排序时优先召回与当前情感状态共鸣的记忆。
+- 输入：`host_brain/retrieval/reranker.py`（或对应路径）；TASK-0235（`EpisodicRecord` 情感字段）。
+- 输出：
+  - 对应文件：`rerank()` 新增 `emotion_context: str | None = None` 参数；情感匹配的记录额外加权 1.3x；
+  - `tests/unit/test_reranker_emotion_m28.py`（新增）：T-RERANK-EMO-01~02。
+- 验收标准：
+  - T-RERANK-EMO-01：`emotion_context="HAPPY"` 时，`emotion_tag="HAPPY"` 的记录排名上升；
+  - T-RERANK-EMO-02：`emotion_context=None` 时，行为与旧版一致。
+- 涉及文件路径：`host_brain/retrieval/reranker.py`；`tests/unit/test_reranker_emotion_m28.py`。
+- 关联需求/测试：FR-RERANK-EMOTION-001；T-RERANK-EMO-01~02。
+
+### TASK-0259 M28-P：RetrievalPipeline 传递情感上下文（OPT-41）
+
+- 状态：PLANNED
+- 任务描述：`RetrievalPipelineContract.run()` 增加 `emotion_context` 参数并传递给 reranker 和 recall_fusion，打通召回管线的情感上下文传递。
+- 输入：`host_brain/retrieval/pipeline.py`（或对应路径）；TASK-0238（recall_fusion 情感路由）；TASK-0258（reranker 情感感知）。
+- 输出：
+  - 对应文件：`run()` 新增 `emotion_context: str | None = None` 参数；透传给 reranker 和 recall_fusion；
+  - `tests/unit/test_retrieval_pipeline_emotion_m28.py`（新增）：T-PIPELINE-EMO-01~02。
+- 验收标准：
+  - T-PIPELINE-EMO-01：`emotion_context="SAD"` 时，pipeline 将参数透传给 reranker；
+  - T-PIPELINE-EMO-02：`emotion_context=None` 时，行为与旧版一致。
+- 涉及文件路径：`host_brain/retrieval/pipeline.py`；`tests/unit/test_retrieval_pipeline_emotion_m28.py`。
+- 关联需求/测试：FR-PIPELINE-EMOTION-001；T-PIPELINE-EMO-01~02。
+
+### TASK-0260 M28-Q：LlmGatewayContract 携带情感上下文（OPT-44）
+
+- 状态：PLANNED
+- 任务描述：`LlmGatewayContract.generate()` 的 `prompt_payload` 增加 `emotion_context` 字段，LLM 调用时携带情感上下文，支持情感感知的 prompt 注入策略。
+- 输入：`host_brain/core/llm_gateway.py`（或对应路径）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - 对应文件：`generate()` prompt_payload 新增 `emotion_context: dict`（含 `mood_state`/`emotion_tag`/`emotion_range_hint`）；
+  - `tests/unit/test_llm_gateway_emotion_m28.py`（新增）：T-LLM-GW-EMO-01~02。
+- 验收标准：
+  - T-LLM-GW-EMO-01：`generate()` 的 prompt_payload 含 `emotion_context` 字段；
+  - T-LLM-GW-EMO-02：`emotion_context` 缺失时使用默认值，不报错。
+- 涉及文件路径：`host_brain/core/llm_gateway.py`；`tests/unit/test_llm_gateway_emotion_m28.py`。
+- 关联需求/测试：FR-LLM-EMOTION-001；T-LLM-GW-EMO-01~02。
+
+### TASK-0261 M28-R：GraphExecutor 节点执行携带情感状态（OPT-45）
+
+- 状态：PLANNED
+- 任务描述：`GraphExecutor._invoke_handler()` 的 `context` 参数携带情感状态，图节点执行时能感知当前情感上下文。
+- 输入：`host_brain/core/graph_executor.py`（或对应路径）；TASK-0234（情感状态来源）。
+- 输出：
+  - 对应文件：`_invoke_handler()` context 新增 `emotion_tag`/`mood_state` 字段；
+  - `tests/unit/test_graph_executor_emotion_m28.py`（新增）：T-GRAPH-EMO-01~02。
+- 验收标准：
+  - T-GRAPH-EMO-01：handler 接收到的 context 含 `emotion_tag` 字段；
+  - T-GRAPH-EMO-02：context 无情感字段时使用默认值，不报错。
+- 涉及文件路径：`host_brain/core/graph_executor.py`；`tests/unit/test_graph_executor_emotion_m28.py`。
+- 关联需求/测试：FR-GRAPH-EMOTION-001；T-GRAPH-EMO-01~02。
+
+### TASK-0262 M28-S：SoVITS synthesize emotion_intensity 真正传递（OPT-47）
+
+- 状态：PLANNED
+- 任务描述：修复 `SoVITSModelManager.synthesize()` 的 `emotion_intensity` 参数被忽略的问题，确保参数真正传递给底层 SDK，影响 TTS 语气幅度。
+- 输入：`edge_client/actuators/tts_engine.py`。
+- 输出：
+  - `edge_client/actuators/tts_engine.py`：`synthesize()` 将 `emotion_intensity` 映射为底层 SDK 的对应参数（如 `speed_factor`/`energy_factor`）并传递；
+  - `tests/unit/test_tts_intensity_fix_m28.py`（新增）：T-TTS-INTENSITY-FIX-01~02。
+- 验收标准：
+  - T-TTS-INTENSITY-FIX-01：`emotion_intensity=0.9` 时，底层 SDK 调用参数与 `emotion_intensity=0.3` 时不同；
+  - T-TTS-INTENSITY-FIX-02：`emotion_intensity` 超出 [0,1] 时被截断，不报错。
+- 涉及文件路径：`edge_client/actuators/tts_engine.py`；`tests/unit/test_tts_intensity_fix_m28.py`。
+- 关联需求/测试：FR-TTS-INTENSITY-001；T-TTS-INTENSITY-FIX-01~02。
+
+### TASK-0263 M28-T：M28 发布清单
+
+- 状态：PLANNED
+- 任务描述：TASK-0244~0262 全部 DONE 后，生成 M28 发布清单，记录 P1 情感架构深化文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M28 里程碑状态为 DONE；生成代码审查报告。
+- 输入：TASK-0244~0262 全部 DONE；全量测试 ≥1895 passed（1857 + 38 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m28_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M28 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M28 小节；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m28.md`（新增）。
+- 验收标准：
+  - `release_ready=true`；
+  - `emotion_vector_implemented=true`（EmotionVector 情绪连续体已实现）；
+  - `governor_r8_active=true`（R8 情感门控已激活）；
+  - `bond_grade_refined=true`（Bond 互动质量分级已实现）；
+  - `vts_expression_full=true`（VTS 表情映射已覆盖16种情感）；
+  - `tts_intensity_fixed=true`（TTS 强度参数断路已修复）；
+  - `total_tests_passed ≥ 1895`；
+  - `zero_regressions=true`。
+- 涉及文件路径：`docs/50_release/m28_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m28.md`。
+- 关联需求：NFR-REL-001；FR-EMOTION-CONTINUUM-001；FR-GOV-R8-001；FR-BOND-GRADE-001；FR-VTS-EXPRESSION-FULL-001；FR-TTS-INTENSITY-001。
+
+---
+
+## M29 情感体验增强（P2 优化）（TASK-0264~0279）
+
+> **目标：** 在 M27/M28 基础设施和核心架构完成后，实现情感体验的全面增强：Bond 质感层、情感记忆召回、主动触发器、裂痕修复、情感回声、LLM 参数动态调整等 17 项 P2 优化。
+> **依据：** SOUL-OPT-2026-03-05 优化2/3/4/5/9/10/11/12/15/17/18/23/24/30/36/42/48
+> **前置：** M28 全部 DONE
+
+### TASK-0264 M29-A：BondEmotionalTexture 情感质感层（OPT-2）
+
+- 状态：PLANNED
+- 任务描述：在 `BondScoreState` 上增加 `BondEmotionalTexture` 情感质感层，感知互动节奏（平均回复间隔）和关系温度（近期情感均值），影响 AI 表达风格。
+- 输入：`host_brain/bond/bond_stage_engine.py`；TASK-0246（Bond 互动分级）。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`：新增 `BondEmotionalTexture` dataclass（`avg_response_gap_ms`/`recent_emotion_valence`/`intimacy_temperature`）；`BondScoreState` 持有 `texture: BondEmotionalTexture`；`texture` 影响 `to_summary()` 的风格描述；
+  - `tests/unit/test_bond_texture_m29.py`（新增）：T-BOND-TEX-01~04。
+- 验收标准：
+  - T-BOND-TEX-01：`avg_response_gap_ms < 5000` 时，`intimacy_temperature` 上升；
+  - T-BOND-TEX-02：`recent_emotion_valence > 0.5` 时，`to_summary()` 含温暖风格描述；
+  - T-BOND-TEX-03：`BondEmotionalTexture` 不影响 Bond 积分计算；
+  - T-BOND-TEX-04：`texture` 字段缺失时使用默认值，不报错。
+- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_texture_m29.py`。
+- 关联需求/测试：FR-BOND-TEXTURE-001；T-BOND-TEX-01~04。
+
+### TASK-0265 M29-B：情感记忆标注与加权召回（OPT-3）
+
+- 状态：PLANNED
+- 任务描述：`recall()` 支持情感加权召回（语义60% + 情感共鸣30% + 情感显著度10%），使高情感强度的记忆在相关场景下优先被召回。
+- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）；TASK-0238（recall_fusion 情感路由）。
+- 输出：
+  - `host_brain/memory/episodic.py`：`recall()` 新增情感加权评分（`emotion_resonance_score`）；最终排序为 `semantic*0.6 + resonance*0.3 + salience*0.1`；
+  - `tests/unit/test_episodic_weighted_recall_m29.py`（新增）：T-EPISODIC-WR-01~03。
+- 验收标准：
+  - T-EPISODIC-WR-01：当前情感为 `HAPPY` 时，`emotion_tag="HAPPY"` 的记录排名高于 `emotion_tag="SAD"` 的同等语义记录；
+  - T-EPISODIC-WR-02：`emotion_salience > 0.8` 的记录在同等条件下排名更高；
+  - T-EPISODIC-WR-03：无情感字段的旧记录不被过滤，正常参与召回。
+- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_weighted_recall_m29.py`。
+- 关联需求/测试：FR-EPISODIC-WEIGHTED-RECALL-001；T-EPISODIC-WR-01~03。
+
+### TASK-0266 M29-C：emotion_pulse 动态槽位注入（OPT-4）
+
+- 状态：PLANNED
+- 任务描述：利用 TASK-0250 的 `OPTIONAL_SLOTS` 架构，注册 `emotion_pulse` 槽位，将当前情感状态的自然语言描述动态注入 `context_pack`，使 LLM 感知"此刻感受"。
+- 输入：`host_brain/core/context_pack.py`；TASK-0250（`OPTIONAL_SLOTS` 扩展）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - `host_brain/core/context_pack.py`：注册 `emotion_pulse` 槽位，builder 从 `EmotionVector` 生成自然语言描述（如 `"此刻感到有些开心，精力充沛"`）；
+  - `tests/unit/test_emotion_pulse_m29.py`（新增）：T-EMO-PULSE-01~03。
+- 验收标准：
+  - T-EMO-PULSE-01：`context_pack` 含 `emotion_pulse` 字段；
+  - T-EMO-PULSE-02：`emotion_pulse` 为中文自然语言描述，不含原始数值；
+  - T-EMO-PULSE-03：`EmotionVector` 不可用时，`emotion_pulse` 使用默认描述，不报错。
+- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_emotion_pulse_m29.py`。
+- 关联需求/测试：FR-EMOTION-PULSE-001；T-EMO-PULSE-01~03。
+
+### TASK-0267 M29-D：主动情感触发器（OPT-5）
+
+- 状态：PLANNED
+- 任务描述：实现主动情感触发器，感知沉默超时/早晨问候/纪念日/用户压力信号，自动触发对应情感响应（如沉默 10 分钟后主动关心）。
+- 输入：`host_brain/scheduler/scheduler.py`；TASK-0244（`EmotionVector`）；TASK-0242（调度器情感状态）。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`：新增 `ProactiveEmotionTrigger` 类，检测沉默/时间/纪念日/压力信号；触发时生成对应情感意图；
+  - `tests/unit/test_proactive_emotion_trigger_m29.py`（新增）：T-PROACTIVE-EMO-01~04。
+- 验收标准：
+  - T-PROACTIVE-EMO-01：沉默超过 600 秒时，触发 `PROACTIVE_CARE` 意图；
+  - T-PROACTIVE-EMO-02：早晨 7-9 点首次对话时，触发 `MORNING_GREETING` 情感；
+  - T-PROACTIVE-EMO-03：检测到用户压力信号（`emotion_tag="ANXIOUS"` 持续 3 轮）时，触发 `COMFORT` 意图；
+  - T-PROACTIVE-EMO-04：触发频率限制（同类触发器 1 小时内最多 1 次）。
+- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_proactive_emotion_trigger_m29.py`。
+- 关联需求/测试：FR-PROACTIVE-EMOTION-001；T-PROACTIVE-EMO-01~04。
+
+### TASK-0268 M29-E：情感时间线重建（OPT-9）
+
+- 状态：PLANNED
+- 任务描述：新增 `recall_emotional_timeline()` 方法，分析情感弧线（开始/中间/结束），生成时间线摘要，支持 AI 描述"那段时间"的整体感受。
+- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）；TASK-0254（时间线情感事件）。
+- 输出：
+  - `host_brain/memory/episodic.py`：新增 `recall_emotional_timeline(time_range)` 方法，返回情感弧线摘要（`start_emotion`/`peak_emotion`/`end_emotion`/`overall_valence`/`narrative`）；
+  - `tests/unit/test_emotional_timeline_m29.py`（新增）：T-EMO-TIMELINE-01~03。
+- 验收标准：
+  - T-EMO-TIMELINE-01：给定时间范围内有记录时，返回含 `start_emotion`/`end_emotion` 的摘要；
+  - T-EMO-TIMELINE-02：`overall_valence` 为 [-1,1] 范围内的浮点数；
+  - T-EMO-TIMELINE-03：时间范围内无记录时，返回默认摘要，不报错。
+- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_emotional_timeline_m29.py`。
+- 关联需求/测试：FR-EMOTIONAL-TIMELINE-001；T-EMO-TIMELINE-01~03。
+
+### TASK-0269 M29-F：LLM 情感感知生成参数动态调整（OPT-10）
+
+- 状态：PLANNED
+- 任务描述：根据 `emotion_pulse` 动态调整 LLM 生成参数（兴奋→temperature↑，悲伤→temperature↓），使 AI 回复风格与情感状态匹配。
+- 输入：`host_brain/core/llm_gateway.py`；TASK-0260（LLM Gateway 情感上下文）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - `host_brain/core/llm_gateway.py`：`generate()` 根据 `emotion_context.arousal` 动态调整 `temperature`（`arousal > 0.7` → `temperature=0.9`，`arousal < 0.3` → `temperature=0.6`）；
+  - `tests/unit/test_llm_emotion_params_m29.py`（新增）：T-LLM-EMO-PARAM-01~03。
+- 验收标准：
+  - T-LLM-EMO-PARAM-01：`arousal=0.9` 时，`temperature ≥ 0.85`；
+  - T-LLM-EMO-PARAM-02：`arousal=0.1` 时，`temperature ≤ 0.65`；
+  - T-LLM-EMO-PARAM-03：`emotion_context` 缺失时，使用默认 `temperature`，不报错。
+- 涉及文件路径：`host_brain/core/llm_gateway.py`；`tests/unit/test_llm_emotion_params_m29.py`。
+- 关联需求/测试：FR-LLM-EMOTION-PARAMS-001；T-LLM-EMO-PARAM-01~03。
+
+### TASK-0270 M29-G：Bond 裂痕修复机制（OPT-11）
+
+- 状态：PLANNED
+- 任务描述：新增 `BondRiftState` 裂痕-修复双轨机制，冲突后进入裂痕状态，修复期间自动调整 AI 表达风格（更温柔、更主动道歉）。
+- 输入：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`。
+- 输出：
+  - `host_brain/bond/bond_stage_engine.py`：新增 `BondRiftState`（`rift_level`/`repair_progress`/`rift_cause`）；`BondScoreState` 持有 `rift: BondRiftState | None`；
+  - `host_brain/bond/bond_dynamics.py`：`CONFLICT` 事件触发裂痕；`APOLOGY`/`COMFORT` 事件推进修复；
+  - `tests/unit/test_bond_rift_m29.py`（新增）：T-BOND-RIFT-01~04。
+- 验收标准：
+  - T-BOND-RIFT-01：`CONFLICT` 事件后，`rift_level > 0`；
+  - T-BOND-RIFT-02：`APOLOGY` 事件后，`repair_progress` 上升；
+  - T-BOND-RIFT-03：`repair_progress >= 1.0` 时，`rift` 清除；
+  - T-BOND-RIFT-04：裂痕期间，`to_summary()` 含修复风格提示。
+- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_rift_m29.py`。
+- 关联需求/测试：FR-BOND-RIFT-001；T-BOND-RIFT-01~04。
+
+### TASK-0271 M29-H：情感回声机制（OPT-12）
+
+- 状态：PLANNED
+- 任务描述：新增 `EmotionEcho` 模块，AI 情感受用户情感感染（Bond 越深共情越强），陌生人阶段感染率 5%，灵魂伴侣阶段感染率 65%。
+- 输入：`host_brain/core/metabolism.py`；`host_brain/bond/bond_stage_engine.py`；TASK-0244（`EmotionVector`）。
+- 输出：
+  - `host_brain/core/metabolism.py`：新增 `apply_emotion_echo(user_emotion, bond_stage)` 方法；感染率由 Bond 阶段决定；
+  - `tests/unit/test_emotion_echo_m29.py`（新增）：T-EMO-ECHO-01~03。
+- 验收标准：
+  - T-EMO-ECHO-01：`bond_stage="STRANGER"` 时，感染率 ≤ 0.1；
+  - T-EMO-ECHO-02：`bond_stage="SOULMATE"` 时，感染率 ≥ 0.6；
+  - T-EMO-ECHO-03：`apply_emotion_echo()` 后，AI `emotion_vector` 向用户情感方向漂移。
+- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotion_echo_m29.py`。
+- 关联需求/测试：FR-EMOTION-ECHO-001；T-EMO-ECHO-01~03。
+
+### TASK-0272 M29-I：EpisodicRecord decay_profile_id 实装（OPT-15）
+
+- 状态：PLANNED
+- 任务描述：`EpisodicRecord.decay_profile_id` 从空壳变为真实生效的衰减配置，不同情感强度的记忆使用不同衰减曲线（高情感强度记忆衰减更慢）。
+- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）。
+- 输出：
+  - `host_brain/memory/episodic.py`：新增 `DECAY_PROFILES` dict（`fast`/`normal`/`slow`/`permanent`）；`decay_profile_id` 由 `emotion_intensity` 自动推导；`recall()` 评分时应用衰减系数；
+  - `tests/unit/test_episodic_decay_m29.py`（新增）：T-EPISODIC-DECAY-01~03。
+- 验收标准：
+  - T-EPISODIC-DECAY-01：`emotion_intensity > 0.8` 的记录使用 `slow` 衰减曲线；
+  - T-EPISODIC-DECAY-02：`emotion_intensity < 0.3` 的记录使用 `fast` 衰减曲线；
+  - T-EPISODIC-DECAY-03：衰减后的记录评分低于未衰减记录（时间越久分越低）。
+- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_decay_m29.py`。
+- 关联需求/测试：FR-EPISODIC-DECAY-001；T-EPISODIC-DECAY-01~03。
+
+### TASK-0273 M29-J：BondDynamicsWriter payload 语义标准化（OPT-17）
+
+- 状态：PLANNED
+- 任务描述：`BondDynamicsWriter.apply_update()` 的 `payload` 字段建立语义标准化规范，不同事件类型有对应的 payload schema，消除字段随意性。
+- 输入：`host_brain/bond/bond_dynamics.py`；TASK-0236（Bond 事件情感字段）。
+- 输出：
+  - `host_brain/bond/bond_dynamics.py`：新增 `BOND_EVENT_PAYLOAD_SCHEMA` dict，每种事件类型对应必填/可选字段；`apply_update()` 校验 payload 合规性；
+  - `tests/unit/test_bond_payload_schema_m29.py`（新增）：T-BOND-PAYLOAD-01~03。
+- 验收标准：
+  - T-BOND-PAYLOAD-01：`INTERACTION` 事件 payload 缺少必填字段时，记录警告日志（不拒绝）；
+  - T-BOND-PAYLOAD-02：`DEEP_TALK` 事件 payload 含 `topic` 字段时，正常处理；
+  - T-BOND-PAYLOAD-03：未知事件类型的 payload 不被校验，直接通过。
+- 涉及文件路径：`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_payload_schema_m29.py`。
+- 关联需求/测试：FR-BOND-PAYLOAD-001；T-BOND-PAYLOAD-01~03。
+
+### TASK-0274 M29-K：hard_state_summary 增加情感时间戳（OPT-18）
+
+- 状态：PLANNED
+- 任务描述：`governance_snapshot` 的 `hard_state_summary` 增加 `emotion_updated_at` 时间戳字段，支持情感状态的时效性判断。
+- 输入：`host_brain/core/metabolism.py`（`HardStateSnapshot`）；`host_brain/governor/decision.py`。
+- 输出：
+  - `host_brain/core/metabolism.py`：`HardStateSnapshot` 新增 `emotion_updated_at: int`（毫秒时间戳）；
+  - `host_brain/governor/decision.py`：`build_governance_snapshot()` 传递 `emotion_updated_at`；
+  - `tests/unit/test_hard_state_timestamp_m29.py`（新增）：T-HARD-TS-01~02。
+- 验收标准：
+  - T-HARD-TS-01：`HardStateSnapshot` 含 `emotion_updated_at` 字段，值为合法毫秒时间戳；
+  - T-HARD-TS-02：情感状态更新时，`emotion_updated_at` 同步更新。
+- 涉及文件路径：`host_brain/core/metabolism.py`；`host_brain/governor/decision.py`；`tests/unit/test_hard_state_timestamp_m29.py`。
+- 关联需求/测试：FR-HARD-STATE-TS-001；T-HARD-TS-01~02。
+
+### TASK-0275 M29-L：validate_context_pack bond_summary 语义校验（OPT-23）
+
+- 状态：PLANNED
+- 任务描述：`validate_context_pack()` 对 `bond_summary` 的 `stage`/`trend` 字段增加语义校验，拒绝非法枚举值（如 `"S_BOND_UPDATE"`）。
+- 输入：`host_brain/core/context_pack.py`；TASK-0237（`derive_bond_summary` 修复）。
+- 输出：
+  - `host_brain/core/context_pack.py`：`validate_context_pack()` 校验 `bond_summary.stage` 为合法 Bond 阶段枚举；`bond_summary.trend` 为合法中文趋势描述；非法值记录警告并使用默认值；
+  - `tests/unit/test_context_pack_bond_validate_m29.py`（新增）：T-CP-BOND-VAL-01~03。
+- 验收标准：
+  - T-CP-BOND-VAL-01：`bond_summary.stage="S_BOND_UPDATE"` 时，校验失败，使用默认值 `"STRANGER"`；
+  - T-CP-BOND-VAL-02：`bond_summary.stage="FRIEND"` 时，校验通过；
+  - T-CP-BOND-VAL-03：校验失败时记录 WARNING 日志，不抛出异常。
+- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_context_pack_bond_validate_m29.py`。
+- 关联需求/测试：FR-CONTEXT-BOND-VALIDATE-001；T-CP-BOND-VAL-01~03。
+
+### TASK-0276 M29-M：build_fallback_output 情感感知降级（OPT-24）
+
+- 状态：PLANNED
+- 任务描述：`build_fallback_output()` 降级回复感知当前情感状态，根据 `mood_state` 选择对应的降级回复模板（如 `tired` 状态使用温柔道歉语气）。
+- 输入：`host_brain/core/qa.py`（`build_fallback_output()`）；TASK-0234（情感状态来源）。
+- 输出：
+  - `host_brain/core/qa.py`：`build_fallback_output()` 接收 `mood_state` 参数；新增 `FALLBACK_TEMPLATES` dict（按 `mood_state` 分类）；
+  - `tests/unit/test_fallback_emotion_m29.py`（新增）：T-FALLBACK-EMO-01~03。
+- 验收标准：
+  - T-FALLBACK-EMO-01：`mood_state="tired"` 时，降级回复使用温柔语气模板；
+  - T-FALLBACK-EMO-02：`mood_state="engaged"` 时，降级回复使用活泼语气模板；
+  - T-FALLBACK-EMO-03：`mood_state=None` 时，使用默认降级模板，不报错。
+- 涉及文件路径：`host_brain/core/qa.py`；`tests/unit/test_fallback_emotion_m29.py`。
+- 关联需求/测试：FR-FALLBACK-EMOTION-001；T-FALLBACK-EMO-01~03。
+
+### TASK-0277 M29-N：NatsumeScheduler 心跳感知情感状态（OPT-30）
+
+- 状态：PLANNED
+- 任务描述：`NatsumeScheduler` 的心跳检测 Prompt 感知当前情感状态，心跳时不重置情感状态，而是在情感上下文中执行心跳逻辑。
+- 输入：`host_brain/scheduler/scheduler.py`；TASK-0242（调度器情感状态）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - `host_brain/scheduler/scheduler.py`：心跳 Prompt 携带当前 `emotion_pulse` 描述；心跳执行后不重置 `EmotionVector`；
+  - `tests/unit/test_scheduler_heartbeat_emotion_m29.py`（新增）：T-SCHED-HB-EMO-01~02。
+- 验收标准：
+  - T-SCHED-HB-EMO-01：心跳执行前后，`emotion_vector` 数值不变；
+  - T-SCHED-HB-EMO-02：心跳 Prompt 含 `emotion_pulse` 字段。
+- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_scheduler_heartbeat_emotion_m29.py`。
+- 关联需求/测试：FR-SCHED-HEARTBEAT-EMOTION-001；T-SCHED-HB-EMO-01~02。
+
+### TASK-0278 M29-O：HybridFusionStrategy 情感强度加权（OPT-36）
+
+- 状态：PLANNED
+- 任务描述：`HybridFusionStrategy.fuse()` 的融合分数感知情感强度，高情感强度的记忆在融合时获得额外权重加成。
+- 输入：`host_brain/retrieval/recall_fusion.py`（或对应路径）；TASK-0235（`EpisodicRecord` 情感字段）。
+- 输出：
+  - 对应文件：`fuse()` 新增情感强度加权（`emotion_intensity > 0.7` → 融合分数 × 1.2）；
+  - `tests/unit/test_hybrid_fusion_emotion_m29.py`（新增）：T-FUSION-EMO-01~02。
+- 验收标准：
+  - T-FUSION-EMO-01：`emotion_intensity=0.9` 的记录融合分数 ≥ `emotion_intensity=0.3` 同等语义记录的 1.15 倍；
+  - T-FUSION-EMO-02：`emotion_intensity` 缺失时，使用默认权重 1.0，不报错。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_hybrid_fusion_emotion_m29.py`。
+- 关联需求/测试：FR-FUSION-EMOTION-001；T-FUSION-EMO-01~02。
+
+### TASK-0279 M29-P：ASRTranscriptEvent 增加用户情感推断字段（OPT-48）
+
+- 状态：PLANNED
+- 任务描述：`ASRTranscriptEvent` 增加 `user_emotion_hint` 字段，ASR 层根据语音特征（语速/音量/语调）推断用户情感，为情感回声和主动触发器提供数据来源。
+- 输入：`edge_client/senses/asr.py`（或对应路径）；TASK-0271（情感回声）；TASK-0267（主动触发器）。
+- 输出：
+  - 对应文件：`ASRTranscriptEvent` 新增 `user_emotion_hint: str | None` 字段；ASR 处理时根据语音特征填充（可为 `None`）；
+  - `tests/unit/test_asr_emotion_hint_m29.py`（新增）：T-ASR-EMO-01~02。
+- 验收标准：
+  - T-ASR-EMO-01：`ASRTranscriptEvent` 含 `user_emotion_hint` 字段；
+  - T-ASR-EMO-02：`user_emotion_hint=None` 时，下游模块不报错（情感回声使用默认值）。
+- 涉及文件路径：`edge_client/senses/asr.py`；`tests/unit/test_asr_emotion_hint_m29.py`。
+- 关联需求/测试：FR-ASR-EMOTION-001；T-ASR-EMO-01~02。
+
+### TASK-0280 M29-Q：MetricsCollector 增加情感维度指标（OPT-46）
+
+- 状态：PLANNED
+- 任务描述：`MetricsCollector.collect()` 增加情感维度指标（`emotion_tag_distribution`/`avg_emotion_intensity`/`bond_stage_distribution`），使观测层能感知情感健康度。
+- 输入：`host_brain/obs/metrics.py`（或对应路径）；TASK-0244（`EmotionVector`）。
+- 输出：
+  - 对应文件：`collect()` 新增情感指标字段；指标按时间窗口聚合；
+  - `tests/unit/test_metrics_emotion_m29.py`（新增）：T-METRICS-EMO-01~02。
+- 验收标准：
+  - T-METRICS-EMO-01：`collect()` 返回含 `emotion_tag_distribution` 字段；
+  - T-METRICS-EMO-02：`avg_emotion_intensity` 为 [0,1] 范围内的浮点数。
+- 涉及文件路径：`host_brain/obs/metrics.py`；`tests/unit/test_metrics_emotion_m29.py`。
+- 关联需求/测试：FR-METRICS-EMOTION-001；T-METRICS-EMO-01~02。
+
+### TASK-0281 M29-R：EdgeEventReporter 增加情感字段（OPT-42）
+
+- 状态：PLANNED
+- 任务描述：`EdgeEventReporter` 的 `EventReportItem` 增加 `emotion_tag`/`emotion_intensity` 字段，边缘端事件上报携带情感信息，支持全链路情感追踪。
+- 输入：`edge_client/runtime/event_reporter.py`（或对应路径）；TASK-0279（ASR 情感推断）。
+- 输出：
+  - 对应文件：`EventReportItem` 新增 `emotion_tag: str | None`、`emotion_intensity: float | None` 字段；
+  - `tests/unit/test_edge_event_emotion_m29.py`（新增）：T-EDGE-EMO-01~02。
+- 验收标准：
+  - T-EDGE-EMO-01：`EventReportItem` 含 `emotion_tag` 字段；
+  - T-EDGE-EMO-02：`emotion_tag=None` 时，序列化不报错。
+- 涉及文件路径：`edge_client/runtime/event_reporter.py`；`tests/unit/test_edge_event_emotion_m29.py`。
+- 关联需求/测试：FR-EDGE-EMOTION-001；T-EDGE-EMO-01~02。
+
+### TASK-0282 M29-S：M29 发布清单
+
+- 状态：PLANNED
+- 任务描述：TASK-0264~0281 全部 DONE 后，生成 M29 发布清单，记录 P2 情感体验增强文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M29 里程碑状态为 DONE；生成代码审查报告。
+- 输入：TASK-0264~0281 全部 DONE；全量测试 ≥1941 passed（1895 + 46 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m29_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M29 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M29 小节；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m29.md`（新增）。
+- 验收标准：
+  - `release_ready=true`；
+  - `bond_texture_implemented=true`（Bond 情感质感层已实现）；
+  - `emotion_echo_implemented=true`（情感回声机制已实现）；
+  - `bond_rift_implemented=true`（Bond 裂痕修复机制已实现）；
+  - `proactive_trigger_implemented=true`（主动情感触发器已实现）；
+  - `emotion_timeline_implemented=true`（情感时间线重建已实现）；
+  - `total_tests_passed ≥ 1941`；
+  - `zero_regressions=true`。
+- 涉及文件路径：`docs/50_release/m29_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m29.md`。
+- 关联需求：NFR-REL-001；FR-BOND-TEXTURE-001；FR-EMOTION-ECHO-001；FR-BOND-RIFT-001；FR-PROACTIVE-EMOTION-001；FR-EMOTIONAL-TIMELINE-001。
+
 
 
 

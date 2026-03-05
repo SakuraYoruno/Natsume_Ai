@@ -29,6 +29,10 @@ class EpisodicRecord:
     embedding_model_id: str
     merged_into: str | None = None
     deleted_at: int | None = None
+    # M27-D：情感标注字段（OPT-25）
+    emotion_tag: str = "NEUTRAL"
+    emotion_valence: float = 0.0
+    emotion_arousal: float = 0.3
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +46,9 @@ class EpisodicRecord:
             "embedding_model_id": self.embedding_model_id,
             "merged_into": self.merged_into,
             "deleted_at": self.deleted_at,
+            "emotion_tag": self.emotion_tag,
+            "emotion_valence": self.emotion_valence,
+            "emotion_arousal": self.emotion_arousal,
         }
 
 
@@ -76,6 +83,9 @@ class EpisodicStore:
         decay_profile_id: str = "default",
         visibility: str = "internal",
         ts_ms: int | None = None,
+        emotion_tag: str = "NEUTRAL",
+        emotion_valence: float = 0.0,
+        emotion_arousal: float = 0.3,
     ) -> MemoryOpResult:
         ts_value = int(ts_ms if ts_ms is not None else now_ms())
         refs = _normalize_evidence_refs(evidence_refs)
@@ -125,6 +135,9 @@ class EpisodicStore:
             ts_ms=ts_value,
             decay_profile_id=decay_profile_id,
             visibility=visibility,
+            emotion_tag=emotion_tag,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
         )
         self._log_memory_op(
             request_id=request_id,
@@ -382,9 +395,15 @@ class EpisodicStore:
         )
         return MemoryOpResult(True, None, "memory deleted", memory_id=record.memory_id)
 
-    def recall(self, *, query_text: str, top_k: int = 5) -> list[dict[str, Any]]:
+    def recall(self, *, query_text: str, top_k: int = 5, emotion_filter: str | None = None) -> list[dict[str, Any]]:
         embedding, _ = embed_text(query_text)
-        return self.chroma.search(query_embedding=embedding, top_k=top_k)
+        results = self.chroma.search(query_embedding=embedding, top_k=top_k)
+        if emotion_filter is not None:
+            # 优先返回匹配情感标签的记录
+            matched = [r for r in results if r.get("metadata", {}).get("emotion_tag") == emotion_filter]
+            unmatched = [r for r in results if r.get("metadata", {}).get("emotion_tag") != emotion_filter]
+            return matched + unmatched
+        return results
 
     def get_memory(self, memory_id: str) -> EpisodicRecord | None:
         return self._records.get(memory_id)
@@ -415,11 +434,17 @@ class EpisodicStore:
         ts_ms: int,
         decay_profile_id: str,
         visibility: str,
+        emotion_tag: str = "NEUTRAL",
+        emotion_valence: float = 0.0,
+        emotion_arousal: float = 0.3,
     ) -> EpisodicRecord:
         memory_id = f"mem_{uuid.uuid4().hex}"
         normalized_text = str(text).strip()
         text_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
         embedding, model_id = embed_text(normalized_text)
+        # 截断情感数值到合法范围
+        valence = max(-1.0, min(1.0, float(emotion_valence)))
+        arousal = max(0.0, min(1.0, float(emotion_arousal)))
         record = EpisodicRecord(
             memory_id=memory_id,
             text=normalized_text,
@@ -429,6 +454,9 @@ class EpisodicStore:
             evidence_refs=list(evidence_refs),
             visibility=str(visibility).strip() or "internal",
             embedding_model_id=model_id,
+            emotion_tag=str(emotion_tag).strip().upper() or "NEUTRAL",
+            emotion_valence=valence,
+            emotion_arousal=arousal,
         )
         self._records[memory_id] = record
         self.chroma.upsert(
@@ -441,6 +469,9 @@ class EpisodicStore:
                 "visibility": record.visibility,
                 "evidence_refs": list(evidence_refs),
                 "embedding_model_id": model_id,
+                "emotion_tag": record.emotion_tag,
+                "emotion_valence": record.emotion_valence,
+                "emotion_arousal": record.emotion_arousal,
             },
         )
         return record

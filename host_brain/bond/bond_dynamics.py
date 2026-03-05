@@ -66,6 +66,8 @@ class BondDynamicsWriter:
         update_kind: str = "INTERACTION",
         event_id: str | None = None,
         ts_ms: int | None = None,
+        emotion_tag: str = "NEUTRAL",
+        emotion_intensity: float = 0.5,
     ) -> BondUpdateResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         refs = _normalize_evidence_refs(evidence_refs)
@@ -122,12 +124,15 @@ class BondDynamicsWriter:
         stage_transition: "StageTransitionResult | None" = None
         if self._stage_engine is not None:
             try:
+                # M27-E：情感强度加权（OPT-26）：emotion_intensity > 0.7 的互动额外加权 1.5x
+                effective_update_kind = str(update_kind)
                 stage_transition = self._stage_engine.apply_event(
                     user_id=str(user_id),
-                    update_kind=str(update_kind),
+                    update_kind=effective_update_kind,
                     evidence_refs=refs,
                     request_id=request_id,
                     ts_ms=now_value,
+                    emotion_intensity=float(emotion_intensity),
                 )
                 _logger.debug(
                     "BondStageEngine applied: user=%s %s (delta=%+d, total=%d)",

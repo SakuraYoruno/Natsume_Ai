@@ -349,8 +349,13 @@ class NatsumeScheduler:
         *,
         intent_id: str,
         request_id: str,
+        emotion_tag: str = "NEUTRAL",
+        mood_state: str = "steady",
     ) -> dict[str, Any]:
-        """根据任务模板生成 system_initiated_intent。"""
+        """根据任务模板生成 system_initiated_intent。
+
+        M27-K（OPT-39）：携带情感状态字段 emotion_tag / mood_state。
+        """
         template = dict(task.intent_template)
         return {
             "intent_id": intent_id,
@@ -362,6 +367,9 @@ class NatsumeScheduler:
             "priority": task.priority.value,
             "trigger_mode": task.trigger_mode.value,
             "ts_ms": now_ms(),
+            # M27-K：情感状态字段
+            "emotion_tag": emotion_tag,
+            "mood_state": mood_state,
         }
 
     # ── 审计写入 ──

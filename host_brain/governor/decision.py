@@ -180,6 +180,27 @@ class IntentDecisionEngine:
                 snapshot_refs=snapshot_refs,
             )
 
+        # M27-H：情感状态门控（OPT-32）：critical 状态下拒绝 TOOL_CALL/SKILL_EXEC 类意图
+        mood_state = _extract_mood_state(governance_snapshot)
+        if mood_state == "critical" and envelope.action in ("TOOL_CALL", "SKILL_EXEC"):
+            return self._reject(
+                req_id,
+                envelope.id,
+                "EMOTION_GATE_BLOCKED",
+                stage="S_GOV_EMOTION_GATE",
+                turn_id=turn,
+                thread_id=thread_id,
+                rule_trace=[{
+                    "gate_id": "R8_EMOTION_GATE",
+                    "hit": True,
+                    "reason_hint": "EMOTION_GATE_BLOCKED",
+                    "threshold_summary": {"blocked_mood_states": ["critical"]},
+                    "snapshot_summary": {"mood_state": mood_state, "action": envelope.action},
+                }],
+                ts_ms=now,
+                snapshot_refs=snapshot_refs,
+            )
+
         self.ledger.mark_intent_seen(
             intent_id=envelope.id,
             session_id=envelope.session_id,
@@ -304,3 +325,18 @@ def _derive_snapshot_refs(governance_snapshot: dict[str, Any] | None) -> dict[st
         "governance_snapshot": governance_snapshot_ref(gates_input),
         "hard_state": hard_state_ref(state),
     }
+
+
+def _extract_mood_state(governance_snapshot: dict[str, Any] | None) -> str:
+    """从 governance_snapshot 中提取 mood_state（M27-H OPT-32）。"""
+    if not isinstance(governance_snapshot, dict):
+        return "steady"
+    # 优先从 hard_state_summary 读取
+    hard_state_summary = governance_snapshot.get("hard_state_summary")
+    if isinstance(hard_state_summary, dict):
+        mood = str(hard_state_summary.get("mood_state", "steady")).strip().lower()
+        if mood:
+            return mood
+    # 其次从顶层读取
+    mood = str(governance_snapshot.get("mood_state", "steady")).strip().lower()
+    return mood if mood else "steady"

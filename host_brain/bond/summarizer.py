@@ -20,18 +20,44 @@ BOND_SUMMARY_ALLOWED_KEYS = frozenset(
 )
 
 
-def derive_bond_summary(event: dict[str, Any] | None) -> dict[str, Any]:
-    """Build a context-pack-safe Bond summary from a bond event record."""
+def derive_bond_summary(
+    event: dict[str, Any] | None,
+    *,
+    bond_score_state: Any | None = None,
+) -> dict[str, Any]:
+    """Build a context-pack-safe Bond summary from a bond event record.
+
+    M27-F（OPT-27）：优先从 BondScoreState 读取 stage/trend，修复从 event["stage"] 读取的 Bug。
+
+    Args:
+        event: Bond 事件记录（dict）。
+        bond_score_state: 可选 BondScoreState 实例，提供时优先从其读取 stage/trend。
+    """
     if not isinstance(event, dict):
         event = {}
 
-    return {
-        "stage": _as_text_bucket(event.get("stage"), default=DEFAULT_STAGE),
-        "trend": _as_text_bucket(event.get("trend"), default=DEFAULT_TREND),
-        "capability_hint": _as_text_bucket(
+    # M27-F：优先从 BondScoreState 读取 stage/trend（修复 Bug）
+    if bond_score_state is not None:
+        stage = getattr(bond_score_state, "current_stage", DEFAULT_STAGE)
+        trend = bond_score_state.trend() if callable(getattr(bond_score_state, "trend", None)) else DEFAULT_TREND
+        capability_hint = (
+            bond_score_state.capability_hint()
+            if callable(getattr(bond_score_state, "capability_hint", None))
+            else DEFAULT_CAPABILITY_HINT
+        )
+    else:
+        # 兼容旧版：从 event 读取（但 event["stage"] 通常是 "S_BOND_UPDATE"，不是阶段名）
+        stage = _as_text_bucket(event.get("stage"), default=DEFAULT_STAGE)
+        trend = _as_text_bucket(event.get("trend"), default=DEFAULT_TREND)
+        capability_hint = _as_text_bucket(
             event.get("capability_hint"),
             default=DEFAULT_CAPABILITY_HINT,
-        ),
+        )
+
+    return {
+        "stage": stage,
+        "trend": trend,
+        "capability_hint": capability_hint,
         "event_id": _as_optional_text(event.get("event_id")),
         "evidence_refs": _normalize_evidence_refs(event.get("evidence_refs")),
     }

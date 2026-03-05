@@ -177,8 +177,12 @@ class BondStageEngine:
         evidence_refs: list[str],
         request_id: str | None = None,
         ts_ms: int | None = None,
+        emotion_intensity: float = 0.5,
     ) -> StageTransitionResult:
-        """处理一次 Bond 事件，更新积分并判断阶段变化。"""
+        """处理一次 Bond 事件，更新积分并判断阶段变化。
+
+        M27-E：emotion_intensity > 0.7 的互动额外加权 1.5x（OPT-26）。
+        """
         req_id = request_id or new_request_id()
         ts = int(ts_ms if ts_ms is not None else now_ms())
         uid = str(user_id).strip()
@@ -187,7 +191,13 @@ class BondStageEngine:
         from_stage = state.current_stage
 
         # 计算积分增量
-        delta = self._score_map.get(str(update_kind).strip(), 1)
+        base_delta = self._score_map.get(str(update_kind).strip(), 1)
+        # M27-E：情感强度加权
+        intensity = max(0.0, min(1.0, float(emotion_intensity)))
+        if intensity > 0.7:
+            delta = int(round(base_delta * 1.5))
+        else:
+            delta = base_delta
         state.total_score = max(0, state.total_score + delta)
         state.event_count += 1
         state.last_event_ts_ms = ts

@@ -151,7 +151,13 @@ class SkillLoader:
             )
 
         try:
-            handler_result = meta.handler(args, context)
+            # M27-I：context 注入情感字段（OPT-37）
+            exec_context = dict(context or {})
+            if "emotion_tag" not in exec_context:
+                exec_context["emotion_tag"] = "NEUTRAL"
+            if "mood_state" not in exec_context:
+                exec_context["mood_state"] = "steady"
+            handler_result = meta.handler(args, exec_context)
         except Exception as exc:  # pragma: no cover - defensive guard
             return self._log_and_return(
                 intent_id=intent_id,
