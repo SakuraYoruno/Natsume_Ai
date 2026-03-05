@@ -311,8 +311,19 @@ class LlmGatewayContract:
         model_profile_id: str,
         prompt_payload: dict[str, Any],
         ts_ms: int | None = None,
+        # M28-Q（OPT-44）：情感上下文参数
+        emotion_context: dict[str, Any] | None = None,
     ) -> GatewayResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
+
+        # M28-Q（OPT-44）：将情感上下文注入 prompt_payload
+        if emotion_context:
+            prompt_payload = dict(prompt_payload)
+            prompt_payload["emotion_context"] = {
+                "mood_state": str(emotion_context.get("mood_state") or "steady"),
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                "emotion_range_hint": str(emotion_context.get("emotion_range_hint") or ""),
+            }
 
         egress = self.egress_gate_fn(
             prompt_payload,

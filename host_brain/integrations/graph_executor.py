@@ -98,9 +98,15 @@ class GraphExecutor:
         handler = self._handlers.get(handler_id)
         if handler is None:
             raise KeyError(f"handler missing for node={node_id}, handler_id={handler_id}")
+        # M28-R（OPT-45）：context 携带情感状态，使图节点执行时能感知当前情感上下文
+        emotion_ctx = state.get("emotion_context") or {}
         return handler(dict(state.get("payload") or {}), {
             "request_id": str(state.get("request_id") or ""), "node_id": node_id,
-            "graph_id": str(state.get("graph_id") or ""), "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms)})
+            "graph_id": str(state.get("graph_id") or ""), "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms),
+            # M28-R：情感状态字段（默认值保证向后兼容）
+            "emotion_tag": str(emotion_ctx.get("emotion_tag") or state.get("emotion_tag") or "NEUTRAL"),
+            "mood_state": str(emotion_ctx.get("mood_state") or state.get("mood_state") or "steady"),
+        })
 
     def _invoke_model_node(self, *, node_id: str, binding: Mapping[str, Any], state: GraphState) -> dict[str, Any]:
         model_node_id = str(binding.get("model_node_id") or node_id).strip()

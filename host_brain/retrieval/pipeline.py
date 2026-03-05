@@ -133,6 +133,8 @@ class RetrievalPipelineContract:
         intent_id: str | None = None,
         top_k: int | None = None,
         ts_ms: int | None = None,
+        # M28-P（OPT-41）：情感上下文透传参数
+        emotion_context: str | None = None,
     ) -> RetrievalPipelineResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
@@ -162,6 +164,8 @@ class RetrievalPipelineContract:
             intent_id=intent_id,
             top_k=top_k,
             ts_ms=now_value,
+            # M28-P（OPT-41）：透传情感上下文给 reranker
+            emotion_context=emotion_context,
         )
 
         stage_reasons = [

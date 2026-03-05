@@ -30,12 +30,34 @@ TRIGGER_HOST = "HOST"
 TRIGGER_LLM = "LLM"
 
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
+    # 原有 6 种
     "NEUTRAL": "exp_neutral_01",
     "HAPPY": "exp_happy_01",
     "SAD": "exp_sad_01",
     "ANGRY": "exp_angry_01",
     "SURPRISED": "exp_surprised_01",
     "THINKING": "exp_thinking_01",
+    # M28-L（OPT-34）：补全 10 种缺失情感的表情映射
+    "EXCITED": "exp_excited_01",
+    "CALM": "exp_calm_01",
+    "FRUSTRATED": "exp_frustrated_01",
+    "ANXIOUS": "exp_anxious_01",
+    "LOVING": "exp_loving_01",
+    "EMBARRASSED": "exp_embarrassed_01",
+    "CONFUSED": "exp_confused_01",
+    "BORED": "exp_bored_01",
+    "PROUD": "exp_proud_01",
+    "GRATEFUL": "exp_grateful_01",
+}
+
+# M28-L（OPT-34）：未知情感 fallback 映射（按情感极性分组）
+EMOTION_FALLBACK_MAP: dict[str, str] = {
+    # 正向情感 → happy
+    "POSITIVE": "exp_happy_01",
+    # 负向情感 → sad
+    "NEGATIVE": "exp_sad_01",
+    # 中性/未知 → neutral
+    "UNKNOWN": "exp_neutral_01",
 }
 
 DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"

@@ -33,6 +33,9 @@ EDGE_EVENT_FALLBACK_LLM = "FALLBACK_LLM"
 EDGE_EVENT_TTS_SYNTH = "TTS_SYNTH"
 EDGE_EVENT_VTS_EXPRESSION = "VTS_EXPRESSION"
 EDGE_EVENT_VTS_TALK_GATE = "VTS_TALK_GATE"
+# M28-K（OPT-33）：情感事件类型
+EDGE_EVENT_EMOTION_PEAK = "EMOTION_PEAK"
+EDGE_EVENT_EMOTION_SHIFT = "EMOTION_SHIFT"
 
 VALID_EDGE_EVENT_TYPES = frozenset({
     EDGE_EVENT_ASR_CHUNK,
@@ -43,6 +46,9 @@ VALID_EDGE_EVENT_TYPES = frozenset({
     EDGE_EVENT_TTS_SYNTH,
     EDGE_EVENT_VTS_EXPRESSION,
     EDGE_EVENT_VTS_TALK_GATE,
+    # M28-K（OPT-33）：情感事件
+    EDGE_EVENT_EMOTION_PEAK,
+    EDGE_EVENT_EMOTION_SHIFT,
 })
 
 # ── 时间漂移容忍阈值（毫秒） ──
@@ -213,6 +219,62 @@ class CrossTimelineAggregator:
     ) -> None:
         self.ledger = ledger
         self.clock_drift_tolerance_ms = int(clock_drift_tolerance_ms)
+
+    @staticmethod
+    def detect_emotion_events(
+        events: list[dict[str, Any]],
+        *,
+        intensity_threshold: float = 0.8,
+    ) -> list[dict[str, Any]]:
+        """从事件列表中检测情感峰值和情感转变事件（M28-K OPT-33）。
+
+        Args:
+            events: 时间线事件列表（每个事件含 payload 字段）
+            intensity_threshold: 情感强度阈值，超过此值生成 EMOTION_PEAK 事件
+
+        Returns:
+            新生成的情感事件列表（EMOTION_PEAK / EMOTION_SHIFT）
+        """
+        emotion_events: list[dict[str, Any]] = []
+        prev_emotion_tag: str | None = None
+
+        for event in events:
+            payload = event.get("payload") or {}
+            emotion_tag = payload.get("emotion_tag") or event.get("emotion_tag")
+            emotion_intensity = float(payload.get("emotion_intensity") or
+                                      event.get("emotion_intensity") or 0.0)
+            ts_ms = int(event.get("ts_ms") or 0)
+
+            # 检测情感峰值（intensity > threshold）
+            if emotion_intensity > intensity_threshold and emotion_tag:
+                emotion_events.append({
+                    "event_type": EDGE_EVENT_EMOTION_PEAK,
+                    "ts_ms": ts_ms,
+                    "source": SOURCE_HOST,
+                    "payload": {
+                        "emotion_tag": emotion_tag,
+                        "emotion_intensity": emotion_intensity,
+                        "trigger_event_type": event.get("event_type"),
+                    },
+                })
+
+            # 检测情感转变（emotion_tag 发生变化）
+            if emotion_tag and prev_emotion_tag and emotion_tag != prev_emotion_tag:
+                emotion_events.append({
+                    "event_type": EDGE_EVENT_EMOTION_SHIFT,
+                    "ts_ms": ts_ms,
+                    "source": SOURCE_HOST,
+                    "payload": {
+                        "from_emotion": prev_emotion_tag,
+                        "to_emotion": emotion_tag,
+                        "trigger_event_type": event.get("event_type"),
+                    },
+                })
+
+            if emotion_tag:
+                prev_emotion_tag = emotion_tag
+
+        return emotion_events
 
     def aggregate(
         self,

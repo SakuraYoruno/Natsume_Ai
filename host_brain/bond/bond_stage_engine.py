@@ -56,6 +56,10 @@ DEFAULT_STAGE_THRESHOLDS: dict[str, int] = {
 # 各 update_kind 的积分贡献
 DEFAULT_SCORE_MAP: dict[str, int] = {
     "INTERACTION": 1,
+    # M28-C：三级互动分类（OPT-7）
+    "INTERACTION_MINIMAL": 1,    # 简短互动（< 10 字，无问号）
+    "INTERACTION_ENGAGED": 2,    # 普通互动（> 50 字或含问号）
+    "INTERACTION_DEEP": 5,       # 深度互动（emotion_intensity > 0.8 且 > 100 字）
     "DEEP_TALK": 5,
     "EMOTIONAL_SUPPORT": 8,
     "SHARED_MEMORY": 3,
@@ -76,6 +80,16 @@ UPDATE_KIND_INIT = "INIT"
 UPDATE_KIND_STAGE_TRANSITION = "STAGE_TRANSITION"
 STATUS_SUCCESS = "SUCCESS"
 
+# M28-H：阶段名称中文映射（OPT-21）
+_STAGE_CN_MAP: dict[str, str] = {
+    STAGE_STRANGER: "陌生人",
+    STAGE_ACQUAINTANCE: "相识",
+    STAGE_FRIEND: "朋友",
+    STAGE_CLOSE_FRIEND: "挚友",
+    STAGE_CONFIDANT: "知己",
+    STAGE_SOULMATE: "灵魂伴侣",
+}
+
 
 # ---------------------------------------------------------------------------
 # 数据类
@@ -92,17 +106,33 @@ class BondScoreState:
     recent_scores: list[int] = field(default_factory=list)  # 最近 TREND_WINDOW 次积分
 
     def trend(self) -> str:
-        """根据最近积分趋势判断 RISING/STABLE/DECLINING。"""
+        """根据最近积分趋势判断，返回中文语义描述（M28-F OPT-14）。
+
+        返回值：上升/快速上升/稳定/下降/快速下降
+        """
         if len(self.recent_scores) < 2:
-            return "STABLE"
+            return "稳定"
         recent = self.recent_scores[-TREND_WINDOW:]
         positive = sum(1 for s in recent if s > 0)
         negative = sum(1 for s in recent if s < 0)
-        if positive > negative and positive >= len(recent) // 2 + 1:
-            return "RISING"
-        if negative > positive and negative >= len(recent) // 2 + 1:
-            return "DECLINING"
-        return "STABLE"
+        total = len(recent)
+        if positive > negative and positive >= total // 2 + 1:
+            # 判断是否快速上升（平均积分 > 3）
+            avg = sum(s for s in recent if s > 0) / max(positive, 1)
+            return "快速上升" if avg >= 3 else "上升"
+        if negative > positive and negative >= total // 2 + 1:
+            avg_neg = abs(sum(s for s in recent if s < 0)) / max(negative, 1)
+            return "快速下降" if avg_neg >= 3 else "下降"
+        return "稳定"
+
+    def trend_intensity(self) -> str:
+        """返回趋势强度描述（M28-F OPT-14）。"""
+        t = self.trend()
+        if "快速" in t:
+            return "强"
+        if t in ("上升", "下降"):
+            return "中"
+        return "弱"
 
     def capability_hint(self) -> str:
         """根据阶段返回能力提示（降采样，不含数值）。"""
@@ -117,9 +147,13 @@ class BondScoreState:
         return hints.get(self.current_stage, "UNKNOWN")
 
     def to_summary(self) -> dict[str, Any]:
-        """生成 context-pack-safe 的 Bond Summary（不含数值）。"""
+        """生成 context-pack-safe 的 Bond Summary（不含数值，全中文）。
+
+        M28-H（OPT-21）：所有字段值统一为中文，消除英中文枚举混用。
+        """
+        stage_cn = _STAGE_CN_MAP.get(self.current_stage, "未知")
         return {
-            "stage": self.current_stage,
+            "stage": stage_cn,
             "trend": self.trend(),
             "capability_hint": self.capability_hint(),
         }

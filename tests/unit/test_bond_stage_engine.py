@@ -72,7 +72,8 @@ class TestInitialState:
 
     def test_initial_trend_is_stable(self, engine):
         state = engine.get_state("user_001")
-        assert state.trend() == "STABLE"
+        # M28-F：trend() 已中文化，接受中文或英文
+        assert state.trend() in ("STABLE", "稳定")
 
     def test_initial_state_persisted_to_bond_update_log(self, engine_with_update_ledger):
         engine, ledger = engine_with_update_ledger
@@ -266,7 +267,8 @@ class TestTrend:
                 evidence_refs=[f"evt::{i}"],
             )
         state = engine.get_state("user_012")
-        assert state.trend() == "RISING"
+        # M28-F：trend() 已中文化
+        assert state.trend() in ("RISING", "上升", "快速上升", "缓慢上升")
 
     def test_declining_trend_after_decay(self):
         custom_engine = BondStageEngine(
@@ -287,7 +289,8 @@ class TestTrend:
                 evidence_refs=[f"evt::d{i}"],
             )
         state = custom_engine.get_state("user_013")
-        assert state.trend() == "DECLINING"
+        # M28-F：trend() 已中文化
+        assert state.trend() in ("DECLINING", "下降", "快速下降", "缓慢下降")
 
 
 # ── T-BOND-STAGE-06: Bond Summary 不含数值 ───────────────────────────────────
@@ -313,11 +316,16 @@ class TestBondSummary:
 
     def test_summary_stage_is_valid(self, engine):
         summary = engine.get_summary("user_016")
-        assert summary["stage"] in STAGE_ORDER
+        # M28-H：to_summary() 已中文化，stage 可能是中文或英文枚举
+        CHINESE_STAGES = ["陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"]
+        assert summary["stage"] in STAGE_ORDER or summary["stage"] in CHINESE_STAGES
 
     def test_summary_trend_is_valid(self, engine):
         summary = engine.get_summary("user_017")
-        assert summary["trend"] in ("RISING", "STABLE", "DECLINING")
+        # M28-F/H：trend 已中文化
+        VALID_TRENDS = ("RISING", "STABLE", "DECLINING", "上升", "稳定", "下降",
+                        "快速上升", "缓慢上升", "快速下降", "缓慢下降")
+        assert summary["trend"] in VALID_TRENDS
 
 
 # ── T-BOND-STAGE-07: 审计链写入 ──────────────────────────────────────────────

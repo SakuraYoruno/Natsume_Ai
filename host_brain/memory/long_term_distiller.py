@@ -38,7 +38,24 @@ DEFAULT_DISTILL_TOPICS: list[str] = [
     "情感状态与心理变化",
     "用户目标与计划",
     "关系与社交互动",
+    # M28-J（OPT-29）：情感关系蒸馏主题
+    "情感关系史",
 ]
+
+# M28-J：情感关系蒸馏 prompt 模板
+EMOTION_RELATIONSHIP_PROMPT_TEMPLATE = """
+请根据以下对话记忆片段，蒸馏出用户与 AI 之间的情感关系演变摘要。
+重点关注：
+1. 情感关系的发展阶段（陌生→相识→朋友→挚友）
+2. 关键情感转折点（第一次深度对话、情感支持事件等）
+3. 用户对 AI 的情感态度变化
+4. AI 对用户情感需求的响应模式
+
+记忆片段：
+{memories}
+
+请输出简洁的情感关系演变摘要（200字以内）：
+"""
 
 # Canon 提案目标文档 ID（蒸馏结果写入的 World Canon 文档）
 DISTILL_TARGET_DOC_ID = "wc-distilled-long-term-memory"
@@ -398,13 +415,24 @@ class LongTermMemoryDistiller:
         semantic_id: str,
         source_count: int,
     ) -> str:
-        """构建 Canon 提案正文（不含完成性表述）。"""
+        """构建 Canon 提案正文（不含完成性表述）。
+
+        M28-J（OPT-29）：情感关系史主题额外输出 emotional_relationship_summary 字段。
+        """
+        # M28-J：情感关系史主题特殊处理
+        emotion_section = ""
+        if topic == "情感关系史":
+            emotion_section = (
+                f"\n**emotional_relationship_summary**: {summary}\n"
+            )
+
         return (
             f"## 长期记忆蒸馏提案\n\n"
             f"**主题**: {topic}\n\n"
             f"**语义记忆 ID**: {semantic_id}\n\n"
             f"**来源记忆数量**: {source_count}\n\n"
-            f"**摘要内容**:\n\n{summary}\n\n"
+            f"**摘要内容**:\n\n{summary}\n"
+            f"{emotion_section}\n"
             f"---\n"
             f"*本提案由长期记忆蒸馏引擎自动生成，需人工审核后方可应用。*"
         )

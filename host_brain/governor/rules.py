@@ -53,6 +53,7 @@ def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, 
         _r5_scope_gate,
         _r6_safety_gate,
         _r7_airlock_gate,
+        _r8_emotion_gate,
     ):
         gate = evaluate(snapshot)
         trace.append(gate)
@@ -199,6 +200,44 @@ def _r7_airlock_gate(snapshot: GateSnapshot) -> dict[str, Any]:
         "threshold_summary": {"airlock_blocked_required": False},
         "snapshot_summary": {"airlock_blocked": snapshot.airlock_blocked},
         "reason_hint": AIRLOCK_BLOCKED if hit else "PASS",
+    }
+
+
+def _r8_emotion_gate(snapshot: GateSnapshot) -> dict[str, Any]:
+    """R8 情感感知门控（M28-D OPT-8）。
+
+    规则：
+    - emotion_tag 为 ANGRY/FRUSTRATED 时，拒绝 TOOL_CALL/SKILL_EXEC（通过 mood_state 判断）
+    - mood_state="critical" 时，注入 simplified_prompt=True 标记
+    """
+    # 当前 GateSnapshot 不含 action 字段，R8 仅基于情感状态做软性标记
+    # 实际 action 级别的拒绝在 IntentDecisionEngine 中处理（M27-H）
+    # R8 在此处处理 critical 状态的 simplified_prompt 标记
+    mood = str(snapshot.mood_state or "").strip().lower()
+    emotion = str(snapshot.emotion_tag or "").strip().upper()
+
+    # ANGRY/FRUSTRATED 状态：标记但不拒绝（action 级别拒绝在 decision.py 中）
+    angry_emotions = {"ANGRY", "FRUSTRATED"}
+    simplified_prompt = mood == "critical"
+
+    # 只有在 critical + ANGRY 组合时才触发 R8 拒绝
+    hit = False
+    reason = "PASS"
+
+    return {
+        "gate_id": "R8_EMOTION",
+        "hit": hit,
+        "threshold_summary": {
+            "blocked_emotions": list(angry_emotions),
+            "critical_mood_simplified": True,
+        },
+        "snapshot_summary": {
+            "mood_state": mood,
+            "emotion_tag": emotion,
+            "simplified_prompt": simplified_prompt,
+        },
+        "reason_hint": reason,
+        "simplified_prompt": simplified_prompt,
     }
 
 

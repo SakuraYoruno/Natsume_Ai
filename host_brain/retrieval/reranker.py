@@ -152,6 +152,8 @@ class RerankerServiceContract:
         top_k: int | None = None,
         timeout_ms: int | None = None,
         ts_ms: int | None = None,
+        # M28-O（OPT-40）：情感感知重排序参数
+        emotion_context: str | None = None,
     ) -> RerankerResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         route = resolve_reranker_route(self.runtime_config, node_id=self.node_id)
@@ -333,6 +335,12 @@ class RerankerServiceContract:
             )
 
         topk = _build_topk(normalized_candidates, normalized_scores, topk_value)
+        # M28-O（OPT-40）：情感感知重排序 - 对匹配情感的候选项加权 1.3x
+        if emotion_context:
+            normalized_scores = _apply_emotion_boost(
+                normalized_candidates, normalized_scores, emotion_context
+            )
+            topk = _build_topk(normalized_candidates, normalized_scores, topk_value)
         output = {
             "query": normalized_query,
             "scores": normalized_scores,
@@ -1071,3 +1079,40 @@ def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
         return scores, model_id
 
     return _provider
+
+
+# M28-O（OPT-40）：情感感知重排序辅助函数
+def _apply_emotion_boost(
+    candidates: list[dict[str, Any]],
+    scores: list[float],
+    emotion_context: str,
+    boost_factor: float = 1.3,
+) -> list[float]:
+    """对与 emotion_context 匹配的候选项加权 boost_factor（M28-O OPT-40）。
+
+    Args:
+        candidates: 候选项列表
+        scores: 对应的相关性分数列表
+        emotion_context: 当前情感上下文（如 "HAPPY"）
+        boost_factor: 情感匹配加权系数，默认 1.3x
+
+    Returns:
+        加权后的分数列表（归一化到 [0, 1]）
+    """
+    if not emotion_context or not candidates or not scores:
+        return scores
+
+    normalized_emotion = str(emotion_context).strip().upper()
+    boosted = list(scores)
+
+    for i, candidate in enumerate(candidates):
+        if i >= len(boosted):
+            break
+        candidate_emotion = str(
+            candidate.get("emotion_tag") or
+            candidate.get("meta", {}).get("emotion_tag") or ""
+        ).strip().upper()
+        if candidate_emotion == normalized_emotion:
+            boosted[i] = min(1.0, boosted[i] * boost_factor)
+
+    return boosted

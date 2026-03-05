@@ -51,6 +51,30 @@ class BondDynamicsWriter:
         self.neo4j_client = neo4j_client or InMemoryNeo4jBondClient()
         self._stage_engine = stage_engine
 
+    @staticmethod
+    def classify_interaction(
+        *,
+        text: str = "",
+        emotion_intensity: float = 0.5,
+    ) -> str:
+        """根据文本长度、情感强度、问号数量自动推断互动质量（M28-C OPT-7）。
+
+        Returns:
+            "INTERACTION_MINIMAL" | "INTERACTION_ENGAGED" | "INTERACTION_DEEP"
+        """
+        text_len = len(str(text).strip())
+        question_count = str(text).count("?") + str(text).count("？")
+        intensity = max(0.0, min(1.0, float(emotion_intensity)))
+
+        # 深度互动：高情感强度 + 长文本
+        if intensity > 0.8 and text_len > 100:
+            return "INTERACTION_DEEP"
+        # 普通互动：长文本或含问号
+        if text_len > 50 or question_count > 0:
+            return "INTERACTION_ENGAGED"
+        # 简短互动：短文本且无问号
+        return "INTERACTION_MINIMAL"
+
     def apply_update(
         self,
         *,

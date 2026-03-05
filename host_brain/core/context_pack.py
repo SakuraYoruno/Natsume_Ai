@@ -30,7 +30,42 @@ EXPECTED_SLOTS: dict[str, type] = {
 # M10-C: 可选槽位（不强制要求，存在时验证格式）
 OPTIONAL_SLOTS: dict[str, type] = {
     "semantic_slot": list,  # 语义记忆槽位（记忆蒸馏结果）
+    # M28-G：情感槽位（OPT-16）
+    "emotion_pulse": dict,       # 当前情感脉冲（EmotionVector 降采样）
+    "bond_texture": dict,        # Bond 质感层（情感关系摘要）
+    "memory_emotion_hint": dict, # 记忆情感提示（情感记忆检索结果）
 }
+
+# M28-G：动态槽位注册表（OPT-16）
+# slot_name → builder_fn(context_data: dict) -> Any
+_DYNAMIC_SLOT_REGISTRY: dict[str, Any] = {}
+
+
+def register_slot(name: str, builder_fn: Any) -> None:
+    """注册动态槽位构建函数（M28-G OPT-16）。
+
+    Args:
+        name: 槽位名称
+        builder_fn: 接受 context_data dict 并返回槽位值的函数
+    """
+    _DYNAMIC_SLOT_REGISTRY[str(name)] = builder_fn
+
+
+def build_dynamic_slots(context_data: dict[str, Any]) -> dict[str, Any]:
+    """遍历所有已注册动态槽位，构建槽位值（M28-G OPT-16）。
+
+    槽位 builder 抛出异常时，该槽位被跳过，不影响其他槽位。
+    """
+    result: dict[str, Any] = {}
+    for slot_name, builder_fn in _DYNAMIC_SLOT_REGISTRY.items():
+        try:
+            value = builder_fn(context_data)
+            if value is not None:
+                result[slot_name] = value
+        except Exception:
+            # 槽位构建失败时跳过，不影响其他槽位
+            pass
+    return result
 
 
 @dataclass(frozen=True)

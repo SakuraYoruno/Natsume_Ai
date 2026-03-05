@@ -12,6 +12,106 @@ ALLOWED_SYS_MODES = {"normal", "focus", "gaming", "maintenance", "locked"}
 ALLOWED_MOOD_STATES = {"calm", "steady", "engaged", "tired", "critical"}
 
 
+# ---------------------------------------------------------------------------
+# M28-A：EmotionVector 情绪连续体（VAD 三维模型）（OPT-1）
+# ---------------------------------------------------------------------------
+
+# VAD 模型：Valence（效价）/ Arousal（唤醒度）/ Dominance（支配感）
+# 所有维度范围 [-1.0, 1.0]，0.0 为中性
+_EMOTION_DECAY_RATE = 0.05  # 每次 decay() 调用的衰减率（向 0 靠近）
+
+
+@dataclass
+class EmotionVector:
+    """VAD 三维情绪连续体（M28-A OPT-1）。
+
+    Attributes:
+        valence: 效价，[-1.0, 1.0]，正值=积极，负值=消极
+        arousal: 唤醒度，[-1.0, 1.0]，正值=兴奋，负值=平静
+        dominance: 支配感，[-1.0, 1.0]，正值=主导，负值=顺从
+        ts_ms: 最后更新时间戳（毫秒）
+    """
+    valence: float = 0.0
+    arousal: float = 0.0
+    dominance: float = 0.0
+    ts_ms: int = 0
+
+    def __post_init__(self) -> None:
+        self.valence = _clamp_float(self.valence)
+        self.arousal = _clamp_float(self.arousal)
+        self.dominance = _clamp_float(self.dominance)
+
+    def decay(self, rate: float = _EMOTION_DECAY_RATE) -> "EmotionVector":
+        """情绪衰减：向中性（0）靠近。"""
+        r = max(0.0, min(1.0, float(rate)))
+        return EmotionVector(
+            valence=self.valence * (1.0 - r),
+            arousal=self.arousal * (1.0 - r),
+            dominance=self.dominance * (1.0 - r),
+            ts_ms=self.ts_ms,
+        )
+
+    def blend(self, other: "EmotionVector", weight: float = 0.3) -> "EmotionVector":
+        """情绪混合：将 other 以 weight 权重混入当前情绪。"""
+        w = max(0.0, min(1.0, float(weight)))
+        return EmotionVector(
+            valence=self.valence * (1.0 - w) + other.valence * w,
+            arousal=self.arousal * (1.0 - w) + other.arousal * w,
+            dominance=self.dominance * (1.0 - w) + other.dominance * w,
+            ts_ms=self.ts_ms,
+        )
+
+    def to_mood_state(self) -> str:
+        """将 VAD 向量映射为离散 mood_state（向后兼容）。"""
+        # 基于 valence + arousal 的简单映射规则
+        if self.valence < -0.5 and self.arousal < -0.3:
+            return "critical"
+        if self.valence < -0.2 or self.arousal < -0.4:
+            return "tired"
+        if self.valence > 0.3 and self.arousal > 0.3:
+            return "engaged"
+        if abs(self.valence) < 0.2 and abs(self.arousal) < 0.2:
+            return "calm"
+        return "steady"
+
+    def to_emotion_tag(self) -> str:
+        """将 VAD 向量映射为离散 emotion_tag。"""
+        if self.valence > 0.5 and self.arousal > 0.5:
+            return "EXCITED"
+        if self.valence > 0.3 and self.arousal > 0.0:
+            return "HAPPY"
+        if self.valence < -0.5 and self.arousal > 0.3:
+            return "ANGRY"
+        if self.valence < -0.3 and self.arousal < 0.0:
+            return "SAD"
+        if self.arousal > 0.4 and abs(self.valence) < 0.3:
+            return "SURPRISED"
+        if self.arousal < -0.3 and abs(self.valence) < 0.3:
+            return "CALM"
+        if self.dominance > 0.3 and abs(self.valence) < 0.3:
+            return "THINKING"
+        return "NEUTRAL"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "valence": round(self.valence, 4),
+            "arousal": round(self.arousal, 4),
+            "dominance": round(self.dominance, 4),
+            "ts_ms": self.ts_ms,
+            "mood_state": self.to_mood_state(),
+            "emotion_tag": self.to_emotion_tag(),
+        }
+
+
+def _clamp_float(value: float, low: float = -1.0, high: float = 1.0) -> float:
+    """将浮点数截断到 [low, high] 范围。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = 0.0
+    return max(low, min(high, v))
+
+
 @dataclass(frozen=True)
 class HardState:
     energy_level: int
@@ -63,7 +163,22 @@ def evolve_hard_state(
     ts_ms: int | None = None,
 ) -> HardState:
     energy = _clamp_int(state.energy_level + int(energy_delta), low=0, high=100, default=state.energy_level)
-    normalized_mood = _normalize_mood(mood_state, energy=energy, event_kind=event_kind)
+    # M28-E：情感事件语义扩展（OPT-13）
+    kind = str(event_kind or "").strip().lower()
+    if kind == "emotion_spike":
+        # 情感激增：能量上升，mood 向 engaged 靠近
+        energy = min(100, energy + 5)
+        effective_mood = "engaged" if energy >= 60 else mood_state
+    elif kind == "emotion_calm":
+        # 情感平静：mood 向 calm/steady 靠近
+        effective_mood = "calm" if energy >= 40 else mood_state
+    elif kind == "bond_deepen":
+        # 关系深化：能量小幅上升
+        energy = min(100, energy + 3)
+        effective_mood = mood_state
+    else:
+        effective_mood = mood_state
+    normalized_mood = _normalize_mood(effective_mood, energy=energy, event_kind=kind)
     normalized_mode = _normalize_sys_mode(sys_mode if sys_mode is not None else state.sys_mode)
     next_safety = bool(state.safety_flag if safety_flag is None else safety_flag)
     return HardState(
@@ -221,4 +336,94 @@ def mood_to_emotion_constraint(mood_state: str) -> list[str]:
     """
     normalized = str(mood_state or "").strip().lower()
     return list(MOOD_EMOTION_CONSTRAINTS.get(normalized, MOOD_EMOTION_CONSTRAINTS["steady"]))
+
+
+# ---------------------------------------------------------------------------
+# M28-B：HardStateSnapshot 增加情感策略字段（OPT-6）
+# ---------------------------------------------------------------------------
+
+# mood_state → 中文情感范围提示
+_MOOD_RANGE_HINTS: dict[str, str] = {
+    "critical": "当前状态极度疲惫，只能表达平静或悲伤",
+    "tired": "当前状态疲惫，适合平静、温柔的情感表达",
+    "calm": "当前状态平和，适合思考性、平静的情感表达",
+    "steady": "当前状态正常，可以表达多种情感",
+    "engaged": "当前状态活跃，可以表达积极、兴奋的情感",
+}
+
+
+@dataclass(frozen=True)
+class HardStateSnapshot:
+    """包含情感策略字段的硬状态快照（M28-B OPT-6）。"""
+    mood_state: str
+    energy_level: int
+    allowed_emotion_tags: tuple[str, ...]
+    emotion_range_hint: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mood_state": self.mood_state,
+            "energy_level": self.energy_level,
+            "allowed_emotion_tags": list(self.allowed_emotion_tags),
+            "emotion_range_hint": self.emotion_range_hint,
+        }
+
+
+def build_hard_snapshot(state: HardState) -> HardStateSnapshot:
+    """从 HardState 构建 HardStateSnapshot（M28-B OPT-6）。"""
+    allowed = mood_to_emotion_constraint(state.mood_state)
+    hint = _MOOD_RANGE_HINTS.get(state.mood_state, _MOOD_RANGE_HINTS["steady"])
+    return HardStateSnapshot(
+        mood_state=state.mood_state,
+        energy_level=state.energy_level,
+        allowed_emotion_tags=tuple(allowed),
+        emotion_range_hint=hint,
+    )
+
+
+# ---------------------------------------------------------------------------
+# M28-M：apply_visual_emotion_hint（OPT-35）
+# ---------------------------------------------------------------------------
+
+# 视觉情感提示 → EmotionVector 增量映射
+_VISUAL_EMOTION_DELTA: dict[str, dict[str, float]] = {
+    "HAPPY": {"valence": 0.3, "arousal": 0.2},
+    "EXCITED": {"valence": 0.4, "arousal": 0.5},
+    "SAD": {"valence": -0.3, "arousal": -0.2},
+    "ANGRY": {"valence": -0.4, "arousal": 0.4},
+    "SURPRISED": {"valence": 0.1, "arousal": 0.5},
+    "ANXIOUS": {"valence": -0.2, "arousal": 0.3},
+    "FRUSTRATED": {"valence": -0.3, "arousal": 0.2},
+    "NEUTRAL": {"valence": 0.0, "arousal": 0.0},
+    "THINKING": {"valence": 0.0, "arousal": 0.1},
+    "CALM": {"valence": 0.1, "arousal": -0.2},
+}
+
+
+def apply_visual_emotion_hint(
+    current_vector: "EmotionVector",
+    user_emotion_hint: str,
+    *,
+    weight: float = 0.2,
+) -> "EmotionVector":
+    """将用户视觉情感提示混入当前 EmotionVector（M28-M OPT-35）。
+
+    Args:
+        current_vector: 当前情绪向量
+        user_emotion_hint: 视觉识别到的用户情感标签（如 "HAPPY"）
+        weight: 混合权重（0.0~1.0），默认 0.2（视觉信号权重较低）
+
+    Returns:
+        混合后的新 EmotionVector
+    """
+    delta = _VISUAL_EMOTION_DELTA.get(str(user_emotion_hint or "").upper(), {})
+    if not delta:
+        return current_vector
+    target = EmotionVector(
+        valence=_clamp_float(current_vector.valence + delta.get("valence", 0.0)),
+        arousal=_clamp_float(current_vector.arousal + delta.get("arousal", 0.0)),
+        dominance=current_vector.dominance,
+        ts_ms=current_vector.ts_ms,
+    )
+    return current_vector.blend(target, weight=weight)
 

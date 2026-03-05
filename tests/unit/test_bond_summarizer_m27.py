@@ -19,11 +19,14 @@ class TestDeriveBondSummaryFix:
         assert result["stage"] != "S_BOND_UPDATE"
 
     def test_trend_from_bond_score_state(self):
-        """T-BOND-SUM-02：derive_bond_summary() 返回的 trend 为语义描述（RISING/STABLE/DECLINING）"""
+        """T-BOND-SUM-02：derive_bond_summary() 返回的 trend 为语义描述"""
         state = BondScoreState(user_id="user1", recent_scores=[1, 1, 1, 1, 1])
         event = {}
         result = derive_bond_summary(event, bond_score_state=state)
-        assert result["trend"] in ("RISING", "STABLE", "DECLINING")
+        # M28-F/H：trend 已中文化
+        VALID_TRENDS = ("RISING", "STABLE", "DECLINING", "上升", "稳定", "下降",
+                        "快速上升", "缓慢上升", "快速下降", "缓慢下降")
+        assert result["trend"] in VALID_TRENDS
 
     def test_empty_bond_score_state_returns_defaults(self):
         """T-BOND-SUM-03：BondScoreState 为空时，derive_bond_summary() 返回默认值，不报错"""

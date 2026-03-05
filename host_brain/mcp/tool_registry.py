@@ -39,6 +39,9 @@ class ToolMeta:
     version: str = "1.0.0"
     schema_hash: str = ""
     domain_tags: list[str] = field(default_factory=list)
+    # M28-N（OPT-39）：情感适用性字段
+    # 标注工具适用的情感场景（如 ["HAPPY", "EXCITED"]），空列表表示无限制
+    emotion_requirement: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +55,8 @@ class ToolMeta:
             "version": self.version,
             "schema_hash": self.schema_hash,
             "domain_tags": list(self.domain_tags),
+            # M28-N（OPT-39）：情感适用性字段
+            "emotion_requirement": list(self.emotion_requirement),
         }
 
     @classmethod
@@ -59,6 +64,9 @@ class ToolMeta:
         tags = data.get("domain_tags") or []
         if isinstance(tags, str):
             tags = json.loads(tags)
+        emotion_req = data.get("emotion_requirement") or []
+        if isinstance(emotion_req, str):
+            emotion_req = json.loads(emotion_req)
         return cls(
             provider_id=str(data["provider_id"]),
             tool_id=str(data["tool_id"]),
@@ -70,6 +78,7 @@ class ToolMeta:
             version=str(data.get("version") or "1.0.0"),
             schema_hash=str(data.get("schema_hash") or ""),
             domain_tags=list(tags),
+            emotion_requirement=list(emotion_req),
         )
 
 

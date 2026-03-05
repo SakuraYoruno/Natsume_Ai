@@ -1137,11 +1137,22 @@ def _synthesize_audio(
 
     t0 = time.monotonic()
 
-    # 璋冪敤妯″瀷鎺ㄧ悊
+    # M28-S（OPT-47）：将 emotion_intensity 映射为底层 SDK 参数并真正传递
+    # emotion_intensity → speed_factor（0.3→0.85, 0.5→1.0, 0.9→1.2）
+    # emotion_intensity → energy_factor（0.3→0.8, 0.5→1.0, 0.9→1.3）
+    _intensity = float(emotion_intensity) if emotion_intensity is not None else 0.5
+    _intensity = max(0.0, min(1.0, _intensity))
+    speed_factor = round(0.7 + _intensity * 0.5, 3)    # [0.7, 1.2]
+    energy_factor = round(0.6 + _intensity * 0.8, 3)   # [0.6, 1.4]
+
+    # 调用底层模型推理，传递情感强度参数
     result = model.synthesize(
         text=text,
         language=language,
         emotion=emotion_tag,
+        # M28-S：真正传递 emotion_intensity 映射后的参数
+        speed_factor=speed_factor,
+        energy_factor=energy_factor,
     )
 
     elapsed = time.monotonic() - t0

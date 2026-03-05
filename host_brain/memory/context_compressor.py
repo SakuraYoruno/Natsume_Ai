@@ -232,19 +232,32 @@ class ContextCompressor:
             return 0
 
         saved_count = 0
-        # 提取所有 assistant 轮次作为重要片段（含 evidence_refs 占位）
+        # M28-I（OPT-28）：同时保存 user + assistant 双轮次，确保用户情感表达不被丢弃
         for idx, turn in enumerate(turns):
             role = str(turn.get("role") or "user")
             content = str(turn.get("content") or "").strip()
             if not content:
                 continue
-            # 仅保存 assistant 回复（含有实质性信息的轮次）
-            if role != "assistant":
+            # 保存 user 和 assistant 轮次（双声道记忆）
+            if role not in ("user", "assistant"):
                 continue
-            evidence_ref = f"compress://pre_save/{session_id or 'unknown'}/turn_{idx:03d}"
+            evidence_ref = f"compress://pre_save/{session_id or 'unknown'}/{role}/turn_{idx:03d}"
+            # M28-I：user 轮次携带 emotion_tag 字段（若可用）
+            extra_kwargs: dict[str, Any] = {}
+            if role == "user":
+                emotion_tag = turn.get("emotion_tag") or turn.get("meta", {}).get("emotion_tag")
+                if emotion_tag:
+                    extra_kwargs["emotion_tag"] = str(emotion_tag)
             try:
-                self._episodic_writer(content, [evidence_ref])
+                self._episodic_writer(content, [evidence_ref], **extra_kwargs)
                 saved_count += 1
+            except TypeError:
+                # 旧版 episodic_writer 不接受 extra_kwargs，降级调用
+                try:
+                    self._episodic_writer(content, [evidence_ref])
+                    saved_count += 1
+                except Exception:
+                    pass
             except Exception:
                 pass  # 静默失败，不影响压缩主流程
 

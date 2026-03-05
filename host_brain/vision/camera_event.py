@@ -142,6 +142,8 @@ class CameraRecognitionServiceContract:
 
         objects = _normalize_objects(raw_objects, low_conf_threshold=self.low_conf_threshold)
         low_conf_count = sum(1 for item in objects if item["low_confidence"])
+        # M28-M（OPT-35）：从识别结果推断用户情感提示
+        user_emotion_hint = _infer_user_emotion_hint(objects)
         output = {
             "request_id": request_id,
             "intent_id": intent_id,
@@ -159,6 +161,8 @@ class CameraRecognitionServiceContract:
                 "low_confidence_count": low_conf_count,
             },
             "quality": {"stage": S_VISION_CAMERA, "reason_code": None},
+            # M28-M（OPT-35）：用户视觉情感提示
+            "user_emotion_hint": user_emotion_hint,
         }
         self._log_event(
             request_id=request_id,
@@ -523,3 +527,40 @@ def _valid_ref(value: str) -> bool:
     if not value:
         return False
     return re.match(r"^[a-z][a-z0-9+.-]*://.+", value, flags=re.IGNORECASE) is not None
+
+
+# M28-M（OPT-35）：视觉情感推断映射
+_VISUAL_LABEL_TO_EMOTION: dict[str, str] = {
+    "smile": "HAPPY",
+    "laugh": "EXCITED",
+    "cry": "SAD",
+    "frown": "SAD",
+    "angry": "ANGRY",
+    "surprised": "SURPRISED",
+    "neutral": "NEUTRAL",
+    "thinking": "THINKING",
+    "happy": "HAPPY",
+    "sad": "SAD",
+    "fear": "ANXIOUS",
+    "disgust": "FRUSTRATED",
+}
+
+
+def _infer_user_emotion_hint(objects: list[dict[str, Any]]) -> str | None:
+    """从识别到的对象标签推断用户情感提示（M28-M OPT-35）。
+
+    Args:
+        objects: 归一化后的识别对象列表
+
+    Returns:
+        情感标签字符串（如 "HAPPY"），或 None（无法推断时）
+    """
+    for obj in objects:
+        label = str(obj.get("label") or "").strip().lower()
+        # 跳过低置信度对象
+        if obj.get("low_confidence"):
+            continue
+        for keyword, emotion in _VISUAL_LABEL_TO_EMOTION.items():
+            if keyword in label:
+                return emotion
+    return None
