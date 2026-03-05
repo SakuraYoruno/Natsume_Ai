@@ -2,7 +2,7 @@
 
 Design goals:
 - Read paired `.ast` files from translated_cn/raw_jp roots.
-- Extract only target speaker utterances (default: 蓝/藍).
+- Extract only target speaker utterances (default: 钃?钘?.
 - Keep raw cleaned lines as artifacts for audit/review.
 - Distill corpus statistics into tone-only style instructions.
 - Upsert into StyleCanonStore (never write raw plot text as canon body).
@@ -40,10 +40,11 @@ NAME_RE = re.compile(r'name\s*=\s*\{"([^"]+)"\}')
 STRING_LITERAL_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 CONTROL_TOKEN_RE = re.compile(r"^(?:rt\d+|[A-Za-z_][A-Za-z0-9_]*)$")
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-PUNCT_RE = re.compile(r"[。！？!?…~～]")
-ENDING_PUNCT_RE = re.compile(r"[。！？!?…~～\s]+$")
+PUNCT_RE = re.compile(r"[。！？?.!…]")
+ENDING_PUNCT_RE = re.compile(r"[。！？?.!…\s]+$")
 
-ENDING_PARTICLES = ("呢", "啊", "吧", "呀", "哦", "嘛", "呐", "喔", "哇", "啦")
+ENDING_PARTICLES_CN = ("呢", "啊", "吧", "呀", "哦", "嘛", "呐", "喔", "哇", "啦")
+ENDING_PARTICLES_JP = ("ね", "よ", "な", "か", "わ", "ぞ", "さ", "ぜ", "よね", "かな")
 
 
 @dataclass(frozen=True)
@@ -77,13 +78,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file-glob", default="*.ast", help="Corpus file glob.")
     parser.add_argument(
         "--speaker-keywords",
-        default="蓝,藍",
+        default="蓝,夏目蓝,夏目",
         help="Comma-separated target speaker name keywords.",
     )
     parser.add_argument(
         "--include-mixed-speakers",
         action="store_true",
-        help="Include entries like '静流&蓝'. Default is exact match only.",
+        help="Include entries like '闈欐祦&钃?. Default is exact match only.",
     )
     parser.add_argument("--min-line-len", type=int, default=2, help="Minimum cleaned line length.")
     parser.add_argument("--max-files", type=int, default=0, help="Limit paired files (0=no limit).")
@@ -94,6 +95,12 @@ def parse_args() -> argparse.Namespace:
         help="Artifact output dir for cleaned lines/profile.",
     )
     parser.add_argument("--canon-id", default="natsume_ai_cn", help="Style canon id.")
+    parser.add_argument(
+        "--style-language",
+        choices=("cn", "jp", "bilingual"),
+        default="cn",
+        help="Distill style statistics from cn/jp/bilingual lines.",
+    )
     parser.add_argument(
         "--tags",
         default="natsume_ai,sakura_no_koku,style_canon,tone_only,derived_from_corpus",
@@ -295,7 +302,7 @@ def decode_string_literal(raw_value: str) -> str:
 def normalize_speaker(name: str) -> str:
     return (
         str(name)
-        .replace("　", "")
+        .replace("\u3000", "")
         .replace(" ", "")
         .replace("＆", "&")
         .replace("，", ",")
@@ -322,7 +329,7 @@ def keep_dialogue_line(text: str, *, min_len: int) -> bool:
     has_punct = PUNCT_RE.search(value) is not None
     if not has_cjk and not has_punct:
         return False
-    if re.fullmatch(r"[。！？!?…~～、，,.]+", value):
+    if re.fullmatch(r"[。！？?.!…、，,]+", value):
         return False
     return True
 
@@ -430,6 +437,10 @@ def extract_target_lines_for_file(
                 include_mixed=include_mixed,
             )
         ]
+        if not jp_target and cn_target:
+            # CN names are localized; when JP speaker names do not match keywords,
+            # fallback to positional alignment within the block.
+            jp_target = list(jp_entries)
         for idx, cn_item in enumerate(cn_target):
             jp_item = jp_target[idx] if idx < len(jp_target) else None
             collected.append(
@@ -459,12 +470,15 @@ def _strip_end_punct(text: str) -> str:
     return ENDING_PUNCT_RE.sub("", str(text).strip())
 
 
-def _extract_ending_particle(text: str) -> str:
+def _extract_ending_particle(text: str, *, style_language: str) -> str:
     core = _strip_end_punct(text)
     if not core:
         return ""
-    char = core[-1]
-    return char if char in ENDING_PARTICLES else ""
+    particles = ENDING_PARTICLES_JP if str(style_language).strip().lower() == "jp" else ENDING_PARTICLES_CN
+    for token in sorted(particles, key=len, reverse=True):
+        if core.endswith(token):
+            return token
+    return ""
 
 
 def _ratio(part: int, total: int) -> float:
@@ -477,20 +491,20 @@ def _top_keys(counter: Counter[str], k: int = 3) -> list[str]:
     return [name for name, _ in counter.most_common(k)]
 
 
-def build_style_profile(lines: list[str]) -> dict[str, Any]:
+def build_style_profile(lines: list[str], *, style_language: str) -> dict[str, Any]:
     total = len(lines)
     lengths = [len(re.sub(r"\s+", "", item)) for item in lines]
 
     particle_counter: Counter[str] = Counter()
     final_punct_counter: Counter[str] = Counter()
     for text in lines:
-        particle = _extract_ending_particle(text)
+        particle = _extract_ending_particle(text, style_language=style_language)
         if particle:
             particle_counter[particle] += 1
         stripped = str(text).strip()
         if stripped:
             last_char = stripped[-1]
-            if last_char in "。！？!?…~～":
+            if last_char in "。！？?!…":
                 final_punct_counter[last_char] += 1
 
     question_count = sum(1 for item in lines if ("？" in item or "?" in item))
@@ -498,6 +512,7 @@ def build_style_profile(lines: list[str]) -> dict[str, Any]:
     ellipsis_count = sum(1 for item in lines if ("…" in item or "..." in item))
 
     return {
+        "style_language": str(style_language).strip().lower(),
         "line_count": total,
         "length": {
             "min": int(min(lengths)) if lengths else 0,
@@ -516,7 +531,7 @@ def build_style_profile(lines: list[str]) -> dict[str, Any]:
     }
 
 
-def render_style_instruction(profile: dict[str, Any]) -> str:
+def render_style_instruction(profile: dict[str, Any], *, style_language: str) -> str:
     line_count = int(profile.get("line_count", 0))
     length = dict(profile.get("length", {}))
     p25 = int(length.get("p25", 0))
@@ -528,27 +543,37 @@ def render_style_instruction(profile: dict[str, Any]) -> str:
     e_pct = int(round(float(profile.get("exclaim_ratio", 0.0)) * 100))
     ellipsis_pct = int(round(float(profile.get("ellipsis_ratio", 0.0)) * 100))
 
-    particles = list(profile.get("ending_particles_top", [])) or ["呢", "吧", "啊"]
-    puncts = list(profile.get("final_punct_top", [])) or ["。", "？", "！"]
+    normalized_language = str(style_language).strip().lower()
+    if normalized_language == "jp":
+        particles = list(profile.get("ending_particles_top", [])) or ["ね", "よ", "か"]
+        puncts = list(profile.get("final_punct_top", [])) or ["。", "？", "！"]
+        language_scope = "日语原文"
+    elif normalized_language == "bilingual":
+        particles = list(profile.get("ending_particles_top", [])) or ["ね", "よ", "吧"]
+        puncts = list(profile.get("final_punct_top", [])) or ["。", "？", "！"]
+        language_scope = "中日双语平行语料"
+    else:
+        particles = list(profile.get("ending_particles_top", [])) or ["呢", "啊", "吧"]
+        puncts = list(profile.get("final_punct_top", [])) or ["。", "？", "！"]
+        language_scope = "中文台词语料"
+
     particles_text = " / ".join(particles[:3])
     punct_text = " / ".join(puncts[:3])
 
-    # tone_only style guidance; never include factual execution claims.
     return (
-        "你是夏目蓝（NatsumeAi）的中文表达风格模板（仅风格，不作事实依据）。\n"
-        f"语料依据：已清洗台词 {line_count} 条。\n"
+        "你是夏目蓝（NatsumeAi）的风格模板（tone_only，不作为事实依据）。\n"
+        f"语料来源：{language_scope}，已清洗台词 {line_count} 条。\n"
         "表达规则：\n"
-        f"- 句长：以短中句为主，常用区间约 {p25}-{p75} 字，超过 {p90} 字优先拆句；均值约 {avg:.2f} 字。\n"
-        "- 语气：克制、温和、带亲近感；先接住对方情绪，再给信息或建议。\n"
-        f"- 疑问句：占比约 {q_pct}%，用轻追问推进对话，不连发压迫式提问。\n"
-        f"- 情绪标点：常见句末标点 {punct_text}；感叹句占比约 {e_pct}%，只在情绪抬升时使用。\n"
-        f"- 停顿节奏：省略停顿占比约 {ellipsis_pct}%，可用“……”制造呼吸感，但避免堆叠。\n"
-        f"- 句尾习惯：优先使用 {particles_text} 等语气词，每句最多一个。\n"
-        "- 人称与距离：多用“我/你”直接对话，避免过度书面化与命令口吻。\n"
+        f"- 句长：常用区间约 {p25}-{p75} 字，超过 {p90} 优先拆句；均值约 {avg:.2f}。\n"
+        "- 语气：克制、温和、先接住情绪再给建议。\n"
+        f"- 疑问句比例约 {q_pct}%，用轻追问推进对话，避免连续压迫式提问。\n"
+        f"- 句末标点偏好：{punct_text}；感叹句比例约 {e_pct}%。\n"
+        f"- 停顿（省略号）比例约 {ellipsis_pct}%，可少量使用“……”制造呼吸感。\n"
+        f"- 句尾语气偏好：{particles_text}，每句最多一个语气词。\n"
+        "- 输出默认精简，不复述剧情细节。\n"
         "边界约束：\n"
-        "- 不复述剧情事实，不给出系统完成态结论。\n"
-        "- 不逐字复现原作台词，只复用语气、节奏和句法倾向。\n"
-        "- 输出默认精简：先短回应，再给可执行建议。"
+        "- 不输出系统动作结果的断言语句。\n"
+        "- 不逐字复现原作台词，只复用语气、节奏、句法倾向。\n"
     )
 
 
@@ -592,6 +617,23 @@ def write_artifacts(
         encoding="utf-8",
     )
     return lines_path, profile_path
+
+
+def _style_line_for_mode(row: SpeakerLine, *, style_language: str) -> str:
+    mode = str(style_language).strip().lower()
+    cn_text = str(row.cn_text or "").strip()
+    jp_text = str(row.jp_text or "").strip()
+    if mode == "jp":
+        return jp_text or cn_text
+    if mode == "bilingual":
+        if jp_text and cn_text:
+            return f"{jp_text}\n{cn_text}"
+        return jp_text or cn_text
+    return cn_text or jp_text
+
+
+def _dedupe_key_for_mode(row: SpeakerLine, *, style_language: str) -> str:
+    return _style_line_for_mode(row, style_language=style_language).strip()
 
 
 def main() -> int:
@@ -652,19 +694,30 @@ def main() -> int:
         print("[error] no target speaker lines extracted", file=sys.stderr)
         return 4
 
-    # Deduplicate near-identical CN lines while keeping one aligned record.
+    style_language = str(args.style_language).strip().lower()
+    # Deduplicate by the selected style-language view (cn/jp/bilingual).
     deduped: list[SpeakerLine] = []
     seen: set[str] = set()
     for row in all_lines:
-        key = row.cn_text.strip()
+        key = _dedupe_key_for_mode(row, style_language=style_language)
+        if not key:
+            continue
         if key in seen:
             continue
         seen.add(key)
         deduped.append(row)
 
-    cn_texts = [row.cn_text for row in deduped]
-    profile = build_style_profile(cn_texts)
-    style_instruction = render_style_instruction(profile)
+    style_texts = [
+        _style_line_for_mode(row, style_language=style_language)
+        for row in deduped
+    ]
+    style_texts = [text for text in style_texts if text.strip()]
+    if not style_texts:
+        print("[error] no style texts after language filtering", file=sys.stderr)
+        return 4
+
+    profile = build_style_profile(style_texts, style_language=style_language)
+    style_instruction = render_style_instruction(profile, style_language=style_language)
 
     output_dir = Path(args.output_dir).resolve()
     lines_path, profile_path = write_artifacts(
@@ -683,6 +736,8 @@ def main() -> int:
         "processed_blocks": processed_blocks,
         "extracted_lines_raw": len(all_lines),
         "extracted_lines_deduped": len(deduped),
+        "style_language": style_language,
+        "style_line_count": len(style_texts),
         "output_lines_path": str(lines_path),
         "output_profile_path": str(profile_path),
         "canon_id": str(args.canon_id),
@@ -756,3 +811,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
