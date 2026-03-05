@@ -580,6 +580,7 @@ def build_reranker_provider_registry(
     }
     device = str(merged.get("RETR_RERANK_DEVICE") or "cpu").strip() or "cpu"
     registry["cross_encoder"] = _build_cross_encoder_provider(device=device)
+    registry["qwen3_reranker"] = _build_qwen3_reranker_provider(device=device)
     return registry
 
 
@@ -965,3 +966,108 @@ def _build_cross_encoder_provider(*, device: str) -> RerankProvider:
 def _sigmoid(value: float) -> float:
     clipped = max(-50.0, min(50.0, float(value)))
     return round(1.0 / (1.0 + math.exp(-clipped)), 6)
+
+
+def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
+    """Qwen3-Reranker 生成式重排 provider。
+
+    Qwen3-Reranker 是基于 CausalLM 的生成式重排模型，通过判断 "yes"/"no" token
+    的 logit 差值作为相关性分数，不能使用 CrossEncoder 接口。
+
+    支持的 model_id 示例：
+        - Qwen/Qwen3-Reranker-0.6B
+        - 本地路径：models/Qwen3-Reranker-0.6B
+    """
+    cache: dict[str, Any] = {}
+    runtime_device = str(device or "cpu").strip() or "cpu"
+
+    # Qwen3-Reranker 官方 prompt 模板
+    _SYSTEM_PROMPT = (
+        "Judge whether the Document meets the requirements based on the Query and the Candidate Document, "
+        "output your judgement, the answer should be \"yes\" or \"no\"."
+    )
+    _PREFIX = "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n"
+    _SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    _QUERY_DOC_TEMPLATE = "Query: {query}\nCandidate Document: {doc}"
+
+    def _get_model_and_tokenizer(model_id: str) -> tuple[Any, Any, int, int]:
+        """加载并缓存模型与 tokenizer，返回 (model, tokenizer, yes_token_id, no_token_id)。"""
+        if model_id in cache:
+            return cache[model_id]
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except Exception as exc:
+            raise RuntimeError(f"transformers/torch 包不可用: {exc}") from exc
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
+        )
+        model.to(runtime_device)
+        model.eval()
+
+        # 获取 "yes" / "no" 对应的 token id（Qwen3 tokenizer 中为单 token）
+        yes_token_id = tokenizer.convert_tokens_to_ids("yes")
+        no_token_id = tokenizer.convert_tokens_to_ids("no")
+        if yes_token_id == tokenizer.unk_token_id or no_token_id == tokenizer.unk_token_id:
+            # 部分 tokenizer 版本使用大写
+            yes_token_id = tokenizer.convert_tokens_to_ids("Yes")
+            no_token_id = tokenizer.convert_tokens_to_ids("No")
+
+        cache[model_id] = (model, tokenizer, yes_token_id, no_token_id)
+        return model, tokenizer, yes_token_id, no_token_id
+
+    def _provider(
+        query: str,
+        candidates: list[dict[str, Any]],
+        route: RerankRouteConfig | None = None,
+    ) -> tuple[list[float], str]:
+        model_id = str(route.model_id).strip() if route is not None else "Qwen/Qwen3-Reranker-0.6B"
+        if not model_id:
+            model_id = "Qwen/Qwen3-Reranker-0.6B"
+
+        try:
+            import torch
+        except Exception as exc:
+            raise RuntimeError(f"torch 包不可用: {exc}") from exc
+
+        model, tokenizer, yes_token_id, no_token_id = _get_model_and_tokenizer(model_id)
+
+        # 构造每个候选的 prompt
+        prompts: list[str] = []
+        for candidate in candidates:
+            doc_text = str(candidate.get("snippet") or candidate.get("text") or "")
+            query_doc = _QUERY_DOC_TEMPLATE.format(query=query, doc=doc_text)
+            full_prompt = (
+                _PREFIX.format(system=_SYSTEM_PROMPT)
+                + query_doc
+                + _SUFFIX
+            )
+            prompts.append(full_prompt)
+
+        # 批量 tokenize（左填充，统一长度）
+        inputs = tokenizer(
+            prompts,
+            padding=True,
+            truncation=True,
+            max_length=4096,
+            return_tensors="pt",
+        ).to(runtime_device)
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+            # 取最后一个 token 位置的 logits
+            last_logits = outputs.logits[:, -1, :]  # shape: (batch, vocab)
+            yes_logits = last_logits[:, yes_token_id].float()
+            no_logits = last_logits[:, no_token_id].float()
+            # 用 yes/(yes+no) softmax 作为相关性分数
+            scores_tensor = torch.softmax(
+                torch.stack([yes_logits, no_logits], dim=-1), dim=-1
+            )[:, 0]  # yes 的概率
+
+        scores = [round(float(s), 6) for s in scores_tensor.cpu().tolist()]
+        return scores, model_id
+
+    return _provider
