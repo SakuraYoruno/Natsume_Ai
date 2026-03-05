@@ -1,0 +1,15 @@
+{
+  "test_id": "T5-3",
+  "service": "host.retrieval.embedding",
+  "operation": "embed_empty",
+  "params_in": {
+    "text": ""
+  },
+  "params_out": {
+    "status": "DEGRADED",
+    "reason_code": "RETR_EMBED_INPUT_INVALID",
+    "success": false
+  },
+  "status": "PASS",
+  "ts_ms": 1772685190737
+}
