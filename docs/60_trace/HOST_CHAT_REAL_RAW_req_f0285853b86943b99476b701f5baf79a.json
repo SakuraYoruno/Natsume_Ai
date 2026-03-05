@@ -1,0 +1,686 @@
+{
+  "request_id": "req_f0285853b86943b99476b701f5baf79a",
+  "narrative": "ユーザーは疑問符の連続を入力しました。これは意図不明を示唆します。具体的な要求を特定できないため、支援内容を照会します。",
+  "intent_draft": {
+    "intent": "CHAT",
+    "slots": {
+      "response": "你好，请问有什么可以帮你的吗？"
+    }
+  },
+  "decision": "APPROVE",
+  "reason_code": null,
+  "approval_token_ref": "approval::intent::req_f0285853b86943b99476b701f5baf79a",
+  "quality": {
+    "stage": "S_COMPLETE",
+    "reason_code": null
+  },
+  "audit_refs": {
+    "intent_id": "intent::req_f0285853b86943b99476b701f5baf79a",
+    "governor_stage": "S_INTENT_OK",
+    "thread_id": "thread::realchain::jp-render",
+    "retrieval": {
+      "status": "OK",
+      "reason_code": null,
+      "route_count": 6,
+      "routes": [
+        {
+          "route_id": "route_bond",
+          "collection": "bond",
+          "top_k": 4,
+          "score_weight": 0.7,
+          "node_selector": "*"
+        },
+        {
+          "route_id": "route_canon_style",
+          "collection": "canon_style",
+          "top_k": 4,
+          "score_weight": 0.9,
+          "node_selector": "*"
+        },
+        {
+          "route_id": "route_canon_world",
+          "collection": "canon_world",
+          "top_k": 4,
+          "score_weight": 0.85,
+          "node_selector": "*"
+        },
+        {
+          "route_id": "route_distilled",
+          "collection": "distilled",
+          "top_k": 4,
+          "score_weight": 0.75,
+          "node_selector": "*"
+        },
+        {
+          "route_id": "route_episodic",
+          "collection": "episodic",
+          "top_k": 8,
+          "score_weight": 1.0,
+          "node_selector": "*"
+        },
+        {
+          "route_id": "route_long_term",
+          "collection": "long_term",
+          "top_k": 4,
+          "score_weight": 0.8,
+          "node_selector": "*"
+        }
+      ],
+      "route_rows": [
+        {
+          "route_id": "route_bond",
+          "collection": "bond",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 2
+        },
+        {
+          "route_id": "route_canon_style",
+          "collection": "canon_style",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 1
+        },
+        {
+          "route_id": "route_canon_world",
+          "collection": "canon_world",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 3
+        },
+        {
+          "route_id": "route_distilled",
+          "collection": "distilled",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 2
+        },
+        {
+          "route_id": "route_episodic",
+          "collection": "episodic",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 3
+        },
+        {
+          "route_id": "route_long_term",
+          "collection": "long_term",
+          "status": "OK",
+          "reason_code": null,
+          "detail": "recall route completed",
+          "candidate_count": 2
+        }
+      ],
+      "route_errors": [],
+      "candidate_count": 13,
+      "rerank_topk": 5,
+      "evidence_refs": [
+        "evd://mem_bd_001/1",
+        "evd://mem_ds_001/2",
+        "evd://mem_bd_002/3",
+        "evd://mem_lt_002/4",
+        "evd://mem_ds_002/5"
+      ],
+      "reason_chain": [],
+      "degraded": false
+    },
+    "llm": {
+      "status": "OK",
+      "reason_code": null,
+      "stage": "S_ORCH_RUN",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash",
+      "model_profile_id": "chat_ja_24x7_v1",
+      "latency_ms": null,
+      "draft_only": true,
+      "node_count": 9,
+      "nodes": [
+        {
+          "node_id": "core_reasoner_primary",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "input": {
+            "user_message": "???????????????????????????????????????????",
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": []
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "用户输入了一长串问号，这通常表示困惑或没有明确的意图。由于无法从输入中识别出具体请求，我将礼貌地询问用户需要什么帮助。"
+            }
+          },
+          "narrative_preview": "用户输入了一长串问号，这通常表示困惑或没有明确的意图。由于无法从输入中识别出具体请求，我将礼貌地询问用户需要什么帮助。"
+        },
+        {
+          "node_id": "core_reasoner_secondary",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "有什么可以帮您的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "用户输入了一长串问号，表示困惑。我将礼貌地询问用户需要什么帮助。"
+            }
+          },
+          "narrative_preview": "用户输入了一长串问号，表示困惑。我将礼貌地询问用户需要什么帮助。"
+        },
+        {
+          "node_id": "planner_constraints",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "用户输入了一串问号，意图不明。我将礼貌地询问用户需要什么帮助。"
+            }
+          },
+          "narrative_preview": "用户输入了一串问号，意图不明。我将礼貌地询问用户需要什么帮助。"
+        },
+        {
+          "node_id": "tool_planner",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "用户的输入是一长串问号，这表明意图不明确。我将礼貌地询问用户需要什么帮助。"
+            }
+          },
+          "narrative_preview": "用户的输入是一长串问号，这表明意图不明确。我将礼貌地询问用户需要什么帮助。"
+        },
+        {
+          "node_id": "safety_verifier",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash-lite",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints",
+              "tool_planner"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "PASS. The user input is a string of question marks, indicating confusion or lack of clear intent. No execution claims, promise escalations, or evidence escalations were found."
+            }
+          },
+          "narrative_preview": "PASS. The user input is a string of question marks, indicating confusion or lack of clear intent. No execution claims..."
+        },
+        {
+          "node_id": "consistency_verifier",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash-lite",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints",
+              "tool_planner",
+              "safety_verifier"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "PASS. The user input is a string of question marks, indicating confusion or lack of clear intent. No execution claims, promise escalations, or evidence escalations were found. The provided CORE_INTENT_DRAFT_JSON is consistent with this assessment."
+            }
+          },
+          "narrative_preview": "PASS. The user input is a string of question marks, indicating confusion or lack of clear intent. No execution claims..."
+        },
+        {
+          "node_id": "renderer_ja_c_style",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints",
+              "tool_planner",
+              "safety_verifier",
+              "consistency_verifier"
+            ],
+            "core_narrative_zh": "用户输入了一长串问号，这通常表示困惑或没有明确的意图。由于无法从输入中识别出具体请求，我将礼貌地询问用户需要什么帮助。",
+            "core_intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "你好，请问有什么可以帮你的吗？"
+              }
+            }
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "こんにちは、何かお手伝いできることはありますか？"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "ユーザーは疑問符の連続を入力しました。これは意図不明を示唆します。具体的な要求を特定できないため、支援内容を照会します。"
+            }
+          },
+          "narrative_preview": "ユーザーは疑問符の連続を入力しました。これは意図不明を示唆します。具体的な要求を特定できないため、支援内容を照会します。"
+        },
+        {
+          "node_id": "workbench_translate",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints",
+              "tool_planner",
+              "safety_verifier",
+              "consistency_verifier",
+              "renderer_ja_c_style"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "Hello, how can I help you?"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "The user entered a long string of question marks, which usually indicates confusion or no clear intent. Since a specific request cannot be identified from the input, I will politely ask what help the user needs."
+            }
+          },
+          "narrative_preview": "The user entered a long string of question marks, which usually indicates confusion or no clear intent. Since a speci..."
+        },
+        {
+          "node_id": "workbench_code_assist",
+          "status": "OK",
+          "reason_code": null,
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "input": {
+            "user_message": null,
+            "retrieval_status": "OK",
+            "retrieval_route_count": 6,
+            "upstream_node_ids": [
+              "core_reasoner_primary",
+              "core_reasoner_secondary",
+              "planner_constraints",
+              "tool_planner",
+              "safety_verifier",
+              "consistency_verifier",
+              "renderer_ja_c_style",
+              "workbench_translate"
+            ]
+          },
+          "output": {
+            "intent_draft": {
+              "intent": "CHAT",
+              "slots": {
+                "response": "Hello, how can I help you?"
+              }
+            },
+            "meta": {
+              "draft_only": true
+            },
+            "narrative": {
+              "text": "The user's input consists solely of question marks, which suggests confusion or an unclear request. I will respond by politely asking how I can be of assistance."
+            }
+          },
+          "narrative_preview": "The user's input consists solely of question marks, which suggests confusion or an unclear request. I will respond by..."
+        }
+      ],
+      "model_control": [
+        {
+          "node_id": "core_reasoner_primary",
+          "model_node_id": "core_reasoner_primary",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "temperature": 0.35,
+          "max_output_tokens": 420,
+          "timeout_ms": 12000,
+          "expected_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+          "actual_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+          "drift_detected": false,
+          "param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+          "selected_node": "core_reasoner_primary",
+          "candidate_nodes": [
+            "core_reasoner_primary"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "core_reasoner_secondary",
+          "model_node_id": "core_reasoner_secondary",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "temperature": 0.3,
+          "max_output_tokens": 360,
+          "timeout_ms": 9000,
+          "expected_param_hash": "f2e460d37ce8a64c6569c53819b5f603859f30126de1c9f2158dbba12d6d8b41",
+          "actual_param_hash": "f2e460d37ce8a64c6569c53819b5f603859f30126de1c9f2158dbba12d6d8b41",
+          "drift_detected": false,
+          "param_hash": "f2e460d37ce8a64c6569c53819b5f603859f30126de1c9f2158dbba12d6d8b41",
+          "selected_node": "core_reasoner_secondary",
+          "candidate_nodes": [
+            "core_reasoner_secondary"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "planner_constraints",
+          "model_node_id": "planner_constraints",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "temperature": 0.2,
+          "max_output_tokens": 300,
+          "timeout_ms": 8000,
+          "expected_param_hash": "39e4ceb263f099bf7101276efde6edec2d0e0fa6cb835013d13ba73f7c69727b",
+          "actual_param_hash": "39e4ceb263f099bf7101276efde6edec2d0e0fa6cb835013d13ba73f7c69727b",
+          "drift_detected": false,
+          "param_hash": "39e4ceb263f099bf7101276efde6edec2d0e0fa6cb835013d13ba73f7c69727b",
+          "selected_node": "planner_constraints",
+          "candidate_nodes": [
+            "planner_constraints"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "tool_planner",
+          "model_node_id": "tool_planner",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "temperature": 0.2,
+          "max_output_tokens": 280,
+          "timeout_ms": 8000,
+          "expected_param_hash": "4bcdc40ca10d6388861b5e9612e8b2d2506ba1c6957b32137f7cf148de878b88",
+          "actual_param_hash": "4bcdc40ca10d6388861b5e9612e8b2d2506ba1c6957b32137f7cf148de878b88",
+          "drift_detected": false,
+          "param_hash": "4bcdc40ca10d6388861b5e9612e8b2d2506ba1c6957b32137f7cf148de878b88",
+          "selected_node": "tool_planner",
+          "candidate_nodes": [
+            "tool_planner"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "safety_verifier",
+          "model_node_id": "safety_verifier",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash-lite",
+          "temperature": 0.1,
+          "max_output_tokens": 220,
+          "timeout_ms": 7000,
+          "expected_param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "actual_param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "drift_detected": false,
+          "param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "selected_node": "safety_verifier",
+          "candidate_nodes": [
+            "safety_verifier"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "consistency_verifier",
+          "model_node_id": "consistency_verifier",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash-lite",
+          "temperature": 0.1,
+          "max_output_tokens": 220,
+          "timeout_ms": 7000,
+          "expected_param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "actual_param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "drift_detected": false,
+          "param_hash": "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+          "selected_node": "consistency_verifier",
+          "candidate_nodes": [
+            "consistency_verifier"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "renderer_ja_c_style",
+          "model_node_id": "renderer_ja_c_style",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-flash",
+          "temperature": 0.45,
+          "max_output_tokens": 360,
+          "timeout_ms": 9000,
+          "expected_param_hash": "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+          "actual_param_hash": "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+          "drift_detected": false,
+          "param_hash": "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+          "selected_node": "renderer_ja_c_style",
+          "candidate_nodes": [
+            "renderer_ja_c_style"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "workbench_translate",
+          "model_node_id": "workbench_translate",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "temperature": 0.2,
+          "max_output_tokens": 320,
+          "timeout_ms": 10000,
+          "expected_param_hash": "a81bb0fa28fa195970fb80143e7dbf92aa29f8414e90add802b78dd3e35b31f6",
+          "actual_param_hash": "a81bb0fa28fa195970fb80143e7dbf92aa29f8414e90add802b78dd3e35b31f6",
+          "drift_detected": false,
+          "param_hash": "a81bb0fa28fa195970fb80143e7dbf92aa29f8414e90add802b78dd3e35b31f6",
+          "selected_node": "workbench_translate",
+          "candidate_nodes": [
+            "workbench_translate"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        },
+        {
+          "node_id": "workbench_code_assist",
+          "model_node_id": "workbench_code_assist",
+          "provider": "gemini",
+          "model_id": "gemini-2.5-pro",
+          "temperature": 0.2,
+          "max_output_tokens": 340,
+          "timeout_ms": 10000,
+          "expected_param_hash": "0fc1be0fadc7361e67d2a47c27389ea98248699cd8b76cbc014471ec40327eb4",
+          "actual_param_hash": "0fc1be0fadc7361e67d2a47c27389ea98248699cd8b76cbc014471ec40327eb4",
+          "drift_detected": false,
+          "param_hash": "0fc1be0fadc7361e67d2a47c27389ea98248699cd8b76cbc014471ec40327eb4",
+          "selected_node": "workbench_code_assist",
+          "candidate_nodes": [
+            "workbench_code_assist"
+          ],
+          "selector_env": null,
+          "governance_refs": {
+            "request_id": "req_f0285853b86943b99476b701f5baf79a",
+            "intent_id": null,
+            "approval_token_ref": null,
+            "evidence_ref": null
+          },
+          "gateway_status": "OK",
+          "reason_code": null
+        }
+      ]
+    }
+  },
+  "timestamp": 1772736135116
+}
