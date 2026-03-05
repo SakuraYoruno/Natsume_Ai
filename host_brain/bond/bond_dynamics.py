@@ -114,6 +114,13 @@ class BondDynamicsWriter:
             )
 
         event_key = str(event_id or _new_event_id()).strip()
+        # M29-J（OPT-?）：payload 语义标准化——确保 payload 包含标准字段
+        normalized_payload = _normalize_bond_payload(
+            payload=dict(payload or {}),
+            update_kind=str(update_kind),
+            emotion_tag=str(emotion_tag),
+            emotion_intensity=float(emotion_intensity),
+        )
         try:
             written = self.neo4j_client.write_bond_event(
                 writer_id=BOND_WRITER_ID,
@@ -123,7 +130,7 @@ class BondDynamicsWriter:
                 topic_id=str(topic_id),
                 capability_hint=str(capability_hint),
                 evidence_refs=refs,
-                payload=dict(payload or {}),
+                payload=normalized_payload,
                 ts_ms=now_value,
             )
         except PermissionError:
@@ -157,6 +164,12 @@ class BondDynamicsWriter:
                     request_id=request_id,
                     ts_ms=now_value,
                     emotion_intensity=float(emotion_intensity),
+                )
+                # M29-G（OPT-11）：CONFLICT/APOLOGY/COMFORT 事件触发裂痕修复
+                self._apply_rift_event(
+                    user_id=str(user_id),
+                    update_kind=effective_update_kind,
+                    payload=dict(payload or {}),
                 )
                 _logger.debug(
                     "BondStageEngine applied: user=%s %s (delta=%+d, total=%d)",
@@ -339,6 +352,78 @@ class BondDynamicsWriter:
                 reason_code=reason_code,
                 detail=detail,
             )
+
+
+    def _apply_rift_event(
+        self,
+        *,
+        user_id: str,
+        update_kind: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """M29-G（OPT-11）：CONFLICT/APOLOGY/COMFORT 事件触发裂痕修复。"""
+        if self._stage_engine is None:
+            return
+        state = self._stage_engine.get_state(user_id)
+        from host_brain.bond.bond_stage_engine import BondRiftState
+        kind = str(update_kind).strip().upper()
+        if kind == "CONFLICT":
+            # 冲突事件：触发裂痕
+            rift_level = min(1.0, (state.rift.rift_level if state.rift else 0.0) + 0.4)
+            cause = str(payload.get("cause") or "冲突事件")
+            state.rift = BondRiftState(
+                rift_level=rift_level,
+                repair_progress=0.0,
+                rift_cause=cause,
+            )
+        elif kind in ("APOLOGY", "COMFORT") and state.rift is not None and state.rift.is_active():
+            # 道歉/安慰事件：推进修复
+            repair_delta = 0.3 if kind == "APOLOGY" else 0.2
+            new_progress = min(1.0, state.rift.repair_progress + repair_delta)
+            if new_progress >= 1.0:
+                # 完全修复，清除裂痕
+                state.rift = None
+            else:
+                state.rift = BondRiftState(
+                    rift_level=state.rift.rift_level,
+                    repair_progress=new_progress,
+                    rift_cause=state.rift.rift_cause,
+                )
+
+
+def _normalize_bond_payload(
+    *,
+    payload: dict[str, Any],
+    update_kind: str,
+    emotion_tag: str,
+    emotion_intensity: float,
+) -> dict[str, Any]:
+    """M29-J（OPT-?）：Bond payload 语义标准化。
+
+    确保 payload 包含标准字段：
+    - update_kind: 互动类型
+    - emotion_tag: 情感标签
+    - emotion_intensity: 情感强度
+    - semantic_label: 语义标签（从 update_kind 推断）
+    """
+    result = dict(payload)
+    result.setdefault("update_kind", str(update_kind).strip().upper())
+    result.setdefault("emotion_tag", str(emotion_tag).strip().upper() or "NEUTRAL")
+    result.setdefault("emotion_intensity", round(max(0.0, min(1.0, float(emotion_intensity))), 4))
+    # 语义标签推断
+    kind = str(update_kind).strip().upper()
+    _SEMANTIC_LABELS: dict[str, str] = {
+        "INTERACTION_DEEP": "深度互动",
+        "INTERACTION_ENGAGED": "积极互动",
+        "INTERACTION_MINIMAL": "简短互动",
+        "CONFLICT": "冲突事件",
+        "APOLOGY": "道歉修复",
+        "COMFORT": "安慰关怀",
+        "REWARD": "正向奖励",
+        "INTERACTION": "普通互动",
+    }
+    result.setdefault("semantic_label", _SEMANTIC_LABELS.get(kind, "互动事件"))
+    return result
 
 
 def _new_event_id() -> str:

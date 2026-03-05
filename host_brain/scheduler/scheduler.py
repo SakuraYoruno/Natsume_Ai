@@ -84,6 +84,8 @@ class NatsumeScheduler:
         get_sys_mode: Callable[[], str] | None = None,
         ledger: Any | None = None,
         persist_tasks: bool = True,
+        # M29-N（OPT-?）：心跳感知情感状态
+        get_emotion_state: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._registry = registry
         self._health = health_reporter
@@ -91,6 +93,8 @@ class NatsumeScheduler:
         self._get_sys_mode = get_sys_mode or (lambda: "normal")
         self._ledger = ledger
         self._persist_tasks = persist_tasks  # F-40：是否启用任务持久化
+        # M29-N：情感状态获取函数（返回 {"mood_state": ..., "emotion_tag": ...}）
+        self._get_emotion_state = get_emotion_state or (lambda: {"mood_state": "steady", "emotion_tag": "NEUTRAL"})
 
         # 运行时状态
         self._running = False
@@ -272,6 +276,21 @@ class NatsumeScheduler:
                 last_reason_code=reason,
             )
             return {"status": "REJECTED", "reason_code": reason, "task_id": task_id, "sys_mode": current_mode}
+
+        # M29-N（OPT-?）：情感状态感知门控——critical 状态下跳过非紧急任务
+        emotion_state = self._get_emotion_state()
+        mood_state = str(emotion_state.get("mood_state") or "steady").lower()
+        if mood_state == "critical" and task.priority not in (TaskPriority.HIGH,):
+            reason = "EMOTION_GATE_BLOCKED"
+            self._log_scheduler_event(
+                task_id=task_id,
+                trigger_ts=trigger_ts,
+                status="REJECTED",
+                reason_code=reason,
+                mode_at_trigger=current_mode,
+                error_detail=f"task skipped: mood_state=critical, priority={task.priority.value}",
+            )
+            return {"status": "REJECTED", "reason_code": reason, "task_id": task_id, "mood_state": mood_state}
 
         # 生成 system_initiated_intent
         intent_id = new_intent_id()

@@ -95,6 +95,83 @@ _STAGE_CN_MAP: dict[str, str] = {
 # 数据类
 # ---------------------------------------------------------------------------
 
+# M29-A：BondEmotionalTexture 情感质感层（OPT-2）
+@dataclass
+class BondEmotionalTexture:
+    """Bond 情感质感层——感知互动节奏和关系温度（M29-A OPT-2）。
+
+    Attributes:
+        avg_response_gap_ms: 平均回复间隔（毫秒），越小表示互动越频繁
+        recent_emotion_valence: 近期情感均值（[-1.0, 1.0]），正值=积极
+        intimacy_temperature: 亲密温度（[0.0, 1.0]），综合节奏+情感计算
+    """
+    avg_response_gap_ms: float = 30000.0   # 默认 30 秒
+    recent_emotion_valence: float = 0.0
+    intimacy_temperature: float = 0.5
+
+    def update(
+        self,
+        *,
+        response_gap_ms: float | None = None,
+        emotion_valence: float | None = None,
+    ) -> "BondEmotionalTexture":
+        """更新质感层并重新计算 intimacy_temperature。"""
+        new_gap = self.avg_response_gap_ms
+        new_valence = self.recent_emotion_valence
+        if response_gap_ms is not None:
+            # 指数移动平均（α=0.3）
+            new_gap = self.avg_response_gap_ms * 0.7 + float(response_gap_ms) * 0.3
+        if emotion_valence is not None:
+            new_valence = self.recent_emotion_valence * 0.7 + float(emotion_valence) * 0.3
+            new_valence = max(-1.0, min(1.0, new_valence))
+        # intimacy_temperature：节奏贡献 50%（gap 越小越高），情感贡献 50%
+        gap_score = max(0.0, 1.0 - new_gap / 60000.0)  # 60s 以上 → 0
+        valence_score = (new_valence + 1.0) / 2.0       # [-1,1] → [0,1]
+        temperature = round(gap_score * 0.5 + valence_score * 0.5, 4)
+        return BondEmotionalTexture(
+            avg_response_gap_ms=round(new_gap, 1),
+            recent_emotion_valence=round(new_valence, 4),
+            intimacy_temperature=temperature,
+        )
+
+    def style_hint(self) -> str:
+        """根据 intimacy_temperature 返回风格提示（用于 to_summary）。"""
+        if self.intimacy_temperature >= 0.7:
+            return "温暖亲密，可以更主动表达情感"
+        if self.intimacy_temperature >= 0.4:
+            return "关系融洽，保持自然互动"
+        return "关系较疏远，保持礼貌距离"
+
+
+# M29-G：BondRiftState 裂痕-修复双轨机制（OPT-11）
+@dataclass
+class BondRiftState:
+    """Bond 裂痕状态（M29-G OPT-11）。
+
+    Attributes:
+        rift_level: 裂痕程度（[0.0, 1.0]），0=无裂痕，1=严重裂痕
+        repair_progress: 修复进度（[0.0, 1.0]），1.0=完全修复
+        rift_cause: 裂痕原因描述
+    """
+    rift_level: float = 0.0
+    repair_progress: float = 0.0
+    rift_cause: str = ""
+
+    def is_active(self) -> bool:
+        """裂痕是否处于活跃状态（未完全修复）。"""
+        return self.rift_level > 0.0 and self.repair_progress < 1.0
+
+    def repair_hint(self) -> str:
+        """返回修复风格提示（用于 to_summary）。"""
+        if not self.is_active():
+            return ""
+        if self.repair_progress < 0.3:
+            return "关系出现裂痕，需要温柔道歉和主动关心"
+        if self.repair_progress < 0.7:
+            return "正在修复关系，保持温柔耐心"
+        return "关系即将修复，继续温暖互动"
+
+
 @dataclass
 class BondScoreState:
     """用户 Bond 积分状态快照。"""
@@ -104,6 +181,10 @@ class BondScoreState:
     event_count: int = 0
     last_event_ts_ms: int = 0
     recent_scores: list[int] = field(default_factory=list)  # 最近 TREND_WINDOW 次积分
+    # M29-A：情感质感层
+    texture: BondEmotionalTexture = field(default_factory=BondEmotionalTexture)
+    # M29-G：裂痕状态
+    rift: "BondRiftState | None" = None
 
     def trend(self) -> str:
         """根据最近积分趋势判断，返回中文语义描述（M28-F OPT-14）。
@@ -150,13 +231,22 @@ class BondScoreState:
         """生成 context-pack-safe 的 Bond Summary（不含数值，全中文）。
 
         M28-H（OPT-21）：所有字段值统一为中文，消除英中文枚举混用。
+        M29-A（OPT-2）：加入 texture 风格提示。
+        M29-G（OPT-11）：裂痕期间加入修复风格提示。
         """
         stage_cn = _STAGE_CN_MAP.get(self.current_stage, "未知")
-        return {
+        summary: dict[str, Any] = {
             "stage": stage_cn,
             "trend": self.trend(),
             "capability_hint": self.capability_hint(),
         }
+        # M29-A：texture 风格提示
+        if self.texture.intimacy_temperature >= 0.7:
+            summary["style_hint"] = self.texture.style_hint()
+        # M29-G：裂痕修复提示
+        if self.rift is not None and self.rift.is_active():
+            summary["repair_hint"] = self.rift.repair_hint()
+        return summary
 
 
 @dataclass(frozen=True)

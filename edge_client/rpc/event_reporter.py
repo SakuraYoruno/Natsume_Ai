@@ -60,9 +60,12 @@ class EventReportItem:
     stage: str | None = None
     detail: str | None = None
     evidence_ref: str | None = None
+    # M29-R（OPT-?）：情感字段（Edge 端感知到的用户情感）
+    emotion_tag: str | None = None          # 用户情感标签（如 "SAD"/"HAPPY"）
+    emotion_intensity: float | None = None  # 情感强度（0.0~1.0）
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "event_type": self.event_type,
             "ts_ms": self.ts_ms,
             "request_id": self.request_id,
@@ -77,6 +80,12 @@ class EventReportItem:
             "detail": self.detail,
             "evidence_ref": self.evidence_ref,
         }
+        # M29-R：仅在有情感字段时输出
+        if self.emotion_tag is not None:
+            result["emotion_tag"] = self.emotion_tag
+        if self.emotion_intensity is not None:
+            result["emotion_intensity"] = self.emotion_intensity
+        return result
 
 
 @dataclass

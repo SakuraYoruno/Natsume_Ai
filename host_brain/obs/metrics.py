@@ -58,6 +58,8 @@ class MetricsCollector:
         snapshot_staleness = self._query_snapshot_staleness()
         recent_chains = self._query_recent_chains(recent_chains_n)
         latency_baseline = self.collect_latency_baseline(ts_ms=collected_ts)
+        # M29-Q（OPT-?）：情感维度指标
+        emotion_metrics = self._query_emotion_metrics()
 
         payload: dict[str, Any] = {
             "request_id": request_id,
@@ -68,6 +70,8 @@ class MetricsCollector:
             "hard_snapshot_staleness_ms": snapshot_staleness,
             "recent_chains": recent_chains,
             "latency_baseline": latency_baseline,
+            # M29-Q：情感维度指标
+            "emotion_metrics": emotion_metrics,
             "debug_trace": None,
         }
 
@@ -349,4 +353,55 @@ class MetricsCollector:
             "sample_count": sample_count,
             "stale": stale,
             "stale_reason_code": PERF_BASELINE_STALE if stale else None,
+        }
+
+    def _query_emotion_metrics(self) -> dict[str, Any]:
+        """M29-Q（OPT-?）：收集情感维度指标。
+
+        从 ledger 中统计：
+        - emotion_tag 分布（各情感标签出现次数）
+        - 平均情感强度
+        - 情感门控拒绝次数（Governor R8）
+        - 最近情感状态
+        """
+        emotion_tag_counts: dict[str, int] = {}
+        intensity_sum = 0.0
+        intensity_count = 0
+        emotion_gate_blocked = 0
+        latest_emotion_tag: str | None = None
+        latest_mood_state: str | None = None
+
+        try:
+            # 从 governor_decision_log 中统计情感相关数据
+            for record in getattr(self.ledger, "governor_decision_log", []):
+                payload = record.get("payload") or {}
+                emotion_tag = payload.get("emotion_tag")
+                if emotion_tag:
+                    emotion_tag_counts[emotion_tag] = emotion_tag_counts.get(emotion_tag, 0) + 1
+                    latest_emotion_tag = emotion_tag
+                intensity = payload.get("emotion_intensity")
+                if intensity is not None:
+                    try:
+                        intensity_sum += float(intensity)
+                        intensity_count += 1
+                    except (TypeError, ValueError):
+                        pass
+                # 统计 R8 情感门控拒绝次数
+                reason_code = record.get("reason_code") or ""
+                if "EMOTION_GATE" in str(reason_code).upper() or "R8" in str(reason_code).upper():
+                    emotion_gate_blocked += 1
+                mood_state = payload.get("mood_state")
+                if mood_state:
+                    latest_mood_state = mood_state
+        except Exception:
+            pass
+
+        avg_intensity = round(intensity_sum / intensity_count, 4) if intensity_count > 0 else None
+
+        return {
+            "emotion_tag_distribution": emotion_tag_counts,
+            "avg_emotion_intensity": avg_intensity,
+            "emotion_gate_blocked_count": emotion_gate_blocked,
+            "latest_emotion_tag": latest_emotion_tag,
+            "latest_mood_state": latest_mood_state,
         }

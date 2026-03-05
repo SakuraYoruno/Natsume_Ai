@@ -324,6 +324,8 @@ class LlmGatewayContract:
                 "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
                 "emotion_range_hint": str(emotion_context.get("emotion_range_hint") or ""),
             }
+            # M29-F（OPT-10）：根据情感上下文动态调整生成参数
+            prompt_payload = _inject_emotion_gen_params(prompt_payload, emotion_context)
 
         egress = self.egress_gate_fn(
             prompt_payload,
@@ -656,3 +658,50 @@ def _default_mock_provider(_payload: dict[str, Any]) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def _inject_emotion_gen_params(
+    prompt_payload: dict[str, Any],
+    emotion_context: dict[str, Any],
+) -> dict[str, Any]:
+    """M29-F（OPT-10）：根据情感上下文动态调整 LLM 生成参数。
+
+    情感强度高（EXCITED/ANGRY）→ temperature 上调（更有创意/活力）
+    情感低落（SAD/TIRED）→ temperature 下调（更稳定/温柔）
+    默认 temperature=0.7，top_p=0.9
+
+    Args:
+        prompt_payload: 当前 prompt_payload（已含 emotion_context）
+        emotion_context: 情感上下文字典
+
+    Returns:
+        注入了 gen_params 字段的新 prompt_payload
+    """
+    emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").upper()
+    mood_state = str(emotion_context.get("mood_state") or "steady").lower()
+
+    # 基础参数
+    temperature = 0.7
+    top_p = 0.9
+
+    # 高唤醒情感：提高 temperature（更活泼/有创意）
+    if emotion_tag in ("EXCITED", "HAPPY", "SURPRISED"):
+        temperature = 0.85
+        top_p = 0.92
+    # 负面高唤醒：降低 temperature（更稳定/安抚）
+    elif emotion_tag in ("ANGRY", "FRUSTRATED", "ANXIOUS"):
+        temperature = 0.6
+        top_p = 0.88
+    # 低落情感：降低 temperature（更温柔/稳定）
+    elif emotion_tag in ("SAD", "TIRED") or mood_state in ("tired", "critical"):
+        temperature = 0.55
+        top_p = 0.85
+
+    result = dict(prompt_payload)
+    result["gen_params"] = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "emotion_adjusted": True,
+        "emotion_tag": emotion_tag,
+    }
+    return result

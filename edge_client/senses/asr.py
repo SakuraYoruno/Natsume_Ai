@@ -155,9 +155,12 @@ class ASRTranscriptEvent:
     evidence_ref: str               # 审计链引用（必填）
     low_confidence: bool            # confidence < LOW_CONFIDENCE_THRESHOLD 时为 True
     reason_code: str | None         # 低置信度时填 ASR_LOW_CONFIDENCE
+    # M29-P（OPT-?）：用户情感推断字段（从语音韵律/文本推断）
+    user_emotion_hint: str | None = None        # 推断的用户情感标签（如 "SAD"/"HAPPY"）
+    user_emotion_confidence: float | None = None  # 情感推断置信度（0.0~1.0）
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "event_id": self.event_id,
             "session_id": self.session_id,
             "segment_id": self.segment_id,
@@ -171,6 +174,12 @@ class ASRTranscriptEvent:
             "low_confidence": self.low_confidence,
             "reason_code": self.reason_code,
         }
+        # M29-P：仅在有情感推断时输出
+        if self.user_emotion_hint is not None:
+            result["user_emotion_hint"] = self.user_emotion_hint
+        if self.user_emotion_confidence is not None:
+            result["user_emotion_confidence"] = self.user_emotion_confidence
+        return result
 
 
 def build_asr_transcript_event(

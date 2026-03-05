@@ -395,15 +395,69 @@ class EpisodicStore:
         )
         return MemoryOpResult(True, None, "memory deleted", memory_id=record.memory_id)
 
-    def recall(self, *, query_text: str, top_k: int = 5, emotion_filter: str | None = None) -> list[dict[str, Any]]:
+    def recall(
+        self,
+        *,
+        query_text: str,
+        top_k: int = 5,
+        emotion_filter: str | None = None,
+        # M29-B（OPT-3）：情感上下文加权召回
+        emotion_context: str | None = None,
+        emotion_boost_factor: float = 1.3,
+    ) -> list[dict[str, Any]]:
+        """情感感知记忆召回（M29-B OPT-3）。
+
+        emotion_context 匹配的记录分数加权 emotion_boost_factor（默认 1.3x）。
+        emotion_filter 仍保留向后兼容（优先返回匹配情感的记录）。
+        """
         embedding, _ = embed_text(query_text)
         results = self.chroma.search(query_embedding=embedding, top_k=top_k)
+
+        # M29-B：情感上下文加权
+        if emotion_context:
+            boosted: list[dict[str, Any]] = []
+            for r in results:
+                meta = r.get("metadata") or {}
+                score = float(r.get("score") or r.get("distance") or 0.0)
+                if meta.get("emotion_tag") == str(emotion_context).strip().upper():
+                    score = min(1.0, score * emotion_boost_factor)
+                    r = dict(r)
+                    r["score"] = score
+                boosted.append(r)
+            # 按加权后分数降序排列
+            results = sorted(boosted, key=lambda x: float(x.get("score") or 0.0), reverse=True)
+
         if emotion_filter is not None:
-            # 优先返回匹配情感标签的记录
-            matched = [r for r in results if r.get("metadata", {}).get("emotion_tag") == emotion_filter]
-            unmatched = [r for r in results if r.get("metadata", {}).get("emotion_tag") != emotion_filter]
+            # 向后兼容：优先返回匹配情感标签的记录
+            matched = [r for r in results if (r.get("metadata") or {}).get("emotion_tag") == emotion_filter]
+            unmatched = [r for r in results if (r.get("metadata") or {}).get("emotion_tag") != emotion_filter]
             return matched + unmatched
         return results
+
+    # M29-I（OPT-?）：decay_profile_id 实装——FAST/SLOW/PERMANENT 三档
+    _DECAY_PROFILES: dict[str, dict[str, Any]] = {
+        "FAST":      {"ttl_days": 7,   "decay_rate": 0.9, "label": "快速遗忘"},
+        "SLOW":      {"ttl_days": 90,  "decay_rate": 0.3, "label": "缓慢遗忘"},
+        "PERMANENT": {"ttl_days": None, "decay_rate": 0.0, "label": "永久保留"},
+        "default":   {"ttl_days": 30,  "decay_rate": 0.5, "label": "默认"},
+    }
+
+    def get_decay_profile(self, decay_profile_id: str) -> dict[str, Any]:
+        """M29-I：返回 decay_profile_id 对应的衰减配置。"""
+        return self._DECAY_PROFILES.get(
+            str(decay_profile_id).strip().upper(),
+            self._DECAY_PROFILES["default"],
+        )
+
+    def is_expired(self, record: "EpisodicRecord", *, now_ts_ms: int | None = None) -> bool:
+        """M29-I：根据 decay_profile_id 判断记忆是否已过期。"""
+        profile = self.get_decay_profile(record.decay_profile_id)
+        ttl_days = profile.get("ttl_days")
+        if ttl_days is None:
+            return False  # PERMANENT
+        now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
+        age_days = (now_value - record.ts_ms) / (1000 * 86400)
+        return age_days > ttl_days
 
     def get_memory(self, memory_id: str) -> EpisodicRecord | None:
         return self._records.get(memory_id)

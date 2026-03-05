@@ -284,12 +284,22 @@ def _downgrade(
     )
 
 
-def build_fallback_output(*, reason_code: str, stage: str) -> dict[str, Any]:
-    """Generate deterministic host fallback output that still matches strict JSON."""
+def build_fallback_output(
+    *,
+    reason_code: str,
+    stage: str,
+    # M29-M（OPT-?）：情感感知降级参数
+    emotion_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Generate deterministic host fallback output that still matches strict JSON.
 
+    M29-M（OPT-?）：根据 emotion_context 生成情感感知的降级文本。
+    """
+    # M29-M：根据情感上下文选择降级文本
+    fallback_text = _build_emotion_aware_fallback_text(emotion_context)
     return {
         "narrative": {
-            "text": "当前无法确认执行结果，我会先保持草案回复并等待后续治理。",
+            "text": fallback_text,
         },
         "intent_draft": {},
         "meta": {
@@ -299,6 +309,24 @@ def build_fallback_output(*, reason_code: str, stage: str) -> dict[str, Any]:
             "stage": stage,
         },
     }
+
+
+def _build_emotion_aware_fallback_text(
+    emotion_context: dict[str, Any] | None,
+) -> str:
+    """M29-M（OPT-?）：根据情感上下文生成情感感知的降级文本。"""
+    if not emotion_context:
+        return "当前无法确认执行结果，我会先保持草案回复并等待后续治理。"
+    emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").upper()
+    mood_state = str(emotion_context.get("mood_state") or "steady").lower()
+    # 根据情感状态选择合适的降级文本
+    if emotion_tag in ("SAD", "ANXIOUS") or mood_state in ("tired", "critical"):
+        return "我现在有点状态不太好，让我稍微缓一缓，稍后再好好回应你。"
+    if emotion_tag in ("ANGRY", "FRUSTRATED"):
+        return "我需要冷静一下，稍后再来处理这个请求。"
+    if emotion_tag in ("HAPPY", "EXCITED"):
+        return "哎呀，现在有点小问题，不过没关系，我马上就好！"
+    return "当前无法确认执行结果，我会先保持草案回复并等待后续治理。"
 
 
 def _validate_required_fields(payload: dict[str, Any], result: LintResult) -> None:

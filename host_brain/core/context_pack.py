@@ -68,6 +68,51 @@ def build_dynamic_slots(context_data: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def build_emotion_pulse_slot(
+    emotion_vector: "Any | None",
+    *,
+    emotion_tag: str = "NEUTRAL",
+    mood_state: str = "steady",
+) -> dict[str, Any]:
+    """M29-C（OPT-4）：将 EmotionVector 降采样为 emotion_pulse 槽位。
+
+    emotion_pulse 槽位包含：
+    - emotion_tag: 当前情感标签
+    - mood_state: 当前情绪状态
+    - valence: 情感效价（[-1.0, 1.0]）
+    - arousal: 情感唤醒度（[0.0, 1.0]）
+    - intensity: 综合强度（[0.0, 1.0]）
+    - style_hint: 风格提示（基于 valence/arousal 推断）
+    """
+    valence = 0.0
+    arousal = 0.3
+    if emotion_vector is not None:
+        try:
+            valence = float(getattr(emotion_vector, "valence", 0.0))
+            arousal = float(getattr(emotion_vector, "arousal", 0.3))
+        except Exception:
+            pass
+    # 综合强度：arousal 主导（70%）+ |valence| 辅助（30%）
+    intensity = round(arousal * 0.7 + abs(valence) * 0.3, 4)
+    # 风格提示
+    if arousal > 0.7 and valence > 0.3:
+        style_hint = "情绪高涨，可以活泼表达"
+    elif arousal > 0.7 and valence < -0.3:
+        style_hint = "情绪激动，需要温柔安抚"
+    elif arousal < 0.3:
+        style_hint = "情绪平静，保持温和语气"
+    else:
+        style_hint = "情绪平稳，自然互动"
+    return {
+        "emotion_tag": str(emotion_tag).strip().upper() or "NEUTRAL",
+        "mood_state": str(mood_state).strip() or "steady",
+        "valence": round(valence, 4),
+        "arousal": round(arousal, 4),
+        "intensity": intensity,
+        "style_hint": style_hint,
+    }
+
+
 @dataclass(frozen=True)
 class ContextPackViolation:
     code: str
@@ -232,6 +277,32 @@ def _validate_bond_summary_slot(
             slot="bond_summary",
         )
         return
+
+    # M29-L（OPT-?）：stage/trend 语义校验（中文枚举值）
+    _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"}
+    _VALID_STAGES_EN = {"STRANGER", "ACQUAINTANCE", "FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
+    _VALID_TRENDS_CN = {"上升", "稳定", "下降", "快速上升", "缓慢上升", "快速下降", "缓慢下降"}
+    _VALID_TRENDS_EN = {"RISING", "STABLE", "DECLINING"}
+
+    stage = bond_summary.get("stage")
+    if stage is not None and isinstance(stage, str):
+        if stage not in _VALID_STAGES_CN and stage not in _VALID_STAGES_EN:
+            result.add(
+                CP_BOND_SUMMARY_FIELD_INVALID,
+                f"bond_summary.stage '{stage}' is not a valid stage value",
+                slot="bond_summary",
+            )
+            return
+
+    trend = bond_summary.get("trend")
+    if trend is not None and isinstance(trend, str):
+        if trend not in _VALID_TRENDS_CN and trend not in _VALID_TRENDS_EN:
+            result.add(
+                CP_BOND_SUMMARY_FIELD_INVALID,
+                f"bond_summary.trend '{trend}' is not a valid trend value",
+                slot="bond_summary",
+            )
+            return
 
     event_id = bond_summary.get("event_id")
     if event_id is not None and not isinstance(event_id, str):
