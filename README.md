@@ -223,7 +223,7 @@ cp .env.example .env
 | `HOST_RATE_LIMIT_BACKEND` | 限流后端（memory/sqlite/redis） |
 
 > 配置架构：运行时单一配置源为根目录 `.env`，当 `.env` 缺失时脚本会回退读取 `.env.example`（示例/降级模板）。
->  
+>
 > 完整变量清单请参考 [.env.example](.env.example)。
 
 ### 4. 启动本地服务
@@ -345,12 +345,12 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 
 | 维度 | 状态 |
 |------|------|
-| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS 等全部 DONE |
-| **开发任务** | TASK-0000 ~ TASK-0202（M1 ~ M20 已落地；其中 TASK-0137 为 BLOCKED_ENV）|
-| **测试覆盖** | 最新发布基线：1609 passed，0 failed（见 `docs/50_release/m19_release.json`）|
+| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS / FR-GOV-EMOTION / FR-QA-EMOTION / FR-MEM-EMOTION / FR-BOND-EMOTION / FR-RECALL-EMOTION 等全部 DONE |
+| **开发任务** | TASK-0000 ~ TASK-0243（M1 ~ M27 已落地；其中 TASK-0137 为 BLOCKED_ENV）|
+| **测试覆盖** | 最新发布基线：884 passed，0 failed（见 `docs/50_release/m27_release.json`）|
 | **审计表** | 21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log / scheduler_tasks 等）|
-| **错误码** | 70+ 统一 reason_code（可统计、可回放）|
-| **发布清单** | M12 ~ M19 release.json 已归档（`docs/50_release/`）|
+| **错误码** | 70+ 统一 reason_code（含 EMOTION_GATE_BLOCKED，可统计、可回放）|
+| **发布清单** | M12 ~ M27 release.json 已归档（`docs/50_release/`）|
 
 ### 里程碑进度
 
@@ -367,6 +367,8 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | M18 | 监控面板 v3 后端 API 扩展（健康聚合 / 会话列表 / 链路节点详情 / 指标时序）| ✅ DONE |
 | M19 | M17/M18 审查缺陷修复（P0/P1 修复、obs 路由重构、集成测试补齐）| ✅ DONE |
 | M20 | Agent 心跳健康检测 + 压缩前静默保存 + Episodic 混合检索增强 | ✅ DONE |
+| M21 ~ M26 | 情感系统深化（情感状态机 / 情感记忆 / 情感驱动 Bond / 情感感知 / 情感表达 / 情感治理）| ✅ DONE |
+| M27 | 情感链路端到端连通（P0 基础设施修复：GateSnapshot 情感字段 / extract_emotion_tag 约束 / EpisodicRecord 情感标注 / BondDynamics 情感加权 / RecallFusion 情感路由 / IntentDecision 情感门控 / SkillLoader/ToolBroker/Scheduler 情感上下文）| ✅ DONE |
 
 ---
 
