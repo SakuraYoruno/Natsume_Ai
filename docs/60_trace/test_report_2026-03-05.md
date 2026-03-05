@@ -809,3 +809,151 @@ feat(retrieval): add qwen3_reranker provider for Qwen3-Reranker-0.6B
 Target hardware: RTX 5080 16G
 Estimated VRAM: ~2.4 GB (both models loaded simultaneously)
 ```
+
+---
+
+## 附录 D：服务探针修复留痕（2026-03-05 12:20）
+
+**提交**：`90b56ca` fix: 补全3个host服务探针并修复health端点runtime_statuses注入
+**修改文件**：`host_brain/app/config.py`、`host_brain/app/fastapi_app.py`
+**测试结果**：1677 passed, 2 skipped（零回归）
+
+### D.1 问题背景
+
+通过服务可调用性全面检查，发现以下两个缺陷：
+
+| # | 问题 | 严重度 |
+|---|------|--------|
+| 1 | `build_host_runtime_statuses` 缺少 3 个服务的探针，健康检查永远显示 UP | 中 |
+| 2 | `/health` 端点传 `runtime_statuses={}` 空字典，不经过 `build_host_runtime_statuses` | 中 |
+
+### D.2 修复详情
+
+#### 问题 1：`config.py` — 补全 3 个服务探针
+
+**受影响服务**：
+
+| service_id | 修复前 | 修复后探针逻辑 |
+|-----------|--------|--------------|
+| `host.audit.sqlite_ledger` | 无探针，永远 UP | 检查 `Natsume_AUDIT_DB` 路径的父目录是否存在；`:memory:` 模式直接 UP |
+| `host.governor.decision` | 无探针，永远 UP | `llm_provider=disabled` → DOWN；否则 UP |
+| `host.skills.loader` | 无探针，永远 UP | env 合法即 UP（轻量探针） |
+
+同时补全了 `host.retrieval.embedding`、`host.retrieval.reranker`、`host.vision.screen_ocr`、`host.vision.camera_recognizer` 在 **enabled** 时的显式 UP 状态（原实现只写 DOWN 分支，enabled 时无状态注入，依赖 `_normalize_runtime_status(None)` 默认 UP，语义不清晰）。
+
+#### 问题 2：`fastapi_app.py` — `/health` 端点注入真实 runtime_statuses
+
+**修复前**：
+```python
+health_report = build_service_health_report(
+    runtime_statuses={},   # 空字典，所有服务默认 UP
+    ...
+)
+```
+
+**修复后**：
+```python
+_host_result = load_host_config()
+_runtime_statuses = {}
+if _host_result.success and _host_result.config is not None:
+    _runtime_statuses = build_host_runtime_statuses(_host_result.config)
+health_report = build_service_health_report(
+    runtime_statuses=_runtime_statuses,   # 真实状态
+    ...
+)
+```
+
+同时在 `fastapi_app.py` 顶部补充了 `build_host_runtime_statuses, load_host_config` 的导入。
+
+### D.3 遗留问题（低优先级）
+
+| # | 问题 | 说明 |
+|---|------|------|
+| 1 | `build_edge_transport_probe_statuses` 定义但未被调用 | 该函数用于 edge RPC 传输层故障时批量降级，当前 edge 服务状态完全依赖配置驱动（`build_edge_runtime_statuses`）。若 edge 节点运行时宕机，host 侧无法感知。建议后续在 edge 心跳检测中集成。 |
+
+---
+
+## 附录 E：里程碑 M-TRIAL-RUN-2026-03-05 全面试运行留痕
+
+**提交**：`35a4e1a` feat: M-TRIAL-RUN-2026-03-05 host全面试运行里程碑测试套件
+**测试文件**：`tests/integration/test_host_milestone_trial_run.py`
+**报告目录**：`docs/60_trace/trial_run_reports/`
+**全量测试结果**：1703 passed, 10 skipped（零回归）
+
+### E.1 里程碑目标
+
+对 host 所有 14 个注册服务进行全面试运行，验证每条链路真实可通：
+- 不使用 mock，全部使用真实服务
+- 模型相关测试标记 `[SKIP_MODEL]` 并跳过
+- 所有链路节点的出入参数、状态均写入 JSON 报告留痕
+
+### E.2 测试执行结果
+
+| 分类 | 测试数 | PASS | SKIP | FAIL |
+|------|--------|------|------|------|
+| 里程碑试运行 | 34 | 26 | 8 | 0 |
+| 全量回归 | 1713 | 1703 | 10 | 0 |
+
+### E.3 服务覆盖明细
+
+| # | service_id | 测试状态 | 测试用例 | 说明 |
+|---|-----------|---------|---------|------|
+| 1 | `host.audit.sqlite_ledger` | ✅ PASS | T1-1 ~ T1-5 | WAL健康/intent写读/service_health写/trace_request/checkpoint |
+| 2 | `host.governor.decision` | ✅ PASS | T2-1 ~ T2-3 | 基础裁决/schema拒绝/速率限制 |
+| 3 | `host.skills.loader` | ✅ PASS | T3-1 ~ T3-3 | registry.all/registry.get/execute_rejected |
+| 4 | `host.integrations.llm_gateway` | ⚠️ SKIP | T4-1 ~ T4-2 | [SKIP_MODEL] 需 API Key |
+| 5 | `host.retrieval.embedding` | ✅ PASS | T5-1 ~ T5-3 | 单文本/中文/空文本嵌入 |
+| 6 | `host.retrieval.reranker` | ✅ PASS | T6-1 ~ T6-2 | 基础重排/空候选集 |
+| 7 | `host.vision.screen_ocr` | ⚠️ SKIP | T7-1 | [SKIP_MODEL] 需 OCR 模型 |
+| 8 | `host.vision.camera_recognizer` | ⚠️ SKIP | T8-1 | [SKIP_MODEL] 需摄像头 |
+| 9 | `edge.rpc.gateway` | ✅ PASS | T9-1 ~ T9-3 | 配置加载/runtime_statuses/服务注册表 |
+| 10 | `edge.rpc.asr` | ⚠️ SKIP | T10-1 | [SKIP_MODEL] 需 ASR 模型 |
+| 11 | `edge.rpc.tts` | ⚠️ SKIP | T11-1 | [SKIP_MODEL] 需 TTS 模型 |
+| 12 | `edge.rpc.barge_in` | ⚠️ SKIP | T12-1 | [SKIP_MODEL] 依赖 TTS |
+| 13 | `edge.rpc.fallback_llm` | ⚠️ SKIP | T13-1 | [SKIP_MODEL] 需本地 LLM |
+| 14 | `edge.rpc.resource_gate` | ✅ PASS | T14-1 | 资源门控配置探针 |
+
+### E.4 综合链路测试
+
+| 测试ID | 链路 | 结果 |
+|--------|------|------|
+| TC-1 | 全服务健康检查报告（14个服务） | ✅ PASS |
+| TC-2 | 完整启动报告（host+edge配置） | ✅ PASS |
+| TC-3 | host runtime_statuses 覆盖8个服务 | ✅ PASS |
+| TC-4 | Governor 裁决完整链路 | ✅ PASS |
+| TC-5 | Governor + 检索管道完整链路 | ✅ PASS |
+| TS-1 | 里程碑汇总报告（25/25 PASS） | ✅ PASS |
+
+### E.5 报告文件清单（最终批次 12-35-45）
+
+每个测试用例均生成独立 JSON 报告，包含完整的 `params_in`、`params_out`、`status`、`ts_ms` 字段：
+
+```
+docs/60_trace/trial_run_reports/
+├── T1-1_ledger_wal_health_*.json
+├── T1-2_ledger_intent_write_read_*.json
+├── T1-3_ledger_service_health_write_*.json
+├── T1-4_ledger_trace_request_*.json
+├── T1-5_ledger_wal_checkpoint_*.json
+├── T2-1_governor_approve_basic_*.json
+├── T2-2_governor_reject_bad_schema_*.json
+├── T2-3_governor_rate_limit_*.json
+├── T3-1_skills_registry_list_*.json
+├── T3-2_skills_registry_get_builtin_*.json
+├── T3-3_skills_loader_execute_rejected_*.json
+├── T5-1_embedding_single_text_*.json
+├── T5-2_embedding_chinese_text_*.json
+├── T5-3_embedding_empty_text_*.json
+├── T6-1_reranker_basic_*.json
+├── T6-2_reranker_empty_*.json
+├── T9-1_edge_config_load_*.json
+├── T9-2_edge_runtime_statuses_*.json
+├── T9-3_edge_required_services_*.json
+├── T14-1_resource_gate_config_*.json
+├── TC-1_full_service_health_report_*.json
+├── TC-2_startup_report_*.json
+├── TC-3_host_runtime_statuses_*.json
+├── TC-4_chat_pipeline_governor_*.json
+├── TC-5_chat_pipeline_with_retrieval_*.json
+└── TS-1_milestone_summary_*.json  ← 汇总：25/25 PASS, 0 FAIL
+```
