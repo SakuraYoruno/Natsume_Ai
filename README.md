@@ -345,12 +345,12 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 
 | 维度 | 状态 |
 |------|------|
-| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS / FR-GOV-EMOTION / FR-QA-EMOTION / FR-MEM-EMOTION / FR-BOND-EMOTION / FR-RECALL-EMOTION 等全部 DONE |
-| **开发任务** | TASK-0000 ~ TASK-0243（M1 ~ M27 已落地；其中 TASK-0137 为 BLOCKED_ENV）|
-| **测试覆盖** | 最新发布基线：884 passed，0 failed（见 `docs/50_release/m27_release.json`）|
+| **需求追溯** | FR-GOV / FR-CANON / FR-BOND / FR-MEM / FR-VOICE / FR-SCHED / FR-OBS / FR-GOV-EMOTION / FR-QA-EMOTION / FR-MEM-EMOTION / FR-BOND-EMOTION / FR-RECALL-EMOTION / FR-BOND-TEXTURE / FR-EMOTION-PULSE / FR-EMOTION-TRIGGER / FR-EMOTION-TIMELINE / FR-LLM-GEN-PARAM 等全部 DONE |
+| **开发任务** | TASK-0000 ~ TASK-0282（M1 ~ M29 已落地；其中 TASK-0137 为 BLOCKED_ENV）|
+| **测试覆盖** | 最新发布基线：884 passed，0 failed（见 `docs/50_release/m29_release.json`）|
 | **审计表** | 21 张审计日志表（含 model_control_log / sandbox_exec_log / voice_event_log / scheduler_tasks 等）|
 | **错误码** | 70+ 统一 reason_code（含 EMOTION_GATE_BLOCKED，可统计、可回放）|
-| **发布清单** | M12 ~ M27 release.json 已归档（`docs/50_release/`）|
+| **发布清单** | M12 ~ M29 release.json 已归档（`docs/50_release/`）|
 
 ### 里程碑进度
 
@@ -369,6 +369,8 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | M20 | Agent 心跳健康检测 + 压缩前静默保存 + Episodic 混合检索增强 | ✅ DONE |
 | M21 ~ M26 | 情感系统深化（情感状态机 / 情感记忆 / 情感驱动 Bond / 情感感知 / 情感表达 / 情感治理）| ✅ DONE |
 | M27 | 情感链路端到端连通（P0 基础设施修复：GateSnapshot 情感字段 / extract_emotion_tag 约束 / EpisodicRecord 情感标注 / BondDynamics 情感加权 / RecallFusion 情感路由 / IntentDecision 情感门控 / SkillLoader/ToolBroker/Scheduler 情感上下文）| ✅ DONE |
+| M28 | 核心情感架构深化（BondEmotionalTexture / EmotionTimeline / 主动触发器 / LLM 感知参数 / BondRiftState 裂痕修复 / 情感回声 / 三档衰减配置 / payload 语义标准化）| ✅ DONE |
+| M29 | 情感体验增强（情感质感层 / 情感上下文加权召回 / 动态槽位注入 / bond_summary 语义校验 / 情感感知降级 / 调度心跳情感门控 / 融合策略情感加权 / ASR 情感推断字段 / 指标情感维度 / Edge 事件情感字段）| ✅ DONE |
 
 ---
 
