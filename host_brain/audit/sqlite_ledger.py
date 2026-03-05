@@ -57,6 +57,8 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "replay_guard",
     "session_seq_guard",
     "llm_route_log",
+    "llm_node_call_log",
+    "graph_run_trace",
 })
 from host_brain.core.ids import now_ms
 
@@ -425,6 +427,8 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "sandbox_exec_log": {"resource_usage"},
     "scheduler_event_log": set(),
     "llm_route_log": set(),
+    "llm_node_call_log": set(),
+    "graph_run_trace": {"nodes_json", "edges_json"},
 }
 
 
@@ -1045,9 +1049,6 @@ class SQLiteLedger:
         必填字段：request_id / status / ts_ms
         可选字段：session_id / total_latency_ms / reason_code / node_count / nodes_json / edges_json
         """
-        import json as _json
-        nodes = row.get("nodes_json")
-        edges = row.get("edges_json")
         payload = {
             "request_id": str(row.get("request_id") or ""),
             "session_id": row.get("session_id"),
@@ -1055,8 +1056,8 @@ class SQLiteLedger:
             "status": str(row.get("status") or "OK"),
             "reason_code": row.get("reason_code"),
             "node_count": row.get("node_count"),
-            "nodes_json": _json.dumps(nodes, ensure_ascii=False) if isinstance(nodes, (list, dict)) else nodes,
-            "edges_json": _json.dumps(edges, ensure_ascii=False) if isinstance(edges, (list, dict)) else edges,
+            "nodes_json": row.get("nodes_json"),
+            "edges_json": row.get("edges_json"),
             "ts_ms": int(row.get("ts_ms") or 0),
         }
         # 使用 INSERT OR REPLACE 支持幂等写入（同一 request_id 覆盖）
@@ -2179,5 +2180,3 @@ class SQLiteLedger:
                 self._column_cache.pop(table, None)
             else:
                 self._column_cache.clear()
-
-
