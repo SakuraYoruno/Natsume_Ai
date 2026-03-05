@@ -25,6 +25,11 @@ class _MockVtsDriver:
         self.talk_start_calls = 0
         self.talk_end_calls = 0
         self.reset_calls = 0
+        self.set_expression_calls: list[str] = []
+
+    def set_expression(self, emotion_tag: str) -> VtsDriverResult:
+        self.set_expression_calls.append(emotion_tag)
+        return VtsDriverResult(success=True, reason_code=None, detail=f"set_expression:{emotion_tag}", action="set_expression")
 
     def talk_start(self) -> VtsDriverResult:
         self.talk_start_calls += 1

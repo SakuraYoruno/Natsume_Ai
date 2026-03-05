@@ -1,0 +1,28 @@
+{
+  "test_id": "T2-2",
+  "service": "host.governor.decision",
+  "operation": "evaluate_intent_reject",
+  "params_in": {
+    "intent": {
+      "id": "intent::req_b0767ec35ed546ceab0d3f9ac8eb898f",
+      "ts_ms": 1772693943501,
+      "session_id": "session::trial::req_b0767ec35ed546ceab0d3f9ac8eb898f",
+      "seq": 1,
+      "type": "query",
+      "action": "narrative_only",
+      "target": "host",
+      "args": {
+        "text": "bad intent"
+      },
+      "nonce": "nonce::req_b0767ec35ed546ceab0d3f9ac8eb898f"
+    },
+    "request_id": "req_b0767ec35ed546ceab0d3f9ac8eb898f"
+  },
+  "params_out": {
+    "decision": "REJECT",
+    "reason_code": "INTENT_SCHEMA_INVALID",
+    "stage": "S_INTENT_VALIDATE"
+  },
+  "status": "PASS",
+  "ts_ms": 1772693916408
+}

@@ -1,0 +1,352 @@
+# VTS 热键配置文件 — 宅家少女模型
+# 版本：v1.0.0
+# 说明：本文件定义 VTube Studio 所有热键的 emotion_tag 映射、快捷键绑定及触发参数。
+#       由 VTSMappingStore.load_from_config_file() 加载，替代代码中的 DEFAULT_EMOTION_MAPPING 硬编码。
+#       字段说明详见 docs/30_devspec/vts_hotkey_config_guide.md
+
+meta:
+  model_name: "宅家少女"
+  config_version: "v1.0.0"
+  description: "宅家少女 Live2D 模型 VTS 热键完整配置"
+
+# ─────────────────────────────────────────────
+# 全局触发参数（可被单条热键覆盖）
+# ─────────────────────────────────────────────
+defaults:
+  trigger_delay_ms: 0        # 触发延迟（毫秒）
+  priority: 0                # 优先级（数值越大越优先）
+  fallback_tag: "NEUTRAL"    # emotion_tag 不存在时的降级标签
+
+# ─────────────────────────────────────────────
+# emotion_tag → expression_id 映射表
+# 用于 VTSMappingStore 加载初始映射（情感驱动对话链路）
+# ─────────────────────────────────────────────
+emotion_mapping:
+  NEUTRAL:    "exp_neutral_01"
+  HAPPY:      "exp_happy_01"
+  SAD:        "exp_sad_01"
+  ANGRY:      "exp_angry_01"
+  SURPRISED:  "exp_surprised_01"
+  THINKING:   "exp_thinking_01"
+  CALM:       "exp_calm_01"
+  EXCITED:    "exp_excited_01"
+
+# ─────────────────────────────────────────────
+# 热键分组配置
+# hotkey_id: VTube Studio 内部热键 ID（需与 VTS 软件中配置一致）
+# shortcut:  快捷键绑定（仅供说明，实际触发由 VTS 软件管理）
+# ─────────────────────────────────────────────
+hotkey_groups:
+
+  # ── 基础外观 ──────────────────────────────
+  - group: "基础外观"
+    hotkeys:
+      - name: "去水印"
+        hotkey_id: "hotkey_remove_watermark"
+        shortcut: "Numpad0"
+        emotion_tag: null
+        description: "去除模型水印"
+
+      - name: "飞头"
+        hotkey_id: "hotkey_fly_head"
+        shortcut: "Shift+N1"
+        emotion_tag: null
+        description: "飞头效果"
+
+      - name: "变Q"
+        hotkey_id: "hotkey_chibi"
+        shortcut: "Shift+N2"
+        emotion_tag: null
+        description: "切换 Q 版形态"
+
+      - name: "改色"
+        hotkey_id: "hotkey_change_color"
+        shortcut: "Shift+N3"
+        emotion_tag: null
+        description: "改变模型配色"
+
+  # ── 表情 ──────────────────────────────────
+  - group: "表情"
+    hotkeys:
+      - name: "生气"
+        hotkey_id: "hotkey_exp_angry"
+        shortcut: "Numpad1"
+        emotion_tag: "ANGRY"
+        description: "生气表情"
+
+      - name: "鄙视脸黑"
+        hotkey_id: "hotkey_exp_disdain_dark"
+        shortcut: "Numpad2"
+        emotion_tag: "ANGRY"
+        description: "鄙视脸黑"
+
+      - name: "脸黑"
+        hotkey_id: "hotkey_exp_face_dark"
+        shortcut: "Numpad3"
+        emotion_tag: "ANGRY"
+        description: "脸黑"
+
+      - name: "脸红"
+        hotkey_id: "hotkey_exp_blush"
+        shortcut: "Numpad4"
+        emotion_tag: "HAPPY"
+        description: "脸红（害羞/开心）"
+
+      - name: "眩晕"
+        hotkey_id: "hotkey_exp_dizzy"
+        shortcut: "Numpad5"
+        emotion_tag: "SURPRISED"
+        description: "眩晕表情"
+
+      - name: "哭哭"
+        hotkey_id: "hotkey_exp_cry"
+        shortcut: "Numpad6"
+        emotion_tag: "SAD"
+        description: "哭泣表情"
+
+      - name: "剪刀眼"
+        hotkey_id: "hotkey_exp_scissors_eye"
+        shortcut: "Numpad7"
+        emotion_tag: "HAPPY"
+        description: "剪刀眼"
+
+      - name: "星星眼"
+        hotkey_id: "hotkey_exp_star_eye"
+        shortcut: "Numpad8"
+        emotion_tag: "EXCITED"
+        description: "星星眼（兴奋）"
+
+      - name: "爱心眼"
+        hotkey_id: "hotkey_exp_heart_eye"
+        shortcut: "Numpad9"
+        emotion_tag: "HAPPY"
+        description: "爱心眼"
+
+      - name: "四叶草"
+        hotkey_id: "hotkey_exp_clover"
+        shortcut: "Ctrl+N0"
+        emotion_tag: "HAPPY"
+        description: "四叶草眼"
+
+      - name: "黑眼"
+        hotkey_id: "hotkey_exp_black_eye"
+        shortcut: "Ctrl+N1"
+        emotion_tag: "NEUTRAL"
+        description: "黑眼"
+
+      - name: "白眼"
+        hotkey_id: "hotkey_exp_white_eye"
+        shortcut: "Ctrl+N2"
+        emotion_tag: "NEUTRAL"
+        description: "白眼"
+
+      - name: "无语眼"
+        hotkey_id: "hotkey_exp_speechless_eye"
+        shortcut: "Ctrl+N3"
+        emotion_tag: "NEUTRAL"
+        description: "无语眼"
+
+      - name: "圈圈眼"
+        hotkey_id: "hotkey_exp_circle_eye"
+        shortcut: "Ctrl+N4"
+        emotion_tag: "SURPRISED"
+        description: "圈圈眼（惊讶）"
+
+      - name: "蓝瞳孔"
+        hotkey_id: "hotkey_exp_blue_pupil"
+        shortcut: "Ctrl+N5"
+        emotion_tag: "CALM"
+        description: "蓝瞳孔"
+
+  # ── 配件 ──────────────────────────────────
+  - group: "配件"
+    hotkeys:
+      - name: "白耳机"
+        hotkey_id: "hotkey_acc_white_headphone"
+        shortcut: "Ctrl+N6"
+        emotion_tag: null
+        description: "白色耳机"
+
+      - name: "黑耳机"
+        hotkey_id: "hotkey_acc_black_headphone"
+        shortcut: "Ctrl+N7"
+        emotion_tag: null
+        description: "黑色耳机"
+
+      - name: "兽耳消失"
+        hotkey_id: "hotkey_acc_animal_ear_hide"
+        shortcut: "Ctrl+N8"
+        emotion_tag: null
+        description: "隐藏兽耳"
+
+      - name: "眼镜"
+        hotkey_id: "hotkey_acc_glasses"
+        shortcut: "Ctrl+N9"
+        emotion_tag: null
+        description: "眼镜"
+
+      - name: "兔兔消失"
+        hotkey_id: "hotkey_acc_rabbit_hide"
+        shortcut: "Tab+N1"
+        emotion_tag: null
+        description: "隐藏兔兔"
+
+      - name: "兔兔位置"
+        hotkey_id: "hotkey_acc_rabbit_pos"
+        shortcut: "Tab+N2"
+        emotion_tag: null
+        description: "切换兔兔位置"
+
+      - name: "脖子项圈"
+        hotkey_id: "hotkey_acc_neck_collar"
+        shortcut: "Tab+N3"
+        emotion_tag: null
+        description: "脖子项圈"
+
+      - name: "项链1"
+        hotkey_id: "hotkey_acc_necklace_1"
+        shortcut: "Tab+N4"
+        emotion_tag: null
+        description: "项链1"
+
+      - name: "项链2消失"
+        hotkey_id: "hotkey_acc_necklace_2_hide"
+        shortcut: "Tab+N5"
+        emotion_tag: null
+        description: "隐藏项链2"
+
+      - name: "黑鞋"
+        hotkey_id: "hotkey_acc_black_shoes"
+        shortcut: "Tab+N6"
+        emotion_tag: null
+        description: "黑色鞋子"
+
+  # ── 发型 ──────────────────────────────────
+  - group: "发型"
+    hotkeys:
+      - name: "左小啾啾"
+        hotkey_id: "hotkey_hair_left_small_bun"
+        shortcut: "CAPS+N1"
+        emotion_tag: null
+        description: "左侧小啾啾发型"
+
+      - name: "右啾啾"
+        hotkey_id: "hotkey_hair_right_bun"
+        shortcut: "CAPS+N2"
+        emotion_tag: null
+        description: "右侧啾啾发型"
+
+      - name: "啾啾短发"
+        hotkey_id: "hotkey_hair_bun_short"
+        shortcut: "CAPS+N3"
+        emotion_tag: null
+        description: "啾啾短发"
+
+      - name: "长发"
+        hotkey_id: "hotkey_hair_long"
+        shortcut: "CAPS+N4"
+        emotion_tag: null
+        description: "长发"
+
+      - name: "水母短发"
+        hotkey_id: "hotkey_hair_jellyfish_short"
+        shortcut: "CAPS+N5"
+        emotion_tag: null
+        description: "水母短发"
+
+      - name: "水母长发"
+        hotkey_id: "hotkey_hair_jellyfish_long"
+        shortcut: "CAPS+N6"
+        emotion_tag: null
+        description: "水母长发"
+
+      - name: "紫色挑染"
+        hotkey_id: "hotkey_hair_purple_highlight"
+        shortcut: "CAPS+N7"
+        emotion_tag: null
+        description: "紫色挑染"
+
+      - name: "左小啾啾消失"
+        hotkey_id: "hotkey_hair_left_small_bun_hide"
+        shortcut: "CAPS+N8"
+        emotion_tag: null
+        description: "隐藏左侧小啾啾"
+
+      - name: "右小啾啾消失"
+        hotkey_id: "hotkey_hair_right_small_bun_hide"
+        shortcut: "CAPS+N9"
+        emotion_tag: null
+        description: "隐藏右侧小啾啾"
+
+  # ── 道具 ──────────────────────────────────
+  - group: "道具"
+    hotkeys:
+      - name: "手柄"
+        hotkey_id: "hotkey_prop_gamepad"
+        shortcut: "Shift+N4"
+        emotion_tag: null
+        description: "手柄道具"
+
+      - name: "麦克风"
+        hotkey_id: "hotkey_prop_microphone"
+        shortcut: "Shift+N5"
+        emotion_tag: null
+        description: "麦克风道具"
+
+      - name: "黑麦克风"
+        hotkey_id: "hotkey_prop_black_microphone"
+        shortcut: "Shift+N6"
+        emotion_tag: null
+        description: "黑色麦克风道具"
+
+      - name: "抱兔兔"
+        hotkey_id: "hotkey_prop_hug_rabbit"
+        shortcut: "Shift+N7"
+        emotion_tag: null
+        description: "抱兔兔道具"
+
+      - name: "比耶"
+        hotkey_id: "hotkey_prop_peace_sign"
+        shortcut: "Shift+N8"
+        emotion_tag: "HAPPY"
+        description: "比耶手势"
+
+      - name: "拿手机"
+        hotkey_id: "hotkey_prop_phone"
+        shortcut: "Shift+N9"
+        emotion_tag: null
+        description: "拿手机道具"
+
+      - name: "指脸"
+        hotkey_id: "hotkey_prop_point_face"
+        shortcut: "Shift+N0"
+        emotion_tag: null
+        description: "指脸动作"
+
+  # ── 屏幕特效 ──────────────────────────────
+  - group: "屏幕特效"
+    hotkeys:
+      - name: "屏幕"
+        hotkey_id: "hotkey_fx_screen"
+        shortcut: "Alt+N1"
+        emotion_tag: null
+        description: "屏幕特效"
+
+      - name: "屏幕竖眼"
+        hotkey_id: "hotkey_fx_screen_vertical_eye"
+        shortcut: "Alt+N2"
+        emotion_tag: null
+        description: "屏幕竖眼特效"
+
+      - name: "屏幕笑眼"
+        hotkey_id: "hotkey_fx_screen_smile_eye"
+        shortcut: "Alt+N3"
+        emotion_tag: "HAPPY"
+        description: "屏幕笑眼特效"
+
+      - name: "移除所有按键表情"
+        hotkey_id: "hotkey_reset_all"
+        shortcut: "Alt+N0"
+        emotion_tag: "NEUTRAL"
+        description: "移除所有按键触发的表情，恢复默认状态"
+        priority: 10

@@ -124,6 +124,9 @@ class EdgeVoicePipeline:
                 and start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
                 and self.vts_driver is not None
             ):
+                # M26-E：先触发 emotion_tag 表情，再开启 talk gate
+                emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                self.vts_driver.set_expression(emotion_tag)
                 vts_result = self.vts_driver.talk_start()
 
         success = bool(

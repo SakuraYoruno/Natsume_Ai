@@ -16,6 +16,20 @@ VIOLATION_UNKNOWN_FIELD = "LLM_UNKNOWN_FIELD"
 VIOLATION_FALSE_EXECUTION_CLAIM = "FALSE_EXECUTION_CLAIM"
 VIOLATION_CANON_AS_FACT = "CANON_AS_FACT_VIOLATION"
 
+# M26-E：emotion_tag 合法枚举值（与 core_output_contract.json 保持一致）
+VALID_EMOTION_TAGS: frozenset[str] = frozenset({
+    "NEUTRAL",
+    "HAPPY",
+    "SAD",
+    "ANGRY",
+    "SURPRISED",
+    "THINKING",
+    "CALM",
+    "EXCITED",
+})
+DEFAULT_EMOTION_TAG = "NEUTRAL"
+VIOLATION_INVALID_EMOTION_TAG = "LLM_INVALID_EMOTION_TAG"
+
 # F-33：context_pack 分槽注入失败告警码（R113-1）
 VIOLATION_WCANON_SLOT = "WCANON_SLOT_VIOLATION"
 
@@ -565,3 +579,74 @@ def check_canon_as_fact(
         violated=bool(violations),
         violations=violations,
     )
+
+
+# ---------------------------------------------------------------------------
+# M26-E：emotion_tag 校验与提取接口（FR-EMOTION-DRIVE-001~003）
+# ---------------------------------------------------------------------------
+
+def _validate_emotion_tag(
+    emotion_tag: str | None,
+    *,
+    ledger: Any | None = None,
+    request_id: str | None = None,
+) -> str:
+    """校验 emotion_tag 合法性，非法值降级为 NEUTRAL 并写 QA 警告日志。
+
+    Args:
+        emotion_tag: LLM 输出的情感标签（可为 None 或空字符串）。
+        ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
+        request_id: 可选请求 ID，用于关联审计日志。
+
+    Returns:
+        合法的 emotion_tag 字符串（枚举值之一），缺失或非法时返回 "NEUTRAL"。
+    """
+    if not emotion_tag or not str(emotion_tag).strip():
+        return DEFAULT_EMOTION_TAG
+
+    normalized = str(emotion_tag).strip().upper()
+    if normalized in VALID_EMOTION_TAGS:
+        return normalized
+
+    # 非法值：降级为 NEUTRAL，写 QA 警告日志
+    detail = (
+        f"invalid emotion_tag {emotion_tag!r} downgraded to NEUTRAL; "
+        f"valid values: {sorted(VALID_EMOTION_TAGS)}"
+    )
+    if ledger is not None and hasattr(ledger, "log_qa_violation"):
+        ledger.log_qa_violation(
+            request_id=request_id,
+            code=VIOLATION_INVALID_EMOTION_TAG,
+            detail=detail,
+            field="narrative.emotion_tag",
+        )
+    import logging as _logging
+    _logging.getLogger("Natsume.host.qa").warning(
+        "emotion_tag downgraded: %s -> NEUTRAL (request_id=%s)",
+        emotion_tag,
+        request_id,
+    )
+    return DEFAULT_EMOTION_TAG
+
+
+def extract_emotion_tag(
+    payload: dict[str, Any],
+    *,
+    ledger: Any | None = None,
+    request_id: str | None = None,
+) -> str:
+    """从 LLM 输出 payload 中提取并校验 emotion_tag。
+
+    从 `payload["narrative"]["emotion_tag"]` 提取，缺失或非法时返回 "NEUTRAL"。
+
+    Args:
+        payload: LLM 输出的完整 payload（已通过 lint_llm_output 校验）。
+        ledger: 可选 SQLiteLedger，用于写入 qa_violation 表。
+        request_id: 可选请求 ID，用于关联审计日志。
+
+    Returns:
+        合法的 emotion_tag 字符串。
+    """
+    narrative = payload.get("narrative") if isinstance(payload, dict) else None
+    raw_tag = narrative.get("emotion_tag") if isinstance(narrative, dict) else None
+    return _validate_emotion_tag(raw_tag, ledger=ledger, request_id=request_id)

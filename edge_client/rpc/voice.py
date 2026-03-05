@@ -210,6 +210,7 @@ class VoiceRpcContract:
             "seq": int(seq) if isinstance(seq, int) else None,
             "utterance_id": utterance_id,
             "text": text,
+            "emotion_tag": str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
             "interruptible": bool(payload.get("interruptible", True)),
             "voice_profile": str(payload.get("voice_profile") or "default"),
             "ts_ms": now_value,

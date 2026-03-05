@@ -1,0 +1,14 @@
+{
+  "test_id": "T2-3",
+  "service": "host.governor.decision",
+  "operation": "rate_limit_check",
+  "params_in": {
+    "session_id": "session::rl::req_8f7bcc0f48df49f7be4f659f07336b1d"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null
+  },
+  "status": "PASS",
+  "ts_ms": 1772693916408
+}

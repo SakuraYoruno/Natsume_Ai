@@ -3635,6 +3635,266 @@ TASK-XXXX 标题
   - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
 - 关联需求：NFR-REL-001；NFR-MAINT-001；FR-AUDIT-LLM-001~002；FR-CHANNEL-GC-001~002；FR-PERF-AUDIT-001；FR-COMPAT-001。
 
+---
+
+## M26 生产就绪 II — 情感驱动交互 + 端到端集成验证 + 运行时健康加固
+
+- 状态：IN_PROGRESS
+- 目标：在对话链路中引入 emotion_tag 心情参数，驱动 VTS 表情 + TTS 语气联动；将 VTS 热键配置抽离为独立配置文件；建立端到端集成冒烟测试；加固运行时健康检查；LLM 路由配置热更新；VTS 映射表版本回滚。
+- 质量门禁：全量测试 ≥1832 passed（1802 + 30 新增），0 failed，0 warnings，零回归。
+
+### TASK-0222 M26-A：端到端集成冒烟测试套件
+
+- 状态：TODO
+- 任务描述：建立覆盖"用户输入 → Intent → Governor → Skill → Audit"完整链路的集成冒烟测试，确保各模块联动无断点；新增审计链完整性校验（request_id 串联三联画日志）。
+- 输入：`tests/e2e/` 目录；`tests/contract/` 目录；现有 host_brain 链路代码。
+- 输出：
+  - `tests/integration/test_e2e_smoke_m26.py`（新增）：覆盖 5 条核心链路（普通对话/执行/拒绝/降级/审计串联）；
+  - `tests/integration/test_audit_chain_integrity_m26.py`（新增）：审计链完整性校验（request_id 串联三联画日志）。
+- 验收标准：
+  - T-E2E-SMOKE-01：普通对话链路（无执行）完整走通，审计链可串联；
+  - T-E2E-SMOKE-02：执行链路（APPROVE + Skill）完整走通，token_ref 可追溯；
+  - T-E2E-SMOKE-03：拒绝链路（REJECT + reason_code）完整走通；
+  - T-E2E-SMOKE-04：降级链路（LLM 不可用 → 降级输出）完整走通；
+  - T-AUDIT-CHAIN-01~03：request_id 串联三联画日志（intent/governor/skill_exec）；
+  - 全量测试 ≥1802 passed，0 failed。
+- 涉及文件路径：
+  - `tests/integration/test_e2e_smoke_m26.py`（新增）；
+  - `tests/integration/test_audit_chain_integrity_m26.py`（新增）。
+- 关联需求/测试：FR-CORE-001；FR-AUDIT-001；FR-GOV-001；T-E2E-SMOKE-01~04；T-AUDIT-CHAIN-01~03。
+
+### TASK-0223 M26-B：运行时健康检查加固（/health 端点完整性）
+
+- 状态：TODO
+- 任务描述：确保 `/health` 端点聚合所有已注册服务的健康状态，并在服务降级时给出精确的 `reason_code`；新增 `validate_health_response()` 方法校验响应结构完整性。
+- 输入：`host_brain/app/main.py`；`host_brain/obs/health_aggregator.py`（若存在）。
+- 输出：
+  - `host_brain/obs/health_aggregator.py`：新增 `validate_health_response()` 方法（校验响应结构完整性）；
+  - `tests/unit/test_health_aggregator_m26.py`（新增）：T-HEALTH-AGG-01~04（4 个测试）。
+- 验收标准：
+  - T-HEALTH-AGG-01：所有已注册服务均出现在 `/health` 响应中；
+  - T-HEALTH-AGG-02：单服务超时时该服务 `status=DOWN`，其余正常返回；
+  - T-HEALTH-AGG-03：响应结构稳定（字段不随服务状态变化而缺失）；
+  - T-HEALTH-AGG-04：`validate_health_response()` 对缺字段响应返回 `False`；
+  - 全量测试 ≥1806 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/obs/health_aggregator.py`；
+  - `tests/unit/test_health_aggregator_m26.py`（新增）。
+- 关联需求/测试：FR-OBS-008；FR-OBS-004；T-HEALTH-AGG-01~04。
+
+### TASK-0224 M26-C：LLM 路由配置热更新 + 审计
+
+- 状态：TODO
+- 任务描述：`LlmGatewayContract` 的路由策略支持热更新（不重启），变更写 `llm_route_config_log`；新增 `update_route_config()` 方法 + `log_llm_route_config_change()` 审计方法。
+- 输入：`host_brain/integrations/llm_gateway.py`；`host_brain/audit/sqlite_ledger.py`。
+- 输出：
+  - `host_brain/integrations/llm_gateway.py`：新增 `update_route_config()` 方法 + `llm_route_config_log` 写入；
+  - `host_brain/audit/sqlite_ledger.py`：新增 `log_llm_route_config_change()` 方法 + `llm_route_config_log` 表；
+  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`（新增）；
+  - `tests/unit/test_llm_route_config_m26.py`（新增）：T-LLM-CFG-01~04（4 个测试）。
+- 验收标准：
+  - T-LLM-CFG-01：`update_route_config()` 热更新后立即生效；
+  - T-LLM-CFG-02：配置变更写 `llm_route_config_log`（含变更前后 hash）；
+  - T-LLM-CFG-03：迁移脚本幂等；
+  - T-LLM-CFG-04：配置非法时拒绝更新（`INVALID_ROUTE_CONFIG`）；
+  - 全量测试 ≥1810 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/integrations/llm_gateway.py`；
+  - `host_brain/audit/sqlite_ledger.py`；
+  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`（新增）；
+  - `tests/unit/test_llm_route_config_m26.py`（新增）。
+- 关联需求/测试：FR-LLM-GW-003；T-LLM-CFG-01~04。
+
+### TASK-0225 M26-D：VTS 映射表热更新 + 版本回滚
+
+- 状态：TODO
+- 任务描述：`VTSMappingStore` 支持映射表热更新（不重启）和版本回滚，变更写 `vts_mapping_change_log`；新增 `rollback_to_version()` 方法 + 版本历史存储。
+- 输入：`host_brain/channels/vts_mapping_store.py`。
+- 输出：
+  - `host_brain/channels/vts_mapping_store.py`：新增 `rollback_to_version()` 方法 + 版本历史存储；
+  - `tests/unit/test_vts_mapping_rollback_m26.py`（新增）：T-VTS-ROLL-01~03（3 个测试）。
+- 验收标准：
+  - T-VTS-ROLL-01：`rollback_to_version()` 回滚后映射表恢复历史版本；
+  - T-VTS-ROLL-02：回滚写 `vts_mapping_change_log`（含回滚原因）；
+  - T-VTS-ROLL-03：回滚到不存在的版本返回 `VERSION_NOT_FOUND`；
+  - 全量测试 ≥1813 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/channels/vts_mapping_store.py`；
+  - `tests/unit/test_vts_mapping_rollback_m26.py`（新增）。
+- 关联需求/测试：FR-VTS-DRIVE-001；T-VTS-ROLL-01~03。
+
+### TASK-0226 M26-E：情感驱动对话链路（Emotion-Driven Dialogue）
+
+- 状态：DONE（2026-03-05）
+- 任务描述：在对话链路中引入 `emotion_tag` 心情参数——LLM 输出契约 `narrative` 对象新增 `emotion_tag` 可选字段（枚举：NEUTRAL/HAPPY/SAD/ANGRY/SURPRISED/THINKING/CALM/EXCITED）；Host QA 校验 `emotion_tag` 合法性（非法值降级为 NEUTRAL）；Host 下发 Edge RPC 时透传 `emotion_tag`；Edge 同步触发 VTS `set_expression(emotion_tag)` + TTS `synthesize(emotion_tag=...)`，实现表情与语气联动。
+- 输入：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `host_brain/core/qa.py`（QA 校验）；
+  - `host_brain/app/main.py`（Host → Edge RPC 下发）；
+  - `edge_client/actuators/vts_driver.py`（VTS 表情触发）；
+  - `edge_client/actuators/tts_engine.py`（TTS 语气参数）。
+- 输出：
+  - `prompts/llm_contract/core_output_contract.json`：`narrative` 对象新增 `emotion_tag` 字段（可选，枚举约束）；
+  - `host_brain/core/qa.py`：新增 `_validate_emotion_tag()` 方法（非法值降级 NEUTRAL，写 QA 警告日志）；
+  - `host_brain/app/main.py`：speak 下发时透传 `emotion_tag`；
+  - `edge_client/actuators/vts_driver.py`：speak_event 处理时调用 `set_expression(emotion_tag)`；
+  - `edge_client/actuators/tts_engine.py`：`synthesize()` 接收并应用 `emotion_tag` 语气参数；
+  - `tests/unit/test_emotion_driven_dialogue_m26.py`（新增）：T-EMOTION-01~06（6 个测试）。
+- 验收标准：
+  - T-EMOTION-01：LLM 输出含合法 `emotion_tag` 时，VTS `set_expression` 被调用（emotion_tag 正确传递）；
+  - T-EMOTION-02：LLM 输出含合法 `emotion_tag` 时，TTS `synthesize` 接收到对应 `emotion_tag`；
+  - T-EMOTION-03：LLM 输出 `emotion_tag` 非法时，QA 降级为 `NEUTRAL`，不中断链路；
+  - T-EMOTION-04：LLM 输出缺少 `emotion_tag` 时，默认使用 `NEUTRAL`；
+  - T-EMOTION-05：`_validate_emotion_tag()` 对所有枚举值返回合法；
+  - T-EMOTION-06：`_validate_emotion_tag()` 对非枚举值返回 `NEUTRAL` 并写警告日志；
+  - 全量测试 ≥1819 passed，0 failed。
+- 涉及文件路径：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `host_brain/core/qa.py`；
+  - `host_brain/app/main.py`；
+  - `edge_client/actuators/vts_driver.py`；
+  - `edge_client/actuators/tts_engine.py`；
+  - `tests/unit/test_emotion_driven_dialogue_m26.py`（新增）。
+- 关联需求/测试：FR-EMOTION-DRIVE-001；FR-EMOTION-DRIVE-002；FR-EMOTION-DRIVE-003；T-EMOTION-01~06。
+
+### TASK-0227 M26-F：VTS 热键配置文件抽离 + 说明文档
+
+- 状态：TODO
+- 任务描述：将 VTS 所有热键配置（emotion_tag → expression_id 映射、热键 ID、触发参数等）从代码中抽离为独立的 YAML 配置文件 `configs/vts/vts_hotkey_config.yaml`；`VTSMappingStore` 支持从该配置文件加载初始映射表（替代硬编码的 `DEFAULT_EMOTION_MAPPING`）；新增配置说明文档 `docs/30_devspec/vts_hotkey_config_guide.md`，说明配置格式、字段含义、扩展方式及与 VTSMappingStore 的关联关系。
+- 输入：
+  - `host_brain/channels/vts_mapping_store.py`（`DEFAULT_EMOTION_MAPPING` 硬编码）；
+  - `edge_client/actuators/vts_driver.py`（热键触发逻辑）；
+  - `configs/` 目录（新增 `vts/` 子目录）。
+- 输出：
+  - `configs/vts/vts_hotkey_config.yaml`（新增）：包含所有 emotion_tag → expression_id 映射 + 热键触发参数（触发延迟、优先级、fallback 策略等）；
+  - `host_brain/channels/vts_mapping_store.py`：新增 `load_from_config_file(path)` 类方法，支持从 YAML 配置文件加载初始映射表；`DEFAULT_EMOTION_MAPPING` 保留为 fallback；
+  - `docs/30_devspec/vts_hotkey_config_guide.md`（新增）：配置文件格式说明、字段含义、扩展方式、与 VTSMappingStore 的关联关系、示例；
+  - `tests/unit/test_vts_hotkey_config_m26.py`（新增）：T-VTS-CFG-01~04（4 个测试）。
+- 验收标准：
+  - T-VTS-CFG-01：`load_from_config_file()` 从 YAML 文件加载映射表，与文件内容一致；
+  - T-VTS-CFG-02：YAML 文件缺失时 `load_from_config_file()` 抛出 `FileNotFoundError`（含明确错误信息）；
+  - T-VTS-CFG-03：YAML 文件格式非法时抛出 `ValueError`（含字段名）；
+  - T-VTS-CFG-04：`DEFAULT_EMOTION_MAPPING` 作为 fallback，YAML 未配置的 emotion_tag 使用默认值；
+  - `configs/vts/vts_hotkey_config.yaml` 存在且格式合法；
+  - `docs/30_devspec/vts_hotkey_config_guide.md` 存在且包含所有必要章节；
+  - 全量测试 ≥1823 passed，0 failed。
+- 涉及文件路径：
+  - `configs/vts/vts_hotkey_config.yaml`（新增）；
+  - `host_brain/channels/vts_mapping_store.py`；
+  - `docs/30_devspec/vts_hotkey_config_guide.md`（新增）；
+  - `tests/unit/test_vts_hotkey_config_m26.py`（新增）。
+- 关联需求/测试：FR-VTS-CFG-001；FR-VTS-CFG-002；T-VTS-CFG-01~04。
+
+### TASK-0228 M26-G：mood_state → emotion_tag 约束映射（情感系统深化 I）
+
+- 状态：TODO
+- 任务描述：在 `metabolism.py` 中新增 `mood_to_emotion_constraint()` 函数，将系统硬状态（calm/steady/engaged/tired/critical）映射为 emotion_tag 的允许范围；在 QA 校验时检查 emotion_tag 是否在当前 mood_state 的允许范围内，不在则降级到该范围的第一个值（写 QA 警告日志）。实现"系统状态感知"的情感约束，防止能量极低时输出 EXCITED 等不合理情感。
+- 输入：
+  - `host_brain/core/metabolism.py`（新增 `mood_to_emotion_constraint()` 函数）；
+  - `host_brain/core/qa.py`（集成 mood_state 约束校验）。
+- 输出：
+  - `host_brain/core/metabolism.py`：新增 `MOOD_EMOTION_CONSTRAINTS` 常量 + `mood_to_emotion_constraint(mood_state)` 函数；
+  - `host_brain/core/qa.py`：`_validate_emotion_tag()` 新增 `mood_state` 参数，支持约束范围校验；
+  - `tests/unit/test_mood_emotion_constraint_m26.py`（新增）：T-MOOD-CONST-01~04（4 个测试）。
+- 验收标准：
+  - T-MOOD-CONST-01：`mood_to_emotion_constraint("critical")` 返回 `["NEUTRAL", "SAD"]`；
+  - T-MOOD-CONST-02：`mood_to_emotion_constraint("engaged")` 返回包含 `EXCITED` 的列表；
+  - T-MOOD-CONST-03：`_validate_emotion_tag("EXCITED", mood_state="critical")` 降级为 `NEUTRAL` 并写警告日志；
+  - T-MOOD-CONST-04：`_validate_emotion_tag("HAPPY", mood_state="steady")` 返回 `HAPPY`（在允许范围内）；
+  - 全量测试 ≥1827 passed，0 failed。
+- 涉及文件路径：
+  - `host_brain/core/metabolism.py`；
+  - `host_brain/core/qa.py`；
+  - `tests/unit/test_mood_emotion_constraint_m26.py`（新增）。
+- 关联需求/测试：FR-EMOTION-DRIVE-004；T-MOOD-CONST-01~04。
+
+### TASK-0229 M26-H：sub_emotion 细粒度表情驱动（情感系统深化 II）
+
+- 状态：TODO
+- 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `sub_emotion`，映射到 `vts_hotkey_config.yaml` 中的具体热键（如 blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；`VTSMappingStore` 新增 `sub_emotion_to_hotkey()` 方法；`voice_pipeline.py` 在触发 `set_expression(emotion_tag)` 后，若 `sub_emotion` 存在则额外触发对应热键，充分利用模型的 15 个细粒度表情。
+- 输入：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `configs/vts/vts_hotkey_config.yaml`（TASK-0227 产出）；
+  - `host_brain/channels/vts_mapping_store.py`；
+  - `edge_client/runtime/voice_pipeline.py`。
+- 输出：
+  - `prompts/llm_contract/core_output_contract.json`：`narrative` 新增 `sub_emotion` 可选字段（枚举：blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；
+  - `host_brain/channels/vts_mapping_store.py`：新增 `sub_emotion_to_hotkey(sub_emotion)` 方法；
+  - `edge_client/runtime/voice_pipeline.py`：`enqueue_speak` 时若 payload 含 `sub_emotion` 则额外触发对应热键；
+  - `tests/unit/test_sub_emotion_m26.py`（新增）：T-SUB-EMOTION-01~04（4 个测试）。
+- 验收标准：
+  - T-SUB-EMOTION-01：`sub_emotion_to_hotkey("blush")` 返回对应热键 ID；
+  - T-SUB-EMOTION-02：`sub_emotion_to_hotkey("unknown")` 返回 `None`（不触发，不报错）；
+  - T-SUB-EMOTION-03：speak payload 含 `sub_emotion="star_eye"` 时，VTS 额外触发对应热键；
+  - T-SUB-EMOTION-04：speak payload 无 `sub_emotion` 时，仅触发 `set_expression(emotion_tag)`，无额外热键；
+  - 全量测试 ≥1831 passed，0 failed。
+- 涉及文件路径：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `host_brain/channels/vts_mapping_store.py`；
+  - `edge_client/runtime/voice_pipeline.py`；
+  - `tests/unit/test_sub_emotion_m26.py`（新增）。
+- 关联需求/测试：FR-EMOTION-DRIVE-005；T-SUB-EMOTION-01~04。
+
+### TASK-0230 M26-I：emotion_intensity 强度参数（情感系统深化 III）
+
+- 状态：TODO
+- 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `emotion_intensity`（float，0.0~1.0），影响 TTS 语气幅度；`SoVITSModelManager.synthesize()` 接收 `emotion_intensity` 参数并传递给底层模型；`VTubeStudioDriver.set_expression()` 接收 `intensity` 参数，影响表情触发的 `duration_ms`（强度越高持续越长）。
+- 输入：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `edge_client/actuators/tts_engine.py`；
+  - `edge_client/actuators/vts_driver.py`；
+  - `edge_client/runtime/voice_pipeline.py`。
+- 输出：
+  - `prompts/llm_contract/core_output_contract.json`：`narrative` 新增 `emotion_intensity` 可选字段（number，0.0~1.0）；
+  - `edge_client/actuators/tts_engine.py`：`synthesize()` 新增 `emotion_intensity` 参数（float，默认 0.5）；
+  - `edge_client/actuators/vts_driver.py`：`set_expression()` 新增 `intensity` 参数（float，默认 0.5），影响 `duration_ms`；
+  - `edge_client/runtime/voice_pipeline.py`：透传 `emotion_intensity` 到 TTS + VTS；
+  - `tests/unit/test_emotion_intensity_m26.py`（新增）：T-INTENSITY-01~04（4 个测试）。
+- 验收标准：
+  - T-INTENSITY-01：`synthesize(text, emotion_tag="HAPPY", emotion_intensity=0.9)` 正常调用不报错；
+  - T-INTENSITY-02：`set_expression("HAPPY", intensity=0.9)` 正常调用不报错；
+  - T-INTENSITY-03：`emotion_intensity` 超出 [0.0, 1.0] 范围时 QA 校验截断到合法范围（不拒绝）；
+  - T-INTENSITY-04：speak payload 含 `emotion_intensity=0.8` 时，TTS 和 VTS 均收到该参数；
+  - 全量测试 ≥1835 passed，0 failed。
+- 涉及文件路径：
+  - `prompts/llm_contract/core_output_contract.json`；
+  - `edge_client/actuators/tts_engine.py`；
+  - `edge_client/actuators/vts_driver.py`；
+  - `edge_client/runtime/voice_pipeline.py`；
+  - `tests/unit/test_emotion_intensity_m26.py`（新增）。
+- 关联需求/测试：FR-EMOTION-DRIVE-006；T-INTENSITY-01~04。
+
+### TASK-0231 M26-J：M26 发布清单
+
+- 状态：TODO
+- 任务描述：TASK-0222~0230 全部 DONE 后，生成 M26 发布清单（`m26_release.json`），记录 M26-A~I 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M26 里程碑状态为 DONE；更新 `requirements_trace.md` M26 小节（R-167~R-175）；生成代码审查报告 `full_code_review_report_2026-03-05-m26.md`。
+- 输入：TASK-0222~0230 全部 DONE；全量测试 ≥1835 passed（1802 + 33 新增），0 failed，0 warnings。
+- 输出：
+  - `docs/50_release/m26_release.json`（新增）；
+  - `docs/20_prd/PRD.md`：M26 里程碑条目状态更新为 DONE；
+  - `docs/60_trace/requirements_trace.md`：新增 M26 小节（R-167~R-175）；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
+- 验收标准：
+  - `release_ready=true`；
+  - `emotion_driven_dialogue=true`（基础情感链路已实现）；
+  - `mood_emotion_constraint=true`（mood_state 约束映射已实现）；
+  - `sub_emotion_driven=true`（细粒度表情驱动已实现）；
+  - `emotion_intensity=true`（强度参数已实现）；
+  - `vts_hotkey_config_extracted=true`（VTS 热键配置已抽离）；
+  - `e2e_smoke_suite=true`（端到端冒烟测试套件已建立）；
+  - `health_aggregator_validated=true`（健康检查加固已完成）；
+  - `llm_route_hot_reload=true`（LLM 路由热更新已实现）；
+  - `vts_mapping_rollback=true`（VTS 映射表版本回滚已实现）；
+  - `total_tests_passed ≥ 1835`；
+  - `zero_regressions=true`；
+  - `zero_warnings=true`。
+- 涉及文件路径：
+  - `docs/50_release/m26_release.json`（新增）；
+  - `docs/20_prd/PRD.md`；
+  - `docs/60_trace/requirements_trace.md`；
+  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
+- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-EMOTION-DRIVE-001~006；FR-VTS-CFG-001~002；FR-CORE-001；FR-OBS-008；FR-LLM-GW-003；FR-VTS-DRIVE-001。
+
 
 
 

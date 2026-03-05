@@ -17,6 +17,20 @@
         "text": {
           "type": "string",
           "minLength": 1
+        },
+        "emotion_tag": {
+          "type": "string",
+          "enum": [
+            "NEUTRAL",
+            "HAPPY",
+            "SAD",
+            "ANGRY",
+            "SURPRISED",
+            "THINKING",
+            "CALM",
+            "EXCITED"
+          ],
+          "description": "情感标签，驱动 VTS 表情 + TTS 语气联动。缺省时使用 NEUTRAL。"
         }
       },
       "additionalProperties": true
