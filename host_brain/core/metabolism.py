@@ -7,6 +7,8 @@ import hashlib
 import json
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms
+
 
 ALLOWED_SYS_MODES = {"normal", "focus", "gaming", "maintenance", "locked"}
 ALLOWED_MOOD_STATES = {"calm", "steady", "engaged", "tired", "critical"}
@@ -361,6 +363,8 @@ class HardStateSnapshot:
     energy_level: int
     allowed_emotion_tags: tuple[str, ...]
     emotion_range_hint: str
+    # M29-K（OPT-18）：情感状态时间戳，支持时效性判断
+    emotion_ts_ms: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -368,18 +372,21 @@ class HardStateSnapshot:
             "energy_level": self.energy_level,
             "allowed_emotion_tags": list(self.allowed_emotion_tags),
             "emotion_range_hint": self.emotion_range_hint,
+            "emotion_ts_ms": self.emotion_ts_ms,
         }
 
 
-def build_hard_snapshot(state: HardState) -> HardStateSnapshot:
-    """从 HardState 构建 HardStateSnapshot（M28-B OPT-6）。"""
+def build_hard_snapshot(state: HardState, *, ts_ms: int | None = None) -> HardStateSnapshot:
+    """从 HardState 构建 HardStateSnapshot（M28-B OPT-6；M29-K OPT-18 增加 emotion_ts_ms）。"""
     allowed = mood_to_emotion_constraint(state.mood_state)
     hint = _MOOD_RANGE_HINTS.get(state.mood_state, _MOOD_RANGE_HINTS["steady"])
+    emotion_ts = int(ts_ms if ts_ms is not None else now_ms())
     return HardStateSnapshot(
         mood_state=state.mood_state,
         energy_level=state.energy_level,
         allowed_emotion_tags=tuple(allowed),
         emotion_range_hint=hint,
+        emotion_ts_ms=emotion_ts,
     )
 
 
