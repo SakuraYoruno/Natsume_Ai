@@ -139,6 +139,26 @@
 
 ## 4. 路由与链路（LangGraph 视角）
 
+4.0 pre_intent_classifier（Host 层轻量规则预分类器，M34）
+
+**定位**：运行在 `/v1/chat` 端点层，不是 LangGraph 节点，无 LLM 调用，延迟 < 1ms。
+
+**输入**：`user_input: str`（用户原始输入文本）
+
+**输出**：`scene_type_hint: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI）
+
+**优先级规则**（从高到低）：
+1. VISION_UI：截图/屏幕/界面等关键词
+2. WORK_CODE：代码/编程/函数/python 等关键词
+3. WORK_TRANSLATE：翻译/translate/訳して 等关键词
+4. EXEC_INTENT：执行/运行/设置/配置等关键词
+5. CHAT（默认）：其余所有输入
+
+**与 Governor 的关系**：
+- `pre_intent_classifier` 输出只影响节点链路选择（走哪条路），不影响 Governor 裁决权
+- 显式传入的 `scene_type` 优先级高于预分类结果（`scene_type_source = "explicit"` > `"pre_classifier"`）
+- `graph_meta.scene_type_source` 字段记录来源，供审计追踪
+
 4.1 场景枚举（最小）
 - CHAT：闲聊/陪伴
 - EXEC_INTENT：执行意图（需要 Governor）
@@ -224,3 +244,83 @@
 - Edge 3B 量化模型（Ollama）不作为 LangGraph 节点参与编排树；Host 仅以“远程工具/能力端点”的方式调用。
 - 调用目的仅限：在场回应、输入清洗、摘要压缩、检索提示（draft-only）。
 - 约束：不得产生裁决语义、不得产生执行事实宣告；失败必须可观测并快速回退到 Host 兜底口径。
+
+---
+
+## 10. Governed Runtime Contract（治理运行时契约，M34）
+
+> **核心定位**：LangGraph 在该系统中永远是 governed runtime，不是 autonomous orchestrator。
+> Natsume 采用 LangGraph，但不继承其默认自治语义；系统仅复用其受控执行能力，
+> 所有裁决、提交、降级、边界锁与审计闭锁均保留在 Host 主权域内。
+
+### 10.1 五条契约条款（硬约束）
+
+**Rule 1：Route Commitment Rule**（M34 已实现）
+- 条件边只能基于 `committed_route_token` 跳转，不得直接消费 LLM 原始输出
+- `committed_route_token` 只能由 Host Governor 写入，LLM 节点不可写
+- 令牌枚举：`GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`
+
+**Rule 2：Parallel Branch Pre-Issuance Rule**（后续里程碑实现）
+- 并行分支必须先获得 Host 签发的 `branch_manifest`（含 `branch_id`、`audit_ticket_id`、`allowed_capabilities`）
+- fan-in 时必须通过 `barrier_join()` 校验所有分支的 `audit_commit`
+- 暂不开放带副作用的并行分支
+
+**Rule 3：Transparent Subgraph Rule**（后续里程碑实现）
+- 子图内部节点必须对 Evidence Plane 透明（通过 `compile_governed_subgraph()` 工厂编译）
+- 子图结束时输出 `subgraph_commit_summary`，Evidence Plane 保存展平后的 `graph_trace_flat`
+- 不允许不透明子图存在
+
+**Rule 4：Dual-Clock Rule**（后续里程碑实现）
+- 状态恢复由 Execution Clock（LangGraph checkpoint/interrupt/resume）管理
+- 超时降级由 Policy Clock（Host Supervisor：`budget_ms_remaining`、`deadline_at_mono`）管理
+- 两者职责分离：LangGraph 负责"能不能恢复"，Host 负责"允不允许恢复"
+
+**Rule 5：Phase-Locked Streaming Rule**（后续里程碑实现）
+- Presence Stream（在场流）：非权威，只给前端，不允许作为下游节点输入
+- Commit Stream（提交流）：权威，只在 S1 完成并经过 Governor 后产生
+- Render Stream（渲染流）：只能读取 Commit Stream 对应的快照，不允许回读 Presence Stream
+
+### 10.2 状态字段三分法（M34 已实现）
+
+| 前缀 | 语义 | 写入方 |
+|------|------|--------|
+| `observed_*` | 观测值，描述事实 | Host 观测层 |
+| `proposed_*` | LLM 提案，候选动作 | LLM 节点 |
+| `committed_*` | Host 已提交决策 | Host Governor（唯一） |
+
+示例：
+- `proposed_intent_draft_json`：LLM 提案字段（proposed_* 类）
+- `committed_route_token`：Governor 裁决令牌（committed_* 类）
+
+### 10.3 能力优先级三档分类
+
+**第一档：优先做（收益大、主权风险低）**
+
+| 能力 | 状态 |
+|------|------|
+| `committed_route_token` + Route Commitment Rule | ✅ M34 已实现 |
+| `pre_intent_classifier` 轻量预分类 | ✅ M34 已实现 |
+| `transparent_subgraph` 审计透明子图 | 后续里程碑 |
+| `dual-clock supervision` 双时钟监督 | 后续里程碑 |
+
+**第二档：可以做，但要严格限域**
+
+| 能力 | 限制条件 |
+|------|---------|
+| 只读并行分支 | 必须先有 `branch_manifest`，暂不含副作用分支 |
+| Presence Stream | 只允许向 UI 单向输出，禁止作为下游节点输入 |
+
+**第三档：不建议强求"接近原生体验"**
+
+| 能力 | 原因 |
+|------|------|
+| 图内自主降级 | 降级权属于 Host，不能下放给图 |
+| 基于 LLM state 的自治路由 | 违反主权约束核心条款 |
+| 跨阶段 token 级联动 streaming | 边界锁定成本极高，收益有限 |
+| 带副作用的并行执行 | 审计闭锁难以保证，风险不可控 |
+
+### 10.4 最终定位声明
+
+> LangGraph 在该系统中的定位固定为 **governed runtime**，而非 **autonomous orchestrator**。
+> Host 主权约束决定了图内自治只能存在于执行层，不能进入裁决层。
+> 系统优化目标不是"释放 LangGraph 全能力"，而是"**以最小治理成本换取最高执行收益**"。

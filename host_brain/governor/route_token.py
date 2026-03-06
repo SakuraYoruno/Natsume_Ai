@@ -1,0 +1,111 @@
+"""Committed route token definitions for Governed Runtime Contract (M34-C).
+
+Host Governor 将裁决结果编译为有限令牌（CommittedRouteDecision），
+LangGraph 条件边只读取 committed_route_token，不直接消费 LLM 原始输出。
+
+设计原则（ModelPlane.md §10 Route Commitment Rule）：
+- LLM 只能输出 proposed_* 字段（提案）
+- Host Governor 才能写入 committed_* 字段（裁决）
+- 条件边只能基于 committed_route_token 跳转
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+
+class RouteToken(str, Enum):
+    """Governor 裁决结果的有限令牌枚举。
+
+    每个令牌代表一种不可歧义的路由决策，由 Host Governor 编译后写入
+    graph_state.committed_route_token，LangGraph 条件边只读取此字段。
+    """
+
+    # 裁决通过，允许进入渲染阶段（S2）
+    GOV_OK_RENDER = "GOV_OK_RENDER"
+
+    # 裁决失败，降级到 fallback 链路（core_reasoner_secondary 或模板）
+    GOV_FAIL_FALLBACK = "GOV_FAIL_FALLBACK"
+
+    # 需要 AIRLOCK 人工审核，暂停执行
+    GOV_AIRLOCK_REVIEW = "GOV_AIRLOCK_REVIEW"
+
+    # 降级到 secondary reasoner（primary 超时/格式漂移时）
+    GOV_SECONDARY_REASONER = "GOV_SECONDARY_REASONER"
+
+
+@dataclass(frozen=True)
+class CommittedRouteDecision:
+    """Governor 已提交的路由裁决（不可变）。
+
+    只有 Host Governor 可以创建此对象并写入 graph_state.committed_route_token。
+    LLM 节点不可写入此字段（权限约束由 Host 端点层强制执行）。
+
+    字段说明：
+    - token: 路由令牌（RouteToken 枚举值）
+    - reason_code: 裁决原因代码（APPROVE/REJECT 的具体原因）
+    - committed_at_ms: 编译时间戳（毫秒，单调时钟）
+    - proposer_node_id: 提案节点 ID（通常为 Governor 节点）
+    """
+
+    token: RouteToken
+    reason_code: str
+    committed_at_ms: int
+    proposer_node_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.token, RouteToken):
+            raise TypeError(f"token 必须是 RouteToken 枚举，got {type(self.token).__name__}")
+        if not isinstance(self.reason_code, str) or not self.reason_code.strip():
+            raise ValueError("reason_code 不能为空")
+        if not isinstance(self.committed_at_ms, int) or self.committed_at_ms <= 0:
+            raise ValueError(f"committed_at_ms 必须为正整数，got {self.committed_at_ms!r}")
+        if not isinstance(self.proposer_node_id, str) or not self.proposer_node_id.strip():
+            raise ValueError("proposer_node_id 不能为空")
+
+
+def compile_route_decision(
+    *,
+    approved: bool,
+    reason_code: str | None,
+    committed_at_ms: int,
+    proposer_node_id: str = "governor",
+) -> CommittedRouteDecision:
+    """将 Governor evaluate_intent 的裁决结果编译为 CommittedRouteDecision。
+
+    映射规则（TASK-0316 M34-D）：
+    - approved=True                          → GOV_OK_RENDER
+    - approved=False, reason=AIRLOCK*        → GOV_AIRLOCK_REVIEW
+    - approved=False, reason=其他            → GOV_FAIL_FALLBACK
+
+    Args:
+        approved: Governor 是否批准
+        reason_code: 拒绝原因代码（approved=True 时可为 None）
+        committed_at_ms: 编译时间戳（毫秒）
+        proposer_node_id: 提案节点 ID
+
+    Returns:
+        CommittedRouteDecision（不可变）
+    """
+    if approved:
+        return CommittedRouteDecision(
+            token=RouteToken.GOV_OK_RENDER,
+            reason_code=reason_code or "APPROVE",
+            committed_at_ms=committed_at_ms,
+            proposer_node_id=proposer_node_id,
+        )
+
+    rc = str(reason_code or "REJECT").strip().upper()
+    # AIRLOCK 相关原因代码
+    if "AIRLOCK" in rc or rc in ("EMOTION_GATE_BLOCKED",):
+        token = RouteToken.GOV_AIRLOCK_REVIEW
+    else:
+        token = RouteToken.GOV_FAIL_FALLBACK
+
+    return CommittedRouteDecision(
+        token=token,
+        reason_code=rc,
+        committed_at_ms=committed_at_ms,
+        proposer_node_id=proposer_node_id,
+    )

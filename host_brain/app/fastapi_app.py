@@ -331,6 +331,85 @@ SCENE_CHAT = "CHAT"
 SCENE_EXEC_INTENT = "EXEC_INTENT"
 SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
 SCENE_WORK_CODE = "WORK_CODE"
+# M34-A：新增 VISION_UI 场景常量
+SCENE_VISION_UI = "VISION_UI"
+
+# M34-A：pre_intent_classifier 关键词规则表（优先级从高到低）
+# 规则：纯规则驱动，无 LLM 调用，延迟 < 1ms
+# 优先级：VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT（默认）
+_PIC_VISION_UI_KEYWORDS = frozenset([
+    "截图", "屏幕", "界面", "ui", "screenshot", "screen", "画面", "看一下屏幕",
+    "clawdbot", "窗口", "桌面截图",
+])
+_PIC_WORK_CODE_KEYWORDS = frozenset([
+    "代码", "code", "编程", "写个函数", "写函数", "写代码", "程序", "脚本",
+    "python", "javascript", "typescript", "java", "golang", "rust", "c++",
+    "debug", "调试", "bug", "函数", "class", "类", "算法", "implement",
+    "实现", "开发", "编写", "coding",
+])
+_PIC_WORK_TRANSLATE_KEYWORDS = frozenset([
+    "翻译", "translate", "translation", "訳して", "翻訳", "译成", "译为",
+    "翻成", "英文翻译", "中文翻译", "日文翻译", "日语翻译", "英语翻译",
+    "把这段", "帮我翻", "翻一下", "翻译成",
+])
+_PIC_EXEC_INTENT_KEYWORDS = frozenset([
+    "执行", "运行", "帮我做", "设置", "配置", "启动", "关闭", "打开",
+    "execute", "run", "setup", "configure", "start", "stop", "install",
+    "安装", "卸载", "删除", "创建", "新建", "修改", "更新", "部署",
+    "deploy", "build", "编译", "发送", "提交", "保存",
+])
+
+
+def pre_intent_classifier(user_input: str) -> str:
+    """轻量规则预分类器（M34-A，ModelPlane.md §4.0）。
+
+    在 LLM 调用前，基于关键词/规则快速判断 scene_type_hint。
+    纯规则驱动，无 LLM 调用，延迟 < 1ms。
+
+    优先级（从高到低）：
+    1. VISION_UI：截图/界面/屏幕等
+    2. WORK_CODE：代码/编程/函数等
+    3. WORK_TRANSLATE：翻译/translate/訳して等
+    4. EXEC_INTENT：执行/运行/设置/配置等
+    5. CHAT（默认）：其余所有输入
+
+    注意：
+    - 此函数只影响节点链路选择，不影响 Governor 裁决权
+    - 显式传入的 scene_type 优先级高于预分类结果
+    - 空字符串或无法识别的输入默认返回 CHAT
+
+    Args:
+        user_input: 用户原始输入文本
+
+    Returns:
+        scene_type_hint: CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI
+    """
+    text = str(user_input or "").strip().lower()
+    if not text:
+        return SCENE_CHAT
+
+    # 优先级 1：VISION_UI
+    for kw in _PIC_VISION_UI_KEYWORDS:
+        if kw in text:
+            return SCENE_VISION_UI
+
+    # 优先级 2：WORK_CODE
+    for kw in _PIC_WORK_CODE_KEYWORDS:
+        if kw in text:
+            return SCENE_WORK_CODE
+
+    # 优先级 3：WORK_TRANSLATE
+    for kw in _PIC_WORK_TRANSLATE_KEYWORDS:
+        if kw in text:
+            return SCENE_WORK_TRANSLATE
+
+    # 优先级 4：EXEC_INTENT
+    for kw in _PIC_EXEC_INTENT_KEYWORDS:
+        if kw in text:
+            return SCENE_EXEC_INTENT
+
+    # 默认：CHAT
+    return SCENE_CHAT
 
 
 def _resolve_scene_node_sequence(scene_type: str) -> list[str]:
@@ -1358,6 +1437,7 @@ def _build_chat_graph_config(
     api_key: str | None,
     provider_fn: Callable[[dict[str, Any]], Any],
     scene_type: str = SCENE_CHAT,
+    scene_type_source: str = "explicit",
 ) -> dict[str, Any]:
     _ = provider_fn
     _ = model_id
@@ -1446,6 +1526,7 @@ def _build_chat_graph_config(
             "online_chain": "six_recall + scene_routed_langgraph + forced_renderer_ja",
             "provider": provider_name,
             "scene_type": str(scene_type or SCENE_CHAT).strip().upper(),
+            "scene_type_source": scene_type_source,
             "active_node_count": len(scene_node_sequence),
         },
     }
@@ -1698,8 +1779,15 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             available = bool(llm_runtime["available"])
             provider_fn = llm_runtime["provider_fn"]
 
-            # M33-C：从 request_body 提取 scene_type，传递给图配置构建
-            scene_type = str(request_body.scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
+            # M34-B：scene_type 解析（显式传入优先，否则使用预分类结果）
+            if request_body.scene_type:
+                # 显式传入：优先级最高
+                scene_type = str(request_body.scene_type).strip().upper() or SCENE_CHAT
+                scene_type_source = "explicit"
+            else:
+                # M34-A：使用 pre_intent_classifier 预分类（纯规则，无 LLM 调用）
+                scene_type = pre_intent_classifier(request_body.message)
+                scene_type_source = "pre_classifier"
             graph_config = _build_chat_graph_config(
                 provider_name=provider_name,
                 model_id=model_id,
@@ -1708,6 +1796,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 api_key=llm_api_key,
                 provider_fn=provider_fn,
                 scene_type=scene_type,
+                scene_type_source=scene_type_source,
             )
             dependency_statuses: dict[str, dict[str, Any]] = {
                 node_id: {

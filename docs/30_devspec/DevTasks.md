@@ -5154,6 +5154,194 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m33_2026-03-06.md`。
 - 关联需求：ModelPlane.md §4；NFR-COST-001；NFR-REL-001。
 
+---
+
+## M34 Governed Runtime 第一阶段 + 轻量意图预分类（TASK-0313~0322）
+
+> **目标：** 落地 `LangGraph_Governed_Runtime_Solution` 文档中**第一档优先做**的三项能力，并在 Host 层新增轻量规则预分类器，实现"LLM 调用前的场景快速判断"。
+>
+> **两条主线：**
+> - **主线 A（轻量预分类）**：在 Host 层（`fastapi_app.py` 端点逻辑）新增规则/关键词驱动的 `pre_intent_classifier`，在 LLM 调用前快速判断 `scene_type_hint`，避免用全节点链路处理明显的 CHAT 请求。
+> - **主线 B（Governed Runtime 第一阶段）**：实现 `committed_route_token` 机制，将 Governor 的裁决结果编译为有限令牌，LangGraph 条件边只读取 `committed_route_token`，不直接消费 LLM 原始输出。
+>
+> **依据：** `docs/50_project/LangGraph_Governed_Runtime_Solution_2026-03-06.md` §4.1、§6（第一阶段）、§11.3（第一档能力）；上一轮架构讨论结论（governed runtime 定位固定）
+> **前置：** M33 全部 DONE
+> **完成标准：** 全量测试 0 failed；`pre_intent_classifier` 对 CHAT/EXEC_INTENT/WORK_* 分类准确率 ≥ 95%（基于规则集）；`committed_route_token` 写入 Governor 裁决链路；条件边只读取 committed 字段
+
+### TASK-0313 M34-A：Host 层轻量规则预分类器
+
+- 状态：DONE
+- 任务描述：在 `fastapi_app.py` 中新增 `pre_intent_classifier(user_input: str) -> str` 函数，基于关键词/正则规则在 LLM 调用前快速判断 `scene_type_hint`。不使用 LLM，纯规则驱动，运行在 Host 层。
+- 输入：`user_input: str`（用户原始输入文本）。
+- 输出：`scene_type_hint: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI，默认 CHAT）。
+- 验收标准：
+  - 包含翻译关键词（翻译/translate/訳して等）→ WORK_TRANSLATE；
+  - 包含代码关键词（代码/code/编程/写个函数等）→ WORK_CODE；
+  - 包含执行意图关键词（执行/运行/帮我做/设置等）→ EXEC_INTENT；
+  - 包含 UI/截图关键词（截图/界面/看一下屏幕等）→ VISION_UI；
+  - 其余默认 → CHAT；
+  - 函数纯规则，无 LLM 调用，延迟 < 1ms；
+  - `scene_type_hint` 写入 `payload.scene_type_hint` 供后续链路使用。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §（意图预分类）；ModelPlane.md §4.1。
+
+### TASK-0314 M34-B：预分类结果接入场景路由
+
+- 状态：DONE
+- 任务描述：修改 `/v1/chat` 端点，在未显式传入 `scene_type` 时，使用 `pre_intent_classifier` 的结果作为 `scene_type_hint`，传递给 `_build_chat_graph_config`。显式传入优先级高于预分类结果。
+- 输入：`request_body.scene_type`（可选）；`pre_intent_classifier(user_input)` 结果。
+- 输出：`graph_config` 按最终 `scene_type` 构建；`graph_meta.scene_type_source` 记录来源（`explicit` / `pre_classifier`）。
+- 验收标准：
+  - 显式传入 `scene_type` 时，`scene_type_source = "explicit"`；
+  - 未传入时，使用预分类结果，`scene_type_source = "pre_classifier"`；
+  - `graph_meta` 新增 `scene_type_source` 字段；
+  - 预分类结果不影响 Governor 的最终裁决权（预分类只影响节点链路选择，不影响 intent 裁决）。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：ModelPlane.md §4.1；NFR-COST-001。
+
+### TASK-0315 M34-C：committed_route_token 数据结构定义
+
+- 状态：DONE
+- 任务描述：在 `host_brain/governor/` 中定义 `committed_route_token` 的数据结构和有限令牌枚举，作为 Governor 裁决结果的标准化输出格式。
+- 输入：Governor 裁决逻辑现有输出。
+- 输出：
+  - `host_brain/governor/route_token.py`（新增）：定义 `RouteToken` 枚举和 `CommittedRouteDecision` 数据类；
+  - 令牌枚举：`GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`。
+- 验收标准：
+  - `RouteToken` 枚举包含上述 4 个令牌；
+  - `CommittedRouteDecision` 包含字段：`token: RouteToken`、`reason_code: str`、`committed_at_ms: int`、`proposer_node_id: str`；
+  - 数据类不可变（frozen dataclass 或 Pydantic model）；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/governor/route_token.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1。
+
+### TASK-0316 M34-D：Governor 输出编译为 committed_route_token
+
+- 状态：DONE
+- 任务描述：修改 `host_brain/governor/` 中的 Governor 裁决逻辑，在 `evaluate_intent` 完成后，将裁决结果编译为 `CommittedRouteDecision`，写入 `graph_state.committed_route_token`。
+- 输入：现有 Governor `evaluate_intent` 输出（`approved: bool`、`reason` 等）。
+- 输出：`graph_state.committed_route_token: CommittedRouteDecision`（Host 写入，LLM 不可写）。
+- 验收标准：
+  - `approved=True` → `token = GOV_OK_RENDER`；
+  - `approved=False, reason=AIRLOCK` → `token = GOV_AIRLOCK_REVIEW`；
+  - `approved=False, reason=FALLBACK` → `token = GOV_FAIL_FALLBACK`；
+  - `committed_route_token` 只能由 Governor（Host 层）写入，LLM 节点不可写；
+  - `committed_at_ms` 记录编译时间戳；
+  - 写入后记录到 `intent_log`（`committed_route_token_ref` 字段）。
+- 涉及文件路径：`host_brain/governor/`（修改）；`host_brain/app/fastapi_app.py`（修改）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1、§6。
+
+### TASK-0317 M34-E：状态字段三分法（observed / proposed / committed）
+
+- 状态：DONE
+- 任务描述：在 `graph_state` 的字段命名规范中落实三分法：`observed_*`（观测值）、`proposed_*`（LLM 提案）、`committed_*`（Host 已提交决策）。对现有关键字段进行重命名或注释标注，确保语义清晰。
+- 输入：现有 `graph_state` 字段定义。
+- 输出：
+  - `graph_state` 中新增/重命名字段：`proposed_intent_draft`（原 `intent_draft`）、`committed_route_token`（新增）；
+  - 字段注释标注三分法归属；
+  - 相关测试同步更新。
+- 验收标准：
+  - `proposed_*` 字段只能由 LLM 节点写入；
+  - `committed_*` 字段只能由 Host Governor 写入；
+  - `observed_*` 字段只能由 Host 观测层写入；
+  - 现有测试无回归（字段重命名需同步更新引用）。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`；`host_brain/governor/`；相关测试文件。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1。
+
+### TASK-0318 M34-F：预分类器专项测试
+
+- 状态：DONE
+- 任务描述：新增 `pre_intent_classifier` 专项测试，覆盖各场景的关键词命中、边界情况和默认退化。
+- 输入：`pre_intent_classifier` 函数。
+- 输出：`tests/unit/test_pre_intent_classifier_m34.py`（新增）：T-PIC-01~15。
+- 验收标准：
+  - T-PIC-01：中文翻译关键词 → WORK_TRANSLATE；
+  - T-PIC-02：英文 translate 关键词 → WORK_TRANSLATE；
+  - T-PIC-03：日文翻訳关键词 → WORK_TRANSLATE；
+  - T-PIC-04：代码关键词 → WORK_CODE；
+  - T-PIC-05：编程关键词 → WORK_CODE；
+  - T-PIC-06：执行意图关键词 → EXEC_INTENT；
+  - T-PIC-07：设置/配置关键词 → EXEC_INTENT；
+  - T-PIC-08：截图/界面关键词 → VISION_UI；
+  - T-PIC-09：普通闲聊 → CHAT；
+  - T-PIC-10：空字符串 → CHAT（默认）；
+  - T-PIC-11：混合关键词（优先级测试）→ 按优先级规则返回；
+  - T-PIC-12：`scene_type_source = "pre_classifier"` 当未显式传入时；
+  - T-PIC-13：`scene_type_source = "explicit"` 当显式传入时；
+  - T-PIC-14：`graph_meta.scene_type_source` 字段存在；
+  - T-PIC-15：预分类函数延迟 < 1ms（性能断言）。
+- 涉及文件路径：`tests/unit/test_pre_intent_classifier_m34.py`（新增）。
+- 关联需求：ModelPlane.md §4.1；NFR-PERF-001。
+
+### TASK-0319 M34-G：committed_route_token 专项测试
+
+- 状态：DONE
+- 任务描述：新增 `committed_route_token` 机制专项测试，验证 Governor 编译令牌的正确性和字段不可变性。
+- 输入：`RouteToken`、`CommittedRouteDecision`、Governor 编译逻辑。
+- 输出：`tests/unit/test_committed_route_token_m34.py`（新增）：T-CRT-01~10。
+- 验收标准：
+  - T-CRT-01：`approved=True` → `token = GOV_OK_RENDER`；
+  - T-CRT-02：`approved=False, AIRLOCK` → `token = GOV_AIRLOCK_REVIEW`；
+  - T-CRT-03：`approved=False, FALLBACK` → `token = GOV_FAIL_FALLBACK`；
+  - T-CRT-04：`CommittedRouteDecision` 不可变（修改抛出异常）；
+  - T-CRT-05：`committed_at_ms` 为正整数时间戳；
+  - T-CRT-06：`proposer_node_id` 为 Governor 节点 ID；
+  - T-CRT-07：LLM 节点不能写入 `committed_route_token`（权限校验）；
+  - T-CRT-08：`committed_route_token` 写入后记录到 `intent_log`；
+  - T-CRT-09：`proposed_intent_draft` 字段重命名后引用正确；
+  - T-CRT-10：`observed_*` / `proposed_*` / `committed_*` 字段归属注释存在。
+- 涉及文件路径：`tests/unit/test_committed_route_token_m34.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1、§11.3；ModelPlane.md §0.1、§6。
+
+### TASK-0320 M34-H：ModelPlane.md §4 补充 pre_intent_classifier 规范
+
+- 状态：DONE
+- 任务描述：在 `ModelPlane.md` §4（路由与链路）中补充 `pre_intent_classifier` 的规范条款，明确其定位（Host 层规则引擎，非 LangGraph 节点）、输入输出、优先级规则和与 Governor 的关系。
+- 输入：现有 ModelPlane.md §4.1。
+- 输出：ModelPlane.md §4.0（新增子节）：`pre_intent_classifier` 规范。
+- 验收标准：
+  - 明确 `pre_intent_classifier` 不是 LangGraph 节点，运行在 Host 端点层；
+  - 明确输出只影响节点链路选择，不影响 Governor 裁决权；
+  - 明确 `scene_type_source` 字段的语义；
+  - 明确显式传入优先于预分类结果。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §（意图预分类）；ModelPlane.md §4。
+
+### TASK-0321 M34-I：ModelPlane.md 补充 Governed Runtime Contract 条款
+
+- 状态：DONE
+- 任务描述：在 `ModelPlane.md` 中新增 §10（Governed Runtime Contract），将 `LangGraph_Governed_Runtime_Solution` 文档 §7.1 的五条契约条款正式写入 DevSpec，作为后续开发的硬约束。
+- 输入：`LangGraph_Governed_Runtime_Solution_2026-03-06.md` §7.1、§11.2、§11.3。
+- 输出：ModelPlane.md §10（新增）：Governed Runtime Contract，包含：
+  - Route Commitment Rule（条件边只能基于 `committed_route_token`）；
+  - Parallel Branch Pre-Issuance Rule（并行分支必须先获得 `branch_manifest`，M34 暂不实现，仅写入规范）；
+  - Transparent Subgraph Rule（子图内部节点必须对 Evidence Plane 透明，M34 暂不实现，仅写入规范）；
+  - Dual-Clock Rule（状态恢复与超时降级分别由 Execution Clock / Policy Clock 管理，M34 暂不实现，仅写入规范）；
+  - Phase-Locked Streaming Rule（三类流隔离，M34 暂不实现，仅写入规范）；
+  - 三档能力分类表（第一档/第二档/第三档）。
+- 验收标准：
+  - §10 条款与 `LangGraph_Governed_Runtime_Solution` §7.1 内容一致；
+  - 明确标注 M34 实现范围（Route Commitment Rule + pre_intent_classifier）；
+  - 明确标注后续里程碑待实现项。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §7、§11；ModelPlane.md §0.1。
+
+### TASK-0322 M34-J：M34 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0313~0321 全部 DONE 后，生成 M34 代码审查报告，记录轻量预分类器和 Governed Runtime 第一阶段的实现情况。
+- 输入：TASK-0313~0321 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m34_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0313~0321 全部 9 个任务的变更摘要；
+  - 新增测试 ≥ 25 个，全部通过；
+  - `pre_intent_classifier` 覆盖 5 种场景分类；
+  - `committed_route_token` 机制完整落地；
+  - ModelPlane.md §10 Governed Runtime Contract 写入；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m34_2026-03-06.md`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1、§6、§7、§11；ModelPlane.md §4、§10；NFR-COST-001；NFR-REL-001。
+
 
 
 

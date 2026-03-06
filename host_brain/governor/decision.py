@@ -13,6 +13,7 @@ from host_brain.core.metabolism import (
     normalize_hard_state,
 )
 from host_brain.governor.rules import evaluate_governor_gates
+from host_brain.governor.route_token import CommittedRouteDecision, RouteToken, compile_route_decision
 from host_brain.governor.schemas import (
     DECISION_APPROVE,
     EXPIRED_INTENT,
@@ -66,6 +67,10 @@ class IntentDecisionEngine:
         intent_id = normalized.get("id")
         nonce = normalized.get("nonce")
 
+        # M34-E：状态字段三分法注释（ModelPlane.md §10）
+        # proposed_*：LLM 提案，只能由 LLM 节点写入
+        # observed_*：观测值，只能由 Host 观测层写入
+        # committed_*：Host 已提交决策，只能由 Host Governor 写入
         proposal_row = {
             "request_id": req_id,
             "thread_id": thread_id,
@@ -82,6 +87,7 @@ class IntentDecisionEngine:
             "model_snapshot": model_snapshot,
             "prompt_profile_id": prompt_profile_id,
             "tool_visibility_hash": tool_visibility_hash,
+            # proposed_intent_draft_json：LLM 提案字段（proposed_* 类）
             "proposed_intent_draft_json": parse.normalized_json,
             "lint_result": parse.lint_result,
         }
@@ -231,6 +237,20 @@ class IntentDecisionEngine:
             "stage": "S_INTENT_OK",
             "ts_ms": now,
         }
+        # M34-D：编译 committed_route_token（GOV_OK_RENDER）
+        committed = compile_route_decision(
+            approved=True,
+            reason_code="APPROVE",
+            committed_at_ms=now,
+            proposer_node_id=proposer_node_id,
+        )
+        row["committed_route_token_ref"] = committed.token.value
+        row["committed_route_token"] = {
+            "token": committed.token.value,
+            "reason_code": committed.reason_code,
+            "committed_at_ms": committed.committed_at_ms,
+            "proposer_node_id": committed.proposer_node_id,
+        }
         return self._finalize_governor_row(row)
 
     def _reject(
@@ -245,7 +265,15 @@ class IntentDecisionEngine:
         rule_trace: list[dict[str, Any]],
         ts_ms: int,
         snapshot_refs: dict[str, Any] | None = None,
+        proposer_node_id: str = "governor",
     ) -> dict[str, Any]:
+        # M34-D：编译 committed_route_token（REJECT 路径）
+        committed = compile_route_decision(
+            approved=False,
+            reason_code=reason_code,
+            committed_at_ms=ts_ms,
+            proposer_node_id=proposer_node_id,
+        )
         row = {
             "request_id": request_id,
             "thread_id": thread_id,
@@ -257,6 +285,13 @@ class IntentDecisionEngine:
             "snapshot_refs": snapshot_refs or {"governance_snapshot": "runtime"},
             "stage": stage,
             "ts_ms": ts_ms,
+            "committed_route_token_ref": committed.token.value,
+            "committed_route_token": {
+                "token": committed.token.value,
+                "reason_code": committed.reason_code,
+                "committed_at_ms": committed.committed_at_ms,
+                "proposer_node_id": committed.proposer_node_id,
+            },
         }
         return self._finalize_governor_row(row)
 
