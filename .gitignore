@@ -102,3 +102,9 @@ configs/secrets/key_profiles.runtime.json
 .vts_token
 GPT_SoVITS/
 data/evidence/*.db
+
+# --- trial run reports (runtime-generated, never commit) ---
+docs/60_trace/trial_run_reports/
+
+# --- Windows device file artifacts ---
+nul
