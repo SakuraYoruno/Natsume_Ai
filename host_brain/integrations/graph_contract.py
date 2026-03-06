@@ -31,6 +31,14 @@ STATUS_DEGRADED = "DEGRADED"
 STATUS_FAILED = "FAILED"
 # M35-K：AIRLOCK 暂停状态（GOV_AIRLOCK_REVIEW 令牌触发，等待人工审核）
 STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"
+# M36-L：Policy Clock 超时状态
+STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"
+
+# M36-G：Dual-Clock 事件类型常量
+CLOCK_EVENT_EXEC_TIMEOUT = "EXEC_TIMEOUT"
+CLOCK_EVENT_POLICY_TIMEOUT = "POLICY_TIMEOUT"
+# M36-G：默认全局策略超时（30 秒）
+DEFAULT_POLICY_TIMEOUT_MS = 30_000
 
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
@@ -67,6 +75,15 @@ class GraphState(TypedDict):
     # M35-A：Transparent Subgraph 字段（ModelPlane.md §10 Rule 3）
     # subgraph_trace：透明子图节点执行追踪（只能由 compile_governed_subgraph 写入）
     subgraph_trace: list[dict[str, Any]]
+    # M36-B：Dual-Clock Supervision 字段（ModelPlane.md §10 Rule 2）
+    # policy_start_ms：图级策略时钟启动时间戳（毫秒）
+    policy_start_ms: int | None
+    # policy_timeout_ms：全局策略超时阈值（毫秒），超时时强制终止图执行
+    policy_timeout_ms: int | None
+    # clock_events：时钟事件列表（EXEC_TIMEOUT / POLICY_TIMEOUT）
+    clock_events: list[dict[str, Any]]
+    # node_exec_stats：节点执行统计（exec_start_ms / exec_end_ms / exec_duration_ms）
+    node_exec_stats: dict[str, dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +265,38 @@ def pick_api_key(*, state: GraphState, provider_name: str, model_node_id: str | 
 
 def _issue(*, reason_code: str, detail: str, failed_artifact: str) -> dict[str, Any]:
     return {"check_id": S_ORCH_VALIDATE, "reason_code": str(reason_code), "detail": str(detail), "failed_artifact": str(failed_artifact)}
+
+
+# ---------------------------------------------------------------------------
+# M36-G：Dual-Clock 辅助函数
+# ---------------------------------------------------------------------------
+
+def build_clock_event(
+    *,
+    event_type: str,
+    node_id: str,
+    elapsed_ms: int,
+    threshold_ms: int,
+) -> dict[str, Any]:
+    """构建时钟事件字典，供 Evidence Plane 写入和 clock_events 追加。
+
+    Args:
+        event_type: 事件类型（EXEC_TIMEOUT / POLICY_TIMEOUT）
+        node_id: 触发事件的节点 ID
+        elapsed_ms: 已耗时（毫秒）
+        threshold_ms: 超时阈值（毫秒）
+
+    Returns:
+        时钟事件字典（含 event_type、node_id、elapsed_ms、threshold_ms、ts_ms）
+    """
+    import time as _time
+    return {
+        "event_type": str(event_type),
+        "node_id": str(node_id),
+        "elapsed_ms": int(elapsed_ms),
+        "threshold_ms": int(threshold_ms),
+        "ts_ms": int(_time.time() * 1000),
+    }
 
 
 # ---------------------------------------------------------------------------

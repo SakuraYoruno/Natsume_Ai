@@ -20,9 +20,11 @@ from host_brain.core.errors import (
 )
 from host_brain.integrations.graph_contract import (
     GraphState, NodeHandler, GatewayFactory,
-    STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK,
+    CLOCK_EVENT_POLICY_TIMEOUT,
+    STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK, STATUS_POLICY_TIMEOUT,
     build_model_param_hash, extract_governance_refs, normalize_dependency_status, pick_api_key,
 )
+from host_brain.integrations.graph_clock import DualClockSupervisor
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
@@ -34,11 +36,14 @@ class GraphExecutor:
     """Executes graph nodes step-by-step using LangGraph runtime."""
 
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
-                 default_timeout_ms: int = 5_000, ledger: Any = None) -> None:
+                 default_timeout_ms: int = 5_000, ledger: Any = None,
+                 evidence_plane: Any = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
         self._ledger = ledger
+        # M36-K：Evidence Plane 实时写入（可选，默认 None）
+        self._evidence_plane = evidence_plane
 
     def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
@@ -71,23 +76,48 @@ class GraphExecutor:
                 "committed_route_token": None,
             }
 
-        binding = (state.get("node_bindings") or {}).get(node_id)
-        if binding is None:
-            return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"node binding missing: {node_id}")
-        dep_status = normalize_dependency_status((state.get("dependency_statuses") or {}).get(node_id))
-        handler_id = str(binding.get("handler_id") or "")
-        if not dep_status["available"]:
-            return handle_dependency_unavailable(state=state, node_id=node_id, handler_id=handler_id,
-                                                  detail=dep_status["detail"] or f"dependency unavailable for node={node_id}")
-        try:
-            output = (self._invoke_handler(handler_id=handler_id, node_id=node_id, state=state)
-                      if handler_id else self._invoke_model_node(node_id=node_id, binding=binding, state=state))
-        except TimeoutError:
-            return handle_timeout(state=state, node_id=node_id, handler_id=handler_id)
-        except KeyError as exc:
-            return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"{exc}")
-        except Exception as exc:
-            return handle_execution_error(state=state, node_id=node_id, handler_id=handler_id, error=exc)
+        # M36-D：Dual-Clock Supervision — 在节点执行前后使用双时钟监督
+        supervisor = DualClockSupervisor(
+            policy_start_ms=state.get("policy_start_ms"),
+            policy_timeout_ms=int(state.get("policy_timeout_ms") or self._default_timeout_ms),
+            node_timeout_ms=int(state.get("timeout_ms") or self._default_timeout_ms),
+        )
+        with supervisor.supervise_node(node_id=node_id) as clock_ctx:
+            # Policy Clock 超时：强制终止图执行
+            if clock_ctx.policy_timeout_event is not None:
+                clock_events = list(state.get("clock_events") or [])
+                clock_events.append(clock_ctx.policy_timeout_event.to_dict())
+                return {
+                    **state,
+                    "status": STATUS_FAILED,
+                    "reason_code": CLOCK_EVENT_POLICY_TIMEOUT,
+                    "detail": f"Policy Clock 超时，强制终止图执行，节点={node_id}",
+                    "pending_node_id": None,
+                    "clock_events": clock_events,
+                }
+
+            binding = (state.get("node_bindings") or {}).get(node_id)
+            if binding is None:
+                return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"node binding missing: {node_id}")
+            dep_status = normalize_dependency_status((state.get("dependency_statuses") or {}).get(node_id))
+            handler_id = str(binding.get("handler_id") or "")
+            if not dep_status["available"]:
+                return handle_dependency_unavailable(state=state, node_id=node_id, handler_id=handler_id,
+                                                      detail=dep_status["detail"] or f"dependency unavailable for node={node_id}")
+            try:
+                output = (self._invoke_handler(handler_id=handler_id, node_id=node_id, state=state)
+                          if handler_id else self._invoke_model_node(node_id=node_id, binding=binding, state=state))
+            except TimeoutError:
+                return handle_timeout(state=state, node_id=node_id, handler_id=handler_id)
+            except KeyError as exc:
+                return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"{exc}")
+            except Exception as exc:
+                return handle_execution_error(state=state, node_id=node_id, handler_id=handler_id, error=exc)
+
+        # 节点执行完成：收集双时钟事件和执行统计
+        new_clock_events = list(state.get("clock_events") or []) + supervisor.collect_clock_events()
+        new_exec_stats = dict(state.get("node_exec_stats") or {})
+        new_exec_stats.update(supervisor.collect_exec_stats())
 
         payload = dict(output or state.get("payload") or {})
         model_calls = list(state.get("model_calls") or [])
@@ -108,9 +138,27 @@ class GraphExecutor:
         trace.append({"node_id": node_id, "handler_id": handler_id, "status": "OK", "reason_code": orch_reason, "detail": orch_detail})
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
-        return {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
+
+        new_state = {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
                 "status": (orch_status if orch_status in {STATUS_OK, STATUS_DEGRADED, STATUS_FAILED} else STATUS_OK),
-                "reason_code": orch_reason, "detail": orch_detail}
+                "reason_code": orch_reason, "detail": orch_detail,
+                # M36-D：双时钟字段更新
+                "clock_events": new_clock_events,
+                "node_exec_stats": new_exec_stats,
+                }
+
+        # M36-K：Evidence Plane 实时写入单节点 trace
+        if self._evidence_plane is not None:
+            try:
+                self._evidence_plane.write_trace(
+                    request_id=str(state.get("request_id") or ""),
+                    graph_id=str(state.get("graph_id") or ""),
+                    trace=[trace[-1]] if trace else [],
+                )
+            except Exception:
+                pass  # 静默降级
+
+        return new_state
 
     def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -> dict[str, Any]:
         handler = self._handlers.get(handler_id)

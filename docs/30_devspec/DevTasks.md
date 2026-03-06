@@ -5548,4 +5548,258 @@ TASK-XXXX 标题
 
 
 
+---
+
+## M36 Dual-Clock Supervision + Evidence Plane 写入
+
+- **里程碑编号**：M36
+- **标题**：Dual-Clock Supervision（双时钟监督）+ Evidence Plane SQLite 写入
+- **任务范围**：TASK-0335 ~ TASK-0348（共 14 个任务）
+- **前置依赖**：M35 DONE（committed_route_token 条件边 + transparent_subgraph 第一阶段）
+- **目标**：
+  1. 实现 Dual-Clock Supervision（Execution Clock + Policy Clock），集成到 `graph_executor.py`
+  2. 实现 Evidence Plane SQLite 写入（`graph_evidence.py`），将 trace/subgraph_commit_summary 持久化
+  3. 专项测试覆盖（T-DCK-01~10 + T-EVP-01~08）
+  4. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0335 M36-A：新建 graph_clock.py（Dual-Clock 核心实现）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_clock.py`，实现双时钟监督机制。
+  - **Execution Clock**：记录每个节点的执行开始时间戳（`exec_start_ms`）和结束时间戳（`exec_end_ms`），计算节点耗时（`exec_duration_ms`），超过节点超时阈值时触发 `EXEC_TIMEOUT` 事件。
+  - **Policy Clock**：记录整个图执行的策略时钟（`policy_start_ms`），在每个节点执行前检查是否超过全局策略超时（`policy_timeout_ms`），超时时触发 `POLICY_TIMEOUT` 事件，强制终止图执行。
+- 输入：节点 ID、节点超时阈值（`node_timeout_ms`）、全局策略超时（`policy_timeout_ms`）。
+- 输出：
+  - `host_brain/integrations/graph_clock.py`（新增）；
+  - `ExecutionClock`：节点级执行时钟（`start()` / `stop()` / `elapsed_ms` / `is_timeout`）；
+  - `PolicyClock`：图级策略时钟（`start()` / `check_policy_timeout()` / `elapsed_ms`）；
+  - `ClockEvent`：时钟事件数据类（`event_type`、`node_id`、`elapsed_ms`、`threshold_ms`、`ts_ms`）；
+  - `DualClockSupervisor`：双时钟监督器，组合 ExecutionClock + PolicyClock，提供 `supervise_node()` 上下文管理器。
+- 验收标准：
+  - `ExecutionClock.is_timeout` 在 `elapsed_ms > node_timeout_ms` 时返回 True；
+  - `PolicyClock.check_policy_timeout()` 在全局超时时返回 `ClockEvent(event_type="POLICY_TIMEOUT")`；
+  - `DualClockSupervisor.supervise_node()` 作为上下文管理器，节点执行前检查 Policy Clock，节点执行后记录 Execution Clock；
+  - 所有时钟操作纯内存，无 I/O 依赖；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_clock.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0336 M36-B：GraphState 新增双时钟字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增双时钟相关字段。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.policy_start_ms: int | None`（图级策略时钟启动时间戳）；
+  - `GraphState.policy_timeout_ms: int | None`（全局策略超时阈值，毫秒）；
+  - `GraphState.clock_events: list[dict[str, Any]]`（时钟事件列表，含 EXEC_TIMEOUT / POLICY_TIMEOUT）；
+  - `GraphState.node_exec_stats: dict[str, dict[str, Any]]`（节点执行统计，含 exec_start_ms / exec_end_ms / exec_duration_ms）。
+- 验收标准：
+  - `GraphState` 包含上述四个新字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归（TypedDict 新增字段向后兼容）。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0337 M36-C：graph_runtime.py 初始化双时钟字段
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化双时钟字段：`policy_start_ms`（当前时间戳）、`policy_timeout_ms`（从 `graph_config` 或 `timeout_ms` 提取）、`clock_events`（空列表）、`node_exec_stats`（空字典）。
+- 输入：`graph_config.policy_timeout_ms`（可选，默认等于 `timeout_ms`）。
+- 输出：`initial_state` 包含双时钟初始值。
+- 验收标准：
+  - `initial_state.policy_start_ms` 为当前时间戳（毫秒）；
+  - `initial_state.policy_timeout_ms` 从 `graph_config` 提取，默认等于 `timeout_ms`；
+  - `initial_state.clock_events = []`；
+  - `initial_state.node_exec_stats = {}`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0338 M36-D：graph_executor.py 集成 DualClockSupervisor
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行前后使用 `DualClockSupervisor.supervise_node()` 上下文管理器：
+  - 节点执行前：检查 Policy Clock，若超时则触发 `POLICY_TIMEOUT` 事件，强制终止图执行（`status = STATUS_FAILED`，`reason_code = "POLICY_TIMEOUT"`）；
+  - 节点执行后：记录 Execution Clock 统计（`exec_start_ms`、`exec_end_ms`、`exec_duration_ms`），若节点超时则追加 `EXEC_TIMEOUT` 事件到 `clock_events`；
+  - 时钟事件写入 `state.clock_events`，节点统计写入 `state.node_exec_stats`。
+- 输入：`DualClockSupervisor`、`state.policy_start_ms`、`state.policy_timeout_ms`。
+- 输出：`state.clock_events` 和 `state.node_exec_stats` 已更新。
+- 验收标准：
+  - Policy Clock 超时时，图执行强制终止（`status = STATUS_FAILED`，`reason_code = "POLICY_TIMEOUT"`）；
+  - Execution Clock 超时时，`clock_events` 追加 `EXEC_TIMEOUT` 事件（不强制终止，仅记录）；
+  - `node_exec_stats[node_id]` 包含 `exec_start_ms`、`exec_end_ms`、`exec_duration_ms`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0339 M36-E：新建 graph_evidence.py（Evidence Plane SQLite 写入）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_evidence.py`，实现 Evidence Plane 的 SQLite 轻量写入。
+  - `EvidencePlane`：Evidence Plane 主类，封装 SQLite 连接，提供 `write_trace()`、`write_subgraph_summary()`、`write_clock_events()` 方法；
+  - 数据库文件路径：`data/evidence/evidence.db`（可通过环境变量 `EVIDENCE_DB_PATH` 覆盖）；
+  - 表结构：`graph_trace`（request_id、graph_id、node_id、status、reason_code、detail、ts_ms）、`subgraph_summary`（request_id、subgraph_id、node_count、success_count、fail_count、committed_at_ms、graph_trace_flat_json）、`clock_events`（request_id、graph_id、event_type、node_id、elapsed_ms、threshold_ms、ts_ms）；
+  - 写入失败时不影响主流程（静默降级，记录到 Python logging）。
+- 输入：`GraphState`（含 trace、subgraph_trace、clock_events）。
+- 输出：
+  - `host_brain/integrations/graph_evidence.py`（新增）；
+  - `EvidencePlane.write_trace(request_id, graph_id, trace)` → 写入 `graph_trace` 表；
+  - `EvidencePlane.write_subgraph_summary(request_id, summary)` → 写入 `subgraph_summary` 表；
+  - `EvidencePlane.write_clock_events(request_id, graph_id, clock_events)` → 写入 `clock_events` 表；
+  - `get_evidence_plane()` 单例工厂函数。
+- 验收标准：
+  - `write_trace` 将 trace 列表写入 SQLite `graph_trace` 表；
+  - `write_subgraph_summary` 将 subgraph_commit_summary 写入 SQLite `subgraph_summary` 表；
+  - `write_clock_events` 将 clock_events 写入 SQLite `clock_events` 表；
+  - 写入失败时静默降级（不抛出异常，记录 logging.warning）；
+  - 数据库文件路径可通过 `EVIDENCE_DB_PATH` 环境变量覆盖；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0340 M36-F：graph_runtime.py 集成 Evidence Plane 写入
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在图执行完成后调用 `EvidencePlane` 写入 trace、subgraph_commit_summary 和 clock_events。
+- 输入：图执行完成后的 `final_state`（含 trace、subgraph_trace、clock_events）。
+- 输出：Evidence Plane 已写入（trace + subgraph_summary + clock_events）。
+- 验收标准：
+  - 图执行完成后调用 `evidence_plane.write_trace()`；
+  - 若 `final_state.payload.subgraph_commit_summary` 存在，调用 `evidence_plane.write_subgraph_summary()`；
+  - 若 `final_state.clock_events` 非空，调用 `evidence_plane.write_clock_events()`；
+  - Evidence Plane 写入失败时不影响主流程（静默降级）；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0341 M36-G：graph_contract.py 新增双时钟相关常量和辅助函数
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增双时钟相关常量和辅助函数。
+- 输入：现有常量定义区域。
+- 输出：
+  - `CLOCK_EVENT_EXEC_TIMEOUT = "EXEC_TIMEOUT"` 常量；
+  - `CLOCK_EVENT_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量；
+  - `DEFAULT_POLICY_TIMEOUT_MS = 30_000`（默认全局策略超时 30 秒）；
+  - `build_clock_event(event_type, node_id, elapsed_ms, threshold_ms) -> dict` 辅助函数。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - `build_clock_event` 返回包含 `event_type`、`node_id`、`elapsed_ms`、`threshold_ms`、`ts_ms` 的字典；
+  - 在 `graph_clock.py` 和 `graph_executor.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0342 M36-H：Dual-Clock Supervision 专项测试（T-DCK-01~10）
+
+- 状态：DONE
+- 任务描述：新增 Dual-Clock Supervision 专项测试，验证双时钟监督机制的正确性。
+- 输入：`DualClockSupervisor`、`ExecutionClock`、`PolicyClock`、`GraphExecutor._run_single_step`。
+- 输出：`tests/unit/test_dual_clock_supervision_m36.py`（新增）：T-DCK-01~10。
+- 验收标准：
+  - T-DCK-01：ExecutionClock.start/stop 正确记录 exec_start_ms 和 exec_end_ms；
+  - T-DCK-02：ExecutionClock.elapsed_ms 正确计算耗时；
+  - T-DCK-03：ExecutionClock.is_timeout 在超时时返回 True；
+  - T-DCK-04：PolicyClock.check_policy_timeout 在全局超时时返回 POLICY_TIMEOUT 事件；
+  - T-DCK-05：PolicyClock.check_policy_timeout 在未超时时返回 None；
+  - T-DCK-06：DualClockSupervisor.supervise_node 节点执行前检查 Policy Clock；
+  - T-DCK-07：Policy Clock 超时时图执行强制终止（status = STATUS_FAILED）；
+  - T-DCK-08：Execution Clock 超时时 clock_events 追加 EXEC_TIMEOUT 事件；
+  - T-DCK-09：node_exec_stats 包含正确的 exec_duration_ms；
+  - T-DCK-10：build_clock_event 返回正确的字典结构。
+- 涉及文件路径：`tests/unit/test_dual_clock_supervision_m36.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+
+### TASK-0343 M36-I：Evidence Plane 专项测试（T-EVP-01~08）
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane SQLite 写入专项测试，验证写入正确性和静默降级行为。
+- 输入：`EvidencePlane`、`get_evidence_plane`。
+- 输出：`tests/unit/test_evidence_plane_m36.py`（新增）：T-EVP-01~08。
+- 验收标准：
+  - T-EVP-01：write_trace 将 trace 写入 SQLite graph_trace 表；
+  - T-EVP-02：write_subgraph_summary 将 summary 写入 SQLite subgraph_summary 表；
+  - T-EVP-03：write_clock_events 将 clock_events 写入 SQLite clock_events 表；
+  - T-EVP-04：写入失败时静默降级（不抛出异常）；
+  - T-EVP-05：数据库路径可通过 EVIDENCE_DB_PATH 环境变量覆盖；
+  - T-EVP-06：graph_trace 表包含正确的字段（request_id、node_id、status 等）；
+  - T-EVP-07：subgraph_summary 表包含正确的字段（subgraph_id、node_count 等）；
+  - T-EVP-08：clock_events 表包含正确的字段（event_type、elapsed_ms 等）。
+- 涉及文件路径：`tests/unit/test_evidence_plane_m36.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0344 M36-J：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 `dual-clock supervision` 和 `Evidence Plane 写入` 标记为 M36 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M36 实现项标注 ✅）。
+- 验收标准：
+  - `dual-clock supervision` 标注 ✅ M36 已实现；
+  - `Evidence Plane SQLite 写入` 标注 ✅ M36 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0345 M36-K：graph_executor.py 新增 GraphExecutor.ledger 属性集成
+
+- 状态：DONE
+- 任务描述：修改 `GraphExecutor.__init__`，接受 `evidence_plane` 参数（`EvidencePlane | None`），在节点执行完成后调用 `evidence_plane.write_trace()` 写入单节点 trace（实时写入，不等待图执行完成）。
+- 输入：`evidence_plane: EvidencePlane | None`（可选，默认 None）。
+- 输出：`GraphExecutor._evidence_plane` 属性；节点执行后实时写入 trace。
+- 验收标准：
+  - `GraphExecutor.__init__` 接受 `evidence_plane` 参数；
+  - 节点执行完成后调用 `evidence_plane.write_trace()`（若 evidence_plane 非 None）；
+  - evidence_plane 写入失败时不影响节点执行（静默降级）；
+  - 现有测试无回归（evidence_plane=None 时行为不变）。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0346 M36-L：graph_contract.py 新增 STATUS_POLICY_TIMEOUT 常量
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 `STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量，供 `graph_executor.py`、`graph_clock.py` 和测试使用。
+- 输入：现有常量定义区域。
+- 输出：`STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - 在 `graph_executor.py` 和 `graph_clock.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 2。
+
+### TASK-0347 M36-M：data/evidence/ 目录初始化
+
+- 状态：DONE
+- 任务描述：在项目根目录创建 `data/evidence/` 目录，添加 `.gitkeep` 文件（保持目录结构），并在 `.gitignore` 中添加 `data/evidence/*.db` 规则（不提交 SQLite 数据库文件）。
+- 输入：项目根目录。
+- 输出：`data/evidence/.gitkeep`（新增）；`.gitignore` 更新。
+- 验收标准：
+  - `data/evidence/` 目录存在；
+  - `.gitignore` 包含 `data/evidence/*.db` 规则；
+  - `data/evidence/.gitkeep` 文件存在。
+- 涉及文件路径：`data/evidence/.gitkeep`（新增）；`.gitignore`（修改）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0348 M36-N：M36 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0335~0347 全部 DONE 后，生成 M36 代码审查报告，记录 Dual-Clock Supervision 和 Evidence Plane 写入的实现情况。
+- 输入：TASK-0335~0347 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m36_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0335~0347 全部 13 个任务的变更摘要；
+  - 新增测试 ≥ 18 个（T-DCK-01~10 + T-EVP-01~08），全部通过；
+  - Dual-Clock Supervision 完整落地（ExecutionClock + PolicyClock + DualClockSupervisor）；
+  - Evidence Plane SQLite 写入实现（graph_evidence.py）；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m36_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §5.3、§6.1、§11.2。
+
+
+
 

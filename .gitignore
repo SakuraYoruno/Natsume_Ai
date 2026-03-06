@@ -101,3 +101,4 @@ configs/secrets/key_profiles.runtime.json
 # --- local VTS / GPT-SoVITS runtime artifacts ---
 .vts_token
 GPT_SoVITS/
+data/evidence/*.db

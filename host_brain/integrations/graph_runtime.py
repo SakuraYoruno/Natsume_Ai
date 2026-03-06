@@ -17,6 +17,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 from host_brain.integrations.graph_contract import (
     DEFAULT_MODEL_PLANE_DIR,
+    DEFAULT_POLICY_TIMEOUT_MS,
     GraphRunResult,
     GraphState,
     GatewayFactory,
@@ -147,6 +148,10 @@ class GraphRuntimeContract:
             ledger=self.ledger,
         )
         compiled = executor.compile_runtime_graph()
+        # M36-C：初始化双时钟字段
+        policy_timeout_ms = int(
+            graph_config.get("policy_timeout_ms") or timeout_limit or DEFAULT_POLICY_TIMEOUT_MS
+        )
         initial_state: GraphState = {
             "request_id": request_id,
             "graph_id": str(graph_config.get("graph_id") or ""),
@@ -170,8 +175,16 @@ class GraphRuntimeContract:
             "committed_route_token_detail": (dict(payload or {})).get("committed_route_token_detail") or None,
             # M35-A：透明子图节点执行追踪（初始为空列表）
             "subgraph_trace": [],
+            # M36-C：双时钟字段初始化
+            "policy_start_ms": now_value,
+            "policy_timeout_ms": policy_timeout_ms,
+            "clock_events": [],
+            "node_exec_stats": {},
         }
         state = compiled.invoke(initial_state)
+
+        # M36-F：图执行完成后写入 Evidence Plane
+        self._write_evidence(request_id=request_id, state=state)
 
         # 4. 最终化输出
         return self._finalize(
@@ -190,6 +203,27 @@ class GraphRuntimeContract:
 
     def _default_gateway_factory(self, **kwargs: Any) -> LlmGatewayContract:
         return LlmGatewayContract(**kwargs)
+
+    def _write_evidence(self, *, request_id: str, state: Any) -> None:
+        """M36-F：图执行完成后写入 Evidence Plane（静默降级）。"""
+        try:
+            from host_brain.integrations.graph_evidence import get_evidence_plane
+            ep = get_evidence_plane()
+            graph_id = str((state or {}).get("graph_id") or "")
+            # 写入 trace
+            trace = list((state or {}).get("trace") or [])
+            if trace:
+                ep.write_trace(request_id=request_id, graph_id=graph_id, trace=trace)
+            # 写入 subgraph_commit_summary
+            summary = ((state or {}).get("payload") or {}).get("subgraph_commit_summary")
+            if summary:
+                ep.write_subgraph_summary(request_id=request_id, summary=summary)
+            # 写入 clock_events
+            clock_events = list((state or {}).get("clock_events") or [])
+            if clock_events:
+                ep.write_clock_events(request_id=request_id, graph_id=graph_id, clock_events=clock_events)
+        except Exception:
+            pass  # 静默降级，不影响主流程
 
     def _finalize(
         self,
