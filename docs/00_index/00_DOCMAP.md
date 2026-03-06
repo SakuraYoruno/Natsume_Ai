@@ -1,10 +1,10 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.1
-日期：2026-03-03
+版本：v1.2
+日期：2026-03-06
 
-本仓库所有“应该读什么、从哪里开工、哪些文档禁止当任务来源”，以本文件为准。
+本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
 0）总览关系图（唯一口径）
 
@@ -22,7 +22,7 @@
 
 1）白皮书（宪法 + 人格/风格设定）
 - docs/10_whitepaper/whitepaper_constitution_persona.md
-  用途：定义不可变边界、不变量、真相/风格层级、人格表达约束；作为“法律与人设”。含 sys_mode/Focus 子状态、Scheduler 宪法约束、NARRATIVE_ONLY 宪法定位、PERF/SCHED 系列错误码。
+  用途：定义不可变边界、不变量、真相/风格层级、人格表达约束；作为"法律与人设"。含 sys_mode/Focus 子状态、Scheduler 宪法约束、NARRATIVE_ONLY 宪法定位、PERF/SCHED 系列错误码。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
 2）需求文档（PRD）
@@ -40,7 +40,7 @@
   读者：实现层（唯一任务入口）。
 
 - docs/30_devspec/ModelPlane.md
-  用途：模型平面规格（多模型节点分工、路由、降级、出网最小化、审计字段、回归口径）；用于“可回放、可追责”的模型配置治理。
+  用途：模型平面规格（多模型节点分工、路由、降级、出网最小化、审计字段、回归口径）；用于"可回放、可追责"的模型配置治理。
   读者：MASTER、实现层（按契约实现与验证）。
 
 4）代理行为规范（实现层）
@@ -54,16 +54,73 @@
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
 - docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md
 - docs/50_project/ExternalServices_Config.md
-  用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；不包含终端指令片段。
+- docs/50_project/vts_hotkey_config_guide.md
+  用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；配置指南与外部服务清单；不包含终端指令片段。
   读者：Project（主要）、MASTER。实现层不应把它当任务来源。
 
 6）可追溯性（Trace）
 - docs/60_trace/requirements_trace.md
-- 可选：docs/60_trace/requirements_trace.csv
-- docs/60_trace/flows/index.md
-  用途：审阅“需求→设计→任务→测试”覆盖情况；以及 Flow 指针与索引的一致性。
+  用途：审阅"需求→设计→任务→测试"覆盖情况。
   口径：若 csv 未维护或滞后，以 md 为准。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
+
+- docs/60_trace/flows/index.md
+  用途：Flow 指针与索引的一致性。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/risk_registry.md
+  用途：风险登记册，记录已识别风险、缓解措施与状态。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/test_report_2026-03-05.md
+  用途：全量测试报告（2026-03-05）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/EDGE_OPTIMIZATION_AND_TEST_REPORT_2026-03-04.md
+  用途：Edge 优化与测试报告（2026-03-04）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/UI_UPGRADE_CHANGELOG.md
+  用途：UI 升级变更日志。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md
+  用途：模型本地/云端切换变更日志（2026-03-05）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/ENV_SINGLE_SOURCE_MIGRATION_2026-03-04.md
+  用途：环境变量单一来源迁移记录（2026-03-04）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/CANON_VECTOR_PROJECTION_2026-03-04.md
+  用途：Canon 向量投影分析（2026-03-04）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md
+  docs/60_trace/HOST_CHAT_REAL_CHAIN_JA_RENDER_VERIFY_2026-03-05.md
+  docs/60_trace/HOST_CHAT_REAL_CHAIN_TRACE_req_*.md
+  docs/60_trace/HOST_FULL_CHAIN_REAL_RUN_2026-03-05.md
+  docs/60_trace/HOST_REAL_RUN_TEST_2026-03-04.md
+  用途：真实链路运行追踪报告（按日期/请求ID归档）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/HOST_CHAT_*_req_*.json
+  docs/60_trace/CANON_STYLE_SYNC_*.json
+  docs/60_trace/canon_sync_summary_*.json
+  用途：运行时原始 JSON 追踪数据（模型控制、检索事件、Canon 同步等）。
+  读者：MASTER（调试/回放用）。
+
+- docs/60_trace/trial_run_reports/
+  用途：自动化试运行报告（T1-x 系列，按时间戳归档）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/code_reviews/
+  用途：代码审查报告归档目录（含全量审查报告与各里程碑专项审查报告）。
+  命名规范：
+    - 全量审查：full_code_review_report_YYYY-MM-DD[-vN|-mXX].md
+    - 里程碑专项：code_review_mXX_YYYY-MM-DD.md
+    - 仓库分析：repo_code_analysis_report_YYYY-MM-DD.md
+  读者：MASTER、Project（文档代理）。
 
 7）提示词入口
 - prompts/CODEX_PROMPT.md
@@ -81,12 +138,20 @@
   用途：灵魂情感架构优化设计留痕文档（2026-03-05）。记录五大优化方向：①情绪连续体 EmotionVector、②Bond 情感质感层、③情感记忆标注、④emotion_pulse 动态槽位、⑤主动情感触发器。含完整伪代码设计方案、优先级排序与安全约束说明。待实施，不作为当前任务来源。
   读者：MASTER、Project（文档代理）。
 
+- docs/15_theory/LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS_2026-03-06.md
+  用途：LangGraph 高级能力与 Host 治理约束冲突分析（2026-03-06）。分析五项冲突点（条件边、并行分支、子图、断点续跑、流式输出）与当前系统约束的关系。
+  读者：MASTER、Project（文档代理）。
+
+- docs/15_theory/LangGraph_Governed_Runtime_Solution_2026-03-06.md
+  用途：LangGraph Governed Runtime 更优解法方案（2026-03-06）。提出三层架构（Policy Plane / Execution Plane / Evidence Plane）、Host Governance Overlay 方案、五阶段能力恢复路径与三句话架构结论。
+  读者：MASTER、Project（文档代理）。
+
 9）协作与运行手册（Worksheet：分工/流程/落地节奏）
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
   用途：明确 Project×实现层×Master 的分工边界、交接物与防污染规则；不包含终端指令片段。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
-10）配置资产入口（非文档，但属于“可部署/可回放”真相源的一部分）
+10）配置资产入口（非文档，但属于"可部署/可回放"真相源的一部分）
 - flows/
   用途：Flow 导出物与环境指针（exports/ + active.pointer）；由 Trace（docs/60_trace/flows/index.md）指向当前生效版本。
   读者：MASTER、实现层（按 DevSpec/DevTasks 约束维护与回归）。
@@ -95,10 +160,15 @@
   用途：运行时单一配置源（`.env`）与示例/降级模板（`.env.example`）；用于 Host/Edge/Neo4j/Chroma/Retrieval 统一配置。
   读者：MASTER、实现层（按 DevSpec 与运行脚本约束实现与回归）。
 
+11）发布目录（Release）
+- docs/50_release/mXX_release.json
+  用途：各里程碑发布清单（JSON 格式），记录发布版本、变更摘要、测试通过情况。
+  读者：MASTER、Project（文档代理）。
+
 ---
 
 附：实现层任务来源白名单（强约束）
-- 仅允许将以下目录作为“任务来源”读取并据此行动：
+- 仅允许将以下目录作为"任务来源"读取并据此行动：
   - docs/30_devspec/**
   - docs/40_agents/**
 - 若需引用其它文档，必须由 MASTER 在任务卡中明确点名路径与引用范围。
@@ -107,3 +177,11 @@
 - 所有 .md 文件必须以两行头部开场：
   - `受众：MASTER|CODEX|PROJECT`
   - `标题：...`
+
+附：文档归类规则（v1.2 新增）
+- 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/60_trace/code_reviews/
+- 测试报告、运行追踪报告、变更日志 → docs/60_trace/
+- 架构分析、理论推导、设计方案 → docs/15_theory/
+- 配置指南、运行手册、项目协作文档 → docs/50_project/
+- 发布清单（JSON）→ docs/50_release/
+- 开发规范、任务清单、模型平面 → docs/30_devspec/

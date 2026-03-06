@@ -1,0 +1,39 @@
+{
+  "test_id": "T1-2",
+  "service": "host.audit.sqlite_ledger",
+  "operation": "log_intent + read_back",
+  "params_in": {
+    "request_id": "req_43ee2bd43b4c4b679d52296ad0f0285a",
+    "intent_id": "intent::req_43ee2bd43b4c4b679d52296ad0f0285a",
+    "session_id": "session::trial",
+    "seq": 1,
+    "ts_ms": 1772771450865,
+    "nonce": "nonce::req_43ee2bd43b4c4b679d52296ad0f0285a",
+    "parse_stage": "S_INTENT_PARSE",
+    "raw_text": "试运行测试输入"
+  },
+  "params_out": {
+    "matched_count": 1,
+    "first_row": {
+      "request_id": "req_43ee2bd43b4c4b679d52296ad0f0285a",
+      "thread_id": null,
+      "turn_id": null,
+      "intent_id": "intent::req_43ee2bd43b4c4b679d52296ad0f0285a",
+      "session_id": "session::trial",
+      "seq": 1,
+      "ts_ms": 1772771450865,
+      "nonce": "nonce::req_43ee2bd43b4c4b679d52296ad0f0285a",
+      "parse_stage": "S_INTENT_PARSE",
+      "raw_text": "试运行测试输入",
+      "normalized_json": null,
+      "proposer_node_id": null,
+      "model_snapshot": null,
+      "prompt_profile_id": null,
+      "tool_visibility_hash": "",
+      "proposed_intent_draft_json": null,
+      "lint_result": ""
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1772771425223
+}

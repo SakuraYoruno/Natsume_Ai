@@ -27,14 +27,14 @@
 
 这并非完全错误，但仍然偏保守。更优的方向不是继续把图压成 `while loop + edge_map`，而是把系统明确拆成三层：
 
-1. **Policy Plane（治理平面）**  
-   负责裁决、审计、边界锁、预算与降级规则。  
+1. **Policy Plane（治理平面）**
+   负责裁决、审计、边界锁、预算与降级规则。
    典型组件：Governor、AIRLOCK、RenderGuard、Deadline Supervisor。
 
-2. **Execution Plane（执行平面）**  
+2. **Execution Plane（执行平面）**
    由 LangGraph / Functional API 承担节点调度、状态传播、并行、checkpoint、interrupt、stream。
 
-3. **Evidence Plane（证据平面）**  
+3. **Evidence Plane（证据平面）**
    专门记录 `route_token / branch_manifest / llm_call_log / sanitization_log / commit_hash / replay_ref`。
 
 核心原则只有一句：
@@ -47,7 +47,7 @@
 
 原分析报告中的五项冲突，方向基本正确，但结论略显绝对。更准确的说法应当是：
 
-> LangGraph 高级能力与当前 Host 治理协议的**默认接法**存在冲突，  
+> LangGraph 高级能力与当前 Host 治理协议的**默认接法**存在冲突，
 > 而不是这些能力本体与治理约束天然不可兼容。
 
 因此，正确问题不是“要不要禁用 LangGraph 能力”，而是：
@@ -304,7 +304,7 @@ Evidence Plane 则保存展平后的证据流：
 
 这个判断只对了一半。
 
-Checkpointer 的职责本来就不是“管理 SLA”，而是“保存可恢复现场”。  
+Checkpointer 的职责本来就不是“管理 SLA”，而是“保存可恢复现场”。
 真正的问题是你把“是否允许恢复”也交给了同一层。
 
 ### 更优方案
@@ -319,7 +319,7 @@ Checkpointer 的职责本来就不是“管理 SLA”，而是“保存可恢复
 - interrupt
 - resume
 
-职责：  
+职责：
 保存现场、恢复状态、支持人工介入。
 
 #### 2）Policy Clock（治理时钟）
@@ -332,7 +332,7 @@ Checkpointer 的职责本来就不是“管理 SLA”，而是“保存可恢复
 - `degrade_stage`
 - `resume_deadline_at`
 
-职责：  
+职责：
 决定还能不能继续等、能不能恢复、该不该降级。
 
 每次恢复前，先由 Host 检查：
@@ -534,8 +534,8 @@ LangGraph 负责：
 
 顺序建议为：
 
-1. 先只开放 Presence Stream  
-2. 再补 Commit Stream  
+1. 先只开放 Presence Stream
+2. 再补 Commit Stream
 3. 最后再接 Render Stream 与 RenderGuard
 
 不建议一步到位直接做跨阶段 token 级流式。
@@ -551,7 +551,7 @@ LangGraph 负责：
 
 更好的表述是：
 
-> LangGraph 高级能力与当前 Host 治理协议的默认接法存在冲突。  
+> LangGraph 高级能力与当前 Host 治理协议的默认接法存在冲突。
 > 在满足 Governed Runtime Contract 的前提下，可按能力类别、风险等级、证据完备度有条件启用。
 
 建议新增一类条款：
@@ -560,19 +560,19 @@ LangGraph 负责：
 
 至少包括：
 
-- **Route Commitment Rule**  
+- **Route Commitment Rule**
   条件边只能基于 `committed_route_token`
 
-- **Parallel Branch Pre-Issuance Rule**  
+- **Parallel Branch Pre-Issuance Rule**
   并行分支必须先获得 `branch_manifest`
 
-- **Transparent Subgraph Rule**  
+- **Transparent Subgraph Rule**
   子图内部节点必须对 Evidence Plane 透明
 
-- **Dual-Clock Rule**  
+- **Dual-Clock Rule**
   状态恢复与超时降级必须分别由 Execution Clock / Policy Clock 管理
 
-- **Phase-Locked Streaming Rule**  
+- **Phase-Locked Streaming Rule**
   Presence / Commit / Render 三类流必须隔离，且 Render 只能消费 committed snapshot
 
 ### 7.2 默认策略
@@ -592,13 +592,13 @@ LangGraph 负责：
 
 ## 八、最终结论
 
-原报告的总体方向是正确的：  
+原报告的总体方向是正确的：
 **治理必须优先于框架能力。**
 
 但更精确的结论应当是：
 
-> LangGraph 的高级能力并非天然不可用；  
-> 真正冲突的是其默认控制语义与当前 Host 治理协议未分层。  
+> LangGraph 的高级能力并非天然不可用；
+> 真正冲突的是其默认控制语义与当前 Host 治理协议未分层。
 > 通过 route tokenization、audit pre-issuance、transparent subgraphs、dual-clock supervision、phase-locked streaming，可在不放松主权约束的前提下，有条件恢复大部分高级能力。
 
 因此，系统不应停留在“主动降级使用 LangGraph”的长期状态，而应升级为：
@@ -625,5 +625,105 @@ LangGraph 负责：
 
 一句话概括：
 
-> 不是“LangGraph 高级能力不能用”，而是“不能按默认方式直接用”；  
+> 不是"LangGraph 高级能力不能用"，而是"不能按默认方式直接用"；
 > 必须先把治理语义协议化，再让 LangGraph 承担被治理的执行能力。
+
+---
+
+## 十一、架构结论修订：三句话版（2026-03-06 补充）
+
+> 本节为对第八节结论的精确化修订，基于对"本质限制"与"工程风险"的分层判断。
+
+### 11.1 四项负面评估的分层
+
+原评估中的四项负面点，性质并不相同，需要区分对待：
+
+#### 第一类：本质限制（结构性事实，无法消除，只能接受）
+
+**① 不能完整释放 LangGraph 原生能力**
+
+这是结构性事实，不是暂时缺陷。LangGraph 最有价值的部分，本来就是让图根据状态自主继续长、继续分叉、继续恢复、继续决策。但 Natsume 的主权约束恰恰要求：状态可以演化，决策必须上收。两者不可能同时最大化，这是不可调和的哲学冲突，不是实现问题。
+
+**② 五阶段存在串行风险链（部分本质）**
+
+系统将安全、审计、边界锁、提交权集中在 Host，天然会形成若干串行闸门。能优化的是"把不影响主权的部分前移并行"，但不可能把所有关键路径都并行化——否则主权本身会被稀释。串行闸门是主权集中的必然代价。
+
+#### 第二类：工程风险（可以通过设计优化）
+
+**③ 治理层复杂度不低，需要严格实现**
+
+这是协议复杂度，不是普通代码复杂度。最危险的不是代码量大，而是"语义错位"：
+
+- `route_token` 已提交，但 `audit_ticket` 还没落库
+- `render_snapshot` 已锁定，但 `presence_stream` 还在被下游误消费
+
+这类错位一旦发生，系统表面仍能运行，但主权约束已被悄悄打穿。这是可以通过严格的协议设计和集成测试来防范的工程问题。
+
+**④ Evidence Plane 写入压力未被充分评估**
+
+一旦以下能力全部上线：
+
+- 子图透明化
+- 分支 manifest
+- 每节点前后摘要
+- `llm_call_log`
+- `replay_index`
+- `presence / commit / render` 三类事件流
+
+写入量会从"审计日志"膨胀为"事件源系统"。Evidence Plane 将不再只是留痕，而会变成吞吐瓶颈、延迟放大器、甚至故障传播点。这是可以通过分级写入、异步落库、分区索引等工程手段缓解的问题。
+
+---
+
+### 11.2 修订后的三句话架构结论
+
+**第一句：**
+
+> LangGraph 在该系统中的定位应固定为 **governed runtime**，而非 **autonomous orchestrator**。
+
+**第二句：**
+
+> Host 主权约束决定了图内自治只能存在于执行层，不能进入裁决层。
+
+**第三句（最关键）：**
+
+> 因此系统优化目标不是"释放 LangGraph 全能力"，而是"**以最小治理成本换取最高执行收益**"。
+
+第三句直接改变落地策略：**不是所有可治理化能力都值得做。**
+
+---
+
+### 11.3 能力优先级三档分类
+
+按"收益/主权风险比"重新分档：
+
+#### 第一档：优先做（收益大、主权风险低）
+
+| 能力 | 理由 |
+|------|------|
+| `committed_route_token` | 条件边恢复的最小代价，主权完全保留 |
+| `transparent_subgraph` | 显著改善可维护性，证据链不损失 |
+| `dual-clock supervision` | 解耦执行与治理，降低降级链路脆性 |
+
+#### 第二档：可以做，但要严格限域
+
+| 能力 | 限制条件 |
+|------|---------|
+| 只读并行分支 | 必须先有 `branch_manifest`，暂不含副作用分支 |
+| Presence Stream | 只允许向 UI 单向输出，禁止作为下游节点输入 |
+
+#### 第三档：不建议强求"接近原生体验"
+
+| 能力 | 原因 |
+|------|------|
+| 图内自主降级 | 降级权属于 Host，不能下放给图 |
+| 基于 LLM state 的自治路由 | 违反主权约束核心条款 |
+| 跨阶段 token 级联动 streaming | 边界锁定成本极高，收益有限 |
+| 带副作用的并行执行 | 审计闭锁难以保证，风险不可控 |
+
+---
+
+### 11.4 最终定位声明
+
+> Natsume 采用 LangGraph，但不继承其默认自治语义。
+> 系统仅复用其受控执行能力，所有裁决、提交、降级、边界锁与审计闭锁均保留在 Host 主权域内。
+> LangGraph 在该系统中永远是 governed runtime，这不是妥协，而是正确的架构选择。

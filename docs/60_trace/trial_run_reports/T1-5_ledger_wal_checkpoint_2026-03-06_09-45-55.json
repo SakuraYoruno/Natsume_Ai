@@ -1,0 +1,18 @@
+{
+  "test_id": "T1-5",
+  "service": "host.audit.sqlite_ledger",
+  "operation": "checkpoint",
+  "params_in": {
+    "mode": "PASSIVE"
+  },
+  "params_out": {
+    "status": "OK",
+    "mode": "PASSIVE",
+    "blocked": 0,
+    "total_frames": -1,
+    "checkpointed_frames": -1,
+    "reason_code": null
+  },
+  "status": "PASS",
+  "ts_ms": 1772761555562
+}

@@ -1,0 +1,35 @@
+{
+  "test_id": "T9-1",
+  "service": "edge.rpc.gateway",
+  "operation": "load_edge_config",
+  "params_in": {
+    "EDGE_RPC_HOST": null,
+    "EDGE_RPC_PORT": null,
+    "EDGE_RPC_GATEWAY_ENABLED": null
+  },
+  "params_out": {
+    "success": true,
+    "reason_code": null,
+    "config": {
+      "env": "dev",
+      "rpc_host": "127.0.0.1",
+      "rpc_port": 17800,
+      "hmac_shared_key_set": false,
+      "hmac_shared_key_ref": null,
+      "key_profile_status": null,
+      "allow_insecure_auth": true,
+      "rpc_auth_window_ms": 15000,
+      "rpc_nonce_window_ms": 120000,
+      "rpc_gateway_enabled": true,
+      "asr_enabled": true,
+      "tts_enabled": true,
+      "barge_in_enabled": true,
+      "fallback_llm_enabled": false,
+      "resource_gate_enabled": true,
+      "max_vram_mb": 4096,
+      "max_queue_length": 8
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1772767770442
+}
