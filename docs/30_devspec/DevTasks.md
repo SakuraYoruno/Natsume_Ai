@@ -4675,6 +4675,72 @@ TASK-XXXX 标题
 - 涉及文件路径：`edge_client/runtime/event_reporter.py`；`tests/unit/test_edge_event_emotion_m29.py`。
 - 关联需求/测试：FR-EDGE-EMOTION-001；T-EDGE-EMO-01~02。
 
+---
+
+## M30：测试同步修复（Test Sync Hotfix）
+
+**目标：** 修复最新代码拉取后暴露的 17 个测试失败，全部为测试/代码同步问题，无逻辑 Bug。
+**前置条件：** M29 PLANNED（M30 独立于 M29 执行，优先级高于 M29）
+**完成标准：** 全量测试 0 failed，2094 passed，10 skipped
+**实际完成：** 2026-03-06 10:18
+**状态：** ✅ DONE
+
+### TASK-0283 M30-A：修复 Bond fixture 非法 stage/trend 值
+
+- 状态：DONE
+- 任务描述：修复 5 个 contract 测试的 fixture 中 `bond_summary.stage` 使用了非法值（`'warm'`/`'stable'`/`'ESTABLISHED'`/`'up'`），更新为合法枚举值。
+- 涉及文件路径：
+  - `tests/fixtures/context_pack/good/minimal_valid.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
+  - `tests/fixtures/canon/world/context_pack_with_world_canon.json`：`stage: "ESTABLISHED"→"STRANGER"`
+  - `tests/fixtures/llm_gateway/good/prompt_payload.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
+  - `tests/fixtures/bond/good/bond_event_for_summary.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
+  - `tests/contract/test_bond_summary_contract.py`：更新 `test_t_74` 期望值
+- 关联失败：5 个 contract 测试（bond_summary_contract/context_pack_contract/tool_catalog_contract/canon_store_contract/world_canon_slot_contract）
+
+### TASK-0284 M30-B：修复 Bond 集成测试中英文枚举不兼容
+
+- 状态：DONE
+- 任务描述：`BondScoreState.to_summary()` 已中文化（M28-H），但集成测试仍期望英文枚举值，更新为中文枚举。
+- 涉及文件路径：
+  - `tests/integration/test_bond_routes_api.py`：`test_summary_stage_is_valid`/`test_summary_trend_is_valid`/`test_summary_stage_updates_after_promotion` 期望值改为中文
+  - `tests/integration/test_bond_dynamics_stage_integration.py`：`test_summary_stage_matches_state` 期望值改为 `"相识"`
+- 关联失败：4 个集成测试
+
+### TASK-0285 M30-C：修复 Governor rule_trace 数量硬编码
+
+- 状态：DONE
+- 任务描述：M28-D（OPT-8）新增 R8 情感门控规则，`rule_trace` 从 7 条增加到 8 条，更新测试硬编码数量。
+- 涉及文件路径：
+  - `tests/contract/test_governor_rate_limit_contract.py`：`assertEqual(7, ...)→assertEqual(8, ...)`
+  - `tests/contract/test_governor_rules_contract.py`：`assertEqual(7, ...)→assertEqual(8, ...)`
+- 关联失败：2 个 contract 测试
+
+### TASK-0286 M30-D：修复 Obs metrics required_keys 缺少 emotion_metrics
+
+- 状态：DONE
+- 任务描述：M29-Q（OPT-46）在 `MetricsCollector.collect()` 中新增了 `emotion_metrics` 字段，更新测试 `required_keys`。
+- 涉及文件路径：`tests/contract/test_obs_metrics_contract.py`：`required_keys` 添加 `'emotion_metrics'`
+- 关联失败：1 个 contract 测试
+
+### TASK-0287 M30-E：同步 edge_client VTS 映射表至 16 种
+
+- 状态：DONE
+- 任务描述：M28-L（OPT-34）已将 `host_brain/channels/vts.py` 的 `EMOTION_TO_EXPRESSION_ID` 扩展至 16 种，同步更新 `edge_client/actuators/vts_driver.py`，并修复相关测试。
+- 涉及文件路径：
+  - `edge_client/actuators/vts_driver.py`：`EMOTION_TO_EXPRESSION_ID` 从 6 种扩展至 16 种
+  - `tests/contract/test_vts_reconnect_contract.py`：`len == 6→16`
+  - `tests/contract/test_vts_degraded_contract.py`：未知 tag 从 `CONFUSED`/`excited` 改为 `SLEEPY`/`sleepy`
+  - `tests/fixtures/channels/vts_unknown_tag_degraded.json`：`emotion_tag: "CONFUSED"→"SLEEPY"`
+- 关联失败：5 个 contract 测试
+
+### TASK-0288 M30-F：M30 代码审查报告
+
+- 状态：DONE
+- 任务描述：生成 M30 代码审查报告，记录 17 个测试修复详情和最终测试结果。
+- 涉及文件路径：`docs/60_trace/code_review_m30_2026-03-06.md`（新增）
+
+---
+
 ### TASK-0282 M29-S：M29 发布清单
 
 - 状态：PLANNED

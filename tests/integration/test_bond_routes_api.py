@@ -81,13 +81,16 @@ class TestGetBondSummary:
     def test_summary_stage_is_valid(self, client):
         resp = client.get("/bond/summary/dave")
         data = resp.json()
-        from host_brain.bond.bond_stage_engine import STAGE_ORDER
-        assert data["stage"] in STAGE_ORDER
+        # M28-H：to_summary() 返回中文阶段名
+        _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "挚友", "知己", "灵魂伴侣"}
+        assert data["stage"] in _VALID_STAGES_CN
 
     def test_summary_trend_is_valid(self, client):
         resp = client.get("/bond/summary/eve")
         data = resp.json()
-        assert data["trend"] in ("RISING", "STABLE", "DECLINING")
+        # M28-F：trend() 返回中文趋势描述
+        _VALID_TRENDS_CN = {"上升", "稳定", "下降", "快速上升", "缓慢上升", "快速下降", "缓慢下降"}
+        assert data["trend"] in _VALID_TRENDS_CN
 
 
 # ── T-BOND-API-04: POST /bond/event 成功 ─────────────────────────────────────
@@ -207,7 +210,8 @@ class TestSummaryAfterPromotion:
             })
         resp = client.get("/bond/summary/frank")
         data = resp.json()
-        assert data["stage"] == STAGE_ACQUAINTANCE
+        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相识”
+        assert data["stage"] == "相识"
 
     def test_summary_still_no_numeric_after_promotion(self, client):
         for i in range(2):

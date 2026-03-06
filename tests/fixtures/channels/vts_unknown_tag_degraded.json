@@ -2,7 +2,7 @@
   "description": "VTS 未知映射 → DEGRADED 降级到 neutral fixture",
   "scenario": "vts_unknown_tag_degraded",
   "input": {
-    "emotion_tag": "CONFUSED",
+    "emotion_tag": "SLEEPY",
     "trigger": "LLM",
     "edge_available": true,
     "request_id": "req_vts_deg_002"
@@ -11,7 +11,7 @@
     "success": true,
     "status": "DEGRADED",
     "reason_code": "VTS_DEGRADED_FALLBACK",
-    "emotion_tag": "CONFUSED",
+    "emotion_tag": "SLEEPY",
     "expression_id": "exp_neutral_01",
     "stage": "S_AVATAR_EXPRESSION_MAP",
     "detail_contains": "unsupported emotion_tag",

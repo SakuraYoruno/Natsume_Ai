@@ -116,6 +116,7 @@ class TestObsMetricsContract(unittest.TestCase):
             "governor_decisions", "retrieval_latency",
             "hard_snapshot_staleness_ms", "recent_chains", "debug_trace",
             "latency_baseline",  # M8 TASK-0109 新增
+            "emotion_metrics",   # M29-Q TASK-0280 新增
         }
         self.assertEqual(required_keys, set(result.keys()))
 

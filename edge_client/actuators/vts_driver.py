@@ -48,12 +48,24 @@ TALK_END = "TALK_END"
 
 # 确定性表情映射表（与 host_brain/channels/vts.py 一致）
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
+    # 原有6种
     "NEUTRAL": "exp_neutral_01",
     "HAPPY": "exp_happy_01",
     "SAD": "exp_sad_01",
     "ANGRY": "exp_angry_01",
     "SURPRISED": "exp_surprised_01",
     "THINKING": "exp_thinking_01",
+    # M28-L（OPT-34）：同步 host_brain/channels/vts.py 新增 10 种
+    "EXCITED": "exp_excited_01",
+    "CALM": "exp_calm_01",
+    "FRUSTRATED": "exp_frustrated_01",
+    "ANXIOUS": "exp_anxious_01",
+    "LOVING": "exp_loving_01",
+    "EMBARRASSED": "exp_embarrassed_01",
+    "CONFUSED": "exp_confused_01",
+    "BORED": "exp_bored_01",
+    "PROUD": "exp_proud_01",
+    "GRATEFUL": "exp_grateful_01",
 }
 
 # VTS 参数映射（口型用 mouth_open_level）

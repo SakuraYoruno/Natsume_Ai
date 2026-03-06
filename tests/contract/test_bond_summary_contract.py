@@ -24,8 +24,8 @@ class TestBondSummaryContract(unittest.TestCase):
             {"stage", "trend", "capability_hint", "event_id", "evidence_refs"},
             set(summary.keys()),
         )
-        self.assertEqual("warm", summary["stage"])
-        self.assertEqual("up", summary["trend"])
+        self.assertEqual("STRANGER", summary["stage"])
+        self.assertEqual("稳定", summary["trend"])
         self.assertEqual("SUPPORTIVE", summary["capability_hint"])
         self.assertEqual("bond_evt_summary_001", summary["event_id"])
         self.assertEqual(["evidence::bond::summary::001"], summary["evidence_refs"])

@@ -419,7 +419,7 @@ class TestVtsDriverRegression:
         """确定性表情映射表未变更。"""
         assert "NEUTRAL" in EMOTION_TO_EXPRESSION_ID
         assert "HAPPY" in EMOTION_TO_EXPRESSION_ID
-        assert len(EMOTION_TO_EXPRESSION_ID) == 6
+        assert len(EMOTION_TO_EXPRESSION_ID) == 16
 
     def test_set_expression_invalid_tag(self) -> None:
         """无效 emotion_tag 仍被拒绝。"""

@@ -5,7 +5,7 @@
   },
   "bond_summary": {
     "event_id": "bond-wcanon-001",
-    "stage": "ESTABLISHED",
+    "stage": "STRANGER",
     "evidence_refs": ["wc-001-system-terms"]
   },
   "authoritative": [

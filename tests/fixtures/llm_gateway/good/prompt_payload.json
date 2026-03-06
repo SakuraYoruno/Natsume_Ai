@@ -4,8 +4,8 @@
       "sys_mode": "normal"
     },
     "bond_summary": {
-      "stage": "warm",
-      "trend": "up",
+      "stage": "STRANGER",
+      "trend": "稳定",
       "capability_hint": "SUPPORTIVE",
       "event_id": "bond_evt_001",
       "evidence_refs": [

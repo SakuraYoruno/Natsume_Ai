@@ -556,7 +556,7 @@ class TestGovernorRulesRegression(unittest.TestCase):
         """T-Gov-R4-01.45: R1~R7 trace 结构不变。"""
         result = evaluate_governor_gates({"trust_level": 50})
         self.assertEqual("APPROVE", result["decision"])
-        self.assertEqual(7, len(result["rule_trace"]))
+        self.assertEqual(8, len(result["rule_trace"]))
         for row in result["rule_trace"]:
             self.assertIn("gate_id", row)
             self.assertIn("hit", row)

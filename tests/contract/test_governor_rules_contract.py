@@ -20,7 +20,7 @@ class TestGovernorRulesContract(unittest.TestCase):
 
         self.assertEqual("REJECT", result["decision"])
         self.assertTrue(result["reason_code"])
-        self.assertEqual(7, len(result["rule_trace"]))
+        self.assertEqual(8, len(result["rule_trace"]))
 
         for row in result["rule_trace"]:
             self.assertIn("gate_id", row)

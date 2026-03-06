@@ -4,8 +4,8 @@
   "session_id": "session_bond_001",
   "topic_id": "topic_trust_support",
   "capability_hint": "SUPPORTIVE",
-  "stage": "warm",
-  "trend": "up",
+  "stage": "STRANGER",
+  "trend": "稳定",
   "evidence_refs": [
     "evidence::bond::summary::001"
   ],

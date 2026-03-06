@@ -193,7 +193,7 @@ class TestCanonStoreContract(unittest.TestCase):
                 result = validate_context_pack(
                     {
                         "hard_snapshot": {},
-                        "bond_summary": {"stage": "stable"},
+                        "bond_summary": {"stage": "STRANGER"},
                         "authoritative": [authoritative],
                         "retrieval": [],
                         "style_pack": {

@@ -164,7 +164,7 @@ class TestUnknownTagDegraded:
         """不在映射表中的 tag → DEGRADED（而非 REJECTED）。"""
         ledger = _make_ledger()
         result = resolve_vts_expression(
-            emotion_tag="CONFUSED",
+            emotion_tag="SLEEPY",
             ledger=ledger,
             request_id="req_deg_010",
             edge_available=True,
@@ -175,18 +175,18 @@ class TestUnknownTagDegraded:
         assert result.reason_code == VTS_DEGRADED_FALLBACK
         assert result.expression_id == DEGRADED_FALLBACK_EXPRESSION_ID
         assert "unsupported emotion_tag" in result.detail
-        assert "CONFUSED" in result.detail
+        assert "SLEEPY" in result.detail
 
     def test_unknown_tag_preserves_original(self) -> None:
         """未知 tag 保留原始值（大写归一化后）。"""
         ledger = _make_ledger()
         result = resolve_vts_expression(
-            emotion_tag="excited",
+            emotion_tag="sleepy",
             ledger=ledger,
             request_id="req_deg_011",
             ts_ms=NOW_MS,
         )
-        assert result.emotion_tag == "EXCITED"
+        assert result.emotion_tag == "SLEEPY"
         assert result.expression_id == "exp_neutral_01"
         assert result.status == STATUS_DEGRADED
 
@@ -536,4 +536,4 @@ class TestFixtureStructure:
         assert data["expected"]["status"] == STATUS_DEGRADED
         assert data["expected"]["reason_code"] == VTS_DEGRADED_FALLBACK
         assert data["input"]["edge_available"] is True
-        assert data["expected"]["emotion_tag"] == "CONFUSED"
+        assert data["expected"]["emotion_tag"] == "SLEEPY"
