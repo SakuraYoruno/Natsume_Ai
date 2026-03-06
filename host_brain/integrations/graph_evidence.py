@@ -51,13 +51,19 @@ class EvidencePlane:
         else:
             self._db_path = _DEFAULT_DB_PATH
 
+        # :memory: 模式下缓存连接，避免每次 connect() 创建独立数据库
+        self._memory_conn: sqlite3.Connection | None = None
+        if str(self._db_path) == ":memory:":
+            self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
+
         self._initialized = False
         self._init_db()
 
     def _init_db(self) -> None:
         """初始化数据库，创建表结构（若不存在）。"""
         try:
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            if str(self._db_path) != ":memory:":
+                self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
                 conn.executescript("""
                     CREATE TABLE IF NOT EXISTS graph_trace (
@@ -128,6 +134,32 @@ class EvidencePlane:
                         reason TEXT,
                         ts_ms INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS subgraph_trace (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        parent_path TEXT,
+                        node_id TEXT NOT NULL,
+                        input_digest TEXT,
+                        output_digest TEXT,
+                        latency_ms INTEGER,
+                        ts_ms INTEGER NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS llm_call_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        node_id TEXT NOT NULL,
+                        model_id TEXT,
+                        prompt_tokens INTEGER,
+                        completion_tokens INTEGER,
+                        latency_ms INTEGER,
+                        ts_ms INTEGER NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_bjl_run_id ON barrier_join_log(request_id);
+                    CREATE INDEX IF NOT EXISTS idx_bjl_ts ON barrier_join_log(ts_ms);
+                    CREATE INDEX IF NOT EXISTS idx_sgt_run_id ON subgraph_trace(run_id);
+                    CREATE INDEX IF NOT EXISTS idx_sgt_parent_path ON subgraph_trace(parent_path);
+                    CREATE INDEX IF NOT EXISTS idx_lcl_run_id ON llm_call_log(run_id);
+                    CREATE INDEX IF NOT EXISTS idx_lcl_node_id ON llm_call_log(node_id);
                 """)
             self._initialized = True
         except Exception as exc:
@@ -135,7 +167,12 @@ class EvidencePlane:
             self._initialized = False
 
     def _connect(self) -> sqlite3.Connection:
-        """创建 SQLite 连接（check_same_thread=False 支持多线程）。"""
+        """创建 SQLite 连接（check_same_thread=False 支持多线程）。
+
+        :memory: 模式下复用缓存连接，确保所有操作在同一数据库实例上执行。
+        """
+        if self._memory_conn is not None:
+            return self._memory_conn
         return sqlite3.connect(str(self._db_path), check_same_thread=False)
 
     def write_trace(

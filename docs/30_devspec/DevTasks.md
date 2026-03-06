@@ -6957,6 +6957,170 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m40_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.2、§4.5、§6、§11.2。
 
+---
+
+## M41：Evidence Plane 写入压力评估与分级写入优化
+
+> **里程碑目标**：评估 Governed Runtime Contract 五条规则全部落地后 Evidence Plane 的写入压力，实现分级写入策略（Critical 同步 / Non-critical 异步队列）、写入失败熔断机制、分区索引优化，防止 Evidence Plane 成为生产吞吐瓶颈。
+>
+> **背景**：`LangGraph_Governed_Runtime_Solution` §11.1 明确指出：一旦子图透明化、分支 manifest、每节点前后摘要、`llm_call_log`、`replay_index`、`presence/commit/render` 三类事件流全部上线，写入量会从"审计日志"膨胀为"事件源系统"，Evidence Plane 将不再只是留痕，而会变成**吞吐瓶颈、延迟放大器、甚至故障传播点**。
+>
+> **约束**：本里程碑为纯代码层工程优化，不依赖真实运行环境，全部通过单元测试 + mock 验证。
+
+---
+
+### TASK-0417 M41-A：Evidence Plane 写入延迟基准测量工具
+
+- 状态：DONE
+- 任务描述：新增 `EvidencePlane` 写入延迟基准测量工具，测量当前各写入方法的 P50/P95/P99 延迟，建立基准数据，为分级写入策略提供依据。
+- 输入：现有 `graph_evidence.py` 中的所有 `write_*` 方法（`write_route_token`、`write_branch_manifest`、`write_subgraph_trace`、`write_llm_call`、`write_barrier_join`、`write_render_event`）。
+- 输出：
+  - `host_brain/integrations/evidence_bench.py`（新增）：`EvidenceBench` 类，提供 `measure_write_latency(method, n=1000)` 方法，返回 `{p50, p95, p99, mean, max}` 延迟统计；
+  - `tests/unit/test_evidence_bench_m41.py`（新增）：T-EVP-BENCH-01~04。
+- 验收标准：
+  - T-EVP-BENCH-01：`measure_write_latency` 对 `write_route_token` 返回包含 p50/p95/p99 的字典；
+  - T-EVP-BENCH-02：`measure_write_latency` 对 `write_branch_manifest` 返回包含 p50/p95/p99 的字典；
+  - T-EVP-BENCH-03：`measure_write_latency` 对 `write_barrier_join` 返回包含 p50/p95/p99 的字典；
+  - T-EVP-BENCH-04：`measure_write_latency` 对 `write_render_event` 返回包含 p50/p95/p99 的字典。
+- 涉及文件路径：`host_brain/integrations/evidence_bench.py`（新增）；`tests/unit/test_evidence_bench_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1。
+
+---
+
+### TASK-0418 M41-B：Evidence Plane 写入优先级分级枚举
+
+- 状态：DONE
+- 任务描述：在 `graph_evidence.py` 中新增 `WritePriority` 枚举，将所有写入方法按主权影响分为 `CRITICAL`（同步必写）和 `NON_CRITICAL`（可异步）两级，并为每个 `write_*` 方法标注默认优先级。
+- 输入：现有 `graph_evidence.py`。
+- 输出：
+  - `graph_evidence.py`（修改）：新增 `WritePriority(Enum)` 枚举（`CRITICAL = "critical"`、`NON_CRITICAL = "non_critical"`）；各 `write_*` 方法新增 `priority: WritePriority` 参数（默认值按规则设定）；
+  - 分级规则：`write_route_token` → `CRITICAL`；`write_branch_manifest` → `CRITICAL`；`write_barrier_join` → `CRITICAL`；`write_llm_call` → `NON_CRITICAL`；`write_subgraph_trace` → `NON_CRITICAL`；`write_render_event` → `NON_CRITICAL`；
+  - `tests/unit/test_evidence_priority_m41.py`（新增）：T-EVP-PRI-01~06。
+- 验收标准：
+  - T-EVP-PRI-01：`WritePriority` 枚举包含 `CRITICAL` 和 `NON_CRITICAL` 两个值；
+  - T-EVP-PRI-02：`write_route_token` 默认优先级为 `CRITICAL`；
+  - T-EVP-PRI-03：`write_branch_manifest` 默认优先级为 `CRITICAL`；
+  - T-EVP-PRI-04：`write_barrier_join` 默认优先级为 `CRITICAL`；
+  - T-EVP-PRI-05：`write_llm_call` 默认优先级为 `NON_CRITICAL`；
+  - T-EVP-PRI-06：`write_render_event` 默认优先级为 `NON_CRITICAL`。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_priority_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
+---
+
+### TASK-0419 M41-C：Evidence Plane 异步写入队列
+
+- 状态：DONE
+- 任务描述：新增 `EvidenceWriteQueue` 类，为 `NON_CRITICAL` 级写入提供异步队列缓冲，支持批量落库，避免非关键写入阻塞主流程。
+- 输入：`WritePriority` 枚举（TASK-0418）；现有 `EvidencePlane`。
+- 输出：
+  - `host_brain/integrations/evidence_write_queue.py`（新增）：`EvidenceWriteQueue` 类，提供 `enqueue(write_fn, *args, **kwargs)`、`flush(timeout_ms=500)`、`queue_size()` 方法；内部使用 `collections.deque` 作为缓冲区；`flush()` 批量执行队列中的写入操作；
+  - `EvidencePlane` 集成：`NON_CRITICAL` 写入自动路由到 `EvidenceWriteQueue`，`CRITICAL` 写入保持同步直写；
+  - `tests/unit/test_evidence_write_queue_m41.py`（新增）：T-EVP-QUEUE-01~06。
+- 验收标准：
+  - T-EVP-QUEUE-01：`enqueue()` 将写入任务加入队列，`queue_size()` 返回正确数量；
+  - T-EVP-QUEUE-02：`flush()` 执行队列中所有写入任务并清空队列；
+  - T-EVP-QUEUE-03：`flush(timeout_ms=100)` 超时后停止执行并返回剩余队列大小；
+  - T-EVP-QUEUE-04：`CRITICAL` 写入（`write_route_token`）绕过队列直接同步执行；
+  - T-EVP-QUEUE-05：`NON_CRITICAL` 写入（`write_llm_call`）进入队列，不立即执行；
+  - T-EVP-QUEUE-06：队列满时（超过 `max_size`）新写入触发 `flush()` 后再入队。
+- 涉及文件路径：`host_brain/integrations/evidence_write_queue.py`（新增）；`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_write_queue_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
+---
+
+### TASK-0420 M41-D：Evidence Plane 写入失败熔断机制
+
+- 状态：DONE
+- 任务描述：新增 `EvidenceCircuitBreaker` 类，当 Evidence Plane 写入连续失败超过阈值时触发熔断，降级为内存缓冲 + 批量落库，防止写入故障传播到主流程。
+- 输入：现有 `EvidencePlane`；`EvidenceWriteQueue`（TASK-0419）。
+- 输出：
+  - `host_brain/integrations/evidence_circuit_breaker.py`（新增）：`EvidenceCircuitBreaker` 类，状态机包含 `CLOSED`（正常）、`OPEN`（熔断）、`HALF_OPEN`（探测恢复）三态；`failure_threshold`（默认 5）、`recovery_timeout_ms`（默认 10000）可配置；熔断时写入转入内存缓冲 `_memory_buffer: list`；`HALF_OPEN` 状态下允许单次探测写入；
+  - `EvidencePlane` 集成：所有写入经过 `EvidenceCircuitBreaker` 保护；
+  - `tests/unit/test_evidence_circuit_breaker_m41.py`（新增）：T-EVP-CB-01~08。
+- 验收标准：
+  - T-EVP-CB-01：初始状态为 `CLOSED`，写入正常执行；
+  - T-EVP-CB-02：连续失败 `failure_threshold` 次后状态变为 `OPEN`；
+  - T-EVP-CB-03：`OPEN` 状态下写入不执行，转入 `_memory_buffer`；
+  - T-EVP-CB-04：`OPEN` 状态持续 `recovery_timeout_ms` 后自动转为 `HALF_OPEN`；
+  - T-EVP-CB-05：`HALF_OPEN` 状态下探测写入成功后状态恢复为 `CLOSED`；
+  - T-EVP-CB-06：`HALF_OPEN` 状态下探测写入失败后状态回退为 `OPEN`；
+  - T-EVP-CB-07：`CRITICAL` 写入在 `OPEN` 状态下仍写入 `_memory_buffer`，不丢失；
+  - T-EVP-CB-08：`get_buffer_snapshot()` 返回当前内存缓冲中的所有待写入记录。
+- 涉及文件路径：`host_brain/integrations/evidence_circuit_breaker.py`（新增）；`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_circuit_breaker_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
+---
+
+### TASK-0421 M41-E：Evidence Plane 分区索引优化
+
+- 状态：DONE
+- 任务描述：为 `barrier_join_log`、`subgraph_trace`、`llm_call_log` 三张高写入量表新增分区索引，提升查询性能，并通过迁移脚本幂等添加索引。
+- 输入：现有 `graph_evidence.py` 中的 SQLite 表结构；现有迁移机制。
+- 输出：
+  - `graph_evidence.py`（修改）：`_ensure_tables()` 中为以下表新增索引：
+    - `barrier_join_log`：`CREATE INDEX IF NOT EXISTS idx_bjl_run_id ON barrier_join_log(run_id)`；`CREATE INDEX IF NOT EXISTS idx_bjl_ts ON barrier_join_log(timestamp_ms)`；
+    - `subgraph_trace`：`CREATE INDEX IF NOT EXISTS idx_sgt_run_id ON subgraph_trace(run_id)`；`CREATE INDEX IF NOT EXISTS idx_sgt_parent_path ON subgraph_trace(parent_path)`；
+    - `llm_call_log`：`CREATE INDEX IF NOT EXISTS idx_lcl_run_id ON llm_call_log(run_id)`；`CREATE INDEX IF NOT EXISTS idx_lcl_node_id ON llm_call_log(node_id)`；
+  - `tests/unit/test_evidence_index_m41.py`（新增）：T-EVP-IDX-01~06。
+- 验收标准：
+  - T-EVP-IDX-01：`barrier_join_log` 表存在 `idx_bjl_run_id` 索引；
+  - T-EVP-IDX-02：`barrier_join_log` 表存在 `idx_bjl_ts` 索引；
+  - T-EVP-IDX-03：`subgraph_trace` 表存在 `idx_sgt_run_id` 索引；
+  - T-EVP-IDX-04：`subgraph_trace` 表存在 `idx_sgt_parent_path` 索引；
+  - T-EVP-IDX-05：`llm_call_log` 表存在 `idx_lcl_run_id` 索引；
+  - T-EVP-IDX-06：`_ensure_tables()` 重复调用时索引创建幂等（`IF NOT EXISTS` 不报错）。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_index_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
+---
+
+### TASK-0422 M41-F：EvidencePlane 写入压力专项测试
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane 写入压力专项测试，验证分级写入策略、熔断机制、异步队列在高并发写入场景下的正确性（mock 模拟，不依赖真实环境）。
+- 输入：`WritePriority`（TASK-0418）；`EvidenceWriteQueue`（TASK-0419）；`EvidenceCircuitBreaker`（TASK-0420）。
+- 输出：`tests/unit/test_evidence_perf_m41.py`（新增）：T-EVP-PERF-01~05。
+- 验收标准：
+  - T-EVP-PERF-01：连续 100 次 `CRITICAL` 写入全部同步完成，无丢失；
+  - T-EVP-PERF-02：连续 100 次 `NON_CRITICAL` 写入全部进入队列，`flush()` 后全部落库；
+  - T-EVP-PERF-03：混合 50 次 `CRITICAL` + 50 次 `NON_CRITICAL` 写入，`CRITICAL` 全部同步完成，`NON_CRITICAL` 全部进入队列；
+  - T-EVP-PERF-04：写入失败注入（mock SQLite 抛异常）触发熔断后，`CRITICAL` 写入转入内存缓冲，不丢失；
+  - T-EVP-PERF-05：熔断恢复后，内存缓冲中的记录可通过 `get_buffer_snapshot()` 取出并重放写入。
+- 涉及文件路径：`tests/unit/test_evidence_perf_m41.py`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
+---
+
+### TASK-0423 M41-G：契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M41 新增 `EvidenceWriteQueue`、`EvidenceCircuitBreaker`、`WritePriority` 后，`graph_evidence.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §6。
+
+---
+
+### TASK-0424 M41-H：M41 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0417~0423 全部 DONE 后，生成 M41 代码审查报告，记录 Evidence Plane 写入压力评估与分级写入优化的实现情况。
+- 输入：TASK-0417~0423 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m41_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0417~0423 全部 7 个任务的变更摘要；
+  - 新增测试 ≥ 29 个（T-EVP-BENCH-01~04 + T-EVP-PRI-01~06 + T-EVP-QUEUE-01~06 + T-EVP-CB-01~08 + T-EVP-IDX-01~06 + T-EVP-PERF-01~05），全部通过；
+  - `WritePriority` 枚举完整落地（CRITICAL / NON_CRITICAL 两级）；
+  - `EvidenceWriteQueue` 完整落地（enqueue / flush / timeout）；
+  - `EvidenceCircuitBreaker` 完整落地（CLOSED / OPEN / HALF_OPEN 三态）；
+  - 分区索引完整落地（barrier_join_log / subgraph_trace / llm_call_log）；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m41_2026-03-06.md`（新增）。
+- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
+
 
 
 
