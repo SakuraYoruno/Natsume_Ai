@@ -105,6 +105,8 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID（可选，缺省自动生成）")
     thread_id: Optional[str] = Field(None, description="线程ID（微信thread_key等）")
     intent_draft: Optional[Dict[str, Any]] = Field(None, description="预构造的intent草案（可选）")
+    # M33-C：场景类型（CHAT/EXEC_INTENT/WORK_TRANSLATE/WORK_CODE），默认 CHAT
+    scene_type: Optional[str] = Field(None, description="场景类型（CHAT/EXEC_INTENT/WORK_TRANSLATE/WORK_CODE），默认CHAT")
 
 
 class ChatResponse(BaseModel):
@@ -308,6 +310,8 @@ _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
 _logger = logging.getLogger("Natsume.fastapi")
 
+# M33-F：CHAT_GRAPH_NODE_ORDER 保留为"全节点注册表"，用于 model_node_overrides 初始化。
+# 不再用于 node_bindings/edges 的构建——改用 _resolve_scene_node_sequence(scene_type)。
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     "core_reasoner_primary",
     "core_reasoner_secondary",
@@ -321,6 +325,55 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
 ]
 CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
+
+# M33-A：场景枚举常量（ModelPlane.md §4.1）
+SCENE_CHAT = "CHAT"
+SCENE_EXEC_INTENT = "EXEC_INTENT"
+SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
+SCENE_WORK_CODE = "WORK_CODE"
+
+
+def _resolve_scene_node_sequence(scene_type: str) -> list[str]:
+    """按场景返回应执行的节点序列（M33-A，ModelPlane.md §4.1/4.2）。
+
+    规则：
+    - core_reasoner_secondary 是 primary 的 fallback-only，不在正常链路中。
+    - safety_verifier / consistency_verifier 仅在 EXEC_INTENT 场景按需触发。
+    - planner_constraints / tool_planner 仅在 EXEC_INTENT 场景触发。
+    - workbench_translate 仅在 WORK_TRANSLATE 场景触发。
+    - workbench_code_assist 仅在 WORK_CODE 场景触发。
+    - renderer_ja_c_style 每次必跑（S2 段）。
+    - 未知场景退化为 CHAT 序列。
+    """
+    scene = str(scene_type or SCENE_CHAT).strip().upper()
+    if scene == SCENE_EXEC_INTENT:
+        # S1: primary → planner → tool_planner → safety_verifier → S2: renderer
+        return [
+            "core_reasoner_primary",
+            "planner_constraints",
+            "tool_planner",
+            "safety_verifier",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_TRANSLATE:
+        # S1: primary → workbench_translate → S2: renderer
+        return [
+            "core_reasoner_primary",
+            "workbench_translate",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_CODE:
+        # S1: primary → workbench_code_assist → S2: renderer
+        return [
+            "core_reasoner_primary",
+            "workbench_code_assist",
+            "renderer_ja_c_style",
+        ]
+    # CHAT（默认）：S1: primary → S2: renderer（最小链路）
+    return [
+        "core_reasoner_primary",
+        "renderer_ja_c_style",
+    ]
 
 
 def _resolve_host_llm_model_id(provider_name: str) -> str:
@@ -1304,6 +1357,7 @@ def _build_chat_graph_config(
     available: bool,
     api_key: str | None,
     provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_CHAT,
 ) -> dict[str, Any]:
     _ = provider_fn
     _ = model_id
@@ -1332,6 +1386,8 @@ def _build_chat_graph_config(
         "workbench_code_assist": min(base_timeout_ms, 10000),
     }
 
+    # M33-F：model_node_overrides 仍使用全节点注册表（CHAT_GRAPH_NODE_ORDER），
+    # 确保所有节点的模型配置都已准备好（fallback 节点也需要配置）。
     model_node_overrides: dict[str, dict[str, Any]] = {}
     for node_id in CHAT_GRAPH_NODE_ORDER:
         node_model_id = node_model_ids[node_id]
@@ -1351,6 +1407,15 @@ def _build_chat_graph_config(
             ),
         }
 
+    # M33-A/B：按场景动态解析节点序列（不含 secondary fallback 节点）
+    scene_node_sequence = _resolve_scene_node_sequence(scene_type)
+    # M33-B：core_reasoner_secondary 作为 fallback 节点，必须在 node_bindings 中注册
+    # （validate_graph_config 要求 fallback_edges 中的节点也在 node_bindings 中），
+    # 但不加入 edges 正常链路。
+    fallback_only_nodes = ["core_reasoner_secondary"]
+    all_registered_nodes = scene_node_sequence + [
+        n for n in fallback_only_nodes if n not in scene_node_sequence
+    ]
     node_bindings = [
         {
             "node_id": node_id,
@@ -1358,33 +1423,30 @@ def _build_chat_graph_config(
             "task": node_id,
             "require_approval_token": False,
         }
-        for node_id in CHAT_GRAPH_NODE_ORDER
+        for node_id in all_registered_nodes
     ]
     edges = [
-        {"from": CHAT_GRAPH_NODE_ORDER[i], "to": CHAT_GRAPH_NODE_ORDER[i + 1]}
-        for i in range(len(CHAT_GRAPH_NODE_ORDER) - 1)
+        {"from": scene_node_sequence[i], "to": scene_node_sequence[i + 1]}
+        for i in range(len(scene_node_sequence) - 1)
     ]
     return {
         "graph_id": "host.chat.realtime",
         "version": "v1",
-        "entry_node": CHAT_GRAPH_NODE_ORDER[0],
+        "entry_node": scene_node_sequence[0],
         "model_profile_id": "chat_ja_24x7_v1",
         "node_bindings": node_bindings,
         "edges": edges,
         "fallback_edges": [
+            # M33-B：core_reasoner_secondary 仅作为 primary 失败时的 fallback
             {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"},
-            {"from": "core_reasoner_secondary", "to": "planner_constraints"},
-            {"from": "planner_constraints", "to": "tool_planner"},
-            {"from": "tool_planner", "to": "safety_verifier"},
-            {"from": "safety_verifier", "to": "consistency_verifier"},
-            {"from": "consistency_verifier", "to": "renderer_ja_c_style"},
-            {"from": "renderer_ja_c_style", "to": "workbench_translate"},
-            {"from": "workbench_translate", "to": "workbench_code_assist"},
+            {"from": "core_reasoner_secondary", "to": "renderer_ja_c_style"},
         ],
         "model_node_overrides": model_node_overrides,
         "graph_meta": {
-            "online_chain": "six_recall + nine_node_langgraph + forced_renderer_ja",
+            "online_chain": "six_recall + scene_routed_langgraph + forced_renderer_ja",
             "provider": provider_name,
+            "scene_type": str(scene_type or SCENE_CHAT).strip().upper(),
+            "active_node_count": len(scene_node_sequence),
         },
     }
 
@@ -1636,6 +1698,8 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             available = bool(llm_runtime["available"])
             provider_fn = llm_runtime["provider_fn"]
 
+            # M33-C：从 request_body 提取 scene_type，传递给图配置构建
+            scene_type = str(request_body.scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
             graph_config = _build_chat_graph_config(
                 provider_name=provider_name,
                 model_id=model_id,
@@ -1643,6 +1707,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 available=available,
                 api_key=llm_api_key,
                 provider_fn=provider_fn,
+                scene_type=scene_type,
             )
             dependency_statuses: dict[str, dict[str, Any]] = {
                 node_id: {

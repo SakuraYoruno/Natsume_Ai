@@ -5047,6 +5047,113 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m32_2026-03-06.md`。
 - 关联需求：NFR-REL-001；FR-EMOTION-CONTINUUM-001；FR-BOND-TEXTURE-001；FR-BOND-RIFT-001。
 
+---
+
+## M33 节点编排场景路由修复（Scene-Aware Node Routing）（TASK-0306~0313）
+
+> **目标：** 修复当前"无条件全跑9节点"的编排问题，按 ModelPlane.md §4 的场景路由规格实现条件路由：CHAT 场景只跑 2 个必要节点，`core_reasoner_secondary` 改为 primary 失败时的 fallback-only，`planner_constraints`/`tool_planner` 只在 EXEC_INTENT 场景触发，`workbench_*` 只在对应 WORK_* 场景触发，`safety_verifier`/`consistency_verifier` 按需触发。
+> **依据：** ModelPlane.md §4.1（场景枚举）、§4.2（两段式链路）；Trace 日志分析（HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md）
+> **前置：** M32 全部 DONE
+> **完成标准：** 全量测试 0 failed；CHAT 场景节点数 = 2（primary + renderer）；secondary 仅在 primary 失败时出现在 trace 中
+
+### TASK-0306 M33-A：场景节点序列解析函数
+
+- 状态：DONE
+- 任务描述：在 `fastapi_app.py` 中新增 `_resolve_scene_node_sequence(scene_type)` 函数，按场景返回应执行的节点序列（不含 secondary fallback 节点）。
+- 输入：`scene_type: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE）。
+- 输出：`list[str]`（节点 ID 序列）。
+- 验收标准：
+  - CHAT → `["core_reasoner_primary", "renderer_ja_c_style"]`；
+  - EXEC_INTENT → `["core_reasoner_primary", "planner_constraints", "tool_planner", "safety_verifier", "renderer_ja_c_style"]`；
+  - WORK_TRANSLATE → `["core_reasoner_primary", "workbench_translate", "renderer_ja_c_style"]`；
+  - WORK_CODE → `["core_reasoner_primary", "workbench_code_assist", "renderer_ja_c_style"]`；
+  - 未知场景 → 退化为 CHAT 序列。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：ModelPlane.md §4.1；T-SCENE-ROUTE-01~04。
+
+### TASK-0307 M33-B：_build_chat_graph_config 接受 scene_type 参数
+
+- 状态：DONE
+- 任务描述：修改 `_build_chat_graph_config` 函数，接受 `scene_type` 参数，使用 `_resolve_scene_node_sequence` 替代硬编码的 `CHAT_GRAPH_NODE_ORDER`，并将 `core_reasoner_secondary` 改为 fallback-only（仅在 fallback_edges 中出现）。
+- 输入：`scene_type: str`（默认 "CHAT"）。
+- 输出：`graph_config` 中 `node_bindings`/`edges`/`entry_node` 按场景动态生成。
+- 验收标准：
+  - CHAT 场景：`node_bindings` 只含 2 个节点（primary + renderer）；
+  - `core_reasoner_secondary` 不在 `node_bindings` 中，只在 `fallback_edges` 中；
+  - `graph_meta.scene_type` 字段记录当前场景；
+  - 向后兼容：不传 `scene_type` 时默认 CHAT。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：ModelPlane.md §4.2；T-SCENE-ROUTE-05~07。
+
+### TASK-0308 M33-C：chat 端点传递 scene_type
+
+- 状态：DONE
+- 任务描述：在 `/v1/chat` 端点中，从 `request_body` 或 intent 分析结果中提取 `scene_type`，传递给 `_build_chat_graph_config`。
+- 输入：`request_body.scene_type`（可选，默认 "CHAT"）。
+- 输出：`graph_config` 按实际场景构建。
+- 验收标准：
+  - 不传 `scene_type` 时，默认 CHAT，节点数 = 2；
+  - 传入 `scene_type="EXEC_INTENT"` 时，节点数 = 5；
+  - `graph_meta.scene_type` 与传入值一致。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：ModelPlane.md §4.1；T-SCENE-ROUTE-08。
+
+### TASK-0309 M33-D：场景路由专项测试
+
+- 状态：DONE
+- 任务描述：新增场景路由专项测试，验证各场景的节点序列正确性。
+- 输入：`_resolve_scene_node_sequence` 函数。
+- 输出：`tests/unit/test_scene_node_routing_m33.py`（新增）：T-SCENE-ROUTE-01~08。
+- 验收标准：
+  - T-SCENE-ROUTE-01：CHAT 场景节点序列 = ["core_reasoner_primary", "renderer_ja_c_style"]；
+  - T-SCENE-ROUTE-02：EXEC_INTENT 场景含 planner_constraints 和 tool_planner；
+  - T-SCENE-ROUTE-03：WORK_TRANSLATE 场景含 workbench_translate，不含 workbench_code_assist；
+  - T-SCENE-ROUTE-04：WORK_CODE 场景含 workbench_code_assist，不含 workbench_translate；
+  - T-SCENE-ROUTE-05：CHAT 场景 graph_config 的 node_bindings 只有 2 个节点；
+  - T-SCENE-ROUTE-06：core_reasoner_secondary 不在 CHAT 场景的 node_bindings 中；
+  - T-SCENE-ROUTE-07：core_reasoner_secondary 在 fallback_edges 中；
+  - T-SCENE-ROUTE-08：未知场景退化为 CHAT 序列。
+- 涉及文件路径：`tests/unit/test_scene_node_routing_m33.py`。
+- 关联需求：ModelPlane.md §4.1~4.2；T-SCENE-ROUTE-01~08。
+
+### TASK-0310 M33-E：graph_meta 场景字段审计测试
+
+- 状态：DONE
+- 任务描述：验证 `graph_meta.scene_type` 字段在各场景下正确记录，支持可观测性追踪。
+- 输入：`_build_chat_graph_config` 函数。
+- 输出：`tests/unit/test_scene_node_routing_m33.py` 中的 T-SCENE-META-01~02。
+- 验收标准：
+  - T-SCENE-META-01：CHAT 场景 `graph_meta.scene_type` = "CHAT"；
+  - T-SCENE-META-02：EXEC_INTENT 场景 `graph_meta.scene_type` = "EXEC_INTENT"。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`；`tests/unit/test_scene_node_routing_m33.py`。
+- 关联需求：ModelPlane.md §6（审计字段）；T-SCENE-META-01~02。
+
+### TASK-0311 M33-F：CHAT_GRAPH_NODE_ORDER 保留向后兼容常量
+
+- 状态：DONE
+- 任务描述：保留 `CHAT_GRAPH_NODE_ORDER` 常量作为"全节点注册表"（用于 model_node_overrides 初始化），但不再用于 node_bindings/edges 的构建。
+- 输入：现有 `CHAT_GRAPH_NODE_ORDER` 定义。
+- 输出：注释更新，说明其用途变更为"节点注册表"而非"执行顺序"。
+- 验收标准：
+  - `CHAT_GRAPH_NODE_ORDER` 仍包含全部 9 个节点（用于 model_node_overrides）；
+  - `node_bindings` 和 `edges` 不再直接使用 `CHAT_GRAPH_NODE_ORDER`，改用 `_resolve_scene_node_sequence`。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`。
+- 关联需求：ModelPlane.md §3.1；向后兼容性。
+
+### TASK-0312 M33-G：M33 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0306~0311 全部 DONE 后，生成 M33 代码审查报告。
+- 输入：TASK-0306~0311 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m33_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0306~0311 全部 6 个任务的变更摘要；
+  - 新增测试 ≥ 10 个，全部通过；
+  - CHAT 场景节点数从 9 降至 2，成本降低约 78%；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m33_2026-03-06.md`。
+- 关联需求：ModelPlane.md §4；NFR-COST-001；NFR-REL-001。
+
 
 
 
