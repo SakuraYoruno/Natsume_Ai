@@ -58,7 +58,10 @@ from host_brain.app.bond_routes import router as bond_router, set_bond_engine_pr
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.broker import ToolBroker
+from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
+from host_brain.skills.builtin_registry import build_builtin_skill_registry
+from host_brain.skills.registry import SkillRegistry
 from host_brain.bond.bond_stage_engine import BondStageEngine
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.integrations.llm_gateway import (
@@ -117,6 +120,7 @@ class ChatResponse(BaseModel):
     decision: Optional[str] = Field(None, description="Governor裁决: APPROVE/REJECT/None")
     reason_code: Optional[str] = Field(None, description="拒绝/降级原因代码")
     approval_token_ref: Optional[str] = Field(None, description="审批票据引用（仅APPROVE时）")
+    approval_tier: Optional[str] = Field(None, description="M44：分层治理审批通道（cache/rule/full/airlock），None 表示未知")
     quality: Dict[str, Any] = Field(default_factory=dict, description="质量标记: stage/reason_code")
     audit_refs: Dict[str, Any] = Field(default_factory=dict, description="审计引用: intent_id/governor_log等")
     timestamp: int = Field(..., description="响应时间戳(毫秒)")
@@ -302,6 +306,8 @@ if _cors_origins_raw:
 # ---------------------------------------------------------------------------
 _ledger: Optional[SQLiteLedger] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
+_skill_registry: Optional[SkillRegistry] = None  # M44：内置 Skill 注册表单例
+_policy_cache: Optional[GovernorPolicyCache] = None  # M44：分层治理 Policy Cache 单例
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
@@ -1025,11 +1031,37 @@ def get_bond_stage_engine() -> BondStageEngine:
 _set_bond_engine_provider(get_bond_stage_engine)
 
 
+def get_skill_registry() -> SkillRegistry:
+    """获取内置 Skill 注册表单例（M44：延迟初始化，供分层治理使用）。"""
+    global _skill_registry
+    if _skill_registry is None:
+        _skill_registry = build_builtin_skill_registry()
+    return _skill_registry
+
+
+def get_policy_cache() -> GovernorPolicyCache:
+    """获取 Governor Policy Cache 单例（M44：延迟初始化，TTL=60s）。"""
+    global _policy_cache
+    if _policy_cache is None:
+        _policy_cache = GovernorPolicyCache(ttl_ms=60_000)
+    return _policy_cache
+
+
 def get_intent_engine() -> IntentDecisionEngine:
-    """获取 Governor IntentDecisionEngine 实例（延迟初始化）"""
+    """获取 Governor IntentDecisionEngine 实例（延迟初始化）。
+
+    M44：注入 registry + policy_cache，使 M42 分层治理在 /v1/chat 端点真正生效。
+    - risk_level=1 的内置 Skill（narrative_only/memory_recall/noop/read_only_status）
+      走 CACHE 通道，Policy Cache 命中后审批延迟从 ~300ms 降至 ~0ms。
+    - 未注册的 Skill 仍走 FULL 通道（向后兼容）。
+    """
     global _intent_engine
     if _intent_engine is None:
-        _intent_engine = IntentDecisionEngine(ledger=get_ledger())
+        _intent_engine = IntentDecisionEngine(
+            ledger=get_ledger(),
+            registry=get_skill_registry(),
+            policy_cache=get_policy_cache(),
+        )
     return _intent_engine
 
 
@@ -1696,6 +1728,11 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         tokens = governor_result.get("tokens")
         if isinstance(tokens, dict):
             approval_token_ref = tokens.get("approval_token_ref")
+        # M44：提取分层治理审批通道（approval_tier）
+        _committed_token_detail = governor_result.get("committed_route_token")
+        approval_tier: Optional[str] = None
+        if isinstance(_committed_token_detail, dict):
+            approval_tier = _committed_token_detail.get("approval_tier")
 
         retrieval_summary: Dict[str, Any] = {}
         llm_summary: Dict[str, Any] = {}
@@ -1933,6 +1970,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             decision=decision,
             reason_code=reason_code,
             approval_token_ref=approval_token_ref,
+            approval_tier=approval_tier,  # M44：透出分层治理审批通道
             quality=quality,
             audit_refs={
                 "intent_id": intent_id,
@@ -1954,6 +1992,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             decision="REJECT",
             reason_code="INTERNAL_SERVER_ERROR",
             approval_token_ref=None,
+            approval_tier=None,
             quality={"stage": "S_INTERNAL_ERROR", "reason_code": "INTERNAL_SERVER_ERROR"},
             audit_refs={"request_id": request_id},
             timestamp=ts_ms,

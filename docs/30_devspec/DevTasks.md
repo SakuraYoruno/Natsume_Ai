@@ -7377,6 +7377,99 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
 - 关联需求：DevSpec §7~9；FR-OPS-001；FR-OPS-002；FR-AUDIT-001。
 
+---
+
+## M44：分层治理运行时接入（Tiered Governance Runtime Integration）
+
+> **里程碑目标**：将 M42 实现的分层治理架构真正接入 `/v1/chat` 运行时端点。当前 `fastapi_app.py` 的 `get_intent_engine()` 创建 `IntentDecisionEngine` 时未注入 `registry` 和 `policy_cache`，导致 M42 的分层治理在生产链路中形同虚设——所有请求仍走 `GOV_OK_RENDER`（全量审批通道）。M44 修复这一接入缺口，同时注册内置 Skill 的风险等级元数据，让分层治理在运行时真正生效。
+>
+> **背景**：M42 实现了完整的分层治理机制（`GovernorTierPolicy` / `GovernorPolicyCache` / `ApprovalTier`），但 `fastapi_app.py` 的 `get_intent_engine()` 工厂函数没有注入 `registry` 和 `policy_cache`，导致 `IntentDecisionEngine` 的分层路由代码永远不会执行（`self._registry is None` 恒为真）。这是一个典型的"实现完整但接入缺失"的问题。
+>
+> **约束**：不改变 Governor 核心裁决逻辑；不削弱主权；向后兼容（未注册的 Skill 仍走 FULL 通道）。
+
+---
+
+### TASK-0436 M44-A：fastapi_app.py 注入 registry + policy_cache
+
+- 状态：DONE
+- 任务描述：修改 `fastapi_app.py` 的 `get_intent_engine()` 工厂函数，在创建 `IntentDecisionEngine` 时注入 `SkillRegistry` 和 `GovernorPolicyCache`，使 M42 分层治理在 `/v1/chat` 端点真正生效。
+- 输入：`GovernorPolicyCache`（M42-C）；`SkillRegistry`（M44-B 注册内置 Skill）；现有 `get_intent_engine()`。
+- 输出：
+  - `host_brain/app/fastapi_app.py`（修改）：
+    - 新增模块级单例 `_skill_registry: SkillRegistry | None = None` 和 `_policy_cache: GovernorPolicyCache | None = None`；
+    - 新增 `get_skill_registry() -> SkillRegistry` 工厂函数（延迟初始化，调用 `build_builtin_skill_registry()`）；
+    - 新增 `get_policy_cache() -> GovernorPolicyCache` 工厂函数（延迟初始化，TTL=60_000ms）；
+    - 修改 `get_intent_engine()`：注入 `registry=get_skill_registry()` 和 `policy_cache=get_policy_cache()`；
+  - `tests/unit/test_tiered_governance_runtime_m44.py`（新增）：T-TG-RT-01~04。
+- 验收标准：
+  - T-TG-RT-01：`get_intent_engine()` 返回的 `IntentDecisionEngine` 实例的 `_registry` 不为 `None`；
+  - T-TG-RT-02：`get_intent_engine()` 返回的实例的 `_policy_cache` 不为 `None`；
+  - T-TG-RT-03：`get_intent_engine()` 多次调用返回同一实例（单例）；
+  - T-TG-RT-04：`get_skill_registry()` 返回的 `SkillRegistry` 包含内置 Skill（`narrative_only` / `memory_recall` / `noop` / `read_only_status`）。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）；`tests/unit/test_tiered_governance_runtime_m44.py`（新增）。
+- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
+
+---
+
+### TASK-0437 M44-B：内置 Skill 注册表（build_builtin_skill_registry）
+
+- 状态：DONE
+- 任务描述：新增 `build_builtin_skill_registry()` 工厂函数，将系统内置的 4 个 Skill（`narrative_only` / `memory_recall` / `noop` / `read_only_status`）注册到 `SkillRegistry`，并设置正确的 `risk_level`，使分层治理能对这些 Skill 生效。
+- 输入：`SkillRegistry`；`SkillMeta`；`ACTION_ALLOWLIST`（`schemas.py`）。
+- 输出：
+  - `host_brain/skills/builtin_registry.py`（新增）：
+    - `build_builtin_skill_registry() -> SkillRegistry`：注册 4 个内置 Skill；
+    - `narrative_only`：`risk_level=1`（只读叙事，最低风险）；
+    - `memory_recall`：`risk_level=1`（只读记忆检索，最低风险）；
+    - `noop`：`risk_level=1`（空操作，最低风险）；
+    - `read_only_status`：`risk_level=1`（只读状态查询，最低风险）；
+    - 所有内置 Skill 均为 `reversible=True`，`clearance="LOW"`，`scope="host"`；
+    - handler 为 `lambda args, ctx: {"status": "OK", "result": "builtin_noop"}`（占位符，实际执行由上层链路处理）；
+  - `tests/unit/test_tiered_governance_runtime_m44.py`（追加）：T-TG-BUILTIN-01~04。
+- 验收标准：
+  - T-TG-BUILTIN-01：`build_builtin_skill_registry()` 返回包含 4 个内置 Skill 的 `SkillRegistry`；
+  - T-TG-BUILTIN-02：`narrative_only` 的 `risk_level=1`，`GovernorTierPolicy` 映射为 `ApprovalTier.CACHE`；
+  - T-TG-BUILTIN-03：`memory_recall` 的 `risk_level=1`，映射为 `ApprovalTier.CACHE`；
+  - T-TG-BUILTIN-04：`read_only_status` 的 `risk_level=1`，映射为 `ApprovalTier.CACHE`。
+- 涉及文件路径：`host_brain/skills/builtin_registry.py`（新增）；`tests/unit/test_tiered_governance_runtime_m44.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6.1；FR-SKILL-001。
+
+---
+
+### TASK-0438 M44-C：ChatResponse 透出 approval_tier 字段
+
+- 状态：DONE
+- 任务描述：修改 `fastapi_app.py` 的 `ChatResponse` 模型和 `/v1/chat` 端点，将 `committed_route_token.approval_tier` 透出到响应体，供调用方感知当前请求走了哪个审批通道。
+- 输入：`governor_result["committed_route_token"]["approval_tier"]`（M42-D 已写入）；现有 `ChatResponse`。
+- 输出：
+  - `host_brain/app/fastapi_app.py`（修改）：
+    - `ChatResponse` 新增 `approval_tier: Optional[str]` 字段（`None` 表示未知/向后兼容）；
+    - `/v1/chat` 端点从 `governor_result["committed_route_token"]` 提取 `approval_tier` 并写入响应；
+  - `tests/unit/test_tiered_governance_runtime_m44.py`（追加）：T-TG-RESP-01~02。
+- 验收标准：
+  - T-TG-RESP-01：`ChatResponse` 包含 `approval_tier` 字段；
+  - T-TG-RESP-02：`approval_tier` 为 `None` 时不影响响应结构（向后兼容）。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）；`tests/unit/test_tiered_governance_runtime_m44.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
+
+---
+
+### TASK-0439 M44-D：M44 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0436~0438 全部 DONE 后，生成 M44 代码审查报告，记录分层治理运行时接入的实现情况。
+- 输入：TASK-0436~0438 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0436~0438 全部 3 个任务的变更摘要；
+  - 新增测试 ≥ 10 个（T-TG-RT-01~04 + T-TG-BUILTIN-01~04 + T-TG-RESP-01~02），全部通过；
+  - `fastapi_app.py` 的 `get_intent_engine()` 已注入 `registry` + `policy_cache`；
+  - `build_builtin_skill_registry()` 完整落地（4 个内置 Skill）；
+  - `ChatResponse.approval_tier` 完整落地；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
+
 
 
 
