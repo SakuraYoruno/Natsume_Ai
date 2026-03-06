@@ -695,6 +695,16 @@ class SQLiteLedger:
 
     def log_intent(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in INTENT_COLUMNS}
+        # M31-C：向后兼容 lint_result_json 字段（DevSpec 8.1 A 要求 JSON 格式摘要）
+        # lint_result_json 优先级高于 lint_result；若调用方传 lint_result_json，映射到 lint_result 列
+        if "lint_result_json" in row and row["lint_result_json"] is not None:
+            payload["lint_result"] = row["lint_result_json"]
+        # M31-C：tool_visibility_hash 缺失时默认为空字符串（向后兼容）
+        if payload.get("tool_visibility_hash") is None:
+            payload["tool_visibility_hash"] = ""
+        # M31-C：lint_result 缺失时默认为空字符串（向后兼容）
+        if payload.get("lint_result") is None:
+            payload["lint_result"] = ""
         self._insert("intent_log", payload)
 
     def log_governor(self, row: dict[str, Any]) -> None:

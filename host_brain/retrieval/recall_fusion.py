@@ -16,6 +16,11 @@ from host_brain.core.errors import (
     CHROMA_VECTOR_DIM_MISMATCH,
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
+    RETR_LEDGER_UNAVAILABLE,
+    RETR_BOND_UNAVAILABLE,
+    RETR_STYLE_UNAVAILABLE,
+    RETR_WORLD_UNAVAILABLE,
+    RETR_VAULT_UNAVAILABLE,
     RETR_RECALL_INPUT_INVALID,
     RETR_RECALL_UNAVAILABLE,
 )
@@ -247,7 +252,7 @@ class RecallFusionServiceContract:
                             "event_id": (str(row.get("event_id") or "").strip() or None),
                             "evidence_refs": evidence_refs,
                             "source_ref": f"ledger://intent_log/{memory_id}",
-                            "evidence_ref": evidence_refs[0] if evidence_refs else f"ledger://intent/{memory_id}",
+                            "evidence_refs_primary": evidence_refs[0] if evidence_refs else f"ledger://intent/{memory_id}",
                         },
                     },
                 )
@@ -301,7 +306,7 @@ class RecallFusionServiceContract:
                             "capability_hint": str(row.get("capability_hint") or "").strip() or None,
                             "evidence_refs": refs,
                             "source_ref": f"neo4j://bond/event/{event_id}",
-                            "evidence_ref": refs[0],
+                            "evidence_refs_primary": refs[0] if refs else f"evd://bond/{event_id}",
                         },
                     },
                 )
@@ -338,7 +343,7 @@ class RecallFusionServiceContract:
                             "hash": content_hash,
                             "evidence_refs": [source_ref],
                             "source_ref": source_ref,
-                            "evidence_ref": source_ref,
+                            "evidence_refs_primary": source_ref,
                         },
                     },
                 )
@@ -376,7 +381,7 @@ class RecallFusionServiceContract:
                             "hash": doc_hash,
                             "evidence_refs": [source_ref],
                             "source_ref": source_ref,
-                            "evidence_ref": source_ref,
+                            "evidence_refs_primary": source_ref,
                         },
                     },
                 )
@@ -384,15 +389,21 @@ class RecallFusionServiceContract:
         return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
 
     def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
-        if self.ledger is None:
+        # M31-A：通过 SSOT 接口读取，消除对 self.ledger.vault_manifest_index 的旁路访问
+        if self.artifact_vault is None:
             return []
-        manifests = [row for row in self.ledger.vault_manifest_index if isinstance(row, Mapping)]
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for row in manifests:
+        try:
+            raw_results = self.artifact_vault.search(query, topk=int(top_k))
+        except Exception:
+            return []
+        candidates: list[dict[str, Any]] = []
+        for row in raw_results or []:
+            if not isinstance(row, Mapping):
+                continue
             manifest_id = str(row.get("manifest_id") or "").strip()
             if not manifest_id:
                 continue
-            integrity = str(row.get("integrity_digest") or "").strip()
+            integrity = str(row.get("hash") or row.get("integrity_digest") or "").strip()
             refs = _normalize_recall_refs(
                 row.get("evidence_refs"),
                 fallback=f"vault://manifest/{manifest_id}",
@@ -412,26 +423,26 @@ class RecallFusionServiceContract:
             if score <= 0.0:
                 continue
             source_ref = f"vault://manifest/{manifest_id}"
-            scored.append(
-                (
-                    score,
-                    {
-                        "memory_id": manifest_id,
-                        "text": _truncate_text_for_recall(text, limit=512),
-                        "score": score,
-                        "metadata": {
-                            "store_id": STORE_ARTIFACT_VAULT,
-                            "manifest_id": manifest_id,
-                            "hash": integrity or None,
-                            "artifact_id": None,
-                            "evidence_refs": refs,
-                            "source_ref": source_ref,
-                            "evidence_ref": refs[0],
-                        },
+            # M31-D：从 vault 返回数据中提取 artifact_id，不再硬编码 None
+            artifact_id_raw = row.get("artifact_id")
+            artifact_id = str(artifact_id_raw).strip() if artifact_id_raw is not None else ""
+            candidates.append(
+                {
+                    "memory_id": manifest_id,
+                    "text": _truncate_text_for_recall(text, limit=512),
+                    "score": score,
+                    "metadata": {
+                        "store_id": STORE_ARTIFACT_VAULT,
+                        "manifest_id": manifest_id,
+                        "hash": integrity or None,
+                        "artifact_id": artifact_id if artifact_id else None,
+                        "evidence_refs": refs,
+                        "source_ref": source_ref,
+                        "evidence_refs_primary": refs[0] if refs else source_ref,
                     },
-                )
+                }
             )
-        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+        return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
 
     def recall(
         self,
@@ -966,7 +977,7 @@ def _normalize_candidate(
     weighted_score = round(base_score * float(route.score_weight), 6)
     collection_for_ref = str(route.collection or route.store_id or DEFAULT_RECALL_COLLECTION)
     source_ref = str(metadata.get("source_ref") or f"memory://{collection_for_ref}/{memory_id}")
-    evidence_ref = str(metadata.get("evidence_ref") or f"evd://{collection_for_ref}/{memory_id}")
+    evidence_refs_primary = str(metadata.get("evidence_refs_primary") or metadata.get("evidence_ref") or f"evd://{collection_for_ref}/{memory_id}")
     merged_metadata = dict(metadata)
     merged_metadata["store_id"] = route.store_id
     merged_metadata["collection"] = route.collection
@@ -983,7 +994,7 @@ def _normalize_candidate(
         "score": weighted_score,
         "confidence": weighted_score,
         "metadata": merged_metadata,
-        "evidence_ref": evidence_ref,
+        "evidence_refs": evidence_refs_primary,
     }
 
 
@@ -1046,9 +1057,20 @@ def _coerce_score(raw_value: Any) -> float:
 
 
 def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
+    """按 store_id 返回专属 reason_code（M31-B，DevSpec 8.1 审计可追溯性）。"""
     normalized_store = str(store_id or STORE_EPISODIC_VECTOR).strip().lower()
-    if normalized_store != STORE_EPISODIC_VECTOR:
-        return RETR_RECALL_UNAVAILABLE
+    # 各库专属 reason_code 分发
+    if normalized_store == STORE_SQLITE_LEDGER:
+        return RETR_LEDGER_UNAVAILABLE
+    if normalized_store == STORE_NEO4J_BOND:
+        return RETR_BOND_UNAVAILABLE
+    if normalized_store == STORE_STYLE_CANON:
+        return RETR_STYLE_UNAVAILABLE
+    if normalized_store == STORE_WORLD_CANON:
+        return RETR_WORLD_UNAVAILABLE
+    if normalized_store == STORE_ARTIFACT_VAULT:
+        return RETR_VAULT_UNAVAILABLE
+    # episodic_vector：保持原有 Chroma 错误码分发（向后兼容）
     text = str(exc)
     if CHROMA_COLLECTION_MISSING in text:
         return CHROMA_COLLECTION_MISSING
@@ -1470,7 +1492,7 @@ class HybridFusionStrategy:
                         "hybrid_fused": True,
                         "matched_routes": ["fts"],
                     },
-                    "evidence_ref": f"evd://episodic/{doc_id}",
+                    "evidence_refs": f"evd://episodic/{doc_id}",
                 }
                 fused[doc_id] = entry
 

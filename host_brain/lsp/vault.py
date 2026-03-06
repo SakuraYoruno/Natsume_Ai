@@ -285,6 +285,60 @@ class ArtifactVault:
             "blocked_manifest_ids": blocked_manifest_ids,
         }
 
+    def search(self, query: str, topk: int = 8) -> list[dict]:
+        """通过 SSOT 接口检索 vault manifest 索引（DevSpec 8.0/8.8）。
+
+        Args:
+            query: 检索查询文本。
+            topk: 最多返回条数（默认 8）。
+
+        Returns:
+            manifest 候选列表，每条包含 manifest_id / artifact_id / kind / hash /
+            created_ts / evidence_refs / integrity_digest / intent_id 等字段。
+        """
+        from typing import Mapping as _Mapping
+        import re as _re
+
+        def _score(q: str, text: str) -> float:
+            q_tokens = set(_re.findall(r"[a-z0-9_]+", q.lower()) + list(_re.findall(r"[\u4e00-\u9fff]", q)))
+            t_tokens = set(_re.findall(r"[a-z0-9_]+", text.lower()) + list(_re.findall(r"[\u4e00-\u9fff]", text)))
+            if not q_tokens:
+                return 0.0
+            overlap = len(q_tokens & t_tokens)
+            return round(overlap / max(1, len(q_tokens)), 6)
+
+        manifests = [row for row in self.ledger.vault_manifest_index if isinstance(row, _Mapping)]
+        scored: list[tuple[float, dict]] = []
+        for row in manifests:
+            manifest_id = str(row.get("manifest_id") or "").strip()
+            if not manifest_id:
+                continue
+            integrity = str(row.get("integrity_digest") or "").strip()
+            refs_raw = row.get("evidence_refs") or []
+            refs: list[str] = [str(r).strip() for r in (refs_raw if isinstance(refs_raw, list) else [refs_raw]) if str(r).strip()]
+            text = " ".join(filter(None, [
+                manifest_id,
+                str(row.get("intent_id") or "").strip(),
+                str(row.get("policy_profile_id") or "").strip(),
+                integrity,
+                " ".join(refs),
+            ]))
+            s = _score(query, text)
+            if s <= 0.0:
+                continue
+            scored.append((s, {
+                "manifest_id": manifest_id,
+                "artifact_id": str(row.get("artifact_id") or "").strip() or None,
+                "kind": str(row.get("kind") or "").strip() or None,
+                "hash": integrity or None,
+                "created_ts": row.get("ts_ms"),
+                "evidence_refs": refs,
+                "integrity_digest": integrity or None,
+                "intent_id": str(row.get("intent_id") or "").strip() or None,
+                "policy_profile_id": str(row.get("policy_profile_id") or "").strip() or None,
+            }))
+        return [item for _s, item in sorted(scored, key=lambda p: -p[0])[:max(1, int(topk))]]
+
     def _create_artifact_entry(
         self,
         *,

@@ -300,3 +300,10 @@ WECHAT_PARSE_FAILED = "WECHAT_PARSE_FAILED"                          # 微信消
 WECHAT_SEND_FAILED = "WECHAT_SEND_FAILED"                            # 微信消息发送失败
 WECHAT_CHANNEL_DEGRADED = "WECHAT_CHANNEL_DEGRADED"                  # 微信通道降级（连续失败）
 WECHAT_RATE_LIMIT_EXCEEDED = "WECHAT_RATE_LIMIT_EXCEEDED"            # 微信推送频率超限
+
+# ── M31-B: 六库专属 reason_code（DevSpec 8.1 审计可追溯性） ──
+RETR_LEDGER_UNAVAILABLE = "RETR_LEDGER_UNAVAILABLE"                  # sqlite_ledger 不可用
+RETR_BOND_UNAVAILABLE = "RETR_BOND_UNAVAILABLE"                      # neo4j_bond 不可用
+RETR_STYLE_UNAVAILABLE = "RETR_STYLE_UNAVAILABLE"                    # style_canon 不可用
+RETR_WORLD_UNAVAILABLE = "RETR_WORLD_UNAVAILABLE"                    # world_canon 不可用
+RETR_VAULT_UNAVAILABLE = "RETR_VAULT_UNAVAILABLE"                    # artifact_vault 不可用

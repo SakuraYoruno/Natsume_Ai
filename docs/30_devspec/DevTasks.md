@@ -4777,7 +4777,7 @@ TASK-XXXX 标题
 
 ### TASK-0289 M31-A：修复 Artifact Vault 旁路读取（P0）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 当前直接访问 `self.ledger.vault_manifest_index`，绕过了 `lsp/vault.py` 的 SSOT 接口层，违反 DevSpec 8.0 和 8.8 约束。需将读取路径改为通过 `self.artifact_vault`（`lsp/vault.py` 暴露的接口）进行，彻底消除旁路。
 - 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/lsp/vault.py`。
 - 输出：
@@ -4793,7 +4793,7 @@ TASK-XXXX 标题
 
 ### TASK-0290 M31-B：修复各库 reason_code 粗粒度归并（P0）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：`recall_fusion.py` 的 `_map_route_exception()` 对所有非 `episodic_vector` 库的异常统一返回 `RETR_RECALL_UNAVAILABLE`，丢失了可区分的 reason_code，违反 DevSpec 8.1 审计可追溯性要求。需为每个库定义专属 reason_code 枚举，并在 `_map_route_exception()` 中按 `store_id` 分发。
 - 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/retrieval/constants.py`（或等效常量文件）。
 - 输出：
@@ -4817,7 +4817,7 @@ TASK-XXXX 标题
 
 ### TASK-0291 M31-C：补充 intent_log 缺失字段（P1）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：DevSpec 8.1 A 要求 `intent_log` 必须包含 `tool_visibility_hash`（本轮暴露的工具元数据子集哈希）和 `lint_result_json`（schema/args 校验摘要；禁止自然语言"结论句"替代），当前实现缺少这两个字段。
 - 输入：`host_brain/audit/sqlite_ledger.py`；`host_brain/governor/decision.py`（或 intent 写入路径）。
 - 输出：
@@ -4833,7 +4833,7 @@ TASK-XXXX 标题
 
 ### TASK-0292 M31-D：修复 artifact_id 硬编码 None（P1）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 中 `artifact_id` 被硬编码为 `None`，违反 DevSpec 8.6 要求的 manifest 最小字段（`artifact_id` 必须从 vault 数据中读取）。本任务依赖 TASK-0289（Vault SSOT 接口修复）完成后，从 `self.artifact_vault.search()` 返回的数据中正确提取 `artifact_id`。
 - 输入：`host_brain/retrieval/recall_fusion.py`（TASK-0289 修复后版本）；`host_brain/lsp/vault.py`。
 - 输出：
@@ -4848,7 +4848,7 @@ TASK-XXXX 标题
 
 ### TASK-0293 M31-E：补充 summarizer 写回 Neo4j 静态扫描断言（P1）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：DevSpec 8.2 要求 `summarizer.py` 只能派生 summary，不得写回 SSOT（Neo4j Bond）。当前缺少对应的静态扫描断言测试（T-SSOT-01），无法在 CI 中自动拦截违规写回。
 - 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_dynamics.py`。
 - 输出：
@@ -4863,7 +4863,7 @@ TASK-XXXX 标题
 
 ### TASK-0294 M31-F：统一 evidence_ref 命名口径（P2）
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：`recall_fusion.py` 中 `evidence_ref`（单数）与 `evidence_refs`（复数）命名不统一，与 DevSpec 8.3 规范的 `evidence_refs`（复数）不一致。统一为复数形式，并更新所有引用。
 - 输入：`host_brain/retrieval/recall_fusion.py`；相关测试文件。
 - 输出：
@@ -4878,7 +4878,7 @@ TASK-XXXX 标题
 
 ### TASK-0295 M31-G：M31 代码审查报告
 
-- 状态：PLANNED
+- 状态：DONE
 - 任务描述：TASK-0289~0294 全部 DONE 后，生成 M31 代码审查报告，记录六库合规修复详情、测试覆盖情况和最终测试结果。
 - 输入：TASK-0289~0294 全部 DONE；全量测试 0 failed。
 - 输出：
