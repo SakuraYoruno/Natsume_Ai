@@ -15,6 +15,7 @@ from host_brain.core.errors import (
 )
 from host_brain.integrations.graph_contract import (
     GraphState,
+    STATUS_AIRLOCK_PENDING,
     STATUS_DEGRADED,
     STATUS_FAILED,
 )
@@ -149,4 +150,45 @@ def set_finish(state: GraphState) -> GraphState:
     return {
         **state,
         "pending_node_id": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# M35-J：AIRLOCK 暂停处理（Route Commitment Rule）
+# ---------------------------------------------------------------------------
+
+def handle_airlock_pending(
+    *,
+    state: GraphState,
+    node_id: str,
+) -> GraphState:
+    """AIRLOCK 暂停处理：当 committed_route_token = GOV_AIRLOCK_REVIEW 时触发。
+
+    将图状态设置为 AIRLOCK_PENDING，记录到 trace，安全终止图执行。
+    不触发 fallback 链路（与 GOV_FAIL_FALLBACK 行为区分）。
+
+    Args:
+        state: 当前图状态
+        node_id: 触发 AIRLOCK 的节点 ID
+
+    Returns:
+        更新后的图状态（status = AIRLOCK_PENDING，pending_node_id = None）
+    """
+    detail = f"AIRLOCK 暂停：等待人工审核，节点={node_id}"
+    trace = list(state.get("trace") or [])
+    trace.append(
+        {
+            "node_id": node_id,
+            "status": STATUS_AIRLOCK_PENDING,
+            "reason_code": "GOV_AIRLOCK_REVIEW",
+            "detail": detail,
+        }
+    )
+    return {
+        **state,
+        "trace": trace,
+        "status": STATUS_AIRLOCK_PENDING,
+        "reason_code": "GOV_AIRLOCK_REVIEW",
+        "detail": detail,
+        "pending_node_id": None,  # 安全终止，不进入 fallback
     }

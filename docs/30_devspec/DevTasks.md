@@ -5344,4 +5344,208 @@ TASK-XXXX 标题
 
 
 
+---
+
+## M35 Route Commitment Rule 完整落地 + Transparent Subgraph
+
+- **里程碑编号**：M35
+- **标题**：Route Commitment Rule 完整落地 + Transparent Subgraph 审计透明子图
+- **任务范围**：TASK-0323 ~ TASK-0334（共 12 个任务）
+- **前置依赖**：M34 DONE（committed_route_token 已编译写入）
+- **目标**：
+  1. 让 LangGraph 条件边真正读取 `committed_route_token`（Route Commitment Rule 完整落地）
+  2. 实现 `compile_governed_subgraph()` 工厂（Transparent Subgraph Rule 第一阶段）
+  3. 专项测试覆盖（T-RCR-01~10 + T-TSG-01~08）
+  4. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0323 M35-A：GraphState 新增 committed_route_token 字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 `committed_route_token` 字段（`str | None`），以及 `committed_route_token_detail` 字段（`dict[str, Any] | None`），供 Governor 写入、条件边读取。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.committed_route_token: str | None`（令牌字符串，如 `"GOV_OK_RENDER"`）；
+  - `GraphState.committed_route_token_detail: dict[str, Any] | None`（完整 CommittedRouteDecision 字典）；
+  - `GraphState.subgraph_trace: list[dict[str, Any]]`（透明子图节点追踪，M35-E 使用）。
+- 验收标准：
+  - `GraphState` 包含上述三个新字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归（TypedDict 新增字段向后兼容）。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0324 M35-B：graph_runtime.py 注入 committed_route_token 到 initial_state
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时，从 `payload` 中提取 Governor 已编译的 `committed_route_token`（由 `/v1/chat` 端点在调用 `run_graph` 前注入），写入 `initial_state.committed_route_token`。
+- 输入：`payload.committed_route_token`（由 fastapi_app.py 在 Governor 裁决后注入）。
+- 输出：`initial_state.committed_route_token` 已正确填充。
+- 验收标准：
+  - `initial_state.committed_route_token` 从 `payload` 中提取；
+  - 若 `payload` 中无此字段，默认为 `None`；
+  - `initial_state.committed_route_token_detail` 同步提取；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0325 M35-C：fastapi_app.py 在调用 run_graph 前注入 committed_route_token
+
+- 状态：DONE
+- 任务描述：修改 `fastapi_app.py` 的 `/v1/chat` 端点，在 Governor `evaluate_intent` 完成后、调用 `run_graph` 前，将 `committed_route_token` 和 `committed_route_token_detail` 注入到 `payload` 中，供 `graph_runtime.py` 提取到 `initial_state`。
+- 输入：Governor `evaluate_intent` 返回结果中的 `committed_route_token` 字段。
+- 输出：`payload["committed_route_token"]` 和 `payload["committed_route_token_detail"]` 已注入。
+- 验收标准：
+  - Governor APPROVE 时，`payload["committed_route_token"] = "GOV_OK_RENDER"`；
+  - Governor REJECT 时，`payload["committed_route_token"] = "GOV_FAIL_FALLBACK"` 或 `"GOV_AIRLOCK_REVIEW"`；
+  - `payload["committed_route_token_detail"]` 包含完整令牌详情；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0326 M35-D：graph_executor.py 条件边读取 committed_route_token
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_route_after_step` 方法，在路由决策时优先读取 `state.committed_route_token`，按令牌值决定下一步：`GOV_OK_RENDER` → 继续执行；`GOV_FAIL_FALLBACK` → 跳转 fallback；`GOV_AIRLOCK_REVIEW` → 跳转 finish（等待人工审核）；`GOV_SECONDARY_REASONER` → 跳转 secondary reasoner 节点（若存在）。
+- 输入：`state.committed_route_token`（`str | None`）。
+- 输出：条件边路由结果（`"step"` / `"finish"` / `"fallback"`）。
+- 验收标准：
+  - `committed_route_token = "GOV_OK_RENDER"` → 正常执行（`"step"` 或 `"finish"`）；
+  - `committed_route_token = "GOV_FAIL_FALLBACK"` → 跳转 fallback 链路；
+  - `committed_route_token = "GOV_AIRLOCK_REVIEW"` → 跳转 finish，`status = "AIRLOCK_PENDING"`；
+  - `committed_route_token = None` → 保持原有路由逻辑（向后兼容）；
+  - 条件边不直接消费 LLM 原始输出（Route Commitment Rule 完整落地）。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0327 M35-E：compile_governed_subgraph() 工厂（Transparent Subgraph 第一阶段）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_subgraph.py`，实现 `compile_governed_subgraph()` 工厂函数。子图内部节点必须对 Evidence Plane 透明：每个节点执行前后写入 `subgraph_trace`，子图结束时输出 `subgraph_commit_summary`。
+- 输入：子图节点列表（`node_ids: list[str]`）、子图 ID（`subgraph_id: str`）、节点处理器（`handlers: dict[str, NodeHandler]`）。
+- 输出：
+  - `host_brain/integrations/graph_subgraph.py`（新增）；
+  - `compile_governed_subgraph(subgraph_id, node_ids, handlers) -> CompiledSubgraph`；
+  - `CompiledSubgraph.invoke(state) -> GraphState`：执行子图，写入 `subgraph_trace`；
+  - `subgraph_commit_summary: dict`：子图执行摘要（节点数、成功数、失败数、trace 展平）。
+- 验收标准：
+  - 子图每个节点执行后写入 `subgraph_trace`（含 `node_id`、`status`、`ts_ms`）；
+  - 子图结束时 `state.subgraph_trace` 包含所有节点的执行记录；
+  - `subgraph_commit_summary` 包含 `subgraph_id`、`node_count`、`success_count`、`fail_count`、`graph_trace_flat`；
+  - 子图不允许直接写入 `committed_*` 字段（权限约束）；
+  - 子图失败时 `status = STATUS_DEGRADED`，不影响主图继续执行。
+- 涉及文件路径：`host_brain/integrations/graph_subgraph.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
+
+### TASK-0328 M35-F：graph_contract.py 新增 subgraph 相关辅助函数
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 `build_subgraph_commit_summary()` 辅助函数，将 `subgraph_trace` 展平为 `graph_trace_flat`，供 Evidence Plane 写入。
+- 输入：`subgraph_id: str`、`subgraph_trace: list[dict]`。
+- 输出：`subgraph_commit_summary: dict`（含 `subgraph_id`、`node_count`、`success_count`、`fail_count`、`graph_trace_flat`、`committed_at_ms`）。
+- 验收标准：
+  - `build_subgraph_commit_summary` 正确统计成功/失败节点数；
+  - `graph_trace_flat` 为展平后的节点执行记录列表；
+  - `committed_at_ms` 为当前时间戳（毫秒）；
+  - 有完整类型注解和单元测试。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
+
+### TASK-0329 M35-G：Route Commitment Rule 专项测试（T-RCR-01~10）
+
+- 状态：DONE
+- 任务描述：新增 Route Commitment Rule 完整落地的专项测试，验证条件边基于 `committed_route_token` 的路由行为。
+- 输入：`GraphExecutor._route_after_step`、`GraphState.committed_route_token`。
+- 输出：`tests/unit/test_route_commitment_rule_m35.py`（新增）：T-RCR-01~10。
+- 验收标准：
+  - T-RCR-01：`committed_route_token = None` → 保持原有路由逻辑；
+  - T-RCR-02：`committed_route_token = "GOV_OK_RENDER"` → 正常执行；
+  - T-RCR-03：`committed_route_token = "GOV_FAIL_FALLBACK"` → 跳转 fallback；
+  - T-RCR-04：`committed_route_token = "GOV_AIRLOCK_REVIEW"` → 跳转 finish，status = AIRLOCK_PENDING；
+  - T-RCR-05：`committed_route_token = "GOV_SECONDARY_REASONER"` → 跳转 secondary（若存在）；
+  - T-RCR-06：条件边不直接消费 LLM 原始输出（只读 committed_route_token）；
+  - T-RCR-07：`initial_state.committed_route_token` 从 payload 正确提取；
+  - T-RCR-08：fastapi_app.py 注入 committed_route_token 到 payload；
+  - T-RCR-09：Governor APPROVE → payload["committed_route_token"] = "GOV_OK_RENDER"；
+  - T-RCR-10：Governor REJECT → payload["committed_route_token"] = "GOV_FAIL_FALLBACK" 或 "GOV_AIRLOCK_REVIEW"。
+- 涉及文件路径：`tests/unit/test_route_commitment_rule_m35.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0330 M35-H：Transparent Subgraph 专项测试（T-TSG-01~08）
+
+- 状态：DONE
+- 任务描述：新增 `compile_governed_subgraph` 专项测试，验证子图透明性和 Evidence Plane 写入。
+- 输入：`compile_governed_subgraph`、`build_subgraph_commit_summary`。
+- 输出：`tests/unit/test_transparent_subgraph_m35.py`（新增）：T-TSG-01~08。
+- 验收标准：
+  - T-TSG-01：子图每个节点执行后写入 subgraph_trace；
+  - T-TSG-02：subgraph_commit_summary 包含正确的 node_count；
+  - T-TSG-03：subgraph_commit_summary 包含正确的 success_count 和 fail_count；
+  - T-TSG-04：graph_trace_flat 为展平后的节点执行记录；
+  - T-TSG-05：子图不允许写入 committed_* 字段；
+  - T-TSG-06：子图失败时 status = STATUS_DEGRADED，主图继续；
+  - T-TSG-07：build_subgraph_commit_summary 正确统计；
+  - T-TSG-08：committed_at_ms 为正整数时间戳。
+- 涉及文件路径：`tests/unit/test_transparent_subgraph_m35.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
+
+### TASK-0331 M35-I：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 `committed_route_token` 条件边和 `transparent_subgraph` 标记为 M35 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M35 实现项标注 ✅）。
+- 验收标准：
+  - `committed_route_token` 条件边标注 ✅ M35 已实现；
+  - `transparent_subgraph` 标注 ✅ M35 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0332 M35-J：graph_fallback.py 新增 AIRLOCK_PENDING 状态处理
+
+- 状态：DONE
+- 任务描述：在 `graph_fallback.py` 中新增 `handle_airlock_pending()` 函数，当 `committed_route_token = "GOV_AIRLOCK_REVIEW"` 时，将图状态设置为 `STATUS_AIRLOCK_PENDING`，记录到 trace，并安全终止图执行（不触发 fallback 链路）。
+- 输入：`state: GraphState`、`node_id: str`。
+- 输出：`GraphState.status = "AIRLOCK_PENDING"`；`trace` 记录 AIRLOCK 事件。
+- 验收标准：
+  - `handle_airlock_pending` 设置 `status = "AIRLOCK_PENDING"`；
+  - `trace` 包含 `{"node_id": node_id, "status": "AIRLOCK_PENDING", "reason_code": "GOV_AIRLOCK_REVIEW"}`；
+  - 不触发 fallback 链路（与 `GOV_FAIL_FALLBACK` 行为区分）；
+  - 有单元测试覆盖。
+- 涉及文件路径：`host_brain/integrations/graph_fallback.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+
+### TASK-0333 M35-K：graph_contract.py 新增 STATUS_AIRLOCK_PENDING 常量
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 `STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 常量，供 `graph_executor.py`、`graph_fallback.py` 和测试使用。
+- 输入：现有常量定义区域。
+- 输出：`STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 常量。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - 在 `graph_executor.py` 和 `graph_fallback.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 1。
+
+### TASK-0334 M35-L：M35 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0323~0333 全部 DONE 后，生成 M35 代码审查报告，记录 Route Commitment Rule 完整落地和 Transparent Subgraph 第一阶段的实现情况。
+- 输入：TASK-0323~0333 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m35_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0323~0333 全部 11 个任务的变更摘要；
+  - 新增测试 ≥ 18 个（T-RCR-01~10 + T-TSG-01~08），全部通过；
+  - Route Commitment Rule 完整落地（条件边基于 committed_route_token）；
+  - Transparent Subgraph 第一阶段实现（compile_governed_subgraph 工厂）；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m35_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.1、§5.2、§11.2。
+
+
+
 

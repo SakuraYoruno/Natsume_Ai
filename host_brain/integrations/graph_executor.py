@@ -20,11 +20,11 @@ from host_brain.core.errors import (
 )
 from host_brain.integrations.graph_contract import (
     GraphState, NodeHandler, GatewayFactory,
-    STATUS_DEGRADED, STATUS_FAILED, STATUS_OK,
+    STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK,
     build_model_param_hash, extract_governance_refs, normalize_dependency_status, pick_api_key,
 )
 from host_brain.integrations.graph_fallback import (
-    fail_hard, handle_dependency_unavailable, handle_execution_error,
+    fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
 )
 from host_brain.integrations.llm_gateway import LlmGatewayContract
@@ -53,6 +53,24 @@ class GraphExecutor:
         node_id = str(state.get("pending_node_id") or "").strip()
         if not node_id:
             return set_finish(state)
+
+        # M35-D：Route Commitment Rule — 在节点执行前检查 committed_route_token
+        # AIRLOCK 令牌：安全终止，不执行任何节点
+        token = str(state.get("committed_route_token") or "").strip()
+        if token == "GOV_AIRLOCK_REVIEW":
+            return handle_airlock_pending(state=state, node_id=node_id)
+        # GOV_FAIL_FALLBACK：跳转 fallback 链路（不执行当前节点）
+        if token == "GOV_FAIL_FALLBACK":
+            return {
+                **state,
+                "status": STATUS_DEGRADED,
+                "reason_code": "GOV_FAIL_FALLBACK",
+                "detail": f"Governor 裁决失败，跳转 fallback，节点={node_id}",
+                "pending_node_id": pick_fallback_node(state=state, node_id=node_id),
+                # 令牌消费后清空，避免 fallback 节点再次被拦截
+                "committed_route_token": None,
+            }
+
         binding = (state.get("node_bindings") or {}).get(node_id)
         if binding is None:
             return fail_hard(state, reason_code=ORCH_NODE_MISSING, detail=f"node binding missing: {node_id}")
@@ -173,6 +191,19 @@ class GraphExecutor:
                 "__orchestration_detail__": f"approval token missing for node={node_id}"}
 
     def _route_after_step(self, state: GraphState) -> str:
+        # M35-D：Route Commitment Rule 完整落地（ModelPlane.md §10 Rule 1）
+        # 条件边优先读取 committed_route_token，不直接消费 LLM 原始输出
+        token = str(state.get("committed_route_token") or "").strip()
+        if token == "GOV_AIRLOCK_REVIEW":
+            # AIRLOCK 暂停：安全终止，不进入 fallback
+            return "finish"
+        if token == "GOV_FAIL_FALLBACK":
+            # 裁决失败：跳转 fallback 链路
+            return "finish"
+        if token == "GOV_SECONDARY_REASONER":
+            # 降级到 secondary reasoner（若存在）
+            return "finish"
+        # GOV_OK_RENDER 或 token=None（向后兼容）：保持原有路由逻辑
         if str(state.get("status") or "") == STATUS_FAILED:
             return "finish"
         return "step" if str(state.get("pending_node_id") or "").strip() else "finish"

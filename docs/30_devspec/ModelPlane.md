@@ -298,9 +298,10 @@
 
 | 能力 | 状态 |
 |------|------|
-| `committed_route_token` + Route Commitment Rule | ✅ M34 已实现 |
+| `committed_route_token` + Route Commitment Rule | ✅ M34 已实现（编译写入）|
+| `committed_route_token` 条件边读取（完整落地） | ✅ M35 已实现 |
 | `pre_intent_classifier` 轻量预分类 | ✅ M34 已实现 |
-| `transparent_subgraph` 审计透明子图 | 后续里程碑 |
+| `transparent_subgraph` 审计透明子图 | ✅ M35 已实现（第一阶段）|
 | `dual-clock supervision` 双时钟监督 | 后续里程碑 |
 
 **第二档：可以做，但要严格限域**

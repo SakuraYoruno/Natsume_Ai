@@ -1820,7 +1820,13 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             graph_result = get_graph_runtime().run_graph(
                 request_id=request_id,
                 graph_config=graph_config,
-                payload=llm_prompt_payload,
+                payload={
+                    **llm_prompt_payload,
+                    # M35-C：注入 committed_route_token 到 payload，供 graph_runtime 提取到 initial_state
+                    # Governor 已在 evaluate_intent 中编译令牌，此处透传给 LangGraph 图
+                    "committed_route_token": governor_result.get("committed_route_token_ref"),
+                    "committed_route_token_detail": governor_result.get("committed_route_token"),
+                },
                 dependency_statuses=dependency_statuses,
                 ts_ms=ts_ms,
             )

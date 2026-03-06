@@ -23,6 +23,7 @@ from host_brain.integrations.graph_contract import (
     NodeHandler,
     S_ORCH_RUN,
     S_ORCH_VALIDATE,
+    STATUS_AIRLOCK_PENDING,
     STATUS_DEGRADED,
     STATUS_FAILED,
     STATUS_OK,
@@ -163,6 +164,12 @@ class GraphRuntimeContract:
             "model_nodes": model_nodes,
             "model_profile_id": model_profile_id,
             "model_calls": [],
+            # M35-B：从 payload 提取 Governor 已编译的 committed_route_token
+            # 由 fastapi_app.py 在 Governor 裁决后、调用 run_graph 前注入
+            "committed_route_token": str((dict(payload or {})).get("committed_route_token") or "").strip() or None,
+            "committed_route_token_detail": (dict(payload or {})).get("committed_route_token_detail") or None,
+            # M35-A：透明子图节点执行追踪（初始为空列表）
+            "subgraph_trace": [],
         }
         state = compiled.invoke(initial_state)
 

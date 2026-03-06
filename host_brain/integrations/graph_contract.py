@@ -29,6 +29,8 @@ S_ORCH_RUN = "S_ORCH_RUN"
 STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 STATUS_FAILED = "FAILED"
+# M35-K：AIRLOCK 暂停状态（GOV_AIRLOCK_REVIEW 令牌触发，等待人工审核）
+STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"
 
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
@@ -57,6 +59,14 @@ class GraphState(TypedDict):
     model_nodes: dict[str, dict[str, Any]]
     model_profile_id: str | None
     model_calls: list[dict[str, Any]]
+    # M35-A：Route Commitment Rule 字段（ModelPlane.md §10 Rule 1）
+    # committed_route_token：Governor 已提交的路由令牌（只能由 Host Governor 写入）
+    committed_route_token: str | None
+    # committed_route_token_detail：完整 CommittedRouteDecision 字典（审计用）
+    committed_route_token_detail: dict[str, Any] | None
+    # M35-A：Transparent Subgraph 字段（ModelPlane.md §10 Rule 3）
+    # subgraph_trace：透明子图节点执行追踪（只能由 compile_governed_subgraph 写入）
+    subgraph_trace: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -238,3 +248,52 @@ def pick_api_key(*, state: GraphState, provider_name: str, model_node_id: str | 
 
 def _issue(*, reason_code: str, detail: str, failed_artifact: str) -> dict[str, Any]:
     return {"check_id": S_ORCH_VALIDATE, "reason_code": str(reason_code), "detail": str(detail), "failed_artifact": str(failed_artifact)}
+
+
+# ---------------------------------------------------------------------------
+# M35-F：Transparent Subgraph 辅助函数
+# ---------------------------------------------------------------------------
+
+def build_subgraph_commit_summary(
+    *,
+    subgraph_id: str,
+    subgraph_trace: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """将 subgraph_trace 展平为 subgraph_commit_summary，供 Evidence Plane 写入。
+
+    Args:
+        subgraph_id: 子图 ID
+        subgraph_trace: 子图节点执行追踪列表
+
+    Returns:
+        subgraph_commit_summary: 包含 subgraph_id、node_count、success_count、
+            fail_count、graph_trace_flat、committed_at_ms
+    """
+    import time as _time
+
+    node_count = len(subgraph_trace)
+    success_count = sum(
+        1 for entry in subgraph_trace
+        if str(entry.get("status") or "").upper() in {"OK", "SUCCESS", STATUS_OK}
+    )
+    fail_count = node_count - success_count
+
+    # 展平：每个节点记录保留 node_id、status、ts_ms、reason_code
+    graph_trace_flat: list[dict[str, Any]] = [
+        {
+            "node_id": str(entry.get("node_id") or ""),
+            "status": str(entry.get("status") or STATUS_OK),
+            "ts_ms": int(entry.get("ts_ms") or 0),
+            "reason_code": entry.get("reason_code"),
+        }
+        for entry in subgraph_trace
+    ]
+
+    return {
+        "subgraph_id": str(subgraph_id),
+        "node_count": node_count,
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "graph_trace_flat": graph_trace_flat,
+        "committed_at_ms": int(_time.time() * 1000),
+    }
