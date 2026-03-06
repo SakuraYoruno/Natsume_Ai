@@ -37,6 +37,8 @@ class CompiledSubgraph:
     node_ids: list[str]
     handlers: dict[str, NodeHandler]
     _compiled: bool = field(default=False, repr=False)
+    # M37-E：Evidence Plane 实时写入（可选，默认 None）
+    _evidence_plane: Any = field(default=None, repr=False)
 
     def invoke(self, state: GraphState) -> GraphState:
         """执行子图，写入 subgraph_trace，返回更新后的 GraphState。
@@ -77,21 +79,31 @@ class CompiledSubgraph:
                 # 权限约束：子图不允许写入 committed_* 字段
                 _strip_committed_fields(output)
                 payload.update(output or {})
-                subgraph_trace.append({
+                trace_entry = {
                     "node_id": node_id,
                     "status": STATUS_OK,
                     "ts_ms": ts_ms,
                     "reason_code": None,
                     "detail": "subgraph node executed",
-                })
+                }
+                subgraph_trace.append(trace_entry)
+                # M37-E：Evidence Plane 实时写入（成功）
+                self._write_node_trace(request_id=str(state.get("request_id") or ""),
+                                       graph_id=str(state.get("graph_id") or ""),
+                                       entry=trace_entry)
             except Exception as exc:
-                subgraph_trace.append({
+                trace_entry = {
                     "node_id": node_id,
                     "status": STATUS_FAILED,
                     "ts_ms": ts_ms,
                     "reason_code": "SUBGRAPH_NODE_ERROR",
                     "detail": f"子图节点执行失败: {node_id}: {exc}",
-                })
+                }
+                subgraph_trace.append(trace_entry)
+                # M37-E：Evidence Plane 实时写入（失败）
+                self._write_node_trace(request_id=str(state.get("request_id") or ""),
+                                       graph_id=str(state.get("graph_id") or ""),
+                                       entry=trace_entry)
                 current_status = STATUS_DEGRADED
                 # 子图失败不影响主图继续执行（继续下一个节点）
 
@@ -115,11 +127,25 @@ class CompiledSubgraph:
             "status": final_status if final_status != STATUS_OK else str(state.get("status") or STATUS_OK),
         }
 
+    def _write_node_trace(self, *, request_id: str, graph_id: str, entry: dict[str, Any]) -> None:
+        """M37-E：子图节点执行后实时写入 Evidence Plane（静默降级）。"""
+        if self._evidence_plane is None:
+            return
+        try:
+            self._evidence_plane.write_trace(
+                request_id=request_id,
+                graph_id=graph_id,
+                trace=[entry],
+            )
+        except Exception:
+            pass  # 静默降级，不影响子图执行
+
 
 def compile_governed_subgraph(
     subgraph_id: str,
     node_ids: list[str],
     handlers: dict[str, NodeHandler],
+    evidence_plane: Any = None,
 ) -> CompiledSubgraph:
     """编译透明子图工厂函数（Transparent Subgraph Rule，ModelPlane.md §10 Rule 3）。
 
@@ -132,6 +158,7 @@ def compile_governed_subgraph(
         subgraph_id: 子图唯一 ID（用于 Evidence Plane 追踪）
         node_ids: 子图节点 ID 列表（按执行顺序）
         handlers: 节点处理器字典 {node_id: handler_fn}
+        evidence_plane: Evidence Plane 实例（可选，M37-E 新增，默认 None）
 
     Returns:
         CompiledSubgraph（可调用 .invoke(state) 执行）
@@ -149,6 +176,7 @@ def compile_governed_subgraph(
         node_ids=[str(nid).strip() for nid in node_ids if str(nid or "").strip()],
         handlers=dict(handlers or {}),
         _compiled=True,
+        _evidence_plane=evidence_plane,
     )
 
 

@@ -24,6 +24,11 @@ from host_brain.integrations.graph_contract import (
     STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK, STATUS_POLICY_TIMEOUT,
     build_model_param_hash, extract_governance_refs, normalize_dependency_status, pick_api_key,
 )
+from host_brain.integrations.graph_branch import (
+    BranchSpec,
+    build_branch_manifest_dict,
+    run_parallel_branches,
+)
 from host_brain.integrations.graph_clock import DualClockSupervisor
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
@@ -157,6 +162,30 @@ class GraphExecutor:
                 )
             except Exception:
                 pass  # 静默降级
+
+        # M37-D：只读并行分支执行（若 branch_specs 非空）
+        branch_specs_raw = list(new_state.get("branch_specs") or [])
+        if branch_specs_raw:
+            try:
+                branch_specs = [
+                    BranchSpec(
+                        branch_id=str(spec.get("branch_id") or f"branch_{i}"),
+                        handler=spec["handler"],
+                        input_payload=dict(spec.get("input_payload") or new_state.get("payload") or {}),
+                        timeout_ms=int(spec.get("timeout_ms") or self._default_timeout_ms),
+                    )
+                    for i, spec in enumerate(branch_specs_raw)
+                    if callable(spec.get("handler"))
+                ]
+                if branch_specs:
+                    manifest = run_parallel_branches(
+                        branch_specs=branch_specs,
+                        state=new_state,
+                        max_workers=int(new_state.get("branch_max_workers") or 4),
+                    )
+                    new_state = {**new_state, "branch_manifest": build_branch_manifest_dict(manifest)}
+            except Exception:
+                pass  # 静默降级，不影响主图执行
 
         return new_state
 

@@ -40,6 +40,12 @@ CLOCK_EVENT_POLICY_TIMEOUT = "POLICY_TIMEOUT"
 # M36-G：默认全局策略超时（30 秒）
 DEFAULT_POLICY_TIMEOUT_MS = 30_000
 
+# M37-F：只读并行分支常量
+BRANCH_STATUS_OK = "OK"
+BRANCH_STATUS_FAILED = "FAILED"
+# M37-F：默认并行分支最大线程数
+DEFAULT_BRANCH_MAX_WORKERS = 4
+
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
 NodeHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
@@ -84,6 +90,11 @@ class GraphState(TypedDict):
     clock_events: list[dict[str, Any]]
     # node_exec_stats：节点执行统计（exec_start_ms / exec_end_ms / exec_duration_ms）
     node_exec_stats: dict[str, dict[str, Any]]
+    # M37-B：只读并行分支字段（ModelPlane.md §10 Rule 4）
+    # branch_specs：分支规格列表（由主图配置注入，只读）
+    branch_specs: list[dict[str, Any]]
+    # branch_manifest：分支执行结果清单（由 run_parallel_branches 写入）
+    branch_manifest: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +276,27 @@ def pick_api_key(*, state: GraphState, provider_name: str, model_node_id: str | 
 
 def _issue(*, reason_code: str, detail: str, failed_artifact: str) -> dict[str, Any]:
     return {"check_id": S_ORCH_VALIDATE, "reason_code": str(reason_code), "detail": str(detail), "failed_artifact": str(failed_artifact)}
+
+
+# ---------------------------------------------------------------------------
+# M37-F：只读并行分支辅助函数
+# ---------------------------------------------------------------------------
+
+def build_branch_manifest_summary(manifest_dict: dict[str, Any]) -> dict[str, Any]:
+    """从 branch_manifest 字典中提取摘要信息。
+
+    Args:
+        manifest_dict: build_branch_manifest_dict() 返回的字典
+
+    Returns:
+        包含 total_count、success_count、fail_count 的摘要字典
+    """
+    return {
+        "total_count": int(manifest_dict.get("total_count") or 0),
+        "success_count": int(manifest_dict.get("success_count") or 0),
+        "fail_count": int(manifest_dict.get("fail_count") or 0),
+        "committed_at_ms": int(manifest_dict.get("committed_at_ms") or 0),
+    }
 
 
 # ---------------------------------------------------------------------------

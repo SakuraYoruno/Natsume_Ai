@@ -90,6 +90,16 @@ class EvidencePlane:
                         threshold_ms INTEGER NOT NULL,
                         ts_ms INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS branch_manifest (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        request_id TEXT NOT NULL,
+                        graph_id TEXT NOT NULL,
+                        total_count INTEGER NOT NULL,
+                        success_count INTEGER NOT NULL,
+                        fail_count INTEGER NOT NULL,
+                        committed_at_ms INTEGER NOT NULL,
+                        branches_json TEXT
+                    );
                 """)
             self._initialized = True
         except Exception as exc:
@@ -218,6 +228,63 @@ class EvidencePlane:
                 )
         except Exception as exc:
             logger.warning("EvidencePlane.write_clock_events 失败（静默降级）: %s", exc)
+
+    def write_branch_manifest(
+        self,
+        *,
+        request_id: str,
+        graph_id: str,
+        manifest: dict[str, Any],
+    ) -> None:
+        """将 branch_manifest 写入 branch_manifest 表（M37-L）。
+
+        Args:
+            request_id: 请求 ID
+            graph_id: 图 ID
+            manifest: build_branch_manifest_dict() 返回的字典
+        """
+        if not self._initialized or not manifest:
+            return
+        try:
+            branches_json = json.dumps(
+                manifest.get("branches") or [],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO branch_manifest "
+                    "(request_id, graph_id, total_count, success_count, fail_count, committed_at_ms, branches_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(request_id),
+                        str(graph_id),
+                        int(manifest.get("total_count") or 0),
+                        int(manifest.get("success_count") or 0),
+                        int(manifest.get("fail_count") or 0),
+                        int(manifest.get("committed_at_ms") or int(time.time() * 1000)),
+                        branches_json,
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("EvidencePlane.write_branch_manifest 失败（静默降级）: %s", exc)
+
+    def query_branch_manifest(self, *, request_id: str) -> list[dict[str, Any]]:
+        """查询指定 request_id 的 branch_manifest 记录（测试用）。"""
+        if not self._initialized:
+            return []
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT request_id, graph_id, total_count, success_count, fail_count, committed_at_ms, branches_json "
+                    "FROM branch_manifest WHERE request_id = ? ORDER BY id",
+                    (str(request_id),),
+                )
+                cols = ["request_id", "graph_id", "total_count", "success_count", "fail_count", "committed_at_ms", "branches_json"]
+                return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception as exc:
+            logger.warning("EvidencePlane.query_branch_manifest 失败: %s", exc)
+            return []
 
     def query_trace(self, *, request_id: str) -> list[dict[str, Any]]:
         """查询指定 request_id 的 trace 记录（测试用）。"""

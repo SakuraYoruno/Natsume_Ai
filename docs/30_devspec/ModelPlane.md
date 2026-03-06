@@ -309,7 +309,8 @@
 
 | 能力 | 限制条件 |
 |------|---------|
-| 只读并行分支 | 必须先有 `branch_manifest`，暂不含副作用分支 |
+| 只读并行分支 + `branch_manifest` | ✅ M37 已实现（graph_branch.py，只读约束，无副作用）|
+| Transparent Subgraph Evidence Plane 实时写入 | ✅ M37 已实现（子图节点级实时写入）|
 | Presence Stream | 只允许向 UI 单向输出，禁止作为下游节点输入 |
 
 **第三档：不建议强求"接近原生体验"**

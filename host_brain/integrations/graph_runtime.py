@@ -180,6 +180,9 @@ class GraphRuntimeContract:
             "policy_timeout_ms": policy_timeout_ms,
             "clock_events": [],
             "node_exec_stats": {},
+            # M37-C：只读并行分支字段初始化
+            "branch_specs": [],
+            "branch_manifest": None,
         }
         state = compiled.invoke(initial_state)
 
@@ -222,6 +225,10 @@ class GraphRuntimeContract:
             clock_events = list((state or {}).get("clock_events") or [])
             if clock_events:
                 ep.write_clock_events(request_id=request_id, graph_id=graph_id, clock_events=clock_events)
+            # M37-L：写入 branch_manifest
+            branch_manifest = (state or {}).get("branch_manifest")
+            if branch_manifest:
+                ep.write_branch_manifest(request_id=request_id, graph_id=graph_id, manifest=branch_manifest)
         except Exception:
             pass  # 静默降级，不影响主流程
 

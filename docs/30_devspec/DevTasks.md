@@ -5802,4 +5802,245 @@ TASK-XXXX 标题
 
 
 
+---
+
+## M37 只读并行分支 + Transparent Subgraph Evidence Plane 实时写入
+
+- **里程碑编号**：M37
+- **标题**：只读并行分支（branch_manifest）+ Transparent Subgraph Evidence Plane 实时写入
+- **任务范围**：TASK-0349 ~ TASK-0362（共 14 个任务）
+- **前置依赖**：M36 DONE（Dual-Clock Supervision + Evidence Plane SQLite 写入）
+- **目标**：
+  1. 实现只读并行分支执行器（`graph_branch.py`），分支结果汇总为 `branch_manifest`，分支不能写入 `committed_*` 字段（第二档能力）
+  2. Transparent Subgraph Evidence Plane 实时写入（子图节点级，修改 `graph_subgraph.py`）
+  3. GraphState 新增 `branch_manifest` 字段
+  4. 专项测试覆盖（T-BRN-01~10 + T-SGE-01~06）
+  5. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0349 M37-A：新建 graph_branch.py（只读并行分支核心实现）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_branch.py`，实现只读并行分支执行器。
+  - **只读约束**：分支节点不能写入 `committed_*` 字段（由 `_strip_committed_fields` 强制执行）；分支节点不能修改主图 `trace`、`status`、`reason_code` 等核心字段；分支结果只能写入 `branch_manifest`。
+  - **并行执行**：使用 `concurrent.futures.ThreadPoolExecutor` 并行执行多个分支，每个分支独立运行，互不影响。
+  - **branch_manifest**：分支执行结果汇总字典，包含每个分支的 `branch_id`、`status`、`output`、`exec_duration_ms`、`error`（若失败）。
+  - **主权保护**：分支失败不影响主图执行（静默降级，记录到 `branch_manifest`）。
+- 输入：分支定义列表（`branch_id`、`handler`、`payload`）、主图 `GraphState`。
+- 输出：
+  - `host_brain/integrations/graph_branch.py`（新增）；
+  - `BranchSpec`：分支规格数据类（`branch_id`、`handler`、`input_payload`）；
+  - `BranchResult`：分支执行结果数据类（`branch_id`、`status`、`output`、`exec_duration_ms`、`error`）；
+  - `BranchManifest`：分支清单数据类（`branches`、`total_count`、`success_count`、`fail_count`、`committed_at_ms`）；
+  - `run_parallel_branches(branch_specs, state, max_workers) -> BranchManifest`：并行执行所有分支，返回 `BranchManifest`；
+  - `build_branch_manifest_dict(manifest) -> dict`：将 `BranchManifest` 转换为字典，供 `GraphState.branch_manifest` 写入。
+- 验收标准：
+  - `run_parallel_branches` 并行执行所有分支（`ThreadPoolExecutor`）；
+  - 分支节点输出中的 `committed_*` 字段被自动移除（只读约束）；
+  - 分支失败时 `BranchResult.status = "FAILED"`，不影响其他分支和主图；
+  - `BranchManifest.success_count + fail_count == total_count`；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_branch.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4（第二档能力）；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0350 M37-B：GraphState 新增 branch_manifest 字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 `branch_manifest` 字段。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.branch_manifest: dict[str, Any] | None`（只读并行分支清单，由 `run_parallel_branches` 写入）；
+  - `GraphState.branch_specs: list[dict[str, Any]]`（分支规格列表，由主图配置注入）。
+- 验收标准：
+  - `GraphState` 包含 `branch_manifest` 和 `branch_specs` 字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归（TypedDict 新增字段向后兼容）。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0351 M37-C：graph_runtime.py 初始化 branch_manifest 字段
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 `branch_manifest = None`、`branch_specs = []`。
+- 输入：现有 `initial_state` 构建逻辑。
+- 输出：`initial_state` 包含 `branch_manifest = None`、`branch_specs = []`。
+- 验收标准：
+  - `initial_state.branch_manifest = None`；
+  - `initial_state.branch_specs = []`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0352 M37-D：graph_executor.py 集成只读并行分支执行
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行完成后检查 `state.branch_specs`，若非空则调用 `run_parallel_branches()` 执行并行分支，将 `BranchManifest` 写入 `state.branch_manifest`。
+- 输入：`state.branch_specs`（分支规格列表）、`run_parallel_branches`。
+- 输出：`state.branch_manifest` 已更新（若 `branch_specs` 非空）。
+- 验收标准：
+  - `branch_specs` 非空时，调用 `run_parallel_branches()` 并将结果写入 `state.branch_manifest`；
+  - `branch_specs` 为空时，行为不变（向后兼容）；
+  - 分支执行失败时不影响主图执行（静默降级）；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0353 M37-E：graph_subgraph.py 集成 Evidence Plane 实时写入
+
+- 状态：DONE
+- 任务描述：修改 `graph_subgraph.py` 的 `CompiledSubgraph.invoke()` 方法，在每个子图节点执行后实时写入 Evidence Plane（`subgraph_trace` 单条记录）。
+  - 写入时机：每个子图节点执行完成后（无论成功或失败），立即调用 `evidence_plane.write_trace()`；
+  - 写入内容：单条 `subgraph_trace` 记录（`node_id`、`status`、`ts_ms`、`reason_code`、`detail`）；
+  - 静默降级：写入失败时不影响子图执行；
+  - `compile_governed_subgraph()` 新增 `evidence_plane` 可选参数（默认 None）。
+- 输入：`evidence_plane: EvidencePlane | None`（可选）。
+- 输出：子图节点执行后实时写入 Evidence Plane。
+- 验收标准：
+  - `compile_governed_subgraph()` 接受 `evidence_plane` 参数；
+  - 每个子图节点执行后调用 `evidence_plane.write_trace()`（若 evidence_plane 非 None）；
+  - 写入失败时静默降级；
+  - 现有测试无回归（evidence_plane=None 时行为不变）。
+- 涉及文件路径：`host_brain/integrations/graph_subgraph.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0354 M37-F：graph_contract.py 新增 branch 相关常量和辅助函数
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增只读并行分支相关常量和辅助函数。
+- 输入：现有常量定义区域。
+- 输出：
+  - `BRANCH_STATUS_OK = "OK"` 常量；
+  - `BRANCH_STATUS_FAILED = "FAILED"` 常量；
+  - `DEFAULT_BRANCH_MAX_WORKERS = 4`（默认并行分支最大线程数）；
+  - `build_branch_manifest_summary(manifest_dict) -> dict` 辅助函数（提取 total_count、success_count、fail_count）。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - `build_branch_manifest_summary` 返回包含 `total_count`、`success_count`、`fail_count` 的字典；
+  - 在 `graph_branch.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0355 M37-G：只读并行分支专项测试（T-BRN-01~10）
+
+- 状态：DONE
+- 任务描述：新增只读并行分支专项测试，验证 `run_parallel_branches`、`BranchManifest`、只读约束的正确性。
+- 输入：`run_parallel_branches`、`BranchSpec`、`BranchManifest`、`build_branch_manifest_dict`。
+- 输出：`tests/unit/test_parallel_branches_m37.py`（新增）：T-BRN-01~10。
+- 验收标准：
+  - T-BRN-01：run_parallel_branches 并行执行所有分支；
+  - T-BRN-02：分支成功时 BranchResult.status = "OK"；
+  - T-BRN-03：分支失败时 BranchResult.status = "FAILED"，不影响其他分支；
+  - T-BRN-04：分支输出中的 committed_* 字段被自动移除（只读约束）；
+  - T-BRN-05：BranchManifest.success_count + fail_count == total_count；
+  - T-BRN-06：build_branch_manifest_dict 返回正确的字典结构；
+  - T-BRN-07：branch_specs 为空时 run_parallel_branches 返回空 BranchManifest；
+  - T-BRN-08：max_workers 参数控制并行线程数；
+  - T-BRN-09：分支执行超时时 BranchResult.status = "FAILED"（含 error 信息）；
+  - T-BRN-10：BranchManifest.committed_at_ms 为合法时间戳。
+- 涉及文件路径：`tests/unit/test_parallel_branches_m37.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0356 M37-H：Transparent Subgraph Evidence Plane 实时写入专项测试（T-SGE-01~06）
+
+- 状态：DONE
+- 任务描述：新增 Transparent Subgraph Evidence Plane 实时写入专项测试，验证子图节点级实时写入的正确性。
+- 输入：`compile_governed_subgraph`、`EvidencePlane`。
+- 输出：`tests/unit/test_subgraph_evidence_m37.py`（新增）：T-SGE-01~06。
+- 验收标准：
+  - T-SGE-01：compile_governed_subgraph 接受 evidence_plane 参数；
+  - T-SGE-02：子图节点执行成功后调用 evidence_plane.write_trace()；
+  - T-SGE-03：子图节点执行失败后也调用 evidence_plane.write_trace()（记录失败）；
+  - T-SGE-04：evidence_plane=None 时行为不变（向后兼容）；
+  - T-SGE-05：evidence_plane 写入失败时静默降级（不影响子图执行）；
+  - T-SGE-06：写入的 trace 记录包含正确的 node_id、status、ts_ms 字段。
+- 涉及文件路径：`tests/unit/test_subgraph_evidence_m37.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0357 M37-I：graph_executor.py 集成测试（T-BRN-INT-01~03）
+
+- 状态：DONE
+- 任务描述：新增 graph_executor.py 集成测试，验证 `_run_single_step` 在 `branch_specs` 非空时正确调用 `run_parallel_branches` 并写入 `branch_manifest`。
+- 输入：`GraphExecutor._run_single_step`、`branch_specs`。
+- 输出：`tests/unit/test_branch_executor_integration_m37.py`（新增）：T-BRN-INT-01~03。
+- 验收标准：
+  - T-BRN-INT-01：branch_specs 非空时，_run_single_step 调用 run_parallel_branches；
+  - T-BRN-INT-02：branch_manifest 写入 state；
+  - T-BRN-INT-03：branch_specs 为空时，_run_single_step 行为不变。
+- 涉及文件路径：`tests/unit/test_branch_executor_integration_m37.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+
+### TASK-0358 M37-J：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将只读并行分支和 Transparent Subgraph Evidence Plane 实时写入标记为 M37 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M37 实现项标注 ✅）。
+- 验收标准：
+  - `只读并行分支 + branch_manifest` 标注 ✅ M37 已实现；
+  - `Transparent Subgraph Evidence Plane 实时写入` 标注 ✅ M37 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0359 M37-K：graph_contract.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M37 新增 branch 相关常量和辅助函数后，`graph_contract.py` 行数可能超出当前契约测试限制（400 行），需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：
+  - 契约测试通过；
+  - 行数限制合理（不超过实际行数 + 50 的余量）。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0360 M37-L：graph_runtime.py 集成 Evidence Plane 写入 branch_manifest
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.branch_manifest` 非空，将 `branch_manifest` 写入 Evidence Plane（新增 `write_branch_manifest` 方法到 `EvidencePlane`）。
+- 输入：`state.branch_manifest`（若非空）。
+- 输出：
+  - `EvidencePlane.write_branch_manifest(request_id, graph_id, manifest)` 方法（新增）；
+  - `graph_evidence.py` 新增 `branch_manifest` 表（`request_id`、`graph_id`、`total_count`、`success_count`、`fail_count`、`committed_at_ms`、`branches_json`）；
+  - `graph_runtime.py._write_evidence` 调用 `write_branch_manifest`（若 `branch_manifest` 非空）。
+- 验收标准：
+  - `write_branch_manifest` 将 branch_manifest 写入 SQLite `branch_manifest` 表；
+  - 写入失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §5.3、§7.1。
+
+### TASK-0361 M37-M：Evidence Plane branch_manifest 写入专项测试（T-EVP-09~11）
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane branch_manifest 写入专项测试。
+- 输入：`EvidencePlane.write_branch_manifest`。
+- 输出：在 `tests/unit/test_evidence_plane_m36.py` 中追加 T-EVP-09~11（或新建 `test_evidence_branch_m37.py`）。
+- 验收标准：
+  - T-EVP-09：write_branch_manifest 将 manifest 写入 SQLite branch_manifest 表；
+  - T-EVP-10：branch_manifest 表包含正确的字段（total_count、success_count、fail_count 等）；
+  - T-EVP-11：write_branch_manifest 写入失败时静默降级。
+- 涉及文件路径：`tests/unit/test_evidence_branch_m37.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §5.3。
+
+### TASK-0362 M37-N：M37 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0349~0361 全部 DONE 后，生成 M37 代码审查报告，记录只读并行分支和 Transparent Subgraph Evidence Plane 实时写入的实现情况。
+- 输入：TASK-0349~0361 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m37_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0349~0361 全部 13 个任务的变更摘要；
+  - 新增测试 ≥ 19 个（T-BRN-01~10 + T-SGE-01~06 + T-BRN-INT-01~03），全部通过；
+  - 只读并行分支完整落地（graph_branch.py + branch_manifest）；
+  - Transparent Subgraph Evidence Plane 实时写入实现；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m37_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §5.3、§7.1、§11.2。
+
+
+
 
