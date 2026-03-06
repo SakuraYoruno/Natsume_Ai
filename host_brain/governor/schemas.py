@@ -151,7 +151,18 @@ def lenient_parse_intent(raw_input: str | dict[str, Any]) -> IntentParseResult:
     )
 
 
-def strict_validate_intent(normalized_json: dict[str, Any]) -> tuple[IntentEnvelope | None, str | None, dict[str, Any]]:
+def strict_validate_intent(
+    normalized_json: dict[str, Any],
+    extra_action_allowlist: set[str] | None = None,
+) -> tuple[IntentEnvelope | None, str | None, dict[str, Any]]:
+    """严格校验 intent 格式。
+
+    Args:
+        normalized_json: 已解析的 intent 字典
+        extra_action_allowlist: M42 扩展 — 动态注册的 Skill action 白名单（来自 SkillRegistry）。
+            若提供，则允许 action 为 ACTION_ALLOWLIST ∪ extra_action_allowlist 中的任意值。
+            对于 extra_action_allowlist 中的 action，args 校验规则宽松（允许任意 dict）。
+    """
     lint: dict[str, Any] = {"schema": [], "args": []}
 
     for field_name, expected_type in REQUIRED_FIELDS.items():
@@ -169,9 +180,12 @@ def strict_validate_intent(normalized_json: dict[str, Any]) -> tuple[IntentEnvel
     if lint["schema"]:
         return None, INTENT_SCHEMA_INVALID, lint
 
+    # M42：合并静态白名单和动态 Skill 白名单
+    effective_action_allowlist = ACTION_ALLOWLIST | (extra_action_allowlist or set())
+
     if normalized_json["type"] not in TYPE_ALLOWLIST:
         lint["schema"].append(f"type not allowed: {normalized_json['type']}")
-    if normalized_json["action"] not in ACTION_ALLOWLIST:
+    if normalized_json["action"] not in effective_action_allowlist:
         lint["schema"].append(f"action not allowed: {normalized_json['action']}")
     if normalized_json["target"] not in TARGET_ALLOWLIST:
         lint["schema"].append(f"target not allowed: {normalized_json['target']}")
@@ -183,9 +197,15 @@ def strict_validate_intent(normalized_json: dict[str, Any]) -> tuple[IntentEnvel
     if lint["schema"]:
         return None, INTENT_SCHEMA_INVALID, lint
 
-    args_reason = _validate_args(normalized_json["action"], normalized_json["args"], lint)
-    if args_reason is not None:
-        return None, args_reason, lint
+    # M42：动态 Skill 的 args 校验宽松（允许任意 dict，不要求特定字段）
+    action = normalized_json["action"]
+    if extra_action_allowlist and action in extra_action_allowlist and action not in ACTION_ARGS_RULES:
+        # 动态注册的 Skill：args 只要是 dict 即可（已在 REQUIRED_FIELDS 中校验）
+        pass
+    else:
+        args_reason = _validate_args(action, normalized_json["args"], lint)
+        if args_reason is not None:
+            return None, args_reason, lint
 
     return IntentEnvelope(**normalized_json), None, lint
 

@@ -34,6 +34,13 @@ class RouteToken(str, Enum):
     # 降级到 secondary reasoner（primary 超时/格式漂移时）
     GOV_SECONDARY_REASONER = "GOV_SECONDARY_REASONER"
 
+    # M42：分层治理令牌
+    # Policy Cache 命中直接放行（risk_level=1，~0ms）
+    GOV_OK_CACHED = "GOV_OK_CACHED"
+
+    # 规则引擎审批通过（risk_level=2，~5ms，不调用 LLM）
+    GOV_OK_RULE = "GOV_OK_RULE"
+
 
 @dataclass(frozen=True)
 class CommittedRouteDecision:
@@ -71,11 +78,15 @@ def compile_route_decision(
     reason_code: str | None,
     committed_at_ms: int,
     proposer_node_id: str = "governor",
+    tier: str = "full",
 ) -> CommittedRouteDecision:
     """将 Governor evaluate_intent 的裁决结果编译为 CommittedRouteDecision。
 
-    映射规则（TASK-0316 M34-D）：
-    - approved=True                          → GOV_OK_RENDER
+    映射规则（TASK-0316 M34-D；M42 扩展分层令牌）：
+    - approved=True, tier="cache"            → GOV_OK_CACHED（Policy Cache 命中）
+    - approved=True, tier="rule"             → GOV_OK_RULE（规则引擎审批通过）
+    - approved=True, tier="full"（默认）      → GOV_OK_RENDER
+    - approved=True, tier="airlock"          → GOV_AIRLOCK_REVIEW（高风险暂停）
     - approved=False, reason=AIRLOCK*        → GOV_AIRLOCK_REVIEW
     - approved=False, reason=其他            → GOV_FAIL_FALLBACK
 
@@ -84,13 +95,23 @@ def compile_route_decision(
         reason_code: 拒绝原因代码（approved=True 时可为 None）
         committed_at_ms: 编译时间戳（毫秒）
         proposer_node_id: 提案节点 ID
+        tier: 审批通道（"cache" / "rule" / "full" / "airlock"），默认 "full"
 
     Returns:
         CommittedRouteDecision（不可变）
     """
     if approved:
+        tier_lower = str(tier).strip().lower()
+        if tier_lower == "cache":
+            token = RouteToken.GOV_OK_CACHED
+        elif tier_lower == "rule":
+            token = RouteToken.GOV_OK_RULE
+        elif tier_lower == "airlock":
+            token = RouteToken.GOV_AIRLOCK_REVIEW
+        else:
+            token = RouteToken.GOV_OK_RENDER
         return CommittedRouteDecision(
-            token=RouteToken.GOV_OK_RENDER,
+            token=token,
             reason_code=reason_code or "APPROVE",
             committed_at_ms=committed_at_ms,
             proposer_node_id=proposer_node_id,

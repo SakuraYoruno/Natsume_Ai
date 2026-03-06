@@ -8,6 +8,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import SKILL_TOKEN_MISSING, TOKEN_INVALID, UNDO_REQUIRED
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.governor.tier_policy import AuditTier
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.registry import SkillRegistry
 
@@ -223,6 +224,7 @@ class SkillLoader:
             thread_id=thread_id,
             turn_id=turn_id,
             ts_ms=now_value,
+            governor_output=governor_output,
         )
 
     def _log_and_return(
@@ -242,23 +244,36 @@ class SkillLoader:
         thread_id: str | None,
         turn_id: str | None,
         ts_ms: int,
+        governor_output: dict[str, Any] | None = None,
     ) -> SkillExecutionResult:
-        row = {
+        # M42：分层审计——根据 approval_tier 选择审计级别
+        audit_tier = _extract_audit_tier(governor_output)
+
+        row: dict[str, Any] = {
             "request_id": request_id or None,
             "thread_id": thread_id,
             "turn_id": turn_id,
             "intent_id": intent_id,
             "skill_name": skill_name,
-            "approval_token_ref": approval_token_ref,
-            "confirm_token_ref": confirm_token_ref,
             "result_status": result_status,
             "result_code": result_code,
-            "result_digest": result_digest,
-            "evidence_ref": evidence_ref,
-            "manifest_ref": manifest_ref,
-            "undo_token_ref": undo_token_ref,
             "ts_ms": ts_ms,
         }
+
+        if audit_tier == AuditTier.LIGHT:
+            # LIGHT 级：只写基础字段（不写 token/evidence/manifest 详情）
+            row["approval_token_ref"] = approval_token_ref
+        else:
+            # STANDARD / FULL_AUDIT：写完整字段
+            row["approval_token_ref"] = approval_token_ref
+            row["confirm_token_ref"] = confirm_token_ref
+            row["result_digest"] = result_digest
+            row["evidence_ref"] = evidence_ref
+            row["manifest_ref"] = manifest_ref
+            row["undo_token_ref"] = undo_token_ref
+            if audit_tier == AuditTier.FULL_AUDIT:
+                row["audit_tier"] = "full_audit"
+
         self.ledger.log_skill_exec(row)
         return SkillExecutionResult(
             status=result_status,
@@ -270,3 +285,22 @@ class SkillLoader:
             undo_token_ref=undo_token_ref,
             detail=row,
         )
+
+
+def _extract_audit_tier(governor_output: dict[str, Any] | None) -> AuditTier:
+    """从 governor_output 中提取审计级别（M42 分层审计）。
+
+    读取 committed_route_token.approval_tier 字段，映射到 AuditTier 枚举。
+    未提供时降级为 STANDARD（向后兼容）。
+    """
+    if not isinstance(governor_output, dict):
+        return AuditTier.STANDARD
+    committed = governor_output.get("committed_route_token")
+    if not isinstance(committed, dict):
+        return AuditTier.STANDARD
+    tier_str = str(committed.get("approval_tier", "")).strip().lower()
+    if tier_str == "cache":
+        return AuditTier.LIGHT
+    if tier_str == "airlock":
+        return AuditTier.FULL_AUDIT
+    return AuditTier.STANDARD

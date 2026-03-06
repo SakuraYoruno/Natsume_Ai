@@ -1,0 +1,18 @@
+{
+  "test_id": "TC-2",
+  "service": "ALL_SERVICES",
+  "operation": "build_startup_report",
+  "params_in": {
+    "request_id": "req_068f1c7c73184554b72c476bbd694e08"
+  },
+  "params_out": {
+    "boot_status": "DEGRADED",
+    "required_total": 14,
+    "required_unavailable": 2,
+    "issue_count": 0,
+    "host_config_success": true,
+    "edge_config_success": true
+  },
+  "status": "PASS",
+  "ts_ms": 1772789267647
+}

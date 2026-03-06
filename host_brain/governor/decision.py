@@ -12,6 +12,7 @@ from host_brain.core.metabolism import (
     hard_state_ref,
     normalize_hard_state,
 )
+from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.rules import evaluate_governor_gates
 from host_brain.governor.route_token import CommittedRouteDecision, RouteToken, compile_route_decision
 from host_brain.governor.schemas import (
@@ -24,6 +25,7 @@ from host_brain.governor.schemas import (
     strict_validate_intent,
     validate_governor_output,
 )
+from host_brain.governor.tier_policy import ApprovalTier, GovernorTierPolicy
 from host_brain.governor.tokens import TokenService
 
 
@@ -36,10 +38,17 @@ class IntentDecisionEngine:
         ledger: SQLiteLedger | None = None,
         token_service: TokenService | None = None,
         expiry_window_ms: int = 5 * 60 * 1000,
+        # M42：分层治理注入点（可选，向后兼容）
+        registry: Any | None = None,
+        policy_cache: GovernorPolicyCache | None = None,
     ) -> None:
         self.ledger = ledger or SQLiteLedger()
         self.token_service = token_service
         self.expiry_window_ms = expiry_window_ms
+        # M42：分层治理组件（可选注入，未注入时保持现有行为）
+        self._registry = registry
+        self._policy_cache = policy_cache
+        self._tier_policy = GovernorTierPolicy() if registry is not None else None
 
     def evaluate_intent(
         self,
@@ -106,7 +115,12 @@ class IntentDecisionEngine:
                 snapshot_refs=snapshot_refs,
             )
 
-        envelope, reason_code, lint = strict_validate_intent(normalized)
+        # M42：若注入了 registry，则将所有已注册 Skill 名称作为动态 action 白名单
+        extra_action_allowlist: set[str] | None = None
+        if self._registry is not None:
+            extra_action_allowlist = set(self._registry.list_skill_names())
+
+        envelope, reason_code, lint = strict_validate_intent(normalized, extra_action_allowlist)
         proposal_row["lint_result"] = lint
         self.ledger.log_intent(proposal_row)
         if reason_code is not None:
@@ -237,12 +251,68 @@ class IntentDecisionEngine:
             "stage": "S_INTENT_OK",
             "ts_ms": now,
         }
-        # M34-D：编译 committed_route_token（GOV_OK_RENDER）
+        # M42：分层治理路由（若注入了 registry，则按 risk_level 选择审批通道）
+        approval_tier = "full"  # 默认全量审批（向后兼容）
+        if self._registry is not None and self._tier_policy is not None:
+            skill_name = envelope.action
+            meta = self._registry.get(skill_name)
+            if meta is not None:
+                tier_enum = self._tier_policy.get_approval_tier(meta)
+                approval_tier = tier_enum.value
+
+                # CACHE 通道：查询 Policy Cache
+                if tier_enum == ApprovalTier.CACHE and self._policy_cache is not None:
+                    trust_level = int(gates_input.get("trust_level", 50))
+                    cached = self._policy_cache.get(skill_name, trust_level)
+                    if cached is True:
+                        # 缓存命中，直接放行
+                        committed = compile_route_decision(
+                            approved=True,
+                            reason_code="APPROVE_CACHED",
+                            committed_at_ms=now,
+                            proposer_node_id=proposer_node_id,
+                            tier="cache",
+                        )
+                        row["committed_route_token_ref"] = committed.token.value
+                        row["committed_route_token"] = {
+                            "token": committed.token.value,
+                            "reason_code": committed.reason_code,
+                            "committed_at_ms": committed.committed_at_ms,
+                            "proposer_node_id": committed.proposer_node_id,
+                            "approval_tier": approval_tier,
+                        }
+                        return self._finalize_governor_row(row)
+                    elif cached is None:
+                        # 缓存未命中，规则引擎审批后写入缓存
+                        self._policy_cache.put(skill_name, trust_level, True)
+                        approval_tier = "rule"  # 首次审批走 RULE 通道
+
+                # AIRLOCK 通道：强制返回 GOV_AIRLOCK_REVIEW
+                elif tier_enum == ApprovalTier.AIRLOCK:
+                    committed = compile_route_decision(
+                        approved=True,
+                        reason_code="AIRLOCK_REQUIRED",
+                        committed_at_ms=now,
+                        proposer_node_id=proposer_node_id,
+                        tier="airlock",
+                    )
+                    row["committed_route_token_ref"] = committed.token.value
+                    row["committed_route_token"] = {
+                        "token": committed.token.value,
+                        "reason_code": committed.reason_code,
+                        "committed_at_ms": committed.committed_at_ms,
+                        "proposer_node_id": committed.proposer_node_id,
+                        "approval_tier": approval_tier,
+                    }
+                    return self._finalize_governor_row(row)
+
+        # M34-D：编译 committed_route_token（按 approval_tier 选择令牌）
         committed = compile_route_decision(
             approved=True,
             reason_code="APPROVE",
             committed_at_ms=now,
             proposer_node_id=proposer_node_id,
+            tier=approval_tier,
         )
         row["committed_route_token_ref"] = committed.token.value
         row["committed_route_token"] = {
@@ -250,6 +320,7 @@ class IntentDecisionEngine:
             "reason_code": committed.reason_code,
             "committed_at_ms": committed.committed_at_ms,
             "proposer_node_id": committed.proposer_node_id,
+            "approval_tier": approval_tier,
         }
         return self._finalize_governor_row(row)
 

@@ -62,3 +62,7 @@ class SkillRegistry:
 
     def all(self) -> list[SkillMeta]:
         return list(self._skills.values())
+
+    def list_skill_names(self) -> list[str]:
+        """返回所有已注册 Skill 的名称列表（M42：用于动态 action 白名单）。"""
+        return list(self._skills.keys())

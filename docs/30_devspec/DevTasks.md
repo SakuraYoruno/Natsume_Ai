@@ -7121,6 +7121,141 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m41_2026-03-06.md`（新增）。
 - 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
 
+---
+
+## M42：Tiered Governance — 分层治理架构
+
+> **里程碑目标**：实现 Governor 分层治理，利用 `SkillMeta.risk_level` 对 Skill 进行风险分层（L0~L4），为不同风险等级的 Skill 提供差异化审批通道（Policy Cache 直接放行 / 规则引擎审批 / 全量审批 + AIRLOCK），防止未来接入大量 Skills 时"强主权 + 全量细审 + 串行审批"导致体验崩溃。
+>
+> **背景**：当前 Governor 对所有 Skill 一视同仁，没有利用 `SkillMeta.risk_level` 做差异化审批。当 Skill 数量从 5 个增长到 50 个、500 个时，延迟爆炸、体验断裂、审计链膨胀三个维度的问题会同时爆发。分层治理的本质是让主权**更聪明**：高风险的地方更严，低风险的地方更快。
+>
+> **约束**：不削弱主权，只让主权更精准。`CRITICAL` 路径（L3/L4）保持全量审批 + AIRLOCK，`GOV_AIRLOCK_REVIEW` 只保留给 L4，不再滥用。
+
+---
+
+### TASK-0425 M42-A：RouteToken 新增分层令牌
+
+- 状态：DONE
+- 任务描述：在 `route_token.py` 中新增 `GOV_OK_CACHED`（Policy Cache 命中直接放行）和 `GOV_OK_RULE`（规则引擎审批通过）两个令牌，并更新 `compile_route_decision` 支持新令牌。
+- 输入：现有 `RouteToken` 枚举（`GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`）。
+- 输出：
+  - `host_brain/governor/route_token.py`（修改）：新增 `GOV_OK_CACHED = "GOV_OK_CACHED"` 和 `GOV_OK_RULE = "GOV_OK_RULE"`；`compile_route_decision` 新增 `tier` 参数（`"cache"` / `"rule"` / `"full"`），按 tier 选择令牌；
+  - `tests/unit/test_tiered_governance_m42.py`（新增）：T-TG-TOKEN-01~04。
+- 验收标准：
+  - T-TG-TOKEN-01：`RouteToken` 枚举包含 `GOV_OK_CACHED` 和 `GOV_OK_RULE`；
+  - T-TG-TOKEN-02：`compile_route_decision(approved=True, tier="cache")` 返回 `GOV_OK_CACHED`；
+  - T-TG-TOKEN-03：`compile_route_decision(approved=True, tier="rule")` 返回 `GOV_OK_RULE`；
+  - T-TG-TOKEN-04：`compile_route_decision(approved=True, tier="full")` 返回 `GOV_OK_RENDER`（向后兼容）。
+- 涉及文件路径：`host_brain/governor/route_token.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（新增）。
+- 关联需求：ModelPlane.md §10；DevSpec §6。
+
+---
+
+### TASK-0426 M42-B：GovernorTierPolicy — Skill 风险分层策略
+
+- 状态：DONE
+- 任务描述：新增 `GovernorTierPolicy` 类，将 `SkillMeta.risk_level(1-5)` 映射到审批通道（`"cache"` / `"rule"` / `"full"` / `"airlock"`），并定义各通道的审计级别（`"light"` / `"standard"` / `"full"`）。
+- 输入：`SkillMeta.risk_level`（1-5）；`SkillMeta.clearance`（LOW/MEDIUM/HIGH）；`SkillMeta.reversible`。
+- 输出：
+  - `host_brain/governor/tier_policy.py`（新增）：
+    - `ApprovalTier(Enum)`：`CACHE = "cache"`、`RULE = "rule"`、`FULL = "full"`、`AIRLOCK = "airlock"`；
+    - `AuditTier(Enum)`：`LIGHT = "light"`、`STANDARD = "standard"`、`FULL_AUDIT = "full_audit"`；
+    - `GovernorTierPolicy` 类，提供 `get_approval_tier(meta: SkillMeta) -> ApprovalTier` 和 `get_audit_tier(meta: SkillMeta) -> AuditTier` 方法；
+    - 分层规则：`risk_level=1` → `CACHE`；`risk_level=2` → `RULE`；`risk_level=3` → `FULL`；`risk_level=4` → `FULL`；`risk_level=5` → `AIRLOCK`；不可逆（`reversible=False`）且 `risk_level>=3` → 升一级；
+    - 审计规则：`CACHE` → `LIGHT`；`RULE` → `STANDARD`；`FULL` → `STANDARD`；`AIRLOCK` → `FULL_AUDIT`；
+  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-TIER-01~08。
+- 验收标准：
+  - T-TG-TIER-01：`risk_level=1` → `ApprovalTier.CACHE`；
+  - T-TG-TIER-02：`risk_level=2` → `ApprovalTier.RULE`；
+  - T-TG-TIER-03：`risk_level=3` → `ApprovalTier.FULL`；
+  - T-TG-TIER-04：`risk_level=4` → `ApprovalTier.FULL`；
+  - T-TG-TIER-05：`risk_level=5` → `ApprovalTier.AIRLOCK`；
+  - T-TG-TIER-06：`risk_level=3, reversible=False` → `ApprovalTier.FULL`（不可逆升级）；
+  - T-TG-TIER-07：`CACHE` → `AuditTier.LIGHT`；
+  - T-TG-TIER-08：`AIRLOCK` → `AuditTier.FULL_AUDIT`。
+- 涉及文件路径：`host_brain/governor/tier_policy.py`（新增）；`tests/unit/test_tiered_governance_m42.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6.1。
+
+---
+
+### TASK-0427 M42-C：GovernorPolicyCache — L0/L1 审批结果缓存
+
+- 状态：DONE
+- 任务描述：新增 `GovernorPolicyCache` 类，为 `CACHE` 通道（risk_level=1）的 Skill 提供审批结果缓存（TTL），相同 `(skill_name, session_trust_level)` 组合在 TTL 内复用上次审批结果，不重复调用规则引擎。
+- 输入：`ApprovalTier`（TASK-0426）；`SkillMeta`。
+- 输出：
+  - `host_brain/governor/policy_cache.py`（新增）：`GovernorPolicyCache` 类，提供 `get(skill_name, trust_level) -> bool | None`、`put(skill_name, trust_level, approved: bool)`、`invalidate(skill_name)`、`clear()` 方法；内部使用 `dict` + 时间戳实现 TTL；默认 `ttl_ms=60_000`（1 分钟）；
+  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-CACHE-01~06。
+- 验收标准：
+  - T-TG-CACHE-01：`put` 后 `get` 在 TTL 内返回缓存值；
+  - T-TG-CACHE-02：`get` 在 TTL 过期后返回 `None`；
+  - T-TG-CACHE-03：`invalidate(skill_name)` 后 `get` 返回 `None`；
+  - T-TG-CACHE-04：`clear()` 后所有缓存清空；
+  - T-TG-CACHE-05：不同 `trust_level` 的缓存互不干扰；
+  - T-TG-CACHE-06：`put(approved=False)` 后 `get` 返回 `False`（拒绝结果也可缓存）。
+- 涉及文件路径：`host_brain/governor/policy_cache.py`（新增）；`tests/unit/test_tiered_governance_m42.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6。
+
+---
+
+### TASK-0428 M42-D：IntentDecisionEngine 集成分层路由
+
+- 状态：DONE
+- 任务描述：修改 `IntentDecisionEngine.evaluate_intent()`，在 R1-R7 门控通过后，根据 `SkillMeta.risk_level` 选择审批通道（CACHE / RULE / FULL / AIRLOCK），并将通道信息写入 `committed_route_token`。
+- 输入：`GovernorTierPolicy`（TASK-0426）；`GovernorPolicyCache`（TASK-0427）；`SkillRegistry`（可选注入）；现有 `IntentDecisionEngine`。
+- 输出：
+  - `host_brain/governor/decision.py`（修改）：`IntentDecisionEngine.__init__` 新增 `registry: SkillRegistry | None = None` 和 `policy_cache: GovernorPolicyCache | None = None` 参数；`evaluate_intent` 在 R1-R7 通过后，若 `registry` 已注入则查询 `SkillMeta`，调用 `GovernorTierPolicy.get_approval_tier()` 选择通道；`CACHE` 通道命中缓存时直接返回 `GOV_OK_CACHED`；`RULE` 通道通过规则引擎（R1-R7 已通过即可）返回 `GOV_OK_RULE`；`FULL` 通道保持现有逻辑返回 `GOV_OK_RENDER`；`AIRLOCK` 通道返回 `GOV_AIRLOCK_REVIEW`；`committed_route_token` 中新增 `approval_tier` 字段；
+  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-ENGINE-01~08。
+- 验收标准：
+  - T-TG-ENGINE-01：注入 `registry`，`risk_level=1` Skill 且缓存命中 → `committed_route_token.token = GOV_OK_CACHED`；
+  - T-TG-ENGINE-02：注入 `registry`，`risk_level=1` Skill 且缓存未命中 → 规则引擎审批，结果写入缓存，返回 `GOV_OK_RULE`；
+  - T-TG-ENGINE-03：注入 `registry`，`risk_level=2` Skill → `GOV_OK_RULE`；
+  - T-TG-ENGINE-04：注入 `registry`，`risk_level=3` Skill → `GOV_OK_RENDER`；
+  - T-TG-ENGINE-05：注入 `registry`，`risk_level=5` Skill → `GOV_AIRLOCK_REVIEW`；
+  - T-TG-ENGINE-06：未注入 `registry` → 保持现有行为（`GOV_OK_RENDER`），向后兼容；
+  - T-TG-ENGINE-07：`committed_route_token` 包含 `approval_tier` 字段；
+  - T-TG-ENGINE-08：R1-R7 拒绝时，分层路由不执行（先门控后分层）。
+- 涉及文件路径：`host_brain/governor/decision.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
+
+---
+
+### TASK-0429 M42-E：SkillLoader 集成分层审计
+
+- 状态：DONE
+- 任务描述：修改 `SkillLoader.execute()`，根据 `committed_route_token.approval_tier` 选择审计级别（LIGHT / STANDARD / FULL_AUDIT），`LIGHT` 级只写 `skill_exec_log` 基础字段，`FULL_AUDIT` 级写完整字段 + 额外 manifest 记录。
+- 输入：`AuditTier`（TASK-0426）；现有 `SkillLoader`；`committed_route_token`（来自 `governor_output`）。
+- 输出：
+  - `host_brain/skills/loader.py`（修改）：`execute()` 从 `governor_output.committed_route_token.approval_tier` 读取审计级别；`LIGHT` 级：`skill_exec_log` 只写 `intent_id / skill_name / result_status / result_code / ts_ms`；`STANDARD` 级：现有完整字段；`FULL_AUDIT` 级：完整字段 + `audit_tier = "full_audit"` 标记；
+  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-AUDIT-01~04。
+- 验收标准：
+  - T-TG-AUDIT-01：`approval_tier="cache"` → `AuditTier.LIGHT`，`skill_exec_log` 包含基础字段；
+  - T-TG-AUDIT-02：`approval_tier="full"` → `AuditTier.STANDARD`，`skill_exec_log` 包含完整字段；
+  - T-TG-AUDIT-03：`approval_tier="airlock"` → `AuditTier.FULL_AUDIT`，`skill_exec_log` 包含 `audit_tier = "full_audit"` 标记；
+  - T-TG-AUDIT-04：未提供 `approval_tier` → 降级为 `STANDARD`（向后兼容）。
+- 涉及文件路径：`host_brain/skills/loader.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（追加）。
+- 关联需求：ModelPlane.md §10；DevSpec §6.4；FR-AUDIT-001。
+
+---
+
+### TASK-0430 M42-F：M42 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0425~0429 全部 DONE 后，生成 M42 代码审查报告，记录分层治理架构的实现情况。
+- 输入：TASK-0425~0429 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m42_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0425~0429 全部 5 个任务的变更摘要；
+  - 新增测试 ≥ 26 个（T-TG-TOKEN-01~04 + T-TG-TIER-01~08 + T-TG-CACHE-01~06 + T-TG-ENGINE-01~08 + T-TG-AUDIT-01~04），全部通过；
+  - `RouteToken` 新增 `GOV_OK_CACHED` / `GOV_OK_RULE` 完整落地；
+  - `GovernorTierPolicy` 完整落地（L0~L4 分层映射）；
+  - `GovernorPolicyCache` 完整落地（TTL 缓存）；
+  - `IntentDecisionEngine` 分层路由完整落地（向后兼容）；
+  - `SkillLoader` 分层审计完整落地（向后兼容）；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m42_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
+
 
 
 
