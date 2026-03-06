@@ -4763,6 +4763,134 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/50_release/m29_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m29.md`。
 - 关联需求：NFR-REL-001；FR-BOND-TEXTURE-001；FR-EMOTION-ECHO-001；FR-BOND-RIFT-001；FR-PROACTIVE-EMOTION-001；FR-EMOTIONAL-TIMELINE-001。
 
+---
+
+## M31：六库 DevSpec 第八章合规修复（Six-Store Ch.8 Compliance Fix）
+
+**目标**：修复六库实现与 DevSpec 第八章约束的 4 项明确违规和 3 项部分合规问题，确保 SSOT 接口完整性、审计可追溯性和字段规范性。
+
+**优先级**：P0（SSOT 接口违规）→ P1（字段合规）→ P2（命名规范）
+
+**前置条件**：M30 全部 DONE；全量测试 0 failed。
+
+---
+
+### TASK-0289 M31-A：修复 Artifact Vault 旁路读取（P0）
+
+- 状态：PLANNED
+- 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 当前直接访问 `self.ledger.vault_manifest_index`，绕过了 `lsp/vault.py` 的 SSOT 接口层，违反 DevSpec 8.0 和 8.8 约束。需将读取路径改为通过 `self.artifact_vault`（`lsp/vault.py` 暴露的接口）进行，彻底消除旁路。
+- 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/lsp/vault.py`。
+- 输出：
+  - `host_brain/retrieval/recall_fusion.py`：`_search_artifact_vault()` 改为调用 `self.artifact_vault.search(query, topk)` 或等效接口，删除对 `self.ledger.vault_manifest_index` 的直接访问；
+  - `host_brain/lsp/vault.py`：若 `search()` 接口不存在，新增 `search(query: str, topk: int) -> list[dict]` 方法；
+  - `tests/unit/test_artifact_vault_ssot_m31.py`（新增）：T-VAULT-SSOT-01~03。
+- 验收标准：
+  - T-VAULT-SSOT-01：`_search_artifact_vault()` 调用路径中不出现 `ledger.vault_manifest_index`（静态扫描断言）；
+  - T-VAULT-SSOT-02：`self.artifact_vault=None` 时，`_search_artifact_vault()` 返回空列表，不抛异常；
+  - T-VAULT-SSOT-03：`self.artifact_vault` 提供有效数据时，`_search_artifact_vault()` 正确返回候选列表。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`host_brain/lsp/vault.py`；`tests/unit/test_artifact_vault_ssot_m31.py`。
+- 关联需求：DevSpec 8.0（SSOT 单写者/单读者接口）；DevSpec 8.8（T-SSOT-01 静态扫描断言）。
+
+### TASK-0290 M31-B：修复各库 reason_code 粗粒度归并（P0）
+
+- 状态：PLANNED
+- 任务描述：`recall_fusion.py` 的 `_map_route_exception()` 对所有非 `episodic_vector` 库的异常统一返回 `RETR_RECALL_UNAVAILABLE`，丢失了可区分的 reason_code，违反 DevSpec 8.1 审计可追溯性要求。需为每个库定义专属 reason_code 枚举，并在 `_map_route_exception()` 中按 `store_id` 分发。
+- 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/retrieval/constants.py`（或等效常量文件）。
+- 输出：
+  - `host_brain/retrieval/constants.py`（或等效文件）：新增以下 reason_code 常量：
+    - `RETR_LEDGER_UNAVAILABLE`（sqlite_ledger 不可用）
+    - `RETR_BOND_UNAVAILABLE`（neo4j_bond 不可用）
+    - `RETR_STYLE_UNAVAILABLE`（style_canon 不可用）
+    - `RETR_WORLD_UNAVAILABLE`（world_canon 不可用）
+    - `RETR_VAULT_UNAVAILABLE`（artifact_vault 不可用）
+  - `host_brain/retrieval/recall_fusion.py`：`_map_route_exception()` 按 `store_id` 返回对应 reason_code；
+  - `tests/unit/test_reason_code_dispatch_m31.py`（新增）：T-REASON-01~06。
+- 验收标准：
+  - T-REASON-01：`store_id="sqlite_ledger"` 异常 → `RETR_LEDGER_UNAVAILABLE`；
+  - T-REASON-02：`store_id="neo4j_bond"` 异常 → `RETR_BOND_UNAVAILABLE`；
+  - T-REASON-03：`store_id="style_canon"` 异常 → `RETR_STYLE_UNAVAILABLE`；
+  - T-REASON-04：`store_id="world_canon"` 异常 → `RETR_WORLD_UNAVAILABLE`；
+  - T-REASON-05：`store_id="artifact_vault"` 异常 → `RETR_VAULT_UNAVAILABLE`；
+  - T-REASON-06：`store_id="episodic_vector"` 异常 → 原有 `RETR_RECALL_UNAVAILABLE`（向后兼容）。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`host_brain/retrieval/constants.py`；`tests/unit/test_reason_code_dispatch_m31.py`。
+- 关联需求：DevSpec 8.1（decision=REJECT → reason_code 非空且来自稳定枚举）。
+
+### TASK-0291 M31-C：补充 intent_log 缺失字段（P1）
+
+- 状态：PLANNED
+- 任务描述：DevSpec 8.1 A 要求 `intent_log` 必须包含 `tool_visibility_hash`（本轮暴露的工具元数据子集哈希）和 `lint_result_json`（schema/args 校验摘要；禁止自然语言"结论句"替代），当前实现缺少这两个字段。
+- 输入：`host_brain/audit/sqlite_ledger.py`；`host_brain/governor/decision.py`（或 intent 写入路径）。
+- 输出：
+  - `host_brain/audit/sqlite_ledger.py`：`intent_log` 表结构新增 `tool_visibility_hash TEXT`、`lint_result_json TEXT` 列；`log_intent()` 方法接受并写入这两个字段；
+  - 调用方（`decision.py` 或 `metabolism.py`）：写入 intent_log 时填充 `tool_visibility_hash`（当前轮次暴露工具的元数据哈希，无工具时为空字符串）和 `lint_result_json`（JSON 格式的 schema/args 校验摘要，禁止自然语言）；
+  - `tests/unit/test_intent_log_fields_m31.py`（新增）：T-INTENT-LOG-01~03。
+- 验收标准：
+  - T-INTENT-LOG-01：`log_intent()` 写入记录后，`SELECT tool_visibility_hash FROM intent_log` 返回非 NULL 值（无工具时为空字符串）；
+  - T-INTENT-LOG-02：`lint_result_json` 字段为合法 JSON 字符串，不含自然语言结论句；
+  - T-INTENT-LOG-03：旧版调用方不传这两个字段时，默认值为空字符串，不报错（向后兼容）。
+- 涉及文件路径：`host_brain/audit/sqlite_ledger.py`；`host_brain/governor/decision.py`；`tests/unit/test_intent_log_fields_m31.py`。
+- 关联需求：DevSpec 8.1 A（intent_log 最小字段）。
+
+### TASK-0292 M31-D：修复 artifact_id 硬编码 None（P1）
+
+- 状态：PLANNED
+- 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 中 `artifact_id` 被硬编码为 `None`，违反 DevSpec 8.6 要求的 manifest 最小字段（`artifact_id` 必须从 vault 数据中读取）。本任务依赖 TASK-0289（Vault SSOT 接口修复）完成后，从 `self.artifact_vault.search()` 返回的数据中正确提取 `artifact_id`。
+- 输入：`host_brain/retrieval/recall_fusion.py`（TASK-0289 修复后版本）；`host_brain/lsp/vault.py`。
+- 输出：
+  - `host_brain/retrieval/recall_fusion.py`：`_search_artifact_vault()` 从 vault 返回数据中提取 `artifact_id`，不再硬编码 `None`；
+  - `tests/unit/test_artifact_id_field_m31.py`（新增）：T-VAULT-ID-01~02。
+- 验收标准：
+  - T-VAULT-ID-01：vault 返回含 `artifact_id` 的 manifest 时，候选结果中 `artifact_id` 非 `None`；
+  - T-VAULT-ID-02：vault 返回不含 `artifact_id` 的旧格式数据时，`artifact_id` 降级为空字符串，不报错。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_artifact_id_field_m31.py`。
+- 关联需求：DevSpec 8.6（manifest 最小字段：`artifact_id`、`kind`、`hash`、`created_ts`、`evidence_refs`）。
+- 前置任务：TASK-0289。
+
+### TASK-0293 M31-E：补充 summarizer 写回 Neo4j 静态扫描断言（P1）
+
+- 状态：PLANNED
+- 任务描述：DevSpec 8.2 要求 `summarizer.py` 只能派生 summary，不得写回 SSOT（Neo4j Bond）。当前缺少对应的静态扫描断言测试（T-SSOT-01），无法在 CI 中自动拦截违规写回。
+- 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_dynamics.py`。
+- 输出：
+  - `tests/unit/test_summarizer_ssot_m31.py`（新增）：T-SSOT-SUMM-01~02；
+    - T-SSOT-SUMM-01：静态扫描 `summarizer.py` 源码，断言不含 `bond_dynamics`、`neo4j`、`write`、`upsert`、`create`、`merge` 等写入关键词（正则扫描）；
+    - T-SSOT-SUMM-02：`derive_bond_summary()` 返回值为纯数据结构（dict/dataclass），不触发任何数据库写入副作用。
+- 验收标准：
+  - T-SSOT-SUMM-01：静态扫描通过，`summarizer.py` 中无写入关键词；
+  - T-SSOT-SUMM-02：mock `bond_dynamics` 写入方法后，调用 `derive_bond_summary()` 不触发任何 mock 调用。
+- 涉及文件路径：`host_brain/bond/summarizer.py`；`tests/unit/test_summarizer_ssot_m31.py`。
+- 关联需求：DevSpec 8.2（summarizer 不得写回 SSOT）；DevSpec 8.8（T-SSOT-01）。
+
+### TASK-0294 M31-F：统一 evidence_ref 命名口径（P2）
+
+- 状态：PLANNED
+- 任务描述：`recall_fusion.py` 中 `evidence_ref`（单数）与 `evidence_refs`（复数）命名不统一，与 DevSpec 8.3 规范的 `evidence_refs`（复数）不一致。统一为复数形式，并更新所有引用。
+- 输入：`host_brain/retrieval/recall_fusion.py`；相关测试文件。
+- 输出：
+  - `host_brain/retrieval/recall_fusion.py`：将所有 `evidence_ref`（单数）重命名为 `evidence_refs`（复数）；
+  - 相关测试文件：同步更新字段名引用；
+  - `tests/unit/test_evidence_refs_naming_m31.py`（新增）：T-EVREF-01。
+- 验收标准：
+  - T-EVREF-01：静态扫描 `recall_fusion.py`，断言不含孤立的 `evidence_ref`（单数，排除 `evidence_refs` 的子串匹配）；
+  - 全量测试无回归。
+- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_evidence_refs_naming_m31.py`。
+- 关联需求：DevSpec 8.3.1（Evidence Pack 字段命名规范）。
+
+### TASK-0295 M31-G：M31 代码审查报告
+
+- 状态：PLANNED
+- 任务描述：TASK-0289~0294 全部 DONE 后，生成 M31 代码审查报告，记录六库合规修复详情、测试覆盖情况和最终测试结果。
+- 输入：TASK-0289~0294 全部 DONE；全量测试 0 failed。
+- 输出：
+  - `docs/60_trace/code_review_m31_2026-03-06.md`（新增）：包含变更摘要、测试覆盖、合规性对照表、向后兼容性说明。
+- 验收标准：
+  - 报告包含 TASK-0289~0294 全部 6 个任务的变更摘要；
+  - 新增测试 ≥ 14 个（T-VAULT-SSOT-01~03、T-REASON-01~06、T-INTENT-LOG-01~03、T-VAULT-ID-01~02、T-SSOT-SUMM-01~02、T-EVREF-01），全部通过；
+  - DevSpec 第八章合规性对照表：4 项违规全部修复，3 项部分合规全部升级为合规；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m31_2026-03-06.md`。
+- 关联需求：NFR-REL-001；DevSpec 8.0~8.8。
+
 
 
 
