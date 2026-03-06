@@ -7256,6 +7256,127 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m42_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
 
+---
+
+## M43：启动编排收口
+
+> **里程碑目标**：完成系统启动链路的最后收口，包括：启动健康快照冻结（StartupHealthSnapshot）、SQLite 迁移版本守卫（SQLiteMigrationVersionGuard）、迁移目录版本连续性修复、request_id 单键回放报告（ReplayReport）。这四个模块合起来构成"系统可观测性"的完整闭环：启动时知道系统状态，迁移时知道 Schema 版本，运行时知道每个请求的完整链路。
+>
+> **背景**：M42 完成了分层治理架构，系统的"执行链路"已经完整。M43 的目标是完成"运维链路"：启动快照 → 迁移守卫 → 回放报告，三者串联构成完整的可观测性闭环。
+>
+> **约束**：所有新增模块均为可选注入，不影响现有启动流程；迁移目录修复只补充缺失版本，不修改已有文件。
+
+---
+
+### TASK-0431 M43-A：SQLite 迁移目录版本连续性修复
+
+- 状态：DONE
+- 任务描述：修复 `host_brain/audit/migrations/` 目录中的版本连续性问题：存在两个 `0017_*` 文件（重复版本号）和版本跳跃（0018→0021，缺 0019/0020）。补充缺失的迁移文件，确保版本号连续。
+- 输入：`host_brain/audit/migrations/` 目录现状（0017 重复，0019/0020 缺失）。
+- 输出：
+  - `host_brain/audit/migrations/0017_canon_proposal_id_unique.sql`（保留，重命名为 `0017_canon_proposal_unique.sql`）；
+  - `host_brain/audit/migrations/0019_subgraph_trace.sql`（新增）：补充 M41 新增的 `subgraph_trace` 表；
+  - `host_brain/audit/migrations/0020_llm_call_log.sql`（新增）：补充 M41 新增的 `llm_call_log` 表；
+  - 删除重复的 `0017_canon_proposal_log_unique.sql`（内容合并到 `0017_canon_proposal_unique.sql`）；
+  - `tests/unit/test_migration_version_guard_m43.py`（新增）：T-MIG-VER-01~04。
+- 验收标准：
+  - T-MIG-VER-01：`migrations/` 目录版本号连续（0001~0022, 0039, 0040 → 修复后 0001~0022, 0039, 0040，无重复无跳跃）；
+  - T-MIG-VER-02：`SQLiteMigrationRunner` 能正确发现并排序所有迁移文件；
+  - T-MIG-VER-03：重复版本号检测：存在两个 `0017_*` 时，`discover_assets()` 返回错误；
+  - T-MIG-VER-04：版本跳跃检测：缺少 `0019` 时，`discover_assets()` 返回错误。
+- 涉及文件路径：`host_brain/audit/migrations/`（修改）；`tests/unit/test_migration_version_guard_m43.py`（新增）。
+- 关联需求：DevSpec §7；FR-AUDIT-001。
+
+---
+
+### TASK-0432 M43-B：SQLiteMigrationVersionGuard — SQLite Schema 版本守卫
+
+- 状态：DONE
+- 任务描述：新增 `SQLiteMigrationVersionGuard` 类，为 SQLite Ledger 提供 Schema 版本守卫，在启动时检查已应用的迁移版本与迁移目录的一致性，防止 Schema 漂移。
+- 输入：`host_brain/audit/migrations/` 目录；`SQLiteLedger`（可选）。
+- 输出：
+  - `host_brain/audit/migration_guard.py`（新增）：
+    - `SQLiteMigrationAsset(dataclass)`：`migration_id: int, name: str, path: Path, checksum: str`；
+    - `SQLiteMigrationVersionGuard` 类，提供：
+      - `discover_assets() -> list[SQLiteMigrationAsset]`：发现并排序迁移文件，检测重复版本号；
+      - `check_version_continuity(assets) -> list[str]`：检查版本连续性，返回问题列表；
+      - `build_guard_report(request_id, ts_ms) -> dict`：生成版本守卫报告（`status: READY/DEGRADED/FAILED`）；
+  - `tests/unit/test_migration_version_guard_m43.py`（追加）：T-MIG-GUARD-01~06。
+- 验收标准：
+  - T-MIG-GUARD-01：正常目录 → `build_guard_report` 返回 `status=READY`；
+  - T-MIG-GUARD-02：存在重复版本号 → `status=FAILED`，`reason_code=MIGRATION_SCHEMA_DRIFT`；
+  - T-MIG-GUARD-03：存在版本跳跃 → `status=DEGRADED`，`reason_code=MIGRATION_ASSET_MISSING`；
+  - T-MIG-GUARD-04：迁移目录不存在 → `status=FAILED`，`reason_code=MIGRATION_ASSET_MISSING`；
+  - T-MIG-GUARD-05：`discover_assets()` 返回按版本号排序的资产列表；
+  - T-MIG-GUARD-06：`check_version_continuity()` 正确识别跳跃区间。
+- 涉及文件路径：`host_brain/audit/migration_guard.py`（新增）；`tests/unit/test_migration_version_guard_m43.py`（追加）。
+- 关联需求：DevSpec §7；FR-AUDIT-001。
+
+---
+
+### TASK-0433 M43-C：StartupHealthSnapshot — 启动健康快照冻结
+
+- 状态：DONE
+- 任务描述：新增 `StartupHealthSnapshot` 类，在系统启动时将 `build_startup_report()` 的结果冻结为不可变快照，供后续回放/演练/CI 引用。快照包含启动时间戳、服务状态摘要、迁移版本守卫报告。
+- 输入：`build_startup_report()` 返回值；`SQLiteMigrationVersionGuard`（TASK-0432）；`BondMigrationRunner`（可选）。
+- 输出：
+  - `host_brain/app/startup_snapshot.py`（新增）：
+    - `StartupHealthSnapshot(dataclass, frozen=True)`：`request_id, ts_ms, boot_status, service_summary, migration_guard_report, bond_migration_summary, snapshot_hash`；
+    - `build_startup_snapshot(startup_report, migration_guard_report, bond_result) -> StartupHealthSnapshot`：从启动报告构建快照；
+    - `snapshot_to_dict(snapshot) -> dict`：序列化为可审计的字典；
+  - `tests/unit/test_startup_snapshot_m43.py`（新增）：T-SNAP-01~06。
+- 验收标准：
+  - T-SNAP-01：`build_startup_snapshot()` 返回 `StartupHealthSnapshot` 实例；
+  - T-SNAP-02：`snapshot.boot_status` 与 `startup_report["summary"]["boot_status"]` 一致；
+  - T-SNAP-03：`snapshot.snapshot_hash` 是 `snapshot_to_dict()` 内容的 SHA256（不含 `snapshot_hash` 字段本身）；
+  - T-SNAP-04：`StartupHealthSnapshot` 是不可变的（`frozen=True`），修改字段抛出 `FrozenInstanceError`；
+  - T-SNAP-05：`migration_guard_report` 为 `None` 时，快照仍可构建（向后兼容）；
+  - T-SNAP-06：`snapshot_to_dict()` 包含所有字段，且 `snapshot_hash` 可验证。
+- 涉及文件路径：`host_brain/app/startup_snapshot.py`（新增）；`tests/unit/test_startup_snapshot_m43.py`（新增）。
+- 关联需求：DevSpec §8；FR-OPS-001。
+
+---
+
+### TASK-0434 M43-D：ReplayReport — request_id 单键回放报告
+
+- 状态：DONE
+- 任务描述：新增 `ReplayReport` 类，基于 `build_request_observability_report()` 的结果，生成结构化的单键回放报告，包含时间线摘要、关键节点状态、异常链路标注。
+- 输入：`build_request_observability_report()` 返回值（`main.py`）；`request_id`。
+- 输出：
+  - `tools/replay/replay_report.py`（新增）：
+    - `ReplayReport(dataclass, frozen=True)`：`request_id, ts_ms, trace_status, timeline_total, key_events, anomalies, report_hash`；
+    - `build_replay_report(observability_report) -> ReplayReport`：从可观测性报告构建回放报告；
+    - `format_replay_report(report) -> str`：格式化为人类可读的文本报告；
+  - `tests/unit/test_replay_report_m43.py`（新增）：T-REPLAY-01~06。
+- 验收标准：
+  - T-REPLAY-01：`build_replay_report()` 返回 `ReplayReport` 实例；
+  - T-REPLAY-02：`report.timeline_total` 与 `observability_report["timeline_total"]` 一致；
+  - T-REPLAY-03：`report.key_events` 包含 `intent_log` 和 `governor_log` 的关键事件；
+  - T-REPLAY-04：`report.anomalies` 包含 `REJECT` 决策和 `error_log` 中的异常；
+  - T-REPLAY-05：`format_replay_report()` 返回包含 `request_id` 和时间线摘要的字符串；
+  - T-REPLAY-06：`report.report_hash` 是报告内容的 SHA256（不含 `report_hash` 字段本身）。
+- 涉及文件路径：`tools/replay/replay_report.py`（新增）；`tests/unit/test_replay_report_m43.py`（新增）。
+- 关联需求：DevSpec §9；FR-OPS-002。
+
+---
+
+### TASK-0435 M43-E：M43 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0431~0434 全部 DONE 后，生成 M43 代码审查报告，记录启动编排收口的实现情况。
+- 输入：TASK-0431~0434 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0431~0434 全部 4 个任务的变更摘要；
+  - 新增测试 ≥ 22 个（T-MIG-VER-01~04 + T-MIG-GUARD-01~06 + T-SNAP-01~06 + T-REPLAY-01~06），全部通过；
+  - `SQLiteMigrationVersionGuard` 完整落地；
+  - `StartupHealthSnapshot` 完整落地（不可变 + SHA256 验证）；
+  - `ReplayReport` 完整落地；
+  - 迁移目录版本连续性修复完整落地；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
+- 关联需求：DevSpec §7~9；FR-OPS-001；FR-OPS-002；FR-AUDIT-001。
+
 
 
 
