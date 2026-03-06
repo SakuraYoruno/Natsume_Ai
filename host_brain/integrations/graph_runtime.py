@@ -193,6 +193,9 @@ class GraphRuntimeContract:
             "interrupt_reason": None,
             "resume_allowed": None,
             "resume_deadline_at": None,
+            # M40-E：barrier_join / RenderGuard 字段初始化
+            "barrier_join_result": None,
+            "render_guard_result": None,
         }
         state = compiled.invoke(initial_state)
 
@@ -377,6 +380,14 @@ class GraphRuntimeContract:
                     graph_id=graph_id,
                     interrupt_reason=str((state or {}).get("interrupt_reason") or ""),
                     resume_deadline_at=int((state or {}).get("resume_deadline_at") or 0),
+                )
+            # M40-I：写入 barrier_join 结果
+            barrier_join_result = (state or {}).get("barrier_join_result")
+            if barrier_join_result and isinstance(barrier_join_result, dict):
+                ep.write_barrier_join(
+                    request_id=request_id,
+                    graph_id=graph_id,
+                    barrier_join_result=barrier_join_result,
                 )
         except Exception:
             pass  # 静默降级，不影响主流程

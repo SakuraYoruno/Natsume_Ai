@@ -28,12 +28,14 @@ from host_brain.integrations.graph_branch import (
     BranchSpec,
     build_branch_manifest_dict,
     run_parallel_branches,
+    barrier_join,
 )
 from host_brain.integrations.graph_clock import DualClockSupervisor
 from host_brain.integrations.graph_streaming import (
     CommitStreamEmitter,
     PhaseLockGuard,
     PresenceStreamEmitter,
+    RenderGuard,
     RenderStreamEmitter,
 )
 from host_brain.integrations.graph_checkpoint import (
@@ -63,6 +65,7 @@ class GraphExecutor:
         self._commit_emitter = CommitStreamEmitter()
         self._render_emitter = RenderStreamEmitter()
         self._phase_lock_guard = PhaseLockGuard()
+        self._render_guard = RenderGuard()
         # M39-E：Checkpoint 管理器
         self._checkpoint_manager = CheckpointManager()
 
@@ -240,6 +243,26 @@ class GraphExecutor:
                 except Exception:
                     pass  # 静默降级
 
+        # M40-G：RenderGuard 验证（render_snapshot_ref 存在时验证 render 输出）
+        if new_state.get("render_snapshot_ref"):
+            try:
+                render_output = dict(new_state.get("payload") or {})
+                rg_result = self._render_guard.validate_render_output(
+                    render_output=render_output,
+                    commit_snapshot=new_state.get("commit_snapshot"),
+                )
+                new_state = {**new_state, "render_guard_result": rg_result.to_dict()}
+                if not rg_result.passed:
+                    # 验证失败：写入降级通知到 presence_events
+                    failed_event = self._phase_lock_guard.build_precondition_failed_event(
+                        node_id=node_id,
+                        reason=f"RenderGuard 验证失败: {rg_result.reason}",
+                    )
+                    new_presence = list(new_state.get("presence_events") or []) + [failed_event]
+                    new_state = {**new_state, "presence_events": new_presence}
+            except Exception:
+                pass  # 静默降级
+
         # M36-K：Evidence Plane 实时写入单节点 trace
         if self._evidence_plane is not None:
             try:
@@ -271,7 +294,17 @@ class GraphExecutor:
                         state=new_state,
                         max_workers=int(new_state.get("branch_max_workers") or 4),
                     )
-                    new_state = {**new_state, "branch_manifest": build_branch_manifest_dict(manifest)}
+                    manifest_dict = build_branch_manifest_dict(manifest)
+                    new_state = {**new_state, "branch_manifest": manifest_dict}
+                    # M40-F：barrier_join() fan-in 校验
+                    try:
+                        bj_result = barrier_join(
+                            branch_manifest=manifest_dict,
+                            audit_tickets=None,
+                        )
+                        new_state = {**new_state, "barrier_join_result": bj_result.to_dict()}
+                    except Exception:
+                        pass  # 静默降级
             except Exception:
                 pass  # 静默降级，不影响主图执行
 

@@ -6626,6 +6626,337 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_review_m39_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.4、§6、§11.2。
 
+---
+
+## M40 barrier_join() + RenderGuard（并行分支 fan-in 校验 + 渲染输出授权）
+
+- **里程碑编号**：M40
+- **标题**：barrier_join() + RenderGuard — 并行分支 fan-in 校验与渲染输出授权
+- **任务范围**：TASK-0397 ~ TASK-0416（共 20 个任务）
+- **前置依赖**：M39 DONE（Checkpoint / Interrupt / Resume）
+- **目标**：
+  1. 实现 `barrier_join()`：并行分支 fan-in 校验，校验所有分支是否存在 `audit_commit`，缺任一证据则 fail closed，支持 `join_policy_ref`
+  2. 实现 `RenderGuard`：渲染输出授权，验证 render 输出只修改允许的派生字段，不允许修改 `locked_fields`
+  3. `graph_branch.py` 新增 `AuditTicket`、`BarrierJoinResult`、`barrier_join()` 函数
+  4. `graph_streaming.py` 新增 `RenderGuard` 类
+  5. `GraphState` 新增 `barrier_join_result`、`render_guard_result` 字段
+  6. `graph_executor.py` 集成 `barrier_join()` 和 `RenderGuard`
+  7. Evidence Plane 新增 `barrier_join_log` 表和写入方法
+  8. 专项测试覆盖（T-BJ-01~10 + T-RG-01~08）
+  9. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0397 M40-A：graph_branch.py 新增 AuditTicket、BarrierJoinResult、barrier_join()
+
+- 状态：DONE
+- 任务描述：在 `graph_branch.py` 中新增 `AuditTicket`、`BarrierJoinResult` 数据类和 `barrier_join()` 函数，实现并行分支 fan-in 校验。
+  - **AuditTicket**：审计工单数据类（`branch_id`、`audit_commit`、`input_digest`、`output_digest`、`issued_at_ms`）
+  - **BarrierJoinResult**：barrier_join 结果数据类（`passed`、`failed_branches`、`join_policy_ref`、`reason`）
+  - **barrier_join()**：校验所有分支是否存在 `audit_commit`，缺任一证据则 fail closed
+    - 校验 `branch_manifest` 中每个分支的 `audit_commit` 是否存在
+    - 校验 `output_digest` 是否与 `AuditTicket` 签发时一致（若提供 `audit_tickets`）
+    - 缺任一证据则 `passed=False`，记录 `failed_branches`
+    - 若允许部分成功，必须记录 `join_policy_ref`
+- 输入：`branch_manifest: dict`、`audit_tickets: list[AuditTicket] | None`、`join_policy: str`。
+- 输出：
+  - `AuditTicket` 数据类；
+  - `BarrierJoinResult` 数据类；
+  - `barrier_join(branch_manifest, audit_tickets, join_policy) -> BarrierJoinResult`；
+  - `build_audit_ticket(branch_id, input_payload) -> AuditTicket`（辅助函数）。
+- 验收标准：
+  - 所有分支有 `audit_commit` 时 `passed=True`；
+  - 任一分支缺 `audit_commit` 时 `passed=False`；
+  - `failed_branches` 包含所有缺证据的分支 ID；
+  - `join_policy_ref` 在 `join_policy != "strict"` 时记录；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_branch.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+
+### TASK-0398 M40-B：graph_streaming.py 新增 RenderGuard
+
+- 状态：DONE
+- 任务描述：在 `graph_streaming.py` 中新增 `RenderGuard` 类，实现渲染输出授权。
+  - **RenderGuard**：渲染输出授权守卫
+    - `validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`：验证 render 输出只修改允许的派生字段
+    - 不允许修改 `locked_fields`（来自 `commit_snapshot`）
+    - 不允许修改 `intent_commit`、`s1_output_hash`
+    - 允许修改的派生字段：`render_text`、`render_html`、`render_markdown`、`display_*` 前缀字段
+  - **RenderGuardResult**：渲染守卫结果数据类（`passed`、`violated_fields`、`reason`）
+- 输入：`render_output: dict`、`commit_snapshot: dict | CommitSnapshot`。
+- 输出：
+  - `RenderGuardResult` 数据类（`passed: bool`、`violated_fields: list[str]`、`reason: str`）；
+  - `RenderGuard.validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`；
+  - `RenderGuard.is_allowed_render_field(field_name) -> bool`（辅助方法）。
+- 验收标准：
+  - render 输出只修改允许字段时 `passed=True`；
+  - render 输出修改 `locked_fields` 中的字段时 `passed=False`；
+  - render 输出修改 `intent_commit` 时 `passed=False`；
+  - `violated_fields` 包含所有违规字段名；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_streaming.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0399 M40-C：GraphState 新增 barrier_join_result、render_guard_result 字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 barrier_join 和 RenderGuard 相关字段。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.barrier_join_result: dict[str, Any] | None`（barrier_join 结果，由 barrier_join() 写入）；
+  - `GraphState.render_guard_result: dict[str, Any] | None`（RenderGuard 结果，由 RenderGuard 写入）。
+- 验收标准：
+  - `GraphState` 包含 2 个新字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+
+### TASK-0400 M40-D：graph_contract.py 新增 barrier_join 和 RenderGuard 相关常量
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 barrier_join 和 RenderGuard 相关常量。
+- 输入：现有常量定义区域。
+- 输出：
+  - `BARRIER_JOIN_POLICY_STRICT = "strict"` 常量（严格模式：任一分支缺证据则 fail closed）；
+  - `BARRIER_JOIN_POLICY_PARTIAL = "partial"` 常量（部分成功模式：允许部分分支失败，但必须记录 join_policy_ref）；
+  - `BARRIER_JOIN_STATUS_PASSED = "PASSED"` 常量；
+  - `BARRIER_JOIN_STATUS_FAILED = "FAILED"` 常量；
+  - `RENDER_GUARD_STATUS_PASSED = "PASSED"` 常量；
+  - `RENDER_GUARD_STATUS_FAILED = "FAILED"` 常量；
+  - `RENDER_ALLOWED_FIELDS = frozenset({"render_text", "render_html", "render_markdown"})` 常量（允许修改的派生字段集合）；
+  - `RENDER_ALLOWED_FIELD_PREFIX = "display_"` 常量（允许修改的派生字段前缀）。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - 在 `graph_branch.py` 和 `graph_streaming.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+
+### TASK-0401 M40-E：graph_runtime.py 初始化 barrier_join_result、render_guard_result 字段
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 barrier_join 和 RenderGuard 字段。
+- 输入：现有 `initial_state` 构建逻辑。
+- 输出：`initial_state` 包含 `barrier_join_result = None`、`render_guard_result = None`。
+- 验收标准：
+  - 2 个新字段正确初始化；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+
+### TASK-0402 M40-F：graph_executor.py 集成 barrier_join()
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在并行分支执行完成后调用 `barrier_join()` 进行 fan-in 校验。
+  - 在 `branch_manifest` 写入后立即调用 `barrier_join()`；
+  - `barrier_join` 失败（`passed=False`）时写入 `barrier_join_result` 并降级（`STATUS_DEGRADED`）；
+  - `barrier_join` 通过时写入 `barrier_join_result`（`passed=True`）；
+  - 静默降级：`barrier_join` 失败时不影响主图执行（只降级，不终止）。
+- 输入：`branch_manifest`、`audit_tickets`（可选）。
+- 输出：`state.barrier_join_result` 已更新。
+- 验收标准：
+  - `branch_manifest` 非空时调用 `barrier_join()`；
+  - `barrier_join` 失败时 `state.barrier_join_result.passed = False`；
+  - `barrier_join` 通过时 `state.barrier_join_result.passed = True`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+
+### TASK-0403 M40-G：graph_executor.py 集成 RenderGuard
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在 Render Stream 发射后调用 `RenderGuard.validate_render_output()` 进行渲染输出授权。
+  - 在 `render_snapshot_ref` 写入后调用 `RenderGuard.validate_render_output()`；
+  - `RenderGuard` 失败时写入 `render_guard_result` 并写入降级通知到 `presence_events`；
+  - `RenderGuard` 通过时写入 `render_guard_result`（`passed=True`）；
+  - 静默降级：`RenderGuard` 失败时不影响主图执行。
+- 输入：`render_output`（来自 payload）、`commit_snapshot`。
+- 输出：`state.render_guard_result` 已更新。
+- 验收标准：
+  - `render_snapshot_ref` 非空时调用 `RenderGuard.validate_render_output()`；
+  - `RenderGuard` 失败时 `state.render_guard_result.passed = False`；
+  - `RenderGuard` 通过时 `state.render_guard_result.passed = True`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0404 M40-H：graph_evidence.py 新增 barrier_join_log 表和写入方法
+
+- 状态：DONE
+- 任务描述：修改 `graph_evidence.py`，新增 `barrier_join_log` 表和 `write_barrier_join`、`query_barrier_join` 方法。
+- 输入：`BarrierJoinResult`、`request_id`、`graph_id`。
+- 输出：
+  - `barrier_join_log` 表（`id`、`request_id`、`graph_id`、`passed`、`failed_branches_json`、`join_policy_ref`、`reason`、`ts_ms`）；
+  - `EvidencePlane.write_barrier_join(request_id, graph_id, barrier_join_result)` 方法；
+  - `EvidencePlane.query_barrier_join(request_id)` 方法（测试用）。
+- 验收标准：
+  - `write_barrier_join` 将 barrier_join 结果写入 `barrier_join_log` 表；
+  - 写入失败时静默降级；
+  - `query_barrier_join` 返回正确的记录；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+
+### TASK-0405 M40-I：graph_runtime.py 集成 barrier_join_log 写入 Evidence Plane
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.barrier_join_result` 非空，将 barrier_join 结果写入 Evidence Plane。
+- 输入：`state.barrier_join_result`（若非空）。
+- 输出：`EvidencePlane.write_barrier_join()` 调用（若 `barrier_join_result` 非空）。
+- 验收标准：
+  - `barrier_join_result` 非空时调用 `write_barrier_join`；
+  - 写入失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 4。
+
+### TASK-0406 M40-J：barrier_join() 核心专项测试（T-BJ-01~10）
+
+- 状态：DONE
+- 任务描述：新增 barrier_join() 核心专项测试，验证并行分支 fan-in 校验的正确性。
+- 输入：`barrier_join`、`AuditTicket`、`BarrierJoinResult`、`build_audit_ticket`。
+- 输出：`tests/unit/test_barrier_join_m40.py`（新增）：T-BJ-01~10。
+- 验收标准：
+  - T-BJ-01：所有分支有 audit_commit 时 passed=True；
+  - T-BJ-02：任一分支缺 audit_commit 时 passed=False；
+  - T-BJ-03：failed_branches 包含所有缺证据的分支 ID；
+  - T-BJ-04：空 branch_manifest 时 passed=True（无分支无需校验）；
+  - T-BJ-05：join_policy=strict 时任一失败则 passed=False；
+  - T-BJ-06：join_policy=partial 时记录 join_policy_ref；
+  - T-BJ-07：build_audit_ticket 返回有效 AuditTicket；
+  - T-BJ-08：AuditTicket.audit_commit 非空；
+  - T-BJ-09：output_digest 不一致时 passed=False（若提供 audit_tickets）；
+  - T-BJ-10：output_digest 一致时 passed=True（若提供 audit_tickets）。
+- 涉及文件路径：`tests/unit/test_barrier_join_m40.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+
+### TASK-0407 M40-K：RenderGuard 核心专项测试（T-RG-01~08）
+
+- 状态：DONE
+- 任务描述：新增 RenderGuard 核心专项测试，验证渲染输出授权的正确性。
+- 输入：`RenderGuard`、`RenderGuardResult`、`CommitSnapshot`。
+- 输出：`tests/unit/test_render_guard_m40.py`（新增）：T-RG-01~08。
+- 验收标准：
+  - T-RG-01：render 输出只修改允许字段时 passed=True；
+  - T-RG-02：render 输出修改 locked_fields 中的字段时 passed=False；
+  - T-RG-03：render 输出修改 intent_commit 时 passed=False；
+  - T-RG-04：violated_fields 包含所有违规字段名；
+  - T-RG-05：render 输出修改 display_ 前缀字段时 passed=True；
+  - T-RG-06：render 输出修改 render_text 时 passed=True；
+  - T-RG-07：commit_snapshot 为 None 时 passed=False；
+  - T-RG-08：render 输出为空时 passed=True。
+- 涉及文件路径：`tests/unit/test_render_guard_m40.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0408 M40-L：barrier_join executor 集成测试（T-BJ-INT-01~03）
+
+- 状态：DONE
+- 任务描述：新增 barrier_join executor 集成测试，验证 graph_executor.py 中 barrier_join 的正确集成。
+- 输入：`GraphExecutor._run_single_step`、`branch_specs`、`branch_manifest`。
+- 输出：`tests/unit/test_barrier_join_executor_integration_m40.py`（新增）：T-BJ-INT-01~03。
+- 验收标准：
+  - T-BJ-INT-01：branch_manifest 非空时 state.barrier_join_result 非空；
+  - T-BJ-INT-02：所有分支有 audit_commit 时 barrier_join_result.passed=True；
+  - T-BJ-INT-03：任一分支缺 audit_commit 时 barrier_join_result.passed=False。
+- 涉及文件路径：`tests/unit/test_barrier_join_executor_integration_m40.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4。
+
+### TASK-0409 M40-M：RenderGuard executor 集成测试（T-RG-INT-01~03）
+
+- 状态：DONE
+- 任务描述：新增 RenderGuard executor 集成测试，验证 graph_executor.py 中 RenderGuard 的正确集成。
+- 输入：`GraphExecutor._run_single_step`、`commit_snapshot`、`render_output`。
+- 输出：`tests/unit/test_render_guard_executor_integration_m40.py`（新增）：T-RG-INT-01~03。
+- 验收标准：
+  - T-RG-INT-01：render_snapshot_ref 非空时 state.render_guard_result 非空；
+  - T-RG-INT-02：render 输出合法时 render_guard_result.passed=True；
+  - T-RG-INT-03：render 输出违规时 render_guard_result.passed=False。
+- 涉及文件路径：`tests/unit/test_render_guard_executor_integration_m40.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5。
+
+### TASK-0410 M40-N：Evidence Plane barrier_join_log 写入专项测试（T-EVP-18~20）
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane barrier_join_log 写入专项测试。
+- 输入：`EvidencePlane.write_barrier_join`。
+- 输出：`tests/unit/test_evidence_barrier_join_m40.py`（新增）：T-EVP-18~20。
+- 验收标准：
+  - T-EVP-18：write_barrier_join 将结果写入 SQLite barrier_join_log 表；
+  - T-EVP-19：barrier_join_log 表包含正确的字段；
+  - T-EVP-20：write_barrier_join 写入失败时静默降级。
+- 涉及文件路径：`tests/unit/test_evidence_barrier_join_m40.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 4。
+
+### TASK-0411 M40-O：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 barrier_join() 和 RenderGuard 标记为 M40 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M40 实现项标注 ✅）。
+- 验收标准：
+  - `barrier_join()（并行分支 fan-in 校验）` 标注 ✅ M40 已实现；
+  - `RenderGuard（渲染输出授权）` 标注 ✅ M40 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0412 M40-P：graph_branch.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M40 新增 AuditTicket、BarrierJoinResult、barrier_join() 后，`graph_branch.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0413 M40-Q：graph_streaming.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M40 新增 RenderGuard 后，`graph_streaming.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0414 M40-R：graph_executor.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M40 新增 barrier_join 和 RenderGuard 集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0415 M40-S：graph_evidence.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M40 新增 barrier_join_log 表和写入方法后，`graph_evidence.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0416 M40-T：M40 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0397~0415 全部 DONE 后，生成 M40 代码审查报告，记录 barrier_join() + RenderGuard 的实现情况。
+- 输入：TASK-0397~0415 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m40_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0397~0415 全部 19 个任务的变更摘要；
+  - 新增测试 ≥ 24 个（T-BJ-01~10 + T-RG-01~08 + T-BJ-INT-01~03 + T-RG-INT-01~03 + T-EVP-18~20），全部通过；
+  - barrier_join() 完整落地（AuditTicket + BarrierJoinResult + barrier_join()）；
+  - RenderGuard 完整落地（RenderGuardResult + validate_render_output()）；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m40_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.2、§4.5、§6、§11.2。
+
 
 
 

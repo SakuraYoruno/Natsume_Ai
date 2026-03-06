@@ -30,6 +30,10 @@ from host_brain.integrations.graph_contract import (
     STREAM_PHASE_COMMIT,
     STREAM_PHASE_PRESENCE,
     STREAM_PHASE_RENDER,
+    RENDER_ALLOWED_FIELDS,
+    RENDER_ALLOWED_FIELD_PREFIX,
+    RENDER_GUARD_STATUS_PASSED,
+    RENDER_GUARD_STATUS_FAILED,
 )
 
 
@@ -312,3 +316,130 @@ class PhaseLockGuard:
             "chunk": str(reason or "Render 前置条件不满足"),
             "ts_ms": int(time.time() * 1000),
         }
+
+
+# ---------------------------------------------------------------------------
+# M40-B：RenderGuard — 渲染输出授权守卫
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RenderGuardResult:
+    """渲染守卫结果：RenderGuard.validate_render_output() 返回值。"""
+    passed: bool
+    violated_fields: list[str] = field(default_factory=list)
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "violated_fields": list(self.violated_fields),
+            "reason": self.reason,
+        }
+
+
+class RenderGuard:
+    """渲染输出授权守卫（M40-B）。
+
+    验证 render 输出只修改允许的派生字段，不允许修改 locked_fields。
+
+    设计原则（LangGraph_Governed_Runtime_Solution §4.5）：
+    - render 输出只能修改 RENDER_ALLOWED_FIELDS 中的字段
+    - render 输出只能修改 display_ 前缀的字段
+    - 不允许修改 locked_fields（来自 commit_snapshot）
+    - 不允许修改 intent_commit、s1_output_hash
+    """
+
+    # 绝对禁止修改的字段（无论 locked_fields 如何）
+    _FORBIDDEN_FIELDS: frozenset[str] = frozenset({
+        "intent_commit",
+        "s1_output_hash",
+        "committed_route_token",
+        "committed_route_token_detail",
+    })
+
+    def is_allowed_render_field(self, field_name: str) -> bool:
+        """判断字段是否允许被 render 输出修改。
+
+        Args:
+            field_name: 字段名
+
+        Returns:
+            True：允许修改；False：不允许修改
+        """
+        name = str(field_name or "")
+        # 允许的固定字段集合
+        if name in RENDER_ALLOWED_FIELDS:
+            return True
+        # 允许的前缀字段
+        if name.startswith(RENDER_ALLOWED_FIELD_PREFIX):
+            return True
+        return False
+
+    def validate_render_output(
+        self,
+        *,
+        render_output: dict[str, Any] | None,
+        commit_snapshot: "CommitSnapshot | dict[str, Any] | None",
+    ) -> RenderGuardResult:
+        """验证 render 输出只修改允许的派生字段。
+
+        Args:
+            render_output: render 节点的输出字典
+            commit_snapshot: 提交快照（CommitSnapshot 或字典）
+
+        Returns:
+            RenderGuardResult（passed=True 或 passed=False + violated_fields）
+        """
+        # commit_snapshot 为 None：无法校验，fail closed
+        if commit_snapshot is None:
+            return RenderGuardResult(
+                passed=False,
+                violated_fields=[],
+                reason="commit_snapshot 为 None，无法校验 render 输出",
+            )
+
+        # render_output 为空：无修改，通过
+        if not render_output:
+            return RenderGuardResult(
+                passed=True,
+                violated_fields=[],
+                reason="render 输出为空，校验通过",
+            )
+
+        # 提取 locked_fields（来自 commit_snapshot）
+        if isinstance(commit_snapshot, dict):
+            locked_fields: dict[str, Any] = dict(commit_snapshot.get("locked_fields") or {})
+        else:
+            locked_fields = dict(getattr(commit_snapshot, "locked_fields", {}) or {})
+
+        violated: list[str] = []
+
+        for field_name in render_output:
+            name = str(field_name or "")
+
+            # 绝对禁止修改的字段
+            if name in self._FORBIDDEN_FIELDS:
+                violated.append(name)
+                continue
+
+            # locked_fields 中的字段不允许修改
+            if name in locked_fields:
+                violated.append(name)
+                continue
+
+            # 不在允许列表中的字段
+            if not self.is_allowed_render_field(name):
+                violated.append(name)
+
+        if violated:
+            return RenderGuardResult(
+                passed=False,
+                violated_fields=violated,
+                reason=f"render 输出包含 {len(violated)} 个违规字段: {', '.join(violated)}",
+            )
+
+        return RenderGuardResult(
+            passed=True,
+            violated_fields=[],
+            reason="render 输出校验通过，所有字段均为允许的派生字段",
+        )

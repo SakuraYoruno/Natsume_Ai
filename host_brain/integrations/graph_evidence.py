@@ -118,6 +118,16 @@ class EvidencePlane:
                         resume_deadline_at INTEGER,
                         created_at_ms INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS barrier_join_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        request_id TEXT NOT NULL,
+                        graph_id TEXT NOT NULL,
+                        passed INTEGER NOT NULL,
+                        failed_branches_json TEXT,
+                        join_policy_ref TEXT,
+                        reason TEXT,
+                        ts_ms INTEGER NOT NULL
+                    );
                 """)
             self._initialized = True
         except Exception as exc:
@@ -419,6 +429,76 @@ class EvidencePlane:
         except Exception as exc:
             logger.warning("EvidencePlane.query_checkpoint 失败: %s", exc)
         return None
+
+    def write_barrier_join(
+        self,
+        *,
+        request_id: str,
+        graph_id: str,
+        barrier_join_result: dict[str, Any],
+    ) -> None:
+        """将 barrier_join 结果写入 barrier_join_log 表（M40-H）。
+
+        Args:
+            request_id: 请求 ID
+            graph_id: 图 ID
+            barrier_join_result: BarrierJoinResult.to_dict() 返回的字典
+        """
+        if not self._initialized:
+            return
+        try:
+            import json as _json
+            ts_ms = int(time.time() * 1000)
+            passed = int(bool(barrier_join_result.get("passed")))
+            failed_branches = barrier_join_result.get("failed_branches") or []
+            failed_branches_json = _json.dumps(list(failed_branches), ensure_ascii=False)
+            join_policy_ref = str(barrier_join_result.get("join_policy_ref") or "")
+            reason = str(barrier_join_result.get("reason") or "")
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO barrier_join_log "
+                    "(request_id, graph_id, passed, failed_branches_json, join_policy_ref, reason, ts_ms) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(request_id),
+                        str(graph_id),
+                        passed,
+                        failed_branches_json,
+                        join_policy_ref,
+                        reason,
+                        ts_ms,
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("EvidencePlane.write_barrier_join 失败（静默降级）: %s", exc)
+
+    def query_barrier_join(self, *, request_id: str) -> list[dict[str, Any]]:
+        """查询指定 request_id 的 barrier_join 记录（测试用）。"""
+        if not self._initialized:
+            return []
+        try:
+            import json as _json
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT id, request_id, graph_id, passed, failed_branches_json, join_policy_ref, reason, ts_ms "
+                    "FROM barrier_join_log WHERE request_id = ? ORDER BY id",
+                    (str(request_id),),
+                )
+                rows = cursor.fetchall()
+                cols = ["id", "request_id", "graph_id", "passed", "failed_branches_json", "join_policy_ref", "reason", "ts_ms"]
+                result = []
+                for row in rows:
+                    d = dict(zip(cols, row))
+                    d["passed"] = bool(d["passed"])
+                    try:
+                        d["failed_branches"] = _json.loads(d.get("failed_branches_json") or "[]")
+                    except Exception:
+                        d["failed_branches"] = []
+                    result.append(d)
+                return result
+        except Exception as exc:
+            logger.warning("EvidencePlane.query_barrier_join 失败: %s", exc)
+        return []
 
     def query_trace(self, *, request_id: str) -> list[dict[str, Any]]:
         """查询指定 request_id 的 trace 记录（测试用）。"""

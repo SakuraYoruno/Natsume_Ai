@@ -70,6 +70,19 @@ SYNTHETIC_EVENT_TIMEOUT = "TIMEOUT_SYNTHETIC"
 # M39-C：默认恢复截止时间（5 分钟）
 DEFAULT_RESUME_DEADLINE_MS = 300_000
 
+# M40-D：barrier_join 相关常量
+BARRIER_JOIN_POLICY_STRICT = "strict"   # 严格模式：任一分支缺证据则 fail closed
+BARRIER_JOIN_POLICY_PARTIAL = "partial"  # 部分成功模式：允许部分分支失败，但必须记录 join_policy_ref
+BARRIER_JOIN_STATUS_PASSED = "PASSED"
+BARRIER_JOIN_STATUS_FAILED = "FAILED"
+# M40-D：RenderGuard 相关常量
+RENDER_GUARD_STATUS_PASSED = "PASSED"
+RENDER_GUARD_STATUS_FAILED = "FAILED"
+# M40-D：允许修改的派生字段集合（render 输出只能修改这些字段）
+RENDER_ALLOWED_FIELDS: frozenset[str] = frozenset({"render_text", "render_html", "render_markdown"})
+# M40-D：允许修改的派生字段前缀（display_ 前缀字段允许修改）
+RENDER_ALLOWED_FIELD_PREFIX = "display_"
+
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
 NodeHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
@@ -137,6 +150,11 @@ class GraphState(TypedDict):
     resume_allowed: bool | None
     # resume_deadline_at：恢复截止时间戳（毫秒），超过则写入 SyntheticTimeoutEvent
     resume_deadline_at: int | None
+    # M40-C：barrier_join / RenderGuard 字段（ModelPlane.md §10 Rule 4、Rule 5）
+    # barrier_join_result：barrier_join 结果（由 barrier_join() 写入）
+    barrier_join_result: dict[str, Any] | None
+    # render_guard_result：RenderGuard 结果（由 RenderGuard.validate_render_output() 写入）
+    render_guard_result: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------

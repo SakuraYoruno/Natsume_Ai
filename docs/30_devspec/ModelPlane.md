@@ -317,6 +317,8 @@
 | Presence Stream（在场流） | ✅ M38 已实现（只向 UI 单向输出，不作为下游节点输入）|
 | Commit Stream（提交流） | ✅ M38 已实现（GOV_OK_RENDER 时产生，含 intent_commit + s1_output_hash）|
 | Render Stream（渲染流） | ✅ M38 已实现（只消费 Commit 快照，PhaseLockGuard 验证）|
+| `barrier_join()`（并行分支 fan-in 校验） | ✅ M40 已实现（AuditTicket + BarrierJoinResult + barrier_join()，fail closed）|
+| `RenderGuard`（渲染输出授权） | ✅ M40 已实现（validate_render_output()，locked_fields 保护）|
 
 **第三档：不建议强求"接近原生体验"**
 
