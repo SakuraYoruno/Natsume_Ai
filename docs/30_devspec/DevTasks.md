@@ -6043,4 +6043,288 @@ TASK-XXXX 标题
 
 
 
+---
+
+## M38 Phase-Locked Streaming（分相流式：Presence / Commit / Render 三类流隔离）
+
+- **里程碑编号**：M38
+- **标题**：Phase-Locked Streaming — Presence / Commit / Render 三类流隔离
+- **任务范围**：TASK-0363 ~ TASK-0378（共 16 个任务）
+- **前置依赖**：M37 DONE（只读并行分支 + Transparent Subgraph Evidence Plane 实时写入）
+- **目标**：
+  1. 实现 Phase-Locked Streaming 核心模块（`graph_streaming.py`），包含三类流：Presence Stream（在场流）、Commit Stream（提交流）、Render Stream（渲染流）
+  2. 三类流严格隔离：Presence 只向 UI 单向输出，Render 只能消费 Commit 快照，Commit 只在 Governor 裁决后产生
+  3. GraphState 新增 streaming 相关字段（`presence_events`、`commit_snapshot`、`render_snapshot_ref`）
+  4. Evidence Plane 新增 streaming 事件写入（`stream_events` 表）
+  5. 专项测试覆盖（T-STR-01~12 + T-STR-INT-01~04）
+  6. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0363 M38-A：新建 graph_streaming.py（Phase-Locked Streaming 核心实现）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_streaming.py`，实现 Phase-Locked Streaming 三类流。
+  - **Presence Stream（在场流）**：非权威，只向 UI 单向输出，不允许作为下游节点输入；包含节点阶段、临时 narrative chunk、进度型状态；由 `PresenceStreamEmitter` 实现。
+  - **Commit Stream（提交流）**：权威，只在 S1 完成并经过 Governor 后产生；包含 `intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`；由 `CommitStreamEmitter` 实现。
+  - **Render Stream（渲染流）**：只能读取 Commit Stream 对应的快照，不允许回读 Presence Stream 的临时 token；由 `RenderStreamEmitter` 实现。
+  - **Phase-Lock 保证**：Render Stream 必须先验证 `commit_snapshot` 存在且 `intent_commit` 未变化，才能开始渲染。
+  - **隔离约束**：三类流互不干扰，Presence 事件不能流入 Commit/Render，Render 不能消费未提交状态。
+- 输入：`GraphState`（含 `committed_route_token`、`payload`）。
+- 输出：
+  - `host_brain/integrations/graph_streaming.py`（新增）；
+  - `StreamPhase`：流阶段枚举（`PRESENCE`、`COMMIT`、`RENDER`）；
+  - `PresenceEvent`：在场流事件数据类（`phase`、`node_id`、`event_type`、`chunk`、`ts_ms`）；
+  - `CommitSnapshot`：提交快照数据类（`intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`、`committed_at_ms`）；
+  - `RenderEvent`：渲染流事件数据类（`phase`、`snapshot_ref`、`chunk`、`ts_ms`）；
+  - `PresenceStreamEmitter`：在场流发射器（`emit(node_id, event_type, chunk) -> PresenceEvent`）；
+  - `CommitStreamEmitter`：提交流发射器（`commit(state) -> CommitSnapshot`，需要 `committed_route_token` 非空）；
+  - `RenderStreamEmitter`：渲染流发射器（`render(snapshot, chunk) -> RenderEvent`，需要 `commit_snapshot` 存在）；
+  - `PhaseLockGuard`：分相锁守卫（`validate_render_precondition(commit_snapshot, intent_commit) -> bool`）。
+- 验收标准：
+  - `PresenceStreamEmitter.emit()` 返回 `PresenceEvent`，`phase = PRESENCE`；
+  - `CommitStreamEmitter.commit()` 在 `committed_route_token` 为空时抛出 `PhaseViolationError`；
+  - `RenderStreamEmitter.render()` 在 `commit_snapshot` 为 None 时抛出 `PhaseViolationError`；
+  - `PhaseLockGuard.validate_render_precondition()` 在 `intent_commit` 变化时返回 False；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_streaming.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5（Phase-Locked Streaming Rule）；`LangGraph_Governed_Runtime_Solution` §4.5、§6 第五阶段。
+
+### TASK-0364 M38-B：GraphState 新增 streaming 相关字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 streaming 相关字段。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.presence_events: list[dict[str, Any]]`（在场流事件列表，只向 UI 输出，不作为下游输入）；
+  - `GraphState.commit_snapshot: dict[str, Any] | None`（提交快照，由 CommitStreamEmitter 写入）；
+  - `GraphState.render_snapshot_ref: str | None`（渲染快照引用，由 RenderStreamEmitter 写入）；
+  - `GraphState.streaming_phase: str | None`（当前流阶段：PRESENCE / COMMIT / RENDER / None）。
+- 验收标准：
+  - `GraphState` 包含 4 个新字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归（TypedDict 新增字段向后兼容）。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0365 M38-C：graph_contract.py 新增 streaming 相关常量
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 Phase-Locked Streaming 相关常量。
+- 输入：现有常量定义区域。
+- 输出：
+  - `STREAM_PHASE_PRESENCE = "PRESENCE"` 常量；
+  - `STREAM_PHASE_COMMIT = "COMMIT"` 常量；
+  - `STREAM_PHASE_RENDER = "RENDER"` 常量；
+  - `STREAM_EVENT_NODE_START = "NODE_START"` 常量；
+  - `STREAM_EVENT_NODE_END = "NODE_END"` 常量；
+  - `STREAM_EVENT_CHUNK = "CHUNK"` 常量；
+  - `STREAM_EVENT_PROGRESS = "PROGRESS"` 常量。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - 在 `graph_streaming.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0366 M38-D：graph_runtime.py 初始化 streaming 字段
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 streaming 字段。
+- 输入：现有 `initial_state` 构建逻辑。
+- 输出：`initial_state` 包含 `presence_events = []`、`commit_snapshot = None`、`render_snapshot_ref = None`、`streaming_phase = None`。
+- 验收标准：
+  - 4 个 streaming 字段正确初始化；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0367 M38-E：graph_executor.py 集成 Presence Stream 发射
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行前后发射 Presence Stream 事件（NODE_START / NODE_END），写入 `state.presence_events`。
+  - 节点执行前：发射 `NODE_START` 事件；
+  - 节点执行后：发射 `NODE_END` 事件；
+  - Presence 事件只写入 `presence_events`，不影响 `payload`、`trace` 等核心字段；
+  - 静默降级：发射失败时不影响主图执行。
+- 输入：`PresenceStreamEmitter`、`node_id`。
+- 输出：`state.presence_events` 追加 NODE_START / NODE_END 事件。
+- 验收标准：
+  - 节点执行前后各追加一条 Presence 事件；
+  - Presence 事件不影响 `payload`、`trace`；
+  - 发射失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0368 M38-F：graph_executor.py 集成 Commit Stream 发射
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行完成且 `committed_route_token` 为 `GOV_OK_RENDER` 时，调用 `CommitStreamEmitter.commit()` 生成 `CommitSnapshot`，写入 `state.commit_snapshot`。
+  - 只有 `committed_route_token == "GOV_OK_RENDER"` 时才生成 Commit Snapshot；
+  - `commit_snapshot` 包含 `intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`；
+  - 静默降级：生成失败时不影响主图执行。
+- 输入：`CommitStreamEmitter`、`state.committed_route_token`、`state.payload`。
+- 输出：`state.commit_snapshot` 已更新（若 `committed_route_token == "GOV_OK_RENDER"`）。
+- 验收标准：
+  - `committed_route_token == "GOV_OK_RENDER"` 时生成 `commit_snapshot`；
+  - `committed_route_token` 为其他值时不生成；
+  - 生成失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0369 M38-G：graph_executor.py 集成 Render Stream 发射
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_route_after_step` 方法，在路由到 `GOV_OK_RENDER` 时，调用 `RenderStreamEmitter.render()` 生成渲染事件，写入 `state.render_snapshot_ref`。
+  - 只有 `commit_snapshot` 存在时才允许渲染；
+  - `PhaseLockGuard.validate_render_precondition()` 验证 `intent_commit` 未变化；
+  - 验证失败时写入 `RENDER_PRECONDITION_FAILED` 事件到 `presence_events`（降级通知）；
+  - 静默降级：渲染失败时不影响主图执行。
+- 输入：`RenderStreamEmitter`、`PhaseLockGuard`、`state.commit_snapshot`。
+- 输出：`state.render_snapshot_ref` 已更新（若 `commit_snapshot` 存在且验证通过）。
+- 验收标准：
+  - `commit_snapshot` 存在且验证通过时生成 `render_snapshot_ref`；
+  - `commit_snapshot` 为 None 时不生成；
+  - 验证失败时写入降级通知到 `presence_events`；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0370 M38-H：graph_evidence.py 新增 stream_events 表和写入方法
+
+- 状态：DONE
+- 任务描述：修改 `graph_evidence.py`，新增 `stream_events` 表和 `write_stream_events()` 方法，用于记录三类流事件。
+- 输入：`presence_events`、`commit_snapshot`、`render_snapshot_ref`。
+- 输出：
+  - `stream_events` 表（`request_id`、`graph_id`、`phase`、`event_type`、`node_id`、`chunk`、`ts_ms`）；
+  - `EvidencePlane.write_stream_events(request_id, graph_id, events)` 方法；
+  - `EvidencePlane.query_stream_events(request_id)` 方法（测试用）。
+- 验收标准：
+  - `write_stream_events` 将事件列表写入 `stream_events` 表；
+  - 写入失败时静默降级；
+  - `query_stream_events` 返回正确的事件列表；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0371 M38-I：graph_runtime.py 集成 streaming 事件写入 Evidence Plane
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.presence_events` 非空，将 streaming 事件写入 Evidence Plane。
+- 输入：`state.presence_events`（若非空）。
+- 输出：`EvidencePlane.write_stream_events()` 调用（若 `presence_events` 非空）。
+- 验收标准：
+  - `presence_events` 非空时调用 `write_stream_events`；
+  - 写入失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0372 M38-J：Phase-Locked Streaming 核心专项测试（T-STR-01~12）
+
+- 状态：DONE
+- 任务描述：新增 Phase-Locked Streaming 核心专项测试，验证三类流的正确性和隔离约束。
+- 输入：`PresenceStreamEmitter`、`CommitStreamEmitter`、`RenderStreamEmitter`、`PhaseLockGuard`。
+- 输出：`tests/unit/test_phase_locked_streaming_m38.py`（新增）：T-STR-01~12。
+- 验收标准：
+  - T-STR-01：PresenceStreamEmitter.emit() 返回 PresenceEvent，phase = PRESENCE；
+  - T-STR-02：PresenceEvent 不包含 committed_* 字段（隔离约束）；
+  - T-STR-03：CommitStreamEmitter.commit() 在 committed_route_token 为空时抛出 PhaseViolationError；
+  - T-STR-04：CommitStreamEmitter.commit() 在 committed_route_token = GOV_OK_RENDER 时返回 CommitSnapshot；
+  - T-STR-05：CommitSnapshot 包含 intent_commit、s1_output_hash、locked_fields、render_input_snapshot_ref；
+  - T-STR-06：RenderStreamEmitter.render() 在 commit_snapshot 为 None 时抛出 PhaseViolationError；
+  - T-STR-07：RenderStreamEmitter.render() 在 commit_snapshot 存在时返回 RenderEvent；
+  - T-STR-08：PhaseLockGuard.validate_render_precondition() 在 intent_commit 未变化时返回 True；
+  - T-STR-09：PhaseLockGuard.validate_render_precondition() 在 intent_commit 变化时返回 False；
+  - T-STR-10：Presence 事件不能作为下游节点输入（presence_events 不在 payload 中）；
+  - T-STR-11：Render 不能消费未提交状态（commit_snapshot 为 None 时 render 失败）；
+  - T-STR-12：三类流事件的 ts_ms 为合法时间戳。
+- 涉及文件路径：`tests/unit/test_phase_locked_streaming_m38.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0373 M38-K：graph_executor.py streaming 集成测试（T-STR-INT-01~04）
+
+- 状态：DONE
+- 任务描述：新增 graph_executor.py streaming 集成测试，验证 Presence / Commit / Render 三类流在 _run_single_step 中的正确集成。
+- 输入：`GraphExecutor._run_single_step`、`streaming_phase`。
+- 输出：`tests/unit/test_streaming_executor_integration_m38.py`（新增）：T-STR-INT-01~04。
+- 验收标准：
+  - T-STR-INT-01：节点执行前后各追加一条 Presence 事件（NODE_START / NODE_END）；
+  - T-STR-INT-02：committed_route_token = GOV_OK_RENDER 时生成 commit_snapshot；
+  - T-STR-INT-03：commit_snapshot 存在时生成 render_snapshot_ref；
+  - T-STR-INT-04：presence_events 不影响 payload、trace 等核心字段。
+- 涉及文件路径：`tests/unit/test_streaming_executor_integration_m38.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0374 M38-L：Evidence Plane stream_events 写入专项测试（T-EVP-12~14）
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane stream_events 写入专项测试。
+- 输入：`EvidencePlane.write_stream_events`。
+- 输出：`tests/unit/test_evidence_streaming_m38.py`（新增）：T-EVP-12~14。
+- 验收标准：
+  - T-EVP-12：write_stream_events 将事件写入 SQLite stream_events 表；
+  - T-EVP-13：stream_events 表包含正确的字段（phase、event_type、node_id 等）；
+  - T-EVP-14：write_stream_events 写入失败时静默降级。
+- 涉及文件路径：`tests/unit/test_evidence_streaming_m38.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+
+### TASK-0375 M38-M：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 Phase-Locked Streaming 标记为 M38 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M38 实现项标注 ✅）。
+- 验收标准：
+  - `Presence Stream` 标注 ✅ M38 已实现；
+  - `Commit Stream + Render Stream` 标注 ✅ M38 已实现；
+  - `Phase-Locked Streaming Rule` 标注 ✅ M38 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0376 M38-N：graph_contract.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M38 新增 streaming 相关常量和字段后，`graph_contract.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：
+  - 契约测试通过；
+  - 行数限制合理（不超过实际行数 + 50 的余量）。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0377 M38-O：graph_executor.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M38 新增 Presence / Commit / Render 三类流集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制（350 行），需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：
+  - 契约测试通过；
+  - 行数限制合理（不超过实际行数 + 50 的余量）。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0378 M38-P：M38 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0363~0377 全部 DONE 后，生成 M38 代码审查报告，记录 Phase-Locked Streaming 三类流隔离的实现情况。
+- 输入：TASK-0363~0377 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m38_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0363~0377 全部 15 个任务的变更摘要；
+  - 新增测试 ≥ 19 个（T-STR-01~12 + T-STR-INT-01~04 + T-EVP-12~14），全部通过；
+  - Phase-Locked Streaming 三类流完整落地（graph_streaming.py）；
+  - 三类流严格隔离（Presence 不作为下游输入，Render 只消费 Commit 快照）；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m38_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.5、§6、§11.2。
+
+
+
 

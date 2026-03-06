@@ -46,6 +46,18 @@ BRANCH_STATUS_FAILED = "FAILED"
 # M37-F：默认并行分支最大线程数
 DEFAULT_BRANCH_MAX_WORKERS = 4
 
+# M38-C：Phase-Locked Streaming 流阶段常量
+STREAM_PHASE_PRESENCE = "PRESENCE"
+STREAM_PHASE_COMMIT = "COMMIT"
+STREAM_PHASE_RENDER = "RENDER"
+# M38-C：Presence Stream 事件类型常量
+STREAM_EVENT_NODE_START = "NODE_START"
+STREAM_EVENT_NODE_END = "NODE_END"
+STREAM_EVENT_CHUNK = "CHUNK"
+STREAM_EVENT_PROGRESS = "PROGRESS"
+# M38-C：Render 前置条件失败事件
+STREAM_EVENT_RENDER_PRECONDITION_FAILED = "RENDER_PRECONDITION_FAILED"
+
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
 NodeHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
@@ -95,6 +107,15 @@ class GraphState(TypedDict):
     branch_specs: list[dict[str, Any]]
     # branch_manifest：分支执行结果清单（由 run_parallel_branches 写入）
     branch_manifest: dict[str, Any] | None
+    # M38-B：Phase-Locked Streaming 字段（ModelPlane.md §10 Rule 5）
+    # presence_events：在场流事件列表（只向 UI 输出，不作为下游节点输入）
+    presence_events: list[dict[str, Any]]
+    # commit_snapshot：提交快照（由 CommitStreamEmitter 写入，GOV_OK_RENDER 时产生）
+    commit_snapshot: dict[str, Any] | None
+    # render_snapshot_ref：渲染快照引用（由 RenderStreamEmitter 写入）
+    render_snapshot_ref: str | None
+    # streaming_phase：当前流阶段（PRESENCE / COMMIT / RENDER / None）
+    streaming_phase: str | None
 
 
 # ---------------------------------------------------------------------------

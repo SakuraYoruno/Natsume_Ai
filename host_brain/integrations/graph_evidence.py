@@ -100,6 +100,16 @@ class EvidencePlane:
                         committed_at_ms INTEGER NOT NULL,
                         branches_json TEXT
                     );
+                    CREATE TABLE IF NOT EXISTS stream_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        request_id TEXT NOT NULL,
+                        graph_id TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        node_id TEXT,
+                        chunk TEXT,
+                        ts_ms INTEGER NOT NULL
+                    );
                 """)
             self._initialized = True
         except Exception as exc:
@@ -284,6 +294,64 @@ class EvidencePlane:
                 return [dict(zip(cols, row)) for row in cursor.fetchall()]
         except Exception as exc:
             logger.warning("EvidencePlane.query_branch_manifest 失败: %s", exc)
+            return []
+
+    def write_stream_events(
+        self,
+        *,
+        request_id: str,
+        graph_id: str,
+        events: list[dict[str, Any]],
+    ) -> None:
+        """将 streaming 事件列表写入 stream_events 表（M38-H）。
+
+        Args:
+            request_id: 请求 ID
+            graph_id: 图 ID
+            events: 流事件列表（PresenceEvent.to_dict() 格式）
+        """
+        if not self._initialized or not events:
+            return
+        try:
+            ts_ms = int(time.time() * 1000)
+            rows = [
+                (
+                    str(request_id),
+                    str(graph_id),
+                    str(event.get("phase") or ""),
+                    str(event.get("event_type") or ""),
+                    str(event.get("node_id") or ""),
+                    str(event.get("chunk") or ""),
+                    int(event.get("ts_ms") or ts_ms),
+                )
+                for event in events
+                if isinstance(event, dict)
+            ]
+            with self._connect() as conn:
+                conn.executemany(
+                    "INSERT INTO stream_events "
+                    "(request_id, graph_id, phase, event_type, node_id, chunk, ts_ms) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    rows,
+                )
+        except Exception as exc:
+            logger.warning("EvidencePlane.write_stream_events 失败（静默降级）: %s", exc)
+
+    def query_stream_events(self, *, request_id: str) -> list[dict[str, Any]]:
+        """查询指定 request_id 的 stream_events 记录（测试用）。"""
+        if not self._initialized:
+            return []
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
+                    "FROM stream_events WHERE request_id = ? ORDER BY id",
+                    (str(request_id),),
+                )
+                cols = ["request_id", "graph_id", "phase", "event_type", "node_id", "chunk", "ts_ms"]
+                return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception as exc:
+            logger.warning("EvidencePlane.query_stream_events 失败: %s", exc)
             return []
 
     def query_trace(self, *, request_id: str) -> list[dict[str, Any]]:

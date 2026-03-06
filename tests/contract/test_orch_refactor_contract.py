@@ -257,12 +257,12 @@ class TestOrchRefactorModuleSize(unittest.TestCase):
         self.assertLessEqual(self._count_lines("host_brain/integrations/graph_runtime.py"), 380)
 
     def test_graph_contract_under_300(self) -> None:
-        # M36 新增双时钟常量、GraphState 字段和 build_clock_event 辅助函数，上限调整为 400
-        self.assertLessEqual(self._count_lines("host_brain/integrations/graph_contract.py"), 400)
+        # M38 新增 Phase-Locked Streaming 常量和字段，上限调整为 450
+        self.assertLessEqual(self._count_lines("host_brain/integrations/graph_contract.py"), 450)
 
     def test_graph_executor_under_300(self) -> None:
-        # M37 新增只读并行分支集成代码，上限调整为 350
-        self.assertLessEqual(self._count_lines("host_brain/integrations/graph_executor.py"), 350)
+        # M38 新增 Phase-Locked Streaming 三类流集成代码，上限调整为 420
+        self.assertLessEqual(self._count_lines("host_brain/integrations/graph_executor.py"), 420)
 
     def test_graph_fallback_under_300(self) -> None:
         self.assertLessEqual(self._count_lines("host_brain/integrations/graph_fallback.py"), 300)

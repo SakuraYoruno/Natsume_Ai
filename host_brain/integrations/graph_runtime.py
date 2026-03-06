@@ -183,6 +183,11 @@ class GraphRuntimeContract:
             # M37-C：只读并行分支字段初始化
             "branch_specs": [],
             "branch_manifest": None,
+            # M38-D：Phase-Locked Streaming 字段初始化
+            "presence_events": [],
+            "commit_snapshot": None,
+            "render_snapshot_ref": None,
+            "streaming_phase": None,
         }
         state = compiled.invoke(initial_state)
 
@@ -229,6 +234,10 @@ class GraphRuntimeContract:
             branch_manifest = (state or {}).get("branch_manifest")
             if branch_manifest:
                 ep.write_branch_manifest(request_id=request_id, graph_id=graph_id, manifest=branch_manifest)
+            # M38-I：写入 streaming 事件
+            presence_events = list((state or {}).get("presence_events") or [])
+            if presence_events:
+                ep.write_stream_events(request_id=request_id, graph_id=graph_id, events=presence_events)
         except Exception:
             pass  # 静默降级，不影响主流程
 

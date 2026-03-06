@@ -30,6 +30,12 @@ from host_brain.integrations.graph_branch import (
     run_parallel_branches,
 )
 from host_brain.integrations.graph_clock import DualClockSupervisor
+from host_brain.integrations.graph_streaming import (
+    CommitStreamEmitter,
+    PhaseLockGuard,
+    PresenceStreamEmitter,
+    RenderStreamEmitter,
+)
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
@@ -49,6 +55,11 @@ class GraphExecutor:
         self._ledger = ledger
         # M36-K：Evidence Plane 实时写入（可选，默认 None）
         self._evidence_plane = evidence_plane
+        # M38-E/F/G：Phase-Locked Streaming 发射器
+        self._presence_emitter = PresenceStreamEmitter()
+        self._commit_emitter = CommitStreamEmitter()
+        self._render_emitter = RenderStreamEmitter()
+        self._phase_lock_guard = PhaseLockGuard()
 
     def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
@@ -81,12 +92,19 @@ class GraphExecutor:
                 "committed_route_token": None,
             }
 
-        # M36-D：Dual-Clock Supervision — 在节点执行前后使用双时钟监督
+        # M36-D：Dual-Clock Supervision —— 在节点执行前后使用双时钟监督
         supervisor = DualClockSupervisor(
             policy_start_ms=state.get("policy_start_ms"),
             policy_timeout_ms=int(state.get("policy_timeout_ms") or self._default_timeout_ms),
             node_timeout_ms=int(state.get("timeout_ms") or self._default_timeout_ms),
         )
+        # M38-E：节点执行前发射 Presence NODE_START 事件
+        presence_events = list(state.get("presence_events") or [])
+        try:
+            start_event = self._presence_emitter.emit(node_id=node_id, event_type="NODE_START")
+            presence_events.append(start_event.to_dict())
+        except Exception:
+            pass  # 静默降级
         with supervisor.supervise_node(node_id=node_id) as clock_ctx:
             # Policy Clock 超时：强制终止图执行
             if clock_ctx.policy_timeout_event is not None:
@@ -124,6 +142,13 @@ class GraphExecutor:
         new_exec_stats = dict(state.get("node_exec_stats") or {})
         new_exec_stats.update(supervisor.collect_exec_stats())
 
+        # M38-E：节点执行后发射 Presence NODE_END 事件
+        try:
+            end_event = self._presence_emitter.emit(node_id=node_id, event_type="NODE_END")
+            presence_events.append(end_event.to_dict())
+        except Exception:
+            pass  # 静默降级
+
         payload = dict(output or state.get("payload") or {})
         model_calls = list(state.get("model_calls") or [])
         if isinstance(payload.get("__model_calls__"), list):
@@ -150,7 +175,50 @@ class GraphExecutor:
                 # M36-D：双时钟字段更新
                 "clock_events": new_clock_events,
                 "node_exec_stats": new_exec_stats,
+                # M38-E：Presence 事件列表更新（不影响 payload/trace）
+                "presence_events": presence_events,
                 }
+
+        # M38-F：Commit Stream 发射（committed_route_token = GOV_OK_RENDER 时生成 CommitSnapshot）
+        token = str(new_state.get("committed_route_token") or "").strip()
+        if token == "GOV_OK_RENDER":
+            try:
+                snapshot = self._commit_emitter.commit(
+                    committed_route_token=token,
+                    payload=dict(new_state.get("payload") or {}),
+                    request_id=str(new_state.get("request_id") or ""),
+                )
+                new_state = {**new_state, "commit_snapshot": snapshot.to_dict(), "streaming_phase": "COMMIT"}
+            except Exception:
+                pass  # 静默降级
+
+        # M38-G：Render Stream 发射（commit_snapshot 存在且验证通过时生成 render_snapshot_ref）
+        commit_snapshot = new_state.get("commit_snapshot")
+        if commit_snapshot is not None:
+            current_intent = str((new_state.get("payload") or {}).get("intent_commit") or "").strip()
+            if self._phase_lock_guard.validate_render_precondition(
+                commit_snapshot=commit_snapshot,
+                current_intent_commit=current_intent,
+            ):
+                try:
+                    render_event = self._render_emitter.render(
+                        commit_snapshot=commit_snapshot,
+                        chunk="",
+                    )
+                    new_state = {**new_state, "render_snapshot_ref": render_event.snapshot_ref, "streaming_phase": "RENDER"}
+                except Exception:
+                    pass  # 静默降级
+            else:
+                # 验证失败：写入降级通知到 presence_events
+                try:
+                    failed_event = self._phase_lock_guard.build_precondition_failed_event(
+                        node_id=node_id,
+                        reason="intent_commit 已变化，Render 前置条件不满足",
+                    )
+                    new_presence = list(new_state.get("presence_events") or []) + [failed_event]
+                    new_state = {**new_state, "presence_events": new_presence}
+                except Exception:
+                    pass  # 静默降级
 
         # M36-K：Evidence Plane 实时写入单节点 trace
         if self._evidence_plane is not None:

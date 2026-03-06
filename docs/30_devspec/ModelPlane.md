@@ -311,7 +311,9 @@
 |------|---------|
 | 只读并行分支 + `branch_manifest` | ✅ M37 已实现（graph_branch.py，只读约束，无副作用）|
 | Transparent Subgraph Evidence Plane 实时写入 | ✅ M37 已实现（子图节点级实时写入）|
-| Presence Stream | 只允许向 UI 单向输出，禁止作为下游节点输入 |
+| Presence Stream（在场流） | ✅ M38 已实现（只向 UI 单向输出，不作为下游节点输入）|
+| Commit Stream（提交流） | ✅ M38 已实现（GOV_OK_RENDER 时产生，含 intent_commit + s1_output_hash）|
+| Render Stream（渲染流） | ✅ M38 已实现（只消费 Commit 快照，PhaseLockGuard 验证）|
 
 **第三档：不建议强求"接近原生体验"**
 
