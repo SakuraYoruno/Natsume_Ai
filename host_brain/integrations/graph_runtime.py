@@ -188,6 +188,11 @@ class GraphRuntimeContract:
             "commit_snapshot": None,
             "render_snapshot_ref": None,
             "streaming_phase": None,
+            # M39-D：Checkpoint 字段初始化
+            "gov_checkpoint_id": None,
+            "interrupt_reason": None,
+            "resume_allowed": None,
+            "resume_deadline_at": None,
         }
         state = compiled.invoke(initial_state)
 
@@ -207,6 +212,131 @@ class GraphRuntimeContract:
             model_calls=list(state.get("model_calls") or []),
             model_profile_id=state.get("model_profile_id"),
             ts_ms=now_value,
+        )
+
+    def resume_graph(
+        self,
+        *,
+        checkpoint_id: str,
+        request_id: str,
+        now_ms: int | None = None,
+    ) -> GraphRunResult:
+        """从 checkpoint 恢复图执行（M39-F）。
+
+        恢复前调用 HostPolicyGuard 验证：
+        - 验证失败时写入 SyntheticTimeoutEvent 并返回 STATUS_FAILED
+        - 验证通过时从 checkpoint 加载 state 并继续执行
+
+        Args:
+            checkpoint_id: checkpoint ID
+            request_id: 请求 ID
+            now_ms: 当前时间戳（毫秒），默认为 now_ms()
+
+        Returns:
+            GraphRunResult（恢复执行结果或 synthetic timeout 结果）
+        """
+        from host_brain.integrations.graph_checkpoint import (
+            CheckpointManager,
+            InterruptSignal,
+            SyntheticTimeoutEvent,
+        )
+        from host_brain.integrations.graph_contract import (
+            INTERRUPT_REASON_HUMAN_REVIEW,
+            RESUME_DENIED_DEADLINE_EXCEEDED,
+        )
+
+        from host_brain.core.ids import now_ms as _now_ms
+        current_ms = int(now_ms if now_ms is not None else _now_ms())
+        manager = CheckpointManager()
+
+        # 1. 加载 checkpoint
+        state = manager.load_state(checkpoint_id)
+        if state is None:
+            return GraphRunResult(
+                status=STATUS_FAILED,
+                reason_code="CHECKPOINT_NOT_FOUND",
+                stage=S_ORCH_RUN,
+                detail=f"checkpoint 不存在: {checkpoint_id}",
+                output={
+                    "request_id": request_id,
+                    "checkpoint_id": checkpoint_id,
+                    "status": STATUS_FAILED,
+                    "reason_code": "CHECKPOINT_NOT_FOUND",
+                },
+            )
+
+        # 2. 构建 InterruptSignal（从 state 中恢复）
+        resume_deadline_at = int(state.get("resume_deadline_at") or (current_ms + 300_000))
+        interrupt_signal = InterruptSignal(
+            checkpoint_id=checkpoint_id,
+            interrupt_reason=str(state.get("interrupt_reason") or INTERRUPT_REASON_HUMAN_REVIEW),
+            interrupted_at_ms=int(state.get("policy_start_ms") or current_ms),
+            resume_deadline_at=resume_deadline_at,
+        )
+        decision = manager.resume(
+            interrupt_signal,
+            now_ms=current_ms,
+            policy_timeout_ms=int(state.get("policy_timeout_ms") or DEFAULT_POLICY_TIMEOUT_MS),
+            policy_start_ms=int(state.get("policy_start_ms") or current_ms),
+        )
+
+        if not decision.allowed:
+            # 验证失败：写入 SyntheticTimeoutEvent
+            synthetic = decision.synthetic_event or SyntheticTimeoutEvent(
+                checkpoint_id=checkpoint_id,
+                error_code=RESUME_DENIED_DEADLINE_EXCEEDED,
+                ts_ms=current_ms,
+            ).to_dict()
+            self._write_evidence(request_id=request_id, state=state)
+            return GraphRunResult(
+                status=STATUS_FAILED,
+                reason_code=str(synthetic.get("error_code") or "RESUME_DENIED"),
+                stage=S_ORCH_RUN,
+                detail=decision.reason,
+                output={
+                    "request_id": request_id,
+                    "checkpoint_id": checkpoint_id,
+                    "status": STATUS_FAILED,
+                    "reason_code": str(synthetic.get("error_code") or "RESUME_DENIED"),
+                    "synthetic_event": synthetic,
+                    "resume_decision": decision.to_dict(),
+                },
+            )
+
+        # 4. 验证通过：从 checkpoint 恢复并继续执行
+        executor = GraphExecutor(
+            handlers=self._handlers,
+            gateway_factory=self._gateway_factory,
+            default_timeout_ms=self.default_timeout_ms,
+            ledger=self.ledger,
+        )
+        compiled = executor.compile_runtime_graph()
+        # 更新 state：清除 checkpoint 中断标记，重置 resume_allowed
+        resumed_state = {
+            **state,
+            "gov_checkpoint_id": checkpoint_id,
+            "resume_allowed": True,
+            "interrupt_reason": None,
+        }
+        final_state = compiled.invoke(resumed_state)
+        self._write_evidence(request_id=request_id, state=final_state)
+
+        return GraphRunResult(
+            status=str(final_state.get("status") or STATUS_OK),
+            reason_code=(str(final_state["reason_code"]).strip() if final_state.get("reason_code") else None),
+            stage=S_ORCH_RUN,
+            detail=str(final_state.get("detail") or "graph resumed"),
+            output={
+                "request_id": request_id,
+                "checkpoint_id": checkpoint_id,
+                "graph_id": str(final_state.get("graph_id") or ""),
+                "graph_status": str(final_state.get("status") or STATUS_OK),
+                "reason_code": final_state.get("reason_code"),
+                "stage": S_ORCH_RUN,
+                "payload": dict(final_state.get("payload") or {}),
+                "graph_trace": list(final_state.get("trace") or []),
+                "resume_decision": decision.to_dict(),
+            },
         )
 
     def _default_gateway_factory(self, **kwargs: Any) -> LlmGatewayContract:
@@ -238,6 +368,16 @@ class GraphRuntimeContract:
             presence_events = list((state or {}).get("presence_events") or [])
             if presence_events:
                 ep.write_stream_events(request_id=request_id, graph_id=graph_id, events=presence_events)
+            # M39-H：写入 checkpoint 信息
+            gov_checkpoint_id = str((state or {}).get("gov_checkpoint_id") or "").strip()
+            if gov_checkpoint_id:
+                ep.write_checkpoint(
+                    checkpoint_id=gov_checkpoint_id,
+                    request_id=request_id,
+                    graph_id=graph_id,
+                    interrupt_reason=str((state or {}).get("interrupt_reason") or ""),
+                    resume_deadline_at=int((state or {}).get("resume_deadline_at") or 0),
+                )
         except Exception:
             pass  # 静默降级，不影响主流程
 

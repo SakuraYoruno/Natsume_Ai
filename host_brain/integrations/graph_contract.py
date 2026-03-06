@@ -58,6 +58,18 @@ STREAM_EVENT_PROGRESS = "PROGRESS"
 # M38-C：Render 前置条件失败事件
 STREAM_EVENT_RENDER_PRECONDITION_FAILED = "RENDER_PRECONDITION_FAILED"
 
+# M39-C：Checkpoint / Interrupt / Resume 常量
+CHECKPOINT_STATUS_SAVED = "SAVED"
+CHECKPOINT_STATUS_LOADED = "LOADED"
+INTERRUPT_REASON_HUMAN_REVIEW = "HUMAN_REVIEW"
+INTERRUPT_REASON_POLICY_TIMEOUT = "POLICY_TIMEOUT"
+INTERRUPT_REASON_AIRLOCK = "AIRLOCK"
+RESUME_DENIED_DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"
+RESUME_DENIED_POLICY_EXPIRED = "POLICY_EXPIRED"
+SYNTHETIC_EVENT_TIMEOUT = "TIMEOUT_SYNTHETIC"
+# M39-C：默认恢复截止时间（5 分钟）
+DEFAULT_RESUME_DEADLINE_MS = 300_000
+
 DEFAULT_MODEL_PLANE_DIR = Path("configs/model_plane")
 
 NodeHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
@@ -116,6 +128,15 @@ class GraphState(TypedDict):
     render_snapshot_ref: str | None
     # streaming_phase：当前流阶段（PRESENCE / COMMIT / RENDER / None）
     streaming_phase: str | None
+    # M39-B：Checkpoint / Interrupt / Resume 字段（ModelPlane.md §10 Rule 6）
+    # gov_checkpoint_id：当前 checkpoint ID（由 CheckpointManager 写入，避免与 LangGraph 保留字段冲突）
+    gov_checkpoint_id: str | None
+    # interrupt_reason：中断原因（HUMAN_REVIEW / POLICY_TIMEOUT / AIRLOCK）
+    interrupt_reason: str | None
+    # resume_allowed：是否允许恢复（由 HostPolicyGuard 写入）
+    resume_allowed: bool | None
+    # resume_deadline_at：恢复截止时间戳（毫秒），超过则写入 SyntheticTimeoutEvent
+    resume_deadline_at: int | None
 
 
 # ---------------------------------------------------------------------------

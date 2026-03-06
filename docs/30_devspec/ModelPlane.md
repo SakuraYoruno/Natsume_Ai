@@ -304,6 +304,9 @@
 | `transparent_subgraph` 审计透明子图 | ✅ M35 已实现（第一阶段）|
 | `dual-clock supervision` 双时钟监督 | ✅ M36 已实现（ExecutionClock + PolicyClock）|
 | Evidence Plane SQLite 写入 | ✅ M36 已实现（graph_evidence.py）|
+| Checkpoint / Interrupt / Resume | ✅ M39 已实现（双时钟模型下断点续跑，HostPolicyGuard 恢复前置检查）|
+| HostPolicyGuard（恢复前置检查） | ✅ M39 已实现（超时时写入 SyntheticTimeoutEvent，不直接恢复）|
+| SyntheticTimeoutEvent | ✅ M39 已实现（TIMEOUT_SYNTHETIC + DEADLINE_EXCEEDED + GOV_FALLBACK_SECONDARY）|
 
 **第二档：可以做，但要严格限域**
 

@@ -110,6 +110,14 @@ class EvidencePlane:
                         chunk TEXT,
                         ts_ms INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        checkpoint_id TEXT PRIMARY KEY,
+                        request_id TEXT NOT NULL,
+                        graph_id TEXT NOT NULL,
+                        interrupt_reason TEXT,
+                        resume_deadline_at INTEGER,
+                        created_at_ms INTEGER NOT NULL
+                    );
                 """)
             self._initialized = True
         except Exception as exc:
@@ -353,6 +361,64 @@ class EvidencePlane:
         except Exception as exc:
             logger.warning("EvidencePlane.query_stream_events 失败: %s", exc)
             return []
+
+    def write_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        request_id: str,
+        graph_id: str,
+        interrupt_reason: str = "",
+        resume_deadline_at: int = 0,
+    ) -> None:
+        """将 checkpoint 信息写入 checkpoints 表（M39-G）。
+
+        Args:
+            checkpoint_id: checkpoint ID
+            request_id: 请求 ID
+            graph_id: 图 ID
+            interrupt_reason: 中断原因
+            resume_deadline_at: 恢复截止时间戳（毫秒）
+        """
+        if not self._initialized:
+            return
+        try:
+            ts_ms = int(time.time() * 1000)
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO checkpoints "
+                    "(checkpoint_id, request_id, graph_id, interrupt_reason, resume_deadline_at, created_at_ms) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        str(checkpoint_id),
+                        str(request_id),
+                        str(graph_id),
+                        str(interrupt_reason),
+                        int(resume_deadline_at),
+                        ts_ms,
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("EvidencePlane.write_checkpoint 失败（静默降级）: %s", exc)
+
+    def query_checkpoint(self, *, checkpoint_id: str) -> dict[str, Any] | None:
+        """查询指定 checkpoint_id 的记录（测试用）。"""
+        if not self._initialized:
+            return None
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT checkpoint_id, request_id, graph_id, interrupt_reason, resume_deadline_at, created_at_ms "
+                    "FROM checkpoints WHERE checkpoint_id = ?",
+                    (str(checkpoint_id),),
+                )
+                row = cursor.fetchone()
+                if row:
+                    cols = ["checkpoint_id", "request_id", "graph_id", "interrupt_reason", "resume_deadline_at", "created_at_ms"]
+                    return dict(zip(cols, row))
+        except Exception as exc:
+            logger.warning("EvidencePlane.query_checkpoint 失败: %s", exc)
+        return None
 
     def query_trace(self, *, request_id: str) -> list[dict[str, Any]]:
         """查询指定 request_id 的 trace 记录（测试用）。"""

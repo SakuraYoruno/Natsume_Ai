@@ -36,6 +36,9 @@ from host_brain.integrations.graph_streaming import (
     PresenceStreamEmitter,
     RenderStreamEmitter,
 )
+from host_brain.integrations.graph_checkpoint import (
+    CheckpointManager,
+)
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
@@ -60,6 +63,8 @@ class GraphExecutor:
         self._commit_emitter = CommitStreamEmitter()
         self._render_emitter = RenderStreamEmitter()
         self._phase_lock_guard = PhaseLockGuard()
+        # M39-E：Checkpoint 管理器
+        self._checkpoint_manager = CheckpointManager()
 
     def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
@@ -79,6 +84,21 @@ class GraphExecutor:
         # AIRLOCK 令牌：安全终止，不执行任何节点
         token = str(state.get("committed_route_token") or "").strip()
         if token == "GOV_AIRLOCK_REVIEW":
+            # M39-E：保存 checkpoint 并写入 InterruptSignal
+            try:
+                from host_brain.integrations.graph_contract import INTERRUPT_REASON_AIRLOCK
+                interrupt_signal = self._checkpoint_manager.interrupt(
+                    dict(state),
+                    interrupt_reason=INTERRUPT_REASON_AIRLOCK,
+                )
+                state = {
+                    **state,
+                    "gov_checkpoint_id": interrupt_signal.checkpoint_id,
+                    "interrupt_reason": interrupt_signal.interrupt_reason,
+                    "resume_deadline_at": interrupt_signal.resume_deadline_at,
+                }
+            except Exception:
+                pass  # 静默降级
             return handle_airlock_pending(state=state, node_id=node_id)
         # GOV_FAIL_FALLBACK：跳转 fallback 链路（不执行当前节点）
         if token == "GOV_FAIL_FALLBACK":

@@ -6327,4 +6327,305 @@ TASK-XXXX 标题
 
 
 
+---
+
+## M39 Checkpoint / Interrupt / Resume（双时钟模型下的断点续跑）
+
+- **里程碑编号**：M39
+- **标题**：Checkpoint / Interrupt / Resume — 双时钟模型下的断点续跑
+- **任务范围**：TASK-0379 ~ TASK-0396（共 18 个任务）
+- **前置依赖**：M38 DONE（Phase-Locked Streaming 三类流隔离）
+- **目标**：
+  1. 实现 `graph_checkpoint.py`：Checkpoint 保存/恢复核心模块，支持 `save_checkpoint`、`load_checkpoint`、`interrupt`、`resume`
+  2. Host Policy Guard：恢复前由 Host 检查 `deadline_at_mono`、`degrade_stage`、`resume_deadline_at`，决定允不允许恢复
+  3. Synthetic Timeout Event：超时时写入 `TIMEOUT_SYNTHETIC` 事件而非直接恢复
+  4. GraphState 新增 checkpoint 相关字段（`checkpoint_id`、`interrupt_reason`、`resume_allowed`、`resume_deadline_at`）
+  5. Evidence Plane 新增 `checkpoints` 表和写入方法
+  6. 专项测试覆盖（T-CKP-01~12 + T-CKP-INT-01~04）
+  7. ModelPlane.md §10 更新实现状态
+
+---
+
+### TASK-0379 M39-A：新建 graph_checkpoint.py（Checkpoint / Interrupt / Resume 核心实现）
+
+- 状态：DONE
+- 任务描述：在 `host_brain/integrations/` 中新建 `graph_checkpoint.py`，实现双时钟模型下的断点续跑。
+  - **CheckpointStore**：内存 + SQLite 双层存储，`save(state) -> checkpoint_id`，`load(checkpoint_id) -> GraphState`
+  - **InterruptSignal**：中断信号数据类（`checkpoint_id`、`interrupt_reason`、`interrupted_at_ms`、`resume_deadline_at`）
+  - **ResumeRequest**：恢复请求数据类（`checkpoint_id`、`requested_at_ms`、`requester`）
+  - **HostPolicyGuard**：Host 策略守卫，恢复前检查 Policy Clock 是否允许恢复（`check_resume_allowed(interrupt_signal, policy_clock) -> ResumeDecision`）
+  - **ResumeDecision**：恢复决策数据类（`allowed`、`reason`、`synthetic_event`）
+  - **SyntheticTimeoutEvent**：超时合成事件（`node_result = TIMEOUT_SYNTHETIC`、`error_code = DEADLINE_EXCEEDED`、`route_token = GOV_FALLBACK_SECONDARY`）
+  - **CheckpointManager**：组合 CheckpointStore + HostPolicyGuard，提供 `interrupt(state) -> InterruptSignal`、`resume(interrupt_signal, policy_clock) -> ResumeDecision`
+- 输入：`GraphState`（含 `policy_start_ms`、`policy_timeout_ms`）。
+- 输出：
+  - `host_brain/integrations/graph_checkpoint.py`（新增）；
+  - `CheckpointStore`：`save(state) -> str`，`load(checkpoint_id) -> GraphState | None`；
+  - `InterruptSignal`：中断信号数据类；
+  - `ResumeRequest`：恢复请求数据类；
+  - `HostPolicyGuard`：`check_resume_allowed(interrupt_signal, now_ms, policy_timeout_ms) -> ResumeDecision`；
+  - `ResumeDecision`：`allowed: bool`，`reason: str`，`synthetic_event: dict | None`；
+  - `SyntheticTimeoutEvent`：`to_dict() -> dict`；
+  - `CheckpointManager`：`interrupt(state) -> InterruptSignal`，`resume(interrupt_signal, policy_clock) -> ResumeDecision`。
+- 验收标准：
+  - `CheckpointStore.save()` 返回唯一 `checkpoint_id`；
+  - `CheckpointStore.load()` 返回保存的 `GraphState`；
+  - `HostPolicyGuard.check_resume_allowed()` 在超过 `resume_deadline_at` 时返回 `allowed=False`；
+  - `HostPolicyGuard.check_resume_allowed()` 在未超时时返回 `allowed=True`；
+  - `ResumeDecision.synthetic_event` 在 `allowed=False` 时包含 `TIMEOUT_SYNTHETIC` 事件；
+  - `CheckpointManager.interrupt()` 保存 checkpoint 并返回 `InterruptSignal`；
+  - `CheckpointManager.resume()` 调用 `HostPolicyGuard` 验证后返回 `ResumeDecision`；
+  - 有完整类型注解。
+- 涉及文件路径：`host_brain/integrations/graph_checkpoint.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 6（Dual-Clock Rule）；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0380 M39-B：GraphState 新增 checkpoint 相关字段
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 checkpoint 相关字段。
+- 输入：现有 `GraphState` TypedDict 定义。
+- 输出：
+  - `GraphState.checkpoint_id: str | None`（当前 checkpoint ID，由 CheckpointManager 写入）；
+  - `GraphState.interrupt_reason: str | None`（中断原因，由 InterruptSignal 写入）；
+  - `GraphState.resume_allowed: bool | None`（是否允许恢复，由 HostPolicyGuard 写入）；
+  - `GraphState.resume_deadline_at: int | None`（恢复截止时间戳（毫秒），由 InterruptSignal 写入）。
+- 验收标准：
+  - `GraphState` 包含 4 个新字段；
+  - 字段有完整类型注解；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0381 M39-C：graph_contract.py 新增 checkpoint 相关常量
+
+- 状态：DONE
+- 任务描述：在 `graph_contract.py` 中新增 Checkpoint / Interrupt / Resume 相关常量。
+- 输入：现有常量定义区域。
+- 输出：
+  - `CHECKPOINT_STATUS_SAVED = "SAVED"` 常量；
+  - `CHECKPOINT_STATUS_LOADED = "LOADED"` 常量；
+  - `INTERRUPT_REASON_HUMAN_REVIEW = "HUMAN_REVIEW"` 常量；
+  - `INTERRUPT_REASON_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量；
+  - `INTERRUPT_REASON_AIRLOCK = "AIRLOCK"` 常量；
+  - `RESUME_DENIED_DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"` 常量；
+  - `RESUME_DENIED_POLICY_EXPIRED = "POLICY_EXPIRED"` 常量；
+  - `SYNTHETIC_EVENT_TIMEOUT = "TIMEOUT_SYNTHETIC"` 常量；
+  - `DEFAULT_RESUME_DEADLINE_MS = 300_000`（默认恢复截止时间：5 分钟）常量。
+- 验收标准：
+  - 常量定义在 `graph_contract.py` 的常量区域；
+  - 在 `graph_checkpoint.py` 中正确导入使用；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0382 M39-D：graph_runtime.py 初始化 checkpoint 字段
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 checkpoint 字段。
+- 输入：现有 `initial_state` 构建逻辑。
+- 输出：`initial_state` 包含 `checkpoint_id = None`、`interrupt_reason = None`、`resume_allowed = None`、`resume_deadline_at = None`。
+- 验收标准：
+  - 4 个 checkpoint 字段正确初始化；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0383 M39-E：graph_executor.py 集成 Interrupt 触发
+
+- 状态：DONE
+- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在 `GOV_AIRLOCK_REVIEW` 令牌触发时，调用 `CheckpointManager.interrupt()` 保存 checkpoint 并写入 `InterruptSignal` 到 state。
+  - 触发条件：`committed_route_token == "GOV_AIRLOCK_REVIEW"`；
+  - 保存 checkpoint 并写入 `checkpoint_id`、`interrupt_reason = INTERRUPT_REASON_AIRLOCK`、`resume_deadline_at`；
+  - 静默降级：checkpoint 保存失败时不影响主图执行。
+- 输入：`CheckpointManager`、`state.committed_route_token`。
+- 输出：`state.checkpoint_id`、`state.interrupt_reason`、`state.resume_deadline_at` 已更新（若 `GOV_AIRLOCK_REVIEW`）。
+- 验收标准：
+  - `GOV_AIRLOCK_REVIEW` 时保存 checkpoint 并写入 `checkpoint_id`；
+  - checkpoint 保存失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0384 M39-F：graph_runtime.py 新增 resume_graph 方法
+
+- 状态：DONE
+- 任务描述：在 `graph_runtime.py` 的 `GraphRuntimeContract` 中新增 `resume_graph` 方法，支持从 checkpoint 恢复图执行。
+  - 恢复前调用 `HostPolicyGuard.check_resume_allowed()` 验证；
+  - 验证失败时写入 `SyntheticTimeoutEvent` 并返回 `STATUS_FAILED`；
+  - 验证通过时从 checkpoint 加载 state 并继续执行；
+  - 恢复后写入 Evidence Plane（checkpoint 恢复记录）。
+- 输入：`checkpoint_id: str`、`request_id: str`。
+- 输出：`GraphRunResult`（恢复执行结果或 synthetic timeout 结果）。
+- 验收标准：
+  - `checkpoint_id` 不存在时返回 `STATUS_FAILED`；
+  - `HostPolicyGuard` 验证失败时返回 `STATUS_FAILED` + `SyntheticTimeoutEvent`；
+  - 验证通过时从 checkpoint 恢复并继续执行；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0385 M39-G：graph_evidence.py 新增 checkpoints 表和写入方法
+
+- 状态：DONE
+- 任务描述：修改 `graph_evidence.py`，新增 `checkpoints` 表和 `write_checkpoint`、`query_checkpoint` 方法。
+- 输入：`InterruptSignal`、`checkpoint_id`、`state`。
+- 输出：
+  - `checkpoints` 表（`checkpoint_id`、`request_id`、`graph_id`、`interrupt_reason`、`interrupted_at_ms`、`resume_deadline_at`、`state_json`）；
+  - `EvidencePlane.write_checkpoint(checkpoint_id, request_id, graph_id, interrupt_signal, state_json)` 方法；
+  - `EvidencePlane.query_checkpoint(checkpoint_id)` 方法（测试用）。
+- 验收标准：
+  - `write_checkpoint` 将 checkpoint 写入 `checkpoints` 表；
+  - 写入失败时静默降级；
+  - `query_checkpoint` 返回正确的 checkpoint 记录；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0386 M39-H：graph_runtime.py 集成 checkpoint 写入 Evidence Plane
+
+- 状态：DONE
+- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.checkpoint_id` 非空，将 checkpoint 信息写入 Evidence Plane。
+- 输入：`state.checkpoint_id`（若非空）、`state.interrupt_reason`、`state.resume_deadline_at`。
+- 输出：`EvidencePlane.write_checkpoint()` 调用（若 `checkpoint_id` 非空）。
+- 验收标准：
+  - `checkpoint_id` 非空时调用 `write_checkpoint`；
+  - 写入失败时静默降级；
+  - 现有测试无回归。
+- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0387 M39-I：Checkpoint / Interrupt / Resume 核心专项测试（T-CKP-01~12）
+
+- 状态：DONE
+- 任务描述：新增 Checkpoint / Interrupt / Resume 核心专项测试，验证双时钟模型下断点续跑的正确性。
+- 输入：`CheckpointStore`、`HostPolicyGuard`、`CheckpointManager`、`SyntheticTimeoutEvent`。
+- 输出：`tests/unit/test_checkpoint_m39.py`（新增）：T-CKP-01~12。
+- 验收标准：
+  - T-CKP-01：CheckpointStore.save() 返回唯一 checkpoint_id；
+  - T-CKP-02：CheckpointStore.load() 返回保存的 GraphState；
+  - T-CKP-03：CheckpointStore.load() 在 checkpoint_id 不存在时返回 None；
+  - T-CKP-04：HostPolicyGuard.check_resume_allowed() 在未超时时返回 allowed=True；
+  - T-CKP-05：HostPolicyGuard.check_resume_allowed() 在超过 resume_deadline_at 时返回 allowed=False；
+  - T-CKP-06：ResumeDecision.synthetic_event 在 allowed=False 时包含 TIMEOUT_SYNTHETIC 事件；
+  - T-CKP-07：SyntheticTimeoutEvent 包含 node_result=TIMEOUT_SYNTHETIC、error_code=DEADLINE_EXCEEDED、route_token=GOV_FALLBACK_SECONDARY；
+  - T-CKP-08：CheckpointManager.interrupt() 保存 checkpoint 并返回 InterruptSignal；
+  - T-CKP-09：CheckpointManager.interrupt() 写入 interrupt_reason 和 resume_deadline_at；
+  - T-CKP-10：CheckpointManager.resume() 在 allowed=True 时返回 ResumeDecision(allowed=True)；
+  - T-CKP-11：CheckpointManager.resume() 在 allowed=False 时返回 ResumeDecision(allowed=False, synthetic_event)；
+  - T-CKP-12：两次 interrupt() 生成不同的 checkpoint_id（唯一性）。
+- 涉及文件路径：`tests/unit/test_checkpoint_m39.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0388 M39-J：graph_executor.py checkpoint 集成测试（T-CKP-INT-01~04）
+
+- 状态：DONE
+- 任务描述：新增 graph_executor.py checkpoint 集成测试，验证 GOV_AIRLOCK_REVIEW 触发 interrupt 的正确集成。
+- 输入：`GraphExecutor._run_single_step`、`committed_route_token = GOV_AIRLOCK_REVIEW`。
+- 输出：`tests/unit/test_checkpoint_executor_integration_m39.py`（新增）：T-CKP-INT-01~04。
+- 验收标准：
+  - T-CKP-INT-01：GOV_AIRLOCK_REVIEW 时 state.checkpoint_id 非空；
+  - T-CKP-INT-02：GOV_AIRLOCK_REVIEW 时 state.interrupt_reason = INTERRUPT_REASON_AIRLOCK；
+  - T-CKP-INT-03：GOV_AIRLOCK_REVIEW 时 state.resume_deadline_at 为合法时间戳；
+  - T-CKP-INT-04：checkpoint 保存失败时静默降级（不影响主图执行）。
+- 涉及文件路径：`tests/unit/test_checkpoint_executor_integration_m39.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0389 M39-K：Evidence Plane checkpoints 写入专项测试（T-EVP-15~17）
+
+- 状态：DONE
+- 任务描述：新增 Evidence Plane checkpoints 写入专项测试。
+- 输入：`EvidencePlane.write_checkpoint`。
+- 输出：`tests/unit/test_evidence_checkpoint_m39.py`（新增）：T-EVP-15~17。
+- 验收标准：
+  - T-EVP-15：write_checkpoint 将 checkpoint 写入 SQLite checkpoints 表；
+  - T-EVP-16：checkpoints 表包含正确的字段（checkpoint_id、interrupt_reason、resume_deadline_at 等）；
+  - T-EVP-17：write_checkpoint 写入失败时静默降级。
+- 涉及文件路径：`tests/unit/test_evidence_checkpoint_m39.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0390 M39-L：resume_graph 集成测试（T-CKP-RES-01~03）
+
+- 状态：DONE
+- 任务描述：新增 resume_graph 集成测试，验证从 checkpoint 恢复图执行的正确性。
+- 输入：`GraphRuntimeContract.resume_graph`。
+- 输出：`tests/unit/test_resume_graph_m39.py`（新增）：T-CKP-RES-01~03。
+- 验收标准：
+  - T-CKP-RES-01：checkpoint_id 不存在时返回 STATUS_FAILED；
+  - T-CKP-RES-02：HostPolicyGuard 验证失败时返回 STATUS_FAILED + synthetic_event；
+  - T-CKP-RES-03：验证通过时从 checkpoint 恢复并继续执行（返回 STATUS_OK 或 STATUS_DEGRADED）。
+- 涉及文件路径：`tests/unit/test_resume_graph_m39.py`（新增）。
+- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+
+### TASK-0391 M39-M：ModelPlane.md §10 更新实现状态
+
+- 状态：DONE
+- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 Checkpoint / Interrupt / Resume 标记为 M39 已实现。
+- 输入：现有 ModelPlane.md §10。
+- 输出：ModelPlane.md §10 能力三档分类表更新（M39 实现项标注 ✅）。
+- 验收标准：
+  - `Checkpoint / Interrupt / Resume` 标注 ✅ M39 已实现；
+  - `HostPolicyGuard（恢复前置检查）` 标注 ✅ M39 已实现；
+  - `SyntheticTimeoutEvent` 标注 ✅ M39 已实现；
+  - 其余后续里程碑项保持不变。
+- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
+
+### TASK-0392 M39-N：graph_contract.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M39 新增 checkpoint 相关常量和字段后，`graph_contract.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0393 M39-O：graph_executor.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M39 新增 checkpoint 集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0394 M39-P：graph_runtime.py 契约测试行数限制更新
+
+- 状态：DONE
+- 任务描述：M39 新增 resume_graph 方法后，`graph_runtime.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试行数限制更新（若超出则调整上限）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0395 M39-Q：graph_checkpoint.py 契约测试（新文件行数限制）
+
+- 状态：DONE
+- 任务描述：为新建的 `graph_checkpoint.py` 添加契约测试，确保文件行数在合理范围内。
+- 输入：现有契约测试 `test_orch_refactor_contract.py`。
+- 输出：契约测试新增 `graph_checkpoint.py` 行数限制（上限 350 行）。
+- 验收标准：契约测试通过；行数限制合理。
+- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（修改）。
+- 关联需求：ModelPlane.md §10。
+
+### TASK-0396 M39-R：M39 代码审查报告
+
+- 状态：DONE
+- 任务描述：TASK-0379~0395 全部 DONE 后，生成 M39 代码审查报告，记录 Checkpoint / Interrupt / Resume 双时钟模型下断点续跑的实现情况。
+- 输入：TASK-0379~0395 全部 DONE；全量测试 0 failed。
+- 输出：`docs/60_trace/code_review_m39_2026-03-06.md`（新增）。
+- 验收标准：
+  - 报告包含 TASK-0379~0395 全部 17 个任务的变更摘要；
+  - 新增测试 ≥ 19 个（T-CKP-01~12 + T-CKP-INT-01~04 + T-EVP-15~17 + T-CKP-RES-01~03），全部通过；
+  - Checkpoint / Interrupt / Resume 完整落地（graph_checkpoint.py）；
+  - HostPolicyGuard 恢复前置检查正确（超时时写入 SyntheticTimeoutEvent）；
+  - ModelPlane.md §10 实现状态更新；
+  - 全量测试无回归。
+- 涉及文件路径：`docs/60_trace/code_review_m39_2026-03-06.md`（新增）。
+- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.4、§6、§11.2。
+
+
+
 
