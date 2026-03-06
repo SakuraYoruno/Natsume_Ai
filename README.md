@@ -372,6 +372,199 @@ Evidence Plane 是 LangGraph 运行时的写入治理层，负责将图执行过
 
 ---
 
+## 🗜️ 上下文压缩（Context Compression）
+
+上下文压缩系统（`host_brain/memory/context_compressor.py`）负责在多轮对话中管理 Token 预算，确保送入 LLM 的上下文始终在可控范围内，同时不丢失关键记忆。
+
+### 三种压缩策略
+
+| 策略 | 说明 | 适用场景 |
+|------|------|----------|
+| **sliding_window** | 保留最近 N 轮，直接截断超出预算的历史 | 短对话 / 低延迟优先 |
+| **summary** | 调用 LLM 将历史轮次生成摘要；LLM 不可用时自动降级为 sliding_window | 长对话 / 摘要质量优先 |
+| **hybrid**（默认） | 保留最近 N 轮（默认 6 轮）+ 对更早历史生成摘要；超出预算时进一步截断 recent | 兼顾近期细节与历史摘要 |
+
+### 压缩数据流
+
+```
+多轮对话 turns
+    │
+    ▼ _normalize_turns()（归一化 role/content）
+    │
+    ├─ strategy == sliding_window → 保留最近 N 轮（token 预算内）
+    │
+    ├─ strategy == summary → LLM 摘要全部历史（不可用时降级）
+    │
+    └─ strategy == hybrid（默认）
+           │
+           ├─ recent = turns[-6:]（保留最近 6 轮）
+           ├─ history = turns[:-6]（历史轮次）
+           │       └─ LLM 摘要 history → summary_text
+           └─ 若 recent + summary 超出预算 → 进一步截断 recent
+    │
+    ▼ CompressedContext（strategy / turns / summary / total_tokens / degraded / reason_code）
+    │
+    ▼ build_evidence_pack()
+           │
+           ├─ 从压缩后 turns 构建 EvidenceCandidate（score 按位置衰减）
+           ├─ 追加 episodic 命中（向量检索结果）
+           └─ EvidencePack（pack_id / hash / candidates / total_tokens）
+```
+
+### 压缩前静默保存（COMPRESS_BEFORE_SAVE）
+
+在 `summary` / `hybrid` 策略执行**前**，系统会将当前对话中的 `user` 和 `assistant` 轮次静默写入 Episodic 记忆库（双声道记忆），确保即将被压缩的内容不会永久丢失：
+
+- `user` 轮次携带 `emotion_tag` 字段（若可用），保留情感上下文
+- 写入失败静默降级，不影响压缩主流程
+- 写入事件记录到 SQLite 审计链（`COMPRESS_BEFORE_SAVE` 事件类型）
+
+### 降级策略
+
+| 场景 | 降级行为 | reason_code |
+|------|----------|-------------|
+| 输入为空 | 返回空 `CompressedContext`，`degraded=True` | `CTX_COMPRESS_INPUT_INVALID` |
+| LLM 摘要不可用 | 自动回退到 `sliding_window` | `CTX_COMPRESS_LLM_UNAVAILABLE` |
+| Token 预算超出 | 进一步截断 recent 轮次 | — |
+
+---
+
+## 🔀 Agent 编排（Graph Runtime）
+
+Agent 编排系统基于 LangGraph 构建，采用**治理运行时契约（Governed Runtime Contract）**，确保图执行过程中的每一步都受 Host 主权约束。
+
+### 编排文件结构
+
+| 文件 | 职责 |
+|------|------|
+| `graph_runtime.py` | 公共 API 入口，组装四层并对外暴露 `run_graph()` |
+| `graph_contract.py` | Schema 验证、共享类型、常量定义、Model Plane 解析 |
+| `graph_executor.py` | LangGraph 步进执行引擎（节点执行 / 边路由 / 票据联动）|
+| `graph_fallback.py` | 超时 / 依赖不可用统一降级处理 |
+| `graph_model_resolve.py` | Model Plane 配置解析与节点路由 |
+| `graph_branch.py` | 只读并行分支执行器（ThreadPoolExecutor + branch_manifest）|
+| `graph_streaming.py` | Phase-Locked Streaming（Presence / Commit / Render 三类流）|
+| `graph_checkpoint.py` | Checkpoint / Interrupt / Resume（双时钟模型下断点续跑）|
+| `graph_evidence.py` | Evidence Plane SQLite 写入（21 张审计表 + 分区索引）|
+| `graph_clock.py` | DualClockSupervisor（Policy Clock / Execution Clock 双时钟）|
+
+### 治理运行时契约（Governed Runtime Contract）
+
+图执行必须遵守以下五项契约规则：
+
+| 规则 | 说明 |
+|------|------|
+| **Route Commitment Rule** | 条件边只能基于 `committed_route_token`（Governor 裁决后产生）跳转，禁止基于 LLM 原始输出直接路由 |
+| **Parallel Branch Pre-Issuance Rule** | 并行分支必须先由 `prepare_parallel_branches()` 签发不可变工单（Branch Manifest），每个分支只能在 envelope 定义范围内执行 |
+| **Transparent Subgraph Rule** | 子图内部节点必须对 Evidence Plane 透明，所有节点级事件实时写入 `subgraph_trace` 表 |
+| **Dual-Clock Rule** | 状态恢复与超时降级分别由 Execution Clock / Policy Clock 管理，超时时写入 `TIMEOUT_SYNTHETIC` 事件而非直接恢复 |
+| **Phase-Locked Streaming Rule** | Presence / Commit / Render 三类流严格隔离，Render 只能消费 committed snapshot，Presence 不能作为下游节点输入 |
+
+### 图执行流程
+
+```
+run_graph(request_id, intent, config)
+    │
+    ▼ validate_graph_config()（契约层校验）
+    │
+    ▼ resolve_model_nodes()（Model Plane 节点路由）
+    │
+    ▼ build_initial_state()（初始化 GraphState）
+    │
+    ▼ GraphExecutor.compile_runtime_graph()
+    │   ┌─────────────────────────────────────────┐
+    │   │  StateGraph                              │
+    │   │  START → step → (route) → step / finish │
+    │   │                  ↓                       │
+    │   │           finish → END                   │
+    │   └─────────────────────────────────────────┘
+    │
+    ▼ _run_single_step()（每步执行）
+    │   ├─ DualClockSupervisor 时钟检查
+    │   ├─ Governor 裁决（committed_route_token）
+    │   ├─ 并行分支执行（run_parallel_branches → branch_manifest）
+    │   │       └─ barrier_join()（fan-in 校验，缺证据则 fail closed）
+    │   ├─ Phase-Locked Streaming 发射
+    │   │       ├─ PresenceStreamEmitter（在场流 → UI）
+    │   │       ├─ CommitStreamEmitter（提交流 → Governor 裁决后）
+    │   │       └─ RenderStreamEmitter + RenderGuard（渲染流 → 只消费 committed snapshot）
+    │   ├─ CheckpointManager（断点保存）
+    │   └─ Evidence Plane 实时写入
+    │
+    ▼ _write_evidence()（图执行完成后汇总写入）
+    │   ├─ llm_call_log（LLM 调用记录）
+    │   ├─ subgraph_trace（子图节点轨迹）
+    │   ├─ barrier_join_log（并行分支 fan-in 结果）
+    │   └─ stream_events（流式事件记录）
+    │
+    ▼ GraphRunResult（status / trace / reason_code / evidence_pack）
+```
+
+### 并行分支执行（Parallel Branches）
+
+```
+prepare_parallel_branches()
+    │ 为每个分支签发不可变工单（Branch Manifest）
+    │   branch_id / target_node / input_digest
+    │   sanitization_report_ref / deadline_at
+    │   allowed_capabilities / audit_ticket_id
+    │
+    ▼ run_parallel_branches()（ThreadPoolExecutor 并行执行）
+    │   ├─ 分支 A（只读，不能写 committed_* 字段）
+    │   ├─ 分支 B（只读，不能写 committed_* 字段）
+    │   └─ 分支 C（只读，不能写 committed_* 字段）
+    │
+    ▼ barrier_join()（fan-in 校验）
+        ├─ 校验所有分支是否存在 audit_commit
+        ├─ 校验 output_digest 与签发时一致
+        ├─ 缺任一证据 → passed=False，fail closed
+        └─ join_policy: strict（任一失败则全失败）/ partial（允许部分失败，记录 join_policy_ref）
+```
+
+**当前开放的并行场景**（只读）：
+- 并行多源检索
+- 并行多模型评审
+- 并行 rerank
+- 并行候选生成
+
+**暂不开放**：带副作用的并行分支（写入外部状态 / 触发 Skill）
+
+### Phase-Locked Streaming（分相流式）
+
+三类流严格隔离，防止未提交状态泄漏到渲染层：
+
+```
+Presence Stream（在场流）
+    │ 非权威，只向 UI 单向输出
+    │ 不允许作为下游节点输入
+    │ 事件类型：NODE_START / NODE_END / PROGRESS / CHUNK
+
+Commit Stream（提交流）
+    │ 权威，只在 Governor 裁决（GOV_OK_RENDER）后产生
+    │ 产生 commit_snapshot（不可变快照）
+
+Render Stream（渲染流）
+    │ 只能消费 commit_snapshot（PhaseLockGuard 前置校验）
+    │ RenderGuard 验证：只允许修改派生字段（render_text / render_html / render_markdown / display_*）
+    │ 不允许修改 locked_fields
+    └─ 违规 → PhaseViolationError / RENDER_GUARD_STATUS_FAILED
+```
+
+### Checkpoint / Interrupt / Resume
+
+双时钟模型下的断点续跑机制：
+
+| 组件 | 说明 |
+|------|------|
+| **Policy Clock** | 管理超时降级（`deadline_at_mono`），超时时写入 `TIMEOUT_SYNTHETIC` 事件 |
+| **Execution Clock** | 管理实际执行时间，与 Policy Clock 独立 |
+| **CheckpointManager** | 保存 / 恢复 GraphState 快照（`save_checkpoint` / `load_checkpoint`）|
+| **HostPolicyGuard** | 恢复前检查 `deadline_at_mono` / `degrade_stage` / `resume_deadline_at`，决定是否允许恢复 |
+| **Interrupt** | 主动中断图执行，写入 `interrupt_reason` 到 GraphState |
+| **Resume** | 从 checkpoint 恢复执行，必须通过 HostPolicyGuard 前置检查 |
+
+---
+
 ## 💜 灵魂构成（Soul Architecture）
 
 Natsume Ai 的"灵魂"由多个相互协作的子系统共同构成，形成一个有记忆、有情感、有人格约束的完整意识体。
