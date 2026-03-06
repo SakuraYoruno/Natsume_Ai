@@ -1,7 +1,7 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.4
+版本：v1.5
 
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
 
@@ -1163,6 +1163,79 @@
 - DevTasks（TASK）：TASK-0264~0282
 - 验收测试（T-xx）：T-BOND-TEXTURE-01~03；T-EPISODIC-EMOTION-01~02；T-EMOTION-PULSE-01~02；T-EMOTION-TRIGGER-01~02；T-EMOTION-TIMELINE-01~02；T-LLM-GEN-PARAM-01~03；T-BOND-RIFT-01~02；T-EMOTION-ECHO-01~02；T-EPISODIC-DECAY-01~02；T-BOND-PAYLOAD-STD-01~02；T-EMOTION-TS-01；T-CP-BOND-STAGE-01~02；T-FALLBACK-EMOTION-01~03；T-SCHED-EMOTION-01~02；T-FUSION-EMOTION-01~02；T-ASR-EMOTION-01~02；T-METRICS-EMOTION-01~02；T-EDGE-REPORTER-EMOTION-01~02
 - 当前进展（2026-03-05）：M29 全部 46 个新增测试通过；全量测试 884 passed，0 failed，零回归；情感体验增强系统覆盖 Edge→Host 完整链路。
+- 覆盖状态：DONE
+
+
+## M41 Evidence Plane 写入压力评估与分级写入优化（R-169~R-175）
+
+## R-169（M41-A Evidence Plane 写入延迟基准测量）
+- 系统级需求：Evidence Plane 写入延迟基准测量工具——`EvidenceBench` 类提供 `measure_write_latency(method, n=1000)` 方法，返回 `{p50, p95, p99, mean, max}` 延迟统计，覆盖 `write_route_token`、`write_branch_manifest`、`write_barrier_join`、`write_render_event` 四个核心写入方法，为分级写入策略提供基准数据
+- PRD 需求编号（FR）：FR-EVP-BENCH-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；DevTasks TASK-0417
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0417
+- 验收测试（T-xx）：T-EVP-BENCH-01~04
+- 当前进展（2026-03-06）：`host_brain/integrations/evidence_bench.py`（EvidenceBench 类）已落地；T-EVP-BENCH-01~04 全部通过。
+- 覆盖状态：DONE
+
+## R-170（M41-B Evidence Plane 写入优先级分级）
+- 系统级需求：Evidence Plane 写入优先级分级枚举——`WritePriority(Enum)` 包含 `CRITICAL`（同步必写）和 `NON_CRITICAL`（可异步）两级；分级规则：`write_route_token`/`write_branch_manifest`/`write_barrier_join` → `CRITICAL`；`write_llm_call`/`write_subgraph_trace`/`write_render_event` → `NON_CRITICAL`；各 `write_*` 方法新增 `priority` 参数
+- PRD 需求编号（FR）：FR-EVP-PRIORITY-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；ModelPlane.md §6；DevTasks TASK-0418
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0418
+- 验收测试（T-xx）：T-EVP-PRI-01~06
+- 当前进展（2026-03-06）：`graph_evidence.py` 新增 `WritePriority` 枚举及各方法 `priority` 参数；T-EVP-PRI-01~06 全部通过。
+- 覆盖状态：DONE
+
+## R-171（M41-C Evidence Plane 异步写入队列）
+- 系统级需求：Evidence Plane 异步写入队列——`EvidenceWriteQueue` 类提供 `enqueue(write_fn, *args, **kwargs)`、`flush(timeout_ms=500)`、`queue_size()` 方法；内部使用 `collections.deque` 缓冲；`NON_CRITICAL` 写入自动路由到队列，`CRITICAL` 写入保持同步直写；队列满时（超过 `max_size`）触发 `flush()` 后再入队
+- PRD 需求编号（FR）：FR-EVP-QUEUE-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；ModelPlane.md §6；DevTasks TASK-0419
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0419
+- 验收测试（T-xx）：T-EVP-QUEUE-01~06
+- 当前进展（2026-03-06）：`host_brain/integrations/evidence_write_queue.py`（EvidenceWriteQueue 类）已落地；`graph_evidence.py` 集成异步路由；T-EVP-QUEUE-01~06 全部通过。
+- 覆盖状态：DONE
+
+## R-172（M41-D Evidence Plane 写入失败熔断机制）
+- 系统级需求：Evidence Plane 写入失败熔断机制——`EvidenceCircuitBreaker` 类实现 `CLOSED`/`OPEN`/`HALF_OPEN` 三态状态机；`failure_threshold`（默认 5）、`recovery_timeout_ms`（默认 10000）可配置；熔断时写入转入内存缓冲 `_memory_buffer`；`HALF_OPEN` 状态允许单次探测写入；`CRITICAL` 写入在 `OPEN` 状态下仍写入内存缓冲不丢失；`get_buffer_snapshot()` 返回缓冲记录
+- PRD 需求编号（FR）：FR-EVP-CB-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；ModelPlane.md §6；DevTasks TASK-0420
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0420
+- 验收测试（T-xx）：T-EVP-CB-01~08
+- 当前进展（2026-03-06）：`host_brain/integrations/evidence_circuit_breaker.py`（EvidenceCircuitBreaker 类）已落地；`graph_evidence.py` 集成熔断保护；T-EVP-CB-01~08 全部通过。
+- 覆盖状态：DONE
+
+## R-173（M41-E Evidence Plane 分区索引优化）
+- 系统级需求：Evidence Plane 分区索引优化——为 `barrier_join_log`（`idx_bjl_run_id`/`idx_bjl_ts`）、`subgraph_trace`（`idx_sgt_run_id`/`idx_sgt_parent_path`）、`llm_call_log`（`idx_lcl_run_id`/`idx_lcl_node_id`）三张高写入量表新增 6 个分区索引；`_ensure_tables()` 重复调用时索引创建幂等（`IF NOT EXISTS`）
+- PRD 需求编号（FR）：FR-EVP-INDEX-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；ModelPlane.md §6；DevTasks TASK-0421
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0421
+- 验收测试（T-xx）：T-EVP-IDX-01~06
+- 当前进展（2026-03-06）：`graph_evidence.py` `_ensure_tables()` 新增 6 个分区索引；T-EVP-IDX-01~06 全部通过。
+- 覆盖状态：DONE
+
+## R-174（M41-F Evidence Plane 写入压力专项测试）
+- 系统级需求：Evidence Plane 写入压力专项测试——验证分级写入策略、熔断机制、异步队列在高并发写入场景下的正确性（mock 模拟，不依赖真实环境）；覆盖 100 次 CRITICAL 同步写入、100 次 NON_CRITICAL 队列写入、混合写入、失败注入熔断、熔断恢复后内存缓冲重放五个场景
+- PRD 需求编号（FR）：FR-EVP-PERF-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；ModelPlane.md §6；DevTasks TASK-0422
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0422
+- 验收测试（T-xx）：T-EVP-PERF-01~05
+- 当前进展（2026-03-06）：`tests/unit/test_evidence_perf_m41.py` 已落地；T-EVP-PERF-01~05 全部通过。
+- 覆盖状态：DONE
+
+## R-175（M41-G/H 契约测试更新 + 代码审查报告）
+- 系统级需求：M41 收口——`graph_evidence.py` 行数超出后契约测试行数限制更新（TASK-0423）；M41 代码审查报告生成（TASK-0424），包含 TASK-0417~0423 全部 7 个任务变更摘要、≥29 个新增测试全部通过、`WritePriority`/`EvidenceWriteQueue`/`EvidenceCircuitBreaker`/分区索引完整落地、全量测试无回归
+- PRD 需求编号（FR）：NFR-MAINT-001
+- 来源：LangGraph_Governed_Runtime_Solution §11.1；DevTasks TASK-0423~0424
+- DevSpec 落点：DevSpec §M41
+- DevTasks（TASK）：TASK-0423；TASK-0424
+- 验收测试（T-xx）：T-EVP-BENCH-01~04；T-EVP-PRI-01~06；T-EVP-QUEUE-01~06；T-EVP-CB-01~08；T-EVP-IDX-01~06；T-EVP-PERF-01~05（全量 ≥29 项）
+- 当前进展（2026-03-06）：契约测试行数限制已更新；`docs/60_trace/code_reviews/code_review_m41_2026-03-06.md` 已生成；全量测试无回归。
 - 覆盖状态：DONE
 
 
