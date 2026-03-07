@@ -235,11 +235,11 @@ cp .env.example .env
 ### 4. 启动本地服务
 
 ```powershell
-# Windows PowerShell - 一键启动 Neo4j + ChromaDB
-.\scripts\runtime\start_local_services.ps1
+# Windows PowerShell - 一键启动 Docker 外置服务（Neo4j + ChromaDB + Redis）
+.\scripts\runtime\start_docker_services.ps1
 
 # 停止
-.\scripts\runtime\stop_local_services.ps1
+.\scripts\runtime\stop_docker_services.ps1
 ```
 
 ### 5. 环境就绪检查

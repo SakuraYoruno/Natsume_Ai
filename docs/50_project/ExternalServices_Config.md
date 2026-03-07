@@ -27,9 +27,10 @@
 覆盖范围：
 
 - `scripts/runtime/start_host_side.ps1`
-- `scripts/runtime/start_local_services.ps1`
+- `scripts/runtime/start_docker_services.ps1`
 - `scripts/runtime/start_edge.ps1`
 - `scripts/runtime/stop_host_side.ps1`
+- `scripts/runtime/stop_docker_services.ps1`
 - `scripts/runtime/check_external_env.py`
 - `scripts/runtime/generate_env_readiness_report.py`
 
@@ -89,7 +90,7 @@
 ### 5.1 启动
 
 ```powershell
-.\scripts\runtime\start_local_services.ps1
+.\scripts\runtime\start_docker_services.ps1
 .\scripts\runtime\start_host_side.ps1
 .\scripts\runtime\start_edge.ps1
 ```
@@ -105,7 +106,7 @@ python scripts/runtime/generate_env_readiness_report.py
 
 ```powershell
 .\scripts\runtime\stop_host_side.ps1
-.\scripts\runtime\stop_local_services.ps1
+.\scripts\runtime\stop_docker_services.ps1
 .\scripts\runtime\stop_edge.ps1
 ```
 

@@ -3,6 +3,11 @@ param(
   [switch]$SkipHost,
   [switch]$SkipEdge,
   [switch]$StopLocalServices,
+  [ValidateSet("docker")]
+  [string]$LocalServicesBackend = "docker",
+  [string]$DockerComposeFile = "",
+  [string]$DockerProjectName = "natsume-ext",
+  [switch]$DockerRemoveVolumes,
 
   [string]$HostEnvFile = "",
   [string]$HostPidFile = "",
@@ -132,7 +137,7 @@ function Invoke-RemoteEdgeStopViaSsh {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $hostStopScript = Join-Path $PSScriptRoot "stop_host_side.ps1"
 $edgeStopScript = Join-Path $PSScriptRoot "stop_edge_side.ps1"
-$localServicesStopScript = Join-Path $PSScriptRoot "stop_local_services.ps1"
+$dockerServicesStopScript = Join-Path $PSScriptRoot "stop_docker_services.ps1"
 
 $hostResult = $null
 $edgeResult = $null
@@ -177,13 +182,12 @@ if (-not $SkipEdge.IsPresent) {
 
 if ($StopLocalServices.IsPresent) {
   try {
-    $localRaw = & $localServicesStopScript
-    $localJson = ($localRaw | Out-String).Trim()
-    if ($localJson) {
-      $localServicesResult = $localJson | ConvertFrom-Json
-    } else {
-      $localServicesResult = @()
+    $dockerArgs = @{
+      ComposeFile = $DockerComposeFile
+      ProjectName = $DockerProjectName
+      RemoveVolumes = [bool]$DockerRemoveVolumes.IsPresent
     }
+    $localServicesResult = Invoke-JsonScript -ScriptPath $dockerServicesStopScript -ArgsMap $dockerArgs
   } catch {
     $errors += "local services stop failed: $($_.Exception.Message)"
   }
@@ -197,6 +201,7 @@ $result = [ordered]@{
   stopped_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   mode = [ordered]@{
     edge_mode = $EdgeMode
+    local_services_backend = $LocalServicesBackend
   }
   host = $hostResult
   edge = $edgeResult

@@ -78,7 +78,7 @@
 ### 4.1 启动链路
 
 ```powershell
-.\scripts\runtime\start_local_services.ps1
+.\scripts\runtime\start_docker_services.ps1
 .\scripts\runtime\start_host_side.ps1
 .\scripts\runtime\start_edge.ps1
 ```

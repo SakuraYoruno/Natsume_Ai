@@ -4,8 +4,11 @@ param(
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
+  [ValidateSet("docker")]
+  [string]$ExternalServicesBackend = "docker",
+  [string]$DockerComposeFile = "",
+  [string]$DockerProjectName = "natsume-ext",
   [int]$WaitSeconds = 40,
-  [string]$Neo4jHome = "",
   [int]$Neo4jWaitSeconds = 45,
   [int]$ChromaWaitSeconds = 30,
   [switch]$ForceRestart,
@@ -148,23 +151,24 @@ if ($Port -le 0) {
 
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
 
-$startLocalScript = Join-Path $PSScriptRoot "start_local_services.ps1"
-if (-not (Test-Path -Path $startLocalScript)) {
-  throw "start_local_services.ps1 not found: $startLocalScript"
+$localServices = $null
+$startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
+if (-not (Test-Path -Path $startDockerScript)) {
+  throw "start_docker_services.ps1 not found: $startDockerScript"
 }
-$localRaw = & $startLocalScript `
+$dockerRaw = & $startDockerScript `
   -EnvFile $EnvFile `
-  -Neo4jHome $Neo4jHome `
+  -ComposeFile $DockerComposeFile `
+  -ProjectName $DockerProjectName `
   -Neo4jWaitSeconds $Neo4jWaitSeconds `
   -ChromaWaitSeconds $ChromaWaitSeconds
-$localJson = ($localRaw | Out-String).Trim()
-$localServices = $null
-if ($localJson) {
+$dockerJson = ($dockerRaw | Out-String).Trim()
+if ($dockerJson) {
   try {
-    $localServices = $localJson | ConvertFrom-Json
+    $localServices = $dockerJson | ConvertFrom-Json
   } catch {
     $localServices = [ordered]@{
-      raw = $localJson
+      raw = $dockerJson
     }
   }
 }
@@ -182,6 +186,7 @@ if (Test-Path -Path $pidFile) {
         pid_file = $pidFile
         host = $BindHost
         port = $Port
+        external_services_backend = $ExternalServicesBackend
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
@@ -210,6 +215,7 @@ if ($null -ne $listeningPid) {
         pid_file = $pidFile
         host = $BindHost
         port = $Port
+        external_services_backend = $ExternalServicesBackend
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
@@ -333,6 +339,7 @@ $result = [ordered]@{
   pid_file = $pidFile
   host = $BindHost
   port = $Port
+  external_services_backend = $ExternalServicesBackend
   health_url = $healthUrl
   env_file = $EnvFile
   stdout_log = $stdoutLog

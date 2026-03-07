@@ -38,7 +38,7 @@ Adopt repository root `.env` as the single runtime configuration source.
 The following now use `.env` first, then `.env.example` fallback:
 
 - `scripts/runtime/start_host_side.ps1`
-- `scripts/runtime/start_local_services.ps1`
+- `scripts/runtime/start_docker_services.ps1`
 - `scripts/runtime/start_edge.ps1`
 - `scripts/runtime/stop_host_side.ps1`
 - `scripts/runtime/check_external_env.py`
