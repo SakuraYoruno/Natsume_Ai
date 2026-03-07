@@ -31,6 +31,7 @@ router = APIRouter(prefix="/obs", tags=["observability"])
 # 9 个 LLM 云节点静态注册表（来自 node_registry.yaml）
 # ---------------------------------------------------------------------------
 _LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
+    "chat_direct_ja":           {"role": "聊天直出",      "provider": "gemini", "model_id": "gemini-2.5-flash"},
     "core_reasoner_primary":    {"role": "主推理",      "provider": "gemini", "model_id": "gemini-2.5-pro"},
     "core_reasoner_secondary":  {"role": "备用推理",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
     "planner_constraints":      {"role": "规划约束",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
@@ -511,3 +512,4 @@ async def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
+

@@ -39,9 +39,8 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
 
     assert len(graph_rows) == 1
     graph = graph_rows[0]
-    # M33：CHAT 场景使用场景路由，active_node_count = 2（primary + renderer）
-    # node_bindings 包含 3 个节点（+secondary fallback），但 edges 只有 1 条
-    # graph_run_trace 记录的是实际执行的节点数（model_calls 数量）
+    # M33：CHAT 场景使用场景路由，active_node_count = 3（primary + consistency + renderer）
+    # graph_run_trace / llm_node_call_log 记录的是本次实际执行节点，而不是全量 9 节点注册表。
     assert graph.get("status") in {"OK", "DEGRADED", "FAILED"}
     nodes_raw = graph.get("nodes_json")
     if isinstance(nodes_raw, str):
@@ -49,10 +48,8 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
     else:
         nodes_value = nodes_raw
     assert isinstance(nodes_value, list)
-    # 实际执行的节点数 >= 1（至少 primary 节点）
+    # 实际执行的节点数 >= 1（至少 primary 节点），且不应退回旧的全量 9 节点视觉混淆。
     assert len(nodes_value) >= 1
-
-    # M33：CHAT 场景 llm_rows 数量 = 实际执行的节点数（不再是固定 9 个）
-    assert len(llm_rows) >= 1
-    # 第一个节点必须是 core_reasoner_primary
-    assert str(llm_rows[0].get("node_id") or "") == "core_reasoner_primary"
+    assert len(llm_rows) == 1
+    assert str(llm_rows[0].get("node_id") or "") == "chat_direct_ja"
+    assert len(llm_rows) < 9

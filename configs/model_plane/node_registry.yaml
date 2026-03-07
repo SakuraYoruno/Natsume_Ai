@@ -4,6 +4,14 @@
 # 约束来源：docs/30_devspec/ModelPlane.md §3.1（9 云节点）
 
 nodes:
+  chat_direct_ja:
+    description: "聊天单节点日文直出（ChatDirect.v1）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.45
+    max_output_tokens: 420
+    node_allowlist_envs: [dev, staging, prod]
+
   core_reasoner_primary:
     description: "主语义推理（CoreDraft.v1）"
     provider: gemini
