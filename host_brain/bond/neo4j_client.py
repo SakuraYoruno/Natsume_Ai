@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -29,6 +30,9 @@ S_NEO4J_PROBE = "S_NEO4J_PROBE"
 
 NEO4J_STATUS_UP = "UP"
 NEO4J_STATUS_DOWN = "DOWN"
+
+DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
+DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
 
 
 @dataclass(frozen=True)
@@ -263,6 +267,109 @@ def build_neo4j_dependency_status(probe_report: Mapping[str, Any]) -> dict[str, 
     }
 
 
+class Neo4jBondClient:
+    """Neo4j driver-backed bond reader for retrieval routes."""
+
+    _EVENTS_QUERY = """
+    MATCH (e:Event)
+    OPTIONAL MATCH (e)-[:ABOUT]->(t:Topic)
+    OPTIONAL MATCH (e)-[:AFFECTS]->(c:CapabilityHint)
+    RETURN
+      e.event_id AS event_id,
+      coalesce(t.topic_id, e.topic_id, "") AS topic_id,
+      coalesce(c.capability_hint, e.capability_hint, "") AS capability_hint,
+      e.evidence_refs AS evidence_refs,
+      e.payload AS payload,
+      e.ts_ms AS ts_ms
+    ORDER BY coalesce(e.ts_ms, 0) DESC
+    LIMIT $limit
+    """
+
+    def __init__(
+        self,
+        *,
+        uri: str,
+        database: str,
+        auth_value: str,
+        pool_size: int,
+        tls_enabled: bool,
+        fetch_limit: int = 256,
+    ) -> None:
+        username, password = _parse_basic_auth(auth_value)
+        try:
+            from neo4j import GraphDatabase  # type: ignore[import-untyped]
+        except Exception as exc:  # pragma: no cover - runtime dependency
+            raise RuntimeError(f"neo4j driver unavailable: {exc}") from exc
+
+        self._database = str(database).strip() or "neo4j"
+        self._fetch_limit = max(1, int(fetch_limit))
+        self._driver = GraphDatabase.driver(
+            str(uri).strip(),
+            auth=(username, password),
+            max_connection_pool_size=max(1, int(pool_size)),
+            encrypted=bool(tls_enabled),
+        )
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return self.fetch_events(limit=self._fetch_limit)
+
+    def fetch_events(self, *, limit: int) -> list[dict[str, Any]]:
+        row_limit = max(1, int(limit))
+        rows: list[dict[str, Any]] = []
+        with self._driver.session(database=self._database) as session:
+            result = session.run(self._EVENTS_QUERY, limit=row_limit)
+            for record in result:
+                payload = record.data() if hasattr(record, "data") else dict(record)
+                normalized = _normalize_bond_event_row(payload)
+                if normalized is not None:
+                    rows.append(normalized)
+        return rows
+
+    def close(self) -> None:
+        try:
+            self._driver.close()
+        except Exception:
+            pass
+
+
+def resolve_neo4j_auth_value(
+    *,
+    auth_ref: str | None,
+    secret_store: Mapping[str, Any] | None = None,
+) -> str:
+    ref = str(auth_ref or "").strip()
+    if not ref:
+        return ""
+    if not ref.startswith("sec://"):
+        return ref
+    store = dict(secret_store or {})
+    if not store:
+        store = _load_json_file(_pick_existing_path(DEFAULT_SECRET_STORE, DEFAULT_SECRET_STORE_FALLBACK))
+    return str(store.get(ref) or "").strip()
+
+
+def build_neo4j_bond_client(
+    *,
+    config: Neo4jRuntimeConfig,
+    secret_store: Mapping[str, Any] | None = None,
+    fetch_limit: int = 256,
+) -> Neo4jBondClient | None:
+    if not config.enabled:
+        return None
+    auth_value = resolve_neo4j_auth_value(auth_ref=config.auth_ref, secret_store=secret_store)
+    if not auth_value:
+        raise RuntimeError("neo4j auth unresolved from BOND_NEO4J_AUTH_REF")
+    return Neo4jBondClient(
+        uri=config.uri,
+        database=config.database,
+        auth_value=auth_value,
+        pool_size=config.pool_size,
+        tls_enabled=config.tls_enabled,
+        fetch_limit=fetch_limit,
+    )
+
+
 class InMemoryNeo4jBondClient:
     """Dependency-free stand-in for Neo4j bond graph contracts."""
 
@@ -444,6 +551,62 @@ class InMemoryNeo4jBondClient:
         }
 
 
+def _parse_basic_auth(value: str) -> tuple[str, str]:
+    username, sep, password = str(value or "").partition(":")
+    if not sep or not username.strip() or not password:
+        raise ValueError("neo4j auth must be 'username:password'")
+    return username.strip(), password
+
+
+def _normalize_bond_event_row(raw: Mapping[str, Any]) -> dict[str, Any] | None:
+    event_id = str(raw.get("event_id") or "").strip()
+    if not event_id:
+        return None
+    payload_raw = raw.get("payload")
+    payload: dict[str, Any] = {}
+    if isinstance(payload_raw, Mapping):
+        payload = dict(payload_raw)
+    elif isinstance(payload_raw, str):
+        text = payload_raw.strip()
+        if text:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, Mapping):
+                payload = dict(parsed)
+    return {
+        "event_id": event_id,
+        "topic_id": str(raw.get("topic_id") or "").strip() or None,
+        "capability_hint": str(raw.get("capability_hint") or "").strip() or None,
+        "evidence_refs": _normalize_string_list(raw.get("evidence_refs")),
+        "payload": payload,
+        "ts_ms": _coerce_non_negative_int(raw.get("ts_ms"), default=0),
+    }
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return [cleaned] if cleaned else []
+    if not isinstance(value, (list, tuple)):
+        return []
+    rows: list[str] = []
+    for item in value:
+        cleaned = str(item or "").strip()
+        if cleaned:
+            rows.append(cleaned)
+    return rows
+
+
+def _coerce_non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return int(default)
+    return max(0, int(parsed))
+
+
 def _normalize_evidence_refs(value: list[str] | tuple[str, ...] | Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
@@ -520,3 +683,22 @@ def _load_constraint_statements(paths: list[str | Path]) -> list[str]:
             if upper.startswith("CREATE CONSTRAINT") or upper.startswith("CREATE INDEX"):
                 statements.append(line + ";")
     return statements
+
+
+def _pick_existing_path(primary: Path, fallback: Path) -> Path:
+    if primary.exists() and primary.is_file():
+        return primary
+    return fallback
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            payload = json.loads(path.read_text(encoding=encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}

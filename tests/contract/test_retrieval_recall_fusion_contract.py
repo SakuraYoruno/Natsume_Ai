@@ -34,12 +34,14 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             "RETR_RECALL_ROUTES_JSON": json.dumps(
                 {
                     "episodic_route": {
+                        "store_id": "episodic_vector",
                         "collection": "episodic",
                         "top_k": 3,
                         "score_weight": 1.0,
                         "node_selector": "host-01",
                     },
                     "canon_route": {
+                        "store_id": "episodic_vector",
                         "collection": "canon",
                         "top_k": 3,
                         "score_weight": 0.8,
@@ -104,12 +106,14 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             "RETR_RECALL_ROUTES_JSON": json.dumps(
                 {
                     "episodic_route": {
+                        "store_id": "episodic_vector",
                         "collection": "episodic",
                         "top_k": 3,
                         "score_weight": 1.0,
                         "node_selector": "host-01",
                     },
                     "missing_route": {
+                        "store_id": "episodic_vector",
                         "collection": "canon_missing",
                         "top_k": 3,
                         "score_weight": 0.7,

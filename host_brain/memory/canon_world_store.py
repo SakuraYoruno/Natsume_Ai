@@ -6,10 +6,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
+from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync
 
 # F-34：跨进程文件锁（R111-1）
 # filelock 为可选依赖；单进程部署时降级为 threading.Lock（已有 _write_lock）
@@ -32,6 +34,9 @@ WORLD_EXECUTION_FACT_TOKENS = (
     "executed",
     "execution complete",
 )
+
+_ROLLBACK_DELETE_RETRY_ATTEMPTS = 4
+_ROLLBACK_DELETE_RETRY_DELAY_S = 0.05
 
 
 @dataclass(frozen=True)
@@ -226,6 +231,12 @@ class WorldCanonStore:
                 "source_path": str(path),
                 "updated_ts": update_ts,
             }
+        )
+        trigger_canon_vector_auto_sync(
+            include_style=False,
+            include_world=True,
+            world_root=self.world_root,
+            reason=f"world_upsert:{doc_id}@v{next_version}",
         )
         return self.get(doc_id)  # type: ignore[return-value]
 
@@ -551,7 +562,12 @@ class WorldCanonStore:
         if base_version == 0:
             # 回滚到初始状态：删除 SSOT 文件
             path = self._doc_path(doc_id)
-            path.unlink(missing_ok=True)
+            lock_path = self._lock_dir / f"{_normalize_doc_id(doc_id)}.lock"
+            if _FILELOCK_AVAILABLE and _FileLock is not None:
+                with _FileLock(str(lock_path), timeout=10):
+                    _unlink_path_with_retry(path)
+            else:
+                _unlink_path_with_retry(path)
             after_hash = ""
             rolled_back_to_version = 0
         else:
@@ -718,3 +734,14 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
 def _contains_execution_claim(text: str) -> bool:
     lowered = text.lower()
     return any(token in lowered for token in WORLD_EXECUTION_FACT_TOKENS)
+
+
+def _unlink_path_with_retry(path: Path) -> None:
+    for attempt in range(1, _ROLLBACK_DELETE_RETRY_ATTEMPTS + 1):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if attempt >= _ROLLBACK_DELETE_RETRY_ATTEMPTS:
+                raise
+            time.sleep(_ROLLBACK_DELETE_RETRY_DELAY_S)

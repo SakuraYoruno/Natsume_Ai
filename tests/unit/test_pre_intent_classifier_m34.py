@@ -15,6 +15,9 @@ from host_brain.app.fastapi_app import (
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
+    ChatRequest,
+    _resolve_chat_retrieval_gate,
+    _resolve_chat_scene_type,
     pre_intent_classifier,
 )
 
@@ -219,3 +222,37 @@ def test_pic_15_classifier_latency_under_1ms():
         pre_intent_classifier(text)
         elapsed_ms = (time.perf_counter() - start) * 1000
         assert elapsed_ms < 1.0, f"pre_intent_classifier({text!r}) 耗时 {elapsed_ms:.3f}ms，超过 1ms 限制"
+
+
+def test_pic_16_chat_defaults_to_scene_chat_when_preclassifier_disabled(monkeypatch):
+    monkeypatch.setenv("HOST_CHAT_ENABLE_PRECLASSIFIER", "false")
+    scene_type, scene_type_source = _resolve_chat_scene_type(
+        request_body=ChatRequest(message="把这句话翻成日语：今天也要加油。")
+    )
+    assert scene_type == SCENE_CHAT
+    assert scene_type_source == "default_chat"
+
+
+def test_pic_17_chat_allows_preclassifier_when_enabled(monkeypatch):
+    monkeypatch.setenv("HOST_CHAT_ENABLE_PRECLASSIFIER", "true")
+    scene_type, scene_type_source = _resolve_chat_scene_type(
+        request_body=ChatRequest(message="把这句话翻成日语：今天也要加油。")
+    )
+    assert scene_type == SCENE_WORK_TRANSLATE
+    assert scene_type_source == "pre_classifier"
+
+
+def test_pic_18_chat_retrieval_can_be_disabled_for_chat(monkeypatch):
+    monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "true")
+    monkeypatch.setenv("HOST_CHAT_DISABLE_RETRIEVAL", "true")
+    enabled, reason_code = _resolve_chat_retrieval_gate(scene_type=SCENE_CHAT)
+    assert enabled is False
+    assert reason_code == "HOST_CHAT_RETRIEVAL_DISABLED"
+
+
+def test_pic_19_non_chat_retrieval_not_blocked_by_chat_flag(monkeypatch):
+    monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "true")
+    monkeypatch.setenv("HOST_CHAT_DISABLE_RETRIEVAL", "true")
+    enabled, reason_code = _resolve_chat_retrieval_gate(scene_type=SCENE_WORK_TRANSLATE)
+    assert enabled is True
+    assert reason_code is None

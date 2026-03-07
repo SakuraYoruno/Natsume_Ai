@@ -161,6 +161,31 @@ def test_sessions_pagination(client):
     assert len(data["items"]) <= 1
 
 
+def test_sessions_can_find_rows_beyond_default_fetch_limit(client, ledger):
+    """Regression: session query should not silently truncate to first 100 rows."""
+    now = int(time.time() * 1000)
+    for i in range(120):
+        ledger.log_governor({
+            "request_id": f"req-many-{i:03d}",
+            "thread_id": f"tm{i:03d}",
+            "turn_id": f"um{i:03d}",
+            "intent_id": f"im{i:03d}",
+            "decision": "APPROVE",
+            "reason_code": None,
+            "rule_trace": None,
+            "tokens": None,
+            "snapshot_refs": None,
+            "stage": "S_GOVERNOR",
+            "ts_ms": now - i,
+        })
+
+    resp = client.get("/obs/sessions?window_minutes=10080&keyword=req-many-119")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["request_id"] == "req-many-119"
+
+
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------

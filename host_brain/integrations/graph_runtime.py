@@ -1,11 +1,6 @@
-"""Graph orchestration runtime: thin entry point assembling contract/executor/fallback layers.
-
-This module is the public API for graph orchestration. It delegates to:
-- graph_contract: config validation, model node resolution, shared types
-- graph_executor: step-by-step node execution via LangGraph
-- graph_fallback: degradation / timeout / dependency-down handling
-
-All public symbols are re-exported for backward compatibility.
+"""Graph orchestration runtime facade.
+Delegates to graph_contract, graph_executor, and graph_fallback.
+Public symbols remain re-exported for backward compatibility.
 """
 
 from __future__ import annotations
@@ -114,8 +109,9 @@ class GraphRuntimeContract:
         # 2. 契约层：解析模型节点
         timeout_limit = int(timeout_ms if timeout_ms is not None else self.default_timeout_ms)
         node_bindings = {str(node["node_id"]): dict(node) for node in graph_config.get("node_bindings", [])}
-        edge_map = build_edge_map(graph_config.get("edges", []))
-        fallback_map = build_edge_map(graph_config.get("fallback_edges", []))
+        edges = [dict(row) for row in graph_config.get("edges", []) if isinstance(row, Mapping)]
+        fallback_edges = [dict(row) for row in graph_config.get("fallback_edges", []) if isinstance(row, Mapping)]
+        edge_map, fallback_map = build_edge_map(edges + fallback_edges), build_edge_map(fallback_edges)
 
         model_profile_id = pick_model_profile_id(graph_config)
         try:
@@ -152,11 +148,50 @@ class GraphRuntimeContract:
         policy_timeout_ms = int(
             graph_config.get("policy_timeout_ms") or timeout_limit or DEFAULT_POLICY_TIMEOUT_MS
         )
+        payload_dict = dict(payload or {})
+        payload_emotion_raw = payload_dict.get("emotion_context")
+        emotion_context: dict[str, Any] = {}
+        if isinstance(payload_emotion_raw, Mapping):
+            emotion_context = dict(payload_emotion_raw)
+        else:
+            top_level_mood = payload_dict.get("mood_state")
+            top_level_emotion = payload_dict.get("emotion_tag")
+            top_level_hint = payload_dict.get("emotion_range_hint")
+            if any(
+                str(value or "").strip()
+                for value in (top_level_mood, top_level_emotion, top_level_hint)
+            ):
+                emotion_context = {
+                    "mood_state": top_level_mood,
+                    "emotion_tag": top_level_emotion,
+                    "emotion_range_hint": top_level_hint,
+                }
+        if emotion_context:
+            emotion_context = {
+                "mood_state": str(emotion_context.get("mood_state") or "steady").strip().lower() or "steady",
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
+                "emotion_range_hint": str(emotion_context.get("emotion_range_hint") or "").strip(),
+            }
+        mood_state = (
+            str(emotion_context.get("mood_state") or "").strip().lower()
+            if emotion_context
+            else None
+        )
+        emotion_tag = (
+            str(emotion_context.get("emotion_tag") or "").strip().upper()
+            if emotion_context
+            else None
+        )
+        emotion_range_hint = (
+            str(emotion_context.get("emotion_range_hint") or "").strip()
+            if emotion_context
+            else None
+        )
         initial_state: GraphState = {
             "request_id": request_id,
             "graph_id": str(graph_config.get("graph_id") or ""),
             "timeout_ms": timeout_limit,
-            "payload": dict(payload or {}),
+            "payload": payload_dict,
             "trace": [],
             "status": STATUS_OK,
             "reason_code": None,
@@ -169,10 +204,14 @@ class GraphRuntimeContract:
             "model_nodes": model_nodes,
             "model_profile_id": model_profile_id,
             "model_calls": [],
+            "emotion_context": (emotion_context or None),
+            "emotion_tag": emotion_tag,
+            "mood_state": mood_state,
+            "emotion_range_hint": emotion_range_hint,
             # M35-B：从 payload 提取 Governor 已编译的 committed_route_token
             # 由 fastapi_app.py 在 Governor 裁决后、调用 run_graph 前注入
-            "committed_route_token": str((dict(payload or {})).get("committed_route_token") or "").strip() or None,
-            "committed_route_token_detail": (dict(payload or {})).get("committed_route_token_detail") or None,
+            "committed_route_token": str(payload_dict.get("committed_route_token") or "").strip() or None,
+            "committed_route_token_detail": payload_dict.get("committed_route_token_detail") or None,
             # M35-A：透明子图节点执行追踪（初始为空列表）
             "subgraph_trace": [],
             # M36-C：双时钟字段初始化

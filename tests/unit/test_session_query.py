@@ -101,3 +101,28 @@ def test_session_query_empty_result():
     assert result["total"] == 0
     assert result["items"] == []
     assert "timestamp" in result
+
+
+def test_session_query_fetches_all_pages_with_keyword_args():
+    first_page = _make_rows(10_000, id_offset=0)
+    second_page = _make_rows(1, id_offset=10_000)
+    ledger = MagicMock()
+    ledger.fetch_by_time_range.side_effect = [first_page, second_page]
+
+    svc = SessionQueryService(ledger)
+    result = svc.query(page=1, page_size=20)
+
+    assert result["total"] == 10_001
+    assert ledger.fetch_by_time_range.call_count == 2
+
+    first_call = ledger.fetch_by_time_range.call_args_list[0]
+    second_call = ledger.fetch_by_time_range.call_args_list[1]
+
+    for call in (first_call, second_call):
+        assert "start_ms" in call.kwargs
+        assert "end_ms" in call.kwargs
+        assert "limit" in call.kwargs
+        assert "offset" in call.kwargs
+
+    assert first_call.kwargs["offset"] == 0
+    assert second_call.kwargs["offset"] == 10_000

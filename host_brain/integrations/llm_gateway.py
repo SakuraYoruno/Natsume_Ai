@@ -9,6 +9,8 @@ M24-A 扩展：
 from __future__ import annotations
 
 from dataclasses import dataclass
+from queue import Empty, Queue
+from threading import Thread
 from time import perf_counter
 import json
 import os
@@ -46,6 +48,47 @@ PROVIDER_DISABLED = "disabled"
 ProviderFn = Callable[[dict[str, Any]], Any]
 EgressGateFn = Callable[..., EgressGateResult]
 IngressQuarantineFn = Callable[..., IngressQuarantineResult]
+_API_KEY_UNSET = object()
+
+
+def _invoke_provider_with_timeout(
+    *,
+    provider: ProviderFn,
+    payload: dict[str, Any],
+    timeout_ms: int,
+) -> Any:
+    """Run provider behind a hard wall-clock timeout.
+
+    SDK-level timeouts are not consistently enforced across all upstream
+    providers, so the gateway must enforce a deterministic upper bound itself.
+    """
+    if int(timeout_ms) <= 0:
+        return provider(payload)
+
+    result_queue: Queue[tuple[bool, Any]] = Queue(maxsize=1)
+
+    def _target() -> None:
+        try:
+            result_queue.put((True, provider(payload)))
+        except Exception as exc:  # pragma: no cover - re-raised on caller thread
+            result_queue.put((False, exc))
+
+    worker = Thread(
+        target=_target,
+        name="llm-gateway-provider",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(max(1, int(timeout_ms)) / 1000.0)
+    if worker.is_alive():
+        raise TimeoutError(f"provider hard timeout>{int(timeout_ms)}ms")
+    try:
+        ok, value = result_queue.get_nowait()
+    except Empty as exc:  # pragma: no cover - defensive
+        raise RuntimeError("provider worker finished without returning a result") from exc
+    if ok:
+        return value
+    raise value
 
 
 @dataclass(frozen=True)
@@ -95,7 +138,7 @@ class LlmGatewayContract:
         ledger: SQLiteLedger | None = None,
         provider: ProviderFn | None = None,
         provider_name: str = PROVIDER_OPENAI,
-        api_key: str | None = None,
+        api_key: str | None | object = _API_KEY_UNSET,
         available: bool = True,
         timeout_ms: int = 30_000,
         egress_gate_fn: EgressGateFn | None = None,
@@ -107,7 +150,7 @@ class LlmGatewayContract:
         self.provider = provider or _default_mock_provider
         self.provider_name = str(provider_name or PROVIDER_OPENAI).strip().lower()
         # M24-A：优先从环境变量读取 API Key（不硬编码）
-        self.api_key = api_key or _load_api_key_from_env(self.provider_name)
+        self.api_key = _load_api_key_from_env(self.provider_name) if api_key is _API_KEY_UNSET else api_key
         self.available = bool(available)
         self.timeout_ms = int(timeout_ms)
         self.egress_gate_fn = egress_gate_fn or sanitize_and_gate_egress
@@ -155,7 +198,11 @@ class LlmGatewayContract:
         probe_payload = {"probe": True, "request_id": req_id, "ts_ms": now_value}
         start = perf_counter()
         try:
-            self.provider(probe_payload)
+            _invoke_provider_with_timeout(
+                provider=self.provider,
+                payload=probe_payload,
+                timeout_ms=self.timeout_ms,
+            )
             latency_ms = int(round((perf_counter() - start) * 1000))
             return LLMHealthProbeResult(
                 model_id=self.provider_name,
@@ -364,7 +411,11 @@ class LlmGatewayContract:
 
         start = perf_counter()
         try:
-            raw_response = self.provider(dict(egress.payload))
+            raw_response = _invoke_provider_with_timeout(
+                provider=self.provider,
+                payload=dict(egress.payload),
+                timeout_ms=self.timeout_ms,
+            )
         except TimeoutError:
             latency_ms = int(round((perf_counter() - start) * 1000))
             return self._degrade(

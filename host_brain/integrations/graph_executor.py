@@ -344,6 +344,22 @@ class GraphExecutor:
             provider_name=provider_name,
             api_key=pick_api_key(state=state, provider_name=provider_name, model_node_id=model_node_id),
             available=bool(model_node.get("available", True)), timeout_ms=timeout_value)
+        emotion_context_raw = state.get("emotion_context")
+        emotion_context = (
+            dict(emotion_context_raw)
+            if isinstance(emotion_context_raw, Mapping)
+            else {}
+        )
+        if not emotion_context and (
+            str(state.get("mood_state") or "").strip()
+            or str(state.get("emotion_tag") or "").strip()
+            or str(state.get("emotion_range_hint") or "").strip()
+        ):
+            emotion_context = {
+                "mood_state": state.get("mood_state"),
+                "emotion_tag": state.get("emotion_tag"),
+                "emotion_range_hint": state.get("emotion_range_hint"),
+            }
 
         result = gateway.generate(
             request_id=str(state.get("request_id") or ""),
@@ -352,7 +368,8 @@ class GraphExecutor:
                             "task": str(binding.get("task") or node_id), "input": dict(state.get("payload") or {}),
                             "model": {"provider": provider_name, "model_id": str(model_node.get("model_id") or ""),
                                       "temperature": model_node.get("temperature"), "max_output_tokens": model_node.get("max_output_tokens"),
-                                      "timeout_ms": timeout_value}})
+                                      "timeout_ms": timeout_value}},
+            emotion_context=(emotion_context or None))
 
         actual_hash = build_model_param_hash(provider=provider_name, model_id=str(model_node.get("model_id") or ""),
                                              temperature=model_node.get("temperature"), max_output_tokens=model_node.get("max_output_tokens"), timeout_ms=timeout_value)

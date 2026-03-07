@@ -61,14 +61,30 @@ class EvidencePackServiceContract:
         final_degraded = bool(degraded) or upstream_degraded
         final_reason = reason_code or upstream_reason
 
-        if not merged_query or not normalized_topk:
+        if not merged_query:
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 query=merged_query,
                 topk=normalized_topk,
                 reason_code=RETR_EPACK_INPUT_INVALID,
-                detail="evidence pack input invalid: query and topk are required",
+                detail="evidence pack input invalid: query is required",
+                ts_ms=now_value,
+            )
+        if not normalized_topk:
+            reason_for_empty_topk = str(final_reason or "").strip() or RETR_EPACK_INPUT_INVALID
+            detail_for_empty_topk = (
+                "evidence pack skipped: empty topk from upstream degraded stage"
+                if final_reason
+                else "evidence pack input invalid: topk is required"
+            )
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                query=merged_query,
+                topk=normalized_topk,
+                reason_code=reason_for_empty_topk,
+                detail=detail_for_empty_topk,
                 ts_ms=now_value,
             )
 
