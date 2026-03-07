@@ -150,6 +150,21 @@ def validate_event(raw: dict[str, Any]) -> tuple[EventReportItem | None, str | N
     elif not isinstance(payload, dict):
         payload = {}
 
+    raw_emotion_tag = raw.get("emotion_tag")
+    if raw_emotion_tag is None:
+        raw_emotion_tag = payload.get("emotion_tag")
+    emotion_tag = str(raw_emotion_tag or "").strip().upper() or None
+
+    raw_emotion_intensity = raw.get("emotion_intensity")
+    if raw_emotion_intensity is None:
+        raw_emotion_intensity = payload.get("emotion_intensity")
+    emotion_intensity: float | None = None
+    if raw_emotion_intensity is not None:
+        try:
+            emotion_intensity = max(0.0, min(1.0, float(raw_emotion_intensity)))
+        except (TypeError, ValueError):
+            emotion_intensity = None
+
     return EventReportItem(
         event_type=event_type,
         ts_ms=int(ts_ms),
@@ -164,6 +179,8 @@ def validate_event(raw: dict[str, Any]) -> tuple[EventReportItem | None, str | N
         stage=str(raw.get("stage") or "").strip() or None,
         detail=str(raw.get("detail") or "").strip() or None,
         evidence_ref=str(raw.get("evidence_ref") or "").strip() or None,
+        emotion_tag=emotion_tag,
+        emotion_intensity=emotion_intensity,
     ), None
 
 
@@ -481,3 +498,47 @@ class EdgeEventReporter:
             "total_retried": self._total_retried,
             "cache": self.cache.health(),
         }
+
+
+def build_http_transport(
+    *,
+    host_url: str,
+    timeout_s: float = 3.0,
+) -> Any:
+    endpoint = f"{str(host_url or '').rstrip('/')}/v1/edge/events"
+    resolved_timeout_s = max(0.1, float(timeout_s))
+
+    def _transport(events: list[dict[str, Any]]) -> BatchReportResult:
+        import urllib.request
+
+        payload = json.dumps({"events": events}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "NatsumeEdgeEventReporter/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=resolved_timeout_s) as response:
+            body = response.read()
+            parsed = json.loads(body.decode("utf-8")) if body else {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        return BatchReportResult(
+            success=bool(parsed.get("success", False)),
+            total=int(parsed.get("total", len(events))),
+            accepted=int(parsed.get("accepted", 0)),
+            rejected=int(parsed.get("rejected", len(events))),
+            reason_code=str(parsed.get("reason_code") or "").strip() or None,
+            detail=str(parsed.get("detail") or f"edge events posted to {endpoint}").strip() or None,
+            rejected_indices=[
+                int(item)
+                for item in list(parsed.get("rejected_indices") or [])
+                if isinstance(item, int)
+            ],
+        )
+
+    return _transport

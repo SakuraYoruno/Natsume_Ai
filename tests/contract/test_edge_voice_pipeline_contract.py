@@ -152,6 +152,41 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         self.assertEqual(1, len(sent))
         self.assertEqual(VOICE_SCHEMA_INVALID, sent[0]["reason_code"])
 
+    def test_t_edge_voice_01_asr_emotion_fields_reported(self) -> None:
+        sent: list[dict[str, Any]] = []
+
+        def _transport(events: list[dict[str, Any]]) -> BatchReportResult:
+            sent.extend(events)
+            return _success_batch(len(events))
+
+        reporter = EdgeEventReporter(transport_fn=_transport, max_retry=1)
+        rpc = VoiceRpcContract(asr_min_interval_ms=0)
+        queue = SpeechPlaybackQueue(rpc=rpc)
+        pipeline = EdgeVoicePipeline(
+            voice_rpc=rpc,
+            speech_queue=queue,
+            event_reporter=reporter,
+        )
+
+        result = pipeline.asr_chunk(
+            request_id="req_edge_emotion_001",
+            payload={
+                "session_id": "sess_edge_emotion_001",
+                "text": "今天真的好开心！",
+                "seq": 1,
+                "confidence": 0.96,
+                "final": True,
+            },
+            ts_ms=1_800_102_300_000,
+        )
+
+        self.assertTrue(result.success, msg=result)
+        self.assertEqual(1, len(sent))
+        self.assertEqual("HAPPY", sent[0]["emotion_tag"])
+        self.assertGreater(float(sent[0]["emotion_intensity"]), 0.2)
+        self.assertEqual("HAPPY", sent[0]["payload"]["emotion_tag"])
+        self.assertEqual(sent[0]["emotion_intensity"], sent[0]["payload"]["emotion_intensity"])
+
     def test_t_edge_voice_02_barge_in_interrupts_and_vts_resets(self) -> None:
         fixture = _load_json(FIXTURES / "good" / "barge_in_vts_linkage_accept.json")
         vts = _MockVtsDriver()

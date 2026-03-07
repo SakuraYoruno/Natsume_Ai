@@ -15,6 +15,7 @@ from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
+from edge_client.runtime.emotion_inference import infer_asr_emotion
 from host_brain.core.errors import VOICE_INTERRUPTED
 from host_brain.core.ids import now_ms
 
@@ -208,6 +209,26 @@ class EdgeVoicePipeline:
         session_id = str(event.get("session_id") or "").strip()
         if not session_id:
             return None
+        emotion_report = self._resolve_asr_emotion_report(event)
+        payload = {
+            **event,
+            **self._resource_metrics(),
+        }
+        emotion_tag = str(emotion_report.get("emotion_tag") or "").strip().upper() or None
+        emotion_intensity = emotion_report.get("emotion_intensity")
+        if emotion_tag:
+            payload["emotion_tag"] = emotion_tag
+        if isinstance(emotion_intensity, (int, float)):
+            payload["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
+        mood_state = str(emotion_report.get("mood_state") or "").strip().lower()
+        if mood_state:
+            payload["mood_state"] = mood_state
+        emotion_source = str(emotion_report.get("emotion_source") or "").strip()
+        if emotion_source:
+            payload["emotion_source"] = emotion_source
+        matched_terms = emotion_report.get("matched_terms")
+        if isinstance(matched_terms, list) and matched_terms:
+            payload["emotion_terms"] = list(matched_terms)
 
         report_event = {
             "event_type": EVENT_ASR_CHUNK,
@@ -221,11 +242,12 @@ class EdgeVoicePipeline:
             "reason_code": rpc_result.reason_code,
             "stage": rpc_result.stage,
             "detail": rpc_result.detail,
-            "payload": {
-                **event,
-                **self._resource_metrics(),
-            },
+            "payload": payload,
         }
+        if emotion_tag:
+            report_event["emotion_tag"] = emotion_tag
+        if isinstance(emotion_intensity, (int, float)):
+            report_event["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
         return self.event_reporter.report([report_event])
 
     def _resource_metrics(self) -> dict[str, Any]:
@@ -244,3 +266,23 @@ class EdgeVoicePipeline:
             "queue_depth": queue_depth,
         }
 
+    def _resolve_asr_emotion_report(self, event: dict[str, Any]) -> dict[str, Any]:
+        explicit_tag = str(event.get("emotion_tag") or "").strip().upper()
+        explicit_intensity = event.get("emotion_intensity")
+        if explicit_tag:
+            report = {
+                "emotion_tag": explicit_tag,
+                "emotion_source": "edge_explicit",
+                "mood_state": str(event.get("mood_state") or "").strip().lower() or "steady",
+                "matched_terms": [],
+            }
+            if isinstance(explicit_intensity, (int, float)):
+                report["emotion_intensity"] = max(0.0, min(1.0, float(explicit_intensity)))
+            else:
+                report["emotion_intensity"] = 0.5
+            return report
+        return infer_asr_emotion(
+            text=str(event.get("text") or ""),
+            confidence=event.get("confidence") if isinstance(event.get("confidence"), (int, float)) else None,
+            final=bool(event.get("final", False)),
+        )

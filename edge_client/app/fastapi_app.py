@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import inspect
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
@@ -12,7 +13,14 @@ from fastapi.responses import JSONResponse
 from edge_client.app.schemas import EdgeRpcEnvelope, EdgeRpcResponse, parse_edge_rpc_envelope
 from edge_client.config import EdgeConfig, load_edge_config
 from edge_client.rpc.auth import NonceReplayCache, validate_edge_rpc_auth
-from edge_client.runtime import EdgeRuntime, build_edge_health_snapshot, build_edge_runtime
+from edge_client.runtime import (
+    EdgeRuntime,
+    bootstrap,
+    build_edge_health_snapshot,
+    collect_health,
+    shutdown as runtime_shutdown,
+    startup as runtime_startup,
+)
 from host_brain.core.errors import (
     CONFIG_VALUE_INVALID,
     EDGE_RPC_SCHEMA_INVALID,
@@ -39,6 +47,8 @@ class EdgeGatewayResult:
 
 
 EnvelopeHandler = Callable[[EdgeRuntime, EdgeRpcEnvelope], EdgeGatewayResult]
+LifecycleHook = Callable[[EdgeRuntime], Any]
+HealthCollector = Callable[[EdgeRuntime], dict[str, Any]]
 
 
 def create_edge_fastapi_app(
@@ -47,6 +57,9 @@ def create_edge_fastapi_app(
     runtime: EdgeRuntime | None = None,
     replay_cache: NonceReplayCache | None = None,
     now_fn: Callable[[], int] | None = None,
+    startup_hook: LifecycleHook | None = None,
+    shutdown_hook: LifecycleHook | None = None,
+    health_collector: HealthCollector | None = None,
 ) -> FastAPI:
     runtime_config = config
     if runtime_config is None:
@@ -55,16 +68,22 @@ def create_edge_fastapi_app(
             raise RuntimeError(f"edge config load failed: {loaded.as_dict()}")
         runtime_config = loaded.config
 
-    runtime_value = runtime or build_edge_runtime(runtime_config)
+    runtime_value = runtime or bootstrap(runtime_config)
     replay_value = replay_cache or NonceReplayCache(
         window_ms=runtime_config.rpc_nonce_window_ms
     )
     clock = now_fn or now_ms
+    startup_runner = startup_hook or runtime_startup
+    shutdown_runner = shutdown_hook or runtime_shutdown
+    health_runner = health_collector or collect_health
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
-        yield
-        runtime_value.close()
+        await _run_lifecycle_hook(startup_runner, runtime_value)
+        try:
+            yield
+        finally:
+            await _run_lifecycle_hook(shutdown_runner, runtime_value)
 
     app = FastAPI(
         title="Natsume Edge RPC Gateway",
@@ -80,7 +99,12 @@ def create_edge_fastapi_app(
 
     @app.get("/v1/edge/health")
     async def edge_health() -> dict[str, Any]:
-        health = build_edge_health_snapshot(runtime_value, ts_ms=int(clock()))
+        snapshot_ts = int(clock())
+        collected = _run_health_collector(health_runner, runtime_value, ts_ms=snapshot_ts)
+        health = build_edge_health_snapshot(runtime_value, ts_ms=snapshot_ts)
+        for key in ("status", "timestamp", "components", "resource_gate"):
+            if key in collected:
+                health[key] = collected[key]
         return _response(
             success=True,
             status=STATUS_ACCEPTED,
@@ -492,10 +516,29 @@ def _response(
     ).as_dict()
 
 
+async def _run_lifecycle_hook(hook: LifecycleHook, runtime: EdgeRuntime) -> None:
+    outcome = hook(runtime)
+    if inspect.isawaitable(outcome):
+        await outcome
+
+
+def _run_health_collector(
+    collector: HealthCollector,
+    runtime: EdgeRuntime,
+    *,
+    ts_ms: int,
+) -> dict[str, Any]:
+    try:
+        payload = collector(runtime, ts_ms=ts_ms)  # type: ignore[misc]
+    except TypeError:
+        payload = collector(runtime)
+    return dict(payload) if isinstance(payload, dict) else {"status": "degraded"}
+
+
 def build_edge_app_from_env() -> FastAPI:
     loaded = load_edge_config()
     if not loaded.success or loaded.config is None:
         reason = loaded.reason_code or CONFIG_VALUE_INVALID
         raise RuntimeError(f"edge config invalid [{reason}]: {loaded.as_dict()}")
-    runtime = build_edge_runtime(loaded.config)
+    runtime = bootstrap(loaded.config)
     return create_edge_fastapi_app(config=loaded.config, runtime=runtime)

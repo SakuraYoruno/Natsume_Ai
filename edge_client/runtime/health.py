@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from host_brain.core.ids import now_ms
@@ -12,100 +13,257 @@ from edge_client.runtime.bootstrap import EdgeRuntime
 S_EDGE_HEALTH = "S_EDGE_HEALTH"
 
 
-def build_edge_health_snapshot(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
+def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
     snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
-    queue_depth = int(runtime.speech_queue.queue_depth)
-    gate_snapshot = (
-        runtime.resource_gate.snapshot()
-        if runtime.resource_gate is not None
-        else {
-            "stage": "S_VOICE_RESOURCE_GATE",
-            "active_tasks": [],
-            "metrics": {
-                "vram_total_mb": int(runtime.config.max_vram_mb),
-                "vram_used_mb": 0,
-                "queue_depth": queue_depth,
-                "vram_utilization": 0.0,
-            },
-        }
+    queue_depth = int(getattr(getattr(runtime, "speech_queue", None), "queue_depth", 0) or 0)
+
+    gate_enabled = bool(getattr(runtime.config, "resource_gate_enabled", False))
+    gate_snapshot, gate_status, gate_detail = _collect_resource_gate(
+        runtime=runtime,
+        enabled=gate_enabled,
+        queue_depth=queue_depth,
     )
-    gate_metrics = dict(gate_snapshot.get("metrics") or {})
 
     components: dict[str, Any] = {
         "asr": _component_snapshot(
-            enabled=runtime.config.asr_enabled,
-            detail="edge asr disabled by config",
-            health=(runtime.asr_service.health() if runtime.asr_service is not None else None),
+            enabled=bool(getattr(runtime.config, "asr_enabled", False)),
+            detail_when_disabled="edge asr disabled by config",
+            component=getattr(runtime, "asr", None),
         ),
         "tts": _component_snapshot(
-            enabled=runtime.config.tts_enabled,
-            detail="edge tts disabled by config",
-            health=(runtime.tts_model.health() if runtime.tts_model is not None else None),
+            enabled=bool(getattr(runtime.config, "tts_enabled", False)),
+            detail_when_disabled="edge tts disabled by config",
+            component=getattr(runtime, "tts", None),
         ),
         "vts": _component_snapshot(
             enabled=True,
-            detail="edge vts unavailable",
-            health=(runtime.vts_driver.health() if runtime.vts_driver is not None else None),
+            detail_when_disabled="edge vts unavailable",
+            component=getattr(runtime, "vts", None),
         ),
-        "fallback": {
-            "enabled": runtime.config.fallback_llm_enabled,
-            "available": runtime.config.fallback_llm_enabled,
-            "detail": (
-                "edge fallback llm enabled"
-                if runtime.config.fallback_llm_enabled
-                else "edge fallback llm disabled by default"
-            ),
-            "default_unloaded": bool(runtime.fallback_rpc.default_unloaded),
-            "model_id": str(runtime.fallback_rpc.model_id),
-        },
+        "fallback": _fallback_snapshot(runtime),
+        "event_reporter": _component_snapshot(
+            enabled=True,
+            detail_when_disabled="edge event reporter disabled",
+            component=getattr(runtime, "event_reporter", None),
+        ),
         "resource_gate": {
-            "enabled": runtime.config.resource_gate_enabled,
-            "available": runtime.resource_gate is not None,
-            "detail": (
-                "edge resource gate enabled"
-                if runtime.resource_gate is not None
-                else "edge resource gate disabled by config"
-            ),
+            "enabled": gate_enabled,
+            "available": bool(getattr(runtime, "resource_gate", None) is not None),
+            "status": gate_status,
+            "detail": gate_detail,
             "snapshot": gate_snapshot,
-        },
-        "event_reporter": {
-            "enabled": True,
-            "available": True,
-            "detail": "edge event reporter active",
-            "health": runtime.event_reporter.health(),
         },
     }
 
+    aggregate_inputs = [str(item.get("status") or "ok") for item in components.values()]
+    aggregate_inputs.append(gate_status)
+    status = _aggregate_status(aggregate_inputs)
+
+    return {
+        "status": status,
+        "components": components,
+        "resource_gate": {
+            "status": gate_status,
+            "detail": gate_detail,
+            "snapshot": gate_snapshot,
+            "queue_depth": queue_depth,
+        },
+        "timestamp": _format_iso8601(snapshot_ts),
+    }
+
+
+def build_edge_health_snapshot(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
+    snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
+    collected = collect_health(runtime, ts_ms=snapshot_ts)
+    queue_depth = int(collected["resource_gate"].get("queue_depth", 0))
+    gate_snapshot = dict(collected["resource_gate"].get("snapshot") or {})
+    gate_metrics = dict(gate_snapshot.get("metrics") or {})
+    services = runtime.service_statuses() if callable(getattr(runtime, "service_statuses", None)) else {}
+    config_snapshot = (
+        runtime.redacted_config_snapshot()
+        if callable(getattr(runtime, "redacted_config_snapshot", None))
+        else {}
+    )
+
     return {
         "stage": S_EDGE_HEALTH,
-        "services": runtime.service_statuses(),
+        "status": collected["status"],
+        "timestamp": collected["timestamp"],
+        "services": services,
         "resources": {
             "vram_total_mb": int(gate_metrics.get("vram_total_mb", runtime.config.max_vram_mb)),
             "vram_used_mb": int(gate_metrics.get("vram_used_mb", 0)),
             "queue_depth": queue_depth,
         },
-        "components": components,
-        "config_snapshot": runtime.redacted_config_snapshot(),
+        "components": collected["components"],
+        "resource_gate": collected["resource_gate"],
+        "config_snapshot": config_snapshot,
         "ts_ms": snapshot_ts,
     }
 
 
-def _component_snapshot(*, enabled: bool, detail: str, health: dict[str, Any] | None) -> dict[str, Any]:
+def _component_snapshot(
+    *,
+    enabled: bool,
+    detail_when_disabled: str,
+    component: Any,
+) -> dict[str, Any]:
     if not enabled:
         return {
             "enabled": False,
             "available": False,
-            "detail": detail,
+            "status": "ok",
+            "detail": detail_when_disabled,
         }
-    if health is None:
+    if component is None:
         return {
             "enabled": True,
             "available": False,
+            "status": "down",
             "detail": "component unavailable",
         }
+    health, error = _safe_health(component)
+    if error is not None:
+        return {
+            "enabled": True,
+            "available": True,
+            "status": "error",
+            "detail": f"health() failed: {error}",
+        }
+    component_status = _extract_component_status(health)
     return {
         "enabled": True,
         "available": True,
+        "status": component_status,
         "detail": "component loaded",
         "health": health,
     }
+
+
+def _fallback_snapshot(runtime: EdgeRuntime) -> dict[str, Any]:
+    enabled = bool(getattr(runtime.config, "fallback_llm_enabled", False))
+    fallback = getattr(runtime, "fallback", None)
+    available = bool(getattr(fallback, "available", enabled))
+    status = "ok" if (not enabled or available) else "down"
+    row = {
+        "enabled": enabled,
+        "available": available,
+        "status": status,
+        "detail": (
+            "edge fallback llm enabled"
+            if enabled
+            else "edge fallback llm disabled by default"
+        ),
+        "default_unloaded": bool(getattr(fallback, "default_unloaded", not enabled)),
+        "model_id": str(getattr(fallback, "model_id", "")),
+    }
+    if enabled and fallback is not None:
+        health, error = _safe_health(fallback)
+        if error is not None:
+            row["status"] = "error"
+            row["detail"] = f"health() failed: {error}"
+        elif health:
+            row["health"] = health
+            row["status"] = _extract_component_status(health)
+    return row
+
+
+def _collect_resource_gate(
+    *,
+    runtime: EdgeRuntime,
+    enabled: bool,
+    queue_depth: int,
+) -> tuple[dict[str, Any], str, str]:
+    if not enabled:
+        return (
+            {
+                "stage": "S_VOICE_RESOURCE_GATE",
+                "active_tasks": [],
+                "metrics": {
+                    "vram_total_mb": int(runtime.config.max_vram_mb),
+                    "vram_used_mb": 0,
+                    "queue_depth": queue_depth,
+                    "vram_utilization": 0.0,
+                },
+            },
+            "ok",
+            "edge resource gate disabled by config",
+        )
+
+    resource_gate = getattr(runtime, "resource_gate", None)
+    if resource_gate is None:
+        return (
+            {
+                "stage": "S_VOICE_RESOURCE_GATE",
+                "active_tasks": [],
+                "metrics": {
+                    "vram_total_mb": int(runtime.config.max_vram_mb),
+                    "vram_used_mb": 0,
+                    "queue_depth": queue_depth,
+                    "vram_utilization": 0.0,
+                },
+            },
+            "down",
+            "resource gate unavailable",
+        )
+    try:
+        snapshot = dict(resource_gate.snapshot())
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            {
+                "stage": "S_VOICE_RESOURCE_GATE",
+                "active_tasks": [],
+                "metrics": {
+                    "vram_total_mb": int(runtime.config.max_vram_mb),
+                    "vram_used_mb": 0,
+                    "queue_depth": queue_depth,
+                    "vram_utilization": 0.0,
+                },
+            },
+            "error",
+            f"resource gate snapshot failed: {exc}",
+        )
+    return snapshot, "ok", "edge resource gate enabled"
+
+
+def _safe_health(component: Any) -> tuple[dict[str, Any], Exception | None]:
+    health = getattr(component, "health", None)
+    if not callable(health):
+        return {}, None
+    try:
+        raw = health()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return {}, exc
+    if isinstance(raw, dict):
+        return dict(raw), None
+    return {"raw_health": raw}, None
+
+
+def _extract_component_status(health: dict[str, Any]) -> str:
+    raw = str(
+        health.get("status")
+        or health.get("state")
+        or health.get("connection_state")
+        or "ok"
+    ).strip().lower()
+    if raw in {"down", "error", "unavailable", "shutdown"}:
+        return "down"
+    if raw in {"degraded", "loading", "recovering", "warning"}:
+        return "degraded"
+    if raw in {"unloaded"}:
+        return "degraded"
+    return "ok"
+
+
+def _aggregate_status(statuses: list[str]) -> str:
+    normalized = [s.strip().lower() for s in statuses if str(s).strip()]
+    if any(s == "down" for s in normalized):
+        return "down"
+    if any(s in {"degraded", "error"} for s in normalized):
+        return "degraded"
+    return "ok"
+
+
+def _format_iso8601(ts_ms: int) -> str:
+    dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
