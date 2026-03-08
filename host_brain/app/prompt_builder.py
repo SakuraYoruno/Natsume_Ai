@@ -1,0 +1,501 @@
+"""提示词构建模块。
+
+从 fastapi_app.py 拆分，负责所有 LLM 提示词的渲染逻辑。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Mapping
+
+# ---------------------------------------------------------------------------
+# 场景常量
+# ---------------------------------------------------------------------------
+CHAT_DIRECT_NODE_ID = "chat_direct_ja"
+CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
+CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
+
+SCENE_CHAT = "CHAT"
+SCENE_EXEC_INTENT = "EXEC_INTENT"
+SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
+SCENE_WORK_CODE = "WORK_CODE"
+SCENE_VISION_UI = "VISION_UI"
+
+
+# ---------------------------------------------------------------------------
+# 文本工具函数
+# ---------------------------------------------------------------------------
+def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 3)]}..."
+
+
+def _contains_kana(text: str) -> bool:
+    for ch in str(text or ""):
+        cp = ord(ch)
+        if 0x3040 <= cp <= 0x30FF:
+            return True
+    return False
+
+
+def _contains_cjk_ideograph(text: str) -> bool:
+    for ch in str(text or ""):
+        cp = ord(ch)
+        if 0x4E00 <= cp <= 0x9FFF:
+            return True
+    return False
+
+
+def _contains_cjk_or_kana(text: str) -> bool:
+    return _contains_cjk_ideograph(text) or _contains_kana(text)
+
+
+def repair_utf8_latin1_mojibake(text: str) -> str:
+    raw = str(text or "")
+    if not raw:
+        return raw
+    if _contains_cjk_or_kana(raw):
+        return raw
+    try:
+        repaired = raw.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        return raw
+    if _contains_cjk_or_kana(repaired):
+        return repaired
+    return raw
+
+
+def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
+    """ModelPlane §0.4: 二次式输出强制日文渲染。"""
+    override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
+    if override in {"zh", "ja"}:
+        return override
+    return "ja"
+
+
+# ---------------------------------------------------------------------------
+# 节点角色指令
+# ---------------------------------------------------------------------------
+def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja") -> str:
+    resolved_node_id = str(node_id or "").strip()
+    if resolved_node_id == CHAT_DIRECT_NODE_ID:
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "Role: chat_direct_ja.\n"
+                "Goal: generate the final user-facing reply directly in concise spoken Simplified Chinese.\n"
+                "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
+                "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+            )
+        return (
+            "Role: chat_direct_ja.\n"
+            "Goal: generate the final user-facing reply directly in concise natural Japanese.\n"
+            "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
+            "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+        )
+    if resolved_node_id == CHAT_RENDER_NODE_ID:
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "Role: renderer_ja_c_style (final Chinese renderer).\n"
+                "Goal: render CORE_NARRATIVE_ZH into concise spoken Simplified Chinese.\n"
+                "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+            )
+        return (
+            "Role: renderer_ja_c_style (final Japanese renderer).\n"
+            "Goal: render CORE_NARRATIVE_ZH into concise natural Japanese.\n"
+            "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+        )
+
+    role_instructions: dict[str, str] = {
+        "core_reasoner_primary": (
+            "Role: core_reasoner_primary.\n"
+            "Goal: produce the main Chinese semantic draft for the user request.\n"
+            "Policy: stay grounded in evidence, remain concise, and never claim execution."
+        ),
+        "core_reasoner_secondary": (
+            "Role: core_reasoner_secondary.\n"
+            "Goal: produce a shorter fallback Chinese draft when primary reasoning degrades.\n"
+            "Policy: be conservative and never expand facts or scope."
+        ),
+        "planner_constraints": (
+            "Role: planner_constraints.\n"
+            "Goal: summarize actionable constraints for this turn.\n"
+            "Policy: output compact draft-only guidance."
+        ),
+        "tool_planner": (
+            "Role: tool_planner.\n"
+            "Goal: propose tool-use drafts only when tools materially help.\n"
+            "Policy: never imply a tool has already run."
+        ),
+        "safety_verifier": (
+            "Role: safety_verifier.\n"
+            "Goal: flag safety or overclaim risks.\n"
+            "Policy: output a concise verdict and minimum patch."
+        ),
+        "consistency_verifier": (
+            "Role: consistency_verifier.\n"
+            "Goal: check canon/style consistency drift.\n"
+            "Policy: output a concise verdict and minimum patch."
+        ),
+        "workbench_translate": (
+            "Role: workbench_translate.\n"
+            "Goal: provide translation-assist draft output.\n"
+            "Policy: preserve meaning and terminology consistency."
+        ),
+        "workbench_code_assist": (
+            "Role: workbench_code_assist.\n"
+            "Goal: provide concise code-assist draft output.\n"
+            "Policy: stay concrete and do not claim files were changed."
+        ),
+    }
+    return role_instructions.get(
+        resolved_node_id,
+        "Role: generic node.\nGoal: produce a concise draft-only output.\nPolicy: keep the JSON contract stable.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# JSON 提取工具
+# ---------------------------------------------------------------------------
+def extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise RuntimeError("provider returned empty content")
+
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    decoder = json.JSONDecoder()
+    try:
+        parsed, _ = decoder.raw_decode(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    first = text.find("{")
+    last = text.rfind("}")
+    if first >= 0 and last > first:
+        snippet = text[first : last + 1]
+        parsed = json.loads(snippet)
+        if isinstance(parsed, dict):
+            return parsed
+    raise RuntimeError("provider content does not contain a valid json object")
+
+
+def coerce_gateway_payload_json_text(raw_text: str) -> str:
+    parsed = extract_json_object_from_text(raw_text)
+    narrative_node = parsed.get("narrative")
+    narrative_text = ""
+    if isinstance(narrative_node, dict):
+        narrative_text = str(narrative_node.get("text") or "").strip()
+    elif isinstance(narrative_node, str):
+        narrative_text = narrative_node.strip()
+    if not narrative_text:
+        narrative_text = str(parsed.get("text") or "").strip()
+    narrative_text = repair_utf8_latin1_mojibake(narrative_text)
+    if not narrative_text:
+        raise RuntimeError("provider output missing narrative.text")
+
+    intent_draft = parsed.get("intent_draft")
+    if not isinstance(intent_draft, dict):
+        intent_draft = {}
+    meta = parsed.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    safe_meta = dict(meta)
+    safe_meta["draft_only"] = True
+
+    contract_payload = {
+        "narrative": {"text": narrative_text},
+        "intent_draft": intent_draft,
+        "meta": safe_meta,
+    }
+    return json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)
+
+
+def extract_langchain_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text_value = item.get("text")
+            if text_value is not None:
+                parts.append(str(text_value))
+        return "".join(parts)
+    return str(content)
+
+
+# ---------------------------------------------------------------------------
+# 节点 Runtime Payload 提取
+# ---------------------------------------------------------------------------
+def extract_node_runtime_payload(runtime_payload: Mapping[str, Any], *, node_id: str) -> dict[str, Any]:
+    node_root = runtime_payload.get(node_id)
+    if not isinstance(node_root, Mapping):
+        return {}
+    payload_raw = node_root.get("payload")
+    if isinstance(payload_raw, Mapping):
+        return dict(payload_raw)
+    return {}
+
+
+def extract_node_narrative_text(runtime_payload: Mapping[str, Any], *, node_id: str) -> str:
+    node_payload = extract_node_runtime_payload(runtime_payload, node_id=node_id)
+    return extract_gateway_narrative(node_payload)
+
+
+def extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
+    node = dict(payload or {})
+    narrative = node.get("narrative")
+    if isinstance(narrative, dict):
+        text = repair_utf8_latin1_mojibake(str(narrative.get("text") or "").strip())
+        if text:
+            return text
+    elif isinstance(narrative, str):
+        text = repair_utf8_latin1_mojibake(narrative.strip())
+        if text:
+            return text
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Host 生成提示词（简单版，无 context_pack）
+# ---------------------------------------------------------------------------
+def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
+    user_message = _truncate_for_prompt(prompt_payload.get("user_message"), limit=1000)
+    retrieval_raw = prompt_payload.get("retrieval")
+    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, dict) else {}
+    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
+    evidence_items = retrieval.get("evidence_items")
+    rows = evidence_items if isinstance(evidence_items, list) else []
+    evidence_lines: list[str] = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        evidence_ref = _truncate_for_prompt(row.get("evidence_ref") or row.get("source_ref") or "unknown", limit=80)
+        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
+        if not snippet:
+            continue
+        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+    return (
+        "You are the Natsume core reasoning node.\n"
+        "Return exactly one JSON object with top-level keys: narrative, intent_draft, meta.\n"
+        "Required schema:\n"
+        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "Rules:\n"
+        "1. Output JSON only. No markdown. No code fences.\n"
+        "2. Keep draft_only=true.\n"
+        "3. Do not claim execution/saving/confirmation has happened.\n"
+        "4. Reply in Simplified Chinese and keep it concise.\n"
+        "5. Ground the output in user message and evidence only.\n\n"
+        f"User message:\n{user_message}\n\n"
+        f"Retrieval status: {retrieval_status}\n"
+        f"Retrieval reason_code: {retrieval_reason}\n"
+        f"Evidence:\n{evidence_block}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 节点生成提示词（完整版，含 context_pack）
+# ---------------------------------------------------------------------------
+def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
+    user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=1000)
+    context_pack_raw = runtime_payload.get("context_pack")
+    context_pack = dict(context_pack_raw) if isinstance(context_pack_raw, Mapping) else {}
+    context_pack_validation_raw = runtime_payload.get("context_pack_validation")
+    context_pack_validation = (
+        dict(context_pack_validation_raw)
+        if isinstance(context_pack_validation_raw, Mapping)
+        else {}
+    )
+
+    retrieval_raw = runtime_payload.get("retrieval")
+    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, Mapping) else {}
+    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
+    retrieval_slot_rows = context_pack.get("retrieval")
+    slot_rows = retrieval_slot_rows if isinstance(retrieval_slot_rows, list) else []
+    rows = slot_rows if slot_rows else (retrieval.get("evidence_items") or [])
+
+    evidence_lines: list[str] = []
+    for row in rows[:6]:
+        if not isinstance(row, Mapping):
+            continue
+        evidence_ref = _truncate_for_prompt(
+            row.get("evidence_ref") or row.get("source_ref") or row.get("citation") or "unknown",
+            limit=80,
+        )
+        snippet = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=220)
+        if not snippet:
+            continue
+        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+
+    authoritative_rows = context_pack.get("authoritative")
+    world_rows = authoritative_rows if isinstance(authoritative_rows, list) else []
+    world_lines: list[str] = []
+    for row in world_rows[:3]:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("kind") or "").strip().lower() != "world_canon":
+            continue
+        citation = _truncate_for_prompt(row.get("citation") or row.get("doc_id") or "unknown", limit=96)
+        content = _truncate_for_prompt(row.get("content"), limit=260)
+        if not content:
+            continue
+        world_lines.append(f"- [{citation}] {content}")
+    world_block = "\n".join(world_lines) if world_lines else "- (none)"
+
+    constraints_raw = context_pack.get("constraints")
+    constraints = dict(constraints_raw) if isinstance(constraints_raw, Mapping) else {}
+    constraints_json = _truncate_for_prompt(
+        json.dumps(constraints, ensure_ascii=False, sort_keys=True),
+        limit=1200,
+    )
+    context_pack_valid = bool(context_pack_validation.get("valid", False))
+    context_pack_reason = str(context_pack_validation.get("reason_code") or "NONE").strip() or "NONE"
+    context_pack_violation_count = int(context_pack_validation.get("violation_count") or 0)
+
+    core_payload = extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_narrative = extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_meta = core_payload.get("meta")
+    if isinstance(core_meta, dict) and core_meta.get("degraded"):
+        secondary_narrative = extract_node_narrative_text(runtime_payload, node_id="core_reasoner_secondary")
+        if secondary_narrative:
+            core_narrative = secondary_narrative
+            secondary_payload = extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_secondary")
+            if isinstance(secondary_payload.get("intent_draft"), dict) and secondary_payload["intent_draft"]:
+                core_payload = secondary_payload
+
+    core_intent_draft = core_payload.get("intent_draft")
+    if not isinstance(core_intent_draft, dict):
+        core_intent_draft = {}
+    core_intent_json = json.dumps(core_intent_draft, ensure_ascii=False, sort_keys=True)
+    planner_text = extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
+    verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
+
+    style_pack_raw = context_pack.get("style_pack")
+    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
+    style_bindings_raw = style_pack.get("node_bindings")
+    style_bindings = dict(style_bindings_raw) if isinstance(style_bindings_raw, Mapping) else {}
+    if not style_bindings:
+        legacy_bindings_raw = runtime_payload.get("style_bindings")
+        style_bindings = dict(legacy_bindings_raw) if isinstance(legacy_bindings_raw, Mapping) else {}
+    node_style_raw = style_bindings.get(node_id)
+    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
+    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
+    style_block = ""
+    if style_instruction:
+        style_block = (
+            "STYLE_CANON_BINDING:\n"
+            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
+            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
+            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
+            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
+            f"- instruction:\n{style_instruction}\n\n"
+        )
+
+    from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
+    emotion_context_raw = runtime_payload.get("emotion_context")
+    emotion_context = dict(emotion_context_raw) if isinstance(emotion_context_raw, Mapping) else {}
+    context_pack_emotion_raw = context_pack.get("emotion_pulse")
+    context_pack_emotion = dict(context_pack_emotion_raw) if isinstance(context_pack_emotion_raw, Mapping) else {}
+    merged_emotion_context = normalize_chat_emotion_context(
+        {
+            "mood_state": context_pack_emotion.get("mood_state") or emotion_context.get("mood_state"),
+            "emotion_tag": context_pack_emotion.get("emotion_tag") or emotion_context.get("emotion_tag"),
+            "emotion_range_hint": (
+                context_pack_emotion.get("emotion_range_hint")
+                or emotion_context.get("emotion_range_hint")
+            ),
+        }
+    )
+    pulse_style_hint = _truncate_for_prompt(context_pack_emotion.get("style_hint"), limit=160)
+    memory_emotion_hint_raw = context_pack.get("memory_emotion_hint")
+    memory_emotion_hint = dict(memory_emotion_hint_raw) if isinstance(memory_emotion_hint_raw, Mapping) else {}
+    bond_texture_raw = context_pack.get("bond_texture")
+    bond_texture = dict(bond_texture_raw) if isinstance(bond_texture_raw, Mapping) else {}
+    memory_emotion_hint_json = _truncate_for_prompt(
+        json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True),
+        limit=600,
+    )
+    bond_texture_json = _truncate_for_prompt(
+        json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
+        limit=600,
+    )
+    emotion_binding_block = (
+        "EMOTION_BINDING:\n"
+        f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
+        f"- emotion_tag: {merged_emotion_context.get('emotion_tag')}\n"
+        f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
+        f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
+        f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
+        f"- bond_texture_json: {bond_texture_json}\n\n"
+    )
+
+    render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
+    if render_target_lang not in {"zh", "ja"}:
+        render_target_lang = infer_render_target_lang(
+            user_message=user_message,
+            core_narrative=core_narrative,
+        )
+
+    cn_style_boost_block = ""
+    if render_target_lang == "zh":
+        cn_style_boost_block = (
+            "CN_STYLE_BOOST_BINDING:\n"
+            "- style_strength: HIGH\n"
+            "- Priority: safety/facts > style canon > generic assistant tone.\n"
+            "- Write naturally spoken Simplified Chinese; avoid formal support-style wording.\n"
+            "- Typical rhythm: 2-4 short sentences, compact and clear.\n"
+            "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
+        )
+
+    role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang)
+
+    return (
+        "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
+        "Schema:\n"
+        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "Hard rules:\n"
+        "1) JSON only; no markdown/code fence.\n"
+        "2) meta.draft_only must be true.\n"
+        "3) Never claim executed/saved/confirmed/completed.\n"
+        "4) Keep concise and grounded in provided context.\n"
+        "NODE_ROLE_BINDING:\n"
+        f"{role_instruction}\n\n"
+        f"{style_block}"
+        f"{cn_style_boost_block}"
+        f"{emotion_binding_block}"
+        "CONTEXT_PACK_VALIDATION:\n"
+        f"- valid: {context_pack_valid}\n"
+        f"- reason_code: {context_pack_reason}\n"
+        f"- violation_count: {context_pack_violation_count}\n\n"
+        f"WORLD_CANON_BINDING:\n{world_block}\n\n"
+        f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
+        f"NODE_ID: {node_id}\n"
+        f"RENDER_TARGET_LANG: {render_target_lang}\n"
+        f"USER_MESSAGE:\n{user_message}\n\n"
+        f"RETRIEVAL_STATUS: {retrieval_status}\n"
+        f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
+        f"EVIDENCE:\n{evidence_block}\n\n"
+        f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
+        f"PLANNER_HINT:\n{planner_text}\n\n"
+        f"SAFETY_HINT:\n{verifier_text}\n\n"
+        f"CORE_INTENT_DRAFT_JSON:\n{core_intent_json}\n"
+    )

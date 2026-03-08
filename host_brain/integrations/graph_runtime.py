@@ -5,6 +5,7 @@ Public symbols remain re-exported for backward compatibility.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -40,6 +41,9 @@ from host_brain.integrations.graph_fallback import (
     set_finish,
 )
 from host_brain.integrations.llm_gateway import LlmGatewayContract
+
+# Evidence Plane 专用线程池：最多 2 线程，不阻塞主图执行路径
+_evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence")
 
 # 向后兼容：保留旧的私有函数名作为模块级别别名
 _build_edge_map = build_edge_map
@@ -238,8 +242,8 @@ class GraphRuntimeContract:
         }
         state = compiled.invoke(initial_state)
 
-        # M36-F：图执行完成后写入 Evidence Plane
-        self._write_evidence(request_id=request_id, state=state)
+        # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）
+        _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
 
         # 4. 最终化输出
         return self._finalize(
@@ -329,7 +333,7 @@ class GraphRuntimeContract:
                 error_code=RESUME_DENIED_DEADLINE_EXCEEDED,
                 ts_ms=current_ms,
             ).to_dict()
-            self._write_evidence(request_id=request_id, state=state)
+            _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
             return GraphRunResult(
                 status=STATUS_FAILED,
                 reason_code=str(synthetic.get("error_code") or "RESUME_DENIED"),
@@ -361,7 +365,7 @@ class GraphRuntimeContract:
             "interrupt_reason": None,
         }
         final_state = compiled.invoke(resumed_state)
-        self._write_evidence(request_id=request_id, state=final_state)
+        _evidence_executor.submit(self._write_evidence, request_id=request_id, state=final_state)
 
         return GraphRunResult(
             status=str(final_state.get("status") or STATUS_OK),

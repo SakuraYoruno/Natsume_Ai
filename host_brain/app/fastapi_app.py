@@ -7,6 +7,7 @@ TASK-0065: HTTP 鏈嶅姟妗嗘灦钀藉湴 鈥?FastAPI 璺敱缁戝畾 + 鍋
 
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import logging
@@ -86,6 +87,11 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
 )
+from host_brain.integrations.llm_helpers import (
+    adjust_gen_params_for_emotion,
+    stream_llm_chunks,
+)
+from fastapi.responses import StreamingResponse
 
 
 # HTTP contract models
@@ -3050,14 +3056,22 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             ts_ms=ts_ms,
         )
 
-        # 2) Governor decision (intent validation + R1-R7 gates)
+        # scene_type pre-computed before Governor so it can be used in retrieval gate below
+        _pre_scene_type, _pre_scene_source = _resolve_chat_scene_type(request_body=request_body)
+
+        # 2) Governor decision via run_in_executor (non-blocking on async event loop)
         engine = get_intent_engine()
-        governor_result = engine.evaluate_intent(
-            raw_intent=intent_draft,
-            request_id=request_id,
-            thread_id=request_body.thread_id,
-            governance_snapshot=governance_snapshot,
+        _loop = asyncio.get_event_loop()
+        _gov_future = _loop.run_in_executor(
+            None,
+            lambda: engine.evaluate_intent(
+                raw_intent=intent_draft,
+                request_id=request_id,
+                thread_id=request_body.thread_id,
+                governance_snapshot=governance_snapshot,
+            ),
         )
+        governor_result = await _gov_future
 
         decision = governor_result.get("decision")
         reason_code = governor_result.get("reason_code")
@@ -3084,7 +3098,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         }
         if decision == DECISION_APPROVE:
             retrieval_evidence_items: list[dict[str, Any]] = []
-            scene_type, scene_type_source = _resolve_chat_scene_type(request_body=request_body)
+            scene_type, scene_type_source = _pre_scene_type, _pre_scene_source
             retrieval_enabled, retrieval_disabled_reason = _resolve_chat_retrieval_gate(scene_type=scene_type)
             if retrieval_enabled:
                 try:
@@ -3092,14 +3106,18 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 except ValueError:
                     retrieval_top_k = 5
                 retrieval_top_k = max(1, min(retrieval_top_k, 20))
-                retrieval_result = get_retrieval_pipeline().run(
-                    request_id=request_id,
-                    query=request_body.message,
-                    intent_id=intent_id,
-                    session_id=session_id,
-                    top_k=retrieval_top_k,
-                    ts_ms=ts_ms,
-                    emotion_context=str(emotion_context.get("emotion_tag") or "") or None,
+                _loop = asyncio.get_event_loop()
+                retrieval_result = await _loop.run_in_executor(
+                    None,
+                    lambda: get_retrieval_pipeline().run(
+                        request_id=request_id,
+                        query=request_body.message,
+                        intent_id=intent_id,
+                        session_id=session_id,
+                        top_k=retrieval_top_k,
+                        ts_ms=ts_ms,
+                        emotion_context=str(emotion_context.get("emotion_tag") or "") or None,
+                    ),
                 )
                 recall_output = dict(retrieval_result.output.get("recall") or {})
                 rerank_output = dict(retrieval_result.output.get("rerank") or {})
@@ -3571,7 +3589,88 @@ async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResp
 
 
 # ---------------------------------------------------------------------------
-# 鏍硅矾寰勯噸瀹氬悜鍒版枃妗?
+# SSE 流式聊天端点
+# ---------------------------------------------------------------------------
+@app.get("/v1/chat/stream")
+async def chat_stream(
+    request: Request,
+    message: str = "",
+    session_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    mood_state: Optional[str] = None,
+    emotion_tag: Optional[str] = None,
+) -> StreamingResponse:
+    """GET /v1/chat/stream — SSE 流式响应端点。"""
+    import asyncio
+    import threading
+
+    request_id = getattr(request.state, "request_id", None) or new_request_id()
+    resolved_session_id = session_id or f"session::{request_id}"
+    resolved_mood = mood_state or "steady"
+    resolved_emotion = emotion_tag or "NEUTRAL"
+
+    async def _event_generator():
+        yield f"data: {json.dumps({'phase': 'PRESENCE', 'event': 'THINKING', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+        try:
+            llm_runtime = _resolve_host_llm_runtime()
+            provider_name = str(llm_runtime["provider_name"])
+            model_id = str(llm_runtime["model_id"])
+            timeout_ms_val = int(llm_runtime["timeout_ms"])
+            llm_api_key = str(llm_runtime.get("llm_api_key") or "").strip()
+            available = bool(llm_runtime["available"])
+
+            if not available:
+                yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'LLM_UNAVAILABLE'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 异步桥接同步 generator
+            loop = asyncio.get_event_loop()
+            chunk_queue: asyncio.Queue = asyncio.Queue()
+
+            def _run_stream():
+                import sys as _sys
+                _stream_fn = _sys.modules.get("host_brain.app.fastapi_app").stream_llm_chunks  # allows mock patching
+                try:
+                    for chunk in _stream_fn(
+                        provider_name=provider_name,
+                        model_id=model_id,
+                        api_key=llm_api_key,
+                        timeout_ms=timeout_ms_val,
+                        prompt_text=message,
+                        system_prompt="",
+                        gen_params=adjust_gen_params_for_emotion({"temperature": 0.7}, emotion_context={"emotion_tag": resolved_emotion}),
+                    ):
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                finally:
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+            thread = threading.Thread(target=_run_stream, daemon=True)
+            thread.start()
+
+            full_text = ""
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                full_text += chunk
+                yield f"data: {json.dumps({'phase': 'RENDER', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'APPROVE', 'narrative': full_text, 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+        except Exception as exc:
+            _logger.error("SSE stream failed: %s", exc, extra={"request_id": request_id})
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'INTERNAL_SERVER_ERROR'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# 根路由重定向到文档
 # ---------------------------------------------------------------------------
 @app.get("/")
 async def root() -> Response:

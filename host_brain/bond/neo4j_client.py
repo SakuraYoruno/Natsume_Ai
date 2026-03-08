@@ -17,6 +17,12 @@ from host_brain.core.errors import (
     NEO4J_LEADER_UNAVAILABLE,
     NEO4J_SCHEMA_DRIFT,
 )
+from host_brain.bond.neo4j_schemas import (
+    BondEventRecord,
+    Neo4jConfigIssue,
+    Neo4jConfigLoadResult,
+    Neo4jRuntimeConfig,
+)
 
 
 BOND_WRITER_ID = "host_brain.bond.bond_dynamics"
@@ -33,70 +39,6 @@ NEO4J_STATUS_DOWN = "DOWN"
 
 DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
 DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
-
-
-@dataclass(frozen=True)
-class Neo4jConfigIssue:
-    reason_code: str
-    detail: str
-    field: str | None = None
-
-
-@dataclass(frozen=True)
-class Neo4jRuntimeConfig:
-    enabled: bool
-    uri: str
-    database: str
-    auth_ref: str | None
-    pool_size: int
-    tls_enabled: bool
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "uri": self.uri,
-            "database": self.database,
-            "auth_ref": self.auth_ref,
-            "pool_size": self.pool_size,
-            "tls_enabled": self.tls_enabled,
-        }
-
-
-@dataclass(frozen=True)
-class Neo4jConfigLoadResult:
-    success: bool
-    stage: str
-    reason_code: str | None
-    config: Neo4jRuntimeConfig | None
-    issues: tuple[Neo4jConfigIssue, ...]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "stage": self.stage,
-            "reason_code": self.reason_code,
-            "config": (self.config.as_dict() if self.config is not None else None),
-            "issues": [
-                {
-                    "reason_code": issue.reason_code,
-                    "detail": issue.detail,
-                    "field": issue.field,
-                }
-                for issue in self.issues
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class BondEventRecord:
-    event_id: str
-    user_id: str
-    session_id: str
-    topic_id: str
-    capability_hint: str
-    evidence_refs: tuple[str, ...]
-    payload: dict[str, Any]
-    ts_ms: int
 
 
 def load_neo4j_runtime_config(

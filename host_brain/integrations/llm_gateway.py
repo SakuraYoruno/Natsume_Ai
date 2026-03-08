@@ -19,6 +19,10 @@ from typing import Any, Callable
 from host_brain.airlock.quarantine import IngressQuarantineResult, quarantine_ingress
 from host_brain.airlock.sanitizer import EgressGateResult, sanitize_and_gate_egress
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.integrations.llm_helpers import (  # re-export for backward compat
+    adjust_gen_params_for_emotion,
+    stream_llm_chunks,
+)
 from host_brain.core.errors import (
     AIRLOCK_BLOCKED_EGRESS,
     LLM_HEALTH_PROBE_FAILED,
@@ -30,6 +34,12 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.core.qa import enforce_qa_contract
+from host_brain.integrations.llm_gateway_schemas import (
+    GatewayResult,
+    LLMHealthProbeResult,
+    LLMRouteResult,
+)
+
 
 
 S_LLM_GATEWAY_EGRESS = "S_LLM_GATEWAY_EGRESS"
@@ -89,38 +99,6 @@ def _invoke_provider_with_timeout(
     if ok:
         return value
     raise value
-
-
-@dataclass(frozen=True)
-class GatewayResult:
-    success: bool
-    status: str
-    reason_code: str | None
-    stage: str
-    detail: str
-    output: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class LLMHealthProbeResult:
-    """M24-A：LLM 健康探测结果。"""
-    model_id: str
-    provider: str
-    available: bool
-    latency_ms: int
-    reason_code: str | None
-    detail: str
-
-
-@dataclass(frozen=True)
-class LLMRouteResult:
-    """M24-A：多模型路由结果。"""
-    model_id: str
-    provider: str
-    reason_code: str | None
-    latency_ms: int
-    fallback_used: bool
-    detail: str
 
 
 class LlmGatewayContract:

@@ -1191,15 +1191,17 @@ class SQLiteLedger:
             return None
         return self._decode_row("vault_manifest_index", row)
 
-    def has_replay(self, *, intent_id: str, session_id: str, nonce: str) -> bool:
+    def has_replay(self, *, intent_id: str, session_id: str, nonce: str, window_ms: int = 60 * 60 * 1000) -> bool:
+        cutoff = now_ms() - window_ms
         row = self._conn.execute(
             """
             SELECT 1
             FROM replay_guard
-            WHERE intent_id = ? OR (session_id = ? AND nonce = ?)
+            WHERE ts_ms >= ?
+              AND (intent_id = ? OR (session_id = ? AND nonce = ?))
             LIMIT 1
             """,
-            (intent_id, session_id, nonce),
+            (cutoff, intent_id, session_id, nonce),
         ).fetchone()
         return row is not None
 

@@ -12,6 +12,11 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync
+from host_brain.memory.canon_schemas import (
+    WorldCanonDocument,
+    WorldCanonScanIssue,
+)
+
 
 # F-34：跨进程文件锁（R111-1）
 # filelock 为可选依赖；单进程部署时降级为 threading.Lock（已有 _write_lock）
@@ -37,48 +42,6 @@ WORLD_EXECUTION_FACT_TOKENS = (
 
 _ROLLBACK_DELETE_RETRY_ATTEMPTS = 4
 _ROLLBACK_DELETE_RETRY_DELAY_S = 0.05
-
-
-@dataclass(frozen=True)
-class WorldCanonDocument:
-    doc_id: str
-    version: int
-    hash: str
-    status: str
-    title: str
-    tags: list[str]
-    body: str
-    updated_by: str
-    ts_ms: int
-    source_path: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "doc_id": self.doc_id,
-            "version": self.version,
-            "hash": self.hash,
-            "status": self.status,
-            "title": self.title,
-            "tags": list(self.tags),
-            "body": self.body,
-            "updated_by": self.updated_by,
-            "ts_ms": self.ts_ms,
-            "source_path": self.source_path,
-        }
-
-
-@dataclass(frozen=True)
-class WorldCanonScanIssue:
-    code: str
-    source_path: str
-    detail: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "code": self.code,
-            "source_path": self.source_path,
-            "detail": self.detail,
-        }
 
 
 class WorldCanonStore:
