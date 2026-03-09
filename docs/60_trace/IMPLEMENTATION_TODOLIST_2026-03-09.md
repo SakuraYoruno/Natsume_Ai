@@ -81,6 +81,9 @@
 - [x] P3：新增依赖层桥接回归 `23 passed`（`test_dependencies_mcp_skill_bridge` + `test_mcp_skill_bridge` + `test_tiered_governance_runtime_m44`）
 - [x] P3：补齐 Edge 3B 路径情感层透传：`chat_handler` 将 `emotion_context` 下发到 edge fallback RPC（presence/asr_compile）并写入审计
 - [x] P3：新增情感全路径回归 `12 passed`（`test_chat_gaming_edge_route` + `test_chat_emotion_integration_m45` + graph/stream 契约）
+- [x] P3：新增长期指标看板工具 `tools/diag_longterm_dashboard.py`，统一质量/延迟/成本/可用性四维输出（JSON+Markdown）
+- [x] P3：接入统一诊断入口 `tools/diag.py dashboard`，新增回归 `10 passed`（dashboard + unified + stability）
+- [x] P3：生成首份长期指标看板 `LONGTERM_METRIC_DASHBOARD_20260310_014526.{json,md}`（30 天窗口，状态 `WARN`）
 
 ---
 
@@ -259,7 +262,7 @@
 - [x] Bond 更新统一异步队列化
 - [x] 情感层接入 Host 8B / Edge 3B / Cloud Graph 全路径
 - [x] MCP 与 Skills 完全合并，形成唯一工具入口
-- [ ] 建立长期指标看板（质量、延迟、成本、可用性）
+- [x] 建立长期指标看板（质量、延迟、成本、可用性）
 
 ---
 

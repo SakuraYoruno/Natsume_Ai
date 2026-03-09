@@ -118,6 +118,42 @@ def test_diag_unified_stability_command_supports_threshold_flags(tmp_path: Path)
     assert "--threshold-failure-rate-pct" in command
 
 
+def test_diag_unified_dashboard_command_supports_longterm_threshold_flags(tmp_path: Path) -> None:
+    report = run(
+        [
+            "dashboard",
+            "--dry-run",
+            "--days",
+            "30",
+            "--ledger-db",
+            str(tmp_path / "audit.sqlite3"),
+            "--threshold-governor-approve-rate-min-pct",
+            "81",
+            "--threshold-retrieval-failure-rate-max-pct",
+            "19",
+            "--threshold-graph-p95-latency-max-ms",
+            "2500",
+            "--threshold-cloud-call-ratio-max-pct",
+            "71",
+            "--threshold-required-up-rate-min-pct",
+            "97",
+            "--output-json",
+            str(tmp_path / "diag_dashboard.json"),
+            "--output-md",
+            str(tmp_path / "diag_dashboard.md"),
+        ]
+    )
+
+    command = list(report.get("command") or [])
+    joined = " ".join(command)
+    assert "diag_longterm_dashboard.py" in joined
+    assert "--threshold-governor-approve-rate-min-pct" in command
+    assert "--threshold-retrieval-failure-rate-max-pct" in command
+    assert "--threshold-graph-p95-latency-max-ms" in command
+    assert "--threshold-cloud-call-ratio-max-pct" in command
+    assert "--threshold-required-up-rate-min-pct" in command
+
+
 def test_extract_artifact_paths_parses_downstream_report_lines() -> None:
     stdout = (
         "step\n"
