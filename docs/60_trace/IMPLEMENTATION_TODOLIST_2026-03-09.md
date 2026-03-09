@@ -39,6 +39,8 @@
 - [x] P0-A/A5：短会话检索缓存（`RetrievalOrchestrator` TTL/LRU）落地，命中信息写入 `retrieval_summary`
 - [x] P0-B/B1：新增统一 `emotion_snapshot`（tag/intensity/source/timestamp/age）并贯通 `chat`/`chat/stream` 审计输出
 - [x] P0-B/B1：Prompt 绑定补齐情感强度与快照字段（`emotion_intensity` + `snapshot_*`），新增对应单测
+- [x] P0-B/B3：新增闭环校验工具 `tools/diag_emotion_closed_loop.py`（12 条语料，输出 JSON+Markdown 报告）
+- [x] P0-B/B3：完成首轮闭环报告 `EMOTION_CLOSED_LOOP_REPORT_20260309_235917.*`，一致性通过率 `100%`（12/12）
 
 ---
 
@@ -142,8 +144,8 @@
 - SSE 输出不中断；VTS 事件单独可追踪
 
 #### B3. 闭环校验（0.5 天）
-- [ ] 对 10+ 条情感测试语料做验证
-- [ ] 校验“情感识别 -> 输出语气 -> VTS 动作”一致性
+- [x] 对 10+ 条情感测试语料做验证
+- [x] 校验“情感识别 -> 输出语气 -> VTS 动作”一致性
 
 **验收标准**
 - 一致性通过率达到预设阈值（建议 >= 80%）
