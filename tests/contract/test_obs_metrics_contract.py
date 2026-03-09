@@ -6,6 +6,7 @@ import json
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
@@ -144,6 +145,114 @@ class TestObsMetricsContract(unittest.TestCase):
         lat = result["retrieval_latency"]
         self.assertEqual(42, lat["p50_ms"])
         self.assertEqual(1, lat["sample_count"])
+
+    def test_t_obs_01_alerting_fields_present(self) -> None:
+        """默认样本下存在告警字段，且无激活告警。"""
+        _seed_ledger(self.ledger, self.ts_base)
+        result = build_obs_metrics_response(
+            collector=self.collector,
+            obs_mode=ObsMode.PROD,
+            ts_ms=self.ts_base + 100,
+        )
+        gov = result["governor_decisions"]
+        lat = result["retrieval_latency"]
+
+        self.assertIn("degraded_rate_pct", gov)
+        self.assertIn("failure_rate_pct", gov)
+        self.assertIn("alerting", gov)
+        self.assertEqual([], list(gov["alerting"].get("active_alerts") or []))
+
+        self.assertIn("timeout_count", lat)
+        self.assertIn("degraded_count", lat)
+        self.assertIn("failure_count", lat)
+        self.assertIn("timeout_rate_pct", lat)
+        self.assertIn("degraded_rate_pct", lat)
+        self.assertIn("failure_rate_pct", lat)
+        self.assertIn("alerting", lat)
+        self.assertEqual([], list(lat["alerting"].get("active_alerts") or []))
+
+    def test_t_obs_01_alerting_thresholds_trigger(self) -> None:
+        """超时/降级/失败率超过阈值时产出稳定告警码。"""
+        request_id = "req_obs_alert_001"
+        intent_id = "intent_obs_alert_001"
+
+        for idx in range(10):
+            if idx < 4:
+                decision = "DEGRADED"
+            elif idx < 7:
+                decision = "REJECT"
+            else:
+                decision = "APPROVE"
+            self.ledger.log_governor({
+                "request_id": request_id,
+                "thread_id": "thread_obs_alert",
+                "turn_id": f"turn_obs_alert_{idx}",
+                "intent_id": intent_id,
+                "decision": decision,
+                "reason_code": ("R_ALERT_TEST" if decision != "APPROVE" else None),
+                "rule_trace": [],
+                "tokens": {},
+                "snapshot_refs": [],
+                "stage": "S_GOVERNOR",
+                "ts_ms": self.ts_base + idx,
+            })
+
+        for idx in range(10):
+            status = "SUCCESS"
+            reason_code = None
+            detail = "ok"
+            if idx < 3:
+                status = "FAILED"
+                reason_code = "RETRIEVAL_TIMEOUT"
+                detail = "retrieval timeout in contract test"
+            elif idx < 6:
+                status = "DEGRADED"
+                reason_code = "RETRIEVAL_PARTIAL_DEGRADED"
+                detail = "retrieval degraded in contract test"
+            self.ledger.log_retrieval_event({
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "op_kind": "RECALL",
+                "status": status,
+                "reason_code": reason_code,
+                "stage": "S_RETRIEVAL",
+                "payload": {"latency_ms": 30 + idx},
+                "detail": detail,
+                "ts_ms": self.ts_base + 100 + idx,
+            })
+
+        with patch.dict(
+            os.environ,
+            {
+                "OBS_ALERT_TIMEOUT_RATE_PCT": "20",
+                "OBS_ALERT_DEGRADED_RATE_PCT": "20",
+                "OBS_ALERT_FAILURE_RATE_PCT": "20",
+            },
+            clear=False,
+        ):
+            result = build_obs_metrics_response(
+                collector=self.collector,
+                request_id=request_id,
+                obs_mode=ObsMode.PROD,
+                ts_ms=self.ts_base + 300,
+            )
+
+        gov_alert_codes = {
+            str(a.get("code"))
+            for a in list(result["governor_decisions"]["alerting"].get("active_alerts") or [])
+            if isinstance(a, dict)
+        }
+        ret_alert_codes = {
+            str(a.get("code"))
+            for a in list(result["retrieval_latency"]["alerting"].get("active_alerts") or [])
+            if isinstance(a, dict)
+        }
+
+        self.assertIn("GOVERNOR_DEGRADED_RATE_HIGH", gov_alert_codes)
+        self.assertIn("GOVERNOR_FAILURE_RATE_HIGH", gov_alert_codes)
+        self.assertIn("RETRIEVAL_TIMEOUT_RATE_HIGH", ret_alert_codes)
+        self.assertIn("RETRIEVAL_DEGRADED_RATE_HIGH", ret_alert_codes)
+        self.assertIn("RETRIEVAL_FAILURE_RATE_HIGH", ret_alert_codes)
 
     def test_t_obs_01_recent_chains_request_id_traceable(self) -> None:
         """recent_chains 中每条记录的 request_id 可在 Ledger 中找到对应审计行。"""

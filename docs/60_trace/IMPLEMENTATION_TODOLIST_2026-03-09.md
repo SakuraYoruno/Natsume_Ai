@@ -60,6 +60,8 @@
 - [x] 5.1：补齐关键链路 trace 字段（`retrieval_latency_ms` / `first_token_latency_ms` / `background_tasks_latency_ms`）
 - [x] 5.1：`/v1/chat` 与 `/v1/chat/stream` 审计输出增加 `audit_refs.trace_metrics`（含 retrieval、首 token、后处理耗时）
 - [x] 5.1：完成扩展回归 `149 passed`（obs + scene_router + stream + retrieval + chat + emotion）
+- [x] 5.1：`/obs/metrics` 增加超时/降级/失败率阈值告警（环境变量阈值 + 稳定告警码）
+- [x] 5.1：新增/更新 observability 契约回归 `26 passed`（`test_obs_metrics_contract` + `test_perf_baseline_contract`）
 
 ---
 
@@ -246,7 +248,7 @@
 
 ### 5.1 观测与告警
 - [x] 增加关键链路 trace：召回耗时、首 token、后台任务耗时
-- [ ] 为超时、降级、失败率设置阈值告警
+- [x] 为超时、降级、失败率设置阈值告警
 - [ ] 每周输出稳定性报告
 
 ### 5.2 测试体系

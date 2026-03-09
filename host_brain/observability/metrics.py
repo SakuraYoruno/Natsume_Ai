@@ -8,7 +8,6 @@ Supports dev/prod mode via OBS_MODE env var:
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -29,6 +28,43 @@ def get_obs_mode() -> ObsMode:
     if raw == "dev":
         return ObsMode.DEV
     return ObsMode.PROD
+
+
+def _parse_threshold_pct(env_name: str, default: float) -> float:
+    raw = str(os.environ.get(env_name, "")).strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+    if value < 0:
+        return 0.0
+    if value > 100:
+        return 100.0
+    return float(value)
+
+
+def _rate_pct(count: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round((float(count) / float(total)) * 100.0, 2)
+
+
+def _contains_timeout_marker(*, status: Any, reason_code: Any, detail: Any) -> bool:
+    status_text = str(status or "").strip().upper()
+    reason_text = str(reason_code or "").strip().upper()
+    detail_text = str(detail or "").strip().upper()
+    return (
+        ("TIMEOUT" in status_text)
+        or ("TIMEOUT" in reason_text)
+        or ("TIMEOUT" in detail_text)
+    )
+
+
+def _is_failure_status(status: Any) -> bool:
+    normalized = str(status or "").strip().upper()
+    return normalized in {"FAILED", "ERROR", "REJECTED", "TIMEOUT"}
 
 
 class MetricsCollector:
@@ -52,9 +88,10 @@ class MetricsCollector:
         """Collect and return the full /obs/metrics payload."""
         mode = obs_mode if obs_mode is not None else get_obs_mode()
         collected_ts = int(ts_ms if ts_ms is not None else now_ms())
+        alert_thresholds = self._resolve_alert_thresholds()
 
-        governor_stats = self._query_governor_stats()
-        retrieval_stats = self._query_retrieval_stats()
+        governor_stats = self._query_governor_stats(alert_thresholds=alert_thresholds)
+        retrieval_stats = self._query_retrieval_stats(alert_thresholds=alert_thresholds)
         snapshot_staleness = self._query_snapshot_staleness()
         recent_chains = self._query_recent_chains(recent_chains_n)
         latency_baseline = self.collect_latency_baseline(ts_ms=collected_ts)
@@ -84,7 +121,14 @@ class MetricsCollector:
     # Internal query helpers
     # ------------------------------------------------------------------
 
-    def _query_governor_stats(self) -> dict[str, Any]:
+    def _resolve_alert_thresholds(self) -> dict[str, float]:
+        return {
+            "timeout_rate_pct": _parse_threshold_pct("OBS_ALERT_TIMEOUT_RATE_PCT", 10.0),
+            "degraded_rate_pct": _parse_threshold_pct("OBS_ALERT_DEGRADED_RATE_PCT", 20.0),
+            "failure_rate_pct": _parse_threshold_pct("OBS_ALERT_FAILURE_RATE_PCT", 15.0),
+        }
+
+    def _query_governor_stats(self, *, alert_thresholds: dict[str, float]) -> dict[str, Any]:
         """Count governor decisions from governor_log."""
         try:
             rows = self.ledger.governor_log
@@ -95,6 +139,9 @@ class MetricsCollector:
         approved = sum(1 for r in rows if r.get("decision") == "APPROVE")
         rejected = sum(1 for r in rows if r.get("decision") == "REJECT")
         degraded = sum(1 for r in rows if r.get("decision") == "DEGRADED")
+        failure = rejected + degraded
+        degraded_rate_pct = _rate_pct(degraded, total)
+        failure_rate_pct = _rate_pct(failure, total)
 
         # 伪执行拦截：reason_code 含 AIRLOCK 或 SAFETY 的 REJECT
         pseudo_exec_blocked = sum(
@@ -102,6 +149,25 @@ class MetricsCollector:
             if r.get("decision") == "REJECT"
             and r.get("reason_code") in {"AIRLOCK_BLOCKED", "SAFETY_BLOCKED"}
         )
+        active_alerts: list[dict[str, Any]] = []
+        if total > 0 and degraded_rate_pct >= float(alert_thresholds["degraded_rate_pct"]):
+            active_alerts.append(
+                {
+                    "code": "GOVERNOR_DEGRADED_RATE_HIGH",
+                    "severity": "WARN",
+                    "observed_rate_pct": degraded_rate_pct,
+                    "threshold_rate_pct": float(alert_thresholds["degraded_rate_pct"]),
+                }
+            )
+        if total > 0 and failure_rate_pct >= float(alert_thresholds["failure_rate_pct"]):
+            active_alerts.append(
+                {
+                    "code": "GOVERNOR_FAILURE_RATE_HIGH",
+                    "severity": "WARN",
+                    "observed_rate_pct": failure_rate_pct,
+                    "threshold_rate_pct": float(alert_thresholds["failure_rate_pct"]),
+                }
+            )
 
         return {
             "total": total,
@@ -109,9 +175,19 @@ class MetricsCollector:
             "rejected": rejected,
             "degraded": degraded,
             "pseudo_exec_blocked": pseudo_exec_blocked,
+            "degraded_rate_pct": degraded_rate_pct,
+            "failure_rate_pct": failure_rate_pct,
+            "alerting": {
+                "window_size": total,
+                "thresholds": {
+                    "degraded_rate_pct": float(alert_thresholds["degraded_rate_pct"]),
+                    "failure_rate_pct": float(alert_thresholds["failure_rate_pct"]),
+                },
+                "active_alerts": active_alerts,
+            },
         }
 
-    def _query_retrieval_stats(self) -> dict[str, Any]:
+    def _query_retrieval_stats(self, *, alert_thresholds: dict[str, float]) -> dict[str, Any]:
         """Compute p50/p95 latency from retrieval_event_log."""
         try:
             rows = self.ledger.retrieval_event_log
@@ -119,21 +195,96 @@ class MetricsCollector:
             rows = []
 
         latencies: list[int] = []
+        timeout_count = 0
+        degraded_count = 0
+        failure_count = 0
         for r in rows:
+            status_value = r.get("status")
+            reason_code_value = r.get("reason_code")
+            detail_value = r.get("detail")
             payload = r.get("payload") or {}
+            row_degraded = False
             if isinstance(payload, dict):
                 lat = payload.get("latency_ms")
                 if isinstance(lat, (int, float)) and lat >= 0:
                     latencies.append(int(lat))
+                if bool(payload.get("degraded")):
+                    row_degraded = True
+            if str(status_value or "").strip().upper() == "DEGRADED":
+                row_degraded = True
+            if row_degraded:
+                degraded_count += 1
+            if _contains_timeout_marker(
+                status=status_value,
+                reason_code=reason_code_value,
+                detail=detail_value,
+            ):
+                timeout_count += 1
+            if _is_failure_status(status_value):
+                failure_count += 1
 
-        if not latencies:
-            return {"p50_ms": None, "p95_ms": None, "sample_count": 0}
+        total_events = len(rows)
+        timeout_rate_pct = _rate_pct(timeout_count, total_events)
+        degraded_rate_pct = _rate_pct(degraded_count, total_events)
+        failure_rate_pct = _rate_pct(failure_count, total_events)
+        active_alerts: list[dict[str, Any]] = []
+        if total_events > 0 and timeout_rate_pct >= float(alert_thresholds["timeout_rate_pct"]):
+            active_alerts.append(
+                {
+                    "code": "RETRIEVAL_TIMEOUT_RATE_HIGH",
+                    "severity": "WARN",
+                    "observed_rate_pct": timeout_rate_pct,
+                    "threshold_rate_pct": float(alert_thresholds["timeout_rate_pct"]),
+                }
+            )
+        if total_events > 0 and degraded_rate_pct >= float(alert_thresholds["degraded_rate_pct"]):
+            active_alerts.append(
+                {
+                    "code": "RETRIEVAL_DEGRADED_RATE_HIGH",
+                    "severity": "WARN",
+                    "observed_rate_pct": degraded_rate_pct,
+                    "threshold_rate_pct": float(alert_thresholds["degraded_rate_pct"]),
+                }
+            )
+        if total_events > 0 and failure_rate_pct >= float(alert_thresholds["failure_rate_pct"]):
+            active_alerts.append(
+                {
+                    "code": "RETRIEVAL_FAILURE_RATE_HIGH",
+                    "severity": "WARN",
+                    "observed_rate_pct": failure_rate_pct,
+                    "threshold_rate_pct": float(alert_thresholds["failure_rate_pct"]),
+                }
+            )
 
-        sorted_lats = sorted(latencies)
-        n = len(sorted_lats)
-        p50 = sorted_lats[int(n * 0.50)]
-        p95 = sorted_lats[min(int(n * 0.95), n - 1)]
-        return {"p50_ms": p50, "p95_ms": p95, "sample_count": n}
+        p50: int | None = None
+        p95: int | None = None
+        if latencies:
+            sorted_lats = sorted(latencies)
+            n = len(sorted_lats)
+            p50 = sorted_lats[int(n * 0.50)]
+            p95 = sorted_lats[min(int(n * 0.95), n - 1)]
+
+        return {
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "sample_count": len(latencies),
+            "event_count": total_events,
+            "timeout_count": timeout_count,
+            "degraded_count": degraded_count,
+            "failure_count": failure_count,
+            "timeout_rate_pct": timeout_rate_pct,
+            "degraded_rate_pct": degraded_rate_pct,
+            "failure_rate_pct": failure_rate_pct,
+            "alerting": {
+                "window_size": total_events,
+                "thresholds": {
+                    "timeout_rate_pct": float(alert_thresholds["timeout_rate_pct"]),
+                    "degraded_rate_pct": float(alert_thresholds["degraded_rate_pct"]),
+                    "failure_rate_pct": float(alert_thresholds["failure_rate_pct"]),
+                },
+                "active_alerts": active_alerts,
+            },
+        }
 
     def _query_snapshot_staleness(self) -> int | None:
         """Return staleness of the most recent config snapshot in ms."""
