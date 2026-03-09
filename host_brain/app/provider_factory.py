@@ -229,21 +229,23 @@ def build_langchain_chat_provider_fn(
     api_key: str,
     timeout_ms: int,
     node_id: str | None = None,
+    base_url_override: str | None = None,
 ) -> Callable[[dict[str, Any]], Any]:
     from langchain_openai import ChatOpenAI  # noqa: PLC0415
     from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
 
     provider = str(provider_name or "").strip().lower()
     model_name = str(model_id or "").strip() or "default"
-    base_url: str | None = None
-    if provider == PROVIDER_DEEPSEEK:
-        base_url = str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
-    elif provider == PROVIDER_GEMINI:
-        base_url = str(
-            os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
-        ).strip()
-    else:
-        base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
+    base_url: str | None = str(base_url_override or "").strip() or None
+    if not base_url:
+        if provider == PROVIDER_DEEPSEEK:
+            base_url = str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
+        elif provider == PROVIDER_GEMINI:
+            base_url = str(
+                os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
+            ).strip()
+        else:
+            base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
     llm = ChatOpenAI(
         model=model_name,
@@ -336,6 +338,7 @@ def build_host_provider_fn(
     model_id: str,
     api_key: str | None,
     timeout_ms: int,
+    base_url_override: str | None = None,
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
@@ -345,6 +348,7 @@ def build_host_provider_fn(
             model_id=model_id,
             api_key=key_value,
             timeout_ms=timeout_ms,
+            base_url_override=base_url_override,
         )
     return build_host_mock_provider()
 
@@ -356,6 +360,7 @@ def build_host_provider_fn_for_node(
     api_key: str | None,
     timeout_ms: int,
     node_id: str,
+    base_url_override: str | None = None,
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
@@ -366,6 +371,7 @@ def build_host_provider_fn_for_node(
             api_key=key_value,
             timeout_ms=timeout_ms,
             node_id=node_id,
+            base_url_override=base_url_override,
         )
         fallback_provider_fn: Callable[[dict[str, Any]], Any] | None = None
         fallback_model_id: str | None = None
@@ -382,6 +388,7 @@ def build_host_provider_fn_for_node(
                     api_key=key_value,
                     timeout_ms=timeout_ms,
                     node_id=node_id,
+                    base_url_override=base_url_override,
                 )
         return wrap_node_provider_fn_with_retry(
             provider_fn=provider_fn,

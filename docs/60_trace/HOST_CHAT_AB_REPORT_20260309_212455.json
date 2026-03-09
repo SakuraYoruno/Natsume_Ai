@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-03-09T21:24:55",
+  "profiles": {
+    "host8b": {
+      "HOST_SYS_MODE": "normal",
+      "HOST_CHAT_HOST_8B_ENABLED": "true",
+      "HOST_CHAT_FORCE_CLOUD": "false",
+      "HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED": "true",
+      "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
+      "HOST_CHAT_HOST_8B_PROVIDER": "openai",
+      "HOST_CHAT_HOST_8B_MODEL_ID": "qwen3:8b-q4_k_m",
+      "HOST_CHAT_HOST_8B_BASE_URL": "http://127.0.0.1:11434/v1",
+      "HOST_ENABLE_RETRIEVAL": "false"
+    },
+    "cloud": {
+      "HOST_SYS_MODE": "normal",
+      "HOST_CHAT_FORCE_CLOUD": "true",
+      "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
+      "HOST_LLM_PROVIDER": "gemini",
+      "HOST_ENABLE_RETRIEVAL": "false"
+    }
+  },
+  "repeat": 1,
+  "sample_count_per_round": 1,
+  "profile_summary": {
+    "host8b": {
+      "sample_count": 1,
+      "ok_rate": 1.0,
+      "approve_rate": 1.0,
+      "quality_mean": 0.65,
+      "latency_mean_ms": 4948.846,
+      "latency_p95_ms": 4948.846,
+      "route_target_hist": {
+        "host_8b": 1
+      },
+      "provider_hist": {
+        "openai": 1
+      },
+      "llm_status_hist": {
+        "DEGRADED": 1
+      },
+      "errors": 0
+    },
+    "cloud": {
+      "sample_count": 1,
+      "ok_rate": 1.0,
+      "approve_rate": 1.0,
+      "quality_mean": 0.9,
+      "latency_mean_ms": 4983.085,
+      "latency_p95_ms": 4983.085,
+      "route_target_hist": {
+        "cloud": 1
+      },
+      "provider_hist": {
+        "gemini": 1
+      },
+      "llm_status_hist": {
+        "OK": 1
+      },
+      "errors": 0
+    }
+  },
+  "runs": [
+    {
+      "profile": "host8b",
+      "round_index": 1,
+      "sample_index": 1,
+      "message": "???????????",
+      "ok": true,
+      "latency_ms": 4948.846,
+      "decision": "APPROVE",
+      "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+      "quality_stage": "S_ORCH_RUN",
+      "quality_score": 0.65,
+      "narrative_len": 21,
+      "llm_status": "DEGRADED",
+      "provider": "openai",
+      "model_id": "qwen3:8b-q4_k_m",
+      "route_target": "host_8b",
+      "route_reason_code": "HOST_CHAT_HOST_8B_ACTIVE",
+      "error": null
+    },
+    {
+      "profile": "cloud",
+      "round_index": 1,
+      "sample_index": 1,
+      "message": "???????????",
+      "ok": true,
+      "latency_ms": 4983.085,
+      "decision": "APPROVE",
+      "reason_code": null,
+      "quality_stage": "S_COMPLETE",
+      "quality_score": 0.9,
+      "narrative_len": 11,
+      "llm_status": "OK",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash",
+      "route_target": "cloud",
+      "route_reason_code": "HOST_CHAT_FORCE_CLOUD",
+      "error": null
+    }
+  ]
+}

@@ -151,6 +151,7 @@ def stream_llm_chunks(
     prompt_text: str,
     system_prompt: str,
     gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
 ) -> "Generator[str, None, None]":
     """P0 SSE 优化：直接调用 LangChain streaming 模式，逐 token yield 文本片段。
 
@@ -170,15 +171,16 @@ def stream_llm_chunks(
     from langchain_openai import ChatOpenAI
 
     provider = str(provider_name or "").strip().lower()
-    base_url: str | None = None
-    if provider == PROVIDER_DEEPSEEK:
-        base_url = str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
-    elif provider == PROVIDER_GEMINI:
-        base_url = str(
-            os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
-        ).strip()
-    else:
-        base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
+    base_url: str | None = str(base_url_override or "").strip() or None
+    if not base_url:
+        if provider == PROVIDER_DEEPSEEK:
+            base_url = str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()
+        elif provider == PROVIDER_GEMINI:
+            base_url = str(
+                os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
+            ).strip()
+        else:
+            base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
     params = dict(gen_params or {})
     temperature = float(params.get("temperature", 0.4))
@@ -214,6 +216,7 @@ async def astream_llm_chunks(
     prompt_text: str,
     system_prompt: str,
     gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
 ) -> "AsyncGenerator[str, None]":
     """P0 SSE 优化：原生异步流式生成器，通过 asyncio.Queue 桥接同步 LangChain streaming。
 
@@ -248,6 +251,7 @@ async def astream_llm_chunks(
                 prompt_text=prompt_text,
                 system_prompt=system_prompt,
                 gen_params=gen_params,
+                base_url_override=base_url_override,
             ):
                 asyncio.run_coroutine_threadsafe(chunk_queue.put(chunk), loop)
         except Exception:

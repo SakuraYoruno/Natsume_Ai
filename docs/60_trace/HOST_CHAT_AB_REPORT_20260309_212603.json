@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-03-09T21:26:03",
+  "profiles": {
+    "host8b": {
+      "HOST_SYS_MODE": "normal",
+      "HOST_CHAT_HOST_8B_ENABLED": "true",
+      "HOST_CHAT_FORCE_CLOUD": "false",
+      "HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED": "true",
+      "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
+      "HOST_CHAT_HOST_8B_PROVIDER": "openai",
+      "HOST_CHAT_HOST_8B_MODEL_ID": "qwen3:8b",
+      "HOST_CHAT_HOST_8B_BASE_URL": "http://127.0.0.1:11434/v1",
+      "HOST_ENABLE_RETRIEVAL": "false"
+    },
+    "cloud": {
+      "HOST_SYS_MODE": "normal",
+      "HOST_CHAT_FORCE_CLOUD": "true",
+      "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
+      "HOST_LLM_PROVIDER": "gemini",
+      "HOST_ENABLE_RETRIEVAL": "false"
+    }
+  },
+  "repeat": 1,
+  "sample_count_per_round": 1,
+  "profile_summary": {
+    "host8b": {
+      "sample_count": 1,
+      "ok_rate": 0.0,
+      "approve_rate": 0.0,
+      "quality_mean": 0.0,
+      "latency_mean_ms": 6.919,
+      "latency_p95_ms": 6.919,
+      "route_target_hist": {
+        "UNKNOWN": 1
+      },
+      "provider_hist": {
+        "UNKNOWN": 1
+      },
+      "llm_status_hist": {
+        "UNKNOWN": 1
+      },
+      "errors": 1
+    },
+    "cloud": {
+      "sample_count": 1,
+      "ok_rate": 0.0,
+      "approve_rate": 0.0,
+      "quality_mean": 0.0,
+      "latency_mean_ms": 0.984,
+      "latency_p95_ms": 0.984,
+      "route_target_hist": {
+        "UNKNOWN": 1
+      },
+      "provider_hist": {
+        "UNKNOWN": 1
+      },
+      "llm_status_hist": {
+        "UNKNOWN": 1
+      },
+      "errors": 1
+    }
+  },
+  "runs": [
+    {
+      "profile": "host8b",
+      "round_index": 1,
+      "sample_index": 1,
+      "message": "???????????",
+      "ok": false,
+      "latency_ms": 6.919,
+      "decision": "REJECT",
+      "reason_code": null,
+      "quality_stage": "S_ERROR",
+      "quality_score": 0.0,
+      "narrative_len": 0,
+      "llm_status": "",
+      "provider": "",
+      "model_id": "",
+      "route_target": "",
+      "route_reason_code": "",
+      "error": "'_NoopMetrics' object has no attribute 'inc_error'"
+    },
+    {
+      "profile": "cloud",
+      "round_index": 1,
+      "sample_index": 1,
+      "message": "???????????",
+      "ok": false,
+      "latency_ms": 0.984,
+      "decision": "REJECT",
+      "reason_code": null,
+      "quality_stage": "S_ERROR",
+      "quality_score": 0.0,
+      "narrative_len": 0,
+      "llm_status": "",
+      "provider": "",
+      "model_id": "",
+      "route_target": "",
+      "route_reason_code": "",
+      "error": "'_NoopMetrics' object has no attribute 'inc_error'"
+    }
+  ]
+}
