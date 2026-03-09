@@ -70,6 +70,8 @@
 - [x] 5.3：新增回滚运行手册 `ROLLBACK_RUNBOOK_2026-03-10.md`，并生成门禁报告 `RELEASE_ROLLBACK_GATE_20260310_010648.{json,md}`
 - [x] 5.3：新增 24h 复盘脚本 `tools/post_release_review.py`（聚合稳定性 + 回滚门禁结论）
 - [x] 5.3：生成首份复盘 `POST_RELEASE_REVIEW_20260310_010918.{json,md}`（`release_id=codex-20260309`，状态 `COMPLETE`）
+- [x] P2-A：`skills/registry.py` 新增统一 `@skill` 装饰器 + `register_decorated()` 扫描注册入口
+- [x] P2-A：补齐 `SkillResult` 与 `permission_model` 抽象，新增装饰器回归 `60 passed`（含 skills/governance）
 
 ---
 
@@ -216,8 +218,8 @@
 ## 3. P2（中期）架构治理优化
 
 ### P2-A Skills 层 OpenClaw 风格封装（预估 5-7 天）
-- [ ] 设计统一 `@skill` 注册器
-- [ ] 抽象 `SkillRegistry`、`SkillResult`、权限模型
+- [x] 设计统一 `@skill` 注册器
+- [x] 抽象 `SkillRegistry`、`SkillResult`、权限模型
 - [ ] 封装 Cursor / PyCharm / Codex 三类能力
 - [ ] 打通 MCP 工具注册与 Skills（单入口）
 

@@ -13,6 +13,21 @@ ALLOWED_SCOPE = {"host", "memory", "system"}
 
 
 @dataclass(frozen=True)
+class SkillPermissionModel:
+    clearance: str
+    scope: str
+    require_confirm: bool
+
+
+@dataclass(frozen=True)
+class SkillResult:
+    status: str
+    result_code: str
+    payload: dict[str, Any]
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
 class SkillMeta:
     skill_name: str
     clearance: str
@@ -21,6 +36,7 @@ class SkillMeta:
     reversible: bool
     handler: SkillHandler
     require_confirm: bool = False
+    description: str = ""
 
     def validate(self) -> None:
         if not self.skill_name or not isinstance(self.skill_name, str):
@@ -37,6 +53,47 @@ class SkillMeta:
             raise ValueError("handler must be callable")
         if self.risk_level >= 4 and not self.require_confirm:
             raise ValueError("high-risk skill must set require_confirm=True")
+        if self.description and not isinstance(self.description, str):
+            raise ValueError("description must be string")
+
+    @property
+    def permission_model(self) -> SkillPermissionModel:
+        return SkillPermissionModel(
+            clearance=self.clearance,
+            scope=self.scope,
+            require_confirm=self.require_confirm,
+        )
+
+
+def skill(
+    *,
+    skill_name: str | None = None,
+    clearance: str = "LOW",
+    risk_level: int = 1,
+    scope: str = "host",
+    reversible: bool = True,
+    require_confirm: bool = False,
+    description: str = "",
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator to attach SkillMeta config on handler callables."""
+
+    def _decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
+        setattr(
+            handler,
+            "__skill_meta_config__",
+            {
+                "skill_name": str(skill_name or handler.__name__).strip(),
+                "clearance": str(clearance).strip().upper(),
+                "risk_level": int(risk_level),
+                "scope": str(scope).strip().lower(),
+                "reversible": bool(reversible),
+                "require_confirm": bool(require_confirm),
+                "description": str(description or "").strip(),
+            },
+        )
+        return handler
+
+    return _decorator
 
 
 class SkillRegistry:
@@ -66,3 +123,25 @@ class SkillRegistry:
     def list_skill_names(self) -> list[str]:
         """返回所有已注册 Skill 的名称列表（M42：用于动态 action 白名单）。"""
         return list(self._skills.keys())
+
+    def register_decorated(self, provider: Any) -> int:
+        """Scan provider object and register all `@skill` handlers."""
+        count = 0
+        for attr_name in sorted(dir(provider)):
+            candidate = getattr(provider, attr_name)
+            cfg = getattr(candidate, "__skill_meta_config__", None)
+            if not isinstance(cfg, dict):
+                continue
+            meta = SkillMeta(
+                skill_name=str(cfg.get("skill_name") or attr_name).strip(),
+                clearance=str(cfg.get("clearance") or "LOW").strip().upper(),
+                risk_level=int(cfg.get("risk_level") or 1),
+                scope=str(cfg.get("scope") or "host").strip().lower(),
+                reversible=bool(cfg.get("reversible", True)),
+                handler=candidate,  # bound method or function
+                require_confirm=bool(cfg.get("require_confirm", False)),
+                description=str(cfg.get("description") or "").strip(),
+            )
+            self.register(meta)
+            count += 1
+        return count
