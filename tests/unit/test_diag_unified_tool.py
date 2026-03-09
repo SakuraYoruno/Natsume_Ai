@@ -86,6 +86,38 @@ def test_diag_unified_stream_command_supports_messages(tmp_path: Path) -> None:
     assert "beta" in command
 
 
+def test_diag_unified_stability_command_supports_threshold_flags(tmp_path: Path) -> None:
+    report = run(
+        [
+            "stability",
+            "--dry-run",
+            "--days",
+            "14",
+            "--ledger-db",
+            str(tmp_path / "audit.sqlite3"),
+            "--threshold-timeout-rate-pct",
+            "11",
+            "--threshold-degraded-rate-pct",
+            "22",
+            "--threshold-failure-rate-pct",
+            "33",
+            "--output-json",
+            str(tmp_path / "diag_stability.json"),
+            "--output-md",
+            str(tmp_path / "diag_stability.md"),
+        ]
+    )
+
+    command = list(report.get("command") or [])
+    joined = " ".join(command)
+    assert "diag_stability_weekly.py" in joined
+    assert "--days" in command
+    assert "14" in command
+    assert "--threshold-timeout-rate-pct" in command
+    assert "--threshold-degraded-rate-pct" in command
+    assert "--threshold-failure-rate-pct" in command
+
+
 def test_extract_artifact_paths_parses_downstream_report_lines() -> None:
     stdout = (
         "step\n"

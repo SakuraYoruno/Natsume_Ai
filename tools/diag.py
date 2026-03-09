@@ -1,7 +1,7 @@
-"""Unified diagnostic entrypoint for retrieval/stream/emotion/graph.
+"""Unified diagnostic entrypoint for retrieval/stream/emotion/graph/stability.
 
 This tool consolidates scattered diagnostic scripts behind one command:
-    python tools/diag.py <retrieval|stream|emotion|graph> [options]
+    python tools/diag.py <retrieval|stream|emotion|graph|stability> [options]
 
 For every run, a unified JSON + Markdown report is written under docs/60_trace
 unless overridden by --output-json/--output-md.
@@ -27,6 +27,7 @@ DOMAIN_RETRIEVAL = "retrieval"
 DOMAIN_STREAM = "stream"
 DOMAIN_EMOTION = "emotion"
 DOMAIN_GRAPH = "graph"
+DOMAIN_STABILITY = "stability"
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,27 @@ def _build_command_plan(args: argparse.Namespace) -> CommandPlan:
         return CommandPlan(
             domain=DOMAIN_EMOTION,
             description="Run emotion closed-loop corpus diagnostic.",
+            command=command,
+        )
+
+    if args.domain == DOMAIN_STABILITY:
+        command = [
+            python_bin,
+            str(ROOT / "tools" / "diag_stability_weekly.py"),
+            "--ledger-db",
+            str(args.ledger_db),
+            "--days",
+            str(int(args.days)),
+            "--threshold-timeout-rate-pct",
+            str(float(args.threshold_timeout_rate_pct)),
+            "--threshold-degraded-rate-pct",
+            str(float(args.threshold_degraded_rate_pct)),
+            "--threshold-failure-rate-pct",
+            str(float(args.threshold_failure_rate_pct)),
+        ]
+        return CommandPlan(
+            domain=DOMAIN_STABILITY,
+            description="Run weekly stability summary diagnostic.",
             command=command,
         )
 
@@ -305,6 +327,14 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_options(emotion)
     emotion.add_argument("--threshold", type=float, default=0.8)
     emotion.add_argument("--case-file", default="")
+
+    stability = subparsers.add_parser(DOMAIN_STABILITY, help="Run weekly stability report diagnostic")
+    _add_common_options(stability)
+    stability.add_argument("--ledger-db", default="host_brain/data/audit.sqlite3")
+    stability.add_argument("--days", type=int, default=7)
+    stability.add_argument("--threshold-timeout-rate-pct", type=float, default=10.0)
+    stability.add_argument("--threshold-degraded-rate-pct", type=float, default=20.0)
+    stability.add_argument("--threshold-failure-rate-pct", type=float, default=15.0)
     return parser
 
 

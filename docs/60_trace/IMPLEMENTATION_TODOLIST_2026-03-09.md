@@ -62,6 +62,8 @@
 - [x] 5.1：完成扩展回归 `149 passed`（obs + scene_router + stream + retrieval + chat + emotion）
 - [x] 5.1：`/obs/metrics` 增加超时/降级/失败率阈值告警（环境变量阈值 + 稳定告警码）
 - [x] 5.1：新增/更新 observability 契约回归 `26 passed`（`test_obs_metrics_contract` + `test_perf_baseline_contract`）
+- [x] 5.1：新增周稳定性报告工具 `tools/diag_stability_weekly.py` 并接入 `tools/diag.py stability` 子命令
+- [x] 5.1：生成首份周报 `WEEKLY_STABILITY_REPORT_20260310_005912.{json,md}`（7 天窗口，状态 `WARN`，2 条告警）
 
 ---
 
@@ -249,7 +251,7 @@
 ### 5.1 观测与告警
 - [x] 增加关键链路 trace：召回耗时、首 token、后台任务耗时
 - [x] 为超时、降级、失败率设置阈值告警
-- [ ] 每周输出稳定性报告
+- [x] 每周输出稳定性报告
 
 ### 5.2 测试体系
 - [x] 为流式链路增加契约测试（SSE 事件顺序、终止条件）
