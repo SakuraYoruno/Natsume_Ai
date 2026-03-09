@@ -276,6 +276,10 @@ def extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
     user_message = _truncate_for_prompt(prompt_payload.get("user_message"), limit=1000)
+    render_target_lang = str(prompt_payload.get("render_target_lang") or "").strip().lower()
+    if render_target_lang not in {"zh", "ja"}:
+        render_target_lang = infer_render_target_lang(user_message=user_message)
+
     retrieval_raw = prompt_payload.get("retrieval")
     retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, dict) else {}
     retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
@@ -292,6 +296,12 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
             continue
         evidence_lines.append(f"- [{evidence_ref}] {snippet}")
     evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+
+    if render_target_lang == "zh":
+        language_rule = "4. Reply in concise spoken Simplified Chinese."
+    else:
+        language_rule = "4. Reply in concise natural Japanese."
+
     return (
         "You are the Natsume core reasoning node.\n"
         "Return exactly one JSON object with top-level keys: narrative, intent_draft, meta.\n"
@@ -301,8 +311,9 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
         "1. Output JSON only. No markdown. No code fences.\n"
         "2. Keep draft_only=true.\n"
         "3. Do not claim execution/saving/confirmation has happened.\n"
-        "4. Reply in Simplified Chinese and keep it concise.\n"
+        f"{language_rule}\n"
         "5. Ground the output in user message and evidence only.\n\n"
+        f"Render target lang: {render_target_lang}\n"
         f"User message:\n{user_message}\n\n"
         f"Retrieval status: {retrieval_status}\n"
         f"Retrieval reason_code: {retrieval_reason}\n"

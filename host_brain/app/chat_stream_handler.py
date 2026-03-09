@@ -258,11 +258,11 @@ def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
 
 
 def _resolve_stream_retrieval_timeout_ms() -> int:
-    raw = str(os.environ.get("HOST_STREAM_RETRIEVAL_TIMEOUT_MS") or "450").strip()
+    raw = str(os.environ.get("HOST_STREAM_RETRIEVAL_TIMEOUT_MS") or "1200").strip()
     try:
         value = int(raw)
     except ValueError:
-        value = 450
+        value = 1200
     return max(100, min(value, 5000))
 
 
@@ -431,6 +431,10 @@ async def _sse_event_generator(
     yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
     try:
+        resolved_message = repair_utf8_latin1_mojibake(str(message or "").strip())
+        if not resolved_message:
+            resolved_message = str(message or "").strip()
+
         retrieval_latency_ms: int | None = None
         first_token_latency_ms: int | None = None
 
@@ -445,14 +449,14 @@ async def _sse_event_generator(
                 "type": "query",
                 "action": "narrative_only",
                 "target": "host",
-                "args": {"text": message},
+                "args": {"text": resolved_message},
                 "nonce": f"nonce::{request_id}",
             }
 
         # ── 2. 情感上下文 ─────────────────────────────────────────────────
         class _StreamReq:
             def __init__(self) -> None:
-                self.message = message
+                self.message = resolved_message
                 self.session_id = session_id
                 self.thread_id = thread_id
                 self.mood_state = mood_state
@@ -503,7 +507,7 @@ async def _sse_event_generator(
             retrieval_task = asyncio.create_task(
                 _run_retrieval(
                     request_id=request_id,
-                    message=message,
+                    message=resolved_message,
                     session_id=session_id,
                     ts_ms=ts_ms,
                     emotion_tag=_retr_emotion,
@@ -522,13 +526,22 @@ async def _sse_event_generator(
                 if retrieval_started_ms is not None:
                     retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
             except asyncio.TimeoutError:
-                retrieval_task.cancel()
                 retrieval_summary = _build_degraded_retrieval_summary("RETRIEVAL_TIMEOUT")
                 retrieval_evidence_items = []
                 if retrieval_started_ms is not None:
                     retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
+                if retrieval_task is not None:
+                    def _swallow_retrieval_task_error(task: asyncio.Task) -> None:
+                        try:
+                            task.exception()
+                        except asyncio.CancelledError:
+                            return
+                        except Exception:
+                            return
+
+                    retrieval_task.add_done_callback(_swallow_retrieval_task_error)
                 _logger.warning(
-                    "retrieval timeout before stream prompt build",
+                    "retrieval timeout before stream prompt build; allow background warmup to continue",
                     extra={"request_id": request_id, "timeout_ms": retrieval_timeout_ms},
                 )
             except Exception as exc:
@@ -577,7 +590,7 @@ async def _sse_event_generator(
 
         # ── 6. 构建 prompt（已注入 Retrieval + Emotion 上下文）───────────
         prompt_build_result = await _build_stream_chat_prompt(
-            message=message,
+            message=resolved_message,
             session_id=session_id,
             thread_id=thread_id,
             mood_state=mood_state,
@@ -679,7 +692,7 @@ async def _sse_event_generator(
                 request_id=request_id,
                 intent_id=str(intent_id or request_id),
                 session_id=session_id,
-                user_message=message,
+                user_message=resolved_message,
                 assistant_reply=narrative,
                 emotion_context=emotion_context,
                 ts_ms=ts_ms,
