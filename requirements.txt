@@ -1,6 +1,6 @@
 # Core runtime and integration dependencies for local deploy checks.
 neo4j>=6.1.0,<7
-chromadb>=0.6.0,<1
+chromadb>=1.4.0,<2
 langchain>=1.2.0,<2
 langchain-openai>=1.1.0,<2
 langgraph>=1.0.0,<2

@@ -44,7 +44,7 @@ from host_brain.app.http_hooks import (
     add_request_id_and_audit as _add_request_id_fn,
 )
 from host_brain.app.chat_handler import handle_chat
-from host_brain.app.chat_stream_handler import handle_chat_stream
+from host_brain.app.chat_stream_handler import handle_chat_stream, handle_chat_stream_post
 from host_brain.app.system_handler import receive_edge_events_response
 from host_brain.core.ids import new_request_id
 
@@ -180,14 +180,14 @@ if _cors_origins_raw:
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler — 委托给 http_hooks._global_exception_handler_fn。"""
-    return await _global_exception_handler_fn(request, exc)
+    return await _global_exception_handler_fn(request=request, exc=exc, logger=_logger)
 
 
 # 中间件：请求ID注入和审计
 @app.middleware("http")
 async def add_request_id_and_audit(request: Request, call_next: Callable) -> Response:
     """Attach request ids to incoming requests — 委托给 http_hooks._add_request_id_fn。"""
-    return await _add_request_id_fn(request, call_next, _metrics)
+    return await _add_request_id_fn(request=request, call_next=call_next, metrics=_metrics, logger=_logger)
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +248,7 @@ async def startup_report() -> Any:
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
     """POST /v1/chat — 委托给 chat_handler.handle_chat。"""
-    request_id = getattr(request.state, "request_id", None) or new_request_id()
-    _metrics.inc_chat()
-    return await handle_chat(request_body=request_body, request_id=request_id)
+    return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
 
 
 @app.get("/v1/chat/stream")
@@ -263,14 +261,29 @@ async def chat_stream(
     emotion_tag: Optional[str] = None,
 ) -> StreamingResponse:
     """GET /v1/chat/stream — 委托给 chat_stream_handler.handle_chat_stream。"""
-    request_id = getattr(request.state, "request_id", None) or new_request_id()
     return await handle_chat_stream(
         message=message,
         session_id=session_id,
         thread_id=thread_id,
         mood_state=mood_state,
         emotion_tag=emotion_tag,
-        request_id=request_id,
+        request=request,
+    )
+
+
+@app.post("/v1/chat/stream")
+async def chat_stream_post(
+    request_body: ChatRequest,
+    request: Request,
+) -> StreamingResponse:
+    """POST /v1/chat/stream — 委托给 chat_stream_handler.handle_chat_stream_post。
+
+    接受与 POST /v1/chat 相同的 ChatRequest 请求体，
+    返回与 GET /v1/chat/stream 相同格式的 SSE 事件流。
+    """
+    return await handle_chat_stream_post(
+        request_body=request_body,
+        request=request,
     )
 
 
@@ -301,7 +314,7 @@ async def metrics() -> MetricsResponse:
 # Web UI 面板入口（M17: 已升级为 React SPA，旧 panel.html 已移除）
 # ---------------------------------------------------------------------------
 @app.get("/panel")
-async def panel_page() -> "RedirectResponse":
+async def panel_page() -> Response:
     """Monitoring panel redirect endpoint."""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/monitor/index.html", status_code=301)

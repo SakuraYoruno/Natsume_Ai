@@ -22,9 +22,8 @@ def client(tmp_path, monkeypatch):
 
     # 重置模块级单例，确保 fixture 隔离
     import host_brain.app.canon_routes as cr
-    import host_brain.app.fastapi_app as fa
     cr._canon_store = None
-    fa._ledger = None
+    cr._ledger_provider = None
 
     from host_brain.audit.sqlite_ledger import SQLiteLedger
     from host_brain.memory.canon_world_store import WorldCanonStore

@@ -24,9 +24,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from host_brain.audit.sqlite_ledger import (
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.ledger_constants import (
     DEFAULT_WAL_CONFIG,
-    SQLiteLedger,
     WalConfig,
     WRITE_RETRY_MAX,
     WRITE_RETRY_DELAY_S,

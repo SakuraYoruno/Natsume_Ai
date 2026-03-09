@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from host_brain.retrieval.recall_fusion import HybridFusionStrategy
+from host_brain.retrieval.hybrid_fusion import HybridFusionStrategy
 
 
 class TestHybridFusionEmotionBoost:

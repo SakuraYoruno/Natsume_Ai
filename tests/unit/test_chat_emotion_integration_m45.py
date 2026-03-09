@@ -81,10 +81,11 @@ def test_chat_emotion_context_propagates_to_governor_retrieval_and_graph(
                 },
             )
 
-    monkeypatch.setattr(appmod, "_ledger", None)
-    monkeypatch.setattr(appmod, "_intent_engine", _FakeIntentEngine())
-    monkeypatch.setattr(appmod, "_retrieval_pipeline", _FakeRetrievalPipeline())
-    monkeypatch.setattr(appmod, "_graph_runtime", _FakeGraphRuntime())
+    import host_brain.app.dependencies as dep
+    monkeypatch.setattr(dep, "_ledger", None)
+    monkeypatch.setattr(dep, "_intent_engine", _FakeIntentEngine())
+    monkeypatch.setattr(dep, "_retrieval_pipeline", _FakeRetrievalPipeline())
+    monkeypatch.setattr(dep, "_graph_runtime", _FakeGraphRuntime())
 
     client = TestClient(appmod.app)
     response = client.post(

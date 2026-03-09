@@ -15,7 +15,7 @@ PROVIDER_DEEPSEEK = "deepseek"
 ProviderFn = Callable[[dict[str, Any]], Any]
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator, Generator
 
 
 def _invoke_provider_with_timeout(
@@ -203,3 +203,63 @@ def stream_llm_chunks(
         text = getattr(chunk, "content", "") or ""
         if text:
             yield text
+
+
+async def astream_llm_chunks(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    prompt_text: str,
+    system_prompt: str,
+    gen_params: dict[str, Any] | None = None,
+) -> "AsyncGenerator[str, None]":
+    """P0 SSE 优化：原生异步流式生成器，通过 asyncio.Queue 桥接同步 LangChain streaming。
+
+    相比 stream_llm_chunks（同步），本函数可在 async 上下文中直接 async for 迭代，
+    无需在调用方手动创建线程桥接，适合在 FastAPI SSE handler 中直接使用。
+
+    Args:
+        provider_name: 提供商名称（openai/gemini/deepseek）
+        model_id: 模型 ID
+        api_key: API Key
+        timeout_ms: 超时毫秒
+        prompt_text: 用户侧 prompt 文本
+        system_prompt: system 角色提示词
+        gen_params: 可选生成参数（temperature/top_p）
+
+    Yields:
+        str: LLM 返回的文本片段（token chunk）
+    """
+    import asyncio
+    import threading
+
+    loop = asyncio.get_event_loop()
+    chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def _producer() -> None:
+        try:
+            for chunk in stream_llm_chunks(
+                provider_name=provider_name,
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                prompt_text=prompt_text,
+                system_prompt=system_prompt,
+                gen_params=gen_params,
+            ):
+                asyncio.run_coroutine_threadsafe(chunk_queue.put(chunk), loop)
+        except Exception:
+            pass
+        finally:
+            asyncio.run_coroutine_threadsafe(chunk_queue.put(None), loop)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+
+    while True:
+        chunk = await chunk_queue.get()
+        if chunk is None:
+            break
+        yield chunk

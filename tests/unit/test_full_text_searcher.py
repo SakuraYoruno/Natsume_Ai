@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.retrieval.recall_fusion import FullTextSearcher
+from host_brain.retrieval.full_text_searcher import FullTextSearcher
 
 
 # ---------------------------------------------------------------------------

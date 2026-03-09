@@ -9,17 +9,17 @@ import time
 
 import pytest
 
-from host_brain.app.fastapi_app import (
+from host_brain.app.graph_config_builder import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
-    ChatRequest,
-    _resolve_chat_retrieval_gate,
-    _resolve_chat_scene_type,
     pre_intent_classifier,
+    resolve_chat_retrieval_gate as _resolve_chat_retrieval_gate,
+    resolve_chat_scene_type as _resolve_chat_scene_type,
 )
+from host_brain.app.schemas import ChatRequest
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +145,7 @@ def test_pic_11_mixed_keywords_priority():
 # ---------------------------------------------------------------------------
 def test_pic_12_scene_type_source_pre_classifier(monkeypatch):
     """T-PIC-12: scene_type_source equals pre_classifier when scene_type not explicitly provided"""
-    from host_brain.app.fastapi_app import SCENE_CHAT, pre_intent_classifier
-
-    # 模拟端点逻辑：request_body.scene_type 为 None
+    from host_brain.app.graph_config_builder import SCENE_CHAT, pre_intent_classifier
     request_scene_type = None
     if request_scene_type:
         scene_type = str(request_scene_type).strip().upper() or SCENE_CHAT
@@ -165,7 +163,7 @@ def test_pic_12_scene_type_source_pre_classifier(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_pic_13_scene_type_source_explicit():
     """T-PIC-13: scene_type_source equals explicit when scene_type is explicitly provided"""
-    from host_brain.app.fastapi_app import SCENE_WORK_CODE, pre_intent_classifier
+    from host_brain.app.graph_config_builder import SCENE_WORK_CODE, pre_intent_classifier
 
     # 模拟端点逻辑：request_body.scene_type 显式传入 WORK_CODE
     request_scene_type = "WORK_CODE"
@@ -187,7 +185,7 @@ def test_pic_14_graph_meta_scene_type_source_field():
     """T-PIC-14：_build_chat_graph_config 返回的 graph_meta 包含 scene_type_source 字段"""
     from unittest.mock import MagicMock
 
-    from host_brain.app.fastapi_app import SCENE_CHAT, _build_chat_graph_config
+    from host_brain.app.graph_config_builder import SCENE_CHAT, build_chat_graph_config as _build_chat_graph_config
 
     config = _build_chat_graph_config(
         provider_name="gemini",

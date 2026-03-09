@@ -98,42 +98,42 @@ class TestFastapiIntentEngineInjectionM44(unittest.TestCase):
 
     def setUp(self) -> None:
         # 重置全局单例，确保测试隔离
-        import host_brain.app.fastapi_app as app_module
-        app_module._intent_engine = None
-        app_module._skill_registry = None
-        app_module._policy_cache = None
+        import host_brain.app.dependencies as dep
+        dep._intent_engine = None
+        dep._skill_registry = None
+        dep._policy_cache = None
 
     def tearDown(self) -> None:
         # 清理全局单例
-        import host_brain.app.fastapi_app as app_module
-        app_module._intent_engine = None
-        app_module._skill_registry = None
-        app_module._policy_cache = None
+        import host_brain.app.dependencies as dep
+        dep._intent_engine = None
+        dep._skill_registry = None
+        dep._policy_cache = None
 
     def test_get_intent_engine_has_registry(self) -> None:
         """T-TG-RT-01：get_intent_engine() 返回的 IntentDecisionEngine 实例的 _registry 不为 None。"""
-        from host_brain.app.fastapi_app import get_intent_engine
+        from host_brain.app.dependencies import get_intent_engine
         engine = get_intent_engine()
         self.assertIsNotNone(engine._registry)
         self.assertIsInstance(engine._registry, SkillRegistry)
 
     def test_get_intent_engine_has_policy_cache(self) -> None:
         """T-TG-RT-02：get_intent_engine() 返回的实例的 _policy_cache 不为 None。"""
-        from host_brain.app.fastapi_app import get_intent_engine
+        from host_brain.app.dependencies import get_intent_engine
         engine = get_intent_engine()
         self.assertIsNotNone(engine._policy_cache)
         self.assertIsInstance(engine._policy_cache, GovernorPolicyCache)
 
     def test_get_intent_engine_is_singleton(self) -> None:
         """T-TG-RT-03：get_intent_engine() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.fastapi_app import get_intent_engine
+        from host_brain.app.dependencies import get_intent_engine
         engine1 = get_intent_engine()
         engine2 = get_intent_engine()
         self.assertIs(engine1, engine2)
 
     def test_get_skill_registry_contains_builtin_skills(self) -> None:
         """T-TG-RT-04：get_skill_registry() 返回的 SkillRegistry 包含内置 Skill。"""
-        from host_brain.app.fastapi_app import get_skill_registry
+        from host_brain.app.dependencies import get_skill_registry
         registry = get_skill_registry()
         names = registry.list_skill_names()
         self.assertIn("narrative_only", names)
@@ -143,14 +143,14 @@ class TestFastapiIntentEngineInjectionM44(unittest.TestCase):
 
     def test_get_policy_cache_is_singleton(self) -> None:
         """get_policy_cache() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.fastapi_app import get_policy_cache
+        from host_brain.app.dependencies import get_policy_cache
         cache1 = get_policy_cache()
         cache2 = get_policy_cache()
         self.assertIs(cache1, cache2)
 
     def test_get_policy_cache_has_correct_ttl(self) -> None:
         """get_policy_cache() 返回的 GovernorPolicyCache TTL=60_000ms。"""
-        from host_brain.app.fastapi_app import get_policy_cache
+        from host_brain.app.dependencies import get_policy_cache
         cache = get_policy_cache()
         self.assertEqual(60_000, cache._ttl_ms)
 
@@ -164,7 +164,7 @@ class TestChatResponseApprovalTierM44(unittest.TestCase):
 
     def test_chat_response_has_approval_tier_field(self) -> None:
         """T-TG-RESP-01：ChatResponse 包含 approval_tier 字段。"""
-        from host_brain.app.fastapi_app import ChatResponse
+        from host_brain.app.schemas import ChatResponse
         from host_brain.core.ids import now_ms
         resp = ChatResponse(
             request_id="req::test",
@@ -181,7 +181,7 @@ class TestChatResponseApprovalTierM44(unittest.TestCase):
 
     def test_chat_response_approval_tier_none_backward_compat(self) -> None:
         """T-TG-RESP-02：approval_tier 为 None 时不影响响应结构（向后兼容）。"""
-        from host_brain.app.fastapi_app import ChatResponse
+        from host_brain.app.schemas import ChatResponse
         from host_brain.core.ids import now_ms
         resp = ChatResponse(
             request_id="req::test",
@@ -203,6 +203,7 @@ class TestChatResponseApprovalTierM44(unittest.TestCase):
         """approval_tier 支持所有合法值（cache/rule/full/airlock）。"""
         from host_brain.app.fastapi_app import ChatResponse
         from host_brain.core.ids import now_ms
+        from host_brain.app.schemas import ChatResponse
         for tier in ("cache", "rule", "full", "airlock"):
             resp = ChatResponse(
                 request_id=f"req::{tier}",
@@ -226,20 +227,20 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
     """验证分层治理在 narrative_only 请求中真正生效（缓存命中路径）。"""
 
     def setUp(self) -> None:
-        import host_brain.app.fastapi_app as app_module
-        app_module._intent_engine = None
-        app_module._skill_registry = None
-        app_module._policy_cache = None
+        import host_brain.app.dependencies as dep
+        dep._intent_engine = None
+        dep._skill_registry = None
+        dep._policy_cache = None
 
     def tearDown(self) -> None:
-        import host_brain.app.fastapi_app as app_module
-        app_module._intent_engine = None
-        app_module._skill_registry = None
-        app_module._policy_cache = None
+        import host_brain.app.dependencies as dep
+        dep._intent_engine = None
+        dep._skill_registry = None
+        dep._policy_cache = None
 
     def test_narrative_only_uses_cache_or_rule_tier(self) -> None:
         """narrative_only 请求应走 CACHE 或 RULE 通道（不走 FULL 通道）。"""
-        from host_brain.app.fastapi_app import get_intent_engine
+        from host_brain.app.dependencies import get_intent_engine
         from host_brain.core.ids import now_ms
 
         engine = get_intent_engine()
@@ -271,7 +272,7 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
 
     def test_second_narrative_only_hits_cache(self) -> None:
         """第二次 narrative_only 请求应命中 Policy Cache，走 CACHE 通道。"""
-        from host_brain.app.fastapi_app import get_intent_engine
+        from host_brain.app.dependencies import get_intent_engine
         from host_brain.core.ids import now_ms
 
         engine = get_intent_engine()

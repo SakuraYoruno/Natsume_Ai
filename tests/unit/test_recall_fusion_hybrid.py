@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.retrieval.recall_fusion import (
-    FullTextSearcher,
+from host_brain.retrieval.full_text_searcher import FullTextSearcher
+from host_brain.retrieval.hybrid_fusion import (
     HybridFusionStrategy,
-    RecallFusionServiceContract,
     DEFAULT_VECTOR_WEIGHT,
     DEFAULT_FTS_WEIGHT,
 )
+from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 from host_brain.memory.chroma_client import InMemoryChromaClient
 
 

@@ -61,8 +61,9 @@ def test_chat_writes_episodic_memory_on_approve(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
 
     from host_brain.app import fastapi_app as appmod
+    import host_brain.app.dependencies as dep
 
-    _mount_chat_runtime(monkeypatch, appmod)
+    _mount_chat_runtime(monkeypatch, dep)
 
     client = TestClient(appmod.app)
     response = client.post(
@@ -83,13 +84,14 @@ def test_chat_writes_episodic_memory_on_approve(monkeypatch, tmp_path) -> None:
     memory_id = str(episodic_info.get("memory_id") or "")
     assert memory_id
 
-    record = appmod.get_episodic_store().get_memory(memory_id)
+    from host_brain.app.dependencies import get_episodic_store, get_ledger
+    record = get_episodic_store().get_memory(memory_id)
     assert record is not None
     assert "remember this user statement" in record.text
     assert "hello from natsume" in record.text
     assert record.emotion_tag == "HAPPY"
 
-    rows = appmod.get_ledger().fetch_by_request_id("memory_ops_log", str(body.get("request_id") or ""))
+    rows = get_ledger().fetch_by_request_id("memory_ops_log", str(body.get("request_id") or ""))
     assert any(str(row.get("op_kind") or "") == "WRITE" and str(row.get("status") or "") == "SUCCESS" for row in rows)
 
 
@@ -100,9 +102,10 @@ def test_chat_episodic_write_failure_is_non_blocking(monkeypatch, tmp_path) -> N
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
 
     from host_brain.app import fastapi_app as appmod
+    import host_brain.app.dependencies as dep
 
-    _mount_chat_runtime(monkeypatch, appmod)
-    monkeypatch.setattr(appmod, "_persist_chat_episodic_memory", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("episodic boom")))
+    _mount_chat_runtime(monkeypatch, dep)
+    monkeypatch.setattr("host_brain.app.chat_handler._persist_chat_episodic_memory", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("episodic boom")))
 
     client = TestClient(appmod.app)
     response = client.post(

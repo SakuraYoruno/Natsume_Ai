@@ -18,7 +18,8 @@ from typing import Any
 
 import pytest
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger, _ALLOWED_TABLES
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.ledger_constants import _ALLOWED_TABLES
 
 
 # ---------------------------------------------------------------------------

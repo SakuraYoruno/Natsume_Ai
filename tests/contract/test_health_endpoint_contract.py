@@ -52,7 +52,7 @@ class TestHealthEndpointEdgeProbeContract:
             return {"edge.rpc.gateway": {"available": available, "detail": detail or "mock"}}
 
         with patch(
-            "host_brain.app.fastapi_app.build_edge_transport_probe_statuses",
+            "host_brain.app.health_routes.build_edge_transport_probe_statuses",
             side_effect=_mock_edge_probe,
         ):
             response = client.get("/health")

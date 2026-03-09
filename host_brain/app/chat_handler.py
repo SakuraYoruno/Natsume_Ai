@@ -473,8 +473,23 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
         )
 
     except Exception as exc:
+        import traceback as _tb
+        _tb_str = _tb.format_exc()
         metrics.inc_error()
-        _logger.error("Chat request failed", extra={"request_id": request_id, "error": str(exc)})
+        _logger.error(
+            "Chat request failed",
+            extra={"request_id": request_id, "error": str(exc), "traceback": _tb_str},
+        )
+        # 写入 error_log 方便诊断
+        try:
+            get_ledger().log_error(
+                request_id=request_id,
+                stage="S_INTERNAL_ERROR",
+                reason_code="INTERNAL_SERVER_ERROR",
+                detail=f"{type(exc).__name__}: {exc}\n{_tb_str[:800]}",
+            )
+        except Exception:
+            pass
         return ChatResponse(
             request_id=request_id,
             narrative="系统有点忙，请稍后再试。",

@@ -17,17 +17,17 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.app.fastapi_app import (
+from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     CHAT_GRAPH_NODE_ORDER,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
-    _build_chat_graph_config,
-    _build_host_provider_fn_for_node,
-    _resolve_scene_node_sequence,
+    build_chat_graph_config as _build_chat_graph_config,
+    resolve_scene_node_sequence as _resolve_scene_node_sequence,
 )
+from host_brain.app.provider_factory import build_host_provider_fn_for_node as _build_host_provider_fn_for_node
 
 
 def _make_mock_provider_fn() -> MagicMock:
@@ -216,7 +216,7 @@ class TestGraphMetaSceneField:
 
 
 def test_core_reasoner_primary_gemini_pro_retries_timeout(monkeypatch) -> None:
-    from host_brain.app import fastapi_app as appmod
+    import host_brain.app.provider_factory as pf
 
     call_count = 0
 
@@ -232,7 +232,7 @@ def test_core_reasoner_primary_gemini_pro_retries_timeout(monkeypatch) -> None:
 
         return _provider
 
-    monkeypatch.setattr(appmod, "_build_langchain_chat_provider_fn", _fake_builder)
+    monkeypatch.setattr(pf, "build_langchain_chat_provider_fn", _fake_builder)
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS", "2")
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS", "0")
 
@@ -250,7 +250,7 @@ def test_core_reasoner_primary_gemini_pro_retries_timeout(monkeypatch) -> None:
 
 
 def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) -> None:
-    from host_brain.app import fastapi_app as appmod
+    import host_brain.app.provider_factory as pf
 
     call_count = 0
 
@@ -264,7 +264,7 @@ def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) ->
 
         return _provider
 
-    monkeypatch.setattr(appmod, "_build_langchain_chat_provider_fn", _fake_builder)
+    monkeypatch.setattr(pf, "build_langchain_chat_provider_fn", _fake_builder)
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS", "2")
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS", "0")
 
@@ -286,7 +286,7 @@ def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) ->
 
 
 def test_core_reasoner_primary_quota_failure_downgrades_to_31pro_default(monkeypatch) -> None:
-    from host_brain.app import fastapi_app as appmod
+    import host_brain.app.provider_factory as pf
 
     call_counts = {
         "gemini-2.5-pro": 0,
@@ -304,7 +304,7 @@ def test_core_reasoner_primary_quota_failure_downgrades_to_31pro_default(monkeyp
 
         return _provider
 
-    monkeypatch.setattr(appmod, "_build_langchain_chat_provider_fn", _fake_builder)
+    monkeypatch.setattr(pf, "build_langchain_chat_provider_fn", _fake_builder)
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS", "2")
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS", "0")
     monkeypatch.delenv("HOST_GEMINI_PRIMARY_DISABLE_MODEL_FALLBACK", raising=False)
@@ -325,7 +325,7 @@ def test_core_reasoner_primary_quota_failure_downgrades_to_31pro_default(monkeyp
 
 
 def test_non_primary_node_does_not_retry_timeout(monkeypatch) -> None:
-    from host_brain.app import fastapi_app as appmod
+    import host_brain.app.provider_factory as pf
 
     call_count = 0
 
@@ -339,7 +339,7 @@ def test_non_primary_node_does_not_retry_timeout(monkeypatch) -> None:
 
         return _provider
 
-    monkeypatch.setattr(appmod, "_build_langchain_chat_provider_fn", _fake_builder)
+    monkeypatch.setattr(pf, "build_langchain_chat_provider_fn", _fake_builder)
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS", "2")
     monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS", "0")
 

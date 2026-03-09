@@ -1,0 +1,8 @@
+{
+  "java_home": "D:\\nastume\\Natsume_Ai\\data\\jdk17\\jdk-17.0.14+7",
+  "java_exe": "D:\\nastume\\Natsume_Ai\\data\\jdk17\\jdk-17.0.14+7\\bin\\java.exe",
+  "neo4j_home": "D:\\nastume\\Natsume_Ai\\data\\neo4j\\neo4j-community-5.26.7",
+  "neo4j_bat": "D:\\nastume\\Natsume_Ai\\data\\neo4j\\neo4j-community-5.26.7\\bin\\neo4j.bat",
+  "bolt_port": 7687,
+  "http_port": 7474
+}

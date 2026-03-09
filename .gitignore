@@ -110,3 +110,5 @@ FULL_RUN_REPORT_*.json
 
 # --- Windows device file artifacts ---
 nul
+
+.codebuddy

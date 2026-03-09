@@ -9,8 +9,25 @@ ROOT = pathlib.Path(".").resolve()
 CHROMA_DATA = ROOT / "data" / "chroma_db"
 CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
-CHROMA_EXE = ROOT / ".venv" / "Scripts" / "chroma.exe"
-PYTHON_EXE = ROOT / ".venv" / "Scripts" / "python.exe"
+# 自动查找 chroma.exe：优先 .venv，其次系统 Python Scripts，最后 PATH
+def _find_chroma_exe() -> pathlib.Path:
+    py_dir = pathlib.Path(sys.executable).parent
+    candidates = [
+        ROOT / ".venv" / "Scripts" / "chroma.exe",
+        py_dir / "Scripts" / "chroma.exe",   # Python311/Scripts/chroma.exe
+        py_dir / "chroma.exe",               # 直接在 Python 目录下（少见）
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    # 回退到 PATH 中的 chroma
+    import shutil
+    found = shutil.which("chroma")
+    if found:
+        return pathlib.Path(found)
+    raise FileNotFoundError("找不到 chroma.exe，请确认 chromadb 已正确安装")
+
+CHROMA_EXE = _find_chroma_exe()
 HOST = "127.0.0.1"
 PORT = 8000
 ENDPOINT = f"http://{HOST}:{PORT}"
@@ -38,6 +55,10 @@ def is_running() -> bool:
 
 def start_bg() -> None:
     """用 Windows DETACHED_PROCESS 方式启动 ChromaDB"""
+    import subprocess as _sp
+    ver = _sp.run([str(CHROMA_EXE), "--version"], capture_output=True, text=True)
+    print(f"[ChromaDB] 使用: {CHROMA_EXE}")
+    print(f"[ChromaDB] CLI 版本: {ver.stdout.strip() or ver.stderr.strip()}")
     DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     log_fd = open(str(LOG_FILE), "w", encoding="utf-8")

@@ -55,10 +55,10 @@ def test_build_node_style_bindings_loads_cn_and_ja(monkeypatch, tmp_path: Path) 
     monkeypatch.setenv("HOST_STYLE_CORE_CANON_ID", "natsume_ai_cn")
     monkeypatch.setenv("HOST_STYLE_RENDER_CANON_ID", "natsume_ai_ja")
 
-    from host_brain.app import fastapi_app as appmod
-
-    appmod._ledger = None
-    bindings = appmod._build_node_style_bindings()
+    import host_brain.app.dependencies as dep
+    dep._ledger = None
+    from host_brain.app.chat_context_builder import build_node_style_bindings as _build_node_style_bindings
+    bindings = _build_node_style_bindings()
 
     assert bindings["core_reasoner_primary"]["canon_id"] == "natsume_ai_cn"
     assert bindings["core_reasoner_secondary"]["canon_id"] == "natsume_ai_cn"
@@ -70,7 +70,7 @@ def test_build_node_style_bindings_loads_cn_and_ja(monkeypatch, tmp_path: Path) 
 
 
 def test_render_node_prompt_uses_node_specific_style() -> None:
-    from host_brain.app.fastapi_app import _render_node_generation_prompt
+    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
 
     runtime_payload = {
         "user_message": "测试风格绑定",
@@ -160,11 +160,14 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
     monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(world_root))
     monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
 
-    from host_brain.app import fastapi_app as appmod
-
-    appmod._ledger = None
-    style_bindings = appmod._build_node_style_bindings()
-    payload = appmod._build_chat_generation_prompt_payload(
+    import host_brain.app.dependencies as dep
+    dep._ledger = None
+    from host_brain.app.chat_context_builder import (
+        build_node_style_bindings as _build_node_style_bindings,
+        build_chat_generation_prompt_payload as _build_chat_generation_prompt_payload,
+    )
+    style_bindings = _build_node_style_bindings()
+    payload = _build_chat_generation_prompt_payload(
         request_id="req_ctx_pack",
         session_id="session_ctx_pack",
         thread_id="thread_ctx_pack",
@@ -212,7 +215,7 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
 
 
 def test_render_node_prompt_prefers_context_pack_slots() -> None:
-    from host_brain.app.fastapi_app import _render_node_generation_prompt
+    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
 
     runtime_payload = {
         "user_message": "测试严格分槽",
@@ -310,7 +313,7 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
 
 
 def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> None:
-    from host_brain.app.fastapi_app import _render_node_generation_prompt
+    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
 
     base_runtime_payload = {
         "user_message": "测试节点提示词",

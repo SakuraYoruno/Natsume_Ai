@@ -1,6 +1,6 @@
 import unittest
 
-from host_brain.app.main import (
+from host_brain.app.observability import (
     OBS_LANGSMITH_API_KEY_MISSING,
     OBS_LANGSMITH_DISABLED,
     build_agent_monitoring_profile,

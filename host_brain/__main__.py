@@ -6,6 +6,25 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
+
+# 在所有模块导入之前加载 .env 文件（不覆盖已有的系统环境变量）
+def _load_dotenv_file() -> None:
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key and key not in os.environ:  # 不覆盖已有的系统环境变量
+                os.environ[key] = value
+
+_load_dotenv_file()
 
 from host_brain.app.fastapi_app import app
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
@@ -130,8 +149,8 @@ def main() -> int:
     setup_logging(args.log_level)
     logger = logging.getLogger("Natsume.main")
 
-    # 设置环境变量
-    os.environ.setdefault("Natsume_ENV", "production")
+    # 设置环境变量（.env 已在模块顶部加载，此处仅作兜底）
+    os.environ.setdefault("Natsume_ENV", "dev")
 
     # 运行启动检查（如果启用）
     if args.startup_check:

@@ -15,10 +15,11 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
     from host_brain.app import fastapi_app as appmod
 
     # Reset cached singletons to guarantee this test uses isolated ledger/runtime state.
-    appmod._ledger = None
-    appmod._intent_engine = None
-    appmod._retrieval_pipeline = None
-    appmod._graph_runtime = None
+    import host_brain.app.dependencies as dep
+    dep._ledger = None
+    dep._intent_engine = None
+    dep._retrieval_pipeline = None
+    dep._graph_runtime = None
 
     client = TestClient(appmod.app)
     response = client.post(
@@ -33,7 +34,8 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
     request_id = str(body.get("request_id") or "")
     assert request_id
 
-    ledger = appmod.get_ledger()
+    from host_brain.app.dependencies import get_ledger
+    ledger = get_ledger()
     graph_rows = ledger.fetch_by_request_id("graph_run_trace", request_id)
     llm_rows = ledger.fetch_by_request_id("llm_node_call_log", request_id)
 
