@@ -68,6 +68,8 @@
 - [x] 5.3：灰度回归通过 `15 passed`（host8b runtime route + stream/chat 路径）
 - [x] 5.3：新增发布门禁脚本 `tools/release_rollback_gate.py`（绑定回滚条件 + 回滚命令输出）
 - [x] 5.3：新增回滚运行手册 `ROLLBACK_RUNBOOK_2026-03-10.md`，并生成门禁报告 `RELEASE_ROLLBACK_GATE_20260310_010648.{json,md}`
+- [x] 5.3：新增 24h 复盘脚本 `tools/post_release_review.py`（聚合稳定性 + 回滚门禁结论）
+- [x] 5.3：生成首份复盘 `POST_RELEASE_REVIEW_20260310_010918.{json,md}`（`release_id=codex-20260309`，状态 `COMPLETE`）
 
 ---
 
@@ -265,7 +267,7 @@
 ### 5.3 发布与回滚
 - [x] 每个阶段准备灰度开关（按用户/按场景）
 - [x] 每次上线绑定回滚条件与回滚命令
-- [ ] 发布后 24h 做一次复盘
+- [x] 发布后 24h 做一次复盘
 
 ---
 
