@@ -32,3 +32,4 @@
 26. `ci/`: delivery gate fixtures for doc audience/title lint failures and static-scan non-single-writer violations (`T-CI-01`).
 27. `release/`: release checklist and rollback map fixtures for `M0~M3` deployable assets, checksum drift/missing asset negatives, and rollback target resolution (`T-Release-01`).
 28. `drill/`: production drill fixtures for `cold_start_no_key`, `provider_down`, and `rollback_conflict`, with deterministic scenario report fields (`scenario_id/status/reason_code_chain/replay_ref`) and failure classification/disposition (`T-Drill-01`).
+29. `emotion/`: emotion closed-loop regression corpus for mood-tag constraints, intensity clamping, prompt binding consistency, and VTS expression mapping (`T-Emotion-Regression-01`).
