@@ -53,6 +53,10 @@
 - [x] P2-C：统一诊断报告格式落地（`DIAG_UNIFIED_<DOMAIN>_*.json/.md`）
 - [x] P2-C：新增工具单测 `test_diag_unified_tool.py`（dry-run/参数拼装/下游报告解析）
 - [x] P2-C：完成扩展回归 `86 passed`（含 unified diag + scene_router + stream + retrieval + chat + emotion）
+- [x] P2-B：完成 `host_brain/obs` 与 `host_brain/observability` 能力清点并建立统一主路径（`observability`）
+- [x] P2-B：将 metrics/session/trace/health/routes 主实现迁移到 `host_brain/observability/*`，`host_brain/obs/*` 保留兼容转发层
+- [x] P2-B：应用层调用方切换到 `host_brain/observability/*`（dependencies/health_routes/system_handler/obs_routes）
+- [x] P2-B：新增兼容导入单测 `test_observability_module_compat.py`，完成扩展回归 `149 passed`
 
 ---
 
@@ -209,9 +213,9 @@
 - MCP/Skills 不再双轨维护
 
 ### P2-B observability 合并（预估 1 天）
-- [ ] 清点 `obs/` 与 `observability/` 重复能力
-- [ ] 合并目录和导出路径
-- [ ] 迁移调用方，保留兼容层（短期）
+- [x] 清点 `obs/` 与 `observability/` 重复能力
+- [x] 合并目录和导出路径
+- [x] 迁移调用方，保留兼容层（短期）
 
 **验收标准**
 - 功能不回退；目录职责清晰
