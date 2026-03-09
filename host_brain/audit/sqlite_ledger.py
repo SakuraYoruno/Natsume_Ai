@@ -26,7 +26,7 @@ from host_brain.core.errors import (
 )
 
 # ---------------------------------------------------------------------------
-# 琛ㄥ悕鐧藉悕鍗曪紙纭 紪鐮佸厑璁歌〃鍚嶉泦鍚堬紝鐢ㄤ簬 _fetch_all 瀹夊叏鏍￠獙锛?# ---------------------------------------------------------------------------
+# 表名白名单（确保编码允许表名集合，用于 _fetch_all 安全校验）# ---------------------------------------------------------------------------
 _ALLOWED_TABLES: frozenset[str] = frozenset({
     "intent_log",
     "governor_log",
@@ -457,7 +457,7 @@ class WalConfig:
 
 DEFAULT_WAL_CONFIG = WalConfig()
 
-# 鍐欏叆閲嶈瘯绛栫暐
+# 写入重试策略
 WRITE_RETRY_MAX = 3
 WRITE_RETRY_DELAY_S = 0.05
 
@@ -483,7 +483,7 @@ class SQLiteLedger:
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
-        # 琛ㄧ粨鏋勭紦瀛橈細閬垮厤姣忔  _table_has_column 璋冪敤 PRAGMA table_info
+        # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
         self._column_cache_lock = threading.Lock()
         self._apply_wal_config()
@@ -760,14 +760,15 @@ class SQLiteLedger:
                 )
 
     # ---------------------------------------------------------------------------
-    # M10-C: 璇 箟璁板繂 CRUD
+    # M10-C: 语义记忆 CRUD
     # ---------------------------------------------------------------------------
 
     def log_semantic_memory(self, row: dict[str, Any]) -> None:
-        """鍐欏叆璇 箟璁板繂鏉＄洰锛圛NSERT OR IGNORE锛屽箓绛夛級銆?
+        """写入语义记忆条目（INSERT OR IGNORE，幂等）。
         Args:
-            row: 鍖呭惈 semantic_id / summary / source_memory_ids / source_hash /
-                 distill_strategy / confidence / tags / ts_ms / operator_node_id 鐨勫瓧鍏搞€?        """
+            row: 包含 semantic_id / summary / source_memory_ids / source_hash /
+                 distill_strategy / confidence / tags / ts_ms / operator_node_id 的字典。
+        """
         import json as _json
 
         source_ids = row.get("source_memory_ids", [])
@@ -795,9 +796,10 @@ class SQLiteLedger:
                 )
 
     def get_semantic_memory_by_source_hash(self, source_hash: str) -> dict[str, Any] | None:
-        """鎸?source_hash 鏌ヨ 璇 箟璁板繂锛堝箓绛夋 鏌ョ敤锛夈€?
+        """按 source_hash 查询语义记忆（幂等写入查用）。
         Returns:
-            璇 箟璁板繂瀛楀吀锛屾垨 None锛堜笉瀛樺湪锛夈€?        """
+            语义记忆字典，或 None（不存在）。
+        """
         row = self._conn.execute(
             "SELECT * FROM semantic_memory WHERE source_hash = ? AND deleted_at IS NULL LIMIT 1",
             (str(source_hash),),
@@ -812,9 +814,10 @@ class SQLiteLedger:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """鍒楀嚭璇 箟璁板繂锛堝垎椤碉紝鎸?ts_ms 闄嶅簭锛夈€?
+        """列出语义记忆（分页，按 ts_ms 降序）。
         Returns:
-            (items, total) 鍏冪粍銆?        """
+            (items, total) 元组。
+        """
         total_row = self._conn.execute(
             "SELECT COUNT(*) FROM semantic_memory WHERE deleted_at IS NULL"
         ).fetchone()
@@ -833,7 +836,7 @@ class SQLiteLedger:
         import json as _json
 
         d = dict(row)
-        # 鍙嶅簭鍒楀寲 JSON 瀛楁
+        # 反序列化 JSON 字段
         for json_field in ("source_memory_ids", "tags"):
             raw = d.get(json_field, "[]")
             try:
@@ -2063,7 +2066,7 @@ class SQLiteLedger:
                 f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
             )
 
-        limit = max(1, min(limit, 10_000))  # 纭 笂闄?10000
+        limit = max(1, min(limit, 10_000))  # 确保上限 10000
         offset = max(0, offset)
 
         has_ts = self._table_has_column(table, "ts_ms")
