@@ -9,6 +9,8 @@ import os
 from typing import Optional
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.bond.async_queue import BondUpdateQueue
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
@@ -41,6 +43,7 @@ _policy_cache: Optional[GovernorPolicyCache] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
+_bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
 _retrieval_pipeline: Optional[RetrievalPipelineContract] = None
 _retrieval_orchestrator: Optional[RetrievalOrchestrator] = None
@@ -185,6 +188,44 @@ def get_bond_stage_engine() -> BondStageEngine:
     if _bond_stage_engine is None:
         _bond_stage_engine = BondStageEngine(ledger=get_ledger())
     return _bond_stage_engine
+
+
+def get_bond_update_queue() -> BondUpdateQueue:
+    global _bond_update_queue
+    max_queue_size = _parse_int_env(
+        "HOST_BOND_QUEUE_MAX_SIZE",
+        default=1024,
+        minimum=8,
+        maximum=100000,
+    )
+    worker_enabled = _parse_bool_env("HOST_BOND_QUEUE_ENABLED", default=True)
+    signature = (int(max_queue_size), bool(worker_enabled))
+
+    if _bond_update_queue is None:
+        _bond_update_queue = BondUpdateQueue(
+            writer_factory=lambda: BondDynamicsWriter(
+                ledger=get_ledger(),
+                stage_engine=get_bond_stage_engine(),
+            ),
+            max_queue_size=max_queue_size,
+            worker_enabled=worker_enabled,
+        )
+        setattr(_bond_update_queue, "_config_signature", signature)
+        return _bond_update_queue
+
+    current_signature = getattr(_bond_update_queue, "_config_signature", None)
+    if current_signature != signature:
+        _bond_update_queue.shutdown()
+        _bond_update_queue = BondUpdateQueue(
+            writer_factory=lambda: BondDynamicsWriter(
+                ledger=get_ledger(),
+                stage_engine=get_bond_stage_engine(),
+            ),
+            max_queue_size=max_queue_size,
+            worker_enabled=worker_enabled,
+        )
+        setattr(_bond_update_queue, "_config_signature", signature)
+    return _bond_update_queue
 
 
 def get_skill_registry() -> SkillRegistry:

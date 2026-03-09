@@ -39,4 +39,7 @@ def test_chat_approve_path_uses_graph_runtime(monkeypatch) -> None:
     trace_metrics = dict((body.get("audit_refs") or {}).get("trace_metrics") or {})
     background_tasks = dict(trace_metrics.get("background_tasks_latency_ms") or {})
     assert "retrieval_latency_ms" in trace_metrics
-    assert int(background_tasks.get("total_ms") or -1) >= 0
+    assert background_tasks.get("total_ms") is not None
+    assert int(background_tasks.get("total_ms")) >= 0
+    bond_queue = dict(trace_metrics.get("bond_queue") or {})
+    assert bond_queue.get("status") in {"QUEUED", "DIRECT_FALLBACK_APPLIED", "SKIPPED", None}

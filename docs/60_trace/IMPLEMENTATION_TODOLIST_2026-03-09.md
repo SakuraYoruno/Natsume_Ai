@@ -75,6 +75,8 @@
 - [x] P2-A：新增 IDE Skills 封装 `ide_registry.py`（`open_cursor` / `run_pycharm_action` / `codex_task`）
 - [x] P2-A：新增 MCP→Skills 桥接 `mcp_skill_bridge.py`（统一 `mcp::<provider>::<tool>` 命名，支持 broker 单入口调用）
 - [x] P2-A：新增 skills/mcp 相关回归 `26 passed`（decorator + ide + mcp bridge + hot_loader）
+- [x] P3：新增 Bond 异步队列 `bond/async_queue.py`，`/v1/chat` 改为入队写入（队列退化时 direct fallback）
+- [x] P3：新增队列单测 `test_bond_async_queue.py`，并完成 chat/stream/bond 回归 `21 passed`
 
 ---
 
@@ -250,7 +252,7 @@
 
 ## 4. P3（长期）闭环建设
 
-- [ ] Bond 更新统一异步队列化
+- [x] Bond 更新统一异步队列化
 - [ ] 情感层接入 Host 8B / Edge 3B / Cloud Graph 全路径
 - [ ] MCP 与 Skills 完全合并，形成唯一工具入口
 - [ ] 建立长期指标看板（质量、延迟、成本、可用性）

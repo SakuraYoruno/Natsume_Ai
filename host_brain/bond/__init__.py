@@ -7,6 +7,7 @@ from host_brain.bond.bond_dynamics import (
     BondDynamicsWriter,
     BondUpdateResult,
 )
+from host_brain.bond.async_queue import BondUpdateQueue
 from host_brain.bond.migration_runner import (
     S_MIGRATION_BOND,
     BondMigrationRunner,
@@ -56,6 +57,7 @@ __all__ = [
     "BondMigrationRecord",
     "BondDynamicsWriter",
     "BondUpdateResult",
+    "BondUpdateQueue",
     "InMemoryNeo4jBondClient",
     "build_neo4j_bond_client",
     "load_neo4j_runtime_config",

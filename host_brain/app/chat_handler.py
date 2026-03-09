@@ -17,6 +17,7 @@ from edge_client.rpc.auth import build_edge_rpc_signature
 from fastapi import Request
 from host_brain.app.dependencies import (
     get_bond_stage_engine,
+    get_bond_update_queue,
     get_episodic_store,
     get_graph_runtime,
     get_intent_engine,
@@ -1015,6 +1016,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
 
             _bond_started_ms = int(time.time() * 1000)
             bond_latency_ms = 0
+            bond_queue_status = "SKIPPED"
+            bond_queue_reason: str | None = None
             try:
                 _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
                 _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
@@ -1022,25 +1025,35 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     text=request_body.message,
                     emotion_intensity=_intensity,
                 )
-                _bond_writer = BondDynamicsWriter(
-                    ledger=get_ledger(),
-                    stage_engine=get_bond_stage_engine(),
-                )
-                _bond_writer.apply_update(
-                    request_id=request_id,
-                    intent_id=str(intent_id or request_id),
-                    session_id=session_id,
-                    seq=1,
-                    user_id=session_id,
-                    topic_id=str(intent_draft.get("args", {}).get("text", request_body.message))[:64],
-                    update_kind=_update_kind,
-                    evidence_refs=[str(intent_id or request_id)],
-                    emotion_tag=_etag,
-                    emotion_intensity=_intensity,
-                    ts_ms=ts_ms,
-                )
+                _bond_payload = {
+                    "request_id": request_id,
+                    "intent_id": str(intent_id or request_id),
+                    "session_id": session_id,
+                    "seq": 1,
+                    "user_id": session_id,
+                    "topic_id": str(intent_draft.get("args", {}).get("text", request_body.message))[:64],
+                    "capability_hint": "bond_memory",
+                    "update_kind": _update_kind,
+                    "evidence_refs": [str(intent_id or request_id)],
+                    "emotion_tag": _etag,
+                    "emotion_intensity": _intensity,
+                    "ts_ms": ts_ms,
+                }
+                _bond_queue = get_bond_update_queue()
+                _queue_result = _bond_queue.enqueue(_bond_payload)
+                bond_queue_status = str(_queue_result.get("status") or "UNKNOWN")
+                bond_queue_reason = str(_queue_result.get("reason_code") or "").strip() or None
+                if bond_queue_status != "QUEUED":
+                    _bond_writer = BondDynamicsWriter(
+                        ledger=get_ledger(),
+                        stage_engine=get_bond_stage_engine(),
+                    )
+                    _bond_writer.apply_update(**_bond_payload)
+                    bond_queue_status = "DIRECT_FALLBACK_APPLIED"
             except Exception as exc:
                 _logger.debug("bond emotion record skipped", extra={"request_id": request_id, "error": str(exc)})
+                if not bond_queue_reason:
+                    bond_queue_reason = str(exc)
             finally:
                 bond_latency_ms = max(0, int(time.time() * 1000) - _bond_started_ms)
 
@@ -1077,6 +1090,10 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             trace_metrics = {
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "background_tasks_latency_ms": dict(background_tasks_latency_ms),
+                "bond_queue": {
+                    "status": bond_queue_status,
+                    "reason_code": bond_queue_reason,
+                },
             }
         else:
             if _retrieval_task is not None and not _retrieval_task.done():
