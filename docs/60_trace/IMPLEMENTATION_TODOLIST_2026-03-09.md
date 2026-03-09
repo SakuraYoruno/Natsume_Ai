@@ -49,6 +49,10 @@
 - [x] 5.2：新增情感层回归样本集 `tests/fixtures/emotion/closed_loop_cases.json`（16 样本，覆盖 mood/tag 约束与强度 clamp）
 - [x] 5.2：闭环工具支持 fixture 语料加载（`--case-file`）并在报告中记录 `case_source`
 - [x] 5.2：完成情感层回归扩展 `82 passed`（scene_router + stream + retrieval + chat + emotion）
+- [x] P2-C：新增统一诊断入口 `tools/diag.py`（子命令：`retrieval` / `stream` / `emotion` / `graph`）
+- [x] P2-C：统一诊断报告格式落地（`DIAG_UNIFIED_<DOMAIN>_*.json/.md`）
+- [x] P2-C：新增工具单测 `test_diag_unified_tool.py`（dry-run/参数拼装/下游报告解析）
+- [x] P2-C：完成扩展回归 `86 passed`（含 unified diag + scene_router + stream + retrieval + chat + emotion）
 
 ---
 
@@ -213,9 +217,9 @@
 - 功能不回退；目录职责清晰
 
 ### P2-C 诊断工具整合（预估 1-2 天）
-- [ ] 合并 `tools/_diag_*.py` 为统一入口命令
-- [ ] 提供子命令：`retrieval`、`stream`、`emotion`、`graph`
-- [ ] 输出统一报告格式（JSON + 人类可读）
+- [x] 合并 `tools/_diag_*.py` 为统一入口命令
+- [x] 提供子命令：`retrieval`、`stream`、`emotion`、`graph`
+- [x] 输出统一报告格式（JSON + 人类可读）
 
 **验收标准**
 - 常见诊断场景无需查找多个脚本
