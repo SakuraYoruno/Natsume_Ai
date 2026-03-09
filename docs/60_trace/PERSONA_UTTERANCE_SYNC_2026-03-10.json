@@ -1,0 +1,16 @@
+{
+  "backend": "http",
+  "cn_docs_synced": 1719,
+  "collection": "persona_utterance",
+  "collection_count": 3447,
+  "docs_synced": 3447,
+  "embedding_model_id": "models/Qwen3-Embedding-0.6B",
+  "embedding_node_id": "natsu-node-01",
+  "embedding_provider": "sentence_transformers",
+  "embedding_route_id": "host_default",
+  "issues": [],
+  "issues_count": 0,
+  "ja_docs_synced": 1728,
+  "success": true,
+  "vector_dim": 1024
+}

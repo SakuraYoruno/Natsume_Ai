@@ -11,6 +11,7 @@ from host_brain.core.errors import (
     CHROMA_ENDPOINT_UNAVAILABLE,
     RETR_BOND_UNAVAILABLE,
     RETR_LEDGER_UNAVAILABLE,
+    RETR_PERSONA_UTTERANCE_UNAVAILABLE,
     RETR_RECALL_UNAVAILABLE,
     RETR_STYLE_UNAVAILABLE,
     RETR_VAULT_UNAVAILABLE,
@@ -71,6 +72,15 @@ def test_reason_05_artifact_vault():
     result = _map_route_exception(exc, store_id="artifact_vault")
     assert result == RETR_VAULT_UNAVAILABLE, (
         f"T-REASON-05 FAILED: 期望 {RETR_VAULT_UNAVAILABLE}，实际 {result}"
+    )
+
+
+def test_reason_05b_persona_utterance():
+    """T-REASON-05b：store_id="persona_utterance" 异常 → RETR_PERSONA_UTTERANCE_UNAVAILABLE。"""
+    exc = RuntimeError("persona utterance collection unavailable")
+    result = _map_route_exception(exc, store_id="persona_utterance")
+    assert result == RETR_PERSONA_UTTERANCE_UNAVAILABLE, (
+        f"T-REASON-05b FAILED: 期望 {RETR_PERSONA_UTTERANCE_UNAVAILABLE}，实际 {result}"
     )
 
 

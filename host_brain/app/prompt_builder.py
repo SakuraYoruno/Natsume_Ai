@@ -516,6 +516,88 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
         )
 
+    persona_example_rows: list[Mapping[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("kind") or "").strip().lower() != "persona_utterance":
+            continue
+        persona_example_rows.append(row)
+
+    persona_lines: list[str] = []
+    preferred_lang_tokens: set[str] = set()
+    if render_target_lang == "ja":
+        preferred_lang_tokens = {"ja", "jp", "japanese"}
+    elif render_target_lang == "zh":
+        preferred_lang_tokens = {"zh", "cn", "chinese"}
+
+    if preferred_lang_tokens and rows:
+        filtered_evidence_rows: list[Mapping[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            if str(row.get("kind") or "").strip().lower() != "persona_utterance":
+                filtered_evidence_rows.append(row)
+                continue
+            lang = str(row.get("lang") or "").strip().lower()
+            if lang and lang not in preferred_lang_tokens:
+                continue
+            filtered_evidence_rows.append(row)
+        if filtered_evidence_rows:
+            evidence_lines = []
+            for row in filtered_evidence_rows[:6]:
+                if not isinstance(row, Mapping):
+                    continue
+                evidence_ref = _truncate_for_prompt(
+                    row.get("evidence_ref") or row.get("source_ref") or row.get("citation") or "unknown",
+                    limit=80,
+                )
+                snippet = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=220)
+                if not snippet:
+                    continue
+                evidence_lines.append(f"- [{evidence_ref}] {snippet}")
+            evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+
+    for row in persona_example_rows:
+        lang = str(row.get("lang") or "").strip().lower()
+        if preferred_lang_tokens and lang and lang not in preferred_lang_tokens:
+            continue
+        citation = _truncate_for_prompt(
+            row.get("evidence_ref") or row.get("source_ref") or "unknown",
+            limit=96,
+        )
+        speaker = _truncate_for_prompt(row.get("speaker") or "夏目藍", limit=24)
+        utterance = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=200)
+        if not utterance:
+            continue
+        persona_lines.append(f"- [{citation}] {speaker}: {utterance}")
+        if len(persona_lines) >= 4:
+            break
+
+    if not persona_lines:
+        for row in persona_example_rows:
+            citation = _truncate_for_prompt(
+                row.get("evidence_ref") or row.get("source_ref") or "unknown",
+                limit=96,
+            )
+            speaker = _truncate_for_prompt(row.get("speaker") or "夏目藍", limit=24)
+            utterance = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=200)
+            if not utterance:
+                continue
+            persona_lines.append(f"- [{citation}] {speaker}: {utterance}")
+            if len(persona_lines) >= 3:
+                break
+
+    persona_examples_block = ""
+    if persona_lines:
+        persona_examples_block = (
+            "DIALOGUE_EXAMPLES_BINDING:\n"
+            "- These are persona style-transfer references only.\n"
+            "- NEVER quote any example verbatim; adapt to current user message.\n"
+            "- Keep safety/factual constraints above stylistic imitation.\n"
+            f"{chr(10).join(persona_lines)}\n\n"
+        )
+
     role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang)
 
     return (
@@ -537,6 +619,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- reason_code: {context_pack_reason}\n"
         f"- violation_count: {context_pack_violation_count}\n\n"
         f"WORLD_CANON_BINDING:\n{world_block}\n\n"
+        f"{persona_examples_block}"
         f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
         f"NODE_ID: {node_id}\n"
         f"RENDER_TARGET_LANG: {render_target_lang}\n"

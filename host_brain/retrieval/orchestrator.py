@@ -75,6 +75,8 @@ def _extract_evidence_items(*, rerank_output: Mapping[str, Any]) -> list[dict[st
         snippet = _truncate_for_prompt(item.get("snippet"), limit=240)
         if not snippet:
             continue
+        metadata_raw = item.get("metadata")
+        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
         evidence_items.append(
             {
                 "evidence_ref": str(item.get("evidence_ref") or "").strip() or str(item.get("doc_id") or ""),
@@ -82,6 +84,8 @@ def _extract_evidence_items(*, rerank_output: Mapping[str, Any]) -> list[dict[st
                 "snippet": snippet,
                 "score": item.get("score"),
                 "confidence": item.get("confidence"),
+                "metadata": metadata,
+                "store_id": str(metadata.get("store_id") or "").strip() or None,
             }
         )
     return evidence_items

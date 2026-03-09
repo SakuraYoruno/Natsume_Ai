@@ -150,15 +150,30 @@ def build_chat_context_pack(
         snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
         if not snippet:
             continue
+        metadata_raw = row.get("metadata")
+        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+        store_id = str(
+            row.get("store_id")
+            or metadata.get("store_id")
+            or ""
+        ).strip().lower()
+        retrieval_kind = "persona_utterance" if store_id == "persona_utterance" else "episodic"
         retrieval_rows.append(
             {
                 "slot": "retrieval",
-                "kind": "episodic",
+                "kind": retrieval_kind,
                 "source_ref": str(row.get("source_ref") or "").strip() or None,
                 "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
                 "content": snippet,
                 "score": row.get("score"),
                 "confidence": row.get("confidence"),
+                "store_id": store_id or None,
+                "canon_id": str(metadata.get("canon_id") or "").strip() or None,
+                "lang": str(metadata.get("lang") or "").strip().lower() or None,
+                "speaker": str(metadata.get("speaker") or "").strip() or None,
+                "file_rel_path": str(metadata.get("file_rel_path") or "").strip() or None,
+                "block_id": str(metadata.get("block_id") or "").strip() or None,
+                "line_index": metadata.get("line_index"),
             }
         )
 

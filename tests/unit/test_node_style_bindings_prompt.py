@@ -225,6 +225,76 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
     assert dict(context_pack.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
 
 
+def test_build_chat_generation_prompt_payload_marks_persona_utterance_rows(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    style_root = tmp_path / "style"
+    world_root = tmp_path / "world"
+    _write_style_entry(style_root, canon_id="natsume_ai_cn", content="CN_STYLE_HINT")
+    _write_style_entry(style_root, canon_id="natsume_ai_ja", content="JA_STYLE_HINT")
+    _write_world_doc(
+        world_root,
+        doc_id="wc-003-persona-core",
+        title="人格核心设定",
+        body="夏目保持温柔与边界感，只能给出草案，不宣称执行。",
+    )
+
+    monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
+    monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(world_root))
+    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
+
+    import host_brain.app.dependencies as dep
+    dep._ledger = None
+    from host_brain.app.chat_context_builder import (
+        build_node_style_bindings as _build_node_style_bindings,
+        build_chat_generation_prompt_payload as _build_chat_generation_prompt_payload,
+    )
+
+    payload = _build_chat_generation_prompt_payload(
+        request_id="req_ctx_pack_persona",
+        session_id="session_ctx_pack_persona",
+        thread_id="thread_ctx_pack_persona",
+        user_message="有点难受，想聊聊。",
+        retrieval_summary={
+            "status": "OK",
+            "reason_code": "NONE",
+            "route_count": 2,
+            "candidate_count": 2,
+            "rerank_topk": 2,
+            "degraded": False,
+        },
+        retrieval_evidence_items=[
+            {
+                "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/01",
+                "source_ref": "persona_utterance://natsume_ai_ja/ja/01",
+                "snippet": "今日は少しつらいんだね……無理しないで。",
+                "score": 0.91,
+                "confidence": 0.91,
+                "metadata": {
+                    "store_id": "persona_utterance",
+                    "canon_id": "natsume_ai_ja",
+                    "lang": "ja",
+                    "speaker": "夏目藍",
+                    "file_rel_path": "story/ch01.ast",
+                    "block_id": "block_01",
+                    "line_index": 3,
+                },
+            }
+        ],
+        style_bindings=_build_node_style_bindings(),
+    )
+
+    context_pack = dict(payload.get("context_pack") or {})
+    retrieval_rows = list(context_pack.get("retrieval") or [])
+    assert retrieval_rows
+    top = dict(retrieval_rows[0])
+    assert top.get("kind") == "persona_utterance"
+    assert top.get("store_id") == "persona_utterance"
+    assert top.get("lang") == "ja"
+    assert top.get("speaker") == "夏目藍"
+
+
 def test_context_pack_observability_marks_bare_llm_when_minimal_fallback() -> None:
     from host_brain.app.chat_context_builder import (
         build_context_pack_observability as _build_context_pack_observability,
@@ -376,6 +446,67 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
     assert "mood_state: engaged" in prompt
     assert "emotion_intensity: 0.76" in prompt
     assert "snapshot_source: test_case" in prompt
+
+
+def test_render_node_prompt_injects_persona_dialogue_examples_binding() -> None:
+    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
+
+    runtime_payload = {
+        "render_target_lang": "ja",
+        "user_message": "今天有点难过，想听你说说话。",
+        "retrieval": {
+            "status": "OK",
+            "reason_code": "NONE",
+            "evidence_items": [],
+        },
+        "context_pack": {
+            "hard_snapshot": {"session_id": "s1"},
+            "bond_summary": {},
+            "authoritative": [],
+            "retrieval": [
+                {
+                    "slot": "retrieval",
+                    "kind": "persona_utterance",
+                    "lang": "ja",
+                    "speaker": "夏目藍",
+                    "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/1",
+                    "content": "今日は少しつらいんだね……無理しないで。",
+                },
+                {
+                    "slot": "retrieval",
+                    "kind": "persona_utterance",
+                    "lang": "cn",
+                    "speaker": "夏目蓝",
+                    "evidence_ref": "evd://persona_utterance/natsume_ai_cn/cn/1",
+                    "content": "今天有点难受的话，先慢一点也可以。",
+                },
+            ],
+            "style_pack": {"node_bindings": {}},
+            "constraints": {
+                "strict_json_output": True,
+                "no_false_execution_claim": True,
+            },
+            "tool_meta_pack": [],
+            "emotion_pulse": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
+            "memory_emotion_hint": {},
+            "bond_texture": {},
+        },
+        "context_pack_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+        "emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
+        "core_reasoner_primary": {"payload": {"narrative": {"text": "核心语义草案"}, "intent_draft": {}}},
+        "planner_constraints": {"payload": {"narrative": {"text": "constraints"}}},
+        "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
+    }
+
+    prompt = _render_node_generation_prompt(
+        node_id="chat_direct_ja",
+        runtime_payload=runtime_payload,
+    )
+
+    assert "DIALOGUE_EXAMPLES_BINDING" in prompt
+    assert "NEVER quote any example verbatim" in prompt
+    assert "今日は少しつらいんだね" in prompt
+    assert "今天有点难受的话" not in prompt
 
 
 def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> None:

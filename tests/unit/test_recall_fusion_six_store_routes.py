@@ -10,6 +10,7 @@ from host_brain.retrieval.recall_fusion import (
     STORE_ARTIFACT_VAULT,
     STORE_EPISODIC_VECTOR,
     STORE_NEO4J_BOND,
+    STORE_PERSONA_UTTERANCE,
     STORE_SQLITE_LEDGER,
     STORE_STYLE_CANON,
     STORE_WORLD_CANON,
@@ -324,6 +325,77 @@ def test_style_canon_falls_back_to_file_when_vector_unavailable(tmp_path) -> Non
         assert result.output["route_errors"] == []
         assert result.output["candidate_count"] > 0
         assert result.output["candidates"][0]["metadata"]["store_id"] == STORE_STYLE_CANON
+    finally:
+        ledger.close()
+
+
+def test_persona_utterance_vector_route_returns_dialogue_candidates() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        chroma = InMemoryChromaClient(
+            collection_profiles={"episodic": 16, "persona_utterance": 16},
+            default_collection="episodic",
+        )
+        query = "今天有点难受 想聊聊"
+        query_embedding, _ = embed_text(query)
+        chroma.upsert(
+            memory_id="persona_utterance::natsume_ai_ja::ja::abc001",
+            text="今日は少しつらいんだね……無理しないで。",
+            embedding=query_embedding,
+            collection="persona_utterance",
+            metadata={
+                "canon_id": "natsume_ai_ja",
+                "lang": "ja",
+                "speaker": "夏目藍",
+                "source_ref": "persona_utterance://natsume_ai_ja/ja/abc001",
+                "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/abc001",
+                "file_rel_path": "story/ch01.ast",
+                "block_id": "block_01",
+                "line_index": 7,
+            },
+        )
+
+        env = {
+            "RETR_RECALL_ENABLED": "true",
+            "RETR_RECALL_DEFAULT_ROUTE": "route_persona_utterance",
+            "RETR_RECALL_ROUTES_JSON": json.dumps(
+                {
+                    "route_persona_utterance": {
+                        "store_id": STORE_PERSONA_UTTERANCE,
+                        "collection": "persona_utterance",
+                        "top_k": 3,
+                        "score_weight": 1.0,
+                        "node_selector": "*",
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        }
+        cfg_result = load_recall_runtime_config(env=env)
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+
+        service = RecallFusionServiceContract(
+            ledger=ledger,
+            chroma_client=chroma,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+        result = service.recall(
+            request_id="req_persona_vec_001",
+            query=query,
+            query_embedding=query_embedding,
+            ts_ms=1_800_310_000_111,
+        )
+
+        assert result.success
+        assert result.output["candidate_count"] > 0
+        top = result.output["candidates"][0]
+        assert top["metadata"]["store_id"] == STORE_PERSONA_UTTERANCE
+        assert top["metadata"]["lang"] == "ja"
+        assert "persona_utterance://" in str(top["source_ref"])
     finally:
         ledger.close()
 

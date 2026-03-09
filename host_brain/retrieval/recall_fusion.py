@@ -22,6 +22,7 @@ from host_brain.core.errors import (
     RETR_STYLE_UNAVAILABLE,
     RETR_WORLD_UNAVAILABLE,
     RETR_VAULT_UNAVAILABLE,
+    RETR_PERSONA_UTTERANCE_UNAVAILABLE,
     RETR_RECALL_INPUT_INVALID,
     RETR_RECALL_UNAVAILABLE,
 )
@@ -49,6 +50,7 @@ logger = logging.getLogger("Natsume.retrieval.recall_fusion")
 DEFAULT_RECALL_ROUTE = "default"
 DEFAULT_RECALL_COLLECTION = "episodic"
 DEFAULT_CANON_VECTOR_COLLECTION = "canon"
+DEFAULT_PERSONA_UTTERANCE_COLLECTION = "persona_utterance"
 DEFAULT_RECALL_STORE_ID = "episodic_vector"
 DEFAULT_RECALL_TOP_K = 8
 DEFAULT_RECALL_SCORE_WEIGHT = 1.0
@@ -66,6 +68,7 @@ STORE_EPISODIC_VECTOR = "episodic_vector"
 STORE_STYLE_CANON = "style_canon"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
+STORE_PERSONA_UTTERANCE = "persona_utterance"
 
 SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset(
     {
@@ -75,6 +78,7 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset(
         STORE_STYLE_CANON,
         STORE_WORLD_CANON,
         STORE_ARTIFACT_VAULT,
+        STORE_PERSONA_UTTERANCE,
     }
 )
 
@@ -166,6 +170,12 @@ class RecallFusionServiceContract:
             )
         if store_id == STORE_ARTIFACT_VAULT:
             return self._search_artifact_vault(query=query, top_k=int(route.top_k))
+        if store_id == STORE_PERSONA_UTTERANCE:
+            return self._search_persona_utterance(
+                query_embedding=query_embedding,
+                top_k=int(route.top_k),
+                collection=route.collection,
+            )
         raise RuntimeError(f"unsupported recall store_id: {store_id}")
 
     def _search_sqlite_ledger(
@@ -639,6 +649,80 @@ class RecallFusionServiceContract:
                 }
             )
         return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
+
+    def _search_persona_utterance(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+    ) -> list[dict[str, Any]]:
+        target_collection = str(collection or DEFAULT_PERSONA_UTTERANCE_COLLECTION).strip()
+        if not target_collection:
+            target_collection = DEFAULT_PERSONA_UTTERANCE_COLLECTION
+
+        fetch_k = max(1, int(top_k)) * CANON_VECTOR_FETCH_FACTOR
+        rows = self.chroma.search(
+            query_embedding=query_embedding,
+            top_k=fetch_k,
+            collection=target_collection,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            metadata_raw = row.get("metadata")
+            metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+
+            memory_id = str(row.get("memory_id") or "").strip()
+            if not memory_id:
+                continue
+
+            score = _coerce_score(row.get("score"))
+            if score <= 0.0:
+                continue
+
+            canon_id = str(metadata.get("canon_id") or "").strip() or "unknown"
+            lang = str(metadata.get("lang") or "").strip().lower() or "unknown"
+            source_ref = str(
+                metadata.get("source_ref")
+                or f"persona_utterance://{canon_id}/{memory_id}"
+            ).strip()
+            evidence_primary = str(
+                metadata.get("evidence_ref")
+                or metadata.get("evidence_refs_primary")
+                or source_ref
+            ).strip() or source_ref
+            speaker = str(metadata.get("speaker") or "").strip() or None
+            file_rel_path = str(metadata.get("file_rel_path") or "").strip() or None
+            block_id = str(metadata.get("block_id") or "").strip() or None
+            line_index = _coerce_non_negative_int(metadata.get("line_index"), default=0)
+            snippet = _truncate_text_for_recall(str(row.get("text") or ""), limit=512)
+            if not snippet:
+                continue
+
+            candidates.append(
+                {
+                    "memory_id": memory_id,
+                    "text": snippet,
+                    "score": score,
+                    "metadata": {
+                        "store_id": STORE_PERSONA_UTTERANCE,
+                        "canon_id": canon_id,
+                        "lang": lang,
+                        "speaker": speaker,
+                        "file_rel_path": file_rel_path,
+                        "block_id": block_id,
+                        "line_index": line_index,
+                        "vector_collection": target_collection,
+                        "source_ref": source_ref,
+                        "evidence_refs": [evidence_primary],
+                        "evidence_refs_primary": evidence_primary,
+                    },
+                }
+            )
+        return sorted(candidates, key=lambda row: -float(row["score"]))[: max(1, int(top_k))]
 
     def recall(
         self,
@@ -1390,6 +1474,8 @@ def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
         return RETR_WORLD_UNAVAILABLE
     if normalized_store == STORE_ARTIFACT_VAULT:
         return RETR_VAULT_UNAVAILABLE
+    if normalized_store == STORE_PERSONA_UTTERANCE:
+        return RETR_PERSONA_UTTERANCE_UNAVAILABLE
     # episodic_vector：保持原有 Chroma 错误码分发（向后兼容）
     text = str(exc)
     if CHROMA_COLLECTION_MISSING in text:
