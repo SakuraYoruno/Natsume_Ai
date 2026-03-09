@@ -46,6 +46,9 @@
 - [x] P0-A/A6：完成扩展回归 `45 passed`（含 stream/retrieval/chat 路径）
 - [x] 5.2：新增路由器场景分类测试集 `test_scene_router_classification_dataset.py`（入口/后置路由、优先级与显式覆盖）
 - [x] 5.2：完成场景分类回归扩展 `79 passed`（scene_router + stream + retrieval + chat）
+- [x] 5.2：新增情感层回归样本集 `tests/fixtures/emotion/closed_loop_cases.json`（16 样本，覆盖 mood/tag 约束与强度 clamp）
+- [x] 5.2：闭环工具支持 fixture 语料加载（`--case-file`）并在报告中记录 `case_source`
+- [x] 5.2：完成情感层回归扩展 `82 passed`（scene_router + stream + retrieval + chat + emotion）
 
 ---
 
@@ -238,7 +241,7 @@
 ### 5.2 测试体系
 - [x] 为流式链路增加契约测试（SSE 事件顺序、终止条件）
 - [x] 为路由器增加场景分类测试集
-- [ ] 为情感层增加回归样本集
+- [x] 为情感层增加回归样本集
 
 ### 5.3 发布与回滚
 - [ ] 每个阶段准备灰度开关（按用户/按场景）
