@@ -64,6 +64,8 @@
 - [x] 5.1：新增/更新 observability 契约回归 `26 passed`（`test_obs_metrics_contract` + `test_perf_baseline_contract`）
 - [x] 5.1：新增周稳定性报告工具 `tools/diag_stability_weekly.py` 并接入 `tools/diag.py stability` 子命令
 - [x] 5.1：生成首份周报 `WEEKLY_STABILITY_REPORT_20260310_005912.{json,md}`（7 天窗口，状态 `WARN`，2 条告警）
+- [x] 5.3：新增灰度门控（按会话/用户哈希百分比 + 场景白名单 + allowlist），`/v1/chat` 与 `/v1/chat/stream` 已接入
+- [x] 5.3：灰度回归通过 `15 passed`（host8b runtime route + stream/chat 路径）
 
 ---
 
@@ -259,7 +261,7 @@
 - [x] 为情感层增加回归样本集
 
 ### 5.3 发布与回滚
-- [ ] 每个阶段准备灰度开关（按用户/按场景）
+- [x] 每个阶段准备灰度开关（按用户/按场景）
 - [ ] 每次上线绑定回滚条件与回滚命令
 - [ ] 发布后 24h 做一次复盘
 

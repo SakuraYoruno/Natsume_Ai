@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import urllib.error
 import urllib.request
@@ -121,6 +122,96 @@ def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> i
     except (TypeError, ValueError):
         parsed = int(default)
     return max(int(min_value), min(int(max_value), parsed))
+
+
+def _parse_csv_tokens(value: Any) -> set[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return set()
+    tokens: set[str] = set()
+    for item in raw.split(","):
+        token = str(item or "").strip()
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+def _stable_bucket_0_99(value: str) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+    return int(digest[:8], 16) % 100
+
+
+def _evaluate_host_chat_gray_rollout(
+    *,
+    rollout_key: str | None,
+    scene_type: str | None,
+) -> dict[str, Any]:
+    enabled = _parse_bool(os.environ.get("HOST_CHAT_GRAY_ENABLED"), default=False)
+    percent = _parse_int(
+        os.environ.get("HOST_CHAT_GRAY_PERCENT"),
+        default=100,
+        min_value=0,
+        max_value=100,
+    )
+    scope_scenes = {
+        str(item).strip().upper()
+        for item in _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_SCENES") or "CHAT")
+        if str(item).strip()
+    }
+    allowlist = _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_USER_ALLOWLIST"))
+    normalized_scene = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
+    key_value = str(rollout_key or "").strip()
+
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "percent": percent,
+        "scene_type": normalized_scene,
+        "scope_scenes": sorted(scope_scenes),
+        "rollout_key": (key_value or None),
+        "bucket": None,
+        "allowlist_hit": False,
+        "in_rollout": True,
+        "reason_code": "HOST_CHAT_GRAY_DISABLED",
+        "detail": "gray rollout disabled",
+    }
+    if not enabled:
+        return result
+
+    if scope_scenes and normalized_scene not in scope_scenes:
+        result["in_rollout"] = False
+        result["reason_code"] = "HOST_CHAT_GRAY_SCENE_EXCLUDED"
+        result["detail"] = f"scene_type={normalized_scene} not in gray scope"
+        return result
+
+    if key_value and key_value in allowlist:
+        result["allowlist_hit"] = True
+        result["reason_code"] = "HOST_CHAT_GRAY_ALLOWLIST_MATCH"
+        result["detail"] = "rollout key hit allowlist"
+        return result
+
+    if not key_value:
+        include_without_key = percent >= 100
+        result["in_rollout"] = include_without_key
+        result["reason_code"] = (
+            "HOST_CHAT_GRAY_NO_KEY_INCLUDED" if include_without_key else "HOST_CHAT_GRAY_NO_KEY_EXCLUDED"
+        )
+        result["detail"] = "rollout key missing"
+        return result
+
+    bucket = _stable_bucket_0_99(key_value)
+    in_rollout = bucket < percent
+    result["bucket"] = bucket
+    result["in_rollout"] = in_rollout
+    if in_rollout:
+        result["reason_code"] = "HOST_CHAT_GRAY_BUCKET_INCLUDED"
+        result["detail"] = f"bucket={bucket} < percent={percent}"
+    else:
+        result["reason_code"] = "HOST_CHAT_GRAY_BUCKET_EXCLUDED"
+        result["detail"] = f"bucket={bucket} >= percent={percent}"
+    return result
 
 
 def _provider_requires_api_key(provider_name: str) -> bool:
@@ -502,7 +593,11 @@ def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def resolve_host_llm_runtime() -> dict[str, Any]:
+def resolve_host_llm_runtime(
+    *,
+    rollout_key: str | None = None,
+    scene_type: str | None = None,
+) -> dict[str, Any]:
     config_result = load_host_config()
     cloud_provider_name = str(os.environ.get("HOST_LLM_PROVIDER") or PROVIDER_OPENAI).strip().lower() or PROVIDER_OPENAI
     cloud_timeout_ms = 15_000
@@ -550,6 +645,10 @@ def resolve_host_llm_runtime() -> dict[str, Any]:
 
     host_8b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_8B_ENABLED"), default=True)
     force_cloud = _parse_bool(os.environ.get("HOST_CHAT_FORCE_CLOUD"), default=False)
+    gray_rollout = _evaluate_host_chat_gray_rollout(
+        rollout_key=rollout_key,
+        scene_type=scene_type,
+    )
 
     if force_cloud:
         route_reason_code = "HOST_CHAT_FORCE_CLOUD"
@@ -560,6 +659,9 @@ def resolve_host_llm_runtime() -> dict[str, Any]:
     elif sys_mode == "gaming":
         route_reason_code = "HOST_CHAT_HOST_8B_DISABLED_GAMING_MODE"
         route_detail = "sys_mode=gaming"
+    elif bool(gray_rollout.get("enabled")) and not bool(gray_rollout.get("in_rollout")):
+        route_reason_code = str(gray_rollout.get("reason_code") or "HOST_CHAT_GRAY_EXCLUDED")
+        route_detail = str(gray_rollout.get("detail") or "gray rollout excluded")
     else:
         host_8b_provider = (
             str(os.environ.get("HOST_CHAT_HOST_8B_PROVIDER") or _HOST_CHAT_8B_DEFAULT_PROVIDER).strip().lower()
@@ -646,6 +748,7 @@ def resolve_host_llm_runtime() -> dict[str, Any]:
         "cloud_available": cloud_available,
         "cloud_provider_fn": cloud_provider_fn,
         "cloud_base_url_override": cloud_base_url_override,
+        "gray_rollout": dict(gray_rollout),
     }
 
 

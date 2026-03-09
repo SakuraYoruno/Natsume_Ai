@@ -71,7 +71,7 @@ def test_stream_prompt_injects_retrieval_before_render(monkeypatch: Any) -> None
     monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
     monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
     monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
-    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda: {
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
         "provider_name": "mock",
         "model_id": "mock-model",
         "timeout_ms": 1000,
@@ -144,7 +144,7 @@ def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any)
     monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
     monkeypatch.setattr(stream_mod, "_run_retrieval", _slow_run_retrieval)
     monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
-    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda: {
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
         "provider_name": "mock",
         "model_id": "mock-model",
         "timeout_ms": 1000,
@@ -256,7 +256,7 @@ def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order
     monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
     monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
     monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
-    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda: {
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
         "provider_name": "mock",
         "model_id": "mock-model",
         "timeout_ms": 1000,
@@ -318,7 +318,7 @@ def test_stream_commit_contains_vts_summary(monkeypatch: Any) -> None:
     monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
     monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
-    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda: {
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
         "provider_name": "mock",
         "model_id": "mock-model",
         "timeout_ms": 1000,

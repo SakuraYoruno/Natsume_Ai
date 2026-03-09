@@ -112,6 +112,71 @@ def test_resolve_host_llm_runtime_unhealthy_host_8b_falls_back_to_cloud(monkeypa
     assert runtime["provider_name"] == "gemini"
 
 
+def test_resolve_host_llm_runtime_gray_rollout_bucket_excluded_forces_cloud(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
+    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
+    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
+    monkeypatch.delenv("HOST_CHAT_GRAY_USER_ALLOWLIST", raising=False)
+
+    runtime = graph_builder.resolve_host_llm_runtime(
+        rollout_key="session::gray::excluded",
+        scene_type="CHAT",
+    )
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CHAT_GRAY_BUCKET_EXCLUDED"
+    assert bool(runtime["gray_rollout"]["enabled"]) is True
+    assert bool(runtime["gray_rollout"]["in_rollout"]) is False
+
+
+def test_resolve_host_llm_runtime_gray_rollout_allowlist_overrides_percent(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
+    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
+    monkeypatch.setenv("HOST_CHAT_GRAY_USER_ALLOWLIST", "session::gray::allow")
+    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
+
+    runtime = graph_builder.resolve_host_llm_runtime(
+        rollout_key="session::gray::allow",
+        scene_type="CHAT",
+    )
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_8B
+    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_8B_ACTIVE"
+    assert bool(runtime["gray_rollout"]["allowlist_hit"]) is True
+    assert runtime["gray_rollout"]["reason_code"] == "HOST_CHAT_GRAY_ALLOWLIST_MATCH"
+
+
+def test_resolve_host_llm_runtime_gray_rollout_scene_excluded_forces_cloud(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "100")
+    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
+    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
+    monkeypatch.delenv("HOST_CHAT_GRAY_USER_ALLOWLIST", raising=False)
+
+    runtime = graph_builder.resolve_host_llm_runtime(
+        rollout_key="session::gray::work-code",
+        scene_type="WORK_CODE",
+    )
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CHAT_GRAY_SCENE_EXCLUDED"
+    assert runtime["gray_rollout"]["scene_type"] == "WORK_CODE"
+
+
 def test_build_chat_graph_config_uses_host_8b_only_for_chat_direct(monkeypatch) -> None:
     captured_calls: list[dict] = []
 

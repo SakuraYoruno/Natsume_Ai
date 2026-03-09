@@ -555,7 +555,10 @@ async def _sse_event_generator(
         )
 
         # ── 5. 检查 LLM 可用性 ────────────────────────────────────────────
-        llm_runtime = resolve_host_llm_runtime()
+        llm_runtime = resolve_host_llm_runtime(
+            rollout_key=session_id,
+            scene_type=scene_type,
+        )
         provider_name = str(llm_runtime["provider_name"])
         model_id = str(llm_runtime["model_id"])
         timeout_ms_val = int(llm_runtime["timeout_ms"])

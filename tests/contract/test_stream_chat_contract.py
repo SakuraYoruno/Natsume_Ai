@@ -157,7 +157,7 @@ def _install_stream_contract_stubs(monkeypatch: Any) -> dict[str, Any]:
     monkeypatch.setattr(
         stream_mod,
         "resolve_host_llm_runtime",
-        lambda: {
+        lambda **kwargs: {
             "provider_name": "mock",
             "model_id": "mock-model",
             "timeout_ms": 1000,

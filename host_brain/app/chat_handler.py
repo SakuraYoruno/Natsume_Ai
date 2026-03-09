@@ -703,7 +703,10 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 context_pack_observability=context_pack_observability,
             )
 
-            llm_runtime = resolve_host_llm_runtime()
+            llm_runtime = resolve_host_llm_runtime(
+                rollout_key=session_id,
+                scene_type=scene_type_for_retrieval,
+            )
             provider_name = str(llm_runtime["provider_name"])
             model_id = str(llm_runtime["model_id"])
             timeout_ms = int(llm_runtime["timeout_ms"])
