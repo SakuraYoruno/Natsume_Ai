@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Mapping
 
@@ -18,6 +19,14 @@ from host_brain.core.context_pack import (
 )
 from host_brain.core.qa import check_wcanon_slot_violation
 from host_brain.memory.canon_style_store import StyleCanonStore
+
+
+CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
+    "six_route",
+    "core_three",
+    "minimal_context",
+    "bare_llm",
+)
 
 
 def normalize_node_style_bindings(
@@ -252,6 +261,188 @@ def build_chat_context_pack(
     )
 
 
+def _coerce_non_negative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    return max(0, parsed)
+
+
+def _count_kind(rows: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        kind = str(row.get("kind") or "unknown").strip().lower() or "unknown"
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _extract_route_ids(routes_value: Any) -> list[str]:
+    route_ids: list[str] = []
+    routes = list(routes_value or []) if isinstance(routes_value, list) else []
+    for route in routes:
+        route_id = ""
+        if isinstance(route, Mapping):
+            route_id = str(route.get("route_id") or route.get("store_id") or route.get("id") or "").strip()
+        else:
+            route_id = str(route).strip()
+        if route_id and route_id not in route_ids:
+            route_ids.append(route_id)
+    return route_ids
+
+
+def _classify_retrieval_path_for_obs(
+    *,
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> str:
+    status = str(retrieval_summary.get("status") or "").strip().upper()
+    degraded = bool(retrieval_summary.get("degraded", False))
+    route_count = _coerce_non_negative_int(retrieval_summary.get("route_count"))
+    candidate_count = _coerce_non_negative_int(retrieval_summary.get("candidate_count"))
+    rerank_topk = _coerce_non_negative_int(retrieval_summary.get("rerank_topk"))
+    if status == "OK" and not degraded:
+        return "success"
+    if route_count > 0 or candidate_count > 0 or rerank_topk > 0 or len(retrieval_evidence_items) > 0:
+        return "partial_failure"
+    return "all_failure"
+
+
+def _select_context_degrade_tier(
+    *,
+    retrieval_summary: Mapping[str, Any],
+    context_pack_validation: Mapping[str, Any],
+    slot_item_counts: Mapping[str, int],
+) -> tuple[str, str]:
+    validation_reason = str(context_pack_validation.get("reason_code") or "").strip().upper()
+    retrieval_status = str(retrieval_summary.get("status") or "").strip().upper()
+    retrieval_degraded = bool(retrieval_summary.get("degraded", False))
+    route_count = _coerce_non_negative_int(retrieval_summary.get("route_count"))
+    retrieval_items = _coerce_non_negative_int(slot_item_counts.get("retrieval", 0))
+    non_retrieval_items = (
+        _coerce_non_negative_int(slot_item_counts.get("authoritative", 0))
+        + _coerce_non_negative_int(slot_item_counts.get("style_canon", 0))
+        + _coerce_non_negative_int(slot_item_counts.get("tool_meta_pack", 0))
+    )
+    total_items = sum(_coerce_non_negative_int(value) for value in slot_item_counts.values())
+
+    if validation_reason == "CONTEXT_PACK_MINIMAL_FALLBACK":
+        if total_items == 0:
+            return "bare_llm", "context_pack_minimal_fallback_and_empty_slots"
+        return "minimal_context", "context_pack_minimal_fallback"
+
+    if validation_reason == "CONTEXT_PACK_DEGRADED":
+        return "minimal_context", "context_pack_authoritative_slot_degraded"
+
+    if route_count >= 6 and retrieval_items > 0 and retrieval_status == "OK" and not retrieval_degraded:
+        return "six_route", "full_six_route_retrieval_ready"
+
+    if route_count >= 3 and retrieval_items > 0:
+        return "core_three", "core_three_retrieval_routes_ready"
+
+    if retrieval_items > 0:
+        return "core_three", "partial_retrieval_context_ready"
+
+    if non_retrieval_items > 0:
+        return "minimal_context", "retrieval_empty_using_non_retrieval_context"
+
+    return "bare_llm", "no_context_slots_available"
+
+
+def build_context_pack_observability(
+    *,
+    context_pack: Mapping[str, Any],
+    context_pack_validation: Mapping[str, Any],
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    authoritative_rows = list(context_pack.get("authoritative") or []) if isinstance(context_pack.get("authoritative"), list) else []
+    retrieval_rows = list(context_pack.get("retrieval") or []) if isinstance(context_pack.get("retrieval"), list) else []
+    tool_meta_rows = list(context_pack.get("tool_meta_pack") or []) if isinstance(context_pack.get("tool_meta_pack"), list) else []
+
+    style_pack_raw = context_pack.get("style_pack")
+    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
+    style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
+    node_bindings_raw = style_pack.get("node_bindings")
+    node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
+
+    slot_item_counts = {
+        "authoritative": len(authoritative_rows),
+        "retrieval": len(retrieval_rows),
+        "style_canon": len(style_rows),
+        "style_node_bindings": len(node_bindings),
+        "tool_meta_pack": len(tool_meta_rows),
+    }
+
+    selected_tier, selected_reason = _select_context_degrade_tier(
+        retrieval_summary=retrieval_summary,
+        context_pack_validation=context_pack_validation,
+        slot_item_counts=slot_item_counts,
+    )
+
+    route_ids = _extract_route_ids(retrieval_summary.get("routes"))
+    retrieval_path = _classify_retrieval_path_for_obs(
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+    )
+
+    context_chars = len(
+        json.dumps(
+            {
+                "authoritative": authoritative_rows,
+                "retrieval": retrieval_rows,
+                "style_pack": style_pack,
+                "constraints": dict(context_pack.get("constraints") or {}),
+                "emotion_pulse": dict(context_pack.get("emotion_pulse") or {}),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+    retrieval_input_count = len(list(retrieval_evidence_items or []))
+    retrieval_used_count = len(retrieval_rows)
+    retrieval_item_cap = 10
+
+    return {
+        "version": "context_pack_obs.v1",
+        "degrade_order": list(CONTEXT_DEGRADE_ORDER),
+        "selected_tier": selected_tier,
+        "selected_tier_rank": list(CONTEXT_DEGRADE_ORDER).index(selected_tier),
+        "selected_reason": selected_reason,
+        "slot_item_counts": slot_item_counts,
+        "kind_breakdown": {
+            "authoritative": _count_kind(authoritative_rows),
+            "retrieval": _count_kind(retrieval_rows),
+            "style_canon": _count_kind(style_rows),
+        },
+        "retrieval_metrics": {
+            "status": str(retrieval_summary.get("status") or "UNKNOWN"),
+            "reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
+            "degraded": bool(retrieval_summary.get("degraded", False)),
+            "path": retrieval_path,
+            "route_count": _coerce_non_negative_int(retrieval_summary.get("route_count")),
+            "candidate_count": _coerce_non_negative_int(retrieval_summary.get("candidate_count")),
+            "rerank_topk": _coerce_non_negative_int(retrieval_summary.get("rerank_topk")),
+            "route_ids": route_ids,
+            "cache_hit": bool(retrieval_summary.get("cache_hit", False)),
+            "cache_ttl_ms": _coerce_non_negative_int(retrieval_summary.get("cache_ttl_ms")),
+            "cache_age_ms": _coerce_non_negative_int(retrieval_summary.get("cache_age_ms")),
+        },
+        "source_stats": {
+            "retrieval_input_items": retrieval_input_count,
+            "retrieval_used_items": retrieval_used_count,
+            "retrieval_item_cap": retrieval_item_cap,
+            "retrieval_trimmed_items": max(0, retrieval_input_count - retrieval_used_count),
+            "world_authoritative_items": len(authoritative_rows),
+            "style_binding_nodes": len(node_bindings),
+        },
+        "context_size_chars": context_chars,
+    }
+
+
 def build_chat_generation_prompt_payload(
     *,
     request_id: str,
@@ -279,6 +470,12 @@ def build_chat_generation_prompt_payload(
         style_bindings=normalized_style_bindings,
         emotion_context=normalized_emotion_context,
     )
+    context_pack_observability = build_context_pack_observability(
+        context_pack=context_pack,
+        context_pack_validation=context_pack_validation,
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+    )
     return {
         "request_id": request_id,
         "session_id": session_id,
@@ -293,6 +490,7 @@ def build_chat_generation_prompt_payload(
         },
         "context_pack": context_pack,
         "context_pack_validation": context_pack_validation,
+        "context_pack_observability": context_pack_observability,
         "retrieval": {
             "status": retrieval_summary.get("status"),
             "reason_code": retrieval_summary.get("reason_code"),

@@ -199,8 +199,15 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
 
     context_pack = dict(payload.get("context_pack") or {})
     context_pack_validation = dict(payload.get("context_pack_validation") or {})
+    context_pack_observability = dict(payload.get("context_pack_observability") or {})
     assert context_pack
     assert context_pack_validation.get("valid") is True
+    assert context_pack_observability.get("version") == "context_pack_obs.v1"
+    assert context_pack_observability.get("selected_tier") == "core_three"
+    retrieval_metrics = dict(context_pack_observability.get("retrieval_metrics") or {})
+    source_stats = dict(context_pack_observability.get("source_stats") or {})
+    assert retrieval_metrics.get("path") == "success"
+    assert source_stats.get("retrieval_used_items") == 1
     authoritative = list(context_pack.get("authoritative") or [])
     assert any(str(row.get("kind") or "") == "world_canon" for row in authoritative)
     style_pack = dict(context_pack.get("style_pack") or {})
@@ -212,6 +219,45 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
     assert dict(context_pack.get("emotion_pulse") or {}).get("emotion_tag") == "HAPPY"
     assert dict(context_pack.get("memory_emotion_hint") or {}).get("mood_state") == "engaged"
     assert dict(context_pack.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
+
+
+def test_context_pack_observability_marks_bare_llm_when_minimal_fallback() -> None:
+    from host_brain.app.chat_context_builder import (
+        build_context_pack_observability as _build_context_pack_observability,
+    )
+
+    observability = _build_context_pack_observability(
+        context_pack={
+            "hard_snapshot": {},
+            "bond_summary": {},
+            "authoritative": [],
+            "retrieval": [],
+            "style_pack": {},
+            "constraints": {},
+            "tool_meta_pack": [],
+        },
+        context_pack_validation={
+            "valid": True,
+            "degraded": True,
+            "reason_code": "CONTEXT_PACK_MINIMAL_FALLBACK",
+            "violation_count": 2,
+            "violations": [],
+        },
+        retrieval_summary={
+            "status": "DEGRADED",
+            "reason_code": "RETRIEVAL_FAILED",
+            "route_count": 0,
+            "candidate_count": 0,
+            "rerank_topk": 0,
+            "degraded": True,
+        },
+        retrieval_evidence_items=[],
+    )
+
+    assert observability.get("selected_tier") == "bare_llm"
+    assert observability.get("selected_reason") == "context_pack_minimal_fallback_and_empty_slots"
+    retrieval_metrics = dict(observability.get("retrieval_metrics") or {})
+    assert retrieval_metrics.get("path") == "all_failure"
 
 
 def test_render_node_prompt_prefers_context_pack_slots() -> None:

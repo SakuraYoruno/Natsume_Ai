@@ -26,3 +26,13 @@ def test_chat_approve_path_uses_graph_runtime(monkeypatch) -> None:
     llm = dict((body.get("audit_refs") or {}).get("llm") or {})
     assert llm.get("stage") == "S_ORCH_RUN", llm
     assert llm.get("status") in {"OK", "DEGRADED"}, llm
+    context_pack_observability = dict(llm.get("context_pack_observability") or {})
+    assert context_pack_observability.get("selected_tier") in {
+        "six_route",
+        "core_three",
+        "minimal_context",
+        "bare_llm",
+        None,
+    }, context_pack_observability
+    route_decision = dict((body.get("audit_refs") or {}).get("route_decision") or {})
+    assert route_decision.get("target") in {"host", "cloud", "skills"}, route_decision
