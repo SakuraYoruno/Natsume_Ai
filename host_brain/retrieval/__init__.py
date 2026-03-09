@@ -59,6 +59,17 @@ from host_brain.retrieval.pipeline import (
     RetrievalPipelineResult,
     build_retrieval_pipeline_from_env,
 )
+from host_brain.retrieval.orchestrator import (
+    RETRIEVAL_PATH_ALL_FAILURE,
+    RETRIEVAL_PATH_PARTIAL_FAILURE,
+    RETRIEVAL_PATH_SUCCESS,
+    RetrievalOrchestrator,
+    RetrievalOrchestratorRequest,
+    RetrievalOrchestratorResult,
+    build_degraded_retrieval_summary,
+    build_skipped_retrieval_summary,
+    build_summary_from_pipeline_result,
+)
 
 __all__ = [
     "RET_OP_EMBEDDING",
@@ -101,6 +112,15 @@ __all__ = [
     "RetrievalPipelineResult",
     "ChromaHttpSearchClient",
     "build_retrieval_pipeline_from_env",
+    "RETRIEVAL_PATH_ALL_FAILURE",
+    "RETRIEVAL_PATH_PARTIAL_FAILURE",
+    "RETRIEVAL_PATH_SUCCESS",
+    "RetrievalOrchestrator",
+    "RetrievalOrchestratorRequest",
+    "RetrievalOrchestratorResult",
+    "build_degraded_retrieval_summary",
+    "build_skipped_retrieval_summary",
+    "build_summary_from_pipeline_result",
     "RerankConfigIssue",
     "RerankConfigLoadResult",
     "RerankRouteConfig",
