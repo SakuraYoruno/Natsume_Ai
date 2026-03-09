@@ -44,6 +44,8 @@
 - [x] P0-A/A6：新增流式 SSE 契约测试 `test_stream_chat_contract.py`（GET/POST 事件顺序、终止条件、COMMIT 审计字段）
 - [x] P0-A/A6：完成流式集成回归（`/v1/chat/stream` 端点层）并验证 intent_draft 透传
 - [x] P0-A/A6：完成扩展回归 `45 passed`（含 stream/retrieval/chat 路径）
+- [x] 5.2：新增路由器场景分类测试集 `test_scene_router_classification_dataset.py`（入口/后置路由、优先级与显式覆盖）
+- [x] 5.2：完成场景分类回归扩展 `79 passed`（scene_router + stream + retrieval + chat）
 
 ---
 
@@ -235,7 +237,7 @@
 
 ### 5.2 测试体系
 - [x] 为流式链路增加契约测试（SSE 事件顺序、终止条件）
-- [ ] 为路由器增加场景分类测试集
+- [x] 为路由器增加场景分类测试集
 - [ ] 为情感层增加回归样本集
 
 ### 5.3 发布与回滚
