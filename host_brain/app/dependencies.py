@@ -13,6 +13,12 @@ from host_brain.bond.bond_stage_engine import BondStageEngine
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
+from host_brain.app.graph_config_builder import (
+    SCENE_ROUTER_ENTRY_HANDLER_ID,
+    SCENE_ROUTER_POST_CORE_HANDLER_ID,
+    graph_scene_router_entry_handler,
+    graph_scene_router_post_core_handler,
+)
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.mcp.tool_registry import MCPToolRegistry
@@ -21,6 +27,7 @@ from host_brain.retrieval.pipeline import (
     RetrievalPipelineContract,
     build_retrieval_pipeline_from_env,
 )
+from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
@@ -36,8 +43,29 @@ _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
 _episodic_store: Optional[EpisodicStore] = None
 _retrieval_pipeline: Optional[RetrievalPipelineContract] = None
+_retrieval_orchestrator: Optional[RetrievalOrchestrator] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except ValueError:
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
 
 
 def get_ledger() -> SQLiteLedger:
@@ -73,12 +101,55 @@ def get_retrieval_pipeline() -> RetrievalPipelineContract:
     return _retrieval_pipeline
 
 
+def get_retrieval_orchestrator() -> RetrievalOrchestrator:
+    global _retrieval_orchestrator
+    pipeline = get_retrieval_pipeline()
+    cache_enabled = _parse_bool_env("HOST_RETRIEVAL_CACHE_ENABLED", default=False)
+    cache_ttl_ms = _parse_int_env(
+        "HOST_RETRIEVAL_CACHE_TTL_MS",
+        default=3000,
+        minimum=0,
+        maximum=600000,
+    )
+    cache_max_entries = _parse_int_env(
+        "HOST_RETRIEVAL_CACHE_MAX_ENTRIES",
+        default=256,
+        minimum=1,
+        maximum=20000,
+    )
+    cache_signature = (
+        bool(cache_enabled and cache_ttl_ms > 0 and cache_max_entries > 0),
+        int(max(0, cache_ttl_ms)),
+        int(max(1, cache_max_entries)),
+    )
+    if (
+        _retrieval_orchestrator is None
+        or _retrieval_orchestrator.pipeline is not pipeline
+        or _retrieval_orchestrator.cache_config_signature != cache_signature
+    ):
+        _retrieval_orchestrator = RetrievalOrchestrator(
+            pipeline=pipeline,
+            cache_enabled=cache_enabled,
+            cache_ttl_ms=cache_ttl_ms,
+            cache_max_entries=cache_max_entries,
+        )
+    return _retrieval_orchestrator
+
+
 def get_graph_runtime() -> GraphRuntimeContract:
     global _graph_runtime
     if _graph_runtime is None:
         _graph_runtime = GraphRuntimeContract(
             ledger=get_ledger(),
             default_timeout_ms=5_000,
+        )
+        _graph_runtime.register_node_handler(
+            SCENE_ROUTER_ENTRY_HANDLER_ID,
+            graph_scene_router_entry_handler,
+        )
+        _graph_runtime.register_node_handler(
+            SCENE_ROUTER_POST_CORE_HANDLER_ID,
+            graph_scene_router_post_core_handler,
         )
     return _graph_runtime
 
