@@ -84,6 +84,7 @@ host_brain/core/models/
 
 # Runtime logs
 host_brain/core/data/logs/
+runtime_logs/
 
 # --- edge_client ---
 # Temporary audio generated during local runs
