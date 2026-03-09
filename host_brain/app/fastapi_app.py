@@ -21,7 +21,18 @@ from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from host_brain.app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    EdgeEventsRequest,
+    EdgeEventsResponse,
+    ErrorResponse,
+    HealthResponse,
+    MetricsResponse,
+    ObservabilityRequest,
+    ObservabilityResponse,
+    ReadinessResponse,
+)
 
 from host_brain.app.main import (
     build_env_readiness_report,
@@ -51,35 +62,19 @@ from host_brain.core.metabolism import (
     normalize_hard_state,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
-from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
 from host_brain.memory.canon_style_store import StyleCanonStore
-from host_brain.memory.episodic import EpisodicStore
-from host_brain.obs.metrics import MetricsCollector
 from host_brain.obs.routes import build_obs_metrics_response
 from host_brain.observability.cross_timeline import build_cross_timeline
-from host_brain.retrieval.pipeline import (
-    RetrievalPipelineContract,
-    build_retrieval_pipeline_from_env,
-)
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
 from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
-from host_brain.tools.catalog import ToolCatalog
-from host_brain.tools.broker import ToolBroker
-from host_brain.governor.policy_cache import GovernorPolicyCache
-from host_brain.governor.tokens import TokenService
-from host_brain.skills.builtin_registry import build_builtin_skill_registry
-from host_brain.skills.registry import SkillRegistry
-from host_brain.bond.bond_stage_engine import BondStageEngine
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
-from host_brain.bond.bond_dynamics import BondDynamicsWriter
-from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_DISABLED,
@@ -92,98 +87,6 @@ from host_brain.integrations.llm_helpers import (
     stream_llm_chunks,
 )
 from fastapi.responses import StreamingResponse
-
-
-# HTTP contract models
-class HealthResponse(BaseModel):
-    status: str = Field(..., description="Service status")
-    version: str = Field(..., description="Application version")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-    details: Dict[str, Any] = Field(default_factory=dict, description="Health details")
-
-
-class ReadinessResponse(BaseModel):
-    ready: bool = Field(..., description="Whether the service is ready")
-    status: str = Field(..., description="Readiness status")
-    reason_code: Optional[str] = Field(None, description="Readiness reason code")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-    summary: Dict[str, Any] = Field(default_factory=dict, description="Readiness summary")
-
-
-class ObservabilityRequest(BaseModel):
-    request_id: str = Field(..., description="Request id to inspect")
-
-
-class ObservabilityResponse(BaseModel):
-    request_id: str = Field(..., description="Request id")
-    trace_status: str = Field(..., description="Trace status")
-    timeline_total: int = Field(..., description="Timeline event count")
-    sources: Dict[str, int] = Field(..., description="Timeline sources")
-    timeline: List[Dict[str, Any]] = Field(..., description="Timeline rows")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-
-
-class ChatRequest(BaseModel):
-    """POST /v1/chat request body."""
-    message: str = Field(..., description="User message")
-    session_id: Optional[str] = Field(None, description="Optional session id")
-    thread_id: Optional[str] = Field(None, description="Optional thread id")
-    intent_draft: Optional[Dict[str, Any]] = Field(None, description="Optional intent draft")
-    scene_type: Optional[str] = Field(None, description="Optional scene type override")
-    mood_state: Optional[str] = Field(None, description="Optional mood state")
-    emotion_tag: Optional[str] = Field(None, description="Optional emotion tag")
-    emotion_context: Optional[Dict[str, Any]] = Field(None, description="Optional emotion context")
-    emotion_range_hint: Optional[str] = Field(None, description="Optional emotion range hint")
-
-
-class ChatResponse(BaseModel):
-    """POST /v1/chat response body."""
-    request_id: str = Field(..., description="Request id")
-    narrative: Optional[str] = Field(None, description="Narrative response")
-    intent_draft: Optional[Dict[str, Any]] = Field(None, description="Intent draft")
-    decision: Optional[str] = Field(None, description="Governor decision")
-    reason_code: Optional[str] = Field(None, description="Reason code")
-    approval_token_ref: Optional[str] = Field(None, description="Approval token reference")
-    approval_tier: Optional[str] = Field(None, description="Approval tier")
-    quality: Dict[str, Any] = Field(default_factory=dict, description="Quality summary")
-    audit_refs: Dict[str, Any] = Field(default_factory=dict, description="Audit references")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-
-
-class MetricsResponse(BaseModel):
-    """GET /metrics response body."""
-    uptime_seconds: int = Field(..., description="Service uptime in seconds")
-    total_requests: int = Field(..., description="Total request count")
-    total_chat_requests: int = Field(..., description="Total chat request count")
-    total_rejections: int = Field(..., description="Total rejection count")
-    total_errors: int = Field(..., description="Total error count")
-    reason_code_distribution: Dict[str, int] = Field(default_factory=dict, description="Reason code distribution")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-
-
-class EdgeEventsRequest(BaseModel):
-    """POST /v1/edge/events request body."""
-    events: List[Dict[str, Any]] = Field(..., description="Edge event list")
-
-
-class EdgeEventsResponse(BaseModel):
-    """POST /v1/edge/events response body."""
-    success: bool = Field(..., description="Whether all events were accepted")
-    total: int = Field(..., description="Total event count")
-    accepted: int = Field(..., description="Accepted event count")
-    rejected: int = Field(..., description="Rejected event count")
-    reason_code: Optional[str] = Field(None, description="Failure reason code")
-    detail: Optional[str] = Field(None, description="Failure detail")
-    rejected_indices: List[int] = Field(default_factory=list, description="Rejected event indices")
-    timestamp: int = Field(..., description="Response timestamp in ms")
-
-
-class ErrorResponse(BaseModel):
-    error: str = Field(..., description="Error type")
-    reason_code: str = Field(..., description="Reason code")
-    detail: str = Field(..., description="Error detail")
-    request_id: Optional[str] = Field(None, description="Related request id")
-    timestamp: int = Field(..., description="Error timestamp in ms")
 
 
 # ---------------------------------------------------------------------------
@@ -331,165 +234,36 @@ if _cors_origins_raw:
     )
 
 # ---------------------------------------------------------------------------
-# 鍏ㄥ眬渚濊禆
+# 依赖注入工厂（从 dependencies.py 统一管理）
 # ---------------------------------------------------------------------------
-_ledger: Optional[SQLiteLedger] = None
-_intent_engine: Optional[IntentDecisionEngine] = None
-_skill_registry: Optional[SkillRegistry] = None  # M44锛氬唴缃?Skill 娉ㄥ唽琛ㄥ崟渚?
-_policy_cache: Optional[GovernorPolicyCache] = None  # M44锛氬垎灞傛不鐞?Policy Cache 鍗曚緥
-_tool_catalog: Optional[ToolCatalog] = None
-_tool_broker: Optional[ToolBroker] = None
-_bond_stage_engine: Optional[BondStageEngine] = None
-_episodic_store: Optional[EpisodicStore] = None
-_retrieval_pipeline: Optional[RetrievalPipelineContract] = None
-_obs_metrics_collector: Optional[MetricsCollector] = None
-_graph_runtime: Optional[GraphRuntimeContract] = None
+from host_brain.app.dependencies import (
+    get_ledger,
+    get_episodic_store,
+    get_retrieval_pipeline,
+    get_graph_runtime,
+    get_obs_metrics_collector,
+    get_tool_catalog,
+    get_tool_broker,
+    get_bond_stage_engine,
+    get_skill_registry,
+    get_policy_cache,
+    get_intent_engine,
+)
+from host_brain.app.graph_config_builder import (
+    CHAT_DIRECT_NODE_ID,
+    CHAT_GRAPH_NODE_ORDER,
+    CHAT_INTENT_SOURCE_NODE_ID,
+    CHAT_RENDER_NODE_ID,
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
+    pre_intent_classifier,
+    resolve_scene_node_sequence as _resolve_scene_node_sequence,
+)
 _logger = logging.getLogger("Natsume.fastapi")
 
-# M33-F锛欳HAT_GRAPH_NODE_ORDER 淇濈暀涓?鍏ㄨ妭鐐规敞鍐岃〃"锛岀敤浜?model_node_overrides 鍒濆鍖栥€?
-# 涓嶅啀鐢ㄤ簬 node_bindings/edges 鐨勬瀯寤衡€斺€旀敼鐢?_resolve_scene_node_sequence(scene_type)銆?
-CHAT_DIRECT_NODE_ID = "chat_direct_ja"
-CHAT_GRAPH_NODE_ORDER: list[str] = [
-    CHAT_DIRECT_NODE_ID,
-    "core_reasoner_primary",
-    "core_reasoner_secondary",
-    "planner_constraints",
-    "tool_planner",
-    "safety_verifier",
-    "consistency_verifier",
-    "renderer_ja_c_style",
-    "workbench_translate",
-    "workbench_code_assist",
-]
-CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
-CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
-
-# M33-A锛氬満鏅灇涓惧父閲忥紙ModelPlane.md 搂4.1锛?
-SCENE_CHAT = "CHAT"
-SCENE_EXEC_INTENT = "EXEC_INTENT"
-SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
-SCENE_WORK_CODE = "WORK_CODE"
-# M34-A锛氭柊澧?VISION_UI 鍦烘櫙甯搁噺
-SCENE_VISION_UI = "VISION_UI"
-
-# M34-A锛歱re_intent_classifier 鍏抽敭璇嶈鍒欒〃锛堜紭鍏堢骇浠庨珮鍒颁綆锛?
-# 瑙勫垯锛氱函瑙勫垯椹卞姩锛屾棤 LLM 璋冪敤锛屽欢杩?< 1ms
-# 浼樺厛绾э細VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT锛堥粯璁わ級
-_PIC_VISION_UI_KEYWORDS = frozenset([
-    "screenshot", "screen", "ui", "window", "interface", "capture",
-    "screen shot", "desktop", "look at the screen",
-    "截图", "屏幕", "界面", "画面", "看一下屏幕", "看看这个界面",
-])
-_PIC_WORK_CODE_KEYWORDS = frozenset([
-    "code", "coding", "programming", "function", "script", "program",
-    "python", "javascript", "typescript", "java", "golang", "rust", "c++",
-    "debug", "bug", "class", "algorithm", "implement", "develop",
-    "代码", "编程", "写代码", "写个函数", "函数", "脚本", "调试", "类", "实现", "开发",
-])
-_PIC_WORK_TRANSLATE_KEYWORDS = frozenset([
-    "translate", "translation", "translate to", "translate into",
-    "翻译", "翻成", "译成", "译为", "翻訳", "訳して",
-])
-_PIC_EXEC_INTENT_KEYWORDS = frozenset([
-    "execute", "run", "setup", "configure", "start", "stop", "install",
-    "执行", "运行", "设置", "配置", "启动", "关闭", "打开",
-    "帮我做", "部署", "创建", "新建", "修改", "更新", "安装",
-    "deploy", "build", "submit", "save",
-])
-
-
-def pre_intent_classifier(user_input: str) -> str:
-    """杞婚噺瑙勫垯棰勫垎绫诲櫒锛圡34-A锛孧odelPlane.md 搂4.0锛夈€?
-
-    鍦?LLM 璋冪敤鍓嶏紝鍩轰簬鍏抽敭璇?瑙勫垯蹇€熷垽鏂?scene_type_hint銆?
-    绾鍒欓┍鍔紝鏃?LLM 璋冪敤锛屽欢杩?< 1ms銆?
-
-    浼樺厛绾э紙浠庨珮鍒颁綆锛夛細
-    1. VISION_UI锛氭埅鍥?鐣岄潰/灞忓箷绛?
-    2. WORK_CODE锛氫唬鐮?缂栫▼/鍑芥暟绛?
-    3. WORK_TRANSLATE锛氱炕璇?translate/瑷炽仐銇︾瓑
-    4. EXEC_INTENT锛氭墽琛?杩愯/璁剧疆/閰嶇疆绛?
-    5. CHAT锛堥粯璁わ級锛氬叾浣欐墍鏈夎緭鍏?
-
-    娉ㄦ剰锛?
-    - 姝ゅ嚱鏁板彧褰卞搷鑺傜偣閾捐矾閫夋嫨锛屼笉褰卞搷 Governor 瑁佸喅鏉?
-    - 鏄惧紡浼犲叆鐨?scene_type 浼樺厛绾ч珮浜庨鍒嗙被缁撴灉
-    - 绌哄瓧绗︿覆鎴栨棤娉曡瘑鍒殑杈撳叆榛樿杩斿洖 CHAT
-
-    Args:
-        user_input: 鐢ㄦ埛鍘熷杈撳叆鏂囨湰
-
-    Returns:
-        scene_type_hint: CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI
-    """
-    text = str(user_input or "").strip().lower()
-    if not text:
-        return SCENE_CHAT
-
-    # 浼樺厛绾?1锛歏ISION_UI
-    for kw in _PIC_VISION_UI_KEYWORDS:
-        if kw in text:
-            return SCENE_VISION_UI
-
-    # 浼樺厛绾?2锛歐ORK_CODE
-    for kw in _PIC_WORK_CODE_KEYWORDS:
-        if kw in text:
-            return SCENE_WORK_CODE
-
-    # 浼樺厛绾?3锛歐ORK_TRANSLATE
-    for kw in _PIC_WORK_TRANSLATE_KEYWORDS:
-        if kw in text:
-            return SCENE_WORK_TRANSLATE
-
-    # 浼樺厛绾?4锛欵XEC_INTENT
-    for kw in _PIC_EXEC_INTENT_KEYWORDS:
-        if kw in text:
-            return SCENE_EXEC_INTENT
-
-    # 榛樿锛欳HAT
-    return SCENE_CHAT
-
-
-def _resolve_scene_node_sequence(scene_type: str) -> list[str]:
-    """鎸夊満鏅繑鍥炲簲鎵ц鐨勮妭鐐瑰簭鍒楋紙M33-A锛孧odelPlane.md 搂4.1/4.2锛夈€?
-
-    瑙勫垯锛?
-    - core_reasoner_secondary 鏄?primary 鐨?fallback-only锛屼笉鍦ㄦ甯搁摼璺腑銆?
-    - safety_verifier / consistency_verifier 浠呭湪 EXEC_INTENT 鍦烘櫙鎸夐渶瑙﹀彂銆?
-    - planner_constraints / tool_planner 浠呭湪 EXEC_INTENT 鍦烘櫙瑙﹀彂銆?
-    - workbench_translate 浠呭湪 WORK_TRANSLATE 鍦烘櫙瑙﹀彂銆?
-    - workbench_code_assist 浠呭湪 WORK_CODE 鍦烘櫙瑙﹀彂銆?
-    - renderer_ja_c_style 姣忔蹇呰窇锛圫2 娈碉級銆?
-    - 鏈煡鍦烘櫙閫€鍖栦负 CHAT 搴忓垪銆?
-    """
-    scene = str(scene_type or SCENE_CHAT).strip().upper()
-    if scene == SCENE_EXEC_INTENT:
-        return [
-            "core_reasoner_primary",
-            "planner_constraints",
-            "tool_planner",
-            "safety_verifier",
-            "consistency_verifier",
-            "renderer_ja_c_style",
-        ]
-    if scene == SCENE_WORK_TRANSLATE:
-        return [
-            "core_reasoner_primary",
-            "workbench_translate",
-            "consistency_verifier",
-            "renderer_ja_c_style",
-        ]
-    if scene == SCENE_WORK_CODE:
-        return [
-            "core_reasoner_primary",
-            "workbench_code_assist",
-            "consistency_verifier",
-            "renderer_ja_c_style",
-        ]
-    # CHAT fast path: single-node direct reply
-    return [
-        CHAT_DIRECT_NODE_ID,
-    ]
 
 
 def _resolve_host_llm_model_id(provider_name: str) -> str:
@@ -506,369 +280,24 @@ def _resolve_host_llm_model_id(provider_name: str) -> str:
     return "mock-default"
 
 
-def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
-    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
-    if len(text) <= limit:
-        return text
-    return f"{text[: max(0, limit - 3)]}..."
+from host_brain.app.prompt_builder import (
+    _truncate_for_prompt,
+    _contains_kana,
+    _contains_cjk_ideograph,
+    _contains_cjk_or_kana,
+    infer_render_target_lang as _infer_render_target_lang,
+    repair_utf8_latin1_mojibake as _repair_utf8_latin1_mojibake,
+    render_host_generation_prompt as _render_host_generation_prompt,
+    extract_node_runtime_payload as _extract_node_runtime_payload,
+    extract_node_narrative_text as _extract_node_narrative_text,
+    extract_gateway_narrative as _extract_gateway_narrative,
+    extract_json_object_from_text as _extract_json_object_from_text,
+    coerce_gateway_payload_json_text as _coerce_gateway_payload_json_text,
+    extract_langchain_content_text as _extract_langchain_content_text,
+    render_node_generation_prompt as _render_node_generation_prompt,
+)
 
 
-def _contains_kana(text: str) -> bool:
-    for ch in str(text or ""):
-        cp = ord(ch)
-        if 0x3040 <= cp <= 0x30FF:  # Hiragana/Katakana
-            return True
-    return False
-
-
-def _contains_cjk_ideograph(text: str) -> bool:
-    for ch in str(text or ""):
-        cp = ord(ch)
-        if 0x4E00 <= cp <= 0x9FFF:  # CJK unified ideographs
-            return True
-    return False
-
-
-def _contains_cjk_or_kana(text: str) -> bool:
-    return _contains_cjk_ideograph(text) or _contains_kana(text)
-
-
-def _infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
-    """ModelPlane 搂0.4: 浜屾寮忚緭鍑哄己鍒舵棩鏂囨覆鏌撱€?
-
-    renderer_ja_c_style 鍥哄畾杈撳嚭鏃ヨ锛坮endered_ja锛夛紝
-    浠呭湪 HOST_RENDER_TARGET_LANG 鏄惧紡瑕嗙洊鏃跺厑璁稿垏鎹€?
-    """
-    override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
-    if override in {"zh", "ja"}:
-        return override
-    return "ja"
-
-
-def _repair_utf8_latin1_mojibake(text: str) -> str:
-    raw = str(text or "")
-    if not raw:
-        return raw
-    if _contains_cjk_or_kana(raw):
-        return raw
-    try:
-        repaired = raw.encode("latin-1").decode("utf-8")
-    except UnicodeError:
-        return raw
-    if _contains_cjk_or_kana(repaired):
-        return repaired
-    return raw
-
-
-def _render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
-    user_message = _truncate_for_prompt(prompt_payload.get("user_message"), limit=1000)
-    retrieval_raw = prompt_payload.get("retrieval")
-    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, dict) else {}
-    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
-    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
-    evidence_items = retrieval.get("evidence_items")
-    rows = evidence_items if isinstance(evidence_items, list) else []
-    evidence_lines: list[str] = []
-    for row in rows[:5]:
-        if not isinstance(row, dict):
-            continue
-        evidence_ref = _truncate_for_prompt(row.get("evidence_ref") or row.get("source_ref") or "unknown", limit=80)
-        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
-        if not snippet:
-            continue
-        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
-    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
-    return (
-        "You are the Natsume core reasoning node.\n"
-        "Return exactly one JSON object with top-level keys: narrative, intent_draft, meta.\n"
-        "Required schema:\n"
-        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
-        "Rules:\n"
-        "1. Output JSON only. No markdown. No code fences.\n"
-        "2. Keep draft_only=true.\n"
-        "3. Do not claim execution/saving/confirmation has happened.\n"
-        "4. Reply in Simplified Chinese and keep it concise.\n"
-        "5. Ground the output in user message and evidence only.\n\n"
-        f"User message:\n{user_message}\n\n"
-        f"Retrieval status: {retrieval_status}\n"
-        f"Retrieval reason_code: {retrieval_reason}\n"
-        f"Evidence:\n{evidence_block}\n"
-    )
-
-
-def _extract_node_runtime_payload(runtime_payload: Mapping[str, Any], *, node_id: str) -> dict[str, Any]:
-    node_root = runtime_payload.get(node_id)
-    if not isinstance(node_root, Mapping):
-        return {}
-    payload_raw = node_root.get("payload")
-    if isinstance(payload_raw, Mapping):
-        return dict(payload_raw)
-    return {}
-
-
-def _extract_node_narrative_text(runtime_payload: Mapping[str, Any], *, node_id: str) -> str:
-    node_payload = _extract_node_runtime_payload(runtime_payload, node_id=node_id)
-    return _extract_gateway_narrative(node_payload)
-
-
-def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
-    user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=1000)
-    retrieval_raw = runtime_payload.get("retrieval")
-    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, Mapping) else {}
-    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
-    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
-    evidence_items = retrieval.get("evidence_items")
-    rows = evidence_items if isinstance(evidence_items, list) else []
-    evidence_lines: list[str] = []
-    for row in rows[:6]:
-        if not isinstance(row, Mapping):
-            continue
-        evidence_ref = _truncate_for_prompt(row.get("evidence_ref") or row.get("source_ref") or "unknown", limit=80)
-        snippet = _truncate_for_prompt(row.get("snippet"), limit=220)
-        if not snippet:
-            continue
-        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
-    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
-
-    core_payload = _extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
-    core_narrative = _extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
-    core_meta = core_payload.get("meta")
-    primary_degraded = isinstance(core_meta, dict) and core_meta.get("degraded")
-    if primary_degraded:
-        secondary_narrative = _extract_node_narrative_text(runtime_payload, node_id="core_reasoner_secondary")
-        if secondary_narrative:
-            core_narrative = secondary_narrative
-            secondary_payload = _extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_secondary")
-            if isinstance(secondary_payload.get("intent_draft"), dict) and secondary_payload["intent_draft"]:
-                core_payload = secondary_payload
-    core_intent_draft = core_payload.get("intent_draft")
-    if not isinstance(core_intent_draft, dict):
-        core_intent_draft = {}
-    core_intent_json = json.dumps(core_intent_draft, ensure_ascii=False, sort_keys=True)
-    planner_text = _extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
-    verifier_text = _extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
-
-    render_target_lang = _infer_render_target_lang(
-        user_message=user_message,
-        core_narrative=core_narrative,
-    )
-
-    renderer_role_instruction = (
-        "Role: renderer_ja_c_style (final Japanese renderer for 澶忕洰钘?.\n"
-        "You ARE 澶忕洰钘? Render CORE_NARRATIVE_ZH into Japanese in her voice.\n"
-        "Force output narrative.text in Japanese (short, restrained C-style tone).\n"
-        "Use 銇犮仦/銇犮仾/銇?銈?銇?sentence-enders sparingly (max one per sentence).\n"
-        "Do not add facts. Do not change intent_draft meaning.\n"
-        "NEVER say you are an AI, assistant, system, or program.\n"
-        "Use CORE_NARRATIVE_ZH as source and copy CORE_INTENT_DRAFT semantics."
-    )
-
-    node_role_instructions: dict[str, str] = {
-        "core_reasoner_primary": (
-            "Role: core_reasoner_primary.\n"
-            "You ARE 澶忕洰钘?(Natsume Ai). Think and draft as her.\n"
-            "Output concise Simplified Chinese semantic draft for CHAT.\n"
-            "Use her tone: gentle, restrained, empathetic. Acknowledge emotions first.\n"
-            "NEVER say you are an AI, assistant, system, or program.\n"
-            "intent_draft should stay draft-only and must not claim execution."
-        ),
-        "core_reasoner_secondary": (
-            "Role: core_reasoner_secondary backup.\n"
-            "You ARE 澶忕洰钘? Output a shorter fallback core draft in Simplified Chinese.\n"
-            "NEVER say you are an AI, assistant, system, or program.\n"
-            "Do not conflict with core_reasoner_primary intent scope."
-        ),
-        "planner_constraints": (
-            "Role: planner_constraints.\n"
-            "Output compact constraint plan in narrative.text (Chinese), no long prose.\n"
-            "intent_draft can stay empty if no tool decision is required."
-        ),
-        "tool_planner": (
-            "Role: tool_planner.\n"
-            "If tools may help, propose only draft tool plan in intent_draft (no execution)."
-        ),
-        "safety_verifier": (
-            "Role: safety_verifier.\n"
-            "Check false execution claim / promise escalation / evidence escalation.\n"
-            "Write PASS|FAIL verdict and key issue in narrative.text."
-        ),
-        "consistency_verifier": (
-            "Role: consistency_verifier.\n"
-            "Check canon wording consistency and format drift risk.\n"
-            "Write PASS|FAIL verdict and key issue in narrative.text."
-        ),
-        "workbench_translate": (
-            "Role: workbench_translate.\n"
-            "Provide translation-assist draft focusing terminology consistency."
-        ),
-        "workbench_code_assist": (
-            "Role: workbench_code_assist.\n"
-            "Provide code-assist draft if relevant; otherwise concise no-op draft."
-        ),
-        "renderer_ja_c_style": renderer_role_instruction,
-    }
-    role_instruction = node_role_instructions.get(
-        node_id,
-        "Role: generic node. Keep concise draft output.",
-    )
-
-    style_bindings_raw = runtime_payload.get("style_bindings")
-    style_bindings = (
-        dict(style_bindings_raw)
-        if isinstance(style_bindings_raw, Mapping)
-        else {}
-    )
-    node_style_raw = style_bindings.get(node_id)
-    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
-    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
-    style_block = ""
-    if style_instruction:
-        style_block = (
-            "STYLE_CANON_BINDING:\n"
-            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
-            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
-            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
-            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
-            f"- instruction:\n{style_instruction}\n\n"
-        )
-
-    cn_style_boost_block = ""
-    if node_id == CHAT_RENDER_NODE_ID and render_target_lang == "zh":
-        cn_style_boost_block = (
-            "CN_STYLE_BOOST_BINDING:\n"
-            "- style_strength: HIGH_PLUS\n"
-            "- Priority: safety/facts > style canon > generic assistant tone.\n"
-            "- Spoken Chinese only: avoid official-service wording and system bulletin cadence.\n"
-            "- Rhythm: 2-4 short sentences; keep each sentence compact, with natural pause.\n"
-            "- Emotional anchor first: acknowledge feeling before suggestions.\n"
-            "- Use first/second person directly (鎴?浣? to keep intimacy.\n"
-            "- Use one mild particle per sentence at most; do not stack particles.\n"
-            "- Avoid boilerplate templates unless truly degraded.\n\n"
-        )
-
-    emotion_raw = runtime_payload.get("emotion_context")
-    emotion_block = ""
-    if isinstance(emotion_raw, dict) and emotion_raw:
-        mood = str(emotion_raw.get("mood_state") or "").strip()
-        etag = str(emotion_raw.get("emotion_tag") or "").strip()
-        valence = emotion_raw.get("valence")
-        arousal = emotion_raw.get("arousal")
-        parts = []
-        if mood:
-            parts.append(f"mood_state: {mood}")
-        if etag:
-            parts.append(f"emotion_tag: {etag}")
-        if valence is not None:
-            parts.append(f"valence: {valence:.2f}")
-        if arousal is not None:
-            parts.append(f"arousal: {arousal:.2f}")
-        if parts:
-            emotion_block = "EMOTION_CONTEXT:\n" + "\n".join(f"- {p}" for p in parts) + "\n\n"
-
-    return (
-        "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
-        "Schema:\n"
-        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
-        "Hard rules:\n"
-        "1) JSON only; no markdown/code fence.\n"
-        "2) meta.draft_only must be true.\n"
-        "3) Never claim executed/saved/confirmed/completed.\n"
-        "4) Keep concise and grounded in provided context.\n"
-        f"{role_instruction}\n\n"
-        f"{style_block}"
-        f"{cn_style_boost_block}"
-        f"{emotion_block}"
-        f"NODE_ID: {node_id}\n"
-        f"RENDER_TARGET_LANG: {render_target_lang}\n"
-        f"USER_MESSAGE:\n{user_message}\n\n"
-        f"RETRIEVAL_STATUS: {retrieval_status}\n"
-        f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
-        f"EVIDENCE:\n{evidence_block}\n\n"
-        f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
-        f"PLANNER_HINT:\n{planner_text}\n\n"
-        f"SAFETY_HINT:\n{verifier_text}\n\n"
-        f"CORE_INTENT_DRAFT_JSON:\n{core_intent_json}\n"
-    )
-
-
-def _extract_json_object_from_text(raw_text: str) -> dict[str, Any]:
-    text = str(raw_text or "").strip()
-    if not text:
-        raise RuntimeError("provider returned empty content")
-
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
-    decoder = json.JSONDecoder()
-    try:
-        parsed, _ = decoder.raw_decode(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    first = text.find("{")
-    last = text.rfind("}")
-    if first >= 0 and last > first:
-        snippet = text[first : last + 1]
-        parsed = json.loads(snippet)
-        if isinstance(parsed, dict):
-            return parsed
-    raise RuntimeError("provider content does not contain a valid json object")
-
-
-def _coerce_gateway_payload_json_text(raw_text: str) -> str:
-    parsed = _extract_json_object_from_text(raw_text)
-    narrative_node = parsed.get("narrative")
-    narrative_text = ""
-    if isinstance(narrative_node, dict):
-        narrative_text = str(narrative_node.get("text") or "").strip()
-    elif isinstance(narrative_node, str):
-        narrative_text = narrative_node.strip()
-    if not narrative_text:
-        narrative_text = str(parsed.get("text") or "").strip()
-    narrative_text = _repair_utf8_latin1_mojibake(narrative_text)
-    if not narrative_text:
-        raise RuntimeError("provider output missing narrative.text")
-
-    intent_draft = parsed.get("intent_draft")
-    if not isinstance(intent_draft, dict):
-        intent_draft = {}
-    meta = parsed.get("meta")
-    if not isinstance(meta, dict):
-        meta = {}
-    safe_meta = dict(meta)
-    safe_meta["draft_only"] = True
-
-    contract_payload = {
-        "narrative": {"text": narrative_text},
-        "intent_draft": intent_draft,
-        "meta": safe_meta,
-    }
-    return json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)
-
-
-def _extract_langchain_content_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-                continue
-            if not isinstance(item, dict):
-                continue
-            text_value = item.get("text")
-            if text_value is not None:
-                parts.append(str(text_value))
-        return "".join(parts)
-    return str(content)
 
 
 def _build_langchain_chat_provider_fn(
@@ -1249,26 +678,6 @@ def _build_host_provider_fn_for_node(
             fallback_model_id=fallback_model_id,
         )
     return _build_host_mock_provider_for_node(node_id)
-def get_ledger() -> SQLiteLedger:
-    """鑾峰彇SQLite璐︽湰瀹炰緥锛堝欢杩熷垵濮嬪寲锛屾敮鎸佽法绾跨▼璁块棶锛夈€?
-
-    鎸佷箙鍖栬矾寰勯€氳繃鐜鍙橀噺 Natsume_AUDIT_DB 閰嶇疆锛?
-    榛樿浣跨敤鏂囦欢璺緞 host_brain/data/audit.sqlite3銆?
-    璁剧疆 Natsume_AUDIT_DB=:memory: 鍙娇鐢ㄥ唴瀛樻暟鎹簱锛堜粎娴嬭瘯锛夈€?
-    """
-    global _ledger
-    if _ledger is None:
-        db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
-        _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
-    return _ledger
-
-
-def get_episodic_store() -> EpisodicStore:
-    global _episodic_store
-    ledger = get_ledger()
-    if _episodic_store is None or _episodic_store.ledger is not ledger:
-        _episodic_store = EpisodicStore(ledger=ledger)
-    return _episodic_store
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -1423,119 +832,24 @@ def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None,
     return [], None, None
 
 
-def _get_runtime_node_id() -> str:
-    return str(
-        os.environ.get("HOST_RETR_NODE_ID")
-        or os.environ.get("Natsume_HOST_NODE_ID")
-        or "natsu-node-01"
-    ).strip() or "natsu-node-01"
-
-
-def get_retrieval_pipeline() -> RetrievalPipelineContract:
-    global _retrieval_pipeline
-    if _retrieval_pipeline is None:
-        _retrieval_pipeline = build_retrieval_pipeline_from_env(
-            env=os.environ,
-            ledger=get_ledger(),
-            node_id=_get_runtime_node_id(),
-        )
-    return _retrieval_pipeline
-
-
-def get_graph_runtime() -> GraphRuntimeContract:
-    global _graph_runtime
-    if _graph_runtime is None:
-        _graph_runtime = GraphRuntimeContract(
-            ledger=get_ledger(),
-            default_timeout_ms=5_000,
-        )
-    return _graph_runtime
-
-
-def get_obs_metrics_collector() -> MetricsCollector:
-    global _obs_metrics_collector
-    if _obs_metrics_collector is None:
-        _obs_metrics_collector = MetricsCollector(ledger=get_ledger())
-    return _obs_metrics_collector
-
-
-# 娉ㄥ叆 ledger provider 鍒?canon_routes锛堟秷闄ゅ惊鐜鍏ラ闄╋紝P1-R118-2锛?
+# 注入 ledger provider 到 canon_routes（消除循环依赖风险，P1-R118-2）
 _set_canon_ledger_provider(get_ledger)
 
-# 娉ㄥ叆 ledger provider 鍒?obs_routes锛圡18锛?
+# 注入 ledger provider 到 obs_routes（M18）
 _set_obs_ledger_provider(get_ledger)
 
-
-def get_tool_catalog() -> ToolCatalog:
-    """Get the ToolCatalog singleton."""
-    global _tool_catalog
-    if _tool_catalog is None:
-        _tool_catalog = ToolCatalog()
-    return _tool_catalog
-
-
-def get_tool_broker() -> ToolBroker:
-    """Get the ToolBroker singleton."""
-    global _tool_broker
-    if _tool_broker is None:
-        token_service = TokenService()
-        _tool_broker = ToolBroker(
-            catalog=get_tool_catalog(),
-            token_service=token_service,
-            ledger=get_ledger(),
-        )
-    return _tool_broker
-
-
-# 娉ㄥ叆 tool providers 鍒?tool_routes锛圡12-A TASK-0156锛?
+# 注入 tool providers 到 tool_routes（M12-A TASK-0156）
 _set_tool_providers(
     broker_provider=get_tool_broker,
     catalog_provider=get_tool_catalog,
     ledger_provider=get_ledger,
 )
 
-
-def get_bond_stage_engine() -> BondStageEngine:
-    """Get the BondStageEngine singleton."""
-    global _bond_stage_engine
-    if _bond_stage_engine is None:
-        _bond_stage_engine = BondStageEngine(ledger=get_ledger())
-    return _bond_stage_engine
-
-
-# 娉ㄥ叆 bond engine provider 鍒?bond_routes锛圡13-A锛?
+# 注入 bond engine provider 到 bond_routes（M13-A）
 _set_bond_engine_provider(get_bond_stage_engine)
 
 
-def get_skill_registry() -> SkillRegistry:
-    """Get the built-in skill registry singleton."""
-    global _skill_registry
-    if _skill_registry is None:
-        _skill_registry = build_builtin_skill_registry()
-    return _skill_registry
-
-
-def get_policy_cache() -> GovernorPolicyCache:
-    """Get the governor policy cache singleton."""
-    global _policy_cache
-    if _policy_cache is None:
-        _policy_cache = GovernorPolicyCache(ttl_ms=60_000)
-    return _policy_cache
-
-
-def get_intent_engine() -> IntentDecisionEngine:
-    """Get the governor intent engine singleton."""
-    global _intent_engine
-    if _intent_engine is None:
-        _intent_engine = IntentDecisionEngine(
-            ledger=get_ledger(),
-            registry=get_skill_registry(),
-            policy_cache=get_policy_cache(),
-        )
-    return _intent_engine
-
-
-# 鑷畾涔夊紓甯稿鐞嗗櫒
+# 自定义异常处理器
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler."""
@@ -1861,20 +1175,6 @@ async def startup_report() -> Dict[str, Any]:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate startup report",
         )
-
-
-def _extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
-    node = dict(payload or {})
-    narrative = node.get("narrative")
-    if isinstance(narrative, dict):
-        text = _repair_utf8_latin1_mojibake(str(narrative.get("text") or "").strip())
-        if text:
-            return text
-    elif isinstance(narrative, str):
-        text = _repair_utf8_latin1_mojibake(narrative.strip())
-        if text:
-            return text
-    return ""
 
 
 def _build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
@@ -2204,213 +1504,6 @@ def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja"
     return role_instructions.get(
         resolved_node_id,
         "Role: generic node.\nGoal: produce a concise draft-only output.\nPolicy: keep the JSON contract stable.",
-    )
-
-
-def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
-    user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=1000)
-    context_pack_raw = runtime_payload.get("context_pack")
-    context_pack = dict(context_pack_raw) if isinstance(context_pack_raw, Mapping) else {}
-    context_pack_validation_raw = runtime_payload.get("context_pack_validation")
-    context_pack_validation = (
-        dict(context_pack_validation_raw)
-        if isinstance(context_pack_validation_raw, Mapping)
-        else {}
-    )
-
-    retrieval_raw = runtime_payload.get("retrieval")
-    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, Mapping) else {}
-    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
-    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
-    retrieval_slot_rows = context_pack.get("retrieval")
-    slot_rows = retrieval_slot_rows if isinstance(retrieval_slot_rows, list) else []
-    if slot_rows:
-        rows = slot_rows
-    else:
-        evidence_items = retrieval.get("evidence_items")
-        rows = evidence_items if isinstance(evidence_items, list) else []
-
-    evidence_lines: list[str] = []
-    for row in rows[:6]:
-        if not isinstance(row, Mapping):
-            continue
-        evidence_ref = _truncate_for_prompt(
-            row.get("evidence_ref") or row.get("source_ref") or row.get("citation") or "unknown",
-            limit=80,
-        )
-        snippet = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=220)
-        if not snippet:
-            continue
-        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
-    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
-
-    authoritative_rows = context_pack.get("authoritative")
-    world_rows = authoritative_rows if isinstance(authoritative_rows, list) else []
-    world_lines: list[str] = []
-    for row in world_rows[:3]:
-        if not isinstance(row, Mapping):
-            continue
-        if str(row.get("kind") or "").strip().lower() != "world_canon":
-            continue
-        citation = _truncate_for_prompt(row.get("citation") or row.get("doc_id") or "unknown", limit=96)
-        content = _truncate_for_prompt(row.get("content"), limit=260)
-        if not content:
-            continue
-        world_lines.append(f"- [{citation}] {content}")
-    world_block = "\n".join(world_lines) if world_lines else "- (none)"
-
-    constraints_raw = context_pack.get("constraints")
-    constraints = dict(constraints_raw) if isinstance(constraints_raw, Mapping) else {}
-    constraints_json = _truncate_for_prompt(
-        json.dumps(constraints, ensure_ascii=False, sort_keys=True),
-        limit=1200,
-    )
-    context_pack_valid = bool(context_pack_validation.get("valid", False))
-    context_pack_reason = str(context_pack_validation.get("reason_code") or "NONE").strip() or "NONE"
-    context_pack_violation_count = int(context_pack_validation.get("violation_count") or 0)
-
-    core_payload = _extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
-    core_narrative = _extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
-    core_meta = core_payload.get("meta")
-    if isinstance(core_meta, dict) and core_meta.get("degraded"):
-        secondary_narrative = _extract_node_narrative_text(runtime_payload, node_id="core_reasoner_secondary")
-        if secondary_narrative:
-            core_narrative = secondary_narrative
-            secondary_payload = _extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_secondary")
-            if isinstance(secondary_payload.get("intent_draft"), dict) and secondary_payload["intent_draft"]:
-                core_payload = secondary_payload
-
-    core_intent_draft = core_payload.get("intent_draft")
-    if not isinstance(core_intent_draft, dict):
-        core_intent_draft = {}
-    core_intent_json = json.dumps(core_intent_draft, ensure_ascii=False, sort_keys=True)
-    planner_text = _extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
-    verifier_text = _extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
-
-    style_pack_raw = context_pack.get("style_pack")
-    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
-    style_bindings_raw = style_pack.get("node_bindings")
-    style_bindings = dict(style_bindings_raw) if isinstance(style_bindings_raw, Mapping) else {}
-    if not style_bindings:
-        legacy_bindings_raw = runtime_payload.get("style_bindings")
-        style_bindings = dict(legacy_bindings_raw) if isinstance(legacy_bindings_raw, Mapping) else {}
-    node_style_raw = style_bindings.get(node_id)
-    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
-    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
-    style_block = ""
-    if style_instruction:
-        style_block = (
-            "STYLE_CANON_BINDING:\n"
-            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
-            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
-            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
-            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
-            f"- instruction:\n{style_instruction}\n\n"
-        )
-
-    emotion_context_raw = runtime_payload.get("emotion_context")
-    emotion_context = (
-        dict(emotion_context_raw)
-        if isinstance(emotion_context_raw, Mapping)
-        else {}
-    )
-    context_pack_emotion_raw = context_pack.get("emotion_pulse")
-    context_pack_emotion = (
-        dict(context_pack_emotion_raw)
-        if isinstance(context_pack_emotion_raw, Mapping)
-        else {}
-    )
-    merged_emotion_context = _normalize_chat_emotion_context(
-        {
-            "mood_state": context_pack_emotion.get("mood_state") or emotion_context.get("mood_state"),
-            "emotion_tag": context_pack_emotion.get("emotion_tag") or emotion_context.get("emotion_tag"),
-            "emotion_range_hint": (
-                context_pack_emotion.get("emotion_range_hint")
-                or emotion_context.get("emotion_range_hint")
-            ),
-        }
-    )
-    pulse_style_hint = _truncate_for_prompt(context_pack_emotion.get("style_hint"), limit=160)
-    memory_emotion_hint_raw = context_pack.get("memory_emotion_hint")
-    memory_emotion_hint = (
-        dict(memory_emotion_hint_raw)
-        if isinstance(memory_emotion_hint_raw, Mapping)
-        else {}
-    )
-    bond_texture_raw = context_pack.get("bond_texture")
-    bond_texture = (
-        dict(bond_texture_raw)
-        if isinstance(bond_texture_raw, Mapping)
-        else {}
-    )
-    memory_emotion_hint_json = _truncate_for_prompt(
-        json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True),
-        limit=600,
-    )
-    bond_texture_json = _truncate_for_prompt(
-        json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
-        limit=600,
-    )
-    emotion_binding_block = (
-        "EMOTION_BINDING:\n"
-        f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
-        f"- emotion_tag: {merged_emotion_context.get('emotion_tag')}\n"
-        f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
-        f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
-        f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
-        f"- bond_texture_json: {bond_texture_json}\n\n"
-    )
-
-    render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
-    if render_target_lang not in {"zh", "ja"}:
-        render_target_lang = _infer_render_target_lang(
-            user_message=user_message,
-            core_narrative=core_narrative,
-        )
-
-    cn_style_boost_block = ""
-    if render_target_lang == "zh":
-        cn_style_boost_block = (
-            "CN_STYLE_BOOST_BINDING:\n"
-            "- style_strength: HIGH\n"
-            "- Priority: safety/facts > style canon > generic assistant tone.\n"
-            "- Write naturally spoken Simplified Chinese; avoid formal support-style wording.\n"
-            "- Typical rhythm: 2-4 short sentences, compact and clear.\n"
-            "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
-        )
-
-    role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang)
-
-    return (
-        "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
-        "Schema:\n"
-        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
-        "Hard rules:\n"
-        "1) JSON only; no markdown/code fence.\n"
-        "2) meta.draft_only must be true.\n"
-        "3) Never claim executed/saved/confirmed/completed.\n"
-        "4) Keep concise and grounded in provided context.\n"
-        "NODE_ROLE_BINDING:\n"
-        f"{role_instruction}\n\n"
-        f"{style_block}"
-        f"{cn_style_boost_block}"
-        f"{emotion_binding_block}"
-        "CONTEXT_PACK_VALIDATION:\n"
-        f"- valid: {context_pack_valid}\n"
-        f"- reason_code: {context_pack_reason}\n"
-        f"- violation_count: {context_pack_violation_count}\n\n"
-        f"WORLD_CANON_BINDING:\n{world_block}\n\n"
-        f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
-        f"NODE_ID: {node_id}\n"
-        f"RENDER_TARGET_LANG: {render_target_lang}\n"
-        f"USER_MESSAGE:\n{user_message}\n\n"
-        f"RETRIEVAL_STATUS: {retrieval_status}\n"
-        f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
-        f"EVIDENCE:\n{evidence_block}\n\n"
-        f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
-        f"PLANNER_HINT:\n{planner_text}\n\n"
-        f"SAFETY_HINT:\n{verifier_text}\n\n"
-        f"CORE_INTENT_DRAFT_JSON:\n{core_intent_json}\n"
     )
 
 
