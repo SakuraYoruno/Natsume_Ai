@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
@@ -23,6 +24,7 @@ from host_brain.app.graph_config_builder import (
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
+from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.retrieval.pipeline import (
@@ -31,15 +33,20 @@ from host_brain.retrieval.pipeline import (
 )
 from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
+from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
+
+_logger = logging.getLogger("Natsume.dependencies")
 
 # 全局单例
 _ledger: Optional[SQLiteLedger] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
 _skill_registry: Optional[SkillRegistry] = None
 _policy_cache: Optional[GovernorPolicyCache] = None
+_mcp_tool_registry: Optional[MCPToolRegistry] = None
+_mcp_tool_broker: Optional[MCPToolBroker] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
@@ -183,6 +190,60 @@ def get_tool_broker() -> ToolBroker:
     return _tool_broker
 
 
+def _resolve_mcp_registry_db_path() -> str:
+    return (
+        str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+        or "host_brain/data/mcp_registry.sqlite3"
+    )
+
+
+def get_mcp_tool_registry() -> MCPToolRegistry:
+    global _mcp_tool_registry, _mcp_tool_broker
+    db_path = _resolve_mcp_registry_db_path()
+    current_path = str(getattr(_mcp_tool_registry, "db_path", "") or "")
+    if _mcp_tool_registry is None or current_path != db_path:
+        if _mcp_tool_registry is not None:
+            try:
+                _mcp_tool_registry.close()
+            except Exception:
+                pass
+        _mcp_tool_registry = MCPToolRegistry(
+            db_path=db_path,
+            check_same_thread=False,
+        )
+        _mcp_tool_broker = None
+    return _mcp_tool_registry
+
+
+def get_mcp_tool_broker() -> MCPToolBroker:
+    global _mcp_tool_broker
+    registry = get_mcp_tool_registry()
+    ledger = get_ledger()
+    if (
+        _mcp_tool_broker is None
+        or _mcp_tool_broker.registry is not registry
+        or _mcp_tool_broker.ledger is not ledger
+    ):
+        _mcp_tool_broker = MCPToolBroker(
+            registry=registry,
+            ledger=ledger,
+        )
+    return _mcp_tool_broker
+
+
+def _sync_mcp_skills_into_registry(skill_registry: SkillRegistry) -> None:
+    if not _parse_bool_env("HOST_SKILL_MCP_BRIDGE_ENABLED", default=True):
+        return
+    try:
+        register_mcp_tools_into_skill_registry(
+            skill_registry=skill_registry,
+            mcp_registry=get_mcp_tool_registry(),
+            broker=get_mcp_tool_broker(),
+        )
+    except Exception as exc:
+        _logger.warning("mcp skill bridge sync skipped: %s", exc)
+
+
 def get_bond_stage_engine() -> BondStageEngine:
     global _bond_stage_engine
     if _bond_stage_engine is None:
@@ -232,6 +293,7 @@ def get_skill_registry() -> SkillRegistry:
     global _skill_registry
     if _skill_registry is None:
         _skill_registry = build_builtin_skill_registry()
+    _sync_mcp_skills_into_registry(_skill_registry)
     return _skill_registry
 
 
