@@ -1,5 +1,5 @@
-"""Chat 鏍稿績涓氬姟閫昏緫妯″潡銆?
-浠?fastapi_app.py 鎷嗗垎锛岃礋璐?POST /v1/chat 鐨勬牳蹇冪紪鎺掗€昏緫銆?"""
+"""Chat 核心业务逻辑模块。
+从 fastapi_app.py 拆分，负责 POST /v1/chat 的核心编排逻辑。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,9 @@ from host_brain.app.chat_context_builder import (
     normalize_node_style_bindings as _normalize_node_style_bindings,
 )
 from host_brain.app.prompt_builder import (
+    _truncate_for_prompt,
     extract_gateway_narrative,
+    infer_render_target_lang,
     repair_utf8_latin1_mojibake,
 )
 from host_brain.app.schemas import ChatRequest, ChatResponse
