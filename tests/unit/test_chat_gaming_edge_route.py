@@ -121,9 +121,11 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
     dep._graph_runtime = _NeverCalledGraphRuntime()
     dep._episodic_store = None
 
-    monkeypatch.setattr(
-        "host_brain.app.chat_handler._run_gaming_edge_chat",
-        lambda **kwargs: {  # noqa: ARG005
+    captured: dict[str, object] = {}
+
+    def _fake_edge_chat(**kwargs):  # noqa: ANN001
+        captured["edge_chat_kwargs"] = dict(kwargs)
+        return {
             "success": True,
             "reason_code": None,
             "detail": "ok",
@@ -133,7 +135,12 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
             "latency_ms": 18,
             "presence": {"success": True, "event": {"available": True}},
             "compile": {"success": True, "event": {"draft_only": True}},
-        },
+            "emotion_context": dict(kwargs.get("emotion_context") or {}),
+        }
+
+    monkeypatch.setattr(
+        "host_brain.app.chat_handler._run_gaming_edge_chat",
+        _fake_edge_chat,
     )
 
     client = TestClient(appmod.app)
@@ -142,6 +149,9 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
         json={
             "message": "gaming chat ping",
             "session_id": "sess::gaming::edge",
+            "mood_state": "engaged",
+            "emotion_tag": "HAPPY",
+            "emotion_intensity": 0.82,
         },
     )
     assert response.status_code == 200
@@ -164,6 +174,13 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
     assert route_decision.get("target") == "edge"
     assert route_decision.get("route_target") == "edge_3b"
     assert dict(llm.get("route_decision") or {}).get("route_target") == "edge_3b"
+    assert dict(edge_route.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
+    llm_nodes = list(llm.get("nodes") or [])
+    assert llm_nodes
+    node_input = dict(llm_nodes[0].get("input") or {})
+    assert node_input.get("emotion_tag") == "HAPPY"
+    edge_chat_kwargs = dict(captured.get("edge_chat_kwargs") or {})
+    assert dict(edge_chat_kwargs.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
 
 
 def test_chat_gaming_edge_failure_falls_back_to_host_graph(monkeypatch, tmp_path) -> None:
@@ -244,3 +261,54 @@ def test_chat_gaming_mode_does_not_route_edge_when_flag_disabled(monkeypatch, tm
     assert fallback_runtime.called is True
     llm = dict(dict(body.get("audit_refs") or {}).get("llm") or {})
     assert llm.get("provider") == "mock"
+
+
+def test_run_gaming_edge_chat_forwards_emotion_context_to_rpc(monkeypatch) -> None:
+    from host_brain.app import chat_handler as chat_mod
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_post_edge_fallback_rpc(**kwargs):  # noqa: ANN001
+        calls.append(dict(kwargs))
+        endpoint = str(kwargs.get("endpoint_path") or "")
+        if endpoint.endswith("/presence"):
+            return {
+                "success": True,
+                "status": "OK",
+                "reason_code": None,
+                "detail": "presence ok",
+                "event": {"available": True},
+                "ts_ms": 1,
+            }
+        return {
+            "success": True,
+            "status": "OK",
+            "reason_code": None,
+            "detail": "compile ok",
+            "event": {
+                "model_id": "edge-fallback-3b",
+                "draft_only": True,
+                "draft": {"summary": "ok"},
+            },
+            "ts_ms": 2,
+        }
+
+    monkeypatch.setattr(chat_mod, "_post_edge_fallback_rpc", _fake_post_edge_fallback_rpc)
+    result = chat_mod._run_gaming_edge_chat(
+        request_id="req::edge::emotion",
+        session_id="sess::edge::emotion",
+        message="edge chat with emotion",
+        emotion_context={
+            "mood_state": "engaged",
+            "emotion_tag": "HAPPY",
+            "emotion_intensity": 0.9,
+            "emotion_range_hint": "playful",
+        },
+    )
+    assert result.get("success") is True
+    assert len(calls) == 2
+    compile_payload = dict(calls[1].get("payload") or {})
+    edge_emotion = dict(compile_payload.get("emotion_context") or {})
+    assert edge_emotion.get("mood_state") == "engaged"
+    assert edge_emotion.get("emotion_tag") == "HAPPY"
+    assert float(edge_emotion.get("emotion_intensity") or 0.0) == 0.9

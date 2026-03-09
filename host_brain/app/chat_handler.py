@@ -293,17 +293,46 @@ def _build_gaming_edge_narrative(*, draft: Mapping[str, Any]) -> str:
     return _truncate_for_prompt(compact, limit=80) or _EDGE_GAMING_DEFAULT_REPLY
 
 
+def _build_edge_emotion_context_payload(
+    *,
+    emotion_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    context = dict(emotion_context or {})
+    mood_state = str(context.get("mood_state") or "steady").strip().lower() or "steady"
+    emotion_tag = str(context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    try:
+        emotion_intensity = float(context.get("emotion_intensity") or 0.5)
+    except (TypeError, ValueError):
+        emotion_intensity = 0.5
+    emotion_intensity = max(0.0, min(1.0, emotion_intensity))
+    emotion_range_hint = str(context.get("emotion_range_hint") or "").strip() or None
+    return {
+        "mood_state": mood_state,
+        "emotion_tag": emotion_tag,
+        "emotion_intensity": emotion_intensity,
+        "emotion_range_hint": emotion_range_hint,
+    }
+
+
 def _run_gaming_edge_chat(
     *,
     request_id: str,
     session_id: str,
     message: str,
+    emotion_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     started_ms = int(time.time() * 1000)
+    edge_emotion_context = _build_edge_emotion_context_payload(
+        emotion_context=emotion_context,
+    )
     presence = _post_edge_fallback_rpc(
         request_id=request_id,
         endpoint_path="/v1/edge/fallback/presence",
-        payload={"request_hint": "gaming_chat", "seq": 1},
+        payload={
+            "request_hint": "gaming_chat",
+            "seq": 1,
+            "emotion_context": dict(edge_emotion_context),
+        },
     )
     presence_event = dict(presence.get("event") or {})
     if not bool(presence.get("success")):
@@ -312,6 +341,7 @@ def _run_gaming_edge_chat(
             "reason_code": str(presence.get("reason_code") or SERVICE_UNAVAILABLE_EDGE_RPC),
             "detail": str(presence.get("detail") or "edge presence call failed"),
             "presence": presence,
+            "emotion_context": dict(edge_emotion_context),
         }
     if not bool(presence_event.get("available", False)):
         return {
@@ -322,6 +352,7 @@ def _run_gaming_edge_chat(
             ),
             "detail": str(presence.get("detail") or "edge fallback llm unavailable"),
             "presence": presence,
+            "emotion_context": dict(edge_emotion_context),
         }
 
     compile_result = _post_edge_fallback_rpc(
@@ -332,6 +363,7 @@ def _run_gaming_edge_chat(
             "text": str(message or ""),
             "mode": "gaming_chat",
             "seq": 2,
+            "emotion_context": dict(edge_emotion_context),
         },
     )
     if not bool(compile_result.get("success")):
@@ -341,6 +373,7 @@ def _run_gaming_edge_chat(
             "detail": str(compile_result.get("detail") or "edge asr_compile failed"),
             "presence": presence,
             "compile": compile_result,
+            "emotion_context": dict(edge_emotion_context),
         }
 
     compile_event = dict(compile_result.get("event") or {})
@@ -356,6 +389,7 @@ def _run_gaming_edge_chat(
         "latency_ms": max(0, int(time.time() * 1000) - started_ms),
         "presence": presence,
         "compile": compile_result,
+        "emotion_context": dict(edge_emotion_context),
     }
 
 
@@ -502,9 +536,15 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     request_id=request_id,
                     session_id=session_id,
                     message=request_body.message,
+                    emotion_context=emotion_context,
                 )
                 if bool(edge_chat_result.get("success")):
                     narrative = str(edge_chat_result.get("narrative") or "").strip() or _EDGE_GAMING_DEFAULT_REPLY
+                    edge_emotion_context = dict(
+                        edge_chat_result.get("emotion_context")
+                        or emotion_context
+                        or {}
+                    )
                     edge_route_decision = build_unified_route_decision(
                         scene_type=SCENE_CHAT,
                         scene_type_source="gaming_mode_edge_route",
@@ -558,6 +598,9 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                                     "sys_mode": sys_mode,
                                     "route_target": "edge_3b",
                                     "minimal_reply": True,
+                                    "mood_state": edge_emotion_context.get("mood_state"),
+                                    "emotion_tag": edge_emotion_context.get("emotion_tag"),
+                                    "emotion_intensity": edge_emotion_context.get("emotion_intensity"),
                                 },
                                 "output": {
                                     "narrative": narrative,
@@ -571,6 +614,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                                 "route": "gaming_edge_3b",
                                 "sys_mode": sys_mode,
                                 "minimal_reply": True,
+                                "emotion_tag": edge_emotion_context.get("emotion_tag"),
                             }
                         ],
                         "context_pack_validation": {},
@@ -636,6 +680,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                                 "route": "gaming_edge_3b",
                                 "presence": dict(edge_chat_result.get("presence") or {}),
                                 "compile": dict(edge_chat_result.get("compile") or {}),
+                                "emotion_context": dict(edge_emotion_context),
                             },
                             "trace_metrics": trace_metrics,
                         },

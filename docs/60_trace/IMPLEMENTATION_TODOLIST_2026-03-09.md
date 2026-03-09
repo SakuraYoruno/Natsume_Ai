@@ -79,6 +79,8 @@
 - [x] P3：新增队列单测 `test_bond_async_queue.py`，并完成 chat/stream/bond 回归 `21 passed`
 - [x] P3：依赖层接入 MCP/Skills 自动合并：`get_skill_registry()` 增量同步 MCP 注册表为 `mcp::<provider>::<tool>` 技能入口
 - [x] P3：新增依赖层桥接回归 `23 passed`（`test_dependencies_mcp_skill_bridge` + `test_mcp_skill_bridge` + `test_tiered_governance_runtime_m44`）
+- [x] P3：补齐 Edge 3B 路径情感层透传：`chat_handler` 将 `emotion_context` 下发到 edge fallback RPC（presence/asr_compile）并写入审计
+- [x] P3：新增情感全路径回归 `12 passed`（`test_chat_gaming_edge_route` + `test_chat_emotion_integration_m45` + graph/stream 契约）
 
 ---
 
@@ -255,7 +257,7 @@
 ## 4. P3（长期）闭环建设
 
 - [x] Bond 更新统一异步队列化
-- [ ] 情感层接入 Host 8B / Edge 3B / Cloud Graph 全路径
+- [x] 情感层接入 Host 8B / Edge 3B / Cloud Graph 全路径
 - [x] MCP 与 Skills 完全合并，形成唯一工具入口
 - [ ] 建立长期指标看板（质量、延迟、成本、可用性）
 
