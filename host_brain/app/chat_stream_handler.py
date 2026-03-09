@@ -63,6 +63,7 @@ from host_brain.retrieval.orchestrator import (
 _logger = logging.getLogger("Natsume.chat_stream_handler")
 _stream_vts_rate_limiter = VTSRateLimiter(max_per_second=2.0, burst_size=2.0)
 _stream_vts_rate_limit_per_second = 2.0
+_CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 
 # ---------------------------------------------------------------------------
 # 内部辅助：构建 prompt
@@ -121,6 +122,38 @@ def _log_context_pack_observability(
         )
 
 
+def _resolve_stream_style_bindings(
+    *,
+    node_style_bindings: Mapping[str, Mapping[str, Any]] | None,
+    render_target_lang: str,
+) -> dict[str, dict[str, Any]]:
+    resolved: dict[str, dict[str, Any]] = {}
+    for node_id, row in dict(node_style_bindings or {}).items():
+        if not isinstance(row, Mapping):
+            continue
+        resolved[str(node_id)] = dict(row)
+
+    # Stream chat currently routes through one combined node (chat_direct_ja).
+    # Keep style injection focused on Japanese canon to avoid mixed CN/JP drift.
+    if str(render_target_lang).strip().lower() != "ja":
+        return resolved
+
+    direct_binding_raw = resolved.get(CHAT_DIRECT_NODE_ID)
+    render_binding_raw = resolved.get(_CHAT_RENDER_NODE_ID)
+    preferred_raw = direct_binding_raw or render_binding_raw
+    if not isinstance(preferred_raw, Mapping):
+        return resolved
+
+    preferred = dict(preferred_raw)
+    if not preferred:
+        return resolved
+
+    return {
+        CHAT_DIRECT_NODE_ID: dict(preferred),
+        _CHAT_RENDER_NODE_ID: dict(preferred),
+    }
+
+
 async def _build_stream_chat_prompt(
     *,
     message: str,
@@ -173,10 +206,13 @@ async def _build_stream_chat_prompt(
         build_chat_generation_prompt_payload as _build_payload,
         build_node_style_bindings as _build_style,
     )
-    from host_brain.app.prompt_builder import render_host_generation_prompt  # noqa: PLC0415
+    from host_brain.app.prompt_builder import render_node_generation_prompt  # noqa: PLC0415
 
     render_target_lang = infer_render_target_lang(user_message=message)
-    node_style_bindings = _build_style(render_target_lang=render_target_lang)
+    node_style_bindings = _resolve_stream_style_bindings(
+        node_style_bindings=_build_style(render_target_lang=render_target_lang),
+        render_target_lang=render_target_lang,
+    )
 
     prompt_payload = _build_payload(
         request_id=request_id,
@@ -195,7 +231,12 @@ async def _build_stream_chat_prompt(
 
     gen_params = dict(prompt_payload.get("gen_params") or {})
     runtime_payload = prompt_payload.get("input") or dict(prompt_payload)
-    prompt_text = render_host_generation_prompt(runtime_payload)
+    runtime_payload_for_node = dict(runtime_payload)
+    runtime_payload_for_node["render_target_lang"] = render_target_lang
+    prompt_text = render_node_generation_prompt(
+        node_id=CHAT_DIRECT_NODE_ID,
+        runtime_payload=runtime_payload_for_node,
+    )
     prompt_meta = {
         "context_pack_validation": dict(prompt_payload.get("context_pack_validation") or {}),
         "context_pack_observability": dict(prompt_payload.get("context_pack_observability") or {}),
@@ -205,6 +246,7 @@ async def _build_stream_chat_prompt(
         "You are 夏目藍 (Natsume Ai). "
         "You are NOT an AI or assistant — you are 夏目藍 herself. "
         "Output exactly one JSON object with keys narrative, intent_draft, meta. "
+        "narrative.text must be natural Japanese suitable for spoken TTS output. "
         "meta.draft_only must be true."
     )
     return prompt_text, system_prompt, gen_params, resolved_emotion_context, prompt_meta

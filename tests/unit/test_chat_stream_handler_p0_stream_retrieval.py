@@ -1,11 +1,52 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from host_brain.app import chat_stream_handler as stream_mod
+
+
+def _write_style_entry(root: Path, *, canon_id: str, content: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "canon_id": canon_id,
+        "version": 1,
+        "hash": ("a" * 64),
+        "tone_only": True,
+        "unsafe_as_fact": True,
+        "content": content,
+        "tags": ["style_canon", "tone_only"],
+        "updated_by": "test",
+        "ts_ms": 1,
+    }
+    (root / f"{canon_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_world_doc(root: Path, *, doc_id: str, title: str, body: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "doc_id": doc_id,
+        "version": 1,
+        "status": "active",
+        "title": title,
+        "tags": ["persona", "invariant"],
+        "body": body,
+        "updated_by": "test",
+        "ts_ms": 1,
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    (root / f"{doc_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _collect_sse_events(gen: Any) -> list[dict[str, Any]]:
@@ -32,6 +73,83 @@ class _FakeIntentEngine:
 class _FakeIngress:
     classification = "ALLOW"
     quarantine_digest = None
+
+
+def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeypatch: Any, tmp_path: Path) -> None:
+    style_root = tmp_path / "style"
+    world_root = tmp_path / "world"
+    _write_style_entry(style_root, canon_id="natsume_ai_cn", content="CN_STYLE_HINT")
+    _write_style_entry(style_root, canon_id="natsume_ai_ja", content="JA_STYLE_HINT")
+    _write_world_doc(
+        world_root,
+        doc_id="wc-003-persona-core",
+        title="人格核心设定",
+        body="夏目蓝应保持克制温柔且不宣称执行动作。",
+    )
+
+    monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
+    monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(world_root))
+    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
+    monkeypatch.setenv("HOST_STYLE_CORE_CANON_ID", "natsume_ai_cn")
+    monkeypatch.setenv("HOST_STYLE_SECONDARY_CANON_ID", "natsume_ai_cn")
+    monkeypatch.setenv("HOST_STYLE_RENDER_JA_CANON_ID", "natsume_ai_ja")
+    monkeypatch.delenv("HOST_STYLE_RENDER_CANON_ID", raising=False)
+
+    import host_brain.app.dependencies as dep
+    dep._ledger = None
+
+    prompt_text, system_prompt, gen_params, _, prompt_meta = asyncio.run(
+        stream_mod._build_stream_chat_prompt(
+            message="今天可以和我说说吗？",
+            session_id="s_prompt_ja",
+            thread_id=None,
+            mood_state="engaged",
+            emotion_tag="HAPPY",
+            request_id="req_prompt_ja",
+            ts_ms=1,
+            retrieval_summary={
+                "status": "OK",
+                "reason_code": "NONE",
+                "route_count": 2,
+                "candidate_count": 2,
+                "rerank_topk": 2,
+                "degraded": False,
+            },
+            retrieval_evidence_items=[
+                {"evidence_ref": "evd://1", "source_ref": "memory://1", "snippet": "用户偏好日语交流。"},
+            ],
+            emotion_context_override={
+                "mood_state": "engaged",
+                "emotion_tag": "HAPPY",
+                "emotion_intensity": 0.8,
+                "emotion_range_hint": "可积极表达",
+            },
+            emotion_snapshot_override={
+                "version": "chat_emotion_snapshot.v1",
+                "source": "test_prompt",
+                "captured_ts_ms": 1,
+                "emotion_ts_ms": 1,
+                "age_ms": 0,
+                "emotion_context": {
+                    "mood_state": "engaged",
+                    "emotion_tag": "HAPPY",
+                    "emotion_intensity": 0.8,
+                },
+            },
+        )
+    )
+
+    assert "NODE_ID: chat_direct_ja" in prompt_text
+    assert "STYLE_CANON_BINDING" in prompt_text
+    assert "WORLD_CANON_BINDING" in prompt_text
+    assert "canon_id: natsume_ai_ja" in prompt_text
+    assert "canon_id: natsume_ai_cn" not in prompt_text
+    assert "Role: chat_direct_ja" in prompt_text
+    assert "natural Japanese suitable for spoken TTS output" in system_prompt
+    assert bool(gen_params.get("emotion_adjusted")) is True
+    observability = dict(prompt_meta.get("context_pack_observability") or {})
+    source_stats = dict(observability.get("source_stats") or {})
+    assert int(source_stats.get("style_binding_nodes") or 0) == 2
 
 
 def test_stream_prompt_injects_retrieval_before_render(monkeypatch: Any) -> None:
