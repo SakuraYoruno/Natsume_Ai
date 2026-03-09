@@ -80,6 +80,7 @@ from host_brain.integrations.llm_helpers import (
 )
 from host_brain.retrieval.orchestrator import (
     RetrievalOrchestratorRequest,
+    build_degraded_retrieval_summary,
     build_skipped_retrieval_summary,
 )
 
@@ -474,6 +475,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
 
         _retrieval_task = None
         _retrieval_started_ms: int | None = None
+        retrieval_init_failed_reason: str | None = None
         if retrieval_enabled:
             try:
                 _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
@@ -481,26 +483,42 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 _retr_top_k = 5
             _retr_top_k = max(1, min(_retr_top_k, 20))
             _retr_emotion = str(emotion_context.get("emotion_tag") or "") or None
-            _retr_orchestrator = get_retrieval_orchestrator()
             _retrieval_started_ms = int(time.time() * 1000)
-            _retrieval_task = asyncio.create_task(
-                _retr_orchestrator.arun(
-                    request=RetrievalOrchestratorRequest(
-                        trace_id=request_id,
-                        query=request_body.message,
-                        session_state={
-                            "session_id": session_id,
-                            "thread_id": request_body.thread_id,
-                            "scene_type": scene_type_for_retrieval,
-                        },
-                        request_id=request_id,
-                        session_id=session_id,
-                        top_k=_retr_top_k,
-                        ts_ms=ts_ms,
-                        emotion_context=_retr_emotion,
+            try:
+                _retr_orchestrator = get_retrieval_orchestrator()
+            except Exception as exc:
+                retrieval_enabled = False
+                retrieval_init_failed_reason = "RETRIEVAL_INIT_FAILED"
+                retrieval_disabled_reason = retrieval_init_failed_reason
+                retrieval_latency_ms = max(0, int(time.time() * 1000) - _retrieval_started_ms)
+                _logger.warning(
+                    "retrieval orchestrator init failed; continue without retrieval",
+                    extra={
+                        "request_id": request_id,
+                        "session_id": session_id,
+                        "reason_code": retrieval_init_failed_reason,
+                        "error": str(exc),
+                    },
+                )
+            else:
+                _retrieval_task = asyncio.create_task(
+                    _retr_orchestrator.arun(
+                        request=RetrievalOrchestratorRequest(
+                            trace_id=request_id,
+                            query=request_body.message,
+                            session_state={
+                                "session_id": session_id,
+                                "thread_id": request_body.thread_id,
+                                "scene_type": scene_type_for_retrieval,
+                            },
+                            request_id=request_id,
+                            session_id=session_id,
+                            top_k=_retr_top_k,
+                            ts_ms=ts_ms,
+                            emotion_context=_retr_emotion,
+                        )
                     )
                 )
-            )
 
         governor_result = await _gov_task
 
@@ -704,11 +722,27 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
 
             retrieval_evidence_items: list[dict[str, Any]] = []
             if retrieval_enabled and _retrieval_task is not None:
-                retrieval_result = await _retrieval_task
-                retrieval_summary = dict(retrieval_result.retrieval_summary)
-                retrieval_evidence_items = list(retrieval_result.retrieval_evidence_items)
-                if _retrieval_started_ms is not None:
-                    retrieval_latency_ms = max(0, int(time.time() * 1000) - _retrieval_started_ms)
+                try:
+                    retrieval_result = await _retrieval_task
+                    retrieval_summary = dict(retrieval_result.retrieval_summary)
+                    retrieval_evidence_items = list(retrieval_result.retrieval_evidence_items)
+                except Exception as exc:
+                    retrieval_summary = build_degraded_retrieval_summary("RETRIEVAL_FAILED")
+                    retrieval_evidence_items = []
+                    _logger.warning(
+                        "retrieval task failed; degrade chat retrieval path",
+                        extra={
+                            "request_id": request_id,
+                            "session_id": session_id,
+                            "reason_code": "RETRIEVAL_FAILED",
+                            "error": str(exc),
+                        },
+                    )
+                finally:
+                    if _retrieval_started_ms is not None:
+                        retrieval_latency_ms = max(0, int(time.time() * 1000) - _retrieval_started_ms)
+            elif retrieval_init_failed_reason:
+                retrieval_summary = build_degraded_retrieval_summary(retrieval_init_failed_reason)
             else:
                 retrieval_summary = build_skipped_retrieval_summary(
                     str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED")
