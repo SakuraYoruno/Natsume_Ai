@@ -216,6 +216,10 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
     assert "chat_direct_ja" in node_bindings
     assert "renderer_ja_c_style" in node_bindings
     assert dict(payload.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
+    assert float(dict(payload.get("emotion_context") or {}).get("emotion_intensity") or 0.0) == 0.5
+    emotion_snapshot = dict(payload.get("emotion_snapshot") or {})
+    assert emotion_snapshot.get("version") == "chat_emotion_snapshot.v1"
+    assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
     assert dict(context_pack.get("emotion_pulse") or {}).get("emotion_tag") == "HAPPY"
     assert dict(context_pack.get("memory_emotion_hint") or {}).get("mood_state") == "engaged"
     assert dict(context_pack.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
@@ -331,6 +335,20 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
             "mood_state": "engaged",
             "emotion_tag": "HAPPY",
             "emotion_range_hint": "可以表达积极情感",
+            "emotion_intensity": 0.76,
+        },
+        "emotion_snapshot": {
+            "version": "chat_emotion_snapshot.v1",
+            "source": "test_case",
+            "captured_ts_ms": 1234567890,
+            "emotion_ts_ms": 1234567000,
+            "age_ms": 890,
+            "emotion_context": {
+                "mood_state": "engaged",
+                "emotion_tag": "HAPPY",
+                "emotion_range_hint": "可以表达积极情感",
+                "emotion_intensity": 0.76,
+            },
         },
         "core_reasoner_primary": {
             "payload": {
@@ -356,6 +374,8 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
     assert "EMOTION_BINDING" in prompt
     assert "emotion_tag: HAPPY" in prompt
     assert "mood_state: engaged" in prompt
+    assert "emotion_intensity: 0.76" in prompt
+    assert "snapshot_source: test_case" in prompt
 
 
 def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> None:

@@ -37,6 +37,8 @@
 - [x] P0-A/A4：补齐 `context_pack_observability` 字段（来源计数/条目统计/上下文大小/召回路径）
 - [x] P0-A/A5：流式与非流式路径增加退化顺序日志（`six_route -> core_three -> minimal_context -> bare_llm`）
 - [x] P0-A/A5：短会话检索缓存（`RetrievalOrchestrator` TTL/LRU）落地，命中信息写入 `retrieval_summary`
+- [x] P0-B/B1：新增统一 `emotion_snapshot`（tag/intensity/source/timestamp/age）并贯通 `chat`/`chat/stream` 审计输出
+- [x] P0-B/B1：Prompt 绑定补齐情感强度与快照字段（`emotion_intensity` + `snapshot_*`），新增对应单测
 
 ---
 
@@ -125,16 +127,16 @@
 ### P0-B 流式 Chat 接入情感层（预估 1-2 天）
 
 #### B1. 情感快照接入（0.5 天）
-- [ ] 在召回后、LLM 前调用 `emotion_context` 构建快照
-- [ ] 将情感状态注入 prompt（含强度/标签）
+- [x] 在召回后、LLM 前调用 `emotion_context` 构建快照
+- [x] 将情感状态注入 prompt（含强度/标签）
 
 **验收标准**
 - trace 中可观测 `emotion_snapshot`
 - prompt 构建包含情感字段
 
 #### B2. VTS 驱动事件打通（0.5 天）
-- [ ] 将情感标签映射为 VTS 事件
-- [ ] 事件异步投递，不阻塞 SSE
+- [x] 将情感标签映射为 VTS 事件
+- [x] 事件异步投递，不阻塞 SSE
 
 **验收标准**
 - SSE 输出不中断；VTS 事件单独可追踪

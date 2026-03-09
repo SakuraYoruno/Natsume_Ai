@@ -108,6 +108,9 @@ def test_stream_prompt_injects_retrieval_before_render(monkeypatch: Any) -> None
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     assert commit["audit_refs"]["retrieval"]["status"] == "OK"
     assert dict(commit["audit_refs"].get("route_decision") or {}).get("route_target") == "cloud"
+    emotion_snapshot = dict(commit["audit_refs"].get("emotion_snapshot") or {})
+    assert emotion_snapshot.get("version") == "chat_emotion_snapshot.v1"
+    assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "NEUTRAL"
 
 
 def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any) -> None:
@@ -335,3 +338,5 @@ def test_stream_commit_contains_vts_summary(monkeypatch: Any) -> None:
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     assert commit["audit_refs"]["vts"]["status"] == "APPLIED"
     assert commit["audit_refs"]["vts"]["emotion_tag"] == "HAPPY"
+    emotion_snapshot = dict(commit["audit_refs"].get("emotion_snapshot") or {})
+    assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
