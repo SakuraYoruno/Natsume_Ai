@@ -36,3 +36,7 @@ def test_chat_approve_path_uses_graph_runtime(monkeypatch) -> None:
     }, context_pack_observability
     route_decision = dict((body.get("audit_refs") or {}).get("route_decision") or {})
     assert route_decision.get("target") in {"host", "cloud", "skills"}, route_decision
+    trace_metrics = dict((body.get("audit_refs") or {}).get("trace_metrics") or {})
+    background_tasks = dict(trace_metrics.get("background_tasks_latency_ms") or {})
+    assert "retrieval_latency_ms" in trace_metrics
+    assert int(background_tasks.get("total_ms") or -1) >= 0

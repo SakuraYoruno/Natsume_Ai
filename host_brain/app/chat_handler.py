@@ -365,6 +365,12 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     ts_ms = int(time.time() * 1000)
     session_id = request_body.session_id or f"session::{request_id}"
+    retrieval_latency_ms: int | None = None
+    background_tasks_latency_ms: dict[str, int] = {"total_ms": 0}
+    trace_metrics: dict[str, Any] = {
+        "retrieval_latency_ms": None,
+        "background_tasks_latency_ms": dict(background_tasks_latency_ms),
+    }
 
     try:
         intent_draft = request_body.intent_draft
@@ -432,6 +438,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
         )
 
         _retrieval_task = None
+        _retrieval_started_ms: int | None = None
         if retrieval_enabled:
             try:
                 _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
@@ -440,6 +447,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             _retr_top_k = max(1, min(_retr_top_k, 20))
             _retr_emotion = str(emotion_context.get("emotion_tag") or "") or None
             _retr_orchestrator = get_retrieval_orchestrator()
+            _retrieval_started_ms = int(time.time() * 1000)
             _retrieval_task = asyncio.create_task(
                 _retr_orchestrator.arun(
                     request=RetrievalOrchestratorRequest(
@@ -574,6 +582,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                         "memory_id": None,
                         "detail": "gaming edge route keeps minimal path and skips episodic persistence",
                     }
+                    _obs_persist_started_ms = int(time.time() * 1000)
+                    obs_persist_latency_ms = 0
                     try:
                         persist_chat_observability_rows(
                             ledger=get_ledger(),
@@ -588,6 +598,16 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                             "chat observability persistence failed (gaming edge route)",
                             extra={"request_id": request_id, "error": str(exc)},
                         )
+                    finally:
+                        obs_persist_latency_ms = max(0, int(time.time() * 1000) - _obs_persist_started_ms)
+                    background_tasks_latency_ms = {
+                        "observability_persist_ms": obs_persist_latency_ms,
+                        "total_ms": obs_persist_latency_ms,
+                    }
+                    trace_metrics = {
+                        "retrieval_latency_ms": retrieval_latency_ms,
+                        "background_tasks_latency_ms": dict(background_tasks_latency_ms),
+                    }
                     return ChatResponse(
                         request_id=request_id,
                         narrative=narrative,
@@ -616,6 +636,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                                 "presence": dict(edge_chat_result.get("presence") or {}),
                                 "compile": dict(edge_chat_result.get("compile") or {}),
                             },
+                            "trace_metrics": trace_metrics,
                         },
                         timestamp=ts_ms,
                     )
@@ -640,6 +661,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 retrieval_result = await _retrieval_task
                 retrieval_summary = dict(retrieval_result.retrieval_summary)
                 retrieval_evidence_items = list(retrieval_result.retrieval_evidence_items)
+                if _retrieval_started_ms is not None:
+                    retrieval_latency_ms = max(0, int(time.time() * 1000) - _retrieval_started_ms)
             else:
                 retrieval_summary = build_skipped_retrieval_summary(
                     str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED")
@@ -648,6 +671,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED")
                     not in {"HOST_RETRIEVAL_DISABLED", "HOST_CHAT_RETRIEVAL_DISABLED"}
                 )
+            if retrieval_latency_ms is not None:
+                retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
 
             render_target_lang = infer_render_target_lang(user_message=request_body.message)
             node_style_bindings = _build_node_style_bindings(render_target_lang=render_target_lang)
@@ -969,6 +994,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             else:
                 quality = {"stage": "S_COMPLETE", "reason_code": None}
 
+            _obs_persist_started_ms = int(time.time() * 1000)
+            obs_persist_latency_ms = 0
             try:
                 persist_chat_observability_rows(
                     ledger=get_ledger(),
@@ -980,7 +1007,11 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 )
             except Exception as exc:
                 _logger.warning("chat observability persistence failed", extra={"request_id": request_id, "error": str(exc)})
+            finally:
+                obs_persist_latency_ms = max(0, int(time.time() * 1000) - _obs_persist_started_ms)
 
+            _bond_started_ms = int(time.time() * 1000)
+            bond_latency_ms = 0
             try:
                 _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
                 _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
@@ -1007,7 +1038,11 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 )
             except Exception as exc:
                 _logger.debug("bond emotion record skipped", extra={"request_id": request_id, "error": str(exc)})
+            finally:
+                bond_latency_ms = max(0, int(time.time() * 1000) - _bond_started_ms)
 
+            _episodic_started_ms = int(time.time() * 1000)
+            episodic_latency_ms = 0
             try:
                 episodic_summary = persist_chat_episodic_memory(
                     request_id=request_id,
@@ -1027,10 +1062,31 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     "detail": str(exc),
                 }
                 _logger.debug("episodic memory write skipped", extra={"request_id": request_id, "error": str(exc)})
+            finally:
+                episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
+
+            background_tasks_latency_ms = {
+                "observability_persist_ms": obs_persist_latency_ms,
+                "bond_update_ms": bond_latency_ms,
+                "episodic_memory_ms": episodic_latency_ms,
+                "total_ms": obs_persist_latency_ms + bond_latency_ms + episodic_latency_ms,
+            }
+            trace_metrics = {
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "background_tasks_latency_ms": dict(background_tasks_latency_ms),
+            }
         else:
+            if _retrieval_task is not None and not _retrieval_task.done():
+                _retrieval_task.cancel()
+                if _retrieval_started_ms is not None:
+                    retrieval_latency_ms = max(0, int(time.time() * 1000) - _retrieval_started_ms)
             narrative = f"[REJECTED] reason: {reason_code or 'UNKNOWN'}"
             quality = {"stage": governor_result.get("stage", "S_GOV_REJECT"), "reason_code": reason_code}
             metrics.inc_rejection(reason_code or "UNKNOWN")
+            trace_metrics = {
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "background_tasks_latency_ms": dict(background_tasks_latency_ms),
+            }
 
         return ChatResponse(
             request_id=request_id,
@@ -1055,6 +1111,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 "emotion_context": dict(emotion_context),
                 "emotion_snapshot": dict(emotion_snapshot),
                 "episodic_memory": dict(episodic_summary),
+                "trace_metrics": trace_metrics,
             },
             timestamp=ts_ms,
         )

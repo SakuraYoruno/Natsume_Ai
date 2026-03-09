@@ -204,6 +204,14 @@ def test_t_stream_01_get_stream_sse_sequence_and_commit_contract(monkeypatch: An
     assert dict(audit_refs.get("context_pack_observability") or {}).get("selected_tier") == "six_route"
     assert dict(dict(audit_refs.get("emotion_snapshot") or {}).get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
     assert dict(audit_refs.get("vts") or {}).get("status") == "APPLIED"
+    trace_metrics = dict(audit_refs.get("trace_metrics") or {})
+    assert trace_metrics.get("retrieval_latency_ms") is not None
+    assert int(trace_metrics.get("retrieval_latency_ms")) >= 0
+    assert trace_metrics.get("first_token_latency_ms") is not None
+    assert int(trace_metrics.get("first_token_latency_ms")) >= 0
+    background_tasks = dict(trace_metrics.get("background_tasks_latency_ms") or {})
+    assert "total_ms" in background_tasks
+    assert int(background_tasks.get("total_ms")) >= 0
     assert dict(captured.get("retrieval_kwargs") or {}).get("session_id") == "sess-stream-contract-01"
 
 

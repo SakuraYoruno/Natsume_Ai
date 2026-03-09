@@ -108,6 +108,14 @@ def test_stream_prompt_injects_retrieval_before_render(monkeypatch: Any) -> None
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     assert commit["audit_refs"]["retrieval"]["status"] == "OK"
     assert dict(commit["audit_refs"].get("route_decision") or {}).get("route_target") == "cloud"
+    trace_metrics = dict(commit["audit_refs"].get("trace_metrics") or {})
+    assert trace_metrics.get("retrieval_latency_ms") is not None
+    assert int(trace_metrics.get("retrieval_latency_ms")) >= 0
+    assert trace_metrics.get("first_token_latency_ms") is not None
+    assert int(trace_metrics.get("first_token_latency_ms")) >= 0
+    background_tasks = dict(trace_metrics.get("background_tasks_latency_ms") or {})
+    assert "total_ms" in background_tasks
+    assert int(background_tasks.get("total_ms")) >= 0
     emotion_snapshot = dict(commit["audit_refs"].get("emotion_snapshot") or {})
     assert emotion_snapshot.get("version") == "chat_emotion_snapshot.v1"
     assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "NEUTRAL"

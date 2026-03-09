@@ -57,6 +57,9 @@
 - [x] P2-B：将 metrics/session/trace/health/routes 主实现迁移到 `host_brain/observability/*`，`host_brain/obs/*` 保留兼容转发层
 - [x] P2-B：应用层调用方切换到 `host_brain/observability/*`（dependencies/health_routes/system_handler/obs_routes）
 - [x] P2-B：新增兼容导入单测 `test_observability_module_compat.py`，完成扩展回归 `149 passed`
+- [x] 5.1：补齐关键链路 trace 字段（`retrieval_latency_ms` / `first_token_latency_ms` / `background_tasks_latency_ms`）
+- [x] 5.1：`/v1/chat` 与 `/v1/chat/stream` 审计输出增加 `audit_refs.trace_metrics`（含 retrieval、首 token、后处理耗时）
+- [x] 5.1：完成扩展回归 `149 passed`（obs + scene_router + stream + retrieval + chat + emotion）
 
 ---
 
@@ -242,7 +245,7 @@
 ## 5. 跨阶段公共任务（必须持续执行）
 
 ### 5.1 观测与告警
-- [ ] 增加关键链路 trace：召回耗时、首 token、后台任务耗时
+- [x] 增加关键链路 trace：召回耗时、首 token、后台任务耗时
 - [ ] 为超时、降级、失败率设置阈值告警
 - [ ] 每周输出稳定性报告
 

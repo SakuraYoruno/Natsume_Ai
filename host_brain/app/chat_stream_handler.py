@@ -431,6 +431,9 @@ async def _sse_event_generator(
     yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
     try:
+        retrieval_latency_ms: int | None = None
+        first_token_latency_ms: int | None = None
+
         # ── 1. 构建 intent_draft ──────────────────────────────────────────
         if intent_draft is None:
             intent_draft = {
@@ -493,8 +496,10 @@ async def _sse_event_generator(
         retrieval_enabled, retrieval_disabled_reason = resolve_chat_retrieval_gate(scene_type=scene_type)
 
         retrieval_task: asyncio.Task | None = None
+        retrieval_started_ms: int | None = None
         if retrieval_enabled:
             _retr_emotion = str(emotion_context.get("emotion_tag") or "") or None
+            retrieval_started_ms = int(time.time() * 1000)
             retrieval_task = asyncio.create_task(
                 _run_retrieval(
                     request_id=request_id,
@@ -514,10 +519,14 @@ async def _sse_event_generator(
                     retrieval_task,
                     timeout=float(retrieval_timeout_ms) / 1000.0,
                 )
+                if retrieval_started_ms is not None:
+                    retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
             except asyncio.TimeoutError:
                 retrieval_task.cancel()
                 retrieval_summary = _build_degraded_retrieval_summary("RETRIEVAL_TIMEOUT")
                 retrieval_evidence_items = []
+                if retrieval_started_ms is not None:
+                    retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
                 _logger.warning(
                     "retrieval timeout before stream prompt build",
                     extra={"request_id": request_id, "timeout_ms": retrieval_timeout_ms},
@@ -525,6 +534,8 @@ async def _sse_event_generator(
             except Exception as exc:
                 retrieval_summary = _build_degraded_retrieval_summary("RETRIEVAL_FAILED")
                 retrieval_evidence_items = []
+                if retrieval_started_ms is not None:
+                    retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
                 _logger.warning(
                     "retrieval task failed before stream prompt build: %s",
                     exc,
@@ -535,6 +546,8 @@ async def _sse_event_generator(
                 str(retrieval_disabled_reason or "HOST_CHAT_RETRIEVAL_DISABLED")
             )
             retrieval_evidence_items = []
+        if retrieval_latency_ms is not None:
+            retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="stream_pre_llm",
@@ -594,6 +607,7 @@ async def _sse_event_generator(
         splitter = SentenceSplitter()
         full_text = ""
         sentence_index = 0
+        llm_stream_started_ms = int(time.time() * 1000)
 
         async for chunk in astream_llm_chunks(
             provider_name=provider_name,
@@ -605,6 +619,8 @@ async def _sse_event_generator(
             gen_params=gen_params,
             base_url_override=base_url_override,
         ):
+            if first_token_latency_ms is None:
+                first_token_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
             full_text += chunk
             yield _sse({"phase": "RENDER", "chunk": chunk})
 
@@ -630,6 +646,8 @@ async def _sse_event_generator(
         # ── 8. Airlock Ingress 检疫 ───────────────────────────────────────
         narrative = repair_utf8_latin1_mojibake(full_text) or "系统有点忙，请稍后再试。"
         ingress_result = None
+        airlock_latency_ms = 0
+        _airlock_started_ms = int(time.time() * 1000)
         try:
             ingress_result = quarantine_ingress(
                 narrative,
@@ -639,6 +657,8 @@ async def _sse_event_generator(
             )
         except Exception as exc:
             _logger.warning("airlock ingress failed: %s", exc, extra={"request_id": request_id})
+        finally:
+            airlock_latency_ms = max(0, int(time.time() * 1000) - _airlock_started_ms)
 
         airlock_refs: Dict[str, Any] = {}
         if ingress_result is not None:
@@ -649,6 +669,8 @@ async def _sse_event_generator(
 
         # ── 9. episodic memory 写入 ───────────────────────────────────────
         episodic_summary: Dict[str, Any] = {}
+        episodic_latency_ms = 0
+        _episodic_started_ms = int(time.time() * 1000)
         try:
             episodic_summary = persist_chat_episodic_memory(
                 request_id=request_id,
@@ -669,13 +691,28 @@ async def _sse_event_generator(
             }
             _logger.debug("episodic memory write skipped in stream mode",
                           extra={"request_id": request_id, "error": str(exc)})
+        finally:
+            episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
 
         # ── 10. VTS 情感驱动（异步线程，不阻塞流式 token 输出）────────────
+        _vts_started_ms = int(time.time() * 1000)
         vts_summary = await _drive_stream_vts_emotion(
             request_id=request_id,
             emotion_context=emotion_context,
             ts_ms=ts_ms,
         )
+        vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
+        background_tasks_total_ms = airlock_latency_ms + episodic_latency_ms + vts_latency_ms
+        trace_metrics = {
+            "retrieval_latency_ms": retrieval_latency_ms,
+            "first_token_latency_ms": first_token_latency_ms,
+            "background_tasks_latency_ms": {
+                "airlock_ingress_ms": airlock_latency_ms,
+                "episodic_memory_ms": episodic_latency_ms,
+                "vts_emotion_ms": vts_latency_ms,
+                "total_ms": background_tasks_total_ms,
+            },
+        }
 
         # ── 11. COMMIT 事件 ───────────────────────────────────────────────
         route_decision = build_unified_route_decision(
@@ -716,6 +753,7 @@ async def _sse_event_generator(
                 "vts": vts_summary,
                 "airlock": airlock_refs,
                 "episodic_memory": episodic_summary,
+                "trace_metrics": trace_metrics,
             },
         })
 
