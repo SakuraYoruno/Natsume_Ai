@@ -48,6 +48,7 @@ class ChatRequest(BaseModel):
     scene_type: Optional[str] = Field(None, description="Optional scene type override")
     mood_state: Optional[str] = Field(None, description="Optional mood state")
     emotion_tag: Optional[str] = Field(None, description="Optional emotion tag")
+    emotion_intensity: Optional[float] = Field(None, description="Optional emotion intensity [0,1]")
     emotion_context: Optional[Dict[str, Any]] = Field(None, description="Optional emotion context")
     emotion_range_hint: Optional[str] = Field(None, description="Optional emotion range hint")
 

@@ -26,6 +26,7 @@ from host_brain.app.dependencies import (
     get_retrieval_orchestrator,
 )
 from host_brain.app.emotion_context import (
+    build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
@@ -132,6 +133,7 @@ async def _build_stream_chat_prompt(
     retrieval_summary: Dict[str, Any] | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     emotion_context_override: Dict[str, Any] | None = None,
+    emotion_snapshot_override: Dict[str, Any] | None = None,
 ) -> tuple[str, str, dict, dict, dict[str, Any]]:
     """构建流式聊天的 prompt、system_prompt 和生成参数。
 
@@ -145,6 +147,7 @@ async def _build_stream_chat_prompt(
             self.thread_id = thread_id
             self.mood_state = mood_state
             self.emotion_tag = emotion_tag
+            self.emotion_intensity = None
             self.emotion_range_hint = None
             self.emotion_context = None
             self.scene_type = None
@@ -156,6 +159,15 @@ async def _build_stream_chat_prompt(
     else:
         request_body = _StreamReq()
         resolved_emotion_context = resolve_chat_emotion_context(request_body=request_body)
+    resolved_emotion_snapshot = (
+        dict(emotion_snapshot_override)
+        if isinstance(emotion_snapshot_override, dict)
+        else build_chat_emotion_snapshot(
+            emotion_context=resolved_emotion_context,
+            source="stream_prompt",
+            ts_ms=ts_ms,
+        )
+    )
 
     from host_brain.app.chat_context_builder import (  # noqa: PLC0415
         build_chat_generation_prompt_payload as _build_payload,
@@ -176,6 +188,7 @@ async def _build_stream_chat_prompt(
         retrieval_evidence_items=retrieval_evidence_items or [],
         style_bindings=node_style_bindings,
         emotion_context=resolved_emotion_context if resolved_emotion_context else None,
+        emotion_snapshot=resolved_emotion_snapshot,
     )
     if resolved_emotion_context:
         prompt_payload = adjust_gen_params_for_emotion(prompt_payload, resolved_emotion_context)
@@ -186,6 +199,7 @@ async def _build_stream_chat_prompt(
     prompt_meta = {
         "context_pack_validation": dict(prompt_payload.get("context_pack_validation") or {}),
         "context_pack_observability": dict(prompt_payload.get("context_pack_observability") or {}),
+        "emotion_snapshot": dict(prompt_payload.get("emotion_snapshot") or {}),
     }
     system_prompt = (
         "You are 夏目藍 (Natsume Ai). "
@@ -440,6 +454,7 @@ async def _sse_event_generator(
                 self.thread_id = thread_id
                 self.mood_state = mood_state
                 self.emotion_tag = emotion_tag
+                self.emotion_intensity = None
                 self.emotion_range_hint = None
                 self.emotion_context = None
                 self.scene_type = None
@@ -520,6 +535,11 @@ async def _sse_event_generator(
                 str(retrieval_disabled_reason or "HOST_CHAT_RETRIEVAL_DISABLED")
             )
             retrieval_evidence_items = []
+        emotion_snapshot = build_chat_emotion_snapshot(
+            emotion_context=emotion_context,
+            source="stream_pre_llm",
+            ts_ms=int(time.time() * 1000),
+        )
 
         # ── 5. 检查 LLM 可用性 ────────────────────────────────────────────
         llm_runtime = resolve_host_llm_runtime()
@@ -551,14 +571,17 @@ async def _sse_event_generator(
             retrieval_summary=retrieval_summary,
             retrieval_evidence_items=retrieval_evidence_items,
             emotion_context_override=emotion_context,
+            emotion_snapshot_override=emotion_snapshot,
         )
         context_pack_validation: dict[str, Any] = {}
         context_pack_observability: dict[str, Any] = {}
+        emotion_snapshot_for_audit: dict[str, Any] = dict(emotion_snapshot)
         if len(prompt_build_result) >= 5:
             prompt_text, system_prompt, gen_params, _, prompt_meta = prompt_build_result
             if isinstance(prompt_meta, Mapping):
                 context_pack_validation = dict(prompt_meta.get("context_pack_validation") or {})
                 context_pack_observability = dict(prompt_meta.get("context_pack_observability") or {})
+                emotion_snapshot_for_audit = dict(prompt_meta.get("emotion_snapshot") or emotion_snapshot)
         else:
             prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
         _log_context_pack_observability(
@@ -682,10 +705,12 @@ async def _sse_event_generator(
                     "route_target": str(llm_runtime.get("route_target") or "cloud"),
                     "route_reason_code": str(llm_runtime.get("route_reason_code") or ""),
                     "route_decision": route_decision,
+                    "emotion_snapshot": emotion_snapshot_for_audit,
                     "context_pack_validation": context_pack_validation,
                     "context_pack_observability": context_pack_observability,
                 },
                 "route_decision": route_decision,
+                "emotion_snapshot": emotion_snapshot_for_audit,
                 "context_pack_validation": context_pack_validation,
                 "context_pack_observability": context_pack_observability,
                 "vts": vts_summary,

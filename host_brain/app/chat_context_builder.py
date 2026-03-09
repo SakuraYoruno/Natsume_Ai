@@ -453,11 +453,23 @@ def build_chat_generation_prompt_payload(
     retrieval_evidence_items: list[dict[str, Any]],
     style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
+    emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
 ) -> dict[str, Any]:
-    from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
+    from host_brain.app.emotion_context import (  # noqa: PLC0415
+        build_chat_emotion_snapshot,
+        normalize_chat_emotion_context,
+    )
     normalized_style_bindings = normalize_node_style_bindings(style_bindings)
     normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
+    normalized_emotion_snapshot = (
+        dict(emotion_snapshot)
+        if isinstance(emotion_snapshot, Mapping)
+        else build_chat_emotion_snapshot(
+            emotion_context=normalized_emotion_context,
+            source="prompt_payload",
+        )
+    )
     resolved_render_lang = str(render_target_lang or "").strip().lower()
     if resolved_render_lang not in {"zh", "ja"}:
         resolved_render_lang = infer_render_target_lang(user_message=user_message)
@@ -487,7 +499,9 @@ def build_chat_generation_prompt_payload(
             "mood_state": normalized_emotion_context.get("mood_state"),
             "emotion_tag": normalized_emotion_context.get("emotion_tag"),
             "emotion_range_hint": normalized_emotion_context.get("emotion_range_hint"),
+            "emotion_intensity": normalized_emotion_context.get("emotion_intensity"),
         },
+        "emotion_snapshot": normalized_emotion_snapshot,
         "context_pack": context_pack,
         "context_pack_validation": context_pack_validation,
         "context_pack_observability": context_pack_observability,

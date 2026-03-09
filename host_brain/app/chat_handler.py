@@ -24,6 +24,7 @@ from host_brain.app.dependencies import (
     get_retrieval_orchestrator,
 )
 from host_brain.app.emotion_context import (
+    build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
@@ -386,6 +387,11 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             emotion_context=emotion_context,
             ts_ms=ts_ms,
         )
+        emotion_snapshot = build_chat_emotion_snapshot(
+            emotion_context=emotion_context,
+            source="chat_request",
+            ts_ms=ts_ms,
+        )
 
         explicit_scene_type = str(request_body.scene_type or "").strip().upper()
         scene_type_for_retrieval = explicit_scene_type or SCENE_CHAT
@@ -529,6 +535,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                         "route_target": HOST_CHAT_ROUTE_EDGE_3B,
                         "route_reason_code": _EDGE_GAMING_ROUTE_REASON,
                         "route_decision": edge_route_decision,
+                        "emotion_snapshot": dict(emotion_snapshot),
                         "node_count": 1,
                         "nodes": [
                             {
@@ -602,6 +609,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                             "scene_type_source": llm_summary.get("scene_type_source"),
                             "route_decision": edge_route_decision,
                             "emotion_context": dict(emotion_context),
+                            "emotion_snapshot": dict(emotion_snapshot),
                             "episodic_memory": dict(episodic_summary),
                             "edge_route": {
                                 "route": "gaming_edge_3b",
@@ -643,6 +651,11 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
 
             render_target_lang = infer_render_target_lang(user_message=request_body.message)
             node_style_bindings = _build_node_style_bindings(render_target_lang=render_target_lang)
+            emotion_snapshot = build_chat_emotion_snapshot(
+                emotion_context=emotion_context,
+                source="chat_pre_llm",
+                ts_ms=int(time.time() * 1000),
+            )
             llm_prompt_payload = _build_chat_generation_prompt_payload(
                 request_id=request_id,
                 session_id=session_id,
@@ -653,6 +666,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 retrieval_evidence_items=retrieval_evidence_items,
                 style_bindings=node_style_bindings,
                 emotion_context=emotion_context if emotion_context else None,
+                emotion_snapshot=emotion_snapshot,
             )
             if emotion_context:
                 llm_prompt_payload = adjust_gen_params_for_emotion(llm_prompt_payload, emotion_context)
@@ -743,6 +757,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     "scene_type": (explicit_scene_type or None),
                     "committed_route_token": governor_result.get("committed_route_token_ref"),
                     "committed_route_token_detail": governor_result.get("committed_route_token"),
+                    "emotion_snapshot": dict(emotion_snapshot),
                 },
                 dependency_statuses=dependency_statuses,
                 ts_ms=graph_start_ms,
@@ -935,6 +950,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                     route_decision.get("route_reason_code") or llm_runtime.get("route_reason_code") or ""
                 ),
                 "route_decision": route_decision,
+                "emotion_snapshot": dict(emotion_snapshot),
                 "node_count": len(node_summaries),
                 "nodes": node_summaries,
                 "model_control": list(graph_output.get("model_control") or []),
@@ -1037,6 +1053,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
                 "scene_type_source": llm_summary.get("scene_type_source"),
                 "route_decision": llm_summary.get("route_decision"),
                 "emotion_context": dict(emotion_context),
+                "emotion_snapshot": dict(emotion_snapshot),
                 "episodic_memory": dict(episodic_summary),
             },
             timestamp=ts_ms,

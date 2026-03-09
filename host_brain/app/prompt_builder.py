@@ -413,19 +413,54 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
     emotion_context_raw = runtime_payload.get("emotion_context")
     emotion_context = dict(emotion_context_raw) if isinstance(emotion_context_raw, Mapping) else {}
+    emotion_snapshot_raw = runtime_payload.get("emotion_snapshot")
+    emotion_snapshot = dict(emotion_snapshot_raw) if isinstance(emotion_snapshot_raw, Mapping) else {}
+    snapshot_emotion_context_raw = emotion_snapshot.get("emotion_context")
+    snapshot_emotion_context = (
+        dict(snapshot_emotion_context_raw)
+        if isinstance(snapshot_emotion_context_raw, Mapping)
+        else {}
+    )
     context_pack_emotion_raw = context_pack.get("emotion_pulse")
     context_pack_emotion = dict(context_pack_emotion_raw) if isinstance(context_pack_emotion_raw, Mapping) else {}
     merged_emotion_context = normalize_chat_emotion_context(
         {
-            "mood_state": context_pack_emotion.get("mood_state") or emotion_context.get("mood_state"),
-            "emotion_tag": context_pack_emotion.get("emotion_tag") or emotion_context.get("emotion_tag"),
+            "mood_state": (
+                context_pack_emotion.get("mood_state")
+                or snapshot_emotion_context.get("mood_state")
+                or emotion_context.get("mood_state")
+            ),
+            "emotion_tag": (
+                context_pack_emotion.get("emotion_tag")
+                or snapshot_emotion_context.get("emotion_tag")
+                or emotion_context.get("emotion_tag")
+            ),
             "emotion_range_hint": (
                 context_pack_emotion.get("emotion_range_hint")
+                or snapshot_emotion_context.get("emotion_range_hint")
                 or emotion_context.get("emotion_range_hint")
+            ),
+            "emotion_intensity": (
+                snapshot_emotion_context.get("emotion_intensity")
+                or emotion_context.get("emotion_intensity")
+            ),
+            "emotion_ts_ms": (
+                emotion_snapshot.get("emotion_ts_ms")
+                or snapshot_emotion_context.get("emotion_ts_ms")
+                or emotion_context.get("emotion_ts_ms")
             ),
         }
     )
     pulse_style_hint = _truncate_for_prompt(context_pack_emotion.get("style_hint"), limit=160)
+    snapshot_source = _truncate_for_prompt(emotion_snapshot.get("source"), limit=120) or "NONE"
+    try:
+        snapshot_age_ms = int(emotion_snapshot.get("age_ms") or 0)
+    except (TypeError, ValueError):
+        snapshot_age_ms = 0
+    try:
+        snapshot_captured_ts_ms = int(emotion_snapshot.get("captured_ts_ms") or 0)
+    except (TypeError, ValueError):
+        snapshot_captured_ts_ms = 0
     memory_emotion_hint_raw = context_pack.get("memory_emotion_hint")
     memory_emotion_hint = dict(memory_emotion_hint_raw) if isinstance(memory_emotion_hint_raw, Mapping) else {}
     bond_texture_raw = context_pack.get("bond_texture")
@@ -442,7 +477,11 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
         f"- emotion_tag: {merged_emotion_context.get('emotion_tag')}\n"
+        f"- emotion_intensity: {merged_emotion_context.get('emotion_intensity')}\n"
         f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
+        f"- snapshot_source: {snapshot_source}\n"
+        f"- snapshot_captured_ts_ms: {snapshot_captured_ts_ms}\n"
+        f"- snapshot_age_ms: {snapshot_age_ms}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
         f"- bond_texture_json: {bond_texture_json}\n\n"
