@@ -1,12 +1,16 @@
-"""Observability package: metrics collection and /obs/* routes (M18)."""
+"""Compatibility package for legacy `host_brain.obs.*` imports.
 
-from __future__ import annotations
+Canonical observability implementations now live in `host_brain.observability.*`.
+"""
 
-from host_brain.obs.metrics import MetricsCollector, ObsMode, get_obs_mode
-from host_brain.obs.service_health_aggregator import ServiceHealthAggregator, ServiceHealthResult
-from host_brain.obs.session_query import SessionQueryService
-from host_brain.obs.trace_node_builder import TraceNodeBuilder
-from host_brain.obs.metrics_timeseries import MetricsTimeseriesService
+from host_brain.observability.metrics import MetricsCollector, ObsMode, get_obs_mode
+from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
+from host_brain.observability.service_health_aggregator import (
+    ServiceHealthAggregator,
+    ServiceHealthResult,
+)
+from host_brain.observability.session_query import SessionQueryService
+from host_brain.observability.trace_node_builder import TraceNodeBuilder
 
 __all__ = [
     "MetricsCollector",

@@ -22,7 +22,7 @@ from host_brain.app.graph_config_builder import (
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.obs.metrics import MetricsCollector
+from host_brain.observability.metrics import MetricsCollector
 from host_brain.retrieval.pipeline import (
     RetrievalPipelineContract,
     build_retrieval_pipeline_from_env,

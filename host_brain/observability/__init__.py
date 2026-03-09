@@ -1,1 +1,45 @@
-# 跨端时间线聚合器 __init__
+"""Unified observability package (canonical path).
+
+This package consolidates previous `host_brain.obs` and `host_brain.observability`
+capabilities. Legacy imports under `host_brain.obs` are kept as compatibility shims.
+"""
+
+from host_brain.observability.cross_timeline import (
+    CrossTimelineAggregator,
+    CrossTimelineResult,
+    EdgeEventReport,
+    UnifiedTimelineEntry,
+    build_cross_timeline,
+)
+from host_brain.observability.metrics import MetricsCollector, ObsMode, get_obs_mode
+from host_brain.observability.metrics_timeseries import MAX_DATA_POINTS, MetricsTimeseriesService
+from host_brain.observability.routes import build_obs_metrics_response
+from host_brain.observability.service_health_aggregator import (
+    ALL_SERVICES,
+    ServiceHealthAggregator,
+    ServiceHealthResult,
+    validate_health_response,
+)
+from host_brain.observability.session_query import SessionQueryService
+from host_brain.observability.trace_node_builder import TraceNodeBuilder, _IO_MAX_BYTES
+
+__all__ = [
+    "ALL_SERVICES",
+    "CrossTimelineAggregator",
+    "CrossTimelineResult",
+    "EdgeEventReport",
+    "MAX_DATA_POINTS",
+    "MetricsCollector",
+    "MetricsTimeseriesService",
+    "ObsMode",
+    "ServiceHealthAggregator",
+    "ServiceHealthResult",
+    "SessionQueryService",
+    "TraceNodeBuilder",
+    "UnifiedTimelineEntry",
+    "_IO_MAX_BYTES",
+    "build_cross_timeline",
+    "build_obs_metrics_response",
+    "get_obs_mode",
+    "validate_health_response",
+]

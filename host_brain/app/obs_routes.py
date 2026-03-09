@@ -19,9 +19,9 @@ from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.obs.service_health_aggregator import ServiceHealthAggregator
-from host_brain.obs.session_query import SessionQueryService
-from host_brain.obs.metrics_timeseries import MetricsTimeseriesService
+from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
+from host_brain.observability.session_query import SessionQueryService
+from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -249,7 +249,7 @@ async def get_services_health(
 def _build_probe_registry(ledger, since_ms: int) -> dict:
     """基于 ledger 历史数据构建被动探测函数注册表。"""
     import asyncio
-    from host_brain.obs.service_health_aggregator import ServiceHealthResult
+    from host_brain.observability.service_health_aggregator import ServiceHealthResult
 
     # 预加载所需数据
     try:

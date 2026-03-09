@@ -36,7 +36,7 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
-from host_brain.obs.routes import build_obs_metrics_response
+from host_brain.observability.routes import build_obs_metrics_response
 
 
 def _load_json_file(path: Path) -> dict[str, Any] | None:

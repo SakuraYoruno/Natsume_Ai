@@ -37,7 +37,7 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
-from host_brain.obs.routes import build_obs_metrics_response
+from host_brain.observability.routes import build_obs_metrics_response
 from edge_client.rpc.health import build_edge_transport_probe_statuses
 
 _logger = logging.getLogger("Natsume.health_routes")

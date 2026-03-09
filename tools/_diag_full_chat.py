@@ -27,7 +27,7 @@ class FakeRequest:
 
 async def run():
     from host_brain.app.chat_handler import handle_chat
-    from host_brain.obs.metrics import MetricsCollector
+    from host_brain.observability.metrics import MetricsCollector
     from host_brain.app.dependencies import get_ledger
 
     metrics = MetricsCollector(ledger=get_ledger())
