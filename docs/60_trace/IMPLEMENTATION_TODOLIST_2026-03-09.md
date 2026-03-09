@@ -72,6 +72,9 @@
 - [x] 5.3：生成首份复盘 `POST_RELEASE_REVIEW_20260310_010918.{json,md}`（`release_id=codex-20260309`，状态 `COMPLETE`）
 - [x] P2-A：`skills/registry.py` 新增统一 `@skill` 装饰器 + `register_decorated()` 扫描注册入口
 - [x] P2-A：补齐 `SkillResult` 与 `permission_model` 抽象，新增装饰器回归 `60 passed`（含 skills/governance）
+- [x] P2-A：新增 IDE Skills 封装 `ide_registry.py`（`open_cursor` / `run_pycharm_action` / `codex_task`）
+- [x] P2-A：新增 MCP→Skills 桥接 `mcp_skill_bridge.py`（统一 `mcp::<provider>::<tool>` 命名，支持 broker 单入口调用）
+- [x] P2-A：新增 skills/mcp 相关回归 `26 passed`（decorator + ide + mcp bridge + hot_loader）
 
 ---
 
@@ -220,8 +223,8 @@
 ### P2-A Skills 层 OpenClaw 风格封装（预估 5-7 天）
 - [x] 设计统一 `@skill` 注册器
 - [x] 抽象 `SkillRegistry`、`SkillResult`、权限模型
-- [ ] 封装 Cursor / PyCharm / Codex 三类能力
-- [ ] 打通 MCP 工具注册与 Skills（单入口）
+- [x] 封装 Cursor / PyCharm / Codex 三类能力
+- [x] 打通 MCP 工具注册与 Skills（单入口）
 
 **验收标准**
 - 新增技能可通过统一协议发现与调用
