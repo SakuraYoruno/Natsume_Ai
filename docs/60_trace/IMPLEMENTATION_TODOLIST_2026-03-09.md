@@ -66,6 +66,8 @@
 - [x] 5.1：生成首份周报 `WEEKLY_STABILITY_REPORT_20260310_005912.{json,md}`（7 天窗口，状态 `WARN`，2 条告警）
 - [x] 5.3：新增灰度门控（按会话/用户哈希百分比 + 场景白名单 + allowlist），`/v1/chat` 与 `/v1/chat/stream` 已接入
 - [x] 5.3：灰度回归通过 `15 passed`（host8b runtime route + stream/chat 路径）
+- [x] 5.3：新增发布门禁脚本 `tools/release_rollback_gate.py`（绑定回滚条件 + 回滚命令输出）
+- [x] 5.3：新增回滚运行手册 `ROLLBACK_RUNBOOK_2026-03-10.md`，并生成门禁报告 `RELEASE_ROLLBACK_GATE_20260310_010648.{json,md}`
 
 ---
 
@@ -262,7 +264,7 @@
 
 ### 5.3 发布与回滚
 - [x] 每个阶段准备灰度开关（按用户/按场景）
-- [ ] 每次上线绑定回滚条件与回滚命令
+- [x] 每次上线绑定回滚条件与回滚命令
 - [ ] 发布后 24h 做一次复盘
 
 ---
