@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import inspect
 import json
+import logging
 import os
 from time import perf_counter
 from typing import Any, Callable, Mapping
@@ -19,6 +20,14 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.memory.chroma_client import EMBEDDING_MODEL_ID, embed_text
+from host_brain.retrieval.embedding_schemas import (
+    EmbeddingConfigIssue,
+    EmbeddingConfigLoadResult,
+    EmbeddingResult,
+    EmbeddingRouteConfig,
+    EmbeddingRuntimeConfig,
+)
+
 
 
 S_RET_EMBEDDING = "S_RET_EMBEDDING"
@@ -33,87 +42,11 @@ DEFAULT_EMBED_ROUTE = "default"
 DEFAULT_EMBED_DIM = 16
 DEFAULT_EMBED_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
+_COLD_START_RETRYABLE_EMBED_PROVIDERS = frozenset({"sentence_transformers"})
+_TIMEOUT_FALLBACK_EMBED_PROVIDERS = frozenset({"sentence_transformers"})
 
 EmbeddingProvider = Callable[..., tuple[list[float], str]]
-
-
-@dataclass(frozen=True)
-class EmbeddingRouteConfig:
-    route_id: str
-    provider: str
-    model_id: str
-    dim: int
-    timeout_ms: int
-    node_selector: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "route_id": self.route_id,
-            "provider": self.provider,
-            "model_id": self.model_id,
-            "dim": int(self.dim),
-            "timeout_ms": int(self.timeout_ms),
-            "node_selector": self.node_selector,
-        }
-
-
-@dataclass(frozen=True)
-class EmbeddingRuntimeConfig:
-    enabled: bool
-    default_route: str
-    routes: dict[str, EmbeddingRouteConfig]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "default_route": self.default_route,
-            "routes": {
-                route_id: route.as_dict()
-                for route_id, route in sorted(self.routes.items())
-            },
-        }
-
-
-@dataclass(frozen=True)
-class EmbeddingConfigIssue:
-    reason_code: str
-    detail: str
-    field: str | None = None
-
-
-@dataclass(frozen=True)
-class EmbeddingConfigLoadResult:
-    success: bool
-    stage: str
-    reason_code: str | None
-    config: EmbeddingRuntimeConfig | None
-    issues: tuple[EmbeddingConfigIssue, ...]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "stage": self.stage,
-            "reason_code": self.reason_code,
-            "config": (self.config.as_dict() if self.config is not None else None),
-            "issues": [
-                {
-                    "reason_code": issue.reason_code,
-                    "detail": issue.detail,
-                    "field": issue.field,
-                }
-                for issue in self.issues
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class EmbeddingResult:
-    success: bool
-    status: str
-    reason_code: str | None
-    stage: str
-    detail: str
-    output: dict[str, Any]
+logger = logging.getLogger("Natsume.retrieval.embedding")
 
 
 class EmbeddingServiceContract:
@@ -222,61 +155,120 @@ class EmbeddingServiceContract:
                 node_selector=route.node_selector,
                 ts_ms=now_value,
             )
-        start = perf_counter()
-        try:
-            vector, model_id = _invoke_embedding_provider(selected_provider, normalized, route)
-        except TimeoutError:
-            latency_ms = int(round((perf_counter() - start) * 1000))
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_EMBED_TIMEOUT,
-                detail=f"embedding provider timeout>{timeout_value}ms",
-                latency_ms=latency_ms,
-                model_id=route.model_id,
-                provider=route.provider,
-                route_id=route.route_id,
-                expected_dim=route.dim,
-                vector=[],
-                text=normalized,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
-        except Exception as exc:
-            latency_ms = int(round((perf_counter() - start) * 1000))
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_EMBED_UNAVAILABLE,
-                detail=f"embedding provider unavailable: {exc}",
-                latency_ms=latency_ms,
-                model_id=route.model_id,
-                provider=route.provider,
-                route_id=route.route_id,
-                expected_dim=route.dim,
-                vector=[],
-                text=normalized,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
+        warm_retry_used = False
+        fallback_used = False
+        fallback_reason_code: str | None = None
+        fallback_detail: str | None = None
+        effective_provider = route.provider
+        configured_model_id = str(route.model_id)
+        attempt = 1
+        while True:
+            start = perf_counter()
+            try:
+                vector, model_id = _invoke_embedding_provider(selected_provider, normalized, route)
+            except TimeoutError:
+                latency_ms = int(round((perf_counter() - start) * 1000))
+                if _should_retry_embedding_cold_start(route.provider, attempt):
+                    warm_retry_used = True
+                    logger.warning(
+                        "Retrying embedding provider after cold-start timeout (%s/%s, %dms, attempt=%d)",
+                        route.provider,
+                        route.model_id,
+                        latency_ms,
+                        attempt,
+                    )
+                    attempt += 1
+                    continue
+                if _should_fallback_embedding_timeout(route.provider):
+                    vector, model_id = _build_timeout_fallback_embedding(normalized, route)
+                    fallback_used = True
+                    fallback_reason_code = RETR_EMBED_TIMEOUT
+                    fallback_detail = f"embedding provider timeout>{timeout_value}ms"
+                    effective_provider = DEFAULT_EMBED_PROVIDER
+                    logger.warning(
+                        "Using builtin embedding fallback after timeout (%s/%s, %dms)",
+                        route.provider,
+                        route.model_id,
+                        latency_ms,
+                    )
+                    break
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_EMBED_TIMEOUT,
+                    detail=f"embedding provider timeout>{timeout_value}ms",
+                    latency_ms=latency_ms,
+                    model_id=route.model_id,
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    expected_dim=route.dim,
+                    vector=[],
+                    text=normalized,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
+            except Exception as exc:
+                latency_ms = int(round((perf_counter() - start) * 1000))
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_EMBED_UNAVAILABLE,
+                    detail=f"embedding provider unavailable: {exc}",
+                    latency_ms=latency_ms,
+                    model_id=route.model_id,
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    expected_dim=route.dim,
+                    vector=[],
+                    text=normalized,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
 
-        latency_ms = int(round((perf_counter() - start) * 1000))
-        if latency_ms > timeout_value:
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_EMBED_TIMEOUT,
-                detail=f"embedding provider slow: {latency_ms}ms>{timeout_value}ms",
-                latency_ms=latency_ms,
-                model_id=str(model_id or route.model_id),
-                provider=route.provider,
-                route_id=route.route_id,
-                expected_dim=route.dim,
-                vector=[],
-                text=normalized,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
+            latency_ms = int(round((perf_counter() - start) * 1000))
+            if latency_ms > timeout_value and _should_retry_embedding_cold_start(route.provider, attempt):
+                warm_retry_used = True
+                logger.warning(
+                    "Retrying embedding provider after cold-start slow call (%s/%s, %dms>%dms, attempt=%d)",
+                    route.provider,
+                    route.model_id,
+                    latency_ms,
+                    timeout_value,
+                    attempt,
+                )
+                attempt += 1
+                continue
+            if latency_ms > timeout_value:
+                if _should_fallback_embedding_timeout(route.provider):
+                    vector, model_id = _build_timeout_fallback_embedding(normalized, route)
+                    fallback_used = True
+                    fallback_reason_code = RETR_EMBED_TIMEOUT
+                    fallback_detail = f"embedding provider slow: {latency_ms}ms>{timeout_value}ms"
+                    effective_provider = DEFAULT_EMBED_PROVIDER
+                    logger.warning(
+                        "Using builtin embedding fallback after slow local provider (%s/%s, %dms>%dms)",
+                        route.provider,
+                        route.model_id,
+                        latency_ms,
+                        timeout_value,
+                    )
+                    break
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_EMBED_TIMEOUT,
+                    detail=f"embedding provider slow: {latency_ms}ms>{timeout_value}ms",
+                    latency_ms=latency_ms,
+                    model_id=str(model_id or route.model_id),
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    expected_dim=route.dim,
+                    vector=[],
+                    text=normalized,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
+            break
 
         normalized_vector = _normalize_vector(vector)
         actual_dim = len(normalized_vector)
@@ -301,6 +293,8 @@ class EmbeddingServiceContract:
             "embedding_vector": normalized_vector,
             "embedding_model_id": str(model_id or route.model_id),
             "provider": route.provider,
+            "effective_provider": effective_provider,
+            "configured_model_id": configured_model_id,
             "route_id": route.route_id,
             "node_id": self.node_id,
             "node_selector": route.node_selector,
@@ -311,22 +305,31 @@ class EmbeddingServiceContract:
             "stage": S_RET_EMBEDDING,
             "reason_code": None,
             "degraded": False,
+            "warm_retry_used": warm_retry_used,
+            "fallback_used": fallback_used,
+            "fallback_reason_code": fallback_reason_code,
+            "fallback_detail": fallback_detail,
         }
+        success_detail = "embedding generated via builtin hash fallback" if fallback_used else "embedding generated"
         self._log_event(
             request_id=request_id,
             intent_id=intent_id,
             status=STATUS_OK,
             reason_code=None,
-            detail="embedding generated",
+            detail=success_detail,
             payload={
                 "text_length": len(normalized),
                 "embedding_dim": actual_dim,
                 "expected_dim": int(route.dim),
                 "provider": route.provider,
+                "effective_provider": effective_provider,
                 "route_id": route.route_id,
                 "node_selector": route.node_selector,
                 "latency_ms": latency_ms,
                 "output_status": STATUS_OK,
+                "warm_retry_used": warm_retry_used,
+                "fallback_used": fallback_used,
+                "fallback_reason_code": fallback_reason_code,
             },
             ts_ms=now_value,
         )
@@ -335,7 +338,7 @@ class EmbeddingServiceContract:
             status=STATUS_OK,
             reason_code=None,
             stage=S_RET_EMBEDDING,
-            detail="embedding generated",
+            detail=success_detail,
             output=output,
         )
 
@@ -540,7 +543,7 @@ def build_embedding_provider_registry(
         merged.update(dict(local_overrides))
 
     registry: dict[str, EmbeddingProvider] = {
-        DEFAULT_EMBED_PROVIDER: lambda text, _route=None: embed_text(text),
+        DEFAULT_EMBED_PROVIDER: lambda text, route=None: embed_text(text, dim=_resolve_route_embedding_dim(route)),
     }
     embed_device = str(merged.get("RETR_EMBED_DEVICE") or "cpu").strip() or "cpu"
     registry["sentence_transformers"] = _build_sentence_transformers_embedding_provider(device=embed_device)
@@ -783,6 +786,31 @@ def _provider_accepts_route(provider: EmbeddingProvider) -> bool:
         if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
             positional += 1
     return positional >= 2
+
+
+def _resolve_route_embedding_dim(route: EmbeddingRouteConfig | None) -> int:
+    if route is None:
+        return DEFAULT_EMBED_DIM
+    try:
+        dim = int(route.dim)
+    except (TypeError, ValueError):
+        return DEFAULT_EMBED_DIM
+    return dim if dim > 0 else DEFAULT_EMBED_DIM
+
+
+def _should_retry_embedding_cold_start(provider_name: str, attempt: int) -> bool:
+    return int(attempt) < 2 and str(provider_name or "").strip().lower() in _COLD_START_RETRYABLE_EMBED_PROVIDERS
+
+
+def _should_fallback_embedding_timeout(provider_name: str) -> bool:
+    return str(provider_name or "").strip().lower() in _TIMEOUT_FALLBACK_EMBED_PROVIDERS
+
+
+def _build_timeout_fallback_embedding(
+    text: str,
+    route: EmbeddingRouteConfig,
+) -> tuple[list[float], str]:
+    return embed_text(text, dim=_resolve_route_embedding_dim(route))
 
 
 def _build_openai_embedding_provider(*, api_key: str) -> EmbeddingProvider:

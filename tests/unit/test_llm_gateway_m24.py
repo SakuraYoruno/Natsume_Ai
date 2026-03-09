@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,6 +34,7 @@ def _make_gateway(
     provider=None,
     fallback_providers=None,
     ledger=None,
+    timeout_ms: int = 30_000,
 ) -> LlmGatewayContract:
     return LlmGatewayContract(
         available=available,
@@ -41,6 +43,7 @@ def _make_gateway(
         provider=provider,
         fallback_providers=fallback_providers or [],
         ledger=ledger,
+        timeout_ms=timeout_ms,
     )
 
 
@@ -212,6 +215,33 @@ class TestLLMGatewayAirlockEgress:
         # 出站净化报告应存在
         airlock = result.output.get("airlock", {})
         assert airlock.get("egress_report") is not None or result.success is False
+
+    def test_t_llm_gw_10b_provider_hard_timeout_degrades_quickly(self):
+        def _slow_provider(_payload):
+            time.sleep(0.25)
+            return "{}"
+
+        gw = _make_gateway(
+            available=True,
+            api_key="sk-valid",
+            provider_name=PROVIDER_MOCK,
+            provider=_slow_provider,
+            timeout_ms=50,
+        )
+
+        started = time.perf_counter()
+        result = gw.generate(
+            request_id="req_010b",
+            model_profile_id="gpt-4o",
+            prompt_payload={"messages": [{"role": "user", "content": "test"}]},
+        )
+        elapsed_ms = int(round((time.perf_counter() - started) * 1000))
+
+        assert result.success is False
+        assert result.reason_code == SERVICE_UNAVAILABLE_DEPENDENCY
+        assert result.output["status"] == "DEGRADED"
+        assert result.output["latency_ms"] >= 40
+        assert elapsed_ms < 200
 
 
 # ---------------------------------------------------------------------------

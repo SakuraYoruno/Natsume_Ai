@@ -1,12 +1,13 @@
 """FastAPI web application entry for Natsume AI host brain.
 
-TASK-0065: HTTP 服务框架落地 — FastAPI 路由绑定 + 健康检查 + 链路入口。
-提供 POST /v1/chat（编排入口）、GET /health、GET /ready、GET /metrics，
-所有执行仍经 Governor/Token/Skills，不引入旁路。
+TASK-0065: HTTP 鏈嶅姟妗嗘灦钀藉湴 鈥?FastAPI 璺敱缁戝畾 + 鍋ュ悍妫€鏌?+ 閾捐矾鍏ュ彛銆?
+鎻愪緵 POST /v1/chat锛堢紪鎺掑叆鍙ｏ級銆丟ET /health銆丟ET /ready銆丟ET /metrics锛?
+鎵€鏈夋墽琛屼粛缁?Governor/Token/Skills锛屼笉寮曞叆鏃佽矾銆?
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import logging
@@ -38,11 +39,24 @@ from host_brain.core.errors import (
     RPC_EVENT_SCHEMA_INVALID,
     STARTUP_MCP_DEGRADED,
 )
+from host_brain.core.context_pack import (
+    build_emotion_pulse_slot,
+    build_world_canon_slot,
+    validate_context_pack,
+)
 from host_brain.core.ids import new_request_id
+from host_brain.core.metabolism import (
+    build_governance_snapshot,
+    build_hard_snapshot,
+    normalize_hard_state,
+)
+from host_brain.core.qa import check_wcanon_slot_violation
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.schemas import DECISION_APPROVE
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
+from host_brain.memory.canon_style_store import StyleCanonStore
+from host_brain.memory.episodic import EpisodicStore
 from host_brain.obs.metrics import MetricsCollector
 from host_brain.obs.routes import build_obs_metrics_response
 from host_brain.observability.cross_timeline import build_cross_timeline
@@ -63,6 +77,8 @@ from host_brain.governor.tokens import TokenService
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.registry import SkillRegistry
 from host_brain.bond.bond_stage_engine import BondStageEngine
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
@@ -71,106 +87,114 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
 )
+from host_brain.integrations.llm_helpers import (
+    adjust_gen_params_for_emotion,
+    stream_llm_chunks,
+)
+from fastapi.responses import StreamingResponse
 
 
-# HTTP契约模型定义
+# HTTP contract models
 class HealthResponse(BaseModel):
-    status: str = Field(..., description="服务状态: OK/DEGRADED/FAILED")
-    version: str = Field(..., description="应用版本")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
-    details: Dict[str, Any] = Field(default_factory=dict, description="详细状态信息")
+    status: str = Field(..., description="Service status")
+    version: str = Field(..., description="Application version")
+    timestamp: int = Field(..., description="Response timestamp in ms")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Health details")
 
 
 class ReadinessResponse(BaseModel):
-    ready: bool = Field(..., description="环境就绪状态")
-    status: str = Field(..., description="就绪状态: READY/DEGRADED/FAILED")
-    reason_code: Optional[str] = Field(None, description="状态原因代码")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
-    summary: Dict[str, Any] = Field(default_factory=dict, description="环境摘要信息")
+    ready: bool = Field(..., description="Whether the service is ready")
+    status: str = Field(..., description="Readiness status")
+    reason_code: Optional[str] = Field(None, description="Readiness reason code")
+    timestamp: int = Field(..., description="Response timestamp in ms")
+    summary: Dict[str, Any] = Field(default_factory=dict, description="Readiness summary")
 
 
 class ObservabilityRequest(BaseModel):
-    request_id: str = Field(..., description="要查询的请求ID")
+    request_id: str = Field(..., description="Request id to inspect")
 
 
 class ObservabilityResponse(BaseModel):
-    request_id: str = Field(..., description="请求ID")
-    trace_status: str = Field(..., description="追踪状态")
-    timeline_total: int = Field(..., description="时间线事件总数")
-    sources: Dict[str, int] = Field(..., description="事件源统计")
-    timeline: List[Dict[str, Any]] = Field(..., description="时间线事件列表")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
+    request_id: str = Field(..., description="Request id")
+    trace_status: str = Field(..., description="Trace status")
+    timeline_total: int = Field(..., description="Timeline event count")
+    sources: Dict[str, int] = Field(..., description="Timeline sources")
+    timeline: List[Dict[str, Any]] = Field(..., description="Timeline rows")
+    timestamp: int = Field(..., description="Response timestamp in ms")
 
 
 class ChatRequest(BaseModel):
-    """POST /v1/chat 请求体"""
-    message: str = Field(..., description="用户输入文本")
-    session_id: Optional[str] = Field(None, description="会话ID（可选，缺省自动生成）")
-    thread_id: Optional[str] = Field(None, description="线程ID（微信thread_key等）")
-    intent_draft: Optional[Dict[str, Any]] = Field(None, description="预构造的intent草案（可选）")
-    # M33-C：场景类型（CHAT/EXEC_INTENT/WORK_TRANSLATE/WORK_CODE），默认 CHAT
-    scene_type: Optional[str] = Field(None, description="场景类型（CHAT/EXEC_INTENT/WORK_TRANSLATE/WORK_CODE），默认CHAT")
+    """POST /v1/chat request body."""
+    message: str = Field(..., description="User message")
+    session_id: Optional[str] = Field(None, description="Optional session id")
+    thread_id: Optional[str] = Field(None, description="Optional thread id")
+    intent_draft: Optional[Dict[str, Any]] = Field(None, description="Optional intent draft")
+    scene_type: Optional[str] = Field(None, description="Optional scene type override")
+    mood_state: Optional[str] = Field(None, description="Optional mood state")
+    emotion_tag: Optional[str] = Field(None, description="Optional emotion tag")
+    emotion_context: Optional[Dict[str, Any]] = Field(None, description="Optional emotion context")
+    emotion_range_hint: Optional[str] = Field(None, description="Optional emotion range hint")
 
 
 class ChatResponse(BaseModel):
-    """POST /v1/chat 响应体 — 成功/拒绝/降级都返回此结构"""
-    request_id: str = Field(..., description="请求唯一ID")
-    narrative: Optional[str] = Field(None, description="叙事输出（LLM或模板）")
-    intent_draft: Optional[Dict[str, Any]] = Field(None, description="Intent草案（可为空）")
-    decision: Optional[str] = Field(None, description="Governor裁决: APPROVE/REJECT/None")
-    reason_code: Optional[str] = Field(None, description="拒绝/降级原因代码")
-    approval_token_ref: Optional[str] = Field(None, description="审批票据引用（仅APPROVE时）")
-    approval_tier: Optional[str] = Field(None, description="M44：分层治理审批通道（cache/rule/full/airlock），None 表示未知")
-    quality: Dict[str, Any] = Field(default_factory=dict, description="质量标记: stage/reason_code")
-    audit_refs: Dict[str, Any] = Field(default_factory=dict, description="审计引用: intent_id/governor_log等")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
+    """POST /v1/chat response body."""
+    request_id: str = Field(..., description="Request id")
+    narrative: Optional[str] = Field(None, description="Narrative response")
+    intent_draft: Optional[Dict[str, Any]] = Field(None, description="Intent draft")
+    decision: Optional[str] = Field(None, description="Governor decision")
+    reason_code: Optional[str] = Field(None, description="Reason code")
+    approval_token_ref: Optional[str] = Field(None, description="Approval token reference")
+    approval_tier: Optional[str] = Field(None, description="Approval tier")
+    quality: Dict[str, Any] = Field(default_factory=dict, description="Quality summary")
+    audit_refs: Dict[str, Any] = Field(default_factory=dict, description="Audit references")
+    timestamp: int = Field(..., description="Response timestamp in ms")
 
 
 class MetricsResponse(BaseModel):
-    """GET /metrics 响应体 — 运行时指标摘要"""
-    uptime_seconds: int = Field(..., description="服务运行时长(秒)")
-    total_requests: int = Field(..., description="总请求数")
-    total_chat_requests: int = Field(..., description="chat请求数")
-    total_rejections: int = Field(..., description="Governor拒绝数")
-    total_errors: int = Field(..., description="错误数")
-    reason_code_distribution: Dict[str, int] = Field(default_factory=dict, description="拒绝码分布")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
+    """GET /metrics response body."""
+    uptime_seconds: int = Field(..., description="Service uptime in seconds")
+    total_requests: int = Field(..., description="Total request count")
+    total_chat_requests: int = Field(..., description="Total chat request count")
+    total_rejections: int = Field(..., description="Total rejection count")
+    total_errors: int = Field(..., description="Total error count")
+    reason_code_distribution: Dict[str, int] = Field(default_factory=dict, description="Reason code distribution")
+    timestamp: int = Field(..., description="Response timestamp in ms")
 
 
 class EdgeEventsRequest(BaseModel):
-    """POST /v1/edge/events 请求体 — Edge 端事件批量上报"""
-    events: List[Dict[str, Any]] = Field(..., description="Edge 事件列表")
+    """POST /v1/edge/events request body."""
+    events: List[Dict[str, Any]] = Field(..., description="Edge event list")
 
 
 class EdgeEventsResponse(BaseModel):
-    """POST /v1/edge/events 响应体"""
-    success: bool = Field(..., description="是否全部接受")
-    total: int = Field(..., description="收到事件总数")
-    accepted: int = Field(..., description="成功写入数")
-    rejected: int = Field(..., description="拒绝数")
-    reason_code: Optional[str] = Field(None, description="部分失败/全失败原因")
-    detail: Optional[str] = Field(None, description="描述")
-    rejected_indices: List[int] = Field(default_factory=list, description="被拒绝的事件索引")
-    timestamp: int = Field(..., description="响应时间戳(毫秒)")
+    """POST /v1/edge/events response body."""
+    success: bool = Field(..., description="Whether all events were accepted")
+    total: int = Field(..., description="Total event count")
+    accepted: int = Field(..., description="Accepted event count")
+    rejected: int = Field(..., description="Rejected event count")
+    reason_code: Optional[str] = Field(None, description="Failure reason code")
+    detail: Optional[str] = Field(None, description="Failure detail")
+    rejected_indices: List[int] = Field(default_factory=list, description="Rejected event indices")
+    timestamp: int = Field(..., description="Response timestamp in ms")
 
 
 class ErrorResponse(BaseModel):
-    error: str = Field(..., description="错误类型")
-    reason_code: str = Field(..., description="错误原因代码")
-    detail: str = Field(..., description="错误详情")
-    request_id: Optional[str] = Field(None, description="关联请求ID")
-    timestamp: int = Field(..., description="错误时间戳(毫秒)")
+    error: str = Field(..., description="Error type")
+    reason_code: str = Field(..., description="Reason code")
+    detail: str = Field(..., description="Error detail")
+    request_id: Optional[str] = Field(None, description="Related request id")
+    timestamp: int = Field(..., description="Error timestamp in ms")
 
 
 # ---------------------------------------------------------------------------
-# 运行时指标收集器（内存，用于 /metrics 端点）
+# 杩愯鏃舵寚鏍囨敹闆嗗櫒锛堝唴瀛橈紝鐢ㄤ簬 /metrics 绔偣锛?
 # ---------------------------------------------------------------------------
 class _RuntimeMetrics:
-    """进程内运行时指标收集（轻量级内存实现）。
+    """杩涚▼鍐呰繍琛屾椂鎸囨爣鏀堕泦锛堣交閲忕骇鍐呭瓨瀹炵幇锛夈€?
 
-    注意：计数器依赖 CPython GIL 保证单进程内线程安全，
-    但多 worker 模式下各 worker 独立计数（指标为 per-worker 视图）。
-    如需全局指标，请改用外部存储（Redis/Prometheus）。
+    娉ㄦ剰锛氳鏁板櫒渚濊禆 CPython GIL 淇濊瘉鍗曡繘绋嬪唴绾跨▼瀹夊叏锛?
+    浣嗗 worker 妯″紡涓嬪悇 worker 鐙珛璁℃暟锛堟寚鏍囦负 per-worker 瑙嗗浘锛夈€?
+    濡傞渶鍏ㄥ眬鎸囨爣锛岃鏀圭敤澶栭儴瀛樺偍锛圧edis/Prometheus锛夈€?
     """
 
     def __init__(self) -> None:
@@ -203,14 +227,14 @@ _metrics = _RuntimeMetrics()
 
 
 # ---------------------------------------------------------------------------
-# 生命周期钩子
+# 鐢熷懡鍛ㄦ湡閽╁瓙
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup / shutdown 生命周期钩子。
+    """Startup / shutdown 鐢熷懡鍛ㄦ湡閽╁瓙銆?
 
-    Startup: 初始化 Ledger、执行启动探针、写入审计。
-    Shutdown: 刷新审计缓冲。
+    Startup: 鍒濆鍖?Ledger銆佹墽琛屽惎鍔ㄦ帰閽堛€佸啓鍏ュ璁°€?
+    Shutdown: 鍒锋柊瀹¤缂撳啿銆?
     """
     _logger.info("Natsume AI Host Brain starting up ...")
     ledger = get_ledger()
@@ -227,14 +251,14 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         _logger.warning("Startup probe degraded", extra={"error": str(exc)})
 
-    yield  # 服务运行阶段
+    yield  # 鏈嶅姟杩愯闃舵
 
     _logger.info("Natsume AI Host Brain shutting down ...")
-    # 刷新审计缓冲（当前 SQLite 同步写入，此处预留扩展点）
+    # 鍒锋柊瀹¤缂撳啿锛堝綋鍓?SQLite 鍚屾鍐欏叆锛屾澶勯鐣欐墿灞曠偣锛?
 
 
 # ---------------------------------------------------------------------------
-# FastAPI 应用实例
+# FastAPI 搴旂敤瀹炰緥
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Natsume AI Host Brain",
@@ -246,47 +270,52 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# 注册 Web UI API 路由（TASK-0066: 链路可视化面板后端）
+# 娉ㄥ唽 Web UI API 璺敱锛圱ASK-0066: 閾捐矾鍙鍖栭潰鏉垮悗绔級
 # ---------------------------------------------------------------------------
 app.include_router(web_ui_router, prefix="/api")
 
 # ---------------------------------------------------------------------------
-# 注册 Canon 治理 API 路由（M10-A TASK-0118: Canon 提案审核 REST API）
+# 娉ㄥ唽 Canon 娌荤悊 API 璺敱锛圡10-A TASK-0118: Canon 鎻愭瀹℃牳 REST API锛?
 # ---------------------------------------------------------------------------
 app.include_router(canon_router)
 
 # ---------------------------------------------------------------------------
-# 注册 Scheduler REST API 路由（M11-A TASK-0149: 定时调度器任务管理）
+# 娉ㄥ唽 Scheduler REST API 璺敱锛圡11-A TASK-0149: 瀹氭椂璋冨害鍣ㄤ换鍔＄鐞嗭級
 # ---------------------------------------------------------------------------
 app.include_router(scheduler_router)
 
 # ---------------------------------------------------------------------------
-# 注册 ToolBroker REST API 路由（M12-A TASK-0156: 工具元数据包 + 执行入口）
+# 娉ㄥ唽 ToolBroker REST API 璺敱锛圡12-A TASK-0156: 宸ュ叿鍏冩暟鎹寘 + 鎵ц鍏ュ彛锛?
 # ---------------------------------------------------------------------------
 app.include_router(tool_router)
 
 # ---------------------------------------------------------------------------
-# 注册 Bond 阶段 REST API 路由（M13-A: Bond 阶段积分 + 自动晋级）
+# 娉ㄥ唽 Bond 闃舵 REST API 璺敱锛圡13-A: Bond 闃舵绉垎 + 鑷姩鏅嬬骇锛?
 # ---------------------------------------------------------------------------
 app.include_router(bond_router)
 
 # ---------------------------------------------------------------------------
-# 注册 Observability REST API 路由（M18: 监控面板后端数据接口）
+# 娉ㄥ唽 Observability REST API 璺敱锛圡18: 鐩戞帶闈㈡澘鍚庣鏁版嵁鎺ュ彛锛?
 # ---------------------------------------------------------------------------
 app.include_router(obs_router)
 
 # ---------------------------------------------------------------------------
-# 挂载静态文件目录（TASK-0066: 前端面板页面）
+# 鎸傝浇闈欐€佹枃浠剁洰褰曪紙TASK-0066: 鍓嶇闈㈡澘椤甸潰锛?
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+    # M17 monitor SPA build outputs absolute asset URLs under "/monitor/*".
+    # Keep an alias mount so /panel and /static/monitor/index.html both work.
+    _monitor_dir = os.path.join(_static_dir, "monitor")
+    if os.path.isdir(_monitor_dir):
+        app.mount("/monitor", StaticFiles(directory=_monitor_dir), name="monitor")
 
 # ---------------------------------------------------------------------------
-# CORS 中间件（可配置）
+# CORS 涓棿浠讹紙鍙厤缃級
 # ---------------------------------------------------------------------------
-# CORS 默认关闭：生产环境必须显式设置 Natsume_CORS_ORIGINS
-# 例如 Natsume_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
+# CORS 榛樿鍏抽棴锛氱敓浜х幆澧冨繀椤绘樉寮忚缃?Natsume_CORS_ORIGINS
+# 渚嬪 Natsume_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:8000"
 _cors_origins_raw = os.environ.get(
     "Natsume_CORS_ORIGINS",
     "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
@@ -302,23 +331,26 @@ if _cors_origins_raw:
     )
 
 # ---------------------------------------------------------------------------
-# 全局依赖
+# 鍏ㄥ眬渚濊禆
 # ---------------------------------------------------------------------------
 _ledger: Optional[SQLiteLedger] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
-_skill_registry: Optional[SkillRegistry] = None  # M44：内置 Skill 注册表单例
-_policy_cache: Optional[GovernorPolicyCache] = None  # M44：分层治理 Policy Cache 单例
+_skill_registry: Optional[SkillRegistry] = None  # M44锛氬唴缃?Skill 娉ㄥ唽琛ㄥ崟渚?
+_policy_cache: Optional[GovernorPolicyCache] = None  # M44锛氬垎灞傛不鐞?Policy Cache 鍗曚緥
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
+_episodic_store: Optional[EpisodicStore] = None
 _retrieval_pipeline: Optional[RetrievalPipelineContract] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
 _logger = logging.getLogger("Natsume.fastapi")
 
-# M33-F：CHAT_GRAPH_NODE_ORDER 保留为"全节点注册表"，用于 model_node_overrides 初始化。
-# 不再用于 node_bindings/edges 的构建——改用 _resolve_scene_node_sequence(scene_type)。
+# M33-F锛欳HAT_GRAPH_NODE_ORDER 淇濈暀涓?鍏ㄨ妭鐐规敞鍐岃〃"锛岀敤浜?model_node_overrides 鍒濆鍖栥€?
+# 涓嶅啀鐢ㄤ簬 node_bindings/edges 鐨勬瀯寤衡€斺€旀敼鐢?_resolve_scene_node_sequence(scene_type)銆?
+CHAT_DIRECT_NODE_ID = "chat_direct_ja"
 CHAT_GRAPH_NODE_ORDER: list[str] = [
+    CHAT_DIRECT_NODE_ID,
     "core_reasoner_primary",
     "core_reasoner_secondary",
     "planner_constraints",
@@ -332,60 +364,60 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
 CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
 
-# M33-A：场景枚举常量（ModelPlane.md §4.1）
+# M33-A锛氬満鏅灇涓惧父閲忥紙ModelPlane.md 搂4.1锛?
 SCENE_CHAT = "CHAT"
 SCENE_EXEC_INTENT = "EXEC_INTENT"
 SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
 SCENE_WORK_CODE = "WORK_CODE"
-# M34-A：新增 VISION_UI 场景常量
+# M34-A锛氭柊澧?VISION_UI 鍦烘櫙甯搁噺
 SCENE_VISION_UI = "VISION_UI"
 
-# M34-A：pre_intent_classifier 关键词规则表（优先级从高到低）
-# 规则：纯规则驱动，无 LLM 调用，延迟 < 1ms
-# 优先级：VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT（默认）
+# M34-A锛歱re_intent_classifier 鍏抽敭璇嶈鍒欒〃锛堜紭鍏堢骇浠庨珮鍒颁綆锛?
+# 瑙勫垯锛氱函瑙勫垯椹卞姩锛屾棤 LLM 璋冪敤锛屽欢杩?< 1ms
+# 浼樺厛绾э細VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT锛堥粯璁わ級
 _PIC_VISION_UI_KEYWORDS = frozenset([
-    "截图", "屏幕", "界面", "ui", "screenshot", "screen", "画面", "看一下屏幕",
-    "clawdbot", "窗口", "桌面截图",
+    "screenshot", "screen", "ui", "window", "interface", "capture",
+    "screen shot", "desktop", "look at the screen",
+    "截图", "屏幕", "界面", "画面", "看一下屏幕", "看看这个界面",
 ])
 _PIC_WORK_CODE_KEYWORDS = frozenset([
-    "代码", "code", "编程", "写个函数", "写函数", "写代码", "程序", "脚本",
+    "code", "coding", "programming", "function", "script", "program",
     "python", "javascript", "typescript", "java", "golang", "rust", "c++",
-    "debug", "调试", "bug", "函数", "class", "类", "算法", "implement",
-    "实现", "开发", "编写", "coding",
+    "debug", "bug", "class", "algorithm", "implement", "develop",
+    "代码", "编程", "写代码", "写个函数", "函数", "脚本", "调试", "类", "实现", "开发",
 ])
 _PIC_WORK_TRANSLATE_KEYWORDS = frozenset([
-    "翻译", "translate", "translation", "訳して", "翻訳", "译成", "译为",
-    "翻成", "英文翻译", "中文翻译", "日文翻译", "日语翻译", "英语翻译",
-    "把这段", "帮我翻", "翻一下", "翻译成",
+    "translate", "translation", "translate to", "translate into",
+    "翻译", "翻成", "译成", "译为", "翻訳", "訳して",
 ])
 _PIC_EXEC_INTENT_KEYWORDS = frozenset([
-    "执行", "运行", "帮我做", "设置", "配置", "启动", "关闭", "打开",
     "execute", "run", "setup", "configure", "start", "stop", "install",
-    "安装", "卸载", "删除", "创建", "新建", "修改", "更新", "部署",
-    "deploy", "build", "编译", "发送", "提交", "保存",
+    "执行", "运行", "设置", "配置", "启动", "关闭", "打开",
+    "帮我做", "部署", "创建", "新建", "修改", "更新", "安装",
+    "deploy", "build", "submit", "save",
 ])
 
 
 def pre_intent_classifier(user_input: str) -> str:
-    """轻量规则预分类器（M34-A，ModelPlane.md §4.0）。
+    """杞婚噺瑙勫垯棰勫垎绫诲櫒锛圡34-A锛孧odelPlane.md 搂4.0锛夈€?
 
-    在 LLM 调用前，基于关键词/规则快速判断 scene_type_hint。
-    纯规则驱动，无 LLM 调用，延迟 < 1ms。
+    鍦?LLM 璋冪敤鍓嶏紝鍩轰簬鍏抽敭璇?瑙勫垯蹇€熷垽鏂?scene_type_hint銆?
+    绾鍒欓┍鍔紝鏃?LLM 璋冪敤锛屽欢杩?< 1ms銆?
 
-    优先级（从高到低）：
-    1. VISION_UI：截图/界面/屏幕等
-    2. WORK_CODE：代码/编程/函数等
-    3. WORK_TRANSLATE：翻译/translate/訳して等
-    4. EXEC_INTENT：执行/运行/设置/配置等
-    5. CHAT（默认）：其余所有输入
+    浼樺厛绾э紙浠庨珮鍒颁綆锛夛細
+    1. VISION_UI锛氭埅鍥?鐣岄潰/灞忓箷绛?
+    2. WORK_CODE锛氫唬鐮?缂栫▼/鍑芥暟绛?
+    3. WORK_TRANSLATE锛氱炕璇?translate/瑷炽仐銇︾瓑
+    4. EXEC_INTENT锛氭墽琛?杩愯/璁剧疆/閰嶇疆绛?
+    5. CHAT锛堥粯璁わ級锛氬叾浣欐墍鏈夎緭鍏?
 
-    注意：
-    - 此函数只影响节点链路选择，不影响 Governor 裁决权
-    - 显式传入的 scene_type 优先级高于预分类结果
-    - 空字符串或无法识别的输入默认返回 CHAT
+    娉ㄦ剰锛?
+    - 姝ゅ嚱鏁板彧褰卞搷鑺傜偣閾捐矾閫夋嫨锛屼笉褰卞搷 Governor 瑁佸喅鏉?
+    - 鏄惧紡浼犲叆鐨?scene_type 浼樺厛绾ч珮浜庨鍒嗙被缁撴灉
+    - 绌哄瓧绗︿覆鎴栨棤娉曡瘑鍒殑杈撳叆榛樿杩斿洖 CHAT
 
     Args:
-        user_input: 用户原始输入文本
+        user_input: 鐢ㄦ埛鍘熷杈撳叆鏂囨湰
 
     Returns:
         scene_type_hint: CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI
@@ -394,70 +426,69 @@ def pre_intent_classifier(user_input: str) -> str:
     if not text:
         return SCENE_CHAT
 
-    # 优先级 1：VISION_UI
+    # 浼樺厛绾?1锛歏ISION_UI
     for kw in _PIC_VISION_UI_KEYWORDS:
         if kw in text:
             return SCENE_VISION_UI
 
-    # 优先级 2：WORK_CODE
+    # 浼樺厛绾?2锛歐ORK_CODE
     for kw in _PIC_WORK_CODE_KEYWORDS:
         if kw in text:
             return SCENE_WORK_CODE
 
-    # 优先级 3：WORK_TRANSLATE
+    # 浼樺厛绾?3锛歐ORK_TRANSLATE
     for kw in _PIC_WORK_TRANSLATE_KEYWORDS:
         if kw in text:
             return SCENE_WORK_TRANSLATE
 
-    # 优先级 4：EXEC_INTENT
+    # 浼樺厛绾?4锛欵XEC_INTENT
     for kw in _PIC_EXEC_INTENT_KEYWORDS:
         if kw in text:
             return SCENE_EXEC_INTENT
 
-    # 默认：CHAT
+    # 榛樿锛欳HAT
     return SCENE_CHAT
 
 
 def _resolve_scene_node_sequence(scene_type: str) -> list[str]:
-    """按场景返回应执行的节点序列（M33-A，ModelPlane.md §4.1/4.2）。
+    """鎸夊満鏅繑鍥炲簲鎵ц鐨勮妭鐐瑰簭鍒楋紙M33-A锛孧odelPlane.md 搂4.1/4.2锛夈€?
 
-    规则：
-    - core_reasoner_secondary 是 primary 的 fallback-only，不在正常链路中。
-    - safety_verifier / consistency_verifier 仅在 EXEC_INTENT 场景按需触发。
-    - planner_constraints / tool_planner 仅在 EXEC_INTENT 场景触发。
-    - workbench_translate 仅在 WORK_TRANSLATE 场景触发。
-    - workbench_code_assist 仅在 WORK_CODE 场景触发。
-    - renderer_ja_c_style 每次必跑（S2 段）。
-    - 未知场景退化为 CHAT 序列。
+    瑙勫垯锛?
+    - core_reasoner_secondary 鏄?primary 鐨?fallback-only锛屼笉鍦ㄦ甯搁摼璺腑銆?
+    - safety_verifier / consistency_verifier 浠呭湪 EXEC_INTENT 鍦烘櫙鎸夐渶瑙﹀彂銆?
+    - planner_constraints / tool_planner 浠呭湪 EXEC_INTENT 鍦烘櫙瑙﹀彂銆?
+    - workbench_translate 浠呭湪 WORK_TRANSLATE 鍦烘櫙瑙﹀彂銆?
+    - workbench_code_assist 浠呭湪 WORK_CODE 鍦烘櫙瑙﹀彂銆?
+    - renderer_ja_c_style 姣忔蹇呰窇锛圫2 娈碉級銆?
+    - 鏈煡鍦烘櫙閫€鍖栦负 CHAT 搴忓垪銆?
     """
     scene = str(scene_type or SCENE_CHAT).strip().upper()
     if scene == SCENE_EXEC_INTENT:
-        # S1: primary → planner → tool_planner → safety_verifier → S2: renderer
         return [
             "core_reasoner_primary",
             "planner_constraints",
             "tool_planner",
             "safety_verifier",
+            "consistency_verifier",
             "renderer_ja_c_style",
         ]
     if scene == SCENE_WORK_TRANSLATE:
-        # S1: primary → workbench_translate → S2: renderer
         return [
             "core_reasoner_primary",
             "workbench_translate",
+            "consistency_verifier",
             "renderer_ja_c_style",
         ]
     if scene == SCENE_WORK_CODE:
-        # S1: primary → workbench_code_assist → S2: renderer
         return [
             "core_reasoner_primary",
             "workbench_code_assist",
+            "consistency_verifier",
             "renderer_ja_c_style",
         ]
-    # CHAT（默认）：S1: primary → S2: renderer（最小链路）
+    # CHAT fast path: single-node direct reply
     return [
-        "core_reasoner_primary",
-        "renderer_ja_c_style",
+        CHAT_DIRECT_NODE_ID,
     ]
 
 
@@ -482,14 +513,36 @@ def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
     return f"{text[: max(0, limit - 3)]}..."
 
 
-def _contains_cjk_or_kana(text: str) -> bool:
+def _contains_kana(text: str) -> bool:
+    for ch in str(text or ""):
+        cp = ord(ch)
+        if 0x3040 <= cp <= 0x30FF:  # Hiragana/Katakana
+            return True
+    return False
+
+
+def _contains_cjk_ideograph(text: str) -> bool:
     for ch in str(text or ""):
         cp = ord(ch)
         if 0x4E00 <= cp <= 0x9FFF:  # CJK unified ideographs
             return True
-        if 0x3040 <= cp <= 0x30FF:  # Hiragana/Katakana
-            return True
     return False
+
+
+def _contains_cjk_or_kana(text: str) -> bool:
+    return _contains_cjk_ideograph(text) or _contains_kana(text)
+
+
+def _infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
+    """ModelPlane 搂0.4: 浜屾寮忚緭鍑哄己鍒舵棩鏂囨覆鏌撱€?
+
+    renderer_ja_c_style 鍥哄畾杈撳嚭鏃ヨ锛坮endered_ja锛夛紝
+    浠呭湪 HOST_RENDER_TARGET_LANG 鏄惧紡瑕嗙洊鏃跺厑璁稿垏鎹€?
+    """
+    override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
+    if override in {"zh", "ja"}:
+        return override
+    return "ja"
 
 
 def _repair_utf8_latin1_mojibake(text: str) -> str:
@@ -577,8 +630,17 @@ def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str
         evidence_lines.append(f"- [{evidence_ref}] {snippet}")
     evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
 
-    core_narrative = _extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
     core_payload = _extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_narrative = _extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_meta = core_payload.get("meta")
+    primary_degraded = isinstance(core_meta, dict) and core_meta.get("degraded")
+    if primary_degraded:
+        secondary_narrative = _extract_node_narrative_text(runtime_payload, node_id="core_reasoner_secondary")
+        if secondary_narrative:
+            core_narrative = secondary_narrative
+            secondary_payload = _extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_secondary")
+            if isinstance(secondary_payload.get("intent_draft"), dict) and secondary_payload["intent_draft"]:
+                core_payload = secondary_payload
     core_intent_draft = core_payload.get("intent_draft")
     if not isinstance(core_intent_draft, dict):
         core_intent_draft = {}
@@ -586,15 +648,34 @@ def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str
     planner_text = _extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
     verifier_text = _extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
+    render_target_lang = _infer_render_target_lang(
+        user_message=user_message,
+        core_narrative=core_narrative,
+    )
+
+    renderer_role_instruction = (
+        "Role: renderer_ja_c_style (final Japanese renderer for 澶忕洰钘?.\n"
+        "You ARE 澶忕洰钘? Render CORE_NARRATIVE_ZH into Japanese in her voice.\n"
+        "Force output narrative.text in Japanese (short, restrained C-style tone).\n"
+        "Use 銇犮仦/銇犮仾/銇?銈?銇?sentence-enders sparingly (max one per sentence).\n"
+        "Do not add facts. Do not change intent_draft meaning.\n"
+        "NEVER say you are an AI, assistant, system, or program.\n"
+        "Use CORE_NARRATIVE_ZH as source and copy CORE_INTENT_DRAFT semantics."
+    )
+
     node_role_instructions: dict[str, str] = {
         "core_reasoner_primary": (
             "Role: core_reasoner_primary.\n"
+            "You ARE 澶忕洰钘?(Natsume Ai). Think and draft as her.\n"
             "Output concise Simplified Chinese semantic draft for CHAT.\n"
+            "Use her tone: gentle, restrained, empathetic. Acknowledge emotions first.\n"
+            "NEVER say you are an AI, assistant, system, or program.\n"
             "intent_draft should stay draft-only and must not claim execution."
         ),
         "core_reasoner_secondary": (
             "Role: core_reasoner_secondary backup.\n"
-            "Output a shorter fallback core draft in Simplified Chinese.\n"
+            "You ARE 澶忕洰钘? Output a shorter fallback core draft in Simplified Chinese.\n"
+            "NEVER say you are an AI, assistant, system, or program.\n"
             "Do not conflict with core_reasoner_primary intent scope."
         ),
         "planner_constraints": (
@@ -624,17 +705,65 @@ def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str
             "Role: workbench_code_assist.\n"
             "Provide code-assist draft if relevant; otherwise concise no-op draft."
         ),
-        "renderer_ja_c_style": (
-            "Role: renderer_ja_c_style.\n"
-            "Force output narrative.text in Japanese (short, restrained C-style tone).\n"
-            "Do not add facts. Do not change intent_draft meaning.\n"
-            "Use CORE_NARRATIVE_ZH as source and copy CORE_INTENT_DRAFT semantics."
-        ),
+        "renderer_ja_c_style": renderer_role_instruction,
     }
     role_instruction = node_role_instructions.get(
         node_id,
         "Role: generic node. Keep concise draft output.",
     )
+
+    style_bindings_raw = runtime_payload.get("style_bindings")
+    style_bindings = (
+        dict(style_bindings_raw)
+        if isinstance(style_bindings_raw, Mapping)
+        else {}
+    )
+    node_style_raw = style_bindings.get(node_id)
+    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
+    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
+    style_block = ""
+    if style_instruction:
+        style_block = (
+            "STYLE_CANON_BINDING:\n"
+            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
+            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
+            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
+            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
+            f"- instruction:\n{style_instruction}\n\n"
+        )
+
+    cn_style_boost_block = ""
+    if node_id == CHAT_RENDER_NODE_ID and render_target_lang == "zh":
+        cn_style_boost_block = (
+            "CN_STYLE_BOOST_BINDING:\n"
+            "- style_strength: HIGH_PLUS\n"
+            "- Priority: safety/facts > style canon > generic assistant tone.\n"
+            "- Spoken Chinese only: avoid official-service wording and system bulletin cadence.\n"
+            "- Rhythm: 2-4 short sentences; keep each sentence compact, with natural pause.\n"
+            "- Emotional anchor first: acknowledge feeling before suggestions.\n"
+            "- Use first/second person directly (鎴?浣? to keep intimacy.\n"
+            "- Use one mild particle per sentence at most; do not stack particles.\n"
+            "- Avoid boilerplate templates unless truly degraded.\n\n"
+        )
+
+    emotion_raw = runtime_payload.get("emotion_context")
+    emotion_block = ""
+    if isinstance(emotion_raw, dict) and emotion_raw:
+        mood = str(emotion_raw.get("mood_state") or "").strip()
+        etag = str(emotion_raw.get("emotion_tag") or "").strip()
+        valence = emotion_raw.get("valence")
+        arousal = emotion_raw.get("arousal")
+        parts = []
+        if mood:
+            parts.append(f"mood_state: {mood}")
+        if etag:
+            parts.append(f"emotion_tag: {etag}")
+        if valence is not None:
+            parts.append(f"valence: {valence:.2f}")
+        if arousal is not None:
+            parts.append(f"arousal: {arousal:.2f}")
+        if parts:
+            emotion_block = "EMOTION_CONTEXT:\n" + "\n".join(f"- {p}" for p in parts) + "\n\n"
 
     return (
         "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
@@ -646,7 +775,11 @@ def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str
         "3) Never claim executed/saved/confirmed/completed.\n"
         "4) Keep concise and grounded in provided context.\n"
         f"{role_instruction}\n\n"
+        f"{style_block}"
+        f"{cn_style_boost_block}"
+        f"{emotion_block}"
         f"NODE_ID: {node_id}\n"
+        f"RENDER_TARGET_LANG: {render_target_lang}\n"
         f"USER_MESSAGE:\n{user_message}\n\n"
         f"RETRIEVAL_STATUS: {retrieval_status}\n"
         f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
@@ -772,13 +905,15 @@ def _build_langchain_chat_provider_fn(
     resolved_node_id = str(node_id or "").strip()
     if resolved_node_id:
         system_prompt = (
-            f"You are Natsume model node `{resolved_node_id}`. "
+            f"You are 澶忕洰钘?(Natsume Ai), processing node `{resolved_node_id}`. "
+            "You are NOT an AI or assistant 鈥?you are 澶忕洰钘?herself. "
             "Output exactly one JSON object with keys narrative, intent_draft, meta. "
             "meta.draft_only must be true."
         )
     else:
         system_prompt = (
-            "You are the Natsume host narrative generator. "
+            "You are 澶忕洰钘?(Natsume Ai). "
+            "You are NOT an AI or assistant 鈥?you are 澶忕洰钘?herself. "
             "Output exactly one JSON object with keys narrative, intent_draft, meta. "
             "meta.draft_only must be true."
         )
@@ -814,13 +949,13 @@ def _build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[st
         runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
         if not isinstance(runtime_payload, dict):
             runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
-        user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=120) or "こんにちは"
-        if resolved_node_id == CHAT_RENDER_NODE_ID:
-            text = f"了解しました。{user_message}について、まず下書きを整えます。"
+        user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=120) or "hello"
+        if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
+            text = f"Draft render reply for: {user_message}"
         elif resolved_node_id in {"safety_verifier", "consistency_verifier"}:
             text = "PASS: draft output is within policy boundary."
         else:
-            text = f"收到。关于“{user_message}”，我先给出草案。"
+            text = f"Draft response for: {user_message}"
         return json.dumps(
             {
                 "narrative": {"text": text},
@@ -834,6 +969,220 @@ def _build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[st
             ensure_ascii=False,
             sort_keys=True,
         )
+
+    return _provider
+
+
+def _build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[str, Any]], Any]:
+    resolved_node_id = str(node_id or "").strip()
+
+    def _provider(prompt_payload: dict[str, Any]) -> str:
+        runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
+        if not isinstance(runtime_payload, dict):
+            runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
+        user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=120) or "浣犲ソ"
+        if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
+            render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
+            if render_target_lang not in {"zh", "ja"}:
+                render_target_lang = _infer_render_target_lang(user_message=user_message)
+            if render_target_lang == "zh":
+                text = f"收到，先给你一个中文草稿：{user_message}"
+            else:
+                text = f"了解しました。まず草案を出します: {user_message}"
+        elif resolved_node_id in {"safety_verifier", "consistency_verifier"}:
+            text = "PASS: draft output is within policy boundary."
+        else:
+            text = f"收到，先给你一个草稿：{user_message}"
+        return json.dumps(
+            {
+                "narrative": {"text": text},
+                "intent_draft": {},
+                "meta": {
+                    "draft_only": True,
+                    "source": "host_mock_provider",
+                    "node_id": (resolved_node_id or "chat_model"),
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    return _provider
+
+
+_GEMINI_PRIMARY_RETRY_NODE_ID = "core_reasoner_primary"
+_GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro"})
+_GEMINI_PRIMARY_FALLBACK_MODEL_ID = "gemini-3.1-pro-preview"
+_GEMINI_PRIMARY_RETRYABLE_MARKERS = (
+    "503",
+    "deadline exceeded",
+    "service unavailable",
+    "service_unavailable",
+    "temporarily unavailable",
+    "timed out",
+    "timeout",
+    "unavailable",
+)
+_GEMINI_PRIMARY_NON_RETRYABLE_MARKERS = (
+    "401",
+    "403",
+    "api key",
+    "api_key",
+    "authentication",
+    "billing",
+    "permission",
+    "quota",
+    "resource_exhausted",
+    "unauthorized",
+)
+_GEMINI_PRIMARY_FALLBACK_BLOCKED_MARKERS = (
+    "401",
+    "403",
+    "api key",
+    "api_key",
+    "authentication",
+    "permission",
+    "unauthorized",
+)
+_GEMINI_PRIMARY_FALLBACK_TRIGGER_MARKERS = (
+    "429",
+    "quota",
+    "rate limit",
+    "rate_limit",
+    "resource_exhausted",
+    * _GEMINI_PRIMARY_RETRYABLE_MARKERS,
+)
+
+
+def _should_retry_node_provider_failure(
+    *,
+    provider_name: str,
+    model_id: str,
+    node_id: str,
+    exc: BaseException,
+) -> bool:
+    provider = str(provider_name or "").strip().lower()
+    if provider != PROVIDER_GEMINI:
+        return False
+    if str(node_id or "").strip() != _GEMINI_PRIMARY_RETRY_NODE_ID:
+        return False
+    if str(model_id or "").strip() not in _GEMINI_PRIMARY_RETRY_MODEL_IDS:
+        return False
+    if isinstance(exc, TimeoutError):
+        return True
+    detail = str(exc or "").strip().lower()
+    if not detail:
+        return False
+    if any(marker in detail for marker in _GEMINI_PRIMARY_NON_RETRYABLE_MARKERS):
+        return False
+    return any(marker in detail for marker in _GEMINI_PRIMARY_RETRYABLE_MARKERS)
+
+
+def _resolve_gemini_primary_fallback_model_id(primary_model_id: str) -> str | None:
+    disable_fallback = str(os.environ.get("HOST_GEMINI_PRIMARY_DISABLE_MODEL_FALLBACK") or "").strip().lower()
+    if disable_fallback in {"1", "true", "yes", "on"}:
+        return None
+    fallback_model_id = str(
+        os.environ.get("HOST_GEMINI_PRIMARY_FALLBACK_MODEL_ID") or _GEMINI_PRIMARY_FALLBACK_MODEL_ID
+    ).strip()
+    if not fallback_model_id:
+        return None
+    if fallback_model_id == str(primary_model_id or "").strip():
+        return None
+    return fallback_model_id
+
+
+def _should_try_gemini_primary_model_fallback(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    detail = str(exc or "").strip().lower()
+    if not detail:
+        return False
+    if any(marker in detail for marker in _GEMINI_PRIMARY_FALLBACK_BLOCKED_MARKERS):
+        return False
+    return any(marker in detail for marker in _GEMINI_PRIMARY_FALLBACK_TRIGGER_MARKERS)
+
+
+def _wrap_node_provider_fn_with_retry(
+    *,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    provider_name: str,
+    model_id: str,
+    node_id: str,
+    fallback_provider_fn: Callable[[dict[str, Any]], Any] | None = None,
+    fallback_model_id: str | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    provider = str(provider_name or "").strip().lower()
+    resolved_node_id = str(node_id or "").strip()
+    resolved_model_id = str(model_id or "").strip()
+    if (
+        provider != PROVIDER_GEMINI
+        or resolved_node_id != _GEMINI_PRIMARY_RETRY_NODE_ID
+        or resolved_model_id not in _GEMINI_PRIMARY_RETRY_MODEL_IDS
+    ):
+        return provider_fn
+
+    try:
+        configured_attempts = int(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS") or "2").strip())
+    except ValueError:
+        configured_attempts = 2
+    max_attempts = max(1, min(configured_attempts, 3))
+    if max_attempts <= 1 and not callable(fallback_provider_fn):
+        return provider_fn
+
+    try:
+        configured_delay_ms = float(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS") or "150").strip())
+    except ValueError:
+        configured_delay_ms = 150.0
+    retry_delay_s = max(0.0, min(configured_delay_ms / 1000.0, 2.0))
+
+    def _provider(prompt_payload: dict[str, Any]) -> Any:
+        last_exc: BaseException | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return provider_fn(prompt_payload)
+            except Exception as exc:
+                last_exc = exc
+                should_retry = _should_retry_node_provider_failure(
+                    provider_name=provider,
+                    model_id=resolved_model_id,
+                    node_id=resolved_node_id,
+                    exc=exc,
+                )
+                should_try_fallback = (
+                    callable(fallback_provider_fn)
+                    and _should_try_gemini_primary_model_fallback(exc)
+                )
+                if not should_retry or attempt >= max_attempts:
+                    if should_try_fallback and fallback_provider_fn is not None:
+                        resolved_fallback_model = str(fallback_model_id or "").strip() or _GEMINI_PRIMARY_FALLBACK_MODEL_ID
+                        _logger.warning(
+                            "Downgrading node provider call for %s from %s to %s after failure: %s",
+                            resolved_node_id,
+                            resolved_model_id,
+                            resolved_fallback_model,
+                            exc,
+                        )
+                        try:
+                            return fallback_provider_fn(prompt_payload)
+                        except Exception as fallback_exc:
+                            raise RuntimeError(
+                                f"gemini primary model failed: {exc}; fallback model {resolved_fallback_model} failed: {fallback_exc}"
+                            ) from fallback_exc
+                    raise
+                _logger.warning(
+                    "Retrying node provider call for %s/%s after transient Gemini failure (%d/%d): %s",
+                    resolved_node_id,
+                    resolved_model_id,
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if retry_delay_s > 0:
+                    time.sleep(retry_delay_s)
+        if last_exc is not None:
+            raise last_exc
+        return provider_fn(prompt_payload)
 
     return _provider
 
@@ -868,26 +1217,58 @@ def _build_host_provider_fn_for_node(
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
     if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
-        return _build_langchain_chat_provider_fn(
+        provider_fn = _build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,
             api_key=key_value,
             timeout_ms=timeout_ms,
             node_id=node_id,
         )
+        fallback_provider_fn: Callable[[dict[str, Any]], Any] | None = None
+        fallback_model_id: str | None = None
+        if (
+            provider == PROVIDER_GEMINI
+            and str(node_id or "").strip() == _GEMINI_PRIMARY_RETRY_NODE_ID
+            and str(model_id or "").strip() in _GEMINI_PRIMARY_RETRY_MODEL_IDS
+        ):
+            fallback_model_id = _resolve_gemini_primary_fallback_model_id(str(model_id or ""))
+            if fallback_model_id:
+                fallback_provider_fn = _build_langchain_chat_provider_fn(
+                    provider_name=provider,
+                    model_id=fallback_model_id,
+                    api_key=key_value,
+                    timeout_ms=timeout_ms,
+                    node_id=node_id,
+                )
+        return _wrap_node_provider_fn_with_retry(
+            provider_fn=provider_fn,
+            provider_name=provider,
+            model_id=model_id,
+            node_id=node_id,
+            fallback_provider_fn=fallback_provider_fn,
+            fallback_model_id=fallback_model_id,
+        )
     return _build_host_mock_provider_for_node(node_id)
 def get_ledger() -> SQLiteLedger:
-    """获取SQLite账本实例（延迟初始化，支持跨线程访问）。
+    """鑾峰彇SQLite璐︽湰瀹炰緥锛堝欢杩熷垵濮嬪寲锛屾敮鎸佽法绾跨▼璁块棶锛夈€?
 
-    持久化路径通过环境变量 Natsume_AUDIT_DB 配置，
-    默认使用文件路径 host_brain/data/audit.sqlite3。
-    设置 Natsume_AUDIT_DB=:memory: 可使用内存数据库（仅测试）。
+    鎸佷箙鍖栬矾寰勯€氳繃鐜鍙橀噺 Natsume_AUDIT_DB 閰嶇疆锛?
+    榛樿浣跨敤鏂囦欢璺緞 host_brain/data/audit.sqlite3銆?
+    璁剧疆 Natsume_AUDIT_DB=:memory: 鍙娇鐢ㄥ唴瀛樻暟鎹簱锛堜粎娴嬭瘯锛夈€?
     """
     global _ledger
     if _ledger is None:
         db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
+
+
+def get_episodic_store() -> EpisodicStore:
+    global _episodic_store
+    ledger = get_ledger()
+    if _episodic_store is None or _episodic_store.ledger is not ledger:
+        _episodic_store = EpisodicStore(ledger=ledger)
+    return _episodic_store
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -899,6 +1280,101 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _resolve_chat_scene_type(*, request_body: ChatRequest) -> tuple[str, str]:
+    explicit_scene_type = str(request_body.scene_type or "").strip().upper()
+    if explicit_scene_type:
+        return explicit_scene_type, "explicit"
+    if _parse_bool(os.environ.get("HOST_CHAT_ENABLE_PRECLASSIFIER"), default=True):
+        return pre_intent_classifier(request_body.message), "pre_classifier"
+    return SCENE_CHAT, "default_chat"
+
+
+def _resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:
+    if not _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True):
+        return False, "HOST_RETRIEVAL_DISABLED"
+    if (
+        str(scene_type or "").strip().upper() == SCENE_CHAT
+        and _parse_bool(os.environ.get("HOST_CHAT_DISABLE_RETRIEVAL"), default=False)
+    ):
+        return False, "HOST_CHAT_RETRIEVAL_DISABLED"
+    return True, None
+
+
+def _normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    source = dict(raw or {})
+    state = normalize_hard_state(
+        {
+            "mood_state": source.get("mood_state"),
+            "ts_ms": source.get("emotion_ts_ms"),
+        }
+    )
+    hard_snapshot = build_hard_snapshot(state)
+    allowed_emotion_tags = list(hard_snapshot.allowed_emotion_tags)
+
+    emotion_tag = str(source.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags:
+        emotion_tag = allowed_emotion_tags[0]
+
+    emotion_range_hint = str(source.get("emotion_range_hint") or "").strip() or hard_snapshot.emotion_range_hint
+    try:
+        emotion_ts_ms = int(source.get("emotion_ts_ms") or hard_snapshot.emotion_ts_ms)
+    except (TypeError, ValueError):
+        emotion_ts_ms = int(hard_snapshot.emotion_ts_ms)
+
+    return {
+        "mood_state": str(hard_snapshot.mood_state),
+        "emotion_tag": str(emotion_tag),
+        "emotion_range_hint": str(emotion_range_hint),
+        "allowed_emotion_tags": allowed_emotion_tags,
+        "emotion_ts_ms": emotion_ts_ms,
+    }
+
+
+def _resolve_chat_emotion_context(*, request_body: ChatRequest) -> dict[str, Any]:
+    raw: dict[str, Any] = {}
+    if isinstance(request_body.emotion_context, Mapping):
+        raw.update(dict(request_body.emotion_context))
+    if request_body.mood_state is not None:
+        raw["mood_state"] = request_body.mood_state
+    if request_body.emotion_tag is not None:
+        raw["emotion_tag"] = request_body.emotion_tag
+    if request_body.emotion_range_hint is not None:
+        raw["emotion_range_hint"] = request_body.emotion_range_hint
+    if "mood_state" not in raw:
+        raw["mood_state"] = str(os.environ.get("HOST_DEFAULT_MOOD_STATE") or "steady").strip().lower() or "steady"
+    if "emotion_tag" not in raw:
+        raw["emotion_tag"] = str(os.environ.get("HOST_DEFAULT_EMOTION_TAG") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    return _normalize_chat_emotion_context(raw)
+
+
+def _build_chat_governance_snapshot(
+    *,
+    emotion_context: Mapping[str, Any],
+    ts_ms: int,
+) -> dict[str, Any]:
+    normalized = _normalize_chat_emotion_context(emotion_context)
+    hard_state = normalize_hard_state(
+        {
+            "mood_state": normalized.get("mood_state"),
+            "ts_ms": normalized.get("emotion_ts_ms", ts_ms),
+        }
+    )
+    snapshot = build_governance_snapshot(
+        hard_state,
+        overrides={
+            "mood_state": normalized.get("mood_state"),
+            "emotion_tag": normalized.get("emotion_tag"),
+            "emotion_ts_ms": normalized.get("emotion_ts_ms", ts_ms),
+        },
+    )
+    snapshot["emotion_context"] = {
+        "mood_state": normalized.get("mood_state"),
+        "emotion_tag": normalized.get("emotion_tag"),
+        "emotion_range_hint": normalized.get("emotion_range_hint"),
+    }
+    return snapshot
 
 
 def _load_json_file(path: Path) -> dict[str, Any] | None:
@@ -983,15 +1459,15 @@ def get_obs_metrics_collector() -> MetricsCollector:
     return _obs_metrics_collector
 
 
-# 注入 ledger provider 到 canon_routes（消除循环导入风险，P1-R118-2）
+# 娉ㄥ叆 ledger provider 鍒?canon_routes锛堟秷闄ゅ惊鐜鍏ラ闄╋紝P1-R118-2锛?
 _set_canon_ledger_provider(get_ledger)
 
-# 注入 ledger provider 到 obs_routes（M18）
+# 娉ㄥ叆 ledger provider 鍒?obs_routes锛圡18锛?
 _set_obs_ledger_provider(get_ledger)
 
 
 def get_tool_catalog() -> ToolCatalog:
-    """获取 ToolCatalog 单例（延迟初始化）。"""
+    """Get the ToolCatalog singleton."""
     global _tool_catalog
     if _tool_catalog is None:
         _tool_catalog = ToolCatalog()
@@ -999,7 +1475,7 @@ def get_tool_catalog() -> ToolCatalog:
 
 
 def get_tool_broker() -> ToolBroker:
-    """获取 ToolBroker 单例（延迟初始化）。"""
+    """Get the ToolBroker singleton."""
     global _tool_broker
     if _tool_broker is None:
         token_service = TokenService()
@@ -1011,7 +1487,7 @@ def get_tool_broker() -> ToolBroker:
     return _tool_broker
 
 
-# 注入 tool providers 到 tool_routes（M12-A TASK-0156）
+# 娉ㄥ叆 tool providers 鍒?tool_routes锛圡12-A TASK-0156锛?
 _set_tool_providers(
     broker_provider=get_tool_broker,
     catalog_provider=get_tool_catalog,
@@ -1020,19 +1496,19 @@ _set_tool_providers(
 
 
 def get_bond_stage_engine() -> BondStageEngine:
-    """获取 BondStageEngine 单例（延迟初始化）。"""
+    """Get the BondStageEngine singleton."""
     global _bond_stage_engine
     if _bond_stage_engine is None:
         _bond_stage_engine = BondStageEngine(ledger=get_ledger())
     return _bond_stage_engine
 
 
-# 注入 bond engine provider 到 bond_routes（M13-A）
+# 娉ㄥ叆 bond engine provider 鍒?bond_routes锛圡13-A锛?
 _set_bond_engine_provider(get_bond_stage_engine)
 
 
 def get_skill_registry() -> SkillRegistry:
-    """获取内置 Skill 注册表单例（M44：延迟初始化，供分层治理使用）。"""
+    """Get the built-in skill registry singleton."""
     global _skill_registry
     if _skill_registry is None:
         _skill_registry = build_builtin_skill_registry()
@@ -1040,7 +1516,7 @@ def get_skill_registry() -> SkillRegistry:
 
 
 def get_policy_cache() -> GovernorPolicyCache:
-    """获取 Governor Policy Cache 单例（M44：延迟初始化，TTL=60s）。"""
+    """Get the governor policy cache singleton."""
     global _policy_cache
     if _policy_cache is None:
         _policy_cache = GovernorPolicyCache(ttl_ms=60_000)
@@ -1048,13 +1524,7 @@ def get_policy_cache() -> GovernorPolicyCache:
 
 
 def get_intent_engine() -> IntentDecisionEngine:
-    """获取 Governor IntentDecisionEngine 实例（延迟初始化）。
-
-    M44：注入 registry + policy_cache，使 M42 分层治理在 /v1/chat 端点真正生效。
-    - risk_level=1 的内置 Skill（narrative_only/memory_recall/noop/read_only_status）
-      走 CACHE 通道，Policy Cache 命中后审批延迟从 ~300ms 降至 ~0ms。
-    - 未注册的 Skill 仍走 FULL 通道（向后兼容）。
-    """
+    """Get the governor intent engine singleton."""
     global _intent_engine
     if _intent_engine is None:
         _intent_engine = IntentDecisionEngine(
@@ -1065,13 +1535,13 @@ def get_intent_engine() -> IntentDecisionEngine:
     return _intent_engine
 
 
-# 自定义异常处理器
+# 鑷畾涔夊紓甯稿鐞嗗櫒
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """全局异常处理，确保所有错误都有稳定的HTTP状态码映射"""
+    """Global exception handler."""
     request_id = getattr(request.state, 'request_id', None) or new_request_id()
 
-    # 根据异常类型映射到HTTP状态码和reason_code
+    # 鏍规嵁寮傚父绫诲瀷鏄犲皠鍒癏TTP鐘舵€佺爜鍜宺eason_code
     if isinstance(exc, HTTPException):
         status_code = exc.status_code
         reason_code = f"HTTP_{status_code}"
@@ -1081,7 +1551,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         reason_code = "INTERNAL_SERVER_ERROR"
         detail = str(exc) or "Internal server error"
 
-    # 记录错误日志
+    # 璁板綍閿欒鏃ュ織
     _logger.error(
         "HTTP request failed",
         extra={
@@ -1106,16 +1576,16 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
-# 中间件：请求ID注入和审计
+# 涓棿浠讹細璇锋眰ID娉ㄥ叆鍜屽璁?
 @app.middleware("http")
 async def add_request_id_and_audit(request: Request, call_next: Callable) -> Response:
-    """为每个请求注入唯一ID并记录审计日志"""
+    """Attach request ids to incoming requests."""
     request_id = new_request_id()
     request.state.request_id = request_id
 
     start_time = time.time()
 
-    # 记录请求开始
+    # 璁板綍璇锋眰寮€濮?
     _logger.info(
         "HTTP request started",
         extra={
@@ -1130,7 +1600,7 @@ async def add_request_id_and_audit(request: Request, call_next: Callable) -> Res
         _metrics.inc_request()
         response = await call_next(request)
 
-        # 记录请求完成
+        # 璁板綍璇锋眰瀹屾垚
         duration_ms = int((time.time() - start_time) * 1000)
         _logger.info(
             "HTTP request completed",
@@ -1146,7 +1616,7 @@ async def add_request_id_and_audit(request: Request, call_next: Callable) -> Res
         return response
 
     except Exception as exc:
-        # 异常已在全局处理器中处理，这里只记录额外信息
+        # 寮傚父宸插湪鍏ㄥ眬澶勭悊鍣ㄤ腑澶勭悊锛岃繖閲屽彧璁板綍棰濆淇℃伅
         duration_ms = int((time.time() - start_time) * 1000)
         _logger.error(
             "HTTP request failed with exception",
@@ -1161,26 +1631,27 @@ async def add_request_id_and_audit(request: Request, call_next: Callable) -> Res
         raise
 
 
-# 核心HTTP端点
+# 鏍稿績HTTP绔偣
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """健康检查端点 - 快速服务可用性检查"""
+    """Health endpoint."""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        # 先获取真实 runtime_statuses，确保健康检查能反映服务真实状态
+        # 鍏堣幏鍙栫湡瀹?runtime_statuses锛岀‘淇濆仴搴锋鏌ヨ兘鍙嶆槧鏈嶅姟鐪熷疄鐘舵€?
+        _host_result = load_host_config()
         _host_result = load_host_config()
         _runtime_statuses: dict[str, Any] = {}
         if _host_result.success and _host_result.config is not None:
             _runtime_statuses = build_host_runtime_statuses(_host_result.config)
-        # TASK-0211 M23-B：合并 edge 传输层探针结果
-        # build_edge_transport_probe_statuses 原本定义但未被调用，
-        # 此处集成使 edge 节点运行时状态能反映到 host 侧健康报告中。
+        # TASK-0211 M23-B锛氬悎骞?edge 浼犺緭灞傛帰閽堢粨鏋?
+        # build_edge_transport_probe_statuses 鍘熸湰瀹氫箟浣嗘湭琚皟鐢紝
+        # 姝ゅ闆嗘垚浣?edge 鑺傜偣杩愯鏃剁姸鎬佽兘鍙嶆槧鍒?host 渚у仴搴锋姤鍛婁腑銆?
         try:
             _edge_available = _runtime_statuses.get("edge.rpc.gateway", {}).get("available", True)
             _edge_probes = build_edge_transport_probe_statuses(available=bool(_edge_available))
-            # edge 探针结果不覆盖已有的 host 侧状态，仅补充 edge 传输层状态
+            # edge 鎺㈤拡缁撴灉涓嶈鐩栧凡鏈夌殑 host 渚х姸鎬侊紝浠呰ˉ鍏?edge 浼犺緭灞傜姸鎬?
             for _svc_id, _probe in _edge_probes.items():
                 if _svc_id not in _runtime_statuses:
                     _runtime_statuses[_svc_id] = _probe
@@ -1209,7 +1680,7 @@ async def health_check() -> HealthResponse:
 
 @app.get("/ready", response_model=ReadinessResponse)
 async def environment_readiness() -> ReadinessResponse:
-    """环境就绪性检查 - 完整的环境依赖验证"""
+    """Readiness endpoint."""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -1245,7 +1716,7 @@ async def environment_readiness() -> ReadinessResponse:
 
 @app.get("/obs/metrics")
 async def obs_metrics(request_id: Optional[str] = None) -> Dict[str, Any]:
-    """M8 启动探针使用的 /obs/metrics HTTP 路由。"""
+    """Metrics endpoint."""
     ts_ms = int(time.time() * 1000)
     payload = build_obs_metrics_response(
         collector=get_obs_metrics_collector(),
@@ -1258,7 +1729,7 @@ async def obs_metrics(request_id: Optional[str] = None) -> Dict[str, Any]:
 
 @app.get("/health/mcp", response_model=HealthResponse)
 async def mcp_health_check() -> HealthResponse:
-    """MCP 注册表健康检查（探针对齐）。"""
+    """MCP registry health endpoint."""
     ts_ms = int(time.time() * 1000)
     db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
     status_text = "OK"
@@ -1295,7 +1766,7 @@ async def mcp_health_check() -> HealthResponse:
 
 @app.get("/health/canon_sync", response_model=HealthResponse)
 async def canon_sync_health_check() -> HealthResponse:
-    """World Canon 同步健康检查（探针对齐）。"""
+    """World canon sync health endpoint."""
     ts_ms = int(time.time() * 1000)
     world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
     status_text = "OK"
@@ -1331,7 +1802,7 @@ async def canon_sync_health_check() -> HealthResponse:
 
 @app.post("/observability/trace", response_model=ObservabilityResponse)
 async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResponse:
-    """请求追踪 - 获取特定请求的完整执行时间线"""
+    """Request trace endpoint."""
     ts_ms = int(time.time() * 1000)
 
     try:
@@ -1363,7 +1834,7 @@ async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResp
 
 @app.get("/startup")
 async def startup_report() -> Dict[str, Any]:
-    """启动报告 - 获取系统启动时的详细配置和依赖状态"""
+    """Startup report endpoint."""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
@@ -1376,7 +1847,7 @@ async def startup_report() -> Dict[str, Any]:
             ts_ms=ts_ms,
         )
 
-        # 记录启动报告用于调试
+        # 璁板綍鍚姩鎶ュ憡鐢ㄤ簬璋冭瘯
         emit_runtime_bootstrap_logs(startup_report=report)
 
         return {
@@ -1406,20 +1877,94 @@ def _extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
     return ""
 
 
+def _build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
+    style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
+    core_canon_id = str(os.environ.get("HOST_STYLE_CORE_CANON_ID") or "natsume_ai_cn").strip()
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    explicit_render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_CANON_ID") or "").strip()
+    if explicit_render_canon_id:
+        render_canon_id = explicit_render_canon_id
+    elif resolved_render_lang == "zh":
+        render_canon_id = (
+            str(os.environ.get("HOST_STYLE_RENDER_CN_CANON_ID") or "").strip()
+            or core_canon_id
+            or "natsume_ai_cn"
+        )
+    else:
+        render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_JA_CANON_ID") or "natsume_ai_ja").strip()
+    secondary_canon_id = str(os.environ.get("HOST_STYLE_SECONDARY_CANON_ID") or core_canon_id).strip()
+
+    store = StyleCanonStore(style_root=style_root, ledger=get_ledger())
+    resolved: dict[str, dict[str, Any]] = {}
+    mapping = [
+        ("core_reasoner_primary", core_canon_id),
+        ("core_reasoner_secondary", secondary_canon_id),
+        (CHAT_DIRECT_NODE_ID, render_canon_id),
+        ("renderer_ja_c_style", render_canon_id),
+    ]
+    for node_id, canon_id in mapping:
+        if not canon_id:
+            continue
+        try:
+            entry = store.get(canon_id)
+        except Exception:
+            continue
+        if entry is None:
+            continue
+        resolved[node_id] = {
+            "canon_id": entry.canon_id,
+            "version": int(entry.version),
+            "hash": entry.hash,
+            "tone_only": bool(entry.tone_only),
+            "unsafe_as_fact": bool(entry.unsafe_as_fact),
+            "style_instruction": entry.content,
+            "citation": f"style_canon:{entry.canon_id}@v{entry.version}:{entry.hash[:12]}",
+        }
+    return resolved
+
+
+def _normalize_node_style_bindings(
+    style_bindings: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    normalized_style_bindings: dict[str, dict[str, Any]] = {}
+    for node_id, row in dict(style_bindings or {}).items():
+        if not isinstance(row, Mapping):
+            continue
+        normalized_style_bindings[str(node_id)] = {
+            "canon_id": str(row.get("canon_id") or "").strip(),
+            "version": row.get("version"),
+            "hash": str(row.get("hash") or "").strip(),
+            "tone_only": bool(row.get("tone_only", True)),
+            "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
+            "style_instruction": str(row.get("style_instruction") or "").strip(),
+            "citation": str(row.get("citation") or "").strip(),
+        }
+    return normalized_style_bindings
+
+
 def _build_chat_generation_prompt_payload(
     *,
     request_id: str,
     session_id: str,
     thread_id: str | None,
     user_message: str,
+    render_target_lang: str | None,
     retrieval_summary: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    emotion_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    if resolved_render_lang not in {"zh", "ja"}:
+        resolved_render_lang = _infer_render_target_lang(user_message=user_message)
+    normalized_style_bindings = _normalize_node_style_bindings(style_bindings)
+    payload: dict[str, Any] = {
         "request_id": request_id,
         "session_id": session_id,
         "thread_id": thread_id,
         "user_message": user_message,
+        "render_target_lang": resolved_render_lang,
+        "style_bindings": normalized_style_bindings,
         "retrieval": {
             "status": retrieval_summary.get("status"),
             "reason_code": retrieval_summary.get("reason_code"),
@@ -1430,6 +1975,9 @@ def _build_chat_generation_prompt_payload(
             "evidence_items": retrieval_evidence_items,
         },
     }
+    if isinstance(emotion_context, dict) and emotion_context:
+        payload["emotion_context"] = emotion_context
+    return payload
 
 
 def _resolve_host_llm_runtime() -> dict[str, Any]:
@@ -1470,9 +2018,665 @@ def _build_chat_graph_config(
     provider_fn: Callable[[dict[str, Any]], Any],
     scene_type: str = SCENE_CHAT,
     scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
 ) -> dict[str, Any]:
     _ = provider_fn
     _ = model_id
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    if resolved_render_lang not in {"zh", "ja"}:
+        resolved_render_lang = "ja"
+    base_timeout_ms = max(800, int(timeout_ms))
+    resolved_provider = PROVIDER_GEMINI
+    node_model_ids: dict[str, str] = {
+        CHAT_DIRECT_NODE_ID: "gemini-2.5-flash",
+        "core_reasoner_primary": "gemini-2.5-pro",
+        "core_reasoner_secondary": "gemini-2.5-flash",
+        "planner_constraints": "gemini-2.5-pro",
+        "tool_planner": "gemini-2.5-flash",
+        "safety_verifier": "gemini-2.5-flash-lite",
+        "consistency_verifier": "gemini-2.5-flash-lite",
+        "renderer_ja_c_style": "gemini-2.5-flash",
+        "workbench_translate": "gemini-2.5-pro",
+        "workbench_code_assist": "gemini-2.5-pro",
+    }
+    node_timeouts: dict[str, int] = {
+        CHAT_DIRECT_NODE_ID: min(base_timeout_ms, 7000),
+        "core_reasoner_primary": min(base_timeout_ms, 12000),
+        "core_reasoner_secondary": min(base_timeout_ms, 9000),
+        "planner_constraints": min(base_timeout_ms, 8000),
+        "tool_planner": min(base_timeout_ms, 8000),
+        "safety_verifier": min(base_timeout_ms, 7000),
+        "consistency_verifier": min(base_timeout_ms, 7000),
+        "renderer_ja_c_style": min(base_timeout_ms, 9000),
+        "workbench_translate": min(base_timeout_ms, 10000),
+        "workbench_code_assist": min(base_timeout_ms, 10000),
+    }
+
+    # M33-F锛歮odel_node_overrides 浠嶄娇鐢ㄥ叏鑺傜偣娉ㄥ唽琛紙CHAT_GRAPH_NODE_ORDER锛夛紝
+    # 纭繚鎵€鏈夎妭鐐圭殑妯″瀷閰嶇疆閮藉凡鍑嗗濂斤紙fallback 鑺傜偣涔熼渶瑕侀厤缃級銆?
+    model_node_overrides: dict[str, dict[str, Any]] = {}
+    model_node_overrides: dict[str, dict[str, Any]] = {}
+    for node_id in CHAT_GRAPH_NODE_ORDER:
+        node_model_id = node_model_ids[node_id]
+        node_timeout = node_timeouts[node_id]
+        model_node_overrides[node_id] = {
+            "provider": resolved_provider,
+            "model_id": node_model_id,
+            "timeout_ms": node_timeout,
+            "api_key": str(api_key or "").strip() or None,
+            "available": bool(available),
+            "provider_fn": _build_host_provider_fn_for_node(
+                provider_name=resolved_provider,
+                model_id=node_model_id,
+                api_key=api_key,
+                timeout_ms=node_timeout,
+                node_id=node_id,
+            ),
+        }
+
+    # M33-A/B锛氭寜鍦烘櫙鍔ㄦ€佽В鏋愯妭鐐瑰簭鍒楋紙涓嶅惈 secondary fallback 鑺傜偣锛?
+    scene_node_sequence = _resolve_scene_node_sequence(scene_type)
+    # M33-B锛歝ore_reasoner_secondary 浣滀负 fallback 鑺傜偣锛屽繀椤诲湪 node_bindings 涓敞鍐?
+    # 锛坴alidate_graph_config 瑕佹眰 fallback_edges 涓殑鑺傜偣涔熷湪 node_bindings 涓級锛?
+    # 浣嗕笉鍔犲叆 edges 姝ｅ父閾捐矾銆?
+    fallback_only_nodes = ["core_reasoner_secondary"]
+    scene_node_sequence = _resolve_scene_node_sequence(scene_type)
+    fallback_only_nodes = ["core_reasoner_secondary"]
+    all_registered_nodes = scene_node_sequence + [
+        n for n in fallback_only_nodes if n not in scene_node_sequence
+    ]
+    node_bindings = [
+        {
+            "node_id": node_id,
+            "model_node_id": node_id,
+            "task": node_id,
+            "require_approval_token": False,
+        }
+        for node_id in all_registered_nodes
+    ]
+    edges = [
+        {"from": scene_node_sequence[i], "to": scene_node_sequence[i + 1]}
+        for i in range(len(scene_node_sequence) - 1)
+    ]
+    # Ensure fallback secondary node can continue into renderer on successful recovery.
+    if (
+        "core_reasoner_secondary" in all_registered_nodes
+        and CHAT_RENDER_NODE_ID in all_registered_nodes
+        and not any(str(edge.get("from") or "").strip() == "core_reasoner_secondary" for edge in edges)
+    ):
+        edges.append({"from": "core_reasoner_secondary", "to": CHAT_RENDER_NODE_ID})
+    return {
+        "graph_id": "host.chat.realtime",
+        "version": "v1",
+        "policy_timeout_ms": max(base_timeout_ms * 6, 60_000),
+        "entry_node": scene_node_sequence[0],
+        "model_profile_id": "chat_ja_24x7_v1",
+        "node_bindings": node_bindings,
+        "edges": edges,
+        "fallback_edges": [
+            # M33-B锛歝ore_reasoner_secondary 浠呬綔涓?primary 澶辫触鏃剁殑 fallback
+            {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"},
+            {"from": "core_reasoner_secondary", "to": "renderer_ja_c_style"},
+        ],
+        "model_node_overrides": model_node_overrides,
+        "graph_meta": {
+            "online_chain": "six_recall + scene_routed_langgraph + targeted_renderer",
+            "provider": provider_name,
+            "scene_type": str(scene_type or SCENE_CHAT).strip().upper(),
+            "scene_type_source": scene_type_source,
+            "render_target_lang": resolved_render_lang,
+            "active_node_count": len(scene_node_sequence),
+        },
+    }
+
+
+def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja") -> str:
+    resolved_node_id = str(node_id or "").strip()
+    if resolved_node_id == CHAT_DIRECT_NODE_ID:
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "Role: chat_direct_ja.\n"
+                "Goal: generate the final user-facing reply directly in concise spoken Simplified Chinese.\n"
+                "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
+                "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+            )
+        return (
+            "Role: chat_direct_ja.\n"
+            "Goal: generate the final user-facing reply directly in concise natural Japanese.\n"
+            "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
+            "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+        )
+    if resolved_node_id == CHAT_RENDER_NODE_ID:
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "Role: renderer_ja_c_style (final Chinese renderer).\n"
+                "Goal: render CORE_NARRATIVE_ZH into concise spoken Simplified Chinese.\n"
+                "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+            )
+        return (
+            "Role: renderer_ja_c_style (final Japanese renderer).\n"
+            "Goal: render CORE_NARRATIVE_ZH into concise natural Japanese.\n"
+            "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+        )
+
+    role_instructions: dict[str, str] = {
+        "core_reasoner_primary": (
+            "Role: core_reasoner_primary.\n"
+            "Goal: produce the main Chinese semantic draft for the user request.\n"
+            "Policy: stay grounded in evidence, remain concise, and never claim execution."
+        ),
+        "core_reasoner_secondary": (
+            "Role: core_reasoner_secondary.\n"
+            "Goal: produce a shorter fallback Chinese draft when primary reasoning degrades.\n"
+            "Policy: be conservative and never expand facts or scope."
+        ),
+        "planner_constraints": (
+            "Role: planner_constraints.\n"
+            "Goal: summarize actionable constraints for this turn.\n"
+            "Policy: output compact draft-only guidance."
+        ),
+        "tool_planner": (
+            "Role: tool_planner.\n"
+            "Goal: propose tool-use drafts only when tools materially help.\n"
+            "Policy: never imply a tool has already run."
+        ),
+        "safety_verifier": (
+            "Role: safety_verifier.\n"
+            "Goal: flag safety or overclaim risks.\n"
+            "Policy: output a concise verdict and minimum patch."
+        ),
+        "consistency_verifier": (
+            "Role: consistency_verifier.\n"
+            "Goal: check canon/style consistency drift.\n"
+            "Policy: output a concise verdict and minimum patch."
+        ),
+        "workbench_translate": (
+            "Role: workbench_translate.\n"
+            "Goal: provide translation-assist draft output.\n"
+            "Policy: preserve meaning and terminology consistency."
+        ),
+        "workbench_code_assist": (
+            "Role: workbench_code_assist.\n"
+            "Goal: provide concise code-assist draft output.\n"
+            "Policy: stay concrete and do not claim files were changed."
+        ),
+    }
+    return role_instructions.get(
+        resolved_node_id,
+        "Role: generic node.\nGoal: produce a concise draft-only output.\nPolicy: keep the JSON contract stable.",
+    )
+
+
+def _render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
+    user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=1000)
+    context_pack_raw = runtime_payload.get("context_pack")
+    context_pack = dict(context_pack_raw) if isinstance(context_pack_raw, Mapping) else {}
+    context_pack_validation_raw = runtime_payload.get("context_pack_validation")
+    context_pack_validation = (
+        dict(context_pack_validation_raw)
+        if isinstance(context_pack_validation_raw, Mapping)
+        else {}
+    )
+
+    retrieval_raw = runtime_payload.get("retrieval")
+    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, Mapping) else {}
+    retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+    retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
+    retrieval_slot_rows = context_pack.get("retrieval")
+    slot_rows = retrieval_slot_rows if isinstance(retrieval_slot_rows, list) else []
+    if slot_rows:
+        rows = slot_rows
+    else:
+        evidence_items = retrieval.get("evidence_items")
+        rows = evidence_items if isinstance(evidence_items, list) else []
+
+    evidence_lines: list[str] = []
+    for row in rows[:6]:
+        if not isinstance(row, Mapping):
+            continue
+        evidence_ref = _truncate_for_prompt(
+            row.get("evidence_ref") or row.get("source_ref") or row.get("citation") or "unknown",
+            limit=80,
+        )
+        snippet = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=220)
+        if not snippet:
+            continue
+        evidence_lines.append(f"- [{evidence_ref}] {snippet}")
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+
+    authoritative_rows = context_pack.get("authoritative")
+    world_rows = authoritative_rows if isinstance(authoritative_rows, list) else []
+    world_lines: list[str] = []
+    for row in world_rows[:3]:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("kind") or "").strip().lower() != "world_canon":
+            continue
+        citation = _truncate_for_prompt(row.get("citation") or row.get("doc_id") or "unknown", limit=96)
+        content = _truncate_for_prompt(row.get("content"), limit=260)
+        if not content:
+            continue
+        world_lines.append(f"- [{citation}] {content}")
+    world_block = "\n".join(world_lines) if world_lines else "- (none)"
+
+    constraints_raw = context_pack.get("constraints")
+    constraints = dict(constraints_raw) if isinstance(constraints_raw, Mapping) else {}
+    constraints_json = _truncate_for_prompt(
+        json.dumps(constraints, ensure_ascii=False, sort_keys=True),
+        limit=1200,
+    )
+    context_pack_valid = bool(context_pack_validation.get("valid", False))
+    context_pack_reason = str(context_pack_validation.get("reason_code") or "NONE").strip() or "NONE"
+    context_pack_violation_count = int(context_pack_validation.get("violation_count") or 0)
+
+    core_payload = _extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_narrative = _extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
+    core_meta = core_payload.get("meta")
+    if isinstance(core_meta, dict) and core_meta.get("degraded"):
+        secondary_narrative = _extract_node_narrative_text(runtime_payload, node_id="core_reasoner_secondary")
+        if secondary_narrative:
+            core_narrative = secondary_narrative
+            secondary_payload = _extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_secondary")
+            if isinstance(secondary_payload.get("intent_draft"), dict) and secondary_payload["intent_draft"]:
+                core_payload = secondary_payload
+
+    core_intent_draft = core_payload.get("intent_draft")
+    if not isinstance(core_intent_draft, dict):
+        core_intent_draft = {}
+    core_intent_json = json.dumps(core_intent_draft, ensure_ascii=False, sort_keys=True)
+    planner_text = _extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
+    verifier_text = _extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
+
+    style_pack_raw = context_pack.get("style_pack")
+    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
+    style_bindings_raw = style_pack.get("node_bindings")
+    style_bindings = dict(style_bindings_raw) if isinstance(style_bindings_raw, Mapping) else {}
+    if not style_bindings:
+        legacy_bindings_raw = runtime_payload.get("style_bindings")
+        style_bindings = dict(legacy_bindings_raw) if isinstance(legacy_bindings_raw, Mapping) else {}
+    node_style_raw = style_bindings.get(node_id)
+    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
+    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
+    style_block = ""
+    if style_instruction:
+        style_block = (
+            "STYLE_CANON_BINDING:\n"
+            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
+            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
+            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
+            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
+            f"- instruction:\n{style_instruction}\n\n"
+        )
+
+    emotion_context_raw = runtime_payload.get("emotion_context")
+    emotion_context = (
+        dict(emotion_context_raw)
+        if isinstance(emotion_context_raw, Mapping)
+        else {}
+    )
+    context_pack_emotion_raw = context_pack.get("emotion_pulse")
+    context_pack_emotion = (
+        dict(context_pack_emotion_raw)
+        if isinstance(context_pack_emotion_raw, Mapping)
+        else {}
+    )
+    merged_emotion_context = _normalize_chat_emotion_context(
+        {
+            "mood_state": context_pack_emotion.get("mood_state") or emotion_context.get("mood_state"),
+            "emotion_tag": context_pack_emotion.get("emotion_tag") or emotion_context.get("emotion_tag"),
+            "emotion_range_hint": (
+                context_pack_emotion.get("emotion_range_hint")
+                or emotion_context.get("emotion_range_hint")
+            ),
+        }
+    )
+    pulse_style_hint = _truncate_for_prompt(context_pack_emotion.get("style_hint"), limit=160)
+    memory_emotion_hint_raw = context_pack.get("memory_emotion_hint")
+    memory_emotion_hint = (
+        dict(memory_emotion_hint_raw)
+        if isinstance(memory_emotion_hint_raw, Mapping)
+        else {}
+    )
+    bond_texture_raw = context_pack.get("bond_texture")
+    bond_texture = (
+        dict(bond_texture_raw)
+        if isinstance(bond_texture_raw, Mapping)
+        else {}
+    )
+    memory_emotion_hint_json = _truncate_for_prompt(
+        json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True),
+        limit=600,
+    )
+    bond_texture_json = _truncate_for_prompt(
+        json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
+        limit=600,
+    )
+    emotion_binding_block = (
+        "EMOTION_BINDING:\n"
+        f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
+        f"- emotion_tag: {merged_emotion_context.get('emotion_tag')}\n"
+        f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
+        f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
+        f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
+        f"- bond_texture_json: {bond_texture_json}\n\n"
+    )
+
+    render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
+    if render_target_lang not in {"zh", "ja"}:
+        render_target_lang = _infer_render_target_lang(
+            user_message=user_message,
+            core_narrative=core_narrative,
+        )
+
+    cn_style_boost_block = ""
+    if render_target_lang == "zh":
+        cn_style_boost_block = (
+            "CN_STYLE_BOOST_BINDING:\n"
+            "- style_strength: HIGH\n"
+            "- Priority: safety/facts > style canon > generic assistant tone.\n"
+            "- Write naturally spoken Simplified Chinese; avoid formal support-style wording.\n"
+            "- Typical rhythm: 2-4 short sentences, compact and clear.\n"
+            "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
+        )
+
+    role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang)
+
+    return (
+        "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
+        "Schema:\n"
+        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "Hard rules:\n"
+        "1) JSON only; no markdown/code fence.\n"
+        "2) meta.draft_only must be true.\n"
+        "3) Never claim executed/saved/confirmed/completed.\n"
+        "4) Keep concise and grounded in provided context.\n"
+        "NODE_ROLE_BINDING:\n"
+        f"{role_instruction}\n\n"
+        f"{style_block}"
+        f"{cn_style_boost_block}"
+        f"{emotion_binding_block}"
+        "CONTEXT_PACK_VALIDATION:\n"
+        f"- valid: {context_pack_valid}\n"
+        f"- reason_code: {context_pack_reason}\n"
+        f"- violation_count: {context_pack_violation_count}\n\n"
+        f"WORLD_CANON_BINDING:\n{world_block}\n\n"
+        f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
+        f"NODE_ID: {node_id}\n"
+        f"RENDER_TARGET_LANG: {render_target_lang}\n"
+        f"USER_MESSAGE:\n{user_message}\n\n"
+        f"RETRIEVAL_STATUS: {retrieval_status}\n"
+        f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
+        f"EVIDENCE:\n{evidence_block}\n\n"
+        f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
+        f"PLANNER_HINT:\n{planner_text}\n\n"
+        f"SAFETY_HINT:\n{verifier_text}\n\n"
+        f"CORE_INTENT_DRAFT_JSON:\n{core_intent_json}\n"
+    )
+
+
+def _build_chat_context_pack(
+    *,
+    request_id: str,
+    session_id: str,
+    thread_id: str | None,
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    style_bindings: Mapping[str, Mapping[str, Any]] | None,
+    emotion_context: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    normalized_style_bindings = _normalize_node_style_bindings(style_bindings)
+    normalized_emotion_context = _normalize_chat_emotion_context(emotion_context)
+
+    style_rows: list[dict[str, Any]] = []
+    for node_id, row in normalized_style_bindings.items():
+        style_rows.append(
+            {
+                "slot": "style_pack",
+                "kind": "style_canon",
+                "node_id": node_id,
+                "canon_id": row.get("canon_id"),
+                "version": row.get("version"),
+                "hash": row.get("hash"),
+                "tone_only": bool(row.get("tone_only", True)),
+                "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
+                "citation": row.get("citation"),
+                "instruction": _truncate_for_prompt(row.get("style_instruction"), limit=1600),
+            }
+        )
+
+    authoritative_rows: list[dict[str, Any]] = []
+    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "").strip() or None
+    try:
+        world_top_k = int(str(os.environ.get("HOST_WCANON_TOP_K") or "3").strip())
+    except ValueError:
+        world_top_k = 3
+    world_top_k = max(1, min(world_top_k, 10))
+    try:
+        authoritative_rows = build_world_canon_slot(world_root=world_root, top_k=world_top_k)
+    except Exception as exc:
+        check_wcanon_slot_violation(
+            slot_name="world_canon_slot",
+            detail=f"world canon slot build failed: {exc}",
+            ledger=get_ledger(),
+            request_id=request_id,
+        )
+        authoritative_rows = []
+
+    retrieval_rows: list[dict[str, Any]] = []
+    for row in retrieval_evidence_items[:10]:
+        if not isinstance(row, Mapping):
+            continue
+        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
+        if not snippet:
+            continue
+        retrieval_rows.append(
+            {
+                "slot": "retrieval",
+                "kind": "episodic",
+                "source_ref": str(row.get("source_ref") or "").strip() or None,
+                "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
+                "content": snippet,
+                "score": row.get("score"),
+                "confidence": row.get("confidence"),
+            }
+        )
+
+    mood_state = str(normalized_emotion_context.get("mood_state") or "steady")
+    emotion_tag = str(normalized_emotion_context.get("emotion_tag") or "NEUTRAL")
+    emotion_range_hint = _truncate_for_prompt(
+        normalized_emotion_context.get("emotion_range_hint"),
+        limit=200,
+    )
+    allowed_emotion_tags = list(normalized_emotion_context.get("allowed_emotion_tags") or [])
+    emotion_pulse = build_emotion_pulse_slot(
+        None,
+        emotion_tag=emotion_tag,
+        mood_state=mood_state,
+    )
+    if emotion_range_hint:
+        emotion_pulse["emotion_range_hint"] = emotion_range_hint
+    memory_emotion_hint = {
+        "mood_state": mood_state,
+        "emotion_tag": emotion_tag,
+        "emotion_range_hint": emotion_range_hint,
+        "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
+        "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
+    }
+    bond_texture = {
+        "mood_state": mood_state,
+        "emotion_tag": emotion_tag,
+        "tone_hint": str(emotion_pulse.get("style_hint") or ""),
+    }
+
+    context_pack = {
+        "hard_snapshot": {
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "sys_mode": str(os.environ.get("HOST_SYS_MODE") or "normal").strip() or "normal",
+            "mood_state": mood_state,
+            "allowed_emotion_tags": allowed_emotion_tags,
+            "emotion_range_hint": emotion_range_hint,
+        },
+        "bond_summary": {},
+        "authoritative": authoritative_rows,
+        "retrieval": retrieval_rows,
+        "style_pack": {
+            "style_canon": style_rows,
+            "node_bindings": normalized_style_bindings,
+        },
+        "constraints": {
+            "strict_json_output": True,
+            "no_false_execution_claim": True,
+            "no_canon_as_fact": True,
+            "tone_policy": "short_restrained",
+            "contract_versions": {
+                "core": "CoreDraft.v1",
+                "render": "RenderDraft.v1",
+                "verifier": "Verifier.v1",
+            },
+            "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
+            "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
+        },
+        "tool_meta_pack": [],
+        "emotion_pulse": emotion_pulse,
+        "memory_emotion_hint": memory_emotion_hint,
+        "bond_texture": bond_texture,
+    }
+
+    validation = validate_context_pack(context_pack)
+    violations = [
+        {"code": item.code, "detail": item.detail, "slot": item.slot}
+        for item in validation.violations
+    ]
+    if validation.valid:
+        return (
+            context_pack,
+            {
+                "valid": True,
+                "degraded": False,
+                "reason_code": None,
+                "violation_count": 0,
+                "violations": [],
+            },
+        )
+
+    for item in validation.violations:
+        if item.slot == "authoritative":
+            check_wcanon_slot_violation(
+                slot_name="world_canon_slot",
+                detail=item.detail,
+                ledger=get_ledger(),
+                request_id=request_id,
+            )
+            break
+
+    degraded_pack = dict(context_pack)
+    degraded_pack["authoritative"] = []
+    degraded_validation = validate_context_pack(degraded_pack)
+    if degraded_validation.valid:
+        return (
+            degraded_pack,
+            {
+                "valid": True,
+                "degraded": True,
+                "reason_code": "CONTEXT_PACK_DEGRADED",
+                "violation_count": len(violations),
+                "violations": violations,
+            },
+        )
+
+    minimal_pack = {
+        "hard_snapshot": {},
+        "bond_summary": {},
+        "authoritative": [],
+        "retrieval": [],
+        "style_pack": {},
+        "constraints": {},
+        "tool_meta_pack": [],
+    }
+    return (
+        minimal_pack,
+        {
+            "valid": True,
+            "degraded": True,
+            "reason_code": "CONTEXT_PACK_MINIMAL_FALLBACK",
+            "violation_count": len(violations),
+            "violations": violations,
+        },
+    )
+
+
+def _build_chat_generation_prompt_payload(
+    *,
+    request_id: str,
+    session_id: str,
+    thread_id: str | None,
+    user_message: str,
+    retrieval_summary: dict[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    emotion_context: Mapping[str, Any] | None = None,
+    render_target_lang: str | None = None,
+) -> dict[str, Any]:
+    normalized_style_bindings = _normalize_node_style_bindings(style_bindings)
+    normalized_emotion_context = _normalize_chat_emotion_context(emotion_context)
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    if resolved_render_lang not in {"zh", "ja"}:
+        resolved_render_lang = _infer_render_target_lang(user_message=user_message)
+    context_pack, context_pack_validation = _build_chat_context_pack(
+        request_id=request_id,
+        session_id=session_id,
+        thread_id=thread_id,
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        style_bindings=normalized_style_bindings,
+        emotion_context=normalized_emotion_context,
+    )
+    return {
+        "request_id": request_id,
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "user_message": user_message,
+        "render_target_lang": resolved_render_lang,
+        "style_bindings": normalized_style_bindings,
+        "emotion_context": {
+            "mood_state": normalized_emotion_context.get("mood_state"),
+            "emotion_tag": normalized_emotion_context.get("emotion_tag"),
+            "emotion_range_hint": normalized_emotion_context.get("emotion_range_hint"),
+        },
+        "context_pack": context_pack,
+        "context_pack_validation": context_pack_validation,
+        "retrieval": {
+            "status": retrieval_summary.get("status"),
+            "reason_code": retrieval_summary.get("reason_code"),
+            "route_count": retrieval_summary.get("route_count"),
+            "candidate_count": retrieval_summary.get("candidate_count"),
+            "rerank_topk": retrieval_summary.get("rerank_topk"),
+            "degraded": retrieval_summary.get("degraded"),
+            "evidence_items": retrieval_evidence_items,
+        },
+    }
+
+
+def _build_chat_graph_config(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_CHAT,
+    scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
+) -> dict[str, Any]:
+    _ = provider_fn
+    _ = model_id
+    resolved_scene_type = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
+    is_chat_fast_path = resolved_scene_type == SCENE_CHAT
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    if resolved_render_lang not in {"zh", "ja"}:
+        resolved_render_lang = "ja"
     base_timeout_ms = max(800, int(timeout_ms))
     resolved_provider = PROVIDER_GEMINI
     node_model_ids: dict[str, str] = {
@@ -1497,13 +2701,17 @@ def _build_chat_graph_config(
         "workbench_translate": min(base_timeout_ms, 10000),
         "workbench_code_assist": min(base_timeout_ms, 10000),
     }
-
-    # M33-F：model_node_overrides 仍使用全节点注册表（CHAT_GRAPH_NODE_ORDER），
-    # 确保所有节点的模型配置都已准备好（fallback 节点也需要配置）。
+    if is_chat_fast_path:
+        node_model_ids[CHAT_DIRECT_NODE_ID] = "gemini-2.5-flash"
+        node_timeouts[CHAT_DIRECT_NODE_ID] = min(base_timeout_ms, 6000)
+        node_model_ids["core_reasoner_primary"] = "gemini-2.5-flash"
+        node_timeouts["core_reasoner_primary"] = min(base_timeout_ms, 5000)
+        node_timeouts["core_reasoner_secondary"] = min(base_timeout_ms, 3000)
+        node_timeouts["renderer_ja_c_style"] = min(base_timeout_ms, 4000)
     model_node_overrides: dict[str, dict[str, Any]] = {}
     for node_id in CHAT_GRAPH_NODE_ORDER:
-        node_model_id = node_model_ids[node_id]
-        node_timeout = node_timeouts[node_id]
+        node_model_id = str(node_model_ids.get(node_id) or model_id).strip() or model_id
+        node_timeout = int(node_timeouts.get(node_id, base_timeout_ms))
         model_node_overrides[node_id] = {
             "provider": resolved_provider,
             "model_id": node_model_id,
@@ -1519,12 +2727,8 @@ def _build_chat_graph_config(
             ),
         }
 
-    # M33-A/B：按场景动态解析节点序列（不含 secondary fallback 节点）
     scene_node_sequence = _resolve_scene_node_sequence(scene_type)
-    # M33-B：core_reasoner_secondary 作为 fallback 节点，必须在 node_bindings 中注册
-    # （validate_graph_config 要求 fallback_edges 中的节点也在 node_bindings 中），
-    # 但不加入 edges 正常链路。
-    fallback_only_nodes = ["core_reasoner_secondary"]
+    fallback_only_nodes = [] if is_chat_fast_path else ["core_reasoner_secondary"]
     all_registered_nodes = scene_node_sequence + [
         n for n in fallback_only_nodes if n not in scene_node_sequence
     ]
@@ -1541,25 +2745,76 @@ def _build_chat_graph_config(
         {"from": scene_node_sequence[i], "to": scene_node_sequence[i + 1]}
         for i in range(len(scene_node_sequence) - 1)
     ]
+    entry_node_id = scene_node_sequence[0]
+    fallback_target_node = CHAT_RENDER_NODE_ID if is_chat_fast_path else (
+        "consistency_verifier"
+        if "consistency_verifier" in scene_node_sequence
+        else CHAT_RENDER_NODE_ID
+    )
+    chain_budget_ms = (
+        sum(int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence)
+        + (
+            int(node_timeouts.get("core_reasoner_secondary", base_timeout_ms))
+            if not is_chat_fast_path
+            else 0
+        )
+    )
+    primary_timeout_ms = int(node_timeouts.get(entry_node_id, base_timeout_ms))
+    try:
+        configured_attempts = int(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS") or "2").strip())
+    except ValueError:
+        configured_attempts = 2
+    retry_attempts = max(1, min(configured_attempts, 3))
+    try:
+        configured_retry_delay_ms = int(float(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS") or "150").strip()))
+    except ValueError:
+        configured_retry_delay_ms = 150
+    retry_delay_ms = max(0, min(configured_retry_delay_ms, 2_000))
+    retry_budget_ms = 0
+    fallback_budget_ms = 0
+    if entry_node_id == _GEMINI_PRIMARY_RETRY_NODE_ID:
+        retry_budget_ms = max(0, retry_attempts - 1) * (primary_timeout_ms + retry_delay_ms)
+        fallback_budget_ms = (
+            primary_timeout_ms
+            if _resolve_gemini_primary_fallback_model_id(str(node_model_ids.get(entry_node_id) or ""))
+            else 0
+        )
+    policy_timeout_ms = chain_budget_ms + retry_budget_ms + fallback_budget_ms + 5_000
+    if is_chat_fast_path:
+        policy_timeout_ms = max(8_000, min(int(policy_timeout_ms), 12_000))
+    else:
+        # Keep a generous lower bound for non-chat long-tail latency to avoid
+        # premature policy cutoffs right before renderer.
+        policy_timeout_ms = max(90_000, min(int(policy_timeout_ms), 240_000))
     return {
         "graph_id": "host.chat.realtime",
         "version": "v1",
-        "entry_node": scene_node_sequence[0],
+        "policy_timeout_ms": policy_timeout_ms,
+        "entry_node": entry_node_id,
         "model_profile_id": "chat_ja_24x7_v1",
         "node_bindings": node_bindings,
         "edges": edges,
-        "fallback_edges": [
-            # M33-B：core_reasoner_secondary 仅作为 primary 失败时的 fallback
-            {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"},
-            {"from": "core_reasoner_secondary", "to": "renderer_ja_c_style"},
-        ],
+        "fallback_edges": (
+            []
+            if is_chat_fast_path
+            else [
+                {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"},
+                {"from": "core_reasoner_secondary", "to": fallback_target_node},
+            ]
+        ),
         "model_node_overrides": model_node_overrides,
         "graph_meta": {
-            "online_chain": "six_recall + scene_routed_langgraph + forced_renderer_ja",
+            "online_chain": (
+                "chat_direct_single_node + scene_routed_langgraph"
+                if is_chat_fast_path
+                else "six_recall + scene_routed_langgraph + targeted_renderer"
+            ),
             "provider": provider_name,
-            "scene_type": str(scene_type or SCENE_CHAT).strip().upper(),
+            "scene_type": resolved_scene_type,
             "scene_type_source": scene_type_source,
+            "render_target_lang": resolved_render_lang,
             "active_node_count": len(scene_node_sequence),
+            "active_nodes": list(scene_node_sequence),
         },
     }
 
@@ -1685,8 +2940,90 @@ def _persist_chat_observability_rows(
     )
 
 
+def _map_emotion_tag_to_vad(emotion_tag: str) -> tuple[float, float]:
+    tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    if tag in {"HAPPY", "EXCITED"}:
+        return 0.7, 0.8
+    if tag in {"SAD"}:
+        return -0.6, 0.35
+    if tag in {"ANGRY"}:
+        return -0.7, 0.85
+    if tag in {"ANXIOUS"}:
+        return -0.4, 0.75
+    if tag in {"CALM"}:
+        return 0.2, 0.2
+    return 0.0, 0.3
+
+
+def _build_chat_episodic_text(*, user_message: str, assistant_reply: str, session_id: str) -> str:
+    user_text = _truncate_for_prompt(
+        _repair_utf8_latin1_mojibake(str(user_message or "").strip()),
+        limit=800,
+    )
+    assistant_text = _truncate_for_prompt(
+        _repair_utf8_latin1_mojibake(str(assistant_reply or "").strip()),
+        limit=1200,
+    )
+    return (
+        f"[session={session_id}]\n"
+        f"User: {user_text}\n"
+        f"Natsume: {assistant_text}"
+    ).strip()
+
+
+def _persist_chat_episodic_memory(
+    *,
+    request_id: str,
+    intent_id: str | None,
+    session_id: str,
+    user_message: str,
+    assistant_reply: str,
+    emotion_context: Mapping[str, Any] | None,
+    ts_ms: int,
+) -> dict[str, Any]:
+    text = _build_chat_episodic_text(
+        user_message=user_message,
+        assistant_reply=assistant_reply,
+        session_id=session_id,
+    )
+    if not str(text).strip():
+        return {
+            "status": "SKIPPED",
+            "reason_code": "EPISODIC_EMPTY_TEXT",
+            "memory_id": None,
+            "detail": "chat episodic text is empty",
+        }
+
+    tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    valence, arousal = _map_emotion_tag_to_vad(tag)
+    evidence_refs = [
+        f"chat://request/{request_id}",
+        f"chat://session/{session_id}",
+        f"chat://intent/{str(intent_id or request_id)}",
+    ]
+    result = get_episodic_store().write_memory(
+        text=text,
+        evidence_refs=evidence_refs,
+        request_id=request_id,
+        intent_id=str(intent_id or request_id),
+        decay_profile_id="SLOW",
+        visibility="internal",
+        ts_ms=ts_ms,
+        emotion_tag=tag,
+        emotion_valence=valence,
+        emotion_arousal=arousal,
+    )
+    return {
+        "status": ("OK" if result.success else "DEGRADED"),
+        "reason_code": result.reason_code,
+        "memory_id": result.memory_id,
+        "detail": result.detail,
+        "emotion_tag": tag,
+    }
+
+
 # ---------------------------------------------------------------------------
-# 核心链路入口: POST /v1/chat
+# 鏍稿績閾捐矾鍏ュ彛: POST /v1/chat
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
@@ -1713,13 +3050,28 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "nonce": f"nonce::{request_id}",
             }
 
-        # 2) Governor decision (intent validation + R1-R7 gates)
-        engine = get_intent_engine()
-        governor_result = engine.evaluate_intent(
-            raw_intent=intent_draft,
-            request_id=request_id,
-            thread_id=request_body.thread_id,
+        emotion_context = _resolve_chat_emotion_context(request_body=request_body)
+        governance_snapshot = _build_chat_governance_snapshot(
+            emotion_context=emotion_context,
+            ts_ms=ts_ms,
         )
+
+        # scene_type pre-computed before Governor so it can be used in retrieval gate below
+        _pre_scene_type, _pre_scene_source = _resolve_chat_scene_type(request_body=request_body)
+
+        # 2) Governor decision via run_in_executor (non-blocking on async event loop)
+        engine = get_intent_engine()
+        _loop = asyncio.get_event_loop()
+        _gov_future = _loop.run_in_executor(
+            None,
+            lambda: engine.evaluate_intent(
+                raw_intent=intent_draft,
+                request_id=request_id,
+                thread_id=request_body.thread_id,
+                governance_snapshot=governance_snapshot,
+            ),
+        )
+        governor_result = await _gov_future
 
         decision = governor_result.get("decision")
         reason_code = governor_result.get("reason_code")
@@ -1728,29 +3080,44 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         tokens = governor_result.get("tokens")
         if isinstance(tokens, dict):
             approval_token_ref = tokens.get("approval_token_ref")
-        # M44：提取分层治理审批通道（approval_tier）
+        _committed_token_detail = governor_result.get("committed_route_token")
+        # M44锛氭彁鍙栧垎灞傛不鐞嗗鎵归€氶亾锛坅pproval_tier锛?
         _committed_token_detail = governor_result.get("committed_route_token")
         approval_tier: Optional[str] = None
         if isinstance(_committed_token_detail, dict):
             approval_tier = _committed_token_detail.get("approval_tier")
 
+        # M45-E锛氫粠璇锋眰浣撴瀯寤烘儏鎰熶笂涓嬫枃锛屼緵 retrieval boost 鍜?LLM prompt 浣跨敤
         retrieval_summary: Dict[str, Any] = {}
         llm_summary: Dict[str, Any] = {}
+        episodic_summary: Dict[str, Any] = {
+            "status": "SKIPPED",
+            "reason_code": "NOT_APPROVED",
+            "memory_id": None,
+            "detail": "governor decision is not APPROVE",
+        }
         if decision == DECISION_APPROVE:
             retrieval_evidence_items: list[dict[str, Any]] = []
-            retrieval_enabled = _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True)
+            scene_type, scene_type_source = _pre_scene_type, _pre_scene_source
+            retrieval_enabled, retrieval_disabled_reason = _resolve_chat_retrieval_gate(scene_type=scene_type)
             if retrieval_enabled:
                 try:
                     retrieval_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
                 except ValueError:
                     retrieval_top_k = 5
                 retrieval_top_k = max(1, min(retrieval_top_k, 20))
-                retrieval_result = get_retrieval_pipeline().run(
-                    request_id=request_id,
-                    query=request_body.message,
-                    intent_id=intent_id,
-                    top_k=retrieval_top_k,
-                    ts_ms=ts_ms,
+                _loop = asyncio.get_event_loop()
+                retrieval_result = await _loop.run_in_executor(
+                    None,
+                    lambda: get_retrieval_pipeline().run(
+                        request_id=request_id,
+                        query=request_body.message,
+                        intent_id=intent_id,
+                        session_id=session_id,
+                        top_k=retrieval_top_k,
+                        ts_ms=ts_ms,
+                        emotion_context=str(emotion_context.get("emotion_tag") or "") or None,
+                    ),
                 )
                 recall_output = dict(retrieval_result.output.get("recall") or {})
                 rerank_output = dict(retrieval_result.output.get("rerank") or {})
@@ -1787,7 +3154,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             else:
                 retrieval_summary = {
                     "status": "SKIPPED",
-                    "reason_code": "HOST_RETRIEVAL_DISABLED",
+                    "reason_code": str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED"),
                     "route_count": 0,
                     "routes": [],
                     "route_rows": [],
@@ -1795,17 +3162,23 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                     "candidate_count": 0,
                     "rerank_topk": 0,
                     "evidence_refs": [],
-                    "reason_chain": ["HOST_RETRIEVAL_DISABLED"],
-                    "degraded": True,
+                    "reason_chain": [str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED")],
+                    "degraded": str(retrieval_disabled_reason or "HOST_RETRIEVAL_DISABLED")
+                    not in {"HOST_RETRIEVAL_DISABLED", "HOST_CHAT_RETRIEVAL_DISABLED"},
                 }
 
+            render_target_lang = _infer_render_target_lang(user_message=request_body.message)
+            node_style_bindings = _build_node_style_bindings(render_target_lang=render_target_lang)
             llm_prompt_payload = _build_chat_generation_prompt_payload(
                 request_id=request_id,
                 session_id=session_id,
                 thread_id=request_body.thread_id,
                 user_message=request_body.message,
+                render_target_lang=render_target_lang,
                 retrieval_summary=retrieval_summary,
                 retrieval_evidence_items=retrieval_evidence_items,
+                style_bindings=node_style_bindings,
+                emotion_context=emotion_context if emotion_context else None,
             )
 
             llm_runtime = _resolve_host_llm_runtime()
@@ -1815,17 +3188,8 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             llm_api_key = str(llm_runtime.get("llm_api_key") or "").strip()
             available = bool(llm_runtime["available"])
             provider_fn = llm_runtime["provider_fn"]
-
-            # M34-B：scene_type 解析（显式传入优先，否则使用预分类结果）
-            if request_body.scene_type:
-                # 显式传入：优先级最高
-                scene_type = str(request_body.scene_type).strip().upper() or SCENE_CHAT
-                scene_type_source = "explicit"
-            else:
-                # M34-A：使用 pre_intent_classifier 预分类（纯规则，无 LLM 调用）
-                scene_type = pre_intent_classifier(request_body.message)
-                scene_type_source = "pre_classifier"
             graph_config = _build_chat_graph_config(
+
                 provider_name=provider_name,
                 model_id=model_id,
                 timeout_ms=timeout_ms,
@@ -1834,6 +3198,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 provider_fn=provider_fn,
                 scene_type=scene_type,
                 scene_type_source=scene_type_source,
+                render_target_lang=render_target_lang,
             )
             dependency_statuses: dict[str, dict[str, Any]] = {
                 node_id: {
@@ -1854,54 +3219,109 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                     "api_key": (llm_api_key or None),
                 }
 
+            # Start policy clock at graph runtime entry.
+            # Do not reuse request start ts_ms, otherwise retrieval latency is
+            # wrongly counted into policy timeout budget.
+            graph_start_ms = int(time.time() * 1000)
             graph_result = get_graph_runtime().run_graph(
                 request_id=request_id,
                 graph_config=graph_config,
                 payload={
                     **llm_prompt_payload,
-                    # M35-C：注入 committed_route_token 到 payload，供 graph_runtime 提取到 initial_state
-                    # Governor 已在 evaluate_intent 中编译令牌，此处透传给 LangGraph 图
+                    # M35-C锛氭敞鍏?committed_route_token 鍒?payload锛屼緵 graph_runtime 鎻愬彇鍒?initial_state
+                    # Governor 宸插湪 evaluate_intent 涓紪璇戜护鐗岋紝姝ゅ閫忎紶缁?LangGraph 鍥?
                     "committed_route_token": governor_result.get("committed_route_token_ref"),
                     "committed_route_token_detail": governor_result.get("committed_route_token"),
                 },
                 dependency_statuses=dependency_statuses,
-                ts_ms=ts_ms,
+                ts_ms=graph_start_ms,
             )
 
             graph_output = dict(graph_result.output or {})
+            is_chat_direct_path = str(scene_type or "").strip().upper() == SCENE_CHAT
+            chat_intent_node_id = CHAT_DIRECT_NODE_ID if is_chat_direct_path else CHAT_INTENT_SOURCE_NODE_ID
+            chat_response_node_id = CHAT_DIRECT_NODE_ID if is_chat_direct_path else CHAT_RENDER_NODE_ID
             _core_node, core_payload = _extract_chat_graph_gateway_payload(
                 graph_output,
-                node_id=CHAT_INTENT_SOURCE_NODE_ID,
+                node_id=chat_intent_node_id,
+            )
+            secondary_node, secondary_payload = _extract_chat_graph_gateway_payload(
+                graph_output,
+                node_id="core_reasoner_secondary",
             )
             render_node, render_payload = _extract_chat_graph_gateway_payload(
                 graph_output,
-                node_id=CHAT_RENDER_NODE_ID,
+                node_id=chat_response_node_id,
             )
             gateway_status = str(render_node.get("gateway_status") or "").strip().upper()
             gateway_reason = str(render_node.get("reason_code") or "").strip() or None
 
-            narrative = _extract_gateway_narrative(render_payload)
+            core_gateway_status = str(_core_node.get("gateway_status") or "").strip().upper()
+            secondary_gateway_status = str(secondary_node.get("gateway_status") or "").strip().upper()
+            render_narrative = _extract_gateway_narrative(render_payload)
+            core_narrative = _extract_gateway_narrative(core_payload)
+            secondary_narrative = _extract_gateway_narrative(secondary_payload)
+
+            primary_degraded = core_gateway_status not in {"OK", ""}
+            effective_core_narrative = core_narrative
+            if primary_degraded and secondary_narrative and secondary_gateway_status == "OK":
+                effective_core_narrative = secondary_narrative
+
+            narrative = render_narrative
+            if not narrative and secondary_narrative and secondary_gateway_status == "OK" and primary_degraded:
+                narrative = secondary_narrative
             if not narrative:
-                narrative = _extract_gateway_narrative(core_payload)
+                narrative = effective_core_narrative or core_narrative or secondary_narrative
             narrative = _repair_utf8_latin1_mojibake(narrative)
             if not narrative:
-                narrative = "申し訳ありません。現在は下書き応答のみ可能です。"
+                narrative = "系统有点忙，请稍后再试。"
 
             core_intent_draft = core_payload.get("intent_draft")
+            if primary_degraded and secondary_gateway_status == "OK":
+                secondary_intent = secondary_payload.get("intent_draft")
+                if isinstance(secondary_intent, dict) and secondary_intent:
+                    core_intent_draft = secondary_intent
             if isinstance(core_intent_draft, dict) and core_intent_draft:
                 intent_draft = core_intent_draft
 
+            style_bindings_payload_raw = llm_prompt_payload.get("style_bindings")
+            style_bindings_payload = (
+                dict(style_bindings_payload_raw)
+                if isinstance(style_bindings_payload_raw, Mapping)
+                else {}
+            )
+            graph_meta = dict(graph_config.get("graph_meta") or {})
+            active_node_ids = [
+                str(node_id).strip()
+                for node_id in list(graph_meta.get("active_nodes") or [])
+                if str(node_id).strip() in CHAT_GRAPH_NODE_ORDER
+            ]
+            payload_root = dict(graph_output.get("payload") or {})
+            for node_id in CHAT_GRAPH_NODE_ORDER:
+                if node_id in active_node_ids:
+                    continue
+                if isinstance(payload_root.get(node_id), Mapping):
+                    active_node_ids.append(node_id)
+            if not active_node_ids:
+                active_node_ids = list(_resolve_scene_node_sequence(scene_type))
             node_summaries: list[dict[str, Any]] = []
-            for node_index, node_id in enumerate(CHAT_GRAPH_NODE_ORDER):
+            for node_index, node_id in enumerate(active_node_ids):
                 node_entry, node_payload = _extract_chat_graph_gateway_payload(graph_output, node_id=node_id)
                 node_input: dict[str, Any] = {
                     "user_message": (request_body.message if node_index == 0 else None),
                     "retrieval_status": retrieval_summary.get("status"),
                     "retrieval_route_count": retrieval_summary.get("route_count"),
-                    "upstream_node_ids": CHAT_GRAPH_NODE_ORDER[:node_index],
+                    "upstream_node_ids": active_node_ids[:node_index],
                 }
-                if node_id == CHAT_RENDER_NODE_ID:
-                    node_input["core_narrative_zh"] = _extract_gateway_narrative(core_payload)
+                node_style_raw = style_bindings_payload.get(node_id)
+                node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
+                if node_style:
+                    node_input["style_canon_id"] = node_style.get("canon_id")
+                    node_input["style_citation"] = node_style.get("citation")
+                if node_id == CHAT_DIRECT_NODE_ID:
+                    node_input["response_mode"] = "direct_final_reply"
+                if node_id == CHAT_RENDER_NODE_ID and not is_chat_direct_path:
+                    node_input["core_narrative_zh"] = effective_core_narrative
                     node_input["core_intent_draft"] = core_intent_draft
                 node_summaries.append(
                     {
@@ -1926,15 +3346,21 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "provider": (render_node.get("provider") or provider_name),
                 "model_id": (render_node.get("model_id") or model_id),
                 "model_profile_id": graph_output.get("model_profile_id"),
+                "render_target_lang": str(llm_prompt_payload.get("render_target_lang") or ""),
                 "latency_ms": None,
                 "draft_only": bool(dict(render_payload.get("meta") or {}).get("draft_only", True)),
                 "node_count": len(node_summaries),
                 "nodes": node_summaries,
                 "model_control": list(graph_output.get("model_control") or []),
+                "context_pack_validation": dict(llm_prompt_payload.get("context_pack_validation") or {}),
             }
 
             retrieval_reason_code = str(retrieval_summary.get("reason_code") or "")
-            if retrieval_summary.get("degraded") and retrieval_reason_code not in {"", "HOST_RETRIEVAL_DISABLED"}:
+            if retrieval_summary.get("degraded") and retrieval_reason_code not in {
+                "",
+                "HOST_RETRIEVAL_DISABLED",
+                "HOST_CHAT_RETRIEVAL_DISABLED",
+            }:
                 reason_code = reason_code or retrieval_reason_code
             graph_ok = str(graph_result.status).upper() == "OK"
             renderer_ok = gateway_status == "OK"
@@ -1958,6 +3384,58 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                     "chat observability persistence failed",
                     extra={"request_id": request_id, "error": str(exc)},
                 )
+
+            # M45-E锛歝hat 瀹屾垚鍚庡悜 Bond 鍐欏叆鎯呮劅浜掑姩璁板綍
+            try:
+                _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
+                _update_kind = BondDynamicsWriter.classify_interaction(
+                    text=request_body.message,
+                    emotion_intensity=_intensity,
+                )
+                _bond_writer = BondDynamicsWriter(
+                    ledger=get_ledger(),
+                    stage_engine=get_bond_stage_engine(),
+                )
+                _bond_writer.apply_update(
+                    request_id=request_id,
+                    intent_id=str(intent_id or request_id),
+                    session_id=session_id,
+                    seq=1,
+                    user_id=session_id,
+                    topic_id=str(intent_draft.get("args", {}).get("text", request_body.message))[:64],
+                    update_kind=_update_kind,
+                    evidence_refs=[str(intent_id or request_id)],
+                    emotion_tag=_etag,
+                    emotion_intensity=_intensity,
+                    ts_ms=ts_ms,
+                )
+            except Exception as exc:
+                _logger.debug(
+                    "bond emotion record skipped",
+                    extra={"request_id": request_id, "error": str(exc)},
+                )
+            try:
+                episodic_summary = _persist_chat_episodic_memory(
+                    request_id=request_id,
+                    intent_id=str(intent_id or request_id),
+                    session_id=session_id,
+                    user_message=request_body.message,
+                    assistant_reply=narrative,
+                    emotion_context=emotion_context,
+                    ts_ms=ts_ms,
+                )
+            except Exception as exc:
+                episodic_summary = {
+                    "status": "DEGRADED",
+                    "reason_code": "EPISODIC_WRITE_FAILED",
+                    "memory_id": None,
+                    "detail": str(exc),
+                }
+                _logger.debug(
+                    "episodic memory write skipped",
+                    extra={"request_id": request_id, "error": str(exc)},
+                )
         else:
             narrative = f"[REJECTED] reason: {reason_code or 'UNKNOWN'}"
             quality = {"stage": governor_result.get("stage", "S_GOV_REJECT"), "reason_code": reason_code}
@@ -1970,7 +3448,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
             decision=decision,
             reason_code=reason_code,
             approval_token_ref=approval_token_ref,
-            approval_tier=approval_tier,  # M44：透出分层治理审批通道
+            approval_tier=approval_tier,  # M44锛氶€忓嚭鍒嗗眰娌荤悊瀹℃壒閫氶亾
             quality=quality,
             audit_refs={
                 "intent_id": intent_id,
@@ -1978,6 +3456,9 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
                 "thread_id": request_body.thread_id,
                 "retrieval": retrieval_summary,
                 "llm": llm_summary,
+                "context_pack_validation": llm_summary.get("context_pack_validation"),
+                "emotion_context": dict(emotion_context),
+                "episodic_memory": dict(episodic_summary),
             },
             timestamp=ts_ms,
         )
@@ -1987,7 +3468,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
         _logger.error("Chat request failed", extra={"request_id": request_id, "error": str(exc)})
         return ChatResponse(
             request_id=request_id,
-            narrative="[DEGRADED] Internal error while processing request.",
+            narrative="系统有点忙，请稍后再试。",
             intent_draft=None,
             decision="REJECT",
             reason_code="INTERNAL_SERVER_ERROR",
@@ -2001,7 +3482,7 @@ async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
 
 @app.get("/metrics", response_model=MetricsResponse)
 async def metrics() -> MetricsResponse:
-    """运行时指标摘要 — 拒绝码分布、请求计数、运行时长"""
+    """Runtime metrics summary endpoint."""
     return MetricsResponse(
         uptime_seconds=_metrics.uptime_seconds,
         total_requests=_metrics.total_requests,
@@ -2014,24 +3495,24 @@ async def metrics() -> MetricsResponse:
 
 
 # ---------------------------------------------------------------------------
-# Web UI 面板入口（M17: 已升级为 React SPA，旧 panel.html 已移除）
+# Web UI 闈㈡澘鍏ュ彛锛圡17: 宸插崌绾т负 React SPA锛屾棫 panel.html 宸茬Щ闄わ級
 # ---------------------------------------------------------------------------
 @app.get("/panel")
 async def panel_page() -> "RedirectResponse":
-    """监控面板入口 — 重定向到 M17 React SPA"""
+    """Monitoring panel redirect endpoint."""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/monitor/index.html", status_code=301)
 
 
 # ---------------------------------------------------------------------------
-# TASK-0079: Edge→Host 事件批量上报端点
+# TASK-0079: Edge鈫扝ost 浜嬩欢鎵归噺涓婃姤绔偣
 # ---------------------------------------------------------------------------
 @app.post("/v1/edge/events", response_model=EdgeEventsResponse)
 async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
-    """接收 Edge 端批量上报的事件，校验并写入审计链。
+    """鎺ユ敹 Edge 绔壒閲忎笂鎶ョ殑浜嬩欢锛屾牎楠屽苟鍐欏叆瀹¤閾俱€?
 
-    TASK-0079: 打通 Edge→Host 事件上报通道。
-    事件通过 cross_timeline 的 EdgeEventReport 结构化解析后写入审计。
+    TASK-0079: 鎵撻€?Edge鈫扝ost 浜嬩欢涓婃姤閫氶亾銆?
+    浜嬩欢閫氳繃 cross_timeline 鐨?EdgeEventReport 缁撴瀯鍖栬В鏋愬悗鍐欏叆瀹¤銆?
     """
     ts_ms = int(time.time() * 1000)
     raw_events = request_body.events
@@ -2042,7 +3523,7 @@ async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResp
             detail="empty batch", timestamp=ts_ms,
         )
 
-    # 逐条校验必需字段
+    # 閫愭潯鏍￠獙蹇呴渶瀛楁
     required_fields = {"event_type", "ts_ms", "request_id", "session_id"}
     accepted_count = 0
     rejected_indices: list[int] = []
@@ -2062,7 +3543,7 @@ async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResp
             rejected_indices.append(idx)
             continue
 
-        # 写入 voice_event_log（Edge 事件统一入表）
+        # 鍐欏叆 voice_event_log锛圗dge 浜嬩欢缁熶竴鍏ヨ〃锛?
         try:
             ledger.log_voice_event({
                 "request_id": request_id,
@@ -2108,24 +3589,105 @@ async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResp
 
 
 # ---------------------------------------------------------------------------
-# 根路径重定向到文档
+# SSE 流式聊天端点
+# ---------------------------------------------------------------------------
+@app.get("/v1/chat/stream")
+async def chat_stream(
+    request: Request,
+    message: str = "",
+    session_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    mood_state: Optional[str] = None,
+    emotion_tag: Optional[str] = None,
+) -> StreamingResponse:
+    """GET /v1/chat/stream — SSE 流式响应端点。"""
+    import asyncio
+    import threading
+
+    request_id = getattr(request.state, "request_id", None) or new_request_id()
+    resolved_session_id = session_id or f"session::{request_id}"
+    resolved_mood = mood_state or "steady"
+    resolved_emotion = emotion_tag or "NEUTRAL"
+
+    async def _event_generator():
+        yield f"data: {json.dumps({'phase': 'PRESENCE', 'event': 'THINKING', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+        try:
+            llm_runtime = _resolve_host_llm_runtime()
+            provider_name = str(llm_runtime["provider_name"])
+            model_id = str(llm_runtime["model_id"])
+            timeout_ms_val = int(llm_runtime["timeout_ms"])
+            llm_api_key = str(llm_runtime.get("llm_api_key") or "").strip()
+            available = bool(llm_runtime["available"])
+
+            if not available:
+                yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'LLM_UNAVAILABLE'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 异步桥接同步 generator
+            loop = asyncio.get_event_loop()
+            chunk_queue: asyncio.Queue = asyncio.Queue()
+
+            def _run_stream():
+                import sys as _sys
+                _stream_fn = _sys.modules.get("host_brain.app.fastapi_app").stream_llm_chunks  # allows mock patching
+                try:
+                    for chunk in _stream_fn(
+                        provider_name=provider_name,
+                        model_id=model_id,
+                        api_key=llm_api_key,
+                        timeout_ms=timeout_ms_val,
+                        prompt_text=message,
+                        system_prompt="",
+                        gen_params=adjust_gen_params_for_emotion({"temperature": 0.7}, emotion_context={"emotion_tag": resolved_emotion}),
+                    ):
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                finally:
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+            thread = threading.Thread(target=_run_stream, daemon=True)
+            thread.start()
+
+            full_text = ""
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                full_text += chunk
+                yield f"data: {json.dumps({'phase': 'RENDER', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'APPROVE', 'narrative': full_text, 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+        except Exception as exc:
+            _logger.error("SSE stream failed: %s", exc, extra={"request_id": request_id})
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'INTERNAL_SERVER_ERROR'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# 根路由重定向到文档
 # ---------------------------------------------------------------------------
 @app.get("/")
 async def root() -> Response:
-    """根路径重定向到API文档"""
+    """Redirect root to the API docs."""
     return Response(status_code=status.HTTP_307_TEMPORARY_REDIRECT, headers={"Location": "/docs"})
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    # 配置日志
+    # 閰嶇疆鏃ュ織
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # 启动FastAPI服务器
+    # 鍚姩FastAPI鏈嶅姟鍣?
     uvicorn.run(
         app,
         host="0.0.0.0",
@@ -2133,3 +3695,5 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True,
     )
+
+

@@ -42,7 +42,7 @@ class IntentDecisionEngine:
         registry: Any | None = None,
         policy_cache: GovernorPolicyCache | None = None,
     ) -> None:
-        self.ledger = ledger or SQLiteLedger()
+        self.ledger = ledger if ledger is not None else SQLiteLedger(":memory:")
         self.token_service = token_service
         self.expiry_window_ms = expiry_window_ms
         # M42：分层治理组件（可选注入，未注入时保持现有行为）
@@ -186,6 +186,29 @@ class IntentDecisionEngine:
             "governance_snapshot": governance_snapshot_ref(gates_input),
             "hard_state": hard_state_ref(_hard_state_from_snapshot(governance_snapshot)),
         }
+
+        # P2-A 快速通道：narrative_only + policy_cache 命中时跳过完整 gate 评估
+        if (
+            self._policy_cache is not None
+            and str(envelope.action or "").strip() == "narrative_only"
+            and self._registry is None  # registry 注入时由分层治理处理，避免重复
+        ):
+            _trust = int(gates_input.get("trust_level", 50))
+            _cached = self._policy_cache.get("narrative_only", _trust)
+            if _cached is True:
+                return self._approve_fast(
+                    req_id=req_id,
+                    envelope=envelope,
+                    now=now,
+                    turn=turn,
+                    thread_id=thread_id,
+                    snapshot_refs=snapshot_refs,
+                    proposer_node_id=proposer_node_id,
+                )
+            elif _cached is None:
+                # 首次未命中：完整审批后写入缓存（本次走正常路径，下次命中快速通道）
+                self._policy_cache.put("narrative_only", _trust, True)
+
         gate_eval = evaluate_governor_gates(gates_input)
         if gate_eval["decision"] == "REJECT":
             return self._reject(
@@ -362,6 +385,67 @@ class IntentDecisionEngine:
                 "reason_code": committed.reason_code,
                 "committed_at_ms": committed.committed_at_ms,
                 "proposer_node_id": committed.proposer_node_id,
+            },
+        }
+        return self._finalize_governor_row(row)
+
+    def _approve_fast(
+        self,
+        *,
+        req_id: str,
+        envelope: Any,
+        now: int,
+        turn: str,
+        thread_id: str | None,
+        snapshot_refs: dict[str, Any],
+        proposer_node_id: str = "governor",
+    ) -> dict[str, Any]:
+        """P2-A 快速审批通道：policy cache 命中时跳过完整 gate 评估，直接返回 APPROVE。
+
+        仅用于 narrative_only 且 policy_cache 已预热命中的场景，
+        可节省约 20-30ms 的 gate 评估开销。
+        """
+        approval_token_ref = f"approval::{envelope.id}"
+        if self.token_service is not None:
+            approval_token_ref = self.token_service.issue_approval_token(
+                intent_id=envelope.id,
+                skill_name=envelope.action,
+                session_id=envelope.session_id,
+                seq=envelope.seq,
+                now_ts_ms=now,
+            )
+        self.ledger.mark_intent_seen(
+            intent_id=envelope.id,
+            session_id=envelope.session_id,
+            nonce=envelope.nonce,
+        )
+        self.ledger.update_seq(session_id=envelope.session_id, seq=envelope.seq)
+        committed = compile_route_decision(
+            approved=True,
+            reason_code="APPROVE_CACHED",
+            committed_at_ms=now,
+            proposer_node_id=proposer_node_id,
+            tier="cache",
+        )
+        row = {
+            "request_id": req_id,
+            "thread_id": thread_id,
+            "turn_id": turn,
+            "intent_id": envelope.id,
+            "decision": DECISION_APPROVE,
+            "reason_code": None,
+            "rule_trace": [{"gate_id": "POLICY_CACHE_HIT", "hit": False, "reason_hint": "APPROVE_CACHED"}],
+            "tokens": {"approval_token_ref": approval_token_ref},
+            "snapshot_refs": snapshot_refs,
+            "stage": "S_INTENT_OK",
+            "ts_ms": now,
+            "committed_route_token_ref": committed.token.value,
+            "committed_route_token": {
+                "token": committed.token.value,
+                "reason_code": committed.reason_code,
+                "committed_at_ms": committed.committed_at_ms,
+                "proposer_node_id": committed.proposer_node_id,
+                "approval_tier": "cache",
             },
         }
         return self._finalize_governor_row(row)

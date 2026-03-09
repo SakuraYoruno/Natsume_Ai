@@ -105,6 +105,8 @@ data/evidence/*.db
 
 # --- trial run reports (runtime-generated, never commit) ---
 docs/60_trace/trial_run_reports/
+run_report_*.json
+FULL_RUN_REPORT_*.json
 
 # --- Windows device file artifacts ---
 nul

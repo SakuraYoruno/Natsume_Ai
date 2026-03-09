@@ -10,6 +10,7 @@ from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
+from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync
 
 
 STYLE_EXECUTION_FACT_TOKENS = (
@@ -169,6 +170,12 @@ class StyleCanonStore:
                 "source_path": str(path),
                 "ts_ms": update_ts,
             }
+        )
+        trigger_canon_vector_auto_sync(
+            include_style=True,
+            include_world=False,
+            style_root=self.style_root,
+            reason=f"style_upsert:{canon_id}@v{next_version}",
         )
         return self.get(canon_id)  # type: ignore[return-value]
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import inspect
 import json
 import math
+import logging
 import os
 from time import perf_counter
 import re
@@ -20,6 +21,14 @@ from host_brain.core.errors import (
     RETR_RERANK_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.retrieval.reranker_schemas import (
+    RerankConfigIssue,
+    RerankConfigLoadResult,
+    RerankRouteConfig,
+    RerankRuntimeConfig,
+    RerankerResult,
+)
+
 
 
 S_RET_RERANK = "S_RET_RERANK"
@@ -35,87 +44,10 @@ DEFAULT_RERANK_ROUTE = "default"
 DEFAULT_RERANK_TOP_K = 5
 DEFAULT_RERANK_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
+_COLD_START_RETRYABLE_RERANK_PROVIDERS = frozenset({"cross_encoder", "qwen3_reranker"})
 
 RerankProvider = Callable[..., tuple[list[float], str]]
-
-
-@dataclass(frozen=True)
-class RerankRouteConfig:
-    route_id: str
-    provider: str
-    model_id: str
-    top_k: int
-    timeout_ms: int
-    node_selector: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "route_id": self.route_id,
-            "provider": self.provider,
-            "model_id": self.model_id,
-            "top_k": int(self.top_k),
-            "timeout_ms": int(self.timeout_ms),
-            "node_selector": self.node_selector,
-        }
-
-
-@dataclass(frozen=True)
-class RerankRuntimeConfig:
-    enabled: bool
-    default_route: str
-    routes: dict[str, RerankRouteConfig]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "default_route": self.default_route,
-            "routes": {
-                route_id: route.as_dict()
-                for route_id, route in sorted(self.routes.items())
-            },
-        }
-
-
-@dataclass(frozen=True)
-class RerankConfigIssue:
-    reason_code: str
-    detail: str
-    field: str | None = None
-
-
-@dataclass(frozen=True)
-class RerankConfigLoadResult:
-    success: bool
-    stage: str
-    reason_code: str | None
-    config: RerankRuntimeConfig | None
-    issues: tuple[RerankConfigIssue, ...]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "stage": self.stage,
-            "reason_code": self.reason_code,
-            "config": (self.config.as_dict() if self.config is not None else None),
-            "issues": [
-                {
-                    "reason_code": issue.reason_code,
-                    "detail": issue.detail,
-                    "field": issue.field,
-                }
-                for issue in self.issues
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class RerankerResult:
-    success: bool
-    status: str
-    reason_code: str | None
-    stage: str
-    detail: str
-    output: dict[str, Any]
+logger = logging.getLogger("Natsume.retrieval.reranker")
 
 
 class RerankerServiceContract:
@@ -163,14 +95,33 @@ class RerankerServiceContract:
         requested_top_k = (route.top_k if top_k is None else int(top_k))
         topk_value = _coerce_top_k(requested_top_k, len(normalized_candidates))
 
-        if not normalized_query or not normalized_candidates:
+        if not normalized_query:
             fallback_scores = _build_fallback_scores(normalized_candidates)
             fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
             return self._degrade(
                 request_id=request_id,
                 intent_id=intent_id,
                 reason_code=RETR_RERANK_INPUT_INVALID,
-                detail="reranker input invalid: query and candidates are required",
+                detail="reranker input invalid: query is required",
+                latency_ms=0,
+                model_id=route.model_id,
+                provider=route.provider,
+                route_id=route.route_id,
+                query=normalized_query,
+                scores=fallback_scores,
+                topk=fallback_topk,
+                expected_top_k=topk_value,
+                node_selector=route.node_selector,
+                ts_ms=now_value,
+            )
+        if not normalized_candidates:
+            fallback_scores = _build_fallback_scores(normalized_candidates)
+            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+            return self._degrade(
+                request_id=request_id,
+                intent_id=intent_id,
+                reason_code=RETR_RERANK_UNAVAILABLE,
+                detail="reranker skipped: no candidates from recall stage",
                 latency_ms=0,
                 model_id=route.model_id,
                 provider=route.provider,
@@ -243,75 +194,102 @@ class RerankerServiceContract:
                 node_selector=route.node_selector,
                 ts_ms=now_value,
             )
-        start = perf_counter()
-        try:
-            scores, model_id = _invoke_rerank_provider(
-                selected_provider,
-                normalized_query,
-                normalized_candidates,
-                route,
-            )
-        except TimeoutError:
-            latency_ms = int(round((perf_counter() - start) * 1000))
-            fallback_scores = _build_fallback_scores(normalized_candidates)
-            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_RERANK_TIMEOUT,
-                detail=f"reranker timeout>{timeout_value}ms",
-                latency_ms=latency_ms,
-                model_id=route.model_id,
-                provider=route.provider,
-                route_id=route.route_id,
-                query=normalized_query,
-                scores=fallback_scores,
-                topk=fallback_topk,
-                expected_top_k=topk_value,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
-        except Exception as exc:
-            latency_ms = int(round((perf_counter() - start) * 1000))
-            fallback_scores = _build_fallback_scores(normalized_candidates)
-            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_RERANK_UNAVAILABLE,
-                detail=f"reranker provider unavailable: {exc}",
-                latency_ms=latency_ms,
-                model_id=route.model_id,
-                provider=route.provider,
-                route_id=route.route_id,
-                query=normalized_query,
-                scores=fallback_scores,
-                topk=fallback_topk,
-                expected_top_k=topk_value,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
+        warm_retry_used = False
+        attempt = 1
+        while True:
+            start = perf_counter()
+            try:
+                scores, model_id = _invoke_rerank_provider(
+                    selected_provider,
+                    normalized_query,
+                    normalized_candidates,
+                    route,
+                )
+            except TimeoutError:
+                latency_ms = int(round((perf_counter() - start) * 1000))
+                if _should_retry_reranker_cold_start(route.provider, attempt):
+                    warm_retry_used = True
+                    logger.warning(
+                        "Retrying reranker after cold-start timeout (%s/%s, %dms, attempt=%d)",
+                        route.provider,
+                        route.model_id,
+                        latency_ms,
+                        attempt,
+                    )
+                    attempt += 1
+                    continue
+                fallback_scores = _build_fallback_scores(normalized_candidates)
+                fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_RERANK_TIMEOUT,
+                    detail=f"reranker timeout>{timeout_value}ms",
+                    latency_ms=latency_ms,
+                    model_id=route.model_id,
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    query=normalized_query,
+                    scores=fallback_scores,
+                    topk=fallback_topk,
+                    expected_top_k=topk_value,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
+            except Exception as exc:
+                latency_ms = int(round((perf_counter() - start) * 1000))
+                fallback_scores = _build_fallback_scores(normalized_candidates)
+                fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_RERANK_UNAVAILABLE,
+                    detail=f"reranker provider unavailable: {exc}",
+                    latency_ms=latency_ms,
+                    model_id=route.model_id,
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    query=normalized_query,
+                    scores=fallback_scores,
+                    topk=fallback_topk,
+                    expected_top_k=topk_value,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
 
-        latency_ms = int(round((perf_counter() - start) * 1000))
-        if latency_ms > timeout_value:
-            fallback_scores = _build_fallback_scores(normalized_candidates)
-            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                reason_code=RETR_RERANK_TIMEOUT,
-                detail=f"reranker slow: {latency_ms}ms>{timeout_value}ms",
-                latency_ms=latency_ms,
-                model_id=str(model_id or route.model_id),
-                provider=route.provider,
-                route_id=route.route_id,
-                query=normalized_query,
-                scores=fallback_scores,
-                topk=fallback_topk,
-                expected_top_k=topk_value,
-                node_selector=route.node_selector,
-                ts_ms=now_value,
-            )
+            latency_ms = int(round((perf_counter() - start) * 1000))
+            if latency_ms > timeout_value and _should_retry_reranker_cold_start(route.provider, attempt):
+                warm_retry_used = True
+                logger.warning(
+                    "Retrying reranker after cold-start slow call (%s/%s, %dms>%dms, attempt=%d)",
+                    route.provider,
+                    route.model_id,
+                    latency_ms,
+                    timeout_value,
+                    attempt,
+                )
+                attempt += 1
+                continue
+            if latency_ms > timeout_value:
+                fallback_scores = _build_fallback_scores(normalized_candidates)
+                fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    reason_code=RETR_RERANK_TIMEOUT,
+                    detail=f"reranker slow: {latency_ms}ms>{timeout_value}ms",
+                    latency_ms=latency_ms,
+                    model_id=str(model_id or route.model_id),
+                    provider=route.provider,
+                    route_id=route.route_id,
+                    query=normalized_query,
+                    scores=fallback_scores,
+                    topk=fallback_topk,
+                    expected_top_k=topk_value,
+                    node_selector=route.node_selector,
+                    ts_ms=now_value,
+                )
+            break
 
         normalized_scores, has_invalid_score = _normalize_scores(scores, len(normalized_candidates))
         if has_invalid_score:
@@ -355,6 +333,7 @@ class RerankerServiceContract:
             "stage": S_RET_RERANK,
             "reason_code": None,
             "degraded": False,
+            "warm_retry_used": warm_retry_used,
             "topk": topk,
         }
         self._log_event(
@@ -940,6 +919,10 @@ def _provider_accepts_route(provider: RerankProvider) -> bool:
     return positional >= 3
 
 
+def _should_retry_reranker_cold_start(provider_name: str, attempt: int) -> bool:
+    return int(attempt) < 2 and str(provider_name or "").strip().lower() in _COLD_START_RETRYABLE_RERANK_PROVIDERS
+
+
 def _build_cross_encoder_provider(*, device: str) -> RerankProvider:
     cache: dict[str, Any] = {}
     runtime_device = str(device or "cpu").strip() or "cpu"
@@ -1082,6 +1065,82 @@ def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
 
 
 # M28-O（OPT-40）：情感感知重排序辅助函数
+def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
+    cache: dict[str, Any] = {}
+    runtime_device = str(device or "cpu").strip() or "cpu"
+    system_prompt = (
+        'Judge whether the Document meets the requirements based on the Query and the Candidate Document, '
+        'output your judgement, the answer should be "yes" or "no".'
+    )
+    prefix = "<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n"
+    suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    query_doc_template = "Query: {query}\nCandidate Document: {doc}"
+
+    def _get_model_and_tokenizer(model_id: str) -> tuple[Any, Any, int, int]:
+        if model_id in cache:
+            return cache[model_id]
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
+        )
+        model.to(runtime_device)
+        model.eval()
+        yes_token_id = tokenizer.convert_tokens_to_ids("yes")
+        no_token_id = tokenizer.convert_tokens_to_ids("no")
+        if yes_token_id == tokenizer.unk_token_id or no_token_id == tokenizer.unk_token_id:
+            yes_token_id = tokenizer.convert_tokens_to_ids("Yes")
+            no_token_id = tokenizer.convert_tokens_to_ids("No")
+        cache[model_id] = (model, tokenizer, yes_token_id, no_token_id)
+        return model, tokenizer, yes_token_id, no_token_id
+
+    def _provider(
+        query: str,
+        candidates: list[dict[str, Any]],
+        route: RerankRouteConfig | None = None,
+    ) -> tuple[list[float], str]:
+        model_id = str(route.model_id).strip() if route is not None else "Qwen/Qwen3-Reranker-0.6B"
+        if not model_id:
+            model_id = "Qwen/Qwen3-Reranker-0.6B"
+        try:
+            import torch
+
+            model, tokenizer, yes_token_id, no_token_id = _get_model_and_tokenizer(model_id)
+            prompts = [
+                prefix.format(system=system_prompt)
+                + query_doc_template.format(
+                    query=query,
+                    doc=str(candidate.get("snippet") or candidate.get("text") or ""),
+                )
+                + suffix
+                for candidate in candidates
+            ]
+            inputs = tokenizer(
+                prompts,
+                padding=True,
+                truncation=True,
+                max_length=4096,
+                return_tensors="pt",
+            ).to(runtime_device)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                last_logits = outputs.logits[:, -1, :]
+                yes_logits = last_logits[:, yes_token_id].float()
+                no_logits = last_logits[:, no_token_id].float()
+                scores_tensor = torch.softmax(
+                    torch.stack([yes_logits, no_logits], dim=-1), dim=-1
+                )[:, 0]
+            scores = [round(float(score), 6) for score in scores_tensor.cpu().tolist()]
+            return scores, model_id
+        except Exception:
+            return _default_rerank_provider(query, candidates)
+
+    return _provider
+
+
 def _apply_emotion_boost(
     candidates: list[dict[str, Any]],
     scores: list[float],

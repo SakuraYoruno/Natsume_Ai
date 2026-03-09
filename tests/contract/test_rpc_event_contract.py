@@ -151,6 +151,20 @@ class TestValidateEvent:
         assert item.seq is None
         assert item.evidence_ref is None
 
+    def test_emotion_fields_preserved_from_top_level_or_payload(self) -> None:
+        item, err = validate_event({
+            "event_type": "ASR_CHUNK",
+            "ts_ms": 1000,
+            "request_id": "req",
+            "session_id": "sess",
+            "emotion_tag": "happy",
+            "payload": {"emotion_intensity": 0.82},
+        })
+        assert err is None
+        assert item is not None
+        assert item.emotion_tag == "HAPPY"
+        assert item.emotion_intensity == 0.82
+
 
 # ---------------------------------------------------------------------------
 # 批量校验

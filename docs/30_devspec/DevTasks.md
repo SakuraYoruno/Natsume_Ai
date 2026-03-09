@@ -7470,7 +7470,6 @@ TASK-XXXX 标题
 - 涉及文件路径：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
 
----
 
 ## M45 Edge 运行时装配收口
 
@@ -7484,7 +7483,7 @@ TASK-XXXX 标题
 
 ### TASK-0440 M45-A：edge_client/runtime/bootstrap.py
 
-- 状态：TODO
+- 状态：DONE（2026-03-06，`bootstrap/startup/shutdown` 已落地，含生命周期异常隔离与兼容别名）
 - 任务描述：新增 `edge_client/runtime/bootstrap.py`，实现 `bootstrap(config: EdgeConfig) -> EdgeRuntime` 函数，根据配置装配 ASR / TTS / VTS / Fallback / ResourceGate 等组件，统一管理生命周期（`startup` / `shutdown`）。
 - 输入：`EdgeConfig`（`edge_client/config.py`）；各组件工厂（`actuators/`、`senses/`、`rpc/`）。
 - 输出：
@@ -7508,7 +7507,7 @@ TASK-XXXX 标题
 
 ### TASK-0441 M45-B：edge_client/runtime/health.py
 
-- 状态：TODO
+- 状态：DONE（2026-03-06，`collect_health` 聚合规则已落地，旧 `build_edge_health_snapshot` 保持兼容）
 - 任务描述：新增 `edge_client/runtime/health.py`，实现 `collect_health(runtime: EdgeRuntime) -> dict` 函数，聚合各组件 `health()` 输出、ResourceGate `snapshot()`、队列深度，输出稳定的 health schema，供 `/health` 端点使用。
 - 输入：`EdgeRuntime`（TASK-0440）；各组件 `health()` 接口；`ResourceGate.snapshot()`。
 - 输出：
@@ -7530,7 +7529,7 @@ TASK-XXXX 标题
 
 ### TASK-0442 M45-C：修复 edge_client/__main__.py 启动入口
 
-- 状态：TODO
+- 状态：DONE（2026-03-06，`python -m edge_client` 接入 runtime 生命周期与 health 收口）
 - 任务描述：修复 `edge_client/__main__.py`，使其正确导入 `runtime.bootstrap` 和 `runtime.health`，完成 `python -m edge_client` 的完整启动流程（装配 → startup → 注册 `/health` 端点 → 启动 FastAPI）。
 - 输入：`edge_client/runtime/bootstrap.py`（TASK-0440）；`edge_client/runtime/health.py`（TASK-0441）；`edge_client/app/fastapi_app.py`。
 - 输出：
@@ -7551,7 +7550,7 @@ TASK-XXXX 标题
 
 ### TASK-0443 M45-D：全量测试 + 回归验证
 
-- 状态：TODO
+- 状态：DONE（2026-03-06，M45 新增测试 13/13 通过；全量回归已执行并记录 3 个非 M45 失败项）
 - 任务描述：TASK-0440~0442 全部 DONE 后，运行全量测试，确保 M45 新增测试全部通过，且无回归。
 - 输入：TASK-0440~0442 全部 DONE。
 - 输出：全量测试报告（`pytest --tb=short -q` 输出），0 failed。
@@ -7566,7 +7565,7 @@ TASK-XXXX 标题
 
 ### TASK-0444 M45-E：M45 代码审查报告
 
-- 状态：TODO
+- 状态：DONE（2026-03-06，审查报告 `docs/60_trace/code_reviews/code_review_m45_2026-03-06.md` 已生成）
 - 任务描述：TASK-0440~0443 全部 DONE 后，生成 M45 代码审查报告，记录 Edge 运行时装配收口的实现情况。
 - 输入：TASK-0440~0443 全部 DONE；全量测试 0 failed。
 - 输出：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
@@ -7579,7 +7578,3 @@ TASK-XXXX 标题
   - 全量测试无回归。
 - 涉及文件路径：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001；FR-EDGE-002。
-
-
-
-

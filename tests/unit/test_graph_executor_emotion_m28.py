@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from host_brain.integrations.graph_executor import GraphExecutor
 from host_brain.integrations.graph_contract import STATUS_OK
@@ -72,3 +74,59 @@ def _make_executor_with_capture(captured: dict) -> GraphExecutor:
         handlers={"test_handler": mock_handler},
         gateway_factory=lambda **kwargs: None,
     )
+
+
+def test_model_node_passes_emotion_context_to_gateway() -> None:
+    captured: dict = {}
+
+    class _Gateway:
+        def generate(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return SimpleNamespace(
+                success=True,
+                status="OK",
+                reason_code=None,
+                output={
+                    "payload": {
+                        "narrative": {"text": "ok"},
+                        "intent_draft": {},
+                        "meta": {"draft_only": True},
+                    }
+                },
+            )
+
+    executor = GraphExecutor(
+        handlers={},
+        gateway_factory=lambda **kwargs: _Gateway(),
+    )
+    state = {
+        "request_id": "req-graph-emo-model",
+        "graph_id": "graph-emo-model",
+        "timeout_ms": 5000,
+        "payload": {},
+        "edge_map": {},
+        "model_profile_id": "chat_ja_24x7_v1",
+        "model_calls": [],
+        "model_nodes": {
+            "core_reasoner_primary": {
+                "provider": "mock",
+                "model_id": "mock-model",
+                "timeout_ms": 3000,
+                "available": True,
+            }
+        },
+        "emotion_context": {
+            "mood_state": "engaged",
+            "emotion_tag": "HAPPY",
+            "emotion_range_hint": "可以表达积极情感",
+        },
+    }
+
+    result = executor._invoke_model_node(
+        node_id="core_reasoner_primary",
+        binding={"model_node_id": "core_reasoner_primary", "task": "chat"},
+        state=state,
+    )
+    assert dict(captured.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
+    assert dict(captured.get("emotion_context") or {}).get("mood_state") == "engaged"
+    assert result.get("__orchestration_status__") == "OK"

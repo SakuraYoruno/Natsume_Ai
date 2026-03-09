@@ -168,10 +168,14 @@
 - CHANNEL_IO：微信/通道（确定性外显，模型只写草案文本）
 
 4.2 两段式输出链路（强制）
-- S1：core_reasoner_primary →（必要时 safety_verifier）→ Host QA/Governor
-- S2：renderer_ja_c_style → Host RenderGuard
+- CHAT（最小链路）：core_reasoner_primary → consistency_verifier → renderer_ja_c_style
+- EXEC_INTENT：core_reasoner_primary → planner_constraints → tool_planner → safety_verifier → consistency_verifier → renderer_ja_c_style
+- WORK_TRANSLATE：core_reasoner_primary → workbench_translate → consistency_verifier → renderer_ja_c_style
+- WORK_CODE：core_reasoner_primary → workbench_code_assist → consistency_verifier → renderer_ja_c_style
+- safety_verifier 在 CHAT 中默认非必经，仅在高风险触发（执行承诺/越权倾向/高风险领域建议等）时插入到 consistency_verifier 前。
 规则：
 - intent_draft 只能来自 S1；S2 不得新增/修改 intent_draft。
+- consistency_verifier 作为对外输出前的一致性闸门，默认不得跳过（故障降级链路除外）。
 
 4.3 3–5 秒开口（在场回应 + 超时退化）
 - t0：Host 立即输出“在场回应模板”（不承诺执行），并启动云调用
@@ -225,6 +229,8 @@
 
 - T-LLM-01：CoreDraft/RenderDraft/Verifier 输出 Strict JSON（单对象、无前后缀、字段最小集）
 - T-Render-01：渲染不得加料/不得升级承诺与证据/不得引入 intent
+- T-Route-CHAT-01：CHAT 最小链路固定为 core_reasoner_primary → consistency_verifier → renderer_ja_c_style
+- T-Route-CHAT-02：CHAT 中 safety_verifier 默认不触发；命中高风险触发条件时必须出现在 consistency_verifier 之前
 - T-CP-01：context_pack 分槽隔离（world/style/episodic/tool_meta 不混槽）
 - T-Intent-01：intent_log 字段最小集（proposer/tool_visibility_hash 等）
 - T-Intent-02：proposal/decision/exec 分离（intent_log 不得支撑完成性表述）

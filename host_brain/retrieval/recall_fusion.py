@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -26,6 +27,14 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.memory.chroma_client import InMemoryChromaClient
+from host_brain.retrieval.recall_schemas import (
+    RecallConfigIssue,
+    RecallConfigLoadResult,
+    RecallFusionResult,
+    RecallRouteConfig,
+    RecallRuntimeConfig,
+)
+
 
 
 S_RET_RECALL = "S_RET_RECALL"
@@ -35,12 +44,21 @@ RET_OP_RECALL = "RECALL"
 STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
 
+logger = logging.getLogger("Natsume.retrieval.recall_fusion")
+
 DEFAULT_RECALL_ROUTE = "default"
 DEFAULT_RECALL_COLLECTION = "episodic"
+DEFAULT_CANON_VECTOR_COLLECTION = "canon"
 DEFAULT_RECALL_STORE_ID = "episodic_vector"
 DEFAULT_RECALL_TOP_K = 8
 DEFAULT_RECALL_SCORE_WEIGHT = 1.0
 DEFAULT_NODE_SELECTOR = "default"
+CANON_VECTOR_FETCH_FACTOR = 5
+SQLITE_SESSION_BOOST = 0.25
+SQLITE_RECENCY_BOOST_5M = 0.20
+SQLITE_RECENCY_BOOST_1H = 0.10
+SQLITE_RECENCY_BOOST_1D = 0.05
+_SESSION_REF_PREFIX = "chat://session/"
 
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_NEO4J_BOND = "neo4j_bond"
@@ -63,85 +81,6 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset(
 # 混合检索默认权重（TASK-0202）
 DEFAULT_VECTOR_WEIGHT: float = 0.7
 DEFAULT_FTS_WEIGHT: float = 0.3
-
-
-@dataclass(frozen=True)
-class RecallRouteConfig:
-    route_id: str
-    store_id: str
-    collection: str | None
-    top_k: int
-    score_weight: float
-    node_selector: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "route_id": self.route_id,
-            "store_id": self.store_id,
-            "collection": self.collection,
-            "top_k": int(self.top_k),
-            "score_weight": float(self.score_weight),
-            "node_selector": self.node_selector,
-        }
-
-
-@dataclass(frozen=True)
-class RecallRuntimeConfig:
-    enabled: bool
-    default_route: str
-    routes: dict[str, RecallRouteConfig]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "default_route": self.default_route,
-            "routes": {
-                route_id: route.as_dict()
-                for route_id, route in sorted(self.routes.items())
-            },
-        }
-
-
-@dataclass(frozen=True)
-class RecallConfigIssue:
-    reason_code: str
-    detail: str
-    field: str | None = None
-
-
-@dataclass(frozen=True)
-class RecallConfigLoadResult:
-    success: bool
-    stage: str
-    reason_code: str | None
-    config: RecallRuntimeConfig | None
-    issues: tuple[RecallConfigIssue, ...]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "stage": self.stage,
-            "reason_code": self.reason_code,
-            "config": (self.config.as_dict() if self.config is not None else None),
-            "issues": [
-                {
-                    "reason_code": issue.reason_code,
-                    "detail": issue.detail,
-                    "field": issue.field,
-                }
-                for issue in self.issues
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class RecallFusionResult:
-    success: bool
-    status: str
-    reason_code: str | None
-    stage: str
-    detail: str
-    output: dict[str, Any]
 
 
 class RecallFusionServiceContract:
@@ -191,6 +130,8 @@ class RecallFusionServiceContract:
         route: RecallRouteConfig,
         query: str,
         query_embedding: list[float],
+        session_id: str | None = None,
+        now_ts_ms: int | None = None,
     ) -> list[dict[str, Any]]:
         store_id = str(route.store_id or STORE_EPISODIC_VECTOR).strip().lower()
         if store_id == STORE_EPISODIC_VECTOR:
@@ -201,23 +142,47 @@ class RecallFusionServiceContract:
                 collection=collection,
             )
         if store_id == STORE_SQLITE_LEDGER:
-            return self._search_sqlite_ledger(query=query, top_k=int(route.top_k))
+            return self._search_sqlite_ledger(
+                query=query,
+                top_k=int(route.top_k),
+                session_id=session_id,
+                now_ts_ms=now_ts_ms,
+            )
         if store_id == STORE_NEO4J_BOND:
             return self._search_neo4j_bond(query=query, top_k=int(route.top_k))
         if store_id == STORE_STYLE_CANON:
-            return self._search_style_canon(query=query, top_k=int(route.top_k))
+            return self._search_style_canon(
+                query=query,
+                query_embedding=query_embedding,
+                top_k=int(route.top_k),
+                collection=route.collection,
+            )
         if store_id == STORE_WORLD_CANON:
-            return self._search_world_canon(query=query, top_k=int(route.top_k))
+            return self._search_world_canon(
+                query=query,
+                query_embedding=query_embedding,
+                top_k=int(route.top_k),
+                collection=route.collection,
+            )
         if store_id == STORE_ARTIFACT_VAULT:
             return self._search_artifact_vault(query=query, top_k=int(route.top_k))
         raise RuntimeError(f"unsupported recall store_id: {store_id}")
 
-    def _search_sqlite_ledger(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+    def _search_sqlite_ledger(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        session_id: str | None = None,
+        now_ts_ms: int | None = None,
+    ) -> list[dict[str, Any]]:
         if self.ledger is None:
             raise RuntimeError("sqlite ledger unavailable")
-        rows = list(self.ledger.intent_log)
+        current_ts = int(now_ts_ms if now_ts_ms is not None else now_ms())
+        normalized_session_id = str(session_id or "").strip()
         scored: list[tuple[float, dict[str, Any]]] = []
-        for row in rows:
+
+        for row in list(self.ledger.intent_log):
             if not isinstance(row, Mapping):
                 continue
             raw_text = str(row.get("raw_text") or "").strip()
@@ -231,6 +196,15 @@ class RecallFusionServiceContract:
             score = _text_similarity_score(query, text)
             if score <= 0.0:
                 continue
+            row_session_id = str(row.get("session_id") or "").strip() or None
+            row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
+            boosted_score, boost_meta = _apply_sqlite_ledger_boost(
+                base_score=score,
+                row_ts_ms=row_ts,
+                now_ts_ms=current_ts,
+                row_session_id=row_session_id,
+                target_session_id=normalized_session_id,
+            )
             request_id = str(row.get("request_id") or "").strip() or None
             intent_id = str(row.get("intent_id") or "").strip() or None
             memory_id = str(intent_id or request_id or f"ledger_{len(scored)}")
@@ -240,16 +214,19 @@ class RecallFusionServiceContract:
             )
             scored.append(
                 (
-                    score,
+                    boosted_score,
                     {
                         "memory_id": memory_id,
                         "text": _truncate_text_for_recall(text, limit=512),
-                        "score": score,
+                        "score": boosted_score,
                         "metadata": {
                             "store_id": STORE_SQLITE_LEDGER,
                             "request_id": request_id,
                             "intent_id": intent_id,
+                            "session_id": row_session_id,
                             "event_id": (str(row.get("event_id") or "").strip() or None),
+                            "base_score": score,
+                            "score_boost": boost_meta,
                             "evidence_refs": evidence_refs,
                             "source_ref": f"ledger://intent_log/{memory_id}",
                             "evidence_refs_primary": evidence_refs[0] if evidence_refs else f"ledger://intent/{memory_id}",
@@ -257,14 +234,91 @@ class RecallFusionServiceContract:
                     },
                 )
             )
-        return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+        for row in list(self.ledger.memory_ops_log):
+            if not isinstance(row, Mapping):
+                continue
+            op_kind = str(row.get("op_kind") or "").strip().upper()
+            if op_kind != "WRITE":
+                continue
+            status = str(row.get("status") or "").strip().upper()
+            if status and status != "SUCCESS":
+                continue
+
+            memory_id = str(row.get("memory_id") or "").strip() or f"memop_{len(scored)}"
+            request_id = str(row.get("request_id") or "").strip() or None
+            intent_id = str(row.get("intent_id") or "").strip() or None
+            detail = str(row.get("detail") or "").strip()
+            evidence_refs = _normalize_recall_refs(
+                row.get("evidence_refs"),
+                fallback=(f"memory://episodic/{memory_id}" if memory_id else None),
+            )
+            row_session_id = _extract_session_id_from_refs(evidence_refs)
+            row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
+            text = " ".join(
+                part
+                for part in (
+                    detail,
+                    memory_id,
+                    " ".join(evidence_refs),
+                )
+                if part
+            ).strip()
+            score = _text_similarity_score(query, text)
+            if score <= 0.0:
+                continue
+            boosted_score, boost_meta = _apply_sqlite_ledger_boost(
+                base_score=score,
+                row_ts_ms=row_ts,
+                now_ts_ms=current_ts,
+                row_session_id=row_session_id,
+                target_session_id=normalized_session_id,
+            )
+            scored.append(
+                (
+                    boosted_score,
+                    {
+                        "memory_id": memory_id,
+                        "text": _truncate_text_for_recall(text, limit=512),
+                        "score": boosted_score,
+                        "metadata": {
+                            "store_id": STORE_SQLITE_LEDGER,
+                            "request_id": request_id,
+                            "intent_id": intent_id,
+                            "session_id": row_session_id,
+                            "op_kind": op_kind,
+                            "status": status or None,
+                            "base_score": score,
+                            "score_boost": boost_meta,
+                            "evidence_refs": evidence_refs,
+                            "source_ref": f"ledger://memory_ops_log/{memory_id}",
+                            "evidence_refs_primary": (
+                                evidence_refs[0] if evidence_refs else f"memory://episodic/{memory_id}"
+                            ),
+                        },
+                    },
+                )
+            )
+        return [
+            item
+            for _score, item in sorted(
+                scored,
+                key=lambda pair: _sqlite_candidate_sort_key(score=pair[0], candidate=pair[1]),
+            )[: max(1, int(top_k))]
+        ]
 
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         records: list[Mapping[str, Any]] = []
-        events_attr = getattr(self.neo4j, "events", None)
-        if isinstance(events_attr, list):
-            records = [row for row in events_attr if isinstance(row, Mapping)]
-        elif self.ledger is not None:
+        try:
+            events_attr = getattr(self.neo4j, "events", None)
+            if isinstance(events_attr, list):
+                records = [row for row in events_attr if isinstance(row, Mapping)]
+        except Exception as exc:
+            # Neo4j route is best-effort in online chat retrieval:
+            # when graph store is unavailable, fallback to sqlite bond_update_log.
+            logger.warning("neo4j recall route unavailable, fallback to sqlite bond log: %s", exc)
+            records = []
+        if not records and self.ledger is not None:
             records = [row for row in self.ledger.bond_update_log if isinstance(row, Mapping)]
         if not records:
             return []
@@ -313,7 +367,30 @@ class RecallFusionServiceContract:
             )
         return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
 
-    def _search_style_canon(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+    def _search_style_canon(
+        self,
+        *,
+        query: str,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+    ) -> list[dict[str, Any]]:
+        # Vector projection is preferred; file search is deterministic fallback.
+        try:
+            vector_rows = self._search_canon_projection_vector(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                collection=collection,
+                canon_kind="style",
+                store_id=STORE_STYLE_CANON,
+            )
+            if vector_rows:
+                return vector_rows
+        except Exception:
+            pass
+        return self._search_style_canon_file(query=query, top_k=top_k)
+
+    def _search_style_canon_file(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         if self.style_store is None:
             return []
         entries = getattr(self.style_store, "list_entries", lambda: [])()
@@ -350,7 +427,30 @@ class RecallFusionServiceContract:
             )
         return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
 
-    def _search_world_canon(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
+    def _search_world_canon(
+        self,
+        *,
+        query: str,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+    ) -> list[dict[str, Any]]:
+        # Vector projection is preferred; file search is deterministic fallback.
+        try:
+            vector_rows = self._search_canon_projection_vector(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                collection=collection,
+                canon_kind="world",
+                store_id=STORE_WORLD_CANON,
+            )
+            if vector_rows:
+                return vector_rows
+        except Exception:
+            pass
+        return self._search_world_canon_file(query=query, top_k=top_k)
+
+    def _search_world_canon_file(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         if self.world_store is None:
             return []
         docs = getattr(self.world_store, "list_documents", lambda: [])()
@@ -387,6 +487,102 @@ class RecallFusionServiceContract:
                 )
             )
         return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
+
+    def _search_canon_projection_vector(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+        canon_kind: str,
+        store_id: str,
+    ) -> list[dict[str, Any]]:
+        target_collection = str(collection or DEFAULT_CANON_VECTOR_COLLECTION).strip()
+        if not target_collection:
+            target_collection = DEFAULT_CANON_VECTOR_COLLECTION
+        fetch_k = max(1, int(top_k)) * CANON_VECTOR_FETCH_FACTOR
+        rows = self.chroma.search(
+            query_embedding=query_embedding,
+            top_k=fetch_k,
+            collection=target_collection,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            metadata = row.get("metadata")
+            normalized_metadata = dict(metadata or {}) if isinstance(metadata, Mapping) else {}
+            row_kind = str(normalized_metadata.get("canon_kind") or "").strip().lower()
+            if row_kind and row_kind != canon_kind:
+                continue
+
+            memory_id = str(row.get("memory_id") or "").strip()
+            if not memory_id:
+                continue
+
+            score = _coerce_score(row.get("score"))
+            if score <= 0.0:
+                continue
+
+            version = _coerce_non_negative_int(normalized_metadata.get("version"), default=0)
+            content_hash = str(normalized_metadata.get("hash") or "").strip() or "unknown"
+            snippet = _truncate_text_for_recall(str(row.get("text") or ""), limit=512)
+
+            if canon_kind == "style":
+                canon_id = str(normalized_metadata.get("canon_id") or "").strip()
+                if not canon_id:
+                    canon_id = _extract_canon_entity_id(memory_id, "canon_style") or memory_id
+                source_ref = str(normalized_metadata.get("source_ref") or f"style_canon://{canon_id}@v{version}")
+                evidence_primary = str(
+                    normalized_metadata.get("evidence_ref")
+                    or normalized_metadata.get("evidence_refs_primary")
+                    or source_ref
+                )
+                payload = {
+                    "memory_id": canon_id,
+                    "text": snippet,
+                    "score": score,
+                    "metadata": {
+                        "store_id": store_id,
+                        "canon_kind": canon_kind,
+                        "canon_id": canon_id,
+                        "version": version,
+                        "hash": content_hash,
+                        "vector_collection": target_collection,
+                        "evidence_refs": [source_ref],
+                        "source_ref": source_ref,
+                        "evidence_refs_primary": evidence_primary,
+                    },
+                }
+            else:
+                doc_id = str(normalized_metadata.get("doc_id") or "").strip()
+                if not doc_id:
+                    doc_id = _extract_canon_entity_id(memory_id, "canon_world") or memory_id
+                source_ref = str(normalized_metadata.get("source_ref") or f"world_canon://{doc_id}@v{version}")
+                evidence_primary = str(
+                    normalized_metadata.get("evidence_ref")
+                    or normalized_metadata.get("evidence_refs_primary")
+                    or source_ref
+                )
+                payload = {
+                    "memory_id": doc_id,
+                    "text": snippet,
+                    "score": score,
+                    "metadata": {
+                        "store_id": store_id,
+                        "canon_kind": canon_kind,
+                        "doc_id": doc_id,
+                        "version": version,
+                        "hash": content_hash,
+                        "vector_collection": target_collection,
+                        "evidence_refs": [source_ref],
+                        "source_ref": source_ref,
+                        "evidence_refs_primary": evidence_primary,
+                    },
+                }
+            candidates.append(payload)
+        return sorted(candidates, key=lambda row: -float(row["score"]))[: max(1, int(top_k))]
 
     def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         # M31-A：通过 SSOT 接口读取，消除对 self.ledger.vault_manifest_index 的旁路访问
@@ -451,6 +647,7 @@ class RecallFusionServiceContract:
         query: str,
         query_embedding: list[float] | tuple[float, ...] | Any,
         intent_id: str | None = None,
+        session_id: str | None = None,
         ts_ms: int | None = None,
         emotion_filter: str | None = None,
     ) -> RecallFusionResult:
@@ -511,6 +708,8 @@ class RecallFusionServiceContract:
                     route=route,
                     query=normalized_query,
                     query_embedding=normalized_vector,
+                    session_id=session_id,
+                    now_ts_ms=now_value,
                 )
             except Exception as exc:
                 reason_code = _map_route_exception(exc, store_id=route.store_id)
@@ -568,10 +767,7 @@ class RecallFusionServiceContract:
                 merged["metadata"]["matched_routes"] = merged_routes
                 fused_candidates[key] = merged
 
-        candidates = sorted(
-            fused_candidates.values(),
-            key=lambda row: (-float(row["score"]), str(row["doc_id"]), str(row["source_ref"])),
-        )
+        candidates = sorted(fused_candidates.values(), key=_candidate_sort_key)
 
         # 混合检索：叠加 FTS5 全文检索结果（TASK-0202）
         if self.use_hybrid and self._fts_searcher is not None:
@@ -905,7 +1101,8 @@ def _coerce_route(
         )
         return None
 
-    store_id = str(raw_route.get("store_id") or DEFAULT_RECALL_STORE_ID).strip().lower()
+    store_raw = raw_route.get("store_id")
+    store_id = str(store_raw or "").strip().lower()
     collection_raw = raw_route.get("collection")
     collection = str(collection_raw).strip() if collection_raw is not None else ""
     node_selector = str(raw_route.get("node_selector") or "").strip()
@@ -920,6 +1117,14 @@ def _coerce_route(
         issues=issues,
     )
 
+    if not store_id:
+        issues.append(
+            RecallConfigIssue(
+                reason_code=CONFIG_REQUIRED_MISSING,
+                detail=f"{field_name}.{route_id}.store_id is required",
+                field=f"{field_name}.{route_id}.store_id",
+            )
+        )
     if store_id not in SUPPORTED_RECALL_STORE_IDS:
         issues.append(
             RecallConfigIssue(
@@ -947,7 +1152,13 @@ def _coerce_route(
                 field=f"{field_name}.{route_id}.node_selector",
             )
         )
-    if top_k is None or score_weight is None or not node_selector or store_id not in SUPPORTED_RECALL_STORE_IDS:
+    if (
+        top_k is None
+        or score_weight is None
+        or not node_selector
+        or not store_id
+        or store_id not in SUPPORTED_RECALL_STORE_IDS
+    ):
         return None
 
     normalized_collection = collection if collection else store_id
@@ -1023,6 +1234,55 @@ def _normalize_recall_refs(raw_refs: Any, *, fallback: str | None = None) -> lis
     return refs
 
 
+def _extract_session_id_from_refs(refs: list[str]) -> str | None:
+    prefix = _SESSION_REF_PREFIX
+    for ref in refs:
+        value = str(ref or "").strip()
+        if value.startswith(prefix):
+            session_id = value[len(prefix):].strip()
+            if session_id:
+                return session_id
+    return None
+
+
+def _compute_recency_boost(*, row_ts_ms: int, now_ts_ms: int) -> float:
+    if row_ts_ms <= 0 or now_ts_ms <= 0:
+        return 0.0
+    age_ms = max(0, int(now_ts_ms) - int(row_ts_ms))
+    if age_ms <= 5 * 60 * 1000:
+        return SQLITE_RECENCY_BOOST_5M
+    if age_ms <= 60 * 60 * 1000:
+        return SQLITE_RECENCY_BOOST_1H
+    if age_ms <= 24 * 60 * 60 * 1000:
+        return SQLITE_RECENCY_BOOST_1D
+    return 0.0
+
+
+def _apply_sqlite_ledger_boost(
+    *,
+    base_score: float,
+    row_ts_ms: int,
+    now_ts_ms: int,
+    row_session_id: str | None,
+    target_session_id: str | None,
+) -> tuple[float, dict[str, Any]]:
+    normalized_row_session = str(row_session_id or "").strip()
+    normalized_target_session = str(target_session_id or "").strip()
+    session_boost = (
+        SQLITE_SESSION_BOOST
+        if normalized_row_session and normalized_row_session == normalized_target_session
+        else 0.0
+    )
+    recency_boost = _compute_recency_boost(row_ts_ms=row_ts_ms, now_ts_ms=now_ts_ms)
+    boosted = round(min(1.0, max(0.0, float(base_score) + session_boost + recency_boost)), 6)
+    return boosted, {
+        "session_boost": round(session_boost, 6),
+        "recency_boost": round(recency_boost, 6),
+        "row_ts_ms": int(row_ts_ms),
+        "now_ts_ms": int(now_ts_ms),
+    }
+
+
 def _text_similarity_score(query: str, text: str) -> float:
     query_tokens = _tokenize_for_similarity(query)
     if not query_tokens:
@@ -1054,6 +1314,66 @@ def _coerce_score(raw_value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return round(max(0.0, min(1.0, value)), 6)
+
+
+def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[float, float, int, str, str]:
+    score = _coerce_score(row.get("score"))
+    metadata = row.get("metadata")
+    boost_total = 0.0
+    row_ts_ms = 0
+    if isinstance(metadata, Mapping):
+        boost_total, row_ts_ms = _score_boost_priority(metadata)
+    return (
+        -score,
+        -boost_total,
+        -int(row_ts_ms),
+        str(row.get("doc_id") or ""),
+        str(row.get("source_ref") or ""),
+    )
+
+
+def _sqlite_candidate_sort_key(*, score: float, candidate: Mapping[str, Any]) -> tuple[float, float, int, str]:
+    metadata = candidate.get("metadata")
+    boost_total = 0.0
+    row_ts_ms = 0
+    if isinstance(metadata, Mapping):
+        boost_total, row_ts_ms = _score_boost_priority(metadata)
+    return (-float(score), -boost_total, -int(row_ts_ms), str(candidate.get("memory_id") or ""))
+
+
+def _score_boost_priority(metadata: Mapping[str, Any]) -> tuple[float, int]:
+    raw_boost = metadata.get("score_boost")
+    if not isinstance(raw_boost, Mapping):
+        return 0.0, 0
+    session_boost = _coerce_non_negative_float(raw_boost.get("session_boost"), default=0.0)
+    recency_boost = _coerce_non_negative_float(raw_boost.get("recency_boost"), default=0.0)
+    row_ts_ms = _coerce_non_negative_int(raw_boost.get("row_ts_ms"), default=0)
+    return round(session_boost + recency_boost, 6), row_ts_ms
+
+
+def _coerce_non_negative_float(raw_value: Any, *, default: float = 0.0) -> float:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return float(default)
+    return max(0.0, float(value))
+
+
+def _coerce_non_negative_int(raw_value: Any, *, default: int = 0) -> int:
+    try:
+        value = int(raw_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return int(default)
+    return max(0, int(value))
+
+
+def _extract_canon_entity_id(memory_id: str, prefix: str) -> str | None:
+    value = str(memory_id or "").strip()
+    marker = f"{str(prefix).strip()}::"
+    if value.startswith(marker):
+        tail = value[len(marker):].strip()
+        return tail or None
+    return None
 
 
 def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
@@ -1188,326 +1508,8 @@ def _normalize_vector(raw: list[float] | tuple[float, ...] | Any) -> list[float]
 
 # ── FullTextSearcher（TASK-0202）────────────────────────────────────────────
 
-class FullTextSearcher:
-    """基于 SQLite FTS5 的全文检索器。
-
-    使用 episodic_fts 虚拟表（由 0021_episodic_fts5.sql 迁移创建）进行全文检索。
-    支持中文字符边界分割（unicode61 tokenizer）。
-
-    TASK-0210 M23-A：修复中文词组检索失效问题。
-    unicode61 tokenizer 按单字分词，多字中文词组（如"猫咪"）无法作为整体 token 命中。
-    修复方案：对中文字符进行字符级分割，写入和查询时均使用空格分隔的单字序列，
-    使 FTS5 MATCH 语法能正确匹配中文内容。
-    """
-
-    def __init__(self, *, db_path: str | None = None) -> None:
-        """初始化 FTS5 检索器。
-
-        Args:
-            db_path: SQLite 数据库路径。None 时使用内存数据库（仅用于测试）。
-
-        Raises:
-            RuntimeError: 如果 FTS5 虚拟表不可用。
-        """
-        self._db_path = db_path or ":memory:"
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._ensure_fts_table()
-
-    def _ensure_fts_table(self) -> None:
-        """确保 episodic_fts 虚拟表存在（若不存在则创建）。"""
-        try:
-            self._conn.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(
-                    memory_id UNINDEXED,
-                    content,
-                    tokenize = "unicode61"
-                )
-                """
-            )
-            self._conn.commit()
-        except sqlite3.OperationalError as exc:
-            raise RuntimeError(f"FTS5 虚拟表创建失败（SQLite 可能不支持 FTS5）: {exc}") from exc
-
-    @staticmethod
-    def _split_chinese_query(text: str) -> str:
-        """将文本中的中文字符进行字符级分割，非中文词保留原样。
-
-        TASK-0210 M23-A：unicode61 tokenizer 对中文按单字分词，
-        因此查询词"猫咪"需要拆分为"猫 咪"才能命中索引中的单字 token。
-        非中文词（英文、数字等）保留原词，不做拆分。
-
-        Args:
-            text: 原始查询文本。
-
-        Returns:
-            处理后的 FTS5 查询字符串，中文字符以空格分隔。
-
-        Examples:
-            >>> FullTextSearcher._split_chinese_query("猫咪")
-            '猫 咪'
-            >>> FullTextSearcher._split_chinese_query("工作压力大")
-            '工 作 压 力 大'
-            >>> FullTextSearcher._split_chinese_query("hello world")
-            'hello world'
-            >>> FullTextSearcher._split_chinese_query("用户喜欢cats")
-            '用 户 喜 欢 cats'
-        """
-        if not text:
-            return text
-        tokens: list[str] = []
-        current_non_chinese: list[str] = []
-        for ch in text:
-            # 判断是否为中文字符（CJK 统一汉字基本区及扩展区）
-            cp = ord(ch)
-            is_chinese = (
-                0x4E00 <= cp <= 0x9FFF   # CJK 统一汉字
-                or 0x3400 <= cp <= 0x4DBF  # CJK 扩展 A
-                or 0x20000 <= cp <= 0x2A6DF  # CJK 扩展 B
-                or 0x2A700 <= cp <= 0x2CEAF  # CJK 扩展 C/D/E
-                or 0xF900 <= cp <= 0xFAFF   # CJK 兼容汉字
-            )
-            if is_chinese:
-                # 先把积累的非中文词 flush
-                if current_non_chinese:
-                    tokens.append("".join(current_non_chinese).strip())
-                    current_non_chinese = []
-                # 中文字符单独作为一个 token
-                tokens.append(ch)
-            else:
-                current_non_chinese.append(ch)
-        # flush 剩余非中文
-        if current_non_chinese:
-            tokens.append("".join(current_non_chinese).strip())
-        # 过滤空串，用空格连接
-        return " ".join(t for t in tokens if t)
-
-    @staticmethod
-    def _prepare_content_for_index(content: str) -> str:
-        """将文本内容预处理为适合 FTS5 unicode61 索引的格式。
-
-        中文字符进行字符级分割，确保写入索引时与查询时的分词策略一致。
-
-        Args:
-            content: 原始文本内容。
-
-        Returns:
-            处理后的文本，中文字符以空格分隔。
-        """
-        return FullTextSearcher._split_chinese_query(content)
-
-    def index_memory(self, *, memory_id: str, content: str) -> None:
-        """将一条 Episodic 记忆写入 FTS5 索引。
-
-        TASK-0210 M23-A：写入时对中文内容进行字符级分割，
-        确保索引与查询时的分词策略一致。
-
-        Args:
-            memory_id: 记忆唯一 ID。
-            content: 记忆文本内容。
-        """
-        # 对中文内容进行字符级分割，与查询时保持一致
-        indexed_content = self._prepare_content_for_index(str(content or ""))
-        # 先删除旧记录（幂等写入）
-        self._conn.execute("DELETE FROM episodic_fts WHERE memory_id = ?", (memory_id,))
-        self._conn.execute(
-            "INSERT INTO episodic_fts(memory_id, content) VALUES (?, ?)",
-            (memory_id, indexed_content),
-        )
-        self._conn.commit()
-
-    def search(self, query: str, *, top_k: int = 8) -> list[dict[str, Any]]:
-        """全文检索，返回匹配的记忆列表。
-
-        TASK-0210 M23-A：对中文查询词进行字符级分割，
-        使 FTS5 MATCH 语法能正确匹配 unicode61 单字索引。
-
-        Args:
-            query: 检索查询文本。
-            top_k: 最多返回条数。
-
-        Returns:
-            候选列表，每条含 doc_id / snippet / fts_score（归一化到 [0, 1]）。
-        """
-        if not str(query or "").strip():
-            return []
-        # 对中文查询词进行字符级分割，与索引写入时保持一致
-        fts_query = self._split_chinese_query(str(query).strip())
-        if not fts_query:
-            return []
-        try:
-            # FTS5 使用 bm25() 函数计算相关性分数（负值，越小越相关）
-            rows = self._conn.execute(
-                """
-                SELECT memory_id, content, bm25(episodic_fts) AS bm25_score
-                FROM episodic_fts
-                WHERE episodic_fts MATCH ?
-                ORDER BY bm25_score
-                LIMIT ?
-                """,
-                (fts_query, int(top_k)),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            # FTS5 查询语法错误或表不存在时降级返回空
-            return []
-
-        if not rows:
-            return []
-
-        # 将 bm25 负分归一化到 [0, 1]（最相关 → 1.0）
-        raw_scores = [float(row["bm25_score"]) for row in rows]
-        min_score = min(raw_scores)
-        max_score = max(raw_scores)
-        score_range = abs(max_score - min_score)
-
-        results: list[dict[str, Any]] = []
-        for row, raw_score in zip(rows, raw_scores):
-            if score_range < 1e-9:
-                # 所有结果分数相同（含单条命中），均视为最相关 → 1.0
-                normalized = 1.0
-            else:
-                # bm25 分数为负，越小（绝对值越大）越相关
-                # 最小分（最相关）→ 1.0，最大分（最不相关）→ 0.0
-                normalized = round((raw_score - max_score) / (-score_range), 6)
-                normalized = max(0.0, min(1.0, normalized))
-            results.append({
-                "doc_id": str(row["memory_id"]),
-                "snippet": str(row["content"])[:512],
-                "fts_score": normalized,
-            })
-        return results
-
-    def close(self) -> None:
-        """关闭数据库连接。"""
-        try:
-            self._conn.close()
-        except Exception:
-            pass
-
 
 # ── HybridFusionStrategy（TASK-0202）────────────────────────────────────────
-
-class HybridFusionStrategy:
-    """向量检索 + 全文检索混合融合策略。
-
-    融合公式：final_score = vector_score × vector_weight + fts_score × fts_weight
-    要求：vector_weight + fts_weight == 1.0（否则抛出 ValueError）。
-    """
-
-    def __init__(
-        self,
-        *,
-        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
-        fts_weight: float = DEFAULT_FTS_WEIGHT,
-    ) -> None:
-        """初始化混合融合策略。
-
-        Args:
-            vector_weight: 向量检索权重（默认 0.7）。
-            fts_weight: 全文检索权重（默认 0.3）。
-
-        Raises:
-            ValueError: 如果 vector_weight + fts_weight != 1.0。
-        """
-        total = round(float(vector_weight) + float(fts_weight), 6)
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError(
-                f"vector_weight + fts_weight 必须等于 1.0，当前为 {total}"
-            )
-        self.vector_weight = float(vector_weight)
-        self.fts_weight = float(fts_weight)
-
-    def fuse(
-        self,
-        *,
-        vector_candidates: list[dict[str, Any]],
-        fts_candidates: list[dict[str, Any]],
-        # M29-O（OPT-?）：情感强度加权
-        emotion_context: str | None = None,
-        emotion_boost_factor: float = 1.2,
-    ) -> list[dict[str, Any]]:
-        """融合向量检索和全文检索结果。
-
-        M29-O（OPT-?）：支持情感强度加权——emotion_context 匹配的候选项分数加权。
-
-        Args:
-            vector_candidates: 向量检索候选列表（含 doc_id / score 字段）。
-            fts_candidates: 全文检索候选列表（含 doc_id / fts_score 字段）。
-            emotion_context: 当前情感上下文标签（如 "HAPPY"），匹配时加权
-            emotion_boost_factor: 情感匹配加权系数（默认 1.2x）
-
-        Returns:
-            融合后的候选列表，按 final_score 降序排列，同 doc_id 去重保留最高分。
-        """
-        # 构建 doc_id → 候选 映射
-        fused: dict[str, dict[str, Any]] = {}
-
-        # 处理向量检索结果
-        for cand in vector_candidates:
-            doc_id = str(cand.get("doc_id") or "")
-            if not doc_id:
-                continue
-            vector_score = float(cand.get("score") or 0.0)
-            entry = dict(cand)
-            entry["vector_score"] = vector_score
-            entry["fts_score"] = 0.0
-            entry["score"] = round(vector_score * self.vector_weight, 6)
-            fused[doc_id] = entry
-
-        # 处理全文检索结果，与向量结果融合
-        for fts_cand in fts_candidates:
-            doc_id = str(fts_cand.get("doc_id") or "")
-            if not doc_id:
-                continue
-            fts_score = float(fts_cand.get("fts_score") or 0.0)
-            if doc_id in fused:
-                # 已有向量结果，叠加全文分数
-                existing = fused[doc_id]
-                vector_score = float(existing.get("vector_score") or 0.0)
-                final_score = round(
-                    vector_score * self.vector_weight + fts_score * self.fts_weight,
-                    6,
-                )
-                existing["fts_score"] = fts_score
-                existing["score"] = final_score
-                # 更新 metadata 中的融合信息
-                metadata = dict(existing.get("metadata") or {})
-                metadata["fts_score"] = fts_score
-                metadata["hybrid_fused"] = True
-                existing["metadata"] = metadata
-            else:
-                # 仅全文命中，无向量结果
-                snippet = str(fts_cand.get("snippet") or "")
-                entry = {
-                    "doc_id": doc_id,
-                    "source_ref": f"memory://episodic/{doc_id}",
-                    "snippet": snippet,
-                    "score": round(fts_score * self.fts_weight, 6),
-                    "confidence": round(fts_score * self.fts_weight, 6),
-                    "vector_score": 0.0,
-                    "fts_score": fts_score,
-                    "metadata": {
-                        "fts_score": fts_score,
-                        "hybrid_fused": True,
-                        "matched_routes": ["fts"],
-                    },
-                    "evidence_refs": f"evd://episodic/{doc_id}",
-                }
-                fused[doc_id] = entry
-
-        # M29-O：情感强度加权——emotion_context 匹配的候选项分数加权
-        if emotion_context:
-            for entry in fused.values():
-                meta = entry.get("metadata") or {}
-                if meta.get("emotion_tag") == str(emotion_context).strip().upper():
-                    entry["score"] = min(1.0, round(float(entry["score"]) * emotion_boost_factor, 6))
-
-        # 按 final_score 降序排列
-        return sorted(
-            fused.values(),
-            key=lambda row: (-float(row["score"]), str(row["doc_id"])),
-        )
 
 
 # ── RecallFusionServiceContract 混合检索方法（TASK-0202）────────────────────

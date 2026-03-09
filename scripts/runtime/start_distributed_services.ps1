@@ -4,6 +4,10 @@ param(
   [string]$HostLogDir = "",
   [string]$HostBindHost = "",
   [int]$HostPort = 0,
+  [ValidateSet("docker")]
+  [string]$HostExternalServicesBackend = "docker",
+  [string]$HostDockerComposeFile = "",
+  [string]$HostDockerProjectName = "natsume-ext",
   [int]$HostWaitSeconds = 40,
   [switch]$HostForceRestart,
   [switch]$HostStartupCheck,
@@ -174,6 +178,9 @@ $hostArgs = @{
   LogDir = $HostLogDir
   BindHost = $HostBindHost
   Port = $HostPort
+  ExternalServicesBackend = $HostExternalServicesBackend
+  DockerComposeFile = $HostDockerComposeFile
+  DockerProjectName = $HostDockerProjectName
   WaitSeconds = $HostWaitSeconds
   ForceRestart = [bool]$HostForceRestart.IsPresent
   StartupCheck = [bool]$HostStartupCheck.IsPresent
@@ -235,6 +242,7 @@ $result = [ordered]@{
   started_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   mode = [ordered]@{
     edge_mode = $EdgeMode
+    host_external_services_backend = $HostExternalServicesBackend
   }
   host = $hostResult
   edge = $edgeResult

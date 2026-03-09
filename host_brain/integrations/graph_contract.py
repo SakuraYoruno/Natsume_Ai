@@ -110,6 +110,11 @@ class GraphState(TypedDict):
     model_nodes: dict[str, dict[str, Any]]
     model_profile_id: str | None
     model_calls: list[dict[str, Any]]
+    # M45：情感上下文透传字段（chat -> runtime -> executor -> gateway）
+    emotion_context: dict[str, Any] | None
+    emotion_tag: str | None
+    mood_state: str | None
+    emotion_range_hint: str | None
     # M35-A：Route Commitment Rule 字段（ModelPlane.md §10 Rule 1）
     # committed_route_token：Governor 已提交的路由令牌（只能由 Host Governor 写入）
     committed_route_token: str | None

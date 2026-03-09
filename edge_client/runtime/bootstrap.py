@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -16,12 +18,15 @@ from edge_client.actuators.tts_engine import (
 )
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
-from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter
+from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
 from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
+
+
+LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
 
 
 @dataclass
@@ -39,6 +44,26 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
+
+    @property
+    def asr(self) -> AsrService | None:
+        return self.asr_service
+
+    @property
+    def tts(self) -> SoVITSModelManager | None:
+        return self.tts_model
+
+    @property
+    def vts(self) -> VTubeStudioDriver | None:
+        return self.vts_driver
+
+    @property
+    def fallback(self) -> EdgeFallbackRpcContract:
+        return self.fallback_rpc
+
+    @property
+    def rpc_client(self) -> VoiceRpcContract:
+        return self.voice_rpc
 
     def service_statuses(self) -> dict[str, dict[str, Any]]:
         return build_edge_runtime_statuses(self.config)
@@ -223,7 +248,21 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     )
 
     vts_driver = VTubeStudioDriver(config=vts_cfg)
+    event_report_host_url = _as_optional_text(_env_get(env_lookup, "EDGE_EVENT_REPORT_HOST_URL"))
     event_reporter = EdgeEventReporter(
+        transport_fn=(
+            build_http_transport(
+                host_url=event_report_host_url,
+                timeout_s=_parse_float(
+                    _env_get(env_lookup, "EDGE_EVENT_REPORT_TIMEOUT_S"),
+                    default=3.0,
+                    min_value=0.1,
+                    max_value=300.0,
+                ),
+            )
+            if event_report_host_url
+            else None
+        ),
         cache=EdgeEventCache(
             max_events=_parse_int(
                 _env_get(env_lookup, "EDGE_EVENT_REPORT_MAX_CACHE_EVENTS"),
@@ -382,6 +421,68 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
     )
+
+
+def bootstrap(config: EdgeConfig) -> EdgeRuntime:
+    """M45 entrypoint alias for runtime assembly."""
+
+    return build_edge_runtime(config)
+
+
+async def startup(runtime: EdgeRuntime) -> None:
+    """Best-effort runtime startup; component failures are logged and skipped."""
+
+    for name, component in _iter_lifecycle_components(runtime):
+        await _invoke_lifecycle(component, "startup", name=name)
+
+
+async def shutdown(runtime: EdgeRuntime) -> None:
+    """Best-effort runtime shutdown; component failures are logged and skipped."""
+
+    components = _iter_lifecycle_components(runtime)
+    for name, component in reversed(components):
+        await _invoke_lifecycle(component, "shutdown", name=name)
+
+    if callable(getattr(runtime, "close", None)):
+        try:
+            runtime.close()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            LOGGER.exception("runtime close failed: %s", exc)
+
+
+def _iter_lifecycle_components(runtime: EdgeRuntime) -> list[tuple[str, Any]]:
+    ordered_names = (
+        "asr",
+        "tts",
+        "vts",
+        "fallback",
+        "resource_gate",
+        "rpc_client",
+    )
+    rows: list[tuple[str, Any]] = []
+    for name in ordered_names:
+        component = getattr(runtime, name, None)
+        if component is None:
+            continue
+        rows.append((name, component))
+    return rows
+
+
+async def _invoke_lifecycle(component: Any, method_name: str, *, name: str) -> None:
+    method = getattr(component, method_name, None)
+    if not callable(method):
+        return
+    try:
+        outcome = method()
+        if inspect.isawaitable(outcome):
+            await outcome
+    except Exception as exc:  # pragma: no cover - defensive lifecycle guard
+        LOGGER.exception(
+            "edge lifecycle %s failed for component=%s: %s",
+            method_name,
+            name,
+            exc,
+        )
 
 
 def _normalize_env_lookup(values: Mapping[str, Any]) -> dict[str, Any]:

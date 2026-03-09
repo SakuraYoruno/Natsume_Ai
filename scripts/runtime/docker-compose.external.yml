@@ -1,0 +1,39 @@
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: natsume-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: "${NATSUME_NEO4J_USER:-neo4j}/${NATSUME_NEO4J_PASSWORD:-NatsuNeo4j!20260306}"
+      NEO4J_server_memory_heap_initial__size: "512m"
+      NEO4J_server_memory_heap_max__size: "512m"
+      NEO4J_dbms_security_auth__minimum__password__length: "8"
+    ports:
+      - "${NATSUME_NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NATSUME_NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - ../../runtime/docker/neo4j/data:/data
+      - ../../runtime/docker/neo4j/logs:/logs
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: natsume-chroma
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: "/chroma/chroma"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "${NATSUME_CHROMA_PORT:-8000}:8000"
+    volumes:
+      - ../../runtime/docker/chroma/data:/chroma/chroma
+
+  redis:
+    image: redis:7-alpine
+    container_name: natsume-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "${NATSUME_REDIS_PORT:-6379}:6379"
+    volumes:
+      - ../../runtime/docker/redis/data:/data

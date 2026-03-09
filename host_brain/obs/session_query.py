@@ -60,9 +60,9 @@ class SessionQueryService:
 
         # 从 governor_log 拉取数据
         try:
-            rows = self._ledger.fetch_by_time_range("governor_log", start_time or 0, end_time)
+            rows = self._fetch_governor_rows(start_ms=start_time or 0, end_ms=end_time)
         except Exception as exc:
-            logger.warning("SessionQuery: 读取 governor_log 失败 — %s", exc)
+            logger.warning("SessionQuery: 读取 governor_log 失败 - %s", exc)
             rows = []
 
         # 去重（同一 request_id 取最新记录）
@@ -92,6 +92,32 @@ class SessionQueryService:
             "items":     [self._format_item(r) for r in page_items],
             "timestamp": now_ms,
         }
+
+    def _fetch_governor_rows(self, start_ms: int, end_ms: int) -> List[Dict]:
+        """Fetch all governor rows in the time window with paging.
+
+        SQLiteLedger.fetch_by_time_range defaults to limit=100, which can hide
+        recent sessions when the window has more rows. We page through the full
+        window explicitly.
+        """
+        page_size = 10_000
+        offset = 0
+        rows: List[Dict] = []
+        while True:
+            chunk = self._ledger.fetch_by_time_range(
+                "governor_log",
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+                limit=page_size,
+                offset=offset,
+            )
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            offset += page_size
+        return rows
 
     # ------------------------------------------------------------------
     # 内部方法

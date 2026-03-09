@@ -1,0 +1,175 @@
+"""Hybrid fusion strategy for recall pipeline."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+logger = logging.getLogger("Natsume.retrieval.hybrid_fusion")
+
+DEFAULT_VECTOR_WEIGHT: float = 0.7
+DEFAULT_FTS_WEIGHT: float = 0.3
+
+class HybridFusionStrategy:
+    """向量检索 + 全文检索混合融合策略。
+
+    融合公式：final_score = vector_score × vector_weight + fts_score × fts_weight
+    要求：vector_weight + fts_weight == 1.0（否则抛出 ValueError）。
+    """
+
+    def __init__(
+        self,
+        *,
+        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+        fts_weight: float = DEFAULT_FTS_WEIGHT,
+    ) -> None:
+        """初始化混合融合策略。
+
+        Args:
+            vector_weight: 向量检索权重（默认 0.7）。
+            fts_weight: 全文检索权重（默认 0.3）。
+
+        Raises:
+            ValueError: 如果 vector_weight + fts_weight != 1.0。
+        """
+        total = round(float(vector_weight) + float(fts_weight), 6)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"vector_weight + fts_weight 必须等于 1.0，当前为 {total}"
+            )
+        self.vector_weight = float(vector_weight)
+        self.fts_weight = float(fts_weight)
+
+    def fuse(
+        self,
+        *,
+        vector_candidates: list[dict[str, Any]],
+        fts_candidates: list[dict[str, Any]],
+        # M29-O（OPT-?）：情感强度加权
+        emotion_context: str | None = None,
+        emotion_boost_factor: float = 1.2,
+    ) -> list[dict[str, Any]]:
+        """融合向量检索和全文检索结果。
+
+        M29-O（OPT-?）：支持情感强度加权——emotion_context 匹配的候选项分数加权。
+
+        Args:
+            vector_candidates: 向量检索候选列表（含 doc_id / score 字段）。
+            fts_candidates: 全文检索候选列表（含 doc_id / fts_score 字段）。
+            emotion_context: 当前情感上下文标签（如 "HAPPY"），匹配时加权
+            emotion_boost_factor: 情感匹配加权系数（默认 1.2x）
+
+        Returns:
+            融合后的候选列表，按 final_score 降序排列，同 doc_id 去重保留最高分。
+        """
+        # 构建 doc_id → 候选 映射
+        fused: dict[str, dict[str, Any]] = {}
+
+        # 处理向量检索结果
+        for cand in vector_candidates:
+            doc_id = str(cand.get("doc_id") or "")
+            if not doc_id:
+                continue
+            vector_score = float(cand.get("score") or 0.0)
+            entry = dict(cand)
+            entry["vector_score"] = vector_score
+            entry["fts_score"] = 0.0
+            entry["score"] = round(vector_score * self.vector_weight, 6)
+            fused[doc_id] = entry
+
+        # 处理全文检索结果，与向量结果融合
+        for fts_cand in fts_candidates:
+            doc_id = str(fts_cand.get("doc_id") or "")
+            if not doc_id:
+                continue
+            fts_score = float(fts_cand.get("fts_score") or 0.0)
+            if doc_id in fused:
+                # 已有向量结果，叠加全文分数
+                existing = fused[doc_id]
+                vector_score = float(existing.get("vector_score") or 0.0)
+                final_score = round(
+                    vector_score * self.vector_weight + fts_score * self.fts_weight,
+                    6,
+                )
+                existing["fts_score"] = fts_score
+                existing["score"] = final_score
+                # 更新 metadata 中的融合信息
+                metadata = dict(existing.get("metadata") or {})
+                metadata["fts_score"] = fts_score
+                metadata["hybrid_fused"] = True
+                existing["metadata"] = metadata
+            else:
+                # 仅全文命中，无向量结果
+                snippet = str(fts_cand.get("snippet") or "")
+                entry = {
+                    "doc_id": doc_id,
+                    "source_ref": f"memory://episodic/{doc_id}",
+                    "snippet": snippet,
+                    "score": round(fts_score * self.fts_weight, 6),
+                    "confidence": round(fts_score * self.fts_weight, 6),
+                    "vector_score": 0.0,
+                    "fts_score": fts_score,
+                    "metadata": {
+                        "fts_score": fts_score,
+                        "hybrid_fused": True,
+                        "matched_routes": ["fts"],
+                    },
+                    "evidence_refs": f"evd://episodic/{doc_id}",
+                }
+                fused[doc_id] = entry
+
+        # M29-O：情感强度加权——emotion_context 匹配的候选项分数加权
+        if emotion_context:
+            for entry in fused.values():
+                meta = entry.get("metadata") or {}
+                if meta.get("emotion_tag") == str(emotion_context).strip().upper():
+                    entry["score"] = min(1.0, round(float(entry["score"]) * emotion_boost_factor, 6))
+
+        # 按 final_score 降序排列
+        return sorted(
+            fused.values(),
+            key=lambda row: (-float(row["score"]), str(row["doc_id"])),
+        )
+
+
+# ── RecallFusionServiceContract 混合检索方法（TASK-0202）────────────────────
+
+def _apply_hybrid_fusion_impl(
+    self: "RecallFusionServiceContract",
+    *,
+    vector_candidates: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]]:
+    """在 RecallFusionServiceContract 中执行混合融合。
+
+    Args:
+        vector_candidates: 向量检索候选列表。
+        query: 检索查询文本。
+
+    Returns:
+        融合后的候选列表（FTS5 不可用时返回原向量候选）。
+    """
+    if self._fts_searcher is None:
+        return vector_candidates
+
+    try:
+        fts_results = self._fts_searcher.search(query, top_k=DEFAULT_RECALL_TOP_K)
+    except Exception:
+        # FTS5 检索失败时降级为纯向量
+        return vector_candidates
+
+    if not fts_results:
+        return vector_candidates
+
+    # 校验权重
+    try:
+        strategy = HybridFusionStrategy(
+            vector_weight=self.vector_weight,
+            fts_weight=self.fts_weight,
+        )
+    except ValueError:
+        return vector_candidates
+
+    return strategy.fuse(
+        vector_candidates=vector_candidates,
+        fts_candidates=fts_results,
+    )

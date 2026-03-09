@@ -117,6 +117,13 @@ def resolve_model_nodes(
             overrides=overrides,
             candidate_ids=[selected_model_node_id, node_id],
         )
+        node_config["expected_param_hash"] = build_model_param_hash(
+            provider=str(node_config.get("provider") or ""),
+            model_id=str(node_config.get("model_id") or ""),
+            temperature=node_config.get("temperature"),
+            max_output_tokens=node_config.get("max_output_tokens"),
+            timeout_ms=node_config.get("timeout_ms"),
+        )
         resolved[selected_model_node_id] = dict(node_config)
         if node_id != selected_model_node_id:
             resolved[node_id] = dict(node_config)

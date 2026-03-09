@@ -149,7 +149,7 @@ class EpisodicStore:
             evidence_refs=refs,
             status="SUCCESS",
             reason_code=None,
-            detail="memory written",
+            detail=_build_memory_write_detail(record.text),
             decay_profile_id=record.decay_profile_id,
             visibility=record.visibility,
             ts_ms=ts_value,
@@ -586,3 +586,13 @@ def _normalize_memory_ids(memory_ids: list[str] | None) -> list[str]:
         if item and item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def _build_memory_write_detail(text: str, *, limit: int = 240) -> str:
+    normalized = " ".join(str(text or "").strip().split())
+    if not normalized:
+        return "memory written"
+    max_len = max(1, int(limit))
+    if len(normalized) > max_len:
+        normalized = normalized[: max(1, max_len - 3)] + "..."
+    return f"memory written: {normalized}"

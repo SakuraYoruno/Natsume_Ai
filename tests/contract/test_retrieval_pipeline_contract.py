@@ -2,7 +2,7 @@ import json
 import unittest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import RETR_RERANK_UNAVAILABLE
+from host_brain.core.errors import RETR_RECALL_UNAVAILABLE, RETR_RERANK_UNAVAILABLE
 from host_brain.memory.chroma_client import InMemoryChromaClient, embed_text
 from host_brain.retrieval.embedding import EmbeddingServiceContract, load_embedding_runtime_config
 from host_brain.retrieval.evidence_pack import EvidencePackServiceContract
@@ -96,7 +96,33 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         self.assertTrue(result.output["evidence_pack"]["degraded"])
         self.assertGreater(len(result.output["evidence_pack"]["topk"]), 0)
 
-    def _build_pipeline(self, *, node_id: str, reranker_available: bool) -> RetrievalPipelineContract:
+    def test_pipeline_recall_unavailable_keeps_root_reason_without_input_invalid_drift(self) -> None:
+        pipeline = self._build_pipeline(
+            node_id="host-01",
+            reranker_available=True,
+            recall_available=False,
+        )
+        result = pipeline.run(
+            request_id="req_pipe_004",
+            intent_id="intent_pipe_004",
+            query="Natsume retrieval pipeline",
+            top_k=2,
+            ts_ms=self.now_ms + 3,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(STATUS_DEGRADED, result.status)
+        self.assertEqual(RETR_RECALL_UNAVAILABLE, result.reason_code)
+        self.assertIn(RETR_RECALL_UNAVAILABLE, result.output["reason_chain"])
+        self.assertEqual(RETR_RECALL_UNAVAILABLE, result.output["evidence_pack"]["reason_code"])
+
+    def _build_pipeline(
+        self,
+        *,
+        node_id: str,
+        reranker_available: bool,
+        recall_available: bool = True,
+    ) -> RetrievalPipelineContract:
         embed_env = {
             "RETR_EMBED_ENABLED": "true",
             "RETR_EMBED_DEFAULT_ROUTE": "host_default",
@@ -149,12 +175,14 @@ class TestRetrievalPipelineContract(unittest.TestCase):
             "RETR_RECALL_ROUTES_JSON": json.dumps(
                 {
                     "episodic_route": {
+                        "store_id": "episodic_vector",
                         "collection": "episodic",
                         "top_k": 4,
                         "score_weight": 1.0,
                         "node_selector": "host-01,node-gpu-01",
                     },
                     "canon_route": {
+                        "store_id": "episodic_vector",
                         "collection": "canon",
                         "top_k": 3,
                         "score_weight": 0.75,
@@ -186,7 +214,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
             chroma_client=self.chroma,
             runtime_config=recall_config,
             node_id=node_id,
-            available=True,
+            available=recall_available,
         )
         reranker_service = RerankerServiceContract(
             ledger=self.ledger,

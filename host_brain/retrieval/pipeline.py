@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from host_brain.app.config import load_host_config
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.bond.neo4j_client import build_neo4j_bond_client, load_neo4j_runtime_config
 from host_brain.core.ids import now_ms
 from host_brain.lsp.vault import ArtifactVault
 from host_brain.memory.chroma_client import ChromaRuntimeConfig, load_chroma_runtime_config
@@ -134,6 +135,7 @@ class RetrievalPipelineContract:
         request_id: str,
         query: str,
         intent_id: str | None = None,
+        session_id: str | None = None,
         top_k: int | None = None,
         ts_ms: int | None = None,
         # M28-P（OPT-41）：情感上下文透传参数
@@ -156,6 +158,7 @@ class RetrievalPipelineContract:
             query=normalized_query,
             query_embedding=embedding_vector,
             intent_id=intent_id,
+            session_id=session_id,
             ts_ms=now_value,
         )
 
@@ -330,6 +333,20 @@ def build_retrieval_pipeline_from_env(
         openai_api_key=resolved_openai_key,
     )
     reranker_registry = build_reranker_provider_registry(env=merged)
+    neo4j_cfg_result = load_neo4j_runtime_config(env=merged)
+    neo4j_client = None
+    if (
+        neo4j_cfg_result.success
+        and neo4j_cfg_result.config is not None
+        and neo4j_cfg_result.config.enabled
+    ):
+        try:
+            neo4j_client = build_neo4j_bond_client(
+                config=neo4j_cfg_result.config,
+                secret_store=secret_store,
+            )
+        except Exception:
+            neo4j_client = None
 
     chroma_client = ChromaHttpSearchClient.from_runtime_config(chroma_cfg_result.config)
     style_root = str(merged.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
@@ -350,6 +367,7 @@ def build_retrieval_pipeline_from_env(
     recall_service = RecallFusionServiceContract(
         ledger=ledger,
         chroma_client=chroma_client,
+        neo4j_client=neo4j_client,
         style_store=style_store,
         world_store=world_store,
         artifact_vault=artifact_vault,

@@ -88,6 +88,14 @@ class VoiceRpcContract:
 
         conf_value = float(confidence)
         is_low_confidence = conf_value < self.asr_min_confidence
+        emotion_tag = str(payload.get("emotion_tag") or "").strip().upper() or None
+        emotion_intensity_raw = payload.get("emotion_intensity")
+        emotion_intensity: float | None = None
+        if emotion_intensity_raw is not None:
+            try:
+                emotion_intensity = max(0.0, min(1.0, float(emotion_intensity_raw)))
+            except (TypeError, ValueError):
+                emotion_intensity = None
         last_seq = self._last_asr_seq.get(session_id)
         if last_seq is not None and int(seq) <= int(last_seq):
             return self._reject(
@@ -157,6 +165,10 @@ class VoiceRpcContract:
             "final": bool(payload.get("final", False)),
             "ts_ms": now_value,
         }
+        if emotion_tag is not None:
+            event["emotion_tag"] = emotion_tag
+        if emotion_intensity is not None:
+            event["emotion_intensity"] = emotion_intensity
         self._last_asr_seq[session_id] = int(seq)
         self._last_asr_ts_ms[session_id] = now_value
         return self._accept(
