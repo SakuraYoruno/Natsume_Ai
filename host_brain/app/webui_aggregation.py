@@ -1,11 +1,13 @@
-"""WebUI 数据聚合函数。
+"""WebUI 数据聚合函数（TASK-0066: 链路可视化面板数据底座）。"""
 
-从 app/main.py 拆分，负责 WebUI 时间线/拓扑/请求搜索等聚合逻辑。
-"""
 from __future__ import annotations
 
-import re
-from typing import Any
+import time
+from typing import Any, Mapping
+
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.ids import new_request_id
+
 
 def build_webui_timeline_aggregation(
     *,
@@ -304,18 +306,3 @@ def _parse_interval_ms(interval: str) -> int:
             except ValueError:
                 pass
     return 3_600_000  # 默认 1h
-
-
-if __name__ == "__main__":
-    report = build_startup_report(runtime_statuses={}, dependency_probes={})
-    monitor_profile = build_agent_monitoring_profile()
-    console_profile = build_runtime_console_profile(
-        spawn_console=(str(os.environ.get("Natsume_RUNTIME_MONITOR_CONSOLE") or "").strip().lower() in {"1", "true", "yes", "on"})
-    )
-    emit_runtime_bootstrap_logs(
-        startup_report=report,
-        monitoring_profile=monitor_profile,
-        console_profile=console_profile,
-    )
-    _main_logger = logging.getLogger(LOGGER_NAME_RUNTIME_MONITOR)
-    _main_logger.info(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

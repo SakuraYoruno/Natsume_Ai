@@ -1,4 +1,4 @@
-"""app/main.py 内部辅助函数，用于组装就绪报告、请求轨迹等。"""
+"""main.py 的私有辅助函数集合。"""
 
 from __future__ import annotations
 
@@ -18,22 +18,6 @@ def _rows_by_request(rows: list[dict[str, Any]], request_id: str) -> list[dict[s
     return [dict(row) for row in rows if str(row.get("request_id") or "") == req_id]
 
 
-def _pick_status(row: dict[str, Any]) -> str | None:
-    for key in ("status", "decision", "result_status"):
-        value = str(row.get(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _pick_detail(row: dict[str, Any]) -> str | None:
-    for key in ("detail", "result_code", "event_type", "op_kind"):
-        value = str(row.get(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
 def _to_timeline_rows(rows: list[dict[str, Any]], *, source: str) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for idx, row in enumerate(rows, start=1):
@@ -50,6 +34,22 @@ def _to_timeline_rows(rows: list[dict[str, Any]], *, source: str) -> list[dict[s
             }
         )
     return normalized
+
+
+def _pick_status(row: dict[str, Any]) -> str | None:
+    for key in ("status", "decision", "result_status"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _pick_detail(row: dict[str, Any]) -> str | None:
+    for key in ("detail", "result_code", "event_type", "op_kind"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _summarize_sources(rows: list[dict[str, Any]]) -> dict[str, int]:
