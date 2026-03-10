@@ -181,13 +181,6 @@ def build_node_deployment_report(
     }
 
 
-def map_unavailable_reason(unavailable_kind: str | None) -> str:
-    key = str(unavailable_kind or "").strip().lower()
-    if not key:
-        return SERVICE_UNAVAILABLE_GENERIC
-    return REASON_BY_KIND.get(key, SERVICE_UNAVAILABLE_GENERIC)
-
-
 def build_owner_unavailable_statuses(
     *,
     registry: "ServiceRegistry",
@@ -309,52 +302,6 @@ def pick_startup_reason(*, issues: Sequence[Mapping[str, Any]], service_reason: 
         if reason:
             return reason
     return str(service_reason) if service_reason else None
-
-
-def _normalize_runtime_status(raw: Any) -> dict[str, Any]:
-    if raw is None:
-        return {
-            "available": True,
-            "unavailable_kind": None,
-            "detail": "",
-        }
-    if isinstance(raw, bool):
-        return {
-            "available": bool(raw),
-            "unavailable_kind": None if raw else "generic",
-            "detail": "",
-        }
-    if isinstance(raw, dict):
-        available = bool(raw.get("available", True))
-        kind = raw.get("unavailable_kind") or raw.get("kind")
-        return {
-            "available": available,
-            "unavailable_kind": str(kind).strip().lower() if kind is not None else None,
-            "detail": str(raw.get("detail") or "").strip(),
-        }
-    return {
-        "available": True,
-        "unavailable_kind": None,
-        "detail": "",
-    }
-
-
-def _pick_report_reason(services: list[dict[str, Any]]) -> str | None:
-    for row in services:
-        if row["required"] and row["reason_code"]:
-            return str(row["reason_code"])
-    for row in services:
-        if row["reason_code"]:
-            return str(row["reason_code"])
-    return None
-
-
-def _pick_node_report_reason(rows: list[dict[str, Any]]) -> str | None:
-    for row in rows:
-        reason = str(row.get("reason_code") or "").strip()
-        if reason:
-            return reason
-    return None
 
 
 def _coerce_node_spec(raw: "NodeSpec | Mapping[str, Any]") -> "NodeSpec":
