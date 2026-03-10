@@ -387,21 +387,32 @@ class LongTermMemoryDistiller:
             return f"[语义记忆 {semantic_id}]"
 
     def _proposal_exists_for_semantic(self, semantic_id: str) -> bool:
-        """检查是否已有相同 semantic_id 的 pending 提案（幂等保护）。"""
+        """检查是否已有相同 semantic_id 的 pending 提案（幂等保护）。
+
+        修复：
+        1. 原实现调用了不存在的 list_canon_proposals 方法，实际方法名为 list_proposals。
+        2. 原实现通过 `semantic_id in summary` 字符串包含检查，容易假阳性；
+           改为检查 proposal_id 前缀（distill_prop_{semantic_id[:16]}_*）或 summary 中的精确匹配。
+        """
         if self._ledger is None:
             return False
-        if not hasattr(self._ledger, "list_canon_proposals"):
+        # 使用正确的方法名 list_proposals
+        if not hasattr(self._ledger, "list_proposals"):
             return False
         try:
-            proposals, _ = self._ledger.list_canon_proposals(
+            proposals, _ = self._ledger.list_proposals(
                 status="pending",
-                proposer_node_id="long_term_distiller",
                 limit=100,
                 offset=0,
             )
             for p in proposals:
+                # 精确匹配：proposal_id 前缀包含 semantic_id 的前 16 位
+                proposal_id = str(p.get("proposal_id", ""))
+                if proposal_id.startswith(f"distill_prop_{semantic_id[:16]}_"):
+                    return True
+                # 备用：summary 中精确匹配完整 semantic_id（不是子字符串包含）
                 summary = str(p.get("summary", ""))
-                if semantic_id in summary:
+                if f"semantic_id={semantic_id}" in summary:
                     return True
             return False
         except Exception:

@@ -297,6 +297,14 @@ class IntentDecisionEngine:
                     cached = self._policy_cache.get(skill_name, trust_level)
                     if cached is True:
                         # 缓存命中，直接放行
+                        # 修复：CACHE 命中时仍需写入 replay_guard 和 session_seq_guard，
+                        # 防止相同 intent_id/nonce 被重放（防重放约束不可绕过）
+                        self.ledger.mark_intent_seen(
+                            intent_id=envelope.id,
+                            session_id=envelope.session_id,
+                            nonce=envelope.nonce,
+                        )
+                        self.ledger.update_seq(session_id=envelope.session_id, seq=envelope.seq)
                         committed = compile_route_decision(
                             approved=True,
                             reason_code="APPROVE_CACHED",
