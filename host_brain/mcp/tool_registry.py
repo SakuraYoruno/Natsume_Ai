@@ -126,8 +126,8 @@ class MCPToolRegistry:
                     INSERT INTO mcp_tool_registry
                         (provider_id, tool_id, name, description,
                          access_level, risk_level, reversible,
-                         version, schema_hash, domain_tags, updated_ts_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         version, schema_hash, domain_tags, emotion_requirement, updated_ts_ms)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(provider_id, tool_id) DO UPDATE SET
                         name = excluded.name,
                         description = excluded.description,
@@ -137,6 +137,7 @@ class MCPToolRegistry:
                         version = excluded.version,
                         schema_hash = excluded.schema_hash,
                         domain_tags = excluded.domain_tags,
+                        emotion_requirement = excluded.emotion_requirement,
                         updated_ts_ms = excluded.updated_ts_ms
                     """,
                     (
@@ -150,6 +151,7 @@ class MCPToolRegistry:
                         meta.version,
                         meta.schema_hash,
                         json.dumps(meta.domain_tags, ensure_ascii=False),
+                        json.dumps(meta.emotion_requirement, ensure_ascii=False),
                         now_ms(),
                     ),
                 )
@@ -271,6 +273,7 @@ class MCPToolRegistry:
                     version TEXT NOT NULL DEFAULT '1.0.0',
                     schema_hash TEXT,
                     domain_tags TEXT,
+                    emotion_requirement TEXT,
                     updated_ts_ms INTEGER NOT NULL,
                     UNIQUE(provider_id, tool_id)
                 );
@@ -308,6 +311,14 @@ def _row_to_meta(row: sqlite3.Row) -> ToolMeta:
             tags = []
     else:
         tags = list(tags_raw)
+    emotion_raw = data.get("emotion_requirement") or "[]"
+    if isinstance(emotion_raw, str):
+        try:
+            emotion_req = json.loads(emotion_raw)
+        except Exception:
+            emotion_req = []
+    else:
+        emotion_req = list(emotion_raw)
     return ToolMeta(
         provider_id=str(data["provider_id"]),
         tool_id=str(data["tool_id"]),
@@ -319,6 +330,7 @@ def _row_to_meta(row: sqlite3.Row) -> ToolMeta:
         version=str(data.get("version") or "1.0.0"),
         schema_hash=str(data.get("schema_hash") or ""),
         domain_tags=tags,
+        emotion_requirement=emotion_req,
     )
 
 

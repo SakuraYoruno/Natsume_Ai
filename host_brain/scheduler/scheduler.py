@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import threading
 import time
@@ -194,8 +195,6 @@ class NatsumeScheduler:
 
     def _cron_check_loop(self) -> None:
         """定期检查 cron 任务是否到达触发时间。"""
-        import datetime
-
         while not self._shutdown_event.is_set():
             now = datetime.datetime.now()
             for task in self._registry.enabled_tasks():
