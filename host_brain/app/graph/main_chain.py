@@ -391,11 +391,18 @@ class MainChain:
 
         Governor 放行后由 SceneRouter 决定是否分流；
         任意节点返回 False 或抛出异常时，调用 failure_handler 并终止链路。
-        """
-        # 确定执行节点列表
-        nodes = list(self.MAIN_NODES)
 
-        for node in nodes:
+        注意：使用 while 循环 + 索引而非 for-in 迭代，
+        确保 Governor 放行后替换子链时新节点能被正确执行。
+        （for-in 迭代器绑定原始列表对象，重新赋值 nodes 不会影响迭代，
+        导致子链节点永远不会被执行。）
+        """
+        # 确定执行节点列表（使用 while + 索引，支持运行时替换子链）
+        nodes: List[ChainNode] = list(self.MAIN_NODES)
+        idx = 0
+
+        while idx < len(nodes):
+            node = nodes[idx]
             try:
                 should_continue = await node.execute_with_timeout(ctx)
             except Exception as exc:
@@ -426,13 +433,16 @@ class MainChain:
             if node.name == "governor" and ctx.governor_passed:
                 sub_chain = SceneRouter.route(ctx)
                 if sub_chain:
-                    # 插入子链节点（替换后续主链路节点）
-                    remaining_idx = nodes.index(node) + 1
-                    nodes = nodes[:remaining_idx] + sub_chain
+                    # 替换后续主链路节点为子链节点
+                    # 必须直接修改 nodes 列表（而非重新赋值变量），
+                    # 并将 idx 推进到子链起始位置
+                    nodes = nodes[: idx + 1] + sub_chain
                     logger.info(
                         "[%s] 已切换到 %s 子链，共 %d 个节点",
                         ctx.request_id, ctx.task_type, len(nodes),
                     )
+
+            idx += 1
 
         return ctx
 
