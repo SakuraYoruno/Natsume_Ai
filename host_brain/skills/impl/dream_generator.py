@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import logging
 from typing import Any, Callable
 
@@ -82,7 +84,6 @@ def execute_dream_generator(
     if episodic_reader:
         try:
             # 当日范围：当天 0:00 到当前时间
-            import datetime
             today_start = int(datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
             episodic_entries = episodic_reader(today_start, ts, top_k)
         except Exception as exc:
@@ -192,5 +193,4 @@ def execute_dream_generator(
 
 
 def _content_hash(content: str) -> str:
-    import hashlib
     return hashlib.sha256(content.encode("utf-8")).hexdigest()

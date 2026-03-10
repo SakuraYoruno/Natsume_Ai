@@ -103,9 +103,8 @@ def get_ledger() -> SQLiteLedger:
 
 def get_episodic_store() -> EpisodicStore:
     global _episodic_store
-    ledger = get_ledger()
-    if _episodic_store is None or _episodic_store.ledger is not ledger:
-        _episodic_store = EpisodicStore(ledger=ledger)
+    if _episodic_store is None:
+        _episodic_store = EpisodicStore(ledger=get_ledger())
     return _episodic_store
 
 

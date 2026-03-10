@@ -70,14 +70,24 @@ def _file_hash(path: Path) -> str | None:
 
 
 def _is_path_safe(base_dir: Path, target_path: Path) -> bool:
-    """检查目标路径是否在安全基目录内（防路径穿越）。"""
+    """检查目标路径是否在安全基目录内（防路径穿越）。
+
+    使用 Path.is_relative_to（Python 3.9+）精确判断，避免
+    str.startswith 的前缀混淆漏洞（如 /base 误匹配 /base_evil）。
+    """
     try:
         resolved_base = base_dir.resolve()
         resolved_target = target_path.resolve()
-        # 检查是否在 base_dir 内
-        return str(resolved_target).startswith(str(resolved_base))
-    except (OSError, ValueError):
-        return False
+        # is_relative_to 精确判断路径层级，不会被前缀混淆
+        return resolved_target.is_relative_to(resolved_base)
+    except (OSError, ValueError, AttributeError):
+        # AttributeError: Python < 3.9 回退到带分隔符的 startswith
+        try:
+            base_str = str(resolved_base).rstrip("/\\") + os.sep
+            target_str = str(resolved_target)
+            return target_str.startswith(base_str) or target_str == str(resolved_base).rstrip("/\\")
+        except Exception:
+            return False
 
 
 def _contains_path_traversal(filename: str) -> bool:
