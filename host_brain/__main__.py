@@ -29,7 +29,7 @@ _load_dotenv_file()
 from host_brain.app.fastapi_app import app
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.ids import new_request_id
+from host_brain.core.ids import new_request_id, now_ms
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,7 +106,9 @@ def run_startup_check(db_path: str) -> bool:
             dependency_probes={},
             request_id=request_id,
             ledger=ledger,
-            ts_ms=new_request_id(),
+            # 修复：原代码 ts_ms=new_request_id() 将 UUID 字符串传给整数时间戳参数，
+            # 导致 build_startup_report 内部 int(ts_ms) 抛出 ValueError。
+            ts_ms=now_ms(),
         )
 
         emit_runtime_bootstrap_logs(startup_report=report)
