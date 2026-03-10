@@ -184,7 +184,7 @@ def _get_ledger_from_app() -> SQLiteLedger:
     if _ledger_provider is not None:
         return _ledger_provider()
     # 降级：直接构造内存 ledger（仅测试场景，生产环境必须注入 provider）
-    _logger.warning("ledger_provider not set, falling back to in-memory SQLiteLedger")
+    _logger.warning("ledger_provider 未注入，降级使用内存 SQLiteLedger（仅测试场景）")
     return SQLiteLedger(db_path=":memory:")
 
 
@@ -233,7 +233,7 @@ async def list_proposals(
             timestamp=ts_ms,
         )
     except Exception as exc:
-        _logger.error("list_proposals failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("list_proposals 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -256,7 +256,7 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
         if existing is not None:
             raise HTTPException(
                 status_code=409,
-                detail=f"proposal_id already exists: {body.proposal_id}",
+                detail=f"proposal_id 已存在: {body.proposal_id}",
                 headers={"X-Reason-Code": WCANON_PROPOSAL_DUPLICATE},
             )
 
@@ -282,7 +282,7 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
             headers={"X-Reason-Code": WCANON_PROPOSAL_INVALID},
         )
     except Exception as exc:
-        _logger.error("submit_proposal failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("submit_proposal 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -301,14 +301,14 @@ async def get_proposal(proposal_id: str) -> CanonProposalResponse:
         if row is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"proposal not found: {proposal_id}",
+                detail=f"提案不存在: {proposal_id}",
                 headers={"X-Reason-Code": WCANON_PROPOSAL_NOT_FOUND},
             )
         return _proposal_row_to_response(row, request_id)
     except HTTPException:
         raise
     except Exception as exc:
-        _logger.error("get_proposal failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("get_proposal 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -331,7 +331,7 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
         if existing is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"proposal not found: {proposal_id}",
+                detail=f"提案不存在: {proposal_id}",
                 headers={"X-Reason-Code": WCANON_PROPOSAL_NOT_FOUND},
             )
 
@@ -375,7 +375,7 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
             headers={"X-Reason-Code": WCANON_PROPOSAL_INVALID},
         )
     except Exception as exc:
-        _logger.error("approve_proposal failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("approve_proposal 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(
             status_code=500,
             detail=str(exc),
@@ -417,7 +417,7 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
             })
         except Exception as audit_exc:
             _logger.warning(
-                "reject_proposal audit write failed (non-fatal): %s",
+                "reject_proposal 审计写入失败（非致命）: %s",
                 audit_exc,
                 extra={"request_id": request_id},
             )
@@ -439,7 +439,7 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
             headers={"X-Reason-Code": WCANON_PROPOSAL_NOT_FOUND},
         )
     except Exception as exc:
-        _logger.error("reject_proposal failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("reject_proposal 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -475,7 +475,7 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
                 "ts_ms": ts_ms,
             })
         except Exception as audit_exc:
-            _logger.warning("Failed to write system_event_log for rollback: %s", audit_exc)
+            _logger.warning("rollback 审计写入 system_event_log 失败（非致命）: %s", audit_exc)
 
         return CanonProposalRollbackResponse(
             proposal_id=result["proposal_id"],
@@ -509,7 +509,7 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
             headers={"X-Reason-Code": WCANON_DOC_NOT_FOUND},
         )
     except Exception as exc:
-        _logger.error("rollback_proposal failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("rollback_proposal 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -551,7 +551,7 @@ async def list_documents() -> CanonDocumentListResponse:
             timestamp=ts_ms,
         )
     except Exception as exc:
-        _logger.error("list_documents failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("list_documents 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -572,7 +572,7 @@ async def get_document(doc_id: str) -> CanonDocumentResponse:
         if doc is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"world canon document not found: {doc_id}",
+                detail=f"World Canon 文档不存在: {doc_id}",
                 headers={"X-Reason-Code": WCANON_DOC_NOT_FOUND},
             )
         return CanonDocumentResponse(
@@ -592,7 +592,7 @@ async def get_document(doc_id: str) -> CanonDocumentResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        _logger.error("get_document failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("get_document 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -629,5 +629,5 @@ async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
             timestamp=ts_ms,
         )
     except Exception as exc:
-        _logger.error("get_hotwords failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("get_hotwords 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))

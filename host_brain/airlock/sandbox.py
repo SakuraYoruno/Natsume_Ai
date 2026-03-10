@@ -1,4 +1,4 @@
-﻿"""AIRLOCK DRAFT_CODE sandbox execution with isolation and audit logging."""
+﻿"""AIRLOCK DRAFT_CODE 沙箱执行模块，提供隔离运行与审计日志功能。"""
 
 from __future__ import annotations
 
@@ -231,7 +231,7 @@ class SandboxExecutor:
                 status=SANDBOX_STATUS_RESOURCE_EXCEEDED,
                 exit_code=None,
                 stdout="",
-                stderr=f"code size {code_bytes} bytes exceeds limit {self.config.max_code_bytes}",
+                stderr=f"代码大小 {code_bytes} 字节超过限制 {self.config.max_code_bytes} 字节",
                 duration_ms=0,
                 reason_code=SANDBOX_RESOURCE_EXCEEDED,
                 evidence_ref=evidence_ref,
@@ -247,7 +247,7 @@ class SandboxExecutor:
                 status=SANDBOX_STATUS_UNAVAILABLE,
                 exit_code=None,
                 stdout="",
-                stderr=f"unsupported language: {language}",
+                stderr=f"不支持的语言: {language}",
                 duration_ms=0,
                 reason_code=SANDBOX_UNAVAILABLE,
                 evidence_ref=evidence_ref,
@@ -266,7 +266,7 @@ class SandboxExecutor:
                 status=SANDBOX_STATUS_UNAVAILABLE,
                 exit_code=None,
                 stdout="",
-                stderr=f"container isolation required, backend={backend}",
+                stderr=f"需要容器隔离，当前后端={backend}",
                 duration_ms=0,
                 reason_code=SANDBOX_CONTAINER_UNAVAILABLE,
                 evidence_ref=evidence_ref,
@@ -333,7 +333,7 @@ class SandboxExecutor:
                     status=SANDBOX_STATUS_UNAVAILABLE,
                     exit_code=None,
                     stdout="",
-                    stderr="docker backend required but unavailable",
+                    stderr="需要 Docker 后端但不可用",
                     duration_ms=0,
                     reason_code=SANDBOX_CONTAINER_UNAVAILABLE,
                     evidence_ref=evidence_ref,
@@ -433,7 +433,7 @@ class SandboxExecutor:
                         status=SANDBOX_STATUS_TIMEOUT,
                         exit_code=None,
                         stdout="",
-                        stderr=f"execution timed out after {timeout_s}s",
+                    stderr=f"执行超时，超时时间 {timeout_s}s",
                         duration_ms=duration_ms,
                         reason_code=SANDBOX_TIMEOUT,
                         evidence_ref=evidence_ref,
@@ -452,7 +452,7 @@ class SandboxExecutor:
                     status=SANDBOX_STATUS_UNAVAILABLE,
                     exit_code=None,
                     stdout="",
-                    stderr=f"python executable not found: {self.config.python_executable}",
+                stderr=f"未找到 Python 可执行文件: {self.config.python_executable}",
                     duration_ms=duration_ms,
                     reason_code=SANDBOX_UNAVAILABLE,
                     evidence_ref=evidence_ref,
@@ -528,7 +528,7 @@ class SandboxExecutor:
                 status=SANDBOX_STATUS_EXEC_FAILED,
                 exit_code=None,
                 stdout="",
-                stderr=f"sandbox setup failed: {exc}",
+                stderr=f"沙箱初始化失败: {exc}",
                 duration_ms=0,
                 reason_code=SANDBOX_EXEC_FAILED,
                 evidence_ref=evidence_ref,

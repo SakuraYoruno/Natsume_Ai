@@ -137,7 +137,7 @@ def build_chat_context_pack(
     except Exception as exc:
         check_wcanon_slot_violation(
             slot_name="world_canon_slot",
-            detail=f"world canon slot build failed: {exc}",
+            detail=f"world canon slot 构建失败: {exc}",
             ledger=get_ledger(),
             request_id=request_id,
         )

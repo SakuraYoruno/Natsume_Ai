@@ -92,7 +92,7 @@ def _log_context_pack_observability(
     slot_counts = dict(slot_counts_raw) if isinstance(slot_counts_raw, Mapping) else {}
 
     _logger.info(
-        "stream context pack observability",
+        "流式上下文包可观测性数据",
         extra={
             "request_id": request_id,
             "session_id": session_id,
@@ -114,7 +114,7 @@ def _log_context_pack_observability(
 
     if selected_tier and selected_tier != "six_route":
         _logger.warning(
-            "stream context degrade tier selected",
+            "流式上下文降级层级已选择",
             extra={
                 "request_id": request_id,
                 "session_id": session_id,
@@ -136,8 +136,8 @@ def _resolve_stream_style_bindings(
             continue
         resolved[str(node_id)] = dict(row)
 
-    # Stream chat currently routes through one combined node (chat_direct_ja).
-    # Keep style injection focused on Japanese canon to avoid mixed CN/JP drift.
+    # 流式聊天当前通过单一合并节点（chat_direct_ja）路由。
+    # 样式注入聚焦于日语 canon，避免中日混排漂移。
     if str(render_target_lang).strip().lower() != "ja":
         return resolved
 
@@ -246,11 +246,11 @@ async def _build_stream_chat_prompt(
         "emotion_snapshot": dict(prompt_payload.get("emotion_snapshot") or {}),
     }
     system_prompt = (
-        "You are 夏目藍 (Natsume Ai). "
-        "You are NOT an AI or assistant — you are 夏目藍 herself. "
-        "Output exactly one JSON object with keys narrative, intent_draft, meta. "
-        "narrative.text must be natural Japanese suitable for spoken TTS output. "
-        "meta.draft_only must be true."
+        "你是夏目藍（Natsume Ai）。"
+        "你不是 AI 或助手——你就是夏目藍本人。"
+        "仅输出一个 JSON 对象，包含 narrative、intent_draft、meta 三个键。"
+        "narrative.text 必须是适合 TTS 朗读的自然日语。"
+        "meta.draft_only 必须为 true。"
     )
     return prompt_text, system_prompt, gen_params, resolved_emotion_context, prompt_meta
 
@@ -267,7 +267,7 @@ async def _run_retrieval(
     ts_ms: int,
     emotion_tag: Optional[str],
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
-    """并行执行 Retrieval，返回 (retrieval_summary, retrieval_evidence_items)。"""
+    """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
     try:
         _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
     except ValueError:
@@ -363,7 +363,7 @@ async def _drive_stream_vts_emotion(
             "emotion_tag": None,
             "expression_id": None,
             "trigger": "HOST",
-            "detail": "vts emotion drive disabled by config",
+            "detail": "VTS 情感驱动已通过配置禁用",
         }
 
     normalized_emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
@@ -374,7 +374,7 @@ async def _drive_stream_vts_emotion(
             "emotion_tag": None,
             "expression_id": None,
             "trigger": "HOST",
-            "detail": "emotion tag missing in stream emotion context",
+            "detail": "流式情感上下文中缺少情感标签",
         }
 
     ledger = get_ledger()
@@ -421,7 +421,7 @@ async def _drive_stream_vts_emotion(
         }
     except asyncio.TimeoutError:
         _logger.warning(
-            "vts emotion drive timeout in stream path",
+            "流式路径中 VTS 情感驱动超时",
             extra={"request_id": request_id, "timeout_ms": timeout_ms},
         )
         return {
@@ -430,11 +430,11 @@ async def _drive_stream_vts_emotion(
             "emotion_tag": normalized_emotion_tag,
             "expression_id": None,
             "trigger": "HOST",
-            "detail": "vts emotion drive timed out",
+            "detail": "VTS 情感驱动超时",
         }
     except Exception as exc:
         _logger.warning(
-            "vts emotion drive failed in stream path: %s",
+            "流式路径中 VTS 情感驱动失败: %s",
             exc,
             extra={"request_id": request_id},
         )
@@ -597,7 +597,7 @@ async def _sse_event_generator(
 
                     retrieval_task.add_done_callback(_swallow_retrieval_task_error)
                 _logger.warning(
-                    "retrieval timeout before stream prompt build; allow background warmup to continue",
+                    "流式 prompt 构建前检索超时，允许后台预热任务继续运行",
                     extra={"request_id": request_id, "timeout_ms": retrieval_timeout_ms},
                 )
             except Exception as exc:
@@ -606,7 +606,7 @@ async def _sse_event_generator(
                 if retrieval_started_ms is not None:
                     retrieval_latency_ms = max(0, int(time.time() * 1000) - retrieval_started_ms)
                 _logger.warning(
-                    "retrieval task failed before stream prompt build: %s",
+                    "流式 prompt 构建前检索任务失败: %s",
                     exc,
                     extra={"request_id": request_id},
                 )
@@ -728,7 +728,7 @@ async def _sse_event_generator(
                 ts_ms=ts_ms,
             )
         except Exception as exc:
-            _logger.warning("airlock ingress failed: %s", exc, extra={"request_id": request_id})
+            _logger.warning("Airlock 入口检疫失败: %s", exc, extra={"request_id": request_id})
         finally:
             airlock_latency_ms = max(0, int(time.time() * 1000) - _airlock_started_ms)
 
@@ -761,7 +761,7 @@ async def _sse_event_generator(
                 "memory_id": None,
                 "detail": str(exc),
             }
-            _logger.debug("episodic memory write skipped in stream mode",
+            _logger.debug("流式模式下情节记忆写入跳过",
                           extra={"request_id": request_id, "error": str(exc)})
         finally:
             episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
@@ -830,7 +830,7 @@ async def _sse_event_generator(
         })
 
     except Exception as exc:
-        _logger.error("SSE chat stream failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("SSE 聊天流式处理失败: %s", exc, extra={"request_id": request_id})
         yield _sse({
             "phase": "COMMIT",
             "done": True,

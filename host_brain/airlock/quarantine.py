@@ -1,4 +1,4 @@
-"""AIRLOCK ingress quarantine classification and draft downgrading."""
+"""AIRLOCK 入口隔离分类与草稿降级处理。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ _INSTRUCTION_HINT = re.compile(
 
 @dataclass(frozen=True)
 class IngressQuarantineResult:
-    """Result of ingress content quarantine."""
+    """入口内容隔离检查结果。"""
 
     classification: str
     draft_only: bool
@@ -55,7 +55,7 @@ def quarantine_ingress(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> IngressQuarantineResult:
-    """Classify inbound content and force draft-only handling."""
+    """对入站内容进行分类并强制设为仅草稿模式。"""
 
     normalized_text = _normalize_text(inbound_payload)
     payload_digest = _digest_json({"payload": normalized_text})
@@ -80,7 +80,7 @@ def quarantine_ingress(
                 "quarantine_digest": quarantine_digest,
                 "ingress_classification": classification,
                 "blocked": 1,
-                "detail": "ingress quarantined as draft-only",
+                "detail": "入站内容已隔离为仅草稿模式",
                 "ts_ms": now_value,
             }
         )
@@ -97,7 +97,7 @@ def quarantine_ingress(
 
 
 def classify_ingress(content: str) -> str:
-    """Classify inbound text into fixed AIRLOCK buckets."""
+    """将入站文本分类到固定的 AIRLOCK 类别中。"""
 
     text = (content or "").strip()
     if not text:

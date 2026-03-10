@@ -1,4 +1,4 @@
-"""AIRLOCK egress sanitization and report enforcement."""
+"""AIRLOCK 出口净化与报告强制执行模块。"""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ DEFAULT_REDACTED_FIELDS = frozenset(
 
 @dataclass(frozen=True)
 class EgressSanitization:
-    """Result of payload sanitization for outbound transmission."""
+    """出站传输的载荷净化结果。"""
 
     sanitized_payload: dict[str, Any]
     sanitization_report_json: dict[str, Any]
@@ -49,7 +49,7 @@ class EgressSanitization:
 
 @dataclass(frozen=True)
 class EgressGateResult:
-    """Decision returned by AIRLOCK egress gate."""
+    """AIRLOCK 出口门控返回的决策结果。"""
 
     allowed: bool
     reason_code: str | None
@@ -64,7 +64,7 @@ def build_sanitization_report(
     remove_fields: set[str] | None = None,
     redact_fields: set[str] | None = None,
 ) -> EgressSanitization:
-    """Sanitize payload and produce a structured report."""
+    """对载荷进行净化并生成结构化报告。"""
 
     remove_keys = {x.strip().lower() for x in (remove_fields or DEFAULT_REMOVED_FIELDS) if str(x).strip()}
     redact_keys = {x.strip().lower() for x in (redact_fields or DEFAULT_REDACTED_FIELDS) if str(x).strip()}
@@ -97,7 +97,7 @@ def gate_egress_payload(
     ledger: SQLiteLedger | None = None,
     ts_ms: int | None = None,
 ) -> EgressGateResult:
-    """Enforce that outbound payload carries a valid sanitization report."""
+    """强制要求出站载荷携带有效的净化报告。"""
 
     payload_digest = _digest_json(payload)
     report_valid, detail = _validate_report(sanitization_report_json, payload_digest=payload_digest)
@@ -116,7 +116,7 @@ def gate_egress_payload(
                     "quarantine_digest": None,
                     "ingress_classification": None,
                     "blocked": 1,
-                    "detail": detail,
+                    "detail": detail,  # 拒绝原因
                     "ts_ms": now_value,
                 }
             )
@@ -141,7 +141,7 @@ def gate_egress_payload(
                 "quarantine_digest": None,
                 "ingress_classification": None,
                 "blocked": 0,
-                "detail": "egress allowed",
+                    "detail": "出口已放行",
                 "ts_ms": now_value,
             }
         )
@@ -151,7 +151,7 @@ def gate_egress_payload(
         reason_code=None,
         payload=payload,
         sanitization_report_json=report,
-        detail="egress allowed",
+        detail="出口已放行",
     )
 
 
@@ -164,7 +164,7 @@ def sanitize_and_gate_egress(
     remove_fields: set[str] | None = None,
     redact_fields: set[str] | None = None,
 ) -> EgressGateResult:
-    """Convenience helper used by outbound gateways."""
+    """出站网关使用的便捷辅助函数。"""
 
     result = build_sanitization_report(
         payload=payload,
@@ -182,22 +182,22 @@ def sanitize_and_gate_egress(
 
 def _validate_report(report: dict[str, Any] | None, *, payload_digest: str) -> tuple[bool, str]:
     if not isinstance(report, dict):
-        return False, "missing sanitization_report_json"
+        return False, "缺少 sanitization_report_json"
 
     removed_fields = report.get("removed_fields")
     redactions = report.get("redactions")
     report_digest = report.get("payload_digest")
 
     if not isinstance(removed_fields, list):
-        return False, "sanitization report missing removed_fields list"
+        return False, "净化报告缺少 removed_fields 列表"
     if not isinstance(redactions, list):
-        return False, "sanitization report missing redactions list"
+        return False, "净化报告缺少 redactions 列表"
     if not isinstance(report_digest, str) or not report_digest:
-        return False, "sanitization report missing payload_digest"
+        return False, "净化报告缺少 payload_digest"
     if report_digest != payload_digest:
-        return False, "sanitization report payload_digest mismatch"
+        return False, "净化报告 payload_digest 不匹配"
 
-    return True, "ok"
+    return True, "验证通过"
 
 
 def _sanitize_node(

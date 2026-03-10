@@ -139,7 +139,7 @@ async def bond_health() -> BondHealthResponse:
             timestamp=ts_ms,
         )
     except Exception as exc:
-        _logger.error("bond_health failed: %s", exc)
+        _logger.error("bond_health 接口异常: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -190,7 +190,7 @@ async def get_bond_summary(user_id: str) -> BondSummaryResponse:
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        _logger.error("get_bond_summary failed: %s", exc)
+        _logger.error("get_bond_summary 接口异常: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -222,7 +222,7 @@ async def get_bond_stage(user_id: str) -> BondStageResponse:
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        _logger.error("get_bond_stage failed: %s", exc)
+        _logger.error("get_bond_stage 接口异常: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -246,7 +246,7 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
     if not refs:
         raise HTTPException(
             status_code=422,
-            detail="evidence_refs must not be empty (FR-BOND-002)",
+            detail="evidence_refs 不能为空（FR-BOND-002）",
             headers={"X-Reason-Code": "BOND_EVIDENCE_REQUIRED"},
         )
 
@@ -276,5 +276,5 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
             timestamp=ts_ms,
         )
     except Exception as exc:
-        _logger.error("submit_bond_event failed: %s", exc, extra={"request_id": request_id})
+        _logger.error("submit_bond_event 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
