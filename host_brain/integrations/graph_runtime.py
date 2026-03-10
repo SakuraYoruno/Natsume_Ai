@@ -76,6 +76,12 @@ class GraphRuntimeContract:
         self._handlers: dict[str, NodeHandler] = {}
         self._gateway_factory = gateway_factory or self._default_gateway_factory
         self._model_plane_dir = Path(model_plane_dir) if model_plane_dir is not None else DEFAULT_MODEL_PLANE_DIR
+        # 修复：CheckpointManager 必须在实例级别共享，而非在 resume_graph 中每次 new。
+        # 原逻辑在 resume_graph 中 `manager = CheckpointManager()` 创建全新实例，
+        # 其内部 CheckpointStore 是纯内存存储，与 interrupt() 时保存 checkpoint 的实例不同，
+        # 导致 load_state() 永远返回 None，resume_graph 始终返回 CHECKPOINT_NOT_FOUND。
+        from host_brain.integrations.graph_checkpoint import CheckpointManager as _CM
+        self._checkpoint_manager = _CM()
 
     def register_node_handler(self, handler_id: str, handler: NodeHandler) -> None:
         """Register a handler function for a handler_id."""
@@ -297,7 +303,8 @@ class GraphRuntimeContract:
 
         from host_brain.core.ids import now_ms as _now_ms
         current_ms = int(now_ms if now_ms is not None else _now_ms())
-        manager = CheckpointManager()
+        # 修复：使用实例级别共享的 _checkpoint_manager，而非每次 new CheckpointManager()
+        manager = self._checkpoint_manager
 
         # 1. 加载 checkpoint
         state = manager.load_state(checkpoint_id)

@@ -121,26 +121,34 @@ class GraphExecutor:
             policy_timeout_ms=int(state.get("policy_timeout_ms") or self._default_timeout_ms),
             node_timeout_ms=int(state.get("timeout_ms") or self._default_timeout_ms),
         )
-        # M38-E：节点执行前发射 Presence NODE_START 事件
+
+        # 修复：Policy Clock 超时检查必须在进入 with 块之前完成。
+        # 原逻辑在 with supervisor.supervise_node() 内部 return，Python 仍会执行
+        # finally 块，导致 POLICY_TIMEOUT 事件被重复追加到 _pending_events，
+        # 但该事件不会被收集到已 return 的 state 中（逻辑错误 + 内存泄漏）。
+        _pre_policy_event = supervisor._policy_clock.check_policy_timeout(node_id=node_id)
+        if _pre_policy_event is not None:
+            clock_events = list(state.get("clock_events") or [])
+            clock_events.append(_pre_policy_event.to_dict())
+            return {
+                **state,
+                "status": STATUS_FAILED,
+                "reason_code": CLOCK_EVENT_POLICY_TIMEOUT,
+                "detail": f"Policy Clock 超时，强制终止图执行，节点={node_id}",
+                "pending_node_id": None,
+                "clock_events": clock_events,
+            }
+
+        # M38-E：presence_events 在 with 块外初始化，确保 with 块外的 NODE_END 发射可以访问
         presence_events = list(state.get("presence_events") or [])
-        try:
-            start_event = self._presence_emitter.emit(node_id=node_id, event_type="NODE_START")
-            presence_events.append(start_event.to_dict())
-        except Exception:
-            pass  # 静默降级
+
         with supervisor.supervise_node(node_id=node_id) as clock_ctx:
-            # Policy Clock 超时：强制终止图执行
-            if clock_ctx.policy_timeout_event is not None:
-                clock_events = list(state.get("clock_events") or [])
-                clock_events.append(clock_ctx.policy_timeout_event.to_dict())
-                return {
-                    **state,
-                    "status": STATUS_FAILED,
-                    "reason_code": CLOCK_EVENT_POLICY_TIMEOUT,
-                    "detail": f"Policy Clock 超时，强制终止图执行，节点={node_id}",
-                    "pending_node_id": None,
-                    "clock_events": clock_events,
-                }
+            # M38-E：节点执行前发射 Presence NODE_START 事件
+            try:
+                start_event = self._presence_emitter.emit(node_id=node_id, event_type="NODE_START")
+                presence_events.append(start_event.to_dict())
+            except Exception:
+                pass  # 静默降级
 
             binding = (state.get("node_bindings") or {}).get(node_id)
             if binding is None:
