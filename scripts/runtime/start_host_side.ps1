@@ -12,7 +12,8 @@ param(
   [int]$Neo4jWaitSeconds = 45,
   [int]$ChromaWaitSeconds = 30,
   [switch]$ForceRestart,
-  [switch]$StartupCheck
+  [switch]$StartupCheck,
+  [switch]$ShowConsoleWindow
 )
 
 $ErrorActionPreference = "Stop"
@@ -239,13 +240,18 @@ if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }
 
-$proc = Start-Process `
-  -FilePath $pythonCmd.Source `
-  -ArgumentList $hostArgs `
-  -WorkingDirectory $repoRoot `
-  -PassThru `
-  -RedirectStandardOutput $stdoutLog `
-  -RedirectStandardError $stderrLog
+$startProcessArgs = @{
+  FilePath = $pythonCmd.Source
+  ArgumentList = $hostArgs
+  WorkingDirectory = $repoRoot
+  PassThru = $true
+  RedirectStandardOutput = $stdoutLog
+  RedirectStandardError = $stderrLog
+}
+if (-not $ShowConsoleWindow.IsPresent) {
+  $startProcessArgs["WindowStyle"] = "Hidden"
+}
+$proc = Start-Process @startProcessArgs
 
 $healthUrl = "http://$probeHost`:$Port/health"
 if (-not (Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds)) {

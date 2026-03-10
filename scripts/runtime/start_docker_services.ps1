@@ -3,6 +3,7 @@ param(
   [string]$EnvFile = "",
   [string]$ComposeFile = "",
   [string]$ProjectName = "natsume-ext",
+  [int]$DockerDaemonWaitSeconds = 90,
   [int]$Neo4jWaitSeconds = 45,
   [int]$ChromaWaitSeconds = 30,
   [int]$RedisWaitSeconds = 20
@@ -139,6 +140,94 @@ function Resolve-DockerExecutable {
   throw "docker executable not found in PATH or common install paths"
 }
 
+function Test-DockerDaemon {
+  param([string]$DockerExe)
+  if (-not $DockerExe) {
+    return $false
+  }
+  $prevPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    & $DockerExe info --format "{{.ServerVersion}}" *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  } finally {
+    $ErrorActionPreference = $prevPreference
+  }
+}
+
+function Start-DockerDesktopProcess {
+  $candidates = @("C:\Program Files\Docker\Docker\Docker Desktop.exe")
+  if ($env:ProgramFiles) {
+    $candidates += Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+  }
+  if ($env:ProgramW6432) {
+    $candidates += Join-Path $env:ProgramW6432 "Docker\Docker\Docker Desktop.exe"
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\Docker Desktop.exe"
+  }
+  foreach ($candidate in ($candidates | Select-Object -Unique)) {
+    if (-not $candidate -or -not (Test-Path -Path $candidate)) {
+      continue
+    }
+    try {
+      Start-Process -FilePath $candidate -ErrorAction Stop | Out-Null
+      return $true
+    } catch {
+    }
+  }
+  return $false
+}
+
+function Ensure-DockerDaemonRunning {
+  param(
+    [string]$DockerExe,
+    [int]$TimeoutSeconds = 90
+  )
+  if (Test-DockerDaemon -DockerExe $DockerExe) {
+    return
+  }
+
+  $actions = @()
+  $dockerService = Get-Service -Name "com.docker.service" -ErrorAction SilentlyContinue
+  if ($null -ne $dockerService) {
+    if ($dockerService.Status -ne "Running") {
+      try {
+        Start-Service -Name "com.docker.service" -ErrorAction Stop
+        $actions += "service_started"
+      } catch {
+        $actions += "service_start_failed"
+      }
+    } else {
+      $actions += "service_already_running"
+    }
+  } else {
+    $actions += "service_not_found"
+  }
+
+  if (-not (Test-DockerDaemon -DockerExe $DockerExe)) {
+    if (Start-DockerDesktopProcess) {
+      $actions += "desktop_launch_requested"
+    } else {
+      $actions += "desktop_not_found_or_launch_failed"
+    }
+  }
+
+  $waitSeconds = if ($TimeoutSeconds -gt 0) { $TimeoutSeconds } else { 90 }
+  $deadline = (Get-Date).AddSeconds($waitSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-DockerDaemon -DockerExe $DockerExe) {
+      return
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  $detail = if ($actions.Count -gt 0) { ($actions -join ", ") } else { "no_auto_start_actions" }
+  throw "docker daemon not ready after ${waitSeconds}s (actions=$detail). please start Docker Desktop and retry."
+}
+
 function Ensure-PathContains {
   param([string]$Directory)
   if (-not $Directory) {
@@ -234,6 +323,7 @@ if (-not (Test-Path -Path $ComposeFile)) {
 $dockerExe = Resolve-DockerExecutable
 $dockerDir = Split-Path -Path $dockerExe -Parent
 Ensure-PathContains -Directory $dockerDir
+Ensure-DockerDaemonRunning -DockerExe $dockerExe -TimeoutSeconds $DockerDaemonWaitSeconds
 
 $envValues = Read-EnvFile -Path $EnvFile
 $neo4jUri = if ($envValues.ContainsKey("BOND_NEO4J_URI")) { [string]$envValues["BOND_NEO4J_URI"] } elseif ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } else { "bolt://127.0.0.1:7687" }

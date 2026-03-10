@@ -3,7 +3,8 @@ param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
   [int]$WaitSeconds = 20,
-  [switch]$ForceRestart
+  [switch]$ForceRestart,
+  [switch]$ShowConsoleWindow
 )
 
 $ErrorActionPreference = "Stop"
@@ -246,13 +247,18 @@ if ($null -eq $pythonCmd) {
   throw "python executable not found in PATH"
 }
 
-$proc = Start-Process `
-  -FilePath $pythonCmd.Source `
-  -ArgumentList @("-m", "edge_client") `
-  -WorkingDirectory $repoRoot `
-  -PassThru `
-  -RedirectStandardOutput $stdoutLog `
-  -RedirectStandardError $stderrLog
+$startProcessArgs = @{
+  FilePath = $pythonCmd.Source
+  ArgumentList = @("-m", "edge_client")
+  WorkingDirectory = $repoRoot
+  PassThru = $true
+  RedirectStandardOutput = $stdoutLog
+  RedirectStandardError = $stderrLog
+}
+if (-not $ShowConsoleWindow.IsPresent) {
+  $startProcessArgs["WindowStyle"] = "Hidden"
+}
+$proc = Start-Process @startProcessArgs
 
 if (-not (Wait-Port -Port $port -TimeoutSeconds $WaitSeconds)) {
   $stderrTail = ""
