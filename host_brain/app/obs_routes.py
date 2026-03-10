@@ -345,20 +345,17 @@ async def get_trace(request_id: str):
     ledger = _get_ledger()
 
     # 1) 从 graph_run_trace 获取链路骨架
+    # 修复：使用公共方法 fetch_by_request_id 替代直接访问私有属性 _conn，
+    # 同时利用 _decode_row 自动反序列化 nodes_json/edges_json 等 JSON 字段
     try:
-        conn = ledger._conn
-        row = conn.execute(
-            "SELECT * FROM graph_run_trace WHERE request_id = ? LIMIT 1",
-            (request_id,)
-        ).fetchone()
+        trace_rows = ledger.fetch_by_request_id("graph_run_trace", request_id)
     except Exception:
-        row = None
+        trace_rows = []
 
-    if row is None:
-        # 降级：从 governor_log 构造最小链路（使用方法调用而非属性访问，避免 AttributeError）
+    if not trace_rows:
+        # 降级：从 governor_log 构造最小链路
         try:
-            all_gov = ledger.fetch_by_time_range("governor_log", start_ms=0, end_ms=_now_ms())
-            gov_rows = [r for r in all_gov if r.get("request_id") == request_id]
+            gov_rows = ledger.fetch_by_request_id("governor_log", request_id)
         except Exception:
             gov_rows = []
         if not gov_rows:
@@ -387,8 +384,8 @@ async def get_trace(request_id: str):
             timestamp=_now_ms(),
         )
 
-    # 2) 解析完整链路
-    row_dict = dict(row)
+    # 2) 解析完整链路（fetch_by_request_id 已通过 _decode_row 自动反序列化 JSON 字段）
+    row_dict = trace_rows[0]
     nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
     edges_raw = _safe_json(row_dict.get("edges_json")) or []
 
