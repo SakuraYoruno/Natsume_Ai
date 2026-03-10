@@ -45,6 +45,10 @@ from host_brain.integrations.llm_gateway import LlmGatewayContract
 # Evidence Plane 专用线程池：最多 2 线程，不阻塞主图执行路径
 _evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence")
 
+# 注册 atexit 钩子，确保进程退出时线程池优雅关闭，防止线程泄漏
+import atexit as _atexit
+_atexit.register(_evidence_executor.shutdown, wait=False, cancel_futures=True)
+
 # 向后兼容：保留旧的私有函数名作为模块级别别名
 _build_edge_map = build_edge_map
 _pick_model_profile_id = pick_model_profile_id

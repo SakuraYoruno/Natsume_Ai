@@ -1,4 +1,4 @@
-﻿"""Reranker config loading, route resolution, scoring, and provider helpers."""
+"""Reranker config loading, route resolution, scoring, and provider helpers."""
 from __future__ import annotations
 
 import inspect

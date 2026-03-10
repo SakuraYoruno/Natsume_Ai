@@ -1,4 +1,4 @@
-﻿"""AIRLOCK DRAFT_CODE 沙箱执行模块，提供隔离运行与审计日志功能。"""
+"""AIRLOCK DRAFT_CODE 沙箱执行模块，提供隔离运行与审计日志功能。"""
 
 from __future__ import annotations
 

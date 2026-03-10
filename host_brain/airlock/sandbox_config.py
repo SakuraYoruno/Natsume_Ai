@@ -1,4 +1,4 @@
-﻿"""Sandbox 配置和辅助函数。
+"""Sandbox 配置和辅助函数。
 
 从 sandbox.py 拆分，包含 SandboxConfig、SandboxExecResult 和辅助工具函数。
 """

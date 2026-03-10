@@ -1,4 +1,4 @@
-﻿"""Canon 路由 Pydantic 模型。
+"""Canon 路由 Pydantic 模型。
 
 从 canon_routes.py 拆分，包含所有 Canon API 的请求和响应模型。
 """

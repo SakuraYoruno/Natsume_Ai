@@ -1,4 +1,4 @@
-﻿"""Rate Limit 检查器。
+"""Rate Limit 检查器。
 
 从 rate_limit_store.py 拆分，提供 RateLimitChecker 和工厂函数。
 """
