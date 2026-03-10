@@ -83,20 +83,21 @@ Natsume_Ai/
 │   │   └── static/monitor/  #    监控面板构建产物（FastAPI 静态托管）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
-│   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 迁移）
+│   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 异步写入队列 + 迁移）
 │   ├── canon/               #    正典系统（Style Canon / World Canon，治理 API 事务化）
 │   ├── channels/            #    渠道适配（VTS DEGRADED 降级 / 微信 I/O）
 │   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
 │   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
 │   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关 / Evidence Plane）
 │   ├── lsp/                 #    密钥与策略（Vault / Policies）
-│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步 / cursor-based 分页）
-│   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测）
+│   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
+│   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
-│   ├── retrieval/           #    检索链（Embedding / 召回融合 / 重排 / Evidence Pack）
+│   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
 │   ├── scheduler/           #    调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
-│   ├── skills/              #    技能系统（加载器 / 注册表 / ClawdBot UI 实现）
+│   ├── skills/              #    技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
 │   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
+│   ├── app/emotion_context.py #  情感上下文模块（归一化 / 快照 / 治理快照 / VAD 映射）
 │   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 │
 ├── edge_client/             # 🎙️ Edge 边缘客户端
@@ -135,6 +136,7 @@ Natsume_Ai/
 │
 ├── scripts/                 # 🛠️ 运维脚本
 │   └── runtime/             #    本地服务启停 / 环境检查 / 报告生成
+│       └── sync_persona_utterance_vector_index.py  # Persona 语料向量索引同步脚本
 │
 ├── tests/                   # 🧪 测试
 │   ├── contract/            #    契约测试（Airlock / Audit / Avatar…）
@@ -145,7 +147,14 @@ Natsume_Ai/
 │   ├── bench/               #    性能基准测试（Ledger WAL 读写吞吐）
 │   ├── doc_lint/            #    文档检查与交付门禁
 │   ├── replay/              #    审计回放工具（请求回放 + 生产演练）
-│   └── static_scan/         #    静态扫描工具（Bond SSOT 单写者检查）
+│   ├── static_scan/         #    静态扫描工具（Bond SSOT 单写者检查）
+│   ├── diag.py              #    统一诊断入口
+│   ├── diag_chat_ab.py      #    A/B 对比测试
+│   ├── diag_emotion_closed_loop.py  # 情感闭环验证（12 case corpus）
+│   ├── diag_stability_weekly.py     # 周稳定性报告
+│   ├── diag_longterm_dashboard.py   # 长期 KPI 仪表盘
+│   ├── release_rollback_gate.py     # 发布回滚门控（生成 RELEASE_ROLLBACK_GATE_*.json）
+│   └── post_release_review.py       # 发布后 24h 自动复盘（生成 POST_RELEASE_REVIEW_*.json）
 │
 ├── .github/workflows/       # 🚀 CI/CD（GitHub Actions）
 ├── .env.example             # 环境变量模板
@@ -161,7 +170,7 @@ Natsume_Ai/
 | 类别 | 技术 | 说明 |
 |------|------|------|
 | **语言** | Python 3.11+ | 主开发语言 |
-| **AI 编排** | LangChain / LangGraph | Agent 编排与工作流引擎 |
+| **AI 编排** | LangChain / LangGraph | Agent 编排与工作流引擎（五场景路由 + 治理运行时契约）|
 | **LLM 网关** | OpenAI / DeepSeek / Gemini | 多模型支持 + 降级策略 |
 | **关系图谱** | Neo4j 6.x | Bond 关系动力学（SSOT） |
 | **向量存储** | ChromaDB 1.4+ | 情景记忆 / Canon 存储 |
@@ -174,7 +183,9 @@ Natsume_Ai/
 | **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级） |
 | **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表 + scheduler_tasks 持久化）|
 | **调度器** | APScheduler + SQLite | CRON 任务持久化，进程重启自动恢复 |
-| **CI/CD** | GitHub Actions | 交付门禁（delivery-gates） |
+| **混合检索** | ChromaDB + SQLite FTS5 | 向量检索（0.7）+ 全文检索（0.3），FTS5 不可用时自动降级 |
+| **技能治理** | SkillRegistry + MCP Bridge | 装饰器注册 / 权限分级（LOW/MEDIUM/HIGH）/ MCP 工具统一纳管 |
+| **CI/CD** | GitHub Actions | 交付门禁（delivery-gates）|
 
 ---
 
@@ -563,6 +574,85 @@ Render Stream（渲染流）
 | **Interrupt** | 主动中断图执行，写入 `interrupt_reason` 到 GraphState |
 | **Resume** | 从 checkpoint 恢复执行，必须通过 HostPolicyGuard 前置检查 |
 
+### 检索链（Retrieval）
+
+检索链负责从多路数据源召回相关记忆与知识，并通过重排序提升精度：
+
+```
+用户 Query
+    │
+    ▼ RetrievalOrchestrator（统一编排入口，LRU 缓存 TTL=3s，最大 256 条）
+    │   key = SHA-256(session_id + query + top_k + intent_id + emotion_context)
+    │
+    ▼ EmbeddingService（向量化）
+    │
+    ▼ RecallFusion（7 路并行召回）
+    │   ├─ sqlite_ledger（审计链检索）
+    │   ├─ neo4j_bond（关系图谱检索）
+    │   ├─ episodic_vector（情景记忆向量检索）
+    │   ├─ style_canon（风格正典检索）
+    │   ├─ world_canon（世界观正典检索）
+    │   ├─ artifact_vault（制品库检索）
+    │   └─ persona_utterance（角色台词向量检索，NEW）
+    │
+    ▼ HybridFusion（混合检索融合）
+    │   ├─ 向量检索权重：0.7
+    │   └─ FTS5 全文检索权重：0.3（不可用时自动降级为纯向量）
+    │
+    ▼ Reranker（重排序）
+    │
+    ▼ EvidencePack（证据包）
+        path: success / partial_failure / all_failure
+```
+
+### 技能系统（Skills）
+
+技能系统采用三层架构，将 Host 的执行能力模块化，统一纳入权限治理：
+
+```
+@skill 装饰器（registry.py）
+    ↓ register_decorated() 扫描
+SkillRegistry（单一注册表）
+    ↑ register_mcp_tools_into_skill_registry()
+MCPToolRegistry（MCP 工具元数据）
+```
+
+| 组件 | 说明 |
+|------|------|
+| **SkillRegistry** | 装饰器注册表，`@skill` 标注元数据，`register_decorated()` 自动扫描 |
+| **SkillMeta** | 技能元数据：`clearance`（LOW/MEDIUM/HIGH）/ `risk_level`（1-5）/ `scope` / `reversible` / `require_confirm` |
+| **安全约束** | `risk_level >= 4` 必须设置 `require_confirm=True`，否则注册时抛出异常 |
+| **MCP 桥接** | `mcp_skill_bridge.py` 将 MCP 工具统一映射为 Skill，纳入权限治理 |
+| **IDE 技能包** | `ide_registry.py`：`open_cursor`（LOW/2）/ `run_pycharm_action`（MEDIUM/3）/ `codex_task`（MEDIUM/3）|
+| **ClawdBot UI** | 监控面板技能实现（系统状态查询 / 日志检索）|
+
+### 可观测性（Observability）
+
+可观测性系统提供跨端时间线聚合与时钟漂移检测能力，支持 Host 与 Edge 的联合监控。
+
+> **迁移说明**：`host_brain/obs/` 模块已规范化迁移至 `host_brain/observability/`，旧包保留向后兼容 shim 层，外部代码无需修改导入路径。
+
+| 新增能力 | 说明 |
+|---------|------|
+| **阈值告警** | 指标超阈值时自动触发告警事件 |
+| **长期 KPI 仪表盘** | `LONGTERM_METRIC_DASHBOARD`，支持跨周期趋势分析 |
+
+### 发布治理
+
+发布清单管理（`host_brain/release/`）提供 model_plane digest 门禁，确保每次发布的模型配置可追溯。
+
+**发布闭环工具链**（`tools/`）：
+
+| 工具 | 说明 |
+|------|------|
+| `release_rollback_gate.py` | 绑定回滚条件与命令，生成 `RELEASE_ROLLBACK_GATE_*.json` |
+| `post_release_review.py` | 发布后 24h 自动复盘，生成 `POST_RELEASE_REVIEW_*.json` |
+| `diag.py` | 统一诊断入口，聚合所有诊断子命令 |
+| `diag_chat_ab.py` | A/B 对比测试（对比两个版本的对话质量）|
+| `diag_emotion_closed_loop.py` | 情感闭环验证（12 case corpus，验证情感链路端到端正确性）|
+| `diag_stability_weekly.py` | 周稳定性报告（自动汇总 7 天内的错误率 / 降级率 / P99 延迟）|
+| `diag_longterm_dashboard.py` | 长期 KPI 仪表盘（跨周期趋势可视化）|
+
 ---
 
 ## 💜 灵魂构成（Soul Architecture）
@@ -599,7 +689,7 @@ Natsume 拥有三层记忆结构：
 - **衰减策略**：三档衰减配置（FAST / SLOW / PERMANENT），控制记忆的遗忘速率
 - **情感加权召回**：情感上下文匹配时给予 1.3x 权重提升
 
-### 关系图谱（Bond）
+### Bond 系统（Bond）
 
 Bond 系统以 Neo4j 图数据库为 SSOT，记录 Natsume 与用户之间的关系动力学：
 
@@ -610,6 +700,7 @@ Bond 系统以 Neo4j 图数据库为 SSOT，记录 Natsume 与用户之间的关
 | **BondEmotionalTexture** | VAD 情感质感层（平均回复间隔 / 情感效价 / 亲密温度）|
 | **BondRiftState** | 裂痕修复机制（CONFLICT → APOLOGY → COMFORT 三阶段）|
 | **BondSummary** | 关系摘要语义校验（防止 LLM 篡改关系事实）|
+| **BondUpdateQueue** | 异步写入队列（容量 1024，守护线程 worker，队满降级 `BOND_QUEUE_FULL`，支持 `drain()` 优雅关闭）|
 
 ### 情感系统（Emotion System）
 
