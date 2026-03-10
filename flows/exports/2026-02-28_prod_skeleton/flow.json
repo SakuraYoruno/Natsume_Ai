@@ -1,7 +1,0 @@
-{
-  "flow_id": "prod-skeleton",
-  "version": "2026-02-28",
-  "environment": "prod",
-  "status": "placeholder",
-  "notes": "Initial skeleton export for cold-start bootstrap."
-}

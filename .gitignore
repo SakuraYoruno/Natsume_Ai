@@ -61,8 +61,13 @@ temp/
 data/install/
 data/jdk*/
 data/neo4j*/
+# Neo4j 运行时生成的 JSON / log
+data/neo4j_install_info.json
+data/neo4j_server.log
+data/download_model.log
 # ChromaDB 向量数据库运行时文件
 data/chroma_db/
+chroma_data/
 # 其他数据库文件
 data/*.db
 data/*.sqlite3
@@ -111,5 +116,22 @@ FULL_RUN_REPORT_*.json
 
 # --- Windows device file artifacts ---
 nul
+# pip 安装时产生的垃圾文件（如 =1.4.0）
+=*
+
+# --- 根目录临时调试 / 测试脚本（不属于正式测试套件）---
+debug_intent.py
+_check_health.py
+test_fastapi_import.py
+test_host_optimizations.py
+test_real_env_integration.py
+test_webui_integration.py
+
+# --- flows 运行时导出产物 ---
+flows/exports/
+
+# --- release 构建产物 ---
+release/
+host_brain/release/
 
 .codebuddy
