@@ -134,7 +134,11 @@ class ContextPackBuilder:
         """
         self._audit_writer = audit_writer
 
-    def build(self, recall_results: Dict[str, Optional[str]]) -> ContextPack:
+    def build(
+        self,
+        recall_results: Dict[str, Optional[str]],
+        task_type: Optional[str] = None,
+    ) -> ContextPack:
         """
         组装 ContextPack。
 
@@ -183,6 +187,10 @@ class ContextPackBuilder:
         # 第二步：语义冲突检测（需求 4.3）
         self._check_and_suppress_conflicts(pack)
 
+        # 第三步：style_canon 与任务冲突时降级为参考（需求 4.4）
+        if task_type:
+            self._check_style_canon_task_conflict(pack, task_type)
+
         # 第三步：总量超限时按优先级截断（需求 4.2）
         total = pack.recalculate_total()
         if total > TOTAL_TOKEN_BUDGET:
@@ -196,6 +204,47 @@ class ContextPackBuilder:
             pack.total_token_count, TOTAL_TOKEN_BUDGET, len(pack.conflict_events),
         )
         return pack
+
+    def _check_style_canon_task_conflict(
+        self,
+        pack: ContextPack,
+        task_type: str,
+    ) -> None:
+        """
+        检测 style_canon 与当前任务类型是否冲突，冲突时降级为参考（需求 4.4）。
+
+        冲突场景：
+        - task_type 为 code/translate 等技术任务时，style_canon（情感/语气规范）
+          与任务目标冲突，降级为参考（reference_only），不强制注入 prompt。
+        - task_type 为 reasoning 时，style_canon 同样降级为参考。
+        """
+        # 与 style_canon 冲突的任务类型
+        STYLE_CONFLICT_TASK_TYPES = {"code", "translate", "reasoning"}
+
+        style_slot = pack.get_slot("style_canon")
+        if style_slot is None or not style_slot.content:
+            return
+
+        task_lower = task_type.lower()
+        if task_lower not in STYLE_CONFLICT_TASK_TYPES:
+            return
+
+        # 降级为参考：在内容前加 [REFERENCE_ONLY] 标记
+        if not style_slot.content.startswith("[REFERENCE_ONLY]"):
+            style_slot.content = f"[REFERENCE_ONLY]\n{style_slot.content}"
+            style_slot.token_count = estimate_token_count(style_slot.content)
+
+        # 记录到 subgraph_trace
+        for trace in pack.subgraph_trace:
+            if trace["slot"] == "style_canon":
+                trace["reference_only"] = True
+                trace["reference_reason"] = f"task_type={task_type} 与 style_canon 冲突，降级为参考"
+                break
+
+        logger.info(
+            "style_canon 与任务类型 %s 冲突，已降级为参考（[REFERENCE_ONLY]）",
+            task_type,
+        )
 
     def _check_and_suppress_conflicts(self, pack: ContextPack) -> None:
         """

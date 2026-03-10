@@ -81,12 +81,12 @@ class MemoryGuard:
     """
 
     def __init__(self, audit_writer: Optional[Callable] = None) -> None:
-        # 已处理的 source_hash 集合（幂等保护，实例级别，防止跨实例污染）
-        self._processed_hashes: Set[str] = set()
         """
         Args:
             audit_writer: 审计写入回调，签名为 (event: str, detail: dict) -> None。
         """
+        # 已处理的 source_hash 集合（幂等保护，实例级别，防止跨实例污染）
+        self._processed_hashes: Set[str] = set()
         self._audit_writer = audit_writer
         self._emotion_aggregator = SessionEmotionAggregator()
 

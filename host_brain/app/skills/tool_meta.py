@@ -139,6 +139,10 @@ class PermissionGuard:
         self._human_approval_requester = human_approval_requester
         # SCHEDULER 调用计数器：session_id → call_count
         self._scheduler_call_counts: Dict[str, int] = {}
+        # 调用计数时间戳：session_id → last_access_time（用于自动过期清理）
+        self._scheduler_count_timestamps: Dict[str, float] = {}
+        # 计数器自动过期时间（秒），超过此时间的 session 自动清理
+        self._count_ttl_seconds: float = 3600.0  # 1 小时
 
     def check(
         self,
@@ -192,6 +196,15 @@ class PermissionGuard:
 
         # 检查调用次数限制（需求 7.2）
         if session_id:
+            import time as _time
+            now = _time.monotonic()
+
+            # 自动过期清理：超过 TTL 的 session 重置计数
+            last_ts = self._scheduler_count_timestamps.get(session_id, 0.0)
+            if now - last_ts > self._count_ttl_seconds:
+                self._scheduler_call_counts.pop(session_id, None)
+                self._scheduler_count_timestamps.pop(session_id, None)
+
             count = self._scheduler_call_counts.get(session_id, 0)
             if count >= self.SCHEDULER_MAX_TOOL_CALLS:
                 raise PermissionGuardError(
@@ -199,6 +212,7 @@ class PermissionGuard:
                     tool_meta.name,
                 )
             self._scheduler_call_counts[session_id] = count + 1
+            self._scheduler_count_timestamps[session_id] = now
 
         logger.debug(
             "SCHEDULER 权限校验通过: tool=%s, session=%s",

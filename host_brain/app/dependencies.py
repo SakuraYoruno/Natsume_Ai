@@ -38,6 +38,13 @@ from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
+# 新模块导入（优化计划新增模块）
+from host_brain.app.graph.main_chain import MainChain
+from host_brain.app.llm.routing_matrix import RoutingMatrix
+from host_brain.app.recall.context_pack_builder import ContextPackBuilder
+from host_brain.app.memory.memory_guard import MemoryGuard
+from host_brain.app.memory.state_arbiter import StateArbiter
+
 _logger = logging.getLogger("Natsume.dependencies")
 
 # 全局单例
@@ -56,6 +63,13 @@ _retrieval_pipeline: Optional[RetrievalPipelineContract] = None
 _retrieval_orchestrator: Optional[RetrievalOrchestrator] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
+
+# 新模块单例
+_main_chain: Optional[MainChain] = None
+_routing_matrix: Optional[RoutingMatrix] = None
+_context_pack_builder: Optional[ContextPackBuilder] = None
+_memory_guard: Optional[MemoryGuard] = None
+_state_arbiter: Optional[StateArbiter] = None
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -313,3 +327,100 @@ def get_intent_engine() -> IntentDecisionEngine:
             policy_cache=get_policy_cache(),
         )
     return _intent_engine
+
+
+# ---------------------------------------------------------------------------
+# 新模块工厂函数（优化计划新增）
+# ---------------------------------------------------------------------------
+
+def get_main_chain() -> MainChain:
+    """获取主链路编排器单例（延迟初始化）。"""
+    global _main_chain
+    if _main_chain is None:
+        from host_brain.app.failure_matrix import FailureHandler
+        from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+        ledger = get_ledger()
+
+        async def _audit_writer(tag: str, detail: dict) -> None:
+            try:
+                ledger.append(event_type=tag, payload=detail)
+            except Exception as exc:
+                _logger.warning("MainChain 审计写入失败: %s", exc)
+
+        failure_handler = FailureHandler(audit_writer=_audit_writer)
+        _main_chain = MainChain(failure_handler=failure_handler.handle)
+        _logger.info("MainChain 已初始化（含审计写入）")
+    return _main_chain
+
+
+def get_routing_matrix() -> RoutingMatrix:
+    """获取模型路由矩阵单例（延迟初始化）。"""
+    global _routing_matrix
+    if _routing_matrix is None:
+        ledger = get_ledger()
+
+        def _route_log_writer(decision: object) -> None:
+            try:
+                import dataclasses
+                ledger.append(
+                    event_type="llm_route_log",
+                    payload=dataclasses.asdict(decision) if dataclasses.is_dataclass(decision) else str(decision),
+                )
+            except Exception as exc:
+                _logger.warning("路由日志写入失败: %s", exc)
+
+        _routing_matrix = RoutingMatrix(route_log_writer=_route_log_writer)
+        _logger.info("RoutingMatrix 已初始化")
+    return _routing_matrix
+
+
+def get_context_pack_builder() -> ContextPackBuilder:
+    """获取 ContextPack 组装器单例（延迟初始化）。"""
+    global _context_pack_builder
+    if _context_pack_builder is None:
+        ledger = get_ledger()
+
+        def _audit_writer(event: str, detail: dict) -> None:
+            try:
+                ledger.append(event_type=event, payload=detail)
+            except Exception as exc:
+                _logger.warning("ContextPackBuilder 审计写入失败: %s", exc)
+
+        _context_pack_builder = ContextPackBuilder(audit_writer=_audit_writer)
+        _logger.info("ContextPackBuilder 已初始化")
+    return _context_pack_builder
+
+
+def get_memory_guard() -> MemoryGuard:
+    """获取记忆守卫单例（延迟初始化）。"""
+    global _memory_guard
+    if _memory_guard is None:
+        ledger = get_ledger()
+
+        def _audit_writer(event: str, detail: dict) -> None:
+            try:
+                ledger.append(event_type=event, payload=detail)
+            except Exception as exc:
+                _logger.warning("MemoryGuard 审计写入失败: %s", exc)
+
+        _memory_guard = MemoryGuard(audit_writer=_audit_writer)
+        _logger.info("MemoryGuard 已初始化")
+    return _memory_guard
+
+
+def get_state_arbiter() -> StateArbiter:
+    """获取状态仲裁器单例（延迟初始化）。"""
+    global _state_arbiter
+    if _state_arbiter is None:
+        ledger = get_ledger()
+
+        async def _audit_writer(event: str, detail: dict) -> None:
+            try:
+                ledger.append(event_type=event, payload=detail)
+            except Exception as exc:
+                _logger.warning("StateArbiter 审计写入失败: %s", exc)
+
+        _state_arbiter = StateArbiter(audit_writer=_audit_writer)
+        _logger.info("StateArbiter 已初始化（未注册状态源，需业务层注入）")
+    return _state_arbiter
