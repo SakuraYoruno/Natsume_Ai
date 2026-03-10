@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -24,14 +25,17 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_PATH = Path("data/evidence/evidence.db")
-_SINGLETON: EvidencePlane | None = None
+_SINGLETON: "EvidencePlane | None" = None
+_SINGLETON_LOCK = threading.Lock()
 
 
 def get_evidence_plane() -> "EvidencePlane":
-    """获取 EvidencePlane 单例（懒初始化）。"""
+    """获取 EvidencePlane 单例（懒初始化，线程安全双重检查锁）。"""
     global _SINGLETON
     if _SINGLETON is None:
-        _SINGLETON = EvidencePlane()
+        with _SINGLETON_LOCK:
+            if _SINGLETON is None:
+                _SINGLETON = EvidencePlane()
     return _SINGLETON
 
 

@@ -295,7 +295,17 @@ class NatsumeScheduler:
         # 生成 system_initiated_intent
         intent_id = new_intent_id()
         request_id = new_request_id()
-        system_intent = self._build_system_intent(task, intent_id=intent_id, request_id=request_id)
+        # M27-K：从情感状态获取函数中读取当前情感状态，传入 Intent
+        emotion_state = self._get_emotion_state()
+        emotion_tag = str(emotion_state.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        mood_state_val = str(emotion_state.get("mood_state") or "steady").strip().lower() or "steady"
+        system_intent = self._build_system_intent(
+            task,
+            intent_id=intent_id,
+            request_id=request_id,
+            emotion_tag=emotion_tag,
+            mood_state=mood_state_val,
+        )
 
         # 分发执行
         result: dict[str, Any]

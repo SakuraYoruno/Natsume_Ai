@@ -62,6 +62,8 @@ class EvidenceWriteQueue:
             deadline = time.perf_counter() + timeout_ms / 1000.0
 
         executed = 0
+        retry_queue: list[tuple] = []  # 失败任务暂存，flush 结束后重入队一次
+
         while self._queue:
             if deadline is not None and time.perf_counter() >= deadline:
                 logger.debug("EvidenceWriteQueue flush 超时，剩余 %d 个任务", len(self._queue))
@@ -70,8 +72,16 @@ class EvidenceWriteQueue:
             try:
                 write_fn(*args, **kwargs)
             except Exception as exc:
-                logger.warning("EvidenceWriteQueue 写入任务执行失败（静默降级）: %s", exc)
+                logger.warning("EvidenceWriteQueue 写入失败，将重试一次: %s", exc)
+                retry_queue.append((write_fn, args, kwargs))
             executed += 1
+
+        # 将失败任务重新放回队列末尾（最多重试 1 次，避免无限循环）
+        for item in retry_queue:
+            if len(self._queue) < self._max_size:
+                self._queue.append(item)
+            else:
+                logger.warning("EvidenceWriteQueue 队列已满，丢弃重试任务")
 
         return len(self._queue)
 

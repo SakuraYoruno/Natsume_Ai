@@ -63,6 +63,9 @@ class MemoryOpResult:
 class EpisodicStore:
     """Single-writer episodic memory store with lifecycle audit logs."""
 
+    # 内存中最多保留的记忆条数（LRU 淘汰），防止长期运行 OOM
+    _MAX_RECORDS = 10_000
+
     def __init__(
         self,
         *,
@@ -71,7 +74,9 @@ class EpisodicStore:
     ) -> None:
         self.ledger = ledger or SQLiteLedger()
         self.chroma = chroma_client or InMemoryChromaClient()
-        self._records: dict[str, EpisodicRecord] = {}
+        # 使用 OrderedDict 实现 LRU：最近写入/访问的记录在末尾
+        from collections import OrderedDict
+        self._records: OrderedDict[str, EpisodicRecord] = OrderedDict()
 
     def write_memory(
         self,
@@ -513,6 +518,11 @@ class EpisodicStore:
             emotion_arousal=arousal,
         )
         self._records[memory_id] = record
+        self._records.move_to_end(memory_id)
+        # LRU 淘汰：超过上限时移除最旧的记录（仅从内存中移除，Chroma 和 Ledger 保留）
+        while len(self._records) > self._MAX_RECORDS:
+            oldest_id, _ = self._records.popitem(last=False)
+            logger.debug("EpisodicStore LRU 淘汰内存记录: %s", oldest_id)
         self.chroma.upsert(
             memory_id=memory_id,
             text=normalized_text,
