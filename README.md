@@ -80,7 +80,15 @@ Natsume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
 │   ├── app/                 #    应用入口（FastAPI + 监控面板 API + 配置 + 健康检查）
 │   │   ├── monitor_ui/      #    监控面板前端源码（React + Vite SPA）
-│   │   └── static/monitor/  #    监控面板构建产物（FastAPI 静态托管）
+│   │   ├── static/monitor/  #    监控面板构建产物（FastAPI 静态托管）
+│   │   ├── schemas/         #    核心数据结构与枚举（ProposalType / TaskType / ContextPack 等）
+│   │   ├── graph/           #    主聊天链路时序编排器（MainChain 9节点 + SceneRouter）
+│   │   ├── memory/          #    状态源仲裁器（StateArbiter）+ 记忆写入宪法守卫（MemoryGuard）
+│   │   ├── recall/          #    ContextPack 组装器（token 预算截断 + 冲突检测）
+│   │   ├── llm/             #    模型路由矩阵（能力路由 + cloud→host_8b→edge_3b 降级链）
+│   │   ├── skills/          #    Skill/MCP 权限模型（PermissionGuard + HotLoader）
+│   │   ├── vision/          #    UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
+│   │   └── failure_matrix.py #   统一失败语义矩阵（7个标准化失败事件）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 异步写入队列 + 迁移）
@@ -89,7 +97,7 @@ Natsume_Ai/
 │   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
 │   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
 │   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关 / Evidence Plane）
-│   ├── lsp/                 #    密钥与策略（Vault / Policies）
+│   ├── lsp/                 #    Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
 │   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
@@ -383,7 +391,127 @@ Evidence Plane 是 LangGraph 运行时的写入治理层，负责将图执行过
 
 ---
 
-## 🗜️ 上下文压缩（Context Compression）
+## 🏛️ 架构优化层（Architecture Optimization Layer）
+
+架构优化层是对现有系统「概念层成熟度高于实现层收敛度」问题的系统性补齐，位于 `host_brain/app/` 下，提供**宪法级约束**与**确定性执行保障**。
+
+### 主聊天链路时序编排器（MainChain）
+
+`host_brain/app/graph/main_chain.py` 定义了 80% 请求走的固定主链路，节点数量不超过 12 个：
+
+```
+AirlockQuarantine → Governor → GraphExecutor → RecallFusion
+→ LlmGateway → QAContract → EpisodicStore → Audit → AirlockSanitizer
+```
+
+- 每个节点有标准 TypedDict 输入/输出、最大超时常量和降级策略
+- 任意节点失败统一走 `FailureHandler`，不各自处理
+- `SceneRouter` 在 Governor 放行后根据 `task_type` 分流到专用子链
+
+### 全局状态源优先级仲裁器（StateArbiter）
+
+`host_brain/app/memory/state_arbiter.py` 解决多状态源事实冲突问题：
+
+| 优先级 | 状态源 | 说明 |
+|--------|--------|------|
+| 1（最高）| `WorldCanonStore` | 单一事实来源（SSOT）|
+| 2 | `StyleCanonStore` | 风格/语气规范 |
+| 3 | `EpisodicStore` | 情节记忆（取最新）|
+| 4 | `BondGraph` | 关系图谱（Neo4j）|
+| 5 | `ChromaDB` | 向量数据库 |
+| 6（最低）| `EdgeRuntime` | 边缘端局部状态 |
+
+- 状态源不可达时自动降级并写入 `STATE_SOURCE_FALLBACK` 审计事件
+- `SESSION_OVERRIDE` 场景下新信息不直接写入 Canon，等待蒸馏周期处理
+
+### 记忆写入宪法守卫（MemoryGuard）
+
+`host_brain/app/memory/memory_guard.py` 强制执行 7 条记忆写入硬性规则：
+
+| 规则 | 说明 |
+|------|------|
+| **轮次门槛** | EpisodicStore 写入要求对话轮次 ≥ 2 |
+| **标签门槛** | 必须包含情感/事实/偏好标签之一 |
+| **蒸馏资格** | 频次 ≥ 3 次 OR 被标记为 `MILESTONE` 级别 |
+| **提案类型** | Canon 提案必须携带合法 `proposal_type` 字段 |
+| **幂等保护** | 相同 `source_hash` 拒绝重复写入 |
+| **Dream 拦截** | dream 内容 `evidence_level` 强制设为 `NARRATIVE_ONLY` |
+| **情绪聚合** | 情绪标签以 session 粒度聚合，不以单轮覆盖 |
+
+### ContextPack 组装器（ContextPackBuilder）
+
+`host_brain/app/recall/context_pack_builder.py` 按 token 预算组装七路召回证据：
+
+| 证据路 | Token 上限 |
+|--------|-----------|
+| `world_canon` | 800 |
+| `episodic_vector` | 600 |
+| `style_canon` | 400 |
+| `bond_graph` | 300 |
+| `artifact_vault` / `persona_utterance` / `sqlite_ledger` | 各 200 |
+| **总上限** | **2700** |
+
+超出总量时按优先级从低到高丢弃；`world_canon` 与 `episodic` 语义冲突时将 episodic 标记为 `[CONFLICT_SUPPRESSED]`。
+
+### 模型路由矩阵（RoutingMatrix）
+
+`host_brain/app/llm/routing_matrix.py` 实现能力路由而非仅故障切换：
+
+| 条件 | 路由目标 |
+|------|---------|
+| `chat` + `<2s` 延迟预算 | `host_8b`（本地 Ollama）|
+| `reasoning` 或 context > 16k | `cloud`（Gemini Primary）|
+| `dream` / `diary` | `skills`（专用路由）|
+| `HIGH` risk_level | 禁止路由到 `edge_3b` |
+| 主路由失败 | `cloud → host_8b → edge_3b` 降级链 |
+
+### 统一失败语义矩阵（FailureHandler）
+
+`host_brain/app/failure_matrix.py` 替代各模块分散的 try/except：
+
+| 失败事件 | 用户可见行为 | 是否中止 |
+|---------|------------|---------|
+| `GOVERNOR_BLOCK` | 标准化拒绝响应（不暴露规则细节）| ✅ |
+| `EVIDENCE_EMPTY` | 保守回答，meta 标注 `evidence_empty: true` | ❌ |
+| `MODEL_FALLBACK` | 透明降级，meta 标注 `model_fallback: true` | ❌ |
+| `QA_REWRITE` | 展示重写内容，triptych 保留原始输出 | ❌ |
+| `EDGE_UNREACHABLE` | 禁用 TTS/VTS，切换纯文字模式 | ❌ |
+| `VISION_LOW_CONFIDENCE` | 请求用户确认或回退文本指导 | ✅ |
+| `MODULE_TIMEOUT` | 超时提示，触发降级 | ✅ |
+
+### Skill/MCP 权限模型（PermissionGuard + HotLoader）
+
+`host_brain/app/skills/tool_meta.py` 强化工具权限治理：
+
+- **ToolMeta 必填字段**：`access_level` / `risk_level` / `reversible` / `requires_human_approval` / `scheduler_allowed`
+- **SCHEDULER 严格限制**：`max_tool_calls ≤ 3` / 禁止 `HIGH` risk / 禁止 `ClawdUIAction`
+- **HotLoader**：热加载前验证元数据完整性，缺少必填字段拒绝加载
+- **人工确认流程**：`requires_human_approval=true` 工具执行前等待用户明确批准
+
+### Vision/UI 自动化断言协议（UIAssertionGuard）
+
+`host_brain/app/vision/ui_assertion.py` 验证「交互语义正确性」：
+
+```
+ClawdUIAction 准备执行
+    │
+    ▼ pre_check()（前置断言）
+    │   ├─ 敏感界面检测（密码/支付/系统设置）→ SENSITIVE_UI_BLOCKED（最高优先级）
+    │   ├─ is_foreground_window 验证（防止误操作后台窗口）
+    │   ├─ window_title 匹配
+    │   ├─ process_name 匹配
+    │   └─ ui_state_hash 一致性（防止页面变化）
+    │
+    ▼ 执行 UI 操作
+    │
+    ▼ post_check()（后置断言）
+        ├─ 截图对比（before/after）
+        └─ 无变化 → UI_POSTCONDITION_FAILED → step_replay_guard
+```
+
+---
+
+
 
 上下文压缩系统（`host_brain/memory/context_compressor.py`）负责在多轮对话中管理 Token 预算，确保送入 LLM 的上下文始终在可控范围内，同时不丢失关键记忆。
 
@@ -826,7 +954,8 @@ pre-commit run -a
 
 | 层级 | 目录 | 说明 |
 |------|------|------|
-| **单元测试** | `tests/unit/` | 各模块独立测试 |
+| **单元测试** | `tests/unit/` | 各模块独立测试（StateArbiter / MemoryGuard / ContextPackBuilder / RoutingMatrix / FailureHandler / PermissionGuard / UIAssertionGuard）|
+| **集成测试** | `tests/integration/` | 主链路集成测试（正常流 / Governor 拦截流 / 模型降级流）|
 | **契约测试** | `tests/contract/` | 跨模块接口契约验证 |
 | **端到端测试** | `tests/e2e/` | 完整链路集成测试 |
 | **性能基准** | `tools/bench/` | Ledger WAL 读写吞吐基准 |
