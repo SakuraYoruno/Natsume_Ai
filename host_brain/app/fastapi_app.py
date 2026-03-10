@@ -20,7 +20,6 @@ from fastapi.staticfiles import StaticFiles
 
 from host_brain.app.schemas import (
     ChatRequest,
-    ChatResponse,
     EdgeEventsRequest,
     EdgeEventsResponse,
     MetricsResponse,
@@ -44,7 +43,6 @@ from host_brain.app.http_hooks import (
     add_request_id_and_audit as _add_request_id_fn,
 )
 from host_brain.app.chat_handler import handle_chat
-from host_brain.app.chat_stream_handler import handle_chat_stream, handle_chat_stream_post
 from host_brain.app.system_handler import receive_edge_events_response
 from host_brain.core.ids import new_request_id
 
@@ -245,46 +243,10 @@ async def startup_report() -> Any:
 # ---------------------------------------------------------------------------
 # FastAPI 应用实例
 # ---------------------------------------------------------------------------
-@app.post("/v1/chat", response_model=ChatResponse)
-async def chat(request_body: ChatRequest, request: Request) -> ChatResponse:
-    """POST /v1/chat — 委托给 chat_handler.handle_chat。"""
+@app.post("/v1/chat")
+async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse:
+    """POST /v1/chat — 统一入口，根据场景自动路由到本地单节点或云端多节点，统一返回 SSE 流式响应。"""
     return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
-
-
-@app.get("/v1/chat/stream")
-async def chat_stream(
-    request: Request,
-    message: str = "",
-    session_id: Optional[str] = None,
-    thread_id: Optional[str] = None,
-    mood_state: Optional[str] = None,
-    emotion_tag: Optional[str] = None,
-) -> StreamingResponse:
-    """GET /v1/chat/stream — 委托给 chat_stream_handler.handle_chat_stream。"""
-    return await handle_chat_stream(
-        message=message,
-        session_id=session_id,
-        thread_id=thread_id,
-        mood_state=mood_state,
-        emotion_tag=emotion_tag,
-        request=request,
-    )
-
-
-@app.post("/v1/chat/stream")
-async def chat_stream_post(
-    request_body: ChatRequest,
-    request: Request,
-) -> StreamingResponse:
-    """POST /v1/chat/stream — 委托给 chat_stream_handler.handle_chat_stream_post。
-
-    接受与 POST /v1/chat 相同的 ChatRequest 请求体，
-    返回与 GET /v1/chat/stream 相同格式的 SSE 事件流。
-    """
-    return await handle_chat_stream_post(
-        request_body=request_body,
-        request=request,
-    )
 
 
 # ---------------------------------------------------------------------------

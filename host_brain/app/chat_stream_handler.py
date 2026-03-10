@@ -1,10 +1,13 @@
-"""SSE 流式聊天处理模块。
+"""SSE 流式聊天处理模块（SCENE_CHAT 专用）。
 
-从 fastapi_app.py 拆分，负责 GET /v1/chat/stream 和 POST /v1/chat/stream SSE 流式响应。
+从 fastapi_app.py 拆分，负责 SCENE_CHAT 场景下的 token 级流式 SSE 响应。
+由 chat_handler._unified_chat_sse_generator 在场景分类后调用。
 
 完整链路：
-  Governor 鉴权 → 并行 Retrieval → stream_llm_chunks → SentenceSplitter
+  [Governor 鉴权（由调用方预完成）] → 并行 Retrieval → stream_llm_chunks → SentenceSplitter
   → Airlock Ingress 检疫 → episodic memory 写入 → COMMIT 事件
+
+注意：/v1/chat/stream 接口已删除，统一走 POST /v1/chat（SSE 流式响应）。
 """
 
 from __future__ import annotations
@@ -459,12 +462,16 @@ async def _sse_event_generator(
     request_id: str,
     ts_ms: int,
     intent_draft: Dict[str, Any] | None = None,
+    _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """完整链路 SSE 事件生成器。
+    """完整链路 SSE 事件生成器（SCENE_CHAT 专用，token 级流式输出）。
 
     事件序列：
       PRESENCE(THINKING) → [Governor] → PRESENCE(GOV_APPROVED)
       → RENDER(chunk)* → SENTENCE(sentence)* → COMMIT
+
+    当 _pre_approved_governor_result 传入时，跳过重复 Governor 鉴权
+    （由 _unified_chat_sse_generator 在场景分类前已完成鉴权）。
     """
 
     def _sse(data: dict) -> str:
@@ -516,15 +523,19 @@ async def _sse_event_generator(
             ts_ms=ts_ms,
         )
 
-        # ── 3. Governor 鉴权 ──────────────────────────────────────────────
-        engine = get_intent_engine()
-        governor_result = await asyncio.to_thread(
-            engine.evaluate_intent,
-            raw_intent=intent_draft,
-            request_id=request_id,
-            thread_id=thread_id,
-            governance_snapshot=governance_snapshot,
-        )
+        # ── 3. Governor 鉴权（若已预鉴权则跳过）────────────────────────────
+        if _pre_approved_governor_result is not None:
+            # 由 _unified_chat_sse_generator 已完成鉴权，直接使用结果
+            governor_result = _pre_approved_governor_result
+        else:
+            engine = get_intent_engine()
+            governor_result = await asyncio.to_thread(
+                engine.evaluate_intent,
+                raw_intent=intent_draft,
+                request_id=request_id,
+                thread_id=thread_id,
+                governance_snapshot=governance_snapshot,
+            )
 
         decision = governor_result.get("decision")
         intent_id = governor_result.get("intent_id")
@@ -535,10 +546,13 @@ async def _sse_event_generator(
                         "reason_code": reason, "request_id": request_id})
             return
 
-        yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
+        # 若是预鉴权路径，GOV_APPROVED 已由 _unified_chat_sse_generator 发出，此处跳过
+        if _pre_approved_governor_result is None:
+            yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
 
         # ── 4. 并行启动 Retrieval ─────────────────────────────────────────
-        scene_type = str(getattr(request_body_obj, "scene_type", None) or SCENE_CHAT).strip().upper() or SCENE_CHAT
+        # 本函数仅被 SCENE_CHAT 分支调用，scene_type 固定为 SCENE_CHAT
+        scene_type = SCENE_CHAT
         retrieval_enabled, retrieval_disabled_reason = resolve_chat_retrieval_gate(scene_type=scene_type)
 
         retrieval_task: asyncio.Task | None = None
@@ -827,92 +841,8 @@ async def _sse_event_generator(
 
 
 # ---------------------------------------------------------------------------
-# 公开处理函数：GET /v1/chat/stream
+# handle_chat_stream 和 handle_chat_stream_post 已移除。
+# /v1/chat/stream 接口已删除，统一走 POST /v1/chat（SSE 流式响应）。
+# _sse_event_generator 由 chat_handler._unified_chat_sse_generator 在
+# SCENE_CHAT 场景下调用。
 # ---------------------------------------------------------------------------
-
-async def handle_chat_stream(
-    message: str,
-    session_id: Optional[str],
-    thread_id: Optional[str],
-    mood_state: Optional[str],
-    emotion_tag: Optional[str],
-    request: Optional[Request],
-) -> StreamingResponse:
-    """GET /v1/chat/stream SSE 流式聊天处理函数。"""
-    request_id = (
-        getattr(request.state, "request_id", None) if request is not None else None
-    ) or new_request_id()
-    ts_ms = int(time.time() * 1000)
-    resolved_session_id = session_id or f"session::{request_id}"
-
-    return StreamingResponse(
-        _sse_event_generator(
-            message=message,
-            session_id=resolved_session_id,
-            thread_id=thread_id,
-            mood_state=mood_state,
-            emotion_tag=emotion_tag,
-            request_id=request_id,
-            ts_ms=ts_ms,
-            intent_draft=None,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# 公开处理函数：POST /v1/chat/stream
-# ---------------------------------------------------------------------------
-
-async def handle_chat_stream_post(
-    request_body: ChatRequest,
-    request: Optional[Request],
-) -> StreamingResponse:
-    """POST /v1/chat/stream SSE 流式聊天处理函数。
-
-    接受与 POST /v1/chat 相同的 ChatRequest 请求体，
-    返回与 GET /v1/chat/stream 相同格式的 SSE 事件流。
-    """
-    request_id = (
-        getattr(request.state, "request_id", None) if request is not None else None
-    ) or new_request_id()
-    ts_ms = int(time.time() * 1000)
-    session_id = request_body.session_id or f"session::{request_id}"
-
-    # 从请求体中提取 intent_draft（若已提供则直接使用，保持 seq 一致性）
-    intent_draft = request_body.intent_draft
-    if intent_draft is None:
-        intent_draft = {
-            "schema_version": "Natsume.intent.v1",
-            "id": f"intent::{request_id}",
-            "ts_ms": ts_ms,
-            "session_id": session_id,
-            "seq": 1,
-            "type": "query",
-            "action": "narrative_only",
-            "target": "host",
-            "args": {"text": request_body.message},
-            "nonce": f"nonce::{request_id}",
-        }
-
-    return StreamingResponse(
-        _sse_event_generator(
-            message=request_body.message,
-            session_id=session_id,
-            thread_id=request_body.thread_id,
-            mood_state=request_body.mood_state,
-            emotion_tag=request_body.emotion_tag,
-            request_id=request_id,
-            ts_ms=ts_ms,
-            intent_draft=intent_draft,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
