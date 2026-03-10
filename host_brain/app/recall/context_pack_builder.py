@@ -191,7 +191,7 @@ class ContextPackBuilder:
         if task_type:
             self._check_style_canon_task_conflict(pack, task_type)
 
-        # 第三步：总量超限时按优先级截断（需求 4.2）
+        # 第四步：总量超限时按优先级截断（需求 4.2）
         total = pack.recalculate_total()
         if total > TOTAL_TOKEN_BUDGET:
             self._apply_global_truncation(pack, total)

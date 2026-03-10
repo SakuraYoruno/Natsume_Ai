@@ -358,18 +358,20 @@ class MainChain:
     任意节点失败时统一走 FailureHandler（需求 1.2）。
     """
 
-    # 主链路固定节点列表
-    MAIN_NODES: List[ChainNode] = [
-        AirlockQuarantineNode(),
-        GovernorNode(),
-        GraphExecutorNode(),
-        RecallFusionNode(),
-        LlmGatewayNode(),
-        QAContractNode(),
-        EpisodicStoreNode(),
-        AuditNode(),
-        AirlockSanitizerNode(),
-    ]
+    # 主链路节点工厂（类级别只读元组，不可变，避免共享可变状态）
+    # 注意：不在此处实例化节点，而是在 __init__ 中为每个实例创建独立的节点列表，
+    # 防止多个 MainChain 实例共享同一可变列表导致并发污染。
+    _NODE_FACTORIES: tuple = (
+        AirlockQuarantineNode,
+        GovernorNode,
+        GraphExecutorNode,
+        RecallFusionNode,
+        LlmGatewayNode,
+        QAContractNode,
+        EpisodicStoreNode,
+        AuditNode,
+        AirlockSanitizerNode,
+    )
 
     def __init__(self, failure_handler: Optional[Callable] = None) -> None:
         """
@@ -377,6 +379,11 @@ class MainChain:
             failure_handler: 统一失败处理回调，签名为 (event: str, ctx: ChainContext) -> None。
                              若未传入，则自动创建默认 FailureHandler 实例。
         """
+        # 修复：为每个实例创建独立的节点列表，避免类变量共享可变列表导致并发污染。
+        # 原实现 MAIN_NODES 是类级别可变列表，所有实例共享同一对象，
+        # 若某处代码修改 MainChain.MAIN_NODES 会影响所有实例。
+        self.MAIN_NODES: List[ChainNode] = [factory() for factory in self._NODE_FACTORIES]
+
         if failure_handler is not None:
             self._failure_handler = failure_handler
         else:
