@@ -413,7 +413,7 @@ class MainChain:
             try:
                 should_continue = await node.execute_with_timeout(ctx)
             except Exception as exc:
-                ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
+                ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value  # 使用枚举值字符串，与 FailureHandler 解析保持一致
                 ctx.failure_detail = f"节点 {node.name} 未捕获异常: {exc}"
                 logger.exception("节点 %s 执行异常", node.name)
                 should_continue = False
@@ -425,9 +425,15 @@ class MainChain:
                     ctx.failure_detail = f"节点 {node.name} 返回 False 但未设置 failure_event"
 
                 # 统一失败处理
+                # 修复：_failure_handler 可能是同步或异步函数，需自动检测并适配，
+                # 防止注入同步 Callable 时 await 报错（TypeError: object NoneType can't be used in 'await' expression）
                 if self._failure_handler:
                     try:
-                        await self._failure_handler(ctx.failure_event, ctx)
+                        import asyncio as _asyncio
+                        if _asyncio.iscoroutinefunction(self._failure_handler):
+                            await self._failure_handler(ctx.failure_event, ctx)
+                        else:
+                            self._failure_handler(ctx.failure_event, ctx)
                     except Exception as fh_exc:
                         logger.error("FailureHandler 执行异常: %s", fh_exc)
                 logger.warning(

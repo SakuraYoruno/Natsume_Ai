@@ -85,7 +85,10 @@ class MemoryGuard:
         Args:
             audit_writer: 审计写入回调，签名为 (event: str, detail: dict) -> None。
         """
-        # 已处理的 source_hash 集合（幂等保护，实例级别，防止跨实例污染）
+        # 已处理的 source_hash 集合（内存幂等保护，实例级别）。
+        # 注意：进程重启后内存集合清空，幂等保护仅在当前进程生命周期内有效。
+        # 持久化幂等保护依赖 mark_proposal_processed() 写入审计日志，
+        # 以及启动时通过 restore_processed_hashes() 从审计日志恢复已处理集合。
         self._processed_hashes: Set[str] = set()
         self._audit_writer = audit_writer
         self._emotion_aggregator = SessionEmotionAggregator()
@@ -154,8 +157,45 @@ class MemoryGuard:
         )
 
     def mark_proposal_processed(self, source_hash: str) -> None:
-        """将 source_hash 标记为已处理（写入成功后调用）。"""
+        """将 source_hash 标记为已处理（写入成功后调用）。
+
+        同时写入审计日志，确保持久化层记录已处理的 source_hash，
+        使进程重启后可通过 restore_processed_hashes() 恢复幂等状态。
+        """
         self._processed_hashes.add(source_hash)
+        # 异步写入审计日志（fire-and-forget，不阻塞调用方）
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(
+                    self._write_audit(
+                        "CANON_HASH_PROCESSED",
+                        {"source_hash": source_hash},
+                    )
+                )
+            else:
+                # 同步上下文：直接调用同步版本
+                if self._audit_writer is not None:
+                    try:
+                        if not _asyncio.iscoroutinefunction(self._audit_writer):
+                            self._audit_writer("CANON_HASH_PROCESSED", {"source_hash": source_hash})
+                    except Exception:
+                        pass
+        except RuntimeError:
+            pass
+
+    def restore_processed_hashes(self, hashes: Set[str]) -> None:
+        """从持久化层恢复已处理的 source_hash 集合（进程启动时调用）。
+
+        调用方应在启动时查询审计日志中 event='CANON_HASH_PROCESSED' 的记录，
+        提取所有 source_hash 后调用此方法，确保重启后幂等保护持续有效。
+
+        Args:
+            hashes: 从持久化层恢复的已处理 source_hash 集合。
+        """
+        self._processed_hashes.update(hashes)
+        logger.info("已从持久化层恢复 %d 个 source_hash 到幂等保护集合", len(hashes))
 
     # ------------------------------------------------------------------
     # Dream 内容拦截（需求 3.6）
