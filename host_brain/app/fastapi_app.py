@@ -189,55 +189,11 @@ async def add_request_id_and_audit(request: Request, call_next: Callable) -> Res
 
 
 # ---------------------------------------------------------------------------
-# 核心 HTTP 端点（委托给各 handler 模块）
+# 注册 Health / Readiness / Observability 路由（health_routes.py 统一管理）
+# 注意：/health、/ready、/obs/metrics、/health/mcp、/health/canon_sync、
+#       /observability/trace、/startup 均由 health_router 注册，此处不重复注册。
 # ---------------------------------------------------------------------------
-@app.get("/health")
-async def health_check() -> Any:
-    """Health endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import health_check as _health_check
-    return await _health_check()
-
-
-@app.get("/ready")
-async def environment_readiness() -> Any:
-    """Readiness endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import environment_readiness as _readiness
-    return await _readiness()
-
-
-@app.get("/obs/metrics")
-async def obs_metrics(request_id: Optional[str] = None) -> Any:
-    """Metrics endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import obs_metrics as _obs_metrics
-    return await _obs_metrics(request_id=request_id)
-
-
-@app.get("/health/mcp")
-async def mcp_health_check() -> Any:
-    """MCP health endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import mcp_health_check as _mcp_health
-    return await _mcp_health()
-
-
-@app.get("/health/canon_sync")
-async def canon_sync_health() -> Any:
-    """Canon sync health endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import canon_sync_health_check as _canon_sync
-    return await _canon_sync()
-
-
-@app.post("/observability/trace")
-async def observability_trace(request: Request) -> Any:
-    """Observability trace endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import request_trace as _obs_trace
-    return await _obs_trace(request)
-
-
-@app.get("/startup")
-async def startup_report() -> Any:
-    """Startup report endpoint — 委托给 health_routes。"""
-    from host_brain.app.health_routes import startup_report as _startup
-    return await _startup()
+app.include_router(health_router)
 
 
 # ---------------------------------------------------------------------------

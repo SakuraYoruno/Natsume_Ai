@@ -23,8 +23,35 @@ async def runtime_lifespan(
     logger.info("Natsume AI Host Brain starting up ...")
     ledger = get_ledger()
     try:
+        # 预初始化新模块，确保启动时即可感知降级状态
+        from host_brain.app.dependencies import (
+            get_main_chain,
+            get_routing_matrix,
+            get_context_pack_builder,
+            get_memory_guard,
+            get_state_arbiter,
+        )
+        new_module_statuses: dict[str, str] = {}
+        for name, factory in [
+            ("main_chain", get_main_chain),
+            ("routing_matrix", get_routing_matrix),
+            ("context_pack_builder", get_context_pack_builder),
+            ("memory_guard", get_memory_guard),
+            ("state_arbiter", get_state_arbiter),
+        ]:
+            try:
+                factory()
+                new_module_statuses[name] = "OK"
+            except Exception as exc:
+                new_module_statuses[name] = f"DEGRADED: {exc}"
+                logger.warning(
+                    "新模块 %s 启动探针失败（降级）: %s",
+                    name, exc,
+                    extra={"module": name, "error": str(exc)},
+                )
+
         report = build_startup_report(
-            runtime_statuses={},
+            runtime_statuses=new_module_statuses,
             dependency_probes={},
             request_id=new_request_id(),
             ledger=ledger,
@@ -32,6 +59,15 @@ async def runtime_lifespan(
         )
         emit_runtime_bootstrap_logs(startup_report=report)
         logger.info("Startup probe completed", extra={"status": report.get("status", "UNKNOWN")})
+
+        # 新模块中有降级时，明显提示
+        degraded_modules = [k for k, v in new_module_statuses.items() if v != "OK"]
+        if degraded_modules:
+            logger.warning(
+                "⚠️ 以下新模块启动时处于降级状态，请检查配置: %s",
+                degraded_modules,
+                extra={"degraded_modules": degraded_modules},
+            )
     except Exception as exc:
         logger.warning("Startup probe degraded", extra={"error": str(exc)})
     yield

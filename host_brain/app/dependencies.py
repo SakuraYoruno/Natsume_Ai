@@ -338,13 +338,17 @@ def get_main_chain() -> MainChain:
     global _main_chain
     if _main_chain is None:
         from host_brain.app.failure_matrix import FailureHandler
-        from host_brain.audit.sqlite_ledger import SQLiteLedger
 
         ledger = get_ledger()
 
         async def _audit_writer(tag: str, detail: dict) -> None:
             try:
-                ledger.append(event_type=tag, payload=detail)
+                ledger.log_error(
+                    request_id=str(detail.get("request_id") or "main_chain"),
+                    stage=tag,
+                    reason_code=str(detail.get("event") or tag),
+                    detail=str(detail),
+                )
             except Exception as exc:
                 _logger.warning("MainChain 审计写入失败: %s", exc)
 
@@ -363,10 +367,17 @@ def get_routing_matrix() -> RoutingMatrix:
         def _route_log_writer(decision: object) -> None:
             try:
                 import dataclasses
-                ledger.append(
-                    event_type="llm_route_log",
-                    payload=dataclasses.asdict(decision) if dataclasses.is_dataclass(decision) else str(decision),
-                )
+                import enum
+                if dataclasses.is_dataclass(decision):
+                    raw = dataclasses.asdict(decision)
+                    payload = {
+                        k: (v.value if isinstance(v, enum.Enum) else v)
+                        for k, v in raw.items()
+                    }
+                else:
+                    payload = {"raw": str(decision)}
+                # 使用 SQLiteLedger 的路由日志专用方法，参数为 row: dict
+                ledger.log_llm_route(row=payload)
             except Exception as exc:
                 _logger.warning("路由日志写入失败: %s", exc)
 
@@ -383,7 +394,12 @@ def get_context_pack_builder() -> ContextPackBuilder:
 
         def _audit_writer(event: str, detail: dict) -> None:
             try:
-                ledger.append(event_type=event, payload=detail)
+                ledger.log_error(
+                    request_id=str(detail.get("request_id") or "context_pack_builder"),
+                    stage=event,
+                    reason_code=event,
+                    detail=str(detail),
+                )
             except Exception as exc:
                 _logger.warning("ContextPackBuilder 审计写入失败: %s", exc)
 
@@ -400,7 +416,7 @@ def get_memory_guard() -> MemoryGuard:
 
         def _audit_writer(event: str, detail: dict) -> None:
             try:
-                ledger.append(event_type=event, payload=detail)
+                ledger.log_memory_op(row={"op_type": event, **detail})
             except Exception as exc:
                 _logger.warning("MemoryGuard 审计写入失败: %s", exc)
 
@@ -417,7 +433,12 @@ def get_state_arbiter() -> StateArbiter:
 
         async def _audit_writer(event: str, detail: dict) -> None:
             try:
-                ledger.append(event_type=event, payload=detail)
+                ledger.log_error(
+                    request_id=str(detail.get("request_id") or "state_arbiter"),
+                    stage=event,
+                    reason_code=event,
+                    detail=str(detail),
+                )
             except Exception as exc:
                 _logger.warning("StateArbiter 审计写入失败: %s", exc)
 
