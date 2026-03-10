@@ -121,6 +121,7 @@ def execute_diary_writer(
     # LLM 生成日记叙事
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     diary_narrative: str = ""
+    llm_result: dict[str, Any] | None = None  # 防止 evolution_proposal 分支 NameError
 
     if llm_generator:
         try:
