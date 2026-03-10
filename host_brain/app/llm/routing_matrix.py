@@ -227,7 +227,8 @@ class RoutingMatrix:
             task_type, risk_level,
         )
         # 返回最后一个决策（调用方需处理此情况）
-        return RouteDecision(
+        # 修复：兜底决策同样需要写入路由日志，确保运维可感知"所有模型均不可用"的异常情况
+        exhausted_decision = RouteDecision(
             task_type=task_type,
             selected_model=ModelTarget.HOST_8B,
             latency_budget=latency_budget,
@@ -237,6 +238,8 @@ class RoutingMatrix:
             fallback_reason="所有模型均不可用",
             original_model=original_model,
         )
+        self._write_route_log(exhausted_decision)
+        return exhausted_decision
 
     def _write_route_log(self, decision: RouteDecision) -> None:
         """写入路由决策日志（llm_route_log）。"""
