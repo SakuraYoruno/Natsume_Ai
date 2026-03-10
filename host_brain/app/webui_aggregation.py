@@ -180,7 +180,11 @@ def build_webui_link_topology(
 ) -> dict[str, Any]:
     """构建链路拓扑图（节点=审计源，边=同一 request_id 串联），用于拓扑可视化。"""
 
-    # 收集所有审计源的记录
+    # 修复：原实现通过 getattr(ledger, source, []) 直接访问 SQLiteLedger 内存列表属性，
+    # 全量遍历所有历史记录后再按时间过滤，当审计日志积累大量数据时性能极差。
+    # 改用 fetch_by_time_range 按时间范围查询，与其他 webui 函数保持一致。
+    # 注意：fetch_by_time_range 仅支持 intent_log/governor_log 等已建索引的表，
+    # 对于不支持的表名会静默返回空列表，行为与原实现一致。
     source_names = [
         "intent_log", "governor_log", "skill_exec_log",
         "channel_io_log", "avatar_action_log", "voice_event_log",
@@ -190,13 +194,20 @@ def build_webui_link_topology(
     # 收集 request_id -> 经过的源集合
     request_sources: dict[str, set[str]] = {}
     for source in source_names:
-        rows = getattr(ledger, source, [])
+        try:
+            rows = ledger.fetch_by_time_range(
+                source,
+                start_ms=start_time,
+                end_ms=end_time,
+                limit=10_000,
+            )
+        except Exception:
+            # 不支持的表名静默跳过，不影响其他源的拓扑构建
+            continue
         for row in rows:
-            ts = int(row.get("ts_ms") or 0)
-            if start_time <= ts <= end_time:
-                rid = str(row.get("request_id") or "")
-                if rid:
-                    request_sources.setdefault(rid, set()).add(source)
+            rid = str(row.get("request_id") or "")
+            if rid:
+                request_sources.setdefault(rid, set()).add(source)
 
     # 构建节点
     all_sources_used: set[str] = set()

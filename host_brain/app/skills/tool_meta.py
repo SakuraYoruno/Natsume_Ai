@@ -195,24 +195,26 @@ class PermissionGuard:
             )
 
         # 检查调用次数限制（需求 7.2）
-        if session_id:
-            import time as _time
-            now = _time.monotonic()
+        # 修复：session_id=None 时使用全局计数键 "_global_"，
+        # 防止 SCHEDULER 通过不传 session_id 绕过调用次数限制。
+        import time as _time
+        count_key = session_id if session_id else "_global_"
+        now = _time.monotonic()
 
-            # 自动过期清理：超过 TTL 的 session 重置计数
-            last_ts = self._scheduler_count_timestamps.get(session_id, 0.0)
-            if now - last_ts > self._count_ttl_seconds:
-                self._scheduler_call_counts.pop(session_id, None)
-                self._scheduler_count_timestamps.pop(session_id, None)
+        # 自动过期清理：超过 TTL 的 session 重置计数
+        last_ts = self._scheduler_count_timestamps.get(count_key, 0.0)
+        if now - last_ts > self._count_ttl_seconds:
+            self._scheduler_call_counts.pop(count_key, None)
+            self._scheduler_count_timestamps.pop(count_key, None)
 
-            count = self._scheduler_call_counts.get(session_id, 0)
-            if count >= self.SCHEDULER_MAX_TOOL_CALLS:
-                raise PermissionGuardError(
-                    f"SCHEDULER 本周期调用次数 {count} 已达上限 {self.SCHEDULER_MAX_TOOL_CALLS}",
-                    tool_meta.name,
-                )
-            self._scheduler_call_counts[session_id] = count + 1
-            self._scheduler_count_timestamps[session_id] = now
+        count = self._scheduler_call_counts.get(count_key, 0)
+        if count >= self.SCHEDULER_MAX_TOOL_CALLS:
+            raise PermissionGuardError(
+                f"SCHEDULER 本周期调用次数 {count} 已达上限 {self.SCHEDULER_MAX_TOOL_CALLS}",
+                tool_meta.name,
+            )
+        self._scheduler_call_counts[count_key] = count + 1
+        self._scheduler_count_timestamps[count_key] = now
 
         logger.debug(
             "SCHEDULER 权限校验通过: tool=%s, session=%s",
