@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -324,6 +325,8 @@ class EdgeEventReporter:
         self._total_sent = 0
         self._total_failed = 0
         self._total_retried = 0
+        # 后台重试线程池（单线程，避免并发重试冲突）
+        self._retry_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="edge-event-retry")
 
     def report(self, events: list[dict[str, Any]]) -> BatchReportResult:
         """批量上报事件。
@@ -425,7 +428,11 @@ class EdgeEventReporter:
         )
 
     def _try_send(self, events: list[dict[str, Any]]) -> BatchReportResult:
-        """通过 transport_fn 发送事件，带指数退避重试。"""
+        """通过 transport_fn 发送事件（单次尝试，不阻塞）。
+
+        重试逻辑由 _retry_in_background 在后台线程中执行，
+        避免在 FastAPI 异步事件循环中调用 time.sleep 阻塞事件循环。
+        """
         if self.transport_fn is None:
             return BatchReportResult(
                 success=False,
@@ -436,53 +443,74 @@ class EdgeEventReporter:
                 detail="no transport_fn configured",
             )
 
-        last_error: str | None = None
-        delay = self.base_delay_s
-
-        for attempt in range(self.max_retry):
-            try:
-                result = self.transport_fn(events)
-                if isinstance(result, BatchReportResult):
-                    self._network_available = True
-                    return result
-                # transport_fn 返回 dict 兼容
-                if isinstance(result, dict):
-                    self._network_available = True
-                    return BatchReportResult(
-                        success=result.get("success", False),
-                        total=result.get("total", len(events)),
-                        accepted=result.get("accepted", 0),
-                        rejected=result.get("rejected", len(events)),
-                        reason_code=result.get("reason_code"),
-                        detail=result.get("detail"),
-                    )
-                # 未知返回类型视为成功
+        try:
+            result = self.transport_fn(events)
+            if isinstance(result, BatchReportResult):
+                self._network_available = True
+                return result
+            # transport_fn 返回 dict 兼容
+            if isinstance(result, dict):
                 self._network_available = True
                 return BatchReportResult(
-                    success=True,
-                    total=len(events),
-                    accepted=len(events),
-                    rejected=0,
+                    success=result.get("success", False),
+                    total=result.get("total", len(events)),
+                    accepted=result.get("accepted", 0),
+                    rejected=result.get("rejected", len(events)),
+                    reason_code=result.get("reason_code"),
+                    detail=result.get("detail"),
                 )
-            except Exception as exc:
-                last_error = str(exc)
-                self._total_retried += 1
-                self._network_available = False
-                logger.warning(
-                    "Event report attempt %d/%d failed: %s",
-                    attempt + 1, self.max_retry, last_error,
-                )
-                if attempt < self.max_retry - 1:
-                    time.sleep(min(delay, self.max_delay_s))
-                    delay *= 2
+            # 未知返回类型视为成功
+            self._network_available = True
+            return BatchReportResult(
+                success=True,
+                total=len(events),
+                accepted=len(events),
+                rejected=0,
+            )
+        except Exception as exc:
+            self._network_available = False
+            self._total_retried += 1
+            logger.warning("Event report failed (will retry in background): %s", exc)
+            # 将失败事件缓存，并在后台线程中带退避重试
+            for event in events:
+                self.cache.push(event)
+            self._retry_executor.submit(self._retry_flush_background)
+            return BatchReportResult(
+                success=False,
+                total=len(events),
+                accepted=0,
+                rejected=len(events),
+                reason_code=RPC_EVENT_NETWORK_UNAVAILABLE,
+                detail=f"send failed, queued {len(events)} events for background retry: {exc}",
+            )
 
-        return BatchReportResult(
-            success=False,
-            total=len(events),
-            accepted=0,
-            rejected=len(events),
-            reason_code=RPC_EVENT_NETWORK_UNAVAILABLE,
-            detail=f"all {self.max_retry} attempts failed: {last_error}",
+    def _retry_flush_background(self) -> None:
+        """在后台线程中带指数退避重试，刷新缓存事件。
+
+        此方法在独立线程中运行，使用 time.sleep 不会阻塞事件循环。
+        """
+        delay = self.base_delay_s
+        for attempt in range(self.max_retry):
+            time.sleep(min(delay, self.max_delay_s))
+            if self.cache.size == 0:
+                return
+            result = self.flush_cache()
+            if result.success:
+                logger.info(
+                    "Background retry succeeded on attempt %d/%d, flushed %d events",
+                    attempt + 1, self.max_retry, result.accepted,
+                )
+                return
+            self._total_retried += 1
+            logger.warning(
+                "Background retry attempt %d/%d failed: %s",
+                attempt + 1, self.max_retry, result.detail,
+            )
+            delay = min(delay * 2, self.max_delay_s)
+
+        logger.error(
+            "Background retry exhausted after %d attempts, %d events remain in cache",
+            self.max_retry, self.cache.size,
         )
 
     @property

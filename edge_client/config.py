@@ -272,7 +272,7 @@ def load_edge_config(
     asr_enabled = _parse_bool(_env_get(env_lookup, "EDGE_ASR_ENABLED"), default=True)
     tts_enabled = _parse_bool(_env_get(env_lookup, "EDGE_TTS_ENABLED"), default=True)
     barge_in_enabled = _parse_bool(_env_get(env_lookup, "EDGE_BARGE_IN_ENABLED"), default=True)
-    fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=False)
+    fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=True)
     resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
 
     if issues:
@@ -411,8 +411,8 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
     else:
         statuses["edge.rpc.fallback_llm"] = {
             "available": False,
-            "unavailable_kind": "cold_start",
-            "detail": "edge fallback llm disabled by default",
+            "unavailable_kind": "dependency",
+            "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)",
         }
     statuses["edge.rpc.resource_gate"] = _service_status(
         enabled=config.resource_gate_enabled,

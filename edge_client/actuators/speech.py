@@ -80,6 +80,7 @@ class SpeechPlaybackQueue:
         request_id: str,
         payload: dict[str, Any],
         ts_ms: int | None = None,
+        auto_start: bool = False,
     ) -> SpeechQueueResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         speak = request_speak(
@@ -117,6 +118,12 @@ class SpeechPlaybackQueue:
             payload=event,
             ts_ms=now_value,
         )
+        # auto_start=True 且当前无正在播放的项目时，立即启动播放
+        if auto_start and self._active is None:
+            start_result = self.start_next(ts_ms=now_value)
+            if start_result is not None:
+                return start_result
+
         return SpeechQueueResult(
             success=True,
             status=STATUS_ACCEPTED,
