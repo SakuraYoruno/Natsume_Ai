@@ -233,6 +233,13 @@ class FailureHandler:
             # 在响应 meta 中标注 model_fallback（需求 6.3）
             meta["model_fallback"] = True
             meta["fallback_reason"] = detail.get("fallback_reason", "主模型不可用")
+            meta["degraded"] = True
+            meta["degraded_mode"] = "fallback_model"
+            # 降级明显提示：写入 WARNING 日志，确保运维可感知
+            logger.warning(
+                "[MODEL_FALLBACK] ⚠️ 主模型不可用，已降级到备用模型。原因: %s",
+                meta["fallback_reason"],
+            )
 
         elif event == FailureEvent.QA_REWRITE:
             # triptych 同时保留原始输出和重写后输出（需求 6.4）

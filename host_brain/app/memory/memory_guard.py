@@ -23,7 +23,6 @@ from ..schemas.memory_types import (
     EpisodicRecord,
     EvidenceLevel,
     ProposalType,
-    TaskType,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,16 +80,16 @@ class MemoryGuard:
     所有写入 EpisodicStore 和 Canon 的操作必须先通过此守卫校验。
     """
 
-    # 已处理的 source_hash 集合（幂等保护）
-    _processed_hashes: Set[str] = set()
-
     def __init__(self, audit_writer: Optional[Callable] = None) -> None:
+        # 已处理的 source_hash 集合（幂等保护，实例级别，防止跨实例污染）
+        self._processed_hashes: Set[str] = set()
         """
         Args:
             audit_writer: 审计写入回调，签名为 (event: str, detail: dict) -> None。
         """
         self._audit_writer = audit_writer
         self._emotion_aggregator = SessionEmotionAggregator()
+
 
     # ------------------------------------------------------------------
     # EpisodicStore 写入校验（需求 3.1）

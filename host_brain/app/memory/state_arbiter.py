@@ -140,7 +140,10 @@ class StateArbiter:
                 )
 
         fallback_chain: List[StateSource] = []
+        # 记录最高优先级的有效值（找到后继续遍历以检测冲突）
         highest_value: Optional[Tuple[StateSource, Any]] = None
+        conflict_detected: bool = False
+        conflict_detail: Optional[str] = None
 
         for source in SOURCE_PRIORITY:
             getter = self._sources.get(source)
@@ -174,8 +177,8 @@ class StateArbiter:
             if value is None:
                 continue
 
-            # 找到第一个有效值
             if highest_value is None:
+                # 记录最高优先级的有效值，继续遍历以检测冲突（需求 2.2）
                 highest_value = (source, value)
             else:
                 # 检测与更高优先级源的冲突（需求 2.2）
@@ -197,24 +200,20 @@ class StateArbiter:
                             "loser_value": str(value),
                         },
                     )
-                    # 已有更高优先级的值，直接返回
-                    return ArbiterResult(
-                        fact_key=fact_key,
-                        value=existing_value,
-                        source=existing_source,
-                        is_fallback=bool(fallback_chain),
-                        fallback_chain=fallback_chain,
-                        conflict_detected=True,
-                        conflict_detail=conflict_detail,
-                    )
+                    conflict_detected = True
+                    # 已记录冲突，继续遍历其余源（不提前退出）
 
-            # 找到第一个有效值后即可返回（已是最高优先级）
+        # 所有源遍历完毕，返回最高优先级的有效值
+        if highest_value is not None:
+            winner_source, winner_value = highest_value
             return ArbiterResult(
                 fact_key=fact_key,
-                value=value,
-                source=source,
+                value=winner_value,
+                source=winner_source,
                 is_fallback=bool(fallback_chain),
                 fallback_chain=fallback_chain,
+                conflict_detected=conflict_detected,
+                conflict_detail=conflict_detail,
             )
 
         # 所有源均无值

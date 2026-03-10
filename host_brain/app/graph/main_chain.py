@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from ..schemas import TaskType
 from ..schemas.memory_types import ProposerClass
+from ..failure_matrix import FailureHandler, FailureEvent
 
 logger = logging.getLogger(__name__)
 
@@ -374,9 +375,15 @@ class MainChain:
         """
         Args:
             failure_handler: 统一失败处理回调，签名为 (event: str, ctx: ChainContext) -> None。
-                             对应 FailureHandler.handle()（任务 7 实现后注入）。
+                             若未传入，则自动创建默认 FailureHandler 实例。
         """
-        self._failure_handler = failure_handler
+        if failure_handler is not None:
+            self._failure_handler = failure_handler
+        else:
+            # 默认创建 FailureHandler 实例，确保链路失败时有统一处理
+            _default_handler = FailureHandler()
+            self._failure_handler = _default_handler.handle
+            logger.info("MainChain 使用默认 FailureHandler（无审计写入）")
 
     async def run(self, ctx: ChainContext) -> ChainContext:
         """
@@ -392,14 +399,19 @@ class MainChain:
             try:
                 should_continue = await node.execute_with_timeout(ctx)
             except Exception as exc:
-                ctx.failure_event = "MODULE_TIMEOUT"
-                ctx.failure_detail = f"节点 {node.name} 异常: {exc}"
+                ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
+                ctx.failure_detail = f"节点 {node.name} 未捕获异常: {exc}"
                 logger.exception("节点 %s 执行异常", node.name)
                 should_continue = False
 
             if not should_continue:
+                # 确保 failure_event 有值
+                if not ctx.failure_event:
+                    ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
+                    ctx.failure_detail = f"节点 {node.name} 返回 False 但未设置 failure_event"
+
                 # 统一失败处理
-                if self._failure_handler and ctx.failure_event:
+                if self._failure_handler:
                     try:
                         await self._failure_handler(ctx.failure_event, ctx)
                     except Exception as fh_exc:
