@@ -6,7 +6,6 @@ Separated from graph_contract to keep each module under 300 lines.
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -165,13 +164,28 @@ def _pick_candidate_node(*, candidates: list[str], allowlist: set[str]) -> str |
     return candidates[0] if candidates else None
 
 
-@lru_cache(maxsize=8)
+# 修复：原 @lru_cache 以 Path 对象为 key，YAML 文件热更新后缓存永远不失效，
+# 导致 model_profiles.yaml / node_registry.yaml 修改后需要重启进程才能生效，
+# 与 graph_runtime.update_route_config 热更新设计相矛盾。
+# 改为基于文件 mtime 的缓存失效机制：mtime 变化时自动重新加载。
+_yaml_cache: dict[Path, tuple[float, dict[str, Any]]] = {}
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    cached = _yaml_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
     with path.open("r", encoding="utf-8") as f:
         payload = yaml.safe_load(f)
-    return dict(payload or {}) if isinstance(payload, Mapping) else {}
+    result = dict(payload or {}) if isinstance(payload, Mapping) else {}
+    _yaml_cache[path] = (mtime, result)
+    return result
 
 
 def _resolve_timeout_ms(

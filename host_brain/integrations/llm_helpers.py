@@ -239,7 +239,11 @@ async def astream_llm_chunks(
     import threading
 
     loop = asyncio.get_event_loop()
-    chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    # 修复：使用 str | None | BaseException 联合类型队列，将生产者异常传递给消费者。
+    # 原逻辑 except Exception: pass 静默吞掉所有异常，导致 SSE 流静默返回空内容，
+    # 调用方无法区分"LLM 正常返回空"和"LLM 调用失败"，且错误日志完全缺失。
+    chunk_queue: asyncio.Queue[str | None | BaseException] = asyncio.Queue()
+    _SENTINEL = None  # 正常结束哨兵
 
     def _producer() -> None:
         try:
@@ -254,16 +258,21 @@ async def astream_llm_chunks(
                 base_url_override=base_url_override,
             ):
                 asyncio.run_coroutine_threadsafe(chunk_queue.put(chunk), loop)
-        except Exception:
-            pass
+        except Exception as exc:
+            # 将异常对象放入队列，由消费者侧重新抛出
+            asyncio.run_coroutine_threadsafe(chunk_queue.put(exc), loop)
+            return
         finally:
-            asyncio.run_coroutine_threadsafe(chunk_queue.put(None), loop)
+            asyncio.run_coroutine_threadsafe(chunk_queue.put(_SENTINEL), loop)
 
     thread = threading.Thread(target=_producer, daemon=True)
     thread.start()
 
     while True:
-        chunk = await chunk_queue.get()
-        if chunk is None:
+        item = await chunk_queue.get()
+        if item is _SENTINEL:
             break
-        yield chunk
+        if isinstance(item, BaseException):
+            # 重新抛出生产者线程中的异常，确保调用方可以感知流式生成失败
+            raise item
+        yield item  # type: ignore[misc]
