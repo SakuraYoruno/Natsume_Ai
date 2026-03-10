@@ -188,13 +188,15 @@ class IntentDecisionEngine:
         }
 
         # P2-A 快速通道：narrative_only + policy_cache 命中时跳过完整 gate 评估
+        _p2a_cache_miss = False  # 标记首次未命中，gate 通过后再写入缓存
+        _p2a_trust: int = 0
         if (
             self._policy_cache is not None
             and str(envelope.action or "").strip() == "narrative_only"
             and self._registry is None  # registry 注入时由分层治理处理，避免重复
         ):
-            _trust = int(gates_input.get("trust_level", 50))
-            _cached = self._policy_cache.get("narrative_only", _trust)
+            _p2a_trust = int(gates_input.get("trust_level", 50))
+            _cached = self._policy_cache.get("narrative_only", _p2a_trust)
             if _cached is True:
                 return self._approve_fast(
                     req_id=req_id,
@@ -206,8 +208,9 @@ class IntentDecisionEngine:
                     proposer_node_id=proposer_node_id,
                 )
             elif _cached is None:
-                # 首次未命中：完整审批后写入缓存（本次走正常路径，下次命中快速通道）
-                self._policy_cache.put("narrative_only", _trust, True)
+                # 首次未命中：本次走正常 gate 评估路径，gate 通过后再写入缓存
+                # 注意：不能在 gate 评估前写入 True，否则 gate 失败时缓存会错误放行后续请求
+                _p2a_cache_miss = True
 
         gate_eval = evaluate_governor_gates(gates_input)
         if gate_eval["decision"] == "REJECT":
@@ -243,6 +246,11 @@ class IntentDecisionEngine:
                 ts_ms=now,
                 snapshot_refs=snapshot_refs,
             )
+
+        # P2-A：所有 gate 评估通过后，将首次未命中的 narrative_only 写入缓存
+        # 必须在此处（gate 全部通过后）写入，防止 gate 失败时缓存错误放行后续请求
+        if _p2a_cache_miss and self._policy_cache is not None:
+            self._policy_cache.put("narrative_only", _p2a_trust, True)
 
         self.ledger.mark_intent_seen(
             intent_id=envelope.id,
