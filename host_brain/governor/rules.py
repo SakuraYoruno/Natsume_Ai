@@ -207,28 +207,24 @@ def _r8_emotion_gate(snapshot: GateSnapshot) -> dict[str, Any]:
     """R8 情感感知门控（M28-D OPT-8）。
 
     规则：
-    - emotion_tag 为 ANGRY/FRUSTRATED 时，拒绝 TOOL_CALL/SKILL_EXEC（通过 mood_state 判断）
+    - mood_state="critical" 且 emotion_tag 为 ANGRY/FRUSTRATED 时，拒绝请求并提示降级
     - mood_state="critical" 时，注入 simplified_prompt=True 标记
     """
-    # 当前 GateSnapshot 不含 action 字段，R8 仅基于情感状态做软性标记
-    # 实际 action 级别的拒绝在 IntentDecisionEngine 中处理（M27-H）
-    # R8 在此处处理 critical 状态的 simplified_prompt 标记
     mood = str(snapshot.mood_state or "").strip().lower()
     emotion = str(snapshot.emotion_tag or "").strip().upper()
 
-    # ANGRY/FRUSTRATED 状态：标记但不拒绝（action 级别拒绝在 decision.py 中）
     angry_emotions = {"ANGRY", "FRUSTRATED"}
     simplified_prompt = mood == "critical"
 
-    # 只有在 critical + ANGRY 组合时才触发 R8 拒绝
-    hit = False
-    reason = "PASS"
+    # critical + ANGRY/FRUSTRATED 组合：触发 R8 拒绝，明显提示降级
+    hit = mood == "critical" and emotion in angry_emotions
+    reason = "EMOTION_GATE_BLOCKED" if hit else "PASS"
 
     return {
         "gate_id": "R8_EMOTION",
         "hit": hit,
         "threshold_summary": {
-            "blocked_emotions": list(angry_emotions),
+            "blocked_combinations": [{"mood": "critical", "emotions": list(angry_emotions)}],
             "critical_mood_simplified": True,
         },
         "snapshot_summary": {
@@ -238,6 +234,12 @@ def _r8_emotion_gate(snapshot: GateSnapshot) -> dict[str, Any]:
         },
         "reason_hint": reason,
         "simplified_prompt": simplified_prompt,
+        # 降级明显提示：hit 时附加用户可见的降级说明
+        "degraded_hint": (
+            "⚠️ [DEGRADED] 当前情感状态（critical+愤怒）已触发 R8 门控，请求被拒绝，"
+            "请稍后在情绪平稳后重试。"
+            if hit else None
+        ),
     }
 
 

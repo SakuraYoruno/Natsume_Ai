@@ -6,7 +6,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from edge_client.rpc import edge_required_services
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     INFRA_NODE_MISSING_SERVICE,
@@ -312,7 +311,18 @@ def build_default_service_registry() -> ServiceRegistry:
     for spec in host_required:
         registry.register(spec)
 
-    for edge_spec in edge_required_services():
+    # edge_client 为可选外部依赖，不可用时降级为空列表并记录 WARNING
+    try:
+        from edge_client.rpc import edge_required_services  # type: ignore[import-untyped]
+        edge_specs = edge_required_services()
+    except Exception as _exc:
+        import logging as _logging
+        _logging.getLogger("Natsume.core.services").warning(
+            "⚠️ [DEGRADED] edge_client 不可用，Edge 服务探针已跳过: %s", _exc
+        )
+        edge_specs = []
+
+    for edge_spec in edge_specs:
         registry.register(
             ServiceSpec(
                 service_id=edge_spec.service_id,

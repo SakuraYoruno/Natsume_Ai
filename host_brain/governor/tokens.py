@@ -40,6 +40,9 @@ class TokenValidationResult:
 class TokenService:
     """In-memory token registry used by governor/skills contracts."""
 
+    # 每隔多少次 issue 操作触发一次过期清理（避免每次都扫描）
+    _CLEANUP_INTERVAL = 50
+
     def __init__(
         self,
         *,
@@ -51,6 +54,7 @@ class TokenService:
         self.confirm_ttl_ms = confirm_ttl_ms
         self.undo_ttl_ms = undo_ttl_ms
         self._tokens: dict[str, TokenRecord] = {}
+        self._issue_count: int = 0
 
     def issue_approval_token(
         self,
@@ -234,7 +238,22 @@ class TokenService:
             nonce=f"nonce::{uuid.uuid4().hex}",
         )
         self._tokens[token_ref] = token
+        # 定期清理过期/已使用的 token，防止内存无限增长
+        self._issue_count += 1
+        if self._issue_count % self._CLEANUP_INTERVAL == 0:
+            self._purge_expired_tokens()
         return token_ref
+
+    def _purge_expired_tokens(self, now_ts_ms: int | None = None) -> int:
+        """清理所有已过期或已使用的 token，返回清理数量。"""
+        now_value = now_ts_ms if now_ts_ms is not None else now_ms()
+        expired_refs = [
+            ref for ref, t in self._tokens.items()
+            if t.used or t.expiry_ts_ms < now_value
+        ]
+        for ref in expired_refs:
+            del self._tokens[ref]
+        return len(expired_refs)
 
     def export_snapshot(self) -> dict[str, dict[str, Any]]:
         return {
