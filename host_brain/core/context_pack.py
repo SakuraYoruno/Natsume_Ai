@@ -167,7 +167,14 @@ def validate_context_pack(context_pack: dict[str, Any]) -> ContextPackValidation
             )
 
     for slot_name in context_pack.keys():
-        if slot_name not in EXPECTED_SLOTS and slot_name not in OPTIONAL_SLOTS:
+        # 修复：动态注册的槽位（通过 register_slot 注册到 _DYNAMIC_SLOT_REGISTRY）
+        # 不在 EXPECTED_SLOTS 也不在 OPTIONAL_SLOTS 中，原逻辑会将其报为 CP_UNKNOWN_SLOT，
+        # 导致 register_slot + build_dynamic_slots 的整个动态槽位机制完全失效。
+        if (
+            slot_name not in EXPECTED_SLOTS
+            and slot_name not in OPTIONAL_SLOTS
+            and slot_name not in _DYNAMIC_SLOT_REGISTRY
+        ):
             result.add(CP_UNKNOWN_SLOT, f"unknown slot is not allowed: {slot_name}", slot=slot_name)
 
     if not result.valid:

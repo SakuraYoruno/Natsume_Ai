@@ -118,7 +118,3 @@ def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> i
     except ValueError:
         return int(default)
     return min(max(parsed, min_value), max_value)
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
