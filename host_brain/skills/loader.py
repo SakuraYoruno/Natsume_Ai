@@ -184,13 +184,9 @@ class SkillLoader:
 
         undo_token_ref = None
         if meta.reversible:
-            undo_token_ref = self.token_service.issue_undo_token(
-                intent_id=intent_id,
-                skill_name=skill_name,
-                session_id=session_id,
-                seq=seq,
-                now_ts_ms=now_value,
-            )
+            # 修复：先检查 manifest_ref，再签发 undo_token。
+            # 原逻辑先调用 issue_undo_token() 再检查 manifest_ref，
+            # 导致 manifest_ref 缺失时 undo_token 已写入 token store 但永远不会被消费（token 泄漏）。
             if not manifest_ref:
                 return self._log_and_return(
                     intent_id=intent_id,
@@ -202,12 +198,19 @@ class SkillLoader:
                     result_digest="reversible execution requires manifest_ref",
                     evidence_ref=None,
                     manifest_ref=None,
-                    undo_token_ref=undo_token_ref,
+                    undo_token_ref=None,
                     request_id=request_id,
                     thread_id=thread_id,
                     turn_id=turn_id,
                     ts_ms=now_value,
                 )
+            undo_token_ref = self.token_service.issue_undo_token(
+                intent_id=intent_id,
+                skill_name=skill_name,
+                session_id=session_id,
+                seq=seq,
+                now_ts_ms=now_value,
+            )
 
         return self._log_and_return(
             intent_id=intent_id,

@@ -280,6 +280,9 @@ class TraceNodeBuilder:
                     best = c["node_id"]
             return best or candidates[0]["node_id"]
 
+        # 修复：预构建 node_id → index 映射，避免兜底分支中 nodes.index(node) 的 O(n²) 复杂度
+        node_index: Dict[str, int] = {n["node_id"]: i for i, n in enumerate(nodes)}
+
         for node in nodes:
             if node.get("parent_node_id") is not None:
                 continue  # 已有 parent，跳过
@@ -302,6 +305,6 @@ class TraceNodeBuilder:
 
             else:
                 # 兜底：线性链（前一个节点）
-                idx = nodes.index(node)
+                idx = node_index.get(node["node_id"], 0)
                 if idx > 0:
                     node["parent_node_id"] = nodes[idx - 1]["node_id"]
