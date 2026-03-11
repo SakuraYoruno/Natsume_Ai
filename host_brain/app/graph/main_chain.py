@@ -1,6 +1,16 @@
 """
 main_chain.py —— 主聊天链路时序编排器
 
+⚠️  [审计修复 #4] 遗留架构警告
+    此模块（MainChain / SceneRouter）是早期架构遗留代码，当前实际路由
+    完全由 host_brain/app/chat_handler.py 中的 _unified_chat_sse_generator
+    if-else 分支控制，本模块中的节点实现均为骨架（logger.debug + return True），
+    且 MainChain 在 dependencies.py 中已初始化但从未被任何路由调用。
+
+    当前状态：死代码（Dead Code）
+    实际路由入口：host_brain/app/chat_handler.py::_unified_chat_sse_generator
+    计划：在下一个里程碑中将本模块迁移为实际路由的适配层，或彻底移除。
+
 定义主链路节点顺序：
   Airlock(Quarantine) → Governor → GraphExecutor → RecallFusion
   → LlmGateway → QAContract → EpisodicStore → Audit → Airlock(Sanitizer)

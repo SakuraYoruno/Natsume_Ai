@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import urllib.error
@@ -280,6 +281,7 @@ def _resolve_host_8b_base_url(*, provider_name: str) -> str | None:
 
 
 def _probe_http_endpoint(*, url: str, timeout_ms: int) -> tuple[bool, str]:
+    """同步 HTTP 探测（仅供 asyncio.to_thread 包装后调用，不得在事件循环中直接调用）。"""
     endpoint = str(url or "").strip()
     if not endpoint:
         return False, "empty_probe_url"
@@ -302,6 +304,11 @@ def _probe_http_endpoint(*, url: str, timeout_ms: int) -> tuple[bool, str]:
         return False, f"url_error:{exc}"
     except Exception as exc:  # pragma: no cover - defensive guard
         return False, f"probe_error:{exc}"
+
+
+async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool, str]:
+    """异步 HTTP 探测——通过 asyncio.to_thread 包装同步探测，不阻塞事件循环。"""
+    return await asyncio.to_thread(_probe_http_endpoint, url=url, timeout_ms=timeout_ms)
 
 
 def _resolve_host_8b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
@@ -337,6 +344,19 @@ def _resolve_host_8b_health_status(*, provider_name: str, timeout_ms: int) -> tu
         if not first_failure:
             first_failure = detail
     return False, f"HOST_8B_PROBE_FAILED:{first_failure or 'unknown'}"
+
+
+async def _resolve_host_8b_health_status_async(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
+    """异步版本的 8B 健康探测——在事件循环中调用此函数，不阻塞事件循环。
+
+    修复审计问题 #1：原 _resolve_host_8b_health_status 使用同步 urllib 在事件循环中
+    直接调用，会阻塞事件循环最多 3s。此函数通过 asyncio.to_thread 包装解决该问题。
+    """
+    return await asyncio.to_thread(
+        _resolve_host_8b_health_status,
+        provider_name=provider_name,
+        timeout_ms=timeout_ms,
+    )
 
 
 def pre_intent_classifier(user_input: str) -> str:
@@ -593,11 +613,15 @@ def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def resolve_host_llm_runtime(
+async def resolve_host_llm_runtime_async(
     *,
     rollout_key: str | None = None,
     scene_type: str | None = None,
 ) -> dict[str, Any]:
+    """异步版本的 LLM 运行时解析（修复审计问题 #1：使用异步健康探测）。
+
+    在事件循环中调用此函数，不阻塞事件循环。
+    """
     config_result = load_host_config()
     cloud_provider_name = str(os.environ.get("HOST_LLM_PROVIDER") or PROVIDER_OPENAI).strip().lower() or PROVIDER_OPENAI
     cloud_timeout_ms = 15_000
@@ -694,6 +718,172 @@ def resolve_host_llm_runtime(
             configured_available=True,
         )
         if host_8b_available:
+            # 修复审计问题 #1：使用异步健康探测，避免阻塞事件循环
+            healthy, health_detail = await _resolve_host_8b_health_status_async(
+                provider_name=host_8b_provider,
+                timeout_ms=min(host_8b_timeout_ms, 3_000),
+            )
+            if healthy:
+                chat_provider_name = host_8b_provider
+                chat_model_id = host_8b_model_id
+                chat_timeout_ms = host_8b_timeout_ms
+                chat_llm_api_key = host_8b_api_key
+                chat_available = True
+                chat_base_url_override = _resolve_host_8b_base_url(provider_name=chat_provider_name)
+                chat_provider_fn = build_host_provider_fn(
+                    provider_name=chat_provider_name,
+                    model_id=chat_model_id,
+                    api_key=chat_llm_api_key,
+                    timeout_ms=chat_timeout_ms,
+                    base_url_override=chat_base_url_override,
+                )
+                route_target = HOST_CHAT_ROUTE_HOST_8B
+                route_reason_code = "HOST_CHAT_HOST_8B_ACTIVE"
+                route_detail = "non-gaming mode defaults to host 8b runtime"
+            else:
+                route_reason_code = "HOST_CHAT_HOST_8B_UNHEALTHY"
+                route_detail = health_detail
+        elif route_reason_code == "HOST_CHAT_ROUTE_CLOUD_DEFAULT":
+            route_reason_code = "HOST_CHAT_HOST_8B_UNAVAILABLE"
+            route_detail = "host 8b provider unavailable"
+
+    return {
+        "provider_name": chat_provider_name,
+        "model_id": chat_model_id,
+        "timeout_ms": chat_timeout_ms,
+        "llm_api_key": chat_llm_api_key,
+        "available": chat_available,
+        "provider_fn": chat_provider_fn,
+        "route_target": route_target,
+        "route_reason_code": route_reason_code,
+        "route_detail": route_detail,
+        "base_url_override": chat_base_url_override,
+        "sys_mode": sys_mode,
+        "chat_provider_name": chat_provider_name,
+        "chat_model_id": chat_model_id,
+        "chat_timeout_ms": chat_timeout_ms,
+        "chat_llm_api_key": chat_llm_api_key,
+        "chat_available": chat_available,
+        "chat_provider_fn": chat_provider_fn,
+        "chat_base_url_override": chat_base_url_override,
+        "cloud_provider_name": cloud_provider_name,
+        "cloud_model_id": cloud_model_id,
+        "cloud_timeout_ms": cloud_timeout_ms,
+        "cloud_llm_api_key": cloud_llm_api_key,
+        "cloud_available": cloud_available,
+        "cloud_provider_fn": cloud_provider_fn,
+        "cloud_base_url_override": cloud_base_url_override,
+        "gray_rollout": dict(gray_rollout),
+    }
+
+
+def resolve_host_llm_runtime(
+    *,
+    rollout_key: str | None = None,
+    scene_type: str | None = None,
+) -> dict[str, Any]:
+    """同步版本的 LLM 运行时解析（向后兼容，供测试和非异步上下文使用）。
+
+    修复审计问题 #1：在事件循环外调用时使用同步健康探测（不阻塞事件循环）。
+    在事件循环内请使用 resolve_host_llm_runtime_async。
+    """
+    config_result = load_host_config()
+    cloud_provider_name = str(os.environ.get("HOST_LLM_PROVIDER") or PROVIDER_OPENAI).strip().lower() or PROVIDER_OPENAI
+    cloud_timeout_ms = 15_000
+    cloud_llm_api_key: str | None = None
+    cloud_available = True
+    if config_result.success and config_result.config is not None:
+        cloud_provider_name = (
+            str(config_result.config.llm_provider or cloud_provider_name).strip().lower() or cloud_provider_name
+        )
+        cloud_timeout_ms = int(config_result.config.llm_timeout_ms)
+        cloud_llm_api_key = config_result.config.llm_api_key
+        cloud_available = (cloud_provider_name != PROVIDER_DISABLED)
+
+    cloud_model_id = resolve_host_llm_model_id(cloud_provider_name)
+    cloud_available = _is_provider_available(
+        provider_name=cloud_provider_name,
+        api_key=cloud_llm_api_key,
+        configured_available=cloud_available,
+    )
+    cloud_base_url_override = (
+        _normalize_openai_compat_base_url(str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip())
+        if cloud_provider_name == PROVIDER_OPENAI
+        else None
+    )
+    cloud_provider_fn = build_host_provider_fn(
+        provider_name=cloud_provider_name,
+        model_id=cloud_model_id,
+        api_key=cloud_llm_api_key,
+        timeout_ms=cloud_timeout_ms,
+        base_url_override=cloud_base_url_override,
+    )
+
+    route_target = HOST_CHAT_ROUTE_CLOUD
+    route_reason_code = "HOST_CHAT_ROUTE_CLOUD_DEFAULT"
+    route_detail = "using configured cloud runtime"
+    sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower() or "normal"
+
+    chat_provider_name = cloud_provider_name
+    chat_model_id = cloud_model_id
+    chat_timeout_ms = cloud_timeout_ms
+    chat_llm_api_key = cloud_llm_api_key
+    chat_available = cloud_available
+    chat_provider_fn = cloud_provider_fn
+    chat_base_url_override = cloud_base_url_override
+
+    host_8b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_8B_ENABLED"), default=True)
+    force_cloud = _parse_bool(os.environ.get("HOST_CHAT_FORCE_CLOUD"), default=False)
+    gray_rollout = _evaluate_host_chat_gray_rollout(
+        rollout_key=rollout_key,
+        scene_type=scene_type,
+    )
+
+    if force_cloud:
+        route_reason_code = "HOST_CHAT_FORCE_CLOUD"
+        route_detail = "HOST_CHAT_FORCE_CLOUD=true"
+    elif not host_8b_enabled:
+        route_reason_code = "HOST_CHAT_HOST_8B_DISABLED"
+        route_detail = "HOST_CHAT_HOST_8B_ENABLED=false"
+    elif sys_mode == "gaming":
+        route_reason_code = "HOST_CHAT_HOST_8B_DISABLED_GAMING_MODE"
+        route_detail = "sys_mode=gaming"
+    elif bool(gray_rollout.get("enabled")) and not bool(gray_rollout.get("in_rollout")):
+        route_reason_code = str(gray_rollout.get("reason_code") or "HOST_CHAT_GRAY_EXCLUDED")
+        route_detail = str(gray_rollout.get("detail") or "gray rollout excluded")
+    else:
+        host_8b_provider = (
+            str(os.environ.get("HOST_CHAT_HOST_8B_PROVIDER") or _HOST_CHAT_8B_DEFAULT_PROVIDER).strip().lower()
+            or _HOST_CHAT_8B_DEFAULT_PROVIDER
+        )
+        host_8b_model_id = (
+            str(os.environ.get("HOST_CHAT_HOST_8B_MODEL_ID") or _HOST_CHAT_8B_DEFAULT_MODEL_ID).strip()
+            or _HOST_CHAT_8B_DEFAULT_MODEL_ID
+        )
+        host_8b_timeout_ms = _parse_int(
+            os.environ.get("HOST_CHAT_HOST_8B_TIMEOUT_MS"),
+            default=cloud_timeout_ms,
+            min_value=800,
+            max_value=120_000,
+        )
+        host_8b_api_key = _resolve_provider_api_key(
+            provider_name=host_8b_provider,
+            preferred_api_key=str(os.environ.get("HOST_CHAT_HOST_8B_API_KEY") or "").strip() or None,
+        )
+        if _provider_requires_api_key(host_8b_provider) and not host_8b_api_key:
+            if _parse_bool(os.environ.get("HOST_CHAT_HOST_8B_ALLOW_EMPTY_KEY"), default=True):
+                host_8b_api_key = _HOST_CHAT_8B_FALLBACK_API_KEY
+            else:
+                route_reason_code = "HOST_CHAT_HOST_8B_KEY_MISSING"
+                route_detail = f"{_provider_api_key_env_name(host_8b_provider) or 'api_key'} missing"
+
+        host_8b_available = _is_provider_available(
+            provider_name=host_8b_provider,
+            api_key=host_8b_api_key,
+            configured_available=True,
+        )
+        if host_8b_available:
+            # 同步版本：直接调用同步健康探测（在事件循环外使用）
             healthy, health_detail = _resolve_host_8b_health_status(
                 provider_name=host_8b_provider,
                 timeout_ms=min(host_8b_timeout_ms, 3_000),

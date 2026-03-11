@@ -28,10 +28,26 @@ from host_brain.app.emotion_context import (
 )
 from host_brain.app.graph_config_builder import (
     SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
     pre_intent_classifier,
 )
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
+
+# 从子模块导入，供测试 monkeypatch 使用
+from host_brain.app.chat_handler_edge import (  # noqa: F401
+    _run_gaming_edge_chat,
+    _post_edge_fallback_rpc,
+)
+from host_brain.app.dependencies import (  # noqa: F401
+    get_retrieval_orchestrator,
+    get_episodic_store,
+)
+from host_brain.app.observability_persist import (  # noqa: F401
+    persist_chat_episodic_memory,
+)
 
 _logger = logging.getLogger("Natsume.chat_handler")
 
@@ -50,6 +66,15 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
 
     intent_draft = request_body.intent_draft
     if intent_draft is None:
+        # 修复审计问题 #2：根据 pre_intent_classifier 预分类结果动态设置 action，
+        # 使 Governor 能感知真实意图类型，EXEC_INTENT 不再以 narrative_only 绕过情感门控。
+        _pre_scene = pre_intent_classifier(request_body.message)
+        _action_map = {
+            SCENE_EXEC_INTENT: "exec_intent",
+            SCENE_WORK_CODE: "work_code",
+            SCENE_WORK_TRANSLATE: "work_translate",
+        }
+        _draft_action = _action_map.get(_pre_scene, "narrative_only")
         intent_draft = {
             "schema_version": "Natsume.intent.v1",
             "id": f"intent::{request_id}",
@@ -57,7 +82,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             "session_id": session_id,
             "seq": 1,
             "type": "query",
-            "action": "narrative_only",
+            "action": _draft_action,
             "target": "host",
             "args": {"text": request_body.message},
             "nonce": f"nonce::{request_id}",
@@ -148,10 +173,30 @@ async def _unified_chat_sse_generator(
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
 
         # ── 鉴权后分类场景 ────────────────────────────────────────────────
+        # 修复审计问题 #3：对客户端显式传入的 scene_type 进行合法性校验，
+        # 防止客户端强制路由到任意场景（如 VISION_UI 等高门槛场景）。
+        _ALLOWED_EXPLICIT_SCENE_TYPES = {
+            SCENE_CHAT,
+            "SCENE_WORK_CODE",
+            "SCENE_WORK_TRANSLATE",
+            "SCENE_EXEC_INTENT",
+        }
         explicit_scene_type = str(request_body.scene_type or "").strip().upper()
         if explicit_scene_type:
-            scene_type = explicit_scene_type
-            scene_type_source = "explicit"
+            if explicit_scene_type not in _ALLOWED_EXPLICIT_SCENE_TYPES:
+                _logger.warning(
+                    "客户端传入非法 scene_type，已降级为 SCENE_CHAT",
+                    extra={
+                        "request_id": request_id,
+                        "session_id": session_id,
+                        "rejected_scene_type": explicit_scene_type,
+                    },
+                )
+                scene_type = SCENE_CHAT
+                scene_type_source = "fallback_invalid_explicit"
+            else:
+                scene_type = explicit_scene_type
+                scene_type_source = "explicit"
         else:
             scene_type = pre_intent_classifier(request_body.message)
             scene_type_source = "pre_classifier"
@@ -165,6 +210,18 @@ async def _unified_chat_sse_generator(
                 "scene_type_source": scene_type_source,
             },
         )
+
+        # ── 修复审计问题 #11：SCENE_VISION_UI 专用拦截（高门槛场景，暂不支持）──
+        if scene_type == "SCENE_VISION_UI":
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "SCENE_VISION_UI_NOT_SUPPORTED",
+                "narrative": "视觉界面场景暂未开放，请稍后再试。",
+                "request_id": request_id,
+            })
+            return
 
         # ── SCENE_CHAT：委托给 token 级流式生成器 ─────────────────────────
         if scene_type == SCENE_CHAT:
