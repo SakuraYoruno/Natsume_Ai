@@ -87,6 +87,9 @@ class BondEventRequest(BaseModel):
     update_kind: str = Field(..., description="事件类型: INTERACTION/DEEP_TALK/EMOTIONAL_SUPPORT/...")
     evidence_refs: List[str] = Field(default_factory=list, description="证据引用列表")
     request_id: Optional[str] = Field(default=None, description="关联请求 ID（可选）")
+    # 修复审计问题 #9：添加情感参数，支持外部提交 Bond 事件时传入情感信息
+    emotion_tag: Optional[str] = Field(default=None, description="情感标签（可选，如 JOY/SADNESS/NEUTRAL）")
+    emotion_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="情感强度（可选，0.0-1.0，默认 0.5）")
 
 
 class BondEventResponse(BaseModel):
@@ -262,6 +265,8 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
             evidence_refs=refs,
             request_id=request_id,
             ts_ms=ts_ms,
+            # 修复审计问题 #9：使用请求体中的情感参数，默认 0.5
+            emotion_intensity=float(body.emotion_intensity if body.emotion_intensity is not None else 0.5),
         )
         return BondEventResponse(
             user_id=result.user_id,

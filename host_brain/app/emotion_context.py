@@ -13,7 +13,21 @@ from host_brain.core.metabolism import (
     build_governance_snapshot,
     build_hard_snapshot,
     normalize_hard_state,
+    # 修复审计问题 #6：接入孤立的情感模块
+    EmotionVector,
+    EmotionTimeline,
+    compute_emotion_echo,
+    evaluate_emotion_triggers,
+    apply_visual_emotion_hint,  # noqa: F401 — 供外部模块按需调用
 )
+
+# 修复审计问题 #6：全局 EmotionTimeline 实例，记录情感状态变化历史
+_global_emotion_timeline = EmotionTimeline(max_entries=100)
+
+
+def get_emotion_timeline() -> EmotionTimeline:
+    """获取全局情感时间线实例（供外部模块访问）。"""
+    return _global_emotion_timeline
 
 
 def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -41,6 +55,35 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
     except (TypeError, ValueError):
         emotion_ts_ms = int(hard_snapshot.emotion_ts_ms)
 
+    # 修复审计问题 #6：接入 EmotionVector VAD 模型和情感时间线
+    valence, arousal = map_emotion_tag_to_vad(emotion_tag)
+    current_vector = EmotionVector(
+        valence=valence,
+        arousal=arousal,
+        dominance=0.0,
+        ts_ms=emotion_ts_ms,
+    )
+    # 记录到全局情感时间线
+    _global_emotion_timeline.append(
+        ts_ms=emotion_ts_ms,
+        emotion_tag=emotion_tag,
+        valence=valence,
+        arousal=arousal,
+        source="normalize_chat_emotion_context",
+    )
+    # 计算情感回声（共情响应提示）
+    echo_result = compute_emotion_echo(
+        emotion_tag,
+        current_vector=current_vector,
+        echo_weight=0.4,
+    )
+    # 评估主动情感触发器
+    triggered_emotions = evaluate_emotion_triggers({
+        "emotion_tag": emotion_tag,
+        "emotion_intensity": emotion_intensity,
+        "mood_state": str(hard_snapshot.mood_state),
+    })
+
     return {
         "mood_state": str(hard_snapshot.mood_state),
         "emotion_tag": str(emotion_tag),
@@ -48,6 +91,10 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "emotion_intensity": emotion_intensity,
         "allowed_emotion_tags": allowed_emotion_tags,
         "emotion_ts_ms": emotion_ts_ms,
+        # 修复审计问题 #6：新增 VAD 向量、情感回声、触发器结果
+        "vad_vector": current_vector.as_dict(),
+        "emotion_echo": echo_result,
+        "triggered_emotions": triggered_emotions,
     }
 
 

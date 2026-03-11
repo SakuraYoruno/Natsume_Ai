@@ -324,10 +324,24 @@ class BondStageEngine:
             delta = base_delta
         state.total_score = max(0, state.total_score + delta)
         state.event_count += 1
+        # 修复审计问题 #5：先保存旧时间戳，再更新，确保 response_gap_ms 能正确计算
+        _prev_event_ts_ms = state.last_event_ts_ms
         state.last_event_ts_ms = ts
         state.recent_scores.append(delta)
         if len(state.recent_scores) > TREND_WINDOW * 2:
             state.recent_scores = state.recent_scores[-TREND_WINDOW * 2:]
+
+        # 修复审计问题 #5：更新 BondEmotionalTexture，激活亲密温度功能
+        # emotion_intensity 映射到 valence：[0,1] → [-1,1]（0.5 为中性）
+        emotion_valence = (intensity - 0.5) * 2.0
+        # 使用事件间隔估算回复节奏（若有上次事件时间戳）
+        response_gap_ms: float | None = None
+        if _prev_event_ts_ms > 0 and ts > _prev_event_ts_ms:
+            response_gap_ms = float(ts - _prev_event_ts_ms)
+        state.texture = state.texture.update(
+            response_gap_ms=response_gap_ms,
+            emotion_valence=emotion_valence,
+        )
 
         # 判断阶段变化
         new_stage = self._compute_stage(state.total_score)
