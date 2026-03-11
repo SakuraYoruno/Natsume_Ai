@@ -323,6 +323,11 @@ def receive_edge_events_response(
     accepted_count = 0
     rejected_indices: list[int] = []
     ledger = get_ledger()
+
+    # 收集情感相关事件，用于后续 Bond 更新和 VTS 驱动
+    # 修复问题B：Edge 事件上报链路打通——情感事件触发 Bond 更新和 VTS 驱动
+    _emotion_events: list[dict[str, Any]] = []
+
     for idx, raw in enumerate(raw_events):
         if not isinstance(raw, dict):
             rejected_indices.append(idx)
@@ -350,9 +355,136 @@ def receive_edge_events_response(
                 "ts_ms": int(ts_val),
             })
             accepted_count += 1
+
+            # 收集情感相关事件（ASR_FINAL / EMOTION_DETECTED / USER_REACTION）
+            if event_type in {
+                "ASR_FINAL", "EMOTION_DETECTED", "USER_REACTION",
+                "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL",
+            }:
+                payload_inner = raw.get("payload") or {}
+                emotion_tag = str(
+                    (payload_inner.get("emotion_tag") if isinstance(payload_inner, dict) else None)
+                    or raw.get("emotion_tag")
+                    or "NEUTRAL"
+                ).strip().upper() or "NEUTRAL"
+                try:
+                    emotion_intensity = float(
+                        (payload_inner.get("emotion_intensity") if isinstance(payload_inner, dict) else None)
+                        or raw.get("emotion_intensity")
+                        or 0.5
+                    )
+                except (TypeError, ValueError):
+                    emotion_intensity = 0.5
+                emotion_intensity = max(0.0, min(1.0, emotion_intensity))
+                text = str(
+                    (payload_inner.get("text") if isinstance(payload_inner, dict) else None)
+                    or raw.get("text")
+                    or ""
+                ).strip()
+                _emotion_events.append({
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "event_type": event_type,
+                    "emotion_tag": emotion_tag,
+                    "emotion_intensity": emotion_intensity,
+                    "text": text,
+                    "ts_ms": int(ts_val),
+                })
         except Exception as exc:
             logger.warning("Failed to write edge event %d: %s", idx, exc)
             rejected_indices.append(idx)
+
+    # 情感事件后处理：Bond 更新 + VTS 驱动（fire-and-forget，不阻塞响应）
+    if _emotion_events:
+        try:
+            import asyncio as _asyncio
+            from host_brain.app.dependencies import (
+                get_bond_stage_engine,
+                get_bond_update_queue,
+            )
+            from host_brain.bond.bond_dynamics import BondDynamicsWriter
+
+            for ev in _emotion_events:
+                _ev_request_id = ev["request_id"]
+                _ev_session_id = ev["session_id"]
+                _ev_emotion_tag = ev["emotion_tag"]
+                _ev_emotion_intensity = ev["emotion_intensity"]
+                _ev_text = ev["text"]
+                _ev_ts_ms = ev["ts_ms"]
+
+                # Bond 更新
+                try:
+                    _update_kind = BondDynamicsWriter.classify_interaction(
+                        text=_ev_text,
+                        emotion_intensity=_ev_emotion_intensity,
+                    )
+                    _bond_payload = {
+                        "request_id": _ev_request_id,
+                        "intent_id": _ev_request_id,
+                        "session_id": _ev_session_id,
+                        "seq": 1,
+                        "user_id": _ev_session_id,
+                        "topic_id": _ev_text[:64],
+                        "capability_hint": "edge_event_bond",
+                        "update_kind": _update_kind,
+                        "evidence_refs": [_ev_request_id],
+                        "emotion_tag": _ev_emotion_tag,
+                        "emotion_intensity": _ev_emotion_intensity,
+                        "ts_ms": _ev_ts_ms,
+                    }
+                    _bond_queue = get_bond_update_queue()
+                    _queue_result = _bond_queue.enqueue(_bond_payload)
+                    if str(_queue_result.get("status") or "") != "QUEUED":
+                        _bond_writer = BondDynamicsWriter(
+                            ledger=ledger,
+                            stage_engine=get_bond_stage_engine(),
+                        )
+                        _bond_writer.apply_update(**_bond_payload)
+                except Exception as bond_exc:
+                    logger.debug(
+                        "edge event bond update skipped: %s (request_id=%s)",
+                        bond_exc, _ev_request_id,
+                    )
+
+                # VTS 情感驱动（仅当 HOST_STREAM_VTS_EMOTION_ENABLED=true）
+                _vts_enabled = str(os.environ.get("HOST_STREAM_VTS_EMOTION_ENABLED") or "true").strip().lower()
+                if _vts_enabled in {"1", "true", "yes", "on"}:
+                    try:
+                        from host_brain.app.chat_stream_handler import _drive_stream_vts_emotion  # noqa: PLC0415
+
+                        async def _fire_vts(req_id: str, etag: str, intensity: float, ev_ts: int) -> None:
+                            try:
+                                await _drive_stream_vts_emotion(
+                                    request_id=req_id,
+                                    emotion_context={
+                                        "emotion_tag": etag,
+                                        "emotion_intensity": intensity,
+                                    },
+                                    ts_ms=ev_ts,
+                                )
+                            except Exception as vts_exc:
+                                logger.debug(
+                                    "edge event VTS drive skipped: %s (request_id=%s)",
+                                    vts_exc, req_id,
+                                )
+
+                        try:
+                            loop = _asyncio.get_event_loop()
+                            if loop.is_running():
+                                _asyncio.ensure_future(
+                                    _fire_vts(
+                                        _ev_request_id,
+                                        _ev_emotion_tag,
+                                        _ev_emotion_intensity,
+                                        _ev_ts_ms,
+                                    )
+                                )
+                        except RuntimeError:
+                            pass  # 无事件循环时跳过 VTS 驱动
+                    except ImportError:
+                        pass
+        except Exception as post_exc:
+            logger.warning("edge event post-processing failed: %s", post_exc)
 
     rejected_count = len(rejected_indices)
     total = len(raw_events)

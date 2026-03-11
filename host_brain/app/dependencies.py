@@ -261,7 +261,40 @@ def _sync_mcp_skills_into_registry(skill_registry: SkillRegistry) -> None:
 def get_bond_stage_engine() -> BondStageEngine:
     global _bond_stage_engine
     if _bond_stage_engine is None:
-        _bond_stage_engine = BondStageEngine(ledger=get_ledger())
+        # 修复问题F：Bond 积分阈值可配置化
+        # 支持通过环境变量覆盖默认阈值，格式：JSON 字符串
+        # 示例：HOST_BOND_STAGE_THRESHOLDS='{"STRANGER":0,"ACQUAINTANCE":5,"FRIEND":20}'
+        import json as _json
+        from host_brain.bond.bond_stage_engine import DEFAULT_STAGE_THRESHOLDS, DEFAULT_SCORE_MAP
+
+        stage_thresholds = dict(DEFAULT_STAGE_THRESHOLDS)
+        score_map = dict(DEFAULT_SCORE_MAP)
+
+        _thresholds_env = str(os.environ.get("HOST_BOND_STAGE_THRESHOLDS") or "").strip()
+        if _thresholds_env:
+            try:
+                _parsed = _json.loads(_thresholds_env)
+                if isinstance(_parsed, dict):
+                    stage_thresholds.update({str(k): int(v) for k, v in _parsed.items()})
+                    _logger.info("Bond 阶段阈值已从环境变量覆盖: %s", _thresholds_env[:200])
+            except Exception as exc:
+                _logger.warning("HOST_BOND_STAGE_THRESHOLDS 解析失败，使用默认值: %s", exc)
+
+        _score_map_env = str(os.environ.get("HOST_BOND_SCORE_MAP") or "").strip()
+        if _score_map_env:
+            try:
+                _parsed = _json.loads(_score_map_env)
+                if isinstance(_parsed, dict):
+                    score_map.update({str(k): int(v) for k, v in _parsed.items()})
+                    _logger.info("Bond 积分映射已从环境变量覆盖: %s", _score_map_env[:200])
+            except Exception as exc:
+                _logger.warning("HOST_BOND_SCORE_MAP 解析失败，使用默认值: %s", exc)
+
+        _bond_stage_engine = BondStageEngine(
+            ledger=get_ledger(),
+            stage_thresholds=stage_thresholds,
+            score_map=score_map,
+        )
     return _bond_stage_engine
 
 

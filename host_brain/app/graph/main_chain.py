@@ -863,3 +863,99 @@ class MainChain:
                     logger.error("FailureHandler 执行异常: %s", fh_exc)
         finally:
             ctx.node_timings["main_chain_adapter"] = time.monotonic() - start
+
+
+# ---------------------------------------------------------------------------
+# 输入上报入口（供 input_routes.py 调用）
+# ---------------------------------------------------------------------------
+
+async def run_main_chain_from_input(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict,
+    ts_ms: int,
+) -> None:
+    """处理来自 Edge 端的输入上报（ASR / 微信消息），触发完整 chat 流程。
+
+    由 input_routes.py 的 _dispatch_to_graph 以 fire-and-forget 方式调用。
+    内部构建 ChatRequest 并委托给 MainChain.run_as_sse_adapter，
+    但由于此路径无 SSE 客户端，仅执行处理逻辑（不推送 SSE 事件）。
+
+    Args:
+        request_id: 请求唯一 ID
+        session_id: 会话 ID（ASR 时为 session_id，微信时为 from_wxid）
+        source: 输入来源（"ASR" / "WECHAT"）
+        text: 识别/接收到的文本
+        payload: 完整原始载荷
+        ts_ms: 消息时间戳（毫秒）
+    """
+    from host_brain.app.schemas import ChatRequest  # noqa: PLC0415
+    from host_brain.app.dependencies import get_main_chain, get_obs_metrics_collector  # noqa: PLC0415
+
+    logger.info(
+        "run_main_chain_from_input: source=%s session_id=%s request_id=%s text=%.60s",
+        source, session_id, request_id, text,
+    )
+
+    # 构建 ChatRequest（从 Edge 输入上报转换）
+    emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    mood_state = str(payload.get("mood_state") or "steady").strip().lower() or "steady"
+    try:
+        request_body = ChatRequest(
+            message=text,
+            session_id=session_id,
+            thread_id=str(payload.get("session_id") or session_id),
+            emotion_tag=emotion_tag,
+            mood_state=mood_state,
+        )
+    except Exception as exc:
+        logger.error(
+            "run_main_chain_from_input: ChatRequest 构建失败 request_id=%s: %s",
+            request_id, exc,
+        )
+        return
+
+    # 构建 intent_draft
+    from host_brain.app.graph_config_builder import pre_intent_classifier  # noqa: PLC0415
+    pre_scene = pre_intent_classifier(text)
+    _action_map = {
+        "SCENE_EXEC_INTENT": "exec_intent",
+        "SCENE_WORK_CODE": "work_code",
+        "SCENE_WORK_TRANSLATE": "work_translate",
+    }
+    intent_draft = {
+        "schema_version": "Natsume.intent.v1",
+        "id": f"intent::{request_id}",
+        "ts_ms": ts_ms,
+        "session_id": session_id,
+        "seq": 1,
+        "type": "query",
+        "action": _action_map.get(pre_scene, "narrative_only"),
+        "target": "host",
+        "args": {"text": text, "source": source},
+        "nonce": f"nonce::{request_id}",
+    }
+
+    metrics = get_obs_metrics_collector()
+    chain = get_main_chain()
+
+    # 消费 SSE 事件（fire-and-forget，不推送给客户端）
+    try:
+        async for _event in chain.run_as_sse_adapter(
+            request_body=request_body,
+            request_id=request_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+            intent_draft=intent_draft,
+            metrics=metrics,
+            _pre_classified_scene=pre_scene,
+        ):
+            pass  # 消费事件，不推送（无 SSE 客户端）
+    except Exception as exc:
+        logger.error(
+            "run_main_chain_from_input: 处理异常 request_id=%s: %s",
+            request_id, exc,
+        )

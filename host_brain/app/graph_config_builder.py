@@ -372,8 +372,12 @@ async def _resolve_host_8b_health_status_async(*, provider_name: str, timeout_ms
 def pre_intent_classifier(user_input: str) -> str:
     """轻量规则预分类器，优先级从高到低：VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT。
 
-    修复：文化娱乐关键词（动漫、书、电影等）默认归为 SCENE_CHAT，
+    修复1：文化娱乐关键词（动漫、书、电影等）默认归为 SCENE_CHAT，
     仅当同时命中代码关键词时才升级为 SCENE_WORK_CODE（代码意图优先级更高）。
+
+    修复2（问题A）：娱乐关键词同时命中 EXEC_INTENT 关键词时，优先归为 SCENE_CHAT。
+    例如："帮我安装一下这首歌" → 命中"安装"(EXEC_INTENT) + "歌"(娱乐) → SCENE_CHAT。
+    仅当无娱乐关键词时，EXEC_INTENT 关键词才生效。
     """
     text = str(user_input or "").strip().lower()
     if not text:
@@ -389,6 +393,8 @@ def pre_intent_classifier(user_input: str) -> str:
         return SCENE_WORK_CODE
     if has_entertainment:
         # 纯娱乐话题，强制归为 CHAT，不触发多节点链路
+        # 修复问题A：即使同时命中 EXEC_INTENT 关键词（如"安装"），也优先归为 CHAT
+        # 避免"帮我安装一下这首歌"被误判为 EXEC_INTENT
         return SCENE_CHAT
     for kw in _PIC_WORK_TRANSLATE_KEYWORDS:
         if kw in text:

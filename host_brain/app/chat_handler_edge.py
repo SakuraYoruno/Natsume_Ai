@@ -310,6 +310,15 @@ async def _gaming_edge_chat_sse_generator(
 
     在 gaming 模式下，SCENE_CHAT 优先走 edge fallback 3B 模型（低延迟）。
     若 edge 路由失败，则 fallback 到 _complex_scene_sse_generator（云端 LangGraph）。
+
+    ⚠️ 设计说明（问题C）：Gaming Edge 路径为有意的最小路径（Minimal Path）设计。
+    以下功能在此路径中被有意跳过，以最大化降低延迟（目标 < 200ms）：
+      - VTS 情感驱动：游戏模式下用户注意力在游戏画面，VTS 表情无实际意义
+      - Bond 积分更新：游戏模式下的简短回复不计入亲密度积分
+      - Episodic 记忆写入：游戏模式下的对话不写入长期记忆
+      - Retrieval 七路召回：跳过召回以降低延迟
+    若需要完整功能，可将 HOST_GAMING_EDGE_CHAT_ENABLED=false 禁用此路径，
+    回退到标准 SCENE_CHAT 流程（_sse_event_generator）。
     """
     from host_brain.app.dependencies import get_ledger
     from host_brain.app.observability_persist import persist_chat_observability_rows
