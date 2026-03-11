@@ -31,6 +31,7 @@ from host_brain.app.tool_routes import router as tool_router, set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.app.health_routes import router as health_router
+from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.dependencies import (
     get_ledger,
     get_tool_catalog,
@@ -141,6 +142,11 @@ app.include_router(bond_router)
 # 注册 Observability REST API 路由（M18: 监控面板后端数据接口）
 # ---------------------------------------------------------------------------
 app.include_router(obs_router)
+
+# ---------------------------------------------------------------------------
+# 注册 Agent Loop REST API 路由（ClawdBot 视觉自动化闭环）
+# ---------------------------------------------------------------------------
+app.include_router(agent_router)
 
 # ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
