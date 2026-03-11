@@ -42,7 +42,7 @@ from host_brain.app.graph_config_builder import (
     build_unified_route_decision,
     build_chat_graph_config,
     resolve_chat_retrieval_gate,
-    resolve_host_llm_runtime,
+    resolve_host_llm_runtime_async as resolve_host_llm_runtime,  # 修复审计问题 #1：使用异步版本
 )
 from host_brain.app.observability_persist import (
     persist_chat_episodic_memory,
@@ -289,7 +289,7 @@ async def _complex_scene_sse_generator(
             context_pack_observability=context_pack_observability,
         )
 
-        llm_runtime = resolve_host_llm_runtime(
+        llm_runtime = await resolve_host_llm_runtime(
             rollout_key=session_id,
             scene_type=scene_type,
         )
@@ -679,11 +679,27 @@ async def _complex_scene_sse_generator(
         finally:
             episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
 
+        # ── 修复审计问题 #7：复杂场景补充 VTS 情感驱动 ─────────────────────
+        from host_brain.app.chat_stream_handler import _drive_stream_vts_emotion  # noqa: PLC0415
+        _vts_started_ms = int(time.time() * 1000)
+        vts_summary: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+        try:
+            vts_summary = await _drive_stream_vts_emotion(
+                request_id=request_id,
+                emotion_context=emotion_context,
+                ts_ms=ts_ms,
+            )
+        except Exception as exc:
+            vts_summary = {"status": "DEGRADED", "reason_code": str(exc)}
+            _logger.debug("complex scene VTS drive skipped", extra={"request_id": request_id, "error": str(exc)})
+        vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
+
         background_tasks_latency_ms = {
             "observability_persist_ms": obs_persist_latency_ms,
             "bond_update_ms": bond_latency_ms,
             "episodic_memory_ms": episodic_latency_ms,
-            "total_ms": obs_persist_latency_ms + bond_latency_ms + episodic_latency_ms,
+            "vts_emotion_ms": vts_latency_ms,
+            "total_ms": obs_persist_latency_ms + bond_latency_ms + episodic_latency_ms + vts_latency_ms,
         }
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
@@ -713,6 +729,7 @@ async def _complex_scene_sse_generator(
                 "route_decision": llm_summary.get("route_decision"),
                 "emotion_context": dict(emotion_context),
                 "emotion_snapshot": dict(emotion_snapshot),
+                "vts": vts_summary,
                 "episodic_memory": dict(episodic_summary),
                 "trace_metrics": trace_metrics,
             },

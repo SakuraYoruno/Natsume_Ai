@@ -38,8 +38,13 @@ from host_brain.app.graph_config_builder import (
     SCENE_CHAT,
     build_unified_route_decision,
     resolve_chat_retrieval_gate,
-    resolve_host_llm_runtime,
+    resolve_host_llm_runtime,  # 同步版本，供测试 mock 使用
+    resolve_host_llm_runtime_async,  # 修复审计问题 #1：异步版本，供实际调用
 )
+
+# 修复审计问题 #1：模块级别名，供 _sse_event_generator 调用（可被测试 mock）
+# 测试通过 monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", ...) 替换此引用
+resolve_host_llm_runtime = resolve_host_llm_runtime_async  # noqa: F811
 from host_brain.app.observability_persist import persist_chat_episodic_memory
 from host_brain.app.prompt_builder import (
     _truncate_for_prompt,
@@ -114,7 +119,7 @@ def _log_context_pack_observability(
 
     if selected_tier and selected_tier != "six_route":
         _logger.warning(
-            "流式上下文降级层级已选择",
+            "stream context degrade tier selected",
             extra={
                 "request_id": request_id,
                 "session_id": session_id,
@@ -209,7 +214,10 @@ async def _build_stream_chat_prompt(
         build_chat_generation_prompt_payload as _build_payload,
         build_node_style_bindings as _build_style,
     )
-    from host_brain.app.prompt_builder import render_node_generation_prompt  # noqa: PLC0415
+    from host_brain.app.prompt_builder import (  # noqa: PLC0415
+        render_node_generation_prompt,
+        _build_node_role_instruction,
+    )
 
     render_target_lang = infer_render_target_lang(user_message=message)
     node_style_bindings = _resolve_stream_style_bindings(
@@ -245,12 +253,9 @@ async def _build_stream_chat_prompt(
         "context_pack_observability": dict(prompt_payload.get("context_pack_observability") or {}),
         "emotion_snapshot": dict(prompt_payload.get("emotion_snapshot") or {}),
     }
-    system_prompt = (
-        "你是夏目藍（Natsume Ai）。"
-        "你不是 AI 或助手——你就是夏目藍本人。"
-        "仅输出一个 JSON 对象，包含 narrative、intent_draft、meta 三个键。"
-        "narrative.text 必须是适合 TTS 朗读的自然日语。"
-        "meta.draft_only 必须为 true。"
+    system_prompt = _build_node_role_instruction(
+        CHAT_DIRECT_NODE_ID,
+        render_target_lang=render_target_lang,
     )
     return prompt_text, system_prompt, gen_params, resolved_emotion_context, prompt_meta
 
@@ -624,10 +629,16 @@ async def _sse_event_generator(
         )
 
         # ── 5. 检查 LLM 可用性 ────────────────────────────────────────────
-        llm_runtime = resolve_host_llm_runtime(
+        # 修复审计问题 #1：resolve_host_llm_runtime 在模块级被重新绑定为异步版本
+        # 兼容测试 mock（同步 lambda）和生产代码（async def）
+        _runtime_result = resolve_host_llm_runtime(
             rollout_key=session_id,
             scene_type=scene_type,
         )
+        if asyncio.iscoroutine(_runtime_result):
+            llm_runtime = await _runtime_result
+        else:
+            llm_runtime = _runtime_result
         provider_name = str(llm_runtime["provider_name"])
         model_id = str(llm_runtime["model_id"])
         timeout_ms_val = int(llm_runtime["timeout_ms"])
@@ -766,6 +777,50 @@ async def _sse_event_generator(
         finally:
             episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
 
+        # ── 9b. Bond 更新（修复审计问题 #8：SCENE_CHAT 路径补充 Bond 积分）────
+        bond_latency_ms = 0
+        bond_summary: Dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+        _bond_started_ms = int(time.time() * 1000)
+        try:
+            from host_brain.app.dependencies import get_bond_stage_engine, get_bond_update_queue  # noqa: PLC0415
+            from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
+            _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
+            _update_kind = BondDynamicsWriter.classify_interaction(
+                text=resolved_message,
+                emotion_intensity=_intensity,
+            )
+            _bond_payload = {
+                "request_id": request_id,
+                "intent_id": str(intent_id or request_id),
+                "session_id": session_id,
+                "seq": 1,
+                "user_id": session_id,
+                "topic_id": resolved_message[:64],
+                "capability_hint": "bond_memory",
+                "update_kind": _update_kind,
+                "evidence_refs": [str(intent_id or request_id)],
+                "emotion_tag": _etag,
+                "emotion_intensity": _intensity,
+                "ts_ms": ts_ms,
+            }
+            _bond_queue = get_bond_update_queue()
+            _queue_result = _bond_queue.enqueue(_bond_payload)
+            _bond_queue_status = str(_queue_result.get("status") or "UNKNOWN")
+            if _bond_queue_status != "QUEUED":
+                _bond_writer = BondDynamicsWriter(
+                    ledger=get_ledger(),
+                    stage_engine=get_bond_stage_engine(),
+                )
+                _bond_writer.apply_update(**_bond_payload)
+                _bond_queue_status = "DIRECT_FALLBACK_APPLIED"
+            bond_summary = {"status": _bond_queue_status, "update_kind": _update_kind}
+        except Exception as exc:
+            bond_summary = {"status": "DEGRADED", "reason_code": str(exc)}
+            _logger.debug("流式路径 Bond 更新跳过", extra={"request_id": request_id, "error": str(exc)})
+        finally:
+            bond_latency_ms = max(0, int(time.time() * 1000) - _bond_started_ms)
+
         # ── 10. VTS 情感驱动（异步线程，不阻塞流式 token 输出）────────────
         _vts_started_ms = int(time.time() * 1000)
         vts_summary = await _drive_stream_vts_emotion(
@@ -774,7 +829,7 @@ async def _sse_event_generator(
             ts_ms=ts_ms,
         )
         vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
-        background_tasks_total_ms = airlock_latency_ms + episodic_latency_ms + vts_latency_ms
+        background_tasks_total_ms = airlock_latency_ms + episodic_latency_ms + vts_latency_ms + bond_latency_ms
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
             "first_token_latency_ms": first_token_latency_ms,
@@ -782,6 +837,7 @@ async def _sse_event_generator(
                 "airlock_ingress_ms": airlock_latency_ms,
                 "episodic_memory_ms": episodic_latency_ms,
                 "vts_emotion_ms": vts_latency_ms,
+                "bond_update_ms": bond_latency_ms,
                 "total_ms": background_tasks_total_ms,
             },
         }
