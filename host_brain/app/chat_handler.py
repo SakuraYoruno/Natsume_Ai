@@ -27,6 +27,7 @@ from host_brain.app.emotion_context import (
     resolve_chat_emotion_context,
 )
 from host_brain.app.graph_config_builder import (
+    ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_WORK_CODE,
@@ -65,6 +66,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     session_id = request_body.session_id or f"session::{request_id}"
 
     intent_draft = request_body.intent_draft
+    _pre_scene: str | None = None
     if intent_draft is None:
         # 修复审计问题 #2：根据 pre_intent_classifier 预分类结果动态设置 action，
         # 使 Governor 能感知真实意图类型，EXEC_INTENT 不再以 narrative_only 绕过情感门控。
@@ -96,6 +98,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             ts_ms=ts_ms,
             intent_draft=intent_draft,
             metrics=metrics,
+            _pre_classified_scene=_pre_scene,
         ),
         media_type="text/event-stream",
         headers={
@@ -113,6 +116,7 @@ async def _unified_chat_sse_generator(
     ts_ms: int,
     intent_draft: Dict[str, Any],
     metrics: Any,
+    _pre_classified_scene: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """统一 SSE 生成器。
 
@@ -175,15 +179,10 @@ async def _unified_chat_sse_generator(
         # ── 鉴权后分类场景 ────────────────────────────────────────────────
         # 修复审计问题 #3：对客户端显式传入的 scene_type 进行合法性校验，
         # 防止客户端强制路由到任意场景（如 VISION_UI 等高门槛场景）。
-        _ALLOWED_EXPLICIT_SCENE_TYPES = {
-            SCENE_CHAT,
-            "SCENE_WORK_CODE",
-            "SCENE_WORK_TRANSLATE",
-            "SCENE_EXEC_INTENT",
-        }
+        # ALLOWED_EXPLICIT_SCENE_TYPES 统一在 graph_config_builder 中维护，此处直接引用。
         explicit_scene_type = str(request_body.scene_type or "").strip().upper()
         if explicit_scene_type:
-            if explicit_scene_type not in _ALLOWED_EXPLICIT_SCENE_TYPES:
+            if explicit_scene_type not in ALLOWED_EXPLICIT_SCENE_TYPES:
                 _logger.warning(
                     "客户端传入非法 scene_type，已降级为 SCENE_CHAT",
                     extra={
@@ -197,6 +196,10 @@ async def _unified_chat_sse_generator(
             else:
                 scene_type = explicit_scene_type
                 scene_type_source = "explicit"
+        elif _pre_classified_scene is not None:
+            # 复用 handle_chat 中已完成的预分类结果，避免重复调用 pre_intent_classifier
+            scene_type = _pre_classified_scene
+            scene_type_source = "pre_classifier"
         else:
             scene_type = pre_intent_classifier(request_body.message)
             scene_type_source = "pre_classifier"

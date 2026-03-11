@@ -21,7 +21,16 @@ PARSE_LENIENT_OK = "LENIENT_OK"
 PARSE_LENIENT_FAIL = "LENIENT_FAIL"
 
 TYPE_ALLOWLIST = {"skill_call", "query", "control"}
-ACTION_ALLOWLIST = {"read_only_status", "narrative_only", "memory_recall", "noop"}
+ACTION_ALLOWLIST = {
+    "read_only_status",
+    "narrative_only",
+    "memory_recall",
+    "noop",
+    # M45：场景路由 action（由 chat_handler._action_map 注入，Governor 需感知真实意图类型）
+    "exec_intent",
+    "work_code",
+    "work_translate",
+}
 TARGET_ALLOWLIST = {"host", "memory", "system"}
 
 REQUIRED_FIELDS: dict[str, type] = {
@@ -42,6 +51,10 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
     "narrative_only": {"required": {"text": str}, "optional": {"style": str}},
     "memory_recall": {"required": {"query": str}, "optional": {"k": int}},
     "noop": {"required": {}, "optional": {}},
+    # M45：场景路由 action — args 只要包含 text 字段即可
+    "exec_intent": {"required": {"text": str}, "optional": {}},
+    "work_code": {"required": {"text": str}, "optional": {}},
+    "work_translate": {"required": {"text": str}, "optional": {}},
 }
 
 DECISION_APPROVE = "APPROVE"
