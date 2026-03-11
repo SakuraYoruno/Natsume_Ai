@@ -90,6 +90,32 @@ async def runtime_lifespan(
             logger.warning("StateArbiter 状态源注册失败（降级）: %s", _sa_exc)
             new_module_statuses["state_arbiter_sources"] = f"DEGRADED: {_sa_exc}"
 
+        # [P1] Edge RPC 健康探测：启动时检查 Edge 是否可达
+        try:
+            from host_brain.app.dependencies import probe_edge_rpc_health  # noqa: PLC0415
+            _edge_health = await probe_edge_rpc_health()
+            _edge_available = bool(_edge_health.get("available", False))
+            new_module_statuses["edge_rpc"] = (
+                f"OK (latency={_edge_health.get('latency_ms', 0)}ms)"
+                if _edge_available
+                else f"DEGRADED: {_edge_health.get('detail', 'unreachable')}"
+            )
+            if _edge_available:
+                logger.info(
+                    "Edge RPC 可达: %s (latency=%dms)",
+                    _edge_health.get("base_url", ""),
+                    _edge_health.get("latency_ms", 0),
+                )
+            else:
+                logger.warning(
+                    "⚠️ Edge RPC 不可达（降级模式）: %s",
+                    _edge_health.get("detail", ""),
+                    extra={"edge_health": _edge_health},
+                )
+        except Exception as _edge_exc:
+            new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
+            logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
+
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes={},

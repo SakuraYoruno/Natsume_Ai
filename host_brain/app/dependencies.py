@@ -549,3 +549,74 @@ def get_state_arbiter() -> StateArbiter:
         _state_arbiter = StateArbiter(audit_writer=_audit_writer)
         _logger.info("StateArbiter 已初始化（未注册状态源，需业务层注入）")
     return _state_arbiter
+
+
+# ---------------------------------------------------------------------------
+# EdgeRpcClient 工厂（Host → Edge HTTP 推送）
+# ---------------------------------------------------------------------------
+
+
+def get_edge_base_url() -> str:
+    """返回 Edge RPC 服务的 base URL（由环境变量决定）。
+
+    环境变量：
+      EDGE_RPC_HOST  Edge 监听地址（默认 127.0.0.1）
+      EDGE_RPC_PORT  Edge 监听端口（默认 17800）
+    """
+    host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip()
+    port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 17800
+    return f"http://{host}:{port}"
+
+
+async def probe_edge_rpc_health() -> dict:
+    """探测 Edge RPC 服务健康状态（GET /v1/edge/health）。
+
+    返回 dict 包含 available / status / detail / latency_ms。
+    用于 Host 启动时的依赖检查和运行时健康监控。
+    """
+    import time
+
+    t0 = int(time.time() * 1000)
+    base_url = get_edge_base_url()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{base_url}/v1/edge/health")
+        latency_ms = max(0, int(time.time() * 1000) - t0)
+        if resp.status_code == 200:
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            return {
+                "available": True,
+                "status": str(body.get("status") or "OK"),
+                "detail": "edge rpc reachable",
+                "latency_ms": latency_ms,
+                "base_url": base_url,
+            }
+        return {
+            "available": False,
+            "status": "DEGRADED",
+            "detail": f"edge health returned HTTP {resp.status_code}",
+            "latency_ms": latency_ms,
+            "base_url": base_url,
+        }
+    except ImportError:
+        return {
+            "available": False,
+            "status": "DEGRADED",
+            "detail": "httpx 未安装，无法探测 Edge RPC",
+            "latency_ms": 0,
+            "base_url": base_url,
+        }
+    except Exception as exc:
+        latency_ms = max(0, int(time.time() * 1000) - t0)
+        return {
+            "available": False,
+            "status": "DEGRADED",
+            "detail": f"edge rpc unreachable: {exc}",
+            "latency_ms": latency_ms,
+            "base_url": base_url,
+        }

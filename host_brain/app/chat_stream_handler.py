@@ -871,11 +871,45 @@ async def _sse_event_generator(
                 _logger.debug("流式路径 Bond 更新跳过", extra={"request_id": request_id, "error": str(exc)})
             return _summary, max(0, int(time.time() * 1000) - _t0)
 
+        async def _run_tts() -> tuple[Dict[str, Any], int]:
+            """驱动 Edge TTS 语音合成（fire-and-forget，不阻塞 COMMIT）。
+
+            仅当 HOST_STREAM_TTS_ENABLED=true（默认 true）且 narrative 非空时触发。
+            通过 EdgeRpcClient.post_speak() 发送 HTTP POST /v1/edge/speak。
+            """
+            _t0 = int(time.time() * 1000)
+            _tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
+            if _tts_enabled not in {"1", "true", "yes", "on"}:
+                return {"status": "SKIPPED", "reason_code": "HOST_STREAM_TTS_DISABLED"}, 0
+            if not narrative or not narrative.strip():
+                return {"status": "SKIPPED", "reason_code": "NARRATIVE_EMPTY"}, 0
+            try:
+                from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
+                _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                _tts_result = await _post_speak(
+                    text=narrative,
+                    request_id=request_id,
+                    emotion_tag=_etag,
+                )
+                return _tts_result.as_dict(), max(0, int(time.time() * 1000) - _t0)
+            except Exception as exc:
+                _logger.debug(
+                    "流式路径 TTS 驱动失败（降级）: %s",
+                    exc,
+                    extra={"request_id": request_id},
+                )
+                return {
+                    "status": "DEGRADED",
+                    "reason_code": "TTS_CALL_FAILED",
+                    "detail": str(exc),
+                }, max(0, int(time.time() * 1000) - _t0)
+
         (
             (airlock_refs, airlock_latency_ms),
             (episodic_summary, episodic_latency_ms),
             (bond_summary, bond_latency_ms),
             (vts_summary, vts_latency_ms),
+            (tts_summary, tts_latency_ms),
         ) = await asyncio.gather(
             _run_airlock(),
             _run_episodic(),
@@ -885,6 +919,7 @@ async def _sse_event_generator(
                 emotion_context=emotion_context,
                 ts_ms=ts_ms,
             ),
+            _run_tts(),
         )
 
         background_tasks_total_ms = max(0, int(time.time() * 1000) - _post_started_ms)
@@ -896,6 +931,7 @@ async def _sse_event_generator(
                 "episodic_memory_ms": episodic_latency_ms,
                 "vts_emotion_ms": vts_latency_ms,
                 "bond_update_ms": bond_latency_ms,
+                "tts_speak_ms": tts_latency_ms,
                 "total_ms": background_tasks_total_ms,
             },
         }
@@ -937,6 +973,7 @@ async def _sse_event_generator(
                 "context_pack_validation": context_pack_validation,
                 "context_pack_observability": context_pack_observability,
                 "vts": vts_summary,
+                "tts": tts_summary,
                 "airlock": airlock_refs,
                 "episodic_memory": episodic_summary,
                 "trace_metrics": trace_metrics,

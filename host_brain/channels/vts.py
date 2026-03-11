@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +16,8 @@ from host_brain.core.errors import (
     VTS_DEGRADED_FALLBACK,
 )
 from host_brain.core.ids import new_request_id, now_ms
+
+_logger = logging.getLogger("Natsume.vts")
 
 
 S_AVATAR_TALK_GATE = "S_AVATAR_TALK_GATE"
@@ -200,7 +204,7 @@ def resolve_vts_expression(
             ts_ms=now_value,
         )
 
-    return _log_result(
+    result = _log_result(
         ledger=ledger,
         request_id=req_id,
         trigger=trigger,
@@ -212,6 +216,36 @@ def resolve_vts_expression(
         detail="expression resolved via fixed mapping",
         ts_ms=now_value,
     )
+
+    # ── 真正驱动 Edge VTS（fire-and-forget，不阻塞调用方）──────────────────
+    # 通过 EdgeRpcClient 发送 HTTP POST /v1/edge/vts，让 Edge 端执行表情切换。
+    # 若无事件循环（同步调用场景）则跳过，不影响审计结果。
+    try:
+        from host_brain.channels.edge_rpc_client import post_vts as _post_vts  # noqa: PLC0415
+
+        async def _fire_edge_vts() -> None:
+            try:
+                await _post_vts(
+                    action="set_expression",
+                    emotion_tag=normalized_tag,
+                    request_id=req_id,
+                )
+            except Exception as exc:
+                _logger.debug(
+                    "Edge VTS HTTP 调用失败（降级）: %s (request_id=%s)",
+                    exc, req_id,
+                )
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_fire_edge_vts())
+        except RuntimeError:
+            pass  # 无事件循环时跳过
+    except ImportError:
+        pass
+
+    return result
 
 
 def _normalize_emotion_tag(value: str | None) -> str | None:
