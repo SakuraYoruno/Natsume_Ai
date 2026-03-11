@@ -211,7 +211,11 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
 @app.post("/v1/edge/events", response_model=EdgeEventsResponse)
 async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
     """接收 Edge 端批量上报的事件 — 委托给 system_handler.receive_edge_events_response。"""
-    return await receive_edge_events_response(request_body=request_body)
+    return receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=get_ledger,
+        logger=_logger,
+    )
 
 
 @app.get("/metrics", response_model=MetricsResponse)

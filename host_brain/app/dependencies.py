@@ -291,12 +291,21 @@ def get_bond_update_queue() -> BondUpdateQueue:
     worker_enabled = _parse_bool_env("HOST_BOND_QUEUE_ENABLED", default=True)
     signature = (int(max_queue_size), bool(worker_enabled))
 
+    # 修复审计问题 #10：writer_factory 使用 get_bond_neo4j_client() 而非硬编码
+    # InMemoryNeo4jBondClient，确保 Bond 事件写入持久化客户端（SQLite 或内存）。
+    # 客户端类型由环境变量 HOST_BOND_BACKEND / HOST_BOND_SQLITE_PATH 控制：
+    #   HOST_BOND_BACKEND=sqlite  → SqliteBondClient（持久化，推荐生产环境）
+    #   HOST_BOND_BACKEND=memory  → InMemoryNeo4jBondClient（内存，重启丢失）
+    def _make_writer() -> BondDynamicsWriter:
+        return BondDynamicsWriter(
+            ledger=get_ledger(),
+            neo4j_client=get_bond_neo4j_client(),
+            stage_engine=get_bond_stage_engine(),
+        )
+
     if _bond_update_queue is None:
         _bond_update_queue = BondUpdateQueue(
-            writer_factory=lambda: BondDynamicsWriter(
-                ledger=get_ledger(),
-                stage_engine=get_bond_stage_engine(),
-            ),
+            writer_factory=_make_writer,
             max_queue_size=max_queue_size,
             worker_enabled=worker_enabled,
         )
@@ -307,10 +316,7 @@ def get_bond_update_queue() -> BondUpdateQueue:
     if current_signature != signature:
         _bond_update_queue.shutdown()
         _bond_update_queue = BondUpdateQueue(
-            writer_factory=lambda: BondDynamicsWriter(
-                ledger=get_ledger(),
-                stage_engine=get_bond_stage_engine(),
-            ),
+            writer_factory=_make_writer,
             max_queue_size=max_queue_size,
             worker_enabled=worker_enabled,
         )
@@ -349,7 +355,17 @@ def get_intent_engine() -> IntentDecisionEngine:
 # ---------------------------------------------------------------------------
 
 def get_main_chain() -> MainChain:
-    """获取主链路编排器单例（延迟初始化）。"""
+    """获取主链路编排器单例（延迟初始化）。
+
+    [审计修复 #4] MainChain 已从死代码迁移为 _unified_chat_sse_generator 的适配层。
+    通过 MainChain.run_as_sse_adapter() 可将请求委托给真实的 SSE 路由逻辑，
+    同时保留 ChainContext 审计追踪能力。
+
+    路由层调用示例：
+        chain = get_main_chain()
+        async for event in chain.run_as_sse_adapter(request_body=..., ...):
+            yield event
+    """
     global _main_chain
     if _main_chain is None:
         from host_brain.app.failure_matrix import FailureHandler
@@ -369,8 +385,48 @@ def get_main_chain() -> MainChain:
 
         failure_handler = FailureHandler(audit_writer=_audit_writer)
         _main_chain = MainChain(failure_handler=failure_handler.handle)
-        _logger.info("MainChain 已初始化（含审计写入）")
+        _logger.info("MainChain 已初始化（含审计写入，适配层模式）")
     return _main_chain
+
+
+async def run_chat_via_main_chain(
+    *,
+    request_body: object,
+    request_id: str,
+    session_id: str,
+    ts_ms: int,
+    intent_draft: dict,
+    metrics: object,
+    _pre_classified_scene: str | None = None,
+):
+    """[审计修复 #4] 通过 MainChain 适配层执行聊天 SSE 路由。
+
+    这是 MainChain 的标准调用入口，供路由层（如 canon_routes.py）使用。
+    内部委托给 MainChain.run_as_sse_adapter → _unified_chat_sse_generator。
+
+    Args:
+        request_body: ChatRequest 实例
+        request_id: 请求唯一 ID
+        session_id: 会话 ID
+        ts_ms: 请求时间戳（毫秒）
+        intent_draft: Governor 意图草稿
+        metrics: MetricsCollector 实例
+        _pre_classified_scene: 预分类场景（可选，避免重复分类）
+
+    Yields:
+        SSE 事件字符串
+    """
+    chain = get_main_chain()
+    async for event in chain.run_as_sse_adapter(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        metrics=metrics,
+        _pre_classified_scene=_pre_classified_scene,
+    ):
+        yield event
 
 
 def get_routing_matrix() -> RoutingMatrix:

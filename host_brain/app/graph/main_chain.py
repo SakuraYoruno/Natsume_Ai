@@ -1,15 +1,13 @@
 """
 main_chain.py —— 主聊天链路时序编排器
 
-⚠️  [审计修复 #4] 遗留架构警告
-    此模块（MainChain / SceneRouter）是早期架构遗留代码，当前实际路由
-    完全由 host_brain/app/chat_handler.py 中的 _unified_chat_sse_generator
-    if-else 分支控制，本模块中的节点实现均为骨架（logger.debug + return True），
-    且 MainChain 在 dependencies.py 中已初始化但从未被任何路由调用。
+[审计修复 #4] 已从死代码迁移为 _unified_chat_sse_generator 的适配层。
+    通过 MainChain.run_as_sse_adapter() 将请求委托给真实的 SSE 路由逻辑，
+    同时保留 ChainContext 审计追踪能力。
 
-    当前状态：死代码（Dead Code）
     实际路由入口：host_brain/app/chat_handler.py::_unified_chat_sse_generator
-    计划：在下一个里程碑中将本模块迁移为实际路由的适配层，或彻底移除。
+    适配层入口：MainChain.run_as_sse_adapter()
+    标准调用方式：dependencies.run_chat_via_main_chain()
 
 定义主链路节点顺序：
   Airlock(Quarantine) → Governor → GraphExecutor → RecallFusion
@@ -472,3 +470,67 @@ class MainChain:
     def set_failure_handler(self, handler: Callable) -> None:
         """注入统一失败处理器（任务 7 完成后调用）。"""
         self._failure_handler = handler
+
+    async def run_as_sse_adapter(
+        self,
+        *,
+        request_body: Any,
+        request_id: str,
+        session_id: str,
+        ts_ms: int,
+        intent_draft: dict,
+        metrics: Any,
+        _pre_classified_scene: str | None = None,
+    ):
+        """[审计修复 #4] 适配层入口：将 MainChain 接入实际路由。
+
+        将 MainChain 从死代码迁移为 _unified_chat_sse_generator 的适配层。
+        调用方可通过此方法将请求委托给真实的 SSE 路由逻辑，
+        同时保留 MainChain 的 ChainContext 审计追踪能力。
+
+        用法示例（在路由层）：
+            chain = get_main_chain()
+            async for event in chain.run_as_sse_adapter(
+                request_body=request_body,
+                request_id=request_id,
+                ...
+            ):
+                yield event
+        """
+        from host_brain.app.chat_handler import _unified_chat_sse_generator  # noqa: PLC0415
+
+        # 构建 ChainContext 用于审计追踪
+        ctx = ChainContext(
+            request_id=request_id,
+            user_message=str(getattr(request_body, "message", "") or ""),
+            session_id=session_id,
+        )
+        ctx.audit_tags.append("main_chain_adapter")
+
+        start = time.monotonic()
+        try:
+            async for event in _unified_chat_sse_generator(
+                request_body=request_body,
+                request_id=request_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                intent_draft=intent_draft,
+                metrics=metrics,
+                _pre_classified_scene=_pre_classified_scene,
+            ):
+                yield event
+            ctx.governor_passed = True
+        except Exception as exc:
+            ctx.failure_event = "MODULE_TIMEOUT"
+            ctx.failure_detail = f"MainChain SSE adapter 异常: {exc}"
+            logger.exception("MainChain.run_as_sse_adapter 异常: %s", exc)
+            if self._failure_handler:
+                try:
+                    if asyncio.iscoroutinefunction(self._failure_handler):
+                        await self._failure_handler(ctx.failure_event, ctx)
+                    else:
+                        self._failure_handler(ctx.failure_event, ctx)
+                except Exception as fh_exc:
+                    logger.error("FailureHandler 执行异常: %s", fh_exc)
+        finally:
+            ctx.node_timings["main_chain_adapter"] = time.monotonic() - start
