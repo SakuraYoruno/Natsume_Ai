@@ -57,13 +57,16 @@ SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
 SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
 
-# 客户端允许显式指定的场景类型白名单（不含 VISION_UI 等高门槛场景）
+# 客户端允许显式指定的场景类型白名单
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
+# [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
+# 注意：VISION_UI 场景需要客户端传入 image_upload_consent=true 才允许上传图片
 ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
     SCENE_CHAT,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
     SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
 })
 
 HOST_CHAT_ROUTE_HOST_8B = "host_8b"
@@ -817,6 +820,37 @@ async def _resolve_host_llm_runtime_core(
             route_reason_code = "HOST_CHAT_HOST_8B_UNAVAILABLE"
             route_detail = "host 8b provider unavailable"
 
+    # [选项二] 接入 RoutingMatrix：将场景类型映射为 TaskType，记录路由矩阵决策
+    routing_matrix_decision: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_routing_matrix  # noqa: PLC0415
+        from host_brain.app.schemas.routing_types import TaskType as _TaskType, LatencyBudget as _LatencyBudget  # noqa: PLC0415
+        _scene_to_task = {
+            SCENE_CHAT: _TaskType.CHAT,
+            SCENE_WORK_CODE: _TaskType.CODE,
+            SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE,
+            SCENE_VISION_UI: _TaskType.CHAT,  # 视觉场景复用 CHAT 路由
+        }
+        _task_type = _scene_to_task.get(
+            str(scene_type or SCENE_CHAT).strip().upper(),
+            _TaskType.CHAT,
+        )
+        _latency = _LatencyBudget.FAST if sys_mode == "gaming" else _LatencyBudget.NORMAL
+        _matrix = get_routing_matrix()
+        _decision = _matrix.select_with_fallback(
+            task_type=_task_type,
+            latency_budget=_latency,
+        )
+        routing_matrix_decision = {
+            "task_type": _decision.task_type.value,
+            "selected_model": _decision.selected_model.value,
+            "latency_budget": _decision.latency_budget.value,
+            "is_fallback": _decision.is_fallback,
+            "fallback_reason": _decision.fallback_reason,
+        }
+    except Exception as _rm_exc:
+        routing_matrix_decision = {"status": "DEGRADED", "reason": str(_rm_exc)}
+
     return {
         "provider_name": chat_provider_name,
         "model_id": chat_model_id,
@@ -844,6 +878,7 @@ async def _resolve_host_llm_runtime_core(
         "cloud_provider_fn": cloud_provider_fn,
         "cloud_base_url_override": cloud_base_url_override,
         "gray_rollout": dict(gray_rollout),
+        "routing_matrix_decision": routing_matrix_decision,
     }
 
 

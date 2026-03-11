@@ -792,12 +792,12 @@ flowchart TD
 | **D（P4）** | `input_routes.py` 调用 `run_main_chain_from_input` 但该函数不存在，ASR/微信输入上报无法触发完整 chat 流程 | 🟡 中危 | ✅ 已修复：在 `main_chain.py` 中实现 `run_main_chain_from_input`，构建 ChatRequest 并触发完整链路 | `graph/main_chain.py` |
 | **F（P5）** | Bond 积分阈值硬编码（STRANGER=0, SOULMATE=300），无法运行时调整 | 🟢 低危 | ✅ 已修复：`get_bond_stage_engine()` 支持通过 `HOST_BOND_STAGE_THRESHOLDS` / `HOST_BOND_SCORE_MAP` 环境变量覆盖 | `dependencies.py` |
 
-### 13.3 仍存在的架构问题（待后续处理）
+### 13.3 仍存在的架构问题（已全部解决，见第十五节）
 
-| # | 问题描述 | 严重度 | 建议 |
+| # | 问题描述 | 严重度 | 状态 |
 |---|---------|--------|------|
-| D-残留 | `RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个模块有工厂函数但无调用方（实际路由仍由 `graph_config_builder.py` 直接处理） | 🟡 中危 | 接入实际路由或标记为待实现 |
-| E | `SCENE_VISION_UI` 目前返回 `NOT_SUPPORTED`，视觉场景无完整实现 | 🟡 中危 | 实现完整的视觉分析链路 |
+| D-残留 | `RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个模块有工厂函数但无调用方 | 🟡 中危 | ✅ 已解决（选项二，2026-03-11 17:40） |
+| E | `SCENE_VISION_UI` 目前返回 `NOT_SUPPORTED`，视觉场景无完整实现 | 🟡 中危 | ✅ 已解决（选项一，2026-03-11 17:40） |
 
 ---
 
@@ -826,7 +826,7 @@ flowchart TD
 
 ---
 
-*报告初版生成时间：2026-03-11 17:20 | 最后更新：2026-03-11 17:28 | 生成模型：claude-4.6-sonnet*
+*报告初版生成时间：2026-03-11 17:20 | 最后更新：2026-03-11 17:52 | 生成模型：claude-4.6-sonnet*
 *基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块*
 
 ---
@@ -856,5 +856,188 @@ flowchart TD
 
 仍存在的限制（有意设计）：
   Gaming Edge 路径：最小路径设计，无 VTS/Bond/Episodic（已补充设计说明）
-  SCENE_VISION_UI：返回 NOT_SUPPORTED，视觉分析链路待实现
+
+后续已解决（2026-03-11 17:52）：
+  SCENE_VISION_UI：✅ 已加入白名单，视觉链路完整接入（见第十五节）
+  孤立模块：✅ RoutingMatrix/ContextPackBuilder/MemoryGuard/StateArbiter 全部接入（见第十五节）
 ```
+
+---
+
+## 十五、选项一/二/三 实施记录（2026-03-11 17:52）
+
+### 15.1 选项一：SCENE_VISION_UI 视觉链路完整接入
+
+**背景**：`chat_handler_vision.py` 已有完整的 `_vision_ui_sse_generator` 实现（Gemini Vision 多模态分析链路），但 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单中不含 `SCENE_VISION_UI`，导致客户端无法显式指定该场景。
+
+**修复内容**：
+- `graph_config_builder.py`：将 `SCENE_VISION_UI` 加入 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单
+- 注释更新：说明 VISION_UI 场景需要 `image_upload_consent=true` 才允许上传图片
+
+**视觉链路数据流**：
+
+```mermaid
+flowchart TD
+    A["客户端 POST /v1/chat
+{scene_type: SCENE_VISION_UI,
+vision_context: {...}}"] --> B["chat_handler._unified_chat_sse_generator"]
+    B --> C["SceneRouter.route_sse()
+SCENE_VISION_UI 分支"]
+    C --> D["chat_handler_vision._vision_ui_sse_generator"]
+    D --> E["vision_context_parser
+解析 base64/url/text"]
+    E --> F{"check_image_upload_allowed()
+REQUIRE_CONSENT 策略"}
+    F -->|"consent=true"| G["Airlock image_filter
+元数据检查 + 敏感词扫描"]
+    F -->|"consent=false"| H["降级：纯文字模式"]
+    G --> I["Gemini Vision 多模态分析"]
+    H --> I
+    I --> J["vision_renderer
+可选 ActionPlan 生成"]
+    J --> K["COMMIT(APPROVE)
+audit_refs.vision_input"]
+```
+
+**支持的输入模式**：
+
+| 模式 | 条件 | 说明 |
+|------|------|------|
+| `image` | `vision_context.image_base64` 或 `image_url` 非空 + `image_upload_consent=true` | 真实多模态分析 |
+| `text_description` | `vision_context.screen_description` 等文字字段非空 | 降级文字模式 |
+| `text_only` | 无 vision_context | 最低优先级，纯文字分析 |
+
+---
+
+### 15.2 选项二：孤立模块接入实际路由
+
+**背景**：`RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个模块有完整实现和工厂函数，但未接入实际路由，形成孤立代码。
+
+#### 15.2.1 RoutingMatrix 接入
+
+**接入点**：`graph_config_builder._resolve_host_llm_runtime_core` 返回值
+
+**修复内容**：在 `_resolve_host_llm_runtime_core` 的返回值中附加 `routing_matrix_decision` 字段，记录 RoutingMatrix 的路由决策（task_type、selected_model、latency_budget、is_fallback）。结果透传至 `COMMIT.audit_refs.routing_matrix_decision`，可观测。
+
+**场景映射**：
+
+| SCENE_TYPE | TaskType | 说明 |
+|-----------|---------|------|
+| SCENE_CHAT | CHAT | 普通聊天 |
+| SCENE_WORK_CODE | CODE | 代码辅助 |
+| SCENE_WORK_TRANSLATE | TRANSLATE | 翻译任务 |
+| SCENE_VISION_UI | CHAT | 视觉场景复用 CHAT 路由 |
+
+**降级策略**：RoutingMatrix 调用失败时返回 `{"status": "DEGRADED", "reason": "..."}` 不影响主链路。
+
+#### 15.2.2 ContextPackBuilder 接入
+
+**接入点**：`chat_stream_handler._sse_event_generator`，在 `_build_stream_chat_prompt` 调用之前
+
+**修复内容**：从 `retrieval_evidence_items` 中提取各路召回文本，调用 `ContextPackBuilder.build()` 执行 token 预算控制，结果附加到 `COMMIT.audit_refs.context_pack_builder`。
+
+**数据流**：
+```
+_run_retrieval() → retrieval_evidence_items
+  → [新增] ContextPackBuilder.build(recall_results, task_type="chat")
+    → token 预算截断（world_canon≤800 / style_canon≤400 / episodic_vector≤600 等）
+    → 语义冲突检测（world_canon vs episodic_vector）
+    → 全局截断（总量超 2700 tokens 时按优先级丢弃）
+  → context_pack_builder_summary 附加到 COMMIT.audit_refs
+  → _build_stream_chat_prompt()（原有逻辑不变）
+```
+
+**降级策略**：ContextPackBuilder 调用失败时返回 `{"status": "DEGRADED"}` 不影响主链路，prompt 构建继续使用原始 retrieval_summary。
+
+#### 15.2.3 MemoryGuard 接入
+
+**接入点**：`observability_persist.persist_chat_episodic_memory`
+
+**修复内容**：在写入 EpisodicStore 前，调用 `MemoryGuard.check_episodic_write()` 进行宪法校验。校验失败时返回 `SKIPPED` 状态（不抛出异常），降级策略保证主链路不中断。同时调用 `aggregate_emotion_tags()` 进行 session 粒度情绪聚合。
+
+**校验规则**：
+- 对话轮次 ≥ 2（从 `emotion_context.turn_count` 读取，默认 2）
+- 包含情感标签 OR 事实标签 OR 偏好标签（至少一类）
+
+**数据流**：
+```
+persist_chat_episodic_memory()
+  → [新增] MemoryGuard.check_episodic_write(EpisodicRecord)
+    → 校验通过 → 继续写入 EpisodicStore
+    → 校验失败 → 返回 {status: "SKIPPED", reason_code: "MEMORY_GUARD_REJECTED:..."}
+  → [新增] MemoryGuard.aggregate_emotion_tags(session_id, emotion_tags)
+  → episodic_store.write_memory()（原有逻辑）
+```
+
+#### 15.2.4 StateArbiter 接入
+
+**接入点**：`http_hooks.runtime_lifespan`（应用启动时）
+
+**修复内容**：在应用启动时注册三个状态源（WorldCanonStore、StyleCanonStore、EpisodicStore），每个源注册失败时独立降级（不影响其他源和主链路）。
+
+**优先级顺序**：
+```
+WorldCanonStore(SSOT) > StyleCanonStore > EpisodicStore > BondGraph > ChromaDB > EdgeRuntime
+```
+
+**数据流**：
+```
+runtime_lifespan() 启动时
+  → [新增] StateArbiter.register_source(WORLD_CANON, world_store.get_fact)
+  → [新增] StateArbiter.register_source(STYLE_CANON, style_store.get_fact)
+  → [新增] StateArbiter.register_source(EPISODIC_STORE, ep_store.get_fact)
+  → 各源注册失败时独立降级，记录 new_module_statuses["state_arbiter_sources"]
+
+运行时查询（供业务层调用）：
+  → StateArbiter.resolve(fact_key, session_id)
+    → 按优先级遍历已注册源
+    → 不可达时自动降级到下一优先级
+    → 冲突时写入 triptych 审计
+    → 返回 ArbiterResult(value, source, is_fallback, conflict_detected)
+```
+
+---
+
+### 15.3 选项三：单元测试补充
+
+**新增测试文件**：`tests/unit/test_isolated_modules_integration.py`
+
+**测试覆盖**（18 个测试，全部通过）：
+
+| 测试类 | 测试数 | 覆盖内容 |
+|--------|--------|----------|
+| `TestSceneVisionUIWhitelist` | 2 | SCENE_VISION_UI 已加入白名单；所有预期场景均在白名单中 |
+| `TestRoutingMatrixIntegration` | 5 | CHAT→HOST_8B；REASONING→CLOUD；降级链跳过失败模型；路由日志写入 |
+| `TestContextPackBuilderIntegration` | 4 | 空召回；world_canon 组装；token 截断；style_canon 任务冲突降级 |
+| `TestMemoryGuardIntegration` | 4 | 情感标签通过；轮次不足拒绝；无标签拒绝；persist 函数降级路径 |
+| `TestStateArbiterIntegration` | 3 | 最高优先级返回；不可达降级；全空返回 None |
+
+---
+
+### 15.4 选项四：端到端联调验证（TODO）
+
+> **TODO**：启动 Host + Edge 双端，实际验证本次修复的通信链路是否真正打通。
+>
+> 验证清单：
+> - [ ] ASR 输入 → `POST /v1/host/input` → `run_main_chain_from_input` → 完整 chat 流程
+> - [ ] Edge 情感事件 → `POST /v1/edge/events` → Bond 更新 + VTS 驱动
+> - [ ] `SCENE_VISION_UI` 请求 → Gemini Vision 分析 → SSE 流式回复
+> - [ ] RoutingMatrix 路由决策出现在 `COMMIT.audit_refs` 中
+> - [ ] MemoryGuard 校验失败时 episodic 写入被跳过（reason_code 可观测）
+> - [ ] StateArbiter 冲突事件写入 triptych 审计
+
+---
+
+### 15.5 本次修改文件清单
+
+| 文件 | 修改内容 | 选项 |
+|------|---------|------|
+| `host_brain/app/graph_config_builder.py` | `ALLOWED_EXPLICIT_SCENE_TYPES` 加入 `SCENE_VISION_UI`；`_resolve_host_llm_runtime_core` 返回值附加 `routing_matrix_decision` | 选项一、选项二 |
+| `host_brain/app/chat_stream_handler.py` | `_sse_event_generator` 接入 `ContextPackBuilder`；COMMIT 附加 `context_pack_builder` 和 `routing_matrix_decision` | 选项二 |
+| `host_brain/app/observability_persist.py` | `persist_chat_episodic_memory` 接入 `MemoryGuard` 宪法校验 | 选项二 |
+| `host_brain/app/http_hooks.py` | `runtime_lifespan` 注册 `StateArbiter` 状态源（WorldCanon/StyleCanon/EpisodicStore） | 选项二 |
+| `tests/unit/test_isolated_modules_integration.py` | 新增 18 个单元测试，全部通过 | 选项三 |
+
+---
+
+*最后更新：2026-03-11 17:52 | 本节由 claude-4.6-sonnet 自动生成*

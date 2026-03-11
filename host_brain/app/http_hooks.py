@@ -50,6 +50,46 @@ async def runtime_lifespan(
                     extra={"module": name, "error": str(exc)},
                 )
 
+        # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、StyleCanon、EpisodicStore）
+        try:
+            from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+            from host_brain.app.memory.state_arbiter import StateSource  # noqa: PLC0415
+            _arbiter = get_state_arbiter()
+
+            # 注册 WorldCanonStore（最高优先级 SSOT）
+            try:
+                from host_brain.memory.canon_world_store import CanonWorldStore  # noqa: PLC0415
+                _world_store = CanonWorldStore()
+                _arbiter.register_source(StateSource.WORLD_CANON, _world_store.get_fact)
+                logger.info("StateArbiter: WorldCanonStore 已注册")
+            except Exception as _exc:
+                logger.warning("StateArbiter: WorldCanonStore 注册失败（降级）: %s", _exc)
+
+            # 注册 StyleCanonStore
+            try:
+                from host_brain.memory.canon_style_store import CanonStyleStore  # noqa: PLC0415
+                _style_store = CanonStyleStore()
+                _arbiter.register_source(StateSource.STYLE_CANON, _style_store.get_fact)
+                logger.info("StateArbiter: StyleCanonStore 已注册")
+            except Exception as _exc:
+                logger.warning("StateArbiter: StyleCanonStore 注册失败（降级）: %s", _exc)
+
+            # 注册 EpisodicStore（取最新记录）
+            try:
+                from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+                _ep_store = get_episodic_store()
+                _arbiter.register_source(StateSource.EPISODIC_STORE, _ep_store.get_fact)
+                logger.info("StateArbiter: EpisodicStore 已注册")
+            except Exception as _exc:
+                logger.warning("StateArbiter: EpisodicStore 注册失败（降级）: %s", _exc)
+
+            new_module_statuses["state_arbiter_sources"] = (
+                f"OK:{len(_arbiter._sources)} sources"
+            )
+        except Exception as _sa_exc:
+            logger.warning("StateArbiter 状态源注册失败（降级）: %s", _sa_exc)
+            new_module_statuses["state_arbiter_sources"] = f"DEGRADED: {_sa_exc}"
+
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes={},

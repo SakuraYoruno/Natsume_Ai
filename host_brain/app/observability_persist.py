@@ -165,6 +165,44 @@ def persist_chat_episodic_memory(
 
     tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
     valence, arousal = map_emotion_tag_to_vad(tag)
+
+    # [选项二] 接入 MemoryGuard：在写入 EpisodicStore 前进行宪法校验
+    # 校验条件：对话轮次 ≥ 2 且包含情感/事实/偏好标签
+    # 降级策略：校验失败时跳过写入（不抛出异常），记录 reason_code
+    try:
+        from host_brain.app.dependencies import get_memory_guard  # noqa: PLC0415
+        from host_brain.app.memory.memory_guard import MemoryGuardError  # noqa: PLC0415
+        from host_brain.app.schemas.memory_types import EpisodicRecord, EvidenceLevel  # noqa: PLC0415
+        _guard = get_memory_guard()
+        # 从 emotion_context 中提取轮次信息（默认 2，满足最低写入条件）
+        _turn_count = int((emotion_context or {}).get("turn_count") or 2)
+        _emotion_tags = [tag] if tag and tag != "NEUTRAL" else []
+        _fact_tags = list((emotion_context or {}).get("fact_tags") or [])
+        _pref_tags = list((emotion_context or {}).get("preference_tags") or [])
+        _record = EpisodicRecord(
+            session_id=session_id,
+            content=text,
+            turn_count=_turn_count,
+            emotion_tags=_emotion_tags,
+            fact_tags=_fact_tags,
+            preference_tags=_pref_tags,
+            evidence_level=EvidenceLevel.CANDIDATE,
+        )
+        _guard.check_episodic_write(_record)
+        # 聚合情绪标签（session 粒度）
+        if _emotion_tags:
+            _guard.aggregate_emotion_tags(session_id, _emotion_tags)
+    except ImportError:
+        pass  # MemoryGuard 模块不可用，降级跳过校验
+    except Exception as _guard_exc:
+        _guard_reason = str(getattr(_guard_exc, "reason", None) or type(_guard_exc).__name__)
+        return {
+            "status": "SKIPPED",
+            "reason_code": f"MEMORY_GUARD_REJECTED:{_guard_reason}",
+            "memory_id": None,
+            "detail": str(_guard_exc),
+        }
+
     evidence_refs = [
         f"chat://request/{request_id}",
         f"chat://session/{session_id}",

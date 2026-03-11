@@ -673,6 +673,38 @@ async def _sse_event_generator(
             return
 
         # ── 6. 构建 prompt（已注入 Retrieval + Emotion 上下文）───────────
+        # [选项二] 接入 ContextPackBuilder：将召回结果组装为 ContextPack，执行 token 预算控制
+        context_pack_builder_summary: dict[str, Any] = {}
+        try:
+            from host_brain.app.dependencies import get_context_pack_builder  # noqa: PLC0415
+            _cpb = get_context_pack_builder()
+            # 从 retrieval_summary 中提取各路召回文本
+            _recall_results: dict[str, str | None] = {}
+            _evidence_items = list(retrieval_evidence_items or [])
+            for _item in _evidence_items:
+                _slot = str(_item.get("slot_name") or _item.get("source") or "").strip()
+                _text = str(_item.get("text") or _item.get("content") or "").strip()
+                if _slot and _text:
+                    _recall_results[_slot] = _text
+            if _recall_results:
+                _cp = _cpb.build(recall_results=_recall_results, task_type="chat")
+                context_pack_builder_summary = {
+                    "status": "OK",
+                    "total_tokens": _cp.total_token_count,
+                    "slot_count": len([s for s in _cp.slots.values() if s and s.content]),
+                    "conflict_events": len(_cp.conflict_events),
+                    "subgraph_trace_count": len(_cp.subgraph_trace),
+                }
+            else:
+                context_pack_builder_summary = {"status": "SKIPPED", "reason_code": "NO_RECALL_RESULTS"}
+        except Exception as _cpb_exc:
+            context_pack_builder_summary = {"status": "DEGRADED", "reason": str(_cpb_exc)}
+            _logger.debug(
+                "ContextPackBuilder 调用失败（降级）: %s",
+                _cpb_exc,
+                extra={"request_id": request_id},
+            )
+
         prompt_build_result = await _build_stream_chat_prompt(
             message=resolved_message,
             session_id=session_id,
@@ -908,6 +940,8 @@ async def _sse_event_generator(
                 "airlock": airlock_refs,
                 "episodic_memory": episodic_summary,
                 "trace_metrics": trace_metrics,
+                "context_pack_builder": context_pack_builder_summary,
+                "routing_matrix_decision": dict(llm_runtime.get("routing_matrix_decision") or {}),
             },
         })
 
