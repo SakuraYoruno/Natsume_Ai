@@ -287,3 +287,149 @@
 现在开始执行。
 
 先遍历并审计相关代码文件，再实施最小必要修改，再运行测试，最后按要求输出完整结果。
+
+---
+
+# 后续待处理任务（严格审计后遗留，2026-03-11 18:12）
+
+> 以下任务来自严格代码审计（见 `docs/dataflow_report_20260311.md` 第十六节 §16.7）。
+> 所有任务均以代码真实执行语义为准，不允许把 TODO 写成"已解决"。
+
+## P1（高优先级）
+
+### TODO-1：ContextPackBuilder 升级为 ACTIVE
+
+**当前状态**：`SHADOW`
+- `_cpb.build()` 的结果只写入 `audit_refs.context_pack_builder`，不影响 `_build_stream_chat_prompt` 的 `retrieval_evidence_items`
+- 证据：`chat_stream_handler.py::_sse_event_generator`，`context_pack_builder_summary` 只写入 `audit_refs`
+
+**目标**：将截断结果回写到 `retrieval_evidence_items`，使 token 预算控制真正影响 prompt 构建
+
+**最小改动方案**：
+```python
+# chat_stream_handler.py::_sse_event_generator
+# 在 _cpb.build() 之后，将截断结果回写
+if _cp and _cp.slots:
+    _truncated_items = []
+    for slot_name, slot in _cp.slots.items():
+        if slot and slot.content:
+            _truncated_items.append({
+                "slot_name": slot_name,
+                "text": slot.content,
+                "source": slot_name,
+            })
+    if _truncated_items:
+        retrieval_evidence_items = _truncated_items
+```
+
+**前置条件**：
+1. 先在 SHADOW 模式下观察 `audit_refs.context_pack_builder` 数据，确认截断行为符合预期
+2. 验证 `slot.content` 格式与 `_build_stream_chat_prompt` 期望的 `retrieval_evidence_items` 格式兼容
+
+**风险**：截断过激可能丢失重要召回结果
+
+**回退方式**：添加 `HOST_CONTEXT_PACK_ACTIVE` 环境变量开关（当前代码无此开关，需同步添加）
+
+---
+
+### TODO-2：`/v1/edge/events` 添加事件类型白名单
+
+**当前状态**：无事件类型枚举约束，无来源校验
+- 证据：`system_handler.py::receive_edge_events_response`，`event_type` 字段无白名单过滤
+
+**目标**：添加最小安全边界，防止非法事件类型注入
+
+**最小改动方案**：
+```python
+# system_handler.py
+ALLOWED_EDGE_EVENT_TYPES = frozenset({
+    "ASR_FINAL", "ASR_PARTIAL", "EMOTION_DETECTED", "USER_REACTION",
+    "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL", "TTS_STARTED", "TTS_DONE",
+    "VTS_EXPRESSION_SET", "EDGE_HEALTH_PING",
+})
+
+# 在 receive_edge_events_response 入口处校验
+if event.event_type not in ALLOWED_EDGE_EVENT_TYPES:
+    raise HTTPException(status_code=400, detail=f"Unknown event_type: {event.event_type}")
+```
+
+**安全前提**（当前暂不加鉴权的前提）：
+1. Host Brain 仅部署在内网，不暴露公网
+2. Edge Client 与 Host Brain 在同一受信任网络
+3. 无多租户场景（单用户部署）
+
+---
+
+## P2（中优先级）
+
+### TODO-3：RoutingMatrix 升级为 ACTIVE
+
+**当前状态**：`SHADOW`
+- `select_with_fallback()` 结果写入 `routing_matrix_decision`，但不影响实际 `chat_provider_name/model_id` 选择（仍由 8B 健康探测决定）
+- 证据：`graph_config_builder.py::_resolve_host_llm_runtime_core`
+
+**目标**：将 `_decision.selected_model` 映射回 `chat_provider_name/model_id`，使路由矩阵真正影响模型选择
+
+**注意**：需保留 8B 健康探测作为 fallback，不能直接替换
+
+---
+
+### TODO-4：StateArbiter 接入业务查询
+
+**当前状态**：`WIRED`
+- 3 个状态源已注册（WorldCanon/StyleCanon/EpisodicStore），但全局无任何 `resolve()` 调用
+- 证据：`http_hooks.py::runtime_lifespan`，全局搜索无 `arbiter.resolve(` 调用
+
+**推荐方案（方案 B）**：
+- 在 `_build_stream_chat_prompt` 中调用 `StateArbiter.resolve("world_canon_facts", session_id)` 获取世界观事实
+- 将结果注入 `retrieval_summary` 的 `world_canon` 槽位
+- 接入后补测试
+
+**保守方案（方案 A）**：
+- 不改主业务逻辑，保持 `WIRED` 状态
+- 仅修正文档口径，不得写成"已完成接入"
+
+---
+
+## P3（低优先级）
+
+### TODO-5：SCENE_VISION_UI E2E 联调验证
+
+**当前状态**：`WIRED`（非 `E2E_VERIFIED`）
+- 白名单已加入，`_vision_ui_sse_generator` 完整实现（Gemini Vision 多模态）
+- 但无 E2E 联调证据
+- 证据：`graph_config_builder.py::ALLOWED_EXPLICIT_SCENE_TYPES`，`chat_handler_vision.py::_vision_ui_sse_generator`
+
+**验证步骤**：
+1. 启动 Host Brain + Edge Client 双端
+2. 发送 `scene_type=SCENE_VISION_UI` + `image_upload_consent=true` 请求
+3. 验证 Gemini Vision 分析链路完整执行
+4. 确认 `audit_refs.vision_input` 真实写入
+5. 验证无 consent 的降级逻辑成立
+
+**升级条件**：完成上述 5 步验证后，可将等级升为 `E2E_VERIFIED`
+
+---
+
+### TODO-6：MainChain 骨架节点填充
+
+**当前状态**：`WIRED`（适配层）
+- 骨架节点全是 `return True`，`run_as_sse_adapter` 只透传给 `_unified_chat_sse_generator`
+- 证据：`main_chain.py::MainChain._NODE_FACTORIES`，各节点 `execute()` 直接 `return True`
+
+**目标**：填充真实业务逻辑，使 MainChain 成为真正的编排器而非透传适配层
+
+**建议最小改动**：先补充节点级审计追踪（写入 `ChainContext.node_timings`），再逐步填充各节点业务逻辑
+
+---
+
+## 完成标准
+
+| 任务 | 完成标准 | 升级后等级 |
+|------|---------|-----------|
+| TODO-1 | `retrieval_evidence_items` 真实使用截断结果，有测试验证 | `ACTIVE` |
+| TODO-2 | 白名单校验上线，非法事件类型返回 400 | `ACTIVE`（安全边界完整） |
+| TODO-3 | 路由矩阵决策真实影响模型选择，有 fallback | `ACTIVE` |
+| TODO-4 | 至少一条业务路径调用 `resolve()`，有测试 | `ACTIVE` |
+| TODO-5 | 双端 E2E 联调通过，有截图/日志证据 | `E2E_VERIFIED` |
+| TODO-6 | 骨架节点填充真实逻辑，`run_as_sse_adapter` 不再只是透传 | `ACTIVE` |
