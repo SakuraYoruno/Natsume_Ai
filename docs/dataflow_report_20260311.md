@@ -1,9 +1,9 @@
 # Natsume AI 系统数据流全景报告
 
-> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-11 17:28（本次修复后更新）
+> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-11 18:12（严格审计修订）
 > 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排
 > 报告模型：claude-4.6-sonnet
-> 本次修复：问题 A/B/C/D/F 已按优先级处理（见第十三节）
+> 本次修复：问题 A/B/C/D/F 已按优先级处理（见第十三节）；严格代码审计已完成（见第十六节）
 
 ---
 
@@ -22,6 +22,9 @@
 11. [Edge 端各功能数据流](#十一edge-端各功能数据流)
 12. [双端通信打通状态评估](#十二双端通信打通状态评估)
 13. [关键问题与修复状态](#十三关键问题与修复状态)
+14. [本次修复变更摘要（2026-03-11 17:28）](#十四本次修复变更摘要2026-03-11-1728)
+15. [选项一/二/三 实施记录（2026-03-11 17:52）](#十五选项一二三-实施记录2026-03-11-1752)
+16. [严格代码审计报告（2026-03-11 18:12）](#十六严格代码审计报告2026-03-11-1812)
 
 ---
 
@@ -1041,3 +1044,199 @@ runtime_lifespan() 启动时
 ---
 
 *最后更新：2026-03-11 17:52 | 本节由 claude-4.6-sonnet 自动生成*
+
+---
+
+## 十六、严格代码审计报告（2026-03-11 18:12）
+
+> 本节基于对所有关键文件的逐行代码审计，以代码真实执行语义为准。
+> 凡与前序章节存在冲突，以本节为准。
+
+### 16.1 唯一可信执行时序
+
+#### /v1/chat 主链路
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端
+    participant H as handle_chat<br/>chat_handler.py
+    participant U as _unified_chat_sse_generator
+    participant G as Governor.evaluate_intent
+    participant P as pre_intent_classifier
+    participant SR as SceneRouter.route_sse<br/>main_chain.py
+    participant SSE as 各场景 SSE 生成器
+
+    C->>H: POST /v1/chat {message, session_id, ...}
+    H->>H: pre_intent_classifier(message) → _pre_scene
+    H->>H: 构建 intent_draft（action 动态映射）
+    H->>U: _unified_chat_sse_generator(...)
+    U-->>C: PRESENCE(THINKING)
+    U->>G: evaluate_intent(intent_draft)
+    G-->>U: {decision: APPROVE, intent_id}
+    U-->>C: PRESENCE(GOV_APPROVED)
+    U->>P: pre_intent_classifier(message) 或复用 _pre_scene
+    P-->>U: scene_type
+    alt scene_type != SCENE_CHAT
+        U-->>C: PRESENCE(SCENE_ROUTED)
+    end
+    U->>SR: route_sse(scene_type, ...)
+    SR->>SSE: 分流到对应生成器
+    SSE-->>C: 各阶段 SSE 事件流
+    SSE-->>C: COMMIT(APPROVE)
+```
+
+**关键事实**：
+- `pre_intent_classifier` 在 `handle_chat` 中调用一次（构建 `intent_draft`），在 `_unified_chat_sse_generator` 中**复用结果**（`_pre_classified_scene`），不重复调用
+- `Governor.evaluate_intent` 在 `_unified_chat_sse_generator` 中调用，`_sse_event_generator`（SCENE_CHAT）通过 `_pre_approved_governor_result` 跳过重复鉴权
+- `SceneRouter.route_sse` 是真实路由入口，`MainChain.run_as_sse_adapter` 是适配层（透传给 `_unified_chat_sse_generator`）
+
+#### /v1/host/input 链路
+
+```mermaid
+sequenceDiagram
+    participant E as Edge Client
+    participant IR as input_routes.py
+    participant MC as run_main_chain_from_input<br/>main_chain.py
+    participant U as _unified_chat_sse_generator
+
+    E->>IR: POST /v1/host/input {source, text, session_id}
+    IR-->>E: {success: true}（立即返回）
+    IR->>MC: asyncio.create_task（fire-and-forget）
+    MC->>MC: 构建 ChatRequest + intent_draft
+    MC->>U: MainChain.run_as_sse_adapter(...)
+    U->>U: 完整 Governor+LLM+Bond+VTS 流程
+    Note over U: 无 SSE 客户端，事件被消费但不推送
+```
+
+**关键事实**：
+- HTTP 200 在 `asyncio.create_task` 之后立即返回，副作用（LLM 生成、Bond 更新、VTS 驱动）在后台异步执行
+- 副作用完成与否对调用方不可观测（fire-and-forget）
+- 这是**有意设计**（ASR/微信输入不需要等待 LLM 响应）
+
+### 16.2 模块成熟度重分级表
+
+| 模块 | 当前等级 | 理由 | 证据（文件/函数） | 建议升级 | 下一步最小改动 |
+|------|---------|------|----------------|---------|--------------|
+| `MainChain` | `WIRED`（适配层） | 骨架节点全是 `return True`；`run_as_sse_adapter` 只透传给 `_unified_chat_sse_generator` | `main_chain.py::MainChain._NODE_FACTORIES`，各节点 `execute()` 直接 `return True` | 否（当前设计合理） | 补充节点级审计追踪（写入 `ChainContext.node_timings`） |
+| `RoutingMatrix` | `SHADOW` | 在 `_resolve_host_llm_runtime_core` 中调用 `select_with_fallback()`，结果写入 `routing_matrix_decision`，但**不影响** `chat_provider_name/model_id` 选择（仍由 8B 健康探测决定） | `graph_config_builder.py::_resolve_host_llm_runtime_core`，`routing_matrix_decision` 只写入返回值字典 | 是（P2） | 将 `_decision.selected_model` 映射回 `chat_provider_name/model_id`，使路由矩阵真正影响模型选择 |
+| `ContextPackBuilder` | `SHADOW` | 在 `_sse_event_generator` 中调用 `_cpb.build()`，结果写入 `audit_refs.context_pack_builder`，但**不影响** `_build_stream_chat_prompt` 的 `retrieval_evidence_items` | `chat_stream_handler.py::_sse_event_generator`，`context_pack_builder_summary` 只写入 `audit_refs` | 是（P1） | 将 `_cp` 的截断结果注入 `retrieval_evidence_items`，使 token 预算控制真正影响 prompt |
+| `MemoryGuard` | `ACTIVE` ✅ | 在 `persist_chat_episodic_memory` 中调用 `check_episodic_write()`，校验失败时**真实跳过** episodic 写入 | `observability_persist.py::persist_chat_episodic_memory`，`_guard.check_episodic_write(_record)` 抛出异常时 `return {status: SKIPPED}` | 否（已达预期） | 补充 E2E 测试验证校验失败路径 |
+| `StateArbiter` | `WIRED` | 在 `runtime_lifespan` 注册了 3 个状态源（WorldCanon/StyleCanon/EpisodicStore），但**没有任何业务代码调用 `resolve()`** | `http_hooks.py::runtime_lifespan`，`_arbiter.register_source(...)` 已调用；但全局搜索无 `arbiter.resolve(` 调用 | 是（P2，方案A） | 选择一条业务路径（如 retrieval 前的事实查询）接入 `StateArbiter.resolve()`，或保持 `WIRED` 并修正文档 |
+| `SCENE_VISION_UI` | `WIRED` | 白名单已加入，`_vision_ui_sse_generator` 完整实现（Gemini Vision 多模态），但**无 E2E 联调证据** | `graph_config_builder.py::ALLOWED_EXPLICIT_SCENE_TYPES`，`chat_handler_vision.py::_vision_ui_sse_generator` | 是（E2E 验证） | 启动双端，发送 `scene_type=SCENE_VISION_UI` 请求，验证 Gemini Vision 分析链路 |
+| `/v1/host/input` | `ACTIVE`（非闭环） | `run_main_chain_from_input` 已实现，fire-and-forget 触发完整链路；但副作用不可观测，HTTP 200 只代表 accepted | `main_chain.py::run_main_chain_from_input`，`input_routes.py` 调用 `asyncio.create_task` | 否（当前设计合理） | 补充后台任务完成状态的可观测性（如写入 ledger） |
+| `/v1/edge/events` | `ACTIVE`（非闭环） | Bond/VTS 是 fire-and-forget，HTTP 200 只代表 accepted；Bond 更新通过队列异步执行，VTS 通过 `asyncio.ensure_future` 异步执行 | `system_handler.py::receive_edge_events_response`，Bond 和 VTS 均在 `try/except` 中 fire-and-forget | 否（当前设计合理） | 补充事件类型白名单（安全边界），添加来源校验 |
+
+### 16.3 /v1/edge/events 安全边界审计
+
+**当前真实语义分层**：
+
+```
+Layer 1: request accepted    → HTTP 200（ledger.log_voice_event 成功）
+Layer 2: side effect dispatched → Bond 队列入队 / VTS ensure_future 调度
+Layer 3: side effect completed  → ❌ 不可观测（fire-and-forget）
+Layer 4: side effect observed   → ❌ 不可观测
+```
+
+**安全风险**：
+- 无来源校验（任何能访问 Host 的客户端均可发送任意事件）
+- 无事件类型白名单（`event_type` 字段无枚举约束）
+- 无内网限制（依赖部署层网络隔离）
+- 无 HMAC/签名（与 Host→Edge 方向不对称）
+
+**当前安全前提**（必须满足才能接受上述风险）：
+1. Host Brain 仅部署在内网，不暴露公网
+2. Edge Client 与 Host Brain 在同一受信任网络
+3. 无多租户场景（单用户部署）
+
+**建议最小安全改动**（P1）：
+```python
+# 在 receive_edge_events_response 中添加事件类型白名单
+ALLOWED_EDGE_EVENT_TYPES = frozenset({
+    "ASR_FINAL", "ASR_PARTIAL", "EMOTION_DETECTED", "USER_REACTION",
+    "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL", "TTS_STARTED", "TTS_DONE",
+    "VTS_EXPRESSION_SET", "EDGE_HEALTH_PING",
+})
+```
+
+### 16.4 ContextPackBuilder 升级方案（SHADOW → ACTIVE）
+
+**当前状态**：`_cpb.build()` 的结果只写入 `audit_refs.context_pack_builder`，不影响 prompt 构建。
+
+**最小安全接入方案**：
+
+```python
+# 在 chat_stream_handler.py::_sse_event_generator 中
+# 当前（SHADOW 模式）：
+context_pack_builder_summary = {
+    "status": "OK",
+    "total_tokens": _cp.total_token_count,
+    ...
+}
+# 修改后（ACTIVE 模式）：
+# 将 ContextPack 的截断结果回写到 retrieval_evidence_items
+# 使 token 预算控制真正影响 _build_stream_chat_prompt
+if _cp and _cp.slots:
+    _truncated_items = []
+    for slot_name, slot in _cp.slots.items():
+        if slot and slot.content:
+            _truncated_items.append({
+                "slot_name": slot_name,
+                "text": slot.content,
+                "source": slot_name,
+            })
+    if _truncated_items:
+        retrieval_evidence_items = _truncated_items  # 替换为截断后的版本
+```
+
+**风险**：
+- 若 `ContextPackBuilder.build()` 截断过激，可能丢失重要召回结果
+- 需要验证 `slot.content` 格式与 `_build_stream_chat_prompt` 期望的 `retrieval_evidence_items` 格式兼容
+
+**回退方式**：设置 `HOST_CONTEXT_PACK_ACTIVE=false` 环境变量跳过回写（当前代码无此开关，需添加）
+
+**建议**：先在 `SHADOW` 模式下观察 `audit_refs.context_pack_builder` 数据，确认截断行为符合预期后再升级为 `ACTIVE`。
+
+### 16.5 StateArbiter 处置方案
+
+**当前状态**：3 个状态源已注册（WorldCanon/StyleCanon/EpisodicStore），但无业务代码调用 `resolve()`。
+
+**方案 A（保守，推荐）**：
+- 不改主业务逻辑
+- 修正文档：将 StateArbiter 标为 `WIRED`，不得写成"已完成接入"
+- 明确标注：状态源已注册，但仲裁路径尚未接入任何业务查询
+
+**方案 B（推进）**：
+- 在 `_build_stream_chat_prompt` 中，调用 `StateArbiter.resolve("world_canon_facts", session_id)` 获取世界观事实
+- 将结果注入 `retrieval_summary` 的 `world_canon` 槽位
+- 接入后补测试
+
+**当前决策**：采用方案 A，修正文档口径。
+
+### 16.6 旧报告冲突点修正
+
+| 冲突点 | 旧报告表述 | 修正后表述 |
+|--------|-----------|-----------|
+| ContextPackBuilder | "已完成接入主链" | `SHADOW` 模式：结果只写入 `audit_refs`，不影响 prompt 构建 |
+| RoutingMatrix | "已接入路由决策" | `SHADOW` 模式：结果只写入 `audit_refs`，不影响实际模型选择 |
+| StateArbiter | "已注册状态源" | `WIRED`：源已注册，但无业务代码调用 `resolve()` |
+| MainChain | "主链路编排器" | `WIRED`（适配层）：骨架节点全是 `return True`，实际路由委托给 `_unified_chat_sse_generator` |
+| `/v1/edge/events` | "完整闭环已打通" | `ACTIVE`（非闭环）：HTTP 200 只代表 accepted，副作用 fire-and-forget，不可观测 |
+| `SCENE_VISION_UI` | "视觉链路完整实现" | `WIRED`：代码完整，但无 E2E 联调证据，不得写成"已验证" |
+| `/v1/host/input` | "完整闭环" | `ACTIVE`（非闭环）：fire-and-forget，副作用不可观测 |
+
+### 16.7 仍未解决的问题
+
+| 问题 | 等级 | 说明 |
+|------|------|------|
+| ContextPackBuilder 升级为 ACTIVE | P1 | 需将截断结果回写到 `retrieval_evidence_items` |
+| RoutingMatrix 升级为 ACTIVE | P2 | 需将 `_decision.selected_model` 映射回实际模型选择 |
+| StateArbiter 接入业务查询 | P2 | 需选择一条业务路径调用 `resolve()` |
+| `/v1/edge/events` 事件类型白名单 | P1 | 安全边界补充 |
+| SCENE_VISION_UI E2E 联调验证 | P3 | 需启动双端实际验证 |
+| MainChain 骨架节点填充 | P3 | 当前 `return True` 骨架，需填充真实业务逻辑 |
+
+---
+
+*严格审计时间：2026-03-11 18:12 | 审计模型：claude-4.6-sonnet*
+*审计范围：chat_handler.py / chat_stream_handler.py / graph_config_builder.py / http_hooks.py / system_handler.py / observability_persist.py / chat_handler_vision.py / main_chain.py / dependencies.py*
+*审计原则：以代码真实执行语义为准，不允许脑补，不允许把 SHADOW 写成 ACTIVE*
