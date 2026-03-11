@@ -221,6 +221,79 @@ def create_edge_fastapi_app(
             handler=_handle_fallback_context_compress,
         )
 
+    @app.post("/v1/edge/wechat/callback")
+    async def edge_wechat_callback(request: Request) -> JSONResponse:
+        """接收微信 Hook 工具（wcf 等）推送的消息，转发给 Host Brain。
+
+        此接口不需要 HMAC 鉴权（本地 Hook 工具调用），但只监听 127.0.0.1。
+        """
+        ts = int(clock())
+        payload_or_error = await _load_json_body(request)
+        if isinstance(payload_or_error, JSONResponse):
+            return payload_or_error
+
+        raw_msg = payload_or_error
+        try:
+            from edge_client.channels.wechat_listener import WeChatListener
+            listener: WeChatListener | None = getattr(runtime_value, "wechat_listener", None)
+            if listener is not None:
+                dispatched = listener.on_raw_message(raw_msg)
+            else:
+                dispatched = False
+            return JSONResponse(_response(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                detail="wechat message received" + ("" if dispatched else " (listener not active)"),
+                event={"dispatched": dispatched, "stage": "S_EDGE_WECHAT_CALLBACK"},
+                ts_ms=ts,
+            ))
+        except Exception as exc:
+            return JSONResponse(_response(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code="WECHAT_CALLBACK_ERROR",
+                detail=f"wechat callback handler failed: {exc}",
+                event={"stage": "S_EDGE_WECHAT_CALLBACK"},
+                ts_ms=ts,
+            ))
+
+    @app.post("/v1/edge/screenshot")
+    async def edge_screenshot(request: Request) -> JSONResponse:
+        """截取 Edge 端屏幕，返回 base64 编码的 PNG 图像。
+
+        Host Brain 通过此接口获取 Edge 端屏幕截图，用于 Agent Loop 视觉分析。
+        需要 HMAC 鉴权（Host → Edge 方向）。
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_screenshot,
+        )
+
+    @app.post("/v1/edge/automate")
+    async def edge_automate(request: Request) -> JSONResponse:
+        """在 Edge 端执行桌面自动化操作（点击/输入/滚动等）。
+
+        Host Brain 通过此接口远程控制 Edge 端的鼠标和键盘。
+        需要 HMAC 鉴权（Host → Edge 方向）。
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_automate,
+        )
+
     return app
 
 
@@ -495,6 +568,121 @@ def _handle_fallback_context_compress(runtime: EdgeRuntime, envelope: EdgeRpcEnv
         detail=result.detail,
         event=dict(result.event),
     )
+
+
+def _handle_screenshot(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """处理截图请求：调用 DesktopController 截图并返回 base64 图像。"""
+    try:
+        from edge_client.actuators.desktop_controller import DesktopController
+        monitor_index = int(envelope.payload.get("monitor_index") or 1)
+        controller = DesktopController(monitor_index=monitor_index)
+        result = controller.capture_screenshot()
+        if result.success:
+            return EdgeGatewayResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage="S_EDGE_SCREENSHOT",
+                detail=result.detail,
+                event={
+                    "image_b64": result.image_b64,
+                    "image_mime": result.image_mime,
+                    "width": result.width,
+                    "height": result.height,
+                    "monitor_index": result.monitor_index,
+                    "latency_ms": result.latency_ms,
+                },
+            )
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=result.reason_code,
+            stage="S_EDGE_SCREENSHOT",
+            detail=result.detail,
+            event={"latency_ms": result.latency_ms},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_GENERIC,
+            stage="S_EDGE_SCREENSHOT",
+            detail=f"screenshot failed: {exc}",
+            event={},
+        )
+
+
+def _handle_automate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """处理自动化操作请求：调用 DesktopController 执行鼠标/键盘操作。"""
+    try:
+        from edge_client.actuators.desktop_controller import (
+            DesktopController,
+            DesktopAction,
+            DesktopActionType,
+        )
+        raw_actions = envelope.payload.get("actions")
+        if not isinstance(raw_actions, list) or not raw_actions:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=EDGE_RPC_SCHEMA_INVALID,
+                stage="S_EDGE_AUTOMATE",
+                detail="automate requires non-empty actions list",
+                event={},
+            )
+
+        # 解析操作列表
+        actions: list[DesktopAction] = []
+        for raw in raw_actions:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                action_type = DesktopActionType(str(raw.get("type") or "").lower())
+            except ValueError:
+                continue
+            actions.append(DesktopAction(
+                type=action_type,
+                x=raw.get("x"),
+                y=raw.get("y"),
+                x2=raw.get("x2"),
+                y2=raw.get("y2"),
+                text=raw.get("text"),
+                amount=raw.get("amount"),
+                duration_ms=int(raw.get("duration_ms") or 0),
+                wait_after_ms=int(raw.get("wait_after_ms") or 100),
+            ))
+
+        if not actions:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=EDGE_RPC_SCHEMA_INVALID,
+                stage="S_EDGE_AUTOMATE",
+                detail="no valid actions parsed from request",
+                event={},
+            )
+
+        stop_on_error = bool(envelope.payload.get("stop_on_error", True))
+        controller = DesktopController()
+        report = controller.execute_actions(actions, stop_on_error=stop_on_error)
+
+        return EdgeGatewayResult(
+            success=report.all_success,
+            status=STATUS_ACCEPTED if report.all_success else STATUS_REJECTED,
+            reason_code=None if report.all_success else "DESKTOP_ACTION_PARTIAL_FAILURE",
+            stage="S_EDGE_AUTOMATE",
+            detail=f"executed {report.success_count}/{report.total_actions} actions",
+            event=report.as_dict(),
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_GENERIC,
+            stage="S_EDGE_AUTOMATE",
+            detail=f"automate failed: {exc}",
+            event={},
+        )
 
 
 def _response(

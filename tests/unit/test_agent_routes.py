@@ -12,6 +12,7 @@ from host_brain.app.agent_routes import (
     AgentRunRequest,
     AgentInfoResponse,
     _get_clawdbot_base_url,
+    _get_edge_rpc_base_url,
     _agent_loop_sse_generator,
 )
 from host_brain.app.vision.agent_loop import DEFAULT_MAX_ROUNDS, DEFAULT_ROUND_TIMEOUT_SEC, DEFAULT_TOTAL_TIMEOUT_SEC
@@ -102,13 +103,15 @@ class TestAgentLoopSseGenerator:
             async for sse_line in _agent_loop_sse_generator(
                 request_id="req-test-001",
                 session_id="sess-test-001",
-                goal="点击登录按钮",
+                goal="点击登录按鈕",
                 max_rounds=2,
                 round_timeout_sec=10.0,
                 total_timeout_sec=30.0,
                 image_upload_consent=False,
                 use_mock=True,
+                use_edge_rpc=False,
                 clawdbot_base_url="mock://",
+                edge_rpc_base_url="http://localhost:17800",
             ):
                 if sse_line.startswith("data: "):
                     events.append(json.loads(sse_line[6:]))
@@ -123,9 +126,8 @@ class TestAgentLoopSseGenerator:
             init_event = next(e for e in events if e["phase"] == "AGENT_INIT")
             assert init_event["request_id"] == "req-test-001"
             assert init_event["session_id"] == "sess-test-001"
-            assert init_event["goal"] == "点击登录按钮"
-            assert init_event["use_mock"] is True
-            assert init_event["clawdbot_base_url"] == "mock://"
+            assert init_event["goal"] == "点击登录按鈕"
+            assert init_event["client_mode"] == "mock"
 
             # LOOP_DONE 事件字段验证
             loop_done = next(e for e in events if e["phase"] == "LOOP_DONE")
@@ -148,7 +150,9 @@ class TestAgentLoopSseGenerator:
                 total_timeout_sec=30.0,
                 image_upload_consent=False,
                 use_mock=True,
+                use_edge_rpc=False,
                 clawdbot_base_url="mock://",
+                edge_rpc_base_url="http://localhost:17800",
             ):
                 if sse_line.startswith("data: "):
                     events.append(json.loads(sse_line[6:]))

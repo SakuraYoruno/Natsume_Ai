@@ -89,7 +89,19 @@ class AgentRunRequest(BaseModel):
         description="是否使用 Mock ClawdBot（开发/测试模式，不发送真实 HTTP 请求）",
     )
 
-    # ClawdBot 地址（可选，覆盖环境变量）
+    # Edge RPC 模式（推荐）：通过 Edge RPC 网关执行截图和操作
+    use_edge_rpc: bool = Field(
+        False,
+        description="是否使用 Edge RPC 客户端（通过 Edge 端 /v1/edge/screenshot 和 /v1/edge/automate）",
+    )
+
+    # Edge RPC 地址（可选，覆盖环境变量）
+    edge_rpc_base_url: Optional[str] = Field(
+        None,
+        description="Edge RPC 网关地址（可选，默认读取 EDGE_RPC_BASE_URL 环境变量）",
+    )
+
+    # ClawdBot 地址（可选，覆盖环境变量，use_edge_rpc=False 时生效）
     clawdbot_base_url: Optional[str] = Field(
         None,
         description="ClawdBot 服务地址（可选，默认读取 CLAWDBOT_BASE_URL 环境变量）",
@@ -119,6 +131,14 @@ def _get_clawdbot_base_url(override: Optional[str] = None) -> str:
     return env_url or "http://localhost:7788"
 
 
+def _get_edge_rpc_base_url(override: Optional[str] = None) -> str:
+    """获取 Edge RPC 网关地址（优先级：请求参数 > 环境变量 > 默认值）。"""
+    if override and override.strip():
+        return override.strip().rstrip("/")
+    env_url = str(os.environ.get("EDGE_RPC_BASE_URL") or "").strip().rstrip("/")
+    return env_url or "http://localhost:17800"
+
+
 async def _agent_loop_sse_generator(
     *,
     request_id: str,
@@ -129,7 +149,9 @@ async def _agent_loop_sse_generator(
     total_timeout_sec: float,
     image_upload_consent: bool,
     use_mock: bool,
+    use_edge_rpc: bool,
     clawdbot_base_url: str,
+    edge_rpc_base_url: str,
 ) -> AsyncGenerator[str, None]:
     import json
 
@@ -153,11 +175,24 @@ async def _agent_loop_sse_generator(
         _logger.warning("agent_routes: llm_runtime 解析失败，使用空配置: %s", exc)
         llm_runtime = {"available": False}
 
-    # ── 构建 ClawdBot 客户端 ─────────────────────────────────────────────
+    # ── 构建自动化客户端 ─────────────────────────────────────────────────
     if use_mock:
         clawdbot_client = MockClawdbotClient()
         _logger.info(
             "agent_routes: 使用 MockClawdbotClient（开发模式）",
+            extra={"request_id": request_id},
+        )
+    elif use_edge_rpc:
+        from host_brain.app.vision.edge_rpc_client import EdgeRpcClient
+        hmac_key = str(os.environ.get("EDGE_HMAC_SHARED_KEY") or "").strip() or None
+        clawdbot_client = EdgeRpcClient(
+            edge_base_url=edge_rpc_base_url,
+            hmac_key=hmac_key,
+            timeout_sec=round_timeout_sec,
+        )
+        _logger.info(
+            "agent_routes: 使用 EdgeRpcClient，地址=%s",
+            edge_rpc_base_url,
             extra={"request_id": request_id},
         )
     else:
@@ -166,12 +201,14 @@ async def _agent_loop_sse_generator(
             timeout_sec=round_timeout_sec,
         )
         _logger.info(
-            "agent_routes: 使用真实 ClawdbotClient，地址=%s",
+            "agent_routes: 使用 ClawdbotClient，地址=%s",
             clawdbot_base_url,
             extra={"request_id": request_id},
         )
 
     # ── 推送 AGENT_INIT 事件（路由层元信息）────────────────────────────
+    _client_mode = "mock" if use_mock else ("edge_rpc" if use_edge_rpc else "clawdbot")
+    _client_url = "mock://" if use_mock else (edge_rpc_base_url if use_edge_rpc else clawdbot_base_url)
     yield _sse({
         "phase": "AGENT_INIT",
         "request_id": request_id,
@@ -181,8 +218,8 @@ async def _agent_loop_sse_generator(
         "round_timeout_sec": round_timeout_sec,
         "total_timeout_sec": total_timeout_sec,
         "image_upload_consent": image_upload_consent,
-        "use_mock": use_mock,
-        "clawdbot_base_url": clawdbot_base_url if not use_mock else "mock://",
+        "client_mode": _client_mode,
+        "client_url": _client_url,
         "llm_available": bool(llm_runtime.get("available", False)),
     })
 
@@ -242,13 +279,15 @@ async def agent_run(body: AgentRunRequest, request: Request) -> StreamingRespons
     request_id = new_request_id()
     session_id = str(body.session_id or request_id).strip() or request_id
     clawdbot_base_url = _get_clawdbot_base_url(body.clawdbot_base_url)
+    edge_rpc_base_url = _get_edge_rpc_base_url(body.edge_rpc_base_url)
 
     _logger.info(
-        "agent_run: goal=%r session_id=%s max_rounds=%d use_mock=%s",
+        "agent_run: goal=%r session_id=%s max_rounds=%d use_mock=%s use_edge_rpc=%s",
         body.goal[:80],
         session_id,
         body.max_rounds,
         body.use_mock,
+        body.use_edge_rpc,
         extra={"request_id": request_id},
     )
 
@@ -262,7 +301,9 @@ async def agent_run(body: AgentRunRequest, request: Request) -> StreamingRespons
             total_timeout_sec=body.total_timeout_sec,
             image_upload_consent=body.image_upload_consent,
             use_mock=body.use_mock,
+            use_edge_rpc=body.use_edge_rpc,
             clawdbot_base_url=clawdbot_base_url,
+            edge_rpc_base_url=edge_rpc_base_url,
         ),
         media_type="text/event-stream",
         headers={
