@@ -453,6 +453,23 @@ async def _drive_stream_vts_emotion(
         }
 
 
+async def _wrap_vts_with_latency(
+    *,
+    request_id: str,
+    emotion_context: Dict[str, Any] | None,
+    ts_ms: int,
+) -> tuple[Dict[str, Any], int]:
+    """包装 _drive_stream_vts_emotion，返回 (result_dict, latency_ms) 元组，
+    以便与 asyncio.gather 中其他返回 tuple 的协程统一解包。"""
+    _t0 = int(time.time() * 1000)
+    result = await _drive_stream_vts_emotion(
+        request_id=request_id,
+        emotion_context=emotion_context,
+        ts_ms=ts_ms,
+    )
+    return result, max(0, int(time.time() * 1000) - _t0)
+
+
 # ---------------------------------------------------------------------------
 # 核心 SSE 事件生成器
 # ---------------------------------------------------------------------------
@@ -726,110 +743,119 @@ async def _sse_event_generator(
             })
             sentence_index += 1
 
-        # ── 8. Airlock Ingress 检疫 ───────────────────────────────────────
+        # ── 8-10. 后处理并行执行：Airlock / Episodic / Bond / VTS ──────────
+        # 四个步骤之间无数据依赖，使用 asyncio.gather 并行执行，
+        # 总延迟 = max(各步骤延迟) 而非各步骤之和，减少 COMMIT 前等待时间。
         narrative = repair_utf8_latin1_mojibake(full_text) or "系统有点忙，请稍后再试。"
-        ingress_result = None
-        airlock_latency_ms = 0
-        _airlock_started_ms = int(time.time() * 1000)
-        try:
-            ingress_result = quarantine_ingress(
-                narrative,
-                request_id=request_id,
-                ledger=get_ledger(),
-                ts_ms=ts_ms,
-            )
-        except Exception as exc:
-            _logger.warning("Airlock 入口检疫失败: %s", exc, extra={"request_id": request_id})
-        finally:
-            airlock_latency_ms = max(0, int(time.time() * 1000) - _airlock_started_ms)
 
-        airlock_refs: Dict[str, Any] = {}
-        if ingress_result is not None:
-            airlock_refs = {
-                "ingress_classification": ingress_result.classification,
-                "quarantine_digest": ingress_result.quarantine_digest,
-            }
+        _post_started_ms = int(time.time() * 1000)
 
-        # ── 9. episodic memory 写入 ───────────────────────────────────────
-        episodic_summary: Dict[str, Any] = {}
-        episodic_latency_ms = 0
-        _episodic_started_ms = int(time.time() * 1000)
-        try:
-            episodic_summary = persist_chat_episodic_memory(
+        async def _run_airlock() -> tuple[Dict[str, Any], int]:
+            _t0 = int(time.time() * 1000)
+            _ingress_result = None
+            try:
+                _ingress_result = await asyncio.to_thread(
+                    quarantine_ingress,
+                    narrative,
+                    request_id=request_id,
+                    ledger=get_ledger(),
+                    ts_ms=ts_ms,
+                )
+            except Exception as exc:
+                _logger.warning("Airlock 入口检疫失败: %s", exc, extra={"request_id": request_id})
+            _refs: Dict[str, Any] = {}
+            if _ingress_result is not None:
+                _refs = {
+                    "ingress_classification": _ingress_result.classification,
+                    "quarantine_digest": _ingress_result.quarantine_digest,
+                }
+            return _refs, max(0, int(time.time() * 1000) - _t0)
+
+        async def _run_episodic() -> tuple[Dict[str, Any], int]:
+            _t0 = int(time.time() * 1000)
+            _summary: Dict[str, Any] = {}
+            try:
+                _summary = await asyncio.to_thread(
+                    persist_chat_episodic_memory,
+                    request_id=request_id,
+                    intent_id=str(intent_id or request_id),
+                    session_id=session_id,
+                    user_message=resolved_message,
+                    assistant_reply=narrative,
+                    emotion_context=emotion_context,
+                    ts_ms=ts_ms,
+                    episodic_store=get_episodic_store(),
+                )
+            except Exception as exc:
+                _summary = {
+                    "status": "DEGRADED",
+                    "reason_code": "EPISODIC_WRITE_FAILED",
+                    "memory_id": None,
+                    "detail": str(exc),
+                }
+                _logger.debug("流式模式下情节记忆写入跳过",
+                              extra={"request_id": request_id, "error": str(exc)})
+            return _summary, max(0, int(time.time() * 1000) - _t0)
+
+        async def _run_bond() -> tuple[Dict[str, Any], int]:
+            _t0 = int(time.time() * 1000)
+            _summary: Dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+            try:
+                from host_brain.app.dependencies import get_bond_stage_engine, get_bond_update_queue  # noqa: PLC0415
+                from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
+                _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
+                _update_kind = BondDynamicsWriter.classify_interaction(
+                    text=resolved_message,
+                    emotion_intensity=_intensity,
+                )
+                _bond_payload = {
+                    "request_id": request_id,
+                    "intent_id": str(intent_id or request_id),
+                    "session_id": session_id,
+                    "seq": 1,
+                    "user_id": session_id,
+                    "topic_id": resolved_message[:64],
+                    "capability_hint": "bond_memory",
+                    "update_kind": _update_kind,
+                    "evidence_refs": [str(intent_id or request_id)],
+                    "emotion_tag": _etag,
+                    "emotion_intensity": _intensity,
+                    "ts_ms": ts_ms,
+                }
+                _bond_queue = get_bond_update_queue()
+                _queue_result = _bond_queue.enqueue(_bond_payload)
+                _bond_queue_status = str(_queue_result.get("status") or "UNKNOWN")
+                if _bond_queue_status != "QUEUED":
+                    _bond_writer = BondDynamicsWriter(
+                        ledger=get_ledger(),
+                        stage_engine=get_bond_stage_engine(),
+                    )
+                    await asyncio.to_thread(_bond_writer.apply_update, **_bond_payload)
+                    _bond_queue_status = "DIRECT_FALLBACK_APPLIED"
+                _summary = {"status": _bond_queue_status, "update_kind": _update_kind}
+            except Exception as exc:
+                _summary = {"status": "DEGRADED", "reason_code": str(exc)}
+                _logger.debug("流式路径 Bond 更新跳过", extra={"request_id": request_id, "error": str(exc)})
+            return _summary, max(0, int(time.time() * 1000) - _t0)
+
+        (
+            (airlock_refs, airlock_latency_ms),
+            (episodic_summary, episodic_latency_ms),
+            (bond_summary, bond_latency_ms),
+            (vts_summary, vts_latency_ms),
+        ) = await asyncio.gather(
+            _run_airlock(),
+            _run_episodic(),
+            _run_bond(),
+            _wrap_vts_with_latency(
                 request_id=request_id,
-                intent_id=str(intent_id or request_id),
-                session_id=session_id,
-                user_message=resolved_message,
-                assistant_reply=narrative,
                 emotion_context=emotion_context,
                 ts_ms=ts_ms,
-                episodic_store=get_episodic_store(),
-            )
-        except Exception as exc:
-            episodic_summary = {
-                "status": "DEGRADED",
-                "reason_code": "EPISODIC_WRITE_FAILED",
-                "memory_id": None,
-                "detail": str(exc),
-            }
-            _logger.debug("流式模式下情节记忆写入跳过",
-                          extra={"request_id": request_id, "error": str(exc)})
-        finally:
-            episodic_latency_ms = max(0, int(time.time() * 1000) - _episodic_started_ms)
-
-        # ── 9b. Bond 更新（修复审计问题 #8：SCENE_CHAT 路径补充 Bond 积分）────
-        bond_latency_ms = 0
-        bond_summary: Dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
-        _bond_started_ms = int(time.time() * 1000)
-        try:
-            from host_brain.app.dependencies import get_bond_stage_engine, get_bond_update_queue  # noqa: PLC0415
-            from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
-            _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-            _intensity = float(emotion_context.get("emotion_intensity") or 0.5)
-            _update_kind = BondDynamicsWriter.classify_interaction(
-                text=resolved_message,
-                emotion_intensity=_intensity,
-            )
-            _bond_payload = {
-                "request_id": request_id,
-                "intent_id": str(intent_id or request_id),
-                "session_id": session_id,
-                "seq": 1,
-                "user_id": session_id,
-                "topic_id": resolved_message[:64],
-                "capability_hint": "bond_memory",
-                "update_kind": _update_kind,
-                "evidence_refs": [str(intent_id or request_id)],
-                "emotion_tag": _etag,
-                "emotion_intensity": _intensity,
-                "ts_ms": ts_ms,
-            }
-            _bond_queue = get_bond_update_queue()
-            _queue_result = _bond_queue.enqueue(_bond_payload)
-            _bond_queue_status = str(_queue_result.get("status") or "UNKNOWN")
-            if _bond_queue_status != "QUEUED":
-                _bond_writer = BondDynamicsWriter(
-                    ledger=get_ledger(),
-                    stage_engine=get_bond_stage_engine(),
-                )
-                _bond_writer.apply_update(**_bond_payload)
-                _bond_queue_status = "DIRECT_FALLBACK_APPLIED"
-            bond_summary = {"status": _bond_queue_status, "update_kind": _update_kind}
-        except Exception as exc:
-            bond_summary = {"status": "DEGRADED", "reason_code": str(exc)}
-            _logger.debug("流式路径 Bond 更新跳过", extra={"request_id": request_id, "error": str(exc)})
-        finally:
-            bond_latency_ms = max(0, int(time.time() * 1000) - _bond_started_ms)
-
-        # ── 10. VTS 情感驱动（异步线程，不阻塞流式 token 输出）────────────
-        _vts_started_ms = int(time.time() * 1000)
-        vts_summary = await _drive_stream_vts_emotion(
-            request_id=request_id,
-            emotion_context=emotion_context,
-            ts_ms=ts_ms,
+            ),
         )
-        vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
-        background_tasks_total_ms = airlock_latency_ms + episodic_latency_ms + vts_latency_ms + bond_latency_ms
+
+        background_tasks_total_ms = max(0, int(time.time() * 1000) - _post_started_ms)
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
             "first_token_latency_ms": first_token_latency_ms,
