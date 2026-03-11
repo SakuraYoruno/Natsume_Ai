@@ -83,6 +83,15 @@ class ChatRequest(BaseModel):
         None,
         description="Optional vision context for SCENE_VISION_UI (image_base64/image_url/screen_description etc.)",
     )
+    # 响应格式：text（自然语言建议，给用户看）或 actions（结构化指令，给 ClawdBot 执行）
+    # 默认 text，兼容现有行为。
+    # 设为 actions 时，夏目会分析截图并生成 ActionPlan JSON，
+    # COMMIT 事件中的 action_plan 字段包含完整指令序列。
+    response_format: str = Field(
+        "text",
+        description="视觉场景响应格式：'text'（自然语言建议）或 'actions'（ClawdBot 可执行指令序列）",
+    )
+
     # 图片上传隐私授权标志
     # 屏幕截图属高敏隐私内容，默认禁止上传至云端 API。
     # 当 SceneRouter 策略为 REQUIRE_CONSENT 时，必须显式传入 true 才允许上传图片。

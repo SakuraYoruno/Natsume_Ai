@@ -397,11 +397,43 @@ async def _vision_ui_sse_generator(
         if not narrative:
             narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
 
+        # response_format 分支：actions 模式 → 生成 ActionPlan
+        response_format = str(getattr(request_body, "response_format", "text") or "text").lower()
+        action_plan_dict: Optional[Dict[str, Any]] = None
+
+        if response_format == "actions":
+            from host_brain.app.vision.action_planner import generate_action_plan  # noqa: PLC0415
+            try:
+                action_plan = await generate_action_plan(
+                    request_id=request_id,
+                    session_id=session_id,
+                    goal=request_body.message,
+                    vision_context=vision_context,
+                    llm_runtime=llm_runtime,
+                    image_upload_allowed=_img_allowed,
+                    stop_on_error=True,
+                    need_screenshot_feedback=False,
+                )
+                action_plan_dict = action_plan.model_dump()
+                _logger.info(
+                    "action_plan generated",
+                    extra={
+                        "request_id": request_id,
+                        "action_count": len(action_plan.actions),
+                        "is_fallback": action_plan.extra.get("fallback", False),
+                    },
+                )
+            except Exception as exc:
+                _logger.warning("action_plan generation failed: %s", exc, extra={"request_id": request_id})
+                action_plan_dict = None
+
         yield _sse({
             "phase": "NODE_DONE",
             "node_id": "vision_renderer",
             "status": "OK",
+            "response_format": response_format,
             "narrative_length": len(narrative),
+            "has_action_plan": action_plan_dict is not None,
             "request_id": request_id,
         })
 
@@ -447,12 +479,13 @@ async def _vision_ui_sse_generator(
             }
             _logger.debug("vision episodic memory write skipped", extra={"request_id": request_id, "error": str(exc)})
 
-        # ── COMMIT ─────────────────────────────────────────────────────────
-        yield _sse({
+        # ── COMMIT ──────────────────────────────────────────────────────────────────
+        commit_payload: Dict[str, Any] = {
             "phase": "COMMIT",
             "done": True,
             "decision": "APPROVE",
             "narrative": narrative,
+            "response_format": response_format,
             "request_id": request_id,
             "audit_refs": {
                 "intent_id": intent_id,
@@ -470,9 +503,14 @@ async def _vision_ui_sse_generator(
                     "image_upload_allowed": _img_allowed,
                     "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
                     "user_consent": _user_consent,
+                    "response_format": response_format,
                 },
             },
-        })
+        }
+        # actions 模式：将 ActionPlan 附加到 COMMIT 事件
+        if action_plan_dict is not None:
+            commit_payload["action_plan"] = action_plan_dict
+        yield _sse(commit_payload)
 
     except Exception as exc:
         import traceback as _tb
