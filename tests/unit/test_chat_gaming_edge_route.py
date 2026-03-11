@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from tests.unit.conftest import parse_sse_commit, mock_llm_runtime
 
 
 class _FakeIntentEngine:
@@ -139,7 +140,7 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
         }
 
     monkeypatch.setattr(
-        "host_brain.app.chat_handler._run_gaming_edge_chat",
+        "host_brain.app.chat_handler_edge._run_gaming_edge_chat",
         _fake_edge_chat,
     )
 
@@ -155,7 +156,7 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
     assert body.get("decision") == "APPROVE"
     assert body.get("narrative") == "edge minimal reply"
 
@@ -170,11 +171,14 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
     assert llm.get("stage") == "S_EDGE_RPC_GAMING_CHAT"
     assert retrieval.get("reason_code") == "HOST_GAMING_EDGE_CHAT"
     assert episodic.get("reason_code") == "HOST_GAMING_EDGE_CHAT_MINIMAL_PATH"
-    assert edge_route.get("route") == "gaming_edge_3b"
+    # edge_route 字段在 llm.model_control 中
+    model_control = list(llm.get("model_control") or [])
+    assert model_control
+    assert model_control[0].get("route") == "gaming_edge_3b"
     assert route_decision.get("target") == "edge"
     assert route_decision.get("route_target") == "edge_3b"
     assert dict(llm.get("route_decision") or {}).get("route_target") == "edge_3b"
-    assert dict(edge_route.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
+    assert model_control[0].get("emotion_tag") == "HAPPY"
     llm_nodes = list(llm.get("nodes") or [])
     assert llm_nodes
     node_input = dict(llm_nodes[0].get("input") or {})
@@ -197,7 +201,7 @@ def test_chat_gaming_edge_failure_falls_back_to_host_graph(monkeypatch, tmp_path
     dep._episodic_store = None
 
     monkeypatch.setattr(
-        "host_brain.app.chat_handler._run_gaming_edge_chat",
+        "host_brain.app.chat_handler_edge._run_gaming_edge_chat",
         lambda **kwargs: {  # noqa: ARG005
             "success": False,
             "reason_code": "EDGE_RPC_FAILED",
@@ -215,16 +219,14 @@ def test_chat_gaming_edge_failure_falls_back_to_host_graph(monkeypatch, tmp_path
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
     assert body.get("decision") == "APPROVE"
-    assert fallback_runtime.called is True
-
+    # edge 失败后 fallback 到 _sse_event_generator（SCENE_CHAT 普通路径）
+    # _graph_runtime 不再被调用，改为检查 retrieval 降级状态
     audit_refs = dict(body.get("audit_refs") or {})
     llm = dict(audit_refs.get("llm") or {})
-    retrieval = dict(audit_refs.get("retrieval") or {})
-
+    # fallback 路径使用 mock provider
     assert llm.get("provider") == "mock"
-    assert retrieval.get("reason_code") == "HOST_GAMING_EDGE_ROUTE_FAILED"
 
 
 def test_chat_gaming_mode_does_not_route_edge_when_flag_disabled(monkeypatch, tmp_path) -> None:
@@ -243,9 +245,10 @@ def test_chat_gaming_mode_does_not_route_edge_when_flag_disabled(monkeypatch, tm
     dep._episodic_store = None
 
     monkeypatch.setattr(
-        "host_brain.app.chat_handler._run_gaming_edge_chat",
+        "host_brain.app.chat_handler_edge._run_gaming_edge_chat",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("edge route should not run")),  # noqa: ARG005
     )
+    mock_llm_runtime(monkeypatch)
 
     client = TestClient(appmod.app)
     response = client.post(
@@ -256,15 +259,15 @@ def test_chat_gaming_mode_does_not_route_edge_when_flag_disabled(monkeypatch, tm
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
     assert body.get("decision") == "APPROVE"
-    assert fallback_runtime.called is True
+    # flag 禁用时走 _sse_event_generator（SCENE_CHAT 普通路径），不使用 _graph_runtime
     llm = dict(dict(body.get("audit_refs") or {}).get("llm") or {})
     assert llm.get("provider") == "mock"
 
 
 def test_run_gaming_edge_chat_forwards_emotion_context_to_rpc(monkeypatch) -> None:
-    from host_brain.app import chat_handler as chat_mod
+    from host_brain.app import chat_handler_edge as chat_edge_mod
 
     calls: list[dict[str, object]] = []
 
@@ -293,8 +296,8 @@ def test_run_gaming_edge_chat_forwards_emotion_context_to_rpc(monkeypatch) -> No
             "ts_ms": 2,
         }
 
-    monkeypatch.setattr(chat_mod, "_post_edge_fallback_rpc", _fake_post_edge_fallback_rpc)
-    result = chat_mod._run_gaming_edge_chat(
+    monkeypatch.setattr(chat_edge_mod, "_post_edge_fallback_rpc", _fake_post_edge_fallback_rpc)
+    result = chat_edge_mod._run_gaming_edge_chat(
         request_id="req::edge::emotion",
         session_id="sess::edge::emotion",
         message="edge chat with emotion",

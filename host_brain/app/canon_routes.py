@@ -417,7 +417,7 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
             })
         except Exception as audit_exc:
             _logger.warning(
-                "reject_proposal 审计写入失败（非致命）: %s",
+                "reject_proposal audit write failed (non-fatal): %s",
                 audit_exc,
                 extra={"request_id": request_id},
             )

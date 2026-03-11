@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import time
 
+from tests.unit.conftest import parse_sse_commit, mock_llm_runtime
+
 
 def test_chat_approve_path_uses_graph_runtime(monkeypatch) -> None:
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
+    mock_llm_runtime(monkeypatch)
 
     from fastapi.testclient import TestClient
     from host_brain.app.fastapi_app import app
@@ -20,7 +23,7 @@ def test_chat_approve_path_uses_graph_runtime(monkeypatch) -> None:
         },
     )
     assert resp.status_code == 200
-    body = resp.json()
+    body = parse_sse_commit(resp)
     assert body.get("decision") == "APPROVE", body
 
     llm = dict((body.get("audit_refs") or {}).get("llm") or {})

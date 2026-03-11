@@ -191,9 +191,9 @@ class TestIdempotency:
     """T-DISTILL-B-04: 相同 semantic_id 不重复生成 Canon 提案（FR-MEM-DISTILL-001）。"""
 
     def test_duplicate_semantic_id_skipped(self, mock_distillation_engine, mock_canon_store, mock_ledger):
-        # 模拟已有 pending 提案包含 semantic_id
-        mock_ledger.list_canon_proposals.return_value = (
-            [{"summary": "semantic_id=sem_abc123 source_count=3", "status": "pending"}],
+        # 模拟已有 pending 提案包含 semantic_id（使用代码实际调用的 list_proposals 方法）
+        mock_ledger.list_proposals.return_value = (
+            [{"proposal_id": "distill_prop_sem_abc123_12345678", "summary": "semantic_id=sem_abc123 source_count=3", "status": "pending"}],
             1,
         )
         mock_ledger.list_semantic_memories.return_value = (

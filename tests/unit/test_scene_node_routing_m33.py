@@ -216,6 +216,7 @@ class TestGraphMetaSceneField:
 
 
 def test_core_reasoner_primary_gemini_pro_retries_timeout(monkeypatch) -> None:
+    import asyncio
     import host_brain.app.provider_factory as pf
 
     call_count = 0
@@ -244,12 +245,19 @@ def test_core_reasoner_primary_gemini_pro_retries_timeout(monkeypatch) -> None:
         node_id="core_reasoner_primary",
     )
 
-    result = provider_fn({"input": {"user_message": "retry me"}})
+    import asyncio
+    import inspect
+    if inspect.iscoroutinefunction(provider_fn):
+        result = asyncio.run(provider_fn({"input": {"user_message": "retry me"}}))
+    else:
+        result = provider_fn({"input": {"user_message": "retry me"}})
     assert result == {"status": "OK"}
     assert call_count == 2
 
 
 def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) -> None:
+    import asyncio
+    import inspect
     import host_brain.app.provider_factory as pf
 
     call_count = 0
@@ -277,7 +285,10 @@ def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) ->
     )
 
     try:
-        provider_fn({"input": {"user_message": "do not retry"}})
+        if inspect.iscoroutinefunction(provider_fn):
+            asyncio.run(provider_fn({"input": {"user_message": "do not retry"}}))
+        else:
+            provider_fn({"input": {"user_message": "do not retry"}})
     except RuntimeError as exc:
         assert "403" in str(exc)
     else:  # pragma: no cover - defensive assertion
@@ -286,6 +297,8 @@ def test_core_reasoner_primary_permission_failure_is_not_retried(monkeypatch) ->
 
 
 def test_core_reasoner_primary_quota_failure_downgrades_to_31pro_default(monkeypatch) -> None:
+    import asyncio
+    import inspect
     import host_brain.app.provider_factory as pf
 
     call_counts = {
@@ -318,7 +331,10 @@ def test_core_reasoner_primary_quota_failure_downgrades_to_31pro_default(monkeyp
         node_id="core_reasoner_primary",
     )
 
-    result = provider_fn({"input": {"user_message": "downgrade me"}})
+    if inspect.iscoroutinefunction(provider_fn):
+        result = asyncio.run(provider_fn({"input": {"user_message": "downgrade me"}}))
+    else:
+        result = provider_fn({"input": {"user_message": "downgrade me"}})
     assert result == {"status": "OK", "model_id": "gemini-3.1-pro-preview"}
     assert call_counts["gemini-2.5-pro"] == 1
     assert call_counts["gemini-3.1-pro-preview"] == 1

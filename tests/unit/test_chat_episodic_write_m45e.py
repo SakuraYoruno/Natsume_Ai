@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from tests.unit.conftest import parse_sse_commit, mock_llm_runtime
 
 
 def _mount_chat_runtime(monkeypatch, appmod) -> None:  # noqa: ANN001
@@ -64,6 +65,7 @@ def test_chat_writes_episodic_memory_on_approve(monkeypatch, tmp_path) -> None:
     import host_brain.app.dependencies as dep
 
     _mount_chat_runtime(monkeypatch, dep)
+    mock_llm_runtime(monkeypatch)
 
     client = TestClient(appmod.app)
     response = client.post(
@@ -75,7 +77,7 @@ def test_chat_writes_episodic_memory_on_approve(monkeypatch, tmp_path) -> None:
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
 
     assert body.get("decision") == "APPROVE"
     audit_refs = dict(body.get("audit_refs") or {})
@@ -105,7 +107,8 @@ def test_chat_episodic_write_failure_is_non_blocking(monkeypatch, tmp_path) -> N
     import host_brain.app.dependencies as dep
 
     _mount_chat_runtime(monkeypatch, dep)
-    monkeypatch.setattr("host_brain.app.chat_handler._persist_chat_episodic_memory", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("episodic boom")))
+    mock_llm_runtime(monkeypatch)
+    monkeypatch.setattr("host_brain.app.chat_stream_handler.persist_chat_episodic_memory", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("episodic boom")))
 
     client = TestClient(appmod.app)
     response = client.post(
@@ -116,7 +119,7 @@ def test_chat_episodic_write_failure_is_non_blocking(monkeypatch, tmp_path) -> N
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
     assert body.get("decision") == "APPROVE"
 
     episodic_info = dict(dict(body.get("audit_refs") or {}).get("episodic_memory") or {})

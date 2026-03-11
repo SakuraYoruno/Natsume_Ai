@@ -82,37 +82,19 @@ def test_ckp_res_02_expired_checkpoint_returns_failed_with_synthetic_event():
     runtime = GraphRuntimeContract()
     runtime.register_node_handler("handler_a", _noop_handler)
 
-    # 使用 monkeypatch 替换 CheckpointManager 的 load_state
-    original_resume_graph = runtime.resume_graph
+    # 直接替换 runtime._checkpoint_manager 为能返回已过期 state 的 PatchedManager
+    from host_brain.integrations.graph_checkpoint import CheckpointManager as CM
 
-    def _patched_resume_graph(*, checkpoint_id: str, request_id: str, now_ms=None):
-        # 直接调用原方法，但注入已过期的 state
-        from host_brain.integrations.graph_checkpoint import CheckpointManager as CM
-        original_manager_class = CM
+    class PatchedManager(CM):
+        def load_state(self, ckp_id):
+            return dict(state)
 
-        class PatchedManager(original_manager_class):
-            def load_state(self, ckp_id):
-                return dict(state)
+    runtime._checkpoint_manager = PatchedManager()
 
-        import host_brain.integrations.graph_runtime as gr_module
-        original_executor_class = gr_module.GraphExecutor
-
-        # 临时替换 CheckpointManager
-        import host_brain.integrations.graph_checkpoint as ckp_module
-        original_class = ckp_module.CheckpointManager
-        ckp_module.CheckpointManager = PatchedManager
-        try:
-            return original_resume_graph(
-                checkpoint_id=checkpoint_id,
-                request_id=request_id,
-                now_ms=now,
-            )
-        finally:
-            ckp_module.CheckpointManager = original_class
-
-    result = _patched_resume_graph(
+    result = runtime.resume_graph(
         checkpoint_id=checkpoint_id,
         request_id="req-res-002",
+        now_ms=now,
     )
     assert result.status == STATUS_FAILED
     assert result.output.get("synthetic_event") is not None

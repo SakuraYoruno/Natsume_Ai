@@ -24,17 +24,13 @@ def _make_app(ledger):
 def _make_ledger_no_trace(gov_rows=None):
     """构造 mock ledger：graph_run_trace 无数据，governor_log 返回指定行。"""
     ledger = MagicMock()
-    # 模拟 _conn.execute 返回 None（graph_run_trace 无记录）
-    mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchone.return_value = None
-    ledger._conn = mock_conn
 
-    def fetch(table, start=None, end=None, **kwargs):
+    def fetch_by_request_id(table, request_id, **kwargs):
         if table == "governor_log":
             return gov_rows or []
         return []
 
-    ledger.fetch_by_time_range.side_effect = fetch
+    ledger.fetch_by_request_id.side_effect = fetch_by_request_id
     return ledger
 
 
@@ -82,7 +78,7 @@ def test_trace_fallback_not_found_returns_404():
 # T-OBS-ROUTE-TRACE-FALLBACK-03: 降级路径调用 fetch_by_time_range 而非属性访问
 # ---------------------------------------------------------------------------
 def test_trace_fallback_uses_method_not_attribute():
-    """BUG-BE-001: 降级路径使用 ledger.fetch_by_time_range('governor_log', ...) 而非 ledger.governor_log。"""
+    """BUG-BE-001: 降级路径使用 ledger.fetch_by_request_id('governor_log', ...) 而非 ledger.governor_log。"""
     gov_row = {
         "request_id": "req-fallback-03",
         "decision": "REJECT",
@@ -96,11 +92,9 @@ def test_trace_fallback_uses_method_not_attribute():
     resp = client.get("/obs/trace/req-fallback-03")
     assert resp.status_code == 200
 
-    # 验证调用了 fetch_by_time_range 而非属性访问
-    calls = [str(c) for c in ledger.fetch_by_time_range.call_args_list]
+    # 验证调用了 fetch_by_request_id 而非属性访问
+    calls = [str(c) for c in ledger.fetch_by_request_id.call_args_list]
     assert any("governor_log" in c for c in calls), (
-        "降级路径应调用 fetch_by_time_range('governor_log', ...) 而非属性访问"
+        "降级路径应调用 fetch_by_request_id('governor_log', ...) 而非属性访问"
     )
-    # 确保没有访问 .governor_log 属性（属性访问不会触发 mock 的 call_args_list）
-    # 通过检查 fetch_by_time_range 被调用来间接验证
-    ledger.fetch_by_time_range.assert_called()
+    ledger.fetch_by_request_id.assert_called()

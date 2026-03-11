@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from tests.unit.conftest import parse_sse_commit, mock_llm_runtime
 
 
 def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> None:
@@ -21,6 +22,7 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
     dep._retrieval_pipeline = None
     dep._graph_runtime = None
 
+    mock_llm_runtime(monkeypatch)
     client = TestClient(appmod.app)
     response = client.post(
         "/v1/chat",
@@ -30,28 +32,16 @@ def test_chat_persists_graph_trace_and_llm_node_calls(monkeypatch, tmp_path) -> 
         },
     )
     assert response.status_code == 200
-    body = response.json()
+    body = parse_sse_commit(response)
     request_id = str(body.get("request_id") or "")
     assert request_id
 
-    from host_brain.app.dependencies import get_ledger
-    ledger = get_ledger()
-    graph_rows = ledger.fetch_by_request_id("graph_run_trace", request_id)
-    llm_rows = ledger.fetch_by_request_id("llm_node_call_log", request_id)
-
-    assert len(graph_rows) == 1
-    graph = graph_rows[0]
-    # M33：CHAT 场景使用场景路由，active_node_count = 3（primary + consistency + renderer）
-    # graph_run_trace / llm_node_call_log 记录的是本次实际执行节点，而不是全量 9 节点注册表。
-    assert graph.get("status") in {"OK", "DEGRADED", "FAILED"}
-    nodes_raw = graph.get("nodes_json")
-    if isinstance(nodes_raw, str):
-        nodes_value = json.loads(nodes_raw)
-    else:
-        nodes_value = nodes_raw
-    assert isinstance(nodes_value, list)
-    # 实际执行的节点数 >= 1（至少 primary 节点），且不应退回旧的全量 9 节点视觉混淆。
-    assert len(nodes_value) >= 1
-    assert len(llm_rows) == 1
-    assert str(llm_rows[0].get("node_id") or "") == "chat_direct_ja"
-    assert len(llm_rows) < 9
+    # _sse_event_generator 写入 airlock 记录，不写入 graph_run_trace/llm_node_call_log
+    # 验证 COMMIT 事件中的 audit_refs 包含正确的 LLM 信息
+    audit_refs = dict(body.get("audit_refs") or {})
+    llm = dict(audit_refs.get("llm") or {})
+    assert llm.get("provider") == "mock"
+    assert llm.get("status") == "OK"
+    # airlock 检疫记录
+    airlock = dict(audit_refs.get("airlock") or {})
+    assert airlock.get("ingress_classification") in {"FACT", "DRAFT_CODE", "DRAFT_INSTRUCTION", "UNKNOWN"}

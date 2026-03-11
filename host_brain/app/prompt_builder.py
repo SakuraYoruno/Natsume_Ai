@@ -91,7 +91,7 @@ def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja"
             )
         return (
             "Role: chat_direct_ja.\n"
-            "Goal: generate the final user-facing reply directly in concise natural Japanese.\n"
+            "Goal: generate the final user-facing reply directly in natural Japanese suitable for spoken TTS output.\n"
             "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
             "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
         )

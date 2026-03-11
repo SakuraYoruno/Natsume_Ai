@@ -66,6 +66,7 @@ from host_brain.retrieval.recall_fusion_stores import (
     STORE_PERSONA_UTTERANCE,
     search_route as _search_route_impl,
 )
+from host_brain.retrieval.hybrid_fusion import HybridFusionStrategy  # noqa: F401
 
 logger = logging.getLogger("Natsume.retrieval.recall_fusion")
 

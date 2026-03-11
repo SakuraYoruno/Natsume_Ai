@@ -13,6 +13,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.async_queue import BondUpdateQueue
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
+from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient  # 修复审计问题 #10
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
@@ -262,6 +263,21 @@ def get_bond_stage_engine() -> BondStageEngine:
     if _bond_stage_engine is None:
         _bond_stage_engine = BondStageEngine(ledger=get_ledger())
     return _bond_stage_engine
+
+
+def get_bond_neo4j_client():
+    """修复审计问题 #10：根据环境变量自动选择持久化 Bond 客户端。
+
+    优先级：
+    1. HOST_BOND_BACKEND=sqlite → SqliteBondClient（持久化，推荐）
+    2. HOST_BOND_BACKEND=memory（默认）→ InMemoryNeo4jBondClient（内存，重启丢失）
+    3. HOST_BOND_SQLITE_PATH 有值 → 自动升级为 SqliteBondClient
+    """
+    backend = str(os.environ.get("HOST_BOND_BACKEND") or "memory").strip().lower()
+    sqlite_path = str(os.environ.get("HOST_BOND_SQLITE_PATH") or "").strip()
+    if backend == "sqlite" or sqlite_path:
+        return SqliteBondClient(db_path=sqlite_path or None)
+    return InMemoryNeo4jBondClient()
 
 
 def get_bond_update_queue() -> BondUpdateQueue:

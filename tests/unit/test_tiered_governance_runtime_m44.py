@@ -201,9 +201,8 @@ class TestChatResponseApprovalTierM44(unittest.TestCase):
 
     def test_chat_response_approval_tier_all_valid_values(self) -> None:
         """approval_tier 支持所有合法值（cache/rule/full/airlock）。"""
-        from host_brain.app.fastapi_app import ChatResponse
-        from host_brain.core.ids import now_ms
         from host_brain.app.schemas import ChatResponse
+        from host_brain.core.ids import now_ms
         for tier in ("cache", "rule", "full", "airlock"):
             resp = ChatResponse(
                 request_id=f"req::{tier}",
