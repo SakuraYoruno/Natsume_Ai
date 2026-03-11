@@ -68,6 +68,34 @@ class ChatRequest(BaseModel):
     emotion_intensity: Optional[float] = Field(None, description="Optional emotion intensity [0,1]")
     emotion_context: Optional[Dict[str, Any]] = Field(None, description="Optional emotion context")
     emotion_range_hint: Optional[str] = Field(None, description="Optional emotion range hint")
+    # [任务4] SCENE_VISION_UI 专用字段：视觉上下文
+    # 支持格式：
+    #   image_base64: str       — Base64 编码的截图（优先级最高）
+    #   image_url: str          — 图片 URL
+    #   image_mime: str         — 图片 MIME 类型（默认 "image/png"）
+    #   screen_description: str — 文字描述的界面内容（降级模式）
+    #   app_name: str           — 应用程序名称
+    #   os_info: str            — 操作系统信息
+    #   resolution: str         — 屏幕分辨率（如 "1920x1080"）
+    #   error_text: str         — 界面中的错误信息
+    #   selected_text: str      — 用户选中的文本
+    vision_context: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional vision context for SCENE_VISION_UI (image_base64/image_url/screen_description etc.)",
+    )
+    # 图片上传隐私授权标志
+    # 屏幕截图属高敏隐私内容，默认禁止上传至云端 API。
+    # 当 SceneRouter 策略为 REQUIRE_CONSENT 时，必须显式传入 true 才允许上传图片。
+    # 若为 false（默认），即使 vision_context 中包含 image_base64/image_url，
+    # 也只会使用文字描述模式（screen_description / message）进行分析。
+    image_upload_consent: bool = Field(
+        False,
+        description=(
+            "用户隐私授权标志：是否允许将 vision_context 中的图片发送给云端 API。"
+            "屏幕截图属高敏隐私内容，默认 false（禁止上传）。"
+            "仅在用户明确知晓并同意图片将被发送至第三方服务时，才应传入 true。"
+        ),
+    )
 
 
 class ChatResponse(BaseModel):

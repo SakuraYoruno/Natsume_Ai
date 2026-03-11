@@ -4,9 +4,14 @@
   - handle_chat：POST /v1/chat 统一入口
   - _unified_chat_sse_generator：统一 SSE 生成器（Governor 鉴权 + 场景分类 + 路由分发）
 
+[任务3] 场景路由已迁入 SceneRouter.route_sse()，不再使用 if-else 硬编码分流。
+_unified_chat_sse_generator 只负责 Governor 鉴权 + 场景分类，路由委托给 SceneRouter。
+
 子模块职责：
   - chat_handler_edge.py    — Gaming Edge RPC 路由（_gaming_edge_chat_sse_generator）
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
+  - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator，任务4）
+  - graph/main_chain.py     — SceneRouter.route_sse()（场景路由分发，任务3）
 """
 
 from __future__ import annotations
@@ -125,13 +130,11 @@ async def _unified_chat_sse_generator(
       → Governor 鉴权
       → PRESENCE(GOV_APPROVED)
       → pre_intent_classifier 分类（鉴权后）
-      → SCENE_CHAT：委托 _sse_event_generator（token 级流式）
-      → 复杂场景：LangGraph 多节点 + 节点级进度通知
+      → [任务3] SceneRouter.route_sse() 节点化路由分发：
+          SCENE_VISION_UI  → _vision_ui_sse_generator（视觉分析）
+          SCENE_CHAT       → _sse_event_generator（token 级流式）
+          复杂场景         → _complex_scene_sse_generator（LangGraph 多节点）
     """
-    from host_brain.app.chat_stream_handler import _sse_event_generator  # noqa: PLC0415
-    from host_brain.app.chat_handler_edge import _gaming_edge_chat_sse_generator, _parse_bool  # noqa: PLC0415
-    from host_brain.app.chat_handler_complex import _complex_scene_sse_generator  # noqa: PLC0415
-
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -214,82 +217,25 @@ async def _unified_chat_sse_generator(
             },
         )
 
-        # ── 修复审计问题 #11：SCENE_VISION_UI 专用拦截（高门槛场景，暂不支持）──
-        if scene_type == "SCENE_VISION_UI":
+        # ── [任务3] SceneRouter 节点化路由：替换 if-else 硬编码分流 ─────────
+        # 非 SCENE_CHAT 场景通知客户端已路由
+        if scene_type != SCENE_CHAT:
             yield _sse({
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "REJECT",
-                "reason_code": "SCENE_VISION_UI_NOT_SUPPORTED",
-                "narrative": "视觉界面场景暂未开放，请稍后再试。",
+                "phase": "PRESENCE",
+                "event": "SCENE_ROUTED",
+                "scene_type": scene_type,
+                "scene_type_source": scene_type_source,
                 "request_id": request_id,
             })
-            return
 
-        # ── SCENE_CHAT：委托给 token 级流式生成器 ─────────────────────────
-        if scene_type == SCENE_CHAT:
-            sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower() or "normal"
-            gaming_edge_chat_enabled = _parse_bool(
-                os.environ.get("HOST_GAMING_EDGE_CHAT_ENABLED"),
-                default=False,
-            )
-            host_edge_rpc_enabled = _parse_bool(
-                os.environ.get("HOST_ENABLE_EDGE_RPC"),
-                default=True,
-            )
-            use_gaming_edge_chat = bool(
-                sys_mode == "gaming"
-                and gaming_edge_chat_enabled
-                and host_edge_rpc_enabled
-            )
-            if use_gaming_edge_chat:
-                async for event in _gaming_edge_chat_sse_generator(
-                    request_body=request_body,
-                    request_id=request_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    intent_draft=intent_draft,
-                    governor_result=governor_result,
-                    emotion_context=emotion_context,
-                    emotion_snapshot=emotion_snapshot,
-                    intent_id=intent_id,
-                    reason_code=reason_code,
-                    sys_mode=sys_mode,
-                    metrics=metrics,
-                ):
-                    yield event
-                return
-
-            async for event in _sse_event_generator(
-                message=request_body.message,
-                session_id=session_id,
-                thread_id=request_body.thread_id,
-                mood_state=request_body.mood_state,
-                emotion_tag=request_body.emotion_tag,
-                request_id=request_id,
-                ts_ms=ts_ms,
-                intent_draft=intent_draft,
-                _pre_approved_governor_result=governor_result,
-            ):
-                yield event
-            return
-
-        # ── 复杂场景：LangGraph 多节点 + 节点级进度通知 ───────────────────
-        yield _sse({
-            "phase": "PRESENCE",
-            "event": "SCENE_ROUTED",
-            "scene_type": scene_type,
-            "scene_type_source": scene_type_source,
-            "request_id": request_id,
-        })
-
-        async for event in _complex_scene_sse_generator(
+        from host_brain.app.graph.main_chain import SceneRouter  # noqa: PLC0415
+        async for event in SceneRouter.route_sse(
+            scene_type=scene_type,
             request_body=request_body,
             request_id=request_id,
             session_id=session_id,
             ts_ms=ts_ms,
             intent_draft=intent_draft,
-            scene_type=scene_type,
             scene_type_source=scene_type_source,
             governor_result=governor_result,
             emotion_context=emotion_context,

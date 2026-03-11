@@ -1,0 +1,501 @@
+"""视觉界面场景 SSE 生成器模块（SCENE_VISION_UI 专用）。
+
+从 chat_handler.py 拆分，负责 SCENE_VISION_UI 场景下的视觉分析 SSE 响应。
+由 chat_handler._unified_chat_sse_generator 在场景分类后调用。
+
+完整链路：
+  [Governor 鉴权（由调用方预完成）]
+  → 视觉上下文解析（vision_context / 消息文本）
+  → Gemini Vision 模型分析（multimodal）
+  → 结构化输出（界面元素 + 操作建议 + 自然语言描述）
+  → COMMIT 事件
+
+支持的视觉输入格式：
+  - vision_context.image_base64：Base64 编码的截图
+  - vision_context.image_url：图片 URL
+  - vision_context.screen_description：文字描述的界面内容（降级模式）
+  - message：纯文字描述（最低优先级）
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+from typing import Any, AsyncGenerator, Dict, Optional
+
+from host_brain.app.dependencies import (
+    get_bond_stage_engine,
+    get_bond_update_queue,
+    get_episodic_store,
+    get_ledger,
+)
+from host_brain.app.emotion_context import build_chat_emotion_snapshot
+from host_brain.app.graph_config_builder import (
+    SCENE_VISION_UI,
+    resolve_host_llm_runtime_async,
+)
+from host_brain.app.observability_persist import persist_chat_episodic_memory
+from host_brain.app.schemas import ChatRequest
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
+from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
+
+_logger = logging.getLogger("Natsume.chat_handler_vision")
+
+# ---------------------------------------------------------------------------
+# 视觉场景节点序列（用于 GRAPH_START 通知）
+# ---------------------------------------------------------------------------
+
+VISION_UI_NODE_SEQUENCE = [
+    "vision_context_parser",   # 解析视觉输入（base64/url/text）
+    "vision_analyzer",         # Gemini Vision 多模态分析
+    "vision_renderer",         # 结构化输出渲染（界面元素 + 操作建议）
+]
+
+# ---------------------------------------------------------------------------
+# 视觉分析 Prompt 模板
+# ---------------------------------------------------------------------------
+
+_VISION_ANALYSIS_SYSTEM_PROMPT = """你是夏目（Natsume），一个温柔、聪明的 AI 助手，擅长分析用户界面和屏幕截图。
+
+当用户分享屏幕截图或描述界面内容时，你需要：
+1. 识别界面类型（应用程序、网页、系统界面等）
+2. 描述界面中的主要元素和布局
+3. 理解用户的操作意图
+4. 提供具体、可操作的建议
+
+回答风格：温柔自然，像朋友一样解释，避免过于技术性的术语。
+语言：根据用户消息语言自动切换（中文/日文/英文）。
+"""
+
+_VISION_ANALYSIS_USER_PROMPT_TEMPLATE = """用户消息：{user_message}
+
+{vision_context_section}
+
+请分析上述内容，提供：
+1. 界面/内容识别：这是什么类型的界面或内容？
+2. 关键元素：主要的界面元素有哪些？
+3. 操作建议：针对用户的问题，具体应该怎么操作？
+4. 自然语言回复：用温柔友好的语气回答用户。
+
+请直接给出自然语言回复，不需要分点列举（除非用户明确要求）。"""
+
+
+def _build_vision_context_section(vision_context: Optional[Dict[str, Any]]) -> str:
+    """构建视觉上下文描述段落。"""
+    if not vision_context:
+        return "（用户未提供截图，请根据文字描述进行分析）"
+
+    parts = []
+    screen_desc = str(vision_context.get("screen_description") or "").strip()
+    if screen_desc:
+        parts.append(f"界面描述：{screen_desc}")
+
+    app_name = str(vision_context.get("app_name") or "").strip()
+    if app_name:
+        parts.append(f"应用程序：{app_name}")
+
+    os_info = str(vision_context.get("os_info") or "").strip()
+    if os_info:
+        parts.append(f"操作系统：{os_info}")
+
+    resolution = str(vision_context.get("resolution") or "").strip()
+    if resolution:
+        parts.append(f"分辨率：{resolution}")
+
+    error_text = str(vision_context.get("error_text") or "").strip()
+    if error_text:
+        parts.append(f"错误信息：{error_text}")
+
+    selected_text = str(vision_context.get("selected_text") or "").strip()
+    if selected_text:
+        parts.append(f"选中文本：{selected_text}")
+
+    if parts:
+        return "视觉上下文：\n" + "\n".join(f"  - {p}" for p in parts)
+    return "（视觉上下文为空，请根据文字描述进行分析）"
+
+
+def _has_image_input(vision_context: Optional[Dict[str, Any]]) -> bool:
+    """判断是否有真实图片输入（base64 或 URL）。"""
+    if not vision_context:
+        return False
+    return bool(
+        str(vision_context.get("image_base64") or "").strip()
+        or str(vision_context.get("image_url") or "").strip()
+    )
+
+
+async def _call_vision_llm(
+    *,
+    request_id: str,
+    user_message: str,
+    vision_context: Optional[Dict[str, Any]],
+    llm_runtime: Dict[str, Any],
+    ts_ms: int,
+    image_upload_allowed: bool = False,
+    image_upload_deny_reason: str = "",
+) -> Dict[str, Any]:
+    """调用 LLM 进行视觉分析（优先使用 Gemini Vision，降级为文本模式）。
+
+    Args:
+        image_upload_allowed:    是否允许将图片发送给云端 API（由 SceneRouter 策略决定）。
+                                 False 时即使 vision_context 中有 image_base64/image_url
+                                 也不会上传，自动降级为纯文字模式。
+        image_upload_deny_reason: 禁止上传的原因（用于日志记录）。
+
+    Returns:
+        dict with keys: narrative, model_used, provider, status, reason_code
+    """
+    import asyncio as _asyncio
+
+    provider_name = str(llm_runtime.get("cloud_provider_name") or llm_runtime.get("provider_name") or PROVIDER_GEMINI)
+    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash")
+    api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
+    timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 15000)
+    available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))
+
+    if not available or not api_key:
+        # 降级：返回友好的不可用提示
+        return {
+            "narrative": "啊啦，视觉分析功能现在暂时不可用呢。不过你可以用文字描述一下你看到的界面，我来帮你分析！",
+            "model_used": model_id,
+            "provider": provider_name,
+            "status": "DEGRADED",
+            "reason_code": "VISION_LLM_UNAVAILABLE",
+        }
+
+    vision_context_section = _build_vision_context_section(vision_context)
+    user_prompt = _VISION_ANALYSIS_USER_PROMPT_TEMPLATE.format(
+        user_message=user_message,
+        vision_context_section=vision_context_section,
+    )
+
+    # 图片上传策略检查：即使 vision_context 中有图片，也需要策略允许才能上传
+    has_image_input = _has_image_input(vision_context)
+    has_image = has_image_input and image_upload_allowed
+    if has_image_input and not image_upload_allowed:
+        _logger.info(
+            "图片上传被策略拒绝，降级为纯文字模式",
+            extra={"request_id": request_id, "deny_reason": image_upload_deny_reason},
+        )
+    image_base64 = str((vision_context or {}).get("image_base64") or "").strip() if has_image else ""
+    image_url = str((vision_context or {}).get("image_url") or "").strip() if has_image else ""
+    image_mime = str((vision_context or {}).get("image_mime") or "image/png").strip()
+
+    try:
+        provider_fn = llm_runtime.get("cloud_provider_fn") or llm_runtime.get("provider_fn")
+        if provider_fn is None:
+            raise ValueError("provider_fn 未配置")
+
+        # 构建消息列表（支持多模态）
+        messages: list[dict] = [
+            {"role": "system", "content": _VISION_ANALYSIS_SYSTEM_PROMPT},
+        ]
+        if has_image and image_base64:
+            # Gemini Vision 多模态消息格式
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image_mime};base64,{image_base64}",
+                        },
+                    },
+                    {"type": "text", "text": user_prompt},
+                ],
+            })
+        elif has_image and image_url:
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": user_prompt},
+                ],
+            })
+        else:
+            # 纯文本模式（无图片）
+            messages.append({"role": "user", "content": user_prompt})
+
+        payload = {
+            "messages": messages,
+            "model": model_id,
+            "max_tokens": 800,
+            "temperature": 0.7,
+        }
+
+        timeout_sec = max(5.0, float(timeout_ms) / 1000.0)
+        result = await _asyncio.wait_for(
+            _asyncio.to_thread(provider_fn, payload),
+            timeout=timeout_sec,
+        )
+
+        narrative = ""
+        if isinstance(result, dict):
+            choices = result.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                msg = choices[0].get("message") or {}
+                narrative = str(msg.get("content") or "").strip()
+            if not narrative:
+                narrative = str(result.get("content") or result.get("text") or "").strip()
+
+        if not narrative:
+            narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+
+        return {
+            "narrative": narrative,
+            "model_used": model_id,
+            "provider": provider_name,
+            "status": "OK",
+            "reason_code": None,
+        }
+
+    except Exception as exc:
+        _logger.warning(
+            "vision LLM call failed",
+            extra={"request_id": request_id, "error": str(exc)},
+        )
+        return {
+            "narrative": "啊啦，视觉分析的时候遇到了一点小问题呢。你可以再试一次，或者用文字描述一下你看到的内容，我来帮你！",
+            "model_used": model_id,
+            "provider": provider_name,
+            "status": "DEGRADED",
+            "reason_code": f"VISION_LLM_ERROR:{type(exc).__name__}",
+        }
+
+
+async def _vision_ui_sse_generator(
+    *,
+    request_body: ChatRequest,
+    request_id: str,
+    session_id: str,
+    ts_ms: int,
+    intent_draft: Dict[str, Any],
+    scene_type: str,
+    scene_type_source: str,
+    governor_result: Dict[str, Any],
+    emotion_context: Dict[str, Any],
+    emotion_snapshot: Dict[str, Any],
+    intent_id: Any,
+    reason_code: Any,
+    metrics: Any,
+) -> AsyncGenerator[str, None]:
+    """SCENE_VISION_UI 专用 SSE 生成器。
+
+    节点级进度通知：
+      GRAPH_START → vision_context_parser → vision_analyzer → vision_renderer → COMMIT
+    """
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    vision_llm_summary: Dict[str, Any] = {}
+    episodic_summary: Dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+
+    try:
+        # ── 节点级进度通知：GRAPH_START ────────────────────────────────────
+        yield _sse({
+            "phase": "GRAPH_START",
+            "scene_type": SCENE_VISION_UI,
+            "node_sequence": VISION_UI_NODE_SEQUENCE,
+            "node_count": len(VISION_UI_NODE_SEQUENCE),
+            "request_id": request_id,
+        })
+
+        # ── vision_context_parser：解析视觉输入 ────────────────────────────
+        yield _sse({
+            "phase": "NODE_START",
+            "node_id": "vision_context_parser",
+            "scene_type": SCENE_VISION_UI,
+            "request_id": request_id,
+        })
+
+        # 从 request_body 中提取视觉上下文
+        # 优先使用 request_body.vision_context（新字段，任务4新增）
+        # 向后兼容：若无 vision_context，则从 emotion_context 中提取视觉字段
+        vision_context: Optional[Dict[str, Any]] = None
+        vision_keys = {"image_base64", "image_url", "screen_description", "app_name", "os_info",
+                       "resolution", "error_text", "selected_text", "image_mime"}
+
+        if getattr(request_body, "vision_context", None):
+            vision_context = dict(request_body.vision_context)
+        else:
+            # 向后兼容：从 emotion_context 中提取视觉字段
+            raw_emotion_ctx = dict(request_body.emotion_context or {})
+            if any(k in raw_emotion_ctx for k in vision_keys):
+                vision_context = {k: raw_emotion_ctx[k] for k in vision_keys if k in raw_emotion_ctx}
+
+        has_image = _has_image_input(vision_context)
+        input_mode = "image" if has_image else ("text_description" if vision_context else "text_only")
+
+        yield _sse({
+            "phase": "NODE_DONE",
+            "node_id": "vision_context_parser",
+            "status": "OK",
+            "input_mode": input_mode,
+            "has_image": has_image,
+            "request_id": request_id,
+        })
+
+        # ── vision_analyzer：Gemini Vision 分析 ───────────────────────────
+        yield _sse({
+            "phase": "NODE_START",
+            "node_id": "vision_analyzer",
+            "scene_type": SCENE_VISION_UI,
+            "request_id": request_id,
+        })
+
+        # 图片上传策略检查（基于场景，屏幕截图属高敏隐私内容）
+        from host_brain.app.graph.main_chain import SceneRouter  # noqa: PLC0415
+        _user_consent = bool(getattr(request_body, "image_upload_consent", False))
+        _img_allowed, _img_deny_reason = SceneRouter.check_image_upload_allowed(
+            SCENE_VISION_UI,
+            user_consent=_user_consent,
+        )
+
+        llm_runtime = await resolve_host_llm_runtime_async(
+            rollout_key=session_id,
+            scene_type=SCENE_VISION_UI,
+        )
+
+        analysis_start_ms = int(time.time() * 1000)
+        llm_result = await _call_vision_llm(
+            request_id=request_id,
+            user_message=request_body.message,
+            vision_context=vision_context,
+            llm_runtime=llm_runtime,
+            ts_ms=ts_ms,
+            image_upload_allowed=_img_allowed,
+            image_upload_deny_reason=_img_deny_reason,
+        )
+        analysis_latency_ms = max(0, int(time.time() * 1000) - analysis_start_ms)
+
+        narrative = str(llm_result.get("narrative") or "")
+        llm_status = str(llm_result.get("status") or "DEGRADED")
+
+        yield _sse({
+            "phase": "NODE_DONE",
+            "node_id": "vision_analyzer",
+            "status": llm_status,
+            "provider": llm_result.get("provider"),
+            "model_id": llm_result.get("model_used"),
+            "latency_ms": analysis_latency_ms,
+            "image_upload_allowed": _img_allowed,
+            "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
+            "request_id": request_id,
+        })
+
+        # ── vision_renderer：渲染最终输出 ──────────────────────────────────
+        yield _sse({
+            "phase": "NODE_START",
+            "node_id": "vision_renderer",
+            "scene_type": SCENE_VISION_UI,
+            "request_id": request_id,
+        })
+
+        if not narrative:
+            narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+
+        yield _sse({
+            "phase": "NODE_DONE",
+            "node_id": "vision_renderer",
+            "status": "OK",
+            "narrative_length": len(narrative),
+            "request_id": request_id,
+        })
+
+        # ── GRAPH_DONE ─────────────────────────────────────────────────────
+        graph_latency_ms = analysis_latency_ms
+        yield _sse({
+            "phase": "GRAPH_DONE",
+            "scene_type": SCENE_VISION_UI,
+            "status": llm_status,
+            "latency_ms": graph_latency_ms,
+            "request_id": request_id,
+        })
+
+        # ── 后处理：情节记忆 ───────────────────────────────────────────────
+        vision_llm_summary = {
+            "status": llm_status,
+            "reason_code": llm_result.get("reason_code"),
+            "provider": llm_result.get("provider"),
+            "model_id": llm_result.get("model_used"),
+            "scene_type": SCENE_VISION_UI,
+            "input_mode": input_mode,
+            "has_image": has_image,
+            "latency_ms": analysis_latency_ms,
+        }
+
+        try:
+            episodic_summary = persist_chat_episodic_memory(
+                request_id=request_id,
+                intent_id=str(intent_id or request_id),
+                session_id=session_id,
+                user_message=request_body.message,
+                assistant_reply=narrative,
+                emotion_context=emotion_context,
+                ts_ms=ts_ms,
+                episodic_store=get_episodic_store(),
+            )
+        except Exception as exc:
+            episodic_summary = {
+                "status": "DEGRADED",
+                "reason_code": "EPISODIC_WRITE_FAILED",
+                "memory_id": None,
+                "detail": str(exc),
+            }
+            _logger.debug("vision episodic memory write skipped", extra={"request_id": request_id, "error": str(exc)})
+
+        # ── COMMIT ─────────────────────────────────────────────────────────
+        yield _sse({
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": narrative,
+            "request_id": request_id,
+            "audit_refs": {
+                "intent_id": intent_id,
+                "governor_stage": governor_result.get("stage"),
+                "thread_id": request_body.thread_id,
+                "scene_type": SCENE_VISION_UI,
+                "scene_type_source": scene_type_source,
+                "llm": vision_llm_summary,
+                "emotion_context": dict(emotion_context),
+                "emotion_snapshot": dict(emotion_snapshot),
+                "episodic_memory": dict(episodic_summary),
+                "vision_input": {
+                    "input_mode": input_mode,
+                    "has_image": has_image,
+                    "image_upload_allowed": _img_allowed,
+                    "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
+                    "user_consent": _user_consent,
+                },
+            },
+        })
+
+    except Exception as exc:
+        import traceback as _tb
+        _tb_str = _tb.format_exc()
+        metrics.inc_error()
+        _logger.error(
+            "vision UI SSE generator failed",
+            extra={"request_id": request_id, "error": str(exc), "traceback": _tb_str},
+        )
+        try:
+            get_ledger().log_error(
+                request_id=request_id,
+                stage="S_INTERNAL_ERROR",
+                reason_code="VISION_INTERNAL_ERROR",
+                detail=f"{type(exc).__name__}: {exc}\n{_tb_str[:800]}",
+            )
+        except Exception:
+            pass
+        yield _sse({
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "VISION_INTERNAL_ERROR",
+            "narrative": "啊啦，视觉分析的时候遇到了一点小问题呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？",
+            "request_id": request_id,
+        })
