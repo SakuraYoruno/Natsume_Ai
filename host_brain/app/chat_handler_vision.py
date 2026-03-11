@@ -25,6 +25,11 @@ import os
 import time
 from typing import Any, AsyncGenerator, Dict, Optional
 
+from host_brain.airlock.image_filter import (
+    IMAGE_EGRESS_BLOCK,
+    IMAGE_EGRESS_WARN,
+    filter_image_egress,
+)
 from host_brain.app.dependencies import (
     get_bond_stage_engine,
     get_bond_update_queue,
@@ -184,6 +189,33 @@ async def _call_vision_llm(
     image_url = str((vision_context or {}).get("image_url") or "").strip() if has_image else ""
     image_mime = str((vision_context or {}).get("image_mime") or "image/png").strip()
 
+    # Airlock 图片出站过滤：元数据检查 + 明文敏感词扫描
+    # 仅在策略允许且有 base64 图片时执行（image_url 跳过，无法解码扫描）
+    image_egress_report = None
+    if has_image and image_base64:
+        image_egress_report = filter_image_egress(
+            image_base64,
+            mime_type=image_mime,
+            request_id=request_id,
+            ledger=get_ledger(),
+        )
+        if image_egress_report.decision == IMAGE_EGRESS_BLOCK:
+            # 元数据不合规（MIME 非法 / 超大），降级为纯文字模式
+            _logger.warning(
+                "Airlock 图片过滤 BLOCK，降级为纯文字模式: %s",
+                image_egress_report.reason_code,
+                extra={"request_id": request_id},
+            )
+            has_image = False
+            image_base64 = ""
+        elif image_egress_report.decision == IMAGE_EGRESS_WARN:
+            # 检测到潜在敏感内容，记录警告但仍允许上传（误报率较高）
+            _logger.warning(
+                "Airlock 图片过滤 WARN，检测到潜在敏感内容: %s",
+                image_egress_report.risks,
+                extra={"request_id": request_id},
+            )
+
     try:
         provider_fn = llm_runtime.get("cloud_provider_fn") or llm_runtime.get("provider_fn")
         if provider_fn is None:
@@ -250,6 +282,9 @@ async def _call_vision_llm(
             "provider": provider_name,
             "status": "OK",
             "reason_code": None,
+            "image_filter_decision": image_egress_report.decision if image_egress_report else None,
+            "image_filter_risks": image_egress_report.risks if image_egress_report else [],
+            "image_digest": image_egress_report.image_digest if image_egress_report else None,
         }
 
     except Exception as exc:
@@ -383,6 +418,8 @@ async def _vision_ui_sse_generator(
             "latency_ms": analysis_latency_ms,
             "image_upload_allowed": _img_allowed,
             "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
+            "image_filter_decision": llm_result.get("image_filter_decision"),
+            "image_filter_risks": llm_result.get("image_filter_risks"),
             "request_id": request_id,
         })
 
@@ -504,6 +541,9 @@ async def _vision_ui_sse_generator(
                     "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
                     "user_consent": _user_consent,
                     "response_format": response_format,
+                    "image_filter_decision": llm_result.get("image_filter_decision"),
+                    "image_filter_risks": llm_result.get("image_filter_risks"),
+                    "image_digest": llm_result.get("image_digest"),
                 },
             },
         }
