@@ -32,6 +32,7 @@ from host_brain.audit.ledger_constants import (
     CHANNEL_IO_COLUMNS,
     AVATAR_ACTION_COLUMNS,
     CLAWD_ACTION_COLUMNS,
+    AGENT_LOOP_COLUMNS,
     SERVICE_HEALTH_COLUMNS,
     MIGRATION_COLUMNS,
     CONFIG_SNAPSHOT_COLUMNS,
@@ -156,6 +157,10 @@ class SQLiteLedger(
     @property
     def clawd_action_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("clawd_action_log")
+
+    @property
+    def agent_loop_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("agent_loop_log")
 
     @property
     def service_health_log(self) -> list[dict[str, Any]]:
@@ -287,6 +292,24 @@ class SQLiteLedger(
     def log_clawd_action(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in CLAWD_ACTION_COLUMNS}
         self._insert("clawd_action_log", payload)
+
+    def log_agent_loop(self, row: dict[str, Any]) -> None:
+        """写入 Agent Loop 中间状态（每轮/每阶段一行）。
+
+        必填字段：request_id, session_id, goal, phase, ts_ms
+        可选字段：round, status, goal_achieved, action_plan_json, report_json,
+                  action_count, success_count, failed_count, latency_ms, error, extra_json
+        """
+        payload = {key: row.get(key) for key in AGENT_LOOP_COLUMNS}
+        # goal_achieved 存为 0/1 整数
+        if payload.get("goal_achieved") is None:
+            payload["goal_achieved"] = 0
+        else:
+            payload["goal_achieved"] = 1 if payload["goal_achieved"] else 0
+        # round 默认 0（loop 级事件）
+        if payload.get("round") is None:
+            payload["round"] = 0
+        self._insert("agent_loop_log", payload)
 
     def log_service_health(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SERVICE_HEALTH_COLUMNS}

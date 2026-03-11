@@ -550,6 +550,30 @@ CREATE TABLE IF NOT EXISTS llm_route_config_log (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_route_config_log_request_id ON llm_route_config_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_llm_route_config_log_ts_ms ON llm_route_config_log (ts_ms);
+
+-- Agent Loop 中间状态持久化表（每轮写一行，支持断点续跑和历史回溯）
+CREATE TABLE IF NOT EXISTS agent_loop_log (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id       TEXT    NOT NULL,          -- Agent Loop 请求 ID
+    session_id       TEXT    NOT NULL,          -- ClawdBot 会话 ID
+    goal             TEXT    NOT NULL,          -- 自动化目标
+    round            INTEGER NOT NULL DEFAULT 0, -- 当前轮次（0=loop级事件）
+    phase            TEXT    NOT NULL,          -- 事件阶段（LOOP_START/ROUND_START/...）
+    status           TEXT,                      -- 本轮/本阶段状态（OK/FAILED/SUCCESS/CONTINUE）
+    goal_achieved    INTEGER NOT NULL DEFAULT 0, -- 是否达成目标（0/1）
+    action_plan_json TEXT,                      -- ActionPlan JSON（PLAN_GENERATED 阶段写入）
+    report_json      TEXT,                      -- ActionReport JSON（EXECUTE_DONE 阶段写入）
+    action_count     INTEGER,                   -- 本轮指令数量
+    success_count    INTEGER,                   -- 成功执行数量
+    failed_count     INTEGER,                   -- 失败执行数量
+    latency_ms       INTEGER,                   -- 本轮耗时（毫秒）
+    error            TEXT,                      -- 错误信息（如有）
+    extra_json       TEXT,                      -- 扩展字段（JSON）
+    ts_ms            INTEGER NOT NULL           -- 事件时间戳（毫秒）
+);
+CREATE INDEX IF NOT EXISTS idx_agent_loop_request_id ON agent_loop_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_agent_loop_session_id ON agent_loop_log (session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_loop_ts_ms      ON agent_loop_log (ts_ms);
 """
 
 

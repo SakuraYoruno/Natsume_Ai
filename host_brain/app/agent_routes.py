@@ -30,6 +30,7 @@ from host_brain.app.vision.agent_loop import (
     DEFAULT_ROUND_TIMEOUT_SEC,
     DEFAULT_TOTAL_TIMEOUT_SEC,
 )
+from host_brain.app.dependencies import get_ledger
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.agent_routes")
@@ -130,17 +131,17 @@ async def _agent_loop_sse_generator(
     use_mock: bool,
     clawdbot_base_url: str,
 ) -> AsyncGenerator[str, None]:
-    """Agent Loop SSE 生成器（路由层包装）。
-
-    负责：
-    1. 解析 llm_runtime（与 chat_handler_vision 保持一致）
-    2. 构建 ClawdbotClient
-    3. 调用 run_agent_loop 并透传 SSE 事件
-    """
     import json
 
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    # ── 获取 ledger 实例（失败不阻断主流程）────────────────────────────
+    try:
+        ledger = get_ledger()
+    except Exception as exc:
+        _logger.warning("agent_routes: ledger 获取失败，持久化将被跳过: %s", exc)
+        ledger = None
 
     # ── 解析 LLM 运行时配置 ──────────────────────────────────────────────
     try:
@@ -198,6 +199,7 @@ async def _agent_loop_sse_generator(
             total_timeout_sec=total_timeout_sec,
             image_upload_allowed=image_upload_consent,
             use_mock=False,  # 客户端已在上面构建，不再重复 mock
+            ledger=ledger,
         ):
             yield sse_line
     except Exception as exc:

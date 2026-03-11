@@ -194,6 +194,25 @@ CLAWD_ACTION_COLUMNS = (
     "ts_ms",
 )
 
+AGENT_LOOP_COLUMNS = (
+    "request_id",
+    "session_id",
+    "goal",
+    "round",
+    "phase",
+    "status",
+    "goal_achieved",
+    "action_plan_json",
+    "report_json",
+    "action_count",
+    "success_count",
+    "failed_count",
+    "latency_ms",
+    "error",
+    "extra_json",
+    "ts_ms",
+)
+
 SERVICE_HEALTH_COLUMNS = (
     "request_id",
     "service_id",
@@ -386,6 +405,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "channel_io_log",
     "avatar_action_log",
     "clawd_action_log",
+    "agent_loop_log",
     "service_health_log",
     "migration_log",
     "config_snapshot_log",

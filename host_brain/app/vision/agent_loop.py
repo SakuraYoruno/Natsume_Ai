@@ -19,7 +19,10 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 from .clawdbot_protocol import (
     Action,
@@ -142,6 +145,16 @@ class MockClawdbotClient(ClawdbotClient):
 # Agent Loop 核心
 # ---------------------------------------------------------------------------
 
+def _persist(ledger: "SQLiteLedger | None", row: dict) -> None:
+    """安全写入 agent_loop_log，失败不影响主流程。"""
+    if ledger is None:
+        return
+    try:
+        ledger.log_agent_loop(row)
+    except Exception as exc:
+        _logger.warning("agent_loop: 持久化写入失败（不影响主流程）: %s", exc)
+
+
 async def run_agent_loop(
     *,
     request_id: str,
@@ -154,6 +167,7 @@ async def run_agent_loop(
     total_timeout_sec: float = DEFAULT_TOTAL_TIMEOUT_SEC,
     image_upload_allowed: bool = False,
     use_mock: bool = False,
+    ledger: "SQLiteLedger | None" = None,
 ) -> AsyncGenerator[str, None]:
     """Agent Loop SSE 生成器。
 
@@ -179,6 +193,17 @@ async def run_agent_loop(
     goal_achieved = False
     final_status = "TIMEOUT"
     round_summaries: List[Dict[str, Any]] = []
+
+    _persist(ledger, {
+        "request_id": request_id,
+        "session_id": session_id,
+        "goal": goal,
+        "round": 0,
+        "phase": "LOOP_START",
+        "status": "RUNNING",
+        "goal_achieved": False,
+        "ts_ms": loop_start_ms,
+    })
 
     yield _sse({
         "phase": "LOOP_START",
@@ -266,6 +291,19 @@ async def run_agent_loop(
                     break
 
                 is_fallback = plan.extra.get("fallback", False)
+                _persist(ledger, {
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "goal": goal,
+                    "round": round_num,
+                    "phase": "PLAN_GENERATED",
+                    "status": "FALLBACK" if is_fallback else "OK",
+                    "goal_achieved": False,
+                    "action_plan_json": plan.model_dump_json(),
+                    "action_count": len(plan.actions),
+                    "ts_ms": int(time.time() * 1000),
+                })
+
                 yield _sse({
                     "phase": "PLAN_GENERATED",
                     "round": round_num,
@@ -301,6 +339,23 @@ async def run_agent_loop(
                     })
                     final_status = "EXECUTE_TIMEOUT"
                     break
+
+                _persist(ledger, {
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "goal": goal,
+                    "round": round_num,
+                    "phase": "EXECUTE_DONE",
+                    "status": report.status.value,
+                    "goal_achieved": report.goal_achieved,
+                    "report_json": report.model_dump_json(),
+                    "action_count": report.total_actions,
+                    "success_count": report.success_count,
+                    "failed_count": report.failed_count,
+                    "latency_ms": report.total_latency_ms,
+                    "error": report.error,
+                    "ts_ms": int(time.time() * 1000),
+                })
 
                 yield _sse({
                     "phase": "EXECUTE_DONE",
@@ -373,6 +428,20 @@ async def run_agent_loop(
         _logger.error("agent_loop: 内部错误 %s", exc, extra={"request_id": request_id})
 
     total_latency_ms = int(time.time() * 1000) - loop_start_ms
+
+    _persist(ledger, {
+        "request_id": request_id,
+        "session_id": session_id,
+        "goal": goal,
+        "round": 0,
+        "phase": "LOOP_DONE",
+        "status": final_status,
+        "goal_achieved": goal_achieved,
+        "action_count": len(round_summaries),
+        "latency_ms": total_latency_ms,
+        "extra_json": json.dumps({"round_summaries": round_summaries}, ensure_ascii=False),
+        "ts_ms": int(time.time() * 1000),
+    })
 
     yield _sse({
         "phase": "LOOP_DONE",
