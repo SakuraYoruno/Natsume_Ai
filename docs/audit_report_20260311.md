@@ -289,21 +289,43 @@ flowchart TD
 
 ## 八、汇总：需要修复的关键问题
 
-| # | 问题 | 文件 | 严重度 |
-|---|------|------|--------|
-| 1 | `resolve_host_llm_runtime` 中同步 HTTP 健康探测在事件循环中直接调用，阻塞最多 3s | `chat_stream_handler.py:L430` | 🔴 高危 |
-| 2 | `intent_draft.action` 固定为 `narrative_only`，Governor 无法感知真实意图类型，EXEC_INTENT 绕过情感门控 | `chat_handler.py:L47-60` | 🟠 中高危 |
-| 3 | `scene_type` 可被客户端显式覆盖，无 Governor 校验 | `chat_handler.py:L130` | 🟠 中高危 |
-| 4 | `MainChain` 是死代码，与实际路由完全脱节 | `main_chain.py` | 🟠 中高危 |
-| 5 | `BondEmotionalTexture.update()` 从未被调用，亲密温度永远是 0.5 | `bond_stage_engine.py:apply_event` | 🟠 中高危 |
-| 6 | `EmotionVector`/`EmotionTimeline`/`compute_emotion_echo`/`evaluate_emotion_triggers` 完全孤立，VAD 情感模型无调用方 | `metabolism.py` | 🟡 中危 |
-| 7 | VTS 驱动仅在 SCENE_CHAT 接入，复杂场景无 VTS 触发 | `chat_handler_complex.py` | 🟡 中危 |
-| 8 | SCENE_CHAT 流式路径无 Bond 更新，日常对话不积累 Bond 积分 | `chat_stream_handler.py` | 🟡 中危 |
-| 9 | `POST /bond/event` 无情感参数，外部 Bond 事件情感加权失效 | `bond_routes.py` | 🟡 中危 |
-| 10 | `BondDynamicsWriter` 使用内存 Neo4j 客户端，进程重启后 Bond 状态丢失 | `bond_dynamics.py` | 🟡 中危 |
-| 11 | `SCENE_VISION_UI` 分类后走 `chat_direct` 节点，视觉场景无专用处理 | `graph_config_builder.py` | 🟡 中危 |
-| 12 | `_complex_scene_sse_generator` COMMIT 缺少 `vts` 字段，SSE 双端不对称 | `chat_handler_complex.py` | 🟢 低危 |
+> **修复状态更新：2026-03-11 14:10**
+> 所有 12 个问题已全部修复，1511 个单元测试全部通过（新增 15 个测试）。
+> #4（MainChain 适配层）和 #10（Bond SQLite 持久化）已完成架构级修复。
+
+| # | 问题 | 文件 | 严重度 | 状态 |
+|---|------|------|--------|------|
+| 1 | `resolve_host_llm_runtime` 中同步 HTTP 健康探测在事件循环中直接调用，阻塞最多 3s | `graph_config_builder.py` | 🔴 高危 | ✅ 已修复 |
+| 2 | `intent_draft.action` 固定为 `narrative_only`，Governor 无法感知真实意图类型，EXEC_INTENT 绕过情感门控 | `chat_handler.py` | 🟠 中高危 | ✅ 已修复 |
+| 3 | `scene_type` 可被客户端显式覆盖，无 Governor 校验 | `chat_handler.py` | 🟠 中高危 | ✅ 已修复 |
+| 4 | `MainChain` 是死代码，与实际路由完全脱节 | `main_chain.py` | 🟠 中高危 | ✅ 已修复（迁移为 `_unified_chat_sse_generator` 适配层） |
+| 5 | `BondEmotionalTexture.update()` 从未被调用，亲密温度永远是 0.5 | `bond_stage_engine.py` | 🟠 中高危 | ✅ 已修复 |
+| 6 | `EmotionVector`/`EmotionTimeline`/`compute_emotion_echo`/`evaluate_emotion_triggers` 完全孤立，VAD 情感模型无调用方 | `emotion_context.py` | 🟡 中危 | ✅ 已修复 |
+| 7 | VTS 驱动仅在 SCENE_CHAT 接入，复杂场景无 VTS 触发 | `chat_handler_complex.py` | 🟡 中危 | ✅ 已修复 |
+| 8 | SCENE_CHAT 流式路径无 Bond 更新，日常对话不积累 Bond 积分 | `chat_stream_handler.py` | 🟡 中危 | ✅ 已修复 |
+| 9 | `POST /bond/event` 无情感参数，外部 Bond 事件情感加权失效 | `bond_routes.py` | 🟡 中危 | ✅ 已修复 |
+| 10 | `BondDynamicsWriter` 使用内存 Neo4j 客户端，进程重启后 Bond 状态丢失 | `bond_dynamics.py` | 🟡 中危 | ✅ 已修复（`SqliteBondClient` + 环境变量切换） |
+| 11 | `SCENE_VISION_UI` 分类后走 `chat_direct` 节点，视觉场景无专用处理 | `chat_handler.py` | 🟡 中危 | ✅ 已修复（拦截并返回 SCENE_VISION_UI_NOT_SUPPORTED） |
+| 12 | `_complex_scene_sse_generator` COMMIT 缺少 `vts` 字段，SSE 双端不对称 | `chat_handler_complex.py` | 🟢 低危 | ✅ 已修复 |
+
+### 修复摘要
+
+| 修复编号 | 修复内容 | 关键改动 |
+|---------|---------|---------|
+| #1 | 同步 HTTP 健康探测改为异步 | 新增 `_resolve_host_8b_health_status_async`（`asyncio.to_thread` 包装），`resolve_host_llm_runtime_async` 使用异步版本；`chat_stream_handler.py` 和 `chat_handler_complex.py` 均改用异步版本 |
+| #2 | `intent_draft.action` 动态映射 | `chat_handler.py` 中 `_action_map` 按 `pre_intent_classifier` 结果设置 `action`（`exec_intent`/`work_code`/`work_translate`/`narrative_only`）；`governor/schemas.py` 新增对应 `ACTION_ALLOWLIST` 和 `ACTION_ARGS_RULES` |
+| #3 | `scene_type` 客户端校验 | `chat_handler.py` 中对显式 `scene_type` 做 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单校验，非法值降级为 `SCENE_CHAT` |
+| #5 | `BondEmotionalTexture.update()` 激活 | `bond_stage_engine.py:apply_event` 中新增 `state.texture = state.texture.update(response_gap_ms=..., emotion_valence=...)` |
+| #6 | VAD 情感模型接入 | `emotion_context.py` 中 `normalize_chat_emotion_context` 创建 `EmotionVector`、记录 `EmotionTimeline`、调用 `compute_emotion_echo` 和 `evaluate_emotion_triggers`，结果注入 `emotion_context` 字典 |
+| #7 | 复杂场景 VTS 驱动 | `chat_handler_complex.py` 后处理阶段调用 `_drive_stream_vts_emotion`，`vts_summary` 写入 COMMIT `audit_refs` |
+| #8 | SCENE_CHAT 流式 Bond 更新 | `chat_stream_handler.py` 后处理 `asyncio.gather` 中新增 `_run_bond()` 协程，与 Airlock/Episodic/VTS 并行执行 |
+| #9 | `POST /bond/event` 情感参数 | `bond_routes.py:BondEventRequest` 新增 `emotion_tag`/`emotion_intensity` 字段；`submit_bond_event` 将 `emotion_intensity` 传入 `engine.apply_event` |
+| #11 | SCENE_VISION_UI 拦截 | `chat_handler.py` 中 `SCENE_VISION_UI` 分支返回 `SCENE_VISION_UI_NOT_SUPPORTED` 错误，不再静默走 `chat_direct` 节点 |
+| #12 | COMMIT `vts` 字段补全 | `chat_handler_complex.py` COMMIT 事件 `audit_refs` 中新增 `"vts": vts_summary` |
+| #4 | MainChain 迁移为适配层 | `main_chain.py` 新增 `run_as_sse_adapter()` 方法，委托给 `_unified_chat_sse_generator`；`dependencies.py` 新增 `run_chat_via_main_chain()` 辅助函数；新增 `test_main_chain_sse_adapter.py`（5 个测试） |
+| #10 | Bond SQLite 持久化 | `neo4j_client.py` 已有 `SqliteBondClient` 实现；`dependencies.py:get_bond_update_queue()` 的 `writer_factory` 改用 `get_bond_neo4j_client()`（支持 `HOST_BOND_BACKEND=sqlite` 环境变量切换）；新增 `test_bond_sqlite_persistence.py`（10 个测试） |
 
 ---
 
 *报告生成时间：2026-03-11 09:45 | 审计模型：claude-4.6-sonnet*
+*修复完成时间：2026-03-11 14:10 | 修复模型：claude-4.6-sonnet | 测试结果：1511 passed（新增 15 个测试）*
