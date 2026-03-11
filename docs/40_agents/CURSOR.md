@@ -290,68 +290,44 @@
 
 ---
 
-# 后续待处理任务（严格审计后遗留，2026-03-11 18:12）
+# 后续任务看板（更新于 2026-03-11 22:40）
 
 > 以下任务来自严格代码审计（见 `docs/dataflow_report_20260311.md` 第十六节 §16.7）。
-> 所有任务均以代码真实执行语义为准，不允许把 TODO 写成"已解决"。
+> 任务状态必须以代码真实执行语义和测试证据为准；未落地前不得写成“已解决”。
 
 ## P1（高优先级）
 
-### TODO-1：ContextPackBuilder 升级为 ACTIVE
+### TODO-1：ContextPackBuilder 升级为 ACTIVE（已完成，2026-03-11）
 
-**当前状态**：`SHADOW`
-- `_cpb.build()` 的结果只写入 `audit_refs.context_pack_builder`，不影响 `_build_stream_chat_prompt` 的 `retrieval_evidence_items`
-- 证据：`chat_stream_handler.py::_sse_event_generator`，`context_pack_builder_summary` 只写入 `audit_refs`
+**当前状态**：`ACTIVE`（可回退）
+- `_cpb.build()` 输出会转换为 `retrieval_evidence_items` 并在 `HOST_CONTEXT_PACK_ACTIVE=true` 时回写，真实影响 `_build_stream_chat_prompt`
+- 同时保留 `audit_refs.context_pack_builder` 观测，并新增 `mode/active_enabled/applied_to_prompt/rewritten_item_count/input_item_count`
 
-**目标**：将截断结果回写到 `retrieval_evidence_items`，使 token 预算控制真正影响 prompt 构建
+**改动文件**：
+- `host_brain/app/chat_stream_handler.py`
+- `tests/unit/test_chat_stream_handler_p0_stream_retrieval.py`
 
-**最小改动方案**：
-```python
-# chat_stream_handler.py::_sse_event_generator
-# 在 _cpb.build() 之后，将截断结果回写
-if _cp and _cp.slots:
-    _truncated_items = []
-    for slot_name, slot in _cp.slots.items():
-        if slot and slot.content:
-            _truncated_items.append({
-                "slot_name": slot_name,
-                "text": slot.content,
-                "source": slot_name,
-            })
-    if _truncated_items:
-        retrieval_evidence_items = _truncated_items
-```
+**验证**：
+- `pytest -q tests/unit/test_chat_stream_handler_p0_stream_retrieval.py`（6 passed）
 
-**前置条件**：
-1. 先在 SHADOW 模式下观察 `audit_refs.context_pack_builder` 数据，确认截断行为符合预期
-2. 验证 `slot.content` 格式与 `_build_stream_chat_prompt` 期望的 `retrieval_evidence_items` 格式兼容
-
-**风险**：截断过激可能丢失重要召回结果
-
-**回退方式**：添加 `HOST_CONTEXT_PACK_ACTIVE` 环境变量开关（当前代码无此开关，需同步添加）
+**回退方式**：设置 `HOST_CONTEXT_PACK_ACTIVE=false`，保留构建与审计但不回写 prompt 输入（退回 `SHADOW` 语义）。
 
 ---
 
-### TODO-2：`/v1/edge/events` 添加事件类型白名单
+### TODO-2：`/v1/edge/events` 添加事件类型白名单（已完成，2026-03-11）
 
-**当前状态**：无事件类型枚举约束，无来源校验
-- 证据：`system_handler.py::receive_edge_events_response`，`event_type` 字段无白名单过滤
+**当前状态**：`ACTIVE`（最小安全边界已上线）
+- 已增加 `ALLOWED_EDGE_EVENT_TYPES` 事件类型白名单
+- 已增加 `ALLOWED_EDGE_EVENT_SOURCES` 来源白名单
+- 非法类型/来源在入口返回 `HTTP 400`
 
-**目标**：添加最小安全边界，防止非法事件类型注入
+**改动文件**：
+- `host_brain/app/system_handler.py`
+- `tests/unit/test_edge_events_whitelist.py`
 
-**最小改动方案**：
-```python
-# system_handler.py
-ALLOWED_EDGE_EVENT_TYPES = frozenset({
-    "ASR_FINAL", "ASR_PARTIAL", "EMOTION_DETECTED", "USER_REACTION",
-    "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL", "TTS_STARTED", "TTS_DONE",
-    "VTS_EXPRESSION_SET", "EDGE_HEALTH_PING",
-})
-
-# 在 receive_edge_events_response 入口处校验
-if event.event_type not in ALLOWED_EDGE_EVENT_TYPES:
-    raise HTTPException(status_code=400, detail=f"Unknown event_type: {event.event_type}")
-```
+**验证**：
+- `pytest -q tests/unit/test_edge_events_whitelist.py`（3 passed）
+- `pytest -q tests/integration/test_host_integration.py::TestEdgeEventsEndpoint`（4 passed）
 
 **安全前提**（当前暂不加鉴权的前提）：
 1. Host Brain 仅部署在内网，不暴露公网
@@ -362,32 +338,38 @@ if event.event_type not in ALLOWED_EDGE_EVENT_TYPES:
 
 ## P2（中优先级）
 
-### TODO-3：RoutingMatrix 升级为 ACTIVE
+### TODO-3：RoutingMatrix 升级为 ACTIVE（已完成，2026-03-11）
 
-**当前状态**：`SHADOW`
-- `select_with_fallback()` 结果写入 `routing_matrix_decision`，但不影响实际 `chat_provider_name/model_id` 选择（仍由 8B 健康探测决定）
-- 证据：`graph_config_builder.py::_resolve_host_llm_runtime_core`
+**当前状态**：`ACTIVE`（策略门控）
+- `_decision.selected_model` 已映射回真实 runtime 选择（`provider_name/model_id`），不再仅写审计字段
+- 保留 8B 健康探测与策略门控 fallback；不可切换时写入 `routing_matrix_decision.not_applied_reason`
+- 新增 `routing_matrix_decision.runtime_applied/runtime_selected_target` 用于判定是否真实改写
 
-**目标**：将 `_decision.selected_model` 映射回 `chat_provider_name/model_id`，使路由矩阵真正影响模型选择
+**改动文件**：
+- `host_brain/app/graph_config_builder.py`
+- `tests/unit/test_host_8b_runtime_route.py`
 
-**注意**：需保留 8B 健康探测作为 fallback，不能直接替换
+**验证**：
+- `pytest -q tests/unit/test_host_8b_runtime_route.py`（9 passed）
+- 新增用例：`test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cloud`
 
 ---
 
-### TODO-4：StateArbiter 接入业务查询
+### TODO-4：StateArbiter 接入业务查询（已完成，2026-03-11）
 
-**当前状态**：`WIRED`
-- 3 个状态源已注册（WorldCanon/StyleCanon/EpisodicStore），但全局无任何 `resolve()` 调用
-- 证据：`http_hooks.py::runtime_lifespan`，全局搜索无 `arbiter.resolve(` 调用
+**当前状态**：`ACTIVE`（局部路径）
+- 启动时注册 world/style/episodic 三个适配状态源（修复无效类名/方法引用导致的注册降级）
+- 流式主链调用 `StateArbiter.resolve("world_canon_facts", session_id)`，命中时注入 `retrieval_evidence_items` 与 `retrieval_summary.world_canon`
+- COMMIT 增加 `audit_refs.state_arbiter`，可观测 status/source/fallback/conflict
 
-**推荐方案（方案 B）**：
-- 在 `_build_stream_chat_prompt` 中调用 `StateArbiter.resolve("world_canon_facts", session_id)` 获取世界观事实
-- 将结果注入 `retrieval_summary` 的 `world_canon` 槽位
-- 接入后补测试
+**改动文件**：
+- `host_brain/app/http_hooks.py`
+- `host_brain/app/chat_stream_handler.py`
+- `tests/unit/test_chat_stream_handler_p0_stream_retrieval.py`
 
-**保守方案（方案 A）**：
-- 不改主业务逻辑，保持 `WIRED` 状态
-- 仅修正文档口径，不得写成"已完成接入"
+**验证**：
+- `pytest -q tests/unit/test_chat_stream_handler_p0_stream_retrieval.py`（7 passed）
+- 新增用例：`test_stream_state_arbiter_resolve_injects_world_canon_into_prompt`
 
 ---
 
@@ -395,31 +377,41 @@ if event.event_type not in ALLOWED_EDGE_EVENT_TYPES:
 
 ### TODO-5：SCENE_VISION_UI E2E 联调验证
 
-**当前状态**：`WIRED`（非 `E2E_VERIFIED`）
-- 白名单已加入，`_vision_ui_sse_generator` 完整实现（Gemini Vision 多模态）
-- 但无 E2E 联调证据
-- 证据：`graph_config_builder.py::ALLOWED_EXPLICIT_SCENE_TYPES`，`chat_handler_vision.py::_vision_ui_sse_generator`
+**当前状态**：`E2E_VERIFIED`（2026-03-11）
+- 白名单生效，`SCENE_VISION_UI` 可达（已兼容 `scene_type=SCENE_VISION_UI` 前缀写法）
+- 双端实测已覆盖：
+  - `image_upload_consent=true` → `audit_refs.vision_input.image_upload_allowed=true`
+  - `image_upload_consent=false` → `audit_refs.vision_input.image_upload_allowed=false`
+- `audit_refs.vision_input`、`GRAPH_START(scene_type=VISION_UI)`、`COMMIT(APPROVE)` 均已观测
 
-**验证步骤**：
-1. 启动 Host Brain + Edge Client 双端
-2. 发送 `scene_type=SCENE_VISION_UI` + `image_upload_consent=true` 请求
-3. 验证 Gemini Vision 分析链路完整执行
-4. 确认 `audit_refs.vision_input` 真实写入
-5. 验证无 consent 的降级逻辑成立
-
-**升级条件**：完成上述 5 步验证后，可将等级升为 `E2E_VERIFIED`
+**证据**：
+- 真实双端联调（本地进程启动 `host_brain` + `edge_client`）返回：
+  - `edge_health_status=ACCEPTED`
+  - `host_health_status=OK`
+  - `consent_true.vision_input.image_upload_allowed=true`
+  - `consent_false.vision_input.image_upload_allowed=false`
+- 集成测试：
+  - `tests/integration/test_host_integration.py::TestChatEndpoint::test_chat_vision_ui_with_consent_writes_vision_audit_refs`
+  - `tests/integration/test_host_integration.py::TestChatEndpoint::test_chat_vision_ui_without_consent_degrades_image_upload`
 
 ---
 
 ### TODO-6：MainChain 骨架节点填充
 
-**当前状态**：`WIRED`（适配层）
-- 骨架节点全是 `return True`，`run_as_sse_adapter` 只透传给 `_unified_chat_sse_generator`
-- 证据：`main_chain.py::MainChain._NODE_FACTORIES`，各节点 `execute()` 直接 `return True`
+**当前状态**：`ACTIVE`（轻编排适配层，2026-03-11）
+- 各节点 `execute()` 已补充最小可执行语义（非纯 `return True`）：
+  - `AirlockQuarantineNode`：输入净化/空消息阻断
+  - `GovernorNode`：场景提示映射 `TaskType` 并落审计
+  - `GraphExecutor/RecallFusion/LlmGateway/QA/Episodic/Audit/AirlockSanitizer`：状态落点与审计标签
+- `run_as_sse_adapter` 已升级为：
+  - 执行 pre-node（airlock→governor→graph→recall→llm）
+  - 委托 `_unified_chat_sse_generator` 并观测 SSE（含 COMMIT）
+  - 执行 post-node（qa→episodic→audit→sanitizer）
+  - 前后置失败时触发 FailureHandler + REJECT COMMIT 兜底
 
-**目标**：填充真实业务逻辑，使 MainChain 成为真正的编排器而非透传适配层
-
-**建议最小改动**：先补充节点级审计追踪（写入 `ChainContext.node_timings`），再逐步填充各节点业务逻辑
+**证据**：
+- 代码：`host_brain/app/graph/main_chain.py`
+- 单测：`tests/unit/test_main_chain_sse_adapter.py`（同步执行，覆盖 pre/post 编排与异常兜底）
 
 ---
 

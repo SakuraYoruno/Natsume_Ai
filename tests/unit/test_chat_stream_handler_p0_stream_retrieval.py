@@ -466,3 +466,203 @@ def test_stream_commit_contains_vts_summary(monkeypatch: Any) -> None:
     assert commit["audit_refs"]["vts"]["emotion_tag"] == "HAPPY"
     emotion_snapshot = dict(commit["audit_refs"].get("emotion_snapshot") or {})
     assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
+
+
+def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakeSlot:
+        def __init__(self, content: str) -> None:
+            self.content = content
+            self.token_count = 12
+            self.truncated = True
+            self.conflict_suppressed = False
+
+    class _FakeContextPack:
+        def __init__(self) -> None:
+            self.slots = {"episodic_vector": _FakeSlot("trimmed by context pack")}
+            self.total_token_count = 12
+            self.conflict_events: list[dict[str, Any]] = []
+            self.subgraph_trace: list[dict[str, Any]] = []
+
+        def get_slot(self, slot_name: str) -> Any:
+            return self.slots.get(slot_name)
+
+    class _FakeContextPackBuilder:
+        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _FakeContextPack:
+            assert "episodic_vector" in recall_results
+            assert task_type == "chat"
+            return _FakeContextPack()
+
+    async def _fake_run_retrieval(**kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        return (
+            {"status": "OK", "reason_code": "OK", "degraded": False},
+            [
+                {
+                    "evidence_ref": "e1",
+                    "source_ref": "episodic_vector://memory/1",
+                    "snippet": "raw retrieval snippet",
+                    "store_id": "episodic_vector",
+                    "metadata": {"store_id": "episodic_vector"},
+                }
+            ],
+        )
+
+    async def _fake_build_prompt(**kwargs: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+        captured["retrieval_evidence_items"] = list(kwargs["retrieval_evidence_items"])
+        return "prompt", "system", {}, {"emotion_tag": "NEUTRAL"}
+
+    async def _fake_stream_chunks(**kwargs: Any):
+        yield "hello"
+
+    async def _fake_drive_vts(**kwargs: Any) -> dict[str, Any]:
+        return {"status": "SKIPPED", "reason_code": "TEST"}
+
+    import host_brain.app.dependencies as dep
+
+    monkeypatch.setenv("HOST_CONTEXT_PACK_ACTIVE", "true")
+    monkeypatch.setattr(dep, "get_context_pack_builder", lambda: _FakeContextPackBuilder())
+    monkeypatch.setattr(stream_mod, "get_intent_engine", lambda: _FakeIntentEngine())
+    monkeypatch.setattr(stream_mod, "resolve_chat_emotion_context", lambda request_body: {"emotion_tag": "NEUTRAL"})
+    monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
+    monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
+    monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
+        "provider_name": "mock",
+        "model_id": "mock-model",
+        "timeout_ms": 1000,
+        "llm_api_key": "k",
+        "available": True,
+    })
+    monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
+    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
+    monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
+    monkeypatch.setattr(stream_mod, "get_episodic_store", lambda: object())
+
+    events = _collect_sse_events(
+        stream_mod._sse_event_generator(
+            message="hi",
+            session_id="s1",
+            thread_id=None,
+            mood_state=None,
+            emotion_tag=None,
+            request_id="r4-cpb",
+            ts_ms=1,
+            intent_draft=None,
+        )
+    )
+
+    rewritten = list(captured["retrieval_evidence_items"])
+    assert len(rewritten) == 1
+    assert rewritten[0]["slot_name"] == "episodic_vector"
+    assert rewritten[0]["snippet"] == "trimmed by context pack"
+    commit = next(e for e in events if e.get("phase") == "COMMIT")
+    summary = dict(commit["audit_refs"].get("context_pack_builder") or {})
+    assert summary.get("mode") == "ACTIVE"
+    assert summary.get("applied_to_prompt") is True
+
+
+def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    class _EmptyContextPack:
+        slots: dict[str, Any] = {}
+        total_token_count = 0
+        conflict_events: list[dict[str, Any]] = []
+        subgraph_trace: list[dict[str, Any]] = []
+
+        def get_slot(self, slot_name: str) -> Any:
+            _ = slot_name
+            return None
+
+    class _NoopContextPackBuilder:
+        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _EmptyContextPack:
+            _ = (recall_results, task_type)
+            return _EmptyContextPack()
+
+    class _FakeSource:
+        value = "WorldCanonStore"
+
+    class _FakeArbiterResult:
+        fact_key = "world_canon_facts"
+        value = [{"title": "人格核心", "content": "夏目蓝保持克制温柔。"}]
+        source = _FakeSource()
+        is_fallback = False
+        fallback_chain: list[Any] = []
+        conflict_detected = False
+        conflict_detail = None
+
+    class _FakeArbiter:
+        async def resolve(self, fact_key: str, session_id: str | None = None) -> _FakeArbiterResult | None:
+            assert fact_key == "world_canon_facts"
+            assert session_id == "s-state-arbiter"
+            return _FakeArbiterResult()
+
+    async def _fake_run_retrieval(**kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        _ = kwargs
+        return (
+            {"status": "OK", "reason_code": "OK", "degraded": False},
+            [{"evidence_ref": "e1", "source_ref": "episodic://1", "snippet": "retrieval snippet"}],
+        )
+
+    async def _fake_build_prompt(**kwargs: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+        captured["retrieval_summary"] = dict(kwargs["retrieval_summary"])
+        captured["retrieval_evidence_items"] = list(kwargs["retrieval_evidence_items"])
+        return "prompt", "system", {}, {"emotion_tag": "NEUTRAL"}
+
+    async def _fake_stream_chunks(**kwargs: Any):
+        _ = kwargs
+        yield "hello"
+
+    async def _fake_drive_vts(**kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        return {"status": "SKIPPED", "reason_code": "TEST"}
+
+    import host_brain.app.dependencies as dep
+
+    monkeypatch.setenv("HOST_CONTEXT_PACK_ACTIVE", "false")
+    monkeypatch.setattr(dep, "get_context_pack_builder", lambda: _NoopContextPackBuilder())
+    monkeypatch.setattr(dep, "get_state_arbiter", lambda: _FakeArbiter())
+    monkeypatch.setattr(stream_mod, "get_intent_engine", lambda: _FakeIntentEngine())
+    monkeypatch.setattr(stream_mod, "resolve_chat_emotion_context", lambda request_body: {"emotion_tag": "NEUTRAL"})
+    monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
+    monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
+    monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
+        "provider_name": "mock",
+        "model_id": "mock-model",
+        "timeout_ms": 1000,
+        "llm_api_key": "k",
+        "available": True,
+    })
+    monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
+    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
+    monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
+    monkeypatch.setattr(stream_mod, "get_episodic_store", lambda: object())
+
+    events = _collect_sse_events(
+        stream_mod._sse_event_generator(
+            message="hi",
+            session_id="s-state-arbiter",
+            thread_id=None,
+            mood_state=None,
+            emotion_tag=None,
+            request_id="r5-state-arbiter",
+            ts_ms=1,
+            intent_draft=None,
+        )
+    )
+
+    prompt_inputs = list(captured["retrieval_evidence_items"])
+    assert len(prompt_inputs) >= 2
+    assert prompt_inputs[0]["source"] == "state_arbiter"
+    assert prompt_inputs[0]["store_id"] == "world_canon"
+    retrieval_summary = dict(captured["retrieval_summary"] or {})
+    assert dict(retrieval_summary.get("state_arbiter") or {}).get("status") == "APPLIED"
+    assert dict(retrieval_summary.get("world_canon") or {}).get("status") == "INJECTED"
+    commit = next(e for e in events if e.get("phase") == "COMMIT")
+    assert dict(commit["audit_refs"].get("state_arbiter") or {}).get("status") == "APPLIED"

@@ -18,7 +18,7 @@ EDGE_REQUIRED_SERVICES: tuple[EdgeServiceSpec, ...] = (
     EdgeServiceSpec(service_id="edge.rpc.asr"),
     EdgeServiceSpec(service_id="edge.rpc.tts"),
     EdgeServiceSpec(service_id="edge.rpc.barge_in"),
-    EdgeServiceSpec(service_id="edge.rpc.fallback_llm", required=False),
+    EdgeServiceSpec(service_id="edge.rpc.fallback_llm"),
     EdgeServiceSpec(service_id="edge.rpc.resource_gate"),
 )
 

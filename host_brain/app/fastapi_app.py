@@ -34,7 +34,7 @@ from host_brain.app.health_routes import router as health_router
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.input_routes import router as input_router
 from host_brain.app.dependencies import (
-    get_ledger,
+    get_ledger as _get_ledger_dep,
     get_tool_catalog,
     get_tool_broker,
     get_bond_stage_engine,
@@ -50,6 +50,16 @@ from host_brain.core.ids import new_request_id
 
 
 _logger = logging.getLogger("Natsume.fastapi")
+
+# Legacy injectable globals retained for compatibility with older E2E tests.
+_ledger = None
+_intent_engine = None
+
+
+def _get_ledger_compat():
+    if _ledger is not None:
+        return _ledger
+    return _get_ledger_dep()
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +108,7 @@ _metrics = _RuntimeMetrics()
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown 生命周期钩子。"""
-    async with runtime_lifespan(get_ledger=get_ledger, logger=_logger):
+    async with runtime_lifespan(get_ledger=_get_ledger_compat, logger=_logger):
         yield
 
 
@@ -225,7 +235,7 @@ async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResp
     """接收 Edge 端批量上报的事件 — 委托给 system_handler.receive_edge_events_response。"""
     return receive_edge_events_response(
         request_body=request_body,
-        get_ledger=get_ledger,
+        get_ledger=_get_ledger_compat,
         logger=_logger,
     )
 
@@ -280,5 +290,3 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True,
     )
-
-

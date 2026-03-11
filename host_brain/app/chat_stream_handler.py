@@ -327,6 +327,248 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return bool(default)
 
 
+_CONTEXT_PACK_SLOT_ALIASES: dict[str, str] = {
+    "world": "world_canon",
+    "world_canon": "world_canon",
+    "style": "style_canon",
+    "style_canon": "style_canon",
+    "episodic": "episodic_vector",
+    "episodic_store": "episodic_vector",
+    "episodic_vector": "episodic_vector",
+    "bond": "bond_graph",
+    "bond_graph": "bond_graph",
+    "artifact": "artifact_vault",
+    "artifact_vault": "artifact_vault",
+    "persona": "persona_utterance",
+    "persona_utterance": "persona_utterance",
+    "sqlite": "sqlite_ledger",
+    "sqlite_ledger": "sqlite_ledger",
+    "ledger": "sqlite_ledger",
+}
+
+_CONTEXT_PACK_SLOT_TO_STORE_ID: dict[str, str] = {
+    "world_canon": "world_canon",
+    "style_canon": "style_canon",
+    "episodic_vector": "episodic_vector",
+    "bond_graph": "bond_graph",
+    "artifact_vault": "artifact_vault",
+    "persona_utterance": "persona_utterance",
+    "sqlite_ledger": "sqlite_ledger",
+}
+
+
+def _normalize_context_pack_slot(
+    *,
+    slot_hint: str,
+    source_ref: str,
+) -> str | None:
+    normalized_hint = str(slot_hint or "").strip().lower()
+    if normalized_hint:
+        direct = _CONTEXT_PACK_SLOT_ALIASES.get(normalized_hint)
+        if direct:
+            return direct
+
+    normalized_source_ref = str(source_ref or "").strip().lower()
+    if not normalized_source_ref:
+        return None
+    for alias, slot in _CONTEXT_PACK_SLOT_ALIASES.items():
+        token = f"{alias}://"
+        if normalized_source_ref.startswith(token):
+            return slot
+    return None
+
+
+def _build_context_pack_recall_results(
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> dict[str, str]:
+    recall_results: dict[str, str] = {}
+    for item in list(retrieval_evidence_items or []):
+        if not isinstance(item, Mapping):
+            continue
+
+        metadata_raw = item.get("metadata")
+        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+        slot = _normalize_context_pack_slot(
+            slot_hint=str(
+                item.get("slot_name")
+                or item.get("source")
+                or item.get("store_id")
+                or metadata.get("store_id")
+                or ""
+            ),
+            source_ref=str(item.get("source_ref") or metadata.get("source_ref") or ""),
+        )
+        if not slot:
+            continue
+
+        text = str(
+            item.get("text")
+            or item.get("content")
+            or item.get("snippet")
+            or ""
+        ).strip()
+        if not text:
+            continue
+
+        existing = recall_results.get(slot)
+        if existing:
+            merged = f"{existing}\n{text}"
+            recall_results[slot] = _truncate_for_prompt(merged, limit=1600)
+        else:
+            recall_results[slot] = text
+
+    return recall_results
+
+
+def _context_pack_to_retrieval_evidence_items(context_pack: Any) -> list[dict[str, Any]]:
+    from host_brain.app.schemas.context_pack import TRUNCATION_PRIORITY  # noqa: PLC0415
+
+    rewritten: list[dict[str, Any]] = []
+    for slot_name in TRUNCATION_PRIORITY:
+        slot = context_pack.get_slot(slot_name)
+        if slot is None:
+            continue
+        content = str(getattr(slot, "content", "") or "").strip()
+        if not content:
+            continue
+
+        store_id = _CONTEXT_PACK_SLOT_TO_STORE_ID.get(slot_name, slot_name)
+        rewritten.append(
+            {
+                "slot_name": slot_name,
+                "source": slot_name,
+                "store_id": store_id,
+                "evidence_ref": f"context_pack://{slot_name}",
+                "source_ref": f"{slot_name}://context_pack_builder",
+                "snippet": _truncate_for_prompt(content, limit=240),
+                "content": content,
+                "text": content,
+                "metadata": {
+                    "store_id": store_id,
+                    "source": "context_pack_builder",
+                    "truncated": bool(getattr(slot, "truncated", False)),
+                    "conflict_suppressed": bool(getattr(slot, "conflict_suppressed", False)),
+                },
+            }
+        )
+    return rewritten
+
+
+def _normalize_state_arbiter_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        for key in ("content", "body", "text", "summary", "value"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+        try:
+            return json.dumps(dict(value), ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return str(value).strip()
+    if isinstance(value, list):
+        chunks: list[str] = []
+        for row in value[:3]:
+            if isinstance(row, Mapping):
+                piece = (
+                    str(row.get("content") or "").strip()
+                    or str(row.get("body") or "").strip()
+                    or str(row.get("text") or "").strip()
+                    or str(row.get("title") or "").strip()
+                )
+            else:
+                piece = str(row).strip()
+            if piece:
+                chunks.append(piece)
+        return "\n".join(chunks).strip()
+    return str(value).strip()
+
+
+def _build_state_arbiter_world_evidence_item(
+    *,
+    fact_text: str,
+    source_name: str,
+    fact_key: str,
+) -> dict[str, Any]:
+    normalized_source = str(source_name or "unknown").strip() or "unknown"
+    normalized_key = str(fact_key or "world_canon_facts").strip() or "world_canon_facts"
+    snippet = _truncate_for_prompt(fact_text, limit=240)
+    return {
+        "slot_name": "world_canon",
+        "source": "state_arbiter",
+        "store_id": "world_canon",
+        "evidence_ref": f"state_arbiter://{normalized_source}/{normalized_key}",
+        "source_ref": f"state_arbiter://{normalized_source}",
+        "snippet": snippet,
+        "content": fact_text,
+        "text": fact_text,
+        "metadata": {
+            "store_id": "world_canon",
+            "source": "state_arbiter",
+            "arbiter_source": normalized_source,
+            "fact_key": normalized_key,
+        },
+    }
+
+
+async def _resolve_state_arbiter_world_fact(
+    *,
+    session_id: str,
+    request_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    summary: dict[str, Any] = {
+        "status": "SKIPPED",
+        "reason_code": "NOT_AVAILABLE",
+        "fact_key": "world_canon_facts",
+    }
+    try:
+        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+
+        arbiter = get_state_arbiter()
+        result = await arbiter.resolve("world_canon_facts", session_id=session_id)
+        if result is None:
+            summary["reason_code"] = "NO_MATCH"
+            return summary, None
+
+        fact_text = _normalize_state_arbiter_value(result.value)
+        summary.update(
+            {
+                "source": str(getattr(result.source, "value", result.source) or "unknown"),
+                "is_fallback": bool(getattr(result, "is_fallback", False)),
+                "fallback_chain": [
+                    str(getattr(row, "value", row) or "")
+                    for row in list(getattr(result, "fallback_chain", []) or [])
+                    if str(getattr(row, "value", row) or "").strip()
+                ],
+                "conflict_detected": bool(getattr(result, "conflict_detected", False)),
+                "conflict_detail": str(getattr(result, "conflict_detail", "") or "").strip() or None,
+            }
+        )
+        if not fact_text:
+            summary["reason_code"] = "EMPTY_VALUE"
+            return summary, None
+
+        evidence_item = _build_state_arbiter_world_evidence_item(
+            fact_text=fact_text,
+            source_name=str(getattr(result.source, "value", result.source) or "unknown"),
+            fact_key=str(getattr(result, "fact_key", "world_canon_facts") or "world_canon_facts"),
+        )
+        summary["status"] = "APPLIED"
+        summary["reason_code"] = None
+        summary["value_chars"] = len(fact_text)
+        return summary, evidence_item
+    except Exception as exc:
+        _logger.debug(
+            "StateArbiter 调用失败（降级）: %s",
+            exc,
+            extra={"request_id": request_id},
+        )
+        summary["status"] = "DEGRADED"
+        summary["reason_code"] = "STATE_ARBITER_FAILED"
+        summary["detail"] = str(exc)
+        return summary, None
+
+
 def _resolve_stream_vts_timeout_ms() -> int:
     raw = str(os.environ.get("HOST_STREAM_VTS_TIMEOUT_MS") or "300").strip()
     try:
@@ -639,6 +881,20 @@ async def _sse_event_generator(
             retrieval_evidence_items = []
         if retrieval_latency_ms is not None:
             retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
+
+        state_arbiter_summary, state_arbiter_evidence_item = await _resolve_state_arbiter_world_fact(
+            session_id=session_id,
+            request_id=request_id,
+        )
+        retrieval_summary["state_arbiter"] = dict(state_arbiter_summary)
+        if state_arbiter_evidence_item is not None:
+            retrieval_evidence_items = [state_arbiter_evidence_item, *list(retrieval_evidence_items or [])]
+            retrieval_summary["world_canon"] = {
+                "status": "INJECTED",
+                "source": "state_arbiter",
+                "fact_key": str(state_arbiter_summary.get("fact_key") or "world_canon_facts"),
+            }
+
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="stream_pre_llm",
@@ -678,25 +934,36 @@ async def _sse_event_generator(
         try:
             from host_brain.app.dependencies import get_context_pack_builder  # noqa: PLC0415
             _cpb = get_context_pack_builder()
-            # 从 retrieval_summary 中提取各路召回文本
-            _recall_results: dict[str, str | None] = {}
             _evidence_items = list(retrieval_evidence_items or [])
-            for _item in _evidence_items:
-                _slot = str(_item.get("slot_name") or _item.get("source") or "").strip()
-                _text = str(_item.get("text") or _item.get("content") or "").strip()
-                if _slot and _text:
-                    _recall_results[_slot] = _text
+            _recall_results = _build_context_pack_recall_results(_evidence_items)
+            _context_pack_active = _parse_bool_env("HOST_CONTEXT_PACK_ACTIVE", default=True)
             if _recall_results:
                 _cp = _cpb.build(recall_results=_recall_results, task_type="chat")
+                _rewritten_items = _context_pack_to_retrieval_evidence_items(_cp)
+                _applied_to_prompt = False
+                if _context_pack_active and _rewritten_items:
+                    retrieval_evidence_items = _rewritten_items
+                    _applied_to_prompt = True
                 context_pack_builder_summary = {
                     "status": "OK",
+                    "mode": ("ACTIVE" if _applied_to_prompt else "SHADOW"),
+                    "active_enabled": _context_pack_active,
+                    "applied_to_prompt": _applied_to_prompt,
+                    "rewritten_item_count": len(_rewritten_items),
+                    "input_item_count": len(_evidence_items),
                     "total_tokens": _cp.total_token_count,
                     "slot_count": len([s for s in _cp.slots.values() if s and s.content]),
                     "conflict_events": len(_cp.conflict_events),
                     "subgraph_trace_count": len(_cp.subgraph_trace),
                 }
             else:
-                context_pack_builder_summary = {"status": "SKIPPED", "reason_code": "NO_RECALL_RESULTS"}
+                context_pack_builder_summary = {
+                    "status": "SKIPPED",
+                    "mode": "SHADOW",
+                    "active_enabled": _context_pack_active,
+                    "reason_code": "NO_RECALL_RESULTS",
+                    "input_item_count": len(_evidence_items),
+                }
         except Exception as _cpb_exc:
             context_pack_builder_summary = {"status": "DEGRADED", "reason": str(_cpb_exc)}
             _logger.debug(
@@ -979,6 +1246,7 @@ async def _sse_event_generator(
                 "trace_metrics": trace_metrics,
                 "context_pack_builder": context_pack_builder_summary,
                 "routing_matrix_decision": dict(llm_runtime.get("routing_matrix_decision") or {}),
+                "state_arbiter": state_arbiter_summary,
             },
         })
 

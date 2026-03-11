@@ -38,6 +38,41 @@ from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
 from host_brain.observability.routes import build_obs_metrics_response
 
+ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "ASR_CHUNK",
+        "ASR_FINAL",
+        "ASR_PARTIAL",
+        "ASR_RESULT",
+        "EMOTION_DETECTED",
+        "USER_REACTION",
+        "WECHAT_MSG_RECEIVED",
+        "USER_INPUT_FINAL",
+        "SPEAK",
+        "BARGE_IN",
+        "TTS_PLAY",
+        "TTS_SYNTH",
+        "TTS_STARTED",
+        "TTS_DONE",
+        "TTS_QUEUED",
+        "TTS_SYNTH_READY",
+        "TTS_SYNTH_FAILED",
+        "TTS_PLAYBACK_STARTED",
+        "TTS_PLAYBACK_FINISHED",
+        "TTS_PLAYBACK_INTERRUPTED",
+        "VTS_EXPRESSION",
+        "VTS_EXPRESSION_SET",
+        "FALLBACK_PRESENCE",
+        "FALLBACK_ASR_COMPILE",
+        "FALLBACK_RETRIEVAL_HINTS",
+        "FALLBACK_CONTEXT_COMPRESS",
+        "VOICE_RESOURCE_GATE",
+        "EDGE_HEALTH_PING",
+    }
+)
+
+ALLOWED_EDGE_EVENT_SOURCES: frozenset[str] = frozenset({"edge", "edge_client", "host_edge_bridge"})
+
 
 def _load_json_file(path: Path) -> dict[str, Any] | None:
     if not path.exists():
@@ -336,15 +371,27 @@ def receive_edge_events_response(
         event_type = str(raw.get("event_type") or "").strip()
         request_id = str(raw.get("request_id") or "").strip()
         session_id = str(raw.get("session_id") or "").strip()
+        source = str(raw.get("source") or "edge").strip().lower()
         ts_val = raw.get("ts_ms")
         if missing or not event_type or not request_id or not session_id or not isinstance(ts_val, (int, float)):
             rejected_indices.append(idx)
             continue
+        if source not in ALLOWED_EDGE_EVENT_SOURCES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown edge event source: {source}",
+            )
+        normalized_event_type = event_type.upper()
+        if normalized_event_type not in ALLOWED_EDGE_EVENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown edge event_type: {event_type}",
+            )
         try:
             ledger.log_voice_event({
                 "request_id": request_id,
                 "session_id": session_id,
-                "event_type": event_type,
+                "event_type": normalized_event_type,
                 "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
                 "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
                 "status": str(raw.get("status") or "RECEIVED"),
@@ -357,7 +404,7 @@ def receive_edge_events_response(
             accepted_count += 1
 
             # 收集情感相关事件（ASR_FINAL / EMOTION_DETECTED / USER_REACTION）
-            if event_type in {
+            if normalized_event_type in {
                 "ASR_FINAL", "EMOTION_DETECTED", "USER_REACTION",
                 "WECHAT_MSG_RECEIVED", "USER_INPUT_FINAL",
             }:
@@ -384,7 +431,7 @@ def receive_edge_events_response(
                 _emotion_events.append({
                     "request_id": request_id,
                     "session_id": session_id,
-                    "event_type": event_type,
+                    "event_type": normalized_event_type,
                     "emotion_tag": emotion_tag,
                     "emotion_intensity": emotion_intensity,
                     "text": text,

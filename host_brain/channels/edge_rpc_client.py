@@ -120,7 +120,8 @@ def _resolve_edge_base_url() -> str:
 
 
 def _resolve_hmac_key() -> str | None:
-    key = str(os.environ.get("EDGE_HMAC_SHARED_KEY") or "").strip()
+    # Host only reads HOST_EDGE_RPC_SHARED_KEY for signing.
+    key = str(os.environ.get("HOST_EDGE_RPC_SHARED_KEY") or "").strip()
     return key if key else None
 
 

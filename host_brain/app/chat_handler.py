@@ -183,7 +183,8 @@ async def _unified_chat_sse_generator(
         # 修复审计问题 #3：对客户端显式传入的 scene_type 进行合法性校验，
         # 防止客户端强制路由到任意场景（如 VISION_UI 等高门槛场景）。
         # ALLOWED_EXPLICIT_SCENE_TYPES 统一在 graph_config_builder 中维护，此处直接引用。
-        explicit_scene_type = str(request_body.scene_type or "").strip().upper()
+        explicit_scene_raw = str(request_body.scene_type or "").strip().upper()
+        explicit_scene_type = explicit_scene_raw.removeprefix("SCENE_")
         if explicit_scene_type:
             if explicit_scene_type not in ALLOWED_EXPLICIT_SCENE_TYPES:
                 _logger.warning(
@@ -191,7 +192,7 @@ async def _unified_chat_sse_generator(
                     extra={
                         "request_id": request_id,
                         "session_id": session_id,
-                        "rejected_scene_type": explicit_scene_type,
+                        "rejected_scene_type": explicit_scene_raw,
                     },
                 )
                 scene_type = SCENE_CHAT

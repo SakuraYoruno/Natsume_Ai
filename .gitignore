@@ -132,6 +132,8 @@ flows/exports/
 
 # --- release 构建产物 ---
 release/
-host_brain/release/
+!host_brain/release/
+!host_brain/release/__init__.py
+!host_brain/release/release_manifest.py
 
 .codebuddy

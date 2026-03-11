@@ -487,23 +487,112 @@ class TestChatEndpoint:
         commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
         assert commit is not None
 
-    def test_chat_vision_ui_scene_rejected(self, test_client):
-        """T-INT-CHAT-10: SCENE_VISION_UI 场景被拒绝（暂不支持）。"""
-        resp = test_client.post(
-            "/v1/chat",
-            json={
-                "message": "帮我看一下屏幕",
-                "scene_type": "SCENE_VISION_UI",
-            },
-        )
+    def test_chat_vision_ui_with_consent_writes_vision_audit_refs(self, test_client):
+        """T-INT-CHAT-10: SCENE_VISION_UI 可达，consent=true 时写入 vision_input 审计。"""
+        async def _mock_runtime(*args, **kwargs):
+            return {
+                "cloud_provider_name": "gemini",
+                "cloud_model_id": "gemini-2.5-flash",
+                "cloud_llm_api_key": "mock-key",
+                "cloud_timeout_ms": 8000,
+                "cloud_available": True,
+                "cloud_provider_fn": MagicMock(),
+            }
+
+        async def _mock_vision_llm(**kwargs):
+            return {
+                "narrative": "我看到一个登录界面，右上角有设置按钮。",
+                "model_used": "gemini-2.5-flash",
+                "provider": "gemini",
+                "status": "OK",
+                "reason_code": None,
+            }
+
+        with (
+            patch("host_brain.app.chat_handler_vision.resolve_host_llm_runtime_async", side_effect=_mock_runtime),
+            patch("host_brain.app.chat_handler_vision._call_vision_llm", side_effect=_mock_vision_llm),
+        ):
+            resp = test_client.post(
+                "/v1/chat",
+                json={
+                    "message": "帮我看一下这个截图",
+                    "scene_type": "SCENE_VISION_UI",
+                    "image_upload_consent": True,
+                    "vision_context": {
+                        "image_base64": "ZmFrZS1pbWFnZS1iYXNlNjQ=",
+                        "image_mime": "image/png",
+                        "screen_description": "登录界面",
+                    },
+                },
+            )
+
         assert resp.status_code == 200
         events = parse_sse_events(resp.text)
-        # SCENE_VISION_UI 被白名单拦截，降级为 SCENE_CHAT 或直接 REJECT
+        graph_start = next((e for e in events if e.get("phase") == "GRAPH_START"), None)
+        commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
+        assert graph_start is not None
+        assert graph_start.get("scene_type") == "VISION_UI"
+        assert commit is not None
+        vision_input = (((commit.get("audit_refs") or {}).get("vision_input") or {}))
+        assert vision_input.get("user_consent") is True
+        assert vision_input.get("has_image") is True
+        assert vision_input.get("image_upload_allowed") is True
+        assert vision_input.get("image_upload_policy") == "REQUIRE_CONSENT"
+
+    def test_chat_vision_ui_without_consent_degrades_image_upload(self, test_client):
+        """T-INT-CHAT-11: SCENE_VISION_UI consent=false 时仍可达，但图片上传被降级禁用。"""
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _mock_runtime(*args, **kwargs):
+            return {
+                "cloud_provider_name": "gemini",
+                "cloud_model_id": "gemini-2.5-flash",
+                "cloud_llm_api_key": "mock-key",
+                "cloud_timeout_ms": 8000,
+                "cloud_available": True,
+                "cloud_provider_fn": MagicMock(),
+            }
+
+        async def _mock_vision_llm(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "narrative": "我这边先按文字描述帮你分析，图片未上传。",
+                "model_used": "gemini-2.5-flash",
+                "provider": "gemini",
+                "status": "OK",
+                "reason_code": None,
+            }
+
+        with (
+            patch("host_brain.app.chat_handler_vision.resolve_host_llm_runtime_async", side_effect=_mock_runtime),
+            patch("host_brain.app.chat_handler_vision._call_vision_llm", side_effect=_mock_vision_llm),
+        ):
+            resp = test_client.post(
+                "/v1/chat",
+                json={
+                    "message": "帮我看一下这个截图",
+                    "scene_type": "SCENE_VISION_UI",
+                    "image_upload_consent": False,
+                    "vision_context": {
+                        "image_base64": "ZmFrZS1pbWFnZS1iYXNlNjQ=",
+                        "image_mime": "image/png",
+                        "screen_description": "设置界面",
+                    },
+                },
+            )
+
+        assert resp.status_code == 200
+        events = parse_sse_events(resp.text)
         commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
         assert commit is not None
+        vision_input = (((commit.get("audit_refs") or {}).get("vision_input") or {}))
+        assert vision_input.get("user_consent") is False
+        assert vision_input.get("has_image") is True
+        assert vision_input.get("image_upload_allowed") is False
+        assert captured_kwargs.get("image_upload_allowed") is False
 
     def test_chat_multiple_requests_independent(self, test_client):
-        """T-INT-CHAT-11: 多次请求相互独立，request_id 不重复。"""
+        """T-INT-CHAT-12: 多次请求相互独立，request_id 不重复。"""
         request_ids = set()
         for i in range(3):
             resp = test_client.post(

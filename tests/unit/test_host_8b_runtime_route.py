@@ -7,6 +7,7 @@ from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
     HOST_CHAT_ROUTE_HOST_8B,
+    SCENE_EXEC_INTENT,
     SCENE_TYPE_AUTO,
     build_chat_graph_config,
 )
@@ -175,6 +176,27 @@ def test_resolve_host_llm_runtime_gray_rollout_scene_excluded_forces_cloud(monke
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "HOST_CHAT_GRAY_SCENE_EXCLUDED"
     assert runtime["gray_rollout"]["scene_type"] == "WORK_CODE"
+
+
+def test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cloud(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_PROVIDER", "openai")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_MODEL_ID", "qwen3:8b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
+
+    runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_EXEC_INTENT)
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["provider_name"] == "gemini"
+    assert runtime["model_id"] == "gemini-cloud-model"
+    routing_matrix_decision = dict(runtime.get("routing_matrix_decision") or {})
+    assert routing_matrix_decision.get("task_type") == "reasoning"
+    assert routing_matrix_decision.get("selected_model") == "cloud"
+    assert bool(routing_matrix_decision.get("runtime_applied")) is True
+    assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_CLOUD
 
 
 def test_build_chat_graph_config_uses_host_8b_only_for_chat_direct(monkeypatch) -> None:

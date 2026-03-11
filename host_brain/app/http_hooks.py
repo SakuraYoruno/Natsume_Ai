@@ -58,18 +58,54 @@ async def runtime_lifespan(
 
             # 注册 WorldCanonStore（最高优先级 SSOT）
             try:
-                from host_brain.memory.canon_world_store import CanonWorldStore  # noqa: PLC0415
-                _world_store = CanonWorldStore()
-                _arbiter.register_source(StateSource.WORLD_CANON, _world_store.get_fact)
+                from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
+
+                _world_store = WorldCanonStore()
+
+                def _world_get_fact(fact_key: str) -> str | None:
+                    if str(fact_key or "").strip() != "world_canon_facts":
+                        return None
+                    try:
+                        docs = _world_store.list_documents()
+                    except Exception:
+                        return None
+                    chunks: list[str] = []
+                    for doc in docs[:3]:
+                        title = str(getattr(doc, "title", "") or "").strip()
+                        body = str(getattr(doc, "body", "") or "").strip()
+                        line = f"{title}: {body}" if title and body else (body or title)
+                        if line:
+                            chunks.append(line)
+                    merged = "\n".join(chunks).strip()
+                    return merged or None
+
+                _arbiter.register_source(StateSource.WORLD_CANON, _world_get_fact)
                 logger.info("StateArbiter: WorldCanonStore 已注册")
             except Exception as _exc:
                 logger.warning("StateArbiter: WorldCanonStore 注册失败（降级）: %s", _exc)
 
             # 注册 StyleCanonStore
             try:
-                from host_brain.memory.canon_style_store import CanonStyleStore  # noqa: PLC0415
-                _style_store = CanonStyleStore()
-                _arbiter.register_source(StateSource.STYLE_CANON, _style_store.get_fact)
+                from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
+
+                _style_store = StyleCanonStore()
+
+                def _style_get_fact(fact_key: str) -> str | None:
+                    if str(fact_key or "").strip() != "style_canon_facts":
+                        return None
+                    try:
+                        entries = _style_store.list_entries()
+                    except Exception:
+                        return None
+                    chunks: list[str] = []
+                    for entry in entries[:3]:
+                        content = str(getattr(entry, "content", "") or "").strip()
+                        if content:
+                            chunks.append(content)
+                    merged = "\n".join(chunks).strip()
+                    return merged or None
+
+                _arbiter.register_source(StateSource.STYLE_CANON, _style_get_fact)
                 logger.info("StateArbiter: StyleCanonStore 已注册")
             except Exception as _exc:
                 logger.warning("StateArbiter: StyleCanonStore 注册失败（降级）: %s", _exc)
@@ -77,8 +113,23 @@ async def runtime_lifespan(
             # 注册 EpisodicStore（取最新记录）
             try:
                 from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+
                 _ep_store = get_episodic_store()
-                _arbiter.register_source(StateSource.EPISODIC_STORE, _ep_store.get_fact)
+
+                def _episodic_get_fact(fact_key: str) -> str | None:
+                    if str(fact_key or "").strip() != "episodic_latest":
+                        return None
+                    records_map = getattr(_ep_store, "_records", None)
+                    if not isinstance(records_map, dict) or not records_map:
+                        return None
+                    try:
+                        latest = max(records_map.values(), key=lambda row: int(getattr(row, "ts_ms", 0)))
+                    except Exception:
+                        return None
+                    text = str(getattr(latest, "text", "") or "").strip()
+                    return text or None
+
+                _arbiter.register_source(StateSource.EPISODIC_STORE, _episodic_get_fact)
                 logger.info("StateArbiter: EpisodicStore 已注册")
             except Exception as _exc:
                 logger.warning("StateArbiter: EpisodicStore 注册失败（降级）: %s", _exc)

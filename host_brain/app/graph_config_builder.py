@@ -735,6 +735,10 @@ async def _resolve_host_llm_runtime_core(
     chat_provider_fn = cloud_provider_fn
     chat_base_url_override = cloud_base_url_override
 
+    host_8b_candidate_runtime: dict[str, Any] = {}
+    host_8b_ready = False
+    host_8b_unavailable_reason = "HOST_8B_NOT_EVALUATED"
+
     host_8b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_8B_ENABLED"), default=True)
     force_cloud = _parse_bool(os.environ.get("HOST_CHAT_FORCE_CLOUD"), default=False)
     gray_rollout = _evaluate_host_chat_gray_rollout(
@@ -745,15 +749,19 @@ async def _resolve_host_llm_runtime_core(
     if force_cloud:
         route_reason_code = "HOST_CHAT_FORCE_CLOUD"
         route_detail = "HOST_CHAT_FORCE_CLOUD=true"
+        host_8b_unavailable_reason = "HOST_CHAT_FORCE_CLOUD"
     elif not host_8b_enabled:
         route_reason_code = "HOST_CHAT_HOST_8B_DISABLED"
         route_detail = "HOST_CHAT_HOST_8B_ENABLED=false"
+        host_8b_unavailable_reason = "HOST_CHAT_HOST_8B_DISABLED"
     elif sys_mode == "gaming":
         route_reason_code = "HOST_CHAT_HOST_8B_DISABLED_GAMING_MODE"
         route_detail = "sys_mode=gaming"
+        host_8b_unavailable_reason = "HOST_CHAT_HOST_8B_DISABLED_GAMING_MODE"
     elif bool(gray_rollout.get("enabled")) and not bool(gray_rollout.get("in_rollout")):
         route_reason_code = str(gray_rollout.get("reason_code") or "HOST_CHAT_GRAY_EXCLUDED")
         route_detail = str(gray_rollout.get("detail") or "gray rollout excluded")
+        host_8b_unavailable_reason = str(route_reason_code or "HOST_CHAT_GRAY_EXCLUDED")
     else:
         host_8b_provider = (
             str(os.environ.get("HOST_CHAT_HOST_8B_PROVIDER") or _HOST_CHAT_8B_DEFAULT_PROVIDER).strip().lower()
@@ -779,12 +787,33 @@ async def _resolve_host_llm_runtime_core(
             else:
                 route_reason_code = "HOST_CHAT_HOST_8B_KEY_MISSING"
                 route_detail = f"{_provider_api_key_env_name(host_8b_provider) or 'api_key'} missing"
+                host_8b_unavailable_reason = "HOST_CHAT_HOST_8B_KEY_MISSING"
 
         host_8b_available = _is_provider_available(
             provider_name=host_8b_provider,
             api_key=host_8b_api_key,
             configured_available=True,
         )
+        host_8b_base_url_override = _resolve_host_8b_base_url(provider_name=host_8b_provider)
+        host_8b_candidate_runtime = {
+            "provider_name": host_8b_provider,
+            "model_id": host_8b_model_id,
+            "timeout_ms": host_8b_timeout_ms,
+            "llm_api_key": host_8b_api_key,
+            "available": bool(host_8b_available),
+            "base_url_override": host_8b_base_url_override,
+            "provider_fn": (
+                build_host_provider_fn(
+                    provider_name=host_8b_provider,
+                    model_id=host_8b_model_id,
+                    api_key=host_8b_api_key,
+                    timeout_ms=host_8b_timeout_ms,
+                    base_url_override=host_8b_base_url_override,
+                )
+                if host_8b_available
+                else None
+            ),
+        }
         if host_8b_available:
             if health_probe_async:
                 healthy, health_detail = await _resolve_host_8b_health_status_async(
@@ -797,18 +826,23 @@ async def _resolve_host_llm_runtime_core(
                     timeout_ms=min(host_8b_timeout_ms, 3_000),
                 )
             if healthy:
+                host_8b_ready = True
+                host_8b_unavailable_reason = ""
                 chat_provider_name = host_8b_provider
                 chat_model_id = host_8b_model_id
                 chat_timeout_ms = host_8b_timeout_ms
                 chat_llm_api_key = host_8b_api_key
                 chat_available = True
-                chat_base_url_override = _resolve_host_8b_base_url(provider_name=chat_provider_name)
-                chat_provider_fn = build_host_provider_fn(
-                    provider_name=chat_provider_name,
-                    model_id=chat_model_id,
-                    api_key=chat_llm_api_key,
-                    timeout_ms=chat_timeout_ms,
-                    base_url_override=chat_base_url_override,
+                chat_base_url_override = host_8b_base_url_override
+                chat_provider_fn = (
+                    host_8b_candidate_runtime.get("provider_fn")
+                    or build_host_provider_fn(
+                        provider_name=chat_provider_name,
+                        model_id=chat_model_id,
+                        api_key=chat_llm_api_key,
+                        timeout_ms=chat_timeout_ms,
+                        base_url_override=chat_base_url_override,
+                    )
                 )
                 route_target = HOST_CHAT_ROUTE_HOST_8B
                 route_reason_code = "HOST_CHAT_HOST_8B_ACTIVE"
@@ -816,9 +850,13 @@ async def _resolve_host_llm_runtime_core(
             else:
                 route_reason_code = "HOST_CHAT_HOST_8B_UNHEALTHY"
                 route_detail = health_detail
+                host_8b_unavailable_reason = str(health_detail or "HOST_CHAT_HOST_8B_UNHEALTHY")
         elif route_reason_code == "HOST_CHAT_ROUTE_CLOUD_DEFAULT":
             route_reason_code = "HOST_CHAT_HOST_8B_UNAVAILABLE"
             route_detail = "host 8b provider unavailable"
+            host_8b_unavailable_reason = "HOST_CHAT_HOST_8B_UNAVAILABLE"
+        elif not host_8b_available and not host_8b_unavailable_reason:
+            host_8b_unavailable_reason = "HOST_CHAT_HOST_8B_UNAVAILABLE"
 
     # [选项二] 接入 RoutingMatrix：将场景类型映射为 TaskType，记录路由矩阵决策
     routing_matrix_decision: dict[str, Any] = {}
@@ -827,6 +865,7 @@ async def _resolve_host_llm_runtime_core(
         from host_brain.app.schemas.routing_types import TaskType as _TaskType, LatencyBudget as _LatencyBudget  # noqa: PLC0415
         _scene_to_task = {
             SCENE_CHAT: _TaskType.CHAT,
+            SCENE_EXEC_INTENT: _TaskType.REASONING,
             SCENE_WORK_CODE: _TaskType.CODE,
             SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE,
             SCENE_VISION_UI: _TaskType.CHAT,  # 视觉场景复用 CHAT 路由
@@ -841,12 +880,65 @@ async def _resolve_host_llm_runtime_core(
             task_type=_task_type,
             latency_budget=_latency,
         )
+        _selected_model = str(_decision.selected_model.value or "").strip().lower()
+        _runtime_changed = False
+        _not_applied_reason: str | None = None
+
+        if _selected_model == HOST_CHAT_ROUTE_CLOUD:
+            if route_target != HOST_CHAT_ROUTE_CLOUD:
+                chat_provider_name = cloud_provider_name
+                chat_model_id = cloud_model_id
+                chat_timeout_ms = cloud_timeout_ms
+                chat_llm_api_key = cloud_llm_api_key
+                chat_available = cloud_available
+                chat_provider_fn = cloud_provider_fn
+                chat_base_url_override = cloud_base_url_override
+                route_target = HOST_CHAT_ROUTE_CLOUD
+                route_reason_code = "ROUTING_MATRIX_SELECTED_CLOUD"
+                route_detail = (
+                    f"routing_matrix selected cloud: task={_decision.task_type.value},"
+                    f" latency={_decision.latency_budget.value}"
+                )
+                _runtime_changed = True
+        elif _selected_model == HOST_CHAT_ROUTE_HOST_8B:
+            if route_target != HOST_CHAT_ROUTE_HOST_8B and host_8b_ready and host_8b_candidate_runtime:
+                chat_provider_name = str(host_8b_candidate_runtime.get("provider_name") or chat_provider_name)
+                chat_model_id = str(host_8b_candidate_runtime.get("model_id") or chat_model_id)
+                chat_timeout_ms = int(host_8b_candidate_runtime.get("timeout_ms") or chat_timeout_ms)
+                chat_llm_api_key = host_8b_candidate_runtime.get("llm_api_key")
+                chat_available = bool(host_8b_candidate_runtime.get("available", True))
+                chat_provider_fn = (
+                    host_8b_candidate_runtime.get("provider_fn")
+                    or chat_provider_fn
+                )
+                chat_base_url_override = str(
+                    host_8b_candidate_runtime.get("base_url_override")
+                    or chat_base_url_override
+                    or ""
+                ).strip() or None
+                route_target = HOST_CHAT_ROUTE_HOST_8B
+                route_reason_code = "ROUTING_MATRIX_SELECTED_HOST_8B"
+                route_detail = (
+                    f"routing_matrix selected host_8b: task={_decision.task_type.value},"
+                    f" latency={_decision.latency_budget.value}"
+                )
+                _runtime_changed = True
+            elif route_target != HOST_CHAT_ROUTE_HOST_8B:
+                _not_applied_reason = (
+                    f"HOST_8B_UNAVAILABLE:{host_8b_unavailable_reason or 'UNKNOWN'}"
+                )
+        else:
+            _not_applied_reason = f"UNSUPPORTED_MODEL_TARGET:{_selected_model or 'unknown'}"
+
         routing_matrix_decision = {
             "task_type": _decision.task_type.value,
             "selected_model": _decision.selected_model.value,
             "latency_budget": _decision.latency_budget.value,
             "is_fallback": _decision.is_fallback,
             "fallback_reason": _decision.fallback_reason,
+            "runtime_applied": _runtime_changed,
+            "runtime_selected_target": route_target,
+            "not_applied_reason": _not_applied_reason,
         }
     except Exception as _rm_exc:
         routing_matrix_decision = {"status": "DEGRADED", "reason": str(_rm_exc)}

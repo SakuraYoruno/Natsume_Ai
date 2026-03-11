@@ -19,6 +19,7 @@ SceneRouter 在 Governor 放行后根据 task_type 分流到专用子链。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -223,7 +224,28 @@ class AirlockQuarantineNode(ChainNode):
     timeout = NODE_TIMEOUT["airlock_quarantine"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        # 骨架实现：直接放行，实际安全检查由业务模块注入
+        raw_message = str(ctx.user_message or "")
+        sanitized_message = raw_message.replace("\x00", "").strip()
+
+        ctx.metadata["sanitized_user_message"] = sanitized_message
+        ctx.metadata["airlock_quarantine"] = {
+            "input_chars": len(raw_message),
+            "output_chars": len(sanitized_message),
+            "changed": sanitized_message != raw_message,
+        }
+
+        if not sanitized_message:
+            ctx.quarantine_passed = False
+            ctx.failure_event = FailureEvent.GOVERNOR_BLOCK.value
+            ctx.failure_detail = "Airlock 拒绝空消息输入"
+            ctx.audit_tags.append("AIRLOCK_BLOCK_EMPTY_MESSAGE")
+            logger.info("[%s] Airlock 拒绝：空消息", ctx.request_id)
+            return False
+
+        if sanitized_message != raw_message:
+            ctx.audit_tags.append("AIRLOCK_INPUT_SANITIZED")
+            ctx.user_message = sanitized_message
+
         ctx.quarantine_passed = True
         logger.debug("[%s] 入口隔离通过", ctx.request_id)
         return True
@@ -235,9 +257,34 @@ class GovernorNode(ChainNode):
     timeout = NODE_TIMEOUT["governor"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        # 骨架实现：直接放行，实际规则由 Governor 模块注入
+        if not ctx.quarantine_passed:
+            ctx.governor_passed = False
+            ctx.governor_block_reason = "AIRLOCK_NOT_PASSED"
+            ctx.failure_event = FailureEvent.GOVERNOR_BLOCK.value
+            ctx.failure_detail = "Governor 前置条件失败：Airlock 未通过"
+            ctx.audit_tags.append("GOVERNOR_BLOCK_AIRLOCK")
+            logger.info("[%s] Governor 拒绝：Airlock 未通过", ctx.request_id)
+            return False
+
+        scene_hint = str(ctx.metadata.get("pre_classified_scene") or "").strip().upper()
+        _scene_to_task: Dict[str, TaskType] = {
+            "CHAT": TaskType.CHAT,
+            "EXEC_INTENT": TaskType.REASONING,
+            "WORK_CODE": TaskType.CODE,
+            "WORK_TRANSLATE": TaskType.TRANSLATE,
+            "VISION_UI": TaskType.CHAT,
+        }
+        if scene_hint:
+            ctx.task_type = _scene_to_task.get(scene_hint, TaskType.CHAT)
+
         ctx.governor_passed = True
-        logger.debug("[%s] Governor 放行", ctx.request_id)
+        ctx.governor_block_reason = None
+        ctx.metadata["governor"] = {
+            "scene_hint": scene_hint or None,
+            "task_type": ctx.task_type.value,
+        }
+        ctx.audit_tags.append("GOVERNOR_PRECHECK_PASSED")
+        logger.debug("[%s] Governor 放行 task_type=%s", ctx.request_id, ctx.task_type.value)
         return True
 
 
@@ -247,7 +294,14 @@ class GraphExecutorNode(ChainNode):
     timeout = NODE_TIMEOUT["graph_executor"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] GraphExecutor 执行", ctx.request_id)
+        execution_mode = "chat_single_stage" if ctx.task_type == TaskType.CHAT else "scene_graph_multi_stage"
+        ctx.metadata["graph_executor"] = {
+            "execution_mode": execution_mode,
+            "task_type": ctx.task_type.value,
+        }
+        if execution_mode != "chat_single_stage":
+            ctx.audit_tags.append("GRAPH_EXECUTOR_COMPLEX_PATH")
+        logger.debug("[%s] GraphExecutor 执行 mode=%s", ctx.request_id, execution_mode)
         return True
 
 
@@ -257,7 +311,16 @@ class RecallFusionNode(ChainNode):
     timeout = NODE_TIMEOUT["recall_fusion"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] RecallFusion 执行", ctx.request_id)
+        evidence_empty = ctx.recall_context_pack in (None, "", [], {})
+        ctx.metadata["recall_fusion"] = {
+            "evidence_empty": bool(evidence_empty),
+            "context_pack_type": (
+                type(ctx.recall_context_pack).__name__ if ctx.recall_context_pack is not None else "none"
+            ),
+        }
+        if evidence_empty:
+            ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
+        logger.debug("[%s] RecallFusion 执行 evidence_empty=%s", ctx.request_id, evidence_empty)
         return True
 
 
@@ -267,7 +330,16 @@ class LlmGatewayNode(ChainNode):
     timeout = NODE_TIMEOUT["llm_gateway"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] LlmGateway 执行", ctx.request_id)
+        has_raw_output = bool(str(ctx.llm_raw_output or "").strip())
+        if has_raw_output and not ctx.final_response:
+            ctx.final_response = str(ctx.llm_raw_output or "")
+        ctx.metadata["llm_gateway"] = {
+            "raw_output_present": has_raw_output,
+            "final_response_present": bool(str(ctx.final_response or "").strip()),
+        }
+        if not has_raw_output:
+            ctx.audit_tags.append("LLM_GATEWAY_DELEGATED_STREAM")
+        logger.debug("[%s] LlmGateway 执行 raw_output_present=%s", ctx.request_id, has_raw_output)
         return True
 
 
@@ -277,7 +349,28 @@ class QAContractNode(ChainNode):
     timeout = NODE_TIMEOUT["qa_contract"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] QAContract 执行", ctx.request_id)
+        raw_output = str(ctx.final_response or ctx.llm_raw_output or "")
+        if not raw_output:
+            ctx.metadata["qa_contract"] = {
+                "status": "SKIPPED_NO_OUTPUT",
+                "rewritten": False,
+            }
+            logger.debug("[%s] QAContract 跳过：无输出", ctx.request_id)
+            return True
+
+        normalized_output = raw_output.strip()
+        rewritten = normalized_output != raw_output
+        ctx.qa_rewritten = rewritten
+        ctx.qa_original_output = raw_output if rewritten else None
+        ctx.final_response = normalized_output
+        ctx.metadata["qa_contract"] = {
+            "status": "OK",
+            "rewritten": rewritten,
+            "output_chars": len(normalized_output),
+        }
+        if rewritten:
+            ctx.audit_tags.append("QA_REWRITE_WHITESPACE_TRIM")
+        logger.debug("[%s] QAContract 执行 rewritten=%s", ctx.request_id, rewritten)
         return True
 
 
@@ -287,7 +380,13 @@ class EpisodicStoreNode(ChainNode):
     timeout = NODE_TIMEOUT["episodic_store"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] EpisodicStore 执行", ctx.request_id)
+        can_persist = bool(str(ctx.final_response or "").strip())
+        ctx.metadata["episodic_store"] = {
+            "status": "READY_TO_PERSIST" if can_persist else "SKIPPED_NO_RESPONSE",
+            "task_type": ctx.task_type.value,
+            "session_id": ctx.session_id,
+        }
+        logger.debug("[%s] EpisodicStore 执行 can_persist=%s", ctx.request_id, can_persist)
         return True
 
 
@@ -297,7 +396,14 @@ class AuditNode(ChainNode):
     timeout = NODE_TIMEOUT["audit"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] Audit 写入，标签: %s", ctx.request_id, ctx.audit_tags)
+        audit_id = f"audit::{ctx.request_id}::{int(time.time() * 1000)}"
+        ctx.metadata["audit"] = {
+            "audit_id": audit_id,
+            "tag_count": len(ctx.audit_tags),
+            "timing_keys": sorted(ctx.node_timings.keys()),
+        }
+        ctx.audit_tags.append("AUDIT_SNAPSHOT_WRITTEN")
+        logger.debug("[%s] Audit 写入 audit_id=%s 标签: %s", ctx.request_id, audit_id, ctx.audit_tags)
         return True
 
 
@@ -307,7 +413,26 @@ class AirlockSanitizerNode(ChainNode):
     timeout = NODE_TIMEOUT["airlock_sanitizer"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        logger.debug("[%s] 出口净化完成", ctx.request_id)
+        raw_response = str(ctx.final_response or "")
+        if not raw_response:
+            ctx.metadata["airlock_sanitizer"] = {
+                "status": "SKIPPED_NO_RESPONSE",
+                "changed": False,
+            }
+            logger.debug("[%s] 出口净化跳过：无响应", ctx.request_id)
+            return True
+
+        safe_response = raw_response.replace("\x00", "").strip()
+        changed = safe_response != raw_response
+        ctx.final_response = safe_response
+        ctx.metadata["airlock_sanitizer"] = {
+            "status": "OK",
+            "changed": changed,
+            "output_chars": len(safe_response),
+        }
+        if changed:
+            ctx.audit_tags.append("AIRLOCK_OUTPUT_SANITIZED")
+        logger.debug("[%s] 出口净化完成 changed=%s", ctx.request_id, changed)
         return True
 
 
@@ -709,6 +834,9 @@ class MainChain:
         AuditNode,
         AirlockSanitizerNode,
     )
+    # Backward-compatible class-level chain definition for callers/tests that
+    # read MainChain.MAIN_NODES directly (for example node-count assertions).
+    MAIN_NODES: tuple[type[ChainNode], ...] = _NODE_FACTORIES
 
     def __init__(self, failure_handler: Optional[Callable] = None) -> None:
         """
@@ -800,6 +928,132 @@ class MainChain:
         """注入统一失败处理器（任务 7 完成后调用）。"""
         self._failure_handler = handler
 
+    @staticmethod
+    def _build_reject_sse(
+        *,
+        request_id: str,
+        reason_code: str,
+        detail: str | None = None,
+    ) -> str:
+        payload: Dict[str, Any] = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": reason_code,
+            "request_id": request_id,
+        }
+        if detail:
+            payload["detail"] = detail
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def _parse_sse_payload(event: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(event, str):
+            return None
+        text = event.strip()
+        if not text.startswith("data:"):
+            return None
+        payload_raw = text[len("data:"):].strip()
+        if not payload_raw:
+            return None
+        try:
+            data = json.loads(payload_raw)
+        except Exception:
+            return None
+        if isinstance(data, dict):
+            return data
+        return None
+
+    async def _invoke_failure_handler(self, *, ctx: ChainContext) -> None:
+        if not self._failure_handler:
+            return
+        try:
+            if asyncio.iscoroutinefunction(self._failure_handler):
+                await self._failure_handler(str(ctx.failure_event or FailureEvent.MODULE_TIMEOUT.value), ctx)
+            else:
+                self._failure_handler(str(ctx.failure_event or FailureEvent.MODULE_TIMEOUT.value), ctx)
+        except Exception as fh_exc:
+            logger.error("FailureHandler 执行异常: %s", fh_exc)
+
+    def _find_node(self, name: str) -> Optional[ChainNode]:
+        for node in self.MAIN_NODES:
+            if node.name == name:
+                return node
+        return None
+
+    async def _run_adapter_nodes(
+        self,
+        *,
+        ctx: ChainContext,
+        node_names: tuple[str, ...],
+    ) -> bool:
+        for node_name in node_names:
+            node = self._find_node(node_name)
+            if node is None:
+                logger.warning("[%s] MainChain 适配层缺少节点: %s", ctx.request_id, node_name)
+                continue
+            try:
+                should_continue = await node.execute_with_timeout(ctx)
+            except Exception as exc:
+                ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
+                ctx.failure_detail = f"适配层节点 {node_name} 异常: {exc}"
+                logger.exception("MainChain 适配层节点异常: %s", node_name)
+                return False
+            if not should_continue:
+                if not ctx.failure_event:
+                    ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
+                    ctx.failure_detail = f"适配层节点 {node_name} 返回 False"
+                return False
+        return True
+
+    @staticmethod
+    def _observe_adapter_sse_event(
+        *,
+        ctx: ChainContext,
+        payload: Dict[str, Any],
+    ) -> None:
+        phase = str(payload.get("phase") or "").strip().upper()
+        if not phase:
+            return
+
+        observed = ctx.metadata.setdefault("observed_phases", [])
+        if isinstance(observed, list) and phase not in observed:
+            observed.append(phase)
+
+        if phase == "PRESENCE":
+            evt = str(payload.get("event") or "").strip().upper()
+            if evt == "GOV_APPROVED":
+                ctx.governor_passed = True
+            if evt == "SCENE_ROUTED":
+                ctx.metadata["scene_type"] = payload.get("scene_type")
+
+        if phase == "GRAPH_START":
+            ctx.metadata.setdefault("scene_type", payload.get("scene_type"))
+
+        if phase == "RENDER":
+            chunk = str(payload.get("chunk") or "")
+            if chunk:
+                ctx.metadata["render_chunk_count"] = int(ctx.metadata.get("render_chunk_count") or 0) + 1
+
+        if phase == "COMMIT" and bool(payload.get("done")):
+            ctx.metadata["commit_observed"] = True
+            decision = str(payload.get("decision") or "").strip().upper()
+            if decision:
+                ctx.metadata["commit_decision"] = decision
+            narrative = payload.get("narrative")
+            if narrative is not None:
+                ctx.final_response = str(narrative)
+            audit_refs = payload.get("audit_refs")
+            if isinstance(audit_refs, dict):
+                ctx.metadata["commit_audit_refs_keys"] = sorted(audit_refs.keys())
+                llm_meta = audit_refs.get("llm")
+                if isinstance(llm_meta, dict):
+                    ctx.metadata["llm_runtime"] = {
+                        "provider": llm_meta.get("provider"),
+                        "model_id": llm_meta.get("model_id"),
+                        "status": llm_meta.get("status"),
+                    }
+
     async def run_as_sse_adapter(
         self,
         *,
@@ -811,33 +1065,63 @@ class MainChain:
         metrics: Any,
         _pre_classified_scene: str | None = None,
     ):
-        """[审计修复 #4] 适配层入口：将 MainChain 接入实际路由。
+        """MainChain 的 SSE 适配入口。
 
-        将 MainChain 从死代码迁移为 _unified_chat_sse_generator 的适配层。
-        调用方可通过此方法将请求委托给真实的 SSE 路由逻辑，
-        同时保留 MainChain 的 ChainContext 审计追踪能力。
-
-        用法示例（在路由层）：
-            chain = get_main_chain()
-            async for event in chain.run_as_sse_adapter(
-                request_body=request_body,
-                request_id=request_id,
-                ...
-            ):
-                yield event
+        在不改变既有 SSE 对外契约的前提下，适配层会执行：
+          1. 前置节点（airlock/governor/graph/recall/llm）状态编排
+          2. 委托 _unified_chat_sse_generator 产生真实 SSE
+          3. 后置节点（qa/episodic/audit/sanitizer）收尾编排
         """
         from host_brain.app.chat_handler import _unified_chat_sse_generator  # noqa: PLC0415
 
-        # 构建 ChainContext 用于审计追踪
         ctx = ChainContext(
             request_id=request_id,
             user_message=str(getattr(request_body, "message", "") or ""),
             session_id=session_id,
         )
         ctx.audit_tags.append("main_chain_adapter")
+        ctx.metadata["adapter_mode"] = "sse"
+        ctx.metadata["intent_action"] = str((intent_draft or {}).get("action") or "")
+        explicit_scene = str(getattr(request_body, "scene_type", "") or "").strip().upper().removeprefix("SCENE_")
+        pre_scene = str(_pre_classified_scene or "").strip().upper().removeprefix("SCENE_")
+        if explicit_scene:
+            ctx.metadata["pre_classified_scene"] = explicit_scene
+            ctx.metadata["scene_source"] = "explicit"
+        elif pre_scene:
+            ctx.metadata["pre_classified_scene"] = pre_scene
+            ctx.metadata["scene_source"] = "pre_classifier"
+        else:
+            ctx.metadata["scene_source"] = "unknown"
+        ctx.metadata["commit_observed"] = False
 
+        pre_node_order = (
+            "airlock_quarantine",
+            "governor",
+            "graph_executor",
+            "recall_fusion",
+            "llm_gateway",
+        )
+        post_node_order = (
+            "qa_contract",
+            "episodic_store",
+            "audit",
+            "airlock_sanitizer",
+        )
+
+        commit_seen = False
         start = time.monotonic()
         try:
+            pre_ok = await self._run_adapter_nodes(ctx=ctx, node_names=pre_node_order)
+            if not pre_ok:
+                ctx.audit_tags.append("MAIN_CHAIN_PRECHECK_FAILED")
+                await self._invoke_failure_handler(ctx=ctx)
+                yield self._build_reject_sse(
+                    request_id=request_id,
+                    reason_code="MAIN_CHAIN_PRECHECK_FAILED",
+                    detail=str(ctx.failure_detail or "MainChain precheck failed"),
+                )
+                return
+
             async for event in _unified_chat_sse_generator(
                 request_body=request_body,
                 request_id=request_id,
@@ -847,20 +1131,39 @@ class MainChain:
                 metrics=metrics,
                 _pre_classified_scene=_pre_classified_scene,
             ):
+                payload = self._parse_sse_payload(event)
+                if payload:
+                    self._observe_adapter_sse_event(ctx=ctx, payload=payload)
+                    if str(payload.get("phase") or "").strip().upper() == "COMMIT" and bool(payload.get("done")):
+                        commit_seen = True
                 yield event
-            ctx.governor_passed = True
+
+            post_ok = await self._run_adapter_nodes(ctx=ctx, node_names=post_node_order)
+            if not post_ok:
+                ctx.audit_tags.append("MAIN_CHAIN_POSTPROCESS_FAILED")
+                await self._invoke_failure_handler(ctx=ctx)
+                if not commit_seen:
+                    yield self._build_reject_sse(
+                        request_id=request_id,
+                        reason_code="MAIN_CHAIN_POSTPROCESS_FAILED",
+                        detail=str(ctx.failure_detail or "MainChain postprocess failed"),
+                    )
+                return
+
+            if not commit_seen:
+                ctx.audit_tags.append("MAIN_CHAIN_COMMIT_NOT_OBSERVED")
+
         except Exception as exc:
-            ctx.failure_event = "MODULE_TIMEOUT"
+            ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
             ctx.failure_detail = f"MainChain SSE adapter 异常: {exc}"
             logger.exception("MainChain.run_as_sse_adapter 异常: %s", exc)
-            if self._failure_handler:
-                try:
-                    if asyncio.iscoroutinefunction(self._failure_handler):
-                        await self._failure_handler(ctx.failure_event, ctx)
-                    else:
-                        self._failure_handler(ctx.failure_event, ctx)
-                except Exception as fh_exc:
-                    logger.error("FailureHandler 执行异常: %s", fh_exc)
+            await self._invoke_failure_handler(ctx=ctx)
+            if not commit_seen:
+                yield self._build_reject_sse(
+                    request_id=request_id,
+                    reason_code="INTERNAL_SERVER_ERROR",
+                    detail="MainChain adapter exception",
+                )
         finally:
             ctx.node_timings["main_chain_adapter"] = time.monotonic() - start
 

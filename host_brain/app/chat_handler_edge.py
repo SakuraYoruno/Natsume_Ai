@@ -93,11 +93,7 @@ def _post_edge_fallback_rpc(
         os.environ.get("HOST_EDGE_RPC_ALLOW_INSECURE_AUTH"),
         default=_parse_bool(os.environ.get("EDGE_ALLOW_INSECURE_AUTH"), default=True),
     )
-    shared_key = str(
-        os.environ.get("HOST_EDGE_RPC_SHARED_KEY")
-        or os.environ.get("EDGE_HMAC_SHARED_KEY")
-        or ""
-    ).strip()
+    shared_key = str(os.environ.get("HOST_EDGE_RPC_SHARED_KEY") or "").strip()
     ts_ms = int(time.time() * 1000)
     nonce = f"nonce::{request_id}::{uuid.uuid4().hex[:8]}"
     envelope_payload = dict(payload or {})
