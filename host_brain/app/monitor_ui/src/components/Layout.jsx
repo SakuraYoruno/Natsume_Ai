@@ -5,6 +5,7 @@ import {
   MessageSquare,
   GitBranch,
   BarChart2,
+  Lightbulb,
   RefreshCw,
   PauseCircle,
 } from 'lucide-react'
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/sessions',  icon: MessageSquare,  label: 'Sessions'  },
   { to: '/trace',     icon: GitBranch,      label: 'Trace'     },
   { to: '/metrics',   icon: BarChart2,      label: 'Metrics'   },
+  { to: '/insights',  icon: Lightbulb,      label: 'Insights'  },
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]

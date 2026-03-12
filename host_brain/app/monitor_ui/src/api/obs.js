@@ -102,3 +102,55 @@ export function fetchRecentRequests(params = {}) {
   const qs = new URLSearchParams(params).toString()
   return request(`/ui/search-requests${qs ? '?' + qs : ''}`)
 }
+
+// ===== P1: Governor 决策统计 =====
+
+/**
+ * Governor 决策漏斗 + reason_code 分布
+ * @param {object} params - { window_minutes, interval_minutes }
+ */
+export function fetchGovernorStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/governor/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== P1: 全局错误日志 =====
+
+/**
+ * 全局错误日志统计
+ * @param {object} params - { window_minutes, interval_minutes, limit }
+ */
+export function fetchErrors(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/errors${qs ? '?' + qs : ''}`)
+}
+
+// ===== P2/P3: 子系统健康统计 =====
+
+/**
+ * 子系统健康统计（Memory/Retrieval/Skill/Agent Loop/Airlock 等）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchSubsystemsStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/subsystems/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== P3: Agent Loop 详细统计 =====
+
+/**
+ * Agent Loop 详细统计
+ * @param {object} params - { window_minutes, limit }
+ */
+export function fetchAgentLoopStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/agent_loop/stats${qs ? '?' + qs : ''}`)
+}

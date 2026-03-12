@@ -528,3 +528,403 @@ async def get_llm_nodes(
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
 
+
+# ---------------------------------------------------------------------------
+# P1: GET /obs/governor/stats  — Governor 决策漏斗 + reason_code 分布
+# ---------------------------------------------------------------------------
+class GovernorReasonItem(BaseModel):
+    reason_code: str
+    count: int
+    pct: float
+
+class GovernorStatsResponse(BaseModel):
+    window_minutes: int
+    total: int
+    approved: int
+    rejected: int
+    rejection_rate: float
+    reason_codes: List[GovernorReasonItem]
+    timeseries_labels: List[str]
+    timeseries_approved: List[int]
+    timeseries_rejected: List[int]
+    timestamp: int
+
+@router.get("/governor/stats", response_model=GovernorStatsResponse)
+async def get_governor_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+):
+    """P1: Governor 决策漏斗 — 批准/拒绝数量、拒绝率、reason_code 分布、时序趋势。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("governor_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    total = len(rows)
+    approved = sum(1 for r in rows if str(r.get("decision", "")).upper() == "APPROVE")
+    rejected = total - approved
+    rejection_rate = round(rejected / total * 100, 1) if total > 0 else 0.0
+
+    # reason_code 分布（仅拒绝行）
+    from collections import Counter
+    rej_rows = [r for r in rows if str(r.get("decision", "")).upper() != "APPROVE"]
+    rc_counter = Counter(r.get("reason_code") or "UNKNOWN" for r in rej_rows)
+    reason_codes = [
+        GovernorReasonItem(
+            reason_code=code,
+            count=cnt,
+            pct=round(cnt / rejected * 100, 1) if rejected > 0 else 0.0,
+        )
+        for code, cnt in rc_counter.most_common(10)
+    ]
+
+    # 时序聚合
+    interval_ms = interval_minutes * 60 * 1000
+    bucket_count = max(1, (window_minutes * 60 * 1000) // interval_ms)
+    ts_approved = [0] * bucket_count
+    ts_rejected = [0] * bucket_count
+    for r in rows:
+        ts = r.get("ts_ms") or 0
+        idx = min(int((ts - since_ms) // interval_ms), bucket_count - 1)
+        if 0 <= idx < bucket_count:
+            if str(r.get("decision", "")).upper() == "APPROVE":
+                ts_approved[idx] += 1
+            else:
+                ts_rejected[idx] += 1
+
+    labels = []
+    for i in range(bucket_count):
+        ts_val = since_ms + i * interval_ms
+        d = __import__("datetime").datetime.fromtimestamp(ts_val / 1000)
+        if window_minutes <= 60:
+            labels.append(d.strftime("%H:%M"))
+        elif window_minutes <= 1440:
+            labels.append(d.strftime("%m/%d %H:%M"))
+        else:
+            labels.append(d.strftime("%m/%d"))
+
+    return GovernorStatsResponse(
+        window_minutes=window_minutes,
+        total=total,
+        approved=approved,
+        rejected=rejected,
+        rejection_rate=rejection_rate,
+        reason_codes=reason_codes,
+        timeseries_labels=labels,
+        timeseries_approved=ts_approved,
+        timeseries_rejected=ts_rejected,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# P1: GET /obs/errors  — 全局错误日志统计
+# ---------------------------------------------------------------------------
+class ErrorStageItem(BaseModel):
+    stage: str
+    count: int
+    pct: float
+
+class ErrorCodeItem(BaseModel):
+    reason_code: str
+    count: int
+
+class ErrorsResponse(BaseModel):
+    window_minutes: int
+    total_errors: int
+    stages: List[ErrorStageItem]
+    top_codes: List[ErrorCodeItem]
+    timeseries_labels: List[str]
+    timeseries_counts: List[int]
+    recent: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/errors", response_model=ErrorsResponse)
+async def get_errors(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    interval_minutes: int = Query(5, ge=1, le=60),
+    limit: int = Query(20, ge=1, le=100, description="最近错误条数"),
+):
+    """P1: 全局错误日志统计 — 错误总量、stage 分布、reason_code Top10、时序趋势、最近错误列表。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    total = len(rows)
+
+    from collections import Counter
+    stage_counter = Counter(r.get("stage") or "UNKNOWN" for r in rows)
+    stages = [
+        ErrorStageItem(
+            stage=s,
+            count=c,
+            pct=round(c / total * 100, 1) if total > 0 else 0.0,
+        )
+        for s, c in stage_counter.most_common(10)
+    ]
+
+    code_counter = Counter(r.get("reason_code") or "UNKNOWN" for r in rows)
+    top_codes = [
+        ErrorCodeItem(reason_code=code, count=cnt)
+        for code, cnt in code_counter.most_common(10)
+    ]
+
+    # 时序聚合
+    interval_ms = interval_minutes * 60 * 1000
+    bucket_count = max(1, (window_minutes * 60 * 1000) // interval_ms)
+    ts_counts = [0] * bucket_count
+    for r in rows:
+        ts = r.get("ts_ms") or 0
+        idx = min(int((ts - since_ms) // interval_ms), bucket_count - 1)
+        if 0 <= idx < bucket_count:
+            ts_counts[idx] += 1
+
+    labels = []
+    for i in range(bucket_count):
+        ts_val = since_ms + i * interval_ms
+        d = __import__("datetime").datetime.fromtimestamp(ts_val / 1000)
+        if window_minutes <= 60:
+            labels.append(d.strftime("%H:%M"))
+        elif window_minutes <= 1440:
+            labels.append(d.strftime("%m/%d %H:%M"))
+        else:
+            labels.append(d.strftime("%m/%d"))
+
+    # 最近 N 条错误（倒序）
+    recent_rows = sorted(rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
+    recent = [
+        {
+            "request_id": r.get("request_id"),
+            "stage": r.get("stage"),
+            "reason_code": r.get("reason_code"),
+            "detail": (r.get("detail") or "")[:200],
+            "ts_ms": r.get("ts_ms"),
+        }
+        for r in recent_rows
+    ]
+
+    return ErrorsResponse(
+        window_minutes=window_minutes,
+        total_errors=total,
+        stages=stages,
+        top_codes=top_codes,
+        timeseries_labels=labels,
+        timeseries_counts=ts_counts,
+        recent=recent,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# P2/P3: GET /obs/subsystems/stats  — 子系统健康统计（Memory/Retrieval/Skill/Agent Loop/Airlock/Bond）
+# ---------------------------------------------------------------------------
+class SubsystemStatItem(BaseModel):
+    subsystem: str
+    display_name: str
+    total: int
+    success: int
+    failed: int
+    success_rate: Optional[float]
+    p95_ms: Optional[int]
+    last_ts: Optional[int]
+
+class SubsystemsStatsResponse(BaseModel):
+    window_minutes: int
+    subsystems: List[SubsystemStatItem]
+    timestamp: int
+
+def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", latency_field: Optional[str] = None) -> Dict[str, Any]:
+    """通用子系统健康计算：成功率、P95延迟、最后活跃时间。"""
+    total = len(rows)
+    if total == 0:
+        return {"total": 0, "success": 0, "failed": 0, "success_rate": None, "p95_ms": None, "last_ts": None}
+
+    success = sum(1 for r in rows if str(r.get(status_field, "")).upper() in ("OK", "SUCCESS", "DONE", "APPROVED"))
+    failed = total - success
+    success_rate = round(success / total * 100, 1)
+
+    p95_ms = None
+    if latency_field:
+        latencies = [r[latency_field] for r in rows if r.get(latency_field) is not None]
+        if latencies:
+            latencies.sort()
+            idx = max(0, int(len(latencies) * 0.95) - 1)
+            p95_ms = latencies[idx]
+
+    last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+    return {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": p95_ms, "last_ts": last_ts}
+
+@router.get("/subsystems/stats", response_model=SubsystemsStatsResponse)
+async def get_subsystems_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+):
+    """P2/P3: 子系统健康统计 — Memory/Retrieval/Skill/Agent Loop/Airlock/Bond/Vision/Sandbox/Channel。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # 定义各子系统：(subsystem_id, display_name, table, status_field, latency_field)
+    SUBSYSTEM_DEFS = [
+        ("memory",    "Memory 操作",    "memory_ops_log",     "status",        None),
+        ("retrieval", "向量检索",        "retrieval_event_log","status",        None),
+        ("skill",     "Skill 执行",     "skill_exec_log",     "result_status", None),
+        ("agent_loop","Agent Loop",     "agent_loop_log",     "status",        "latency_ms"),
+        ("airlock",   "Airlock 过滤",   "airlock_log",        "blocked",       None),
+        ("bond",      "Bond 关系更新",  "bond_update_log",    "status",        None),
+        ("vision",    "Vision 视觉",    "vision_event_log",   "status",        None),
+        ("sandbox",   "Sandbox 执行",   "sandbox_exec_log",   "status",        "duration_ms"),
+        ("channel",   "Channel I/O",   "channel_io_log",     "status",        None),
+        ("intent",    "Intent 解析",    "intent_log",         "lint_result",   None),
+        ("qa",        "QA 违规检查",    "qa_violation_log",   None,            None),
+    ]
+
+    subsystems = []
+    for sid, dname, table, status_field, latency_field in SUBSYSTEM_DEFS:
+        try:
+            rows = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            rows = []
+
+        if sid == "airlock":
+            # airlock: blocked=0 表示通过，blocked=1 表示拦截
+            total = len(rows)
+            blocked = sum(1 for r in rows if r.get("blocked") in (1, True, "1"))
+            success = total - blocked
+            failed = blocked
+            success_rate = round(success / total * 100, 1) if total > 0 else None
+            last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+            h = {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": None, "last_ts": last_ts}
+        elif sid == "qa":
+            # qa_violation_log: 每行都是一次违规，total=违规次数，success=0
+            total = len(rows)
+            h = {"total": total, "success": 0, "failed": total, "success_rate": 0.0 if total > 0 else None, "p95_ms": None, "last_ts": max((r.get("ts_ms") or 0 for r in rows), default=None)}
+        elif sid == "intent":
+            # intent_log: lint_result 为空或 "OK" 表示通过
+            total = len(rows)
+            success = sum(1 for r in rows if not r.get("lint_result") or str(r.get("lint_result", "")).upper() in ("OK", "PASS", ""))
+            failed = total - success
+            success_rate = round(success / total * 100, 1) if total > 0 else None
+            last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
+            h = {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": None, "last_ts": last_ts}
+        else:
+            h = _compute_subsystem_health(rows, status_field=status_field or "status", latency_field=latency_field)
+
+        subsystems.append(SubsystemStatItem(
+            subsystem=sid,
+            display_name=dname,
+            total=h["total"],
+            success=h["success"],
+            failed=h["failed"],
+            success_rate=h["success_rate"],
+            p95_ms=h.get("p95_ms"),
+            last_ts=h.get("last_ts"),
+        ))
+
+    return SubsystemsStatsResponse(
+        window_minutes=window_minutes,
+        subsystems=subsystems,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# P3: GET /obs/agent_loop/stats  — Agent Loop 详细统计
+# ---------------------------------------------------------------------------
+class AgentLoopRoundItem(BaseModel):
+    request_id: str
+    session_id: Optional[str]
+    goal: str
+    total_rounds: int
+    goal_achieved: bool
+    total_actions: int
+    success_actions: int
+    failed_actions: int
+    total_latency_ms: Optional[int]
+    ts_ms: int
+
+class AgentLoopStatsResponse(BaseModel):
+    window_minutes: int
+    total_loops: int
+    achieved: int
+    failed: int
+    achievement_rate: float
+    avg_rounds: Optional[float]
+    recent_loops: List[AgentLoopRoundItem]
+    timestamp: int
+
+@router.get("/agent_loop/stats", response_model=AgentLoopStatsResponse)
+async def get_agent_loop_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """P3: Agent Loop 详细统计 — 目标达成率、平均轮次、最近执行列表。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("agent_loop_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 按 request_id 聚合（取 LOOP_END 或最后一行）
+    from collections import defaultdict
+    loop_map: Dict[str, List] = defaultdict(list)
+    for r in rows:
+        loop_map[r.get("request_id", "")].append(r)
+
+    loops = []
+    for req_id, loop_rows in loop_map.items():
+        # 找 LOOP_END 行
+        end_rows = [r for r in loop_rows if str(r.get("phase", "")).upper() in ("LOOP_END", "LOOP_SUCCESS", "LOOP_FAILED")]
+        summary_row = end_rows[-1] if end_rows else loop_rows[-1]
+
+        total_rounds = max((r.get("round") or 0 for r in loop_rows), default=0)
+        goal_achieved = bool(summary_row.get("goal_achieved"))
+        total_actions = sum(r.get("action_count") or 0 for r in loop_rows)
+        success_actions = sum(r.get("success_count") or 0 for r in loop_rows)
+        failed_actions = sum(r.get("failed_count") or 0 for r in loop_rows)
+        total_latency = sum(r.get("latency_ms") or 0 for r in loop_rows if r.get("latency_ms"))
+
+        loops.append({
+            "request_id": req_id,
+            "session_id": summary_row.get("session_id"),
+            "goal": (summary_row.get("goal") or "")[:80],
+            "total_rounds": total_rounds,
+            "goal_achieved": goal_achieved,
+            "total_actions": total_actions,
+            "success_actions": success_actions,
+            "failed_actions": failed_actions,
+            "total_latency_ms": total_latency or None,
+            "ts_ms": summary_row.get("ts_ms") or 0,
+        })
+
+    total_loops = len(loops)
+    achieved = sum(1 for l in loops if l["goal_achieved"])
+    failed_loops = total_loops - achieved
+    achievement_rate = round(achieved / total_loops * 100, 1) if total_loops > 0 else 0.0
+    avg_rounds = round(sum(l["total_rounds"] for l in loops) / total_loops, 1) if total_loops > 0 else None
+
+    # 最近 N 条（按 ts_ms 倒序）
+    recent = sorted(loops, key=lambda l: l["ts_ms"], reverse=True)[:limit]
+
+    return AgentLoopStatsResponse(
+        window_minutes=window_minutes,
+        total_loops=total_loops,
+        achieved=achieved,
+        failed=failed_loops,
+        achievement_rate=achievement_rate,
+        avg_rounds=avg_rounds,
+        recent_loops=[AgentLoopRoundItem(**l) for l in recent],
+        timestamp=now,
+    )
+

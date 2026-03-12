@@ -5,6 +5,7 @@ import Overview from './pages/Overview.jsx'
 import Sessions from './pages/Sessions.jsx'
 import Trace from './pages/Trace.jsx'
 import Metrics from './pages/Metrics.jsx'
+import Insights from './pages/Insights.jsx'
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="trace" element={<Trace />} />
           <Route path="trace/:requestId" element={<Trace />} />
           <Route path="metrics" element={<Metrics />} />
+          <Route path="insights" element={<Insights />} />
         </Route>
       </Routes>
     </HashRouter>
