@@ -928,3 +928,175 @@ async def get_agent_loop_stats(
         timestamp=now,
     )
 
+
+# ---------------------------------------------------------------------------
+# TODO-26: GET /obs/memory/stats  — Memory 子系统详细统计
+# ---------------------------------------------------------------------------
+class MemorySubsystemItem(BaseModel):
+    subsystem: str
+    display_name: str
+    total: int
+    success: int
+    failed: int
+    success_rate: Optional[float]
+    p95_ms: Optional[int]
+    last_ts: Optional[int]
+    extra: Optional[Dict[str, Any]] = None
+
+class MemoryStatsResponse(BaseModel):
+    window_minutes: int
+    subsystems: List[MemorySubsystemItem]
+    # 聚合指标
+    total_writes: int
+    guard_reject_rate: Optional[float]
+    compress_rate: Optional[float]
+    distill_count: int
+    timestamp: int
+
+@router.get("/memory/stats", response_model=MemoryStatsResponse)
+async def get_memory_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-26: Memory 子系统详细统计。
+
+    覆盖四个 Memory 子系统：
+    - EpisodicStore：写入量、成功率
+    - MemoryGuard：拒绝率（NARRATIVE_ONLY 过滤 + 宪法校验拒绝）
+    - ContextCompressor：压缩率（压缩前/后 token 数比值）
+    - LongTermDistiller：蒸馏次数、蒸馏成功率
+    """
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # ── EpisodicStore 写入统计 ────────────────────────────────────────────
+    try:
+        episodic_rows = ledger.fetch_by_time_range("episodic_store_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        episodic_rows = []
+
+    ep_total = len(episodic_rows)
+    ep_success = sum(1 for r in episodic_rows if str(r.get("status", "")).upper() in ("OK", "WRITTEN", "SUCCESS"))
+    ep_failed = ep_total - ep_success
+    ep_rate = round(ep_success / ep_total * 100, 1) if ep_total > 0 else None
+    ep_last = max((r.get("ts_ms") or 0 for r in episodic_rows), default=None)
+
+    # ── MemoryGuard 拒绝统计 ──────────────────────────────────────────────
+    try:
+        guard_rows = ledger.fetch_by_time_range("memory_guard_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        guard_rows = []
+
+    # 从 error_log 中补充 MemoryGuard 相关记录（MEMORY_GUARD_FILTERED 标签）
+    try:
+        error_rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
+        guard_error_rows = [
+            r for r in error_rows
+            if "MEMORY_GUARD" in str(r.get("stage", "")).upper()
+            or "MEMORY_GUARD" in str(r.get("reason_code", "")).upper()
+        ]
+    except Exception:
+        guard_error_rows = []
+
+    all_guard_rows = guard_rows + guard_error_rows
+    guard_total = len(all_guard_rows)
+    guard_rejected = sum(
+        1 for r in all_guard_rows
+        if str(r.get("status", "")).upper() in ("REJECTED", "BLOCKED", "FAILED")
+        or str(r.get("reason_code", "")).upper().startswith("EPISODIC_")
+        or str(r.get("reason_code", "")).upper().startswith("CANON_")
+    )
+    guard_reject_rate = round(guard_rejected / guard_total * 100, 1) if guard_total > 0 else None
+    guard_last = max((r.get("ts_ms") or 0 for r in all_guard_rows), default=None)
+
+    # ── ContextCompressor 压缩统计 ────────────────────────────────────────
+    try:
+        compress_rows = ledger.fetch_by_time_range("context_compress_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        compress_rows = []
+
+    comp_total = len(compress_rows)
+    comp_success = sum(1 for r in compress_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
+    comp_failed = comp_total - comp_success
+    comp_rate = None
+    if compress_rows:
+        # 计算平均压缩率：(1 - output_tokens / input_tokens) * 100
+        ratios = []
+        for r in compress_rows:
+            inp = r.get("input_tokens") or r.get("input_chars")
+            out = r.get("output_tokens") or r.get("output_chars")
+            if inp and out and inp > 0:
+                ratios.append(1.0 - out / inp)
+        if ratios:
+            comp_rate = round(sum(ratios) / len(ratios) * 100, 1)
+    comp_last = max((r.get("ts_ms") or 0 for r in compress_rows), default=None)
+
+    # ── LongTermDistiller 蒸馏统计 ────────────────────────────────────────
+    try:
+        distill_rows = ledger.fetch_by_time_range("distill_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        distill_rows = []
+
+    distill_total = len(distill_rows)
+    distill_success = sum(1 for r in distill_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
+    distill_failed = distill_total - distill_success
+    distill_rate = round(distill_success / distill_total * 100, 1) if distill_total > 0 else None
+    distill_last = max((r.get("ts_ms") or 0 for r in distill_rows), default=None)
+
+    subsystems = [
+        MemorySubsystemItem(
+            subsystem="episodic_store",
+            display_name="EpisodicStore 写入",
+            total=ep_total,
+            success=ep_success,
+            failed=ep_failed,
+            success_rate=ep_rate,
+            p95_ms=None,
+            last_ts=ep_last,
+            extra={"write_count": ep_success},
+        ),
+        MemorySubsystemItem(
+            subsystem="memory_guard",
+            display_name="MemoryGuard 宪法守卫",
+            total=guard_total,
+            success=guard_total - guard_rejected,
+            failed=guard_rejected,
+            success_rate=(100.0 - guard_reject_rate) if guard_reject_rate is not None else None,
+            p95_ms=None,
+            last_ts=guard_last,
+            extra={"reject_rate": guard_reject_rate, "rejected_count": guard_rejected},
+        ),
+        MemorySubsystemItem(
+            subsystem="context_compressor",
+            display_name="ContextCompressor 压缩",
+            total=comp_total,
+            success=comp_success,
+            failed=comp_failed,
+            success_rate=round(comp_success / comp_total * 100, 1) if comp_total > 0 else None,
+            p95_ms=None,
+            last_ts=comp_last,
+            extra={"avg_compress_rate_pct": comp_rate},
+        ),
+        MemorySubsystemItem(
+            subsystem="long_term_distiller",
+            display_name="LongTermDistiller 蒸馏",
+            total=distill_total,
+            success=distill_success,
+            failed=distill_failed,
+            success_rate=distill_rate,
+            p95_ms=None,
+            last_ts=distill_last,
+            extra={"distill_count": distill_success},
+        ),
+    ]
+
+    return MemoryStatsResponse(
+        window_minutes=window_minutes,
+        subsystems=subsystems,
+        total_writes=ep_success,
+        guard_reject_rate=guard_reject_rate,
+        compress_rate=comp_rate,
+        distill_count=distill_success,
+        timestamp=now,
+    )
+

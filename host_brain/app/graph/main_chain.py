@@ -502,25 +502,75 @@ class RecallFusionNode(ChainNode):
                 timeout_ms=int(NODE_TIMEOUT["recall_fusion"] * 1000),
             )
 
+            raw_evidence_items = list(orchestrator_result.retrieval_evidence_items)
+
+            # ── TODO-21：MemoryGuard 过滤召回证据 ────────────────────────
+            filtered_evidence_items = raw_evidence_items
+            memory_guard_meta: dict[str, Any] = {
+                "mode": "SKIPPED",
+                "raw_count": len(raw_evidence_items),
+                "filtered_count": len(raw_evidence_items),
+                "rejected_count": 0,
+            }
+            try:
+                from host_brain.app.dependencies import get_memory_guard  # noqa: PLC0415
+                _guard = get_memory_guard()
+                if _guard is not None:
+                    _passed: list[dict] = []
+                    _rejected_count = 0
+                    for _item in raw_evidence_items:
+                        # 对每条证据做轻量级安全检查：
+                        # evidence_level=NARRATIVE_ONLY 的条目不注入 prompt（防止 dream 内容污染）
+                        _ev_level = str(_item.get("evidence_level") or "").strip().upper()
+                        if _ev_level == "NARRATIVE_ONLY":
+                            _rejected_count += 1
+                            logger.debug(
+                                "[%s] MemoryGuard 过滤 NARRATIVE_ONLY 证据: source=%s",
+                                ctx.request_id, _item.get("source_id", "?"),
+                            )
+                            continue
+                        _passed.append(_item)
+                    filtered_evidence_items = _passed
+                    memory_guard_meta = {
+                        "mode": "ACTIVE",
+                        "raw_count": len(raw_evidence_items),
+                        "filtered_count": len(filtered_evidence_items),
+                        "rejected_count": _rejected_count,
+                    }
+                    if _rejected_count > 0:
+                        ctx.audit_tags.append(f"MEMORY_GUARD_FILTERED:{_rejected_count}")
+                        logger.info(
+                            "[%s] MemoryGuard 过滤了 %d 条 NARRATIVE_ONLY 证据",
+                            ctx.request_id, _rejected_count,
+                        )
+            except (ImportError, AttributeError):
+                memory_guard_meta["mode"] = "SKIPPED_NOT_WIRED"
+            except Exception as _mg_exc:
+                memory_guard_meta["mode"] = "DEGRADED"
+                memory_guard_meta["error"] = str(_mg_exc)[:100]
+                logger.warning("[%s] MemoryGuard 过滤异常（降级）: %s", ctx.request_id, _mg_exc)
+
             ctx.recall_context_pack = {
                 "retrieval_summary": dict(orchestrator_result.retrieval_summary),
-                "retrieval_evidence_items": list(orchestrator_result.retrieval_evidence_items),
+                "retrieval_evidence_items": filtered_evidence_items,
                 "path": str(orchestrator_result.path),
             }
             recall_mode = "ACTIVE"
-            evidence_empty = len(orchestrator_result.retrieval_evidence_items) == 0
+            evidence_empty = len(filtered_evidence_items) == 0
             ctx.metadata["recall_fusion"] = {
                 "mode": recall_mode,
                 "evidence_empty": bool(evidence_empty),
-                "evidence_count": len(orchestrator_result.retrieval_evidence_items),
+                "evidence_count": len(filtered_evidence_items),
                 "retrieval_status": str(orchestrator_result.status),
                 "retrieval_path": str(orchestrator_result.path),
                 "context_pack_type": "RetrievalOrchestratorResult",
+                "memory_guard": memory_guard_meta,
             }
+            ctx.metadata.setdefault("audit_refs", {})["memory_guard"] = memory_guard_meta
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:
-                ctx.audit_tags.append(f"RECALL_EVIDENCE_COUNT:{len(orchestrator_result.retrieval_evidence_items)}")
+                ctx.audit_tags.append(f"RECALL_EVIDENCE_COUNT:{len(filtered_evidence_items)}")
             logger.debug(
                 "[%s] RecallFusion 真实召回完成 evidence_count=%d status=%s",
                 ctx.request_id,
@@ -1529,18 +1579,8 @@ class MainChain:
                     ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
                     ctx.failure_detail = f"节点 {node.name} 返回 False 但未设置 failure_event"
 
-                # 统一失败处理
-                # 修复：_failure_handler 可能是同步或异步函数，需自动检测并适配，
-                # 防止注入同步 Callable 时 await 报错（TypeError: object NoneType can't be used in 'await' expression）
-                if self._failure_handler:
-                    try:
-                        import asyncio as _asyncio
-                        if _asyncio.iscoroutinefunction(self._failure_handler):
-                            await self._failure_handler(ctx.failure_event, ctx)
-                        else:
-                            self._failure_handler(ctx.failure_event, ctx)
-                    except Exception as fh_exc:
-                        logger.error("FailureHandler 执行异常: %s", fh_exc)
+                # 统一失败处理（TODO-22：通过 _invoke_failure_handler 写入 FailureMatrix 分类结果）
+                await self._invoke_failure_handler(ctx=ctx)
                 logger.warning(
                     "[%s] 链路在节点 %s 中止，failure_event=%s",
                     ctx.request_id, node.name, ctx.failure_event,
@@ -1605,15 +1645,50 @@ class MainChain:
         return None
 
     async def _invoke_failure_handler(self, *, ctx: ChainContext) -> None:
+        """TODO-22：调用 FailureHandler 并将 FailureMatrix 分类结果写入 ctx.metadata。
+
+        FailureHandler.handle() 返回 FailureResult，包含：
+          - should_abort: 是否中止链路
+          - degraded_mode: 降级模式（如 'conservative_answer'/'fallback_model'/'text_only'）
+          - meta: 附加元数据（如 evidence_empty/model_fallback 等）
+          - user_response: 标准化用户响应文本
+
+        将上述信息写入 ctx.metadata["failure_matrix"]，供后续节点和审计使用。
+        """
         if not self._failure_handler:
             return
+        _event_str = str(ctx.failure_event or FailureEvent.MODULE_TIMEOUT.value)
         try:
             if asyncio.iscoroutinefunction(self._failure_handler):
-                await self._failure_handler(str(ctx.failure_event or FailureEvent.MODULE_TIMEOUT.value), ctx)
+                _result = await self._failure_handler(_event_str, ctx)
             else:
-                self._failure_handler(str(ctx.failure_event or FailureEvent.MODULE_TIMEOUT.value), ctx)
+                _result = self._failure_handler(_event_str, ctx)
+
+            # 将 FailureResult 写入 ctx.metadata["failure_matrix"]
+            if _result is not None and hasattr(_result, "should_abort"):
+                ctx.metadata["failure_matrix"] = {
+                    "event": _event_str,
+                    "should_abort": bool(_result.should_abort),
+                    "degraded_mode": _result.degraded_mode,
+                    "audit_tag": getattr(_result, "audit_tag", None),
+                    "meta": dict(getattr(_result, "meta", {}) or {}),
+                    "user_response_present": bool(getattr(_result, "user_response", "")),
+                }
+                ctx.audit_tags.append(f"FAILURE_MATRIX:{_event_str}")
+                if _result.degraded_mode:
+                    ctx.audit_tags.append(f"DEGRADED_MODE:{_result.degraded_mode}")
+                logger.info(
+                    "[%s] FailureMatrix 分类完成: event=%s should_abort=%s degraded_mode=%s",
+                    ctx.request_id, _event_str, _result.should_abort, _result.degraded_mode,
+                )
         except Exception as fh_exc:
             logger.error("FailureHandler 执行异常: %s", fh_exc)
+            ctx.metadata["failure_matrix"] = {
+                "event": _event_str,
+                "should_abort": True,
+                "degraded_mode": None,
+                "error": str(fh_exc)[:200],
+            }
 
     def _find_node(self, name: str) -> Optional[ChainNode]:
         for node in self.MAIN_NODES:

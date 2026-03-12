@@ -7,6 +7,9 @@ import {
   BarChart2,
   Lightbulb,
   BookOpen,
+  Heart,
+  Wrench,
+  Clock,
   RefreshCw,
   PauseCircle,
 } from 'lucide-react'
@@ -19,6 +22,9 @@ const NAV_ITEMS = [
   { to: '/metrics',   icon: BarChart2,      label: 'Metrics'   },
   { to: '/insights',  icon: Lightbulb,      label: 'Insights'  },
   { to: '/canon',     icon: BookOpen,       label: 'Canon'     },
+  { to: '/bond',      icon: Heart,          label: 'Bond'      },
+  { to: '/tools',     icon: Wrench,         label: 'Tools'     },
+  { to: '/automation',icon: Clock,          label: 'Automation'},
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]

@@ -209,3 +209,132 @@ export function rejectCanonProposal(proposalId, body) {
     body: JSON.stringify(body),
   })
 }
+
+// ===== TODO-23: Bond 管理 =====
+
+/** BondStageEngine 健康状态 */
+export function fetchBondHealth() {
+  return request('/bond/health')
+}
+
+/** 列出所有有 Bond 状态的用户 */
+export function fetchBondUsers() {
+  return request('/bond/users')
+}
+
+/**
+ * 查询用户当前 Bond 阶段与积分状态
+ * @param {string} userId
+ */
+export function fetchBondStage(userId) {
+  return request(`/bond/stage/${encodeURIComponent(userId)}`)
+}
+
+/**
+ * 获取 context-pack-safe Bond Summary
+ * @param {string} userId
+ */
+export function fetchBondSummary(userId) {
+  return request(`/bond/summary/${encodeURIComponent(userId)}`)
+}
+
+/**
+ * 提交 Bond 事件
+ * @param {object} body - BondEventRequest
+ */
+export function submitBondEvent(body) {
+  return request('/bond/event', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// ===== TODO-24: Tools 管理 =====
+
+/** ToolBroker 健康状态 */
+export function fetchToolHealth() {
+  return request('/tools/health')
+}
+
+/**
+ * 获取 Top-K 工具元数据包
+ * @param {object} params - { query, k, include_write, tags }
+ */
+export function fetchToolMetaPack(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/tools/meta-pack${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * 查询单个工具元数据
+ * @param {string} toolId
+ */
+export function fetchToolMeta(toolId) {
+  return request(`/tools/${encodeURIComponent(toolId)}`)
+}
+
+/**
+ * 执行工具
+ * @param {object} body - ToolExecuteRequest
+ */
+export function executeTool(body) {
+  return request('/tools/execute', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// ===== TODO-26: Memory 子系统统计 =====
+
+/**
+ * Memory 子系统详细统计（EpisodicStore/MemoryGuard/ContextCompressor/LongTermDistiller）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchMemoryStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/memory/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-25: Scheduler 调度器管理 =====
+
+/** 列出所有调度任务（含健康状态） */
+export function fetchSchedulerTasks() {
+  return request('/scheduler/tasks')
+}
+
+/** 调度器健康快照 */
+export function fetchSchedulerHealth() {
+  return request('/scheduler/health')
+}
+
+/**
+ * 启用调度任务
+ * @param {string} taskId
+ */
+export function enableSchedulerTask(taskId) {
+  return request(`/scheduler/tasks/${encodeURIComponent(taskId)}/enable`, { method: 'POST' })
+}
+
+/**
+ * 禁用调度任务
+ * @param {string} taskId
+ */
+export function disableSchedulerTask(taskId) {
+  return request(`/scheduler/tasks/${encodeURIComponent(taskId)}/disable`, { method: 'POST' })
+}
+
+/**
+ * 立即触发调度任务（通过 PATCH 重置 trigger_config 中的 next_run_ts 为 0）
+ * @param {string} taskId
+ */
+export function triggerSchedulerTask(taskId) {
+  // scheduler_routes 没有专用 trigger 端点，通过 PATCH 重置触发时间来实现立即触发
+  return request(`/scheduler/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ trigger_config: { next_run_ts: 0 } }),
+  })
+}

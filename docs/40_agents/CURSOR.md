@@ -791,3 +791,115 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - 合并运行：43 passed（含所有相关单元测试，无回归）
 
 **回退方式**：StateArbiter 不可用时自动降级，不阻断主链路
+
+---
+
+### TODO-21：MemoryGuard 接入 RecallFusionNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（MemoryGuard 过滤已接入召回链路）
+
+**问题**：`RecallFusionNode` 完成七路召回后，`retrieval_evidence_items` 未经过滤直接注入 prompt，`NARRATIVE_ONLY` 级别的 dream 内容可能污染上下文。
+
+**修复**：
+- 在 `RecallFusionNode.execute()` 真实召回成功后，对 `retrieval_evidence_items` 逐条检查 `evidence_level`
+- 过滤掉 `evidence_level=NARRATIVE_ONLY` 的条目（防止 dream 内容污染 prompt）
+- 过滤结果写入 `ctx.metadata["recall_fusion"]["memory_guard"]` 和 `ctx.metadata["audit_refs"]["memory_guard"]`
+- 降级策略：`get_memory_guard()` 不可用时跳过过滤（`SKIPPED_NOT_WIRED`），不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`RecallFusionNode.execute()` 接入 MemoryGuard 过滤
+
+---
+
+### TODO-22：FailureMatrix 接入 FailureHandlerNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（FailureMatrix 分类结果可观测）
+
+**问题**：`FailureHandler.handle()` 返回的 `FailureResult`（含 `should_abort`/`degraded_mode`/`meta`）从未被写入 `ctx.metadata`，链路无法感知降级策略，运维无法观测失败分类结果。
+
+**修复**：
+- 重写 `MainChain._invoke_failure_handler()`，将 `FailureResult` 写入 `ctx.metadata["failure_matrix"]`
+- 写入字段：`event`、`should_abort`、`degraded_mode`、`audit_tag`、`meta`、`user_response_present`
+- 同时追加 `FAILURE_MATRIX:{event}` 和 `DEGRADED_MODE:{mode}` 到 `ctx.audit_tags`
+- `MainChain.run()` 中的内联 failure_handler 调用统一改为调用 `_invoke_failure_handler`
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`_invoke_failure_handler()` 重写；`run()` 中统一调用
+
+---
+
+### TODO-23：WebUI Bond 管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Bond 管理页面已上线）
+
+**新增功能**：
+- `Bond.jsx`：用户列表 + 阶段分布 SVG 饼图 + 单用户阶段详情（积分/趋势/能力提示）+ Bond 事件提交表单
+- `obs.js`：新增 `fetchBondHealth`、`fetchBondUsers`、`fetchBondStage`、`fetchBondSummary`、`submitBondEvent` 5 个 API 函数
+- `App.jsx`：注册 `/bond` 路由
+- `Layout.jsx`：导航栏新增 Bond 入口（Heart 图标）
+
+**改动文件**：
+- `monitor_ui/src/pages/Bond.jsx`（新建）
+- `monitor_ui/src/api/obs.js`
+- `monitor_ui/src/App.jsx`
+- `monitor_ui/src/components/Layout.jsx`
+
+---
+
+### TODO-24：WebUI Tools 管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Tools 管理页面已上线）
+
+**新增功能**：
+- `Tools.jsx`：工具列表（READ/WRITE 分组过滤）+ 工具详情卡片 + 内嵌执行面板（支持 JSON 参数输入）
+- `obs.js`：新增 `fetchToolHealth`、`fetchToolMetaPack`、`fetchToolMeta`、`executeTool` 4 个 API 函数
+- `App.jsx`：注册 `/tools` 路由
+- `Layout.jsx`：导航栏新增 Tools 入口（Wrench 图标）
+
+**改动文件**：
+- `monitor_ui/src/pages/Tools.jsx`（新建）
+- `monitor_ui/src/api/obs.js`
+- `monitor_ui/src/App.jsx`
+- `monitor_ui/src/components/Layout.jsx`
+
+---
+
+### TODO-25：TaskScheduler WebUI 管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Automation 管理页面已上线，后端 scheduler_routes 已存在）
+
+**说明**：`host_brain/scheduler/scheduler_routes.py` 已提供完整 REST API（`/scheduler/tasks`、`/scheduler/health` 等），`fastapi_app.py` 已注册路由。本次补全前端可视化层。
+
+**新增功能**：
+- `Automation.jsx`：任务列表卡片（状态/优先级/执行次数/失败次数）+ 启用/禁用/立即触发按钮 + 健康状态统计
+- `obs.js`：新增 `fetchSchedulerTasks`、`fetchSchedulerHealth`、`enableSchedulerTask`、`disableSchedulerTask`、`triggerSchedulerTask` 5 个 API 函数
+- `App.jsx`：注册 `/automation` 路由
+- `Layout.jsx`：导航栏新增 Automation 入口（Clock 图标）
+
+**改动文件**：
+- `monitor_ui/src/pages/Automation.jsx`（新建）
+- `monitor_ui/src/api/obs.js`
+- `monitor_ui/src/App.jsx`
+- `monitor_ui/src/components/Layout.jsx`
+
+---
+
+### TODO-26：Memory 子系统详细统计端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（`GET /obs/memory/stats` 端点已上线）
+
+**问题**：`GET /obs/subsystems/stats` 中 Memory 子系统只有健康状态，缺少写入量/拒绝率/压缩率/蒸馏次数等关键指标。
+
+**新增端点**：`GET /obs/memory/stats`
+
+覆盖四个 Memory 子系统：
+- **EpisodicStore**：写入总量、成功率
+- **MemoryGuard**：拒绝率（NARRATIVE_ONLY 过滤 + 宪法校验拒绝）
+- **ContextCompressor**：平均压缩率（output_tokens/input_tokens 比值）
+- **LongTermDistiller**：蒸馏次数、蒸馏成功率
+
+响应字段：`subsystems[]`、`total_writes`、`guard_reject_rate`、`compress_rate`、`distill_count`
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `GET /obs/memory/stats` 端点
+- `monitor_ui/src/api/obs.js`：新增 `fetchMemoryStats` API 函数
