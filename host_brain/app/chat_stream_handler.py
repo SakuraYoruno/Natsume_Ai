@@ -175,6 +175,7 @@ async def _build_stream_chat_prompt(
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     emotion_context_override: Dict[str, Any] | None = None,
     emotion_snapshot_override: Dict[str, Any] | None = None,
+    cpb_slots: Dict[str, Any] | None = None,
 ) -> tuple[str, str, dict, dict, dict[str, Any]]:
     """构建流式聊天的 prompt、system_prompt 和生成参数。
 
@@ -236,6 +237,7 @@ async def _build_stream_chat_prompt(
         style_bindings=node_style_bindings,
         emotion_context=resolved_emotion_context if resolved_emotion_context else None,
         emotion_snapshot=resolved_emotion_snapshot,
+        cpb_slots=cpb_slots,
     )
     if resolved_emotion_context:
         prompt_payload = adjust_gen_params_for_emotion(prompt_payload, resolved_emotion_context)
@@ -727,6 +729,7 @@ async def _sse_event_generator(
     ts_ms: int,
     intent_draft: Dict[str, Any] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
+    _pre_recall_evidence: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """完整链路 SSE 事件生成器（SCENE_CHAT 专用，token 级流式输出）。
 
@@ -736,6 +739,9 @@ async def _sse_event_generator(
 
     当 _pre_approved_governor_result 传入时，跳过重复 Governor 鉴权
     （由 _unified_chat_sse_generator 在场景分类前已完成鉴权）。
+
+    当 _pre_recall_evidence 传入时（来自 MainChain.RecallFusionNode 的预召回结果），
+    跳过内部重复召回，直接使用预召回证据，避免双重召回浪费资源。
     """
 
     def _sse(data: dict) -> str:
@@ -821,7 +827,15 @@ async def _sse_event_generator(
 
         retrieval_task: asyncio.Task | None = None
         retrieval_started_ms: int | None = None
-        if retrieval_enabled:
+
+        # 当 MainChain.RecallFusionNode 已完成预召回时，跳过重复召回
+        _use_pre_recall = _pre_recall_evidence is not None
+        if _use_pre_recall:
+            _logger.debug(
+                "[%s] _sse_event_generator 使用预召回结果（来自 RecallFusionNode），跳过重复召回 evidence_count=%d",
+                request_id, len(_pre_recall_evidence),
+            )
+        elif retrieval_enabled:
             _retr_emotion = str(emotion_context.get("emotion_tag") or "") or None
             retrieval_started_ms = int(time.time() * 1000)
             retrieval_task = asyncio.create_task(
@@ -836,7 +850,15 @@ async def _sse_event_generator(
 
         retrieval_summary: Dict[str, Any]
         retrieval_evidence_items: list[dict[str, Any]]
-        if retrieval_task is not None:
+        if _use_pre_recall:
+            # 使用 RecallFusionNode 的预召回结果，跳过重复召回
+            retrieval_evidence_items = list(_pre_recall_evidence)
+            retrieval_summary = {
+                "status": "PRE_RECALLED",
+                "source": "RecallFusionNode",
+                "evidence_count": len(retrieval_evidence_items),
+            }
+        elif retrieval_task is not None:
             retrieval_timeout_ms = _resolve_stream_retrieval_timeout_ms()
             try:
                 retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
@@ -931,6 +953,7 @@ async def _sse_event_generator(
         # ── 6. 构建 prompt（已注入 Retrieval + Emotion 上下文）───────────
         # [选项二] 接入 ContextPackBuilder：将召回结果组装为 ContextPack，执行 token 预算控制
         context_pack_builder_summary: dict[str, Any] = {}
+        _cpb_slots: dict[str, Any] = {}
         try:
             from host_brain.app.dependencies import get_context_pack_builder  # noqa: PLC0415
             _cpb = get_context_pack_builder()
@@ -944,6 +967,14 @@ async def _sse_event_generator(
                 if _context_pack_active and _rewritten_items:
                     retrieval_evidence_items = _rewritten_items
                     _applied_to_prompt = True
+                # 提取 CPB 的 slot 内容，供 build_chat_context_pack 直接使用，
+                # 统一两套 context_pack 构建路径（避免 slot 分配被覆盖）
+                if _context_pack_active:
+                    from host_brain.app.schemas.context_pack import TRUNCATION_PRIORITY  # noqa: PLC0415
+                    for _slot_name in TRUNCATION_PRIORITY:
+                        _slot = _cp.get_slot(_slot_name)
+                        if _slot and str(getattr(_slot, "content", "") or "").strip():
+                            _cpb_slots[_slot_name] = str(_slot.content).strip()
                 context_pack_builder_summary = {
                     "status": "OK",
                     "mode": ("ACTIVE" if _applied_to_prompt else "SHADOW"),
@@ -955,6 +986,7 @@ async def _sse_event_generator(
                     "slot_count": len([s for s in _cp.slots.values() if s and s.content]),
                     "conflict_events": len(_cp.conflict_events),
                     "subgraph_trace_count": len(_cp.subgraph_trace),
+                    "cpb_slots_injected": list(_cpb_slots.keys()),
                 }
             else:
                 context_pack_builder_summary = {
@@ -984,6 +1016,7 @@ async def _sse_event_generator(
             retrieval_evidence_items=retrieval_evidence_items,
             emotion_context_override=emotion_context,
             emotion_snapshot_override=emotion_snapshot,
+            cpb_slots=_cpb_slots if _cpb_slots else None,
         )
         context_pack_validation: dict[str, Any] = {}
         context_pack_observability: dict[str, Any] = {}

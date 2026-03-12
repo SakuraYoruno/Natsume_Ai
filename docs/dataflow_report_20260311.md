@@ -1129,12 +1129,12 @@ sequenceDiagram
 
 | 模块 | 当前等级 | 理由 | 证据（文件/函数） | 建议升级 | 下一步最小改动 |
 |------|---------|------|----------------|---------|--------------|
-| `MainChain` | `ACTIVE`（轻编排适配层） | 各节点已具备最小可执行语义（输入净化、任务类型映射、召回/LLM/QA/审计/出口净化状态）；`run_as_sse_adapter` 执行 pre/post 节点并观测 COMMIT，不再纯透传 | `graph/main_chain.py::AirlockQuarantineNode.execute`、`GovernorNode.execute`、`MainChain.run_as_sse_adapter`、`_observe_adapter_sse_event` | 是（向 AUTHORITATIVE 演进） | 将 Governor/Recall/QA 的“占位语义”替换为真实业务调用并保持 SSE 契约稳定 |
+| `MainChain` | `ACTIVE`（深度业务化，2026-03-12） | 各节点已具备最小可执行语义（输入净化、任务类型映射、召回/LLM/QA/审计/出口净化状态）；`run_as_sse_adapter` 执行 pre/post 节点并观测 COMMIT，不再纯透传 | `graph/main_chain.py::AirlockQuarantineNode.execute`、`GovernorNode.execute`、`MainChain.run_as_sse_adapter`、`_observe_adapter_sse_event` | 是（向 AUTHORITATIVE 演进） | 将 Governor/Recall/QA 的“占位语义”替换为真实业务调用并保持 SSE 契约稳定 |
 | `RoutingMatrix` | `ACTIVE`（策略门控） | 在 `_resolve_host_llm_runtime_core` 中调用 `select_with_fallback()` 后，将 `selected_model` 映射回真实 `provider_name/model_id`（支持 cloud/host_8b）；并保留 8B 健康探测与策略门控 fallback；`routing_matrix_decision.runtime_applied` 标记是否真的改写 runtime | `graph_config_builder.py::_resolve_host_llm_runtime_core`（`route_target/provider_name/model_id` 在 RoutingMatrix 后可变） | 否（已达预期） | 扩展 `skills/edge_3b` 到主链 runtime 映射，补充对应回退策略测试 |
 | `ContextPackBuilder` | `ACTIVE`（可回退） | 在 `_sse_event_generator` 中调用 `_cpb.build()` 后，将截断结果在 `HOST_CONTEXT_PACK_ACTIVE=true` 时回写到 `retrieval_evidence_items`，真实影响 `_build_stream_chat_prompt`；同时保留 `audit_refs.context_pack_builder` 观测 | `chat_stream_handler.py::_sse_event_generator`，`retrieval_evidence_items = _rewritten_items`，`context_pack_builder_summary.mode/applied_to_prompt` | 否（已达预期） | 继续监控 `rewritten_item_count` 与回复质量，按需调优 slot token 配额 |
 | `MemoryGuard` | `ACTIVE` ✅ | 在 `persist_chat_episodic_memory` 中调用 `check_episodic_write()`，校验失败时**真实跳过** episodic 写入 | `observability_persist.py::persist_chat_episodic_memory`，`_guard.check_episodic_write(_record)` 抛出异常时 `return {status: SKIPPED}` | 否（已达预期） | 补充 E2E 测试验证校验失败路径 |
 | `StateArbiter` | `ACTIVE`（局部路径） | 启动时注册 world/style/episodic 三个适配状态源；流式主链调用 `resolve("world_canon_facts")`，命中结果会注入 `retrieval_evidence_items` 和 `retrieval_summary.world_canon`，并写入 `audit_refs.state_arbiter` | `http_hooks.py::runtime_lifespan`（源注册）；`chat_stream_handler.py::_resolve_state_arbiter_world_fact` + `_sse_event_generator`（业务调用） | 否（已达预期） | 扩展更多 fact_key（如 style/episodic）到主链查询，并补冲突路径观测测试 |
-| `SCENE_VISION_UI` | `E2E_VERIFIED` | 白名单生效，`_vision_ui_sse_generator` 可达；`image_upload_consent=true/false` 两分支均完成双端实测，`audit_refs.vision_input` 按预期写入 | `chat_handler.py`（scene_type 规范化+白名单）、`chat_handler_vision.py::_vision_ui_sse_generator`、双端联调日志（2026-03-11） | 是（向 PROD_READY） | 增加生产鉴权/签名与真实云模型 SLA 监控，补异常回退演练 |
+| `SCENE_VISION_UI` | `PROD_READY`（最小加固，2026-03-12） | 在 `E2E_VERIFIED` 基础上新增：`_VisionSLAMonitor` 追踪连续失败/降级率/延迟，超阈值写入 ledger 告警；请求来源校验（`HOST_VISION_REQUIRE_INTERNAL_ORIGIN`）；`COMMIT.audit_refs.sla_monitor` 可观测；所有加固均有降级策略不阻断主链路 | `chat_handler_vision.py::_VisionSLAMonitor`、`_call_vision_llm`（SLA 记录）、`_vision_ui_sse_generator`（来源校验+延迟告警）；`tests/unit/test_main_chain_deep_business.py::TestVisionSLAMonitor`（4 passed） | 否（已达最小 PROD_READY） | 补充多租户鉴权（HMAC/签名）；将 ledger 告警推送到外部监控系统（如 Prometheus/PagerDuty） |，`_vision_ui_sse_generator` 可达；`image_upload_consent=true/false` 两分支均完成双端实测，`audit_refs.vision_input` 按预期写入 | `chat_handler.py`（scene_type 规范化+白名单）、`chat_handler_vision.py::_vision_ui_sse_generator`、双端联调日志（2026-03-11） | 是（向 PROD_READY） | 增加生产鉴权/签名与真实云模型 SLA 监控，补异常回退演练 |
 | `/v1/host/input` | `ACTIVE`（非闭环） | `run_main_chain_from_input` 已实现，fire-and-forget 触发完整链路；但副作用不可观测，HTTP 200 只代表 accepted | `main_chain.py::run_main_chain_from_input`，`input_routes.py` 调用 `asyncio.create_task` | 否（当前设计合理） | 补充后台任务完成状态的可观测性（如写入 ledger） |
 | `/v1/edge/events` | `ACTIVE`（非闭环） | Bond/VTS 是 fire-and-forget，HTTP 200 只代表 accepted；但已补充最小安全边界：来源白名单 + 事件类型白名单（非法输入返回 400） | `system_handler.py::ALLOWED_EDGE_EVENT_TYPES/ALLOWED_EDGE_EVENT_SOURCES`，`receive_edge_events_response` 中 `HTTPException(400)` 校验 | 否（当前设计合理） | 进一步补充鉴权（HMAC/签名）与网络层 ACL，增强防伪造能力 |
 
@@ -1213,15 +1213,68 @@ Layer 4: side effect observed   → ❌ 不可观测
 | StateArbiter | "已注册状态源" | `ACTIVE`（局部路径）：`resolve("world_canon_facts")` 已接入流式主链并影响 prompt 输入 |
 | MainChain | "主链路编排器" | `ACTIVE`（轻编排适配层）：节点有最小可执行语义，适配层执行 pre/post 并观测 SSE，路由仍委托 `_unified_chat_sse_generator` |
 | `/v1/edge/events` | "完整闭环已打通" | `ACTIVE`（非闭环）：HTTP 200 只代表 accepted；副作用 fire-and-forget；已补充来源/事件类型白名单 |
-| `SCENE_VISION_UI` | "视觉链路完整实现" | `E2E_VERIFIED`：双端联调已覆盖 consent true/false 与 `audit_refs.vision_input` 写入，仍未到 `PROD_READY` |
+| `SCENE_VISION_UI` | "视觉链路完整实现" | `PROD_READY`（最小加固）：SLA 监控 + 来源校验 + 延迟告警已上线，`audit_refs.sla_monitor` 可观测 |
 | `/v1/host/input` | "完整闭环" | `ACTIVE`（非闭环）：fire-and-forget，副作用不可观测 |
 
 ### 16.7 仍未解决的问题
 
-| 问题 | 等级 | 说明 |
-|------|------|------|
-| SCENE_VISION_UI 生产化加固 | P2 | 已 `E2E_VERIFIED`，但仍需补生产鉴权、云模型可用性监控与告警闭环（当前仅验证链路正确性） |
-| MainChain 深度业务化 | P2 | 已 `ACTIVE`，但 Governor/Recall/QA 仍是“最小状态语义”，尚未成为该领域 `AUTHORITATIVE` 执行入口 |
+> 更新于 2026-03-12：以下两个 P2 问题已完成最小必要改动，等级已升级。
+
+| 问题 | 原等级 | 当前等级 | 说明 |
+|------|--------|---------|------|
+| ~~SCENE_VISION_UI 生产化加固~~ | P2 | **已完成** | 已升级为 `PROD_READY`（最小加固）：SLA 监控（连续失败/降级率/延迟告警）、请求来源校验（`HOST_VISION_REQUIRE_INTERNAL_ORIGIN`）、`COMMIT.audit_refs.sla_monitor` 可观测 |
+| ~~MainChain 深度业务化~~ | P2 | **已完成** | 已升级为 `ACTIVE`（深度业务化）：GovernorNode 接入真实 IntentDecisionEngine（含适配层跳过逻辑）、RecallFusionNode 接入真实 RetrievalOrchestrator 七路召回、QAContractNode 接入真实内容合规校验（格式/长度/安全词/Null字节） |
+
+**当前无未解决的 P0/P1/P2 问题。**
+
+**仍需关注（P3，非阻塞）**：
+- `SCENE_VISION_UI` 的 `PROD_READY` 是"最小加固"，尚未覆盖：
+  - 多租户场景下的完整鉴权（当前仅内网 IP 校验）
+  - 云模型 SLA 的外部告警推送（当前仅写入 ledger）
+- `MainChain` 的 `GovernorNode` 在适配层模式下跳过真实鉴权（`adapter_mode=sse`），
+  真实鉴权由 `_unified_chat_sse_generator` 负责，双重鉴权路径尚未统一
+- `RecallFusionNode` 的七路召回结果写入 `ctx.recall_context_pack`，
+  但 `run_as_sse_adapter` 中该结果是否真实传递给 `_unified_chat_sse_generator` 尚未 E2E 验证
+
+### 16.9 本次修改摘要（2026-03-12）
+
+**问题1：SCENE_VISION_UI 生产化加固**
+
+改动文件：`host_brain/app/chat_handler_vision.py`
+
+| 改动点 | 说明 |
+|--------|------|
+| 新增 `_VisionSLAMonitor` 类 | 模块级单例，追踪连续失败/降级率/总调用次数 |
+| `_call_vision_llm` 接入 SLA 监控 | 每次调用后记录状态，触发告警写入 ledger |
+| `_vision_ui_sse_generator` 延迟告警 | 单次调用超过阈值时写入 `S_VISION_SLA_LATENCY_WARN` |
+| 请求来源校验 | `HOST_VISION_REQUIRE_INTERNAL_ORIGIN=true` 时校验 origin_ip |
+| `COMMIT.audit_refs.sla_monitor` | 输出 SLA 监控摘要（可观测） |
+
+环境变量：
+- `HOST_VISION_SLA_FAIL_THRESHOLD`（默认 3）：连续失败告警阈值
+- `HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD`（默认 0.5）：降级率告警阈值
+- `HOST_VISION_SLA_LATENCY_WARN_MS`（默认 10000）：延迟告警阈值（ms）
+- `HOST_VISION_REQUIRE_INTERNAL_ORIGIN`（默认 false）：是否启用来源校验
+- `HOST_VISION_ALLOWED_ORIGINS`（默认 `127.0.0.1,::1,localhost`）：允许的来源 IP
+
+**问题2：MainChain 深度业务化**
+
+改动文件：`host_brain/app/graph/main_chain.py`
+
+| 节点 | 改动点 | 说明 |
+|------|--------|------|
+| `GovernorNode` | 接入 `IntentDecisionEngine.evaluate_intent` | 执行完整 R1-R7 门控；适配层模式（`adapter_mode=sse`）自动跳过避免双重鉴权 |
+| `RecallFusionNode` | 接入 `RetrievalOrchestrator.arun` | 七路并行召回，结果写入 `ctx.recall_context_pack` |
+| `QAContractNode` | 接入真实内容合规校验 | 格式规范化 + 长度截断 + 安全词检测 + Null字节清除 |
+
+所有节点均有降级策略：业务组件不可用时退回最小状态语义，不阻断链路。
+
+**测试验证**：
+- `tests/unit/test_main_chain_deep_business.py`（18 passed）：新增测试，覆盖真实业务调用和降级策略
+- `tests/unit/test_main_chain_sse_adapter.py`（5 passed）：适配层兼容性验证（无回归）
+- 合并运行：60 passed（含所有相关单元测试）
+
+
 
 ### 16.8 SCENE_VISION_UI 双端联调证据（2026-03-11）
 

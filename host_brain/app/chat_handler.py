@@ -122,12 +122,14 @@ async def _unified_chat_sse_generator(
     intent_draft: Dict[str, Any],
     metrics: Any,
     _pre_classified_scene: str | None = None,
+    _pre_recall_evidence: list[dict] | None = None,
+    _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """统一 SSE 生成器。
 
     流程：
       PRESENCE(THINKING)
-      → Governor 鉴权
+      → Governor 鉴权（若 _pre_approved_governor_result 传入则跳过重复鉴权）
       → PRESENCE(GOV_APPROVED)
       → pre_intent_classifier 分类（鉴权后）
       → [任务3] SceneRouter.route_sse() 节点化路由分发：
@@ -153,14 +155,22 @@ async def _unified_chat_sse_generator(
         )
 
         # ── Governor 鉴权 ─────────────────────────────────────────────────
-        engine = get_intent_engine()
-        governor_result = await asyncio.to_thread(
-            engine.evaluate_intent,
-            raw_intent=intent_draft,
-            request_id=request_id,
-            thread_id=request_body.thread_id,
-            governance_snapshot=governance_snapshot,
-        )
+        if _pre_approved_governor_result is not None:
+            # GovernorNode（MainChain 适配层）已完成真实鉴权，直接复用结果，避免重复鉴权
+            governor_result = _pre_approved_governor_result
+            _logger.debug(
+                "unified_chat_sse_generator 使用预鉴权结果（来自 GovernorNode），跳过重复鉴权",
+                extra={"request_id": request_id},
+            )
+        else:
+            engine = get_intent_engine()
+            governor_result = await asyncio.to_thread(
+                engine.evaluate_intent,
+                raw_intent=intent_draft,
+                request_id=request_id,
+                thread_id=request_body.thread_id,
+                governance_snapshot=governance_snapshot,
+            )
 
         decision = governor_result.get("decision")
         reason_code = governor_result.get("reason_code")
@@ -244,6 +254,7 @@ async def _unified_chat_sse_generator(
             intent_id=intent_id,
             reason_code=reason_code,
             metrics=metrics,
+            _pre_recall_evidence=_pre_recall_evidence,
         ):
             yield event
 

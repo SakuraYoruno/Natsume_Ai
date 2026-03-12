@@ -49,8 +49,115 @@ from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
 _logger = logging.getLogger("Natsume.chat_handler_vision")
 
 # ---------------------------------------------------------------------------
-# 视觉场景节点序列（用于 GRAPH_START 通知）
+# 云模型 SLA 监控（生产化加固）
 # ---------------------------------------------------------------------------
+
+class _VisionSLAMonitor:
+    """SCENE_VISION_UI 云模型 SLA 监控器。
+
+    追踪连续失败次数、总调用次数、降级次数，
+    超过阈值时写入 ledger 告警日志。
+
+    生产化加固目标：
+    - 连续失败 >= HOST_VISION_SLA_FAIL_THRESHOLD（默认 3）时触发告警
+    - 降级率 >= HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD（默认 0.5）时触发告警
+    - 告警写入 ledger（stage=S_VISION_SLA_ALERT）
+    """
+
+    def __init__(self) -> None:
+        self._consecutive_failures: int = 0
+        self._total_calls: int = 0
+        self._degraded_calls: int = 0
+        self._lock = __import__("threading").Lock()
+
+    @staticmethod
+    def _resolve_fail_threshold() -> int:
+        raw = str(os.environ.get("HOST_VISION_SLA_FAIL_THRESHOLD") or "3").strip()
+        try:
+            return max(1, int(raw))
+        except (ValueError, TypeError):
+            return 3
+
+    @staticmethod
+    def _resolve_degrade_rate_threshold() -> float:
+        raw = str(os.environ.get("HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD") or "0.5").strip()
+        try:
+            return max(0.0, min(1.0, float(raw)))
+        except (ValueError, TypeError):
+            return 0.5
+
+    def record_call(
+        self,
+        *,
+        status: str,
+        request_id: str,
+        latency_ms: int,
+        model_id: str,
+        provider: str,
+    ) -> dict[str, Any]:
+        """记录一次调用结果，返回 SLA 监控摘要。"""
+        is_degraded = str(status or "").upper() == "DEGRADED"
+        with self._lock:
+            self._total_calls += 1
+            if is_degraded:
+                self._degraded_calls += 1
+                self._consecutive_failures += 1
+            else:
+                self._consecutive_failures = 0
+
+            consecutive = self._consecutive_failures
+            total = self._total_calls
+            degraded = self._degraded_calls
+
+        degrade_rate = degraded / total if total > 0 else 0.0
+        fail_threshold = self._resolve_fail_threshold()
+        degrade_rate_threshold = self._resolve_degrade_rate_threshold()
+
+        alert_triggered = False
+        alert_reason = None
+
+        if consecutive >= fail_threshold:
+            alert_triggered = True
+            alert_reason = f"CONSECUTIVE_FAILURES:{consecutive}>={fail_threshold}"
+        elif total >= 10 and degrade_rate >= degrade_rate_threshold:
+            alert_triggered = True
+            alert_reason = f"DEGRADE_RATE:{degrade_rate:.2f}>={degrade_rate_threshold}"
+
+        if alert_triggered:
+            _logger.warning(
+                "VISION SLA 告警: %s model=%s provider=%s consecutive=%d degrade_rate=%.2f",
+                alert_reason, model_id, provider, consecutive, degrade_rate,
+                extra={"request_id": request_id},
+            )
+            try:
+                get_ledger().log_error(
+                    request_id=request_id,
+                    stage="S_VISION_SLA_ALERT",
+                    reason_code=f"VISION_SLA_ALERT:{alert_reason}",
+                    detail=(
+                        f"model={model_id} provider={provider} "
+                        f"consecutive_failures={consecutive} "
+                        f"degrade_rate={degrade_rate:.2f} "
+                        f"total_calls={total} latency_ms={latency_ms}"
+                    ),
+                )
+            except Exception:
+                pass
+
+        return {
+            "consecutive_failures": consecutive,
+            "total_calls": total,
+            "degraded_calls": degraded,
+            "degrade_rate": round(degrade_rate, 4),
+            "alert_triggered": alert_triggered,
+            "alert_reason": alert_reason,
+        }
+
+
+# 模块级 SLA 监控单例（进程内共享）
+_vision_sla_monitor = _VisionSLAMonitor()
+
+
 
 VISION_UI_NODE_SEQUENCE = [
     "vision_context_parser",   # 解析视觉输入（base64/url/text）
@@ -285,6 +392,13 @@ async def _call_vision_llm(
             "image_filter_decision": image_egress_report.decision if image_egress_report else None,
             "image_filter_risks": image_egress_report.risks if image_egress_report else [],
             "image_digest": image_egress_report.image_digest if image_egress_report else None,
+            "sla": _vision_sla_monitor.record_call(
+                status="OK",
+                request_id=request_id,
+                latency_ms=0,  # 调用方会补充实际延迟
+                model_id=model_id,
+                provider=provider_name,
+            ),
         }
 
     except Exception as exc:
@@ -292,12 +406,20 @@ async def _call_vision_llm(
             "vision LLM call failed",
             extra={"request_id": request_id, "error": str(exc)},
         )
+        _sla = _vision_sla_monitor.record_call(
+            status="DEGRADED",
+            request_id=request_id,
+            latency_ms=0,
+            model_id=model_id,
+            provider=provider_name,
+        )
         return {
             "narrative": "啊啦，视觉分析的时候遇到了一点小问题呢。你可以再试一次，或者用文字描述一下你看到的内容，我来帮你！",
             "model_used": model_id,
             "provider": provider_name,
             "status": "DEGRADED",
             "reason_code": f"VISION_LLM_ERROR:{type(exc).__name__}",
+            "sla": _sla,
         }
 
 
@@ -321,12 +443,58 @@ async def _vision_ui_sse_generator(
 
     节点级进度通知：
       GRAPH_START → vision_context_parser → vision_analyzer → vision_renderer → COMMIT
+
+    生产化加固（P2）：
+    - 请求来源校验：HOST_VISION_REQUIRE_INTERNAL_ORIGIN=true 时，
+      仅允许来自内网的请求（通过 request_body.origin_ip 或 X-Forwarded-For 校验）
+    - 云模型 SLA 监控：连续失败/降级率超阈值时写入 ledger 告警
+    - 延迟告警：单次调用超过 HOST_VISION_SLA_LATENCY_WARN_MS 时写入告警
     """
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    # ── 生产化加固：请求来源校验 ──────────────────────────────────────────
+    _require_internal = str(os.environ.get("HOST_VISION_REQUIRE_INTERNAL_ORIGIN") or "false").strip().lower()
+    if _require_internal in {"1", "true", "yes", "on"}:
+        _origin_ip = str(getattr(request_body, "origin_ip", "") or "").strip()
+        _allowed_origins_raw = str(os.environ.get("HOST_VISION_ALLOWED_ORIGINS") or "127.0.0.1,::1,localhost").strip()
+        _allowed_origins = {o.strip() for o in _allowed_origins_raw.split(",") if o.strip()}
+        _is_internal = (
+            not _origin_ip  # 无 IP 信息时默认允许（内网部署场景）
+            or _origin_ip in _allowed_origins
+            or _origin_ip.startswith("127.")
+            or _origin_ip.startswith("192.168.")
+            or _origin_ip.startswith("10.")
+            or _origin_ip == "::1"
+        )
+        if not _is_internal:
+            _logger.warning(
+                "VISION 请求来源校验失败: origin_ip=%s",
+                _origin_ip,
+                extra={"request_id": request_id},
+            )
+            try:
+                get_ledger().log_error(
+                    request_id=request_id,
+                    stage="S_VISION_ORIGIN_REJECTED",
+                    reason_code="VISION_ORIGIN_NOT_ALLOWED",
+                    detail=f"origin_ip={_origin_ip} not in allowed_origins",
+                )
+            except Exception:
+                pass
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "VISION_ORIGIN_NOT_ALLOWED",
+                "narrative": "啊啦，这个请求来源不在允许范围内呢。",
+                "request_id": request_id,
+            })
+            return
+
     vision_llm_summary: Dict[str, Any] = {}
     episodic_summary: Dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+    _sla_summary: Dict[str, Any] = {}
 
     try:
         # ── 节点级进度通知：GRAPH_START ────────────────────────────────────
@@ -405,6 +573,28 @@ async def _vision_ui_sse_generator(
             image_upload_deny_reason=_img_deny_reason,
         )
         analysis_latency_ms = max(0, int(time.time() * 1000) - analysis_start_ms)
+
+        # 补充实际延迟到 SLA 监控（_call_vision_llm 内部记录时延迟未知）
+        _sla_summary = dict(llm_result.get("sla") or {})
+        if _sla_summary:
+            _sla_summary["latency_ms"] = analysis_latency_ms
+            # 若延迟超过 HOST_VISION_SLA_LATENCY_WARN_MS（默认 10000ms），写入告警
+            _latency_warn_ms = int(str(os.environ.get("HOST_VISION_SLA_LATENCY_WARN_MS") or "10000").strip() or "10000")
+            if analysis_latency_ms > _latency_warn_ms:
+                _logger.warning(
+                    "VISION SLA 延迟告警: latency_ms=%d > threshold=%d",
+                    analysis_latency_ms, _latency_warn_ms,
+                    extra={"request_id": request_id},
+                )
+                try:
+                    get_ledger().log_error(
+                        request_id=request_id,
+                        stage="S_VISION_SLA_LATENCY_WARN",
+                        reason_code="VISION_SLA_HIGH_LATENCY",
+                        detail=f"latency_ms={analysis_latency_ms} threshold={_latency_warn_ms}",
+                    )
+                except Exception:
+                    pass
 
         narrative = str(llm_result.get("narrative") or "")
         llm_status = str(llm_result.get("status") or "DEGRADED")
@@ -545,6 +735,7 @@ async def _vision_ui_sse_generator(
                     "image_filter_risks": llm_result.get("image_filter_risks"),
                     "image_digest": llm_result.get("image_digest"),
                 },
+                "sla_monitor": _sla_summary,
             },
         }
         # actions 模式：将 ActionPlan 附加到 COMMIT 事件

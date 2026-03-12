@@ -252,7 +252,15 @@ class AirlockQuarantineNode(ChainNode):
 
 
 class GovernorNode(ChainNode):
-    """治理节点：执行 R1-R7 规则检查，决定是否放行请求。"""
+    """治理节点：执行 R1-R7 规则检查，决定是否放行请求。
+
+    [深度业务化] 接入真实 IntentDecisionEngine.evaluate_intent 调用，
+    执行完整的 R1-R7 门控（速率限制、会话状态、内容安全、权限、配额、白名单、工具权限）
+    以及 R8 情感门控（critical 状态下拒绝 TOOL_CALL/SKILL_EXEC）。
+
+    降级策略：IntentDecisionEngine 不可用时，退回最小状态语义（仅做场景映射），
+    并在 audit_tags 中标记 GOVERNOR_DEGRADED_FALLBACK。
+    """
     name = "governor"
     timeout = NODE_TIMEOUT["governor"]
 
@@ -277,14 +285,159 @@ class GovernorNode(ChainNode):
         if scene_hint:
             ctx.task_type = _scene_to_task.get(scene_hint, TaskType.CHAT)
 
+        # ── 真实 Governor 鉴权（接入 IntentDecisionEngine）────────────────
+        # 注意：当在 run_as_sse_adapter 适配层中调用时（adapter_mode=sse），
+        # 真实的 Governor 鉴权已由 _unified_chat_sse_generator 负责，
+        # 此处跳过重复鉴权，只做场景映射和状态初始化。
+        # 当独立调用（非适配层）时，执行完整的 R1-R7 门控。
+        _adapter_mode = str(ctx.metadata.get("adapter_mode") or "").strip().lower()
+        _skip_real_auth = _adapter_mode == "sse" or bool(ctx.metadata.get("skip_governor_real_auth"))
+
+        governor_result: Dict[str, Any] = {}
+        governor_mode = "DEGRADED_FALLBACK"
+        if _skip_real_auth:
+            # 适配层模式：复用已注入的预鉴权结果（若有），否则执行真实鉴权
+            # 这样两条路径（适配层/独立调用）都经过真实 IntentDecisionEngine 鉴权，
+            # 避免适配层路径永远跳过真实鉴权的安全盲区。
+            _pre_result = ctx.metadata.get("pre_governor_result")
+            if isinstance(_pre_result, dict) and _pre_result:
+                # 已有预鉴权结果（由 run_as_sse_adapter 注入），直接复用
+                governor_result = dict(_pre_result)
+                governor_mode = "ADAPTER_PRE_AUTH"
+                decision = str(governor_result.get("decision") or "").strip().upper()
+                if decision != "APPROVE":
+                    reason = str(governor_result.get("reason_code") or "GOVERNOR_REJECTED")
+                    ctx.governor_passed = False
+                    ctx.governor_block_reason = reason
+                    ctx.failure_event = FailureEvent.GOVERNOR_BLOCK.value
+                    ctx.failure_detail = f"Governor 预鉴权拒绝：{reason}"
+                    ctx.metadata["governor"] = {
+                        "mode": governor_mode,
+                        "decision": decision,
+                        "reason_code": reason,
+                        "scene_hint": scene_hint or None,
+                        "task_type": ctx.task_type.value,
+                    }
+                    ctx.audit_tags.append(f"GOVERNOR_REJECT:{reason}")
+                    logger.info("[%s] Governor 预鉴权拒绝 reason=%s", ctx.request_id, reason)
+                    return False
+                ctx.metadata["intent_id"] = governor_result.get("intent_id")
+            else:
+                # 无预鉴权结果，执行真实鉴权（与独立调用路径完全一致）
+                governor_mode = "ADAPTER_SKIP"
+        if not _skip_real_auth or governor_mode == "ADAPTER_SKIP":
+            try:
+                from host_brain.app.dependencies import get_intent_engine  # noqa: PLC0415
+                from host_brain.app.emotion_context import (  # noqa: PLC0415
+                    build_chat_governance_snapshot,
+                    resolve_chat_emotion_context,
+                )
+                from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+                # 构建 intent_draft（若 metadata 中已有则复用）
+                intent_action = str(ctx.metadata.get("intent_action") or "narrative_only").strip() or "narrative_only"
+                intent_draft = {
+                    "schema_version": "Natsume.intent.v1",
+                    "id": f"intent::{ctx.request_id}",
+                    "ts_ms": now_ms(),
+                    "session_id": ctx.session_id,
+                    "seq": 1,
+                    "type": "query",
+                    "action": intent_action,
+                    "target": "host",
+                    "args": {"text": ctx.user_message},
+                    "nonce": f"nonce::{ctx.request_id}",
+                }
+
+                # 构建 governance_snapshot（情感治理快照）
+                class _MinimalReq:
+                    def __init__(self) -> None:
+                        self.message = ctx.user_message
+                        self.session_id = ctx.session_id
+                        self.thread_id = None
+                        self.mood_state = str(ctx.metadata.get("mood_state") or "steady")
+                        self.emotion_tag = str(ctx.metadata.get("emotion_tag") or "NEUTRAL")
+                        self.emotion_intensity = None
+                        self.emotion_range_hint = None
+                        self.emotion_context = None
+                        self.scene_type = None
+                        self.intent_draft = None
+
+                emotion_ctx = resolve_chat_emotion_context(request_body=_MinimalReq())
+                governance_snapshot = build_chat_governance_snapshot(
+                    emotion_context=emotion_ctx,
+                    ts_ms=now_ms(),
+                )
+
+                engine = get_intent_engine()
+                governor_result = await asyncio.to_thread(
+                    engine.evaluate_intent,
+                    raw_intent=intent_draft,
+                    request_id=ctx.request_id,
+                    governance_snapshot=governance_snapshot,
+                )
+                governor_mode = "ACTIVE"
+
+                decision = str(governor_result.get("decision") or "").strip().upper()
+                if decision != "APPROVE":
+                    reason = str(governor_result.get("reason_code") or "GOVERNOR_REJECTED")
+                    if _skip_real_auth:
+                        # 适配层模式：鉴权拒绝时降级放行，让 _unified_chat_sse_generator 自己执行鉴权
+                        # 避免双重鉴权导致的误拒（如 nonce 重复检测）
+                        logger.warning(
+                            "[%s] GovernorNode 适配层鉴权拒绝（降级放行，委托给 unified generator）: %s",
+                            ctx.request_id, reason,
+                        )
+                        ctx.audit_tags.append(f"GOVERNOR_ADAPTER_SKIP_REJECT:{reason}")
+                        governor_mode = "DEGRADED_FALLBACK"
+                    else:
+                        ctx.governor_passed = False
+                        ctx.governor_block_reason = reason
+                        ctx.failure_event = FailureEvent.GOVERNOR_BLOCK.value
+                        ctx.failure_detail = f"Governor 拒绝：{reason}"
+                        ctx.metadata["governor"] = {
+                            "mode": governor_mode,
+                            "decision": decision,
+                            "reason_code": reason,
+                            "stage": str(governor_result.get("stage") or ""),
+                            "scene_hint": scene_hint or None,
+                            "task_type": ctx.task_type.value,
+                        }
+                        ctx.audit_tags.append(f"GOVERNOR_REJECT:{reason}")
+                        logger.info("[%s] Governor 拒绝 reason=%s", ctx.request_id, reason)
+                        return False
+                else:
+                    # 放行：写入 intent_id 供后续节点使用
+                    ctx.metadata["intent_id"] = governor_result.get("intent_id")
+                    ctx.metadata["governor_result"] = {
+                        "decision": decision,
+                        "intent_id": governor_result.get("intent_id"),
+                        "stage": str(governor_result.get("stage") or ""),
+                        "approval_tier": str(
+                            (governor_result.get("committed_route_token") or {}).get("approval_tier") or "full"
+                        ),
+                    }
+                    # 存储完整鉴权结果，供 run_as_sse_adapter 传给 _unified_chat_sse_generator 跳过重复鉴权
+                    ctx.metadata["pre_governor_result"] = dict(governor_result)
+
+            except Exception as exc:
+                # 降级：IntentDecisionEngine 不可用时退回最小状态语义
+                logger.warning(
+                    "[%s] GovernorNode 真实鉴权失败，降级为最小状态语义: %s",
+                    ctx.request_id, exc,
+                )
+                ctx.audit_tags.append("GOVERNOR_DEGRADED_FALLBACK")
+                governor_mode = "DEGRADED_FALLBACK"
+
         ctx.governor_passed = True
         ctx.governor_block_reason = None
         ctx.metadata["governor"] = {
+            "mode": governor_mode,
             "scene_hint": scene_hint or None,
             "task_type": ctx.task_type.value,
         }
         ctx.audit_tags.append("GOVERNOR_PRECHECK_PASSED")
-        logger.debug("[%s] Governor 放行 task_type=%s", ctx.request_id, ctx.task_type.value)
+        logger.debug("[%s] Governor 放行 task_type=%s mode=%s", ctx.request_id, ctx.task_type.value, governor_mode)
         return True
 
 
@@ -306,21 +459,95 @@ class GraphExecutorNode(ChainNode):
 
 
 class RecallFusionNode(ChainNode):
-    """召回融合节点：执行七路召回并组装 ContextPack。"""
+    """召回融合节点：执行七路召回并组装 ContextPack。
+
+    [深度业务化] 接入真实 RetrievalOrchestrator.arun 调用，
+    执行七路并行召回（向量语义/全文/情节记忆/Bond/知识图谱/情感/工具元数据）
+    + HybridFusion RRF 融合 + Reranker 重排序。
+
+    降级策略：RetrievalOrchestrator 不可用时，退回最小状态语义（仅记录空证据），
+    并在 audit_tags 中标记 RECALL_DEGRADED_FALLBACK。
+    """
     name = "recall_fusion"
     timeout = NODE_TIMEOUT["recall_fusion"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        evidence_empty = ctx.recall_context_pack in (None, "", [], {})
-        ctx.metadata["recall_fusion"] = {
-            "evidence_empty": bool(evidence_empty),
-            "context_pack_type": (
-                type(ctx.recall_context_pack).__name__ if ctx.recall_context_pack is not None else "none"
-            ),
-        }
-        if evidence_empty:
-            ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
-        logger.debug("[%s] RecallFusion 执行 evidence_empty=%s", ctx.request_id, evidence_empty)
+        # ── 真实七路召回（接入 RetrievalOrchestrator）────────────────────
+        recall_mode = "DEGRADED_FALLBACK"
+        try:
+            from host_brain.app.dependencies import get_retrieval_orchestrator  # noqa: PLC0415
+            from host_brain.retrieval.orchestrator import RetrievalOrchestratorRequest  # noqa: PLC0415
+            import os as _os  # noqa: PLC0415
+
+            _retr_top_k = int(str(_os.environ.get("HOST_RETR_TOP_K") or "5").strip())
+            _emotion_tag = str(ctx.metadata.get("emotion_tag") or "").strip() or None
+            _ts_ms = int(ctx.metadata.get("ts_ms") or 0) or None
+
+            orchestrator = get_retrieval_orchestrator()
+            orchestrator_result = await orchestrator.arun(
+                request=RetrievalOrchestratorRequest(
+                    trace_id=ctx.request_id,
+                    query=ctx.user_message,
+                    session_state={
+                        "session_id": ctx.session_id,
+                        "emotion_tag": _emotion_tag,
+                    },
+                    request_id=ctx.request_id,
+                    session_id=ctx.session_id,
+                    top_k=_retr_top_k,
+                    ts_ms=_ts_ms,
+                    emotion_context=_emotion_tag,
+                ),
+                timeout_ms=int(NODE_TIMEOUT["recall_fusion"] * 1000),
+            )
+
+            ctx.recall_context_pack = {
+                "retrieval_summary": dict(orchestrator_result.retrieval_summary),
+                "retrieval_evidence_items": list(orchestrator_result.retrieval_evidence_items),
+                "path": str(orchestrator_result.path),
+            }
+            recall_mode = "ACTIVE"
+            evidence_empty = len(orchestrator_result.retrieval_evidence_items) == 0
+            ctx.metadata["recall_fusion"] = {
+                "mode": recall_mode,
+                "evidence_empty": bool(evidence_empty),
+                "evidence_count": len(orchestrator_result.retrieval_evidence_items),
+                "retrieval_status": str(orchestrator_result.status),
+                "retrieval_path": str(orchestrator_result.path),
+                "context_pack_type": "RetrievalOrchestratorResult",
+            }
+            if evidence_empty:
+                ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
+            else:
+                ctx.audit_tags.append(f"RECALL_EVIDENCE_COUNT:{len(orchestrator_result.retrieval_evidence_items)}")
+            logger.debug(
+                "[%s] RecallFusion 真实召回完成 evidence_count=%d status=%s",
+                ctx.request_id,
+                len(orchestrator_result.retrieval_evidence_items),
+                orchestrator_result.status,
+            )
+
+        except Exception as exc:
+            # 降级：RetrievalOrchestrator 不可用时退回最小状态语义
+            logger.warning(
+                "[%s] RecallFusionNode 真实召回失败，降级为最小状态语义: %s",
+                ctx.request_id, exc,
+            )
+            ctx.audit_tags.append("RECALL_DEGRADED_FALLBACK")
+            recall_mode = "DEGRADED_FALLBACK"
+            evidence_empty = ctx.recall_context_pack in (None, "", [], {})
+            ctx.metadata["recall_fusion"] = {
+                "mode": recall_mode,
+                "evidence_empty": bool(evidence_empty),
+                "context_pack_type": (
+                    type(ctx.recall_context_pack).__name__ if ctx.recall_context_pack is not None else "none"
+                ),
+                "error": str(exc),
+            }
+            if evidence_empty:
+                ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
+
+        logger.debug("[%s] RecallFusion 执行完成 mode=%s", ctx.request_id, recall_mode)
         return True
 
 
@@ -344,33 +571,154 @@ class LlmGatewayNode(ChainNode):
 
 
 class QAContractNode(ChainNode):
-    """QA 合约节点：验证输出合规性，必要时重写。"""
+    """QA 合约节点：验证输出合规性，必要时重写。
+
+    [深度业务化] 接入真实内容合规校验：
+    - 空响应检查：final_response 为空时标记 QA_EMPTY_RESPONSE
+    - 长度检查：超过 HOST_QA_MAX_RESPONSE_CHARS（默认 4000）时截断并标记
+    - 格式检查：去除首尾空白、规范化换行符
+    - 安全词检查：检测明显的系统提示词泄露（"system prompt"/"你是一个AI"等）
+    - 空白规范化：多余空行压缩为单行
+
+    降级策略：任何检查步骤异常时，保留原始输出并标记 QA_CHECK_DEGRADED。
+    """
     name = "qa_contract"
     timeout = NODE_TIMEOUT["qa_contract"]
+
+    # 安全词检测列表（检测系统提示词泄露）
+    _SAFETY_PATTERNS: tuple[str, ...] = (
+        "system prompt",
+        "你是一个AI",
+        "你是一个人工智能",
+        "I am an AI",
+        "As an AI language model",
+        "作为一个AI",
+        "<|system|>",
+        "<|assistant|>",
+        "SYSTEM:",
+        "[INST]",
+        "<<SYS>>",
+    )
+
+    # 最大响应字符数（可通过环境变量覆盖）
+    _DEFAULT_MAX_CHARS = 4000
+
+    @classmethod
+    def _resolve_max_chars(cls) -> int:
+        import os as _os  # noqa: PLC0415
+        raw = str(_os.environ.get("HOST_QA_MAX_RESPONSE_CHARS") or "").strip()
+        try:
+            value = int(raw)
+            return max(100, min(value, 20000))
+        except (ValueError, TypeError):
+            return cls._DEFAULT_MAX_CHARS
 
     async def execute(self, ctx: ChainContext) -> bool:
         raw_output = str(ctx.final_response or ctx.llm_raw_output or "")
         if not raw_output:
             ctx.metadata["qa_contract"] = {
                 "status": "SKIPPED_NO_OUTPUT",
+                "mode": "ACTIVE",
                 "rewritten": False,
+                "checks": [],
             }
             logger.debug("[%s] QAContract 跳过：无输出", ctx.request_id)
             return True
 
-        normalized_output = raw_output.strip()
-        rewritten = normalized_output != raw_output
+        checks_passed: list[str] = []
+        checks_failed: list[str] = []
+        rewrite_reasons: list[str] = []
+        output = raw_output
+
+        try:
+            # ── 检查1：格式规范化（去除首尾空白、规范化换行）────────────
+            normalized = output.strip()
+            import re as _re  # noqa: PLC0415
+            # 压缩连续空行（3个以上换行 → 2个换行）
+            normalized = _re.sub(r"\n{3,}", "\n\n", normalized)
+            # 去除行尾空白
+            normalized = _re.sub(r"[ \t]+\n", "\n", normalized)
+            if normalized != output:
+                rewrite_reasons.append("FORMAT_NORMALIZE")
+                output = normalized
+            checks_passed.append("FORMAT_CHECK")
+
+            # ── 检查2：长度检查（超限截断）──────────────────────────────
+            max_chars = self._resolve_max_chars()
+            if len(output) > max_chars:
+                # 在句子边界截断（避免截断到句子中间）
+                truncated = output[:max_chars]
+                # 尝试在最后一个句号/问号/感叹号处截断
+                last_sentence_end = max(
+                    truncated.rfind("。"),
+                    truncated.rfind("！"),
+                    truncated.rfind("？"),
+                    truncated.rfind("."),
+                    truncated.rfind("!"),
+                    truncated.rfind("?"),
+                )
+                if last_sentence_end > max_chars * 0.7:
+                    output = truncated[:last_sentence_end + 1]
+                else:
+                    output = truncated + "…"
+                rewrite_reasons.append(f"LENGTH_TRUNCATED:{len(raw_output)}->{len(output)}")
+                ctx.audit_tags.append("QA_LENGTH_TRUNCATED")
+                checks_failed.append(f"LENGTH_CHECK:EXCEEDED({len(raw_output)}>{max_chars})")
+            else:
+                checks_passed.append(f"LENGTH_CHECK:OK({len(output)}<={max_chars})")
+
+            # ── 检查3：安全词检测（系统提示词泄露）──────────────────────
+            output_lower = output.lower()
+            leaked_patterns: list[str] = []
+            for pattern in self._SAFETY_PATTERNS:
+                if pattern.lower() in output_lower:
+                    leaked_patterns.append(pattern)
+            if leaked_patterns:
+                # 不截断，仅标记警告（误报率较高，不阻断）
+                ctx.audit_tags.append(f"QA_SAFETY_WARN:PROMPT_LEAK_SUSPECTED")
+                checks_failed.append(f"SAFETY_CHECK:WARN({len(leaked_patterns)} patterns)")
+                logger.warning(
+                    "[%s] QAContract 安全词检测：疑似系统提示词泄露 patterns=%s",
+                    ctx.request_id, leaked_patterns[:3],
+                )
+            else:
+                checks_passed.append("SAFETY_CHECK:OK")
+
+            # ── 检查4：空白规范化（去除 null 字节）──────────────────────
+            if "\x00" in output:
+                output = output.replace("\x00", "")
+                rewrite_reasons.append("NULL_BYTE_REMOVED")
+                ctx.audit_tags.append("QA_NULL_BYTE_REMOVED")
+            checks_passed.append("NULL_BYTE_CHECK")
+
+        except Exception as exc:
+            ctx.audit_tags.append("QA_CHECK_DEGRADED")
+            checks_failed.append(f"QA_CHECK_EXCEPTION:{type(exc).__name__}")
+            logger.warning("[%s] QAContract 检查异常（降级）: %s", ctx.request_id, exc)
+            # 降级：保留原始输出
+            output = raw_output
+
+        rewritten = output != raw_output
         ctx.qa_rewritten = rewritten
         ctx.qa_original_output = raw_output if rewritten else None
-        ctx.final_response = normalized_output
+        ctx.final_response = output
+
         ctx.metadata["qa_contract"] = {
             "status": "OK",
+            "mode": "ACTIVE",
             "rewritten": rewritten,
-            "output_chars": len(normalized_output),
+            "rewrite_reasons": rewrite_reasons,
+            "output_chars": len(output),
+            "input_chars": len(raw_output),
+            "checks_passed": checks_passed,
+            "checks_failed": checks_failed,
         }
         if rewritten:
-            ctx.audit_tags.append("QA_REWRITE_WHITESPACE_TRIM")
-        logger.debug("[%s] QAContract 执行 rewritten=%s", ctx.request_id, rewritten)
+            ctx.audit_tags.append(f"QA_REWRITE:{','.join(rewrite_reasons)}")
+        logger.debug(
+            "[%s] QAContract 执行完成 rewritten=%s checks_passed=%d checks_failed=%d",
+            ctx.request_id, rewritten, len(checks_passed), len(checks_failed),
+        )
         return True
 
 
@@ -642,6 +990,8 @@ class SceneRouter:
         # SCENE_CHAT 专用参数
         sys_mode: str = "normal",
         gaming_edge_enabled: bool = False,
+        # 预召回结果（来自 MainChain.RecallFusionNode），传入时跳过 _sse_event_generator 内部重复召回
+        _pre_recall_evidence: list[dict] | None = None,
     ):
         """[任务3] 根据 scene_type 分流到对应的 SSE 生成器。
 
@@ -781,6 +1131,7 @@ class SceneRouter:
                 ts_ms=ts_ms,
                 intent_draft=intent_draft,
                 _pre_approved_governor_result=governor_result,
+                _pre_recall_evidence=_pre_recall_evidence,
             ):
                 yield event
             return
@@ -1122,6 +1473,30 @@ class MainChain:
                 )
                 return
 
+            # 提取 RecallFusionNode 的预召回结果（若有）
+            _pre_recall: list[dict] | None = None
+            _recall_pack = ctx.recall_context_pack
+            if isinstance(_recall_pack, dict):
+                _items = _recall_pack.get("retrieval_evidence_items")
+                if isinstance(_items, list) and len(_items) > 0:
+                    _pre_recall = _items
+                    logger.debug(
+                        "[%s] run_as_sse_adapter 将 RecallFusionNode 预召回结果注入 _unified_chat_sse_generator"
+                        " evidence_count=%d",
+                        request_id, len(_pre_recall),
+                    )
+
+            # 提取 GovernorNode 的真实鉴权结果（若有），传给 _unified_chat_sse_generator 跳过重复鉴权
+            # 统一两条鉴权路径：适配层路径和独立调用路径都经过真实 IntentDecisionEngine 鉴权
+            _pre_governor: dict | None = None
+            _pre_governor_raw = ctx.metadata.get("pre_governor_result")
+            if isinstance(_pre_governor_raw, dict) and _pre_governor_raw:
+                _pre_governor = dict(_pre_governor_raw)
+                logger.debug(
+                    "[%s] run_as_sse_adapter 将 GovernorNode 真实鉴权结果注入 _unified_chat_sse_generator",
+                    request_id,
+                )
+
             async for event in _unified_chat_sse_generator(
                 request_body=request_body,
                 request_id=request_id,
@@ -1130,6 +1505,8 @@ class MainChain:
                 intent_draft=intent_draft,
                 metrics=metrics,
                 _pre_classified_scene=_pre_classified_scene,
+                _pre_recall_evidence=_pre_recall,
+                _pre_approved_governor_result=_pre_governor,
             ):
                 payload = self._parse_sse_payload(event)
                 if payload:

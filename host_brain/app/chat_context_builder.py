@@ -103,45 +103,90 @@ def build_chat_context_pack(
     retrieval_evidence_items: list[dict[str, Any]],
     style_bindings: Mapping[str, Mapping[str, Any]] | None,
     emotion_context: Mapping[str, Any] | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """构建 context_pack。
+
+    当 cpb_slots 传入时（来自 ContextPackBuilder.build() 的 slot 输出），
+    直接使用 CPB 的 authoritative/style_pack slot 内容，
+    跳过默认的 world_canon_slot 和 style_bindings 构建逻辑，
+    统一两套 context_pack 构建路径。
+    """
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
     normalized_style_bindings = normalize_node_style_bindings(style_bindings)
     normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
 
+    # ── style_pack slot ──────────────────────────────────────────────────
+    # 优先使用 CPB 的 style_canon slot 内容（已经过 token 预算控制）
+    _cpb_style = dict(cpb_slots or {}).get("style_canon") if cpb_slots else None
     style_rows: list[dict[str, Any]] = []
-    for node_id, row in normalized_style_bindings.items():
+    if _cpb_style and str(_cpb_style).strip():
+        # CPB 路径：将 style_canon slot 内容包装为单条 style_row
         style_rows.append(
             {
                 "slot": "style_pack",
                 "kind": "style_canon",
-                "node_id": node_id,
-                "canon_id": row.get("canon_id"),
-                "version": row.get("version"),
-                "hash": row.get("hash"),
-                "tone_only": bool(row.get("tone_only", True)),
-                "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
-                "citation": row.get("citation"),
-                "instruction": _truncate_for_prompt(row.get("style_instruction"), limit=1600),
+                "node_id": "context_pack_builder",
+                "canon_id": None,
+                "version": None,
+                "hash": None,
+                "tone_only": True,
+                "unsafe_as_fact": True,
+                "citation": "context_pack_builder://style_canon",
+                "instruction": _truncate_for_prompt(str(_cpb_style), limit=1600),
             }
         )
+    else:
+        # 默认路径：从 style_bindings 构建
+        for node_id, row in normalized_style_bindings.items():
+            style_rows.append(
+                {
+                    "slot": "style_pack",
+                    "kind": "style_canon",
+                    "node_id": node_id,
+                    "canon_id": row.get("canon_id"),
+                    "version": row.get("version"),
+                    "hash": row.get("hash"),
+                    "tone_only": bool(row.get("tone_only", True)),
+                    "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
+                    "citation": row.get("citation"),
+                    "instruction": _truncate_for_prompt(row.get("style_instruction"), limit=1600),
+                }
+            )
 
+    # ── authoritative slot ───────────────────────────────────────────────
+    # 优先使用 CPB 的 world_canon slot 内容（已经过冲突检测和 token 预算控制）
+    _cpb_world = dict(cpb_slots or {}).get("world_canon") if cpb_slots else None
     authoritative_rows: list[dict[str, Any]] = []
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "").strip() or None
-    try:
-        world_top_k = int(str(os.environ.get("HOST_WCANON_TOP_K") or "3").strip())
-    except ValueError:
-        world_top_k = 3
-    world_top_k = max(1, min(world_top_k, 10))
-    try:
-        authoritative_rows = build_world_canon_slot(world_root=world_root, top_k=world_top_k)
-    except Exception as exc:
-        check_wcanon_slot_violation(
-            slot_name="world_canon_slot",
-            detail=f"world canon slot 构建失败: {exc}",
-            ledger=get_ledger(),
-            request_id=request_id,
+    if _cpb_world and str(_cpb_world).strip():
+        # CPB 路径：将 world_canon slot 内容包装为单条 authoritative_row
+        authoritative_rows.append(
+            {
+                "slot": "authoritative",
+                "kind": "world_canon",
+                "source_ref": "context_pack_builder://world_canon",
+                "content": _truncate_for_prompt(str(_cpb_world), limit=800),
+                "citation": "context_pack_builder://world_canon",
+            }
         )
-        authoritative_rows = []
+    else:
+        # 默认路径：从 world_canon_slot 构建
+        world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "").strip() or None
+        try:
+            world_top_k = int(str(os.environ.get("HOST_WCANON_TOP_K") or "3").strip())
+        except ValueError:
+            world_top_k = 3
+        world_top_k = max(1, min(world_top_k, 10))
+        try:
+            authoritative_rows = build_world_canon_slot(world_root=world_root, top_k=world_top_k)
+        except Exception as exc:
+            check_wcanon_slot_violation(
+                slot_name="world_canon_slot",
+                detail=f"world canon slot 构建失败: {exc}",
+                ledger=get_ledger(),
+                request_id=request_id,
+            )
+            authoritative_rows = []
 
     retrieval_rows: list[dict[str, Any]] = []
     for row in retrieval_evidence_items[:10]:
@@ -470,6 +515,7 @@ def build_chat_generation_prompt_payload(
     emotion_context: Mapping[str, Any] | None = None,
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from host_brain.app.emotion_context import (  # noqa: PLC0415
         build_chat_emotion_snapshot,
@@ -496,6 +542,7 @@ def build_chat_generation_prompt_payload(
         retrieval_evidence_items=retrieval_evidence_items,
         style_bindings=normalized_style_bindings,
         emotion_context=normalized_emotion_context,
+        cpb_slots=cpb_slots,
     )
     context_pack_observability = build_context_pack_observability(
         context_pack=context_pack,

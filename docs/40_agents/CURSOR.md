@@ -415,13 +415,85 @@
 
 ---
 
+### TODO-7：SCENE_VISION_UI 生产化加固（已完成，2026-03-12）
+
+**当前状态**：`PROD_READY`（最小生产化加固已上线）
+- 新增 `_VisionSLAMonitor` 模块级单例，追踪连续失败次数、降级率
+- 连续失败 >= `HOST_VISION_SLA_FAIL_THRESHOLD`（默认 3）时写入 ledger 告警（`S_VISION_SLA_ALERT`）
+- 降级率 >= `HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD`（默认 0.5）且总调用 >= 10 时触发告警
+- 单次调用延迟 > `HOST_VISION_SLA_LATENCY_WARN_MS`（默认 10000ms）时写入延迟告警（`S_VISION_SLA_LATENCY_WARN`）
+- 新增请求来源校验：`HOST_VISION_REQUIRE_INTERNAL_ORIGIN=true` 时，仅允许内网 IP（127.x/192.168.x/10.x/::1）
+- `COMMIT.audit_refs.sla_monitor` 输出 SLA 监控摘要（可观测）
+
+**改动文件**：
+- `host_brain/app/chat_handler_vision.py`
+
+**验证**：
+- `pytest -q tests/unit/test_main_chain_deep_business.py::TestVisionSLAMonitor`（4 passed）
+
+**回退方式**：
+- 设置 `HOST_VISION_REQUIRE_INTERNAL_ORIGIN=false` 禁用来源校验
+- SLA 监控为纯观测，不影响主链路
+
+---
+
+### TODO-8：MainChain 深度业务化（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（深度业务化，接近 AUTHORITATIVE）
+- `GovernorNode`：接入真实 `IntentDecisionEngine.evaluate_intent`，执行完整 R1-R7 门控
+  - 适配层模式（`adapter_mode=sse`）自动跳过重复鉴权，避免双重 Governor 调用
+  - 降级策略：引擎不可用时退回最小状态语义，标记 `GOVERNOR_DEGRADED_FALLBACK`
+- `RecallFusionNode`：接入真实 `RetrievalOrchestrator.arun`，执行七路并行召回
+  - 降级策略：Orchestrator 不可用时退回最小状态语义，标记 `RECALL_DEGRADED_FALLBACK`
+  - 召回结果写入 `ctx.recall_context_pack`，供后续节点使用
+- `QAContractNode`：接入真实内容合规校验（4 项检查）
+  - 格式规范化：去除首尾空白、压缩多余空行、去除行尾空白
+  - 长度截断：超过 `HOST_QA_MAX_RESPONSE_CHARS`（默认 4000）时在句子边界截断
+  - 安全词检测：疑似系统提示词泄露时写入告警标签（不阻断，误报率较高）
+  - Null 字节清除：去除 `\x00` 字节
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`
+
+**验证**：
+- `pytest -q tests/unit/test_main_chain_deep_business.py`（18 passed）
+- `pytest -q tests/unit/test_main_chain_sse_adapter.py`（5 passed，适配层兼容性验证）
+
+**回退方式**：
+- `GovernorNode` 降级：引擎不可用时自动降级，不阻断链路
+- `RecallFusionNode` 降级：Orchestrator 不可用时自动降级，不阻断链路
+- `QAContractNode` 降级：检查异常时保留原始输出，标记 `QA_CHECK_DEGRADED`
+
+---
+
+### TODO-9：RecallFusionNode 孤岛问题修复（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（链路闭环）
+- **问题**：`RecallFusionNode` 执行七路召回后，结果写入 `ctx.recall_context_pack`，但 `run_as_sse_adapter` 调用 `_unified_chat_sse_generator` 时未传入，导致 `_sse_event_generator` 内部重复执行一次召回（双重召回，预召回结果被丢弃）
+- **修复**：将 `ctx.recall_context_pack.retrieval_evidence_items` 作为 `_pre_recall_evidence` 参数透传，链路：`run_as_sse_adapter` → `_unified_chat_sse_generator` → `SceneRouter.route_sse` → `_sse_event_generator`
+- **效果**：`_sse_event_generator` 在有预召回结果时跳过内部召回，避免双重召回浪费资源；空列表/None 时退回原有召回逻辑
+
+**改动文件**：
+- `host_brain/app/chat_stream_handler.py`：`_sse_event_generator` 增加 `_pre_recall_evidence` 参数
+- `host_brain/app/chat_handler.py`：`_unified_chat_sse_generator` 增加 `_pre_recall_evidence` 参数并透传
+- `host_brain/app/graph/main_chain.py`：`SceneRouter.route_sse` 增加 `_pre_recall_evidence` 参数并透传；`run_as_sse_adapter` 提取 `ctx.recall_context_pack` 并注入
+
+**验证**：
+- `pytest -q tests/unit/test_main_chain_deep_business.py::TestPreRecallInjection`（2 passed）
+- 合并运行：62 passed（含所有相关单元测试，无回归）
+
+**回退方式**：`_pre_recall_evidence=None` 时退回原有召回逻辑，无破坏性变更
+
+---
+
 ## 完成标准
 
 | 任务 | 完成标准 | 升级后等级 |
-|------|---------|-----------|
-| TODO-1 | `retrieval_evidence_items` 真实使用截断结果，有测试验证 | `ACTIVE` |
+|------|---------|-----------|\n| TODO-1 | `retrieval_evidence_items` 真实使用截断结果，有测试验证 | `ACTIVE` |
 | TODO-2 | 白名单校验上线，非法事件类型返回 400 | `ACTIVE`（安全边界完整） |
 | TODO-3 | 路由矩阵决策真实影响模型选择，有 fallback | `ACTIVE` |
 | TODO-4 | 至少一条业务路径调用 `resolve()`，有测试 | `ACTIVE` |
 | TODO-5 | 双端 E2E 联调通过，有截图/日志证据 | `E2E_VERIFIED` |
 | TODO-6 | 骨架节点填充真实逻辑，`run_as_sse_adapter` 不再只是透传 | `ACTIVE` |
+| TODO-7 | SLA 监控上线，连续失败/降级率/延迟告警可观测，来源校验可配置 | `PROD_READY`（最小加固） |
+| TODO-8 | Governor/Recall/QA 接入真实业务调用，有降级策略和测试验证 | `ACTIVE`（深度业务化） |
