@@ -390,13 +390,12 @@ class DistillationEngine:
             return
         try:
             if self._ledger is not None:
-                self._ledger.append_audit_log(
+                # 使用 SQLiteLedger 实际存在的 log_error 方法写入审计日志
+                self._ledger.log_error(
                     request_id="distillation_engine",
-                    session_id="",
-                    stage="distillation_engine",
-                    audit_tag=event,
+                    stage=event,
+                    reason_code=event,
                     detail=json.dumps(detail, ensure_ascii=False),
-                    ts_ms=int(time.time() * 1000),
                 )
             elif self._audit_writer is not None:
                 self._audit_writer(event, detail)

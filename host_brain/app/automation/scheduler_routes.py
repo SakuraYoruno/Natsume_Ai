@@ -115,16 +115,21 @@ async def patch_scheduler_task(task_id: str, body: dict[str, Any]) -> dict[str, 
     前端通过 PATCH + { trigger_config: { next_run_ts: 0 } } 实现立即触发。
     """
     scheduler = get_scheduler()
-    if task_id not in scheduler._tasks:
+    # 使用公开方法检查任务是否存在（避免直接访问私有属性 _tasks）
+    all_tasks = {t["task_id"]: t for t in scheduler.get_all_tasks_status()}
+    if task_id not in all_tasks:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"任务 {task_id!r} 不存在",
         )
-    task = scheduler._tasks[task_id]
     trigger_config = body.get("trigger_config") or {}
     if isinstance(trigger_config, dict) and trigger_config.get("next_run_ts") == 0:
-        # 立即触发：重置 last_run_ts
-        import time as _time  # noqa: PLC0415
-        task.last_run_ts = 0.0
+        # 立即触发：通过公开的 trigger_now 方法重置 last_run_ts
+        ok = scheduler.trigger_now(task_id)
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"任务 {task_id!r} 已禁用，无法触发",
+            )
         _logger.info("调度任务通过 PATCH 触发: task_id=%s", task_id)
     return {"task_id": task_id, "patched": True, "status": "OK"}

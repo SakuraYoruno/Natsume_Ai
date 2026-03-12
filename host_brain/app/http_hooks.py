@@ -30,6 +30,8 @@ async def runtime_lifespan(
             get_context_pack_builder,
             get_memory_guard,
             get_state_arbiter,
+            get_distillation_engine,
+            get_semantic_recaller,
         )
         new_module_statuses: dict[str, str] = {}
         for name, factory in [
@@ -38,6 +40,8 @@ async def runtime_lifespan(
             ("context_pack_builder", get_context_pack_builder),
             ("memory_guard", get_memory_guard),
             ("state_arbiter", get_state_arbiter),
+            ("distillation_engine", get_distillation_engine),
+            ("semantic_recaller", get_semantic_recaller),
         ]:
             try:
                 factory()

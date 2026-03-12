@@ -3974,26 +3974,35 @@ async def get_failure_events(
     ]
 
     try:
-        # 从 audit_log 查询失败事件
-        rows = ledger.query_audit_log(
-            since_ms=since_ms,
-            audit_tags=([event_type] if event_type else KNOWN_FAILURE_EVENTS),
-            limit=limit,
+        # 使用 SQLiteLedger 实际存在的 fetch_by_time_range 方法查询 error_log
+        # error_log 表的 reason_code 字段对应 FailureEvent 枚举值
+        all_rows = ledger.fetch_by_time_range(
+            "error_log",
+            start_ms=since_ms,
+            end_ms=now,
+            limit=limit * 3,  # 多取一些，过滤后再截断
         )
+
+        # 按 reason_code 过滤（对应 FailureEvent 枚举值）
+        target_codes = set([event_type] if event_type else KNOWN_FAILURE_EVENTS)
+        filtered_rows = [
+            row for row in all_rows
+            if row.get("reason_code", "") in target_codes
+        ]
 
         # 按事件类型聚合
         event_counts: dict = {}
         recent_events = []
-        for row in rows:
-            tag = row.get("audit_tag", "UNKNOWN")
+        for row in filtered_rows:
+            tag = row.get("reason_code", "UNKNOWN")
             event_counts[tag] = event_counts.get(tag, 0) + 1
             if len(recent_events) < limit:
                 recent_events.append({
                     "ts_ms": row.get("ts_ms", 0),
                     "event_type": tag,
                     "request_id": row.get("request_id", ""),
-                    "session_id": row.get("session_id", ""),
-                    "detail": row.get("detail", ""),
+                    "stage": row.get("stage", ""),
+                    "detail": str(row.get("detail", ""))[:200],
                 })
 
         total_failures = sum(event_counts.values())
