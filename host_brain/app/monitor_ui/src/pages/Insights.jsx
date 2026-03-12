@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -21,6 +21,7 @@ import {
   fetchContextCompressorStats,
   fetchPromptBuilderStats,
   fetchEpisodicStoreStats,
+  fetchCanonProposalStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -650,6 +651,9 @@ export default function Insights() {
       {/* ===== TODO-66: EpisodicStore 写入统计 ===== */}
       <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
 
+      {/* ===== TODO-77: Canon 提案统计 ===== */}
+      <CanonProposalStatsSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -1094,6 +1098,106 @@ function UIAssertionSection({ windowMinutes }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-77: Canon 提案统计子组件 =====
+function CanonProposalStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchCanonProposalStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={ScrollText} title="Canon 提案统计" color="text-indigo-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总提案数" value={data?.total ?? '—'} color="text-gray-700" />
+        <StatCard label="待审核" value={data?.pending ?? '—'} color={data?.pending > 0 ? 'text-orange-500' : 'text-gray-400'} />
+        <StatCard label="已通过" value={data?.applied ?? '—'} color="text-green-600" />
+        <StatCard label="已拒绝" value={data?.rejected ?? '—'} color="text-red-600" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        {/* 通过率进度条 */}
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">提案通过率</div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-gray-100 rounded-full h-3">
+              <div
+                className="bg-indigo-400 h-3 rounded-full transition-all"
+                style={{ width: `${Math.min(data?.approval_rate ?? 0, 100)}%` }}
+              />
+            </div>
+            <span className={`text-sm font-bold ${(data?.approval_rate ?? 0) >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
+              {data?.approval_rate != null ? `${data.approval_rate}%` : '—'}
+            </span>
+          </div>
+          {data?.pending > 0 && (
+            <div className="mt-2 text-xs text-orange-500 flex items-center gap-1">
+              ⚠ 有 {data.pending} 条提案待审核
+            </div>
+          )}
+        </div>
+        {/* 状态分布 */}
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">状态分布</div>
+          <div className="space-y-2">
+            {(data?.status_distribution ?? []).map((s) => {
+              const colorMap = { pending: 'bg-orange-400', applied: 'bg-green-400', rejected: 'bg-red-400' }
+              return (
+                <div key={s.status} className="flex items-center gap-2">
+                  <div className="text-xs text-gray-600 w-16 capitalize">{s.status}</div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2">
+                    <div className={`${colorMap[s.status] ?? 'bg-gray-400'} h-2 rounded-full`} style={{ width: `${s.pct}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-500 w-12 text-right">{s.count} ({s.pct}%)</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+      {/* 最近提案列表 */}
+      {(data?.recent_proposals ?? []).length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            最近提案（近 {windowMinutes} 分钟）
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {['提案 ID', '目标文档', '状态', '提案者', '时间'].map((h) => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {(data?.recent_proposals ?? []).map((p) => {
+                const statusColor = { pending: 'text-orange-500', APPLIED: 'text-green-600', rejected: 'text-red-600' }
+                return (
+                  <tr key={p.proposal_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs font-mono text-indigo-600 truncate max-w-32" title={p.proposal_id}>
+                      {p.proposal_id?.slice(0, 12)}…
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-600 truncate max-w-28" title={p.target_doc_id}>
+                      {p.target_doc_id}
+                    </td>
+                    <td className={`px-4 py-2 text-xs font-medium ${statusColor[p.status] ?? 'text-gray-500'}`}>
+                      {p.status}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-28">
+                      {p.proposer_node_id ?? '—'}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">
+                      {p.ts_ms ? new Date(p.ts_ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </section>

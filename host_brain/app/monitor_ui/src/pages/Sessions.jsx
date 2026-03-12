@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, RefreshCw, ExternalLink } from 'lucide-react'
+import { Search, RefreshCw, ExternalLink, Download } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
-import { fetchSessions } from '../api/obs.js'
+import { fetchSessions, exportSessionsCsv } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const PAGE_SIZE = 20
@@ -33,6 +33,7 @@ export default function Sessions() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
   // 过滤条件
   const [keyword, setKeyword] = useState('')
@@ -74,9 +75,33 @@ export default function Sessions() {
       {/* 页头 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">会话列表</h1>
-        <button className="btn-secondary" onClick={() => load()} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
-        </button>
+        <div className="flex items-center gap-2">
+          {/* TODO-78: CSV 导出按钮 */}
+          <button
+            className="btn-secondary"
+            disabled={exporting}
+            onClick={async () => {
+              setExporting(true)
+              try {
+                await exportSessionsCsv({
+                  window_minutes: timeRange === '1h' ? 60 : timeRange === '6h' ? 360 : timeRange === '24h' ? 1440 : 10080,
+                  status: status || undefined,
+                  keyword: keyword || undefined,
+                })
+              } catch (e) {
+                alert('导出失败：' + e.message)
+              } finally {
+                setExporting(false)
+              }
+            }}
+          >
+            <Download size={14} className={exporting ? 'animate-pulse' : ''} />
+            {exporting ? '导出中…' : '导出 CSV'}
+          </button>
+          <button className="btn-secondary" onClick={() => load()} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
+          </button>
+        </div>
       </div>
 
       {/* 过滤栏 */}

@@ -1717,5 +1717,85 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Metrics.jsx`：新增两个迷你卡片组件 + 渲染调用
 
+---
+
+### TODO-75：GET /obs/sessions/export — 会话列表 CSV 导出端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（CSV 导出端点已上线）
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/sessions/export` 端点（支持 status/keyword/window_minutes/max_rows 过滤）
+- 返回 `text/csv; charset=utf-8` 响应，文件名为 `sessions_{timestamp}.csv`
+- 字段：request_id/session_id/ts_ms/datetime/status/decision/reason_code/total_latency_ms
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 /obs/sessions/export 端点
+
+---
+
+### TODO-76：GET /canon/proposals/stats — Canon 提案统计端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 提案统计端点已上线）
+
+**新增功能**：
+- `canon_routes.py` 新增 `GET /canon/proposals/stats` 端点
+- 返回：全量 pending/applied/rejected 分布 + 通过率 + 最近 10 条提案列表（按时间窗口过滤）
+
+**改动文件**：
+- `host_brain/app/canon_routes.py`：新增 /canon/proposals/stats 端点
+
+---
+
+### TODO-77：Insights.jsx 新增 Canon 提案统计区块（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 提案统计区块已上线）
+
+**新增功能**：
+- 新增 `CanonProposalStatsSection` 子组件（ScrollText 图标，靛蓝色主题）
+- 4 个聚合指标（总提案/待审核/已通过/已拒绝）+ 通过率进度条 + 状态分布 + 最近提案列表
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：引入 fetchCanonProposalStats + 新增 CanonProposalStatsSection
+
+---
+
+### TODO-78：Sessions.jsx 新增 CSV 导出按钮（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（CSV 导出按钮已上线）
+
+**新增功能**：
+- 引入 `exportSessionsCsv`，在页头添加"导出 CSV"按钮（Download 图标）
+- 导出时按当前过滤条件（时间范围/状态/关键词）导出，导出中显示 loading 状态
+
+**改动文件**：
+- `monitor_ui/src/pages/Sessions.jsx`：引入 exportSessionsCsv + 新增导出按钮
+
+---
+
+### TODO-79：Overview.jsx 新增 Canon 提案待审核警告徽章（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 提案状态卡片已上线）
+
+**新增功能**：
+- 引入 `fetchCanonProposalStats`，在 load 中并行请求 Canon 提案统计数据
+- 新增 Canon 提案状态卡片（ScrollText 图标，靛蓝色主题）：4 个聚合指标
+- pending > 0 时显示橙色闪烁警告标签（`animate-pulse`）
+
+**改动文件**：
+- `monitor_ui/src/pages/Overview.jsx`：引入 fetchCanonProposalStats + 新增 Canon 提案状态卡片
+
+---
+
+### TODO-80：Metrics.jsx 新增 Canon 提案迷你卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 提案迷你卡片已上线）
+
+**新增功能**：
+- 新增 `CanonProposalMiniCard`（ScrollText 图标，靛蓝色主题）：4 个聚合指标 + 通过率进度条
+- pending > 0 时在卡片右上角显示橙色"N 待审核"徽章
+
+**改动文件**：
+- `monitor_ui/src/pages/Metrics.jsx`：新增 CanonProposalMiniCard 组件 + 渲染调用
+
 
 

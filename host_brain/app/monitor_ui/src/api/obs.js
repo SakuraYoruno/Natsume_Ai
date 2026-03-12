@@ -631,5 +631,41 @@ export function fetchEpisodicStoreStats(params = {}) {
   return request(`/obs/episodic-store/stats${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-75: 会话列表 CSV 导出 =====
+
+/**
+ * 触发会话列表 CSV 导出（直接下载文件）
+ * @param {object} params - { window_minutes, status, keyword, max_rows }
+ */
+export async function exportSessionsCsv(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  const res = await fetch(`/obs/sessions/export${qs ? '?' + qs : ''}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `sessions_${Date.now()}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ===== TODO-76: Canon 提案统计 =====
+
+/**
+ * Canon 提案统计（pending/applied/rejected 分布 + 最近提案列表）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchCanonProposalStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/canon/proposals/stats${qs ? '?' + qs : ''}`)
+}
+
 
 

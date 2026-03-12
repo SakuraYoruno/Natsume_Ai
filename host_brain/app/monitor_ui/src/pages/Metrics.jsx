@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive } from 'lucide-react'
+import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -324,6 +324,9 @@ export default function Metrics() {
       {/* ===== TODO-74: PromptBuilder / EpisodicStore 迷你卡片 ===== */}
       <PromptBuilderMiniCard />
       <EpisodicStoreMiniCard />
+
+      {/* ===== TODO-80: Canon 提案迷你卡片 ===== */}
+      <CanonProposalMiniCard />
     </div>
   )
 }
@@ -517,6 +520,53 @@ function EpisodicStoreMiniCard() {
           </div>
           <div className="bg-gray-100 rounded-full h-1.5">
             <div className="bg-amber-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.write_rate, 100)}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-80: Canon 提案迷你卡片 ────────────────────────────────────────────
+function CanonProposalMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchCanonProposalStats({ window_minutes: 1440 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <ScrollText size={14} className="text-indigo-600" />
+        <span className="text-sm font-semibold text-gray-700">Canon 提案（全量）</span>
+        {(data?.pending ?? 0) > 0 && (
+          <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium ml-auto">
+            {data.pending} 待审核
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总提案', value: data?.total, color: 'text-gray-700' },
+          { label: '待审核', value: data?.pending, color: data?.pending > 0 ? 'text-orange-500' : 'text-gray-400' },
+          { label: '已通过', value: data?.applied, color: 'text-green-600' },
+          { label: '已拒绝', value: data?.rejected, color: 'text-red-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.approval_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>通过率</span>
+            <span className={data.approval_rate >= 70 ? 'text-green-600 font-medium' : 'text-orange-500 font-medium'}>
+              {data.approval_rate}%
+            </span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div className="bg-indigo-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.approval_rate, 100)}%` }} />
           </div>
         </div>
       )}

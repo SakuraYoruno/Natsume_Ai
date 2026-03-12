@@ -631,3 +631,85 @@ async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
     except Exception as exc:
         _logger.error("get_hotwords 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# GET /canon/proposals/stats — TODO-76: 提案统计端点
+# ---------------------------------------------------------------------------
+
+class CanonProposalStatsItem(BaseModel):
+    status: str
+    count: int
+    pct: float
+
+
+class CanonProposalStatsResponse(BaseModel):
+    window_minutes: int
+    total: int
+    pending: int
+    applied: int
+    rejected: int
+    approval_rate: float          # applied / (applied + rejected) * 100
+    status_distribution: List[CanonProposalStatsItem]
+    recent_proposals: List[CanonProposalResponse]  # 最近 10 条
+    request_id: str
+    timestamp: int
+
+
+@router.get("/proposals/stats", response_model=CanonProposalStatsResponse)
+async def get_proposal_stats(
+    window_minutes: int = 1440,
+) -> CanonProposalStatsResponse:
+    """Canon 提案统计（pending/applied/rejected 分布 + 最近提案列表）。
+
+    window_minutes 控制"最近提案列表"的时间窗口，状态分布统计全量数据。
+    """
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+
+    try:
+        ledger = _get_ledger_from_app()
+
+        # 全量统计（不限时间窗口）
+        all_pending, total_pending = ledger.list_proposals(status="pending", limit=1, offset=0)
+        all_applied, total_applied = ledger.list_proposals(status="APPLIED", limit=1, offset=0)
+        all_rejected, total_rejected = ledger.list_proposals(status="rejected", limit=1, offset=0)
+
+        total = total_pending + total_applied + total_rejected
+        approval_rate = round(
+            total_applied / (total_applied + total_rejected) * 100, 1
+        ) if (total_applied + total_rejected) > 0 else 0.0
+
+        status_distribution = []
+        for s, cnt in [("pending", total_pending), ("applied", total_applied), ("rejected", total_rejected)]:
+            status_distribution.append(CanonProposalStatsItem(
+                status=s,
+                count=cnt,
+                pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
+            ))
+
+        # 最近 10 条提案（按时间窗口过滤）
+        since_ms = ts_ms - window_minutes * 60 * 1000
+        recent_raw, _ = ledger.list_proposals(limit=10, offset=0)
+        recent = [
+            _proposal_row_to_response(row, request_id)
+            for row in recent_raw
+            if (row.get("ts_ms") or 0) >= since_ms
+        ]
+
+        return CanonProposalStatsResponse(
+            window_minutes=window_minutes,
+            total=total,
+            pending=total_pending,
+            applied=total_applied,
+            rejected=total_rejected,
+            approval_rate=approval_rate,
+            status_distribution=status_distribution,
+            recent_proposals=recent,
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+
+    except Exception as exc:
+        _logger.error("get_proposal_stats 接口异常: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))

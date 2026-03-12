@@ -355,6 +355,73 @@ async def get_sessions(
     )
 
 # ---------------------------------------------------------------------------
+# GET /obs/sessions/export  — TODO-75: 会话列表 CSV 导出
+# ---------------------------------------------------------------------------
+@router.get("/sessions/export")
+async def export_sessions_csv(
+    status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
+    window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
+    keyword: Optional[str] = Query(None),
+    max_rows: int = Query(5000, ge=1, le=10000, description="最大导出行数"),
+):
+    """导出会话列表为 CSV 文件（支持时间范围 + 状态过滤）。
+
+    返回 text/csv 响应，文件名为 sessions_{timestamp}.csv。
+    """
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    ledger = _get_ledger()
+    svc = SessionQueryService(ledger)
+    since_ms = _now_ms() - window_minutes * 60 * 1000
+
+    # 一次性拉取所有数据（最多 max_rows 行）
+    result = svc.query(
+        page=1,
+        page_size=max_rows,
+        status=status,
+        keyword=keyword,
+        start_time=since_ms,
+        end_time=_now_ms(),
+    )
+
+    rows = result.get("items", [])
+
+    # 构建 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # 表头
+    writer.writerow([
+        "request_id", "session_id", "ts_ms", "datetime",
+        "status", "decision", "reason_code", "total_latency_ms",
+    ])
+    # 数据行
+    import datetime as _dt
+    for r in rows:
+        ts = r.get("ts_ms") or 0
+        dt_str = _dt.datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S") if ts else ""
+        writer.writerow([
+            r.get("request_id", ""),
+            r.get("session_id", ""),
+            ts,
+            dt_str,
+            r.get("status", ""),
+            r.get("decision", ""),
+            r.get("reason_code", ""),
+            r.get("duration_ms", ""),
+        ])
+
+    output.seek(0)
+    filename = f"sessions_{int(_now_ms() / 1000)}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)

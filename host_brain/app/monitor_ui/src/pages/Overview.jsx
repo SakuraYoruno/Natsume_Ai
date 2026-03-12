@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert } from 'lucide-react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
-import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats } from '../api/obs.js'
+import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -15,6 +15,7 @@ export default function Overview() {
   const [data, setData] = useState(null)
   const [dispatchData, setDispatchData] = useState(null)
   const [pbData, setPbData] = useState(null)  // TODO-73: PromptBuilder 注入检测摘要
+  const [canonData, setCanonData] = useState(null)  // TODO-79: Canon 提案待审核警告
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -24,14 +25,16 @@ export default function Overview() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [res, dispRes, pbRes] = await Promise.all([
+      const [res, dispRes, pbRes, canonRes] = await Promise.all([
         fetchServicesHealth({ window_minutes: windowMinutes }),
         fetchInputDispatchStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchPromptBuilderStats({ window_minutes: windowMinutes }).catch(() => null),
+        fetchCanonProposalStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
       setData(res)
       setDispatchData(dispRes)
       setPbData(pbRes)
+      setCanonData(canonRes)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -267,6 +270,48 @@ export default function Overview() {
                     {pbData.injection_detection_rate != null ? `${pbData.injection_detection_rate}%` : '—'}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">检测率</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TODO-79: Canon 提案待审核警告徽章 */}
+          {canonData && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <ScrollText size={15} className="text-indigo-500" />
+                <h2 className="text-sm font-semibold text-gray-700">Canon 提案状态</h2>
+                {canonData.pending > 0 && (
+                  <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium animate-pulse">
+                    ⏳ {canonData.pending} 条待审核
+                  </span>
+                )}
+                {canonData.pending === 0 && (
+                  <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded font-medium">
+                    ✓ 无待审核
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-gray-700">{canonData.total ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">总提案数</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${canonData.pending > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                    {canonData.pending ?? '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">待审核</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-green-600">{canonData.applied ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">已通过</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${canonData.approval_rate >= 70 ? 'text-green-600' : 'text-orange-500'}`}>
+                    {canonData.approval_rate != null ? `${canonData.approval_rate}%` : '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">通过率</div>
                 </div>
               </div>
             </div>
