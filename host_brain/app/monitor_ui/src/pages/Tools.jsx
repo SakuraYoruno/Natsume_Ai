@@ -3,6 +3,8 @@ import {
   fetchToolMetaPack,
   fetchToolHealth,
   executeTool,
+  fetchPermissionStats,
+  fetchActionPlanStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -339,7 +341,7 @@ export default function Tools() {
                 </button>
               </div>
 
-              {executeTarget?.id === selectedTool.id && (
+          {executeTarget?.id === selectedTool.id && (
                 <ExecutePanel tool={selectedTool} onClose={() => setExecuteTarget(null)} />
               )}
             </>
@@ -350,6 +352,97 @@ export default function Tools() {
           )}
         </div>
       </div>
+
+      {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
+      <PermissionGuardStats />
+
+      {/* ===== TODO-56: ActionPlan 执行统计 ===== */}
+      <ActionPlanStats />
+    </div>
+  )
+}
+
+// ── TODO-54: PermissionGuard 权限拒绝统计子组件 ────────────────────────
+function PermissionGuardStats() {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchPermissionStats({ window_minutes: 1440 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
+      <div className="text-sm font-semibold text-gray-700">🔒 PermissionGuard 权限拒绝统计（近 24h）</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: '总校验次数', value: data?.total_checks, color: 'text-gray-700' },
+          { label: '允许次数', value: data?.allowed_count, color: 'text-green-600' },
+          { label: '拒绝次数', value: data?.denied_count, color: 'text-red-600' },
+          { label: 'SCHEDULER 拒绝', value: data?.scheduler_denied_count, color: 'text-orange-500' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="bg-gray-50 rounded p-3 text-center">
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {(data?.top_denied_tools ?? []).length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-gray-500 mb-2">Top 拒绝工具</div>
+          <div className="space-y-1.5">
+            {(data?.top_denied_tools ?? []).map((t) => (
+              <div key={t.tool_name} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-36 truncate">{t.tool_name}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-violet-400 h-2 rounded-full" style={{ width: `${t.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-8 text-right">{t.deny_count}</div>
+                {t.proposer_class && <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{t.proposer_class}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-56: ActionPlan 执行统计子组件 ───────────────────────────────
+function ActionPlanStats() {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchActionPlanStats({ window_minutes: 1440 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
+      <div className="text-sm font-semibold text-gray-700">🤖 ActionPlan 执行统计（近 24h）</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: '总计划数', value: data?.total_plans, color: 'text-gray-700' },
+          { label: '成功数', value: data?.success_count, color: 'text-green-600' },
+          { label: '降级数', value: data?.fallback_count, color: 'text-orange-500' },
+          { label: '成功率', value: data?.success_rate != null ? `${data.success_rate}%` : '—', color: data?.success_rate > 80 ? 'text-green-600' : 'text-red-500' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="bg-gray-50 rounded p-3 text-center">
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {(data?.top_action_types ?? []).length > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-gray-500 mb-2">指令类型分布</div>
+          <div className="space-y-1.5">
+            {(data?.top_action_types ?? []).map((a) => (
+              <div key={a.action_type} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-20 truncate">{a.action_type}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-blue-400 h-2 rounded-full" style={{ width: `${a.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-10 text-right">{a.pct}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

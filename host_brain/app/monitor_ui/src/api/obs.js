@@ -514,4 +514,57 @@ export function fetchUIAssertionStats(params = {}) {
   return request(`/obs/ui-assertion/stats${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-53: FailureMatrix 失败事件统计 =====
+
+/**
+ * FailureMatrix 失败事件统计（7 种失败事件分布、中止率、降级模式分布）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchFailureStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/failure/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-54: PermissionGuard 权限拒绝统计 =====
+
+/**
+ * PermissionGuard 权限拒绝统计（工具调用允许/拒绝分布、SCHEDULER 拒绝次数）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchPermissionStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/permission/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-55: TaskScheduler 执行历史趋势 =====
+
+/**
+ * TaskScheduler 执行历史趋势（任务状态分布、run_count/error_count 趋势）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchSchedulerHistory(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/scheduler/history${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-56: ActionPlan 执行成功率/指令类型分布 =====
+
+/**
+ * ActionPlan 执行成功率/指令类型分布（成功率、平均置信度、指令类型分布、降级原因）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchActionPlanStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/action-plan/stats${qs ? '?' + qs : ''}`)
+}
+
+
 

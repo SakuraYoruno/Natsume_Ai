@@ -835,6 +835,61 @@ class RecallFusionNode(ChainNode):
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
 
+        # ── TODO-52：FailureHandler 统一失败语义处理 ─────────────────────
+        failure_handler_meta: dict[str, Any] = {"mode": "SKIPPED"}
+        try:
+            from host_brain.app.failure_matrix import FailureHandler, FailureEvent  # noqa: PLC0415
+
+            _fh = FailureHandler()
+            _fh_event: str | None = None
+            _fh_detail: dict[str, Any] = {}
+
+            # 判断是否触发 EVIDENCE_EMPTY 事件
+            if evidence_empty:
+                _fh_event = FailureEvent.EVIDENCE_EMPTY.value
+                _fh_detail = {
+                    "recall_mode": recall_mode,
+                    "session_id": ctx.session_id,
+                }
+            # 判断是否触发 MODEL_FALLBACK（召回降级）
+            elif recall_mode == "DEGRADED_FALLBACK":
+                _fh_event = FailureEvent.MODEL_FALLBACK.value
+                _fh_detail = {
+                    "fallback_reason": "RetrievalOrchestrator 不可用，已降级",
+                    "session_id": ctx.session_id,
+                }
+
+            if _fh_event:
+                _fh_result = await _fh.handle(
+                    event=_fh_event,
+                    context=ctx,
+                    detail=_fh_detail,
+                )
+                failure_handler_meta = {
+                    "mode": "ACTIVE",
+                    "event": _fh_result.event.value,
+                    "should_abort": _fh_result.should_abort,
+                    "degraded_mode": _fh_result.degraded_mode,
+                    "audit_tag": _fh_result.audit_tag,
+                }
+                ctx.metadata["failure_handler"] = failure_handler_meta
+                ctx.metadata.setdefault("audit_refs", {})["failure_handler"] = failure_handler_meta
+                ctx.audit_tags.append(f"FAILURE_HANDLER:{_fh_result.audit_tag}")
+                # 将标准化用户响应写入 ctx（仅在 EVIDENCE_EMPTY 且无其他响应时）
+                if _fh_result.user_response and not ctx.final_response:
+                    ctx.metadata["failure_user_response"] = _fh_result.user_response
+                logger.debug(
+                    "[%s] FailureHandler 处理完成 event=%s abort=%s mode=%s",
+                    ctx.request_id, _fh_result.event, _fh_result.should_abort, _fh_result.degraded_mode,
+                )
+            else:
+                failure_handler_meta = {"mode": "ACTIVE", "event": None, "triggered": False}
+        except (ImportError, AttributeError):
+            failure_handler_meta = {"mode": "SKIPPED_NOT_WIRED"}
+        except Exception as _fh_exc:
+            failure_handler_meta = {"mode": "DEGRADED", "error": str(_fh_exc)[:100]}
+            logger.warning("[%s] FailureHandler 处理异常（降级）: %s", ctx.request_id, _fh_exc)
+
         logger.debug("[%s] RecallFusion 执行完成 mode=%s", ctx.request_id, recall_mode)
         return True
 
@@ -938,6 +993,75 @@ class LlmGatewayNode(ChainNode):
         except Exception as _rm_exc:
             routing_matrix_meta = {"mode": "DEGRADED", "error": str(_rm_exc)[:100]}
             logger.warning("[%s] RoutingMatrix 路由决策异常（降级）: %s", ctx.request_id, _rm_exc)
+
+        # ── TODO-51：PermissionGuard 工具调用权限校验 ────────────────────
+        permission_guard_meta: dict[str, Any] = {"mode": "SKIPPED"}
+        try:
+            from host_brain.app.skills.tool_meta import PermissionGuard, PermissionGuardError  # noqa: PLC0415
+            from host_brain.app.skills.tool_meta import AccessLevel, ToolMeta as _ToolMeta  # noqa: PLC0415
+            from host_brain.app.schemas.memory_types import RiskLevel as _RiskLevel  # noqa: PLC0415
+
+            _pg = PermissionGuard()
+            # 从 ctx.metadata 提取本轮待调用的工具列表（由 LLM 输出解析填充）
+            _pending_tools: list[dict] = list(ctx.metadata.get("pending_tool_calls") or [])
+            _pg_allowed: list[str] = []
+            _pg_denied: list[dict] = []
+
+            for _tool_call in _pending_tools:
+                _tool_name = str(_tool_call.get("name") or _tool_call.get("tool_name") or "")
+                if not _tool_name:
+                    continue
+                # 构造轻量级 ToolMeta（从 tool_call 元数据中读取，缺省安全值）
+                _risk_str_tool = str(_tool_call.get("risk_level") or "LOW").strip().upper()
+                _risk_level_tool = {"LOW": _RiskLevel.LOW, "MEDIUM": _RiskLevel.MEDIUM, "HIGH": _RiskLevel.HIGH}.get(
+                    _risk_str_tool, _RiskLevel.LOW
+                )
+                _tool_meta = _ToolMeta(
+                    name=_tool_name,
+                    description=str(_tool_call.get("description") or ""),
+                    access_level=AccessLevel.PUBLIC,
+                    risk_level=_risk_level_tool,
+                    reversible=bool(_tool_call.get("reversible", True)),
+                    requires_human_approval=bool(_tool_call.get("requires_human_approval", False)),
+                    scheduler_allowed=bool(_tool_call.get("scheduler_allowed", True)),
+                )
+                try:
+                    _pg.check(
+                        tool_meta=_tool_meta,
+                        proposer_class=ctx.proposer_class,
+                        session_id=ctx.session_id,
+                    )
+                    _pg_allowed.append(_tool_name)
+                except PermissionGuardError as _pge:
+                    _pg_denied.append({"tool": _tool_name, "reason": _pge.reason})
+                    ctx.audit_tags.append(f"PERMISSION_DENIED:{_tool_name}")
+                    logger.warning(
+                        "[%s] PermissionGuard 拒绝工具调用: tool=%s reason=%s",
+                        ctx.request_id, _tool_name, _pge.reason,
+                    )
+
+            permission_guard_meta = {
+                "mode": "ACTIVE",
+                "proposer_class": ctx.proposer_class.value
+                    if hasattr(ctx.proposer_class, "value") else str(ctx.proposer_class),
+                "total_tools": len(_pending_tools),
+                "allowed_count": len(_pg_allowed),
+                "denied_count": len(_pg_denied),
+                "denied_tools": _pg_denied,
+            }
+            ctx.metadata["permission_guard"] = permission_guard_meta
+            ctx.metadata.setdefault("audit_refs", {})["permission_guard"] = permission_guard_meta
+            if _pg_denied:
+                ctx.audit_tags.append(f"PERMISSION_GUARD_DENIED:{len(_pg_denied)}")
+            logger.debug(
+                "[%s] PermissionGuard 校验完成 total=%d allowed=%d denied=%d",
+                ctx.request_id, len(_pending_tools), len(_pg_allowed), len(_pg_denied),
+            )
+        except (ImportError, AttributeError):
+            permission_guard_meta = {"mode": "SKIPPED_NOT_WIRED"}
+        except Exception as _pg_exc:
+            permission_guard_meta = {"mode": "DEGRADED", "error": str(_pg_exc)[:100]}
+            logger.warning("[%s] PermissionGuard 校验异常（降级）: %s", ctx.request_id, _pg_exc)
 
         # ── TODO-27：EmotionTimeline 追踪 ────────────────────────────────
         _emotion_tag = str(ctx.metadata.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"

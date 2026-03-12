@@ -5,6 +5,7 @@ import {
   enableSchedulerTask,
   disableSchedulerTask,
   triggerSchedulerTask,
+  fetchSchedulerHistory,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -231,6 +232,87 @@ export default function Automation() {
               actionLoading={actionLoading}
             />
           ))}
+        </div>
+      )}
+
+      {/* ===== TODO-55: TaskScheduler 执行历史趋势 ===== */}
+      <SchedulerHistorySection />
+    </div>
+  )
+}
+
+// ── TODO-55: TaskScheduler 执行历史趋势子组件 ─────────────────────────────
+function SchedulerHistorySection() {
+  const [data, setData] = React.useState(null)
+  const [loading, setLoading] = React.useState(false)
+  React.useEffect(() => {
+    setLoading(true)
+    fetchSchedulerHistory({ window_minutes: 1440 })
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-gray-700">📊 执行历史趋势（近 24h）</span>
+        {loading && <span className="text-xs text-gray-400">加载中...</span>}
+      </div>
+      {/* 汇总卡片 */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+        {[
+          { label: '总任务', value: data?.total_tasks, color: 'text-gray-700' },
+          { label: '运行中', value: data?.running_count, color: 'text-blue-600' },
+          { label: '成功', value: data?.success_count, color: 'text-green-600' },
+          { label: '失败', value: data?.failed_count, color: 'text-red-500' },
+          { label: '已禁用', value: data?.disabled_count, color: 'text-gray-400' },
+          { label: '整体错误率', value: data?.overall_error_rate != null ? `${data.overall_error_rate}%` : '—', color: data?.overall_error_rate > 20 ? 'text-red-500' : 'text-green-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="bg-gray-50 rounded p-2 text-center">
+            <div className={`text-lg font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {/* 各任务详情 */}
+      {(data?.tasks ?? []).length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="text-left py-2 px-3 text-gray-500 font-medium">任务 ID</th>
+                <th className="text-center py-2 px-3 text-gray-500 font-medium">状态</th>
+                <th className="text-right py-2 px-3 text-gray-500 font-medium">执行次数</th>
+                <th className="text-right py-2 px-3 text-gray-500 font-medium">失败次数</th>
+                <th className="text-right py-2 px-3 text-gray-500 font-medium">错误率</th>
+                <th className="text-left py-2 px-3 text-gray-500 font-medium">最近错误</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {(data?.tasks ?? []).map((t) => (
+                <tr key={t.task_id} className="hover:bg-gray-50">
+                  <td className="py-2 px-3 font-mono text-blue-600">{t.task_id}</td>
+                  <td className="py-2 px-3 text-center">
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${
+                      t.status === 'SUCCESS' ? 'bg-green-100 text-green-700' :
+                      t.status === 'FAILED' ? 'bg-red-100 text-red-700' :
+                      t.status === 'RUNNING' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>{t.status}</span>
+                  </td>
+                  <td className="py-2 px-3 text-right text-gray-700">{t.run_count}</td>
+                  <td className="py-2 px-3 text-right text-red-500">{t.error_count}</td>
+                  <td className="py-2 px-3 text-right">
+                    <span className={t.error_rate > 20 ? 'text-red-500' : 'text-green-600'}>
+                      {t.error_rate != null ? `${t.error_rate}%` : '—'}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-gray-400 truncate max-w-xs">{t.last_error || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

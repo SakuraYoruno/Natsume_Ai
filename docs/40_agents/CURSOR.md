@@ -1331,4 +1331,109 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - `monitor_ui/src/pages/Insights.jsx`：新增 UIAssertionSection 子组件
 - `monitor_ui/src/api/obs.js`：新增 `fetchUIAssertionStats`
 
+---
+
+### TODO-51：PermissionGuard 接入 LlmGatewayNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（工具调用权限校验已上线）
+
+**问题**：`LlmGatewayNode` 在处理工具调用时，没有经过 `PermissionGuard` 校验，SCHEDULER 来源可以绕过 max_tool_calls_per_cycle ≤ 3 和 HIGH risk_level 限制。
+
+**新增功能**：
+- `LlmGatewayNode.execute()` 接入 `PermissionGuard.check()`，对 `ctx.metadata["pending_tool_calls"]` 中的每个工具调用进行权限校验
+- 拒绝结果写入 `ctx.metadata["permission_guard"]`（total_tools/allowed_count/denied_count/denied_tools）
+- 拒绝事件追加到 `ctx.audit_tags`（`PERMISSION_DENIED:{tool_name}`、`PERMISSION_GUARD_DENIED:N`）
+- 降级策略：PermissionGuard 不可用时跳过，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：LlmGatewayNode 接入 PermissionGuard
+
+---
+
+### TODO-52：FailureHandler 接入 RecallFusionNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（统一失败语义处理已上线）
+
+**问题**：`RecallFusionNode` 在召回为空（EVIDENCE_EMPTY）或降级（DEGRADED_FALLBACK）时，只是追加 audit_tag，没有走统一的 `FailureHandler` 处理，导致失败语义分散。
+
+**新增功能**：
+- `RecallFusionNode.execute()` 末尾接入 `FailureHandler.handle()`，统一处理 EVIDENCE_EMPTY 和 MODEL_FALLBACK 事件
+- 处理结果写入 `ctx.metadata["failure_handler"]`（event/should_abort/degraded_mode/audit_tag）
+- 标准化用户响应写入 `ctx.metadata["failure_user_response"]`（仅在无其他响应时）
+- 降级策略：FailureHandler 不可用时跳过，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：RecallFusionNode 接入 FailureHandler
+
+---
+
+### TODO-53：FailureMatrix 失败事件统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（失败事件统计已上线）
+
+**问题**：7 种失败事件（GOVERNOR_BLOCK/EVIDENCE_EMPTY/MODEL_FALLBACK/QA_REWRITE/EDGE_UNREACHABLE/VISION_LOW_CONFIDENCE/MODULE_TIMEOUT）没有统计面板，运维无法感知失败分布。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/failure/stats`：失败事件统计（7 种事件分布、中止率、降级模式分布、小时趋势）
+- `Insights.jsx` 新增 FailureStatsSection 子组件（TriangleAlert 图标，琥珀色主题）：4 个聚合指标卡片 + 失败事件分布进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/failure/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 FailureStatsSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchFailureStats`
+
+---
+
+### TODO-54：PermissionGuard 权限拒绝统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（权限拒绝统计已上线）
+
+**问题**：PermissionGuard 的拒绝事件只写入 audit_tags，没有统计面板，无法感知 SCHEDULER 滥用工具的情况。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/permission/stats`：权限拒绝统计（允许/拒绝分布、SCHEDULER 拒绝次数、Top 拒绝工具）
+- `Insights.jsx` 新增 PermissionStatsSection 子组件（Lock 图标，紫色主题）：4 个聚合指标卡片 + Top 拒绝工具进度条
+- `Tools.jsx` 新增 PermissionGuardStats 子组件：权限拒绝统计卡片
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/permission/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 PermissionStatsSection 子组件
+- `monitor_ui/src/pages/Tools.jsx`：新增 PermissionGuardStats 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchPermissionStats`
+
+---
+
+### TODO-55：TaskScheduler 执行历史趋势接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（调度器历史趋势已上线）
+
+**问题**：`HostTaskScheduler` 的 `run_count`/`error_count` 只在内存中维护，WebUI 的 `Automation.jsx` 只展示实时状态，没有历史趋势面板。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/scheduler/history`：调度器执行历史（任务状态分布、run_count/error_count 趋势、各任务详情表格）
+- `Automation.jsx` 新增 SchedulerHistorySection 子组件：6 个聚合指标卡片 + 各任务详情表格（状态/执行次数/失败次数/错误率/最近错误）
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/scheduler/history` 端点
+- `monitor_ui/src/pages/Automation.jsx`：新增 SchedulerHistorySection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchSchedulerHistory`
+
+---
+
+### TODO-56：ActionPlan 执行成功率/指令类型分布接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（ActionPlan 统计已上线）
+
+**问题**：`vision/action_planner.py` 生成的 ActionPlan 执行结果（成功率、置信度、指令类型分布）没有统计面板，无法感知 ClawdBot 自动化执行质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/action-plan/stats`：ActionPlan 统计（成功率、平均置信度、平均指令数、指令类型分布、降级原因分布）
+- `Tools.jsx` 新增 ActionPlanStats 子组件：4 个聚合指标卡片 + 指令类型分布进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/action-plan/stats` 端点
+- `monitor_ui/src/pages/Tools.jsx`：新增 ActionPlanStats 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchActionPlanStats`
+
+
 

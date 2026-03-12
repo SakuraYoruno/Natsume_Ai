@@ -2547,5 +2547,463 @@ async def get_ui_assertion_stats(
     )
 
 
+# ---------------------------------------------------------------------------
+# TODO-53: GET /obs/failure/stats  — FailureMatrix 失败事件统计
+# ---------------------------------------------------------------------------
+class FailureEventItem(BaseModel):
+    event: str
+    count: int
+    pct: float
+    degraded_mode: Optional[str]
+
+class FailureStatsResponse(BaseModel):
+    window_minutes: int
+    total_failures: int
+    abort_count: int
+    degraded_count: int
+    abort_rate: Optional[float]
+    top_events: List[FailureEventItem]
+    hourly_trend: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/failure/stats", response_model=FailureStatsResponse)
+async def get_failure_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-53: FailureMatrix 失败事件统计 — 7 种失败事件分布、中止率、降级模式分布。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("failure_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 FailureHandler 处理的事件（通过 audit_tag 前缀识别）
+    _failure_events = {
+        "GOVERNOR_BLOCK", "EVIDENCE_EMPTY", "MODEL_FALLBACK",
+        "QA_REWRITE", "EDGE_UNREACHABLE", "VISION_LOW_CONFIDENCE", "MODULE_TIMEOUT",
+    }
+    failure_rows = [
+        r for r in rows
+        if str(r.get("reason_code") or r.get("event") or r.get("stage") or "").upper()
+        in _failure_events
+    ]
+
+    total = len(failure_rows)
+    from collections import Counter, defaultdict
+
+    event_counter: Counter = Counter()
+    degraded_mode_counter: Counter = Counter()
+    abort_count = 0
+
+    _abort_events = {"GOVERNOR_BLOCK", "VISION_LOW_CONFIDENCE", "MODULE_TIMEOUT"}
+    _degraded_mode_map = {
+        "EVIDENCE_EMPTY": "conservative_answer",
+        "MODEL_FALLBACK": "fallback_model",
+        "QA_REWRITE": "rewritten_output",
+        "EDGE_UNREACHABLE": "text_only",
+    }
+
+    for r in failure_rows:
+        evt = str(r.get("reason_code") or r.get("event") or r.get("stage") or "UNKNOWN").upper()
+        event_counter[evt] += 1
+        if evt in _abort_events:
+            abort_count += 1
+        mode = _degraded_mode_map.get(evt)
+        if mode:
+            degraded_mode_counter[mode] += 1
+
+    degraded_count = sum(degraded_mode_counter.values())
+    abort_rate = round(abort_count / total * 100, 1) if total > 0 else None
+
+    top_events = [
+        FailureEventItem(
+            event=evt,
+            count=cnt,
+            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
+            degraded_mode=_degraded_mode_map.get(evt),
+        )
+        for evt, cnt in event_counter.most_common(10)
+    ]
+
+    # 小时趋势（按小时分桶）
+    hourly_buckets: dict = defaultdict(int)
+    for r in failure_rows:
+        ts = int(r.get("ts_ms") or r.get("created_at_ms") or 0)
+        if ts > 0:
+            hour_key = ts // (3600 * 1000)
+            hourly_buckets[hour_key] += 1
+    hourly_trend = [
+        {"hour_ts_ms": h * 3600 * 1000, "count": c}
+        for h, c in sorted(hourly_buckets.items())[-24:]
+    ]
+
+    return FailureStatsResponse(
+        window_minutes=window_minutes,
+        total_failures=total,
+        abort_count=abort_count,
+        degraded_count=degraded_count,
+        abort_rate=abort_rate,
+        top_events=top_events,
+        hourly_trend=hourly_trend,
+        timestamp=now,
+    )
 
 
+# ---------------------------------------------------------------------------
+# TODO-54: GET /obs/permission/stats  — PermissionGuard 权限拒绝统计
+# ---------------------------------------------------------------------------
+class PermissionDeniedItem(BaseModel):
+    tool_name: str
+    deny_count: int
+    pct: float
+    proposer_class: Optional[str]
+
+class PermissionStatsResponse(BaseModel):
+    window_minutes: int
+    total_checks: int
+    allowed_count: int
+    denied_count: int
+    deny_rate: Optional[float]
+    scheduler_denied_count: int
+    top_denied_tools: List[PermissionDeniedItem]
+    timestamp: int
+
+@router.get("/permission/stats", response_model=PermissionStatsResponse)
+async def get_permission_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-54: PermissionGuard 权限拒绝统计 — 工具调用允许/拒绝分布、SCHEDULER 拒绝次数、Top 拒绝工具。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("permission_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 PERMISSION_DENIED 事件
+    denied_rows = [
+        r for r in rows
+        if "PERMISSION_DENIED" in str(r.get("audit_tag") or r.get("reason_code") or r.get("stage") or "").upper()
+    ]
+    allowed_rows = [
+        r for r in rows
+        if "PERMISSION_ALLOWED" in str(r.get("audit_tag") or r.get("stage") or "").upper()
+    ]
+
+    total_checks = len(denied_rows) + len(allowed_rows)
+    denied_count = len(denied_rows)
+    allowed_count = len(allowed_rows)
+    deny_rate = round(denied_count / total_checks * 100, 1) if total_checks > 0 else None
+
+    from collections import Counter
+    tool_counter: Counter = Counter()
+    scheduler_denied = 0
+    proposer_map: dict = {}
+
+    for r in denied_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+        tool_name = str(detail.get("tool") or r.get("tool_name") or "unknown")
+        proposer = str(detail.get("proposer_class") or r.get("proposer_class") or "USER").upper()
+        tool_counter[tool_name] += 1
+        proposer_map[tool_name] = proposer
+        if proposer == "SCHEDULER":
+            scheduler_denied += 1
+
+    top_denied_tools = [
+        PermissionDeniedItem(
+            tool_name=tool,
+            deny_count=cnt,
+            pct=round(cnt / denied_count * 100, 1) if denied_count > 0 else 0.0,
+            proposer_class=proposer_map.get(tool),
+        )
+        for tool, cnt in tool_counter.most_common(10)
+    ]
+
+    return PermissionStatsResponse(
+        window_minutes=window_minutes,
+        total_checks=total_checks,
+        allowed_count=allowed_count,
+        denied_count=denied_count,
+        deny_rate=deny_rate,
+        scheduler_denied_count=scheduler_denied,
+        top_denied_tools=top_denied_tools,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-55: GET /obs/scheduler/history  — TaskScheduler 执行历史趋势
+# ---------------------------------------------------------------------------
+class SchedulerTaskItem(BaseModel):
+    task_id: str
+    name: Optional[str]
+    status: str
+    run_count: int
+    error_count: int
+    error_rate: Optional[float]
+    last_run_ts: Optional[float]
+    last_error: Optional[str]
+
+class SchedulerHistoryResponse(BaseModel):
+    window_minutes: int
+    total_tasks: int
+    running_count: int
+    success_count: int
+    failed_count: int
+    disabled_count: int
+    overall_error_rate: Optional[float]
+    tasks: List[SchedulerTaskItem]
+    run_trend: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/scheduler/history", response_model=SchedulerHistoryResponse)
+async def get_scheduler_history(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-55: TaskScheduler 执行历史趋势 — 任务状态分布、run_count/error_count 趋势。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("scheduler_log", "task_log", "audit_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 尝试从全局调度器单例获取实时快照
+    scheduler_tasks: list[dict] = []
+    try:
+        from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
+        _sched = get_scheduler()
+        health = _sched.health()
+        scheduler_tasks = health.get("tasks") or []
+    except Exception:
+        pass
+
+    # 若无实时数据，从日志中聚合
+    if not scheduler_tasks:
+        from collections import defaultdict
+        task_agg: dict = defaultdict(lambda: {
+            "task_id": "", "name": None, "status": "UNKNOWN",
+            "run_count": 0, "error_count": 0, "last_run_ts": None, "last_error": None,
+        })
+        for r in rows:
+            tid = str(r.get("task_id") or r.get("id") or "unknown")
+            task_agg[tid]["task_id"] = tid
+            task_agg[tid]["name"] = r.get("name") or task_agg[tid]["name"]
+            task_agg[tid]["status"] = str(r.get("status") or "UNKNOWN").upper()
+            task_agg[tid]["run_count"] += int(r.get("run_count") or 1)
+            task_agg[tid]["error_count"] += int(r.get("error_count") or 0)
+            ts = r.get("last_run_ts") or r.get("ts_ms")
+            if ts:
+                task_agg[tid]["last_run_ts"] = float(ts)
+            if r.get("last_error"):
+                task_agg[tid]["last_error"] = str(r["last_error"])[:200]
+        scheduler_tasks = list(task_agg.values())
+
+    total_tasks = len(scheduler_tasks)
+    running_count = sum(1 for t in scheduler_tasks if str(t.get("status") or "").upper() == "RUNNING")
+    success_count = sum(1 for t in scheduler_tasks if str(t.get("status") or "").upper() == "SUCCESS")
+    failed_count = sum(1 for t in scheduler_tasks if str(t.get("status") or "").upper() == "FAILED")
+    disabled_count = sum(1 for t in scheduler_tasks if str(t.get("status") or "").upper() == "DISABLED")
+
+    total_runs = sum(int(t.get("run_count") or 0) for t in scheduler_tasks)
+    total_errors = sum(int(t.get("error_count") or 0) for t in scheduler_tasks)
+    overall_error_rate = round(total_errors / total_runs * 100, 1) if total_runs > 0 else None
+
+    tasks = [
+        SchedulerTaskItem(
+            task_id=str(t.get("task_id") or ""),
+            name=t.get("name"),
+            status=str(t.get("status") or "UNKNOWN").upper(),
+            run_count=int(t.get("run_count") or 0),
+            error_count=int(t.get("error_count") or 0),
+            error_rate=round(
+                int(t.get("error_count") or 0) / int(t.get("run_count") or 1) * 100, 1
+            ) if int(t.get("run_count") or 0) > 0 else None,
+            last_run_ts=float(t["last_run_ts"]) if t.get("last_run_ts") else None,
+            last_error=str(t["last_error"])[:200] if t.get("last_error") else None,
+        )
+        for t in scheduler_tasks
+    ]
+
+    # 执行趋势（从日志按小时分桶）
+    from collections import defaultdict
+    hourly_runs: dict = defaultdict(int)
+    hourly_errors: dict = defaultdict(int)
+    for r in rows:
+        ts = int(r.get("ts_ms") or r.get("last_run_ts") or 0)
+        if ts > 0:
+            hour_key = ts // (3600 * 1000)
+            hourly_runs[hour_key] += int(r.get("run_count") or 1)
+            hourly_errors[hour_key] += int(r.get("error_count") or 0)
+    all_hours = sorted(set(list(hourly_runs.keys()) + list(hourly_errors.keys())))
+    run_trend = [
+        {
+            "hour_ts_ms": h * 3600 * 1000,
+            "run_count": hourly_runs.get(h, 0),
+            "error_count": hourly_errors.get(h, 0),
+        }
+        for h in all_hours[-24:]
+    ]
+
+    return SchedulerHistoryResponse(
+        window_minutes=window_minutes,
+        total_tasks=total_tasks,
+        running_count=running_count,
+        success_count=success_count,
+        failed_count=failed_count,
+        disabled_count=disabled_count,
+        overall_error_rate=overall_error_rate,
+        tasks=tasks,
+        run_trend=run_trend,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-56: GET /obs/action-plan/stats  — ActionPlan 执行成功率/指令类型分布
+# ---------------------------------------------------------------------------
+class ActionTypeItem(BaseModel):
+    action_type: str
+    count: int
+    pct: float
+
+class ActionPlanStatsResponse(BaseModel):
+    window_minutes: int
+    total_plans: int
+    success_count: int
+    fallback_count: int
+    success_rate: Optional[float]
+    avg_confidence: Optional[float]
+    avg_action_count: Optional[float]
+    top_action_types: List[ActionTypeItem]
+    fallback_reasons: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/action-plan/stats", response_model=ActionPlanStatsResponse)
+async def get_action_plan_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-56: ActionPlan 执行成功率/指令类型分布 — 成功率、平均置信度、指令类型分布、降级原因。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("action_plan_log", "vision_log", "audit_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    total = len(rows)
+    if total == 0:
+        return ActionPlanStatsResponse(
+            window_minutes=window_minutes,
+            total_plans=0,
+            success_count=0,
+            fallback_count=0,
+            success_rate=None,
+            avg_confidence=None,
+            avg_action_count=None,
+            top_action_types=[],
+            fallback_reasons=[],
+            timestamp=now,
+        )
+
+    from collections import Counter
+    action_type_counter: Counter = Counter()
+    fallback_reason_counter: Counter = Counter()
+    confidence_list: list = []
+    action_count_list: list = []
+    success_count = 0
+    fallback_count = 0
+
+    for r in rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+
+        # 判断是否降级计划
+        extra = detail.get("extra") or {}
+        is_fallback = bool(extra.get("fallback") or r.get("is_fallback"))
+        if is_fallback:
+            fallback_count += 1
+            reason = str(extra.get("reason") or r.get("fallback_reason") or "UNKNOWN")
+            fallback_reason_counter[reason] += 1
+        else:
+            success_count += 1
+
+        # 置信度
+        confidence = float(extra.get("confidence") or r.get("confidence") or 0.0)
+        if confidence > 0:
+            confidence_list.append(confidence)
+
+        # 指令类型分布
+        actions = detail.get("actions") or []
+        action_count_list.append(len(actions))
+        for action in actions:
+            atype = str(action.get("type") or "unknown").lower()
+            action_type_counter[atype] += 1
+
+    success_rate = round(success_count / total * 100, 1) if total > 0 else None
+    avg_confidence = round(sum(confidence_list) / len(confidence_list), 3) if confidence_list else None
+    avg_action_count = round(sum(action_count_list) / len(action_count_list), 1) if action_count_list else None
+
+    total_actions = sum(action_type_counter.values())
+    top_action_types = [
+        ActionTypeItem(
+            action_type=atype,
+            count=cnt,
+            pct=round(cnt / total_actions * 100, 1) if total_actions > 0 else 0.0,
+        )
+        for atype, cnt in action_type_counter.most_common(10)
+    ]
+
+    fallback_reasons = [
+        {"reason": reason, "count": cnt}
+        for reason, cnt in fallback_reason_counter.most_common(5)
+    ]
+
+    return ActionPlanStatsResponse(
+        window_minutes=window_minutes,
+        total_plans=total,
+        success_count=success_count,
+        fallback_count=fallback_count,
+        success_rate=success_rate,
+        avg_confidence=avg_confidence,
+        avg_action_count=avg_action_count,
+        top_action_types=top_action_types,
+        fallback_reasons=fallback_reasons,
+        timestamp=now,
+    )

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -14,6 +14,8 @@ import {
   fetchLlmRouteStats,
   fetchContextPackStats,
   fetchUIAssertionStats,
+  fetchFailureStats,
+  fetchPermissionStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -622,23 +624,11 @@ export default function Insights() {
       {/* ===== TODO-50: UIAssertion 统计 ===== */}
       <UIAssertionSection windowMinutes={windowMinutes} />
 
-      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
-      <RouteStatsSection windowMinutes={windowMinutes} />
+      {/* ===== TODO-53: FailureMatrix 失败事件统计 ===== */}
+      <FailureStatsSection windowMinutes={windowMinutes} />
 
-      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
-      <ContextPackSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-50: UIAssertion 统计 ===== */}
-      <UIAssertionSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
-      <RouteStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
-      <ContextPackSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-50: UIAssertion 统计 ===== */}
-      <UIAssertionSection windowMinutes={windowMinutes} />
+      {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
+      <PermissionStatsSection windowMinutes={windowMinutes} />
 
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
@@ -794,6 +784,78 @@ function ContextPackSection({ windowMinutes }) {
                 <div className="text-xs text-gray-500 w-12 text-right">{Math.round(s.avg_tokens)} tok</div>
                 {s.truncation_rate > 0 && <div className="text-xs text-orange-400">截断{s.truncation_rate}%</div>}
                 {s.conflict_suppressed_count > 0 && <div className="text-xs text-red-400">冲突{s.conflict_suppressed_count}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-53: FailureMatrix 失败事件统计子组件 =====
+function FailureStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchFailureStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={TriangleAlert} title="FailureMatrix 失败事件统计" color="text-amber-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总失败事件" value={data?.total_failures ?? '—'} color="text-gray-700" />
+        <StatCard label="中止次数" value={data?.abort_count ?? '—'} color="text-red-600" />
+        <StatCard label="降级次数" value={data?.degraded_count ?? '—'} color="text-orange-500" />
+        <StatCard label="中止率" value={data?.abort_rate != null ? `${data.abort_rate}%` : '—'} color={data?.abort_rate > 30 ? 'text-red-500' : 'text-green-600'} />
+      </div>
+      {(data?.top_events ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">失败事件分布</div>
+          <div className="space-y-2">
+            {(data?.top_events ?? []).map((e) => (
+              <div key={e.event} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-40 truncate">{e.event}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-amber-400 h-2 rounded-full" style={{ width: `${e.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-10 text-right">{e.count}</div>
+                {e.degraded_mode && <div className="text-xs text-blue-400 w-28 truncate">{e.degraded_mode}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-54: PermissionGuard 权限拒绝统计子组件 =====
+function PermissionStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchPermissionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={Lock} title="PermissionGuard 权限拒绝统计" color="text-violet-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
+        <StatCard label="允许次数" value={data?.allowed_count ?? '—'} color="text-green-600" />
+        <StatCard label="拒绝次数" value={data?.denied_count ?? '—'} color="text-red-600" />
+        <StatCard label="SCHEDULER 拒绝" value={data?.scheduler_denied_count ?? '—'} color="text-orange-500" />
+      </div>
+      {(data?.top_denied_tools ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">Top 拒绝工具</div>
+          <div className="space-y-2">
+            {(data?.top_denied_tools ?? []).map((t) => (
+              <div key={t.tool_name} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-36 truncate">{t.tool_name}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-violet-400 h-2 rounded-full" style={{ width: `${t.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-8 text-right">{t.deny_count}</div>
+                {t.proposer_class && <div className="text-xs text-gray-400 w-20 truncate">{t.proposer_class}</div>}
               </div>
             ))}
           </div>
