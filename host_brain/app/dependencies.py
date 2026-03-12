@@ -45,6 +45,9 @@ from host_brain.app.llm.routing_matrix import RoutingMatrix
 from host_brain.app.recall.context_pack_builder import ContextPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
+# TODO-99: 蒸馏引擎 + 语义召回器
+from host_brain.app.memory.distillation_engine import DistillationEngine
+from host_brain.app.recall.semantic_recall import SemanticRecaller
 
 _logger = logging.getLogger("Natsume.dependencies")
 
@@ -71,6 +74,9 @@ _routing_matrix: Optional[RoutingMatrix] = None
 _context_pack_builder: Optional[ContextPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
+# TODO-99: 蒸馏引擎 + 语义召回器单例
+_distillation_engine: Optional[DistillationEngine] = None
+_semantic_recaller: Optional[SemanticRecaller] = None
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -549,6 +555,69 @@ def get_state_arbiter() -> StateArbiter:
         _state_arbiter = StateArbiter(audit_writer=_audit_writer)
         _logger.info("StateArbiter 已初始化（未注册状态源，需业务层注入）")
     return _state_arbiter
+
+
+# ---------------------------------------------------------------------------
+# TODO-99: 蒸馏引擎 + 语义召回器工厂
+# ---------------------------------------------------------------------------
+
+
+def get_distillation_engine() -> DistillationEngine:
+    """获取蒸馏引擎单例（延迟初始化）。"""
+    global _distillation_engine
+    if _distillation_engine is None:
+        from host_brain.app.memory.episodic_store import EpisodicStore as _AppEpisodicStore  # noqa: PLC0415
+        # 尝试获取 app 层 EpisodicStore（若不可用则创建新实例）
+        try:
+            _ep_store = get_episodic_store()
+            # 若是旧版 EpisodicStore（host_brain.memory.episodic），包装为新版
+            if not isinstance(_ep_store, _AppEpisodicStore):
+                _ep_store = _AppEpisodicStore(
+                    memory_guard=get_memory_guard(),
+                    ledger=get_ledger(),
+                )
+        except Exception:
+            _ep_store = _AppEpisodicStore(
+                memory_guard=get_memory_guard(),
+                ledger=get_ledger(),
+            )
+        _distillation_engine = DistillationEngine(
+            episodic_store=_ep_store,
+            memory_guard=get_memory_guard(),
+            state_arbiter=get_state_arbiter(),
+            ledger=get_ledger(),
+        )
+        _logger.info("DistillationEngine 已初始化")
+    return _distillation_engine
+
+
+def get_semantic_recaller() -> SemanticRecaller:
+    """获取语义召回器单例（延迟初始化）。"""
+    global _semantic_recaller
+    if _semantic_recaller is None:
+        import os as _os  # noqa: PLC0415
+        use_mock = _parse_bool_env("SEMANTIC_RECALL_USE_MOCK", default=True)
+        chroma_host = str(_os.environ.get("CHROMA_HOST") or "localhost").strip()
+        chroma_port = _parse_int_env("CHROMA_PORT", default=8000, minimum=1, maximum=65535)
+        top_k = _parse_int_env("SEMANTIC_RECALL_TOP_K", default=5, minimum=1, maximum=20)
+        threshold_raw = str(_os.environ.get("SEMANTIC_RECALL_THRESHOLD") or "0.70").strip()
+        try:
+            threshold = float(threshold_raw)
+        except ValueError:
+            threshold = 0.70
+        _semantic_recaller = SemanticRecaller(
+            collection_name="episodic_memory",
+            top_k=top_k,
+            similarity_threshold=threshold,
+            use_mock=use_mock,
+            chroma_host=chroma_host,
+            chroma_port=chroma_port,
+        )
+        _logger.info(
+            "SemanticRecaller 已初始化（use_mock=%s, chroma=%s:%d, top_k=%d, threshold=%.2f）",
+            use_mock, chroma_host, chroma_port, top_k, threshold,
+        )
+    return _semantic_recaller
 
 
 # ---------------------------------------------------------------------------

@@ -3888,3 +3888,57 @@ async def get_error_heatmap(
         node_totals=node_totals,
         timestamp=now,
     )
+
+
+# ---------------------------------------------------------------------------
+# TODO-103: GET /obs/semantic-recall/stats — 语义召回器统计
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SemanticRecallStatsResponse:
+    """语义召回器统计响应。"""
+    use_mock: bool
+    chroma_host: str
+    chroma_port: int
+    top_k: int
+    similarity_threshold: float
+    collection_name: str
+    mock_doc_count: int
+    """Mock 后端中的文档数量（use_mock=True 时有效）"""
+    status: str
+    """OK / DEGRADED"""
+    timestamp: int
+
+
+@router.get("/semantic-recall/stats")
+async def get_semantic_recall_stats():
+    """TODO-103: 语义召回器统计端点 — 返回 SemanticRecaller 的配置和状态信息。"""
+    now = _now_ms()
+    try:
+        from host_brain.app.dependencies import get_semantic_recaller  # noqa: PLC0415
+        recaller = get_semantic_recaller()
+
+        mock_doc_count = len(getattr(recaller, "_mock_store", []))
+        return SemanticRecallStatsResponse(
+            use_mock=recaller._use_mock,
+            chroma_host=recaller._chroma_host,
+            chroma_port=recaller._chroma_port,
+            top_k=recaller._top_k,
+            similarity_threshold=recaller._threshold,
+            collection_name=recaller._collection_name,
+            mock_doc_count=mock_doc_count,
+            status="OK",
+            timestamp=now,
+        )
+    except Exception as exc:
+        return SemanticRecallStatsResponse(
+            use_mock=True,
+            chroma_host="localhost",
+            chroma_port=8000,
+            top_k=5,
+            similarity_threshold=0.70,
+            collection_name="episodic_memory",
+            mock_doc_count=0,
+            status=f"DEGRADED: {exc}",
+            timestamp=now,
+        )

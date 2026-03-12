@@ -16,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 _logger = logging.getLogger("Natsume.host.automation.task_scheduler")
 
@@ -186,6 +186,53 @@ class HostTaskScheduler:
             return False
         task.last_run_ts = 0.0  # 重置时间，让调度器立即触发
         return True
+
+    def register_task(
+        self,
+        task_id: str,
+        name: str,
+        fn: TaskFn,
+        interval_s: float = 60.0,
+        max_retries: int = 3,
+        retry_delay_s: float = 5.0,
+        enabled: bool = True,
+        priority: TaskPriority = TaskPriority.P2,
+        depends_on: Optional[list] = None,
+    ) -> ScheduledTask:
+        """
+        便捷注册方法（TODO-102）：直接传入参数构建 ScheduledTask 并注册。
+
+        等价于：
+            task = ScheduledTask(task_id=..., name=..., fn=..., ...)
+            scheduler.register(task)
+
+        Returns:
+            已注册的 ScheduledTask 实例。
+        """
+        task = ScheduledTask(
+            task_id=task_id,
+            name=name,
+            fn=fn,
+            interval_s=interval_s,
+            max_retries=max_retries,
+            retry_delay_s=retry_delay_s,
+            enabled=enabled,
+            priority=priority,
+            depends_on=depends_on or [],
+        )
+        self.register(task)
+        return task
+
+    def get_all_tasks_status(self) -> list[dict[str, Any]]:
+        """
+        返回所有任务的状态快照（TODO-102）。
+
+        Returns:
+            按优先级排序的任务状态列表，每项包含 task_id/name/status/priority/
+            last_run_ts/run_count/error_count/last_error/depends_on 等字段。
+        """
+        tasks = sorted(self._tasks.values(), key=lambda t: t.priority.value)
+        return [t.as_dict() for t in tasks]
 
     def health(self) -> dict[str, Any]:
         """返回调度器健康快照。"""

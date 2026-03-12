@@ -205,6 +205,64 @@ class ContextPackBuilder:
         )
         return pack
 
+    # ------------------------------------------------------------------
+    # TODO-101: 接入 SemanticRecaller 的便捷方法
+    # ------------------------------------------------------------------
+
+    async def build_with_semantic_recall(
+        self,
+        recall_results: Dict[str, Optional[str]],
+        query: str,
+        semantic_recaller: Optional[Any] = None,
+        task_type: Optional[str] = None,
+        semantic_recall_max_tokens: int = 600,
+    ) -> "ContextPack":
+        """
+        组装 ContextPack，并自动调用 SemanticRecaller 填充 episodic_vector 槽位（TODO-101）。
+
+        若 recall_results 中已有 episodic_vector，则跳过语义召回（调用方优先）。
+        若 semantic_recaller 为 None，则退化为普通 build()。
+
+        Args:
+            recall_results: 七路召回结果字典（episodic_vector 可为空）
+            query: 当前用户查询文本（用于语义召回）
+            semantic_recaller: SemanticRecaller 实例（None 时跳过语义召回）
+            task_type: 任务类型（用于 style_canon 冲突检测）
+            semantic_recall_max_tokens: episodic_vector 槽位的 token 上限
+
+        Returns:
+            组装完成的 ContextPack。
+        """
+        # 若 episodic_vector 槽位已有内容，直接使用
+        if recall_results.get("episodic_vector"):
+            return self.build(recall_results, task_type=task_type)
+
+        # 调用 SemanticRecaller 填充 episodic_vector
+        if semantic_recaller is not None and query:
+            try:
+                recall_result = await semantic_recaller.recall(query=query)
+                if recall_result.filtered_count > 0:
+                    episodic_text = recall_result.to_context_text(
+                        max_tokens=semantic_recall_max_tokens,
+                    )
+                    recall_results = dict(recall_results)
+                    recall_results["episodic_vector"] = episodic_text
+                    logger.debug(
+                        "SemanticRecaller 填充 episodic_vector: hits=%d, degraded=%s",
+                        recall_result.filtered_count, recall_result.degraded,
+                    )
+                elif recall_result.degraded:
+                    logger.warning(
+                        "SemanticRecaller 降级（reason=%s），episodic_vector 槽位为空",
+                        recall_result.degraded_reason,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "SemanticRecaller 调用失败（不影响主链路）: %s", exc,
+                )
+
+        return self.build(recall_results, task_type=task_type)
+
     def _check_style_canon_task_conflict(
         self,
         pack: ContextPack,

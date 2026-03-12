@@ -167,6 +167,47 @@ async def runtime_lifespan(
             new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
             logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
 
+        # [TODO-100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
+        try:
+            from host_brain.app.dependencies import get_distillation_engine  # noqa: PLC0415
+            from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
+                ScheduledTask, TaskPriority, get_scheduler,
+            )
+
+            _distill_engine = get_distillation_engine()
+            _scheduler = get_scheduler()
+
+            async def _run_distillation_task() -> None:
+                """DistillationEngine 蒸馏定时任务执行体。"""
+                report = await _distill_engine.run_batch()
+                logger.info(
+                    "蒸馏任务完成: 候选=%d, 成功=%d, 跳过=%d, 失败=%d, 耗时=%dms",
+                    report.total_candidates, report.distilled_count,
+                    report.skipped_count, report.failed_count, report.duration_ms,
+                )
+
+            _distill_task = ScheduledTask(
+                task_id="distillation_engine_periodic",
+                name="情节记忆蒸馏（每 30 分钟）",
+                fn=_run_distillation_task,
+                interval_s=1800.0,  # 30 分钟
+                max_retries=2,
+                retry_delay_s=30.0,
+                enabled=True,
+                priority=TaskPriority.P1,
+            )
+            _scheduler.register(_distill_task)
+            new_module_statuses["distillation_engine_scheduler"] = (
+                f"OK (task_id={_distill_task.task_id}, interval=1800s)"
+            )
+            logger.info(
+                "DistillationEngine 蒸馏任务已注册到调度器: task_id=%s",
+                _distill_task.task_id,
+            )
+        except Exception as _distill_exc:
+            new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
+            logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
+
         # [TODO-31] LongTermDistiller 蒸馏任务注册到调度器
         try:
             from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415

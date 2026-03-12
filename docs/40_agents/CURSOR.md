@@ -2093,6 +2093,98 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `host_brain/app/llm/routing_matrix.py`：新增 select_with_cost_budget() 方法 + _MODEL_COST_PER_1K 常量
 
+---
+
+### TODO-99：dependencies.py 新增 get_distillation_engine() + get_semantic_recaller()（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（依赖注入工厂已上线）
+
+**新增功能**：
+- `dependencies.py` 新增 `get_distillation_engine()` 工厂函数
+  - 延迟初始化 DistillationEngine 单例
+  - 自动接入 get_memory_guard() / get_state_arbiter() / get_ledger()
+  - 兼容旧版 EpisodicStore（host_brain.memory.episodic）和新版（app/memory/episodic_store.py）
+- `dependencies.py` 新增 `get_semantic_recaller()` 工厂函数
+  - 延迟初始化 SemanticRecaller 单例
+  - 支持环境变量配置：SEMANTIC_RECALL_USE_MOCK / CHROMA_HOST / CHROMA_PORT / SEMANTIC_RECALL_TOP_K / SEMANTIC_RECALL_THRESHOLD
+  - 默认 use_mock=True（开发环境），生产环境设 SEMANTIC_RECALL_USE_MOCK=false
+
+**改动文件**：
+- `host_brain/app/dependencies.py`：新增导入 + 单例变量 + 两个工厂函数
+
+---
+
+### TODO-100：http_hooks.py 接入 DistillationEngine 蒸馏定时任务（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（蒸馏定时任务已注册）
+
+**新增功能**：
+- `http_hooks.py` lifespan 中注册 DistillationEngine 蒸馏定时任务到 HostTaskScheduler
+- 任务配置：task_id=distillation_engine_periodic / 间隔 1800s（30 分钟）/ P1 优先级 / 最多重试 2 次
+- 启动状态写入 new_module_statuses["distillation_engine_scheduler"]
+- 失败时降级（不阻断启动流程）
+
+**改动文件**：
+- `host_brain/app/http_hooks.py`：新增蒸馏定时任务注册代码块
+
+---
+
+### TODO-101：ContextPackBuilder.build_with_semantic_recall() — 接入语义召回（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（语义召回接入已上线）
+
+**新增功能**：
+- `context_pack_builder.py` 新增 `build_with_semantic_recall()` 异步方法
+- 若 recall_results 中已有 episodic_vector，直接使用（调用方优先）
+- 若 episodic_vector 为空，自动调用 SemanticRecaller.recall() 填充
+- SemanticRecaller 失败时降级为空（不阻断主链路）
+- 支持 semantic_recall_max_tokens 参数控制 episodic_vector 槽位 token 上限
+
+**改动文件**：
+- `host_brain/app/recall/context_pack_builder.py`：新增 build_with_semantic_recall() 方法
+
+---
+
+### TODO-102：task_scheduler.py 新增 register_task() + get_all_tasks_status()（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（便捷方法已上线）
+
+**新增功能**：
+- `HostTaskScheduler` 新增 `register_task()` 便捷方法：直接传入参数构建 ScheduledTask 并注册（无需手动创建 ScheduledTask 实例）
+- `HostTaskScheduler` 新增 `get_all_tasks_status()` 方法：返回按优先级排序的所有任务状态快照列表
+- `typing.Optional` 导入补全
+
+**改动文件**：
+- `host_brain/app/automation/task_scheduler.py`：新增 register_task() + get_all_tasks_status() + Optional 导入
+
+---
+
+### TODO-103：obs_routes.py 新增 GET /obs/semantic-recall/stats（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（语义召回统计端点已上线）
+
+**新增功能**：
+- 新增 `GET /obs/semantic-recall/stats` 端点
+- 返回 SemanticRecaller 的配置信息：use_mock / chroma_host / chroma_port / top_k / similarity_threshold / collection_name / mock_doc_count
+- 失败时返回 DEGRADED 状态（不抛出 500）
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 SemanticRecallStatsResponse + get_semantic_recall_stats 端点
+
+---
+
+### TODO-104：memory/__init__.py 更新导出（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（新模块已暴露）
+
+**新增功能**：
+- `memory/__init__.py` 新增导出：EpisodicStore / EpisodicWriteResult / DistillationEngine / DistillationResult / BatchDistillationReport
+- 使外部模块可通过 `from host_brain.app.memory import EpisodicStore` 直接导入
+
+**改动文件**：
+- `host_brain/app/memory/__init__.py`：新增 4 个类的导出
+
+
 
 
 
