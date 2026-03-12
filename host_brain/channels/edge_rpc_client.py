@@ -277,6 +277,8 @@ async def post_speak(
     *,
     text: str,
     request_id: str | None = None,
+    session_id: str | None = None,
+    utterance_id: str | None = None,
     voice_id: str | None = None,
     speed: float = 1.0,
     pitch: float = 0.0,
@@ -290,7 +292,13 @@ async def post_speak(
     pitch: 音调偏移（-1.0~1.0）
     emotion_tag: 情感标签（可选，影响语调）
     """
+    req_id = request_id or new_request_id()
+    resolved_session_id = str(session_id or "").strip() or f"sess::{req_id}"
+    resolved_utterance_id = str(utterance_id or "").strip() or f"utt::{req_id}"
+
     payload: dict[str, Any] = {
+        "session_id": resolved_session_id,
+        "utterance_id": resolved_utterance_id,
         "text": str(text).strip(),
         "speed": float(speed),
         "pitch": float(pitch),
@@ -302,7 +310,7 @@ async def post_speak(
     result = await _post_to_edge(
         path="/v1/edge/speak",
         payload=payload,
-        request_id=request_id,
+        request_id=req_id,
     )
     _logger.debug(
         "post_speak text_len=%d → %s latency=%dms",

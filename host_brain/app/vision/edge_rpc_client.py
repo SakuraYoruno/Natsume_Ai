@@ -20,6 +20,7 @@ import hmac as _hmac
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from host_brain.app.vision.agent_loop import ClawdbotClient
@@ -151,21 +152,25 @@ class EdgeRpcClient(ClawdbotClient):
             )
 
     def _build_envelope(self, *, request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """构建 Edge RPC 信封（含 HMAC 签名）。"""
+        """构建 Edge RPC 信封（与 edge_client.rpc.auth 协议保持一致）。"""
         ts_ms = int(time.time() * 1000)
+        nonce = str(uuid.uuid4())
+        signature = "insecure"
+        if self._hmac_key:
+            canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            message = f"{request_id}\n{ts_ms}\n{nonce}\n{canonical}"
+            signature = _hmac.new(
+                self._hmac_key.encode("utf-8"),
+                message.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
         envelope: dict[str, Any] = {
             "request_id": request_id,
             "ts_ms": ts_ms,
+            "nonce": nonce,
+            "signature": signature,
             "payload": payload,
         }
-        if self._hmac_key:
-            body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-            sig = _hmac.new(
-                self._hmac_key.encode("utf-8"),
-                f"{ts_ms}.{body}".encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            envelope["hmac_sig"] = sig
         return envelope
 
 
