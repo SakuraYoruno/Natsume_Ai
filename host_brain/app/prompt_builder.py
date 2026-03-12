@@ -628,6 +628,34 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             core_narrative=core_narrative,
         )
 
+    # ── TODO-109：episodic_vector 槽位注入 ──────────────────────────────
+    # 优先从 context_pack["episodic_vector"] 读取，其次从 runtime_payload 读取
+    _episodic_vector_raw = context_pack.get("episodic_vector") or runtime_payload.get("episodic_vector")
+    _episodic_vector_text = ""
+    if isinstance(_episodic_vector_raw, str):
+        _episodic_vector_text = _truncate_for_prompt(_episodic_vector_raw, limit=600)
+    elif isinstance(_episodic_vector_raw, list):
+        # 列表格式：每项为 {"text": "...", "score": 0.9} 或纯字符串
+        _ev_lines: list[str] = []
+        for _ev_item in _episodic_vector_raw[:5]:
+            if isinstance(_ev_item, str):
+                _ev_lines.append(f"- {_truncate_for_prompt(_ev_item, limit=200)}")
+            elif isinstance(_ev_item, dict):
+                _ev_text = _truncate_for_prompt(_ev_item.get("text") or _ev_item.get("content") or "", limit=200)
+                _ev_score = _ev_item.get("score") or _ev_item.get("similarity")
+                if _ev_text:
+                    _ev_lines.append(f"- [{_ev_score:.2f}] {_ev_text}" if _ev_score else f"- {_ev_text}")
+        _episodic_vector_text = "\n".join(_ev_lines)
+
+    episodic_vector_block = ""
+    if _episodic_vector_text:
+        episodic_vector_block = (
+            "EPISODIC_VECTOR_RECALL:\n"
+            "- These are semantically similar past memories retrieved by vector search.\n"
+            "- Use as soft context only; do not quote verbatim.\n"
+            f"{_episodic_vector_text}\n\n"
+        )
+
     cn_style_boost_block = ""
     if render_target_lang == "zh":
         cn_style_boost_block = (
@@ -750,6 +778,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"RETRIEVAL_STATUS: {retrieval_status}\n"
         f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
         f"EVIDENCE:\n{evidence_block}\n\n"
+        f"{episodic_vector_block}"
         f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
         f"PLANNER_HINT:\n{planner_text}\n\n"
         f"SAFETY_HINT:\n{verifier_text}\n\n"

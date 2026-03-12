@@ -27,6 +27,7 @@ from host_brain.app.schemas import (
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
+from host_brain.app.automation.scheduler_routes import router as host_scheduler_router  # TODO-108: HostTaskScheduler 管理路由
 from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
@@ -138,6 +139,12 @@ app.include_router(canon_router)
 # 注册 Scheduler REST API 路由（M11-A TASK-0149: 定时调度器任务管理）
 # ---------------------------------------------------------------------------
 app.include_router(scheduler_router)
+
+# ---------------------------------------------------------------------------
+# 注册 HostTaskScheduler REST API 路由（TODO-108: app/automation/task_scheduler.py 管理接口）
+# 使用 /host-scheduler 前缀，避免与旧 /scheduler 路由冲突
+# ---------------------------------------------------------------------------
+app.include_router(host_scheduler_router, prefix="/host-scheduler")
 
 # ---------------------------------------------------------------------------
 # 注册 ToolBroker REST API 路由（M12-A TASK-0156: 工具元数据包 + 执行入口）

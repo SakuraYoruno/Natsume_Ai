@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity } from 'lucide-react'
+import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Layers, Search } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats, fetchDistillationStats, fetchSemanticRecallStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -330,6 +330,10 @@ export default function Metrics() {
 
       {/* ===== TODO-92: Chain 主链路迷你卡片 ===== */}
       <ChainMiniCard />
+
+      {/* ===== TODO-106: 蒸馏统计 + 语义召回迷你卡片 ===== */}
+      <DistillationMiniCard />
+      <SemanticRecallMiniCard />
     </div>
   )
 }
@@ -571,6 +575,97 @@ function CanonProposalMiniCard() {
           <div className="bg-gray-100 rounded-full h-1.5">
             <div className="bg-indigo-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.approval_rate, 100)}%` }} />
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-106: 蒸馏统计迷你卡片 ───────────────────────────────────────────
+function DistillationMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchDistillationStats({ window_minutes: 1440 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Layers size={14} className="text-purple-600" />
+        <span className="text-sm font-semibold text-gray-700">情节记忆蒸馏（近 24h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总候选', value: data?.total_candidates, color: 'text-gray-700' },
+          { label: '蒸馏成功', value: data?.distilled_count, color: 'text-green-600' },
+          { label: '跳过', value: data?.skipped_count, color: 'text-gray-400' },
+          { label: '失败', value: data?.failed_count, color: data?.failed_count > 0 ? 'text-red-600' : 'text-gray-400' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.success_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>蒸馏成功率</span>
+            <span className={data.success_rate < 70 ? 'text-orange-500 font-medium' : 'text-green-600 font-medium'}>
+              {data.success_rate}%
+            </span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div className="bg-purple-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.success_rate, 100)}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-106: 语义召回迷你卡片 ────────────────────────────────────────────
+function SemanticRecallMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchSemanticRecallStats().then(setData).catch(() => {})
+  }, [])
+  const isOk = data?.status === 'OK'
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Search size={14} className="text-sky-600" />
+        <span className="text-sm font-semibold text-gray-700">语义召回器（SemanticRecaller）</span>
+        {data && (
+          <span className={`ml-auto text-xs px-1.5 py-0.5 rounded border font-medium ${
+            isOk
+              ? 'bg-green-50 text-green-700 border-green-200'
+              : 'bg-orange-50 text-orange-700 border-orange-200'
+          }`}>
+            {isOk ? 'OK' : 'DEGRADED'}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: 'Top-K', value: data?.top_k, color: 'text-gray-700' },
+          { label: '相似度阈值', value: data?.similarity_threshold != null ? data.similarity_threshold.toFixed(2) : '—', color: 'text-sky-600' },
+          { label: 'Mock 文档', value: data?.mock_doc_count, color: data?.use_mock ? 'text-orange-500' : 'text-gray-400' },
+          { label: '模式', value: data?.use_mock ? 'Mock' : 'Chroma', color: data?.use_mock ? 'text-orange-500' : 'text-green-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data && !data.use_mock && (
+        <div className="mt-2 text-xs text-gray-400">
+          ChromaDB: {data.chroma_host}:{data.chroma_port} · 集合: {data.collection_name}
+        </div>
+      )}
+      {data?.use_mock && (
+        <div className="mt-2 text-xs text-orange-400">
+          ⚠ 当前使用 Mock 后端，生产环境请设置 SEMANTIC_RECALL_USE_MOCK=false
         </div>
       )}
     </div>

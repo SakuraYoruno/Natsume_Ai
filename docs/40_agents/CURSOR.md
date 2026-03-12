@@ -2184,6 +2184,89 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `host_brain/app/memory/__init__.py`：新增 4 个类的导出
 
+---
+
+### TODO-105：obs.js 新增 fetchSemanticRecallStats()（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `obs.js` 末尾新增 `fetchSemanticRecallStats()` API 函数
+- 调用 `GET /obs/semantic-recall/stats` 端点
+
+**改动文件**：
+- `host_brain/app/monitor_ui/src/api/obs.js`：新增 fetchSemanticRecallStats()
+
+---
+
+### TODO-106：Metrics.jsx 新增 DistillationMiniCard + SemanticRecallMiniCard（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（两个迷你卡片已上线）
+
+**新增功能**：
+- `DistillationMiniCard`：展示情节记忆蒸馏统计（近 24h）
+  - 总候选 / 蒸馏成功 / 跳过 / 失败 四格统计
+  - 蒸馏成功率进度条（<70% 显示橙色警告）
+- `SemanticRecallMiniCard`：展示 SemanticRecaller 配置和状态
+  - Top-K / 相似度阈值 / Mock 文档数 / 模式（Mock/Chroma）四格统计
+  - Mock 模式时显示橙色警告提示
+  - ChromaDB 模式时显示连接信息
+- 新增 `Layers`、`Search` 图标导入
+- 新增 `fetchDistillationStats`、`fetchSemanticRecallStats` API 导入
+
+**改动文件**：
+- `host_brain/app/monitor_ui/src/pages/Metrics.jsx`：新增两个迷你卡片组件
+
+---
+
+### TODO-107：新建 automation/scheduler_routes.py（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（HostTaskScheduler REST API 已上线）
+
+**新增功能**：
+- 新建 `host_brain/app/automation/scheduler_routes.py`
+- 实现 5 个端点：
+  - `GET /host-scheduler/tasks` — 列出所有任务（含状态，按优先级排序）
+  - `GET /host-scheduler/health` — 调度器健康快照
+  - `POST /host-scheduler/tasks/{id}/enable` — 启用任务
+  - `POST /host-scheduler/tasks/{id}/disable` — 禁用任务
+  - `POST /host-scheduler/tasks/{id}/trigger` — 立即触发任务
+  - `PATCH /host-scheduler/tasks/{id}` — 更新任务配置（兼容前端 trigger_config 写法）
+- 使用 `/host-scheduler` 前缀，避免与旧 `/scheduler` 路由冲突
+
+**改动文件**：
+- `host_brain/app/automation/scheduler_routes.py`：新建文件
+
+---
+
+### TODO-108：fastapi_app.py 注册 host_scheduler_router（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（路由已注册）
+
+**新增功能**：
+- `fastapi_app.py` 导入并注册 `host_scheduler_router`
+- 使用 `prefix="/host-scheduler"` 注册，避免与旧 `/scheduler` 路由冲突
+
+**改动文件**：
+- `host_brain/app/fastapi_app.py`：新增导入 + include_router
+
+---
+
+### TODO-109：prompt_builder.py 新增 episodic_vector 槽位注入（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（语义召回结果已注入提示词）
+
+**新增功能**：
+- `render_node_generation_prompt` 中新增 `episodic_vector` 槽位读取逻辑
+- 优先从 `context_pack["episodic_vector"]` 读取，其次从 `runtime_payload["episodic_vector"]` 读取
+- 支持字符串和列表两种格式（列表格式支持 `{"text": "...", "score": 0.9}` 结构）
+- 注入为 `EPISODIC_VECTOR_RECALL` 块，位于 `EVIDENCE` 块之后
+- 仅在有内容时注入（空时跳过，不影响提示词结构）
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：新增 episodic_vector 槽位读取 + EPISODIC_VECTOR_RECALL 块注入
+
+
 
 
 

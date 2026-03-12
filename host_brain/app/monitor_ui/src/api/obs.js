@@ -718,3 +718,12 @@ export function fetchErrorHeatmap(params = {}) {
   return request(`/obs/error-heatmap${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-105: 语义召回器统计 =====
+
+/**
+ * SemanticRecaller 配置和状态统计（use_mock/chroma/top_k/threshold/mock_doc_count）
+ */
+export function fetchSemanticRecallStats() {
+  return request('/obs/semantic-recall/stats')
+}
+
