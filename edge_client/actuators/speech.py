@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import threading
 from typing import Any
 from typing import Callable
 
@@ -59,6 +60,7 @@ class SpeechPlaybackQueue:
     ) -> None:
         self.rpc = rpc
         self.resource_gate = resource_gate
+        self._lock = threading.RLock()
         self._queue: deque[dict[str, Any]] = deque()
         self._active: dict[str, Any] | None = None
         self._synthesizer = synthesizer or _default_synthesizer
@@ -66,13 +68,15 @@ class SpeechPlaybackQueue:
 
     @property
     def queue_depth(self) -> int:
-        return len(self._queue)
+        with self._lock:
+            return len(self._queue)
 
     @property
     def active_playback(self) -> dict[str, Any] | None:
-        if self._active is None:
-            return None
-        return dict(self._active)
+        with self._lock:
+            if self._active is None:
+                return None
+            return dict(self._active)
 
     def enqueue_speak(
         self,
@@ -290,9 +294,18 @@ class SpeechPlaybackQueue:
                 )
             playback_gate_acquired = True
 
+        self._active = {
+            "request_id": request_id,
+            "session_id": session_id,
+            "seq": seq,
+            "utterance_id": speak_event.get("utterance_id"),
+            "speak_event": speak_event,
+            "synth_event": synth_event,
+        }
         try:
             self._playback_starter(speak_event, synth_event)
         except Exception as exc:  # pragma: no cover - defensive catch for callback
+            self._active = None
             detail = f"tts playback failed to start: {exc}"
             if playback_gate_acquired and self.resource_gate is not None:
                 self.resource_gate.release(
@@ -328,15 +341,6 @@ class SpeechPlaybackQueue:
                 detail=detail,
                 event=event,
             )
-
-        self._active = {
-            "request_id": request_id,
-            "session_id": session_id,
-            "seq": seq,
-            "utterance_id": speak_event.get("utterance_id"),
-            "speak_event": speak_event,
-            "synth_event": synth_event,
-        }
         playback_event = {
             "request_id": request_id,
             "session_id": session_id,

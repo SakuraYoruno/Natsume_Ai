@@ -303,6 +303,8 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         vts_driver=vts_driver,
         resource_gate=resource_gate,
     )
+    if playback_device is not None:
+        playback_device.set_on_playback_finished(lambda: voice_pipeline.complete_playback())
     asr_cfg = AsrConfig(
         model_size=_as_text(_env_get(env_lookup, "EDGE_ASR_MODEL_SIZE"), "large-v3"),
         device=_as_text(_env_get(env_lookup, "EDGE_ASR_DEVICE"), "cuda"),

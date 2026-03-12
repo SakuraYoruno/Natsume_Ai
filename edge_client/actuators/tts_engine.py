@@ -521,10 +521,15 @@ class AudioPlaybackDevice:
         self._playing = False
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._on_playback_finished: Callable[[], None] | None = None
 
     @property
     def playing(self) -> bool:
         return self._playing
+
+    def set_on_playback_finished(self, callback: Callable[[], None] | None) -> None:
+        with self._lock:
+            self._on_playback_finished = callback
 
     def play(
         self,
@@ -558,6 +563,14 @@ class AudioPlaybackDevice:
             if blocking:
                 with self._lock:
                     self._playing = False
+                self._notify_playback_finished()
+            else:
+                threading.Thread(
+                    target=self._await_nonblocking_completion,
+                    args=(sd,),
+                    name="edge-tts-playback-monitor",
+                    daemon=True,
+                ).start()
             return TtsSynthResult(
                 success=True,
                 reason_code=None,
@@ -607,6 +620,27 @@ class AudioPlaybackDevice:
             "sample_rate": self._sample_rate,
             "device_index": self._device_index,
         }
+
+    def _await_nonblocking_completion(self, sd_module: Any) -> None:
+        try:
+            sd_module.wait()
+        except Exception:
+            logger.debug("non-blocking playback wait failed", exc_info=True)
+        finally:
+            with self._lock:
+                self._playing = False
+            self._notify_playback_finished()
+
+    def _notify_playback_finished(self) -> None:
+        callback: Callable[[], None] | None
+        with self._lock:
+            callback = self._on_playback_finished
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            logger.debug("playback finished callback failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
