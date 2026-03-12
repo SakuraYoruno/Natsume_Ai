@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, RefreshCw } from 'lucide-react'
+import { Search, RefreshCw, ExternalLink } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { fetchSessions } from '../api/obs.js'
+import useAppStore from '../store/useAppStore.js'
 
 const PAGE_SIZE = 20
 
@@ -26,6 +27,7 @@ function normalizeStatus(status) {
 
 export default function Sessions() {
   const navigate = useNavigate()
+  const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
   const [sessions, setSessions] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -141,10 +143,17 @@ export default function Sessions() {
               <tr
                 key={s.request_id}
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
-                onClick={() => navigate(`/trace/${s.request_id}`)}
+                onClick={() => {
+                  // TODO-69: 写入 useAppStore，确保 Trace 页面能自动加载
+                  setSelectedRequestId(s.request_id)
+                  navigate(`/trace/${s.request_id}`)
+                }}
               >
                 <td className="px-4 py-2.5 font-mono text-xs text-gray-600" title={s.request_id}>
-                  {s.request_id?.slice(0, 16)}…
+                  <span className="flex items-center gap-1">
+                    {s.request_id?.slice(0, 16)}…
+                    <ExternalLink size={11} className="text-gray-300 group-hover:text-blue-400" />
+                  </span>
                 </td>
                 <td className="px-4 py-2.5 text-gray-600 text-xs whitespace-nowrap">
                   {formatTime(s.ts_ms)}

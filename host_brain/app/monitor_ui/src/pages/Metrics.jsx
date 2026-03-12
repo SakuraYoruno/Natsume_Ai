@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw, Database, BookLock, GitMerge, Minimize2 } from 'lucide-react'
+import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -320,6 +320,10 @@ export default function Metrics() {
       <MemoryGuardMiniCard />
       <StateArbiterMiniCard />
       <ContextCompressorMiniCard />
+
+      {/* ===== TODO-74: PromptBuilder / EpisodicStore 迷你卡片 ===== */}
+      <PromptBuilderMiniCard />
+      <EpisodicStoreMiniCard />
     </div>
   )
 }
@@ -426,6 +430,93 @@ function ContextCompressorMiniCard() {
           </div>
           <div className="bg-gray-100 rounded-full h-1.5">
             <div className="bg-teal-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.avg_compression_ratio * 100, 100)}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-74: PromptBuilder 迷你卡片 ────────────────────────────────────────
+function PromptBuilderMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchPromptBuilderStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <FileCode size={14} className="text-violet-600" />
+        <span className="text-sm font-semibold text-gray-700">PromptBuilder 安全（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总构建', value: data?.total_builds, color: 'text-gray-700' },
+          { label: '注入检测', value: data?.injection_detected_count, color: data?.injection_detected_count > 0 ? 'text-red-600' : 'text-green-600' },
+          { label: '高风险', value: data?.high_risk_count, color: data?.high_risk_count > 0 ? 'text-orange-500' : 'text-gray-400' },
+          { label: '降级', value: data?.degraded_count, color: 'text-orange-500' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.injection_detection_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>注入检测率</span>
+            <span className={data.injection_detection_rate > 5 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>
+              {data.injection_detection_rate}%
+            </span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div
+              className={`h-1.5 rounded-full ${data.injection_detection_rate > 5 ? 'bg-red-400' : 'bg-violet-400'}`}
+              style={{ width: `${Math.min(data.injection_detection_rate, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-74: EpisodicStore 迷你卡片 ────────────────────────────────────────
+function EpisodicStoreMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchEpisodicStoreStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Archive size={14} className="text-amber-600" />
+        <span className="text-sm font-semibold text-gray-700">EpisodicStore 写入（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总尝试', value: data?.total_attempts, color: 'text-gray-700' },
+          { label: '写入成功', value: data?.written_count, color: 'text-green-600' },
+          { label: 'MG 拦截', value: data?.memory_guard_blocked_count, color: data?.memory_guard_blocked_count > 0 ? 'text-red-600' : 'text-gray-400' },
+          { label: '蒸馏资格', value: data?.distill_eligible_count, color: 'text-blue-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.write_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>写入率</span>
+            <span className={data.write_rate < 50 ? 'text-orange-500 font-medium' : 'text-green-600 font-medium'}>
+              {data.write_rate}%
+            </span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div className="bg-amber-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.write_rate, 100)}%` }} />
           </div>
         </div>
       )}

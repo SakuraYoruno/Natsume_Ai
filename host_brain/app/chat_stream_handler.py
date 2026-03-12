@@ -1260,6 +1260,28 @@ async def _sse_event_generator(
                 emotion_snapshot_for_audit = dict(prompt_meta.get("emotion_snapshot") or emotion_snapshot)
         else:
             prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
+
+        # ── TODO-70: 读取 PromptBuilder 注入检测结果，写入 Ledger audit_log ──
+        try:
+            from host_brain.app.prompt_builder import get_last_injection_meta  # noqa: PLC0415
+            _inj_meta = get_last_injection_meta()
+            if _inj_meta.get("mode") == "ACTIVE" and _inj_meta.get("detected"):
+                _inj_risk = str(_inj_meta.get("risk_level") or "LOW").upper()
+                _inj_tag = f"INJECTION_DETECTED:{_inj_risk}"
+                ledger.append_audit_log(
+                    request_id=request_id,
+                    session_id=session_id,
+                    stage="prompt_builder",
+                    audit_tag=_inj_tag,
+                    detail=json.dumps({
+                        "risk_level": _inj_risk,
+                        "matched_patterns": list(_inj_meta.get("matched_patterns") or [])[:5],
+                        "mode": "ACTIVE",
+                    }, ensure_ascii=False),
+                    ts_ms=ts_ms,
+                )
+        except Exception:
+            pass
         _log_context_pack_observability(
             request_id=request_id,
             session_id=session_id,

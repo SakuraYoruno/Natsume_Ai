@@ -279,6 +279,18 @@ def build_langchain_chat_provider_fn(
             prompt_text = render_node_generation_prompt(node_id=resolved_node_id, runtime_payload=runtime_payload)
         else:
             prompt_text = render_host_generation_prompt(runtime_payload)
+
+        # TODO-70: 读取注入检测结果，写入 runtime_payload 供上层写入 audit_tags
+        try:
+            from host_brain.app.prompt_builder import get_last_injection_meta  # noqa: PLC0415
+            _inj_meta = get_last_injection_meta()
+            if _inj_meta.get("detected"):
+                _risk = str(_inj_meta.get("risk_level") or "LOW").upper()
+                runtime_payload["_injection_detected"] = True
+                runtime_payload["_injection_risk"] = _risk
+        except Exception:
+            pass
+
         response = llm.invoke(
             [
                 SystemMessage(content=system_prompt),

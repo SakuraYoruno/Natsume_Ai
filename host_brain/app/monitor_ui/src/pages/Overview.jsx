@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain, ArrowDownToLine } from 'lucide-react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
-import { fetchServicesHealth, fetchInputDispatchStats } from '../api/obs.js'
+import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -14,6 +14,7 @@ const WINDOW_OPTIONS = [
 export default function Overview() {
   const [data, setData] = useState(null)
   const [dispatchData, setDispatchData] = useState(null)
+  const [pbData, setPbData] = useState(null)  // TODO-73: PromptBuilder 注入检测摘要
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -23,12 +24,14 @@ export default function Overview() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [res, dispRes] = await Promise.all([
+      const [res, dispRes, pbRes] = await Promise.all([
         fetchServicesHealth({ window_minutes: windowMinutes }),
         fetchInputDispatchStats({ window_minutes: windowMinutes }).catch(() => null),
+        fetchPromptBuilderStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
       setData(res)
       setDispatchData(dispRes)
+      setPbData(pbRes)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -223,6 +226,49 @@ export default function Overview() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TODO-73: PromptBuilder 注入检测摘要卡片 */}
+          {pbData && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldAlert size={15} className="text-red-500" />
+                <h2 className="text-sm font-semibold text-gray-700">Prompt 安全摘要</h2>
+                <span className="text-xs text-gray-400">（近 {windowMinutes} 分钟）</span>
+                {pbData.injection_detected_count > 0 && (
+                  <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">
+                    ⚠ 检测到 {pbData.injection_detected_count} 次注入
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-gray-700">{pbData.total_builds ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">总构建次数</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${pbData.injection_detected_count > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {pbData.injection_detected_count ?? '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">注入检测</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${pbData.high_risk_count > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                    {pbData.high_risk_count ?? '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">高风险</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${
+                    pbData.injection_detection_rate == null ? 'text-gray-400' :
+                    pbData.injection_detection_rate > 5 ? 'text-red-500' : 'text-green-600'
+                  }`}>
+                    {pbData.injection_detection_rate != null ? `${pbData.injection_detection_rate}%` : '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">检测率</div>
+                </div>
+              </div>
             </div>
           )}
         </>

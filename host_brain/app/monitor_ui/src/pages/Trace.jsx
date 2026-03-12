@@ -239,6 +239,50 @@ function GanttView({ traceData, onSelectNode }) {
   )
 }
 
+// ===== TODO-72: Top 5 最慢节点排行榜 =====
+function SlowestNodesPanel({ traceData }) {
+  if (!traceData) return null
+  const nodes = [...(traceData.nodes ?? [])]
+    .filter((n) => n.latency_ms != null)
+    .sort((a, b) => (b.latency_ms ?? 0) - (a.latency_ms ?? 0))
+    .slice(0, 5)
+  if (nodes.length === 0) return null
+
+  const maxMs = nodes[0]?.latency_ms ?? 1
+
+  return (
+    <div className="card p-4">
+      <div className="text-xs font-semibold text-gray-600 mb-3 flex items-center gap-1.5">
+        <BarChart2 size={13} className="text-orange-500" />
+        Top 5 最慢节点
+      </div>
+      <div className="space-y-2">
+        {nodes.map((n, i) => {
+          const pct = Math.max((n.latency_ms / maxMs) * 100, 2)
+          const color = nodeColor(n.node_type)
+          return (
+            <div key={n.node_id} className="flex items-center gap-2">
+              <div className="w-4 text-xs text-gray-400 text-right shrink-0">{i + 1}</div>
+              <div className="w-28 text-xs text-gray-700 truncate shrink-0" title={n.display_name || n.node_id}>
+                {n.display_name || n.node_id}
+              </div>
+              <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div
+                  className="h-2 rounded-full"
+                  style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.8 }}
+                />
+              </div>
+              <div className="w-16 text-xs text-right font-mono text-gray-600 shrink-0">
+                {n.latency_ms}ms
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ===== 主页面 =====
 export default function Trace() {
   const { requestId: paramId } = useParams()
@@ -499,6 +543,9 @@ export default function Trace() {
           </div>
         )}
       </div>
+
+      {/* TODO-72: Top 5 最慢节点排行榜（有 traceData 时显示） */}
+      {traceData && <SlowestNodesPanel traceData={traceData} />}
     </div>
   )
 }

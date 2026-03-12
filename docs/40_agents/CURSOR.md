@@ -1628,5 +1628,94 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Insights.jsx`：追加两个新统计区块的渲染调用
 
+---
+
+### TODO-69：Sessions.jsx 补全会话详情跳转写入 useAppStore（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（会话详情跳转已补全）
+
+**问题**：`Sessions.jsx` 中点击会话行跳转到 `/trace/{request_id}` 时，没有将 `request_id` 写入 `useAppStore`，导致 Trace 页面无法自动加载对应链路。
+
+**新增功能**：
+- 引入 `useAppStore`，在 `onClick` 中先调用 `setSelectedRequestId(s.request_id)` 再 `navigate`
+- 会话行末尾追加 `ExternalLink` 图标，视觉提示可跳转
+
+**改动文件**：
+- `monitor_ui/src/pages/Sessions.jsx`：补全 useAppStore 写入 + ExternalLink 图标
+
+---
+
+### TODO-70：PromptBuilder 注入检测结果写入 Ledger audit_log（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（注入检测结果已写入 Ledger）
+
+**问题**：`prompt_builder.py` 的注入检测结果（`_injection_meta`）只存在于函数局部变量中，无法被 Ledger 查询，导致 `/obs/prompt-builder/stats` 端点无法统计注入事件。
+
+**新增功能**：
+- `prompt_builder.py` 新增线程局部变量 `_injection_meta_local`（`threading.local()`）
+- 新增 `get_last_injection_meta()` 和 `_set_injection_meta()` 两个公共函数
+- `render_node_generation_prompt` 和 `render_host_generation_prompt` 在注入检测后调用 `_set_injection_meta()`
+- `provider_factory.py` 在 `_provider` 函数中读取注入检测结果，写入 `runtime_payload["_injection_detected"]`
+- `chat_stream_handler.py` 在 `_build_stream_chat_prompt` 调用后读取注入检测结果，写入 Ledger `audit_log`（`audit_tag=INJECTION_DETECTED:{RISK_LEVEL}`）
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：新增线程局部变量 + get/set 函数
+- `host_brain/app/provider_factory.py`：读取注入检测结果写入 runtime_payload
+- `host_brain/app/chat_stream_handler.py`：读取注入检测结果写入 Ledger audit_log
+
+---
+
+### TODO-71：会话列表 CSV 导出（已规划，待实现）
+
+**当前状态**：`PLANNED`
+
+---
+
+### TODO-72：Trace.jsx 新增节点耗时排行榜（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Top 5 最慢节点排行榜已上线）
+
+**问题**：`Trace.jsx` 的甘特图视图只展示节点执行时序，没有直观的耗时排行榜，难以快速定位性能瓶颈。
+
+**新增功能**：
+- 新增 `SlowestNodesPanel` 子组件：展示 Top 5 最慢节点（按 `latency_ms` 降序）
+- 每个节点显示：排名/节点名/进度条（按节点类型着色）/耗时（ms）
+- 在主体渲染区块末尾追加，有 `traceData` 时显示
+
+**改动文件**：
+- `monitor_ui/src/pages/Trace.jsx`：新增 SlowestNodesPanel 子组件 + 渲染调用
+
+---
+
+### TODO-73：Overview.jsx 新增 PromptBuilder 注入检测摘要卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Prompt 安全摘要卡片已上线）
+
+**问题**：`Overview.jsx` 总览页面缺少 Prompt 安全状态感知，运维无法在总览页快速发现注入攻击。
+
+**新增功能**：
+- 引入 `fetchPromptBuilderStats`，在 `load` 中并行请求 PromptBuilder 统计数据
+- 新增 Prompt 安全摘要卡片（ShieldAlert 图标，红色主题）：4 个聚合指标（总构建/注入检测/高风险/检测率）
+- 检测到注入时显示橙色警告标签
+
+**改动文件**：
+- `monitor_ui/src/pages/Overview.jsx`：引入 fetchPromptBuilderStats + 新增 Prompt 安全摘要卡片
+
+---
+
+### TODO-74：Metrics.jsx 新增 PromptBuilder 和 EpisodicStore 迷你卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（两个新迷你卡片已上线）
+
+**问题**：`Metrics.jsx` 缺少 PromptBuilder 和 EpisodicStore 的迷你卡片，无法在 Metrics 页面感知 prompt 安全和记忆写入质量。
+
+**新增功能**：
+- 新增 `PromptBuilderMiniCard`（FileCode 图标，紫色主题）：4 个聚合指标 + 注入检测率进度条
+- 新增 `EpisodicStoreMiniCard`（Archive 图标，琥珀色主题）：4 个聚合指标 + 写入率进度条
+- 在 ContextCompressorMiniCard 之后渲染
+
+**改动文件**：
+- `monitor_ui/src/pages/Metrics.jsx`：新增两个迷你卡片组件 + 渲染调用
+
 
 
