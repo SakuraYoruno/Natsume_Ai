@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2 } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -16,6 +16,9 @@ import {
   fetchUIAssertionStats,
   fetchFailureStats,
   fetchPermissionStats,
+  fetchMemoryGuardStats,
+  fetchStateArbiterStats,
+  fetchContextCompressorStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -630,6 +633,15 @@ export default function Insights() {
       {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
       <PermissionStatsSection windowMinutes={windowMinutes} />
 
+      {/* ===== TODO-59: MemoryGuard 宪法校验统计 ===== */}
+      <MemoryGuardStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-60: StateArbiter 事实仲裁统计 ===== */}
+      <StateArbiterStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-61: ContextCompressor 压缩效率统计 ===== */}
+      <ContextCompressorStatsSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -856,6 +868,121 @@ function PermissionStatsSection({ windowMinutes }) {
                 </div>
                 <div className="text-xs text-gray-500 w-8 text-right">{t.deny_count}</div>
                 {t.proposer_class && <div className="text-xs text-gray-400 w-20 truncate">{t.proposer_class}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-59: MemoryGuard 宪法校验统计子组件 =====
+function MemoryGuardStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchMemoryGuardStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={BookLock} title="MemoryGuard 宪法校验统计" color="text-emerald-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
+        <StatCard label="通过次数" value={data?.passed_count ?? '—'} color="text-green-600" />
+        <StatCard label="拦截次数" value={data?.blocked_count ?? '—'} color="text-red-600" />
+        <StatCard label="拦截率" value={data?.block_rate != null ? `${data.block_rate}%` : '—'} color={data?.block_rate > 20 ? 'text-red-500' : 'text-green-600'} />
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <StatCard label="NARRATIVE_ONLY" value={data?.narrative_only_count ?? '—'} color="text-orange-500" />
+        <StatCard label="Dream 拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
+        <StatCard label="蒸馏资格" value={data?.distill_eligible_count ?? '—'} color="text-blue-600" />
+      </div>
+      {(data?.top_reject_reasons ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">拒绝原因分布</div>
+          <div className="space-y-2">
+            {(data?.top_reject_reasons ?? []).map((r) => (
+              <div key={r.reason} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-44 truncate">{r.reason}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-emerald-400 h-2 rounded-full" style={{ width: `${r.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-8 text-right">{r.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-60: StateArbiter 事实仲裁统计子组件 =====
+function StateArbiterStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchStateArbiterStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={GitMerge} title="StateArbiter 事实仲裁统计" color="text-cyan-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总仲裁次数" value={data?.total_resolutions ?? '—'} color="text-gray-700" />
+        <StatCard label="冲突次数" value={data?.conflict_count ?? '—'} color="text-red-600" />
+        <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color="text-orange-500" />
+        <StatCard label="SESSION_OVERRIDE" value={data?.session_override_count ?? '—'} color="text-blue-600" />
+      </div>
+      {(data?.top_sources ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">状态源命中分布</div>
+          <div className="space-y-2">
+            {(data?.top_sources ?? []).map((s) => (
+              <div key={s.source} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-36 truncate">{s.source}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-cyan-400 h-2 rounded-full" style={{ width: `${s.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-10 text-right">{s.hit_count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-61: ContextCompressor 压缩效率统计子组件 =====
+function ContextCompressorStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchContextCompressorStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={Minimize2} title="ContextCompressor 压缩效率统计" color="text-teal-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总压缩次数" value={data?.total_compressions ?? '—'} color="text-gray-700" />
+        <StatCard label="活跃压缩" value={data?.active_count ?? '—'} color="text-green-600" />
+        <StatCard label="平均压缩率" value={data?.avg_compression_ratio != null ? `${(data.avg_compression_ratio * 100).toFixed(1)}%` : '—'} color="text-teal-600" />
+        <StatCard label="平均节省轮次" value={data?.avg_token_saving != null ? data.avg_token_saving.toFixed(1) : '—'} color="text-blue-600" />
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <StatCard label="总节省轮次" value={data?.total_tokens_saved ?? '—'} color="text-teal-700" />
+        <StatCard label="摘要生成次数" value={data?.summary_generated_count ?? '—'} color="text-indigo-600" />
+        <StatCard label="降级次数" value={data?.degraded_count ?? '—'} color="text-orange-500" />
+      </div>
+      {(data?.strategy_distribution ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">压缩策略分布</div>
+          <div className="space-y-2">
+            {(data?.strategy_distribution ?? []).map((s) => (
+              <div key={s.strategy} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-24 truncate">{s.strategy}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-teal-400 h-2 rounded-full" style={{ width: `${s.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-10 text-right">{s.pct}%</div>
               </div>
             ))}
           </div>

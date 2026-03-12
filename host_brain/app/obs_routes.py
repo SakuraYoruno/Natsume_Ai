@@ -3007,3 +3007,303 @@ async def get_action_plan_stats(
         fallback_reasons=fallback_reasons,
         timestamp=now,
     )
+
+
+# ---------------------------------------------------------------------------
+# TODO-59: GET /obs/memory-guard/stats  — MemoryGuard 宪法校验统计
+# ---------------------------------------------------------------------------
+class MemoryGuardRejectItem(BaseModel):
+    reason: str
+    count: int
+    pct: float
+
+class MemoryGuardStatsResponse(BaseModel):
+    window_minutes: int
+    total_checks: int
+    passed_count: int
+    blocked_count: int
+    block_rate: Optional[float]
+    narrative_only_count: int
+    dream_blocked_count: int
+    distill_eligible_count: int
+    top_reject_reasons: List[MemoryGuardRejectItem]
+    timestamp: int
+
+@router.get("/memory-guard/stats", response_model=MemoryGuardStatsResponse)
+async def get_memory_guard_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-59: MemoryGuard 宪法校验统计 — 过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("memory_guard_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 MemoryGuard 相关事件
+    _mg_tags = {"MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED",
+                "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE",
+                "EPISODIC_WRITTEN", "EPISODIC_SKIPPED"}
+    mg_rows = [
+        r for r in rows
+        if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper()
+               for tag in _mg_tags)
+    ]
+
+    from collections import Counter
+    total = len(mg_rows)
+    passed_count = sum(1 for r in mg_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
+    blocked_count = sum(1 for r in mg_rows if any(
+        t in str(r.get("audit_tag") or "").upper()
+        for t in ("MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED")
+    ))
+    narrative_only_count = sum(1 for r in mg_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
+    dream_blocked_count = sum(1 for r in mg_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
+    distill_eligible_count = sum(1 for r in mg_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
+    block_rate = round(blocked_count / total * 100, 1) if total > 0 else None
+
+    reason_counter: Counter = Counter()
+    for r in mg_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+        reason = str(detail.get("reason") or r.get("reason_code") or "UNKNOWN").upper()
+        if reason != "UNKNOWN":
+            reason_counter[reason] += 1
+
+    top_reject_reasons = [
+        MemoryGuardRejectItem(
+            reason=reason,
+            count=cnt,
+            pct=round(cnt / blocked_count * 100, 1) if blocked_count > 0 else 0.0,
+        )
+        for reason, cnt in reason_counter.most_common(10)
+    ]
+
+    return MemoryGuardStatsResponse(
+        window_minutes=window_minutes,
+        total_checks=total,
+        passed_count=passed_count,
+        blocked_count=blocked_count,
+        block_rate=block_rate,
+        narrative_only_count=narrative_only_count,
+        dream_blocked_count=dream_blocked_count,
+        distill_eligible_count=distill_eligible_count,
+        top_reject_reasons=top_reject_reasons,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-60: GET /obs/state-arbiter/stats  — StateArbiter 事实仲裁统计
+# ---------------------------------------------------------------------------
+class StateSourceItem(BaseModel):
+    source: str
+    hit_count: int
+    pct: float
+
+class StateArbiterStatsResponse(BaseModel):
+    window_minutes: int
+    total_resolutions: int
+    conflict_count: int
+    fallback_count: int
+    conflict_rate: Optional[float]
+    fallback_rate: Optional[float]
+    session_override_count: int
+    top_sources: List[StateSourceItem]
+    top_conflict_keys: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/state-arbiter/stats", response_model=StateArbiterStatsResponse)
+async def get_state_arbiter_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-60: StateArbiter 事实仲裁统计 — 冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("state_arbiter_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 StateArbiter 相关事件
+    _sa_tags = {"STATE_SOURCE_CONFLICT", "STATE_SOURCE_FALLBACK",
+                "STATE_ARBITER_CONFLICT", "SESSION_OVERRIDE_WRITTEN"}
+    sa_rows = [
+        r for r in rows
+        if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper()
+               for tag in _sa_tags)
+    ]
+
+    from collections import Counter
+    total = len(sa_rows)
+    conflict_count = sum(1 for r in sa_rows if "CONFLICT" in str(r.get("audit_tag") or "").upper())
+    fallback_count = sum(1 for r in sa_rows if "FALLBACK" in str(r.get("audit_tag") or "").upper())
+    session_override_count = sum(1 for r in sa_rows if "SESSION_OVERRIDE" in str(r.get("audit_tag") or "").upper())
+    conflict_rate = round(conflict_count / total * 100, 1) if total > 0 else None
+    fallback_rate = round(fallback_count / total * 100, 1) if total > 0 else None
+
+    source_counter: Counter = Counter()
+    conflict_key_counter: Counter = Counter()
+
+    for r in sa_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+        winner_source = str(detail.get("winner_source") or r.get("source") or "UNKNOWN").upper()
+        if winner_source != "UNKNOWN":
+            source_counter[winner_source] += 1
+        fact_key = str(detail.get("fact_key") or r.get("fact_key") or "")
+        if fact_key and "CONFLICT" in str(r.get("audit_tag") or "").upper():
+            conflict_key_counter[fact_key] += 1
+
+    total_hits = sum(source_counter.values())
+    top_sources = [
+        StateSourceItem(
+            source=src,
+            hit_count=cnt,
+            pct=round(cnt / total_hits * 100, 1) if total_hits > 0 else 0.0,
+        )
+        for src, cnt in source_counter.most_common(10)
+    ]
+
+    top_conflict_keys = [
+        {"fact_key": key, "conflict_count": cnt}
+        for key, cnt in conflict_key_counter.most_common(5)
+    ]
+
+    return StateArbiterStatsResponse(
+        window_minutes=window_minutes,
+        total_resolutions=total,
+        conflict_count=conflict_count,
+        fallback_count=fallback_count,
+        conflict_rate=conflict_rate,
+        fallback_rate=fallback_rate,
+        session_override_count=session_override_count,
+        top_sources=top_sources,
+        top_conflict_keys=top_conflict_keys,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-61: GET /obs/context-compressor/stats  — ContextCompressor 压缩效率统计
+# ---------------------------------------------------------------------------
+class ContextCompressorStatsResponse(BaseModel):
+    window_minutes: int
+    total_compressions: int
+    active_count: int
+    degraded_count: int
+    avg_compression_ratio: Optional[float]
+    avg_token_saving: Optional[float]
+    total_tokens_saved: int
+    strategy_distribution: List[Dict[str, Any]]
+    summary_generated_count: int
+    timestamp: int
+
+@router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
+async def get_context_compressor_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-61: ContextCompressor 压缩效率统计 — 压缩率/token 节省/策略分布/摘要生成次数。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("context_compressor_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 ContextCompressor 相关事件
+    cc_rows = [
+        r for r in rows
+        if "CTX_COMPRESSED" in str(r.get("audit_tag") or r.get("stage") or "").upper()
+        or "CONTEXT_COMPRESSOR" in str(r.get("stage") or r.get("reason_code") or "").upper()
+    ]
+
+    from collections import Counter
+    total = len(cc_rows)
+    active_count = sum(1 for r in cc_rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or "").upper())
+    degraded_count = sum(1 for r in cc_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
+
+    compression_ratios: list = []
+    token_savings: list = []
+    total_tokens_saved = 0
+    strategy_counter: Counter = Counter()
+    summary_generated_count = 0
+
+    for r in cc_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+
+        input_turns = int(detail.get("input_turns") or r.get("input_turns") or 0)
+        output_turns = int(detail.get("output_turns") or r.get("output_turns") or 0)
+        total_tokens = int(detail.get("total_tokens") or r.get("total_tokens") or 0)
+        strategy = str(detail.get("strategy") or r.get("strategy") or "unknown").lower()
+        has_summary = bool(detail.get("has_summary") or r.get("has_summary"))
+
+        if input_turns > 0 and output_turns > 0:
+            ratio = round(output_turns / input_turns, 3)
+            compression_ratios.append(ratio)
+            saved = input_turns - output_turns
+            token_savings.append(saved)
+            total_tokens_saved += saved
+
+        if strategy and strategy != "unknown":
+            strategy_counter[strategy] += 1
+        if has_summary:
+            summary_generated_count += 1
+
+    avg_compression_ratio = round(sum(compression_ratios) / len(compression_ratios), 3) if compression_ratios else None
+    avg_token_saving = round(sum(token_savings) / len(token_savings), 1) if token_savings else None
+
+    total_strategies = sum(strategy_counter.values())
+    strategy_distribution = [
+        {
+            "strategy": strategy,
+            "count": cnt,
+            "pct": round(cnt / total_strategies * 100, 1) if total_strategies > 0 else 0.0,
+        }
+        for strategy, cnt in strategy_counter.most_common(5)
+    ]
+
+    return ContextCompressorStatsResponse(
+        window_minutes=window_minutes,
+        total_compressions=total,
+        active_count=active_count,
+        degraded_count=degraded_count,
+        avg_compression_ratio=avg_compression_ratio,
+        avg_token_saving=avg_token_saving,
+        total_tokens_saved=total_tokens_saved,
+        strategy_distribution=strategy_distribution,
+        summary_generated_count=summary_generated_count,
+        timestamp=now,
+    )

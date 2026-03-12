@@ -1435,5 +1435,115 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - `monitor_ui/src/pages/Tools.jsx`：新增 ActionPlanStats 子组件
 - `monitor_ui/src/api/obs.js`：新增 `fetchActionPlanStats`
 
+---
+
+### TODO-57：MemoryGuard 宪法校验增强接入 EpisodicStoreNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（dream 内容过滤 + 蒸馏资格预判已上线）
+
+**问题**：`EpisodicStoreNode` 通过 `persist_chat_episodic_memory` 接入了 MemoryGuard，但缺少 dream 内容过滤和蒸馏资格预判两个关键校验步骤。
+
+**新增功能**：
+- 在 `persist_chat_episodic_memory` 调用前，执行 MemoryGuard 宪法校验增强：
+  - dream 内容（`source_tag` 含 DREAM 或 `is_dream_content=True`）强制 NARRATIVE_ONLY，阻止写入 EpisodicStore
+  - `evidence_level=NARRATIVE_ONLY` 的内容直接阻止写入
+  - 蒸馏资格预判（频次 ≥ 3 或 MILESTONE 级别），写入 `ctx.metadata["distill_eligible"]`
+- 阻止结果写入 `ctx.metadata["memory_guard_write"]`（mode/reason/evidence_level/distill_eligible）
+- 拒绝事件追加 `MEMORY_GUARD_DREAM_BLOCKED`/`MEMORY_GUARD_NARRATIVE_BLOCKED`/`MEMORY_GUARD_DISTILL_ELIGIBLE` 到 `ctx.audit_tags`
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：EpisodicStoreNode 接入 MemoryGuard 宪法校验增强
+
+---
+
+### TODO-58：StateArbiter SESSION_OVERRIDE 写入接入 LlmGatewayNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（SESSION_OVERRIDE 写入已上线）
+
+**问题**：`LlmGatewayNode` 输出的 `intent_draft` 中包含新事实（`user_fact_updates`/`session_context`），但这些新事实没有写入 `StateArbiter.set_session_override()`，导致新事实直接绕过仲裁层。
+
+**新增功能**：
+- `LlmGatewayNode.execute()` 末尾（EmotionTimeline 之后）接入 `StateArbiter.set_session_override()`
+- 从 `ctx.metadata["llm_gateway"]["intent_draft"]` 中提取 `user_fact_updates` 和 `session_context`
+- 将新事实写入 SESSION_OVERRIDE（不直接写 Canon，等待蒸馏周期处理）
+- 写入结果记录到 `ctx.metadata["session_override"]`（override_count/fact_keys）
+- 写入事件追加 `SESSION_OVERRIDE_WRITTEN:N` 到 `ctx.audit_tags`
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：LlmGatewayNode 接入 StateArbiter SESSION_OVERRIDE 写入
+
+---
+
+### TODO-59：MemoryGuard 宪法校验统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（MemoryGuard 统计已上线）
+
+**问题**：MemoryGuard 的宪法校验结果（过滤率/拒绝原因/NARRATIVE_ONLY 比例/蒸馏资格）没有统计面板，运维无法感知记忆写入质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/memory-guard/stats`：MemoryGuard 统计（过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格次数）
+- `Insights.jsx` 新增 MemoryGuardStatsSection 子组件（BookLock 图标，翠绿色主题）：4+3 个聚合指标卡片 + 拒绝原因分布进度条
+- `Metrics.jsx` 新增 MemoryGuardMiniCard 迷你卡片：4 个聚合指标 + 拦截率进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/memory-guard/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 MemoryGuardStatsSection 子组件
+- `monitor_ui/src/pages/Metrics.jsx`：新增 MemoryGuardMiniCard 迷你卡片
+- `monitor_ui/src/api/obs.js`：新增 `fetchMemoryGuardStats`
+
+---
+
+### TODO-60：StateArbiter 事实仲裁统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（StateArbiter 统计已上线）
+
+**问题**：StateArbiter 的事实仲裁结果（冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数）没有统计面板，无法感知事实冲突情况。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/state-arbiter/stats`：StateArbiter 统计（冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数/Top 冲突键）
+- `Insights.jsx` 新增 StateArbiterStatsSection 子组件（GitMerge 图标，青色主题）：4 个聚合指标卡片 + 状态源命中分布进度条
+- `Metrics.jsx` 新增 StateArbiterMiniCard 迷你卡片：4 个聚合指标
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/state-arbiter/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 StateArbiterStatsSection 子组件
+- `monitor_ui/src/pages/Metrics.jsx`：新增 StateArbiterMiniCard 迷你卡片
+- `monitor_ui/src/api/obs.js`：新增 `fetchStateArbiterStats`
+
+---
+
+### TODO-61：ContextCompressor 压缩效率统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（ContextCompressor 统计已上线）
+
+**问题**：ContextCompressor 的压缩效率（压缩率/token 节省/策略分布/摘要生成次数）没有统计面板，无法感知上下文压缩质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/context-compressor/stats`：ContextCompressor 统计（压缩率/token 节省/策略分布/摘要生成次数）
+- `Insights.jsx` 新增 ContextCompressorStatsSection 子组件（Minimize2 图标，青绿色主题）：4+3 个聚合指标卡片 + 压缩策略分布进度条
+- `Metrics.jsx` 新增 ContextCompressorMiniCard 迷你卡片：4 个聚合指标 + 平均压缩率进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/context-compressor/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 ContextCompressorStatsSection 子组件
+- `monitor_ui/src/pages/Metrics.jsx`：新增 ContextCompressorMiniCard 迷你卡片
+- `monitor_ui/src/api/obs.js`：新增 `fetchContextCompressorStats`
+
+---
+
+### TODO-62：Metrics.jsx 新增 MemoryGuard/StateArbiter/ContextCompressor 迷你卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（三个迷你卡片已上线）
+
+**问题**：`Metrics.jsx` 只有 LLM 时序指标和速率限制卡片，缺少记忆子系统的关键指标概览。
+
+**新增功能**：
+- `Metrics.jsx` 新增三个迷你卡片：MemoryGuardMiniCard（翠绿色）、StateArbiterMiniCard（青色）、ContextCompressorMiniCard（青绿色）
+- 每个卡片展示 4 个聚合指标 + 关键比率进度条
+- 数据来源：`/obs/memory-guard/stats`、`/obs/state-arbiter/stats`、`/obs/context-compressor/stats`（窗口 1h）
+
+**改动文件**：
+- `monitor_ui/src/pages/Metrics.jsx`：新增三个迷你卡片组件
+
 
 

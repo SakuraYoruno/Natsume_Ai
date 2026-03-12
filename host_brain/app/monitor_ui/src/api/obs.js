@@ -566,5 +566,44 @@ export function fetchActionPlanStats(params = {}) {
   return request(`/obs/action-plan/stats${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-59: MemoryGuard 宪法校验统计 =====
+
+/**
+ * MemoryGuard 宪法校验统计（过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchMemoryGuardStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/memory-guard/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-60: StateArbiter 事实仲裁统计 =====
+
+/**
+ * StateArbiter 事实仲裁统计（冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchStateArbiterStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/state-arbiter/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-61: ContextCompressor 压缩效率统计 =====
+
+/**
+ * ContextCompressor 压缩效率统计（压缩率/token 节省/策略分布/摘要生成次数）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchContextCompressorStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/context-compressor/stats${qs ? '?' + qs : ''}`)
+}
+
 
 

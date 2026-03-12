@@ -1129,6 +1129,63 @@ class LlmGatewayNode(ChainNode):
             logger.warning("[%s] EmotionTimeline 追踪异常（降级）: %s", ctx.request_id, _et_exc)
 
         logger.debug("[%s] LlmGateway 执行 raw_output_present=%s", ctx.request_id, has_raw_output)
+
+        # ── TODO-58：StateArbiter SESSION_OVERRIDE 写入 ──────────────────
+        # 将 LLM 输出中提取的新事实写入 SESSION_OVERRIDE（不直接写 Canon，等待蒸馏周期）
+        session_override_meta: dict[str, Any] = {"mode": "SKIPPED"}
+        try:
+            from host_brain.app.memory.state_arbiter import StateArbiter  # noqa: PLC0415
+
+            _arbiter_inst: StateArbiter = ctx.metadata.get("_state_arbiter_instance")
+            if not isinstance(_arbiter_inst, StateArbiter):
+                _arbiter_inst = StateArbiter()
+                ctx.metadata["_state_arbiter_instance"] = _arbiter_inst
+
+            # 从 intent_draft 中提取新事实（由 LLM 输出解析填充）
+            _intent_draft: dict = {}
+            _llm_gw_meta = ctx.metadata.get("llm_gateway") or {}
+            if isinstance(_llm_gw_meta, dict):
+                _intent_draft = dict(_llm_gw_meta.get("intent_draft") or {})
+
+            _new_facts: dict[str, Any] = {}
+            # 提取 user_fact_updates（LLM 在 intent_draft 中声明的用户事实更新）
+            _fact_updates = _intent_draft.get("user_fact_updates") or {}
+            if isinstance(_fact_updates, dict):
+                _new_facts.update(_fact_updates)
+            # 提取 session_context（LLM 在 intent_draft 中声明的会话上下文）
+            _session_ctx = _intent_draft.get("session_context") or {}
+            if isinstance(_session_ctx, dict):
+                for _k, _v in _session_ctx.items():
+                    if _v is not None:
+                        _new_facts[f"session.{_k}"] = _v
+
+            _override_count = 0
+            for _fact_key, _fact_val in _new_facts.items():
+                _arbiter_inst.set_session_override(
+                    session_id=ctx.session_id,
+                    fact_key=_fact_key,
+                    value=_fact_val,
+                )
+                _override_count += 1
+
+            session_override_meta = {
+                "mode": "ACTIVE",
+                "override_count": _override_count,
+                "fact_keys": list(_new_facts.keys()),
+            }
+            ctx.metadata["session_override"] = session_override_meta
+            if _override_count > 0:
+                ctx.audit_tags.append(f"SESSION_OVERRIDE_WRITTEN:{_override_count}")
+                logger.debug(
+                    "[%s] StateArbiter SESSION_OVERRIDE 写入 %d 个事实: %s",
+                    ctx.request_id, _override_count, list(_new_facts.keys()),
+                )
+        except (ImportError, AttributeError):
+            session_override_meta = {"mode": "SKIPPED_NOT_WIRED"}
+        except Exception as _so_exc:
+            session_override_meta = {"mode": "DEGRADED", "error": str(_so_exc)[:100]}
+            logger.warning("[%s] StateArbiter SESSION_OVERRIDE 写入异常（降级）: %s", ctx.request_id, _so_exc)
+
         return True
 
 
@@ -1321,7 +1378,95 @@ class EpisodicStoreNode(ChainNode):
                 logger.debug("[%s] EpisodicStore 跳过：store 不可用", ctx.request_id)
                 return True
 
-            # 从 ctx.metadata 中提取情绪上下文（由 LlmGatewayNode 或 SSE 观测写入）
+            # ── TODO-57：MemoryGuard 宪法校验增强 ────────────────────────
+            # 在写入前执行 dream 内容过滤 + 蒸馏资格预判
+            memory_guard_write_meta: dict[str, Any] = {"mode": "SKIPPED"}
+            _should_skip_write = False
+            try:
+                from host_brain.app.memory.memory_guard import MemoryGuard  # noqa: PLC0415
+                from host_brain.app.schemas.memory_types import EvidenceLevel  # noqa: PLC0415
+
+                _mg = MemoryGuard()
+                # 检查是否为 dream 内容（来源标记）
+                _source_tag = str(ctx.metadata.get("source_tag") or ctx.task_type.value or "").upper()
+                _is_dream = "DREAM" in _source_tag or ctx.metadata.get("is_dream_content", False)
+
+                # 检查 evidence_level（从 ctx.metadata 中读取）
+                _ev_level_str = str(
+                    ctx.metadata.get("evidence_level") or
+                    (ctx.metadata.get("llm_gateway") or {}).get("evidence_level") or
+                    "FACTUAL"
+                ).strip().upper()
+                _ev_level_map = {
+                    "FACTUAL": EvidenceLevel.FACTUAL,
+                    "INFERRED": EvidenceLevel.INFERRED,
+                    "NARRATIVE_ONLY": EvidenceLevel.NARRATIVE_ONLY,
+                    "MILESTONE": EvidenceLevel.MILESTONE,
+                }
+                _ev_level = _ev_level_map.get(_ev_level_str, EvidenceLevel.FACTUAL)
+
+                # dream 内容强制 NARRATIVE_ONLY，不写入 EpisodicStore
+                if _is_dream and _ev_level != EvidenceLevel.NARRATIVE_ONLY:
+                    _should_skip_write = True
+                    memory_guard_write_meta = {
+                        "mode": "BLOCKED",
+                        "reason": "DREAM_CONTENT_NARRATIVE_ONLY",
+                        "evidence_level": _ev_level_str,
+                    }
+                    ctx.audit_tags.append("MEMORY_GUARD_DREAM_BLOCKED")
+                    logger.info(
+                        "[%s] MemoryGuard 阻止 dream 内容写入 EpisodicStore（evidence_level=%s）",
+                        ctx.request_id, _ev_level_str,
+                    )
+                elif _ev_level == EvidenceLevel.NARRATIVE_ONLY:
+                    # NARRATIVE_ONLY 内容不写入 EpisodicStore
+                    _should_skip_write = True
+                    memory_guard_write_meta = {
+                        "mode": "BLOCKED",
+                        "reason": "NARRATIVE_ONLY_BLOCKED",
+                        "evidence_level": _ev_level_str,
+                    }
+                    ctx.audit_tags.append("MEMORY_GUARD_NARRATIVE_BLOCKED")
+                    logger.debug(
+                        "[%s] MemoryGuard 阻止 NARRATIVE_ONLY 内容写入 EpisodicStore",
+                        ctx.request_id,
+                    )
+                else:
+                    # 蒸馏资格预判（频次 ≥ 3 或 MILESTONE 级别）
+                    _occurrence_count = int(ctx.metadata.get("occurrence_count") or 1)
+                    _distill_eligible = _mg.check_distillation_eligibility(
+                        content_hash=ctx.request_id,
+                        occurrence_count=_occurrence_count,
+                        evidence_level=_ev_level,
+                    )
+                    memory_guard_write_meta = {
+                        "mode": "PASSED",
+                        "evidence_level": _ev_level_str,
+                        "distill_eligible": _distill_eligible,
+                        "occurrence_count": _occurrence_count,
+                    }
+                    if _distill_eligible:
+                        ctx.audit_tags.append("MEMORY_GUARD_DISTILL_ELIGIBLE")
+                        ctx.metadata["distill_eligible"] = True
+
+                ctx.metadata["memory_guard_write"] = memory_guard_write_meta
+            except (ImportError, AttributeError):
+                memory_guard_write_meta = {"mode": "SKIPPED_NOT_WIRED"}
+                ctx.metadata["memory_guard_write"] = memory_guard_write_meta
+            except Exception as _mgw_exc:
+                memory_guard_write_meta = {"mode": "DEGRADED", "error": str(_mgw_exc)[:100]}
+                ctx.metadata["memory_guard_write"] = memory_guard_write_meta
+                logger.warning("[%s] MemoryGuard 宪法校验异常（降级）: %s", ctx.request_id, _mgw_exc)
+
+            # 如果 MemoryGuard 阻止写入，直接返回
+            if _should_skip_write:
+                ctx.metadata["episodic_store"] = {
+                    "status": "SKIPPED_MEMORY_GUARD",
+                    "reason_code": memory_guard_write_meta.get("reason", "MEMORY_GUARD_BLOCKED"),
+                    "task_type": ctx.task_type.value,
+                    "session_id": ctx.session_id,
+                }
+                return True
             _emotion_context: dict[str, Any] = {}
             _llm_meta = ctx.metadata.get("llm_gateway") or {}
             if isinstance(_llm_meta, dict):

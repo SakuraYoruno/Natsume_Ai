@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw, Database } from 'lucide-react'
+import { RefreshCw, Database, BookLock, GitMerge, Minimize2 } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -313,6 +313,120 @@ export default function Metrics() {
           {rlData.top_keys.length === 0 && (
             <div className="text-center py-4 text-gray-400 text-sm">近 5 分钟无速率限制触发</div>
           )}
+        </div>
+      )}
+
+      {/* ===== TODO-62: MemoryGuard / StateArbiter / ContextCompressor 迷你卡片 ===== */}
+      <MemoryGuardMiniCard />
+      <StateArbiterMiniCard />
+      <ContextCompressorMiniCard />
+    </div>
+  )
+}
+
+// ── TODO-62: MemoryGuard 迷你卡片 ──────────────────────────────────────────
+function MemoryGuardMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchMemoryGuardStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <BookLock size={14} className="text-emerald-600" />
+        <span className="text-sm font-semibold text-gray-700">MemoryGuard 宪法校验（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总校验', value: data?.total_checks, color: 'text-gray-700' },
+          { label: '通过', value: data?.passed_count, color: 'text-green-600' },
+          { label: '拦截', value: data?.blocked_count, color: 'text-red-600' },
+          { label: '蒸馏资格', value: data?.distill_eligible_count, color: 'text-blue-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.block_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>拦截率</span>
+            <span className={data.block_rate > 20 ? 'text-red-500 font-medium' : 'text-green-600'}>{data.block_rate}%</span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div className="bg-emerald-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.block_rate, 100)}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-62: StateArbiter 迷你卡片 ─────────────────────────────────────────
+function StateArbiterMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchStateArbiterStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <GitMerge size={14} className="text-cyan-600" />
+        <span className="text-sm font-semibold text-gray-700">StateArbiter 事实仲裁（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总仲裁', value: data?.total_resolutions, color: 'text-gray-700' },
+          { label: '冲突', value: data?.conflict_count, color: 'text-red-600' },
+          { label: '降级', value: data?.fallback_count, color: 'text-orange-500' },
+          { label: 'SESSION覆盖', value: data?.session_override_count, color: 'text-blue-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── TODO-62: ContextCompressor 迷你卡片 ────────────────────────────────────
+function ContextCompressorMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchContextCompressorStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Minimize2 size={14} className="text-teal-600" />
+        <span className="text-sm font-semibold text-gray-700">ContextCompressor 压缩效率（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总压缩', value: data?.total_compressions, color: 'text-gray-700' },
+          { label: '活跃', value: data?.active_count, color: 'text-green-600' },
+          { label: '节省轮次', value: data?.total_tokens_saved, color: 'text-teal-600' },
+          { label: '摘要生成', value: data?.summary_generated_count, color: 'text-indigo-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.avg_compression_ratio != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>平均压缩率</span>
+            <span className="text-teal-600 font-medium">{(data.avg_compression_ratio * 100).toFixed(1)}%</span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div className="bg-teal-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.avg_compression_ratio * 100, 100)}%` }} />
+          </div>
         </div>
       )}
     </div>
