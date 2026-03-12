@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
-import { fetchUIAssertionStats } from '../api/obs.js'
-import { Bot, Play, Square, RefreshCw, CheckCircle, XCircle, Clock, Zap, ShieldAlert } from 'lucide-react'
+import { fetchUIAssertionStats, fetchAgentLoopHistory } from '../api/obs.js'
+import { Bot, Play, Square, RefreshCw, CheckCircle, XCircle, Clock, Zap, ShieldAlert, History } from 'lucide-react'
 
 // ===== 工具函数 =====
 function formatTime(tsMs) {
@@ -31,6 +31,7 @@ export default function AgentLoop() {
   const [roundTimeout, setRoundTimeout] = useState(30)
   const [totalTimeout, setTotalTimeout] = useState(180)
   const [uiAssertionData, setUiAssertionData] = useState(null)
+  const [loopHistory, setLoopHistory] = useState([])  // TODO-86: 历史执行记录
   const [useMock, setUseMock]     = useState(false)
   const [useEdgeRpc, setUseEdgeRpc] = useState(false)
   const [imageConsent, setImageConsent] = useState(false)
@@ -56,6 +57,13 @@ export default function AgentLoop() {
         .catch(() => {})
     }, 5 * 60 * 1000)
     return () => clearInterval(timer)
+  }, [])
+
+  // TODO-86: 加载 Agent Loop 历史执行记录
+  useEffect(() => {
+    fetchAgentLoopHistory({ window_minutes: 1440, limit: 10 })
+      .then(d => setLoopHistory(d?.items ?? []))
+      .catch(() => {})
   }, [])
 
   // 加载 Agent 配置信息
@@ -364,6 +372,54 @@ export default function AgentLoop() {
           </div>
         </div>
       </div>
+
+      {/* TODO-86: Agent Loop 历史执行记录面板 */}
+      {loopHistory.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+            <History size={13} className="text-gray-500" />
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">历史执行记录（近 24h，最近 10 次）</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {['目标', '状态', '达成', '轮次', '耗时', '模式', '时间'].map(h => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loopHistory.map((item, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 text-xs text-gray-700 max-w-48 truncate" title={item.goal}>
+                    {item.goal || '—'}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-gray-500">{item.final_status || '—'}</td>
+                  <td className="px-4 py-2 text-xs">
+                    {item.goal_achieved === true
+                      ? <CheckCircle size={13} className="text-green-500" />
+                      : item.goal_achieved === false
+                        ? <XCircle size={13} className="text-red-400" />
+                        : <span className="text-gray-300">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500">{item.total_rounds ?? '—'}</td>
+                  <td className="px-4 py-2 text-xs text-gray-500">
+                    {item.total_latency_ms != null ? `${item.total_latency_ms}ms` : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-400">{item.client_mode || '—'}</td>
+                  <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">
+                    {item.ts_ms
+                      ? new Date(item.ts_ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : '—'
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

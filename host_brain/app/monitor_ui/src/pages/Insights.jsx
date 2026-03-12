@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -22,6 +22,7 @@ import {
   fetchPromptBuilderStats,
   fetchEpisodicStoreStats,
   fetchCanonProposalStats,
+  fetchChainStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -654,6 +655,9 @@ export default function Insights() {
       {/* ===== TODO-77: Canon 提案统计 ===== */}
       <CanonProposalStatsSection windowMinutes={windowMinutes} />
 
+      {/* ===== TODO-84: 主链路节点统计 ===== */}
+      <ChainStatsSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -1104,7 +1108,72 @@ function UIAssertionSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-77: Canon 提案统计子组件 =====
+// ===== TODO-84: 主链路节点统计子组件 =====
+function ChainStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchChainStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+
+  const nodes = data?.node_stats ?? []
+  const maxAvg = Math.max(...nodes.map(n => n.avg_latency_ms ?? 0), 1)
+
+  const NODE_COLOR = {
+    airlock_quarantine: '#667085', governor: '#7A5AF8', graph_executor: '#2970FF',
+    recall_fusion: '#0BA5EC', llm_gateway: '#F79009', qa_contract: '#12B76A',
+    episodic_store: '#EE46BC', audit: '#667085', canon_proposal: '#6366F1',
+    airlock_sanitizer: '#667085',
+  }
+
+  return (
+    <section>
+      <SectionTitle icon={Activity} title="主链路节点统计" color="text-blue-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总请求数" value={data?.total_requests ?? '—'} color="text-gray-700" />
+        <StatCard label="Governor 拦截率" value={data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—'} color={data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700'} />
+        <StatCard label="记忆写入次数" value={data?.episodic_written_count ?? '—'} color="text-green-600" />
+        <StatCard label="Canon 提案次数" value={data?.canon_proposal_count ?? '—'} color="text-indigo-600" />
+      </div>
+      {/* 节点耗时分布直方图 */}
+      <div className="card p-4">
+        <div className="text-xs font-semibold text-gray-600 mb-3">各节点平均耗时分布（近 {windowMinutes} 分钟）</div>
+        <div className="space-y-2">
+          {nodes.filter(n => n.total_calls > 0).map((n) => {
+            const avgPct = maxAvg > 0 ? Math.max((n.avg_latency_ms ?? 0) / maxAvg * 100, 1) : 0
+            const color = NODE_COLOR[n.node_name] ?? '#667085'
+            return (
+              <div key={n.node_name} className="flex items-center gap-2">
+                <div className="w-36 text-xs text-gray-600 truncate shrink-0" title={n.node_name}>
+                  {n.node_name}
+                </div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-2 rounded-full transition-all"
+                    style={{ width: `${avgPct}%`, backgroundColor: color, opacity: 0.75 }}
+                  />
+                </div>
+                <div className="w-24 text-xs text-right text-gray-500 shrink-0">
+                  {n.avg_latency_ms != null ? `avg ${n.avg_latency_ms}ms` : '—'}
+                  {n.p95_latency_ms != null && <span className="text-gray-400"> / p95 {n.p95_latency_ms}ms</span>}
+                </div>
+                {n.degraded_rate > 0 && (
+                  <div className="text-xs text-orange-500 shrink-0 w-16 text-right">{n.degraded_rate}% 降级</div>
+                )}
+                {n.timeout_count > 0 && (
+                  <div className="text-xs text-red-500 shrink-0 w-12 text-right">{n.timeout_count} 超时</div>
+                )}
+              </div>
+            )
+          })}
+          {nodes.filter(n => n.total_calls > 0).length === 0 && (
+            <div className="text-center py-4 text-xs text-gray-400">暂无节点调用数据（窗口内无 AUDIT_SNAPSHOT 记录）</div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function CanonProposalStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {

@@ -5,6 +5,7 @@ import {
   submitCanonProposal,
   approveCanonProposal,
   rejectCanonProposal,
+  rollbackCanonProposal,
   fetchVaultStats,
 } from '../api/obs.js'
 import {
@@ -17,6 +18,8 @@ import {
   ChevronUp,
   AlertCircle,
   Lock,
+  RotateCcw,
+  Search,
 } from 'lucide-react'
 
 // ── 状态徽章 ──────────────────────────────────────────────────────────────
@@ -37,7 +40,7 @@ function StatusBadge({ status }) {
 }
 
 // ── 提案行 ────────────────────────────────────────────────────────────────
-function ProposalRow({ item, onApprove, onReject }) {
+function ProposalRow({ item, onApprove, onReject, onRollback }) {
   const [expanded, setExpanded] = useState(false)
   const ts = item.ts_ms ? new Date(item.ts_ms).toLocaleString('zh-CN') : '—'
 
@@ -74,6 +77,16 @@ function ProposalRow({ item, onApprove, onReject }) {
                   <XCircle size={12} /> 拒绝
                 </button>
               </>
+            )}
+            {/* TODO-81: 回滚按钮（仅 APPLIED 状态） */}
+            {item.status === 'APPLIED' && (
+              <button
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 transition-colors"
+                onClick={() => onRollback(item)}
+                title="回滚到 base_version"
+              >
+                <RotateCcw size={12} /> 回滚
+              </button>
             )}
             <button
               className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
@@ -285,6 +298,7 @@ export default function Canon() {
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [activeTab, setActiveTab] = useState('proposals') // 'proposals' | 'documents'
   const [vaultData, setVaultData] = useState(null)        // TODO-44: Vault 统计
+  const [docKeyword, setDocKeyword] = useState('')         // TODO-85: 文档搜索关键词
   const PAGE_SIZE = 20
 
   const loadProposals = useCallback(async () => {
@@ -351,6 +365,18 @@ export default function Canon() {
       loadProposals()
     } catch (err) {
       alert(`拒绝失败：${err.message}`)
+    }
+  }
+
+  // TODO-81: 回滚已 APPLIED 的提案
+  const handleRollback = async (item) => {
+    const reason = window.prompt(`确认回滚提案 ${item.proposal_id?.slice(0, 16)}… 到 base_version？\n请输入回滚原因（可选）：`)
+    if (reason === null) return
+    try {
+      await rollbackCanonProposal(item.proposal_id, { rollback_reason: reason })
+      loadProposals()
+    } catch (err) {
+      alert(`回滚失败：${err.message}`)
     }
   }
 
@@ -545,7 +571,7 @@ export default function Canon() {
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">暂无提案</td></tr>
                 ) : (
                   proposals.map(item => (
-                    <ProposalRow key={item.proposal_id} item={item} onApprove={handleApprove} onReject={handleReject} />
+                    <ProposalRow key={item.proposal_id} item={item} onApprove={handleApprove} onReject={handleReject} onRollback={handleRollback} />
                   ))
                 )}
               </tbody>
@@ -576,13 +602,34 @@ export default function Canon() {
       {/* SSOT 文档列表 */}
       {activeTab === 'documents' && (
         <div>
+          {/* TODO-85: 文档搜索过滤 */}
+          <div className="mb-3 relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary-200"
+              placeholder="按标题或标签搜索文档…"
+              value={docKeyword}
+              onChange={e => setDocKeyword(e.target.value)}
+            />
+          </div>
           {docsLoading ? (
             <div className="text-center py-8 text-sm text-gray-400">加载中…</div>
           ) : documents.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400">暂无 World Canon 文档</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {documents.map(doc => <DocCard key={doc.doc_id} doc={doc} />)}
+              {documents
+                .filter(doc => {
+                  if (!docKeyword.trim()) return true
+                  const kw = docKeyword.trim().toLowerCase()
+                  return (
+                    (doc.title || '').toLowerCase().includes(kw) ||
+                    (doc.doc_id || '').toLowerCase().includes(kw) ||
+                    (doc.tags || []).some(t => t.toLowerCase().includes(kw))
+                  )
+                })
+                .map(doc => <DocCard key={doc.doc_id} doc={doc} />)
+              }
             </div>
           )}
         </div>

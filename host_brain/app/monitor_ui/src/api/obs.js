@@ -210,6 +210,31 @@ export function rejectCanonProposal(proposalId, body) {
   })
 }
 
+/**
+ * TODO-81: 回滚已 APPLIED 的 Canon 提案（恢复到 base_version）
+ * @param {string} proposalId
+ * @param {object} body - { rollback_reason, operator_node_id }
+ */
+export function rollbackCanonProposal(proposalId, body = {}) {
+  return request(`/canon/proposals/${encodeURIComponent(proposalId)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// ===== TODO-82: 主链路节点统计 =====
+
+/**
+ * 主链路节点统计（各节点耗时分布/降级率/失败率）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchChainStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/chain/stats${qs ? '?' + qs : ''}`)
+}
+
 // ===== TODO-23: Bond 管理 =====
 
 /** BondStageEngine 健康状态 */
@@ -665,6 +690,19 @@ export function fetchCanonProposalStats(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/canon/proposals/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-86: Agent Loop 历史执行记录 =====
+
+/**
+ * Agent Loop 历史执行记录（最近 N 次执行结果）
+ * @param {object} params - { window_minutes, limit }
+ */
+export function fetchAgentLoopHistory(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/agent-loop/history${qs ? '?' + qs : ''}`)
 }
 
 

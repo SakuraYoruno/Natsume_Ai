@@ -10,11 +10,11 @@ import {
   MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2, Bookmark } from 'lucide-react'
+import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2, Bookmark, Activity } from 'lucide-react'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import { applyDagreLayout } from '../utils/traceLayout.js'
-import { fetchTraceNodes, fetchCheckpoints } from '../api/obs.js'
+import { fetchTraceNodes, fetchCheckpoints, fetchChainStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
@@ -234,6 +234,80 @@ function GanttView({ traceData, onSelectNode }) {
             <span className="text-xs text-gray-500">{type}</span>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ===== TODO-83: 节点耗时分布直方图 =====
+function ChainStatsPanel() {
+  const [data, setData] = React.useState(null)
+  const [loading, setLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    setLoading(true)
+    fetchChainStats({ window_minutes: 1440 })
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return (
+    <div className="card p-4 text-center text-xs text-gray-400">
+      <RefreshCw size={12} className="animate-spin inline mr-1" />加载主链路统计…
+    </div>
+  )
+  if (!data) return null
+
+  const nodes = data.node_stats ?? []
+  const maxAvg = Math.max(...nodes.map(n => n.avg_latency_ms ?? 0), 1)
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Activity size={14} className="text-blue-500" />
+        <span className="text-xs font-semibold text-gray-700">主链路节点耗时分布（近 24h）</span>
+        <span className="ml-auto text-xs text-gray-400">{data.total_requests} 次请求</span>
+      </div>
+      {/* 全局摘要 */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        {[
+          { label: 'Governor 拦截率', value: data.governor_block_rate != null ? `${data.governor_block_rate}%` : '—', color: data.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700' },
+          { label: '记忆写入次数', value: data.episodic_written_count ?? '—', color: 'text-green-600' },
+          { label: 'QA 重写次数', value: data.qa_rewrite_count ?? '—', color: 'text-orange-500' },
+          { label: 'Canon 提案次数', value: data.canon_proposal_count ?? '—', color: 'text-indigo-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="text-center">
+            <div className={`text-xl font-bold ${color}`}>{value}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {/* 节点耗时直方图 */}
+      <div className="space-y-2">
+        {nodes.filter(n => n.total_calls > 0).map((n) => {
+          const avgPct = maxAvg > 0 ? Math.max((n.avg_latency_ms ?? 0) / maxAvg * 100, 1) : 0
+          const color = nodeColor(n.node_name.replace('_', ''))
+          return (
+            <div key={n.node_name} className="flex items-center gap-2">
+              <div className="w-32 text-xs text-gray-600 truncate shrink-0" title={n.node_name}>
+                {n.node_name}
+              </div>
+              <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div
+                  className="h-2 rounded-full"
+                  style={{ width: `${avgPct}%`, backgroundColor: color, opacity: 0.75 }}
+                />
+              </div>
+              <div className="w-20 text-xs text-right text-gray-500 shrink-0">
+                {n.avg_latency_ms != null ? `avg ${n.avg_latency_ms}ms` : '—'}
+              </div>
+              {n.degraded_rate > 0 && (
+                <div className="text-xs text-orange-500 shrink-0">{n.degraded_rate}% 降级</div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -546,6 +620,9 @@ export default function Trace() {
 
       {/* TODO-72: Top 5 最慢节点排行榜（有 traceData 时显示） */}
       {traceData && <SlowestNodesPanel traceData={traceData} />}
+
+      {/* TODO-83: 主链路节点耗时分布直方图（始终显示，独立于 traceData） */}
+      <ChainStatsPanel />
     </div>
   )
 }

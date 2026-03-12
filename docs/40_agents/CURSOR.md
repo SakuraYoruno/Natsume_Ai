@@ -1797,5 +1797,93 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Metrics.jsx`：新增 CanonProposalMiniCard 组件 + 渲染调用
 
+---
+
+### TODO-81：Canon.jsx 新增提案回滚按钮（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（回滚按钮已上线）
+
+**新增功能**：
+- `obs.js` 追加 `rollbackCanonProposal(proposalId, body)` 函数（POST /canon/proposals/{id}/rollback）
+- `Canon.jsx` 在 APPLIED 状态的提案行中新增"回滚"按钮（RotateCcw 图标，橙色主题）
+- 点击后弹出确认对话框，输入回滚原因后调用 rollbackCanonProposal
+
+**改动文件**：
+- `monitor_ui/src/api/obs.js`：新增 rollbackCanonProposal 函数
+- `monitor_ui/src/pages/Canon.jsx`：新增回滚按钮 + handleRollback 处理函数
+
+---
+
+### TODO-82：GET /obs/chain/stats — 主链路节点统计端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（主链路节点统计端点已上线）
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/chain/stats` 端点
+- 从 AUDIT_SNAPSHOT 记录中提取 audit_tags 和 node_timings，聚合各节点调用次数/降级率/平均耗时/P95 耗时/超时次数
+- 全局统计：总请求数/Governor 拦截率/记忆写入次数/QA 重写次数/Canon 提案次数
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 /obs/chain/stats 端点
+
+---
+
+### TODO-83：Trace.jsx 新增节点耗时分布直方图（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（节点耗时分布直方图已上线）
+
+**新增功能**：
+- 新增 `ChainStatsPanel` 组件（Activity 图标，蓝色主题）
+- 接入 `fetchChainStats`，展示各节点平均耗时分布直方图（按比例渲染彩色进度条）
+- 显示全局摘要：总请求数/Governor 拦截率/记忆写入次数/Canon 提案次数
+- 始终显示（独立于 traceData，不需要先查询 trace）
+
+**改动文件**：
+- `monitor_ui/src/pages/Trace.jsx`：引入 fetchChainStats + 新增 ChainStatsPanel 组件
+
+---
+
+### TODO-84：Insights.jsx 新增主链路节点统计区块（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（主链路节点统计区块已上线）
+
+**新增功能**：
+- 新增 `ChainStatsSection` 子组件（Activity 图标，蓝色主题）
+- 4 个聚合指标 + 各节点耗时分布直方图（avg/p95 耗时 + 降级率 + 超时次数）
+- 无数据时显示友好提示
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：引入 fetchChainStats + 新增 ChainStatsSection
+
+---
+
+### TODO-85：Canon.jsx 新增文档搜索过滤（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（文档搜索过滤已上线）
+
+**新增功能**：
+- 在 SSOT 文档列表 Tab 顶部新增搜索框（Search 图标）
+- 支持按 title/doc_id/tags 关键词实时过滤文档列表（前端过滤，无需额外 API 请求）
+
+**改动文件**：
+- `monitor_ui/src/pages/Canon.jsx`：新增 docKeyword 状态 + 搜索框 + 过滤逻辑
+
+---
+
+### TODO-86：AgentLoop.jsx 新增历史执行记录面板（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（历史执行记录面板已上线）
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/agent-loop/history` 端点（从 LOOP_DONE 审计记录中提取）
+- `obs.js` 追加 `fetchAgentLoopHistory(params)` 函数
+- `AgentLoop.jsx` 在页面底部新增历史执行记录表格（近 24h，最近 10 次）
+- 字段：目标/状态/达成/轮次/耗时/模式/时间
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 /obs/agent-loop/history 端点
+- `monitor_ui/src/api/obs.js`：新增 fetchAgentLoopHistory 函数
+- `monitor_ui/src/pages/AgentLoop.jsx`：新增历史执行记录面板
+
 
 

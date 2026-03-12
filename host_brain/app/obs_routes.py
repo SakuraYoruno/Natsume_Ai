@@ -3565,3 +3565,237 @@ async def get_episodic_store_stats(
         avg_occurrence_count=avg_occurrence_count,
         timestamp=now,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/chain/stats — TODO-82: 主链路节点统计
+# ---------------------------------------------------------------------------
+
+class ChainNodeStatItem(BaseModel):
+    node_name: str
+    total_calls: int
+    degraded_count: int
+    degraded_rate: float          # degraded / total * 100
+    avg_latency_ms: Optional[float]
+    p95_latency_ms: Optional[float]
+    timeout_count: int
+
+
+class ChainStatsResponse(BaseModel):
+    window_minutes: int
+    total_requests: int
+    governor_block_count: int
+    governor_block_rate: float
+    recall_degraded_count: int
+    episodic_written_count: int
+    qa_rewrite_count: int
+    canon_proposal_count: int
+    node_stats: List[ChainNodeStatItem]
+    timestamp: int
+
+
+@router.get("/chain/stats", response_model=ChainStatsResponse)
+async def get_chain_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-82: 主链路节点统计（各节点耗时分布/降级率/失败率）。
+
+    从 audit_log（AUDIT_SNAPSHOT 阶段）中提取 audit_tags 和 node_timings，
+    聚合各节点的调用次数、降级率、平均耗时、P95 耗时、超时次数。
+    """
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # 从 audit_log 中拉取 AUDIT_SNAPSHOT 记录
+    try:
+        rows = ledger.fetch_by_time_range("audit_log", start_ms=since_ms, end_ms=now)
+        audit_rows = [r for r in rows if str(r.get("stage") or "").upper() == "AUDIT_SNAPSHOT"]
+    except Exception:
+        audit_rows = []
+
+    total_requests = len(audit_rows)
+
+    # 解析 audit_tags 和 node_timings
+    governor_block_count = 0
+    recall_degraded_count = 0
+    episodic_written_count = 0
+    qa_rewrite_count = 0
+    canon_proposal_count = 0
+
+    # 节点耗时收集：node_name → [latency_ms, ...]
+    node_latencies: dict[str, list[float]] = {}
+    node_degraded: dict[str, int] = {}
+    node_timeout: dict[str, int] = {}
+    node_calls: dict[str, int] = {}
+
+    _KNOWN_NODES = [
+        "airlock_quarantine", "governor", "graph_executor", "recall_fusion",
+        "llm_gateway", "qa_contract", "episodic_store", "audit",
+        "canon_proposal", "airlock_sanitizer",
+    ]
+    for n in _KNOWN_NODES:
+        node_latencies[n] = []
+        node_degraded[n] = 0
+        node_timeout[n] = 0
+        node_calls[n] = 0
+
+    for row in audit_rows:
+        detail_raw = row.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+
+        audit_tags = list(detail.get("audit_tags") or [])
+        node_timings_ms = dict(detail.get("node_timings_ms") or {})
+
+        # 全局统计
+        if any("GOVERNOR_BLOCK" in t or "GOVERNOR_REJECT" in t for t in audit_tags):
+            governor_block_count += 1
+        if any("RECALL_DEGRADED" in t or "RECALL_CIRCUIT_OPEN" in t for t in audit_tags):
+            recall_degraded_count += 1
+        if "EPISODIC_WRITTEN" in audit_tags:
+            episodic_written_count += 1
+        if any("QA_REWRITE" in t for t in audit_tags):
+            qa_rewrite_count += 1
+        if any("CANON_PROPOSAL_SUBMITTED" in t for t in audit_tags):
+            canon_proposal_count += 1
+
+        # 节点耗时
+        for node_name, latency_ms in node_timings_ms.items():
+            if node_name not in node_latencies:
+                node_latencies[node_name] = []
+                node_degraded[node_name] = 0
+                node_timeout[node_name] = 0
+                node_calls[node_name] = 0
+            node_calls[node_name] += 1
+            if isinstance(latency_ms, (int, float)) and latency_ms > 0:
+                node_latencies[node_name].append(float(latency_ms))
+
+        # 降级/超时标记
+        for tag in audit_tags:
+            if "DEGRADED_FALLBACK" in tag or "DEGRADED" in tag:
+                for n in _KNOWN_NODES:
+                    if n.upper().replace("_", "") in tag.upper().replace("_", ""):
+                        node_degraded[n] += 1
+                        break
+            if "MODULE_TIMEOUT" in tag:
+                for n in _KNOWN_NODES:
+                    if n.upper().replace("_", "") in tag.upper().replace("_", ""):
+                        node_timeout[n] += 1
+                        break
+
+    # 构建节点统计列表
+    node_stats = []
+    for node_name in _KNOWN_NODES:
+        calls = node_calls.get(node_name, 0)
+        latencies = node_latencies.get(node_name, [])
+        degraded = node_degraded.get(node_name, 0)
+        timeout = node_timeout.get(node_name, 0)
+
+        avg_lat = round(sum(latencies) / len(latencies), 1) if latencies else None
+        p95_lat = None
+        if len(latencies) >= 5:
+            sorted_lat = sorted(latencies)
+            p95_idx = int(len(sorted_lat) * 0.95)
+            p95_lat = round(sorted_lat[min(p95_idx, len(sorted_lat) - 1)], 1)
+
+        node_stats.append(ChainNodeStatItem(
+            node_name=node_name,
+            total_calls=calls,
+            degraded_count=degraded,
+            degraded_rate=round(degraded / calls * 100, 1) if calls > 0 else 0.0,
+            avg_latency_ms=avg_lat,
+            p95_latency_ms=p95_lat,
+            timeout_count=timeout,
+        ))
+
+    governor_block_rate = round(governor_block_count / total_requests * 100, 1) if total_requests > 0 else 0.0
+
+    return ChainStatsResponse(
+        window_minutes=window_minutes,
+        total_requests=total_requests,
+        governor_block_count=governor_block_count,
+        governor_block_rate=governor_block_rate,
+        recall_degraded_count=recall_degraded_count,
+        episodic_written_count=episodic_written_count,
+        qa_rewrite_count=qa_rewrite_count,
+        canon_proposal_count=canon_proposal_count,
+        node_stats=node_stats,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/agent-loop/history — TODO-86: Agent Loop 历史执行记录
+# ---------------------------------------------------------------------------
+
+class AgentLoopHistoryItem(BaseModel):
+    request_id: str
+    goal: Optional[str]
+    final_status: Optional[str]
+    goal_achieved: Optional[bool]
+    total_rounds: Optional[int]
+    total_latency_ms: Optional[int]
+    ts_ms: Optional[int]
+    client_mode: Optional[str]
+
+
+class AgentLoopHistoryResponse(BaseModel):
+    items: List[AgentLoopHistoryItem]
+    total: int
+    window_minutes: int
+    timestamp: int
+
+
+@router.get("/agent-loop/history", response_model=AgentLoopHistoryResponse)
+async def get_agent_loop_history(
+    window_minutes: int = Query(1440, ge=1, le=10080, description="统计窗口（分钟）"),
+    limit: int = Query(10, ge=1, le=50, description="最大返回条数"),
+):
+    """TODO-86: Agent Loop 历史执行记录（最近 N 次执行结果）。
+
+    从 audit_log 中拉取 LOOP_DONE 阶段的记录，返回最近 limit 条。
+    """
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("audit_log", start_ms=since_ms, end_ms=now)
+        loop_rows = [r for r in rows if str(r.get("stage") or "").upper() == "LOOP_DONE"]
+    except Exception:
+        loop_rows = []
+
+    # 按时间倒序，取最近 limit 条
+    loop_rows.sort(key=lambda r: r.get("ts_ms") or 0, reverse=True)
+    loop_rows = loop_rows[:limit]
+
+    items = []
+    for row in loop_rows:
+        detail_raw = row.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+
+        items.append(AgentLoopHistoryItem(
+            request_id=str(row.get("request_id") or ""),
+            goal=detail.get("goal") or row.get("goal"),
+            final_status=detail.get("final_status") or row.get("final_status"),
+            goal_achieved=detail.get("goal_achieved"),
+            total_rounds=detail.get("total_rounds"),
+            total_latency_ms=detail.get("total_latency_ms"),
+            ts_ms=row.get("ts_ms"),
+            client_mode=detail.get("client_mode"),
+        ))
+
+    return AgentLoopHistoryResponse(
+        items=items,
+        total=len(items),
+        window_minutes=window_minutes,
+        timestamp=now,
+    )
+
+
