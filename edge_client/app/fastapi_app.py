@@ -427,14 +427,38 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
         ts_ms=envelope.ts_ms,
         auto_start=True,
     )
-    result = pipeline_result.queue_result
+    queue_result = pipeline_result.queue_result
+    start_result = pipeline_result.start_result
+    vts_result = pipeline_result.vts_result
+
+    # Prefer the real playback-start result when available so Host can detect
+    # synth/playback failures instead of only seeing "queued".
+    result = start_result if start_result is not None else queue_result
+    event = dict(result.event)
+    event.setdefault("queue_event", dict(queue_result.event))
+    if start_result is not None:
+        event["start_event"] = dict(start_result.event)
+        event["start_status"] = start_result.status
+        event["start_reason_code"] = start_result.reason_code
+        event["start_stage"] = start_result.stage
+        event["start_detail"] = start_result.detail
+    if vts_result is not None:
+        event["vts_result"] = vts_result.as_dict()
+
+    success = bool(queue_result.success and (start_result is None or start_result.success))
+    detail = str(result.detail)
+    if start_result is not None and not start_result.success:
+        detail = f"{queue_result.detail}; playback start failed: {start_result.detail}"
+    elif start_result is not None and start_result.success:
+        detail = f"{queue_result.detail}; {start_result.detail}"
+
     return EdgeGatewayResult(
-        success=result.success,
+        success=success,
         status=result.status,
         reason_code=result.reason_code,
         stage=result.stage,
-        detail=result.detail,
-        event=dict(result.event),
+        detail=detail,
+        event=event,
     )
 
 

@@ -134,6 +134,98 @@ function Start-VtsViaSteam {
   }
 }
 
+function Resolve-VtsExecutablePath {
+  param([hashtable]$EnvValues)
+
+  $candidates = New-Object System.Collections.Generic.List[string]
+
+  if ($EnvValues.ContainsKey("EDGE_VTS_EXECUTABLE_PATH")) {
+    $candidate = [string]$EnvValues["EDGE_VTS_EXECUTABLE_PATH"]
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+      [void]$candidates.Add($candidate.Trim())
+    }
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:EDGE_VTS_EXECUTABLE_PATH)) {
+    [void]$candidates.Add($env:EDGE_VTS_EXECUTABLE_PATH.Trim())
+  }
+
+  $steamRoots = New-Object System.Collections.Generic.List[string]
+  foreach ($regPath in @(
+    "Registry::HKEY_CURRENT_USER\Software\Valve\Steam",
+    "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam",
+    "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam"
+  )) {
+    try {
+      $item = Get-ItemProperty -Path $regPath -ErrorAction Stop
+      foreach ($prop in @("SteamPath", "InstallPath")) {
+        $value = [string]$item.$prop
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+          [void]$steamRoots.Add($value.Trim())
+        }
+      }
+    } catch {
+    }
+  }
+
+  foreach ($fallbackRoot in @(
+    "C:\Program Files (x86)\Steam",
+    "D:\Program Files (x86)\Steam",
+    "C:\Program Files\Steam",
+    "D:\Program Files\Steam"
+  )) {
+    [void]$steamRoots.Add($fallbackRoot)
+  }
+
+  $uniqueSteamRoots = $steamRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+  foreach ($steamRoot in $uniqueSteamRoots) {
+    [void]$candidates.Add((Join-Path $steamRoot "steamapps\common\VTube Studio\VTube Studio.exe"))
+    [void]$candidates.Add((Join-Path $steamRoot "steamapps\common\VTube Studio\VTubeStudio.exe"))
+  }
+
+  $uniqueCandidates = $candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+  foreach ($candidatePath in $uniqueCandidates) {
+    if (Test-Path -Path $candidatePath) {
+      return (Resolve-Path -Path $candidatePath).Path
+    }
+  }
+
+  return $null
+}
+
+function Start-VtsViaExecutable {
+  param([string]$ExecutablePath)
+
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    return [ordered]@{
+      status = "launch_failed"
+      detail = "vts executable path is empty"
+      executable_path = $null
+    }
+  }
+
+  if (-not (Test-Path -Path $ExecutablePath)) {
+    return [ordered]@{
+      status = "launch_failed"
+      detail = "vts executable not found: $ExecutablePath"
+      executable_path = $ExecutablePath
+    }
+  }
+
+  try {
+    Start-Process -FilePath $ExecutablePath -ErrorAction Stop | Out-Null
+    return [ordered]@{
+      status = "launched"
+      detail = "launched via direct executable path"
+      executable_path = $ExecutablePath
+    }
+  } catch {
+    return [ordered]@{
+      status = "launch_failed"
+      detail = "direct executable launch failed: $($_.Exception.Message)"
+      executable_path = $ExecutablePath
+    }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
@@ -198,6 +290,8 @@ if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
   $candidate = [int]$env:EDGE_VTS_AUTOSTART_WAIT_SECONDS
   if ($candidate -gt 0) { $vtsAutoStartWaitSeconds = $candidate }
 }
+
+$vtsExecutablePath = Resolve-VtsExecutablePath -EnvValues $envValues
 
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
@@ -314,14 +408,38 @@ if ($vtsAutoStart) {
     $launch = Start-VtsViaSteam -SteamAppId $vtsSteamAppId
     $vtsAutoStartStatus = [string]$launch.status
     $vtsAutoStartDetail = [string]$launch.detail
+    $portReady = $false
     if ($vtsAutoStartStatus -eq "launched") {
-      if (Wait-Port -Port $vtsPort -TimeoutSeconds $vtsAutoStartWaitSeconds) {
+      $portReady = Wait-Port -Port $vtsPort -TimeoutSeconds $vtsAutoStartWaitSeconds
+      if ($portReady) {
         $vtsAutoStartStatus = "ready"
         $vtsAutoStartDetail = "vts listens on port $vtsPort after steam launch"
       } else {
         $vtsAutoStartStatus = "launch_timeout"
         $vtsAutoStartDetail = "steam launch requested but port $vtsPort not ready within $vtsAutoStartWaitSeconds seconds"
       }
+    }
+
+    if (-not $portReady -and $vtsExecutablePath) {
+      $directLaunch = Start-VtsViaExecutable -ExecutablePath $vtsExecutablePath
+      if ([string]$directLaunch.status -eq "launched") {
+        if (Wait-Port -Port $vtsPort -TimeoutSeconds $vtsAutoStartWaitSeconds) {
+          $vtsAutoStartStatus = "ready"
+          $vtsAutoStartDetail = "vts listens on port $vtsPort after direct executable fallback"
+        } else {
+          $vtsAutoStartStatus = "launch_timeout"
+          $vtsAutoStartDetail = "direct executable fallback launched but port $vtsPort not ready within $vtsAutoStartWaitSeconds seconds (path=$($directLaunch.executable_path))"
+        }
+      } else {
+        if ($vtsAutoStartStatus -eq "launch_timeout") {
+          $vtsAutoStartDetail = "$vtsAutoStartDetail; direct fallback failed: $($directLaunch.detail)"
+        } else {
+          $vtsAutoStartStatus = "launch_failed"
+          $vtsAutoStartDetail = "steam launch failed and direct fallback failed: $($directLaunch.detail)"
+        }
+      }
+    } elseif (-not $portReady -and -not $vtsExecutablePath -and $vtsAutoStartStatus -eq "launch_timeout") {
+      $vtsAutoStartDetail = "$vtsAutoStartDetail; direct executable fallback unavailable"
     }
   }
 }

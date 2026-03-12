@@ -10,12 +10,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -58,8 +59,9 @@ def set_ledger_provider(provider) -> None:
 def _get_ledger() -> SQLiteLedger:
     if _ledger_provider is not None:
         return _ledger_provider()
-    from host_brain.app.fastapi_app import get_ledger as _app_ledger
-    return _app_ledger()
+    # Fallback to shared dependency factory to avoid import-order/cycle issues.
+    from host_brain.app.dependencies import get_ledger as _deps_get_ledger
+    return _deps_get_ledger()
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -594,7 +596,6 @@ async def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
-
 
 # ---------------------------------------------------------------------------
 # P1: GET /obs/governor/stats  — Governor 决策漏斗 + reason_code 分布
@@ -3953,7 +3954,7 @@ async def get_failure_events(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
-    ledger: "SQLiteLedger" = Depends(get_ledger),
+    ledger: "SQLiteLedger" = Depends(_get_ledger),
 ):
     """
     TODO-115: 失败事件统计端点。
@@ -4017,7 +4018,7 @@ async def get_failure_events(
         }
 
     except Exception as exc:
-        _logger.warning("get_failure_events: 查询失败: %s", exc)
+        logger.warning("get_failure_events: 查询失败: %s", exc)
         return {
             "window_minutes": window_minutes,
             "total_failures": 0,
