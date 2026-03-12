@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText } from 'lucide-react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
-import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats } from '../api/obs.js'
+import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -16,6 +16,7 @@ export default function Overview() {
   const [dispatchData, setDispatchData] = useState(null)
   const [pbData, setPbData] = useState(null)  // TODO-73: PromptBuilder 注入检测摘要
   const [canonData, setCanonData] = useState(null)  // TODO-79: Canon 提案待审核警告
+  const [chainData, setChainData] = useState(null)  // TODO-90: 主链路健康评分
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -25,16 +26,18 @@ export default function Overview() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [res, dispRes, pbRes, canonRes] = await Promise.all([
+      const [res, dispRes, pbRes, canonRes, chainRes] = await Promise.all([
         fetchServicesHealth({ window_minutes: windowMinutes }),
         fetchInputDispatchStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchPromptBuilderStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchCanonProposalStats({ window_minutes: windowMinutes }).catch(() => null),
+        fetchChainStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
       setData(res)
       setDispatchData(dispRes)
       setPbData(pbRes)
       setCanonData(canonRes)
+      setChainData(chainRes)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -316,6 +319,84 @@ export default function Overview() {
               </div>
             </div>
           )}
+
+          {/* TODO-90: 实时健康评分卡片 */}
+          {(chainData || dispatchData || pbData) && (() => {
+            // 综合健康评分算法（满分 100）
+            let score = 100
+            const issues = []
+
+            // Governor 拦截率扣分（>10% 扣 20 分，>5% 扣 10 分）
+            const blockRate = chainData?.governor_block_rate ?? 0
+            if (blockRate > 10) { score -= 20; issues.push(`Governor 拦截率 ${blockRate}%`) }
+            else if (blockRate > 5) { score -= 10; issues.push(`Governor 拦截率偏高 ${blockRate}%`) }
+
+            // 注入检测率扣分（>5% 扣 15 分，>1% 扣 5 分）
+            const injRate = pbData?.injection_detection_rate ?? 0
+            if (injRate > 5) { score -= 15; issues.push(`注入检测率 ${injRate}%`) }
+            else if (injRate > 1) { score -= 5; issues.push(`注入检测率偏高 ${injRate}%`) }
+
+            // 服务故障扣分（每个 down 扣 10 分）
+            const downCount = data?.down ?? 0
+            if (downCount > 0) { score -= downCount * 10; issues.push(`${downCount} 个服务故障`) }
+
+            // 服务降级扣分（每个 degraded 扣 5 分）
+            const degradedCount = data?.degraded ?? 0
+            if (degradedCount > 0) { score -= degradedCount * 5; issues.push(`${degradedCount} 个服务降级`) }
+
+            // 输入分发成功率扣分（<90% 扣 10 分，<70% 扣 20 分）
+            const successRate = dispatchData?.overall_success_rate ?? 100
+            if (successRate < 70) { score -= 20; issues.push(`分发成功率仅 ${successRate}%`) }
+            else if (successRate < 90) { score -= 10; issues.push(`分发成功率偏低 ${successRate}%`) }
+
+            // Canon 待审核扣分（>5 条扣 5 分）
+            const pendingCount = canonData?.pending ?? 0
+            if (pendingCount > 5) { score -= 5; issues.push(`${pendingCount} 条提案待审核`) }
+
+            score = Math.max(score, 0)
+            const scoreColor = score >= 90 ? 'text-green-600' : score >= 70 ? 'text-orange-500' : 'text-red-600'
+            const scoreBg = score >= 90 ? 'bg-green-50 border-green-200' : score >= 70 ? 'bg-orange-50 border-orange-200' : 'bg-red-50 border-red-200'
+            const scoreLabel = score >= 90 ? '健康' : score >= 70 ? '注意' : '告警'
+
+            return (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <HeartPulse size={15} className={scoreColor} />
+                  <h2 className="text-sm font-semibold text-gray-700">系统健康评分</h2>
+                  <span className="text-xs text-gray-400">（综合评估）</span>
+                </div>
+                <div className={`card p-4 border ${scoreBg}`}>
+                  <div className="flex items-center gap-6">
+                    {/* 评分圆圈 */}
+                    <div className="text-center shrink-0">
+                      <div className={`text-5xl font-bold ${scoreColor}`}>{score}</div>
+                      <div className={`text-xs font-semibold mt-1 ${scoreColor}`}>{scoreLabel}</div>
+                    </div>
+                    {/* 评分进度条 */}
+                    <div className="flex-1">
+                      <div className="bg-gray-100 rounded-full h-4 overflow-hidden mb-3">
+                        <div
+                          className={`h-4 rounded-full transition-all ${score >= 90 ? 'bg-green-400' : score >= 70 ? 'bg-orange-400' : 'bg-red-400'}`}
+                          style={{ width: `${score}%` }}
+                        />
+                      </div>
+                      {issues.length === 0 ? (
+                        <div className="text-xs text-green-600">✓ 所有指标正常，系统运行健康</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {issues.map((issue, i) => (
+                            <div key={i} className="text-xs text-orange-600 flex items-center gap-1">
+                              <span className="text-orange-400">⚠</span> {issue}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
     </div>

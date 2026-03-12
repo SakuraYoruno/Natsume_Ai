@@ -3799,3 +3799,92 @@ async def get_agent_loop_history(
     )
 
 
+# ---------------------------------------------------------------------------
+# GET /obs/error-heatmap — TODO-88: 错误热力图端点（按小时/节点分布）
+# ---------------------------------------------------------------------------
+
+class ErrorHeatmapCell(BaseModel):
+    hour: int                    # 0-23
+    node_name: str
+    error_count: int
+    pct: float                   # 占该小时总错误的百分比
+
+
+class ErrorHeatmapResponse(BaseModel):
+    window_hours: int
+    total_errors: int
+    hours: List[int]             # 出现过错误的小时列表（0-23）
+    nodes: List[str]             # 出现过错误的节点列表
+    cells: List[ErrorHeatmapCell]
+    hourly_totals: List[Dict[str, Any]]   # [{ hour, total }]
+    node_totals: List[Dict[str, Any]]     # [{ node_name, total }]
+    timestamp: int
+
+
+@router.get("/error-heatmap", response_model=ErrorHeatmapResponse)
+async def get_error_heatmap(
+    window_hours: int = Query(24, ge=1, le=168, description="统计窗口（小时），最大 7 天"),
+):
+    """TODO-88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。
+
+    从 error_log 中拉取近 window_hours 小时的错误记录，
+    按 (hour, node_name) 聚合，返回热力图数据。
+    """
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_hours * 3600 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 按 (hour, node_name) 聚合
+    from collections import defaultdict
+    import datetime as _dt
+
+    cell_counts: dict[tuple[int, str], int] = defaultdict(int)
+    hourly_counts: dict[int, int] = defaultdict(int)
+    node_counts: dict[str, int] = defaultdict(int)
+
+    for row in rows:
+        ts = row.get("ts_ms") or 0
+        if ts <= 0:
+            continue
+        hour = _dt.datetime.fromtimestamp(ts / 1000).hour
+        node_name = str(
+            row.get("node_id") or row.get("stage") or row.get("source") or "unknown"
+        )
+        cell_counts[(hour, node_name)] += 1
+        hourly_counts[hour] += 1
+        node_counts[node_name] += 1
+
+    total_errors = sum(hourly_counts.values())
+    hours_list = sorted(hourly_counts.keys())
+    nodes_list = sorted(node_counts.keys(), key=lambda n: node_counts[n], reverse=True)[:20]
+
+    cells = []
+    for (hour, node_name), cnt in cell_counts.items():
+        if node_name not in nodes_list:
+            continue
+        hour_total = hourly_counts.get(hour, 1)
+        cells.append(ErrorHeatmapCell(
+            hour=hour,
+            node_name=node_name,
+            error_count=cnt,
+            pct=round(cnt / hour_total * 100, 1),
+        ))
+
+    hourly_totals = [{"hour": h, "total": hourly_counts[h]} for h in range(24)]
+    node_totals = [{"node_name": n, "total": node_counts[n]} for n in nodes_list]
+
+    return ErrorHeatmapResponse(
+        window_hours=window_hours,
+        total_errors=total_errors,
+        hours=hours_list,
+        nodes=nodes_list,
+        cells=cells,
+        hourly_totals=hourly_totals,
+        node_totals=node_totals,
+        timestamp=now,
+    )

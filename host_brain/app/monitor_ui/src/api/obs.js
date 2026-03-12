@@ -705,5 +705,16 @@ export function fetchAgentLoopHistory(params = {}) {
   return request(`/obs/agent-loop/history${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-88: 错误热力图 =====
 
+/**
+ * 错误热力图（按小时 × 节点维度统计错误分布）
+ * @param {object} params - { window_hours }
+ */
+export function fetchErrorHeatmap(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/error-heatmap${qs ? '?' + qs : ''}`)
+}
 

@@ -141,17 +141,48 @@ function GanttView({ traceData, onSelectNode }) {
   const timeline = computeGanttTimeline(traceData)
   if (timeline.length === 0) return null
 
+  // TODO-91: 节点搜索过滤状态
+  const [nodeFilter, setNodeFilter] = React.useState('')
+
   const totalMs = timeline[0]?.total_ms ?? 1
+
+  // 过滤节点
+  const filteredTimeline = nodeFilter.trim()
+    ? timeline.filter(n =>
+        (n.display_name || n.node_id || '').toLowerCase().includes(nodeFilter.trim().toLowerCase()) ||
+        (n.node_type || '').toLowerCase().includes(nodeFilter.trim().toLowerCase())
+      )
+    : timeline
 
   // 时间轴刻度（5 个刻度）
   const ticks = Array.from({ length: 6 }, (_, i) => Math.round(totalMs * i / 5))
 
   return (
     <div className="h-full overflow-auto p-4 bg-white">
-      {/* 时间轴标题 */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-medium text-gray-500">节点执行甘特图（总耗时 {totalMs}ms）</span>
-        <span className="text-xs text-gray-400">点击行查看节点详情</span>
+      {/* 时间轴标题 + TODO-91 搜索框 */}
+      <div className="flex items-center justify-between mb-3 gap-3">
+        <span className="text-xs font-medium text-gray-500 shrink-0">节点执行甘特图（总耗时 {totalMs}ms）</span>
+        <div className="flex items-center gap-2">
+          {/* TODO-91: 节点搜索过滤 */}
+          <div className="relative">
+            <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="pl-6 pr-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-200 w-36"
+              placeholder="过滤节点名/类型…"
+              value={nodeFilter}
+              onChange={e => setNodeFilter(e.target.value)}
+            />
+            {nodeFilter && (
+              <button
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                onClick={() => setNodeFilter('')}
+              >×</button>
+            )}
+          </div>
+          <span className="text-xs text-gray-400">
+            {nodeFilter ? `${filteredTimeline.length}/${timeline.length}` : '点击行查看节点详情'}
+          </span>
+        </div>
       </div>
 
       {/* 时间轴刻度 */}
@@ -169,7 +200,7 @@ function GanttView({ traceData, onSelectNode }) {
 
       {/* 甘特条 */}
       <div className="space-y-1.5">
-        {timeline.map((node) => {
+        {filteredTimeline.map((node) => {
           const leftPct = (node.start_ms / totalMs) * 100
           const widthPct = Math.max((node.latency_ms ?? 0) / totalMs * 100, 0.5)
           const color = nodeColor(node.node_type)

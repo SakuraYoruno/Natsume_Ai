@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText } from 'lucide-react'
+import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -327,6 +327,9 @@ export default function Metrics() {
 
       {/* ===== TODO-80: Canon 提案迷你卡片 ===== */}
       <CanonProposalMiniCard />
+
+      {/* ===== TODO-92: Chain 主链路迷你卡片 ===== */}
+      <ChainMiniCard />
     </div>
   )
 }
@@ -567,6 +570,51 @@ function CanonProposalMiniCard() {
           </div>
           <div className="bg-gray-100 rounded-full h-1.5">
             <div className="bg-indigo-400 h-1.5 rounded-full" style={{ width: `${Math.min(data.approval_rate, 100)}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TODO-92: Chain 主链路迷你卡片 ──────────────────────────────────────────
+function ChainMiniCard() {
+  const [data, setData] = React.useState(null)
+  useEffect(() => {
+    fetchChainStats({ window_minutes: 60 }).then(setData).catch(() => {})
+  }, [])
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Activity size={14} className="text-blue-600" />
+        <span className="text-sm font-semibold text-gray-700">主链路统计（近 1h）</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-center">
+        {[
+          { label: '总请求', value: data?.total_requests, color: 'text-gray-700' },
+          { label: 'Gov 拦截率', value: data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—', color: data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700' },
+          { label: '记忆写入', value: data?.episodic_written_count, color: 'text-green-600' },
+          { label: 'QA 重写', value: data?.qa_rewrite_count, color: 'text-orange-500' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
+            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      {data?.governor_block_rate != null && (
+        <div className="mt-3">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>Governor 拦截率</span>
+            <span className={data.governor_block_rate > 10 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>
+              {data.governor_block_rate}%
+            </span>
+          </div>
+          <div className="bg-gray-100 rounded-full h-1.5">
+            <div
+              className={`h-1.5 rounded-full ${data.governor_block_rate > 10 ? 'bg-red-400' : 'bg-blue-400'}`}
+              style={{ width: `${Math.min(data.governor_block_rate, 100)}%` }}
+            />
           </div>
         </div>
       )}

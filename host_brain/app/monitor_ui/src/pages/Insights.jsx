@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Flame } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -23,6 +23,7 @@ import {
   fetchEpisodicStoreStats,
   fetchCanonProposalStats,
   fetchChainStats,
+  fetchErrorHeatmap,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -658,6 +659,9 @@ export default function Insights() {
       {/* ===== TODO-84: 主链路节点统计 ===== */}
       <ChainStatsSection windowMinutes={windowMinutes} />
 
+      {/* ===== TODO-89: 错误热力图 ===== */}
+      <ErrorHeatmapSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -1267,6 +1271,107 @@ function CanonProposalStatsSection({ windowMinutes }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-89: 错误热力图子组件 =====
+function ErrorHeatmapSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    const windowHours = Math.max(1, Math.round(windowMinutes / 60))
+    fetchErrorHeatmap({ window_hours: windowHours }).then(setData).catch(() => {})
+  }, [windowMinutes])
+
+  const cells = data?.cells ?? []
+  const nodes = data?.nodes ?? []
+  const hourlyTotals = data?.hourly_totals ?? []
+  const maxCellCount = Math.max(...cells.map(c => c.error_count), 1)
+
+  // 构建 hour → node → count 的查找表
+  const cellMap = {}
+  for (const c of cells) {
+    if (!cellMap[c.hour]) cellMap[c.hour] = {}
+    cellMap[c.hour][c.node_name] = c.error_count
+  }
+
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+
+  return (
+    <section>
+      <SectionTitle icon={Flame} title="错误热力图" color="text-red-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
+        <StatCard label="总错误数" value={data?.total_errors ?? '—'} color={data?.total_errors > 0 ? 'text-red-600' : 'text-green-600'} />
+        <StatCard label="统计窗口" value={data?.window_hours != null ? `${data.window_hours}h` : '—'} color="text-gray-700" />
+        <StatCard label="涉及节点数" value={nodes.length > 0 ? nodes.length : '—'} color="text-orange-500" />
+      </div>
+      {nodes.length === 0 ? (
+        <div className="card p-6 text-center text-xs text-gray-400">
+          ✓ 窗口内无错误记录
+        </div>
+      ) : (
+        <div className="card p-4 overflow-x-auto">
+          <div className="text-xs font-semibold text-gray-600 mb-3">按小时 × 节点错误分布（颜色深度 = 错误数量）</div>
+          {/* 热力图表格 */}
+          <table className="text-xs border-collapse">
+            <thead>
+              <tr>
+                <th className="w-36 text-left text-gray-400 font-normal pb-1 pr-2">节点 \ 小时</th>
+                {hours.map(h => (
+                  <th key={h} className="w-6 text-center text-gray-400 font-normal pb-1" style={{ minWidth: '1.5rem' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {nodes.slice(0, 15).map(node => (
+                <tr key={node}>
+                  <td className="text-gray-600 pr-2 py-0.5 truncate max-w-36" title={node}>{node}</td>
+                  {hours.map(h => {
+                    const cnt = cellMap[h]?.[node] ?? 0
+                    const intensity = cnt > 0 ? Math.max(cnt / maxCellCount, 0.15) : 0
+                    return (
+                      <td key={h} className="py-0.5 px-0.5" title={cnt > 0 ? `${node} @ ${h}:00 — ${cnt} 次错误` : ''}>
+                        <div
+                          className="w-5 h-5 rounded-sm"
+                          style={{
+                            backgroundColor: cnt > 0
+                              ? `rgba(239, 68, 68, ${intensity})`
+                              : 'rgba(243, 244, 246, 1)',
+                          }}
+                        />
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+              {/* 每小时总计行 */}
+              <tr className="border-t border-gray-200">
+                <td className="text-gray-400 pr-2 py-1 font-medium">每小时合计</td>
+                {hours.map(h => {
+                  const total = hourlyTotals.find(t => t.hour === h)?.total ?? 0
+                  return (
+                    <td key={h} className="py-1 px-0.5 text-center">
+                      <span className={`text-xs font-mono ${total > 0 ? 'text-red-500' : 'text-gray-300'}`}>
+                        {total > 0 ? total : '·'}
+                      </span>
+                    </td>
+                  )
+                })}
+              </tr>
+            </tbody>
+          </table>
+          {/* 图例 */}
+          <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
+            <span>少</span>
+            {[0.15, 0.35, 0.55, 0.75, 1.0].map(v => (
+              <div key={v} className="w-4 h-4 rounded-sm" style={{ backgroundColor: `rgba(239, 68, 68, ${v})` }} />
+            ))}
+            <span>多</span>
+          </div>
         </div>
       )}
     </section>

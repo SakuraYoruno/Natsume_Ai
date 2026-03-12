@@ -1885,5 +1885,97 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - `monitor_ui/src/api/obs.js`：新增 fetchAgentLoopHistory 函数
 - `monitor_ui/src/pages/AgentLoop.jsx`：新增历史执行记录面板
 
+---
+
+### TODO-87：Automation.jsx 新增调度器执行历史时序图（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（调度器执行历史时序图已上线）
+
+**新增功能**：
+- 新增 `SchedulerTimelineChart` 子组件：展示各任务执行量对比（水平条形图）
+- 绿色条表示执行次数，红色叠加条表示失败次数（按比例渲染）
+- 在 SchedulerHistorySection 的表格之后追加，有任务数据时显示
+
+**改动文件**：
+- `monitor_ui/src/pages/Automation.jsx`：新增 SchedulerTimelineChart 组件 + 渲染调用
+
+---
+
+### TODO-88：GET /obs/error-heatmap — 错误热力图端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（错误热力图端点已上线）
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/error-heatmap` 端点（支持 window_hours 参数，最大 7 天）
+- 从 error_log 中按 (hour, node_name) 聚合错误分布
+- 返回：总错误数/小时列表/节点列表/热力图单元格/每小时合计/节点合计
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 /obs/error-heatmap 端点
+
+---
+
+### TODO-89：Insights.jsx 新增错误热力图区块（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（错误热力图区块已上线）
+
+**新增功能**：
+- 新增 `ErrorHeatmapSection` 子组件（Flame 图标，红色主题）
+- 24 小时 × 节点维度的热力图表格（颜色深度 = 错误数量）
+- 每小时合计行 + 图例（颜色渐变说明）
+- 无错误时显示友好提示"✓ 窗口内无错误记录"
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：引入 fetchErrorHeatmap + 新增 ErrorHeatmapSection
+- `monitor_ui/src/api/obs.js`：新增 fetchErrorHeatmap 函数
+
+---
+
+### TODO-90：Overview.jsx 新增实时健康评分卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（系统健康评分卡片已上线）
+
+**新增功能**：
+- 引入 `fetchChainStats`，在 load 中并行请求主链路统计数据
+- 新增系统健康评分卡片（HeartPulse 图标）：综合评估算法（满分 100）
+  - Governor 拦截率 >10% 扣 20 分，>5% 扣 10 分
+  - 注入检测率 >5% 扣 15 分，>1% 扣 5 分
+  - 每个 down 服务扣 10 分，每个 degraded 服务扣 5 分
+  - 分发成功率 <70% 扣 20 分，<90% 扣 10 分
+  - Canon 待审核 >5 条扣 5 分
+- 评分 ≥90 绿色（健康），≥70 橙色（注意），<70 红色（告警）
+- 显示具体扣分原因列表
+
+**改动文件**：
+- `monitor_ui/src/pages/Overview.jsx`：引入 fetchChainStats + 新增健康评分卡片
+
+---
+
+### TODO-91：Trace.jsx 新增节点搜索过滤（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（节点搜索过滤已上线）
+
+**新增功能**：
+- 在 GanttView 组件中添加节点搜索过滤框（Search 图标）
+- 支持按节点名/类型关键词实时过滤甘特图节点
+- 过滤时显示"已过滤/总数"计数，点击 × 清除过滤
+
+**改动文件**：
+- `monitor_ui/src/pages/Trace.jsx`：新增 nodeFilter 状态 + 搜索框 + 过滤逻辑
+
+---
+
+### TODO-92：Metrics.jsx 新增 Chain 主链路迷你卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Chain 主链路迷你卡片已上线）
+
+**新增功能**：
+- 新增 `ChainMiniCard`（Activity 图标，蓝色主题）：4 个聚合指标 + Governor 拦截率进度条
+- 指标：总请求数 / Governor 拦截率 / 记忆写入次数 / QA 重写次数
+- 拦截率 >10% 时进度条变红
+
+**改动文件**：
+- `monitor_ui/src/pages/Metrics.jsx`：新增 ChainMiniCard 组件 + 渲染调用
+
 
 

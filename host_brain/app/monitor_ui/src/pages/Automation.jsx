@@ -241,6 +241,55 @@ export default function Automation() {
   )
 }
 
+// ── TODO-87: 调度器执行历史时序图 ─────────────────────────────────────────
+function SchedulerTimelineChart({ tasks }) {
+  // 将各任务的 run_count/error_count 渲染为简单的水平条形图
+  if (!tasks || tasks.length === 0) return null
+  const maxRun = Math.max(...tasks.map(t => t.run_count ?? 0), 1)
+  return (
+    <div className="mt-4">
+      <div className="text-xs font-semibold text-gray-600 mb-3">各任务执行量对比（近 24h）</div>
+      <div className="space-y-2">
+        {tasks.map((t) => {
+          const runPct = Math.max((t.run_count ?? 0) / maxRun * 100, 1)
+          const errPct = t.run_count > 0 ? Math.min((t.error_count ?? 0) / t.run_count * 100, 100) : 0
+          return (
+            <div key={t.task_id} className="flex items-center gap-2">
+              <div className="w-40 text-xs text-gray-600 truncate shrink-0" title={t.task_id}>
+                {t.task_id}
+              </div>
+              <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden relative">
+                {/* 成功部分（绿色） */}
+                <div
+                  className="absolute left-0 top-0 h-3 rounded-full bg-green-400 transition-all"
+                  style={{ width: `${runPct}%` }}
+                />
+                {/* 失败部分（红色叠加） */}
+                {errPct > 0 && (
+                  <div
+                    className="absolute left-0 top-0 h-3 rounded-full bg-red-400 transition-all"
+                    style={{ width: `${runPct * errPct / 100}%` }}
+                  />
+                )}
+              </div>
+              <div className="w-20 text-xs text-right text-gray-500 shrink-0">
+                {t.run_count ?? 0} 次
+                {t.error_count > 0 && (
+                  <span className="text-red-500 ml-1">/ {t.error_count} 失败</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
+        <span className="flex items-center gap-1"><span className="w-3 h-2 bg-green-400 rounded inline-block" />执行次数</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-2 bg-red-400 rounded inline-block" />失败次数（叠加）</span>
+      </div>
+    </div>
+  )
+}
+
 // ── TODO-55: TaskScheduler 执行历史趋势子组件 ─────────────────────────────
 function SchedulerHistorySection() {
   const [data, setData] = React.useState(null)
@@ -314,6 +363,11 @@ function SchedulerHistorySection() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* TODO-87: 调度器执行历史时序图 */}
+      {(data?.tasks ?? []).length > 0 && (
+        <SchedulerTimelineChart tasks={data.tasks} />
       )}
     </div>
   )
