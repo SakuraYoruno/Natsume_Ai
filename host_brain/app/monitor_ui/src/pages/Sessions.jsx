@@ -6,6 +6,24 @@ import { fetchSessions } from '../api/obs.js'
 
 const PAGE_SIZE = 20
 
+/** 将 ts_ms 格式化为可读时间 */
+function formatTime(tsMs) {
+  if (!tsMs) return '—'
+  return new Date(tsMs).toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+}
+
+/** 将后端 status 字段映射为 StatusBadge 可识别的值 */
+function normalizeStatus(status) {
+  const s = (status ?? '').toLowerCase()
+  if (s === 'ok' || s === 'success') return 'healthy'
+  if (s === 'rejected') return 'degraded'
+  if (s === 'error' || s === 'fail') return 'error'
+  return 'unknown'
+}
+
 export default function Sessions() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState([])
@@ -19,7 +37,6 @@ export default function Sessions() {
   const [status, setStatus] = useState('')
   const [timeRange, setTimeRange] = useState('24h')
 
-  // WARN-FE-005: load 接受 pageNum 参数，避免闭包陈旧值问题
   const load = useCallback(async (pageNum) => {
     const p = pageNum ?? page
     setLoading(true)
@@ -45,13 +62,18 @@ export default function Sessions() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  const handleSearch = () => {
+    setPage(1)
+    load(1)
+  }
+
   return (
     <div className="space-y-4">
       {/* 页头 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">会话列表</h1>
-        <button className="btn-secondary" onClick={() => load()}>
-          <RefreshCw size={14} />刷新
+        <button className="btn-secondary" onClick={() => load()} disabled={loading}>
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
         </button>
       </div>
 
@@ -65,13 +87,13 @@ export default function Sessions() {
             placeholder="搜索 request_id…"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && load(1)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
         </div>
         <select
           className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-200"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={(e) => { setStatus(e.target.value); setPage(1) }}
         >
           <option value="">全部状态</option>
           <option value="ok">成功</option>
@@ -81,13 +103,14 @@ export default function Sessions() {
         <select
           className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-200"
           value={timeRange}
-          onChange={(e) => setTimeRange(e.target.value)}
+          onChange={(e) => { setTimeRange(e.target.value); setPage(1) }}
         >
           <option value="1h">最近 1h</option>
           <option value="6h">最近 6h</option>
           <option value="24h">最近 24h</option>
           <option value="7d">最近 7d</option>
         </select>
+        <button className="btn-primary text-sm" onClick={handleSearch}>搜索</button>
       </div>
 
       {/* 表格 */}
@@ -95,7 +118,7 @@ export default function Sessions() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              {['Request ID', '时间', '状态', '耗时', '通道'].map((h) => (
+              {['Request ID', '时间', '状态', '耗时', '拒绝码'].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -104,7 +127,9 @@ export default function Sessions() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">加载中…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">
+                <RefreshCw size={16} className="animate-spin inline mr-2" />加载中…
+              </td></tr>
             )}
             {error && (
               <tr><td colSpan={5} className="px-4 py-6 text-center text-red-500">{error}</td></tr>
@@ -118,11 +143,21 @@ export default function Sessions() {
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => navigate(`/trace/${s.request_id}`)}
               >
-                <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{s.request_id?.slice(0, 16)}…</td>
-                <td className="px-4 py-2.5 text-gray-600">{s.created_at}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={s.status} /></td>
-                <td className="px-4 py-2.5 text-gray-600">{s.duration_ms != null ? `${s.duration_ms}ms` : '—'}</td>
-                <td className="px-4 py-2.5 text-gray-600">{s.channel ?? '—'}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-gray-600" title={s.request_id}>
+                  {s.request_id?.slice(0, 16)}…
+                </td>
+                <td className="px-4 py-2.5 text-gray-600 text-xs whitespace-nowrap">
+                  {formatTime(s.ts_ms)}
+                </td>
+                <td className="px-4 py-2.5">
+                  <StatusBadge status={normalizeStatus(s.status)} />
+                </td>
+                <td className="px-4 py-2.5 text-gray-600">
+                  {s.total_latency_ms != null ? `${s.total_latency_ms}ms` : '—'}
+                </td>
+                <td className="px-4 py-2.5 text-gray-500 text-xs">
+                  {s.reason_code ?? '—'}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -133,9 +168,21 @@ export default function Sessions() {
       <div className="flex items-center justify-between text-sm text-gray-500">
         <span>共 {total} 条</span>
         <div className="flex items-center gap-1">
-          <button className="btn-secondary px-2 py-1 text-xs" disabled={page <= 1} onClick={() => { const p = page - 1; setPage(p); load(p) }}>上一页</button>
+          <button
+            className="btn-secondary px-2 py-1 text-xs"
+            disabled={page <= 1}
+            onClick={() => { const p = page - 1; setPage(p); load(p) }}
+          >
+            上一页
+          </button>
           <span className="px-2">{page} / {totalPages}</span>
-          <button className="btn-secondary px-2 py-1 text-xs" disabled={page >= totalPages} onClick={() => { const p = page + 1; setPage(p); load(p) }}>下一页</button>
+          <button
+            className="btn-secondary px-2 py-1 text-xs"
+            disabled={page >= totalPages}
+            onClick={() => { const p = page + 1; setPage(p); load(p) }}
+          >
+            下一页
+          </button>
         </div>
       </div>
     </div>

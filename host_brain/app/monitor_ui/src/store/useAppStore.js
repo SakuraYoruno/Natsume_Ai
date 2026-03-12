@@ -2,14 +2,15 @@ import { create } from 'zustand'
 
 /**
  * 全局应用状态
- * - 30s 自动轮询开关
+ * - 自动轮询开关 + 间隔
  * - 全局时间范围过滤（Metrics 页使用）
  */
 const useAppStore = create((set) => ({
   // ===== 轮询状态 =====
   pollingEnabled: true,
   pollingInterval: 30, // 秒
-  setPollingEnabled: (enabled) => set({ pollingEnabled: enabled }),
+  setPollingEnabled:  (enabled)  => set({ pollingEnabled: enabled }),
+  setPollingInterval: (interval) => set({ pollingInterval: interval }),
 
   // ===== 全局时间范围 =====
   // 可选值: '1h' | '6h' | '24h' | '7d'

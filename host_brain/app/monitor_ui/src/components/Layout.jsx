@@ -5,7 +5,10 @@ import {
   MessageSquare,
   GitBranch,
   BarChart2,
+  RefreshCw,
+  PauseCircle,
 } from 'lucide-react'
+import useAppStore from '../store/useAppStore.js'
 
 const NAV_ITEMS = [
   { to: '/overview', icon: LayoutDashboard, label: 'Overview' },
@@ -14,7 +17,14 @@ const NAV_ITEMS = [
   { to: '/metrics',   icon: BarChart2,      label: 'Metrics'   },
 ]
 
+const INTERVAL_OPTIONS = [15, 30, 60]
+
 export default function Layout() {
+  const pollingEnabled  = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const setPollingEnabled  = useAppStore((s) => s.setPollingEnabled)
+  const setPollingInterval = useAppStore((s) => s.setPollingInterval)
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* 顶部导航栏 */}
@@ -44,6 +54,35 @@ export default function Layout() {
               </NavLink>
             ))}
           </nav>
+
+          {/* 轮询控制 */}
+          <div className="flex items-center gap-2 text-sm">
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border transition-colors text-xs font-medium ${
+                pollingEnabled
+                  ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                  : 'border-gray-300 bg-gray-50 text-gray-500 hover:bg-gray-100'
+              }`}
+              onClick={() => setPollingEnabled(!pollingEnabled)}
+              title={pollingEnabled ? '点击暂停自动刷新' : '点击开启自动刷新'}
+            >
+              {pollingEnabled
+                ? <RefreshCw size={12} className="animate-spin" />
+                : <PauseCircle size={12} />
+              }
+              {pollingEnabled ? '轮询中' : '已暂停'}
+            </button>
+            <select
+              className="text-xs border border-gray-300 rounded px-1.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-200 text-gray-600"
+              value={pollingInterval}
+              onChange={(e) => setPollingInterval(Number(e.target.value))}
+              title="自动刷新间隔"
+            >
+              {INTERVAL_OPTIONS.map((s) => (
+                <option key={s} value={s}>{s}s</option>
+              ))}
+            </select>
+          </div>
         </div>
       </header>
 

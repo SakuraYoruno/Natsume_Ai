@@ -218,21 +218,27 @@ async def get_services_health(
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     # 使用 ledger 数据构建探测函数注册表（被动监控）
-    probe_registry = _build_probe_registry(ledger, since_ms)
+    probe_registry, extra_data = _build_probe_registry(ledger, since_ms)
     aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
     result = await aggregator.aggregate(side_filter=side)
 
     # 将 ServiceHealthAggregator 返回的通用结构映射到 ServicesHealthResponse
     services = []
     for svc in result.get("services", []):
+        sid = svc["service_id"]
+        extra = extra_data.get(sid, {})
         services.append(ServiceHealthItem(
-            service_id=svc["service_id"],
+            service_id=sid,
             service_type=svc.get("side", "edge"),
-            display_name=svc.get("name", svc["service_id"]),
+            display_name=svc.get("name", sid),
+            role=extra.get("role"),
+            provider=extra.get("provider"),
+            model_id=extra.get("model_id"),
             status=svc["status"],
+            success_rate=extra.get("success_rate"),
             p95_ms=svc.get("latency_ms"),
             last_call_ts=svc.get("last_check_ts"),
-            call_count=None,
+            call_count=extra.get("call_count"),
         ))
 
     return ServicesHealthResponse(
@@ -246,9 +252,8 @@ async def get_services_health(
     )
 
 
-def _build_probe_registry(ledger, since_ms: int) -> dict:
-    """基于 ledger 历史数据构建被动探测函数注册表。"""
-    import asyncio
+def _build_probe_registry(ledger, since_ms: int):
+    """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。"""
     from host_brain.observability.service_health_aggregator import ServiceHealthResult
 
     # 预加载所需数据
@@ -262,6 +267,7 @@ def _build_probe_registry(ledger, since_ms: int) -> dict:
         llm_rows = []
 
     registry = {}
+    extra_data = {}  # service_id -> {success_rate, call_count, role, provider, model_id}
 
     # 边缘服务探测
     for svc in _EDGE_SERVICES:
@@ -270,11 +276,16 @@ def _build_probe_registry(ledger, since_ms: int) -> dict:
         _status = health["status"]
         _p95 = health["p95_ms"]
         _last = health["last_call_ts"]
+        sid = svc.lower()
 
-        async def _make_edge_probe(s=_status, p=_p95, l=_last, sid=svc.lower()):
-            return ServiceHealthResult(sid, sid, "edge", s, latency_ms=p, last_check_ts=l)
+        async def _make_edge_probe(s=_status, p=_p95, l=_last, _sid=sid):
+            return ServiceHealthResult(_sid, _sid.upper(), "edge", s, latency_ms=p, last_check_ts=l)
 
-        registry[svc.lower()] = _make_edge_probe
+        registry[sid] = _make_edge_probe
+        extra_data[sid] = {
+            "success_rate": health["success_rate"],
+            "call_count":   health.get("call_count", 0),
+        }
 
     # LLM 节点探测
     for node_id, meta in _LLM_NODE_REGISTRY.items():
@@ -288,8 +299,15 @@ def _build_probe_registry(ledger, since_ms: int) -> dict:
             return ServiceHealthResult(nid, m["role"], "host", s, latency_ms=p, last_check_ts=l)
 
         registry[node_id] = _make_llm_probe
+        extra_data[node_id] = {
+            "role":         meta["role"],
+            "provider":     meta["provider"],
+            "model_id":     meta["model_id"],
+            "success_rate": health["success_rate"],
+            "call_count":   health.get("call_count", 0),
+        }
 
-    return registry
+    return registry, extra_data
 
 # ---------------------------------------------------------------------------
 # GET /obs/sessions
