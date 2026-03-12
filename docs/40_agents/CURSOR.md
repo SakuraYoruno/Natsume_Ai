@@ -1977,5 +1977,122 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Metrics.jsx`：新增 ChainMiniCard 组件 + 渲染调用
 
+---
+
+### TODO-93：memory/distillation_engine.py — 情节记忆蒸馏引擎（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（蒸馏引擎已上线）
+
+**新增功能**：
+- 新建 `host_brain/app/memory/distillation_engine.py`（~230 行）
+- `DistillationEngine` 类：从 EpisodicStore 批量蒸馏满足条件的情节记忆为 Canon 提案
+- 蒸馏条件：频次 ≥ 3 OR MILESTONE 级别（接入 MemoryGuard.check_distillation_eligibility）
+- 蒸馏后清理 SESSION_OVERRIDE（接入 StateArbiter.clear_session_override）
+- 蒸馏结果生成 Canon 提案（FACT_CANDIDATE / PREFERENCE_CANDIDATE）
+- 拦截 NARRATIVE_ONLY（dream 内容）
+- 蒸馏过程写入 audit_log（DISTILL_STARTED / DISTILL_DONE）
+- `BatchDistillationReport`：批量蒸馏报告（候选数/成功数/跳过数/失败数/耗时）
+
+**改动文件**：
+- `host_brain/app/memory/distillation_engine.py`：新建文件
+
+---
+
+### TODO-94：memory/episodic_store.py — EpisodicStore 情节记忆存储（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（EpisodicStore 已上线）
+
+**新增功能**：
+- 新建 `host_brain/app/memory/episodic_store.py`（~200 行）
+- `EpisodicStore` 类：EpisodicRecord 的写入/查询/幂等保护
+- 写入前通过 MemoryGuard.check_episodic_write() 校验
+- source_hash 幂等保护（相同内容拒绝重复写入）
+- 按 session_id 查询最近 N 条记录（支持 evidence_level 过滤）
+- `query_distill_candidates()`：查询满足蒸馏资格的候选记录
+- LRU 淘汰（内存中最多保留 1000 条）
+- 可选 SQLiteLedger 持久化（写入 EPISODIC_WRITTEN 审计日志）
+- `EpisodicWriteResult`：写入结果（success/skipped/distill_eligible/occurrence_count）
+
+**改动文件**：
+- `host_brain/app/memory/episodic_store.py`：新建文件
+
+---
+
+### TODO-95：recall/semantic_recall.py — 语义召回器（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（语义召回器已上线）
+
+**新增功能**：
+- 新建 `host_brain/app/recall/semantic_recall.py`（~250 行）
+- `SemanticRecaller` 类：七路召回中的向量召回路（episodic_vector 槽位）
+- 支持两种后端：ChromaDB（生产）和内存 Mock（开发/测试）
+- ChromaDB 后端：L2 距离转相似度分数 + 相似度阈值过滤
+- Mock 后端：基于关键词重叠率的相似度估算
+- 降级策略：ChromaDB 不可达时返回空结果（不阻断主链路）
+- `to_context_text()`：将召回结果转换为 ContextPack 可用的文本格式（[EPISODIC_VECTOR] 格式）
+- `SemanticRecallResult`：召回结果（hits/degraded/latency_ms）
+
+**改动文件**：
+- `host_brain/app/recall/semantic_recall.py`：新建文件
+
+---
+
+### TODO-96：MemoryGuard.check_prompt_injection() — 提示词注入检测（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（提示词注入检测已上线）
+
+**问题**：TODO-64 中 `prompt_builder.py` 已调用 `MemoryGuard.check_prompt_injection()`，但该方法从未实现，导致运行时 AttributeError。
+
+**新增功能**：
+- `memory_guard.py` 新增 `check_prompt_injection(user_message, strict_mode)` 方法
+- 基于正则规则的三级检测：CRITICAL / HIGH / MEDIUM
+- CRITICAL 模式（8 条规则）：ignore previous instructions / jailbreak / DAN mode / override system prompt 等
+- HIGH 模式（9 条规则）：system: you are / [SYSTEM] / reveal your prompt / print your instructions 等
+- MEDIUM 模式（6 条规则）：ignore the above / from now on you will / repeat the following 等
+- 返回：{detected, risk_level, matched_patterns, scan_ms}
+- strict_mode=True 时 MEDIUM 级别也视为检测到注入
+
+**改动文件**：
+- `host_brain/app/memory/memory_guard.py`：新增 check_prompt_injection() 方法 + 三组注入模式常量
+
+---
+
+### TODO-97：task_scheduler.py 新增优先级队列 + 依赖链（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（优先级调度已上线）
+
+**问题**：`task_scheduler.py` 只有简单 cron 调度，缺少 P0/P1/P2/P3 优先级和 depends_on 依赖链，无法保证关键任务（如 MemoryGuard 清理）优先执行。
+
+**新增功能**：
+- 新增 `TaskPriority` 枚举（P0/P1/P2/P3，数值越小优先级越高）
+- `ScheduledTask` 新增 `priority: TaskPriority` 和 `depends_on: list[str]` 字段
+- `_scheduler_loop()` 改为按优先级排序后触发（P0 最先执行）
+- 新增 `_check_dependencies()` 方法：所有依赖任务最近一次执行成功后才触发本任务
+- 依赖未满足时任务状态设为 `BLOCKED`
+- `as_dict()` 新增 priority 和 depends_on 字段
+
+**改动文件**：
+- `host_brain/app/automation/task_scheduler.py`：新增 TaskPriority 枚举 + priority/depends_on 字段 + 优先级调度逻辑
+
+---
+
+### TODO-98：RoutingMatrix.select_with_cost_budget() — 成本预算路由（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（成本预算路由已上线）
+
+**问题**：`routing_matrix.py` 只有故障降级路由，缺少按 token 成本预算路由的能力，无法在 cloud 成本过高时自动降级到 host_8b。
+
+**新增功能**：
+- `RoutingMatrix` 新增 `select_with_cost_budget()` 方法
+- 各模型相对成本：cloud=1.0 / host_8b=0.05 / edge_3b=0.01 / skills=0.02
+- 主路由成本超出 max_cost_per_1k 时，自动按成本从低到高寻找替代模型
+- HIGH risk_level 禁止降级到 edge_3b（与 select_with_fallback 保持一致）
+- 所有模型均超出预算时返回主路由（调用方自行处理）
+- 降级决策写入路由日志（is_fallback=True + fallback_reason 含成本信息）
+
+**改动文件**：
+- `host_brain/app/llm/routing_matrix.py`：新增 select_with_cost_budget() 方法 + _MODEL_COST_PER_1K 常量
+
+
 
 

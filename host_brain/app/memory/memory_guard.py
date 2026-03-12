@@ -306,6 +306,136 @@ class MemoryGuard:
         self._emotion_aggregator.clear_session(session_id)
 
     # ------------------------------------------------------------------
+    # TODO-96：提示词注入检测（需求 8.x）
+    # ------------------------------------------------------------------
+
+    # 注入攻击特征模式（按风险等级分组）
+    _INJECTION_PATTERNS_CRITICAL: List[str] = [
+        r"ignore\s+(all\s+)?previous\s+instructions?",
+        r"disregard\s+(all\s+)?previous\s+instructions?",
+        r"forget\s+(all\s+)?previous\s+instructions?",
+        r"you\s+are\s+now\s+(?:a\s+)?(?:different|new|another|evil|jailbreak)",
+        r"act\s+as\s+(?:if\s+you\s+(?:are|were)\s+)?(?:an?\s+)?(?:evil|unrestricted|jailbreak|DAN)",
+        r"DAN\s+mode",
+        r"jailbreak",
+        r"override\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions?|rules?|constraints?)",
+    ]
+    _INJECTION_PATTERNS_HIGH: List[str] = [
+        r"system\s*:\s*you\s+(?:are|must|should|will)",
+        r"<\s*system\s*>",
+        r"\[SYSTEM\]",
+        r"new\s+instructions?\s*:",
+        r"your\s+(?:new\s+)?(?:role|persona|identity)\s+is",
+        r"pretend\s+(?:you\s+are|to\s+be)\s+(?:an?\s+)?(?:AI|assistant|bot|model)\s+(?:without|that\s+(?:has\s+no|ignores?))",
+        r"reveal\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions?|training)",
+        r"print\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions?)",
+        r"what\s+(?:are|were)\s+your\s+(?:original\s+)?instructions?",
+    ]
+    _INJECTION_PATTERNS_MEDIUM: List[str] = [
+        r"ignore\s+(?:the\s+)?(?:above|previous|prior|earlier)",
+        r"disregard\s+(?:the\s+)?(?:above|previous|prior|earlier)",
+        r"from\s+now\s+on\s+(?:you\s+(?:are|will|must|should))",
+        r"you\s+(?:must|should|will)\s+(?:now\s+)?(?:always|never)\s+(?:follow|obey|comply)",
+        r"translate\s+(?:the\s+)?(?:above|following)\s+(?:to|into)\s+(?:english|chinese|japanese)",
+        r"repeat\s+(?:the\s+)?(?:above|following|previous)\s+(?:text|content|instructions?|prompt)",
+    ]
+
+    def check_prompt_injection(
+        self,
+        user_message: Optional[str],
+        *,
+        strict_mode: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        基于规则的提示词注入检测（TODO-96）。
+
+        检测用户消息中是否包含提示词注入攻击特征，
+        按风险等级（CRITICAL / HIGH / MEDIUM / LOW）分级返回结果。
+
+        Args:
+            user_message: 待检测的用户消息文本
+            strict_mode: 严格模式（True 时 MEDIUM 级别也视为检测到注入）
+
+        Returns:
+            {
+                "detected": bool,
+                "risk_level": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
+                "matched_patterns": List[str],
+                "scan_ms": int,
+            }
+        """
+        import re as _re
+        import time as _time
+
+        t0 = _time.monotonic()
+        result: Dict[str, Any] = {
+            "detected": False,
+            "risk_level": "LOW",
+            "matched_patterns": [],
+            "scan_ms": 0,
+        }
+
+        if not user_message or not isinstance(user_message, str):
+            result["scan_ms"] = int((_time.monotonic() - t0) * 1000)
+            return result
+
+        text = user_message.strip()
+        if not text:
+            result["scan_ms"] = int((_time.monotonic() - t0) * 1000)
+            return result
+
+        matched: List[str] = []
+        detected_level = "LOW"
+
+        # 按风险等级从高到低扫描
+        for pattern in self._INJECTION_PATTERNS_CRITICAL:
+            try:
+                if _re.search(pattern, text, _re.IGNORECASE | _re.DOTALL):
+                    matched.append(pattern)
+                    detected_level = "CRITICAL"
+            except _re.error:
+                pass
+
+        if detected_level != "CRITICAL":
+            for pattern in self._INJECTION_PATTERNS_HIGH:
+                try:
+                    if _re.search(pattern, text, _re.IGNORECASE | _re.DOTALL):
+                        matched.append(pattern)
+                        if detected_level != "HIGH":
+                            detected_level = "HIGH"
+                except _re.error:
+                    pass
+
+        if detected_level not in ("CRITICAL", "HIGH"):
+            for pattern in self._INJECTION_PATTERNS_MEDIUM:
+                try:
+                    if _re.search(pattern, text, _re.IGNORECASE | _re.DOTALL):
+                        matched.append(pattern)
+                        if detected_level != "MEDIUM":
+                            detected_level = "MEDIUM"
+                except _re.error:
+                    pass
+
+        # 判断是否检测到注入
+        is_detected = bool(matched) and (
+            detected_level in ("CRITICAL", "HIGH")
+            or (strict_mode and detected_level == "MEDIUM")
+        )
+
+        result["detected"] = is_detected
+        result["risk_level"] = detected_level if matched else "LOW"
+        result["matched_patterns"] = matched[:10]  # 最多返回 10 个匹配模式
+        result["scan_ms"] = int((_time.monotonic() - t0) * 1000)
+
+        if is_detected:
+            logger.warning(
+                "MemoryGuard 检测到提示词注入: risk=%s, patterns=%s",
+                detected_level, matched[:3],
+            )
+
+        return result
+
+    # ------------------------------------------------------------------
     # 工具方法：计算 source_hash
     # ------------------------------------------------------------------
 

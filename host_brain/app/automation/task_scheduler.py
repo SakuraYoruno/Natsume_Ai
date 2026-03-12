@@ -32,6 +32,19 @@ class TaskStatus(str, Enum):
     FAILED = "FAILED"         # 上次执行失败
     DISABLED = "DISABLED"     # 已禁用
     CANCELLED = "CANCELLED"   # 已取消
+    BLOCKED = "BLOCKED"       # 依赖未满足，阻塞中
+
+
+# ---------------------------------------------------------------------------
+# TODO-97: 任务优先级
+# ---------------------------------------------------------------------------
+
+class TaskPriority(int, Enum):
+    """任务优先级（数值越小优先级越高）。"""
+    P0 = 0   # 最高优先级：系统关键任务（如 MemoryGuard 清理）
+    P1 = 1   # 高优先级：记忆蒸馏、Canon 提案提交
+    P2 = 2   # 普通优先级：游戏辅助、定时操作
+    P3 = 3   # 低优先级：统计上报、日志清理
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +64,11 @@ class ScheduledTask:
     max_retries: int = 3               # 失败最大重试次数
     retry_delay_s: float = 5.0         # 重试间隔（秒）
     enabled: bool = True               # 是否启用
+    # TODO-97: 优先级和依赖链
+    priority: TaskPriority = TaskPriority.P2
+    """任务优先级（P0 最高，P3 最低）"""
+    depends_on: list[str] = field(default_factory=list)
+    """依赖的任务 ID 列表（所有依赖任务最近一次执行成功后才触发本任务）"""
     # 运行时状态（不参与初始化）
     status: TaskStatus = field(default=TaskStatus.PENDING, init=False)
     last_run_ts: float = field(default=0.0, init=False)
@@ -66,6 +84,8 @@ class ScheduledTask:
             "interval_s": self.interval_s,
             "max_retries": self.max_retries,
             "enabled": self.enabled,
+            "priority": self.priority.value,
+            "depends_on": self.depends_on,
             "status": self.status.value,
             "last_run_ts": self.last_run_ts,
             "last_error": self.last_error,
@@ -180,9 +200,11 @@ class HostTaskScheduler:
     # ------------------------------------------------------------------
 
     async def _scheduler_loop(self) -> None:
-        """主调度循环：每秒检查一次，触发到期任务。"""
+        """主调度循环：每秒检查一次，按优先级触发到期任务（TODO-97）。"""
         while self._running:
             now = time.monotonic()
+            # TODO-97: 按优先级排序（P0 最先触发）
+            ready_tasks = []
             for task in list(self._tasks.values()):
                 if not task.enabled:
                     continue
@@ -192,12 +214,41 @@ class HostTaskScheduler:
                 elapsed = now - task.last_run_ts
                 if elapsed < task.interval_s:
                     continue
-                # 触发任务
+                # TODO-97: 检查依赖链
+                if not self._check_dependencies(task):
+                    task.status = TaskStatus.BLOCKED
+                    continue
+                ready_tasks.append(task)
+
+            # 按优先级排序（P0 最高优先级先执行）
+            ready_tasks.sort(key=lambda t: t.priority.value)
+
+            for task in ready_tasks:
                 task._task_handle = asyncio.create_task(
                     self._run_task(task),
                     name=f"task-{task.task_id}",
                 )
             await asyncio.sleep(1.0)
+
+    def _check_dependencies(self, task: ScheduledTask) -> bool:
+        """TODO-97: 检查任务依赖链是否满足（所有依赖任务最近一次执行成功）。"""
+        if not task.depends_on:
+            return True
+        for dep_id in task.depends_on:
+            dep_task = self._tasks.get(dep_id)
+            if dep_task is None:
+                _logger.warning(
+                    "TaskScheduler: 任务 %s 依赖的任务 %s 不存在，视为未满足",
+                    task.task_id, dep_id,
+                )
+                return False
+            if dep_task.status != TaskStatus.SUCCESS:
+                _logger.debug(
+                    "TaskScheduler: 任务 %s 依赖 %s 未满足（status=%s）",
+                    task.task_id, dep_id, dep_task.status,
+                )
+                return False
+        return True
 
     async def _run_task(self, task: ScheduledTask) -> None:
         """执行单个任务，含重试逻辑。"""

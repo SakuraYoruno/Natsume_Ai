@@ -249,3 +249,132 @@ class RoutingMatrix:
             self._route_log_writer(decision)
         except Exception as exc:
             logger.error("路由日志写入失败: %s", exc)
+
+    # ------------------------------------------------------------------
+    # TODO-98: 按 token 成本预算路由
+    # ------------------------------------------------------------------
+
+    # 各模型每 1000 token 的相对成本（归一化，cloud=1.0 为基准）
+    _MODEL_COST_PER_1K: dict = {
+        "cloud": 1.0,
+        "host_8b": 0.05,
+        "edge_3b": 0.01,
+        "skills": 0.02,
+    }
+
+    def select_with_cost_budget(
+        self,
+        task_type: "TaskType",
+        context_length: int = 0,
+        latency_budget: "LatencyBudget | None" = None,
+        risk_level: "RiskLevel" = None,
+        requires_structured_output: bool = False,
+        max_cost_per_1k: float = 0.5,
+        failed_models: Optional[List["ModelTarget"]] = None,
+    ) -> "RouteDecision":
+        """
+        按 token 成本预算路由（TODO-98）。
+
+        在满足任务需求的前提下，优先选择成本不超过 max_cost_per_1k 的模型。
+        若主路由模型成本超出预算，自动降级到成本更低的模型。
+
+        Args:
+            task_type: 任务类型
+            context_length: 上下文 token 数
+            latency_budget: 延迟预算（None 时使用 NORMAL）
+            risk_level: 风险等级（None 时使用 LOW）
+            requires_structured_output: 是否需要结构化输出
+            max_cost_per_1k: 每 1000 token 的最大成本预算（相对值，cloud=1.0）
+            failed_models: 已失败的模型列表
+
+        Returns:
+            RouteDecision（is_fallback=True 表示因成本预算降级）
+        """
+        from ..schemas.routing_types import LatencyBudget as _LB  # noqa: PLC0415
+
+        _latency = latency_budget or _LB.NORMAL
+        _risk = risk_level or RiskLevel.LOW
+        _failed = failed_models or []
+
+        # 先获取主路由决策
+        primary = self.select(
+            task_type=task_type,
+            latency_budget=_latency,
+            risk_level=_risk,
+            context_length=context_length,
+            requires_structured_output=requires_structured_output,
+        )
+
+        # 检查主路由模型的成本
+        primary_model_name = primary.selected_model.value
+        primary_cost = self._MODEL_COST_PER_1K.get(primary_model_name, 1.0)
+
+        if primary_cost <= max_cost_per_1k and primary.selected_model not in _failed:
+            # 主路由在预算内，直接返回
+            return primary
+
+        # 主路由超出预算，按成本从低到高寻找替代模型
+        logger.info(
+            "路由成本预算降级: 主路由 %s 成本 %.2f 超出预算 %.2f，寻找替代模型",
+            primary_model_name, primary_cost, max_cost_per_1k,
+        )
+
+        # 按成本从低到高排序所有模型
+        sorted_models = sorted(
+            self._MODEL_COST_PER_1K.items(),
+            key=lambda x: x[1],
+        )
+
+        for model_name, cost in sorted_models:
+            if cost > max_cost_per_1k:
+                continue
+
+            # 转换为 ModelTarget
+            try:
+                from ..schemas.routing_types import ModelTarget as _MT  # noqa: PLC0415
+                model_target = _MT(model_name)
+            except ValueError:
+                continue
+
+            if model_target in _failed:
+                continue
+
+            # HIGH risk_level 禁止路由到 edge_3b
+            if _risk == RiskLevel.HIGH and model_name == "edge_3b":
+                continue
+
+            # 检查模型可用性
+            if self._availability_checker:
+                try:
+                    if not self._availability_checker(model_target):
+                        continue
+                except Exception:
+                    continue
+
+            fallback_decision = RouteDecision(
+                task_type=task_type,
+                selected_model=model_target,
+                latency_budget=_latency,
+                risk_level=_risk,
+                context_length=context_length,
+                requires_structured_output=requires_structured_output,
+                is_fallback=True,
+                fallback_reason=(
+                    f"成本预算降级: {primary_model_name}(cost={primary_cost:.2f}) "
+                    f"→ {model_name}(cost={cost:.2f})，预算上限={max_cost_per_1k:.2f}"
+                ),
+                original_model=primary.selected_model,
+            )
+            self._write_route_log(fallback_decision)
+            logger.info(
+                "成本预算路由: %s → %s（cost %.2f → %.2f，预算 %.2f）",
+                primary_model_name, model_name, primary_cost, cost, max_cost_per_1k,
+            )
+            return fallback_decision
+
+        # 所有模型均超出预算，返回主路由（调用方自行处理）
+        logger.warning(
+            "成本预算路由: 所有模型均超出预算 %.2f，返回主路由 %s",
+            max_cost_per_1k, primary_model_name,
+        )
+        return primary
