@@ -484,6 +484,22 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
         limit=600,
     )
+    # ── TODO-33：EmotionTimeline 摘要注入 ────────────────────────────────
+    emotion_timeline_raw = runtime_payload.get("emotion_timeline")
+    emotion_timeline = dict(emotion_timeline_raw) if isinstance(emotion_timeline_raw, Mapping) else {}
+    emotion_echo_raw = runtime_payload.get("emotion_echo")
+    emotion_echo = dict(emotion_echo_raw) if isinstance(emotion_echo_raw, Mapping) else {}
+
+    _et_dominant = str(emotion_timeline.get("dominant_emotion") or "NEUTRAL").strip() or "NEUTRAL"
+    _et_trend = str(emotion_timeline.get("trend") or "stable").strip() or "stable"
+    _et_entry_count = int(emotion_timeline.get("entry_count") or 0)
+    _et_mode = str(emotion_timeline.get("mode") or "").strip()
+    _echo_tag = str(emotion_echo.get("echo_emotion_tag") or "").strip() or "NONE"
+    _echo_hint = _truncate_for_prompt(emotion_echo.get("echo_hint"), limit=160) or "NONE"
+
+    # 仅在 EmotionTimeline 有效数据时注入（mode 不为 SKIPPED/DEGRADED）
+    _et_active = _et_mode not in ("SKIPPED", "SKIPPED_NOT_WIRED", "DEGRADED") and _et_entry_count > 0
+
     emotion_binding_block = (
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
@@ -495,7 +511,18 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- snapshot_age_ms: {snapshot_age_ms}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
-        f"- bond_texture_json: {bond_texture_json}\n\n"
+        f"- bond_texture_json: {bond_texture_json}\n"
+        + (
+            f"- emotion_timeline_dominant: {_et_dominant}\n"
+            f"- emotion_timeline_trend: {_et_trend}\n"
+            f"- emotion_timeline_entry_count: {_et_entry_count}\n"
+            f"- emotion_echo_tag: {_echo_tag}\n"
+            f"- emotion_echo_hint: {_echo_hint}\n"
+            if _et_active else
+            "- emotion_timeline_dominant: NONE\n"
+            "- emotion_timeline_trend: NONE\n"
+        )
+        + "\n"
     )
 
     render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()

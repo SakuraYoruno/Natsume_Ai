@@ -364,3 +364,40 @@ export function fetchDistillationStats(params = {}) {
   ).toString()
   return request(`/obs/distillation/stats${qs ? '?' + qs : ''}`)
 }
+
+// ===== TODO-37: WeChat 通道管理 =====
+
+/**
+ * WeChat 通道统计（通道健康状态、频率限制统计、最近事件）
+ * @param {object} params - { window_minutes, limit }
+ */
+export function fetchWeChatStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/wechat/stats${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * 手动重置 WeChat 通道频率限制计数器
+ * @param {object} params - { reason }
+ */
+export function resetWeChatChannel(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/wechat/reset${qs ? '?' + qs : ''}`, { method: 'POST' })
+}
+
+// ===== TODO-34: AuditRetention 保留策略统计 =====
+
+/**
+ * AuditRetention 保留策略执行统计
+ * @param {object} params - { limit }
+ */
+export function fetchRetentionStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/retention/stats${qs ? '?' + qs : ''}`)
+}

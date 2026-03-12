@@ -187,6 +187,49 @@ async def runtime_lifespan(
             new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
             logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
 
+        # [TODO-34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
+        try:
+            from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
+            from host_brain.scheduler.task_registry import SchedulerTaskRegistry, SchedulerTaskConfig  # noqa: PLC0415
+
+            _retention_policy = RetentionPolicy()
+            _retention_registry = SchedulerTaskRegistry.get_instance()
+
+            async def _run_audit_retention_task() -> dict:
+                """AuditRetention 调度任务执行体。"""
+                import time as _time  # noqa: PLC0415
+                from host_brain.audit.retention import run_retention_policy  # noqa: PLC0415
+                from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
+                _req_id = _new_id()
+                _result = run_retention_policy(
+                    ledger=get_ledger(),
+                    policy=_retention_policy,
+                    request_id=_req_id,
+                    now_ts_ms=int(_time.time() * 1000),
+                )
+                return _result.as_dict()
+
+            _retention_task = SchedulerTaskConfig(
+                task_id="audit_retention_daily",
+                display_name="审计数据保留策略（每日清理）",
+                trigger_mode="cron",
+                trigger_config={"cron": "0 2 * * *"},
+                task_fn=_run_audit_retention_task,
+                enabled=True,
+            )
+            _retention_registry.register(_retention_task)
+            new_module_statuses["audit_retention_scheduler"] = (
+                f"OK (task_id={_retention_task.task_id})"
+            )
+            logger.info(
+                "AuditRetention 保留策略任务已注册到调度器: task_id=%s trigger=%s",
+                _retention_task.task_id,
+                _retention_task.trigger_mode,
+            )
+        except Exception as _ret_exc:
+            new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
+            logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
+
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes={},

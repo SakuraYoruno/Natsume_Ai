@@ -1011,3 +1011,111 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Insights.jsx`：新增 Memory 统计区块
 - `monitor_ui/src/api/obs.js`：已在 TODO-26 中添加 `fetchMemoryStats`
+
+---
+
+### TODO-33：EmotionTimeline 摘要注入 PromptBuilder（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（EmotionTimeline 摘要已注入 EMOTION_BINDING 块）
+
+**问题**：TODO-27 已在 `LlmGatewayNode` 中生成了 `ctx.metadata["emotion_timeline"]`（含 `dominant_emotion`/`trend`/`entry_count`）和 `ctx.metadata["emotion_echo"]`，但 `prompt_builder.py` 的 `render_node_generation_prompt()` 完全没有读取这些字段，情感轨迹摘要对 LLM 生成没有任何影响。
+
+**新增功能**：
+- 在 `render_node_generation_prompt()` 的 `EMOTION_BINDING` 块中，追加 `emotion_timeline_dominant`/`emotion_timeline_trend`/`emotion_timeline_entry_count`/`emotion_echo_tag`/`emotion_echo_hint` 字段
+- 仅在 EmotionTimeline 有效数据时注入（mode 不为 SKIPPED/DEGRADED 且 entry_count > 0）
+- 无效时注入 `NONE` 占位符，保持 prompt 格式稳定
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：`render_node_generation_prompt()` EMOTION_BINDING 块追加 EmotionTimeline 字段
+
+---
+
+### TODO-34：AuditRetention 接入调度器（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（AuditRetention 每日调度任务已注册，`GET /obs/retention/stats` 端点已上线）
+
+**问题**：`audit/retention.py` 有完整的 `run_retention_policy()` 实现，但调度器从未注册这个任务，审计数据会无限增长。
+
+**新增功能**：
+- `http_hooks.py` 的 `runtime_lifespan` 中，注册 AuditRetention 调度任务（task_id=`audit_retention_daily`，每日 02:00 CRON）
+- `obs_routes.py` 新增 `GET /obs/retention/stats`：保留策略执行统计（最近执行时间/状态/各表候选删除量/已删除量/受保护量）
+
+**改动文件**：
+- `host_brain/app/http_hooks.py`：`runtime_lifespan` 注册 AuditRetention 调度任务
+- `host_brain/app/obs_routes.py`：新增 `GET /obs/retention/stats` 端点
+- `monitor_ui/src/api/obs.js`：新增 `fetchRetentionStats` API 函数
+
+---
+
+### TODO-35：CanonVectorAutoSync 接入 CanonProposalNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（CanonProposalNode 提案提交后自动触发向量同步）
+
+**问题**：`canon_vector_auto_sync.py` 有完整的 `trigger_canon_vector_auto_sync()` 接口，但 `CanonProposalNode` 在提案提交后从未触发向量同步，导致 Canon SSOT 写入后 Chroma 向量索引不同步。
+
+**新增功能**：
+- `CanonProposalNode.execute()` 提案成功提交后，调用 `trigger_canon_vector_auto_sync(include_world=True, include_style=False, reason="canon_proposal_node")`
+- 降级策略：向量同步失败时仅记录日志，不阻断主链路
+- 同步结果写入 `ctx.metadata["canon_proposal_node"]["vector_sync"]`
+- 成功时追加 `CANON_VECTOR_SYNC_TRIGGERED` audit tag
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`CanonProposalNode.execute()` 追加向量同步调用
+
+---
+
+### TODO-36：EvidenceCircuitBreaker 接入 RecallFusionNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（RecallFusionNode 已接入熔断器保护）
+
+**问题**：`evidence_circuit_breaker.py` 有完整的 `EvidenceCircuitBreaker` 实现（CLOSED/OPEN/HALF_OPEN 状态机），但 `RecallFusionNode` 在召回失败时没有任何熔断保护，连续失败时会持续重试。
+
+**新增功能**：
+- `RecallFusionNode.execute()` 召回前检查熔断器状态：OPEN 时直接跳过召回，返回空证据（`RECALL_CIRCUIT_OPEN`）
+- 召回成功时重置熔断器失败计数（`_failure_count = 0`）
+- 召回失败时通知熔断器记录失败（触发阈值：3 次失败，恢复超时：30s）
+- 熔断状态写入 `ctx.metadata["recall_fusion"]["circuit_breaker"]`
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`RecallFusionNode.execute()` 接入 EvidenceCircuitBreaker
+
+---
+
+### TODO-37：WebUI WeChat 通道管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（WeChat 通道管理页面已上线）
+
+**问题**：`channels/wechat.py` 和 `channels/wechat_health.py` 有完整的微信通道实现，但 WebUI 完全没有对应界面，无法通过 UI 观测微信通道状态。
+
+**新增功能**：
+- 新建 `WeChat.jsx` 页面：通道健康状态卡片（UP/DEGRADED/DOWN/UNKNOWN）+ 7 个统计卡片（总事件/入站/出站/成功/失败/成功率/频率限制次数）+ Top wxid 频率限制统计表 + 最近事件列表 + 手动重置按钮
+- `obs_routes.py` 新增 `GET /obs/wechat/stats` 端点（通道统计）和 `POST /obs/wechat/reset` 端点（手动重置）
+- `obs.js` 新增 `fetchWeChatStats`、`resetWeChatChannel`、`fetchRetentionStats` 3 个 API 函数
+- `App.jsx` 注册 `/wechat` 路由
+- `Layout.jsx` 导航栏新增 WeChat 入口（MessageSquare 图标）
+
+**改动文件**：
+- 新建 `monitor_ui/src/pages/WeChat.jsx`
+- `host_brain/app/obs_routes.py`：新增 WeChat 统计端点
+- `monitor_ui/src/api/obs.js`：新增 WeChat API 函数
+- `monitor_ui/src/App.jsx`：注册 `/wechat` 路由
+- `monitor_ui/src/components/Layout.jsx`：导航栏新增 WeChat 入口
+
+---
+
+### TODO-38：Insights 页面 VTS 统计卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（VTS 统计区块已上线）
+
+**问题**：TODO-30 已实现 `GET /obs/vts/stats` 后端端点，但 `Insights.jsx` 页面没有对应的 VTS 统计卡片，数据无法可视化。
+
+**新增功能**：
+- `Insights.jsx` 新增 VTS 通道统计区块（Tv 图标，粉色主题）
+- 聚合指标卡片：总事件数 + 表情应用率 + 降级率 + 拒绝率
+- Top 情感标签横向柱状图（BarChart）
+- Talk Gate 统计面板（总请求/允许/拒绝 + 允许率进度条）
+- 并行加载：与其他 Insights 数据同时请求
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：新增 VTS 统计区块，引入 `Tv` 图标和 `fetchVtsStats`
+

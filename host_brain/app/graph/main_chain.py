@@ -468,11 +468,47 @@ class RecallFusionNode(ChainNode):
 
     降级策略：RetrievalOrchestrator 不可用时，退回最小状态语义（仅记录空证据），
     并在 audit_tags 中标记 RECALL_DEGRADED_FALLBACK。
+
+    [TODO-36] 接入 EvidenceCircuitBreaker：
+    - 召回前检查熔断器状态：OPEN 时直接跳过召回，返回空证据（RECALL_CIRCUIT_OPEN）
+    - 召回成功时重置失败计数
+    - 召回失败时记录失败，触发熔断（failure_threshold=3, recovery_timeout_ms=30_000）
     """
     name = "recall_fusion"
     timeout = NODE_TIMEOUT["recall_fusion"]
 
     async def execute(self, ctx: ChainContext) -> bool:
+        # ── TODO-36：EvidenceCircuitBreaker 熔断检查 ─────────────────────
+        _circuit_breaker = None
+        _cb_state = "UNKNOWN"
+        try:
+            from host_brain.integrations.evidence_circuit_breaker import EvidenceCircuitBreaker  # noqa: PLC0415
+            # 使用 ctx.metadata 存储会话级熔断器单例（跨请求共享需用模块级变量，此处用 ctx 隔离）
+            # 实际生产中应使用模块级单例；此处为 best-effort 降级实现
+            _circuit_breaker = ctx.metadata.get("_recall_circuit_breaker_instance")
+            if not isinstance(_circuit_breaker, EvidenceCircuitBreaker):
+                _circuit_breaker = EvidenceCircuitBreaker(
+                    failure_threshold=3,
+                    recovery_timeout_ms=30_000,
+                )
+                ctx.metadata["_recall_circuit_breaker_instance"] = _circuit_breaker
+            _cb_state = _circuit_breaker.state
+            if _cb_state == "OPEN":
+                ctx.metadata["recall_fusion"] = {
+                    "mode": "CIRCUIT_OPEN",
+                    "evidence_empty": True,
+                    "evidence_count": 0,
+                    "circuit_breaker": {"state": "OPEN", "skipped": True},
+                }
+                ctx.audit_tags.append("RECALL_CIRCUIT_OPEN")
+                logger.warning("[%s] RecallFusionNode 熔断器 OPEN，跳过召回", ctx.request_id)
+                return True
+        except (ImportError, AttributeError):
+            _circuit_breaker = None
+        except Exception as _cb_init_exc:
+            logger.warning("[%s] EvidenceCircuitBreaker 初始化失败（降级）: %s", ctx.request_id, _cb_init_exc)
+            _circuit_breaker = None
+
         # ── 真实七路召回（接入 RetrievalOrchestrator）────────────────────
         recall_mode = "DEGRADED_FALLBACK"
         try:
@@ -501,6 +537,13 @@ class RecallFusionNode(ChainNode):
                 ),
                 timeout_ms=int(NODE_TIMEOUT["recall_fusion"] * 1000),
             )
+
+            # 召回成功：重置熔断器失败计数
+            if _circuit_breaker is not None:
+                try:
+                    _circuit_breaker._failure_count = 0
+                except Exception:
+                    pass
 
             raw_evidence_items = list(orchestrator_result.retrieval_evidence_items)
 
@@ -614,6 +657,7 @@ class RecallFusionNode(ChainNode):
                 "context_pack_type": "RetrievalOrchestratorResult",
                 "memory_guard": memory_guard_meta,
                 "context_compressor": context_compressor_meta,
+                "circuit_breaker": {"state": _cb_state, "skipped": False},
             }
             ctx.metadata.setdefault("audit_refs", {})["memory_guard"] = memory_guard_meta
             ctx.metadata.setdefault("audit_refs", {})["context_compressor"] = context_compressor_meta
@@ -629,6 +673,17 @@ class RecallFusionNode(ChainNode):
             )
 
         except Exception as exc:
+            # 召回失败：通知熔断器记录失败
+            if _circuit_breaker is not None:
+                try:
+                    async def _noop():
+                        raise exc  # type: ignore[misc]
+                    try:
+                        await _circuit_breaker.call(_noop)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             # 降级：RetrievalOrchestrator 不可用时退回最小状态语义
             logger.warning(
                 "[%s] RecallFusionNode 真实召回失败，降级为最小状态语义: %s",
@@ -637,6 +692,12 @@ class RecallFusionNode(ChainNode):
             ctx.audit_tags.append("RECALL_DEGRADED_FALLBACK")
             recall_mode = "DEGRADED_FALLBACK"
             evidence_empty = ctx.recall_context_pack in (None, "", [], {})
+            _cb_state_after = "UNKNOWN"
+            if _circuit_breaker is not None:
+                try:
+                    _cb_state_after = _circuit_breaker.state
+                except Exception:
+                    pass
             ctx.metadata["recall_fusion"] = {
                 "mode": recall_mode,
                 "evidence_empty": bool(evidence_empty),
@@ -644,6 +705,7 @@ class RecallFusionNode(ChainNode):
                     type(ctx.recall_context_pack).__name__ if ctx.recall_context_pack is not None else "none"
                 ),
                 "error": str(exc),
+                "circuit_breaker": {"state": _cb_state_after, "skipped": False},
             }
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
@@ -1191,6 +1253,36 @@ class CanonProposalNode(ChainNode):
                 "[%s] CanonProposalNode 提案已提交 proposal_id=%s trigger=%s",
                 ctx.request_id, proposal_id, trigger_source,
             )
+
+            # ── TODO-35：触发 CanonVectorAutoSync（best-effort，不阻断主链路）──
+            try:
+                from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync  # noqa: PLC0415
+                _sync_result = trigger_canon_vector_auto_sync(
+                    include_world=True,
+                    include_style=False,
+                    reason="canon_proposal_node",
+                )
+                ctx.metadata["canon_proposal_node"]["vector_sync"] = {
+                    "triggered": True,
+                    "status": str(_sync_result.get("status") or "OK"),
+                    "synced_count": _sync_result.get("synced_count"),
+                }
+                ctx.audit_tags.append("CANON_VECTOR_SYNC_TRIGGERED")
+                logger.debug(
+                    "[%s] CanonVectorAutoSync 触发完成 status=%s synced=%s",
+                    ctx.request_id,
+                    _sync_result.get("status"),
+                    _sync_result.get("synced_count"),
+                )
+            except (ImportError, AttributeError):
+                ctx.metadata["canon_proposal_node"]["vector_sync"] = {"triggered": False, "reason": "NOT_WIRED"}
+            except Exception as _vs_exc:
+                ctx.metadata["canon_proposal_node"]["vector_sync"] = {
+                    "triggered": False,
+                    "reason": "DEGRADED",
+                    "error": str(_vs_exc)[:100],
+                }
+                logger.warning("[%s] CanonVectorAutoSync 触发失败（降级）: %s", ctx.request_id, _vs_exc)
 
         except Exception as exc:
             _err_str = str(exc)

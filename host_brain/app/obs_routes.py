@@ -1303,3 +1303,280 @@ async def get_distillation_stats(
         timestamp=now,
     )
 
+
+# ---------------------------------------------------------------------------
+# TODO-37: GET /obs/wechat/stats  — WeChat 通道统计
+# ---------------------------------------------------------------------------
+class WeChatRateLimitItem(BaseModel):
+    wxid: str
+    message_count: int
+    last_ts: Optional[int]
+    rate_limited: bool
+
+class WeChatEventItem(BaseModel):
+    request_id: Optional[str]
+    wxid: Optional[str]
+    direction: Optional[str]  # "inbound" | "outbound"
+    status: str
+    reason_code: Optional[str]
+    ts_ms: int
+
+class WeChatStatsResponse(BaseModel):
+    window_minutes: int
+    channel_status: str  # "UP" | "DEGRADED" | "DOWN" | "UNKNOWN"
+    total_events: int
+    inbound: int
+    outbound: int
+    success: int
+    failed: int
+    success_rate: Optional[float]
+    rate_limited_count: int
+    top_wxids: List[WeChatRateLimitItem]
+    recent_events: List[WeChatEventItem]
+    last_event_ts: Optional[int]
+    timestamp: int
+
+@router.get("/wechat/stats", response_model=WeChatStatsResponse)
+async def get_wechat_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    limit: int = Query(20, ge=1, le=100, description="最近事件条数"),
+):
+    """TODO-37: WeChat 通道统计 — 通道健康状态、频率限制统计、最近 channel_io_log 事件。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # ── channel_io_log 中过滤 WeChat 相关事件 ────────────────────────────
+    try:
+        channel_rows = ledger.fetch_by_time_range("channel_io_log", start_ms=since_ms, end_ms=now)
+        wechat_rows = [
+            r for r in channel_rows
+            if str(r.get("channel") or r.get("source") or "").upper() in ("WECHAT", "WX", "WEIXIN")
+            or str(r.get("event_type") or "").upper().startswith("WECHAT")
+        ]
+    except Exception:
+        wechat_rows = []
+
+    # 补充从 voice_event_log 中过滤 WECHAT 相关事件
+    try:
+        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now)
+        wechat_voice_rows = [
+            r for r in voice_rows
+            if str(r.get("event_type") or "").upper().startswith("WECHAT")
+        ]
+    except Exception:
+        wechat_voice_rows = []
+
+    all_rows = wechat_rows + wechat_voice_rows
+    total_events = len(all_rows)
+
+    inbound = sum(
+        1 for r in all_rows
+        if str(r.get("direction") or r.get("event_type") or "").upper()
+        in ("INBOUND", "RECEIVE", "RECV", "WECHAT_RECV")
+    )
+    outbound = total_events - inbound
+
+    success = sum(
+        1 for r in all_rows
+        if str(r.get("status") or "").upper() in ("OK", "SUCCESS", "SENT", "DELIVERED")
+    )
+    failed = total_events - success
+    success_rate = round(success / total_events * 100, 1) if total_events > 0 else None
+
+    # 频率限制统计
+    rate_limited_count = sum(
+        1 for r in all_rows
+        if str(r.get("reason_code") or "").upper().startswith("RATE_LIMIT")
+        or str(r.get("status") or "").upper() == "RATE_LIMITED"
+    )
+
+    # Top wxid 统计（按消息量排序）
+    from collections import Counter, defaultdict
+    wxid_counter: Counter = Counter()
+    wxid_last_ts: dict = defaultdict(int)
+    wxid_rate_limited: dict = defaultdict(bool)
+    for r in all_rows:
+        wxid = str(r.get("wxid") or r.get("from_wxid") or r.get("session_id") or "unknown")
+        wxid_counter[wxid] += 1
+        ts = r.get("ts_ms") or 0
+        if ts > wxid_last_ts[wxid]:
+            wxid_last_ts[wxid] = ts
+        if str(r.get("reason_code") or "").upper().startswith("RATE_LIMIT"):
+            wxid_rate_limited[wxid] = True
+
+    top_wxids = [
+        WeChatRateLimitItem(
+            wxid=wxid,
+            message_count=cnt,
+            last_ts=wxid_last_ts.get(wxid),
+            rate_limited=bool(wxid_rate_limited.get(wxid, False)),
+        )
+        for wxid, cnt in wxid_counter.most_common(10)
+    ]
+
+    # 通道健康状态
+    if total_events == 0:
+        channel_status = "UNKNOWN"
+    elif success_rate is not None and success_rate >= 80:
+        channel_status = "UP"
+    elif success_rate is not None and success_rate >= 50:
+        channel_status = "DEGRADED"
+    else:
+        channel_status = "DOWN"
+
+    # 最近事件列表（倒序）
+    recent_sorted = sorted(all_rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
+    recent_events = [
+        WeChatEventItem(
+            request_id=r.get("request_id"),
+            wxid=str(r.get("wxid") or r.get("from_wxid") or r.get("session_id") or ""),
+            direction=(
+                "inbound"
+                if str(r.get("direction") or r.get("event_type") or "").upper()
+                in ("INBOUND", "RECEIVE", "RECV", "WECHAT_RECV")
+                else "outbound"
+            ),
+            status=str(r.get("status") or "UNKNOWN").upper(),
+            reason_code=r.get("reason_code"),
+            ts_ms=int(r.get("ts_ms") or 0),
+        )
+        for r in recent_sorted
+    ]
+
+    last_event_ts = max((r.get("ts_ms") or 0 for r in all_rows), default=None)
+
+    return WeChatStatsResponse(
+        window_minutes=window_minutes,
+        channel_status=channel_status,
+        total_events=total_events,
+        inbound=inbound,
+        outbound=outbound,
+        success=success,
+        failed=failed,
+        success_rate=success_rate,
+        rate_limited_count=rate_limited_count,
+        top_wxids=top_wxids,
+        recent_events=recent_events,
+        last_event_ts=last_event_ts,
+        timestamp=now,
+    )
+
+
+@router.post("/wechat/reset", response_model=Dict[str, Any])
+async def reset_wechat_channel(
+    reason: Optional[str] = Query(None, description="重置原因"),
+):
+    """TODO-37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
+    try:
+        from host_brain.channels.wechat import WeChatChannel  # noqa: PLC0415
+        _channel = WeChatChannel.get_instance()
+        if _channel is not None and hasattr(_channel, "reset_rate_limits"):
+            _channel.reset_rate_limits()
+            return {
+                "status": "OK",
+                "reason_code": "WECHAT_CHANNEL_RESET",
+                "detail": f"WeChat 通道频率限制已重置（原因：{reason or 'manual'}）",
+                "timestamp": _now_ms(),
+            }
+    except (ImportError, AttributeError):
+        pass
+    except Exception as exc:
+        logger.warning("WeChat 通道重置失败: %s", exc)
+        return {
+            "status": "DEGRADED",
+            "reason_code": "WECHAT_RESET_FAILED",
+            "detail": str(exc)[:200],
+            "timestamp": _now_ms(),
+        }
+    return {
+        "status": "OK",
+        "reason_code": "WECHAT_CHANNEL_RESET_NOOP",
+        "detail": "WeChat 通道重置（无状态实例，已记录）",
+        "timestamp": _now_ms(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# TODO-34: GET /obs/retention/stats  — AuditRetention 保留策略统计
+# ---------------------------------------------------------------------------
+class RetentionTableItem(BaseModel):
+    table: str
+    candidate_count: int
+    deleted_count: int
+    protected: bool
+
+class RetentionStatsResponse(BaseModel):
+    last_run_ts: Optional[int]
+    last_run_status: Optional[str]
+    total_deleted: int
+    total_candidates: int
+    total_protected: int
+    tables: List[RetentionTableItem]
+    timestamp: int
+
+@router.get("/retention/stats", response_model=RetentionStatsResponse)
+async def get_retention_stats(
+    limit: int = Query(5, ge=1, le=20, description="最近执行记录条数"),
+):
+    """TODO-34: AuditRetention 保留策略执行统计。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+
+    # 从 error_log 中查询 S_AUDIT_RETENTION 阶段的记录
+    try:
+        rows = ledger.fetch_by_time_range("error_log", start_ms=0, end_ms=now)
+        retention_rows = [
+            r for r in rows
+            if str(r.get("stage") or "").upper() == "S_AUDIT_RETENTION"
+        ]
+    except Exception:
+        retention_rows = []
+
+    # 取最近一次执行记录
+    recent = sorted(retention_rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
+    last_run_ts = recent[0].get("ts_ms") if recent else None
+    last_run_status = str(recent[0].get("reason_code") or "UNKNOWN") if recent else None
+
+    # 解析最近一次执行的详情
+    tables: list[RetentionTableItem] = []
+    total_deleted = 0
+    total_candidates = 0
+    total_protected = 0
+
+    if recent:
+        try:
+            detail_raw = recent[0].get("detail") or "{}"
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+            candidate_counts = dict(detail.get("candidate_counts") or {})
+            deleted_counts = dict(detail.get("deleted_counts") or {})
+            protected_counts = dict(detail.get("protected_counts") or {})
+
+            all_tables = set(candidate_counts) | set(deleted_counts) | set(protected_counts)
+            for tbl in sorted(all_tables):
+                cand = int(candidate_counts.get(tbl) or 0)
+                deleted = int(deleted_counts.get(tbl) or 0)
+                protected = tbl in protected_counts
+                tables.append(RetentionTableItem(
+                    table=tbl,
+                    candidate_count=cand,
+                    deleted_count=deleted,
+                    protected=protected,
+                ))
+                total_candidates += cand
+                total_deleted += deleted
+                total_protected += int(protected_counts.get(tbl) or 0)
+        except Exception:
+            pass
+
+    return RetentionStatsResponse(
+        last_run_ts=last_run_ts,
+        last_run_status=last_run_status,
+        total_deleted=total_deleted,
+        total_candidates=total_candidates,
+        total_protected=total_protected,
+        tables=tables,
+        timestamp=now,
+    )
+
+

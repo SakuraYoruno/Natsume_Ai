@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -8,6 +8,7 @@ import {
   fetchSubsystemsStats,
   fetchAgentLoopStats,
   fetchMemoryStats,
+  fetchVtsStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -77,24 +78,27 @@ export default function Insights() {
   const [subsysData,  setSubsysData]  = useState(null)
   const [agentData,   setAgentData]   = useState(null)
   const [memoryData,  setMemoryData]  = useState(null)
+  const [vtsData,     setVtsData]     = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const intervalMinutes = windowMinutes <= 60 ? 5 : windowMinutes <= 360 ? 30 : windowMinutes <= 1440 ? 60 : 360
-      const [gov, err, subsys, agent, memory] = await Promise.allSettled([
+      const [gov, err, subsys, agent, memory, vts] = await Promise.allSettled([
         fetchGovernorStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
         fetchErrors({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
         fetchSubsystemsStats({ window_minutes: windowMinutes }),
         fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 8 }),
         fetchMemoryStats({ window_minutes: windowMinutes }),
+        fetchVtsStats({ window_minutes: windowMinutes }),
       ])
       if (gov.status === 'fulfilled')    setGovData(gov.value)
       if (err.status === 'fulfilled')    setErrData(err.value)
       if (subsys.status === 'fulfilled') setSubsysData(subsys.value)
       if (agent.status === 'fulfilled')  setAgentData(agent.value)
       if (memory.status === 'fulfilled') setMemoryData(memory.value)
+      if (vts.status === 'fulfilled')    setVtsData(vts.value)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -346,6 +350,89 @@ export default function Insights() {
             暂无 Agent Loop 执行记录
           </div>
         )}
+      </section>
+
+      {/* ===== TODO-38: VTS 通道统计 ===== */}
+      <section>
+        <SectionTitle icon={Tv} title="VTS 通道统计" color="text-pink-600" />
+        {/* 聚合指标卡片 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard
+            label="总事件数"
+            value={vtsData?.total_events ?? '—'}
+          />
+          <StatCard
+            label="表情应用率"
+            value={vtsData?.apply_rate != null ? `${vtsData.apply_rate}%` : '—'}
+            color={vtsData?.apply_rate >= 80 ? 'text-green-600' : vtsData?.apply_rate >= 50 ? 'text-orange-500' : 'text-red-500'}
+          />
+          <StatCard
+            label="降级率"
+            value={vtsData?.degrade_rate != null ? `${vtsData.degrade_rate}%` : '—'}
+            color={vtsData?.degrade_rate > 20 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="拒绝率"
+            value={vtsData?.reject_rate != null ? `${vtsData.reject_rate}%` : '—'}
+            color={vtsData?.reject_rate > 10 ? 'text-red-500' : 'text-green-600'}
+          />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Top 情感标签横向柱状图 */}
+          <div className="card p-4">
+            {(vtsData?.top_emotions?.length ?? 0) > 0 ? (
+              <BarChart
+                title="Top 情感标签分布"
+                direction="horizontal"
+                categories={(vtsData?.top_emotions ?? []).map((e) => e.emotion_tag)}
+                series={[{ name: '次数', data: (vtsData?.top_emotions ?? []).map((e) => e.count), color: '#EC4899' }]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
+                <Tv size={24} className="mb-2 text-gray-300" />
+                <span className="text-xs font-medium text-gray-500">Top 情感标签分布</span>
+                <span className="mt-1">暂无 VTS 事件数据</span>
+              </div>
+            )}
+          </div>
+          {/* Talk Gate 统计 */}
+          <div className="card p-4">
+            <div className="text-xs font-medium text-gray-500 mb-3">Talk Gate 统计</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-gray-700">{vtsData?.talk_gate_total ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">总请求</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">{vtsData?.talk_gate_allowed ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">允许</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-500">{vtsData?.talk_gate_blocked ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">拒绝</div>
+              </div>
+            </div>
+            {vtsData?.talk_gate_total > 0 && (
+              <div className="mt-4">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span>允许率</span>
+                  <span>{Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    className="bg-green-500 h-2 rounded-full transition-all"
+                    style={{ width: `${Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {(vtsData?.talk_gate_total ?? 0) === 0 && (
+              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
+                <span>暂无 Talk Gate 数据</span>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* ===== TODO-32: Memory 子系统统计 ===== */}

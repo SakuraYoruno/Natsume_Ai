@@ -11,6 +11,7 @@ import Bond from './pages/Bond.jsx'
 import Tools from './pages/Tools.jsx'
 import Automation from './pages/Automation.jsx'
 import AgentLoop from './pages/AgentLoop.jsx'
+import WeChat from './pages/WeChat.jsx'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="tools" element={<Tools />} />
           <Route path="automation" element={<Automation />} />
           <Route path="agent" element={<AgentLoop />} />
+          <Route path="wechat" element={<WeChat />} />
         </Route>
       </Routes>
     </HashRouter>
