@@ -628,3 +628,83 @@
 
 **改动文件**：
 - `host_brain/app/chat_handler_vision.py`：`_vision_ui_sse_generator` 增加 HMAC 签名校验逻辑
+
+---
+
+## 近期完成（2026-03-12 第三批）
+
+### TODO-15：EpisodicStoreNode 真实业务化（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（真实记忆写入）
+
+**问题**：`EpisodicStoreNode.execute()` 只标记 `READY_TO_PERSIST` 状态，未接入真实 `persist_chat_episodic_memory`，情节记忆实际上从未通过 MainChain 写入。
+
+**修复**：
+- 接入真实 `persist_chat_episodic_memory`，从 `ctx.final_response` + `ctx.user_message` 构建记忆文本
+- 从 `ctx.metadata["llm_gateway"]["emotion_context"]` 提取情绪上下文（含 emotion_tag/turn_count）
+- 通过 `asyncio.to_thread` 异步执行（不阻塞事件循环）
+- 降级策略：
+  - `EpisodicStore` 不可用 → `SKIPPED_NO_STORE`
+  - `MemoryGuard` 拒绝 → `EPISODIC_SKIPPED:{reason_code}`
+  - 异常 → `DEGRADED`，标记 `EPISODIC_DEGRADED` 审计标签
+  - 无最终响应 → `SKIPPED_NO_RESPONSE`
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`EpisodicStoreNode.execute()` 接入真实写入逻辑
+
+**验证**：
+- `pytest -q tests/unit/test_new_features_todo15_17.py::TestEpisodicStoreNode`（4 passed）
+
+**回退方式**：`EpisodicStore` 不可用时自动降级，不阻断主链路
+
+---
+
+### TODO-16：AuditNode 真实写入（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（审计快照真实落地）
+
+**问题**：`AuditNode.execute()` 只写 `ctx.metadata["audit"]`，未接入真实 ledger 写入，审计快照实际上只存在内存中，进程重启后丢失。
+
+**修复**：
+- 接入真实 `ledger.log_error`，将 `ChainContext` 审计快照写入 ledger
+- 快照内容：`audit_id`、`request_id`、`session_id`、`task_type`、`audit_tags`、`node_timings_ms`、`metadata_keys`、`governor_passed`、`final_response_chars`、`failure_event`
+- 通过 `asyncio.to_thread` 异步执行（不阻塞事件循环）
+- 降级策略：ledger 不可用时仅记录本地日志，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`AuditNode.execute()` 接入真实 ledger 写入
+
+**验证**：
+- `pytest -q tests/unit/test_new_features_todo15_17.py::TestAuditNode`（3 passed）
+
+**回退方式**：ledger 不可用时自动降级，不阻断主链路
+
+---
+
+### TODO-17：StateArbiter 扩展 style/episodic 查询（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（三路 StateArbiter 查询全部接入）
+
+**问题**：`_sse_event_generator` 中只查询 `world_canon_facts`，`style_canon_facts` 和 `episodic_latest` 虽已在 `http_hooks.py` 注册，但从未被主链路查询，注册的状态源处于空转状态。
+
+**修复**：
+- 新增 `_resolve_state_arbiter_style_fact()`：查询 `style_canon_facts`，构建 `slot_name=style_canon` 证据条目（score=0.85，追加到 world_canon 之后）
+- 新增 `_resolve_state_arbiter_episodic_fact()`：查询 `episodic_latest`，构建 `slot_name=episodic_latest` 证据条目（score=0.75，追加到末尾）
+- 在 `_sse_event_generator` 中调用两个新函数，将结果注入 `retrieval_evidence_items`
+- `COMMIT.audit_refs.retrieval_summary` 新增 `style_canon` 和 `episodic_latest` 字段，可观测注入状态
+
+**注入优先级**：
+```
+world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score=0.75）> 其他召回
+```
+
+**降级策略**：StateArbiter 不可用时各路独立降级，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/chat_stream_handler.py`：新增 `_resolve_state_arbiter_style_fact()` 和 `_resolve_state_arbiter_episodic_fact()` 函数；`_sse_event_generator` 中调用并注入
+
+**验证**：
+- `pytest -q tests/unit/test_new_features_todo15_17.py::TestStateArbiterStyleEpisodicResolvers`（4 passed）
+- 合并运行：43 passed（含所有相关单元测试，无回归）
+
+**回退方式**：StateArbiter 不可用时自动降级，不阻断主链路

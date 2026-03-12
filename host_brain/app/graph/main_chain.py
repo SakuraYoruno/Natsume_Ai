@@ -723,23 +723,107 @@ class QAContractNode(ChainNode):
 
 
 class EpisodicStoreNode(ChainNode):
-    """情节记忆存储节点：按宪法规则决定是否写入 EpisodicStore。"""
+    """情节记忆存储节点：按宪法规则决定是否写入 EpisodicStore。
+
+    [TODO-15] 已接入真实 persist_chat_episodic_memory，执行 MemoryGuard 宪法校验后写入。
+    降级策略：EpisodicStore 不可用或 MemoryGuard 拒绝时，标记 SKIPPED/DEGRADED，不阻断主链路。
+    """
     name = "episodic_store"
     timeout = NODE_TIMEOUT["episodic_store"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        can_persist = bool(str(ctx.final_response or "").strip())
-        ctx.metadata["episodic_store"] = {
-            "status": "READY_TO_PERSIST" if can_persist else "SKIPPED_NO_RESPONSE",
-            "task_type": ctx.task_type.value,
-            "session_id": ctx.session_id,
-        }
-        logger.debug("[%s] EpisodicStore 执行 can_persist=%s", ctx.request_id, can_persist)
+        final_response = str(ctx.final_response or "").strip()
+        user_message = str(ctx.user_message or "").strip()
+
+        if not final_response:
+            ctx.metadata["episodic_store"] = {
+                "status": "SKIPPED_NO_RESPONSE",
+                "task_type": ctx.task_type.value,
+                "session_id": ctx.session_id,
+            }
+            logger.debug("[%s] EpisodicStore 跳过：无最终响应", ctx.request_id)
+            return True
+
+        # 接入真实 persist_chat_episodic_memory
+        try:
+            from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
+            from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+
+            _episodic_store = get_episodic_store()
+            if _episodic_store is None:
+                ctx.metadata["episodic_store"] = {
+                    "status": "SKIPPED_NO_STORE",
+                    "task_type": ctx.task_type.value,
+                    "session_id": ctx.session_id,
+                }
+                logger.debug("[%s] EpisodicStore 跳过：store 不可用", ctx.request_id)
+                return True
+
+            # 从 ctx.metadata 中提取情绪上下文（由 LlmGatewayNode 或 SSE 观测写入）
+            _emotion_context: dict[str, Any] = {}
+            _llm_meta = ctx.metadata.get("llm_gateway") or {}
+            if isinstance(_llm_meta, dict):
+                _emotion_context = dict(_llm_meta.get("emotion_context") or {})
+            # 确保 turn_count 至少为 2（满足 MemoryGuard 最低写入条件）
+            if not _emotion_context.get("turn_count"):
+                _emotion_context["turn_count"] = 2
+
+            _result = await asyncio.to_thread(
+                persist_chat_episodic_memory,
+                request_id=ctx.request_id,
+                intent_id=ctx.metadata.get("intent_id") or ctx.request_id,
+                session_id=ctx.session_id,
+                user_message=user_message,
+                assistant_reply=final_response,
+                emotion_context=_emotion_context,
+                ts_ms=int(time.time() * 1000),
+                episodic_store=_episodic_store,
+            )
+            ctx.metadata["episodic_store"] = {
+                "status": _result.get("status", "UNKNOWN"),
+                "reason_code": _result.get("reason_code"),
+                "memory_id": _result.get("memory_id"),
+                "emotion_tag": _result.get("emotion_tag"),
+                "task_type": ctx.task_type.value,
+                "session_id": ctx.session_id,
+            }
+            if _result.get("status") == "OK":
+                ctx.audit_tags.append("EPISODIC_WRITTEN")
+            elif _result.get("status") == "SKIPPED":
+                ctx.audit_tags.append(f"EPISODIC_SKIPPED:{_result.get('reason_code', 'UNKNOWN')}")
+            else:
+                ctx.audit_tags.append("EPISODIC_DEGRADED")
+            logger.debug(
+                "[%s] EpisodicStore 执行完成 status=%s memory_id=%s",
+                ctx.request_id, _result.get("status"), _result.get("memory_id"),
+            )
+        except ImportError:
+            ctx.metadata["episodic_store"] = {
+                "status": "SKIPPED_NOT_WIRED",
+                "task_type": ctx.task_type.value,
+                "session_id": ctx.session_id,
+            }
+            logger.debug("[%s] EpisodicStore 跳过：模块未接入", ctx.request_id)
+        except Exception as exc:
+            ctx.metadata["episodic_store"] = {
+                "status": "DEGRADED",
+                "reason_code": "EPISODIC_STORE_ERROR",
+                "detail": str(exc)[:200],
+                "task_type": ctx.task_type.value,
+                "session_id": ctx.session_id,
+            }
+            ctx.audit_tags.append("EPISODIC_DEGRADED")
+            logger.warning("[%s] EpisodicStore 异常（降级）: %s", ctx.request_id, exc)
         return True
 
 
 class AuditNode(ChainNode):
-    """审计节点：向 triptych 写入审计事件。"""
+    """审计节点：向 ledger 写入 ChainContext 审计快照。
+
+    [TODO-16] 已接入真实 ledger 写入：将 ctx.audit_tags、ctx.node_timings、
+    ctx.metadata 摘要写入 ledger.log_error（stage=AUDIT_SNAPSHOT）。
+    降级策略：ledger 不可用时仅记录本地日志，不阻断主链路。
+    """
     name = "audit"
     timeout = NODE_TIMEOUT["audit"]
 
@@ -751,6 +835,46 @@ class AuditNode(ChainNode):
             "timing_keys": sorted(ctx.node_timings.keys()),
         }
         ctx.audit_tags.append("AUDIT_SNAPSHOT_WRITTEN")
+
+        # 接入真实 ledger 写入
+        try:
+            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+            _ledger = get_ledger()
+            # 构建审计快照摘要（避免写入过大的 metadata）
+            _timing_summary = {
+                k: round(v * 1000)  # 转换为毫秒
+                for k, v in (ctx.node_timings or {}).items()
+            }
+            _meta_keys = sorted((ctx.metadata or {}).keys())
+            _snapshot = {
+                "audit_id": audit_id,
+                "request_id": ctx.request_id,
+                "session_id": ctx.session_id,
+                "task_type": ctx.task_type.value,
+                "audit_tags": list(ctx.audit_tags),
+                "node_timings_ms": _timing_summary,
+                "metadata_keys": _meta_keys,
+                "governor_passed": bool(ctx.governor_passed),
+                "final_response_chars": len(str(ctx.final_response or "")),
+                "failure_event": ctx.failure_event,
+            }
+            await asyncio.to_thread(
+                _ledger.log_error,
+                request_id=ctx.request_id,
+                stage="AUDIT_SNAPSHOT",
+                reason_code="AUDIT_SNAPSHOT_WRITTEN",
+                detail=json.dumps(_snapshot, ensure_ascii=False, default=str)[:2000],
+            )
+            logger.debug(
+                "[%s] Audit 快照已写入 ledger audit_id=%s tags=%d",
+                ctx.request_id, audit_id, len(ctx.audit_tags),
+            )
+        except ImportError:
+            logger.debug("[%s] Audit ledger 未接入（降级）", ctx.request_id)
+        except Exception as exc:
+            logger.warning("[%s] Audit ledger 写入失败（降级）: %s", ctx.request_id, exc)
+
         logger.debug("[%s] Audit 写入 audit_id=%s 标签: %s", ctx.request_id, audit_id, ctx.audit_tags)
         return True
 

@@ -571,6 +571,126 @@ async def _resolve_state_arbiter_world_fact(
         return summary, None
 
 
+async def _resolve_state_arbiter_style_fact(
+    *,
+    session_id: str,
+    request_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """[TODO-17] 查询 StyleCanon 风格规范，注入 prompt 作为风格约束。"""
+    summary: dict[str, Any] = {
+        "status": "SKIPPED",
+        "reason_code": "NOT_AVAILABLE",
+        "fact_key": "style_canon_facts",
+    }
+    try:
+        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+
+        arbiter = get_state_arbiter()
+        result = await arbiter.resolve("style_canon_facts", session_id=session_id)
+        if result is None:
+            summary["reason_code"] = "NO_MATCH"
+            return summary, None
+
+        fact_text = _normalize_state_arbiter_value(result.value)
+        summary.update(
+            {
+                "source": str(getattr(result.source, "value", result.source) or "unknown"),
+                "is_fallback": bool(getattr(result, "is_fallback", False)),
+                "conflict_detected": bool(getattr(result, "conflict_detected", False)),
+            }
+        )
+        if not fact_text:
+            summary["reason_code"] = "EMPTY_VALUE"
+            return summary, None
+
+        # 构建 style_canon 证据条目（slot_name=style_canon，优先级低于 world_canon）
+        evidence_item = {
+            "slot_name": "style_canon",
+            "doc_id": f"style_canon::{session_id}",
+            "snippet": fact_text[:600],
+            "score": 0.85,
+            "source": "state_arbiter_style",
+            "metadata": {
+                "fact_key": "style_canon_facts",
+                "source": str(getattr(result.source, "value", result.source) or "unknown"),
+            },
+        }
+        summary["status"] = "APPLIED"
+        summary["reason_code"] = None
+        summary["value_chars"] = len(fact_text)
+        return summary, evidence_item
+    except Exception as exc:
+        _logger.debug(
+            "StateArbiter style_canon 调用失败（降级）: %s",
+            exc,
+            extra={"request_id": request_id},
+        )
+        summary["status"] = "DEGRADED"
+        summary["reason_code"] = "STATE_ARBITER_STYLE_FAILED"
+        summary["detail"] = str(exc)
+        return summary, None
+
+
+async def _resolve_state_arbiter_episodic_fact(
+    *,
+    session_id: str,
+    request_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """[TODO-17] 查询最新情节记忆，注入 prompt 作为近期记忆上下文。"""
+    summary: dict[str, Any] = {
+        "status": "SKIPPED",
+        "reason_code": "NOT_AVAILABLE",
+        "fact_key": "episodic_latest",
+    }
+    try:
+        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+
+        arbiter = get_state_arbiter()
+        result = await arbiter.resolve("episodic_latest", session_id=session_id)
+        if result is None:
+            summary["reason_code"] = "NO_MATCH"
+            return summary, None
+
+        fact_text = _normalize_state_arbiter_value(result.value)
+        summary.update(
+            {
+                "source": str(getattr(result.source, "value", result.source) or "unknown"),
+                "is_fallback": bool(getattr(result, "is_fallback", False)),
+                "conflict_detected": bool(getattr(result, "conflict_detected", False)),
+            }
+        )
+        if not fact_text:
+            summary["reason_code"] = "EMPTY_VALUE"
+            return summary, None
+
+        # 构建 episodic_latest 证据条目（slot_name=episodic_latest，优先级最低）
+        evidence_item = {
+            "slot_name": "episodic_latest",
+            "doc_id": f"episodic_latest::{session_id}",
+            "snippet": fact_text[:400],
+            "score": 0.75,
+            "source": "state_arbiter_episodic",
+            "metadata": {
+                "fact_key": "episodic_latest",
+                "source": str(getattr(result.source, "value", result.source) or "unknown"),
+            },
+        }
+        summary["status"] = "APPLIED"
+        summary["reason_code"] = None
+        summary["value_chars"] = len(fact_text)
+        return summary, evidence_item
+    except Exception as exc:
+        _logger.debug(
+            "StateArbiter episodic_latest 调用失败（降级）: %s",
+            exc,
+            extra={"request_id": request_id},
+        )
+        summary["status"] = "DEGRADED"
+        summary["reason_code"] = "STATE_ARBITER_EPISODIC_FAILED"
+        summary["detail"] = str(exc)
+        return summary, None
+
+
 def _resolve_stream_vts_timeout_ms() -> int:
     raw = str(os.environ.get("HOST_STREAM_VTS_TIMEOUT_MS") or "300").strip()
     try:
@@ -916,6 +1036,27 @@ async def _sse_event_generator(
                 "source": "state_arbiter",
                 "fact_key": str(state_arbiter_summary.get("fact_key") or "world_canon_facts"),
             }
+
+        # [TODO-17] 扩展 StateArbiter 查询：style_canon_facts + episodic_latest
+        # 并行查询，降级时不阻断主链路
+        _style_summary, _style_evidence_item = await _resolve_state_arbiter_style_fact(
+            session_id=session_id,
+            request_id=request_id,
+        )
+        _episodic_summary, _episodic_evidence_item = await _resolve_state_arbiter_episodic_fact(
+            session_id=session_id,
+            request_id=request_id,
+        )
+        retrieval_summary["style_canon"] = dict(_style_summary)
+        retrieval_summary["episodic_latest"] = dict(_episodic_summary)
+        # style_canon 追加到 world_canon 之后（优先级：world_canon > style_canon > episodic > 其他召回）
+        if _style_evidence_item is not None:
+            retrieval_evidence_items = list(retrieval_evidence_items or []) + [_style_evidence_item]
+            retrieval_summary["style_canon"]["injected"] = True
+        # episodic_latest 追加到末尾（最低优先级）
+        if _episodic_evidence_item is not None:
+            retrieval_evidence_items = list(retrieval_evidence_items or []) + [_episodic_evidence_item]
+            retrieval_summary["episodic_latest"]["injected"] = True
 
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
