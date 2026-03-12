@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -11,6 +11,9 @@ import {
   fetchVtsStats,
   fetchQaStats,
   fetchLlmCallStats,
+  fetchLlmRouteStats,
+  fetchContextPackStats,
+  fetchUIAssertionStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -610,6 +613,33 @@ export default function Insights() {
         )}
       </section>
 
+      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
+      <RouteStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
+      <ContextPackSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-50: UIAssertion 统计 ===== */}
+      <UIAssertionSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
+      <RouteStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
+      <ContextPackSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-50: UIAssertion 统计 ===== */}
+      <UIAssertionSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
+      <RouteStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
+      <ContextPackSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-50: UIAssertion 统计 ===== */}
+      <UIAssertionSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -675,5 +705,135 @@ export default function Insights() {
         </div>
       </section>
     </div>
+  )
+}
+
+// ===== TODO-47: 路由决策统计子组件 =====
+function RouteStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchLlmRouteStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={GitBranch} title="LLM 路由决策统计" color="text-indigo-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总路由决策" value={data?.total_decisions ?? '—'} color="text-indigo-600" />
+        <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-orange-500'} />
+        <StatCard label="降级率" value={data?.fallback_rate != null ? `${data.fallback_rate}%` : '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-green-600'} />
+        <StatCard label="模型种类" value={data?.models?.length ?? '—'} color="text-gray-700" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">模型选择分布</div>
+          {(data?.models ?? []).length === 0 ? (
+            <div className="text-center py-6 text-gray-400 text-xs">暂无路由数据</div>
+          ) : (
+            <div className="space-y-2">
+              {(data?.models ?? []).map((m) => (
+                <div key={m.model_target} className="flex items-center gap-2">
+                  <div className="text-xs text-gray-600 w-24 truncate" title={m.model_target}>{m.model_target}</div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2">
+                    <div className="bg-indigo-400 h-2 rounded-full" style={{ width: `${data.total_decisions > 0 ? (m.select_count / data.total_decisions * 100).toFixed(1) : 0}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-500 w-10 text-right">{m.select_count}</div>
+                  {m.fallback_count > 0 && <div className="text-xs text-orange-500">↓{m.fallback_count}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">任务类型分布</div>
+          {(data?.task_types ?? []).length === 0 ? (
+            <div className="text-center py-6 text-gray-400 text-xs">暂无数据</div>
+          ) : (
+            <div className="space-y-2">
+              {(data?.task_types ?? []).map((t) => (
+                <div key={t.task_type} className="flex items-center gap-2">
+                  <div className="text-xs text-gray-600 w-20 truncate">{t.task_type}</div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2">
+                    <div className="bg-purple-400 h-2 rounded-full" style={{ width: `${t.pct}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-500 w-10 text-right">{t.pct}%</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ===== TODO-49: ContextPack 预算统计子组件 =====
+function ContextPackSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchContextPackStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={Layers} title="ContextPack Token 预算统计" color="text-cyan-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总 Pack 数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
+        <StatCard label="平均 Token 数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />
+        <StatCard label="截断率" value={data?.truncation_rate != null ? `${data.truncation_rate}%` : '—'} color={data?.truncation_rate > 30 ? 'text-red-500' : 'text-green-600'} />
+        <StatCard label="冲突率" value={data?.conflict_rate != null ? `${data.conflict_rate}%` : '—'} color={data?.conflict_rate > 10 ? 'text-orange-500' : 'text-green-600'} />
+      </div>
+      {(data?.slots ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">各槽位 Token 消耗</div>
+          <div className="space-y-2">
+            {(data?.slots ?? []).map((s) => (
+              <div key={s.slot} className="flex items-center gap-2">
+                <div className="text-xs text-gray-600 w-28 truncate font-mono" title={s.slot}>{s.slot}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-cyan-400 h-2 rounded-full" style={{ width: `${data.avg_total_tokens > 0 ? Math.min(100, s.avg_tokens / data.avg_total_tokens * 100).toFixed(1) : 0}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-12 text-right">{Math.round(s.avg_tokens)} tok</div>
+                {s.truncation_rate > 0 && <div className="text-xs text-orange-400">截断{s.truncation_rate}%</div>}
+                {s.conflict_suppressed_count > 0 && <div className="text-xs text-red-400">冲突{s.conflict_suppressed_count}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-50: UIAssertion 统计子组件 =====
+function UIAssertionSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchUIAssertionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={ShieldAlert} title="UI 断言安全统计" color="text-red-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总断言事件" value={data?.total_assertions ?? '—'} color="text-gray-700" />
+        <StatCard label="敏感界面拦截" value={data?.sensitive_blocked ?? '—'} color="text-red-600" />
+        <StatCard label="前置断言失败" value={data?.precondition_failed ?? '—'} color="text-orange-500" />
+        <StatCard label="后置断言失败" value={data?.postcondition_failed ?? '—'} color="text-yellow-600" />
+      </div>
+      {(data?.top_failed_reasons ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">前置断言失败原因分布</div>
+          <div className="space-y-1.5">
+            {(data?.top_failed_reasons ?? []).map((r, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-36 truncate">{r.reason}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                  <div className="bg-red-400 h-1.5 rounded-full" style={{ width: `${data.precondition_failed > 0 ? (r.count / data.precondition_failed * 100).toFixed(1) : 0}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-8 text-right">{r.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }

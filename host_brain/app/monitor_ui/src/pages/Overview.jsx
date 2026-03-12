@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain } from 'lucide-react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
-import { fetchServicesHealth } from '../api/obs.js'
+import { fetchServicesHealth, fetchInputDispatchStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -13,6 +13,7 @@ const WINDOW_OPTIONS = [
 
 export default function Overview() {
   const [data, setData] = useState(null)
+  const [dispatchData, setDispatchData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -22,8 +23,12 @@ export default function Overview() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const res = await fetchServicesHealth({ window_minutes: windowMinutes })
+      const [res, dispRes] = await Promise.all([
+        fetchServicesHealth({ window_minutes: windowMinutes }),
+        fetchInputDispatchStats({ window_minutes: windowMinutes }).catch(() => null),
+      ])
       setData(res)
+      setDispatchData(dispRes)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -168,6 +173,57 @@ export default function Overview() {
           {/* 无数据 */}
           {services.length === 0 && (
             <div className="text-center py-16 text-gray-400 text-sm">暂无服务数据</div>
+          )}
+
+          {/* TODO-48: InputDispatch 统计卡片 */}
+          {dispatchData && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <ArrowDownToLine size={15} className="text-gray-500" />
+                <h2 className="text-sm font-semibold text-gray-700">输入分发统计</h2>
+                <span className="text-xs text-gray-400">（近 {windowMinutes} 分钟）</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-blue-600">{dispatchData.total_accepted ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">已接收</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-green-600">{dispatchData.total_completed ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">已完成</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className="text-xl font-bold text-red-500">{dispatchData.total_failed ?? '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">失败</div>
+                </div>
+                <div className="card p-3 text-center">
+                  <div className={`text-xl font-bold ${dispatchData.overall_success_rate >= 90 ? 'text-green-600' : dispatchData.overall_success_rate >= 70 ? 'text-orange-500' : 'text-red-500'}`}>
+                    {dispatchData.overall_success_rate != null ? `${dispatchData.overall_success_rate}%` : '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">成功率</div>
+                </div>
+              </div>
+              {(dispatchData.sources ?? []).length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(dispatchData.sources ?? []).map((s) => (
+                    <div key={s.source} className="card p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-700">{s.source}</span>
+                        <span className={`text-xs font-bold ${s.success_rate >= 90 ? 'text-green-600' : s.success_rate >= 70 ? 'text-orange-500' : 'text-red-500'}`}>
+                          {s.success_rate != null ? `${s.success_rate}%` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex gap-3 text-xs text-gray-500">
+                        <span>接收 {s.accepted}</span>
+                        <span className="text-green-600">完成 {s.completed}</span>
+                        <span className="text-red-500">失败 {s.failed}</span>
+                        {s.not_wired > 0 && <span className="text-gray-400">未接入 {s.not_wired}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

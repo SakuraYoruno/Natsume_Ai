@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react'
-import { Bot, Play, Square, RefreshCw, CheckCircle, XCircle, Clock, Zap } from 'lucide-react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
+import { fetchUIAssertionStats } from '../api/obs.js'
+import { Bot, Play, Square, RefreshCw, CheckCircle, XCircle, Clock, Zap, ShieldAlert } from 'lucide-react'
 
 // ===== 工具函数 =====
 function formatTime(tsMs) {
@@ -29,6 +30,7 @@ export default function AgentLoop() {
   const [maxRounds, setMaxRounds] = useState(5)
   const [roundTimeout, setRoundTimeout] = useState(30)
   const [totalTimeout, setTotalTimeout] = useState(180)
+  const [uiAssertionData, setUiAssertionData] = useState(null)
   const [useMock, setUseMock]     = useState(false)
   const [useEdgeRpc, setUseEdgeRpc] = useState(false)
   const [imageConsent, setImageConsent] = useState(false)
@@ -286,6 +288,29 @@ export default function AgentLoop() {
 
         {/* 右侧：SSE 事件流 */}
         <div className="lg:col-span-2">
+          {/* TODO-50: UIAssertion 统计侧边栏 */}
+          {uiAssertionData && (uiAssertionData.total_assertions > 0) && (
+            <div className="card p-3 mb-3 border border-red-100 bg-red-50">
+              <div className="flex items-center gap-1.5 mb-2">
+                <ShieldAlert size={13} className="text-red-500" />
+                <span className="text-xs font-semibold text-red-700">UI 断言统计（近 1h）</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-base font-bold text-red-600">{uiAssertionData.sensitive_blocked}</div>
+                  <div className="text-xs text-gray-500">敏感拦截</div>
+                </div>
+                <div>
+                  <div className="text-base font-bold text-orange-500">{uiAssertionData.precondition_failed}</div>
+                  <div className="text-xs text-gray-500">前置失败</div>
+                </div>
+                <div>
+                  <div className="text-base font-bold text-yellow-600">{uiAssertionData.postcondition_failed}</div>
+                  <div className="text-xs text-gray-500">后置失败</div>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="card overflow-hidden">
             <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center gap-1.5">

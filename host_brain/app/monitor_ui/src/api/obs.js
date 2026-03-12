@@ -462,16 +462,56 @@ export function fetchRateLimitBackendStats(params = {}) {
   return request(`/obs/rate-limit/backend-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-44: Vault Manifest 统计 =====
+// ===== TODO-47: RoutingMatrix 路由决策统计 =====
 
 /**
- * ArtifactVault Manifest 统计（ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表）
- * @param {object} params - { limit }
+ * RoutingMatrix 路由决策统计（按 model_id 分组的选择次数/降级次数/降级率/task_type 分布）
+ * @param {object} params - { window_minutes }
  */
-export function fetchVaultStats(params = {}) {
+export function fetchLlmRouteStats(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
-  return request(`/obs/vault/stats${qs ? '?' + qs : ''}`)
+  return request(`/obs/llm/route-stats${qs ? '?' + qs : ''}`)
 }
+
+// ===== TODO-48: InputDispatch 生命周期统计 =====
+
+/**
+ * InputDispatch 生命周期统计（按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量）
+ * @param {object} params - { window_minutes, interval_minutes }
+ */
+export function fetchInputDispatchStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/dispatch-stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-49: ContextPack token 预算统计 =====
+
+/**
+ * ContextPack token 预算统计（各槽位平均 token 消耗/截断率/冲突抑制率）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchContextPackStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/context-pack/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-50: UIAssertionGuard 统计 =====
+
+/**
+ * UIAssertionGuard 统计（SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchUIAssertionStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/ui-assertion/stats${qs ? '?' + qs : ''}`)
+}
+
 

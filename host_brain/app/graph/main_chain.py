@@ -641,6 +641,127 @@ class RecallFusionNode(ChainNode):
                 context_compressor_meta = {"mode": "DEGRADED", "error": str(_cc_exc)[:100]}
                 logger.warning("[%s] ContextCompressor 压缩异常（降级）: %s", ctx.request_id, _cc_exc)
 
+            # ── TODO-45：StateArbiter 事实仲裁 ──────────────────────────────
+            state_arbiter_meta: dict[str, Any] = {"mode": "SKIPPED"}
+            try:
+                from host_brain.app.memory.state_arbiter import StateArbiter  # noqa: PLC0415
+
+                # 获取或创建会话级 StateArbiter 单例
+                _arbiter: StateArbiter = ctx.metadata.get("_state_arbiter_instance")
+                if not isinstance(_arbiter, StateArbiter):
+                    _arbiter = StateArbiter()
+                    # 注册状态源：从 filtered_evidence_items 中提取各源数据
+                    _world_canon_items = {
+                        str(item.get("source_id") or item.get("doc_id") or ""): item
+                        for item in filtered_evidence_items
+                        if str(item.get("source_type") or item.get("kind") or "").upper()
+                        in ("WORLD_CANON", "CANON", "AUTHORITATIVE")
+                    }
+                    _episodic_items = {
+                        str(item.get("source_id") or ""): item
+                        for item in filtered_evidence_items
+                        if str(item.get("source_type") or item.get("kind") or "").upper()
+                        in ("EPISODIC", "EPISODIC_STORE", "MEMORY")
+                    }
+
+                    from host_brain.app.memory.state_arbiter import StateSource  # noqa: PLC0415
+
+                    def _world_canon_getter(fact_key: str) -> Any:
+                        for item in _world_canon_items.values():
+                            content = str(item.get("snippet") or item.get("content") or "")
+                            if fact_key.lower() in content.lower():
+                                return content[:200]
+                        return None
+
+                    def _episodic_getter(fact_key: str) -> Any:
+                        for item in _episodic_items.values():
+                            content = str(item.get("snippet") or item.get("content") or "")
+                            if fact_key.lower() in content.lower():
+                                return content[:200]
+                        return None
+
+                    _arbiter.register_source(StateSource.WORLD_CANON, _world_canon_getter)
+                    _arbiter.register_source(StateSource.EPISODIC_STORE, _episodic_getter)
+                    ctx.metadata["_state_arbiter_instance"] = _arbiter
+
+                # 对关键事实键进行仲裁
+                _KEY_FACTS = ["user.identity", "user.name", "user.age", "user.occupation"]
+                _arbiter_results: list[dict] = []
+                _conflict_count = 0
+                for _fact_key in _KEY_FACTS:
+                    try:
+                        _result = await _arbiter.resolve(_fact_key, session_id=ctx.session_id)
+                        if _result is not None:
+                            _arbiter_results.append({
+                                "fact_key": _fact_key,
+                                "winner_source": _result.source.value,
+                                "conflict_detected": _result.conflict_detected,
+                                "is_fallback": _result.is_fallback,
+                            })
+                            if _result.conflict_detected:
+                                _conflict_count += 1
+                    except Exception as _af_exc:
+                        logger.debug("[%s] StateArbiter 仲裁 %s 失败: %s", ctx.request_id, _fact_key, _af_exc)
+
+                state_arbiter_meta = {
+                    "mode": "ACTIVE",
+                    "keys_resolved": len(_arbiter_results),
+                    "conflict_count": _conflict_count,
+                    "results": _arbiter_results,
+                }
+                if _conflict_count > 0:
+                    ctx.audit_tags.append(f"STATE_ARBITER_CONFLICT:{_conflict_count}")
+                logger.debug(
+                    "[%s] StateArbiter 仲裁完成 keys=%d conflicts=%d",
+                    ctx.request_id, len(_arbiter_results), _conflict_count,
+                )
+            except (ImportError, AttributeError):
+                state_arbiter_meta = {"mode": "SKIPPED_NOT_WIRED"}
+            except Exception as _sa_exc:
+                state_arbiter_meta = {"mode": "DEGRADED", "error": str(_sa_exc)[:100]}
+                logger.warning("[%s] StateArbiter 仲裁异常（降级）: %s", ctx.request_id, _sa_exc)
+
+            # ── TODO-49：ContextPackBuilder subgraph_trace 持久化 ────────
+            context_pack_trace_meta: dict[str, Any] = {"mode": "SKIPPED"}
+            try:
+                from host_brain.app.recall.context_pack_builder import ContextPackBuilder  # noqa: PLC0415
+                _builder = ContextPackBuilder()
+                # 将 filtered_evidence_items 转换为 recall_results 格式
+                _recall_results: dict[str, str] = {}
+                for _item in filtered_evidence_items:
+                    _slot = str(
+                        _item.get("source_type") or _item.get("kind") or "retrieval"
+                    ).lower().replace(" ", "_")
+                    _content = str(_item.get("snippet") or _item.get("content") or "")
+                    if _content:
+                        _recall_results[_slot] = (_recall_results.get(_slot, "") + "\n" + _content).strip()
+
+                if _recall_results:
+                    _pack = _builder.build(_recall_results, task_type=ctx.task_type.value)
+                    _trace = list(_pack.subgraph_trace)
+                    _conflict_events = list(_pack.conflict_events)
+                    context_pack_trace_meta = {
+                        "mode": "ACTIVE",
+                        "total_tokens": _pack.total_token_count,
+                        "slot_count": len(_trace),
+                        "conflict_events": len(_conflict_events),
+                        "trace": _trace[:10],  # 最多记录 10 个槽位
+                    }
+                    ctx.metadata["context_pack_trace"] = context_pack_trace_meta
+                    if _conflict_events:
+                        ctx.audit_tags.append(f"CONTEXT_PACK_CONFLICT:{len(_conflict_events)}")
+                    logger.debug(
+                        "[%s] ContextPackBuilder trace 完成 tokens=%d slots=%d",
+                        ctx.request_id, _pack.total_token_count, len(_trace),
+                    )
+                else:
+                    context_pack_trace_meta = {"mode": "SKIPPED_NO_RESULTS"}
+            except (ImportError, AttributeError):
+                context_pack_trace_meta = {"mode": "SKIPPED_NOT_WIRED"}
+            except Exception as _cp_exc:
+                context_pack_trace_meta = {"mode": "DEGRADED", "error": str(_cp_exc)[:100]}
+                logger.warning("[%s] ContextPackBuilder trace 异常（降级）: %s", ctx.request_id, _cp_exc)
+
             ctx.recall_context_pack = {
                 "retrieval_summary": dict(orchestrator_result.retrieval_summary),
                 "retrieval_evidence_items": filtered_evidence_items,
@@ -657,10 +778,14 @@ class RecallFusionNode(ChainNode):
                 "context_pack_type": "RetrievalOrchestratorResult",
                 "memory_guard": memory_guard_meta,
                 "context_compressor": context_compressor_meta,
+                "state_arbiter": state_arbiter_meta,
+                "context_pack_trace": context_pack_trace_meta,
                 "circuit_breaker": {"state": _cb_state, "skipped": False},
             }
             ctx.metadata.setdefault("audit_refs", {})["memory_guard"] = memory_guard_meta
             ctx.metadata.setdefault("audit_refs", {})["context_compressor"] = context_compressor_meta
+            ctx.metadata.setdefault("audit_refs", {})["state_arbiter"] = state_arbiter_meta
+            ctx.metadata.setdefault("audit_refs", {})["context_pack_trace"] = context_pack_trace_meta
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:
@@ -736,6 +861,83 @@ class LlmGatewayNode(ChainNode):
         }
         if not has_raw_output:
             ctx.audit_tags.append("LLM_GATEWAY_DELEGATED_STREAM")
+
+        # ── TODO-46：RoutingMatrix 路由决策 ──────────────────────────────
+        routing_matrix_meta: dict[str, Any] = {"mode": "SKIPPED"}
+        try:
+            from host_brain.app.llm.routing_matrix import RoutingMatrix  # noqa: PLC0415
+            from host_brain.app.schemas.routing_types import (  # noqa: PLC0415
+                LatencyBudget,
+                ModelTarget,
+                TaskType as RoutingTaskType,
+            )
+            from host_brain.app.schemas.memory_types import RiskLevel  # noqa: PLC0415
+
+            # 从 ctx 提取路由参数
+            _task_type_str = ctx.task_type.value.upper()
+            _routing_task_map = {
+                "CHAT": RoutingTaskType.CHAT,
+                "REASONING": RoutingTaskType.REASONING,
+                "CODE": RoutingTaskType.CODE,
+                "TRANSLATE": RoutingTaskType.TRANSLATE,
+                "DREAM": RoutingTaskType.DREAM,
+                "DIARY": RoutingTaskType.DIARY,
+            }
+            _routing_task = _routing_task_map.get(_task_type_str, RoutingTaskType.CHAT)
+
+            # 从 recall_fusion 估算 context_length
+            _evidence_count = int(
+                (ctx.metadata.get("recall_fusion") or {}).get("evidence_count") or 0
+            )
+            _context_length = _evidence_count * 200  # 粗估：每条证据约 200 tokens
+
+            # 从 metadata 提取 risk_level
+            _risk_str = str(ctx.metadata.get("risk_level") or "LOW").strip().upper()
+            _risk_map = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH}
+            _risk_level = _risk_map.get(_risk_str, RiskLevel.LOW)
+
+            # 延迟预算：CHAT 场景默认 FAST，其他 NORMAL
+            _latency_budget = LatencyBudget.FAST if _routing_task == RoutingTaskType.CHAT else LatencyBudget.NORMAL
+
+            _routing_matrix = RoutingMatrix()
+            _route_decision = _routing_matrix.select(
+                task_type=_routing_task,
+                latency_budget=_latency_budget,
+                risk_level=_risk_level,
+                context_length=_context_length,
+                requires_structured_output=False,
+            )
+
+            routing_matrix_meta = {
+                "mode": "ACTIVE",
+                "selected_model": _route_decision.selected_model.value
+                    if hasattr(_route_decision.selected_model, "value")
+                    else str(_route_decision.selected_model),
+                "is_fallback": bool(_route_decision.is_fallback),
+                "fallback_reason": _route_decision.fallback_reason,
+                "task_type": _task_type_str,
+                "latency_budget": _latency_budget.value
+                    if hasattr(_latency_budget, "value")
+                    else str(_latency_budget),
+                "risk_level": _risk_str,
+                "context_length": _context_length,
+            }
+            ctx.metadata["routing_matrix"] = routing_matrix_meta
+            if _route_decision.is_fallback:
+                ctx.audit_tags.append(f"ROUTING_FALLBACK:{_route_decision.selected_model}")
+            else:
+                ctx.audit_tags.append(f"ROUTING_SELECTED:{_route_decision.selected_model}")
+            logger.debug(
+                "[%s] RoutingMatrix 路由决策: model=%s is_fallback=%s",
+                ctx.request_id,
+                _route_decision.selected_model,
+                _route_decision.is_fallback,
+            )
+        except (ImportError, AttributeError):
+            routing_matrix_meta = {"mode": "SKIPPED_NOT_WIRED"}
+        except Exception as _rm_exc:
+            routing_matrix_meta = {"mode": "DEGRADED", "error": str(_rm_exc)[:100]}
+            logger.warning("[%s] RoutingMatrix 路由决策异常（降级）: %s", ctx.request_id, _rm_exc)
 
         # ── TODO-27：EmotionTimeline 追踪 ────────────────────────────────
         _emotion_tag = str(ctx.metadata.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"

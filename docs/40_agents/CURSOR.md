@@ -1223,4 +1223,112 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - `monitor_ui/src/pages/Canon.jsx`：新增 Vault Manifest 统计面板
 - `monitor_ui/src/api/obs.js`：新增 `fetchVaultStats`
 
+---
+
+### TODO-45：StateArbiter 接入 RecallFusionNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（StateArbiter 事实仲裁已接入主链路）
+
+**问题**：`memory/state_arbiter.py` 有完整的六源优先级仲裁器，但主链路的 `RecallFusionNode` 在七路召回后直接合并结果，没有经过 StateArbiter 仲裁，多路召回结果存在冲突时没有权威裁决机制。
+
+**新增功能**：
+- `RecallFusionNode.execute()` 在 ContextCompressor 之后接入 `StateArbiter.resolve()`
+- 对关键事实键（`user.identity`/`user.name`/`user.age`/`user.occupation`）进行仲裁
+- 仲裁结果（`winner_source`/`conflict_detected`/`is_fallback`）写入 `ctx.metadata["state_arbiter"]`
+- 冲突事件写入 `ctx.audit_tags`（`STATE_ARBITER_CONFLICT:N`）
+- 降级策略：StateArbiter 不可用时跳过，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：RecallFusionNode 接入 StateArbiter
+
+---
+
+### TODO-46：RoutingMatrix 接入 LlmGatewayNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（RoutingMatrix 路由决策已接入主链路）
+
+**问题**：`llm/routing_matrix.py` 有完整的多维度路由矩阵，但 `LlmGatewayNode` 在选择模型时没有调用 `RoutingMatrix.select()`，完全绕过了路由逻辑。
+
+**新增功能**：
+- `LlmGatewayNode.execute()` 接入 `RoutingMatrix.select()`
+- 从 `ctx.metadata` 提取 `task_type`/`risk_level`/`context_length`，计算路由决策
+- `RouteDecision`（`selected_model`/`is_fallback`/`fallback_reason`）写入 `ctx.metadata["routing_matrix"]`
+- 路由结果写入 `ctx.audit_tags`（`ROUTING_SELECTED:model` 或 `ROUTING_FALLBACK:model`）
+- 降级策略：RoutingMatrix 不可用时使用默认模型，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：LlmGatewayNode 接入 RoutingMatrix
+
+---
+
+### TODO-47：RoutingMatrix 路由决策统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（路由决策统计已上线）
+
+**问题**：`llm_route_log` 表记录了每次路由决策，但 `obs_routes.py` 没有任何路由统计端点，无法观测模型选择分布和降级频率。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/llm/route-stats`：路由决策统计（按 model_id 分组的选择次数/降级次数/降级率/task_type 分布）
+- `Insights.jsx` 新增路由决策分布区块（GitBranch 图标，靛蓝色主题）：模型选择分布进度条 + 任务类型分布进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/llm/route-stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 RouteStatsSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchLlmRouteStats`
+
+---
+
+### TODO-48：InputDispatch 生命周期统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（输入分发统计已上线）
+
+**问题**：`input_routes.py` 的 `_dispatch_to_graph()` 写入了完整的生命周期日志，但 WebUI 完全没有对应的输入分发统计面板。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/input/dispatch-stats`：输入分发统计（按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量、成功率、平均延迟 + 时序趋势）
+- `Overview.jsx` 新增输入分发统计卡片（ArrowDownToLine 图标）：4 个聚合指标卡片 + 按 source 分组的详情卡片
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/input/dispatch-stats` 端点
+- `monitor_ui/src/pages/Overview.jsx`：新增输入分发统计区块
+- `monitor_ui/src/api/obs.js`：新增 `fetchInputDispatchStats`
+
+---
+
+### TODO-49：ContextPackBuilder token 预算统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（ContextPack token 预算统计已上线）
+
+**问题**：`recall/context_pack_builder.py` 的 `ContextPackBuilder.build()` 在 `subgraph_trace` 中记录了各路召回的 token 消耗和截断情况，但这些数据只存在于 `ctx.metadata`，从未写入审计日志，也没有 WebUI 面板展示。
+
+**新增功能**：
+- `RecallFusionNode.execute()` 接入 `ContextPackBuilder.build()`，将 `subgraph_trace` 写入 `ctx.metadata["context_pack_trace"]`
+- `obs_routes.py` 新增 `GET /obs/context-pack/stats`：ContextPack token 预算统计（各槽位平均 token 消耗/截断率/冲突抑制率）
+- `Insights.jsx` 新增 ContextPack 预算统计区块（Layers 图标，青色主题）：4 个聚合指标卡片 + 各槽位 token 消耗进度条
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：RecallFusionNode 接入 ContextPackBuilder
+- `host_brain/app/obs_routes.py`：新增 `/obs/context-pack/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 ContextPackSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchContextPackStats`
+
+---
+
+### TODO-50：UIAssertionGuard 统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（UI 断言统计已上线）
+
+**问题**：`vision/ui_assertion.py` 的 `UIAssertionGuard` 在断言失败时写入审计日志，但 WebUI 的 `AgentLoop.jsx` 页面完全没有展示这些断言统计。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/ui-assertion/stats`：UI 断言统计（SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布、前置断言失败原因分布）
+- `AgentLoop.jsx` 新增 UI 断言统计侧边栏（ShieldAlert 图标，红色主题）：3 个拦截计数卡片
+- `Insights.jsx` 新增 UIAssertionSection 子组件（ShieldAlert 图标，红色主题）：4 个聚合指标卡片 + 前置断言失败原因分布进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/ui-assertion/stats` 端点
+- `monitor_ui/src/pages/AgentLoop.jsx`：新增 UI 断言统计侧边栏
+- `monitor_ui/src/pages/Insights.jsx`：新增 UIAssertionSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchUIAssertionStats`
+
 
