@@ -3307,3 +3307,194 @@ async def get_context_compressor_stats(
         summary_generated_count=summary_generated_count,
         timestamp=now,
     )
+
+
+# ---------------------------------------------------------------------------
+# TODO-65: GET /obs/prompt-builder/stats  — PromptBuilder 构建统计
+# ---------------------------------------------------------------------------
+class PromptBuilderStatsResponse(BaseModel):
+    window_minutes: int
+    total_builds: int
+    injection_detected_count: int
+    injection_blocked_count: int
+    injection_detection_rate: Optional[float]
+    high_risk_count: int
+    critical_risk_count: int
+    slot_fill_distribution: List[Dict[str, Any]]
+    avg_user_message_len: Optional[float]
+    degraded_count: int
+    timestamp: int
+
+@router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
+async def get_prompt_builder_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-65: PromptBuilder 构建统计 — 注入检测率/slot 填充分布/高风险消息比例。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("prompt_builder_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 PromptBuilder 相关事件
+    pb_rows = [
+        r for r in rows
+        if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper()
+               for tag in ("PROMPT_BUILT", "PROMPT_INJECTION", "PROMPT_BUILDER", "INJECTION_DETECTED"))
+    ]
+
+    from collections import Counter
+    total = len(pb_rows)
+    injection_detected_count = sum(1 for r in pb_rows if "INJECTION_DETECTED" in str(r.get("audit_tag") or "").upper())
+    injection_blocked_count = sum(1 for r in pb_rows if "INJECTION_BLOCKED" in str(r.get("audit_tag") or "").upper())
+    injection_detection_rate = round(injection_detected_count / total * 100, 1) if total > 0 else None
+    degraded_count = sum(1 for r in pb_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
+
+    high_risk_count = 0
+    critical_risk_count = 0
+    slot_counter: Counter = Counter()
+    msg_lens: list = []
+
+    for r in pb_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+
+        risk_level = str(detail.get("risk_level") or r.get("risk_level") or "").upper()
+        if risk_level == "HIGH":
+            high_risk_count += 1
+        elif risk_level == "CRITICAL":
+            critical_risk_count += 1
+
+        # slot 填充统计
+        slots_filled = list(detail.get("slots_filled") or r.get("slots_filled") or [])
+        for slot in slots_filled:
+            slot_counter[str(slot)] += 1
+
+        # 用户消息长度
+        msg_len = int(detail.get("user_message_len") or r.get("user_message_len") or 0)
+        if msg_len > 0:
+            msg_lens.append(msg_len)
+
+    avg_user_message_len = round(sum(msg_lens) / len(msg_lens), 1) if msg_lens else None
+    total_slot_fills = sum(slot_counter.values())
+    slot_fill_distribution = [
+        {
+            "slot": slot,
+            "count": cnt,
+            "pct": round(cnt / total_slot_fills * 100, 1) if total_slot_fills > 0 else 0.0,
+        }
+        for slot, cnt in slot_counter.most_common(10)
+    ]
+
+    return PromptBuilderStatsResponse(
+        window_minutes=window_minutes,
+        total_builds=total,
+        injection_detected_count=injection_detected_count,
+        injection_blocked_count=injection_blocked_count,
+        injection_detection_rate=injection_detection_rate,
+        high_risk_count=high_risk_count,
+        critical_risk_count=critical_risk_count,
+        slot_fill_distribution=slot_fill_distribution,
+        avg_user_message_len=avg_user_message_len,
+        degraded_count=degraded_count,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-66: GET /obs/episodic-store/stats  — EpisodicStore 写入统计
+# ---------------------------------------------------------------------------
+class EpisodicStoreStatsResponse(BaseModel):
+    window_minutes: int
+    total_attempts: int
+    written_count: int
+    skipped_count: int
+    write_rate: Optional[float]
+    memory_guard_blocked_count: int
+    dream_blocked_count: int
+    narrative_only_blocked_count: int
+    distill_eligible_count: int
+    avg_occurrence_count: Optional[float]
+    timestamp: int
+
+@router.get("/episodic-store/stats", response_model=EpisodicStoreStatsResponse)
+async def get_episodic_store_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-66: EpisodicStore 写入统计 — 写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    rows = []
+    for table in ("episodic_store_log", "audit_log", "error_log"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    # 过滤 EpisodicStore 相关事件
+    _ep_tags = {"EPISODIC_WRITTEN", "EPISODIC_SKIPPED", "MEMORY_GUARD_DREAM_BLOCKED",
+                "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE",
+                "SKIPPED_MEMORY_GUARD"}
+    ep_rows = [
+        r for r in rows
+        if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper()
+               for tag in _ep_tags)
+    ]
+
+    total = len(ep_rows)
+    written_count = sum(1 for r in ep_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
+    skipped_count = sum(1 for r in ep_rows if any(
+        t in str(r.get("audit_tag") or r.get("stage") or "").upper()
+        for t in ("EPISODIC_SKIPPED", "SKIPPED_MEMORY_GUARD")
+    ))
+    memory_guard_blocked_count = sum(1 for r in ep_rows if any(
+        t in str(r.get("audit_tag") or "").upper()
+        for t in ("MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_FILTERED")
+    ))
+    dream_blocked_count = sum(1 for r in ep_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
+    narrative_only_blocked_count = sum(1 for r in ep_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
+    distill_eligible_count = sum(1 for r in ep_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
+    write_rate = round(written_count / total * 100, 1) if total > 0 else None
+
+    occurrence_counts: list = []
+    for r in ep_rows:
+        detail_raw = r.get("detail") or "{}"
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
+        except Exception:
+            detail = {}
+        occ = int(detail.get("occurrence_count") or r.get("occurrence_count") or 0)
+        if occ > 0:
+            occurrence_counts.append(occ)
+
+    avg_occurrence_count = round(sum(occurrence_counts) / len(occurrence_counts), 1) if occurrence_counts else None
+
+    return EpisodicStoreStatsResponse(
+        window_minutes=window_minutes,
+        total_attempts=total,
+        written_count=written_count,
+        skipped_count=skipped_count,
+        write_rate=write_rate,
+        memory_guard_blocked_count=memory_guard_blocked_count,
+        dream_blocked_count=dream_blocked_count,
+        narrative_only_blocked_count=narrative_only_blocked_count,
+        distill_eligible_count=distill_eligible_count,
+        avg_occurrence_count=avg_occurrence_count,
+        timestamp=now,
+    )

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2 } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -19,6 +19,8 @@ import {
   fetchMemoryGuardStats,
   fetchStateArbiterStats,
   fetchContextCompressorStats,
+  fetchPromptBuilderStats,
+  fetchEpisodicStoreStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -642,6 +644,12 @@ export default function Insights() {
       {/* ===== TODO-61: ContextCompressor 压缩效率统计 ===== */}
       <ContextCompressorStatsSection windowMinutes={windowMinutes} />
 
+      {/* ===== TODO-65: PromptBuilder 构建统计 ===== */}
+      <PromptBuilderStatsSection windowMinutes={windowMinutes} />
+
+      {/* ===== TODO-66: EpisodicStore 写入统计 ===== */}
+      <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
+
       {/* ===== TODO-32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
@@ -988,6 +996,71 @@ function ContextCompressorStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
+    </section>
+  )
+}
+
+// ===== TODO-65: PromptBuilder 构建统计子组件 =====
+function PromptBuilderStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchPromptBuilderStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={FileCode} title="PromptBuilder 构建统计" color="text-violet-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总构建次数" value={data?.total_builds ?? '—'} color="text-gray-700" />
+        <StatCard label="注入检测" value={data?.injection_detected_count ?? '—'} color="text-red-600" />
+        <StatCard label="注入拦截" value={data?.injection_blocked_count ?? '—'} color="text-orange-500" />
+        <StatCard label="检测率" value={data?.injection_detection_rate != null ? `${data.injection_detection_rate}%` : '—'} color={data?.injection_detection_rate > 5 ? 'text-red-500' : 'text-green-600'} />
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <StatCard label="高风险消息" value={data?.high_risk_count ?? '—'} color="text-red-600" />
+        <StatCard label="严重风险消息" value={data?.critical_risk_count ?? '—'} color="text-red-700" />
+        <StatCard label="降级次数" value={data?.degraded_count ?? '—'} color="text-orange-500" />
+      </div>
+      {(data?.slot_fill_distribution ?? []).length > 0 && (
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">Slot 填充分布</div>
+          <div className="space-y-2">
+            {(data?.slot_fill_distribution ?? []).map((s) => (
+              <div key={s.slot} className="flex items-center gap-2">
+                <div className="text-xs font-mono text-gray-600 w-36 truncate">{s.slot}</div>
+                <div className="flex-1 bg-gray-100 rounded-full h-2">
+                  <div className="bg-violet-400 h-2 rounded-full" style={{ width: `${s.pct}%` }} />
+                </div>
+                <div className="text-xs text-gray-500 w-10 text-right">{s.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ===== TODO-66: EpisodicStore 写入统计子组件 =====
+function EpisodicStoreStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  React.useEffect(() => {
+    fetchEpisodicStoreStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  return (
+    <section>
+      <SectionTitle icon={Archive} title="EpisodicStore 写入统计" color="text-amber-600" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="总尝试次数" value={data?.total_attempts ?? '—'} color="text-gray-700" />
+        <StatCard label="写入成功" value={data?.written_count ?? '—'} color="text-green-600" />
+        <StatCard label="跳过次数" value={data?.skipped_count ?? '—'} color="text-gray-500" />
+        <StatCard label="写入率" value={data?.write_rate != null ? `${data.write_rate}%` : '—'} color={data?.write_rate < 50 ? 'text-orange-500' : 'text-green-600'} />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="MemoryGuard 拦截" value={data?.memory_guard_blocked_count ?? '—'} color="text-red-600" />
+        <StatCard label="Dream 拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
+        <StatCard label="NARRATIVE_ONLY" value={data?.narrative_only_blocked_count ?? '—'} color="text-orange-500" />
+        <StatCard label="蒸馏资格" value={data?.distill_eligible_count ?? '—'} color="text-blue-600" />
+      </div>
     </section>
   )
 }

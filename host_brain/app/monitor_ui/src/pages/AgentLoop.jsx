@@ -44,6 +44,20 @@ export default function AgentLoop() {
   const abortRef = useRef(null)
   const eventsEndRef = useRef(null)
 
+  // TODO-63: 加载 UIAssertion 统计数据（近 1h）
+  useEffect(() => {
+    fetchUIAssertionStats({ window_minutes: 60 })
+      .then(setUiAssertionData)
+      .catch(() => {})
+    // 每 5 分钟自动刷新
+    const timer = setInterval(() => {
+      fetchUIAssertionStats({ window_minutes: 60 })
+        .then(setUiAssertionData)
+        .catch(() => {})
+    }, 5 * 60 * 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   // 加载 Agent 配置信息
   const loadInfo = useCallback(async () => {
     setInfoLoading(true)

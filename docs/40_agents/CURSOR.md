@@ -1545,5 +1545,88 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Metrics.jsx`：新增三个迷你卡片组件
 
+---
+
+### TODO-63：AgentLoop.jsx 补全 UIAssertion 数据加载（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（UIAssertion 数据加载已上线）
+
+**问题**：`AgentLoop.jsx` 中 `uiAssertionData` 状态已声明，但从未调用 `fetchUIAssertionStats` 加载数据，导致 UIAssertion 统计侧边栏永远不显示。
+
+**新增功能**：
+- 在 `AgentLoop.jsx` 中添加 `useEffect`，在组件挂载时调用 `fetchUIAssertionStats({ window_minutes: 60 })` 加载数据
+- 每 5 分钟自动刷新（`setInterval`），保持数据实时性
+- 组件卸载时清理定时器（`clearInterval`）
+
+**改动文件**：
+- `monitor_ui/src/pages/AgentLoop.jsx`：补全 UIAssertion 数据加载 useEffect
+
+---
+
+### TODO-64：MemoryGuard 提示词注入检测接入 PromptBuilder（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（提示词注入检测已上线）
+
+**问题**：`prompt_builder.py` 的 `render_node_generation_prompt` 和 `render_host_generation_prompt` 在构建 prompt 前没有检测用户消息中的注入攻击，存在 LLM 被劫持的安全风险。
+
+**新增功能**：
+- `render_node_generation_prompt`：在 `user_message` 截断后接入 `MemoryGuard.check_prompt_injection()`
+  - 检测到 HIGH/CRITICAL 风险注入时，在 `user_message` 末尾追加 `[SECURITY_ALERT: ...]` 警告标记
+  - 注入检测结果写入 `_injection_meta`（mode/detected/risk_level/matched_patterns）
+  - 降级时不阻断 prompt 构建（try/except 保护）
+- `render_host_generation_prompt`：同样接入注入检测（简化版）
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：两个 render 函数接入 MemoryGuard 提示词注入检测
+
+---
+
+### TODO-65：PromptBuilder 构建统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（PromptBuilder 统计已上线）
+
+**问题**：PromptBuilder 的构建统计（注入检测率/slot 填充分布/高风险消息比例）没有统计面板，无法感知 prompt 安全质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/prompt-builder/stats`：PromptBuilder 统计（注入检测率/slot 填充分布/高风险消息比例/降级次数）
+- `Insights.jsx` 新增 PromptBuilderStatsSection 子组件（FileCode 图标，紫色主题）：4+3 个聚合指标卡片 + Slot 填充分布进度条
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/prompt-builder/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 PromptBuilderStatsSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchPromptBuilderStats`
+
+---
+
+### TODO-66：EpisodicStore 写入统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（EpisodicStore 统计已上线）
+
+**问题**：EpisodicStore 的写入统计（写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数）没有统计面板，无法感知记忆写入质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/episodic-store/stats`：EpisodicStore 统计（写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数）
+- `Insights.jsx` 新增 EpisodicStoreStatsSection 子组件（Archive 图标，琥珀色主题）：4+4 个聚合指标卡片
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/episodic-store/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 EpisodicStoreStatsSection 子组件
+- `monitor_ui/src/api/obs.js`：新增 `fetchEpisodicStoreStats`
+
+---
+
+### TODO-67/68：Insights.jsx 新增 PromptBuilder 和 EpisodicStore 统计区块（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（两个新统计区块已上线）
+
+**问题**：`Insights.jsx` 缺少 PromptBuilder 和 EpisodicStore 的统计区块，运维无法在同一页面感知 prompt 安全和记忆写入质量。
+
+**新增功能**：
+- `Insights.jsx` 在 ContextCompressorStatsSection 之后追加 PromptBuilderStatsSection 和 EpisodicStoreStatsSection 两个新区块
+- 数据来源：`/obs/prompt-builder/stats`、`/obs/episodic-store/stats`
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：追加两个新统计区块的渲染调用
+
 
 

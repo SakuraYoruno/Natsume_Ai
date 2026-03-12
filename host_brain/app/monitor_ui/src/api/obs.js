@@ -605,5 +605,31 @@ export function fetchContextCompressorStats(params = {}) {
   return request(`/obs/context-compressor/stats${qs ? '?' + qs : ''}`)
 }
 
+// ===== TODO-65: PromptBuilder 构建统计 =====
+
+/**
+ * PromptBuilder 构建统计（注入检测率/slot 填充分布/高风险消息比例）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchPromptBuilderStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/prompt-builder/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-66: EpisodicStore 写入统计 =====
+
+/**
+ * EpisodicStore 写入统计（写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchEpisodicStoreStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/episodic-store/stats${qs ? '?' + qs : ''}`)
+}
+
 
 
