@@ -1100,3 +1100,206 @@ async def get_memory_stats(
         timestamp=now,
     )
 
+
+# ---------------------------------------------------------------------------
+# TODO-30: GET /obs/vts/stats  — VTS 通道统计
+# ---------------------------------------------------------------------------
+class VtsEmotionItem(BaseModel):
+    emotion_tag: str
+    count: int
+    pct: float
+
+class VtsStatsResponse(BaseModel):
+    window_minutes: int
+    total_events: int
+    applied: int
+    degraded: int
+    rejected: int
+    apply_rate: Optional[float]
+    degrade_rate: Optional[float]
+    reject_rate: Optional[float]
+    top_emotions: List[VtsEmotionItem]
+    talk_gate_total: int
+    talk_gate_allowed: int
+    talk_gate_blocked: int
+    timestamp: int
+
+@router.get("/vts/stats", response_model=VtsStatsResponse)
+async def get_vts_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """TODO-30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # ── VTS 表情事件统计 ──────────────────────────────────────────────────
+    try:
+        vts_rows = ledger.fetch_by_time_range("vts_event_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        vts_rows = []
+
+    # 补充从 voice_event_log 中过滤 VTS 相关事件
+    try:
+        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now)
+        vts_voice_rows = [
+            r for r in voice_rows
+            if str(r.get("event_type", "")).upper().startswith("VTS")
+        ]
+    except Exception:
+        vts_voice_rows = []
+
+    all_vts_rows = vts_rows + vts_voice_rows
+    total_events = len(all_vts_rows)
+
+    applied = sum(
+        1 for r in all_vts_rows
+        if str(r.get("status", "")).upper() in ("APPLIED", "OK", "SUCCESS")
+        or str(r.get("result", "")).upper() == "APPLIED"
+    )
+    degraded = sum(
+        1 for r in all_vts_rows
+        if str(r.get("status", "")).upper() in ("DEGRADED", "FALLBACK")
+        or str(r.get("result", "")).upper() == "DEGRADED"
+    )
+    rejected = sum(
+        1 for r in all_vts_rows
+        if str(r.get("status", "")).upper() in ("REJECTED", "BLOCKED", "FAILED")
+        or str(r.get("result", "")).upper() == "REJECTED"
+    )
+
+    apply_rate = round(applied / total_events * 100, 1) if total_events > 0 else None
+    degrade_rate = round(degraded / total_events * 100, 1) if total_events > 0 else None
+    reject_rate = round(rejected / total_events * 100, 1) if total_events > 0 else None
+
+    # Top 情感标签分布
+    from collections import Counter
+    emotion_counter = Counter(
+        str(r.get("emotion_tag") or r.get("expression") or "UNKNOWN").upper()
+        for r in all_vts_rows
+    )
+    top_emotions = [
+        VtsEmotionItem(
+            emotion_tag=tag,
+            count=cnt,
+            pct=round(cnt / total_events * 100, 1) if total_events > 0 else 0.0,
+        )
+        for tag, cnt in emotion_counter.most_common(8)
+    ]
+
+    # ── Talk Gate 事件统计 ────────────────────────────────────────────────
+    try:
+        talk_gate_rows = ledger.fetch_by_time_range("talk_gate_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        talk_gate_rows = []
+
+    talk_gate_total = len(talk_gate_rows)
+    talk_gate_allowed = sum(
+        1 for r in talk_gate_rows
+        if str(r.get("decision", "")).upper() in ("ALLOW", "ALLOWED", "APPROVE", "OK")
+    )
+    talk_gate_blocked = talk_gate_total - talk_gate_allowed
+
+    return VtsStatsResponse(
+        window_minutes=window_minutes,
+        total_events=total_events,
+        applied=applied,
+        degraded=degraded,
+        rejected=rejected,
+        apply_rate=apply_rate,
+        degrade_rate=degrade_rate,
+        reject_rate=reject_rate,
+        top_emotions=top_emotions,
+        talk_gate_total=talk_gate_total,
+        talk_gate_allowed=talk_gate_allowed,
+        talk_gate_blocked=talk_gate_blocked,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-31: GET /obs/distillation/stats  — LongTermDistiller 蒸馏统计
+# ---------------------------------------------------------------------------
+class DistillationCycleItem(BaseModel):
+    cycle_id: str
+    topics_processed: int
+    semantic_memories_created: int
+    proposals_submitted: int
+    proposals_skipped: int
+    error_count: int
+    ts_ms: int
+    detail: Optional[str] = None
+
+class DistillationStatsResponse(BaseModel):
+    window_minutes: int
+    total_cycles: int
+    success_cycles: int
+    failed_cycles: int
+    success_rate: Optional[float]
+    total_proposals_submitted: int
+    total_semantic_created: int
+    recent_cycles: List[DistillationCycleItem]
+    timestamp: int
+
+@router.get("/distillation/stats", response_model=DistillationStatsResponse)
+async def get_distillation_stats(
+    window_minutes: int = Query(1440, ge=1, le=43200, description="统计窗口（分钟，默认 24h）"),
+    limit: int = Query(10, ge=1, le=50, description="最近循环条数"),
+):
+    """TODO-31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("distillation_cycle_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 补充从 distill_log 查询（兼容旧表名）
+    if not rows:
+        try:
+            rows = ledger.fetch_by_time_range("distill_log", start_ms=since_ms, end_ms=now)
+        except Exception:
+            rows = []
+
+    total_cycles = len(rows)
+    success_cycles = sum(
+        1 for r in rows
+        if (r.get("errors") in (None, [], "") or len(r.get("errors") or []) == 0)
+        and int(r.get("proposals_submitted") or 0) >= 0
+    )
+    failed_cycles = total_cycles - success_cycles
+    success_rate = round(success_cycles / total_cycles * 100, 1) if total_cycles > 0 else None
+
+    total_proposals = sum(int(r.get("proposals_submitted") or 0) for r in rows)
+    total_semantic = sum(int(r.get("semantic_memories_created") or 0) for r in rows)
+
+    # 最近 N 条（倒序）
+    recent_rows = sorted(rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
+    recent_cycles = [
+        DistillationCycleItem(
+            cycle_id=str(r.get("cycle_id") or r.get("request_id") or ""),
+            topics_processed=int(r.get("topics_processed") or 0),
+            semantic_memories_created=int(r.get("semantic_memories_created") or 0),
+            proposals_submitted=int(r.get("proposals_submitted") or 0),
+            proposals_skipped=int(r.get("proposals_skipped") or 0),
+            error_count=len(r.get("errors") or []),
+            ts_ms=int(r.get("ts_ms") or 0),
+            detail=(r.get("detail") or "")[:200],
+        )
+        for r in recent_rows
+    ]
+
+    return DistillationStatsResponse(
+        window_minutes=window_minutes,
+        total_cycles=total_cycles,
+        success_cycles=success_cycles,
+        failed_cycles=failed_cycles,
+        success_rate=success_rate,
+        total_proposals_submitted=total_proposals,
+        total_semantic_created=total_semantic,
+        recent_cycles=recent_cycles,
+        timestamp=now,
+    )
+

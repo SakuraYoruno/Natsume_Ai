@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -7,6 +7,7 @@ import {
   fetchErrors,
   fetchSubsystemsStats,
   fetchAgentLoopStats,
+  fetchMemoryStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -75,22 +76,25 @@ export default function Insights() {
   const [errData,     setErrData]     = useState(null)
   const [subsysData,  setSubsysData]  = useState(null)
   const [agentData,   setAgentData]   = useState(null)
+  const [memoryData,  setMemoryData]  = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const intervalMinutes = windowMinutes <= 60 ? 5 : windowMinutes <= 360 ? 30 : windowMinutes <= 1440 ? 60 : 360
-      const [gov, err, subsys, agent] = await Promise.allSettled([
+      const [gov, err, subsys, agent, memory] = await Promise.allSettled([
         fetchGovernorStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
         fetchErrors({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
         fetchSubsystemsStats({ window_minutes: windowMinutes }),
         fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 8 }),
+        fetchMemoryStats({ window_minutes: windowMinutes }),
       ])
       if (gov.status === 'fulfilled')    setGovData(gov.value)
       if (err.status === 'fulfilled')    setErrData(err.value)
       if (subsys.status === 'fulfilled') setSubsysData(subsys.value)
       if (agent.status === 'fulfilled')  setAgentData(agent.value)
+      if (memory.status === 'fulfilled') setMemoryData(memory.value)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -336,12 +340,77 @@ export default function Insights() {
             </table>
           </div>
         )}
-        {(agentData?.total_loops ?? 0) === 0 && (
+      {(agentData?.total_loops ?? 0) === 0 && (
           <div className="card p-8 text-center text-gray-400 text-sm">
             <Bot size={24} className="mx-auto mb-2 text-gray-300" />
             暂无 Agent Loop 执行记录
           </div>
         )}
+      </section>
+
+      {/* ===== TODO-32: Memory 子系统统计 ===== */}
+      <section>
+        <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
+        {/* 聚合指标卡片 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard
+            label="EpisodicStore 写入量"
+            value={memoryData?.total_writes ?? '—'}
+            color="text-teal-600"
+          />
+          <StatCard
+            label="MemoryGuard 拒绝率"
+            value={memoryData?.guard_reject_rate != null ? `${memoryData.guard_reject_rate}%` : '—'}
+            color={memoryData?.guard_reject_rate > 30 ? 'text-red-500' : memoryData?.guard_reject_rate > 10 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="ContextCompressor 压缩率"
+            value={memoryData?.compress_rate != null ? `${memoryData.compress_rate}%` : '—'}
+            color="text-blue-600"
+          />
+          <StatCard
+            label="LongTermDistiller 蒸馏次数"
+            value={memoryData?.distill_count ?? '—'}
+            color="text-purple-600"
+          />
+        </div>
+        {/* 子系统详情卡片 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {(memoryData?.subsystems ?? []).map((s) => (
+            <div key={s.subsystem} className={`card p-3 border ${statusBg(s.success_rate)}`}>
+              <div className="text-xs font-medium text-gray-700 mb-2 truncate" title={s.display_name}>
+                {s.display_name}
+              </div>
+              <div className={`text-xl font-bold ${statusColor(s.success_rate)}`}>
+                {s.success_rate != null ? `${s.success_rate}%` : '—'}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                {s.total > 0 ? `${s.success}/${s.total} 成功` : '无数据'}
+              </div>
+              {/* 子系统专属指标 */}
+              {s.extra?.reject_rate != null && (
+                <div className="text-xs text-red-500 mt-0.5">拒绝率 {s.extra.reject_rate}%</div>
+              )}
+              {s.extra?.avg_compress_rate_pct != null && (
+                <div className="text-xs text-blue-500 mt-0.5">压缩率 {s.extra.avg_compress_rate_pct}%</div>
+              )}
+              {s.extra?.distill_count != null && (
+                <div className="text-xs text-purple-500 mt-0.5">蒸馏 {s.extra.distill_count} 次</div>
+              )}
+              {s.last_ts && (
+                <div className="text-xs text-gray-300 mt-1 truncate" title={formatTime(s.last_ts)}>
+                  {formatTime(s.last_ts)}
+                </div>
+              )}
+            </div>
+          ))}
+          {(memoryData?.subsystems ?? []).length === 0 && (
+            <div className="col-span-full text-center py-8 text-gray-400 text-sm">
+              <Database size={24} className="mx-auto mb-2 text-gray-300" />
+              暂无 Memory 子系统数据
+            </div>
+          )}
+        </div>
       </section>
     </div>
   )

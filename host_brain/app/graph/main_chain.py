@@ -550,6 +550,54 @@ class RecallFusionNode(ChainNode):
                 memory_guard_meta["error"] = str(_mg_exc)[:100]
                 logger.warning("[%s] MemoryGuard 过滤异常（降级）: %s", ctx.request_id, _mg_exc)
 
+            # ── TODO-28：ContextCompressor 压缩历史轮次 ──────────────────
+            context_compressor_meta: dict[str, Any] = {"mode": "SKIPPED"}
+            try:
+                from host_brain.app.dependencies import get_context_compressor  # noqa: PLC0415
+                _compressor = get_context_compressor()
+                if _compressor is not None:
+                    # 将 filtered_evidence_items 转换为 turns 格式（role/content）
+                    _turns = []
+                    for _item in filtered_evidence_items:
+                        _role = str(_item.get("role") or "user").strip() or "user"
+                        _content = str(
+                            _item.get("snippet") or _item.get("text") or _item.get("content") or ""
+                        ).strip()
+                        if _content:
+                            _turns.append({"role": _role, "content": _content})
+                    if _turns:
+                        _compressed = _compressor.compress(
+                            _turns,
+                            strategy="hybrid",
+                            session_id=ctx.session_id,
+                        )
+                        context_compressor_meta = {
+                            "mode": "ACTIVE",
+                            "strategy": _compressed.strategy,
+                            "input_turns": len(_turns),
+                            "output_turns": len(_compressed.turns),
+                            "total_tokens": _compressed.total_tokens,
+                            "degraded": _compressed.degraded,
+                            "reason_code": _compressed.reason_code,
+                            "has_summary": _compressed.summary is not None,
+                        }
+                        ctx.metadata["context_compressor"] = context_compressor_meta
+                        if not _compressed.degraded:
+                            ctx.audit_tags.append(
+                                f"CTX_COMPRESSED:{len(_turns)}->{len(_compressed.turns)}"
+                            )
+                        logger.debug(
+                            "[%s] ContextCompressor 压缩完成 input=%d output=%d tokens=%d",
+                            ctx.request_id, len(_turns), len(_compressed.turns), _compressed.total_tokens,
+                        )
+                    else:
+                        context_compressor_meta = {"mode": "SKIPPED_NO_TURNS"}
+            except (ImportError, AttributeError):
+                context_compressor_meta = {"mode": "SKIPPED_NOT_WIRED"}
+            except Exception as _cc_exc:
+                context_compressor_meta = {"mode": "DEGRADED", "error": str(_cc_exc)[:100]}
+                logger.warning("[%s] ContextCompressor 压缩异常（降级）: %s", ctx.request_id, _cc_exc)
+
             ctx.recall_context_pack = {
                 "retrieval_summary": dict(orchestrator_result.retrieval_summary),
                 "retrieval_evidence_items": filtered_evidence_items,
@@ -565,8 +613,10 @@ class RecallFusionNode(ChainNode):
                 "retrieval_path": str(orchestrator_result.path),
                 "context_pack_type": "RetrievalOrchestratorResult",
                 "memory_guard": memory_guard_meta,
+                "context_compressor": context_compressor_meta,
             }
             ctx.metadata.setdefault("audit_refs", {})["memory_guard"] = memory_guard_meta
+            ctx.metadata.setdefault("audit_refs", {})["context_compressor"] = context_compressor_meta
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:
@@ -603,7 +653,14 @@ class RecallFusionNode(ChainNode):
 
 
 class LlmGatewayNode(ChainNode):
-    """LLM 网关节点：按路由矩阵选择模型并生成响应。"""
+    """LLM 网关节点：按路由矩阵选择模型并生成响应。
+
+    [TODO-27] 接入 EmotionTimeline：
+    - 从 ctx.metadata 提取 emotion_tag，调用 EmotionTimeline.append() 追踪情感事件
+    - 调用 EmotionTimeline.rebuild_summary() 生成情感轨迹摘要，注入 ctx.metadata["emotion_timeline"]
+    - 调用 compute_emotion_echo() 生成情感回声，注入 ctx.metadata["emotion_echo"]
+    - 降级策略：EmotionTimeline 不可用时跳过，不阻断主链路
+    """
     name = "llm_gateway"
     timeout = NODE_TIMEOUT["llm_gateway"]
 
@@ -617,6 +674,72 @@ class LlmGatewayNode(ChainNode):
         }
         if not has_raw_output:
             ctx.audit_tags.append("LLM_GATEWAY_DELEGATED_STREAM")
+
+        # ── TODO-27：EmotionTimeline 追踪 ────────────────────────────────
+        _emotion_tag = str(ctx.metadata.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        try:
+            from host_brain.core.emotion_timeline import EmotionTimeline, compute_emotion_echo  # noqa: PLC0415
+            from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+            from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
+
+            # 获取或创建会话级 EmotionTimeline（存储在 ctx.metadata 中复用）
+            _timeline: EmotionTimeline = ctx.metadata.get("_emotion_timeline_instance")
+            if not isinstance(_timeline, EmotionTimeline):
+                _timeline = EmotionTimeline(max_entries=50)
+                ctx.metadata["_emotion_timeline_instance"] = _timeline
+
+            # 追加当前情感事件
+            _valence_map = {
+                "HAPPY": 0.6, "EXCITED": 0.7, "CALM": 0.2, "THINKING": 0.0,
+                "NEUTRAL": 0.0, "SAD": -0.5, "ANGRY": -0.6,
+                "ANXIOUS": -0.3, "FRUSTRATED": -0.4,
+            }
+            _arousal_map = {
+                "HAPPY": 0.4, "EXCITED": 0.7, "CALM": -0.3, "THINKING": 0.1,
+                "NEUTRAL": 0.0, "SAD": -0.3, "ANGRY": 0.5,
+                "ANXIOUS": 0.4, "FRUSTRATED": 0.3,
+            }
+            _valence = _valence_map.get(_emotion_tag, 0.0)
+            _arousal = _arousal_map.get(_emotion_tag, 0.0)
+            _timeline.append(
+                ts_ms=_now_ms(),
+                emotion_tag=_emotion_tag,
+                valence=_valence,
+                arousal=_arousal,
+                source="user_input",
+            )
+
+            # 重建情感轨迹摘要（5 分钟窗口）
+            _timeline_summary = _timeline.rebuild_summary(window_ms=300_000)
+            ctx.metadata["emotion_timeline"] = _timeline_summary
+            ctx.audit_tags.append(f"EMOTION_TIMELINE:{_timeline_summary.get('dominant_emotion', 'NEUTRAL')}")
+
+            # 计算情感回声
+            _current_vec = EmotionVector(
+                valence=_valence,
+                arousal=_arousal,
+                dominance=0.0,
+                ts_ms=_now_ms(),
+            )
+            _echo = compute_emotion_echo(
+                _emotion_tag,
+                current_vector=_current_vec,
+                echo_weight=0.4,
+            )
+            ctx.metadata["emotion_echo"] = _echo
+            logger.debug(
+                "[%s] EmotionTimeline 追踪完成 dominant=%s trend=%s echo=%s",
+                ctx.request_id,
+                _timeline_summary.get("dominant_emotion"),
+                _timeline_summary.get("trend"),
+                _echo.get("echo_emotion_tag"),
+            )
+        except (ImportError, AttributeError):
+            ctx.metadata["emotion_timeline"] = {"mode": "SKIPPED_NOT_WIRED"}
+        except Exception as _et_exc:
+            ctx.metadata["emotion_timeline"] = {"mode": "DEGRADED", "error": str(_et_exc)[:100]}
+            logger.warning("[%s] EmotionTimeline 追踪异常（降级）: %s", ctx.request_id, _et_exc)
+
         logger.debug("[%s] LlmGateway 执行 raw_output_present=%s", ctx.request_id, has_raw_output)
         return True
 

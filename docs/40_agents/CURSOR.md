@@ -903,3 +903,111 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `host_brain/app/obs_routes.py`：新增 `GET /obs/memory/stats` 端点
 - `monitor_ui/src/api/obs.js`：新增 `fetchMemoryStats` API 函数
+
+---
+
+### TODO-27：EmotionTimeline 接入 LlmGatewayNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（EmotionTimeline 已接入主链路 LlmGatewayNode）
+
+**问题**：`EmotionTimeline` 和 `compute_emotion_echo` 已在 `emotion_timeline.py` 中完整实现，但主链路从未调用 `EmotionTimeline.append()` 追踪情感事件，也从未调用 `rebuild_summary()` 将情感轨迹注入 prompt。
+
+**新增功能**：
+- `LlmGatewayNode.execute()` 中从 `ctx.metadata["emotion_tag"]` 提取情感标签
+- 调用 `EmotionTimeline.append()` 追踪情感事件（valence/arousal 自动映射）
+- 调用 `EmotionTimeline.rebuild_summary(window_ms=300_000)` 生成情感轨迹摘要，写入 `ctx.metadata["emotion_timeline"]`
+- 调用 `compute_emotion_echo()` 生成情感回声（echo_weight=0.4），写入 `ctx.metadata["emotion_echo"]`
+- 降级策略：EmotionTimeline 不可用时跳过，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：重写 `LlmGatewayNode.execute()`
+
+---
+
+### TODO-28：ContextCompressor 接入 RecallFusionNode（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（ContextCompressor 已接入主链路 RecallFusionNode）
+
+**问题**：`ContextCompressor` 有完整的 `compress()` 接口，但主链路的 `RecallFusionNode` 在召回后直接将证据传递给 prompt，没有经过上下文压缩，对话轮次增多时上下文会无限增长。
+
+**新增功能**：
+- 在 `RecallFusionNode.execute()` 的 MemoryGuard 过滤之后，调用 `ContextCompressor.compress()` 对历史轮次进行压缩（`hybrid` 策略）
+- 将 `CompressedContext` 统计写入 `ctx.metadata["context_compressor"]`（strategy/input_turns/output_turns/total_tokens/degraded）
+- 同时写入 `ctx.metadata["audit_refs"]["context_compressor"]`，供审计节点使用
+- 降级策略：`ContextCompressor` 不可用时跳过压缩，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：`RecallFusionNode.execute()` 新增压缩逻辑
+
+---
+
+### TODO-29：WebUI Agent Loop 管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Agent Loop 管理页面已上线）
+
+**问题**：`agent_routes.py` 提供了 `POST /v1/agent/run`（SSE 流式）和 `GET /v1/agent/info`，但 WebUI 完全没有对应界面。
+
+**新增功能**：
+- `AgentLoop.jsx`：目标输入框 + 参数配置（max_rounds/timeout/use_mock/use_edge_rpc/image_consent）+ SSE 实时进度展示（AGENT_INIT/ROUND_START/SCREENSHOT_DONE/PLAN_GENERATED/EXECUTE_DONE/LOOP_DONE）+ 执行结果摘要卡片
+- `App.jsx`：注册 `/agent` 路由
+- `Layout.jsx`：导航栏新增 Agent 入口（Bot 图标）
+
+**改动文件**：
+- `monitor_ui/src/pages/AgentLoop.jsx`（新建）
+- `monitor_ui/src/App.jsx`
+- `monitor_ui/src/components/Layout.jsx`
+
+---
+
+### TODO-30：VTS 通道统计端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（`GET /obs/vts/stats` 端点已上线）
+
+**问题**：`channels/vts.py` 已有完整的 `resolve_vts_expression()` 和 `request_talk_gate()` 接口，但 `obs_routes.py` 没有任何端点暴露 VTS 通道的统计数据。
+
+**新增端点**：`GET /obs/vts/stats`
+
+覆盖：
+- 表情应用统计（APPLIED/DEGRADED/REJECTED 分布）
+- Top 情感标签分布（Top 8）
+- Talk Gate 事件统计（允许/拒绝）
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `GET /obs/vts/stats` 端点
+- `monitor_ui/src/api/obs.js`：新增 `fetchVtsStats` API 函数
+
+---
+
+### TODO-31：LongTermDistiller 接入调度器（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（蒸馏任务已注册到调度器，`GET /obs/distillation/stats` 端点已上线）
+
+**问题**：`LongTermMemoryDistiller.run_distillation_cycle()` 已实现完整的蒸馏逻辑，`make_distillation_task_config()` 也提供了调度器任务配置，但调度器从未注册这个任务，蒸馏循环从未被触发。
+
+**新增功能**：
+- `http_hooks.py` 的 `runtime_lifespan` 中，调用 `make_distillation_task_config()` 并注册到 `SchedulerTaskRegistry`（每日 03:00 CRON）
+- `obs_routes.py` 新增 `GET /obs/distillation/stats`：蒸馏循环统计（总循环次数/成功率/提案提交量/语义记忆创建量/最近 N 次循环详情）
+- `obs.js` 新增 `fetchDistillationStats` API 函数
+
+**改动文件**：
+- `host_brain/app/http_hooks.py`：`runtime_lifespan` 注册蒸馏调度任务
+- `host_brain/app/obs_routes.py`：新增 `GET /obs/distillation/stats` 端点
+- `monitor_ui/src/api/obs.js`：新增 `fetchDistillationStats` API 函数
+
+---
+
+### TODO-32：Insights 页面 Memory 统计卡片（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Memory 子系统统计区块已上线）
+
+**问题**：TODO-26 已实现 `GET /obs/memory/stats` 后端端点，但 `Insights.jsx` 页面没有对应的 Memory 统计卡片，数据无法可视化。
+
+**新增功能**：
+- `Insights.jsx` 新增 Memory 子系统统计区块（Database 图标）
+- 聚合指标卡片：EpisodicStore 写入量 + MemoryGuard 拒绝率 + ContextCompressor 压缩率 + LongTermDistiller 蒸馏次数
+- 子系统详情卡片：4 个子系统各自的成功率/专属指标（拒绝率/压缩率/蒸馏次数）/最后活跃时间
+- 并行加载：与其他 Insights 数据同时请求，不增加页面加载时间
+
+**改动文件**：
+- `monitor_ui/src/pages/Insights.jsx`：新增 Memory 统计区块
+- `monitor_ui/src/api/obs.js`：已在 TODO-26 中添加 `fetchMemoryStats`

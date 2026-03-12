@@ -10,6 +10,7 @@ import {
   Heart,
   Wrench,
   Clock,
+  Bot,
   RefreshCw,
   PauseCircle,
 } from 'lucide-react'
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { to: '/bond',      icon: Heart,          label: 'Bond'      },
   { to: '/tools',     icon: Wrench,         label: 'Tools'     },
   { to: '/automation',icon: Clock,          label: 'Automation'},
+  { to: '/agent',      icon: Bot,            label: 'Agent'     },
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]

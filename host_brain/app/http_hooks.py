@@ -167,6 +167,26 @@ async def runtime_lifespan(
             new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
             logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
 
+        # [TODO-31] LongTermDistiller 蒸馏任务注册到调度器
+        try:
+            from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415
+            from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+
+            _distill_config = make_distillation_task_config()
+            _task_registry = SchedulerTaskRegistry.get_instance()
+            _task_registry.register(_distill_config)
+            new_module_statuses["long_term_distiller_scheduler"] = (
+                f"OK (task_id={_distill_config.task_id})"
+            )
+            logger.info(
+                "LongTermDistiller 蒸馏任务已注册到调度器: task_id=%s trigger=%s",
+                _distill_config.task_id,
+                _distill_config.trigger_mode,
+            )
+        except Exception as _distill_exc:
+            new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
+            logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
+
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes={},

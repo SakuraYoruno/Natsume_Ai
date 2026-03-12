@@ -10,6 +10,7 @@ import Canon from './pages/Canon.jsx'
 import Bond from './pages/Bond.jsx'
 import Tools from './pages/Tools.jsx'
 import Automation from './pages/Automation.jsx'
+import AgentLoop from './pages/AgentLoop.jsx'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="bond" element={<Bond />} />
           <Route path="tools" element={<Tools />} />
           <Route path="automation" element={<Automation />} />
+          <Route path="agent" element={<AgentLoop />} />
         </Route>
       </Routes>
     </HashRouter>

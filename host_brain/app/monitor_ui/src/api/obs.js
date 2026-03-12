@@ -338,3 +338,29 @@ export function triggerSchedulerTask(taskId) {
     body: JSON.stringify({ trigger_config: { next_run_ts: 0 } }),
   })
 }
+
+// ===== TODO-30: VTS 通道统计 =====
+
+/**
+ * VTS 通道统计（表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计）
+ * @param {object} params - { window_minutes }
+ */
+export function fetchVtsStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/vts/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-31: 蒸馏统计 =====
+
+/**
+ * LongTermDistiller 蒸馏统计（循环次数、提案提交量、蒸馏成功率）
+ * @param {object} params - { window_minutes, limit }
+ */
+export function fetchDistillationStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/distillation/stats${qs ? '?' + qs : ''}`)
+}
