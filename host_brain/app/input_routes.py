@@ -13,11 +13,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
@@ -159,6 +159,60 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 # 内部：投递到 Graph 流通
 # ---------------------------------------------------------------------------
 
+def _get_ledger_safe():
+    """安全获取 ledger，失败时返回 None（不阻断主链路）。"""
+    try:
+        from host_brain.app.fastapi_app import get_ledger
+        return get_ledger()
+    except Exception:
+        return None
+
+
+def _log_input_event(
+    *,
+    ledger,
+    request_id: str,
+    session_id: str,
+    source: str,
+    phase: str,
+    status: str,
+    detail: str = "",
+    reason_code: str | None = None,
+    latency_ms: int | None = None,
+    ts_ms: int,
+) -> None:
+    """写入 input_dispatch_log，追踪副作用生命周期。
+
+    phase 取值：
+      ACCEPTED   — HTTP 响应已返回，副作用已触发（fire-and-forget 起点）
+      DISPATCHED — main_chain 调用已发起（异步任务已创建）
+      COMPLETED  — main_chain 处理完成（副作用已落地）
+      FAILED     — main_chain 处理失败（副作用未落地）
+      NOT_WIRED  — main_chain 尚未接入（ImportError 降级）
+    """
+    if ledger is None:
+        return
+    try:
+        ledger.log_voice_event({
+            "request_id": request_id,
+            "session_id": session_id,
+            "event_type": f"INPUT_{phase}",
+            "direction": "EDGE_TO_HOST",
+            "status": status,
+            "reason_code": reason_code,
+            "stage": f"input_dispatch.{phase.lower()}",
+            "detail": detail[:400] if detail else None,
+            "payload": {
+                "source": source,
+                "phase": phase,
+                "latency_ms": latency_ms,
+            },
+            "ts_ms": ts_ms,
+        })
+    except Exception as log_exc:
+        _logger.debug("input_routes: ledger 写入失败（不阻断）: %s", log_exc)
+
+
 async def _dispatch_to_graph(
     *,
     request_id: str,
@@ -171,11 +225,40 @@ async def _dispatch_to_graph(
     """将输入投递到 main_chain 处理。
 
     当前实现：异步触发 main_chain，不等待结果（fire-and-forget）。
+    副作用可观测性：通过 ledger.log_voice_event 写入 input_dispatch_log，
+    追踪 ACCEPTED → DISPATCHED → COMPLETED/FAILED 全生命周期。
+
     后续可扩展为：写入消息队列 → 消费者处理 → 结果推送到 Edge。
     """
     import asyncio
 
+    ledger = _get_ledger_safe()
+
+    # 写入 ACCEPTED：HTTP 响应已返回，副作用即将触发
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        phase="ACCEPTED",
+        status="ACCEPTED",
+        detail=f"source={source} text_len={len(text)}",
+        ts_ms=ts_ms,
+    )
+
     async def _run() -> None:
+        dispatch_ts = int(time.time() * 1000)
+        # 写入 DISPATCHED：异步任务已创建，main_chain 调用即将发起
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            phase="DISPATCHED",
+            status="DISPATCHED",
+            detail=f"async_task_created source={source}",
+            ts_ms=dispatch_ts,
+        )
         try:
             from host_brain.app.graph.main_chain import run_main_chain_from_input
             await run_main_chain_from_input(
@@ -186,14 +269,58 @@ async def _dispatch_to_graph(
                 payload=payload,
                 ts_ms=ts_ms,
             )
+            complete_ts = int(time.time() * 1000)
+            latency_ms = complete_ts - dispatch_ts
+            # 写入 COMPLETED：副作用已落地
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                phase="COMPLETED",
+                status="OK",
+                detail=f"main_chain completed source={source} latency_ms={latency_ms}",
+                latency_ms=latency_ms,
+                ts_ms=complete_ts,
+            )
+            _logger.info(
+                "input_routes: Graph 处理完成 request_id=%s source=%s latency_ms=%d",
+                request_id, source, latency_ms,
+            )
         except ImportError:
             # main_chain 尚未实现 run_main_chain_from_input 时，记录日志等待后续接入
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                phase="NOT_WIRED",
+                status="DEGRADED",
+                reason_code="INPUT_MAIN_CHAIN_NOT_WIRED",
+                detail="run_main_chain_from_input not implemented",
+                ts_ms=int(time.time() * 1000),
+            )
             _logger.info(
                 "input_routes: main_chain.run_main_chain_from_input 尚未实现，"
                 "输入已接收但未处理 request_id=%s source=%s text=%.60s",
                 request_id, source, text,
             )
         except Exception as exc:
+            fail_ts = int(time.time() * 1000)
+            latency_ms = fail_ts - dispatch_ts
+            # 写入 FAILED：副作用未落地
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                phase="FAILED",
+                status="FAILED",
+                reason_code="INPUT_GRAPH_ERROR",
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+                latency_ms=latency_ms,
+                ts_ms=fail_ts,
+            )
             _logger.error(
                 "input_routes: Graph 处理异常 request_id=%s: %s",
                 request_id, exc,

@@ -453,7 +453,45 @@ async def _vision_ui_sse_generator(
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    # ── 生产化加固：请求来源校验 ──────────────────────────────────────────
+    # ── 生产化加固：HMAC 签名校验 ─────────────────────────────────────────
+    # 环境变量：HOST_VISION_HMAC_SECRET（非空时启用）
+    # 请求方需在 request_body.hmac_signature 中提供签名：
+    #   HMAC-SHA256(key=HOST_VISION_HMAC_SECRET, msg=f"{request_id}:{session_id}:{ts_ms}")
+    _hmac_secret = str(os.environ.get("HOST_VISION_HMAC_SECRET") or "").strip()
+    if _hmac_secret:
+        import hashlib
+        import hmac as _hmac_mod
+        _provided_sig = str(getattr(request_body, "hmac_signature", "") or "").strip()
+        _expected_msg = f"{request_id}:{session_id}:{ts_ms}"
+        _expected_sig = _hmac_mod.new(
+            _hmac_secret.encode("utf-8"),
+            _expected_msg.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        _sig_valid = _hmac_mod.compare_digest(_provided_sig, _expected_sig)
+        if not _sig_valid:
+            _logger.warning(
+                "VISION HMAC 签名校验失败: request_id=%s session_id=%s",
+                request_id, session_id,
+            )
+            try:
+                get_ledger().log_error(
+                    request_id=request_id,
+                    stage="S_VISION_HMAC_REJECTED",
+                    reason_code="VISION_HMAC_INVALID",
+                    detail=f"provided_sig={_provided_sig[:16]}... expected_msg={_expected_msg}",
+                )
+            except Exception:
+                pass
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "VISION_HMAC_INVALID",
+                "narrative": "啊啦，请求签名验证失败呢，请检查一下鉴权配置。",
+                "request_id": request_id,
+            })
+            return
     _require_internal = str(os.environ.get("HOST_VISION_REQUIRE_INTERNAL_ORIGIN") or "false").strip().lower()
     if _require_internal in {"1", "true", "yes", "on"}:
         _origin_ip = str(getattr(request_body, "origin_ip", "") or "").strip()

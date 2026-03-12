@@ -523,3 +523,108 @@
 | TODO-8 | Governor/Recall/QA 接入真实业务调用，有降级策略和测试验证 | `ACTIVE`（深度业务化） |
 | TODO-9 | RecallFusionNode 预召回结果透传至 `_sse_event_generator`，消除双重召回 | `ACTIVE`（链路闭环） |
 | TODO-10 | CPB slot 注入 + GovernorNode 两条鉴权路径统一 | `ACTIVE`（链路一致） |
+
+---
+
+## 近期完成（2026-03-12 第二批）
+
+### TODO-11：WebUI 监控扩展（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（监控覆盖率大幅提升）
+
+**背景**：原 WebUI 仅监控 6 个边缘服务 + 10 个 LLM 节点（2 张日志表），覆盖率极低。
+
+**完成内容**：
+
+**前端修复（4 处 Bug）**：
+- `api/obs.js`：修复 `fetchSessions` `time_range→window_minutes` 参数映射失效
+- `api/obs.js`：修复 `fetchMetricsTimeseries` 参数映射（`range_minutes/interval_minutes`）
+- `Sessions.jsx`：修复 `ts_ms` 时间格式化、`status` 映射、字段对齐
+- `Metrics.jsx`：增加 `transformApiData()` 适配后端 `points[]` 格式（原图表永远显示 mock 数据）
+
+**后端新增 4 个端点**：
+- `GET /obs/governor/stats`：Governor 决策漏斗（批准/拒绝/reason_code 分布/时序趋势）
+- `GET /obs/errors`：全局错误统计（stage 分布/Top10 reason_code/最近错误列表）
+- `GET /obs/subsystems/stats`：11 个子系统健康矩阵（Memory/Retrieval/Skill/Airlock/Bond/Vision/Sandbox/Channel/Intent/QA/Agent Loop）
+- `GET /obs/agent_loop/stats`：Agent Loop 详细统计（目标达成率/平均轮次/最近执行列表）
+
+**前端新增 Insights 页面**（`#/insights`）：
+- Governor 决策漏斗：汇总统计 + 时序趋势图 + reason_code 横向柱状图
+- 全局错误追踪：错误趋势图 + Top10 reason_code + 最近错误表格
+- 子系统健康矩阵：11 个子系统卡片（颜色编码：绿/橙/红）
+- Agent Loop 统计：达成率汇总 + 最近执行详情表格
+
+**监控覆盖率**：2 张日志表 → **13 张**日志表
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 4 个端点
+- `host_brain/app/monitor_ui/src/api/obs.js`：修复参数映射 + 新增 4 个 API 函数
+- `host_brain/app/monitor_ui/src/pages/Insights.jsx`：新建 Insights 页面
+- `host_brain/app/monitor_ui/src/pages/Metrics.jsx`：修复数据适配
+- `host_brain/app/monitor_ui/src/pages/Sessions.jsx`：修复字段映射
+- `host_brain/app/monitor_ui/src/pages/Overview.jsx`：增加服务分组/success_rate/窗口选择器
+- `host_brain/app/monitor_ui/src/components/Layout.jsx`：增加轮询开关和间隔选择器
+
+---
+
+### TODO-12：WebUI Trace 甘特图（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（视图完善）
+
+**问题**：Trace 页只展示 DAG 节点拓扑图，无法直观看到各节点的时序关系和耗时占比。
+
+**修复**：
+- 新增 `GanttView` 组件，基于节点 `latency_ms` + 拓扑边推算各节点最早开始时间
+- 支持 DAG 图 / 甘特图视图切换（右上角切换按钮）
+- 甘特图特性：
+  - 颜色编码（按节点类型：intent/governor/memory/llm/tts/vts）
+  - 时间轴刻度（5 等分）
+  - 点击行触发节点详情侧边面板
+  - 状态颜色背景（绿/橙/红）
+  - 图例说明
+
+**改动文件**：
+- `host_brain/app/monitor_ui/src/pages/Trace.jsx`：增加 `GanttView` 组件 + `computeGanttTimeline` 函数 + 视图切换逻辑
+
+---
+
+### TODO-13：`/v1/host/input` 副作用可观测性（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（副作用生命周期可观测）
+
+**问题**：`/v1/host/input` 返回 `ACCEPTED` 后，fire-and-forget 的 main_chain 处理结果完全不可观测，无法判断副作用是否真正完成。
+
+**修复**：在 `_dispatch_to_graph` 中写入 `ledger.log_voice_event`，追踪完整生命周期：
+
+| phase | 含义 |
+|-------|------|
+| `ACCEPTED` | HTTP 响应已返回，副作用即将触发 |
+| `DISPATCHED` | 异步任务已创建，main_chain 调用即将发起 |
+| `COMPLETED` | main_chain 处理完成，副作用已落地 |
+| `FAILED` | main_chain 处理失败，副作用未落地 |
+| `NOT_WIRED` | main_chain 尚未接入（ImportError 降级） |
+
+**可观测性**：通过 `GET /obs/subsystems/stats` 的 `channel` 子系统可查看 INPUT_* 事件统计。
+
+**改动文件**：
+- `host_brain/app/input_routes.py`：新增 `_get_ledger_safe()`、`_log_input_event()` 函数；`_dispatch_to_graph` 增加 ACCEPTED/DISPATCHED/COMPLETED/FAILED/NOT_WIRED 五阶段日志
+
+---
+
+### TODO-14：SCENE_VISION_UI HMAC 鉴权加固（已完成，2026-03-12）
+
+**当前状态**：`PROD_READY`（多租户鉴权加固）
+
+**问题**：`SCENE_VISION_UI` 仅有来源 IP 校验，无签名验证，多租户场景下存在伪造请求风险。
+
+**修复**：在 `_vision_ui_sse_generator` 中增加 HMAC-SHA256 签名校验：
+- 环境变量 `HOST_VISION_HMAC_SECRET` 非空时启用
+- 签名消息格式：`f"{request_id}:{session_id}:{ts_ms}"`
+- 请求方在 `request_body.hmac_signature` 中提供签名
+- 校验失败时：写入 `ledger.log_error(stage=S_VISION_HMAC_REJECTED)`，返回 `REJECT` COMMIT 事件
+- 校验顺序：HMAC 签名 → 来源 IP 校验（两层防护）
+
+**回退方式**：不设置 `HOST_VISION_HMAC_SECRET` 环境变量，HMAC 校验自动跳过（向后兼容）。
+
+**改动文件**：
+- `host_brain/app/chat_handler_vision.py`：`_vision_ui_sse_generator` 增加 HMAC 签名校验逻辑

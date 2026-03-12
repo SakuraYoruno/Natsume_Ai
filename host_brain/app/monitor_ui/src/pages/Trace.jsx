@@ -10,7 +10,7 @@ import {
   MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Search, Maximize2, Minimize2, RefreshCw } from 'lucide-react'
+import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2 } from 'lucide-react'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import { applyDagreLayout } from '../utils/traceLayout.js'
@@ -68,6 +68,177 @@ function buildFlowData(traceData, onSelect) {
   return applyDagreLayout(flowNodes, flowEdges)
 }
 
+// ===== 甘特图：基于 edges 拓扑推算各节点开始时间 =====
+function computeGanttTimeline(traceData) {
+  const nodes = traceData.nodes ?? []
+  const edges = traceData.edges ?? []
+
+  // 构建入边映射：node_id → [source_node_id, ...]
+  const inEdges = {}
+  nodes.forEach((n) => { inEdges[n.node_id] = [] })
+  edges.forEach((e) => {
+    if (inEdges[e.target] !== undefined) {
+      inEdges[e.target].push(e.source)
+    }
+  })
+
+  // 拓扑排序 + 计算最早开始时间（基于前驱节点的 start + latency）
+  const latencyMap = {}
+  nodes.forEach((n) => { latencyMap[n.node_id] = n.latency_ms ?? 0 })
+
+  const startMap = {}
+  const visited = new Set()
+
+  function calcStart(nodeId) {
+    if (visited.has(nodeId)) return startMap[nodeId] ?? 0
+    visited.add(nodeId)
+    const preds = inEdges[nodeId] ?? []
+    if (preds.length === 0) {
+      startMap[nodeId] = 0
+    } else {
+      startMap[nodeId] = Math.max(...preds.map((p) => calcStart(p) + (latencyMap[p] ?? 0)))
+    }
+    return startMap[nodeId]
+  }
+
+  nodes.forEach((n) => calcStart(n.node_id))
+
+  const totalMs = Math.max(...nodes.map((n) => (startMap[n.node_id] ?? 0) + (n.latency_ms ?? 0)), 1)
+
+  return nodes.map((n) => ({
+    ...n,
+    start_ms: startMap[n.node_id] ?? 0,
+    end_ms: (startMap[n.node_id] ?? 0) + (n.latency_ms ?? 0),
+    total_ms: totalMs,
+  }))
+}
+
+// ===== 节点类型颜色映射 =====
+const NODE_TYPE_COLOR = {
+  intent:   '#2970FF',
+  governor: '#7A5AF8',
+  memory:   '#0BA5EC',
+  llm:      '#F79009',
+  tts:      '#12B76A',
+  vts:      '#EE46BC',
+  default:  '#667085',
+}
+
+function nodeColor(nodeType) {
+  return NODE_TYPE_COLOR[nodeType] ?? NODE_TYPE_COLOR.default
+}
+
+function statusBg(status) {
+  const s = (status ?? '').toUpperCase()
+  if (s === 'OK' || s === 'SUCCESS') return 'bg-green-50 border-green-200'
+  if (s === 'FAIL' || s === 'ERROR') return 'bg-red-50 border-red-200'
+  if (s === 'DEGRADED') return 'bg-orange-50 border-orange-200'
+  return 'bg-gray-50 border-gray-200'
+}
+
+// ===== 甘特图组件 =====
+function GanttView({ traceData, onSelectNode }) {
+  const timeline = computeGanttTimeline(traceData)
+  if (timeline.length === 0) return null
+
+  const totalMs = timeline[0]?.total_ms ?? 1
+
+  // 时间轴刻度（5 个刻度）
+  const ticks = Array.from({ length: 6 }, (_, i) => Math.round(totalMs * i / 5))
+
+  return (
+    <div className="h-full overflow-auto p-4 bg-white">
+      {/* 时间轴标题 */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-xs font-medium text-gray-500">节点执行甘特图（总耗时 {totalMs}ms）</span>
+        <span className="text-xs text-gray-400">点击行查看节点详情</span>
+      </div>
+
+      {/* 时间轴刻度 */}
+      <div className="flex mb-2 pl-40">
+        {ticks.map((t, i) => (
+          <div
+            key={i}
+            className="flex-1 text-xs text-gray-400 text-center border-l border-gray-200 first:border-l-0"
+            style={{ minWidth: 0 }}
+          >
+            {t}ms
+          </div>
+        ))}
+      </div>
+
+      {/* 甘特条 */}
+      <div className="space-y-1.5">
+        {timeline.map((node) => {
+          const leftPct = (node.start_ms / totalMs) * 100
+          const widthPct = Math.max((node.latency_ms ?? 0) / totalMs * 100, 0.5)
+          const color = nodeColor(node.node_type)
+
+          return (
+            <div
+              key={node.node_id}
+              className={`flex items-center gap-2 rounded border cursor-pointer hover:shadow-sm transition-shadow ${statusBg(node.status)}`}
+              style={{ padding: '4px 8px' }}
+              onClick={() => onSelectNode?.(node)}
+            >
+              {/* 节点名称（固定宽度） */}
+              <div className="w-36 shrink-0">
+                <div className="text-xs font-medium text-gray-700 truncate" title={node.display_name}>
+                  {node.display_name || node.node_id}
+                </div>
+                <div className="text-xs text-gray-400">{node.latency_ms ?? 0}ms</div>
+              </div>
+
+              {/* 甘特条区域 */}
+              <div className="flex-1 relative h-6 bg-gray-100 rounded overflow-hidden">
+                <div
+                  className="absolute top-0 h-full rounded flex items-center justify-end pr-1"
+                  style={{
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
+                    backgroundColor: color,
+                    opacity: 0.85,
+                    minWidth: '4px',
+                  }}
+                >
+                  {widthPct > 8 && (
+                    <span className="text-white text-xs font-mono truncate px-1">
+                      {node.latency_ms}ms
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 状态标签 */}
+              <div className="w-12 shrink-0 text-right">
+                <span
+                  className={`text-xs font-medium ${
+                    (node.status ?? '').toUpperCase() === 'OK' ? 'text-green-600' :
+                    (node.status ?? '').toUpperCase() === 'FAIL' ? 'text-red-500' :
+                    'text-orange-500'
+                  }`}
+                >
+                  {node.status ?? '—'}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* 图例 */}
+      <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-gray-100">
+        {Object.entries(NODE_TYPE_COLOR).filter(([k]) => k !== 'default').map(([type, color]) => (
+          <div key={type} className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded" style={{ backgroundColor: color }} />
+            <span className="text-xs text-gray-500">{type}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ===== 主页面 =====
 export default function Trace() {
   const { requestId: paramId } = useParams()
@@ -82,6 +253,8 @@ export default function Trace() {
   const [error, setError] = useState(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [traceInfo, setTraceInfo] = useState(null)
+  const [traceData, setTraceData] = useState(null)   // 原始 trace 数据（甘特图用）
+  const [viewMode, setViewMode] = useState('dag')    // 'dag' | 'gantt'
   const containerRef = useRef(null)
 
   const handleSelect = useCallback((data) => setSelectedNode(data), [])
@@ -98,6 +271,7 @@ export default function Trace() {
       } else {
         data = await fetchTraceNodes(id)
       }
+      setTraceData(data)
       setTraceInfo({ status: data.status, latency: data.total_latency_ms, nodeCount: (data.nodes ?? []).length })
       const { nodes: ln, edges: le } = buildFlowData(data, handleSelect)
       setNodes(ln)
@@ -121,6 +295,8 @@ export default function Trace() {
     }
     setFullscreen(!fullscreen)
   }
+
+  const hasData = !loading && !error && (viewMode === 'dag' ? nodes.length > 0 : traceData != null)
 
   return (
     <div className="space-y-4">
@@ -154,6 +330,36 @@ export default function Trace() {
             </span>
           </div>
         )}
+
+        {/* 视图切换：DAG / 甘特图 */}
+        {traceData && (
+          <div className="flex rounded border border-gray-300 overflow-hidden text-sm ml-auto">
+            <button
+              className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${
+                viewMode === 'dag'
+                  ? 'bg-primary text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+              onClick={() => setViewMode('dag')}
+              title="DAG 拓扑图"
+            >
+              <GitBranch size={13} />
+              DAG
+            </button>
+            <button
+              className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${
+                viewMode === 'gantt'
+                  ? 'bg-primary text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+              onClick={() => setViewMode('gantt')}
+              title="时序甘特图"
+            >
+              <BarChart2 size={13} />
+              甘特图
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 主体区域 */}
@@ -162,16 +368,18 @@ export default function Trace() {
         className="flex gap-4"
         style={{ height: fullscreen ? '100vh' : 'calc(100vh - 200px)' }}
       >
-        {/* React Flow 画布 */}
+        {/* 画布区域 */}
         <div className="flex-1 card overflow-hidden relative">
-          {/* 全屏按钮 */}
-          <button
-            className="absolute top-3 right-3 z-10 btn-secondary p-1.5"
-            onClick={toggleFullscreen}
-            title={fullscreen ? '退出全屏' : '全屏'}
-          >
-            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
+          {/* 全屏按钮（仅 DAG 模式） */}
+          {viewMode === 'dag' && (
+            <button
+              className="absolute top-3 right-3 z-10 btn-secondary p-1.5"
+              onClick={toggleFullscreen}
+              title={fullscreen ? '退出全屏' : '全屏'}
+            >
+              {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+          )}
 
           {loading && (
             <div className="h-full flex items-center justify-center text-gray-400 text-sm">
@@ -183,14 +391,16 @@ export default function Trace() {
               {error}
             </div>
           )}
-          {!loading && !error && nodes.length === 0 && (
+          {!loading && !error && !traceData && (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm gap-2">
               <Search size={32} className="text-gray-200" />
               <span>请输入 request_id 查询链路</span>
               <span className="text-xs text-gray-300">可输入 mock-req-001 查看示例</span>
             </div>
           )}
-          {!loading && nodes.length > 0 && (
+
+          {/* DAG 视图 */}
+          {!loading && viewMode === 'dag' && nodes.length > 0 && (
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -216,6 +426,14 @@ export default function Trace() {
                 maskColor="rgba(249,250,251,0.7)"
               />
             </ReactFlow>
+          )}
+
+          {/* 甘特图视图 */}
+          {!loading && viewMode === 'gantt' && traceData && (
+            <GanttView
+              traceData={traceData}
+              onSelectNode={handleSelect}
+            />
           )}
         </div>
 
