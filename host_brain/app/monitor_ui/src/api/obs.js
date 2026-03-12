@@ -401,3 +401,77 @@ export function fetchRetentionStats(params = {}) {
   ).toString()
   return request(`/obs/retention/stats${qs ? '?' + qs : ''}`)
 }
+
+// ===== TODO-40: QA 违规统计 =====
+
+/**
+ * QA 违规统计（违规码分布、降级率、重写成功率、时序趋势、最近违规列表）
+ * @param {object} params - { window_minutes, interval_minutes, limit }
+ */
+export function fetchQaStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/qa/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-41: LLM 调用成本统计 =====
+
+/**
+ * LLM 调用成本统计（按 model_id 分组的 token 消耗/平均延迟/调用次数）
+ * @param {object} params - { window_minutes, interval_minutes }
+ */
+export function fetchLlmCallStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/llm/call-stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-42: Checkpoint 状态查询 =====
+
+/**
+ * 最近 checkpoint 列表
+ * @param {object} params - { limit, include_expired }
+ */
+export function fetchCheckpoints(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/checkpoints${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * 单个 checkpoint 详情
+ * @param {string} checkpointId
+ */
+export function fetchCheckpointDetail(checkpointId) {
+  return request(`/obs/checkpoints/${encodeURIComponent(checkpointId)}`)
+}
+
+// ===== TODO-43: RateLimitStore 后端状态 =====
+
+/**
+ * RateLimitStore 后端状态（当前后端类型/是否降级/各 key 当前计数/TTL）
+ * @param {object} params - { top_k }
+ */
+export function fetchRateLimitBackendStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/rate-limit/backend-stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== TODO-44: Vault Manifest 统计 =====
+
+/**
+ * ArtifactVault Manifest 统计（ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表）
+ * @param {object} params - { limit }
+ */
+export function fetchVaultStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/vault/stats${qs ? '?' + qs : ''}`)
+}
+

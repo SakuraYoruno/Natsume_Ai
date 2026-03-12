@@ -5,6 +5,7 @@ import {
   submitCanonProposal,
   approveCanonProposal,
   rejectCanonProposal,
+  fetchVaultStats,
 } from '../api/obs.js'
 import {
   BookOpen,
@@ -15,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  Lock,
 } from 'lucide-react'
 
 // ── 状态徽章 ──────────────────────────────────────────────────────────────
@@ -282,6 +284,7 @@ export default function Canon() {
   const [error, setError] = useState('')
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [activeTab, setActiveTab] = useState('proposals') // 'proposals' | 'documents'
+  const [vaultData, setVaultData] = useState(null)        // TODO-44: Vault 统计
   const PAGE_SIZE = 20
 
   const loadProposals = useCallback(async () => {
@@ -310,10 +313,21 @@ export default function Canon() {
     }
   }, [])
 
+  // TODO-44: 加载 Vault 统计
+  const loadVaultStats = useCallback(async () => {
+    try {
+      const data = await fetchVaultStats({ limit: 10 })
+      setVaultData(data)
+    } catch {
+      // 降级：不影响主流程
+    }
+  }, [])
+
   useEffect(() => {
     if (activeTab === 'proposals') loadProposals()
     else loadDocuments()
-  }, [activeTab, loadProposals, loadDocuments])
+    loadVaultStats()
+  }, [activeTab, loadProposals, loadDocuments, loadVaultStats])
 
   const handleApprove = async (item) => {
     if (!window.confirm(`确认审核通过提案 ${item.proposal_id?.slice(0, 16)}…？`)) return
@@ -372,6 +386,95 @@ export default function Canon() {
           </button>
         </div>
       </div>
+
+      {/* TODO-44: Vault 统计侧边栏 */}
+      {vaultData && (
+        <div className="card p-4 border border-gray-200">
+          <div className="flex items-center gap-2 mb-3">
+            <Lock size={14} className="text-violet-600" />
+            <h2 className="text-sm font-semibold text-violet-600">ArtifactVault Manifest 统计</h2>
+            {vaultData.reversible_rate != null && (
+              <span className="ml-auto text-xs text-gray-400">可逆比例 {vaultData.reversible_rate}%</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <div className="text-center">
+              <div className="text-xl font-bold text-gray-700">{vaultData.total_manifests}</div>
+              <div className="text-xs text-gray-400 mt-0.5">总 Manifest</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-green-600">{vaultData.active_count}</div>
+              <div className="text-xs text-gray-400 mt-0.5">ACTIVE</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-orange-500">{vaultData.undone_count}</div>
+              <div className="text-xs text-gray-400 mt-0.5">UNDONE</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-gray-400">{vaultData.gc_count}</div>
+              <div className="text-xs text-gray-400 mt-0.5">GC'd</div>
+            </div>
+          </div>
+          {/* 状态分布进度条 */}
+          {vaultData.total_manifests > 0 && (
+            <div className="mb-3">
+              <div className="flex text-xs text-gray-400 mb-1 justify-between">
+                <span>ACTIVE {Math.round(vaultData.active_count / vaultData.total_manifests * 100)}%</span>
+                <span>UNDONE {Math.round(vaultData.undone_count / vaultData.total_manifests * 100)}%</span>
+                <span>GC {Math.round(vaultData.gc_count / vaultData.total_manifests * 100)}%</span>
+              </div>
+              <div className="flex h-2 rounded overflow-hidden">
+                <div className="bg-green-500" style={{ width: `${vaultData.active_count / vaultData.total_manifests * 100}%` }} />
+                <div className="bg-orange-400" style={{ width: `${vaultData.undone_count / vaultData.total_manifests * 100}%` }} />
+                <div className="bg-gray-300" style={{ width: `${vaultData.gc_count / vaultData.total_manifests * 100}%` }} />
+              </div>
+            </div>
+          )}
+          {/* 最近 Manifest 列表 */}
+          {vaultData.recent_manifests.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    {['Manifest ID', '类型', '状态', '可逆', '摘要'].map((h) => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium text-gray-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {vaultData.recent_manifests.map((m, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-1.5 font-mono text-violet-600 truncate max-w-[100px]" title={m.manifest_id}>
+                        {m.manifest_id.slice(0, 12)}…
+                      </td>
+                      <td className="px-3 py-1.5 text-gray-500">{m.artifact_type || '—'}</td>
+                      <td className="px-3 py-1.5">
+                        <span className={`px-1.5 py-0.5 rounded border font-medium ${
+                          m.status === 'ACTIVE' ? 'bg-green-50 text-green-700 border-green-200' :
+                          m.status === 'UNDONE' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                          'bg-gray-100 text-gray-500 border-gray-200'
+                        }`}>{m.status}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-center">
+                        {m.is_reversible
+                          ? <span className="text-green-600">✓</span>
+                          : <span className="text-gray-300">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-1.5 text-gray-400 truncate max-w-[120px]" title={m.summary}>
+                        {m.summary || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {vaultData.total_manifests === 0 && (
+            <div className="text-center py-4 text-gray-400 text-sm">暂无 Vault Manifest 记录</div>
+          )}
+        </div>
+      )}
 
       {/* Tab 切换 */}
       <div className="flex border-b border-gray-200">

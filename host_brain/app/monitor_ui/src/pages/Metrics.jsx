@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Database } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import { fetchMetricsTimeseries } from '../api/obs.js'
+import { fetchMetricsTimeseries, fetchRateLimitBackendStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -91,6 +91,7 @@ export default function Metrics() {
   const [loading, setLoading] = React.useState(true)
   const [error, setError]     = React.useState(null)
   const [isMock, setIsMock]   = React.useState(false)
+  const [rlData, setRlData]   = React.useState(null)  // TODO-43: 速率限制后端状态
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -108,6 +109,13 @@ export default function Metrics() {
         setIsMock(true)
       }
       setData(res)
+      // TODO-43: 加载速率限制后端状态
+      try {
+        const rl = await fetchRateLimitBackendStats({ top_k: 10 })
+        setRlData(rl)
+      } catch {
+        // 降级：不影响主流程
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -244,6 +252,69 @@ export default function Metrics() {
           )}
         </div>
       </div>
+
+      {/* TODO-43: 速率限制后端状态 */}
+      {rlData && (
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Database size={15} className="text-indigo-600" />
+            <h2 className="text-sm font-semibold text-indigo-600">速率限制后端状态</h2>
+            <span className={`ml-2 px-2 py-0.5 rounded border text-xs font-medium ${
+              rlData.is_degraded
+                ? 'bg-orange-50 text-orange-700 border-orange-200'
+                : 'bg-green-50 text-green-700 border-green-200'
+            }`}>
+              {rlData.backend_type}{rlData.is_degraded ? ' (降级)' : ''}
+            </span>
+            {rlData.degrade_reason && (
+              <span className="text-xs text-orange-500 ml-1">{rlData.degrade_reason}</span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="text-center">
+              <div className="text-xl font-bold text-gray-700">{rlData.total_keys}</div>
+              <div className="text-xs text-gray-400 mt-1">总 Key 数</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold text-indigo-600">{rlData.active_keys}</div>
+              <div className="text-xs text-gray-400 mt-1">活跃 Key</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-xl font-bold ${rlData.is_degraded ? 'text-orange-500' : 'text-green-600'}`}>
+                {rlData.is_degraded ? '降级' : '正常'}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">后端状态</div>
+            </div>
+          </div>
+          {rlData.top_keys.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {['Key', '当前计数', '窗口'].map((h) => (
+                      <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rlData.top_keys.map((k, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 text-xs font-mono text-gray-700">{k.key}</td>
+                      <td className="px-4 py-2 text-xs text-center font-medium text-indigo-600">{k.current_count}</td>
+                      <td className="px-4 py-2 text-xs text-gray-400">
+                        {k.window_ms != null ? `${k.window_ms / 1000}s` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {rlData.top_keys.length === 0 && (
+            <div className="text-center py-4 text-gray-400 text-sm">近 5 分钟无速率限制触发</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

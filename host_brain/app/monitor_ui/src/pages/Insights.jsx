@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv } from 'lucide-react'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -9,6 +9,8 @@ import {
   fetchAgentLoopStats,
   fetchMemoryStats,
   fetchVtsStats,
+  fetchQaStats,
+  fetchLlmCallStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -79,26 +81,32 @@ export default function Insights() {
   const [agentData,   setAgentData]   = useState(null)
   const [memoryData,  setMemoryData]  = useState(null)
   const [vtsData,     setVtsData]     = useState(null)
+  const [qaData,      setQaData]      = useState(null)
+  const [llmCallData, setLlmCallData] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const intervalMinutes = windowMinutes <= 60 ? 5 : windowMinutes <= 360 ? 30 : windowMinutes <= 1440 ? 60 : 360
-      const [gov, err, subsys, agent, memory, vts] = await Promise.allSettled([
+      const [gov, err, subsys, agent, memory, vts, qa, llmCall] = await Promise.allSettled([
         fetchGovernorStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
         fetchErrors({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
         fetchSubsystemsStats({ window_minutes: windowMinutes }),
         fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 8 }),
         fetchMemoryStats({ window_minutes: windowMinutes }),
         fetchVtsStats({ window_minutes: windowMinutes }),
+        fetchQaStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
+        fetchLlmCallStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
       ])
-      if (gov.status === 'fulfilled')    setGovData(gov.value)
-      if (err.status === 'fulfilled')    setErrData(err.value)
-      if (subsys.status === 'fulfilled') setSubsysData(subsys.value)
-      if (agent.status === 'fulfilled')  setAgentData(agent.value)
-      if (memory.status === 'fulfilled') setMemoryData(memory.value)
-      if (vts.status === 'fulfilled')    setVtsData(vts.value)
+      if (gov.status === 'fulfilled')     setGovData(gov.value)
+      if (err.status === 'fulfilled')     setErrData(err.value)
+      if (subsys.status === 'fulfilled')  setSubsysData(subsys.value)
+      if (agent.status === 'fulfilled')   setAgentData(agent.value)
+      if (memory.status === 'fulfilled')  setMemoryData(memory.value)
+      if (vts.status === 'fulfilled')     setVtsData(vts.value)
+      if (qa.status === 'fulfilled')      setQaData(qa.value)
+      if (llmCall.status === 'fulfilled') setLlmCallData(llmCall.value)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -433,6 +441,173 @@ export default function Insights() {
             )}
           </div>
         </div>
+      </section>
+
+      {/* ===== TODO-40: QA 违规统计 ===== */}
+      <section>
+        <SectionTitle icon={FileWarning} title="QA 违规统计" color="text-red-600" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard
+            label="违规总数"
+            value={qaData?.total_violations ?? '—'}
+            color={qaData?.total_violations > 0 ? 'text-red-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="降级次数"
+            value={qaData?.degraded_count ?? '—'}
+            color={qaData?.degraded_count > 0 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="降级率"
+            value={qaData?.degrade_rate != null ? `${qaData.degrade_rate}%` : '—'}
+            color={qaData?.degrade_rate > 30 ? 'text-red-500' : qaData?.degrade_rate > 10 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="重写成功率"
+            value={qaData?.rewrite_success_rate != null ? `${qaData.rewrite_success_rate}%` : '—'}
+            color={qaData?.rewrite_success_rate >= 80 ? 'text-green-600' : 'text-orange-500'}
+          />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 违规码分布 */}
+          <div className="card p-4">
+            {(qaData?.violation_codes?.length ?? 0) > 0 ? (
+              <BarChart
+                title="违规码分布"
+                direction="horizontal"
+                categories={(qaData?.violation_codes ?? []).map((c) => c.violation_code)}
+                series={[{ name: '次数', data: (qaData?.violation_codes ?? []).map((c) => c.count), color: '#F04438' }]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
+                <FileWarning size={24} className="mb-2 text-green-400" />
+                <span className="text-xs font-medium text-gray-500">违规码分布</span>
+                <span className="mt-1">暂无 QA 违规记录</span>
+              </div>
+            )}
+          </div>
+          {/* 违规时序趋势 */}
+          <div className="card p-4">
+            <LineChart
+              title="违规趋势"
+              xData={qaData?.timeseries_labels ?? []}
+              series={[{ name: '违规数', data: qaData?.timeseries_counts ?? [], color: '#F04438' }]}
+            />
+          </div>
+        </div>
+        {/* 最近违规列表 */}
+        {(qaData?.recent_violations?.length ?? 0) > 0 && (
+          <div className="card overflow-hidden mt-4">
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+              最近 QA 违规
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  {['时间', '节点', '违规码', '处置', '详情'].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(qaData?.recent_violations ?? []).map((v, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{formatTime(v.ts_ms)}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{v.node_id ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-red-600">{v.violation_code ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-orange-500">{v.action ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-xs" title={v.detail}>{v.detail || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* ===== TODO-41: LLM 调用成本统计 ===== */}
+      <section>
+        <SectionTitle icon={Zap} title="LLM 调用成本统计" color="text-amber-600" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard label="总调用次数" value={llmCallData?.total_calls ?? '—'} />
+          <StatCard
+            label="总 Token 消耗"
+            value={llmCallData?.total_tokens != null ? llmCallData.total_tokens.toLocaleString() : '—'}
+            color="text-amber-600"
+          />
+          <StatCard
+            label="Prompt Tokens"
+            value={llmCallData?.total_prompt_tokens != null ? llmCallData.total_prompt_tokens.toLocaleString() : '—'}
+            color="text-blue-600"
+          />
+          <StatCard
+            label="平均延迟"
+            value={llmCallData?.avg_latency_ms != null ? `${llmCallData.avg_latency_ms}ms` : '—'}
+            color={llmCallData?.avg_latency_ms > 2000 ? 'text-red-500' : llmCallData?.avg_latency_ms > 1000 ? 'text-orange-500' : 'text-green-600'}
+          />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 按 model_id 分组的 token 消耗 */}
+          <div className="card p-4">
+            {(llmCallData?.models?.length ?? 0) > 0 ? (
+              <BarChart
+                title="各模型 Token 消耗"
+                direction="horizontal"
+                categories={(llmCallData?.models ?? []).map((m) => m.model_id)}
+                series={[
+                  { name: 'Prompt', data: (llmCallData?.models ?? []).map((m) => m.total_prompt_tokens), color: '#2970FF' },
+                  { name: 'Completion', data: (llmCallData?.models ?? []).map((m) => m.total_completion_tokens), color: '#F79009' },
+                ]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
+                <Zap size={24} className="mb-2 text-gray-300" />
+                <span className="text-xs font-medium text-gray-500">各模型 Token 消耗</span>
+                <span className="mt-1">暂无 LLM 调用数据</span>
+              </div>
+            )}
+          </div>
+          {/* 调用量时序趋势 */}
+          <div className="card p-4">
+            <LineChart
+              title="LLM 调用量趋势"
+              xData={llmCallData?.timeseries_labels ?? []}
+              series={[
+                { name: '调用次数', data: llmCallData?.timeseries_calls ?? [], color: '#2970FF' },
+              ]}
+            />
+          </div>
+        </div>
+        {/* 各模型详情表格 */}
+        {(llmCallData?.models?.length ?? 0) > 0 && (
+          <div className="card overflow-hidden mt-4">
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+              各模型调用详情
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  {['模型 ID', '调用次数', 'Prompt Tokens', 'Completion Tokens', '总 Tokens', '平均延迟', 'P95 延迟'].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(llmCallData?.models ?? []).map((m, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{m.model_id}</td>
+                    <td className="px-4 py-2 text-xs text-gray-700 text-center">{m.call_count}</td>
+                    <td className="px-4 py-2 text-xs text-blue-500 text-right">{m.total_prompt_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-xs text-amber-500 text-right">{m.total_completion_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-xs font-medium text-gray-700 text-right">{m.total_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{m.avg_latency_ms != null ? `${m.avg_latency_ms}ms` : '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{m.p95_latency_ms != null ? `${m.p95_latency_ms}ms` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* ===== TODO-32: Memory 子系统统计 ===== */}

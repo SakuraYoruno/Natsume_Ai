@@ -1580,3 +1580,527 @@ async def get_retention_stats(
     )
 
 
+# ---------------------------------------------------------------------------
+# TODO-40: GET /obs/qa/stats  — QA 违规统计
+# ---------------------------------------------------------------------------
+class QaViolationCodeItem(BaseModel):
+    violation_code: str
+    count: int
+    pct: float
+
+class QaStatsResponse(BaseModel):
+    window_minutes: int
+    total_violations: int
+    degraded_count: int
+    rewritten_count: int
+    degrade_rate: Optional[float]
+    rewrite_success_rate: Optional[float]
+    violation_codes: List[QaViolationCodeItem]
+    timeseries_labels: List[str]
+    timeseries_counts: List[int]
+    recent_violations: List[Dict[str, Any]]
+    timestamp: int
+
+@router.get("/qa/stats", response_model=QaStatsResponse)
+async def get_qa_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+    limit: int = Query(20, ge=1, le=100, description="最近违规条数"),
+):
+    """TODO-40: QA 违规统计 — 违规码分布、降级率、重写成功率、时序趋势、最近违规列表。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("qa_violation_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 兼容旧表名 qa_violation
+    if not rows:
+        try:
+            rows = ledger.fetch_by_time_range("qa_violation", start_ms=since_ms, end_ms=now)
+        except Exception:
+            rows = []
+
+    total = len(rows)
+    degraded_count = sum(
+        1 for r in rows
+        if str(r.get("action") or r.get("result") or "").upper() in ("DEGRADED", "FALLBACK", "DOWNGRADE")
+    )
+    rewritten_count = sum(
+        1 for r in rows
+        if str(r.get("action") or r.get("result") or "").upper() in ("REWRITTEN", "REWRITE", "PATCHED")
+    )
+    degrade_rate = round(degraded_count / total * 100, 1) if total > 0 else None
+    rewrite_success_rate = round(rewritten_count / (degraded_count + rewritten_count) * 100, 1) if (degraded_count + rewritten_count) > 0 else None
+
+    # 违规码分布
+    from collections import Counter
+    code_counter = Counter(
+        str(r.get("violation_code") or r.get("reason_code") or "UNKNOWN").upper()
+        for r in rows
+    )
+    violation_codes = [
+        QaViolationCodeItem(
+            violation_code=code,
+            count=cnt,
+            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
+        )
+        for code, cnt in code_counter.most_common(10)
+    ]
+
+    # 时序聚合
+    interval_ms = interval_minutes * 60 * 1000
+    bucket_count = max(1, (window_minutes * 60 * 1000) // interval_ms)
+    ts_counts = [0] * bucket_count
+    for r in rows:
+        ts = r.get("ts_ms") or 0
+        idx = min(int((ts - since_ms) // interval_ms), bucket_count - 1)
+        if 0 <= idx < bucket_count:
+            ts_counts[idx] += 1
+
+    labels = []
+    for i in range(bucket_count):
+        ts_val = since_ms + i * interval_ms
+        d = __import__("datetime").datetime.fromtimestamp(ts_val / 1000)
+        if window_minutes <= 60:
+            labels.append(d.strftime("%H:%M"))
+        elif window_minutes <= 1440:
+            labels.append(d.strftime("%m/%d %H:%M"))
+        else:
+            labels.append(d.strftime("%m/%d"))
+
+    # 最近 N 条（倒序）
+    recent_sorted = sorted(rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
+    recent_violations = [
+        {
+            "request_id": r.get("request_id"),
+            "node_id": r.get("node_id"),
+            "violation_code": str(r.get("violation_code") or r.get("reason_code") or "UNKNOWN").upper(),
+            "action": str(r.get("action") or r.get("result") or "").upper() or None,
+            "detail": (r.get("detail") or "")[:200],
+            "ts_ms": r.get("ts_ms"),
+        }
+        for r in recent_sorted
+    ]
+
+    return QaStatsResponse(
+        window_minutes=window_minutes,
+        total_violations=total,
+        degraded_count=degraded_count,
+        rewritten_count=rewritten_count,
+        degrade_rate=degrade_rate,
+        rewrite_success_rate=rewrite_success_rate,
+        violation_codes=violation_codes,
+        timeseries_labels=labels,
+        timeseries_counts=ts_counts,
+        recent_violations=recent_violations,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-41: GET /obs/llm/call-stats  — LLM 调用成本统计
+# ---------------------------------------------------------------------------
+class LlmModelCallItem(BaseModel):
+    model_id: str
+    node_id: Optional[str]
+    call_count: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+    avg_latency_ms: Optional[float]
+    p95_latency_ms: Optional[int]
+
+class LlmCallStatsResponse(BaseModel):
+    window_minutes: int
+    total_calls: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+    avg_latency_ms: Optional[float]
+    models: List[LlmModelCallItem]
+    timeseries_labels: List[str]
+    timeseries_calls: List[int]
+    timeseries_tokens: List[int]
+    timestamp: int
+
+@router.get("/llm/call-stats", response_model=LlmCallStatsResponse)
+async def get_llm_call_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+):
+    """TODO-41: LLM 调用成本统计 — 按 model_id 分组的 token 消耗/平均延迟/调用次数。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("llm_call_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 兼容 llm_node_call_log 表名
+    if not rows:
+        try:
+            rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now)
+        except Exception:
+            rows = []
+
+    total_calls = len(rows)
+    total_prompt = sum(int(r.get("prompt_tokens") or 0) for r in rows)
+    total_completion = sum(int(r.get("completion_tokens") or 0) for r in rows)
+    total_tokens = total_prompt + total_completion
+    latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
+    avg_latency = round(sum(latencies) / len(latencies), 1) if latencies else None
+
+    # 按 model_id 分组
+    from collections import defaultdict
+    model_map: Dict[str, List] = defaultdict(list)
+    for r in rows:
+        mid = str(r.get("model_id") or r.get("model") or "unknown")
+        model_map[mid].append(r)
+
+    models = []
+    for mid, mrows in sorted(model_map.items()):
+        m_prompt = sum(int(r.get("prompt_tokens") or 0) for r in mrows)
+        m_completion = sum(int(r.get("completion_tokens") or 0) for r in mrows)
+        m_latencies = [r["latency_ms"] for r in mrows if r.get("latency_ms") is not None]
+        m_avg_lat = round(sum(m_latencies) / len(m_latencies), 1) if m_latencies else None
+        m_p95 = None
+        if m_latencies:
+            sl = sorted(m_latencies)
+            m_p95 = sl[max(0, int(len(sl) * 0.95) - 1)]
+        node_ids = list({str(r.get("node_id") or "") for r in mrows if r.get("node_id")})
+        models.append(LlmModelCallItem(
+            model_id=mid,
+            node_id=node_ids[0] if len(node_ids) == 1 else None,
+            call_count=len(mrows),
+            total_prompt_tokens=m_prompt,
+            total_completion_tokens=m_completion,
+            total_tokens=m_prompt + m_completion,
+            avg_latency_ms=m_avg_lat,
+            p95_latency_ms=m_p95,
+        ))
+
+    # 时序聚合
+    interval_ms = interval_minutes * 60 * 1000
+    bucket_count = max(1, (window_minutes * 60 * 1000) // interval_ms)
+    ts_calls = [0] * bucket_count
+    ts_tokens = [0] * bucket_count
+    for r in rows:
+        ts = r.get("ts_ms") or 0
+        idx = min(int((ts - since_ms) // interval_ms), bucket_count - 1)
+        if 0 <= idx < bucket_count:
+            ts_calls[idx] += 1
+            ts_tokens[idx] += int(r.get("prompt_tokens") or 0) + int(r.get("completion_tokens") or 0)
+
+    labels = []
+    for i in range(bucket_count):
+        ts_val = since_ms + i * interval_ms
+        d = __import__("datetime").datetime.fromtimestamp(ts_val / 1000)
+        if window_minutes <= 60:
+            labels.append(d.strftime("%H:%M"))
+        elif window_minutes <= 1440:
+            labels.append(d.strftime("%m/%d %H:%M"))
+        else:
+            labels.append(d.strftime("%m/%d"))
+
+    return LlmCallStatsResponse(
+        window_minutes=window_minutes,
+        total_calls=total_calls,
+        total_prompt_tokens=total_prompt,
+        total_completion_tokens=total_completion,
+        total_tokens=total_tokens,
+        avg_latency_ms=avg_latency,
+        models=models,
+        timeseries_labels=labels,
+        timeseries_calls=ts_calls,
+        timeseries_tokens=ts_tokens,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-42: GET /obs/checkpoints  — CheckpointManager 状态查询
+# ---------------------------------------------------------------------------
+class CheckpointItem(BaseModel):
+    checkpoint_id: str
+    request_id: Optional[str]
+    interrupt_reason: Optional[str]
+    resume_deadline_at: Optional[int]
+    created_at_ms: Optional[int]
+    is_expired: bool
+    payload_summary: Optional[str]
+
+class CheckpointsResponse(BaseModel):
+    total: int
+    items: List[CheckpointItem]
+    timestamp: int
+
+class CheckpointDetailResponse(BaseModel):
+    checkpoint_id: str
+    request_id: Optional[str]
+    interrupt_reason: Optional[str]
+    resume_deadline_at: Optional[int]
+    created_at_ms: Optional[int]
+    is_expired: bool
+    payload: Optional[Any]
+    timestamp: int
+
+@router.get("/checkpoints", response_model=CheckpointsResponse)
+async def get_checkpoints(
+    limit: int = Query(20, ge=1, le=100, description="返回条数"),
+    include_expired: bool = Query(False, description="是否包含已超时的 checkpoint"),
+):
+    """TODO-42: 最近 checkpoint 列表（checkpoint_id/request_id/interrupt_reason/resume_deadline_at/是否已超时）。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+
+    try:
+        rows = ledger.fetch_by_time_range("checkpoints", start_ms=0, end_ms=now)
+    except Exception:
+        rows = []
+
+    # 兼容 graph_checkpoint 表名
+    if not rows:
+        try:
+            rows = ledger.fetch_by_time_range("graph_checkpoint", start_ms=0, end_ms=now)
+        except Exception:
+            rows = []
+
+    # 按创建时间倒序
+    rows_sorted = sorted(rows, key=lambda r: r.get("created_at_ms") or r.get("ts_ms") or 0, reverse=True)
+
+    items = []
+    for r in rows_sorted:
+        deadline = r.get("resume_deadline_at")
+        is_expired = bool(deadline and int(deadline) < now)
+        if not include_expired and is_expired:
+            continue
+        payload_raw = r.get("payload") or r.get("payload_json")
+        payload_summary = None
+        if payload_raw:
+            try:
+                ps = json.dumps(payload_raw) if not isinstance(payload_raw, str) else payload_raw
+                payload_summary = ps[:120] + "…" if len(ps) > 120 else ps
+            except Exception:
+                pass
+        items.append(CheckpointItem(
+            checkpoint_id=str(r.get("checkpoint_id") or r.get("id") or ""),
+            request_id=r.get("request_id"),
+            interrupt_reason=r.get("interrupt_reason"),
+            resume_deadline_at=int(deadline) if deadline else None,
+            created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0),
+            is_expired=is_expired,
+            payload_summary=payload_summary,
+        ))
+        if len(items) >= limit:
+            break
+
+    return CheckpointsResponse(total=len(items), items=items, timestamp=now)
+
+
+@router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
+async def get_checkpoint_detail(checkpoint_id: str):
+    """TODO-42: 单个 checkpoint 详情（含完整 payload）。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+
+    rows = []
+    for table in ("checkpoints", "graph_checkpoint"):
+        try:
+            all_rows = ledger.fetch_by_time_range(table, start_ms=0, end_ms=now)
+            rows = [
+                r for r in all_rows
+                if str(r.get("checkpoint_id") or r.get("id") or "") == checkpoint_id
+            ]
+            if rows:
+                break
+        except Exception:
+            continue
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "checkpoint_not_found", "checkpoint_id": checkpoint_id},
+        )
+
+    r = rows[0]
+    deadline = r.get("resume_deadline_at")
+    is_expired = bool(deadline and int(deadline) < now)
+    payload_raw = r.get("payload") or r.get("payload_json")
+    payload = _safe_json(payload_raw) if payload_raw else None
+
+    return CheckpointDetailResponse(
+        checkpoint_id=checkpoint_id,
+        request_id=r.get("request_id"),
+        interrupt_reason=r.get("interrupt_reason"),
+        resume_deadline_at=int(deadline) if deadline else None,
+        created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0),
+        is_expired=is_expired,
+        payload=payload,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-43: GET /obs/rate-limit/backend-stats  — RateLimitStore 后端状态
+# ---------------------------------------------------------------------------
+class RateLimitKeyItem(BaseModel):
+    key: str
+    current_count: int
+    ttl_ms: Optional[int]
+    window_ms: Optional[int]
+
+class RateLimitBackendStatsResponse(BaseModel):
+    backend_type: str          # "memory" | "sqlite" | "redis"
+    is_degraded: bool
+    degrade_reason: Optional[str]
+    total_keys: int
+    active_keys: int
+    top_keys: List[RateLimitKeyItem]
+    timestamp: int
+
+@router.get("/rate-limit/backend-stats", response_model=RateLimitBackendStatsResponse)
+async def get_rate_limit_backend_stats(
+    top_k: int = Query(20, ge=1, le=100, description="返回 Top-K 活跃 key"),
+):
+    """TODO-43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+
+    # 尝试从 rate_limit_store_log 读取最新状态快照
+    backend_type = "memory"
+    is_degraded = False
+    degrade_reason = None
+    top_keys: List[RateLimitKeyItem] = []
+
+    try:
+        rows = ledger.fetch_by_time_range("rate_limit_store_log", start_ms=0, end_ms=now)
+        if rows:
+            latest = sorted(rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[0]
+            backend_type = str(latest.get("backend_type") or "memory")
+            is_degraded = bool(latest.get("is_degraded") or False)
+            degrade_reason = latest.get("degrade_reason")
+    except Exception:
+        pass
+
+    # 从 governor_log 中统计各 key 的速率限制计数（近 5 分钟）
+    try:
+        since_5m = now - 5 * 60 * 1000
+        gov_rows = ledger.fetch_by_time_range("governor_log", start_ms=since_5m, end_ms=now)
+        rl_rows = [
+            r for r in gov_rows
+            if str(r.get("reason_code") or "").upper().startswith("RATE_LIMIT")
+        ]
+        from collections import Counter
+        key_counter = Counter(
+            str(r.get("session_id") or r.get("wxid") or r.get("user_id") or "unknown")
+            for r in rl_rows
+        )
+        top_keys = [
+            RateLimitKeyItem(
+                key=k,
+                current_count=cnt,
+                ttl_ms=None,
+                window_ms=5 * 60 * 1000,
+            )
+            for k, cnt in key_counter.most_common(top_k)
+        ]
+    except Exception:
+        pass
+
+    total_keys = len(top_keys)
+    active_keys = sum(1 for k in top_keys if k.current_count > 0)
+
+    return RateLimitBackendStatsResponse(
+        backend_type=backend_type,
+        is_degraded=is_degraded,
+        degrade_reason=degrade_reason,
+        total_keys=total_keys,
+        active_keys=active_keys,
+        top_keys=top_keys,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TODO-44: GET /obs/vault/stats  — ArtifactVault Manifest 统计
+# ---------------------------------------------------------------------------
+class VaultManifestItem(BaseModel):
+    manifest_id: str
+    artifact_type: Optional[str]
+    status: str          # "ACTIVE" | "UNDONE" | "GC"
+    created_at_ms: Optional[int]
+    undone_at_ms: Optional[int]
+    gc_at_ms: Optional[int]
+    is_reversible: bool
+    summary: Optional[str]
+
+class VaultStatsResponse(BaseModel):
+    total_manifests: int
+    active_count: int
+    undone_count: int
+    gc_count: int
+    reversible_count: int
+    reversible_rate: Optional[float]
+    recent_manifests: List[VaultManifestItem]
+    timestamp: int
+
+@router.get("/vault/stats", response_model=VaultStatsResponse)
+async def get_vault_stats(
+    limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
+):
+    """TODO-44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。"""
+    ledger = _get_ledger()
+    now = _now_ms()
+
+    rows = []
+    for table in ("vault_manifest", "artifact_vault_manifest"):
+        try:
+            fetched = ledger.fetch_by_time_range(table, start_ms=0, end_ms=now)
+            if fetched:
+                rows = fetched
+                break
+        except Exception:
+            continue
+
+    total = len(rows)
+    active_count = sum(1 for r in rows if str(r.get("status") or "").upper() == "ACTIVE")
+    undone_count = sum(1 for r in rows if str(r.get("status") or "").upper() in ("UNDONE", "ROLLED_BACK"))
+    gc_count = sum(1 for r in rows if str(r.get("status") or "").upper() in ("GC", "GARBAGE_COLLECTED", "DELETED"))
+    reversible_count = sum(1 for r in rows if bool(r.get("is_reversible") or r.get("reversible")))
+    reversible_rate = round(reversible_count / total * 100, 1) if total > 0 else None
+
+    # 最近 N 条（按创建时间倒序）
+    recent_sorted = sorted(rows, key=lambda r: r.get("created_at_ms") or r.get("ts_ms") or 0, reverse=True)[:limit]
+    recent_manifests = [
+        VaultManifestItem(
+            manifest_id=str(r.get("manifest_id") or r.get("id") or ""),
+            artifact_type=r.get("artifact_type"),
+            status=str(r.get("status") or "UNKNOWN").upper(),
+            created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0) or None,
+            undone_at_ms=int(r.get("undone_at_ms") or 0) or None,
+            gc_at_ms=int(r.get("gc_at_ms") or 0) or None,
+            is_reversible=bool(r.get("is_reversible") or r.get("reversible")),
+            summary=(r.get("summary") or r.get("detail") or "")[:120] or None,
+        )
+        for r in recent_sorted
+    ]
+
+    return VaultStatsResponse(
+        total_manifests=total,
+        active_count=active_count,
+        undone_count=undone_count,
+        gc_count=gc_count,
+        reversible_count=reversible_count,
+        reversible_rate=reversible_rate,
+        recent_manifests=recent_manifests,
+        timestamp=now,
+    )
+
+
+

@@ -484,6 +484,19 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
         limit=600,
     )
+    # ── TODO-39：EmotionVector VAD 连续体注入 ────────────────────────────
+    emotion_vector_raw = runtime_payload.get("emotion_vector")
+    emotion_vector = dict(emotion_vector_raw) if isinstance(emotion_vector_raw, Mapping) else {}
+    # 从 ctx.metadata["emotion_vector"] 读取 VAD 三维数值
+    try:
+        _vad_valence   = float(emotion_vector.get("valence")   or 0.0)
+        _vad_arousal   = float(emotion_vector.get("arousal")   or 0.0)
+        _vad_dominance = float(emotion_vector.get("dominance") or 0.0)
+    except (TypeError, ValueError):
+        _vad_valence = _vad_arousal = _vad_dominance = 0.0
+    # 仅在 VAD 数据有效时注入（非全零）
+    _vad_active = not (_vad_valence == 0.0 and _vad_arousal == 0.0 and _vad_dominance == 0.0)
+
     # ── TODO-33：EmotionTimeline 摘要注入 ────────────────────────────────
     emotion_timeline_raw = runtime_payload.get("emotion_timeline")
     emotion_timeline = dict(emotion_timeline_raw) if isinstance(emotion_timeline_raw, Mapping) else {}
@@ -521,6 +534,16 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             if _et_active else
             "- emotion_timeline_dominant: NONE\n"
             "- emotion_timeline_trend: NONE\n"
+        )
+        # ── TODO-39：VAD 连续体（valence/arousal/dominance）────────────
+        + (
+            f"- emotion_vad_valence: {_vad_valence:.3f}\n"
+            f"- emotion_vad_arousal: {_vad_arousal:.3f}\n"
+            f"- emotion_vad_dominance: {_vad_dominance:.3f}\n"
+            if _vad_active else
+            "- emotion_vad_valence: NONE\n"
+            "- emotion_vad_arousal: NONE\n"
+            "- emotion_vad_dominance: NONE\n"
         )
         + "\n"
     )

@@ -1119,3 +1119,108 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `monitor_ui/src/pages/Insights.jsx`：新增 VTS 统计区块，引入 `Tv` 图标和 `fetchVtsStats`
 
+---
+
+### TODO-39：EmotionVector VAD 连续体注入 PromptBuilder（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（VAD 三维数值已注入 EMOTION_BINDING 块）
+
+**问题**：`core/metabolism.py` 有完整的 `EmotionVector`（VAD 三维模型），但 `prompt_builder.py` 的 `EMOTION_BINDING` 块只注入了离散的 `emotion_tag`/`mood_state`，从未注入 VAD 连续体数值，LLM 无法感知情感的细粒度强度。
+
+**新增功能**：
+- `render_node_generation_prompt()` 中新增 VAD 数据提取逻辑（从 `runtime_payload.get("emotion_vector")` 读取）
+- `EMOTION_BINDING` 块末尾追加 `emotion_vad_valence`/`emotion_vad_arousal`/`emotion_vad_dominance` 三个字段
+- 仅在 VAD 数据有效时注入真实值（非全零），无效时注入 `NONE`
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：新增 VAD 提取逻辑 + EMOTION_BINDING 块扩展
+
+---
+
+### TODO-40：QA 违规统计接入 Insights 页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（QA 质量监控区块已上线）
+
+**问题**：`core/qa.py` 有完整的 QA 违规检测系统，审计数据写入 `qa_violation` 表，但 WebUI 完全没有 QA 违规统计面板，无法观测 LLM 输出质量。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/qa/stats`：QA 违规统计（违规码分布、降级率、重写成功率、时序趋势、最近违规列表）
+- `Insights.jsx` 新增 QA 质量监控区块（FileWarning 图标，红色主题）：违规码分布柱状图 + 违规趋势折线图 + 最近违规列表
+- `obs.js` 新增 `fetchQaStats` API 函数
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/qa/stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 QA 违规统计区块
+- `monitor_ui/src/api/obs.js`：新增 `fetchQaStats`
+
+---
+
+### TODO-41：EvidencePlane LLM 调用日志接入 obs_routes（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（LLM 调用成本统计已上线）
+
+**问题**：`integrations/graph_evidence.py` 的 `EvidencePlane` 有 `llm_call_log` 表，但 `obs_routes.py` 完全没有读取这个表的端点，LLM 调用成本和延迟数据无法通过 WebUI 观测。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/llm/call-stats`：LLM 调用统计（按 model_id 分组的 token 消耗/平均延迟/调用次数/P95延迟 + 时序趋势）
+- `Insights.jsx` 新增 LLM 调用成本区块（Zap 图标，琥珀色主题）：各模型 token 消耗横向柱状图 + 调用量趋势折线图 + 各模型详情表格
+- `obs.js` 新增 `fetchLlmCallStats` API 函数
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/llm/call-stats` 端点
+- `monitor_ui/src/pages/Insights.jsx`：新增 LLM 调用成本区块
+- `monitor_ui/src/api/obs.js`：新增 `fetchLlmCallStats`
+
+---
+
+### TODO-42：CheckpointManager 状态接入 obs_routes（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Checkpoint 状态查询已上线）
+
+**问题**：`integrations/graph_checkpoint.py` 有完整的 `CheckpointManager`，但 `obs_routes.py` 没有任何 checkpoint 状态查询端点，无法观测断点续跑状态。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/checkpoints`：最近 checkpoint 列表（含超时状态过滤）
+- `obs_routes.py` 新增 `GET /obs/checkpoints/{checkpoint_id}`：单个 checkpoint 详情（含完整 payload）
+- `Trace.jsx` 新增 Checkpoint 侧边栏（Bookmark 图标，琥珀色主题）：当 trace 中存在 checkpoint 时显示，展示中断原因/截止时间/payload 摘要
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/checkpoints` 和 `/obs/checkpoints/{id}` 端点
+- `monitor_ui/src/pages/Trace.jsx`：新增 Checkpoint 侧边栏
+- `monitor_ui/src/api/obs.js`：新增 `fetchCheckpoints`、`fetchCheckpointDetail`
+
+---
+
+### TODO-43：RateLimitStore 后端状态接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（速率限制后端状态卡片已上线）
+
+**问题**：`governor/rate_limit_store.py` 有完整的三后端实现和 `DegradingRateLimitStore` 降级包装器，但 WebUI 完全没有速率限制后端状态面板。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/rate-limit/backend-stats`：速率限制后端状态（当前后端类型/是否降级/降级原因/Top-K key 计数）
+- `Metrics.jsx` 新增速率限制后端状态卡片（Database 图标，靛蓝色主题）：后端类型/降级状态 + 活跃 key 统计 + Top key 计数表格
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/rate-limit/backend-stats` 端点
+- `monitor_ui/src/pages/Metrics.jsx`：新增速率限制后端状态卡片
+- `monitor_ui/src/api/obs.js`：新增 `fetchRateLimitBackendStats`
+
+---
+
+### TODO-44：Vault Manifest 统计接入 WebUI（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Vault Manifest 统计已上线）
+
+**问题**：`lsp/vault.py` 有完整的 `ArtifactVault`（manifest 创建/undo/GC），审计数据写入 `vault_manifest` 表，但 WebUI 完全没有 Vault 统计面板。
+
+**新增功能**：
+- `obs_routes.py` 新增 `GET /obs/vault/stats`：Vault 统计（ACTIVE/UNDONE/GC'd manifest 数量、可逆比例、最近 manifest 列表）
+- `Canon.jsx` 新增 Vault 统计面板（Lock 图标，紫罗兰色主题）：manifest 状态分布进度条 + 4 个聚合指标卡片 + 最近 manifest 详情表格
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 `/obs/vault/stats` 端点
+- `monitor_ui/src/pages/Canon.jsx`：新增 Vault Manifest 统计面板
+- `monitor_ui/src/api/obs.js`：新增 `fetchVaultStats`
+
+

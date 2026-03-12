@@ -10,11 +10,11 @@ import {
   MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2 } from 'lucide-react'
+import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2, Bookmark } from 'lucide-react'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import { applyDagreLayout } from '../utils/traceLayout.js'
-import { fetchTraceNodes } from '../api/obs.js'
+import { fetchTraceNodes, fetchCheckpoints } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
@@ -255,6 +255,7 @@ export default function Trace() {
   const [traceInfo, setTraceInfo] = useState(null)
   const [traceData, setTraceData] = useState(null)   // 原始 trace 数据（甘特图用）
   const [viewMode, setViewMode] = useState('dag')    // 'dag' | 'gantt'
+  const [checkpoints, setCheckpoints] = useState([]) // TODO-42: checkpoint 列表
   const containerRef = useRef(null)
 
   const handleSelect = useCallback((data) => setSelectedNode(data), [])
@@ -276,6 +277,16 @@ export default function Trace() {
       const { nodes: ln, edges: le } = buildFlowData(data, handleSelect)
       setNodes(ln)
       setEdges(le)
+      // TODO-42: 加载与该 request_id 关联的 checkpoint
+      try {
+        const cpData = await fetchCheckpoints({ limit: 10 })
+        const relatedCps = (cpData?.items ?? []).filter(
+          (cp) => !cp.request_id || cp.request_id === id
+        )
+        setCheckpoints(relatedCps)
+      } catch {
+        setCheckpoints([])
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -440,6 +451,52 @@ export default function Trace() {
         {/* 节点详情侧边面板 */}
         {selectedNode && (
           <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+        )}
+
+        {/* TODO-42: Checkpoint 侧边栏（有 checkpoint 时显示） */}
+        {!selectedNode && checkpoints.length > 0 && (
+          <div className="w-72 shrink-0 card overflow-hidden flex flex-col">
+            <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+              <Bookmark size={13} className="text-amber-600" />
+              <span className="text-xs font-semibold text-amber-700">Checkpoints ({checkpoints.length})</span>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+              {checkpoints.map((cp) => (
+                <div key={cp.checkpoint_id} className={`p-3 text-xs ${cp.is_expired ? 'opacity-50' : ''}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-mono text-blue-600 truncate max-w-[140px]" title={cp.checkpoint_id}>
+                      {cp.checkpoint_id.slice(0, 16)}…
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded border text-xs font-medium ${
+                      cp.is_expired
+                        ? 'bg-gray-100 text-gray-500 border-gray-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {cp.is_expired ? '已超时' : '等待恢复'}
+                    </span>
+                  </div>
+                  {cp.interrupt_reason && (
+                    <div className="text-orange-600 mb-1 truncate" title={cp.interrupt_reason}>
+                      中断原因：{cp.interrupt_reason}
+                    </div>
+                  )}
+                  {cp.resume_deadline_at && (
+                    <div className="text-gray-400">
+                      截止：{new Date(cp.resume_deadline_at).toLocaleString('zh-CN', {
+                        month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit',
+                      })}
+                    </div>
+                  )}
+                  {cp.payload_summary && (
+                    <div className="mt-1 text-gray-400 truncate" title={cp.payload_summary}>
+                      {cp.payload_summary}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
