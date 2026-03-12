@@ -807,6 +807,8 @@ class _ModernSoVITSAdapter:
         text: str,
         language: str,
         emotion: str | None = None,
+        speed_factor: float | None = None,
+        energy_factor: float | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
@@ -827,13 +829,35 @@ class _ModernSoVITSAdapter:
             "streaming_mode": False,
             "fragment_interval": 0.0,
         }
+        if speed_factor is not None:
+            inputs["speed_factor"] = float(speed_factor)
+        if energy_factor is not None:
+            inputs["energy_factor"] = float(energy_factor)
 
-        chunks: list[Any] = []
-        sample_rate = DEFAULT_SAMPLE_RATE
-        for sr_i, audio_i in self._tts.run(inputs):
-            sample_rate = int(sr_i)
-            if audio_i is not None and hasattr(audio_i, "__len__") and len(audio_i) > 0:
-                chunks.append(np.asarray(audio_i))
+        def _collect_audio(run_inputs: dict[str, Any]) -> tuple[list[Any], int]:
+            chunks: list[Any] = []
+            sample_rate = DEFAULT_SAMPLE_RATE
+            for sr_i, audio_i in self._tts.run(run_inputs):
+                sample_rate = int(sr_i)
+                if audio_i is not None and hasattr(audio_i, "__len__") and len(audio_i) > 0:
+                    chunks.append(np.asarray(audio_i))
+            return chunks, sample_rate
+
+        try:
+            chunks, sample_rate = _collect_audio(inputs)
+        except TypeError as exc:
+            message = str(exc)
+            if "speed_factor" in message or "energy_factor" in message or "unexpected keyword" in message:
+                fallback_inputs = dict(inputs)
+                fallback_inputs.pop("speed_factor", None)
+                fallback_inputs.pop("energy_factor", None)
+                logger.debug(
+                    "Modern SoVITS backend does not accept speed/energy args; retry without them: %s",
+                    message,
+                )
+                chunks, sample_rate = _collect_audio(fallback_inputs)
+            else:
+                raise
 
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio.")
