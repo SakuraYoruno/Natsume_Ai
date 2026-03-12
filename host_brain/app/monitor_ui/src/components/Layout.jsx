@@ -6,6 +6,7 @@ import {
   GitBranch,
   BarChart2,
   Lightbulb,
+  BookOpen,
   RefreshCw,
   PauseCircle,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { to: '/trace',     icon: GitBranch,      label: 'Trace'     },
   { to: '/metrics',   icon: BarChart2,      label: 'Metrics'   },
   { to: '/insights',  icon: Lightbulb,      label: 'Insights'  },
+  { to: '/canon',     icon: BookOpen,       label: 'Canon'     },
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]

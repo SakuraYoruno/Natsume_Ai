@@ -631,6 +631,91 @@ async def _resolve_state_arbiter_style_fact(
         return summary, None
 
 
+async def _resolve_state_arbiter_bond_fact(
+    *,
+    session_id: str,
+    request_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """[TODO-18] 查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
+
+    BondGraph 记录了 Host 与用户之间的情感关系阶段（bond_stage）和互动强度，
+    注入后可让 LLM 根据当前关系阶段调整回应风格（亲密度感知）。
+    优先级：world_canon(1.0) > style_canon(0.85) > episodic_latest(0.75) > bond_graph(0.65)
+    """
+    summary: dict[str, Any] = {
+        "status": "SKIPPED",
+        "reason_code": "NOT_AVAILABLE",
+        "fact_key": "bond_graph_state",
+    }
+    try:
+        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+
+        _bond_engine = get_bond_stage_engine()
+        if _bond_engine is None:
+            summary["reason_code"] = "BOND_ENGINE_NOT_AVAILABLE"
+            return summary, None
+
+        # 从 BondStageEngine 获取当前关系阶段和强度
+        _bond_state = await asyncio.to_thread(
+            _bond_engine.get_bond_state,
+            session_id=session_id,
+        )
+        if _bond_state is None:
+            summary["reason_code"] = "NO_BOND_STATE"
+            return summary, None
+
+        bond_stage = str(getattr(_bond_state, "stage", "") or "").strip()
+        bond_score = float(getattr(_bond_state, "score", 0.0) or 0.0)
+        bond_label = str(getattr(_bond_state, "label", "") or "").strip()
+        interaction_count = int(getattr(_bond_state, "interaction_count", 0) or 0)
+
+        if not bond_stage:
+            summary["reason_code"] = "EMPTY_BOND_STAGE"
+            return summary, None
+
+        # 构建关系上下文文本（供 LLM 感知当前关系阶段）
+        fact_parts: list[str] = [f"当前关系阶段：{bond_stage}"]
+        if bond_label:
+            fact_parts.append(f"关系标签：{bond_label}")
+        if bond_score > 0:
+            fact_parts.append(f"关系强度：{bond_score:.2f}")
+        if interaction_count > 0:
+            fact_parts.append(f"累计互动次数：{interaction_count}")
+        fact_text = "，".join(fact_parts)
+
+        evidence_item = {
+            "slot_name": "bond_graph",
+            "doc_id": f"bond_graph::{session_id}",
+            "snippet": fact_text[:300],
+            "score": 0.65,
+            "source": "state_arbiter_bond",
+            "metadata": {
+                "fact_key": "bond_graph_state",
+                "bond_stage": bond_stage,
+                "bond_score": bond_score,
+                "interaction_count": interaction_count,
+                "source": "bond_stage_engine",
+            },
+        }
+        summary["status"] = "APPLIED"
+        summary["reason_code"] = None
+        summary["bond_stage"] = bond_stage
+        summary["bond_score"] = bond_score
+        summary["value_chars"] = len(fact_text)
+        return summary, evidence_item
+
+    except Exception as exc:
+        _logger.debug(
+            "BondGraph 状态查询失败（降级）: %s",
+            exc,
+            extra={"request_id": request_id},
+        )
+        summary["status"] = "DEGRADED"
+        summary["reason_code"] = "BOND_GRAPH_FAILED"
+        summary["detail"] = str(exc)
+        return summary, None
+
+
 async def _resolve_state_arbiter_episodic_fact(
     *,
     session_id: str,
@@ -1037,26 +1122,31 @@ async def _sse_event_generator(
                 "fact_key": str(state_arbiter_summary.get("fact_key") or "world_canon_facts"),
             }
 
-        # [TODO-17] 扩展 StateArbiter 查询：style_canon_facts + episodic_latest
+        # [TODO-17/18] 扩展 StateArbiter 查询：style_canon_facts + episodic_latest + bond_graph
         # 并行查询，降级时不阻断主链路
-        _style_summary, _style_evidence_item = await _resolve_state_arbiter_style_fact(
-            session_id=session_id,
-            request_id=request_id,
-        )
-        _episodic_summary, _episodic_evidence_item = await _resolve_state_arbiter_episodic_fact(
-            session_id=session_id,
-            request_id=request_id,
+        (
+            (_style_summary, _style_evidence_item),
+            (_episodic_summary, _episodic_evidence_item),
+            (_bond_summary, _bond_evidence_item),
+        ) = await asyncio.gather(
+            _resolve_state_arbiter_style_fact(session_id=session_id, request_id=request_id),
+            _resolve_state_arbiter_episodic_fact(session_id=session_id, request_id=request_id),
+            _resolve_state_arbiter_bond_fact(session_id=session_id, request_id=request_id),
         )
         retrieval_summary["style_canon"] = dict(_style_summary)
         retrieval_summary["episodic_latest"] = dict(_episodic_summary)
-        # style_canon 追加到 world_canon 之后（优先级：world_canon > style_canon > episodic > 其他召回）
+        retrieval_summary["bond_graph"] = dict(_bond_summary)
+        # 注入优先级：world_canon(1.0) > style_canon(0.85) > episodic_latest(0.75) > bond_graph(0.65)
         if _style_evidence_item is not None:
             retrieval_evidence_items = list(retrieval_evidence_items or []) + [_style_evidence_item]
             retrieval_summary["style_canon"]["injected"] = True
-        # episodic_latest 追加到末尾（最低优先级）
         if _episodic_evidence_item is not None:
             retrieval_evidence_items = list(retrieval_evidence_items or []) + [_episodic_evidence_item]
             retrieval_summary["episodic_latest"]["injected"] = True
+        # bond_graph 追加到最末（最低优先级，关系上下文感知）
+        if _bond_evidence_item is not None:
+            retrieval_evidence_items = list(retrieval_evidence_items or []) + [_bond_evidence_item]
+            retrieval_summary["bond_graph"]["injected"] = True
 
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,

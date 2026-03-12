@@ -631,7 +631,90 @@
 
 ---
 
-## 近期完成（2026-03-12 第三批）
+## 近期完成（2026-03-12 第四批）
+
+### TODO-18：StateArbiter 接入 BondGraph 查询（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（四路 StateArbiter 查询全部接入）
+
+**问题**：`http_hooks.py` 注册了 world/style/episodic 三路状态源，但 BondGraph 关系强度从未被查询，`bond_graph` slot 在 ContextPack 中有定义但处于空转状态。
+
+**修复**：
+- 新增 `_resolve_state_arbiter_bond_fact()`：通过 `BondStageEngine.get_bond_state()` 查询当前关系阶段
+- 构建关系上下文文本（bond_stage/bond_score/bond_label/interaction_count）
+- 构建 `slot_name=bond_graph` 证据条目（score=0.65，追加到 episodic_latest 之后）
+- 在 `_sse_event_generator` 中将 style/episodic/bond 三路查询改为 `asyncio.gather` 并行执行
+- `COMMIT.audit_refs.retrieval_summary` 新增 `bond_graph` 字段，可观测注入状态
+
+**注入优先级**：
+```
+world_canon(1.0) > style_canon(0.85) > episodic_latest(0.75) > bond_graph(0.65) > 其他召回
+```
+
+**降级策略**：BondStageEngine 不可用时独立降级，不阻断主链路
+
+**改动文件**：
+- `host_brain/app/chat_stream_handler.py`：新增 `_resolve_state_arbiter_bond_fact()`；三路并行查询改为 `asyncio.gather`
+
+**验证**：
+- `pytest -q tests/unit/test_new_features_todo18_20.py::TestBondGraphStateArbiter`（4 passed）
+
+---
+
+### TODO-19：WebUI Canon 管理页面（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 管理界面上线）
+
+**问题**：`canon_routes.py` 有完整的提案 CRUD API（提案列表/提交/审核/拒绝/文档列表），但 WebUI 完全没有对应界面，运维人员无法通过 UI 管理 Canon 提案。
+
+**修复**：
+- 新建 `Canon.jsx` 页面，包含：
+  - **提案列表**：分页展示，支持 pending/APPLIED/rejected 状态过滤，可展开查看详情
+  - **提交提案**：弹窗表单（proposal_id/target_doc_id/title/body/tags/summary）
+  - **审核操作**：通过（approve）/ 拒绝（reject）按钮，pending 状态下可操作
+  - **SSOT 文档**：展示当前 World Canon 文档快照，支持展开查看正文
+- 新增 5 个 Canon API 函数（`obs.js`）：`fetchCanonProposals/fetchCanonDocuments/submitCanonProposal/approveCanonProposal/rejectCanonProposal`
+- `App.jsx` 注册 `/canon` 路由
+- `Layout.jsx` 导航栏新增 Canon 入口（BookOpen 图标）
+
+**改动文件**：
+- `host_brain/app/monitor_ui/src/pages/Canon.jsx`：新建 Canon 管理页面
+- `host_brain/app/monitor_ui/src/api/obs.js`：新增 5 个 Canon API 函数
+- `host_brain/app/monitor_ui/src/App.jsx`：注册 `/canon` 路由
+- `host_brain/app/monitor_ui/src/components/Layout.jsx`：导航栏新增 Canon 入口
+
+---
+
+### TODO-20：CanonProposalNode 接入主链（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（Canon 提案自动提交）
+
+**问题**：LLM 输出包含世界观更新信号时，主链路没有任何节点自动提交 Canon 提案，世界观更新完全依赖人工操作 `/canon/proposals` API。
+
+**修复**：
+- 新增 `CanonProposalNode`，插入主链路 `AuditNode` 之后、`AirlockSanitizerNode` 之前
+- 触发条件（满足任一）：
+  - `final_response` 包含 `[CANON_UPDATE]`/`[世界观更新]`/`[WORLD_UPDATE]`/`[CANON_PROPOSAL]` 标记
+  - `audit_tags` 包含 `CANON_PROPOSAL_REQUESTED`（由外部注入）
+  - `ctx.metadata["canon_proposal"]` 中有预构建的提案内容
+- 触发后通过 `WorldCanonStore.submit_proposal` 写入 ledger（status=pending，需人工审核）
+- 降级策略：
+  - 提案重复（幂等）→ `SKIPPED_DUPLICATE`，不报错
+  - Store 不可用 → `DEGRADED`，标记 `CANON_PROPOSAL_DEGRADED`，不阻断链路
+  - 无触发信号 → `SKIPPED`，跳过
+
+**改动文件**：
+- `host_brain/app/graph/main_chain.py`：新增 `CanonProposalNode`；`NODE_TIMEOUT` 新增 `canon_proposal: 2.0`；`_NODE_FACTORIES` 插入 `CanonProposalNode`；`post_node_order` 新增 `canon_proposal`
+
+**验证**：
+- `pytest -q tests/unit/test_new_features_todo18_20.py::TestCanonProposalNode`（5 passed）
+- 合并运行：9 passed（含所有新增测试，无回归）
+
+**回退方式**：`CanonProposalNode` 无触发信号时自动跳过，不影响主链路；降级时不阻断链路
+
+---
+
+
 
 ### TODO-15：EpisodicStoreNode 真实业务化（已完成，2026-03-12）
 

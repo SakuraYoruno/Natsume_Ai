@@ -46,6 +46,7 @@ NODE_TIMEOUT: Dict[str, float] = {
     "qa_contract": 3.0,
     "episodic_store": 2.0,
     "audit": 1.0,
+    "canon_proposal": 2.0,
     "airlock_sanitizer": 1.0,
 }
 
@@ -879,6 +880,169 @@ class AuditNode(ChainNode):
         return True
 
 
+class CanonProposalNode(ChainNode):
+    """Canon 提案节点：当 LLM 输出包含世界观更新信号时，自动提交 Canon 提案。
+
+    [TODO-20] 接入真实 canon_routes.submit_proposal 逻辑：
+    - 检测 final_response 中是否包含世界观更新信号（关键词/标记）
+    - 若检测到，构建提案并通过 WorldCanonStore.submit_proposal 写入 ledger
+    - 降级策略：WorldCanonStore 不可用或提案重复时，标记 SKIPPED/DEGRADED，不阻断主链路
+
+    触发条件（满足任一）：
+    - final_response 包含 [CANON_UPDATE] 标记（LLM 主动标注）
+    - audit_tags 中包含 CANON_PROPOSAL_REQUESTED（由 GovernorNode 或外部注入）
+    - ctx.metadata["canon_proposal"] 中有预构建的提案内容
+
+    注意：此节点仅提交提案（status=pending），不直接写入 SSOT，
+    需通过 /canon/proposals/{id}/approve 审核后才生效。
+    """
+    name = "canon_proposal"
+    timeout = 2.0
+
+    # 触发 Canon 提案的关键词/标记（LLM 输出中出现时自动提交）
+    _TRIGGER_MARKERS: tuple[str, ...] = (
+        "[CANON_UPDATE]",
+        "[世界观更新]",
+        "[WORLD_UPDATE]",
+        "[CANON_PROPOSAL]",
+    )
+
+    @classmethod
+    def _detect_canon_signal(cls, text: str) -> tuple[bool, str]:
+        """检测文本中是否包含 Canon 更新信号。
+
+        Returns:
+            (triggered: bool, matched_marker: str)
+        """
+        for marker in cls._TRIGGER_MARKERS:
+            if marker in text:
+                return True, marker
+        return False, ""
+
+    @classmethod
+    def _extract_proposal_body(cls, text: str, marker: str) -> str:
+        """从 LLM 输出中提取提案正文（marker 之后的内容）。"""
+        idx = text.find(marker)
+        if idx < 0:
+            return text[:500].strip()
+        after = text[idx + len(marker):].strip()
+        # 取 marker 之后最多 500 字符作为提案正文
+        return after[:500].strip() or text[:500].strip()
+
+    async def execute(self, ctx: ChainContext) -> bool:
+        final_response = str(ctx.final_response or "").strip()
+
+        # ── 检查触发条件 ──────────────────────────────────────────────────
+        triggered = False
+        trigger_source = ""
+        matched_marker = ""
+
+        # 条件1：final_response 包含触发标记
+        if final_response:
+            triggered, matched_marker = self._detect_canon_signal(final_response)
+            if triggered:
+                trigger_source = f"LLM_MARKER:{matched_marker}"
+
+        # 条件2：audit_tags 中包含 CANON_PROPOSAL_REQUESTED
+        if not triggered and "CANON_PROPOSAL_REQUESTED" in ctx.audit_tags:
+            triggered = True
+            trigger_source = "AUDIT_TAG:CANON_PROPOSAL_REQUESTED"
+
+        # 条件3：ctx.metadata 中有预构建的提案内容
+        _pre_proposal = ctx.metadata.get("canon_proposal")
+        if not triggered and isinstance(_pre_proposal, dict) and _pre_proposal:
+            triggered = True
+            trigger_source = "METADATA:canon_proposal"
+
+        if not triggered:
+            ctx.metadata["canon_proposal_node"] = {
+                "status": "SKIPPED",
+                "reason_code": "NO_CANON_SIGNAL",
+            }
+            logger.debug("[%s] CanonProposalNode 跳过：无 Canon 更新信号", ctx.request_id)
+            return True
+
+        # ── 构建提案内容 ──────────────────────────────────────────────────
+        import time as _time  # noqa: PLC0415
+        from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
+
+        proposal_id = f"auto::{ctx.request_id}::{int(_time.time() * 1000)}"
+        target_doc_id = str(ctx.metadata.get("canon_target_doc_id") or "auto_generated")
+
+        if isinstance(_pre_proposal, dict) and _pre_proposal:
+            # 使用预构建的提案内容
+            proposed_title = str(_pre_proposal.get("title") or f"自动提案 {ctx.request_id[:8]}")
+            proposed_body = str(_pre_proposal.get("body") or final_response[:500])
+            proposed_tags = list(_pre_proposal.get("tags") or [])
+            summary = str(_pre_proposal.get("summary") or "")[:200]
+        else:
+            # 从 LLM 输出中提取提案内容
+            proposed_body = self._extract_proposal_body(final_response, matched_marker)
+            proposed_title = f"自动提案 {ctx.request_id[:8]}"
+            proposed_tags = ["auto_generated", "pending_review"]
+            summary = f"由主链路 CanonProposalNode 自动提交（触发源：{trigger_source}）"[:200]
+
+        # ── 提交提案 ──────────────────────────────────────────────────────
+        try:
+            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+            from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
+            import os as _os  # noqa: PLC0415
+
+            _ledger = get_ledger()
+            _world_root = _os.environ.get("Natsume_WORLD_CANON_ROOT", "host_brain/canon/world")
+            _store = WorldCanonStore(world_root=_world_root, ledger=_ledger)
+
+            _ts_ms = int(_time.time() * 1000)
+            _row = await asyncio.to_thread(
+                _store.submit_proposal,
+                proposal_id=proposal_id,
+                target_doc_id=target_doc_id,
+                proposed_title=proposed_title,
+                proposed_tags=proposed_tags,
+                proposed_body=proposed_body,
+                proposer_node_id=f"CanonProposalNode::{ctx.request_id}",
+                summary=summary,
+                ts_ms=_ts_ms,
+            )
+            ctx.metadata["canon_proposal_node"] = {
+                "status": "SUBMITTED",
+                "proposal_id": proposal_id,
+                "target_doc_id": target_doc_id,
+                "trigger_source": trigger_source,
+                "proposed_title": proposed_title,
+                "proposed_body_chars": len(proposed_body),
+                "ts_ms": _ts_ms,
+            }
+            ctx.audit_tags.append(f"CANON_PROPOSAL_SUBMITTED:{proposal_id[:24]}")
+            logger.info(
+                "[%s] CanonProposalNode 提案已提交 proposal_id=%s trigger=%s",
+                ctx.request_id, proposal_id, trigger_source,
+            )
+
+        except Exception as exc:
+            _err_str = str(exc)
+            # 提案重复（幂等）不算错误
+            if "已存在" in _err_str or "duplicate" in _err_str.lower():
+                ctx.metadata["canon_proposal_node"] = {
+                    "status": "SKIPPED_DUPLICATE",
+                    "proposal_id": proposal_id,
+                    "reason_code": "PROPOSAL_DUPLICATE",
+                }
+                ctx.audit_tags.append("CANON_PROPOSAL_DUPLICATE")
+                logger.debug("[%s] CanonProposalNode 提案重复（幂等跳过）", ctx.request_id)
+            else:
+                ctx.metadata["canon_proposal_node"] = {
+                    "status": "DEGRADED",
+                    "reason_code": "CANON_PROPOSAL_FAILED",
+                    "detail": _err_str[:200],
+                    "trigger_source": trigger_source,
+                }
+                ctx.audit_tags.append("CANON_PROPOSAL_DEGRADED")
+                logger.warning("[%s] CanonProposalNode 提案提交失败（降级）: %s", ctx.request_id, exc)
+
+        return True
+
+
 class AirlockSanitizerNode(ChainNode):
     """出口净化节点：对最终响应进行安全过滤。"""
     name = "airlock_sanitizer"
@@ -1307,6 +1471,7 @@ class MainChain:
         QAContractNode,
         EpisodicStoreNode,
         AuditNode,
+        CanonProposalNode,
         AirlockSanitizerNode,
     )
     # Backward-compatible class-level chain definition for callers/tests that
@@ -1580,6 +1745,7 @@ class MainChain:
             "qa_contract",
             "episodic_store",
             "audit",
+            "canon_proposal",
             "airlock_sanitizer",
         )
 

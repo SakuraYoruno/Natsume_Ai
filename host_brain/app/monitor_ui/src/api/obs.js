@@ -154,3 +154,58 @@ export function fetchAgentLoopStats(params = {}) {
   ).toString()
   return request(`/obs/agent_loop/stats${qs ? '?' + qs : ''}`)
 }
+
+// ===== Canon 管理 =====
+
+/**
+ * 列出 Canon 提案（分页，可按 status 过滤）
+ * @param {object} params - { status, page, page_size }
+ */
+export function fetchCanonProposals(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/canon/proposals${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * 列出当前 World Canon 文档（SSOT 快照）
+ */
+export function fetchCanonDocuments() {
+  return request('/canon/documents')
+}
+
+/**
+ * 提交新 Canon 提案
+ * @param {object} body - CanonProposalSubmitRequest
+ */
+export function submitCanonProposal(body) {
+  return request('/canon/proposals', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * 审核通过 Canon 提案
+ * @param {string} proposalId
+ * @param {object} body - CanonProposalApproveRequest
+ */
+export function approveCanonProposal(proposalId, body) {
+  return request(`/canon/proposals/${encodeURIComponent(proposalId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * 拒绝 Canon 提案
+ * @param {string} proposalId
+ * @param {object} body - CanonProposalRejectRequest
+ */
+export function rejectCanonProposal(proposalId, body) {
+  return request(`/canon/proposals/${encodeURIComponent(proposalId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}

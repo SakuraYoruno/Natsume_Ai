@@ -6,6 +6,7 @@ import Sessions from './pages/Sessions.jsx'
 import Trace from './pages/Trace.jsx'
 import Metrics from './pages/Metrics.jsx'
 import Insights from './pages/Insights.jsx'
+import Canon from './pages/Canon.jsx'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="trace/:requestId" element={<Trace />} />
           <Route path="metrics" element={<Metrics />} />
           <Route path="insights" element={<Insights />} />
+          <Route path="canon" element={<Canon />} />
         </Route>
       </Routes>
     </HashRouter>
