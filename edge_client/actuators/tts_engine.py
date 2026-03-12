@@ -1145,15 +1145,30 @@ def _synthesize_audio(
     speed_factor = round(0.7 + _intensity * 0.5, 3)    # [0.7, 1.2]
     energy_factor = round(0.6 + _intensity * 0.8, 3)   # [0.6, 1.4]
 
-    # 调用底层模型推理，传递情感强度参数
-    result = model.synthesize(
-        text=text,
-        language=language,
-        emotion=emotion_tag,
-        # M28-S：真正传递 emotion_intensity 映射后的参数
-        speed_factor=speed_factor,
-        energy_factor=energy_factor,
-    )
+    # 调用底层模型推理，传递情感强度参数。
+    # 兼容旧适配器：若不支持 speed_factor/energy_factor，回退到基础调用。
+    try:
+        result = model.synthesize(
+            text=text,
+            language=language,
+            emotion=emotion_tag,
+            # M28-S：真正传递 emotion_intensity 映射后的参数
+            speed_factor=speed_factor,
+            energy_factor=energy_factor,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "unexpected keyword argument" not in message:
+            raise
+        logger.debug(
+            "TTS adapter does not support speed/energy factors; fallback to basic synthesize: %s",
+            message,
+        )
+        result = model.synthesize(
+            text=text,
+            language=language,
+            emotion=emotion_tag,
+        )
 
     elapsed = time.monotonic() - t0
     if elapsed > timeout_s:
