@@ -1,8 +1,8 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.2
-日期：2026-03-06
+版本：v1.3
+日期：2026-03-12
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -48,6 +48,10 @@
   用途：实现层的工作准则：任务来源门禁、交付包格式、不变量优先、测试编号（T-xx）口径。
   读者：实现层（主要）、MASTER。
 
+- docs/40_agents/CURSOR.md
+  用途：Cursor 实现层任务看板（TODO 列表、完成标准、进度追踪）；记录各 TODO 的背景、修复方案、改动文件与验证结果。
+  读者：实现层（主要）、MASTER。
+
 5）Project 指令（文档生产，不含代码）
 - docs/50_project/PROJECT_BRIEF.md
 - docs/50_project/PROJECT_TASKS.md
@@ -57,6 +61,10 @@
 - docs/50_project/vts_hotkey_config_guide.md
   用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；配置指南与外部服务清单；不包含终端指令片段。
   读者：Project（主要）、MASTER。实现层不应把它当任务来源。
+
+- docs/50_project/index.md
+  用途：Flow 资产追溯索引（按环境），记录 flows/active.pointer 指向的当前生效 Flow 导出物；支撑 T-Flow-02 回归口径。
+  读者：MASTER、Project（文档代理）。
 
 6）可追溯性（Trace）
 - docs/60_trace/requirements_trace.md
@@ -110,6 +118,14 @@
   用途：运行时原始 JSON 追踪数据（模型控制、检索事件、Canon 同步等）。
   读者：MASTER（调试/回放用）。
 
+- docs/60_trace/audit_report_20260311.md
+  用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/dataflow_report_20260311.md
+  用途：Natsume AI 系统数据流全景报告（2026-03-11，持续更新）。覆盖双端通信、各功能/模块数据流、Agent 治理与路由、Graph 编排；含严格代码审计与修复记录（§13/§16）。
+  读者：MASTER、Project（文档代理）。
+
 - docs/60_trace/trial_run_reports/
   用途：自动化试运行报告（T1-x 系列，按时间戳归档）。
   读者：MASTER、Project（文档代理）。
@@ -146,6 +162,14 @@
   用途：LangGraph Governed Runtime 更优解法方案（2026-03-06）。提出三层架构（Policy Plane / Execution Plane / Evidence Plane）、Host Governance Overlay 方案、五阶段能力恢复路径与三句话架构结论。
   读者：MASTER、Project（文档代理）。
 
+- docs/15_theory/architecture_overview_20260310.md
+  用途：Natsume AI 整体架构全景文档（2026-03-10）。含双端总体架构、Host Brain 各模块、Edge 各模块、数据流、记忆层、治理层的完整 Mermaid 图与说明。
+  读者：MASTER、Project（文档代理）。
+
+- docs/15_theory/arch_analysis_report_20260311.md
+  用途：Natsume AI 架构分析报告（2026-03-11）。对整体架构全景文档的深度评审：成熟特征、薄弱环节、优先级建议与落地路径。
+  读者：MASTER、Project（文档代理）。
+
 9）协作与运行手册（Worksheet：分工/流程/落地节奏）
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
   用途：明确 Project×实现层×Master 的分工边界、交接物与防污染规则；不包含终端指令片段。
@@ -165,6 +189,14 @@
   用途：各里程碑发布清单（JSON 格式），记录发布版本、变更摘要、测试通过情况。
   读者：MASTER、Project（文档代理）。
 
+- docs/50_release/release_catalog.json
+  用途：发布资产目录（M0~M3 里程碑发布清单，含资产路径、依赖服务、配置快照引用）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/release_rollback_map.json
+  用途：发布回滚映射表，记录各里程碑的回滚目标版本与回滚步骤引用。
+  读者：MASTER、Project（文档代理）。
+
 ---
 
 附：实现层任务来源白名单（强约束）
@@ -180,8 +212,9 @@
 
 附：文档归类规则（v1.2 新增）
 - 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/60_trace/code_reviews/
-- 测试报告、运行追踪报告、变更日志 → docs/60_trace/
-- 架构分析、理论推导、设计方案 → docs/15_theory/
-- 配置指南、运行手册、项目协作文档 → docs/50_project/
-- 发布清单（JSON）→ docs/50_release/
+- 测试报告、运行追踪报告、变更日志、审计报告、数据流报告 → docs/60_trace/
+- 架构全景、架构分析、理论推导、设计方案 → docs/15_theory/
+- 配置指南、运行手册、项目协作文档、Flow 资产索引 → docs/50_project/
+- 发布清单（JSON）、发布目录、回滚映射 → docs/50_release/
 - 开发规范、任务清单、模型平面 → docs/30_devspec/
+- 任务看板、TODO 追踪 → docs/40_agents/
