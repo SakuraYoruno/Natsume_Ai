@@ -300,6 +300,119 @@ class SemanticRecaller:
         })
 
     # ------------------------------------------------------------------
+    # TODO-112: 运行时动态添加文档
+    # ------------------------------------------------------------------
+
+    async def add_document(
+        self,
+        doc_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        运行时动态添加单条文档（TODO-112）。
+
+        Mock 模式下写入内存存储；ChromaDB 模式下写入向量数据库。
+        幂等：相同 doc_id 会覆盖已有文档。
+
+        Args:
+            doc_id: 文档唯一 ID
+            content: 文档内容
+            metadata: 附加元数据
+
+        Returns:
+            True 表示添加成功，False 表示失败（降级时不抛出异常）
+        """
+        if not content or not content.strip():
+            logger.warning("add_document: 内容为空，跳过（doc_id=%s）", doc_id)
+            return False
+
+        if self._use_mock:
+            # Mock 模式：写入内存存储（幂等：先删除再插入）
+            self._mock_store = [
+                item for item in self._mock_store
+                if item.get("doc_id") != doc_id
+            ]
+            self._mock_store.append({
+                "doc_id": doc_id,
+                "content": content,
+                "metadata": metadata or {},
+            })
+            logger.debug("add_document(mock): 已添加 doc_id=%s", doc_id)
+            return True
+
+        # ChromaDB 模式
+        try:
+            import chromadb  # noqa: PLC0415
+            if self._chroma_client is None:
+                self._chroma_client = chromadb.HttpClient(
+                    host=self._chroma_host,
+                    port=self._chroma_port,
+                )
+            collection = self._chroma_client.get_or_create_collection(
+                name=self._collection_name,
+            )
+            embedding = await self._embed(content)
+            # upsert 实现幂等
+            collection.upsert(
+                ids=[doc_id],
+                documents=[content],
+                embeddings=[embedding],
+                metadatas=[{**(metadata or {}), "doc_id": doc_id}],
+            )
+            logger.debug("add_document(chroma): 已 upsert doc_id=%s", doc_id)
+            return True
+        except ImportError:
+            logger.warning("add_document: chromadb 未安装，写入失败（doc_id=%s）", doc_id)
+            return False
+        except Exception as exc:
+            logger.warning("add_document: ChromaDB 写入失败（doc_id=%s）: %s", doc_id, exc)
+            return False
+
+    async def add_documents(
+        self,
+        documents: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        批量添加文档（TODO-112）。
+
+        Args:
+            documents: 文档列表，每项格式为：
+                       {"doc_id": str, "content": str, "metadata": dict（可选）}
+
+        Returns:
+            {"total": int, "success": int, "failed": int, "failed_ids": list}
+        """
+        total = len(documents)
+        success = 0
+        failed_ids: List[str] = []
+
+        for doc in documents:
+            doc_id = str(doc.get("doc_id") or "")
+            content = str(doc.get("content") or "")
+            metadata = doc.get("metadata") or {}
+            if not doc_id:
+                logger.warning("add_documents: 跳过缺少 doc_id 的文档")
+                failed_ids.append("<missing_id>")
+                continue
+            ok = await self.add_document(doc_id, content, metadata)
+            if ok:
+                success += 1
+            else:
+                failed_ids.append(doc_id)
+
+        logger.info(
+            "add_documents: 批量添加完成（total=%d, success=%d, failed=%d）",
+            total, success, len(failed_ids),
+        )
+        return {
+            "total": total,
+            "success": success,
+            "failed": len(failed_ids),
+            "failed_ids": failed_ids,
+        }
+
+    # ------------------------------------------------------------------
     # 嵌入工具
     # ------------------------------------------------------------------
 

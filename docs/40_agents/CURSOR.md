@@ -2266,6 +2266,105 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `host_brain/app/prompt_builder.py`：新增 episodic_vector 槽位读取 + EPISODIC_VECTOR_RECALL 块注入
 
+---
+
+### TODO-110：failure_matrix.py 新增 PROMPT_INJECTION 失败事件（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `FailureEvent.PROMPT_INJECTION` 枚举值
+- 对应的用户响应文本（"抱歉，我无法处理这个请求。"）
+- `ABORT_FLAGS[PROMPT_INJECTION] = True`（直接中止链路）
+- `_handle_specific` 中记录注入检测详情：level / matched_pattern / raw_input_preview
+- 写入 WARNING 日志，确保运维可感知
+
+**改动文件**：
+- `host_brain/app/failure_matrix.py`：新增 PROMPT_INJECTION 事件全链路处理
+
+---
+
+### TODO-111：distillation_engine.py 新增 distill_single() 方法（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `DistillationEngine.distill_single()` 方法
+- 支持单条记忆强制蒸馏（跳过频次门槛 min_occurrence）
+- `force=True` 时跳过 MemoryGuard 的幂等保护（允许重复蒸馏）
+- `clear_session_override=True` 时蒸馏完成后清理该 session 的 SESSION_OVERRIDE
+- NARRATIVE_ONLY（dream 内容）即使 force=True 也不允许蒸馏
+- 写入 DISTILL_SINGLE_STARTED / DISTILL_DONE / DISTILL_SKIPPED 审计日志
+
+**改动文件**：
+- `host_brain/app/memory/distillation_engine.py`：新增 distill_single() 方法
+
+---
+
+### TODO-112：semantic_recall.py 新增 add_document() / add_documents() 方法（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `SemanticRecaller.add_document()` 方法：运行时动态添加单条文档
+  - Mock 模式：写入内存存储（幂等：相同 doc_id 覆盖）
+  - ChromaDB 模式：upsert 到向量数据库
+  - 内容为空时跳过，失败时不抛出异常（降级安全）
+- `SemanticRecaller.add_documents()` 方法：批量添加文档
+  - 返回 {total, success, failed, failed_ids} 统计
+  - 跳过缺少 doc_id 的文档
+
+**改动文件**：
+- `host_brain/app/recall/semantic_recall.py`：新增 add_document() / add_documents() 方法
+
+---
+
+### TODO-113：tool_meta.py HotLoader 新增过滤方法（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `HotLoader.list_tools_by_tag(tag)` 方法：按标签过滤工具列表（大小写不敏感）
+- `HotLoader.list_tools_by_risk(risk_level, include_higher=False)` 方法：按风险等级过滤
+  - `include_higher=True` 时同时返回更高风险等级的工具
+  - 结果按风险等级升序、工具名称排序
+
+**改动文件**：
+- `host_brain/app/skills/tool_meta.py`：新增 list_tools_by_tag() / list_tools_by_risk() 方法
+
+---
+
+### TODO-114：ui_assertion.py 新增 batch_pre_check() 方法（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `UIAssertionGuard.batch_pre_check(actions, stop_on_first_failure=True)` 方法
+- 对多步骤操作序列中的每个动作执行前置断言
+- `stop_on_first_failure=True` 时遇到第一个失败即停止
+- 返回详细汇总：passed / total / passed_count / failed_count / results / first_failure_index
+- 失败时写入 BATCH_PRE_CHECK_FAILED 审计事件
+
+**改动文件**：
+- `host_brain/app/vision/ui_assertion.py`：新增 batch_pre_check() 方法
+
+---
+
+### TODO-115：obs_routes.py 新增 GET /obs/failure-events 端点（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`
+
+**新增功能**：
+- `GET /obs/failure-events` 端点
+- 参数：window_minutes（1~10080）/ event_type（可选过滤）/ limit（1~200）
+- 从 audit_log 按 audit_tag 聚合失败事件
+- 返回：total_failures / event_counts（按类型分组）/ recent_events（最近 N 条）
+- 支持 8 种失败事件类型（含新增的 PROMPT_INJECTION）
+
+**改动文件**：
+- `host_brain/app/obs_routes.py`：新增 GET /obs/failure-events 端点
+
+
 
 
 

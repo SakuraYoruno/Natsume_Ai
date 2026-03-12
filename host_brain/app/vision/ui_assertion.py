@@ -416,3 +416,118 @@ class UIAssertionGuard:
                 self._audit_writer(event, detail)
         except Exception as exc:
             logger.error("审计写入失败（event=%s）: %s", event, exc)
+
+    # ------------------------------------------------------------------
+    # TODO-114: 批量前置断言（多步骤操作序列）
+    # ------------------------------------------------------------------
+
+    async def batch_pre_check(
+        self,
+        actions: List[UIAction],
+        *,
+        stop_on_first_failure: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        批量前置断言（TODO-114）。
+
+        对多步骤操作序列中的每个动作执行前置断言，
+        适用于需要在执行前验证整个操作序列合法性的场景。
+
+        Args:
+            actions: 操作序列（UIAction 列表）
+            stop_on_first_failure: True 时遇到第一个失败即停止（默认）；
+                                   False 时继续检查所有动作并汇总结果
+
+        Returns:
+            {
+                "passed": bool,           # 是否全部通过
+                "total": int,             # 总动作数
+                "passed_count": int,      # 通过数
+                "failed_count": int,      # 失败数
+                "results": [              # 每个动作的检查结果
+                    {
+                        "index": int,
+                        "action_type": str,
+                        "passed": bool,
+                        "error": str | None,
+                        "audit_event": str | None,
+                    }
+                ],
+                "first_failure_index": int | None,  # 第一个失败的动作索引
+            }
+        """
+        results = []
+        passed_count = 0
+        failed_count = 0
+        first_failure_index = None
+
+        for i, action in enumerate(actions):
+            item: Dict[str, Any] = {
+                "index": i,
+                "action_type": action.action_type,
+                "passed": False,
+                "error": None,
+                "audit_event": None,
+            }
+            try:
+                await self.pre_check(action)
+                item["passed"] = True
+                passed_count += 1
+            except UIAssertionError as exc:
+                item["passed"] = False
+                item["error"] = exc.reason
+                item["audit_event"] = exc.audit_event
+                failed_count += 1
+                if first_failure_index is None:
+                    first_failure_index = i
+                logger.warning(
+                    "batch_pre_check: 动作 [%d/%d] 前置断言失败: %s",
+                    i + 1, len(actions), exc.reason,
+                )
+                if stop_on_first_failure:
+                    results.append(item)
+                    break
+            except Exception as exc:
+                item["passed"] = False
+                item["error"] = f"INTERNAL_ERROR: {exc}"
+                item["audit_event"] = "BATCH_PRE_CHECK_INTERNAL_ERROR"
+                failed_count += 1
+                if first_failure_index is None:
+                    first_failure_index = i
+                logger.error(
+                    "batch_pre_check: 动作 [%d/%d] 内部错误: %s",
+                    i + 1, len(actions), exc,
+                )
+                if stop_on_first_failure:
+                    results.append(item)
+                    break
+
+            results.append(item)
+
+        all_passed = failed_count == 0 and passed_count == len(actions)
+
+        summary = {
+            "passed": all_passed,
+            "total": len(actions),
+            "passed_count": passed_count,
+            "failed_count": failed_count,
+            "results": results,
+            "first_failure_index": first_failure_index,
+        }
+
+        if not all_passed:
+            await self._write_audit(
+                "BATCH_PRE_CHECK_FAILED",
+                {
+                    "total": len(actions),
+                    "passed_count": passed_count,
+                    "failed_count": failed_count,
+                    "first_failure_index": first_failure_index,
+                },
+            )
+        else:
+            logger.debug(
+                "batch_pre_check: 全部通过（total=%d）", len(actions)
+            )
+
+        return summary

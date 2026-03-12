@@ -375,3 +375,70 @@ class HotLoader:
             logger.info("工具已卸载: %s", name)
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # TODO-113: 按标签/风险等级过滤工具
+    # ------------------------------------------------------------------
+
+    def list_tools_by_tag(self, tag: str) -> List[ToolMeta]:
+        """
+        按标签过滤工具列表（TODO-113）。
+
+        Args:
+            tag: 标签字符串（大小写不敏感）
+
+        Returns:
+            包含该标签的工具列表，按工具名称排序。
+        """
+        tag_lower = tag.lower()
+        matched = [
+            meta for meta in self._loaded_tools.values()
+            if any(t.lower() == tag_lower for t in meta.tags)
+        ]
+        matched.sort(key=lambda m: m.name)
+        logger.debug("list_tools_by_tag(%r): 匹配 %d 个工具", tag, len(matched))
+        return matched
+
+    def list_tools_by_risk(
+        self,
+        risk_level: "RiskLevel",
+        *,
+        include_higher: bool = False,
+    ) -> List[ToolMeta]:
+        """
+        按风险等级过滤工具列表（TODO-113）。
+
+        Args:
+            risk_level: 目标风险等级
+            include_higher: True 时同时返回更高风险等级的工具
+                            （如 risk_level=MEDIUM 且 include_higher=True，
+                             则同时返回 MEDIUM 和 HIGH 的工具）
+
+        Returns:
+            匹配的工具列表，按风险等级升序、工具名称排序。
+        """
+        # 风险等级排序（从低到高）
+        _RISK_ORDER = {
+            RiskLevel.LOW: 0,
+            RiskLevel.MEDIUM: 1,
+            RiskLevel.HIGH: 2,
+        }
+        target_order = _RISK_ORDER.get(risk_level, 0)
+
+        if include_higher:
+            matched = [
+                meta for meta in self._loaded_tools.values()
+                if _RISK_ORDER.get(meta.risk_level, 0) >= target_order
+            ]
+        else:
+            matched = [
+                meta for meta in self._loaded_tools.values()
+                if meta.risk_level == risk_level
+            ]
+
+        matched.sort(key=lambda m: (_RISK_ORDER.get(m.risk_level, 0), m.name))
+        logger.debug(
+            "list_tools_by_risk(%s, include_higher=%s): 匹配 %d 个工具",
+            risk_level, include_higher, len(matched),
+        )
+        return matched

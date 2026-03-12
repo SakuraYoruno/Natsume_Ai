@@ -3942,3 +3942,78 @@ async def get_semantic_recall_stats():
             status=f"DEGRADED: {exc}",
             timestamp=now,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TODO-115: GET /obs/failure-events — 失败事件统计（按事件类型分组）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/failure-events")
+async def get_failure_events(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
+    event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
+    limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
+    ledger: "SQLiteLedger" = Depends(get_ledger),
+):
+    """
+    TODO-115: 失败事件统计端点。
+
+    从 audit_log 中按 audit_tag 聚合失败事件，返回：
+    - 各事件类型的发生次数
+    - 最近 N 条失败事件详情
+    - 时间窗口内的总失败次数
+    """
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    # 所有已知失败事件类型（对应 FailureEvent 枚举）
+    KNOWN_FAILURE_EVENTS = [
+        "GOVERNOR_BLOCK", "EVIDENCE_EMPTY", "MODEL_FALLBACK",
+        "QA_REWRITE", "EDGE_UNREACHABLE", "VISION_LOW_CONFIDENCE",
+        "MODULE_TIMEOUT", "PROMPT_INJECTION",
+    ]
+
+    try:
+        # 从 audit_log 查询失败事件
+        rows = ledger.query_audit_log(
+            since_ms=since_ms,
+            audit_tags=([event_type] if event_type else KNOWN_FAILURE_EVENTS),
+            limit=limit,
+        )
+
+        # 按事件类型聚合
+        event_counts: dict = {}
+        recent_events = []
+        for row in rows:
+            tag = row.get("audit_tag", "UNKNOWN")
+            event_counts[tag] = event_counts.get(tag, 0) + 1
+            if len(recent_events) < limit:
+                recent_events.append({
+                    "ts_ms": row.get("ts_ms", 0),
+                    "event_type": tag,
+                    "request_id": row.get("request_id", ""),
+                    "session_id": row.get("session_id", ""),
+                    "detail": row.get("detail", ""),
+                })
+
+        total_failures = sum(event_counts.values())
+
+        return {
+            "window_minutes": window_minutes,
+            "total_failures": total_failures,
+            "event_counts": event_counts,
+            "recent_events": recent_events,
+            "timestamp": now,
+            "status": "OK",
+        }
+
+    except Exception as exc:
+        _logger.warning("get_failure_events: 查询失败: %s", exc)
+        return {
+            "window_minutes": window_minutes,
+            "total_failures": 0,
+            "event_counts": {},
+            "recent_events": [],
+            "timestamp": now,
+            "status": f"DEGRADED: {exc}",
+        }

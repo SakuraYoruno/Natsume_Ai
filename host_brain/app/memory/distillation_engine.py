@@ -241,6 +241,135 @@ class DistillationEngine:
         )
 
     # ------------------------------------------------------------------
+    # TODO-111: 单条强制蒸馏（跳过频次门槛）
+    # ------------------------------------------------------------------
+
+    async def distill_single(
+        self,
+        record: EpisodicRecord,
+        *,
+        force: bool = False,
+        clear_session_override: bool = False,
+    ) -> DistillationResult:
+        """
+        单条记忆强制蒸馏（TODO-111）。
+
+        与 run_batch() 不同，此方法跳过频次门槛（min_occurrence），
+        直接对指定记录执行蒸馏，适用于：
+        - MILESTONE 级别记录的即时蒸馏
+        - 用户手动触发的单条蒸馏
+        - 测试/调试场景
+
+        Args:
+            record: 要蒸馏的 EpisodicRecord
+            force: True 时跳过 MemoryGuard 的幂等保护（允许重复蒸馏）
+            clear_session_override: True 时蒸馏完成后清理该 session 的 SESSION_OVERRIDE
+
+        Returns:
+            DistillationResult
+        """
+        record_id = record.source_hash or MemoryGuard.compute_source_hash(record.content)
+
+        self._write_audit_sync("DISTILL_SINGLE_STARTED", {
+            "record_id": record_id,
+            "session_id": record.session_id,
+            "evidence_level": record.evidence_level.value if record.evidence_level else None,
+            "force": force,
+        })
+
+        # 拦截 NARRATIVE_ONLY（dream 内容）—— 即使 force=True 也不允许
+        if record.evidence_level == EvidenceLevel.NARRATIVE_ONLY:
+            result = DistillationResult(
+                record_id=record_id,
+                success=False,
+                skipped=True,
+                skip_reason="DREAM_BLOCKED",
+            )
+            self._write_audit_sync("DISTILL_SKIPPED", {
+                "record_id": record_id,
+                "reason": "DREAM_BLOCKED",
+            })
+            return result
+
+        # 确定提案类型
+        proposal_type = self._infer_proposal_type(record)
+
+        # 构建 Canon 提案
+        proposal = CanonProposal(
+            proposal_type=proposal_type,
+            content=record.content,
+            source_hash=record_id,
+            proposer_class=ProposerClass.SCHEDULER,
+            evidence_level=record.evidence_level,
+            metadata={
+                "session_id": record.session_id,
+                "turn_count": record.turn_count,
+                "emotion_tags": record.emotion_tags,
+                "fact_tags": record.fact_tags,
+                "preference_tags": record.preference_tags,
+                "distilled_at_ms": int(time.time() * 1000),
+                "forced": force,
+                "single_distill": True,
+            },
+        )
+
+        # MemoryGuard 校验
+        try:
+            if not force:
+                # 正常模式：执行幂等保护
+                self._guard.check_canon_proposal(proposal)
+            self._guard.check_dream_canon_proposal(proposal)
+        except MemoryGuardError as exc:
+            result = DistillationResult(
+                record_id=record_id,
+                success=False,
+                skipped=True,
+                skip_reason="GUARD_REJECTED",
+                error=exc.reason,
+            )
+            self._write_audit_sync("DISTILL_SKIPPED", {
+                "record_id": record_id,
+                "reason": "GUARD_REJECTED",
+                "error": exc.reason,
+            })
+            return result
+
+        # 标记已处理（force 模式下也标记，防止后续批量蒸馏重复处理）
+        self._guard.mark_proposal_processed(record_id)
+
+        # 清理 SESSION_OVERRIDE
+        if clear_session_override and self._arbiter and record.session_id:
+            try:
+                self._arbiter.clear_session_override(record.session_id)
+                logger.debug(
+                    "distill_single: 已清理 SESSION_OVERRIDE（session=%s）",
+                    record.session_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "distill_single: 清理 SESSION_OVERRIDE 失败（session=%s）: %s",
+                    record.session_id, exc,
+                )
+
+        result = DistillationResult(
+            record_id=record_id,
+            success=True,
+            proposal=proposal,
+        )
+
+        self._write_audit_sync("DISTILL_DONE", {
+            "record_id": record_id,
+            "proposal_type": proposal_type.value,
+            "forced": force,
+        })
+
+        logger.info(
+            "distill_single: 蒸馏完成（record_id=%s, type=%s, forced=%s）",
+            record_id, proposal_type.value, force,
+        )
+        return result
+
+    # ------------------------------------------------------------------
     # 工具方法
     # ------------------------------------------------------------------
 
