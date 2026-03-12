@@ -466,6 +466,30 @@
 
 ---
 
+### TODO-10：CPB slot 注入 + GovernorNode 鉴权路径统一（已完成，2026-03-12）
+
+**当前状态**：`ACTIVE`（链路一致）
+
+**问题 A：`build_chat_context_pack` 未使用 CPB slot 输出**
+- `ContextPackBuilder.build()` 产出的 slot 数据未注入 `build_chat_context_pack` 的参数，导致 CPB 结果与 prompt 构建脱节
+- **修复**：`chat_context_builder.py` 中 `build_chat_context_pack` 接收并注入 `cpb_slots` 参数；`chat_stream_handler.py` 中提取 CPB slot 并透传
+
+**问题 B：GovernorNode 两条鉴权路径不一致**
+- 适配层模式（`adapter_mode=sse`）下 `GovernorNode` 跳过真实鉴权，由 `_unified_chat_sse_generator` 负责；两条路径行为不一致
+- **修复**：`main_chain.py` 中统一两条路径，适配层也执行真实鉴权，结果通过 `pre_governor_result` 传递给 `_unified_chat_sse_generator`，避免重复执行
+
+**改动文件**：
+- `host_brain/app/chat_context_builder.py`：`build_chat_context_pack` 增加 `cpb_slots` 参数注入
+- `host_brain/app/chat_stream_handler.py`：提取 CPB slot 并透传；接收 `pre_governor_result`
+- `host_brain/app/graph/main_chain.py`：`GovernorNode` 统一两条鉴权路径，注入 `pre_governor_result`
+
+**验证**：
+- 合并运行：62 passed（含所有相关单元测试，无回归）
+
+**回退方式**：`cpb_slots=None` 时退回原有 prompt 构建逻辑；`pre_governor_result=None` 时退回原有鉴权逻辑，无破坏性变更
+
+---
+
 ### TODO-9：RecallFusionNode 孤岛问题修复（已完成，2026-03-12）
 
 **当前状态**：`ACTIVE`（链路闭环）
@@ -497,3 +521,5 @@
 | TODO-6 | 骨架节点填充真实逻辑，`run_as_sse_adapter` 不再只是透传 | `ACTIVE` |
 | TODO-7 | SLA 监控上线，连续失败/降级率/延迟告警可观测，来源校验可配置 | `PROD_READY`（最小加固） |
 | TODO-8 | Governor/Recall/QA 接入真实业务调用，有降级策略和测试验证 | `ACTIVE`（深度业务化） |
+| TODO-9 | RecallFusionNode 预召回结果透传至 `_sse_event_generator`，消除双重召回 | `ACTIVE`（链路闭环） |
+| TODO-10 | CPB slot 注入 + GovernorNode 两条鉴权路径统一 | `ACTIVE`（链路一致） |

@@ -1231,12 +1231,39 @@ Layer 4: side effect observed   → ❌ 不可观测
 - `SCENE_VISION_UI` 的 `PROD_READY` 是"最小加固"，尚未覆盖：
   - 多租户场景下的完整鉴权（当前仅内网 IP 校验）
   - 云模型 SLA 的外部告警推送（当前仅写入 ledger）
-- `MainChain` 的 `GovernorNode` 在适配层模式下跳过真实鉴权（`adapter_mode=sse`），
-  真实鉴权由 `_unified_chat_sse_generator` 负责，双重鉴权路径尚未统一
-- `RecallFusionNode` 的七路召回结果写入 `ctx.recall_context_pack`，
-  但 `run_as_sse_adapter` 中该结果是否真实传递给 `_unified_chat_sse_generator` 尚未 E2E 验证
+- ~~`MainChain` 的 `GovernorNode` 在适配层模式下跳过真实鉴权（`adapter_mode=sse`），
+  真实鉴权由 `_unified_chat_sse_generator` 负责，双重鉴权路径尚未统一~~
+  → **已解决（2026-03-12）**：适配层也执行真实鉴权，结果通过 `pre_governor_result` 传递，两条路径已统一（见 §16.10）
+- ~~`RecallFusionNode` 的七路召回结果写入 `ctx.recall_context_pack`，
+  但 `run_as_sse_adapter` 中该结果是否真实传递给 `_unified_chat_sse_generator` 尚未 E2E 验证~~
+  → **已解决（2026-03-12）**：`_pre_recall_evidence` 参数已透传，链路闭环（见 TODO-9）
 
-### 16.9 本次修改摘要（2026-03-12）
+### 16.10 本次修改摘要（2026-03-12，第二批）
+
+**问题1：`build_chat_context_pack` 使用 CPB slot 输出**
+
+改动文件：`host_brain/app/chat_context_builder.py`、`host_brain/app/chat_stream_handler.py`
+
+| 改动点 | 说明 |
+|--------|------|
+| `build_chat_context_pack` 增加 `cpb_slots` 参数 | 接收 `ContextPackBuilder.build()` 输出的 slot 数据并注入 prompt 构建 |
+| `chat_stream_handler.py` 提取 CPB slot | 在调用 `build_chat_context_pack` 前提取 CPB slot 并透传 |
+
+**问题2：GovernorNode 两条鉴权路径统一**
+
+改动文件：`host_brain/app/graph/main_chain.py`、`host_brain/app/chat_stream_handler.py`
+
+| 改动点 | 说明 |
+|--------|------|
+| `GovernorNode` 适配层模式执行真实鉴权 | 不再跳过，执行完整 R1-R7 门控 |
+| `pre_governor_result` 参数透传 | 鉴权结果通过参数传递给 `_unified_chat_sse_generator`，避免重复执行 |
+| `_unified_chat_sse_generator` 接收 `pre_governor_result` | 有预鉴权结果时直接使用，无则执行自身鉴权逻辑 |
+
+**测试验证**：合并运行 62 passed（含所有相关单元测试，无回归）
+
+---
+
+### 16.9 本次修改摘要（2026-03-12，第一批）
 
 **问题1：SCENE_VISION_UI 生产化加固**
 
