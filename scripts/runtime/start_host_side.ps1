@@ -104,6 +104,103 @@ function Wait-Http {
   return $false
 }
 
+function Parse-BoolFromText {
+  param(
+    [string]$Raw,
+    [bool]$Default = $false
+  )
+  if ([string]::IsNullOrWhiteSpace($Raw)) {
+    return $Default
+  }
+  $normalized = $Raw.Trim().ToLowerInvariant()
+  return @("1", "true", "yes", "on") -contains $normalized
+}
+
+function Parse-IntFromText {
+  param(
+    [string]$Raw,
+    [int]$Default,
+    [int]$Min = 0,
+    [int]$Max = 2147483647
+  )
+  try {
+    $value = [int]$Raw
+  } catch {
+    $value = $Default
+  }
+  if ($value -lt $Min) {
+    $value = $Min
+  }
+  if ($value -gt $Max) {
+    $value = $Max
+  }
+  return $value
+}
+
+function Invoke-EdgeWarmup {
+  param(
+    [string]$PythonExe,
+    [int]$TimeoutMs = 20000,
+    [int]$Retries = 0,
+    [string]$WarmupText = "startup warmup"
+  )
+
+  $pythonScript = @'
+import asyncio
+import json
+import os
+
+from host_brain.channels.edge_rpc_client import post_speak, post_vts
+
+async def main():
+    vts = await post_vts(action="talk_start", request_id="req_startup_warmup_vts")
+    tts = await post_speak(
+        text=os.environ.get("HOST_EDGE_WARMUP_TEXT", "startup warmup"),
+        request_id="req_startup_warmup_tts",
+        session_id="sess::startup_warmup",
+        utterance_id="utt::startup_warmup",
+        emotion_tag="NEUTRAL",
+    )
+    print(json.dumps({"vts": vts.as_dict(), "tts": tts.as_dict(), "ok": bool(tts.success)}, ensure_ascii=False))
+    return 0 if bool(tts.success) else 2
+
+raise SystemExit(asyncio.run(main()))
+'@
+
+  $oldTimeout = $env:HOST_EDGE_RPC_TIMEOUT_MS
+  $oldRetries = $env:HOST_EDGE_RPC_RETRIES
+  $oldText = $env:HOST_EDGE_WARMUP_TEXT
+
+  try {
+    $env:HOST_EDGE_RPC_TIMEOUT_MS = [string]$TimeoutMs
+    $env:HOST_EDGE_RPC_RETRIES = [string]$Retries
+    $env:HOST_EDGE_WARMUP_TEXT = [string]$WarmupText
+
+    $output = $pythonScript | & $PythonExe - 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    return [ordered]@{
+      exit_code = $exitCode
+      output = (($output | ForEach-Object { [string]$_ }) -join "`n")
+    }
+  } finally {
+    if ($null -eq $oldTimeout) {
+      Remove-Item Env:HOST_EDGE_RPC_TIMEOUT_MS -ErrorAction SilentlyContinue
+    } else {
+      $env:HOST_EDGE_RPC_TIMEOUT_MS = [string]$oldTimeout
+    }
+    if ($null -eq $oldRetries) {
+      Remove-Item Env:HOST_EDGE_RPC_RETRIES -ErrorAction SilentlyContinue
+    } else {
+      $env:HOST_EDGE_RPC_RETRIES = [string]$oldRetries
+    }
+    if ($null -eq $oldText) {
+      Remove-Item Env:HOST_EDGE_WARMUP_TEXT -ErrorAction SilentlyContinue
+    } else {
+      $env:HOST_EDGE_WARMUP_TEXT = [string]$oldText
+    }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
@@ -338,6 +435,63 @@ if ($canonSyncStatus -eq "degraded") {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
+$edgeWarmupStatus = "skipped"
+$edgeWarmupDetail = "edge warmup disabled by HOST_EDGE_WARMUP_ENABLED=false"
+$edgeWarmupOutput = ""
+
+$warmupEnabledRaw = if ($envValues.ContainsKey("HOST_EDGE_WARMUP_ENABLED")) {
+  [string]$envValues["HOST_EDGE_WARMUP_ENABLED"]
+} else {
+  [string]$env:HOST_EDGE_WARMUP_ENABLED
+}
+$edgeWarmupEnabled = Parse-BoolFromText -Raw $warmupEnabledRaw -Default $true
+
+if ($edgeWarmupEnabled) {
+  $warmupTimeoutRaw = if ($envValues.ContainsKey("HOST_EDGE_WARMUP_TIMEOUT_MS")) {
+    [string]$envValues["HOST_EDGE_WARMUP_TIMEOUT_MS"]
+  } else {
+    [string]$env:HOST_EDGE_WARMUP_TIMEOUT_MS
+  }
+  $warmupRetriesRaw = if ($envValues.ContainsKey("HOST_EDGE_WARMUP_RETRIES")) {
+    [string]$envValues["HOST_EDGE_WARMUP_RETRIES"]
+  } else {
+    [string]$env:HOST_EDGE_WARMUP_RETRIES
+  }
+  $warmupText = if ($envValues.ContainsKey("HOST_EDGE_WARMUP_TEXT")) {
+    [string]$envValues["HOST_EDGE_WARMUP_TEXT"]
+  } elseif ($env:HOST_EDGE_WARMUP_TEXT) {
+    [string]$env:HOST_EDGE_WARMUP_TEXT
+  } else {
+    "startup warmup"
+  }
+
+  $warmupTimeoutMs = Parse-IntFromText -Raw $warmupTimeoutRaw -Default 20000 -Min 1000 -Max 60000
+  $warmupRetries = Parse-IntFromText -Raw $warmupRetriesRaw -Default 0 -Min 0 -Max 2
+
+  try {
+    $warmupResult = Invoke-EdgeWarmup `
+      -PythonExe $pythonCmd.Source `
+      -TimeoutMs $warmupTimeoutMs `
+      -Retries $warmupRetries `
+      -WarmupText $warmupText
+    $edgeWarmupOutput = [string]$warmupResult["output"]
+    if ([int]$warmupResult["exit_code"] -eq 0) {
+      $edgeWarmupStatus = "ok"
+      $edgeWarmupDetail = "edge vts/tts warmup succeeded"
+    } else {
+      $edgeWarmupStatus = "degraded"
+      $edgeWarmupDetail = "edge warmup failed with exit_code=$($warmupResult["exit_code"])"
+      $startupWarnings += "STARTUP_EDGE_WARMUP_DEGRADED"
+      Write-Warning "[STARTUP_EDGE_WARMUP_DEGRADED] $edgeWarmupDetail"
+    }
+  } catch {
+    $edgeWarmupStatus = "degraded"
+    $edgeWarmupDetail = "edge warmup exception: $($_.Exception.Message)"
+    $startupWarnings += "STARTUP_EDGE_WARMUP_DEGRADED"
+    Write-Warning "[STARTUP_EDGE_WARMUP_DEGRADED] $edgeWarmupDetail"
+  }
+}
+
 $result = [ordered]@{
   side = "host"
   status = "started"
@@ -354,6 +508,9 @@ $result = [ordered]@{
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus
   canon_sync_status = $canonSyncStatus
+  edge_warmup_status = $edgeWarmupStatus
+  edge_warmup_detail = $edgeWarmupDetail
+  edge_warmup_output = $edgeWarmupOutput
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10
