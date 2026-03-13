@@ -26,7 +26,10 @@ from host_brain.app.schemas import (
 )
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
-from host_brain.scheduler.scheduler_routes import router as scheduler_router
+from host_brain.scheduler.scheduler_routes import (
+    router as scheduler_router,
+    set_scheduler_providers as _set_scheduler_providers,
+)
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router  # TODO-108: HostTaskScheduler 管理路由
 from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
@@ -101,6 +104,30 @@ class _RuntimeMetrics:
 
 
 _metrics = _RuntimeMetrics()
+
+# ---------------------------------------------------------------------------
+# 路由依赖注入（避免 provider 未配置导致假性 DEGRADED）
+# ---------------------------------------------------------------------------
+_set_canon_ledger_provider(_get_ledger_compat)
+_set_obs_ledger_provider(_get_ledger_compat)
+_set_tool_providers(
+    broker_provider=get_tool_broker,
+    catalog_provider=get_tool_catalog,
+    ledger_provider=_get_ledger_compat,
+)
+_set_bond_engine_provider(get_bond_stage_engine)
+try:
+    from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+    from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
+
+    _scheduler_registry = SchedulerTaskRegistry.get_instance()
+    _scheduler_health = SchedulerHealthReporter(registry=_scheduler_registry)
+    _set_scheduler_providers(
+        registry=_scheduler_registry,
+        health_reporter=_scheduler_health,
+    )
+except Exception as exc:  # pragma: no cover - defensive startup guard
+    _logger.warning("scheduler provider wiring degraded: %s", exc)
 
 
 # ---------------------------------------------------------------------------

@@ -71,7 +71,7 @@ class LinkTopologyResponse(BaseModel):
 
 def get_ledger() -> SQLiteLedger:
     """获取SQLite账本实例"""
-    from host_brain.app.fastapi_app import get_ledger as get_app_ledger
+    from host_brain.app.dependencies import get_ledger as get_app_ledger
     return get_app_ledger()
 
 @router.get("/timeline", response_model=TimelineAggregationResponse)

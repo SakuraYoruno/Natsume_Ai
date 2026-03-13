@@ -162,7 +162,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 def _get_ledger_safe():
     """安全获取 ledger，失败时返回 None（不阻断主链路）。"""
     try:
-        from host_brain.app.fastapi_app import get_ledger
+        from host_brain.app.dependencies import get_ledger
         return get_ledger()
     except Exception:
         return None

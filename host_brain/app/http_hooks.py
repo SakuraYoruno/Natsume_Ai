@@ -327,9 +327,15 @@ async def runtime_lifespan(
                 }
                 return execute_proactive_talk(args=args, context=context)
 
-            # 启动 NatsumeScheduler
+            # 启动 NatsumeScheduler，并注入 /scheduler 路由 providers
             from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-            _health_reporter = SchedulerHealthReporter()
+            from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
+
+            _health_reporter = SchedulerHealthReporter(registry=_proactive_registry)
+            set_scheduler_providers(
+                registry=_proactive_registry,
+                health_reporter=_health_reporter,
+            )
             _natsume_scheduler = NatsumeScheduler(
                 registry=_proactive_registry,
                 health_reporter=_health_reporter,
