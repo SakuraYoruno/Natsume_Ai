@@ -275,6 +275,79 @@ async def runtime_lifespan(
             new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
             logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
 
+        # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
+        try:
+            from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+                SchedulerTaskRegistry, SchedulerTaskConfig, TriggerMode, TaskPriority,
+            )
+            from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
+            from host_brain.app.vision.proactive_push_client import build_proactive_push_client  # noqa: PLC0415
+
+            _proactive_registry = SchedulerTaskRegistry.get_instance()
+
+            # 注册 proactive_talk 任务（每 15 分钟检查一次）
+            _proactive_task = SchedulerTaskConfig(
+                task_id="proactive_talk_periodic",
+                trigger_mode=TriggerMode.INTERVAL,
+                trigger_config={"seconds": 900},  # 15 分钟
+                intent_template={
+                    "skill_name": "proactive_talk",
+                    "args": {"idle_threshold_ms": 14400000},  # 4 小时空闲阈值
+                    "proposer_node_id": "scheduler",
+                },
+                priority=TaskPriority.LOW,
+                mode_allowlist=["normal", "sleep"],
+                enabled=True,
+                description="主动对话：每 15 分钟检查一次，空闲 4 小时后触发问候",
+            )
+            # 避免重复注册（重启时可能已存在）
+            if _proactive_registry.get("proactive_talk_periodic") is None:
+                _proactive_registry.register(_proactive_task)
+
+            # 构建 ui_pusher 回调（同步推送到 Edge）
+            _push_client = build_proactive_push_client()
+
+            def _ui_pusher(message: dict) -> dict:
+                return _push_client.push(message)
+
+            # 构建 intent_dispatcher：执行 proactive_talk skill 并注入 ui_pusher
+            from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
+
+            def _proactive_intent_dispatcher(system_intent: dict) -> dict:
+                """将 scheduler 生成的 system_intent 路由到 proactive_talk skill。"""
+                skill_name = system_intent.get("skill_name", "")
+                if skill_name != "proactive_talk":
+                    return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
+                args = dict(system_intent.get("args") or {})
+                context = {
+                    "sys_mode": system_intent.get("mood_state", "normal"),
+                    "request_id": system_intent.get("request_id"),
+                    "intent_id": system_intent.get("intent_id"),
+                    "ui_pusher": _ui_pusher,
+                }
+                return execute_proactive_talk(args=args, context=context)
+
+            # 启动 NatsumeScheduler
+            from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
+            _health_reporter = SchedulerHealthReporter()
+            _natsume_scheduler = NatsumeScheduler(
+                registry=_proactive_registry,
+                health_reporter=_health_reporter,
+                intent_dispatcher=_proactive_intent_dispatcher,
+            )
+            _natsume_scheduler.start()
+
+            new_module_statuses["proactive_talk_scheduler"] = (
+                f"OK (task_id={_proactive_task.task_id}, interval=900s)"
+            )
+            logger.info(
+                "proactive_talk 任务已注册并启动调度器: task_id=%s",
+                _proactive_task.task_id,
+            )
+        except Exception as _proactive_exc:
+            new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
+            logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
+
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes={},

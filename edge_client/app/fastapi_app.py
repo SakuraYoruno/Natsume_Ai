@@ -294,6 +294,43 @@ def create_edge_fastapi_app(
             handler=_handle_automate,
         )
 
+    @app.post("/v1/edge/proactive_push")
+    async def edge_proactive_push(request: Request) -> JSONResponse:
+        """接收 Host Brain 推送的主动对话消息，存入 EdgeRuntime 消息队列。
+
+        Host Brain 的 proactive_talk skill 通过此接口将主动问候推送到 Edge，
+        Edge 侧前端通过轮询 /v1/edge/proactive_messages 拉取待展示消息。
+        需要 HMAC 鉴权（Host → Edge 方向）。
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_proactive_push,
+        )
+
+    @app.get("/v1/edge/proactive_messages")
+    async def edge_proactive_messages() -> JSONResponse:
+        """前端轮询接口：拉取并清空待展示的主动对话消息队列。
+
+        返回 Edge 侧积压的所有主动消息，调用后队列清空。
+        前端可每 5 秒轮询一次，有消息时弹出对话气泡。
+        """
+        ts = int(clock())
+        messages = _drain_proactive_queue(runtime_value)
+        return JSONResponse(_response(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            detail=f"drained {len(messages)} proactive messages",
+            event={"messages": messages, "count": len(messages)},
+            ts_ms=ts,
+        ))
+
     return app
 
 
@@ -745,6 +782,54 @@ def _run_health_collector(
     except TypeError:
         payload = collector(runtime)
     return dict(payload) if isinstance(payload, dict) else {"status": "degraded"}
+
+
+def _handle_proactive_push(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """处理主动对话推送：将消息存入 EdgeRuntime 的内存队列。"""
+    try:
+        message = dict(envelope.payload)
+        if not message.get("type") or not message.get("content"):
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code="PROACTIVE_PUSH_SCHEMA_INVALID",
+                stage="S_EDGE_PROACTIVE_PUSH",
+                detail="proactive push requires type and content fields",
+                event={},
+            )
+        # 存入 EdgeRuntime 的主动消息队列（懒初始化）
+        queue: list = getattr(runtime, "_proactive_message_queue", None)
+        if queue is None:
+            runtime._proactive_message_queue = []  # type: ignore[attr-defined]
+            queue = runtime._proactive_message_queue
+        queue.append(message)
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_PROACTIVE_PUSH",
+            detail=f"proactive message queued (queue_size={len(queue)})",
+            event={"event_id": message.get("event_id", ""), "queue_size": len(queue)},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_GENERIC,
+            stage="S_EDGE_PROACTIVE_PUSH",
+            detail=f"proactive push failed: {exc}",
+            event={},
+        )
+
+
+def _drain_proactive_queue(runtime: EdgeRuntime) -> list[dict]:
+    """拉取并清空 EdgeRuntime 的主动消息队列。"""
+    queue: list = getattr(runtime, "_proactive_message_queue", None)
+    if not queue:
+        return []
+    messages = list(queue)
+    queue.clear()
+    return messages
 
 
 def build_edge_app_from_env() -> FastAPI:
