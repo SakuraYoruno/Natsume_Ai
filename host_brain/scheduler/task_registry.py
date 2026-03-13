@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -79,6 +80,18 @@ class SchedulerTaskConfig:
 
 class SchedulerTaskRegistry:
     """调度任务注册表——单例管理所有调度任务的元数据。"""
+
+    _instance: "SchedulerTaskRegistry | None" = None
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls) -> "SchedulerTaskRegistry":
+        """获取全局单例（双重检查锁，线程安全）。"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     def __init__(self) -> None:
         self._tasks: dict[str, SchedulerTaskConfig] = {}
