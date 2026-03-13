@@ -95,7 +95,12 @@ def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> 
 # ---------------------------------------------------------------------------
 # 节点角色指令
 # ---------------------------------------------------------------------------
-def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja") -> str:
+def _build_node_role_instruction(
+    node_id: str,
+    *,
+    render_target_lang: str = "ja",
+    skill_manifest: list[dict] | None = None,
+) -> str:
     resolved_node_id = str(node_id or "").strip()
     if resolved_node_id == CHAT_DIRECT_NODE_ID:
         if str(render_target_lang).strip().lower() == "zh":
@@ -143,7 +148,9 @@ def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja"
         "tool_planner": (
             "Role: tool_planner.\n"
             "Goal: propose tool-use drafts only when tools materially help.\n"
-            "Policy: never imply a tool has already run."
+            "Policy: never imply a tool has already run.\n"
+            "When proposing a tool call, set intent_draft.action to the exact skill name from AVAILABLE_SKILLS.\n"
+            "If no skill is needed, leave intent_draft empty ({})."
         ),
         "safety_verifier": (
             "Role: safety_verifier.\n"
@@ -165,11 +172,41 @@ def _build_node_role_instruction(node_id: str, *, render_target_lang: str = "ja"
             "Goal: provide concise code-assist draft output.\n"
             "Policy: stay concrete and do not claim files were changed."
         ),
+        "workbench_vision_ui": (
+            "Role: workbench_vision_ui.\n"
+            "Goal: analyze UI screenshots or element descriptions and produce actionable UI-assist draft output.\n"
+            "Policy: describe UI elements precisely, suggest interactions concisely, "
+            "never claim UI actions have been executed, and keep output grounded in provided visual evidence."
+        ),
+        "vision_ui_analyzer": (
+            "Role: vision_ui_analyzer.\n"
+            "Goal: extract structured UI element metadata from visual input for downstream automation.\n"
+            "Policy: output element type / bounding box / label / state as compact JSON; "
+            "never infer intent beyond what is visually present; flag low-confidence detections."
+        ),
     }
-    return role_instructions.get(
+    base_instruction = role_instructions.get(
         resolved_node_id,
         "Role: generic node.\nGoal: produce a concise draft-only output.\nPolicy: keep the JSON contract stable.",
     )
+
+    # 为 tool_planner 节点追加 AVAILABLE_SKILLS 列表
+    if resolved_node_id == "tool_planner" and skill_manifest:
+        skill_lines: list[str] = []
+        for entry in skill_manifest:
+            name = str(entry.get("name") or "")
+            desc = str(entry.get("description") or "")
+            risk = int(entry.get("risk_level") or 1)
+            confirm = bool(entry.get("require_confirm", False))
+            line = f"  - {name}: {desc} [risk={risk}, confirm={confirm}]"
+            skill_lines.append(line)
+        skills_block = "\n".join(skill_lines)
+        base_instruction = (
+            f"{base_instruction}\n\n"
+            f"AVAILABLE_SKILLS:\n{skills_block}"
+        )
+
+    return base_instruction
 
 
 # ---------------------------------------------------------------------------
@@ -749,7 +786,11 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"{chr(10).join(persona_lines)}\n\n"
         )
 
-    role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang)
+    role_instruction = _build_node_role_instruction(
+        node_id,
+        render_target_lang=render_target_lang,
+        skill_manifest=list(runtime_payload.get("skill_manifest") or []) or None,
+    )
 
     return (
         "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"

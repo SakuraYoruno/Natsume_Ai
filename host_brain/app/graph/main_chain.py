@@ -997,9 +997,7 @@ class LlmGatewayNode(ChainNode):
         # ── TODO-51：PermissionGuard 工具调用权限校验 ────────────────────
         permission_guard_meta: dict[str, Any] = {"mode": "SKIPPED"}
         try:
-            from host_brain.app.skills.tool_meta import PermissionGuard, PermissionGuardError  # noqa: PLC0415
-            from host_brain.app.skills.tool_meta import AccessLevel, ToolMeta as _ToolMeta  # noqa: PLC0415
-            from host_brain.app.schemas.memory_types import RiskLevel as _RiskLevel  # noqa: PLC0415
+            from host_brain.skills.registry import PermissionGuard, PermissionGuardError, AccessLevel, SkillMeta as _SkillMeta  # noqa: PLC0415
 
             _pg = PermissionGuard()
             # 从 ctx.metadata 提取本轮待调用的工具列表（由 LLM 输出解析填充）
@@ -1011,23 +1009,24 @@ class LlmGatewayNode(ChainNode):
                 _tool_name = str(_tool_call.get("name") or _tool_call.get("tool_name") or "")
                 if not _tool_name:
                     continue
-                # 构造轻量级 ToolMeta（从 tool_call 元数据中读取，缺省安全值）
+                # 构造轻量级 SkillMeta（从 tool_call 元数据中读取，缺省安全值）
                 _risk_str_tool = str(_tool_call.get("risk_level") or "LOW").strip().upper()
-                _risk_level_tool = {"LOW": _RiskLevel.LOW, "MEDIUM": _RiskLevel.MEDIUM, "HIGH": _RiskLevel.HIGH}.get(
-                    _risk_str_tool, _RiskLevel.LOW
-                )
-                _tool_meta = _ToolMeta(
-                    name=_tool_name,
+                _risk_level_int = {"LOW": 1, "MEDIUM": 3, "HIGH": 4}.get(_risk_str_tool, 1)
+                _tool_meta = _SkillMeta(
+                    skill_name=_tool_name,
                     description=str(_tool_call.get("description") or ""),
-                    access_level=AccessLevel.PUBLIC,
-                    risk_level=_risk_level_tool,
+                    clearance="LOW",
+                    risk_level=_risk_level_int,
+                    scope="host",
                     reversible=bool(_tool_call.get("reversible", True)),
-                    requires_human_approval=bool(_tool_call.get("requires_human_approval", False)),
+                    handler=lambda p, c=None: {},  # 占位 handler，仅用于权限校验
+                    require_confirm=bool(_tool_call.get("requires_human_approval", False)),
                     scheduler_allowed=bool(_tool_call.get("scheduler_allowed", True)),
+                    access_level=AccessLevel.PUBLIC,
                 )
                 try:
                     _pg.check(
-                        tool_meta=_tool_meta,
+                        skill_meta=_tool_meta,
                         proposer_class=ctx.proposer_class,
                         session_id=ctx.session_id,
                     )
@@ -2483,6 +2482,19 @@ class MainChain:
         ctx.audit_tags.append("main_chain_adapter")
         ctx.metadata["adapter_mode"] = "sse"
         ctx.metadata["intent_action"] = str((intent_draft or {}).get("action") or "")
+
+        # ── Skill Manifest 注入：将当前可用 skill 列表写入 metadata，供 tool_planner 节点使用 ──
+        try:
+            from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+            _skill_reg = get_skill_registry()
+            ctx.metadata["skill_manifest"] = _skill_reg.build_skill_manifest(max_risk_level=3)
+            logger.debug(
+                "[%s] skill_manifest 已构建，共 %d 个 skill",
+                request_id, len(ctx.metadata["skill_manifest"]),
+            )
+        except Exception as _sm_exc:
+            ctx.metadata["skill_manifest"] = []
+            logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)
         explicit_scene = str(getattr(request_body, "scene_type", "") or "").strip().upper().removeprefix("SCENE_")
         pre_scene = str(_pre_classified_scene or "").strip().upper().removeprefix("SCENE_")
         if explicit_scene:

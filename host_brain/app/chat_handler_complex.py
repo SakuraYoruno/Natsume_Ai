@@ -373,6 +373,14 @@ async def _complex_scene_sse_generator(
         })
 
         graph_start_ms = int(time.time() * 1000)
+        # ── Skill Manifest 注入：EXEC_INTENT 场景下将可用 skill 列表注入 payload ──
+        _skill_manifest_for_graph: list[dict] = []
+        if scene_type == SCENE_EXEC_INTENT:
+            try:
+                from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+                _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
+            except Exception as _sm_exc:
+                _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)
         graph_result = await asyncio.to_thread(
             get_graph_runtime().run_graph,
             request_id=request_id,
@@ -384,6 +392,7 @@ async def _complex_scene_sse_generator(
                 "committed_route_token": governor_result.get("committed_route_token_ref"),
                 "committed_route_token_detail": governor_result.get("committed_route_token"),
                 "emotion_snapshot": dict(emotion_snapshot),
+                "skill_manifest": _skill_manifest_for_graph,
             },
             dependency_statuses=dependency_statuses,
             ts_ms=graph_start_ms,
