@@ -201,7 +201,7 @@ class DesktopSkillProvider:
             "keys": keys,
             "hold_ms": hold_ms,
             "repeat": repeat,
-            "manifest_ref": f"desktop_hotkey::{'+'join(keys)}",
+            "manifest_ref": f"desktop_hotkey::{'+'.join(keys)}",
             "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
             "_context": ctx or {},
         }
