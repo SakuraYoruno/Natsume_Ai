@@ -1,20 +1,14 @@
-"""
-skills 包 —— Skill/MCP 工具管理
-"""
-from .tool_meta import (
+"""skills 包 —— 转发导出（tool_meta.py 已合并至 host_brain/skills/registry.py）"""
+from host_brain.skills.registry import (
     AccessLevel,
-    ToolMeta,
+    SkillMeta,
     PermissionGuard,
     PermissionGuardError,
-    HotLoader,
-    HotLoaderError,
 )
 
 __all__ = [
     "AccessLevel",
-    "ToolMeta",
+    "SkillMeta",
     "PermissionGuard",
     "PermissionGuardError",
-    "HotLoader",
-    "HotLoaderError",
 ]

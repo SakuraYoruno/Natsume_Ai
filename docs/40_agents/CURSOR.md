@@ -1665,9 +1665,9 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 
 ---
 
-### TODO-71：会话列表 CSV 导出（已规划，待实现）
+### TODO-71：会话列表 CSV 导出（已完成，由 TODO-75/78 实现）
 
-**当前状态**：`PLANNED`
+**当前状态**：`ACTIVE`（后端端点 + 前端按钮均已上线，见 TODO-75 和 TODO-78）
 
 ---
 
@@ -2361,8 +2361,125 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 - 返回：total_failures / event_counts（按类型分组）/ recent_events（最近 N 条）
 - 支持 8 种失败事件类型（含新增的 PROMPT_INJECTION）
 
+---
+
+### TODO-116：IDE Skills 接入运行时（已完成，2026-03-13）
+
+**当前状态**：`ACTIVE`（IDE Skills 已注册到运行时 SkillRegistry）
+
+**问题**：`host_brain/skills/ide_registry.py` 中的 `IDESkillProvider` 已封装 `open_cursor` / `run_pycharm_action` / `codex_task` 三个 Skills，但 `dependencies.py` 的 `get_skill_registry()` 从未加载 `IDESkillProvider`，导致运行时无法通过 Governor 调用 IDE Skills。
+
+**修复**：
+- `dependencies.py` 新增 `IDESkillProvider` 导入
+- `get_skill_registry()` 在构建内置 registry 后，调用 `_skill_registry.register_decorated(IDESkillProvider())`
+- 支持环境变量 `HOST_SKILL_IDE_ENABLED`（默认 `true`）控制是否加载 IDE Skills
+- 注册失败时降级（仅 warning 日志，不阻断启动）
+
+**新增 Skills**：
+| skill_name | clearance | risk_level | scope | 说明 |
+|---|---|---|---|---|
+| `open_cursor` | LOW | 2 | system | 在 Cursor 中打开文件/项目 |
+| `run_pycharm_action` | MEDIUM | 3 | system | 触发 PyCharm action |
+| `codex_task` | MEDIUM | 3 | system | 提交编码任务到 Codex 执行器 |
+
+**回退方式**：设置 `HOST_SKILL_IDE_ENABLED=false`，IDE Skills 不注册，不影响其他 Skills。
+
 **改动文件**：
-- `host_brain/app/obs_routes.py`：新增 GET /obs/failure-events 端点
+- `host_brain/app/dependencies.py`：新增 `IDESkillProvider` 导入 + `get_skill_registry()` 注册逻辑
+
+---
+
+### TODO-117：builtin_registry 新增实用 Skills（已完成，2026-03-13）
+
+**当前状态**：`ACTIVE`
+
+**问题**：`builtin_registry.py` 中 4 个内置 Skills 全部使用 `_builtin_noop_handler` 占位符，没有实际语义，Governor 无法通过这些 Skills 获取有效的运行时数据（情感状态、Bond 积分、会话摘要）。
+
+**新增内容**：
+- `_emotion_query_handler`：从 ctx 读取 `emotion_snapshot` / `emotion_context`，返回标准化情感摘要
+- `_bond_query_handler`：从 ctx 读取 `bond_texture` / `bond_stage`，返回 Bond 积分和关系阶段
+- `_session_summary_handler`：从 ctx 读取 `session_id` / `turn_count` / `user_message`，返回会话轻量摘要
+- 所有原有 Skills 补充了 `description` 字段
+
+**新增 Skills**：
+| skill_name | clearance | risk_level | scope | 说明 |
+|---|---|---|---|---|
+| `emotion_query` | LOW | 1 | host | 查询当前情感状态快照 |
+| `bond_query` | LOW | 1 | host | 查询 Bond 积分和关系阶段 |
+| `session_summary` | LOW | 1 | host | 生成会话轻量摘要 |
+
+**改动文件**：
+- `host_brain/skills/builtin_registry.py`：新增 3 个专用 handler + 注册 3 个新 Skills，内置 Skills 总数从 4 个增至 7 个
+
+---
+
+### TODO-118：prompt_builder 补充 VISION_UI 场景 role instruction（已完成，2026-03-13）
+
+**当前状态**：`ACTIVE`
+
+**问题**：`_build_node_role_instruction()` 中没有 `workbench_vision_ui` 和 `vision_ui_analyzer` 节点的专用指令，`SCENE_VISION_UI` 场景下这两个节点会退化到 `generic node` 指令，导致 LLM 输出质量下降。
+
+**新增内容**：
+- `workbench_vision_ui`：UI 辅助分析节点，强调精确描述 UI 元素、建议交互操作、不声称已执行
+- `vision_ui_analyzer`：UI 元素结构化提取节点，强调输出紧凑 JSON、不推断视觉之外的意图、标记低置信度检测
+
+**改动文件**：
+- `host_brain/app/prompt_builder.py`：`role_instructions` 字典新增 `workbench_vision_ui` 和 `vision_ui_analyzer` 两个条目
+
+---
+
+### TODO-119：ide_registry 新增 open_file_in_editor 通用 Skill（已完成，2026-03-13）
+
+**当前状态**：`ACTIVE`
+
+**问题**：`IDESkillProvider` 中 `open_cursor` 绑定了具体 IDE，缺少一个不绑定 IDE 的通用文件打开入口，无法在用户未安装 Cursor 时降级到其他编辑器。
+
+**新增内容**：
+- `open_file_in_editor`：通用文件打开 Skill，支持 `editor` 参数（cursor / pycharm / vscode / default），支持 `line` / `column` 跳转，不绑定具体 IDE
+
+**新增 Skills**：
+| skill_name | clearance | risk_level | scope | 说明 |
+|---|---|---|---|---|
+| `open_file_in_editor` | LOW | 2 | system | 在指定/自动检测的编辑器中打开文件 |
+
+**改动文件**：
+- `host_brain/skills/ide_registry.py`：`IDESkillProvider` 新增 `open_file_in_editor` 方法，IDE Skills 总数从 3 个增至 4 个
+
+---
+
+### TODO-120：新增浏览器自动化 Skills（已完成，2026-03-13）
+
+**当前状态**：`ACTIVE`
+
+**问题**：项目缺少浏览器自动化能力，无法支持 agent-browser / Playwright / Puppeteer 等自动化场景，Governor 无法通过 Skill 管道调度浏览器操作。
+
+**新增内容**：
+- 新建 `host_brain/skills/browser_registry.py`，包含 `BrowserSkillProvider` 类和 `build_browser_skill_registry()` 工厂函数
+- 在 `dependencies.py` 中通过环境变量 `HOST_SKILL_BROWSER_ENABLED`（默认 True）控制是否注册浏览器 Skills
+
+**新增 Skills（8 个）**：
+| skill_name | clearance | risk_level | reversible | require_confirm | 说明 |
+|---|---|---|---|---|---|
+| `browser_navigate` | LOW | 2 | True | False | 导航到指定 URL，支持 wait_until / timeout_ms |
+| `browser_click` | MEDIUM | 3 | True | False | 点击 CSS/XPath 元素，支持 left/right/middle 按键 |
+| `browser_type` | MEDIUM | 3 | True | False | 在输入框中逐字输入文本，支持 delay_ms / clear_first |
+| `browser_screenshot` | LOW | 2 | True | False | 截图（全页/元素），返回 base64 或保存到路径 |
+| `browser_execute_script` | MEDIUM | 3 | False | False | 执行任意 JS 脚本，支持传参 |
+| `browser_wait_for` | LOW | 2 | True | False | 等待 selector/url/function/timeout 条件满足 |
+| `browser_scrape` | LOW | 2 | True | False | 抓取页面 text/html/attribute，支持 limit |
+| `browser_close` | MEDIUM | 4 | False | **True** | 关闭 page/browser（不可逆，需确认） |
+
+**风险分级设计**：
+- `risk_level=2`：只读操作（导航、截图、等待、抓取）→ ApprovalTier.CACHE 通道
+- `risk_level=3`：写操作（点击、输入、脚本执行）→ ApprovalTier.FAST 通道
+- `risk_level=4`：破坏性操作（关闭浏览器）→ ApprovalTier.CONFIRM 通道，`require_confirm=True`
+
+**环境变量**：
+- `HOST_SKILL_BROWSER_ENABLED`：是否启用浏览器 Skills（默认 `true`）
+
+**改动文件**：
+- `host_brain/skills/browser_registry.py`：新建，包含 `BrowserSkillProvider`（8 个 Skills）+ `build_browser_skill_registry()`
+- `host_brain/app/dependencies.py`：导入 `BrowserSkillProvider`，在 `get_skill_registry()` 中注册浏览器 Skills
 
 
 
