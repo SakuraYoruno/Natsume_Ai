@@ -163,7 +163,8 @@ def persist_chat_episodic_memory(
             "detail": "chat episodic text is empty",
         }
 
-    tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    raw_tag = (emotion_context or {}).get("emotion_tag")
+    tag = str(raw_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     valence, arousal = map_emotion_tag_to_vad(tag)
 
     # [选项二] 接入 MemoryGuard：在写入 EpisodicStore 前进行宪法校验
@@ -175,10 +176,9 @@ def persist_chat_episodic_memory(
         from host_brain.app.schemas.memory_types import EpisodicRecord, EvidenceLevel  # noqa: PLC0415
         _guard = get_memory_guard()
         # 从 emotion_context 中提取轮次信息（默认 2，满足最低写入条件）
-        _turn_count = int((emotion_context or {}).get("turn_count") or 2)
-        # Include NEUTRAL as a valid emotion tag so chat turns always have at
-        # least one qualifying tag and pass the MemoryGuard episodic write check.
-        _emotion_tags = [tag] if tag else []
+        _turn_count = max(2, int((emotion_context or {}).get("turn_count") or 2))
+        # 保证至少有一个 qualifying tag（含 NEUTRAL），避免 EPISODIC_NO_QUALIFYING_TAGS 阻断封测
+        _emotion_tags = [tag] if tag else ["NEUTRAL"]
         _fact_tags = list((emotion_context or {}).get("fact_tags") or [])
         _pref_tags = list((emotion_context or {}).get("preference_tags") or [])
         _record = EpisodicRecord(

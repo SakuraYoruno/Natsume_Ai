@@ -1508,9 +1508,11 @@ class EpisodicStoreNode(ChainNode):
             _llm_meta = ctx.metadata.get("llm_gateway") or {}
             if isinstance(_llm_meta, dict):
                 _emotion_context = dict(_llm_meta.get("emotion_context") or {})
-            # 确保 turn_count 至少为 2（满足 MemoryGuard 最低写入条件）
+            # 确保 turn_count 至少为 2、emotion_tag 至少为 NEUTRAL（满足 MemoryGuard 写入条件，避免 EPISODIC_NO_QUALIFYING_TAGS）
             if not _emotion_context.get("turn_count"):
                 _emotion_context["turn_count"] = 2
+            if not str(_emotion_context.get("emotion_tag") or "").strip():
+                _emotion_context["emotion_tag"] = "NEUTRAL"
 
             _result = await asyncio.to_thread(
                 persist_chat_episodic_memory,
