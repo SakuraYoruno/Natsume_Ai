@@ -1,6 +1,6 @@
 """
-recall 包 —— 召回与 ContextPack 组装
+recall package: retrieval and RecallPack assembly.
 """
-from .context_pack_builder import ContextPackBuilder, estimate_token_count, truncate_to_token_limit
+from .recall_pack_builder import RecallPackBuilder, estimate_token_count, truncate_to_token_limit
 
-__all__ = ["ContextPackBuilder", "estimate_token_count", "truncate_to_token_limit"]
+__all__ = ["RecallPackBuilder", "estimate_token_count", "truncate_to_token_limit"]

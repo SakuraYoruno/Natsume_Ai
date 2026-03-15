@@ -1,4 +1,4 @@
-"""Context-pack contract checks with slot isolation."""
+﻿"""Prompt-context contract checks with slot isolation."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import Any, Iterable
 
 from host_brain.tools.catalog import TOOL_META_ALLOWED_KEYS, normalize_tool_meta
 
-CP_MISSING_SLOT = "CONTEXT_PACK_MISSING_SLOT"
-CP_UNKNOWN_SLOT = "CONTEXT_PACK_UNKNOWN_SLOT"
-CP_SLOT_TYPE_INVALID = "CONTEXT_PACK_TYPE_INVALID"
+PC_MISSING_SLOT = "PROMPT_CONTEXT_MISSING_SLOT"
+PC_UNKNOWN_SLOT = "PROMPT_CONTEXT_UNKNOWN_SLOT"
+PC_SLOT_TYPE_INVALID = "PROMPT_CONTEXT_TYPE_INVALID"
 CP_SLOT_MIXED = "CONTEXT_SLOT_MIXED"
 CP_CANON_AS_FACT = "CANON_AS_FACT_VIOLATION"
 CP_BOND_NUMERIC_FORBIDDEN = "BOND_SUMMARY_NUMERIC_FORBIDDEN"
@@ -27,35 +27,30 @@ EXPECTED_SLOTS: dict[str, type] = {
     "tool_meta_pack": list,
 }
 
-# M10-C: 可选槽位（不强制要求，存在时验证格式）
+# Optional slots remain explicitly typed so prompt-context validation does not
+# silently degrade when retrieval or emotion layers inject richer context.
 OPTIONAL_SLOTS: dict[str, type] = {
-    "semantic_slot": list,  # 语义记忆槽位（记忆蒸馏结果）
-    # M28-G：情感槽位（OPT-16）
-    "emotion_pulse": dict,       # 当前情感脉冲（EmotionVector 降采样）
-    "bond_texture": dict,        # Bond 质感层（情感关系摘要）
-    "memory_emotion_hint": dict, # 记忆情感提示（情感记忆检索结果）
+    "semantic_slot": list,
+    "emotion_pulse": dict,
+    "bond_texture": dict,
+    "memory_emotion_hint": dict,
 }
 
-# M28-G：动态槽位注册表（OPT-16）
-# slot_name → builder_fn(context_data: dict) -> Any
+# M28-G锛氬姩鎬佹Ы浣嶆敞鍐岃〃锛圤PT-16锛?# slot_name 鈫?builder_fn(context_data: dict) -> Any
 _DYNAMIC_SLOT_REGISTRY: dict[str, Any] = {}
 
 
 def register_slot(name: str, builder_fn: Any) -> None:
-    """注册动态槽位构建函数（M28-G OPT-16）。
-
+    """娉ㄥ唽鍔ㄦ€佹Ы浣嶆瀯寤哄嚱鏁帮紙M28-G OPT-16锛夈€?
     Args:
-        name: 槽位名称
-        builder_fn: 接受 context_data dict 并返回槽位值的函数
+        name: 妲戒綅鍚嶇О
+        builder_fn: 鎺ュ彈 context_data dict 骞惰繑鍥炴Ы浣嶅€肩殑鍑芥暟
     """
     _DYNAMIC_SLOT_REGISTRY[str(name)] = builder_fn
 
 
 def build_dynamic_slots(context_data: dict[str, Any]) -> dict[str, Any]:
-    """遍历所有已注册动态槽位，构建槽位值（M28-G OPT-16）。
-
-    槽位 builder 抛出异常时，该槽位被跳过，不影响其他槽位。
-    """
+    """Build all registered dynamic slots."""
     result: dict[str, Any] = {}
     for slot_name, builder_fn in _DYNAMIC_SLOT_REGISTRY.items():
         try:
@@ -63,7 +58,6 @@ def build_dynamic_slots(context_data: dict[str, Any]) -> dict[str, Any]:
             if value is not None:
                 result[slot_name] = value
         except Exception:
-            # 槽位构建失败时跳过，不影响其他槽位
             pass
     return result
 
@@ -74,16 +68,7 @@ def build_emotion_pulse_slot(
     emotion_tag: str = "NEUTRAL",
     mood_state: str = "steady",
 ) -> dict[str, Any]:
-    """M29-C（OPT-4）：将 EmotionVector 降采样为 emotion_pulse 槽位。
-
-    emotion_pulse 槽位包含：
-    - emotion_tag: 当前情感标签
-    - mood_state: 当前情绪状态
-    - valence: 情感效价（[-1.0, 1.0]）
-    - arousal: 情感唤醒度（[0.0, 1.0]）
-    - intensity: 综合强度（[0.0, 1.0]）
-    - style_hint: 风格提示（基于 valence/arousal 推断）
-    """
+    """Convert the current emotion state into an emotion_pulse slot."""
     valence = 0.0
     arousal = 0.3
     if emotion_vector is not None:
@@ -92,17 +77,15 @@ def build_emotion_pulse_slot(
             arousal = float(getattr(emotion_vector, "arousal", 0.3))
         except Exception:
             pass
-    # 综合强度：arousal 主导（70%）+ |valence| 辅助（30%）
     intensity = round(arousal * 0.7 + abs(valence) * 0.3, 4)
-    # 风格提示
     if arousal > 0.7 and valence > 0.3:
-        style_hint = "情绪高涨，可以活泼表达"
+        style_hint = "high energy, expressive delivery"
     elif arousal > 0.7 and valence < -0.3:
-        style_hint = "情绪激动，需要温柔安抚"
+        style_hint = "heightened agitation, keep the tone gentle"
     elif arousal < 0.3:
-        style_hint = "情绪平静，保持温和语气"
+        style_hint = "calm mood, keep the tone soft"
     else:
-        style_hint = "情绪平稳，自然互动"
+        style_hint = "steady mood, keep the tone natural"
     return {
         "emotion_tag": str(emotion_tag).strip().upper() or "NEUTRAL",
         "mood_state": str(mood_state).strip() or "steady",
@@ -114,22 +97,22 @@ def build_emotion_pulse_slot(
 
 
 @dataclass(frozen=True)
-class ContextPackViolation:
+class PromptContextViolation:
     code: str
     detail: str
     slot: str | None = None
 
 
 @dataclass
-class ContextPackValidationResult:
-    violations: list[ContextPackViolation] = field(default_factory=list)
+class PromptContextValidationResult:
+    violations: list[PromptContextViolation] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
         return not self.violations
 
     def add(self, code: str, detail: str, slot: str | None = None) -> None:
-        self.violations.append(ContextPackViolation(code=code, detail=detail, slot=slot))
+        self.violations.append(PromptContextViolation(code=code, detail=detail, slot=slot))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -141,24 +124,24 @@ class ContextPackValidationResult:
         }
 
 
-def validate_context_pack(context_pack: dict[str, Any]) -> ContextPackValidationResult:
-    result = ContextPackValidationResult()
-    if not isinstance(context_pack, dict):
+def validate_prompt_context(prompt_context: dict[str, Any]) -> PromptContextValidationResult:
+    result = PromptContextValidationResult()
+    if not isinstance(prompt_context, dict):
         result.add(
-            CP_SLOT_TYPE_INVALID,
-            f"context_pack must be object, got {type(context_pack).__name__}",
+            PC_SLOT_TYPE_INVALID,
+            f"prompt_context must be object, got {type(prompt_context).__name__}",
         )
         return result
 
     for slot_name, expected_type in EXPECTED_SLOTS.items():
-        if slot_name not in context_pack:
-            result.add(CP_MISSING_SLOT, f"missing required slot: {slot_name}", slot=slot_name)
+        if slot_name not in prompt_context:
+            result.add(PC_MISSING_SLOT, f"missing required slot: {slot_name}", slot=slot_name)
             continue
 
-        value = context_pack[slot_name]
+        value = prompt_context[slot_name]
         if not isinstance(value, expected_type):
             result.add(
-                CP_SLOT_TYPE_INVALID,
+                PC_SLOT_TYPE_INVALID,
                 (
                     f"slot {slot_name} must be {expected_type.__name__}, "
                     f"got {type(value).__name__}"
@@ -166,38 +149,49 @@ def validate_context_pack(context_pack: dict[str, Any]) -> ContextPackValidation
                 slot=slot_name,
             )
 
-    for slot_name in context_pack.keys():
-        # 修复：动态注册的槽位（通过 register_slot 注册到 _DYNAMIC_SLOT_REGISTRY）
-        # 不在 EXPECTED_SLOTS 也不在 OPTIONAL_SLOTS 中，原逻辑会将其报为 CP_UNKNOWN_SLOT，
-        # 导致 register_slot + build_dynamic_slots 的整个动态槽位机制完全失效。
+    for slot_name in prompt_context.keys():
         if (
             slot_name not in EXPECTED_SLOTS
             and slot_name not in OPTIONAL_SLOTS
             and slot_name not in _DYNAMIC_SLOT_REGISTRY
         ):
-            result.add(CP_UNKNOWN_SLOT, f"unknown slot is not allowed: {slot_name}", slot=slot_name)
+            result.add(PC_UNKNOWN_SLOT, f"unknown slot is not allowed: {slot_name}", slot=slot_name)
+
+    for slot_name, expected_type in OPTIONAL_SLOTS.items():
+        if slot_name not in prompt_context:
+            continue
+        value = prompt_context[slot_name]
+        if not isinstance(value, expected_type):
+            result.add(
+                PC_SLOT_TYPE_INVALID,
+                (
+                    f"slot {slot_name} must be {expected_type.__name__}, "
+                    f"got {type(value).__name__}"
+                ),
+                slot=slot_name,
+            )
 
     if not result.valid:
         return result
 
-    _validate_authoritative_slot(context_pack["authoritative"], result)
-    _validate_retrieval_slot(context_pack["retrieval"], result)
-    _validate_style_pack_slot(context_pack["style_pack"], result)
-    _validate_bond_summary_slot(context_pack["bond_summary"], result)
-    _validate_tool_meta_pack_slot(context_pack["tool_meta_pack"], result)
-    # M10-C: semantic_slot 可选，存在时验证格式
-    if "semantic_slot" in context_pack:
-        _validate_semantic_slot(context_pack["semantic_slot"], result)
+    _validate_authoritative_slot(prompt_context["authoritative"], result)
+    _validate_retrieval_slot(prompt_context["retrieval"], result)
+    _validate_style_pack_slot(prompt_context["style_pack"], result)
+    _validate_bond_summary_slot(prompt_context["bond_summary"], result)
+    _validate_tool_meta_pack_slot(prompt_context["tool_meta_pack"], result)
+    # M10-C: semantic_slot optional validation
+    if "semantic_slot" in prompt_context:
+        _validate_semantic_slot(prompt_context["semantic_slot"], result)
     return result
 
 
 def inject_bond_summary(
-    context_pack: dict[str, Any],
+    prompt_context: dict[str, Any],
     *,
     bond_event: dict[str, Any] | None = None,
     bond_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Inject normalized bond summary into context_pack.bond_summary slot."""
+    """Inject normalized bond summary into prompt_context.bond_summary slot."""
     from host_brain.bond.summarizer import derive_bond_summary, normalize_bond_summary
 
     summary_value = (
@@ -205,13 +199,13 @@ def inject_bond_summary(
         if bond_summary is not None
         else derive_bond_summary(bond_event)
     )
-    merged = dict(context_pack)
+    merged = dict(prompt_context)
     merged["bond_summary"] = summary_value
     return merged
 
 
 def _validate_authoritative_slot(
-    authoritative: list[Any], result: ContextPackValidationResult
+    authoritative: list[Any], result: PromptContextValidationResult
 ) -> None:
     for item in authoritative:
         if not isinstance(item, dict):
@@ -237,7 +231,7 @@ def _validate_authoritative_slot(
                 )
 
 
-def _validate_retrieval_slot(retrieval: list[Any], result: ContextPackValidationResult) -> None:
+def _validate_retrieval_slot(retrieval: list[Any], result: PromptContextValidationResult) -> None:
     for item in retrieval:
         if not isinstance(item, dict):
             continue
@@ -251,7 +245,7 @@ def _validate_retrieval_slot(retrieval: list[Any], result: ContextPackValidation
             )
 
 
-def _validate_style_pack_slot(style_pack: dict[str, Any], result: ContextPackValidationResult) -> None:
+def _validate_style_pack_slot(style_pack: dict[str, Any], result: PromptContextValidationResult) -> None:
     if any(key in style_pack for key in ("event_id", "evidence_refs", "fact", "snapshot")):
         result.add(
             CP_SLOT_MIXED,
@@ -261,7 +255,7 @@ def _validate_style_pack_slot(style_pack: dict[str, Any], result: ContextPackVal
 
 
 def _validate_bond_summary_slot(
-    bond_summary: dict[str, Any], result: ContextPackValidationResult
+    bond_summary: dict[str, Any], result: PromptContextValidationResult
 ) -> None:
     for value in _iter_values(bond_summary):
         if isinstance(value, bool):
@@ -285,7 +279,6 @@ def _validate_bond_summary_slot(
         )
         return
 
-    # M29-L（OPT-?）：stage/trend 语义校验（中文枚举值）
     _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"}
     _VALID_STAGES_EN = {"STRANGER", "ACQUAINTANCE", "FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
     _VALID_TRENDS_CN = {"上升", "稳定", "下降", "快速上升", "缓慢上升", "快速下降", "缓慢下降"}
@@ -334,7 +327,7 @@ def _validate_bond_summary_slot(
 
 
 def _validate_tool_meta_pack_slot(
-    tool_meta_pack: list[Any], result: ContextPackValidationResult
+    tool_meta_pack: list[Any], result: PromptContextValidationResult
 ) -> None:
     forbidden_exec_fields = {
         "args",
@@ -388,7 +381,7 @@ def _check_slot_tag(
     item: dict[str, Any],
     *,
     expected_slot: str,
-    result: ContextPackValidationResult,
+    result: PromptContextValidationResult,
 ) -> None:
     slot = item.get("slot")
     if slot is None:
@@ -430,8 +423,7 @@ def _iter_values(value: Any) -> Iterable[Any]:
 
 
 # ---------------------------------------------------------------------------
-# World Canon 独立槽位注入（TASK-0113 / FR-WCANON-001）
-# ---------------------------------------------------------------------------
+# World Canon 鐙珛妲戒綅娉ㄥ叆锛圱ASK-0113 / FR-WCANON-001锛?# ---------------------------------------------------------------------------
 
 def build_world_canon_slot(
     *,
@@ -439,22 +431,7 @@ def build_world_canon_slot(
     top_k: int = 5,
     status_filter: str = "active",
 ) -> list[dict[str, Any]]:
-    """从 World Canon SSOT 目录扫描 Top-K active 条目，构建 authoritative.world_canon 槽位列表。
-
-    返回的每个条目均带有：
-    - slot="authoritative"
-    - kind="world_canon"
-    - evidence_level="CANON_REFERENCE_ONLY"
-    - unsafe_as_fact=True（提醒下游不得作为执行事实断言）
-
-    Args:
-        world_root: World Canon SSOT 目录路径，默认 host_brain/canon/world。
-        top_k: 最多注入条目数，默认 5。
-        status_filter: 只注入指定 status 的条目，默认 "active"。
-
-    Returns:
-        list[dict]，可直接 extend 到 context_pack["authoritative"]。
-    """
+    """Build authoritative world canon rows for prompt_context."""
     from pathlib import Path as _Path
     from host_brain.memory.canon_world_store import WorldCanonStore
 
@@ -462,7 +439,7 @@ def build_world_canon_slot(
     store = WorldCanonStore(world_root=root, ledger=None)  # type: ignore[arg-type]
     docs, _issues = store.scan_documents()
 
-    # 过滤 status，按 ts_ms 降序取 Top-K
+    # 杩囨护 status锛屾寜 ts_ms 闄嶅簭鍙?Top-K
     filtered = [d for d in docs if d.status == status_filter]
     filtered.sort(key=lambda d: d.ts_ms, reverse=True)
     selected = filtered[:top_k]
@@ -490,31 +467,31 @@ def build_world_canon_slot(
 
 
 # ---------------------------------------------------------------------------
-# M10-C: 语义记忆槽位（记忆蒸馏结果注入）
+# M10-C: 璇箟璁板繂妲戒綅锛堣蹇嗚捀棣忕粨鏋滄敞鍏ワ級
 # ---------------------------------------------------------------------------
 
 def _validate_semantic_slot(
-    semantic_slot: list[Any], result: ContextPackValidationResult
+    semantic_slot: list[Any], result: PromptContextValidationResult
 ) -> None:
-    """验证 semantic_slot 分槽格式。"""
+    """Validate semantic_slot row shape."""
     for index, item in enumerate(semantic_slot):
         if not isinstance(item, dict):
             result.add(
-                CP_SLOT_TYPE_INVALID,
+                PC_SLOT_TYPE_INVALID,
                 f"semantic_slot[{index}] must be object, got {type(item).__name__}",
                 slot="semantic_slot",
             )
             continue
-        # 必须包含 semantic_id 和 summary
+        # semantic_slot rows must include semantic_id and summary
         if "semantic_id" not in item:
             result.add(
-                CP_SLOT_TYPE_INVALID,
+                PC_SLOT_TYPE_INVALID,
                 f"semantic_slot[{index}] missing required field: semantic_id",
                 slot="semantic_slot",
             )
         if "summary" not in item:
             result.add(
-                CP_SLOT_TYPE_INVALID,
+                PC_SLOT_TYPE_INVALID,
                 f"semantic_slot[{index}] missing required field: summary",
                 slot="semantic_slot",
             )
@@ -525,15 +502,7 @@ def build_semantic_slot(
     ledger: "SQLiteLedger",
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """从 semantic_memory 表中取 Top-K 最新语义记忆，构建 semantic_slot 列表。
-
-    Args:
-        ledger: SQLite 审计账本（读取 semantic_memory 表）。
-        top_k: 最多注入条目数（默认 5）。
-
-    Returns:
-        list[dict]，可直接赋值给 context_pack["semantic_slot"]。
-    """
+    """Build semantic memory rows for prompt_context."""
     items, _ = ledger.list_semantic_memories(limit=top_k, offset=0)
     entries: list[dict[str, Any]] = []
     for item in items:

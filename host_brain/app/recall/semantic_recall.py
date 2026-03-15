@@ -1,11 +1,11 @@
 """semantic_recall.py —— 语义召回器
 
-七路召回中的向量召回路（需求 4），补全 ContextPackBuilder 的 episodic_vector 槽位：
+七路召回中的向量召回路（需求 4），补全 RecallPackBuilder 的 episodic_vector 槽位：
 - 基于 ChromaDB 向量数据库的语义相似度召回
 - 支持 top-k 召回 + 相似度阈值过滤
 - 召回结果按相似度降序排列，截断到 token 预算
 - 降级策略：ChromaDB 不可达时返回空结果（不阻断主链路）
-- 召回过程写入 subgraph_trace（接入 ContextPackBuilder）
+- 召回过程写入 subgraph_trace（接入 RecallPackBuilder）
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class SemanticRecallResult:
 
     def to_context_text(self, max_tokens: int = 600) -> str:
         """
-        将召回结果转换为 ContextPack 可用的文本格式。
+        将召回结果转换为 RecallPack 可用的文本格式。
 
         格式：
             [EPISODIC_VECTOR]

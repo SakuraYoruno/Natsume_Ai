@@ -21,7 +21,7 @@ from .routing_types import (
     ModelTarget,
     RouteDecision,
 )
-from .context_pack import ContextPack
+from .recall_pack import RecallPack
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ __all__ = [
     "LatencyBudget",
     "ModelTarget",
     "RouteDecision",
-    "ContextPack",
+    "RecallPack",
     # HTTP 模型
     "ChatRequest",
     "ChatResponse",
