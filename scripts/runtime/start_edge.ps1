@@ -15,7 +15,9 @@ function Read-EnvFile {
   if (-not (Test-Path -Path $Path)) {
     return $values
   }
-  foreach ($line in Get-Content -Path $Path -Encoding UTF8) {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+  $lines = [System.IO.File]::ReadAllLines($Path, $utf8NoBom)
+  foreach ($line in $lines) {
     $raw = [string]$line
     $trimmed = $raw.Trim()
     if (-not $trimmed -or $trimmed.StartsWith("#")) {
@@ -25,7 +27,7 @@ function Read-EnvFile {
     if ($sep -lt 1) {
       continue
     }
-    $key = $trimmed.Substring(0, $sep).Trim()
+    $key = $trimmed.Substring(0, $sep).Trim().TrimStart([char]0xFEFF)
     $value = $trimmed.Substring($sep + 1).Trim()
     if ($key) {
       $values[$key] = $value
@@ -91,6 +93,18 @@ function Parse-Bool {
     return $false
   }
   return [bool]$Default
+}
+
+function Get-EnvValueCaseInsensitive {
+  param([hashtable]$Values, [string]$Key)
+  if (-not $Values) { return $null }
+  $lower = $Key.ToLowerInvariant()
+  foreach ($k in $Values.Keys) {
+    if ([string]$k -eq $Key -or ([string]$k).ToLowerInvariant() -eq $lower) {
+      return $Values[$k]
+    }
+  }
+  return $null
 }
 
 function Start-VtsViaSteam {
@@ -294,10 +308,13 @@ if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
 $vtsExecutablePath = Resolve-VtsExecutablePath -EnvValues $envValues
 
 $wechatBridgeEnabled = $false
-if ($envValues.ContainsKey("EDGE_WECHAT_BRIDGE_ENABLED")) {
-  $wechatBridgeEnabled = Parse-Bool -Value $envValues["EDGE_WECHAT_BRIDGE_ENABLED"] -Default $false
-} elseif ($env:EDGE_WECHAT_BRIDGE_ENABLED) {
+$wechatBridgeEnvRaw = $null
+$wechatBridgeEnvRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_BRIDGE_ENABLED"
+if ($null -ne $wechatBridgeEnvRaw) {
+  $wechatBridgeEnabled = Parse-Bool -Value $wechatBridgeEnvRaw -Default $false
+} elseif ($null -ne $env:EDGE_WECHAT_BRIDGE_ENABLED -and -not [string]::IsNullOrWhiteSpace([string]$env:EDGE_WECHAT_BRIDGE_ENABLED)) {
   $wechatBridgeEnabled = Parse-Bool -Value $env:EDGE_WECHAT_BRIDGE_ENABLED -Default $false
+  $wechatBridgeEnvRaw = $env:EDGE_WECHAT_BRIDGE_ENABLED
 }
 
 $wechatBridgePidFile = Join-Path $runtimeRoot "wechat_bridge.pid"
@@ -315,6 +332,8 @@ if (Test-Path -Path $pidFile) {
         pid_file = $pidFile
         port = $port
         env_file = $EnvFile
+        wechat_bridge_env_raw = $wechatBridgeEnvRaw
+        wechat_bridge_enabled = $wechatBridgeEnabled
       }
       $result | ConvertTo-Json -Depth 4
       exit 0
@@ -338,6 +357,8 @@ if ($null -ne $listeningPid) {
       pid_file = $pidFile
       port = $port
       env_file = $EnvFile
+      wechat_bridge_env_raw = $wechatBridgeEnvRaw
+      wechat_bridge_enabled = $wechatBridgeEnabled
     }
     $result | ConvertTo-Json -Depth 4
     exit 0
@@ -467,6 +488,7 @@ if ($null -eq $vtsConn) {
 # 微信桥接（可选）：EDGE_WECHAT_BRIDGE_ENABLED=1 时启动 wcferry 桥接，将微信消息 POST 到 Edge /v1/edge/wechat/callback
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
+$wechatBridgeError = $null
 if ($wechatBridgeEnabled) {
   $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
   $edgeUrl = "http://127.0.0.1:$port"
@@ -484,10 +506,12 @@ if ($wechatBridgeEnabled) {
       $wechatBridgeStatus = "started"
     } catch {
       $wechatBridgeStatus = "start_failed"
+      $wechatBridgeError = $_.Exception.Message
       $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
     }
   } else {
     $wechatBridgeStatus = "script_not_found"
+    $wechatBridgeError = "script not found: $bridgeScript"
     $startupWarnings += "WECHAT_BRIDGE_SCRIPT_NOT_FOUND"
   }
 }
@@ -512,6 +536,10 @@ $result = [ordered]@{
   wechat_bridge_status = $wechatBridgeStatus
   wechat_bridge_pid = $wechatBridgePid
   wechat_bridge_pid_file = if ($wechatBridgePid) { $wechatBridgePidFile } else { $null }
+  wechat_bridge_error = $wechatBridgeError
+  wechat_bridge_log = if ($wechatBridgeEnabled) { $wechatBridgeLog } else { $null }
+  wechat_bridge_env_raw = $wechatBridgeEnvRaw
+  env_file = $EnvFile
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4

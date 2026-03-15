@@ -38,9 +38,9 @@ Hook **必须在这台机器上**运行：微信小号在这台机登录，Hook 
    若原仓库已停更，可改用社区 fork，例如查阅 [WeChatFerryX](https://github.com/lzb112/WeChatFerryX) 的安装说明。
 
 2. **配置 .env**（同机）：
-   - `EDGE_WECHAT_LISTENER_ENABLED=1`
-   - `EDGE_EVENT_REPORT_HOST_URL=http://<Host_IP>:18080`
-   - `EDGE_WECHAT_BRIDGE_ENABLED=1`（让 Edge 启动脚本一并启动微信桥接）
+   - `EDGE_WECHAT_LISTENER_ENABLED=1`（Edge 进程内 WeChatListener 接收 callback）
+   - `EDGE_EVENT_REPORT_HOST_URL=http://<Host_IP>:18080`（上报 Host，且 WeChatListener 依赖此项）
+   - **`EDGE_WECHAT_BRIDGE_ENABLED=1`**（**启动脚本**用，为 1 时随 Edge 一并启动 wcferry 桥接；缺此项则桥接不会起）
 
 3. **用 Edge 启动脚本统一启动**（推荐）：
    ```powershell
