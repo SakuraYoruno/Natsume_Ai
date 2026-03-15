@@ -12,7 +12,7 @@ import {
   fetchQaStats,
   fetchLlmCallStats,
   fetchLlmRouteStats,
-  fetchContextPackStats,
+  fetchRecallPackStats,
   fetchUIAssertionStats,
   fetchFailureStats,
   fetchPermissionStats,
@@ -626,8 +626,8 @@ export default function Insights() {
       {/* ===== TODO-47: LLM 路由决策统计 ===== */}
       <RouteStatsSection windowMinutes={windowMinutes} />
 
-      {/* ===== TODO-49: ContextPack token 预算统计 ===== */}
-      <ContextPackSection windowMinutes={windowMinutes} />
+      {/* ===== TODO-49: RecallPack token budget stats ===== */}
+      <RecallPackSection windowMinutes={windowMinutes} />
 
       {/* ===== TODO-50: UIAssertion 统计 ===== */}
       <UIAssertionSection windowMinutes={windowMinutes} />
@@ -788,15 +788,15 @@ function RouteStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-49: ContextPack 预算统计子组件 =====
-function ContextPackSection({ windowMinutes }) {
+// ===== TODO-49: RecallPack budget stats =====
+function RecallPackSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
-    fetchContextPackStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+    fetchRecallPackStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
     <section>
-      <SectionTitle icon={Layers} title="ContextPack Token 预算统计" color="text-cyan-600" />
+      <SectionTitle icon={Layers} title="RecallPack Token Budget" color="text-cyan-600" />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总 Pack 数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
         <StatCard label="平均 Token 数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />

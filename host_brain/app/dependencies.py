@@ -56,7 +56,7 @@ from host_brain.tools.catalog import ToolCatalog
 # 新模块导入（优化计划新增模块）
 from host_brain.app.graph.main_chain import MainChain
 from host_brain.app.llm.routing_matrix import RoutingMatrix
-from host_brain.app.recall.context_pack_builder import ContextPackBuilder
+from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
 # TODO-99: 蒸馏引擎 + 语义召回器
@@ -85,7 +85,7 @@ _graph_runtime: Optional[GraphRuntimeContract] = None
 # 新模块单例
 _main_chain: Optional[MainChain] = None
 _routing_matrix: Optional[RoutingMatrix] = None
-_context_pack_builder: Optional[ContextPackBuilder] = None
+_recall_pack_builder: Optional[RecallPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
 # TODO-99: 蒸馏引擎 + 语义召回器单例
@@ -608,26 +608,26 @@ def get_routing_matrix() -> RoutingMatrix:
     return _routing_matrix
 
 
-def get_context_pack_builder() -> ContextPackBuilder:
-    """获取 ContextPack 组装器单例（延迟初始化）。"""
-    global _context_pack_builder
-    if _context_pack_builder is None:
+def get_recall_pack_builder() -> RecallPackBuilder:
+    """获取 RecallPack 组装器单例（延迟初始化）。"""
+    global _recall_pack_builder
+    if _recall_pack_builder is None:
         ledger = get_ledger()
 
         def _audit_writer(event: str, detail: dict) -> None:
             try:
                 ledger.log_error(
-                    request_id=str(detail.get("request_id") or "context_pack_builder"),
+                    request_id=str(detail.get("request_id") or "recall_pack_builder"),
                     stage=event,
                     reason_code=event,
                     detail=str(detail),
                 )
             except Exception as exc:
-                _logger.warning("ContextPackBuilder 审计写入失败: %s", exc)
+                _logger.warning("RecallPackBuilder 审计写入失败: %s", exc)
 
-        _context_pack_builder = ContextPackBuilder(audit_writer=_audit_writer)
-        _logger.info("ContextPackBuilder 已初始化")
-    return _context_pack_builder
+        _recall_pack_builder = RecallPackBuilder(audit_writer=_audit_writer)
+        _logger.info("RecallPackBuilder 已初始化")
+    return _recall_pack_builder
 
 
 def get_memory_guard() -> MemoryGuard:

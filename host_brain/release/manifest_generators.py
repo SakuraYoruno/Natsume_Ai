@@ -325,13 +325,13 @@ def generate_m10c_manifest(
 ) -> dict[str, Any]:
     """Generate M10-C release manifest.
 
-    M10-C 新增：记忆蒸馏系统（MemoryDistillationEngine + semantic_memory 表 + context_pack.semantic_slot）。
+    M10-C 新增：记忆蒸馏系统（MemoryDistillationEngine + semantic_memory 表 + prompt_context.semantic_slot）。
     Locks:
     - git commit hash (via .git/HEAD)
     - migration file hashes（SQL + Cypher，含 M10-B 新增的 0017）
     - world_canon_asset_hashes（host_brain/canon/world/*.json 种子条目）
     - distillation_hash（host_brain/memory/distillation.py 文件 hash）
-    - context_pack_hash（host_brain/core/context_pack.py 文件 hash，含 semantic_slot）
+    - prompt_context_hash（host_brain/core/prompt_context.py 文件 hash，含 semantic_slot）
     - sqlite_ledger_hash（host_brain/audit/sqlite_ledger.py 文件 hash，含 semantic_memory 表）
     - test_passed_count（1062）
     - latency_baseline_snapshot
@@ -368,14 +368,14 @@ def generate_m10c_manifest(
             rel = _normalize(file_path.relative_to(repo_root))
             world_canon_asset_hashes[rel] = _digest_file(file_path)
 
-    # ── M10-C 新增：distillation.py + context_pack.py + sqlite_ledger.py hash ─
+    # ── M10-C 新增：distillation.py + prompt_context.py + sqlite_ledger.py hash ─
     distillation_path = repo_root / "host_brain" / "memory" / "distillation.py"
     distillation_hash = (
         _digest_file(distillation_path) if distillation_path.exists() else None
     )
-    context_pack_path = repo_root / "host_brain" / "core" / "context_pack.py"
-    context_pack_hash = (
-        _digest_file(context_pack_path) if context_pack_path.exists() else None
+    prompt_context_path = repo_root / "host_brain" / "core" / "prompt_context.py"
+    prompt_context_hash = (
+        _digest_file(prompt_context_path) if prompt_context_path.exists() else None
     )
     sqlite_ledger_path = repo_root / "host_brain" / "audit" / "sqlite_ledger.py"
     sqlite_ledger_hash = (
@@ -390,7 +390,7 @@ def generate_m10c_manifest(
         "world_canon_asset_hashes": world_canon_asset_hashes,
         "world_canon_asset_count": len(world_canon_asset_hashes),
         "distillation_hash": distillation_hash,
-        "context_pack_hash": context_pack_hash,
+        "prompt_context_hash": prompt_context_hash,
         "sqlite_ledger_hash": sqlite_ledger_hash,
         "test_passed_count": int(test_passed_count),
         "latency_baseline_snapshot": latency_baseline_snapshot,

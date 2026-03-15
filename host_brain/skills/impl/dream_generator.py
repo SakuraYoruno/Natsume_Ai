@@ -102,7 +102,7 @@ def execute_dream_generator(
             "ts_ms": ts,
         }
 
-    # 构建 context_pack → LLM 生成梦境叙事
+    # 构建 prompt_context → LLM 生成梦境叙事
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     dream_narrative: str = ""
 

@@ -445,6 +445,11 @@ def _normalize_scene_type(scene_type: str | None) -> str:
 
 
 def _extract_scene_router_message(payload: dict[str, Any]) -> str:
+    request_payload = payload.get("request")
+    if isinstance(request_payload, dict):
+        request_message = str(request_payload.get("user_message") or "").strip()
+        if request_message:
+            return request_message
     top_level_message = str(payload.get("user_message") or "").strip()
     if top_level_message:
         return top_level_message
@@ -457,6 +462,12 @@ def _extract_scene_router_message(payload: dict[str, Any]) -> str:
 
 
 def resolve_graph_entry_scene_type(*, payload: dict[str, Any]) -> tuple[str, str]:
+    graph_payload = payload.get("graph")
+    if isinstance(graph_payload, dict):
+        explicit_graph_scene = str(graph_payload.get("scene_type") or "").strip().upper()
+        if explicit_graph_scene:
+            return _normalize_scene_type(explicit_graph_scene), "explicit"
+
     explicit_scene = str(payload.get("scene_type") or "").strip().upper()
     if explicit_scene:
         return _normalize_scene_type(explicit_scene), "explicit"

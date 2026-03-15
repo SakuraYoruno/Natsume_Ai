@@ -31,7 +31,7 @@ _HOST_SERVICES: List[Dict[str, str]] = [
     {"service_id": "routing_matrix",        "name": "LLM Routing Matrix",     "side": "host"},
     {"service_id": "memory_guard",          "name": "Memory Guard",           "side": "host"},
     {"service_id": "state_arbiter",         "name": "State Arbiter",          "side": "host"},
-    {"service_id": "context_pack_builder",  "name": "ContextPack Builder",    "side": "host"},
+    {"service_id": "recall_pack_builder",   "name": "Recall Pack Builder",    "side": "host"},
 ]
 
 _EDGE_SERVICES: List[Dict[str, str]] = [

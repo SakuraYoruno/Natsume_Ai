@@ -16,9 +16,16 @@ import time
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
 from host_brain.app.chat_context_builder import (
-    build_chat_generation_prompt_payload as _build_chat_generation_prompt_payload,
-    build_node_style_bindings as _build_node_style_bindings,
+    build_chat_runtime_payload as _build_chat_runtime_payload,
     extract_chat_graph_gateway_payload as _extract_chat_graph_gateway_payload,
+)
+from host_brain.app.chat_runtime_input import (
+    build_chat_runtime_input,
+    get_chat_runtime_prompt_context_observability,
+    get_chat_runtime_prompt_context_style_row,
+    get_chat_runtime_prompt_context_validation,
+    get_chat_runtime_graph,
+    get_chat_runtime_render_target_lang,
 )
 from host_brain.app.dependencies import (
     get_bond_stage_engine,
@@ -69,22 +76,22 @@ from host_brain.retrieval.orchestrator import (
 _logger = logging.getLogger("Natsume.chat_handler")
 
 
-def _log_context_pack_observability(
+def _log_prompt_context_observability(
     *,
     request_id: str,
     session_id: str,
-    context_pack_observability: Mapping[str, Any],
+    prompt_context_observability: Mapping[str, Any],
 ) -> None:
-    if not isinstance(context_pack_observability, Mapping) or not context_pack_observability:
+    if not isinstance(prompt_context_observability, Mapping) or not prompt_context_observability:
         return
 
-    selected_tier = str(context_pack_observability.get("selected_tier") or "").strip()
-    selected_reason = str(context_pack_observability.get("selected_reason") or "").strip()
-    retrieval_metrics_raw = context_pack_observability.get("retrieval_metrics")
+    selected_tier = str(prompt_context_observability.get("selected_tier") or "").strip()
+    selected_reason = str(prompt_context_observability.get("selected_reason") or "").strip()
+    retrieval_metrics_raw = prompt_context_observability.get("retrieval_metrics")
     retrieval_metrics = dict(retrieval_metrics_raw) if isinstance(retrieval_metrics_raw, Mapping) else {}
-    source_stats_raw = context_pack_observability.get("source_stats")
+    source_stats_raw = prompt_context_observability.get("source_stats")
     source_stats = dict(source_stats_raw) if isinstance(source_stats_raw, Mapping) else {}
-    slot_counts_raw = context_pack_observability.get("slot_item_counts")
+    slot_counts_raw = prompt_context_observability.get("slot_item_counts")
     slot_counts = dict(slot_counts_raw) if isinstance(slot_counts_raw, Mapping) else {}
 
     _logger.info(
@@ -104,7 +111,7 @@ def _log_context_pack_observability(
             "retrieval_used_items": source_stats.get("retrieval_used_items"),
             "retrieval_trimmed_items": source_stats.get("retrieval_trimmed_items"),
             "context_slot_counts": slot_counts,
-            "context_size_chars": context_pack_observability.get("context_size_chars"),
+            "context_size_chars": prompt_context_observability.get("context_size_chars"),
         },
     )
 
@@ -116,7 +123,7 @@ def _log_context_pack_observability(
                 "session_id": session_id,
                 "selected_tier": selected_tier,
                 "selected_reason": selected_reason or None,
-                "degrade_order": list(context_pack_observability.get("degrade_order") or []),
+                "degrade_order": list(prompt_context_observability.get("degrade_order") or []),
             },
         )
 
@@ -260,14 +267,21 @@ async def _complex_scene_sse_generator(
         if retrieval_latency_ms is not None:
             retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
 
+        _skill_manifest_for_graph: list[dict] = []
+        if scene_type == SCENE_EXEC_INTENT:
+            try:
+                from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+                _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
+            except Exception as _sm_exc:
+                _logger.warning("[%s] skill_manifest 鏋勫缓澶辫触锛堥檷绾т负绌哄垪琛級: %s", request_id, _sm_exc)
+
         render_target_lang = infer_render_target_lang(user_message=request_body.message)
-        node_style_bindings = _build_node_style_bindings(render_target_lang=render_target_lang)
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="chat_pre_llm",
             ts_ms=int(time.time() * 1000),
         )
-        llm_prompt_payload = _build_chat_generation_prompt_payload(
+        runtime_input = build_chat_runtime_input(
             request_id=request_id,
             session_id=session_id,
             thread_id=request_body.thread_id,
@@ -275,18 +289,25 @@ async def _complex_scene_sse_generator(
             render_target_lang=render_target_lang,
             retrieval_summary=retrieval_summary,
             retrieval_evidence_items=retrieval_evidence_items,
-            style_bindings=node_style_bindings,
-            emotion_context=emotion_context if emotion_context else None,
+            emotion_state=emotion_context if emotion_context else None,
             emotion_snapshot=emotion_snapshot,
+            scene_type=scene_type,
+            scene_type_source=scene_type_source,
+            committed_route_token=governor_result.get("committed_route_token_ref"),
+            committed_route_token_detail=governor_result.get("committed_route_token"),
+            skill_manifest=_skill_manifest_for_graph,
+        )
+        llm_prompt_payload = _build_chat_runtime_payload(
+            runtime_input=runtime_input,
         )
         if emotion_context:
             llm_prompt_payload = adjust_gen_params_for_emotion(llm_prompt_payload, emotion_context)
-        context_pack_validation = dict(llm_prompt_payload.get("context_pack_validation") or {})
-        context_pack_observability = dict(llm_prompt_payload.get("context_pack_observability") or {})
-        _log_context_pack_observability(
+        prompt_context_validation = get_chat_runtime_prompt_context_validation(llm_prompt_payload)
+        prompt_context_observability = get_chat_runtime_prompt_context_observability(llm_prompt_payload)
+        _log_prompt_context_observability(
             request_id=request_id,
             session_id=session_id,
-            context_pack_observability=context_pack_observability,
+            prompt_context_observability=prompt_context_observability,
         )
 
         llm_runtime = await resolve_host_llm_runtime(
@@ -385,15 +406,7 @@ async def _complex_scene_sse_generator(
             get_graph_runtime().run_graph,
             request_id=request_id,
             graph_config=graph_config,
-            payload={
-                **llm_prompt_payload,
-                "user_message": request_body.message,
-                "scene_type": scene_type,
-                "committed_route_token": governor_result.get("committed_route_token_ref"),
-                "committed_route_token_detail": governor_result.get("committed_route_token"),
-                "emotion_snapshot": dict(emotion_snapshot),
-                "skill_manifest": _skill_manifest_for_graph,
-            },
+            payload=dict(llm_prompt_payload),
             dependency_statuses=dependency_statuses,
             ts_ms=graph_start_ms,
         )
@@ -410,13 +423,14 @@ async def _complex_scene_sse_generator(
 
         graph_output = dict(graph_result.output or {})
         payload_root = dict(graph_output.get("payload") or {})
+        graph_payload = get_chat_runtime_graph(payload_root)
         graph_meta = dict(graph_config.get("graph_meta") or {})
         runtime_scene_type = (
-            str(payload_root.get("scene_type") or graph_meta.get("scene_type") or scene_type)
+            str(graph_payload.get("scene_type") or graph_meta.get("scene_type") or scene_type)
             .strip().upper() or SCENE_CHAT
         )
         runtime_scene_type_source = (
-            str(payload_root.get("scene_type_source") or graph_meta.get("scene_type_source") or graph_scene_type_source)
+            str(graph_payload.get("scene_type_source") or graph_meta.get("scene_type_source") or graph_scene_type_source)
             .strip() or graph_scene_type_source
         )
         default_route_next_node = CHAT_DIRECT_NODE_ID
@@ -492,12 +506,6 @@ async def _complex_scene_sse_generator(
         if isinstance(core_intent_draft, dict) and core_intent_draft:
             intent_draft = core_intent_draft
 
-        style_bindings_payload_raw = llm_prompt_payload.get("style_bindings")
-        style_bindings_payload = (
-            dict(style_bindings_payload_raw)
-            if isinstance(style_bindings_payload_raw, Mapping)
-            else {}
-        )
         graph_trace_rows = list(graph_output.get("graph_trace") or [])
         active_node_ids: list[str] = []
         for row in graph_trace_rows:
@@ -545,8 +553,10 @@ async def _complex_scene_sse_generator(
                 "retrieval_route_count": retrieval_summary.get("route_count"),
                 "upstream_node_ids": active_node_ids[:node_index],
             }
-            node_style_raw = style_bindings_payload.get(nid)
-            node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
+            node_style = get_chat_runtime_prompt_context_style_row(
+                llm_prompt_payload,
+                node_id=nid,
+            )
             if node_style:
                 node_input["style_canon_id"] = node_style.get("canon_id")
                 node_input["style_citation"] = node_style.get("citation")
@@ -578,7 +588,7 @@ async def _complex_scene_sse_generator(
             "model_profile_id": graph_output.get("model_profile_id"),
             "scene_type": runtime_scene_type,
             "scene_type_source": runtime_scene_type_source,
-            "render_target_lang": str(llm_prompt_payload.get("render_target_lang") or ""),
+            "render_target_lang": get_chat_runtime_render_target_lang(llm_prompt_payload),
             "latency_ms": graph_latency_ms,
             "draft_only": bool(dict(render_payload.get("meta") or {}).get("draft_only", True)),
             "route_target": str(route_decision.get("route_target") or llm_runtime.get("route_target") or "cloud"),
@@ -590,8 +600,8 @@ async def _complex_scene_sse_generator(
             "node_count": len(node_summaries),
             "nodes": node_summaries,
             "model_control": list(graph_output.get("model_control") or []),
-            "context_pack_validation": context_pack_validation,
-            "context_pack_observability": context_pack_observability,
+            "prompt_context_validation": prompt_context_validation,
+            "prompt_context_observability": prompt_context_observability,
         }
 
         retrieval_reason_code = str(retrieval_summary.get("reason_code") or "")
@@ -731,8 +741,8 @@ async def _complex_scene_sse_generator(
                 "thread_id": request_body.thread_id,
                 "retrieval": retrieval_summary,
                 "llm": llm_summary,
-                "context_pack_validation": llm_summary.get("context_pack_validation"),
-                "context_pack_observability": llm_summary.get("context_pack_observability"),
+                "prompt_context_validation": llm_summary.get("prompt_context_validation"),
+                "prompt_context_observability": llm_summary.get("prompt_context_observability"),
                 "scene_type": llm_summary.get("scene_type"),
                 "scene_type_source": llm_summary.get("scene_type_source"),
                 "route_decision": llm_summary.get("route_decision"),

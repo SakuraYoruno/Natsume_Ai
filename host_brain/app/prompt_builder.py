@@ -10,6 +10,18 @@ import os
 import threading
 from typing import Any, Mapping
 
+from host_brain.app.chat_runtime_input import (
+    get_chat_runtime_prompt_context,
+    get_chat_runtime_prompt_context_validation,
+    get_chat_runtime_emotion_snapshot,
+    get_chat_runtime_emotion_state,
+    resolve_prompt_context_style_row,
+    get_chat_runtime_render_target_lang,
+    get_chat_runtime_retrieval,
+    get_chat_runtime_skill_manifest,
+    get_chat_runtime_user_message,
+)
+
 # ---------------------------------------------------------------------------
 # 场景常量
 # ---------------------------------------------------------------------------
@@ -92,6 +104,49 @@ def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> 
     return "ja"
 
 
+def _contains_any_token(text: str, tokens: tuple[str, ...]) -> bool:
+    normalized = str(text or "").lower()
+    return any(token in normalized for token in tokens)
+
+
+def _build_direct_response_priority(*, user_message: str, render_target_lang: str) -> str:
+    rules: list[str] = [
+        "Answer the user's concrete request first.",
+        "Do not greet, self-introduce, or restart the conversation unless the user asked for that.",
+        "Do not ask a follow-up question unless the request is actually ambiguous or incomplete.",
+        "Do not invent vocatives, relationship labels, or roleplay framing that are not supported by USER_MESSAGE or EVIDENCE.",
+        "Treat STYLE_CANON_BINDING as tone guidance only; user intent and factual grounding take priority.",
+        "Treat WORLD_CANON_BINDING as background reference only; do not surface lore unless the user explicitly asks for it.",
+    ]
+
+    if _contains_any_token(
+        user_message,
+        ("短く", "简短", "短い", "brief", "short", "一文", "一句", "一言", "one sentence"),
+    ):
+        rules.append("Keep the visible answer to one or two short sentences.")
+
+    if _contains_any_token(
+        user_message,
+        ("気分", "調子", "状态", "状态", "心情", "感觉", "感受"),
+    ):
+        rules.append(
+            "For current mood or state questions, answer directly in first person, do not bounce the question back, and end with a statement rather than a question."
+        )
+
+    if _contains_any_token(
+        user_message,
+        ("優先", "优先", "priority", "prioritize", "まず"),
+    ):
+        rules.append("For prioritization requests, start with the recommendation itself.")
+
+    if str(render_target_lang).strip().lower() == "ja":
+        rules.append("Write natural spoken Japanese for TTS, avoid ending the whole reply as a question unless necessary, and avoid decorative symbols such as 〜 or ～.")
+    else:
+        rules.append("Write concise spoken Simplified Chinese and avoid decorative filler.")
+
+    return "DIRECT_RESPONSE_PRIORITY:\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
+
+
 # ---------------------------------------------------------------------------
 # 节点角色指令
 # ---------------------------------------------------------------------------
@@ -108,13 +163,17 @@ def _build_node_role_instruction(
                 "Role: chat_direct_ja.\n"
                 "Goal: generate the final user-facing reply directly in concise spoken Simplified Chinese.\n"
                 "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
-                "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+                "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
+                "do not greet or self-introduce unless asked; do not ask a follow-up question unless needed; "
+                "keep intent_draft draft-only and never add facts or claim execution."
             )
         return (
             "Role: chat_direct_ja.\n"
             "Goal: generate the final user-facing reply directly in natural Japanese suitable for spoken TTS output.\n"
             "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
-            "ignore CORE_NARRATIVE_ZH when it is empty; keep intent_draft draft-only and never add facts or claim execution."
+            "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
+            "do not greet or self-introduce unless asked; do not ask a follow-up question unless needed; "
+            "keep intent_draft draft-only and never add facts or claim execution."
         )
     if resolved_node_id == CHAT_RENDER_NODE_ID:
         if str(render_target_lang).strip().lower() == "zh":
@@ -325,7 +384,7 @@ def extract_gateway_narrative(payload: dict[str, Any] | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Host 生成提示词（简单版，无 context_pack）
+# Host 生成提示词（简单版，无 prompt_context）
 # ---------------------------------------------------------------------------
 def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
     user_message = _truncate_for_prompt(prompt_payload.get("user_message"), limit=1000)
@@ -399,10 +458,10 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 节点生成提示词（完整版，含 context_pack）
+# 节点生成提示词（完整版，含 prompt_context）
 # ---------------------------------------------------------------------------
 def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
-    user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=1000)
+    user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=1000)
 
     # ── TODO-64：MemoryGuard 提示词注入检测 ──────────────────────────────
     # 在 prompt 构建前检测用户消息中的注入攻击，检测到时追加安全警告标记
@@ -436,20 +495,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     # TODO-70: 将注入检测结果写入线程局部变量，供调用方读取并写入 audit_tags
     _set_injection_meta(_injection_meta)
 
-    context_pack_raw = runtime_payload.get("context_pack")
-    context_pack = dict(context_pack_raw) if isinstance(context_pack_raw, Mapping) else {}
-    context_pack_validation_raw = runtime_payload.get("context_pack_validation")
-    context_pack_validation = (
-        dict(context_pack_validation_raw)
-        if isinstance(context_pack_validation_raw, Mapping)
-        else {}
-    )
-
-    retrieval_raw = runtime_payload.get("retrieval")
-    retrieval = dict(retrieval_raw) if isinstance(retrieval_raw, Mapping) else {}
+    prompt_context = get_chat_runtime_prompt_context(runtime_payload)
+    prompt_context_validation = get_chat_runtime_prompt_context_validation(runtime_payload)
+    retrieval = get_chat_runtime_retrieval(runtime_payload)
     retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
     retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
-    retrieval_slot_rows = context_pack.get("retrieval")
+    retrieval_slot_rows = prompt_context.get("retrieval")
     slot_rows = retrieval_slot_rows if isinstance(retrieval_slot_rows, list) else []
     rows = slot_rows if slot_rows else (retrieval.get("evidence_items") or [])
 
@@ -467,7 +518,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         evidence_lines.append(f"- [{evidence_ref}] {snippet}")
     evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
 
-    authoritative_rows = context_pack.get("authoritative")
+    authoritative_rows = prompt_context.get("authoritative")
     world_rows = authoritative_rows if isinstance(authoritative_rows, list) else []
     world_lines: list[str] = []
     for row in world_rows[:3]:
@@ -482,15 +533,15 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         world_lines.append(f"- [{citation}] {content}")
     world_block = "\n".join(world_lines) if world_lines else "- (none)"
 
-    constraints_raw = context_pack.get("constraints")
+    constraints_raw = prompt_context.get("constraints")
     constraints = dict(constraints_raw) if isinstance(constraints_raw, Mapping) else {}
     constraints_json = _truncate_for_prompt(
         json.dumps(constraints, ensure_ascii=False, sort_keys=True),
         limit=1200,
     )
-    context_pack_valid = bool(context_pack_validation.get("valid", False))
-    context_pack_reason = str(context_pack_validation.get("reason_code") or "NONE").strip() or "NONE"
-    context_pack_violation_count = int(context_pack_validation.get("violation_count") or 0)
+    prompt_context_valid = bool(prompt_context_validation.get("valid", False))
+    prompt_context_reason = str(prompt_context_validation.get("reason_code") or "NONE").strip() or "NONE"
+    prompt_context_violation_count = int(prompt_context_validation.get("violation_count") or 0)
 
     core_payload = extract_node_runtime_payload(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
     core_narrative = extract_node_narrative_text(runtime_payload, node_id=CHAT_INTENT_SOURCE_NODE_ID)
@@ -510,16 +561,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     planner_text = extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
     verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
-    style_pack_raw = context_pack.get("style_pack")
-    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
-    style_bindings_raw = style_pack.get("node_bindings")
-    style_bindings = dict(style_bindings_raw) if isinstance(style_bindings_raw, Mapping) else {}
-    if not style_bindings:
-        legacy_bindings_raw = runtime_payload.get("style_bindings")
-        style_bindings = dict(legacy_bindings_raw) if isinstance(legacy_bindings_raw, Mapping) else {}
-    node_style_raw = style_bindings.get(node_id)
-    node_style = dict(node_style_raw) if isinstance(node_style_raw, Mapping) else {}
-    style_instruction = _truncate_for_prompt(node_style.get("style_instruction"), limit=1200)
+    node_style = resolve_prompt_context_style_row(
+        prompt_context,
+        node_id=node_id,
+    )
+    style_instruction = _truncate_for_prompt(
+        node_style.get("style_instruction") or node_style.get("instruction"),
+        limit=1200,
+    )
     style_block = ""
     if style_instruction:
         style_block = (
@@ -528,37 +577,27 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
             f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
             f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
+            f"- source: {_truncate_for_prompt(node_style.get('source'), limit=64) or 'prompt_context'}\n"
             f"- instruction:\n{style_instruction}\n\n"
         )
 
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
-    emotion_context_raw = runtime_payload.get("emotion_context")
-    emotion_context = dict(emotion_context_raw) if isinstance(emotion_context_raw, Mapping) else {}
-    emotion_snapshot_raw = runtime_payload.get("emotion_snapshot")
-    emotion_snapshot = dict(emotion_snapshot_raw) if isinstance(emotion_snapshot_raw, Mapping) else {}
+    emotion_context = get_chat_runtime_emotion_state(runtime_payload)
+    emotion_snapshot = get_chat_runtime_emotion_snapshot(runtime_payload)
     snapshot_emotion_context_raw = emotion_snapshot.get("emotion_context")
     snapshot_emotion_context = (
         dict(snapshot_emotion_context_raw)
         if isinstance(snapshot_emotion_context_raw, Mapping)
         else {}
     )
-    context_pack_emotion_raw = context_pack.get("emotion_pulse")
-    context_pack_emotion = dict(context_pack_emotion_raw) if isinstance(context_pack_emotion_raw, Mapping) else {}
+    prompt_context_emotion_raw = prompt_context.get("emotion_pulse")
+    prompt_context_emotion = dict(prompt_context_emotion_raw) if isinstance(prompt_context_emotion_raw, Mapping) else {}
     merged_emotion_context = normalize_chat_emotion_context(
         {
-            "mood_state": (
-                context_pack_emotion.get("mood_state")
-                or snapshot_emotion_context.get("mood_state")
-                or emotion_context.get("mood_state")
-            ),
-            "emotion_tag": (
-                context_pack_emotion.get("emotion_tag")
-                or snapshot_emotion_context.get("emotion_tag")
-                or emotion_context.get("emotion_tag")
-            ),
+            "mood_state": snapshot_emotion_context.get("mood_state") or emotion_context.get("mood_state"),
+            "emotion_tag": snapshot_emotion_context.get("emotion_tag") or emotion_context.get("emotion_tag"),
             "emotion_range_hint": (
-                context_pack_emotion.get("emotion_range_hint")
-                or snapshot_emotion_context.get("emotion_range_hint")
+                snapshot_emotion_context.get("emotion_range_hint")
                 or emotion_context.get("emotion_range_hint")
             ),
             "emotion_intensity": (
@@ -572,7 +611,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             ),
         }
     )
-    pulse_style_hint = _truncate_for_prompt(context_pack_emotion.get("style_hint"), limit=160)
+    pulse_style_hint = _truncate_for_prompt(prompt_context_emotion.get("style_hint"), limit=160)
     snapshot_source = _truncate_for_prompt(emotion_snapshot.get("source"), limit=120) or "NONE"
     try:
         snapshot_age_ms = int(emotion_snapshot.get("age_ms") or 0)
@@ -582,9 +621,9 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         snapshot_captured_ts_ms = int(emotion_snapshot.get("captured_ts_ms") or 0)
     except (TypeError, ValueError):
         snapshot_captured_ts_ms = 0
-    memory_emotion_hint_raw = context_pack.get("memory_emotion_hint")
+    memory_emotion_hint_raw = prompt_context.get("memory_emotion_hint")
     memory_emotion_hint = dict(memory_emotion_hint_raw) if isinstance(memory_emotion_hint_raw, Mapping) else {}
-    bond_texture_raw = context_pack.get("bond_texture")
+    bond_texture_raw = prompt_context.get("bond_texture")
     bond_texture = dict(bond_texture_raw) if isinstance(bond_texture_raw, Mapping) else {}
     memory_emotion_hint_json = _truncate_for_prompt(
         json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True),
@@ -658,16 +697,11 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         + "\n"
     )
 
-    render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
-    if render_target_lang not in {"zh", "ja"}:
-        render_target_lang = infer_render_target_lang(
-            user_message=user_message,
-            core_narrative=core_narrative,
-        )
+    render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
 
     # ── TODO-109：episodic_vector 槽位注入 ──────────────────────────────
-    # 优先从 context_pack["episodic_vector"] 读取，其次从 runtime_payload 读取
-    _episodic_vector_raw = context_pack.get("episodic_vector") or runtime_payload.get("episodic_vector")
+    # 优先从 prompt_context["episodic_vector"] 读取，其次从 runtime_payload 读取
+    _episodic_vector_raw = prompt_context.get("episodic_vector") or runtime_payload.get("episodic_vector")
     _episodic_vector_text = ""
     if isinstance(_episodic_vector_raw, str):
         _episodic_vector_text = _truncate_for_prompt(_episodic_vector_raw, limit=600)
@@ -789,8 +823,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     role_instruction = _build_node_role_instruction(
         node_id,
         render_target_lang=render_target_lang,
-        skill_manifest=list(runtime_payload.get("skill_manifest") or []) or None,
+        skill_manifest=get_chat_runtime_skill_manifest(runtime_payload) or None,
     )
+    direct_response_block = ""
+    if str(node_id or "").strip() == CHAT_DIRECT_NODE_ID:
+        direct_response_block = _build_direct_response_priority(
+            user_message=user_message,
+            render_target_lang=render_target_lang,
+        )
 
     return (
         "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
@@ -801,15 +841,19 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         "2) meta.draft_only must be true.\n"
         "3) Never claim executed/saved/confirmed/completed.\n"
         "4) Keep concise and grounded in provided context.\n"
+        "5) Answer the user's explicit request before any optional elaboration.\n"
+        "6) Do not greet or self-introduce unless the user asked for that.\n"
+        "7) Do not ask a follow-up question unless it is necessary to resolve ambiguity.\n"
         "NODE_ROLE_BINDING:\n"
         f"{role_instruction}\n\n"
+        f"{direct_response_block}"
         f"{style_block}"
         f"{cn_style_boost_block}"
         f"{emotion_binding_block}"
-        "CONTEXT_PACK_VALIDATION:\n"
-        f"- valid: {context_pack_valid}\n"
-        f"- reason_code: {context_pack_reason}\n"
-        f"- violation_count: {context_pack_violation_count}\n\n"
+        "PROMPT_CONTEXT_VALIDATION:\n"
+        f"- valid: {prompt_context_valid}\n"
+        f"- reason_code: {prompt_context_reason}\n"
+        f"- violation_count: {prompt_context_violation_count}\n\n"
         f"WORLD_CANON_BINDING:\n{world_block}\n\n"
         f"{persona_examples_block}"
         f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"

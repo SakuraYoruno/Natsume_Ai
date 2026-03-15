@@ -250,6 +250,15 @@ class BondScoreState:
 
 
 @dataclass(frozen=True)
+class BondStateSnapshot:
+    user_id: str
+    stage: str
+    score: float
+    label: str
+    interaction_count: int
+
+
+@dataclass(frozen=True)
 class StageTransitionResult:
     """阶段晋级/降级结果。"""
     user_id: str
@@ -385,6 +394,17 @@ class BondStageEngine:
     def get_state(self, user_id: str) -> BondScoreState:
         """获取用户当前 Bond 积分状态。"""
         return self._get_or_create_state(str(user_id).strip())
+
+    def get_bond_state(self, *, session_id: str | None = None, user_id: str | None = None) -> BondStateSnapshot:
+        identity = str(user_id or session_id or "").strip()
+        state = self._get_or_create_state(identity)
+        return BondStateSnapshot(
+            user_id=state.user_id,
+            stage=state.current_stage,
+            score=float(state.total_score),
+            label=state.capability_hint(),
+            interaction_count=int(state.event_count),
+        )
 
     def get_summary(self, user_id: str) -> dict[str, Any]:
         """获取 context-pack-safe 的 Bond Summary（不含数值）。"""

@@ -710,21 +710,21 @@ def _inject_emotion_gen_params(
     mood_state = str(emotion_context.get("mood_state") or "steady").lower()
 
     # 基础参数
-    temperature = 0.7
-    top_p = 0.9
+    temperature = 0.45
+    top_p = 0.82
 
     # 高唤醒情感：提高 temperature（更活泼/有创意）
     if emotion_tag in ("EXCITED", "HAPPY", "SURPRISED"):
-        temperature = 0.85
-        top_p = 0.92
-    # 负面高唤醒：降低 temperature（更稳定/安抚）
-    elif emotion_tag in ("ANGRY", "FRUSTRATED", "ANXIOUS"):
         temperature = 0.6
         top_p = 0.88
+    # 负面高唤醒：降低 temperature（更稳定/安抚）
+    elif emotion_tag in ("ANGRY", "FRUSTRATED", "ANXIOUS"):
+        temperature = 0.45
+        top_p = 0.8
     # 低落情感：降低 temperature（更温柔/稳定）
     elif emotion_tag in ("SAD", "TIRED") or mood_state in ("tired", "critical"):
-        temperature = 0.55
-        top_p = 0.85
+        temperature = 0.4
+        top_p = 0.78
 
     result = dict(prompt_payload)
     result["gen_params"] = {

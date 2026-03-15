@@ -513,17 +513,17 @@ export function fetchInputDispatchStats(params = {}) {
   return request(`/obs/input/dispatch-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-49: ContextPack token 预算统计 =====
+// ===== TODO-49: RecallPack token budget stats =====
 
 /**
- * ContextPack token 预算统计（各槽位平均 token 消耗/截断率/冲突抑制率）
+ * RecallPack token budget stats.
  * @param {object} params - { window_minutes }
  */
-export function fetchContextPackStats(params = {}) {
+export function fetchRecallPackStats(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
-  return request(`/obs/context-pack/stats${qs ? '?' + qs : ''}`)
+  return request(`/obs/recall-pack/stats${qs ? '?' + qs : ''}`)
 }
 
 // ===== TODO-50: UIAssertionGuard 统计 =====
@@ -726,4 +726,3 @@ export function fetchErrorHeatmap(params = {}) {
 export function fetchSemanticRecallStats() {
   return request('/obs/semantic-recall/stats')
 }
-

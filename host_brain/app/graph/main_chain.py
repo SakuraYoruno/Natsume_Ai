@@ -73,7 +73,7 @@ class ChainContext:
     quarantine_passed: bool = False
     governor_passed: bool = False
     governor_block_reason: Optional[str] = None
-    recall_context_pack: Optional[Any] = None
+    recall_payload: Optional[Any] = None
     llm_raw_output: Optional[str] = None
     qa_rewritten: bool = False
     qa_original_output: Optional[str] = None
@@ -124,13 +124,13 @@ class RecallFusionInput(TypedDict):
 
 
 class RecallFusionOutput(TypedDict):
-    context_pack: Any
+    prompt_context: Any
     evidence_empty: bool
 
 
 class LlmGatewayInput(TypedDict):
     message: str
-    context_pack: Any
+    prompt_context: Any
     task_type: str
     session_id: str
 
@@ -460,7 +460,7 @@ class GraphExecutorNode(ChainNode):
 
 
 class RecallFusionNode(ChainNode):
-    """召回融合节点：执行七路召回并组装 ContextPack。
+    """召回融合节点：执行七路召回并组装 RecallPack。
 
     [深度业务化] 接入真实 RetrievalOrchestrator.arun 调用，
     执行七路并行召回（向量语义/全文/情节记忆/Bond/知识图谱/情感/工具元数据）
@@ -721,11 +721,11 @@ class RecallFusionNode(ChainNode):
                 state_arbiter_meta = {"mode": "DEGRADED", "error": str(_sa_exc)[:100]}
                 logger.warning("[%s] StateArbiter 仲裁异常（降级）: %s", ctx.request_id, _sa_exc)
 
-            # ── TODO-49：ContextPackBuilder subgraph_trace 持久化 ────────
-            context_pack_trace_meta: dict[str, Any] = {"mode": "SKIPPED"}
+            # Persist internal RecallPack trace for recall-layer observability.
+            recall_pack_trace_meta: dict[str, Any] = {"mode": "SKIPPED"}
             try:
-                from host_brain.app.recall.context_pack_builder import ContextPackBuilder  # noqa: PLC0415
-                _builder = ContextPackBuilder()
+                from host_brain.app.recall.recall_pack_builder import RecallPackBuilder  # noqa: PLC0415
+                _builder = RecallPackBuilder()
                 # 将 filtered_evidence_items 转换为 recall_results 格式
                 _recall_results: dict[str, str] = {}
                 for _item in filtered_evidence_items:
@@ -740,29 +740,29 @@ class RecallFusionNode(ChainNode):
                     _pack = _builder.build(_recall_results, task_type=ctx.task_type.value)
                     _trace = list(_pack.subgraph_trace)
                     _conflict_events = list(_pack.conflict_events)
-                    context_pack_trace_meta = {
+                    recall_pack_trace_meta = {
                         "mode": "ACTIVE",
                         "total_tokens": _pack.total_token_count,
                         "slot_count": len(_trace),
                         "conflict_events": len(_conflict_events),
                         "trace": _trace[:10],  # 最多记录 10 个槽位
                     }
-                    ctx.metadata["context_pack_trace"] = context_pack_trace_meta
+                    ctx.metadata["recall_pack_trace"] = recall_pack_trace_meta
                     if _conflict_events:
-                        ctx.audit_tags.append(f"CONTEXT_PACK_CONFLICT:{len(_conflict_events)}")
+                        ctx.audit_tags.append(f"RECALL_PACK_CONFLICT:{len(_conflict_events)}")
                     logger.debug(
-                        "[%s] ContextPackBuilder trace 完成 tokens=%d slots=%d",
+                        "[%s] RecallPackBuilder trace 完成 tokens=%d slots=%d",
                         ctx.request_id, _pack.total_token_count, len(_trace),
                     )
                 else:
-                    context_pack_trace_meta = {"mode": "SKIPPED_NO_RESULTS"}
+                    recall_pack_trace_meta = {"mode": "SKIPPED_NO_RESULTS"}
             except (ImportError, AttributeError):
-                context_pack_trace_meta = {"mode": "SKIPPED_NOT_WIRED"}
+                recall_pack_trace_meta = {"mode": "SKIPPED_NOT_WIRED"}
             except Exception as _cp_exc:
-                context_pack_trace_meta = {"mode": "DEGRADED", "error": str(_cp_exc)[:100]}
-                logger.warning("[%s] ContextPackBuilder trace 异常（降级）: %s", ctx.request_id, _cp_exc)
+                recall_pack_trace_meta = {"mode": "DEGRADED", "error": str(_cp_exc)[:100]}
+                logger.warning("[%s] RecallPackBuilder trace 异常（降级）: %s", ctx.request_id, _cp_exc)
 
-            ctx.recall_context_pack = {
+            ctx.recall_payload = {
                 "retrieval_summary": dict(orchestrator_result.retrieval_summary),
                 "retrieval_evidence_items": filtered_evidence_items,
                 "path": str(orchestrator_result.path),
@@ -775,17 +775,17 @@ class RecallFusionNode(ChainNode):
                 "evidence_count": len(filtered_evidence_items),
                 "retrieval_status": str(orchestrator_result.status),
                 "retrieval_path": str(orchestrator_result.path),
-                "context_pack_type": "RetrievalOrchestratorResult",
+                "recall_payload_type": "RetrievalOrchestratorResult",
                 "memory_guard": memory_guard_meta,
                 "context_compressor": context_compressor_meta,
                 "state_arbiter": state_arbiter_meta,
-                "context_pack_trace": context_pack_trace_meta,
+                "recall_pack_trace": recall_pack_trace_meta,
                 "circuit_breaker": {"state": _cb_state, "skipped": False},
             }
             ctx.metadata.setdefault("audit_refs", {})["memory_guard"] = memory_guard_meta
             ctx.metadata.setdefault("audit_refs", {})["context_compressor"] = context_compressor_meta
             ctx.metadata.setdefault("audit_refs", {})["state_arbiter"] = state_arbiter_meta
-            ctx.metadata.setdefault("audit_refs", {})["context_pack_trace"] = context_pack_trace_meta
+            ctx.metadata.setdefault("audit_refs", {})["recall_pack_trace"] = recall_pack_trace_meta
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:
@@ -816,7 +816,7 @@ class RecallFusionNode(ChainNode):
             )
             ctx.audit_tags.append("RECALL_DEGRADED_FALLBACK")
             recall_mode = "DEGRADED_FALLBACK"
-            evidence_empty = ctx.recall_context_pack in (None, "", [], {})
+            evidence_empty = ctx.recall_payload in (None, "", [], {})
             _cb_state_after = "UNKNOWN"
             if _circuit_breaker is not None:
                 try:
@@ -826,8 +826,8 @@ class RecallFusionNode(ChainNode):
             ctx.metadata["recall_fusion"] = {
                 "mode": recall_mode,
                 "evidence_empty": bool(evidence_empty),
-                "context_pack_type": (
-                    type(ctx.recall_context_pack).__name__ if ctx.recall_context_pack is not None else "none"
+                "recall_payload_type": (
+                    type(ctx.recall_payload).__name__ if ctx.recall_payload is not None else "none"
                 ),
                 "error": str(exc),
                 "circuit_breaker": {"state": _cb_state_after, "skipped": False},
@@ -2538,7 +2538,7 @@ class MainChain:
 
             # 提取 RecallFusionNode 的预召回结果（若有）
             _pre_recall: list[dict] | None = None
-            _recall_pack = ctx.recall_context_pack
+            _recall_pack = ctx.recall_payload
             if isinstance(_recall_pack, dict):
                 _items = _recall_pack.get("retrieval_evidence_items")
                 if isinstance(_items, list) and len(_items) > 0:

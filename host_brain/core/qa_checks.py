@@ -24,7 +24,7 @@ class WcanonSlotViolationResult:
     """check_wcanon_slot_violation() 的结构化返回值。"""
 
     violated: bool
-    """是否检测到 context_pack 分槽注入失败。"""
+    """是否检测到 prompt_context 分槽注入失败。"""
 
     slot_name: str
     """发生违规的分槽名称。"""
@@ -47,9 +47,9 @@ def check_wcanon_slot_violation(
     ledger: Any | None = None,
     request_id: str | None = None,
 ) -> WcanonSlotViolationResult:
-    """记录 context_pack 分槽注入失败告警（WCANON_SLOT_VIOLATION）。
+    """记录 prompt_context 分槽注入失败告警（WCANON_SLOT_VIOLATION）。
 
-    当 context_pack 的 world_canon_slot / semantic_slot 等分槽注入失败时调用，
+    当 prompt_context 的 world_canon_slot / semantic_slot 等分槽注入失败时调用，
     将告警写入 qa_violation 审计表，供监控系统捕获（F-33 / R113-1）。
 
     Args:
@@ -61,7 +61,7 @@ def check_wcanon_slot_violation(
     Returns:
         WcanonSlotViolationResult，含 violated=True 和详情。
     """
-    violation_detail = detail or f"context_pack slot injection failed: {slot_name}"
+    violation_detail = detail or f"prompt_context slot injection failed: {slot_name}"
 
     if ledger is not None and hasattr(ledger, "log_qa_violation"):
         ledger.log_qa_violation(

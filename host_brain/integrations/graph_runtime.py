@@ -9,6 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
 
+from host_brain.app.chat_runtime_input import (
+    get_chat_runtime_emotion_state,
+    get_chat_runtime_graph,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
 from host_brain.integrations.graph_contract import (
@@ -163,23 +167,8 @@ class GraphRuntimeContract:
             graph_config.get("policy_timeout_ms") or timeout_limit or DEFAULT_POLICY_TIMEOUT_MS
         )
         payload_dict = dict(payload or {})
-        payload_emotion_raw = payload_dict.get("emotion_context")
-        emotion_context: dict[str, Any] = {}
-        if isinstance(payload_emotion_raw, Mapping):
-            emotion_context = dict(payload_emotion_raw)
-        else:
-            top_level_mood = payload_dict.get("mood_state")
-            top_level_emotion = payload_dict.get("emotion_tag")
-            top_level_hint = payload_dict.get("emotion_range_hint")
-            if any(
-                str(value or "").strip()
-                for value in (top_level_mood, top_level_emotion, top_level_hint)
-            ):
-                emotion_context = {
-                    "mood_state": top_level_mood,
-                    "emotion_tag": top_level_emotion,
-                    "emotion_range_hint": top_level_hint,
-                }
+        graph_section = get_chat_runtime_graph(payload_dict)
+        emotion_context = get_chat_runtime_emotion_state(payload_dict)
         if emotion_context:
             emotion_context = {
                 "mood_state": str(emotion_context.get("mood_state") or "steady").strip().lower() or "steady",
@@ -224,8 +213,14 @@ class GraphRuntimeContract:
             "emotion_range_hint": emotion_range_hint,
             # M35-B：从 payload 提取 Governor 已编译的 committed_route_token
             # 由 fastapi_app.py 在 Governor 裁决后、调用 run_graph 前注入
-            "committed_route_token": str(payload_dict.get("committed_route_token") or "").strip() or None,
-            "committed_route_token_detail": payload_dict.get("committed_route_token_detail") or None,
+            "committed_route_token": str(
+                graph_section.get("committed_route_token") or payload_dict.get("committed_route_token") or ""
+            ).strip() or None,
+            "committed_route_token_detail": (
+                graph_section.get("committed_route_token_detail")
+                or payload_dict.get("committed_route_token_detail")
+                or None
+            ),
             # M35-A：透明子图节点执行追踪（初始为空列表）
             "subgraph_trace": [],
             # M36-C：双时钟字段初始化

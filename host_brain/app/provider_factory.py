@@ -11,6 +11,10 @@ import logging
 import os
 from typing import Any, Callable
 
+from host_brain.app.chat_runtime_input import (
+    get_chat_runtime_render_target_lang,
+    get_chat_runtime_user_message,
+)
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
@@ -22,7 +26,6 @@ from host_brain.app.prompt_builder import (
     CHAT_RENDER_NODE_ID,
     coerce_gateway_payload_json_text,
     extract_langchain_content_text,
-    infer_render_target_lang,
     render_host_generation_prompt,
     render_node_generation_prompt,
     repair_utf8_latin1_mojibake,
@@ -310,11 +313,9 @@ def build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[str
         runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
         if not isinstance(runtime_payload, dict):
             runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
-        user_message = _truncate_for_prompt(runtime_payload.get("user_message"), limit=120) or "你好"
+        user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=120) or "你好"
         if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
-            render_target_lang = str(runtime_payload.get("render_target_lang") or "").strip().lower()
-            if render_target_lang not in {"zh", "ja"}:
-                render_target_lang = infer_render_target_lang(user_message=user_message)
+            render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
             if render_target_lang == "zh":
                 text = f"收到，先给你一个中文草稿：{user_message}"
             else:

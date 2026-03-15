@@ -27,7 +27,7 @@ async def runtime_lifespan(
         from host_brain.app.dependencies import (
             get_main_chain,
             get_routing_matrix,
-            get_context_pack_builder,
+            get_recall_pack_builder,
             get_memory_guard,
             get_state_arbiter,
             get_distillation_engine,
@@ -37,7 +37,7 @@ async def runtime_lifespan(
         for name, factory in [
             ("main_chain", get_main_chain),
             ("routing_matrix", get_routing_matrix),
-            ("context_pack_builder", get_context_pack_builder),
+            ("recall_pack_builder", get_recall_pack_builder),
             ("memory_guard", get_memory_guard),
             ("state_arbiter", get_state_arbiter),
             ("distillation_engine", get_distillation_engine),

@@ -77,6 +77,129 @@ def _safe_json(text: Any) -> Any:
             return text
     return text
 
+
+def _voice_event_node_type(event_type: str) -> tuple[str, str]:
+    normalized = str(event_type or "").strip().upper()
+    if "TTS" in normalized:
+        return "tts", "TTS"
+    if "VTS" in normalized:
+        return "vts", "VTS"
+    if "ASR" in normalized:
+        return "asr", "ASR"
+    return "edge", (normalized or "Edge Voice")
+
+
+def _build_voice_trace_nodes(rows: List[Dict[str, Any]]) -> List[TraceNode]:
+    nodes: List[TraceNode] = []
+    ordered = sorted(
+        [dict(row) for row in rows if isinstance(row, dict)],
+        key=lambda row: (
+            int(row.get("ts_ms") or 0),
+            int(row.get("seq") or 0),
+            str(row.get("event_type") or ""),
+        ),
+    )
+    for idx, row in enumerate(ordered, start=1):
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        event_type = str(row.get("event_type") or "").strip()
+        node_type, display_name = _voice_event_node_type(event_type)
+        status = str(payload_dict.get("status") or row.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        reason_code = (
+            str(payload_dict.get("reason_code") or row.get("reason_code") or "").strip()
+            or None
+        )
+        latency_ms = payload_dict.get("latency_ms")
+        if latency_ms is None:
+            latency_ms = payload_dict.get("roundtrip_latency_ms")
+        if latency_ms is None:
+            latency_ms = payload_dict.get("roundtrip_ms")
+        try:
+            latency_ms = int(latency_ms) if latency_ms is not None else None
+        except (TypeError, ValueError):
+            latency_ms = None
+
+        output_data: Any = payload_dict if payload_dict else None
+        if output_data is None and row.get("detail"):
+            output_data = {"detail": row.get("detail")}
+        input_data = {
+            "event_type": event_type or None,
+            "direction": row.get("direction"),
+            "stage": row.get("stage"),
+            "seq": row.get("seq"),
+        }
+        if not any(value is not None for value in input_data.values()):
+            input_data = None
+
+        nodes.append(
+            TraceNode(
+                node_id=f"voice_{node_type}_{int(row.get('seq') or idx)}",
+                node_type=node_type,
+                display_name=display_name,
+                status=status,
+                latency_ms=latency_ms,
+                input_data=input_data,
+                output_data=output_data,
+                ts_ms=row.get("ts_ms"),
+                error=reason_code,
+            )
+        )
+    return nodes
+
+
+def _build_trace_edges(
+    existing_nodes: List[TraceNode],
+    existing_edges: List[TraceEdge],
+    appended_nodes: List[TraceNode],
+) -> List[TraceEdge]:
+    merged_edges = list(existing_edges)
+    if not appended_nodes:
+        return merged_edges
+
+    last_existing_node_id = None
+    if existing_nodes:
+        last_existing_node_id = str(existing_nodes[-1].node_id or "").strip() or None
+
+    if last_existing_node_id is not None:
+        merged_edges.append(
+            TraceEdge(
+                source=last_existing_node_id,
+                target=str(appended_nodes[0].node_id or ""),
+            )
+        )
+
+    for idx in range(len(appended_nodes) - 1):
+        merged_edges.append(
+            TraceEdge(
+                source=str(appended_nodes[idx].node_id or ""),
+                target=str(appended_nodes[idx + 1].node_id or ""),
+            )
+        )
+    return merged_edges
+
+
+def _coalesce_trace_status(base_status: str, nodes: List[TraceNode]) -> str:
+    normalized_base = str(base_status or "OK").strip().upper() or "OK"
+    success_statuses = {
+        "OK",
+        "UP",
+        "APPLIED",
+        "ACCEPTED",
+        "QUEUED",
+        "STARTED",
+        "PLAYING",
+        "SUCCESS",
+        "SKIPPED",
+    }
+    for node in nodes:
+        node_status = str(node.status or "").strip().upper()
+        if not node_status or node_status in success_statuses:
+            continue
+        if normalized_base == "FAIL":
+            return normalized_base
+        return "DEGRADED"
+    return normalized_base
+
 def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
     """根据最近 window 条调用记录计算节点健康状态。"""
     if not rows:
@@ -472,7 +595,7 @@ async def get_trace(request_id: str):
         )
 
     # 2) 解析完整链路（fetch_by_request_id 已通过 _decode_row 自动反序列化 JSON 字段）
-    row_dict = trace_rows[0]
+    row_dict = trace_rows[-1]
     nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
     edges_raw = _safe_json(row_dict.get("edges_json")) or []
 
@@ -494,12 +617,21 @@ async def get_trace(request_id: str):
 
     edges = [TraceEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw]
 
+    try:
+        voice_rows = ledger.fetch_by_request_id("voice_event_log", request_id)
+    except Exception:
+        voice_rows = []
+    voice_nodes = _build_voice_trace_nodes(voice_rows)
+    edges = _build_trace_edges(nodes, edges, voice_nodes)
+    nodes.extend(voice_nodes)
+    trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+
     return TraceResponse(
         request_id=request_id,
         session_id=row_dict.get("session_id"),
-        status=row_dict.get("status", "OK"),
+        status=trace_status,
         total_latency_ms=row_dict.get("total_latency_ms"),
-        node_count=row_dict.get("node_count", len(nodes)),
+        node_count=len(nodes),
         nodes=nodes,
         edges=edges,
         ts_ms=row_dict.get("ts_ms", _now_ms()),
@@ -2390,53 +2522,53 @@ async def get_input_dispatch_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-49: GET /obs/context-pack/stats  — ContextPack token 预算统计
+# TODO-49: GET /obs/recall-pack/stats  — RecallPack token 预算统计
 # ---------------------------------------------------------------------------
-class ContextPackSlotItem(BaseModel):
+class RecallPackSlotItem(BaseModel):
     slot: str
     avg_tokens: float
     truncation_rate: Optional[float]
     conflict_suppressed_count: int
 
-class ContextPackStatsResponse(BaseModel):
+class RecallPackStatsResponse(BaseModel):
     window_minutes: int
     total_packs: int
     avg_total_tokens: Optional[float]
     truncation_rate: Optional[float]
     conflict_rate: Optional[float]
-    slots: List[ContextPackSlotItem]
+    slots: List[RecallPackSlotItem]
     timestamp: int
 
-@router.get("/context-pack/stats", response_model=ContextPackStatsResponse)
-async def get_context_pack_stats(
+@router.get("/recall-pack/stats", response_model=RecallPackStatsResponse)
+async def get_recall_pack_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-49: ContextPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
+    """TODO-49: RecallPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # 从 error_log 中查询 CONTEXT_PACK_TRACE 阶段的记录（由 RecallFusionNode 写入）
+    # Read recall-pack traces from audit/error storage.
     try:
         rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
         pack_rows = [
             r for r in rows
-            if str(r.get("stage") or "").upper() in ("CONTEXT_PACK_TRACE", "RECALL_FUSION")
+            if str(r.get("stage") or "").upper() in ("RECALL_PACK_TRACE", "RECALL_FUSION")
             and r.get("detail")
         ]
     except Exception:
         pack_rows = []
 
-    # 兼容 context_pack_log 表名
+    # Read from the dedicated recall-pack log table when present.
     if not pack_rows:
         try:
-            pack_rows = ledger.fetch_by_time_range("context_pack_log", start_ms=since_ms, end_ms=now)
+            pack_rows = ledger.fetch_by_time_range("recall_pack_log", start_ms=since_ms, end_ms=now)
         except Exception:
             pack_rows = []
 
     total_packs = len(pack_rows)
     if total_packs == 0:
-        return ContextPackStatsResponse(
+        return RecallPackStatsResponse(
             window_minutes=window_minutes,
             total_packs=0,
             avg_total_tokens=None,
@@ -2485,7 +2617,7 @@ async def get_context_pack_stats(
     conflict_rate = round(conflict_pack_count / total_packs * 100, 1) if total_packs > 0 else None
 
     slots = [
-        ContextPackSlotItem(
+        RecallPackSlotItem(
             slot=slot_name,
             avg_tokens=round(sum(tokens) / len(tokens), 1) if tokens else 0.0,
             truncation_rate=round(slot_truncated.get(slot_name, 0) / len(tokens) * 100, 1) if tokens else None,
@@ -2494,7 +2626,7 @@ async def get_context_pack_stats(
         for slot_name, tokens in sorted(slot_tokens.items())
     ]
 
-    return ContextPackStatsResponse(
+    return RecallPackStatsResponse(
         window_minutes=window_minutes,
         total_packs=total_packs,
         avg_total_tokens=avg_total_tokens,

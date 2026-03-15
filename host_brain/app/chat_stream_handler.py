@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import string
 import time
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
@@ -33,6 +34,13 @@ from host_brain.app.emotion_context import (
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
+from host_brain.app.chat_runtime_input import (
+    ChatRuntimeInput,
+    build_chat_runtime_input,
+    get_chat_runtime_prompt_context_observability,
+    get_chat_runtime_prompt_context_validation,
+    get_chat_runtime_emotion_snapshot,
+)
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     SCENE_CHAT,
@@ -45,9 +53,14 @@ from host_brain.app.graph_config_builder import (
 # 修复审计问题 #1：模块级别名，供 _sse_event_generator 调用（可被测试 mock）
 # 测试通过 monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", ...) 替换此引用
 resolve_host_llm_runtime = resolve_host_llm_runtime_async  # noqa: F811
-from host_brain.app.observability_persist import persist_chat_episodic_memory
+from host_brain.app.observability_persist import (
+    persist_chat_episodic_memory,
+    persist_chat_observability_rows,
+)
 from host_brain.app.prompt_builder import (
     _truncate_for_prompt,
+    extract_gateway_narrative,
+    extract_json_object_from_text,
     infer_render_target_lang,
     repair_utf8_latin1_mojibake,
 )
@@ -78,22 +91,22 @@ _CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 # ---------------------------------------------------------------------------
 
 
-def _log_context_pack_observability(
+def _log_prompt_context_observability(
     *,
     request_id: str,
     session_id: str,
-    context_pack_observability: Mapping[str, Any],
+    prompt_context_observability: Mapping[str, Any],
 ) -> None:
-    if not isinstance(context_pack_observability, Mapping) or not context_pack_observability:
+    if not isinstance(prompt_context_observability, Mapping) or not prompt_context_observability:
         return
 
-    selected_tier = str(context_pack_observability.get("selected_tier") or "").strip()
-    selected_reason = str(context_pack_observability.get("selected_reason") or "").strip()
-    retrieval_metrics_raw = context_pack_observability.get("retrieval_metrics")
+    selected_tier = str(prompt_context_observability.get("selected_tier") or "").strip()
+    selected_reason = str(prompt_context_observability.get("selected_reason") or "").strip()
+    retrieval_metrics_raw = prompt_context_observability.get("retrieval_metrics")
     retrieval_metrics = dict(retrieval_metrics_raw) if isinstance(retrieval_metrics_raw, Mapping) else {}
-    source_stats_raw = context_pack_observability.get("source_stats")
+    source_stats_raw = prompt_context_observability.get("source_stats")
     source_stats = dict(source_stats_raw) if isinstance(source_stats_raw, Mapping) else {}
-    slot_counts_raw = context_pack_observability.get("slot_item_counts")
+    slot_counts_raw = prompt_context_observability.get("slot_item_counts")
     slot_counts = dict(slot_counts_raw) if isinstance(slot_counts_raw, Mapping) else {}
 
     _logger.info(
@@ -113,7 +126,7 @@ def _log_context_pack_observability(
             "retrieval_used_items": source_stats.get("retrieval_used_items"),
             "retrieval_trimmed_items": source_stats.get("retrieval_trimmed_items"),
             "context_slot_counts": slot_counts,
-            "context_size_chars": context_pack_observability.get("context_size_chars"),
+            "context_size_chars": prompt_context_observability.get("context_size_chars"),
         },
     )
 
@@ -125,8 +138,40 @@ def _log_context_pack_observability(
                 "session_id": session_id,
                 "selected_tier": selected_tier,
                 "selected_reason": selected_reason or None,
-                "degrade_order": list(context_pack_observability.get("degrade_order") or []),
+                "degrade_order": list(prompt_context_observability.get("degrade_order") or []),
             },
+        )
+
+
+def _log_stream_voice_event(
+    *,
+    request_id: str,
+    session_id: str,
+    seq: int,
+    event_type: str,
+    summary: Mapping[str, Any],
+    stage: str,
+) -> None:
+    try:
+        get_ledger().log_voice_event(
+            {
+                "request_id": request_id,
+                "session_id": session_id,
+                "event_type": event_type,
+                "direction": "host_to_edge",
+                "seq": seq,
+                "status": str(summary.get("status") or "UNKNOWN"),
+                "reason_code": summary.get("reason_code"),
+                "stage": stage,
+                "payload": dict(summary),
+                "detail": str(summary.get("detail") or "").strip() or None,
+                "ts_ms": int(time.time() * 1000),
+            }
+        )
+    except Exception as exc:
+        _logger.debug(
+            "stream voice event persistence skipped",
+            extra={"request_id": request_id, "event_type": event_type, "error": str(exc)},
         )
 
 
@@ -162,98 +207,110 @@ def _resolve_stream_style_bindings(
     }
 
 
+def _decode_partial_json_string(raw_text: str) -> str:
+    if not raw_text:
+        return ""
+    out: list[str] = []
+    idx = 0
+    while idx < len(raw_text):
+        ch = raw_text[idx]
+        if ch != "\\":
+            out.append(ch)
+            idx += 1
+            continue
+        if idx + 1 >= len(raw_text):
+            break
+        nxt = raw_text[idx + 1]
+        if nxt == "u":
+            if idx + 6 <= len(raw_text):
+                hex_value = raw_text[idx + 2 : idx + 6]
+                if all(part in string.hexdigits for part in hex_value):
+                    out.append(chr(int(hex_value, 16)))
+                    idx += 6
+                    continue
+            break
+        mapped = {
+            '"': '"',
+            "\\": "\\",
+            "/": "/",
+            "b": "\b",
+            "f": "\f",
+            "n": "\n",
+            "r": "\r",
+            "t": "\t",
+        }.get(nxt)
+        out.append(mapped if mapped is not None else nxt)
+        idx += 2
+    return "".join(out)
+
+
+def _extract_stream_render_text(raw_text: str) -> str:
+    normalized = str(raw_text or "")
+    if not normalized:
+        return ""
+    stripped = normalized.lstrip()
+    token = '"text":"'
+    marker = stripped.find(token)
+    if marker < 0:
+        for prefix_marker in ('{"narrative"', '{\\"narrative\\"', '[{"narrative"', '[{\\"narrative\\"'):
+            prefix_index = stripped.find(prefix_marker)
+            if prefix_index > 0:
+                visible_prefix = stripped[:prefix_index].rstrip()
+                if visible_prefix:
+                    return repair_utf8_latin1_mojibake(visible_prefix)
+        if stripped.startswith("{"):
+            return ""
+        return repair_utf8_latin1_mojibake(normalized)
+
+    cursor = marker + len(token)
+    collected: list[str] = []
+    escaped = False
+    while cursor < len(stripped):
+        ch = stripped[cursor]
+        if ch == '"' and not escaped:
+            break
+        collected.append(ch)
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        cursor += 1
+    return repair_utf8_latin1_mojibake(_decode_partial_json_string("".join(collected)))
+
+
 async def _build_stream_chat_prompt(
     *,
-    message: str,
-    session_id: str,
-    thread_id: Optional[str],
-    mood_state: Optional[str],
-    emotion_tag: Optional[str],
-    request_id: str,
-    ts_ms: int,
-    retrieval_summary: Dict[str, Any] | None = None,
-    retrieval_evidence_items: list[dict[str, Any]] | None = None,
-    emotion_context_override: Dict[str, Any] | None = None,
-    emotion_snapshot_override: Dict[str, Any] | None = None,
-    cpb_slots: Dict[str, Any] | None = None,
+    runtime_input: ChatRuntimeInput,
 ) -> tuple[str, str, dict, dict, dict[str, Any]]:
     """构建流式聊天的 prompt、system_prompt 和生成参数。
 
     返回: (prompt_text, system_prompt, gen_params, emotion_context, prompt_meta)
     """
 
-    class _StreamReq:
-        def __init__(self) -> None:
-            self.message = message
-            self.session_id = session_id
-            self.thread_id = thread_id
-            self.mood_state = mood_state
-            self.emotion_tag = emotion_tag
-            self.emotion_intensity = None
-            self.emotion_range_hint = None
-            self.emotion_context = None
-            self.scene_type = None
-            self.intent_draft = None
-
-    resolved_emotion_context: Dict[str, Any]
-    if isinstance(emotion_context_override, dict):
-        resolved_emotion_context = dict(emotion_context_override)
-    else:
-        request_body = _StreamReq()
-        resolved_emotion_context = resolve_chat_emotion_context(request_body=request_body)
-    resolved_emotion_snapshot = (
-        dict(emotion_snapshot_override)
-        if isinstance(emotion_snapshot_override, dict)
-        else build_chat_emotion_snapshot(
-            emotion_context=resolved_emotion_context,
-            source="stream_prompt",
-            ts_ms=ts_ms,
-        )
-    )
+    resolved_emotion_context = dict(runtime_input.emotion_state)
 
     from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        build_chat_generation_prompt_payload as _build_payload,
-        build_node_style_bindings as _build_style,
+        build_chat_runtime_payload as _build_runtime_payload,
     )
     from host_brain.app.prompt_builder import (  # noqa: PLC0415
         render_node_generation_prompt,
         _build_node_role_instruction,
     )
 
-    render_target_lang = infer_render_target_lang(user_message=message)
-    node_style_bindings = _resolve_stream_style_bindings(
-        node_style_bindings=_build_style(render_target_lang=render_target_lang),
-        render_target_lang=render_target_lang,
-    )
-
-    prompt_payload = _build_payload(
-        request_id=request_id,
-        session_id=session_id,
-        thread_id=thread_id,
-        user_message=message,
-        render_target_lang=render_target_lang,
-        retrieval_summary=retrieval_summary or {"status": "SKIPPED", "reason_code": "SSE_STREAM_MODE"},
-        retrieval_evidence_items=retrieval_evidence_items or [],
-        style_bindings=node_style_bindings,
-        emotion_context=resolved_emotion_context if resolved_emotion_context else None,
-        emotion_snapshot=resolved_emotion_snapshot,
-        cpb_slots=cpb_slots,
-    )
+    render_target_lang = str(runtime_input.render_target_lang).strip().lower() or "ja"
+    prompt_payload = _build_runtime_payload(runtime_input=runtime_input)
     if resolved_emotion_context:
         prompt_payload = adjust_gen_params_for_emotion(prompt_payload, resolved_emotion_context)
 
     gen_params = dict(prompt_payload.get("gen_params") or {})
-    runtime_payload = prompt_payload.get("input") or dict(prompt_payload)
-    runtime_payload_for_node = dict(runtime_payload)
-    runtime_payload_for_node["render_target_lang"] = render_target_lang
     prompt_text = render_node_generation_prompt(
         node_id=CHAT_DIRECT_NODE_ID,
-        runtime_payload=runtime_payload_for_node,
+        runtime_payload=prompt_payload,
     )
     prompt_meta = {
-        "context_pack_validation": dict(prompt_payload.get("context_pack_validation") or {}),
-        "context_pack_observability": dict(prompt_payload.get("context_pack_observability") or {}),
-        "emotion_snapshot": dict(prompt_payload.get("emotion_snapshot") or {}),
+        "prompt_context_validation": get_chat_runtime_prompt_context_validation(prompt_payload),
+        "prompt_context_observability": get_chat_runtime_prompt_context_observability(prompt_payload),
+        "emotion_snapshot": get_chat_runtime_emotion_snapshot(prompt_payload),
     }
     system_prompt = _build_node_role_instruction(
         CHAT_DIRECT_NODE_ID,
@@ -329,7 +386,7 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return bool(default)
 
 
-_CONTEXT_PACK_SLOT_ALIASES: dict[str, str] = {
+_RECALL_PACK_SLOT_ALIASES: dict[str, str] = {
     "world": "world_canon",
     "world_canon": "world_canon",
     "style": "style_canon",
@@ -348,7 +405,7 @@ _CONTEXT_PACK_SLOT_ALIASES: dict[str, str] = {
     "ledger": "sqlite_ledger",
 }
 
-_CONTEXT_PACK_SLOT_TO_STORE_ID: dict[str, str] = {
+_RECALL_PACK_SLOT_TO_STORE_ID: dict[str, str] = {
     "world_canon": "world_canon",
     "style_canon": "style_canon",
     "episodic_vector": "episodic_vector",
@@ -359,28 +416,28 @@ _CONTEXT_PACK_SLOT_TO_STORE_ID: dict[str, str] = {
 }
 
 
-def _normalize_context_pack_slot(
+def _normalize_recall_pack_slot(
     *,
     slot_hint: str,
     source_ref: str,
 ) -> str | None:
     normalized_hint = str(slot_hint or "").strip().lower()
     if normalized_hint:
-        direct = _CONTEXT_PACK_SLOT_ALIASES.get(normalized_hint)
+        direct = _RECALL_PACK_SLOT_ALIASES.get(normalized_hint)
         if direct:
             return direct
 
     normalized_source_ref = str(source_ref or "").strip().lower()
     if not normalized_source_ref:
         return None
-    for alias, slot in _CONTEXT_PACK_SLOT_ALIASES.items():
+    for alias, slot in _RECALL_PACK_SLOT_ALIASES.items():
         token = f"{alias}://"
         if normalized_source_ref.startswith(token):
             return slot
     return None
 
 
-def _build_context_pack_recall_results(
+def _build_recall_pack_inputs(
     retrieval_evidence_items: list[dict[str, Any]],
 ) -> dict[str, str]:
     recall_results: dict[str, str] = {}
@@ -390,7 +447,7 @@ def _build_context_pack_recall_results(
 
         metadata_raw = item.get("metadata")
         metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
-        slot = _normalize_context_pack_slot(
+        slot = _normalize_recall_pack_slot(
             slot_hint=str(
                 item.get("slot_name")
                 or item.get("source")
@@ -422,32 +479,32 @@ def _build_context_pack_recall_results(
     return recall_results
 
 
-def _context_pack_to_retrieval_evidence_items(context_pack: Any) -> list[dict[str, Any]]:
-    from host_brain.app.schemas.context_pack import TRUNCATION_PRIORITY  # noqa: PLC0415
+def _recall_pack_to_retrieval_evidence_items(recall_pack: Any) -> list[dict[str, Any]]:
+    from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
 
     rewritten: list[dict[str, Any]] = []
-    for slot_name in TRUNCATION_PRIORITY:
-        slot = context_pack.get_slot(slot_name)
+    for slot_name in RECALL_SLOT_PRIORITY:
+        slot = recall_pack.get_slot(slot_name)
         if slot is None:
             continue
         content = str(getattr(slot, "content", "") or "").strip()
         if not content:
             continue
 
-        store_id = _CONTEXT_PACK_SLOT_TO_STORE_ID.get(slot_name, slot_name)
+        store_id = _RECALL_PACK_SLOT_TO_STORE_ID.get(slot_name, slot_name)
         rewritten.append(
             {
                 "slot_name": slot_name,
                 "source": slot_name,
                 "store_id": store_id,
-                "evidence_ref": f"context_pack://{slot_name}",
-                "source_ref": f"{slot_name}://context_pack_builder",
+                "evidence_ref": f"recall_pack://{slot_name}",
+                "source_ref": f"{slot_name}://recall_pack_builder",
                 "snippet": _truncate_for_prompt(content, limit=240),
                 "content": content,
                 "text": content,
                 "metadata": {
                     "store_id": store_id,
-                    "source": "context_pack_builder",
+                    "source": "recall_pack_builder",
                     "truncated": bool(getattr(slot, "truncated", False)),
                     "conflict_suppressed": bool(getattr(slot, "conflict_suppressed", False)),
                 },
@@ -1182,81 +1239,90 @@ async def _sse_event_generator(
             return
 
         # ── 6. 构建 prompt（已注入 Retrieval + Emotion 上下文）───────────
-        # [选项二] 接入 ContextPackBuilder：将召回结果组装为 ContextPack，执行 token 预算控制
-        context_pack_builder_summary: dict[str, Any] = {}
-        _cpb_slots: dict[str, Any] = {}
+        # Option 2: build an internal RecallPack from recall results with token budgeting.
+        recall_pack_builder_summary: dict[str, Any] = {}
+        _recall_slot_text: dict[str, Any] = {}
         try:
-            from host_brain.app.dependencies import get_context_pack_builder  # noqa: PLC0415
-            _cpb = get_context_pack_builder()
+            from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
+            _cpb = get_recall_pack_builder()
             _evidence_items = list(retrieval_evidence_items or [])
-            _recall_results = _build_context_pack_recall_results(_evidence_items)
-            _context_pack_active = _parse_bool_env("HOST_CONTEXT_PACK_ACTIVE", default=True)
+            _recall_results = _build_recall_pack_inputs(_evidence_items)
+            _recall_pack_active = _parse_bool_env("HOST_RECALL_PACK_ACTIVE", default=True)
             if _recall_results:
                 _cp = _cpb.build(recall_results=_recall_results, task_type="chat")
-                _rewritten_items = _context_pack_to_retrieval_evidence_items(_cp)
+                _rewritten_items = _recall_pack_to_retrieval_evidence_items(_cp)
                 _applied_to_prompt = False
-                if _context_pack_active and _rewritten_items:
+                if _recall_pack_active and _rewritten_items:
                     retrieval_evidence_items = _rewritten_items
                     _applied_to_prompt = True
-                # 提取 CPB 的 slot 内容，供 build_chat_context_pack 直接使用，
-                # 统一两套 context_pack 构建路径（避免 slot 分配被覆盖）
-                if _context_pack_active:
-                    from host_brain.app.schemas.context_pack import TRUNCATION_PRIORITY  # noqa: PLC0415
-                    for _slot_name in TRUNCATION_PRIORITY:
+                # Extract RecallPack slot text for prompt-facing context-pack assembly,
+                # 统一 prompt_context 构建路径（避免 slot 分配被覆盖）
+                if _recall_pack_active:
+                    from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
+                    for _slot_name in RECALL_SLOT_PRIORITY:
                         _slot = _cp.get_slot(_slot_name)
                         if _slot and str(getattr(_slot, "content", "") or "").strip():
-                            _cpb_slots[_slot_name] = str(_slot.content).strip()
-                context_pack_builder_summary = {
+                            _recall_slot_text[_slot_name] = str(_slot.content).strip()
+                recall_pack_builder_summary = {
                     "status": "OK",
                     "mode": ("ACTIVE" if _applied_to_prompt else "SHADOW"),
-                    "active_enabled": _context_pack_active,
+                    "active_enabled": _recall_pack_active,
                     "applied_to_prompt": _applied_to_prompt,
                     "rewritten_item_count": len(_rewritten_items),
                     "input_item_count": len(_evidence_items),
                     "total_tokens": _cp.total_token_count,
-                    "slot_count": len([s for s in _cp.slots.values() if s and s.content]),
+                    "slot_count": len(
+                        [
+                            _slot_name
+                            for _slot_name in RECALL_SLOT_PRIORITY
+                            if (_slot := _cp.get_slot(_slot_name)) and str(getattr(_slot, "content", "") or "").strip()
+                        ]
+                    ),
                     "conflict_events": len(_cp.conflict_events),
                     "subgraph_trace_count": len(_cp.subgraph_trace),
-                    "cpb_slots_injected": list(_cpb_slots.keys()),
+                    "recall_slot_text_injected": list(_recall_slot_text.keys()),
                 }
             else:
-                context_pack_builder_summary = {
+                recall_pack_builder_summary = {
                     "status": "SKIPPED",
                     "mode": "SHADOW",
-                    "active_enabled": _context_pack_active,
+                    "active_enabled": _recall_pack_active,
                     "reason_code": "NO_RECALL_RESULTS",
                     "input_item_count": len(_evidence_items),
                 }
         except Exception as _cpb_exc:
-            context_pack_builder_summary = {"status": "DEGRADED", "reason": str(_cpb_exc)}
+            recall_pack_builder_summary = {"status": "DEGRADED", "reason": str(_cpb_exc)}
             _logger.debug(
-                "ContextPackBuilder 调用失败（降级）: %s",
+                "RecallPackBuilder 调用失败（降级）: %s",
                 _cpb_exc,
                 extra={"request_id": request_id},
             )
 
-        prompt_build_result = await _build_stream_chat_prompt(
-            message=resolved_message,
+        render_target_lang = infer_render_target_lang(user_message=resolved_message)
+        runtime_input = build_chat_runtime_input(
+            request_id=request_id,
             session_id=session_id,
             thread_id=thread_id,
-            mood_state=mood_state,
-            emotion_tag=emotion_tag,
-            request_id=request_id,
-            ts_ms=ts_ms,
-            retrieval_summary=retrieval_summary,
-            retrieval_evidence_items=retrieval_evidence_items,
-            emotion_context_override=emotion_context,
-            emotion_snapshot_override=emotion_snapshot,
-            cpb_slots=_cpb_slots if _cpb_slots else None,
+            user_message=resolved_message,
+            render_target_lang=render_target_lang,
+            retrieval_summary=retrieval_summary or {"status": "SKIPPED", "reason_code": "SSE_STREAM_MODE"},
+            retrieval_evidence_items=retrieval_evidence_items or [],
+            emotion_state=emotion_context if emotion_context else None,
+            emotion_snapshot=emotion_snapshot,
+            recall_slot_text=_recall_slot_text if _recall_slot_text else None,
+            scene_type=scene_type,
         )
-        context_pack_validation: dict[str, Any] = {}
-        context_pack_observability: dict[str, Any] = {}
+        prompt_build_result = await _build_stream_chat_prompt(
+            runtime_input=runtime_input,
+        )
+        prompt_context_validation: dict[str, Any] = {}
+        prompt_context_observability: dict[str, Any] = {}
         emotion_snapshot_for_audit: dict[str, Any] = dict(emotion_snapshot)
         if len(prompt_build_result) >= 5:
             prompt_text, system_prompt, gen_params, _, prompt_meta = prompt_build_result
             if isinstance(prompt_meta, Mapping):
-                context_pack_validation = dict(prompt_meta.get("context_pack_validation") or {})
-                context_pack_observability = dict(prompt_meta.get("context_pack_observability") or {})
+                prompt_context_validation = dict(prompt_meta.get("prompt_context_validation") or {})
+                prompt_context_observability = dict(prompt_meta.get("prompt_context_observability") or {})
                 emotion_snapshot_for_audit = dict(prompt_meta.get("emotion_snapshot") or emotion_snapshot)
         else:
             prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
@@ -1282,15 +1348,16 @@ async def _sse_event_generator(
                 )
         except Exception:
             pass
-        _log_context_pack_observability(
+        _log_prompt_context_observability(
             request_id=request_id,
             session_id=session_id,
-            context_pack_observability=context_pack_observability,
+            prompt_context_observability=prompt_context_observability,
         )
 
         # ── 7. 流式生成 + SentenceSplitter ───────────────────────────────
         splitter = SentenceSplitter()
         full_text = ""
+        rendered_text = ""
         sentence_index = 0
         llm_stream_started_ms = int(time.time() * 1000)
 
@@ -1307,16 +1374,70 @@ async def _sse_event_generator(
             if first_token_latency_ms is None:
                 first_token_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
             full_text += chunk
-            yield _sse({"phase": "RENDER", "chunk": chunk})
+            visible_text = _extract_stream_render_text(full_text)
+            if not visible_text:
+                continue
+            if visible_text.startswith(rendered_text):
+                render_chunk = visible_text[len(rendered_text):]
+            else:
+                render_chunk = visible_text
+            if not render_chunk:
+                continue
+            rendered_text = visible_text
+            yield _sse({"phase": "RENDER", "chunk": render_chunk})
 
             # 句子边界检测
-            for sentence in splitter.feed(chunk):
+            for sentence in splitter.feed(render_chunk):
                 yield _sse({
                     "phase": "SENTENCE",
                     "sentence": sentence,
                     "sentence_index": sentence_index,
                 })
                 sentence_index += 1
+
+        # ── 8-10. 后处理并行执行：Airlock / Episodic / Bond / VTS ──────────
+        # 四个步骤之间无数据依赖，使用 asyncio.gather 并行执行，
+        # 总延迟 = max(各步骤延迟) 而非各步骤之和，减少 COMMIT 前等待时间。
+        narrative = repair_utf8_latin1_mojibake(full_text) or "系统有点忙，请稍后再试。"
+        raw_narrative = repair_utf8_latin1_mojibake(full_text)
+        if rendered_text.strip():
+            narrative = repair_utf8_latin1_mojibake(rendered_text)
+        llm_intent_draft: dict[str, Any] = {}
+        llm_contract_payload: dict[str, Any] = {}
+        try:
+            llm_contract_payload = extract_json_object_from_text(raw_narrative or narrative)
+            extracted_narrative = extract_gateway_narrative(llm_contract_payload)
+            if extracted_narrative:
+                narrative = extracted_narrative
+            intent_draft_raw = llm_contract_payload.get("intent_draft")
+            if isinstance(intent_draft_raw, Mapping):
+                llm_intent_draft = dict(intent_draft_raw)
+        except Exception:
+            if rendered_text.strip():
+                narrative = repair_utf8_latin1_mojibake(rendered_text)
+                llm_contract_payload = {
+                    "narrative": {"text": narrative},
+                    "intent_draft": {},
+                    "meta": {"draft_only": True, "salvaged_from_stream": True},
+                }
+            else:
+                llm_contract_payload = {}
+        if narrative:
+            final_visible_text = repair_utf8_latin1_mojibake(narrative)
+            if final_visible_text.startswith(rendered_text):
+                trailing_render_chunk = final_visible_text[len(rendered_text):]
+            else:
+                trailing_render_chunk = final_visible_text
+            if trailing_render_chunk:
+                rendered_text = final_visible_text
+                yield _sse({"phase": "RENDER", "chunk": trailing_render_chunk})
+                for sentence in splitter.feed(trailing_render_chunk):
+                    yield _sse({
+                        "phase": "SENTENCE",
+                        "sentence": sentence,
+                        "sentence_index": sentence_index,
+                    })
+                    sentence_index += 1
 
         # flush 剩余未成句文本
         remainder = splitter.flush()
@@ -1327,11 +1448,44 @@ async def _sse_event_generator(
                 "sentence_index": sentence_index,
             })
             sentence_index += 1
-
-        # ── 8-10. 后处理并行执行：Airlock / Episodic / Bond / VTS ──────────
-        # 四个步骤之间无数据依赖，使用 asyncio.gather 并行执行，
-        # 总延迟 = max(各步骤延迟) 而非各步骤之和，减少 COMMIT 前等待时间。
-        narrative = repair_utf8_latin1_mojibake(full_text) or "系统有点忙，请稍后再试。"
+        llm_total_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
+        llm_status = "OK" if narrative.strip() else "DEGRADED"
+        llm_reason_code = None if narrative.strip() else "LLM_EMPTY_OUTPUT"
+        llm_summary: dict[str, Any] = {
+            "status": llm_status,
+            "reason_code": llm_reason_code,
+            "provider": provider_name,
+            "model_id": model_id,
+            "route_target": str(llm_runtime.get("route_target") or "cloud"),
+            "route_reason_code": str(llm_runtime.get("route_reason_code") or ""),
+            "emotion_snapshot": emotion_snapshot_for_audit,
+            "prompt_context_validation": prompt_context_validation,
+            "prompt_context_observability": prompt_context_observability,
+            "latency_ms": llm_total_latency_ms,
+            "intent_draft": llm_intent_draft,
+            "node_count": 1,
+            "nodes": [
+                {
+                    "node_id": CHAT_DIRECT_NODE_ID,
+                    "status": llm_status,
+                    "reason_code": llm_reason_code,
+                    "provider": provider_name,
+                    "model_id": model_id,
+                    "latency_ms": llm_total_latency_ms,
+                    "input": {
+                        "user_message": resolved_message,
+                        "render_target_lang": render_target_lang,
+                        "retrieval_status": retrieval_summary.get("status"),
+                        "prompt_context_validation": prompt_context_validation,
+                    },
+                    "output": {
+                        "narrative": narrative,
+                        "contract_payload": llm_contract_payload,
+                        "emotion_snapshot": emotion_snapshot_for_audit,
+                    },
+                }
+            ],
+        }
 
         _post_started_ms = int(time.time() * 1000)
 
@@ -1475,11 +1629,48 @@ async def _sse_event_generator(
             _run_tts(),
         )
 
+        _log_stream_voice_event(
+            request_id=request_id,
+            session_id=session_id,
+            seq=1,
+            event_type="HOST_STREAM_VTS",
+            summary=vts_summary,
+            stage="S_EDGE_VTS",
+        )
+        _log_stream_voice_event(
+            request_id=request_id,
+            session_id=session_id,
+            seq=2,
+            event_type="HOST_STREAM_TTS",
+            summary=tts_summary,
+            stage="S_EDGE_TTS",
+        )
+
+        _obs_persist_started_ms = int(time.time() * 1000)
+        obs_persist_latency_ms = 0
+        try:
+            persist_chat_observability_rows(
+                ledger=get_ledger(),
+                request_id=request_id,
+                session_id=session_id,
+                llm_summary=llm_summary,
+                ts_ms=ts_ms,
+                fallback_reason_code=str(llm_summary.get("route_reason_code") or "") or None,
+            )
+        except Exception as exc:
+            _logger.warning(
+                "stream chat observability persistence failed",
+                extra={"request_id": request_id, "error": str(exc)},
+            )
+        finally:
+            obs_persist_latency_ms = max(0, int(time.time() * 1000) - _obs_persist_started_ms)
+
         background_tasks_total_ms = max(0, int(time.time() * 1000) - _post_started_ms)
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
             "first_token_latency_ms": first_token_latency_ms,
             "background_tasks_latency_ms": {
+                "observability_persist_ms": obs_persist_latency_ms,
                 "airlock_ingress_ms": airlock_latency_ms,
                 "episodic_memory_ms": episodic_latency_ms,
                 "vts_emotion_ms": vts_latency_ms,
@@ -1501,36 +1692,28 @@ async def _sse_event_generator(
             model_id=model_id,
             sys_mode=str(llm_runtime.get("sys_mode") or ""),
         )
+        llm_summary["route_decision"] = route_decision
         yield _sse({
             "phase": "COMMIT",
             "done": True,
             "decision": "APPROVE",
             "narrative": narrative,
+            "intent_draft": llm_intent_draft,
             "request_id": request_id,
             "audit_refs": {
                 "intent_id": intent_id,
                 "retrieval": retrieval_summary,
-                "llm": {
-                    "status": "OK",
-                    "provider": provider_name,
-                    "model_id": model_id,
-                    "route_target": str(llm_runtime.get("route_target") or "cloud"),
-                    "route_reason_code": str(llm_runtime.get("route_reason_code") or ""),
-                    "route_decision": route_decision,
-                    "emotion_snapshot": emotion_snapshot_for_audit,
-                    "context_pack_validation": context_pack_validation,
-                    "context_pack_observability": context_pack_observability,
-                },
+                "llm": llm_summary,
                 "route_decision": route_decision,
                 "emotion_snapshot": emotion_snapshot_for_audit,
-                "context_pack_validation": context_pack_validation,
-                "context_pack_observability": context_pack_observability,
+                "prompt_context_validation": prompt_context_validation,
+                "prompt_context_observability": prompt_context_observability,
                 "vts": vts_summary,
                 "tts": tts_summary,
                 "airlock": airlock_refs,
                 "episodic_memory": episodic_summary,
                 "trace_metrics": trace_metrics,
-                "context_pack_builder": context_pack_builder_summary,
+                "recall_pack_builder": recall_pack_builder_summary,
                 "routing_matrix_decision": dict(llm_runtime.get("routing_matrix_decision") or {}),
                 "state_arbiter": state_arbiter_summary,
             },

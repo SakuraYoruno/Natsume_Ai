@@ -405,8 +405,8 @@ async def _gaming_edge_chat_sse_generator(
                 "minimal_reply": True,
                 "emotion_tag": edge_emotion_context.get("emotion_tag"),
             }],
-            "context_pack_validation": {},
-            "context_pack_observability": {},
+            "prompt_context_validation": {},
+            "prompt_context_observability": {},
         }
         episodic_summary = {
             "status": "SKIPPED",
