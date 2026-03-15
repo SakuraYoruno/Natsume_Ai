@@ -1,12 +1,5 @@
-"""M10-C 记忆蒸馏系统单元测试。
-
-T-Distill-01：distill_top_k 正常蒸馏 — 有情节记忆时应返回 semantic_id，写入 semantic_memory 表。
-T-Distill-02：幂等检查 — 相同 source_memory_ids 组合重复蒸馏应跳过（skipped=True）。
-T-Distill-03：无情节记忆 — 空 EpisodicStore 时 distill_top_k 应返回 success=False。
-T-Distill-04：list_semantic_memories 分页 — 写入多条后分页查询正确。
-T-Distill-05：context_pack semantic_slot 验证 — 合法 semantic_slot 通过验证，缺字段时报错。
-T-Distill-06：build_semantic_slot — 从 ledger 构建 semantic_slot 列表格式正确。
-"""
+﻿"""M10-C 璁板繂钂搁绯荤粺鍗曞厓娴嬭瘯銆?
+T-Distill-01锛歞istill_top_k 姝ｅ父钂搁 鈥?鏈夋儏鑺傝蹇嗘椂搴旇繑鍥?semantic_id锛屽啓鍏?semantic_memory 琛ㄣ€?T-Distill-02锛氬箓绛夋鏌?鈥?鐩稿悓 source_memory_ids 缁勫悎閲嶅钂搁搴旇烦杩囷紙skipped=True锛夈€?T-Distill-03锛氭棤鎯呰妭璁板繂 鈥?绌?EpisodicStore 鏃?distill_top_k 搴旇繑鍥?success=False銆?T-Distill-04锛歭ist_semantic_memories 鍒嗛〉 鈥?鍐欏叆澶氭潯鍚庡垎椤垫煡璇㈡纭€?T-Distill-05锛歝ontext_pack semantic_slot 楠岃瘉 鈥?鍚堟硶 semantic_slot 閫氳繃楠岃瘉锛岀己瀛楁鏃舵姤閿欍€?T-Distill-06锛歜uild_semantic_slot 鈥?浠?ledger 鏋勫缓 semantic_slot 鍒楄〃鏍煎紡姝ｇ‘銆?"""
 
 from __future__ import annotations
 
@@ -16,15 +9,15 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.chroma_client import InMemoryChromaClient
 from host_brain.memory.distillation import MemoryDistillationEngine
 from host_brain.memory.episodic import EpisodicStore
-from host_brain.core.context_pack import (
-    validate_context_pack,
+from host_brain.core.prompt_context import (
+    validate_prompt_context,
     build_semantic_slot,
     EXPECTED_SLOTS,
 )
 
 
 # ---------------------------------------------------------------------------
-# 共享 fixture
+# 鍏变韩 fixture
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
@@ -44,7 +37,7 @@ def engine(episodic, ledger):
 
 
 def _write_memories(episodic: EpisodicStore, texts: list[str]) -> list[str]:
-    """辅助：批量写入情节记忆，返回 memory_id 列表。"""
+    """杈呭姪锛氭壒閲忓啓鍏ユ儏鑺傝蹇嗭紝杩斿洖 memory_id 鍒楄〃銆?""
     ids = []
     for text in texts:
         result = episodic.write_memory(
@@ -58,21 +51,20 @@ def _write_memories(episodic: EpisodicStore, texts: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-01：正常蒸馏
-# ---------------------------------------------------------------------------
+# T-Distill-01锛氭甯歌捀棣?# ---------------------------------------------------------------------------
 
 def test_distill_top_k_success(engine, episodic, ledger):
-    """有情节记忆时 distill_top_k 应返回 semantic_id，写入 semantic_memory 表。"""
+    """鏈夋儏鑺傝蹇嗘椂 distill_top_k 搴旇繑鍥?semantic_id锛屽啓鍏?semantic_memory 琛ㄣ€?""
     _write_memories(episodic, [
-        "夏目贵志是一个能看见妖怪的少年",
-        "猫咪老师是一只强大的妖怪，外形像猫",
-        "夏目继承了祖母玲子的友人帐",
+        "澶忕洰璐靛織鏄竴涓兘鐪嬭濡栨€殑灏戝勾",
+        "鐚挭鑰佸笀鏄竴鍙己澶х殑濡栨€紝澶栧舰鍍忕尗",
+        "澶忕洰缁ф壙浜嗙姣嶇幉瀛愮殑鍙嬩汉甯?,
     ])
 
     result = engine.distill_top_k(
-        query_text="夏目贵志",
+        query_text="澶忕洰璐靛織",
         top_k=3,
-        tags=["主角", "妖怪"],
+        tags=["涓昏", "濡栨€?],
         ts_ms=2000,
     )
 
@@ -81,78 +73,72 @@ def test_distill_top_k_success(engine, episodic, ledger):
     assert result.source_count > 0
     assert result.skipped is False
 
-    # 验证写入了 semantic_memory 表
-    items, total = ledger.list_semantic_memories()
+    # 楠岃瘉鍐欏叆浜?semantic_memory 琛?    items, total = ledger.list_semantic_memories()
     assert total == 1
     assert items[0]["semantic_id"] == result.semantic_id
-    assert "夏目贵志" in items[0]["summary"]
+    assert "澶忕洰璐靛織" in items[0]["summary"]
     assert items[0]["confidence"] >= 0.0
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-02：幂等检查
-# ---------------------------------------------------------------------------
+# T-Distill-02锛氬箓绛夋鏌?# ---------------------------------------------------------------------------
 
 def test_distill_top_k_idempotent(engine, episodic, ledger):
-    """相同 source_memory_ids 组合重复蒸馏应跳过（skipped=True），不重复写入。"""
-    _write_memories(episodic, ["夏目贵志能看见妖怪"])
+    """鐩稿悓 source_memory_ids 缁勫悎閲嶅钂搁搴旇烦杩囷紙skipped=True锛夛紝涓嶉噸澶嶅啓鍏ャ€?""
+    _write_memories(episodic, ["澶忕洰璐靛織鑳界湅瑙佸鎬?])
 
-    result1 = engine.distill_top_k(query_text="夏目", top_k=1, ts_ms=1000)
+    result1 = engine.distill_top_k(query_text="澶忕洰", top_k=1, ts_ms=1000)
     assert result1.success is True
     assert result1.skipped is False
 
-    # 第二次相同查询（召回相同 source_ids）
-    result2 = engine.distill_top_k(query_text="夏目", top_k=1, ts_ms=2000)
+    # 绗簩娆＄浉鍚屾煡璇紙鍙洖鐩稿悓 source_ids锛?    result2 = engine.distill_top_k(query_text="澶忕洰", top_k=1, ts_ms=2000)
     assert result2.success is True
     assert result2.skipped is True
     assert result2.semantic_id == result1.semantic_id
 
-    # 数据库中只有一条记录
-    _, total = ledger.list_semantic_memories()
+    # 鏁版嵁搴撲腑鍙湁涓€鏉¤褰?    _, total = ledger.list_semantic_memories()
     assert total == 1
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-03：无情节记忆
+# T-Distill-03锛氭棤鎯呰妭璁板繂
 # ---------------------------------------------------------------------------
 
 def test_distill_top_k_empty_store(engine):
-    """空 EpisodicStore 时 distill_top_k 应返回 success=False。"""
-    result = engine.distill_top_k(query_text="夏目贵志", top_k=5)
+    """绌?EpisodicStore 鏃?distill_top_k 搴旇繑鍥?success=False銆?""
+    result = engine.distill_top_k(query_text="澶忕洰璐靛織", top_k=5)
     assert result.success is False
     assert result.semantic_id is None
     assert result.source_count == 0
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-04：list_semantic_memories 分页
+# T-Distill-04锛歭ist_semantic_memories 鍒嗛〉
 # ---------------------------------------------------------------------------
 
 def test_list_semantic_memories_pagination(engine, episodic, ledger):
-    """写入多条后分页查询正确。"""
-    # 写入 3 批不同的情节记忆，蒸馏 3 次
-    for i in range(3):
-        _write_memories(episodic, [f"记忆片段{i:03d}：内容描述{i}"])
-        engine.distill_top_k(query_text=f"记忆{i:03d}", top_k=1, ts_ms=1000 + i * 100)
+    """鍐欏叆澶氭潯鍚庡垎椤垫煡璇㈡纭€?""
+    # 鍐欏叆 3 鎵逛笉鍚岀殑鎯呰妭璁板繂锛岃捀棣?3 娆?    for i in range(3):
+        _write_memories(episodic, [f"璁板繂鐗囨{i:03d}锛氬唴瀹规弿杩皗i}"])
+        engine.distill_top_k(query_text=f"璁板繂{i:03d}", top_k=1, ts_ms=1000 + i * 100)
 
-    # 全量查询
+    # 鍏ㄩ噺鏌ヨ
     items_all, total = ledger.list_semantic_memories(limit=10, offset=0)
     assert total == 3
     assert len(items_all) == 3
 
-    # 分页：每页 2 条
-    items_p1, _ = ledger.list_semantic_memories(limit=2, offset=0)
+    # 鍒嗛〉锛氭瘡椤?2 鏉?    items_p1, _ = ledger.list_semantic_memories(limit=2, offset=0)
     items_p2, _ = ledger.list_semantic_memories(limit=2, offset=2)
     assert len(items_p1) == 2
     assert len(items_p2) == 1
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-05：context_pack semantic_slot 验证
+# T-Distill-05锛歝ontext_pack semantic_slot 楠岃瘉
 # ---------------------------------------------------------------------------
 
-def _make_valid_context_pack(**overrides) -> dict:
-    """构造最小合法 context_pack。"""
+def _make_valid_prompt_context(**overrides) -> dict:
+    """鏋勯€犳渶灏忓悎娉?prompt_context銆?""
     base = {
         "hard_snapshot": {},
         "bond_summary": {},
@@ -166,53 +152,53 @@ def _make_valid_context_pack(**overrides) -> dict:
     return base
 
 
-def test_context_pack_semantic_slot_valid():
-    """合法 semantic_slot 应通过验证。"""
-    cp = _make_valid_context_pack(
+def test_prompt_context_semantic_slot_valid():
+    """鍚堟硶 semantic_slot 搴旈€氳繃楠岃瘉銆?""
+    cp = _make_valid_prompt_context(
         semantic_slot=[
             {
                 "slot": "semantic_slot",
                 "semantic_id": "sem_abc123",
-                "summary": "夏目贵志的语义摘要",
+                "summary": "澶忕洰璐靛織鐨勮涔夋憳瑕?,
                 "confidence": 0.85,
-                "tags": ["主角"],
+                "tags": ["涓昏"],
                 "source_count": 3,
                 "ts_ms": 1000,
             }
         ]
     )
-    result = validate_context_pack(cp)
-    assert result.valid, f"应通过验证，但有违规: {result.violations}"
+    result = validate_prompt_context(cp)
+    assert result.valid, f"搴旈€氳繃楠岃瘉锛屼絾鏈夎繚瑙? {result.violations}"
 
 
-def test_context_pack_semantic_slot_missing_required_field():
-    """semantic_slot 条目缺少 semantic_id 或 summary 时应报错。"""
-    cp = _make_valid_context_pack(
+def test_prompt_context_semantic_slot_missing_required_field():
+    """semantic_slot 鏉＄洰缂哄皯 semantic_id 鎴?summary 鏃跺簲鎶ラ敊銆?""
+    cp = _make_valid_prompt_context(
         semantic_slot=[
-            {"summary": "缺少 semantic_id 的条目"}  # 缺少 semantic_id
+            {"summary": "缂哄皯 semantic_id 鐨勬潯鐩?}  # 缂哄皯 semantic_id
         ]
     )
-    result = validate_context_pack(cp)
+    result = validate_prompt_context(cp)
     assert not result.valid
     codes = [v.code for v in result.violations]
-    assert "CONTEXT_PACK_TYPE_INVALID" in codes
+    assert "PROMPT_CONTEXT_TYPE_INVALID" in codes
 
 
-def test_context_pack_without_semantic_slot_still_valid():
-    """不包含 semantic_slot 的 context_pack 应仍然通过验证（可选槽位）。"""
-    cp = _make_valid_context_pack()
-    result = validate_context_pack(cp)
-    assert result.valid, f"不含 semantic_slot 应通过验证，但有违规: {result.violations}"
+def test_prompt_context_without_semantic_slot_still_valid():
+    """涓嶅寘鍚?semantic_slot 鐨?prompt_context 搴斾粛鐒堕€氳繃楠岃瘉锛堝彲閫夋Ы浣嶏級銆?""
+    cp = _make_valid_prompt_context()
+    result = validate_prompt_context(cp)
+    assert result.valid, f"涓嶅惈 semantic_slot 搴旈€氳繃楠岃瘉锛屼絾鏈夎繚瑙? {result.violations}"
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-06：build_semantic_slot
+# T-Distill-06锛歜uild_semantic_slot
 # ---------------------------------------------------------------------------
 
 def test_build_semantic_slot(engine, episodic, ledger):
-    """build_semantic_slot 应从 ledger 构建格式正确的 semantic_slot 列表。"""
-    _write_memories(episodic, ["夏目贵志的故事"])
-    engine.distill_top_k(query_text="夏目", top_k=1, ts_ms=1000)
+    """build_semantic_slot 搴斾粠 ledger 鏋勫缓鏍煎紡姝ｇ‘鐨?semantic_slot 鍒楄〃銆?""
+    _write_memories(episodic, ["澶忕洰璐靛織鐨勬晠浜?])
+    engine.distill_top_k(query_text="澶忕洰", top_k=1, ts_ms=1000)
 
     slot = build_semantic_slot(ledger=ledger, top_k=5)
     assert isinstance(slot, list)
@@ -258,3 +244,4 @@ def test_distill_top_k_concurrent_idempotent(tmp_path):
         assert all(sid == persisted_id for sid in results)
     finally:
         ledger.close()
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -83,8 +83,8 @@ def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeyp
     _write_world_doc(
         world_root,
         doc_id="wc-003-persona-core",
-        title="人格核心设定",
-        body="夏目蓝应保持克制温柔且不宣称执行动作。",
+        title="浜烘牸鏍稿績璁惧畾",
+        body="澶忕洰钃濆簲淇濇寔鍏嬪埗娓╂煍涓斾笉瀹ｇО鎵ц鍔ㄤ綔銆?,
     )
 
     monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
@@ -100,7 +100,7 @@ def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeyp
 
     prompt_text, system_prompt, gen_params, _, prompt_meta = asyncio.run(
         stream_mod._build_stream_chat_prompt(
-            message="今天可以和我说说吗？",
+            message="浠婂ぉ鍙互鍜屾垜璇磋鍚楋紵",
             session_id="s_prompt_ja",
             thread_id=None,
             mood_state="engaged",
@@ -116,13 +116,13 @@ def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeyp
                 "degraded": False,
             },
             retrieval_evidence_items=[
-                {"evidence_ref": "evd://1", "source_ref": "memory://1", "snippet": "用户偏好日语交流。"},
+                {"evidence_ref": "evd://1", "source_ref": "memory://1", "snippet": "鐢ㄦ埛鍋忓ソ鏃ヨ浜ゆ祦銆?},
             ],
             emotion_context_override={
                 "mood_state": "engaged",
                 "emotion_tag": "HAPPY",
                 "emotion_intensity": 0.8,
-                "emotion_range_hint": "可积极表达",
+                "emotion_range_hint": "鍙Н鏋佽〃杈?,
             },
             emotion_snapshot_override={
                 "version": "chat_emotion_snapshot.v1",
@@ -147,7 +147,7 @@ def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeyp
     assert "Role: chat_direct_ja" in prompt_text
     assert "natural Japanese suitable for spoken TTS output" in system_prompt
     assert bool(gen_params.get("emotion_adjusted")) is True
-    observability = dict(prompt_meta.get("context_pack_observability") or {})
+    observability = dict(prompt_meta.get("prompt_context_observability") or {})
     source_stats = dict(observability.get("source_stats") or {})
     assert int(source_stats.get("style_binding_nodes") or 0) == 2
 
@@ -298,7 +298,7 @@ def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any)
     assert any(e.get("phase") == "RENDER" for e in events)
 
 
-def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order(
+def test_stream_commit_exposes_prompt_context_observability_and_logs_degrade_order(
     monkeypatch: Any,
     caplog,
 ) -> None:
@@ -327,18 +327,18 @@ def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order
             {},
             {"emotion_tag": "NEUTRAL"},
             {
-                "context_pack_validation": {
+                "prompt_context_validation": {
                     "valid": True,
                     "degraded": True,
-                    "reason_code": "CONTEXT_PACK_DEGRADED",
+                    "reason_code": "PROMPT_CONTEXT_DEGRADED",
                     "violation_count": 1,
                     "violations": [],
                 },
-                "context_pack_observability": {
-                    "version": "context_pack_obs.v1",
+                "prompt_context_observability": {
+                    "version": "prompt_context_obs.v1",
                     "degrade_order": ["six_route", "core_three", "minimal_context", "bare_llm"],
                     "selected_tier": "minimal_context",
-                    "selected_reason": "context_pack_authoritative_slot_degraded",
+                    "selected_reason": "prompt_context_authoritative_slot_degraded",
                     "slot_item_counts": {
                         "authoritative": 1,
                         "retrieval": 0,
@@ -403,10 +403,10 @@ def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order
 
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     audit_refs = dict(commit.get("audit_refs") or {})
-    context_pack_observability = dict(audit_refs.get("context_pack_observability") or {})
-    assert context_pack_observability.get("selected_tier") == "minimal_context"
+    prompt_context_observability = dict(audit_refs.get("prompt_context_observability") or {})
+    assert prompt_context_observability.get("selected_tier") == "minimal_context"
     llm = dict(audit_refs.get("llm") or {})
-    assert dict(llm.get("context_pack_observability") or {}).get("selected_tier") == "minimal_context"
+    assert dict(llm.get("prompt_context_observability") or {}).get("selected_tier") == "minimal_context"
     assert any(record.message == "stream context degrade tier selected" for record in caplog.records)
 
 
@@ -468,7 +468,7 @@ def test_stream_commit_contains_vts_summary(monkeypatch: Any) -> None:
     assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
 
 
-def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: Any) -> None:
+def test_stream_recall_pack_builder_active_rewrites_prompt_inputs(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
 
     class _FakeSlot:
@@ -478,7 +478,7 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
             self.truncated = True
             self.conflict_suppressed = False
 
-    class _FakeContextPack:
+    class _FakeRecallPack:
         def __init__(self) -> None:
             self.slots = {"episodic_vector": _FakeSlot("trimmed by context pack")}
             self.total_token_count = 12
@@ -488,11 +488,11 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
         def get_slot(self, slot_name: str) -> Any:
             return self.slots.get(slot_name)
 
-    class _FakeContextPackBuilder:
-        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _FakeContextPack:
+    class _FakeRecallPackBuilder:
+        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _FakeRecallPack:
             assert "episodic_vector" in recall_results
             assert task_type == "chat"
-            return _FakeContextPack()
+            return _FakeRecallPack()
 
     async def _fake_run_retrieval(**kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         return (
@@ -520,8 +520,8 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
 
     import host_brain.app.dependencies as dep
 
-    monkeypatch.setenv("HOST_CONTEXT_PACK_ACTIVE", "true")
-    monkeypatch.setattr(dep, "get_context_pack_builder", lambda: _FakeContextPackBuilder())
+    monkeypatch.setenv("HOST_RECALL_PACK_ACTIVE", "true")
+    monkeypatch.setattr(dep, "get_recall_pack_builder", lambda: _FakeRecallPackBuilder())
     monkeypatch.setattr(stream_mod, "get_intent_engine", lambda: _FakeIntentEngine())
     monkeypatch.setattr(stream_mod, "resolve_chat_emotion_context", lambda request_body: {"emotion_tag": "NEUTRAL"})
     monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
@@ -559,7 +559,7 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
     assert rewritten[0]["slot_name"] == "episodic_vector"
     assert rewritten[0]["snippet"] == "trimmed by context pack"
     commit = next(e for e in events if e.get("phase") == "COMMIT")
-    summary = dict(commit["audit_refs"].get("context_pack_builder") or {})
+    summary = dict(commit["audit_refs"].get("recall_pack_builder") or {})
     assert summary.get("mode") == "ACTIVE"
     assert summary.get("applied_to_prompt") is True
 
@@ -567,7 +567,7 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
 def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
 
-    class _EmptyContextPack:
+    class _EmptyRecallPack:
         slots: dict[str, Any] = {}
         total_token_count = 0
         conflict_events: list[dict[str, Any]] = []
@@ -577,17 +577,17 @@ def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatc
             _ = slot_name
             return None
 
-    class _NoopContextPackBuilder:
-        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _EmptyContextPack:
+    class _NoopRecallPackBuilder:
+        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _EmptyRecallPack:
             _ = (recall_results, task_type)
-            return _EmptyContextPack()
+            return _EmptyRecallPack()
 
     class _FakeSource:
         value = "WorldCanonStore"
 
     class _FakeArbiterResult:
         fact_key = "world_canon_facts"
-        value = [{"title": "人格核心", "content": "夏目蓝保持克制温柔。"}]
+        value = [{"title": "浜烘牸鏍稿績", "content": "澶忕洰钃濅繚鎸佸厠鍒舵俯鏌斻€?}]
         source = _FakeSource()
         is_fallback = False
         fallback_chain: list[Any] = []
@@ -622,8 +622,8 @@ def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatc
 
     import host_brain.app.dependencies as dep
 
-    monkeypatch.setenv("HOST_CONTEXT_PACK_ACTIVE", "false")
-    monkeypatch.setattr(dep, "get_context_pack_builder", lambda: _NoopContextPackBuilder())
+    monkeypatch.setenv("HOST_RECALL_PACK_ACTIVE", "false")
+    monkeypatch.setattr(dep, "get_recall_pack_builder", lambda: _NoopRecallPackBuilder())
     monkeypatch.setattr(dep, "get_state_arbiter", lambda: _FakeArbiter())
     monkeypatch.setattr(stream_mod, "get_intent_engine", lambda: _FakeIntentEngine())
     monkeypatch.setattr(stream_mod, "resolve_chat_emotion_context", lambda request_body: {"emotion_tag": "NEUTRAL"})
@@ -666,3 +666,4 @@ def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatc
     assert dict(retrieval_summary.get("world_canon") or {}).get("status") == "INJECTED"
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     assert dict(commit["audit_refs"].get("state_arbiter") or {}).get("status") == "APPLIED"
+

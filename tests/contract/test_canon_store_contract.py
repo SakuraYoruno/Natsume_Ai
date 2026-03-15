@@ -1,10 +1,10 @@
-import json
+﻿import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.context_pack import validate_context_pack
+from host_brain.core.prompt_context import validate_prompt_context
 from host_brain.memory.canon_style_store import StyleCanonStore
 from host_brain.memory.canon_sync import (
     WORLD_CANON_INVALID_DOC,
@@ -190,7 +190,7 @@ class TestCanonStoreContract(unittest.TestCase):
                 self.assertEqual("citation_only", authoritative["reference_mode"])
                 self.assertTrue(authoritative["citation"].startswith("world_canon:"))
 
-                result = validate_context_pack(
+                result = validate_prompt_context(
                     {
                         "hard_snapshot": {},
                         "bond_summary": {"stage": "STRANGER"},
@@ -287,3 +287,4 @@ class TestCanonStoreContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

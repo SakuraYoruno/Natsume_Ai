@@ -1,4 +1,4 @@
-"""Emotion closed-loop validator for chat prompt + VTS mapping path.
+﻿"""Emotion closed-loop validator for chat prompt + VTS mapping path.
 
 Validates the chain on 10+ samples:
 1) emotion normalization + snapshot consistency
@@ -28,6 +28,8 @@ from host_brain.app.emotion_context import (  # noqa: E402
     map_emotion_tag_to_vad,
     normalize_chat_emotion_context,
 )
+from host_brain.app.chat_context_builder import build_chat_runtime_payload  # noqa: E402
+from host_brain.app.chat_runtime_input import build_chat_runtime_input  # noqa: E402
 from host_brain.app.prompt_builder import render_node_generation_prompt  # noqa: E402
 from host_brain.channels.vts import (  # noqa: E402
     STATUS_APPLIED,
@@ -69,18 +71,18 @@ class CaseResult:
 
 DEFAULT_CASES_FIXTURE = ROOT / "tests" / "fixtures" / "emotion" / "closed_loop_cases.json"
 EMBEDDED_DEFAULT_CASES: list[EmotionCase] = [
-    EmotionCase("c01", "engaged", "HAPPY", 0.86, "今天特别开心，想要积极一点回应。", 1),
-    EmotionCase("c02", "engaged", "EXCITED", 0.92, "太棒了！这件事让我很兴奋。", 1),
-    EmotionCase("c03", "steady", "ANGRY", 0.75, "我有点生气，需要直接一点。", -1),
-    EmotionCase("c04", "steady", "SAD", 0.68, "今天状态低落，想要温和安慰。", -1),
-    EmotionCase("c05", "calm", "CALM", 0.34, "请平静地给我一个简短建议。", 1),
-    EmotionCase("c06", "calm", "THINKING", 0.43, "我想认真思考下这个方案。", 0),
-    EmotionCase("c07", "tired", "SAD", 0.59, "我有点累，回复别太激进。", -1),
-    EmotionCase("c08", "tired", "NEUTRAL", 0.35, "今天先中性一点，短回复就好。", 0),
-    EmotionCase("c09", "critical", "SAD", 0.72, "现在压力很大，先稳住情绪。", -1),
-    EmotionCase("c10", "critical", "NEUTRAL", 0.40, "先给我一个克制、冷静的回应。", 0),
-    EmotionCase("c11", "engaged", "SURPRISED", 0.66, "这个结果让我很惊讶。", 0),
-    EmotionCase("c12", "steady", "HAPPY", 0.63, "想听到更有活力一点的反馈。", 1),
+    EmotionCase("c01", "engaged", "HAPPY", 0.86, "I feel especially happy today, answer with a bright tone.", 1),
+    EmotionCase("c02", "engaged", "EXCITED", 0.92, "That result is exciting, keep the response energetic.", 1),
+    EmotionCase("c03", "steady", "ANGRY", 0.75, "I am irritated, keep the answer direct but controlled.", -1),
+    EmotionCase("c04", "steady", "SAD", 0.68, "I feel low today, use a gentle comforting tone.", -1),
+    EmotionCase("c05", "calm", "CALM", 0.34, "Give me a short and calm suggestion.", 1),
+    EmotionCase("c06", "calm", "THINKING", 0.43, "I want to think through this plan carefully.", 0),
+    EmotionCase("c07", "tired", "SAD", 0.59, "I am tired, avoid an overly intense reply.", -1),
+    EmotionCase("c08", "tired", "NEUTRAL", 0.35, "Stay neutral and keep the reply brief.", 0),
+    EmotionCase("c09", "critical", "SAD", 0.72, "The pressure is high right now, stabilize the mood first.", -1),
+    EmotionCase("c10", "critical", "NEUTRAL", 0.40, "Give me a restrained and calm response first.", 0),
+    EmotionCase("c11", "engaged", "SURPRISED", 0.66, "That outcome surprised me.", 0),
+    EmotionCase("c12", "steady", "HAPPY", 0.63, "I want feedback with slightly more energy.", 1),
 ]
 
 
@@ -202,49 +204,31 @@ def _build_runtime_payload(
     normalized: dict[str, object],
     snapshot: dict[str, object],
 ) -> dict[str, object]:
-    return {
-        "user_message": case.user_message,
-        "retrieval": {"status": "SKIPPED", "reason_code": "DIAG"},
-        "context_pack": {
-            "hard_snapshot": {"session_id": f"diag-session-{case.case_id}"},
-            "bond_summary": {},
-            "authoritative": [],
-            "retrieval": [],
-            "style_pack": {"node_bindings": {}},
-            "constraints": {},
-            "tool_meta_pack": [],
-            "emotion_pulse": {
-                "emotion_tag": normalized.get("emotion_tag"),
-                "mood_state": normalized.get("mood_state"),
-                "style_hint": "diag-emotion-closed-loop",
-                "emotion_range_hint": normalized.get("emotion_range_hint"),
+    runtime_input = build_chat_runtime_input(
+        request_id=f"diag-request-{case.case_id}",
+        session_id=f"diag-session-{case.case_id}",
+        thread_id=None,
+        user_message=case.user_message,
+        render_target_lang="ja",
+        retrieval_summary={"status": "SKIPPED", "reason_code": "DIAG"},
+        retrieval_evidence_items=[],
+        emotion_state=normalized,
+        emotion_snapshot=snapshot,
+    )
+    runtime_payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    runtime_payload.update(
+        {
+            "core_reasoner_primary": {
+                "payload": {
+                    "narrative": {"text": "diagnostic narrative"},
+                    "intent_draft": {"action": "narrative_only", "args": {}},
+                }
             },
-            "memory_emotion_hint": {
-                "emotion_tag": normalized.get("emotion_tag"),
-                "mood_state": normalized.get("mood_state"),
-                "retrieval_status": "SKIPPED",
-            },
-            "bond_texture": {
-                "emotion_tag": normalized.get("emotion_tag"),
-                "mood_state": normalized.get("mood_state"),
-            },
-        },
-        "context_pack_validation": {
-            "valid": True,
-            "reason_code": None,
-            "violation_count": 0,
-        },
-        "emotion_context": dict(normalized),
-        "emotion_snapshot": dict(snapshot),
-        "core_reasoner_primary": {
-            "payload": {
-                "narrative": {"text": "这是语义草案。"},
-                "intent_draft": {"action": "narrative_only", "args": {}},
-            }
-        },
-        "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
-        "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
-    }
+            "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
+            "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
+        }
+    )
+    return runtime_payload
 
 
 def _eval_case(case: EmotionCase, *, ts_ms: int) -> CaseResult:
@@ -473,3 +457,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

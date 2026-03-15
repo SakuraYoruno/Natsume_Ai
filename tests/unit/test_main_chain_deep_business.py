@@ -1,11 +1,7 @@
-"""MainChain 深度业务化 + SCENE_VISION_UI 生产化加固 单元测试。
-
-覆盖范围：
-  - GovernorNode：真实 IntentDecisionEngine 调用 / 降级回退
-  - RecallFusionNode：真实 RetrievalOrchestrator 调用 / 降级回退
-  - QAContractNode：长度截断 / 安全词检测 / 格式规范化
-  - _VisionSLAMonitor：连续失败告警 / 降级率告警
-"""
+﻿"""MainChain 娣卞害涓氬姟鍖?+ SCENE_VISION_UI 鐢熶骇鍖栧姞鍥?鍗曞厓娴嬭瘯銆?
+瑕嗙洊鑼冨洿锛?  - GovernorNode锛氱湡瀹?IntentDecisionEngine 璋冪敤 / 闄嶇骇鍥為€€
+  - RecallFusionNode锛氱湡瀹?RetrievalOrchestrator 璋冪敤 / 闄嶇骇鍥為€€
+  - QAContractNode锛氶暱搴︽埅鏂?/ 瀹夊叏璇嶆娴?/ 鏍煎紡瑙勮寖鍖?  - _VisionSLAMonitor锛氳繛缁け璐ュ憡璀?/ 闄嶇骇鐜囧憡璀?"""
 from __future__ import annotations
 
 import asyncio
@@ -28,13 +24,13 @@ from host_brain.app.schemas import TaskType
 
 
 # ---------------------------------------------------------------------------
-# 辅助函数
+# 杈呭姪鍑芥暟
 # ---------------------------------------------------------------------------
 
 def _make_ctx(
     *,
     request_id: str = "req-test-001",
-    user_message: str = "你好",
+    user_message: str = "浣犲ソ",
     session_id: str = "sess-001",
     quarantine_passed: bool = True,
 ) -> ChainContext:
@@ -56,14 +52,14 @@ def _run(coro):
 
 
 # ---------------------------------------------------------------------------
-# GovernorNode 测试
+# GovernorNode 娴嬭瘯
 # ---------------------------------------------------------------------------
 
 class TestGovernorNodeDeepBusiness:
-    """GovernorNode 深度业务化测试。"""
+    """GovernorNode 娣卞害涓氬姟鍖栨祴璇曘€?""
 
     def test_governor_degraded_fallback_when_engine_unavailable(self):
-        """IntentDecisionEngine 不可用时，降级为最小状态语义并放行。"""
+        """IntentDecisionEngine 涓嶅彲鐢ㄦ椂锛岄檷绾т负鏈€灏忕姸鎬佽涔夊苟鏀捐銆?""
         ctx = _make_ctx()
         node = GovernorNode()
 
@@ -76,7 +72,7 @@ class TestGovernorNodeDeepBusiness:
         assert ctx.metadata["governor"]["mode"] == "DEGRADED_FALLBACK"
 
     def test_governor_active_mode_when_engine_approves(self):
-        """IntentDecisionEngine 返回 APPROVE 时，GovernorNode 放行并标记 ACTIVE 模式。"""
+        """IntentDecisionEngine 杩斿洖 APPROVE 鏃讹紝GovernorNode 鏀捐骞舵爣璁?ACTIVE 妯″紡銆?""
         ctx = _make_ctx()
         node = GovernorNode()
 
@@ -98,7 +94,7 @@ class TestGovernorNodeDeepBusiness:
         assert "GOVERNOR_PRECHECK_PASSED" in ctx.audit_tags
 
     def test_governor_active_mode_when_engine_rejects(self):
-        """IntentDecisionEngine 返回 REJECT 时，GovernorNode 拒绝请求。"""
+        """IntentDecisionEngine 杩斿洖 REJECT 鏃讹紝GovernorNode 鎷掔粷璇锋眰銆?""
         ctx = _make_ctx()
         node = GovernorNode()
 
@@ -119,7 +115,7 @@ class TestGovernorNodeDeepBusiness:
         assert ctx.governor_block_reason == "RATE_LIMIT_EXCEEDED"
 
     def test_governor_blocks_when_airlock_not_passed(self):
-        """Airlock 未通过时，GovernorNode 直接拒绝。"""
+        """Airlock 鏈€氳繃鏃讹紝GovernorNode 鐩存帴鎷掔粷銆?""
         ctx = _make_ctx(quarantine_passed=False)
         node = GovernorNode()
         result = _run(node.execute(ctx))
@@ -128,7 +124,7 @@ class TestGovernorNodeDeepBusiness:
         assert "GOVERNOR_BLOCK_AIRLOCK" in ctx.audit_tags
 
     def test_governor_scene_to_task_mapping(self):
-        """场景类型正确映射到 TaskType。"""
+        """鍦烘櫙绫诲瀷姝ｇ‘鏄犲皠鍒?TaskType銆?""
         ctx = _make_ctx()
         ctx.metadata["pre_classified_scene"] = "EXEC_INTENT"
         node = GovernorNode()
@@ -140,14 +136,14 @@ class TestGovernorNodeDeepBusiness:
 
 
 # ---------------------------------------------------------------------------
-# RecallFusionNode 测试
+# RecallFusionNode 娴嬭瘯
 # ---------------------------------------------------------------------------
 
 class TestRecallFusionNodeDeepBusiness:
-    """RecallFusionNode 深度业务化测试。"""
+    """RecallFusionNode 娣卞害涓氬姟鍖栨祴璇曘€?""
 
     def test_recall_degraded_fallback_when_orchestrator_unavailable(self):
-        """RetrievalOrchestrator 不可用时，降级为最小状态语义并继续。"""
+        """RetrievalOrchestrator 涓嶅彲鐢ㄦ椂锛岄檷绾т负鏈€灏忕姸鎬佽涔夊苟缁х画銆?""
         ctx = _make_ctx()
         node = RecallFusionNode()
 
@@ -159,7 +155,7 @@ class TestRecallFusionNodeDeepBusiness:
         assert ctx.metadata["recall_fusion"]["mode"] == "DEGRADED_FALLBACK"
 
     def test_recall_active_mode_with_evidence(self):
-        """RetrievalOrchestrator 返回证据时，RecallFusionNode 标记 ACTIVE 模式。"""
+        """RetrievalOrchestrator 杩斿洖璇佹嵁鏃讹紝RecallFusionNode 鏍囪 ACTIVE 妯″紡銆?""
         from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
 
         ctx = _make_ctx()
@@ -172,11 +168,11 @@ class TestRecallFusionNodeDeepBusiness:
             path="success",
             detail="ok",
             trace_id="req-test-001",
-            query="你好",
+            query="浣犲ソ",
             session_state={},
             retrieval_summary={"status": "OK"},
             retrieval_evidence_items=[
-                {"slot_name": "world_canon", "text": "夏目是一个AI助手", "snippet": "夏目是一个AI助手"}
+                {"slot_name": "world_canon", "text": "澶忕洰鏄竴涓狝I鍔╂墜", "snippet": "澶忕洰鏄竴涓狝I鍔╂墜"}
             ],
             retrieval_bundle={},
         )
@@ -190,11 +186,11 @@ class TestRecallFusionNodeDeepBusiness:
         assert result is True
         assert ctx.metadata["recall_fusion"]["mode"] == "ACTIVE"
         assert ctx.metadata["recall_fusion"]["evidence_count"] == 1
-        assert ctx.recall_context_pack is not None
+        assert ctx.recall_payload is not None
         assert "RECALL_EVIDENCE_COUNT:1" in ctx.audit_tags
 
     def test_recall_active_mode_empty_evidence(self):
-        """RetrievalOrchestrator 返回空证据时，标记 RECALL_EVIDENCE_EMPTY。"""
+        """RetrievalOrchestrator 杩斿洖绌鸿瘉鎹椂锛屾爣璁?RECALL_EVIDENCE_EMPTY銆?""
         from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
 
         ctx = _make_ctx()
@@ -207,7 +203,7 @@ class TestRecallFusionNodeDeepBusiness:
             path="success",
             detail="ok",
             trace_id="req-test-001",
-            query="你好",
+            query="浣犲ソ",
             session_state={},
             retrieval_summary={"status": "OK"},
             retrieval_evidence_items=[],
@@ -226,14 +222,14 @@ class TestRecallFusionNodeDeepBusiness:
 
 
 # ---------------------------------------------------------------------------
-# QAContractNode 测试
+# QAContractNode 娴嬭瘯
 # ---------------------------------------------------------------------------
 
 class TestQAContractNodeDeepBusiness:
-    """QAContractNode 深度业务化测试。"""
+    """QAContractNode 娣卞害涓氬姟鍖栨祴璇曘€?""
 
     def test_qa_skips_when_no_output(self):
-        """无输出时跳过 QA 检查。"""
+        """鏃犺緭鍑烘椂璺宠繃 QA 妫€鏌ャ€?""
         ctx = _make_ctx()
         node = QAContractNode()
         result = _run(node.execute(ctx))
@@ -241,45 +237,43 @@ class TestQAContractNodeDeepBusiness:
         assert ctx.metadata["qa_contract"]["status"] == "SKIPPED_NO_OUTPUT"
 
     def test_qa_format_normalize(self):
-        """格式规范化：去除首尾空白和多余空行。"""
+        """鏍煎紡瑙勮寖鍖栵細鍘婚櫎棣栧熬绌虹櫧鍜屽浣欑┖琛屻€?""
         ctx = _make_ctx()
-        ctx.final_response = "  你好\n\n\n\n世界  "
+        ctx.final_response = "  浣犲ソ\n\n\n\n涓栫晫  "
         node = QAContractNode()
         result = _run(node.execute(ctx))
         assert result is True
-        assert ctx.final_response == "你好\n\n世界"
+        assert ctx.final_response == "浣犲ソ\n\n涓栫晫"
         assert ctx.qa_rewritten is True
         assert "FORMAT_NORMALIZE" in ctx.metadata["qa_contract"]["rewrite_reasons"]
 
     def test_qa_length_truncation(self, monkeypatch):
-        """超长响应被截断（HOST_QA_MAX_RESPONSE_CHARS 最小值为 100）。"""
+        """瓒呴暱鍝嶅簲琚埅鏂紙HOST_QA_MAX_RESPONSE_CHARS 鏈€灏忓€间负 100锛夈€?""
         monkeypatch.setenv("HOST_QA_MAX_RESPONSE_CHARS", "100")
         ctx = _make_ctx()
-        # 2000 字符，远超 100 字符限制
-        long_text = "这是一段很长的文字。" * 200
+        # 2000 瀛楃锛岃繙瓒?100 瀛楃闄愬埗
+        long_text = "杩欐槸涓€娈靛緢闀跨殑鏂囧瓧銆? * 200
         ctx.final_response = long_text
         node = QAContractNode()
         result = _run(node.execute(ctx))
         assert result is True
-        # 截断后长度应 <= max_chars + 少量句子边界余量（最多 +5）
-        assert len(ctx.final_response) <= 105
+        # 鎴柇鍚庨暱搴﹀簲 <= max_chars + 灏戦噺鍙ュ瓙杈圭晫浣欓噺锛堟渶澶?+5锛?        assert len(ctx.final_response) <= 105
         assert ctx.qa_rewritten is True
         assert any("LENGTH_TRUNCATED" in r for r in ctx.metadata["qa_contract"]["rewrite_reasons"])
         assert "QA_LENGTH_TRUNCATED" in ctx.audit_tags
 
     def test_qa_safety_word_detection(self):
-        """安全词检测：疑似系统提示词泄露时写入告警标签。"""
+        """瀹夊叏璇嶆娴嬶細鐤戜技绯荤粺鎻愮ず璇嶆硠闇叉椂鍐欏叆鍛婅鏍囩銆?""
         ctx = _make_ctx()
-        ctx.final_response = "你好！system prompt: 你是一个AI助手。"
+        ctx.final_response = "浣犲ソ锛乻ystem prompt: 浣犳槸涓€涓狝I鍔╂墜銆?
         node = QAContractNode()
         result = _run(node.execute(ctx))
-        assert result is True  # 不阻断，仅告警
-        assert "QA_SAFETY_WARN:PROMPT_LEAK_SUSPECTED" in ctx.audit_tags
+        assert result is True  # 涓嶉樆鏂紝浠呭憡璀?        assert "QA_SAFETY_WARN:PROMPT_LEAK_SUSPECTED" in ctx.audit_tags
 
     def test_qa_null_byte_removal(self):
-        """去除 null 字节。"""
+        """鍘婚櫎 null 瀛楄妭銆?""
         ctx = _make_ctx()
-        ctx.final_response = "你好\x00世界"
+        ctx.final_response = "浣犲ソ\x00涓栫晫"
         node = QAContractNode()
         result = _run(node.execute(ctx))
         assert result is True
@@ -287,9 +281,9 @@ class TestQAContractNodeDeepBusiness:
         assert "NULL_BYTE_REMOVED" in ctx.metadata["qa_contract"]["rewrite_reasons"]
 
     def test_qa_clean_output_no_rewrite(self):
-        """干净的输出不被重写。"""
+        """骞插噣鐨勮緭鍑轰笉琚噸鍐欍€?""
         ctx = _make_ctx()
-        ctx.final_response = "你好，有什么可以帮你的？"
+        ctx.final_response = "浣犲ソ锛屾湁浠€涔堝彲浠ュ府浣犵殑锛?
         node = QAContractNode()
         result = _run(node.execute(ctx))
         assert result is True
@@ -298,26 +292,25 @@ class TestQAContractNodeDeepBusiness:
 
 
 # ---------------------------------------------------------------------------
-# _VisionSLAMonitor 测试
+# _VisionSLAMonitor 娴嬭瘯
 # ---------------------------------------------------------------------------
 
 class TestVisionSLAMonitor:
-    """_VisionSLAMonitor 生产化加固测试。"""
+    """_VisionSLAMonitor 鐢熶骇鍖栧姞鍥烘祴璇曘€?""
 
     def test_consecutive_failures_trigger_alert(self, monkeypatch):
-        """连续失败达到阈值时触发告警。"""
+        """杩炵画澶辫触杈惧埌闃堝€兼椂瑙﹀彂鍛婅銆?""
         monkeypatch.setenv("HOST_VISION_SLA_FAIL_THRESHOLD", "3")
         monitor = _VisionSLAMonitor()
 
-        # 前 2 次失败：不触发告警
-        for _ in range(2):
+        # 鍓?2 娆″け璐ワ細涓嶈Е鍙戝憡璀?        for _ in range(2):
             result = monitor.record_call(
                 status="DEGRADED", request_id="req-001",
                 latency_ms=100, model_id="gemini-2.5-flash", provider="gemini",
             )
         assert result["alert_triggered"] is False
 
-        # 第 3 次失败：触发告警
+        # 绗?3 娆″け璐ワ細瑙﹀彂鍛婅
         result = monitor.record_call(
             status="DEGRADED", request_id="req-001",
             latency_ms=100, model_id="gemini-2.5-flash", provider="gemini",
@@ -326,25 +319,23 @@ class TestVisionSLAMonitor:
         assert "CONSECUTIVE_FAILURES" in result["alert_reason"]
 
     def test_consecutive_failures_reset_on_success(self, monkeypatch):
-        """成功调用后，连续失败计数重置。"""
+        """鎴愬姛璋冪敤鍚庯紝杩炵画澶辫触璁℃暟閲嶇疆銆?""
         monkeypatch.setenv("HOST_VISION_SLA_FAIL_THRESHOLD", "3")
         monitor = _VisionSLAMonitor()
 
-        # 2 次失败
-        for _ in range(2):
+        # 2 娆″け璐?        for _ in range(2):
             monitor.record_call(
                 status="DEGRADED", request_id="req-001",
                 latency_ms=100, model_id="gemini-2.5-flash", provider="gemini",
             )
 
-        # 1 次成功：重置计数
+        # 1 娆℃垚鍔燂細閲嶇疆璁℃暟
         monitor.record_call(
             status="OK", request_id="req-001",
             latency_ms=100, model_id="gemini-2.5-flash", provider="gemini",
         )
 
-        # 再次失败：不触发告警（计数已重置）
-        result = monitor.record_call(
+        # 鍐嶆澶辫触锛氫笉瑙﹀彂鍛婅锛堣鏁板凡閲嶇疆锛?        result = monitor.record_call(
             status="DEGRADED", request_id="req-001",
             latency_ms=100, model_id="gemini-2.5-flash", provider="gemini",
         )
@@ -352,13 +343,12 @@ class TestVisionSLAMonitor:
         assert result["alert_triggered"] is False
 
     def test_degrade_rate_alert(self, monkeypatch):
-        """降级率超过阈值时触发告警。"""
-        monkeypatch.setenv("HOST_VISION_SLA_FAIL_THRESHOLD", "100")  # 禁用连续失败告警
+        """闄嶇骇鐜囪秴杩囬槇鍊兼椂瑙﹀彂鍛婅銆?""
+        monkeypatch.setenv("HOST_VISION_SLA_FAIL_THRESHOLD", "100")  # 绂佺敤杩炵画澶辫触鍛婅
         monkeypatch.setenv("HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD", "0.5")
         monitor = _VisionSLAMonitor()
 
-        # 10 次调用，6 次降级（60% > 50%）
-        for i in range(10):
+        # 10 娆¤皟鐢紝6 娆￠檷绾э紙60% > 50%锛?        for i in range(10):
             status = "DEGRADED" if i < 6 else "OK"
             result = monitor.record_call(
                 status=status, request_id="req-001",
@@ -369,7 +359,7 @@ class TestVisionSLAMonitor:
         assert "DEGRADE_RATE" in result["alert_reason"]
 
     def test_no_alert_for_normal_operation(self, monkeypatch):
-        """正常运行时不触发告警。"""
+        """姝ｅ父杩愯鏃朵笉瑙﹀彂鍛婅銆?""
         monkeypatch.setenv("HOST_VISION_SLA_FAIL_THRESHOLD", "3")
         monkeypatch.setenv("HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD", "0.5")
         monitor = _VisionSLAMonitor()
@@ -385,26 +375,22 @@ class TestVisionSLAMonitor:
 
 
 # ---------------------------------------------------------------------------
-# 预召回注入链路测试（RecallFusionNode → _sse_event_generator）
-# ---------------------------------------------------------------------------
+# 棰勫彫鍥炴敞鍏ラ摼璺祴璇曪紙RecallFusionNode 鈫?_sse_event_generator锛?# ---------------------------------------------------------------------------
 
 class TestPreRecallInjection:
-    """验证 RecallFusionNode 预召回结果注入 _sse_event_generator 的链路。
-
-    核心问题：RecallFusionNode 执行七路召回后，结果写入 ctx.recall_context_pack，
-    但 run_as_sse_adapter 调用 _unified_chat_sse_generator 时必须将其传入，
-    否则 _sse_event_generator 会重复执行一次召回（孤岛问题）。
-    """
+    """楠岃瘉 RecallFusionNode 棰勫彫鍥炵粨鏋滄敞鍏?_sse_event_generator 鐨勯摼璺€?
+    鏍稿績闂锛歊ecallFusionNode 鎵ц涓冭矾鍙洖鍚庯紝缁撴灉鍐欏叆 ctx.recall_payload锛?    浣?run_as_sse_adapter 璋冪敤 _unified_chat_sse_generator 鏃跺繀椤诲皢鍏朵紶鍏ワ紝
+    鍚﹀垯 _sse_event_generator 浼氶噸澶嶆墽琛屼竴娆″彫鍥烇紙瀛ゅ矝闂锛夈€?    """
 
     def test_sse_event_generator_uses_pre_recall_evidence_skips_retrieval(self):
-        """当 _pre_recall_evidence 传入时，_sse_event_generator 跳过内部召回。"""
+        """褰?_pre_recall_evidence 浼犲叆鏃讹紝_sse_event_generator 璺宠繃鍐呴儴鍙洖銆?""
         import asyncio
         from unittest.mock import patch, MagicMock, AsyncMock
         from host_brain.app.chat_stream_handler import _sse_event_generator
 
         pre_evidence = [
-            {"slot_name": "world_canon", "text": "夏目是一个AI助手", "snippet": "夏目是一个AI助手"},
-            {"slot_name": "episodic", "text": "上次聊了天气", "snippet": "上次聊了天气"},
+            {"slot_name": "world_canon", "text": "澶忕洰鏄竴涓狝I鍔╂墜", "snippet": "澶忕洰鏄竴涓狝I鍔╂墜"},
+            {"slot_name": "episodic", "text": "涓婃鑱婁簡澶╂皵", "snippet": "涓婃鑱婁簡澶╂皵"},
         ]
 
         mock_governor_result = {"decision": "APPROVE", "intent_id": "intent-001"}
@@ -431,7 +417,7 @@ class TestPreRecallInjection:
                  patch("host_brain.app.chat_stream_handler.stream_llm_response",
                        return_value=AsyncMock(__aiter__=lambda s: iter([]))):
                 async for event in _sse_event_generator(
-                    message="你好",
+                    message="浣犲ソ",
                     session_id="sess-001",
                     thread_id=None,
                     mood_state=None,
@@ -449,30 +435,25 @@ class TestPreRecallInjection:
         try:
             loop.run_until_complete(_collect_events())
         except Exception:
-            pass  # 允许 LLM 调用失败，只验证召回是否被跳过
-        finally:
+            pass  # 鍏佽 LLM 璋冪敤澶辫触锛屽彧楠岃瘉鍙洖鏄惁琚烦杩?        finally:
             loop.close()
 
-        # 核心断言：_run_retrieval 不应被调用（预召回已提供）
-        assert len(retrieval_called) == 0, (
-            f"_run_retrieval 被调用了 {len(retrieval_called)} 次，"
-            "说明预召回注入未生效，RecallFusionNode 孤岛问题未修复"
+        # 鏍稿績鏂█锛歘run_retrieval 涓嶅簲琚皟鐢紙棰勫彫鍥炲凡鎻愪緵锛?        assert len(retrieval_called) == 0, (
+            f"_run_retrieval 琚皟鐢ㄤ簡 {len(retrieval_called)} 娆★紝"
+            "璇存槑棰勫彫鍥炴敞鍏ユ湭鐢熸晥锛孯ecallFusionNode 瀛ゅ矝闂鏈慨澶?
         )
 
-    def test_recall_context_pack_extracted_correctly_in_run_as_sse_adapter(self):
-        """run_as_sse_adapter 正确从 ctx.recall_context_pack 提取 retrieval_evidence_items。"""
-        # 验证提取逻辑：只有非空列表才会被提取为 _pre_recall
+    def test_recall_payload_extracted_correctly_in_run_as_sse_adapter(self):
+        """run_as_sse_adapter 姝ｇ‘浠?ctx.recall_payload 鎻愬彇 retrieval_evidence_items銆?""
+        # 楠岃瘉鎻愬彇閫昏緫锛氬彧鏈夐潪绌哄垪琛ㄦ墠浼氳鎻愬彇涓?_pre_recall
         test_cases = [
-            # (recall_context_pack, expected_pre_recall_is_not_none)
+            # (recall_payload, expected_pre_recall_is_not_none)
             ({"retrieval_evidence_items": [{"text": "test"}]}, True),
-            ({"retrieval_evidence_items": []}, False),  # 空列表不提取
-            ({"retrieval_evidence_items": None}, False),  # None 不提取
-            ({}, False),  # 无 key 不提取
-            (None, False),  # None pack 不提取
-        ]
+            ({"retrieval_evidence_items": []}, False),  # 绌哄垪琛ㄤ笉鎻愬彇
+            ({"retrieval_evidence_items": None}, False),  # None 涓嶆彁鍙?            ({}, False),  # 鏃?key 涓嶆彁鍙?            (None, False),  # None pack 涓嶆彁鍙?        ]
 
         for pack, expected_not_none in test_cases:
-            # 模拟 run_as_sse_adapter 中的提取逻辑
+            # 妯℃嫙 run_as_sse_adapter 涓殑鎻愬彇閫昏緫
             _pre_recall = None
             _recall_pack = pack
             if isinstance(_recall_pack, dict):
@@ -481,8 +462,9 @@ class TestPreRecallInjection:
                     _pre_recall = _items
 
             if expected_not_none:
-                assert _pre_recall is not None, f"pack={pack} 应该提取到 _pre_recall"
+                assert _pre_recall is not None, f"pack={pack} 搴旇鎻愬彇鍒?_pre_recall"
                 assert len(_pre_recall) > 0
             else:
-                assert _pre_recall is None, f"pack={pack} 不应该提取到 _pre_recall"
+                assert _pre_recall is None, f"pack={pack} 涓嶅簲璇ユ彁鍙栧埌 _pre_recall"
+
 

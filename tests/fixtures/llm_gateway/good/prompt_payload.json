@@ -1,11 +1,11 @@
-{
-  "context_pack": {
+﻿{
+  "prompt_context": {
     "hard_snapshot": {
       "sys_mode": "normal"
     },
     "bond_summary": {
       "stage": "STRANGER",
-      "trend": "稳定",
+      "trend": "绋冲畾",
       "capability_hint": "SUPPORTIVE",
       "event_id": "bond_evt_001",
       "evidence_refs": [
@@ -26,3 +26,4 @@
   },
   "api_key": "sk-test-hidden"
 }
+

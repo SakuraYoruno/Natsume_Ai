@@ -1,0 +1,53 @@
+{
+  "request_id": "req_personal_lan_inventory_001",
+  "expected_node_count": 2,
+  "required_services": [
+    "host.audit.sqlite_ledger",
+    "host.governor.decision",
+    "host.skills.loader",
+    "host.integrations.llm_gateway",
+    "host.retrieval.embedding",
+    "host.retrieval.reranker",
+    "host.vision.screen_ocr",
+    "host.vision.camera_recognizer",
+    "edge.rpc.gateway",
+    "edge.rpc.asr",
+    "edge.rpc.tts",
+    "edge.rpc.barge_in",
+    "edge.rpc.resource_gate"
+  ],
+  "nodes": [
+    {
+      "node_id": "personal-host-main",
+      "region": "lan",
+      "role": "orchestrator",
+      "services": [
+        "host.audit.sqlite_ledger",
+        "host.governor.decision",
+        "host.skills.loader",
+        "host.integrations.llm_gateway",
+        "host.retrieval.embedding",
+        "host.retrieval.reranker",
+        "host.vision.screen_ocr",
+        "host.vision.camera_recognizer"
+      ],
+      "health_endpoint": "http://127.0.0.1:18080/health",
+      "key_profile_id": "host-local-runtime"
+    },
+    {
+      "node_id": "personal-edge-vts",
+      "region": "lan",
+      "role": "edge_realtime",
+      "services": [
+        "edge.rpc.gateway",
+        "edge.rpc.asr",
+        "edge.rpc.tts",
+        "edge.rpc.barge_in",
+        "edge.rpc.resource_gate"
+      ],
+      "health_endpoint": "http://192.168.1.101:17800/v1/edge/health",
+      "key_profile_id": "edge-lan-runtime"
+    }
+  ],
+  "runtime_statuses": {}
+}

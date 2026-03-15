@@ -2,13 +2,13 @@
 test_isolated_modules_integration.py
 ——————————————————————————————————————
 选项一：SCENE_VISION_UI 白名单测试
-选项二：RoutingMatrix / ContextPackBuilder / MemoryGuard / StateArbiter 接入测试
+选项二：RoutingMatrix / RecallPackBuilder / MemoryGuard / StateArbiter 接入测试
 选项三：单元测试覆盖
 
 覆盖范围：
   - SCENE_VISION_UI 已加入 ALLOWED_EXPLICIT_SCENE_TYPES
   - RoutingMatrix.select_with_fallback() 正常路由 + 降级链
-  - ContextPackBuilder.build() token 预算控制
+  - RecallPackBuilder.build() token 预算控制
   - MemoryGuard.check_episodic_write() 宪法校验
   - StateArbiter.resolve() 优先级仲裁
   - persist_chat_episodic_memory 中 MemoryGuard 校验路径
@@ -109,15 +109,15 @@ class TestRoutingMatrixIntegration:
 
 
 # ---------------------------------------------------------------------------
-# 选项二：ContextPackBuilder 接入测试
+# 选项二：RecallPackBuilder 接入测试
 # ---------------------------------------------------------------------------
 
-class TestContextPackBuilderIntegration:
-    """ContextPackBuilder.build() token 预算控制测试。"""
+class TestRecallPackBuilderIntegration:
+    """RecallPackBuilder.build() token 预算控制测试。"""
 
     def _make_builder(self):
-        from host_brain.app.recall.context_pack_builder import ContextPackBuilder
-        return ContextPackBuilder()
+        from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
+        return RecallPackBuilder()
 
     def test_build_with_empty_recall(self):
         builder = self._make_builder()
@@ -133,8 +133,8 @@ class TestContextPackBuilderIntegration:
         assert slot.content
 
     def test_token_budget_truncation(self):
-        from host_brain.app.recall.context_pack_builder import ContextPackBuilder
-        builder = ContextPackBuilder()
+        from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
+        builder = RecallPackBuilder()
         # 超长文本应被截断
         long_text = "这是一段很长的文本。" * 500
         pack = builder.build(recall_results={"world_canon": long_text})

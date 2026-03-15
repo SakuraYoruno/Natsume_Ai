@@ -1,22 +1,8 @@
-受众：CODEX
-标题：Fixtures 占位
+﻿鍙椾紬锛欳ODEX
+鏍囬锛欶ixtures 鍗犱綅
 
-目录说明：
-1. `intent/`：good/bad intent 样例。
-2. `llm/`：good/bad LLM 输出样例。
-3. `replay_logs/`：回放日志样例。
-4. `cold_start/`：无 API key/外部依赖不可用样例。
-5. `context_pack/`：分槽隔离与 Canon 引用口径样例。
-6. `governor_output/`：GovernorOutput 契约正反例（reason_code/token/rule_trace）。
-7. `tokens/`：approval/confirm/undo 绑定、过期、伪造样例。
-8. `governor_rules/`：R1~R7 gate 快照样例（命中/未命中）。
-9. `intent/proposals/`：多 proposer 元信息样例（A/B）。
-10. `canon/`：style/world canon 的正反例与版本漂移样例。
-11. `memory/`：episodic 写入门禁与生命周期（merge/decay/delete）样例。
-12. `vault/`：manifest/undo/GC 的正反例与 digest 失配样例。
-
-注意：fixtures 仅提供样例结构，不代表真实执行成功。
-13. `airlock/`: egress sanitization, ingress quarantine fixtures (missing report, direct-execution ingress sample, fact sample), and DRAFT_CODE sandbox execution fixtures (normal exec, timeout, malicious code, resource exceeded for `T-Sandbox-01`).
+鐩綍璇存槑锛?1. `intent/`锛歡ood/bad intent 鏍蜂緥銆?2. `llm/`锛歡ood/bad LLM 杈撳嚭鏍蜂緥銆?3. `replay_logs/`锛氬洖鏀炬棩蹇楁牱渚嬨€?4. `cold_start/`锛氭棤 API key/澶栭儴渚濊禆涓嶅彲鐢ㄦ牱渚嬨€?5. `prompt_context/`锛氬垎妲介殧绂讳笌 Canon 寮曠敤鍙ｅ緞鏍蜂緥銆?6. `governor_output/`锛欸overnorOutput 濂戠害姝ｅ弽渚嬶紙reason_code/token/rule_trace锛夈€?7. `tokens/`锛歛pproval/confirm/undo 缁戝畾銆佽繃鏈熴€佷吉閫犳牱渚嬨€?8. `governor_rules/`锛歊1~R7 gate 蹇収鏍蜂緥锛堝懡涓?鏈懡涓級銆?9. `intent/proposals/`锛氬 proposer 鍏冧俊鎭牱渚嬶紙A/B锛夈€?10. `canon/`锛歴tyle/world canon 鐨勬鍙嶄緥涓庣増鏈紓绉绘牱渚嬨€?11. `memory/`锛歟pisodic 鍐欏叆闂ㄧ涓庣敓鍛藉懆鏈燂紙merge/decay/delete锛夋牱渚嬨€?12. `vault/`锛歮anifest/undo/GC 鐨勬鍙嶄緥涓?digest 澶遍厤鏍蜂緥銆?
+娉ㄦ剰锛歠ixtures 浠呮彁渚涙牱渚嬬粨鏋勶紝涓嶄唬琛ㄧ湡瀹炴墽琛屾垚鍔熴€?13. `airlock/`: egress sanitization, ingress quarantine fixtures (missing report, direct-execution ingress sample, fact sample), and DRAFT_CODE sandbox execution fixtures (normal exec, timeout, malicious code, resource exceeded for `T-Sandbox-01`).
 14. `tools/`: tool catalog metadata fixtures (mixed READ/WRITE and metadata-only contract negatives).
 15. `mcp/`: provider tool sync fixtures (READ/WRITE classification, metadata validation, and governed invocation paths).
 16. `channels/`: WeChat ingress/egress and VTS avatar fixtures (duplicate ingress, failed egress ack, invalid emotion tags, and free-form action blocking).
@@ -33,3 +19,4 @@
 27. `release/`: release checklist and rollback map fixtures for `M0~M3` deployable assets, checksum drift/missing asset negatives, and rollback target resolution (`T-Release-01`).
 28. `drill/`: production drill fixtures for `cold_start_no_key`, `provider_down`, and `rollback_conflict`, with deterministic scenario report fields (`scenario_id/status/reason_code_chain/replay_ref`) and failure classification/disposition (`T-Drill-01`).
 29. `emotion/`: emotion closed-loop regression corpus for mood-tag constraints, intensity clamping, prompt binding consistency, and VTS expression mapping (`T-Emotion-Regression-01`).
+

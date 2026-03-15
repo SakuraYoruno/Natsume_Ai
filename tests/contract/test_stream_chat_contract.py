@@ -1,4 +1,4 @@
-"""T-STREAM-01/02: /v1/chat/stream SSE contract tests.
+﻿"""T-STREAM-01/02: /v1/chat/stream SSE contract tests.
 
 T-STREAM-01:
 - GET /v1/chat/stream returns stable SSE sequence and ends with COMMIT.
@@ -102,15 +102,15 @@ def _install_stream_contract_stubs(monkeypatch: Any) -> dict[str, Any]:
             {},
             {"mood_state": "engaged", "emotion_tag": "HAPPY", "emotion_intensity": 0.8},
             {
-                "context_pack_validation": {
+                "prompt_context_validation": {
                     "valid": True,
                     "degraded": False,
                     "reason_code": None,
                     "violation_count": 0,
                     "violations": [],
                 },
-                "context_pack_observability": {
-                    "version": "context_pack_obs.v1",
+                "prompt_context_observability": {
+                    "version": "prompt_context_obs.v1",
                     "degrade_order": ["six_route", "core_three", "minimal_context", "bare_llm"],
                     "selected_tier": "six_route",
                     "selected_reason": "full_six_route_retrieval_ready",
@@ -124,7 +124,7 @@ def _install_stream_contract_stubs(monkeypatch: Any) -> dict[str, Any]:
                     "emotion_context": {
                         "mood_state": "engaged",
                         "emotion_tag": "HAPPY",
-                        "emotion_range_hint": "可积极表达",
+                        "emotion_range_hint": "鍙Н鏋佽〃杈?,
                         "emotion_intensity": 0.8,
                     },
                 },
@@ -201,7 +201,7 @@ def test_t_stream_01_get_stream_sse_sequence_and_commit_contract(monkeypatch: An
     audit_refs = dict(commit.get("audit_refs") or {})
     assert dict(audit_refs.get("retrieval") or {}).get("status") == "OK"
     assert dict(audit_refs.get("route_decision") or {}).get("route_target") == "cloud"
-    assert dict(audit_refs.get("context_pack_observability") or {}).get("selected_tier") == "six_route"
+    assert dict(audit_refs.get("prompt_context_observability") or {}).get("selected_tier") == "six_route"
     assert dict(dict(audit_refs.get("emotion_snapshot") or {}).get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
     assert dict(audit_refs.get("vts") or {}).get("status") == "APPLIED"
     trace_metrics = dict(audit_refs.get("trace_metrics") or {})
@@ -249,3 +249,4 @@ def test_t_stream_02_post_stream_accepts_intent_draft_and_terminates_with_commit
     raw_intent = dict(captured.get("raw_intent") or {})
     assert raw_intent.get("id") == "intent::stream::contract::02"
     assert int(raw_intent.get("seq") or 0) == 7
+

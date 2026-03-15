@@ -22,14 +22,22 @@ defaults:
 # 用于 VTSMappingStore 加载初始映射（情感驱动对话链路）
 # ─────────────────────────────────────────────
 emotion_mapping:
-  NEUTRAL:    "exp_neutral_01"
-  HAPPY:      "exp_happy_01"
-  SAD:        "exp_sad_01"
-  ANGRY:      "exp_angry_01"
-  SURPRISED:  "exp_surprised_01"
-  THINKING:   "exp_thinking_01"
-  CALM:       "exp_calm_01"
-  EXCITED:    "exp_excited_01"
+  NEUTRAL:      "移除所有按键表情"
+  HAPPY:        "HK_Happy"
+  SAD:          "哭哭"
+  ANGRY:        "HK_Angry"
+  SURPRISED:    "圈圈眼"
+  THINKING:     "无语眼"
+  CALM:         "蓝瞳孔"
+  EXCITED:      "HK_Happy"
+  FRUSTRATED:   "HK_Despise"
+  ANXIOUS:      "眩晕"
+  LOVING:       "HK_Love"
+  EMBARRASSED:  "HK_Shy"
+  CONFUSED:     "无语眼"
+  BORED:        "HK_Dead"
+  PROUD:        "剪刀眼"
+  GRATEFUL:     "四叶草"
 
 # ─────────────────────────────────────────────
 # 热键分组配置

@@ -23,8 +23,10 @@ def _write_style_entry(root: Path, *, canon_id: str, content: str) -> None:
         "updated_by": "test",
         "ts_ms": 0,
     }
-    path = root / f"{canon_id}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (root / f"{canon_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_world_doc(root: Path, *, doc_id: str, title: str, body: str) -> None:
@@ -41,146 +43,93 @@ def _write_world_doc(root: Path, *, doc_id: str, title: str, body: str) -> None:
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     payload["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    path = root / f"{doc_id}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (root / f"{doc_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
-def test_build_node_style_bindings_loads_cn_and_ja(monkeypatch, tmp_path: Path) -> None:
-    style_root = tmp_path / "style"
-    _write_style_entry(style_root, canon_id="natsume_ai_cn", content="CN_STYLE_HINT")
-    _write_style_entry(style_root, canon_id="natsume_ai_ja", content="JA_STYLE_HINT")
+def _make_runtime_payload(
+    *,
+    request_id: str,
+    session_id: str,
+    user_message: str,
+    retrieval_summary: dict,
+    retrieval_evidence_items: list[dict],
+    recall_slot_text: dict[str, str] | None = None,
+    emotion_state: dict | None = None,
+):
+    from host_brain.app.chat_context_builder import build_chat_runtime_payload
+    from host_brain.app.chat_runtime_input import build_chat_runtime_input
 
-    monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-    monkeypatch.setenv("HOST_STYLE_CORE_CANON_ID", "natsume_ai_cn")
-    monkeypatch.setenv("HOST_STYLE_RENDER_CANON_ID", "natsume_ai_ja")
-
-    import host_brain.app.dependencies as dep
-    dep._ledger = None
-    from host_brain.app.chat_context_builder import build_node_style_bindings as _build_node_style_bindings
-    bindings = _build_node_style_bindings()
-
-    assert bindings["core_reasoner_primary"]["canon_id"] == "natsume_ai_cn"
-    assert bindings["core_reasoner_secondary"]["canon_id"] == "natsume_ai_cn"
-    assert bindings["chat_direct_ja"]["canon_id"] == "natsume_ai_ja"
-    assert bindings["renderer_ja_c_style"]["canon_id"] == "natsume_ai_ja"
-    assert "CN_STYLE_HINT" in str(bindings["core_reasoner_primary"]["style_instruction"])
-    assert "JA_STYLE_HINT" in str(bindings["chat_direct_ja"]["style_instruction"])
-    assert "JA_STYLE_HINT" in str(bindings["renderer_ja_c_style"]["style_instruction"])
-
-
-def test_render_node_prompt_uses_node_specific_style() -> None:
-    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
-
-    runtime_payload = {
-        "user_message": "测试风格绑定",
-        "retrieval": {
-            "status": "OK",
-            "reason_code": "NONE",
-            "evidence_items": [],
-        },
-        "style_bindings": {
+    runtime_input = build_chat_runtime_input(
+        request_id=request_id,
+        session_id=session_id,
+        thread_id=None,
+        user_message=user_message,
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        recall_slot_text=recall_slot_text or {},
+        emotion_state=emotion_state or {},
+        render_target_lang="ja",
+    )
+    payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    payload.update(
+        {
             "core_reasoner_primary": {
-                "canon_id": "natsume_ai_cn",
-                "citation": "style_canon:natsume_ai_cn@v1:aaaa",
-                "tone_only": True,
-                "unsafe_as_fact": True,
-                "style_instruction": "CN_STYLE_HINT",
+                "payload": {
+                    "narrative": {"text": "core narrative"},
+                    "intent_draft": {"skill_name": "narrative_only", "args": {}},
+                }
             },
-            "renderer_ja_c_style": {
-                "canon_id": "natsume_ai_ja",
-                "citation": "style_canon:natsume_ai_ja@v1:bbbb",
-                "tone_only": True,
-                "unsafe_as_fact": True,
-                "style_instruction": "JA_STYLE_HINT",
-            },
-            "chat_direct_ja": {
-                "canon_id": "natsume_ai_ja",
-                "citation": "style_canon:natsume_ai_ja@v1:cccc",
-                "tone_only": True,
-                "unsafe_as_fact": True,
-                "style_instruction": "JA_STYLE_HINT_DIRECT",
-            },
-        },
-        "core_reasoner_primary": {
-            "payload": {
-                "narrative": {"text": "这是中文语义草案"},
-                "intent_draft": {"skill_name": "narrative_only", "args": {}},
-            }
-        },
-        "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
-        "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
-    }
-
-    core_prompt = _render_node_generation_prompt(
-        node_id="core_reasoner_primary",
-        runtime_payload=runtime_payload,
+            "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
+            "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
+        }
     )
-    render_prompt = _render_node_generation_prompt(
-        node_id="renderer_ja_c_style",
-        runtime_payload=runtime_payload,
-    )
-    direct_prompt = _render_node_generation_prompt(
-        node_id="chat_direct_ja",
-        runtime_payload=runtime_payload,
-    )
-
-    assert "STYLE_CANON_BINDING" in core_prompt
-    assert "canon_id: natsume_ai_cn" in core_prompt
-    assert "CN_STYLE_HINT" in core_prompt
-    assert "canon_id: natsume_ai_ja" not in core_prompt
-
-    assert "STYLE_CANON_BINDING" in render_prompt
-    assert "canon_id: natsume_ai_ja" in render_prompt
-    assert "JA_STYLE_HINT" in render_prompt
-    assert "canon_id: natsume_ai_cn" not in render_prompt
-
-    assert "STYLE_CANON_BINDING" in direct_prompt
-    assert "canon_id: natsume_ai_ja" in direct_prompt
-    assert "JA_STYLE_HINT_DIRECT" in direct_prompt
-    assert "Role: chat_direct_ja" in direct_prompt
+    return payload
 
 
-def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    style_root = tmp_path / "style"
-    world_root = tmp_path / "world"
-    _write_style_entry(style_root, canon_id="natsume_ai_cn", content="CN_STYLE_HINT")
-    _write_style_entry(style_root, canon_id="natsume_ai_ja", content="JA_STYLE_HINT")
-    _write_world_doc(
-        world_root,
-        doc_id="wc-003-persona-core",
-        title="人格核心设定",
-        body="夏目保持温柔与边界感，只能给出草案，不宣称执行。",
-    )
-
-    monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
-    monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(world_root))
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-
-    import host_brain.app.dependencies as dep
-    dep._ledger = None
-    from host_brain.app.chat_context_builder import (
-        build_node_style_bindings as _build_node_style_bindings,
-        build_chat_generation_prompt_payload as _build_chat_generation_prompt_payload,
-    )
-    style_bindings = _build_node_style_bindings()
-    payload = _build_chat_generation_prompt_payload(
-        request_id="req_ctx_pack",
-        session_id="session_ctx_pack",
-        thread_id="thread_ctx_pack",
-        user_message="测试 context pack",
-        emotion_context={
-            "mood_state": "engaged",
-            "emotion_tag": "HAPPY",
-            "emotion_range_hint": "可以表达积极情感",
-        },
+def test_build_chat_runtime_payload_uses_recall_slots_for_background() -> None:
+    payload = _make_runtime_payload(
+        request_id="req_recall_slots",
+        session_id="session_recall_slots",
+        user_message="test prompt context",
         retrieval_summary={
             "status": "OK",
             "reason_code": "NONE",
-            "route_count": 1,
+            "route_count": 7,
+            "candidate_count": 2,
+            "rerank_topk": 2,
+            "degraded": False,
+        },
+        retrieval_evidence_items=[],
+        recall_slot_text={
+            "style_canon": "JA_STYLE_HINT",
+            "world_canon": "Natsume never claims completed execution.",
+        },
+    )
+
+    assert "style" not in payload
+    prompt_context = dict(dict(payload.get("prompt_context") or {}).get("payload") or {})
+    style_pack = dict(prompt_context.get("style_pack") or {})
+    style_rows = list(style_pack.get("style_canon") or [])
+    authoritative = list(prompt_context.get("authoritative") or [])
+    assert len(style_rows) == 1
+    assert style_rows[0].get("source") == "recall_pack_builder"
+    assert style_rows[0].get("instruction") == "JA_STYLE_HINT"
+    assert len(authoritative) == 1
+    assert authoritative[0].get("citation") == "recall_pack_builder://world_canon"
+
+
+def test_build_chat_runtime_payload_includes_valid_prompt_context() -> None:
+    payload = _make_runtime_payload(
+        request_id="req_prompt_context",
+        session_id="session_prompt_context",
+        user_message="test prompt context",
+        retrieval_summary={
+            "status": "OK",
+            "reason_code": "NONE",
+            "route_count": 3,
             "candidate_count": 1,
             "rerank_topk": 1,
             "degraded": False,
@@ -189,73 +138,60 @@ def test_build_chat_generation_prompt_payload_includes_valid_context_pack(
             {
                 "evidence_ref": "evd://episodic/test",
                 "source_ref": "memory://episodic/test",
-                "snippet": "这是检索摘要",
+                "snippet": "retrieval snippet",
                 "score": 0.9,
                 "confidence": 0.9,
             }
         ],
-        style_bindings=style_bindings,
+        recall_slot_text={
+            "style_canon": "JA_STYLE_HINT",
+            "world_canon": "Natsume keeps a soft boundary and never claims completed execution.",
+        },
+        emotion_state={
+            "mood_state": "engaged",
+            "emotion_tag": "HAPPY",
+            "emotion_range_hint": "positive expression is allowed",
+        },
     )
 
-    context_pack = dict(payload.get("context_pack") or {})
-    context_pack_validation = dict(payload.get("context_pack_validation") or {})
-    context_pack_observability = dict(payload.get("context_pack_observability") or {})
-    assert context_pack
-    assert context_pack_validation.get("valid") is True
-    assert context_pack_observability.get("version") == "context_pack_obs.v1"
-    assert context_pack_observability.get("selected_tier") == "core_three"
-    retrieval_metrics = dict(context_pack_observability.get("retrieval_metrics") or {})
-    source_stats = dict(context_pack_observability.get("source_stats") or {})
+    prompt_context_section = dict(payload.get("prompt_context") or {})
+    prompt_context = dict(prompt_context_section.get("payload") or {})
+    prompt_context_validation = dict(prompt_context_section.get("validation") or {})
+    prompt_context_observability = dict(prompt_context_section.get("observability") or {})
+
+    assert prompt_context
+    assert prompt_context_validation.get("valid") is True
+    assert prompt_context_observability.get("version") == "prompt_context_obs.v1"
+    assert prompt_context_observability.get("selected_tier") == "core_three"
+    retrieval_metrics = dict(prompt_context_observability.get("retrieval_metrics") or {})
+    source_stats = dict(prompt_context_observability.get("source_stats") or {})
     assert retrieval_metrics.get("path") == "success"
     assert source_stats.get("retrieval_used_items") == 1
-    authoritative = list(context_pack.get("authoritative") or [])
+    assert source_stats.get("style_prompt_rows") == 1
+
+    authoritative = list(prompt_context.get("authoritative") or [])
     assert any(str(row.get("kind") or "") == "world_canon" for row in authoritative)
-    style_pack = dict(context_pack.get("style_pack") or {})
-    node_bindings = dict(style_pack.get("node_bindings") or {})
-    assert "core_reasoner_primary" in node_bindings
-    assert "chat_direct_ja" in node_bindings
-    assert "renderer_ja_c_style" in node_bindings
-    assert dict(payload.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
-    assert float(dict(payload.get("emotion_context") or {}).get("emotion_intensity") or 0.0) == 0.5
-    emotion_snapshot = dict(payload.get("emotion_snapshot") or {})
+
+    style_pack = dict(prompt_context.get("style_pack") or {})
+    style_rows = list(style_pack.get("style_canon") or [])
+    assert len(style_rows) == 1
+    assert style_rows[0].get("source") == "recall_pack_builder"
+
+    emotion_section = dict(payload.get("emotion") or {})
+    emotion_state = dict(emotion_section.get("state") or {})
+    emotion_snapshot = dict(emotion_section.get("snapshot") or {})
+    assert emotion_state.get("emotion_tag") == "HAPPY"
     assert emotion_snapshot.get("version") == "chat_emotion_snapshot.v1"
-    assert dict(emotion_snapshot.get("emotion_context") or {}).get("emotion_tag") == "HAPPY"
-    assert dict(context_pack.get("emotion_pulse") or {}).get("emotion_tag") == "HAPPY"
-    assert dict(context_pack.get("memory_emotion_hint") or {}).get("mood_state") == "engaged"
-    assert dict(context_pack.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
+    assert dict(prompt_context.get("emotion_pulse") or {}).get("emotion_tag") == "HAPPY"
+    assert dict(prompt_context.get("memory_emotion_hint") or {}).get("mood_state") == "engaged"
+    assert dict(prompt_context.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
 
 
-def test_build_chat_generation_prompt_payload_marks_persona_utterance_rows(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    style_root = tmp_path / "style"
-    world_root = tmp_path / "world"
-    _write_style_entry(style_root, canon_id="natsume_ai_cn", content="CN_STYLE_HINT")
-    _write_style_entry(style_root, canon_id="natsume_ai_ja", content="JA_STYLE_HINT")
-    _write_world_doc(
-        world_root,
-        doc_id="wc-003-persona-core",
-        title="人格核心设定",
-        body="夏目保持温柔与边界感，只能给出草案，不宣称执行。",
-    )
-
-    monkeypatch.setenv("Natsume_STYLE_CANON_ROOT", str(style_root))
-    monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(world_root))
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-
-    import host_brain.app.dependencies as dep
-    dep._ledger = None
-    from host_brain.app.chat_context_builder import (
-        build_node_style_bindings as _build_node_style_bindings,
-        build_chat_generation_prompt_payload as _build_chat_generation_prompt_payload,
-    )
-
-    payload = _build_chat_generation_prompt_payload(
-        request_id="req_ctx_pack_persona",
-        session_id="session_ctx_pack_persona",
-        thread_id="thread_ctx_pack_persona",
-        user_message="有点难受，想聊聊。",
+def test_build_chat_runtime_payload_marks_persona_utterance_rows() -> None:
+    payload = _make_runtime_payload(
+        request_id="req_prompt_context_persona",
+        session_id="session_prompt_context_persona",
+        user_message="need a gentle answer",
         retrieval_summary={
             "status": "OK",
             "reason_code": "NONE",
@@ -268,40 +204,38 @@ def test_build_chat_generation_prompt_payload_marks_persona_utterance_rows(
             {
                 "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/01",
                 "source_ref": "persona_utterance://natsume_ai_ja/ja/01",
-                "snippet": "今日は少しつらいんだね……無理しないで。",
+                "snippet": "example line",
                 "score": 0.91,
                 "confidence": 0.91,
                 "metadata": {
                     "store_id": "persona_utterance",
                     "canon_id": "natsume_ai_ja",
                     "lang": "ja",
-                    "speaker": "夏目藍",
+                    "speaker": "Natsume",
                     "file_rel_path": "story/ch01.ast",
                     "block_id": "block_01",
                     "line_index": 3,
                 },
             }
         ],
-        style_bindings=_build_node_style_bindings(),
+        recall_slot_text={"style_canon": "JA_STYLE_HINT"},
     )
 
-    context_pack = dict(payload.get("context_pack") or {})
-    retrieval_rows = list(context_pack.get("retrieval") or [])
+    prompt_context = dict(dict(payload.get("prompt_context") or {}).get("payload") or {})
+    retrieval_rows = list(prompt_context.get("retrieval") or [])
     assert retrieval_rows
     top = dict(retrieval_rows[0])
     assert top.get("kind") == "persona_utterance"
     assert top.get("store_id") == "persona_utterance"
     assert top.get("lang") == "ja"
-    assert top.get("speaker") == "夏目藍"
+    assert top.get("speaker") == "Natsume"
 
 
-def test_context_pack_observability_marks_bare_llm_when_minimal_fallback() -> None:
-    from host_brain.app.chat_context_builder import (
-        build_context_pack_observability as _build_context_pack_observability,
-    )
+def test_prompt_context_observability_marks_bare_llm_when_minimal_fallback() -> None:
+    from host_brain.app.chat_context_builder import build_prompt_context_observability
 
-    observability = _build_context_pack_observability(
-        context_pack={
+    observability = build_prompt_context_observability(
+        prompt_context={
             "hard_snapshot": {},
             "bond_summary": {},
             "authoritative": [],
@@ -310,10 +244,10 @@ def test_context_pack_observability_marks_bare_llm_when_minimal_fallback() -> No
             "constraints": {},
             "tool_meta_pack": [],
         },
-        context_pack_validation={
+        prompt_context_validation={
             "valid": True,
             "degraded": True,
-            "reason_code": "CONTEXT_PACK_MINIMAL_FALLBACK",
+            "reason_code": "PROMPT_CONTEXT_MINIMAL_FALLBACK",
             "violation_count": 2,
             "violations": [],
         },
@@ -329,100 +263,115 @@ def test_context_pack_observability_marks_bare_llm_when_minimal_fallback() -> No
     )
 
     assert observability.get("selected_tier") == "bare_llm"
-    assert observability.get("selected_reason") == "context_pack_minimal_fallback_and_empty_slots"
+    assert observability.get("selected_reason") == "prompt_context_minimal_fallback_and_empty_slots"
     retrieval_metrics = dict(observability.get("retrieval_metrics") or {})
     assert retrieval_metrics.get("path") == "all_failure"
 
 
-def test_render_node_prompt_prefers_context_pack_slots() -> None:
-    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
+def test_render_node_prompt_prefers_prompt_context_slots() -> None:
+    from host_brain.app.prompt_builder import render_node_generation_prompt
 
     runtime_payload = {
-        "user_message": "测试严格分槽",
+        "request": {
+            "request_id": "req-render",
+            "session_id": "session-render",
+            "thread_id": None,
+            "user_message": "render prompt context",
+        },
+        "render": {"target_lang": "ja"},
         "retrieval": {
             "status": "DEGRADED",
             "reason_code": "RETR_PARTIAL",
             "evidence_items": [],
         },
-        "context_pack": {
-            "hard_snapshot": {"session_id": "s1"},
-            "bond_summary": {},
-            "authoritative": [
-                {
-                    "slot": "authoritative",
-                    "kind": "world_canon",
-                    "citation": "world_canon:wc-003-persona-core@v1:abcdef",
-                    "content": "夏目不会宣称已执行动作。",
-                }
-            ],
-            "retrieval": [
-                {
-                    "slot": "retrieval",
-                    "kind": "episodic",
-                    "evidence_ref": "evd://episodic/1",
-                    "content": "用户喜欢简洁回答。",
-                }
-            ],
-            "style_pack": {
-                "node_bindings": {
-                    "renderer_ja_c_style": {
-                        "canon_id": "natsume_ai_ja",
-                        "citation": "style_canon:natsume_ai_ja@v1:bbbb",
-                        "tone_only": True,
-                        "unsafe_as_fact": True,
-                        "style_instruction": "JA_STYLE_HINT_FROM_CONTEXT_PACK",
-                    }
-                }
-            },
-            "constraints": {
-                "strict_json_output": True,
-                "no_false_execution_claim": True,
-            },
-            "tool_meta_pack": [],
-            "emotion_pulse": {
-                "emotion_tag": "HAPPY",
-                "mood_state": "engaged",
-                "style_hint": "情绪积极",
-                "emotion_range_hint": "可以表达积极情感",
-            },
-            "memory_emotion_hint": {
-                "emotion_tag": "HAPPY",
-                "mood_state": "engaged",
-                "retrieval_status": "DEGRADED",
-            },
-            "bond_texture": {
-                "emotion_tag": "HAPPY",
-                "mood_state": "engaged",
-                "tone_hint": "保持温柔边界",
-            },
-        },
-        "context_pack_validation": {
-            "valid": True,
-            "reason_code": None,
-            "violation_count": 0,
-        },
-        "emotion_context": {
-            "mood_state": "engaged",
-            "emotion_tag": "HAPPY",
-            "emotion_range_hint": "可以表达积极情感",
-            "emotion_intensity": 0.76,
-        },
-        "emotion_snapshot": {
-            "version": "chat_emotion_snapshot.v1",
-            "source": "test_case",
-            "captured_ts_ms": 1234567890,
-            "emotion_ts_ms": 1234567000,
-            "age_ms": 890,
-            "emotion_context": {
+        "emotion": {
+            "state": {
                 "mood_state": "engaged",
                 "emotion_tag": "HAPPY",
-                "emotion_range_hint": "可以表达积极情感",
+                "emotion_range_hint": "positive expression is allowed",
                 "emotion_intensity": 0.76,
             },
+            "snapshot": {
+                "version": "chat_emotion_snapshot.v1",
+                "source": "test_case",
+                "captured_ts_ms": 1234567890,
+                "emotion_ts_ms": 1234567000,
+                "age_ms": 890,
+                "emotion_context": {
+                    "mood_state": "engaged",
+                    "emotion_tag": "HAPPY",
+                    "emotion_range_hint": "positive expression is allowed",
+                    "emotion_intensity": 0.76,
+                },
+            },
+        },
+        "prompt_context": {
+            "payload": {
+                "hard_snapshot": {"session_id": "session-render"},
+                "bond_summary": {},
+                "authoritative": [
+                    {
+                        "slot": "authoritative",
+                        "kind": "world_canon",
+                        "citation": "world_canon:wc-003-persona-core@v1:abcdef",
+                        "content": "Natsume never claims completed execution.",
+                    }
+                ],
+                "retrieval": [
+                    {
+                        "slot": "retrieval",
+                        "kind": "episodic",
+                        "evidence_ref": "evd://episodic/1",
+                        "content": "user prefers concise replies",
+                    }
+                ],
+                "style_pack": {
+                    "style_canon": [
+                        {
+                            "slot": "style_pack",
+                            "kind": "style_canon",
+                            "node_id": "renderer_ja_c_style",
+                            "canon_id": "natsume_ai_ja",
+                            "citation": "style_canon:natsume_ai_ja@v1:bbbb",
+                            "tone_only": True,
+                            "unsafe_as_fact": True,
+                            "instruction": "JA_STYLE_HINT_FROM_PROMPT_CONTEXT",
+                            "source": "recall_pack_builder",
+                        }
+                    ]
+                },
+                "constraints": {
+                    "strict_json_output": True,
+                    "no_false_execution_claim": True,
+                },
+                "tool_meta_pack": [],
+                "emotion_pulse": {
+                    "emotion_tag": "HAPPY",
+                    "mood_state": "engaged",
+                    "style_hint": "energetic but gentle",
+                    "emotion_range_hint": "positive expression is allowed",
+                },
+                "memory_emotion_hint": {
+                    "emotion_tag": "HAPPY",
+                    "mood_state": "engaged",
+                    "retrieval_status": "DEGRADED",
+                },
+                "bond_texture": {
+                    "emotion_tag": "HAPPY",
+                    "mood_state": "engaged",
+                    "tone_hint": "keep a warm boundary",
+                },
+            },
+            "validation": {
+                "valid": True,
+                "reason_code": None,
+                "violation_count": 0,
+            },
+            "observability": {},
         },
         "core_reasoner_primary": {
             "payload": {
-                "narrative": {"text": "这是中文语义草案"},
+                "narrative": {"text": "core narrative"},
                 "intent_draft": {"skill_name": "narrative_only", "args": {}},
             }
         },
@@ -430,17 +379,17 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
         "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
     }
 
-    prompt = _render_node_generation_prompt(
+    prompt = render_node_generation_prompt(
         node_id="renderer_ja_c_style",
         runtime_payload=runtime_payload,
     )
 
-    assert "CONTEXT_PACK_VALIDATION" in prompt
+    assert "PROMPT_CONTEXT_VALIDATION" in prompt
     assert "valid: True" in prompt
     assert "WORLD_CANON_BINDING" in prompt
     assert "world_canon:wc-003-persona-core" in prompt
-    assert "JA_STYLE_HINT_FROM_CONTEXT_PACK" in prompt
-    assert "用户喜欢简洁回答" in prompt
+    assert "JA_STYLE_HINT_FROM_PROMPT_CONTEXT" in prompt
+    assert "user prefers concise replies" in prompt
     assert "EMOTION_BINDING" in prompt
     assert "emotion_tag: HAPPY" in prompt
     assert "mood_state: engaged" in prompt
@@ -448,88 +397,40 @@ def test_render_node_prompt_prefers_context_pack_slots() -> None:
     assert "snapshot_source: test_case" in prompt
 
 
-def test_render_node_prompt_injects_persona_dialogue_examples_binding() -> None:
-    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
-
-    runtime_payload = {
-        "render_target_lang": "ja",
-        "user_message": "今天有点难过，想听你说说话。",
-        "retrieval": {
-            "status": "OK",
-            "reason_code": "NONE",
-            "evidence_items": [],
-        },
-        "context_pack": {
-            "hard_snapshot": {"session_id": "s1"},
-            "bond_summary": {},
-            "authoritative": [],
-            "retrieval": [
-                {
-                    "slot": "retrieval",
-                    "kind": "persona_utterance",
-                    "lang": "ja",
-                    "speaker": "夏目藍",
-                    "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/1",
-                    "content": "今日は少しつらいんだね……無理しないで。",
-                },
-                {
-                    "slot": "retrieval",
-                    "kind": "persona_utterance",
-                    "lang": "cn",
-                    "speaker": "夏目蓝",
-                    "evidence_ref": "evd://persona_utterance/natsume_ai_cn/cn/1",
-                    "content": "今天有点难受的话，先慢一点也可以。",
-                },
-            ],
-            "style_pack": {"node_bindings": {}},
-            "constraints": {
-                "strict_json_output": True,
-                "no_false_execution_claim": True,
-            },
-            "tool_meta_pack": [],
-            "emotion_pulse": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
-            "memory_emotion_hint": {},
-            "bond_texture": {},
-        },
-        "context_pack_validation": {"valid": True, "reason_code": None, "violation_count": 0},
-        "emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
-        "core_reasoner_primary": {"payload": {"narrative": {"text": "核心语义草案"}, "intent_draft": {}}},
-        "planner_constraints": {"payload": {"narrative": {"text": "constraints"}}},
-        "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
-    }
-
-    prompt = _render_node_generation_prompt(
-        node_id="chat_direct_ja",
-        runtime_payload=runtime_payload,
-    )
-
-    assert "DIALOGUE_EXAMPLES_BINDING" in prompt
-    assert "NEVER quote any example verbatim" in prompt
-    assert "今日は少しつらいんだね" in prompt
-    assert "今天有点难受的话" not in prompt
-
-
 def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> None:
-    from host_brain.app.prompt_builder import render_node_generation_prompt as _render_node_generation_prompt
+    from host_brain.app.prompt_builder import render_node_generation_prompt
 
     base_runtime_payload = {
-        "user_message": "测试节点提示词",
-        "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-        "context_pack": {
-            "hard_snapshot": {"session_id": "s1"},
-            "bond_summary": {},
-            "authoritative": [],
-            "retrieval": [],
-            "style_pack": {"node_bindings": {}},
-            "constraints": {},
-            "tool_meta_pack": [],
-            "emotion_pulse": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
-            "memory_emotion_hint": {},
-            "bond_texture": {},
+        "request": {
+            "request_id": "req-role",
+            "session_id": "session-role",
+            "thread_id": None,
+            "user_message": "test node role",
         },
-        "context_pack_validation": {"valid": True, "reason_code": None, "violation_count": 0},
-        "emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
-        "core_reasoner_primary": {"payload": {"narrative": {"text": "核心草案"}, "intent_draft": {}}},
+        "render": {"target_lang": "ja"},
+        "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+        "style": {"node_bindings": {}},
+        "emotion": {
+            "state": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
+            "snapshot": {"emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "steady"}},
+        },
+        "prompt_context": {
+            "payload": {
+                "hard_snapshot": {"session_id": "session-role"},
+                "bond_summary": {},
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {"node_bindings": {}},
+                "constraints": {},
+                "tool_meta_pack": [],
+                "emotion_pulse": {"emotion_tag": "NEUTRAL", "mood_state": "steady"},
+                "memory_emotion_hint": {},
+                "bond_texture": {},
+            },
+            "validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "observability": {},
+        },
+        "core_reasoner_primary": {"payload": {"narrative": {"text": "core"}, "intent_draft": {}}},
         "planner_constraints": {"payload": {"narrative": {"text": "constraints"}}},
         "safety_verifier": {"payload": {"narrative": {"text": "safety"}}},
     }
@@ -547,7 +448,7 @@ def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> 
     }
 
     for node_id, marker in expected_role_markers.items():
-        prompt = _render_node_generation_prompt(
+        prompt = render_node_generation_prompt(
             node_id=node_id,
             runtime_payload=base_runtime_payload,
         )

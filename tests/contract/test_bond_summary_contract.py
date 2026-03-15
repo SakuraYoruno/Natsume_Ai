@@ -1,14 +1,14 @@
-import json
+﻿import json
 import unittest
 from pathlib import Path
 
 from host_brain.bond.summarizer import derive_bond_summary, summary_has_numeric_value
-from host_brain.core.context_pack import inject_bond_summary, validate_context_pack
+from host_brain.core.prompt_context import inject_bond_summary, validate_prompt_context
 
 
 ROOT = Path(__file__).resolve().parents[2]
 BOND_FIXTURES = ROOT / "tests" / "fixtures" / "bond"
-CONTEXT_FIXTURES = ROOT / "tests" / "fixtures" / "context_pack"
+CONTEXT_FIXTURES = ROOT / "tests" / "fixtures" / "prompt_context"
 
 
 def _load_json(path: Path) -> dict:
@@ -25,7 +25,7 @@ class TestBondSummaryContract(unittest.TestCase):
             set(summary.keys()),
         )
         self.assertEqual("STRANGER", summary["stage"])
-        self.assertEqual("稳定", summary["trend"])
+        self.assertEqual("绋冲畾", summary["trend"])
         self.assertEqual("SUPPORTIVE", summary["capability_hint"])
         self.assertEqual("bond_evt_summary_001", summary["event_id"])
         self.assertEqual(["evidence::bond::summary::001"], summary["evidence_refs"])
@@ -33,11 +33,11 @@ class TestBondSummaryContract(unittest.TestCase):
         self.assertNotIn("trust_value", summary)
         self.assertNotIn("payload", summary)
 
-    def test_t_75_summary_is_injected_to_context_pack_bond_slot(self) -> None:
-        context_pack = _load_json(CONTEXT_FIXTURES / "good" / "minimal_valid.json")
+    def test_t_75_summary_is_injected_to_prompt_context_bond_slot(self) -> None:
+        prompt_context = _load_json(CONTEXT_FIXTURES / "good" / "minimal_valid.json")
         event = _load_json(BOND_FIXTURES / "good" / "bond_event_for_summary.json")
 
-        injected = inject_bond_summary(context_pack, bond_event=event)
+        injected = inject_bond_summary(prompt_context, bond_event=event)
         self.assertIn("bond_summary", injected)
         self.assertEqual("bond_evt_summary_001", injected["bond_summary"]["event_id"])
         self.assertEqual(
@@ -46,7 +46,7 @@ class TestBondSummaryContract(unittest.TestCase):
         )
         self.assertFalse(summary_has_numeric_value(injected["bond_summary"]))
 
-        result = validate_context_pack(injected)
+        result = validate_prompt_context(injected)
         self.assertTrue(result.valid, msg=result.as_dict())
 
         for entry in injected["authoritative"]:
@@ -57,3 +57,4 @@ class TestBondSummaryContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
