@@ -119,7 +119,7 @@ class TestVtsTalkGate:
         driver._state = VtsState.AUTHENTICATED
         driver._vts = MagicMock()
 
-        with patch("edge_client.actuators.vts_driver._set_vts_parameter"):
+        with patch("edge_client.actuators.vts_driver._set_vts_parameters"):
             result = driver.talk_start()
         assert result.success
         assert driver.talking
@@ -131,10 +131,57 @@ class TestVtsTalkGate:
         driver._vts = MagicMock()
         driver._talking = True
 
-        with patch("edge_client.actuators.vts_driver._set_vts_parameter"):
+        with patch("edge_client.actuators.vts_driver._set_vts_parameters"):
             result = driver.talk_end()
         assert result.success
         assert not driver.talking
+
+
+# ---------------------------------------------------------------------------
+# T-VTS-HW-01.2b: Mouth Parameter Detection
+# ---------------------------------------------------------------------------
+
+class TestVtsMouthParameterDetection:
+    """Verify mouth sync parameters adapt to the loaded VTS model."""
+
+    def test_detected_parameters_are_exposed_in_health(self):
+        driver = VTubeStudioDriver(VtsConfig())
+        driver._state = VtsState.AUTHENTICATED
+        driver._vts = MagicMock()
+
+        with patch(
+            "edge_client.actuators.vts_driver._list_vts_input_parameters",
+            return_value={"ParamMouthOpenY", "VoiceVolume", "VoiceSilence"},
+        ):
+            driver._refresh_input_parameter_plan()
+
+        health = driver.health()
+        assert health["mouth_parameters"]["mode"] == "detected"
+        assert health["mouth_parameters"]["mouth"] == ["ParamMouthOpenY"]
+        assert health["mouth_parameters"]["volume"] == ["VoiceVolume"]
+        assert health["mouth_parameters"]["silence"] == ["VoiceSilence"]
+
+    def test_set_mouth_open_level_uses_detected_parameters(self):
+        driver = VTubeStudioDriver(VtsConfig())
+        driver._state = VtsState.AUTHENTICATED
+        driver._vts = MagicMock()
+
+        with patch(
+            "edge_client.actuators.vts_driver._list_vts_input_parameters",
+            return_value={"ParamMouthOpenY", "VoiceVolume", "VoiceSilence"},
+        ):
+            driver._refresh_input_parameter_plan()
+
+        with patch("edge_client.actuators.vts_driver._set_vts_parameters") as mocked_set:
+            result = driver.set_mouth_open_level(0.42)
+
+        assert result.success
+        mocked_set.assert_called_once()
+        payload = mocked_set.call_args.kwargs["parameters"]
+        assert payload["ParamMouthOpenY"] == pytest.approx(0.42)
+        assert payload["VoiceVolume"] == pytest.approx(0.42)
+        assert payload["VoiceSilence"] == pytest.approx(1.0)
+        assert "MouthOpen" not in payload
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +255,7 @@ class TestVtsBargeInRecovery:
         driver._current_expression = "exp_happy_01"
 
         with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
-            with patch("edge_client.actuators.vts_driver._set_vts_parameter"):
+            with patch("edge_client.actuators.vts_driver._set_vts_parameters"):
                 result = driver.reset_to_neutral()
 
         assert result.success

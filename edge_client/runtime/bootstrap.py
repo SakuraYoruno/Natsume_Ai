@@ -221,6 +221,18 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             min_value=0.1,
             max_value=300.0,
         ),
+        mouth_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_MOUTH_PARAM_CANDIDATES"),
+            default=("MouthOpen", "ParamMouthOpenY"),
+        ),
+        mouth_volume_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_MOUTH_VOLUME_PARAM_CANDIDATES"),
+            default=("VoiceVolumePlusMouthOpen", "VoiceVolume"),
+        ),
+        voice_silence_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_VOICE_SILENCE_PARAM_CANDIDATES"),
+            default=("VoiceSilence",),
+        ),
         reconnect=ReconnectConfig(
             max_attempts=_parse_int(
                 _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),
@@ -517,6 +529,14 @@ def _as_text(value: Any, default: str) -> str:
 def _as_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text if text else None
+
+
+def _parse_csv_tuple(value: Any, *, default: tuple[str, ...]) -> tuple[str, ...]:
+    text = _as_optional_text(value)
+    if text is None:
+        return tuple(default)
+    parsed = tuple(part.strip() for part in text.split(",") if part.strip())
+    return parsed or tuple(default)
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:

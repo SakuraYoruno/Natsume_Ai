@@ -373,11 +373,13 @@ class EdgeVoicePipeline:
             if hotkey_id:
                 self.vts_driver.trigger_hotkey(hotkey_id)
         talk_result = self.vts_driver.talk_start()
+        vts_health = self.vts_driver.health()
         mouth_sync_debug = {
             "state": "talk_started" if talk_result.success else "talk_failed",
             "started": False,
             "emotion_tag": emotion_tag,
             "intensity": round(float(intensity), 4),
+            "vts_parameters": dict(vts_health.get("mouth_parameters") or {}),
         }
         if synth_event and talk_result.success:
             mouth_sync_debug = self._start_mouth_sync(synth_event)

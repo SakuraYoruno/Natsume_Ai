@@ -1,4 +1,4 @@
-﻿"""VTube Studio driver: WebSocket API connection, talk gate, and expression mapping.
+"""VTube Studio driver: WebSocket API connection, talk gate, and expression mapping.
 
 Provides deterministic VTS integration with talk gate (TALK_START/TALK_END)
 and emotion_tag 鈫?expression_id mapping. Falls back gracefully when VTS
@@ -50,10 +50,16 @@ TALK_END = "TALK_END"
 # 纭畾鎬ц〃鎯呮槧灏勮〃锛堜笌 host_brain/channels/vts.py 涓€鑷达級
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = load_runtime_emotion_mapping()
 
-# VTS mouth parameter used for talk gate.
-VTS_MOUTH_PARAM = "MouthOpen"
-VTS_MOUTH_PLUS_VOLUME_PARAM = "VoiceVolumePlusMouthOpen"
-VTS_VOICE_SILENCE_PARAM = "VoiceSilence"
+# Candidate VTS input parameters used for mouth sync. Some models wire lipsync
+# to the standard tracking params, others to the advanced voice-volume params.
+DEFAULT_MOUTH_PARAM_CANDIDATES = ("MouthOpen", "ParamMouthOpenY")
+DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES = ("VoiceVolumePlusMouthOpen", "VoiceVolume")
+DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES = ("VoiceSilence",)
+
+# Backward-compatible single-name aliases.
+VTS_MOUTH_PARAM = DEFAULT_MOUTH_PARAM_CANDIDATES[0]
+VTS_MOUTH_PLUS_VOLUME_PARAM = DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES[0]
+VTS_VOICE_SILENCE_PARAM = DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES[0]
 VTS_MOUTH_OPEN_VALUE = 1.0
 VTS_MOUTH_CLOSE_VALUE = 0.0
 
@@ -101,6 +107,9 @@ class VtsConfig:
     plugin_developer: str = DEFAULT_VTS_PLUGIN_DEVELOPER
     token_path: str = DEFAULT_VTS_TOKEN_PATH
     api_timeout_s: float = DEFAULT_API_TIMEOUT_S
+    mouth_param_candidates: tuple[str, ...] = DEFAULT_MOUTH_PARAM_CANDIDATES
+    mouth_volume_param_candidates: tuple[str, ...] = DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES
+    voice_silence_param_candidates: tuple[str, ...] = DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES
     reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
 
     def as_dict(self) -> dict[str, Any]:
@@ -111,6 +120,9 @@ class VtsConfig:
             "plugin_developer": self.plugin_developer,
             "token_path": self.token_path,
             "api_timeout_s": self.api_timeout_s,
+            "mouth_param_candidates": list(self.mouth_param_candidates),
+            "mouth_volume_param_candidates": list(self.mouth_volume_param_candidates),
+            "voice_silence_param_candidates": list(self.voice_silence_param_candidates),
             "reconnect": self.reconnect.as_dict(),
         }
 
@@ -166,6 +178,8 @@ class VTubeStudioDriver:
         self._reconnect_thread: threading.Thread | None = None
         self._reconnect_events: list[dict[str, Any]] = []
         self._shutdown_event = threading.Event()
+        self._available_input_parameters: set[str] = set()
+        self._mouth_parameter_plan: dict[str, Any] = _fallback_mouth_parameter_plan(self._config)
 
     @property
     def state(self) -> VtsState:
@@ -205,6 +219,10 @@ class VTubeStudioDriver:
                     token_path=self._config.token_path,
                 )
                 self._state = VtsState.AUTHENTICATED
+                try:
+                    self._refresh_input_parameter_plan()
+                except Exception as exc:
+                    logger.warning("VTS input parameter discovery failed, using fallback plan: %s", exc)
                 logger.info(
                     "VTS connected and authenticated: %s:%d",
                     self._config.host,
@@ -245,6 +263,8 @@ class VTubeStudioDriver:
             self._state = VtsState.DISCONNECTED
             self._talking = False
             self._current_expression = None
+            self._available_input_parameters = set()
+            self._mouth_parameter_plan = _fallback_mouth_parameter_plan(self._config)
             logger.info("VTS disconnected")
             return VtsDriverResult(
                 success=True,
@@ -379,12 +399,7 @@ class VTubeStudioDriver:
         # 鍚屾椂鍏抽棴鍢村反
         if self._state == VtsState.AUTHENTICATED:
             try:
-                _set_vts_parameter(
-                    vts=self._vts,
-                    param_name=VTS_MOUTH_PARAM,
-                    value=VTS_MOUTH_CLOSE_VALUE,
-                    timeout_s=self._config.api_timeout_s,
-                )
+                self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
             except Exception:
                 pass
 
@@ -457,26 +472,29 @@ class VTubeStudioDriver:
                     action="set_mouth_open_level",
                 )
         normalized = max(0.0, min(1.0, float(value)))
+        if not self._available_input_parameters:
+            try:
+                self._refresh_input_parameter_plan()
+            except Exception as exc:
+                logger.debug("VTS mouth parameter discovery refresh failed: %s", exc)
+        parameter_payload = _build_mouth_parameter_payload(self._mouth_parameter_plan, normalized)
         try:
             _set_vts_parameters(
                 vts=self._vts,
-                parameters={
-                    VTS_MOUTH_PARAM: normalized,
-                    VTS_MOUTH_PLUS_VOLUME_PARAM: normalized,
-                    # Keep manual lipsync in control even on models that wire
-                    # MouthOpen through the advanced VoiceSilence gate.
-                    VTS_VOICE_SILENCE_PARAM: 1.0,
-                },
+                parameters=parameter_payload,
                 timeout_s=self._config.api_timeout_s,
             )
+            selected = list(self._mouth_parameter_plan.get("selected") or [])
             return VtsDriverResult(
                 success=True,
                 reason_code=None,
                 detail=(
                     "mouth parameters set: "
-                    f"{VTS_MOUTH_PARAM}={normalized:.3f}, "
-                    f"{VTS_MOUTH_PLUS_VOLUME_PARAM}={normalized:.3f}, "
-                    f"{VTS_VOICE_SILENCE_PARAM}=1.000"
+                    + ", ".join(
+                        f"{param_name}={param_value:.3f}"
+                        for param_name, param_value in parameter_payload.items()
+                    )
+                    + (f" (selected={selected})" if selected else "")
                 ),
                 action="set_mouth_open_level",
             )
@@ -628,6 +646,22 @@ class VTubeStudioDriver:
         logger.warning("VTS connection lost (%s), triggering reconnect", reason)
         self.trigger_reconnect()
 
+    def _refresh_input_parameter_plan(self) -> None:
+        if self._state != VtsState.AUTHENTICATED or self._vts is None:
+            self._available_input_parameters = set()
+            self._mouth_parameter_plan = _fallback_mouth_parameter_plan(self._config)
+            return
+        available = _list_vts_input_parameters(
+            vts=self._vts,
+            timeout_s=self._config.api_timeout_s,
+        )
+        self._available_input_parameters = set(available)
+        self._mouth_parameter_plan = _resolve_mouth_parameter_plan(
+            config=self._config,
+            available_parameters=self._available_input_parameters,
+        )
+        logger.info("VTS mouth parameter plan resolved: %s", self._mouth_parameter_plan)
+
     @property
     def reconnect_events(self) -> list[dict[str, Any]]:
         """Return a copy of reconnect lifecycle events."""
@@ -642,6 +676,11 @@ class VTubeStudioDriver:
             "config": self._config.as_dict(),
             "connection_error": self._connection_error,
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
+            "input_parameters": {
+                "available_count": len(self._available_input_parameters),
+                "sample": sorted(self._available_input_parameters)[:20],
+            },
+            "mouth_parameters": dict(self._mouth_parameter_plan),
             "reconnect": {
                 "total_reconnects": self._total_reconnects,
                 "total_reconnect_failures": self._total_reconnect_failures,
@@ -780,6 +819,31 @@ def _trigger_vts_hotkey(
     _run_in_vts_loop(_trigger(), timeout_s=timeout_s + 1.0)
 
 
+def _list_vts_input_parameters(*, vts: Any, timeout_s: float) -> set[str]:
+    """Return currently available VTS input parameter names."""
+    if vts is None:
+        return set()
+
+    async def _load() -> set[str]:
+        request = vts.vts_request.BaseRequest("InputParameterListRequest", {})
+        response = await asyncio.wait_for(
+            vts.request(request),
+            timeout=timeout_s,
+        )
+        data = dict(response.get("data") or {})
+        out: set[str] = set()
+        for group_name in ("defaultParameters", "customParameters"):
+            for item in list(data.get(group_name) or []):
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if name:
+                    out.add(name)
+        return out
+
+    return _run_in_vts_loop(_load(), timeout_s=timeout_s + 1.0)
+
+
 def _resolve_vts_hotkey(*, vts: Any, configured_hotkey: str, timeout_s: float) -> tuple[str, str]:
     """Resolve a configured hotkey selector to the current model's concrete VTS hotkey id."""
     if vts is None:
@@ -810,6 +874,73 @@ def _resolve_vts_hotkey(*, vts: Any, configured_hotkey: str, timeout_s: float) -
             return hotkey_id, name or file_name
 
     raise RuntimeError(f"configured hotkey selector not found in current model: {selector}")
+
+
+def _resolve_mouth_parameter_plan(
+    *,
+    config: VtsConfig,
+    available_parameters: set[str],
+) -> dict[str, Any]:
+    available = {str(item).strip() for item in available_parameters if str(item).strip()}
+    if not available:
+        return _fallback_mouth_parameter_plan(config)
+    mouth_params = tuple(
+        candidate
+        for candidate in config.mouth_param_candidates
+        if candidate in available
+    )
+    volume_params = tuple(
+        candidate
+        for candidate in config.mouth_volume_param_candidates
+        if candidate in available
+    )
+    silence_params = tuple(
+        candidate
+        for candidate in config.voice_silence_param_candidates
+        if candidate in available
+    )
+    selected = tuple((*mouth_params, *volume_params, *silence_params))
+    if not selected:
+        return _fallback_mouth_parameter_plan(config)
+    return {
+        "mode": "detected",
+        "selected": list(selected),
+        "mouth": list(mouth_params),
+        "volume": list(volume_params),
+        "silence": list(silence_params),
+    }
+
+
+def _fallback_mouth_parameter_plan(config: VtsConfig) -> dict[str, Any]:
+    mouth = [config.mouth_param_candidates[0]] if config.mouth_param_candidates else []
+    volume = [config.mouth_volume_param_candidates[0]] if config.mouth_volume_param_candidates else []
+    silence = [config.voice_silence_param_candidates[0]] if config.voice_silence_param_candidates else []
+    return {
+        "mode": "fallback",
+        "selected": [*mouth, *volume, *silence],
+        "mouth": mouth,
+        "volume": volume,
+        "silence": silence,
+    }
+
+
+def _build_mouth_parameter_payload(plan: dict[str, Any], normalized: float) -> dict[str, float]:
+    payload: dict[str, float] = {}
+    for param_name in list(plan.get("mouth") or []):
+        payload[str(param_name)] = normalized
+    for param_name in list(plan.get("volume") or []):
+        payload[str(param_name)] = normalized
+    for param_name in list(plan.get("silence") or []):
+        # Keep manual lipsync in control even on models that wire
+        # mouth movement through advanced voice-silence gating.
+        payload[str(param_name)] = 1.0
+    if payload:
+        return payload
+    return {
+        VTS_MOUTH_PARAM: normalized,
+        VTS_MOUTH_PLUS_VOLUME_PARAM: normalized,
+        VTS_VOICE_SILENCE_PARAM: 1.0,
+    }
 
 
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
