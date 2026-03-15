@@ -118,7 +118,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
     - session_summary：生成会话轻量摘要，risk_level=1（CACHE 通道）
 
     所有内置 Skill 均为：
-    - reversible=True（可撤销）
+    - reversible=False（只读，无副作用，不可撤销）
     - clearance="LOW"（最低权限）
     - scope="host"（Host 侧执行）
     - risk_level=1 → ApprovalTier.CACHE（Policy Cache 直接放行）
@@ -134,7 +134,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_builtin_noop_handler,
         require_confirm=False,
         description="只读叙事生成，不执行任何副作用操作。",
@@ -146,7 +146,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_builtin_noop_handler,
         require_confirm=False,
         description="只读记忆检索，从 EpisodicStore 中召回历史记忆片段。",
@@ -158,7 +158,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_builtin_noop_handler,
         require_confirm=False,
         description="空操作占位符，用于测试和降级场景。",
@@ -170,7 +170,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_builtin_noop_handler,
         require_confirm=False,
         description="只读状态查询，返回系统当前运行状态摘要。",
@@ -182,7 +182,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_emotion_query_handler,
         require_confirm=False,
         description="查询当前会话的情感状态快照（mood_state / emotion_tag / intensity）。",
@@ -194,7 +194,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_bond_query_handler,
         require_confirm=False,
         description="查询当前会话的 Bond 积分和关系阶段（STRANGER / ACQUAINTANCE / FRIEND）。",
@@ -206,7 +206,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         clearance="LOW",
         risk_level=1,
         scope="host",
-        reversible=True,
+        reversible=False,
         handler=_session_summary_handler,
         require_confirm=False,
         description="生成当前会话的轻量摘要（session_id / turn_count / user_message_preview）。",

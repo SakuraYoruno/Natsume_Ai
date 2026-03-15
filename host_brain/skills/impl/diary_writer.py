@@ -196,6 +196,21 @@ def execute_diary_writer(
         except Exception as exc:
             logger.warning("Episodic write failed for diary: %s", exc)
 
+        # 额外写一条互动槽位，让下次对话召回时能自然引用日记话题
+        try:
+            _snippet = diary_narrative[:80] if len(diary_narrative) > 80 else diary_narrative
+            _hint_entry = {
+                "content": f"[日记话题] 今天写了日记：{_snippet}…可以自然地聊聊今天发生的事。",
+                "category": "interaction_hint",
+                "evidence_refs": [event_id],
+                "source": "diary_writer_hint",
+                "date": date_str,
+                "ts_ms": ts + 1,
+            }
+            episodic_writer(_hint_entry)
+        except Exception:
+            pass
+
     # 构建 manifest
     manifest = {
         "diary_id": event_id,

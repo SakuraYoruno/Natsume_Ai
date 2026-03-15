@@ -168,6 +168,20 @@ def execute_dream_generator(
                 "ts_ms": ts,
             }
 
+        # 额外写一条互动槽位，让下次对话召回时能自然引用梦境话题
+        try:
+            _snippet = dream_narrative[:80] if len(dream_narrative) > 80 else dream_narrative
+            _hint_entry = {
+                "content": f"[梦境话题] 昨晚做了一个梦：{_snippet}…可以自然地提起这个话题。",
+                "category": "interaction_hint",
+                "evidence_refs": [event_id],
+                "source": "dream_generator_hint",
+                "ts_ms": ts + 1,
+            }
+            episodic_writer(_hint_entry)
+        except Exception:
+            pass
+
     # 构建 manifest
     manifest = {
         "dream_id": event_id,
