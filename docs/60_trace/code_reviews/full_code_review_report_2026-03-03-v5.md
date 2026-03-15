@@ -1,221 +1,298 @@
-﻿鍙椾紬锛欳ODEX
-鏍囬锛氬叏闈唬鐮佸闃呮姤鍛婏紙绗簲鐗堬紝2026-03-03锛?
-# 馃攳 Natsume Ai 鍏ㄩ潰浠ｇ爜瀹￠槄鎶ュ憡
+受众：CODEX
+标题：全面代码审阅报告（第五版，2026-03-03）
 
-> **鐢熸垚鏃ユ湡**锛?026-03-03锛堢浜旂増锛屽惈 TASK-0000~0129 / M1~M10-C 鍏ㄩ儴浜や粯锛?> **瀹￠槄鑼冨洿**锛歨ost_brain/銆乪dge_client/銆乼ests/銆乧onfigs/銆乨ocs/
-> **瀹￠槄鏂规硶**锛氶€愭ā鍧楁簮鐮侀槄璇?+ 濂戠害娴嬭瘯鍏ㄩ噺杩愯 + 鏋舵瀯涓€鑷存€ф鏌?+ 涓嶅彉閲忛潤鎬佹壂鎻?+ 瀹夊叏瀹¤
+# 🔍 Natsume Ai 全面代码审阅报告
+
+> **生成日期**：2026-03-03（第五版，含 TASK-0000~0129 / M1~M10-C 全部交付）
+> **审阅范围**：host_brain/、edge_client/、tests/、configs/、docs/
+> **审阅方法**：逐模块源码阅读 + 契约测试全量运行 + 架构一致性检查 + 不变量静态扫描 + 安全审计
 
 ---
 
-## 馃搳 涓€銆侀」鐩€昏
+## 📊 一、项目总览
 
-| 鎸囨爣 | 鏁版嵁 | 杈冧笂娆″彉鍖栵紙vs 绗洓鐗堬級 |
+| 指标 | 数据 | 较上次变化（vs 第四版） |
 |------|------|-----------|
-| **Host Brain 婧愭枃浠?* | 96 涓?`.py`锛堝惈 `__init__`锛?| +2锛圡10-B/C 鏂板锛?|
-| **Edge Client 婧愭枃浠?* | 26 涓?`.py` | 鈥?|
-| **Host Brain 浠ｇ爜琛?* | ~27,100 琛?| +564锛坉istillation.py + prompt_context 鎵╁睍 + ledger 鎵╁睍锛?|
-| **Edge Client 浠ｇ爜琛?* | ~6,900 琛?| +84锛坅sr.py 鐑瘝娉ㄥ叆锛?|
-| **娴嬭瘯浠ｇ爜琛?* | ~25,800 琛?| +1,625锛圡10-B/C 鏂板 21 涓祴璇曪級 |
-| **鎬讳唬鐮佽** | **~59,800 琛?* | +2,273 |
-| **濂戠害娴嬭瘯鏂囦欢** | 122 涓紙鍚?integration/e2e锛?| +2锛圡10-B 鏂板锛?|
-| **娴嬭瘯鏂█鐐?* | **1062 閫氳繃 / 0 澶辫触** 鉁?| +21 閫氳繃 / 0 澶辫触 |
-| **娴嬭瘯 Fixture 鏂囦欢** | 257 涓?`.json` | 鈥?|
-| **瀹¤鏃ュ織琛?* | 27 寮?| +1锛坰emantic_memory锛孧10-C锛?|
-| **閿欒鐮侊紙reason_code锛?* | 148 涓父閲?| 鈥?|
-| **SQL 杩佺Щ鑴氭湰** | 20 涓紙鍚?bond cypher锛?| +1锛?017_canon_proposal_log_unique.sql锛孧10-A P1锛?|
-| **鍙戝竷娓呭崟** | 5 涓紙M8/M9/M10-A/M10-B/M10-C锛?| +2锛圡10-B/C锛?|
-| **闇€姹傝拷韪潯鐩?* | R-01~R-97 | +7锛圧-91~R-97锛?|
+| **Host Brain 源文件** | 96 个 `.py`（含 `__init__`） | +2（M10-B/C 新增） |
+| **Edge Client 源文件** | 26 个 `.py` | — |
+| **Host Brain 代码行** | ~27,100 行 | +564（distillation.py + context_pack 扩展 + ledger 扩展） |
+| **Edge Client 代码行** | ~6,900 行 | +84（asr.py 热词注入） |
+| **测试代码行** | ~25,800 行 | +1,625（M10-B/C 新增 21 个测试） |
+| **总代码行** | **~59,800 行** | +2,273 |
+| **契约测试文件** | 122 个（含 integration/e2e） | +2（M10-B 新增） |
+| **测试断言点** | **1062 通过 / 0 失败** ✅ | +21 通过 / 0 失败 |
+| **测试 Fixture 文件** | 257 个 `.json` | — |
+| **审计日志表** | 27 张 | +1（semantic_memory，M10-C） |
+| **错误码（reason_code）** | 148 个常量 | — |
+| **SQL 迁移脚本** | 20 个（含 bond cypher） | +1（0017_canon_proposal_log_unique.sql，M10-A P1） |
+| **发布清单** | 5 个（M8/M9/M10-A/M10-B/M10-C） | +2（M10-B/C） |
+| **需求追踪条目** | R-01~R-97 | +7（R-91~R-97） |
 
 ---
 
-## 馃彈锔?浜屻€佹灦鏋勫叏鏅紙M10-C 鏇存柊锛?
+## 🏗️ 二、架构全景（M10-C 更新）
+
 ```
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ Host Brain锛圥ython 3.12+锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 app/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹? 鈹? fastapi_app.py      鈫?HTTP 鍏ュ彛 + 涓棿浠?+ 璺敱娉ㄥ唽            鈹?  鈹?鈹? 鈹? main.py             鈫?鍚姩鎶ュ憡 + 鍋ュ悍鑱氬悎 + 9 鑺傜偣鎷撴墤         鈹?  鈹?鈹? 鈹? config.py           鈫?鍒嗗眰閰嶇疆 + 鑴辨晱蹇収 + diff              鈹?  鈹?鈹? 鈹? web_ui.py           鈫?鍙娴嬮潰鏉?API                          鈹?  鈹?鈹? 鈹? canon_routes.py 鈫?M10-A锛? 绔偣锛? M10-B锛?/canon/hotwords锛? 鈹?  鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 memory/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? canon_world_store.py 鈫?M9/M10-A/M10-B锛?extract_hotwords锛?  鈹?    鈹?鈹? 鈹?   + rollback_proposal() 鈫?M10-A P1                           鈹?    鈹?鈹? 鈹? distillation.py 鈫?NEW锛圡10-C锛塎emoryDistillationEngine       鈹?    鈹?鈹? 鈹? episodic.py / chroma_client.py                                鈹?    鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 audit/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? sqlite_ledger.py锛垀1,750L锛夆啇 +semantic_memory 琛紙M10-C锛?   鈹?    鈹?鈹? 鈹?   + log_semantic_memory / list_semantic_memories              鈹?    鈹?鈹? 鈹? migration_runner.py / retention.py / drill.py                 鈹?    鈹?鈹? 鈹? migrations/0017_canon_proposal_log_unique.sql 鈫?NEW锛圡10-A P1锛夆攤   鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 core/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?   鈹?鈹? 鈹? prompt_context.py 鈫?+OPTIONAL_SLOTS + semantic_slot锛圡10-C锛?  鈹?   鈹?鈹? 鈹?   + build_semantic_slot() + _validate_semantic_slot()         鈹?   鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?   鈹?鈹?                                                                       鈹?鈹? + governor/ + integrations/ + airlock/ + channels/ + bond/            鈹?鈹? + retrieval/ + skills/ + tools/ + lsp/ + release/ + obs/              鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ Edge Client 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? rpc/voice.py | rpc/event_reporter.py | rpc/resource_gate.py           鈹?鈹? senses/asr.py锛?inject_canon_hotwords锛孧10-B锛?                       鈹?鈹? senses/fallback_llm.py                                                鈹?鈹? actuators/speech.py | actuators/tts_engine.py                         鈹?鈹? actuators/vts_driver.py锛?鎸囨暟閫€閬块噸杩烇級                               鈹?鈹? proofs/resource_gate.py | config.py                                   鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
-Canon 娌荤悊 REST API锛圡10-A/B 绱 8 绔偣锛夛細
-  GET  /canon/proposals                    鈥?鍒楀嚭鎻愭锛堝垎椤碉級
-  POST /canon/proposals                    鈥?鎻愪氦鏂版彁妗?  GET  /canon/proposals/{proposal_id}      鈥?鏌ヨ鎻愭璇︽儏
-  POST /canon/proposals/{proposal_id}/approve  鈥?瀹℃牳閫氳繃
-  POST /canon/proposals/{proposal_id}/reject   鈥?鎷掔粷鎻愭
-  POST /canon/proposals/{proposal_id}/rollback 鈥?鍥炴粴宸查€氳繃鎻愭锛圡10-A P1锛?  GET  /canon/documents                    鈥?鍒楀嚭 SSOT 蹇収
-  GET  /canon/documents/{doc_id}           鈥?鏌ヨ鍗曚釜鏂囨。
-  GET  /canon/hotwords                     鈥?鑾峰彇 ASR 鐑瘝鍒楄〃锛圡10-B锛?
-璁板繂钂搁 API锛圡10-C锛夛細
-  MemoryDistillationEngine.distill_top_k() 鈥?鎯呰妭璁板繂 鈫?璇箟璁板繂钂搁
-  SQLiteLedger.list_semantic_memories()    鈥?璇箟璁板繂鍒嗛〉鏌ヨ
-  prompt_context["semantic_slot"]            鈥?璇箟璁板繂娉ㄥ叆鍒嗘Ы锛堝彲閫夛級
+┌─────────────────────── Host Brain（Python 3.12+） ─────────────────────┐
+│                                                                        │
+│  ┌─ app/ ──────────────────────────────────────────────────────────┐   │
+│  │  fastapi_app.py      ← HTTP 入口 + 中间件 + 路由注册            │   │
+│  │  main.py             ← 启动报告 + 健康聚合 + 9 节点拓扑         │   │
+│  │  config.py           ← 分层配置 + 脱敏快照 + diff              │   │
+│  │  web_ui.py           ← 可观测面板 API                          │   │
+│  │  canon_routes.py ← M10-A（7 端点）+ M10-B（+/canon/hotwords）  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                        │
+│  ┌─ memory/ ─────────────────────────────────────────────────────┐     │
+│  │  canon_world_store.py ← M9/M10-A/M10-B（+extract_hotwords）   │     │
+│  │    + rollback_proposal() ← M10-A P1                           │     │
+│  │  distillation.py ← NEW（M10-C）MemoryDistillationEngine       │     │
+│  │  episodic.py / chroma_client.py                                │     │
+│  └───────────────────────────────────────────────────────────────┘     │
+│                                                                        │
+│  ┌─ audit/ ──────────────────────────────────────────────────────┐     │
+│  │  sqlite_ledger.py（~1,750L）← +semantic_memory 表（M10-C）    │     │
+│  │    + log_semantic_memory / list_semantic_memories              │     │
+│  │  migration_runner.py / retention.py / drill.py                 │     │
+│  │  migrations/0017_canon_proposal_log_unique.sql ← NEW（M10-A P1）│   │
+│  └───────────────────────────────────────────────────────────────┘     │
+│                                                                        │
+│  ┌─ core/ ────────────────────────────────────────────────────────┐    │
+│  │  context_pack.py ← +OPTIONAL_SLOTS + semantic_slot（M10-C）   │    │
+│  │    + build_semantic_slot() + _validate_semantic_slot()         │    │
+│  └───────────────────────────────────────────────────────────────┘    │
+│                                                                        │
+│  + governor/ + integrations/ + airlock/ + channels/ + bond/            │
+│  + retrieval/ + skills/ + tools/ + lsp/ + release/ + obs/              │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────── Edge Client ────────────────────────────────────┐
+│  rpc/voice.py | rpc/event_reporter.py | rpc/resource_gate.py           │
+│  senses/asr.py（+inject_canon_hotwords，M10-B）                        │
+│  senses/fallback_llm.py                                                │
+│  actuators/speech.py | actuators/tts_engine.py                         │
+│  actuators/vts_driver.py（+指数退避重连）                               │
+│  proofs/resource_gate.py | config.py                                   │
+└────────────────────────────────────────────────────────────────────────┘
+
+Canon 治理 REST API（M10-A/B 累计 8 端点）：
+  GET  /canon/proposals                    — 列出提案（分页）
+  POST /canon/proposals                    — 提交新提案
+  GET  /canon/proposals/{proposal_id}      — 查询提案详情
+  POST /canon/proposals/{proposal_id}/approve  — 审核通过
+  POST /canon/proposals/{proposal_id}/reject   — 拒绝提案
+  POST /canon/proposals/{proposal_id}/rollback — 回滚已通过提案（M10-A P1）
+  GET  /canon/documents                    — 列出 SSOT 快照
+  GET  /canon/documents/{doc_id}           — 查询单个文档
+  GET  /canon/hotwords                     — 获取 ASR 热词列表（M10-B）
+
+记忆蒸馏 API（M10-C）：
+  MemoryDistillationEngine.distill_top_k() — 情节记忆 → 语义记忆蒸馏
+  SQLiteLedger.list_semantic_memories()    — 语义记忆分页查询
+  context_pack["semantic_slot"]            — 语义记忆注入分槽（可选）
 ```
 
 ---
 
-## 馃敩 涓夈€丮10-B/C 鏂板妯″潡瀹℃煡
+## 🔬 三、M10-B/C 新增模块审查
 
-### 3.1 M10-B ASR 鐑瘝娉ㄥ叆锛圱ASK-0122~0125锛?
-| 妯″潡 | 鍙樺寲 | 璇勪环 |
+### 3.1 M10-B ASR 热词注入（TASK-0122~0125）
+
+| 模块 | 变化 | 评价 |
 |------|------|------|
-| `memory/canon_world_store.py` | +`extract_hotwords(max_words=200)` | 鉁?鍘婚噸鎺掑簭锛岀┖鐩綍杩斿洖 [] |
-| `app/canon_routes.py` | +`GET /canon/hotwords` 绔偣 | 鉁?鍚?max_words 鍙傛暟锛屽搷搴旂粨鏋勭粺涓€ |
-| `edge_client/senses/asr.py` | +`inject_canon_hotwords()` + `get_canon_hotwords()` + `_CANON_HOTWORDS_CACHE` | 鉁?Host 涓嶅彲杈炬椂闄嶇骇杩斿洖 0锛屼笉鎶涘紓甯?|
-| `release/manifests/m10b_release.json` | 鏂板 M10-B 鍙戝竷娓呭崟 | 鉁?閿佸畾 canon_routes_hash + asr_hash |
+| `memory/canon_world_store.py` | +`extract_hotwords(max_words=200)` | ✅ 去重排序，空目录返回 [] |
+| `app/canon_routes.py` | +`GET /canon/hotwords` 端点 | ✅ 含 max_words 参数，响应结构统一 |
+| `edge_client/senses/asr.py` | +`inject_canon_hotwords()` + `get_canon_hotwords()` + `_CANON_HOTWORDS_CACHE` | ✅ Host 不可达时降级返回 0，不抛异常 |
+| `release/manifests/m10b_release.json` | 新增 M10-B 发布清单 | ✅ 锁定 canon_routes_hash + asr_hash |
 
-**瀹℃煡缁撹锛?*
-- 鉁?`extract_hotwords()`锛氫粠鎵€鏈?active 鏂囨。鐨?title/tags 鎻愬彇锛屽幓閲嶆帓搴忥紝max_words 鎴柇姝ｇ‘銆?- 鉁?`GET /canon/hotwords`锛氬搷搴旂粨鏋勫惈 `hotwords/total/request_id/timestamp`锛屼笌鍏朵粬 Canon API 涓€鑷淬€?- 鉁?`inject_canon_hotwords()`锛歶rllib 瀹炵幇锛屾棤棰濆渚濊禆锛沀RLError 闄嶇骇澶勭悊瀹屾暣锛沗_CANON_HOTWORDS_CACHE` 妯″潡绾х紦瀛樻敮鎸?`get_canon_hotwords()` 璇诲彇銆?- 鉁?娴嬭瘯瑕嗙洊锛歍-Canon-HW-01~03锛堝崟鍏冿級+ T-Canon-HW-API-01~02锛堝绾︼級+ T-ASR-HW-01~03锛坢ock HTTP锛? 8 涓祴璇曘€?
-### 3.2 M10-C 璁板繂钂搁绯荤粺锛圱ASK-0126~0129锛?
-| 妯″潡 | 鍙樺寲 | 璇勪环 |
+**审查结论：**
+- ✅ `extract_hotwords()`：从所有 active 文档的 title/tags 提取，去重排序，max_words 截断正确。
+- ✅ `GET /canon/hotwords`：响应结构含 `hotwords/total/request_id/timestamp`，与其他 Canon API 一致。
+- ✅ `inject_canon_hotwords()`：urllib 实现，无额外依赖；URLError 降级处理完整；`_CANON_HOTWORDS_CACHE` 模块级缓存支持 `get_canon_hotwords()` 读取。
+- ✅ 测试覆盖：T-Canon-HW-01~03（单元）+ T-Canon-HW-API-01~02（契约）+ T-ASR-HW-01~03（mock HTTP）= 8 个测试。
+
+### 3.2 M10-C 记忆蒸馏系统（TASK-0126~0129）
+
+| 模块 | 变化 | 评价 |
 |------|------|------|
-| `memory/distillation.py` | 鏂板 `MemoryDistillationEngine` | 鉁?瀹屾暣 |
-| `audit/sqlite_ledger.py` | +`semantic_memory` 琛?+ 4 涓?CRUD 鏂规硶 | 鉁?瀹屾暣 |
-| `core/prompt_context.py` | +`OPTIONAL_SLOTS` + `semantic_slot` 鍒嗘Ы | 鉁?瀹屾暣 |
-| `release/manifests/m10c_release.json` | 鏂板 M10-C 鍙戝竷娓呭崟 | 鉁?閿佸畾 distillation/prompt_context/ledger hash |
+| `memory/distillation.py` | 新增 `MemoryDistillationEngine` | ✅ 完整 |
+| `audit/sqlite_ledger.py` | +`semantic_memory` 表 + 4 个 CRUD 方法 | ✅ 完整 |
+| `core/context_pack.py` | +`OPTIONAL_SLOTS` + `semantic_slot` 分槽 | ✅ 完整 |
+| `release/manifests/m10c_release.json` | 新增 M10-C 发布清单 | ✅ 锁定 distillation/context_pack/ledger hash |
 
-**瀹℃煡缁撹锛?*
-- 鉁?`MemoryDistillationEngine.distill_top_k()`锛氬彫鍥?Top-K 鎯呰妭璁板繂 鈫?鍚堝苟鎽樿 鈫?骞傜瓑鍐欏叆锛坰ource_hash UNIQUE锛夆啋 瀹¤ system_event_log銆?- 鉁?骞傜瓑鎬э細`source_hash = SHA-256(sorted source_memory_ids)`锛岀浉鍚屾潵婧愰噸澶嶈捀棣忚繑鍥?`skipped=True`锛屼笉閲嶅鍐欏叆銆?- 鉁?`semantic_memory` 琛細鍚?`semantic_id UNIQUE` + `source_hash UNIQUE` + `ts_ms INDEX`锛宍deleted_at` 杞垹闄ゆ敮鎸併€?- 鉁?`prompt_context.semantic_slot`锛氳璁′负**鍙€夋Ы浣?*锛坄OPTIONAL_SLOTS`锛夛紝涓嶇牬鍧忕幇鏈?prompt_context 楠岃瘉閫昏緫锛屽瓨鍦ㄦ椂鏍￠獙 `semantic_id` + `summary` 蹇呭～瀛楁銆?- 鉁?`build_semantic_slot()`锛氫粠 ledger 鍙?Top-K 鏈€鏂拌涔夎蹇嗭紝鏋勫缓鏍囧噯鍖?slot 鍒楄〃銆?- 鉁?娴嬭瘯瑕嗙洊锛歍-Distill-01~06 = 8 涓祴璇曪紙姝ｅ父钂搁/骞傜瓑/绌哄瓨鍌?鍒嗛〉/prompt_context 楠岃瘉/build_semantic_slot锛夈€?- 鈿狅笍 **鍙戠幇**锛歚_merge_texts()` 褰撳墠涓虹畝鍗曟枃鏈嫾鎺ワ紝鏈帴鍏?LLM 鎽樿锛圧-MC-01锛孭2锛屽凡鐭ヨ竟鐣岋級銆?- 鈿狅笍 **鍙戠幇**锛歚distill_top_k()` 鐨?`query_text` 璇箟鍙洖渚濊禆 `EpisodicStore.recall()`锛岃嫢 Chroma 鍚戦噺搴撲负绌哄垯闄嶇骇杩斿洖 success=False锛堝凡鏈?T-Distill-03 瑕嗙洊锛夈€?
+**审查结论：**
+- ✅ `MemoryDistillationEngine.distill_top_k()`：召回 Top-K 情节记忆 → 合并摘要 → 幂等写入（source_hash UNIQUE）→ 审计 system_event_log。
+- ✅ 幂等性：`source_hash = SHA-256(sorted source_memory_ids)`，相同来源重复蒸馏返回 `skipped=True`，不重复写入。
+- ✅ `semantic_memory` 表：含 `semantic_id UNIQUE` + `source_hash UNIQUE` + `ts_ms INDEX`，`deleted_at` 软删除支持。
+- ✅ `context_pack.semantic_slot`：设计为**可选槽位**（`OPTIONAL_SLOTS`），不破坏现有 context_pack 验证逻辑，存在时校验 `semantic_id` + `summary` 必填字段。
+- ✅ `build_semantic_slot()`：从 ledger 取 Top-K 最新语义记忆，构建标准化 slot 列表。
+- ✅ 测试覆盖：T-Distill-01~06 = 8 个测试（正常蒸馏/幂等/空存储/分页/context_pack 验证/build_semantic_slot）。
+- ⚠️ **发现**：`_merge_texts()` 当前为简单文本拼接，未接入 LLM 摘要（R-MC-01，P2，已知边界）。
+- ⚠️ **发现**：`distill_top_k()` 的 `query_text` 语义召回依赖 `EpisodicStore.recall()`，若 Chroma 向量库为空则降级返回 success=False（已有 T-Distill-03 覆盖）。
+
 ---
 
-## 馃И 鍥涖€佹祴璇曚綋绯昏瘎浼帮紙M10-C 鏇存柊锛?
-### 4.1 娴嬭瘯鍏ㄩ噺杩愯缁撴灉
+## 🧪 四、测试体系评估（M10-C 更新）
+
+### 4.1 测试全量运行结果
 
 ```
-1062 passed, 0 failed 鉁?```
+1062 passed, 0 failed ✅
+```
 
-| 娴嬭瘯鍒嗙被 | 鏂囦欢鏁?| 閫氳繃 | 澶辫触 |
+| 测试分类 | 文件数 | 通过 | 失败 |
 |----------|--------|------|------|
-| **濂戠害娴嬭瘯** | ~102 | ~1008 | 0 |
-| **闆嗘垚娴嬭瘯** | ~10 | ~30 | 0 |
-| **E2E 娴嬭瘯** | ~10 | ~24 | 0 |
-| **鍚堣** | 122 | **1062** | **0** |
+| **契约测试** | ~102 | ~1008 | 0 |
+| **集成测试** | ~10 | ~30 | 0 |
+| **E2E 测试** | ~10 | ~24 | 0 |
+| **合计** | 122 | **1062** | **0** |
 
-### 4.2 M10-B/C 鏂板娴嬭瘯瑕嗙洊
+### 4.2 M10-B/C 新增测试覆盖
 
-| 娴嬭瘯缂栧彿 | 娴嬭瘯鏂囦欢 | 鏂█鐐?| 瑕嗙洊鍩?|
+| 测试编号 | 测试文件 | 断言点 | 覆盖域 |
 |---------|---------|--------|-------|
-| T-Canon-HW-01~03 | `tests/unit/test_canon_hotwords.py` | 8 | extract_hotwords 姝ｅ父/鎴柇/绌虹洰褰?|
-| T-Canon-HW-API-01~02 | `tests/contract/test_canon_hotwords_api.py` | 6 | GET /canon/hotwords 濂戠害 |
+| T-Canon-HW-01~03 | `tests/unit/test_canon_hotwords.py` | 8 | extract_hotwords 正常/截断/空目录 |
+| T-Canon-HW-API-01~02 | `tests/contract/test_canon_hotwords_api.py` | 6 | GET /canon/hotwords 契约 |
 | T-ASR-HW-01~03 | `tests/unit/test_asr_hotword_injection.py` | 7 | inject_canon_hotwords mock HTTP |
-| T-Distill-01~06 | `tests/unit/test_memory_distillation.py` | 18 | 钂搁寮曟搸鍏ㄩ摼璺?|
+| T-Distill-01~06 | `tests/unit/test_memory_distillation.py` | 18 | 蒸馏引擎全链路 |
 
 ---
 
-## 馃敀 浜斻€佸畨鍏ㄥ璁★紙M10-C 鏇存柊锛?
-### 5.1 涓嶅彉閲忓悎瑙勬壂鎻?
-| 涓嶅彉閲?| 妫€鏌ラ」 | 缁撴灉 |
+## 🔒 五、安全审计（M10-C 更新）
+
+### 5.1 不变量合规扫描
+
+| 不变量 | 检查项 | 结果 |
 |--------|--------|------|
-| **I1 鍗曞悜閾?* | 鎼滅储 `from host_brain.skills.impl` 鏃佽矾瀵煎叆 | 鉁?浠?`impl/__init__.py` 鍐呴儴娉ㄥ唽锛屾棤鏃佽矾 |
-| **I6 Token 蹇呮** | 鎼滅储 Skill 鎵ц璺緞 bypass | 鉁?鎵€鏈夋墽琛岀粡 `loader.py` Token 鏍￠獙 |
-| **I8 瀹¤寮哄埗** | 鎼滅储鎵ц鏃犲璁″啓鍏ヨ矾寰?| 鉁?鎵€鏈?`_log_to_table` 閫氳矾鍙揪 |
-| **I9 鎷掔粷蹇呭甫鐮?* | 鎼滅储 REJECT 鏃?reason_code | 鉁?`validate_governor_output` 鎷︽埅 |
-| **I11 涓嶄吉鎵ц** | 鎼滅储 `print("宸叉墽琛?)` 绛?| 鉁?QA 鎷︽埅鍣?+ 姝ｅ垯鍖归厤瑕嗙洊 |
-| **Canon 涓绘潈** | 鎼滅储 SSOT 鏃佽矾鍐欏叆 | 鉁?鎵€鏈夊啓鍏ョ粡 `upsert_document()` + `_write_lock` |
-| **璇箟璁板繂骞傜瓑** | source_hash UNIQUE 绾︽潫 | 鉁?INSERT OR IGNORE 淇濊瘉涓嶉噸澶嶅啓鍏?|
+| **I1 单向链** | 搜索 `from host_brain.skills.impl` 旁路导入 | ✅ 仅 `impl/__init__.py` 内部注册，无旁路 |
+| **I6 Token 必检** | 搜索 Skill 执行路径 bypass | ✅ 所有执行经 `loader.py` Token 校验 |
+| **I8 审计强制** | 搜索执行无审计写入路径 | ✅ 所有 `_log_to_table` 通路可达 |
+| **I9 拒绝必带码** | 搜索 REJECT 无 reason_code | ✅ `validate_governor_output` 拦截 |
+| **I11 不伪执行** | 搜索 `print("已执行")` 等 | ✅ QA 拦截器 + 正则匹配覆盖 |
+| **Canon 主权** | 搜索 SSOT 旁路写入 | ✅ 所有写入经 `upsert_document()` + `_write_lock` |
+| **语义记忆幂等** | source_hash UNIQUE 约束 | ✅ INSERT OR IGNORE 保证不重复写入 |
 
-### 5.2 M10-B/C 鏂板瀹夊叏妫€鏌?
-| 妫€鏌ラ」 | 缁撴灉 |
+### 5.2 M10-B/C 新增安全检查
+
+| 检查项 | 结果 |
 |--------|------|
-| 鐑瘝 API 鏃犲啓鎿嶄綔锛屾棤闇€瀹¤涓茶仈 | 鉁?GET /canon/hotwords 鍙 |
-| inject_canon_hotwords 闄嶇骇澶勭悊 | 鉁?URLError 鎹曡幏锛岃繑鍥?0锛屼笉鎶涘紓甯?|
-| semantic_memory 鍐欏叆骞傜瓑 | 鉁?source_hash UNIQUE + INSERT OR IGNORE |
-| 钂搁瀹¤ | 鉁?distill_top_k 鍐?system_event_log锛圡EMORY_DISTILLED 浜嬩欢锛?|
-| prompt_context 鍙€夋Ы浣嶄笉鐮村潖鐜版湁楠岃瘉 | 鉁?OPTIONAL_SLOTS 鐙珛浜?EXPECTED_SLOTS |
+| 热词 API 无写操作，无需审计串联 | ✅ GET /canon/hotwords 只读 |
+| inject_canon_hotwords 降级处理 | ✅ URLError 捕获，返回 0，不抛异常 |
+| semantic_memory 写入幂等 | ✅ source_hash UNIQUE + INSERT OR IGNORE |
+| 蒸馏审计 | ✅ distill_top_k 写 system_event_log（MEMORY_DISTILLED 事件） |
+| context_pack 可选槽位不破坏现有验证 | ✅ OPTIONAL_SLOTS 独立于 EXPECTED_SLOTS |
 
 ---
 
-## 鈿狅笍 鍏€佸彂鐜伴」姹囨€伙紙M10-C 鏇存柊锛?
-### 馃敶 P0 鈥?闃绘柇鎬ч棶棰橈紙0 椤癸級
+## ⚠️ 六、发现项汇总（M10-C 更新）
 
-**鏃犻樆鏂€ч棶棰樸€?*
+### 🔴 P0 — 阻断性问题（0 项）
 
-### 馃煛 P1 鈥?闇€璺熻繘锛?4 椤癸級
+**无阻断性问题。**
 
-> 娉細F-28~F-31锛圧118-1/R118-2/R118-3/R114-1锛夊凡鍦?M10-A P1 淇涓В鍐筹紝浠?P1 鍒楄〃绉婚櫎銆?
-| # | 妯″潡 | 鍙戠幇 | 寤鸿 |
+### 🟡 P1 — 需跟进（14 项）
+
+> 注：F-28~F-31（R118-1/R118-2/R118-3/R114-1）已在 M10-A P1 修复中解决，从 P1 列表移除。
+
+| # | 模块 | 发现 | 建议 |
 |---|------|------|------|
-| F-01 | `airlock/sandbox.py` | subprocess 鍚庣鏃犲鍣ㄩ殧绂?| 鐢熶骇鐜浣跨敤 Docker 鍚庣 |
-| F-02 | `airlock/sandbox.py` | Windows/Linux 瓒呮椂琛屼负宸紓 | Linux 閮ㄧ讲鐜鍥炲綊楠岃瘉 |
-| F-04 | `governor/rate_limit_store.py` | Redis 鍚庣鏈湪鐪熷疄鐜楠岃瘉 | 鏈?Redis 瀹炰緥鏃堕泦鎴愭祴璇?|
-| F-05 | `audit/sqlite_ledger.py` | WAL 妯″紡鍦?NFS 涓婁笉鏀寔 | 閮ㄧ讲鏂囨。鏍囨敞瀛樺偍浠嬭川瑕佹眰 |
-| F-06 | `audit/sqlite_ledger.py` | `_table_has_column` 鏃犵紦瀛?| 澧炲姞琛ㄧ粨鏋勭紦瀛?|
-| F-07 | Edge ASR | CPU 闄嶇骇寤惰繜鍙兘涓嶅彲鎺ュ彈 | 鐩爣 Edge 璁惧瀹炴祴 |
-| F-08 | Edge TTS+ASR | GPU VRAM 鍙犲姞 OOM | Edge 璁惧鍘嬪姏娴嬭瘯 |
-| F-11 | E2E 娴嬭瘯 | E2E 妯℃嫙 Edge 浜嬩欢鑰岄潪鐪熷疄 RPC | 鐪熷疄 Edge 鐜闆嗘垚楠岃瘉 |
-| F-12 | `requirements.txt` | 缂哄皯 `redis`锛堝彲閫変緷璧栵級璇存槑 | 琛ュ厖鍙€変緷璧栨枃妗?|
-| F-32 | `scripts/runtime/start_host_side.ps1` | canon_sync DEGRADED 闈為樆鏂彲鑳芥帺鐩栧悓姝ュけ璐ワ紙R112-1锛?| 鐩戞帶鍛婅瑕嗙洊 STARTUP_CANON_SYNC_DEGRADED |
-| F-33 | `core/qa.py` | prompt_context 鍒嗘Ы娉ㄥ叆澶辫触闄嶇骇涓虹┖妲斤紙R113-1锛?| 鐩戞帶鍛婅瑕嗙洊 WCANON_SLOT_VIOLATION |
-| F-34 | `memory/canon_world_store.py` | SSOT 鏂囦欢骞跺彂鍐欏叆鏃犳枃浠堕攣锛圧111-1锛?| 澶氳繘绋嬮儴缃叉椂寮曞叆鏂囦欢閿?|
-| **F-40** | `memory/distillation.py` | `_merge_texts()` 涓虹畝鍗曟枃鏈嫾鎺ワ紝鏈帴鍏?LLM 鎽樿锛圧-MC-01锛?| 鍚庣画鎺ュ叆 LLM 鎽樿 API |
-| **F-41** | `memory/distillation.py` | `distill_top_k()` 鏃犲苟鍙戜繚鎶わ紝澶氱嚎绋嬪悓鏃惰捀棣忓彲鑳戒骇鐢熼噸澶?source_hash 绔炴€侊紙R-MC-02锛?| 澶氳繘绋嬮儴缃叉椂鍔?distillation 绾у埆閿?|
+| F-01 | `airlock/sandbox.py` | subprocess 后端无容器隔离 | 生产环境使用 Docker 后端 |
+| F-02 | `airlock/sandbox.py` | Windows/Linux 超时行为差异 | Linux 部署环境回归验证 |
+| F-04 | `governor/rate_limit_store.py` | Redis 后端未在真实环境验证 | 有 Redis 实例时集成测试 |
+| F-05 | `audit/sqlite_ledger.py` | WAL 模式在 NFS 上不支持 | 部署文档标注存储介质要求 |
+| F-06 | `audit/sqlite_ledger.py` | `_table_has_column` 无缓存 | 增加表结构缓存 |
+| F-07 | Edge ASR | CPU 降级延迟可能不可接受 | 目标 Edge 设备实测 |
+| F-08 | Edge TTS+ASR | GPU VRAM 叠加 OOM | Edge 设备压力测试 |
+| F-11 | E2E 测试 | E2E 模拟 Edge 事件而非真实 RPC | 真实 Edge 环境集成验证 |
+| F-12 | `requirements.txt` | 缺少 `redis`（可选依赖）说明 | 补充可选依赖文档 |
+| F-32 | `scripts/runtime/start_host_side.ps1` | canon_sync DEGRADED 非阻断可能掩盖同步失败（R112-1） | 监控告警覆盖 STARTUP_CANON_SYNC_DEGRADED |
+| F-33 | `core/qa.py` | context_pack 分槽注入失败降级为空槽（R113-1） | 监控告警覆盖 WCANON_SLOT_VIOLATION |
+| F-34 | `memory/canon_world_store.py` | SSOT 文件并发写入无文件锁（R111-1） | 多进程部署时引入文件锁 |
+| **F-40** | `memory/distillation.py` | `_merge_texts()` 为简单文本拼接，未接入 LLM 摘要（R-MC-01） | 后续接入 LLM 摘要 API |
+| **F-41** | `memory/distillation.py` | `distill_top_k()` 无并发保护，多线程同时蒸馏可能产生重复 source_hash 竞态（R-MC-02） | 多进程部署时加 distillation 级别锁 |
 
-### 馃煝 P2 鈥?宸茬煡杈圭晫/寤鸿鏀硅繘锛?6 椤癸級
+### 🟢 P2 — 已知边界/建议改进（16 项）
 
-| # | 妯″潡 | 鍙戠幇 | 寤鸿 |
+| # | 模块 | 发现 | 建议 |
 |---|------|------|------|
-| F-13 | `app/main.py:908` | 瑁?`print()` 璋冪敤 | 鏇挎崲涓?`logger.info()` |
-| F-14 | `graph_executor.py:43` | 缂哄皯杩斿洖绫诲瀷鏍囨敞 | 琛ュ厖 `-> None` |
-| F-15 | `fastapi_app.py:582,605` | 2 涓?handler 缂鸿繑鍥炵被鍨嬫爣娉?| 琛ュ厖绫诲瀷鏍囨敞 |
-| F-16 | `audit/sqlite_ledger.py` | 琛ㄥ悕 f-string 鎻掑€硷紙8 澶勶級 | 澧炲姞琛ㄥ悕鐧藉悕鍗曟牎楠?|
-| F-18 | SQLite 鍗曟枃浠?| 楂樺苟鍙戣鍐欏彲鑳界摱棰?| 涓湡鑰冭檻 PostgreSQL 鎴栧彧璇诲壇鏈?|
-| F-19 | WAL checkpoint | 闀挎湡杩愯 WAL 鏂囦欢澧為暱 | 鐩戞帶 WAL 澶у皬 + 瀹氭椂 checkpoint |
-| F-20 | `sandbox.py` | 浠呮敮鎸?Python 璇█ | 鎸夐渶鎵╁睍 JS/Shell |
-| F-25 | `vts_driver.py:685` | `asyncio.get_event_loop()` DeprecationWarning | 鏀逛负 `asyncio.get_running_loop()` |
-| F-26 | Docker 娌欑 | Docker 闀滃儚鏋勫缓渚濊禆缃戠粶 | 鏀寔棰勬瀯寤洪暅鍍忔湰鍦板姞杞?|
-| F-27 | Docker 娌欑 | nsjail 澶囬€夊湪闈?Linux 涓嶅彲鐢?| 閮ㄧ讲鏂囨。鏍囨敞骞冲彴瑕佹眰 |
-| F-35 | `app/canon_routes.py` | approve 绔偣涓ゆ DB 鎿嶄綔闈炰簨鍔★紙R119-1锛?| 澶氳繘绋嬮儴缃叉椂浣跨敤浜嬪姟鍖呰９ |
-| F-36 | `app/canon_routes.py` | reject 瀹¤鍐欏叆澶辫触鍙褰?warning锛圧119-2锛?| 鍚庣画绾冲叆浜嬪姟纭繚鍘熷瓙鎬?|
-| F-37 | `release/manifests/m10a_release.json` | 鏈攣瀹?canon_world_store.py 鍜?sqlite_ledger.py hash锛圧120-1锛?| 鎵╁睍 manifest 閿佸畾鏇村鏍稿績鏂囦欢 |
-| F-38 | `memory/canon_world_store.py` | `list_proposals()` 鍒嗛〉浣跨敤 LIMIT/OFFSET锛屾繁椤电爜鎬ц兘閫€鍖栵紙R112-2锛?| 鍚庣画鏀逛负 cursor-based 鍒嗛〉 |
-| F-39 | `memory/episodic.py` | 鏃ヨ source_intent_id 璺ㄨ〃鍏宠仈鍙兘鏂摼锛圧115-1锛?| 澧炲姞 intent_id 瀹屾暣鎬ф牎楠?|
-| **F-42** | `memory/distillation.py` | `_CANON_HOTWORDS_CACHE` 妯″潡绾х紦瀛樻棤 TTL锛岀儹璇嶆洿鏂板悗涓嶈嚜鍔ㄥけ鏁?| 澧炲姞 TTL 鎴栦富鍔ㄥ埛鏂版満鍒?|
+| F-13 | `app/main.py:908` | 裸 `print()` 调用 | 替换为 `logger.info()` |
+| F-14 | `graph_executor.py:43` | 缺少返回类型标注 | 补充 `-> None` |
+| F-15 | `fastapi_app.py:582,605` | 2 个 handler 缺返回类型标注 | 补充类型标注 |
+| F-16 | `audit/sqlite_ledger.py` | 表名 f-string 插值（8 处） | 增加表名白名单校验 |
+| F-18 | SQLite 单文件 | 高并发读写可能瓶颈 | 中期考虑 PostgreSQL 或只读副本 |
+| F-19 | WAL checkpoint | 长期运行 WAL 文件增长 | 监控 WAL 大小 + 定时 checkpoint |
+| F-20 | `sandbox.py` | 仅支持 Python 语言 | 按需扩展 JS/Shell |
+| F-25 | `vts_driver.py:685` | `asyncio.get_event_loop()` DeprecationWarning | 改为 `asyncio.get_running_loop()` |
+| F-26 | Docker 沙箱 | Docker 镜像构建依赖网络 | 支持预构建镜像本地加载 |
+| F-27 | Docker 沙箱 | nsjail 备选在非 Linux 不可用 | 部署文档标注平台要求 |
+| F-35 | `app/canon_routes.py` | approve 端点两次 DB 操作非事务（R119-1） | 多进程部署时使用事务包裹 |
+| F-36 | `app/canon_routes.py` | reject 审计写入失败只记录 warning（R119-2） | 后续纳入事务确保原子性 |
+| F-37 | `release/manifests/m10a_release.json` | 未锁定 canon_world_store.py 和 sqlite_ledger.py hash（R120-1） | 扩展 manifest 锁定更多核心文件 |
+| F-38 | `memory/canon_world_store.py` | `list_proposals()` 分页使用 LIMIT/OFFSET，深页码性能退化（R112-2） | 后续改为 cursor-based 分页 |
+| F-39 | `memory/episodic.py` | 日记 source_intent_id 跨表关联可能断链（R115-1） | 增加 intent_id 完整性校验 |
+| **F-42** | `memory/distillation.py` | `_CANON_HOTWORDS_CACHE` 模块级缓存无 TTL，热词更新后不自动失效 | 增加 TTL 或主动刷新机制 |
 
 ---
 
-## 馃搳 涓冦€佺患鍚堣瘎鍒嗭紙M10-C 鏇存柊锛?
-| 缁村害 | 璇勫垎 | 杈冧笂娆?| 璇存槑 |
+## 📊 七、综合评分（M10-C 更新）
+
+| 维度 | 评分 | 较上次 | 说明 |
 |------|------|--------|------|
-| **鏋舵瀯璁捐** | 猸愨瓙猸愨瓙猸?| 鈥?| Host-Edge 鍒嗕綋 + 鍗曞悜閾?+ 绁ㄦ嵁鍖栨墽琛?+ Canon 娌荤悊 + 璁板繂钂搁 |
-| **浠ｇ爜璐ㄩ噺** | 猸愨瓙猸愨瓙猸?| 鈥?| 0 瑁?except / 0 TODO / 0 纭紪鐮佸瘑閽?/ frozen dataclass |
-| **瀹夊叏鎬?* | 猸愨瓙猸愨瓙猸?| 鈥?| Docker 瀹瑰櫒闅旂 + Canon 涓绘潈淇濇姢 + 瀹¤涓茶仈 + 钂搁骞傜瓑 |
-| **鍙璁℃€?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | 27 寮犲璁¤〃 + 148 涓敊璇爜 + 钂搁 MEMORY_DISTILLED 浜嬩欢 |
-| **鍙祴璇曟€?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | **1062 閫氳繃 / 0 澶辫触**锛?21 tests vs 绗洓鐗堬級 |
-| **鍔熻兘瀹屾垚搴?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | TASK-0000~0129 / M1~M10-C 鍏ㄩ儴瀹屾垚 |
-| **鍙繍琛屾€?* | 猸愨瓙猸愨瓙猸?| 鈥?| FastAPI + Canon REST API + Docker sandbox + Edge 閲嶈繛/鎭㈠ |
-| **鍙娴嬫€?* | 猸愨瓙猸愨瓙猸?| 鈥?| 闈㈡澘 + 璺ㄧ鏃堕棿绾?+ Canon 娌荤悊 API + 钂搁瀹¤ |
+| **架构设计** | ⭐⭐⭐⭐⭐ | — | Host-Edge 分体 + 单向链 + 票据化执行 + Canon 治理 + 记忆蒸馏 |
+| **代码质量** | ⭐⭐⭐⭐⭐ | — | 0 裸 except / 0 TODO / 0 硬编码密钥 / frozen dataclass |
+| **安全性** | ⭐⭐⭐⭐⭐ | — | Docker 容器隔离 + Canon 主权保护 + 审计串联 + 蒸馏幂等 |
+| **可审计性** | ⭐⭐⭐⭐⭐ | ⬆️ | 27 张审计表 + 148 个错误码 + 蒸馏 MEMORY_DISTILLED 事件 |
+| **可测试性** | ⭐⭐⭐⭐⭐ | ⬆️ | **1062 通过 / 0 失败**（+21 tests vs 第四版） |
+| **功能完成度** | ⭐⭐⭐⭐⭐ | ⬆️ | TASK-0000~0129 / M1~M10-C 全部完成 |
+| **可运行性** | ⭐⭐⭐⭐⭐ | — | FastAPI + Canon REST API + Docker sandbox + Edge 重连/恢复 |
+| **可观测性** | ⭐⭐⭐⭐⭐ | — | 面板 + 跨端时间线 + Canon 治理 API + 蒸馏审计 |
 
-### 鎬讳綋璇勫垎锛?*猸愨瓙猸愨瓙猸?/ 5锛堝伐绋嬫垚鐔熷害鏋侀珮锛?062 tests 鍏ㄩ儴閫氳繃锛?*
+### 总体评分：**⭐⭐⭐⭐⭐ / 5（工程成熟度极高，1062 tests 全部通过）**
 
 ---
 
-## 馃搵 鍏€佷笌绗洓鐗堝姣旓紙鏀硅繘鎬荤粨锛?
-| 涓婃鍙戠幇 | 浼樺厛绾?| 鐘舵€?| 瑙ｅ喅鏂瑰紡 |
+## 📋 八、与第四版对比（改进总结）
+
+| 上次发现 | 优先级 | 状态 | 解决方式 |
 |---------|--------|------|---------|
-| F-28 `_get_canon_store()` 鍏ㄥ眬鍗曚緥绔炴€侊紙R118-1锛?| P1 | 鉁?**宸茶В鍐?* | M10-A P1锛氭敼涓轰緷璧栨敞鍏?`set_ledger_provider()` |
-| F-29 `_get_ledger_from_app()` 寰幆寮曠敤椋庨櫓锛圧118-2锛?| P1 | 鉁?**宸茶В鍐?* | M10-A P1锛氶噸鏋勪负鍙傛暟浼犻€掓ā寮?|
-| F-30 `proposal_id` 鏃?UNIQUE 绾︽潫锛圧118-3锛?| P1 | 鉁?**宸茶В鍐?* | M10-A P1锛?017 migration + INSERT OR IGNORE |
-| F-31 Evolution approve 鏃犲洖婊氭満鍒讹紙R114-1锛?| P1 | 鉁?**宸茶В鍐?* | M10-A P1锛歚rollback_proposal()` + `/rollback` 绔偣 |
+| F-28 `_get_canon_store()` 全局单例竞态（R118-1） | P1 | ✅ **已解决** | M10-A P1：改为依赖注入 `set_ledger_provider()` |
+| F-29 `_get_ledger_from_app()` 循环引用风险（R118-2） | P1 | ✅ **已解决** | M10-A P1：重构为参数传递模式 |
+| F-30 `proposal_id` 无 UNIQUE 约束（R118-3） | P1 | ✅ **已解决** | M10-A P1：0017 migration + INSERT OR IGNORE |
+| F-31 Evolution approve 无回滚机制（R114-1） | P1 | ✅ **已解决** | M10-A P1：`rollback_proposal()` + `/rollback` 端点 |
 
-M10-B/C 鏂板鑳藉姏锛?
-| 鏂板鑳藉姏 | 閲岀▼纰?| 璇存槑 |
+M10-B/C 新增能力：
+
+| 新增能力 | 里程碑 | 说明 |
 |---------|--------|------|
-| ASR 鐑瘝鎻愬彇锛坋xtract_hotwords锛?| M10-B | TASK-0122 |
-| GET /canon/hotwords 绔偣 | M10-B | TASK-0123 |
-| Edge ASR 鐑瘝娉ㄥ叆锛坕nject_canon_hotwords锛?| M10-B | TASK-0124 |
-| M10-B 鍙戝竷娓呭崟锛坢10b_release.json锛?| M10-B | TASK-0125 |
-| 璁板繂钂搁寮曟搸锛圡emoryDistillationEngine锛?| M10-C | TASK-0126 |
-| semantic_memory 琛?+ CRUD | M10-C | TASK-0127 |
-| prompt_context.semantic_slot 鍙€夊垎妲?| M10-C | TASK-0128 |
-| M10-C 鍙戝竷娓呭崟锛坢10c_release.json锛?| M10-C | TASK-0129 |
+| ASR 热词提取（extract_hotwords） | M10-B | TASK-0122 |
+| GET /canon/hotwords 端点 | M10-B | TASK-0123 |
+| Edge ASR 热词注入（inject_canon_hotwords） | M10-B | TASK-0124 |
+| M10-B 发布清单（m10b_release.json） | M10-B | TASK-0125 |
+| 记忆蒸馏引擎（MemoryDistillationEngine） | M10-C | TASK-0126 |
+| semantic_memory 表 + CRUD | M10-C | TASK-0127 |
+| context_pack.semantic_slot 可选分槽 | M10-C | TASK-0128 |
+| M10-C 发布清单（m10c_release.json） | M10-C | TASK-0129 |
 
 ---
 
-## 馃弳 涔濄€佺粨璁?
-**Natsume Ai 鍦?TASK-0000~0129 / M1~M10-C 鍏ㄩ儴瀹屾垚鍚庯紝宸茶揪鍒?璁板繂钂搁闂幆"鐨勫伐绋嬫垚鐔熷害銆?*
+## 🏆 九、结论
 
-- 鉁?**~59,800 琛屼唬鐮?*锛垀34,000 涓氬姟 + ~25,800 娴嬭瘯锛夊叏閮ㄦ湁鏈虹粍缁?- 鉁?**1062 椤规祴璇曞叏閮ㄩ€氳繃**锛? 澶辫触锛夛紝杈冪鍥涚増鏂板 21 椤?- 鉁?**27 寮犲璁¤〃 + 148 涓敊璇爜甯搁噺 + 20 涓?SQL 杩佺Щ鑴氭湰** 瑕嗙洊鍏ㄩ摼璺?- 鉁?**Canon 娌荤悊 REST API**锛? 绔偣锛屽惈 /canon/hotwords锛夊畬鏁村疄鐜?- 鉁?**璁板繂钂搁绯荤粺**锛氭儏鑺傝蹇?鈫?璇箟璁板繂钂搁锛屽箓绛夊啓鍏ワ紝prompt_context 娉ㄥ叆
-- 鉁?**ASR 鐑瘝娉ㄥ叆**锛歐orld Canon 鈫?Edge ASR 鐑瘝闂幆
-- 鉁?鏍稿績涓嶅彉閲忥紙鍗曞悜閾?Token 蹇呮/瀹¤寮哄埗/鎷掔粷蹇呭甫鐮?涓嶄吉鎵ц/Canon 涓绘潈锛夊叏閮ㄩ€氳繃
-- 鉁?Docker 瀹瑰櫒绾ф矙绠遍殧绂诲凡灏变綅
-- 鉁?Edge 璁惧鎭㈠闊ф€э細VTS 鑷姩閲嶈繛 + ASR 璁惧鎭㈠ + 浜嬩欢琛ュ彂
-- 鈿狅笍 鍓╀綑 14 涓?P1 鍙戠幇椤癸紙F-28~F-31 宸茶В鍐筹紝鏂板 F-40/F-41锛?- 鈿狅笍 鍓╀綑 16 涓?P2 寤鸿椤癸紙鏂板 F-42锛?
-**椋庨櫓璇︽儏宸茶褰曞湪** [risk_registry.md](../60_trace/risk_registry.md) **涓€?*
+**Natsume Ai 在 TASK-0000~0129 / M1~M10-C 全部完成后，已达到"记忆蒸馏闭环"的工程成熟度。**
+
+- ✅ **~59,800 行代码**（~34,000 业务 + ~25,800 测试）全部有机组织
+- ✅ **1062 项测试全部通过**（0 失败），较第四版新增 21 项
+- ✅ **27 张审计表 + 148 个错误码常量 + 20 个 SQL 迁移脚本** 覆盖全链路
+- ✅ **Canon 治理 REST API**（9 端点，含 /canon/hotwords）完整实现
+- ✅ **记忆蒸馏系统**：情节记忆 → 语义记忆蒸馏，幂等写入，context_pack 注入
+- ✅ **ASR 热词注入**：World Canon → Edge ASR 热词闭环
+- ✅ 核心不变量（单向链/Token 必检/审计强制/拒绝必带码/不伪执行/Canon 主权）全部通过
+- ✅ Docker 容器级沙箱隔离已就位
+- ✅ Edge 设备恢复韧性：VTS 自动重连 + ASR 设备恢复 + 事件补发
+- ⚠️ 剩余 14 个 P1 发现项（F-28~F-31 已解决，新增 F-40/F-41）
+- ⚠️ 剩余 16 个 P2 建议项（新增 F-42）
+
+**风险详情已记录在** [risk_registry.md](../60_trace/risk_registry.md) **中。**
 
 ---
 
-> 鏈姤鍛婂熀浜庡叏閲忔簮鐮侀€愭ā鍧楀闃?+ 1062 椤规祴璇曞叏閲忚繍琛?+ 涓嶅彉閲忛潤鎬佹壂鎻?+ 瀹夊叏瀹¤鐢熸垚銆?
+> 本报告基于全量源码逐模块审阅 + 1062 项测试全量运行 + 不变量静态扫描 + 安全审计生成。

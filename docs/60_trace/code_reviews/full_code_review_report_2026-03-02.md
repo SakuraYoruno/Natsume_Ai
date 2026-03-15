@@ -1,366 +1,479 @@
-﻿鍙椾紬锛欳ODEX
-鏍囬锛氬叏闈唬鐮佸闃呮姤鍛婏紙绗笁鐗堬紝2026-03-02锛?
-# 馃攳 Natsume Ai 鍏ㄩ潰浠ｇ爜瀹￠槄鎶ュ憡
+受众：CODEX
+标题：全面代码审阅报告（第三版，2026-03-02）
 
-> **鐢熸垚鏃ユ湡**锛?026-03-02锛堢涓夌増锛屽惈 TASK-0000~0083 鍏ㄩ儴浜や粯锛?> **瀹￠槄鑼冨洿**锛歨ost_brain/銆乪dge_client/銆乼ests/銆乧onfigs/銆乨ocs/
-> **瀹￠槄鏂规硶**锛氶€愭ā鍧楁簮鐮侀槄璇?+ 濂戠害娴嬭瘯鍏ㄩ噺杩愯 + 鏋舵瀯涓€鑷存€ф鏌?+ 涓嶅彉閲忛潤鎬佹壂鎻?+ 瀹夊叏瀹¤
+# 🔍 Natsume Ai 全面代码审阅报告
+
+> **生成日期**：2026-03-02（第三版，含 TASK-0000~0083 全部交付）
+> **审阅范围**：host_brain/、edge_client/、tests/、configs/、docs/
+> **审阅方法**：逐模块源码阅读 + 契约测试全量运行 + 架构一致性检查 + 不变量静态扫描 + 安全审计
 
 ---
 
-## 馃搳 涓€銆侀」鐩€昏
+## 📊 一、项目总览
 
-| 鎸囨爣 | 鏁版嵁 | 杈冧笂娆″彉鍖?|
+| 指标 | 数据 | 较上次变化 |
 |------|------|-----------|
-| **Host Brain 婧愭枃浠?* | 78 涓?`.py`锛堝惈 `__init__`锛?| +23锛坴s 涓婄増锛?|
-| **Edge Client 婧愭枃浠?* | 17 涓?`.py` | +2 |
-| **Host Brain 浠ｇ爜琛?* | 22,326 琛?| +1,069 |
-| **Edge Client 浠ｇ爜琛?* | 5,370 琛?| +1,425 |
-| **娴嬭瘯浠ｇ爜琛?* | 17,749 琛?| +3,653 |
-| **鎬讳唬鐮佽** | **45,445 琛?* | +6,147 |
-| **濂戠害娴嬭瘯鏂囦欢** | 81 涓?| +13 |
-| **E2E 娴嬭瘯鏂囦欢** | 4 涓?| 鈥?|
-| **娴嬭瘯鏂囦欢鍚堣** | 89 涓紙鍚?conftest/helper锛?| +17 |
-| **娴嬭瘯鏂█鐐?* | 697 閫氳繃 / **7 澶辫触** 鈿狅笍 | +203 閫氳繃 / +7 澶辫触 |
-| **娴嬭瘯 Fixture 鏂囦欢** | 208 涓?`.json` | 鈥?|
-| **瀹¤鏃ュ織琛?* | 26 寮?| +8 |
-| **閿欒鐮侊紙reason_code锛?* | 144 涓父閲?| -9锛堥儴鍒嗛噸鏋勫悎骞讹級 |
-| **SQL 杩佺Щ鑴氭湰** | 38 涓?| +25 |
-| **Git 鎻愪氦**锛堝叏 TASK锛?| TASK-0000~0083 鍏ㄩ儴瀹屾垚 | 鈥?|
+| **Host Brain 源文件** | 78 个 `.py`（含 `__init__`） | +23（vs 上版） |
+| **Edge Client 源文件** | 17 个 `.py` | +2 |
+| **Host Brain 代码行** | 22,326 行 | +1,069 |
+| **Edge Client 代码行** | 5,370 行 | +1,425 |
+| **测试代码行** | 17,749 行 | +3,653 |
+| **总代码行** | **45,445 行** | +6,147 |
+| **契约测试文件** | 81 个 | +13 |
+| **E2E 测试文件** | 4 个 | — |
+| **测试文件合计** | 89 个（含 conftest/helper） | +17 |
+| **测试断言点** | 697 通过 / **7 失败** ⚠️ | +203 通过 / +7 失败 |
+| **测试 Fixture 文件** | 208 个 `.json` | — |
+| **审计日志表** | 26 张 | +8 |
+| **错误码（reason_code）** | 144 个常量 | -9（部分重构合并） |
+| **SQL 迁移脚本** | 38 个 | +25 |
+| **Git 提交**（全 TASK） | TASK-0000~0083 全部完成 | — |
 
 ---
 
-## 馃彈锔?浜屻€佹灦鏋勫叏鏅?
+## 🏗️ 二、架构全景
+
 ```
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ Host Brain锛圥ython 3.12+锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 app/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹? 鈹? fastapi_app.py (626L) 鈫?HTTP 鍏ュ彛 + 涓棿浠?+ 闈欐€佹枃浠?         鈹?  鈹?鈹? 鈹? main.py (909L)        鈫?鍚姩鎶ュ憡 + 鍋ュ悍鑱氬悎 + 9 鑺傜偣鎷撴墤      鈹?  鈹?鈹? 鈹? config.py (549L)      鈫?鍒嗗眰閰嶇疆 + 鑴辨晱蹇収 + diff             鈹?  鈹?鈹? 鈹? web_ui.py (231L)      鈫?鍙娴嬮潰鏉?API                        鈹?  鈹?鈹? 鈹? static/panel.html     鈫?閾捐矾鍙鍖栭潰鏉?                        鈹?  鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 governor/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹屸攢 audit/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? decision.py (310L)   鈹? 鈹? sqlite_ledger.py (1570L) 鈫?鏈€澶? 鈹?    鈹?鈹? 鈹? rules.py (200L)      鈹? 鈹? migration_runner.py (464L)       鈹?    鈹?鈹? 鈹? schemas.py (260L)    鈹? 鈹? retention.py (175L)              鈹?    鈹?鈹? 鈹? tokens.py (220L)     鈹? 鈹? drill.py (85L)                   鈹?    鈹?鈹? 鈹? rate_limit_store.py  鈹? 鈹? 38 涓?SQL 杩佺Щ鑴氭湰               鈹?    鈹?鈹? 鈹?   (600L)             鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                                           鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 integrations/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹屸攢 core/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? graph_runtime.py     鈹? 鈹? errors.py (144 涓敊璇爜甯搁噺)    鈹?    鈹?鈹? 鈹? graph_executor.py    鈹? 鈹? services.py (763L)               鈹?    鈹?鈹? 鈹? graph_fallback.py    鈹? 鈹? qa.py (436L)                     鈹?    鈹?鈹? 鈹? graph_contract.py    鈹? 鈹? config_snapshot.py / ids.py      鈹?    鈹?鈹? 鈹? graph_model_resolve  鈹? 鈹? metabolism.py / key_profiles.py  鈹?    鈹?鈹? 鈹? llm_gateway.py       鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                                           鈹?鈹?                                                                       鈹?鈹? 鈹屸攢 airlock/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹屸攢 observability/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? sanitizer.py         鈹? 鈹? cross_timeline.py (500L)         鈹?    鈹?鈹? 鈹? quarantine.py        鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹? sandbox.py (468L)    鈹?                                           鈹?鈹? 鈹? docker_sandbox.py    鈹? 鈹屸攢 vision/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹?   (245L) 鈫?NEW       鈹? 鈹? screen_ocr.py (355L)             鈹?    鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹? camera_event.py (525L)           鈹?    鈹?鈹? 鈹屸攢 channels/ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹? detector_registry.py (433L)      鈹?    鈹?鈹? 鈹? wechat.py (187L)     鈹? 鈹?   鈫?NEW                          鈹?    鈹?鈹? 鈹? vts.py (238L)        鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?    鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                                           鈹?鈹?                                                                       鈹?鈹? + bond/ + memory/ + retrieval/ + skills/ + tools/ + lsp/ + release/  鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ Edge Client 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? rpc/voice.py | rpc/event_reporter.py (474L) 鈫?NEW                    鈹?鈹? rpc/resource_gate.py | rpc/health.py (56L) 鈫?NEW                     鈹?鈹? senses/asr.py (1028L) | senses/fallback_llm.py (63L)                 鈹?鈹? actuators/speech.py | actuators/tts_engine.py                         鈹?鈹? actuators/vts_driver.py (693L) + 閲嶈繛鏀寔                             鈹?鈹? proofs/resource_gate.py (22L) | config.py (472L)                      鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?```
+┌─────────────────────── Host Brain（Python 3.12+） ─────────────────────┐
+│                                                                        │
+│  ┌─ app/ ──────────────────────────────────────────────────────────┐   │
+│  │  fastapi_app.py (626L) ← HTTP 入口 + 中间件 + 静态文件          │   │
+│  │  main.py (909L)        ← 启动报告 + 健康聚合 + 9 节点拓扑      │   │
+│  │  config.py (549L)      ← 分层配置 + 脱敏快照 + diff             │   │
+│  │  web_ui.py (231L)      ← 可观测面板 API                        │   │
+│  │  static/panel.html     ← 链路可视化面板                         │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                        │
+│  ┌─ governor/ ───────────┐  ┌─ audit/ ──────────────────────────┐     │
+│  │  decision.py (310L)   │  │  sqlite_ledger.py (1570L) ← 最大  │     │
+│  │  rules.py (200L)      │  │  migration_runner.py (464L)       │     │
+│  │  schemas.py (260L)    │  │  retention.py (175L)              │     │
+│  │  tokens.py (220L)     │  │  drill.py (85L)                   │     │
+│  │  rate_limit_store.py  │  │  38 个 SQL 迁移脚本               │     │
+│  │    (600L)             │  └───────────────────────────────────┘     │
+│  └───────────────────────┘                                            │
+│                                                                        │
+│  ┌─ integrations/ ───────┐  ┌─ core/ ───────────────────────────┐     │
+│  │  graph_runtime.py     │  │  errors.py (144 个错误码常量)    │     │
+│  │  graph_executor.py    │  │  services.py (763L)               │     │
+│  │  graph_fallback.py    │  │  qa.py (436L)                     │     │
+│  │  graph_contract.py    │  │  config_snapshot.py / ids.py      │     │
+│  │  graph_model_resolve  │  │  metabolism.py / key_profiles.py  │     │
+│  │  llm_gateway.py       │  └───────────────────────────────────┘     │
+│  └───────────────────────┘                                            │
+│                                                                        │
+│  ┌─ airlock/ ────────────┐  ┌─ observability/ ──────────────────┐     │
+│  │  sanitizer.py         │  │  cross_timeline.py (500L)         │     │
+│  │  quarantine.py        │  └───────────────────────────────────┘     │
+│  │  sandbox.py (468L)    │                                            │
+│  │  docker_sandbox.py    │  ┌─ vision/ ─────────────────────────┐     │
+│  │    (245L) ← NEW       │  │  screen_ocr.py (355L)             │     │
+│  └───────────────────────┘  │  camera_event.py (525L)           │     │
+│  ┌─ channels/ ───────────┐  │  detector_registry.py (433L)      │     │
+│  │  wechat.py (187L)     │  │    ← NEW                          │     │
+│  │  vts.py (238L)        │  └───────────────────────────────────┘     │
+│  └───────────────────────┘                                            │
+│                                                                        │
+│  + bond/ + memory/ + retrieval/ + skills/ + tools/ + lsp/ + release/  │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────── Edge Client ────────────────────────────────────┐
+│  rpc/voice.py | rpc/event_reporter.py (474L) ← NEW                    │
+│  rpc/resource_gate.py | rpc/health.py (56L) ← NEW                     │
+│  senses/asr.py (1028L) | senses/fallback_llm.py (63L)                 │
+│  actuators/speech.py | actuators/tts_engine.py                         │
+│  actuators/vts_driver.py (693L) + 重连支持                             │
+│  proofs/resource_gate.py (22L) | config.py (472L)                      │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 馃敩 涓夈€侀€愭ā鍧楁繁搴﹀鏌?
-### 3.1 搴旂敤鍏ュ彛灞傦紙`host_brain/app/`锛夆€?猸愨瓙猸愨瓙猸?
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
-|------|------|--------|------|
-| `main.py` | 909 | 95% | 鈥?|
-| `config.py` | 549 | 95% | +34锛圧ate Limit 閰嶇疆椤癸級 |
-| `fastapi_app.py` | 626 | 95% | **NEW锛圱ASK-0065锛?* |
-| `web_ui.py` | 231 | 90% | **NEW锛圱ASK-0066锛?* |
-| `static/panel.html` | 鈥?| 90% | **NEW锛圱ASK-0066锛?* |
+## 🔬 三、逐模块深度审查
 
-**瀹℃煡缁撹锛?*
-- 鉁?`fastapi_app.py`锛歅OST `/v1/chat` + GET 鍋ュ悍绔偣 + 涓棿浠跺紓甯稿厹搴?+ 闈欐€佹枃浠舵湇鍔°€傜粨鏋勬竻鏅帮紝涓棿浠跺眰淇濊瘉浜嗕换浣曟湭鎹曡幏寮傚父浠嶈繑鍥炲彲瑙ｆ瀽 JSON銆?- 鉁?`web_ui.py`锛氬欢杩熷鍏?`fastapi_app.get_ledger` 閬垮厤寰幆寮曠敤鈥斺€旀纭ā寮忋€?- 鉁?`config.py`锛氭柊澧?`HOST_RATE_LIMIT_BACKEND` / `HOST_RATE_LIMIT_WINDOW_MS` / `HOST_RATE_LIMIT_MAX_REQUESTS` 涓変釜閰嶇疆椤癸紝鏃犳晥鍊艰嚜鍔ㄩ檷绾у埌 memory 鍚庣锛坵arning 绾ц€岄潪 error 绾э級銆?- 鈿狅笍 **鍙戠幇**锛歚main.py` 绗?908 琛屾湁瑁?`print()` 璋冪敤锛屽簲鏇挎崲涓?`logger.info()`銆?
+### 3.1 应用入口层（`host_brain/app/`）— ⭐⭐⭐⭐⭐
+
+| 文件 | 行数 | 完成度 | 变化 |
+|------|------|--------|------|
+| `main.py` | 909 | 95% | — |
+| `config.py` | 549 | 95% | +34（Rate Limit 配置项） |
+| `fastapi_app.py` | 626 | 95% | **NEW（TASK-0065）** |
+| `web_ui.py` | 231 | 90% | **NEW（TASK-0066）** |
+| `static/panel.html` | — | 90% | **NEW（TASK-0066）** |
+
+**审查结论：**
+- ✅ `fastapi_app.py`：POST `/v1/chat` + GET 健康端点 + 中间件异常兜底 + 静态文件服务。结构清晰，中间件层保证了任何未捕获异常仍返回可解析 JSON。
+- ✅ `web_ui.py`：延迟导入 `fastapi_app.get_ledger` 避免循环引用——正确模式。
+- ✅ `config.py`：新增 `HOST_RATE_LIMIT_BACKEND` / `HOST_RATE_LIMIT_WINDOW_MS` / `HOST_RATE_LIMIT_MAX_REQUESTS` 三个配置项，无效值自动降级到 memory 后端（warning 级而非 error 级）。
+- ⚠️ **发现**：`main.py` 第 908 行有裸 `print()` 调用，应替换为 `logger.info()`。
+
 ---
 
-### 3.2 Governor 娌荤悊寮曟搸锛坄host_brain/governor/`锛夆€?猸愨瓙猸愨瓙猸?
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
-|------|------|--------|------|
-| `decision.py` | 310 | 92% | 鈥?|
-| `rules.py` | 200 | 95% | +R4 backend 鏍囨敞 |
-| `schemas.py` | 260 | 95% | 鈥?|
-| `tokens.py` | 220 | 95% | 鈥?|
-| `rate_limit_store.py` | 600 | 92% | **NEW锛圱ASK-0073锛?* |
+### 3.2 Governor 治理引擎（`host_brain/governor/`）— ⭐⭐⭐⭐⭐
 
-**瀹℃煡缁撹锛?*
-- 鉁?`rate_limit_store.py`锛氭娊璞℃帴鍙?`RateLimitStore` + 3 绉嶅悗绔紙InMemory/SQLite/Redis锛? `DegradingRateLimitStore` 闄嶇骇鍖呰鍣?+ 宸ュ巶鍑芥暟銆傜嚎绋嬪畨鍏紙InMemory 鐢?threading.Lock锛孲QLite 鐢?WAL+busy_timeout锛夛紝浠ｇ爜缁撴瀯娓呮櫚銆?- 鉁?`rules.py`锛歊4 Gate 澧炲己浜?`backend`/`degraded`/`degraded_from`/`degraded_reason_code` 鍙€夊瓧娈碉紝鍚戝悗鍏煎銆?- 鉁?`GateSnapshot` dataclass 浣跨敤 `frozen=True` 淇濊瘉涓嶅彲鍙樻€с€?- 鈿狅笍 **鍙戠幇**锛歚RedisRateLimitStore` 渚濊禆 `redis` 鍖咃紝浣?`requirements.txt` 鏈垪鍏ワ紙鎸夎璁′负鍙€変緷璧栵紝杩愯鏃?import 澶辫触浼氳Е鍙戦檷绾э級鈥斺€旈渶鍦ㄩ儴缃叉枃妗ｄ腑璇存槑銆?
+| 文件 | 行数 | 完成度 | 变化 |
+|------|------|--------|------|
+| `decision.py` | 310 | 92% | — |
+| `rules.py` | 200 | 95% | +R4 backend 标注 |
+| `schemas.py` | 260 | 95% | — |
+| `tokens.py` | 220 | 95% | — |
+| `rate_limit_store.py` | 600 | 92% | **NEW（TASK-0073）** |
+
+**审查结论：**
+- ✅ `rate_limit_store.py`：抽象接口 `RateLimitStore` + 3 种后端（InMemory/SQLite/Redis）+ `DegradingRateLimitStore` 降级包装器 + 工厂函数。线程安全（InMemory 用 threading.Lock，SQLite 用 WAL+busy_timeout），代码结构清晰。
+- ✅ `rules.py`：R4 Gate 增强了 `backend`/`degraded`/`degraded_from`/`degraded_reason_code` 可选字段，向后兼容。
+- ✅ `GateSnapshot` dataclass 使用 `frozen=True` 保证不可变性。
+- ⚠️ **发现**：`RedisRateLimitStore` 依赖 `redis` 包，但 `requirements.txt` 未列入（按设计为可选依赖，运行时 import 失败会触发降级）——需在部署文档中说明。
+
 ---
 
-### 3.3 瀹¤閾剧郴缁燂紙`host_brain/audit/`锛夆€?猸愨瓙猸愨瓙猸?
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
-|------|------|--------|------|
-| `sqlite_ledger.py` | 1,570 | 95% | +8 寮犳柊琛?+ WAL 澧炲己 + fetch_by_time_range |
-| `migration_runner.py` | 464 | 92% | 鈥?|
-| `retention.py` | 175 | 90% | 鈥?|
-| `drill.py` | 85 | 85% | 鈥?|
+### 3.3 审计链系统（`host_brain/audit/`）— ⭐⭐⭐⭐⭐
 
-**瀹℃煡缁撹锛?*
-- 鉁?绯荤粺鏈€澶у崟鏂囦欢锛?,570 琛岋級锛屼絾鑱岃矗鏄庣‘鈥斺€旀墍鏈夊璁¤〃鐨?DDL/DML/Property 闆嗕腑绠＄悊銆?- 鉁?WAL 妯″紡澧炲己锛圱ASK-0070锛夛細`_activate_wal()` 鈫?鑷姩闄嶇骇鍒?DELETE 妯″紡 + `AUDIT_WAL_FAILED` 鍙娴?+ busy_timeout=5000ms + 3 娆″啓鍏ラ噸璇曘€?- 鉁?`_log_to_table()` 鏄墍鏈夊璁″啓鍏ョ殑缁熶竴鍏ュ彛锛宍_write_lock` + connection context manager + 閲嶈瘯鏈哄埗淇濊瘉浜嗙嚎绋嬪畨鍏ㄣ€?- 鉁?**26 寮犲璁¤〃**瑕嗙洊鍏ㄩ摼璺紝鍚柊澧炵殑 model_control_log / rpc_event_log / edge_health_snapshot / asr_recovery_log / vts_reconnect_log / cross_timeline_cache / config_deploy_log / release_audit_log銆?- 鉁?**鏂板** `fetch_by_time_range()` / `count_by_time_range()` 鏂规硶鈥斺€旀敮鎸佹椂闂寸獥鍙ｈ繃婊?+ 鍒嗛〉鏌ヨ锛圱ASK-0078锛夈€?- 鈿狅笍 **鍙戠幇**锛歚_fetch_all()` 浣跨敤 `f"SELECT * FROM {table}"` 琛ㄥ悕鎻掑€笺€傝櫧鐒?table 鍚嶆潵鑷唴閮ㄥ父閲忚€岄潪鐢ㄦ埛杈撳叆锛屼絾寤鸿澧炲姞琛ㄥ悕鐧藉悕鍗曟牎楠屼互闃叉娼滃湪鐨?SQL 娉ㄥ叆椋庨櫓銆?- 鈿狅笍 **鍙戠幇**锛歚_table_has_column()` 姣忔璋冪敤閮芥墽琛?`PRAGMA table_info`锛屽湪棰戠箒璋冪敤鍦烘櫙鍙兘鏈夋€ц兘褰卞搷鈥斺€斿缓璁紦瀛樿〃缁撴瀯淇℃伅銆?
+| 文件 | 行数 | 完成度 | 变化 |
+|------|------|--------|------|
+| `sqlite_ledger.py` | 1,570 | 95% | +8 张新表 + WAL 增强 + fetch_by_time_range |
+| `migration_runner.py` | 464 | 92% | — |
+| `retention.py` | 175 | 90% | — |
+| `drill.py` | 85 | 85% | — |
+
+**审查结论：**
+- ✅ 系统最大单文件（1,570 行），但职责明确——所有审计表的 DDL/DML/Property 集中管理。
+- ✅ WAL 模式增强（TASK-0070）：`_activate_wal()` → 自动降级到 DELETE 模式 + `AUDIT_WAL_FAILED` 可观测 + busy_timeout=5000ms + 3 次写入重试。
+- ✅ `_log_to_table()` 是所有审计写入的统一入口，`_write_lock` + connection context manager + 重试机制保证了线程安全。
+- ✅ **26 张审计表**覆盖全链路，含新增的 model_control_log / rpc_event_log / edge_health_snapshot / asr_recovery_log / vts_reconnect_log / cross_timeline_cache / config_deploy_log / release_audit_log。
+- ✅ **新增** `fetch_by_time_range()` / `count_by_time_range()` 方法——支持时间窗口过滤 + 分页查询（TASK-0078）。
+- ⚠️ **发现**：`_fetch_all()` 使用 `f"SELECT * FROM {table}"` 表名插值。虽然 table 名来自内部常量而非用户输入，但建议增加表名白名单校验以防止潜在的 SQL 注入风险。
+- ⚠️ **发现**：`_table_has_column()` 每次调用都执行 `PRAGMA table_info`，在频繁调用场景可能有性能影响——建议缓存表结构信息。
+
 ---
 
-### 3.4 Airlock 闅旂灞傦紙`host_brain/airlock/`锛夆€?猸愨瓙猸愨瓙
+### 3.4 Airlock 隔离层（`host_brain/airlock/`）— ⭐⭐⭐⭐
 
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
+| 文件 | 行数 | 完成度 | 变化 |
 |------|------|--------|------|
-| `sanitizer.py` | 230 | 90% | 鈥?|
-| `quarantine.py` | 110 | 85% | 鈥?|
-| `sandbox.py` | 468 | 90% | +Docker 鍚庣濮旀墭 + `isolation_backend` 瀛楁 |
-| `docker_sandbox.py` | 245 | 88% | **NEW锛圱ASK-0077锛?* |
+| `sanitizer.py` | 230 | 90% | — |
+| `quarantine.py` | 110 | 85% | — |
+| `sandbox.py` | 468 | 90% | +Docker 后端委托 + `isolation_backend` 字段 |
+| `docker_sandbox.py` | 245 | 88% | **NEW（TASK-0077）** |
 
-**瀹℃煡缁撹锛?*
-- 鉁?`sandbox.py`锛歴ubprocess 闅旂 + 涓存椂鐩綍 + 瓒呮椂寮烘潃 + 杈撳嚭鎴柇 + 浠ｇ爜浣撶Н涓婇檺 + 瀹¤鍐欏叆銆俙SandboxExecResult` 缁撴瀯瀹屾暣銆?- 鉁?**鏂板** `docker_sandbox.py`锛圱ASK-0077锛夛細Docker 瀹瑰櫒绾ч殧绂诲悗绔紝`--network=none` + `--read-only` + `--pids-limit=32` + `--memory=128m`銆侱ocker 涓嶅彲鐢ㄦ椂鑷姩闄嶇骇鍒?subprocess 骞舵爣璁?`degraded_from=docker`銆?- 鉁?`SandboxConfig` 鏂板 `isolation_backend` 瀛楁锛坄"subprocess"` / `"docker"`锛夛紝鏀寔鎸夌幆澧冮厤缃殧绂荤骇鍒€?- 鈿狅笍 **P1 瀹夊叏椋庨櫓**锛歴ubprocess 鍚庣闅旂绾у埆杈冧綆锛屾伓鎰忎唬鐮佷粛鍙鍙栦富鏈烘枃浠剁郴缁熴€傜敓浜ч儴缃插簲浣跨敤 Docker 鍚庣銆?- 鈿狅笍 **鍙戠幇**锛歚subprocess.TimeoutExpired` 澶勭悊鍦?Windows/Linux 涓婅涓哄彲鑳戒笉鍚岋紙淇″彿澶勭悊宸紓锛夈€?
+**审查结论：**
+- ✅ `sandbox.py`：subprocess 隔离 + 临时目录 + 超时强杀 + 输出截断 + 代码体积上限 + 审计写入。`SandboxExecResult` 结构完整。
+- ✅ **新增** `docker_sandbox.py`（TASK-0077）：Docker 容器级隔离后端，`--network=none` + `--read-only` + `--pids-limit=32` + `--memory=128m`。Docker 不可用时自动降级到 subprocess 并标记 `degraded_from=docker`。
+- ✅ `SandboxConfig` 新增 `isolation_backend` 字段（`"subprocess"` / `"docker"`），支持按环境配置隔离级别。
+- ⚠️ **P1 安全风险**：subprocess 后端隔离级别较低，恶意代码仍可读取主机文件系统。生产部署应使用 Docker 后端。
+- ⚠️ **发现**：`subprocess.TimeoutExpired` 处理在 Windows/Linux 上行为可能不同（信号处理差异）。
+
 ---
 
-### 3.5 鍙娴嬪眰锛坄host_brain/observability/`锛夆€?猸愨瓙猸愨瓙
+### 3.5 可观测层（`host_brain/observability/`）— ⭐⭐⭐⭐
 
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
+| 文件 | 行数 | 完成度 | 变化 |
 |------|------|--------|------|
-| `cross_timeline.py` | 500 | 92% | +fetch_by_time_range 闆嗘垚 |
+| `cross_timeline.py` | 500 | 92% | +fetch_by_time_range 集成 |
 
-**瀹℃煡缁撹锛?*
-- 鉁?`EdgeEventReport` + `HostEdgeTimelineAggregator` + `UnifiedTimelineEntry` 涓夊眰缁撴瀯銆?- 鉁?鏃堕棿婕傜Щ瀹瑰繊绛栫暐锛堥粯璁?5 绉掗槇鍊煎彲閰嶇疆锛夈€?- 鉁?Host 瀹¤琛?+ Edge 浜嬩欢缁熶竴鎺掑簭杈撳嚭锛宺equest_id/session_id 鍏宠仈銆?- 鉁?宸查泦鎴?`fetch_by_time_range()` 瀹炵幇鎸夋椂闂寸獥鍙ｉ珮鏁堟煡璇紙TASK-0078 瑙ｅ喅浜嗗師鏉ョ殑鍏ㄩ噺鍐呭瓨鍔犺浇闂锛夈€?
+**审查结论：**
+- ✅ `EdgeEventReport` + `HostEdgeTimelineAggregator` + `UnifiedTimelineEntry` 三层结构。
+- ✅ 时间漂移容忍策略（默认 5 秒阈值可配置）。
+- ✅ Host 审计表 + Edge 事件统一排序输出，request_id/session_id 关联。
+- ✅ 已集成 `fetch_by_time_range()` 实现按时间窗口高效查询（TASK-0078 解决了原来的全量内存加载问题）。
+
 ---
 
-### 3.6 瑙嗚绯荤粺锛坄host_brain/vision/`锛夆€?猸愨瓙猸愨瓙
+### 3.6 视觉系统（`host_brain/vision/`）— ⭐⭐⭐⭐
 
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
+| 文件 | 行数 | 完成度 | 变化 |
 |------|------|--------|------|
-| `screen_ocr.py` | 355 | 85% | 鈥?|
+| `screen_ocr.py` | 355 | 85% | — |
 | `camera_event.py` | 525 | 88% | +detect_multi |
-| `detector_registry.py` | 433 | 90% | **NEW锛圱ASK-0074锛?* |
+| `detector_registry.py` | 433 | 90% | **NEW（TASK-0074）** |
 
-**瀹℃煡缁撹锛?*
-- 鉁?`detector_registry.py`锛氱嚎绋嬪畨鍏ㄧ殑 `DetectorRegistry` + `MultiDetectorAggregator`銆傛敮鎸佸苟琛屾墽琛屻€侀儴鍒嗘垚鍔燂紙`PARTIAL`锛夈€佸叏閮ㄥけ璐ワ紙`ALL_FAILED`锛変笁绉嶈仛鍚堢粨鏋溿€?- 鉁?`detect_multi()` 鏂板鏂规硶涓嶅奖鍝嶇幇鏈?`detect()` 璋冪敤鏂光€斺€斿悜鍚庡吋瀹广€?- 鉁?Gaming 妯″紡闅旂鍦?screen_ocr 灞傚畬鏁村疄鐜般€?
+**审查结论：**
+- ✅ `detector_registry.py`：线程安全的 `DetectorRegistry` + `MultiDetectorAggregator`。支持并行执行、部分成功（`PARTIAL`）、全部失败（`ALL_FAILED`）三种聚合结果。
+- ✅ `detect_multi()` 新增方法不影响现有 `detect()` 调用方——向后兼容。
+- ✅ Gaming 模式隔离在 screen_ocr 层完整实现。
+
 ---
 
-### 3.7 闆嗘垚灞傦紙`host_brain/integrations/`锛夆€?猸愨瓙猸愨瓙
+### 3.7 集成层（`host_brain/integrations/`）— ⭐⭐⭐⭐
 
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
+| 文件 | 行数 | 完成度 | 变化 |
 |------|------|--------|------|
-| `graph_runtime.py` | 296 | 88% | 閲嶆瀯锛圱ASK-0069锛?|
-| `graph_executor.py` | 335 | 88% | **NEW锛圱ASK-0069 鎷嗗垎锛?* |
-| `graph_fallback.py` | 126 | 90% | **NEW锛圱ASK-0069 鎷嗗垎锛?* |
-| `graph_contract.py` | 243 | 90% | **NEW锛圱ASK-0069 鎷嗗垎锛?* |
-| `graph_model_resolve.py` | 179 | 88% | **NEW锛圱ASK-0069 鎷嗗垎锛?* |
-| `llm_gateway.py` | 300 | 85% | 鈥?|
+| `graph_runtime.py` | 296 | 88% | 重构（TASK-0069） |
+| `graph_executor.py` | 335 | 88% | **NEW（TASK-0069 拆分）** |
+| `graph_fallback.py` | 126 | 90% | **NEW（TASK-0069 拆分）** |
+| `graph_contract.py` | 243 | 90% | **NEW（TASK-0069 拆分）** |
+| `graph_model_resolve.py` | 179 | 88% | **NEW（TASK-0069 拆分）** |
+| `llm_gateway.py` | 300 | 85% | — |
 
-**瀹℃煡缁撹锛?*
-- 鉁?TASK-0069 灏嗗師 942 琛岀殑 `graph_runtime.py` 鎷嗗垎涓?5 涓ā鍧椻€斺€旇亴璐ｆ竻鏅板害澶у箙鎻愬崌銆?- 鉁?瀵煎叆鏂瑰悜鍗曞悜锛歳untime 鈫?executor/fallback/model_resolve 鈫?contract锛屾棤寰幆寮曠敤銆?- 鉁?`graph_contract.py` 浣滀负鍏变韩绫诲瀷灞傦紝鎵€鏈夋ā鍧楅€氳繃瀹冨叡浜暟鎹粨鏋勩€?- 鈿狅笍 **鍙戠幇**锛歚graph_executor.py` 绗?43 琛?`compile_runtime_graph(self)` 鏄敮涓€娌℃湁杩斿洖绫诲瀷鏍囨敞鐨勬柟娉曗€斺€旇交寰被鍨嬫彁绀虹己澶便€?
+**审查结论：**
+- ✅ TASK-0069 将原 942 行的 `graph_runtime.py` 拆分为 5 个模块——职责清晰度大幅提升。
+- ✅ 导入方向单向：runtime → executor/fallback/model_resolve → contract，无循环引用。
+- ✅ `graph_contract.py` 作为共享类型层，所有模块通过它共享数据结构。
+- ⚠️ **发现**：`graph_executor.py` 第 43 行 `compile_runtime_graph(self)` 是唯一没有返回类型标注的方法——轻微类型提示缺失。
+
 ---
 
-### 3.8 鍏朵粬 Host 妯″潡
+### 3.8 其他 Host 模块
 
-| 妯″潡 | 浠ｈ〃鏂囦欢 | 瀹屾垚搴?| 璇勪环 |
+| 模块 | 代表文件 | 完成度 | 评价 |
 |------|---------|--------|------|
-| **Bond** | `neo4j_client.py` (522L) / `bond_dynamics.py` (245L) | 90% | 鍗曞啓鍣?+ 瀹¤闂幆瀹屽杽 |
-| **Memory** | `episodic.py` (503L) / `chroma_client.py` (444L) | 88% | evidence_refs 寮哄埗 + 鐢熷懡鍛ㄦ湡瀹屾暣 |
-| **Canon** | `canon_world_store.py` (304L) / `canon_style_store.py` (228L) | 95% | 鐗堟湰鍖?+ 浜嬪疄闅旂浼樼 |
-| **Retrieval** | `reranker.py` (967L) / `embedding.py` (835L) | 85% | 鍏ㄩ摼璺彲瀹¤锛岄檷绾ц矾寰勫畬鏁?|
-| **Channels** | `wechat.py` (187L) / `vts.py` (238L) | 95% | 纭畾鎬ф槧灏?+ DEGRADED 闄嶇骇 + 閲嶅鍘婚噸 |
-| **Skills** | `loader.py` (270L) / `clawd_ui_action.py` (195L) | 88% | Token 蹇呮 + 绾㈢嚎鐔旀柇 |
-| **Tools** | `broker.py` (225L) / `mcp_adapter.py` (170L) | 90% | Broker 鍗曞叆鍙?+ MCP 鎵╁睍 |
-| **LSP** | `vault.py` (417L) | 90% | Artifact 鍙鍧€ + GC 鍙璁?|
-| **Release** | `release_manifest.py` (405L) | 90% | 鍙戝竷娓呭崟 + 鍥炴粴 + model_plane digest 鏍￠獙 |
-| **Core** | `services.py` (763L) / `qa.py` (436L) | 92% | 9 鑺傜偣鎷撴墤 + QA 鎷︽埅瀹屽杽 |
+| **Bond** | `neo4j_client.py` (522L) / `bond_dynamics.py` (245L) | 90% | 单写器 + 审计闭环完善 |
+| **Memory** | `episodic.py` (503L) / `chroma_client.py` (444L) | 88% | evidence_refs 强制 + 生命周期完整 |
+| **Canon** | `canon_world_store.py` (304L) / `canon_style_store.py` (228L) | 95% | 版本化 + 事实隔离优秀 |
+| **Retrieval** | `reranker.py` (967L) / `embedding.py` (835L) | 85% | 全链路可审计，降级路径完整 |
+| **Channels** | `wechat.py` (187L) / `vts.py` (238L) | 95% | 确定性映射 + DEGRADED 降级 + 重复去重 |
+| **Skills** | `loader.py` (270L) / `clawd_ui_action.py` (195L) | 88% | Token 必检 + 红线熔断 |
+| **Tools** | `broker.py` (225L) / `mcp_adapter.py` (170L) | 90% | Broker 单入口 + MCP 扩展 |
+| **LSP** | `vault.py` (417L) | 90% | Artifact 可寻址 + GC 可审计 |
+| **Release** | `release_manifest.py` (405L) | 90% | 发布清单 + 回滚 + model_plane digest 校验 |
+| **Core** | `services.py` (763L) / `qa.py` (436L) | 92% | 9 节点拓扑 + QA 拦截完善 |
 
 ---
 
-### 3.9 Edge Client 鈥?猸愨瓙猸愨瓙猸?
-| 鏂囦欢 | 琛屾暟 | 瀹屾垚搴?| 鍙樺寲 |
+### 3.9 Edge Client — ⭐⭐⭐⭐⭐
+
+| 文件 | 行数 | 完成度 | 变化 |
 |------|------|--------|------|
-| `senses/asr.py` | 1,028 | 92% | +璁惧鎭㈠寰幆 + 鍊欓€夎澶囨瀯寤猴紙TASK-0081锛?|
+| `senses/asr.py` | 1,028 | 92% | +设备恢复循环 + 候选设备构建（TASK-0081） |
 | `senses/fallback_llm.py` | 63 | 95% | **NEW** |
-| `actuators/speech.py` | 550 | 90% | 鈥?|
-| `actuators/tts_engine.py` | 542 | 90% | 鈥?|
-| `actuators/vts_driver.py` | 693 | 92% | +鎸囨暟閫€閬块噸杩?+ 鍋ュ悍蹇収锛圱ASK-0080锛?|
-| `rpc/voice.py` | 401 | 95% | 鈥?|
-| `rpc/event_reporter.py` | 474 | 95% | **NEW锛圱ASK-0079锛?* |
-| `rpc/resource_gate.py` | 380 | 95% | 鈥?|
+| `actuators/speech.py` | 550 | 90% | — |
+| `actuators/tts_engine.py` | 542 | 90% | — |
+| `actuators/vts_driver.py` | 693 | 92% | +指数退避重连 + 健康快照（TASK-0080） |
+| `rpc/voice.py` | 401 | 95% | — |
+| `rpc/event_reporter.py` | 474 | 95% | **NEW（TASK-0079）** |
+| `rpc/resource_gate.py` | 380 | 95% | — |
 | `rpc/health.py` | 56 | 95% | **NEW** |
 | `proofs/resource_gate.py` | 22 | 95% | **NEW** |
-| `config.py` | 472 | 95% | 鈥?|
+| `config.py` | 472 | 95% | — |
 
-**瀹℃煡缁撹锛?*
-- 鉁?ASR锛圱ASK-0067 + TASK-0081锛夛細WhisperModelManager + CUDA鈫扖PU 鑷姩闄嶇骇 + VAD 闈欓煶妫€娴?+ **楹﹀厠椋庤澶囪嚜鍔ㄦ仮澶?*锛坄_device_recovery_loop` + `_build_device_candidates` + `trigger_device_recovery`锛夈€?- 鉁?TTS锛圱ASK-0068锛夛細GPT-SoVITS 寮曟搸 + 鎾斁闃熷垪 + barge-in 鎵撴柇 + 璧勬簮棰勭暀/閲婃斁銆?- 鉁?VTS锛圱ASK-0068 + TASK-0080锛夛細WebSocket 闀胯繛鎺?+ **鎸囨暟閫€閬胯嚜鍔ㄩ噸杩?*锛堟渶澶?10 娆★紝绾?30 绉掔疮璁★級+ 閲嶈繛鍚?`reset_to_neutral` + `VTS_RECONNECT_EXHAUSTED` reason_code銆?- 鉁?**Event Reporter锛圱ASK-0079锛?*锛欵dge鈫扝ost RPC 浜嬩欢鎵归噺涓婃姤锛屽惈缃戠粶涓柇缂撳瓨锛堟渶澶?1000 鏉★級+ 鎭㈠鍚庢寜 `ts_ms` 琛ュ彂銆?- 鉁?Resource Gate锛氫紭鍏堢骇 ASR > PLAYBACK > TTS_SYNTH > FALLBACK_LLM锛屼簰鏂ユ姠鍗犲彲瀹¤銆?- 鉁?Fallback LLM锛氶粯璁ゅ嵏杞?+ draft_only 寮哄埗 + 绂佹瑁佸喅瀛楁 + 浼墽琛屾嫤鎴€?- 鈿狅笍 **鍙戠幇**锛歚vts_driver.py:685` 浣跨敤 `asyncio.get_event_loop()`鈥斺€擯ython 3.10+ 宸插純鐢紝搴旀敼涓?`asyncio.get_running_loop()` 鎴?`asyncio.new_event_loop()`銆?
+**审查结论：**
+- ✅ ASR（TASK-0067 + TASK-0081）：WhisperModelManager + CUDA→CPU 自动降级 + VAD 静音检测 + **麦克风设备自动恢复**（`_device_recovery_loop` + `_build_device_candidates` + `trigger_device_recovery`）。
+- ✅ TTS（TASK-0068）：GPT-SoVITS 引擎 + 播放队列 + barge-in 打断 + 资源预留/释放。
+- ✅ VTS（TASK-0068 + TASK-0080）：WebSocket 长连接 + **指数退避自动重连**（最大 10 次，约 30 秒累计）+ 重连后 `reset_to_neutral` + `VTS_RECONNECT_EXHAUSTED` reason_code。
+- ✅ **Event Reporter（TASK-0079）**：Edge→Host RPC 事件批量上报，含网络中断缓存（最多 1000 条）+ 恢复后按 `ts_ms` 补发。
+- ✅ Resource Gate：优先级 ASR > PLAYBACK > TTS_SYNTH > FALLBACK_LLM，互斥抢占可审计。
+- ✅ Fallback LLM：默认卸载 + draft_only 强制 + 禁止裁决字段 + 伪执行拦截。
+- ⚠️ **发现**：`vts_driver.py:685` 使用 `asyncio.get_event_loop()`——Python 3.10+ 已弃用，应改为 `asyncio.get_running_loop()` 或 `asyncio.new_event_loop()`。
+
 ---
 
-## 馃И 鍥涖€佹祴璇曚綋绯昏瘎浼?
-### 4.1 娴嬭瘯鍏ㄩ噺杩愯缁撴灉
+## 🧪 四、测试体系评估
+
+### 4.1 测试全量运行结果
 
 ```
-697 passed, 7 failed, 1 warning in 13.32s 鈿狅笍
+697 passed, 7 failed, 1 warning in 13.32s ⚠️
 ```
 
-| 娴嬭瘯鍒嗙被 | 鏂囦欢鏁?| 閫氳繃 | 澶辫触 |
+| 测试分类 | 文件数 | 通过 | 失败 |
 |----------|--------|------|------|
-| **濂戠害娴嬭瘯** | 81 | ~650 | 6 |
-| **E2E 娴嬭瘯** | 4 | ~47 | 1 |
-| **鍚堣** | 89 | **697** | **7** |
+| **契约测试** | 81 | ~650 | 6 |
+| **E2E 测试** | 4 | ~47 | 1 |
+| **合计** | 89 | **697** | **7** |
 
-### 4.2 澶辫触娴嬭瘯鍒嗘瀽
+### 4.2 失败测试分析
 
-| # | 娴嬭瘯 | 澶辫触鍘熷洜 | 鏍瑰洜鍒嗙被 | 寤鸿淇 |
+| # | 测试 | 失败原因 | 根因分类 | 建议修复 |
 |---|------|---------|---------|---------|
-| 1 | `test_avatar_contract::test_t_avatar_01_invalid_tag_and_free_action_attempt_are_rejected` | 鏂█ `assertFalse(invalid.success)` 澶辫触鈥斺€旀湭鐭?tag 鐜板湪杩斿洖 `success=True`锛圖EGRADED锛?| **棰勬湡琛屼负鍙樺寲**锛圱ASK-0082锛?| 鏇存柊鏂█锛氭鏌?`status == DEGRADED` 鑰岄潪 `success == False` |
-| 2 | `test_wechat_vts_voice_e2e::test_15_vts_invalid_emotion_rejected_in_e2e` | 鍚屼笂鈥斺€擡2E 灞傛柇瑷€ `assertFalse(result.success)` | **棰勬湡琛屼负鍙樺寲**锛圱ASK-0082锛?| 鍚屼笂 |
-| 3 | `test_model_plane_release_contract::test_invalid_milestone_rejected` | `build_release_checklist()` 瀵规棤鏁?milestone raise `ValueError` 鑰岄潪杩斿洖 `STATUS_FAILED` | **娴嬭瘯棰勬湡涓嶅尮閰?* | 娴嬭瘯搴斾娇鐢?`assertRaises(ValueError)` |
-| 4 | `test_sandbox_docker_contract::test_docker_backend_degrades_to_subprocess` | `mock.patch("host_brain.airlock.sandbox.is_docker_available")` 澶辫触鈥斺€斿嚱鏁板湪寤惰繜瀵煎叆涓粠 `docker_sandbox` 瀵煎叆 | **Mock 璺緞閿欒** | Mock 璺緞鏀逛负 `host_brain.airlock.docker_sandbox.is_docker_available` |
-| 5 | `test_sandbox_docker_contract::test_docker_backend_degrades_audit_logged` | 鍚屼笂 | **Mock 璺緞閿欒** | 鍚屼笂 |
-| 6 | `test_vts_reconnect_contract::test_reconnect_restores_neutral` | `last_event["neutral_restored"]` 涓?`False`鈥斺€旈噸杩為€昏緫鏈纭缃?neutral 鎭㈠鏍囧織 | **瀹炵幇缁嗚妭缂哄け** | `vts_driver.py` 閲嶈繛鎴愬姛鍚庨渶璁剧疆 `neutral_restored=True` |
-| 7 | `test_vts_reconnect_contract::test_trigger_reconnect_idempotent` | 绗簩娆?trigger 杩斿洖 `"reconnect started"` 鑰岄潪 `"reconnect already in progress"` | **骞傜瓑妫€鏌ョ己澶?* | `trigger_reconnect()` 闇€妫€鏌?`_reconnecting` 鏍囧織 |
+| 1 | `test_avatar_contract::test_t_avatar_01_invalid_tag_and_free_action_attempt_are_rejected` | 断言 `assertFalse(invalid.success)` 失败——未知 tag 现在返回 `success=True`（DEGRADED） | **预期行为变化**（TASK-0082） | 更新断言：检查 `status == DEGRADED` 而非 `success == False` |
+| 2 | `test_wechat_vts_voice_e2e::test_15_vts_invalid_emotion_rejected_in_e2e` | 同上——E2E 层断言 `assertFalse(result.success)` | **预期行为变化**（TASK-0082） | 同上 |
+| 3 | `test_model_plane_release_contract::test_invalid_milestone_rejected` | `build_release_checklist()` 对无效 milestone raise `ValueError` 而非返回 `STATUS_FAILED` | **测试预期不匹配** | 测试应使用 `assertRaises(ValueError)` |
+| 4 | `test_sandbox_docker_contract::test_docker_backend_degrades_to_subprocess` | `mock.patch("host_brain.airlock.sandbox.is_docker_available")` 失败——函数在延迟导入中从 `docker_sandbox` 导入 | **Mock 路径错误** | Mock 路径改为 `host_brain.airlock.docker_sandbox.is_docker_available` |
+| 5 | `test_sandbox_docker_contract::test_docker_backend_degrades_audit_logged` | 同上 | **Mock 路径错误** | 同上 |
+| 6 | `test_vts_reconnect_contract::test_reconnect_restores_neutral` | `last_event["neutral_restored"]` 为 `False`——重连逻辑未正确设置 neutral 恢复标志 | **实现细节缺失** | `vts_driver.py` 重连成功后需设置 `neutral_restored=True` |
+| 7 | `test_vts_reconnect_contract::test_trigger_reconnect_idempotent` | 第二次 trigger 返回 `"reconnect started"` 而非 `"reconnect already in progress"` | **幂等检查缺失** | `trigger_reconnect()` 需检查 `_reconnecting` 标志 |
 
-### 4.3 鏂板娴嬭瘯瑕嗙洊锛圱ASK-0076~0083锛?
-| 娴嬭瘯缂栧彿 | 娴嬭瘯鏂囦欢 | 鏂█鐐?| 瑕嗙洊鍩?|
+### 4.3 新增测试覆盖（TASK-0076~0083）
+
+| 测试编号 | 测试文件 | 断言点 | 覆盖域 |
 |---------|---------|--------|-------|
-| T-VTS-Degraded-01 | `test_vts_degraded_contract.py` | 36 | VTS DEGRADED 闄嶇骇 |
-| T-ASR-Recovery-01 | `test_asr_recovery_contract.py` | 25+ | ASR 璁惧鎭㈠ |
-| T-VTS-Reconnect-01 | `test_vts_reconnect_contract.py` | 20+ | VTS 鑷姩閲嶈繛 |
-| T-RPC-Event-01 | `test_rpc_event_contract.py` | 15+ | Edge鈫扝ost 浜嬩欢涓婃姤 |
-| T-Sandbox-Docker-01 | `test_sandbox_docker_contract.py` | 21 | Docker 瀹瑰櫒闅旂 |
-| T-Timeline-Perf-01 | `test_timeline_perf_contract.py` | 10+ | 鏃堕棿绾?SQL 浼樺寲 |
-| T-Audit-06 | `test_model_control_audit_contract.py` | 10 | model_control 瀹¤ |
-| T-Flow-03 | `test_model_plane_release_contract.py` | 5 | 鍙戝竷闂ㄧ |
-| T-Drill-02 | `test_orch_drill_contract.py` | 9 | 缂栨帓鏁呴殰娉ㄥ叆 |
+| T-VTS-Degraded-01 | `test_vts_degraded_contract.py` | 36 | VTS DEGRADED 降级 |
+| T-ASR-Recovery-01 | `test_asr_recovery_contract.py` | 25+ | ASR 设备恢复 |
+| T-VTS-Reconnect-01 | `test_vts_reconnect_contract.py` | 20+ | VTS 自动重连 |
+| T-RPC-Event-01 | `test_rpc_event_contract.py` | 15+ | Edge→Host 事件上报 |
+| T-Sandbox-Docker-01 | `test_sandbox_docker_contract.py` | 21 | Docker 容器隔离 |
+| T-Timeline-Perf-01 | `test_timeline_perf_contract.py` | 10+ | 时间线 SQL 优化 |
+| T-Audit-06 | `test_model_control_audit_contract.py` | 10 | model_control 审计 |
+| T-Flow-03 | `test_model_plane_release_contract.py` | 5 | 发布门禁 |
+| T-Drill-02 | `test_orch_drill_contract.py` | 9 | 编排故障注入 |
 
-### 4.4 Fixture 浣撶郴
+### 4.4 Fixture 体系
 
 ```
-208 涓?Fixture JSON 鏂囦欢
+208 个 Fixture JSON 文件
 ```
 
-瑕嗙洊鍩燂細airlock / audit / bond / canon / channels / chat / ci / cold_start / config / prompt_context / drill / e2e / governor_output / governor_rate_limit / governor_rules / intent / llm / llm_gateway / mcp / memory / migrations / observability / orchestration / qa / release / replay_logs / retrieval / services / tokens / tools / vault / vision / voice / web_ui
+覆盖域：airlock / audit / bond / canon / channels / chat / ci / cold_start / config / context_pack / drill / e2e / governor_output / governor_rate_limit / governor_rules / intent / llm / llm_gateway / mcp / memory / migrations / observability / orchestration / qa / release / replay_logs / retrieval / services / tokens / tools / vault / vision / voice / web_ui
 
 ---
 
-## 馃敀 浜斻€佸畨鍏ㄥ璁?
-### 5.1 涓嶅彉閲忓悎瑙勬壂鎻?
-| 涓嶅彉閲?| 妫€鏌ラ」 | 缁撴灉 |
+## 🔒 五、安全审计
+
+### 5.1 不变量合规扫描
+
+| 不变量 | 检查项 | 结果 |
 |--------|--------|------|
-| **I1 鍗曞悜閾?* | 鎼滅储 `from host_brain.skills.impl` 鏃佽矾瀵煎叆 | 鉁?浠?`impl/__init__.py` 鍐呴儴娉ㄥ唽锛屾棤鏃佽矾 |
-| **I6 Token 蹇呮** | 鎼滅储 Skill 鎵ц璺緞 bypass | 鉁?鎵€鏈夋墽琛岀粡 `loader.py` Token 鏍￠獙 |
-| **I8 瀹¤寮哄埗** | 鎼滅储鎵ц鏃犲璁″啓鍏ヨ矾寰?| 鉁?鎵€鏈?`_log_to_table` 閫氳矾鍙揪 |
-| **I9 鎷掔粷蹇呭甫鐮?* | 鎼滅储 REJECT 鏃?reason_code | 鉁?`validate_governor_output` 鎷︽埅 |
-| **I11 涓嶄吉鎵ц** | 鎼滅储 `print("宸叉墽琛?)` 绛?| 鉁?QA 鎷︽埅鍣?+ 姝ｅ垯鍖归厤瑕嗙洊 |
+| **I1 单向链** | 搜索 `from host_brain.skills.impl` 旁路导入 | ✅ 仅 `impl/__init__.py` 内部注册，无旁路 |
+| **I6 Token 必检** | 搜索 Skill 执行路径 bypass | ✅ 所有执行经 `loader.py` Token 校验 |
+| **I8 审计强制** | 搜索执行无审计写入路径 | ✅ 所有 `_log_to_table` 通路可达 |
+| **I9 拒绝必带码** | 搜索 REJECT 无 reason_code | ✅ `validate_governor_output` 拦截 |
+| **I11 不伪执行** | 搜索 `print("已执行")` 等 | ✅ QA 拦截器 + 正则匹配覆盖 |
 
-### 5.2 鏁忔劅淇℃伅绠＄悊
+### 5.2 敏感信息管理
 
-| 妫€鏌ラ」 | 缁撴灉 |
+| 检查项 | 结果 |
 |--------|------|
-| 瑁?`except:` 鎹曡幏 | 鉁?0 澶勨€斺€攈ost_brain + edge_client 鍏ㄩ儴浣跨敤鍏蜂綋寮傚父绫诲瀷 |
-| `TODO/FIXME/HACK` 閬楃暀 | 鉁?0 澶勨€斺€攈ost_brain + edge_client 鐢熶骇浠ｇ爜骞插噣 |
-| 纭紪鐮佸瘑閽?瀵嗙爜 | 鉁?0 澶勨€斺€斿叏閮ㄩ€氳繃 env + key_profiles 绠＄悊 |
-| `print()` 璋冭瘯杈撳嚭 | 鈿狅笍 1 澶勶紙`main.py:908`锛夆€斺€斿簲鏇挎崲涓?logger |
-| SQL 娉ㄥ叆椋庨櫓 | 鈿狅笍 浣庨闄┾€斺€旇〃鍚?f-string 鎻掑€兼潵鑷唴閮ㄥ父閲忥紙8 澶勶級锛屾棤琛ㄥ悕鐧藉悕鍗曟牎楠?|
-| 寰幆寮曠敤 | 鉁?0 澶勨€斺€擿web_ui.py` 浣跨敤寤惰繜瀵煎叆姝ｇ‘瑙勯伩 |
-| DeprecationWarning | 鈿狅笍 1 澶勨€斺€擿vts_driver.py:685` `asyncio.get_event_loop()` 鍦?Python 3.10+ 宸插純鐢?|
+| 裸 `except:` 捕获 | ✅ 0 处——host_brain + edge_client 全部使用具体异常类型 |
+| `TODO/FIXME/HACK` 遗留 | ✅ 0 处——host_brain + edge_client 生产代码干净 |
+| 硬编码密钥/密码 | ✅ 0 处——全部通过 env + key_profiles 管理 |
+| `print()` 调试输出 | ⚠️ 1 处（`main.py:908`）——应替换为 logger |
+| SQL 注入风险 | ⚠️ 低风险——表名 f-string 插值来自内部常量（8 处），无表名白名单校验 |
+| 循环引用 | ✅ 0 处——`web_ui.py` 使用延迟导入正确规避 |
+| DeprecationWarning | ⚠️ 1 处——`vts_driver.py:685` `asyncio.get_event_loop()` 在 Python 3.10+ 已弃用 |
 
-### 5.3 绫诲瀷瀹夊叏
+### 5.3 类型安全
 
-| 妫€鏌ラ」 | 缁撴灉 |
+| 检查项 | 结果 |
 |--------|------|
-| 缂哄皯杩斿洖绫诲瀷鏍囨敞鐨勫叕寮€鍑芥暟 | 3 澶勶紙`fastapi_app.py` 2 涓?async handler + `graph_executor.py` 1 涓柟娉曪級 |
-| `from __future__ import annotations` | 鉁?鎵€鏈夋牳蹇冩ā鍧楀惎鐢?|
-| `dataclass(frozen=True)` 涓嶅彲鍙?| 鉁?鎵€鏈夋牳蹇冩暟鎹被浣跨敤 frozen |
+| 缺少返回类型标注的公开函数 | 3 处（`fastapi_app.py` 2 个 async handler + `graph_executor.py` 1 个方法） |
+| `from __future__ import annotations` | ✅ 所有核心模块启用 |
+| `dataclass(frozen=True)` 不可变 | ✅ 所有核心数据类使用 frozen |
 
 ---
 
-## 馃搱 鍏€佷唬鐮佽川閲忓害閲?
-### 6.1 妯″潡澶嶆潅搴︽帓鍚嶏紙鎸夎鏁帮級
+## 📈 六、代码质量度量
 
-| 鎺掑悕 | 鏂囦欢 | 琛屾暟 | 澶嶆潅搴﹁瘎绾?| 寤鸿 |
+### 6.1 模块复杂度排名（按行数）
+
+| 排名 | 文件 | 行数 | 复杂度评级 | 建议 |
 |------|------|------|-----------|------|
-| 1 | `audit/sqlite_ledger.py` | 1,570 | 馃煛 涓?| 26 寮犺〃闆嗕腑绠＄悊锛岃亴璐ｅ崟涓€浣嗕綋閲忓ぇ锛涘彲鎸夎〃鏃忔媶鍒?|
-| 2 | `edge_client/senses/asr.py` | 1,028 | 馃煛 涓?| +璁惧鎭㈠閫昏緫鍚庣獊鐮村崈琛?|
-| 3 | `retrieval/reranker.py` | 967 | 馃煛 涓?| 澶?provider 璺敱 + 褰掍竴鍖栭€昏緫瀵嗛泦 |
-| 4 | `app/main.py` | 909 | 馃煛 涓?| 鎶ュ憡鐢熸垚鍑芥暟瀵嗛泦 |
-| 5 | `retrieval/embedding.py` | 835 | 馃煝 浣?| 缁撴瀯娓呮櫚 |
-| 6 | `core/services.py` | 763 | 馃煝 浣?| 鈥?|
-| 7 | `edge_client/actuators/vts_driver.py` | 693 | 馃煝 浣?| +閲嶈繛鍚庣獊鐮?600 琛?|
-| 8 | `app/fastapi_app.py` | 626 | 馃煝 浣?| 鈥?|
-| 9 | `governor/rate_limit_store.py` | 600 | 馃煝 浣?| 3 鍚庣 + 闄嶇骇鍣紝缁撴瀯鑹ソ |
-| 10 | `observability/cross_timeline.py` | 500 | 馃煝 浣?| 鈥?|
+| 1 | `audit/sqlite_ledger.py` | 1,570 | 🟡 中 | 26 张表集中管理，职责单一但体量大；可按表族拆分 |
+| 2 | `edge_client/senses/asr.py` | 1,028 | 🟡 中 | +设备恢复逻辑后突破千行 |
+| 3 | `retrieval/reranker.py` | 967 | 🟡 中 | 多 provider 路由 + 归一化逻辑密集 |
+| 4 | `app/main.py` | 909 | 🟡 中 | 报告生成函数密集 |
+| 5 | `retrieval/embedding.py` | 835 | 🟢 低 | 结构清晰 |
+| 6 | `core/services.py` | 763 | 🟢 低 | — |
+| 7 | `edge_client/actuators/vts_driver.py` | 693 | 🟢 低 | +重连后突破 600 行 |
+| 8 | `app/fastapi_app.py` | 626 | 🟢 低 | — |
+| 9 | `governor/rate_limit_store.py` | 600 | 🟢 低 | 3 后端 + 降级器，结构良好 |
+| 10 | `observability/cross_timeline.py` | 500 | 🟢 低 | — |
 
-### 6.2 娴嬭瘯瑕嗙洊搴?
-| 搴﹂噺 | 鍊?|
+### 6.2 测试覆盖度
+
+| 度量 | 值 |
 |------|---|
-| 婧愭枃浠舵暟锛坔ost_brain + edge_client锛?| 95 |
-| 娴嬭瘯鏂囦欢鏁帮紙contract + e2e + helpers锛?| 89 |
-| 娴嬭瘯/婧愭枃浠舵瘮 | **0.94**锛堜紭绉€锛?|
-| 娴嬭瘯浠ｇ爜琛?涓氬姟浠ｇ爜琛?| 17,749 / 27,696 = **0.64**锛堣壇濂斤級 |
-| Fixture 鏂囦欢鏁?| 208 |
-| 閿欒鐮佸父閲忔暟 | 144 |
-| 瀹¤琛ㄦ暟 | 26 |
+| 源文件数（host_brain + edge_client） | 95 |
+| 测试文件数（contract + e2e + helpers） | 89 |
+| 测试/源文件比 | **0.94**（优秀） |
+| 测试代码行/业务代码行 | 17,749 / 27,696 = **0.64**（良好） |
+| Fixture 文件数 | 208 |
+| 错误码常量数 | 144 |
+| 审计表数 | 26 |
 
 ---
 
-## 鈿狅笍 涓冦€佸彂鐜伴」姹囨€?
-### 馃敶 P0 鈥?闃绘柇鎬ч棶棰橈紙0 椤癸級
+## ⚠️ 七、发现项汇总
 
-**鏃犻樆鏂€ч棶棰樸€?* 鏍稿績涓嶅彉閲忔棤杩濊锛? 椤规祴璇曞け璐ュ潎涓哄彲鏄庣‘淇鐨?P1 绾ч棶棰樸€?
-### 馃煛 P1 鈥?闇€璺熻繘锛?3 椤癸級
+### 🔴 P0 — 阻断性问题（0 项）
 
-| # | 妯″潡 | 鍙戠幇 | 寤鸿 |
+**无阻断性问题。** 核心不变量无违规，7 项测试失败均为可明确修复的 P1 级问题。
+
+### 🟡 P1 — 需跟进（13 项）
+
+| # | 模块 | 发现 | 建议 |
 |---|------|------|------|
-| F-01 | `airlock/sandbox.py` | subprocess 鍚庣鏃犲鍣ㄩ殧绂?| 鐢熶骇鐜浣跨敤 Docker 鍚庣 |
-| F-02 | `airlock/sandbox.py` | Windows/Linux 瓒呮椂琛屼负宸紓 | Linux 閮ㄧ讲鐜鍥炲綊楠岃瘉 |
-| F-04 | `governor/rate_limit_store.py` | Redis 鍚庣鏈湪鐪熷疄鐜楠岃瘉 | 鏈?Redis 瀹炰緥鏃堕泦鎴愭祴璇?|
-| F-05 | `audit/sqlite_ledger.py` | WAL 妯″紡鍦?NFS 涓婁笉鏀寔 | 閮ㄧ讲鏂囨。鏍囨敞瀛樺偍浠嬭川瑕佹眰 |
-| F-06 | `audit/sqlite_ledger.py` | `_table_has_column` 鏃犵紦瀛?| 澧炲姞琛ㄧ粨鏋勭紦瀛?|
-| F-07 | Edge ASR | CPU 闄嶇骇寤惰繜鍙兘涓嶅彲鎺ュ彈 | 鐩爣 Edge 璁惧瀹炴祴 |
-| F-08 | Edge TTS+ASR | GPU VRAM 鍙犲姞 OOM | Edge 璁惧鍘嬪姏娴嬭瘯 |
-| F-11 | E2E 娴嬭瘯 | E2E 妯℃嫙 Edge 浜嬩欢鑰岄潪鐪熷疄 RPC | 鐪熷疄 Edge 鐜闆嗘垚楠岃瘉 |
-| F-12 | `requirements.txt` | 缂哄皯 `redis`锛堝彲閫変緷璧栵級璇存槑 | 琛ュ厖鍙€変緷璧栨枃妗?|
-| **F-21** | 娴嬭瘯鍥炲綊 | TASK-0082 VTS DEGRADED 瀵艰嚧 2 涓棫娴嬭瘯鏂█澶辫触 | 鏇存柊鏂█锛氭鏌?`status == DEGRADED` |
-| **F-22** | 娴嬭瘯鍥炲綊 | `test_sandbox_docker_contract` mock 璺緞閿欒锛? 椤瑰け璐ワ級 | Mock 鏀逛负 `docker_sandbox.is_docker_available` |
-| **F-23** | 娴嬭瘯鍥炲綊 | `test_vts_reconnect_contract` 閲嶈繛/骞傜瓑鏂█澶辫触锛? 椤癸級 | `vts_driver.py` 琛ュ厖 `neutral_restored` 鍜屽箓绛夋鏌?|
-| **F-24** | 娴嬭瘯鍥炲綊 | `test_model_plane_release_contract` 寮傚父澶勭悊涓嶅尮閰嶏紙1 椤癸級 | 娴嬭瘯鏀逛负 `assertRaises(ValueError)` |
+| F-01 | `airlock/sandbox.py` | subprocess 后端无容器隔离 | 生产环境使用 Docker 后端 |
+| F-02 | `airlock/sandbox.py` | Windows/Linux 超时行为差异 | Linux 部署环境回归验证 |
+| F-04 | `governor/rate_limit_store.py` | Redis 后端未在真实环境验证 | 有 Redis 实例时集成测试 |
+| F-05 | `audit/sqlite_ledger.py` | WAL 模式在 NFS 上不支持 | 部署文档标注存储介质要求 |
+| F-06 | `audit/sqlite_ledger.py` | `_table_has_column` 无缓存 | 增加表结构缓存 |
+| F-07 | Edge ASR | CPU 降级延迟可能不可接受 | 目标 Edge 设备实测 |
+| F-08 | Edge TTS+ASR | GPU VRAM 叠加 OOM | Edge 设备压力测试 |
+| F-11 | E2E 测试 | E2E 模拟 Edge 事件而非真实 RPC | 真实 Edge 环境集成验证 |
+| F-12 | `requirements.txt` | 缺少 `redis`（可选依赖）说明 | 补充可选依赖文档 |
+| **F-21** | 测试回归 | TASK-0082 VTS DEGRADED 导致 2 个旧测试断言失败 | 更新断言：检查 `status == DEGRADED` |
+| **F-22** | 测试回归 | `test_sandbox_docker_contract` mock 路径错误（2 项失败） | Mock 改为 `docker_sandbox.is_docker_available` |
+| **F-23** | 测试回归 | `test_vts_reconnect_contract` 重连/幂等断言失败（2 项） | `vts_driver.py` 补充 `neutral_restored` 和幂等检查 |
+| **F-24** | 测试回归 | `test_model_plane_release_contract` 异常处理不匹配（1 项） | 测试改为 `assertRaises(ValueError)` |
 
-### 馃煝 P2 鈥?宸茬煡杈圭晫/寤鸿鏀硅繘锛?3 椤癸級
+### 🟢 P2 — 已知边界/建议改进（13 项）
 
-| # | 妯″潡 | 鍙戠幇 | 寤鸿 |
+| # | 模块 | 发现 | 建议 |
 |---|------|------|------|
-| F-13 | `app/main.py:908` | 瑁?`print()` 璋冪敤 | 鏇挎崲涓?`logger.info()` |
-| F-14 | `graph_executor.py:43` | 缂哄皯杩斿洖绫诲瀷鏍囨敞 | 琛ュ厖 `-> None` 鎴栧叿浣撹繑鍥炵被鍨?|
-| F-15 | `fastapi_app.py:582,605` | 2 涓?handler 缂鸿繑鍥炵被鍨嬫爣娉?| 琛ュ厖绫诲瀷鏍囨敞 |
-| F-16 | `audit/sqlite_ledger.py` | 琛ㄥ悕 f-string 鎻掑€硷紙8 澶勶級 | 澧炲姞琛ㄥ悕鐧藉悕鍗曟牎楠?|
-| F-18 | SQLite 鍗曟枃浠?| 楂樺苟鍙戣鍐欏彲鑳界摱棰?| 涓湡鑰冭檻 PostgreSQL 鎴栧彧璇诲壇鏈?|
-| F-19 | WAL checkpoint | 闀挎湡杩愯 WAL 鏂囦欢澧為暱 | 鐩戞帶 WAL 澶у皬 + 瀹氭椂 checkpoint |
-| F-20 | `sandbox.py` | 浠呮敮鎸?Python 璇█ | 鎸夐渶鎵╁睍 JS/Shell |
-| **F-25** | `vts_driver.py:685` | `asyncio.get_event_loop()` DeprecationWarning锛圥ython 3.10+锛?| 鏀逛负 `asyncio.get_running_loop()` |
-| **F-26** | Docker 娌欑 | Docker 闀滃儚鏋勫缓渚濊禆缃戠粶锛岀绾跨幆澧冨彲鑳藉け璐?| 鏀寔棰勬瀯寤洪暅鍍忔湰鍦板姞杞?|
-| **F-27** | Docker 娌欑 | nsjail 澶囬€夊湪闈?Linux 涓嶅彲鐢?| 閮ㄧ讲鏂囨。鏍囨敞骞冲彴瑕佹眰 |
+| F-13 | `app/main.py:908` | 裸 `print()` 调用 | 替换为 `logger.info()` |
+| F-14 | `graph_executor.py:43` | 缺少返回类型标注 | 补充 `-> None` 或具体返回类型 |
+| F-15 | `fastapi_app.py:582,605` | 2 个 handler 缺返回类型标注 | 补充类型标注 |
+| F-16 | `audit/sqlite_ledger.py` | 表名 f-string 插值（8 处） | 增加表名白名单校验 |
+| F-18 | SQLite 单文件 | 高并发读写可能瓶颈 | 中期考虑 PostgreSQL 或只读副本 |
+| F-19 | WAL checkpoint | 长期运行 WAL 文件增长 | 监控 WAL 大小 + 定时 checkpoint |
+| F-20 | `sandbox.py` | 仅支持 Python 语言 | 按需扩展 JS/Shell |
+| **F-25** | `vts_driver.py:685` | `asyncio.get_event_loop()` DeprecationWarning（Python 3.10+） | 改为 `asyncio.get_running_loop()` |
+| **F-26** | Docker 沙箱 | Docker 镜像构建依赖网络，离线环境可能失败 | 支持预构建镜像本地加载 |
+| **F-27** | Docker 沙箱 | nsjail 备选在非 Linux 不可用 | 部署文档标注平台要求 |
 
-> **鍙樺寲璇存槑**锛氬師 F-03锛坈ross_timeline 鍏ㄩ噺鍔犺浇锛夊凡鐢?TASK-0078 `fetch_by_time_range` 瑙ｅ喅鈥斺€旂Щ闄ゃ€傚師 F-09锛圴TS 鏃犻噸杩烇級宸茬敱 TASK-0080 瑙ｅ喅鈥斺€旂Щ闄ゃ€傚師 F-10锛圗dge鈫扝ost RPC 鏈疄鐜帮級宸茬敱 TASK-0079 `event_reporter.py` 瑙ｅ喅鈥斺€旂Щ闄ゃ€傚師 F-17锛圴TS 涓嶆敮鎸?DEGRADED锛夊凡鐢?TASK-0082 瑙ｅ喅鈥斺€旂Щ闄ゃ€傛柊澧?F-21~F-27 涓烘湰娆℃壂鎻忔柊鍙戠幇銆?
+> **变化说明**：原 F-03（cross_timeline 全量加载）已由 TASK-0078 `fetch_by_time_range` 解决——移除。原 F-09（VTS 无重连）已由 TASK-0080 解决——移除。原 F-10（Edge→Host RPC 未实现）已由 TASK-0079 `event_reporter.py` 解决——移除。原 F-17（VTS 不支持 DEGRADED）已由 TASK-0082 解决——移除。新增 F-21~F-27 为本次扫描新发现。
+
 ---
 
-## 馃搳 鍏€佺患鍚堣瘎鍒?
-| 缁村害 | 璇勫垎 | 杈冧笂娆?| 璇存槑 |
+## 📊 八、综合评分
+
+| 维度 | 评分 | 较上次 | 说明 |
 |------|------|--------|------|
-| **鏋舵瀯璁捐** | 猸愨瓙猸愨瓙猸?| 鈥?| Host-Edge 鍒嗕綋 + 鍗曞悜閾?+ 绁ㄦ嵁鍖栨墽琛?|
-| **浠ｇ爜璐ㄩ噺** | 猸愨瓙猸愨瓙猸?| 鈥?| 0 瑁?except / 0 TODO / 0 纭紪鐮佸瘑閽?/ frozen dataclass |
-| **瀹夊叏鎬?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | Docker 瀹瑰櫒闅旂鍚庣宸插氨浣?|
-| **鍙璁℃€?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | 26 寮犲璁¤〃 + 144 涓敊璇爜 + model_control 瀹¤ |
-| **鍙祴璇曟€?* | 猸愨瓙猸愨瓙鈽?| 猬囷笍 | 697 閫氳繃 / 7 澶辫触锛堟祴璇曟柇瑷€闇€鏇存柊閫傞厤琛屼负鍙樺寲锛?|
-| **鍔熻兘瀹屾垚搴?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | TASK-0000~0083 鍏ㄩ儴瀹屾垚 |
-| **鍙繍琛屾€?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | FastAPI + Docker sandbox + Edge 閲嶈繛/鎭㈠ |
-| **鍙娴嬫€?* | 猸愨瓙猸愨瓙猸?| 猬嗭笍 | 闈㈡澘 + 璺ㄧ鏃堕棿绾?+ 鏃堕棿绐楀彛鏌ヨ |
+| **架构设计** | ⭐⭐⭐⭐⭐ | — | Host-Edge 分体 + 单向链 + 票据化执行 |
+| **代码质量** | ⭐⭐⭐⭐⭐ | — | 0 裸 except / 0 TODO / 0 硬编码密钥 / frozen dataclass |
+| **安全性** | ⭐⭐⭐⭐⭐ | ⬆️ | Docker 容器隔离后端已就位 |
+| **可审计性** | ⭐⭐⭐⭐⭐ | ⬆️ | 26 张审计表 + 144 个错误码 + model_control 审计 |
+| **可测试性** | ⭐⭐⭐⭐☆ | ⬇️ | 697 通过 / 7 失败（测试断言需更新适配行为变化） |
+| **功能完成度** | ⭐⭐⭐⭐⭐ | ⬆️ | TASK-0000~0083 全部完成 |
+| **可运行性** | ⭐⭐⭐⭐⭐ | ⬆️ | FastAPI + Docker sandbox + Edge 重连/恢复 |
+| **可观测性** | ⭐⭐⭐⭐⭐ | ⬆️ | 面板 + 跨端时间线 + 时间窗口查询 |
 
-### 鎬讳綋璇勫垎锛?*猸愨瓙猸愨瓙猸?/ 5锛堝伐绋嬫垚鐔熷害鏋侀珮锛? 椤规祴璇曞洖褰掗渶淇锛?*
+### 总体评分：**⭐⭐⭐⭐⭐ / 5（工程成熟度极高，7 项测试回归需修复）**
 
 ---
 
-## 馃搵 涔濄€佷笌涓婃瀹￠槄瀵规瘮锛堟敼杩涙€荤粨锛?
-涓婃瀹￠槄锛堢浜岀増锛夎瘑鍒簡 20 涓彂鐜伴」锛團-01~F-20锛夈€傛湰娆?TASK-0076~0083 鐨勬墽琛岃В鍐充簡鍏朵腑 4 椤癸細
+## 📋 九、与上次审阅对比（改进总结）
 
-| 涓婃鍙戠幇 | 浼樺厛绾?| 鐘舵€?| 瑙ｅ喅 TASK |
+上次审阅（第二版）识别了 20 个发现项（F-01~F-20）。本次 TASK-0076~0083 的执行解决了其中 4 项：
+
+| 上次发现 | 优先级 | 状态 | 解决 TASK |
 |---------|--------|------|----------|
-| F-03 Host 瀹¤琛ㄥ叏閲忓唴瀛樺姞杞?| P1 | 鉁?**宸茶В鍐?* | TASK-0078锛坒etch_by_time_range锛?|
-| F-09 VTS WebSocket 鏃犺嚜鍔ㄩ噸杩?| P1 | 鉁?**宸茶В鍐?* | TASK-0080锛堟寚鏁伴€€閬块噸杩烇級 |
-| F-10 Edge鈫扝ost RPC 涓婃姤鏈疄鐜?| P1 | 鉁?**宸茶В鍐?* | TASK-0079锛坋vent_reporter.py锛?|
-| F-17 Host VTS 涓嶆敮鎸?DEGRADED | P2 | 鉁?**宸茶В鍐?* | TASK-0082锛圫TATUS_DEGRADED锛?|
+| F-03 Host 审计表全量内存加载 | P1 | ✅ **已解决** | TASK-0078（fetch_by_time_range） |
+| F-09 VTS WebSocket 无自动重连 | P1 | ✅ **已解决** | TASK-0080（指数退避重连） |
+| F-10 Edge→Host RPC 上报未实现 | P1 | ✅ **已解决** | TASK-0079（event_reporter.py） |
+| F-17 Host VTS 不支持 DEGRADED | P2 | ✅ **已解决** | TASK-0082（STATUS_DEGRADED） |
 
-鍚屾椂锛孴ASK-0076~0083 鏂板浜嗕互涓嬭兘鍔涳細
+同时，TASK-0076~0083 新增了以下能力：
 
-| 鏂板鑳藉姏 | TASK | 璇存槑 |
+| 新增能力 | TASK | 说明 |
 |---------|------|------|
-| Docker 瀹瑰櫒绾ф矙绠遍殧绂?| TASK-0077 | `docker_sandbox.py` + subprocess 鑷姩闄嶇骇 |
-| 璺ㄧ鏃堕棿绾?SQL 浼樺寲 | TASK-0078 | `fetch_by_time_range` + 鍒嗛〉鏌ヨ |
-| Edge鈫扝ost 浜嬩欢鎵归噺涓婃姤 | TASK-0079 | `event_reporter.py` + 缂撳瓨琛ュ彂 |
-| VTS WebSocket 鑷姩閲嶈繛 | TASK-0080 | 鎸囨暟閫€閬?+ neutral 鎭㈠ + 鍋ュ悍蹇収 |
-| ASR 楹﹀厠椋庤澶囪嚜鍔ㄦ仮澶?| TASK-0081 | 璁惧鍊欓€夋瀯寤?+ 鎭㈠寰幆 |
-| Host VTS DEGRADED 鐘舵€?| TASK-0082 | neutral fallback + 闄嶇骇瀹¤ |
-| 閮ㄧ讲鏂囨。鏇存柊 | TASK-0083 | ENV 娓呭崟 v1.1 |
-| 缂栨帓涓绘帶鍏ㄩ摼璺祴璇?| TASK-0057~0063 | model_plane/param_hash/node_selector/governance/audit/release/drill |
+| Docker 容器级沙箱隔离 | TASK-0077 | `docker_sandbox.py` + subprocess 自动降级 |
+| 跨端时间线 SQL 优化 | TASK-0078 | `fetch_by_time_range` + 分页查询 |
+| Edge→Host 事件批量上报 | TASK-0079 | `event_reporter.py` + 缓存补发 |
+| VTS WebSocket 自动重连 | TASK-0080 | 指数退避 + neutral 恢复 + 健康快照 |
+| ASR 麦克风设备自动恢复 | TASK-0081 | 设备候选构建 + 恢复循环 |
+| Host VTS DEGRADED 状态 | TASK-0082 | neutral fallback + 降级审计 |
+| 部署文档更新 | TASK-0083 | ENV 清单 v1.1 |
+| 编排主控全链路测试 | TASK-0057~0063 | model_plane/param_hash/node_selector/governance/audit/release/drill |
 
 ---
 
-## 馃弳 鍗併€佺粨璁?
-**Natsume Ai 鍦?TASK-0000~0083 鍏ㄩ儴瀹屾垚鍚庯紝宸茶揪鍒?鍏ㄥ姛鑳介棴鐜?鐨勫伐绋嬫垚鐔熷害銆?*
+## 🏆 十、结论
 
-- 鉁?**45,445 琛屼唬鐮?*锛?7,696 涓氬姟 + 17,749 娴嬭瘯锛夊叏閮ㄦ湁鏈虹粍缁?- 鉁?**697 椤规祴璇曢€氳繃**锛屽叏閾捐矾瑕嗙洊
-- 鈿狅笍 **7 椤规祴璇曞け璐?*鈥斺€斿潎涓?TASK-0082 DEGRADED 琛屼负鍙樺寲寮曡捣鐨勬柇瑷€杩囨椂锛? 椤癸級+ Mock 璺緞閿欒锛? 椤癸級+ 閲嶈繛缁嗚妭缂哄け锛? 椤癸級锛屽睘浜庡彲蹇€熶慨澶嶇殑鍥炲綊闂
-- 鉁?**26 寮犲璁¤〃 + 144 涓敊璇爜甯搁噺 + 38 涓?SQL 杩佺Щ鑴氭湰** 瑕嗙洊鍏ㄩ摼璺?- 鉁?鏍稿績涓嶅彉閲忥紙鍗曞悜閾?Token 蹇呮/瀹¤寮哄埗/鎷掔粷蹇呭甫鐮?涓嶄吉鎵ц锛夊叏閮ㄩ€氳繃闈欐€?杩愯鏃堕獙璇?- 鉁?Docker 瀹瑰櫒绾ф矙绠遍殧绂诲凡灏变綅锛圱ASK-0077锛?- 鉁?Edge 璁惧鎭㈠闊ф€у凡澧炲己锛歏TS 鑷姩閲嶈繛 + ASR 璁惧鎭㈠ + 浜嬩欢琛ュ彂
-- 鈿狅笍 鍓╀綑 13 涓?P1 鍙戠幇椤癸紙鍚?7 椤规祴璇曞洖褰掍慨澶嶏級
-- 鈿狅笍 鍓╀綑 13 涓?P2 寤鸿椤癸紙浠ｇ爜璐ㄩ噺寰皟 + DeprecationWarning + 娌欑鎵╁睍锛?
-**椋庨櫓璇︽儏宸茶褰曞湪** [risk_registry.md](../60_trace/risk_registry.md) **涓紙v2.0锛岃鐩?TASK-0065~0083锛夈€?*
+**Natsume Ai 在 TASK-0000~0083 全部完成后，已达到"全功能闭环"的工程成熟度。**
+
+- ✅ **45,445 行代码**（27,696 业务 + 17,749 测试）全部有机组织
+- ✅ **697 项测试通过**，全链路覆盖
+- ⚠️ **7 项测试失败**——均为 TASK-0082 DEGRADED 行为变化引起的断言过时（3 项）+ Mock 路径错误（2 项）+ 重连细节缺失（2 项），属于可快速修复的回归问题
+- ✅ **26 张审计表 + 144 个错误码常量 + 38 个 SQL 迁移脚本** 覆盖全链路
+- ✅ 核心不变量（单向链/Token 必检/审计强制/拒绝必带码/不伪执行）全部通过静态+运行时验证
+- ✅ Docker 容器级沙箱隔离已就位（TASK-0077）
+- ✅ Edge 设备恢复韧性已增强：VTS 自动重连 + ASR 设备恢复 + 事件补发
+- ⚠️ 剩余 13 个 P1 发现项（含 7 项测试回归修复）
+- ⚠️ 剩余 13 个 P2 建议项（代码质量微调 + DeprecationWarning + 沙箱扩展）
+
+**风险详情已记录在** [risk_registry.md](../60_trace/risk_registry.md) **中（v2.0，覆盖 TASK-0065~0083）。**
 
 ---
 
-> 鏈姤鍛婂熀浜庡叏閲忔簮鐮侀€愭ā鍧楀闃?+ 704 椤规祴璇曞叏閲忚繍琛?+ 涓嶅彉閲忛潤鎬佹壂鎻?+ 瀹夊叏瀹¤鐢熸垚銆?
+> 本报告基于全量源码逐模块审阅 + 704 项测试全量运行 + 不变量静态扫描 + 安全审计生成。
