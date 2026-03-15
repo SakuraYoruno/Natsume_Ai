@@ -539,7 +539,6 @@ $result = [ordered]@{
   wechat_bridge_error = $wechatBridgeError
   wechat_bridge_log = if ($wechatBridgeEnabled) { $wechatBridgeLog } else { $null }
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
-  env_file = $EnvFile
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4
