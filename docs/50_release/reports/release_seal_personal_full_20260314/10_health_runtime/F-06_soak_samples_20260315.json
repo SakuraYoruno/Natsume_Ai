@@ -1,0 +1,32 @@
+[
+  {
+    "ts_utc": "2026-03-15T15:13:12Z",
+    "pid": 54832,
+    "rss_mb": 254.61,
+    "health": {
+      "status": 200,
+      "ok": true,
+      "detail": "OK"
+    }
+  },
+  {
+    "ts_utc": "2026-03-15T15:13:22Z",
+    "pid": 54832,
+    "rss_mb": 254.61,
+    "health": {
+      "status": 200,
+      "ok": true,
+      "detail": "OK"
+    }
+  },
+  {
+    "ts_utc": "2026-03-15T15:13:56Z",
+    "pid": 54832,
+    "rss_mb": 255.04,
+    "health": {
+      "status": 200,
+      "ok": true,
+      "detail": "OK"
+    }
+  }
+]

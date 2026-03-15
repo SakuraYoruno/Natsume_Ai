@@ -1,0 +1,123 @@
+﻿{
+    "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+    "session_id":  "session::codex-host-chain-retry5-20260307_230308",
+    "status":  "DEGRADED",
+    "total_latency_ms":  57622,
+    "node_count":  3,
+    "nodes":  [
+                  {
+                      "node_id":  "core_reasoner_primary",
+                      "node_type":  "llm_node",
+                      "display_name":  "core_reasoner_primary",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-pro",
+                      "status":  "OK",
+                      "latency_ms":  null,
+                      "input_data":  {
+                                         "retrieval_route_count":  6,
+                                         "retrieval_status":  "OK",
+                                         "style_canon_id":  "natsume_ai_cn",
+                                         "style_citation":  "style_canon:natsume_ai_cn@v4:f86eaacc477d",
+                                         "upstream_node_ids":  [
+
+                                                               ],
+                                         "user_message":  "è¯·ç®è¦è¯´æ Host ä¸ Edge çèè´£åå·¥ï¼å¹¶ç»ä¸¤æ¡è¿ç»´å»ºè®®ã"
+                                     },
+                      "output_data":  {
+                                          "intent_draft":  {
+
+                                                           },
+                                          "meta":  {
+                                                       "draft_only":  true
+                                                   },
+                                          "narrative":  {
+                                                            "text":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã"
+                                                        }
+                                      },
+                      "ts_ms":  1772895846363,
+                      "error":  null
+                  },
+                  {
+                      "node_id":  "consistency_verifier",
+                      "node_type":  "llm_node",
+                      "display_name":  "consistency_verifier",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-flash-lite",
+                      "status":  "OK",
+                      "latency_ms":  null,
+                      "input_data":  {
+                                         "retrieval_route_count":  6,
+                                         "retrieval_status":  "OK",
+                                         "upstream_node_ids":  [
+                                                                   "core_reasoner_primary"
+                                                               ],
+                                         "user_message":  null
+                                     },
+                      "output_data":  {
+                                          "intent_draft":  {
+
+                                                           },
+                                          "meta":  {
+                                                       "draft_only":  true
+                                                   },
+                                          "narrative":  {
+                                                            "text":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã"
+                                                        }
+                                      },
+                      "ts_ms":  1772895846364,
+                      "error":  null
+                  },
+                  {
+                      "node_id":  "renderer_ja_c_style",
+                      "node_type":  "llm_node",
+                      "display_name":  "renderer_ja_c_style",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-flash",
+                      "status":  "DEGRADED",
+                      "latency_ms":  null,
+                      "input_data":  {
+                                         "core_intent_draft":  {
+
+                                                               },
+                                         "core_narrative_zh":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã",
+                                         "retrieval_route_count":  6,
+                                         "retrieval_status":  "OK",
+                                         "style_canon_id":  "natsume_ai_ja",
+                                         "style_citation":  "style_canon:natsume_ai_ja@v2:122b65e8c165",
+                                         "upstream_node_ids":  [
+                                                                   "core_reasoner_primary",
+                                                                   "consistency_verifier"
+                                                               ],
+                                         "user_message":  null
+                                     },
+                      "output_data":  {
+                                          "intent_draft":  {
+
+                                                           },
+                                          "meta":  {
+                                                       "degraded":  true,
+                                                       "draft_only":  true,
+                                                       "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+                                                       "stage":  "S_LLM_GATEWAY_PROVIDER"
+                                                   },
+                                          "narrative":  {
+                                                            "text":  "å½åå¤é¨è¯­ä¹æå¡ä¸å¯ç¨ï¼æå\u0085ç»åºèæ¡åå¤ã"
+                                                        }
+                                      },
+                      "ts_ms":  1772895846365,
+                      "error":  "SERVICE_UNAVAILABLE_DEPENDENCY"
+                  }
+              ],
+    "edges":  [
+                  {
+                      "source":  "core_reasoner_primary",
+                      "target":  "consistency_verifier"
+                  },
+                  {
+                      "source":  "consistency_verifier",
+                      "target":  "renderer_ja_c_style"
+                  }
+              ],
+    "ts_ms":  1772895846363,
+    "timestamp":  1772895846369
+}

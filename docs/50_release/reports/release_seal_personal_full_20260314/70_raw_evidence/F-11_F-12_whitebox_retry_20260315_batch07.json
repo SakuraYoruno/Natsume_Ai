@@ -1,0 +1,38 @@
+{
+  "batch": "20260315_batch07_formal_lan_whitebox_retry",
+  "mode": "formal_lan_dual_node",
+  "operator_observation": {
+    "audio_heard": false,
+    "expression_visible": false,
+    "lip_sync_visible": false
+  },
+  "request_ids": [
+    "req_41eed88b1d3840638cfd0aa62d2582a2",
+    "req_66f10138b701442abdb5c403dc205b48"
+  ],
+  "host_voice_event_log_counts": {
+    "req_41eed88b1d3840638cfd0aa62d2582a2": 2,
+    "req_66f10138b701442abdb5c403dc205b48": 2
+  },
+  "host_voice_event_types": {
+    "req_41eed88b1d3840638cfd0aa62d2582a2": [
+      "HOST_STREAM_VTS",
+      "HOST_STREAM_TTS"
+    ],
+    "req_66f10138b701442abdb5c403dc205b48": [
+      "HOST_STREAM_VTS",
+      "HOST_STREAM_TTS"
+    ]
+  },
+  "edge_health_snapshot": {
+    "tts_state": "READY",
+    "vts_state": "AUTHENTICATED",
+    "current_expression": "exp_neutral_01",
+    "event_reporter_total_sent": 0,
+    "event_reporter_total_failed": 0,
+    "event_reporter_cached_events": 0
+  },
+  "repo_env_reference": {
+    "edge_event_report_host_url_present": false
+  }
+}

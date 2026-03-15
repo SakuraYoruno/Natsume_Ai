@@ -1,0 +1,44 @@
+﻿{
+    "request_id":  "req_90525108bcc0459aac88e6d9ca2ccd56",
+    "quality_stage":  "S_COMPLETE",
+    "reason_code":  null,
+    "render_target_lang":  "zh",
+    "narrative":  "谢谢你的关心，我感觉还不错呢。你今天过得怎么样？",
+    "node_count":  3,
+    "nodes":  [
+                  {
+                      "node_id":  "core_reasoner_primary",
+                      "status":  "OK",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-pro",
+                      "out":  "谢谢你的关心，我感觉还不错呢。你今天过得怎么样？",
+                      "up":  ""
+                  },
+                  {
+                      "node_id":  "consistency_verifier",
+                      "status":  "OK",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-flash-lite",
+                      "out":  "VERDICT=PASS; DRIFT=; PATCH=;",
+                      "up":  "core_reasoner_primary"
+                  },
+                  {
+                      "node_id":  "renderer_ja_c_style",
+                      "status":  "OK",
+                      "provider":  "gemini",
+                      "model_id":  "gemini-2.5-flash",
+                      "out":  "谢谢你的关心，我感觉还不错呢。你今天过得怎么样？",
+                      "up":  "core_reasoner_primary,consistency_verifier"
+                  }
+              ],
+    "edges":  [
+                  {
+                      "source":  "core_reasoner_primary",
+                      "target":  "consistency_verifier"
+                  },
+                  {
+                      "source":  "consistency_verifier",
+                      "target":  "renderer_ja_c_style"
+                  }
+              ]
+}

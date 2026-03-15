@@ -1,0 +1,1255 @@
+﻿{
+    "chat":  {
+                 "request_id":  "req_3fd121e1b5644526aa38fecc8d0d5686",
+                 "narrative":  "ææ¯ä¸ä¸ªAIä¼´ä¾£è§è²ï¼ç±ç³»ç»æä¾æ¯æã",
+                 "intent_draft":  {
+                                      "schema_version":  "Natsume.intent.v1",
+                                      "id":  "intent::req_3fd121e1b5644526aa38fecc8d0d5686",
+                                      "ts_ms":  1772726749745,
+                                      "session_id":  "sess::host-fix-verify::20260306_000549",
+                                      "seq":  1,
+                                      "type":  "query",
+                                      "action":  "narrative_only",
+                                      "target":  "host",
+                                      "args":  {
+                                                   "text":  "State your provider and model in one sentence."
+                                               },
+                                      "nonce":  "nonce::req_3fd121e1b5644526aa38fecc8d0d5686"
+                                  },
+                 "decision":  "APPROVE",
+                 "reason_code":  null,
+                 "approval_token_ref":  "approval::intent::req_3fd121e1b5644526aa38fecc8d0d5686",
+                 "quality":  {
+                                 "stage":  "S_COMPLETE",
+                                 "reason_code":  null
+                             },
+                 "audit_refs":  {
+                                    "intent_id":  "intent::req_3fd121e1b5644526aa38fecc8d0d5686",
+                                    "governor_stage":  "S_INTENT_OK",
+                                    "thread_id":  null,
+                                    "retrieval":  {
+                                                      "status":  "OK",
+                                                      "reason_code":  null,
+                                                      "route_count":  2,
+                                                      "candidate_count":  4,
+                                                      "rerank_topk":  4,
+                                                      "evidence_refs":  [
+                                                                            "evd://canon_world::wc-001-system-terms/1",
+                                                                            "evd://canon_world::wc-002-architecture-invariants/2",
+                                                                            "evd://canon_style::natsume_ai_cn/3",
+                                                                            "evd://canon_world::wc-003-persona-core/4"
+                                                                        ],
+                                                      "reason_chain":  [
+
+                                                                       ],
+                                                      "degraded":  false
+                                                  },
+                                    "llm":  {
+                                                "status":  "OK",
+                                                "reason_code":  null,
+                                                "stage":  "S_ORCH_RUN",
+                                                "provider":  "gemini",
+                                                "model_id":  "gemini-2.5-flash",
+                                                "model_profile_id":  "mp.chat.v1",
+                                                "latency_ms":  null,
+                                                "draft_only":  true
+                                            }
+                                },
+                 "timestamp":  1772726749745
+             },
+    "health":  {
+                   "status":  "OK",
+                   "version":  "0.1.0",
+                   "timestamp":  1772726749696,
+                   "details":  {
+                                   "request_id":  "req_5bfb91e249de4c99b58a3c75c10bce8d",
+                                   "stage":  "S_SERVICE_HEALTH",
+                                   "reason_code":  null,
+                                   "summary":  {
+                                                   "overall_status":  "UP",
+                                                   "required_total":  14,
+                                                   "required_unavailable":  0,
+                                                   "optional_unavailable":  0
+                                               },
+                                   "services":  [
+                                                    {
+                                                        "service_id":  "host.audit.sqlite_ledger",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.governor.decision",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "governor decision engine ready"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.skills.loader",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "skills loader ready (env=dev)"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.integrations.llm_gateway",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "llm gateway enabled"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.retrieval.embedding",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "retrieval embedding enabled"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.retrieval.reranker",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "retrieval reranker enabled"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.vision.screen_ocr",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "vision screen_ocr enabled"
+                                                    },
+                                                    {
+                                                        "service_id":  "host.vision.camera_recognizer",
+                                                        "owner":  "host",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "vision camera_recognizer enabled"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.gateway",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "edge rpc transport healthy"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.asr",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "service healthy"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.tts",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "service healthy"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.barge_in",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "service healthy"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.fallback_llm",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "service healthy"
+                                                    },
+                                                    {
+                                                        "service_id":  "edge.rpc.resource_gate",
+                                                        "owner":  "edge",
+                                                        "required":  true,
+                                                        "status":  "UP",
+                                                        "reason_code":  null,
+                                                        "stage":  "S_SERVICE_HEALTH",
+                                                        "detail":  "service healthy"
+                                                    }
+                                                ],
+                                   "ts_ms":  1772726749696
+                               }
+               },
+    "ready":  {
+                  "ready":  true,
+                  "status":  "READY",
+                  "reason_code":  null,
+                  "timestamp":  1772726749714,
+                  "summary":  {
+                                  "request_id":  "req_61bb607c15ce45ffa9f3219c63622892",
+                                  "stage":  "S_ENV_READY",
+                                  "env":  "dev",
+                                  "node_count":  9,
+                                  "key_profiles":  {
+                                                       "total":  0,
+                                                       "active":  0,
+                                                       "rows":  [
+
+                                                                ]
+                                                   },
+                                  "services":  {
+                                                   "summary":  {
+                                                                   "boot_status":  "READY",
+                                                                   "issue_count":  0,
+                                                                   "probe_total":  0,
+                                                                   "probe_unavailable":  0,
+                                                                   "required_total":  14,
+                                                                   "required_unavailable":  0,
+                                                                   "optional_unavailable":  0
+                                                               },
+                                                   "rows":  [
+                                                                {
+                                                                    "service_id":  "host.audit.sqlite_ledger",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.governor.decision",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "governor decision engine ready"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.skills.loader",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "skills loader ready (env=dev)"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.integrations.llm_gateway",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "llm gateway enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.retrieval.embedding",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "retrieval embedding enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.retrieval.reranker",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "retrieval reranker enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.vision.screen_ocr",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "vision screen_ocr enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "host.vision.camera_recognizer",
+                                                                    "owner":  "host",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "vision camera_recognizer enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.gateway",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge rpc gateway enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.asr",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge asr enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.tts",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge tts enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.barge_in",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge barge-in enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.fallback_llm",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge fallback llm enabled"
+                                                                },
+                                                                {
+                                                                    "service_id":  "edge.rpc.resource_gate",
+                                                                    "owner":  "edge",
+                                                                    "required":  true,
+                                                                    "status":  "UP",
+                                                                    "reason_code":  null,
+                                                                    "stage":  "S_SERVICE_HEALTH",
+                                                                    "detail":  "edge resource gate enabled"
+                                                                }
+                                                            ]
+                                               },
+                                  "graph_runtime":  {
+                                                        "status":  "SKIPPED",
+                                                        "reason_code":  null,
+                                                        "detail":  "graph runtime probe not provided"
+                                                    },
+                                  "dependency_matrix":  [
+                                                            {
+                                                                "component_id":  "graph_runtime",
+                                                                "service_id":  "graph_runtime",
+                                                                "component_type":  "graph_runtime",
+                                                                "available":  true,
+                                                                "reason_code":  null,
+                                                                "detail":  "graph runtime probe not provided"
+                                                            }
+                                                        ],
+                                  "dependency_summary":  {
+                                                             "total":  1,
+                                                             "unavailable":  0,
+                                                             "reason_counts":  {
+
+                                                                               },
+                                                             "unavailable_ids":  [
+
+                                                                                 ]
+                                                         },
+                                  "drill_summary":  [
+
+                                                    ],
+                                  "orchestration_control_coverage":  {
+                                                                         "status":  "PARTIAL",
+                                                                         "required_total":  5,
+                                                                         "covered_count":  0,
+                                                                         "missing_scenarios":  [
+                                                                                                   "drill.orch.missing_profile",
+                                                                                                   "drill.orch.selector_no_candidate",
+                                                                                                   "drill.orch.param_drift",
+                                                                                                   "drill.orch.approval_token_missing",
+                                                                                                   "drill.dependency.provider_down"
+                                                                                               ],
+                                                                         "scenario_total":  0
+                                                                     },
+                                  "startup_report":  {
+                                                         "request_id":  "req_61bb607c15ce45ffa9f3219c63622892",
+                                                         "stage":  "S_SERVICE_BOOTSTRAP",
+                                                         "reason_code":  null,
+                                                         "summary":  {
+                                                                         "boot_status":  "READY",
+                                                                         "issue_count":  0,
+                                                                         "probe_total":  0,
+                                                                         "probe_unavailable":  0,
+                                                                         "required_total":  14,
+                                                                         "required_unavailable":  0,
+                                                                         "optional_unavailable":  0
+                                                                     },
+                                                         "startup_issues":  [
+
+                                                                            ],
+                                                         "dependency_probes":  [
+
+                                                                               ],
+                                                         "services":  [
+                                                                          {
+                                                                              "service_id":  "host.audit.sqlite_ledger",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.governor.decision",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "governor decision engine ready"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.skills.loader",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "skills loader ready (env=dev)"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.integrations.llm_gateway",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "llm gateway enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.retrieval.embedding",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "retrieval embedding enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.retrieval.reranker",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "retrieval reranker enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.vision.screen_ocr",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "vision screen_ocr enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "host.vision.camera_recognizer",
+                                                                              "owner":  "host",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "vision camera_recognizer enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.gateway",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge rpc gateway enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.asr",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge asr enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.tts",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge tts enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.barge_in",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge barge-in enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.fallback_llm",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge fallback llm enabled"
+                                                                          },
+                                                                          {
+                                                                              "service_id":  "edge.rpc.resource_gate",
+                                                                              "owner":  "edge",
+                                                                              "required":  true,
+                                                                              "status":  "UP",
+                                                                              "reason_code":  null,
+                                                                              "stage":  "S_SERVICE_HEALTH",
+                                                                              "detail":  "edge resource gate enabled"
+                                                                          }
+                                                                      ],
+                                                         "service_health":  {
+                                                                                "request_id":  "req_61bb607c15ce45ffa9f3219c63622892",
+                                                                                "stage":  "S_SERVICE_HEALTH",
+                                                                                "reason_code":  null,
+                                                                                "summary":  {
+                                                                                                "overall_status":  "UP",
+                                                                                                "required_total":  14,
+                                                                                                "required_unavailable":  0,
+                                                                                                "optional_unavailable":  0
+                                                                                            },
+                                                                                "services":  [
+                                                                                                 {
+                                                                                                     "service_id":  "host.audit.sqlite_ledger",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.governor.decision",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "governor decision engine ready"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.skills.loader",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "skills loader ready (env=dev)"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.integrations.llm_gateway",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "llm gateway enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.retrieval.embedding",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "retrieval embedding enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.retrieval.reranker",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "retrieval reranker enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.vision.screen_ocr",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "vision screen_ocr enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "host.vision.camera_recognizer",
+                                                                                                     "owner":  "host",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "vision camera_recognizer enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.gateway",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge rpc gateway enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.asr",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge asr enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.tts",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge tts enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.barge_in",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge barge-in enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.fallback_llm",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge fallback llm enabled"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "service_id":  "edge.rpc.resource_gate",
+                                                                                                     "owner":  "edge",
+                                                                                                     "required":  true,
+                                                                                                     "status":  "UP",
+                                                                                                     "reason_code":  null,
+                                                                                                     "stage":  "S_SERVICE_HEALTH",
+                                                                                                     "detail":  "edge resource gate enabled"
+                                                                                                 }
+                                                                                             ],
+                                                                                "ts_ms":  1772726749714
+                                                                            },
+                                                         "ts_ms":  1772726749714,
+                                                         "config":  {
+                                                                        "host":  {
+                                                                                     "success":  true,
+                                                                                     "stage":  "S_HOST_CONFIG",
+                                                                                     "reason_code":  null,
+                                                                                     "config":  {
+                                                                                                    "env":  "dev",
+                                                                                                    "llm_provider":  "gemini",
+                                                                                                    "openai_api_key_set":  false,
+                                                                                                    "openai_api_key_ref":  "sec://openai/natsu-node-01",
+                                                                                                    "gemini_api_key_set":  true,
+                                                                                                    "gemini_api_key_ref":  "sec://gemini/natsu-node-01",
+                                                                                                    "deepseek_api_key_set":  false,
+                                                                                                    "deepseek_api_key_ref":  null,
+                                                                                                    "llm_api_key_set":  true,
+                                                                                                    "llm_api_key_ref":  "sec://gemini/natsu-node-01",
+                                                                                                    "key_profile_status":  null,
+                                                                                                    "llm_timeout_ms":  15000,
+                                                                                                    "llm_max_retries":  1,
+                                                                                                    "cold_start_allowed":  true,
+                                                                                                    "enable_retrieval":  true,
+                                                                                                    "enable_vision":  true,
+                                                                                                    "enable_edge_rpc":  true,
+                                                                                                    "rate_limit_backend":  "memory",
+                                                                                                    "rate_limit_window_ms":  60000,
+                                                                                                    "rate_limit_max_requests":  30
+                                                                                                },
+                                                                                     "issues":  [
+
+                                                                                                ]
+                                                                                 },
+                                                                        "edge":  {
+                                                                                     "success":  true,
+                                                                                     "stage":  "S_EDGE_CONFIG",
+                                                                                     "reason_code":  null,
+                                                                                     "config":  {
+                                                                                                    "env":  "dev",
+                                                                                                    "rpc_host":  "127.0.0.1",
+                                                                                                    "rpc_port":  17800,
+                                                                                                    "hmac_shared_key_set":  false,
+                                                                                                    "hmac_shared_key_ref":  null,
+                                                                                                    "key_profile_status":  null,
+                                                                                                    "allow_insecure_auth":  true,
+                                                                                                    "rpc_auth_window_ms":  15000,
+                                                                                                    "rpc_nonce_window_ms":  120000,
+                                                                                                    "rpc_gateway_enabled":  true,
+                                                                                                    "asr_enabled":  true,
+                                                                                                    "tts_enabled":  true,
+                                                                                                    "barge_in_enabled":  true,
+                                                                                                    "fallback_llm_enabled":  true,
+                                                                                                    "resource_gate_enabled":  true,
+                                                                                                    "max_vram_mb":  4096,
+                                                                                                    "max_queue_length":  8
+                                                                                                },
+                                                                                     "issues":  [
+
+                                                                                                ]
+                                                                                 }
+                                                                    }
+                                                     },
+                                  "node_deployment":  {
+                                                          "request_id":  "req_61bb607c15ce45ffa9f3219c63622892",
+                                                          "stage":  "S_INFRA_NODE_CATALOG",
+                                                          "status":  "READY",
+                                                          "reason_code":  null,
+                                                          "summary":  {
+                                                                          "node_count":  9,
+                                                                          "service_count":  14,
+                                                                          "issue_count":  0,
+                                                                          "node_down":  0
+                                                                      },
+                                                          "node_catalog":  [
+                                                                               {
+                                                                                   "node_id":  "natsu-node-01",
+                                                                                   "region":  "us-east-1",
+                                                                                   "role":  "orchestrator",
+                                                                                   "services":  [
+                                                                                                    "host.governor.decision",
+                                                                                                    "host.integrations.llm_gateway",
+                                                                                                    "host.skills.loader"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node01.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-01"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-02",
+                                                                                   "region":  "us-east-1",
+                                                                                   "role":  "audit",
+                                                                                   "services":  [
+                                                                                                    "host.audit.sqlite_ledger"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node02.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-02"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-03",
+                                                                                   "region":  "us-west-1",
+                                                                                   "role":  "llm",
+                                                                                   "services":  [
+                                                                                                    "host.integrations.llm_gateway"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node03.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-03"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-04",
+                                                                                   "region":  "us-west-1",
+                                                                                   "role":  "retrieval",
+                                                                                   "services":  [
+                                                                                                    "host.retrieval.embedding",
+                                                                                                    "host.retrieval.reranker"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node04.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-04"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-05",
+                                                                                   "region":  "us-west-1",
+                                                                                   "role":  "vision",
+                                                                                   "services":  [
+                                                                                                    "host.vision.camera_recognizer",
+                                                                                                    "host.vision.screen_ocr"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node05.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-05"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-06",
+                                                                                   "region":  "us-east-1",
+                                                                                   "role":  "edge_gateway",
+                                                                                   "services":  [
+                                                                                                    "edge.rpc.gateway",
+                                                                                                    "edge.rpc.resource_gate"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node06.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-06"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-07",
+                                                                                   "region":  "us-east-1",
+                                                                                   "role":  "edge_voice",
+                                                                                   "services":  [
+                                                                                                    "edge.rpc.asr",
+                                                                                                    "edge.rpc.tts"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node07.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-07"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-08",
+                                                                                   "region":  "us-central-1",
+                                                                                   "role":  "edge_realtime",
+                                                                                   "services":  [
+                                                                                                    "edge.rpc.barge_in",
+                                                                                                    "edge.rpc.fallback_llm"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node08.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-08"
+                                                                               },
+                                                                               {
+                                                                                   "node_id":  "natsu-node-09",
+                                                                                   "region":  "us-central-1",
+                                                                                   "role":  "standby",
+                                                                                   "services":  [
+                                                                                                    "edge.rpc.gateway",
+                                                                                                    "host.integrations.llm_gateway",
+                                                                                                    "host.retrieval.embedding"
+                                                                                                ],
+                                                                                   "health_endpoint":  "https://node09.Natsume.ai/healthz",
+                                                                                   "key_profile_id":  "kpf-node-09"
+                                                                               }
+                                                                           ],
+                                                          "service_mapping":  {
+                                                                                  "edge.rpc.asr":  {
+                                                                                                       "primary":  "natsu-node-07",
+                                                                                                       "secondary":  [
+
+                                                                                                                     ]
+                                                                                                   },
+                                                                                  "edge.rpc.barge_in":  {
+                                                                                                            "primary":  "natsu-node-08",
+                                                                                                            "secondary":  [
+
+                                                                                                                          ]
+                                                                                                        },
+                                                                                  "edge.rpc.fallback_llm":  {
+                                                                                                                "primary":  "natsu-node-08",
+                                                                                                                "secondary":  [
+
+                                                                                                                              ]
+                                                                                                            },
+                                                                                  "edge.rpc.gateway":  {
+                                                                                                           "primary":  "natsu-node-06",
+                                                                                                           "secondary":  [
+                                                                                                                             "natsu-node-09"
+                                                                                                                         ]
+                                                                                                       },
+                                                                                  "edge.rpc.resource_gate":  {
+                                                                                                                 "primary":  "natsu-node-06",
+                                                                                                                 "secondary":  [
+
+                                                                                                                               ]
+                                                                                                             },
+                                                                                  "edge.rpc.tts":  {
+                                                                                                       "primary":  "natsu-node-07",
+                                                                                                       "secondary":  [
+
+                                                                                                                     ]
+                                                                                                   },
+                                                                                  "host.audit.sqlite_ledger":  {
+                                                                                                                   "primary":  "natsu-node-02",
+                                                                                                                   "secondary":  [
+
+                                                                                                                                 ]
+                                                                                                               },
+                                                                                  "host.governor.decision":  {
+                                                                                                                 "primary":  "natsu-node-01",
+                                                                                                                 "secondary":  [
+
+                                                                                                                               ]
+                                                                                                             },
+                                                                                  "host.integrations.llm_gateway":  {
+                                                                                                                        "primary":  "natsu-node-01",
+                                                                                                                        "secondary":  [
+                                                                                                                                          "natsu-node-03",
+                                                                                                                                          "natsu-node-09"
+                                                                                                                                      ]
+                                                                                                                    },
+                                                                                  "host.retrieval.embedding":  {
+                                                                                                                   "primary":  "natsu-node-04",
+                                                                                                                   "secondary":  [
+                                                                                                                                     "natsu-node-09"
+                                                                                                                                 ]
+                                                                                                               },
+                                                                                  "host.retrieval.reranker":  {
+                                                                                                                  "primary":  "natsu-node-04",
+                                                                                                                  "secondary":  [
+
+                                                                                                                                ]
+                                                                                                              },
+                                                                                  "host.skills.loader":  {
+                                                                                                             "primary":  "natsu-node-01",
+                                                                                                             "secondary":  [
+
+                                                                                                                           ]
+                                                                                                         },
+                                                                                  "host.vision.camera_recognizer":  {
+                                                                                                                        "primary":  "natsu-node-05",
+                                                                                                                        "secondary":  [
+
+                                                                                                                                      ]
+                                                                                                                    },
+                                                                                  "host.vision.screen_ocr":  {
+                                                                                                                 "primary":  "natsu-node-05",
+                                                                                                                 "secondary":  [
+
+                                                                                                                               ]
+                                                                                                             }
+                                                                              },
+                                                          "validation":  {
+                                                                             "stage":  "S_INFRA_NODE_CATALOG",
+                                                                             "status":  "READY",
+                                                                             "reason_code":  null,
+                                                                             "summary":  {
+                                                                                             "node_count":  9,
+                                                                                             "role_count":  9,
+                                                                                             "service_count":  14,
+                                                                                             "issue_count":  0
+                                                                                         },
+                                                                             "issues":  [
+
+                                                                                        ],
+                                                                             "nodes":  [
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-01",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "orchestrator",
+                                                                                               "services":  [
+                                                                                                                "host.governor.decision",
+                                                                                                                "host.integrations.llm_gateway",
+                                                                                                                "host.skills.loader"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node01.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-01"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-02",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "audit",
+                                                                                               "services":  [
+                                                                                                                "host.audit.sqlite_ledger"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node02.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-02"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-03",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "llm",
+                                                                                               "services":  [
+                                                                                                                "host.integrations.llm_gateway"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node03.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-03"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-04",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "retrieval",
+                                                                                               "services":  [
+                                                                                                                "host.retrieval.embedding",
+                                                                                                                "host.retrieval.reranker"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node04.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-04"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-05",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "vision",
+                                                                                               "services":  [
+                                                                                                                "host.vision.camera_recognizer",
+                                                                                                                "host.vision.screen_ocr"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node05.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-05"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-06",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "edge_gateway",
+                                                                                               "services":  [
+                                                                                                                "edge.rpc.gateway",
+                                                                                                                "edge.rpc.resource_gate"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node06.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-06"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-07",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "edge_voice",
+                                                                                               "services":  [
+                                                                                                                "edge.rpc.asr",
+                                                                                                                "edge.rpc.tts"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node07.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-07"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-08",
+                                                                                               "region":  "us-central-1",
+                                                                                               "role":  "edge_realtime",
+                                                                                               "services":  [
+                                                                                                                "edge.rpc.barge_in",
+                                                                                                                "edge.rpc.fallback_llm"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node08.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-08"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-09",
+                                                                                               "region":  "us-central-1",
+                                                                                               "role":  "standby",
+                                                                                               "services":  [
+                                                                                                                "edge.rpc.gateway",
+                                                                                                                "host.integrations.llm_gateway",
+                                                                                                                "host.retrieval.embedding"
+                                                                                                            ],
+                                                                                               "health_endpoint":  "https://node09.Natsume.ai/healthz",
+                                                                                               "key_profile_id":  "kpf-node-09"
+                                                                                           }
+                                                                                       ],
+                                                                             "service_mapping":  {
+                                                                                                     "edge.rpc.asr":  {
+                                                                                                                          "primary":  "natsu-node-07",
+                                                                                                                          "secondary":  [
+
+                                                                                                                                        ]
+                                                                                                                      },
+                                                                                                     "edge.rpc.barge_in":  {
+                                                                                                                               "primary":  "natsu-node-08",
+                                                                                                                               "secondary":  [
+
+                                                                                                                                             ]
+                                                                                                                           },
+                                                                                                     "edge.rpc.fallback_llm":  {
+                                                                                                                                   "primary":  "natsu-node-08",
+                                                                                                                                   "secondary":  [
+
+                                                                                                                                                 ]
+                                                                                                                               },
+                                                                                                     "edge.rpc.gateway":  {
+                                                                                                                              "primary":  "natsu-node-06",
+                                                                                                                              "secondary":  [
+                                                                                                                                                "natsu-node-09"
+                                                                                                                                            ]
+                                                                                                                          },
+                                                                                                     "edge.rpc.resource_gate":  {
+                                                                                                                                    "primary":  "natsu-node-06",
+                                                                                                                                    "secondary":  [
+
+                                                                                                                                                  ]
+                                                                                                                                },
+                                                                                                     "edge.rpc.tts":  {
+                                                                                                                          "primary":  "natsu-node-07",
+                                                                                                                          "secondary":  [
+
+                                                                                                                                        ]
+                                                                                                                      },
+                                                                                                     "host.audit.sqlite_ledger":  {
+                                                                                                                                      "primary":  "natsu-node-02",
+                                                                                                                                      "secondary":  [
+
+                                                                                                                                                    ]
+                                                                                                                                  },
+                                                                                                     "host.governor.decision":  {
+                                                                                                                                    "primary":  "natsu-node-01",
+                                                                                                                                    "secondary":  [
+
+                                                                                                                                                  ]
+                                                                                                                                },
+                                                                                                     "host.integrations.llm_gateway":  {
+                                                                                                                                           "primary":  "natsu-node-01",
+                                                                                                                                           "secondary":  [
+                                                                                                                                                             "natsu-node-03",
+                                                                                                                                                             "natsu-node-09"
+                                                                                                                                                         ]
+                                                                                                                                       },
+                                                                                                     "host.retrieval.embedding":  {
+                                                                                                                                      "primary":  "natsu-node-04",
+                                                                                                                                      "secondary":  [
+                                                                                                                                                        "natsu-node-09"
+                                                                                                                                                    ]
+                                                                                                                                  },
+                                                                                                     "host.retrieval.reranker":  {
+                                                                                                                                     "primary":  "natsu-node-04",
+                                                                                                                                     "secondary":  [
+
+                                                                                                                                                   ]
+                                                                                                                                 },
+                                                                                                     "host.skills.loader":  {
+                                                                                                                                "primary":  "natsu-node-01",
+                                                                                                                                "secondary":  [
+
+                                                                                                                                              ]
+                                                                                                                            },
+                                                                                                     "host.vision.camera_recognizer":  {
+                                                                                                                                           "primary":  "natsu-node-05",
+                                                                                                                                           "secondary":  [
+
+                                                                                                                                                         ]
+                                                                                                                                       },
+                                                                                                     "host.vision.screen_ocr":  {
+                                                                                                                                    "primary":  "natsu-node-05",
+                                                                                                                                    "secondary":  [
+
+                                                                                                                                                  ]
+                                                                                                                                }
+                                                                                                 }
+                                                                         },
+                                                          "node_probe":  {
+                                                                             "request_id":  "req_61bb607c15ce45ffa9f3219c63622892",
+                                                                             "stage":  "S_INFRA_NODE_PROBE",
+                                                                             "status":  "UP",
+                                                                             "reason_code":  null,
+                                                                             "summary":  {
+                                                                                             "node_total":  9,
+                                                                                             "node_down":  0,
+                                                                                             "node_up":  9
+                                                                                         },
+                                                                             "nodes":  [
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-01",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "orchestrator",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-02",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "audit",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-03",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "llm",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-04",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "retrieval",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-05",
+                                                                                               "region":  "us-west-1",
+                                                                                               "role":  "vision",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-06",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "edge_gateway",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-07",
+                                                                                               "region":  "us-east-1",
+                                                                                               "role":  "edge_voice",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-08",
+                                                                                               "region":  "us-central-1",
+                                                                                               "role":  "edge_realtime",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           },
+                                                                                           {
+                                                                                               "node_id":  "natsu-node-09",
+                                                                                               "region":  "us-central-1",
+                                                                                               "role":  "standby",
+                                                                                               "node_status":  "UP",
+                                                                                               "reason_code":  null,
+                                                                                               "stage":  "S_INFRA_NODE_PROBE",
+                                                                                               "detail":  "node healthy"
+                                                                                           }
+                                                                                       ],
+                                                                             "ts_ms":  1772726749714
+                                                                         },
+                                                          "ts_ms":  1772726749714
+                                                      },
+                                  "readiness_status":  "READY",
+                                  "reason_code":  null,
+                                  "ts_ms":  1772726749714,
+                                  "node_inventory_path":  "tests\\fixtures\\services\\good\\node_inventory_9.json"
+                              }
+              },
+    "ts":  "2026-03-06T00:06:08.1426967+08:00"
+}

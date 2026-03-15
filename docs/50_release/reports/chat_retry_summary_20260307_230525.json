@@ -1,0 +1,74 @@
+﻿[
+    {
+        "attempt":  1,
+        "request_id":  "req_b789fbd28d844b7191d6870e4a8e0ebe",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "POLICY_TIMEOUT",
+        "trace_status":  "FAILED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry1_20260307_225835.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_b789fbd28d844b7191d6870e4a8e0ebe.json"
+    },
+    {
+        "attempt":  2,
+        "request_id":  "req_b507ad513cd1484583c870b9694c2b62",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "POLICY_TIMEOUT",
+        "trace_status":  "FAILED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry2_20260307_225951.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_b507ad513cd1484583c870b9694c2b62.json"
+    },
+    {
+        "attempt":  3,
+        "request_id":  "req_6421ba34cdcb4137b4550670af214899",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "POLICY_TIMEOUT",
+        "trace_status":  "FAILED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry3_20260307_230049.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_6421ba34cdcb4137b4550670af214899.json"
+    },
+    {
+        "attempt":  4,
+        "request_id":  "req_69dabeb0c3e34642a088c483cee2488a",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "POLICY_TIMEOUT",
+        "trace_status":  "FAILED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry4_20260307_230156.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_69dabeb0c3e34642a088c483cee2488a.json"
+    },
+    {
+        "attempt":  5,
+        "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+        "trace_status":  "DEGRADED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry5_20260307_230308.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_145cacf37d074c8d82d39052c6909ece.json"
+    },
+    {
+        "attempt":  6,
+        "request_id":  "req_56a9748d918c4ce6b28ac6e04bd36ad4",
+        "decision":  "APPROVE",
+        "quality_stage":  "S_ORCH_RUN",
+        "reason_code":  "POLICY_TIMEOUT",
+        "trace_status":  "FAILED",
+        "node_count":  3,
+        "all_nodes_ok":  false,
+        "chat_report":  "runtime/reports/chat_real_generation_retry6_20260307_230407.json",
+        "trace_report":  "runtime/reports/chat_chain_nodes_req_56a9748d918c4ce6b28ac6e04bd36ad4.json"
+    }
+]

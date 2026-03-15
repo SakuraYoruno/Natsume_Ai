@@ -1,0 +1,940 @@
+{
+  "run_meta": {
+    "ts": "2026-03-06T17:55:57.050464Z",
+    "base_url": "http://127.0.0.1:18080",
+    "request_payload": {
+      "message": "??????????????????????????",
+      "session_id": "sess::real_chain::full_output",
+      "thread_id": "thread::real_chain::full_output",
+      "scene_type": "CHAT",
+      "mood_state": "engaged",
+      "emotion_tag": "HAPPY",
+      "emotion_range_hint": "????????"
+    },
+    "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4"
+  },
+  "health": {
+    "status": "OK",
+    "version": "0.1.0",
+    "timestamp": 1772819750336,
+    "details": {
+      "request_id": "req_f4945c7f369f4a8d9facca8d1f8eeddd",
+      "stage": "S_SERVICE_HEALTH",
+      "reason_code": null,
+      "summary": {
+        "overall_status": "UP",
+        "required_total": 14,
+        "required_unavailable": 0,
+        "optional_unavailable": 0
+      },
+      "services": [
+        {
+          "service_id": "host.audit.sqlite_ledger",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+        },
+        {
+          "service_id": "host.governor.decision",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "governor decision engine ready"
+        },
+        {
+          "service_id": "host.skills.loader",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "skills loader ready (env=dev)"
+        },
+        {
+          "service_id": "host.integrations.llm_gateway",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "llm gateway enabled"
+        },
+        {
+          "service_id": "host.retrieval.embedding",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "retrieval embedding enabled"
+        },
+        {
+          "service_id": "host.retrieval.reranker",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "retrieval reranker enabled"
+        },
+        {
+          "service_id": "host.vision.screen_ocr",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "vision screen_ocr enabled"
+        },
+        {
+          "service_id": "host.vision.camera_recognizer",
+          "owner": "host",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "vision camera_recognizer enabled"
+        },
+        {
+          "service_id": "edge.rpc.gateway",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "edge rpc transport healthy"
+        },
+        {
+          "service_id": "edge.rpc.asr",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "service healthy"
+        },
+        {
+          "service_id": "edge.rpc.tts",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "service healthy"
+        },
+        {
+          "service_id": "edge.rpc.barge_in",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "service healthy"
+        },
+        {
+          "service_id": "edge.rpc.fallback_llm",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "service healthy"
+        },
+        {
+          "service_id": "edge.rpc.resource_gate",
+          "owner": "edge",
+          "required": true,
+          "status": "UP",
+          "reason_code": null,
+          "stage": "S_SERVICE_HEALTH",
+          "detail": "service healthy"
+        }
+      ],
+      "ts_ms": 1772819750336
+    }
+  },
+  "chat_response": {
+    "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+    "narrative": "用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。",
+    "intent_draft": {
+      "text": "不好意思，我不太明白您的意思，可以请您说得更清楚一点吗？",
+      "type": "CHAT"
+    },
+    "decision": "APPROVE",
+    "reason_code": "RETR_EPACK_INPUT_INVALID",
+    "approval_token_ref": "approval::intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+    "approval_tier": "cache",
+    "quality": {
+      "stage": "S_ORCH_RUN",
+      "reason_code": "RETR_EPACK_INPUT_INVALID"
+    },
+    "audit_refs": {
+      "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+      "governor_stage": "S_INTENT_OK",
+      "thread_id": "thread::real_chain::full_output",
+      "retrieval": {
+        "status": "DEGRADED",
+        "reason_code": "RETR_EPACK_INPUT_INVALID",
+        "route_count": 6,
+        "routes": [
+          {
+            "route_id": "route_artifact_vault",
+            "store_id": "artifact_vault",
+            "collection": "artifact_vault",
+            "top_k": 4,
+            "score_weight": 0.75,
+            "node_selector": "*"
+          },
+          {
+            "route_id": "route_episodic",
+            "store_id": "episodic_vector",
+            "collection": "episodic",
+            "top_k": 8,
+            "score_weight": 0.9,
+            "node_selector": "*"
+          },
+          {
+            "route_id": "route_neo4j_bond",
+            "store_id": "neo4j_bond",
+            "collection": "neo4j_bond",
+            "top_k": 4,
+            "score_weight": 0.95,
+            "node_selector": "*"
+          },
+          {
+            "route_id": "route_sqlite_ledger",
+            "store_id": "sqlite_ledger",
+            "collection": "sqlite_ledger",
+            "top_k": 6,
+            "score_weight": 1.0,
+            "node_selector": "*"
+          },
+          {
+            "route_id": "route_style_canon",
+            "store_id": "style_canon",
+            "collection": "style_canon",
+            "top_k": 4,
+            "score_weight": 0.85,
+            "node_selector": "*"
+          },
+          {
+            "route_id": "route_world_canon",
+            "store_id": "world_canon",
+            "collection": "world_canon",
+            "top_k": 4,
+            "score_weight": 0.8,
+            "node_selector": "*"
+          }
+        ],
+        "route_rows": [
+          {
+            "route_id": "route_artifact_vault",
+            "store_id": "artifact_vault",
+            "collection": "artifact_vault",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          },
+          {
+            "route_id": "route_episodic",
+            "store_id": "episodic_vector",
+            "collection": "episodic",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          },
+          {
+            "route_id": "route_neo4j_bond",
+            "store_id": "neo4j_bond",
+            "collection": "neo4j_bond",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          },
+          {
+            "route_id": "route_sqlite_ledger",
+            "store_id": "sqlite_ledger",
+            "collection": "sqlite_ledger",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          },
+          {
+            "route_id": "route_style_canon",
+            "store_id": "style_canon",
+            "collection": "style_canon",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          },
+          {
+            "route_id": "route_world_canon",
+            "store_id": "world_canon",
+            "collection": "world_canon",
+            "status": "OK",
+            "reason_code": null,
+            "detail": "recall route completed",
+            "candidate_count": 0
+          }
+        ],
+        "route_errors": [],
+        "candidate_count": 0,
+        "rerank_topk": 0,
+        "evidence_refs": [],
+        "reason_chain": [
+          "RETR_RECALL_UNAVAILABLE",
+          "RETR_RERANK_INPUT_INVALID",
+          "RETR_EPACK_INPUT_INVALID"
+        ],
+        "degraded": true
+      },
+      "llm": {
+        "status": "FAILED",
+        "reason_code": "POLICY_TIMEOUT",
+        "stage": "S_ORCH_RUN",
+        "provider": "gemini",
+        "model_id": "gemini-2.5-flash",
+        "model_profile_id": "chat_ja_24x7_v1",
+        "latency_ms": null,
+        "draft_only": true,
+        "node_count": 9,
+        "nodes": [
+          {
+            "node_id": "core_reasoner_primary",
+            "status": "OK",
+            "reason_code": null,
+            "provider": "gemini",
+            "model_id": "gemini-2.5-pro",
+            "input": {
+              "user_message": "??????????????????????????",
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": []
+            },
+            "output": {
+              "intent_draft": {
+                "text": "不好意思，我不太明白您的意思，可以请您说得更清楚一点吗？",
+                "type": "CHAT"
+              },
+              "meta": {
+                "draft_only": true
+              },
+              "narrative": {
+                "text": "用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。"
+              }
+            },
+            "narrative_preview": "用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。"
+          },
+          {
+            "node_id": "core_reasoner_secondary",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "planner_constraints",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "tool_planner",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "safety_verifier",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints",
+                "tool_planner"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "consistency_verifier",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints",
+                "tool_planner",
+                "safety_verifier"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "renderer_ja_c_style",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints",
+                "tool_planner",
+                "safety_verifier",
+                "consistency_verifier"
+              ],
+              "core_narrative_zh": "用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。",
+              "core_intent_draft": {
+                "text": "不好意思，我不太明白您的意思，可以请您说得更清楚一点吗？",
+                "type": "CHAT"
+              }
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "workbench_translate",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints",
+                "tool_planner",
+                "safety_verifier",
+                "consistency_verifier",
+                "renderer_ja_c_style"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          },
+          {
+            "node_id": "workbench_code_assist",
+            "status": "UNKNOWN",
+            "reason_code": null,
+            "provider": null,
+            "model_id": null,
+            "input": {
+              "user_message": null,
+              "retrieval_status": "DEGRADED",
+              "retrieval_route_count": 6,
+              "upstream_node_ids": [
+                "core_reasoner_primary",
+                "core_reasoner_secondary",
+                "planner_constraints",
+                "tool_planner",
+                "safety_verifier",
+                "consistency_verifier",
+                "renderer_ja_c_style",
+                "workbench_translate"
+              ]
+            },
+            "output": {},
+            "narrative_preview": ""
+          }
+        ],
+        "model_control": [
+          {
+            "node_id": "core_reasoner_primary",
+            "model_node_id": "core_reasoner_primary",
+            "provider": "gemini",
+            "model_id": "gemini-2.5-pro",
+            "temperature": 0.35,
+            "max_output_tokens": 420,
+            "timeout_ms": 12000,
+            "expected_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+            "actual_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+            "drift_detected": false,
+            "param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+            "selected_node": "core_reasoner_primary",
+            "candidate_nodes": [
+              "core_reasoner_primary"
+            ],
+            "selector_env": null,
+            "governance_refs": {
+              "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+              "intent_id": null,
+              "approval_token_ref": null,
+              "evidence_ref": null
+            },
+            "gateway_status": "OK",
+            "reason_code": null
+          }
+        ]
+      }
+    },
+    "timestamp": 1772819750342
+  },
+  "observability_trace": {
+    "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+    "trace_status": "COMPLETE",
+    "timeline_total": 9,
+    "sources": {
+      "error_log": 1,
+      "governor_log": 1,
+      "intent_log": 1,
+      "model_control_log": 1,
+      "retrieval_event_log": 5
+    },
+    "timeline": [
+      {
+        "event_id": "governor_log:1",
+        "source": "governor_log",
+        "stage": "S_INTENT_OK",
+        "status": "APPROVE",
+        "reason_code": null,
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": null
+      },
+      {
+        "event_id": "intent_log:1",
+        "source": "intent_log",
+        "stage": null,
+        "status": null,
+        "reason_code": null,
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": null
+      },
+      {
+        "event_id": "model_control_log:1",
+        "source": "model_control_log",
+        "stage": "S_ORCH_RUN",
+        "status": "OK",
+        "reason_code": null,
+        "intent_id": null,
+        "ts_ms": 1772819750342,
+        "detail": null
+      },
+      {
+        "event_id": "retrieval_event_log:1",
+        "source": "retrieval_event_log",
+        "stage": "S_RET_EMBEDDING",
+        "status": "OK",
+        "reason_code": null,
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": "embedding generated"
+      },
+      {
+        "event_id": "retrieval_event_log:2",
+        "source": "retrieval_event_log",
+        "stage": "S_RET_RECALL",
+        "status": "DEGRADED",
+        "reason_code": "RETR_RECALL_UNAVAILABLE",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": "no recall candidates from configured routes"
+      },
+      {
+        "event_id": "retrieval_event_log:3",
+        "source": "retrieval_event_log",
+        "stage": "S_RET_RERANK",
+        "status": "DEGRADED",
+        "reason_code": "RETR_RERANK_INPUT_INVALID",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": "reranker input invalid: query and candidates are required"
+      },
+      {
+        "event_id": "retrieval_event_log:4",
+        "source": "retrieval_event_log",
+        "stage": "S_RET_EVIDENCE_PACK",
+        "status": "DEGRADED",
+        "reason_code": "RETR_EPACK_INPUT_INVALID",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": "evidence pack input invalid: query and topk are required"
+      },
+      {
+        "event_id": "retrieval_event_log:5",
+        "source": "retrieval_event_log",
+        "stage": "S_RET_PIPELINE",
+        "status": "DEGRADED",
+        "reason_code": "RETR_EPACK_INPUT_INVALID",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "ts_ms": 1772819750342,
+        "detail": "retrieval pipeline completed with degradation"
+      },
+      {
+        "event_id": "error_log:1",
+        "source": "error_log",
+        "stage": "S_ORCH_RUN",
+        "status": null,
+        "reason_code": "POLICY_TIMEOUT",
+        "intent_id": null,
+        "ts_ms": 1772819757034,
+        "detail": "Policy Clock 超时，强制终止图执行，节点=renderer_ja_c_style"
+      }
+    ],
+    "timestamp": 1772819757039
+  },
+  "audit_db_rows_by_table": {
+    "airlock_log": [
+      {
+        "id": 435,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "direction": "EGRESS",
+        "reason_code": null,
+        "removed_fields": "[]",
+        "redactions": "[\"input.session_id\", \"input.committed_route_token_detail.token\"]",
+        "payload_digest": "sha256:d2e5020b010e388b521675fe25b26a561891938be186e10619e46cfe26b88242",
+        "quarantine_digest": null,
+        "ingress_classification": null,
+        "blocked": 0,
+        "detail": "egress allowed",
+        "ts_ms": 1772819750427
+      },
+      {
+        "id": 436,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "direction": "INGRESS",
+        "reason_code": "AIRLOCK_BLOCKED_INGRESS",
+        "removed_fields": "[]",
+        "redactions": "[]",
+        "payload_digest": "sha256:e1849290b8d4049153dc389688a20f9fcfa0d17d8b9611794eab3a1a06734a88",
+        "quarantine_digest": "sha256:0e432417a4798ee35869ead65a231208cbadcafbcf2231bcd594cd706bbd7d6f",
+        "ingress_classification": "FACT",
+        "blocked": 1,
+        "detail": "ingress quarantined as draft-only",
+        "ts_ms": 1772819750427
+      }
+    ],
+    "error_log": [
+      {
+        "id": 71,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "stage": "S_ORCH_RUN",
+        "reason_code": "POLICY_TIMEOUT",
+        "detail": "Policy Clock 超时，强制终止图执行，节点=renderer_ja_c_style",
+        "ts_ms": 1772819757034
+      }
+    ],
+    "governor_log": [
+      {
+        "id": 109,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "thread_id": "thread::real_chain::full_output",
+        "turn_id": "turn_35439d90b2624e54839d6c6b164f581f",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "decision": "APPROVE",
+        "reason_code": null,
+        "rule_trace": "[{\"gate_id\": \"R1_TRUST\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"trust_bucket\": \"normal\"}, \"threshold_summary\": {\"min_trust_bucket\": \">=30\"}}, {\"gate_id\": \"R2_ENERGY\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"energy_bucket\": \"normal\"}, \"threshold_summary\": {\"min_energy_bucket\": \">=20\"}}, {\"gate_id\": \"R3_SYSMODE\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"sys_mode\": \"normal\"}, \"threshold_summary\": {\"blocked_modes\": [\"locked\", \"maintenance\"]}}, {\"gate_id\": \"R4_RATE_LIMIT\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"rate_limit_hit\": false}, \"threshold_summary\": {\"window\": \"global_bucket_window\"}}, {\"gate_id\": \"R5_SCOPE\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"scope\": \"host\"}, \"threshold_summary\": {\"allowlist\": [\"host\", \"memory\", \"system\"]}}, {\"gate_id\": \"R6_SAFETY\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"safety_flag\": false}, \"threshold_summary\": {\"safety_flag_required\": false}}, {\"gate_id\": \"R7_AIRLOCK\", \"hit\": false, \"reason_hint\": \"PASS\", \"snapshot_summary\": {\"airlock_blocked\": false}, \"threshold_summary\": {\"airlock_blocked_required\": false}}, {\"gate_id\": \"R8_EMOTION\", \"hit\": false, \"reason_hint\": \"PASS\", \"simplified_prompt\": false, \"snapshot_summary\": {\"emotion_tag\": \"NEUTRAL\", \"mood_state\": \"steady\", \"simplified_prompt\": false}, \"threshold_summary\": {\"blocked_emotions\": [\"FRUSTRATED\", \"ANGRY\"], \"critical_mood_simplified\": true}}]",
+        "tokens": "{\"approval_token_ref\": \"approval::intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4\"}",
+        "snapshot_refs": "{\"governance_snapshot\": \"gov_snap::0307769d126990bf1e57981c8e20a86d66dcac4673dbe17bcd96c64f48d35878\", \"hard_state\": \"hard_state::7b8e7eac4764d4af26b80d3d02a4d8290ab1e73805d9b61bc793236d7cd3e01a\"}",
+        "stage": "S_INTENT_OK",
+        "ts_ms": 1772819750342
+      }
+    ],
+    "graph_run_trace": [
+      {
+        "id": 6,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "session_id": "sess::real_chain::full_output",
+        "total_latency_ms": 6692,
+        "status": "FAILED",
+        "reason_code": "POLICY_TIMEOUT",
+        "node_count": 9,
+        "nodes_json": "[{\"display_name\": \"core_reasoner_primary\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [], \"user_message\": \"??????????????????????????\"}, \"latency_ms\": null, \"model_id\": \"gemini-2.5-pro\", \"node_id\": \"core_reasoner_primary\", \"node_type\": \"llm_node\", \"output_data\": {\"intent_draft\": {\"text\": \"不好意思，我不太明白您的意思，可以请您说得更清楚一点吗？\", \"type\": \"CHAT\"}, \"meta\": {\"draft_only\": true}, \"narrative\": {\"text\": \"用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。\"}}, \"provider\": \"gemini\", \"status\": \"OK\", \"ts_ms\": 1772819757034}, {\"display_name\": \"core_reasoner_secondary\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"core_reasoner_secondary\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757035}, {\"display_name\": \"planner_constraints\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"planner_constraints\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757036}, {\"display_name\": \"tool_planner\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"tool_planner\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757037}, {\"display_name\": \"safety_verifier\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\", \"tool_planner\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"safety_verifier\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757038}, {\"display_name\": \"consistency_verifier\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\", \"tool_planner\", \"safety_verifier\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"consistency_verifier\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757039}, {\"display_name\": \"renderer_ja_c_style\", \"error\": null, \"input_data\": {\"core_intent_draft\": {\"text\": \"不好意思，我不太明白您的意思，可以请您说得更清楚一点吗？\", \"type\": \"CHAT\"}, \"core_narrative_zh\": \"用户输入了一连串问号，我无法理解其意图。正在请求用户澄清。\", \"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\", \"tool_planner\", \"safety_verifier\", \"consistency_verifier\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"renderer_ja_c_style\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757040}, {\"display_name\": \"workbench_translate\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\", \"tool_planner\", \"safety_verifier\", \"consistency_verifier\", \"renderer_ja_c_style\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"workbench_translate\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757041}, {\"display_name\": \"workbench_code_assist\", \"error\": null, \"input_data\": {\"retrieval_route_count\": 6, \"retrieval_status\": \"DEGRADED\", \"upstream_node_ids\": [\"core_reasoner_primary\", \"core_reasoner_secondary\", \"planner_constraints\", \"tool_planner\", \"safety_verifier\", \"consistency_verifier\", \"renderer_ja_c_style\", \"workbench_translate\"], \"user_message\": null}, \"latency_ms\": null, \"model_id\": null, \"node_id\": \"workbench_code_assist\", \"node_type\": \"llm_node\", \"output_data\": {}, \"provider\": null, \"status\": \"UNKNOWN\", \"ts_ms\": 1772819757042}]",
+        "edges_json": "[{\"source\": \"core_reasoner_primary\", \"target\": \"core_reasoner_secondary\"}, {\"source\": \"core_reasoner_secondary\", \"target\": \"planner_constraints\"}, {\"source\": \"planner_constraints\", \"target\": \"tool_planner\"}, {\"source\": \"tool_planner\", \"target\": \"safety_verifier\"}, {\"source\": \"safety_verifier\", \"target\": \"consistency_verifier\"}, {\"source\": \"consistency_verifier\", \"target\": \"renderer_ja_c_style\"}, {\"source\": \"renderer_ja_c_style\", \"target\": \"workbench_translate\"}, {\"source\": \"workbench_translate\", \"target\": \"workbench_code_assist\"}]",
+        "ts_ms": 1772819757034
+      }
+    ],
+    "intent_log": [
+      {
+        "id": 109,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "thread_id": "thread::real_chain::full_output",
+        "turn_id": "turn_35439d90b2624e54839d6c6b164f581f",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "session_id": "sess::real_chain::full_output",
+        "seq": 1,
+        "ts_ms": 1772819750342,
+        "nonce": "nonce::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "parse_stage": "LENIENT_OK",
+        "raw_text": null,
+        "normalized_json": "{\"action\": \"narrative_only\", \"args\": {\"text\": \"??????????????????????????\"}, \"id\": \"intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4\", \"nonce\": \"nonce::req_40cf4e45730b4bc1ac12fcfacfb2d5d4\", \"schema_version\": \"Natsume.intent.v1\", \"seq\": 1, \"session_id\": \"sess::real_chain::full_output\", \"target\": \"host\", \"ts_ms\": 1772819750342, \"type\": \"query\"}",
+        "proposer_node_id": "core_reasoner_primary",
+        "model_snapshot": "unknown_model",
+        "prompt_profile_id": "default_profile",
+        "tool_visibility_hash": "",
+        "proposed_intent_draft_json": "{\"action\": \"narrative_only\", \"args\": {\"text\": \"??????????????????????????\"}, \"id\": \"intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4\", \"nonce\": \"nonce::req_40cf4e45730b4bc1ac12fcfacfb2d5d4\", \"schema_version\": \"Natsume.intent.v1\", \"seq\": 1, \"session_id\": \"sess::real_chain::full_output\", \"target\": \"host\", \"ts_ms\": 1772819750342, \"type\": \"query\"}",
+        "lint_result": "{\"args\": [], \"schema\": []}"
+      }
+    ],
+    "llm_node_call_log": [
+      {
+        "id": 46,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "core_reasoner_primary",
+        "provider": "gemini",
+        "model_id": "gemini-2.5-pro",
+        "status": "OK",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "2b73e808d5d44aeb96715b237c84b966d02648c9d0c03b234268e0751d3a06f5",
+        "output_digest": "4ba821f68576ce909032242d6786288efea79dd80ae410f55c59ed537c0093c6",
+        "ts_ms": 1772819757034
+      },
+      {
+        "id": 47,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "core_reasoner_secondary",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "865098a2bbac21c388135963d66b8976391e371de12b26aa8d324374281b4998",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757035
+      },
+      {
+        "id": 48,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "planner_constraints",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "ff13afab51e1c6079fc4ae611d85a9d6f59f48ffeee729cd2880bb2ee8812597",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757036
+      },
+      {
+        "id": 49,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "tool_planner",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "35485d6fafb6b37454a09bb09d87f1aafdfe822aeaebe960601e179df6eb6937",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757037
+      },
+      {
+        "id": 50,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "safety_verifier",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "00da92b98bfa52a1ff85ff7a975d83a6dce96e51b61c641f1b30cafe4d84da19",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757038
+      },
+      {
+        "id": 51,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "consistency_verifier",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "bfdb354860de980e55b992f43d2dd8760672697ac508c08f70f0effd8de1e7cb",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757039
+      },
+      {
+        "id": 52,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "renderer_ja_c_style",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "9fa2ce9d0c263c300ae04facc3d68f871a65c633e382445eb61e44b5115ea8e9",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757040
+      },
+      {
+        "id": 53,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "workbench_translate",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "8e3d8a87feb88af8def996b5c984bcec1bfc8eb06aee4d31c803629b00ef1d70",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757041
+      },
+      {
+        "id": 54,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "workbench_code_assist",
+        "provider": "",
+        "model_id": "",
+        "status": "UNKNOWN",
+        "reason_code": null,
+        "latency_ms": null,
+        "input_digest": "2418f2474099791ec4be50ba7126964126b83f4a7bc13894f3a73c2fe614f7d0",
+        "output_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "ts_ms": 1772819757042
+      }
+    ],
+    "model_control_log": [
+      {
+        "id": 224,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "node_id": "core_reasoner_primary",
+        "model_node_id": "core_reasoner_primary",
+        "model_profile_id": "chat_ja_24x7_v1",
+        "provider": "gemini",
+        "model_id": "gemini-2.5-pro",
+        "expected_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+        "actual_param_hash": "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+        "drift_detected": 0,
+        "approval_token_ref": null,
+        "evidence_ref": null,
+        "reason_code": null,
+        "status": "OK",
+        "stage": "S_ORCH_RUN",
+        "ts_ms": 1772819750342
+      }
+    ],
+    "retrieval_event_log": [
+      {
+        "id": 275,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "op_kind": "EMBEDDING",
+        "status": "OK",
+        "reason_code": null,
+        "stage": "S_RET_EMBEDDING",
+        "payload": "{\"embedding_dim\": 1024, \"expected_dim\": 1024, \"latency_ms\": 51, \"node_selector\": \"default,natsu-node-01\", \"output_status\": \"OK\", \"provider\": \"sentence_transformers\", \"route_id\": \"host_default\", \"text_length\": 26}",
+        "detail": "embedding generated",
+        "ts_ms": 1772819750342
+      },
+      {
+        "id": 276,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "op_kind": "RECALL",
+        "status": "DEGRADED",
+        "reason_code": "RETR_RECALL_UNAVAILABLE",
+        "stage": "S_RET_RECALL",
+        "payload": "{\"candidate_count\": 0, \"output_status\": \"DEGRADED\", \"query_length\": 26, \"route_count\": 6, \"route_error_count\": 0}",
+        "detail": "no recall candidates from configured routes",
+        "ts_ms": 1772819750342
+      },
+      {
+        "id": 277,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "op_kind": "RERANK",
+        "status": "DEGRADED",
+        "reason_code": "RETR_RERANK_INPUT_INVALID",
+        "stage": "S_RET_RERANK",
+        "payload": "{\"candidate_count\": 0, \"expected_top_k\": 0, \"latency_ms\": 0, \"node_selector\": \"default,natsu-node-01\", \"output_status\": \"DEGRADED\", \"provider\": \"qwen3_reranker\", \"query_length\": 26, \"route_id\": \"host_default\", \"topk_count\": 0}",
+        "detail": "reranker input invalid: query and candidates are required",
+        "ts_ms": 1772819750342
+      },
+      {
+        "id": 278,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "op_kind": "EVIDENCE_PACK",
+        "status": "DEGRADED",
+        "reason_code": "RETR_EPACK_INPUT_INVALID",
+        "stage": "S_RET_EVIDENCE_PACK",
+        "payload": "{\"evidence_refs_count\": 0, \"output_status\": \"DEGRADED\", \"pack_id\": \"epk_789bd961dea22729\", \"query_length\": 26, \"serialization_version\": \"evidence_pack_v1\", \"topk_count\": 0}",
+        "detail": "evidence pack input invalid: query and topk are required",
+        "ts_ms": 1772819750342
+      },
+      {
+        "id": 279,
+        "request_id": "req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "intent_id": "intent::req_40cf4e45730b4bc1ac12fcfacfb2d5d4",
+        "op_kind": "PIPELINE",
+        "status": "DEGRADED",
+        "reason_code": "RETR_EPACK_INPUT_INVALID",
+        "stage": "S_RET_PIPELINE",
+        "payload": "{\"evidence_refs\": 0, \"fallback_embedding_used\": false, \"output_status\": \"DEGRADED\", \"query_length\": 26, \"recall_candidates\": 0, \"rerank_topk\": 0}",
+        "detail": "retrieval pipeline completed with degradation",
+        "ts_ms": 1772819750342
+      }
+    ]
+  }
+}

@@ -216,7 +216,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 
 本次封测统一使用专用目录：
 
-`runtime/reports/release_seal_personal_full_20260314/`
+`docs/50_release/reports/release_seal_personal_full_20260314/`
 
 目录分工如下：
 

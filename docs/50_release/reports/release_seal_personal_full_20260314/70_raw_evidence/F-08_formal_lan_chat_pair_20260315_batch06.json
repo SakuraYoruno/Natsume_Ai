@@ -1,0 +1,39 @@
+{
+  "batch": "20260315_batch06_formal_lan_runtime_fix",
+  "mode": "formal_lan_dual_node",
+  "host_pid": 49820,
+  "samples": [
+    {
+      "request_id": "req_41eed88b1d3840638cfd0aa62d2582a2",
+      "message": "今の気分を短く教えて",
+      "narrative": "今、ちょっと元気です。",
+      "route_target": "host_8b",
+      "retrieval_status": "DEGRADED",
+      "retrieval_reason_code": "RETRIEVAL_TIMEOUT",
+      "route_count": 0,
+      "candidate_count": 0,
+      "prompt_context_tier": "core_three",
+      "vts_status": "APPLIED",
+      "tts_status": "ACCEPTED"
+    },
+    {
+      "request_id": "req_66f10138b701442abdb5c403dc205b48",
+      "message": "今いちばん優先することを短く教えて",
+      "narrative": "今すぐ行動を起こすことが一番大切です。",
+      "route_target": "host_8b",
+      "retrieval_status": "OK",
+      "retrieval_reason_code": "NONE",
+      "route_count": 7,
+      "candidate_count": 9,
+      "prompt_context_tier": "six_route",
+      "vts_status": "APPLIED",
+      "tts_status": "ACCEPTED"
+    }
+  ],
+  "fixes_verified": [
+    "stream_render_no_json_shell",
+    "commit_narrative_clean_text",
+    "prompt_context_single_path_background_ingress",
+    "trace_closure_restored"
+  ]
+}

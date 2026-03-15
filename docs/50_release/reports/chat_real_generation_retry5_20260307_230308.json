@@ -1,0 +1,385 @@
+﻿{
+    "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+    "narrative":  "å½åå¤é¨è¯­ä¹æå¡ä¸å¯ç¨ï¼æå\u0085ç»åºèæ¡åå¤ã",
+    "intent_draft":  {
+                         "schema_version":  "Natsume.intent.v1",
+                         "id":  "intent::req_145cacf37d074c8d82d39052c6909ece",
+                         "ts_ms":  1772895788741,
+                         "session_id":  "session::codex-host-chain-retry5-20260307_230308",
+                         "seq":  1,
+                         "type":  "query",
+                         "action":  "narrative_only",
+                         "target":  "host",
+                         "args":  {
+                                      "text":  "è¯·ç®è¦è¯´æ Host ä¸ Edge çèè´£åå·¥ï¼å¹¶ç»ä¸¤æ¡è¿ç»´å»ºè®®ã"
+                                  },
+                         "nonce":  "nonce::req_145cacf37d074c8d82d39052c6909ece"
+                     },
+    "decision":  "APPROVE",
+    "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+    "approval_token_ref":  "approval::intent::req_145cacf37d074c8d82d39052c6909ece",
+    "approval_tier":  "rule",
+    "quality":  {
+                    "stage":  "S_ORCH_RUN",
+                    "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY"
+                },
+    "audit_refs":  {
+                       "intent_id":  "intent::req_145cacf37d074c8d82d39052c6909ece",
+                       "governor_stage":  "S_INTENT_OK",
+                       "thread_id":  "thread::codex-host-chain-retry5-20260307_230308",
+                       "retrieval":  {
+                                         "status":  "OK",
+                                         "reason_code":  null,
+                                         "route_count":  6,
+                                         "routes":  [
+                                                        {
+                                                            "route_id":  "route_artifact_vault",
+                                                            "store_id":  "artifact_vault",
+                                                            "collection":  "artifact_vault",
+                                                            "top_k":  4,
+                                                            "score_weight":  0.75,
+                                                            "node_selector":  "*"
+                                                        },
+                                                        {
+                                                            "route_id":  "route_episodic",
+                                                            "store_id":  "episodic_vector",
+                                                            "collection":  "episodic",
+                                                            "top_k":  8,
+                                                            "score_weight":  0.9,
+                                                            "node_selector":  "*"
+                                                        },
+                                                        {
+                                                            "route_id":  "route_neo4j_bond",
+                                                            "store_id":  "neo4j_bond",
+                                                            "collection":  "neo4j_bond",
+                                                            "top_k":  4,
+                                                            "score_weight":  0.95,
+                                                            "node_selector":  "*"
+                                                        },
+                                                        {
+                                                            "route_id":  "route_sqlite_ledger",
+                                                            "store_id":  "sqlite_ledger",
+                                                            "collection":  "sqlite_ledger",
+                                                            "top_k":  6,
+                                                            "score_weight":  1.0,
+                                                            "node_selector":  "*"
+                                                        },
+                                                        {
+                                                            "route_id":  "route_style_canon",
+                                                            "store_id":  "style_canon",
+                                                            "collection":  "canon",
+                                                            "top_k":  4,
+                                                            "score_weight":  0.85,
+                                                            "node_selector":  "*"
+                                                        },
+                                                        {
+                                                            "route_id":  "route_world_canon",
+                                                            "store_id":  "world_canon",
+                                                            "collection":  "canon",
+                                                            "top_k":  4,
+                                                            "score_weight":  0.8,
+                                                            "node_selector":  "*"
+                                                        }
+                                                    ],
+                                         "route_rows":  [
+                                                            {
+                                                                "route_id":  "route_artifact_vault",
+                                                                "store_id":  "artifact_vault",
+                                                                "collection":  "artifact_vault",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  0
+                                                            },
+                                                            {
+                                                                "route_id":  "route_episodic",
+                                                                "store_id":  "episodic_vector",
+                                                                "collection":  "episodic",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  0
+                                                            },
+                                                            {
+                                                                "route_id":  "route_neo4j_bond",
+                                                                "store_id":  "neo4j_bond",
+                                                                "collection":  "neo4j_bond",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  0
+                                                            },
+                                                            {
+                                                                "route_id":  "route_sqlite_ledger",
+                                                                "store_id":  "sqlite_ledger",
+                                                                "collection":  "sqlite_ledger",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  6
+                                                            },
+                                                            {
+                                                                "route_id":  "route_style_canon",
+                                                                "store_id":  "style_canon",
+                                                                "collection":  "canon",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  2
+                                                            },
+                                                            {
+                                                                "route_id":  "route_world_canon",
+                                                                "store_id":  "world_canon",
+                                                                "collection":  "canon",
+                                                                "status":  "OK",
+                                                                "reason_code":  null,
+                                                                "detail":  "recall route completed",
+                                                                "candidate_count":  3
+                                                            }
+                                                        ],
+                                         "route_errors":  [
+
+                                                          ],
+                                         "candidate_count":  11,
+                                         "rerank_topk":  5,
+                                         "evidence_refs":  [
+                                                               "evd://mem_78afa5a8619648378e0a8a8283ffbb7b/1",
+                                                               "evd://mem_a7b7a15f42f840d5b9aa00eb93f56316/2",
+                                                               "evd://intent::req_145cacf37d074c8d82d39052c6909ece/3",
+                                                               "evd://intent::req_b507ad513cd1484583c870b9694c2b62/4",
+                                                               "evd://intent::req_6421ba34cdcb4137b4550670af214899/5"
+                                                           ],
+                                         "reason_chain":  [
+
+                                                          ],
+                                         "degraded":  false
+                                     },
+                       "llm":  {
+                                   "status":  "DEGRADED",
+                                   "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+                                   "stage":  "S_ORCH_RUN",
+                                   "provider":  "gemini",
+                                   "model_id":  "gemini-2.5-flash",
+                                   "model_profile_id":  "chat_ja_24x7_v1",
+                                   "render_target_lang":  "ja",
+                                   "latency_ms":  null,
+                                   "draft_only":  true,
+                                   "node_count":  3,
+                                   "nodes":  [
+                                                 {
+                                                     "node_id":  "core_reasoner_primary",
+                                                     "status":  "OK",
+                                                     "reason_code":  null,
+                                                     "provider":  "gemini",
+                                                     "model_id":  "gemini-2.5-pro",
+                                                     "input":  {
+                                                                   "user_message":  "è¯·ç®è¦è¯´æ Host ä¸ Edge çèè´£åå·¥ï¼å¹¶ç»ä¸¤æ¡è¿ç»´å»ºè®®ã",
+                                                                   "retrieval_status":  "OK",
+                                                                   "retrieval_route_count":  6,
+                                                                   "upstream_node_ids":  [
+
+                                                                                         ],
+                                                                   "style_canon_id":  "natsume_ai_cn",
+                                                                   "style_citation":  "style_canon:natsume_ai_cn@v4:f86eaacc477d"
+                                                               },
+                                                     "output":  {
+                                                                    "intent_draft":  {
+
+                                                                                     },
+                                                                    "meta":  {
+                                                                                 "draft_only":  true
+                                                                             },
+                                                                    "narrative":  {
+                                                                                      "text":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã"
+                                                                                  }
+                                                                },
+                                                     "narrative_preview":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦..."
+                                                 },
+                                                 {
+                                                     "node_id":  "consistency_verifier",
+                                                     "status":  "OK",
+                                                     "reason_code":  null,
+                                                     "provider":  "gemini",
+                                                     "model_id":  "gemini-2.5-flash-lite",
+                                                     "input":  {
+                                                                   "user_message":  null,
+                                                                   "retrieval_status":  "OK",
+                                                                   "retrieval_route_count":  6,
+                                                                   "upstream_node_ids":  [
+                                                                                             "core_reasoner_primary"
+                                                                                         ]
+                                                               },
+                                                     "output":  {
+                                                                    "intent_draft":  {
+
+                                                                                     },
+                                                                    "meta":  {
+                                                                                 "draft_only":  true
+                                                                             },
+                                                                    "narrative":  {
+                                                                                      "text":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã"
+                                                                                  }
+                                                                },
+                                                     "narrative_preview":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦..."
+                                                 },
+                                                 {
+                                                     "node_id":  "renderer_ja_c_style",
+                                                     "status":  "DEGRADED",
+                                                     "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+                                                     "provider":  "gemini",
+                                                     "model_id":  "gemini-2.5-flash",
+                                                     "input":  {
+                                                                   "user_message":  null,
+                                                                   "retrieval_status":  "OK",
+                                                                   "retrieval_route_count":  6,
+                                                                   "upstream_node_ids":  [
+                                                                                             "core_reasoner_primary",
+                                                                                             "consistency_verifier"
+                                                                                         ],
+                                                                   "style_canon_id":  "natsume_ai_ja",
+                                                                   "style_citation":  "style_canon:natsume_ai_ja@v2:122b65e8c165",
+                                                                   "core_narrative_zh":  "çªç¶é®èµ·è¿ä¸ªï¼æ¯éå°ä»ä¹éº»ç¦äºåï¼ç®åæ¥è¯´ï¼Host å°±åæ¯è´è´£æèçå¤§èï¼å¤çæå¾è§£æåè®°å¿è°åº¦ãè Edge å¢ï¼æ´åæ¯è´è´£æç¥åæ§è¡çèº«ä½ï¼æ¯å¦è¯­é³å¤çåç¶æä¸æ¥é½å¨é£è¾¹ãè³äºè¿ç»´å»ºè®®åâ¦â¦é¦å\u0085è¦ç¡®ä¿å®ä»¬ä¹é´çéä¿¡ç¨³å®å¯é å§ãå¦å¤ï¼ä¹è¦å¤çæåèªçèµæºå ç¨æ\u0085åµï¼é¿å\u0085åºç°æ§è½ç¶é¢å¦ã",
+                                                                   "core_intent_draft":  {
+
+                                                                                         }
+                                                               },
+                                                     "output":  {
+                                                                    "narrative":  {
+                                                                                      "text":  "å½åå¤é¨è¯­ä¹æå¡ä¸å¯ç¨ï¼æå\u0085ç»åºèæ¡åå¤ã"
+                                                                                  },
+                                                                    "intent_draft":  {
+
+                                                                                     },
+                                                                    "meta":  {
+                                                                                 "draft_only":  true,
+                                                                                 "degraded":  true,
+                                                                                 "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY",
+                                                                                 "stage":  "S_LLM_GATEWAY_PROVIDER"
+                                                                             }
+                                                                },
+                                                     "narrative_preview":  "å½åå¤é¨è¯­ä¹æå¡ä¸å¯ç¨ï¼æå\u0085ç»åºèæ¡åå¤ã"
+                                                 }
+                                             ],
+                                   "model_control":  [
+                                                         {
+                                                             "node_id":  "core_reasoner_primary",
+                                                             "model_node_id":  "core_reasoner_primary",
+                                                             "provider":  "gemini",
+                                                             "model_id":  "gemini-2.5-pro",
+                                                             "temperature":  0.35,
+                                                             "max_output_tokens":  420,
+                                                             "timeout_ms":  12000,
+                                                             "expected_param_hash":  "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+                                                             "actual_param_hash":  "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+                                                             "drift_detected":  false,
+                                                             "param_hash":  "d8165747d5d74ad86c544e535ee551c4a88a9ab2f4079d13612f37efe8bdddde",
+                                                             "selected_node":  "core_reasoner_primary",
+                                                             "candidate_nodes":  [
+                                                                                     "core_reasoner_primary"
+                                                                                 ],
+                                                             "selector_env":  null,
+                                                             "governance_refs":  {
+                                                                                     "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+                                                                                     "intent_id":  null,
+                                                                                     "approval_token_ref":  null,
+                                                                                     "evidence_ref":  null
+                                                                                 },
+                                                             "gateway_status":  "OK",
+                                                             "reason_code":  null
+                                                         },
+                                                         {
+                                                             "node_id":  "consistency_verifier",
+                                                             "model_node_id":  "consistency_verifier",
+                                                             "provider":  "gemini",
+                                                             "model_id":  "gemini-2.5-flash-lite",
+                                                             "temperature":  0.1,
+                                                             "max_output_tokens":  220,
+                                                             "timeout_ms":  7000,
+                                                             "expected_param_hash":  "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+                                                             "actual_param_hash":  "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+                                                             "drift_detected":  false,
+                                                             "param_hash":  "92c9704b6db42d0c35f17d3f45c6667fa11ebf868271c9f6f391d01e59d09bfc",
+                                                             "selected_node":  "consistency_verifier",
+                                                             "candidate_nodes":  [
+                                                                                     "consistency_verifier"
+                                                                                 ],
+                                                             "selector_env":  null,
+                                                             "governance_refs":  {
+                                                                                     "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+                                                                                     "intent_id":  null,
+                                                                                     "approval_token_ref":  null,
+                                                                                     "evidence_ref":  null
+                                                                                 },
+                                                             "gateway_status":  "OK",
+                                                             "reason_code":  null
+                                                         },
+                                                         {
+                                                             "node_id":  "renderer_ja_c_style",
+                                                             "model_node_id":  "renderer_ja_c_style",
+                                                             "provider":  "gemini",
+                                                             "model_id":  "gemini-2.5-flash",
+                                                             "temperature":  0.45,
+                                                             "max_output_tokens":  360,
+                                                             "timeout_ms":  9000,
+                                                             "expected_param_hash":  "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+                                                             "actual_param_hash":  "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+                                                             "drift_detected":  false,
+                                                             "param_hash":  "3b2d8a5a40e3a74476b02963148fdd769517b929a45fd3b3d38a3f8c66462da4",
+                                                             "selected_node":  "renderer_ja_c_style",
+                                                             "candidate_nodes":  [
+                                                                                     "renderer_ja_c_style"
+                                                                                 ],
+                                                             "selector_env":  null,
+                                                             "governance_refs":  {
+                                                                                     "request_id":  "req_145cacf37d074c8d82d39052c6909ece",
+                                                                                     "intent_id":  null,
+                                                                                     "approval_token_ref":  null,
+                                                                                     "evidence_ref":  null
+                                                                                 },
+                                                             "gateway_status":  "DEGRADED",
+                                                             "reason_code":  "SERVICE_UNAVAILABLE_DEPENDENCY"
+                                                         }
+                                                     ],
+                                   "context_pack_validation":  {
+                                                                   "valid":  true,
+                                                                   "degraded":  false,
+                                                                   "reason_code":  null,
+                                                                   "violation_count":  0,
+                                                                   "violations":  [
+
+                                                                                  ]
+                                                               }
+                               },
+                       "context_pack_validation":  {
+                                                       "valid":  true,
+                                                       "degraded":  false,
+                                                       "reason_code":  null,
+                                                       "violation_count":  0,
+                                                       "violations":  [
+
+                                                                      ]
+                                                   },
+                       "emotion_context":  {
+                                               "mood_state":  "steady",
+                                               "emotion_tag":  "NEUTRAL",
+                                               "emotion_range_hint":  "å½åç¶ææ­£å¸¸ï¼å¯ä»¥è¡¨è¾¾å¤ç§æ\u0085æ",
+                                               "allowed_emotion_tags":  [
+                                                                            "NEUTRAL",
+                                                                            "CALM",
+                                                                            "HAPPY",
+                                                                            "THINKING",
+                                                                            "SAD",
+                                                                            "ANGRY"
+                                                                        ],
+                                               "emotion_ts_ms":  1772895788741
+                                           },
+                       "episodic_memory":  {
+                                               "status":  "OK",
+                                               "reason_code":  null,
+                                               "memory_id":  "mem_67dbc2feb8244852a9e8841cffe5b236",
+                                               "detail":  "memory written",
+                                               "emotion_tag":  "NEUTRAL"
+                                           }
+                   },
+    "timestamp":  1772895788741
+}

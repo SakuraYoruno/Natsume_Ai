@@ -1,0 +1,34 @@
+{
+  "captured_at": "2026-03-15 00:38 CST",
+  "scope": "formal_lan_dual_node_seal_test",
+  "host_port_binding": {
+    "port": 18080,
+    "pid_file": "runtime/host/sealtest_host_lan.pid",
+    "process_id": 40780,
+    "process_name": "python.exe",
+    "creation_date": "2026-03-15 00:36:56",
+    "command_line": "\"C:\\Program Files\\Python311\\python.exe\" -m host_brain --host 0.0.0.0 --port 18080 --log-level INFO --startup-check"
+  },
+  "host_ready": {
+    "ready": true,
+    "status": "READY",
+    "edge_rpc_host": "192.168.1.101",
+    "edge_rpc_port": 17800,
+    "edge_fallback_llm_enabled": true,
+    "host_key_profile_status": null,
+    "key_profiles_total": 0,
+    "node_inventory_path": "tests\\fixtures\\services\\good\\node_inventory_9.json"
+  },
+  "host_health": {
+    "status": "OK",
+    "required_total": 14,
+    "required_unavailable": 0,
+    "edge_gateway": "UP",
+    "edge_tts": "UP",
+    "edge_fallback": "UP"
+  },
+  "notes": [
+    "Port 18080 is now owned by the formal LAN host process, not the older local-edge bootstrap process.",
+    "The host control plane now points to the remote edge node 192.168.1.101:17800."
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "batch_id": "20260315_batch04_formal_lan_mainchain",
+  "exec_date": "2026-03-15",
+  "environment": "formal_lan_dual_node",
+  "summary": {
+    "applicable_count": 5,
+    "pass_count": 0,
+    "block_count": 5,
+    "final_decision": "BLOCK"
+  },
+  "items": [
+    {
+      "id": "F-08",
+      "status": "BLOCK",
+      "evidence": [
+        "20_chain_quality/F-08_chat_mainchain_20260315_formal_lan.md",
+        "70_raw_evidence/F-08_formal_chat_req_req_8a9a7212574048d5ae7cb8adcb0189e8.json",
+        "70_raw_evidence/F-08_formal_chat_req_req_f22e3993c272435084f81a63fe5339f4.json"
+      ]
+    },
+    {
+      "id": "F-09",
+      "status": "BLOCK",
+      "evidence": [
+        "20_chain_quality/F-09_retrieval_accuracy_20260315_formal_lan.md"
+      ]
+    },
+    {
+      "id": "F-16",
+      "status": "BLOCK",
+      "evidence": [
+        "20_chain_quality/F-16_text_quality_20260315_formal_lan.md"
+      ]
+    },
+    {
+      "id": "F-17",
+      "status": "BLOCK",
+      "evidence": [
+        "20_chain_quality/F-17_chat_latency_20260315_formal_lan.md"
+      ]
+    },
+    {
+      "id": "F-29",
+      "status": "BLOCK",
+      "evidence": [
+        "40_webui_obs/F-29_trace_closure_20260315_formal_lan.md"
+      ]
+    }
+  ]
+}

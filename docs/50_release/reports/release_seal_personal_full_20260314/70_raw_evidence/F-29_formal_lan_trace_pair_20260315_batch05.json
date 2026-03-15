@@ -1,0 +1,24 @@
+{
+  "batch_id": "20260315_batch05_formal_lan_restart_retest",
+  "sample_window": "2026-03-15 03:39 CST",
+  "traces": [
+    {
+      "request_id": "req_5328cf7b0bfa47bba7770505c640a223",
+      "status": "OK",
+      "node_count": 1,
+      "nodes": [
+        "governor"
+      ],
+      "edges": []
+    },
+    {
+      "request_id": "req_6e88facfa7164b2ab767b44b165b6891",
+      "status": "OK",
+      "node_count": 1,
+      "nodes": [
+        "governor"
+      ],
+      "edges": []
+    }
+  ]
+}

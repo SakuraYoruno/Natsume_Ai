@@ -1,0 +1,183 @@
+{
+  "generated_at": "2026-03-07 23:06:12",
+  "host_url": "http://127.0.0.1:18080",
+  "request_id": "req_145cacf37d074c8d82d39052c6909ece",
+  "chat_summary": {
+    "decision": "APPROVE",
+    "quality_stage": "S_ORCH_RUN",
+    "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY"
+  },
+  "trace_summary": {
+    "status": "DEGRADED",
+    "node_count": 3
+  },
+  "startup_summary": {
+    "boot_status": "DEGRADED",
+    "required_total": 14,
+    "required_unavailable": 1
+  },
+  "services": [
+    {
+      "service_id": "host.audit.sqlite_ledger",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+    },
+    {
+      "service_id": "host.governor.decision",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "governor decision engine ready"
+    },
+    {
+      "service_id": "host.skills.loader",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "skills loader ready (env=dev)"
+    },
+    {
+      "service_id": "host.integrations.llm_gateway",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "llm gateway enabled"
+    },
+    {
+      "service_id": "host.retrieval.embedding",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "retrieval embedding enabled"
+    },
+    {
+      "service_id": "host.retrieval.reranker",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "retrieval reranker enabled"
+    },
+    {
+      "service_id": "host.vision.screen_ocr",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "vision screen_ocr enabled"
+    },
+    {
+      "service_id": "host.vision.camera_recognizer",
+      "owner": "host",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "vision camera_recognizer enabled"
+    },
+    {
+      "service_id": "edge.rpc.gateway",
+      "owner": "edge",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "edge rpc gateway enabled"
+    },
+    {
+      "service_id": "edge.rpc.asr",
+      "owner": "edge",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "edge asr enabled"
+    },
+    {
+      "service_id": "edge.rpc.tts",
+      "owner": "edge",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "edge tts enabled"
+    },
+    {
+      "service_id": "edge.rpc.barge_in",
+      "owner": "edge",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "edge barge-in enabled"
+    },
+    {
+      "service_id": "edge.rpc.fallback_llm",
+      "owner": "edge",
+      "required": true,
+      "status": "DOWN",
+      "reason_code": "SERVICE_UNAVAILABLE_COLD_START",
+      "detail": "edge fallback llm disabled by default"
+    },
+    {
+      "service_id": "edge.rpc.resource_gate",
+      "owner": "edge",
+      "required": true,
+      "status": "UP",
+      "reason_code": null,
+      "detail": "edge resource gate enabled"
+    }
+  ],
+  "node_outputs": [
+    {
+      "node_id": "core_reasoner_primary",
+      "status": "OK",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-pro",
+      "output": {
+        "intent_draft": {},
+        "meta": {
+          "draft_only": true
+        },
+        "narrative": {
+          "text": "突然问起这个，是遇到什么麻烦了吗？简单来说，Host 就像是负责思考的大脑，处理意图解析和记忆调度。而 Edge 呢，更像是负责感知和执行的身体，比如语音处理和状态上报都在那边。至于运维建议嘛……首先要确保它们之间的通信稳定可靠吧。另外，也要多留意各自的资源占用情况，避免出现性能瓶颈哦。"
+        }
+      }
+    },
+    {
+      "node_id": "consistency_verifier",
+      "status": "OK",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash-lite",
+      "output": {
+        "intent_draft": {},
+        "meta": {
+          "draft_only": true
+        },
+        "narrative": {
+          "text": "突然问起这个，是遇到什么麻烦了吗？简单来说，Host 就像是负责思考的大脑，处理意图解析和记忆调度。而 Edge 呢，更像是负责感知和执行的身体，比如语音处理和状态上报都在那边。至于运维建议嘛……首先要确保它们之间的通信稳定可靠吧。另外，也要多留意各自的资源占用情况，避免出现性能瓶颈哦。"
+        }
+      }
+    },
+    {
+      "node_id": "renderer_ja_c_style",
+      "status": "DEGRADED",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash",
+      "output": {
+        "intent_draft": {},
+        "meta": {
+          "degraded": true,
+          "draft_only": true,
+          "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+          "stage": "S_LLM_GATEWAY_PROVIDER"
+        },
+        "narrative": {
+          "text": "当前外部语义服务不可用，我先给出草案回复。"
+        }
+      }
+    }
+  ]
+}

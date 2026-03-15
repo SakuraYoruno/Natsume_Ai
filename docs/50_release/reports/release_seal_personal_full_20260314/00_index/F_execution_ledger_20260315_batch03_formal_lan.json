@@ -1,0 +1,55 @@
+{
+  "batch_id": "20260315_batch03_formal_lan_gate",
+  "exec_date": "2026-03-15",
+  "environment": "formal_lan_dual_node",
+  "summary": {
+    "applicable_count": 3,
+    "pass_count": 0,
+    "block_count": 3,
+    "n_a_count": 0,
+    "final_decision": "BLOCK"
+  },
+  "items": [
+    {
+      "id": "F-01",
+      "scope": "Host/Edge/VTS health",
+      "status": "BLOCK",
+      "system_evidence": [
+        "10_health_runtime/F-01_health_summary_20260315_formal_lan.md",
+        "70_raw_evidence/F-01_formal_lan_topology_20260315.json",
+        "70_raw_evidence/F-01_formal_lan_edge_health_20260315.json"
+      ],
+      "desktop_evidence": [
+        "remote VTS white-box observation not started"
+      ],
+      "blocker_summary": "Formal host now points to remote edge, but remote edge is still degraded and VTS is disconnected.",
+      "retest_status": "pending"
+    },
+    {
+      "id": "F-02",
+      "scope": "startup/config/keys",
+      "status": "BLOCK",
+      "system_evidence": [
+        "10_health_runtime/F-02_config_keys_20260315_formal_lan.md",
+        "70_raw_evidence/F-02_formal_lan_startup_excerpt_20260315.txt"
+      ],
+      "desktop_evidence": [],
+      "blocker_summary": "Host/edge fallback config drift, unresolved key profile state, and startup degradation warnings remain.",
+      "retest_status": "pending"
+    },
+    {
+      "id": "F-03",
+      "scope": "dependency readiness",
+      "status": "BLOCK",
+      "system_evidence": [
+        "10_health_runtime/F-03_dependency_readiness_20260315_formal_lan.md",
+        "70_raw_evidence/F-01_formal_lan_edge_health_20260315.json"
+      ],
+      "desktop_evidence": [
+        "blocked_before_voice_white_box"
+      ],
+      "blocker_summary": "Voice/VTS runtime is not ready for formal audible/visible white-box verification.",
+      "retest_status": "pending"
+    }
+  ]
+}

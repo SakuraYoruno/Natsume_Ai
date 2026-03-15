@@ -1,0 +1,35 @@
+﻿{
+    "side":  "host",
+    "status":  "started",
+    "pid":  44608,
+    "pid_file":  "D:\\Nastume_Ai\\runtime\\host\\host.pid",
+    "host":  "127.0.0.1",
+    "port":  18080,
+    "health_url":  "http://127.0.0.1:18080/health",
+    "env_file":  "D:\\Nastume_Ai\\.env",
+    "stdout_log":  "D:\\Nastume_Ai\\runtime\\host\\logs\\host.stdout.log",
+    "stderr_log":  "D:\\Nastume_Ai\\runtime\\host\\logs\\host.stderr.log",
+    "local_services":  {
+                           "env_file":  "D:\\Nastume_Ai\\.env",
+                           "neo4j":  {
+                                         "status":  "started",
+                                         "uri":  "bolt://127.0.0.1:7687",
+                                         "port":  7687,
+                                         "pid":  38664,
+                                         "pid_file":  "D:\\Nastume_Ai\\runtime\\neo4j\\neo4j.pid"
+                                     },
+                           "chroma":  {
+                                          "status":  "started",
+                                          "endpoint":  "http://127.0.0.1:8000",
+                                          "port":  8000,
+                                          "pid":  36540,
+                                          "pid_file":  "D:\\Nastume_Ai\\runtime\\chroma\\chroma.pid"
+                                      }
+                       },
+    "obs_status":  "ok",
+    "mcp_registry_status":  "ok",
+    "canon_sync_status":  "ok",
+    "startup_warnings":  [
+
+                         ]
+}

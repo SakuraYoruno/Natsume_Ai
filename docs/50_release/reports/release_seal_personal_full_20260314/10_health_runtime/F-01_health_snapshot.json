@@ -1,0 +1,74 @@
+{
+  "batch_id": "20260314_batch01_health_gate",
+  "captured_at_local": "2026-03-14T23:47:43+08:00",
+  "status": "BLOCK",
+  "blocking_reasons": [
+    "edge.event.status=degraded",
+    "edge.components.tts.status=degraded state=UNLOADED",
+    "edge.components.vts.health.state=DISCONNECTED",
+    "host_scheduler.running=false"
+  ],
+  "host": {
+    "health": {
+      "http_status": 200,
+      "overall_status": "UP",
+      "required_total": 14,
+      "required_unavailable": 0,
+      "optional_unavailable": 0
+    },
+    "ready": {
+      "http_status": 200,
+      "ready": true,
+      "status": "READY",
+      "env": "dev",
+      "node_count": 9
+    },
+    "tools_health": {
+      "http_status": 200,
+      "status": "OK",
+      "catalog_size": 0
+    },
+    "bond_health": {
+      "http_status": 200,
+      "status": "OK",
+      "user_count": 0
+    },
+    "scheduler_health": {
+      "http_status": 200,
+      "scheduler_status": "HEALTHY",
+      "total_tasks": 2,
+      "enabled_tasks": 2
+    },
+    "host_scheduler_health": {
+      "http_status": 200,
+      "running": false,
+      "task_count": 1
+    }
+  },
+  "edge": {
+    "health": {
+      "http_status": 200,
+      "status": "ACCEPTED",
+      "event_status": "degraded"
+    },
+    "components": {
+      "asr": {
+        "status": "ok",
+        "model_state": "UNLOADED"
+      },
+      "tts": {
+        "status": "degraded",
+        "state": "UNLOADED"
+      },
+      "vts": {
+        "status": "ok",
+        "state": "DISCONNECTED",
+        "host": "localhost",
+        "port": 8001
+      },
+      "resource_gate": {
+        "status": "ok"
+      }
+    }
+  }
+}

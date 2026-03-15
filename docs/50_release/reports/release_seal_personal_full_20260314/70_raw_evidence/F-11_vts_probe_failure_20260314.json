@@ -1,0 +1,16 @@
+{
+  "batch_id": "20260314_batch02_voice_preflight",
+  "request_id": "req_sealtest_vts_probe",
+  "action": "talk_start",
+  "result": {
+    "success": false,
+    "status": "REJECTED",
+    "reason_code": "VTS_CONNECTION_FAILED",
+    "detail": "cannot start talk: VTS connection error: [WinError 1225] 远程计算机拒绝网络连接。",
+    "latency_ms": 4650
+  },
+  "event": {
+    "stage": "S_EDGE_VTS",
+    "insecure_auth": false
+  }
+}

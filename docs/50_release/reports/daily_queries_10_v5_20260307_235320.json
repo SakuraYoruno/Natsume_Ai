@@ -1,0 +1,182 @@
+﻿{
+    "generated_at":  "2026-03-07 23:53:20",
+    "host":  "http://127.0.0.1:18080",
+    "total":  10,
+    "request_failed_count":  0,
+    "approved_count":  10,
+    "complete_count":  9,
+    "degraded_count":  1,
+    "trace_ok_count":  9,
+    "rows":  [
+                 {
+                     "index":  1,
+                     "query":  "早上好，今天你状态怎么样？",
+                     "request_id":  "req_3bb3f0d1e73f4ee68f14da0a066bfb05",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  14511,
+                     "narrative":  "おはようございます。私は……悪くないですよ。そちらは、いかがですか？"
+                 },
+                 {
+                     "index":  2,
+                     "query":  "我有点累，给我一句简短打气的话。",
+                     "request_id":  "req_7ef662254d4e4decab2a84fb0866e8b8",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  30510,
+                     "narrative":  "お疲れ様でした…少し休んで、無理しすぎないでくださいね。"
+                 },
+                 {
+                     "index":  3,
+                     "query":  "帮我把“今晚八点开会别迟到”改写成礼貌提醒。",
+                     "request_id":  "req_074c3e0624814ad48b1ecd3f96f4be6d",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_ORCH_RUN",
+                     "reason_code":  "POLICY_TIMEOUT",
+                     "trace_status":  "FAILED",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "UNKNOWN",
+                                                 "UNKNOWN"
+                                             ],
+                     "latency_ms":  52005,
+                     "narrative":  "嗯，是想让提醒的语气更柔和一些吧？可以试试这样说：“温馨提醒一下，今晚八点的会议，请记得准时参加哦。”或者也可以说：“今晚八点我们有个会，期待与你准时相见。”……你觉得哪种更好呢？"
+                 },
+                 {
+                     "index":  4,
+                     "query":  "我晚饭想吃清淡一点，给两个简单建议。",
+                     "request_id":  "req_f6bc317f3184455aa0e075a016d21623",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  18185,
+                     "narrative":  "あっさりした夕食がいいんですね…それなら、温かい野菜と豆腐のスープはいかがでしょう？あとは、簡単な素うどんもいいですね。準備も楽ですし…"
+                 },
+                 {
+                     "index":  5,
+                     "query":  "用三句话解释一下什么是向量数据库。",
+                     "request_id":  "req_cddbc68728e648b9907669f230a75884",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  16929,
+                     "narrative":  "ベクトルデータベースは、例えるなら「感覚」を専門に保管する図書館のようなもの、ですね。\n文字や画像のような複雑な情報の意味を、数字の座標に変換して保管するんですよ。\nそうすれば、単に文字が同じものだけでなく、意味的に「近い」内容を素早く見つけられるんです。"
+                 },
+                 {
+                     "index":  6,
+                     "query":  "把“我正在路上，十分钟到”翻成日语。",
+                     "request_id":  "req_72c8fcc4315d431cb7cfa08a32db224e",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  21912,
+                     "narrative":  "ええ、この言葉を訳したいのですね？ 丁寧な言い方だと、「今向かっています。10分ほどで着きます。」でしょうか。 お友達には、「今向かってて、あと10分くらいで着くよ」の方が、自然かもしれませんね。"
+                 },
+                 {
+                     "index":  7,
+                     "query":  "给我一个20分钟的专注学习小计划。",
+                     "request_id":  "req_24fcb04c43aa4662a1acee2c3db81b93",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  34221,
+                     "narrative":  "20分間の集中計画、ですね。とても素敵なアイデアだと思いますよ。こんな風に計画を立ててみましょうか。まず2分で、学習資料の準備と周りを静かに。次に15分、集中する時間です。携帯はサイレントにして、少し遠くに置くといいですよ。最後に3分、簡単に振り返るか、目を休ませてあげてくださいね。いかがでしょうか？"
+                 },
+                 {
+                     "index":  8,
+                     "query":  "我今天心情一般，怎么快速调整一下？",
+                     "request_id":  "req_e4d07dd7defe4940b4b4655b1b958c67",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  17604,
+                     "narrative":  "気分が優れないのですね……。そんな時は、少し外を散歩して、風に当たるのもいいかもしれませんね。もし動きたくないなら、静かな場所でお気に入りの音楽を聴くのもいいですよ。無理はしないで、ご自身が心地よいと感じる方法で、少し休んでみてくださいね。"
+                 },
+                 {
+                     "index":  9,
+                     "query":  "帮我写一条给同事的感谢消息，语气自然。",
+                     "request_id":  "req_60b4c2b9a68842769ffe637b26532a30",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  21764,
+                     "narrative":  "同僚の方に、感謝のメッセージを書きたいのですね？ うん……こんな風に言ってみるのはどうでしょう？ 「今回は本当に助かりました、ありがとうございます！ また何か私にできることがあったら、いつでも声をかけてくださいね。」 もう少し気軽に伝えたいなら、こんな言い方もできますよ。「今日の件はありがとう、本当に助かりました！ 今度、コーヒーでもご馳走させてくださいね。」 どちらの表現が良いでしょうか？"
+                 },
+                 {
+                     "index":  10,
+                     "query":  "睡前我应该做哪三件小事来提高睡眠质量？",
+                     "request_id":  "req_d9f943b03d1a46388ecec84bbfd9f7d0",
+                     "decision":  "APPROVE",
+                     "quality_stage":  "S_COMPLETE",
+                     "reason_code":  null,
+                     "trace_status":  "OK",
+                     "trace_node_count":  3,
+                     "trace_node_statuses":  [
+                                                 "OK",
+                                                 "OK",
+                                                 "OK"
+                                             ],
+                     "latency_ms":  17614,
+                     "narrative":  "眠れないと、次の日に響きますよね。そうですね……。いくつか、試せる習慣があるかもしれません。まず、寝る1時間前からは、なるべくスマホを見ないようにして、目と頭を休ませてあげてください。それから、ゆっくり深呼吸をしたり、静かな音楽を聴いたりして、気持ちを落ち着かせましょう。最後に、ベッド周りを整えて、心地よい環境にするのも、ささやかな儀式になりますよ。"
+                 }
+             ]
+}

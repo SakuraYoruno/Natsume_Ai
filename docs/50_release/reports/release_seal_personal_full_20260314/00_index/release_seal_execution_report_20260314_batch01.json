@@ -1,0 +1,48 @@
+{
+  "batch_id": "20260314_batch01_health_gate",
+  "exec_date": "2026-03-14",
+  "operator": "Codex",
+  "environment": "historical single-node bootstrap diagnosis only, invalid for formal LAN dual-node seal test",
+  "scope": "personal_full",
+  "final_decision": "BLOCK",
+  "summary": {
+    "applicable_count": 3,
+    "pass_count": 0,
+    "block_count": 3,
+    "n_a_count": 0
+  },
+  "blockers": [
+    {
+      "id": "F-01",
+      "issue": "edge health degraded; tts unloaded; vts disconnected; host-scheduler.running=false",
+      "evidence": [
+        "10_health_runtime/F-01_health_summary.md",
+        "10_health_runtime/F-01_health_snapshot.json"
+      ],
+      "retest_status": "pending"
+    },
+    {
+      "id": "F-02",
+      "issue": "sealtest depends on local overrides and startup still logs scheduler registration warning",
+      "evidence": [
+        "10_health_runtime/F-02_config_keys.md",
+        "10_health_runtime/F-02_config_snapshot.json"
+      ],
+      "retest_status": "pending"
+    },
+    {
+      "id": "F-03",
+      "issue": "semantic recall still defaults to mock; models/gpt_sovits missing; pyvts absent; VTS executable not found",
+      "evidence": [
+        "10_health_runtime/F-03_dependency_readiness.md",
+        "10_health_runtime/F-03_dependency_probe.json"
+      ],
+      "retest_status": "pending"
+    }
+  ],
+  "white_box": {
+    "tts_audible": "not_started",
+    "vts_expression_visible": "not_started",
+    "vts_lipsync_visible": "not_started"
+  }
+}

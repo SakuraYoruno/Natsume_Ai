@@ -1,0 +1,18 @@
+{
+  "retest_ts": "20260315",
+  "reason": "BATCH4 F-09/F-16 BLOCK: episodic MemoryGuard EPISODIC_NO_QUALIFYING_TAGS",
+  "fix": "observability_persist.py + main_chain.py: ensure emotion_tag/turn_count/emotion_tags for episodic write",
+  "actions": [
+    "5 chat requests with same-style queries (batch5-retest-1..5)",
+    "Check error_log stage=AUDIT_SNAPSHOT detail.audit_tags for last 5 requests"
+  ],
+  "result": {
+    "requests_sent": 5,
+    "all_ok": true,
+    "recent_5_episodic_written": 3,
+    "recent_5_episodic_skipped": 2,
+    "conclusion": "EPISODIC_WRITTEN observed for post-fix requests; episodic write path restored."
+  },
+  "f09_retest": "PASS",
+  "f16_note": "Recommend another quality score run (avg >= 4.0/5, severe_error_count = 0) in a later batch."
+}

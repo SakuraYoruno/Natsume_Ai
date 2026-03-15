@@ -1,0 +1,90 @@
+{
+  "ts_ms": 1772720593582,
+  "endpoint": "http://127.0.0.1:18080",
+  "results": [
+    {
+      "name": "chat_retrieval_ascii",
+      "request": {
+        "message": "Summarize Natsume Book of Friends in one line.",
+        "thread_id": "thread::real-chain-002"
+      },
+      "chat": {
+        "request_id": "req_061d9901e2804d919c934b8c4f4d8b64",
+        "decision": "APPROVE",
+        "reason_code": null,
+        "quality": {
+          "stage": "S_COMPLETE",
+          "reason_code": null
+        },
+        "narrative": "[已裁决通过] 用户输入: Summarize Natsume Book of Friends in one line.\n[检索] routes=2 candidates=6 topk=5",
+        "retrieval": {
+          "status": "OK",
+          "reason_code": null,
+          "route_count": 2,
+          "candidate_count": 6,
+          "rerank_topk": 5,
+          "evidence_refs": [
+            "evd://canon_style::natsume_ai_cn/1",
+            "evd://canon_world::wc-003-persona-core/2",
+            "evd://mem_ep_001/3",
+            "evd://mem_ep_002/4",
+            "evd://canon_world::wc-001-system-terms/5"
+          ],
+          "reason_chain": [],
+          "degraded": false
+        }
+      },
+      "trace": {
+        "trace_status": "COMPLETE",
+        "timeline_total": 7,
+        "sources": {
+          "governor_log": 1,
+          "intent_log": 1,
+          "retrieval_event_log": 5
+        }
+      }
+    },
+    {
+      "name": "chat_retrieval_style_prompt",
+      "request": {
+        "message": "Please reply in a calm Natsume-style tone and say good night.",
+        "thread_id": "thread::real-chain-003"
+      },
+      "chat": {
+        "request_id": "req_91c4df84275f43ff9058f4774ef00542",
+        "decision": "APPROVE",
+        "reason_code": null,
+        "quality": {
+          "stage": "S_COMPLETE",
+          "reason_code": null
+        },
+        "narrative": "[已裁决通过] 用户输入: Please reply in a calm Natsume-style tone and say good night.\n[检索] routes=2 candidates=6 topk=5",
+        "retrieval": {
+          "status": "OK",
+          "reason_code": null,
+          "route_count": 2,
+          "candidate_count": 6,
+          "rerank_topk": 5,
+          "evidence_refs": [
+            "evd://canon_style::natsume_ai_cn/1",
+            "evd://canon_world::wc-003-persona-core/2",
+            "evd://mem_ep_002/3",
+            "evd://mem_ep_001/4",
+            "evd://canon_world::wc-001-system-terms/5"
+          ],
+          "reason_chain": [],
+          "degraded": false
+        }
+      },
+      "trace": {
+        "trace_status": "COMPLETE",
+        "timeline_total": 7,
+        "sources": {
+          "governor_log": 1,
+          "intent_log": 1,
+          "retrieval_event_log": 5
+        }
+      }
+    }
+  ]
+}

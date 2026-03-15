@@ -1,0 +1,20 @@
+{
+  "batch_id": "20260314_batch02_voice_preflight",
+  "request_id": "req_sealtest_tts_probe",
+  "session_id": "sess::sealtest",
+  "utterance_id": "utt::sealtest",
+  "result": {
+    "success": false,
+    "status": "REJECTED",
+    "reason_code": "VOICE_SYNTH_FAILED",
+    "detail": "tts queued; playback start failed: tts synth failed: TTS synthesis failed [TTS_MODEL_UNAVAILABLE]: GPT-SoVITS package not available: GPT-SoVITS model path does not exist: D:\\Natsume_Ai\\models\\gpt_sovits. Set EDGE_TTS_MODEL_PATH to your GPT-SoVITS root directory.",
+    "latency_ms": 4398
+  },
+  "event": {
+    "event_type": "TTS_SYNTH_FAILED",
+    "stage": "S_VOICE_TTS_SYNTH",
+    "start_status": "REJECTED",
+    "start_reason_code": "VOICE_SYNTH_FAILED",
+    "insecure_auth": false
+  }
+}

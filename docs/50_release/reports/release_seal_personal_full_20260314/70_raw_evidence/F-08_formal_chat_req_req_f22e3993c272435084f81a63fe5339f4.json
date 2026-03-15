@@ -1,0 +1,92 @@
+{
+  "captured_at": "2026-03-15 00:48 CST",
+  "request_id": "req_f22e3993c272435084f81a63fe5339f4",
+  "payload": {
+    "message": "只回复这一句：当前仍在进行正式双节点封测。",
+    "session_id": "sealtest_formal_lan_batch04_quality",
+    "emotion_tag": "neutral",
+    "emotion_intensity": 0.1
+  },
+  "stream_metrics": {
+    "status_code": 200,
+    "content_type": "text/event-stream; charset=utf-8",
+    "first_presence_ms": 104,
+    "first_render_ms": 16595,
+    "elapsed_ms": 16805
+  },
+  "commit": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "narrative": "{\"narrative\":{\"text\":\"現在、正式なデュアルノード封測が続いています。\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}"
+  },
+  "audit_refs": {
+    "retrieval": {
+      "status": "DEGRADED",
+      "reason_code": "RETRIEVAL_TIMEOUT",
+      "route_count": 0,
+      "candidate_count": 0,
+      "rerank_topk": 0,
+      "latency_ms": 1191
+    },
+    "bond_graph": {
+      "status": "DEGRADED",
+      "reason_code": "BOND_GRAPH_FAILED",
+      "detail": "'BondStageEngine' object has no attribute 'get_bond_state'"
+    },
+    "llm": {
+      "status": "OK",
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash",
+      "route_target": "cloud",
+      "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY",
+      "first_token_latency_ms": 9135
+    },
+    "tts": {
+      "success": false,
+      "status": "REJECTED",
+      "reason_code": "EDGE_RPC_AUTH_EXPIRED",
+      "detail": "ts_ms drift 18703ms exceeds window 15000ms",
+      "latency_ms": 74
+    },
+    "vts": {
+      "status": "APPLIED",
+      "emotion_tag": "NEUTRAL",
+      "expression_id": "exp_neutral_01"
+    },
+    "context_pack_builder": {
+      "status": "DEGRADED",
+      "reason": "'ContextPack' object has no attribute 'slots'"
+    }
+  },
+  "observability": {
+    "obs_trace": {
+      "status": "OK",
+      "node_count": 1,
+      "nodes": [
+        {
+          "node_id": "governor",
+          "node_type": "system",
+          "status": "OK"
+        }
+      ]
+    }
+  },
+  "raw_events": [
+    {
+      "t_ms": 104,
+      "line": "data: {\"phase\": \"PRESENCE\", \"event\": \"THINKING\", \"request_id\": \"req_f22e3993c272435084f81a63fe5339f4\"}"
+    },
+    {
+      "t_ms": 105,
+      "line": "data: {\"phase\": \"PRESENCE\", \"event\": \"GOV_APPROVED\", \"request_id\": \"req_f22e3993c272435084f81a63fe5339f4\"}"
+    },
+    {
+      "t_ms": 16595,
+      "line": "data: {\"phase\": \"RENDER\", \"chunk\": \"{\\\"narrative\\\":{\\\"text\\\":\\\"現在、正式なデュアルノード封測が続いています。\\\"},\\\"intent_draft\\\":{},\\\"meta\\\":{\\\"draft_only\\\":true}}\"}"
+    },
+    {
+      "t_ms": 16803,
+      "line": "data: {\"phase\": \"COMMIT\", \"done\": true, \"decision\": \"APPROVE\", \"request_id\": \"req_f22e3993c272435084f81a63fe5339f4\"}"
+    }
+  ]
+}

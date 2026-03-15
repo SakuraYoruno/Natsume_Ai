@@ -1,0 +1,120 @@
+{
+  "batch_id": "20260315_batch05_formal_lan_restart_retest",
+  "sample_window": "2026-03-15 03:35 CST",
+  "environment": "formal_lan_dual_node",
+  "samples": [
+    {
+      "label": "sample_a",
+      "session_id": "sealtest-02d291b6db0b4a94a29371c367c4db40",
+      "request_id": "req_5328cf7b0bfa47bba7770505c640a223",
+      "message_label": "ja_prompt_tired_calm_short_reply",
+      "http_status": 200,
+      "elapsed_ms": 10791,
+      "decision": "APPROVE",
+      "response_text_label": "generic_question_instead_of_calm_acknowledgement",
+      "retrieval": {
+        "status": "DEGRADED",
+        "reason_code": "RETR_RECALL_UNAVAILABLE",
+        "route_count": 7,
+        "candidate_count": 0,
+        "latency_ms": 252,
+        "bond_graph": {
+          "status": "DEGRADED",
+          "reason_code": "BOND_GRAPH_FAILED",
+          "detail": "'BondStageEngine' object has no attribute 'get_bond_state'"
+        }
+      },
+      "llm": {
+        "provider": "gemini",
+        "model_id": "gemini-2.5-flash",
+        "route_target": "cloud",
+        "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY"
+      },
+      "prompt_context": {
+        "validation_reason_code": "PROMPT_CONTEXT_MINIMAL_FALLBACK",
+        "selected_tier": "bare_llm",
+        "selected_reason": "prompt_context_minimal_fallback_and_empty_slots",
+        "violations": [
+          "emotion_pulse",
+          "memory_emotion_hint"
+        ]
+      },
+      "tts": {
+        "status": "REJECTED",
+        "reason_code": "EDGE_RPC_AUTH_EXPIRED",
+        "detail": "ts_ms drift 18969ms exceeds window 15000ms"
+      },
+      "vts": {
+        "status": "APPLIED",
+        "expression_id": "exp_neutral_01"
+      },
+      "trace_metrics": {
+        "first_token_latency_ms": 4286,
+        "tts_speak_ms": 78
+      },
+      "recall_pack_builder": {
+        "status": "OK",
+        "applied_to_prompt": true
+      }
+    },
+    {
+      "label": "sample_b",
+      "session_id": "sealtest-09b6646e676745409918b48fd35bf2a8",
+      "request_id": "req_6e88facfa7164b2ab767b44b165b6891",
+      "message_label": "ja_prompt_prioritize_one_sentence",
+      "http_status": 200,
+      "elapsed_ms": 11094,
+      "decision": "APPROVE",
+      "response_text_label": "mentions_many_question_marks_unrelated_to_query",
+      "retrieval": {
+        "status": "DEGRADED",
+        "reason_code": "RETR_RECALL_UNAVAILABLE",
+        "route_count": 7,
+        "candidate_count": 0,
+        "latency_ms": 262,
+        "bond_graph": {
+          "status": "DEGRADED",
+          "reason_code": "BOND_GRAPH_FAILED",
+          "detail": "'BondStageEngine' object has no attribute 'get_bond_state'"
+        }
+      },
+      "llm": {
+        "provider": "gemini",
+        "model_id": "gemini-2.5-flash",
+        "route_target": "cloud",
+        "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY"
+      },
+      "prompt_context": {
+        "validation_reason_code": "PROMPT_CONTEXT_MINIMAL_FALLBACK",
+        "selected_tier": "bare_llm",
+        "selected_reason": "prompt_context_minimal_fallback_and_empty_slots",
+        "violations": [
+          "emotion_pulse",
+          "memory_emotion_hint"
+        ]
+      },
+      "tts": {
+        "status": "REJECTED",
+        "reason_code": "EDGE_RPC_AUTH_EXPIRED",
+        "detail": "ts_ms drift 18964ms exceeds window 15000ms"
+      },
+      "vts": {
+        "status": "APPLIED",
+        "expression_id": "exp_neutral_01"
+      },
+      "trace_metrics": {
+        "first_token_latency_ms": 4570,
+        "tts_speak_ms": 88
+      },
+      "recall_pack_builder": {
+        "status": "OK",
+        "applied_to_prompt": true
+      }
+    }
+  ],
+  "concurrency_note": {
+    "observed_parallel_count": 2,
+    "current_replay_result": "both_requests_commit",
+    "previous_batch04_internal_server_error": "not_reproduced_in_batch05_replay"
+  }
+}

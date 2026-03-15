@@ -1,0 +1,60 @@
+{
+  "ts_ms": 1772720966457,
+  "mode": "llm_gateway_live_generation",
+  "provider": "gemini",
+  "model_id": "gemini-2.5-flash",
+  "cases": [
+    {
+      "name": "night_style",
+      "request_id": "req_live_gen_case_1_1772720962026",
+      "prompt": "Write two calm bedtime lines mentioning moon and breeze.",
+      "gateway": {
+        "success": true,
+        "status": "OK",
+        "reason_code": null,
+        "stage": "S_LLM_GATEWAY_QA",
+        "detail": "gateway response accepted",
+        "provider": "gemini",
+        "latency_ms": 2037,
+        "elapsed_ms_client": 2037
+      },
+      "narrative_text": "The moonbeams softly through your",
+      "narrative_preview": "The moonbeams softly through your",
+      "airlock": {
+        "egress_report": {
+          "removed_fields": [],
+          "redactions": [],
+          "payload_digest": "sha256:019e444566bd5204e25d36e3fc758fb05c96a2fa3b45d99fa33f9b79ad3187e5"
+        },
+        "ingress_classification": "FACT",
+        "quarantine_digest": "sha256:efe0b995c0bceb4856cf6bb080809c454c827df3ca365cbe024ef256bdc076e8"
+      }
+    },
+    {
+      "name": "morning_style",
+      "request_id": "req_live_gen_case_2_1772720964063",
+      "prompt": "Write two bright morning lines mentioning sunlight and windowsill.",
+      "gateway": {
+        "success": true,
+        "status": "OK",
+        "reason_code": null,
+        "stage": "S_LLM_GATEWAY_QA",
+        "detail": "gateway response accepted",
+        "provider": "gemini",
+        "latency_ms": 2394,
+        "elapsed_ms_client": 2393
+      },
+      "narrative_text": "Golden sunlight streams across the windowsill",
+      "narrative_preview": "Golden sunlight streams across the windowsill",
+      "airlock": {
+        "egress_report": {
+          "removed_fields": [],
+          "redactions": [],
+          "payload_digest": "sha256:2cfd30294b2a4286510e84f8a9152a3b72bd3bb05eac01875b2369501041af21"
+        },
+        "ingress_classification": "FACT",
+        "quarantine_digest": "sha256:ad8b9542f85c38434bcfd890a78583a470f5e55ac31594d23a559dfa2c3fddbd"
+      }
+    }
+  ]
+}

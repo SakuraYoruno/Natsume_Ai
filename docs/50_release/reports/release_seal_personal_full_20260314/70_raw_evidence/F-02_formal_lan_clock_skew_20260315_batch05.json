@@ -1,0 +1,9 @@
+{
+  "batch_id": "20260315_batch05_formal_lan_restart_retest",
+  "sampled_at": "2026-03-15 03:33:24 +08:00",
+  "host_ts_ms": 1773516804961,
+  "edge_ts_ms": 1773516785958,
+  "skew_ms": 19003,
+  "auth_window_ms": 15000,
+  "breach": true
+}

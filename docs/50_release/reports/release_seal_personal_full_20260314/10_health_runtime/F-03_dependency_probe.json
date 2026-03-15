@@ -1,0 +1,46 @@
+{
+  "batch_id": "20260314_batch01_health_gate",
+  "captured_at_local": "2026-03-14T23:51:51+08:00",
+  "status": "BLOCK",
+  "infrastructure_dependencies": {
+    "redis": {
+      "ok": true,
+      "probe": "docker exec natsume-redis redis-cli ping",
+      "detail": "PONG"
+    },
+    "neo4j": {
+      "ok": true,
+      "probe": "docker exec natsume-neo4j cypher-shell -u neo4j -p NatsuNeo4j!20260306 \"RETURN 1 AS ok;\"",
+      "detail": "ok=1"
+    },
+    "chroma": {
+      "ok": true,
+      "probe": "curl.exe http://127.0.0.1:18000/api/v2/heartbeat",
+      "detail": "{\"nanosecond heartbeat\":1773503511030918758}"
+    }
+  },
+  "runtime_dependency_findings": {
+    "env_baseline_chroma_endpoint": "http://127.0.0.1:8000",
+    "host_runtime_chroma_override": "http://127.0.0.1:18000",
+    "semantic_recall_use_mock_env_present": false,
+    "semantic_recall_use_mock_default": true,
+    "tts_model_path_exists": false,
+    "pyvts_installed": false,
+    "vts_executable_found": false,
+    "steam_appmanifest_1325860_present": false,
+    "edge_asr_port_listening": false,
+    "edge_tts_port_listening": false,
+    "vts_api_port_listening": false,
+    "edge_asr_model_state": "UNLOADED",
+    "edge_tts_state": "UNLOADED",
+    "edge_vts_state": "DISCONNECTED"
+  },
+  "blocking_reasons": [
+    "semantic recall currently defaults to mock backend because SEMANTIC_RECALL_USE_MOCK is unset and code default is true",
+    "models/gpt_sovits is missing on this machine",
+    "pyvts is not installed in the current Python runtime",
+    "Steam library contains a leftover VTube Studio directory, but appmanifest_1325860.acf is missing and no local executable was found",
+    "edge tts runtime is still UNLOADED",
+    "edge vts runtime is still DISCONNECTED"
+  ]
+}
