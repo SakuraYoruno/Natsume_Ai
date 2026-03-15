@@ -258,9 +258,10 @@ class MemoryGuard:
         if evidence_level == EvidenceLevel.MILESTONE:
             logger.debug("内容 %s 为 MILESTONE 级别，满足蒸馏条件", content_hash)
             return True
-        if occurrence_count >= 3:
+        # 降低阈值：频次 ≥ 1 即可蒸馏（每条对话记忆都有价值）
+        if occurrence_count >= 1:
             logger.debug(
-                "内容 %s 出现频次 %d ≥ 3，满足蒸馏条件",
+                "内容 %s 出现频次 %d ≥ 1，满足蒸馏条件",
                 content_hash, occurrence_count,
             )
             return True
