@@ -599,16 +599,26 @@ class RecallFusionNode(ChainNode):
                 from host_brain.app.dependencies import get_context_compressor  # noqa: PLC0415
                 _compressor = get_context_compressor()
                 if _compressor is not None:
-                    # 将 filtered_evidence_items 转换为 turns 格式（role/content）
+                    # 优先使用 episodic 类型的检索条目作为对话历史（更接近真实多轮上下文）
+                    _episodic_items = [
+                        _item for _item in filtered_evidence_items
+                        if str(_item.get("kind") or _item.get("source_type") or "").lower()
+                        in ("episodic", "episodic_store", "memory", "persona_utterance")
+                    ]
+                    _source_items = _episodic_items if len(_episodic_items) >= 4 else filtered_evidence_items
+
                     _turns = []
-                    for _item in filtered_evidence_items:
-                        _role = str(_item.get("role") or "user").strip() or "user"
+                    for _item in _source_items:
+                        _role = str(_item.get("role") or _item.get("speaker") or "user").strip() or "user"
                         _content = str(
                             _item.get("snippet") or _item.get("text") or _item.get("content") or ""
                         ).strip()
                         if _content:
                             _turns.append({"role": _role, "content": _content})
-                    if _turns:
+
+                    # 8 轮以上才触发压缩（避免短对话无意义压缩）
+                    _COMPRESS_MIN_TURNS = 8
+                    if len(_turns) >= _COMPRESS_MIN_TURNS:
                         _compressed = _compressor.compress(
                             _turns,
                             strategy="hybrid",
@@ -625,16 +635,40 @@ class RecallFusionNode(ChainNode):
                             "has_summary": _compressed.summary is not None,
                         }
                         ctx.metadata["context_compressor"] = context_compressor_meta
-                        if not _compressed.degraded:
+
+                        # 摘要回灌：把压缩摘要作为高优先级 episodic 条目注入 filtered_evidence_items
+                        if not _compressed.degraded and _compressed.summary:
+                            _summary_item = {
+                                "slot": "retrieval",
+                                "kind": "episodic",
+                                "source_ref": f"context_compressor://summary/{ctx.session_id}",
+                                "evidence_ref": f"compress://summary/{ctx.session_id}",
+                                "content": f"[对话摘要] {_compressed.summary}",
+                                "snippet": f"[对话摘要] {_compressed.summary}",
+                                "score": 0.90,
+                                "confidence": 0.90,
+                                "store_id": "context_compressor",
+                            }
+                            # 摘要插入到最前面（高优先级）
+                            filtered_evidence_items = [_summary_item] + list(filtered_evidence_items)
                             ctx.audit_tags.append(
                                 f"CTX_COMPRESSED:{len(_turns)}->{len(_compressed.turns)}"
                             )
-                        logger.debug(
-                            "[%s] ContextCompressor 压缩完成 input=%d output=%d tokens=%d",
-                            ctx.request_id, len(_turns), len(_compressed.turns), _compressed.total_tokens,
-                        )
+                            logger.debug(
+                                "[%s] ContextCompressor 摘要已回灌 input=%d output=%d summary_len=%d",
+                                ctx.request_id, len(_turns), len(_compressed.turns),
+                                len(_compressed.summary),
+                            )
+                        elif not _compressed.degraded:
+                            ctx.audit_tags.append(
+                                f"CTX_COMPRESSED:{len(_turns)}->{len(_compressed.turns)}"
+                            )
                     else:
-                        context_compressor_meta = {"mode": "SKIPPED_NO_TURNS"}
+                        context_compressor_meta = {
+                            "mode": "SKIPPED_BELOW_THRESHOLD",
+                            "turns": len(_turns),
+                            "threshold": _COMPRESS_MIN_TURNS,
+                        }
             except (ImportError, AttributeError):
                 context_compressor_meta = {"mode": "SKIPPED_NOT_WIRED"}
             except Exception as _cc_exc:
@@ -1069,11 +1103,15 @@ class LlmGatewayNode(ChainNode):
             from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
             from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
 
-            # 获取或创建会话级 EmotionTimeline（存储在 ctx.metadata 中复用）
-            _timeline: EmotionTimeline = ctx.metadata.get("_emotion_timeline_instance")
+            # 获取进程级 EmotionTimeline 单例（跨请求积累情绪趋势）
+            from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
+            _timeline: EmotionTimeline = get_emotion_timeline()
             if not isinstance(_timeline, EmotionTimeline):
-                _timeline = EmotionTimeline(max_entries=50)
-                ctx.metadata["_emotion_timeline_instance"] = _timeline
+                # 降级：回退到会话级
+                _timeline = ctx.metadata.get("_emotion_timeline_instance")
+                if not isinstance(_timeline, EmotionTimeline):
+                    _timeline = EmotionTimeline(max_entries=50)
+                    ctx.metadata["_emotion_timeline_instance"] = _timeline
 
             # 追加当前情感事件
             _valence_map = {

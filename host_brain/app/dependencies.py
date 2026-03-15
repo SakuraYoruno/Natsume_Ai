@@ -91,6 +91,8 @@ _state_arbiter: Optional[StateArbiter] = None
 # TODO-99: 蒸馏引擎 + 语义召回器单例
 _distillation_engine: Optional[DistillationEngine] = None
 _semantic_recaller: Optional[SemanticRecaller] = None
+_context_compressor: Optional[Any] = None
+_emotion_timeline: Optional[Any] = None
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -735,6 +737,90 @@ def get_semantic_recaller() -> SemanticRecaller:
 # ---------------------------------------------------------------------------
 # EdgeRpcClient 工厂（Host → Edge HTTP 推送）
 # ---------------------------------------------------------------------------
+
+
+def get_context_compressor():
+    """获取 ContextCompressor 单例（延迟初始化）。
+
+    返回 ContextCompressor 实例，供主链路压缩多轮上下文使用。
+    若初始化失败则返回 None（降级）。
+    """
+    global _context_compressor
+    if _context_compressor is None:
+        try:
+            from host_brain.memory.context_compressor import ContextCompressor  # noqa: PLC0415
+            _context_compressor = ContextCompressor()
+            _logger.info("ContextCompressor 已初始化")
+        except Exception as exc:
+            _logger.warning("ContextCompressor 初始化失败（降级）: %s", exc)
+            return None
+    return _context_compressor
+
+
+def get_emotion_timeline():
+    """获取进程级 EmotionTimeline 单例，启动时从 memory_ops_log 预热最近 24h 情绪历史。
+
+    返回 EmotionTimeline 实例，供主链路跨请求积累情绪趋势使用。
+    若初始化失败则返回 None（降级）。
+    """
+    global _emotion_timeline
+    if _emotion_timeline is None:
+        try:
+            from host_brain.core.emotion_timeline import EmotionTimeline  # noqa: PLC0415
+            import sqlite3 as _sqlite3  # noqa: PLC0415
+            import time as _time  # noqa: PLC0415
+
+            _timeline = EmotionTimeline(max_entries=200)
+
+            # 从 avatar_action_log 预热最近 24h 的情绪记录
+            _ledger_inst = get_ledger()
+            _db_path = (
+                getattr(_ledger_inst, "_db_path", None)
+                or getattr(_ledger_inst, "db_path", None)
+            )
+            _rows: list = []
+            if _db_path:
+                _valence_map = {
+                    "HAPPY": 0.6, "EXCITED": 0.7, "CALM": 0.2, "THINKING": 0.0,
+                    "NEUTRAL": 0.0, "SAD": -0.5, "ANGRY": -0.6,
+                    "ANXIOUS": -0.3, "FRUSTRATED": -0.4,
+                }
+                _arousal_map = {
+                    "HAPPY": 0.4, "EXCITED": 0.7, "CALM": -0.3, "THINKING": 0.1,
+                    "NEUTRAL": 0.0, "SAD": -0.3, "ANGRY": 0.5,
+                    "ANXIOUS": 0.4, "FRUSTRATED": 0.3,
+                }
+                _since_ms = int(_time.time() * 1000) - 24 * 3600 * 1000
+                _conn = _sqlite3.connect(_db_path)
+                try:
+                    _rows = _conn.execute(
+                        "SELECT emotion_tag, ts_ms FROM avatar_action_log "
+                        "WHERE ts_ms >= ? AND emotion_tag IS NOT NULL "
+                        "AND emotion_tag != '' AND status='OK' "
+                        "ORDER BY ts_ms ASC LIMIT 150",
+                        (_since_ms,),
+                    ).fetchall()
+                    for _etag, _ts in _rows:
+                        _etag_upper = str(_etag or "NEUTRAL").strip().upper()
+                        _timeline.append(
+                            ts_ms=int(_ts),
+                            emotion_tag=_etag_upper,
+                            valence=_valence_map.get(_etag_upper, 0.0),
+                            arousal=_arousal_map.get(_etag_upper, 0.0),
+                            source="restored_from_log",
+                        )
+                finally:
+                    _conn.close()
+                _logger.info(
+                    "EmotionTimeline 已从日志预热 %d 条情绪记录",
+                    len(_rows),
+                )
+
+            _emotion_timeline = _timeline
+        except Exception as exc:
+            _logger.warning("EmotionTimeline 初始化失败（降级）: %s", exc)
+            return None
+    return _emotion_timeline
 
 
 def get_edge_base_url() -> str:
