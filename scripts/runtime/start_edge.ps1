@@ -293,6 +293,16 @@ if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
 
 $vtsExecutablePath = Resolve-VtsExecutablePath -EnvValues $envValues
 
+$wechatBridgeEnabled = $false
+if ($envValues.ContainsKey("EDGE_WECHAT_BRIDGE_ENABLED")) {
+  $wechatBridgeEnabled = Parse-Bool -Value $envValues["EDGE_WECHAT_BRIDGE_ENABLED"] -Default $false
+} elseif ($env:EDGE_WECHAT_BRIDGE_ENABLED) {
+  $wechatBridgeEnabled = Parse-Bool -Value $env:EDGE_WECHAT_BRIDGE_ENABLED -Default $false
+}
+
+$wechatBridgePidFile = Join-Path $runtimeRoot "wechat_bridge.pid"
+$wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
+
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
   if ($existingPidText) {
@@ -454,6 +464,35 @@ if ($null -eq $vtsConn) {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
+# 微信桥接（可选）：EDGE_WECHAT_BRIDGE_ENABLED=1 时启动 wcferry 桥接，将微信消息 POST 到 Edge /v1/edge/wechat/callback
+$wechatBridgePid = $null
+$wechatBridgeStatus = "disabled"
+if ($wechatBridgeEnabled) {
+  $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
+  $edgeUrl = "http://127.0.0.1:$port"
+  if (Test-Path -Path $bridgeScript) {
+    try {
+      $bridgeProc = Start-Process -FilePath $pythonCmd.Source `
+        -ArgumentList @($bridgeScript, "--edge-url", $edgeUrl) `
+        -WorkingDirectory $repoRoot `
+        -WindowStyle Hidden `
+        -PassThru `
+        -RedirectStandardOutput $wechatBridgeLog `
+        -RedirectStandardError $wechatBridgeLog
+      $wechatBridgePid = [int]$bridgeProc.Id
+      Set-Content -Path $wechatBridgePidFile -Value ([string]$wechatBridgePid) -Encoding ascii
+      $wechatBridgeStatus = "started"
+    } catch {
+      $wechatBridgeStatus = "start_failed"
+      $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
+    }
+  } else {
+    $wechatBridgeStatus = "script_not_found"
+    $startupWarnings += "WECHAT_BRIDGE_SCRIPT_NOT_FOUND"
+  }
+}
+# ────────────────────────────────────────────────────────────────────────────
+
 $result = [ordered]@{
   status = "started"
   pid = $edgePid
@@ -469,6 +508,10 @@ $result = [ordered]@{
   vts_autostart_enabled = $vtsAutoStart
   vts_autostart_status = $vtsAutoStartStatus
   vts_autostart_detail = $vtsAutoStartDetail
+  wechat_bridge_enabled = $wechatBridgeEnabled
+  wechat_bridge_status = $wechatBridgeStatus
+  wechat_bridge_pid = $wechatBridgePid
+  wechat_bridge_pid_file = if ($wechatBridgePid) { $wechatBridgePidFile } else { $null }
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4

@@ -35,21 +35,25 @@ Hook **必须在这台机器上**运行：微信小号在这台机登录，Hook 
    ```bash
    pip install wcferry
    ```
-   若原仓库已停更，可改用社区 fork，例如：`pip install wcferry` 或查阅 [WeChatFerryX](https://github.com/lzb112/WeChatFerryX) 的安装说明。
+   若原仓库已停更，可改用社区 fork，例如查阅 [WeChatFerryX](https://github.com/lzb112/WeChatFerryX) 的安装说明。
 
-2. **先启动 Edge**（同机），并确认已配置：
+2. **配置 .env**（同机）：
    - `EDGE_WECHAT_LISTENER_ENABLED=1`
    - `EDGE_EVENT_REPORT_HOST_URL=http://<Host_IP>:18080`
+   - `EDGE_WECHAT_BRIDGE_ENABLED=1`（让 Edge 启动脚本一并启动微信桥接）
 
-3. **在同一台机上运行桥接脚本**（从项目根目录）：
+3. **用 Edge 启动脚本统一启动**（推荐）：
+   ```powershell
+   .\scripts\runtime\start_edge.ps1
+   ```
+   脚本会先启动 Edge，再在 `EDGE_WECHAT_BRIDGE_ENABLED=1` 时自动启动桥接进程（PID 写入 `runtime/edge/wechat_bridge.pid`）。停止 Edge 时执行 `stop_edge.ps1` 会同时结束桥接。
+
+4. **或手动单独跑桥接**（未设 `EDGE_WECHAT_BRIDGE_ENABLED` 时）：
    ```bash
    python tools/wechat_wcferry_bridge.py
-   ```
-   或指定 Edge 地址（若改过端口）：
-   ```bash
    python tools/wechat_wcferry_bridge.py --edge-url http://127.0.0.1:17800
    ```
-   脚本会：用 wcferry 收微信消息 → 转成 JSON → POST 到 `http://127.0.0.1:17800/v1/edge/wechat/callback`。  
+   桥接会：用 wcferry 收微信消息 → 转成 JSON → POST 到 `http://127.0.0.1:17800/v1/edge/wechat/callback`。  
    **注意**：wcferry 会注入本机微信进程，首次运行若失败可尝试以管理员权限启动微信或参考 wcferry 文档。
 
 ### 若不用桥接脚本：自己写 Hook 推送

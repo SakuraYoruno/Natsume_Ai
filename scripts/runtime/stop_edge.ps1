@@ -16,9 +16,12 @@ function Get-ListeningPid {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeEdge = Join-Path $repoRoot "runtime\edge"
 if (-not $PidFile) {
-  $PidFile = Join-Path $repoRoot "runtime\edge\edge.pid"
+  $PidFile = Join-Path $runtimeEdge "edge.pid"
 }
+
+$wechatBridgePidFile = Join-Path $runtimeEdge "wechat_bridge.pid"
 
 $stopped = $false
 $edgePid = $null
@@ -54,11 +57,27 @@ if (-not $stopped) {
   }
 }
 
+# 若存在微信桥接 PID 文件，一并停止桥接进程
+$wechatBridgeStopped = $false
+if (Test-Path -Path $wechatBridgePidFile) {
+  $bridgePidText = (Get-Content -Path $wechatBridgePidFile -Raw -Encoding ascii).Trim()
+  if ($bridgePidText) {
+    $bridgePid = [int]$bridgePidText
+    $bridgeProc = Get-Process -Id $bridgePid -ErrorAction SilentlyContinue
+    if ($null -ne $bridgeProc) {
+      Stop-Process -Id $bridgePid -Force -ErrorAction SilentlyContinue
+      $wechatBridgeStopped = $true
+    }
+  }
+  Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+}
+
 $result = [ordered]@{
   status = if ($stopped) { "stopped" } else { "not_running" }
   pid = $edgePid
   pid_file = $PidFile
   port = $Port
   detail = $detail
+  wechat_bridge_stopped = $wechatBridgeStopped
 }
 $result | ConvertTo-Json -Depth 4
