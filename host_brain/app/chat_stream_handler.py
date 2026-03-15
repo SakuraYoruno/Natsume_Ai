@@ -1299,6 +1299,16 @@ async def _sse_event_generator(
             )
 
         render_target_lang = infer_render_target_lang(user_message=resolved_message)
+        # 从 _bond_summary 提取关系阶段信息传入 runtime_input
+        _bond_stage_for_ctx = str(_bond_summary.get("bond_stage") or "").strip()
+        _bond_summary_for_ctx: dict[str, Any] = {}
+        if _bond_stage_for_ctx:
+            _bond_summary_for_ctx = {
+                "stage": _bond_stage_for_ctx,
+                "trend": str(_bond_summary.get("trend") or ""),
+                "capability_hint": str(_bond_summary.get("capability_hint") or ""),
+            }
+
         runtime_input = build_chat_runtime_input(
             request_id=request_id,
             session_id=session_id,
@@ -1310,6 +1320,7 @@ async def _sse_event_generator(
             emotion_state=emotion_context if emotion_context else None,
             emotion_snapshot=emotion_snapshot,
             recall_slot_text=_recall_slot_text if _recall_slot_text else None,
+            bond_summary=_bond_summary_for_ctx or None,
             scene_type=scene_type,
         )
         prompt_build_result = await _build_stream_chat_prompt(
@@ -1360,40 +1371,83 @@ async def _sse_event_generator(
         rendered_text = ""
         sentence_index = 0
         llm_stream_started_ms = int(time.time() * 1000)
+        _llm_timed_out = False
 
-        async for chunk in astream_llm_chunks(
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=llm_api_key,
-            timeout_ms=timeout_ms_val,
-            prompt_text=prompt_text,
-            system_prompt=system_prompt,
-            gen_params=gen_params,
-            base_url_override=base_url_override,
-        ):
-            if first_token_latency_ms is None:
-                first_token_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
-            full_text += chunk
-            visible_text = _extract_stream_render_text(full_text)
-            if not visible_text:
-                continue
-            if visible_text.startswith(rendered_text):
-                render_chunk = visible_text[len(rendered_text):]
-            else:
-                render_chunk = visible_text
-            if not render_chunk:
-                continue
-            rendered_text = visible_text
-            yield _sse({"phase": "RENDER", "chunk": render_chunk})
+        try:
+            async for chunk in astream_llm_chunks(
+                provider_name=provider_name,
+                model_id=model_id,
+                api_key=llm_api_key,
+                timeout_ms=timeout_ms_val,
+                prompt_text=prompt_text,
+                system_prompt=system_prompt,
+                gen_params=gen_params,
+                base_url_override=base_url_override,
+            ):
+                if first_token_latency_ms is None:
+                    first_token_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
+                full_text += chunk
+                visible_text = _extract_stream_render_text(full_text)
+                if not visible_text:
+                    continue
+                if visible_text.startswith(rendered_text):
+                    render_chunk = visible_text[len(rendered_text):]
+                else:
+                    render_chunk = visible_text
+                if not render_chunk:
+                    continue
+                rendered_text = visible_text
+                yield _sse({"phase": "RENDER", "chunk": render_chunk})
 
-            # 句子边界检测
-            for sentence in splitter.feed(render_chunk):
-                yield _sse({
-                    "phase": "SENTENCE",
-                    "sentence": sentence,
-                    "sentence_index": sentence_index,
-                })
-                sentence_index += 1
+                # 句子边界检测
+                for sentence in splitter.feed(render_chunk):
+                    yield _sse({
+                        "phase": "SENTENCE",
+                        "sentence": sentence,
+                        "sentence_index": sentence_index,
+                    })
+                    sentence_index += 1
+        except (TimeoutError, Exception) as _llm_exc:
+            # LLM 超时或冷启动失败时，先发送占位句让用户知道系统在线
+            _elapsed_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
+            _is_timeout = isinstance(_llm_exc, TimeoutError) or "timeout" in str(_llm_exc).lower()
+            _logger.warning(
+                "LLM 流式生成失败（%s）: %s elapsed=%dms",
+                "timeout" if _is_timeout else "error",
+                _llm_exc,
+                _elapsed_ms,
+                extra={"request_id": request_id},
+            )
+            if not full_text.strip():
+                # 没有任何输出时，发送陪伴性占位句
+                _placeholder = "ちょっと待ってね…"
+                full_text = _placeholder
+                rendered_text = _placeholder
+                yield _sse({"phase": "RENDER", "chunk": _placeholder})
+                for sentence in splitter.feed(_placeholder):
+                    yield _sse({
+                        "phase": "SENTENCE",
+                        "sentence": sentence,
+                        "sentence_index": sentence_index,
+                    })
+                    sentence_index += 1
+            _llm_timed_out = True
+            # 记录超时到 error_log
+            try:
+                ledger.append_audit_log(
+                    request_id=request_id,
+                    session_id=session_id,
+                    stage="S_LLM_GATEWAY_PROVIDER",
+                    audit_tag="LLM_STREAM_FAILED",
+                    detail=json.dumps({
+                        "reason": "timeout" if _is_timeout else "error",
+                        "elapsed_ms": _elapsed_ms,
+                        "error": str(_llm_exc)[:200],
+                    }, ensure_ascii=False),
+                    ts_ms=ts_ms,
+                )
+            except Exception:
+                pass
 
         # ── 8-10. 后处理并行执行：Airlock / Episodic / Bond / VTS ──────────
         # 四个步骤之间无数据依赖，使用 asyncio.gather 并行执行，

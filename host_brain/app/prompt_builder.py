@@ -109,15 +109,34 @@ def _contains_any_token(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in normalized for token in tokens)
 
 
-def _build_direct_response_priority(*, user_message: str, render_target_lang: str) -> str:
+def _build_direct_response_priority(
+    *,
+    user_message: str,
+    render_target_lang: str,
+    follow_up_hint: str = "",
+    bond_stage: str = "",
+) -> str:
     rules: list[str] = [
         "Answer the user's concrete request first.",
         "Do not greet, self-introduce, or restart the conversation unless the user asked for that.",
-        "Do not ask a follow-up question unless the request is actually ambiguous or incomplete.",
         "Do not invent vocatives, relationship labels, or roleplay framing that are not supported by USER_MESSAGE or EVIDENCE.",
         "Treat STYLE_CANON_BINDING as tone guidance only; user intent and factual grounding take priority.",
         "Treat WORLD_CANON_BINDING as background reference only; do not surface lore unless the user explicitly asks for it.",
     ]
+
+    # 追问策略：根据 bond_stage 和 follow_up_hint 决定是否鼓励追问
+    _close_stages = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE", "FRIEND"}
+    if bond_stage.upper() in _close_stages:
+        rules.append(
+            "After answering, you MAY naturally add one short follow-up question to show genuine interest "
+            "(e.g. ask about their day, feelings, or what happened next). Keep it light and warm, not interrogative."
+        )
+    elif follow_up_hint:
+        rules.append(
+            f"Follow-up guidance: {follow_up_hint}"
+        )
+    else:
+        rules.append("Ask a follow-up question only when the request is genuinely ambiguous or incomplete.")
 
     if _contains_any_token(
         user_message,
@@ -125,12 +144,19 @@ def _build_direct_response_priority(*, user_message: str, render_target_lang: st
     ):
         rules.append("Keep the visible answer to one or two short sentences.")
 
+    # 日常互动类问题：直接回答，不反弹问题
     if _contains_any_token(
         user_message,
-        ("気分", "調子", "状态", "状态", "心情", "感觉", "感受"),
+        (
+            "気分", "調子", "状态", "心情", "感觉", "感受",
+            "今日", "今天", "最近", "どうだった", "どうだった", "怎么样",
+            "有没有", "どうだった", "今日どう", "今日は", "最近どう",
+            "过得", "过的", "今天过",
+        ),
     ):
         rules.append(
-            "For current mood or state questions, answer directly in first person, do not bounce the question back, and end with a statement rather than a question."
+            "For daily-life or mood questions, answer directly in first person with warmth; "
+            "share your own perspective first, then optionally invite theirs in one short sentence."
         )
 
     if _contains_any_token(
@@ -140,7 +166,12 @@ def _build_direct_response_priority(*, user_message: str, render_target_lang: st
         rules.append("For prioritization requests, start with the recommendation itself.")
 
     if str(render_target_lang).strip().lower() == "ja":
-        rules.append("Write natural spoken Japanese for TTS, avoid ending the whole reply as a question unless necessary, and avoid decorative symbols such as 〜 or ～.")
+        rules.append(
+            "Write natural spoken Japanese for TTS. "
+            "Avoid ending the whole reply as a pure question unless it flows naturally. "
+            "Avoid decorative symbols such as 〜 or ～. "
+            "Aim for 1-3 sentences; longer only when the topic genuinely warrants it."
+        )
     else:
         rules.append("Write concise spoken Simplified Chinese and avoid decorative filler.")
 
@@ -164,7 +195,8 @@ def _build_node_role_instruction(
                 "Goal: generate the final user-facing reply directly in concise spoken Simplified Chinese.\n"
                 "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
                 "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
-                "do not greet or self-introduce unless asked; do not ask a follow-up question unless needed; "
+                "do not greet or self-introduce unless asked; "
+                "a warm follow-up question is welcome when the relationship is close (see DIRECT_RESPONSE_PRIORITY); "
                 "keep intent_draft draft-only and never add facts or claim execution."
             )
         return (
@@ -172,7 +204,8 @@ def _build_node_role_instruction(
             "Goal: generate the final user-facing reply directly in natural Japanese suitable for spoken TTS output.\n"
             "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
             "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
-            "do not greet or self-introduce unless asked; do not ask a follow-up question unless needed; "
+            "do not greet or self-introduce unless asked; "
+            "a warm follow-up question is welcome when the relationship is close (see DIRECT_RESPONSE_PRIORITY); "
             "keep intent_draft draft-only and never add facts or claim execution."
         )
     if resolved_node_id == CHAT_RENDER_NODE_ID:
@@ -539,6 +572,15 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         json.dumps(constraints, ensure_ascii=False, sort_keys=True),
         limit=1200,
     )
+    # 从 constraints 和 bond_texture 提取 bond_stage / follow_up_hint，供追问策略使用
+    _follow_up_hint = str(constraints.get("follow_up_hint") or "").strip()
+    _bond_texture_raw = prompt_context.get("bond_texture")
+    _bond_texture = dict(_bond_texture_raw) if isinstance(_bond_texture_raw, Mapping) else {}
+    _bond_stage_for_prompt = str(
+        _bond_texture.get("bond_stage")
+        or (dict(prompt_context.get("bond_summary") or {}).get("stage"))
+        or ""
+    ).strip().upper()
     prompt_context_valid = bool(prompt_context_validation.get("valid", False))
     prompt_context_reason = str(prompt_context_validation.get("reason_code") or "NONE").strip() or "NONE"
     prompt_context_violation_count = int(prompt_context_validation.get("violation_count") or 0)
@@ -629,10 +671,24 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True),
         limit=600,
     )
-    bond_texture_json = _truncate_for_prompt(
-        json.dumps(bond_texture, ensure_ascii=False, sort_keys=True),
-        limit=600,
-    )
+    # bond_texture 拆成可读行，避免 LLM 需要自行解析 JSON
+    _bt_stage = str(bond_texture.get("bond_stage") or "").strip()
+    _bt_trend = str(bond_texture.get("bond_trend") or "").strip()
+    _bt_mood = str(bond_texture.get("mood_state") or "").strip()
+    _bt_tone = str(bond_texture.get("tone_hint") or "").strip()
+
+    # bond_stage → 自然语言行为指令
+    _STAGE_INSTRUCTION_MAP = {
+        "STRANGER":     "You are meeting this person for the first time; be polite and slightly reserved.",
+        "ACQUAINTANCE": "You know this person a little; be warm and friendly, use their name occasionally.",
+        "FRIEND":       "You are friends; be relaxed, caring, and show genuine interest in their life.",
+        "CLOSE_FRIEND": "You are close friends; be warm, playful, and feel free to tease gently or share feelings openly.",
+        "CONFIDANT":    "You share a deep bond; be intimate, emotionally present, and speak from the heart.",
+        "SOULMATE":     "You have a soul-level connection; be deeply warm, expressive, and fully present.",
+    }
+    _bond_stage_instruction = _STAGE_INSTRUCTION_MAP.get(
+        _bt_stage.upper(), "Be warm and genuine."
+    ) if _bt_stage else ""
     # ── TODO-39：EmotionVector VAD 连续体注入 ────────────────────────────
     emotion_vector_raw = runtime_payload.get("emotion_vector")
     emotion_vector = dict(emotion_vector_raw) if isinstance(emotion_vector_raw, Mapping) else {}
@@ -673,7 +729,16 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- snapshot_age_ms: {snapshot_age_ms}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
-        f"- bond_texture_json: {bond_texture_json}\n"
+        + (
+            f"- bond_stage: {_bt_stage}\n"
+            f"- bond_trend: {_bt_trend}\n"
+            f"- bond_mood: {_bt_mood}\n"
+            f"- bond_tone_hint: {_bt_tone or 'NONE'}\n"
+            f"- bond_stage_instruction: {_bond_stage_instruction}\n"
+            if _bt_stage else
+            "- bond_stage: UNKNOWN\n"
+            "- bond_stage_instruction: Be warm and genuine.\n"
+        )
         + (
             f"- emotion_timeline_dominant: {_et_dominant}\n"
             f"- emotion_timeline_trend: {_et_trend}\n"
@@ -830,6 +895,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         direct_response_block = _build_direct_response_priority(
             user_message=user_message,
             render_target_lang=render_target_lang,
+            follow_up_hint=_follow_up_hint,
+            bond_stage=_bond_stage_for_prompt,
         )
 
     return (
@@ -843,7 +910,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         "4) Keep concise and grounded in provided context.\n"
         "5) Answer the user's explicit request before any optional elaboration.\n"
         "6) Do not greet or self-introduce unless the user asked for that.\n"
-        "7) Do not ask a follow-up question unless it is necessary to resolve ambiguity.\n"
+        "7) A natural follow-up question is welcome when the relationship is close; keep it brief and warm.\n"
         "NODE_ROLE_BINDING:\n"
         f"{role_instruction}\n\n"
         f"{direct_response_block}"

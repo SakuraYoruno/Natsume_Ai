@@ -1,4 +1,4 @@
-﻿"""Chat 涓婁笅鏂囨瀯寤鸿緟鍔╁嚱鏁般€?
+"""Chat 涓婁笅鏂囨瀯寤鸿緟鍔╁嚱鏁般€?
 浠?chat_handler.py 鎷嗗垎锛岃礋璐ｆ瀯寤?context pack銆乻tyle bindings 鍜?generation prompt payload銆?"""
 
 from __future__ import annotations
@@ -127,10 +127,38 @@ def build_prompt_context(
         "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
+    # Bond summary：从 runtime_input 读取，用于注入关系上下文和动态 tone_policy
+    bond_summary_raw = dict(runtime_input.bond_summary) if runtime_input.bond_summary else {}
+    bond_stage = str(bond_summary_raw.get("stage") or "").strip().upper()
+    bond_trend = str(bond_summary_raw.get("trend") or "").strip()
+    bond_capability_hint = str(bond_summary_raw.get("capability_hint") or "").strip()
+
+    # tone_policy 按关系阶段动态调整
+    _STAGE_TONE_MAP = {
+        "STRANGER":     "restrained",
+        "ACQUAINTANCE": "warm_concise",
+        "FRIEND":       "warm_concise",
+        "CLOSE_FRIEND": "warm_playful",
+        "CONFIDANT":    "warm_playful",
+        "SOULMATE":     "intimate_playful",
+    }
+    tone_policy = _STAGE_TONE_MAP.get(bond_stage, "warm_concise")
+
+    # 构建注入 prompt 的 bond_summary（非空时才注入）
+    bond_summary_for_prompt: dict = {}
+    if bond_stage:
+        bond_summary_for_prompt = {
+            "stage": bond_stage,
+            "trend": bond_trend,
+            "capability_hint": bond_capability_hint,
+        }
+
     bond_texture = {
         "mood_state": mood_state,
         "emotion_tag": emotion_tag,
         "tone_hint": str(emotion_pulse.get("style_hint") or ""),
+        "bond_stage": bond_stage,
+        "bond_trend": bond_trend,
     }
 
     prompt_context = {
@@ -142,7 +170,7 @@ def build_prompt_context(
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
         },
-        "bond_summary": {},
+        "bond_summary": bond_summary_for_prompt,
         "authoritative": authoritative_rows,
         "retrieval": retrieval_rows,
         "style_pack": {
@@ -152,7 +180,8 @@ def build_prompt_context(
             "strict_json_output": True,
             "no_false_execution_claim": True,
             "no_canon_as_fact": True,
-            "tone_policy": "short_restrained",
+            "tone_policy": tone_policy,
+            "follow_up_hint": "如果用户陈述了事实或情绪，优先复述确认再追问一个短问题",
             "contract_versions": {
                 "core": "CoreDraft.v1",
                 "render": "RenderDraft.v1",

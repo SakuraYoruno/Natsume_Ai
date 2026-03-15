@@ -115,18 +115,18 @@ def _inject_emotion_gen_params(
     emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str(emotion_context.get("mood_state") or "steady").lower()
 
-    temperature = 0.45
-    top_p = 0.82
+    temperature = 0.55
+    top_p = 0.85
 
     if emotion_tag in ("EXCITED", "HAPPY", "SURPRISED"):
-        temperature = 0.6
-        top_p = 0.88
+        temperature = 0.72
+        top_p = 0.92
     elif emotion_tag in ("ANGRY", "FRUSTRATED", "ANXIOUS"):
-        temperature = 0.45
-        top_p = 0.8
+        temperature = 0.50
+        top_p = 0.82
     elif emotion_tag in ("SAD", "TIRED") or mood_state in ("tired", "critical"):
-        temperature = 0.4
-        top_p = 0.78
+        temperature = 0.45
+        top_p = 0.80
 
     result = dict(prompt_payload)
     result["gen_params"] = {

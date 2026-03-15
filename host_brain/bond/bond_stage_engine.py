@@ -423,10 +423,84 @@ class BondStageEngine:
 
     def _get_or_create_state(self, user_id: str) -> BondScoreState:
         if user_id not in self._states:
-            state = BondScoreState(user_id=user_id)
-            self._states[user_id] = state
-            self._log_initial_state(state)
+            state = self._restore_state_from_log(user_id)
+            if state is None:
+                state = BondScoreState(user_id=user_id)
+                self._states[user_id] = state
+                self._log_initial_state(state)
+            else:
+                self._states[user_id] = state
         return self._states[user_id]
+
+    def _restore_state_from_log(self, user_id: str) -> "BondScoreState | None":
+        """从 bond_update_log 恢复历史积分状态，避免重启后积分清零。
+
+        策略：
+        1. 优先读取最近一条 STAGE_TRANSITION 记录的 total_score（最可靠）
+        2. 若无 STAGE_TRANSITION，则累加所有非 INIT/STAGE_TRANSITION 事件的积分
+        3. 若无任何历史记录，返回 None（走正常 INIT 流程）
+        """
+        if self._ledger is None:
+            return None
+        try:
+            db_path = getattr(self._ledger, "_db_path", None) or getattr(self._ledger, "db_path", None)
+            if not db_path:
+                return None
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect(db_path)
+            try:
+                # 优先：读最近一条 STAGE_TRANSITION 的 payload.total_score
+                row = conn.execute(
+                    "SELECT payload, ts_ms FROM bond_update_log "
+                    "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
+                    "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                    "ORDER BY ts_ms DESC LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                # 如果 user_id 过滤无结果，放宽到全局最新（单用户场景）
+                if row is None:
+                    row = conn.execute(
+                        "SELECT payload, ts_ms FROM bond_update_log "
+                        "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
+                        "ORDER BY ts_ms DESC LIMIT 1",
+                    ).fetchone()
+                # 无论 STAGE_TRANSITION 是否存在，都直接累加所有历史事件积分
+                # 这样即使每次重启都从 1 开始，也能正确恢复真实历史积分
+                import json as _json
+                event_rows = conn.execute(
+                    "SELECT update_kind, COUNT(*), MAX(ts_ms) FROM bond_update_log "
+                    "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
+                    "AND status IN ('OK','SUCCESS') "
+                    "GROUP BY update_kind"
+                ).fetchall()
+                total_score = 0
+                event_count = 0
+                last_ts = 0
+                for kind, cnt, max_ts in event_rows:
+                    base = self._score_map.get(str(kind).strip(), 1)
+                    total_score += base * cnt
+                    event_count += cnt
+                    if max_ts and int(max_ts) > last_ts:
+                        last_ts = int(max_ts)
+                if total_score > 0:
+                    stage = self._compute_stage(total_score)
+                    state = BondScoreState(
+                        user_id=user_id,
+                        total_score=total_score,
+                        current_stage=stage,
+                        event_count=event_count,
+                        last_event_ts_ms=last_ts,
+                    )
+                    _logger.info(
+                        "Bond 状态从日志恢复: user=%s stage=%s score=%d events=%d",
+                        user_id, stage, total_score, event_count,
+                    )
+                    return state
+            finally:
+                conn.close()
+        except Exception as exc:
+            _logger.warning("Bond 状态恢复失败（降级为新状态）: %s", exc)
+        return None
 
     def _compute_stage(self, total_score: int) -> str:
         """根据总积分计算当前阶段（取满足阈值的最高阶段）。"""

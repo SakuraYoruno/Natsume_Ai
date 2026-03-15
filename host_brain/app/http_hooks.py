@@ -192,9 +192,9 @@ async def runtime_lifespan(
 
             _distill_task = ScheduledTask(
                 task_id="distillation_engine_periodic",
-                name="情节记忆蒸馏（每 30 分钟）",
+                name="情节记忆蒸馏（每 10 分钟）",
                 fn=_run_distillation_task,
-                interval_s=1800.0,  # 30 分钟
+                interval_s=600.0,  # 10 分钟
                 max_retries=2,
                 retry_delay_s=30.0,
                 enabled=True,
@@ -202,7 +202,7 @@ async def runtime_lifespan(
             )
             _scheduler.register(_distill_task)
             new_module_statuses["distillation_engine_scheduler"] = (
-                f"OK (task_id={_distill_task.task_id}, interval=1800s)"
+                f"OK (task_id={_distill_task.task_id}, interval=600s)"
             )
             logger.info(
                 "DistillationEngine 蒸馏任务已注册到调度器: task_id=%s",
@@ -285,20 +285,20 @@ async def runtime_lifespan(
 
             _proactive_registry = SchedulerTaskRegistry.get_instance()
 
-            # 注册 proactive_talk 任务（每 15 分钟检查一次）
+            # 注册 proactive_talk 任务（每 3 分钟检查一次，空闲 45 分钟触发）
             _proactive_task = SchedulerTaskConfig(
                 task_id="proactive_talk_periodic",
                 trigger_mode=TriggerMode.INTERVAL,
-                trigger_config={"seconds": 900},  # 15 分钟
+                trigger_config={"seconds": 180},  # 3 分钟
                 intent_template={
                     "skill_name": "proactive_talk",
-                    "args": {"idle_threshold_ms": 14400000},  # 4 小时空闲阈值
+                    "args": {"idle_threshold_ms": 2700000},  # 45 分钟空闲阈值
                     "proposer_node_id": "scheduler",
                 },
                 priority=TaskPriority.LOW,
                 mode_allowlist=["normal", "sleep"],
                 enabled=True,
-                description="主动对话：每 15 分钟检查一次，空闲 4 小时后触发问候",
+                description="主动对话：每 3 分钟检查一次，空闲 45 分钟后触发问候",
             )
             # 避免重复注册（重启时可能已存在）
             if _proactive_registry.get("proactive_talk_periodic") is None:
@@ -310,20 +310,187 @@ async def runtime_lifespan(
             def _ui_pusher(message: dict) -> dict:
                 return _push_client.push(message)
 
-            # 构建 intent_dispatcher：执行 proactive_talk skill 并注入 ui_pusher
+            # 构建 intent_dispatcher：执行 proactive_talk skill 并注入完整上下文
             from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
 
             def _proactive_intent_dispatcher(system_intent: dict) -> dict:
                 """将 scheduler 生成的 system_intent 路由到 proactive_talk skill。"""
+                import time as _time  # noqa: PLC0415
+                import sqlite3 as _sqlite3  # noqa: PLC0415
+
                 skill_name = system_intent.get("skill_name", "")
                 if skill_name != "proactive_talk":
                     return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
                 args = dict(system_intent.get("args") or {})
+
+                # 读取上次互动时间戳（从 intent_log 最新记录）
+                _last_interaction_ts = None
+                try:
+                    from host_brain.app.dependencies import get_ledger as _get_ledger  # noqa: PLC0415
+                    _ledger = _get_ledger()
+                    _db_path = getattr(_ledger, "_db_path", None) or getattr(_ledger, "db_path", None)
+                    if _db_path:
+                        _conn = _sqlite3.connect(_db_path)
+                        _row = _conn.execute(
+                            "SELECT ts_ms FROM intent_log ORDER BY ts_ms DESC LIMIT 1"
+                        ).fetchone()
+                        _conn.close()
+                        if _row:
+                            _last_interaction_ts = int(_row[0])
+                except Exception:
+                    pass
+
+                # 读取 Bond 摘要（用于生成有温度的问候）
+                _bond_summary: dict = {}
+                try:
+                    from host_brain.app.dependencies import get_bond_stage_engine as _get_bse  # noqa: PLC0415
+                    _bse = _get_bse()
+                    if _bse is not None:
+                        _bs = _bse.get_bond_state(session_id="default")
+                        if _bs is not None:
+                            _bond_summary = {
+                                "stage": str(getattr(_bs, "stage", "") or ""),
+                                "trend": str(getattr(_bs, "trend", "") or ""),
+                                "capability_hint": str(getattr(_bs, "capability_hint", "") or ""),
+                            }
+                except Exception:
+                    pass
+
+                # 读取最近 episodic 摘要作为话题素材
+                _recent_topics: list[str] = []
+                try:
+                    from host_brain.app.dependencies import get_ledger as _get_ledger2  # noqa: PLC0415
+                    _ledger2 = _get_ledger2()
+                    _db_path2 = getattr(_ledger2, "_db_path", None) or getattr(_ledger2, "db_path", None)
+                    if _db_path2:
+                        _now_ms = int(_time.time() * 1000)
+                        _since_ms = _now_ms - 24 * 3600 * 1000  # 最近 24h
+                        _conn2 = _sqlite3.connect(_db_path2)
+                        _rows2 = _conn2.execute(
+                            "SELECT detail FROM memory_ops_log WHERE ts_ms >= ? AND op_kind='WRITE' "
+                            "AND status='SUCCESS' ORDER BY ts_ms DESC LIMIT 5",
+                            (_since_ms,)
+                        ).fetchall()
+                        _conn2.close()
+                        for _r in _rows2:
+                            _detail = str(_r[0] or "")[:80]
+                            if _detail:
+                                _recent_topics.append(_detail)
+                except Exception:
+                    pass
+
+                # 检查昨日梦境/日记，优先作为互动素材
+                import datetime as _dt  # noqa: PLC0415
+                import glob as _glob  # noqa: PLC0415
+                import os as _os  # noqa: PLC0415
+                _dream_snippet: str = ""
+                _diary_snippet: str = ""
+                try:
+                    _yesterday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+                    _today = _dt.date.today().isoformat()
+                    _diary_base = _os.path.join(
+                        _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),
+                        "runtime", "diary", "diary",
+                    )
+                    # 优先今日，其次昨日
+                    for _date_str in (_today, _yesterday):
+                        _diary_path = _os.path.join(_diary_base, f"{_date_str}.md")
+                        if _os.path.isfile(_diary_path):
+                            with open(_diary_path, "r", encoding="utf-8", errors="replace") as _df:
+                                _diary_content = _df.read(300).strip()
+                            if _diary_content:
+                                _diary_snippet = _diary_content[:120]
+                                break
+                except Exception:
+                    pass
+
+                # 读取最近 episodic 中 category=dream 的条目
+                try:
+                    from host_brain.app.dependencies import get_ledger as _get_ledger3  # noqa: PLC0415
+                    _ledger3 = _get_ledger3()
+                    _db_path3 = getattr(_ledger3, "_db_path", None) or getattr(_ledger3, "db_path", None)
+                    if _db_path3:
+                        _conn3 = _sqlite3.connect(_db_path3)
+                        _dream_rows = _conn3.execute(
+                            "SELECT detail FROM memory_ops_log WHERE op_kind='WRITE' "
+                            "AND status='SUCCESS' AND detail LIKE '%dream%' "
+                            "ORDER BY ts_ms DESC LIMIT 1"
+                        ).fetchall()
+                        _conn3.close()
+                        if _dream_rows:
+                            _dream_snippet = str(_dream_rows[0][0] or "")[:100]
+                except Exception:
+                    pass
+
+                # 构建 LLM 生成器（通过 Host 内部 HTTP 接口）
+                import json as _json  # noqa: PLC0415
+                import urllib.request as _urlreq  # noqa: PLC0415
+
+                def _llm_generator(llm_input: dict) -> dict:
+                    _time_period = llm_input.get("time_period", "evening")
+                    _user_name = llm_input.get("user_name", "主人")
+                    _topic_hint = llm_input.get("topic_hint") or ""
+                    _bond = llm_input.get("bond_summary") or {}
+                    _stage = _bond.get("stage", "")
+                    _hint = _bond.get("capability_hint", "")
+                    _topics_str = "、".join(_recent_topics[:3]) if _recent_topics else ""
+
+                    _prompt_parts = [
+                        f"你是夏目藍，现在是{_time_period}时段。",
+                        f"请主动发起一句话问候{_user_name}。",
+                    ]
+                    if _stage:
+                        _prompt_parts.append(f"当前关系阶段：{_stage}，{_hint}。")
+                    # 梦境/日记优先作为话题素材
+                    if _dream_snippet:
+                        _prompt_parts.append(f"你昨晚做了一个梦，可以自然地提起：{_dream_snippet[:60]}。")
+                    elif _diary_snippet:
+                        _prompt_parts.append(f"你写了日记，可以自然地提起今天的感受：{_diary_snippet[:60]}。")
+                    elif _topics_str:
+                        _prompt_parts.append(f"可以围绕最近话题展开：{_topics_str}。")
+                    if _topic_hint:
+                        _prompt_parts.append(f"话题提示：{_topic_hint}。")
+                    _prompt_parts.append("要求：自然、温暖、20字以内，不要重复打招呼模板。")
+
+                    _prompt = "".join(_prompt_parts)
+                    try:
+                        _data = _json.dumps({
+                            "message": _prompt,
+                            "session_id": "proactive_talk_scheduler",
+                            "user_id": "scheduler_internal",
+                        }, ensure_ascii=False).encode()
+                        _req = _urlreq.Request(
+                            "http://127.0.0.1:18080/v1/chat",
+                            data=_data, method="POST",
+                            headers={"Content-Type": "application/json"},
+                        )
+                        _events = []
+                        with _urlreq.urlopen(_req, timeout=30) as _r:
+                            for _raw in _r:
+                                _line = _raw.decode("utf-8", errors="replace").strip()
+                                if _line.startswith("data: "):
+                                    try:
+                                        _events.append(_json.loads(_line[6:]))
+                                    except Exception:
+                                        pass
+                        _text = "".join(
+                            e.get("chunk", "") for e in _events
+                            if e.get("phase") == "RENDER" and e.get("chunk")
+                        )
+                        return {"greeting": _text, "content": _text}
+                    except Exception as _exc:
+                        logger.warning("proactive_talk LLM 生成失败: %s", _exc)
+                        return {}
+
                 context = {
                     "sys_mode": system_intent.get("mood_state", "normal"),
                     "request_id": system_intent.get("request_id"),
                     "intent_id": system_intent.get("intent_id"),
                     "ui_pusher": _ui_pusher,
+                    "last_interaction_ts": _last_interaction_ts,
+                    "bond_summary": _bond_summary,
+                    "llm_generator": _llm_generator,
+                    "user_name": "主人",
                 }
                 return execute_proactive_talk(args=args, context=context)
 
@@ -344,7 +511,7 @@ async def runtime_lifespan(
             _natsume_scheduler.start()
 
             new_module_statuses["proactive_talk_scheduler"] = (
-                f"OK (task_id={_proactive_task.task_id}, interval=900s)"
+                f"OK (task_id={_proactive_task.task_id}, interval=180s, idle_threshold=45min)"
             )
             logger.info(
                 "proactive_talk 任务已注册并启动调度器: task_id=%s",
@@ -353,6 +520,175 @@ async def runtime_lifespan(
         except Exception as _proactive_exc:
             new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
             logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
+
+        # [builtin_tools_catalog] 将内置 READ 工具注册到 ToolCatalog / ToolBroker
+        try:
+            from host_brain.app.dependencies import (  # noqa: PLC0415
+                get_tool_catalog, get_tool_broker, get_skill_registry,
+            )
+            from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
+            import hashlib as _hashlib  # noqa: PLC0415
+            import json as _json_tools  # noqa: PLC0415
+
+            _catalog = get_tool_catalog()
+            _broker = get_tool_broker()
+            _skill_reg = get_skill_registry()
+
+            _BUILTIN_TOOL_DEFS = [
+                ("file_list",      "READ", "NONE", ["file"],   "列出目录内容（只读）"),
+                ("file_read",      "READ", "NONE", ["file"],   "读取文件内容（只读）"),
+                ("memory_search",  "READ", "NONE", ["memory"], "语义检索记忆库"),
+                ("system_info",    "READ", "NONE", ["system"], "查询系统信息"),
+                ("network_status", "READ", "NONE", ["system"], "查询网络状态"),
+                ("web_search",     "READ", "NONE", ["web"],    "执行网络搜索"),
+            ]
+
+            _registered_tools = 0
+            for _tid, _sel, _auth, _tags, _desc in _BUILTIN_TOOL_DEFS:
+                _skill_meta = _skill_reg.get(_tid)
+                if _skill_meta is None:
+                    continue
+                _schema = {"type": "object", "properties": {}}
+                _schema_hash = "sha256:" + _hashlib.sha256(
+                    _json_tools.dumps(_schema, sort_keys=True).encode()
+                ).hexdigest()
+                _tool_meta = ToolMeta(
+                    id=_tid, name=_tid, desc=_desc,
+                    schema_hash=_schema_hash,
+                    side_effect_level=_sel, auth_level=_auth,
+                    domain_tags=tuple(_tags), version="1.0",
+                )
+                try:
+                    _catalog.register(_tool_meta)
+                except Exception:
+                    pass  # 已注册则跳过
+                _broker.register_handler(
+                    _tid,
+                    lambda args, ctx, _h=_skill_meta.handler: _h(args or {}, ctx or {}),
+                )
+                _registered_tools += 1
+
+            new_module_statuses["builtin_tools_catalog"] = f"OK ({_registered_tools} tools registered)"
+            logger.info("内置工具已注册到 ToolCatalog: %d 项", _registered_tools)
+        except Exception as _tool_exc:
+            new_module_statuses["builtin_tools_catalog"] = f"DEGRADED: {_tool_exc}"
+            logger.warning("内置工具注册失败（降级）: %s", _tool_exc)
+
+        # [personality_tools_catalog] 将 Personality / Scheduler Skills 注册到 ToolCatalog
+        try:
+            from host_brain.app.dependencies import get_tool_catalog, get_tool_broker  # noqa: PLC0415
+            from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
+            from host_brain.skills.personality_registry import build_personality_skill_registry  # noqa: PLC0415
+            from host_brain.skills.scheduler_registry import build_scheduler_skill_registry  # noqa: PLC0415
+            import hashlib as _hlib  # noqa: PLC0415
+            import json as _jtools  # noqa: PLC0415
+
+            _cat = get_tool_catalog()
+            _brk = get_tool_broker()
+
+            # Personality skills: diary_writer, dream_generator, desktop_note, focus_mode, proactive_talk
+            _personality_reg = build_personality_skill_registry()
+            _PERSONALITY_TOOL_DEFS = [
+                ("diary_writer",    "WRITE", "LOW",  ["memory", "file"],   "每日日记生成：汇总当日对话→LLM→双写文件+Episodic"),
+                ("dream_generator", "WRITE", "LOW",  ["memory"],           "梦境生成：读取Episodic→LLM生成梦境叙事→写回Episodic"),
+                ("desktop_note",    "WRITE", "LOW",  ["system", "file"],   "桌面留言：创建/更新/删除文本文件（路径穿越防护）"),
+                ("focus_mode",      "READ",  "NONE", ["system"],           "专注模式切换：进入/退出专注模式"),
+                ("proactive_talk",  "WRITE", "LOW",  ["chat"],             "主动对话：空闲超阈值时触发LLM生成问候并推送到Edge"),
+            ]
+            # Scheduler skills: scheduler_add, scheduler_cancel, scheduler_list
+            _scheduler_reg = build_scheduler_skill_registry()
+            _SCHEDULER_TOOL_DEFS = [
+                ("scheduler_add",    "WRITE", "MEDIUM", ["system"], "向调度器添加定时任务"),
+                ("scheduler_cancel", "WRITE", "MEDIUM", ["system"], "取消/删除调度任务（不可逆）"),
+                ("scheduler_list",   "READ",  "NONE",   ["system"], "列出当前所有调度任务"),
+            ]
+
+            _personality_count = 0
+            for _reg, _defs in [(_personality_reg, _PERSONALITY_TOOL_DEFS), (_scheduler_reg, _SCHEDULER_TOOL_DEFS)]:
+                for _tid, _sel, _auth, _tags, _desc in _defs:
+                    _smeta = _reg.get(_tid)
+                    if _smeta is None:
+                        continue
+                    _schema = {"type": "object", "properties": {}}
+                    _shash = "sha256:" + _hlib.sha256(
+                        _jtools.dumps(_schema, sort_keys=True).encode()
+                    ).hexdigest()
+                    _tmeta = ToolMeta(
+                        id=_tid, name=_tid, desc=_desc,
+                        schema_hash=_shash,
+                        side_effect_level=_sel, auth_level=_auth,
+                        domain_tags=tuple(_tags), version="1.0",
+                    )
+                    try:
+                        _cat.register(_tmeta)
+                    except Exception:
+                        pass
+                    _brk.register_handler(
+                        _tid,
+                        lambda args, ctx, _h=_smeta.handler: _h(args or {}, ctx or {}),
+                    )
+                    _personality_count += 1
+
+            new_module_statuses["personality_tools_catalog"] = f"OK ({_personality_count} tools registered)"
+            logger.info("Personality/Scheduler 工具已注册到 ToolCatalog: %d 项", _personality_count)
+        except Exception as _pt_exc:
+            new_module_statuses["personality_tools_catalog"] = f"DEGRADED: {_pt_exc}"
+            logger.warning("Personality 工具注册失败（降级）: %s", _pt_exc)
+
+        # [long_term_distillation_catalog] 注册长期记忆蒸馏工具到 ToolCatalog
+        try:
+            from host_brain.app.dependencies import get_tool_catalog, get_tool_broker, get_ledger as _get_ledger  # noqa: PLC0415
+            from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
+            import hashlib as _hlib2  # noqa: PLC0415
+            import json as _jtools2  # noqa: PLC0415
+
+            _cat2 = get_tool_catalog()
+            _brk2 = get_tool_broker()
+
+            _schema_lt = {"type": "object", "properties": {}}
+            _shash_lt = "sha256:" + _hlib2.sha256(
+                _jtools2.dumps(_schema_lt, sort_keys=True).encode()
+            ).hexdigest()
+            _tmeta_lt = ToolMeta(
+                id="long_term_memory_distillation",
+                name="long_term_memory_distillation",
+                desc="长期记忆蒸馏：从EpisodicStore召回高频记忆→LLM摘要→生成World Canon提案",
+                schema_hash=_shash_lt,
+                side_effect_level="WRITE", auth_level="LOW",
+                domain_tags=("memory",), version="1.0",
+            )
+            try:
+                _cat2.register(_tmeta_lt)
+            except Exception:
+                pass
+
+            def _long_term_distillation_handler(args: dict, ctx: dict) -> dict:
+                """直接调用 LongTermDistiller.run_distillation_cycle()。"""
+                try:
+                    from host_brain.memory.long_term_distiller import LongTermDistiller  # noqa: PLC0415
+                    from host_brain.app.dependencies import (  # noqa: PLC0415
+                        get_episodic_store, get_ledger as _gl,
+                    )
+                    _ep_store = get_episodic_store()
+                    _ledger_inst = _gl()
+                    _top_k = int((args or {}).get("top_k") or 5)
+                    _max_props = int((args or {}).get("max_proposals") or 5)
+                    _distiller = LongTermDistiller(
+                        episodic_store=_ep_store,
+                        ledger=_ledger_inst,
+                        max_proposals_per_cycle=_max_props,
+                    )
+                    result = _distiller.run_distillation_cycle(top_k=_top_k)
+                    return {"status": result.get("status", "OK"), "result": result}
+                except Exception as _exc:
+                    return {"status": "DEGRADED", "error": str(_exc)[:200]}
+
+            _brk2.register_handler("long_term_memory_distillation", _long_term_distillation_handler)
+            new_module_statuses["long_term_distillation_catalog"] = "OK (1 tool registered)"
+            logger.info("长期蒸馏工具已注册到 ToolCatalog")
+        except Exception as _lt_exc:
+            new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
+            logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
 
         report = build_startup_report(
             runtime_statuses=new_module_statuses,

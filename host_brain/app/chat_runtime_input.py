@@ -69,6 +69,7 @@ class ChatRuntimeInput:
     emotion_state: dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: dict[str, Any] = field(default_factory=dict)
     recall_slot_text: dict[str, str] = field(default_factory=dict)
+    bond_summary: dict[str, Any] = field(default_factory=dict)
     scene_type: str | None = None
     scene_type_source: str | None = None
     committed_route_token: str | None = None
@@ -134,6 +135,7 @@ def build_chat_runtime_input(
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
     recall_slot_text: Mapping[str, Any] | None = None,
+    bond_summary: Mapping[str, Any] | None = None,
     scene_type: str | None = None,
     scene_type_source: str | None = None,
     committed_route_token: str | None = None,
@@ -160,6 +162,7 @@ def build_chat_runtime_input(
         emotion_state=normalized_emotion_state,
         emotion_snapshot=normalized_emotion_snapshot,
         recall_slot_text=normalize_recall_slot_text(recall_slot_text),
+        bond_summary=dict(bond_summary) if isinstance(bond_summary, Mapping) else {},
         scene_type=(str(scene_type).strip().upper() if scene_type else None),
         scene_type_source=(str(scene_type_source).strip() if scene_type_source else None),
         committed_route_token=(str(committed_route_token).strip() if committed_route_token else None),
