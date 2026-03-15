@@ -99,6 +99,7 @@ class SpeechPlaybackQueue:
         item = {
             "request_id": request_id,
             "speak_event": speak.event,
+            "payload": dict(payload),
         }
         self._queue.append(item)
 
@@ -157,6 +158,7 @@ class SpeechPlaybackQueue:
         item = self._queue.popleft()
         request_id = str(item["request_id"])
         speak_event = dict(item["speak_event"])
+        payload = dict(item.get("payload") or {})
         session_id = str(speak_event.get("session_id") or "")
         seq = speak_event.get("seq")
 
@@ -300,6 +302,7 @@ class SpeechPlaybackQueue:
             "seq": seq,
             "utterance_id": speak_event.get("utterance_id"),
             "speak_event": speak_event,
+            "payload": payload,
             "synth_event": synth_event,
         }
         try:

@@ -21,6 +21,7 @@ from edge_client.runtime import (
     shutdown as runtime_shutdown,
     startup as runtime_startup,
 )
+from edge_client.actuators.vts_driver import VtsState
 from host_brain.core.errors import (
     CONFIG_VALUE_INVALID,
     EDGE_RPC_SCHEMA_INVALID,
@@ -466,7 +467,9 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
     )
     queue_result = pipeline_result.queue_result
     start_result = pipeline_result.start_result
-    vts_result = pipeline_result.vts_result
+    expression_result = pipeline_result.expression_result
+    talk_result = pipeline_result.talk_result
+    mouth_sync_debug = pipeline_result.mouth_sync_debug
 
     # Prefer the real playback-start result when available so Host can detect
     # synth/playback failures instead of only seeing "queued".
@@ -479,8 +482,12 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
         event["start_reason_code"] = start_result.reason_code
         event["start_stage"] = start_result.stage
         event["start_detail"] = start_result.detail
-    if vts_result is not None:
-        event["vts_result"] = vts_result.as_dict()
+    if expression_result is not None:
+        event["vts_expression_result"] = expression_result.as_dict()
+    if talk_result is not None:
+        event["vts_talk_result"] = talk_result.as_dict()
+    if mouth_sync_debug is not None:
+        event["vts_mouth_sync"] = dict(mouth_sync_debug)
 
     success = bool(queue_result.success and (start_result is None or start_result.success))
     detail = str(result.detail)
@@ -543,6 +550,18 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
                 detail="set_expression requires emotion_tag",
                 event={},
             )
+        if runtime.vts_driver.state != VtsState.AUTHENTICATED:
+            conn_result = runtime.vts_driver.connect()
+            if not conn_result.success:
+                event = conn_result.as_dict()
+                return EdgeGatewayResult(
+                    success=False,
+                    status=STATUS_REJECTED,
+                    reason_code=conn_result.reason_code,
+                    stage="S_EDGE_VTS",
+                    detail=conn_result.detail,
+                    event=event,
+                )
         result = runtime.vts_driver.set_expression(emotion)
     elif action == "reset":
         result = runtime.vts_driver.reset_to_neutral()

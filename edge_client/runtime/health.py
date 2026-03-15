@@ -40,6 +40,11 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
             detail_when_disabled="edge vts unavailable",
             component=getattr(runtime, "vts", None),
         ),
+        "voice_pipeline": _component_snapshot(
+            enabled=True,
+            detail_when_disabled="edge voice pipeline unavailable",
+            component=getattr(runtime, "voice_pipeline", None),
+        ),
         "fallback": _fallback_snapshot(runtime),
         "event_reporter": _component_snapshot(
             enabled=True,

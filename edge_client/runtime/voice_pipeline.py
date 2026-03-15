@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+import threading
+import time
 from typing import Any
 
 from edge_client.actuators.speech import (
@@ -11,13 +14,15 @@ from edge_client.actuators.speech import (
     SpeechPlaybackQueue,
     SpeechQueueResult,
 )
-from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult
+from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult, VtsState
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
 from edge_client.runtime.emotion_inference import infer_asr_emotion
 from host_brain.core.errors import VOICE_INTERRUPTED
 from host_brain.core.ids import now_ms
+
+LOGGER = logging.getLogger("Natsume.edge.voice_pipeline")
 
 
 @dataclass(frozen=True)
@@ -33,7 +38,9 @@ class EdgePlaybackResult:
     success: bool
     queue_result: SpeechQueueResult
     start_result: SpeechQueueResult | None
-    vts_result: VtsDriverResult | None
+    expression_result: VtsDriverResult | None
+    talk_result: VtsDriverResult | None
+    mouth_sync_debug: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,13 @@ class EdgeVoicePipeline:
         self.event_reporter = event_reporter
         self.vts_driver = vts_driver
         self.resource_gate = resource_gate
+        self._mouth_sync_stop = threading.Event()
+        self._mouth_sync_thread: threading.Thread | None = None
+        self._mouth_sync_debug: dict[str, Any] = {
+            "state": "idle",
+            "started": False,
+            "reason": "not_started",
+        }
 
     def asr_chunk(
         self,
@@ -114,36 +128,26 @@ class EdgeVoicePipeline:
             payload=payload,
             ts_ms=event_ts,
         )
+        self._report_voice_queue_result(request_id=request_id, result=queue_result)
         start_result: SpeechQueueResult | None = None
-        vts_result: VtsDriverResult | None = None
+        expression_result: VtsDriverResult | None = None
+        talk_result: VtsDriverResult | None = None
+        mouth_sync_debug: dict[str, Any] | None = None
 
         if queue_result.success and auto_start:
             start_result = self.speech_queue.start_next(ts_ms=event_ts)
+            self._report_voice_queue_result(request_id=request_id, result=start_result)
             if (
                 start_result is not None
                 and start_result.success
                 and start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
-                and self.vts_driver is not None
             ):
-                # M26-E：先触发 emotion_tag 表情，再开启 talk gate
-                emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-                # M26-I：提取 emotion_intensity，超出范围时截断到 [0.0, 1.0]
-                raw_intensity = payload.get("emotion_intensity")
-                intensity = 0.5
-                if raw_intensity is not None:
-                    try:
-                        intensity = max(0.0, min(1.0, float(raw_intensity)))
-                    except (TypeError, ValueError):
-                        intensity = 0.5
-                self.vts_driver.set_expression(emotion_tag, intensity=intensity)
-                # M26-H：若 payload 含 sub_emotion，额外触发对应细粒度热键
-                sub_emotion = payload.get("sub_emotion")
-                if sub_emotion:
-                    from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
-                    hotkey_id = sub_emotion_to_hotkey(sub_emotion)
-                    if hotkey_id:
-                        self.vts_driver.trigger_hotkey(hotkey_id)
-                vts_result = self.vts_driver.talk_start()
+                active = self.speech_queue.active_playback or {}
+                synth_event = dict(active.get("synth_event") or {})
+                expression_result, talk_result, mouth_sync_debug = self._start_vts_for_payload(
+                    payload,
+                    synth_event=synth_event,
+                )
 
         success = bool(
             queue_result.success
@@ -156,19 +160,41 @@ class EdgeVoicePipeline:
             success=success,
             queue_result=queue_result,
             start_result=start_result,
-            vts_result=vts_result,
+            expression_result=expression_result,
+            talk_result=talk_result,
+            mouth_sync_debug=mouth_sync_debug,
         )
 
     def complete_playback(self, *, ts_ms: int | None = None) -> SpeechQueueResult | None:
         event_ts = int(ts_ms if ts_ms is not None else now_ms())
         result = self.speech_queue.complete_active(ts_ms=event_ts)
+        self._report_voice_queue_result(
+            request_id=str(result.event.get("request_id") or "") if result is not None else "",
+            result=result,
+        )
         if (
             result is not None
             and result.success
             and result.event.get("event_type") == EVENT_TTS_PLAYBACK_FINISHED
             and self.vts_driver is not None
         ):
-            self.vts_driver.talk_end()
+            self._stop_mouth_sync()
+            self.vts_driver.reset_to_neutral()
+        if result is not None and result.success:
+            next_start_result = self.speech_queue.start_next(ts_ms=event_ts)
+            self._report_voice_queue_result(
+                request_id=str(result.event.get("request_id") or ""),
+                result=next_start_result,
+            )
+            if (
+                next_start_result is not None
+                and next_start_result.success
+                and next_start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
+            ):
+                active = self.speech_queue.active_playback or {}
+                payload = dict(active.get("payload") or active.get("speak_event") or {})
+                synth_event = dict(active.get("synth_event") or {})
+                self._start_vts_for_payload(payload, synth_event=synth_event)
         return result
 
     def barge_in(
@@ -190,6 +216,7 @@ class EdgeVoicePipeline:
             and barge_result.reason_code == VOICE_INTERRUPTED
             and self.vts_driver is not None
         ):
+            self._stop_mouth_sync()
             vts_result = self.vts_driver.reset_to_neutral()
         return EdgeBargeInResult(
             success=barge_result.success,
@@ -250,6 +277,41 @@ class EdgeVoicePipeline:
             report_event["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
         return self.event_reporter.report([report_event])
 
+    def _report_voice_queue_result(
+        self,
+        *,
+        request_id: str,
+        result: SpeechQueueResult | None,
+    ) -> BatchReportResult | None:
+        if result is None:
+            return None
+        event = dict(result.event or {})
+        event_type = str(event.get("event_type") or "").strip()
+        session_id = str(event.get("session_id") or "").strip()
+        if not event_type or not session_id:
+            return None
+        report_event = {
+            "event_type": event_type,
+            "ts_ms": int(event.get("ts_ms") or now_ms()),
+            "request_id": str(event.get("request_id") or request_id or ""),
+            "session_id": session_id,
+            "source": "edge",
+            "direction": "EDGE_TO_HOST",
+            "seq": event.get("seq"),
+            "status": result.status,
+            "reason_code": result.reason_code,
+            "stage": result.stage,
+            "detail": result.detail,
+            "payload": {
+                **event,
+                **self._resource_metrics(),
+            },
+        }
+        report_result = self.event_reporter.report([report_event])
+        if report_result.success:
+            self.event_reporter.flush_cache()
+        return report_result
+
     def _resource_metrics(self) -> dict[str, Any]:
         queue_depth = int(self.speech_queue.queue_depth)
         if self.resource_gate is None:
@@ -264,6 +326,223 @@ class EdgeVoicePipeline:
             "vram_total_mb": int(metrics.get("vram_total_mb", 0)),
             "vram_used_mb": int(metrics.get("vram_used_mb", 0)),
             "queue_depth": queue_depth,
+        }
+
+    def _start_vts_for_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        synth_event: dict[str, Any] | None = None,
+    ) -> tuple[VtsDriverResult | None, VtsDriverResult | None, dict[str, Any] | None]:
+        if self.vts_driver is None:
+            self._mouth_sync_debug = {
+                "state": "skipped",
+                "started": False,
+                "reason": "vts_driver_unavailable",
+            }
+            return None, None, dict(self._mouth_sync_debug)
+        self._stop_mouth_sync()
+        if self.vts_driver.state != VtsState.AUTHENTICATED:
+            conn_result = self.vts_driver.connect()
+            if not conn_result.success:
+                self._mouth_sync_debug = {
+                    "state": "blocked",
+                    "started": False,
+                    "reason": "vts_connect_failed",
+                    "detail": conn_result.detail,
+                }
+                return conn_result, None, dict(self._mouth_sync_debug)
+        emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        raw_intensity = payload.get("emotion_intensity")
+        intensity = 0.5
+        if raw_intensity is not None:
+            try:
+                intensity = max(0.0, min(1.0, float(raw_intensity)))
+            except (TypeError, ValueError):
+                intensity = 0.5
+        if emotion_tag == "NEUTRAL":
+            expression_result = self.vts_driver.reset_to_neutral()
+        else:
+            self.vts_driver.reset_to_neutral()
+            expression_result = self.vts_driver.set_expression(emotion_tag, intensity=intensity)
+        sub_emotion = payload.get("sub_emotion")
+        if sub_emotion:
+            from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
+
+            hotkey_id = sub_emotion_to_hotkey(sub_emotion)
+            if hotkey_id:
+                self.vts_driver.trigger_hotkey(hotkey_id)
+        talk_result = self.vts_driver.talk_start()
+        mouth_sync_debug = {
+            "state": "talk_started" if talk_result.success else "talk_failed",
+            "started": False,
+            "emotion_tag": emotion_tag,
+            "intensity": round(float(intensity), 4),
+        }
+        if synth_event and talk_result.success:
+            mouth_sync_debug = self._start_mouth_sync(synth_event)
+        elif not synth_event:
+            mouth_sync_debug["reason"] = "missing_synth_event"
+        self._mouth_sync_debug = dict(mouth_sync_debug)
+        return expression_result, talk_result, dict(mouth_sync_debug)
+
+    def _stop_mouth_sync(self) -> None:
+        self._mouth_sync_stop.set()
+        thread = self._mouth_sync_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=0.2)
+        self._mouth_sync_thread = None
+        self._mouth_sync_stop = threading.Event()
+        current_state = str(self._mouth_sync_debug.get("state") or "")
+        if current_state == "running":
+            self._mouth_sync_debug = {
+                **self._mouth_sync_debug,
+                "state": "stopped",
+            }
+
+    def _start_mouth_sync(self, synth_event: dict[str, Any]) -> dict[str, Any]:
+        if self.vts_driver is None:
+            debug = {
+                "state": "skipped",
+                "started": False,
+                "reason": "vts_driver_unavailable",
+            }
+            self._mouth_sync_debug = dict(debug)
+            return debug
+        audio_data = synth_event.get("audio_data")
+        sample_rate_raw = synth_event.get("sample_rate")
+        try:
+            sample_rate = int(sample_rate_raw)
+        except (TypeError, ValueError):
+            sample_rate = 0
+        envelope = self._build_mouth_envelope(audio_data, sample_rate)
+        debug = {
+            "state": "prepared",
+            "started": False,
+            "audio_type": type(audio_data).__name__,
+            "sample_rate": sample_rate,
+            "envelope_points": len(envelope),
+            "source": "synth_event.audio_data",
+        }
+        if not envelope:
+            debug["state"] = "skipped"
+            debug["reason"] = "empty_envelope"
+            self._mouth_sync_debug = dict(debug)
+            LOGGER.warning("mouth sync skipped: %s", debug)
+            return debug
+        debug["envelope_min"] = round(min(envelope), 4)
+        debug["envelope_max"] = round(max(envelope), 4)
+        debug["envelope_avg"] = round(sum(envelope) / len(envelope), 4)
+
+        stop_event = self._mouth_sync_stop
+        frame_interval_s = max(0.02, min(0.08, 1.0 / 24.0))
+        debug["frame_interval_s"] = round(frame_interval_s, 4)
+        debug["state"] = "running"
+        debug["started"] = True
+        debug["frames_sent"] = 0
+        debug["last_value"] = 0.0
+        self._mouth_sync_debug = dict(debug)
+
+        def _runner() -> None:
+            for value in envelope:
+                if stop_event.is_set():
+                    break
+                result = self.vts_driver.set_mouth_open_level(value)
+                debug["frames_sent"] = int(debug.get("frames_sent") or 0) + 1
+                debug["last_value"] = round(float(value), 4)
+                if not result.success:
+                    debug["last_error"] = result.detail
+                time.sleep(frame_interval_s)
+            if not stop_event.is_set():
+                self.vts_driver.set_mouth_open_level(0.0)
+                debug["state"] = "finished"
+            else:
+                debug["state"] = "stopped"
+            self._mouth_sync_debug = dict(debug)
+
+        self._mouth_sync_thread = threading.Thread(
+            target=_runner,
+            name="edge-vts-mouth-sync",
+            daemon=True,
+        )
+        self._mouth_sync_thread.start()
+        LOGGER.info("mouth sync started: %s", debug)
+        return dict(debug)
+
+    @staticmethod
+    def _build_mouth_envelope(audio_data: Any, sample_rate: int) -> list[float]:
+        if audio_data is None or sample_rate <= 0:
+            return []
+        samples = EdgeVoicePipeline._coerce_audio_samples(audio_data)
+        if not samples:
+            return []
+
+        peak = max(samples)
+        if peak <= 0.0:
+            return []
+
+        frame_size = max(1, int(sample_rate / 24))
+        values: list[float] = []
+        smooth = 0.0
+        for start in range(0, len(samples), frame_size):
+            chunk = samples[start : start + frame_size]
+            if not chunk:
+                continue
+            amplitude = (sum(chunk) / len(chunk)) / peak
+            target = max(0.0, min(1.0, amplitude * 3.2))
+            if target > 0.03:
+                target = max(0.14, target)
+            smooth = (smooth * 0.35) + (target * 0.65)
+            values.append(round(max(0.0, min(1.0, smooth)), 4))
+        return values
+
+    @staticmethod
+    def _coerce_audio_samples(audio_data: Any) -> list[float]:
+        try:
+            import numpy as np  # type: ignore[import]
+
+            arr = np.asarray(audio_data, dtype=float)
+            if arr.size == 0:
+                return []
+            if arr.ndim > 1:
+                arr = np.mean(np.abs(arr), axis=1)
+            else:
+                arr = np.abs(arr)
+            return [float(value) for value in arr.tolist()]
+        except Exception:
+            pass
+
+        raw = audio_data
+        if hasattr(raw, "tolist"):
+            try:
+                raw = raw.tolist()
+            except Exception:
+                return []
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            return []
+        if not isinstance(raw, (list, tuple)):
+            return [abs(float(raw))] if isinstance(raw, (int, float)) else []
+
+        values: list[float] = []
+        for item in raw:
+            if isinstance(item, (int, float)):
+                values.append(abs(float(item)))
+                continue
+            if isinstance(item, (list, tuple)):
+                channel_values = [
+                    abs(float(channel))
+                    for channel in item
+                    if isinstance(channel, (int, float))
+                ]
+                if channel_values:
+                    values.append(sum(channel_values) / len(channel_values))
+        return values
+
+    def health(self) -> dict[str, Any]:
+        thread = self._mouth_sync_thread
+        return {
+            "mouth_sync": dict(self._mouth_sync_debug),
+            "mouth_sync_thread_alive": bool(thread is not None and thread.is_alive()),
         }
 
     def _resolve_asr_emotion_report(self, event: dict[str, Any]) -> dict[str, Any]:
