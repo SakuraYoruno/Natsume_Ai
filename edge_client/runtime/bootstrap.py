@@ -17,6 +17,8 @@ from edge_client.actuators.tts_engine import (
     make_sovits_synthesizer,
 )
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
+from edge_client.channels.input_reporter import EdgeInputReporter
+from edge_client.channels.wechat_listener import WeChatListener, WeChatListenerConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
@@ -44,6 +46,7 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
+    wechat_listener: WeChatListener | None = None
 
     @property
     def asr(self) -> AsrService | None:
@@ -82,6 +85,7 @@ class EdgeRuntime:
             "tts_playback_stopped": True,
             "tts_unloaded": True,
             "vts_disconnected": True,
+            "wechat_listener_stopped": True,
             "errors": [],
         }
 
@@ -115,6 +119,13 @@ class EdgeRuntime:
             except Exception as exc:  # pragma: no cover - defensive shutdown
                 outcome["vts_disconnected"] = False
                 outcome["errors"].append(f"vts disconnect failed: {exc}")
+
+        if self.wechat_listener is not None:
+            try:
+                self.wechat_listener.stop()
+            except Exception as exc:  # pragma: no cover
+                outcome["wechat_listener_stopped"] = False
+                outcome["errors"].append(f"wechat listener stop failed: {exc}")
 
         return outcome
 
@@ -422,6 +433,54 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     if asr_service is not None:
         asr_service.set_rpc_event_callback(voice_pipeline.on_asr_rpc_result)
 
+    wechat_listener: WeChatListener | None = None
+    wechat_enabled = _parse_bool(
+        _env_get(env_lookup, "EDGE_WECHAT_LISTENER_ENABLED"),
+        default=False,
+    )
+    if wechat_enabled and event_report_host_url:
+        try:
+            input_reporter = EdgeInputReporter(
+                host_url=event_report_host_url,
+                hmac_key=config.hmac_shared_key,
+                timeout_s=5.0,
+            )
+            input_reporter.start_retry_loop()
+
+            def _on_wechat_msg(msg: Any) -> None:
+                input_reporter.report_wechat(
+                    from_wxid=msg.from_wxid,
+                    to_wxid=msg.to_wxid,
+                    content=msg.content,
+                    msg_type=msg.msg_type,
+                    msg_id=msg.msg_id,
+                    room_wxid=msg.room_wxid,
+                    ts_ms=msg.ts_ms,
+                    raw_extra=msg.raw_extra or None,
+                )
+
+            wechat_listener = WeChatListener(
+                config=WeChatListenerConfig(
+                    self_wxid=_as_optional_text(_env_get(env_lookup, "EDGE_WECHAT_SELF_WXID")),
+                    private_only=_parse_bool(
+                        _env_get(env_lookup, "EDGE_WECHAT_PRIVATE_ONLY"),
+                        default=False,
+                    ),
+                    text_only=_parse_bool(
+                        _env_get(env_lookup, "EDGE_WECHAT_TEXT_ONLY"),
+                        default=True,
+                    ),
+                ),
+                on_message=_on_wechat_msg,
+            )
+            wechat_listener.start()
+            LOGGER.info(
+                "WeChatListener started (host_url=%s); POST to /v1/edge/wechat/callback to push messages",
+                event_report_host_url,
+            )
+        except Exception as exc:  # pragma: no cover
+            LOGGER.warning("WeChatListener not started: %s", exc)
+
     return EdgeRuntime(
         config=config,
         voice_rpc=voice_rpc,
@@ -434,6 +493,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_model=tts_model,
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
+        wechat_listener=wechat_listener,
     )
 
 
