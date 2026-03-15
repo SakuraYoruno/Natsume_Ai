@@ -55,6 +55,10 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = load_runtime_emotion_mapping()
 DEFAULT_MOUTH_PARAM_CANDIDATES = ("MouthOpen", "ParamMouthOpenY")
 DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES = ("VoiceVolumePlusMouthOpen", "VoiceVolume")
 DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES = ("VoiceSilence",)
+UNSAFE_GLOBAL_RESET_HOTKEY_SELECTORS = {
+    "移除所有按键表情",
+    "hotkey_reset_all",
+}
 
 # Backward-compatible single-name aliases.
 VTS_MOUTH_PARAM = DEFAULT_MOUTH_PARAM_CANDIDATES[0]
@@ -358,6 +362,15 @@ class VTubeStudioDriver:
                 configured_hotkey=configured_hotkey,
                 timeout_s=self._config.api_timeout_s,
             )
+            if self._current_expression in {resolved_label, resolved_hotkey_id, configured_hotkey}:
+                return VtsDriverResult(
+                    success=True,
+                    reason_code=None,
+                    detail=f"expression already active: {resolved_label} ({resolved_hotkey_id})",
+                    action="set_expression",
+                    expression_id=resolved_hotkey_id,
+                    emotion_tag=normalized,
+                )
             _trigger_vts_hotkey(
                 vts=self._vts,
                 hotkey_id=resolved_hotkey_id,
@@ -394,7 +407,21 @@ class VTubeStudioDriver:
     def reset_to_neutral(self) -> VtsDriverResult:
         """Reset expression to NEUTRAL (used after barge-in or end of talk)."""
         self._talking = False
-        result = self.set_expression("NEUTRAL")
+        configured_hotkey = str(EMOTION_TO_EXPRESSION_ID.get("NEUTRAL") or "").strip()
+        if _is_unsafe_global_reset_hotkey(configured_hotkey):
+            result = VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail=(
+                    "neutral hotkey skipped because it is a global reset "
+                    "and may overwrite manual VTS toggles"
+                ),
+                action="reset_to_neutral",
+                expression_id=configured_hotkey or None,
+                emotion_tag="NEUTRAL",
+            )
+        else:
+            result = self.set_expression("NEUTRAL")
 
         # 鍚屾椂鍏抽棴鍢村反
         if self._state == VtsState.AUTHENTICATED:
@@ -941,6 +968,15 @@ def _build_mouth_parameter_payload(plan: dict[str, Any], normalized: float) -> d
         VTS_MOUTH_PLUS_VOLUME_PARAM: normalized,
         VTS_VOICE_SILENCE_PARAM: 1.0,
     }
+
+
+def _is_unsafe_global_reset_hotkey(selector: str) -> bool:
+    normalized = str(selector or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in {item.lower() for item in UNSAFE_GLOBAL_RESET_HOTKEY_SELECTORS}:
+        return True
+    return "reset_all" in normalized
 
 
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
