@@ -40,7 +40,7 @@
 - 文档：PRD、DevSpec、Test Plan、Release/Rollback、Schema/协议说明。  
 - 模块边界：Host/Edge/Skills/ToolBroker/通道外显的接口契约（字段级）。  
 - 状态机：sys_mode、Governor 流程状态、票据/确认/撤销（undo）。  
-- 协议定义：context_pack_json、LLM 输出 JSON、Intent 草案、审计记录格式、版本策略。  
+- 协议定义：prompt_context_json、LLM 输出 JSON、Intent 草案、审计记录格式、版本策略。  
 - 验收标准：指标阈值、测试用例集（T-xx）、失败模式与降级策略。
 
 RACI

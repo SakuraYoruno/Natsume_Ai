@@ -1,7580 +1,2451 @@
-受众：CODEX
-标题：DevTasks（任务清单：唯一可执行任务来源）
+﻿鍙椾紬锛欳ODEX
+鏍囬锛欴evTasks锛堜换鍔℃竻鍗曪細鍞竴鍙墽琛屼换鍔℃潵婧愶級
 
-版本：v1.8
-日期：2026-03-04
+鐗堟湰锛歷1.8
+鏃ユ湡锛?026-03-04
 
-本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+鏈枃浠跺彧鍖呭惈鈥淐odex 鍙墽琛屼换鍔℃潯鐩€濄€備换鍔℃潯鐩繀椤绘潵鑷?DevSpec 鐨勫伐绋嬪绾︽媶瑙ｏ紝骞跺弽鍚戝紩鐢?PRD 鐨?FR 缂栧彿涓庢祴璇曠紪鍙?T-鈥︼紱涓嶅緱鍦ㄦ湰鏂囦欢涓璁虹櫧鐨功/PRD 鐨勬枃瀛楄В閲娿€?
+## 0. 浠诲姟鍒楄〃涓庡叾瀹冩枃妗ｇ殑鍏崇郴锛堝己鍒讹級
 
-## 0. 任务列表与其它文档的关系（强制）
+鐧界毊涔︼細娉曞緥涓庣浠わ紝涓嶄骇鍑轰换鍔°€?PRD锛氶渶姹備笌楠屾敹锛屼笉浜у嚭浠诲姟銆?DevSpec锛氬伐绋嬪绾︿笌楠岃瘉鍙ｅ緞锛屾槸浠诲姟鎷嗚В鐨勫敮涓€鏉ユ簮銆?DevTasks锛氫换鍔″崱娓呭崟锛屾槸 Codex 鐨勫敮涓€宸ヤ綔鍏ュ彛銆?Trace锛氬闃呰鐩栧叧绯伙紝涓嶄綔涓轰换鍔℃潵婧愩€?
+### 1. 缂栧彿瑙勮寖
 
-白皮书：法律与禁令，不产出任务。
-PRD：需求与验收，不产出任务。
-DevSpec：工程契约与验证口径，是任务拆解的唯一来源。
-DevTasks：任务卡清单，是 Codex 的唯一工作入口。
-Trace：审阅覆盖关系，不作为任务来源。
+闇€姹傜紪鍙凤紙PRD锛夛細FR-鍩?缂栧彿锛堜緥锛欶R-GOV-003锛?娴嬭瘯缂栧彿锛圖evSpec/TESTPLAN锛夛細T-缂栧彿锛堜緥锛歍-18锛?浠诲姟缂栧彿锛圖evTasks锛夛細TASK-鍥涗綅鏁板瓧锛堜緥锛歍ASK-0123锛?
+### 2. 浠诲姟鍗℃牸寮忥紙姣忔潯蹇呴』瀹屾暣锛?
+TASK-XXXX 鏍囬
+浠诲姟鎻忚堪锛氫竴鍙ヨ瘽璇存槑瑕佽揪鎴愮殑宸ョ▼缁撴灉锛堜笉鍐欏懡浠わ紝涓嶅啓宸ヤ綔娴佹寚鎸ワ級銆?杈撳叆锛氬凡鏈夋ā鍧?鏃㈡湁鏁版嵁缁撴瀯/鏃㈡湁鏂囨。绔犺妭銆?杈撳嚭锛氭柊澧?淇敼鐨勬帴鍙ｃ€丼chema銆佹棩蹇楃偣銆佹祴璇曠偣銆佹枃妗ｆ洿鏂扮偣銆?楠屾敹鏍囧噯锛氬繀椤诲彲楠岃瘉锛屼紭鍏堝紩鐢?T-缂栧彿锛涘苟鍐欐槑鍏抽敭鏂█鐐癸紙瀛楁/鎷掔粷鐮?瀹¤璁板綍锛夈€?娑夊強鏂囦欢璺緞锛氬垪鍑哄皢瑙﹁揪鐨勮矾寰勶紙鍏佽鏂板鏂囦欢璺緞锛屼絾涓嶅啓浠讳綍鍛戒护锛夈€?鍏宠仈闇€姹?娴嬭瘯锛欶R-鈥︼紱T-鈥︼紱锛堝彲閫夛級涓嶅彉閲?I-鈥?
+---
 
-### 1. 编号规范
+## 3. 浠诲姟娓呭崟锛堜粠绌虹洰褰曞紑濮嬶級
 
-需求编号（PRD）：FR-域-编号（例：FR-GOV-003）
-测试编号（DevSpec/TESTPLAN）：T-编号（例：T-18）
-任务编号（DevTasks）：TASK-四位数字（例：TASK-0123）
+### TASK-0000 浠撳簱楠ㄦ灦钀藉湴锛堜粠绌虹洰褰曞紑濮嬶細鐩綍鏍?鍗犱綅鏂囦欢+绱㈠紩鍏ュ彛锛?- 浠诲姟鎻忚堪锛氭妸 DevSpec 鐩綍楠ㄦ灦涓庡叧閿叆鍙ｆ枃浠惰惤鍒颁粨搴撲腑锛岀‘淇濆悗缁换鍔℃湁绋冲畾钀界偣锛涘苟淇濊瘉鈥滄棤 secrets 涔熷彲杩涘叆鍐峰惎鍔紙M0锛夊紑鍙戞€佲€濈殑閰嶇疆鍗犱綅瀛樺湪銆?- 杈撳叆锛欴evSpec 1.1锛堢洰褰曟爲锛夈€丏evSpec 1.4锛堢洰褰曡亴璐ｇ孩绾匡級銆丏evSpec 1.2.1锛堝喎鍚姩绛栫暐锛夈€?- 杈撳嚭锛?  - 缂哄け鐩綍涓庡叧閿崰浣嶆枃浠讹紱
+  - Flow 鎸囬拡鏂囦欢锛坒lows/active.pointer锛夛紱
+  - Flow Trace 绱㈠紩锛坉ocs/60_trace/flows/index.md锛夛紱
+  - TESTPLAN 鍗犱綅锛坱ests/TESTPLAN.md锛夛紱
+  - secret 妯℃澘鏂囦欢锛堜緥濡?.env.example 鎴栫瓑浠锋ā鏉挎枃浠讹細鍙寘鍚彉閲忓悕涓庣ず渚嬶紝涓嶅惈鐪熷疄瀵嗛挜锛夛紝鐢ㄤ簬鏀拺鈥滄湭閰嶇疆 API Key 鐨勫喎鍚姩褰㈡€佲€濄€?- 楠屾敹鏍囧噯锛?  - 鐩綍涓庢枃浠跺瓨鍦ㄦ€у彲瀹￠槄锛?  - active.pointer 涓哄崟涓悎娉?JSON锛屽寘鍚?dev/staging/prod 涓夐敭锛?  - flows/index.md 鍚寜鐜琛岋紱
+  - secret 妯℃澘鏂囦欢涓嶅寘鍚湡瀹炲瘑閽ワ紝涓旇兘琛ㄨ揪鈥滄湭閰嶇疆 key 鏃剁郴缁熻繘鍏ラ檷绾?鏇夸唬璺緞鈥濈殑閰嶇疆鍙ｅ緞锛堜笉瑕佹眰鍙敤鎬х粨璁猴紝浣嗚姹傚彛寰勬槑纭級銆?- 娑夊強鏂囦欢璺緞锛歠lows/exports/锛沠lows/active.pointer锛沝ocs/60_trace/flows/index.md锛泃ests/TESTPLAN.md锛沺rompts/llm_contract/锛沨ost_brain/锛沞dge_client/锛泃ools/**锛涳紙鍙€夛級.env.example銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FLOW-001锛汧R-CORE-004锛汿-Flow-01銆乀-Flow-02銆?
+### TASK-0001 娴嬭瘯楠ㄦ灦锛歝ontract/e2e/fixtures/TESTPLAN 鐨勬渶灏忛棴鐜?- 浠诲姟鎻忚堪锛氬缓绔?tests/contract銆乼ests/e2e銆乼ests/fixtures 鐨勭粨鏋勪笌鏈€灏忔柇瑷€妯℃澘锛岀‘淇濆悗缁瘡涓换鍔￠兘鏈夊彲鎸傝浇鐨勬祴璇曡惤鐐癸紱骞惰ˉ榻愬喎鍚姩鎵€闇€鐨?fixtures锛堟棤 key / 渚濊禆缂哄け / 杈撳嚭浠嶇ǔ瀹氾級銆?- 杈撳叆锛欴evSpec 11锛堝悎瑙勬祴璇曞彛寰勶級銆丏evSpec 1.1锛坱ests 鐩綍绾﹀畾锛夈€丏evSpec 1.2.1锛堝喎鍚姩绛栫暐锛夈€?- 杈撳嚭锛?  - TESTPLAN 缂栧彿琛ㄦā鏉匡紱
+  - contract 娴嬭瘯鍗犱綅锛堟寜 Schema/鏋氫妇/鎸囬拡涓€鑷存€у垎缁勶級锛?  - e2e 鏈€灏忛摼璺祴璇曞崰浣嶏紱
+  - fixtures锛坓ood/bad intent銆乥ad llm output銆乺eplay logs锛夌洰褰曠粨鏋勶紱
+  - 鍐峰惎鍔?fixtures锛氳嚦灏戝寘鍚?鈥滄棤 API Key/澶栭儴渚濊禆涓嶅彲鐢ㄢ€?鐨勬牱渚嬭緭鍏ヤ笌鏈熸湜杈撳嚭缁撴瀯锛堥噸鐐规槸 stage 涓?reason_code 鍙ｅ緞锛岃€屼笉鏄墽琛屾垚鍔燂級銆?- 楠屾敹鏍囧噯锛?  - TESTPLAN 涓瓨鍦ㄧ紪鍙锋钀斤紙T-Flow/T-Intent/T-LLM/T-Audit/T-QA 绛夎嚦灏戝垪鍑哄崰浣嶆潯鐩級锛?  - fixtures 鐩綍鍏峰鏈€灏忔牱渚嬫枃浠讹紙鍙负绌哄唴瀹逛絾鍛藉悕涓庡瓧娈电粨鏋勬槑纭級锛?  - 鍐峰惎鍔?fixtures 浣撶幇锛氳緭鍑轰粛涓哄崟涓悎娉?JSON銆佷笖鍏峰 quality.stage 涓?reason_code锛堝綋閫傜敤锛夈€?- 娑夊強鏂囦欢璺緞锛歵ests/TESTPLAN.md锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/**銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-002锛汧R-CORE-004锛汿-Flow-01~02锛堣嚦灏戣惤鍗犱綅锛夛紱T-14銆乀-15锛堣嚦灏戣惤鍗犱綅锛夛紱T-LLM-01锛堣嚦灏戣惤鍗犱綅锛夈€?
+#### TASK-0002 Flow 璧勪骇锛歟xports 褰掓。 + active.pointer + Trace 绱㈠紩涓€鑷存€?- 浠诲姟鎻忚堪锛氭妸 Flow 璧勪骇浣滀负鍙儴缃查厤缃祫浜х撼鍏ョ増鏈寲涓庡彲杩芥函闂幆锛屽苟鍥哄寲鈥滄寚閽堚€旂储寮曚竴鑷存€р€濈殑鍥炲綊鏂█銆?- 杈撳叆锛欴evSpec 1.5锛汸RD FR-FLOW-001銆?- 杈撳嚭锛歠lows/exports 褰掓。绾﹀畾锛堢洰褰曞懡鍚?鐗堟湰鏍囩锛夛紱active.pointer JSON 濂戠害锛沝ocs/60_trace/flows/index.md 鐨勪竴鑷存€ц鍒欙紱fixtures锛堢ず渚嬫寚閽堜笌绱㈠紩閰嶅锛夈€?- 楠屾敹鏍囧噯锛歍-Flow-01锛堟寚閽堝悎娉曟€?瀛樺湪鎬э級銆乀-Flow-02锛堢储寮曚竴鑷存€э級鍙鏂█锛涗换鎰忕幆澧冨彲浠?active.pointer 涓?index.md 鍞竴纭畾鈥滃綋鍓嶇敓鏁?Flow 璧勪骇鈥濄€?- 娑夊強鏂囦欢璺緞锛歠lows/exports/锛沠lows/active.pointer锛沝ocs/60_trace/flows/index.md锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FLOW-001锛汿-Flow-01~02銆?
+#### TASK-0003 LLM 杈撳嚭濂戠害锛歋trict JSON + 杈撳嚭瀛楁绾︽潫 + lint + fixtures
+- 浠诲姟鎻忚堪锛氬浐鍖栤€淟LM鈫扝ost鈥濈殑 Strict JSON 杈撳嚭濂戠害锛屽苟鎻愪緵 lint 涓?good/bad fixtures锛屼綔涓?QA 涓庡洖褰掔殑鍏卞悓杈撳叆婧愩€?- 杈撳叆锛欴evSpec 0.4銆丏evSpec 9锛圦A锛夈€丳RD FR-CORE-002~003銆?- 杈撳嚭锛氭牳蹇冭緭鍑哄绾︼紙narrative銆乮ntent_draft銆乵eta锛夛紱lint 瑙勫垯锛堝崟 JSON銆佸瓧娈靛瓨鍦ㄦ€с€佺姝㈠墠鍚庣紑锛夛紱fixtures锛坓ood/bad锛氬娈?JSON/澶规潅鏂囨湰/缂哄瓧娈?浼墽琛屽彞锛夈€?- 楠屾敹鏍囧噯锛歍-LLM-01锛堣緭鍑哄彲瑙ｆ瀽鎬т笌 lint 瑙勫垯锛夐€氳繃锛沚ad fixtures 鍧囪鍒ゅ畾涓轰笉鍚堣骞朵骇鐢熷彲缁熻 violation銆?- 娑夊強鏂囦欢璺緞锛歱rompts/llm_contract/core_output_contract.json锛沨ost_brain/core/qa.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-002~003锛汿-LLM-01锛汭13銆?
+#### TASK-0004 PromptContext 濂戠害锛氬垎妲介殧绂?+ world/style/episodic 鍙ｅ緞 + tool_meta_pack 棰勭暀
+- 浠诲姟鎻忚堪锛氬浐鍖?Host鈫扡LM 鐨?prompt_context 鍒嗘Ы缁撴瀯锛岀‘淇濅簨瀹?鏉冨▉鍐呭/椋庢牸/绾跨储涓ユ牸闅旂锛屽苟棰勭暀 tool_meta_pack锛堜粎鍏冩暟鎹級銆?- 杈撳叆锛欴evSpec 7锛汸RD FR-CANON-001銆丗R-WCANON-001~003銆丗R-BOND-003銆?- 杈撳嚭锛歝ontext_pack 瀛楁缁撴瀯鍙ｅ緞锛坔ard_snapshot/bond_summary/authoritative/retrieval/style_pack/constraints/tool_meta_pack锛夛紱娣锋Ы鍒ゅ畾瑙勫垯锛沠ixtures锛堟贩妲?瓒婃潈寮曠敤/Canon-as-fact锛夈€?- 楠屾敹鏍囧噯锛歍-CP-01锛堝垎妲介殧绂伙級閫氳繃锛涙贩妲借緭鍏ヨЕ鍙?QA/contract 鎷︽埅锛汢ond Summary 涓嶅惈鏁板€笺€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/prompt_context.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CANON-001锛汧R-WCANON-001~003锛汧R-BOND-003锛汿-CP-01銆?
+#### TASK-0005 Intent 濂戠害锛氬鏉捐В鏋?+ 涓ユ牸鏍￠獙锛堝惈閲嶆斁/椤哄簭/杩囨湡锛?- 浠诲姟鎻忚堪锛氬舰鎴愬彲澶嶇敤鐨?Intent 瑙ｆ瀽涓庢牎楠屽绾︼紝纭繚鈥滃彧淇娉曚笉琛ヨ涔夆€濓紝骞舵妸鏍￠獙澶辫触绋冲畾鏄犲皠涓?reason_code锛屽彲瀹¤鍥炴斁銆?- 杈撳叆锛欴evSpec 3锛汸RD FR-INTENT-001~003銆?- 杈撳嚭锛欼ntent Schema/鏍￠獙鎺ュ彛钀界偣锛涘け璐モ啋reason_code 鏄犲皠鍙ｅ緞锛涘璁″瓧娈碉紙session_id/seq/nonce/ts_ms锛夎褰曞彛寰勶紱fixtures锛坓ood/bad锛夈€?- 楠屾敹鏍囧噯锛歍-18~T-22 閫氳繃锛涘悓涓€瑙勫垯鐗堟湰涓嬪悓绫诲け璐?reason_code 绋冲畾锛沢overnor_log 鍙畾浣嶅け璐ョ被鍨嬶紙REPLAY/SEQ/EXPIRED锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/governor/schemas.py锛沨ost_brain/governor/decision.py锛沨ost_brain/core/ids.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-INTENT-001~003锛汿-18~T-22锛汭7銆?
+#### TASK-0006 Intent responsibility锛歩ntent_log锛坧roposal锛夊瓧娈佃ˉ榻愶紙proposer 鍏冧俊鎭?+ tool_visibility_hash锛?- 浠诲姟鎻忚堪锛氭妸鈥滆皝鎻愯浜嗕粈涔堚€濆浐鍖栦负 intent_log 鏈€灏忓瓧娈甸泦锛屽苟淇濊瘉涓?governor_log/skill_exec_log 鍒嗙銆?- 杈撳叆锛欴evSpec锛坕ntent_log 濂戠害锛夈€丳RD FR-AUDIT-001锛圱riptych锛夈€丳RD锛圛ntent responsibility 闇€姹傛潯鐩嫢宸插姞鍏ワ級銆?- 杈撳嚭锛歩ntent_log 瀛楁鍙ｅ緞锛坧roposer_node_id/model_snapshot/prompt_profile_id/tool_visibility_hash/proposed_intent_draft/lint_result锛夛紱fixtures锛堝 proposer 骞惰 A/B锛夛紱鍥炴斁涓茶仈閿紙request_id/thread_id/turn_id锛夈€?- 楠屾敹鏍囧噯锛歍-Intent-01锛堝瓧娈垫渶灏忛泦锛変笌 T-Intent-02锛坧roposal/decision/exec 鍒嗙锛夐€氳繃锛沬ntent_log 涓嶈兘鏀拺鈥滃凡鎵ц鈥濆彊浜嬨€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/core/ids.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001锛汿-Intent-01~02銆?
+#### TASK-0007 GovernorOutput 濂戠害锛歊EJECT 蹇呭甫 reason_code + rule_trace
+- 浠诲姟鎻忚堪锛氬浐鍖栧澶栬鍐宠緭鍑哄绾︼紙decision/reason_code/rule_trace/tokens/snapshot_refs锛夛紝骞跺畾涔夌己瀛楁杈撳嚭鐨勫悎瑙勬嫤鎴彛寰勩€?- 杈撳叆锛欴evSpec 4锛汸RD FR-GOV-001~003銆丗R-CORE-002锛涚櫧鐨功鎷掔粷鐮佺害鏉熴€?- 杈撳嚭锛欸overnorOutput Schema 钀界偣锛汻EJECT/APPROVE 蹇呭瀛楁鏂█鍙ｅ緞锛汫OVERNOR_OUTPUT_INVALID/ SKILL_TOKEN_MISSING 鐨勮Е鍙戜笌璁板綍鍙ｅ緞锛沜ontract fixtures銆?- 楠屾敹鏍囧噯锛歍-14銆乀-15銆乀-16銆乀-17 閫氳繃锛涘澶栦笉鍑虹幇鈥滅己 reason_code 鐨?REJECT鈥濓紱鍚岀被鎷掔粷鍦ㄥ悓鐗堟湰涓?reason_code 绋冲畾鍙粺璁°€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/governor/schemas.py锛沨ost_brain/governor/decision.py锛沨ost_brain/core/errors.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-001~003锛汧R-CORE-002锛汿-14~T-17銆?
+#### TASK-0008 Governor Gates锛歊1鈥揜7 楠ㄦ灦 + rule_trace 绋冲畾鎬?- 浠诲姟鎻忚堪锛氭妸 Trust/Energy/SysMode/RateLimit/Scope/Safety/Airlock Gate 鐨勮緭鍏ヨ緭鍑轰笌 rule_trace 鍙ｅ緞鍥哄寲涓哄彲鍥炲綊瑙勫垯鏃忋€?- 杈撳叆锛欴evSpec 6锛圙overnor rules锛夈€丳RD FR-GOV-001銆?- 杈撳嚭锛氭瘡涓?Gate 鐨勬渶灏忚緭鍏ワ紙蹇収瀛楁锛変笌杈撳嚭锛堝懡涓?闃堝€兼憳瑕?鍘熷洜锛夛紱rule_trace 缁撴瀯瀛楁锛沠ixtures锛堝懡涓?鏈懡涓€佽竟鐣屽€硷級銆?- 楠屾敹鏍囧噯锛歍-Gov-01锛坮ule_trace 鍙畾浣嶉槇鍊间笌蹇収鎽樿锛夐€氳繃锛涘悓杈撳叆鍚岀増鏈?rule_trace 绋冲畾銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/governor/rules.py锛沨ost_brain/governor/decision.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-001锛汿-Gov-01銆?
+#### TASK-0009 Token 浣撶郴锛歛pproval/confirm/undo 鐨勭粦瀹氫笌澶辨晥鍙ｅ緞
+- 浠诲姟鎻忚堪锛氬畾涔夊苟鍥哄寲绁ㄦ嵁瀛楁缁戝畾銆乀TL/杩囨湡銆佺鍚?鏍￠獙澶辫触鐨勭ǔ瀹氭嫆缁濈爜鍙ｅ緞锛岀‘淇濃€滆瑷€纭鈥濅笉鏋勬垚鎺堟潈銆?- 杈撳叆锛欴evSpec 5锛汸RD FR-TOKEN-001~003銆?- 杈撳嚭锛歍oken/Manifest Schema锛涚粦瀹氬瓧娈靛彛寰勶紙intent_id/skill_name/session_id/seq锛夛紱confirm_token/undo_token 鐨勮Е鍙戞潯浠朵笌鎷掔粷鐮佸彛寰勶紱fixtures锛堜覆鐢?杩囨湡/浼€狅級銆?- 楠屾敹鏍囧噯锛歍-34~T-38 閫氳繃锛涚己 confirm_token 鐨勯珮椋庨櫓璇锋眰绋冲畾寰楀埌 CONFIRM_REQUIRED锛涗笉鍚堟硶/杩囨湡/涓茬敤 token 绋冲畾寰楀埌 TOKEN_INVALID锛堟垨鏇寸簿纭瓙绫伙級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/governor/tokens.py锛沨ost_brain/governor/schemas.py锛沨ost_brain/governor/decision.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOKEN-001~003锛汿-34~T-38锛汭6/I11銆?
+#### TASK-0010 Skills 鍗曞叆鍙ｏ細Registry+Loader 寮哄埗 token 鏍￠獙 + 骞傜瓑 + evidence_ref
+- 浠诲姟鎻忚堪锛氬浐鍖栤€滃敮涓€鍚堟硶鎵ц鍏ュ彛鈥濅负 loader锛屽苟瀹氫箟骞傜瓑涓庡璁″啓鍏ユ渶灏忓绾︼紝淇濊瘉鎵ц浜嬪疄鍙覆鑱斿洖鏀俱€?- 杈撳叆锛欴evSpec 6/8.1锛汸RD FR-SKILL-001~003銆丗R-AUDIT-001銆?- 杈撳嚭锛歋killMeta 寮哄埗瀛楁鍙ｅ緞锛沴oader 鎵ц杈撳叆杈撳嚭濂戠害锛涘箓绛夌瓥鐣ワ紙鍚?intent_id 涓嶉噸澶嶅壇浣滅敤锛夌殑璇佹槑鍙ｅ緞锛泂kill_exec_log 瀛楁鏈€灏忛泦锛堝惈 evidence_ref/manifest_ref锛夈€?- 楠屾敹鏍囧噯锛歍-Skill-01銆乀-15銆乀-34~T-38 閫氳繃锛涗换鎰?skill_exec 鍧囧彲鍏宠仈 governor_log + approval_token_ref锛涢噸澶?intent_id 涓嶄骇鐢熺浜屾鐪熷疄鍓綔鐢ㄤ笖鍙敱鏃ュ織璇佹槑銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/registry.py锛沨ost_brain/skills/loader.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SKILL-001~003锛汧R-AUDIT-001锛汿-Skill-01锛汿-15锛汭1/I8銆?
+#### TASK-0011 SQLite Ledger锛歍riptych 涓夎仈鐢绘渶灏忚〃 + 绱㈠紩涓茶仈鍙ｅ緞
+- 浠诲姟鎻忚堪锛氬浐鍖栤€滃璁″嵆浜嬪疄鈥濈殑鏈€灏忓彲鍥炴斁鏁版嵁闈細intent_log/governor_log/skill_exec_log 鐨勫瓧娈靛彛寰勪笌涓茶仈閿€?- 杈撳叆锛欴evSpec 8.1锛汸RD FR-AUDIT-001銆?- 杈撳嚭锛氫笁琛ㄥ瓧娈垫渶灏忛泦涓庝覆鑱旈敭鍙ｅ緞锛坮equest_id/intent_id/token_ref锛夛紱error_log/qa_violation_log 鍙ｅ緞锛涘洖鏀剧储寮曢敭锛坋vent_id/evidence_refs锛夈€?- 楠屾敹鏍囧噯锛歍-Audit-01銆乀-14銆乀-15 閫氳繃锛涗换鎰?request_id 鑳戒覆鑱斿埌 intent鈫抔overnor鈫?鍙€?skill_exec锛涚己閾捐矾鏃跺彲瀹氫綅鍒?stage 涓?reason_code銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/core/ids.py锛沨ost_brain/governor/decision.py锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001锛汿-Audit-01锛汿-14銆乀-15銆?
+#### TASK-0012 QA 鍚堣妯″潡锛歋trict JSON + 浼墽琛屽鍛?+ Canon-as-fact + 鏍煎紡婕傜Щ锛堜竴娆￠噸鍐?闄嶇骇锛?- 浠诲姟鎻忚堪锛氬畾涔?Host 渚?QA 鐨勫悎瑙勬鏌ヤ笌鈥滀竴娆￠噸鍐?闄嶇骇鈥濆绾︼紝纭繚瀵瑰杈撳嚭濮嬬粓鍙В鏋愪笖涓嶄吉閫犳墽琛屼簨瀹炪€?- 杈撳叆锛欴evSpec 9/7锛汸RD FR-CORE-002~003銆丗R-AUDIT-003銆丗R-CANON-001銆丗R-WCANON-001~003銆?- 杈撳嚭锛氳繚瑙勭被鍨嬫灇涓句笌璁板綍鍙ｅ緞锛團ALSE_EXECUTION_CLAIM銆丆ANON_AS_FACT_VIOLATION銆丩LM_FORMAT_DRIFT 绛夛級锛涙渶灏忔ā鏉块檷绾цЕ鍙戞潯浠朵笌杈撳嚭缁撴瀯鍙ｅ緞锛沠ixtures锛坓ood/bad锛夈€?- 楠屾敹鏍囧噯锛歍-67~T-71銆乀-Canon-01~02銆乀-WCanon-01~03 閫氳繃锛涙晠闅?瓒呮椂/婕傜Щ涓嬩粛涓哄崟涓悎娉?JSON锛涘畬鎴愭€ц〃杩版棤璇佹嵁蹇呮嫤鎴€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/qa.py锛沨ost_brain/core/prompt_context.py锛沨ost_brain/audit/sqlite_ledger.py锛沺rompts/llm_contract/refusal_templates.md锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-002~003锛汧R-AUDIT-003锛汧R-CANON-001锛汧R-WCANON-001~003锛汿-67~T-71锛汭13銆?
+#### TASK-0013 Style Canon / World Canon锛氱増鏈寲銆佸彉鏇寸暀鐥曘€佹敞鍏ュ彛寰勪笌鍥炲綊闆?- 浠诲姟鎻忚堪锛氬浐鍖?Canon锛坰tyle/world锛夌殑鍐欏叆杈圭晫銆佸彉鏇寸暀鐥曚笌娉ㄥ叆鍙ｅ緞锛岀‘淇?Canon 鍙紩鐢ㄤ絾涓嶈秺鏉冧负浜嬪疄銆?- 杈撳叆锛欴evSpec 8.4/8.5锛汸RD FR-CANON-001~002銆丗R-WCANON-001~003銆?- 杈撳嚭锛歝anon_change_log / canon_proposal_log 鏈€灏忓瓧娈碉紱style/world 娉ㄥ叆鍒嗘Ы瑙勫垯锛沠ixtures锛圕anon-as-fact銆佸紩鐢ㄥ彛寰勩€佺増鏈紓绉伙級銆?- 楠屾敹鏍囧噯锛歍-Canon-01~02銆乀-WCanon-01~03 閫氳繃锛涗换浣?Canon 鏇存柊鍧囧彲瀹氫綅鍒?proposal 涓庡彉鏇村墠鍚?hash/version锛涘紩鐢ㄤ笉寰楀彉鎴愭墽琛屼簨瀹炪€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/canon_style_store.py锛沨ost_brain/memory/canon_world_store.py锛沨ost_brain/memory/canon_sync.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/canon/style/**锛沨ost_brain/canon/world/**锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CANON-001~002锛汧R-WCANON-001~003锛汿-Canon-01~02锛汿-WCanon-01~03銆?
+#### TASK-0014 Episodic锛氬啓鍏ラ棬绂侊紙evidence_refs锛? 鐢熷懡鍛ㄦ湡锛坢erge/decay/delete锛夊璁?- 浠诲姟鎻忚堪锛氬浐鍖?Episodic 鍐欏叆蹇呴』甯?evidence_refs 鐨勯棬绂佷笌鐢熷懡鍛ㄦ湡鎿嶄綔鏃ュ織锛岄伩鍏嶅够瑙夊浐鍖栥€?- 杈撳叆锛欴evSpec 8.3锛汸RD FR-MEM-001~002銆?- 杈撳嚭锛歮emory_ops_log 瀛楁鏈€灏忛泦锛涘啓鍏?鍚堝苟/琛板噺/鍒犻櫎鐨勫璁′簨浠跺彛寰勶紱fixtures锛堟棤璇佹嵁鍐欏叆銆佸悎骞跺悗绱㈠紩锛夈€?- 楠屾敹鏍囧噯锛歍-Mem-01~02 閫氳繃锛涙棤 evidence_refs 鍐欏叆澶辫触涓斿彲瑙ｉ噴锛涚敓鍛藉懆鏈熸搷浣滃潎鍙洖鏀俱€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/episodic.py锛沨ost_brain/memory/chroma_client.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-001~002锛汿-Mem-01~02銆?
+#### TASK-0015 Vault锛歮anifest/undo/GC 鐨勫璁￠棴鐜紙涓嶇牬鍧?undo 绐楀彛锛?- 浠诲姟鎻忚堪锛氬浐鍖?Vault 鐨?manifest 绱㈠紩銆乽ndo 缁戝畾涓?GC 瀹¤瑙勫垯锛岀‘淇濆彲鎾ら攢鑳藉姏鍙洖鏀俱€?- 杈撳叆锛欴evSpec 8.6锛汸RD FR-LSP-001~002銆丗R-TOKEN-003銆?- 杈撳嚭锛歷ault_manifest_index / vault_gc_log 瀛楁鏈€灏忛泦锛汫C 涓嶇牬鍧?undo 绐楀彛鐨勬柇瑷€鍙ｅ緞锛沠ixtures锛坢anifest 缂哄け/ digest 涓嶅尮閰嶏級銆?- 楠屾敹鏍囧噯锛歍-Vault-01~02 閫氳繃锛況eversible=true 鐨勬墽琛屽繀椤讳骇鍑?manifest_ref锛沵anifest digest 涓嶅尮閰嶆椂鎾ら攢鎷掔粷骞跺彲瀹¤銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/lsp/vault.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-LSP-001~002锛汧R-TOKEN-003锛汿-Vault-01~02锛汭11/I12銆?
+#### TASK-0016 Airlock锛氬嚭绔欏噣鍖栨姤鍛?+ 鍏ョ珯闅旂鍒嗙被锛堜笉寰楃洿閫氭墽琛岋級
+- 浠诲姟鎻忚堪锛氬浐鍖?AIRLOCK 鐨勫噣鍖栨姤鍛娿€佸叆绔欓殧绂诲垎绫讳笌瀹¤瀛楁鍙ｅ緞锛岀‘淇濆閮ㄥ唴瀹规案杩滈檷鏉冧负鑽夋銆?- 杈撳叆锛欴evSpec 8.7锛汸RD FR-AIRLOCK-001~002銆?- 杈撳嚭锛歛irlock_log 瀛楁鏈€灏忛泦锛坮emoved_fields/redactions/payload_digest/quarantine_digest锛夛紱鍏ョ珯鍒嗙被鏋氫妇锛團ACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN锛夛紱fixtures锛堟湭鍑€鍖?鐩撮€氬皾璇曪級銆?- 楠屾敹鏍囧噯锛歍-39~T-40 閫氳繃锛涚己鍑€鍖栨姤鍛婄殑鍑虹珯蹇呴』鎷掔粷骞惰褰?AIRLOCK_BLOCKED_EGRESS锛涘叆绔欏唴瀹逛笉寰楃洿鎺ヨЕ鍙戞墽琛屻€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/airlock/sanitizer.py锛沨ost_brain/airlock/quarantine.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AIRLOCK-001~002锛汿-39~T-40锛汭10銆?
+### TASK-0017 Tool Catalog锛氬伐鍏峰厓鏁版嵁 SSOT锛堜粎鍏冩暟鎹級+ Top-K 閫夋嫨 + tool_visibility_hash
+- 浠诲姟鎻忚堪锛氬缓绔嬪伐鍏风洰褰曠殑鍏冩暟鎹?SSOT 涓?Top-K 鍊欓€夐€夋嫨锛岀‘淇濇ā鍨嬫瘡杞彧瑙佸€欓€夊伐鍏峰瓙闆嗭紝骞跺彲浜у嚭 tool_visibility_hash銆?- 杈撳叆锛欴evSpec 8.9锛圱ools锛歍ool Catalog/Selector/Broker锛夛紱PRD FR-TOOL-001~002銆?- 杈撳嚭锛歍oolMeta 瀛楁鏈€灏忛泦锛坕d/name/desc/schema_hash/side_effect_level/auth_level/domain_tags/version锛夛紱Top-K 杈撳嚭缁撴瀯锛泃ool_visibility_hash 璁＄畻鍙ｅ緞锛沠ixtures锛堝寘鍚?READ/WRITE 娣峰悎宸ュ叿锛夈€?- 楠屾敹鏍囧噯锛歍-Tool-01锛堜粎鍏冩暟鎹?瀛楁瀹屾暣鎬э級銆乀-Tool-02锛圱op-K 瀛愰泦/WRITE 榛樿涓嶅彲瑙侊級閫氳繃锛涘叏閲忓伐鍏蜂笉鏆撮湶缁?LLM銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/tools/catalog.py锛沨ost_brain/tools/selector.py锛沨ost_brain/core/prompt_context.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-001~002锛汿-Tool-01~02锛汭14銆?
+#### TASK-0018 ToolBroker锛氬崟鍏ュ彛鎵ц + WRITE token gating + evidence_ref 涓茶仈
+- 浠诲姟鎻忚堪锛氬浐鍖栨墍鏈夊壇浣滅敤宸ュ叿鎵ц鐨勫敮涓€鍏ュ彛涓庤瘉鎹敋鐐癸紙evidence_ref锛夛紝骞舵妸 WRITE 宸ュ叿绾冲叆 capability/approval 绁ㄦ嵁绾︽潫銆?- 杈撳叆锛欴evSpec 8.9锛圱oolBroker锛夛紱PRD FR-TOOL-003锛汧R-TOKEN-001銆?- 杈撳嚭锛歍oolExec 杈撳叆杈撳嚭濂戠害锛沇RITE 鎷掔粷鐮佸彛寰勶紙TOKEN_INVALID/CONFIRM_REQUIRED/鈥︼級锛泂kill_exec_log/evidence_ref 涓茶仈瑙勫垯锛沠ixtures锛堟棤 token 璋冪敤 WRITE锛夈€?- 楠屾敹鏍囧噯锛歍-Tool-03 閫氳繃锛涙棤 token 鐨?WRITE 蹇呮嫆缁濅笖鍙粺璁★紱浠讳綍鈥滃凡鎵ц鈥濆彊浜嬪彲鎸囧悜 evidence_ref銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/tools/broker.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/core/errors.py锛泃ests/contract/锛泃ests/fixtures/锛泃ests/e2e/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-003锛汿-Tool-03锛汭14銆?
+#### TASK-0019 MCP锛歱rovider 鍏冩暟鎹悓姝?+ 鍙楁不鐞嗚皟鐢紙READ/WRITE 鍒嗙骇锛?- 浠诲姟鎻忚堪锛氭妸 MCP 宸ュ叿鎻愪緵鏂圭撼鍏?Tool Catalog锛屽苟纭繚璋冪敤鍙?token 娌荤悊涓庡璁′覆鑱旂害鏉熴€?- 杈撳叆锛欴evSpec 8.10锛圡CP锛夛紱PRD FR-MCP-001銆?- 杈撳嚭锛歁CP provider鈫扵oolMeta 鏄犲皠锛汻EAD/WRITE 鍒嗙骇鍙ｅ緞锛涘璁″瓧娈碉紙provider_id/tool_id/request_id/evidence_ref锛夈€?- 楠屾敹鏍囧噯锛歍-MCP-01 閫氳繃锛汳CP WRITE 鏃?token 蹇呮嫆缁濓紱鎵€鏈?MCP 璋冪敤鍙洖鏀惧埌 intent/governor/evidence_ref銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/tools/mcp_adapter.py锛沨ost_brain/tools/catalog.py锛沨ost_brain/tools/broker.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MCP-001锛汿-MCP-01锛汭14銆?
+#### TASK-0020 閫氶亾锛氬井淇?I/O 浜嬩欢鍖?+ channel_io_log 涓茶仈
+- 浠诲姟鎻忚堪锛氭妸寰俊鏀跺彂浣滀负纭畾鎬ч€氶亾鑳藉姏浜嬩欢鍖栵紝骞跺啓鍏ュ璁￠摼锛岀姝㈢敱 LLM 鑷敱鍐冲畾鈥滄槸鍚﹀彂閫?鍙戠粰璋佲€濄€?- 杈撳叆锛欴evSpec 8.11.1锛堝井淇￠€氶亾锛夛紱PRD FR-CHANNEL-001銆?- 杈撳嚭锛歸echat 鍏ョ珯/鍑虹珯浜嬩欢缁撴瀯锛沜hannel_io_log 瀛楁鏈€灏忛泦锛坱hread_key/message_id/request_id/ts/status锛夛紱fixtures锛堥噸澶嶆秷鎭?澶辫触鍥炴墽锛夈€?- 楠屾敹鏍囧噯锛歍-Channel-01 閫氳繃锛涗换鎰忓叆绔?鍑虹珯鍙拷婧埌 thread_key 涓?request_id锛涘彂閫佸け璐ュ彲瑙ｉ噴锛坮eason_code/stage锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/channels/wechat.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CHANNEL-001锛汿-Channel-01銆?
+#### TASK-0021 澶栨樉锛歏Tube Studio talk gate + emotion_tag鈫抏xpression_id 鍥哄畾鏄犲皠
+- 浠诲姟鎻忚堪锛氬浐鍖栤€滆璇濆紑濮?缁撴潫鈥濅笌鈥滆〃鎯呮灇涓炬槧灏勨€濈殑纭畾鎬ц涓猴紝鎷掔粷妯″瀷鑷敱鍔ㄤ綔鍙傛暟銆?- 杈撳叆锛欴evSpec 8.11.2锛圴TS 澶栨樉锛夛紱PRD FR-AVATAR-001銆?- 杈撳嚭锛歟motion_tag 鏋氫妇涓?expression_id 鏄犲皠琛紱瀹¤瀛楁鍙ｅ緞锛坋motion_tag/expression_id/trigger锛夛紱fixtures锛堥潪娉?tag銆佽嚜鐢卞姩浣滃皾璇曪級銆?- 楠屾敹鏍囧噯锛歍-Avatar-01 閫氳繃锛涗换浣曡〃鎯呰Е鍙戝彲鍥炴斁鍒板浐瀹氭槧灏勶紱鑷敱鍔ㄤ綔鍙傛暟杈撳叆琚嫆缁濆苟鐣欑棔銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/channels/vts.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AVATAR-001锛汿-Avatar-01銆?
+#### TASK-0022 ClawdBot UI Skill锛歜efore/after 璇佹嵁 + 缃俊搴﹂棬妲?+ 绾㈢嚎鐔旀柇
+- 浠诲姟鎻忚堪锛氬浐鍖?UI 鑷姩鍖栫殑璇佹嵁閾句笌绾㈢嚎鐔旀柇鍙ｅ緞锛岀‘淇濅綆缃俊搴︿笉鐐瑰嚮銆佺孩绾垮満鏅笉瓒婃潈銆?- 杈撳叆锛欴evSpec 6.3锛圕lawdBot 浣滀负 Skill锛夛紱PRD FR-VISION-001~002銆丗R-AUDIT-002銆?- 杈撳嚭锛歝lawd_action_log 瀛楁鏈€灏忛泦锛坆efore/after artifact/confidence/target_desc锛夛紱UI_ELEMENT_NOT_FOUND 涓?VISUAL_REDLINE 鐨勮Е鍙戝彛寰勶紱fixtures锛堜綆缃俊搴?绾㈢嚎椤甸潰锛夈€?- 楠屾敹鏍囧噯锛歍-41~T-43 閫氳繃锛沜onfidence<0.80 鏃朵笉鍙戠敓鍔ㄤ綔涓斿啓鏃ュ織锛涚孩绾垮満鏅棬绂佷笉瓒冲繀鎷掔粷骞跺彲瀹¤銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/clawd_ui_action.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/lsp/vault.py锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VISION-001~002锛汧R-AUDIT-002锛汿-41~T-43銆?
+### TASK-0023 鏈嶅姟椤规竻鍗曡惤鍦帮細鏈嶅姟娉ㄥ唽琛?+ health 鍙ｅ緞 + 闄嶇骇鍙娴?- 浠诲姟鎻忚堪锛氫负鎵€鏈夆€滃繀椤诲疄鐜扳€濈殑鏈嶅姟椤瑰缓绔嬬粺涓€娉ㄥ唽琛ㄤ笌 health 濂戠害锛屼繚璇佹湇鍔″嵆浣挎殏涓嶅彲鐢ㄤ篃鑳借璇嗗埆銆佽闄嶇骇銆佽瀹¤銆?- 杈撳叆锛歅RD锛堟湇鍔″繀椤诲疄鐜板彛寰勶級锛汥evSpec 1.2.1/2锛堣繘绋嬫嫇鎵戯級/QA锛堥檷绾х粨鏋勶級銆?- 杈撳嚭锛氭湇鍔℃敞鍐岃〃瀛楁鍙ｅ緞锛坰ervice_id/owner(host|edge)/required=true/status锛夛紱health 杈撳嚭缁撴瀯锛涗笉鍙敤鈫抮eason_code/stage 鏄犲皠鍙ｅ緞锛沠ixtures锛堟湇鍔′笉鍙敤鐭╅樀锛夈€?- 楠屾敹鏍囧噯锛氬悓鐗堟湰涓嬪悓绫讳笉鍙敤 reason_code 绋冲畾锛涜緭鍑虹粨鏋勫彲瑙ｆ瀽锛涘璁￠摼鍙洖鏀惧埌 request_id銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/锛沨ost_brain/audit/锛沞dge_client/rpc/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汿-67~T-71锛堝鐢級锛涳紙鏂板锛塗-Svc-01銆?
+### TASK-0024 Edge RPC锛氳闊抽摼璺鐐逛笌浜嬩欢 Schema锛圓SR/TTS/鎵撴柇锛?- 浠诲姟鎻忚堪锛氳ˉ榻?Edge 璇煶閾捐矾鐨?RPC 绔偣涓庝簨浠?Schema锛屼娇 Host 鑳戒互浜嬩欢椹卞姩缂栨帓璇煶杈撳叆涓庢挱鎶ヨ緭鍑恒€?- 杈撳叆锛欴evSpec 8.11.3锛圴OICE 濂戠害锛夛紱PRD FR-VOICE-001~003銆?- 杈撳嚭锛歛sr_chunk/speak/barge_in 鐨勮姹傚搷搴斿瓧娈靛彛寰勶紱浜嬩欢涓婇€佽妭娴佷笌椤哄簭鍙ｅ緞锛涘け璐?reason_code/stage 鍙ｅ緞锛沠ixtures锛堝瓧娈电己澶?涔卞簭/浣庣疆淇″害锛夈€?- 楠屾敹鏍囧噯锛歍-Voice-01~T-Voice-03 閫氳繃锛涗簨浠剁粨鏋勭ǔ瀹氾紱鍙洖鏀俱€?- 娑夊強鏂囦欢璺緞锛歟dge_client/rpc/锛沞dge_client/senses/锛沞dge_client/actuators/锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001~003锛汿-Voice-01~03銆?
+### TASK-0025 Edge ASR锛坙arge-v3锛夛細涓婇€佷簨浠剁ǔ瀹氬寲涓?alternates锛堝彲閫夊瓧娈典絾蹇呴』鏀寔锛?- 浠诲姟鎻忚堪锛氬皢 ASR 杈撳嚭绋冲畾涓?asr_chunk 浜嬩欢缁撴瀯锛屽苟鏀寔 alternates 瀛楁鐢ㄤ簬妫€绱㈡彁绀猴紱浣庣疆淇″害鏄惧紡鏍囨敞銆?- 杈撳叆锛欴evSpec 8.11.3锛汸RD FR-VOICE-001銆?- 杈撳嚭锛歛sr_chunk 鏈€灏忓瓧娈甸泦锛沘lternates 瀛楁鍙ｅ緞锛涗綆缃俊搴︽爣娉ㄧ瓥鐣ワ紱瀹¤涓茶仈閿€?- 楠屾敹鏍囧噯锛歍-Voice-01 閫氳繃锛涗綆缃俊搴﹀満鏅粛缁撴瀯绋冲畾涓斿彲鍥炴斁銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/senses/锛沞dge_client/rpc/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汿-Voice-01銆?
+### TASK-0026 Edge TTS锛圙PT-SoVITS 鍏?GPU 甯搁┗锛夛細鍚堟垚涓庢挱鎶ラ槦鍒椼€佸け璐ュ彛寰?- 浠诲姟鎻忚堪锛氬舰鎴?speak鈫掑悎鎴愨啋鎾姤闃熷垪鐨勭ǔ瀹氳兘鍔涗笌澶辫触鍙В閲婂彛寰勶紝纭繚寮轰氦浜掍笅鍙鎵撴柇涓斾笉浼墽琛屻€?- 杈撳叆锛欴evSpec 8.11.3锛汸RD FR-VOICE-002銆?- 杈撳嚭锛氭挱鎶ラ槦鍒椾簨浠剁粨鏋勶紱澶辫触 reason_code/stage 鍙ｅ緞锛涗笌 request_id 涓茶仈瀛楁銆?- 楠屾敹鏍囧噯锛歍-Voice-02 閫氳繃锛涘け璐ュ彲瑙ｉ噴涓斾笉褰卞搷 Host 杈撳嚭缁撴瀯銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/actuators/锛沞dge_client/rpc/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-002锛汿-Voice-02銆?
+### TASK-0027 Barge-in锛堝己浜や簰鍙墦鏂級锛氭墦鏂瓥鐣ヤ笌瀹¤浜嬩欢
+- 浠诲姟鎻忚堪锛氳惤瀹炩€滅敤鎴峰紑鍙ｂ啋鎵撴柇鎾姤鈫掍紭鍏?ASR鈥濈殑绛栫暐涓庝簨浠跺寲瀹¤锛屼笖鎵撴柇涓嶆瀯鎴愭墽琛屼簨瀹炪€?- 杈撳叆锛欴evSpec 8.11.3锛汸RD FR-VOICE-003銆?- 杈撳嚭锛歜arge_in 瑙﹀彂鏉′欢鍙ｅ緞锛涙墦鏂簨浠跺瓧娈碉紱Host 瀹¤璁板綍鐐广€?- 楠屾敹鏍囧噯锛歍-Voice-03 閫氳繃锛涙墦鏂珛鍗崇敓鏁堬紱ASR 涓嶈闃诲锛涘璁″彲鍥炴斁銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/actuators/锛沞dge_client/senses/锛沨ost_brain/audit/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-003锛汿-Voice-03銆?
+### TASK-0028 Edge 鍏滃簳 LLM锛圤llama 3B 閲忓寲锛岄粯璁ゅ嵏杞斤級锛歞raft-only 绔偣涓庡揩閫熷け璐ュ洖閫€
+- 浠诲姟鎻忚堪锛氳ˉ榻?Edge 鍏滃簳妯″瀷绔偣锛坧resence/asr_compile/retrieval_hints/context_compress锛夛紝寮哄埗 draft_only=true锛涗笉鍙敤鏃跺揩閫熷け璐ュ苟鍥為€€ Host 鍏滃簳鍙ｅ緞銆?- 杈撳叆锛欴evSpec 8.11.3锛汸RD FR-VOICE-004銆?- 杈撳嚭锛氱鐐硅緭鍏ヨ緭鍑哄瓧娈碉紱绂佹瑁佸喅瀛楁涓庣姝㈡墽琛屼簨瀹炲鍛婄害鏉燂紱涓嶅彲鐢ㄩ敊璇爜鍙ｅ緞銆?- 楠屾敹鏍囧噯锛歍-Voice-04 閫氳繃锛涗换浣曞厹搴曡緭鍑哄潎涓嶅惈瑁佸喅/鎵ц浜嬪疄瀹ｅ憡锛涗笉鍙敤鍙粺璁°€?- 娑夊強鏂囦欢璺緞锛歟dge_client/rpc/锛沞dge_client/senses/锛沨ost_brain/core/qa.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-004锛汿-Voice-04銆?
+### TASK-0029 Edge 璧勬簮闂搁棬锛欰SR>鎾斁>TTS鍚堟垚>鍏滃簳LLM 鐨勪簰鏂ヤ笌鍙娴?- 浠诲姟鎻忚堪锛氳惤瀹炶祫婧愰椄闂ㄧ殑浼樺厛绾т笌浜掓枼绛栫暐锛岄伩鍏嶅嘲鍊煎彔鍔犲鑷翠笉绋冲畾锛屽苟鎻愪緵鍙娴嬬姸鎬併€?- 杈撳叆锛欴evSpec 8.11.3锛汸RD FR-VOICE-005銆?- 杈撳嚭锛氶椄闂ㄧ姸鎬佹満鍙ｅ緞锛涙姠鍗?鎷掔粷鐨?reason_code/stage锛涜祫婧愭寚鏍囧瓧娈碉紙鏄惧瓨/闃熷垪闀垮害锛夈€?- 楠屾敹鏍囧噯锛歍-Voice-05 閫氳繃锛涘帇鍔涘満鏅紭鍏堜繚璇?ASR锛涢檷绾ц涓哄彲鍥炴斁銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/actuators/锛沞dge_client/rpc/锛沞dge_client/proofs/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-005锛汿-Voice-05銆?
+### TASK-0030 Host 妫€绱㈤摼锛欵mbedding 鏈嶅姟鎺ュ彛涓庨檷绾у彛寰?- 浠诲姟鎻忚堪锛氳ˉ榻?embedding 鏈嶅姟鎺ュ彛銆佸仴搴风姸鎬佷笌涓嶅彲鐢ㄩ檷绾у彛寰勶紙涓嶅緱浼涓衡€滆蹇嗕负绌衡€濓級銆?- 杈撳叆锛欴evSpec 8.3.1锛汸RD FR-MEM-003銆?- 杈撳嚭锛歟mbedding 杈撳嚭缁撴瀯锛涗笉鍙敤/瓒呮椂鈫抮eason_code/stage 鏄犲皠锛涘璁′覆鑱旂偣銆?- 楠屾敹鏍囧噯锛歍-Ret-01 閫氳繃锛涚粨鏋勭ǔ瀹氾紱reason_code 鍙粺璁°€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/retrieval/锛沨ost_brain/audit/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-003锛汿-Ret-01銆?
+### TASK-0031 Host 妫€绱㈤摼锛歊eranker 鏈嶅姟鎺ュ彛涓庨檷绾у彛寰?- 浠诲姟鎻忚堪锛氳ˉ榻?reranker 鏈嶅姟鎺ュ彛銆佸仴搴风姸鎬佷笌涓嶅彲鐢ㄩ檷绾у彛寰勶紝骞朵繚鎸?evidence pack 缁撴瀯绋冲畾銆?- 杈撳叆锛欴evSpec 8.3.1锛汸RD FR-MEM-004銆?- 杈撳嚭锛歳erank 杈撳嚭缁撴瀯锛涗笉鍙敤闄嶇骇绛栫暐鍙ｅ緞锛涘璁′覆鑱旂偣銆?- 楠屾敹鏍囧噯锛歍-Ret-02 閫氳繃锛沞vidence pack 浠嶅彲鐢熸垚涓斿瓧娈电ǔ瀹氥€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/retrieval/锛沨ost_brain/audit/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-004锛汿-Ret-02銆?
+### TASK-0032 Host 鍙洖铻嶅悎锛欵vidence Pack 缁撴瀯涓庡洖鏀惧紩鐢?- 浠诲姟鎻忚堪锛氳ˉ榻愬彫鍥炶瀺鍚堣緭鍑虹殑 evidence pack 缁撴瀯锛屼娇鍥炵瓟涓庡璁″彲寮曠敤鍚屼竴璇佹嵁鍖呫€?- 杈撳叆锛欴evSpec 8.3.1锛汸RD FR-MEM-005銆?- 杈撳嚭锛歟vidence pack 鏈€灏忓瓧娈典笌搴忓垪鍖栧彛寰勶紱涓?request_id/intent_id 涓茶仈瀛楁銆?- 楠屾敹鏍囧噯锛歍-Ret-03 閫氳繃锛涘瓧娈电粨鏋勭ǔ瀹氾紱鍙洖鏀惧紩鐢ㄣ€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/retrieval/锛沨ost_brain/audit/锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-005锛汿-Ret-03銆?
+### TASK-0033 Host 灞忓箷鐩戞帶涓?OCR锛堟寜闇€锛夛細Gaming 闂ㄦ帶 + 缁撴瀯鍖栬緭鍑?- 浠诲姟鎻忚堪锛氳ˉ榻愬睆骞曠洃鎺т笌 OCR/璇嗗浘鐨勬寜闇€瑙﹀彂鑳藉姏锛屽苟钀藉疄 Gaming 涓嶈Е鍙戦棬鎺э紱杈撳嚭蹇呴』缁撴瀯鍖栦笖甯?source_ref銆?- 杈撳叆锛歅RD FR-VISION-003锛汥evSpec锛堟柊澧為棬鎺т笌缁撴瀯鍖栬緭鍑哄绾︾偣闇€琛ラ綈鍒?vision 绔犺妭锛夈€?- 杈撳嚭锛歄CR 杈撳嚭缁撴瀯锛坱ext_blocks/bbox/conf/source_ref锛夛紱Gaming 闂ㄦ帶鎷掔粷鐮佸彛寰勶紱瀹¤涓茶仈瀛楁銆?- 楠屾敹鏍囧噯锛欸aming 涓嬬ǔ瀹氭嫆缁?闄嶇骇锛涢潪 Gaming 涓嬬粨鏋勭ǔ瀹氫笖鍙洖鏀俱€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/vision/锛沨ost_brain/audit/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VISION-003锛涳紙鏂板锛塗-VisionGate-01銆乀-Vision-01銆?
+### TASK-0034 Host 鎽勫儚澶磋瘑鍒細浜嬩欢鍖栬緭鍑轰笌 evidence_ref
+- 浠诲姟鎻忚堪锛氳ˉ榻愭憚鍍忓ご璇嗗埆閾捐矾鐨勪簨浠跺寲杈撳嚭锛坥bjects/events + confidence + evidence_ref锛夛紝骞朵笌瀹¤閾句覆鑱斻€?- 杈撳叆锛歅RD FR-VISION-004锛汥evSpec锛坴ision 浜嬩欢鍖栧绾︾偣闇€琛ラ綈鍒?vision 绔犺妭锛夈€?- 杈撳嚭锛歝amera_event 缁撴瀯锛涜瘉鎹紩鐢ㄥ彛寰勶紱浣庣疆淇″害鏍囨敞绛栫暐銆?- 楠屾敹鏍囧噯锛氫簨浠跺彲鍥炴斁骞舵寚鍚?evidence_ref锛涜瘉鎹己澶辨椂绋冲畾闄嶇骇/鎷掔粷銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/vision/锛沨ost_brain/lsp/锛沨ost_brain/audit/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VISION-004锛涳紙鏂板锛塗-Vision-02銆?
+### TASK-0035 Host Bond SSOT锛圢eo4j锛夛細鍗曞啓鑰呭啓鍏ヨ竟鐣?+ bond_update_log + 绾︽潫/绱㈠紩
+- 浠诲姟鎻忚堪锛氳ˉ榻?Neo4j Bond SSOT 鐨勨€滃崟鍐欒€呪€濆啓鍏ヨ竟鐣屼笌鏈€灏忓浘妯″瀷钀界偣锛堝惈绾︽潫/绱㈠紩锛夛紝骞舵妸鍐欏叆浜嬪疄浠?bond_update_log锛堟垨绛変环锛夋柟寮忎覆鑱斿埌瀹¤閾撅紝纭繚鍙洖鏀句笌鍙潤鎬佹壂鎻忛獙璇併€?- 杈撳叆锛欴evSpec 8.2锛圔ond SSOT锛夈€丏evSpec 8.8锛堝崟鍐欒€呴潤鎬佹壂鎻忔柇瑷€锛夛紱PRD FR-BOND-001~003銆?- 杈撳嚭锛?  - Bond 鍐欏叆鍞竴鍏ュ彛涓庡瓧娈靛彛寰勶紙event_id/evidence_refs 鏈€灏忛泦锛夛紱
+  - Neo4j 绾︽潫/绱㈠紩鐨勫０鏄庢€ц祫浜э紙migrations 鎴栫瓑浠风洰褰曪級锛?  - bond_update_log锛堟垨绛変环鏃ュ織锛変笌 SQLite Ledger 涓茶仈閿彛寰勶紱
+  - fixtures锛氬寘鍚€滈潪鍗曞啓鑰呭皾璇曞啓鍏モ€濈殑鍙嶄緥鏍锋湰銆?- 楠屾敹鏍囧噯锛?  - T-50~T-54 閫氳繃锛圔ond SSOT 鍐欏叆杈圭晫銆佷簨浠跺寲銆佸彲鍥炴斁鍙ｅ緞锛夛紱
+  - T-SSOT-01 瑕嗙洊鍒扳€滈潪 bond_dynamics 鍐欏叆 Neo4j 蹇呰闃绘柇/琚壂鎻忓懡涓€濄€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/bond/neo4j_client.py锛沨ost_brain/bond/bond_dynamics.py锛沨ost_brain/bond/migrations/锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-001~003锛汿-50~T-54锛汿-SSOT-01銆?
+### TASK-0036 Host Bond Summary锛氭淳鐢熸憳瑕侊紙涓嶅惈鏁忔劅鏁板€硷級+ prompt_context 娉ㄥ叆
+- 浠诲姟鎻忚堪锛氳ˉ榻?Bond Summary 鐨勬淳鐢熼€昏緫涓庢敞鍏ュ彛寰勶紝纭繚 summary 浠呮淳鐢熴€佷笉鍐欏洖 SSOT锛涗笖涓嶅緱鍖呭惈鏁忔劅鏁板€硷紙渚嬪 trust 鍘熷€硷級锛屽彧鍏佽 stage/trend/capability_hint 绛夋《鍖栦俊鎭€?- 杈撳叆锛欴evSpec 8.2锛坰ummarizer 涓嶅緱鍐欏洖锛夈€丏evSpec 7锛坈ontext_pack 鍒嗘Ы闅旂锛夛紱PRD FR-BOND-003銆?- 杈撳嚭锛?  - bond_summary 鏈€灏忓瓧娈甸泦涓庢敞鍏ュ垎妲斤紙杩涘叆 prompt_context.bond_summary锛夛紱
+  - 绂佹鏁忔劅鏁板€肩殑鏂█鍙ｅ緞涓?fixtures锛堝惈鍙嶄緥锛夛紱
+  - 鍥炴斁寮曠敤鍙ｅ緞锛歴ummary 鍙寚鍥?event_id/evidence_refs锛堝彧鍋氬紩鐢紝涓嶅鍛婃墽琛屼簨瀹烇級銆?- 楠屾敹鏍囧噯锛?  - T-74~T-75 閫氳繃锛坰ummary 涓嶅惈鏁忔劅鏁板€笺€佷粎娲剧敓銆佸垎妲介殧绂伙級锛?  - T-CP-01 涓嶅洖褰掞紙Bond Summary 涓嶈繘鍏ラ敊璇Ы浣嶏級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/bond/summarizer.py锛沨ost_brain/core/prompt_context.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-003锛汿-74~T-75锛汿-CP-01銆?
+### TASK-0037 閰嶇疆鍒嗗眰鏀跺彛锛欻ost/Edge config 浠庡崰浣嶆敼涓哄彲澶嶇幇閰嶇疆鍏ュ彛
+- 浠诲姟鎻忚堪锛氳ˉ榻?Host 涓?Edge 鐨勯厤缃姞杞藉绾︼紙env/local/default 鍒嗗眰銆佸喎鍚姩榛樿鍊笺€佹晱鎰熼」鍗犱綅锛夛紝鏇挎崲褰撳墠 placeholder锛屽疄鐜板彲澶嶇幇閰嶇疆鍏ュ彛銆?- 杈撳叆锛欴evSpec 1.2.1/13锛堢幆澧冧笌閰嶇疆鍒嗗眰锛夛紱PRD FR-CORE-004銆丗R-OBS-001銆?- 杈撳嚭锛?  - Host 閰嶇疆瀵硅薄锛坄Natsume_ENV`銆佹湇鍔″紑鍏炽€侀檷绾у紑鍏炽€佽秴鏃?閲嶈瘯鍙ｅ緞锛夛紱
+  - Edge 閰嶇疆瀵硅薄锛圧PC 绔偣銆佽兘鍔涚煩闃点€佽祫婧愰椄闂ㄩ粯璁ゅ€硷級锛?  - 閰嶇疆楠岃瘉澶辫触鐨勭ǔ瀹?reason_code/stage 鏄犲皠锛?  - fixtures锛氭棤 key / 缂洪厤缃?/ 闈炴硶閰嶇疆鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鍐峰惎鍔ㄥ満鏅緭鍑虹粨鏋勭ǔ瀹氫笖鍙В鏋愶紱
+  - 鍚岀被閰嶇疆缂哄け鍦ㄥ悓鐗堟湰涓?reason_code/stage 绋冲畾锛?  - contract 鏂█鍙鐩?Host/Edge 鍏抽敭閰嶇疆椤逛笌榛樿鍊笺€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/config.py锛沞dge_client/config.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汿-Svc-01锛汿-67~T-71锛涳紙鏂板锛塗-Config-01銆?
+### TASK-0038 LLM Gateway 鏀跺彛锛氱粺涓€鍑虹珯鍏ュ彛 + AIRLOCK 缁戝畾 + 涓嶅彲鐢ㄩ檷绾?- 浠诲姟鎻忚堪锛氳ˉ榻?`integrations/llm_gateway.py` 鐨勭粺涓€璋冪敤濂戠害锛屽己鍒剁粡杩?AIRLOCK 鍑虹珯鍑€鍖栦笌鍏ョ珯闅旂鍙ｅ緞锛屽苟鍦ㄤ簯绔笉鍙敤鏃剁ǔ瀹氶檷绾с€?- 杈撳叆锛欴evSpec 2.3/8.7/9/13锛汸RD FR-AIRLOCK-001~002銆丗R-CORE-002~004銆丗R-AUDIT-003銆?- 杈撳嚭锛?  - gateway 璇锋眰/鍝嶅簲鏍囧噯缁撴瀯锛坮equest_id/model_profile_id/draft_only/latency锛夛紱
+  - 涓?airlock_log/error_log 涓茶仈鐨勫璁¤褰曠偣锛?  - 涓嶅彲鐢?瓒呮椂/鏍煎紡婕傜Щ鐨?reason_code/stage 鏄犲皠锛?  - fixtures锛歱rovider down銆乼imeout銆佹牸寮忔紓绉汇€佸叆绔欓殧绂绘牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 鍑虹珯鏈噣鍖栧繀鎷掔粷骞惰褰?AIRLOCK_BLOCKED_EGRESS锛?  - 鍏ョ珯涓嶅彲淇″唴瀹逛笉寰楃洿閫氭墽琛岋紱
+  - 浜戠涓嶅彲鐢ㄦ椂浠嶈緭鍑哄崟 JSON 涓?quality.stage/reason_code 鍙粺璁°€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/llm_gateway.py锛沨ost_brain/airlock/锛沨ost_brain/core/qa.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AIRLOCK-001~002锛汧R-CORE-002~004锛汿-39~T-40锛汿-67~T-71锛汿-LLM-01銆?
+### TASK-0039 Metabolism 鏀跺彛锛欻ard State 婕斿寲涓?Governor 蹇収寮曠敤
+- 浠诲姟鎻忚堪锛氳ˉ榻?`core/metabolism.py` 鐨勭‖鐘舵€佹紨鍖栧绾︼紙energy/mood/sys_mode/safety锛夛紝骞朵繚璇?Governor 杈撳嚭鍙紩鐢ㄧǔ瀹?snapshot銆?- 杈撳叆锛欴evSpec 0/4/6/14.2锛汸RD FR-GOV-001銆丗R-CORE-001銆?- 杈撳嚭锛?  - 纭姸鎬佸揩鐓х粨鏋勪笌鏇存柊瑙勫垯锛?  - Governor 鍐崇瓥涓殑 snapshot_refs 瀵归綈鍙ｅ緞锛?  - 寮傚父杈撳叆鐨勬嫆缁?闄嶇骇 reason_code锛?  - fixtures锛氳竟鐣岀姸鎬併€侀潪娉曠姸鎬佽縼绉汇€佸揩鐓х己澶辨牱渚嬨€?- 楠屾敹鏍囧噯锛?  - rule_trace 鑳藉畾浣嶅懡涓棬绂佷笌蹇収鎽樿锛?  - snapshot_refs 涓庣姸鎬佹紨鍖栦竴鑷翠笖鍙洖鏀撅紱
+  - 鍚岃緭鍏ュ悓鐗堟湰涓嬪喅绛栨憳瑕佺ǔ瀹氥€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/metabolism.py锛沨ost_brain/governor/rules.py锛沨ost_brain/governor/decision.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-001锛汧R-CORE-001锛汿-Gov-01锛汿-14~T-17锛涳紙鏂板锛塗-Meta-01銆?
+### TASK-0040 Audit Retention 鏀跺彛锛氫繚鐣?褰掓。/GC 绛栫暐涓庡洖鏀剧獥鍙ｄ繚鎶?- 浠诲姟鎻忚堪锛氳ˉ榻?`audit/retention.py` 鐨勪繚鐣欎笌 GC 濂戠害锛岀‘淇濆巻鍙茶鍓笉鐮村潖鍥炴斁閾捐矾涓?undo 绐楀彛銆?- 杈撳叆锛欴evSpec 8.1/8.6/13锛汸RD FR-AUDIT-001~003銆丗R-LSP-002銆?- 杈撳嚭锛?  - retention 绛栫暐閰嶇疆涓庢墽琛岀粨鏋滅粨鏋勶紱
+  - 琚竻鐞?琚樆鏂璞＄殑瀹¤璁板綍鍙ｅ緞锛?  - 涓?manifest/undo 绐楀彛鑱斿姩鐨勪繚鎶よ鍒欙紱
+  - fixtures锛氳繃鏈熸棩蹇椼€乽ndo 绐楀彛鍐呭璞°€侀樆鏂牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 鍥炴斁閾捐矾鍏抽敭閿紙request_id/intent_id/evidence_ref锛変笉琚牬鍧忥紱
+  - undo 绐楀彛鍐呭璞′笉浼氳 GC 鍒犻櫎锛?  - 鎵ц涓庨樆鏂潎鏈夊彲缁熻瀹¤璁板綍銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/retention.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/lsp/vault.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001~003锛汧R-LSP-002锛汿-Audit-01锛汿-Vault-02锛涳紙鏂板锛塗-Audit-RET-01銆?
+### TASK-0041 涓婚摼鏀跺彛鍥炲綊锛欼ntent鈫扜overnor鈫扴kill鈫扐udit 鍏ㄩ摼涓€鑷存€т笌鎷掔粷鐮佺ǔ瀹?- 浠诲姟鎻忚堪锛氬洿缁曚粛澶勪簬 TASK_READY 鐨勬牳蹇冮摼璺渶姹傦紝琛ラ綈 e2e 鍥炲綊涓?trace 瀵归綈锛屽畬鎴愬崟鍚戦摼浜嬪疄闂幆涓庢嫆缁濈爜绋冲畾鎬ф敹鍙ｃ€?- 杈撳叆锛欴evSpec 3/4/5/6/8.1/9/14锛汸RD FR-CORE-001~004銆丗R-INTENT-001~003銆丗R-GOV-001~003銆丗R-TOKEN-001~003銆丗R-AUDIT-001銆?- 杈撳嚭锛?  - e2e 鍦烘櫙锛氭甯告墽琛?鎷掔粷/閲嶆斁/杩囨湡/缂虹エ鎹?闄嶇骇锛?  - 鍥炴斁鏂█锛歩ntent_log鈫抔overnor_log鈫抯kill_exec_log 涓茶仈瀹屾暣锛?  - reason_code 绋冲畾鎬ф柇瑷€锛堝悓绫昏緭鍏ュ悓鐗堟湰涓€鑷达級锛?  - trace 鏇存柊鏉愭枡锛堟湭瀹屾垚椤光啋DONE 鐨勮瘉鎹摼鎺ワ級銆?- 楠屾敹鏍囧噯锛?  - T-14~T-22銆乀-34~T-38銆乀-Audit-01銆乀-67~T-71 鍥炲綊閫氳繃锛?  - 鍚岀被鎷掔粷鐮佺ǔ瀹氬彲缁熻锛?  - requirements_trace 涓?R-01/R-02/R-03/R-04/R-08/R-11/R-12 鑷冲皯杈惧埌 TEST_READY锛堢洰鏍?DONE锛夈€?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/锛泃ests/contract/锛泃ests/fixtures/锛沨ost_brain/governor/锛沨ost_brain/skills/锛沨ost_brain/audit/锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001~004锛汧R-INTENT-001~003锛汧R-GOV-001~003锛汧R-TOKEN-001~003锛汧R-AUDIT-001锛汿-14~T-22锛汿-34~T-38锛汿-Audit-01锛汿-67~T-71銆?
+---
 
-### 2. 任务卡格式（每条必须完整）
+## 4. 澧為噺浠诲姟娓呭崟锛堜氦浠樹笌杩愮淮鏀跺彛锛?
+### TASK-0042 鍚姩缂栨帓鏀跺彛锛欻ost/Edge 鏈嶅姟鍚姩娓呭崟 + 渚濊禆鎺㈤拡
+- 浠诲姟鎻忚堪锛氭妸 Host/Edge 鐨勫惎鍔ㄥ叆鍙ｆ敹鍙ｄ负鍙娴嬬紪鎺掞紝鍚姩鏃惰緭鍑虹粺涓€鏈嶅姟鐘舵€佸揩鐓у苟鏍囨敞涓嶅彲鐢ㄥ師鍥犮€?- 杈撳叆锛欴evSpec 2/10/13锛汸RD FR-CORE-004銆丗R-OBS-001銆?- 杈撳嚭锛?  - 缁熶竴鍚姩娓呭崟缁撴瀯锛坰ervice_id/owner/required/status/reason_code/stage锛夛紱
+  - 鍚姩闃舵鍋ュ悍蹇収杈撳嚭锛堝彲搴忓垪鍖?JSON锛夛紱
+  - 鏈嶅姟涓嶅彲鐢ㄦ椂鐨勭ǔ瀹氶檷绾ф槧灏勪笌瀹¤鍐欏叆鐐癸紱
+  - fixtures锛氬惎鍔ㄦ椂渚濊禆缂哄け/绔彛鍐茬獊/閰嶇疆缂哄け鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鍚姩闃舵鍋ュ悍蹇収缁撴瀯绋冲畾涓斿彲瑙ｆ瀽锛?  - 鍚岀被鍚姩澶辫触鍦ㄥ悓鐗堟湰涓?reason_code/stage 绋冲畾锛?  - 鍥炲綊瑕嗙洊 `T-Svc-01` 涓庯紙鏂板锛塦T-Boot-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/core/services.py锛沞dge_client/rpc/health.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汿-Svc-01锛涳紙鏂板锛塗-Boot-01銆?
+### TASK-0043 杩佺Щ鎵ц鍣ㄦ敹鍙ｏ細SQLite/Bond Schema Version Guard + 骞傜瓑杩佺Щ
+- 浠诲姟鎻忚堪锛氳惤鍦扮粺涓€杩佺Щ鎵ц鍣ㄤ笌 schema 鐗堟湰瀹堝崼锛岀‘淇濇暟鎹簱鍗囩骇/鍥為€€鏈夌‘瀹氭€у璁″彛寰勩€?- 杈撳叆锛欴evSpec 8.1/8.2/14.2锛汸RD FR-AUDIT-001銆丗R-BOND-001銆丯FR-MAINT-001銆?- 杈撳嚭锛?  - SQLite 涓?Bond 杩佺Щ鎵ц鍏ュ彛锛堝箓绛夋墽琛屻€佺増鏈鏌ワ級锛?  - 杩佺Щ鎵ц瀹¤缁撴瀯锛坢igration_id/status/reason_code/latency_ms锛夛紱
+  - schema 婕傜Щ妫€娴嬪け璐ョ殑绋冲畾鎷掔粷鐮佹槧灏勶紱
+  - fixtures锛氶噸澶嶈縼绉汇€佺己杩佺Щ銆佺増鏈€掗€€鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 閲嶅鎵ц杩佺Щ涓嶄骇鐢熼噸澶嶅壇浣滅敤锛?  - schema 婕傜Щ鍙绋冲畾妫€娴嬪苟鍙璁★紱
+  - 鍥炲綊瑕嗙洊 `T-Audit-01`銆乣T-SSOT-01` 涓庯紙鏂板锛塦T-Migrate-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/migrations/锛沨ost_brain/bond/migrations/锛沨ost_brain/audit/sqlite_ledger.py锛泃ools/static_scan/锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001锛汧R-BOND-001锛汵FR-MAINT-001锛汿-Audit-01锛汿-SSOT-01锛涳紙鏂板锛塗-Migrate-01銆?
+### TASK-0044 鍥炴斁宸ュ叿閾炬敹鍙ｏ細request_id 鍗曢敭鍥炴斁鎶ュ憡
+- 浠诲姟鎻忚堪锛氳ˉ榻愬洖鏀惧伐鍏烽摼锛屾敮鎸佸熀浜?request_id 鐢熸垚鍗曟鎵ц閾捐矾鎶ュ憡骞惰緭鍑虹己閾惧師鍥犮€?- 杈撳叆锛欴evSpec 8.1/14.6锛汸RD FR-AUDIT-001~003銆?- 杈撳嚭锛?  - 鍥炴斁鎶ュ憡缁撴瀯锛坕ntent/governor/skill_exec/error/qa_violation 鑱氬悎锛夛紱
+  - 缂洪摼妫€娴嬩笌缂哄け鍘熷洜鏋氫妇锛?  - 鍥炴斁杈撳嚭鐨勭ǔ瀹氭憳瑕佸瓧娈碉紙status/reason_code_chain/evidence_refs锛夛紱
+  - fixtures锛氬畬鏁撮摼銆佺己 skill_exec銆佺己 token_ref 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 缁欏畾 request_id 鍙敓鎴愮ǔ瀹氱粨鏋勬姤鍛婏紱
+  - 缂洪摼鏃跺繀椤诲彲瑙ｉ噴骞跺甫绋冲畾 reason_code锛?  - 鍥炲綊瑕嗙洊 `T-Audit-03` 涓庯紙鏂板锛塦T-Replay-01`銆?- 娑夊強鏂囦欢璺緞锛歵ools/replay/锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001~003锛汿-Audit-03锛涳紙鏂板锛塗-Replay-01銆?
+### TASK-0045 浜や粯闂ㄧ鏀跺彛锛歝ontract/e2e/static-scan/doc-audience 鍥涘悎涓€ CI
+- 浠诲姟鎻忚堪锛氬缓绔嬬粺涓€浜や粯闂ㄧ锛屽皢濂戠害娴嬭瘯銆乪2e銆侀潤鎬佹壂鎻忎笌鏂囨。鍙椾紬闂ㄧ绾冲叆鍚屼竴鍥炲綊鍏ュ彛銆?- 杈撳叆锛欴evSpec 11/14.6锛汚GENTS 2.4锛汸RD NFR-MAINT-001銆?- 杈撳嚭锛?  - CI 闂ㄧ鍒嗙粍涓庡け璐ュ垎绫诲彛寰勶紙contract/e2e/static_scan/doc_gate锛夛紱
+  - 鏂囨。鍙椾紬闂ㄧ涓庢爣棰橀棬绂佺殑鑷姩鏍￠獙锛?  - 澶辫触鎶ュ憡缁撴瀯锛坖ob_id/check_id/reason_code/failed_artifact锛夛紱
+  - fixtures锛氭枃妗ｉ棬绂佸け璐ャ€侀潤鎬佹壂鎻忓け璐ユ牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 鍥涚被闂ㄧ鍧囧彲鐙珛澶辫触骞剁粰鍑哄彲瑙ｉ噴鎶ュ憡锛?  - 鍚岀被闂ㄧ澶辫触鍦ㄥ悓鐗堟湰涓嬭緭鍑虹粨鏋勭ǔ瀹氾紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-CI-01`銆?- 娑夊強鏂囦欢璺緞锛?github/workflows/锛泃ools/doc_lint/锛泃ools/static_scan/锛沝ocs/40_agents/AGENTS.md锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛涳紙鏂板锛塗-CI-01銆?
+### TASK-0046 鐜蹇収鍐荤粨锛歞ev/test/prod 閰嶇疆瀵煎嚭涓庡璁¤拷韪?- 浠诲姟鎻忚堪锛氫负 dev/test/prod 鐢熸垚鑴辨晱閰嶇疆蹇収骞跺啓鍏ュ璁″紩鐢紝淇濊瘉鐜宸紓鍙拷婧笖涓嶆硠闇?secrets銆?- 杈撳叆锛欴evSpec 13.1~13.4锛汸RD FR-CORE-004銆丗R-OBS-001銆?- 杈撳嚭锛?  - 鐜蹇収缁撴瀯锛坋nv/version/digest/override_sources/redacted_keys锛夛紱
+  - 閰嶇疆蹇収鍐欏叆涓庤鍙栨帴鍙ｏ紱
+  - 蹇収姣斿杈撳嚭锛坅dded/removed/changed keys锛夛紱
+  - fixtures锛氳法鐜宸紓涓庢晱鎰熼敭鑴辨晱鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 浠讳竴鐜鍙敓鎴愯劚鏁忓揩鐓т笖 digest 绋冲畾锛?  - 蹇収姣斿缁撴灉鍙璁″苟鍙洖鏀撅紱
+  - 鍥炲綊瑕嗙洊 `T-Config-01` 涓庯紙鏂板锛塦T-Config-02`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/config.py锛沞dge_client/config.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汿-Config-01锛涳紙鏂板锛塗-Config-02銆?
+### TASK-0047 鍙戝竷娓呭崟鏀跺彛锛歁0~M3 鍙儴缃茶祫浜т笌鍥炴粴鏄犲皠
+- 浠诲姟鎻忚堪锛氭矇娣€ M0~M3 鐨勫彂甯冭祫浜ф竻鍗曚笌鍥炴粴鏄犲皠锛岀‘淇濇瘡娆″彂甯冮兘鏈夊彲鏍稿鐨勬渶灏忎氦浠橀潰銆?- 杈撳叆锛欴evSpec 10/14.1锛汸RD FR-OBS-001銆丯FR-MAINT-001銆?- 杈撳嚭锛?  - 鍙戝竷娓呭崟缁撴瀯锛坢ilestone/assets/checksums/required_services锛夛紱
+  - 鍥炴粴鏄犲皠缁撴瀯锛坮elease_id/rollback_target/impact_scope锛夛紱
+  - 涓?Flow 鎸囬拡鍜岄厤缃揩鐓х殑浜ゅ弶鏍￠獙瑙勫垯锛?  - fixtures锛氱己璧勪骇銆乧hecksum 婕傜Щ銆佸洖婊氱洰鏍囦笉瀛樺湪鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - M0~M3 姣忎釜閲岀▼纰戝潎鍙敓鎴愪竴鑷寸殑鍙戝竷娓呭崟锛?  - 鍥炴粴鏄犲皠鍙畾浣嶅彈褰卞搷鑼冨洿骞跺彲瀹¤锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Release-01` 涓?`T-Flow-02`銆?- 娑夊強鏂囦欢璺緞锛歞ocs/50_project/锛沝ocs/60_trace/flows/index.md锛沠lows/active.pointer锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汵FR-MAINT-001锛汿-Flow-02锛涳紙鏂板锛塗-Release-01銆?
+### TASK-0048 鐢熶骇婕旂粌鏀跺彛锛氬喎鍚姩/渚濊禆涓嶅彲鐢?鍥炴粴涓夊満鏅紨缁冨寘
+- 浠诲姟鎻忚堪锛氬缓绔嬩笁绫绘晠闅滄紨缁冨寘锛堝喎鍚姩銆佷緷璧栦笉鍙敤銆佸洖婊氾級锛岄獙璇侀檷绾ц緭鍑轰笌瀹¤閾惧湪鏁呴殰鎬佷粛绋冲畾鍙洖鏀俱€?- 杈撳叆锛欴evSpec 1.2.1/10/14.5锛汸RD FR-CORE-004銆丗R-AUDIT-001銆丗R-OBS-001銆?- 杈撳嚭锛?  - 婕旂粌鍦烘櫙瀹氫箟涓庤緭鍏ユ牱渚嬶紱
+  - 婕旂粌鎶ュ憡缁撴瀯锛坰cenario_id/status/reason_code_chain/replay_ref锛夛紱
+  - 婕旂粌澶辫触鍒嗙被涓庡缃彛寰勶紙涓嶅惈鎿嶄綔鍛戒护锛夛紱
+  - fixtures锛歂oKey銆乸rovider down銆佸洖婊氬啿绐佹牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 涓夌被婕旂粌鍧囪緭鍑哄彲瑙ｆ瀽鍗?JSON 缁撴灉锛?  - 鏁呴殰鎬佷笅 reason_code/stage 绋冲畾涓斿彲缁熻锛?  - 鍥炲綊瑕嗙洊 `T-67~T-71` 涓庯紙鏂板锛塦T-Drill-01`銆?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/锛泃ests/fixtures/锛泃ools/replay/锛沨ost_brain/audit/锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-AUDIT-001锛汧R-OBS-001锛汿-67~T-71锛涳紙鏂板锛塗-Drill-01銆?
+---
 
-TASK-XXXX 标题
-任务描述：一句话说明要达成的工程结果（不写命令，不写工作流指挥）。
-输入：已有模块/既有数据结构/既有文档章节。
-输出：新增/修改的接口、Schema、日志点、测试点、文档更新点。
-验收标准：必须可验证，优先引用 T-编号；并写明关键断言点（字段/拒绝码/审计记录）。
-涉及文件路径：列出将触达的路径（允许新增文件路径，但不写任何命令）。
-关联需求/测试：FR-…；T-…；（可选）不变量 I-…
+## 5. 澧為噺浠诲姟娓呭崟锛堝閮ㄧ幆澧冧笌鏈嶅姟鍙敤鎬ф敹鍙ｏ級
+
+### TASK-0049 浜戣妭鐐圭紪鎺掓敹鍙ｏ細涔濊妭鐐硅鑹?鏈嶅姟鐭╅樀涓庢帰閽堟槧灏?- 浠诲姟鎻忚堪锛氭矇娣€ 9 涓簯鑺傜偣鐨勭粺涓€缂栨帓鐭╅樀锛堣鑹层€佹壙杞芥湇鍔°€佸仴搴锋帰閽堛€侀檷绾х瓥鐣ワ級锛岀‘淇濆鑺傜偣杩愯闈㈠彲瀹¤銆?- 杈撳叆锛欴evSpec 10/13锛汸RD FR-CORE-004銆丗R-OBS-001銆?- 杈撳嚭锛?  - 鑺傜偣娓呭崟缁撴瀯锛坣ode_id/region/role/services/health_endpoint/key_profile_id锛夛紱
+  - 鑺傜偣-鏈嶅姟鏄犲皠涓庢渶灏忓啑浣欑瓥鐣ワ紙primary/secondary锛夛紱
+  - 鑺傜偣鍋ュ悍鎺㈤拡杈撳嚭缁撴瀯锛坣ode_status/reason_code/stage/detail锛夛紱
+  - fixtures锛氳妭鐐圭己鏈嶅姟銆佽鑹插啿绐併€佹帰閽堣秴鏃舵牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 9 鑺傜偣娓呭崟缁撴瀯绋冲畾涓斿彲瑙ｆ瀽锛?  - 鍚岀被鑺傜偣鏁呴殰鍦ㄥ悓鐗堟湰涓?reason_code/stage 绋冲畾锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Infra-01`銆?- 娑夊強鏂囦欢璺緞锛歝onfigs/deploy/锛沨ost_brain/core/services.py锛泃ests/contract/锛泃ests/fixtures/services/锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛涳紙鏂板锛塗-Infra-01銆?
+### TASK-0050 瀵嗛挜瑁呴厤鏀跺彛锛氬鑺傜偣 LLM/API Key Profile 涓庡紩鐢ㄥ寲鍔犺浇
+- 浠诲姟鎻忚堪锛氬缓绔嬭法鑺傜偣瀵嗛挜閰嶇疆 Profile 涓庡紩鐢ㄥ寲鍔犺浇鏈哄埗锛屼繚璇佲€滄湁 key 鍙敤銆佹棤 key 闄嶇骇銆佸叏绋嬩笉钀界洏鏄庢枃鈥濄€?- 杈撳叆锛欴evSpec 13.1~13.4锛汸RD FR-CORE-004銆丗R-OBS-001銆丯FR-MAINT-001銆?- 杈撳嚭锛?  - 瀵嗛挜閰嶇疆缁撴瀯锛坧rovider/node_id/scope/secret_ref/rotation_epoch/status锛夛紱
+  - 杩愯鏃跺瘑閽ヨВ鏋愪笌鑴辨晱蹇収鑱斿姩锛堜粎杈撳嚭 secret_ref 涓?redacted 瀛楁锛夛紱
+  - 缂哄け key 鐨勭ǔ瀹氶檷绾ф槧灏勶紙cold_start/dependency锛夛紱
+  - fixtures锛歮issing key銆乻cope 涓嶅尮閰嶃€佽繃鏈?profile 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 浠ｇ爜涓庨厤缃粨搴撲笉鍑虹幇鏄庢枃 secret锛?  - 鏃?key 鍦烘櫙淇濇寔 draft_only 闄嶇骇骞舵湁绋冲畾 reason_code锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Key-01` 涓?`T-Config-02`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/config.py锛沞dge_client/config.py锛沜onfigs/secrets/锛泃ests/contract/锛泃ests/fixtures/config/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汵FR-MAINT-001锛涳紙鏂板锛塗-Key-01锛汿-Config-02銆?
+### TASK-0051 缂栨帓妗嗘灦鏀跺彛锛歀angChain/LangGraph 杩愯鍥捐閰嶄笌闄嶇骇璺緞
+- 浠诲姟鎻忚堪锛氭帴鍏?LangChain/LangGraph 杩愯缂栨帓锛屽舰鎴愬彲閰嶇疆鍥炬墽琛屽叆鍙ｅ苟淇濇寔娌荤悊閾撅紙Governor/Token/Audit锛変笉琚梺璺€?- 杈撳叆锛欴evSpec 6/8.9/10锛汸RD FR-CORE-001銆丗R-CORE-004銆丗R-AUDIT-001銆?- 杈撳嚭锛?  - 鍥剧紪鎺掗厤缃粨鏋勶紙graph_id/version/node_bindings/edges/fallback_edges锛夛紱
+  - 缂栨帓鎵ц缁撴灉缁撴瀯锛坓raph_status/reason_code/stage/replay_ref锛夛紱
+  - 缂栨帓澶辫触鍒嗙被锛堣妭鐐圭己澶?杈瑰啿绐?瓒呮椂/渚濊禆涓嶅彲鐢級锛?  - fixtures锛歮issing node銆乮nvalid edge銆乬raph timeout 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 缂栨帓缁撴灉淇濇寔鍗?JSON 涓斿彲鍥炴斁锛?  - 缂栨帓澶辫触涓嶇粫杩囨不鐞嗛摼骞舵湁绋冲畾 reason_code锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-01` 涓?`T-Audit-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/锛沨ost_brain/tools/锛沨ost_brain/audit/锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-CORE-004锛汧R-AUDIT-001锛涳紙鏂板锛塗-Orch-01锛汿-Audit-01銆?
+### TASK-0052 鍥炬暟鎹簱鏀跺彛锛歂eo4j 澶栭儴閮ㄧ讲閰嶇疆涓庡惎鍔ㄦ帰閽?- 浠诲姟鎻忚堪锛氳ˉ榻?Neo4j 澶栭儴鍖栬繛鎺ラ厤缃€佽繛閫氭帰閽堜笌澶辫触鏄犲皠锛岀‘淇?Bond SSOT 鍦ㄧ敓浜т緷璧栦笅鍙娴嬪彲闄嶇骇銆?- 杈撳叆锛欴evSpec 8.2/10/13锛汸RD FR-BOND-001~003銆丗R-OBS-001銆?- 杈撳嚭锛?  - Neo4j 閰嶇疆缁撴瀯锛坲ri/database/auth_ref/pool/tls/enabled锛夛紱
+  - 鍚姩鎺㈤拡杈撳嚭涓庡け璐ュ垎绫伙紙auth_failed/schema_drift/leader_unavailable锛夛紱
+  - 杩佺Щ鍏ュ彛涓庢帰閽堢粨鏋滅殑瀹¤涓茶仈瀛楁锛?  - fixtures锛氶壌鏉冨け璐ャ€乻chema 婕傜Щ銆佽妭鐐逛笉鍙揪鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - Neo4j 閰嶇疆鍙В鏋愪笖缂洪」鍙ǔ瀹氭嫆缁濓紱
+  - 渚濊禆涓嶅彲鐢ㄥ満鏅?reason_code/stage 绋冲畾鍙粺璁★紱
+  - 鍥炲綊瑕嗙洊 `T-50~T-54`銆乣T-Migrate-01` 涓庯紙鏂板锛塦T-Neo4j-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/bond/neo4j_client.py锛沨ost_brain/bond/migration_runner.py锛沨ost_brain/core/services.py锛泃ests/contract/锛泃ests/fixtures/bond/锛泃ests/fixtures/services/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-001~003锛汧R-OBS-001锛汿-50~T-54锛汿-Migrate-01锛涳紙鏂板锛塗-Neo4j-01銆?
+### TASK-0053 鍚戦噺搴撴敹鍙ｏ細ChromaDB 澶栭儴閮ㄧ讲閰嶇疆涓庨泦鍚堟不鐞?- 浠诲姟鎻忚堪锛氳ˉ榻?ChromaDB 澶栭儴鍖栭厤缃笌闆嗗悎娌荤悊绛栫暐锛岀‘淇?episodic/retrieval 鍦ㄧ敓浜у舰鎬佷笅鍙帰娴嬨€佸彲闄嶇骇銆佸彲瀹¤銆?- 杈撳叆锛欴evSpec 8.3.1/10/13锛汸RD FR-MEM-003~005銆丗R-OBS-001銆?- 杈撳嚭锛?  - Chroma 閰嶇疆缁撴瀯锛坋ndpoint/tenant/database/collection_profiles/vector_dim锛夛紱
+  - 闆嗗悎鍒濆鍖栦笌缁村害鏍￠獙瑙勫垯锛?  - 渚濊禆涓嶅彲鐢ㄦ椂鐨勯檷绾ц緭鍑轰笌 reason_code 鏄犲皠锛?  - fixtures锛歝ollection 缂哄け銆乿ector dim 涓嶅尮閰嶃€乪ndpoint down 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - Chroma 閰嶇疆涓庨泦鍚堟不鐞嗚緭鍑虹粨鏋勭ǔ瀹氾紱
+  - 鏁呴殰鎬佸彲闄嶇骇涓斿璁￠摼鍙洖鏀撅紱
+  - 鍥炲綊瑕嗙洊 `T-Ret-03` 涓庯紙鏂板锛塦T-Chroma-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/chroma_client.py锛沨ost_brain/retrieval/evidence_pack.py锛沨ost_brain/core/services.py锛泃ests/contract/锛泃ests/fixtures/retrieval/锛泃ests/fixtures/services/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-003~005锛汧R-OBS-001锛汿-Ret-03锛涳紙鏂板锛塗-Chroma-01銆?
+### TASK-0054 宓屽叆妯″瀷鏀跺彛锛欵mbedding 鏈嶅姟璺敱涓庣増鏈寲閰嶇疆
+- 浠诲姟鎻忚堪锛氬缓绔嬪祵鍏ユā鍨嬬殑澶氭彁渚涙柟璺敱涓庣増鏈寲閰嶇疆锛屼繚璇佷笉鍚岃妭鐐逛笅鐨?embedding 琛屼负銆侀檷绾т笌瀹¤鍙ｅ緞涓€鑷淬€?- 杈撳叆锛欴evSpec 8.3.1/13锛汸RD FR-MEM-003銆丗R-OBS-001銆?- 杈撳嚭锛?  - 宓屽叆妯″瀷閰嶇疆缁撴瀯锛坧rovider/model_id/dim/timeout_ms/node_selector锛夛紱
+  - 杩愯鏃惰矾鐢变笌澶辫触鏄犲皠锛坲navailable/timeout/input_invalid锛夛紱
+  - 缁村害婕傜Щ妫€娴嬪彛寰勪笌瀹¤瀛楁锛?  - fixtures锛歮odel unavailable銆乼imeout銆乨im drift 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - Embedding 杈撳嚭濂戠害鍦ㄥ鎻愪緵鏂逛笅缁撴瀯绋冲畾锛?  - 鍚岀被澶辫触鏄犲皠 `RETR_EMBED_*` 绋冲畾锛?  - 鍥炲綊瑕嗙洊 `T-Ret-01` 涓庯紙鏂板锛塦T-Embed-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/retrieval/embedding.py锛沨ost_brain/core/services.py锛泃ests/contract/锛泃ests/fixtures/retrieval/锛沜onfigs/models/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-003锛汧R-OBS-001锛汿-Ret-01锛涳紙鏂板锛塗-Embed-01銆?
+### TASK-0055 閲嶆帓妯″瀷鏀跺彛锛歊eranker 鏈嶅姟璺敱涓庡垎鏁扮ǔ瀹氬寲
+- 浠诲姟鎻忚堪锛氬缓绔嬮噸鎺掓ā鍨嬬殑鏈嶅姟璺敱涓庡垎鏁扮ǔ瀹氬寲绛栫暐锛屼繚璇佸€欓€夐噸鎺掑湪渚濊禆寮傚父涓嬩粛鍙В閲婂苟鍙洖鏀俱€?- 杈撳叆锛欴evSpec 8.3.1/13锛汸RD FR-MEM-004銆丗R-OBS-001銆?- 杈撳嚭锛?  - 閲嶆帓妯″瀷閰嶇疆缁撴瀯锛坧rovider/model_id/top_k/timeout_ms/node_selector锛夛紱
+  - 鍒嗘暟褰掍竴鍖栦笌寮傚父鍥為€€瑙勫垯锛?  - 澶辫触鍒嗙被锛坢odel_down/timeout/invalid_score_range锛夛紱
+  - fixtures锛歮odel down銆乼imeout銆乥ad score 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - Reranker 杈撳嚭濂戠害瀛楁绋冲畾涓斿彲瀹¤锛?  - 鍚岀被澶辫触鏄犲皠 `RETR_RERANK_*` 绋冲畾锛?  - 鍥炲綊瑕嗙洊 `T-Ret-02` 涓庯紙鏂板锛塦T-Rerank-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/retrieval/reranker.py锛沨ost_brain/core/services.py锛泃ests/contract/锛泃ests/fixtures/retrieval/锛沜onfigs/models/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-004锛汧R-OBS-001锛汿-Ret-02锛涳紙鏂板锛塗-Rerank-01銆?
+### TASK-0056 鑱旇皟楠屾敹鏀跺彛锛氬閮ㄤ緷璧栧氨缁姤鍛婁笌鍙敤鎬у熀绾?- 浠诲姟鎻忚堪锛氬舰鎴愬閮ㄤ緷璧栬仈璋冮獙鏀跺寘锛岀粺涓€杈撳嚭鈥滆妭鐐?瀵嗛挜/缂栨帓妗嗘灦/Neo4j/Chroma/Embedding/Reranker鈥濆氨缁熀绾夸笌鏁呴殰鍙ｅ緞銆?- 杈撳叆锛欴evSpec 10/11/14.5锛汸RD FR-CORE-004銆丗R-OBS-001銆丯FR-MAINT-001銆?- 杈撳嚭锛?  - 鑱旇皟灏辩华鎶ュ憡缁撴瀯锛坋nv/node_count/key_profiles/services/graph_runtime/readiness_status锛夛紱
+  - 鍏抽敭渚濊禆鎺㈤拡鐭╅樀涓庡け璐ュ垎绫绘眹鎬伙紱
+  - 婕旂粌鎽樿杈撳嚭锛坰cenario_id/status/reason_code_chain/replay_ref锛夛紱
+  - fixtures锛氶儴鍒嗗氨缁€佸叧閿緷璧栦笉鍙敤鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鑱旇皟鎶ュ憡涓哄彲瑙ｆ瀽鍗?JSON 涓斿瓧娈电ǔ瀹氾紱
+  - 缂轰緷璧栨椂绯荤粺淇濇寔闄嶇骇涓庡璁″彲鍥炴斁锛屼笉鍑虹幇浼墽琛屽鍛婏紱
+  - 鍥炲綊瑕嗙洊 `T-Svc-01`銆乣T-Boot-01`銆乣T-Drill-01` 涓庯紙鏂板锛塦T-EnvReady-01`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/core/services.py锛泃ools/replay/锛泃ests/e2e/锛泃ests/fixtures/services/锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-OBS-001锛汵FR-MAINT-001锛汿-Svc-01锛汿-Boot-01锛汿-Drill-01锛涳紙鏂板锛塗-EnvReady-01銆?
+### TASK-0057 涓绘帶闂幆鏀跺彛锛歀angGraph 璇诲彇 model_plane 骞剁粺涓€涓嬪彂 LLM 鍙傛暟
+- 浠诲姟鎻忚堪锛氬皢 `configs/model_plane/{model_profiles,node_registry}` 浣滀负缂栨帓涓绘帶閰嶇疆婧愶紝钀藉疄鈥滅敱 LangGraph 閫夋嫨鑺傜偣骞剁敱 LangChain/Gateway 鎵ц鈥濈殑鍗曞叆鍙ｉ棴鐜紝娑堥櫎妯″瀷鍙傛暟鏁ｈ惤鍦ㄦ祴璇?璋冪敤鏂规敞鍏ョ殑鐘舵€併€?- 杈撳叆锛欴evSpec 6/8.9/10/13锛汸RD FR-CORE-001銆丗R-CORE-004銆丗R-AUDIT-001銆?- 杈撳嚭锛?  - model_plane 瑙ｆ瀽鍣ㄤ笌杩愯鏃跺揩鐓х粨鏋勶紙profile_id/node_id/provider/model_id/temperature/max_output_tokens/timeout_ms锛夛紱
+  - `GraphRuntimeContract` 瀵?`model_profile_id` 鐨勫己绾︽潫鍔犺浇璺緞锛堢己 profile銆佺己 node銆佸弬鏁伴潪娉曟椂绋冲畾鎷掔粷锛夛紱
+  - LLM 璋冪敤瀹¤鎵╁睍瀛楁锛坧rofile_id/node_id/provider/model_id/param_hash锛夛紝淇濊瘉鍙洖鏀炬瘮瀵癸紱
+  - fixtures锛歮issing profile銆乵issing node銆乸rovider mismatch銆乸aram drift 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 缂栨帓杩愯涓嶅緱渚濊禆澶栭儴涓存椂娉ㄥ叆 `provider_fn/model_nodes` 鎵嶅彲鎵ц锛?  - 妯″瀷鑺傜偣鍙傛暟鐢?model_plane 鍗曠偣鍐冲畾骞跺湪杈撳嚭/瀹¤涓彲杩芥函锛?  - 缂栨帓澶辫触淇濇寔鍗?JSON 涓?reason_code 绋冲畾锛屼笉缁曡繃 Governor/Token/Audit锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-02`銆乣T-Key-02` 涓?`T-Audit-04`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/graph_runtime.py锛沨ost_brain/integrations/llm_gateway.py锛沨ost_brain/app/config.py锛沨ost_brain/audit/sqlite_ledger.py锛沜onfigs/model_plane/锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/orchestration/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-CORE-004锛汧R-AUDIT-001锛汿-Orch-01锛涳紙鏂板锛塗-Orch-02锛汿-Key-01锛涳紙鏂板锛塗-Key-02锛涳紙鏂板锛塗-Audit-04銆?
+### TASK-0058 鍙傛暟绛惧悕鏀跺彛锛歮odel_plane 鍙傛暟鍝堝笇涓庨槻婕傜Щ鏍￠獙
+- 浠诲姟鎻忚堪锛氬 model_plane 涓嬪彂鍙傛暟寤虹珛绋冲畾 `param_hash` 涓庤繍琛屾椂鏍￠獙锛岄伩鍏?provider/model_id/娓╁害/token_cap 鍦ㄦ墽琛岄摼璺彂鐢熶笉鍙璁℃紓绉汇€?- 杈撳叆锛欴evSpec 10/13锛汸RD FR-CORE-004銆丗R-AUDIT-001銆?- 杈撳嚭锛?  - 鍙傛暟绛惧悕瑙勫垯锛坧rovider/model_id/temperature/max_output_tokens/timeout_ms 鐨?canonical 搴忓垪鍖栦笌 hash锛夛紱
+  - 缂栨帓鎵ц鏈熷弬鏁伴槻婕傜Щ鏍￠獙锛堟湡鏈涚鍚?vs 瀹為檯绛惧悕锛夛紱
+  - 瀹¤瀛楁鎵╁睍锛坋xpected_param_hash/actual_param_hash/drift_detected锛夛紱
+  - fixtures锛歨ash mismatch銆乵issing hash銆乼ampered params 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 浠绘剰妯″瀷璋冪敤鍧囧彲杈撳嚭绋冲畾 `param_hash` 骞跺彲鍥炴斁锛?  - 鍙戠幇婕傜Щ鏃剁ǔ瀹氭嫆缁濇垨闄嶇骇涓?reason_code 鍙粺璁★紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-03` 涓?`T-Audit-05`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/graph_runtime.py锛沨ost_brain/integrations/llm_gateway.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/orchestration/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-AUDIT-001锛涳紙鏂板锛塗-Orch-03锛涳紙鏂板锛塗-Audit-05銆?
+### TASK-0059 璺敱娌荤悊鏀跺彛锛歱rofile鈫抧ode 閫夋嫨鍣ㄤ笌鐜绾︽潫鐭╅樀
+- 浠诲姟鎻忚堪锛氬疄鐜?model_profile 鍒?node 鐨勭‘瀹氭€ч€夋嫨鍣紝骞舵妸 env/node_selector/availability 绾︽潫绾冲叆涓绘祦绋嬭矾鐢憋紝纭繚鍚岃緭鍏ュ悓鐜寰楀埌鍚岃矾鐢辩粨鏋溿€?- 杈撳叆锛欴evSpec 6/13锛汸RD FR-CORE-001銆丗R-OBS-001銆?- 杈撳嚭锛?  - profile鈫抧ode 閫夋嫨鍣ㄥ绾︼紙杈撳叆锛歱rofile/env/task锛涜緭鍑猴細selected_node/reason_code锛夛紱
+  - 鐜绾︽潫鐭╅樀锛坉ev/staging/prod 涓?node_selector/availability 鐨勮В鏋愬彛寰勶級锛?  - 瀹¤瀛楁锛坰elected_node/candidate_nodes/reject_reason锛夛紱
+  - fixtures锛歯o candidate銆乵ulti candidate tie-break銆乪nv mismatch 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 閫夋嫨鍣ㄧ粨鏋滅‘瀹氭€т笖鍙В閲婏紱
+  - 鏃犲€欓€夋椂绋冲畾闄嶇骇骞朵繚鎸佸崟 JSON 杈撳嚭锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-04` 涓?`T-EnvReady-02`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/graph_runtime.py锛沨ost_brain/core/services.py锛沨ost_brain/app/main.py锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/orchestration/锛泃ests/fixtures/services/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-OBS-001锛涳紙鏂板锛塗-Orch-04锛涳紙鏂板锛塗-EnvReady-02銆?
+### TASK-0060 绁ㄦ嵁鑱斿姩鏀跺彛锛氭ā鍨嬭皟鐢ㄤ笌 Governor/Token 瀹℃壒閿氱偣涓茶仈
+- 浠诲姟鎻忚堪锛氬皢妯″瀷璋冪敤锛堝挨鍏跺彲鑳借Е鍙戦珮椋庨櫓鎰忓浘鑽夋鐨勮妭鐐癸級涓?Governor/Token 瀹℃壒閿氱偣涓茶仈锛屽舰鎴愨€滄ā鍨嬪缓璁啋娌荤悊鍐崇瓥鈫掓墽琛屽叆鍙ｂ€濈殑鍙洖鏀鹃棴鐜€?- 杈撳叆锛欴evSpec 8.9/10锛汸RD FR-TOOL-003銆丗R-AUDIT-001銆丗R-CORE-001銆?- 杈撳嚭锛?  - 妯″瀷璋冪敤鍒版不鐞嗛摼璺殑涓茶仈閿紙request_id/intent_id/approval_token_ref/evidence_ref锛夛紱
+  - 瀹℃壒鍓嶅悗闃舵瀛楁锛坧recheck_stage/governor_stage/execution_stage锛夛紱
+  - 鎷掔粷鐮佹槧灏勶紙missing_token/invalid_token/governor_reject锛夛紱
+  - fixtures锛歮odel suggests write/no token銆乼oken expired銆乬overnor reject 鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 楂橀闄╄矾寰勪笉寰楀洜妯″瀷鑺傜偣鎴愬姛鑰岀粫杩?Governor/Token锛?  - 澶栭儴鈥滃凡鎵ц鈥濆彊浜嬪繀椤诲彲鎸囧悜 evidence_ref锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-05` 涓?`T-Tool-04`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/graph_runtime.py锛沨ost_brain/governor/decision.py锛沨ost_brain/governor/tokens.py锛沨ost_brain/tools/broker.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-TOOL-003锛汧R-AUDIT-001锛涳紙鏂板锛塗-Orch-05锛涳紙鏂板锛塗-Tool-04锛汭1/I8/I9銆?
+### TASK-0061 瀹¤褰掓。鏀跺彛锛歮odel_control 鍏ュ簱涓?request 绾у洖鏀鹃€忓嚭
+- 浠诲姟鎻忚堪锛氭妸缂栨帓杈撳嚭涓殑 `model_control` 涓庢不鐞嗛敋鐐瑰啓鍏ュ璁″瓨鍌ㄥ苟鎺ュ叆 request 绾у洖鏀撅紝褰㈡垚鈥滃弬鏁扮鍚嶁€旂エ鎹€旀墽琛岀姸鎬佲€濈殑鍙绱㈤棴鐜€?- 杈撳叆锛欴evSpec 10/11锛汸RD FR-AUDIT-001銆丗R-CORE-001銆?- 杈撳嚭锛?  - 瀹¤琛ㄥ瓧娈垫墿灞曪紙request_id/node_id/model_profile_id/provider/model_id/expected_param_hash/actual_param_hash/drift_detected/approval_token_ref/evidence_ref锛夛紱
+  - 鍥炴斁宸ュ叿杈撳嚭鎵╁睍锛堟寜 request_id 鑱氬悎 model_control 涓庢不鐞嗛敋鐐癸級锛?  - fixtures锛歛udit row 缂哄叧閿瓧娈点€佸洖鏀剧己閾捐矾銆乭ash 婕傜Щ鍏ュ簱鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 浠绘剰涓€娆℃ā鍨嬭皟鐢ㄥ彲閫氳繃 request_id 鍥炴斁鍒板弬鏁扮鍚嶄笌绁ㄦ嵁閿氱偣锛?  - 婕傜Щ涓庣エ鎹己澶卞湪鍥炴斁鎶ュ憡涓叿澶囩ǔ瀹?reason_code 涓庨樁娈靛瓧娈碉紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Audit-06`銆乣T-Replay-02`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛泃ools/replay/锛沨ost_brain/integrations/graph_runtime.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001锛汧R-CORE-001锛涳紙鏂板锛塗-Audit-06锛涳紙鏂板锛塗-Replay-02銆?
+### TASK-0062 閰嶇疆娌荤悊鏀跺彛锛歮odel_plane 鐗堟湰绛惧悕涓庡彂甯冮棬绂佽仈鍔?- 浠诲姟鎻忚堪锛氬皢 model_plane 璧勪骇绾冲叆鍙戝竷闂ㄧ锛屽浐鍖栤€滈厤缃増鏈啋鍙傛暟绛惧悕鈫掔敓鏁堢幆澧冣€濈殑涓€鑷存€ф牎楠岋紝閬垮厤鐏板害鏈熼棿閰嶇疆婕傜Щ涓嶅彲鎺с€?- 杈撳叆锛欴evSpec 1.5/14.5锛汸RD FR-FLOW-001銆丗R-OBS-001銆丯FR-MAINT-001銆?- 杈撳嚭锛?  - model_plane 鐗堟湰娓呭崟锛坧rofile_version/node_registry_version/asset_digest锛夛紱
+  - 鍙戝竷鍓嶄竴鑷存€ф牎楠岋紙active pointer 涓?model_plane digest 瀵归綈锛夛紱
+  - 鍥炴粴鏄犲皠锛堢増鏈洖閫€鏃剁鍚嶄竴鑷存€ф鏌ワ級锛?  - fixtures锛歞igest mismatch銆乻tale pointer銆乺ollback digest 缂哄け鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鍙戝竷闂ㄧ鍙樆鏂?model_plane 涓?active 閰嶇疆涓嶄竴鑷达紱
+  - 鍥炴粴璺緞鍙獙璇佺鍚嶄竴鑷翠笖鍙璁★紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Flow-03`銆乣T-Release-01`銆?- 娑夊強鏂囦欢璺緞锛歠lows/active.pointer锛沜onfigs/model_plane/锛沨ost_brain/release/锛泃ests/contract/锛泃ests/fixtures/锛沝ocs/60_trace/flows/index.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FLOW-001锛汧R-OBS-001锛汵FR-MAINT-001锛涳紙鏂板锛塗-Flow-03锛涳紙鏂板锛塗-Release-01銆?
+### TASK-0063 鑱旇皟楠屾敹琛ラ綈锛氱紪鎺掍富鎺у叏閾捐矾婕旂粌涓庢晠闅滄敞鍏ョ煩闃?- 浠诲姟鎻忚堪锛氳ˉ榻愨€滅紪鎺掍富鎺?+ model_plane + Governor/Token + Audit鈥濊仈璋冩紨缁冪煩闃碉紝褰㈡垚鍙鐜板疄鎴樻晠闅滃寘涓庨獙鏀舵姤鍛婃ā鏉裤€?- 杈撳叆锛欴evSpec 10/11/14.5锛汸RD FR-CORE-004銆丗R-AUDIT-001銆丗R-TOOL-003銆?- 杈撳嚭锛?  - 婕旂粌鍦烘櫙鐭╅樀锛坧rofile 缂哄け銆乻elector 鏃犲€欓€夈€乸aram drift銆乤pproval token missing銆乸rovider down锛夛紱
+  - 鏍囧噯鍖栨姤鍛婄粨鏋勶紙scenario_id/stage/status/reason_code_chain/replay_ref/model_profile_id锛夛紱
+  - 鏁呴殰娉ㄥ叆 fixtures 涓庢湡鏈涙柇瑷€鏂囨。锛?  - 鐜灏辩华鎶ュ憡琛ュ厖瀛楁锛坥rchestration_control_coverage锛夈€?- 楠屾敹鏍囧噯锛?  - 浜旂被鏍稿績鏁呴殰鍦烘櫙鍧囧彲绋冲畾澶嶇幇骞惰緭鍑哄崟 JSON 鎶ュ憡锛?  - 姣忎釜鍦烘櫙鍙€氳繃鍥炴斁宸ュ叿瀹氫綅鍒?request_id 涓庡叧閿璁″瓧娈碉紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Drill-02`銆乣T-EnvReady-03`銆乣T-Orch-06`銆?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/锛泃ests/fixtures/drill/锛沨ost_brain/app/main.py锛泃ools/replay/锛沨ost_brain/integrations/graph_runtime.py锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汧R-AUDIT-001锛汧R-TOOL-003锛涳紙鏂板锛塗-Drill-02锛涳紙鏂板锛塗-EnvReady-03锛涳紙鏂板锛塗-Orch-06銆?
+### TASK-0064 杩愯閾捐矾鍙鍖栬ˉ榻愶紙鍙瑙傛祴 API + request 鏃堕棿绾胯仛鍚堬級
+- 浠诲姟鎻忚堪锛氳ˉ榻愨€滄棤鍙鍖栫晫闈㈤毦浠ョ洃鎺ч摼璺粏鑺傗€濈殑缂哄彛锛屽厛钀藉湴鍙瑙傛祴鎺ュ彛锛岃緭鍑?request 绾ч摼璺椂闂寸嚎涓庢潵婧愭眹鎬伙紝浣滀负鍚庣画 UI 闈㈡澘鐨勬暟鎹簳搴э紱骞跺皢 Agent 鐩戞祴鏂瑰悜鍒囧埌 LangSmith锛屽悓鏃跺湪绯荤粺鍚姩鏃惰緭鍑鸿缁嗘暟鎹祦鏃ュ織骞舵敮鎸佹湰鍦扮洃鎺ф帶鍒跺彴绐楀彛锛坆est-effort锛夈€?- 杈撳叆锛欴evSpec 10/11锛涚幇鏈夊璁￠摼锛坕ntent/governor/skill_exec/channel/avatar/clawd/voice/retrieval/vision/service_health锛夈€?- 杈撳嚭锛?  - request 绾ц娴嬫姤鍛婂绾︼紙request_id/trace_status/trace_stage/trace_reason_code/timeline_total/sources/timeline锛夛紱
+  - 鏃堕棿绾胯仛鍚堣鍒欙紙鎸?ts_ms 涓?source 绋冲畾鎺掑簭锛夛紱
+  - Agent 鐩戞祴閰嶇疆濂戠害锛圠angSmith provider/status/reason_code/project/endpoint锛夛紱
+  - 鍚姩鏈熸暟鎹祦鏃ュ織鎵撳嵃锛坰tartup/readiness/monitoring profile/console profile锛夛紱
+  - 鏈湴鐩戞帶鎺у埗鍙扮獥鍙ｏ紙spawn best-effort锛岄粯璁?inline锛夛紱
+  - 鍙绾︽潫锛氫笉鏂板鎵ц鍏ュ彛銆佷笉鏀?Governor/Token/Audit 鍐崇瓥閾撅紱
+  - 鍥炲綊娴嬭瘯锛堟柊澧烇級`T-Obs-01`銆乣T-Obs-02`銆?- 楠屾敹鏍囧噯锛?  - 浠绘剰 request_id 鍙緭鍑哄彲瑙ｆ瀽鍗?JSON 鏃堕棿绾挎姤鍛婏紱
+  - sources 缁熻涓?timeline 鏉＄洰涓€鑷翠笖绋冲畾鍙洖鏀撅紱
+  - 绌?request_id 琚ǔ瀹氭嫆缁濓紙杈撳叆濂戠害閿欒锛夛紱
+  - LangSmith tracing 鍏抽棴/缂?key 鏃惰緭鍑虹ǔ瀹?status+reason_code锛?  - 鐩戞帶鎺у埗鍙板湪涓嶆敮鎸?spawn 鐨勫钩鍙扮ǔ瀹氶檷绾т负 inline 妯″紡锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Obs-01`銆乣T-Obs-02`銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛泃ests/contract/test_observability_timeline_contract.py锛泃ests/contract/test_runtime_monitoring_contract.py锛沝ocs/30_devspec/DevTasks.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汧R-AUDIT-001锛涳紙鏂板锛塗-Obs-01锛涳紙鏂板锛塗-Obs-02锛汭1/I8/I9銆?
+---
+
+## 6. 澧為噺浠诲姟娓呭崟锛堝闃呮姤鍛婄己鍙ｈˉ榻愶細鏈嶅姟鍖?鍙鍖?璁惧闆嗘垚/宸ョ▼鏀瑰杽锛?
+> 鏉ユ簮锛歠ull_code_review_report_2026-03-02.md 绗簲鑺?鍏抽敭缂哄彛涓庢敼杩涘缓璁?銆?> 鎸変紭鍏堢骇鎺掑垪锛歅0锛堥珮锛夆啋 P1锛堜腑锛夆啋 P2锛堜綆锛夈€?
+### TASK-0065 HTTP 鏈嶅姟妗嗘灦钀藉湴锛欶astAPI 璺敱缁戝畾 + 鍋ュ悍妫€鏌?+ 閾捐矾鍏ュ彛锛圥0锛?- 浠诲姟鎻忚堪锛氬皢鐜版湁鍑芥暟鑱氬悎灞傦紙`main.py` 涓殑 `build_service_health_report`銆乣build_startup_report`銆乣build_env_readiness_report` 绛夛級缁戝畾鍒?FastAPI 璺敱锛屽舰鎴愬彲鐩存帴 `python -m host_brain` 鍚姩鐨?HTTP 鏈嶅姟锛屽澶栨毚闇?`POST /v1/chat`锛堥摼璺叆鍙ｏ級涓?`GET /health`锛堝仴搴锋鏌ワ級锛屽苟淇濊瘉 Governor/Token/Audit 娌荤悊閾句笉琚梺璺€?- 杈撳叆锛欴evSpec 2.1锛圚ost 杩涚▼锛?瀵瑰鎻愪緵 `POST /v1/chat`"锛夛紱DevSpec 1.1锛坄host_brain/app/main.py` 瀹氫箟涓?HTTP API 鍏ュ彛"锛夛紱PRD 2.1锛?缂栨帓鍏ュ彛鏈嶅姟 Host Orchestrator API锛氬澶?chat 鍏ュ彛 + 浜嬩欢姹囪仛"锛夈€?- 杈撳嚭锛?  - FastAPI Application 瀹炰緥涓庤矾鐢辨敞鍐岋紙`/v1/chat`銆乣/health`銆乣/readiness`銆乣/metrics`锛夛紱
+  - 璇锋眰鈫掔紪鎺掆啋杈撳嚭鐨勬爣鍑?JSON 鍝嶅簲缁撴瀯锛堝鐢ㄥ凡鏈?`quality.stage`/`reason_code` 鍙ｅ緞锛夛紱
+  - 鍚姩鐢熷懡鍛ㄦ湡閽╁瓙锛坰tartup/shutdown锛変覆鑱旀湇鍔℃帰閽堜笌瀹¤鍐欏叆锛?  - 涓棿浠跺眰锛歳equest_id 娉ㄥ叆銆丆ORS锛堝彲閰嶇疆锛夈€佸紓甯稿厹搴曪紙淇濇寔鍗?JSON 杈撳嚭锛夛紱
+  - `pyproject.toml` / `requirements.txt` 鏂板 `fastapi`銆乣uvicorn` 渚濊禆骞堕攣瀹氱増鏈紱
+  - fixtures锛氭甯歌姹傘€佺己瀛楁銆佹湇鍔′笉鍙敤鍦烘櫙鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - `python -m host_brain` 鍙惎鍔?HTTP 鏈嶅姟骞跺搷搴?`/health`锛?  - `POST /v1/chat` 杈撳叆鍚庣粡 Governor 瑁佸喅骞惰繑鍥炲崟 JSON 鍝嶅簲锛堝惈 narrative/intent_draft/quality锛夛紱
+  - 寮傚父/闄嶇骇鍦烘櫙浠嶈緭鍑哄彲瑙ｆ瀽鍗?JSON 涓?reason_code 绋冲畾锛?  - 涓嶅紩鍏ユ梺璺墽琛岃矾寰勶紙鎵€鏈夋墽琛屼粛缁?Governor/Token/Skills锛夛紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-HTTP-01`锛堣矾鐢卞彲杈炬€т笌鍝嶅簲缁撴瀯锛夈€乣T-HTTP-02`锛堝紓甯稿厹搴曚笌闄嶇骇杈撳嚭锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/app/config.py锛沨ost_brain/pyproject.toml锛堟垨 requirements.txt锛夛紱tests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-CORE-002锛汧R-CORE-004锛汧R-OBS-001锛涳紙鏂板锛塗-HTTP-01锛汿-HTTP-02銆?
+### TASK-0066 閾捐矾鍙鍖栭潰鏉匡細瀹¤鏁版嵁 Web UI 鍛堢幇涓?request 绾ф帓闅滐紙P0锛?- 浠诲姟鎻忚堪锛氬熀浜?TASK-0064 钀藉湴鐨勫彧璇昏娴?API锛屾瀯寤烘渶灏忓彲鐢ㄧ殑 Web UI 闈㈡澘锛屾敮鎸佹寜 request_id/session_id 妫€绱㈤摼璺椂闂寸嚎銆佹煡鐪?Governor 瑁佸喅璇︽儏銆佸璁′簨浠惰仛鍚堬紝闄嶄綆鎺掗殰瀵逛汉宸ユ煡琛ㄧ殑渚濊禆锛沀I 涓哄彧璇伙紝涓嶆柊澧炰换浣曟墽琛屽叆鍙ｃ€?- 杈撳叆锛欴evSpec 10/11锛堝彲瑙傛祴鎬э級锛汿ASK-0064 杈撳嚭鐨?request 绾ц娴嬫姤鍛婂绾︼紱PRD FR-OBS-001锛?鍏抽敭鎸囨爣涓庨潰鏉?锛夈€?- 杈撳嚭锛?  - 鍓嶇椤甸潰锛堝彲閫?React/Vue/绾?HTML+JS锛屼互鏈€灏忓彲杩愯涓哄噯锛夛紱
+  - 椤甸潰鍔熻兘锛歳equest_id 鎼滅储銆佹椂闂寸嚎鍙鍖栥€乻ource 杩囨护銆乺eason_code 缁熻鍥捐〃锛?  - 涓?Host API 鐨勯泦鎴愶紙`GET /v1/observe/{request_id}` 鎴栫瓑浠风鐐癸級锛?  - 闈欐€佽祫婧愭墦鍖呬笌閮ㄧ讲鍙ｅ緞锛堝彲宓屽叆 FastAPI static files 鎴栫嫭绔嬮儴缃诧級锛?  - fixtures锛氱ず渚嬭娴嬫姤鍛婃暟鎹€?- 楠屾敹鏍囧噯锛?  - 杈撳叆 request_id 鍚庡彲鍦ㄦ祻瑙堝櫒鐪嬪埌閾捐矾鏃堕棿绾夸笌 source 鍒嗗竷锛?  - 绌虹粨鏋?閿欒 request_id 鏈夊弸濂芥彁绀轰笖涓嶅穿婧冿紱
+  - 闈㈡澘涓嶅紩鍏ヤ换浣曟墽琛屽叆鍙ｏ紙绾彧璇伙級锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-UI-01`锛堥潰鏉垮彲娓叉煋涓?API 鑱旈€氾級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/app/static/锛堟垨 frontend/锛夛紱tests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汧R-OBS-002锛涳紙鏂板锛塗-UI-01銆?
+### TASK-0067 Edge ASR 璁惧闆嗘垚锛歠aster-whisper 瀹為檯 SDK 瀵规帴涓庝簨浠舵ˉ鎺ワ紙P0锛?- 浠诲姟鎻忚堪锛氬皢 Edge 绔?ASR 浠庡绾﹀眰瀹氫箟鎺ㄨ繘鍒板疄闄?faster-whisper锛坙arge-v3锛塖DK 瀵规帴锛屽舰鎴?楹﹀厠椋庤緭鍏モ啋 faster-whisper 杞啓鈫?asr_chunk 浜嬩欢涓婇€?鐨勫畬鏁撮摼璺紝骞朵繚鎸佷笌宸叉湁 RPC 濂戠害锛圱ASK-0024/TASK-0025锛夌殑缁撴瀯鍏煎銆?- 杈撳叆锛欴evSpec 8.11.3锛圴OICE 濂戠害锛歛sr_chunk 瀛楁锛夛紱TASK-0024/TASK-0025 杈撳嚭鐨?RPC 绔偣涓庝簨浠?Schema锛汸RD FR-VOICE-001銆?- 杈撳嚭锛?  - faster-whisper 妯″瀷鍔犺浇涓庢帹鐞嗗皝瑁咃紙GPU 甯搁┗锛夛紱
+  - 闊抽娴侀噰闆嗕笌鍒嗙墖绛栫暐锛圴AD 鎴栧浐瀹氱獥鍙ｏ級锛?  - 杞啓缁撴灉鈫?asr_chunk 浜嬩欢鏄犲皠锛坱ext/timestamps/confidence/alternates锛夛紱
+  - 璧勬簮闂搁棬锛圱ASK-0029锛夐泦鎴愶細ASR 浼樺厛绾ф渶楂橈紱
+  - 妯″瀷涓嶅彲鐢?GPU OOM 鐨勭ǔ瀹氶檷绾т笌 reason_code 鏄犲皠锛?  - `requirements.txt` 鏂板 `faster-whisper`銆乣sounddevice`锛堟垨绛変环锛変緷璧栵紱
+  - fixtures锛氶煶棰戞牱鏈紙鐭?闀?闈欓煶/浣庝俊鍣瘮锛夈€?- 楠屾敹鏍囧噯锛?  - 瀹為檯楹﹀厠椋庤緭鍏ュ彲浜у嚭缁撴瀯绋冲畾鐨?asr_chunk 浜嬩欢锛?  - 浣庣疆淇″害鏄惧紡鏍囨敞锛汫PU 涓嶅彲鐢ㄦ椂蹇€熷け璐ュ苟鏈夌ǔ瀹?reason_code锛?  - 涓庡凡鏈?T-Voice-01 濂戠害鍏煎锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-ASR-HW-01`锛堝疄闄呰澶囬摼璺彲杈炬€э級銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/senses/asr.py锛沞dge_client/rpc/voice.py锛沞dge_client/rpc/resource_gate.py锛沞dge_client/requirements.txt锛泃ests/contract/锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汿-Voice-01锛涳紙鏂板锛塗-ASR-HW-01銆?
+### TASK-0068 Edge TTS/VTS 璁惧闆嗘垚锛欸PT-SoVITS 鍚堟垚 + VTube Studio SDK 瀵规帴锛圥0锛?- 浠诲姟鎻忚堪锛氬皢 Edge 绔?TTS 涓?VTS 浠庡绾﹀眰瀹氫箟鎺ㄨ繘鍒板疄闄?SDK 瀵规帴锛屽舰鎴?Host 涓嬪彂鏂囨湰鈫?GPT-SoVITS 鍚堟垚鈫掓挱鏀鹃槦鍒椻啋 VTube Studio 鍙ｅ瀷/琛ㄦ儏椹卞姩"鐨勫畬鏁撮摼璺紝淇濇寔涓庡凡鏈?RPC 濂戠害锛圱ASK-0026/TASK-0021锛夌殑缁撴瀯鍏煎銆?- 杈撳叆锛欴evSpec 8.11.3锛圴OICE 濂戠害锛夈€丏evSpec 8.11.2锛圴TS 澶栨樉锛夛紱TASK-0026/TASK-0021 杈撳嚭鐨?RPC 绔偣涓庝簨浠?Schema锛汸RD FR-VOICE-002銆丗R-AVATAR-001銆?- 杈撳嚭锛?  - GPT-SoVITS 妯″瀷鍔犺浇涓庢帹鐞嗗皝瑁咃紙GPU 甯搁┗锛屽叏閲忎笉閲忓寲锛夛紱
+  - 鍚堟垚缁撴灉鈫掓挱鏀鹃槦鍒椻啋闊抽璁惧杈撳嚭閾捐矾锛?  - VTube Studio API 杩炴帴灏佽锛歵alk gate锛圱ALK_START/TALK_END锛変笌 emotion_tag鈫抏xpression_id 鏄犲皠椹卞姩锛?  - barge-in 鎵撴柇鏃剁殑鍚堟垚涓涓?VTS 鎭㈠绛栫暐锛?  - 妯″瀷涓嶅彲鐢?VTS 杩炴帴鏂紑鐨勭ǔ瀹氶檷绾т笌 reason_code 鏄犲皠锛?  - `requirements.txt` 鏂板 `pyvts`锛堟垨绛変环 VTS SDK锛変緷璧栵紱
+  - fixtures锛氬悎鎴愬け璐?VTS 鏂繛/barge-in 鍦烘櫙鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - Host 涓嬪彂鏂囨湰鍙湪 Edge 瀹屾垚鍚堟垚骞舵挱鏀鹃煶棰戯紱
+  - VTS 鍙ｅ瀷涓庤〃鎯呴殢鎾斁鑱斿姩锛屽仠姝㈡椂鎭㈠榛樿琛ㄦ儏锛?  - 鍚堟垚澶辫触/VTS 鏂繛鍦烘櫙鏈夌ǔ瀹?reason_code 涓斿璁″彲鍥炴斁锛?  - 涓庡凡鏈?T-Voice-02銆乀-Avatar-01 濂戠害鍏煎锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-TTS-HW-01`锛圱TS 瀹為檯鍚堟垚閾捐矾锛夈€乣T-VTS-HW-01`锛圴TS 瀹為檯椹卞姩閾捐矾锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/actuators/speech.py锛沞dge_client/rpc/voice.py锛沨ost_brain/channels/vts.py锛沞dge_client/requirements.txt锛泃ests/contract/锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-002锛汧R-AVATAR-001锛汿-Voice-02锛汿-Avatar-01锛涳紙鏂板锛塗-TTS-HW-01锛汿-VTS-HW-01銆?
+### TASK-0069 graph_runtime 鎷嗗垎锛氬绾﹀眰/鎵ц灞?闄嶇骇灞傚垎绂伙紙P1锛?- 浠诲姟鎻忚堪锛氬皢 `integrations/graph_runtime.py`锛堝綋鍓?942 琛屽崟鏂囦欢锛夋寜鑱岃矗鎷嗗垎涓哄绾﹀眰锛堥厤缃牎楠?Schema锛夈€佹墽琛屽眰锛堣妭鐐规墽琛?杈硅矾鐢憋級銆侀檷绾у眰锛坒allback/timeout/dependency 澶勭悊锛夛紝闄嶄綆鍗曟枃浠跺鏉傚害骞舵彁鍗囧彲娴嬭瘯鎬э紝鎷嗗垎鍚庤涓轰笌杈撳嚭缁撴瀯蹇呴』涓庢媶鍒嗗墠淇濇寔涓€鑷淬€?- 杈撳叆锛欴evSpec 6/8.9/10锛汿ASK-0051 杈撳嚭鐨勫浘缂栨帓濂戠害锛涚幇鏈?`graph_runtime.py` 瀹炵幇銆?- 杈撳嚭锛?  - `integrations/graph_contract.py`锛氬浘閰嶇疆 Schema 鏍￠獙銆佽妭鐐?杈瑰悎娉曟€ч獙璇侊紱
+  - `integrations/graph_executor.py`锛氳妭鐐规墽琛屻€佷緷璧栨鏌ャ€佽竟璺敱锛?  - `integrations/graph_fallback.py`锛氳秴鏃?渚濊禆涓嶅彲鐢?鑺傜偣缂哄け鐨勭粺涓€闄嶇骇澶勭悊锛?  - `integrations/graph_runtime.py`锛氱缉鍑忎负缂栨帓鍏ュ彛锛堜覆鑱斾笁灞傦級锛屼繚鎸佸澶栨帴鍙ｄ笉鍙橈紱
+  - 鎷嗗垎鍓嶅悗杈撳嚭缁撴瀯锛坓raph_status/reason_code/stage/fallback_map/dependency_statuses锛夊畬鍏ㄤ竴鑷达紱
+  - fixtures锛氭媶鍒嗗墠鍚庡洖褰掑姣旀暟鎹€?- 楠屾敹鏍囧噯锛?  - 鎷嗗垎鍚?T-Orch-01 鍙婃墍鏈夌幇鏈夊浘缂栨帓鐩稿叧娴嬭瘯鏃犲洖褰掞紱
+  - 鍗曟枃浠惰鏁版帶鍒跺湪 300 琛屼互鍐咃紱
+  - 鍚勫眰鍙嫭绔嬪崟娴嬩笖渚濊禆娉ㄥ叆娓呮櫚锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Orch-Refactor-01`锛堟媶鍒嗗墠鍚庤緭鍑轰竴鑷存€э級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/integrations/graph_runtime.py锛沨ost_brain/integrations/graph_contract.py锛堟柊澧烇級锛沨ost_brain/integrations/graph_executor.py锛堟柊澧烇級锛沨ost_brain/integrations/graph_fallback.py锛堟柊澧烇級锛泃ests/contract/锛泃ests/fixtures/orchestration/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-CORE-004锛汿-Orch-01锛涳紙鏂板锛塗-Orch-Refactor-01銆?
+### TASK-0070 SQLite Ledger 骞跺彂浼樺寲锛歐AL 妯″紡鍚敤涓庡啓鍏ュ悶鍚愬熀鍑嗭紙P1锛?- 浠诲姟鎻忚堪锛氫负 SQLite Ledger 鍚敤 WAL锛圵rite-Ahead Logging锛夋ā寮忥紝鎻愬崌楂樺苟鍙戝満鏅笅鐨勮鍐欏悶鍚愶紝骞跺缓绔嬪啓鍏ユ€ц兘鍩哄噯娴嬭瘯锛屼负鍚庣画鏄惁闇€瑕佽縼绉诲埌澶栭儴瀹¤瀛樺偍鎻愪緵鏁版嵁渚濇嵁銆?- 杈撳叆锛欴evSpec 8.1锛圠edger SSOT锛夛紱TASK-0011 杈撳嚭鐨?Triptych 涓夎仈鐢昏〃锛涘闃呮姤鍛?P1-5 寤鸿銆?- 杈撳嚭锛?  - SQLite 杩炴帴鍒濆鍖栨椂鍚敤 `PRAGMA journal_mode=WAL` 涓庢帹鑽愰厤缃紙`synchronous=NORMAL`銆乣wal_autocheckpoint`锛夛紱
+  - 骞跺彂璇诲啓淇濇姢绛栫暐锛堣繛鎺ユ睜/鍐欓攣/閲嶈瘯鍙ｅ緞锛夛紱
+  - 鍐欏叆鎬ц兘鍩哄噯娴嬭瘯鑴氭湰锛堝崟绾跨▼/澶氱嚎绋?娣峰悎璇诲啓鍦烘櫙锛夛紱
+  - 鍩哄噯鎶ュ憡缁撴瀯锛坰cenario/ops_per_sec/p95_latency_ms/wal_size锛夛紱
+  - WAL 妯″紡鍚敤澶辫触鐨勯檷绾х瓥鐣ワ紙鍥為€€ DELETE 妯″紡骞惰褰?reason_code锛夛紱
+  - fixtures锛氶珮骞跺彂鍐欏叆鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - WAL 妯″紡鍚敤鍚庣幇鏈夊璁￠摼娴嬭瘯鏃犲洖褰掞紱
+  - 鎬ц兘鍩哄噯鍙噺鍖栧苟杈撳嚭绋冲畾鎶ュ憡缁撴瀯锛?  - WAL 鍚敤澶辫触涓嶉樆濉炵郴缁熷惎鍔紙闄嶇骇骞跺彲瀹¤锛夛紱
+  - 鍥炲綊瑕嗙洊 T-Audit-01 涓庯紙鏂板锛塦T-Audit-WAL-01`锛圵AL 妯″紡涓嬪璁￠摼瀹屾暣鎬э級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/app/config.py锛泃ools/bench/锛堟柊澧烇級锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-001锛汿-Audit-01锛涳紙鏂板锛塗-Audit-WAL-01銆?
+### TASK-0071 E2E 琛ュ厖锛氬井淇″叆绔欌啋Governor鈫扸TS/璇煶鈫掑璁?涓€浣撳寲鍦烘櫙锛圥1锛?- 浠诲姟鎻忚堪锛氳ˉ鍏?寰俊娑堟伅鍏ョ珯鈫扝ost 缂栨帓鈫扜overnor 瑁佸喅鈫扸TS 琛ㄦ儏椹卞姩 + 璇煶鎾姤鈫掑璁￠摼鍐欏叆"鐨勭鍒扮娴嬭瘯鍦烘櫙锛岃鐩栨甯告墽琛屻€佹嫆缁濄€侀檷绾т笁绉嶈矾寰勶紝楠岃瘉璺ㄦā鍧椾覆鑱斾笌杈撳嚭绋冲畾鎬с€?- 杈撳叆锛欴evSpec 8.11.1/8.11.2/8.11.3锛汿ASK-0020锛堝井淇￠€氶亾锛夈€乀ASK-0021锛圴TS锛夈€乀ASK-0024~0027锛堣闊抽摼璺級銆乀ASK-0041锛堜富閾惧洖褰掞級銆?- 杈撳嚭锛?  - E2E 鍦烘櫙瀹氫箟锛氭甯革紙寰俊鈫抍hat鈫扸TS琛ㄦ儏+璇煶鎾姤鈫掑璁★級銆佹嫆缁濓紙Governor 鎷掔粷鈫掓棤鎵ц鈫掑璁★級銆侀檷绾э紙VTS 涓嶅彲鐢ㄢ啋浠呮枃鏈啋瀹¤锛夛紱
+  - 姣忎釜鍦烘櫙鐨勮緭鍏?fixtures 涓庢湡鏈涜緭鍑烘柇瑷€锛?  - 瀹¤涓茶仈楠岃瘉锛歳equest_id 鍙粠 channel_io_log鈫抔overnor_log鈫抋vatar_action_log/voice_event_log 涓茶仈锛?  - 璺ㄧ妯℃嫙绛栫暐锛圗dge mock 鎴?stub锛夈€?- 楠屾敹鏍囧噯锛?  - 涓夌璺緞 E2E 娴嬭瘯閫氳繃锛?  - 瀹¤閾句覆鑱旈敭锛坮equest_id/thread_key锛夊畬鏁村彲鍥炴斁锛?  - VTS/璇煶涓嶅彲鐢ㄦ椂杈撳嚭缁撴瀯绋冲畾涓?reason_code 鍙В閲婏紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-E2E-WeChat-01`锛堝井淇♀啋Governor鈫扸TS/璇煶鍏ㄩ摼璺級銆?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/test_wechat_vts_voice_e2e.py锛堟柊澧烇級锛泃ests/fixtures/channel/锛泃ests/fixtures/voice/锛沨ost_brain/channels/锛沨ost_brain/governor/锛沨ost_brain/audit/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CHANNEL-001锛汧R-AVATAR-001锛汧R-VOICE-001~003锛汿-Channel-01锛汿-Avatar-01锛汿-Voice-01~03锛涳紙鏂板锛塗-E2E-WeChat-01銆?
+### TASK-0072 璺ㄧ浜嬩欢鏃堕棿绾匡細Host/Edge 缁熶竴 request_id/session_id 鍏宠仈瑙嗗浘锛圥1锛?- 浠诲姟鎻忚堪锛氬缓绔?Host 涓?Edge 浜嬩欢鐨勭粺涓€鏃堕棿绾胯仛鍚堟満鍒讹紝鏀寔鎸?request_id 鎴?session_id 鍏宠仈涓ょ浜嬩欢锛圚ost 瀹¤ + Edge RPC/璧勬簮/璇煶浜嬩欢锛夛紝杈撳嚭鍙帓搴忔椂闂寸嚎锛屼负鎺掗殰涓庢€ц兘鍒嗘瀽鎻愪緵鏁版嵁搴曞骇銆?- 杈撳叆锛欴evSpec 10/11锛汿ASK-0064 杈撳嚭鐨?Host 绔娴嬫姤鍛婏紱TASK-0024~0029 杈撳嚭鐨?Edge 绔簨浠剁粨鏋勩€?- 杈撳嚭锛?  - Edge 绔簨浠朵笂鎶ョ粨鏋勶紙event_type/ts_ms/request_id/session_id/payload锛夛紱
+  - Host 绔簨浠惰仛鍚堝櫒锛氬悎骞?Host 瀹¤浜嬩欢 + Edge 涓婃姤浜嬩欢锛屾寜 ts_ms 鎺掑簭锛?  - 缁熶竴鏃堕棿绾胯緭鍑虹粨鏋勶紙timeline[]锛屽惈 source=host/edge 鏍囪锛夛紱
+  - 鏃堕棿婕傜Щ瀹瑰繊绛栫暐锛圗dge/Host 鏃堕挓涓嶅畬鍏ㄥ悓姝ユ椂鐨勬帓搴忓彛寰勶級锛?  - fixtures锛欻ost/Edge 娣峰悎浜嬩欢銆佹椂闂翠氦鍙夈€丒dge 浜嬩欢缂哄け鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 缁欏畾 request_id 鍙緭鍑?Host+Edge 鍚堝苟鏃堕棿绾匡紱
+  - Edge 浜嬩欢缂哄け鏃?Host 鏃堕棿绾夸粛瀹屾暣涓旀爣娉ㄧ己澶辨潵婧愶紱
+  - 鏃堕棿绾挎帓搴忕ǔ瀹氫笖鍙洖鏀撅紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Obs-03`锛堣法绔椂闂寸嚎鑱氬悎涓庢帓搴忕ǔ瀹氭€э級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沞dge_client/rpc/锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/e2e/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汧R-AUDIT-001锛汿-Obs-01锛涳紙鏂板锛塗-Obs-03銆?
+### TASK-0073 Rate Limit 鎸佷箙鍖栵細R4 婊戝姩绐楀彛澶栭儴瀛樺偍閫傞厤锛圥2锛?- 浠诲姟鎻忚堪锛氬皢 Governor R4 Rate Limit Gate 鐨勬粦鍔ㄧ獥鍙ｈ鏁板櫒浠庡綋鍓嶅唴瀛樺疄鐜版敼涓哄彲鎻掓嫈瀛樺偍閫傞厤锛堝唴瀛?Redis/SQLite锛夛紝鏀寔闆嗙兢妯″紡涓嬬殑鍏变韩闄愭祦锛屽苟淇濇寔鍗曟満妯″紡闆跺閮ㄤ緷璧栥€?- 杈撳叆锛欴evSpec 6锛圧4 Rate Limit Gate锛夛紱TASK-0008 杈撳嚭鐨?R4 Gate 濂戠害銆?- 杈撳嚭锛?  - Rate Limit 瀛樺偍鎺ュ彛锛堟娊璞″眰锛歚incr`/`get_count`/`reset`/`ttl`锛夛紱
+  - 涓夌瀹炵幇锛欼nMemory锛堥粯璁わ級銆丼QLite锛堝崟鏈烘寔涔呭寲锛夈€丷edis锛堥泦缇ゆā寮忥級锛?  - 閰嶇疆椤癸細`RATE_LIMIT_BACKEND=memory|sqlite|redis`锛?  - Redis 涓嶅彲鐢ㄦ椂闄嶇骇鍒?InMemory 骞惰褰?reason_code锛?  - fixtures锛氱獥鍙ｆ粦鍔?杩囨湡/骞跺彂绔炰簤鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鍒囨崲 backend 鍚?R4 Gate 琛屼负涓€鑷达紙鍚岃緭鍏ュ悓缁撴灉锛夛紱
+  - Redis 涓嶅彲鐢ㄦ椂绋冲畾闄嶇骇涓?rule_trace 鍙爣娉?backend 淇℃伅锛?  - 鐜版湁 T-Gov-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Gov-R4-01`锛圧ate Limit 澶?backend 涓€鑷存€э級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/governor/rules.py锛沨ost_brain/governor/rate_limit_store.py锛堟柊澧烇級锛沨ost_brain/app/config.py锛泃ests/contract/锛泃ests/fixtures/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-001锛汿-Gov-01锛涳紙鏂板锛塗-Gov-R4-01銆?
+### TASK-0074 Camera Events 鎵╁睍锛氬妫€娴嬪櫒娉ㄥ唽 + 澶氭ā鎬佷簨浠惰仛鍚堬紙P2锛?- 浠诲姟鎻忚堪锛氬皢褰撳墠鍩虹鎽勫儚澶翠簨浠惰瘑鍒墿灞曚负澶氭娴嬪櫒娉ㄥ唽涓庡妯℃€佷簨浠惰仛鍚堬紙浜鸿劯/鐗╀綋/鎵嬪娍/鍦烘櫙锛夛紝姣忎釜妫€娴嬪櫒鐙珛杈撳嚭缃俊搴︿笌 evidence_ref锛岃仛鍚堝悗杈撳嚭缁熶竴浜嬩欢缁撴瀯銆?- 杈撳叆锛欴evSpec 8.12锛汿ASK-0034 杈撳嚭鐨?camera_event 缁撴瀯锛汸RD FR-VISION-004銆?- 杈撳嚭锛?  - 妫€娴嬪櫒娉ㄥ唽琛ㄧ粨鏋勶紙detector_id/type/model_id/confidence_threshold/enabled锛夛紱
+  - 澶氭娴嬪櫒骞惰鎵ц涓庣粨鏋滆仛鍚堢瓥鐣ワ紱
+  - 鑱氬悎浜嬩欢缁撴瀯锛坉etections[]{detector_id/type/label/confidence/bbox?/evidence_ref}锛夛紱
+  - 妫€娴嬪櫒涓嶅彲鐢ㄦ椂鐨勯儴鍒嗛檷绾х瓥鐣ワ紙鍙敤妫€娴嬪櫒姝ｅ父杈撳嚭锛屼笉鍙敤妫€娴嬪櫒鏍囨敞 reason_code锛夛紱
+  - fixtures锛氬妫€娴嬪櫒娣峰悎銆侀儴鍒嗕笉鍙敤銆佸叏涓嶅彲鐢ㄦ牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 澶氭娴嬪櫒骞惰杈撳嚭缁撴瀯绋冲畾涓斿悇鑷?evidence_ref 鐙珛锛?  - 閮ㄥ垎妫€娴嬪櫒涓嶅彲鐢ㄦ椂杈撳嚭浠嶅悎娉曚笖闄嶇骇鍙В閲婏紱
+  - 鐜版湁 T-Vision-02 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Vision-03`锛堝妫€娴嬪櫒娉ㄥ唽涓庤仛鍚堢ǔ瀹氭€э級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/vision/camera_events.py锛沨ost_brain/vision/detector_registry.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/vision/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VISION-004锛汿-Vision-02锛涳紙鏂板锛塗-Vision-03銆?
+### TASK-0075 Airlock DRAFT_CODE 娌欑鎵ц锛氶殧绂昏繍琛岀幆澧?+ 缁撴灉瀹¤锛圥2锛?- 浠诲姟鎻忚堪锛氬皢 Airlock 鍏ョ珯闅旂涓?DRAFT_CODE 鍒嗙被浠?浠呮爣璁?鎺ㄨ繘鍒板疄闄呮矙绠辨墽琛岃兘鍔涳紙闅旂杩涚▼/璧勬簮闄愬埗/瓒呮椂淇濇姢锛夛紝鎵ц缁撴灉浣滀负鑽夋璇佹嵁鍐欏叆瀹¤閾撅紝涓嶇洿鎺ュ奖鍝嶄富閾捐矾鐘舵€併€?- 杈撳叆锛欴evSpec 8.7锛圓irlock 鍏ョ珯闅旂锛夛紱TASK-0016 杈撳嚭鐨?quarantine 鍒嗙被濂戠害锛汸RD FR-AIRLOCK-002銆?- 杈撳嚭锛?  - 娌欑鎵ц鐜灏佽锛坰ubprocess/瀹瑰櫒/闄愭椂闄愯祫婧愶級锛?  - 鎵ц缁撴灉缁撴瀯锛坰andbox_id/status/stdout/stderr/exit_code/duration_ms/resource_usage锛夛紱
+  - 娌欑缁撴灉鈫掑璁″啓鍏ワ紙sandbox_exec_log锛変笌 evidence_ref 涓茶仈锛?  - 瀹夊叏绾︽潫锛氭棤缃戠粶/鏃犳枃浠剁郴缁熷啓鍏ワ紙鎴栦粎涓存椂鐩綍锛?璧勬簮涓婇檺/瓒呮椂寮烘潃锛?  - 娌欑涓嶅彲鐢ㄦ椂绋冲畾鎷掔粷锛圫ANDBOX_UNAVAILABLE锛夛紱
+  - fixtures锛氭甯告墽琛?瓒呮椂/鎭舵剰浠ｇ爜/璧勬簮瓒呴檺鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - DRAFT_CODE 鍙湪娌欑涓墽琛屽苟浜у嚭缁撴瀯鍖栫粨鏋滐紱
+  - 瓒呮椂/璧勬簮瓒呴檺鍦烘櫙寮哄埗缁堟涓?reason_code 绋冲畾锛?  - 娌欑鎵ц涓嶅奖鍝嶄富杩涚▼鐘舵€佷笖涓嶅紩鍏ユ梺璺墽琛岃矾寰勶紱
+  - 鐜版湁 T-39/T-40 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Sandbox-01`锛堟矙绠辨墽琛屼笌瀹夊叏杈圭晫锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/airlock/sandbox.py锛堟柊澧烇級锛沨ost_brain/airlock/quarantine.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/锛泃ests/fixtures/airlock/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AIRLOCK-002锛汿-39锛汿-40锛涳紙鏂板锛塗-Sandbox-01銆?
+---
+
+## 闃舵 8锛氳川閲忓姞鍥?+ 椋庨櫓娑堥櫎 + Edge 闆嗘垚娣卞寲
+
+> 璇存槑锛氭湰闃舵浠诲姟鏉ユ簮浜庝唬鐮佸闃呮姤鍛婏紙full_code_review_report_2026-03-02.md锛夈€侀闄╂敞鍐岃〃锛坮isk_registry.md锛夈€佷互鍙?P1/P2 鍚庣画琛屽姩姹囨€汇€傛寜浼樺厛绾ф帓鍒楋細鍏堜慨澶嶄唬鐮佽川閲忓井璋冿紙鍙珛鍗虫墽琛岋級锛屽啀鎺ㄨ繘瀹夊叏鍗囩骇涓?Edge 闆嗘垚娣卞寲銆?
+### TASK-0076 浠ｇ爜璐ㄩ噺寰皟锛氳８ print / 绫诲瀷鏍囨敞 / SQL 瀹夊叏 / 琛ㄧ粨鏋勭紦瀛?/ 鍙€変緷璧栨枃妗ｏ紙P2锛?- 浠诲姟鎻忚堪锛氶泦涓鐞嗕唬鐮佸闃呮姤鍛婁腑鐨?P2 鍙戠幇椤癸紙F-13~F-16, F-12锛夛紝纭繚浠ｇ爜璐ㄩ噺闆堕仐鐣欍€?- 杈撳叆锛氫唬鐮佸闃呮姤鍛?搂涓?P2 鍙戠幇椤癸紙F-13/F-14/F-15/F-16/F-12锛夈€?- 杈撳嚭锛?  - `main.py:908` 瑁?`print()` 鈫?`logger.info()`锛團-13锛夛紱
+  - `graph_executor.py:43` 琛ュ厖杩斿洖绫诲瀷鏍囨敞 `-> None`锛團-14锛夛紱
+  - `fastapi_app.py:582,605` 涓や釜 async handler 琛ュ厖杩斿洖绫诲瀷鏍囨敞锛團-15锛夛紱
+  - `sqlite_ledger.py._fetch_all()` 澧炲姞琛ㄥ悕鐧藉悕鍗曟牎楠岋紙纭紪鐮佸厑璁歌〃鍚嶉泦鍚堬紝鎷掔粷闈炴硶琛ㄥ悕骞惰褰?`AUDIT_TABLE_NAME_INVALID`锛夛紙F-16锛夛紱
+  - `sqlite_ledger.py._table_has_column()` 澧炲姞琛ㄧ粨鏋勭紦瀛橈紙`_column_cache: dict[str, set[str]]`锛夛紝閬垮厤姣忔璋冪敤 PRAGMA锛團-06锛夛紱
+  - `requirements.txt` 澧炲姞娉ㄩ噴鏍囨敞 `redis` 涓哄彲閫変緷璧栵紙F-12锛夈€?- 楠屾敹鏍囧噯锛?  - 闆惰８ `print()` 娈嬬暀锛?  - 鎵€鏈夊叕寮€鍑芥暟/鏂规硶鏈夎繑鍥炵被鍨嬫爣娉紱
+  - `_fetch_all` 浼犲叆闈炴硶琛ㄥ悕鏃舵姏鍑?ValueError 鎴栬繑鍥炵┖骞惰褰?reason_code锛?  - `_table_has_column` 棣栨璋冪敤鍚庣紦瀛樺懡涓巼 = 100%锛堝悓琛ㄩ噸澶嶈皟鐢ㄤ笉瑙﹀彂 PRAGMA锛夛紱
+  - 鐜版湁 494 椤规祴璇曟棤鍥炲綊锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Quality-01`锛堜唬鐮佽川閲忓姞鍥烘柇瑷€锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/integrations/graph_executor.py锛沨ost_brain/app/fastapi_app.py锛沨ost_brain/audit/sqlite_ledger.py锛況equirements.txt锛泃ests/contract/test_quality_contract.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汧R-AUDIT-001锛涳紙鏂板锛塗-Quality-01銆?
+### TASK-0077 娌欑瀹夊叏鍗囩骇锛歴ubprocess 鈫?Docker/nsjail 瀹瑰櫒绾ч殧绂伙紙P1 瀹夊叏锛?- 浠诲姟鎻忚堪锛氬皢 DRAFT_CODE 娌欑浠庡綋鍓?subprocess + 涓存椂鐩綍闅旂锛屽崌绾т负瀹瑰櫒绾ч殧绂伙紙浼樺厛 Docker锛屽閫?nsjail锛夛紝纭繚鎭舵剰浠ｇ爜鏃犳硶璇诲彇/鍐欏叆涓绘満鏂囦欢绯荤粺銆佹棤娉曡闂綉缁溿€?- 杈撳叆锛歳isk_registry.md R41-1/R41-2锛汥evSpec 8.7锛汿ASK-0075 杈撳嚭鐨?`sandbox.py`銆?- 杈撳嚭锛?  - `SandboxConfig` 鏂板 `isolation_backend` 瀛楁锛坄subprocess`/`docker`/`nsjail`锛夛紝榛樿 `subprocess`锛堝悜鍚庡吋瀹癸級锛?  - Docker 鍚庣瀹炵幇锛氳嚜鍔ㄦ瀯寤烘渶灏忔矙绠遍暅鍍?+ 鍙鎸傝浇浠ｇ爜 + 鏃犵綉缁?+ 璧勬簮闄愬埗锛圕PU/鍐呭瓨/瓒呮椂锛?+ 杈撳嚭閲囬泦锛?  - nsjail 鍚庣瀹炵幇锛堝彲閫?澶囬€夛級锛歴eccomp + 鐢ㄦ埛 namespace + 鍙鏍规枃浠剁郴缁燂紱
+  - 瀹瑰櫒鍚庣涓嶅彲鐢ㄦ椂鑷姩闄嶇骇鍒?subprocess 鍚庣 + `SANDBOX_CONTAINER_UNAVAILABLE` reason_code锛?  - 璺ㄥ钩鍙伴獙璇侊紙Windows锛氫粎 subprocess锛汱inux锛欴ocker 浼樺厛锛夛紱
+  - fixtures锛欴ocker 闅旂鎴愬姛/Docker 涓嶅彲鐢ㄩ檷绾?鎭舵剰鏂囦欢璇诲彇琚嫆銆?- 楠屾敹鏍囧噯锛?  - Docker 鍚庣涓嬫伓鎰忎唬鐮佹棤娉曡鍙栦富鏈烘枃浠剁郴缁燂紙`/etc/passwd` 绛夛級锛?  - Docker 涓嶅彲鐢ㄦ椂绋冲畾闄嶇骇鍒?subprocess 鍚庣涓?reason_code 鍙粺璁★紱
+  - 鐜版湁 T-Sandbox-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Sandbox-02`锛堝鍣ㄧ骇闅旂瀹夊叏杈圭晫锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/airlock/sandbox.py锛沨ost_brain/airlock/docker_sandbox.py锛堟柊澧烇級锛沨ost_brain/core/errors.py锛泃ests/contract/test_sandbox_docker_contract.py锛堟柊澧烇級锛泃ests/fixtures/airlock/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AIRLOCK-002锛汿-Sandbox-01锛涳紙鏂板锛塗-Sandbox-02銆?
+### TASK-0078 璺ㄧ鏃堕棿绾?SQL 浼樺寲锛氭寜鏃堕棿绐楀彛杩囨护 + 鍒嗛〉鏌ヨ锛圥1 鎬ц兘锛?- 浠诲姟鎻忚堪锛氳В鍐?`cross_timeline.py` 鍜?`web_ui.py` 鍏ㄩ噺鍐呭瓨鍔犺浇瀹¤琛ㄧ殑鎬ц兘闅愭偅锛屼负 SQLiteLedger 澧炲姞鎸夋椂闂寸獥鍙ｈ繃婊ょ殑鏌ヨ鏂规硶锛屽苟鍦ㄦ椂闂寸嚎鑱氬悎涓庨潰鏉?API 涓娇鐢ㄣ€?- 杈撳叆锛歳isk_registry.md R38-3/R32-2锛涗唬鐮佸闃呮姤鍛?F-03銆?- 杈撳嚭锛?  - `sqlite_ledger.py` 鏂板 `fetch_by_time_range(table, start_ms, end_ms, limit, offset)` 鏂规硶锛堝弬鏁板寲鏌ヨ锛岃〃鍚嶇櫧鍚嶅崟鏍￠獙锛夛紱
+  - `cross_timeline.py` 鐨?Host 瀹¤琛ㄩ亶鍘嗘敼涓烘寜鏃堕棿绐楀彛鏌ヨ锛?  - `web_ui.py` 鐨?API 绔偣鏀寔 `?start_ms=&end_ms=&limit=&offset=` 鍒嗛〉鍙傛暟锛?  - fixtures锛氬ぇ閲忔暟鎹垎椤?绌虹獥鍙?绐楀彛瓒婄晫鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 10000 鏉″璁¤褰曚笅鏃堕棿绾胯仛鍚堣€楁椂 < 100ms锛堝熀鍑嗘祴璇曞彛寰勶級锛?  - 闈㈡澘 API 鏀寔鍒嗛〉涓旈粯璁?limit=100锛?  - 鐜版湁 T-Obs-03 / T-UI-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Obs-04`锛堟椂闂寸獥鍙ｆ煡璇笌鍒嗛〉锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/observability/cross_timeline.py锛沨ost_brain/app/web_ui.py锛泃ests/contract/test_timeline_perf_contract.py锛堟柊澧烇級锛泃ests/fixtures/observability/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汧R-AUDIT-001锛汿-Obs-03锛汿-UI-01锛涳紙鏂板锛塗-Obs-04銆?
+### TASK-0079 Edge鈫扝ost RPC 浜嬩欢鎵归噺涓婃姤鎺ュ彛锛圥1 璺ㄧ闆嗘垚锛?- 浠诲姟鎻忚堪锛氬疄鐜?Edge鈫扝ost 鐨勪簨浠舵壒閲忎笂鎶?RPC 閫氶亾锛屽皢褰撳墠妯℃嫙 Edge 浜嬩欢鐨勬祴璇曟柟寮忓崌绾т负鍙鎺ョ湡瀹?RPC 鐨勫疄鐜般€?- 杈撳叆锛歳isk_registry.md R38-1/R37-1锛汿ASK-0072 杈撳嚭鐨?`EdgeEventReport` 缁撴瀯锛汥evSpec 7.3銆?- 杈撳嚭锛?  - `edge_client/rpc/event_reporter.py`锛堟柊澧烇級锛氭壒閲忎簨浠朵笂鎶ュ鎴风锛屾敮鎸侀噸璇?+ 鎵规鎺у埗 + 缃戠粶寮傚父闄嶇骇锛?  - `host_brain/app/fastapi_app.py` 鏂板 `POST /v1/edge/events` 绔偣锛氭帴鏀?`EdgeEventReport[]`锛屽啓鍏ュ璁″苟杩斿洖纭锛?  - 浜嬩欢涓婃姤鍗忚缁撴瀯锛圝SON Schema锛歟vent_type/source/ts_ms/payload/evidence_ref锛夛紱
+  - 缃戠粶涓嶅彲鐢ㄦ椂 Edge 绔紦瀛樹簨浠跺苟鍦ㄦ仮澶嶅悗鎵归噺琛ュ彂锛?  - fixtures锛氭甯告壒閲忎笂鎶?閮ㄥ垎澶辫触/缃戠粶涓柇缂撳瓨銆?- 楠屾敹鏍囧噯锛?  - Edge 浜嬩欢鍙€氳繃 HTTP 鎵归噺涓婃姤鍒?Host 骞跺啓鍏ュ璁￠摼锛?  - 缃戠粶涓柇鏃?Edge 绔紦瀛樹簨浠讹紙鏈€澶?1000 鏉℃垨 10MB锛夛紝鎭㈠鍚庤嚜鍔ㄨˉ鍙戯紱
+  - 涓婃姤浜嬩欢涓?`cross_timeline.py` 鏃犵紳瀵规帴锛?  - 鐜版湁 T-Obs-03 / T-E2E-WeChat-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-RPC-Event-01`锛圗dge鈫扝ost 浜嬩欢涓婃姤鍗忚锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/rpc/event_reporter.py锛堟柊澧烇級锛沨ost_brain/app/fastapi_app.py锛沨ost_brain/observability/cross_timeline.py锛泃ests/contract/test_rpc_event_contract.py锛堟柊澧烇級锛泃ests/fixtures/e2e/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汧R-AUDIT-001锛汿-Obs-03锛汿-E2E-WeChat-01锛涳紙鏂板锛塗-RPC-Event-01銆?
+### TASK-0080 VTS WebSocket 鑷姩閲嶈繛鏈哄埗锛圥1 Edge 缃戠粶锛?- 浠诲姟鎻忚堪锛氫负 VTubeStudioDriver 娣诲姞 WebSocket 鑷姩閲嶈繛绛栫暐锛堟寚鏁伴€€閬?+ 鏈€澶ч噸璇曟鏁?+ 鍋ュ悍鐘舵€佷笂鎶ワ級锛岃В鍐崇綉缁滄姈鍔ㄥ鑷寸殑鏂繛涓嶆仮澶嶉棶棰樸€?- 杈撳叆锛歳isk_registry.md R34-2锛汿ASK-0068 杈撳嚭鐨?`vts_driver.py`銆?- 杈撳嚭锛?  - `vts_driver.py` 鏂板 `_reconnect_loop()` 鏂规硶锛氭寚鏁伴€€閬匡紙1s鈫?s鈫?s鈫?s鈫?6s 涓婇檺锛? 鏈€澶ч噸璇?10 娆★紱
+  - 閲嶈繛鎴愬姛鍚庤嚜鍔ㄦ仮澶?`neutral` 琛ㄦ儏鐘舵€佸苟涓婃姤 `VTS_RECONNECTED` 浜嬩欢锛?  - 閲嶈繛鍏ㄩ儴澶辫触鍚庤繘鍏?`DISCONNECTED` 鐘舵€佸苟涓婃姤 `VTS_RECONNECT_EXHAUSTED` reason_code锛?  - 閲嶈繛浜嬩欢鍐欏叆 `avatar_action_log` 鍙璁★紱
+  - fixtures锛氭柇杩炩啋閲嶈繛鎴愬姛/鏂繛鈫掗噸杩炶€楀敖銆?- 楠屾敹鏍囧噯锛?  - 妯℃嫙 WebSocket 鏂繛鍚庤嚜鍔ㄨЕ鍙戦噸杩烇紱
+  - 閲嶈繛鎴愬姛鍚庤〃鎯呮槧灏勬仮澶嶆甯革紱
+  - 瓒呰繃鏈€澶ч噸璇曟鏁板悗绋冲畾杩涘叆 DISCONNECTED 鐘舵€佷笖 reason_code 鍙粺璁★紱
+  - 鐜版湁 T-VTS-HW-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-VTS-Reconnect-01`锛圵ebSocket 鑷姩閲嶈繛涓庣姸鎬佹仮澶嶏級銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/actuators/vts_driver.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_vts_reconnect_contract.py锛堟柊澧烇級锛泃ests/fixtures/channels/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AVATAR-001锛汿-VTS-HW-01锛涳紙鏂板锛塗-VTS-Reconnect-01銆?
+### TASK-0081 ASR 楹﹀厠椋庤澶囪嚜鍔ㄦ仮澶嶇瓥鐣ワ紙P1 Edge 闊抽锛?- 浠诲姟鎻忚堪锛氫负 ASR 闊抽閲囬泦娣诲姞璁惧寮傚父鑷姩鎭㈠绛栫暐锛堥噸杩為噸璇?+ 璁惧鍒囨崲 + 鍋ュ悍鐘舵€佷笂鎶ワ級锛岃В鍐抽┍鍔ㄥ紓甯告椂鏃犳硶鑷姩鎭㈠鐨勯棶棰樸€?- 杈撳叆锛歳isk_registry.md R33-2锛汿ASK-0067 杈撳嚭鐨?`asr.py`銆?- 杈撳嚭锛?  - `asr.py` 鏂板 `_device_recovery_loop()` 鏂规硶锛氭娴?`ASR_DEVICE_ERROR` / `ASR_STREAM_INTERRUPTED` 鍚庤嚜鍔ㄥ皾璇曢噸鏂版墦寮€闊抽娴侊紱
+  - 鎸囨暟閫€閬块噸璇曪紙1s鈫?s鈫?s鈫?s 涓婇檺锛? 鏈€澶ч噸璇?5 娆★紱
+  - 鏀寔璁惧鍒楄〃鏋氫妇 + 澶囩敤璁惧鑷姩鍒囨崲锛堝榛樿璁惧澶辫触锛屽皾璇曞叾浠栧彲鐢ㄨ澶囷級锛?  - 鎭㈠鎴愬姛涓婃姤 `ASR_DEVICE_RECOVERED` 浜嬩欢锛涙仮澶嶅け璐ヤ笂鎶?`ASR_DEVICE_RECOVERY_EXHAUSTED`锛?  - fixtures锛氳澶囨柇寮€鈫掓仮澶?璁惧鏂紑鈫掓仮澶嶅け璐?澶囩敤璁惧鍒囨崲銆?- 楠屾敹鏍囧噯锛?  - 妯℃嫙璁惧寮傚父鍚庤嚜鍔ㄨЕ鍙戞仮澶嶆祦绋嬶紱
+  - 鎭㈠鎴愬姛鍚?ASR 閲囬泦姝ｅ父缁х画锛?  - 瓒呰繃鏈€澶ч噸璇曟鏁板悗绋冲畾鎶ュ憡 `ASR_DEVICE_RECOVERY_EXHAUSTED`锛?  - 鐜版湁 T-ASR-HW-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-ASR-Recovery-01`锛堥害鍏嬮璁惧鑷姩鎭㈠锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/senses/asr.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_asr_recovery_contract.py锛堟柊澧烇級锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汧R-VOICE-005锛汿-ASR-HW-01锛涳紙鏂板锛塗-ASR-Recovery-01銆?
+### TASK-0082 Host VTS 閫氶亾 DEGRADED 鐘舵€佹墿灞曪紙P2锛?- 浠诲姟鎻忚堪锛氫负 Host 绔?VTS 閫氶亾妯″潡锛坄vts.py`锛夊鍔?`DEGRADED` 鐘舵€佹敮鎸侊紝浣?E2E 閾捐矾涓殑闄嶇骇鍦烘櫙鍙€氳繃姝ｈ閫氶亾琛ㄨ揪锛岃€岄潪鐩存帴鍐欏璁¤〃缁曡繃銆?- 杈撳叆锛歳isk_registry.md R37-2锛汿ASK-0071 杈撳嚭鐨?E2E 娴嬭瘯鍙戠幇銆?- 杈撳嚭锛?  - `vts.py` 鐨?`resolve_vts_expression()` 杩斿洖缁撴瀯鏂板 `status=DEGRADED` 鏋氫妇鍊硷紙鍦?Edge 涓嶅彲杈?琛ㄦ儏鏄犲皠澶辫触浣嗘湁闄嶇骇澶囬€夋椂瑙﹀彂锛夛紱
+  - 闄嶇骇鏃朵娇鐢?`neutral` 浣滀负澶囬€夎〃鎯?+ `VTS_DEGRADED_FALLBACK` reason_code锛?  - 瀹¤鍐欏叆 `avatar_action_log` 璁板綍闄嶇骇璇︽儏锛?  - fixtures锛欵dge 涓嶅彲杈锯啋DEGRADED/鏄犲皠鏈煡鈫扗EGRADED銆?- 楠屾敹鏍囧噯锛?  - Edge 涓嶅彲杈炬椂 `resolve_vts_expression` 杩斿洖 `DEGRADED` + neutral 澶囬€夛紱
+  - `avatar_action_log` 鍙洖婧檷绾у師鍥狅紱
+  - 鐜版湁 T-VTS-HW-01 / T-E2E-WeChat-01 鏃犲洖褰掞紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-VTS-Degraded-01`锛圴TS DEGRADED 鐘舵€佸绾︼級銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/channels/vts.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_vts_degraded_contract.py锛堟柊澧烇級锛泃ests/fixtures/channels/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AVATAR-001锛汿-VTS-HW-01锛汿-E2E-WeChat-01锛涳紙鏂板锛塗-VTS-Degraded-01銆?
+### TASK-0083 閮ㄧ讲鏂囨。 + 鐜娓呭崟琛ュ厖锛圥2 杩愮淮锛?- 浠诲姟鎻忚堪锛氬熀浜庨闄╂敞鍐岃〃涓墍鏈夐儴缃茬浉鍏崇殑鍚庣画琛屽姩锛岃ˉ鍏呴儴缃叉枃妗ｄ笌鐜娓呭崟锛岀‘淇濈敓浜ч儴缃插墠鎵€鏈夌幆澧冭姹傚凡鏄庣‘銆?- 杈撳叆锛歳isk_registry.md 鍏ㄦ枃锛涗唬鐮佸闃呮姤鍛?搂涓冦€?- 杈撳嚭锛?  - `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md` 鏇存柊锛?    - SQLite 瀛樺偍浠嬭川瑕佹眰锛堟湰鍦扮鐩橈紝绂佹 NFS/缃戠粶鏂囦欢绯荤粺锛夛紙R36-1锛夛紱
+    - Redis 鍙€変緷璧栬鏄庝笌閰嶇疆鎸囧紩锛圧39-1锛夛紱
+    - Docker 鐜瑕佹眰锛堟矙绠卞鍣ㄧ骇闅旂锛夛紙R41-2锛夛紱
+    - Edge GPU VRAM 鏈€浣庤姹傦紙鈮?GB CUDA 鍙敤锛? 璧勬簮闂搁棬閰嶇疆锛圧33-1/R34-1锛夛紱
+    - VTS WebSocket 缃戠粶瑕佹眰涓庤秴鏃堕厤缃紙R34-2锛夛紱
+    - WAL checkpoint 瀹氭椂绛栫暐寤鸿锛圧36-3锛夛紱
+    - 杩涚▼绠＄悊鍣紙systemd/supervisor锛夊畧鎶ゅ缓璁紙R31-2锛夈€?  - 鐜娓呭崟涓瘡椤规爣娉細蹇呴渶/鍙€?寤鸿銆佸叧鑱旈闄╃紪鍙枫€侀厤缃矾寰勩€?- 楠屾敹鏍囧噯锛?  - 鎵€鏈?P1 椋庨櫓鐨勯儴缃插墠缃潯浠跺湪鐜娓呭崟涓湁瀵瑰簲鏉＄洰锛?  - 姣忛」鐜瑕佹眰鏈夐獙璇佹柟娉曪紙妫€鏌ュ懡浠?鍋ュ悍绔偣/閰嶇疆椤癸級锛?  - 鏂囨。绗﹀悎鍙椾紬闂ㄧ鏍煎紡锛堝彈浼楋細MASTER锛夈€?- 娑夊強鏂囦欢璺緞锛歞ocs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汵FR-SEC-001銆?
+---
+
+### TASK-0084 Edge RPC Gateway 鏈€灏忚繍琛岃繘绋嬶紙P1 Edge 杩愯鏃讹級
+- 浠诲姟鎻忚堪锛氬疄鐜?Edge 渚ф渶灏忓彲杩愯 RPC 缃戝叧杩涚▼锛屽 Host 鏆撮湶鑳藉姏绔偣骞跺畬鎴愮鍚?閲嶆斁鏍￠獙涓庡绾﹀寲鍝嶅簲锛岀‘淇濃€滃彧鎵ц銆佷笉瑁佸喅鈥濄€?- 杈撳叆锛欴evSpec 2.2锛圗dge RPC 鑳藉姏绔偣锛夛紱DevSpec 2.4锛圚ost鈫扙dge HMAC + nonce + ts_ms锛夛紱DevSpec 14.2锛圗dge 杈圭晫锛夛紱TASK-0087 杈撳嚭鐨勯壌鏉冧笌 schema锛沞dge_client/config.py锛沞dge_client/rpc/*銆?- 鍓嶇疆渚濊禆锛歍ASK-0087锛堥壌鏉冧腑闂翠欢锛夛紱TASK-0085锛坮untime 瑁呴厤鎺ュ彛锛夈€?- 杈撳嚭锛?  - `edge_client/app/fastapi_app.py`锛堟柊澧烇級锛氭彁渚?`POST /v1/edge/speak`銆乣POST /v1/edge/barge_in`銆乣POST /v1/edge/vts`銆乣POST /v1/edge/fallback/{presence|asr_compile|retrieval_hints|context_compress}`銆乣GET /v1/edge/health`锛堣矾鐢辩粏鑺備笌鍙傛暟浠?edge_client/rpc 濂戠害涓哄噯锛沘sr 涓婇€佺敱 TASK-0088 缁熶竴涓婅瀹炵幇锛夈€?  - 缁熶竴鍝嶅簲缁撴瀯锛歚{success,status,reason_code,detail,event,ts_ms}`锛屾墍鏈夌鐐逛粎杩斿洖姝ょ粨鏋勩€?  - 绔偣瀹炵幇浠呰皟鐢?edge_client/rpc 濂戠害瀵硅薄涓?runtime 瑁呴厤瀵硅薄锛屼笉寮曞叆 Host 瑁佸喅閫昏緫涓庡壇浣滅敤澶栨帹銆?  - `edge_client/pyproject.toml`锛氳ˉ鍏?FastAPI/uvicorn 渚濊禆锛圗dge 渚?RPC 杩愯鏃讹級銆?  - fixtures锛氱鐐圭己瀛楁/闈炴硶 payload/鏈嶅姟琚?config 绂佺敤鐨勬牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 琚鐢ㄨ兘鍔涚鐐硅繑鍥炵ǔ瀹氱殑涓嶅彲鐢ㄧ姸鎬侊紙reason_code 鍙粺璁★級锛?  - 鎵€鏈?RPC 绔偣杈撳嚭缁撴瀯绋冲畾锛坰uccess/status/reason_code/detail/event锛夛紝涓旀嫆缁濆師鍥犱笌濂戠害涓€鑷达紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Edge-RPC-02`锛堢鐐瑰绾︼級銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/app/fastapi_app.py锛堟柊澧烇級锛沞dge_client/pyproject.toml锛泃ests/contract/test_edge_rpc_gateway_contract.py锛堟柊澧烇級锛泃ests/fixtures/edge/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-002~004锛汿-Edge-RPC-02銆?
+### TASK-0085 Edge 杩愯鏃惰閰?+ 鍋ュ悍蹇収锛圥1 Edge 瑙傛祴锛?- 浠诲姟鎻忚堪锛氳ˉ榻?Edge 杩愯鏃惰閰嶅櫒涓庡仴搴峰揩鐓ц仛鍚堬紝杩斿洖鑳藉姏鐭╅樀涓庤祫婧愮姸鎬侊紙鏄惧瓨/闃熷垪/娲诲姩浠诲姟锛夈€?- 杈撳叆锛欴evSpec 2.2锛坔ealth 鑳藉姏鐭╅樀涓庤祫婧愮姸鎬侊級锛汥evSpec 2.5锛坒allback LLM 绾︽潫锛夛紱edge_client/config.py锛沞dge_client/senses/asr.py锛沞dge_client/actuators/tts_engine.py锛沞dge_client/actuators/vts_driver.py锛沞dge_client/actuators/speech.py锛沞dge_client/rpc/resource_gate.py锛沞dge_client/rpc/fallback_llm.py銆?- 鍓嶇疆渚濊禆锛歍ASK-0087锛堥厤缃笌瀹夊叏瀛楁缁熶竴锛夈€?- 杈撳嚭锛?  - `edge_client/runtime/bootstrap.py`锛堟柊澧烇級锛氭牴鎹?`EdgeConfig` 瑁呴厤 ASR/TTS/VTS/Fallback/ResourceGate锛岀粺涓€鐢熷懡鍛ㄦ湡涓庡紑鍏炽€?  - `edge_client/runtime/health.py`锛堟柊澧烇級锛氳仛鍚?`build_edge_runtime_statuses` + 鍚勭粍浠?`health()` + ResourceGate `snapshot()` + 闃熷垪娣卞害锛岃緭鍑虹ǔ瀹?health schema銆?  - health schema 蹇呭惈锛歚services`锛堣兘鍔涚煩闃碉級銆乣resources`锛坴ram_total_mb/vram_used_mb/queue_depth锛夈€乣components`锛坅sr/tts/vts/fallback/resource_gate 璇︾粏鐘舵€侊級銆乣config_snapshot`锛堣劚鏁忥級銆?  - `edge_client/app/fastapi_app.py` 鐨?`/v1/edge/health` 浣跨敤涓婅堪鑱氬悎缁撴灉銆?  - fixtures锛欰SR/TTS 鍏抽棴銆乫allback 鍏抽棴銆乺esource_gate 鍏抽棴鐨勫仴搴峰揩鐓ф牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 閰嶇疆寮€鍏充笌鍋ュ悍鐭╅樀涓€鑷达紙绂佺敤鍗充笉鍙敤锛夛紱fallback 榛樿涓嶅彲鐢紱
+  - 鍋ュ悍杈撳嚭鍖呭惈 services/璧勬簮/缁勪欢鐘舵€?閰嶇疆蹇収锛屽瓧娈电ǔ瀹氫笖鍙璁★紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Edge-Health-01`锛堣兘鍔涚煩闃典笌璧勬簮蹇収锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/runtime/bootstrap.py锛堟柊澧烇級锛沞dge_client/runtime/health.py锛堟柊澧烇級锛沞dge_client/app/fastapi_app.py锛沞dge_client/config.py锛泃ests/contract/test_edge_health_contract.py锛堟柊澧烇級锛泃ests/fixtures/edge/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001~005锛汿-Edge-Health-01銆?
+### TASK-0086 Edge 鍚姩鍏ュ彛 + 鏈湴鍚姩鑴氭湰锛圥2 杩愮淮锛?- 浠诲姟鎻忚堪锛氭彁渚?Edge 鐨勬爣鍑嗗惎鍔ㄥ叆鍙ｄ笌鏈湴鑴氭湰锛岀‘淇濆彲鎸夌幆澧冨彉閲忕洿鎺ュ惎鍔?鍋滄锛屼笖浼橀泤閲婃斁闊抽涓?VTS 杩炴帴銆?- 杈撳叆锛欴evSpec 2.2锛圗dge 杩涚▼鑱岃矗锛夛紱DevSpec 2.4锛堥€氫俊瀹夊叏锛夛紱TASK-0085 杈撳嚭鐨?runtime 瑁呴厤锛沞dge_client/config.py锛汻EADME.md锛堣繍琛屾寚寮曪級銆?- 鍓嶇疆渚濊禆锛歍ASK-0084锛圧PC 缃戝叧锛夛紱TASK-0085锛坮untime 鐢熷懡鍛ㄦ湡锛夈€?- 杈撳嚭锛?  - `edge_client/__main__.py`锛堟柊澧烇級锛氬姞杞?EdgeConfig锛屽垵濮嬪寲 runtime/bootstrap 骞跺惎鍔?RPC 缃戝叧锛?  - `scripts/runtime/start_edge.ps1` / `scripts/runtime/stop_edge.ps1`锛堟柊澧烇級锛氭湰鍦板惎鍔?鍋滄 Edge 杩涚▼锛?  - README.md锛氭柊澧?Edge 鍚姩璇存槑涓庡繀瑕佺幆澧冨彉閲忔彁绀猴紙鍚?`EDGE_RPC_HOST/PORT`銆乣EDGE_ALLOW_INSECURE_AUTH`銆乣EDGE_HMAC_SHARED_KEY(_REF)`锛夈€?- 楠屾敹鏍囧噯锛?  - `python -m edge_client` 鍙湪 `EDGE_RPC_HOST/PORT` 鍚姩鏈嶅姟骞惰緭鍑鸿劚鏁忛厤缃揩鐓э紱
+  - Ctrl+C 鑳戒紭闆呭叧闂紙ASR 闊抽娴併€乀TS 鎾斁銆乂TS 杩炴帴鍏抽棴锛屾棤璧勬簮娉勬紡锛夛紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Edge-Start-01`锛堝惎鍔?鍏抽棴鏈€灏忕儫娴嬶級銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/__main__.py锛堟柊澧烇級锛沞dge_client/runtime/bootstrap.py锛泂cripts/runtime/start_edge.ps1锛堟柊澧烇級锛泂cripts/runtime/stop_edge.ps1锛堟柊澧烇級锛汻EADME.md锛泃ests/contract/test_edge_bootstrap_contract.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001~005锛汿-Edge-Start-01銆?
+### TASK-0087 Edge RPC 璇锋眰鍖呯粶 + 閴存潈涓庨噸鏀句繚鎶わ紙P1 Edge 瀹夊叏锛?- 浠诲姟鎻忚堪锛氬畾涔?Edge RPC 缁熶竴璇锋眰鍖呯粶涓庨壌鏉?閲嶆斁鏍￠獙绛栫暐锛屾彁渚涚ǔ瀹氱殑鎷掔粷 reason_code 涓庡彲鍥炲綊 fixtures銆?- 杈撳叆锛欴evSpec 2.4锛圚MAC + nonce + ts_ms + 閲嶆斁绐楀彛锛夛紱DevSpec 14.3锛堝己绫诲瀷 Schema锛夛紱edge_client/config.py锛沨ost_brain/core/errors.py銆?- 鍓嶇疆渚濊禆锛氭棤锛圗dge 闃舵鍩虹嚎浠诲姟锛夈€?- 杈撳嚭锛?  - `edge_client/app/schemas.py`锛堟柊澧烇級锛氬畾涔?`EdgeRpcEnvelope`锛坮equest_id/ts_ms/nonce/signature/payload锛変笌 `EdgeRpcResponse`锛坰uccess/status/reason_code/detail/event/ts_ms锛夈€?  - `edge_client/rpc/auth.py`锛堟柊澧烇級锛氬疄鐜?HMAC 鏍￠獙銆佹椂闂寸獥鏍￠獙銆乶once 閲嶆斁缂撳瓨锛涙彁渚涘彲娉ㄥ叆鐨?`now_ms()` 涓庣紦瀛樻竻鐞嗙瓥鐣ャ€?  - `edge_client/config.py`锛氭柊澧為壌鏉冪浉鍏抽厤缃」锛堝 `EDGE_RPC_AUTH_WINDOW_MS`/`EDGE_RPC_NONCE_WINDOW_MS`锛夛紝骞惰繘鍏?config snapshot銆?  - `host_brain/core/errors.py`锛氭柊澧為壌鏉?Schema 澶辫触绫?reason_code锛堝 `EDGE_RPC_SCHEMA_INVALID`/`EDGE_RPC_AUTH_INVALID`/`EDGE_RPC_AUTH_EXPIRED`锛夛紝涓?`REPLAY_DETECTED` 骞跺垪銆?  - fixtures锛氱己瀛楁/绛惧悕閿欒/ts_ms 杩囨湡/nonce 閲嶆斁/鍏佽涓嶉壌鏉冿紙dev/test锛夋牱渚嬨€?- 楠屾敹鏍囧噯锛?  - 缂哄瓧娈电ǔ瀹氳繑鍥?`EDGE_RPC_SCHEMA_INVALID`锛涚鍚嶉敊璇繑鍥?`EDGE_RPC_AUTH_INVALID`锛泃s_ms 杩囨湡杩斿洖 `EDGE_RPC_AUTH_EXPIRED`锛沶once 閲嶆斁杩斿洖 `REPLAY_DETECTED`锛?  - `EDGE_ALLOW_INSECURE_AUTH=true` 鏃朵粛鏍￠獙 schema锛屼絾鍏佽璺宠繃绛惧悕鏍￠獙骞惰褰曢檷绾у瓧娈碉紱
+  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Edge-RPC-01`锛堥壌鏉冧笌閲嶆斁锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/app/schemas.py锛堟柊澧烇級锛沞dge_client/rpc/auth.py锛堟柊澧烇級锛沞dge_client/config.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_edge_rpc_auth_contract.py锛堟柊澧烇級锛泃ests/fixtures/edge/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-002锛汵FR-SEC-001锛汿-Edge-RPC-01銆?
+### TASK-0088 Edge 璇煶涓婅缂栨帓涓庝簨浠朵笂閫侊紙P1 Edge 璇煶锛?- 浠诲姟鎻忚堪锛氳ˉ榻?Edge 璇煶閾捐矾鐨勭紪鎺掑眰锛屽皢 ASR 浜嬩欢绋冲畾涓婇€佸埌 Host锛屽苟涓?TTS 鎾斁/鎵撴柇/VTS 琛ㄦ儏鑱斿姩銆?- 杈撳叆锛欴evSpec 2.2锛坅sr/speak/barge-in/vts/health锛夛紱DevSpec 2.5锛坒allback 绾︽潫锛夛紱edge_client/senses/asr.py锛沞dge_client/actuators/speech.py锛沞dge_client/actuators/tts_engine.py锛沞dge_client/actuators/vts_driver.py锛沞dge_client/rpc/event_reporter.py锛沞dge_client/rpc/voice.py銆?- 鍓嶇疆渚濊禆锛歍ASK-0079锛圗dge鈫扝ost 浜嬩欢涓婃姤锛夛紱TASK-0084锛圧PC 缃戝叧锛夛紱TASK-0085锛坮untime 瑁呴厤锛夈€?- 杈撳嚭锛?  - `edge_client/runtime/voice_pipeline.py`锛堟柊澧烇級锛氬皝瑁?ASR鈫掍簨浠朵笂閫併€乀TS 闃熷垪銆乥arge-in 鎵撴柇銆乂TS talk gate 鑱斿姩銆?  - ASR 涓婅锛氫娇鐢?`EdgeEventReporter` 灏?asr_chunk 浣滀负 EdgeEvent 鎵归噺涓婇€侊紙瀵规帴 Host `POST /v1/edge/events`锛夛紝闄勫甫 vram/queue 鎸囨爣锛堣嫢鍙敤锛夈€?  - 鎾斁鑱斿姩锛歍TS 鎾斁寮€濮嬭Е鍙?VTS talk_start锛岀粨鏉?鎵撴柇瑙﹀彂 talk_end 鎴?neutral 澶嶄綅銆?  - 璧勬簮闂搁棬锛歴peak/tts/playback/llm 浣跨敤 `VoiceResourceGate`锛屼紭鍏堢骇涓庝簰鏂ョ鍚?DevSpec銆?  - fixtures锛欰SR 姝ｅ父涓婇€?缃戠粶涓柇缂撳瓨/鎭㈠琛ュ彂锛沚arge-in 鎵撴柇鎾斁涓?VTS 澶嶄綅銆?- 楠屾敹鏍囧噯锛?  - ASR 浜嬩欢鍙€氳繃 Edge鈫扝ost 浜嬩欢閫氶亾绋冲畾涓婇€佸苟閫氳繃 schema 鏍￠獙锛?  - barge-in 鍙墦鏂挱鏀惧苟璁板綍 `VOICE_INTERRUPTED`锛孷TS 杩涘叆缁撴潫鎬侊紱
+  - 璧勬簮闂搁棬鐢熸晥鏃惰繑鍥炵ǔ瀹氭嫆缁?reason_code锛?  - 鍥炲綊瑕嗙洊锛堟柊澧烇級`T-Edge-Voice-01`锛圓SR 涓婇€佷笌缂撳瓨琛ュ彂锛変笌 `T-Edge-Voice-02`锛坆arge-in 涓?VTS 鑱斿姩锛夈€?- 娑夊強鏂囦欢璺緞锛歟dge_client/runtime/voice_pipeline.py锛堟柊澧烇級锛沞dge_client/runtime/bootstrap.py锛沞dge_client/actuators/speech.py锛沞dge_client/rpc/event_reporter.py锛泃ests/contract/test_edge_voice_pipeline_contract.py锛堟柊澧烇級锛泃ests/fixtures/edge/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001~003锛汧R-VOICE-005锛汿-Edge-Voice-01锛汿-Edge-Voice-02銆?
+### TASK-0089 Edge Contract 娴嬭瘯鐭╅樀琛ラ綈涓?fixtures 鍛藉悕瑙勮寖锛圥1 QA锛?- 浠诲姟鎻忚堪锛氬皢 Edge 鏂板浠诲姟锛?084~0088锛夌殑楠屾敹鏂█鍥哄寲涓哄彲杩芥函 contract 娴嬭瘯鐭╅樀锛屽苟缁熶竴 fixtures 鍛藉悕涓庣洰褰曞垎灞傦紝閬垮厤鍚庣画娴嬭瘯鍙ｅ緞婕傜Щ銆?- 杈撳叆锛歍ASK-0084~0088 鐨勮緭鍑哄绾︼紱tests/TESTPLAN.md锛泃ests/contract 鏃㈡湁椋庢牸銆?- 鍓嶇疆渚濊禆锛歍ASK-0084~0088锛堝姛鑳芥帴鍙ｅ凡钀藉湴锛夈€?- 杈撳嚭锛?  - `tests/contract/` 鏂板鎴栧畬鍠勬祴璇曟枃浠讹細`test_edge_rpc_auth_contract.py`銆乣test_edge_rpc_gateway_contract.py`銆乣test_edge_health_contract.py`銆乣test_edge_bootstrap_contract.py`銆乣test_edge_voice_pipeline_contract.py`銆?  - fixtures 鍛藉悕瑙勮寖锛歚tests/fixtures/edge/{auth|gateway|health|voice}/{good|bad}/*.json`锛屾枃浠跺悕閲囩敤 `鍦烘櫙_鏈熸湜.json`锛堜緥锛歚expired_ts_reject.json`锛夈€?  - 瑕嗙洊鏄犲皠锛氭瘡涓?`T-Edge-*` 缂栧彿鑷冲皯鏈変竴涓垚鍔熸牱渚嬪拰涓€涓嫆缁?闄嶇骇鏍蜂緥銆?  - `tests/TESTPLAN.md` 鍚屾鐧昏 `T-Edge-RPC-01`銆乣T-Edge-RPC-02`銆乣T-Edge-Health-01`銆乣T-Edge-Start-01`銆乣T-Edge-Voice-01`銆乣T-Edge-Voice-02` 鐨勬柇瑷€鍙ｅ緞銆?- 楠屾敹鏍囧噯锛?  - `DevTasks` 涓墍鏈?`T-Edge-*` 缂栧彿鍦?`TESTPLAN` 鍙绱笖璇箟涓€鑷达紱
+  - 鍚堝悓娴嬭瘯鍙鐩栭壌鏉冨け璐ャ€乻chema 澶辫触銆佽兘鍔涚鐢ㄣ€佸惎鍔ㄥ叧闂€佷簨浠惰ˉ鍙戜笌鎵撴柇鑱斿姩锛?  - fixtures 鐩綍缁撴瀯涓庡懡鍚嶈鑼冪ǔ瀹氾紝鏂板鍦烘櫙涓嶇牬鍧忔棦鏈夊洖鏀捐矾寰勩€?- 娑夊強鏂囦欢璺緞锛歵ests/contract/锛泃ests/fixtures/edge/锛泃ests/TESTPLAN.md锛沝ocs/30_devspec/DevTasks.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-002锛汧R-VOICE-001~005锛汿-Edge-RPC-01锛汿-Edge-RPC-02锛汿-Edge-Health-01锛汿-Edge-Start-01锛汿-Edge-Voice-01锛汿-Edge-Voice-02銆?
+### TASK-0090 Edge 浜や粯椤哄簭涓庡洖婊氬彛寰勫浐鍖栵紙P2 浜や粯锛?- 浠诲姟鎻忚堪锛氬浐鍖?Edge 浠诲姟鍒嗘壒浜や粯椤哄簭銆佸け璐ュ洖婊氱瓥鐣ヤ笌鏈€灏忓彲杩愯闂ㄦ锛岀‘淇?0084~0089 鍙€愭壒涓婄嚎涓斿彲蹇€熷洖閫€銆?- 杈撳叆锛歍ASK-0084~0089锛沝ocs/50_project/WORKSHEET_Project_Codex_Git_Flow.md锛汻EADME.md銆?- 鍓嶇疆渚濊禆锛歍ASK-0089锛堟祴璇曠煩闃靛畬鎴愶級銆?- 杈撳嚭锛?  - 浜や粯鎵规瀹氫箟锛堝缓璁級锛歚Batch-A`=0087+0085銆乣Batch-B`=0084+0086銆乣Batch-C`=0088+0089锛?  - 姣忔壒鍥炴粴鍙ｅ緞锛氬洖婊氳Е鍙戞潯浠躲€佷繚鐣欒祫浜э紙fixtures/audit锛夈€佸洖婊氬悗鍙敤鑳藉姏鐭╅樀锛?  - README 澧炲姞鈥淓dge 鏈€灏忓彲杩愯闂ㄦ鈥濅笌鈥滄晠闅滃洖閫€妯″紡锛堜粎 health / 绂佺敤 speak / 绂佺敤 asr 涓婅锛夆€濊鏄庛€?- 楠屾敹鏍囧噯锛?  - 浠讳竴鎵规澶辫触鏃舵湁鏄庣‘鍥炴粴鐩爣涓庡彲楠岃瘉鍋ュ悍鐘舵€侊紱
+  - 鍥炴粴涓嶇牬鍧忓璁″洖鏀鹃摼鍜?`T-RPC-Event-01` 鏃㈡湁鑳藉姏锛?  - 浜や粯鏂囨。涓?`DevTasks`/`TESTPLAN` 缂栧彿涓€鑷淬€?- 娑夊強鏂囦欢璺緞锛歞ocs/50_project/WORKSHEET_Project_Codex_Git_Flow.md锛汻EADME.md锛沝ocs/30_devspec/DevTasks.md锛泃ests/TESTPLAN.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汧R-CORE-004锛汿-Edge-Start-01锛汿-RPC-Event-01銆?
+## 4. M4 浣撻獙鍖呬换鍔℃竻鍗曪紙TASK-0091 ~ TASK-0098锛?
+### TASK-0091 Scheduler 瀹氭椂璋冨害鍣ㄥ熀纭€缁勪欢锛圡4 鍓嶇疆锛孭0锛?- 浠诲姟鎻忚堪锛氬疄鐜?Host 瀹氭椂璋冨害鍣ㄥ熀纭€缁勪欢锛屾敮鎸?cron/interval/once 涓夌瑙﹀彂妯″紡锛涜皟搴﹀櫒瑙﹀彂鐨?Intent 蹇呴』璧板畬鏁村崟鍚戦摼锛圙overnor鈫扵oken鈫扴kill鈫扐udit锛夛紝涓庣敤鎴疯姹備韩鏈夌浉鍚屾不鐞嗐€?- 杈撳叆锛欴evSpec 15.1锛汸RD FR-SCHED-001~002銆?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛堟柊澧烇級锛氳皟搴﹀櫒涓讳綋锛屽熀浜?APScheduler 鎴栫瓑浠疯交閲忓簱锛?  - `host_brain/scheduler/task_registry.py`锛堟柊澧烇級锛氫换鍔℃敞鍐岃〃锛坱ask_id/trigger_config/intent_template/priority/mode_allowlist/enabled/max_consecutive_failures锛夛紱
+  - `host_brain/scheduler/health.py`锛堟柊澧烇級锛氫换鍔″仴搴峰揩鐓э紙task_id/last_run_ts/next_run_ts/status/error_count/suspended_reason锛夛紱
+  - `scheduler_event_log` 瀹¤琛紙SQLite Ledger 鏂板锛夛細task_id/trigger_ts/intent_id/status/reason_code/mode_at_trigger/error_detail锛?  - `system_initiated_intent` 鐢熸垚閫昏緫锛歱roposer_node_id=scheduler锛屽鐢ㄧ幇鏈?Intent Schema锛?  - sys_mode 闂ㄦ帶鐭╅樀瀹炵幇锛圚IGH/MEDIUM/LOW 浼樺厛绾?脳 Normal/Sleep/Gaming/Focus锛夛紱
+  - 杩炵画澶辫触鑷姩鏆傚仠绛栫暐锛坢ax_consecutive_failures 鍚?status=SUSPENDED + SCHED_TASK_SUSPENDED锛夛紱
+  - 鏂板閿欒鐮侊細SCHED_TASK_SUSPENDED / SCHED_CONDITION_UNMET / SCHED_NO_CONTENT锛?  - fixtures锛氭甯歌Е鍙?Gaming 鎷︽埅/杩炵画澶辫触鏆傚仠/Focus 妯″紡鏆傚仠銆?- 楠屾敹鏍囧噯锛?  - 璋冨害鍣ㄦ敞鍐?娉ㄩ攢/瑙﹀彂鍙洖鏀撅紝瀹¤閾句腑 proposer_node_id=scheduler锛?  - sys_mode=GAMING 鏃朵綆/涓紭鍏堢骇浠诲姟琚嫤鎴紙SYSMODE_FORBIDDEN锛夛紱
+  - 杩炵画澶辫触 N 娆″悗鑷姩鏆傚仠涓?reason_code 鍙粺璁★紱
+  - 鍋ュ悍蹇収鍙 /health 绔偣鎴栭潰鏉胯鍙栵紱
+  - T-Sched-01銆乀-Sched-02銆乀-Sched-03 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/scheduler/scheduler.py锛堟柊澧烇級锛沨ost_brain/scheduler/task_registry.py锛堟柊澧烇級锛沨ost_brain/scheduler/health.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_scheduler_contract.py锛堟柊澧烇級锛泃ests/fixtures/scheduler/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-001~002锛汧R-MODE-001锛汿-Sched-01~03銆?
+### TASK-0092 Desktop Note Skill 妗岄潰鐣欒█锛圡4 P0锛?- 浠诲姟鎻忚堪锛氬疄鐜版闈㈢暀瑷€ Skill锛屾敮鎸佸湪瀹夊叏鍩虹洰褰曚笅鍒涘缓/鏇存柊/鍒犻櫎鏂囨湰鏂囦欢锛涙搷浣滃彲閫嗭紝浜у嚭 manifest + undo_token锛涜矾寰勭┛瓒婃嫆缁濓紱鍐呭缁?QA 鏍￠獙銆?- 杈撳叆锛欴evSpec 15.2锛汸RD FR-DESKTOP-001~002锛汿ASK-0084 杈撳嚭鐨?Scheduler锛堢敤鎴疯Е鍙戜负涓伙紝Scheduler 瑙﹀彂涓鸿緟锛夈€?- 杈撳嚭锛?  - `host_brain/skills/impl/desktop_note.py`锛堟柊澧烇級锛氭闈㈢暀瑷€ Skill handler + SkillMeta 澹版槑锛?  - args 鏍￠獙锛歛ction/filename/content/base_dir_key锛涜矾寰勭┛瓒婃鏌ワ紙`..`/symlink 鎷掔粷 鈫?SCOPE_VIOLATION锛夛紱
+  - 鏂囦欢 manifest锛歜efore_hash/after_hash/path/artifact_refs锛?  - delete 鈫?move-to-quarantine锛涚湡鍒犻渶 confirm_token锛?  - QA 鏍￠獙闆嗘垚锛氬唴瀹瑰惈浼墽琛屽彞 鈫?鎷︽埅閲嶅啓锛?  - 鏂板閰嶇疆椤癸細NATSUME_DESKTOP_DIR锛堝畨鍏ㄥ熀鐩綍锛夛紱
+  - fixtures锛氬垱寤烘垚鍔?璺緞绌胯秺鎷掔粷/undo 鎭㈠/QA 鎷︽埅/Gaming 鎷掔粷銆?- 楠屾敹鏍囧噯锛?  - 鏂囦欢鍒涘缓鎴愬姛 + manifest 瀹屾暣 + undo 鎭㈠鍘熺姸鎬侊紱
+  - 璺緞绌胯秺 鈫?SCOPE_VIOLATION锛汫aming 鈫?SYSMODE_FORBIDDEN锛?  - 鍐呭 QA 鎷︽埅鍙洖鏀撅紱
+  - T-Desktop-01銆乀-Desktop-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/desktop_note.py锛堟柊澧烇級锛沨ost_brain/skills/registry.py锛沨ost_brain/lsp/vault.py锛沨ost_brain/core/qa.py锛泃ests/contract/test_desktop_note_contract.py锛堟柊澧烇級锛泃ests/fixtures/desktop/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DESKTOP-001~002锛汧R-LSP-001~002锛汿-Desktop-01~02锛汿-Vault-01銆?
+### TASK-0093 Dream Skill 姊﹀鐢熸垚锛圡4 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜版ⅵ澧冪敓鎴?Skill锛岀敱璋冨害鍣ㄥ湪 Sleep/绌洪棽鏃惰Е鍙戯紱璇诲彇褰撴棩 Episodic Memory 鈫?LLM 鐢熸垚姊﹀鍙欎簨 鈫?鍐欏叆 Episodic锛坉ream 鏍囩 + NARRATIVE_ONLY锛夈€?- 杈撳叆锛欴evSpec 15.3锛汸RD FR-DREAM-001~002锛汿ASK-0084 杈撳嚭鐨?Scheduler銆?- 杈撳嚭锛?  - `host_brain/skills/impl/dream_generator.py`锛堟柊澧烇級锛氭ⅵ澧?Skill handler + SkillMeta 澹版槑锛?  - Scheduler 浠诲姟娉ㄥ唽锛歵rigger=Sleep/idle锛宲riority=MEDIUM锛?  - 褰撴棩 Episodic 璇诲彇閫昏緫锛坱s_ms 褰撴棩鑼冨洿杩囨护锛孴opK=20锛夛紱
+  - prompt_context 鎵撳寘锛坆ond_summary + 褰撴棩 episodic 鎽樿锛夆啋 LLM 姊﹀鍙欎簨锛?  - Episodic 鍐欏叆锛歝ategory=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]锛?  - manifest锛歮emory_before_count/memory_after_count/dream_id/hash锛?  - QA 鏍￠獙锛氫笉寰椾吉鎵ц/Canon-as-fact锛?  - 鍙洖鍙ｅ緞鎵╁睍锛歟pisodic 涓?evidence_level=NARRATIVE_ONLY 鏍囨敞鍦?prompt_context 閫忎紶锛?  - fixtures锛歋leep 妯″紡瑙﹀彂鎴愬姛/Normal 闈炵┖闂叉嫆缁?Episodic 涓嶅彲鐢ㄩ檷绾?姊﹀鍙洖闈炰簨瀹炵害鏉熴€?- 楠屾敹鏍囧噯锛?  - 姊﹀鍐欏叆 Episodic 甯?dream 鏍囩 + NARRATIVE_ONLY锛?  - Normal 闈炵┖闂叉椂鎷掔粷锛圫CHED_CONDITION_UNMET锛夛紱
+  - 鍙洖姊﹀鏃?QA 纭 evidence_level 鏍囨敞瀛樺湪锛?  - T-Dream-01銆乀-Dream-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/dream_generator.py锛堟柊澧烇級锛沨ost_brain/skills/registry.py锛沨ost_brain/memory/episodic.py锛沨ost_brain/core/prompt_context.py锛沨ost_brain/core/qa.py锛泃ests/contract/test_dream_contract.py锛堟柊澧烇級锛泃ests/fixtures/dream/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DREAM-001~002锛汧R-MEM-001锛汧R-SCHED-001锛汿-Dream-01~02銆?
+### TASK-0094 Diary Skill 鏃ヨ鐢熸垚锛圡4 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜版瘡鏃ユ棩璁?Skill锛岀敱璋冨害鍣ㄥ畾鏃惰Е鍙戯紱姹囨€诲綋鏃ュ璇?鈫?LLM 鐢熸垚鏃ヨ鍙欎簨 鈫?鍙屽啓鏂囦欢 + Episodic Memory锛涙棤瀵硅瘽鏃惰烦杩囦笉浼€犮€?- 杈撳叆锛欴evSpec 15.4锛汸RD FR-DIARY-001~002锛汿ASK-0084 杈撳嚭鐨?Scheduler銆?- 杈撳嚭锛?  - `host_brain/skills/impl/diary_writer.py`锛堟柊澧烇級锛氭棩璁?Skill handler + SkillMeta 澹版槑锛?  - Scheduler 浠诲姟娉ㄥ唽锛歵rigger=cron(23:00)锛宲riority=HIGH锛?  - 褰撴棩瀵硅瘽姹囨€婚€昏緫锛氳鍙?intent_log + governor_log 褰撴棩璁板綍 + Episodic 褰撴棩鏉＄洰锛?  - 鏃犲疄璐ㄥ璇濇娴?鈫?璺宠繃 + SCHED_NO_CONTENT锛堜笉浼€犳棩璁帮級锛?  - 鏈夊璇?鈫?prompt_context 鈫?LLM 鏃ヨ鍙欎簨 鈫?鍙屽啓锛?    - 鏈湴鏂囦欢锛歚{base_dir}/diary/{YYYY-MM-DD}.md`锛屼骇鍑?file manifest锛?    - Episodic Memory锛歝ategory=diary, evidence_refs=[intent_id, file_path]锛?  - QA 鏍￠獙锛氫笉寰楀惈浼墽琛屽彞锛?  - Evolution 鎻愭锛堝彲閫夛級锛歞rift_suggestion 鈫?canon_proposal_log锛?  - fixtures锛氭湁瀵硅瘽瑙﹀彂鎴愬姛/鏃犲璇濊烦杩?鏂囦欢 undo 鍥炴粴/Evolution 鎻愭鍐欏叆銆?- 楠屾敹鏍囧噯锛?  - 鏃ヨ鏂囦欢鍒涘缓 + Episodic 鍐欏叆 + 瀹¤閾惧畬鏁达紱
+  - 鏃犲綋鏃ュ璇濇椂涓嶄吉閫狅紙SCHED_NO_CONTENT锛夛紱
+  - 鏃ヨ鏂囦欢 manifest 鍙挙閿€锛?  - T-Diary-01銆乀-Diary-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/diary_writer.py锛堟柊澧烇級锛沨ost_brain/skills/registry.py锛沨ost_brain/memory/episodic.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/lsp/vault.py锛泃ests/contract/test_diary_contract.py锛堟柊澧烇級锛泃ests/fixtures/diary/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DIARY-001~002锛汧R-MEM-001锛汧R-LSP-001锛汧R-SCHED-001锛汿-Diary-01~02銆?
+### TASK-0095 Proactive Talk Skill 涓诲姩瀵硅瘽锛圡4 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜颁富鍔ㄥ璇?Skill锛岀敱璋冨害鍣ㄦ寜鏉′欢绛栫暐瑙﹀彂锛涚敓鎴愰棶鍊?鍏冲績/鎻愰啋鍐呭骞堕€氳繃 Edge RPC 鎴栧井淇￠€氶亾鎺ㄩ€侊紱棰戠巼闄愬埗 + 鍐呭 QA + 鎺ㄩ€佸け璐ラ潤榛橀檷绾с€?- 杈撳叆锛欴evSpec 15.5锛汸RD FR-PROACTIVE-001~002锛汿ASK-0084 杈撳嚭鐨?Scheduler銆?- 杈撳嚭锛?  - `host_brain/skills/impl/proactive_talk.py`锛堟柊澧烇級锛氫富鍔ㄥ璇?Skill handler + SkillMeta 澹版槑锛?  - Scheduler 浠诲姟娉ㄥ唽锛歵rigger=interval(15min check)锛宲riority=LOW锛?  - 瑙﹀彂鏉′欢缁勫悎瀹炵幇锛歩dle_duration + bond.stage + sys_mode + active_hours锛圓ND 閫昏緫锛夛紱
+  - 棰戠巼闄愬埗闆嗘垚锛歊ate Limit R4 Gate锛?/hour锛夛紱
+  - prompt_context 鎵撳寘锛坆ond_summary + 鏈€杩?episodic + 鏃堕棿娈典俊鎭級鈫?LLM 鑽夋锛?  - QA 鏍￠獙锛氬唴瀹逛粎闄愰棶鍊?鍏冲績/鍥炲繂寮曠敤/鎻愰啋鍙ｅ緞锛涘惈鎵ц intent 鈫?鎷︽埅锛?  - 鎺ㄩ€佽矾寰勯€夋嫨锛欵dge RPC speak > 寰俊 outbound > 闈欓粯闄嶇骇锛堜笉閲嶈瘯锛夛紱
+  - 瀹¤锛氬鐢?skill_exec_log 璁板綍瑙﹀彂鏉′欢蹇収銆佹帹閫佺粨鏋溿€乺eason_code锛?  - fixtures锛氱┖闂茶Е鍙戞垚鍔?Gaming 鎷掔粷/棰戠巼瓒呴檺/Edge 涓嶅彲杈鹃檷绾?鍐呭 QA 鎷︽埅銆?- 楠屾敹鏍囧噯锛?  - 绌洪棽瑙﹀彂 + 鎺ㄩ€佹垚鍔?+ 瀹¤閾惧畬鏁达紱
+  - Gaming 鈫?SYSMODE_FORBIDDEN锛涢鐜囪秴闄?鈫?RATE_LIMIT_EXCEEDED锛?  - 鎺ㄩ€佸け璐ラ潤榛橀檷绾т笉閲嶈瘯锛?  - T-Proactive-01銆乀-Proactive-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/proactive_talk.py锛堟柊澧烇級锛沨ost_brain/skills/registry.py锛沨ost_brain/channels/wechat.py锛沨ost_brain/core/qa.py锛沨ost_brain/governor/rules.py锛泃ests/contract/test_proactive_contract.py锛堟柊澧烇級锛泃ests/fixtures/proactive/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PROACTIVE-001~002锛汧R-SCHED-001锛汧R-CHANNEL-001锛汿-Proactive-01~02銆?
+### TASK-0096 Focus Mode 涓撴敞妯″紡鐘舵€佹墿灞曪紙M4 P1锛?- 浠诲姟鎻忚堪锛氭墿灞?sys_mode 鐘舵€佹満锛屾柊澧?Focus 瀛愭ā寮忥紙Normal 鐨勫瓙鐘舵€侊級锛涜繘鍏ュ悗鏆傚仠涓柇鍨嬭兘鍔涳紙涓诲姩瀵硅瘽/閫氱煡鎺ㄩ€?闈炵揣鎬ヨ皟搴︼級锛屼繚鐣欒鍔ㄥ搷搴旓紱杩涘叆/閫€鍑哄彲瀹¤銆?- 杈撳叆锛欴evSpec 15.6锛汸RD FR-FOCUS-001锛汿ASK-0084 杈撳嚭鐨?Scheduler 闂ㄦ帶鐭╅樀銆?- 杈撳嚭锛?  - `host_brain/core/metabolism.py` 鎵╁睍锛氭柊澧?sub_mode=FOCUS 鐘舵€佹灇涓句笌鍒囨崲閫昏緫锛?  - 杩涘叆鏉′欢锛氱敤鎴锋寚浠?/ 瀹氭椂绛栫暐 / 鏃ュ巻浜嬩欢锛堥渶 evidence锛夛紱
+  - 閫€鍑烘潯浠讹細鐢ㄦ埛鎸囦护 / 瀹氭椂绛栫暐鍒版湡 / 瓒呮椂鑷姩閫€鍑猴紙鍙厤缃粯璁ゆ椂闀匡級锛?  - Governor rules.py 鎵╁睍锛欶ocus 瀛愭ā寮忎笅 proactive/dream 绛?LOW/MEDIUM 浼樺厛绾т换鍔?鈫?SYSMODE_FORBIDDEN_FOCUS锛?  - Scheduler 鑱斿姩锛欶ocus 杩涘叆鏃舵殏鍋滈潪绱ф€ヤ换鍔★紝閫€鍑烘椂鎭㈠锛?  - hard_state_log 瀹¤锛氳繘鍏?閫€鍑轰簨浠讹紙鍘熷洜銆佽瘉鎹憳瑕併€佹寔缁椂闀匡級锛?  - scheduler_event_log锛氳鎷︽埅浠诲姟鍐?reason_code=SYSMODE_FORBIDDEN_FOCUS锛?  - fixtures锛氳繘鍏?Focus/涓诲姩瀵硅瘽鎷︽埅/鐢ㄦ埛鎻愰棶姝ｅ父/閫€鍑烘仮澶?瓒呮椂鑷姩閫€鍑恒€?- 楠屾敹鏍囧噯锛?  - Focus 杩涘叆鍚庝富鍔ㄥ璇濊鎷︽埅锛涚敤鎴蜂富鍔ㄦ彁闂甯稿搷搴旓紱
+  - 閫€鍑哄悗璋冨害鍣ㄦ仮澶嶏紱瀹¤鍙洖鏀惧垏鎹簨浠讹紱
+  - T-Focus-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/metabolism.py锛沨ost_brain/governor/rules.py锛沨ost_brain/scheduler/scheduler.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/test_focus_mode_contract.py锛堟柊澧烇級锛泃ests/fixtures/focus/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FOCUS-001锛汧R-MODE-001~002锛汧R-SCHED-001锛汿-Focus-01銆?
+### TASK-0097 M4 E2E 闆嗘垚娴嬭瘯锛歋cheduler鈫扴kill鈫扐udit 鍏ㄩ摼闂幆楠岃瘉锛圡4 P2锛?- 浠诲姟鎻忚堪锛氫负 M4 鍏ㄩ儴 5 涓?Skill锛坉esktop_note/dream_generator/diary_writer/proactive_talk/focus_mode锛夌紪鍐?E2E 闆嗘垚娴嬭瘯锛岄獙璇佷粠 Scheduler 瑙﹀彂鍒?Audit 鍐欏叆鐨勫畬鏁撮棴鐜€?- 杈撳叆锛歍ASK-0084~TASK-0089 杈撳嚭鐨勬墍鏈夌粍浠躲€?- 杈撳嚭锛?  - `tests/e2e/test_m4_experience_pack.py`锛堟柊澧烇級锛?    - 妗岄潰鐣欒█ E2E锛氬垱寤?鈫?楠岃瘉鏂囦欢 鈫?undo 鈫?楠岃瘉鎭㈠ 鈫?瀹¤涓茶仈锛?    - 姊﹀ E2E锛歋leep 瑙﹀彂 鈫?Episodic 鍐欏叆 dream 鏍囩 鈫?鍚庣画瀵硅瘽鍙洖 鈫?QA 闈炰簨瀹炵害鏉燂紱
+    - 鏃ヨ E2E锛氬畾鏃惰Е鍙?鈫?鏂囦欢 + Episodic 鍙屽啓 鈫?鏃犲璇濊烦杩?鈫?瀹¤涓茶仈锛?    - 涓诲姩瀵硅瘽 E2E锛氱┖闂茶Е鍙?鈫?鎺ㄩ€佹垚鍔?鈫?棰戠巼瓒呴檺鎷掔粷 鈫?Gaming 鎷掔粷 鈫?瀹¤涓茶仈锛?    - Focus Mode E2E锛氳繘鍏?鈫?涓诲姩瀵硅瘽鎷︽埅 鈫?鐢ㄦ埛鎻愰棶姝ｅ父 鈫?閫€鍑烘仮澶?鈫?瀹¤涓茶仈锛?  - 鎵€鏈?E2E 浣跨敤 LLM stub + 鏈湴 fixtures锛屼笉渚濊禆鐪熷疄澶栭儴鏈嶅姟銆?- 楠屾敹鏍囧噯锛?  - 5 涓姛鑳界殑 E2E 鍏ㄩ儴閫氳繃锛?  - 鐜版湁 E2E 娴嬭瘯鏃犲洖褰掞紱
+  - 瀹¤閾句覆鑱旈敭锛坮equest_id/intent_id/proposer_node_id锛夊畬鏁村彲鍥炴斁銆?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/test_m4_experience_pack.py锛堟柊澧烇級锛泃ests/fixtures/scheduler/锛泃ests/fixtures/desktop/锛泃ests/fixtures/dream/锛泃ests/fixtures/diary/锛泃ests/fixtures/proactive/锛泃ests/fixtures/focus/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-001~002锛汧R-DESKTOP-001~002锛汧R-DREAM-001~002锛汧R-DIARY-001~002锛汧R-PROACTIVE-001~002锛汧R-FOCUS-001锛汿-Sched-01~03锛汿-Desktop-01~02锛汿-Dream-01~02锛汿-Diary-01~02锛汿-Proactive-01~02锛汿-Focus-01銆?
+### TASK-0098 鎬ц兘棰勭畻鍩哄噯锛氬叏閾捐矾鏃跺欢閲囬泦 + p50/p95 鎶ュ憡 + 瓒呮椂閫€鍖栭獙璇侊紙P1锛?- 浠诲姟鎻忚堪锛氬疄鐜板叏閾捐矾鏃跺欢閲囬泦鐐广€乥ench 鑴氭湰鑱氬悎鎶ュ憡銆佷互鍙婅秴鏃堕€€鍖栫瓥鐣ョ殑楠岃瘉锛屼娇 NFR-PERF-001 浠庡畾鎬ф弿杩板彉涓哄彲閲忓寲鍩虹嚎銆?- 杈撳叆锛欴evSpec 16锛汸RD NFR-PERF-001锛涚幇鏈?tools/bench/ledger_bench.py锛圠edger 灞傚熀鍑嗭級銆?- 杈撳嚭锛?  - `host_brain/core/latency.py`锛堟柊澧烇級锛氭椂寤堕噰闆嗙偣娉ㄥ叆锛坮equest_start_ms 鈫?response_end_ms锛変笌 latency_breakdown 缁撴瀯鍖栬緭鍑猴紱
+  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛歭atency_breakdown JSON 瀛楁鍐欏叆瀹¤閾撅紱
+  - `host_brain/core/errors.py` 鎵╁睍锛歅ERF_TIMEOUT / PERF_LLM_TIMEOUT / PERF_RETRIEVAL_TIMEOUT / PERF_SKILL_TIMEOUT 閿欒鐮侊紱
+  - `tools/bench/e2e_latency_bench.py`锛堟柊澧烇級锛氬叏閾捐矾 p50/p95/p99 鑱氬悎鎶ュ憡鑴氭湰锛堝鐢?LLM stub + 鏈湴 fixtures锛夛紱
+  - `tools/bench/retrieval_latency_bench.py`锛堟柊澧烇級锛氭绱㈤摼璺?p50/p95 鑱氬悎鎶ュ憡鑴氭湰锛?  - 瓒呮椂閫€鍖栫瓥鐣ラ泦鎴愶細LLM/妫€绱?Skill 瓒呮椂鏃惰緭鍑虹粨鏋勭ǔ瀹?+ quality.stage 鏍囨敞 + reason_code 鍙粺璁★紱
+  - fixtures锛歀LM 瓒呮椂/妫€绱㈣秴鏃?Skill 瓒呮椂/姝ｅ父鍩哄噯鏍蜂緥銆?- 楠屾敹鏍囧噯锛?  - 鍩哄噯鏈哄櫒涓婂悇闃舵 p50/p95 鍦?DevSpec 16.1 鐩爣鑼冨洿鍐咃紱
+  - 妯℃嫙瓒呮椂鍦烘櫙瑙﹀彂閫€鍖栫瓥鐣ワ紝杈撳嚭缁撴瀯绋冲畾涓?quality.stage/reason_code 鍙粺璁★紱
+  - Ledger 鍐欏叆 p95 鈮?20ms锛堝鐢?ledger_bench.py锛夛紱
+  - T-Perf-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/latency.py锛堟柊澧烇級锛沨ost_brain/core/errors.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ools/bench/e2e_latency_bench.py锛堟柊澧烇級锛泃ools/bench/retrieval_latency_bench.py锛堟柊澧烇級锛泃ests/contract/test_latency_contract.py锛堟柊澧烇級锛泃ests/fixtures/perf/銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-PERF-001锛汿-Perf-01锛汿-Audit-01銆?
+---
+
+## M7 鍙娴?+ MCP + 璇煶娣卞寲锛圱ASK-0099~0106锛?
+> 瀵瑰簲 DevSpec 搂17锛汸RD 搂4.16锛團R-OBS锛夈€伮?.18锛團R-MCP锛夈€伮?.19锛團R-VOICE锛夈€?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-03 瀹炵幇锛?14 passed锛夈€?
+### TASK-0099 鍙娴嬫寚鏍囬潰鏉匡細/obs/metrics 鎺ュ彛 + request_id 涓茶仈锛圡7 P0锛?- 浠诲姟鎻忚堪锛氬疄鐜?`/obs/metrics` HTTP 鎺ュ彛锛岃仛鍚?Governor 瑁佸喅璁℃暟銆佷吉鎵ц鎷︽埅娆℃暟銆佹绱?p50/p95銆丠ard Snapshot staleness銆佹渶杩戦摼璺憳瑕侊紝骞朵繚璇佹墍鏈夋寚鏍囧彲閫氳繃 request_id 涓茶仈鍒?SQLite Ledger銆?- 杈撳叆锛欴evSpec 搂17.1.1锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/governor/rules.py锛沨ost_brain/core/metabolism.py銆?- 杈撳嚭锛?  - `host_brain/obs/metrics.py`锛堟柊澧烇級锛歁etricsCollector 绫伙紝浠?Ledger 鑱氬悎鍚勯」鎸囨爣锛?  - `host_brain/obs/__init__.py`锛堟柊澧烇級锛氬寘鍒濆鍖栵紱
+  - `host_brain/obs/routes.py`锛堟柊澧烇級锛欶lask/FastAPI 璺敱 `GET /obs/metrics`锛岃繑鍥?DevSpec 搂17.1.1 瀹氫箟鐨?JSON 缁撴瀯锛?  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛氭柊澧?`query_governor_stats()`銆乣query_recent_chains(n)` 鏌ヨ鏂规硶锛?  - `tests/contract/test_obs_metrics_contract.py`锛堟柊澧烇級锛歍-OBS-01 楠屾敹娴嬭瘯锛堢粨鏋勭ǔ瀹?+ request_id 涓茶仈鍙洖鏀撅級锛?  - `tests/fixtures/obs/`锛堟柊澧烇級锛歮etrics 鏌ヨ fixtures銆?- 楠屾敹鏍囧噯锛?  - `/obs/metrics` 杩斿洖缁撴瀯涓?DevSpec 搂17.1.1 瀹屽叏涓€鑷达紱
+  - `governor_decisions` 璁℃暟涓?Ledger 涓?`governor_decision_log` 涓€鑷达紱
+  - `recent_chains` 涓瘡鏉¤褰曠殑 `request_id` 鍙湪 Ledger 涓壘鍒板搴斿璁¤锛?  - T-OBS-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/obs/metrics.py锛堟柊澧烇級锛沨ost_brain/obs/__init__.py锛堟柊澧烇級锛沨ost_brain/obs/routes.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/test_obs_metrics_contract.py锛堟柊澧烇級锛泃ests/fixtures/obs/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汿-OBS-01銆?
+### TASK-0100 鍙娴嬫ā寮忓樊寮傦細dev/prod 妯″紡鍒囨崲 + debug_trace 瀛楁鎺у埗锛圡7 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜?`OBS_MODE=dev|prod` 鐜鍙橀噺鎺у埗锛宒ev 妯″紡涓?`/obs/metrics` 棰濆杩斿洖 `debug_trace`锛堝惈 LLM intent_draft銆丟overnor 瑙勫垯鍛戒腑璺緞銆丼kill 鎵ц鍙傛暟锛夛紝prod 妯″紡涓嬩笉杩斿洖銆?- 杈撳叆锛欴evSpec 搂17.1.2锛汿ASK-0099 杈撳嚭鐨?MetricsCollector + routes.py銆?- 杈撳嚭锛?  - `host_brain/obs/metrics.py` 鎵╁睍锛歚ObsMode` 鏋氫妇锛圖EV/PROD锛? `get_obs_mode()` 璇诲彇鐜鍙橀噺锛?  - `host_brain/obs/routes.py` 鎵╁睍锛氭牴鎹?ObsMode 鍐冲畾鏄惁闄勫姞 `debug_trace` 瀛楁锛?  - `host_brain/core/errors.py` 鎵╁睍锛氭柊澧?`OBS_MODE_INVALID` 閿欒鐮侊紱
+  - `tests/contract/test_obs_mode_contract.py`锛堟柊澧烇級锛歍-OBS-02 楠屾敹娴嬭瘯锛堝垏鎹㈡ā寮忓悗 debug_trace 瀛楁鎸夐鏈熷嚭鐜?娑堝け锛涗笉褰卞搷瑁佸喅涓庡璁′簨瀹烇級锛?  - `tests/fixtures/obs/` 鎵╁睍锛歞ev_mode_response.json / prod_mode_response.json銆?- 楠屾敹鏍囧噯锛?  - `OBS_MODE=dev` 鏃?`debug_trace` 瀛楁瀛樺湪涓斿寘鍚?intent_draft/rules_hit/skill_params锛?  - `OBS_MODE=prod` 鏃?`debug_trace` 瀛楁涓?null 鎴栦笉瀛樺湪锛?  - 鍒囨崲妯″紡涓嶅奖鍝?Governor 瑁佸喅缁撴灉涓?Ledger 瀹¤鍐欏叆锛?  - T-OBS-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/obs/metrics.py锛沨ost_brain/obs/routes.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_obs_mode_contract.py锛堟柊澧烇級锛泃ests/fixtures/obs/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-002锛汿-OBS-02銆?
+### TASK-0101 MCP ToolMeta 娉ㄥ唽琛細鍚屾 + 鍒嗙骇 + 鍙樻洿鐣欑棔锛圡7 P0锛?- 浠诲姟鎻忚堪锛氬疄鐜?MCP provider 宸ュ叿鍏冩暟鎹紙ToolMeta锛夌殑鍚屾娉ㄥ唽琛紝鍖呭惈 access_level/risk_level/reversible 鍒嗙骇瀛楁锛屽彉鏇村啓 `mcp_sync_log`锛堝彲鍥炴斁锛夈€?- 杈撳叆锛欴evSpec 搂17.2.1锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/skills/registry.py銆?- 杈撳嚭锛?  - `host_brain/mcp/__init__.py`锛堟柊澧烇級锛氬寘鍒濆鍖栵紱
+  - `host_brain/mcp/tool_registry.py`锛堟柊澧烇級锛歍oolMeta 鏁版嵁绫?+ MCPToolRegistry 娉ㄥ唽琛紙SQLite 鎸佷箙鍖?`mcp_tool_registry` 琛級锛?  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛氭柊澧?`mcp_tool_registry` 琛?+ `mcp_sync_log` 琛?+ `log_mcp_sync()` 鏂规硶锛?  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql`锛堟柊澧烇級锛氬缓琛?SQL锛?  - `tests/contract/test_mcp_registry_contract.py`锛堟柊澧烇級锛歍oolMeta 娉ㄥ唽/鏇存柊/鍙樻洿鐣欑棔楠屾敹娴嬭瘯锛?  - `tests/fixtures/mcp/`锛堟柊澧烇級锛歵ool_meta_read.json / tool_meta_write.json / sync_log.json銆?- 楠屾敹鏍囧噯锛?  - ToolMeta 娉ㄥ唽鍚庡彲鎸?provider_id/tool_id 鏌ヨ锛?  - 鏇存柊 ToolMeta 鏃?`mcp_sync_log` 鍐欏叆鍙樻洿璁板綍锛堝惈 before/after diff锛夛紱
+  - `access_level`/`risk_level`/`reversible` 瀛楁瀹屾暣涓旂被鍨嬫纭紱
+  - 娉ㄥ唽琛ㄦ祴璇曞叏閮ㄩ€氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/mcp/__init__.py锛堟柊澧烇級锛沨ost_brain/mcp/tool_registry.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/audit/migrations/0015_mcp_tool_schema.sql锛堟柊澧烇級锛泃ests/contract/test_mcp_registry_contract.py锛堟柊澧烇級锛泃ests/fixtures/mcp/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MCP-001锛汿-MCP-01~03銆?
+### TASK-0102 MCP ToolBroker锛氬崟鍏ュ彛璋冪敤 + Governor 闂ㄧ + Token 娌荤悊 + 瀹¤锛圡7 P0锛?- 浠诲姟鎻忚堪锛氬疄鐜?ToolBroker 鍗曞叆鍙ｏ紝寮哄埗 `intent_draft.mcp_call 鈫?ToolBroker 鈫?Governor gate 鈫?Token锛圵RITE 蹇呴』锛夆啋 MCP SDK 鈫?Audit` 璋冪敤閾撅紝WRITE 鏃?token 鎷掔粷锛宲rovider 涓嶅彲杈鹃檷绾с€?- 杈撳叆锛欴evSpec 搂17.2.2锛汿ASK-0101 杈撳嚭鐨?MCPToolRegistry锛沨ost_brain/governor/rules.py锛沨ost_brain/core/token_ledger.py锛沨ost_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/mcp/tool_broker.py`锛堟柊澧烇級锛歍oolBroker 绫伙紝瀹炵幇瀹屾暣璋冪敤閾撅紱
+  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛氭柊澧?`mcp_exec_log` 琛?+ `log_mcp_exec()` 鏂规硶锛?  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql` 鎵╁睍锛歚mcp_exec_log` 寤鸿〃 SQL锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚MCP_TOOL_NOT_REGISTERED`銆乣MCP_WRITE_TOKEN_REQUIRED`銆乣MCP_PROVIDER_UNAVAILABLE` 閿欒鐮侊紱
+  - `tests/contract/test_mcp_broker_contract.py`锛堟柊澧烇級锛歍-MCP-01~03 楠屾敹娴嬭瘯锛?  - `tests/fixtures/mcp/` 鎵╁睍锛歸rite_no_token.json / read_no_token.json / provider_unavailable.json銆?- 楠屾敹鏍囧噯锛?  - WRITE 鏃?token 鈫?`MCP_WRITE_TOKEN_REQUIRED` 鎷掔粷 + `mcp_exec_log` 鍐欏叆 decision=REJECT锛?  - READ 鏃?token 鈫?姝ｅ父鎵ц + `mcp_exec_log` 鍐欏叆 decision=APPROVE锛?  - provider 涓嶅彲杈?鈫?`MCP_PROVIDER_UNAVAILABLE` 闄嶇骇 + 杈撳嚭缁撴瀯绋冲畾锛?  - T-MCP-01~03 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/mcp/tool_broker.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/audit/migrations/0015_mcp_tool_schema.sql锛沨ost_brain/core/errors.py锛泃ests/contract/test_mcp_broker_contract.py锛堟柊澧烇級锛泃ests/fixtures/mcp/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MCP-001锛汿-MCP-01~03銆?
+### TASK-0103 ASR 浜嬩欢鍖栦笂閫侊細浜嬩欢 Schema + 浣庣疆淇″害鏍囨敞 + 瀹¤锛圡7 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜?ASR 浜嬩欢鍖栦笂閫佸崗璁紙Edge鈫扝ost RPC锛夛紝鍖呭惈 confidence/is_final/alternates 瀛楁锛屼綆缃俊搴︼紙<0.6锛夋爣娉?`low_confidence=true`锛屼簨浠跺啓 `voice_event_log`銆?- 杈撳叆锛欴evSpec 搂17.3.1锛沞dge_client/actuators/vts_driver.py锛堝弬鑰?RPC 妯″紡锛夛紱host_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/voice/__init__.py`锛堟柊澧烇級锛氬寘鍒濆鍖栵紱
+  - `host_brain/voice/asr_handler.py`锛堟柊澧烇級锛欰SREvent 鏁版嵁绫?+ ASRHandler锛堟帴鏀朵簨浠躲€佷綆缃俊搴︽爣娉ㄣ€佸啓 voice_event_log锛夛紱
+  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛氭柊澧?`voice_event_log` 琛?+ `log_voice_event()` 鏂规硶锛?  - `host_brain/audit/migrations/0016_voice_event_schema.sql`锛堟柊澧烇級锛氬缓琛?SQL锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚ASR_LOW_CONFIDENCE`銆乣ASR_UNAVAILABLE` 閿欒鐮侊紱
+  - `tests/contract/test_asr_contract.py`锛堟柊澧烇級锛歍-VOICE-01 楠屾敹娴嬭瘯锛?  - `tests/fixtures/voice/`锛堟柊澧烇級锛歛sr_high_confidence.json / asr_low_confidence.json / asr_unavailable.json銆?- 楠屾敹鏍囧噯锛?  - confidence 鈮?0.6 鈫?姝ｅ父澶勭悊锛宍voice_event_log` 鍐欏叆 `low_confidence=false`锛?  - confidence < 0.6 鈫?`low_confidence=true` + `reason_code=ASR_LOW_CONFIDENCE`锛?  - ASR 涓嶅彲鐢?鈫?`ASR_UNAVAILABLE` + 杈撳嚭缁撴瀯绋冲畾锛?  - T-VOICE-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/voice/__init__.py锛堟柊澧烇級锛沨ost_brain/voice/asr_handler.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/audit/migrations/0016_voice_event_schema.sql锛堟柊澧烇級锛沨ost_brain/core/errors.py锛泃ests/contract/test_asr_contract.py锛堟柊澧烇級锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汿-VOICE-01銆?
+### TASK-0104 TTS 鍚堟垚鎾姤闃熷垪锛氫紭鍏堢骇闃熷垪 + 鎵撴柇 + 澶辫触鍙В閲婏紙M7 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜?TTS 涓嬪彂鍗忚锛圚ost鈫扙dge RPC锛変笌鎾姤闃熷垪锛屾寜 priority 鎺掑簭锛宍interruptible=true` 鐨勪换鍔″彲琚?Barge-in 鎵撴柇锛屾挱鎶ュ畬鎴?鎵撴柇鍚庡啓 `voice_event_log`銆?- 杈撳叆锛欴evSpec 搂17.3.2锛汿ASK-0103 杈撳嚭鐨?voice_event_log锛沨ost_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/voice/tts_queue.py`锛堟柊澧烇級锛歍TSTask 鏁版嵁绫?+ TTSQueue锛堜紭鍏堢骇闃熷垪 + 鎵撴柇閫昏緫锛夛紱
+  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛歚log_voice_event()` 鏀寔 TTS 浜嬩欢绫诲瀷锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚TTS_QUEUE_FULL`銆乣TTS_INTERRUPTED` 閿欒鐮侊紱
+  - `tests/contract/test_tts_contract.py`锛堟柊澧烇級锛歍-VOICE-02 楠屾敹娴嬭瘯锛?  - `tests/fixtures/voice/` 鎵╁睍锛歵ts_normal.json / tts_queue_full.json / tts_interrupted.json銆?- 楠屾敹鏍囧噯锛?  - 楂樹紭鍏堢骇浠诲姟鎻掗槦鍚庡厛鎵ц锛?  - `interruptible=true` 浠诲姟琚墦鏂悗鍐?`TTS_INTERRUPTED` + 瀹¤鍙洖鏀撅紱
+  - 闃熷垪婊℃椂杩斿洖 `TTS_QUEUE_FULL` + 杈撳嚭缁撴瀯绋冲畾锛?  - T-VOICE-02 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/voice/tts_queue.py锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_tts_contract.py锛堟柊澧烇級锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-002锛汿-VOICE-02銆?
+### TASK-0105 Barge-in 鎵撴柇 + Edge 鍏滃簳灏忔ā鍨嬶紙M7 P2锛?- 浠诲姟鎻忚堪锛氬疄鐜?Barge-in 鎵撴柇鍗忚锛圓SR 妫€娴嬪埌鐢ㄦ埛寮€鍙?鈫?Edge 鍙?barge_in 鈫?Host 鍙?tts_interrupt锛夛紱瀹炵幇 Edge 鍏滃簳灏忔ā鍨嬶紙Host 涓嶅彲鐢ㄦ椂 draft_only 杈撳嚭锛岄粯璁ゅ嵏杞芥寜闇€鍔犺浇锛夈€?- 杈撳叆锛欴evSpec 搂17.3.3~17.3.4锛汿ASK-0103/0104 杈撳嚭鐨?ASRHandler + TTSQueue锛沨ost_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/voice/barge_in.py`锛堟柊澧烇級锛欱argeInHandler锛堟帴鏀?barge_in 浜嬩欢 鈫?瑙﹀彂 tts_interrupt 鈫?鍐?voice_event_log锛夛紱
+  - `edge_client/fallback/fallback_model.py`锛堟柊澧烇級锛欶allbackModel锛坉raft_only 鏍囪 + 鎸夐渶鍔犺浇 + 涓嶅彲鐢ㄥ揩閫熷け璐ワ級锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚FALLBACK_MODEL_UNAVAILABLE`銆乣FALLBACK_OUTPUT_DRAFT_ONLY` 閿欒鐮侊紱
+  - `tests/contract/test_barge_in_contract.py`锛堟柊澧烇級锛歍-VOICE-03 楠屾敹娴嬭瘯锛?  - `tests/contract/test_fallback_model_contract.py`锛堟柊澧烇級锛歍-VOICE-04 楠屾敹娴嬭瘯锛?  - `tests/fixtures/voice/` 鎵╁睍锛歜arge_in_event.json / fallback_draft.json / fallback_unavailable.json銆?- 楠屾敹鏍囧噯锛?  - Barge-in 瑙﹀彂鍚?TTS 绔嬪嵆鎵撴柇 + 瀹¤璁板綍 `BARGE_IN_INTERRUPTED`锛?  - 鍏滃簳杈撳嚭鏍囪 `draft_only=true`锛屼笉鍚鍐虫垨鎵ц浜嬪疄瀹ｅ憡锛?  - 鍏滃簳涓嶅彲鐢ㄦ椂 `FALLBACK_MODEL_UNAVAILABLE` 蹇€熷け璐ワ紱
+  - T-VOICE-03/T-VOICE-04 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/voice/barge_in.py锛堟柊澧烇級锛沞dge_client/fallback/fallback_model.py锛堟柊澧烇級锛沨ost_brain/core/errors.py锛泃ests/contract/test_barge_in_contract.py锛堟柊澧烇級锛泃ests/contract/test_fallback_model_contract.py锛堟柊澧烇級锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-003锛汧R-VOICE-004锛汿-VOICE-03锛汿-VOICE-04銆?
+### TASK-0106 Edge 璧勬簮闂搁棬锛氫紭鍏堢骇鐭╅樀 + 鍋ュ悍蹇収 + 鎶㈠崰鍙娴嬶紙M7 P2锛?- 浠诲姟鎻忚堪锛氬疄鐜?Edge 璧勬簮闂搁棬锛屾寜 P1锛圓SR锛? P2锛堟挱鏀撅級> P3锛圱TS 鍚堟垚锛? P4锛堝厹搴?LLM锛変紭鍏堢骇鐭╅樀绠＄悊璧勬簮锛屼綆浼樺厛绾т换鍔¤鎶㈠崰鏃跺啓 `RESOURCE_GATE_PREEMPTED`锛屽仴搴峰揩鐓у彲瑙傛祴銆?- 杈撳叆锛欴evSpec 搂17.3.5锛汿ASK-0103~0105 杈撳嚭鐨?ASRHandler/TTSQueue/BargeInHandler/FallbackModel銆?- 杈撳嚭锛?  - `edge_client/resource/resource_gate.py`锛堟柊澧烇級锛歊esourceGate锛堜紭鍏堢骇鐭╅樀 + 鎶㈠崰閫昏緫 + 鍋ュ悍蹇収锛夛紱
+  - `edge_client/resource/__init__.py`锛堟柊澧烇級锛氬寘鍒濆鍖栵紱
+  - `host_brain/core/errors.py` 鎵╁睍锛歚RESOURCE_GATE_PREEMPTED` 閿欒鐮侊紱
+  - `tests/contract/test_resource_gate_contract.py`锛堟柊澧烇級锛歍-VOICE-05 楠屾敹娴嬭瘯锛?  - `tests/fixtures/voice/` 鎵╁睍锛歳esource_gate_snapshot.json / preemption_event.json銆?- 楠屾敹鏍囧噯锛?  - P4 浠诲姟鍦?P1 娲昏穬鏃惰鎶㈠崰锛屽啓 `RESOURCE_GATE_PREEMPTED`锛?  - ASR锛圥1锛夊湪鍘嬪姏涓嬩笉琚姠鍗狅紱
+  - 鍋ュ悍蹇収缁撴瀯涓?DevSpec 搂17.3.5 涓€鑷达紱
+  - T-VOICE-05 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/resource/resource_gate.py锛堟柊澧烇級锛沞dge_client/resource/__init__.py锛堟柊澧烇級锛沨ost_brain/core/errors.py锛泃ests/contract/test_resource_gate_contract.py锛堟柊澧烇級锛泃ests/fixtures/voice/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-005锛汿-VOICE-05銆?
+---
+
+## M8 杩愯鏃堕泦鎴愰棴鐜紙TASK-0107~0110锛?
+> 瀵瑰簲 DevSpec 搂18锛汸RD M8锛圢FR-PERF-001銆丯FR-REL-001銆丗R-CORE-004锛夈€?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-03锛夈€?
+### TASK-0107 杩愯鏃惰剼鏈泦鎴愶細start_host_side.ps1 鎺ュ叆 OBS/MCP 鍋ュ悍鎺㈡祴锛圡8 P0锛?- 浠诲姟鎻忚堪锛氭墿灞?`start_host_side.ps1`锛屽湪 `/health` 閫氳繃鍚庨澶栨帰娴?`/obs/metrics` 涓?`MCPToolRegistry.health_check()`锛屽皢 OBS/MCP 瀛愮郴缁熷仴搴风姸鎬佸啓鍏ュ惎鍔ㄧ粨鏋?JSON锛屼笉鍙敤鏃惰緭鍑?`startup_warnings` 浣嗕笉闃绘柇鍚姩銆?- 杈撳叆锛欴evSpec 搂18.1.1锛泂cripts/runtime/start_host_side.ps1锛堢幇鏈夛級锛沨ost_brain/obs/routes.py锛沨ost_brain/mcp/tool_registry.py銆?- 杈撳嚭锛?  - `scripts/runtime/start_host_side.ps1` 鎵╁睍锛氭柊澧?`/obs/metrics` HTTP 鎺㈡祴閫昏緫 + `MCPToolRegistry` SQLite 鍙啓鎬ф鏌ワ紱
+  - 鍚姩缁撴灉 JSON 鏂板瀛楁锛歚obs_status`锛坥k/degraded锛夈€乣mcp_registry_status`锛坥k/degraded锛夈€乣startup_warnings`锛堝垪琛級锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚STARTUP_OBS_DEGRADED`銆乣STARTUP_MCP_DEGRADED` 閿欒鐮侊紱
+  - `tests/contract/test_startup_integration_contract.py`锛堟柊澧烇級锛歍-RT-01 楠屾敹娴嬭瘯锛堝惎鍔ㄧ粨鏋?JSON 瀛楁瀹屾暣鎬?+ OBS/MCP 鐘舵€佸彲瑙傛祴锛夛紱
+  - `tests/fixtures/runtime/`锛堟柊澧烇級锛歴tartup_ok.json / startup_obs_degraded.json / startup_mcp_degraded.json銆?- 楠屾敹鏍囧噯锛?  - 姝ｅ父鍚姩锛歚obs_status=ok`銆乣mcp_registry_status=ok`銆乣startup_warnings=[]`锛?  - OBS 涓嶅彲鐢細`obs_status=degraded`銆乣startup_warnings` 鍚?`STARTUP_OBS_DEGRADED`锛岃繘绋嬩粛鍚姩锛?  - MCP SQLite 涓嶅彲鍐欙細`mcp_registry_status=degraded`銆乣startup_warnings` 鍚?`STARTUP_MCP_DEGRADED`锛岃繘绋嬩粛鍚姩锛?  - T-RT-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歴cripts/runtime/start_host_side.ps1锛沨ost_brain/core/errors.py锛泃ests/contract/test_startup_integration_contract.py锛堟柊澧烇級锛泃ests/fixtures/runtime/銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汿-RT-01銆?
+### TASK-0108 绔埌绔?Smoke Test锛氬喎鍚姩闂幆 + 鎵ц閾捐矾 + 鏁呴殰娉ㄥ叆鐭╅樀锛圡8 P0锛?- 浠诲姟鎻忚堪锛氬疄鐜颁笁涓鍒扮 Smoke 娴嬭瘯鍦烘櫙锛氣憼 鍐峰惎鍔ㄦ渶灏忛棴鐜紙鏃犲閮ㄤ緷璧栵級銆佲憽 鎵ц閾捐矾锛坅pproval_token + undo锛夈€佲憿 鏁呴殰娉ㄥ叆鐭╅樀锛圢eo4j/Chroma/LLM/Edge 鍚勮嚜涓嶅彲鐢ㄦ椂杈撳嚭缁撴瀯绋冲畾锛夈€?- 杈撳叆锛欴evSpec 搂18.2.1锛沨ost_brain/app/fastapi_app.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/governor/decision.py锛沨ost_brain/skills/loader.py锛沨ost_brain/lsp/vault.py銆?- 杈撳嚭锛?  - `tests/e2e/test_cold_start_e2e.py`锛堟柊澧烇級锛歍-E2E-01锛堝喎鍚姩鏈€灏忛棴鐜級锛?  - `tests/e2e/test_exec_chain_e2e.py`锛堟柊澧烇級锛歍-E2E-02锛堟墽琛岄摼璺?+ undo锛夛紱
+  - `tests/e2e/test_fault_injection_e2e.py`锛堟柊澧烇級锛歍-E2E-03锛堟晠闅滄敞鍏ョ煩闃碉細Neo4j/Chroma/LLM/Edge锛夛紱
+  - `tests/fixtures/e2e/`锛堟柊澧烇級锛歝old_start_input.json / exec_chain_input.json / fault_injection_matrix.json銆?- 楠屾敹鏍囧噯锛?  - T-E2E-01锛氭棤澶栭儴渚濊禆涓嬪搷搴斾负鍚堟硶 JSON锛宍quality.stage` 鍚檷绾ф爣璁帮紝SQLite 鏈?intent_log + governor_log锛屾棤浼墽琛屽鍛婏紱
+  - T-E2E-02锛氭墽琛岄摼璺畬鏁达紙APPROVE鈫抰oken鈫抏xec鈫抦anifest锛夛紝undo 鍚庢枃浠舵仮澶嶏紝vault_gc_log 涓嶅垹鏈夋晥 undo 绐楀彛鏉愭枡锛?  - T-E2E-03锛? 绉嶆晠闅滄敞鍏ヤ笅杈撳嚭缁撴瀯鍧囩ǔ瀹氾紝`reason_code` 鍧囧彲缁熻锛?  - T-E2E-01~03 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/test_cold_start_e2e.py锛堟柊澧烇級锛泃ests/e2e/test_exec_chain_e2e.py锛堟柊澧烇級锛泃ests/e2e/test_fault_injection_e2e.py锛堟柊澧烇級锛泃ests/fixtures/e2e/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-004锛汵FR-REL-001锛汿-E2E-01~03銆?
+### TASK-0109 鎬ц兘鍩虹嚎閲囬泦锛歱50/p95 鏃跺欢鎸囨爣 + /obs/metrics 鎵╁睍锛圡8 P1锛?- 浠诲姟鎻忚堪锛氬湪 `MetricsCollector` 涓柊澧?`latency_baseline` 鑱氬悎閫昏緫锛屼粠 `retrieval_event_log`/`governor_log`/`skill_exec_log` 璁＄畻 p50/p95锛屽苟鍦?`/obs/metrics` 鍝嶅簲涓毚闇诧紱鏂板 `PERF_BASELINE_STALE` 閿欒鐮侊紙閲囨牱鏁版嵁瓒?24h 鏈洿鏂帮級銆?- 杈撳叆锛欴evSpec 搂18.3.1锛沨ost_brain/obs/metrics.py锛堢幇鏈?MetricsCollector锛夛紱host_brain/audit/sqlite_ledger.py锛坮etrieval_event_log/governor_log/skill_exec_log锛夈€?- 杈撳嚭锛?  - `host_brain/obs/metrics.py` 鎵╁睍锛歚collect_latency_baseline()` 鏂规硶锛岃绠?p50/p95 骞惰繑鍥?`latency_baseline` 瀛楀吀锛?  - `host_brain/obs/routes.py` 鎵╁睍锛歚/obs/metrics` 鍝嶅簲涓寘鍚?`latency_baseline` 瀛楁锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚PERF_BASELINE_STALE` 閿欒鐮侊紱
+  - `tests/contract/test_perf_baseline_contract.py`锛堟柊澧烇級锛歍-PERF-01 楠屾敹娴嬭瘯锛堝瓧娈电粨鏋勭ǔ瀹?+ 閲囨牱璁℃暟 > 0 + 鏃跺欢鍊煎悎鐞嗚寖鍥达級锛?  - `tests/fixtures/obs/` 鎵╁睍锛歮etrics_with_latency.json銆?- 楠屾敹鏍囧噯锛?  - `latency_baseline` 瀛楁鍖呭惈 retrieval_p50_ms/retrieval_p95_ms/governor_p50_ms/governor_p95_ms/skill_exec_p50_ms/skill_exec_p95_ms/sampled_at/sample_count锛?  - `sample_count > 0` 鏃舵椂寤跺€间负姝ｆ暣鏁帮紱
+  - `sample_count = 0` 鏃跺瓧娈典负 null 鎴栧惈 `PERF_BASELINE_STALE` 鏍囪锛?  - T-PERF-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/obs/metrics.py锛沨ost_brain/obs/routes.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_perf_baseline_contract.py锛堟柊澧烇級锛泃ests/fixtures/obs/銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-PERF-001锛汿-PERF-01銆?
+### TASK-0110 鍙戝竷娓呭崟閿佸畾锛歁8 release manifest锛圡8 P1锛?- 浠诲姟鎻忚堪锛氬熀浜?`host_brain/release/release_manifest.py`锛岀敓鎴?M8 鍙戝竷娓呭崟锛岄攣瀹?git commit hash銆佹墍鏈?migration 鏂囦欢 hash銆佹祴璇曢€氳繃鏁般€佹€ц兘鍩虹嚎蹇収銆佹湇鍔℃敞鍐岃〃蹇収锛岃緭鍑哄埌 `release/manifests/m8_release.json`銆?- 杈撳叆锛欴evSpec 搂18.4.1锛沨ost_brain/release/release_manifest.py锛堢幇鏈夛級锛沨ost_brain/audit/migrations/锛堟墍鏈?SQL 鏂囦欢锛夛紱host_brain/bond/migrations/锛堟墍鏈?Cypher 鏂囦欢锛夛紱host_brain/core/services.py锛堟湇鍔℃敞鍐岃〃锛夈€?- 杈撳嚭锛?  - `host_brain/release/release_manifest.py` 鎵╁睍锛氭柊澧?`generate_m8_manifest()` 鏂规硶锛岃仛鍚堜笂杩板瓧娈碉紱
+  - `release/manifests/m8_release.json`锛堟柊澧烇級锛歁8 鍙戝竷娓呭崟鏂囦欢锛?  - `tests/contract/test_release_manifest_contract.py`锛堟柊澧烇級锛歍-REL-01 楠屾敹娴嬭瘯锛堝瓧娈靛畬鏁存€?+ hash 鏍煎紡鍚堟硶 + migration 鏂囦欢鏁伴噺涓庡疄闄呬竴鑷达級锛?  - `tests/fixtures/release/`锛堟柊澧烇級锛歮8_manifest_expected.json銆?- 楠屾敹鏍囧噯锛?  - `m8_release.json` 鍖呭惈锛歡it_commit_hash/migration_hashes锛堟寜鏂囦欢鍚嶇储寮曪級/test_passed_count/latency_baseline_snapshot/service_registry_snapshot/generated_at锛?  - `migration_hashes` 涓枃浠舵暟閲忎笌 `host_brain/audit/migrations/` + `host_brain/bond/migrations/` 瀹為檯鏂囦欢鏁颁竴鑷达紱
+  - T-REL-01 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/release/release_manifest.py锛況elease/manifests/m8_release.json锛堟柊澧烇級锛泃ests/contract/test_release_manifest_contract.py锛堟柊澧烇級锛泃ests/fixtures/release/銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汿-REL-01銆?
 
 ---
 
-## 3. 任务清单（从空目录开始）
+## M9 World Canon 闂幆 + 鏃ヨ Evolution 鍏宠仈锛圱ASK-0111~0115锛?
+> 瀵瑰簲 DevSpec 搂19锛汸RD M9锛團R-WCANON-001~003銆丗R-DIARY-002锛夈€?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-03锛夈€?
+### TASK-0111 World Canon 鏉＄洰璧勪骇锛氭枃浠?SSOT + 鏈€灏忕瀛愭潯鐩紙M9 P0锛?- 浠诲姟鎻忚堪锛氬湪 `host_brain/canon/world/` 涓嬪缓绔?World Canon 鏂囦欢 SSOT锛屽啓鍏ユ渶灏忕瀛愭潯鐩紙绯荤粺鏈/鏋舵瀯璁惧畾/鍏抽敭涓嶅彉閲忓悇 1 鏉★級锛屽苟纭繚鏉＄洰缁撴瀯绗﹀悎 DevSpec 搂19.1.1 鐨勫瓧娈电害鏉熴€?- 杈撳叆锛欴evSpec 搂19.1.1锛沨ost_brain/canon/world/锛堢幇鏈夌洰褰曪紝鍙兘涓虹┖锛夈€?- 杈撳嚭锛?  - `host_brain/canon/world/wc-001-system-terms.json`锛堟柊澧烇級锛氱郴缁熸湳璇瀛愭潯鐩紱
+  - `host_brain/canon/world/wc-002-architecture-invariants.json`锛堟柊澧烇級锛氭灦鏋勪笉鍙橀噺绉嶅瓙鏉＄洰锛?  - `host_brain/canon/world/wc-003-persona-core.json`锛堟柊澧烇級锛氫汉鏍兼牳蹇冭瀹氱瀛愭潯鐩紱
+  - 姣忎釜鏉＄洰鍖呭惈锛歞oc_id/version/title/tags/body/evidence_level=CANON_REFERENCE_ONLY/status=active/created_at/updated_at锛?  - `tests/fixtures/canon/world/`锛堟柊澧烇級锛氱瀛愭潯鐩殑 fixture 鍓湰锛岀敤浜?contract 娴嬭瘯銆?- 楠屾敹鏍囧噯锛?  - 鎵€鏈夋潯鐩?evidence_level=CANON_REFERENCE_ONLY锛?  - body 涓嶅惈瀹屾垚鎬ц〃杩帮紙QA 鏍￠獙閫氳繃锛夛紱
+  - 鏉＄洰鏂囦欢鍙 canon_sync.py 鎵弿骞跺啓鍏?world_canon_doc 绱㈠紩锛?  - T-WCanon-04 鍓嶇疆鏉′欢婊¤冻锛堟湁鍙悓姝ョ殑鏉＄洰锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/canon/world/wc-001-system-terms.json锛堟柊澧烇級锛沨ost_brain/canon/world/wc-002-architecture-invariants.json锛堟柊澧烇級锛沨ost_brain/canon/world/wc-003-persona-core.json锛堟柊澧烇級锛泃ests/fixtures/canon/world/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汿-WCanon-04锛堝墠缃級銆?
+### TASK-0112 World Canon 绱㈠紩鍚屾锛歸orld_canon_doc 琛?+ canon_sync 骞傜瓑鎵弿锛圡9 P0锛?- 浠诲姟鎻忚堪锛氬湪 SQLite Ledger 涓柊澧?`world_canon_doc` 琛ㄤ笌 `canon_proposal_log` 琛紝骞舵墿灞?`canon_sync.py` 瀹炵幇骞傜瓑鎵弿閫昏緫锛堢浉鍚?hash 涓嶉噸澶嶅啓 change_log锛屽け璐ヨ褰?CANON_SYNC_FAILED锛夈€?- 杈撳叆锛欴evSpec 搂19.1.2/19.1.4锛沨ost_brain/audit/sqlite_ledger.py锛堢幇鏈夛級锛沨ost_brain/memory/canon_sync.py锛堢幇鏈夛級锛汿ASK-0111 杈撳嚭鐨勭瀛愭潯鐩€?- 杈撳嚭锛?  - `host_brain/audit/migrations/0009_world_canon_doc.sql`锛堟柊澧烇級锛歸orld_canon_doc 琛ㄨ縼绉伙紱
+  - `host_brain/audit/migrations/0010_canon_proposal_log.sql`锛堟柊澧烇級锛歝anon_proposal_log 琛ㄨ縼绉伙紱
+  - `host_brain/memory/canon_sync.py` 鎵╁睍锛歚sync_world_canon()` 鏂规硶锛堟壂鎻忊啋hash鈫掑姣斺啋鍐?change_log锛屽箓绛夛級锛?  - `host_brain/core/errors.py` 鎵╁睍锛歚CANON_SYNC_FAILED`銆乣WCANON_SLOT_VIOLATION`銆乣WCANON_PROPOSAL_INVALID` 閿欒鐮侊紱
+  - `tests/contract/test_world_canon_sync_contract.py`锛堟柊澧烇級锛歍-WCanon-04 楠屾敹娴嬭瘯锛堝箓绛夋€?+ 澶辫触鍙粺璁★級锛?  - `tests/fixtures/canon/world/` 鎵╁睍锛歴ync_result_expected.json銆?- 楠屾敹鏍囧噯锛?  - 鐩稿悓鏉＄洰閲嶅鍚屾涓嶄骇鐢熼噸澶?canon_change_log 鏉＄洰锛堝箓绛夛級锛?  - 鍚屾澶辫触鏃?CANON_SYNC_FAILED 鍙粺璁★紱
+  - world_canon_doc 琛ㄥ瓧娈典笌 DevSpec 搂19.1.2 涓€鑷达紱
+  - T-WCanon-04 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/migrations/0009_world_canon_doc.sql锛堟柊澧烇級锛沨ost_brain/audit/migrations/0010_canon_proposal_log.sql锛堟柊澧烇級锛沨ost_brain/memory/canon_sync.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_world_canon_sync_contract.py锛堟柊澧烇級锛泃ests/fixtures/canon/world/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-002锛汿-WCanon-04銆?
+### TASK-0113 World Canon 娉ㄥ叆鍒嗘Ы锛歝ontext_pack 鐙珛妲戒綅 + QA 鎷︽埅 Canon-as-fact锛圡9 P0锛?- 浠诲姟鎻忚堪锛氭墿灞?`prompt_context.py` 瀹炵幇 World Canon 鐙珛妲戒綅娉ㄥ叆锛圱op-K锛宔vidence_level=CANON_REFERENCE_ONLY锛夛紝骞舵墿灞?`qa.py` 鎷︽埅"World Canon 鍐呭 + 瀹屾垚鎬ц〃杩?缁勫悎锛岃褰?CANON_AS_FACT_VIOLATION銆?- 杈撳叆锛欴evSpec 搂19.1.3锛沨ost_brain/core/prompt_context.py锛堢幇鏈夛級锛沨ost_brain/core/qa.py锛堢幇鏈夛級锛汿ASK-0112 杈撳嚭鐨?world_canon_doc 绱㈠紩銆?- 杈撳嚭锛?  - `host_brain/core/prompt_context.py` 鎵╁睍锛歚build_world_canon_slot()` 鏂规硶锛屼粠 world_canon_doc 鏌ヨ Top-K active 鏉＄洰锛屾敞鍏?authoritative.world_canon 妲戒綅锛?  - `host_brain/core/qa.py` 鎵╁睍锛歚check_canon_as_fact()` 鏂规硶锛屾娴嬪彊浜嬩腑"Canon 鍐呭 + 瀹屾垚鎬ц〃杩?缁勫悎锛?  - `tests/contract/test_world_canon_slot_contract.py`锛堟柊澧烇級锛歍-WCanon-05锛堝垎妲介殧绂伙級+ T-WCanon-06锛圦A 鎷︽埅锛夐獙鏀舵祴璇曪紱
+  - `tests/fixtures/canon/world/` 鎵╁睍锛歝ontext_pack_with_world_canon.json / qa_canon_as_fact_bad.json銆?- 楠屾敹鏍囧噯锛?  - World Canon 鏉＄洰鍙嚭鐜板湪 authoritative.world_canon 妲戒綅锛屼笉娣峰叆鍏朵粬妲戒綅锛?  - 鍙欎簨鍚?Canon 鍐呭 + 瀹屾垚鎬ц〃杩?鏃?QA 鎷︽埅骞惰褰?CANON_AS_FACT_VIOLATION锛?  - 閲嶅啓鍚庝粛澶辫触鍒欓檷绾т负 Host 鏈€灏忔ā鏉匡紱
+  - T-WCanon-05/T-WCanon-06 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/prompt_context.py锛沨ost_brain/core/qa.py锛泃ests/contract/test_world_canon_slot_contract.py锛堟柊澧烇級锛泃ests/fixtures/canon/world/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汧R-WCANON-003锛汧R-CANON-001锛汿-WCanon-05锛汿-WCanon-06銆?
+### TASK-0114 World Canon Evolution 鎻愭锛歝anon_proposal_log 鍐欏叆 + 瀹℃牳娴佺▼锛圡9 P1锛?- 浠诲姟鎻忚堪锛氬疄鐜?World Canon Evolution 鎻愭鐨勫啓鍏ヤ笌瀹℃牳娴佺▼锛氭彁妗堝啓鍏?`canon_proposal_log`锛坰tatus=pending锛夛紝瀹℃牳閫氳繃鍚庤Е鍙?`canon_sync.py` 鏇存柊鏂囦欢 SSOT锛屾墍鏈夌姸鎬佸彉鏇村啓 `canon_change_log`锛堝惈鍙樻洿鍓嶅悗 hash锛夈€?- 杈撳叆锛欴evSpec 搂19.1.4锛汿ASK-0112 杈撳嚭鐨?canon_proposal_log 琛紱host_brain/memory/canon_world_store.py锛堢幇鏈夛級锛沨ost_brain/memory/canon_sync.py锛堟墿灞曞悗锛夈€?- 杈撳嚭锛?  - `host_brain/memory/canon_world_store.py` 鎵╁睍锛歚submit_proposal()` 鏂规硶锛堝啓鍏?canon_proposal_log锛宻tatus=pending锛夛紱`approve_proposal()` 鏂规硶锛堢姸鎬佹敼涓?approved锛岃Е鍙?sync锛屽啓 change_log锛夛紱
+  - `tests/contract/test_world_canon_evolution_contract.py`锛堟柊澧烇級锛歍-WCanon-07 楠屾敹娴嬭瘯锛堟彁妗堝啓鍏?瀹℃牳/鍙樻洿 hash 鍙洖鏀撅級锛?  - `tests/fixtures/canon/world/` 鎵╁睍锛歱roposal_pending.json / proposal_approved.json / change_log_expected.json銆?- 楠屾敹鏍囧噯锛?  - 鎻愭鍐欏叆鍚?status=pending锛屽彲鍦?canon_proposal_log 鏌ヨ锛?  - 瀹℃牳閫氳繃鍚?status=approved锛宑anon_change_log 鍚彉鏇村墠鍚?hash锛?  - 闈炵櫧鍚嶅崟娴佺▼涓嶅緱鐩存帴淇敼 status锛坈ontract 娴嬭瘯鏂█锛夛紱
+  - T-WCanon-07 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/canon_world_store.py锛沨ost_brain/memory/canon_sync.py锛泃ests/contract/test_world_canon_evolution_contract.py锛堟柊澧烇級锛泃ests/fixtures/canon/world/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-002锛汿-WCanon-07銆?
+### TASK-0115 鏃ヨ Evolution 鎻愭鍏宠仈锛歞rift_suggestion 鎻愬彇 + QA 鏍￠獙 + canon_proposal 鍐欏叆锛圡9 P1锛?- 浠诲姟鎻忚堪锛氭墿灞?`diary_writer.py`锛屽湪鏃ヨ鐢熸垚鍚庢彁鍙?LLM 杈撳嚭涓殑鍙€?`drift_suggestion` 瀛楁锛岀粡 QA 鏍￠獙鍚庡啓鍏?`canon_proposal_log`锛坧roposer=diary_writer锛宻ource_intent_id=鏃ヨ intent_id锛夛紱鏍￠獙澶辫触鍒欎涪寮冨苟璁板綍 WCANON_PROPOSAL_INVALID锛屼笉闃诲鏃ヨ鍐欏叆銆?- 杈撳叆锛欴evSpec 搂19.2锛沨ost_brain/skills/impl/diary_writer.py锛堢幇鏈夛級锛沨ost_brain/memory/canon_world_store.py锛圱ASK-0114 鎵╁睍鍚庯級锛沨ost_brain/core/qa.py锛圱ASK-0113 鎵╁睍鍚庯級銆?- 杈撳嚭锛?  - `host_brain/skills/impl/diary_writer.py` 鎵╁睍锛歚_extract_drift_suggestion()` 鏂规硶锛堟彁鍙栧苟鏍￠獙 drift_suggestion 瀛楁锛夛紱`_submit_evolution_proposal()` 鏂规硶锛堣皟鐢?canon_world_store.submit_proposal()锛夛紱
+  - `host_brain/core/errors.py` 鎵╁睍锛歚DIARY_EVOLUTION_PROPOSAL_SKIPPED` 閿欒鐮侊紱
+  - `tests/contract/test_diary_evolution_contract.py`锛堟柊澧烇級锛歍-Diary-03锛堟彁妗堝啓鍏?+ source_intent_id 涓茶仈锛? T-Diary-04锛圦A 鎷︽埅 + 鏃ヨ姝ｅ父鍐欏叆锛夐獙鏀舵祴璇曪紱
+  - `tests/fixtures/diary/` 鎵╁睍锛歞iary_with_drift_suggestion.json / diary_drift_suggestion_bad.json銆?- 楠屾敹鏍囧噯锛?  - 鏃ヨ鍚悎瑙?drift_suggestion 鏃讹紝canon_proposal_log 鍐欏叆鎴愬姛锛宻ource_intent_id 鍙拷婧埌鏃ヨ intent_id锛?  - drift_suggestion.suggested_body 鍚吉鎵ц鍙ユ椂锛屾彁妗堣涓㈠純锛屾棩璁版甯稿啓鍏ワ紝WCANON_PROPOSAL_INVALID 鍙粺璁★紱
+  - 鏃?drift_suggestion 鏃舵棩璁版甯稿啓鍏ワ紝DIARY_EVOLUTION_PROPOSAL_SKIPPED 鍙娴嬶紱
+  - T-Diary-03/T-Diary-04 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/impl/diary_writer.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_diary_evolution_contract.py锛堟柊澧烇級锛泃ests/fixtures/diary/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DIARY-002锛汿-Diary-03锛汿-Diary-04銆?
+---
 
-### TASK-0000 仓库骨架落地（从空目录开始：目录树+占位文件+索引入口）
-- 任务描述：把 DevSpec 目录骨架与关键入口文件落到仓库中，确保后续任务有稳定落点；并保证“无 secrets 也可进入冷启动（M0）开发态”的配置占位存在。
-- 输入：DevSpec 1.1（目录树）、DevSpec 1.4（目录职责红线）、DevSpec 1.2.1（冷启动策略）。
-- 输出：
-  - 缺失目录与关键占位文件；
-  - Flow 指针文件（flows/active.pointer）；
-  - Flow Trace 索引（docs/60_trace/flows/index.md）；
-  - TESTPLAN 占位（tests/TESTPLAN.md）；
-  - secret 模板文件（例如 .env.example 或等价模板文件：只包含变量名与示例，不含真实密钥），用于支撑“未配置 API Key 的冷启动形态”。
-- 验收标准：
-  - 目录与文件存在性可审阅；
-  - active.pointer 为单个合法 JSON，包含 dev/staging/prod 三键；
-  - flows/index.md 含按环境行；
-  - secret 模板文件不包含真实密钥，且能表达“未配置 key 时系统进入降级/替代路径”的配置口径（不要求可用性结论，但要求口径明确）。
-- 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/TESTPLAN.md；prompts/llm_contract/；host_brain/；edge_client/；tools/**；（可选）.env.example。
-- 关联需求/测试：FR-FLOW-001；FR-CORE-004；T-Flow-01、T-Flow-02。
+## M9 鏀跺熬锛圱ASK-0116锛?
+> 瀵瑰簲 M9 鏂囨。/杩借釜/鍙戝竷娓呭崟鏀跺熬宸ヤ綔銆?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-03锛夈€?
+### TASK-0116 M9 鏀跺熬锛氶渶姹傝拷韪ˉ鍐?+ 鍙戝竷娓呭崟鐢熸垚 + 鍚姩鑴氭湰 canon_sync 閽╁瓙锛圡9 鏀跺熬锛?- 浠诲姟鎻忚堪锛氳ˉ榻?M9 鐨勪笁椤规敹灏惧伐浣滐細鈶?requirements_trace.md 琛ュ啓 R-85~R-89锛圡9 鐨?5 鏉￠渶姹傝拷韪潯鐩級锛涒憽 鐢熸垚 M9 鍙戝竷娓呭崟 release/manifests/m9_release.json锛堢被姣?M8 鐨?TASK-0110锛夛紱鈶?start_host_side.ps1 鏂板 canon_sync 鍋ュ悍鎺㈡祴閽╁瓙锛?health/canon_sync锛岄潪闃绘柇锛夈€?- 杈撳叆锛欴evSpec 搂19锛況equirements_trace.md锛堢幇鏈夛紝鏈熬涓?R-84锛夛紱host_brain/release/release_manifest.py锛堢幇鏈?generate_m8_manifest锛夛紱scripts/runtime/start_host_side.ps1锛堢幇鏈?M8 鎺㈡祴閫昏緫锛夈€?- 杈撳嚭锛?  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛氭柊澧?M9 绔犺妭鏍囬 + R-85~R-89 浜旀潯杩借釜鏉＄洰锛圖ONE锛夛紱
+  - `host_brain/release/release_manifest.py` 鎵╁睍锛氭柊澧?`generate_m9_manifest()` 鏂规硶锛堝惈 world_canon_asset_hashes 瀛楁锛夛紱
+  - `release/manifests/m9_release.json`锛堟柊澧烇級锛歁9 鍙戝竷娓呭崟锛?7 migration 鏂囦欢 + 3 涓?World Canon 绉嶅瓙鏉＄洰 hash + 1032 tests passed锛夛紱
+  - `scripts/runtime/start_host_side.ps1` 鎵╁睍锛氭柊澧?M9 canon_sync 鍋ュ悍鎺㈡祴鍧楋紙/health/canon_sync锛宒egraded 闈為樆鏂級+ 杈撳嚭 JSON 鏂板 `canon_sync_status` 瀛楁銆?- 楠屾敹鏍囧噯锛?  - requirements_trace.md 鍖呭惈 R-85~R-89锛岃鐩栫姸鎬佸潎涓?DONE锛?  - m9_release.json 鍖呭惈锛歮ilestone=M9 / git_commit_hash / migration_hashes锛?7 鏂囦欢锛? world_canon_asset_hashes锛? 鏂囦欢锛? test_passed_count=1032 / generated_at锛?  - start_host_side.ps1 杈撳嚭 JSON 鍚?canon_sync_status 瀛楁锛?  - start_edge.ps1 鏃犻渶淇敼锛圓SR 鐑瘝娉ㄥ叆涓?M10-B 宸ヤ綔锛夈€?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/requirements_trace.md锛沨ost_brain/release/release_manifest.py锛況elease/manifests/m9_release.json锛堟柊澧烇級锛泂cripts/runtime/start_host_side.ps1銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汧R-WCANON-002锛汧R-WCANON-003锛汧R-DIARY-002锛汵FR-MAINT-001銆?
+---
 
-### TASK-0001 测试骨架：contract/e2e/fixtures/TESTPLAN 的最小闭环
-- 任务描述：建立 tests/contract、tests/e2e、tests/fixtures 的结构与最小断言模板，确保后续每个任务都有可挂载的测试落点；并补齐冷启动所需的 fixtures（无 key / 依赖缺失 / 输出仍稳定）。
-- 输入：DevSpec 11（合规测试口径）、DevSpec 1.1（tests 目录约定）、DevSpec 1.2.1（冷启动策略）。
-- 输出：
-  - TESTPLAN 编号表模板；
-  - contract 测试占位（按 Schema/枚举/指针一致性分组）；
-  - e2e 最小链路测试占位；
-  - fixtures（good/bad intent、bad llm output、replay logs）目录结构；
-  - 冷启动 fixtures：至少包含 “无 API Key/外部依赖不可用” 的样例输入与期望输出结构（重点是 stage 与 reason_code 口径，而不是执行成功）。
-- 验收标准：
-  - TESTPLAN 中存在编号段落（T-Flow/T-Intent/T-LLM/T-Audit/T-QA 等至少列出占位条目）；
-  - fixtures 目录具备最小样例文件（可为空内容但命名与字段结构明确）；
-  - 冷启动 fixtures 体现：输出仍为单个合法 JSON、且具备 quality.stage 与 reason_code（当适用）。
-- 涉及文件路径：tests/TESTPLAN.md；tests/contract/；tests/e2e/；tests/fixtures/**。
-- 关联需求/测试：FR-CORE-002；FR-CORE-004；T-Flow-01~02（至少落占位）；T-14、T-15（至少落占位）；T-LLM-01（至少落占位）。
-
-#### TASK-0002 Flow 资产：exports 归档 + active.pointer + Trace 索引一致性
-- 任务描述：把 Flow 资产作为可部署配置资产纳入版本化与可追溯闭环，并固化“指针—索引一致性”的回归断言。
-- 输入：DevSpec 1.5；PRD FR-FLOW-001。
-- 输出：flows/exports 归档约定（目录命名/版本标签）；active.pointer JSON 契约；docs/60_trace/flows/index.md 的一致性规则；fixtures（示例指针与索引配对）。
-- 验收标准：T-Flow-01（指针合法性/存在性）、T-Flow-02（索引一致性）可被断言；任意环境可从 active.pointer 与 index.md 唯一确定“当前生效 Flow 资产”。
-- 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-FLOW-001；T-Flow-01~02。
-
-#### TASK-0003 LLM 输出契约：Strict JSON + 输出字段约束 + lint + fixtures
-- 任务描述：固化“LLM→Host”的 Strict JSON 输出契约，并提供 lint 与 good/bad fixtures，作为 QA 与回归的共同输入源。
-- 输入：DevSpec 0.4、DevSpec 9（QA）、PRD FR-CORE-002~003。
-- 输出：核心输出契约（narrative、intent_draft、meta）；lint 规则（单 JSON、字段存在性、禁止前后缀）；fixtures（good/bad：多段 JSON/夹杂文本/缺字段/伪执行句）。
-- 验收标准：T-LLM-01（输出可解析性与 lint 规则）通过；bad fixtures 均被判定为不合规并产生可统计 violation。
-- 涉及文件路径：prompts/llm_contract/core_output_contract.json；host_brain/core/qa.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-002~003；T-LLM-01；I13。
-
-#### TASK-0004 ContextPack 契约：分槽隔离 + world/style/episodic 口径 + tool_meta_pack 预留
-- 任务描述：固化 Host→LLM 的 context_pack 分槽结构，确保事实/权威内容/风格/线索严格隔离，并预留 tool_meta_pack（仅元数据）。
-- 输入：DevSpec 7；PRD FR-CANON-001、FR-WCANON-001~003、FR-BOND-003。
-- 输出：context_pack 字段结构口径（hard_snapshot/bond_summary/authoritative/retrieval/style_pack/constraints/tool_meta_pack）；混槽判定规则；fixtures（混槽/越权引用/Canon-as-fact）。
-- 验收标准：T-CP-01（分槽隔离）通过；混槽输入触发 QA/contract 拦截；Bond Summary 不含数值。
-- 涉及文件路径：host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CANON-001；FR-WCANON-001~003；FR-BOND-003；T-CP-01。
-
-#### TASK-0005 Intent 契约：宽松解析 + 严格校验（含重放/顺序/过期）
-- 任务描述：形成可复用的 Intent 解析与校验契约，确保“只修语法不补语义”，并把校验失败稳定映射为 reason_code，可审计回放。
-- 输入：DevSpec 3；PRD FR-INTENT-001~003。
-- 输出：Intent Schema/校验接口落点；失败→reason_code 映射口径；审计字段（session_id/seq/nonce/ts_ms）记录口径；fixtures（good/bad）。
-- 验收标准：T-18~T-22 通过；同一规则版本下同类失败 reason_code 稳定；governor_log 可定位失败类型（REPLAY/SEQ/EXPIRED）。
-- 涉及文件路径：host_brain/governor/schemas.py；host_brain/governor/decision.py；host_brain/core/ids.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-INTENT-001~003；T-18~T-22；I7。
-
-#### TASK-0006 Intent responsibility：intent_log（proposal）字段补齐（proposer 元信息 + tool_visibility_hash）
-- 任务描述：把“谁提议了什么”固化为 intent_log 最小字段集，并保证与 governor_log/skill_exec_log 分离。
-- 输入：DevSpec（intent_log 契约）、PRD FR-AUDIT-001（Triptych）、PRD（Intent responsibility 需求条目若已加入）。
-- 输出：intent_log 字段口径（proposer_node_id/model_snapshot/prompt_profile_id/tool_visibility_hash/proposed_intent_draft/lint_result）；fixtures（多 proposer 并行 A/B）；回放串联键（request_id/thread_id/turn_id）。
-- 验收标准：T-Intent-01（字段最小集）与 T-Intent-02（proposal/decision/exec 分离）通过；intent_log 不能支撑“已执行”叙事。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/core/ids.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001；T-Intent-01~02。
-
-#### TASK-0007 GovernorOutput 契约：REJECT 必带 reason_code + rule_trace
-- 任务描述：固化对外裁决输出契约（decision/reason_code/rule_trace/tokens/snapshot_refs），并定义缺字段输出的合规拦截口径。
-- 输入：DevSpec 4；PRD FR-GOV-001~003、FR-CORE-002；白皮书拒绝码约束。
-- 输出：GovernorOutput Schema 落点；REJECT/APPROVE 必备字段断言口径；GOVERNOR_OUTPUT_INVALID/ SKILL_TOKEN_MISSING 的触发与记录口径；contract fixtures。
-- 验收标准：T-14、T-15、T-16、T-17 通过；对外不出现“缺 reason_code 的 REJECT”；同类拒绝在同版本下 reason_code 稳定可统计。
-- 涉及文件路径：host_brain/governor/schemas.py；host_brain/governor/decision.py；host_brain/core/errors.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-GOV-001~003；FR-CORE-002；T-14~T-17。
-
-#### TASK-0008 Governor Gates：R1–R7 骨架 + rule_trace 稳定性
-- 任务描述：把 Trust/Energy/SysMode/RateLimit/Scope/Safety/Airlock Gate 的输入输出与 rule_trace 口径固化为可回归规则族。
-- 输入：DevSpec 6（Governor rules）、PRD FR-GOV-001。
-- 输出：每个 Gate 的最小输入（快照字段）与输出（命中/阈值摘要/原因）；rule_trace 结构字段；fixtures（命中/未命中、边界值）。
-- 验收标准：T-Gov-01（rule_trace 可定位阈值与快照摘要）通过；同输入同版本 rule_trace 稳定。
-- 涉及文件路径：host_brain/governor/rules.py；host_brain/governor/decision.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-GOV-001；T-Gov-01。
-
-#### TASK-0009 Token 体系：approval/confirm/undo 的绑定与失效口径
-- 任务描述：定义并固化票据字段绑定、TTL/过期、签名/校验失败的稳定拒绝码口径，确保“语言确认”不构成授权。
-- 输入：DevSpec 5；PRD FR-TOKEN-001~003。
-- 输出：Token/Manifest Schema；绑定字段口径（intent_id/skill_name/session_id/seq）；confirm_token/undo_token 的触发条件与拒绝码口径；fixtures（串用/过期/伪造）。
-- 验收标准：T-34~T-38 通过；缺 confirm_token 的高风险请求稳定得到 CONFIRM_REQUIRED；不合法/过期/串用 token 稳定得到 TOKEN_INVALID（或更精确子类）。
-- 涉及文件路径：host_brain/governor/tokens.py；host_brain/governor/schemas.py；host_brain/governor/decision.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-TOKEN-001~003；T-34~T-38；I6/I11。
-
-#### TASK-0010 Skills 单入口：Registry+Loader 强制 token 校验 + 幂等 + evidence_ref
-- 任务描述：固化“唯一合法执行入口”为 loader，并定义幂等与审计写入最小契约，保证执行事实可串联回放。
-- 输入：DevSpec 6/8.1；PRD FR-SKILL-001~003、FR-AUDIT-001。
-- 输出：SkillMeta 强制字段口径；loader 执行输入输出契约；幂等策略（同 intent_id 不重复副作用）的证明口径；skill_exec_log 字段最小集（含 evidence_ref/manifest_ref）。
-- 验收标准：T-Skill-01、T-15、T-34~T-38 通过；任意 skill_exec 均可关联 governor_log + approval_token_ref；重复 intent_id 不产生第二次真实副作用且可由日志证明。
-- 涉及文件路径：host_brain/skills/registry.py；host_brain/skills/loader.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-SKILL-001~003；FR-AUDIT-001；T-Skill-01；T-15；I1/I8。
-
-#### TASK-0011 SQLite Ledger：Triptych 三联画最小表 + 索引串联口径
-- 任务描述：固化“审计即事实”的最小可回放数据面：intent_log/governor_log/skill_exec_log 的字段口径与串联键。
-- 输入：DevSpec 8.1；PRD FR-AUDIT-001。
-- 输出：三表字段最小集与串联键口径（request_id/intent_id/token_ref）；error_log/qa_violation_log 口径；回放索引键（event_id/evidence_refs）。
-- 验收标准：T-Audit-01、T-14、T-15 通过；任意 request_id 能串联到 intent→governor→(可选)skill_exec；缺链路时可定位到 stage 与 reason_code。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/core/ids.py；host_brain/governor/decision.py；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001；T-Audit-01；T-14、T-15。
-
-#### TASK-0012 QA 合规模块：Strict JSON + 伪执行宣告 + Canon-as-fact + 格式漂移（一次重写/降级）
-- 任务描述：定义 Host 侧 QA 的合规检查与“一次重写/降级”契约，确保对外输出始终可解析且不伪造执行事实。
-- 输入：DevSpec 9/7；PRD FR-CORE-002~003、FR-AUDIT-003、FR-CANON-001、FR-WCANON-001~003。
-- 输出：违规类型枚举与记录口径（FALSE_EXECUTION_CLAIM、CANON_AS_FACT_VIOLATION、LLM_FORMAT_DRIFT 等）；最小模板降级触发条件与输出结构口径；fixtures（good/bad）。
-- 验收标准：T-67~T-71、T-Canon-01~02、T-WCanon-01~03 通过；故障/超时/漂移下仍为单个合法 JSON；完成性表述无证据必拦截。
-- 涉及文件路径：host_brain/core/qa.py；host_brain/core/context_pack.py；host_brain/audit/sqlite_ledger.py；prompts/llm_contract/refusal_templates.md；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-002~003；FR-AUDIT-003；FR-CANON-001；FR-WCANON-001~003；T-67~T-71；I13。
-
-#### TASK-0013 Style Canon / World Canon：版本化、变更留痕、注入口径与回归集
-- 任务描述：固化 Canon（style/world）的写入边界、变更留痕与注入口径，确保 Canon 可引用但不越权为事实。
-- 输入：DevSpec 8.4/8.5；PRD FR-CANON-001~002、FR-WCANON-001~003。
-- 输出：canon_change_log / canon_proposal_log 最小字段；style/world 注入分槽规则；fixtures（Canon-as-fact、引用口径、版本漂移）。
-- 验收标准：T-Canon-01~02、T-WCanon-01~03 通过；任何 Canon 更新均可定位到 proposal 与变更前后 hash/version；引用不得变成执行事实。
-- 涉及文件路径：host_brain/memory/canon_style_store.py；host_brain/memory/canon_world_store.py；host_brain/memory/canon_sync.py；host_brain/audit/sqlite_ledger.py；host_brain/canon/style/**；host_brain/canon/world/**；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CANON-001~002；FR-WCANON-001~003；T-Canon-01~02；T-WCanon-01~03。
-
-#### TASK-0014 Episodic：写入门禁（evidence_refs）+ 生命周期（merge/decay/delete）审计
-- 任务描述：固化 Episodic 写入必须带 evidence_refs 的门禁与生命周期操作日志，避免幻觉固化。
-- 输入：DevSpec 8.3；PRD FR-MEM-001~002。
-- 输出：memory_ops_log 字段最小集；写入/合并/衰减/删除的审计事件口径；fixtures（无证据写入、合并后索引）。
-- 验收标准：T-Mem-01~02 通过；无 evidence_refs 写入失败且可解释；生命周期操作均可回放。
-- 涉及文件路径：host_brain/memory/episodic.py；host_brain/memory/chroma_client.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-MEM-001~002；T-Mem-01~02。
-
-#### TASK-0015 Vault：manifest/undo/GC 的审计闭环（不破坏 undo 窗口）
-- 任务描述：固化 Vault 的 manifest 索引、undo 绑定与 GC 审计规则，确保可撤销能力可回放。
-- 输入：DevSpec 8.6；PRD FR-LSP-001~002、FR-TOKEN-003。
-- 输出：vault_manifest_index / vault_gc_log 字段最小集；GC 不破坏 undo 窗口的断言口径；fixtures（manifest 缺失/ digest 不匹配）。
-- 验收标准：T-Vault-01~02 通过；reversible=true 的执行必须产出 manifest_ref；manifest digest 不匹配时撤销拒绝并可审计。
-- 涉及文件路径：host_brain/lsp/vault.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-LSP-001~002；FR-TOKEN-003；T-Vault-01~02；I11/I12。
-
-#### TASK-0016 Airlock：出站净化报告 + 入站隔离分类（不得直通执行）
-- 任务描述：固化 AIRLOCK 的净化报告、入站隔离分类与审计字段口径，确保外部内容永远降权为草案。
-- 输入：DevSpec 8.7；PRD FR-AIRLOCK-001~002。
-- 输出：airlock_log 字段最小集（removed_fields/redactions/payload_digest/quarantine_digest）；入站分类枚举（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN）；fixtures（未净化/直通尝试）。
-- 验收标准：T-39~T-40 通过；缺净化报告的出站必须拒绝并记录 AIRLOCK_BLOCKED_EGRESS；入站内容不得直接触发执行。
-- 涉及文件路径：host_brain/airlock/sanitizer.py；host_brain/airlock/quarantine.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AIRLOCK-001~002；T-39~T-40；I10。
-
-### TASK-0017 Tool Catalog：工具元数据 SSOT（仅元数据）+ Top-K 选择 + tool_visibility_hash
-- 任务描述：建立工具目录的元数据 SSOT 与 Top-K 候选选择，确保模型每轮只见候选工具子集，并可产出 tool_visibility_hash。
-- 输入：DevSpec 8.9（Tools：Tool Catalog/Selector/Broker）；PRD FR-TOOL-001~002。
-- 输出：ToolMeta 字段最小集（id/name/desc/schema_hash/side_effect_level/auth_level/domain_tags/version）；Top-K 输出结构；tool_visibility_hash 计算口径；fixtures（包含 READ/WRITE 混合工具）。
-- 验收标准：T-Tool-01（仅元数据/字段完整性）、T-Tool-02（Top-K 子集/WRITE 默认不可见）通过；全量工具不暴露给 LLM。
-- 涉及文件路径：host_brain/tools/catalog.py；host_brain/tools/selector.py；host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-TOOL-001~002；T-Tool-01~02；I14。
-
-#### TASK-0018 ToolBroker：单入口执行 + WRITE token gating + evidence_ref 串联
-- 任务描述：固化所有副作用工具执行的唯一入口与证据锚点（evidence_ref），并把 WRITE 工具纳入 capability/approval 票据约束。
-- 输入：DevSpec 8.9（ToolBroker）；PRD FR-TOOL-003；FR-TOKEN-001。
-- 输出：ToolExec 输入输出契约；WRITE 拒绝码口径（TOKEN_INVALID/CONFIRM_REQUIRED/…）；skill_exec_log/evidence_ref 串联规则；fixtures（无 token 调用 WRITE）。
-- 验收标准：T-Tool-03 通过；无 token 的 WRITE 必拒绝且可统计；任何“已执行”叙事可指向 evidence_ref。
-- 涉及文件路径：host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/；tests/fixtures/；tests/e2e/。
-- 关联需求/测试：FR-TOOL-003；T-Tool-03；I14。
-
-#### TASK-0019 MCP：provider 元数据同步 + 受治理调用（READ/WRITE 分级）
-- 任务描述：把 MCP 工具提供方纳入 Tool Catalog，并确保调用受 token 治理与审计串联约束。
-- 输入：DevSpec 8.10（MCP）；PRD FR-MCP-001。
-- 输出：MCP provider→ToolMeta 映射；READ/WRITE 分级口径；审计字段（provider_id/tool_id/request_id/evidence_ref）。
-- 验收标准：T-MCP-01 通过；MCP WRITE 无 token 必拒绝；所有 MCP 调用可回放到 intent/governor/evidence_ref。
-- 涉及文件路径：host_brain/tools/mcp_adapter.py；host_brain/tools/catalog.py；host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-MCP-001；T-MCP-01；I14。
-
-#### TASK-0020 通道：微信 I/O 事件化 + channel_io_log 串联
-- 任务描述：把微信收发作为确定性通道能力事件化，并写入审计链，禁止由 LLM 自由决定“是否发送/发给谁”。
-- 输入：DevSpec 8.11.1（微信通道）；PRD FR-CHANNEL-001。
-- 输出：wechat 入站/出站事件结构；channel_io_log 字段最小集（thread_key/message_id/request_id/ts/status）；fixtures（重复消息/失败回执）。
-- 验收标准：T-Channel-01 通过；任意入站/出站可追溯到 thread_key 与 request_id；发送失败可解释（reason_code/stage）。
-- 涉及文件路径：host_brain/channels/wechat.py；host_brain/audit/sqlite_ledger.py；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-CHANNEL-001；T-Channel-01。
-
-#### TASK-0021 外显：VTube Studio talk gate + emotion_tag→expression_id 固定映射
-- 任务描述：固化“说话开始/结束”与“表情枚举映射”的确定性行为，拒绝模型自由动作参数。
-- 输入：DevSpec 8.11.2（VTS 外显）；PRD FR-AVATAR-001。
-- 输出：emotion_tag 枚举与 expression_id 映射表；审计字段口径（emotion_tag/expression_id/trigger）；fixtures（非法 tag、自由动作尝试）。
-- 验收标准：T-Avatar-01 通过；任何表情触发可回放到固定映射；自由动作参数输入被拒绝并留痕。
-- 涉及文件路径：host_brain/channels/vts.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AVATAR-001；T-Avatar-01。
-
-#### TASK-0022 ClawdBot UI Skill：before/after 证据 + 置信度门槛 + 红线熔断
-- 任务描述：固化 UI 自动化的证据链与红线熔断口径，确保低置信度不点击、红线场景不越权。
-- 输入：DevSpec 6.3（ClawdBot 作为 Skill）；PRD FR-VISION-001~002、FR-AUDIT-002。
-- 输出：clawd_action_log 字段最小集（before/after artifact/confidence/target_desc）；UI_ELEMENT_NOT_FOUND 与 VISUAL_REDLINE 的触发口径；fixtures（低置信度/红线页面）。
-- 验收标准：T-41~T-43 通过；confidence<0.80 时不发生动作且写日志；红线场景门禁不足必拒绝并可审计。
-- 涉及文件路径：host_brain/skills/impl/clawd_ui_action.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VISION-001~002；FR-AUDIT-002；T-41~T-43。
-
-### TASK-0023 服务项清单落地：服务注册表 + health 口径 + 降级可观测
-- 任务描述：为所有“必须实现”的服务项建立统一注册表与 health 契约，保证服务即使暂不可用也能被识别、被降级、被审计。
-- 输入：PRD（服务必须实现口径）；DevSpec 1.2.1/2（进程拓扑）/QA（降级结构）。
-- 输出：服务注册表字段口径（service_id/owner(host|edge)/required=true/status）；health 输出结构；不可用→reason_code/stage 映射口径；fixtures（服务不可用矩阵）。
-- 验收标准：同版本下同类不可用 reason_code 稳定；输出结构可解析；审计链可回放到 request_id。
-- 涉及文件路径：host_brain/core/；host_brain/audit/；edge_client/rpc/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-67~T-71（复用）；（新增）T-Svc-01。
-
-### TASK-0024 Edge RPC：语音链路端点与事件 Schema（ASR/TTS/打断）
-- 任务描述：补齐 Edge 语音链路的 RPC 端点与事件 Schema，使 Host 能以事件驱动编排语音输入与播报输出。
-- 输入：DevSpec 8.11.3（VOICE 契约）；PRD FR-VOICE-001~003。
-- 输出：asr_chunk/speak/barge_in 的请求响应字段口径；事件上送节流与顺序口径；失败 reason_code/stage 口径；fixtures（字段缺失/乱序/低置信度）。
-- 验收标准：T-Voice-01~T-Voice-03 通过；事件结构稳定；可回放。
-- 涉及文件路径：edge_client/rpc/；edge_client/senses/；edge_client/actuators/；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-001~003；T-Voice-01~03。
-
-### TASK-0025 Edge ASR（large-v3）：上送事件稳定化与 alternates（可选字段但必须支持）
-- 任务描述：将 ASR 输出稳定为 asr_chunk 事件结构，并支持 alternates 字段用于检索提示；低置信度显式标注。
-- 输入：DevSpec 8.11.3；PRD FR-VOICE-001。
-- 输出：asr_chunk 最小字段集；alternates 字段口径；低置信度标注策略；审计串联键。
-- 验收标准：T-Voice-01 通过；低置信度场景仍结构稳定且可回放。
-- 涉及文件路径：edge_client/senses/；edge_client/rpc/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-001；T-Voice-01。
-
-### TASK-0026 Edge TTS（GPT-SoVITS 全 GPU 常驻）：合成与播报队列、失败口径
-- 任务描述：形成 speak→合成→播报队列的稳定能力与失败可解释口径，确保强交互下可被打断且不伪执行。
-- 输入：DevSpec 8.11.3；PRD FR-VOICE-002。
-- 输出：播报队列事件结构；失败 reason_code/stage 口径；与 request_id 串联字段。
-- 验收标准：T-Voice-02 通过；失败可解释且不影响 Host 输出结构。
-- 涉及文件路径：edge_client/actuators/；edge_client/rpc/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-002；T-Voice-02。
-
-### TASK-0027 Barge-in（强交互可打断）：打断策略与审计事件
-- 任务描述：落实“用户开口→打断播报→优先 ASR”的策略与事件化审计，且打断不构成执行事实。
-- 输入：DevSpec 8.11.3；PRD FR-VOICE-003。
-- 输出：barge_in 触发条件口径；打断事件字段；Host 审计记录点。
-- 验收标准：T-Voice-03 通过；打断立即生效；ASR 不被阻塞；审计可回放。
-- 涉及文件路径：edge_client/actuators/；edge_client/senses/；host_brain/audit/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-003；T-Voice-03。
-
-### TASK-0028 Edge 兜底 LLM（Ollama 3B 量化，默认卸载）：draft-only 端点与快速失败回退
-- 任务描述：补齐 Edge 兜底模型端点（presence/asr_compile/retrieval_hints/context_compress），强制 draft_only=true；不可用时快速失败并回退 Host 兜底口径。
-- 输入：DevSpec 8.11.3；PRD FR-VOICE-004。
-- 输出：端点输入输出字段；禁止裁决字段与禁止执行事实宣告约束；不可用错误码口径。
-- 验收标准：T-Voice-04 通过；任何兜底输出均不含裁决/执行事实宣告；不可用可统计。
-- 涉及文件路径：edge_client/rpc/；edge_client/senses/；host_brain/core/qa.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-004；T-Voice-04。
-
-### TASK-0029 Edge 资源闸门：ASR>播放>TTS合成>兜底LLM 的互斥与可观测
-- 任务描述：落实资源闸门的优先级与互斥策略，避免峰值叠加导致不稳定，并提供可观测状态。
-- 输入：DevSpec 8.11.3；PRD FR-VOICE-005。
-- 输出：闸门状态机口径；抢占/拒绝的 reason_code/stage；资源指标字段（显存/队列长度）。
-- 验收标准：T-Voice-05 通过；压力场景优先保证 ASR；降级行为可回放。
-- 涉及文件路径：edge_client/actuators/；edge_client/rpc/；edge_client/proofs/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VOICE-005；T-Voice-05。
-
-### TASK-0030 Host 检索链：Embedding 服务接口与降级口径
-- 任务描述：补齐 embedding 服务接口、健康状态与不可用降级口径（不得伪装为“记忆为空”）。
-- 输入：DevSpec 8.3.1；PRD FR-MEM-003。
-- 输出：embedding 输出结构；不可用/超时→reason_code/stage 映射；审计串联点。
-- 验收标准：T-Ret-01 通过；结构稳定；reason_code 可统计。
-- 涉及文件路径：host_brain/retrieval/；host_brain/audit/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-MEM-003；T-Ret-01。
-
-### TASK-0031 Host 检索链：Reranker 服务接口与降级口径
-- 任务描述：补齐 reranker 服务接口、健康状态与不可用降级口径，并保持 evidence pack 结构稳定。
-- 输入：DevSpec 8.3.1；PRD FR-MEM-004。
-- 输出：rerank 输出结构；不可用降级策略口径；审计串联点。
-- 验收标准：T-Ret-02 通过；evidence pack 仍可生成且字段稳定。
-- 涉及文件路径：host_brain/retrieval/；host_brain/audit/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-MEM-004；T-Ret-02。
-
-### TASK-0032 Host 召回融合：Evidence Pack 结构与回放引用
-- 任务描述：补齐召回融合输出的 evidence pack 结构，使回答与审计可引用同一证据包。
-- 输入：DevSpec 8.3.1；PRD FR-MEM-005。
-- 输出：evidence pack 最小字段与序列化口径；与 request_id/intent_id 串联字段。
-- 验收标准：T-Ret-03 通过；字段结构稳定；可回放引用。
-- 涉及文件路径：host_brain/retrieval/；host_brain/audit/；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-MEM-005；T-Ret-03。
-
-### TASK-0033 Host 屏幕监控与 OCR（按需）：Gaming 门控 + 结构化输出
-- 任务描述：补齐屏幕监控与 OCR/识图的按需触发能力，并落实 Gaming 不触发门控；输出必须结构化且带 source_ref。
-- 输入：PRD FR-VISION-003；DevSpec（新增门控与结构化输出契约点需补齐到 vision 章节）。
-- 输出：OCR 输出结构（text_blocks/bbox/conf/source_ref）；Gaming 门控拒绝码口径；审计串联字段。
-- 验收标准：Gaming 下稳定拒绝/降级；非 Gaming 下结构稳定且可回放。
-- 涉及文件路径：host_brain/vision/；host_brain/audit/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-VISION-003；（新增）T-VisionGate-01、T-Vision-01。
-
-### TASK-0034 Host 摄像头识别：事件化输出与 evidence_ref
-- 任务描述：补齐摄像头识别链路的事件化输出（objects/events + confidence + evidence_ref），并与审计链串联。
-- 输入：PRD FR-VISION-004；DevSpec（vision 事件化契约点需补齐到 vision 章节）。
-- 输出：camera_event 结构；证据引用口径；低置信度标注策略。
-- 验收标准：事件可回放并指向 evidence_ref；证据缺失时稳定降级/拒绝。
-- 涉及文件路径：host_brain/vision/；host_brain/lsp/；host_brain/audit/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-VISION-004；（新增）T-Vision-02。
-
-### TASK-0035 Host Bond SSOT（Neo4j）：单写者写入边界 + bond_update_log + 约束/索引
-- 任务描述：补齐 Neo4j Bond SSOT 的“单写者”写入边界与最小图模型落点（含约束/索引），并把写入事实以 bond_update_log（或等价）方式串联到审计链，确保可回放与可静态扫描验证。
-- 输入：DevSpec 8.2（Bond SSOT）、DevSpec 8.8（单写者静态扫描断言）；PRD FR-BOND-001~003。
-- 输出：
-  - Bond 写入唯一入口与字段口径（event_id/evidence_refs 最小集）；
-  - Neo4j 约束/索引的声明性资产（migrations 或等价目录）；
-  - bond_update_log（或等价日志）与 SQLite Ledger 串联键口径；
-  - fixtures：包含“非单写者尝试写入”的反例样本。
-- 验收标准：
-  - T-50~T-54 通过（Bond SSOT 写入边界、事件化、可回放口径）；
-  - T-SSOT-01 覆盖到“非 bond_dynamics 写入 Neo4j 必被阻断/被扫描命中”。
-- 涉及文件路径：host_brain/bond/neo4j_client.py；host_brain/bond/bond_dynamics.py；host_brain/bond/migrations/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-BOND-001~003；T-50~T-54；T-SSOT-01。
-
-### TASK-0036 Host Bond Summary：派生摘要（不含敏感数值）+ context_pack 注入
-- 任务描述：补齐 Bond Summary 的派生逻辑与注入口径，确保 summary 仅派生、不写回 SSOT；且不得包含敏感数值（例如 trust 原值），只允许 stage/trend/capability_hint 等桶化信息。
-- 输入：DevSpec 8.2（summarizer 不得写回）、DevSpec 7（context_pack 分槽隔离）；PRD FR-BOND-003。
-- 输出：
-  - bond_summary 最小字段集与注入分槽（进入 context_pack.bond_summary）；
-  - 禁止敏感数值的断言口径与 fixtures（含反例）；
-  - 回放引用口径：summary 可指回 event_id/evidence_refs（只做引用，不宣告执行事实）。
-- 验收标准：
-  - T-74~T-75 通过（summary 不含敏感数值、仅派生、分槽隔离）；
-  - T-CP-01 不回归（Bond Summary 不进入错误槽位）。
-- 涉及文件路径：host_brain/bond/summarizer.py；host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-BOND-003；T-74~T-75；T-CP-01。
-
-### TASK-0037 配置分层收口：Host/Edge config 从占位改为可复现配置入口
-- 任务描述：补齐 Host 与 Edge 的配置加载契约（env/local/default 分层、冷启动默认值、敏感项占位），替换当前 placeholder，实现可复现配置入口。
-- 输入：DevSpec 1.2.1/13（环境与配置分层）；PRD FR-CORE-004、FR-OBS-001。
-- 输出：
-  - Host 配置对象（`Natsume_ENV`、服务开关、降级开关、超时/重试口径）；
-  - Edge 配置对象（RPC 端点、能力矩阵、资源闸门默认值）；
-  - 配置验证失败的稳定 reason_code/stage 映射；
-  - fixtures：无 key / 缺配置 / 非法配置样例。
-- 验收标准：
-  - 冷启动场景输出结构稳定且可解析；
-  - 同类配置缺失在同版本下 reason_code/stage 稳定；
-  - contract 断言可覆盖 Host/Edge 关键配置项与默认值。
-- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Svc-01；T-67~T-71；（新增）T-Config-01。
-
-### TASK-0038 LLM Gateway 收口：统一出站入口 + AIRLOCK 绑定 + 不可用降级
-- 任务描述：补齐 `integrations/llm_gateway.py` 的统一调用契约，强制经过 AIRLOCK 出站净化与入站隔离口径，并在云端不可用时稳定降级。
-- 输入：DevSpec 2.3/8.7/9/13；PRD FR-AIRLOCK-001~002、FR-CORE-002~004、FR-AUDIT-003。
-- 输出：
-  - gateway 请求/响应标准结构（request_id/model_profile_id/draft_only/latency）；
-  - 与 airlock_log/error_log 串联的审计记录点；
-  - 不可用/超时/格式漂移的 reason_code/stage 映射；
-  - fixtures：provider down、timeout、格式漂移、入站隔离样例。
-- 验收标准：
-  - 出站未净化必拒绝并记录 AIRLOCK_BLOCKED_EGRESS；
-  - 入站不可信内容不得直通执行；
-  - 云端不可用时仍输出单 JSON 且 quality.stage/reason_code 可统计。
-- 涉及文件路径：host_brain/integrations/llm_gateway.py；host_brain/airlock/；host_brain/core/qa.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AIRLOCK-001~002；FR-CORE-002~004；T-39~T-40；T-67~T-71；T-LLM-01。
-
-### TASK-0039 Metabolism 收口：Hard State 演化与 Governor 快照引用
-- 任务描述：补齐 `core/metabolism.py` 的硬状态演化契约（energy/mood/sys_mode/safety），并保证 Governor 输出可引用稳定 snapshot。
-- 输入：DevSpec 0/4/6/14.2；PRD FR-GOV-001、FR-CORE-001。
-- 输出：
-  - 硬状态快照结构与更新规则；
-  - Governor 决策中的 snapshot_refs 对齐口径；
-  - 异常输入的拒绝/降级 reason_code；
-  - fixtures：边界状态、非法状态迁移、快照缺失样例。
-- 验收标准：
-  - rule_trace 能定位命中门禁与快照摘要；
-  - snapshot_refs 与状态演化一致且可回放；
-  - 同输入同版本下决策摘要稳定。
-- 涉及文件路径：host_brain/core/metabolism.py；host_brain/governor/rules.py；host_brain/governor/decision.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-GOV-001；FR-CORE-001；T-Gov-01；T-14~T-17；（新增）T-Meta-01。
-
-### TASK-0040 Audit Retention 收口：保留/归档/GC 策略与回放窗口保护
-- 任务描述：补齐 `audit/retention.py` 的保留与 GC 契约，确保历史裁剪不破坏回放链路与 undo 窗口。
-- 输入：DevSpec 8.1/8.6/13；PRD FR-AUDIT-001~003、FR-LSP-002。
-- 输出：
-  - retention 策略配置与执行结果结构；
-  - 被清理/被阻断对象的审计记录口径；
-  - 与 manifest/undo 窗口联动的保护规则；
-  - fixtures：过期日志、undo 窗口内对象、阻断样例。
-- 验收标准：
-  - 回放链路关键键（request_id/intent_id/evidence_ref）不被破坏；
-  - undo 窗口内对象不会被 GC 删除；
-  - 执行与阻断均有可统计审计记录。
-- 涉及文件路径：host_brain/audit/retention.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001~003；FR-LSP-002；T-Audit-01；T-Vault-02；（新增）T-Audit-RET-01。
-
-### TASK-0041 主链收口回归：Intent→Governor→Skill→Audit 全链一致性与拒绝码稳定
-- 任务描述：围绕仍处于 TASK_READY 的核心链路需求，补齐 e2e 回归与 trace 对齐，完成单向链事实闭环与拒绝码稳定性收口。
-- 输入：DevSpec 3/4/5/6/8.1/9/14；PRD FR-CORE-001~004、FR-INTENT-001~003、FR-GOV-001~003、FR-TOKEN-001~003、FR-AUDIT-001。
-- 输出：
-  - e2e 场景：正常执行/拒绝/重放/过期/缺票据/降级；
-  - 回放断言：intent_log→governor_log→skill_exec_log 串联完整；
-  - reason_code 稳定性断言（同类输入同版本一致）；
-  - trace 更新材料（未完成项→DONE 的证据链接）。
-- 验收标准：
-  - T-14~T-22、T-34~T-38、T-Audit-01、T-67~T-71 回归通过；
-  - 同类拒绝码稳定可统计；
-  - requirements_trace 中 R-01/R-02/R-03/R-04/R-08/R-11/R-12 至少达到 TEST_READY（目标 DONE）。
-- 涉及文件路径：tests/e2e/；tests/contract/；tests/fixtures/；host_brain/governor/；host_brain/skills/；host_brain/audit/；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：FR-CORE-001~004；FR-INTENT-001~003；FR-GOV-001~003；FR-TOKEN-001~003；FR-AUDIT-001；T-14~T-22；T-34~T-38；T-Audit-01；T-67~T-71。
+## M10-A Canon 娌荤悊 API锛圱ASK-0117~0120锛?
+> 瀵瑰簲 DevSpec 搂20锛汸RD M10-A锛圥0锛夛細Canon 鎻愭瀹℃牳 REST API銆?> 灏?M9 宸茶惤鍦扮殑 `submit_proposal()` / `approve_proposal_with_content()` 鏆撮湶涓哄彲鎿嶄綔鐨?REST 绔偣銆?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-03锛?041 passed锛孋anon 娌荤悊 API 鍏ㄩ噺瀹炵幇锛夈€?
+### TASK-0117 WorldCanonStore.reject_proposal() 鏂规硶琛ュ厖锛圡10-A 鍓嶇疆锛?- 浠诲姟鎻忚堪锛氬湪 `canon_world_store.py` 涓ˉ鍏?`reject_proposal()` 鏂规硶锛坰tatus 鏀逛负 rejected锛屼笉淇敼 SSOT 鏂囦欢锛夛紝骞跺湪 `errors.py` 涓柊澧?M10-A 閿欒鐮侊紙WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID锛夈€?- 杈撳叆锛欴evSpec 搂20.5锛沨ost_brain/memory/canon_world_store.py锛堢幇鏈夛紝鍚?submit_proposal/approve_proposal_with_content锛夛紱host_brain/core/errors.py锛堢幇鏈夛級銆?- 杈撳嚭锛?  - `host_brain/memory/canon_world_store.py` 鎵╁睍锛歚reject_proposal()` 鏂规硶锛坰tatus=rejected锛孭ermissionError 鑻ラ潪 pending锛夛紱
+  - `host_brain/core/errors.py` 鎵╁睍锛歐CANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID 鍥涗釜閿欒鐮侊紱
+  - `tests/contract/test_canon_proposal_reject_contract.py`锛堟柊澧烇級锛歍-Canon-API-06 楠屾敹娴嬭瘯锛坮eject 鎴愬姛 + 闈?pending 鎷掔粷锛夈€?- 楠屾敹鏍囧噯锛?  - reject_proposal() 瀵?pending 鎻愭鎴愬姛锛宻tatus=rejected锛孲SOT 鏂囦欢涓嶅彉锛?  - reject_proposal() 瀵归潪 pending 鎻愭鎶涘嚭 PermissionError锛圵CANON_PROPOSAL_STATUS_INVALID锛夛紱
+  - reject_proposal() 瀵逛笉瀛樺湪鐨?proposal_id 鎶涘嚭 KeyError锛圵CANON_PROPOSAL_NOT_FOUND锛夛紱
+  - T-Canon-API-06 鍏ㄩ儴閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/canon_world_store.py锛沨ost_brain/core/errors.py锛泃ests/contract/test_canon_proposal_reject_contract.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-002锛汿-Canon-API-06銆?
+### TASK-0118 canon_routes.py锛歊EST 璺敱瀹炵幇锛圙ET/POST /canon/proposals + GET /canon/documents锛?- 浠诲姟鎻忚堪锛氭柊寤?`host_brain/app/canon_routes.py`锛屽疄鐜?DevSpec 搂20.2.1 鐨?7 涓鐐癸紙鍒楀嚭鎻愭銆佹彁浜ゆ彁妗堛€佹煡璇㈡彁妗堛€佸鏍搁€氳繃銆佹嫆缁濇彁妗堛€佸垪鍑烘枃妗ｃ€佹煡璇㈡枃妗ｏ級锛屽苟鍦?`fastapi_app.py` 涓敞鍐岃矾鐢便€?- 杈撳叆锛欴evSpec 搂20.2~20.4锛沨ost_brain/app/fastapi_app.py锛堢幇鏈夎矾鐢辨敞鍐屾柟寮忥級锛沨ost_brain/memory/canon_world_store.py锛圱ASK-0117 鎵╁睍鍚庯級锛沨ost_brain/audit/sqlite_ledger.py锛堢幇鏈?get_proposal/list_proposals 绛夋柟娉曪級銆?- 杈撳嚭锛?  - `host_brain/app/canon_routes.py`锛堟柊澧烇級锛? 涓鐐瑰疄鐜帮紝鍚?Pydantic 璇锋眰/鍝嶅簲妯″瀷锛圕anonProposalSubmitRequest / CanonProposalApproveRequest / CanonProposalRejectRequest / CanonProposalResponse / CanonDocumentResponse / CanonProposalListResponse锛夛紱
+  - `host_brain/app/fastapi_app.py` 鎵╁睍锛歚app.include_router(canon_router)` 娉ㄥ唽锛沗get_canon_store()` 渚濊禆娉ㄥ叆鍑芥暟锛?  - 姣忎釜鍐欐搷浣滅敓鎴?`request_id` 骞跺啓鍏?`proposer_node_id`锛堟牸寮忥細`api.canon_proposals::{request_id}`锛夈€?- 楠屾敹鏍囧噯锛?  - GET /canon/proposals 杩斿洖鍒嗛〉鍒楄〃锛宻tatus 杩囨护姝ｇ‘锛圱-Canon-API-07锛夛紱
+  - POST /canon/proposals 鎻愪氦鎴愬姛锛宻tatus=pending锛宲roposal_id 鍙煡璇紙T-Canon-API-01锛夛紱
+  - POST /canon/proposals 閲嶅 proposal_id 杩斿洖 409 + WCANON_PROPOSAL_DUPLICATE锛圱-Canon-API-02锛夛紱
+  - POST /canon/proposals body 鍚畬鎴愭€ц〃杩拌繑鍥?400 + WCANON_PROPOSAL_INVALID锛圱-Canon-API-03锛夛紱
+  - GET /canon/documents 杩斿洖褰撳墠 SSOT 蹇収锛圱-Canon-API-08锛夛紱
+  - 鎵€鏈夌鐐瑰搷搴旂粨鏋勭ǔ瀹氾紙鍚?request_id + timestamp锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/canon_routes.py锛堟柊澧烇級锛沨ost_brain/app/fastapi_app.py锛泃ests/contract/test_canon_api_contract.py锛堟柊澧烇級锛泃ests/fixtures/canon/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汧R-WCANON-002锛汿-Canon-API-01~03锛汿-Canon-API-07~08銆?
+### TASK-0119 canon_routes.py锛歛pprove/reject 绔偣 + 瀹¤涓茶仈锛圡10-A P0 鏍稿績锛?- 浠诲姟鎻忚堪锛氬疄鐜?`POST /canon/proposals/{proposal_id}/approve` 鍜?`POST /canon/proposals/{proposal_id}/reject` 绔偣锛岀‘淇濆璁′覆鑱旓紙approve 鍐?canon_change_log锛宺eject 鍐?system_event_log锛夛紝骞惰ˉ鍏呭搴旂殑 contract 娴嬭瘯銆?- 杈撳叆锛欴evSpec 搂20.4锛沨ost_brain/app/canon_routes.py锛圱ASK-0118 瀹炵幇鍚庯級锛沨ost_brain/memory/canon_world_store.py锛堝惈 approve_proposal_with_content / reject_proposal锛夛紱host_brain/audit/sqlite_ledger.py锛堝惈 log_system_event锛夈€?- 杈撳嚭锛?  - `host_brain/app/canon_routes.py` 鎵╁睍锛歛pprove 绔偣锛堣皟鐢?approve_proposal_with_content锛屽啓 canon_change_log锛夛紱reject 绔偣锛堣皟鐢?reject_proposal锛屽啓 system_event_log锛宔vent_type=WCANON_PROPOSAL_REJECTED锛夛紱
+  - `tests/contract/test_canon_api_approve_reject_contract.py`锛堟柊澧烇級锛歍-Canon-API-04锛坅pprove 鎴愬姛 + SSOT 鏇存柊 + change_log 鍙洖鏀撅級+ T-Canon-API-05锛堥潪 pending 鎻愭 approve 杩斿洖 422锛夈€?- 楠屾敹鏍囧噯锛?  - approve 鎴愬姛锛歋SOT 鏂囦欢鐗堟湰 +1锛宑anon_change_log 鍚彉鏇村墠鍚?hash锛宺esponse.status=APPLIED锛圱-Canon-API-04锛夛紱
+  - approve 闈?pending锛氳繑鍥?422 + WCANON_PROPOSAL_STATUS_INVALID锛圱-Canon-API-05锛夛紱
+  - reject 鎴愬姛锛歴tatus=rejected锛孲SOT 鏂囦欢涓嶅彉锛宻ystem_event_log 鍚?WCANON_PROPOSAL_REJECTED锛圱-Canon-API-06 鎵╁睍锛夛紱
+  - 鎵€鏈夊啓鎿嶄綔 proposer_node_id 鍚?request_id锛堝璁′覆鑱斿彲楠岃瘉锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/canon_routes.py锛沨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/test_canon_api_approve_reject_contract.py锛堟柊澧烇級锛泃ests/fixtures/canon/銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-002锛汿-Canon-API-04锛汿-Canon-API-05锛汿-Canon-API-06銆?
+### TASK-0120 M10-A 鍙戝竷娓呭崟鐢熸垚 + requirements_trace.md 琛ュ啓 R-90~R-91
+- 浠诲姟鎻忚堪锛氳ˉ榻?M10-A 鐨勪袱椤规敹灏惧伐浣滐細鈶?requirements_trace.md 琛ュ啓 R-90~R-91锛圡10-A 鐨?2 鏉￠渶姹傝拷韪潯鐩級锛涒憽 鍦?release_manifest.py 涓柊澧?generate_m10a_manifest()锛岀敓鎴?release/manifests/m10a_release.json銆?- 杈撳叆锛欴evSpec 搂20锛況equirements_trace.md锛堢幇鏈夛紝鏈熬涓?R-89锛夛紱host_brain/release/release_manifest.py锛堢幇鏈?generate_m9_manifest锛夈€?- 杈撳嚭锛?  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛氭柊澧?M10-A 绔犺妭鏍囬 + R-90锛團R-WCANON-002 Canon 娌荤悊 API锛? R-91锛圢FR-MAINT-001 M10-A 鍙戝竷娓呭崟锛夛紱
+  - `host_brain/release/release_manifest.py` 鎵╁睍锛歚generate_m10a_manifest()` 鏂规硶锛?  - `release/manifests/m10a_release.json`锛堟柊澧烇級锛歁10-A 鍙戝竷娓呭崟銆?- 楠屾敹鏍囧噯锛?  - requirements_trace.md 鍖呭惈 R-90~R-91锛岃鐩栫姸鎬佸潎涓?DONE锛?  - m10a_release.json 鍖呭惈锛歮ilestone=M10-A / git_commit_hash / migration_hashes / test_passed_count / generated_at锛?  - canon_routes.py 绔偣鍦?/docs 鍙锛團astAPI 鑷姩鏂囨。锛夈€?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/requirements_trace.md锛沨ost_brain/release/release_manifest.py锛況elease/manifests/m10a_release.json锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汧R-WCANON-002锛汵FR-MAINT-001锛汿-Canon-API-01~08銆?
 
 ---
 
-## 4. 增量任务清单（交付与运维收口）
-
-### TASK-0042 启动编排收口：Host/Edge 服务启动清单 + 依赖探针
-- 任务描述：把 Host/Edge 的启动入口收口为可观测编排，启动时输出统一服务状态快照并标注不可用原因。
-- 输入：DevSpec 2/10/13；PRD FR-CORE-004、FR-OBS-001。
-- 输出：
-  - 统一启动清单结构（service_id/owner/required/status/reason_code/stage）；
-  - 启动阶段健康快照输出（可序列化 JSON）；
-  - 服务不可用时的稳定降级映射与审计写入点；
-  - fixtures：启动时依赖缺失/端口冲突/配置缺失样例。
-- 验收标准：
-  - 启动阶段健康快照结构稳定且可解析；
-  - 同类启动失败在同版本下 reason_code/stage 稳定；
-  - 回归覆盖 `T-Svc-01` 与（新增）`T-Boot-01`。
-- 涉及文件路径：host_brain/app/main.py；host_brain/core/services.py；edge_client/rpc/health.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Svc-01；（新增）T-Boot-01。
-
-### TASK-0043 迁移执行器收口：SQLite/Bond Schema Version Guard + 幂等迁移
-- 任务描述：落地统一迁移执行器与 schema 版本守卫，确保数据库升级/回退有确定性审计口径。
-- 输入：DevSpec 8.1/8.2/14.2；PRD FR-AUDIT-001、FR-BOND-001、NFR-MAINT-001。
-- 输出：
-  - SQLite 与 Bond 迁移执行入口（幂等执行、版本检查）；
-  - 迁移执行审计结构（migration_id/status/reason_code/latency_ms）；
-  - schema 漂移检测失败的稳定拒绝码映射；
-  - fixtures：重复迁移、缺迁移、版本倒退样例。
-- 验收标准：
-  - 重复执行迁移不产生重复副作用；
-  - schema 漂移可被稳定检测并可审计；
-  - 回归覆盖 `T-Audit-01`、`T-SSOT-01` 与（新增）`T-Migrate-01`。
-- 涉及文件路径：host_brain/audit/migrations/；host_brain/bond/migrations/；host_brain/audit/sqlite_ledger.py；tools/static_scan/；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001；FR-BOND-001；NFR-MAINT-001；T-Audit-01；T-SSOT-01；（新增）T-Migrate-01。
-
-### TASK-0044 回放工具链收口：request_id 单键回放报告
-- 任务描述：补齐回放工具链，支持基于 request_id 生成单次执行链路报告并输出缺链原因。
-- 输入：DevSpec 8.1/14.6；PRD FR-AUDIT-001~003。
-- 输出：
-  - 回放报告结构（intent/governor/skill_exec/error/qa_violation 聚合）；
-  - 缺链检测与缺失原因枚举；
-  - 回放输出的稳定摘要字段（status/reason_code_chain/evidence_refs）；
-  - fixtures：完整链、缺 skill_exec、缺 token_ref 样例。
-- 验收标准：
-  - 给定 request_id 可生成稳定结构报告；
-  - 缺链时必须可解释并带稳定 reason_code；
-  - 回归覆盖 `T-Audit-03` 与（新增）`T-Replay-01`。
-- 涉及文件路径：tools/replay/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001~003；T-Audit-03；（新增）T-Replay-01。
-
-### TASK-0045 交付门禁收口：contract/e2e/static-scan/doc-audience 四合一 CI
-- 任务描述：建立统一交付门禁，将契约测试、e2e、静态扫描与文档受众门禁纳入同一回归入口。
-- 输入：DevSpec 11/14.6；AGENTS 2.4；PRD NFR-MAINT-001。
-- 输出：
-  - CI 门禁分组与失败分类口径（contract/e2e/static_scan/doc_gate）；
-  - 文档受众门禁与标题门禁的自动校验；
-  - 失败报告结构（job_id/check_id/reason_code/failed_artifact）；
-  - fixtures：文档门禁失败、静态扫描失败样例。
-- 验收标准：
-  - 四类门禁均可独立失败并给出可解释报告；
-  - 同类门禁失败在同版本下输出结构稳定；
-  - 回归覆盖（新增）`T-CI-01`。
-- 涉及文件路径：.github/workflows/；tools/doc_lint/；tools/static_scan/；docs/40_agents/AGENTS.md；tests/contract/；tests/fixtures/。
-- 关联需求/测试：NFR-MAINT-001；（新增）T-CI-01。
-
-### TASK-0046 环境快照冻结：dev/test/prod 配置导出与审计追踪
-- 任务描述：为 dev/test/prod 生成脱敏配置快照并写入审计引用，保证环境差异可追溯且不泄露 secrets。
-- 输入：DevSpec 13.1~13.4；PRD FR-CORE-004、FR-OBS-001。
-- 输出：
-  - 环境快照结构（env/version/digest/override_sources/redacted_keys）；
-  - 配置快照写入与读取接口；
-  - 快照比对输出（added/removed/changed keys）；
-  - fixtures：跨环境差异与敏感键脱敏样例。
-- 验收标准：
-  - 任一环境可生成脱敏快照且 digest 稳定；
-  - 快照比对结果可审计并可回放；
-  - 回归覆盖 `T-Config-01` 与（新增）`T-Config-02`。
-- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；T-Config-01；（新增）T-Config-02。
-
-### TASK-0047 发布清单收口：M0~M3 可部署资产与回滚映射
-- 任务描述：沉淀 M0~M3 的发布资产清单与回滚映射，确保每次发布都有可核对的最小交付面。
-- 输入：DevSpec 10/14.1；PRD FR-OBS-001、NFR-MAINT-001。
-- 输出：
-  - 发布清单结构（milestone/assets/checksums/required_services）；
-  - 回滚映射结构（release_id/rollback_target/impact_scope）；
-  - 与 Flow 指针和配置快照的交叉校验规则；
-  - fixtures：缺资产、checksum 漂移、回滚目标不存在样例。
-- 验收标准：
-  - M0~M3 每个里程碑均可生成一致的发布清单；
-  - 回滚映射可定位受影响范围并可审计；
-  - 回归覆盖（新增）`T-Release-01` 与 `T-Flow-02`。
-- 涉及文件路径：docs/50_project/；docs/60_trace/flows/index.md；flows/active.pointer；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-OBS-001；NFR-MAINT-001；T-Flow-02；（新增）T-Release-01。
-
-### TASK-0048 生产演练收口：冷启动/依赖不可用/回滚三场景演练包
-- 任务描述：建立三类故障演练包（冷启动、依赖不可用、回滚），验证降级输出与审计链在故障态仍稳定可回放。
-- 输入：DevSpec 1.2.1/10/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-OBS-001。
-- 输出：
-  - 演练场景定义与输入样例；
-  - 演练报告结构（scenario_id/status/reason_code_chain/replay_ref）；
-  - 演练失败分类与处置口径（不含操作命令）；
-  - fixtures：NoKey、provider down、回滚冲突样例。
-- 验收标准：
-  - 三类演练均输出可解析单 JSON 结果；
-  - 故障态下 reason_code/stage 稳定且可统计；
-  - 回归覆盖 `T-67~T-71` 与（新增）`T-Drill-01`。
-- 涉及文件路径：tests/e2e/；tests/fixtures/；tools/replay/；host_brain/audit/；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-OBS-001；T-67~T-71；（新增）T-Drill-01。
-
+## M10-A 鏂瑰悜 A 鈥?P1 椋庨櫓淇锛?026-03-03锛?
+### TASK-0121-P1 P1 椋庨櫓淇锛歱roposal_id UNIQUE 绾︽潫 + 寰幆瀵煎叆娑堥櫎 + rollback 鏈哄埗
+- 鐘舵€侊細DONE锛?026-03-03锛?046 passed锛孭1 涓夐」淇鍏ㄩ噺钀藉湴锛?- 浠诲姟鎻忚堪锛氫慨澶?risk_registry.md 涓?M10-A 鏂板鐨勪笁椤?P1 椋庨櫓锛歊118-3锛坧roposal_id 鏃?UNIQUE 绾︽潫锛夈€丷118-2锛坈anon_routes 寰幆瀵煎叆锛夈€丷114-1锛圗volution approve 鏃犲洖婊氭満鍒讹級銆?- 杈撳叆锛歳isk_registry.md R118-3/R118-2/R114-1锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/app/canon_routes.py锛沨ost_brain/app/fastapi_app.py锛沨ost_brain/memory/canon_world_store.py銆?- 杈撳嚭锛?  - `host_brain/audit/migrations/0017_canon_proposal_log_unique.sql`锛堟柊澧烇級锛歎NIQUE INDEX 鏂囨。锛?  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛歚_ensure_schema` 杩藉姞 `idx_canon_proposal_id_unique` + `idx_canon_change_id_unique`锛沗log_canon_proposal` 鏀逛负 `INSERT OR IGNORE`锛堝箓绛夊啓鍏ワ級锛?  - `host_brain/app/canon_routes.py` 閲嶆瀯锛歚_get_ledger_from_app` 鏀逛负澶栭儴娉ㄥ叆 provider锛坄set_ledger_provider`锛夛紝娑堥櫎寤惰繜瀵煎叆寰幆寮曠敤锛涙柊澧?`POST /canon/proposals/{id}/rollback` 绔偣 + `CanonProposalRollbackRequest/Response` 妯″瀷锛?  - `host_brain/app/fastapi_app.py` 鎵╁睍锛氬鍏?`set_ledger_provider`锛屽湪 `get_ledger` 瀹氫箟鍚庤皟鐢?`_set_canon_ledger_provider(get_ledger)`锛?  - `host_brain/memory/canon_world_store.py` 鎵╁睍锛氭柊澧?`rollback_proposal()` 鏂规硶锛圓PPLIED鈫扲OLLED_BACK锛屽啓 canon_change_log锛宐ase_version=0 鏃跺垹闄?SSOT 鏂囦欢锛夛紱
+  - `tests/contract/test_canon_p1_fixes.py`锛堟柊澧烇級锛歍-Canon-P1-01~05锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - 鐩稿悓 proposal_id 閲嶅鍐欏叆鍚庢暟鎹簱鍙湁涓€鏉¤褰曪紙T-Canon-P1-01锛夛紱
+  - 鐩存帴 import canon_routes 涓嶈Е鍙?ImportError锛圱-Canon-P1-02锛夛紱
+  - set_ledger_provider 娉ㄥ叆鍚?_get_ledger_from_app 杩斿洖娉ㄥ叆瀹炰緥锛圱-Canon-P1-03锛夛紱
+  - APPLIED 鎻愭鍙洖婊氾紝SSOT 鏂囦欢鍒犻櫎/闄嶇増锛宻tatus=ROLLED_BACK锛圱-Canon-P1-04锛夛紱
+  - pending/rejected 鎻愭鍥炴粴鎶?PermissionError锛圱-Canon-P1-05锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 1046 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/migrations/0017_canon_proposal_log_unique.sql锛堟柊澧烇級锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/app/canon_routes.py锛沨ost_brain/app/fastapi_app.py锛沨ost_brain/memory/canon_world_store.py锛泃ests/contract/test_canon_p1_fixes.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛歳isk_registry.md R118-3/R118-2/R114-1锛汿-Canon-P1-01~05銆?
 ---
 
-## 5. 增量任务清单（外部环境与服务可用性收口）
-
-### TASK-0049 云节点编排收口：九节点角色/服务矩阵与探针映射
-- 任务描述：沉淀 9 个云节点的统一编排矩阵（角色、承载服务、健康探针、降级策略），确保多节点运行面可审计。
-- 输入：DevSpec 10/13；PRD FR-CORE-004、FR-OBS-001。
-- 输出：
-  - 节点清单结构（node_id/region/role/services/health_endpoint/key_profile_id）；
-  - 节点-服务映射与最小冗余策略（primary/secondary）；
-  - 节点健康探针输出结构（node_status/reason_code/stage/detail）；
-  - fixtures：节点缺服务、角色冲突、探针超时样例。
-- 验收标准：
-  - 9 节点清单结构稳定且可解析；
-  - 同类节点故障在同版本下 reason_code/stage 稳定；
-  - 回归覆盖（新增）`T-Infra-01`。
-- 涉及文件路径：configs/deploy/；host_brain/core/services.py；tests/contract/；tests/fixtures/services/；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；（新增）T-Infra-01。
-
-### TASK-0050 密钥装配收口：多节点 LLM/API Key Profile 与引用化加载
-- 任务描述：建立跨节点密钥配置 Profile 与引用化加载机制，保证“有 key 可用、无 key 降级、全程不落盘明文”。
-- 输入：DevSpec 13.1~13.4；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
-- 输出：
-  - 密钥配置结构（provider/node_id/scope/secret_ref/rotation_epoch/status）；
-  - 运行时密钥解析与脱敏快照联动（仅输出 secret_ref 与 redacted 字段）；
-  - 缺失 key 的稳定降级映射（cold_start/dependency）；
-  - fixtures：missing key、scope 不匹配、过期 profile 样例。
-- 验收标准：
-  - 代码与配置仓库不出现明文 secret；
-  - 无 key 场景保持 draft_only 降级并有稳定 reason_code；
-  - 回归覆盖（新增）`T-Key-01` 与 `T-Config-02`。
-- 涉及文件路径：host_brain/app/config.py；edge_client/config.py；configs/secrets/；tests/contract/；tests/fixtures/config/。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；（新增）T-Key-01；T-Config-02。
-
-### TASK-0051 编排框架收口：LangChain/LangGraph 运行图装配与降级路径
-- 任务描述：接入 LangChain/LangGraph 运行编排，形成可配置图执行入口并保持治理链（Governor/Token/Audit）不被旁路。
-- 输入：DevSpec 6/8.9/10；PRD FR-CORE-001、FR-CORE-004、FR-AUDIT-001。
-- 输出：
-  - 图编排配置结构（graph_id/version/node_bindings/edges/fallback_edges）；
-  - 编排执行结果结构（graph_status/reason_code/stage/replay_ref）；
-  - 编排失败分类（节点缺失/边冲突/超时/依赖不可用）；
-  - fixtures：missing node、invalid edge、graph timeout 样例。
-- 验收标准：
-  - 编排结果保持单 JSON 且可回放；
-  - 编排失败不绕过治理链并有稳定 reason_code；
-  - 回归覆盖（新增）`T-Orch-01` 与 `T-Audit-01`。
-- 涉及文件路径：host_brain/integrations/；host_brain/tools/；host_brain/audit/；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-001；FR-CORE-004；FR-AUDIT-001；（新增）T-Orch-01；T-Audit-01。
-
-### TASK-0052 图数据库收口：Neo4j 外部部署配置与启动探针
-- 任务描述：补齐 Neo4j 外部化连接配置、连通探针与失败映射，确保 Bond SSOT 在生产依赖下可观测可降级。
-- 输入：DevSpec 8.2/10/13；PRD FR-BOND-001~003、FR-OBS-001。
-- 输出：
-  - Neo4j 配置结构（uri/database/auth_ref/pool/tls/enabled）；
-  - 启动探针输出与失败分类（auth_failed/schema_drift/leader_unavailable）；
-  - 迁移入口与探针结果的审计串联字段；
-  - fixtures：鉴权失败、schema 漂移、节点不可达样例。
-- 验收标准：
-  - Neo4j 配置可解析且缺项可稳定拒绝；
-  - 依赖不可用场景 reason_code/stage 稳定可统计；
-  - 回归覆盖 `T-50~T-54`、`T-Migrate-01` 与（新增）`T-Neo4j-01`。
-- 涉及文件路径：host_brain/bond/neo4j_client.py；host_brain/bond/migration_runner.py；host_brain/core/services.py；tests/contract/；tests/fixtures/bond/；tests/fixtures/services/。
-- 关联需求/测试：FR-BOND-001~003；FR-OBS-001；T-50~T-54；T-Migrate-01；（新增）T-Neo4j-01。
-
-### TASK-0053 向量库收口：ChromaDB 外部部署配置与集合治理
-- 任务描述：补齐 ChromaDB 外部化配置与集合治理策略，确保 episodic/retrieval 在生产形态下可探测、可降级、可审计。
-- 输入：DevSpec 8.3.1/10/13；PRD FR-MEM-003~005、FR-OBS-001。
-- 输出：
-  - Chroma 配置结构（endpoint/tenant/database/collection_profiles/vector_dim）；
-  - 集合初始化与维度校验规则；
-  - 依赖不可用时的降级输出与 reason_code 映射；
-  - fixtures：collection 缺失、vector dim 不匹配、endpoint down 样例。
-- 验收标准：
-  - Chroma 配置与集合治理输出结构稳定；
-  - 故障态可降级且审计链可回放；
-  - 回归覆盖 `T-Ret-03` 与（新增）`T-Chroma-01`。
-- 涉及文件路径：host_brain/memory/chroma_client.py；host_brain/retrieval/evidence_pack.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；tests/fixtures/services/。
-- 关联需求/测试：FR-MEM-003~005；FR-OBS-001；T-Ret-03；（新增）T-Chroma-01。
-
-### TASK-0054 嵌入模型收口：Embedding 服务路由与版本化配置
-- 任务描述：建立嵌入模型的多提供方路由与版本化配置，保证不同节点下的 embedding 行为、降级与审计口径一致。
-- 输入：DevSpec 8.3.1/13；PRD FR-MEM-003、FR-OBS-001。
-- 输出：
-  - 嵌入模型配置结构（provider/model_id/dim/timeout_ms/node_selector）；
-  - 运行时路由与失败映射（unavailable/timeout/input_invalid）；
-  - 维度漂移检测口径与审计字段；
-  - fixtures：model unavailable、timeout、dim drift 样例。
-- 验收标准：
-  - Embedding 输出契约在多提供方下结构稳定；
-  - 同类失败映射 `RETR_EMBED_*` 稳定；
-  - 回归覆盖 `T-Ret-01` 与（新增）`T-Embed-01`。
-- 涉及文件路径：host_brain/retrieval/embedding.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；configs/models/。
-- 关联需求/测试：FR-MEM-003；FR-OBS-001；T-Ret-01；（新增）T-Embed-01。
-
-### TASK-0055 重排模型收口：Reranker 服务路由与分数稳定化
-- 任务描述：建立重排模型的服务路由与分数稳定化策略，保证候选重排在依赖异常下仍可解释并可回放。
-- 输入：DevSpec 8.3.1/13；PRD FR-MEM-004、FR-OBS-001。
-- 输出：
-  - 重排模型配置结构（provider/model_id/top_k/timeout_ms/node_selector）；
-  - 分数归一化与异常回退规则；
-  - 失败分类（model_down/timeout/invalid_score_range）；
-  - fixtures：model down、timeout、bad score 样例。
-- 验收标准：
-  - Reranker 输出契约字段稳定且可审计；
-  - 同类失败映射 `RETR_RERANK_*` 稳定；
-  - 回归覆盖 `T-Ret-02` 与（新增）`T-Rerank-01`。
-- 涉及文件路径：host_brain/retrieval/reranker.py；host_brain/core/services.py；tests/contract/；tests/fixtures/retrieval/；configs/models/。
-- 关联需求/测试：FR-MEM-004；FR-OBS-001；T-Ret-02；（新增）T-Rerank-01。
-
-### TASK-0056 联调验收收口：外部依赖就绪报告与可用性基线
-- 任务描述：形成外部依赖联调验收包，统一输出“节点/密钥/编排框架/Neo4j/Chroma/Embedding/Reranker”就绪基线与故障口径。
-- 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
-- 输出：
-  - 联调就绪报告结构（env/node_count/key_profiles/services/graph_runtime/readiness_status）；
-  - 关键依赖探针矩阵与失败分类汇总；
-  - 演练摘要输出（scenario_id/status/reason_code_chain/replay_ref）；
-  - fixtures：部分就绪、关键依赖不可用样例。
-- 验收标准：
-  - 联调报告为可解析单 JSON 且字段稳定；
-  - 缺依赖时系统保持降级与审计可回放，不出现伪执行宣告；
-  - 回归覆盖 `T-Svc-01`、`T-Boot-01`、`T-Drill-01` 与（新增）`T-EnvReady-01`。
-- 涉及文件路径：host_brain/app/main.py；host_brain/core/services.py；tools/replay/；tests/e2e/；tests/fixtures/services/；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；T-Svc-01；T-Boot-01；T-Drill-01；（新增）T-EnvReady-01。
-
-### TASK-0057 主控闭环收口：LangGraph 读取 model_plane 并统一下发 LLM 参数
-- 任务描述：将 `configs/model_plane/{model_profiles,node_registry}` 作为编排主控配置源，落实“由 LangGraph 选择节点并由 LangChain/Gateway 执行”的单入口闭环，消除模型参数散落在测试/调用方注入的状态。
-- 输入：DevSpec 6/8.9/10/13；PRD FR-CORE-001、FR-CORE-004、FR-AUDIT-001。
-- 输出：
-  - model_plane 解析器与运行时快照结构（profile_id/node_id/provider/model_id/temperature/max_output_tokens/timeout_ms）；
-  - `GraphRuntimeContract` 对 `model_profile_id` 的强约束加载路径（缺 profile、缺 node、参数非法时稳定拒绝）；
-  - LLM 调用审计扩展字段（profile_id/node_id/provider/model_id/param_hash），保证可回放比对；
-  - fixtures：missing profile、missing node、provider mismatch、param drift 样例。
-- 验收标准：
-  - 编排运行不得依赖外部临时注入 `provider_fn/model_nodes` 才可执行；
-  - 模型节点参数由 model_plane 单点决定并在输出/审计中可追溯；
-  - 编排失败保持单 JSON 且 reason_code 稳定，不绕过 Governor/Token/Audit；
-  - 回归覆盖（新增）`T-Orch-02`、`T-Key-02` 与 `T-Audit-04`。
-- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/llm_gateway.py；host_brain/app/config.py；host_brain/audit/sqlite_ledger.py；configs/model_plane/；tests/contract/；tests/e2e/；tests/fixtures/orchestration/。
-- 关联需求/测试：FR-CORE-001；FR-CORE-004；FR-AUDIT-001；T-Orch-01；（新增）T-Orch-02；T-Key-01；（新增）T-Key-02；（新增）T-Audit-04。
-
-### TASK-0058 参数签名收口：model_plane 参数哈希与防漂移校验
-- 任务描述：对 model_plane 下发参数建立稳定 `param_hash` 与运行时校验，避免 provider/model_id/温度/token_cap 在执行链路发生不可审计漂移。
-- 输入：DevSpec 10/13；PRD FR-CORE-004、FR-AUDIT-001。
-- 输出：
-  - 参数签名规则（provider/model_id/temperature/max_output_tokens/timeout_ms 的 canonical 序列化与 hash）；
-  - 编排执行期参数防漂移校验（期望签名 vs 实际签名）；
-  - 审计字段扩展（expected_param_hash/actual_param_hash/drift_detected）；
-  - fixtures：hash mismatch、missing hash、tampered params 样例。
-- 验收标准：
-  - 任意模型调用均可输出稳定 `param_hash` 并可回放；
-  - 发现漂移时稳定拒绝或降级且 reason_code 可统计；
-  - 回归覆盖（新增）`T-Orch-03` 与 `T-Audit-05`。
-- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/llm_gateway.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/orchestration/。
-- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；（新增）T-Orch-03；（新增）T-Audit-05。
-
-### TASK-0059 路由治理收口：profile→node 选择器与环境约束矩阵
-- 任务描述：实现 model_profile 到 node 的确定性选择器，并把 env/node_selector/availability 约束纳入主流程路由，确保同输入同环境得到同路由结果。
-- 输入：DevSpec 6/13；PRD FR-CORE-001、FR-OBS-001。
-- 输出：
-  - profile→node 选择器契约（输入：profile/env/task；输出：selected_node/reason_code）；
-  - 环境约束矩阵（dev/staging/prod 与 node_selector/availability 的解析口径）；
-  - 审计字段（selected_node/candidate_nodes/reject_reason）；
-  - fixtures：no candidate、multi candidate tie-break、env mismatch 样例。
-- 验收标准：
-  - 选择器结果确定性且可解释；
-  - 无候选时稳定降级并保持单 JSON 输出；
-  - 回归覆盖（新增）`T-Orch-04` 与 `T-EnvReady-02`。
-- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/core/services.py；host_brain/app/main.py；tests/contract/；tests/e2e/；tests/fixtures/orchestration/；tests/fixtures/services/。
-- 关联需求/测试：FR-CORE-001；FR-OBS-001；（新增）T-Orch-04；（新增）T-EnvReady-02。
-
-### TASK-0060 票据联动收口：模型调用与 Governor/Token 审批锚点串联
-- 任务描述：将模型调用（尤其可能触发高风险意图草案的节点）与 Governor/Token 审批锚点串联，形成“模型建议→治理决策→执行入口”的可回放闭环。
-- 输入：DevSpec 8.9/10；PRD FR-TOOL-003、FR-AUDIT-001、FR-CORE-001。
-- 输出：
-  - 模型调用到治理链路的串联键（request_id/intent_id/approval_token_ref/evidence_ref）；
-  - 审批前后阶段字段（precheck_stage/governor_stage/execution_stage）；
-  - 拒绝码映射（missing_token/invalid_token/governor_reject）；
-  - fixtures：model suggests write/no token、token expired、governor reject 样例。
-- 验收标准：
-  - 高风险路径不得因模型节点成功而绕过 Governor/Token；
-  - 外部“已执行”叙事必须可指向 evidence_ref；
-  - 回归覆盖（新增）`T-Orch-05` 与 `T-Tool-04`。
-- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/governor/decision.py；host_brain/governor/tokens.py；host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-001；FR-TOOL-003；FR-AUDIT-001；（新增）T-Orch-05；（新增）T-Tool-04；I1/I8/I9。
-
-### TASK-0061 审计归档收口：model_control 入库与 request 级回放透出
-- 任务描述：把编排输出中的 `model_control` 与治理锚点写入审计存储并接入 request 级回放，形成“参数签名—票据—执行状态”的可检索闭环。
-- 输入：DevSpec 10/11；PRD FR-AUDIT-001、FR-CORE-001。
-- 输出：
-  - 审计表字段扩展（request_id/node_id/model_profile_id/provider/model_id/expected_param_hash/actual_param_hash/drift_detected/approval_token_ref/evidence_ref）；
-  - 回放工具输出扩展（按 request_id 聚合 model_control 与治理锚点）；
-  - fixtures：audit row 缺关键字段、回放缺链路、hash 漂移入库样例。
-- 验收标准：
-  - 任意一次模型调用可通过 request_id 回放到参数签名与票据锚点；
-  - 漂移与票据缺失在回放报告中具备稳定 reason_code 与阶段字段；
-  - 回归覆盖（新增）`T-Audit-06`、`T-Replay-02`。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；tools/replay/；host_brain/integrations/graph_runtime.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001；FR-CORE-001；（新增）T-Audit-06；（新增）T-Replay-02。
-
-### TASK-0062 配置治理收口：model_plane 版本签名与发布门禁联动
-- 任务描述：将 model_plane 资产纳入发布门禁，固化“配置版本→参数签名→生效环境”的一致性校验，避免灰度期间配置漂移不可控。
-- 输入：DevSpec 1.5/14.5；PRD FR-FLOW-001、FR-OBS-001、NFR-MAINT-001。
-- 输出：
-  - model_plane 版本清单（profile_version/node_registry_version/asset_digest）；
-  - 发布前一致性校验（active pointer 与 model_plane digest 对齐）；
-  - 回滚映射（版本回退时签名一致性检查）；
-  - fixtures：digest mismatch、stale pointer、rollback digest 缺失样例。
-- 验收标准：
-  - 发布门禁可阻断 model_plane 与 active 配置不一致；
-  - 回滚路径可验证签名一致且可审计；
-  - 回归覆盖（新增）`T-Flow-03`、`T-Release-01`。
-- 涉及文件路径：flows/active.pointer；configs/model_plane/；host_brain/release/；tests/contract/；tests/fixtures/；docs/60_trace/flows/index.md。
-- 关联需求/测试：FR-FLOW-001；FR-OBS-001；NFR-MAINT-001；（新增）T-Flow-03；（新增）T-Release-01。
-
-### TASK-0063 联调验收补齐：编排主控全链路演练与故障注入矩阵
-- 任务描述：补齐“编排主控 + model_plane + Governor/Token + Audit”联调演练矩阵，形成可复现实战故障包与验收报告模板。
-- 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-TOOL-003。
-- 输出：
-  - 演练场景矩阵（profile 缺失、selector 无候选、param drift、approval token missing、provider down）；
-  - 标准化报告结构（scenario_id/stage/status/reason_code_chain/replay_ref/model_profile_id）；
-  - 故障注入 fixtures 与期望断言文档；
-  - 环境就绪报告补充字段（orchestration_control_coverage）。
-- 验收标准：
-  - 五类核心故障场景均可稳定复现并输出单 JSON 报告；
-  - 每个场景可通过回放工具定位到 request_id 与关键审计字段；
-  - 回归覆盖（新增）`T-Drill-02`、`T-EnvReady-03`、`T-Orch-06`。
-- 涉及文件路径：tests/e2e/；tests/fixtures/drill/；host_brain/app/main.py；tools/replay/；host_brain/integrations/graph_runtime.py；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-TOOL-003；（新增）T-Drill-02；（新增）T-EnvReady-03；（新增）T-Orch-06。
-
-### TASK-0064 运行链路可视化补齐（只读观测 API + request 时间线聚合）
-- 任务描述：补齐“无可视化界面难以监控链路细节”的缺口，先落地只读观测接口，输出 request 级链路时间线与来源汇总，作为后续 UI 面板的数据底座；并将 Agent 监测方向切到 LangSmith，同时在系统启动时输出详细数据流日志并支持本地监控控制台窗口（best-effort）。
-- 输入：DevSpec 10/11；现有审计链（intent/governor/skill_exec/channel/avatar/clawd/voice/retrieval/vision/service_health）。
-- 输出：
-  - request 级观测报告契约（request_id/trace_status/trace_stage/trace_reason_code/timeline_total/sources/timeline）；
-  - 时间线聚合规则（按 ts_ms 与 source 稳定排序）；
-  - Agent 监测配置契约（LangSmith provider/status/reason_code/project/endpoint）；
-  - 启动期数据流日志打印（startup/readiness/monitoring profile/console profile）；
-  - 本地监控控制台窗口（spawn best-effort，默认 inline）；
-  - 只读约束：不新增执行入口、不改 Governor/Token/Audit 决策链；
-  - 回归测试（新增）`T-Obs-01`、`T-Obs-02`。
-- 验收标准：
-  - 任意 request_id 可输出可解析单 JSON 时间线报告；
-  - sources 统计与 timeline 条目一致且稳定可回放；
-  - 空 request_id 被稳定拒绝（输入契约错误）；
-  - LangSmith tracing 关闭/缺 key 时输出稳定 status+reason_code；
-  - 监控控制台在不支持 spawn 的平台稳定降级为 inline 模式；
-  - 回归覆盖（新增）`T-Obs-01`、`T-Obs-02`。
-- 涉及文件路径：host_brain/app/main.py；tests/contract/test_observability_timeline_contract.py；tests/contract/test_runtime_monitoring_contract.py；docs/30_devspec/DevTasks.md。
-- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；（新增）T-Obs-01；（新增）T-Obs-02；I1/I8/I9。
-
+## M10-B 鈥?ASR 鐑瘝娉ㄥ叆 World Canon 鍏抽敭璇嶏紙DONE锛?026-03-03锛?
+### TASK-0122 canon_world_store.py锛歟xtract_hotwords() 鏂规硶
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 WorldCanonStore 涓柊澧?`extract_hotwords()` 鏂规硶锛屼粠 SSOT 鏂囨。涓彁鍙栦汉鍚?鍦板悕/涓撴湁鍚嶈瘝浣滀负 ASR 鐑瘝鍒楄〃銆?- 杈撳叆锛欴evSpec 搂20锛圡10-B 鍊欓€夛級锛沨ost_brain/memory/canon_world_store.py锛沨ost_brain/canon/world/*.json锛圫SOT 鏂囦欢锛夈€?- 杈撳嚭锛?  - `host_brain/memory/canon_world_store.py` 鎵╁睍锛歚extract_hotwords(max_words: int = 200) -> list[str]` 鏂规硶锛屼粠鎵€鏈?active 鏂囨。鐨?title/tags 涓彁鍙栫儹璇嶏紝鍘婚噸鎺掑簭锛?  - `tests/unit/test_canon_hotwords.py`锛堟柊澧烇級锛歍-Canon-HW-01~03銆?- 楠屾敹鏍囧噯锛?  - extract_hotwords 杩斿洖 list[str]锛屾棤閲嶅锛屾寜瀛楁瘝搴忔帓搴忥紱
+  - max_words 鍙傛暟鐢熸晥锛堟埅鏂秴鍑洪儴鍒嗭級锛?  - 绌?SSOT 鐩綍杩斿洖绌哄垪琛ㄣ€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/canon_world_store.py锛泃ests/unit/test_canon_hotwords.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汿-Canon-HW-01~03銆?
+### TASK-0123 canon_routes.py锛欸ET /canon/hotwords 绔偣
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 canon_routes.py 涓柊澧?`GET /canon/hotwords` 绔偣锛岃繑鍥炲綋鍓?World Canon 鐑瘝鍒楄〃锛堜緵 Edge ASR 妯″潡鎷夊彇锛夈€?- 杈撳叆锛欴evSpec 搂20锛圡10-B锛夛紱host_brain/app/canon_routes.py锛沇orldCanonStore.extract_hotwords()锛圱ASK-0122 瀹炵幇鍚庯級銆?- 杈撳嚭锛?  - `host_brain/app/canon_routes.py` 鎵╁睍锛歚GET /canon/hotwords` 绔偣锛屽搷搴旂粨鏋?`{hotwords: list[str], total: int, request_id: str, timestamp: int}`锛?  - `tests/contract/test_canon_hotwords_api.py`锛堟柊澧烇級锛歍-Canon-HW-API-01~02銆?- 楠屾敹鏍囧噯锛?  - GET /canon/hotwords 杩斿洖 hotwords 鍒楄〃锛宼otal 涓庡垪琛ㄩ暱搴︿竴鑷达紱
+  - max_words 鏌ヨ鍙傛暟鐢熸晥锛堥粯璁?200锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/canon_routes.py锛泃ests/contract/test_canon_hotwords_api.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汿-Canon-HW-API-01~02銆?
+### TASK-0124 edge_client/senses/asr.py锛氱儹璇嶆敞鍏ユ帴鍙ｆ墿灞?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 Edge ASR 妯″潡涓墿灞曠儹璇嶆敞鍏ユ帴鍙ｏ紝鏀寔浠?Host `GET /canon/hotwords` 鎷夊彇鐑瘝骞舵敞鍏ュ埌 ASR 寮曟搸銆?- 杈撳叆锛欴evSpec 搂20锛圡10-B锛夛紱edge_client/senses/asr.py锛堢幇鏈夛級锛汫ET /canon/hotwords 绔偣锛圱ASK-0123 瀹炵幇鍚庯級銆?- 杈撳嚭锛?  - `edge_client/senses/asr.py` 鎵╁睍锛歚inject_canon_hotwords(host_url: str, max_words: int = 200) -> int` 鏂规硶锛屾媺鍙栫儹璇嶅苟娉ㄥ叆锛岃繑鍥炴敞鍏ヨ瘝鏁帮紱
+  - `tests/unit/test_asr_hotword_injection.py`锛堟柊澧烇級锛歍-ASR-HW-01~03锛坢ock HTTP 璇锋眰锛夈€?- 楠屾敹鏍囧噯锛?  - inject_canon_hotwords 鎴愬姛鏃惰繑鍥炴敞鍏ヨ瘝鏁?> 0锛?  - Host 涓嶅彲杈炬椂闄嶇骇锛堣繑鍥?0锛屼笉鎶涘紓甯革級锛?  - 鐑瘝鍒楄〃涓虹┖鏃惰繑鍥?0銆?- 娑夊強鏂囦欢璺緞锛歟dge_client/senses/asr.py锛泃ests/unit/test_asr_hotword_injection.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛歍-ASR-HW-01~03銆?
+### TASK-0125 M10-B 鍙戝竷娓呭崟 + requirements_trace.md 琛ュ啓 R-92~R-94
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氳ˉ榻?M10-B 鐨勬敹灏惧伐浣滐細鈶?requirements_trace.md 琛ュ啓 R-92~R-94锛涒憽 鐢熸垚 release/manifests/m10b_release.json锛涒憿 release_manifest.py 杩藉姞 generate_m10b_manifest()銆?- 杈撳叆锛欴evSpec 搂20锛圡10-B锛夛紱requirements_trace.md锛堟湯灏句负 R-91锛夛紱host_brain/release/release_manifest.py銆?- 杈撳嚭锛?  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛歊-92锛團R-WCANON-001 extract_hotwords锛? R-93锛圢FR-PERF-001 鐑瘝鎷夊彇寤惰繜 < 200ms锛? R-94锛團R-ASR-001 inject_canon_hotwords锛夛紱
+  - `release/manifests/m10b_release.json`锛堟柊澧烇級锛歁10-B 鍙戝竷娓呭崟锛宼est_passed_count=1054锛?  - `host_brain/release/release_manifest.py` 鎵╁睍锛歚generate_m10b_manifest()` 鏂规硶銆?- 楠屾敹鏍囧噯锛?  - requirements_trace.md 鍖呭惈 R-92~R-94锛岃鐩栫姸鎬佸潎涓?DONE锛?  - m10b_release.json 鍖呭惈锛歮ilestone=M10-B / git_commit_hash / migration_hashes / asr_hash / test_passed_count=1054 / generated_at锛?  - 鍏ㄩ噺娴嬭瘯 1054 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/requirements_trace.md锛況elease/manifests/m10b_release.json锛堟柊澧烇級锛沨ost_brain/release/release_manifest.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-001锛汵FR-PERF-001锛汧R-ASR-001锛汿-Canon-HW-01~03锛汿-Canon-HW-API-01~02锛汿-ASR-HW-01~03銆?
 ---
 
-## 6. 增量任务清单（审阅报告缺口补齐：服务化/可视化/设备集成/工程改善）
-
-> 来源：full_code_review_report_2026-03-02.md 第五节"关键缺口与改进建议"。
-> 按优先级排列：P0（高）→ P1（中）→ P2（低）。
-
-### TASK-0065 HTTP 服务框架落地：FastAPI 路由绑定 + 健康检查 + 链路入口（P0）
-- 任务描述：将现有函数聚合层（`main.py` 中的 `build_service_health_report`、`build_startup_report`、`build_env_readiness_report` 等）绑定到 FastAPI 路由，形成可直接 `python -m host_brain` 启动的 HTTP 服务，对外暴露 `POST /v1/chat`（链路入口）与 `GET /health`（健康检查），并保证 Governor/Token/Audit 治理链不被旁路。
-- 输入：DevSpec 2.1（Host 进程："对外提供 `POST /v1/chat`"）；DevSpec 1.1（`host_brain/app/main.py` 定义为"HTTP API 入口"）；PRD 2.1（"编排入口服务 Host Orchestrator API：对外 chat 入口 + 事件汇聚"）。
-- 输出：
-  - FastAPI Application 实例与路由注册（`/v1/chat`、`/health`、`/readiness`、`/metrics`）；
-  - 请求→编排→输出的标准 JSON 响应结构（复用已有 `quality.stage`/`reason_code` 口径）；
-  - 启动生命周期钩子（startup/shutdown）串联服务探针与审计写入；
-  - 中间件层：request_id 注入、CORS（可配置）、异常兜底（保持单 JSON 输出）；
-  - `pyproject.toml` / `requirements.txt` 新增 `fastapi`、`uvicorn` 依赖并锁定版本；
-  - fixtures：正常请求、缺字段、服务不可用场景样例。
-- 验收标准：
-  - `python -m host_brain` 可启动 HTTP 服务并响应 `/health`；
-  - `POST /v1/chat` 输入后经 Governor 裁决并返回单 JSON 响应（含 narrative/intent_draft/quality）；
-  - 异常/降级场景仍输出可解析单 JSON 且 reason_code 稳定；
-  - 不引入旁路执行路径（所有执行仍经 Governor/Token/Skills）；
-  - 回归覆盖（新增）`T-HTTP-01`（路由可达性与响应结构）、`T-HTTP-02`（异常兜底与降级输出）。
-- 涉及文件路径：host_brain/app/main.py；host_brain/app/config.py；host_brain/pyproject.toml（或 requirements.txt）；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-CORE-001；FR-CORE-002；FR-CORE-004；FR-OBS-001；（新增）T-HTTP-01；T-HTTP-02。
-
-### TASK-0066 链路可视化面板：审计数据 Web UI 呈现与 request 级排障（P0）
-- 任务描述：基于 TASK-0064 落地的只读观测 API，构建最小可用的 Web UI 面板，支持按 request_id/session_id 检索链路时间线、查看 Governor 裁决详情、审计事件聚合，降低排障对人工查表的依赖；UI 为只读，不新增任何执行入口。
-- 输入：DevSpec 10/11（可观测性）；TASK-0064 输出的 request 级观测报告契约；PRD FR-OBS-001（"关键指标与面板"）。
-- 输出：
-  - 前端页面（可选 React/Vue/纯 HTML+JS，以最小可运行为准）；
-  - 页面功能：request_id 搜索、时间线可视化、source 过滤、reason_code 统计图表；
-  - 与 Host API 的集成（`GET /v1/observe/{request_id}` 或等价端点）；
-  - 静态资源打包与部署口径（可嵌入 FastAPI static files 或独立部署）；
-  - fixtures：示例观测报告数据。
-- 验收标准：
-  - 输入 request_id 后可在浏览器看到链路时间线与 source 分布；
-  - 空结果/错误 request_id 有友好提示且不崩溃；
-  - 面板不引入任何执行入口（纯只读）；
-  - 回归覆盖（新增）`T-UI-01`（面板可渲染与 API 联通）。
-- 涉及文件路径：host_brain/app/main.py；host_brain/app/static/（或 frontend/）；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-OBS-001；FR-OBS-002；（新增）T-UI-01。
-
-### TASK-0067 Edge ASR 设备集成：faster-whisper 实际 SDK 对接与事件桥接（P0）
-- 任务描述：将 Edge 端 ASR 从契约层定义推进到实际 faster-whisper（large-v3）SDK 对接，形成"麦克风输入→ faster-whisper 转写→ asr_chunk 事件上送"的完整链路，并保持与已有 RPC 契约（TASK-0024/TASK-0025）的结构兼容。
-- 输入：DevSpec 8.11.3（VOICE 契约：asr_chunk 字段）；TASK-0024/TASK-0025 输出的 RPC 端点与事件 Schema；PRD FR-VOICE-001。
-- 输出：
-  - faster-whisper 模型加载与推理封装（GPU 常驻）；
-  - 音频流采集与分片策略（VAD 或固定窗口）；
-  - 转写结果→ asr_chunk 事件映射（text/timestamps/confidence/alternates）；
-  - 资源闸门（TASK-0029）集成：ASR 优先级最高；
-  - 模型不可用/GPU OOM 的稳定降级与 reason_code 映射；
-  - `requirements.txt` 新增 `faster-whisper`、`sounddevice`（或等价）依赖；
-  - fixtures：音频样本（短/长/静音/低信噪比）。
-- 验收标准：
-  - 实际麦克风输入可产出结构稳定的 asr_chunk 事件；
-  - 低置信度显式标注；GPU 不可用时快速失败并有稳定 reason_code；
-  - 与已有 T-Voice-01 契约兼容；
-  - 回归覆盖（新增）`T-ASR-HW-01`（实际设备链路可达性）。
-- 涉及文件路径：edge_client/senses/asr.py；edge_client/rpc/voice.py；edge_client/rpc/resource_gate.py；edge_client/requirements.txt；tests/contract/；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-001；T-Voice-01；（新增）T-ASR-HW-01。
-
-### TASK-0068 Edge TTS/VTS 设备集成：GPT-SoVITS 合成 + VTube Studio SDK 对接（P0）
-- 任务描述：将 Edge 端 TTS 与 VTS 从契约层定义推进到实际 SDK 对接，形成"Host 下发文本→ GPT-SoVITS 合成→播放队列→ VTube Studio 口型/表情驱动"的完整链路，保持与已有 RPC 契约（TASK-0026/TASK-0021）的结构兼容。
-- 输入：DevSpec 8.11.3（VOICE 契约）、DevSpec 8.11.2（VTS 外显）；TASK-0026/TASK-0021 输出的 RPC 端点与事件 Schema；PRD FR-VOICE-002、FR-AVATAR-001。
-- 输出：
-  - GPT-SoVITS 模型加载与推理封装（GPU 常驻，全量不量化）；
-  - 合成结果→播放队列→音频设备输出链路；
-  - VTube Studio API 连接封装：talk gate（TALK_START/TALK_END）与 emotion_tag→expression_id 映射驱动；
-  - barge-in 打断时的合成中止与 VTS 恢复策略；
-  - 模型不可用/VTS 连接断开的稳定降级与 reason_code 映射；
-  - `requirements.txt` 新增 `pyvts`（或等价 VTS SDK）依赖；
-  - fixtures：合成失败/VTS 断连/barge-in 场景样例。
-- 验收标准：
-  - Host 下发文本可在 Edge 完成合成并播放音频；
-  - VTS 口型与表情随播放联动，停止时恢复默认表情；
-  - 合成失败/VTS 断连场景有稳定 reason_code 且审计可回放；
-  - 与已有 T-Voice-02、T-Avatar-01 契约兼容；
-  - 回归覆盖（新增）`T-TTS-HW-01`（TTS 实际合成链路）、`T-VTS-HW-01`（VTS 实际驱动链路）。
-- 涉及文件路径：edge_client/actuators/speech.py；edge_client/rpc/voice.py；host_brain/channels/vts.py；edge_client/requirements.txt；tests/contract/；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-002；FR-AVATAR-001；T-Voice-02；T-Avatar-01；（新增）T-TTS-HW-01；T-VTS-HW-01。
-
-### TASK-0069 graph_runtime 拆分：契约层/执行层/降级层分离（P1）
-- 任务描述：将 `integrations/graph_runtime.py`（当前 942 行单文件）按职责拆分为契约层（配置校验/Schema）、执行层（节点执行/边路由）、降级层（fallback/timeout/dependency 处理），降低单文件复杂度并提升可测试性，拆分后行为与输出结构必须与拆分前保持一致。
-- 输入：DevSpec 6/8.9/10；TASK-0051 输出的图编排契约；现有 `graph_runtime.py` 实现。
-- 输出：
-  - `integrations/graph_contract.py`：图配置 Schema 校验、节点/边合法性验证；
-  - `integrations/graph_executor.py`：节点执行、依赖检查、边路由；
-  - `integrations/graph_fallback.py`：超时/依赖不可用/节点缺失的统一降级处理；
-  - `integrations/graph_runtime.py`：缩减为编排入口（串联三层），保持对外接口不变；
-  - 拆分前后输出结构（graph_status/reason_code/stage/fallback_map/dependency_statuses）完全一致；
-  - fixtures：拆分前后回归对比数据。
-- 验收标准：
-  - 拆分后 T-Orch-01 及所有现有图编排相关测试无回归；
-  - 单文件行数控制在 300 行以内；
-  - 各层可独立单测且依赖注入清晰；
-  - 回归覆盖（新增）`T-Orch-Refactor-01`（拆分前后输出一致性）。
-- 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/integrations/graph_contract.py（新增）；host_brain/integrations/graph_executor.py（新增）；host_brain/integrations/graph_fallback.py（新增）；tests/contract/；tests/fixtures/orchestration/。
-- 关联需求/测试：FR-CORE-001；FR-CORE-004；T-Orch-01；（新增）T-Orch-Refactor-01。
-
-### TASK-0070 SQLite Ledger 并发优化：WAL 模式启用与写入吞吐基准（P1）
-- 任务描述：为 SQLite Ledger 启用 WAL（Write-Ahead Logging）模式，提升高并发场景下的读写吞吐，并建立写入性能基准测试，为后续是否需要迁移到外部审计存储提供数据依据。
-- 输入：DevSpec 8.1（Ledger SSOT）；TASK-0011 输出的 Triptych 三联画表；审阅报告 P1-5 建议。
-- 输出：
-  - SQLite 连接初始化时启用 `PRAGMA journal_mode=WAL` 与推荐配置（`synchronous=NORMAL`、`wal_autocheckpoint`）；
-  - 并发读写保护策略（连接池/写锁/重试口径）；
-  - 写入性能基准测试脚本（单线程/多线程/混合读写场景）；
-  - 基准报告结构（scenario/ops_per_sec/p95_latency_ms/wal_size）；
-  - WAL 模式启用失败的降级策略（回退 DELETE 模式并记录 reason_code）；
-  - fixtures：高并发写入样例。
-- 验收标准：
-  - WAL 模式启用后现有审计链测试无回归；
-  - 性能基准可量化并输出稳定报告结构；
-  - WAL 启用失败不阻塞系统启动（降级并可审计）；
-  - 回归覆盖 T-Audit-01 与（新增）`T-Audit-WAL-01`（WAL 模式下审计链完整性）。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/app/config.py；tools/bench/（新增）；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-AUDIT-001；T-Audit-01；（新增）T-Audit-WAL-01。
-
-### TASK-0071 E2E 补充：微信入站→Governor→VTS/语音→审计 一体化场景（P1）
-- 任务描述：补充"微信消息入站→Host 编排→Governor 裁决→VTS 表情驱动 + 语音播报→审计链写入"的端到端测试场景，覆盖正常执行、拒绝、降级三种路径，验证跨模块串联与输出稳定性。
-- 输入：DevSpec 8.11.1/8.11.2/8.11.3；TASK-0020（微信通道）、TASK-0021（VTS）、TASK-0024~0027（语音链路）、TASK-0041（主链回归）。
-- 输出：
-  - E2E 场景定义：正常（微信→chat→VTS表情+语音播报→审计）、拒绝（Governor 拒绝→无执行→审计）、降级（VTS 不可用→仅文本→审计）；
-  - 每个场景的输入 fixtures 与期望输出断言；
-  - 审计串联验证：request_id 可从 channel_io_log→governor_log→avatar_action_log/voice_event_log 串联；
-  - 跨端模拟策略（Edge mock 或 stub）。
-- 验收标准：
-  - 三种路径 E2E 测试通过；
-  - 审计链串联键（request_id/thread_key）完整可回放；
-  - VTS/语音不可用时输出结构稳定且 reason_code 可解释；
-  - 回归覆盖（新增）`T-E2E-WeChat-01`（微信→Governor→VTS/语音全链路）。
-- 涉及文件路径：tests/e2e/test_wechat_vts_voice_e2e.py（新增）；tests/fixtures/channel/；tests/fixtures/voice/；host_brain/channels/；host_brain/governor/；host_brain/audit/。
-- 关联需求/测试：FR-CHANNEL-001；FR-AVATAR-001；FR-VOICE-001~003；T-Channel-01；T-Avatar-01；T-Voice-01~03；（新增）T-E2E-WeChat-01。
-
-### TASK-0072 跨端事件时间线：Host/Edge 统一 request_id/session_id 关联视图（P1）
-- 任务描述：建立 Host 与 Edge 事件的统一时间线聚合机制，支持按 request_id 或 session_id 关联两端事件（Host 审计 + Edge RPC/资源/语音事件），输出可排序时间线，为排障与性能分析提供数据底座。
-- 输入：DevSpec 10/11；TASK-0064 输出的 Host 端观测报告；TASK-0024~0029 输出的 Edge 端事件结构。
-- 输出：
-  - Edge 端事件上报结构（event_type/ts_ms/request_id/session_id/payload）；
-  - Host 端事件聚合器：合并 Host 审计事件 + Edge 上报事件，按 ts_ms 排序；
-  - 统一时间线输出结构（timeline[]，含 source=host/edge 标记）；
-  - 时间漂移容忍策略（Edge/Host 时钟不完全同步时的排序口径）；
-  - fixtures：Host/Edge 混合事件、时间交叉、Edge 事件缺失样例。
-- 验收标准：
-  - 给定 request_id 可输出 Host+Edge 合并时间线；
-  - Edge 事件缺失时 Host 时间线仍完整且标注缺失来源；
-  - 时间线排序稳定且可回放；
-  - 回归覆盖（新增）`T-Obs-03`（跨端时间线聚合与排序稳定性）。
-- 涉及文件路径：host_brain/app/main.py；edge_client/rpc/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
-- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；T-Obs-01；（新增）T-Obs-03。
-
-### TASK-0073 Rate Limit 持久化：R4 滑动窗口外部存储适配（P2）
-- 任务描述：将 Governor R4 Rate Limit Gate 的滑动窗口计数器从当前内存实现改为可插拔存储适配（内存/Redis/SQLite），支持集群模式下的共享限流，并保持单机模式零外部依赖。
-- 输入：DevSpec 6（R4 Rate Limit Gate）；TASK-0008 输出的 R4 Gate 契约。
-- 输出：
-  - Rate Limit 存储接口（抽象层：`incr`/`get_count`/`reset`/`ttl`）；
-  - 三种实现：InMemory（默认）、SQLite（单机持久化）、Redis（集群模式）；
-  - 配置项：`RATE_LIMIT_BACKEND=memory|sqlite|redis`；
-  - Redis 不可用时降级到 InMemory 并记录 reason_code；
-  - fixtures：窗口滑动/过期/并发竞争样例。
-- 验收标准：
-  - 切换 backend 后 R4 Gate 行为一致（同输入同结果）；
-  - Redis 不可用时稳定降级且 rule_trace 可标注 backend 信息；
-  - 现有 T-Gov-01 无回归；
-  - 回归覆盖（新增）`T-Gov-R4-01`（Rate Limit 多 backend 一致性）。
-- 涉及文件路径：host_brain/governor/rules.py；host_brain/governor/rate_limit_store.py（新增）；host_brain/app/config.py；tests/contract/；tests/fixtures/。
-- 关联需求/测试：FR-GOV-001；T-Gov-01；（新增）T-Gov-R4-01。
-
-### TASK-0074 Camera Events 扩展：多检测器注册 + 多模态事件聚合（P2）
-- 任务描述：将当前基础摄像头事件识别扩展为多检测器注册与多模态事件聚合（人脸/物体/手势/场景），每个检测器独立输出置信度与 evidence_ref，聚合后输出统一事件结构。
-- 输入：DevSpec 8.12；TASK-0034 输出的 camera_event 结构；PRD FR-VISION-004。
-- 输出：
-  - 检测器注册表结构（detector_id/type/model_id/confidence_threshold/enabled）；
-  - 多检测器并行执行与结果聚合策略；
-  - 聚合事件结构（detections[]{detector_id/type/label/confidence/bbox?/evidence_ref}）；
-  - 检测器不可用时的部分降级策略（可用检测器正常输出，不可用检测器标注 reason_code）；
-  - fixtures：多检测器混合、部分不可用、全不可用样例。
-- 验收标准：
-  - 多检测器并行输出结构稳定且各自 evidence_ref 独立；
-  - 部分检测器不可用时输出仍合法且降级可解释；
-  - 现有 T-Vision-02 无回归；
-  - 回归覆盖（新增）`T-Vision-03`（多检测器注册与聚合稳定性）。
-- 涉及文件路径：host_brain/vision/camera_events.py；host_brain/vision/detector_registry.py（新增）；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/vision/。
-- 关联需求/测试：FR-VISION-004；T-Vision-02；（新增）T-Vision-03。
-
-### TASK-0075 Airlock DRAFT_CODE 沙箱执行：隔离运行环境 + 结果审计（P2）
-- 任务描述：将 Airlock 入站隔离中 DRAFT_CODE 分类从"仅标记"推进到实际沙箱执行能力（隔离进程/资源限制/超时保护），执行结果作为草案证据写入审计链，不直接影响主链路状态。
-- 输入：DevSpec 8.7（Airlock 入站隔离）；TASK-0016 输出的 quarantine 分类契约；PRD FR-AIRLOCK-002。
-- 输出：
-  - 沙箱执行环境封装（subprocess/容器/限时限资源）；
-  - 执行结果结构（sandbox_id/status/stdout/stderr/exit_code/duration_ms/resource_usage）；
-  - 沙箱结果→审计写入（sandbox_exec_log）与 evidence_ref 串联；
-  - 安全约束：无网络/无文件系统写入（或仅临时目录）/资源上限/超时强杀；
-  - 沙箱不可用时稳定拒绝（SANDBOX_UNAVAILABLE）；
-  - fixtures：正常执行/超时/恶意代码/资源超限样例。
-- 验收标准：
-  - DRAFT_CODE 可在沙箱中执行并产出结构化结果；
-  - 超时/资源超限场景强制终止且 reason_code 稳定；
-  - 沙箱执行不影响主进程状态且不引入旁路执行路径；
-  - 现有 T-39/T-40 无回归；
-  - 回归覆盖（新增）`T-Sandbox-01`（沙箱执行与安全边界）。
-- 涉及文件路径：host_brain/airlock/sandbox.py（新增）；host_brain/airlock/quarantine.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/airlock/。
-- 关联需求/测试：FR-AIRLOCK-002；T-39；T-40；（新增）T-Sandbox-01。
-
+## M10-C 鈥?璁板繂钂搁绯荤粺锛圖ONE锛?026-03-03锛?
+### TASK-0126 memory/distillation.py锛歁emoryDistillationEngine
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氭柊寤?`host_brain/memory/distillation.py`锛屽疄鐜?`MemoryDistillationEngine` 绫伙紝浠庢儏鑺傝蹇嗭紙EpisodicStore锛変腑钂搁璇箟璁板繂锛圫emanticMemory锛夛紝鍐欏叆 SQLite `semantic_memory` 琛ㄣ€?- 杈撳叆锛欴evSpec 搂20锛圡10-C 鍊欓€夛級锛沨ost_brain/memory/episodic.py锛沨ost_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/memory/distillation.py`锛堟柊澧烇級锛歚MemoryDistillationEngine` 绫伙紝鍚?`distill_top_k()` 鏂规硶锛堝彫鍥?Top-K 鎯呰妭璁板繂 鈫?鍚堝苟鎽樿 鈫?骞傜瓑鍐欏叆 semantic_memory 琛?鈫?鍐?system_event_log 瀹¤锛夛紱`SemanticMemoryRecord` / `DistillResult` 鏁版嵁绫伙紱`_compute_source_hash()` / `_merge_texts()` / `_compute_confidence()` 杈呭姪鍑芥暟銆?- 楠屾敹鏍囧噯锛?  - distill_top_k 姝ｅ父钂搁杩斿洖 semantic_id锛屽啓鍏?semantic_memory 琛紙T-Distill-01锛夛紱
+  - 鐩稿悓 source_memory_ids 閲嶅钂搁璺宠繃锛坰kipped=True锛孴-Distill-02锛夛紱
+  - 绌?EpisodicStore 杩斿洖 success=False锛圱-Distill-03锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/distillation.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛歍-Distill-01~03銆?
+### TASK-0127 sqlite_ledger.py锛歴emantic_memory 琛?+ CRUD 鏂规硶
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 `sqlite_ledger.py` 涓柊澧?`semantic_memory` 琛ㄥ畾涔夛紙`_ensure_schema`锛夊拰涓変釜 CRUD 鏂规硶銆?- 杈撳叆锛欴evSpec 搂20锛圡10-C锛夛紱host_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛歚_ensure_schema` 杩藉姞 `semantic_memory` 琛紙鍚?semantic_id UNIQUE / source_hash UNIQUE / ts_ms INDEX锛夛紱鏂板 `log_semantic_memory()` / `get_semantic_memory_by_source_hash()` / `list_semantic_memories()` / `_row_to_semantic_memory()` 鏂规硶銆?- 楠屾敹鏍囧噯锛?  - log_semantic_memory 骞傜瓑鍐欏叆锛圛NSERT OR IGNORE锛夛紱
+  - get_semantic_memory_by_source_hash 鎸?source_hash 鏌ヨ锛?  - list_semantic_memories 鍒嗛〉鏌ヨ姝ｇ‘锛圱-Distill-04锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歍-Distill-04銆?
+### TASK-0128 prompt_context.py锛歴emantic_slot 鍙€夊垎妲?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 `prompt_context.py` 涓柊澧炲彲閫?`semantic_slot` 鍒嗘Ы鏀寔锛屽寘鍚獙璇佸嚱鏁板拰鏋勫缓杈呭姪鍑芥暟銆?- 杈撳叆锛欴evSpec 搂20锛圡10-C锛夛紱host_brain/core/prompt_context.py銆?- 杈撳嚭锛?  - `host_brain/core/prompt_context.py` 鎵╁睍锛氭柊澧?`OPTIONAL_SLOTS` 瀛楀吀锛堝惈 `semantic_slot: list`锛夛紱`validate_prompt_context` 鎵╁睍锛氭湭鐭ユЫ浣嶆鏌ュ悓鏃舵帓闄?OPTIONAL_SLOTS锛屽瓨鍦?semantic_slot 鏃惰皟鐢?`_validate_semantic_slot()`锛涙柊澧?`_validate_semantic_slot()` 鍑芥暟锛堟牎楠?semantic_id / summary 蹇呭～瀛楁锛夛紱鏂板 `build_semantic_slot()` 杈呭姪鍑芥暟锛堜粠 ledger 鏋勫缓 semantic_slot 鍒楄〃锛夈€?- 楠屾敹鏍囧噯锛?  - 鍚堟硶 semantic_slot 閫氳繃楠岃瘉锛圱-Distill-05锛夛紱
+  - 缂哄皯 semantic_id/summary 鏃舵姤 PROMPT_CONTEXT_TYPE_INVALID锛圱-Distill-05锛夛紱
+  - 涓嶅惈 semantic_slot 鐨?prompt_context 浠嶉€氳繃楠岃瘉锛圱-Distill-05锛夛紱
+  - build_semantic_slot 杩斿洖鏍煎紡姝ｇ‘鐨勫垪琛紙T-Distill-06锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 1062 passed锛? failed锛堟棤鍥炲綊锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/core/prompt_context.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歍-Distill-05~06銆?
+### TASK-0129 M10-C 娴嬭瘯 + 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氳ˉ榻?M10-C 鐨勬祴璇曟枃浠跺拰鍙戝竷娓呭崟銆?- 杈撳叆锛欴evSpec 搂20锛圡10-C锛夛紱host_brain/release/release_manifest.py銆?- 杈撳嚭锛?  - `tests/unit/test_memory_distillation.py`锛堟柊澧烇級锛歍-Distill-01~06锛? 涓祴璇曪級锛?  - `release/manifests/m10c_release.json`锛堟柊澧烇級锛歁10-C 鍙戝竷娓呭崟锛宼est_passed_count=1062锛?  - `host_brain/release/release_manifest.py` 鎵╁睍锛歚generate_m10c_manifest()` 鏂规硶锛堥攣瀹?distillation.py / prompt_context.py / sqlite_ledger.py hash锛夛紱
+  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛歊-95~R-97锛圡10-C 璇箟璁板繂钂搁鐩稿叧闇€姹傝拷韪級銆?- 楠屾敹鏍囧噯锛?  - T-Distill-01~06 鍏ㄩ儴閫氳繃锛?  - m10c_release.json 鍖呭惈锛歮ilestone=M10-C / distillation_hash / prompt_context_hash / sqlite_ledger_hash / test_passed_count=1062锛?  - 鍏ㄩ噺娴嬭瘯 1062 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛歵ests/unit/test_memory_distillation.py锛堟柊澧烇級锛況elease/manifests/m10c_release.json锛堟柊澧烇級锛沨ost_brain/release/release_manifest.py锛沝ocs/60_trace/requirements_trace.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛歍-Distill-01~06銆?
 ---
 
-## 阶段 8：质量加固 + 风险消除 + Edge 集成深化
-
-> 说明：本阶段任务来源于代码审阅报告（full_code_review_report_2026-03-02.md）、风险注册表（risk_registry.md）、以及 P1/P2 后续行动汇总。按优先级排列：先修复代码质量微调（可立即执行），再推进安全升级与 Edge 集成深化。
-
-### TASK-0076 代码质量微调：裸 print / 类型标注 / SQL 安全 / 表结构缓存 / 可选依赖文档（P2）
-- 任务描述：集中处理代码审阅报告中的 P2 发现项（F-13~F-16, F-12），确保代码质量零遗留。
-- 输入：代码审阅报告 §七 P2 发现项（F-13/F-14/F-15/F-16/F-12）。
-- 输出：
-  - `main.py:908` 裸 `print()` → `logger.info()`（F-13）；
-  - `graph_executor.py:43` 补充返回类型标注 `-> None`（F-14）；
-  - `fastapi_app.py:582,605` 两个 async handler 补充返回类型标注（F-15）；
-  - `sqlite_ledger.py._fetch_all()` 增加表名白名单校验（硬编码允许表名集合，拒绝非法表名并记录 `AUDIT_TABLE_NAME_INVALID`）（F-16）；
-  - `sqlite_ledger.py._table_has_column()` 增加表结构缓存（`_column_cache: dict[str, set[str]]`），避免每次调用 PRAGMA（F-06）；
-  - `requirements.txt` 增加注释标注 `redis` 为可选依赖（F-12）。
-- 验收标准：
-  - 零裸 `print()` 残留；
-  - 所有公开函数/方法有返回类型标注；
-  - `_fetch_all` 传入非法表名时抛出 ValueError 或返回空并记录 reason_code；
-  - `_table_has_column` 首次调用后缓存命中率 = 100%（同表重复调用不触发 PRAGMA）；
-  - 现有 494 项测试无回归；
-  - 回归覆盖（新增）`T-Quality-01`（代码质量加固断言）。
-- 涉及文件路径：host_brain/app/main.py；host_brain/integrations/graph_executor.py；host_brain/app/fastapi_app.py；host_brain/audit/sqlite_ledger.py；requirements.txt；tests/contract/test_quality_contract.py（新增）。
-- 关联需求/测试：NFR-MAINT-001；FR-AUDIT-001；（新增）T-Quality-01。
-
-### TASK-0077 沙箱安全升级：subprocess → Docker/nsjail 容器级隔离（P1 安全）
-- 任务描述：将 DRAFT_CODE 沙箱从当前 subprocess + 临时目录隔离，升级为容器级隔离（优先 Docker，备选 nsjail），确保恶意代码无法读取/写入主机文件系统、无法访问网络。
-- 输入：risk_registry.md R41-1/R41-2；DevSpec 8.7；TASK-0075 输出的 `sandbox.py`。
-- 输出：
-  - `SandboxConfig` 新增 `isolation_backend` 字段（`subprocess`/`docker`/`nsjail`），默认 `subprocess`（向后兼容）；
-  - Docker 后端实现：自动构建最小沙箱镜像 + 只读挂载代码 + 无网络 + 资源限制（CPU/内存/超时） + 输出采集；
-  - nsjail 后端实现（可选/备选）：seccomp + 用户 namespace + 只读根文件系统；
-  - 容器后端不可用时自动降级到 subprocess 后端 + `SANDBOX_CONTAINER_UNAVAILABLE` reason_code；
-  - 跨平台验证（Windows：仅 subprocess；Linux：Docker 优先）；
-  - fixtures：Docker 隔离成功/Docker 不可用降级/恶意文件读取被拒。
-- 验收标准：
-  - Docker 后端下恶意代码无法读取主机文件系统（`/etc/passwd` 等）；
-  - Docker 不可用时稳定降级到 subprocess 后端且 reason_code 可统计；
-  - 现有 T-Sandbox-01 无回归；
-  - 回归覆盖（新增）`T-Sandbox-02`（容器级隔离安全边界）。
-- 涉及文件路径：host_brain/airlock/sandbox.py；host_brain/airlock/docker_sandbox.py（新增）；host_brain/core/errors.py；tests/contract/test_sandbox_docker_contract.py（新增）；tests/fixtures/airlock/。
-- 关联需求/测试：FR-AIRLOCK-002；T-Sandbox-01；（新增）T-Sandbox-02。
-
-### TASK-0078 跨端时间线 SQL 优化：按时间窗口过滤 + 分页查询（P1 性能）
-- 任务描述：解决 `cross_timeline.py` 和 `web_ui.py` 全量内存加载审计表的性能隐患，为 SQLiteLedger 增加按时间窗口过滤的查询方法，并在时间线聚合与面板 API 中使用。
-- 输入：risk_registry.md R38-3/R32-2；代码审阅报告 F-03。
-- 输出：
-  - `sqlite_ledger.py` 新增 `fetch_by_time_range(table, start_ms, end_ms, limit, offset)` 方法（参数化查询，表名白名单校验）；
-  - `cross_timeline.py` 的 Host 审计表遍历改为按时间窗口查询；
-  - `web_ui.py` 的 API 端点支持 `?start_ms=&end_ms=&limit=&offset=` 分页参数；
-  - fixtures：大量数据分页/空窗口/窗口越界样例。
-- 验收标准：
-  - 10000 条审计记录下时间线聚合耗时 < 100ms（基准测试口径）；
-  - 面板 API 支持分页且默认 limit=100；
-  - 现有 T-Obs-03 / T-UI-01 无回归；
-  - 回归覆盖（新增）`T-Obs-04`（时间窗口查询与分页）。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/observability/cross_timeline.py；host_brain/app/web_ui.py；tests/contract/test_timeline_perf_contract.py（新增）；tests/fixtures/observability/。
-- 关联需求/测试：FR-OBS-001；FR-AUDIT-001；T-Obs-03；T-UI-01；（新增）T-Obs-04。
-
-### TASK-0079 Edge→Host RPC 事件批量上报接口（P1 跨端集成）
-- 任务描述：实现 Edge→Host 的事件批量上报 RPC 通道，将当前模拟 Edge 事件的测试方式升级为可对接真实 RPC 的实现。
-- 输入：risk_registry.md R38-1/R37-1；TASK-0072 输出的 `EdgeEventReport` 结构；DevSpec 7.3。
-- 输出：
-  - `edge_client/rpc/event_reporter.py`（新增）：批量事件上报客户端，支持重试 + 批次控制 + 网络异常降级；
-  - `host_brain/app/fastapi_app.py` 新增 `POST /v1/edge/events` 端点：接收 `EdgeEventReport[]`，写入审计并返回确认；
-  - 事件上报协议结构（JSON Schema：event_type/source/ts_ms/payload/evidence_ref）；
-  - 网络不可用时 Edge 端缓存事件并在恢复后批量补发；
-  - fixtures：正常批量上报/部分失败/网络中断缓存。
-- 验收标准：
-  - Edge 事件可通过 HTTP 批量上报到 Host 并写入审计链；
-  - 网络中断时 Edge 端缓存事件（最多 1000 条或 10MB），恢复后自动补发；
-  - 上报事件与 `cross_timeline.py` 无缝对接；
-  - 现有 T-Obs-03 / T-E2E-WeChat-01 无回归；
-  - 回归覆盖（新增）`T-RPC-Event-01`（Edge→Host 事件上报协议）。
-- 涉及文件路径：edge_client/rpc/event_reporter.py（新增）；host_brain/app/fastapi_app.py；host_brain/observability/cross_timeline.py；tests/contract/test_rpc_event_contract.py（新增）；tests/fixtures/e2e/。
-- 关联需求/测试：FR-VOICE-001；FR-AUDIT-001；T-Obs-03；T-E2E-WeChat-01；（新增）T-RPC-Event-01。
-
-### TASK-0080 VTS WebSocket 自动重连机制（P1 Edge 网络）
-- 任务描述：为 VTubeStudioDriver 添加 WebSocket 自动重连策略（指数退避 + 最大重试次数 + 健康状态上报），解决网络抖动导致的断连不恢复问题。
-- 输入：risk_registry.md R34-2；TASK-0068 输出的 `vts_driver.py`。
-- 输出：
-  - `vts_driver.py` 新增 `_reconnect_loop()` 方法：指数退避（1s→2s→4s→8s→16s 上限）+ 最大重试 10 次；
-  - 重连成功后自动恢复 `neutral` 表情状态并上报 `VTS_RECONNECTED` 事件；
-  - 重连全部失败后进入 `DISCONNECTED` 状态并上报 `VTS_RECONNECT_EXHAUSTED` reason_code；
-  - 重连事件写入 `avatar_action_log` 可审计；
-  - fixtures：断连→重连成功/断连→重连耗尽。
-- 验收标准：
-  - 模拟 WebSocket 断连后自动触发重连；
-  - 重连成功后表情映射恢复正常；
-  - 超过最大重试次数后稳定进入 DISCONNECTED 状态且 reason_code 可统计；
-  - 现有 T-VTS-HW-01 无回归；
-  - 回归覆盖（新增）`T-VTS-Reconnect-01`（WebSocket 自动重连与状态恢复）。
-- 涉及文件路径：edge_client/actuators/vts_driver.py；host_brain/core/errors.py；tests/contract/test_vts_reconnect_contract.py（新增）；tests/fixtures/channels/。
-- 关联需求/测试：FR-AVATAR-001；T-VTS-HW-01；（新增）T-VTS-Reconnect-01。
-
-### TASK-0081 ASR 麦克风设备自动恢复策略（P1 Edge 音频）
-- 任务描述：为 ASR 音频采集添加设备异常自动恢复策略（重连重试 + 设备切换 + 健康状态上报），解决驱动异常时无法自动恢复的问题。
-- 输入：risk_registry.md R33-2；TASK-0067 输出的 `asr.py`。
-- 输出：
-  - `asr.py` 新增 `_device_recovery_loop()` 方法：检测 `ASR_DEVICE_ERROR` / `ASR_STREAM_INTERRUPTED` 后自动尝试重新打开音频流；
-  - 指数退避重试（1s→2s→4s→8s 上限）+ 最大重试 5 次；
-  - 支持设备列表枚举 + 备用设备自动切换（如默认设备失败，尝试其他可用设备）；
-  - 恢复成功上报 `ASR_DEVICE_RECOVERED` 事件；恢复失败上报 `ASR_DEVICE_RECOVERY_EXHAUSTED`；
-  - fixtures：设备断开→恢复/设备断开→恢复失败/备用设备切换。
-- 验收标准：
-  - 模拟设备异常后自动触发恢复流程；
-  - 恢复成功后 ASR 采集正常继续；
-  - 超过最大重试次数后稳定报告 `ASR_DEVICE_RECOVERY_EXHAUSTED`；
-  - 现有 T-ASR-HW-01 无回归；
-  - 回归覆盖（新增）`T-ASR-Recovery-01`（麦克风设备自动恢复）。
-- 涉及文件路径：edge_client/senses/asr.py；host_brain/core/errors.py；tests/contract/test_asr_recovery_contract.py（新增）；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-001；FR-VOICE-005；T-ASR-HW-01；（新增）T-ASR-Recovery-01。
-
-### TASK-0082 Host VTS 通道 DEGRADED 状态扩展（P2）
-- 任务描述：为 Host 端 VTS 通道模块（`vts.py`）增加 `DEGRADED` 状态支持，使 E2E 链路中的降级场景可通过正规通道表达，而非直接写审计表绕过。
-- 输入：risk_registry.md R37-2；TASK-0071 输出的 E2E 测试发现。
-- 输出：
-  - `vts.py` 的 `resolve_vts_expression()` 返回结构新增 `status=DEGRADED` 枚举值（在 Edge 不可达/表情映射失败但有降级备选时触发）；
-  - 降级时使用 `neutral` 作为备选表情 + `VTS_DEGRADED_FALLBACK` reason_code；
-  - 审计写入 `avatar_action_log` 记录降级详情；
-  - fixtures：Edge 不可达→DEGRADED/映射未知→DEGRADED。
-- 验收标准：
-  - Edge 不可达时 `resolve_vts_expression` 返回 `DEGRADED` + neutral 备选；
-  - `avatar_action_log` 可回溯降级原因；
-  - 现有 T-VTS-HW-01 / T-E2E-WeChat-01 无回归；
-  - 回归覆盖（新增）`T-VTS-Degraded-01`（VTS DEGRADED 状态契约）。
-- 涉及文件路径：host_brain/channels/vts.py；host_brain/core/errors.py；tests/contract/test_vts_degraded_contract.py（新增）；tests/fixtures/channels/。
-- 关联需求/测试：FR-AVATAR-001；T-VTS-HW-01；T-E2E-WeChat-01；（新增）T-VTS-Degraded-01。
-
-### TASK-0083 部署文档 + 环境清单补充（P2 运维）
-- 任务描述：基于风险注册表中所有部署相关的后续行动，补充部署文档与环境清单，确保生产部署前所有环境要求已明确。
-- 输入：risk_registry.md 全文；代码审阅报告 §七。
-- 输出：
-  - `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md` 更新：
-    - SQLite 存储介质要求（本地磁盘，禁止 NFS/网络文件系统）（R36-1）；
-    - Redis 可选依赖说明与配置指引（R39-1）；
-    - Docker 环境要求（沙箱容器级隔离）（R41-2）；
-    - Edge GPU VRAM 最低要求（≥4GB CUDA 可用）+ 资源闸门配置（R33-1/R34-1）；
-    - VTS WebSocket 网络要求与超时配置（R34-2）；
-    - WAL checkpoint 定时策略建议（R36-3）；
-    - 进程管理器（systemd/supervisor）守护建议（R31-2）。
-  - 环境清单中每项标注：必需/可选/建议、关联风险编号、配置路径。
-- 验收标准：
-  - 所有 P1 风险的部署前置条件在环境清单中有对应条目；
-  - 每项环境要求有验证方法（检查命令/健康端点/配置项）；
-  - 文档符合受众门禁格式（受众：MASTER）。
-- 涉及文件路径：docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
-- 关联需求/测试：NFR-REL-001；NFR-SEC-001。
-
+## M10-D 鈥?P1/P2 鏀跺彛涓庡彂甯冿紙DONE锛?026-03-03锛?
+### TASK-0130 F-41 淇锛歞istill_top_k() 骞跺彂淇濇姢锛堣捀棣忕骇鍒攣锛?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 `memory/distillation.py` 涓?`distill_top_k()` 澧炲姞绾跨▼骞跺彂淇濇姢锛岄伩鍏嶅苟鍙戣捀棣忓悓涓€ source 闆嗗悎鏃朵骇鐢?source_hash 绔炴€併€?- 杈撳叆锛歳isk_registry.md锛圧-MC-02锛夛紱host_brain/memory/distillation.py锛泃ests/unit/test_memory_distillation.py銆?- 杈撳嚭锛?  - `host_brain/memory/distillation.py` 鎵╁睍锛歚MemoryDistillationEngine` 澧炲姞钂搁绾у埆浜掓枼閿侊紙threading.Lock锛夛紱
+  - `distill_top_k()` 鍏抽敭鍖哄鍔犫€滈攣鍐呬簩娆″箓绛夋鏌?+ 鍐欏叆鍚庡洖璇荤‘璁も€濓紱
+  - `tests/unit/test_memory_distillation.py` 鎵╁睍锛氭柊澧炲苟鍙戝洖褰掓祴璇曪紙澶氱嚎绋嬪悓婧愯捀棣忥級銆?- 楠屾敹鏍囧噯锛?  - 骞跺彂鍦烘櫙涓嬪悓涓€ source_hash 鏈€缁堜粎钀藉簱涓€娆★紱
+  - 涓嶅嚭鐜伴噸澶?semantic_memory 璁板綍锛?  - 骞跺彂娴嬭瘯绋冲畾閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/memory/distillation.py锛泃ests/unit/test_memory_distillation.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-001锛汿-Distill-07锛堝苟鍙戣ˉ鍏咃級銆?
+### TASK-0131 F-06 淇锛歘table_has_column 琛ㄧ粨鏋勭紦瀛橈紙绾跨▼瀹夊叏锛?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氫负 `SQLiteLedger._table_has_column()` 澧炲姞绾跨▼瀹夊叏鐨勫垪缁撴瀯缂撳瓨锛岄檷浣庨噸澶?PRAGMA 鏌ヨ寮€閿€銆?- 杈撳叆锛歳isk_registry.md锛圧119-3锛夛紱host_brain/audit/sqlite_ledger.py锛泃ests/contract/test_quality_contract.py銆?- 杈撳嚭锛?  - `host_brain/audit/sqlite_ledger.py` 鎵╁睍锛氭柊澧?`_column_cache_lock` 涓庡弻妫€閿佺紦瀛樺～鍏咃紱
+  - `_table_has_column()` 鍛戒腑缂撳瓨鏃朵笉鍐嶉噸澶嶆煡璇?`PRAGMA table_info`锛?  - `tests/contract/test_quality_contract.py` 鎵╁睍锛氬苟鍙戠紦瀛樿涓烘柇瑷€娴嬭瘯銆?- 楠屾敹鏍囧噯锛?  - 棣栨璋冪敤濉厖缂撳瓨锛屽悗缁懡涓紦瀛橈紱
+  - 骞跺彂璋冪敤鍦烘櫙浠呭彂鐢熶竴娆?PRAGMA 鏌ヨ锛?  - 璐ㄩ噺濂戠害娴嬭瘯閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛泃ests/contract/test_quality_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-PERF-001锛汿-Quality-01锛團-06 瀛愰」锛夈€?
+### TASK-0132 F-35/F-36 鏀跺彛锛歛pprove/reject 瀹¤鍘熷瓙鎬у寮?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氭敹鍙?`canon_routes.py` 涓?approve/reject 鐨勯潪鍘熷瓙椋庨櫓锛屽噺灏戦潪浜嬪姟绐楀彛骞跺皢瀹¤鍐欏叆澶辫触鍗囩骇涓洪敊璇繑鍥炪€?- 杈撳叆锛歳isk_registry.md锛圧119-1/R119-2锛夛紱host_brain/app/canon_routes.py銆?- 杈撳嚭锛?  - `approve_proposal` 鍘婚櫎鈥滀簩娆?DB 璇诲彇渚濊禆鈥濓紝浠ュ墠缃鍙栫粨鏋滄瀯閫犲搷搴旓紱
+  - `reject_proposal` 涓?`log_system_event` 澶辫触浠?warning 鍗囩骇涓?error + HTTP 500锛?  - 鍝嶅簲澶磋ˉ鍏?`X-Reason-Code: CANON_SYNC_FAILED`锛堝璁″け璐ュ彲瑙傛祴锛夈€?- 楠屾敹鏍囧噯锛?  - approve 璺緞涓嶅啀瀛樺湪棰濆浜屾璇诲彇绐楀彛锛?  - reject 瀹¤鍐欏叆澶辫触涓嶅啀闈欓粯鍚炴帀锛?  - Canon API 濂戠害娴嬭瘯閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/canon_routes.py锛泃ests/contract/test_canon_api_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WCANON-002锛汿-Canon-API-04~06銆?
+### TASK-0133 F-37 淇锛歁10-A 娓呭崟琛ラ攣鏍稿績鏂囦欢 hash
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氭墿灞?`m10a_release.json` 閿佸畾鑼冨洿锛岃ˉ榻?`canon_world_store.py` 涓?`sqlite_ledger.py` hash銆?- 杈撳叆锛歳isk_registry.md锛圧120-1锛夛紱host_brain/release/release_manifest.py锛況elease/manifests/m10a_release.json銆?- 杈撳嚭锛?  - `generate_m10a_manifest()` 澧炲姞 `canon_world_store_hash`銆乣sqlite_ledger_hash` 瀛楁锛?  - `release/manifests/m10a_release.json` 鍐欏叆鏂板 hash 瀛楁骞舵洿鏂板€笺€?- 楠屾敹鏍囧噯锛?  - m10a 娓呭崟鍖呭惈鏂板閿佸畾瀛楁锛?  - 瀛楁鍊间负鍚堟硶 sha256 鎽樿锛?  - 鍙戝竷濂戠害妫€鏌ラ€氳繃銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/release/release_manifest.py锛況elease/manifests/m10a_release.json銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汿-REL-01锛堟墿灞曞彛寰勶級銆?
+### TASK-0134 F-39 淇锛歴ource_intent_id 绔埌绔畬鏁存€ф牎楠?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氳ˉ榻?diary evolution proposal 鐨?`source_intent_id` 浠庢彁浜ゅ埌钀藉簱閾捐矾锛岄槻姝㈣法琛ㄥ叧鑱旀柇閾俱€?- 杈撳叆锛歳isk_registry.md锛圧115-1锛夛紱host_brain/memory/canon_world_store.py锛沨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/skills/impl/diary_writer.py銆?- 杈撳嚭锛?  - `canon_proposal_log` schema 澧炲姞 `source_intent_id`锛?  - `submit_proposal(..., source_intent_id=...)` 鍙傛暟璐€氾紱
+  - `diary_writer` 鍦ㄦ彁妗堟彁浜ゆ椂浼犲叆 diary intent_id锛?  - 杩佺Щ鑴氭湰涓庡绾︽祴璇曞悓姝ユ洿鏂般€?- 楠屾敹鏍囧噯锛?  - proposal 璁板綍鍙洖婧埌婧?intent_id锛?  - diary evolution 濂戠害娴嬭瘯鍚屾椂楠岃瘉杩斿洖鍊间笌 DB 钀藉簱瀛楁锛?  - 鏃?source_intent_id 鏃朵繚鎸佸悜鍚庡吋瀹广€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py锛沨ost_brain/audit/migrations/0002_canon_schema.sql锛沨ost_brain/audit/migrations/0016_canon_proposal_log.sql锛沨ost_brain/memory/canon_world_store.py锛沨ost_brain/skills/impl/diary_writer.py锛泃ests/contract/test_diary_evolution_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DIARY-002锛汿-Diary-03锛汿-Diary-04銆?
+### TASK-0135 F-12 鏀跺彛锛歳equirements 鍙€?Redis 渚濊禆璇存槑
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪 `requirements.txt` 鏄庣‘ Redis 涓哄彲閫変緷璧栵紝浠呭湪鍚敤 Redis rate-limit backend 鏃跺畨瑁呫€?- 杈撳叆锛歳isk_registry.md锛圧121-1锛夛紱requirements.txt锛泃ests/contract/test_quality_contract.py銆?- 杈撳嚭锛?  - `requirements.txt` 澧炲姞 Optional Dependencies 娉ㄩ噴鍧楋紙redis 鍙€夎鏄庯級锛?  - 璐ㄩ噺濂戠害琛ュ厖鏂█锛堣姹傚瓨鍦ㄢ€渞edis + 鍙€夆€濊鏄庯級銆?- 楠屾敹鏍囧噯锛?  - requirements 鏂囨湰鍚?redis 涓?optional/鍙€夋爣璇嗭紱
+  - 涓嶅己鍒堕粯璁ゅ畨瑁?redis锛?  - 瀵瑰簲璐ㄩ噺濂戠害娴嬭瘯閫氳繃銆?- 娑夊強鏂囦欢璺緞锛歳equirements.txt锛泃ests/contract/test_quality_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汿-Quality-01锛團-12 瀛愰」锛夈€?
+### TASK-0136 M10-D 鏀跺彛锛氳拷韪ˉ鍐?+ 绗叚鐗堝鏌ユ姤鍛?+ 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬畬鎴?M10-D 鏂囨。涓庡彂甯冮摼璺敹鍙ｏ細琛ュ啓 `R-98~R-104`锛岀敓鎴愮鍏増瀹℃煡鎶ュ憡锛岀敓鎴?`m10d_release.json`銆?- 杈撳叆锛歞ocs/60_trace/requirements_trace.md锛沝ocs/40_agents/full_code_review_report_2026-03-03-v5.md锛沨ost_brain/release/release_manifest.py銆?- 杈撳嚭锛?  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛歊-98~R-104锛?  - `docs/40_agents/full_code_review_report_2026-03-03-v6.md`锛堟柊澧烇級锛?  - `host_brain/release/release_manifest.py` 鎵╁睍锛歚generate_m10d_manifest()`锛?  - `release/manifests/m10d_release.json`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 闇€姹傝拷韪柊澧炴潯鐩畬鏁达紝鐘舵€佷负 DONE锛?  - 绗叚鐗堟姤鍛婃洿鏂板墿浣?P1/P2 鍙戠幇涓庝慨澶嶈繘灞曪紱
+  - m10d_release.json 鍖呭惈 milestone/git hash/migration hashes/鏍稿績鏂囦欢 hash/test_passed_count/generated_at銆?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/requirements_trace.md锛沝ocs/40_agents/full_code_review_report_2026-03-03-v6.md锛沨ost_brain/release/release_manifest.py锛況elease/manifests/m10d_release.json銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汿-REL-01锛堝彂甯冩竻鍗曞彛寰勬墿灞曪級銆?
+### TASK-0137 F-04 璺熻繘锛歊edis 鍚庣鐪熷疄闆嗘垚娴嬭瘯钀藉湴
+- 鐘舵€侊細BLOCKED_ENV锛?026-03-04锛屾殏缂撯€斺€斿崟鏈?SQLite 閮ㄧ讲鏃犻渶 Redis锛涘瀹炰緥閮ㄧ讲鍓嶆墽琛岋級
+- 浠诲姟鎻忚堪锛氫负 `RedisRateLimitStore` 澧炲姞鐪熷疄 Redis 鐜闆嗘垚娴嬭瘯锛岄獙璇佸叡浜鏁颁笌 checker 琛屼负锛屾秷闄も€滀粎闄嶇骇璺緞瑕嗙洊鈥濈殑楠岃瘉缂哄彛銆?- 杈撳叆锛歳isk_registry.md锛圧39-1锛夛紱host_brain/governor/rate_limit_store.py锛泃ests/contract/test_governor_rate_limit_contract.py銆?- 杈撳嚭锛?  - `tests/integration/test_rate_limit_redis_integration.py`锛堟柊澧烇級锛?    - 鐪熷疄 Redis 鍚庣 `check/check_only/reset/ttl` 楠岃瘉锛?    - 鍙屽疄渚嬪叡浜鏁颁竴鑷存€ч獙璇侊紱
+    - 閫氳繃 `NASTUME_TEST_REDIS_URL` 鐜鍙橀噺鍚敤锛岀己鐪佽嚜鍔?skip锛堜笉褰卞搷榛樿 CI锛夈€?- 楠屾敹鏍囧噯锛?  - 閰嶇疆 `NASTUME_TEST_REDIS_URL` 涓?Redis 鍙揪鏃讹紝闆嗘垚娴嬭瘯閫氳繃锛?  - 鏈厤缃垨 Redis 涓嶅彲杈炬椂锛屾祴璇曠ǔ瀹?skip锛?  - 涓嶅紩鍏ラ粯璁ゆ祴璇曢摼璺笉绋冲畾鎬с€?- 娑夊強鏂囦欢璺緞锛歵ests/integration/test_rate_limit_redis_integration.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-001锛汿-Gov-R4-Redis-01锛堥泦鎴愯ˉ鍏咃級銆?
+### TASK-0138 F-05 璺熻繘锛歐AL/NFS 閮ㄧ讲鏂囨。鏄惧紡绾︽潫
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氬湪閮ㄧ讲鏂囨。涓樉寮忚ˉ鍏?SQLite WAL 涓?NFS 涓嶅吋瀹归闄╁強楠屾敹鍙ｅ緞锛岄伩鍏嶇敓浜ч儴缃茶俯鍧戙€?- 杈撳叆锛歳isk_registry.md锛圧36-1锛夛紱docs/50_project/ExternalServices_Config.md锛沝ocs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md銆?- 杈撳嚭锛?  - `ExternalServices_Config.md` 鏂板 SQLite WAL 瀛樺偍浠嬭川瑕佹眰锛堟湰鍦扮鐩樹紭鍏堬紝NFS/SMB 绂佺敤寤鸿锛夛紱
+  - `ENV_EXTERNAL_SERVICES_CHECKLIST.md` 鏂板閮ㄧ讲鍓嶅己鏍￠獙鏉＄洰锛坖ournal_mode/WAL 涓?`AUDIT_WAL_FAILED` 鍛婅鍙ｅ緞锛夈€?- 楠屾敹鏍囧噯锛?  - 閮ㄧ讲鏂囨。鏄庣‘鈥淟edger 涓诲簱绂佹 NFS/缃戠粶鏂囦欢绯荤粺鈥濓紱
+  - 鏄庣‘ WAL 澶辫触闄嶇骇璇箟涓庤繍缁存鏌ユ柟娉曪紱
+  - 涓?risk_registry 鐨?R36-1 瀵归綈銆?- 娑夊強鏂囦欢璺緞锛歞ocs/50_project/ExternalServices_Config.md锛沝ocs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汵FR-MAINT-001銆?
+### TASK-0139 F-01/F-02 鏀跺彛锛歋andbox 瀹瑰櫒纭殧绂?+ 璺ㄥ钩鍙拌秴鏃朵竴鑷村寲
+- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氭敹鍙?`airlock/sandbox.py` 鍦ㄩ儴缃茬幆澧冪殑涓ら」 P1 椋庨櫓锛氱敓浜х幆澧冨鍣ㄧ‖闅旂绾︽潫锛團-01锛変笌 Windows/Linux 瓒呮椂缁堟璇箟涓€鑷村寲锛團-02锛夈€?- 杈撳叆锛歳isk_registry.md锛團-01/F-02锛夛紱host_brain/airlock/sandbox.py锛泃ests/contract/test_sandbox_contract.py锛泃ests/contract/test_sandbox_docker_contract.py銆?- 杈撳嚭锛?  - `host_brain/airlock/sandbox.py` 鎵╁睍锛歚SandboxConfig.require_container`銆乣isolation_backend=auto`銆佺敓浜х幆澧冨鍣ㄥ繀閫夊垽瀹氾紱
+  - 瀹瑰櫒蹇呴€変笖涓嶅彲鐢ㄦ椂杩斿洖 `UNAVAILABLE + SANDBOX_CONTAINER_UNAVAILABLE`锛堢姝㈤檷绾у埌 subprocess锛夛紱
+  - subprocess 璺緞缁熶竴閲囩敤 `Popen.communicate(timeout=...)` + 骞冲彴鎰熺煡缁堟锛圵indows `taskkill /T /F`锛孡inux/Unix `killpg`锛夛紱
+  - `resource_usage` 琛ュ厖 `timeout_enforcement/platform/isolation_backend` 璇婃柇瀛楁銆?- 楠屾敹鏍囧噯锛?  - 鐢熶骇鐜鎴?`require_container=True` 鏃讹紝涓嶆弧瓒冲鍣ㄩ殧绂诲繀椤荤‖澶辫触锛?  - 瓒呮椂璺緞鍦?Windows/Linux 杩斿洖涓€鑷磋涔夛紙TIMEOUT + SANDBOX_TIMEOUT锛夛紱
+  - T-Sandbox-01 涓?T-Sandbox-Docker-01 鍥炲綊閫氳繃锛堝惈鏂板鏂█锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/airlock/sandbox.py锛泃ests/contract/test_sandbox_contract.py锛泃ests/contract/test_sandbox_docker_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AIRLOCK-002锛汿-Sandbox-01锛汿-Sandbox-Docker-01銆?
+### TASK-0140 F-11 鏀跺彛锛歐eChat鈫扙dge 鐪熷疄 RPC 绔埌绔獙璇?- 鐘舵€侊細DONE锛?026-03-03锛?- 浠诲姟鎻忚堪锛氳ˉ榻?F-11 楠岃瘉缂哄彛锛欵2E 娴嬭瘯涓嶅啀鐩存帴鍐?Ledger 妯℃嫙 Edge锛岃€屾槸缁?Host `POST /v1/edge/events` 鐪熷疄 RPC 鍏ュ彛鍐欏叆璇煶浜嬩欢銆?- 杈撳叆锛歳isk_registry.md锛團-11锛夛紱host_brain/app/fastapi_app.py锛沞dge_client/rpc/event_reporter.py锛泃ests/e2e fixtures銆?- 杈撳嚭锛?  - `tests/e2e/test_wechat_vts_voice_rpc_e2e.py`锛堟柊澧烇級锛氳鐩?WeChat 鍏ョ珯 鈫?Governor APPROVE 鈫?Skill 鎵ц 鈫?EdgeEventReporter 閫氳繃 HTTP 涓婃姤 `ASR_CHUNK/TTS_PLAY`锛?  - E2E 鏂█琛ュ厖锛歚voice_event_log` 鐪熷疄钀藉簱 + `trace_request` 閾捐矾瀹屾暣锛?  - 娴嬭瘯渚?Ledger 杩炴帴璋冩暣涓?`check_same_thread=False`锛屼繚璇?TestClient 璺ㄧ嚎绋嬪啓搴撶ǔ瀹氥€?- 楠屾敹鏍囧噯锛?  - 浜嬩欢涓婃姤閫氳繃鐪熷疄 `/v1/edge/events` 鍏ュ彛锛堥潪鐩存帴璋冪敤 Ledger锛夛紱
+  - `ASR_CHUNK` 涓?`TTS_PLAY` 鍧囧彲鍦ㄥ璁¤〃涓洖鏀撅紱
+  - 鑱氱劍 E2E+RPC+Sandbox + manifest 鍥炲綊閫氳繃锛?02 passed锛夈€?- 娑夊強鏂囦欢璺緞锛歵ests/e2e/test_wechat_vts_voice_rpc_e2e.py锛堟柊澧烇級锛沨ost_brain/airlock/sandbox.py锛泃ests/contract/test_sandbox_contract.py锛泃ests/contract/test_sandbox_docker_contract.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CHANNEL-001锛汧R-VOICE-001锛汿-E2E-RPC-01銆?
 ---
 
-### TASK-0084 Edge RPC Gateway 最小运行进程（P1 Edge 运行时）
-- 任务描述：实现 Edge 侧最小可运行 RPC 网关进程，对 Host 暴露能力端点并完成签名/重放校验与契约化响应，确保“只执行、不裁决”。
-- 输入：DevSpec 2.2（Edge RPC 能力端点）；DevSpec 2.4（Host→Edge HMAC + nonce + ts_ms）；DevSpec 14.2（Edge 边界）；TASK-0087 输出的鉴权与 schema；edge_client/config.py；edge_client/rpc/*。
-- 前置依赖：TASK-0087（鉴权中间件）；TASK-0085（runtime 装配接口）。
-- 输出：
-  - `edge_client/app/fastapi_app.py`（新增）：提供 `POST /v1/edge/speak`、`POST /v1/edge/barge_in`、`POST /v1/edge/vts`、`POST /v1/edge/fallback/{presence|asr_compile|retrieval_hints|context_compress}`、`GET /v1/edge/health`（路由细节与参数以 edge_client/rpc 契约为准；asr 上送由 TASK-0088 统一上行实现）。
-  - 统一响应结构：`{success,status,reason_code,detail,event,ts_ms}`，所有端点仅返回此结构。
-  - 端点实现仅调用 edge_client/rpc 契约对象与 runtime 装配对象，不引入 Host 裁决逻辑与副作用外推。
-  - `edge_client/pyproject.toml`：补充 FastAPI/uvicorn 依赖（Edge 侧 RPC 运行时）。
-  - fixtures：端点缺字段/非法 payload/服务被 config 禁用的样例。
-- 验收标准：
-  - 被禁用能力端点返回稳定的不可用状态（reason_code 可统计）；
-  - 所有 RPC 端点输出结构稳定（success/status/reason_code/detail/event），且拒绝原因与契约一致；
-  - 回归覆盖（新增）`T-Edge-RPC-02`（端点契约）。
-- 涉及文件路径：edge_client/app/fastapi_app.py（新增）；edge_client/pyproject.toml；tests/contract/test_edge_rpc_gateway_contract.py（新增）；tests/fixtures/edge/。
-- 关联需求/测试：FR-VOICE-002~004；T-Edge-RPC-02。
-
-### TASK-0085 Edge 运行时装配 + 健康快照（P1 Edge 观测）
-- 任务描述：补齐 Edge 运行时装配器与健康快照聚合，返回能力矩阵与资源状态（显存/队列/活动任务）。
-- 输入：DevSpec 2.2（health 能力矩阵与资源状态）；DevSpec 2.5（fallback LLM 约束）；edge_client/config.py；edge_client/senses/asr.py；edge_client/actuators/tts_engine.py；edge_client/actuators/vts_driver.py；edge_client/actuators/speech.py；edge_client/rpc/resource_gate.py；edge_client/rpc/fallback_llm.py。
-- 前置依赖：TASK-0087（配置与安全字段统一）。
-- 输出：
-  - `edge_client/runtime/bootstrap.py`（新增）：根据 `EdgeConfig` 装配 ASR/TTS/VTS/Fallback/ResourceGate，统一生命周期与开关。
-  - `edge_client/runtime/health.py`（新增）：聚合 `build_edge_runtime_statuses` + 各组件 `health()` + ResourceGate `snapshot()` + 队列深度，输出稳定 health schema。
-  - health schema 必含：`services`（能力矩阵）、`resources`（vram_total_mb/vram_used_mb/queue_depth）、`components`（asr/tts/vts/fallback/resource_gate 详细状态）、`config_snapshot`（脱敏）。
-  - `edge_client/app/fastapi_app.py` 的 `/v1/edge/health` 使用上述聚合结果。
-  - fixtures：ASR/TTS 关闭、fallback 关闭、resource_gate 关闭的健康快照样例。
-- 验收标准：
-  - 配置开关与健康矩阵一致（禁用即不可用）；fallback 默认不可用；
-  - 健康输出包含 services/资源/组件状态/配置快照，字段稳定且可审计；
-  - 回归覆盖（新增）`T-Edge-Health-01`（能力矩阵与资源快照）。
-- 涉及文件路径：edge_client/runtime/bootstrap.py（新增）；edge_client/runtime/health.py（新增）；edge_client/app/fastapi_app.py；edge_client/config.py；tests/contract/test_edge_health_contract.py（新增）；tests/fixtures/edge/。
-- 关联需求/测试：FR-VOICE-001~005；T-Edge-Health-01。
-
-### TASK-0086 Edge 启动入口 + 本地启动脚本（P2 运维）
-- 任务描述：提供 Edge 的标准启动入口与本地脚本，确保可按环境变量直接启动/停止，且优雅释放音频与 VTS 连接。
-- 输入：DevSpec 2.2（Edge 进程职责）；DevSpec 2.4（通信安全）；TASK-0085 输出的 runtime 装配；edge_client/config.py；README.md（运行指引）。
-- 前置依赖：TASK-0084（RPC 网关）；TASK-0085（runtime 生命周期）。
-- 输出：
-  - `edge_client/__main__.py`（新增）：加载 EdgeConfig，初始化 runtime/bootstrap 并启动 RPC 网关；
-  - `scripts/runtime/start_edge.ps1` / `scripts/runtime/stop_edge.ps1`（新增）：本地启动/停止 Edge 进程；
-  - README.md：新增 Edge 启动说明与必要环境变量提示（含 `EDGE_RPC_HOST/PORT`、`EDGE_ALLOW_INSECURE_AUTH`、`EDGE_HMAC_SHARED_KEY(_REF)`）。
-- 验收标准：
-  - `python -m edge_client` 可在 `EDGE_RPC_HOST/PORT` 启动服务并输出脱敏配置快照；
-  - Ctrl+C 能优雅关闭（ASR 音频流、TTS 播放、VTS 连接关闭，无资源泄漏）；
-  - 回归覆盖（新增）`T-Edge-Start-01`（启动/关闭最小烟测）。
-- 涉及文件路径：edge_client/__main__.py（新增）；edge_client/runtime/bootstrap.py；scripts/runtime/start_edge.ps1（新增）；scripts/runtime/stop_edge.ps1（新增）；README.md；tests/contract/test_edge_bootstrap_contract.py（新增）。
-- 关联需求/测试：FR-VOICE-001~005；T-Edge-Start-01。
-
-### TASK-0087 Edge RPC 请求包络 + 鉴权与重放保护（P1 Edge 安全）
-- 任务描述：定义 Edge RPC 统一请求包络与鉴权/重放校验策略，提供稳定的拒绝 reason_code 与可回归 fixtures。
-- 输入：DevSpec 2.4（HMAC + nonce + ts_ms + 重放窗口）；DevSpec 14.3（强类型 Schema）；edge_client/config.py；host_brain/core/errors.py。
-- 前置依赖：无（Edge 阶段基线任务）。
-- 输出：
-  - `edge_client/app/schemas.py`（新增）：定义 `EdgeRpcEnvelope`（request_id/ts_ms/nonce/signature/payload）与 `EdgeRpcResponse`（success/status/reason_code/detail/event/ts_ms）。
-  - `edge_client/rpc/auth.py`（新增）：实现 HMAC 校验、时间窗校验、nonce 重放缓存；提供可注入的 `now_ms()` 与缓存清理策略。
-  - `edge_client/config.py`：新增鉴权相关配置项（如 `EDGE_RPC_AUTH_WINDOW_MS`/`EDGE_RPC_NONCE_WINDOW_MS`），并进入 config snapshot。
-  - `host_brain/core/errors.py`：新增鉴权/Schema 失败类 reason_code（如 `EDGE_RPC_SCHEMA_INVALID`/`EDGE_RPC_AUTH_INVALID`/`EDGE_RPC_AUTH_EXPIRED`），与 `REPLAY_DETECTED` 并列。
-  - fixtures：缺字段/签名错误/ts_ms 过期/nonce 重放/允许不鉴权（dev/test）样例。
-- 验收标准：
-  - 缺字段稳定返回 `EDGE_RPC_SCHEMA_INVALID`；签名错误返回 `EDGE_RPC_AUTH_INVALID`；ts_ms 过期返回 `EDGE_RPC_AUTH_EXPIRED`；nonce 重放返回 `REPLAY_DETECTED`；
-  - `EDGE_ALLOW_INSECURE_AUTH=true` 时仍校验 schema，但允许跳过签名校验并记录降级字段；
-  - 回归覆盖（新增）`T-Edge-RPC-01`（鉴权与重放）。
-- 涉及文件路径：edge_client/app/schemas.py（新增）；edge_client/rpc/auth.py（新增）；edge_client/config.py；host_brain/core/errors.py；tests/contract/test_edge_rpc_auth_contract.py（新增）；tests/fixtures/edge/。
-- 关联需求/测试：FR-CORE-002；NFR-SEC-001；T-Edge-RPC-01。
-
-### TASK-0088 Edge 语音上行编排与事件上送（P1 Edge 语音）
-- 任务描述：补齐 Edge 语音链路的编排层，将 ASR 事件稳定上送到 Host，并与 TTS 播放/打断/VTS 表情联动。
-- 输入：DevSpec 2.2（asr/speak/barge-in/vts/health）；DevSpec 2.5（fallback 约束）；edge_client/senses/asr.py；edge_client/actuators/speech.py；edge_client/actuators/tts_engine.py；edge_client/actuators/vts_driver.py；edge_client/rpc/event_reporter.py；edge_client/rpc/voice.py。
-- 前置依赖：TASK-0079（Edge→Host 事件上报）；TASK-0084（RPC 网关）；TASK-0085（runtime 装配）。
-- 输出：
-  - `edge_client/runtime/voice_pipeline.py`（新增）：封装 ASR→事件上送、TTS 队列、barge-in 打断、VTS talk gate 联动。
-  - ASR 上行：使用 `EdgeEventReporter` 将 asr_chunk 作为 EdgeEvent 批量上送（对接 Host `POST /v1/edge/events`），附带 vram/queue 指标（若可用）。
-  - 播放联动：TTS 播放开始触发 VTS talk_start，结束/打断触发 talk_end 或 neutral 复位。
-  - 资源闸门：speak/tts/playback/llm 使用 `VoiceResourceGate`，优先级与互斥符合 DevSpec。
-  - fixtures：ASR 正常上送/网络中断缓存/恢复补发；barge-in 打断播放与 VTS 复位。
-- 验收标准：
-  - ASR 事件可通过 Edge→Host 事件通道稳定上送并通过 schema 校验；
-  - barge-in 可打断播放并记录 `VOICE_INTERRUPTED`，VTS 进入结束态；
-  - 资源闸门生效时返回稳定拒绝 reason_code；
-  - 回归覆盖（新增）`T-Edge-Voice-01`（ASR 上送与缓存补发）与 `T-Edge-Voice-02`（barge-in 与 VTS 联动）。
-- 涉及文件路径：edge_client/runtime/voice_pipeline.py（新增）；edge_client/runtime/bootstrap.py；edge_client/actuators/speech.py；edge_client/rpc/event_reporter.py；tests/contract/test_edge_voice_pipeline_contract.py（新增）；tests/fixtures/edge/。
-- 关联需求/测试：FR-VOICE-001~003；FR-VOICE-005；T-Edge-Voice-01；T-Edge-Voice-02。
-
-### TASK-0089 Edge Contract 测试矩阵补齐与 fixtures 命名规范（P1 QA）
-- 任务描述：将 Edge 新增任务（0084~0088）的验收断言固化为可追溯 contract 测试矩阵，并统一 fixtures 命名与目录分层，避免后续测试口径漂移。
-- 输入：TASK-0084~0088 的输出契约；tests/TESTPLAN.md；tests/contract 既有风格。
-- 前置依赖：TASK-0084~0088（功能接口已落地）。
-- 输出：
-  - `tests/contract/` 新增或完善测试文件：`test_edge_rpc_auth_contract.py`、`test_edge_rpc_gateway_contract.py`、`test_edge_health_contract.py`、`test_edge_bootstrap_contract.py`、`test_edge_voice_pipeline_contract.py`。
-  - fixtures 命名规范：`tests/fixtures/edge/{auth|gateway|health|voice}/{good|bad}/*.json`，文件名采用 `场景_期望.json`（例：`expired_ts_reject.json`）。
-  - 覆盖映射：每个 `T-Edge-*` 编号至少有一个成功样例和一个拒绝/降级样例。
-  - `tests/TESTPLAN.md` 同步登记 `T-Edge-RPC-01`、`T-Edge-RPC-02`、`T-Edge-Health-01`、`T-Edge-Start-01`、`T-Edge-Voice-01`、`T-Edge-Voice-02` 的断言口径。
-- 验收标准：
-  - `DevTasks` 中所有 `T-Edge-*` 编号在 `TESTPLAN` 可检索且语义一致；
-  - 合同测试可覆盖鉴权失败、schema 失败、能力禁用、启动关闭、事件补发与打断联动；
-  - fixtures 目录结构与命名规范稳定，新增场景不破坏既有回放路径。
-- 涉及文件路径：tests/contract/；tests/fixtures/edge/；tests/TESTPLAN.md；docs/30_devspec/DevTasks.md。
-- 关联需求/测试：FR-CORE-002；FR-VOICE-001~005；T-Edge-RPC-01；T-Edge-RPC-02；T-Edge-Health-01；T-Edge-Start-01；T-Edge-Voice-01；T-Edge-Voice-02。
-
-### TASK-0090 Edge 交付顺序与回滚口径固化（P2 交付）
-- 任务描述：固化 Edge 任务分批交付顺序、失败回滚策略与最小可运行门槛，确保 0084~0089 可逐批上线且可快速回退。
-- 输入：TASK-0084~0089；docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md；README.md。
-- 前置依赖：TASK-0089（测试矩阵完成）。
-- 输出：
-  - 交付批次定义（建议）：`Batch-A`=0087+0085、`Batch-B`=0084+0086、`Batch-C`=0088+0089；
-  - 每批回滚口径：回滚触发条件、保留资产（fixtures/audit）、回滚后可用能力矩阵；
-  - README 增加“Edge 最小可运行门槛”与“故障回退模式（仅 health / 禁用 speak / 禁用 asr 上行）”说明。
-- 验收标准：
-  - 任一批次失败时有明确回滚目标与可验证健康状态；
-  - 回滚不破坏审计回放链和 `T-RPC-Event-01` 既有能力；
-  - 交付文档与 `DevTasks`/`TESTPLAN` 编号一致。
-- 涉及文件路径：docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md；README.md；docs/30_devspec/DevTasks.md；tests/TESTPLAN.md。
-- 关联需求/测试：NFR-REL-001；FR-CORE-004；T-Edge-Start-01；T-RPC-Event-01。
-
-## 4. M4 体验包任务清单（TASK-0091 ~ TASK-0098）
-
-### TASK-0091 Scheduler 定时调度器基础组件（M4 前置，P0）
-- 任务描述：实现 Host 定时调度器基础组件，支持 cron/interval/once 三种触发模式；调度器触发的 Intent 必须走完整单向链（Governor→Token→Skill→Audit），与用户请求享有相同治理。
-- 输入：DevSpec 15.1；PRD FR-SCHED-001~002。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`（新增）：调度器主体，基于 APScheduler 或等价轻量库；
-  - `host_brain/scheduler/task_registry.py`（新增）：任务注册表（task_id/trigger_config/intent_template/priority/mode_allowlist/enabled/max_consecutive_failures）；
-  - `host_brain/scheduler/health.py`（新增）：任务健康快照（task_id/last_run_ts/next_run_ts/status/error_count/suspended_reason）；
-  - `scheduler_event_log` 审计表（SQLite Ledger 新增）：task_id/trigger_ts/intent_id/status/reason_code/mode_at_trigger/error_detail；
-  - `system_initiated_intent` 生成逻辑：proposer_node_id=scheduler，复用现有 Intent Schema；
-  - sys_mode 门控矩阵实现（HIGH/MEDIUM/LOW 优先级 × Normal/Sleep/Gaming/Focus）；
-  - 连续失败自动暂停策略（max_consecutive_failures 后 status=SUSPENDED + SCHED_TASK_SUSPENDED）；
-  - 新增错误码：SCHED_TASK_SUSPENDED / SCHED_CONDITION_UNMET / SCHED_NO_CONTENT；
-  - fixtures：正常触发/Gaming 拦截/连续失败暂停/Focus 模式暂停。
-- 验收标准：
-  - 调度器注册/注销/触发可回放，审计链中 proposer_node_id=scheduler；
-  - sys_mode=GAMING 时低/中优先级任务被拦截（SYSMODE_FORBIDDEN）；
-  - 连续失败 N 次后自动暂停且 reason_code 可统计；
-  - 健康快照可被 /health 端点或面板读取；
-  - T-Sched-01、T-Sched-02、T-Sched-03 全部通过。
-- 涉及文件路径：host_brain/scheduler/scheduler.py（新增）；host_brain/scheduler/task_registry.py（新增）；host_brain/scheduler/health.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/test_scheduler_contract.py（新增）；tests/fixtures/scheduler/。
-- 关联需求/测试：FR-SCHED-001~002；FR-MODE-001；T-Sched-01~03。
-
-### TASK-0092 Desktop Note Skill 桌面留言（M4 P0）
-- 任务描述：实现桌面留言 Skill，支持在安全基目录下创建/更新/删除文本文件；操作可逆，产出 manifest + undo_token；路径穿越拒绝；内容经 QA 校验。
-- 输入：DevSpec 15.2；PRD FR-DESKTOP-001~002；TASK-0084 输出的 Scheduler（用户触发为主，Scheduler 触发为辅）。
-- 输出：
-  - `host_brain/skills/impl/desktop_note.py`（新增）：桌面留言 Skill handler + SkillMeta 声明；
-  - args 校验：action/filename/content/base_dir_key；路径穿越检查（`..`/symlink 拒绝 → SCOPE_VIOLATION）；
-  - 文件 manifest：before_hash/after_hash/path/artifact_refs；
-  - delete → move-to-quarantine；真删需 confirm_token；
-  - QA 校验集成：内容含伪执行句 → 拦截重写；
-  - 新增配置项：NATSUME_DESKTOP_DIR（安全基目录）；
-  - fixtures：创建成功/路径穿越拒绝/undo 恢复/QA 拦截/Gaming 拒绝。
-- 验收标准：
-  - 文件创建成功 + manifest 完整 + undo 恢复原状态；
-  - 路径穿越 → SCOPE_VIOLATION；Gaming → SYSMODE_FORBIDDEN；
-  - 内容 QA 拦截可回放；
-  - T-Desktop-01、T-Desktop-02 全部通过。
-- 涉及文件路径：host_brain/skills/impl/desktop_note.py（新增）；host_brain/skills/registry.py；host_brain/lsp/vault.py；host_brain/core/qa.py；tests/contract/test_desktop_note_contract.py（新增）；tests/fixtures/desktop/。
-- 关联需求/测试：FR-DESKTOP-001~002；FR-LSP-001~002；T-Desktop-01~02；T-Vault-01。
-
-### TASK-0093 Dream Skill 梦境生成（M4 P1）
-- 任务描述：实现梦境生成 Skill，由调度器在 Sleep/空闲时触发；读取当日 Episodic Memory → LLM 生成梦境叙事 → 写入 Episodic（dream 标签 + NARRATIVE_ONLY）。
-- 输入：DevSpec 15.3；PRD FR-DREAM-001~002；TASK-0084 输出的 Scheduler。
-- 输出：
-  - `host_brain/skills/impl/dream_generator.py`（新增）：梦境 Skill handler + SkillMeta 声明；
-  - Scheduler 任务注册：trigger=Sleep/idle，priority=MEDIUM；
-  - 当日 Episodic 读取逻辑（ts_ms 当日范围过滤，TopK=20）；
-  - context_pack 打包（bond_summary + 当日 episodic 摘要）→ LLM 梦境叙事；
-  - Episodic 写入：category=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]；
-  - manifest：memory_before_count/memory_after_count/dream_id/hash；
-  - QA 校验：不得伪执行/Canon-as-fact；
-  - 召回口径扩展：episodic 中 evidence_level=NARRATIVE_ONLY 标注在 context_pack 透传；
-  - fixtures：Sleep 模式触发成功/Normal 非空闲拒绝/Episodic 不可用降级/梦境召回非事实约束。
-- 验收标准：
-  - 梦境写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；
-  - Normal 非空闲时拒绝（SCHED_CONDITION_UNMET）；
-  - 召回梦境时 QA 确认 evidence_level 标注存在；
-  - T-Dream-01、T-Dream-02 全部通过。
-- 涉及文件路径：host_brain/skills/impl/dream_generator.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/core/context_pack.py；host_brain/core/qa.py；tests/contract/test_dream_contract.py（新增）；tests/fixtures/dream/。
-- 关联需求/测试：FR-DREAM-001~002；FR-MEM-001；FR-SCHED-001；T-Dream-01~02。
-
-### TASK-0094 Diary Skill 日记生成（M4 P1）
-- 任务描述：实现每日日记 Skill，由调度器定时触发；汇总当日对话 → LLM 生成日记叙事 → 双写文件 + Episodic Memory；无对话时跳过不伪造。
-- 输入：DevSpec 15.4；PRD FR-DIARY-001~002；TASK-0084 输出的 Scheduler。
-- 输出：
-  - `host_brain/skills/impl/diary_writer.py`（新增）：日记 Skill handler + SkillMeta 声明；
-  - Scheduler 任务注册：trigger=cron(23:00)，priority=HIGH；
-  - 当日对话汇总逻辑：读取 intent_log + governor_log 当日记录 + Episodic 当日条目；
-  - 无实质对话检测 → 跳过 + SCHED_NO_CONTENT（不伪造日记）；
-  - 有对话 → context_pack → LLM 日记叙事 → 双写：
-    - 本地文件：`{base_dir}/diary/{YYYY-MM-DD}.md`，产出 file manifest；
-    - Episodic Memory：category=diary, evidence_refs=[intent_id, file_path]；
-  - QA 校验：不得含伪执行句；
-  - Evolution 提案（可选）：drift_suggestion → canon_proposal_log；
-  - fixtures：有对话触发成功/无对话跳过/文件 undo 回滚/Evolution 提案写入。
-- 验收标准：
-  - 日记文件创建 + Episodic 写入 + 审计链完整；
-  - 无当日对话时不伪造（SCHED_NO_CONTENT）；
-  - 日记文件 manifest 可撤销；
-  - T-Diary-01、T-Diary-02 全部通过。
-- 涉及文件路径：host_brain/skills/impl/diary_writer.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/contract/test_diary_contract.py（新增）；tests/fixtures/diary/。
-- 关联需求/测试：FR-DIARY-001~002；FR-MEM-001；FR-LSP-001；FR-SCHED-001；T-Diary-01~02。
-
-### TASK-0095 Proactive Talk Skill 主动对话（M4 P1）
-- 任务描述：实现主动对话 Skill，由调度器按条件策略触发；生成问候/关心/提醒内容并通过 Edge RPC 或微信通道推送；频率限制 + 内容 QA + 推送失败静默降级。
-- 输入：DevSpec 15.5；PRD FR-PROACTIVE-001~002；TASK-0084 输出的 Scheduler。
-- 输出：
-  - `host_brain/skills/impl/proactive_talk.py`（新增）：主动对话 Skill handler + SkillMeta 声明；
-  - Scheduler 任务注册：trigger=interval(15min check)，priority=LOW；
-  - 触发条件组合实现：idle_duration + bond.stage + sys_mode + active_hours（AND 逻辑）；
-  - 频率限制集成：Rate Limit R4 Gate（3/hour）；
-  - context_pack 打包（bond_summary + 最近 episodic + 时间段信息）→ LLM 草案；
-  - QA 校验：内容仅限问候/关心/回忆引用/提醒口径；含执行 intent → 拦截；
-  - 推送路径选择：Edge RPC speak > 微信 outbound > 静默降级（不重试）；
-  - 审计：复用 skill_exec_log 记录触发条件快照、推送结果、reason_code；
-  - fixtures：空闲触发成功/Gaming 拒绝/频率超限/Edge 不可达降级/内容 QA 拦截。
-- 验收标准：
-  - 空闲触发 + 推送成功 + 审计链完整；
-  - Gaming → SYSMODE_FORBIDDEN；频率超限 → RATE_LIMIT_EXCEEDED；
-  - 推送失败静默降级不重试；
-  - T-Proactive-01、T-Proactive-02 全部通过。
-- 涉及文件路径：host_brain/skills/impl/proactive_talk.py（新增）；host_brain/skills/registry.py；host_brain/channels/wechat.py；host_brain/core/qa.py；host_brain/governor/rules.py；tests/contract/test_proactive_contract.py（新增）；tests/fixtures/proactive/。
-- 关联需求/测试：FR-PROACTIVE-001~002；FR-SCHED-001；FR-CHANNEL-001；T-Proactive-01~02。
-
-### TASK-0096 Focus Mode 专注模式状态扩展（M4 P1）
-- 任务描述：扩展 sys_mode 状态机，新增 Focus 子模式（Normal 的子状态）；进入后暂停中断型能力（主动对话/通知推送/非紧急调度），保留被动响应；进入/退出可审计。
-- 输入：DevSpec 15.6；PRD FR-FOCUS-001；TASK-0084 输出的 Scheduler 门控矩阵。
-- 输出：
-  - `host_brain/core/metabolism.py` 扩展：新增 sub_mode=FOCUS 状态枚举与切换逻辑；
-  - 进入条件：用户指令 / 定时策略 / 日历事件（需 evidence）；
-  - 退出条件：用户指令 / 定时策略到期 / 超时自动退出（可配置默认时长）；
-  - Governor rules.py 扩展：Focus 子模式下 proactive/dream 等 LOW/MEDIUM 优先级任务 → SYSMODE_FORBIDDEN_FOCUS；
-  - Scheduler 联动：Focus 进入时暂停非紧急任务，退出时恢复；
-  - hard_state_log 审计：进入/退出事件（原因、证据摘要、持续时长）；
-  - scheduler_event_log：被拦截任务写 reason_code=SYSMODE_FORBIDDEN_FOCUS；
-  - fixtures：进入 Focus/主动对话拦截/用户提问正常/退出恢复/超时自动退出。
-- 验收标准：
-  - Focus 进入后主动对话被拦截；用户主动提问正常响应；
-  - 退出后调度器恢复；审计可回放切换事件；
-  - T-Focus-01 全部通过。
-- 涉及文件路径：host_brain/core/metabolism.py；host_brain/governor/rules.py；host_brain/scheduler/scheduler.py；host_brain/audit/sqlite_ledger.py；tests/contract/test_focus_mode_contract.py（新增）；tests/fixtures/focus/。
-- 关联需求/测试：FR-FOCUS-001；FR-MODE-001~002；FR-SCHED-001；T-Focus-01。
-
-### TASK-0097 M4 E2E 集成测试：Scheduler→Skill→Audit 全链闭环验证（M4 P2）
-- 任务描述：为 M4 全部 5 个 Skill（desktop_note/dream_generator/diary_writer/proactive_talk/focus_mode）编写 E2E 集成测试，验证从 Scheduler 触发到 Audit 写入的完整闭环。
-- 输入：TASK-0084~TASK-0089 输出的所有组件。
-- 输出：
-  - `tests/e2e/test_m4_experience_pack.py`（新增）：
-    - 桌面留言 E2E：创建 → 验证文件 → undo → 验证恢复 → 审计串联；
-    - 梦境 E2E：Sleep 触发 → Episodic 写入 dream 标签 → 后续对话召回 → QA 非事实约束；
-    - 日记 E2E：定时触发 → 文件 + Episodic 双写 → 无对话跳过 → 审计串联；
-    - 主动对话 E2E：空闲触发 → 推送成功 → 频率超限拒绝 → Gaming 拒绝 → 审计串联；
-    - Focus Mode E2E：进入 → 主动对话拦截 → 用户提问正常 → 退出恢复 → 审计串联；
-  - 所有 E2E 使用 LLM stub + 本地 fixtures，不依赖真实外部服务。
-- 验收标准：
-  - 5 个功能的 E2E 全部通过；
-  - 现有 E2E 测试无回归；
-  - 审计链串联键（request_id/intent_id/proposer_node_id）完整可回放。
-- 涉及文件路径：tests/e2e/test_m4_experience_pack.py（新增）；tests/fixtures/scheduler/；tests/fixtures/desktop/；tests/fixtures/dream/；tests/fixtures/diary/；tests/fixtures/proactive/；tests/fixtures/focus/。
-- 关联需求/测试：FR-SCHED-001~002；FR-DESKTOP-001~002；FR-DREAM-001~002；FR-DIARY-001~002；FR-PROACTIVE-001~002；FR-FOCUS-001；T-Sched-01~03；T-Desktop-01~02；T-Dream-01~02；T-Diary-01~02；T-Proactive-01~02；T-Focus-01。
-
-### TASK-0098 性能预算基准：全链路时延采集 + p50/p95 报告 + 超时退化验证（P1）
-- 任务描述：实现全链路时延采集点、bench 脚本聚合报告、以及超时退化策略的验证，使 NFR-PERF-001 从定性描述变为可量化基线。
-- 输入：DevSpec 16；PRD NFR-PERF-001；现有 tools/bench/ledger_bench.py（Ledger 层基准）。
-- 输出：
-  - `host_brain/core/latency.py`（新增）：时延采集点注入（request_start_ms → response_end_ms）与 latency_breakdown 结构化输出；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：latency_breakdown JSON 字段写入审计链；
-  - `host_brain/core/errors.py` 扩展：PERF_TIMEOUT / PERF_LLM_TIMEOUT / PERF_RETRIEVAL_TIMEOUT / PERF_SKILL_TIMEOUT 错误码；
-  - `tools/bench/e2e_latency_bench.py`（新增）：全链路 p50/p95/p99 聚合报告脚本（复用 LLM stub + 本地 fixtures）；
-  - `tools/bench/retrieval_latency_bench.py`（新增）：检索链路 p50/p95 聚合报告脚本；
-  - 超时退化策略集成：LLM/检索/Skill 超时时输出结构稳定 + quality.stage 标注 + reason_code 可统计；
-  - fixtures：LLM 超时/检索超时/Skill 超时/正常基准样例。
-- 验收标准：
-  - 基准机器上各阶段 p50/p95 在 DevSpec 16.1 目标范围内；
-  - 模拟超时场景触发退化策略，输出结构稳定且 quality.stage/reason_code 可统计；
-  - Ledger 写入 p95 ≤ 20ms（复用 ledger_bench.py）；
-  - T-Perf-01 全部通过。
-- 涉及文件路径：host_brain/core/latency.py（新增）；host_brain/core/errors.py；host_brain/audit/sqlite_ledger.py；tools/bench/e2e_latency_bench.py（新增）；tools/bench/retrieval_latency_bench.py（新增）；tests/contract/test_latency_contract.py（新增）；tests/fixtures/perf/。
-- 关联需求/测试：NFR-PERF-001；T-Perf-01；T-Audit-01。
-
+## M10-E锛歘CANON_HOTWORDS_CACHE 澧炲姞 TTL 鑷姩澶辨晥锛團-42锛?
+### TASK-0141 asr.py锛歘HotwordsCache 绫诲疄鐜帮紙TTL 鑷姩澶辨晥锛?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬湪 `edge_client/senses/asr.py` 涓柊澧?`_HotwordsCache` 绫伙紝涓烘ā鍧楃骇鐑瘝缂撳瓨澧炲姞 TTL 鑷姩澶辨晥鏈哄埗锛岄伩鍏?SSOT 鏇存柊鍚庣紦瀛橀暱鏈熶笉鍒锋柊銆?- 杈撳叆锛歳isk_registry.md锛團-42锛夛紱edge_client/senses/asr.py锛圡10-B 瀹炵幇锛夈€?- 杈撳嚭锛?  - `_HotwordsCache` 绫伙細`set()/get()/clear()/is_valid()/age_s()` 鏂规硶锛宍threading.Lock` 淇濇姢锛孴TL 榛樿 300s锛?  - `_CANON_HOTWORDS_CACHE = _HotwordsCache(ttl_s=300.0)` 妯″潡绾у疄渚嬶紱
+  - `inject_canon_hotwords()` 鏇存柊锛氭敞鍏ュ悗璋冪敤 `_CANON_HOTWORDS_CACHE.set(hotwords)` 骞惰褰?TTL 鏃ュ織锛?  - `get_canon_hotwords()` 鏇存柊锛氳皟鐢?`_CANON_HOTWORDS_CACHE.get()` 杩斿洖 TTL 鍐呭壇鏈€?- 楠屾敹鏍囧噯锛?  - TTL 鏈埌鏈熸椂 `get()` 杩斿洖瀹屾暣鐑瘝鍒楄〃锛?  - TTL 鍒版湡鍚?`get()` 杩斿洖绌哄垪琛紱
+  - `clear()` 绔嬪嵆浣跨紦瀛樺け鏁堬紱
+  - 澶氱嚎绋嬪苟鍙?`set()` 涓嶅紩鍙戠珵鎬併€?- 娑夊強鏂囦欢璺緞锛歟dge_client/senses/asr.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-ASR-001锛汵FR-PERF-001锛汿-HW-TTL-01~05銆?
+### TASK-0142 tests锛歵est_hotwords_cache_ttl.py锛圱-HW-TTL-01~05锛?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氭柊澧?`_HotwordsCache` TTL 涓撻」娴嬭瘯锛岃鐩?TTL 鏈夋晥鏈熷唴/鍒版湡鍚庤涓恒€乣is_valid()` 鐘舵€佽浆鎹€乣clear()` 绔嬪嵆澶辨晥銆佸苟鍙戝啓鍏ュ畨鍏ㄣ€?- 杈撳叆锛歟dge_client/senses/asr.py锛圱ASK-0141 瀹炵幇鍚庯級銆?- 杈撳嚭锛?  - `tests/unit/test_hotwords_cache_ttl.py`锛堟柊澧烇級锛歍-HW-TTL-01~05锛? tests锛夛紱
+  - 浣跨敤 `unittest.mock.patch("time.monotonic")` 妯℃嫙鏃堕棿鎺ㄨ繘锛屾棤闇€鐪熷疄绛夊緟銆?- 楠屾敹鏍囧噯锛?  - 5 涓祴璇曠敤渚嬪叏閮ㄩ€氳繃锛?  - 涓嶄緷璧栫湡瀹炴椂闂寸瓑寰咃紙mock time.monotonic锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 1090 passed, 2 skipped銆?- 娑夊強鏂囦欢璺緞锛歵ests/unit/test_hotwords_cache_ttl.py锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-ASR-001锛汿-HW-TTL-01~05銆?
+### TASK-0143 M10-E 鍙戝竷鏀跺彛锛坴7 瀹℃煡鎶ュ憡 + m10e_release.json锛?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氱敓鎴?M10-E 鍙戝竷娓呭崟涓庣涓冪増瀹℃煡鎶ュ憡锛屽畬鎴?M10-E 閲岀▼纰戞敹鍙ｃ€?- 杈撳叆锛歍ASK-0141~0142 瀹屾垚鍚庯紱release_manifest.py锛沝ocs/60_trace/requirements_trace.md銆?- 杈撳嚭锛?  - `release/manifests/m10e_release.json`锛堟柊澧烇級锛氶攣瀹?asr.py hash + test_hotwords_cache_ttl.py hash + test_passed_count=1090锛?  - `docs/40_agents/full_code_review_report_2026-03-04-v7.md`锛堟柊澧烇級锛氱涓冪増瀹℃煡鎶ュ憡锛?  - `docs/60_trace/requirements_trace.md` 鎵╁睍锛歊-109锛團-42 TTL 缂撳瓨锛夌姸鎬?DONE锛?  - `docs/30_devspec/DevTasks.md` M10-E 鐘舵€佹洿鏂颁负 DONE銆?- 楠屾敹鏍囧噯锛?  - 闇€姹傝拷韪柊澧?R-109 鏉＄洰瀹屾暣锛岀姸鎬佷负 DONE锛?  - 绗竷鐗堟姤鍛婃洿鏂?M10-E 鏀瑰姩涓?Edge 浼樺寲鎴愭灉锛?  - m10e_release.json 鍖呭惈 milestone/git hash/migration hashes/鏍稿績鏂囦欢 hash/test_passed_count/generated_at銆?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/requirements_trace.md锛沝ocs/40_agents/full_code_review_report_2026-03-04-v7.md锛沨ost_brain/release/release_manifest.py锛況elease/manifests/m10e_release.json銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001锛汿-REL-01锛堝彂甯冩竻鍗曞彛寰勬墿灞曪級銆?
 ---
 
-## M7 可观测 + MCP + 语音深化（TASK-0099~0106）
-
-> 对应 DevSpec §17；PRD §4.16（FR-OBS）、§4.18（FR-MCP）、§4.19（FR-VOICE）。
-> 所有任务当前状态：DONE（2026-03-03 实现，914 passed）。
-
-### TASK-0099 可观测指标面板：/obs/metrics 接口 + request_id 串联（M7 P0）
-- 任务描述：实现 `/obs/metrics` HTTP 接口，聚合 Governor 裁决计数、伪执行拦截次数、检索 p50/p95、Hard Snapshot staleness、最近链路摘要，并保证所有指标可通过 request_id 串联到 SQLite Ledger。
-- 输入：DevSpec §17.1.1；host_brain/audit/sqlite_ledger.py；host_brain/governor/rules.py；host_brain/core/metabolism.py。
-- 输出：
-  - `host_brain/obs/metrics.py`（新增）：MetricsCollector 类，从 Ledger 聚合各项指标；
-  - `host_brain/obs/__init__.py`（新增）：包初始化；
-  - `host_brain/obs/routes.py`（新增）：Flask/FastAPI 路由 `GET /obs/metrics`，返回 DevSpec §17.1.1 定义的 JSON 结构；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `query_governor_stats()`、`query_recent_chains(n)` 查询方法；
-  - `tests/contract/test_obs_metrics_contract.py`（新增）：T-OBS-01 验收测试（结构稳定 + request_id 串联可回放）；
-  - `tests/fixtures/obs/`（新增）：metrics 查询 fixtures。
-- 验收标准：
-  - `/obs/metrics` 返回结构与 DevSpec §17.1.1 完全一致；
-  - `governor_decisions` 计数与 Ledger 中 `governor_decision_log` 一致；
-  - `recent_chains` 中每条记录的 `request_id` 可在 Ledger 中找到对应审计行；
-  - T-OBS-01 全部通过。
-- 涉及文件路径：host_brain/obs/metrics.py（新增）；host_brain/obs/__init__.py（新增）；host_brain/obs/routes.py（新增）；host_brain/audit/sqlite_ledger.py；tests/contract/test_obs_metrics_contract.py（新增）；tests/fixtures/obs/。
-- 关联需求/测试：FR-OBS-001；T-OBS-01。
-
-### TASK-0100 可观测模式差异：dev/prod 模式切换 + debug_trace 字段控制（M7 P1）
-- 任务描述：实现 `OBS_MODE=dev|prod` 环境变量控制，dev 模式下 `/obs/metrics` 额外返回 `debug_trace`（含 LLM intent_draft、Governor 规则命中路径、Skill 执行参数），prod 模式下不返回。
-- 输入：DevSpec §17.1.2；TASK-0099 输出的 MetricsCollector + routes.py。
-- 输出：
-  - `host_brain/obs/metrics.py` 扩展：`ObsMode` 枚举（DEV/PROD）+ `get_obs_mode()` 读取环境变量；
-  - `host_brain/obs/routes.py` 扩展：根据 ObsMode 决定是否附加 `debug_trace` 字段；
-  - `host_brain/core/errors.py` 扩展：新增 `OBS_MODE_INVALID` 错误码；
-  - `tests/contract/test_obs_mode_contract.py`（新增）：T-OBS-02 验收测试（切换模式后 debug_trace 字段按预期出现/消失；不影响裁决与审计事实）；
-  - `tests/fixtures/obs/` 扩展：dev_mode_response.json / prod_mode_response.json。
-- 验收标准：
-  - `OBS_MODE=dev` 时 `debug_trace` 字段存在且包含 intent_draft/rules_hit/skill_params；
-  - `OBS_MODE=prod` 时 `debug_trace` 字段为 null 或不存在；
-  - 切换模式不影响 Governor 裁决结果与 Ledger 审计写入；
-  - T-OBS-02 全部通过。
-- 涉及文件路径：host_brain/obs/metrics.py；host_brain/obs/routes.py；host_brain/core/errors.py；tests/contract/test_obs_mode_contract.py（新增）；tests/fixtures/obs/。
-- 关联需求/测试：FR-OBS-002；T-OBS-02。
-
-### TASK-0101 MCP ToolMeta 注册表：同步 + 分级 + 变更留痕（M7 P0）
-- 任务描述：实现 MCP provider 工具元数据（ToolMeta）的同步注册表，包含 access_level/risk_level/reversible 分级字段，变更写 `mcp_sync_log`（可回放）。
-- 输入：DevSpec §17.2.1；host_brain/audit/sqlite_ledger.py；host_brain/skills/registry.py。
-- 输出：
-  - `host_brain/mcp/__init__.py`（新增）：包初始化；
-  - `host_brain/mcp/tool_registry.py`（新增）：ToolMeta 数据类 + MCPToolRegistry 注册表（SQLite 持久化 `mcp_tool_registry` 表）；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_tool_registry` 表 + `mcp_sync_log` 表 + `log_mcp_sync()` 方法；
-  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql`（新增）：建表 SQL；
-  - `tests/contract/test_mcp_registry_contract.py`（新增）：ToolMeta 注册/更新/变更留痕验收测试；
-  - `tests/fixtures/mcp/`（新增）：tool_meta_read.json / tool_meta_write.json / sync_log.json。
-- 验收标准：
-  - ToolMeta 注册后可按 provider_id/tool_id 查询；
-  - 更新 ToolMeta 时 `mcp_sync_log` 写入变更记录（含 before/after diff）；
-  - `access_level`/`risk_level`/`reversible` 字段完整且类型正确；
-  - 注册表测试全部通过。
-- 涉及文件路径：host_brain/mcp/__init__.py（新增）；host_brain/mcp/tool_registry.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql（新增）；tests/contract/test_mcp_registry_contract.py（新增）；tests/fixtures/mcp/。
-- 关联需求/测试：FR-MCP-001；T-MCP-01~03。
-
-### TASK-0102 MCP ToolBroker：单入口调用 + Governor 门禁 + Token 治理 + 审计（M7 P0）
-- 任务描述：实现 ToolBroker 单入口，强制 `intent_draft.mcp_call → ToolBroker → Governor gate → Token（WRITE 必须）→ MCP SDK → Audit` 调用链，WRITE 无 token 拒绝，provider 不可达降级。
-- 输入：DevSpec §17.2.2；TASK-0101 输出的 MCPToolRegistry；host_brain/governor/rules.py；host_brain/core/token_ledger.py；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/mcp/tool_broker.py`（新增）：ToolBroker 类，实现完整调用链；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_exec_log` 表 + `log_mcp_exec()` 方法；
-  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql` 扩展：`mcp_exec_log` 建表 SQL；
-  - `host_brain/core/errors.py` 扩展：`MCP_TOOL_NOT_REGISTERED`、`MCP_WRITE_TOKEN_REQUIRED`、`MCP_PROVIDER_UNAVAILABLE` 错误码；
-  - `tests/contract/test_mcp_broker_contract.py`（新增）：T-MCP-01~03 验收测试；
-  - `tests/fixtures/mcp/` 扩展：write_no_token.json / read_no_token.json / provider_unavailable.json。
-- 验收标准：
-  - WRITE 无 token → `MCP_WRITE_TOKEN_REQUIRED` 拒绝 + `mcp_exec_log` 写入 decision=REJECT；
-  - READ 无 token → 正常执行 + `mcp_exec_log` 写入 decision=APPROVE；
-  - provider 不可达 → `MCP_PROVIDER_UNAVAILABLE` 降级 + 输出结构稳定；
-  - T-MCP-01~03 全部通过。
-- 涉及文件路径：host_brain/mcp/tool_broker.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql；host_brain/core/errors.py；tests/contract/test_mcp_broker_contract.py（新增）；tests/fixtures/mcp/。
-- 关联需求/测试：FR-MCP-001；T-MCP-01~03。
-
-### TASK-0103 ASR 事件化上送：事件 Schema + 低置信度标注 + 审计（M7 P1）
-- 任务描述：实现 ASR 事件化上送协议（Edge→Host RPC），包含 confidence/is_final/alternates 字段，低置信度（<0.6）标注 `low_confidence=true`，事件写 `voice_event_log`。
-- 输入：DevSpec §17.3.1；edge_client/actuators/vts_driver.py（参考 RPC 模式）；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/voice/__init__.py`（新增）：包初始化；
-  - `host_brain/voice/asr_handler.py`（新增）：ASREvent 数据类 + ASRHandler（接收事件、低置信度标注、写 voice_event_log）；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `voice_event_log` 表 + `log_voice_event()` 方法；
-  - `host_brain/audit/migrations/0016_voice_event_schema.sql`（新增）：建表 SQL；
-  - `host_brain/core/errors.py` 扩展：`ASR_LOW_CONFIDENCE`、`ASR_UNAVAILABLE` 错误码；
-  - `tests/contract/test_asr_contract.py`（新增）：T-VOICE-01 验收测试；
-  - `tests/fixtures/voice/`（新增）：asr_high_confidence.json / asr_low_confidence.json / asr_unavailable.json。
-- 验收标准：
-  - confidence ≥ 0.6 → 正常处理，`voice_event_log` 写入 `low_confidence=false`；
-  - confidence < 0.6 → `low_confidence=true` + `reason_code=ASR_LOW_CONFIDENCE`；
-  - ASR 不可用 → `ASR_UNAVAILABLE` + 输出结构稳定；
-  - T-VOICE-01 全部通过。
-- 涉及文件路径：host_brain/voice/__init__.py（新增）；host_brain/voice/asr_handler.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0016_voice_event_schema.sql（新增）；host_brain/core/errors.py；tests/contract/test_asr_contract.py（新增）；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-001；T-VOICE-01。
-
-### TASK-0104 TTS 合成播报队列：优先级队列 + 打断 + 失败可解释（M7 P1）
-- 任务描述：实现 TTS 下发协议（Host→Edge RPC）与播报队列，按 priority 排序，`interruptible=true` 的任务可被 Barge-in 打断，播报完成/打断后写 `voice_event_log`。
-- 输入：DevSpec §17.3.2；TASK-0103 输出的 voice_event_log；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/voice/tts_queue.py`（新增）：TTSTask 数据类 + TTSQueue（优先级队列 + 打断逻辑）；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：`log_voice_event()` 支持 TTS 事件类型；
-  - `host_brain/core/errors.py` 扩展：`TTS_QUEUE_FULL`、`TTS_INTERRUPTED` 错误码；
-  - `tests/contract/test_tts_contract.py`（新增）：T-VOICE-02 验收测试；
-  - `tests/fixtures/voice/` 扩展：tts_normal.json / tts_queue_full.json / tts_interrupted.json。
-- 验收标准：
-  - 高优先级任务插队后先执行；
-  - `interruptible=true` 任务被打断后写 `TTS_INTERRUPTED` + 审计可回放；
-  - 队列满时返回 `TTS_QUEUE_FULL` + 输出结构稳定；
-  - T-VOICE-02 全部通过。
-- 涉及文件路径：host_brain/voice/tts_queue.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/test_tts_contract.py（新增）；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-002；T-VOICE-02。
-
-### TASK-0105 Barge-in 打断 + Edge 兜底小模型（M7 P2）
-- 任务描述：实现 Barge-in 打断协议（ASR 检测到用户开口 → Edge 发 barge_in → Host 发 tts_interrupt）；实现 Edge 兜底小模型（Host 不可用时 draft_only 输出，默认卸载按需加载）。
-- 输入：DevSpec §17.3.3~17.3.4；TASK-0103/0104 输出的 ASRHandler + TTSQueue；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/voice/barge_in.py`（新增）：BargeInHandler（接收 barge_in 事件 → 触发 tts_interrupt → 写 voice_event_log）；
-  - `edge_client/fallback/fallback_model.py`（新增）：FallbackModel（draft_only 标记 + 按需加载 + 不可用快速失败）；
-  - `host_brain/core/errors.py` 扩展：`FALLBACK_MODEL_UNAVAILABLE`、`FALLBACK_OUTPUT_DRAFT_ONLY` 错误码；
-  - `tests/contract/test_barge_in_contract.py`（新增）：T-VOICE-03 验收测试；
-  - `tests/contract/test_fallback_model_contract.py`（新增）：T-VOICE-04 验收测试；
-  - `tests/fixtures/voice/` 扩展：barge_in_event.json / fallback_draft.json / fallback_unavailable.json。
-- 验收标准：
-  - Barge-in 触发后 TTS 立即打断 + 审计记录 `BARGE_IN_INTERRUPTED`；
-  - 兜底输出标记 `draft_only=true`，不含裁决或执行事实宣告；
-  - 兜底不可用时 `FALLBACK_MODEL_UNAVAILABLE` 快速失败；
-  - T-VOICE-03/T-VOICE-04 全部通过。
-- 涉及文件路径：host_brain/voice/barge_in.py（新增）；edge_client/fallback/fallback_model.py（新增）；host_brain/core/errors.py；tests/contract/test_barge_in_contract.py（新增）；tests/contract/test_fallback_model_contract.py（新增）；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-003；FR-VOICE-004；T-VOICE-03；T-VOICE-04。
-
-### TASK-0106 Edge 资源闸门：优先级矩阵 + 健康快照 + 抢占可观测（M7 P2）
-- 任务描述：实现 Edge 资源闸门，按 P1（ASR）> P2（播放）> P3（TTS 合成）> P4（兜底 LLM）优先级矩阵管理资源，低优先级任务被抢占时写 `RESOURCE_GATE_PREEMPTED`，健康快照可观测。
-- 输入：DevSpec §17.3.5；TASK-0103~0105 输出的 ASRHandler/TTSQueue/BargeInHandler/FallbackModel。
-- 输出：
-  - `edge_client/resource/resource_gate.py`（新增）：ResourceGate（优先级矩阵 + 抢占逻辑 + 健康快照）；
-  - `edge_client/resource/__init__.py`（新增）：包初始化；
-  - `host_brain/core/errors.py` 扩展：`RESOURCE_GATE_PREEMPTED` 错误码；
-  - `tests/contract/test_resource_gate_contract.py`（新增）：T-VOICE-05 验收测试；
-  - `tests/fixtures/voice/` 扩展：resource_gate_snapshot.json / preemption_event.json。
-- 验收标准：
-  - P4 任务在 P1 活跃时被抢占，写 `RESOURCE_GATE_PREEMPTED`；
-  - ASR（P1）在压力下不被抢占；
-  - 健康快照结构与 DevSpec §17.3.5 一致；
-  - T-VOICE-05 全部通过。
-- 涉及文件路径：edge_client/resource/resource_gate.py（新增）；edge_client/resource/__init__.py（新增）；host_brain/core/errors.py；tests/contract/test_resource_gate_contract.py（新增）；tests/fixtures/voice/。
-- 关联需求/测试：FR-VOICE-005；T-VOICE-05。
-
+## P2 浠ｇ爜璐ㄩ噺鏀跺彛锛團-13~F-27 鎵规锛?
+### TASK-0144 P2 浠ｇ爜璐ㄩ噺鏀跺彛锛欶-16 _fetch_by_request 鐧藉悕鍗曟牎楠岃ˉ鍏?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛歚_fetch_by_request()` 缂哄皯琛ㄥ悕鐧藉悕鍗曟牎楠岋紙F-16 閬楁紡锛夛紝琛ュ厖 `_ALLOWED_TABLES` 妫€鏌ワ紝涓?`_fetch_all`/`fetch_by_time_range`/`count_by_time_range` 淇濇寔涓€鑷淬€?- 杈撳叆锛歳isk_registry.md锛圧76-4锛夛紱host_brain/audit/sqlite_ledger.py銆?- 杈撳嚭锛?  - `_fetch_by_request()` 鍑芥暟澶撮儴澧炲姞 `if table not in _ALLOWED_TABLES: raise ValueError(...)` 鏍￠獙锛?  - 娉ㄩ噴鏍囨敞 `# F-16: validate table name with whitelist to prevent SQL injection`銆?- 楠屾敹鏍囧噯锛?  - 浼犲叆闈炵櫧鍚嶅崟琛ㄥ悕鏃舵姏鍑?`ValueError`锛堝惈 `AUDIT_TABLE_NAME_INVALID`锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 1090 passed, 2 skipped锛堟棤鍥炲綊锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/audit/sqlite_ledger.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-SEC-001锛汿-Quality-01锛團-16 鎵╁睍锛夈€?
+### TASK-0145 P2 鐘舵€佺‘璁わ細F-13/F-14/F-15/F-25/F-38 宸蹭慨澶嶆牳鏌?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氭牳鏌?P2 鍙戠幇椤逛腑宸插湪鍘嗘寮€鍙戜腑淇鐨勬潯鐩紝鏇存柊 risk_registry.md 鐘舵€併€?- 鏍告煡缁撹锛?  - F-13锛堣８ print锛夛細main.py 涓凡鏃?print() 璋冪敤锛屽凡淇 鉁咃紱
+  - F-14锛坈ompile_runtime_graph 绫诲瀷鏍囨敞锛夛細宸叉湁 `-> Any` 鏍囨敞锛屽凡淇 鉁咃紱
+  - F-15锛坒astapi_app.py handler 绫诲瀷鏍囨敞锛夛細鎵€鏈?async handler 鍧囨湁杩斿洖绫诲瀷鏍囨敞锛屽凡淇 鉁咃紱
+  - F-25锛坅syncio.get_event_loop DeprecationWarning锛夛細vts_driver.py 宸叉敼涓?`asyncio.new_event_loop()`锛屽凡淇 鉁咃紱
+  - F-38锛坙ist_proposals cursor-based 鍒嗛〉锛夛細宸插疄鐜?`after_id` cursor 鍒嗛〉锛屽凡淇 鉁呫€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/app/main.py锛沨ost_brain/integrations/graph_executor.py锛沨ost_brain/app/fastapi_app.py锛沞dge_client/actuators/vts_driver.py锛沨ost_brain/audit/sqlite_ledger.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-MAINT-001銆?
+### TASK-0146 P2 鏂囨。璁板綍锛欶-18/F-19/F-20/F-26/F-27 宸茬煡杈圭晫纭
+- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬皢鍓╀綑 P2 宸茬煡杈圭晫椤硅褰曚负"宸茬煡闄愬埗/鍚庣画浼樺寲鏂瑰悜"锛屼笉闃诲褰撳墠鍙戝竷銆?- 宸茬煡杈圭晫纭锛?  - F-18锛圫QLite 楂樺苟鍙戣鍐欑摱棰堬級锛氬綋鍓嶅崟鏈洪儴缃插彲鎺ュ彈锛涗腑鏈熷彲寮曞叆 PostgreSQL 鎴栧彧璇诲壇鏈紱
+  - F-19锛圵AL checkpoint 鐩戞帶锛夛細宸叉湁 close() 鑷姩 PASSIVE checkpoint锛涢暱鏈熻繍琛岄渶鐩戞帶 WAL 鏂囦欢澶у皬锛?  - F-20锛坰andbox 浠呮敮鎸?Python锛夛細闈?Python 璇█绋冲畾鎷掔粷 + reason_code 鍙粺璁★紱鎸夐渶鎵╁睍锛?  - F-26锛圖ocker 闀滃儚鏋勫缓渚濊禆缃戠粶锛夛細鏀寔棰勬瀯寤洪暅鍍忔湰鍦板姞杞斤紱閮ㄧ讲鏂囨。宸叉爣娉紱
+  - F-27锛坣sjail 闈?Linux 涓嶅彲鐢級锛氫粎浣滀负 Linux 澶囬€夛紱閮ㄧ讲鏂囨。宸叉爣娉ㄥ钩鍙拌姹傘€?- 娑夊強鏂囦欢璺緞锛歞ocs/60_trace/risk_registry.md锛堢姸鎬佹洿鏂帮級銆?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汵FR-MAINT-001銆?
 ---
 
-## M8 运行时集成闭环（TASK-0107~0110）
-
-> 对应 DevSpec §18；PRD M8（NFR-PERF-001、NFR-REL-001、FR-CORE-004）。
-> 所有任务当前状态：DONE（2026-03-03）。
-
-### TASK-0107 运行时脚本集成：start_host_side.ps1 接入 OBS/MCP 健康探测（M8 P0）
-- 任务描述：扩展 `start_host_side.ps1`，在 `/health` 通过后额外探测 `/obs/metrics` 与 `MCPToolRegistry.health_check()`，将 OBS/MCP 子系统健康状态写入启动结果 JSON，不可用时输出 `startup_warnings` 但不阻断启动。
-- 输入：DevSpec §18.1.1；scripts/runtime/start_host_side.ps1（现有）；host_brain/obs/routes.py；host_brain/mcp/tool_registry.py。
-- 输出：
-  - `scripts/runtime/start_host_side.ps1` 扩展：新增 `/obs/metrics` HTTP 探测逻辑 + `MCPToolRegistry` SQLite 可写性检查；
-  - 启动结果 JSON 新增字段：`obs_status`（ok/degraded）、`mcp_registry_status`（ok/degraded）、`startup_warnings`（列表）；
-  - `host_brain/core/errors.py` 扩展：`STARTUP_OBS_DEGRADED`、`STARTUP_MCP_DEGRADED` 错误码；
-  - `tests/contract/test_startup_integration_contract.py`（新增）：T-RT-01 验收测试（启动结果 JSON 字段完整性 + OBS/MCP 状态可观测）；
-  - `tests/fixtures/runtime/`（新增）：startup_ok.json / startup_obs_degraded.json / startup_mcp_degraded.json。
-- 验收标准：
-  - 正常启动：`obs_status=ok`、`mcp_registry_status=ok`、`startup_warnings=[]`；
-  - OBS 不可用：`obs_status=degraded`、`startup_warnings` 含 `STARTUP_OBS_DEGRADED`，进程仍启动；
-  - MCP SQLite 不可写：`mcp_registry_status=degraded`、`startup_warnings` 含 `STARTUP_MCP_DEGRADED`，进程仍启动；
-  - T-RT-01 全部通过。
-- 涉及文件路径：scripts/runtime/start_host_side.ps1；host_brain/core/errors.py；tests/contract/test_startup_integration_contract.py（新增）；tests/fixtures/runtime/。
-- 关联需求/测试：NFR-REL-001；T-RT-01。
-
-### TASK-0108 端到端 Smoke Test：冷启动闭环 + 执行链路 + 故障注入矩阵（M8 P0）
-- 任务描述：实现三个端到端 Smoke 测试场景：① 冷启动最小闭环（无外部依赖）、② 执行链路（approval_token + undo）、③ 故障注入矩阵（Neo4j/Chroma/LLM/Edge 各自不可用时输出结构稳定）。
-- 输入：DevSpec §18.2.1；host_brain/app/fastapi_app.py；host_brain/audit/sqlite_ledger.py；host_brain/governor/decision.py；host_brain/skills/loader.py；host_brain/lsp/vault.py。
-- 输出：
-  - `tests/e2e/test_cold_start_e2e.py`（新增）：T-E2E-01（冷启动最小闭环）；
-  - `tests/e2e/test_exec_chain_e2e.py`（新增）：T-E2E-02（执行链路 + undo）；
-  - `tests/e2e/test_fault_injection_e2e.py`（新增）：T-E2E-03（故障注入矩阵：Neo4j/Chroma/LLM/Edge）；
-  - `tests/fixtures/e2e/`（新增）：cold_start_input.json / exec_chain_input.json / fault_injection_matrix.json。
-- 验收标准：
-  - T-E2E-01：无外部依赖下响应为合法 JSON，`quality.stage` 含降级标记，SQLite 有 intent_log + governor_log，无伪执行宣告；
-  - T-E2E-02：执行链路完整（APPROVE→token→exec→manifest），undo 后文件恢复，vault_gc_log 不删有效 undo 窗口材料；
-  - T-E2E-03：4 种故障注入下输出结构均稳定，`reason_code` 均可统计；
-  - T-E2E-01~03 全部通过。
-- 涉及文件路径：tests/e2e/test_cold_start_e2e.py（新增）；tests/e2e/test_exec_chain_e2e.py（新增）；tests/e2e/test_fault_injection_e2e.py（新增）；tests/fixtures/e2e/。
-- 关联需求/测试：FR-CORE-004；NFR-REL-001；T-E2E-01~03。
-
-### TASK-0109 性能基线采集：p50/p95 时延指标 + /obs/metrics 扩展（M8 P1）
-- 任务描述：在 `MetricsCollector` 中新增 `latency_baseline` 聚合逻辑，从 `retrieval_event_log`/`governor_log`/`skill_exec_log` 计算 p50/p95，并在 `/obs/metrics` 响应中暴露；新增 `PERF_BASELINE_STALE` 错误码（采样数据超 24h 未更新）。
-- 输入：DevSpec §18.3.1；host_brain/obs/metrics.py（现有 MetricsCollector）；host_brain/audit/sqlite_ledger.py（retrieval_event_log/governor_log/skill_exec_log）。
-- 输出：
-  - `host_brain/obs/metrics.py` 扩展：`collect_latency_baseline()` 方法，计算 p50/p95 并返回 `latency_baseline` 字典；
-  - `host_brain/obs/routes.py` 扩展：`/obs/metrics` 响应中包含 `latency_baseline` 字段；
-  - `host_brain/core/errors.py` 扩展：`PERF_BASELINE_STALE` 错误码；
-  - `tests/contract/test_perf_baseline_contract.py`（新增）：T-PERF-01 验收测试（字段结构稳定 + 采样计数 > 0 + 时延值合理范围）；
-  - `tests/fixtures/obs/` 扩展：metrics_with_latency.json。
-- 验收标准：
-  - `latency_baseline` 字段包含 retrieval_p50_ms/retrieval_p95_ms/governor_p50_ms/governor_p95_ms/skill_exec_p50_ms/skill_exec_p95_ms/sampled_at/sample_count；
-  - `sample_count > 0` 时时延值为正整数；
-  - `sample_count = 0` 时字段为 null 或含 `PERF_BASELINE_STALE` 标记；
-  - T-PERF-01 全部通过。
-- 涉及文件路径：host_brain/obs/metrics.py；host_brain/obs/routes.py；host_brain/core/errors.py；tests/contract/test_perf_baseline_contract.py（新增）；tests/fixtures/obs/。
-- 关联需求/测试：NFR-PERF-001；T-PERF-01。
-
-### TASK-0110 发布清单锁定：M8 release manifest（M8 P1）
-- 任务描述：基于 `host_brain/release/release_manifest.py`，生成 M8 发布清单，锁定 git commit hash、所有 migration 文件 hash、测试通过数、性能基线快照、服务注册表快照，输出到 `release/manifests/m8_release.json`。
-- 输入：DevSpec §18.4.1；host_brain/release/release_manifest.py（现有）；host_brain/audit/migrations/（所有 SQL 文件）；host_brain/bond/migrations/（所有 Cypher 文件）；host_brain/core/services.py（服务注册表）。
-- 输出：
-  - `host_brain/release/release_manifest.py` 扩展：新增 `generate_m8_manifest()` 方法，聚合上述字段；
-  - `release/manifests/m8_release.json`（新增）：M8 发布清单文件；
-  - `tests/contract/test_release_manifest_contract.py`（新增）：T-REL-01 验收测试（字段完整性 + hash 格式合法 + migration 文件数量与实际一致）；
-  - `tests/fixtures/release/`（新增）：m8_manifest_expected.json。
-- 验收标准：
-  - `m8_release.json` 包含：git_commit_hash/migration_hashes（按文件名索引）/test_passed_count/latency_baseline_snapshot/service_registry_snapshot/generated_at；
-  - `migration_hashes` 中文件数量与 `host_brain/audit/migrations/` + `host_brain/bond/migrations/` 实际文件数一致；
-  - T-REL-01 全部通过。
-- 涉及文件路径：host_brain/release/release_manifest.py；release/manifests/m8_release.json（新增）；tests/contract/test_release_manifest_contract.py（新增）；tests/fixtures/release/。
-- 关联需求/测试：NFR-MAINT-001；T-REL-01。
-
-
----
-
-## M9 World Canon 闭环 + 日记 Evolution 关联（TASK-0111~0115）
-
-> 对应 DevSpec §19；PRD M9（FR-WCANON-001~003、FR-DIARY-002）。
-> 所有任务当前状态：DONE（2026-03-03）。
-
-### TASK-0111 World Canon 条目资产：文件 SSOT + 最小种子条目（M9 P0）
-- 任务描述：在 `host_brain/canon/world/` 下建立 World Canon 文件 SSOT，写入最小种子条目（系统术语/架构设定/关键不变量各 1 条），并确保条目结构符合 DevSpec §19.1.1 的字段约束。
-- 输入：DevSpec §19.1.1；host_brain/canon/world/（现有目录，可能为空）。
-- 输出：
-  - `host_brain/canon/world/wc-001-system-terms.json`（新增）：系统术语种子条目；
-  - `host_brain/canon/world/wc-002-architecture-invariants.json`（新增）：架构不变量种子条目；
-  - `host_brain/canon/world/wc-003-persona-core.json`（新增）：人格核心设定种子条目；
-  - 每个条目包含：doc_id/version/title/tags/body/evidence_level=CANON_REFERENCE_ONLY/status=active/created_at/updated_at；
-  - `tests/fixtures/canon/world/`（新增）：种子条目的 fixture 副本，用于 contract 测试。
-- 验收标准：
-  - 所有条目 evidence_level=CANON_REFERENCE_ONLY；
-  - body 不含完成性表述（QA 校验通过）；
-  - 条目文件可被 canon_sync.py 扫描并写入 world_canon_doc 索引；
-  - T-WCanon-04 前置条件满足（有可同步的条目）。
-- 涉及文件路径：host_brain/canon/world/wc-001-system-terms.json（新增）；host_brain/canon/world/wc-002-architecture-invariants.json（新增）；host_brain/canon/world/wc-003-persona-core.json（新增）；tests/fixtures/canon/world/。
-- 关联需求/测试：FR-WCANON-001；T-WCanon-04（前置）。
-
-### TASK-0112 World Canon 索引同步：world_canon_doc 表 + canon_sync 幂等扫描（M9 P0）
-- 任务描述：在 SQLite Ledger 中新增 `world_canon_doc` 表与 `canon_proposal_log` 表，并扩展 `canon_sync.py` 实现幂等扫描逻辑（相同 hash 不重复写 change_log，失败记录 CANON_SYNC_FAILED）。
-- 输入：DevSpec §19.1.2/19.1.4；host_brain/audit/sqlite_ledger.py（现有）；host_brain/memory/canon_sync.py（现有）；TASK-0111 输出的种子条目。
-- 输出：
-  - `host_brain/audit/migrations/0009_world_canon_doc.sql`（新增）：world_canon_doc 表迁移；
-  - `host_brain/audit/migrations/0010_canon_proposal_log.sql`（新增）：canon_proposal_log 表迁移；
-  - `host_brain/memory/canon_sync.py` 扩展：`sync_world_canon()` 方法（扫描→hash→对比→写 change_log，幂等）；
-  - `host_brain/core/errors.py` 扩展：`CANON_SYNC_FAILED`、`WCANON_SLOT_VIOLATION`、`WCANON_PROPOSAL_INVALID` 错误码；
-  - `tests/contract/test_world_canon_sync_contract.py`（新增）：T-WCanon-04 验收测试（幂等性 + 失败可统计）；
-  - `tests/fixtures/canon/world/` 扩展：sync_result_expected.json。
-- 验收标准：
-  - 相同条目重复同步不产生重复 canon_change_log 条目（幂等）；
-  - 同步失败时 CANON_SYNC_FAILED 可统计；
-  - world_canon_doc 表字段与 DevSpec §19.1.2 一致；
-  - T-WCanon-04 全部通过。
-- 涉及文件路径：host_brain/audit/migrations/0009_world_canon_doc.sql（新增）；host_brain/audit/migrations/0010_canon_proposal_log.sql（新增）；host_brain/memory/canon_sync.py；host_brain/core/errors.py；tests/contract/test_world_canon_sync_contract.py（新增）；tests/fixtures/canon/world/。
-- 关联需求/测试：FR-WCANON-002；T-WCanon-04。
-
-### TASK-0113 World Canon 注入分槽：context_pack 独立槽位 + QA 拦截 Canon-as-fact（M9 P0）
-- 任务描述：扩展 `context_pack.py` 实现 World Canon 独立槽位注入（Top-K，evidence_level=CANON_REFERENCE_ONLY），并扩展 `qa.py` 拦截"World Canon 内容 + 完成性表述"组合，记录 CANON_AS_FACT_VIOLATION。
-- 输入：DevSpec §19.1.3；host_brain/core/context_pack.py（现有）；host_brain/core/qa.py（现有）；TASK-0112 输出的 world_canon_doc 索引。
-- 输出：
-  - `host_brain/core/context_pack.py` 扩展：`build_world_canon_slot()` 方法，从 world_canon_doc 查询 Top-K active 条目，注入 authoritative.world_canon 槽位；
-  - `host_brain/core/qa.py` 扩展：`check_canon_as_fact()` 方法，检测叙事中"Canon 内容 + 完成性表述"组合；
-  - `tests/contract/test_world_canon_slot_contract.py`（新增）：T-WCanon-05（分槽隔离）+ T-WCanon-06（QA 拦截）验收测试；
-  - `tests/fixtures/canon/world/` 扩展：context_pack_with_world_canon.json / qa_canon_as_fact_bad.json。
-- 验收标准：
-  - World Canon 条目只出现在 authoritative.world_canon 槽位，不混入其他槽位；
-  - 叙事含"Canon 内容 + 完成性表述"时 QA 拦截并记录 CANON_AS_FACT_VIOLATION；
-  - 重写后仍失败则降级为 Host 最小模板；
-  - T-WCanon-05/T-WCanon-06 全部通过。
-- 涉及文件路径：host_brain/core/context_pack.py；host_brain/core/qa.py；tests/contract/test_world_canon_slot_contract.py（新增）；tests/fixtures/canon/world/。
-- 关联需求/测试：FR-WCANON-001；FR-WCANON-003；FR-CANON-001；T-WCanon-05；T-WCanon-06。
-
-### TASK-0114 World Canon Evolution 提案：canon_proposal_log 写入 + 审核流程（M9 P1）
-- 任务描述：实现 World Canon Evolution 提案的写入与审核流程：提案写入 `canon_proposal_log`（status=pending），审核通过后触发 `canon_sync.py` 更新文件 SSOT，所有状态变更写 `canon_change_log`（含变更前后 hash）。
-- 输入：DevSpec §19.1.4；TASK-0112 输出的 canon_proposal_log 表；host_brain/memory/canon_world_store.py（现有）；host_brain/memory/canon_sync.py（扩展后）。
-- 输出：
-  - `host_brain/memory/canon_world_store.py` 扩展：`submit_proposal()` 方法（写入 canon_proposal_log，status=pending）；`approve_proposal()` 方法（状态改为 approved，触发 sync，写 change_log）；
-  - `tests/contract/test_world_canon_evolution_contract.py`（新增）：T-WCanon-07 验收测试（提案写入/审核/变更 hash 可回放）；
-  - `tests/fixtures/canon/world/` 扩展：proposal_pending.json / proposal_approved.json / change_log_expected.json。
-- 验收标准：
-  - 提案写入后 status=pending，可在 canon_proposal_log 查询；
-  - 审核通过后 status=approved，canon_change_log 含变更前后 hash；
-  - 非白名单流程不得直接修改 status（contract 测试断言）；
-  - T-WCanon-07 全部通过。
-- 涉及文件路径：host_brain/memory/canon_world_store.py；host_brain/memory/canon_sync.py；tests/contract/test_world_canon_evolution_contract.py（新增）；tests/fixtures/canon/world/。
-- 关联需求/测试：FR-WCANON-002；T-WCanon-07。
-
-### TASK-0115 日记 Evolution 提案关联：drift_suggestion 提取 + QA 校验 + canon_proposal 写入（M9 P1）
-- 任务描述：扩展 `diary_writer.py`，在日记生成后提取 LLM 输出中的可选 `drift_suggestion` 字段，经 QA 校验后写入 `canon_proposal_log`（proposer=diary_writer，source_intent_id=日记 intent_id）；校验失败则丢弃并记录 WCANON_PROPOSAL_INVALID，不阻塞日记写入。
-- 输入：DevSpec §19.2；host_brain/skills/impl/diary_writer.py（现有）；host_brain/memory/canon_world_store.py（TASK-0114 扩展后）；host_brain/core/qa.py（TASK-0113 扩展后）。
-- 输出：
-  - `host_brain/skills/impl/diary_writer.py` 扩展：`_extract_drift_suggestion()` 方法（提取并校验 drift_suggestion 字段）；`_submit_evolution_proposal()` 方法（调用 canon_world_store.submit_proposal()）；
-  - `host_brain/core/errors.py` 扩展：`DIARY_EVOLUTION_PROPOSAL_SKIPPED` 错误码；
-  - `tests/contract/test_diary_evolution_contract.py`（新增）：T-Diary-03（提案写入 + source_intent_id 串联）+ T-Diary-04（QA 拦截 + 日记正常写入）验收测试；
-  - `tests/fixtures/diary/` 扩展：diary_with_drift_suggestion.json / diary_drift_suggestion_bad.json。
-- 验收标准：
-  - 日记含合规 drift_suggestion 时，canon_proposal_log 写入成功，source_intent_id 可追溯到日记 intent_id；
-  - drift_suggestion.suggested_body 含伪执行句时，提案被丢弃，日记正常写入，WCANON_PROPOSAL_INVALID 可统计；
-  - 无 drift_suggestion 时日记正常写入，DIARY_EVOLUTION_PROPOSAL_SKIPPED 可观测；
-  - T-Diary-03/T-Diary-04 全部通过。
-- 涉及文件路径：host_brain/skills/impl/diary_writer.py；host_brain/core/errors.py；tests/contract/test_diary_evolution_contract.py（新增）；tests/fixtures/diary/。
-- 关联需求/测试：FR-DIARY-002；T-Diary-03；T-Diary-04。
-
----
-
-## M9 收尾（TASK-0116）
-
-> 对应 M9 文档/追踪/发布清单收尾工作。
-> 所有任务当前状态：DONE（2026-03-03）。
-
-### TASK-0116 M9 收尾：需求追踪补写 + 发布清单生成 + 启动脚本 canon_sync 钩子（M9 收尾）
-- 任务描述：补齐 M9 的三项收尾工作：① requirements_trace.md 补写 R-85~R-89（M9 的 5 条需求追踪条目）；② 生成 M9 发布清单 release/manifests/m9_release.json（类比 M8 的 TASK-0110）；③ start_host_side.ps1 新增 canon_sync 健康探测钩子（/health/canon_sync，非阻断）。
-- 输入：DevSpec §19；requirements_trace.md（现有，末尾为 R-84）；host_brain/release/release_manifest.py（现有 generate_m8_manifest）；scripts/runtime/start_host_side.ps1（现有 M8 探测逻辑）。
-- 输出：
-  - `docs/60_trace/requirements_trace.md` 扩展：新增 M9 章节标题 + R-85~R-89 五条追踪条目（DONE）；
-  - `host_brain/release/release_manifest.py` 扩展：新增 `generate_m9_manifest()` 方法（含 world_canon_asset_hashes 字段）；
-  - `release/manifests/m9_release.json`（新增）：M9 发布清单（17 migration 文件 + 3 个 World Canon 种子条目 hash + 1032 tests passed）；
-  - `scripts/runtime/start_host_side.ps1` 扩展：新增 M9 canon_sync 健康探测块（/health/canon_sync，degraded 非阻断）+ 输出 JSON 新增 `canon_sync_status` 字段。
-- 验收标准：
-  - requirements_trace.md 包含 R-85~R-89，覆盖状态均为 DONE；
-  - m9_release.json 包含：milestone=M9 / git_commit_hash / migration_hashes（17 文件）/ world_canon_asset_hashes（3 文件）/ test_passed_count=1032 / generated_at；
-  - start_host_side.ps1 输出 JSON 含 canon_sync_status 字段；
-  - start_edge.ps1 无需修改（ASR 热词注入为 M10-B 工作）。
-- 涉及文件路径：docs/60_trace/requirements_trace.md；host_brain/release/release_manifest.py；release/manifests/m9_release.json（新增）；scripts/runtime/start_host_side.ps1。
-- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；FR-WCANON-003；FR-DIARY-002；NFR-MAINT-001。
-
----
-
-## M10-A Canon 治理 API（TASK-0117~0120）
-
-> 对应 DevSpec §20；PRD M10-A（P0）：Canon 提案审核 REST API。
-> 将 M9 已落地的 `submit_proposal()` / `approve_proposal_with_content()` 暴露为可操作的 REST 端点。
-> 所有任务当前状态：DONE（2026-03-03：1041 passed，Canon 治理 API 全量实现）。
-
-### TASK-0117 WorldCanonStore.reject_proposal() 方法补充（M10-A 前置）
-- 任务描述：在 `canon_world_store.py` 中补充 `reject_proposal()` 方法（status 改为 rejected，不修改 SSOT 文件），并在 `errors.py` 中新增 M10-A 错误码（WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID）。
-- 输入：DevSpec §20.5；host_brain/memory/canon_world_store.py（现有，含 submit_proposal/approve_proposal_with_content）；host_brain/core/errors.py（现有）。
-- 输出：
-  - `host_brain/memory/canon_world_store.py` 扩展：`reject_proposal()` 方法（status=rejected，PermissionError 若非 pending）；
-  - `host_brain/core/errors.py` 扩展：WCANON_PROPOSAL_NOT_FOUND / WCANON_DOC_NOT_FOUND / WCANON_PROPOSAL_DUPLICATE / WCANON_PROPOSAL_STATUS_INVALID 四个错误码；
-  - `tests/contract/test_canon_proposal_reject_contract.py`（新增）：T-Canon-API-06 验收测试（reject 成功 + 非 pending 拒绝）。
-- 验收标准：
-  - reject_proposal() 对 pending 提案成功，status=rejected，SSOT 文件不变；
-  - reject_proposal() 对非 pending 提案抛出 PermissionError（WCANON_PROPOSAL_STATUS_INVALID）；
-  - reject_proposal() 对不存在的 proposal_id 抛出 KeyError（WCANON_PROPOSAL_NOT_FOUND）；
-  - T-Canon-API-06 全部通过。
-- 涉及文件路径：host_brain/memory/canon_world_store.py；host_brain/core/errors.py；tests/contract/test_canon_proposal_reject_contract.py（新增）。
-- 关联需求/测试：FR-WCANON-002；T-Canon-API-06。
-
-### TASK-0118 canon_routes.py：REST 路由实现（GET/POST /canon/proposals + GET /canon/documents）
-- 任务描述：新建 `host_brain/app/canon_routes.py`，实现 DevSpec §20.2.1 的 7 个端点（列出提案、提交提案、查询提案、审核通过、拒绝提案、列出文档、查询文档），并在 `fastapi_app.py` 中注册路由。
-- 输入：DevSpec §20.2~20.4；host_brain/app/fastapi_app.py（现有路由注册方式）；host_brain/memory/canon_world_store.py（TASK-0117 扩展后）；host_brain/audit/sqlite_ledger.py（现有 get_proposal/list_proposals 等方法）。
-- 输出：
-  - `host_brain/app/canon_routes.py`（新增）：7 个端点实现，含 Pydantic 请求/响应模型（CanonProposalSubmitRequest / CanonProposalApproveRequest / CanonProposalRejectRequest / CanonProposalResponse / CanonDocumentResponse / CanonProposalListResponse）；
-  - `host_brain/app/fastapi_app.py` 扩展：`app.include_router(canon_router)` 注册；`get_canon_store()` 依赖注入函数；
-  - 每个写操作生成 `request_id` 并写入 `proposer_node_id`（格式：`api.canon_proposals::{request_id}`）。
-- 验收标准：
-  - GET /canon/proposals 返回分页列表，status 过滤正确（T-Canon-API-07）；
-  - POST /canon/proposals 提交成功，status=pending，proposal_id 可查询（T-Canon-API-01）；
-  - POST /canon/proposals 重复 proposal_id 返回 409 + WCANON_PROPOSAL_DUPLICATE（T-Canon-API-02）；
-  - POST /canon/proposals body 含完成性表述返回 400 + WCANON_PROPOSAL_INVALID（T-Canon-API-03）；
-  - GET /canon/documents 返回当前 SSOT 快照（T-Canon-API-08）；
-  - 所有端点响应结构稳定（含 request_id + timestamp）。
-- 涉及文件路径：host_brain/app/canon_routes.py（新增）；host_brain/app/fastapi_app.py；tests/contract/test_canon_api_contract.py（新增）；tests/fixtures/canon/。
-- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；T-Canon-API-01~03；T-Canon-API-07~08。
-
-### TASK-0119 canon_routes.py：approve/reject 端点 + 审计串联（M10-A P0 核心）
-- 任务描述：实现 `POST /canon/proposals/{proposal_id}/approve` 和 `POST /canon/proposals/{proposal_id}/reject` 端点，确保审计串联（approve 写 canon_change_log，reject 写 system_event_log），并补充对应的 contract 测试。
-- 输入：DevSpec §20.4；host_brain/app/canon_routes.py（TASK-0118 实现后）；host_brain/memory/canon_world_store.py（含 approve_proposal_with_content / reject_proposal）；host_brain/audit/sqlite_ledger.py（含 log_system_event）。
-- 输出：
-  - `host_brain/app/canon_routes.py` 扩展：approve 端点（调用 approve_proposal_with_content，写 canon_change_log）；reject 端点（调用 reject_proposal，写 system_event_log，event_type=WCANON_PROPOSAL_REJECTED）；
-  - `tests/contract/test_canon_api_approve_reject_contract.py`（新增）：T-Canon-API-04（approve 成功 + SSOT 更新 + change_log 可回放）+ T-Canon-API-05（非 pending 提案 approve 返回 422）。
-- 验收标准：
-  - approve 成功：SSOT 文件版本 +1，canon_change_log 含变更前后 hash，response.status=APPLIED（T-Canon-API-04）；
-  - approve 非 pending：返回 422 + WCANON_PROPOSAL_STATUS_INVALID（T-Canon-API-05）；
-  - reject 成功：status=rejected，SSOT 文件不变，system_event_log 含 WCANON_PROPOSAL_REJECTED（T-Canon-API-06 扩展）；
-  - 所有写操作 proposer_node_id 含 request_id（审计串联可验证）。
-- 涉及文件路径：host_brain/app/canon_routes.py；host_brain/audit/sqlite_ledger.py；tests/contract/test_canon_api_approve_reject_contract.py（新增）；tests/fixtures/canon/。
-- 关联需求/测试：FR-WCANON-002；T-Canon-API-04；T-Canon-API-05；T-Canon-API-06。
-
-### TASK-0120 M10-A 发布清单生成 + requirements_trace.md 补写 R-90~R-91
-- 任务描述：补齐 M10-A 的两项收尾工作：① requirements_trace.md 补写 R-90~R-91（M10-A 的 2 条需求追踪条目）；② 在 release_manifest.py 中新增 generate_m10a_manifest()，生成 release/manifests/m10a_release.json。
-- 输入：DevSpec §20；requirements_trace.md（现有，末尾为 R-89）；host_brain/release/release_manifest.py（现有 generate_m9_manifest）。
-- 输出：
-  - `docs/60_trace/requirements_trace.md` 扩展：新增 M10-A 章节标题 + R-90（FR-WCANON-002 Canon 治理 API）+ R-91（NFR-MAINT-001 M10-A 发布清单）；
-  - `host_brain/release/release_manifest.py` 扩展：`generate_m10a_manifest()` 方法；
-  - `release/manifests/m10a_release.json`（新增）：M10-A 发布清单。
-- 验收标准：
-  - requirements_trace.md 包含 R-90~R-91，覆盖状态均为 DONE；
-  - m10a_release.json 包含：milestone=M10-A / git_commit_hash / migration_hashes / test_passed_count / generated_at；
-  - canon_routes.py 端点在 /docs 可见（FastAPI 自动文档）。
-- 涉及文件路径：docs/60_trace/requirements_trace.md；host_brain/release/release_manifest.py；release/manifests/m10a_release.json（新增）。
-- 关联需求/测试：FR-WCANON-001；FR-WCANON-002；NFR-MAINT-001；T-Canon-API-01~08。
-
-
----
-
-## M10-A 方向 A — P1 风险修复（2026-03-03）
-
-### TASK-0121-P1 P1 风险修复：proposal_id UNIQUE 约束 + 循环导入消除 + rollback 机制
-- 状态：DONE（2026-03-03：1046 passed，P1 三项修复全量落地）
-- 任务描述：修复 risk_registry.md 中 M10-A 新增的三项 P1 风险：R118-3（proposal_id 无 UNIQUE 约束）、R118-2（canon_routes 循环导入）、R114-1（Evolution approve 无回滚机制）。
-- 输入：risk_registry.md R118-3/R118-2/R114-1；host_brain/audit/sqlite_ledger.py；host_brain/app/canon_routes.py；host_brain/app/fastapi_app.py；host_brain/memory/canon_world_store.py。
-- 输出：
-  - `host_brain/audit/migrations/0017_canon_proposal_log_unique.sql`（新增）：UNIQUE INDEX 文档；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：`_ensure_schema` 追加 `idx_canon_proposal_id_unique` + `idx_canon_change_id_unique`；`log_canon_proposal` 改为 `INSERT OR IGNORE`（幂等写入）；
-  - `host_brain/app/canon_routes.py` 重构：`_get_ledger_from_app` 改为外部注入 provider（`set_ledger_provider`），消除延迟导入循环引用；新增 `POST /canon/proposals/{id}/rollback` 端点 + `CanonProposalRollbackRequest/Response` 模型；
-  - `host_brain/app/fastapi_app.py` 扩展：导入 `set_ledger_provider`，在 `get_ledger` 定义后调用 `_set_canon_ledger_provider(get_ledger)`；
-  - `host_brain/memory/canon_world_store.py` 扩展：新增 `rollback_proposal()` 方法（APPLIED→ROLLED_BACK，写 canon_change_log，base_version=0 时删除 SSOT 文件）；
-  - `tests/contract/test_canon_p1_fixes.py`（新增）：T-Canon-P1-01~05（5 个测试）。
-- 验收标准：
-  - 相同 proposal_id 重复写入后数据库只有一条记录（T-Canon-P1-01）；
-  - 直接 import canon_routes 不触发 ImportError（T-Canon-P1-02）；
-  - set_ledger_provider 注入后 _get_ledger_from_app 返回注入实例（T-Canon-P1-03）；
-  - APPLIED 提案可回滚，SSOT 文件删除/降版，status=ROLLED_BACK（T-Canon-P1-04）；
-  - pending/rejected 提案回滚抛 PermissionError（T-Canon-P1-05）；
-  - 全量测试 1046 passed，0 failed。
-- 涉及文件路径：host_brain/audit/migrations/0017_canon_proposal_log_unique.sql（新增）；host_brain/audit/sqlite_ledger.py；host_brain/app/canon_routes.py；host_brain/app/fastapi_app.py；host_brain/memory/canon_world_store.py；tests/contract/test_canon_p1_fixes.py（新增）。
-- 关联需求/测试：risk_registry.md R118-3/R118-2/R114-1；T-Canon-P1-01~05。
-
----
-
-## M10-B — ASR 热词注入 World Canon 关键词（DONE，2026-03-03）
-
-### TASK-0122 canon_world_store.py：extract_hotwords() 方法
-- 状态：DONE（2026-03-03）
-- 任务描述：在 WorldCanonStore 中新增 `extract_hotwords()` 方法，从 SSOT 文档中提取人名/地名/专有名词作为 ASR 热词列表。
-- 输入：DevSpec §20（M10-B 候选）；host_brain/memory/canon_world_store.py；host_brain/canon/world/*.json（SSOT 文件）。
-- 输出：
-  - `host_brain/memory/canon_world_store.py` 扩展：`extract_hotwords(max_words: int = 200) -> list[str]` 方法，从所有 active 文档的 title/tags 中提取热词，去重排序；
-  - `tests/unit/test_canon_hotwords.py`（新增）：T-Canon-HW-01~03。
-- 验收标准：
-  - extract_hotwords 返回 list[str]，无重复，按字母序排序；
-  - max_words 参数生效（截断超出部分）；
-  - 空 SSOT 目录返回空列表。
-- 涉及文件路径：host_brain/memory/canon_world_store.py；tests/unit/test_canon_hotwords.py（新增）。
-- 关联需求/测试：FR-WCANON-001；T-Canon-HW-01~03。
-
-### TASK-0123 canon_routes.py：GET /canon/hotwords 端点
-- 状态：DONE（2026-03-03）
-- 任务描述：在 canon_routes.py 中新增 `GET /canon/hotwords` 端点，返回当前 World Canon 热词列表（供 Edge ASR 模块拉取）。
-- 输入：DevSpec §20（M10-B）；host_brain/app/canon_routes.py；WorldCanonStore.extract_hotwords()（TASK-0122 实现后）。
-- 输出：
-  - `host_brain/app/canon_routes.py` 扩展：`GET /canon/hotwords` 端点，响应结构 `{hotwords: list[str], total: int, request_id: str, timestamp: int}`；
-  - `tests/contract/test_canon_hotwords_api.py`（新增）：T-Canon-HW-API-01~02。
-- 验收标准：
-  - GET /canon/hotwords 返回 hotwords 列表，total 与列表长度一致；
-  - max_words 查询参数生效（默认 200）。
-- 涉及文件路径：host_brain/app/canon_routes.py；tests/contract/test_canon_hotwords_api.py（新增）。
-- 关联需求/测试：FR-WCANON-001；T-Canon-HW-API-01~02。
-
-### TASK-0124 edge_client/senses/asr.py：热词注入接口扩展
-- 状态：DONE（2026-03-03）
-- 任务描述：在 Edge ASR 模块中扩展热词注入接口，支持从 Host `GET /canon/hotwords` 拉取热词并注入到 ASR 引擎。
-- 输入：DevSpec §20（M10-B）；edge_client/senses/asr.py（现有）；GET /canon/hotwords 端点（TASK-0123 实现后）。
-- 输出：
-  - `edge_client/senses/asr.py` 扩展：`inject_canon_hotwords(host_url: str, max_words: int = 200) -> int` 方法，拉取热词并注入，返回注入词数；
-  - `tests/unit/test_asr_hotword_injection.py`（新增）：T-ASR-HW-01~03（mock HTTP 请求）。
-- 验收标准：
-  - inject_canon_hotwords 成功时返回注入词数 > 0；
-  - Host 不可达时降级（返回 0，不抛异常）；
-  - 热词列表为空时返回 0。
-- 涉及文件路径：edge_client/senses/asr.py；tests/unit/test_asr_hotword_injection.py（新增）。
-- 关联需求/测试：T-ASR-HW-01~03。
-
-### TASK-0125 M10-B 发布清单 + requirements_trace.md 补写 R-92~R-94
-- 状态：DONE（2026-03-03）
-- 任务描述：补齐 M10-B 的收尾工作：① requirements_trace.md 补写 R-92~R-94；② 生成 release/manifests/m10b_release.json；③ release_manifest.py 追加 generate_m10b_manifest()。
-- 输入：DevSpec §20（M10-B）；requirements_trace.md（末尾为 R-91）；host_brain/release/release_manifest.py。
-- 输出：
-  - `docs/60_trace/requirements_trace.md` 扩展：R-92（FR-WCANON-001 extract_hotwords）+ R-93（NFR-PERF-001 热词拉取延迟 < 200ms）+ R-94（FR-ASR-001 inject_canon_hotwords）；
-  - `release/manifests/m10b_release.json`（新增）：M10-B 发布清单，test_passed_count=1054；
-  - `host_brain/release/release_manifest.py` 扩展：`generate_m10b_manifest()` 方法。
-- 验收标准：
-  - requirements_trace.md 包含 R-92~R-94，覆盖状态均为 DONE；
-  - m10b_release.json 包含：milestone=M10-B / git_commit_hash / migration_hashes / asr_hash / test_passed_count=1054 / generated_at；
-  - 全量测试 1054 passed，0 failed。
-- 涉及文件路径：docs/60_trace/requirements_trace.md；release/manifests/m10b_release.json（新增）；host_brain/release/release_manifest.py。
-- 关联需求/测试：FR-WCANON-001；NFR-PERF-001；FR-ASR-001；T-Canon-HW-01~03；T-Canon-HW-API-01~02；T-ASR-HW-01~03。
-
----
-
-## M10-C — 记忆蒸馏系统（DONE，2026-03-03）
-
-### TASK-0126 memory/distillation.py：MemoryDistillationEngine
-- 状态：DONE（2026-03-03）
-- 任务描述：新建 `host_brain/memory/distillation.py`，实现 `MemoryDistillationEngine` 类，从情节记忆（EpisodicStore）中蒸馏语义记忆（SemanticMemory），写入 SQLite `semantic_memory` 表。
-- 输入：DevSpec §20（M10-C 候选）；host_brain/memory/episodic.py；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/memory/distillation.py`（新增）：`MemoryDistillationEngine` 类，含 `distill_top_k()` 方法（召回 Top-K 情节记忆 → 合并摘要 → 幂等写入 semantic_memory 表 → 写 system_event_log 审计）；`SemanticMemoryRecord` / `DistillResult` 数据类；`_compute_source_hash()` / `_merge_texts()` / `_compute_confidence()` 辅助函数。
-- 验收标准：
-  - distill_top_k 正常蒸馏返回 semantic_id，写入 semantic_memory 表（T-Distill-01）；
-  - 相同 source_memory_ids 重复蒸馏跳过（skipped=True，T-Distill-02）；
-  - 空 EpisodicStore 返回 success=False（T-Distill-03）。
-- 涉及文件路径：host_brain/memory/distillation.py（新增）。
-- 关联需求/测试：T-Distill-01~03。
-
-### TASK-0127 sqlite_ledger.py：semantic_memory 表 + CRUD 方法
-- 状态：DONE（2026-03-03）
-- 任务描述：在 `sqlite_ledger.py` 中新增 `semantic_memory` 表定义（`_ensure_schema`）和三个 CRUD 方法。
-- 输入：DevSpec §20（M10-C）；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `host_brain/audit/sqlite_ledger.py` 扩展：`_ensure_schema` 追加 `semantic_memory` 表（含 semantic_id UNIQUE / source_hash UNIQUE / ts_ms INDEX）；新增 `log_semantic_memory()` / `get_semantic_memory_by_source_hash()` / `list_semantic_memories()` / `_row_to_semantic_memory()` 方法。
-- 验收标准：
-  - log_semantic_memory 幂等写入（INSERT OR IGNORE）；
-  - get_semantic_memory_by_source_hash 按 source_hash 查询；
-  - list_semantic_memories 分页查询正确（T-Distill-04）。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py。
-- 关联需求/测试：T-Distill-04。
-
-### TASK-0128 context_pack.py：semantic_slot 可选分槽
-- 状态：DONE（2026-03-03）
-- 任务描述：在 `context_pack.py` 中新增可选 `semantic_slot` 分槽支持，包含验证函数和构建辅助函数。
-- 输入：DevSpec §20（M10-C）；host_brain/core/context_pack.py。
-- 输出：
-  - `host_brain/core/context_pack.py` 扩展：新增 `OPTIONAL_SLOTS` 字典（含 `semantic_slot: list`）；`validate_context_pack` 扩展：未知槽位检查同时排除 OPTIONAL_SLOTS，存在 semantic_slot 时调用 `_validate_semantic_slot()`；新增 `_validate_semantic_slot()` 函数（校验 semantic_id / summary 必填字段）；新增 `build_semantic_slot()` 辅助函数（从 ledger 构建 semantic_slot 列表）。
-- 验收标准：
-  - 合法 semantic_slot 通过验证（T-Distill-05）；
-  - 缺少 semantic_id/summary 时报 CONTEXT_PACK_TYPE_INVALID（T-Distill-05）；
-  - 不含 semantic_slot 的 context_pack 仍通过验证（T-Distill-05）；
-  - build_semantic_slot 返回格式正确的列表（T-Distill-06）；
-  - 全量测试 1062 passed，0 failed（无回归）。
-- 涉及文件路径：host_brain/core/context_pack.py。
-- 关联需求/测试：T-Distill-05~06。
-
-### TASK-0129 M10-C 测试 + 发布清单
-- 状态：DONE（2026-03-03）
-- 任务描述：补齐 M10-C 的测试文件和发布清单。
-- 输入：DevSpec §20（M10-C）；host_brain/release/release_manifest.py。
-- 输出：
-  - `tests/unit/test_memory_distillation.py`（新增）：T-Distill-01~06（8 个测试）；
-  - `release/manifests/m10c_release.json`（新增）：M10-C 发布清单，test_passed_count=1062；
-  - `host_brain/release/release_manifest.py` 扩展：`generate_m10c_manifest()` 方法（锁定 distillation.py / context_pack.py / sqlite_ledger.py hash）；
-  - `docs/60_trace/requirements_trace.md` 扩展：R-95~R-97（M10-C 语义记忆蒸馏相关需求追踪）。
-- 验收标准：
-  - T-Distill-01~06 全部通过；
-  - m10c_release.json 包含：milestone=M10-C / distillation_hash / context_pack_hash / sqlite_ledger_hash / test_passed_count=1062；
-  - 全量测试 1062 passed，0 failed。
-- 涉及文件路径：tests/unit/test_memory_distillation.py（新增）；release/manifests/m10c_release.json（新增）；host_brain/release/release_manifest.py；docs/60_trace/requirements_trace.md。
-- 关联需求/测试：T-Distill-01~06。
-
----
-
-## M10-D — P1/P2 收口与发布（DONE，2026-03-03）
-
-### TASK-0130 F-41 修复：distill_top_k() 并发保护（蒸馏级别锁）
-- 状态：DONE（2026-03-03）
-- 任务描述：在 `memory/distillation.py` 为 `distill_top_k()` 增加线程并发保护，避免并发蒸馏同一 source 集合时产生 source_hash 竞态。
-- 输入：risk_registry.md（R-MC-02）；host_brain/memory/distillation.py；tests/unit/test_memory_distillation.py。
-- 输出：
-  - `host_brain/memory/distillation.py` 扩展：`MemoryDistillationEngine` 增加蒸馏级别互斥锁（threading.Lock）；
-  - `distill_top_k()` 关键区增加“锁内二次幂等检查 + 写入后回读确认”；
-  - `tests/unit/test_memory_distillation.py` 扩展：新增并发回归测试（多线程同源蒸馏）。
-- 验收标准：
-  - 并发场景下同一 source_hash 最终仅落库一次；
-  - 不出现重复 semantic_memory 记录；
-  - 并发测试稳定通过。
-- 涉及文件路径：host_brain/memory/distillation.py；tests/unit/test_memory_distillation.py。
-- 关联需求/测试：FR-MEM-001；T-Distill-07（并发补充）。
-
-### TASK-0131 F-06 修复：_table_has_column 表结构缓存（线程安全）
-- 状态：DONE（2026-03-03）
-- 任务描述：为 `SQLiteLedger._table_has_column()` 增加线程安全的列结构缓存，降低重复 PRAGMA 查询开销。
-- 输入：risk_registry.md（R119-3）；host_brain/audit/sqlite_ledger.py；tests/contract/test_quality_contract.py。
-- 输出：
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `_column_cache_lock` 与双检锁缓存填充；
-  - `_table_has_column()` 命中缓存时不再重复查询 `PRAGMA table_info`；
-  - `tests/contract/test_quality_contract.py` 扩展：并发缓存行为断言测试。
-- 验收标准：
-  - 首次调用填充缓存，后续命中缓存；
-  - 并发调用场景仅发生一次 PRAGMA 查询；
-  - 质量契约测试通过。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；tests/contract/test_quality_contract.py。
-- 关联需求/测试：NFR-PERF-001；T-Quality-01（F-06 子项）。
-
-### TASK-0132 F-35/F-36 收口：approve/reject 审计原子性增强
-- 状态：DONE（2026-03-03）
-- 任务描述：收口 `canon_routes.py` 中 approve/reject 的非原子风险，减少非事务窗口并将审计写入失败升级为错误返回。
-- 输入：risk_registry.md（R119-1/R119-2）；host_brain/app/canon_routes.py。
-- 输出：
-  - `approve_proposal` 去除“二次 DB 读取依赖”，以前置读取结果构造响应；
-  - `reject_proposal` 中 `log_system_event` 失败从 warning 升级为 error + HTTP 500；
-  - 响应头补充 `X-Reason-Code: CANON_SYNC_FAILED`（审计失败可观测）。
-- 验收标准：
-  - approve 路径不再存在额外二次读取窗口；
-  - reject 审计写入失败不再静默吞掉；
-  - Canon API 契约测试通过。
-- 涉及文件路径：host_brain/app/canon_routes.py；tests/contract/test_canon_api_contract.py。
-- 关联需求/测试：FR-WCANON-002；T-Canon-API-04~06。
-
-### TASK-0133 F-37 修复：M10-A 清单补锁核心文件 hash
-- 状态：DONE（2026-03-03）
-- 任务描述：扩展 `m10a_release.json` 锁定范围，补齐 `canon_world_store.py` 与 `sqlite_ledger.py` hash。
-- 输入：risk_registry.md（R120-1）；host_brain/release/release_manifest.py；release/manifests/m10a_release.json。
-- 输出：
-  - `generate_m10a_manifest()` 增加 `canon_world_store_hash`、`sqlite_ledger_hash` 字段；
-  - `release/manifests/m10a_release.json` 写入新增 hash 字段并更新值。
-- 验收标准：
-  - m10a 清单包含新增锁定字段；
-  - 字段值为合法 sha256 摘要；
-  - 发布契约检查通过。
-- 涉及文件路径：host_brain/release/release_manifest.py；release/manifests/m10a_release.json。
-- 关联需求/测试：NFR-MAINT-001；T-REL-01（扩展口径）。
-
-### TASK-0134 F-39 修复：source_intent_id 端到端完整性校验
-- 状态：DONE（2026-03-03）
-- 任务描述：补齐 diary evolution proposal 的 `source_intent_id` 从提交到落库链路，防止跨表关联断链。
-- 输入：risk_registry.md（R115-1）；host_brain/memory/canon_world_store.py；host_brain/audit/sqlite_ledger.py；host_brain/skills/impl/diary_writer.py。
-- 输出：
-  - `canon_proposal_log` schema 增加 `source_intent_id`；
-  - `submit_proposal(..., source_intent_id=...)` 参数贯通；
-  - `diary_writer` 在提案提交时传入 diary intent_id；
-  - 迁移脚本与契约测试同步更新。
-- 验收标准：
-  - proposal 记录可回溯到源 intent_id；
-  - diary evolution 契约测试同时验证返回值与 DB 落库字段；
-  - 无 source_intent_id 时保持向后兼容。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0002_canon_schema.sql；host_brain/audit/migrations/0016_canon_proposal_log.sql；host_brain/memory/canon_world_store.py；host_brain/skills/impl/diary_writer.py；tests/contract/test_diary_evolution_contract.py。
-- 关联需求/测试：FR-DIARY-002；T-Diary-03；T-Diary-04。
-
-### TASK-0135 F-12 收口：requirements 可选 Redis 依赖说明
-- 状态：DONE（2026-03-03）
-- 任务描述：在 `requirements.txt` 明确 Redis 为可选依赖，仅在启用 Redis rate-limit backend 时安装。
-- 输入：risk_registry.md（R121-1）；requirements.txt；tests/contract/test_quality_contract.py。
-- 输出：
-  - `requirements.txt` 增加 Optional Dependencies 注释块（redis 可选说明）；
-  - 质量契约补充断言（要求存在“redis + 可选”说明）。
-- 验收标准：
-  - requirements 文本含 redis 与 optional/可选标识；
-  - 不强制默认安装 redis；
-  - 对应质量契约测试通过。
-- 涉及文件路径：requirements.txt；tests/contract/test_quality_contract.py。
-- 关联需求/测试：NFR-MAINT-001；T-Quality-01（F-12 子项）。
-
-### TASK-0136 M10-D 收口：追踪补写 + 第六版审查报告 + 发布清单
-- 状态：DONE（2026-03-03）
-- 任务描述：完成 M10-D 文档与发布链路收口：补写 `R-98~R-104`，生成第六版审查报告，生成 `m10d_release.json`。
-- 输入：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-03-v5.md；host_brain/release/release_manifest.py。
-- 输出：
-  - `docs/60_trace/requirements_trace.md` 扩展：R-98~R-104；
-  - `docs/40_agents/full_code_review_report_2026-03-03-v6.md`（新增）；
-  - `host_brain/release/release_manifest.py` 扩展：`generate_m10d_manifest()`；
-  - `release/manifests/m10d_release.json`（新增）。
-- 验收标准：
-  - 需求追踪新增条目完整，状态为 DONE；
-  - 第六版报告更新剩余 P1/P2 发现与修复进展；
-  - m10d_release.json 包含 milestone/git hash/migration hashes/核心文件 hash/test_passed_count/generated_at。
-- 涉及文件路径：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-03-v6.md；host_brain/release/release_manifest.py；release/manifests/m10d_release.json。
-- 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
-
-### TASK-0137 F-04 跟进：Redis 后端真实集成测试落地
-- 状态：BLOCKED_ENV（2026-03-04，暂缓——单机 SQLite 部署无需 Redis；多实例部署前执行）
-- 任务描述：为 `RedisRateLimitStore` 增加真实 Redis 环境集成测试，验证共享计数与 checker 行为，消除“仅降级路径覆盖”的验证缺口。
-- 输入：risk_registry.md（R39-1）；host_brain/governor/rate_limit_store.py；tests/contract/test_governor_rate_limit_contract.py。
-- 输出：
-  - `tests/integration/test_rate_limit_redis_integration.py`（新增）：
-    - 真实 Redis 后端 `check/check_only/reset/ttl` 验证；
-    - 双实例共享计数一致性验证；
-    - 通过 `NASTUME_TEST_REDIS_URL` 环境变量启用，缺省自动 skip（不影响默认 CI）。
-- 验收标准：
-  - 配置 `NASTUME_TEST_REDIS_URL` 且 Redis 可达时，集成测试通过；
-  - 未配置或 Redis 不可达时，测试稳定 skip；
-  - 不引入默认测试链路不稳定性。
-- 涉及文件路径：tests/integration/test_rate_limit_redis_integration.py（新增）。
-- 关联需求/测试：FR-GOV-001；T-Gov-R4-Redis-01（集成补充）。
-
-### TASK-0138 F-05 跟进：WAL/NFS 部署文档显式约束
-- 状态：DONE（2026-03-03）
-- 任务描述：在部署文档中显式补充 SQLite WAL 与 NFS 不兼容风险及验收口径，避免生产部署踩坑。
-- 输入：risk_registry.md（R36-1）；docs/50_project/ExternalServices_Config.md；docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
-- 输出：
-  - `ExternalServices_Config.md` 新增 SQLite WAL 存储介质要求（本地磁盘优先，NFS/SMB 禁用建议）；
-  - `ENV_EXTERNAL_SERVICES_CHECKLIST.md` 新增部署前强校验条目（journal_mode/WAL 与 `AUDIT_WAL_FAILED` 告警口径）。
-- 验收标准：
-  - 部署文档明确“Ledger 主库禁止 NFS/网络文件系统”；
-  - 明确 WAL 失败降级语义与运维检查方法；
-  - 与 risk_registry 的 R36-1 对齐。
-- 涉及文件路径：docs/50_project/ExternalServices_Config.md；docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
-- 关联需求/测试：NFR-REL-001；NFR-MAINT-001。
-
-### TASK-0139 F-01/F-02 收口：Sandbox 容器硬隔离 + 跨平台超时一致化
-- 状态：DONE（2026-03-03）
-- 任务描述：收口 `airlock/sandbox.py` 在部署环境的两项 P1 风险：生产环境容器硬隔离约束（F-01）与 Windows/Linux 超时终止语义一致化（F-02）。
-- 输入：risk_registry.md（F-01/F-02）；host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
-- 输出：
-  - `host_brain/airlock/sandbox.py` 扩展：`SandboxConfig.require_container`、`isolation_backend=auto`、生产环境容器必选判定；
-  - 容器必选且不可用时返回 `UNAVAILABLE + SANDBOX_CONTAINER_UNAVAILABLE`（禁止降级到 subprocess）；
-  - subprocess 路径统一采用 `Popen.communicate(timeout=...)` + 平台感知终止（Windows `taskkill /T /F`，Linux/Unix `killpg`）；
-  - `resource_usage` 补充 `timeout_enforcement/platform/isolation_backend` 诊断字段。
-- 验收标准：
-  - 生产环境或 `require_container=True` 时，不满足容器隔离必须硬失败；
-  - 超时路径在 Windows/Linux 返回一致语义（TIMEOUT + SANDBOX_TIMEOUT）；
-  - T-Sandbox-01 与 T-Sandbox-Docker-01 回归通过（含新增断言）。
-- 涉及文件路径：host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
-- 关联需求/测试：FR-AIRLOCK-002；T-Sandbox-01；T-Sandbox-Docker-01。
-
-### TASK-0140 F-11 收口：WeChat→Edge 真实 RPC 端到端验证
-- 状态：DONE（2026-03-03）
-- 任务描述：补齐 F-11 验证缺口：E2E 测试不再直接写 Ledger 模拟 Edge，而是经 Host `POST /v1/edge/events` 真实 RPC 入口写入语音事件。
-- 输入：risk_registry.md（F-11）；host_brain/app/fastapi_app.py；edge_client/rpc/event_reporter.py；tests/e2e fixtures。
-- 输出：
-  - `tests/e2e/test_wechat_vts_voice_rpc_e2e.py`（新增）：覆盖 WeChat 入站 → Governor APPROVE → Skill 执行 → EdgeEventReporter 通过 HTTP 上报 `ASR_CHUNK/TTS_PLAY`；
-  - E2E 断言补充：`voice_event_log` 真实落库 + `trace_request` 链路完整；
-  - 测试侧 Ledger 连接调整为 `check_same_thread=False`，保证 TestClient 跨线程写库稳定。
-- 验收标准：
-  - 事件上报通过真实 `/v1/edge/events` 入口（非直接调用 Ledger）；
-  - `ASR_CHUNK` 与 `TTS_PLAY` 均可在审计表中回放；
-  - 聚焦 E2E+RPC+Sandbox + manifest 回归通过（102 passed）。
-- 涉及文件路径：tests/e2e/test_wechat_vts_voice_rpc_e2e.py（新增）；host_brain/airlock/sandbox.py；tests/contract/test_sandbox_contract.py；tests/contract/test_sandbox_docker_contract.py。
-- 关联需求/测试：FR-CHANNEL-001；FR-VOICE-001；T-E2E-RPC-01。
-
----
-
-## M10-E：_CANON_HOTWORDS_CACHE 增加 TTL 自动失效（F-42）
-
-### TASK-0141 asr.py：_HotwordsCache 类实现（TTL 自动失效）
-- 状态：DONE（2026-03-04）
-- 任务描述：在 `edge_client/senses/asr.py` 中新增 `_HotwordsCache` 类，为模块级热词缓存增加 TTL 自动失效机制，避免 SSOT 更新后缓存长期不刷新。
-- 输入：risk_registry.md（F-42）；edge_client/senses/asr.py（M10-B 实现）。
-- 输出：
-  - `_HotwordsCache` 类：`set()/get()/clear()/is_valid()/age_s()` 方法，`threading.Lock` 保护，TTL 默认 300s；
-  - `_CANON_HOTWORDS_CACHE = _HotwordsCache(ttl_s=300.0)` 模块级实例；
-  - `inject_canon_hotwords()` 更新：注入后调用 `_CANON_HOTWORDS_CACHE.set(hotwords)` 并记录 TTL 日志；
-  - `get_canon_hotwords()` 更新：调用 `_CANON_HOTWORDS_CACHE.get()` 返回 TTL 内副本。
-- 验收标准：
-  - TTL 未到期时 `get()` 返回完整热词列表；
-  - TTL 到期后 `get()` 返回空列表；
-  - `clear()` 立即使缓存失效；
-  - 多线程并发 `set()` 不引发竞态。
-- 涉及文件路径：edge_client/senses/asr.py。
-- 关联需求/测试：FR-ASR-001；NFR-PERF-001；T-HW-TTL-01~05。
-
-### TASK-0142 tests：test_hotwords_cache_ttl.py（T-HW-TTL-01~05）
-- 状态：DONE（2026-03-04）
-- 任务描述：新增 `_HotwordsCache` TTL 专项测试，覆盖 TTL 有效期内/到期后行为、`is_valid()` 状态转换、`clear()` 立即失效、并发写入安全。
-- 输入：edge_client/senses/asr.py（TASK-0141 实现后）。
-- 输出：
-  - `tests/unit/test_hotwords_cache_ttl.py`（新增）：T-HW-TTL-01~05（5 tests）；
-  - 使用 `unittest.mock.patch("time.monotonic")` 模拟时间推进，无需真实等待。
-- 验收标准：
-  - 5 个测试用例全部通过；
-  - 不依赖真实时间等待（mock time.monotonic）；
-  - 全量测试 1090 passed, 2 skipped。
-- 涉及文件路径：tests/unit/test_hotwords_cache_ttl.py（新增）。
-- 关联需求/测试：FR-ASR-001；T-HW-TTL-01~05。
-
-### TASK-0143 M10-E 发布收口（v7 审查报告 + m10e_release.json）
-- 状态：DONE（2026-03-04）
-- 任务描述：生成 M10-E 发布清单与第七版审查报告，完成 M10-E 里程碑收口。
-- 输入：TASK-0141~0142 完成后；release_manifest.py；docs/60_trace/requirements_trace.md。
-- 输出：
-  - `release/manifests/m10e_release.json`（新增）：锁定 asr.py hash + test_hotwords_cache_ttl.py hash + test_passed_count=1090；
-  - `docs/40_agents/full_code_review_report_2026-03-04-v7.md`（新增）：第七版审查报告；
-  - `docs/60_trace/requirements_trace.md` 扩展：R-109（F-42 TTL 缓存）状态 DONE；
-  - `docs/30_devspec/DevTasks.md` M10-E 状态更新为 DONE。
-- 验收标准：
-  - 需求追踪新增 R-109 条目完整，状态为 DONE；
-  - 第七版报告更新 M10-E 改动与 Edge 优化成果；
-  - m10e_release.json 包含 milestone/git hash/migration hashes/核心文件 hash/test_passed_count/generated_at。
-- 涉及文件路径：docs/60_trace/requirements_trace.md；docs/40_agents/full_code_review_report_2026-03-04-v7.md；host_brain/release/release_manifest.py；release/manifests/m10e_release.json。
-- 关联需求/测试：NFR-MAINT-001；T-REL-01（发布清单口径扩展）。
-
----
-
-## P2 代码质量收口（F-13~F-27 批次）
-
-### TASK-0144 P2 代码质量收口：F-16 _fetch_by_request 白名单校验补全
-- 状态：DONE（2026-03-04）
-- 任务描述：`_fetch_by_request()` 缺少表名白名单校验（F-16 遗漏），补充 `_ALLOWED_TABLES` 检查，与 `_fetch_all`/`fetch_by_time_range`/`count_by_time_range` 保持一致。
-- 输入：risk_registry.md（R76-4）；host_brain/audit/sqlite_ledger.py。
-- 输出：
-  - `_fetch_by_request()` 函数头部增加 `if table not in _ALLOWED_TABLES: raise ValueError(...)` 校验；
-  - 注释标注 `# F-16: validate table name with whitelist to prevent SQL injection`。
-- 验收标准：
-  - 传入非白名单表名时抛出 `ValueError`（含 `AUDIT_TABLE_NAME_INVALID`）；
-  - 全量测试 1090 passed, 2 skipped（无回归）。
-- 涉及文件路径：host_brain/audit/sqlite_ledger.py。
-- 关联需求/测试：NFR-SEC-001；T-Quality-01（F-16 扩展）。
-
-### TASK-0145 P2 状态确认：F-13/F-14/F-15/F-25/F-38 已修复核查
-- 状态：DONE（2026-03-04）
-- 任务描述：核查 P2 发现项中已在历次开发中修复的条目，更新 risk_registry.md 状态。
-- 核查结论：
-  - F-13（裸 print）：main.py 中已无 print() 调用，已修复 ✅；
-  - F-14（compile_runtime_graph 类型标注）：已有 `-> Any` 标注，已修复 ✅；
-  - F-15（fastapi_app.py handler 类型标注）：所有 async handler 均有返回类型标注，已修复 ✅；
-  - F-25（asyncio.get_event_loop DeprecationWarning）：vts_driver.py 已改为 `asyncio.new_event_loop()`，已修复 ✅；
-  - F-38（list_proposals cursor-based 分页）：已实现 `after_id` cursor 分页，已修复 ✅。
-- 涉及文件路径：host_brain/app/main.py；host_brain/integrations/graph_executor.py；host_brain/app/fastapi_app.py；edge_client/actuators/vts_driver.py；host_brain/audit/sqlite_ledger.py。
-- 关联需求/测试：NFR-MAINT-001。
-
-### TASK-0146 P2 文档记录：F-18/F-19/F-20/F-26/F-27 已知边界确认
-- 状态：DONE（2026-03-04）
-- 任务描述：将剩余 P2 已知边界项记录为"已知限制/后续优化方向"，不阻塞当前发布。
-- 已知边界确认：
-  - F-18（SQLite 高并发读写瓶颈）：当前单机部署可接受；中期可引入 PostgreSQL 或只读副本；
-  - F-19（WAL checkpoint 监控）：已有 close() 自动 PASSIVE checkpoint；长期运行需监控 WAL 文件大小；
-  - F-20（sandbox 仅支持 Python）：非 Python 语言稳定拒绝 + reason_code 可统计；按需扩展；
-  - F-26（Docker 镜像构建依赖网络）：支持预构建镜像本地加载；部署文档已标注；
-  - F-27（nsjail 非 Linux 不可用）：仅作为 Linux 备选；部署文档已标注平台要求。
-- 涉及文件路径：docs/60_trace/risk_registry.md（状态更新）。
-- 关联需求/测试：NFR-REL-001；NFR-MAINT-001。
-
----
-
-## M11 规划框架（待开发）
-
-### M11 里程碑概览
-
-基于 PRD.md 中尚未实现的功能需求，M11 规划如下：
-
-| 子里程碑 | 核心需求 | 优先级 | 前置条件 |
+## M11 瑙勫垝妗嗘灦锛堝緟寮€鍙戯級
+
+### M11 閲岀▼纰戞瑙?
+鍩轰簬 PRD.md 涓皻鏈疄鐜扮殑鍔熻兘闇€姹傦紝M11 瑙勫垝濡備笅锛?
+| 瀛愰噷绋嬬 | 鏍稿績闇€姹?| 浼樺厛绾?| 鍓嶇疆鏉′欢 |
 |---------|---------|--------|---------|
-| M11-A | FR-SCHED-001/002（定时调度器统一入口 + 健康状态） | P1 | M10-E DONE |
-| M11-B | FR-DESKTOP-001/002（桌面留言文件创建与撤销） | P1 | M11-A DONE |
-| M11-C | FR-DREAM-001/002（梦境生成 + 可回溯） | P2 | M11-A DONE |
-| M11-D | FR-DIARY-001（日记生成每日定时汇总） | P2 | M11-A DONE |
-| M11-E | FR-PROACTIVE-001/002（主动对话触发策略） | P2 | M11-A DONE |
-| M11-F | FR-FOCUS-001（Focus Mode 状态切换） | P3 | M11-E DONE |
+| M11-A | FR-SCHED-001/002锛堝畾鏃惰皟搴﹀櫒缁熶竴鍏ュ彛 + 鍋ュ悍鐘舵€侊級 | P1 | M10-E DONE |
+| M11-B | FR-DESKTOP-001/002锛堟闈㈢暀瑷€鏂囦欢鍒涘缓涓庢挙閿€锛?| P1 | M11-A DONE |
+| M11-C | FR-DREAM-001/002锛堟ⅵ澧冪敓鎴?+ 鍙洖婧級 | P2 | M11-A DONE |
+| M11-D | FR-DIARY-001锛堟棩璁扮敓鎴愭瘡鏃ュ畾鏃舵眹鎬伙級 | P2 | M11-A DONE |
+| M11-E | FR-PROACTIVE-001/002锛堜富鍔ㄥ璇濊Е鍙戠瓥鐣ワ級 | P2 | M11-A DONE |
+| M11-F | FR-FOCUS-001锛團ocus Mode 鐘舵€佸垏鎹級 | P3 | M11-E DONE |
 
-> M11 开发前需先完成 DevSpec §21（调度器）+ §22（桌面留言）+ §23（梦境/日记/主动对话）的工程契约拆解。
-
+> M11 寮€鍙戝墠闇€鍏堝畬鎴?DevSpec 搂21锛堣皟搴﹀櫒锛? 搂22锛堟闈㈢暀瑷€锛? 搂23锛堟ⅵ澧?鏃ヨ/涓诲姩瀵硅瘽锛夌殑宸ョ▼濂戠害鎷嗚В銆?
 ---
 
-## M11-A 定时调度器（Scheduler）任务卡
+## M11-A 瀹氭椂璋冨害鍣紙Scheduler锛変换鍔″崱
 
-### TASK-0147 M11-A-1：DevSpec §21~§23 工程契约拆解
-- 状态：DONE（2026-03-04，DevSpec.md §21~§23 已追加）
-- 任务描述：在 DevSpec.md 中追加 §21（调度器）、§22（桌面留言）、§23（梦境/日记/主动对话/Focus Mode）工程契约，包含模块边界、Schema、SQLite 表、接口契约、错误码、测试编号。
-- 输入：PRD.md §4.20~§4.25（FR-SCHED/FR-DESKTOP/FR-DREAM/FR-DIARY/FR-PROACTIVE/FR-FOCUS）。
-- 输出：DevSpec.md §21~§23 完整工程契约。
-- 涉及文件路径：docs/30_devspec/DevSpec.md。
-- 关联需求/测试：FR-SCHED-001/002；FR-DESKTOP-001/002；FR-DREAM-001/002；FR-DIARY-001；FR-PROACTIVE-001/002；FR-FOCUS-001。
-
-### TASK-0148 M11-A-2：SchedulerEngine 核心实现
-- 状态：DONE（2026-03-04，host_brain/scheduler/ 已有完整实现：NatsumeScheduler + SchedulerTaskRegistry + SchedulerHealthReporter）
-- 任务描述：实现 `SchedulerEngine`（任务注册/注销/tick/健康状态）+ `SchedulerStore`（SQLite 持久化）+ `ScheduledTask`/`TaskHealth` Schema。
-- 输入：DevSpec §21.1~§21.5。
-- 输出：
-  - `host_brain/scheduler/scheduler_engine.py`：`SchedulerEngine` 类，含 `register_task / unregister_task / enable_task / disable_task / tick / get_health / list_health / _build_system_intent`；
-  - `host_brain/scheduler/scheduler_models.py`：`ScheduledTask`、`TaskHealth`、`SchedulerConfig` dataclass；
-  - `host_brain/scheduler/scheduler_store.py`：`SchedulerStore`（SQLite CRUD，`scheduler_tasks` 表）；
-  - `host_brain/scheduler/__init__.py`：导出 `SchedulerEngine`。
-- 验收标准：
-  - T-SCHED-01：注册任务后 tick() 在正确时间触发，生成 system_initiated_intent；
-  - T-SCHED-02：sys_mode=GAMING 时 NORMAL 优先级任务被跳过；
-  - T-SCHED-03：sys_mode=SLEEP 时 HIGH 优先级白名单任务正常触发；
-  - T-SCHED-04：连续失败 MAX_ERROR_COUNT 次后 status=SUSPENDED；
-  - T-SCHED-06：注销任务后 tick() 不再触发；
-  - T-SCHED-07：system_initiated_intent 中 proposer_node_id="scheduler"。
-- 涉及文件路径：host_brain/scheduler/scheduler_engine.py；host_brain/scheduler/scheduler_models.py；host_brain/scheduler/scheduler_store.py；host_brain/scheduler/__init__.py。
-- 关联需求/测试：FR-SCHED-001；T-SCHED-01/02/03/04/06/07。
-
-### TASK-0149 M11-A-3：Scheduler REST API + 健康端点
-- 状态：DONE（2026-03-04）
-- 任务描述：实现 `/scheduler/tasks` CRUD + `/scheduler/health` 端点，接入 FastAPI 路由。
-- 输入：DevSpec §21.6；TASK-0148 完成。
-- 输出：
-  - `host_brain/scheduler/scheduler_routes.py`：8 个端点（POST/GET/PATCH/DELETE tasks + enable/disable + GET health）；
-  - `host_brain/app/fastapi_app.py`：注册 scheduler_router。
-- 验收标准：
-  - T-SCHED-05：/scheduler/health 返回所有任务健康快照，字段完整；
-  - 全量测试无回归（≥1090 passed）。
-- 涉及文件路径：host_brain/scheduler/scheduler_routes.py；host_brain/app/fastapi_app.py。
-- 关联需求/测试：FR-SCHED-002；T-SCHED-05。
-
-### TASK-0150 M11-A-4：Scheduler 单元测试
-- 状态：DONE（2026-03-04，tests/unit/test_scheduler_engine.py T-SCHED-01~07 全部通过，12 passed）
-- 任务描述：编写 T-SCHED-01~07 全量单元测试。
-- 输入：DevSpec §21.9；TASK-0148/0149 完成。
-- 输出：`tests/unit/test_scheduler_engine.py`（T-SCHED-01~07，含 sys_mode 门控、连续失败暂停、system_initiated_intent 字段校验）。
-- 验收标准：T-SCHED-01~07 全部通过；全量测试 ≥1097 passed（新增 7 个）。
-- 涉及文件路径：tests/unit/test_scheduler_engine.py。
-- 关联需求/测试：FR-SCHED-001/002；T-SCHED-01~07。
-
-### TASK-0151 M11-B-1：DesktopMessageSkill 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/desktop_note.py 已有完整实现；tests/unit/test_desktop_note_skill.py T-DESK-01~08 全部通过）
-- 任务描述：实现 `DesktopMessageSkill`（create/update/delete/undo）+ 安全路径校验 + manifest 生成。
-- 输入：DevSpec §22.1~§22.6。
-- 输出：
-  - `host_brain/skills/desktop_message/desktop_message_skill.py`；
-  - `host_brain/skills/desktop_message/desktop_message_models.py`；
-  - `host_brain/skills/desktop_message/path_validator.py`；
-  - `tests/unit/test_desktop_message_skill.py`（T-DESK-01~08）。
-- 验收标准：T-DESK-01~08 全部通过；全量测试 ≥1105 passed。
-- 涉及文件路径：host_brain/skills/desktop_message/；tests/unit/test_desktop_message_skill.py。
-- 关联需求/测试：FR-DESKTOP-001/002；T-DESK-01~08。
-
-### TASK-0152 M11-C/D-1：DreamSkill + DiarySkill 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/dream_generator.py + diary_writer.py 已有完整实现；tests/unit/test_dream_skill.py T-DREAM-01~05 + tests/unit/test_diary_skill.py T-DIARY-01~05 全部通过）
-- 任务描述：实现 `DreamSkill`（Episodic 读取 → LLM 生成 → 写入 Episodic）+ `DiarySkill`（当日对话读取 → LLM 生成 → 写文件 + Episodic）。
-- 输入：DevSpec §23.1~§23.2。
-- 输出：
-  - `host_brain/skills/dream/dream_skill.py`；
-  - `host_brain/skills/diary/diary_skill.py`；
-  - `tests/unit/test_dream_skill.py`（T-DREAM-01~05）；
-  - `tests/unit/test_diary_skill.py`（T-DIARY-01~05）。
-- 验收标准：T-DREAM-01~05 + T-DIARY-01~05 全部通过；全量测试 ≥1115 passed。
-- 涉及文件路径：host_brain/skills/dream/；host_brain/skills/diary/；tests/unit/test_dream_skill.py；tests/unit/test_diary_skill.py。
-- 关联需求/测试：FR-DREAM-001/002；FR-DIARY-001/002；T-DREAM-01~05；T-DIARY-01~05。
-
-### TASK-0153 M11-E/F-1：ProactiveSkill + Focus Mode 实现
-- 状态：DONE（2026-03-04，host_brain/skills/impl/proactive_talk.py + focus_mode.py 已有完整实现；tests/unit/test_proactive_skill.py T-PROACT-01~06 + tests/unit/test_focus_mode.py T-FOCUS-01~04 全部通过）
-- 任务描述：实现 `ProactiveSkill`（条件校验 → LLM 生成 → 推送）+ `SysModeEnum.FOCUS` 扩展 + Focus Mode 行为矩阵。
-- 输入：DevSpec §23.3~§23.4。
-- 输出：
-  - `host_brain/skills/proactive/proactive_skill.py`；
-  - `host_brain/core/sys_mode.py`（新增 FOCUS 枚举值）；
-  - `tests/unit/test_proactive_skill.py`（T-PROACT-01~06）；
-  - `tests/unit/test_focus_mode.py`（T-FOCUS-01~04）。
-- 验收标准：T-PROACT-01~06 + T-FOCUS-01~04 全部通过；全量测试 ≥1125 passed。
-- 涉及文件路径：host_brain/skills/proactive/；host_brain/core/sys_mode.py；tests/unit/test_proactive_skill.py；tests/unit/test_focus_mode.py。
-- 关联需求/测试：FR-PROACTIVE-001/002；FR-FOCUS-001；T-PROACT-01~06；T-FOCUS-01~04。
-
+### TASK-0147 M11-A-1锛欴evSpec 搂21~搂23 宸ョ▼濂戠害鎷嗚В
+- 鐘舵€侊細DONE锛?026-03-04锛孌evSpec.md 搂21~搂23 宸茶拷鍔狅級
+- 浠诲姟鎻忚堪锛氬湪 DevSpec.md 涓拷鍔?搂21锛堣皟搴﹀櫒锛夈€伮?2锛堟闈㈢暀瑷€锛夈€伮?3锛堟ⅵ澧?鏃ヨ/涓诲姩瀵硅瘽/Focus Mode锛夊伐绋嬪绾︼紝鍖呭惈妯″潡杈圭晫銆丼chema銆丼QLite 琛ㄣ€佹帴鍙ｅ绾︺€侀敊璇爜銆佹祴璇曠紪鍙枫€?- 杈撳叆锛歅RD.md 搂4.20~搂4.25锛團R-SCHED/FR-DESKTOP/FR-DREAM/FR-DIARY/FR-PROACTIVE/FR-FOCUS锛夈€?- 杈撳嚭锛欴evSpec.md 搂21~搂23 瀹屾暣宸ョ▼濂戠害銆?- 娑夊強鏂囦欢璺緞锛歞ocs/30_devspec/DevSpec.md銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-001/002锛汧R-DESKTOP-001/002锛汧R-DREAM-001/002锛汧R-DIARY-001锛汧R-PROACTIVE-001/002锛汧R-FOCUS-001銆?
+### TASK-0148 M11-A-2锛歋chedulerEngine 鏍稿績瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宧ost_brain/scheduler/ 宸叉湁瀹屾暣瀹炵幇锛歂atsumeScheduler + SchedulerTaskRegistry + SchedulerHealthReporter锛?- 浠诲姟鎻忚堪锛氬疄鐜?`SchedulerEngine`锛堜换鍔℃敞鍐?娉ㄩ攢/tick/鍋ュ悍鐘舵€侊級+ `SchedulerStore`锛圫QLite 鎸佷箙鍖栵級+ `ScheduledTask`/`TaskHealth` Schema銆?- 杈撳叆锛欴evSpec 搂21.1~搂21.5銆?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler_engine.py`锛歚SchedulerEngine` 绫伙紝鍚?`register_task / unregister_task / enable_task / disable_task / tick / get_health / list_health / _build_system_intent`锛?  - `host_brain/scheduler/scheduler_models.py`锛歚ScheduledTask`銆乣TaskHealth`銆乣SchedulerConfig` dataclass锛?  - `host_brain/scheduler/scheduler_store.py`锛歚SchedulerStore`锛圫QLite CRUD锛宍scheduler_tasks` 琛級锛?  - `host_brain/scheduler/__init__.py`锛氬鍑?`SchedulerEngine`銆?- 楠屾敹鏍囧噯锛?  - T-SCHED-01锛氭敞鍐屼换鍔″悗 tick() 鍦ㄦ纭椂闂磋Е鍙戯紝鐢熸垚 system_initiated_intent锛?  - T-SCHED-02锛歴ys_mode=GAMING 鏃?NORMAL 浼樺厛绾т换鍔¤璺宠繃锛?  - T-SCHED-03锛歴ys_mode=SLEEP 鏃?HIGH 浼樺厛绾х櫧鍚嶅崟浠诲姟姝ｅ父瑙﹀彂锛?  - T-SCHED-04锛氳繛缁け璐?MAX_ERROR_COUNT 娆″悗 status=SUSPENDED锛?  - T-SCHED-06锛氭敞閿€浠诲姟鍚?tick() 涓嶅啀瑙﹀彂锛?  - T-SCHED-07锛歴ystem_initiated_intent 涓?proposer_node_id="scheduler"銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/scheduler/scheduler_engine.py锛沨ost_brain/scheduler/scheduler_models.py锛沨ost_brain/scheduler/scheduler_store.py锛沨ost_brain/scheduler/__init__.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-001锛汿-SCHED-01/02/03/04/06/07銆?
+### TASK-0149 M11-A-3锛歋cheduler REST API + 鍋ュ悍绔偣
+- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬疄鐜?`/scheduler/tasks` CRUD + `/scheduler/health` 绔偣锛屾帴鍏?FastAPI 璺敱銆?- 杈撳叆锛欴evSpec 搂21.6锛汿ASK-0148 瀹屾垚銆?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler_routes.py`锛? 涓鐐癸紙POST/GET/PATCH/DELETE tasks + enable/disable + GET health锛夛紱
+  - `host_brain/app/fastapi_app.py`锛氭敞鍐?scheduler_router銆?- 楠屾敹鏍囧噯锛?  - T-SCHED-05锛?scheduler/health 杩斿洖鎵€鏈変换鍔″仴搴峰揩鐓э紝瀛楁瀹屾暣锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掞紙鈮?090 passed锛夈€?- 娑夊強鏂囦欢璺緞锛歨ost_brain/scheduler/scheduler_routes.py锛沨ost_brain/app/fastapi_app.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-002锛汿-SCHED-05銆?
+### TASK-0150 M11-A-4锛歋cheduler 鍗曞厓娴嬭瘯
+- 鐘舵€侊細DONE锛?026-03-04锛宼ests/unit/test_scheduler_engine.py T-SCHED-01~07 鍏ㄩ儴閫氳繃锛?2 passed锛?- 浠诲姟鎻忚堪锛氱紪鍐?T-SCHED-01~07 鍏ㄩ噺鍗曞厓娴嬭瘯銆?- 杈撳叆锛欴evSpec 搂21.9锛汿ASK-0148/0149 瀹屾垚銆?- 杈撳嚭锛歚tests/unit/test_scheduler_engine.py`锛圱-SCHED-01~07锛屽惈 sys_mode 闂ㄦ帶銆佽繛缁け璐ユ殏鍋溿€乻ystem_initiated_intent 瀛楁鏍￠獙锛夈€?- 楠屾敹鏍囧噯锛歍-SCHED-01~07 鍏ㄩ儴閫氳繃锛涘叏閲忔祴璇?鈮?097 passed锛堟柊澧?7 涓級銆?- 娑夊強鏂囦欢璺緞锛歵ests/unit/test_scheduler_engine.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-001/002锛汿-SCHED-01~07銆?
+### TASK-0151 M11-B-1锛欴esktopMessageSkill 瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宧ost_brain/skills/impl/desktop_note.py 宸叉湁瀹屾暣瀹炵幇锛泃ests/unit/test_desktop_note_skill.py T-DESK-01~08 鍏ㄩ儴閫氳繃锛?- 浠诲姟鎻忚堪锛氬疄鐜?`DesktopMessageSkill`锛坈reate/update/delete/undo锛? 瀹夊叏璺緞鏍￠獙 + manifest 鐢熸垚銆?- 杈撳叆锛欴evSpec 搂22.1~搂22.6銆?- 杈撳嚭锛?  - `host_brain/skills/desktop_message/desktop_message_skill.py`锛?  - `host_brain/skills/desktop_message/desktop_message_models.py`锛?  - `host_brain/skills/desktop_message/path_validator.py`锛?  - `tests/unit/test_desktop_message_skill.py`锛圱-DESK-01~08锛夈€?- 楠屾敹鏍囧噯锛歍-DESK-01~08 鍏ㄩ儴閫氳繃锛涘叏閲忔祴璇?鈮?105 passed銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/desktop_message/锛泃ests/unit/test_desktop_message_skill.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DESKTOP-001/002锛汿-DESK-01~08銆?
+### TASK-0152 M11-C/D-1锛欴reamSkill + DiarySkill 瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宧ost_brain/skills/impl/dream_generator.py + diary_writer.py 宸叉湁瀹屾暣瀹炵幇锛泃ests/unit/test_dream_skill.py T-DREAM-01~05 + tests/unit/test_diary_skill.py T-DIARY-01~05 鍏ㄩ儴閫氳繃锛?- 浠诲姟鎻忚堪锛氬疄鐜?`DreamSkill`锛圗pisodic 璇诲彇 鈫?LLM 鐢熸垚 鈫?鍐欏叆 Episodic锛? `DiarySkill`锛堝綋鏃ュ璇濊鍙?鈫?LLM 鐢熸垚 鈫?鍐欐枃浠?+ Episodic锛夈€?- 杈撳叆锛欴evSpec 搂23.1~搂23.2銆?- 杈撳嚭锛?  - `host_brain/skills/dream/dream_skill.py`锛?  - `host_brain/skills/diary/diary_skill.py`锛?  - `tests/unit/test_dream_skill.py`锛圱-DREAM-01~05锛夛紱
+  - `tests/unit/test_diary_skill.py`锛圱-DIARY-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-DREAM-01~05 + T-DIARY-01~05 鍏ㄩ儴閫氳繃锛涘叏閲忔祴璇?鈮?115 passed銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/dream/锛沨ost_brain/skills/diary/锛泃ests/unit/test_dream_skill.py锛泃ests/unit/test_diary_skill.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DREAM-001/002锛汧R-DIARY-001/002锛汿-DREAM-01~05锛汿-DIARY-01~05銆?
+### TASK-0153 M11-E/F-1锛歅roactiveSkill + Focus Mode 瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宧ost_brain/skills/impl/proactive_talk.py + focus_mode.py 宸叉湁瀹屾暣瀹炵幇锛泃ests/unit/test_proactive_skill.py T-PROACT-01~06 + tests/unit/test_focus_mode.py T-FOCUS-01~04 鍏ㄩ儴閫氳繃锛?- 浠诲姟鎻忚堪锛氬疄鐜?`ProactiveSkill`锛堟潯浠舵牎楠?鈫?LLM 鐢熸垚 鈫?鎺ㄩ€侊級+ `SysModeEnum.FOCUS` 鎵╁睍 + Focus Mode 琛屼负鐭╅樀銆?- 杈撳叆锛欴evSpec 搂23.3~搂23.4銆?- 杈撳嚭锛?  - `host_brain/skills/proactive/proactive_skill.py`锛?  - `host_brain/core/sys_mode.py`锛堟柊澧?FOCUS 鏋氫妇鍊硷級锛?  - `tests/unit/test_proactive_skill.py`锛圱-PROACT-01~06锛夛紱
+  - `tests/unit/test_focus_mode.py`锛圱-FOCUS-01~04锛夈€?- 楠屾敹鏍囧噯锛歍-PROACT-01~06 + T-FOCUS-01~04 鍏ㄩ儴閫氳繃锛涘叏閲忔祴璇?鈮?125 passed銆?- 娑夊強鏂囦欢璺緞锛歨ost_brain/skills/proactive/锛沨ost_brain/core/sys_mode.py锛泃ests/unit/test_proactive_skill.py锛泃ests/unit/test_focus_mode.py銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PROACTIVE-001/002锛汧R-FOCUS-001锛汿-PROACT-01~06锛汿-FOCUS-01~04銆?
 ---
 
-## M12 任务卡（PLANNED）
-
-### TASK-0154 M12 前置：DevSpec §24 工程契约拆解
-- 状态：DONE（2026-03-04，DevSpec §24.1~§24.4 已写入）
-- 任务描述：拆解 M12-A~D 工程契约（ToolBroker/ContextCompressor/Reranker/SkillHotLoader），写入 DevSpec §24。
-- 输入：PRD FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002 扩展。
-- 输出：DevSpec §24.1~§24.4（接口/Schema/错误码/测试编号）。
-- 验收标准：DevSpec §24 完整，含 T-TOOL-01~06 / T-CTX-01~05 / T-RERANK-01~04 / T-HOTLOAD-01~05。
-- 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
-
-### TASK-0155 M12-A-1：ToolBroker 核心实现
-- 状态：DONE（2026-03-04，broker.py/catalog.py/selector.py/mcp_adapter.py 已有完整实现；T-TOOL-01~06 17 passed）
-- 任务描述：实现 `ToolBroker`（单入口）+ `ToolMetaRegistry`（注册表）+ `ToolVisibility`（hash 计算）。
-- 输入：DevSpec §24.1。
-- 输出：
-  - `host_brain/tools/tool_broker.py`；
-  - `host_brain/tools/tool_meta_registry.py`；
-  - `host_brain/tools/tool_visibility.py`；
-  - `host_brain/core/errors.py`（新增 TOOL_* 错误码）。
-- 验收标准：T-TOOL-01~06 全部通过；全量测试 ≥1170 passed。
-- 关联需求/测试：FR-TOOL-001/002/003；T-TOOL-01~06。
-
-### TASK-0156 M12-A-2：ToolBroker REST API
-- 状态：DONE（2026-03-04，tool_routes.py NEW；T-TOOL-API-01~05 15 passed）
-- 任务描述：实现 `tool_routes.py`（GET /tools/meta-pack + POST /tools/execute）并注册到 fastapi_app.py。
-- 输入：DevSpec §24.1.3；TASK-0155。
-- 输出：
-  - `host_brain/tools/tool_routes.py`；
-  - `host_brain/app/fastapi_app.py`（注册 tool_router）。
-- 验收标准：API 端点可调用；WRITE 无 token 返回 403 + TOOL_TOKEN_MISSING。
-- 关联需求/测试：FR-TOOL-003；T-TOOL-02/T-TOOL-05。
-
-### TASK-0157 M12-B-1：ContextCompressor 实现
-- 状态：DONE（2026-03-04，context_compressor.py NEW；T-CTX-01~05 17 passed）
-- 任务描述：实现 `ContextCompressor`（sliding_window/summary/hybrid 三策略）+ `EvidencePack` 构建。
-- 输入：DevSpec §24.2。
-- 输出：
-  - `host_brain/memory/context_compressor.py`；
-  - `tests/unit/test_context_compressor.py`（T-CTX-01~05）。
-- 验收标准：T-CTX-01~05 全部通过；LLM 不可用时降级为 sliding_window。
-- 关联需求/测试：FR-MEM-005；T-CTX-01~05。
-
-### TASK-0158 M12-C-1：RerankerService 强化
-- 状态：DONE（2026-03-04，reranker.py/evidence_pack.py 已有完整实现；T-RERANK-01~04 11 passed）
-- 任务描述：强化 `RerankerService`（health() + 降级策略 + evidence_pack rerank_stage 字段）。
-- 输入：DevSpec §24.3；现有 `host_brain/retrieval/reranker.py`。
-- 输出：
-  - `host_brain/retrieval/reranker.py`（强化）；
-  - `tests/unit/test_reranker_service.py`（T-RERANK-01~04）。
-- 验收标准：T-RERANK-01~04 全部通过；不可用时降级且 stage 标注。
-- 关联需求/测试：FR-MEM-004；T-RERANK-01~04。
-
-### TASK-0159 M12-D-1：SkillHotLoader 实现
-- 状态：DONE（2026-03-04，hot_loader.py NEW；T-HOTLOAD-01~05 17 passed）
-- 任务描述：实现 `SkillHotLoader`（热加载/回滚/版本注册）+ `SkillVersionRegistry`。
-- 输入：DevSpec §24.4。
-- 输出：
-  - `host_brain/skills/hot_loader.py`；
-  - `host_brain/skills/version_registry.py`；
-  - `tests/unit/test_skill_hot_loader.py`（T-HOTLOAD-01~05）。
-- 验收标准：T-HOTLOAD-01~05 全部通过；热加载失败时旧版本保持不变。
-- 关联需求/测试：FR-SKILL-001/002；T-HOTLOAD-01~05。
-
-### TASK-0160 M12 错误码补全
-- 状态：DONE（2026-03-04，errors.py 新增 TOOL_*/CTX_*/RETR_RERANK_STAGE_MISSING/HOTLOAD_*）
-- 任务描述：在 `core/errors.py` 中补充 M12 新增错误码（TOOL_*/CTX_*/RERANK_*/HOTLOAD_*）。
-- 输入：DevSpec §24.1.5；TASK-0155~0159。
-- 输出：`host_brain/core/errors.py`（新增 M12 错误码）。
-- 验收标准：所有 M12 错误码常量存在且有注释。
-- 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
-
-### TASK-0161 M12 发布清单
-- 状态：DONE（2026-03-04，scripts/generate_m12_release.py NEW；docs/50_release/m12_release.json 生成；11 核心文件 0 缺失；1240 passed；release_ready=true）
-- 任务描述：生成 `m12_release.json`（含 M12-A~D 核心文件 hash + 测试通过数）。
-- 输入：TASK-0155~0160 全部 DONE。
-- 输出：`host_brain/release/manifests/m12_release.json`。
-- 验收标准：manifest 可被 release_manifest.py 验证；全量测试 ≥1190 passed。
-- 关联需求：NFR-REL-001。
-
+## M12 浠诲姟鍗★紙PLANNED锛?
+### TASK-0154 M12 鍓嶇疆锛欴evSpec 搂24 宸ョ▼濂戠害鎷嗚В
+- 鐘舵€侊細DONE锛?026-03-04锛孌evSpec 搂24.1~搂24.4 宸插啓鍏ワ級
+- 浠诲姟鎻忚堪锛氭媶瑙?M12-A~D 宸ョ▼濂戠害锛圱oolBroker/ContextCompressor/Reranker/SkillHotLoader锛夛紝鍐欏叆 DevSpec 搂24銆?- 杈撳叆锛歅RD FR-TOOL-001/002/003锛汧R-MEM-004/005锛汧R-SKILL-001/002 鎵╁睍銆?- 杈撳嚭锛欴evSpec 搂24.1~搂24.4锛堟帴鍙?Schema/閿欒鐮?娴嬭瘯缂栧彿锛夈€?- 楠屾敹鏍囧噯锛欴evSpec 搂24 瀹屾暣锛屽惈 T-TOOL-01~06 / T-CTX-01~05 / T-RERANK-01~04 / T-HOTLOAD-01~05銆?- 鍏宠仈闇€姹傦細FR-TOOL-001/002/003锛汧R-MEM-004/005锛汧R-SKILL-001/002銆?
+### TASK-0155 M12-A-1锛歍oolBroker 鏍稿績瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宐roker.py/catalog.py/selector.py/mcp_adapter.py 宸叉湁瀹屾暣瀹炵幇锛汿-TOOL-01~06 17 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?`ToolBroker`锛堝崟鍏ュ彛锛? `ToolMetaRegistry`锛堟敞鍐岃〃锛? `ToolVisibility`锛坔ash 璁＄畻锛夈€?- 杈撳叆锛欴evSpec 搂24.1銆?- 杈撳嚭锛?  - `host_brain/tools/tool_broker.py`锛?  - `host_brain/tools/tool_meta_registry.py`锛?  - `host_brain/tools/tool_visibility.py`锛?  - `host_brain/core/errors.py`锛堟柊澧?TOOL_* 閿欒鐮侊級銆?- 楠屾敹鏍囧噯锛歍-TOOL-01~06 鍏ㄩ儴閫氳繃锛涘叏閲忔祴璇?鈮?170 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-001/002/003锛汿-TOOL-01~06銆?
+### TASK-0156 M12-A-2锛歍oolBroker REST API
+- 鐘舵€侊細DONE锛?026-03-04锛宼ool_routes.py NEW锛汿-TOOL-API-01~05 15 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?`tool_routes.py`锛圙ET /tools/meta-pack + POST /tools/execute锛夊苟娉ㄥ唽鍒?fastapi_app.py銆?- 杈撳叆锛欴evSpec 搂24.1.3锛汿ASK-0155銆?- 杈撳嚭锛?  - `host_brain/tools/tool_routes.py`锛?  - `host_brain/app/fastapi_app.py`锛堟敞鍐?tool_router锛夈€?- 楠屾敹鏍囧噯锛欰PI 绔偣鍙皟鐢紱WRITE 鏃?token 杩斿洖 403 + TOOL_TOKEN_MISSING銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-003锛汿-TOOL-02/T-TOOL-05銆?
+### TASK-0157 M12-B-1锛欳ontextCompressor 瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宑ontext_compressor.py NEW锛汿-CTX-01~05 17 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?`ContextCompressor`锛坰liding_window/summary/hybrid 涓夌瓥鐣ワ級+ `EvidencePack` 鏋勫缓銆?- 杈撳叆锛欴evSpec 搂24.2銆?- 杈撳嚭锛?  - `host_brain/memory/context_compressor.py`锛?  - `tests/unit/test_context_compressor.py`锛圱-CTX-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-CTX-01~05 鍏ㄩ儴閫氳繃锛汱LM 涓嶅彲鐢ㄦ椂闄嶇骇涓?sliding_window銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-005锛汿-CTX-01~05銆?
+### TASK-0158 M12-C-1锛歊erankerService 寮哄寲
+- 鐘舵€侊細DONE锛?026-03-04锛宺eranker.py/evidence_pack.py 宸叉湁瀹屾暣瀹炵幇锛汿-RERANK-01~04 11 passed锛?- 浠诲姟鎻忚堪锛氬己鍖?`RerankerService`锛坔ealth() + 闄嶇骇绛栫暐 + evidence_pack rerank_stage 瀛楁锛夈€?- 杈撳叆锛欴evSpec 搂24.3锛涚幇鏈?`host_brain/retrieval/reranker.py`銆?- 杈撳嚭锛?  - `host_brain/retrieval/reranker.py`锛堝己鍖栵級锛?  - `tests/unit/test_reranker_service.py`锛圱-RERANK-01~04锛夈€?- 楠屾敹鏍囧噯锛歍-RERANK-01~04 鍏ㄩ儴閫氳繃锛涗笉鍙敤鏃堕檷绾т笖 stage 鏍囨敞銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-004锛汿-RERANK-01~04銆?
+### TASK-0159 M12-D-1锛歋killHotLoader 瀹炵幇
+- 鐘舵€侊細DONE锛?026-03-04锛宧ot_loader.py NEW锛汿-HOTLOAD-01~05 17 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?`SkillHotLoader`锛堢儹鍔犺浇/鍥炴粴/鐗堟湰娉ㄥ唽锛? `SkillVersionRegistry`銆?- 杈撳叆锛欴evSpec 搂24.4銆?- 杈撳嚭锛?  - `host_brain/skills/hot_loader.py`锛?  - `host_brain/skills/version_registry.py`锛?  - `tests/unit/test_skill_hot_loader.py`锛圱-HOTLOAD-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-HOTLOAD-01~05 鍏ㄩ儴閫氳繃锛涚儹鍔犺浇澶辫触鏃舵棫鐗堟湰淇濇寔涓嶅彉銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SKILL-001/002锛汿-HOTLOAD-01~05銆?
+### TASK-0160 M12 閿欒鐮佽ˉ鍏?- 鐘舵€侊細DONE锛?026-03-04锛宔rrors.py 鏂板 TOOL_*/CTX_*/RETR_RERANK_STAGE_MISSING/HOTLOAD_*锛?- 浠诲姟鎻忚堪锛氬湪 `core/errors.py` 涓ˉ鍏?M12 鏂板閿欒鐮侊紙TOOL_*/CTX_*/RERANK_*/HOTLOAD_*锛夈€?- 杈撳叆锛欴evSpec 搂24.1.5锛汿ASK-0155~0159銆?- 杈撳嚭锛歚host_brain/core/errors.py`锛堟柊澧?M12 閿欒鐮侊級銆?- 楠屾敹鏍囧噯锛氭墍鏈?M12 閿欒鐮佸父閲忓瓨鍦ㄤ笖鏈夋敞閲娿€?- 鍏宠仈闇€姹傦細FR-TOOL-001/002/003锛汧R-MEM-004/005锛汧R-SKILL-001/002銆?
+### TASK-0161 M12 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-04锛宻cripts/generate_m12_release.py NEW锛沝ocs/50_release/m12_release.json 鐢熸垚锛?1 鏍稿績鏂囦欢 0 缂哄け锛?240 passed锛況elease_ready=true锛?- 浠诲姟鎻忚堪锛氱敓鎴?`m12_release.json`锛堝惈 M12-A~D 鏍稿績鏂囦欢 hash + 娴嬭瘯閫氳繃鏁帮級銆?- 杈撳叆锛歍ASK-0155~0160 鍏ㄩ儴 DONE銆?- 杈撳嚭锛歚host_brain/release/manifests/m12_release.json`銆?- 楠屾敹鏍囧噯锛歮anifest 鍙 release_manifest.py 楠岃瘉锛涘叏閲忔祴璇?鈮?190 passed銆?- 鍏宠仈闇€姹傦細NFR-REL-001銆?
 ---
 
-## M13 任务卡（Bond 阶段自动晋级 + 长期记忆蒸馏强化）
-
-### TASK-0162 M13-A Bond 阶段积分 + 自动晋级引擎
-- 状态：DONE（2026-03-04，bond_stage_engine.py NEW；bond_routes.py NEW；T-BOND-STAGE-01~09 30 passed；T-BOND-API-01~08 18 passed）
-- 任务描述：实现 BondStageEngine（积分累积/阶段晋级/降级/趋势/审计串联）+ Bond REST API（/bond/stage /bond/summary /bond/event /bond/users /bond/health）。
-- 输入：FR-BOND-001/002/003；DevSpec §25（新增）。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`（BondStageEngine + BondScoreState + StageTransitionResult）；
-  - `host_brain/app/bond_routes.py`（Bond REST API 5 端点）；
-  - `tests/unit/test_bond_stage_engine.py`（T-BOND-STAGE-01~09，30 passed）；
-  - `tests/integration/test_bond_routes_api.py`（T-BOND-API-01~08，18 passed）。
-- 验收标准：T-BOND-STAGE-01~09 + T-BOND-API-01~08 全部通过；Bond Summary 不含数值（FR-BOND-003）；evidence_refs 为空时 422（FR-BOND-002）；晋级/降级写入审计链。
-- 关联需求：FR-BOND-001/002/003；T-BOND-STAGE-01~09；T-BOND-API-01~08。
-
+## M13 浠诲姟鍗★紙Bond 闃舵鑷姩鏅嬬骇 + 闀挎湡璁板繂钂搁寮哄寲锛?
+### TASK-0162 M13-A Bond 闃舵绉垎 + 鑷姩鏅嬬骇寮曟搸
+- 鐘舵€侊細DONE锛?026-03-04锛宐ond_stage_engine.py NEW锛沚ond_routes.py NEW锛汿-BOND-STAGE-01~09 30 passed锛汿-BOND-API-01~08 18 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?BondStageEngine锛堢Н鍒嗙疮绉?闃舵鏅嬬骇/闄嶇骇/瓒嬪娍/瀹¤涓茶仈锛? Bond REST API锛?bond/stage /bond/summary /bond/event /bond/users /bond/health锛夈€?- 杈撳叆锛欶R-BOND-001/002/003锛汥evSpec 搂25锛堟柊澧烇級銆?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛圔ondStageEngine + BondScoreState + StageTransitionResult锛夛紱
+  - `host_brain/app/bond_routes.py`锛圔ond REST API 5 绔偣锛夛紱
+  - `tests/unit/test_bond_stage_engine.py`锛圱-BOND-STAGE-01~09锛?0 passed锛夛紱
+  - `tests/integration/test_bond_routes_api.py`锛圱-BOND-API-01~08锛?8 passed锛夈€?- 楠屾敹鏍囧噯锛歍-BOND-STAGE-01~09 + T-BOND-API-01~08 鍏ㄩ儴閫氳繃锛汢ond Summary 涓嶅惈鏁板€硷紙FR-BOND-003锛夛紱evidence_refs 涓虹┖鏃?422锛團R-BOND-002锛夛紱鏅嬬骇/闄嶇骇鍐欏叆瀹¤閾俱€?- 鍏宠仈闇€姹傦細FR-BOND-001/002/003锛汿-BOND-STAGE-01~09锛汿-BOND-API-01~08銆?
 ---
 
-### TASK-0163 M13-B 长期记忆蒸馏强化
-- 状态：DONE（2026-03-04，long_term_distiller.py NEW；T-DISTILL-B-01~10 36 passed）
-- 任务描述：实现 LongTermMemoryDistiller（EpisodicMemory→语义记忆蒸馏→Canon pending 提案）+ 调度器 CRON 任务工厂（每日 03:00）。
-- 输入：FR-MEM-DISTILL-001/002；DevSpec §26（新增）；MemoryDistillationEngine（M10-C/D）；WorldCanonStore（M10-B）；NatsumeScheduler（M11）。
-- 输出：
-  - `host_brain/memory/long_term_distiller.py`（LongTermMemoryDistiller + DistillationCycleResult + make_distillation_task_config）；
-  - `tests/unit/test_long_term_distiller.py`（T-DISTILL-B-01~10，36 passed）。
-- 验收标准：T-DISTILL-B-01~10 全部通过；蒸馏结果只生成 pending 提案不直接写 SSOT（FR-MEM-DISTILL-001）；每次循环最多 5 个提案（FR-MEM-DISTILL-002）；幂等保护；调度器 CRON 任务配置合法；全量测试 1324 passed。
-- 关联需求/测试：FR-MEM-DISTILL-001/002；T-DISTILL-B-01~10。
-
+### TASK-0163 M13-B 闀挎湡璁板繂钂搁寮哄寲
+- 鐘舵€侊細DONE锛?026-03-04锛宭ong_term_distiller.py NEW锛汿-DISTILL-B-01~10 36 passed锛?- 浠诲姟鎻忚堪锛氬疄鐜?LongTermMemoryDistiller锛圗pisodicMemory鈫掕涔夎蹇嗚捀棣忊啋Canon pending 鎻愭锛? 璋冨害鍣?CRON 浠诲姟宸ュ巶锛堟瘡鏃?03:00锛夈€?- 杈撳叆锛欶R-MEM-DISTILL-001/002锛汥evSpec 搂26锛堟柊澧烇級锛汳emoryDistillationEngine锛圡10-C/D锛夛紱WorldCanonStore锛圡10-B锛夛紱NatsumeScheduler锛圡11锛夈€?- 杈撳嚭锛?  - `host_brain/memory/long_term_distiller.py`锛圠ongTermMemoryDistiller + DistillationCycleResult + make_distillation_task_config锛夛紱
+  - `tests/unit/test_long_term_distiller.py`锛圱-DISTILL-B-01~10锛?6 passed锛夈€?- 楠屾敹鏍囧噯锛歍-DISTILL-B-01~10 鍏ㄩ儴閫氳繃锛涜捀棣忕粨鏋滃彧鐢熸垚 pending 鎻愭涓嶇洿鎺ュ啓 SSOT锛團R-MEM-DISTILL-001锛夛紱姣忔寰幆鏈€澶?5 涓彁妗堬紙FR-MEM-DISTILL-002锛夛紱骞傜瓑淇濇姢锛涜皟搴﹀櫒 CRON 浠诲姟閰嶇疆鍚堟硶锛涘叏閲忔祴璇?1324 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-DISTILL-001/002锛汿-DISTILL-B-01~10銆?
 ---
 
-### TASK-0164 M13-C Bond 事件与 BondDynamicsWriter 端到端集成
-- 状态：DONE（2026-03-04，bond_dynamics.py 更新；T-BOND-INTEG-01~08 18 passed）
-- 任务描述：将 BondStageEngine.apply_event 接入 BondDynamicsWriter.apply_update 成功路径，实现端到端联动；可选注入（stage_engine=None 向后兼容）；stage_engine 异常不影响主流程（非致命）；event 中新增 stage_transition 字段。
-- 输入：BondDynamicsWriter（M13-A 前）；BondStageEngine（M13-A）。
-- 输出：
-  - `host_brain/bond/bond_dynamics.py`（新增 stage_engine 可选注入 + apply_event 调用）；
-  - `tests/integration/test_bond_dynamics_stage_integration.py`（T-BOND-INTEG-01~08，18 passed）。
-- 验收标准：T-BOND-INTEG-01~08 全部通过；向后兼容（无 stage_engine 时正常工作）；stage_engine 异常非致命；全量测试 1342 passed。
-- 关联需求/测试：FR-BOND-001/002；T-BOND-INTEG-01~08。
-
+### TASK-0164 M13-C Bond 浜嬩欢涓?BondDynamicsWriter 绔埌绔泦鎴?- 鐘舵€侊細DONE锛?026-03-04锛宐ond_dynamics.py 鏇存柊锛汿-BOND-INTEG-01~08 18 passed锛?- 浠诲姟鎻忚堪锛氬皢 BondStageEngine.apply_event 鎺ュ叆 BondDynamicsWriter.apply_update 鎴愬姛璺緞锛屽疄鐜扮鍒扮鑱斿姩锛涘彲閫夋敞鍏ワ紙stage_engine=None 鍚戝悗鍏煎锛夛紱stage_engine 寮傚父涓嶅奖鍝嶄富娴佺▼锛堥潪鑷村懡锛夛紱event 涓柊澧?stage_transition 瀛楁銆?- 杈撳叆锛欱ondDynamicsWriter锛圡13-A 鍓嶏級锛汢ondStageEngine锛圡13-A锛夈€?- 杈撳嚭锛?  - `host_brain/bond/bond_dynamics.py`锛堟柊澧?stage_engine 鍙€夋敞鍏?+ apply_event 璋冪敤锛夛紱
+  - `tests/integration/test_bond_dynamics_stage_integration.py`锛圱-BOND-INTEG-01~08锛?8 passed锛夈€?- 楠屾敹鏍囧噯锛歍-BOND-INTEG-01~08 鍏ㄩ儴閫氳繃锛涘悜鍚庡吋瀹癸紙鏃?stage_engine 鏃舵甯稿伐浣滐級锛泂tage_engine 寮傚父闈炶嚧鍛斤紱鍏ㄩ噺娴嬭瘯 1342 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-001/002锛汿-BOND-INTEG-01~08銆?
 ---
 
-### TASK-0165 M13-D M13 发布清单
-- 状态：DONE（2026-03-04，m13_release.json NEW）
-- 任务描述：生成 M13 发布清单，记录所有里程碑状态、核心文件 SHA-256 hash、测试通过数、质量门禁。
-- 输入：M13-A/B/C 全部完成；全量测试 1342 passed。
-- 输出：`docs/50_release/m13_release.json`（4 个里程碑 DONE；4 个核心文件 hash；102 个 M13 测试通过；1342 全量通过）。
-- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
-- 关联需求/测试：M13-A/B/C/D 全部 DONE。
-
+### TASK-0165 M13-D M13 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-04锛宮13_release.json NEW锛?- 浠诲姟鎻忚堪锛氱敓鎴?M13 鍙戝竷娓呭崟锛岃褰曟墍鏈夐噷绋嬬鐘舵€併€佹牳蹇冩枃浠?SHA-256 hash銆佹祴璇曢€氳繃鏁般€佽川閲忛棬绂併€?- 杈撳叆锛歁13-A/B/C 鍏ㄩ儴瀹屾垚锛涘叏閲忔祴璇?1342 passed銆?- 杈撳嚭锛歚docs/50_release/m13_release.json`锛? 涓噷绋嬬 DONE锛? 涓牳蹇冩枃浠?hash锛?02 涓?M13 娴嬭瘯閫氳繃锛?342 鍏ㄩ噺閫氳繃锛夈€?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_core_files_present=true锛泎ero_regressions=true銆?- 鍏宠仈闇€姹?娴嬭瘯锛歁13-A/B/C/D 鍏ㄩ儴 DONE銆?
 ---
 
-## M14 任务卡（通道 + 外显 + MCP 治理收口）
-
-### TASK-0166 M14 前置：DevSpec §27 工程契约拆解
-- 状态：DONE（2026-03-04，DevSpec §25/§26/§27 NEW）
-- 任务描述：拆解 M14-A~C 工程契约（WeChat 通道事件化 / VTS 外显映射 / MCP 治理），写入 DevSpec §27。
-- 输入：PRD FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
-- 输出：DevSpec §27.1~§27.3（接口/Schema/错误码/测试编号）。
-- 验收标准：DevSpec §27 完整，含 T-CHAN-01~05 / T-VTS-01~05 / T-MCP-GOV-01~05。
-- 关联需求：FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
-
-### TASK-0167 M14-A 微信通道 I/O 事件化
-- 状态：DONE（2026-03-04）
-- 任务描述：将微信收发建模为确定性通道事件（inbound/outbound），写入可追溯审计链；LLM 不得自行决定"是否发送/发给谁/发什么"。
-- 输入：DevSpec §27.1；现有 edge_client/channels/wechat.py（或等价模块）。
-- 输出：
-  - `host_brain/channels/wechat_channel.py`（WeChatChannelEvent：inbound/outbound + thread_key + request_id + audit 串联）；
-  - `host_brain/core/errors.py`（新增 CHANNEL_* 错误码）；
-  - `tests/unit/test_wechat_channel.py`（T-CHAN-01~05）；
-  - `tests/integration/test_wechat_channel_audit.py`（T-CHAN-AUDIT-01~03）。
-- 验收标准：
-  - T-CHAN-01~05 全部通过；
-  - 任一出站消息可在审计链追溯到 thread_key + request_id；
-  - 失败必须可解释（reason_code + stage）；
-  - 全量测试 ≥1350 passed。
-- 关联需求/测试：FR-CHANNEL-001；T-CHAN-01~05；T-CHAN-AUDIT-01~03。
-
-### TASK-0168 M14-B VTS 外显确定性映射
-- 状态：DONE（2026-03-04）
-- 任务描述：实现 emotion_tag→expression_id 固定枚举映射；拒绝非法 tag 或自由动作参数；同版本同输入输出一致。
-- 输入：DevSpec §27.2；现有 edge_client/actuators/vts_driver.py。
-- 输出：
-  - `edge_client/actuators/vts_expression_map.py`（VTSExpressionMap：枚举映射表 + 校验）；
-  - `edge_client/actuators/vts_driver.py`（强化：接入 VTSExpressionMap + 非法 tag 拒绝）；
-  - `host_brain/core/errors.py`（新增 VTS_EXPRESSION_INVALID / VTS_TAG_UNKNOWN）；
-  - `tests/unit/test_vts_expression_map.py`（T-VTS-01~05）。
-- 验收标准：
-  - T-VTS-01~05 全部通过；
-  - 非法 emotion_tag/自由动作参数被拒绝并产生可统计 reason_code；
-  - 合法触发可回放到固定映射表（同版本同输入输出一致）；
-  - 全量测试 ≥1360 passed。
-- 关联需求/测试：FR-AVATAR-001；T-VTS-01~05。
-
-### TASK-0169 M14-C MCP Provider 治理完整验收
-- 状态：DONE（2026-03-04）
-- 任务描述：完整验收 MCP provider 元数据同步 + READ/WRITE 分级 + ToolBroker 单入口 + 审计串联 + AIRLOCK 出站最小化。
-- 输入：DevSpec §27.3；现有 host_brain/tools/mcp_adapter.py；ToolBroker（M12-A）。
-- 输出：
-  - `host_brain/tools/mcp_adapter.py`（强化：provider_id/tool_id/request_id/evidence_ref 审计串联 + AIRLOCK 出站最小化）；
-  - `tests/unit/test_mcp_governance.py`（T-MCP-GOV-01~05）；
-  - `tests/integration/test_mcp_audit_chain.py`（T-MCP-AUDIT-01~03）。
-- 验收标准：
-  - T-MCP-GOV-01~05 全部通过；
-  - MCP WRITE 在无 token 或未 APPROVE 时必拒绝且可统计；
-  - 所有 MCP 调用可追溯到 intent/governor/skill_exec 记录；
-  - 满足 AIRLOCK 出站最小化要求；
-  - 全量测试 ≥1370 passed。
-- 关联需求/测试：FR-MCP-001；T-MCP-GOV-01~05；T-MCP-AUDIT-01~03。
-
-### TASK-0170 M14-D M14 发布清单
-- 状态：DONE（2026-03-04，m14_release.json NEW）
-- 任务描述：生成 M14 发布清单（m14_release.json），记录 M14-A~C 核心文件 hash + 测试通过数 + 质量门禁。
-- 输入：TASK-0166~0169 全部 DONE。
-- 输出：`docs/50_release/m14_release.json`。
-- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
-- 关联需求：NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
-
+## M14 浠诲姟鍗★紙閫氶亾 + 澶栨樉 + MCP 娌荤悊鏀跺彛锛?
+### TASK-0166 M14 鍓嶇疆锛欴evSpec 搂27 宸ョ▼濂戠害鎷嗚В
+- 鐘舵€侊細DONE锛?026-03-04锛孌evSpec 搂25/搂26/搂27 NEW锛?- 浠诲姟鎻忚堪锛氭媶瑙?M14-A~C 宸ョ▼濂戠害锛圵eChat 閫氶亾浜嬩欢鍖?/ VTS 澶栨樉鏄犲皠 / MCP 娌荤悊锛夛紝鍐欏叆 DevSpec 搂27銆?- 杈撳叆锛歅RD FR-CHANNEL-001锛汧R-AVATAR-001锛汧R-MCP-001銆?- 杈撳嚭锛欴evSpec 搂27.1~搂27.3锛堟帴鍙?Schema/閿欒鐮?娴嬭瘯缂栧彿锛夈€?- 楠屾敹鏍囧噯锛欴evSpec 搂27 瀹屾暣锛屽惈 T-CHAN-01~05 / T-VTS-01~05 / T-MCP-GOV-01~05銆?- 鍏宠仈闇€姹傦細FR-CHANNEL-001锛汧R-AVATAR-001锛汧R-MCP-001銆?
+### TASK-0167 M14-A 寰俊閫氶亾 I/O 浜嬩欢鍖?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬皢寰俊鏀跺彂寤烘ā涓虹‘瀹氭€ч€氶亾浜嬩欢锛坕nbound/outbound锛夛紝鍐欏叆鍙拷婧璁￠摼锛汱LM 涓嶅緱鑷鍐冲畾"鏄惁鍙戦€?鍙戠粰璋?鍙戜粈涔?銆?- 杈撳叆锛欴evSpec 搂27.1锛涚幇鏈?edge_client/channels/wechat.py锛堟垨绛変环妯″潡锛夈€?- 杈撳嚭锛?  - `host_brain/channels/wechat_channel.py`锛圵eChatChannelEvent锛歩nbound/outbound + thread_key + request_id + audit 涓茶仈锛夛紱
+  - `host_brain/core/errors.py`锛堟柊澧?CHANNEL_* 閿欒鐮侊級锛?  - `tests/unit/test_wechat_channel.py`锛圱-CHAN-01~05锛夛紱
+  - `tests/integration/test_wechat_channel_audit.py`锛圱-CHAN-AUDIT-01~03锛夈€?- 楠屾敹鏍囧噯锛?  - T-CHAN-01~05 鍏ㄩ儴閫氳繃锛?  - 浠讳竴鍑虹珯娑堟伅鍙湪瀹¤閾捐拷婧埌 thread_key + request_id锛?  - 澶辫触蹇呴』鍙В閲婏紙reason_code + stage锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?350 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CHANNEL-001锛汿-CHAN-01~05锛汿-CHAN-AUDIT-01~03銆?
+### TASK-0168 M14-B VTS 澶栨樉纭畾鎬ф槧灏?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬疄鐜?emotion_tag鈫抏xpression_id 鍥哄畾鏋氫妇鏄犲皠锛涙嫆缁濋潪娉?tag 鎴栬嚜鐢卞姩浣滃弬鏁帮紱鍚岀増鏈悓杈撳叆杈撳嚭涓€鑷淬€?- 杈撳叆锛欴evSpec 搂27.2锛涚幇鏈?edge_client/actuators/vts_driver.py銆?- 杈撳嚭锛?  - `edge_client/actuators/vts_expression_map.py`锛圴TSExpressionMap锛氭灇涓炬槧灏勮〃 + 鏍￠獙锛夛紱
+  - `edge_client/actuators/vts_driver.py`锛堝己鍖栵細鎺ュ叆 VTSExpressionMap + 闈炴硶 tag 鎷掔粷锛夛紱
+  - `host_brain/core/errors.py`锛堟柊澧?VTS_EXPRESSION_INVALID / VTS_TAG_UNKNOWN锛夛紱
+  - `tests/unit/test_vts_expression_map.py`锛圱-VTS-01~05锛夈€?- 楠屾敹鏍囧噯锛?  - T-VTS-01~05 鍏ㄩ儴閫氳繃锛?  - 闈炴硶 emotion_tag/鑷敱鍔ㄤ綔鍙傛暟琚嫆缁濆苟浜х敓鍙粺璁?reason_code锛?  - 鍚堟硶瑙﹀彂鍙洖鏀惧埌鍥哄畾鏄犲皠琛紙鍚岀増鏈悓杈撳叆杈撳嚭涓€鑷达級锛?  - 鍏ㄩ噺娴嬭瘯 鈮?360 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AVATAR-001锛汿-VTS-01~05銆?
+### TASK-0169 M14-C MCP Provider 娌荤悊瀹屾暣楠屾敹
+- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬畬鏁撮獙鏀?MCP provider 鍏冩暟鎹悓姝?+ READ/WRITE 鍒嗙骇 + ToolBroker 鍗曞叆鍙?+ 瀹¤涓茶仈 + AIRLOCK 鍑虹珯鏈€灏忓寲銆?- 杈撳叆锛欴evSpec 搂27.3锛涚幇鏈?host_brain/tools/mcp_adapter.py锛汿oolBroker锛圡12-A锛夈€?- 杈撳嚭锛?  - `host_brain/tools/mcp_adapter.py`锛堝己鍖栵細provider_id/tool_id/request_id/evidence_ref 瀹¤涓茶仈 + AIRLOCK 鍑虹珯鏈€灏忓寲锛夛紱
+  - `tests/unit/test_mcp_governance.py`锛圱-MCP-GOV-01~05锛夛紱
+  - `tests/integration/test_mcp_audit_chain.py`锛圱-MCP-AUDIT-01~03锛夈€?- 楠屾敹鏍囧噯锛?  - T-MCP-GOV-01~05 鍏ㄩ儴閫氳繃锛?  - MCP WRITE 鍦ㄦ棤 token 鎴栨湭 APPROVE 鏃跺繀鎷掔粷涓斿彲缁熻锛?  - 鎵€鏈?MCP 璋冪敤鍙拷婧埌 intent/governor/skill_exec 璁板綍锛?  - 婊¤冻 AIRLOCK 鍑虹珯鏈€灏忓寲瑕佹眰锛?  - 鍏ㄩ噺娴嬭瘯 鈮?370 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MCP-001锛汿-MCP-GOV-01~05锛汿-MCP-AUDIT-01~03銆?
+### TASK-0170 M14-D M14 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-04锛宮14_release.json NEW锛?- 浠诲姟鎻忚堪锛氱敓鎴?M14 鍙戝竷娓呭崟锛坢14_release.json锛夛紝璁板綍 M14-A~C 鏍稿績鏂囦欢 hash + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ銆?- 杈撳叆锛歍ASK-0166~0169 鍏ㄩ儴 DONE銆?- 杈撳嚭锛歚docs/50_release/m14_release.json`銆?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_core_files_present=true锛泎ero_regressions=true銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-CHANNEL-001锛汧R-AVATAR-001锛汧R-MCP-001銆?
 ---
 
-## M15 任务卡（语音链路深化完整验收）
-
-### TASK-0171 M15 前置：DevSpec §28 工程契约拆解
-- 状态：DONE（2026-03-04，DevSpec §28 NEW）
-- 任务描述：拆解 M15-A~E 工程契约（ASR 事件化 / TTS 播报队列 / Barge-in / 兜底模型 / 资源闸门），写入 DevSpec §28。
-- 输入：PRD FR-VOICE-001~005。
-- 输出：DevSpec §28.1~§28.6（接口/Schema/错误码/测试编号）。
-- 验收标准：DevSpec §28 完整，含 T-ASR-EVT-01~05 / T-TTS-QUEUE-01~05 / T-BARGE-01~04 / T-FALLBACK-01~05 / T-RGATE-01~05。
-- 关联需求：FR-VOICE-001~005。
-
-### TASK-0172 M15-A ASR 事件化上送强化
-- 状态：DONE（2026-03-04）
-- 任务描述：强化 ASRTranscriptEvent Schema（alternates + evidence_ref + low_confidence 显式标注）；低置信度必须标注 reason_code=ASR_LOW_CONFIDENCE。
-- 输入：DevSpec §28.1；现有 edge_client/senses/asr.py。
-- 输出：
-  - `edge_client/senses/asr.py`（ASRTranscriptEvent 强化：alternates/evidence_ref/low_confidence）；
-  - `tests/unit/test_asr_event_emitter.py`（T-ASR-EVT-01~05）。
-- 验收标准：T-ASR-EVT-01~05 全部通过；低置信度显式标注；全量测试 ≥1430 passed。
-- 关联需求/测试：FR-VOICE-001；T-ASR-EVT-01~05。
-
-### TASK-0173 M15-B TTS 播报队列强化
-- 状态：DONE（2026-03-04）
-- 任务描述：强化 TTSPlaybackEvent Schema（request_id 关联 + 失败 reason_code + stage）；Host 只下发最终口径文本与情绪标签。
-- 输入：DevSpec §28.2；现有 edge_client/actuators/tts_engine.py。
-- 输出：
-  - `edge_client/actuators/tts_engine.py`（TTSPlaybackEvent 强化：request_id/reason_code/stage）；
-  - `tests/unit/test_tts_playback_queue.py`（T-TTS-QUEUE-01~05）。
-- 验收标准：T-TTS-QUEUE-01~05 全部通过；播报事件可关联 request_id；全量测试 ≥1435 passed。
-- 关联需求/测试：FR-VOICE-002；T-TTS-QUEUE-01~05。
-
-### TASK-0174 M15-C Barge-in 可打断强化
-- 状态：DONE（2026-03-04）
-- 任务描述：强化 interrupt() 方法，补充 BargeInEvent 审计记录；打断不构成执行事实；ASR 不被阻塞。
-- 输入：DevSpec §28.3；现有 edge_client/actuators/tts_engine.py。
-- 输出：
-  - `edge_client/actuators/tts_engine.py`（interrupt() 强化：BargeInEvent 写入审计链）；
-  - `tests/unit/test_barge_in.py`（T-BARGE-01~04）。
-- 验收标准：T-BARGE-01~04 全部通过；打断事件可追溯；全量测试 ≥1439 passed。
-- 关联需求/测试：FR-VOICE-003；T-BARGE-01~04。
-
-### TASK-0175 M15-D Edge 兜底小模型门控
-- 状态：DONE（2026-03-04）
-- 任务描述：实现 FallbackModelGate（默认卸载/按需加载/draft_only 标记/快速失败）；不可用时不阻塞主流程。
-- 输入：DevSpec §28.4。
-- 输出：
-  - `edge_client/fallback_model.py`（FallbackModelGate + FallbackOutput）；
-  - `tests/unit/test_fallback_model_gate.py`（T-FALLBACK-01~05）。
-- 验收标准：T-FALLBACK-01~05 全部通过；输出永远 draft_only=True；全量测试 ≥1444 passed。
-- 关联需求/测试：FR-VOICE-004；T-FALLBACK-01~05。
-
-### TASK-0176 M15-E Edge 资源闸门强化
-- 状态：DONE（2026-03-04）
-- 任务描述：强化 EdgeResourceGate，补充优先级抢占审计（ResourcePreemptionEvent）；压力下保证 ASR。
-- 输入：DevSpec §28.5；现有 edge_client/resource_gate.py（或等价模块）。
-- 输出：
-  - `edge_client/resource_gate.py`（ResourcePreemptionEvent + 优先级抢占审计）；
-  - `tests/unit/test_edge_resource_gate.py`（T-RGATE-01~05）。
-- 验收标准：T-RGATE-01~05 全部通过；ASR 始终保证；全量测试 ≥1449 passed。
-- 关联需求/测试：FR-VOICE-005；T-RGATE-01~05。
-
-### TASK-0177 M15-F M15 发布清单
-- 状态：DONE（2026-03-04，m15_release.json NEW）
-- 任务描述：生成 M15 发布清单（m15_release.json），记录 M15-A~E 核心文件 hash + 测试通过数 + 质量门禁。
-- 输入：TASK-0171~0176 全部 DONE。
-- 输出：`docs/50_release/m15_release.json`。
-- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1445。
-- 关联需求：NFR-REL-001；FR-VOICE-001~005。
-
+## M15 浠诲姟鍗★紙璇煶閾捐矾娣卞寲瀹屾暣楠屾敹锛?
+### TASK-0171 M15 鍓嶇疆锛欴evSpec 搂28 宸ョ▼濂戠害鎷嗚В
+- 鐘舵€侊細DONE锛?026-03-04锛孌evSpec 搂28 NEW锛?- 浠诲姟鎻忚堪锛氭媶瑙?M15-A~E 宸ョ▼濂戠害锛圓SR 浜嬩欢鍖?/ TTS 鎾姤闃熷垪 / Barge-in / 鍏滃簳妯″瀷 / 璧勬簮闂搁棬锛夛紝鍐欏叆 DevSpec 搂28銆?- 杈撳叆锛歅RD FR-VOICE-001~005銆?- 杈撳嚭锛欴evSpec 搂28.1~搂28.6锛堟帴鍙?Schema/閿欒鐮?娴嬭瘯缂栧彿锛夈€?- 楠屾敹鏍囧噯锛欴evSpec 搂28 瀹屾暣锛屽惈 T-ASR-EVT-01~05 / T-TTS-QUEUE-01~05 / T-BARGE-01~04 / T-FALLBACK-01~05 / T-RGATE-01~05銆?- 鍏宠仈闇€姹傦細FR-VOICE-001~005銆?
+### TASK-0172 M15-A ASR 浜嬩欢鍖栦笂閫佸己鍖?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬己鍖?ASRTranscriptEvent Schema锛坅lternates + evidence_ref + low_confidence 鏄惧紡鏍囨敞锛夛紱浣庣疆淇″害蹇呴』鏍囨敞 reason_code=ASR_LOW_CONFIDENCE銆?- 杈撳叆锛欴evSpec 搂28.1锛涚幇鏈?edge_client/senses/asr.py銆?- 杈撳嚭锛?  - `edge_client/senses/asr.py`锛圓SRTranscriptEvent 寮哄寲锛歛lternates/evidence_ref/low_confidence锛夛紱
+  - `tests/unit/test_asr_event_emitter.py`锛圱-ASR-EVT-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-ASR-EVT-01~05 鍏ㄩ儴閫氳繃锛涗綆缃俊搴︽樉寮忔爣娉紱鍏ㄩ噺娴嬭瘯 鈮?430 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-001锛汿-ASR-EVT-01~05銆?
+### TASK-0173 M15-B TTS 鎾姤闃熷垪寮哄寲
+- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬己鍖?TTSPlaybackEvent Schema锛坮equest_id 鍏宠仈 + 澶辫触 reason_code + stage锛夛紱Host 鍙笅鍙戞渶缁堝彛寰勬枃鏈笌鎯呯华鏍囩銆?- 杈撳叆锛欴evSpec 搂28.2锛涚幇鏈?edge_client/actuators/tts_engine.py銆?- 杈撳嚭锛?  - `edge_client/actuators/tts_engine.py`锛圱TSPlaybackEvent 寮哄寲锛歳equest_id/reason_code/stage锛夛紱
+  - `tests/unit/test_tts_playback_queue.py`锛圱-TTS-QUEUE-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-TTS-QUEUE-01~05 鍏ㄩ儴閫氳繃锛涙挱鎶ヤ簨浠跺彲鍏宠仈 request_id锛涘叏閲忔祴璇?鈮?435 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-002锛汿-TTS-QUEUE-01~05銆?
+### TASK-0174 M15-C Barge-in 鍙墦鏂己鍖?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬己鍖?interrupt() 鏂规硶锛岃ˉ鍏?BargeInEvent 瀹¤璁板綍锛涙墦鏂笉鏋勬垚鎵ц浜嬪疄锛汚SR 涓嶈闃诲銆?- 杈撳叆锛欴evSpec 搂28.3锛涚幇鏈?edge_client/actuators/tts_engine.py銆?- 杈撳嚭锛?  - `edge_client/actuators/tts_engine.py`锛坕nterrupt() 寮哄寲锛欱argeInEvent 鍐欏叆瀹¤閾撅級锛?  - `tests/unit/test_barge_in.py`锛圱-BARGE-01~04锛夈€?- 楠屾敹鏍囧噯锛歍-BARGE-01~04 鍏ㄩ儴閫氳繃锛涙墦鏂簨浠跺彲杩芥函锛涘叏閲忔祴璇?鈮?439 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-003锛汿-BARGE-01~04銆?
+### TASK-0175 M15-D Edge 鍏滃簳灏忔ā鍨嬮棬鎺?- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬疄鐜?FallbackModelGate锛堥粯璁ゅ嵏杞?鎸夐渶鍔犺浇/draft_only 鏍囪/蹇€熷け璐ワ級锛涗笉鍙敤鏃朵笉闃诲涓绘祦绋嬨€?- 杈撳叆锛欴evSpec 搂28.4銆?- 杈撳嚭锛?  - `edge_client/fallback_model.py`锛團allbackModelGate + FallbackOutput锛夛紱
+  - `tests/unit/test_fallback_model_gate.py`锛圱-FALLBACK-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-FALLBACK-01~05 鍏ㄩ儴閫氳繃锛涜緭鍑烘案杩?draft_only=True锛涘叏閲忔祴璇?鈮?444 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-004锛汿-FALLBACK-01~05銆?
+### TASK-0176 M15-E Edge 璧勬簮闂搁棬寮哄寲
+- 鐘舵€侊細DONE锛?026-03-04锛?- 浠诲姟鎻忚堪锛氬己鍖?EdgeResourceGate锛岃ˉ鍏呬紭鍏堢骇鎶㈠崰瀹¤锛圧esourcePreemptionEvent锛夛紱鍘嬪姏涓嬩繚璇?ASR銆?- 杈撳叆锛欴evSpec 搂28.5锛涚幇鏈?edge_client/resource_gate.py锛堟垨绛変环妯″潡锛夈€?- 杈撳嚭锛?  - `edge_client/resource_gate.py`锛圧esourcePreemptionEvent + 浼樺厛绾ф姠鍗犲璁★級锛?  - `tests/unit/test_edge_resource_gate.py`锛圱-RGATE-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-RGATE-01~05 鍏ㄩ儴閫氳繃锛汚SR 濮嬬粓淇濊瘉锛涘叏閲忔祴璇?鈮?449 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VOICE-005锛汿-RGATE-01~05銆?
+### TASK-0177 M15-F M15 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE锛?026-03-04锛宮15_release.json NEW锛?- 浠诲姟鎻忚堪锛氱敓鎴?M15 鍙戝竷娓呭崟锛坢15_release.json锛夛紝璁板綍 M15-A~E 鏍稿績鏂囦欢 hash + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ銆?- 杈撳叆锛歍ASK-0171~0176 鍏ㄩ儴 DONE銆?- 杈撳嚭锛歚docs/50_release/m15_release.json`銆?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_core_files_present=true锛泎ero_regressions=true锛泃otal_tests_passed 鈮?1445銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-VOICE-001~005銆?
 ---
 
-## M16 Canon 治理强化 + 记忆检索优化 + 调度器持久化
+## M16 Canon 娌荤悊寮哄寲 + 璁板繂妫€绱紭鍖?+ 璋冨害鍣ㄦ寔涔呭寲
 
-### TASK-0178 M16-A Canon 治理 API 强化
-- 状态：DONE
-- 任务描述：重构 canon_routes.py，修复 _get_canon_store() 全局单例竞态（F-28）；修复 _get_ledger_from_app() 延迟导入循环引用风险（F-29）；approve/reject 端点两次 DB 操作改为事务包裹（F-35）；reject 审计写入失败纳入事务确保原子性（F-36）。
-- 输入：DevSpec §20；现有 host_brain/app/canon_routes.py；F-28/F-29/F-35/F-36 发现项。
-- 输出：
-  - `host_brain/app/canon_routes.py`（依赖注入重构 + 事务包裹）；
-  - `tests/unit/test_canon_routes_tx.py`（T-CANON-TX-01~06）。
-- 验收标准：T-CANON-TX-01~06 全部通过；approve/reject 操作原子性保证；全量测试 ≥1539 passed。
-- 关联需求/测试：FR-CANON-GOV-001；T-CANON-TX-01~06。
-
-### TASK-0179 M16-B 长期记忆检索强化
-- 状态：DONE
-- 任务描述：重构 canon_world_store.py 的 list_proposals()，改为 cursor-based 分页（F-38）；补充 cursor 参数（after_id）；深页码性能从 O(N) 降为 O(1)。
-- 输入：DevSpec §21；现有 host_brain/memory/canon_world_store.py；F-38 发现项。
-- 输出：
-  - `host_brain/memory/canon_world_store.py`（list_proposals() cursor-based 分页）；
-  - `tests/unit/test_canon_cursor_pagination.py`（T-CURSOR-01~05）。
-- 验收标准：T-CURSOR-01~05 全部通过；after_id 参数可选（向后兼容）；全量测试 ≥1544 passed。
-- 关联需求/测试：FR-MEM-PAGE-001；T-CURSOR-01~05。
-
-### TASK-0180 M16-C 调度器任务持久化
-- 状态：DONE
-- 任务描述：实现 NatsumeScheduler CRON 任务 SQLite 持久化（F-40）；进程重启后自动从 DB 恢复任务注册；新增 scheduler_tasks 表（migration 0018）。
-- 输入：DevSpec §22；现有 host_brain/scheduler/scheduler.py；F-40 发现项。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`（持久化 + 重启恢复）；
-  - `host_brain/audit/migrations/0018_scheduler_tasks.sql`（scheduler_tasks 表）；
-  - `tests/unit/test_scheduler_persistence.py`（T-SCHED-PERSIST-01~05）。
-- 验收标准：T-SCHED-PERSIST-01~05 全部通过；重启后任务自动恢复；全量测试 ≥1549 passed。
-- 关联需求/测试：FR-SCHED-PERSIST-001；T-SCHED-PERSIST-01~05。
-
-### TASK-0181 M16-D M16 发布清单
-- 状态：DONE
-- 任务描述：生成 M16 发布清单（m16_release.json），记录 M16-A~C 核心文件 hash + 测试通过数 + 质量门禁。
-- 输入：TASK-0178~0180 全部 DONE。
-- 输出：`docs/50_release/m16_release.json`。
-- 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1549。
-- 关联需求：NFR-REL-001；FR-CANON-GOV-001；FR-MEM-PAGE-001；FR-SCHED-PERSIST-001。
-
+### TASK-0178 M16-A Canon 娌荤悊 API 寮哄寲
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氶噸鏋?canon_routes.py锛屼慨澶?_get_canon_store() 鍏ㄥ眬鍗曚緥绔炴€侊紙F-28锛夛紱淇 _get_ledger_from_app() 寤惰繜瀵煎叆寰幆寮曠敤椋庨櫓锛團-29锛夛紱approve/reject 绔偣涓ゆ DB 鎿嶄綔鏀逛负浜嬪姟鍖呰９锛團-35锛夛紱reject 瀹¤鍐欏叆澶辫触绾冲叆浜嬪姟纭繚鍘熷瓙鎬э紙F-36锛夈€?- 杈撳叆锛欴evSpec 搂20锛涚幇鏈?host_brain/app/canon_routes.py锛汧-28/F-29/F-35/F-36 鍙戠幇椤广€?- 杈撳嚭锛?  - `host_brain/app/canon_routes.py`锛堜緷璧栨敞鍏ラ噸鏋?+ 浜嬪姟鍖呰９锛夛紱
+  - `tests/unit/test_canon_routes_tx.py`锛圱-CANON-TX-01~06锛夈€?- 楠屾敹鏍囧噯锛歍-CANON-TX-01~06 鍏ㄩ儴閫氳繃锛沘pprove/reject 鎿嶄綔鍘熷瓙鎬т繚璇侊紱鍏ㄩ噺娴嬭瘯 鈮?539 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CANON-GOV-001锛汿-CANON-TX-01~06銆?
+### TASK-0179 M16-B 闀挎湡璁板繂妫€绱㈠己鍖?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氶噸鏋?canon_world_store.py 鐨?list_proposals()锛屾敼涓?cursor-based 鍒嗛〉锛團-38锛夛紱琛ュ厖 cursor 鍙傛暟锛坅fter_id锛夛紱娣遍〉鐮佹€ц兘浠?O(N) 闄嶄负 O(1)銆?- 杈撳叆锛欴evSpec 搂21锛涚幇鏈?host_brain/memory/canon_world_store.py锛汧-38 鍙戠幇椤广€?- 杈撳嚭锛?  - `host_brain/memory/canon_world_store.py`锛坙ist_proposals() cursor-based 鍒嗛〉锛夛紱
+  - `tests/unit/test_canon_cursor_pagination.py`锛圱-CURSOR-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-CURSOR-01~05 鍏ㄩ儴閫氳繃锛沘fter_id 鍙傛暟鍙€夛紙鍚戝悗鍏煎锛夛紱鍏ㄩ噺娴嬭瘯 鈮?544 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-PAGE-001锛汿-CURSOR-01~05銆?
+### TASK-0180 M16-C 璋冨害鍣ㄤ换鍔℃寔涔呭寲
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬疄鐜?NatsumeScheduler CRON 浠诲姟 SQLite 鎸佷箙鍖栵紙F-40锛夛紱杩涚▼閲嶅惎鍚庤嚜鍔ㄤ粠 DB 鎭㈠浠诲姟娉ㄥ唽锛涙柊澧?scheduler_tasks 琛紙migration 0018锛夈€?- 杈撳叆锛欴evSpec 搂22锛涚幇鏈?host_brain/scheduler/scheduler.py锛汧-40 鍙戠幇椤广€?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛堟寔涔呭寲 + 閲嶅惎鎭㈠锛夛紱
+  - `host_brain/audit/migrations/0018_scheduler_tasks.sql`锛坰cheduler_tasks 琛級锛?  - `tests/unit/test_scheduler_persistence.py`锛圱-SCHED-PERSIST-01~05锛夈€?- 楠屾敹鏍囧噯锛歍-SCHED-PERSIST-01~05 鍏ㄩ儴閫氳繃锛涢噸鍚悗浠诲姟鑷姩鎭㈠锛涘叏閲忔祴璇?鈮?549 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-PERSIST-001锛汿-SCHED-PERSIST-01~05銆?
+### TASK-0181 M16-D M16 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氱敓鎴?M16 鍙戝竷娓呭崟锛坢16_release.json锛夛紝璁板綍 M16-A~C 鏍稿績鏂囦欢 hash + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ銆?- 杈撳叆锛歍ASK-0178~0180 鍏ㄩ儴 DONE銆?- 杈撳嚭锛歚docs/50_release/m16_release.json`銆?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_core_files_present=true锛泎ero_regressions=true锛泃otal_tests_passed 鈮?1549銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-CANON-GOV-001锛汧R-MEM-PAGE-001锛汧R-SCHED-PERSIST-001銆?
 ---
 
-## M17 监控面板 v3 — 全服务监控 + Dify 风格链路可视化（前端重建）（DONE，2026-03-04）
-
-> 目标：将现有 panel.html 单页重建为专业运维监控 SPA，参考 Dify 简约风格，实现双端全服务监控 + 节点链路可视化展示。
-> 依赖：M18 后端 API（可并行开发，前端先用 mock 数据）。
-> 所有任务当前状态：DONE（2026-03-04：React+Vite SPA 构建成功；四页面全量可用；m17_release.json 已生成）。
-
-### 核心技术栈约定（M17 强制执行）
-
-| 技术 | 版本 | 用途 |
+## M17 鐩戞帶闈㈡澘 v3 鈥?鍏ㄦ湇鍔＄洃鎺?+ Dify 椋庢牸閾捐矾鍙鍖栵紙鍓嶇閲嶅缓锛夛紙DONE锛?026-03-04锛?
+> 鐩爣锛氬皢鐜版湁 panel.html 鍗曢〉閲嶅缓涓轰笓涓氳繍缁寸洃鎺?SPA锛屽弬鑰?Dify 绠€绾﹂鏍硷紝瀹炵幇鍙岀鍏ㄦ湇鍔＄洃鎺?+ 鑺傜偣閾捐矾鍙鍖栧睍绀恒€?> 渚濊禆锛歁18 鍚庣 API锛堝彲骞惰寮€鍙戯紝鍓嶇鍏堢敤 mock 鏁版嵁锛夈€?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-04锛歊eact+Vite SPA 鏋勫缓鎴愬姛锛涘洓椤甸潰鍏ㄩ噺鍙敤锛沵17_release.json 宸茬敓鎴愶級銆?
+### 鏍稿績鎶€鏈爤绾﹀畾锛圡17 寮哄埗鎵ц锛?
+| 鎶€鏈?| 鐗堟湰 | 鐢ㄩ€?|
 |------|------|------|
-| **React** | 18.x | 组件化开发，所有页面均为 React 组件 |
-| **Vite** | 5.x | 快速构建；`npm run build` 产出静态文件由 FastAPI StaticFiles 托管 |
-| **Tailwind CSS** | 3.x | 原子化样式；实现 Dify 简约白色风格；**严格禁用大面积高饱和度渐变与廉价发光阴影** |
-| **React Router** | 6.x | 4 个核心页面的 History/Hash 路由切换 |
-| **React Flow** | latest | Trace 节点流图（Dify Workflow 同款底层库，原生支持节点卡片、有向连线、分支/并行布局） |
-| **Apache ECharts** | 5.x | Metrics 时序折线图、柱状图、条形图；性能优秀，抗锯齿效果佳 |
-| **Zustand** | 4.x | 全局状态管理（30s 轮询状态 + 全局时间范围过滤）；轻量，无 Redux 样板代码 |
-| **Lucide React** | latest | 统一专业的纯色 SVG 图标；**禁止使用 Emoji 作为图标** |
+| **React** | 18.x | 缁勪欢鍖栧紑鍙戯紝鎵€鏈夐〉闈㈠潎涓?React 缁勪欢 |
+| **Vite** | 5.x | 蹇€熸瀯寤猴紱`npm run build` 浜у嚭闈欐€佹枃浠剁敱 FastAPI StaticFiles 鎵樼 |
+| **Tailwind CSS** | 3.x | 鍘熷瓙鍖栨牱寮忥紱瀹炵幇 Dify 绠€绾︾櫧鑹查鏍硷紱**涓ユ牸绂佺敤澶ч潰绉珮楗卞拰搴︽笎鍙樹笌寤変环鍙戝厜闃村奖** |
+| **React Router** | 6.x | 4 涓牳蹇冮〉闈㈢殑 History/Hash 璺敱鍒囨崲 |
+| **React Flow** | latest | Trace 鑺傜偣娴佸浘锛圖ify Workflow 鍚屾搴曞眰搴擄紝鍘熺敓鏀寔鑺傜偣鍗＄墖銆佹湁鍚戣繛绾裤€佸垎鏀?骞惰甯冨眬锛?|
+| **Apache ECharts** | 5.x | Metrics 鏃跺簭鎶樼嚎鍥俱€佹煴鐘跺浘銆佹潯褰㈠浘锛涙€ц兘浼樼锛屾姉閿娇鏁堟灉浣?|
+| **Zustand** | 4.x | 鍏ㄥ眬鐘舵€佺鐞嗭紙30s 杞鐘舵€?+ 鍏ㄥ眬鏃堕棿鑼冨洿杩囨护锛夛紱杞婚噺锛屾棤 Redux 鏍锋澘浠ｇ爜 |
+| **Lucide React** | latest | 缁熶竴涓撲笟鐨勭函鑹?SVG 鍥炬爣锛?*绂佹浣跨敤 Emoji 浣滀负鍥炬爣** |
 
-**项目结构约定：**
-- 源码目录：`host_brain/app/monitor_ui/`（React 项目根，含 `package.json` / `vite.config.js`）
-- 构建产出：`host_brain/app/static/monitor/`（FastAPI StaticFiles 托管，入口为 `index.html`）
-- 开发模式：`npm run dev`（Vite dev server，代理 `/obs/*` 到 FastAPI）
-- 生产构建：`npm run build`（产出物提交到仓库，无需 Node.js 运行时）
+**椤圭洰缁撴瀯绾﹀畾锛?*
+- 婧愮爜鐩綍锛歚host_brain/app/monitor_ui/`锛圧eact 椤圭洰鏍癸紝鍚?`package.json` / `vite.config.js`锛?- 鏋勫缓浜у嚭锛歚host_brain/app/static/monitor/`锛團astAPI StaticFiles 鎵樼锛屽叆鍙ｄ负 `index.html`锛?- 寮€鍙戞ā寮忥細`npm run dev`锛圴ite dev server锛屼唬鐞?`/obs/*` 鍒?FastAPI锛?- 鐢熶骇鏋勫缓锛歚npm run build`锛堜骇鍑虹墿鎻愪氦鍒颁粨搴擄紝鏃犻渶 Node.js 杩愯鏃讹級
 
-### TASK-0182 M17-A 前端架构重建（React + Vite 项目初始化 + 设计系统 + 路由 + 布局框架）
-- 状态：DONE
-- 任务描述：
-  初始化 React 18 + Vite 5 项目（`host_brain/app/monitor_ui/`）；配置 Tailwind CSS（Dify 设计 token：背景 `#F9FAFB`，主色 `#2970FF`，卡片圆角 `8px`，字体 Inter）；配置 React Router 6（4 个页面路由）；建立左侧固定导航栏（Lucide React 图标）+ 顶部面包屑 + 主内容区布局框架；配置 Zustand store（轮询状态 + 时间范围过滤）；配置 Vite 构建产出到 `host_brain/app/static/monitor/`；所有页面先用 mock 数据占位。
-- 输入：DevSpec §OBS-V3-001；FR-OBS-003；Dify 设计参考（白色简约风格）；技术栈约定（见上方）。
-- 输出：
-  - `host_brain/app/monitor_ui/package.json`（依赖声明：react/vite/tailwind/react-router/reactflow/echarts/zustand/lucide-react）；
-  - `host_brain/app/monitor_ui/vite.config.js`（构建配置，产出到 `../static/monitor/`）；
-  - `host_brain/app/monitor_ui/tailwind.config.js`（Dify 设计 token）；
-  - `host_brain/app/monitor_ui/src/main.jsx`（React 入口）；
-  - `host_brain/app/monitor_ui/src/App.jsx`（根组件 + React Router 路由配置）；
-  - `host_brain/app/monitor_ui/src/store/index.js`（Zustand store）；
-  - `host_brain/app/monitor_ui/src/components/Layout.jsx`（导航栏 + 布局框架）；
-  - `host_brain/app/monitor_ui/src/pages/Overview.jsx`（mock 占位）；
-  - `host_brain/app/monitor_ui/src/pages/Sessions.jsx`（mock 占位）；
-  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`（mock 占位）；
-  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`（mock 占位）；
-  - `host_brain/app/static/monitor/`（`npm run build` 产出，提交到仓库）。
-- 验收标准：
-  - `npm run dev` 启动无报错，四个页面均可通过路由切换；
-  - `npm run build` 成功产出，FastAPI 可正常托管；
-  - 左侧导航高亮当前页，Lucide React 图标正常显示；
-  - 在 1280×800 分辨率下布局正常，无横向滚动条；
-  - 设计风格符合 Dify 简约白色风格（非深色主题，无高饱和度渐变）。
-- 关联需求/测试：FR-OBS-003；T-OBS-V3-ARCH-01~03。
+### TASK-0182 M17-A 鍓嶇鏋舵瀯閲嶅缓锛圧eact + Vite 椤圭洰鍒濆鍖?+ 璁捐绯荤粺 + 璺敱 + 甯冨眬妗嗘灦锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  鍒濆鍖?React 18 + Vite 5 椤圭洰锛坄host_brain/app/monitor_ui/`锛夛紱閰嶇疆 Tailwind CSS锛圖ify 璁捐 token锛氳儗鏅?`#F9FAFB`锛屼富鑹?`#2970FF`锛屽崱鐗囧渾瑙?`8px`锛屽瓧浣?Inter锛夛紱閰嶇疆 React Router 6锛? 涓〉闈㈣矾鐢憋級锛涘缓绔嬪乏渚у浐瀹氬鑸爮锛圠ucide React 鍥炬爣锛? 椤堕儴闈㈠寘灞?+ 涓诲唴瀹瑰尯甯冨眬妗嗘灦锛涢厤缃?Zustand store锛堣疆璇㈢姸鎬?+ 鏃堕棿鑼冨洿杩囨护锛夛紱閰嶇疆 Vite 鏋勫缓浜у嚭鍒?`host_brain/app/static/monitor/`锛涙墍鏈夐〉闈㈠厛鐢?mock 鏁版嵁鍗犱綅銆?- 杈撳叆锛欴evSpec 搂OBS-V3-001锛汧R-OBS-003锛汥ify 璁捐鍙傝€冿紙鐧借壊绠€绾﹂鏍硷級锛涙妧鏈爤绾﹀畾锛堣涓婃柟锛夈€?- 杈撳嚭锛?  - `host_brain/app/monitor_ui/package.json`锛堜緷璧栧０鏄庯細react/vite/tailwind/react-router/reactflow/echarts/zustand/lucide-react锛夛紱
+  - `host_brain/app/monitor_ui/vite.config.js`锛堟瀯寤洪厤缃紝浜у嚭鍒?`../static/monitor/`锛夛紱
+  - `host_brain/app/monitor_ui/tailwind.config.js`锛圖ify 璁捐 token锛夛紱
+  - `host_brain/app/monitor_ui/src/main.jsx`锛圧eact 鍏ュ彛锛夛紱
+  - `host_brain/app/monitor_ui/src/App.jsx`锛堟牴缁勪欢 + React Router 璺敱閰嶇疆锛夛紱
+  - `host_brain/app/monitor_ui/src/store/index.js`锛圸ustand store锛夛紱
+  - `host_brain/app/monitor_ui/src/components/Layout.jsx`锛堝鑸爮 + 甯冨眬妗嗘灦锛夛紱
+  - `host_brain/app/monitor_ui/src/pages/Overview.jsx`锛坢ock 鍗犱綅锛夛紱
+  - `host_brain/app/monitor_ui/src/pages/Sessions.jsx`锛坢ock 鍗犱綅锛夛紱
+  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`锛坢ock 鍗犱綅锛夛紱
+  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`锛坢ock 鍗犱綅锛夛紱
+  - `host_brain/app/static/monitor/`锛坄npm run build` 浜у嚭锛屾彁浜ゅ埌浠撳簱锛夈€?- 楠屾敹鏍囧噯锛?  - `npm run dev` 鍚姩鏃犳姤閿欙紝鍥涗釜椤甸潰鍧囧彲閫氳繃璺敱鍒囨崲锛?  - `npm run build` 鎴愬姛浜у嚭锛孎astAPI 鍙甯告墭绠★紱
+  - 宸︿晶瀵艰埅楂樹寒褰撳墠椤碉紝Lucide React 鍥炬爣姝ｅ父鏄剧ず锛?  - 鍦?1280脳800 鍒嗚鲸鐜囦笅甯冨眬姝ｅ父锛屾棤妯悜婊氬姩鏉★紱
+  - 璁捐椋庢牸绗﹀悎 Dify 绠€绾︾櫧鑹查鏍硷紙闈炴繁鑹蹭富棰橈紝鏃犻珮楗卞拰搴︽笎鍙橈級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-003锛汿-OBS-V3-ARCH-01~03銆?
+### TASK-0183 M17-B 鍏ㄦ湇鍔″仴搴锋€昏椤碉紙Overview Page锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 Overview 椤甸潰锛屽睍绀哄弻绔墍鏈夋湇鍔″仴搴风姸鎬佸崱鐗囩綉鏍硷紱椤堕儴姹囨€荤粺璁¤锛堟€绘湇鍔℃暟/鍋ュ悍/闄嶇骇/鏁呴殰锛夛紱姣忎釜鏈嶅姟鍗＄墖鍚細鏈嶅姟鍚嶃€佷晶锛圚ost/Edge锛夈€佺姸鎬佸窘绔狅紙UP/DOWN/DEGRADED锛夈€佸搷搴斿欢杩熴€佹渶鍚庢鏌ユ椂闂淬€侀敊璇憳瑕侊紙DOWN 鏃跺睍绀猴級锛?0 绉掕嚜鍔ㄨ疆璇?`/obs/services/health`锛圡18-A 鎻愪緵锛屽紑鍙戦樁娈典娇鐢?mock锛夈€?- 杈撳叆锛歍ASK-0182 瀹屾垚锛汥evSpec 搂OBS-V3-002锛汧R-OBS-004銆?- 杈撳嚭锛?  - `host_brain/app/static/pages/overview.js`锛堝畬鏁村疄鐜帮紝瀵规帴鐪熷疄 API锛夛紱
+  - 鏈嶅姟鍗＄墖缁勪欢锛堝唴鑱斾簬 overview.js锛夈€?- 楠屾敹鏍囧噯锛?  - 鎵€鏈夊凡娉ㄥ唽鏈嶅姟锛堚墺12 涓級鍧囧嚭鐜板湪鎬昏椤碉紱
+  - DOWN 鐘舵€佸崱鐗囨樉绀虹孩鑹茶竟妗?+ 閿欒鎽樿锛?  - 杞澶辫触鏃舵樉绀?涓婃宸茬煡鐘舵€?HH:MM:SS"锛?  - 椤堕儴姹囨€绘暟瀛椾笌鍗＄墖鏁伴噺涓€鑷淬€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-004锛汿-OBS-V3-OVW-01~05銆?
+### TASK-0184 M17-C 浼氳瘽鍒楄〃椤碉紙Sessions Page锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 Sessions 椤甸潰锛屽睍绀哄巻鍙蹭細璇濆垪琛紱椤堕儴杩囨护鏍忥紙鏃堕棿鑼冨洿閫夋嫨鍣?+ 鐘舵€佷笅鎷?+ 鍏抽敭璇嶆悳绱級锛涜〃鏍煎睍绀猴紙request_id / 鏃堕棿 / 鐘舵€?/ 鑰楁椂 / 閫氶亾 / reason_code锛夛紱搴曢儴鍒嗛〉鎺т欢锛涚偣鍑昏璺宠浆鍒?Trace 椤靛苟浼犻€?request_id锛涘鎺?`/obs/sessions` API锛堝紑鍙戦樁娈典娇鐢?mock锛夈€?- 杈撳叆锛歍ASK-0182 瀹屾垚锛汥evSpec 搂OBS-V3-003锛汧R-OBS-005銆?- 杈撳嚭锛?  - `host_brain/app/static/pages/sessions.js`锛堝畬鏁村疄鐜帮紝瀵规帴鐪熷疄 API锛夈€?- 楠屾敹鏍囧噯锛?  - 鍒楄〃姝ｅ父鍒嗛〉锛堟瘡椤?20 鏉★級锛岀炕椤典笉涓㈠け杩囨护鏉′欢锛?  - 鐐瑰嚮琛屽悗 URL hash 鍙樹负 `#trace?rid=xxx`锛孴race 椤佃嚜鍔ㄥ姞杞斤紱
+  - 鐘舵€佽繃婊わ紙OK/REJECT/ERROR锛夋纭敓鏁堬紱
+  - 绌虹粨鏋滄椂鏄剧ず鍙嬪ソ绌虹姸鎬侊紙闈炴姤閿欙級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-005锛汿-OBS-V3-SESS-01~05銆?
+### TASK-0185 M17-D Dify 椋庢牸閾捐矾鍙鍖栭〉锛圱race Page 鈥?React Flow锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  鍩轰簬 **React Flow** 瀹炵幇 Trace 椤甸潰鏍稿績鍔熻兘鈥斺€旇妭鐐规祦鍥惧彲瑙嗗寲锛?  1. **React Flow 鐢诲竷**锛氳嚜鍔ㄥ竷灞€锛堜粠宸﹀埌鍙筹紝Dagre 甯冨眬绠楁硶锛夛紝鏀寔鍒嗘敮/骞惰锛屾敮鎸佺缉鏀?骞崇Щ锛?  2. **鑷畾涔夎妭鐐瑰崱鐗?*锛圕ustomNode 缁勪欢锛夛細鍦嗚鐭╁舰锛屽惈 Lucide React 鑺傜偣绫诲瀷鍥炬爣銆佽妭鐐瑰悕绉般€佺姸鎬侀鑹诧紙缁?绾?姗?钃濆姩鐢伙級銆佽€楁椂鏍囩銆丳rovider 寰界珷锛圠LM 鑺傜偣涓撳睘锛夛紱
+  3. **鏈夊悜杩炵嚎**锛歊eact Flow 鍐呯疆 Edge锛屾敮鎸佸垎鏀悎骞讹紝绠ご鏍峰紡锛?  4. **鑺傜偣鐐瑰嚮渚ц竟闈㈡澘**锛圢odeDetailPanel 缁勪欢锛夛細灞曠ず input/output锛圝SON 鏍煎紡鍖?+ 鎶樺彔/灞曞紑锛夈€乻tatus銆乺eason_code銆佹椂闂存埑銆乻ide锛圚ost/Edge锛夈€乵odel_id锛圠LM 鑺傜偣锛夛紱
+  5. **椤堕儴宸ュ叿鏍?*锛歳equest_id 杈撳叆妗?+ 鏌ヨ鎸夐挳 + 鍏ㄥ睆鍒囨崲锛圠ucide React 鍥炬爣锛夛紱
+  6. 瀵规帴 `/obs/trace/{request_id}` API锛堝紑鍙戦樁娈典娇鐢?mock锛屽惈瀹屾暣 ASR鈫扡LM脳N鈫扵TS鈫扸TS 閾捐矾锛夈€?- 杈撳叆锛歍ASK-0182 瀹屾垚锛汥evSpec 搂OBS-V3-004锛汧R-OBS-006锛汻eact Flow 鏂囨。銆?- 杈撳嚭锛?  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`锛堝畬鏁村疄鐜帮紝鍚?React Flow 鐢诲竷锛夛紱
+  - `host_brain/app/monitor_ui/src/components/trace/CustomNode.jsx`锛堣嚜瀹氫箟鑺傜偣鍗＄墖缁勪欢锛夛紱
+  - `host_brain/app/monitor_ui/src/components/trace/NodeDetailPanel.jsx`锛堣妭鐐硅鎯呬晶杈归潰鏉匡級锛?  - `host_brain/app/monitor_ui/src/utils/traceLayout.js`锛圖agre 鑷姩甯冨眬宸ュ叿鍑芥暟锛夈€?- 楠屾敹鏍囧噯锛?  - 缁欏畾 request_id 鍚庤妭鐐瑰浘姝ｇ‘娓叉煋锛堚墹50 鑺傜偣娴佺晠锛屾棤鍗￠】锛夛紱
+  - 鐐瑰嚮鑺傜偣渚ц竟闈㈡澘姝ｇ‘鏄剧ず input/output锛?  - 骞惰鑺傜偣浠ュ垎鏀舰寮忓睍绀猴紙涓嶉噸鍙狅紝Dagre 甯冨眬姝ｇ‘锛夛紱
+  - JSON 鎶樺彔/灞曞紑鍔熻兘姝ｅ父锛?  - 鍏ㄥ睆妯″紡鍙敤锛?  - 绌洪摼璺椂鏄剧ず鍙嬪ソ绌虹姸鎬侊紱
+  - LLM 鑺傜偣鍗＄墖鏄剧ず Provider 寰界珷锛圤penAI/Gemini/DeepSeek 棰滆壊鍖哄垎锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-006锛汿-OBS-V3-TRACE-01~08銆?
+### TASK-0186 M17-E 鎸囨爣澶х洏椤碉紙Metrics Page锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 Metrics 椤甸潰锛屽寘鍚細
+  1. 鏃堕棿鑼冨洿閫夋嫨鍣紙1h / 6h / 24h / 7d锛夛紱
+  2. 璇锋眰閲忚秼鍔挎姌绾垮浘锛圕anvas锛夛紱
+  3. 鎷掔粷鐜囪秼鍔挎姌绾垮浘锛圕anvas锛夛紱
+  4. reason_code 鍒嗗竷妯悜鏉″舰鍥撅紙Canvas锛夛紱
+  5. 鍚勬湇鍔″搷搴斿欢杩?P50/P95 鏌辩姸鍥撅紙Canvas锛夛紱
+  6. 瀵规帴 `/obs/metrics/timeseries` API锛堝紑鍙戦樁娈典娇鐢?mock锛夈€?- 杈撳叆锛歍ASK-0182 瀹屾垚锛汥evSpec 搂OBS-V3-005锛汧R-OBS-007锛汚pache ECharts 鏂囨。銆?- 杈撳嚭锛?  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`锛堝畬鏁村疄鐜帮紝鍚?ECharts 鍥捐〃缁勪欢锛夛紱
+  - `host_brain/app/monitor_ui/src/components/charts/LineChart.jsx`锛圗Charts 鎶樼嚎鍥惧皝瑁呯粍浠讹紝鍙鐢級锛?  - `host_brain/app/monitor_ui/src/components/charts/BarChart.jsx`锛圗Charts 鏌辩姸/鏉″舰鍥惧皝瑁呯粍浠讹紝鍙鐢級銆?- 楠屾敹鏍囧噯锛?  - 鍒囨崲鏃堕棿鑼冨洿鍚庡浘琛ㄦ暟鎹纭洿鏂帮紙Zustand 鐘舵€侀┍鍔級锛?  - 鍥捐〃鍦?HiDPI 灞忓箷涓嬫竻鏅帮紙ECharts 鍐呯疆 devicePixelRatio 鏀寔锛夛紱
+  - 鏃犳暟鎹椂鏄剧ず"鏁版嵁閲囬泦涓?鍗犱綅锛屼笉宕╂簝锛?  - 鍥涚鍥捐〃绫诲瀷鍧囨纭覆鏌撱€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-007锛汿-OBS-V3-METRICS-01~05銆?
+### TASK-0187 M17-F M17 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氱敓鎴?M17 鍙戝竷娓呭崟锛坢17_release.json锛夛紝璁板綍 M17-A~E 鏍稿績鏂囦欢娓呭崟 + 椤甸潰鍔熻兘楠屾敹鐘舵€?+ 璐ㄩ噺闂ㄧ銆?- 杈撳叆锛歍ASK-0182~0186 鍏ㄩ儴 DONE銆?- 杈撳嚭锛歚docs/50_release/m17_release.json`銆?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_pages_functional=true锛泎ero_js_errors=true锛沝esign_review_passed=true銆?- 鍏宠仈闇€姹傦細FR-OBS-003~007锛汵FR-MAINT-001銆?
+---
 
-### TASK-0183 M17-B 全服务健康总览页（Overview Page）
-- 状态：DONE
-- 任务描述：
-  实现 Overview 页面，展示双端所有服务健康状态卡片网格；顶部汇总统计行（总服务数/健康/降级/故障）；每个服务卡片含：服务名、侧（Host/Edge）、状态徽章（UP/DOWN/DEGRADED）、响应延迟、最后检查时间、错误摘要（DOWN 时展示）；30 秒自动轮询 `/obs/services/health`（M18-A 提供，开发阶段使用 mock）。
-- 输入：TASK-0182 完成；DevSpec §OBS-V3-002；FR-OBS-004。
-- 输出：
-  - `host_brain/app/static/pages/overview.js`（完整实现，对接真实 API）；
-  - 服务卡片组件（内联于 overview.js）。
-- 验收标准：
-  - 所有已注册服务（≥12 个）均出现在总览页；
-  - DOWN 状态卡片显示红色边框 + 错误摘要；
-  - 轮询失败时显示"上次已知状态 HH:MM:SS"；
-  - 顶部汇总数字与卡片数量一致。
-- 关联需求/测试：FR-OBS-004；T-OBS-V3-OVW-01~05。
+## M18 鐩戞帶闈㈡澘 v3 鍚庣 API 鎵╁睍锛圖ONE锛?026-03-04锛?
+> 鐩爣锛氫负 M17 鍓嶇鎻愪緵瀹屾暣鐨勬暟鎹敮鎾?API锛屾墿灞曠幇鏈?observability 璺敱锛屾柊澧炲叏鏈嶅姟鍋ュ悍鑱氬悎銆佷細璇濆垪琛ㄣ€侀摼璺妭鐐硅鎯呫€佹寚鏍囨椂搴忓洓绫荤鐐广€?> 渚濊禆锛歁17 鍙苟琛屽紑鍙戯紙鍓嶇鍏堢敤 mock锛夛紱M18 瀹屾垚鍚庡墠绔垏鎹㈢湡瀹?API銆?> 鎵€鏈変换鍔″綋鍓嶇姸鎬侊細DONE锛?026-03-04锛?6 涓柊澧炴祴璇曞叏閮ㄩ€氳繃锛?577 鍏ㄩ噺閫氳繃锛? skipped锛? failed锛沵18_release.json 宸茬敓鎴愶級銆?
+### TASK-0188 M18-A 鍏ㄦ湇鍔″仴搴疯仛鍚?API
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 `GET /obs/services/health` 绔偣锛屽苟鍙戞帰娴嬪弻绔墍鏈夊凡娉ㄥ唽鏈嶅姟鍋ュ悍鐘舵€侊紙Host 渚э細LLM Gateway銆丯eo4j銆丼QLite銆丆hroma銆丼cheduler銆丅ond Engine銆丮emory Distiller銆丮CP Provider锛汦dge 渚э細ASR銆乀TS銆乂TS銆丄udio Playback銆丒dge RPC锛夛紱鑱氬悎杩斿洖缁熶竴缁撴瀯锛涘崟鏈嶅姟瓒呮椂锛堚墹200ms锛変笉闃诲鍏朵粬鏈嶅姟锛涙敮鎸?`?side=host|edge` 杩囨护銆?- 杈撳叆锛欴evSpec 搂OBS-V3-API-001锛汧R-OBS-008锛涚幇鏈?`host_brain/app/obs_routes.py`锛堟垨绛変环锛夈€?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堟柊澧?`/obs/services/health` 绔偣锛夛紱
+  - `host_brain/obs/service_health_aggregator.py`锛圫erviceHealthAggregator锛氬苟鍙戞帰娴?+ 缁撴灉鑱氬悎锛夛紱
+  - `tests/unit/test_service_health_aggregator.py`锛圱-OBS-HEALTH-01~06锛夈€?- 楠屾敹鏍囧噯锛?  - T-OBS-HEALTH-01~06 鍏ㄩ儴閫氳繃锛?  - 鍗曟湇鍔¤秴鏃舵椂璇ユ湇鍔?status=DOWN锛屽叾浣欐甯歌繑鍥烇紱
+  - 鍝嶅簲鏃堕棿 鈮?00ms锛堝苟鍙戞帰娴嬶級锛?  - 鍝嶅簲缁撴瀯绋冲畾锛堝瓧娈典笉闅忔湇鍔＄姸鎬佸彉鍖栬€岀己澶憋級锛?  - 鍏ㄩ噺娴嬭瘯 鈮?555 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-008锛汿-OBS-HEALTH-01~06銆?
+### TASK-0189 M18-B 浼氳瘽鍒楄〃 API
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 `GET /obs/sessions` 绔偣锛屼粠 SQLite Ledger 鏌ヨ浼氳瘽鍒楄〃锛涙敮鎸佽繃婊ゅ弬鏁帮細start_time銆乪nd_time銆乻tatus銆乧hannel銆乲eyword锛涘垎椤靛弬鏁帮細page銆乸age_size锛涘搷搴斿寘鍚?total_count锛涙煡璇㈡€ц兘浼樺寲锛堝繀瑕佹椂琛ュ厖绱㈠紩锛夈€?- 杈撳叆锛欴evSpec 搂OBS-V3-API-002锛汧R-OBS-009锛涚幇鏈?SQLite Ledger schema銆?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堟柊澧?`/obs/sessions` 绔偣锛夛紱
+  - `host_brain/obs/session_query.py`锛圫essionQueryService锛氳繃婊?+ 鍒嗛〉 + 鎬ц兘浼樺寲锛夛紱
+  - `host_brain/audit/migrations/0019_obs_sessions_index.sql`锛坰essions 鏌ヨ绱㈠紩锛夛紱
+  - `tests/unit/test_session_query.py`锛圱-OBS-SESS-01~06锛夈€?- 楠屾敹鏍囧噯锛?  - T-OBS-SESS-01~06 鍏ㄩ儴閫氳繃锛?  - 杩囨护鍙傛暟缁勫悎姝ｇ‘鐢熸晥锛?  - total_count 涓庡疄闄呮暟鎹竴鑷达紱
+  - 绌虹粨鏋滄椂杩斿洖 results=[] 鑰岄潪 404锛?  - 鍏ㄩ噺娴嬭瘯 鈮?561 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-009锛汿-OBS-SESS-01~06銆?
+### TASK-0190 M18-C 閾捐矾鑺傜偣璇︽儏 API
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 `GET /obs/trace/{request_id}` 绔偣锛屼粠瀹¤閾撅紙intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 绛夛級鑱氬悎鏋勫缓缁撴瀯鍖栬妭鐐瑰垪琛紱姣忎釜鑺傜偣鍖呭惈 node_id銆乶ode_type銆乶ode_name銆乻tatus銆乻tart_ts_ms銆乪nd_ts_ms銆乨uration_ms銆乮nput銆乷utput銆乺eason_code銆乸arent_node_id銆乻ide锛涙敮鎸?`?include_io=false` 鍙傛暟锛沬nput/output 瓒?64KB 鎴柇骞舵爣娉?truncated=true銆?- 杈撳叆锛欴evSpec 搂OBS-V3-API-003锛汧R-OBS-010锛涚幇鏈夊璁￠摼 schema锛坕ntent_log/governor_log/skill_exec_log锛夈€?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堟柊澧?`/obs/trace/{request_id}` 绔偣锛夛紱
+  - `host_brain/obs/trace_node_builder.py`锛圱raceNodeBuilder锛氬婧愭棩蹇楄仛鍚?+ 鑺傜偣鏍戞瀯寤猴級锛?  - `tests/unit/test_trace_node_builder.py`锛圱-OBS-TRACE-01~08锛夈€?- 楠屾敹鏍囧噯锛?  - T-OBS-TRACE-01~08 鍏ㄩ儴閫氳繃锛?  - 缁欏畾鏈夋晥 request_id 杩斿洖瀹屾暣鑺傜偣鍒楄〃锛?  - parent_node_id 姝ｇ‘鍙嶆槧鎵ц鏍戠粨鏋勶紱
+  - 涓嶅瓨鍦ㄧ殑 request_id 杩斿洖 404 + 绋冲畾閿欒缁撴瀯锛?  - input/output 瓒呴檺鏃?truncated=true 鏍囨敞瀛樺湪锛?  - 鍏ㄩ噺娴嬭瘯 鈮?569 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-010锛汿-OBS-TRACE-01~08銆?
+### TASK-0191 M18-D 鎸囨爣鏃跺簭 API
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  瀹炵幇 `GET /obs/metrics/timeseries` 绔偣锛屾敮鎸佸缁村害鏃跺簭鏁版嵁鏌ヨ锛坮equest_count / reject_rate / latency_p50 / latency_p95 / reason_code_dist锛夛紱鏀寔 interval锛?m/5m/1h锛夈€乻tart_time銆乪nd_time銆佸 metric 鎵归噺鏌ヨ锛涙暟鎹偣涓婇檺 1000锛堣秴鍑鸿嚜鍔ㄩ檷閲囨牱锛夛紱鏃犳暟鎹尯闂磋繑鍥?null 鍊肩偣淇濊瘉鏃跺簭杩炵画鎬с€?- 杈撳叆锛欴evSpec 搂OBS-V3-API-004锛汧R-OBS-011锛涚幇鏈?SQLite Ledger 瀹¤鏁版嵁銆?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堟柊澧?`/obs/metrics/timeseries` 绔偣锛夛紱
+  - `host_brain/obs/metrics_timeseries.py`锛圡etricsTimeseriesService锛氭椂搴忚仛鍚?+ 闄嶉噰鏍?+ 鎵归噺鏌ヨ锛夛紱
+  - `tests/unit/test_metrics_timeseries.py`锛圱-OBS-TS-01~06锛夈€?- 楠屾敹鏍囧噯锛?  - T-OBS-TS-01~06 鍏ㄩ儴閫氳繃锛?  - 鏃跺簭鏁版嵁鐐规椂闂撮棿闅斾笌 interval 鍙傛暟涓€鑷达紱
+  - 闄嶉噰鏍峰悗鏁版嵁鐐规暟閲?鈮?000锛?  - 鎵归噺鏌ヨ杩斿洖 {metrics: {metric_name: {data_points: [...]}}} 缁撴瀯锛?  - 鍏ㄩ噺娴嬭瘯 鈮?575 passed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-011锛汿-OBS-TS-01~06銆?
+### TASK-0192 M18-E M18 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氱敓鎴?M18 鍙戝竷娓呭崟锛坢18_release.json锛夛紝璁板綍 M18-A~D 鏍稿績鏂囦欢 hash + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓鏃舵洿鏂?UI_UPGRADE_CHANGELOG.md 璁板綍 v3.0 鍙樻洿銆?- 杈撳叆锛歍ASK-0188~0191 鍏ㄩ儴 DONE锛汿ASK-0182~0186 鍏ㄩ儴 DONE锛圡17 鍓嶇鍒囨崲鐪熷疄 API 楠岃瘉锛夈€?- 杈撳嚭锛?  - `docs/50_release/m18_release.json`锛?  - `docs/50_project/UI_UPGRADE_CHANGELOG.md`锛坴3.0 鏉＄洰锛夈€?- 楠屾敹鏍囧噯锛歳elease_ready=true锛沘ll_api_endpoints_tested=true锛沠rontend_api_integration_verified=true锛泎ero_regressions=true锛泃otal_tests_passed 鈮?1575銆?- 鍏宠仈闇€姹傦細FR-OBS-003~011锛汵FR-REL-001锛汵FR-MAINT-001銆?
+---
 
-### TASK-0184 M17-C 会话列表页（Sessions Page）
-- 状态：DONE
-- 任务描述：
-  实现 Sessions 页面，展示历史会话列表；顶部过滤栏（时间范围选择器 + 状态下拉 + 关键词搜索）；表格展示（request_id / 时间 / 状态 / 耗时 / 通道 / reason_code）；底部分页控件；点击行跳转到 Trace 页并传递 request_id；对接 `/obs/sessions` API（开发阶段使用 mock）。
-- 输入：TASK-0182 完成；DevSpec §OBS-V3-003；FR-OBS-005。
-- 输出：
-  - `host_brain/app/static/pages/sessions.js`（完整实现，对接真实 API）。
-- 验收标准：
-  - 列表正常分页（每页 20 条），翻页不丢失过滤条件；
-  - 点击行后 URL hash 变为 `#trace?rid=xxx`，Trace 页自动加载；
-  - 状态过滤（OK/REJECT/ERROR）正确生效；
-  - 空结果时显示友好空状态（非报错）。
-- 关联需求/测试：FR-OBS-005；T-OBS-V3-SESS-01~05。
+## M19 瀹℃煡鎶ュ憡缂洪櫡淇锛圥0/P1锛夛紙DONE锛?
+> 鐩爣锛氫慨澶?M17/M18 浠ｇ爜瀹℃煡鎶ュ憡锛坒ull_code_review_report_2026-03-04-m17m18.md锛変腑璇嗗埆鐨勫叏閮?P0 绾?Bug 鍜?P1 绾ф灦鏋勯棶棰橈紝娑堥櫎鍓嶅悗绔瓧娈靛悕涓嶄竴鑷淬€丷oute/Service 灞傝劚鑺傘€佸叏閲忔暟鎹姞杞界瓑鏍稿績缂洪櫡锛屾彁鍗囩洃鎺ч潰鏉垮彲闈犳€т笌鍙淮鎶ゆ€с€?> 渚濊禆锛歁17銆丮18 鍏ㄩ儴 DONE銆?> 鍏宠仈瀹℃煡椤癸細BUG-BE-001銆丅UG-BE-002銆丅UG-FE-001銆乄ARN-FE-004銆乄ARN-FE-005銆乄ARN-FE-006銆乄ARN-BE-001~003銆乄ARN-BE-005銆乄ARN-TEST-001~002銆?
+### TASK-0193 M19-A 淇 Trace 闄嶇骇璺緞 AttributeError锛圔UG-BE-001锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  淇 `obs_routes.py` 涓?`GET /obs/trace/{request_id}` 绔偣鐨勯檷绾ц矾寰勶紙`row is None` 鍒嗘敮锛夛細灏嗙洿鎺ュ睘鎬ц闂?`ledger.governor_log` 鏀逛负姝ｇ‘鐨勬柟娉曡皟鐢?`ledger.fetch_by_time_range("governor_log", 0, _now_ms())`锛屾秷闄?`AttributeError` 鈫?500 閿欒銆傚悓姝ユ鏌ュ悓涓€绔偣涓叾浠栧彲鑳界殑鐩存帴灞炴€ц闂紝纭繚鍏ㄩ儴鏀逛负鏂规硶璋冪敤銆?- 杈撳叆锛歚host_brain/app/obs_routes.py`锛沗host_brain/audit/sqlite_ledger.py`锛堢‘璁ゅ彲鐢ㄦ柟娉曠鍚嶏級锛涘鏌ユ姤鍛?BUG-BE-001銆?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堥檷绾ц矾寰勪慨澶嶏級锛?  - `tests/unit/test_obs_routes_trace_fallback.py`锛圱-OBS-ROUTE-TRACE-FALLBACK-01~03锛氶獙璇侀檷绾ц矾寰勬甯歌繑鍥炪€佷笉瀛樺湪 request_id 杩斿洖 404銆乴edger 鏂规硶璋冪敤姝ｇ‘锛夈€?- 楠屾敹鏍囧噯锛?  - 闄嶇骇璺緞锛坄row is None`锛夎Е鍙戞椂涓嶆姏鍑?`AttributeError`锛岃繑鍥炴甯?JSON 鍝嶅簲锛?  - 涓嶅瓨鍦ㄧ殑 request_id 杩斿洖 404 + `{"error": "not_found", "request_id": "..."}`锛?  - T-OBS-ROUTE-TRACE-FALLBACK-01~03 鍏ㄩ儴閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯 鈮?580 passed锛? failed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-010锛汢UG-BE-001锛汿-OBS-ROUTE-TRACE-FALLBACK-01~03銆?
+### TASK-0194 M19-B 淇 Overview 椤靛瓧娈靛悕瀵归綈锛圔UG-FE-001 + WARN-FE-004锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  淇鍓嶇 Overview 椤典袱澶勫瓧娈靛悕涓嶅尮閰嶉棶棰橈細
+  1. **BUG-FE-001**锛歚Overview.jsx` 姹囨€荤粺璁¤灏?`data?.summary` 鏀逛负鐩存帴璇诲彇椤跺眰瀛楁 `data?.total / data?.up / data?.degraded / data?.down`锛屽苟灏嗘樉绀烘爣绛句粠 `healthy` 瀵归綈涓?`up`锛?  2. **WARN-FE-004**锛歚ServiceCard.jsx` 缁勪欢 props 浠?`name / latency / detail` 瀵归綈涓?`display_name / p95_ms / call_count`锛屽悓姝ユ洿鏂?`Overview.jsx` 涓紶閫掔粰 `ServiceCard` 鐨勫睘鎬ф槧灏勩€?  淇鍚庨噸鏂版瀯寤哄墠绔骇鐗╋紙`npm run build`锛夛紝鏇存柊 `static/monitor/` 涓嬬殑鏋勫缓浜х墿銆?- 杈撳叆锛歚monitor_ui/src/pages/Overview.jsx`锛沗monitor_ui/src/components/ServiceCard.jsx`锛沗host_brain/app/obs_routes.py`锛堢‘璁?`ServicesHealthResponse` 瀛楁锛夛紱瀹℃煡鎶ュ憡 BUG-FE-001銆乄ARN-FE-004銆?- 杈撳嚭锛?  - `monitor_ui/src/pages/Overview.jsx`锛堝瓧娈佃鍙栦慨澶嶏級锛?  - `monitor_ui/src/components/ServiceCard.jsx`锛坧rops 瀛楁鍚嶅榻愶級锛?  - `monitor_ui/dist/`锛堥噸鏂版瀯寤轰骇鐗╋級锛?  - `host_brain/app/static/monitor/`锛堟洿鏂伴潤鎬佹枃浠讹級銆?- 楠屾敹鏍囧噯锛?  - Overview 椤甸《閮?4 涓粺璁″崱鐗囷紙Total / Up / Degraded / Down锛夋纭樉绀烘暟鍊硷紝涓嶅啀鏄剧ず `鈥擿锛?  - ServiceCard 姝ｇ‘娓叉煋 `display_name`銆乣p95_ms`銆乣call_count` 瀛楁锛?  - 鍓嶇鏋勫缓鏃犳姤閿欙紙`npm run build` 0 errors锛夛紱
+  - 鍏ㄩ噺 Python 娴嬭瘯 鈮?580 passed锛? failed锛堝墠绔慨澶嶄笉褰卞搷鍚庣娴嬭瘯锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-003锛汧R-OBS-008锛汢UG-FE-001锛沇ARN-FE-004銆?
+### TASK-0195 M19-C 淇 Trace API 璺緞 + Sessions 缈婚〉闂寘锛圵ARN-FE-006 + WARN-FE-005锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  淇鍓嶇涓ゅ鍔熻兘鎬ч棶棰橈細
+  1. **WARN-FE-006**锛歚monitor_ui/src/api/obs.js` 涓?`fetchTraceNodes` 鐨勮皟鐢ㄨ矾寰勪粠 `/obs/trace/${requestId}/nodes` 淇涓?`/obs/trace/${requestId}`锛屼笌鍚庣璺敱瀵归綈锛涘悓姝ョЩ闄?Mock 鍒嗘敮涓?`id.startsWith('mock')` 鐨勭壒娈婂鐞嗭紝鏀逛负缁熶竴鐨?`requestId === 'mock'` 寮€鍏筹紱
+  2. **WARN-FE-005**锛歚Sessions.jsx` 缈婚〉閫昏緫涓紝灏?`load` 鍑芥暟鐨?`useCallback` 渚濊禆浠?`[page, ...]` 鏀逛负鎺ュ彈 `pageNum` 鍙傛暟锛岀炕椤垫椂璋冪敤 `load(page + 1)` 浼犲叆鏂伴〉鐮侊紝娑堥櫎闂寘闄堟棫鍊奸棶棰樸€?  淇鍚庨噸鏂版瀯寤哄墠绔骇鐗┿€?- 杈撳叆锛歚monitor_ui/src/api/obs.js`锛沗monitor_ui/src/pages/Sessions.jsx`锛沗monitor_ui/src/pages/Trace.jsx`锛涘鏌ユ姤鍛?WARN-FE-006銆乄ARN-FE-005銆?- 杈撳嚭锛?  - `monitor_ui/src/api/obs.js`锛圱race API 璺緞淇锛夛紱
+  - `monitor_ui/src/pages/Sessions.jsx`锛堢炕椤甸棴鍖呬慨澶嶏級锛?  - `monitor_ui/dist/`锛堥噸鏂版瀯寤轰骇鐗╋級锛?  - `host_brain/app/static/monitor/`锛堟洿鏂伴潤鎬佹枃浠讹級銆?- 楠屾敹鏍囧噯锛?  - `fetchTraceNodes` 璋冪敤璺緞涓?`/obs/trace/{requestId}`锛堟棤 `/nodes` 鍚庣紑锛夛紱
+  - Sessions 椤电炕椤垫椂璇锋眰鐨?`page` 鍙傛暟涓庣偣鍑荤殑椤电爜涓€鑷达紙鏃犻棴鍖呴檲鏃у€硷級锛?  - 鍓嶇鏋勫缓鏃犳姤閿欙紱
+  - 鍏ㄩ噺 Python 娴嬭瘯 鈮?580 passed锛? failed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-006锛汧R-OBS-009锛沇ARN-FE-006锛沇ARN-FE-005銆?
+### TASK-0196 M19-D 閲嶆瀯 obs_routes.py 璋冪敤 Service 灞傦紙WARN-BE-001~003锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  娑堥櫎 `obs_routes.py` 涓?Service 灞傜殑涓夌粍骞宠瀹炵幇锛屽皢 Route 灞傛敼涓鸿皟鐢ㄥ凡鏈?Service 灞傦細
+  1. **WARN-BE-001**锛歚GET /obs/services/health` 绔偣鏀逛负璋冪敤 `ServiceHealthAggregator.aggregate(side=side)`锛屽垹闄よ矾鐢卞眰鍐呰仈鐨勮仛鍚堥€昏緫锛?  2. **WARN-BE-002**锛歚GET /obs/sessions` 绔偣鏀逛负璋冪敤 `SessionQueryService.query(filters, page, page_size)`锛屽垹闄よ矾鐢卞眰鍐呰仈鐨勬煡璇㈤€昏緫锛?  3. **WARN-BE-003**锛歚GET /obs/metrics/timeseries` 绔偣鏀逛负璋冪敤 `MetricsTimeseriesService.query(metrics, interval, start_time, end_time)`锛屽垹闄よ矾鐢卞眰鍐呰仈鐨勮仛鍚堥€昏緫銆?  閲嶆瀯鍚庣‘淇濆搷搴旂粨鏋勪笌鍘熸湁缁撴瀯鍏煎锛堝墠绔棤闇€淇敼锛夛紝骞惰ˉ鍏呭繀瑕佺殑渚濊禆娉ㄥ叆锛堥€氳繃 `request.app.state` 鎴栧弬鏁颁紶閫?`ledger` 瀹炰緥锛夈€?- 杈撳叆锛歚host_brain/app/obs_routes.py`锛沗host_brain/obs/service_health_aggregator.py`锛沗host_brain/obs/session_query.py`锛沗host_brain/obs/metrics_timeseries.py`锛涘鏌ユ姤鍛?WARN-BE-001~003銆?- 杈撳嚭锛?  - `host_brain/app/obs_routes.py`锛堜笁涓鐐归噸鏋勪负璋冪敤 Service 灞傦紝鍒犻櫎鍐呰仈閫昏緫锛夛紱
+  - `host_brain/obs/service_health_aggregator.py`锛堝闇€璋冩暣鎺ュ彛绛惧悕浠ラ€傞厤璺敱灞傝皟鐢級锛?  - `host_brain/obs/session_query.py`锛堝闇€璋冩暣鎺ュ彛绛惧悕锛夛紱
+  - `host_brain/obs/metrics_timeseries.py`锛堝闇€璋冩暣鎺ュ彛绛惧悕锛夈€?- 楠屾敹鏍囧噯锛?  - `obs_routes.py` 涓変釜绔偣涓嶅啀鍖呭惈鍐呰仈涓氬姟閫昏緫锛屼粎鍋氬弬鏁拌В鏋?+ Service 璋冪敤 + 鍝嶅簲搴忓垪鍖栵紱
+  - 鍘熸湁 T-OBS-HEALTH-01~06銆乀-OBS-SESS-01~06銆乀-OBS-TS-01~06 鍏ㄩ儴缁х画閫氳繃锛?  - 鍝嶅簲缁撴瀯涓庨噸鏋勫墠鍏煎锛堝瓧娈靛悕銆佺被鍨嬩笉鍙橈級锛?  - 鍏ㄩ噺娴嬭瘯 鈮?580 passed锛? failed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-008~011锛沇ARN-BE-001锛沇ARN-BE-002锛沇ARN-BE-003锛汵FR-MAINT-001銆?
+### TASK-0197 M19-E 淇 TraceNodeBuilder 鍏ㄩ噺鍔犺浇 + 骞惰鍒嗘敮鎺ㄦ柇锛圔UG-BE-002 + WARN-BE-005锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  淇 `trace_node_builder.py` 鐨勪袱涓牳蹇冮棶棰橈細
+  1. **BUG-BE-002**锛歚_fetch_intent_nodes`銆乣_fetch_governor_nodes`銆乣_fetch_skill_nodes`銆乣_fetch_voice_nodes` 鍥涗釜鏂规硶鏀逛负鎸?`request_id` 鐩存帴杩囨护鏌ヨ锛堝湪 SQL 灞傝繃婊よ€岄潪鍏ㄩ噺鍔犺浇鍚庡唴瀛樿繃婊わ級銆傞渶鍦?`SQLiteLedger` 涓柊澧?`fetch_by_request_id(table, request_id)` 鏂规硶锛堟垨鎵╁睍鐜版湁 `fetch_by_time_range` 鏀寔 `request_id` 杩囨护鍙傛暟锛夛紝骞跺湪 `sqlite_ledger.py` 涓负鐩稿叧琛ㄧ殑 `request_id` 鍒楄ˉ鍏呯储寮曪紙migration 鏂囦欢锛夛紱
+  2. **WARN-BE-005**锛歚_infer_parent_ids` 鏀逛负鍩轰簬 `node_type` 鐨勬爲褰㈡帹鏂細`intent` 鑺傜偣鏃?parent锛沗governor` 鑺傜偣 parent 涓?`intent`锛沗skill` / `llm` 鑺傜偣 parent 涓?`governor`锛沗asr` / `tts` / `vts` 鑺傜偣 parent 涓哄搴旂殑 `skill` 鑺傜偣锛堟寜 `start_ts_ms` 鏈€杩戝尮閰嶏級锛涙敮鎸佸涓妭鐐瑰叡浜悓涓€ parent锛堝苟琛屽垎鏀級銆?- 杈撳叆锛歚host_brain/obs/trace_node_builder.py`锛沗host_brain/audit/sqlite_ledger.py`锛涘鏌ユ姤鍛?BUG-BE-002銆乄ARN-BE-005锛汥evSpec 搂29.6.1銆?- 杈撳嚭锛?  - `host_brain/obs/trace_node_builder.py`锛圫QL 绾ц繃婊?+ 鏍戝舰 parent 鎺ㄦ柇锛夛紱
+  - `host_brain/audit/sqlite_ledger.py`锛堟柊澧?`fetch_by_request_id` 鏂规硶锛夛紱
+  - `host_brain/audit/migrations/0020_trace_request_id_index.sql`锛坮equest_id 绱㈠紩锛夛紱
+  - `tests/unit/test_trace_node_builder.py`锛堟洿鏂?T-OBS-TRACE-03 鏂█锛岃ˉ鍏呭苟琛屽垎鏀祴璇曠敤渚?T-OBS-TRACE-09~10锛夈€?- 楠屾敹鏍囧噯锛?  - `_fetch_*_nodes` 鏂规硶涓嶅啀鎷夊彇鍏ㄩ噺鏁版嵁锛屼粎杩斿洖鎸囧畾 `request_id` 鐨勮锛?  - 骞惰鍒嗘敮鍦烘櫙锛堜袱涓?skill 鑺傜偣鍏变韩鍚屼竴 governor parent锛夋纭帹鏂?parent_node_id锛?  - T-OBS-TRACE-01~10 鍏ㄩ儴閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯 鈮?582 passed锛? failed銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-010锛汢UG-BE-002锛沇ARN-BE-005锛汿-OBS-TRACE-01~10銆?
+### TASK-0198 M19-F 琛ュ厖 obs_routes.py 闆嗘垚娴嬭瘯锛圵ARN-TEST-001~002锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛?  琛ュ厖涓ょ被娴嬭瘯瑕嗙洊缂哄彛锛?  1. **WARN-TEST-002**锛氫负 `obs_routes.py` 鐨?4 涓鐐规柊澧為泦鎴愭祴璇曪紙浣跨敤 FastAPI `TestClient`锛夛紝瑕嗙洊姝ｅ父璺緞銆佸弬鏁拌繃婊ゃ€佽竟鐣屾潯浠讹紙绌虹粨鏋溿€佷笉瀛樺湪 ID銆佸弬鏁扮己澶憋級锛?  2. **WARN-TEST-001**锛氭洿鏂?`test_trace_node_builder.py` 涓?T-OBS-TRACE-03锛岃ˉ鍏呭苟琛屽垎鏀柇瑷€锛堜袱涓妭鐐瑰叡浜悓涓€ parent_node_id锛夛紱鏂板 T-OBS-TRACE-09锛堝苟琛?skill 鑺傜偣 parent 鍧囦负 governor锛夊拰 T-OBS-TRACE-10锛圓SR/TTS 鑺傜偣 parent 涓哄搴?skill 鑺傜偣锛夈€?  闆嗘垚娴嬭瘯浣跨敤鍐呭瓨 SQLite锛坄:memory:`锛? 棰勭疆 fixture 鏁版嵁锛屼笉渚濊禆鐪熷疄鏈嶅姟銆?- 杈撳叆锛歚host_brain/app/obs_routes.py`锛圡19-D 閲嶆瀯鍚庯級锛沗host_brain/obs/`锛圡19-E 淇鍚庯級锛沗tests/unit/test_trace_node_builder.py`锛涘鏌ユ姤鍛?WARN-TEST-001~002銆?- 杈撳嚭锛?  - `tests/integration/test_obs_routes_integration.py`锛圱-OBS-ROUTE-INT-01~16锛? 涓鐐?脳 4 涓満鏅級锛?  - `tests/unit/test_trace_node_builder.py`锛堟洿鏂?T-OBS-TRACE-03锛屾柊澧?T-OBS-TRACE-09~10锛夈€?- 楠屾敹鏍囧噯锛?  - T-OBS-ROUTE-INT-01~16 鍏ㄩ儴閫氳繃锛?  - T-OBS-TRACE-03銆?9銆?0 鍏ㄩ儴閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯 鈮?598 passed锛? failed锛?  - `obs_routes.py` 4 涓鐐圭殑闆嗘垚娴嬭瘯瑕嗙洊鐜?鈮?0%銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-008~011锛沇ARN-TEST-001锛沇ARN-TEST-002锛汿-OBS-ROUTE-INT-01~16锛汿-OBS-TRACE-09~10銆?
+### TASK-0199 M19-G M19 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氱敓鎴?M19 鍙戝竷娓呭崟锛坢19_release.json锛夛紝璁板綍 M19-A~F 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂颁唬鐮佸鏌ユ姤鍛婏紙full_code_review_report_2026-03-04-m17m18.md锛変腑鍚勪慨澶嶉」鐘舵€佷负 FIXED锛涙洿鏂?risk_registry.md 涓搴旈闄╂潯鐩姸鎬佷负 MITIGATED銆?- 杈撳叆锛歍ASK-0193~0198 鍏ㄩ儴 DONE銆?- 杈撳嚭锛?  - `docs/50_release/m19_release.json`锛?  - `docs/40_agents/full_code_review_report_2026-03-04-m17m18.md`锛堜慨澶嶉」鐘舵€佹洿鏂帮級锛?  - `docs/60_trace/risk_registry.md`锛圥0/P1 椋庨櫓鏉＄洰鐘舵€佹洿鏂颁负 MITIGATED锛夈€?- 楠屾敹鏍囧噯锛?  - release_ready=true锛?  - all_p0_bugs_fixed=true锛圔UG-BE-001銆丅UG-FE-001 鍧囧凡淇锛夛紱
+  - all_p1_issues_resolved=true锛?  - zero_regressions=true锛?  - total_tests_passed 鈮?1598銆?- 鍏宠仈闇€姹傦細FR-OBS-003~011锛汵FR-REL-001锛汵FR-MAINT-001锛汢UG-BE-001锛汢UG-BE-002锛汢UG-FE-001銆?
+### TASK-0200 M20-A锛欰gentHealthCheck 鈥?SchedulerEngine 蹇冭烦绮剧鐘舵€佹娴?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `SchedulerEngine` 涓敞鍐?`agent_health_check` 瀹氭椂浠诲姟锛堥粯璁ら棿闅?30 鍒嗛挓锛夛紝鍚?LLM 鑺傜偣鍙戦€?Heartbeat Prompt锛屼緷鎹洖澶嶅唴瀹瑰垽鏂?Agent 绮剧鐘舵€侊紱鍥炲鍚?`HEARTBEAT_OK` 鍒欓潤榛樹涪寮冿紝鍚﹀垯鎺ㄩ€?`HEARTBEAT_ALERT` 浜嬩欢鑷冲璁?Ledger 骞跺啓鍏ュ彲瑙傛祴鏃ュ織銆?- 杈撳叆锛?  - `host_brain/scheduler/scheduler.py`锛圫chedulerEngine 鐜版湁瀹炵幇锛夛紱
+  - `host_brain/audit/sqlite_ledger.py`锛堝璁″啓鍏ユ帴鍙ｏ級锛?  - DevSpec 搂21.4锛圫chedulerEngine 鎺ュ彛濂戠害锛夛紱
+  - FR-OBS-001锛堝叧閿寚鏍囦笌闈㈡澘锛夈€?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛氭柊澧?`AgentHealthCheckTask` 浠诲姟宸ュ巶锛屽惈 Heartbeat Prompt 妯℃澘锛堝彲閰嶇疆锛夈€佹渶澶у洖澶嶅瓧绗﹂檺鍒讹紙榛樿 300锛夈€侀潤榛樿繃婊ら€昏緫锛坄HEARTBEAT_OK` 涓㈠純锛夈€佸紓甯告帹閫侀€昏緫锛堝啓鍏?`heartbeat_alert` 瀹¤浜嬩欢锛夛紱
+  - `host_brain/scheduler/health_check_prompt.py`锛堟柊澧烇級锛欻eartbeat Prompt 妯℃澘甯搁噺涓?`parse_heartbeat_response(text) -> Literal["OK", "ALERT"]` 瑙ｆ瀽鍑芥暟锛?  - `host_brain/audit/sqlite_ledger.py`锛氭柊澧?`heartbeat_events` 琛ㄨ縼绉诲紩鐢紙鎴栧鐢ㄧ幇鏈?`scheduler_events` 琛紝澧炲姞 `event_type=HEARTBEAT_ALERT` 鏋氫妇鍊硷級锛?  - `tests/unit/test_agent_health_check.py`锛堟柊澧烇級锛歍-HB-01~05锛堟甯稿洖澶嶉潤榛樸€佸紓甯稿洖澶嶆帹閫併€佽嚜瀹氫箟 Prompt銆佸瓧绗︽埅鏂€丩LM 涓嶅彲鐢ㄩ檷绾э級銆?- 楠屾敹鏍囧噯锛?  - T-HB-01锛氬洖澶嶅惈 `HEARTBEAT_OK` 鏃讹紝`heartbeat_events` 琛ㄦ棤鏂板璁板綍锛屼笖涓嶈Е鍙戜换浣曟帹閫侊紱
+  - T-HB-02锛氬洖澶嶄笉鍚?`HEARTBEAT_OK` 鏃讹紝`heartbeat_events` 琛ㄥ啓鍏ヤ竴鏉?`event_type=HEARTBEAT_ALERT` 璁板綍锛屽惈 `ts_ms`銆乣raw_response`锛堟埅鏂嚦 300 瀛楃锛夈€乣task_id`锛?  - T-HB-03锛歀LM 涓嶅彲鐢紙瓒呮椂/寮傚父锛夋椂锛岄檷绾у啓鍏?`HEARTBEAT_ALERT`锛宍raw_response` 涓?`"LLM_UNAVAILABLE"`锛屼笉鎶涘嚭鏈崟鑾峰紓甯革紱
+  - T-HB-04锛歚parse_heartbeat_response` 瀵瑰惈 `HEARTBEAT_OK` 鐨勪换鎰忓ぇ灏忓啓鍙樹綋鍧囪繑鍥?`"OK"`锛?  - T-HB-05锛氫换鍔℃敞鍐屽悗鍙€氳繃 `SchedulerEngine.list_health()` 鏌ヨ鍒?`agent_health_check` 浠诲姟鐘舵€侊紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?598 passed锛? failed锛堝湪 M19 鍩虹嚎涓婃柊澧烇級銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/scheduler/scheduler.py`锛?  - `host_brain/scheduler/health_check_prompt.py`锛堟柊澧烇級锛?  - `host_brain/audit/sqlite_ledger.py`锛?  - `tests/unit/test_agent_health_check.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汧R-OBS-008锛汿-HB-01~05銆?
+### TASK-0201 M20-B锛欳ontextCompressor 鍘嬬缉鍓嶉潤榛樹繚瀛橈紙COMPRESS_BEFORE_SAVE锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `ContextCompressor` 瑙﹀彂鍘嬬缉锛坄summary` / `hybrid` 绛栫暐锛夊墠锛屽厛灏嗗綋鍓嶅璇濅腑鐨勯噸瑕佷俊鎭潤榛樺啓鍏?Episodic 璁板繂搴擄紝闃叉鍘嬬缉鎿嶄綔瀵艰嚧鍏抽敭涓婁笅鏂囨案涔呬涪澶憋紱骞跺湪瀹¤瀛楁涓鍔?`COMPRESS_BEFORE_SAVE` 浜嬩欢璁板綍锛屾爣璁板帇缂╁墠淇濆瓨鐨勬椂鏈轰笌鍐呭鎽樿銆?- 杈撳叆锛?  - `host_brain/memory/context_compressor.py`锛圕ontextCompressor 鐜版湁瀹炵幇锛夛紱
+  - `host_brain/memory/episodic.py`锛圗pisodicStore 鍐欏叆鎺ュ彛锛夛紱
+  - `host_brain/audit/sqlite_ledger.py`锛堝璁″啓鍏ユ帴鍙ｏ級锛?  - DevSpec 搂24.2.2锛圕ontextCompressor 鎺ュ彛锛夛紱
+  - FR-MEM-005锛堝彫鍥炶瀺鍚堣緭鍑哄繀椤讳负璇佹嵁鍖咃級銆?- 杈撳嚭锛?  - `host_brain/memory/context_compressor.py`锛氬湪 `compress()` 鏂规硶涓紝褰撶瓥鐣ヤ负 `summary` 鎴?`hybrid` 涓旀秷鎭暟瓒呰繃鍘嬬缉闃堝€兼椂锛屽厛璋冪敤 `_pre_compress_save(messages, episodic_writer)` 鎻愬彇骞跺啓鍏ラ噸瑕佺墖娈碉紙鍚?`evidence_refs`锛夛紝鍐嶆墽琛屽帇缂╋紱鏂板 `pre_compress_save_enabled: bool`锛堥粯璁?`True`锛夐厤缃」锛?  - `host_brain/audit/sqlite_ledger.py`锛氭柊澧?`COMPRESS_BEFORE_SAVE` 瀹¤浜嬩欢绫诲瀷锛堟垨澶嶇敤鐜版湁 `memory_events` 琛紝澧炲姞 `event_type` 鏋氫妇鍊硷級锛岃褰曞瓧娈碉細`ts_ms`銆乣session_id`銆乣saved_count`锛堜繚瀛樼墖娈垫暟锛夈€乣strategy`锛堝帇缂╃瓥鐣ュ悕锛夛紱
+  - `tests/unit/test_context_compressor.py`锛氭柊澧?T-CTX-06~08锛堝帇缂╁墠淇濆瓨瑙﹀彂銆佷繚瀛樺唴瀹瑰惈 evidence_refs銆乸re_compress_save_enabled=False 鏃惰烦杩囦繚瀛橈級銆?- 楠屾敹鏍囧噯锛?  - T-CTX-06锛歚summary` 绛栫暐瑙﹀彂鍘嬬缉鏃讹紝`_pre_compress_save` 琚皟鐢紝Episodic 鍐欏叆鑷冲皯 1 鏉¤褰曪紝涓旇璁板綍鍚湁鏁?`evidence_refs`锛?  - T-CTX-07锛氬璁?Ledger 涓瓨鍦?`event_type=COMPRESS_BEFORE_SAVE` 璁板綍锛屽惈 `session_id`銆乣saved_count 鈮?1`銆乣strategy="summary"`锛?  - T-CTX-08锛歚pre_compress_save_enabled=False` 鏃讹紝`_pre_compress_save` 涓嶈璋冪敤锛孍pisodic 鏃犳柊澧炶褰曪紱
+  - T-CTX-09锛歚sliding_window` 绛栫暐涓嶈Е鍙?`_pre_compress_save`锛堜粎鎴柇锛屾棤闇€淇濆瓨锛夛紱
+  - 鍘熸湁 T-CTX-01~05 鍏ㄩ儴缁х画閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯 鈮?603 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/memory/context_compressor.py`锛?  - `host_brain/memory/episodic.py`锛堝彧璇绘帴鍙ｏ紝涓嶄慨鏀癸紝浠呰皟鐢級锛?  - `host_brain/audit/sqlite_ledger.py`锛?  - `tests/unit/test_context_compressor.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-005锛汿-CTX-01~09銆?
+### TASK-0202 M20-C锛欵pisodic 娣峰悎妫€绱㈠寮猴紙鍚戦噺 70% + 鍏ㄦ枃 BM25/FTS5 30%锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `recall_fusion.py` 鐨?Episodic 妫€绱㈢绾夸腑鍙犲姞鍏ㄦ枃妫€绱紙SQLite FTS5 鎴?BM25 绠楁硶锛夛紝涓庣幇鏈夊悜閲忔绱㈢粨鏋滄寜鏉冮噸铻嶅悎锛堝悜閲?70%銆佸叏鏂?30%锛屾潈閲嶅彲閰嶇疆锛夛紝鎻愬崌瀵逛笓鏈夊悕璇嶃€佷汉鍚嶃€佸湴鍚嶇瓑璇箟鍚戦噺涓嶆搮闀垮唴瀹圭殑鍙洖鐜囷紱鍚屾椂澶勭悊璺ㄥ潡璇箟鏂闂锛堢浉閭诲垎鍧楀悎骞剁瓥鐣ワ級銆?- 杈撳叆锛?  - `host_brain/retrieval/recall_fusion.py`锛堢幇鏈夊悜閲忔绱㈣瀺鍚堝疄鐜帮級锛?  - `host_brain/retrieval/pipeline.py`锛堟绱㈢绾匡級锛?  - `host_brain/memory/episodic.py`锛圗pisodicStore锛屽惈 SQLite 瀛樺偍灞傦級锛?  - `host_brain/audit/sqlite_ledger.py`锛圫QLite 杩炴帴澶嶇敤锛夛紱
+  - FR-MEM-005锛堝彫鍥炶瀺鍚堣緭鍑哄繀椤讳负璇佹嵁鍖咃級锛?  - FR-MEM-003锛堟枃鏈祵鍏ユ湇鍔″繀椤诲瓨鍦ㄤ笖鍙檷绾э級銆?- 杈撳嚭锛?  - `host_brain/retrieval/recall_fusion.py`锛氭柊澧?`FullTextSearcher` 绫伙紙鍩轰簬 SQLite FTS5 铏氭嫙琛級+ `HybridFusionStrategy`锛堝悜閲忓垎鏁?脳 0.7 + 鍏ㄦ枃鍒嗘暟 脳 0.3锛屾潈閲嶉€氳繃 `vector_weight` / `fts_weight` 鍙傛暟鍙厤缃級锛涜瀺鍚堝悗缁撴灉鍘婚噸锛堟寜 `doc_id`锛夛紝淇濈暀鏈€楂樺垎锛?  - `host_brain/audit/migrations/0021_episodic_fts5.sql`锛堟柊澧烇級锛氫负 Episodic 璁板繂琛ㄧ殑 `content` 瀛楁鍒涘缓 FTS5 铏氭嫙琛紙`episodic_fts`锛夛紝鏀寔涓枃鍒嗚瘝锛坄unicode61` tokenizer锛夛紱
+  - `host_brain/retrieval/pipeline.py`锛歚RetrievalPipeline` 鏂板 `use_hybrid: bool`锛堥粯璁?`True`锛夐厤缃」锛宍False` 鏃堕€€鍖栦负绾悜閲忔绱紙鍚戝悗鍏煎锛夛紱
+  - `tests/unit/test_recall_fusion_hybrid.py`锛堟柊澧烇級锛歍-RCL-HYB-01~06锛堢函鍚戦噺銆佺函鍏ㄦ枃銆佹贩鍚堣瀺鍚堛€佹潈閲嶉厤缃€佸幓閲嶃€丗TS5 涓嶅彲鐢ㄩ檷绾т负绾悜閲忥級銆?- 楠屾敹鏍囧噯锛?  - T-RCL-HYB-01锛氭贩鍚堟绱㈠涓撴湁鍚嶈瘝鏌ヨ锛堝浜哄悕"澶忕洰"锛夌殑鍙洖缁撴灉涓紝鍏ㄦ枃妫€绱㈠懡涓潯鐩殑鏈€缁堝垎鏁?鈮?绾悜閲忔绱㈠悓鏉＄洰鍒嗘暟锛堜綋鐜板叏鏂囨潈閲嶈础鐚級锛?  - T-RCL-HYB-02锛歚use_hybrid=False` 鏃讹紝`FullTextSearcher` 涓嶈璋冪敤锛岀粨鏋滀笌鍘熸湁绾悜閲忔绱竴鑷达紙鍚戝悗鍏煎锛夛紱
+  - T-RCL-HYB-03锛氬悓涓€ `doc_id` 鍦ㄥ悜閲忓拰鍏ㄦ枃缁撴灉涓潎鍛戒腑鏃讹紝铻嶅悎鍚庡彧淇濈暀涓€鏉★紝鍒嗘暟涓哄姞鏉冭瀺鍚堝€硷紱
+  - T-RCL-HYB-04锛欶TS5 铏氭嫙琛ㄤ笉鍙敤锛堣縼绉绘湭鎵ц锛夋椂锛岃嚜鍔ㄩ檷绾т负绾悜閲忔绱紝涓嶆姏鍑烘湭鎹曡幏寮傚父锛?  - T-RCL-HYB-05锛歚vector_weight + fts_weight` 涓嶇瓑浜?1.0 鏃讹紝鎶涘嚭 `ValueError`锛堥厤缃牎楠岋級锛?  - T-RCL-HYB-06锛氳瀺鍚堢粨鏋滀粛涓哄悎娉?`EvidencePack`锛堝惈 `doc_id`銆乣score`銆乣source_ref`銆乣content`锛夛紱
+  - 鍘熸湁 Episodic 妫€绱㈢浉鍏虫祴璇曞叏閮ㄧ户缁€氳繃锛?  - 鍏ㄩ噺娴嬭瘯 鈮?609 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/retrieval/recall_fusion.py`锛?  - `host_brain/retrieval/pipeline.py`锛?  - `host_brain/memory/episodic.py`锛堝彧璇绘帴鍙ｏ紝涓嶄慨鏀癸級锛?  - `host_brain/audit/migrations/0021_episodic_fts5.sql`锛堟柊澧烇級锛?  - `tests/unit/test_recall_fusion_hybrid.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-003锛汧R-MEM-005锛汿-RCL-HYB-01~06銆?
+## M21 娴嬭瘯鍩虹嚎淇 + Canon 鍚戦噺鎶曞奖杩借釜 + 鍙戝竷娓呭崟锛圱ASK-0203~0206锛?
+> **閲岀▼纰戠洰鏍?*锛氭秷闄ゅ叏閲忔祴璇曚腑 11 涓け璐ョ敤渚嬶紙P1 鏍瑰洜锛歚model_profiles.yaml` 缂哄け瀵艰嚧 `_load_model_plane_meta()` 鎶涘嚭寮傚父锛汸2锛歚panel_page` 缂哄皯杩斿洖绫诲瀷娉ㄨВ + Web UI contract 鍋囪 SSR锛夛紱琛ュ啓 Canon 鍚戦噺鎶曞奖妯″潡鐨勯渶姹傝拷韪笌 contract 娴嬭瘯锛涚敓鎴?M21 鍙戝竷娓呭崟锛屼娇鍏ㄩ噺娴嬭瘯杈惧埌 鈮?661 passed锛? failed銆?
+### TASK-0203 M21-A锛歳elease_manifest.py `_load_model_plane_meta()` 浼橀泤闄嶇骇淇锛圥1锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶?`release_manifest.py` 涓?`_load_model_plane_meta()` 鏂规硶鍦?`configs/model_plane/model_profiles.yaml` 鏂囦欢涓嶅瓨鍦ㄦ椂鐩存帴鎶涘嚭 `FileNotFoundError` 鐨勯棶棰橈紱鏀逛负鏂囦欢瀛樺湪鎬ф鏌ワ紝缂哄け鏃惰繑鍥?`None` 骞惰褰?`WARNING`锛屼娇 model_plane 鑺傜偣闄嶇骇涓?`DEGRADED` 鑰岄潪 `FAILED`锛屼粠鑰屾仮澶?9 涓け璐ョ敤渚嬶紙4 涓?`test_model_plane_release_contract` + 4 涓?`test_orchestration_graph_contract` + 1 涓?E2E drill锛夈€?- 杈撳叆锛?  - `host_brain/app/release_manifest.py`锛坄_load_model_plane_meta()` 鐜版湁瀹炵幇锛夛紱
+  - `tests/contract/test_model_plane_release_contract.py`锛? 涓け璐ョ敤渚嬶級锛?  - `tests/contract/test_orchestration_graph_contract.py`锛? 涓け璐ョ敤渚嬶級锛?  - `tests/e2e/test_production_drill_e2e.py`锛? 涓け璐ョ敤渚嬶級锛?  - 娴嬭瘯鎶ュ憡 `docs/60_trace/test_report_2026-03-05.md`锛堝け璐ョ粍 A/B/E2E 鏍瑰洜鍒嗘瀽锛夈€?- 杈撳嚭锛?  - `host_brain/app/release_manifest.py`锛歚_load_model_plane_meta()` 鏂板 `if not profiles_path.exists(): logger.warning(...); return None` 鍒嗘敮锛涜皟鐢ㄦ柟 `build_checklist()` 瀵?`None` 杩斿洖鍊煎仛绌哄€间繚鎶わ紙璺宠繃 model_plane 鏉＄洰鎴栧～鍏?`status=DEGRADED`锛夛紱
+  - `tests/contract/test_model_plane_release_contract.py`锛氭洿鏂?`test_model_plane_version_parseable` 鏂█锛屽厑璁告枃浠朵笉瀛樺湪鏃惰繑鍥?`None`锛堣€岄潪鏂█ `profiles_path.exists()`锛夛紱
+  - `tests/contract/test_orchestration_graph_contract.py`锛氭洿鏂?4 涓敤渚嬬殑鏈熸湜鐘舵€侊紝鍏佽 model_plane 鑺傜偣涓?`DEGRADED`锛堣€岄潪 `FAILED`锛夈€?- 楠屾敹鏍囧噯锛?  - `_load_model_plane_meta()` 鍦?`model_profiles.yaml` 涓嶅瓨鍦ㄦ椂涓嶆姏鍑哄紓甯革紝杩斿洖 `None` 骞跺啓鍏?WARNING 鏃ュ織锛?  - `test_model_plane_release_contract.py` 4 涓敤渚嬪叏閮ㄩ€氳繃锛?  - `test_orchestration_graph_contract.py` 4 涓敤渚嬪叏閮ㄩ€氳繃锛?  - `test_production_drill_e2e.py::test_t_drill_02_five_orchestration_control_scenarios_are_stable` 閫氳繃锛坄failed_count == 2`锛夛紱
+  - 鍏ㄩ噺娴嬭瘯杈冧慨澶嶅墠鍑€澧?鈮? 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/app/release_manifest.py`锛?  - `tests/contract/test_model_plane_release_contract.py`锛?  - `tests/contract/test_orchestration_graph_contract.py`锛?  - `tests/e2e/test_production_drill_e2e.py`锛堜粎楠岃瘉锛屼笉淇敼锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛歂FR-REL-001锛汵FR-MAINT-001锛汿-REL-MANIFEST-01~04锛汿-ORCH-02/04/05銆?
+### TASK-0204 M21-B锛歅2 浠ｇ爜璐ㄩ噺淇锛坧anel_page 绫诲瀷娉ㄨВ + Web UI contract CSR 閫傞厤锛?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶嶄袱涓?P2 璐ㄩ噺闂锛氣憼 `fastapi_app.py` 涓?`panel_page` 璺敱鍑芥暟缂哄皯杩斿洖绫诲瀷娉ㄨВ锛坄-> HTMLResponse`锛夛紝瀵艰嚧 `test_quality_contract.py` 闈欐€佹壂鎻忓け璐ワ紱鈶?`test_web_ui_contract.py` 鍋囪 SSR 鍐呭祵鍏抽敭璇嶏紙`request_id` / `searchInput`锛夛紝涓庡綋鍓?React CSR 鏋舵瀯涓嶇锛岄渶鏇存柊涓烘娴?SPA 鐗瑰緛锛坄<div id="root">` 鎴?JS bundle 鏂囦欢瀛樺湪鎬э級銆?- 杈撳叆锛?  - `host_brain/app/fastapi_app.py`锛坄panel_page` 鍑芥暟鐜版湁瀹炵幇锛夛紱
+  - `tests/contract/test_quality_contract.py`锛坄test_fastapi_panel_page_has_return_annotation` 澶辫触鐢ㄤ緥锛夛紱
+  - `tests/contract/test_web_ui_contract.py`锛坄test_panel_contains_key_elements` 澶辫触鐢ㄤ緥锛夛紱
+  - 娴嬭瘯鎶ュ憡 `docs/60_trace/test_report_2026-03-05.md`锛堝け璐ョ粍 C/D 鏍瑰洜鍒嗘瀽锛夈€?- 杈撳嚭锛?  - `host_brain/app/fastapi_app.py`锛歚panel_page` 鍑芥暟绛惧悕娣诲姞 `-> HTMLResponse` 杩斿洖绫诲瀷娉ㄨВ锛?  - `tests/contract/test_web_ui_contract.py`锛歚test_panel_contains_key_elements` 鏀逛负妫€娴?`<div id="root">` 瀛樺湪鎬э紙SPA 鎸傝浇鐐癸級鎴栨娴?`static/monitor/index.html` 鏂囦欢瀛樺湪鎬?+ `<title>` 鏍囩锛涚Щ闄ゅ `request_id` / `searchInput` 鐨?SSR 鍋囪鏂█銆?- 楠屾敹鏍囧噯锛?  - `test_fastapi_panel_page_has_return_annotation` 閫氳繃锛坄annotations` 鍚?`return` 閿級锛?  - `test_panel_contains_key_elements` 閫氳繃锛堟娴?SPA 鐗瑰緛鑰岄潪 SSR 鍐呭祵鍐呭锛夛紱
+  - 鍘熸湁 `test_quality_contract.py` 鍏朵綑鐢ㄤ緥鍏ㄩ儴缁х画閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯杈冧慨澶嶅墠鍑€澧?鈮? 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/app/fastapi_app.py`锛?  - `tests/contract/test_quality_contract.py`锛堜粎楠岃瘉锛屼笉淇敼锛夛紱
+  - `tests/contract/test_web_ui_contract.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-003锛汵FR-MAINT-001锛汿-QUALITY-PANEL-01锛汿-WEBUI-CONTRACT-01銆?
+### TASK-0205 M21-C锛欳anon 鍚戦噺鎶曞奖妯″潡闇€姹傝拷韪ˉ鍐?+ contract 娴嬭瘯琛ュ厖
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负鏈鎷夊彇鏂板鐨?`canon_vector_projection.py` 妯″潡琛ュ啓闇€姹傝拷韪潯鐩紙R-156~R-157锛夛紝骞跺湪 contract 灞傝ˉ鍏?`test_canon_vector_projection_contract.py`锛岃鐩栨姇褰辨枃妗ｇ粨鏋勩€佸悜閲?ID 纭畾鎬с€丆hroma 涓嶅彲鐢ㄩ檷绾с€乵etadata 鏍囬噺绾︽潫锛坱ags 瀛樹负閫楀彿鍒嗛殧瀛楃涓诧級绛夊叧閿绾︾偣锛涘悓姝ユ洿鏂?`requirements_trace.md`銆?- 杈撳叆锛?  - `host_brain/memory/canon_vector_projection.py`锛圕anon 鍚戦噺鎶曞奖鐜版湁瀹炵幇锛夛紱
+  - `tests/unit/test_canon_vector_projection.py`锛堢幇鏈?2 涓崟鍏冩祴璇曪級锛?  - `docs/60_trace/CANON_VECTOR_PROJECTION_2026-03-04.md`锛堝疄鐜拌拷韪枃妗ｏ級锛?  - `docs/60_trace/requirements_trace.md`锛堢幇鏈?R-155 涓烘渶鏂版潯鐩級锛?  - DevSpec 搂19锛圕anon 娌荤悊锛夛紱FR-CANON-001锛圕anon 鏂囦欢 SSOT锛夈€?- 杈撳嚭锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M21-C 灏忚妭锛岃ˉ鍐?R-156锛圕anon 鍚戦噺鎶曞奖鏍稿績濂戠害锛夈€丷-157锛圕anon 鍚戦噺鎶曞奖杩愯鏃惰剼鏈笌闄嶇骇绛栫暐锛夛紱
+  - `tests/contract/test_canon_vector_projection_contract.py`锛堟柊澧烇級锛?    - T-CVP-CONTRACT-01锛氭姇褰辨枃妗?`canon_kind` 瀛楁蹇呴』涓?`style` 鎴?`world`锛?    - T-CVP-CONTRACT-02锛氬悜閲?ID 鏍煎紡纭畾鎬э紙`canon_style::{canon_id}` / `canon_world::{doc_id}`锛夛紱
+    - T-CVP-CONTRACT-03锛歮etadata `tags` 瀛楁蹇呴』涓洪€楀彿鍒嗛殧瀛楃涓诧紙闈?list锛夛紝`tags_count` 涓烘暣鏁帮紱
+    - T-CVP-CONTRACT-04锛欳hroma 涓嶅彲鐢ㄦ椂鎶曞奖鎿嶄綔涓嶆姏鍑烘湭鎹曡幏寮傚父锛岃繑鍥為檷绾х粨鏋滐紱
+    - T-CVP-CONTRACT-05锛氭姇褰辨枃妗ｄ笉鍚?Canon SSOT 鍐欒矾寰勶紙涓嶇洿鎺ヤ慨鏀?`canon_proposal_log` / `canon_change_log`锛夛紱
+    - T-CVP-CONTRACT-06锛歚--dry-run` 妯″紡涓嶅啓鍏?Chroma锛屼粎杩斿洖 `docs_collected` 缁熻銆?- 楠屾敹鏍囧噯锛?  - T-CVP-CONTRACT-01~06 鍏ㄩ儴閫氳繃锛?  - `requirements_trace.md` R-156~R-157 鏉＄洰瀹屾暣锛堝惈闇€姹傛潵婧愩€佸疄鐜版弿杩般€佸疄鐜版枃浠躲€佹祴璇曠紪鍙枫€佺姸鎬併€侀噷绋嬬锛夛紱
+  - 鍘熸湁 `test_canon_vector_projection.py` 2 涓崟鍏冩祴璇曠户缁€氳繃锛?  - 鍏ㄩ噺娴嬭瘯杈冧慨澶嶅墠鍑€澧?鈮? 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/memory/canon_vector_projection.py`锛堝彧璇伙紝涓嶄慨鏀癸級锛?  - `tests/contract/test_canon_vector_projection_contract.py`锛堟柊澧烇級锛?  - `docs/60_trace/requirements_trace.md`锛堟柊澧?R-156~R-157锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CANON-001锛汵FR-REL-001锛汿-CVP-CONTRACT-01~06銆?
+### TASK-0206 M21-D锛歁21 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 TASK-0203~0205 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M21 鍙戝竷娓呭崟锛坄m21_release.json`锛夛紝璁板綍 M21-A~C 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M21 閲岀▼纰戠姸鎬佷负 DONE锛涙洿鏂?`requirements_trace.md` M21 灏忚妭鐘舵€併€?- 杈撳叆锛歍ASK-0203~0205 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?661 passed锛? failed銆?- 杈撳嚭锛?  - `docs/50_release/m21_release.json`锛堟柊澧烇級锛氬惈 `release_ready`銆乣all_p1_fixed`銆乣all_p2_fixed`銆乣canon_vector_projection_traced`銆乣total_tests_passed`銆乣zero_regressions` 瀛楁锛?  - `docs/20_prd/PRD.md`锛歁21 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛歁21 灏忚妭 R-156~R-157 鐘舵€佹洿鏂颁负 DONE銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `all_p1_fixed=true`锛坄_load_model_plane_meta()` 闄嶇骇淇宸查獙璇侊級锛?  - `all_p2_fixed=true`锛坄panel_page` 绫诲瀷娉ㄨВ + Web UI contract CSR 閫傞厤宸查獙璇侊級锛?  - `canon_vector_projection_traced=true`锛圧-156~R-157 宸茶ˉ鍐欙級锛?  - `total_tests_passed 鈮?1661`锛?  - `zero_regressions=true`銆?- 娑夊強鏂囦欢璺緞锛?  - `docs/50_release/m21_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛?  - `docs/60_trace/requirements_trace.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001銆?
 
-### TASK-0185 M17-D Dify 风格链路可视化页（Trace Page — React Flow）
-- 状态：DONE
-- 任务描述：
-  基于 **React Flow** 实现 Trace 页面核心功能——节点流图可视化：
-  1. **React Flow 画布**：自动布局（从左到右，Dagre 布局算法），支持分支/并行，支持缩放/平移；
-  2. **自定义节点卡片**（CustomNode 组件）：圆角矩形，含 Lucide React 节点类型图标、节点名称、状态颜色（绿/红/橙/蓝动画）、耗时标签、Provider 徽章（LLM 节点专属）；
-  3. **有向连线**：React Flow 内置 Edge，支持分支合并，箭头样式；
-  4. **节点点击侧边面板**（NodeDetailPanel 组件）：展示 input/output（JSON 格式化 + 折叠/展开）、status、reason_code、时间戳、side（Host/Edge）、model_id（LLM 节点）；
-  5. **顶部工具栏**：request_id 输入框 + 查询按钮 + 全屏切换（Lucide React 图标）；
-  6. 对接 `/obs/trace/{request_id}` API（开发阶段使用 mock，含完整 ASR→LLM×N→TTS→VTS 链路）。
-- 输入：TASK-0182 完成；DevSpec §OBS-V3-004；FR-OBS-006；React Flow 文档。
-- 输出：
-  - `host_brain/app/monitor_ui/src/pages/Trace.jsx`（完整实现，含 React Flow 画布）；
-  - `host_brain/app/monitor_ui/src/components/trace/CustomNode.jsx`（自定义节点卡片组件）；
-  - `host_brain/app/monitor_ui/src/components/trace/NodeDetailPanel.jsx`（节点详情侧边面板）；
-  - `host_brain/app/monitor_ui/src/utils/traceLayout.js`（Dagre 自动布局工具函数）。
-- 验收标准：
-  - 给定 request_id 后节点图正确渲染（≤50 节点流畅，无卡顿）；
-  - 点击节点侧边面板正确显示 input/output；
-  - 并行节点以分支形式展示（不重叠，Dagre 布局正确）；
-  - JSON 折叠/展开功能正常；
-  - 全屏模式可用；
-  - 空链路时显示友好空状态；
-  - LLM 节点卡片显示 Provider 徽章（OpenAI/Gemini/DeepSeek 颜色区分）。
-- 关联需求/测试：FR-OBS-006；T-OBS-V3-TRACE-01~08。
+## M22 浠ｇ爜璐ㄩ噺 Warning 娓呴浂 + 鍙戝竷娓呭崟
 
-### TASK-0186 M17-E 指标大盘页（Metrics Page）
-- 状态：DONE
-- 任务描述：
-  实现 Metrics 页面，包含：
-  1. 时间范围选择器（1h / 6h / 24h / 7d）；
-  2. 请求量趋势折线图（Canvas）；
-  3. 拒绝率趋势折线图（Canvas）；
-  4. reason_code 分布横向条形图（Canvas）；
-  5. 各服务响应延迟 P50/P95 柱状图（Canvas）；
-  6. 对接 `/obs/metrics/timeseries` API（开发阶段使用 mock）。
-- 输入：TASK-0182 完成；DevSpec §OBS-V3-005；FR-OBS-007；Apache ECharts 文档。
-- 输出：
-  - `host_brain/app/monitor_ui/src/pages/Metrics.jsx`（完整实现，含 ECharts 图表组件）；
-  - `host_brain/app/monitor_ui/src/components/charts/LineChart.jsx`（ECharts 折线图封装组件，可复用）；
-  - `host_brain/app/monitor_ui/src/components/charts/BarChart.jsx`（ECharts 柱状/条形图封装组件，可复用）。
-- 验收标准：
-  - 切换时间范围后图表数据正确更新（Zustand 状态驱动）；
-  - 图表在 HiDPI 屏幕下清晰（ECharts 内置 devicePixelRatio 支持）；
-  - 无数据时显示"数据采集中"占位，不崩溃；
-  - 四种图表类型均正确渲染。
-- 关联需求/测试：FR-OBS-007；T-OBS-V3-METRICS-01~05。
+### TASK-0207 M22-A锛欻TTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 淇
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛欶astAPI 鏂扮増鏈皢 `HTTP_422_UNPROCESSABLE_ENTITY` 鏍囪涓?deprecated锛屽簲鏀逛负 `HTTP_422_UNPROCESSABLE_CONTENT`銆備慨澶?`tool_routes.py`锛? 澶勶級鍜?`scheduler_routes.py`锛? 澶勶級鍏?4 澶勩€?- 杈撳叆锛氬叏閲忔祴璇?4 涓?DeprecationWarning锛坄HTTP_422_UNPROCESSABLE_ENTITY`锛夈€?- 杈撳嚭锛?  - `host_brain/app/tool_routes.py`锛? 澶?`HTTP_422_UNPROCESSABLE_ENTITY` 鈫?`HTTP_422_UNPROCESSABLE_CONTENT`锛?  - `host_brain/scheduler/scheduler_routes.py`锛? 澶?`HTTP_422_UNPROCESSABLE_ENTITY` 鈫?`HTTP_422_UNPROCESSABLE_CONTENT`銆?- 楠屾敹鏍囧噯锛氬叏閲忔祴璇曟棤 `HTTP_422_UNPROCESSABLE_ENTITY` DeprecationWarning锛? 鏂板澶辫触銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/tool_routes.py`锛沗host_brain/scheduler/scheduler_routes.py`銆?- 鍏宠仈闇€姹傦細NFR-MAINT-001锛涗唬鐮佸鏌ユ姤鍛?F-15锛圥2锛夈€?
+### TASK-0208 M22-B锛歛syncio.get_event_loop() DeprecationWarning 淇
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歅ython 3.10+ 涓?`asyncio.get_event_loop()` 鍦ㄦ棤褰撳墠浜嬩欢寰幆鏃跺凡寮冪敤锛屽簲鏀逛负 `asyncio.new_event_loop()` + `run_until_complete()` + `close()`銆備慨澶?`tests/unit/test_canon_cursor_pagination.py`锛? 澶勶級鍜?`tests/unit/test_canon_routes_tx.py`锛? 澶勶級鍏?6 澶勩€傚悓鏃跺皢 `test_webui_integration.py` 涓殑 `test_webui_routes` 閲嶅懡鍚嶄负 `run_webui_routes_check`锛堣鍑芥暟闇€瑕佺湡瀹?HTTP 鏈嶅姟鍣紝涓嶅簲琚?pytest 鑷姩鏀堕泦锛夈€?- 杈撳叆锛氬叏閲忔祴璇?2 涓?DeprecationWarning锛坄asyncio.get_event_loop()`锛? 1 涓?PytestReturnNotNoneWarning銆?- 杈撳嚭锛?  - `tests/unit/test_canon_cursor_pagination.py`锛? 澶?`asyncio.get_event_loop().run_until_complete()` 鈫?`asyncio.new_event_loop().run_until_complete()`锛?  - `tests/unit/test_canon_routes_tx.py`锛? 澶?`asyncio.get_event_loop().run_until_complete()` 鈫?`asyncio.new_event_loop().run_until_complete()`锛?  - `test_webui_integration.py`锛歚test_webui_routes` 閲嶅懡鍚嶄负 `run_webui_routes_check`锛屾秷闄?PytestReturnNotNoneWarning銆?- 楠屾敹鏍囧噯锛氬叏閲忔祴璇?0 warnings锛? 鏂板澶辫触锛?677 passed锛? skipped銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_canon_cursor_pagination.py`锛沗tests/unit/test_canon_routes_tx.py`锛沗test_webui_integration.py`銆?- 鍏宠仈闇€姹傦細NFR-MAINT-001锛涗唬鐮佸鏌ユ姤鍛?F-25锛圥2锛夈€?
+### TASK-0209 M22-C锛歁22 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0207~0208 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M22 鍙戝竷娓呭崟锛坄m22_release.json`锛夛紝璁板綍 M22-A~B 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M22 閲岀▼纰戠姸鎬佷负 DONE銆?- 杈撳叆锛歍ASK-0207~0208 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?1677 passed锛? failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m22_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁22 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE銆?- 楠屾敹鏍囧噯锛歚release_ready=true`锛沗zero_warnings=true`锛沗total_tests_passed=1677`锛沗zero_regressions=true`銆?- 娑夊強鏂囦欢璺緞锛歚docs/50_release/m22_release.json`锛沗docs/20_prd/PRD.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001銆?
 
-### TASK-0187 M17-F M17 发布清单
-- 状态：DONE
-- 任务描述：生成 M17 发布清单（m17_release.json），记录 M17-A~E 核心文件清单 + 页面功能验收状态 + 质量门禁。
-- 输入：TASK-0182~0186 全部 DONE。
-- 输出：`docs/50_release/m17_release.json`。
-- 验收标准：release_ready=true；all_pages_functional=true；zero_js_errors=true；design_review_passed=true。
-- 关联需求：FR-OBS-003~007；NFR-MAINT-001。
+## M23 FTS5 涓枃妫€绱慨澶?+ Edge 蹇冭烦鎺㈤拡闆嗘垚
+
+### TASK-0210 M23-A锛欶TS5 涓枃璇嶇粍妫€绱慨澶?- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氳瘯杩愯鎶ュ憡锛堥檮褰?10.4/10.13 P2-FTS锛夊彂鐜?`FullTextSearcher.search()` 浣跨敤 `unicode61` tokenizer锛屽涓枃澶氬瓧璇嶇粍锛堝 `鐚挭`銆乣宸ヤ綔鍘嬪姏`锛夋棤娉曞懡涓?FTS5 绱㈠紩锛屽鑷存贩鍚堟绱紙鍚戦噺 70% + FTS5 30%锛夊疄闄呴€€鍖栦负绾悜閲忔绱紝FTS5 鏉冮噸鏈敓鏁堛€備慨澶嶆柟妗堬細鍦?`FullTextSearcher.search()` 涓涓枃鏌ヨ璇嶈繘琛屽瓧绗︾骇鍒嗗壊锛坄" ".join(list(query))`锛夛紝浣?FTS5 MATCH 璇硶鑳藉尮閰嶅崟瀛楃储寮曪紱鍚屾椂鍦?FTS5 鍐欏叆鏃跺涓枃鏂囨湰鍚屾杩涜瀛楃绾у垎鍓插啓鍏ワ紝淇濊瘉绱㈠紩涓庢煡璇竴鑷淬€?- 杈撳叆锛?  - `host_brain/retrieval/full_text_searcher.py`锛坄FullTextSearcher.search()` 鍜屽啓鍏ラ€昏緫锛夛紱
+  - `host_brain/audit/migrations/0021_episodic_fts5.sql`锛團TS5 琛ㄥ畾涔夛紝tokenizer=unicode61锛夛紱
+  - 璇曡繍琛屾姤鍛?`docs/60_trace/test_report_2026-03-05.md` 搂10.4锛圥2-FTS 闂鎻忚堪锛夛紱
+  - `tests/unit/test_recall_fusion_hybrid.py`锛堢幇鏈?19 涓贩鍚堟绱㈠崟鍏冩祴璇曪級銆?- 杈撳嚭锛?  - `host_brain/retrieval/full_text_searcher.py`锛?    - `search()` 鏂规硶锛氬涓枃鏌ヨ璇嶈繘琛屽瓧绗︾骇鍒嗗壊锛岀敓鎴?FTS5 MATCH 鏌ヨ瀛楃涓诧紙`" ".join(list(query))`锛夛紱
+    - `index_document()` / `index_documents()` 鏂规硶锛氬涓枃鏂囨湰鍚屾杩涜瀛楃绾у垎鍓插悗鍐欏叆 FTS5 绱㈠紩锛?    - 鏂板 `_split_chinese_query(text: str) -> str` 绉佹湁鏂规硶锛屽皝瑁呭垎鍓查€昏緫锛堜腑鏂囧瓧绗﹂€愬瓧鍒嗗壊锛岄潪涓枃淇濈暀鍘熻瘝锛夛紱
+  - `tests/unit/test_full_text_searcher.py`锛堟柊澧炴垨鎵╁睍锛夛細
+    - T-FTS-01锛氫腑鏂囪瘝缁勬煡璇㈠懡涓紙`鐚挭` 鏌ヨ鍛戒腑鍚?`鐚挭` 鐨勬枃妗ｏ級锛?    - T-FTS-02锛氫腑鏂囧崟瀛楁煡璇㈠懡涓紱
+    - T-FTS-03锛氳嫳鏂囨煡璇笉鍙楀奖鍝嶏紱
+    - T-FTS-04锛氭贩鍚堜腑鑻辨枃鏌ヨ锛?    - T-FTS-05锛欶TS5 鏃犵粨鏋滄椂闄嶇骇涓虹函鍚戦噺锛堝洖褰掍繚鎶わ級锛?    - T-FTS-06锛歚hybrid_fused=True` 褰?FTS5 鏈夊懡涓椂锛堝洖褰掍繚鎶わ級銆?- 楠屾敹鏍囧噯锛?  - T-FTS-01~06 鍏ㄩ儴閫氳繃锛?  - 鐜版湁 `test_recall_fusion_hybrid.py` 19 涓敤渚嬪叏閮ㄧ户缁€氳繃锛堥浂鍥炲綊锛夛紱
+  - 鍏ㄩ噺娴嬭瘯杈冧慨澶嶅墠鍑€澧?鈮? 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触锛?  - 璇曡繍琛岃拷韪剼鏈噸璺戞椂锛孎TS5 鏌ヨ `鐚挭` 鍛戒腑鏁?鈮?锛坄hybrid_fused=True`锛夈€?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/retrieval/full_text_searcher.py`锛?  - `tests/unit/test_full_text_searcher.py`锛堟柊澧炴垨鎵╁睍锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-003锛汧R-MEM-005锛汿-FTS-01~06锛汿-RCL-HYB-02锛堝洖褰掞級銆?
+### TASK-0211 M23-B锛欵dge 蹇冭烦鎺㈤拡闆嗘垚 `build_edge_transport_probe_statuses`
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氳瘯杩愯鎶ュ憡锛堥檮褰?D.3 閬楃暀闂锛夊彂鐜?`build_edge_transport_probe_statuses` 鍑芥暟宸插畾涔変絾鏈浠讳綍璋冪敤鏂逛娇鐢紝瀵艰嚧 edge 鑺傜偣杩愯鏃跺畷鏈烘椂 host 渚ф棤娉曟劅鐭ワ紙edge 鏈嶅姟鐘舵€佸畬鍏ㄤ緷璧栭厤缃┍鍔紝涓嶅弽鏄犺繍琛屾椂鐪熷疄鐘舵€侊級銆備慨澶嶆柟妗堬細鍦?`AgentHealthCheck`锛堝績璺虫娴嬶級鐨?edge 鍋ュ悍妫€鏌ラ€昏緫涓泦鎴?`build_edge_transport_probe_statuses`锛屼娇 edge 鑺傜偣杩愯鏃舵帰閽堢粨鏋滆兘鍙嶆槧鍒?host 渚у仴搴锋姤鍛婁腑锛涘悓鏃跺湪 `/health` 绔偣鐨?`runtime_statuses` 鏋勫缓涓悎骞?edge 浼犺緭灞傛帰閽堢粨鏋溿€?- 杈撳叆锛?  - `host_brain/app/config.py`锛坄build_edge_transport_probe_statuses` 瀹氫箟浣嶇疆锛夛紱
+  - `host_brain/app/fastapi_app.py`锛坄/health` 绔偣锛屽綋鍓嶅彧璋冪敤 `build_host_runtime_statuses`锛夛紱
+  - `host_brain/obs/agent_health_check.py`锛坄AgentHealthCheck` 蹇冭烦妫€娴嬪疄鐜帮級锛?  - 璇曡繍琛屾姤鍛?`docs/60_trace/test_report_2026-03-05.md` 搂D.3锛堥仐鐣欓棶棰樻弿杩帮級锛?  - `tests/unit/test_agent_health_check.py`锛堢幇鏈?19 涓績璺虫娴嬪崟鍏冩祴璇曪級銆?- 杈撳嚭锛?  - `host_brain/app/fastapi_app.py`锛?    - `/health` 绔偣鐨?`runtime_statuses` 鏋勫缓涓紝鍚堝苟 `build_edge_transport_probe_statuses` 鐨勬帰閽堢粨鏋滐紙`_runtime_statuses.update(build_edge_transport_probe_statuses(config))`锛夛紱
+    - 琛ュ厖 `build_edge_transport_probe_statuses` 鐨勫鍏ワ紱
+  - `host_brain/obs/agent_health_check.py`锛堟垨鏂板 `edge_probe_checker.py`锛夛細
+    - 鏂板 `check_edge_transport_probes()` 鏂规硶锛岃皟鐢?`build_edge_transport_probe_statuses` 骞跺皢缁撴灉鍐欏叆瀹¤閾撅紙`EDGE_PROBE_ALERT` 浜嬩欢锛屽綋浠绘剰 edge 浼犺緭灞傛帰閽堜负 DOWN 鏃讹級锛?    - 蹇冭烦浠诲姟涓泦鎴?edge 浼犺緭灞傛帰閽堟鏌ワ紙鍦ㄧ幇鏈?LLM 蹇冭烦妫€鏌ヤ箣鍚庢墽琛岋級锛?  - `tests/unit/test_agent_health_check.py`锛堟墿灞曪級锛?    - T-HB-07锛歟dge 浼犺緭灞傛帰閽堝叏閮?UP 鏃朵笉鍐欏璁★紱
+    - T-HB-08锛歟dge 浼犺緭灞傛帰閽堟湁 DOWN 鏃跺啓 EDGE_PROBE_ALERT 瀹¤浜嬩欢锛?    - T-HB-09锛歚build_edge_transport_probe_statuses` 鎶涘嚭寮傚父鏃跺績璺充换鍔′笉宕╂簝锛堥檷绾у鐞嗭級锛?  - `tests/contract/test_health_endpoint_contract.py`锛堟柊澧炴垨鎵╁睍锛夛細
+    - T-HEALTH-EP-01锛歚/health` 绔偣杩斿洖鐨?`runtime_statuses` 鍖呭惈 edge 浼犺緭灞傛帰閽堥敭锛?    - T-HEALTH-EP-02锛歟dge 鎺㈤拡 DOWN 鏃?`/health` 绔偣 `boot_status` 涓?DEGRADED銆?- 楠屾敹鏍囧噯锛?  - T-HB-07~09 鍏ㄩ儴閫氳繃锛?  - T-HEALTH-EP-01~02 鍏ㄩ儴閫氳繃锛?  - 鐜版湁 `test_agent_health_check.py` 19 涓敤渚嬪叏閮ㄧ户缁€氳繃锛堥浂鍥炲綊锛夛紱
+  - `build_edge_transport_probe_statuses` 涓嶅啀鏄?瀹氫箟浣嗘湭琚皟鐢?鐨勫绔嬪嚱鏁帮紱
+  - 鍏ㄩ噺娴嬭瘯杈冧慨澶嶅墠鍑€澧?鈮? 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/app/fastapi_app.py`锛?  - `host_brain/obs/agent_health_check.py`锛?  - `host_brain/app/config.py`锛堝彧璇伙紝涓嶄慨鏀癸級锛?  - `tests/unit/test_agent_health_check.py`锛堟墿灞曪級锛?  - `tests/contract/test_health_endpoint_contract.py`锛堟柊澧炴垨鎵╁睍锛夈€?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-001锛汵FR-REL-001锛汿-HB-07~09锛汿-HEALTH-EP-01~02銆?
+### TASK-0212 M23-C锛歁23 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0210~0211 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M23 鍙戝竷娓呭崟锛坄m23_release.json`锛夛紝璁板綍 M23-A~B 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M23 閲岀▼纰戠姸鎬佷负 DONE锛涙洿鏂?`requirements_trace.md` M23 灏忚妭鐘舵€併€?- 杈撳叆锛歍ASK-0210~0211 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?688 passed锛?677 + 11 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m23_release.json`锛堟柊澧烇級锛氬惈 `release_ready`銆乣fts5_chinese_fixed`銆乣edge_probe_integrated`銆乣total_tests_passed`銆乣zero_regressions`銆乣zero_warnings` 瀛楁锛?  - `docs/20_prd/PRD.md`锛歁23 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M23 灏忚妭锛圧-158~R-159锛夈€?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `fts5_chinese_fixed=true`锛團TS5 涓枃璇嶇粍妫€绱慨澶嶅凡楠岃瘉锛夛紱
+  - `edge_probe_integrated=true`锛坄build_edge_transport_probe_statuses` 宸查泦鎴愶級锛?  - `total_tests_passed 鈮?1688`锛?  - `zero_regressions=true`锛?  - `zero_warnings=true`銆?- 娑夊強鏂囦欢璺緞锛?  - `docs/50_release/m23_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛?  - `docs/60_trace/requirements_trace.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001锛汧R-MEM-003锛汧R-OBS-001銆?
+
+## M24 LLM 缃戝叧鐪熷疄鎺ュ叆 + VTS 琛ㄦ儏椹卞姩瀹屾暣閾捐矾 + 寰俊閫氶亾瀹屾暣閾捐矾
+
+### TASK-0213 M24-A锛歀LM 缃戝叧鐪熷疄鎺ュ叆
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬疄鐜?Cloud LLM Gateway 鐨勭湡瀹?API Key 鎺ュ叆銆佸仴搴锋帰娴嬨€丄IRLOCK 鍑虹珯鍑€鍖栧畬鏁撮摼璺€佸妯″瀷璺敱闄嶇骇绛栫暐銆傚綋鍓?LLM Gateway 浠呮湁 mock/stub 瀹炵幇锛岀己灏戠湡瀹?API Key 閰嶇疆绠＄悊銆佸嚭绔欏噣鍖栨姤鍛婄敓鎴愩€佸叆绔欏唴瀹归殧绂诲垎绫汇€佸妯″瀷璺敱鍒囨崲绛夊畬鏁撮摼璺€?- 杈撳叆锛?  - `host_brain/llm/llm_gateway.py`锛堝綋鍓?LLM Gateway 瀹炵幇锛夛紱
+  - `host_brain/airlock/airlock.py`锛圓IRLOCK 鍑虹珯鍑€鍖栧疄鐜帮級锛?  - `host_brain/app/config.py`锛堥厤缃姞杞斤紝鍚?LLM 鐩稿叧閰嶇疆锛夛紱
+  - `host_brain/scheduler/scheduler.py`锛堝績璺充换鍔★紝闇€闆嗘垚 LLM 鍋ュ悍鎺㈡祴锛夛紱
+  - PRD 搂4.26锛團R-LLM-GW-001~003锛夛紱
+  - `tests/unit/test_llm_gateway.py`锛堢幇鏈?LLM Gateway 娴嬭瘯锛夈€?- 杈撳嚭锛?  - `host_brain/llm/llm_gateway.py`锛堟墿灞曪級锛?    - `LLMGatewayConfig`锛氭敮鎸佷粠鐜鍙橀噺锛坄OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OLLAMA_BASE_URL`锛夋垨鍔犲瘑閰嶇疆鏂囦欢璇诲彇 API Key锛?    - `LLMGateway.health_probe()`锛氭帰娴嬩富妯″瀷/澶囩敤妯″瀷/鏈湴鍏滃簳鍙敤鎬э紝杩斿洖 `{model_id, status, latency_ms}`锛?    - `LLMGateway.route_call()`锛氭寜浼樺厛绾ц矾鐢憋紙涓绘ā鍨嬧啋澶囩敤鈫掓湰鍦板厹搴曪級锛屽啓鍏?`llm_route_log`锛?    - 鏈湴鍏滃簳杈撳嚭鏍囪 `draft_only=true`锛?  - `host_brain/airlock/airlock.py`锛堟墿灞曪級锛?    - `AirlockEgress.sanitize()`锛氱敓鎴愬畬鏁?`sanitization_report`锛坄removed_fields/redactions/payload_digest`锛夛紱
+    - `AirlockIngress.classify()`锛氬鍏ョ珯鍐呭鍒嗙被锛坄FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN`锛夛紱
+    - 鍑€鍖栧け璐ユ椂鎷掔粷鍑虹珯锛坄AIRLOCK_BLOCKED_EGRESS`锛夛紱
+  - `host_brain/app/fastapi_app.py`锛堟墿灞曪級锛?    - `/health` 绔偣 `runtime_statuses` 鍖呭惈 `llm_gateway.status`锛?  - `tests/unit/test_llm_gateway.py`锛堟墿灞曪級锛?    - T-LLM-GW-01锛氭湁鏁?API Key 鏃?LLM 璋冪敤鎴愬姛锛宭lm_call_log 璁板綍瀹屾暣锛?    - T-LLM-GW-02锛欰PI Key 缂哄け鏃惰緭鍑虹ǔ瀹氾紝reason_code=LLM_UNAVAILABLE锛?    - T-LLM-GW-03锛欰PI Key 鏃犳晥鏃惰緭鍑虹ǔ瀹氾紝reason_code=LLM_UNAVAILABLE锛?    - T-LLM-GW-04锛氬績璺虫帰娴?LLM 鍙敤鎬э紝缁撴灉鍐欏叆瀹¤浜嬩欢锛?    - T-LLM-GW-05锛歀LM 涓嶅彲鐢ㄦ椂涓嶄吉閫?鎴戞病鏈変换浣曟兂娉?锛?    - T-LLM-GW-06锛氬嚭绔?payload 鏈?sanitization_report锛坮emoved_fields/redactions/payload_digest锛夛紱
+    - T-LLM-GW-07锛氬噣鍖栧け璐ユ椂鎷掔粷鍑虹珯锛圓IRLOCK_BLOCKED_EGRESS锛夛紱
+    - T-LLM-GW-08锛氬叆绔欏唴瀹瑰垎绫绘纭紙FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN锛夛紱
+    - T-LLM-GW-09锛氬叆绔欏唴瀹逛笉鐩撮€氭墽琛岋紝蹇呴』缁?Governor锛?    - T-LLM-GW-10锛欰IRLOCK 鍑虹珯鍑€鍖栫Щ闄ょ‖鐘舵€佸師鍊硷紱
+    - T-LLM-GW-11锛氫富妯″瀷瓒呮椂鏃惰嚜鍔ㄥ垏鎹㈠鐢紝llm_route_log 璁板綍鍒囨崲鍘熷洜锛?    - T-LLM-GW-12锛氭墍鏈夋ā鍨嬩笉鍙敤鏃惰緭鍑虹ǔ瀹氶檷绾х粨鏋勶紱
+    - T-LLM-GW-13锛氭湰鍦板厹搴曡緭鍑烘爣璁?draft_only=true锛?    - T-LLM-GW-14锛氳矾鐢辩瓥鐣ラ厤缃彉鏇村啓 llm_route_config_log锛?    - T-LLM-GW-15锛氬妯″瀷璺敱鍐崇瓥鍐欏叆 llm_route_log锛坢odel_id/reason/latency_ms锛夈€?- 楠屾敹鏍囧噯锛?  - T-LLM-GW-01~15 鍏ㄩ儴閫氳繃锛?  - 鐜版湁 LLM Gateway 娴嬭瘯鍏ㄩ儴缁х画閫氳繃锛堥浂鍥炲綊锛夛紱
+  - 鍏ㄩ噺娴嬭瘯鍑€澧?鈮?5 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触锛?  - API Key 涓嶇‖缂栫爜锛堥潤鎬佹壂鎻忛獙璇侊級锛?  - AIRLOCK 鍑虹珯鍑€鍖栬鐩栫巼=100%锛堟瘡娆?LLM 璋冪敤閮芥湁 sanitization_report锛夈€?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/llm/llm_gateway.py`锛?  - `host_brain/airlock/airlock.py`锛?  - `host_brain/app/fastapi_app.py`锛?  - `host_brain/app/config.py`锛堝彧璇伙紝涓嶄慨鏀癸級锛?  - `tests/unit/test_llm_gateway.py`锛堟墿灞曪級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-LLM-GW-001锛汧R-LLM-GW-002锛汧R-LLM-GW-003锛汧R-AIRLOCK-001锛汧R-AIRLOCK-002锛汿-LLM-GW-01~15銆?
+### TASK-0214 M24-B锛歏TS 琛ㄦ儏椹卞姩瀹屾暣閾捐矾
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬疄鐜?VTS 琛ㄦ儏鏄犲皠琛ㄦ寔涔呭寲涓庣増鏈寲銆乂TS RPC 鐪熷疄璋冪敤閾捐矾涓庡璁′覆鑱斻€佽〃鎯呰Е鍙戦鐜囬檺鍒朵笌闃熷垪绠＄悊銆傚綋鍓?VTS 琛ㄦ儏椹卞姩浠呮湁鏋氫妇鏄犲皠瀹氫箟锛岀己灏戞槧灏勮〃鎸佷箙鍖栧瓨鍌ㄣ€佺増鏈寲绠＄悊銆丷PC 鐪熷疄璋冪敤瀹¤涓茶仈銆侀鐜囬檺鍒剁瓑瀹屾暣閾捐矾銆?- 杈撳叆锛?  - `edge_client/rpc/vts.py`锛堝綋鍓?VTS RPC 瀹炵幇锛夛紱
+  - `host_brain/avatar/vts_driver.py`锛圴TS 椹卞姩灞傦紝鍚?emotion_tag鈫抏xpression_id 鏄犲皠锛夛紱
+  - PRD 搂4.27锛團R-VTS-DRIVE-001~003锛夛紱
+  - `tests/unit/test_vts_driver.py`锛堢幇鏈?VTS 椹卞姩娴嬭瘯锛夈€?- 杈撳嚭锛?  - `host_brain/avatar/vts_mapping_store.py`锛堟柊澧烇級锛?    - `VTSMappingStore`锛氭槧灏勮〃鎸佷箙鍖栵紙SQLite 琛?`vts_expression_mapping`锛夛紱
+    - `load_mapping(version=None)`锛氭寜鐗堟湰鍔犺浇鏄犲皠琛紱
+    - `save_mapping(mapping, version)`锛氫繚瀛樻槧灏勮〃骞跺啓 `vts_mapping_change_log`锛?    - `get_expression_id(emotion_tag)`锛氭煡璇㈡槧灏勶紝闈炴硶 tag 鎶涘嚭 `AVATAR_INVALID_EMOTION_TAG`锛?  - `host_brain/avatar/vts_driver.py`锛堟墿灞曪級锛?    - 闆嗘垚 `VTSMappingStore`锛屾浛鎹㈢‖缂栫爜鏄犲皠锛?    - `trigger_expression(emotion_tag, request_id, intent_id)`锛氳皟鐢?Edge RPC锛屽啓鍏?`vts_action_log`锛?    - VTS RPC 澶辫触鏃堕檷绾э紙`EDGE_RPC_FAILED`锛夛紝涓嶄吉閫狅紱
+  - `host_brain/avatar/vts_rate_limiter.py`锛堟柊澧烇級锛?    - `VTSRateLimiter`锛氫护鐗屾《绠楁硶锛屾瘡绉掓渶澶?N 娆★紙鍙厤缃級锛?    - 瓒呴檺鏃跺啓 `vts_rate_limit_log`锛坄reason_code=VTS_RATE_LIMIT_EXCEEDED`锛夛紱
+    - 鏀寔鐑洿鏂伴鐜囬厤缃紙涓嶉噸鍚級锛?  - `tests/unit/test_vts_driver.py`锛堟墿灞曪級锛?    - T-VTS-DRIVE-01锛氭槧灏勮〃鍙樻洿鍚庣増鏈彿鏇存柊锛寁ts_mapping_change_log 鍙拷婧紱
+    - T-VTS-DRIVE-02锛氶潪娉?emotion_tag 琚嫆缁濓紙AVATAR_INVALID_EMOTION_TAG锛夛紱
+    - T-VTS-DRIVE-03锛氭槧灏勮〃鍔犺浇澶辫触鏃堕檷绾э紙DEPENDENCY_UNAVAILABLE锛夛紱
+    - T-VTS-DRIVE-04锛氭槧灏勮〃鐗堟湰鍖栵細鍚岀増鏈悓杈撳叆杈撳嚭涓€鑷达紱
+    - T-VTS-DRIVE-05锛氭槧灏勮〃鎸佷箙鍖栵細閲嶅惎鍚庡彲鎭㈠锛?    - T-VTS-DRIVE-06锛歏TS 璋冪敤鎴愬姛锛寁ts_action_log 璁板綍瀹屾暣锛坋xpression_id/status/latency_ms/request_id锛夛紱
+    - T-VTS-DRIVE-07锛歏TS 涓嶅彲鐢ㄦ椂闄嶇骇锛宺eason_code=EDGE_RPC_FAILED锛屼笉浼€狅紱
+    - T-VTS-DRIVE-08锛氭瘡娆¤Е鍙戞湁 evidence_ref 鎸囧悜 vts_action_log锛?    - T-VTS-DRIVE-09锛歏TS RPC 瓒呮椂鏃堕檷绾э紝缁撴瀯绋冲畾锛?    - T-VTS-DRIVE-10锛歷ts_action_log 涓茶仈 request_id/intent_id锛?    - T-VTS-DRIVE-11锛氳秴闄愭椂瑙﹀彂涓㈠純/鎷掔粷锛寁ts_rate_limit_log 璁板綍锛?    - T-VTS-DRIVE-12锛氶鐜囬厤缃儹鏇存柊鍚庣珛鍗崇敓鏁堬紱
+    - T-VTS-DRIVE-13锛欶IFO 涓㈠純绛栫暐锛氳秴闄愭椂涓㈠純鏈€鏃ц姹傦紱
+    - T-VTS-DRIVE-14锛氶鐜囪秴闄?reason_code=VTS_RATE_LIMIT_EXCEEDED銆?- 楠屾敹鏍囧噯锛?  - T-VTS-DRIVE-01~14 鍏ㄩ儴閫氳繃锛?  - 鐜版湁 VTS 椹卞姩娴嬭瘯鍏ㄩ儴缁х画閫氳繃锛堥浂鍥炲綊锛夛紱
+  - 鍏ㄩ噺娴嬭瘯鍑€澧?鈮?4 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触锛?  - 鏄犲皠琛ㄤ笉鍐嶇‖缂栫爜锛堟寔涔呭寲瀛樺偍楠岃瘉锛夛紱
+  - VTS RPC 璋冪敤 100% 鏈?vts_action_log 璁板綍銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/avatar/vts_mapping_store.py`锛堟柊澧烇級锛?  - `host_brain/avatar/vts_driver.py`锛堟墿灞曪級锛?  - `host_brain/avatar/vts_rate_limiter.py`锛堟柊澧烇級锛?  - `edge_client/rpc/vts.py`锛堝彧璇伙紝涓嶄慨鏀癸級锛?  - `tests/unit/test_vts_driver.py`锛堟墿灞曪級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VTS-DRIVE-001锛汧R-VTS-DRIVE-002锛汧R-VTS-DRIVE-003锛汧R-AVATAR-001锛汿-VTS-DRIVE-01~14銆?
+### TASK-0215 M24-C锛氬井淇￠€氶亾瀹屾暣閾捐矾
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬疄鐜板井淇?inbound 浜嬩欢瑙ｆ瀽涓庡璁′覆鑱斻€乷utbound 鎺ㄩ€佷笌棰戠巼闄愬埗銆侀€氶亾鍋ュ悍鐘舵€佷笌闄嶇骇绛栫暐銆傚綋鍓嶅井淇￠€氶亾浠呮湁鍩虹浜嬩欢寤烘ā锛岀己灏戝畬鏁寸殑 inbound 瑙ｆ瀽锛堝浘鐗?璇煶/浜嬩欢娑堟伅锛夈€乷utbound 鎺ㄩ€侀鐜囬檺鍒躲€侀€氶亾鍋ュ悍鐘舵€佺鐞嗙瓑瀹屾暣閾捐矾銆?- 杈撳叆锛?  - `host_brain/channel/wechat_channel.py`锛堝綋鍓嶅井淇￠€氶亾瀹炵幇锛夛紱
+  - `host_brain/airlock/airlock.py`锛圓IRLOCK 鍑虹珯鍑€鍖栵級锛?  - `host_brain/app/fastapi_app.py`锛?health 绔偣锛夛紱
+  - PRD 搂4.28锛團R-WECHAT-001~003锛夛紱
+  - `tests/unit/test_wechat_channel.py`锛堢幇鏈夊井淇￠€氶亾娴嬭瘯锛夈€?- 杈撳嚭锛?  - `host_brain/channel/wechat_channel.py`锛堟墿灞曪級锛?    - `WeChatInboundParser`锛氳В鏋愭枃鏈?鍥剧墖/璇煶/浜嬩欢娑堟伅涓?`WeChatInboundEvent`锛坄thread_key/msg_type/content_hash/ts_ms/request_id`锛夛紱
+    - 鍥剧墖娑堟伅锛氳Е鍙?OCR 杞啓鍚庤繘鍏?Intent 娴佺▼锛宍evidence_ref` 鍙拷婧紱
+    - 璇煶娑堟伅锛氳Е鍙?ASR 杞啓鍚庤繘鍏?Intent 娴佺▼锛?    - 瑙ｆ瀽澶辫触锛歚reason_code=WECHAT_PARSE_FAILED`锛岀粨鏋勭ǔ瀹氾紱
+    - `WeChatOutboundSender`锛氱粡 AIRLOCK 鍑€鍖栧悗鎺ㄩ€侊紝鍐欏叆 `wechat_outbound_log`锛?    - 棰戠巼闄愬埗锛氭瘡涓?`thread_key` 姣忓垎閽熸渶澶?N 鏉★紙鍙厤缃級锛岃秴闄愭嫆缁濓紙`RATE_LIMIT_EXCEEDED`锛夛紱
+    - 鎺ㄩ€佸け璐ワ細`reason_code=WECHAT_SEND_FAILED`锛屼笉浼€狅紱
+  - `host_brain/channel/wechat_health.py`锛堟柊澧烇級锛?    - `WeChatChannelHealth`锛氱淮鎶ゅ仴搴风姸鎬侊紙`last_recv_ts/last_send_ts/status/error_count`锛夛紱
+    - 杩炵画澶辫触 N 娆″悗鑷姩闄嶇骇锛坄WECHAT_CHANNEL_DEGRADED`锛夛紱
+    - 闄嶇骇鏃朵粛鎺ュ彈 inbound锛屽仠姝?outbound锛?    - 鎭㈠鏃跺啓 `wechat_channel_recovery_log`锛?  - `host_brain/app/fastapi_app.py`锛堟墿灞曪級锛?    - `/health` 绔偣 `runtime_statuses` 鍖呭惈 `wechat_channel.status`锛?  - `tests/unit/test_wechat_channel.py`锛堟墿灞曪級锛?    - T-WECHAT-01锛氭枃鏈秷鎭В鏋愭垚鍔燂紝wechat_inbound_log 璁板綍瀹屾暣锛?    - T-WECHAT-02锛氬浘鐗囨秷鎭?OCR 杞啓鍚庤繘鍏?Intent 娴佺▼锛宔vidence_ref 鍙拷婧紱
+    - T-WECHAT-03锛氳闊虫秷鎭?ASR 杞啓鍚庤繘鍏?Intent 娴佺▼锛?    - T-WECHAT-04锛氳В鏋愬け璐?reason_code=WECHAT_PARSE_FAILED锛岀粨鏋勭ǔ瀹氾紱
+    - T-WECHAT-05锛氭秷鎭唴瀹逛笉鐩撮€?LLM锛屽厛缁?AIRLOCK 鍏ョ珯闅旂锛?    - T-WECHAT-06锛歵hread_key 涓?request_id 鍏宠仈锛岃法浼氳瘽鍙拷婧紱
+    - T-WECHAT-07锛氭帹閫佹垚鍔燂紝wechat_outbound_log 璁板綍瀹屾暣锛?    - T-WECHAT-08锛氶鐜囪秴闄愭嫆缁濇帹閫侊紝reason_code=RATE_LIMIT_EXCEEDED锛?    - T-WECHAT-09锛氭帹閫佸け璐ラ檷绾э紝reason_code=WECHAT_SEND_FAILED锛屼笉浼€狅紱
+    - T-WECHAT-10锛氬嚭绔欏唴瀹圭粡 AIRLOCK 鍑€鍖栵紝涓嶅惈纭姸鎬佸師鍊硷紱
+    - T-WECHAT-11锛氶鐜囬檺鍒堕厤缃彲鐑洿鏂帮紱
+    - T-WECHAT-12锛歰utbound 鎺ㄩ€佷覆鑱?request_id锛?    - T-WECHAT-13锛氳繛缁け璐?N 娆″悗鐘舵€佸彉涓?DEGRADED锛?health 绔偣鍙嶆槧锛?    - T-WECHAT-14锛氶檷绾ф湡闂?inbound 姝ｅ父澶勭悊锛宱utbound 闈欓粯涓㈠純锛?    - T-WECHAT-15锛氭仮澶嶆椂鑷姩閲嶇疆闄嶇骇鐘舵€侊紝鍐?wechat_channel_recovery_log锛?    - T-WECHAT-16锛氬仴搴风姸鎬?30 绉掕嚜鍔ㄥ埛鏂般€?- 楠屾敹鏍囧噯锛?  - T-WECHAT-01~16 鍏ㄩ儴閫氳繃锛?  - 鐜版湁寰俊閫氶亾娴嬭瘯鍏ㄩ儴缁х画閫氳繃锛堥浂鍥炲綊锛夛紱
+  - 鍏ㄩ噺娴嬭瘯鍑€澧?鈮?6 涓€氳繃鐢ㄤ緥锛? 鏂板澶辫触锛?  - 寰俊 outbound 鎺ㄩ€?100% 缁?AIRLOCK 鍑€鍖栵紱
+  - 閫氶亾鍋ュ悍鐘舵€佹毚闇插埌 /health 绔偣銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/channel/wechat_channel.py`锛堟墿灞曪級锛?  - `host_brain/channel/wechat_health.py`锛堟柊澧烇級锛?  - `host_brain/app/fastapi_app.py`锛堟墿灞曪級锛?  - `host_brain/airlock/airlock.py`锛堝彧璇伙紝涓嶄慨鏀癸級锛?  - `tests/unit/test_wechat_channel.py`锛堟墿灞曪級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-WECHAT-001锛汧R-WECHAT-002锛汧R-WECHAT-003锛汧R-CHANNEL-001锛汧R-AIRLOCK-001锛汿-WECHAT-01~16銆?
+### TASK-0216 M24-D锛歁24 鍙戝竷娓呭崟
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0213~0215 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M24 鍙戝竷娓呭崟锛坄m24_release.json`锛夛紝璁板綍 M24-A~C 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M24 閲岀▼纰戠姸鎬佷负 DONE锛涙洿鏂?`requirements_trace.md` M24 灏忚妭鐘舵€侊紙R-160~R-165锛夈€?- 杈撳叆锛歍ASK-0213~0215 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?776 passed锛?731 + 45 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m24_release.json`锛堟柊澧烇級锛氬惈 `release_ready`銆乣llm_gateway_integrated`銆乣vts_drive_complete`銆乣wechat_channel_complete`銆乣total_tests_passed`銆乣zero_regressions`銆乣zero_warnings` 瀛楁锛?  - `docs/20_prd/PRD.md`锛歁24 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M24 灏忚妭锛圧-160~R-165锛夈€?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `llm_gateway_integrated=true`锛圠LM 缃戝叧鐪熷疄鎺ュ叆宸查獙璇侊級锛?  - `vts_drive_complete=true`锛圴TS 琛ㄦ儏椹卞姩瀹屾暣閾捐矾宸查獙璇侊級锛?  - `wechat_channel_complete=true`锛堝井淇￠€氶亾瀹屾暣閾捐矾宸查獙璇侊級锛?  - `total_tests_passed 鈮?1776`锛?  - `zero_regressions=true`锛?  - `zero_warnings=true`銆?- 娑夊強鏂囦欢璺緞锛?  - `docs/50_release/m24_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛?  - `docs/60_trace/requirements_trace.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001锛汧R-LLM-GW-001~003锛汧R-VTS-DRIVE-001~003锛汧R-WECHAT-001~003銆?
+---
+
+## M25 鐢熶骇灏辩华鍔犲浐 + SQLiteLedger 鎵╁睍 + 浠ｇ爜璐ㄩ噺鏀跺彛锛圱ASK-0217~0221锛?
+### TASK-0217 M25-A锛歋QLiteLedger log_llm_route() 姝ｅ紡鏂规硶
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `SQLiteLedger` 涓坊鍔?`log_llm_route()` 姝ｅ紡鏂规硶 + `llm_route_log` 琛?+ 杩佺Щ鑴氭湰 `0039_llm_route_log.sql`锛涘悓姝ユ洿鏂?`LlmGatewayContract._log_route_decision()` 鐩存帴璋冪敤 `ledger.log_llm_route()`锛屼笉鍐嶄娇鐢?`hasattr` 妫€鏌ャ€?- 杈撳叆锛歚request_id` / `model_id` / `reason` / `latency_ms` / `fallback_used` / `ts_ms`
+- 杈撳嚭锛?  - `host_brain/audit/sqlite_ledger.py`锛氭柊澧?`log_llm_route()` 鏂规硶锛?  - `host_brain/audit/migrations/0039_llm_route_log.sql`锛氭柊澧炶縼绉昏剼鏈紱
+  - `host_brain/integrations/llm_gateway.py`锛歚_log_route_decision()` 鐩存帴璋冪敤 `ledger.log_llm_route()`锛?  - `tests/unit/test_llm_route_log.py`锛歍-AUDIT-LLM-01~05锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - `log_llm_route()` 鍐欏叆鎴愬姛锛宍llm_route_log` 琛ㄦ湁璁板綍锛圱-AUDIT-LLM-01锛夛紱
+  - `fallback_used=True` 鏃惰褰曟纭紙T-AUDIT-LLM-02锛夛紱
+  - `ledger=None` 鏃朵笉宕╂簝锛圱-AUDIT-LLM-03锛夛紱
+  - 杩佺Щ鑴氭湰骞傜瓑锛圱-AUDIT-LLM-04锛夛紱
+  - 鏃堕棿绐楀彛鏌ヨ杩斿洖姝ｇ‘璁板綍鏁帮紙T-AUDIT-LLM-05锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?782 passed锛? failed锛? warnings銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/audit/sqlite_ledger.py`锛?  - `host_brain/audit/migrations/0039_llm_route_log.sql`锛堟柊澧烇級锛?  - `host_brain/integrations/llm_gateway.py`锛?  - `tests/unit/test_llm_route_log.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-AUDIT-LLM-001锛汧R-AUDIT-LLM-002锛汿-AUDIT-LLM-01~05銆?
+### TASK-0218 M25-B锛歐eChatChannelHealth GC + VTSMappingStore 鐢熷懡鍛ㄦ湡鍔犲浐
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 `WeChatChannelHealth._outbound_counts` 娣诲姞瀹氭湡 GC 鏈哄埗锛堟竻鐞嗚秴杩?`inactive_threshold_s` 鏃犳椿鍔ㄧ殑 `thread_key`锛屽啓 `wechat_gc_log`锛夛紱涓?`VTSMappingStore` 娣诲姞 `db_path=":memory:"` 鏃剁殑 WARNING 鏃ュ織锛堢敓浜у彲瑙傛祴锛夈€?- 杈撳叆锛歚gc_interval_s`锛堥粯璁?3600锛? `inactive_threshold_s`锛堥粯璁?86400锛?- 杈撳嚭锛?  - `host_brain/channels/wechat_health.py`锛氭柊澧?`gc_inactive_threads()` 鏂规硶 + `_gc_interval_s` / `_inactive_threshold_s` 閰嶇疆锛?  - `host_brain/channels/vts_mapping_store.py`锛歚__init__` 涓?`db_path=":memory:"` 鏃跺啓 `logging.warning()`锛?  - `tests/unit/test_channel_gc_m25.py`锛歍-CHANNEL-GC-01~03 + T-VTS-STORE-01锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - GC 鍚庤繃鏈?`thread_key` 琚竻鐞嗭紙T-CHANNEL-GC-01锛夛紱
+  - 娲昏穬 `thread_key` 涓嶈娓呯悊锛圱-CHANNEL-GC-02锛夛紱
+  - GC 鍐欏璁℃棩蹇楋紙T-CHANNEL-GC-03锛夛紱
+  - `db_path=":memory:"` 鏃跺啓 WARNING 鏃ュ織锛圱-VTS-STORE-01锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?782 passed锛? failed锛? warnings銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/channels/wechat_health.py`锛?  - `host_brain/channels/vts_mapping_store.py`锛?  - `tests/unit/test_channel_gc_m25.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CHANNEL-GC-001锛汧R-CHANNEL-GC-002锛汿-CHANNEL-GC-01~03锛汿-VTS-STORE-01銆?
+### TASK-0219 M25-C锛歋QLiteLedger _table_has_column 缂撳瓨 + main.py print 淇
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 `SQLiteLedger._table_has_column()` 娣诲姞琛ㄧ粨鏋勭紦瀛橈紙`_table_schema_cache: dict[str, set[str]]`锛夛紝棣栨鏌ヨ鍚庣紦瀛橈紝杩佺Щ鍚庤嚜鍔ㄦ竻绌猴紱灏?`host_brain/app/main.py:908` 鐨勮８ `print()` 鏇挎崲涓?`logger.info()`銆?- 杈撳叆锛歚table_name` / `column_name`
+- 杈撳嚭锛?  - `host_brain/audit/sqlite_ledger.py`锛氭柊澧?`_table_schema_cache` + `_invalidate_schema_cache()` + `_table_has_column()` 缂撳瓨閫昏緫锛?  - `host_brain/app/main.py`锛歚print()` 鈫?`logger.info()`锛?  - `tests/unit/test_perf_audit_m25.py`锛歍-PERF-AUDIT-01~02锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - 绗簩娆¤皟鐢?`_table_has_column` 涓嶆墽琛?`PRAGMA table_info`锛圱-PERF-AUDIT-01锛夛紱
+  - 杩佺Щ鍚庣紦瀛樿娓呯┖锛圱-PERF-AUDIT-02锛夛紱
+  - `main.py` 鏃犺８ `print()` 璋冪敤锛?  - 鍏ㄩ噺娴嬭瘯 鈮?782 passed锛? failed锛? warnings銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/audit/sqlite_ledger.py`锛?  - `host_brain/app/main.py`锛?  - `tests/unit/test_perf_audit_m25.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PERF-AUDIT-001锛汿-PERF-AUDIT-01~02銆?
+### TASK-0220 M25-D锛歛syncio.get_event_loop() DeprecationWarning 淇
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶?`edge_client/actuators/vts_driver.py:685` 鐨?`asyncio.get_event_loop()` DeprecationWarning锛圥ython 3.10+锛夛紝鏀逛负 `asyncio.get_running_loop()`锛堝湪鍗忕▼涓級鎴?`asyncio.new_event_loop()`锛堝湪闈炲崗绋嬩腑锛夛紱鍏ㄩ噺娴嬭瘯楠岃瘉 0 warnings銆?- 杈撳叆锛歚edge_client/actuators/vts_driver.py:685`
+- 杈撳嚭锛?  - `edge_client/actuators/vts_driver.py`锛歚asyncio.get_event_loop()` 鈫?`asyncio.get_running_loop()` 鎴?`asyncio.new_event_loop()`锛?  - `tests/unit/test_compat_m25.py`锛歍-COMPAT-01锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - 鍏ㄩ噺娴嬭瘯杩愯 0 DeprecationWarning锛圱-COMPAT-01锛夛紱
+  - `vts_driver.py` 鏃?`asyncio.get_event_loop()` 璋冪敤锛?  - 鍏ㄩ噺娴嬭瘯 鈮?782 passed锛? failed锛? warnings銆?- 娑夊強鏂囦欢璺緞锛?  - `edge_client/actuators/vts_driver.py`锛?  - `tests/unit/test_compat_m25.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-COMPAT-001锛汿-COMPAT-01銆?
+### TASK-0221 M25-E锛歁25 鍙戝竷娓呭崟
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0217~0220 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M25 鍙戝竷娓呭崟锛坄m25_release.json`锛夛紝璁板綍 M25-A~D 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M25 閲岀▼纰戠姸鎬佷负 DONE锛涙洿鏂?`requirements_trace.md` M25 灏忚妭鐘舵€侊紙R-163~R-166锛夛紱鐢熸垚浠ｇ爜瀹℃煡鎶ュ憡 `full_code_review_report_2026-03-05-m25.md`銆?- 杈撳叆锛歍ASK-0217~0220 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?794 passed锛?782 + 12 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m25_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁25 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M25 灏忚妭锛圧-163~R-166锛夛紱
+  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `log_llm_route_formal=true`锛圫QLiteLedger 姝ｅ紡鏂规硶宸叉坊鍔狅級锛?  - `wechat_gc_implemented=true`锛圙C 鏈哄埗宸插疄鐜帮級锛?  - `table_schema_cache=true`锛堣〃缁撴瀯缂撳瓨宸插疄鐜帮級锛?  - `zero_deprecation_warnings=true`锛?  - `total_tests_passed 鈮?1794`锛?  - `zero_regressions=true`锛?  - `zero_warnings=true`銆?- 娑夊強鏂囦欢璺緞锛?  - `docs/50_release/m25_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛?  - `docs/60_trace/requirements_trace.md`锛?  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001锛汧R-AUDIT-LLM-001~002锛汧R-CHANNEL-GC-001~002锛汧R-PERF-AUDIT-001锛汧R-COMPAT-001銆?
+---
+
+## M26 鐢熶骇灏辩华 II 鈥?鎯呮劅椹卞姩浜や簰 + 绔埌绔泦鎴愰獙璇?+ 杩愯鏃跺仴搴峰姞鍥?
+- 鐘舵€侊細DONE锛?026-03-05锛?- 鐩爣锛氬湪瀵硅瘽閾捐矾涓紩鍏?emotion_tag 蹇冩儏鍙傛暟锛岄┍鍔?VTS 琛ㄦ儏 + TTS 璇皵鑱斿姩锛涘皢 VTS 鐑敭閰嶇疆鎶界涓虹嫭绔嬮厤缃枃浠讹紱寤虹珛绔埌绔泦鎴愬啋鐑熸祴璇曪紱鍔犲浐杩愯鏃跺仴搴锋鏌ワ紱LLM 璺敱閰嶇疆鐑洿鏂帮紱VTS 鏄犲皠琛ㄧ増鏈洖婊氥€?- 璐ㄩ噺闂ㄧ锛氬叏閲忔祴璇?鈮?832 passed锛?802 + 30 鏂板锛夛紝0 failed锛? warnings锛岄浂鍥炲綊銆?
+### TASK-0222 M26-A锛氱鍒扮闆嗘垚鍐掔儫娴嬭瘯濂椾欢
+
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬缓绔嬭鐩?鐢ㄦ埛杈撳叆 鈫?Intent 鈫?Governor 鈫?Skill 鈫?Audit"瀹屾暣閾捐矾鐨勯泦鎴愬啋鐑熸祴璇曪紝纭繚鍚勬ā鍧楄仈鍔ㄦ棤鏂偣锛涙柊澧炲璁￠摼瀹屾暣鎬ф牎楠岋紙request_id 涓茶仈涓夎仈鐢绘棩蹇楋級銆?- 杈撳叆锛歚tests/e2e/` 鐩綍锛沗tests/contract/` 鐩綍锛涚幇鏈?host_brain 閾捐矾浠ｇ爜銆?- 杈撳嚭锛?  - `tests/integration/test_e2e_smoke_m26.py`锛堟柊澧烇級锛氳鐩?5 鏉℃牳蹇冮摼璺紙鏅€氬璇?鎵ц/鎷掔粷/闄嶇骇/瀹¤涓茶仈锛夛紱
+  - `tests/integration/test_audit_chain_integrity_m26.py`锛堟柊澧烇級锛氬璁￠摼瀹屾暣鎬ф牎楠岋紙request_id 涓茶仈涓夎仈鐢绘棩蹇楋級銆?- 楠屾敹鏍囧噯锛?  - T-E2E-SMOKE-01锛氭櫘閫氬璇濋摼璺紙鏃犳墽琛岋級瀹屾暣璧伴€氾紝瀹¤閾惧彲涓茶仈锛?  - T-E2E-SMOKE-02锛氭墽琛岄摼璺紙APPROVE + Skill锛夊畬鏁磋蛋閫氾紝token_ref 鍙拷婧紱
+  - T-E2E-SMOKE-03锛氭嫆缁濋摼璺紙REJECT + reason_code锛夊畬鏁磋蛋閫氾紱
+  - T-E2E-SMOKE-04锛氶檷绾ч摼璺紙LLM 涓嶅彲鐢?鈫?闄嶇骇杈撳嚭锛夊畬鏁磋蛋閫氾紱
+  - T-AUDIT-CHAIN-01~03锛歳equest_id 涓茶仈涓夎仈鐢绘棩蹇楋紙intent/governor/skill_exec锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?802 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `tests/integration/test_e2e_smoke_m26.py`锛堟柊澧烇級锛?  - `tests/integration/test_audit_chain_integrity_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CORE-001锛汧R-AUDIT-001锛汧R-GOV-001锛汿-E2E-SMOKE-01~04锛汿-AUDIT-CHAIN-01~03銆?
+### TASK-0223 M26-B锛氳繍琛屾椂鍋ュ悍妫€鏌ュ姞鍥猴紙/health 绔偣瀹屾暣鎬э級
+
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氱‘淇?`/health` 绔偣鑱氬悎鎵€鏈夊凡娉ㄥ唽鏈嶅姟鐨勫仴搴风姸鎬侊紝骞跺湪鏈嶅姟闄嶇骇鏃剁粰鍑虹簿纭殑 `reason_code`锛涙柊澧?`validate_health_response()` 鏂规硶鏍￠獙鍝嶅簲缁撴瀯瀹屾暣鎬с€?- 杈撳叆锛歚host_brain/app/main.py`锛沗host_brain/obs/health_aggregator.py`锛堣嫢瀛樺湪锛夈€?- 杈撳嚭锛?  - `host_brain/obs/health_aggregator.py`锛氭柊澧?`validate_health_response()` 鏂规硶锛堟牎楠屽搷搴旂粨鏋勫畬鏁存€э級锛?  - `tests/unit/test_health_aggregator_m26.py`锛堟柊澧烇級锛歍-HEALTH-AGG-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-HEALTH-AGG-01锛氭墍鏈夊凡娉ㄥ唽鏈嶅姟鍧囧嚭鐜板湪 `/health` 鍝嶅簲涓紱
+  - T-HEALTH-AGG-02锛氬崟鏈嶅姟瓒呮椂鏃惰鏈嶅姟 `status=DOWN`锛屽叾浣欐甯歌繑鍥烇紱
+  - T-HEALTH-AGG-03锛氬搷搴旂粨鏋勭ǔ瀹氾紙瀛楁涓嶉殢鏈嶅姟鐘舵€佸彉鍖栬€岀己澶憋級锛?  - T-HEALTH-AGG-04锛歚validate_health_response()` 瀵圭己瀛楁鍝嶅簲杩斿洖 `False`锛?  - 鍏ㄩ噺娴嬭瘯 鈮?806 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/obs/health_aggregator.py`锛?  - `tests/unit/test_health_aggregator_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-OBS-008锛汧R-OBS-004锛汿-HEALTH-AGG-01~04銆?
+### TASK-0224 M26-C锛歀LM 璺敱閰嶇疆鐑洿鏂?+ 瀹¤
+
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛歚LlmGatewayContract` 鐨勮矾鐢辩瓥鐣ユ敮鎸佺儹鏇存柊锛堜笉閲嶅惎锛夛紝鍙樻洿鍐?`llm_route_config_log`锛涙柊澧?`update_route_config()` 鏂规硶 + `log_llm_route_config_change()` 瀹¤鏂规硶銆?- 杈撳叆锛歚host_brain/integrations/llm_gateway.py`锛沗host_brain/audit/sqlite_ledger.py`銆?- 杈撳嚭锛?  - `host_brain/integrations/llm_gateway.py`锛氭柊澧?`update_route_config()` 鏂规硶 + `llm_route_config_log` 鍐欏叆锛?  - `host_brain/audit/sqlite_ledger.py`锛氭柊澧?`log_llm_route_config_change()` 鏂规硶 + `llm_route_config_log` 琛紱
+  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`锛堟柊澧烇級锛?  - `tests/unit/test_llm_route_config_m26.py`锛堟柊澧烇級锛歍-LLM-CFG-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-LLM-CFG-01锛歚update_route_config()` 鐑洿鏂板悗绔嬪嵆鐢熸晥锛?  - T-LLM-CFG-02锛氶厤缃彉鏇村啓 `llm_route_config_log`锛堝惈鍙樻洿鍓嶅悗 hash锛夛紱
+  - T-LLM-CFG-03锛氳縼绉昏剼鏈箓绛夛紱
+  - T-LLM-CFG-04锛氶厤缃潪娉曟椂鎷掔粷鏇存柊锛坄INVALID_ROUTE_CONFIG`锛夛紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?810 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/integrations/llm_gateway.py`锛?  - `host_brain/audit/sqlite_ledger.py`锛?  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`锛堟柊澧烇級锛?  - `tests/unit/test_llm_route_config_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-LLM-GW-003锛汿-LLM-CFG-01~04銆?
+### TASK-0225 M26-D锛歏TS 鏄犲皠琛ㄧ儹鏇存柊 + 鐗堟湰鍥炴粴
+
+- 鐘舵€侊細CANCELLED锛?026-03-05锛?- 鍙栨秷鍘熷洜锛歁24-B 宸插疄鐜?`save_mapping(version=...)`/`load_mapping(version=...)`/`list_versions()` 瀹屾暣鐗堟湰鍖栬兘鍔涳紱M26-F 宸插皢鐑敭閰嶇疆鎶界涓?`configs/vts/vts_hotkey_config.yaml` 闈欐€佹枃浠讹紝杩愯鏃朵笉瀛樺湪鍔ㄦ€佸彉鏇存槧灏勮〃鐨勫満鏅紝`rollback_to_version()` 浠呬负璇硶绯栦笖鏃犲疄闄呬娇鐢ㄥ満鏅紝鍙栨秷浠ヨ仛鐒︽洿楂樹紭鍏堢骇浠诲姟銆?- 浠诲姟鎻忚堪锛歚VTSMappingStore` 鏀寔鏄犲皠琛ㄧ儹鏇存柊锛堜笉閲嶅惎锛夊拰鐗堟湰鍥炴粴锛屽彉鏇村啓 `vts_mapping_change_log`锛涙柊澧?`rollback_to_version()` 鏂规硶 + 鐗堟湰鍘嗗彶瀛樺偍銆?- 杈撳叆锛歚host_brain/channels/vts_mapping_store.py`銆?- 杈撳嚭锛?  - `host_brain/channels/vts_mapping_store.py`锛氭柊澧?`rollback_to_version()` 鏂规硶 + 鐗堟湰鍘嗗彶瀛樺偍锛?  - `tests/unit/test_vts_mapping_rollback_m26.py`锛堟柊澧烇級锛歍-VTS-ROLL-01~03锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-VTS-ROLL-01锛歚rollback_to_version()` 鍥炴粴鍚庢槧灏勮〃鎭㈠鍘嗗彶鐗堟湰锛?  - T-VTS-ROLL-02锛氬洖婊氬啓 `vts_mapping_change_log`锛堝惈鍥炴粴鍘熷洜锛夛紱
+  - T-VTS-ROLL-03锛氬洖婊氬埌涓嶅瓨鍦ㄧ殑鐗堟湰杩斿洖 `VERSION_NOT_FOUND`锛?  - 鍏ㄩ噺娴嬭瘯 鈮?813 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/channels/vts_mapping_store.py`锛?  - `tests/unit/test_vts_mapping_rollback_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VTS-DRIVE-001锛汿-VTS-ROLL-01~03銆?
+### TASK-0226 M26-E锛氭儏鎰熼┍鍔ㄥ璇濋摼璺紙Emotion-Driven Dialogue锛?
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬湪瀵硅瘽閾捐矾涓紩鍏?`emotion_tag` 蹇冩儏鍙傛暟鈥斺€擫LM 杈撳嚭濂戠害 `narrative` 瀵硅薄鏂板 `emotion_tag` 鍙€夊瓧娈碉紙鏋氫妇锛歂EUTRAL/HAPPY/SAD/ANGRY/SURPRISED/THINKING/CALM/EXCITED锛夛紱Host QA 鏍￠獙 `emotion_tag` 鍚堟硶鎬э紙闈炴硶鍊奸檷绾т负 NEUTRAL锛夛紱Host 涓嬪彂 Edge RPC 鏃堕€忎紶 `emotion_tag`锛汦dge 鍚屾瑙﹀彂 VTS `set_expression(emotion_tag)` + TTS `synthesize(emotion_tag=...)`锛屽疄鐜拌〃鎯呬笌璇皵鑱斿姩銆?- 杈撳叆锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `host_brain/core/qa.py`锛圦A 鏍￠獙锛夛紱
+  - `host_brain/app/main.py`锛圚ost 鈫?Edge RPC 涓嬪彂锛夛紱
+  - `edge_client/actuators/vts_driver.py`锛圴TS 琛ㄦ儏瑙﹀彂锛夛紱
+  - `edge_client/actuators/tts_engine.py`锛圱TS 璇皵鍙傛暟锛夈€?- 杈撳嚭锛?  - `prompts/llm_contract/core_output_contract.json`锛歚narrative` 瀵硅薄鏂板 `emotion_tag` 瀛楁锛堝彲閫夛紝鏋氫妇绾︽潫锛夛紱
+  - `host_brain/core/qa.py`锛氭柊澧?`_validate_emotion_tag()` 鏂规硶锛堥潪娉曞€奸檷绾?NEUTRAL锛屽啓 QA 璀﹀憡鏃ュ織锛夛紱
+  - `host_brain/app/main.py`锛歴peak 涓嬪彂鏃堕€忎紶 `emotion_tag`锛?  - `edge_client/actuators/vts_driver.py`锛歴peak_event 澶勭悊鏃惰皟鐢?`set_expression(emotion_tag)`锛?  - `edge_client/actuators/tts_engine.py`锛歚synthesize()` 鎺ユ敹骞跺簲鐢?`emotion_tag` 璇皵鍙傛暟锛?  - `tests/unit/test_emotion_driven_dialogue_m26.py`锛堟柊澧烇級锛歍-EMOTION-01~06锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-EMOTION-01锛歀LM 杈撳嚭鍚悎娉?`emotion_tag` 鏃讹紝VTS `set_expression` 琚皟鐢紙emotion_tag 姝ｇ‘浼犻€掞級锛?  - T-EMOTION-02锛歀LM 杈撳嚭鍚悎娉?`emotion_tag` 鏃讹紝TTS `synthesize` 鎺ユ敹鍒板搴?`emotion_tag`锛?  - T-EMOTION-03锛歀LM 杈撳嚭 `emotion_tag` 闈炴硶鏃讹紝QA 闄嶇骇涓?`NEUTRAL`锛屼笉涓柇閾捐矾锛?  - T-EMOTION-04锛歀LM 杈撳嚭缂哄皯 `emotion_tag` 鏃讹紝榛樿浣跨敤 `NEUTRAL`锛?  - T-EMOTION-05锛歚_validate_emotion_tag()` 瀵规墍鏈夋灇涓惧€艰繑鍥炲悎娉曪紱
+  - T-EMOTION-06锛歚_validate_emotion_tag()` 瀵归潪鏋氫妇鍊艰繑鍥?`NEUTRAL` 骞跺啓璀﹀憡鏃ュ織锛?  - 鍏ㄩ噺娴嬭瘯 鈮?819 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `host_brain/core/qa.py`锛?  - `host_brain/app/main.py`锛?  - `edge_client/actuators/vts_driver.py`锛?  - `edge_client/actuators/tts_engine.py`锛?  - `tests/unit/test_emotion_driven_dialogue_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-DRIVE-001锛汧R-EMOTION-DRIVE-002锛汧R-EMOTION-DRIVE-003锛汿-EMOTION-01~06銆?
+### TASK-0227 M26-F锛歏TS 鐑敭閰嶇疆鏂囦欢鎶界 + 璇存槑鏂囨。
+
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬皢 VTS 鎵€鏈夌儹閿厤缃紙emotion_tag 鈫?expression_id 鏄犲皠銆佺儹閿?ID銆佽Е鍙戝弬鏁扮瓑锛変粠浠ｇ爜涓娊绂讳负鐙珛鐨?YAML 閰嶇疆鏂囦欢 `configs/vts/vts_hotkey_config.yaml`锛沗VTSMappingStore` 鏀寔浠庤閰嶇疆鏂囦欢鍔犺浇鍒濆鏄犲皠琛紙鏇夸唬纭紪鐮佺殑 `DEFAULT_EMOTION_MAPPING`锛夛紱鏂板閰嶇疆璇存槑鏂囨。 `docs/30_devspec/vts_hotkey_config_guide.md`锛岃鏄庨厤缃牸寮忋€佸瓧娈靛惈涔夈€佹墿灞曟柟寮忓強涓?VTSMappingStore 鐨勫叧鑱斿叧绯汇€?- 杈撳叆锛?  - `host_brain/channels/vts_mapping_store.py`锛坄DEFAULT_EMOTION_MAPPING` 纭紪鐮侊級锛?  - `edge_client/actuators/vts_driver.py`锛堢儹閿Е鍙戦€昏緫锛夛紱
+  - `configs/` 鐩綍锛堟柊澧?`vts/` 瀛愮洰褰曪級銆?- 杈撳嚭锛?  - `configs/vts/vts_hotkey_config.yaml`锛堟柊澧烇級锛氬寘鍚墍鏈?emotion_tag 鈫?expression_id 鏄犲皠 + 鐑敭瑙﹀彂鍙傛暟锛堣Е鍙戝欢杩熴€佷紭鍏堢骇銆乫allback 绛栫暐绛夛級锛?  - `host_brain/channels/vts_mapping_store.py`锛氭柊澧?`load_from_config_file(path)` 绫绘柟娉曪紝鏀寔浠?YAML 閰嶇疆鏂囦欢鍔犺浇鍒濆鏄犲皠琛紱`DEFAULT_EMOTION_MAPPING` 淇濈暀涓?fallback锛?  - `docs/30_devspec/vts_hotkey_config_guide.md`锛堟柊澧烇級锛氶厤缃枃浠舵牸寮忚鏄庛€佸瓧娈靛惈涔夈€佹墿灞曟柟寮忋€佷笌 VTSMappingStore 鐨勫叧鑱斿叧绯汇€佺ず渚嬶紱
+  - `tests/unit/test_vts_hotkey_config_m26.py`锛堟柊澧烇級锛歍-VTS-CFG-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-VTS-CFG-01锛歚load_from_config_file()` 浠?YAML 鏂囦欢鍔犺浇鏄犲皠琛紝涓庢枃浠跺唴瀹逛竴鑷达紱
+  - T-VTS-CFG-02锛歒AML 鏂囦欢缂哄け鏃?`load_from_config_file()` 鎶涘嚭 `FileNotFoundError`锛堝惈鏄庣‘閿欒淇℃伅锛夛紱
+  - T-VTS-CFG-03锛歒AML 鏂囦欢鏍煎紡闈炴硶鏃舵姏鍑?`ValueError`锛堝惈瀛楁鍚嶏級锛?  - T-VTS-CFG-04锛歚DEFAULT_EMOTION_MAPPING` 浣滀负 fallback锛孻AML 鏈厤缃殑 emotion_tag 浣跨敤榛樿鍊硷紱
+  - `configs/vts/vts_hotkey_config.yaml` 瀛樺湪涓旀牸寮忓悎娉曪紱
+  - `docs/30_devspec/vts_hotkey_config_guide.md` 瀛樺湪涓斿寘鍚墍鏈夊繀瑕佺珷鑺傦紱
+  - 鍏ㄩ噺娴嬭瘯 鈮?823 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `configs/vts/vts_hotkey_config.yaml`锛堟柊澧烇級锛?  - `host_brain/channels/vts_mapping_store.py`锛?  - `docs/30_devspec/vts_hotkey_config_guide.md`锛堟柊澧烇級锛?  - `tests/unit/test_vts_hotkey_config_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VTS-CFG-001锛汧R-VTS-CFG-002锛汿-VTS-CFG-01~04銆?
+### TASK-0228 M26-G锛歮ood_state 鈫?emotion_tag 绾︽潫鏄犲皠锛堟儏鎰熺郴缁熸繁鍖?I锛?
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬湪 `metabolism.py` 涓柊澧?`mood_to_emotion_constraint()` 鍑芥暟锛屽皢绯荤粺纭姸鎬侊紙calm/steady/engaged/tired/critical锛夋槧灏勪负 emotion_tag 鐨勫厑璁歌寖鍥达紱鍦?QA 鏍￠獙鏃舵鏌?emotion_tag 鏄惁鍦ㄥ綋鍓?mood_state 鐨勫厑璁歌寖鍥村唴锛屼笉鍦ㄥ垯闄嶇骇鍒拌鑼冨洿鐨勭涓€涓€硷紙鍐?QA 璀﹀憡鏃ュ織锛夈€傚疄鐜?绯荤粺鐘舵€佹劅鐭?鐨勬儏鎰熺害鏉燂紝闃叉鑳介噺鏋佷綆鏃惰緭鍑?EXCITED 绛変笉鍚堢悊鎯呮劅銆?- 杈撳叆锛?  - `host_brain/core/metabolism.py`锛堟柊澧?`mood_to_emotion_constraint()` 鍑芥暟锛夛紱
+  - `host_brain/core/qa.py`锛堥泦鎴?mood_state 绾︽潫鏍￠獙锛夈€?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛氭柊澧?`MOOD_EMOTION_CONSTRAINTS` 甯搁噺 + `mood_to_emotion_constraint(mood_state)` 鍑芥暟锛?  - `host_brain/core/qa.py`锛歚_validate_emotion_tag()` 鏂板 `mood_state` 鍙傛暟锛屾敮鎸佺害鏉熻寖鍥存牎楠岋紱
+  - `tests/unit/test_mood_emotion_constraint_m26.py`锛堟柊澧烇級锛歍-MOOD-CONST-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-MOOD-CONST-01锛歚mood_to_emotion_constraint("critical")` 杩斿洖 `["NEUTRAL", "SAD"]`锛?  - T-MOOD-CONST-02锛歚mood_to_emotion_constraint("engaged")` 杩斿洖鍖呭惈 `EXCITED` 鐨勫垪琛紱
+  - T-MOOD-CONST-03锛歚_validate_emotion_tag("EXCITED", mood_state="critical")` 闄嶇骇涓?`NEUTRAL` 骞跺啓璀﹀憡鏃ュ織锛?  - T-MOOD-CONST-04锛歚_validate_emotion_tag("HAPPY", mood_state="steady")` 杩斿洖 `HAPPY`锛堝湪鍏佽鑼冨洿鍐咃級锛?  - 鍏ㄩ噺娴嬭瘯 鈮?827 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `host_brain/core/metabolism.py`锛?  - `host_brain/core/qa.py`锛?  - `tests/unit/test_mood_emotion_constraint_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-DRIVE-004锛汿-MOOD-CONST-01~04銆?
+### TASK-0229 M26-H锛歴ub_emotion 缁嗙矑搴﹁〃鎯呴┍鍔紙鎯呮劅绯荤粺娣卞寲 II锛?
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬湪 LLM 杈撳嚭濂戠害 `narrative` 瀵硅薄涓柊澧炲彲閫夊瓧娈?`sub_emotion`锛屾槧灏勫埌 `vts_hotkey_config.yaml` 涓殑鍏蜂綋鐑敭锛堝 blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign锛夛紱`VTSMappingStore` 鏂板 `sub_emotion_to_hotkey()` 鏂规硶锛沗voice_pipeline.py` 鍦ㄨЕ鍙?`set_expression(emotion_tag)` 鍚庯紝鑻?`sub_emotion` 瀛樺湪鍒欓澶栬Е鍙戝搴旂儹閿紝鍏呭垎鍒╃敤妯″瀷鐨?15 涓粏绮掑害琛ㄦ儏銆?- 杈撳叆锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `configs/vts/vts_hotkey_config.yaml`锛圱ASK-0227 浜у嚭锛夛紱
+  - `host_brain/channels/vts_mapping_store.py`锛?  - `edge_client/runtime/voice_pipeline.py`銆?- 杈撳嚭锛?  - `prompts/llm_contract/core_output_contract.json`锛歚narrative` 鏂板 `sub_emotion` 鍙€夊瓧娈碉紙鏋氫妇锛歜lush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign锛夛紱
+  - `host_brain/channels/vts_mapping_store.py`锛氭柊澧?`sub_emotion_to_hotkey(sub_emotion)` 鏂规硶锛?  - `edge_client/runtime/voice_pipeline.py`锛歚enqueue_speak` 鏃惰嫢 payload 鍚?`sub_emotion` 鍒欓澶栬Е鍙戝搴旂儹閿紱
+  - `tests/unit/test_sub_emotion_m26.py`锛堟柊澧烇級锛歍-SUB-EMOTION-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-SUB-EMOTION-01锛歚sub_emotion_to_hotkey("blush")` 杩斿洖瀵瑰簲鐑敭 ID锛?  - T-SUB-EMOTION-02锛歚sub_emotion_to_hotkey("unknown")` 杩斿洖 `None`锛堜笉瑙﹀彂锛屼笉鎶ラ敊锛夛紱
+  - T-SUB-EMOTION-03锛歴peak payload 鍚?`sub_emotion="star_eye"` 鏃讹紝VTS 棰濆瑙﹀彂瀵瑰簲鐑敭锛?  - T-SUB-EMOTION-04锛歴peak payload 鏃?`sub_emotion` 鏃讹紝浠呰Е鍙?`set_expression(emotion_tag)`锛屾棤棰濆鐑敭锛?  - 鍏ㄩ噺娴嬭瘯 鈮?831 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `host_brain/channels/vts_mapping_store.py`锛?  - `edge_client/runtime/voice_pipeline.py`锛?  - `tests/unit/test_sub_emotion_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-DRIVE-005锛汿-SUB-EMOTION-01~04銆?
+### TASK-0230 M26-I锛歟motion_intensity 寮哄害鍙傛暟锛堟儏鎰熺郴缁熸繁鍖?III锛?
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛氬湪 LLM 杈撳嚭濂戠害 `narrative` 瀵硅薄涓柊澧炲彲閫夊瓧娈?`emotion_intensity`锛坒loat锛?.0~1.0锛夛紝褰卞搷 TTS 璇皵骞呭害锛沗SoVITSModelManager.synthesize()` 鎺ユ敹 `emotion_intensity` 鍙傛暟骞朵紶閫掔粰搴曞眰妯″瀷锛沗VTubeStudioDriver.set_expression()` 鎺ユ敹 `intensity` 鍙傛暟锛屽奖鍝嶈〃鎯呰Е鍙戠殑 `duration_ms`锛堝己搴﹁秺楂樻寔缁秺闀匡級銆?- 杈撳叆锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `edge_client/actuators/tts_engine.py`锛?  - `edge_client/actuators/vts_driver.py`锛?  - `edge_client/runtime/voice_pipeline.py`銆?- 杈撳嚭锛?  - `prompts/llm_contract/core_output_contract.json`锛歚narrative` 鏂板 `emotion_intensity` 鍙€夊瓧娈碉紙number锛?.0~1.0锛夛紱
+  - `edge_client/actuators/tts_engine.py`锛歚synthesize()` 鏂板 `emotion_intensity` 鍙傛暟锛坒loat锛岄粯璁?0.5锛夛紱
+  - `edge_client/actuators/vts_driver.py`锛歚set_expression()` 鏂板 `intensity` 鍙傛暟锛坒loat锛岄粯璁?0.5锛夛紝褰卞搷 `duration_ms`锛?  - `edge_client/runtime/voice_pipeline.py`锛氶€忎紶 `emotion_intensity` 鍒?TTS + VTS锛?  - `tests/unit/test_emotion_intensity_m26.py`锛堟柊澧烇級锛歍-INTENSITY-01~04锛? 涓祴璇曪級銆?- 楠屾敹鏍囧噯锛?  - T-INTENSITY-01锛歚synthesize(text, emotion_tag="HAPPY", emotion_intensity=0.9)` 姝ｅ父璋冪敤涓嶆姤閿欙紱
+  - T-INTENSITY-02锛歚set_expression("HAPPY", intensity=0.9)` 姝ｅ父璋冪敤涓嶆姤閿欙紱
+  - T-INTENSITY-03锛歚emotion_intensity` 瓒呭嚭 [0.0, 1.0] 鑼冨洿鏃?QA 鏍￠獙鎴柇鍒板悎娉曡寖鍥达紙涓嶆嫆缁濓級锛?  - T-INTENSITY-04锛歴peak payload 鍚?`emotion_intensity=0.8` 鏃讹紝TTS 鍜?VTS 鍧囨敹鍒拌鍙傛暟锛?  - 鍏ㄩ噺娴嬭瘯 鈮?835 passed锛? failed銆?- 娑夊強鏂囦欢璺緞锛?  - `prompts/llm_contract/core_output_contract.json`锛?  - `edge_client/actuators/tts_engine.py`锛?  - `edge_client/actuators/vts_driver.py`锛?  - `edge_client/runtime/voice_pipeline.py`锛?  - `tests/unit/test_emotion_intensity_m26.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-DRIVE-006锛汿-INTENSITY-01~04銆?
+### TASK-0231 M26-J锛歁26 鍙戝竷娓呭崟
+
+- 鐘舵€侊細DONE锛?026-03-05锛?- 浠诲姟鎻忚堪锛歍ASK-0222~0230 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M26 鍙戝竷娓呭崟锛坄m26_release.json`锛夛紝璁板綍 M26-A~I 淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M26 閲岀▼纰戠姸鎬佷负 DONE锛涙洿鏂?`requirements_trace.md` M26 灏忚妭锛圧-167~R-175锛夛紱鐢熸垚浠ｇ爜瀹℃煡鎶ュ憡 `full_code_review_report_2026-03-05-m26.md`銆?- 杈撳叆锛歍ASK-0222~0230 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?835 passed锛?802 + 33 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m26_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁26 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M26 灏忚妭锛圧-167~R-175锛夛紱
+  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `emotion_driven_dialogue=true`锛堝熀纭€鎯呮劅閾捐矾宸插疄鐜帮級锛?  - `mood_emotion_constraint=true`锛坢ood_state 绾︽潫鏄犲皠宸插疄鐜帮級锛?  - `sub_emotion_driven=true`锛堢粏绮掑害琛ㄦ儏椹卞姩宸插疄鐜帮級锛?  - `emotion_intensity=true`锛堝己搴﹀弬鏁板凡瀹炵幇锛夛紱
+  - `vts_hotkey_config_extracted=true`锛圴TS 鐑敭閰嶇疆宸叉娊绂伙級锛?  - `e2e_smoke_suite=true`锛堢鍒扮鍐掔儫娴嬭瘯濂椾欢宸插缓绔嬶級锛?  - `health_aggregator_validated=true`锛堝仴搴锋鏌ュ姞鍥哄凡瀹屾垚锛夛紱
+  - `llm_route_hot_reload=true`锛圠LM 璺敱鐑洿鏂板凡瀹炵幇锛夛紱
+  - `total_tests_passed 鈮?1835`锛?  - `zero_regressions=true`锛?  - `zero_warnings=true`銆?- 娑夊強鏂囦欢璺緞锛?  - `docs/50_release/m26_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛?  - `docs/60_trace/requirements_trace.md`锛?  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汵FR-MAINT-001锛汧R-EMOTION-DRIVE-001~006锛汧R-VTS-CFG-001~002锛汧R-CORE-001锛汧R-OBS-008锛汧R-LLM-GW-003锛汧R-VTS-DRIVE-001銆?
+---
+
+## M27 鎯呮劅閾捐矾绔埌绔繛閫氾紙P0 鍩虹璁炬柦淇锛夛紙TASK-0232~0242锛?
+> **鐩爣锛?* 淇鎯呮劅淇℃伅鍦ㄥ叏閾捐矾涓殑 11 涓?P0 绾ф柇璺偣锛屼娇鎯呮劅鐘舵€佽兘浠庢劅鐭ュ眰娴侀€氬埌鍐崇瓥灞傘€佹墽琛屽眰銆佽蹇嗗眰锛屽舰鎴愬畬鏁寸殑鎯呮劅闂幆銆?> **渚濇嵁锛?* SOUL-OPT-2026-03-05 浼樺寲19/20/22/25/26/27/31/32/37/38/43
+> **鍓嶇疆锛?* M26 鍏ㄩ儴 DONE
+
+### TASK-0232 M27-A锛欸ateSnapshot 澧炲姞鎯呮劅瀛楁锛圤PT-19锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚GateSnapshot` 澧炲姞 `mood_state`銆乣emotion_tag`銆乣emotion_intensity` 涓変釜鎯呮劅瀛楁锛屼娇 Governor R8 闂ㄦ帶鑳芥劅鐭ュ綋鍓嶆儏鎰熺姸鎬併€?- 杈撳叆锛歚host_brain/governor/rules.py`锛沗host_brain/core/metabolism.py`锛坄HardStateSnapshot`锛夈€?- 杈撳嚭锛?  - `host_brain/governor/rules.py`锛歚GateSnapshot` dataclass 鏂板 `mood_state: str`銆乣emotion_tag: str`銆乣emotion_intensity: float` 瀛楁锛堝潎鏈夐粯璁ゅ€硷級锛?  - `tests/unit/test_gate_snapshot_m27.py`锛堟柊澧烇級锛歍-GATE-SNAP-01~03銆?- 楠屾敹鏍囧噯锛?  - T-GATE-SNAP-01锛歚GateSnapshot` 鍙惡甯?`mood_state="engaged"` 鏋勯€犳垚鍔燂紱
+  - T-GATE-SNAP-02锛歚GateSnapshot` 涓嶄紶鎯呮劅瀛楁鏃朵娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欙紱
+  - T-GATE-SNAP-03锛歚GateSnapshot` 搴忓垪鍖栦负 dict 鏃跺寘鍚笁涓儏鎰熷瓧娈点€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/rules.py`锛沗tests/unit/test_gate_snapshot_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-EMOTION-001锛汿-GATE-SNAP-01~03銆?
+### TASK-0233 M27-B锛歟xtract_emotion_tag 浼犲叆 mood_state锛圤PT-20锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚qa.py` 涓?`extract_emotion_tag()` 璋冪敤鏃朵紶鍏ュ綋鍓?`mood_state`锛屼娇 `MOOD_EMOTION_CONSTRAINTS` 绾︽潫鏍￠獙鐪熸鐢熸晥銆?- 杈撳叆锛歚host_brain/core/qa.py`锛沗host_brain/core/metabolism.py`锛坄mood_state` 鏉ユ簮锛夈€?- 杈撳嚭锛?  - `host_brain/core/qa.py`锛歚extract_emotion_tag(raw_tag, mood_state)` 绛惧悕琛ュ叏 `mood_state` 鍙傛暟锛涜皟鐢ㄥ浼犲叆 `hard_state.mood_state`锛?  - `tests/unit/test_extract_emotion_tag_m27.py`锛堟柊澧烇級锛歍-EXTRACT-TAG-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EXTRACT-TAG-01锛歚mood_state="tired"` 鏃讹紝`HAPPY` 鎯呮劅鏍囩琚害鏉熶负 `calm` 绯诲垪锛?  - T-EXTRACT-TAG-02锛歚mood_state="engaged"` 鏃讹紝`HAPPY` 鎯呮劅鏍囩姝ｅ父閫氳繃锛?  - T-EXTRACT-TAG-03锛歚mood_state=None` 鏃讹紝涓嶈Е鍙戠害鏉燂紝琛屼负涓庢棫鐗堜竴鑷淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/qa.py`锛沗tests/unit/test_extract_emotion_tag_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-QA-EMOTION-001锛汿-EXTRACT-TAG-01~03銆?
+### TASK-0234 M27-C锛歜uild_governance_snapshot 浼犻€?mood_state 缁?GateSnapshot锛圤PT-22锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚build_governance_snapshot()` 鏋勫缓 `GateSnapshot` 鏃讹紝浠?`hard_state_summary` 涓彁鍙?`mood_state` 骞朵紶鍏ワ紝鎵撻€氭儏鎰熺姸鎬佸埌鍐崇瓥灞傜殑浼犻€掗摼璺€?- 杈撳叆锛歚host_brain/governor/decision.py`锛沗host_brain/core/metabolism.py`锛坄HardStateSnapshot`锛夛紱TASK-0232锛坄GateSnapshot` 鏂板瓧娈碉級銆?- 杈撳嚭锛?  - `host_brain/governor/decision.py`锛歚build_governance_snapshot()` 浠?`hard_state_summary` 璇诲彇 `mood_state`/`emotion_tag`/`emotion_intensity` 骞舵敞鍏?`GateSnapshot`锛?  - `tests/unit/test_governance_snapshot_m27.py`锛堟柊澧烇級锛歍-GOV-SNAP-01~02銆?- 楠屾敹鏍囧噯锛?  - T-GOV-SNAP-01锛歚hard_state_summary.mood_state="critical"` 鏃讹紝`GateSnapshot.mood_state` 涓?`"critical"`锛?  - T-GOV-SNAP-02锛歚hard_state_summary` 鏃犳儏鎰熷瓧娈垫椂锛宍GateSnapshot` 浣跨敤榛樿鍊硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/decision.py`锛沗tests/unit/test_governance_snapshot_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-EMOTION-002锛汿-GOV-SNAP-01~02銆?
+### TASK-0235 M27-D锛欵pisodicRecord 澧炲姞鎯呮劅鏍囨敞瀛楁锛圤PT-25锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚EpisodicRecord` 澧炲姞 `emotion_tag`銆乣emotion_valence`銆乣emotion_arousal` 瀛楁锛屼娇鎯呰妭璁板繂鍏峰鎯呮劅鏍囨敞锛屾敮鎸佸悗缁儏鎰熸绱€?- 杈撳叆锛歚host_brain/memory/episodic.py`銆?- 杈撳嚭锛?  - `host_brain/memory/episodic.py`锛歚EpisodicRecord` dataclass 鏂板 `emotion_tag: str = "NEUTRAL"`銆乣emotion_valence: float = 0.0`銆乣emotion_arousal: float = 0.3` 瀛楁锛沗save()` 鏂规硶鎸佷箙鍖栨柊瀛楁锛沗recall()` 鏀寔鎸?`emotion_tag` 杩囨护锛?  - `tests/unit/test_episodic_emotion_m27.py`锛堟柊澧烇級锛歍-EPISODIC-EMO-01~04銆?- 楠屾敹鏍囧噯锛?  - T-EPISODIC-EMO-01锛氫繚瀛樺惈 `emotion_tag="HAPPY"` 鐨勮褰曞悗锛屽彲鎸?`emotion_tag` 妫€绱㈠埌锛?  - T-EPISODIC-EMO-02锛氭棫璁板綍锛堟棤鎯呮劅瀛楁锛夎鍙栨椂浣跨敤榛樿鍊硷紝涓嶆姤閿欙紱
+  - T-EPISODIC-EMO-03锛歚recall(emotion_filter="HAPPY")` 鍙繑鍥?`emotion_tag="HAPPY"` 鐨勮褰曪紱
+  - T-EPISODIC-EMO-04锛歚emotion_valence` 瓒呭嚭 [-1.0, 1.0] 鏃惰鎴柇鍒板悎娉曡寖鍥淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_episodic_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-MEM-EMOTION-001锛汿-EPISODIC-EMO-01~04銆?
+### TASK-0236 M27-E锛欱ondDynamicsWriter.apply_update 澧炲姞鎯呮劅瀛楁锛圤PT-26锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚BondDynamicsWriter.apply_update()` 鐨?`payload` 澧炲姞 `emotion_tag`銆乣emotion_intensity` 瀛楁锛屼娇 Bond 绉垎鎰熺煡鎯呮劅寮哄害锛岄珮鎯呮劅寮哄害浜掑姩鑾峰緱鏇撮珮绉垎銆?- 杈撳叆锛歚host_brain/bond/bond_dynamics.py`銆?- 杈撳嚭锛?  - `host_brain/bond/bond_dynamics.py`锛歚apply_update()` payload 鏂板 `emotion_tag: str`銆乣emotion_intensity: float` 瀛楁锛涚Н鍒嗚绠楁椂 `emotion_intensity > 0.7` 鐨勪簰鍔ㄩ澶栧姞鏉?1.5x锛?  - `tests/unit/test_bond_dynamics_emotion_m27.py`锛堟柊澧烇級锛歍-BOND-DYN-EMO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BOND-DYN-EMO-01锛歚emotion_intensity=0.9` 鐨?`INTERACTION` 浜嬩欢绉垎 鈮?鏅€?`INTERACTION` 鐨?1.5 鍊嶏紱
+  - T-BOND-DYN-EMO-02锛歚emotion_intensity` 缂哄け鏃朵娇鐢ㄩ粯璁ゅ€?0.5锛岃涓轰笌鏃х増涓€鑷达紱
+  - T-BOND-DYN-EMO-03锛歚emotion_tag="SAD"` 鐨?`INTERACTION` 浜嬩欢涓嶈杩囨护锛屾甯哥Н鍒嗐€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_dynamics.py`锛沗tests/unit/test_bond_dynamics_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-EMOTION-001锛汿-BOND-DYN-EMO-01~03銆?
+### TASK-0237 M27-F锛歞erive_bond_summary 淇 stage/trend 瀛楁璇诲彇锛圤PT-27锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛氫慨澶?`bond/summarizer.py` 涓?`derive_bond_summary()` 浠?`event["stage"]` 璇诲彇 Bond 闃舵鐨?Bug锛屾敼涓轰粠 `BondScoreState` 鐩存帴璇诲彇锛岀‘淇濇敞鍏?LLM 鐨?`bond_summary.stage` 姝ｇ‘銆?- 杈撳叆锛歚host_brain/bond/summarizer.py`锛沗host_brain/bond/bond_stage_engine.py`锛坄BondScoreState`锛夈€?- 杈撳嚭锛?  - `host_brain/bond/summarizer.py`锛歚derive_bond_summary()` 浠?`BondScoreState.stage` 璇诲彇闃舵锛屼粠 `BondScoreState.trend()` 璇诲彇瓒嬪娍锛屼笉鍐嶄粠 event dict 璇诲彇锛?  - `tests/unit/test_bond_summarizer_m27.py`锛堟柊澧烇級锛歍-BOND-SUM-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BOND-SUM-01锛歚derive_bond_summary()` 杩斿洖鐨?`stage` 涓?`"FRIEND"` 鑰岄潪 `"S_BOND_UPDATE"`锛?  - T-BOND-SUM-02锛歚derive_bond_summary()` 杩斿洖鐨?`trend` 涓轰腑鏂囪涔夋弿杩帮紙濡?`"涓婂崌"`锛夛紱
+  - T-BOND-SUM-03锛歚BondScoreState` 涓虹┖鏃讹紝`derive_bond_summary()` 杩斿洖榛樿鍊硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/summarizer.py`锛沗tests/unit/test_bond_summarizer_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-SUMMARY-001锛汿-BOND-SUM-01~03銆?
+### TASK-0238 M27-G锛歊ecallFusionServiceContract 澧炲姞鎯呮劅缁村害璺敱锛圤PT-31锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚RecallFusionServiceContract.recall()` 澧炲姞 `emotion_filter` 鍙傛暟锛屾敮鎸佹儏鎰熻蹇嗕笌鏅€氳蹇嗗垎姹犲彫鍥烇紝楂樻儏鎰熷己搴﹁蹇嗕紭鍏堟帓搴忋€?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛堟垨瀵瑰簲 contract 鏂囦欢锛夛紱TASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夈€?- 杈撳嚭锛?  - `host_brain/retrieval/recall_fusion.py`锛歚recall()` 鏂板 `emotion_filter: str | None = None` 鍙傛暟锛涘綋 `emotion_filter` 闈炵┖鏃讹紝浼樺厛鍙洖鍖归厤鎯呮劅鏍囩鐨勮褰曪紱
+  - `tests/unit/test_recall_fusion_emotion_m27.py`锛堟柊澧烇級锛歍-RECALL-EMO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-RECALL-EMO-01锛歚emotion_filter="HAPPY"` 鏃讹紝杩斿洖缁撴灉涓?`emotion_tag="HAPPY"` 鐨勮褰曟帓鍦ㄥ墠鍒楋紱
+  - T-RECALL-EMO-02锛歚emotion_filter=None` 鏃讹紝琛屼负涓庢棫鐗堜竴鑷达紱
+  - T-RECALL-EMO-03锛氭棤鍖归厤鎯呮劅璁板綍鏃讹紝闄嶇骇涓烘櫘閫氳涔夊彫鍥烇紝涓嶈繑鍥炵┖鍒楄〃銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗tests/unit/test_recall_fusion_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-RECALL-EMOTION-001锛汿-RECALL-EMO-01~03銆?
+### TASK-0239 M27-H锛欼ntentDecisionEngine 鐨?governance_snapshot 鎼哄甫鎯呮劅鐘舵€侊紙OPT-32锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚IntentDecisionEngine.evaluate_intent()` 鎺ユ敹鐨?`governance_snapshot` 鎼哄甫鎯呮劅鐘舵€侊紝鍐崇瓥寮曟搸鏍规嵁鎯呮劅鐘舵€佽皟鏁存剰鍥捐瘎浼版潈閲嶏紙濡?`critical` 鐘舵€佷笅鎷掔粷楂樻秷鑰楁搷浣滐級銆?- 杈撳叆锛歚host_brain/governor/decision.py`锛汿ASK-0234锛坄GateSnapshot` 鎯呮劅瀛楁宸叉敞鍏ワ級銆?- 杈撳嚭锛?  - `host_brain/governor/decision.py`锛歚evaluate_intent()` 璇诲彇 `governance_snapshot.mood_state`锛宍critical` 鐘舵€佷笅鎷掔粷 `TOOL_CALL`/`SKILL_EXEC` 绫绘剰鍥撅紱
+  - `tests/unit/test_intent_decision_emotion_m27.py`锛堟柊澧烇級锛歍-INTENT-EMO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-INTENT-EMO-01锛歚mood_state="critical"` 鏃讹紝`TOOL_CALL` 鎰忓浘琚嫆缁濓紝杩斿洖 `reason_code="EMOTION_GATE_BLOCKED"`锛?  - T-INTENT-EMO-02锛歚mood_state="engaged"` 鏃讹紝`TOOL_CALL` 鎰忓浘姝ｅ父閫氳繃锛?  - T-INTENT-EMO-03锛歚mood_state` 缂哄け鏃讹紝涓嶈Е鍙戞儏鎰熼棬鎺э紝琛屼负涓庢棫鐗堜竴鑷淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/decision.py`锛沗tests/unit/test_intent_decision_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-EMOTION-003锛汿-INTENT-EMO-01~03銆?
+### TASK-0240 M27-I锛歋killLoader.execute 浼犻€掓儏鎰熺姸鎬侊紙OPT-37锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚SkillLoader.execute()` 鐨?`context` 鍙傛暟澧炲姞 `emotion_tag`銆乣mood_state` 瀛楁锛屼娇鎶€鑳?handler 鑳芥劅鐭ュ綋鍓嶆儏鎰熺姸鎬佸苟璋冩暣鎵ц琛屼负銆?- 杈撳叆锛歚host_brain/skills/loader.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0234锛堟儏鎰熺姸鎬佹潵婧愶級銆?- 杈撳嚭锛?  - `host_brain/skills/loader.py`锛歚execute()` context 鏂板 `emotion_tag: str`銆乣mood_state: str` 瀛楁锛?  - `tests/unit/test_skill_loader_emotion_m27.py`锛堟柊澧烇級锛歍-SKILL-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-SKILL-EMO-01锛歚execute(context={"emotion_tag": "HAPPY", "mood_state": "engaged"})` 姝ｅ父璋冪敤涓嶆姤閿欙紱
+  - T-SKILL-EMO-02锛歝ontext 鏃犳儏鎰熷瓧娈垫椂锛屼娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/skills/loader.py`锛沗tests/unit/test_skill_loader_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SKILL-EMOTION-001锛汿-SKILL-EMO-01~02銆?
+### TASK-0241 M27-J锛歍oolBroker.execute 浼犻€掓儏鎰熺姸鎬侊紙OPT-38锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚ToolBroker.execute()` 鐨?`context` 鍙傛暟澧炲姞 `emotion_tag`銆乣mood_state` 瀛楁锛屼娇宸ュ叿 handler 鑳芥劅鐭ュ綋鍓嶆儏鎰熺姸鎬併€?- 杈撳叆锛歚host_brain/tools/broker.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0234锛堟儏鎰熺姸鎬佹潵婧愶級銆?- 杈撳嚭锛?  - `host_brain/tools/broker.py`锛歚execute()` context 鏂板 `emotion_tag: str`銆乣mood_state: str` 瀛楁锛?  - `tests/unit/test_tool_broker_emotion_m27.py`锛堟柊澧烇級锛歍-TOOL-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-TOOL-EMO-01锛歚execute(context={"emotion_tag": "SAD", "mood_state": "tired"})` 姝ｅ父璋冪敤涓嶆姤閿欙紱
+  - T-TOOL-EMO-02锛歝ontext 鏃犳儏鎰熷瓧娈垫椂锛屼娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/tools/broker.py`锛沗tests/unit/test_tool_broker_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-EMOTION-001锛汿-TOOL-EMO-01~02銆?
+### TASK-0242 M27-K锛歂atsumeScheduler._build_system_intent 鎼哄甫鎯呮劅鐘舵€侊紙OPT-43锛?
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歚NatsumeScheduler._build_system_intent()` 鏋勫缓璋冨害鎰忓浘鏃讹紝浠庡綋鍓?`HardStateSnapshot` 璇诲彇鎯呮劅鐘舵€佸苟娉ㄥ叆锛屼娇璋冨害浠诲姟瑙﹀彂鏃朵笉涓㈠け鎯呮劅涓婁笅鏂囥€?- 杈撳叆锛歚host_brain/scheduler/scheduler.py`锛沗host_brain/core/metabolism.py`锛坄HardStateSnapshot`锛夈€?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛歚_build_system_intent()` 鏂板 `emotion_tag`銆乣mood_state` 瀛楁娉ㄥ叆锛?  - `tests/unit/test_scheduler_emotion_m27.py`锛堟柊澧烇級锛歍-SCHED-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-SCHED-EMO-01锛氳皟搴︽剰鍥?dict 鍖呭惈 `emotion_tag` 鍜?`mood_state` 瀛楁锛?  - T-SCHED-EMO-02锛歚HardStateSnapshot` 涓嶅彲鐢ㄦ椂锛屼娇鐢ㄩ粯璁ゆ儏鎰熷€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/scheduler/scheduler.py`锛沗tests/unit/test_scheduler_emotion_m27.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-EMOTION-001锛汿-SCHED-EMO-01~02銆?
+### TASK-0243 M27-L锛歁27 鍙戝竷娓呭崟
+
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歍ASK-0232~0242 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M27 鍙戝竷娓呭崟锛岃褰?P0 鎯呮劅閾捐矾淇鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M27 閲岀▼纰戠姸鎬佷负 DONE锛涚敓鎴愪唬鐮佸鏌ユ姤鍛娿€?- 杈撳叆锛歍ASK-0232~0242 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?857 passed锛?835 + 22 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m27_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁27 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M27 灏忚妭锛?  - `docs/40_agents/full_code_review_report_2026-03-05-m27.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `emotion_gate_connected=true`锛圙ateSnapshot 鎯呮劅瀛楁宸茶繛閫氾級锛?  - `bond_summary_fixed=true`锛坉erive_bond_summary Bug 宸蹭慨澶嶏級锛?  - `episodic_emotion_tagged=true`锛堟儏鑺傝蹇嗘儏鎰熸爣娉ㄥ凡瀹炵幇锛夛紱
+  - `recall_emotion_routed=true`锛堟儏鎰熻蹇嗗垎姹犲彫鍥炲凡瀹炵幇锛夛紱
+  - `total_tests_passed 鈮?1857`锛?  - `zero_regressions=true`銆?- 娑夊強鏂囦欢璺緞锛歚docs/50_release/m27_release.json`锛沗docs/20_prd/PRD.md`锛沗docs/60_trace/requirements_trace.md`锛沗docs/40_agents/full_code_review_report_2026-03-05-m27.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-GOV-EMOTION-001~003锛汧R-MEM-EMOTION-001锛汧R-BOND-EMOTION-001锛汧R-BOND-SUMMARY-001锛汧R-RECALL-EMOTION-001銆?
+---
+
+## M28 鏍稿績鎯呮劅鏋舵瀯娣卞寲锛圥1 浼樺寲锛夛紙TASK-0244~0262锛?
+> **鐩爣锛?* 鍦?M27 P0 杩為€氬熀纭€涓婏紝娣卞寲鎯呮劅鏋舵瀯鐨勬牳蹇冭兘鍔涳細鎯呯华杩炵画浣撱€丅ond 璐ㄦ劅灞傘€佹儏鎰熻蹇嗐€丟overnor 闂ㄦ帶銆丩LM 鎯呮劅鎰熺煡銆乂TS 琛ㄦ儏鎵╁睍绛?20 椤?P1 浼樺寲銆?> **渚濇嵁锛?* SOUL-OPT-2026-03-05 浼樺寲1/6/7/8/13/14/16/21/28/29/33/34/35/39/40/41/44/45/46/47
+> **鍓嶇疆锛?* M27 鍏ㄩ儴 DONE
+> **瀹屾垚鏃堕棿锛?* 2026-03-06
+> **鐘舵€侊細** 鉁?DONE锛?112 passed, 0 failed锛?
+### TASK-0244 M28-A锛欵motionVector 鎯呯华杩炵画浣擄紙OPT-1锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `metabolism.py` 涓紩鍏?`EmotionVector` dataclass锛圴AD 涓夌淮妯″瀷锛夛紝鏇夸唬绂绘暎 `mood_state`锛屾敮鎸佹儏缁“鍑忥紙`decay()`锛夊拰娣峰悎锛坄blend()`锛夛紝骞朵繚鐣?`to_mood_state()` 鍚戝悗鍏煎銆?- 杈撳叆锛歚host_brain/core/metabolism.py`銆?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛氭柊澧?`EmotionVector` dataclass锛坄valence/arousal/dominance/ts_ms`锛夛紱`decay()`銆乣blend()`銆乣to_mood_state()` 鏂规硶锛沗HardStateSnapshot` 鏂板 `emotion_vector: EmotionVector` 瀛楁锛?  - `tests/unit/test_emotion_vector_m28.py`锛堟柊澧烇級锛歍-EMO-VEC-01~06銆?- 楠屾敹鏍囧噯锛?  - T-EMO-VEC-01锛歚decay(elapsed_ms=300_000)` 鍚?`valence` 缁濆鍊?鈮?鍘熷€肩殑 0.55锛?  - T-EMO-VEC-02锛歚blend(other, weight=0.3)` 缁撴灉鍦ㄤ袱鑰呬箣闂达紱
+  - T-EMO-VEC-03锛歚to_mood_state()` 瑕嗙洊 calm/steady/engaged/tired/critical 浜旂杈撳嚭锛?  - T-EMO-VEC-04锛歚valence/arousal/dominance` 瓒呭嚭 [-1,1]/[0,1]/[0,1] 鏃惰鎴柇锛?  - T-EMO-VEC-05锛歚EmotionVector` 涓嶆毚闇茬粰 LLM锛堝簭鍒楀寲鏃朵笉鍚師濮嬫暟鍊硷級锛?  - T-EMO-VEC-06锛歚HardStateSnapshot` 鍚?`emotion_vector` 瀛楁锛屾棫浠ｇ爜璇诲彇 `mood_state` 涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_emotion_vector_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-CONTINUUM-001锛汿-EMO-VEC-01~06銆?
+### TASK-0245 M28-B锛歟motion_tag 鐢熸垚绛栫暐涓诲姩娉ㄥ叆锛圤PT-6锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `hard_snapshot` 涓鍔?`allowed_emotion_tags` 鍜?`emotion_range_hint` 瀛楁锛屼富鍔ㄥ憡鐭?LLM 褰撳墠鍏佽鐨勬儏鎰熸爣绛捐寖鍥达紝鑰岄潪鍙仛浜嬪悗鏍￠獙銆?- 杈撳叆锛歚host_brain/core/metabolism.py`锛坄HardStateSnapshot`锛夛紱`host_brain/core/qa.py`锛坄MOOD_EMOTION_CONSTRAINTS`锛夈€?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛歚HardStateSnapshot` 鏂板 `allowed_emotion_tags: list[str]`銆乣emotion_range_hint: str` 瀛楁锛岀敱 `mood_state` 鑷姩鎺ㄥ锛?  - `host_brain/core/qa.py`锛歚build_hard_snapshot()` 濉厖涓婅堪瀛楁锛?  - `tests/unit/test_emotion_tag_strategy_m28.py`锛堟柊澧烇級锛歍-EMO-TAG-STR-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-TAG-STR-01锛歚mood_state="tired"` 鏃讹紝`allowed_emotion_tags` 涓嶅惈 `EXCITED`/`HAPPY`锛?  - T-EMO-TAG-STR-02锛歚mood_state="engaged"` 鏃讹紝`allowed_emotion_tags` 鍚?`HAPPY`/`EXCITED`锛?  - T-EMO-TAG-STR-03锛歚emotion_range_hint` 涓洪潪绌轰腑鏂囨弿杩板瓧绗︿覆銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗host_brain/core/qa.py`锛沗tests/unit/test_emotion_tag_strategy_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-TAG-STRATEGY-001锛汿-EMO-TAG-STR-01~03銆?
+### TASK-0246 M28-C锛欱ond 绉垎鎯呮劅浜嬩欢鍒嗙被绮惧寲锛圤PT-7锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`INTERACTION_MINIMAL`/`INTERACTION_ENGAGED`/`INTERACTION_DEEP` 涓夌骇浜掑姩鍒嗙被锛屾牴鎹枃鏈暱搴︺€佹儏鎰熷己搴︺€侀棶鍙锋暟閲忚嚜鍔ㄦ帹鏂簰鍔ㄨ川閲忥紝鏇夸唬缁熶竴鐨?`INTERACTION=+1`銆?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛沗host_brain/bond/bond_dynamics.py`銆?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛氭柊澧炰笁绾т簰鍔ㄤ簨浠舵灇涓惧強瀵瑰簲绉垎锛圡INIMAL=+0.5, ENGAGED=+1, DEEP=+3锛夛紱
+  - `host_brain/bond/bond_dynamics.py`锛歚classify_interaction()` 鏂规硶锛屾牴鎹?`text_len`/`emotion_intensity`/`question_count` 鑷姩鍒嗙骇锛?  - `tests/unit/test_bond_interaction_grade_m28.py`锛堟柊澧烇級锛歍-BOND-GRADE-01~04銆?- 楠屾敹鏍囧噯锛?  - T-BOND-GRADE-01锛氭枃鏈暱搴?< 10 瀛椾笖鏃犻棶鍙?鈫?`INTERACTION_MINIMAL`锛?  - T-BOND-GRADE-02锛氭枃鏈暱搴?> 50 瀛楁垨鍚棶鍙?鈫?`INTERACTION_ENGAGED`锛?  - T-BOND-GRADE-03锛歚emotion_intensity > 0.8` 涓旀枃鏈暱搴?> 100 瀛?鈫?`INTERACTION_DEEP`锛?  - T-BOND-GRADE-04锛氭棫 `INTERACTION` 浜嬩欢浠嶅彲澶勭悊锛屼笉鎶ラ敊锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗host_brain/bond/bond_dynamics.py`锛沗tests/unit/test_bond_interaction_grade_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-GRADE-001锛汿-BOND-GRADE-01~04銆?
+### TASK-0247 M28-D锛欸overnor R8 鎯呮劅鎰熺煡闂ㄦ帶锛圤PT-8锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Governor R8 闂ㄦ帶瑙勫垯锛氱敤鎴锋儏鎰熶负 `ANGRY`/`FRUSTRATED` 鏃跺彧鍏佽瀵硅瘽鎿嶄綔锛汚I `critical` 鐘舵€佹椂鑷姩娉ㄥ叆绠€鍖栨彁绀猴紱渚濊禆 TASK-0232/0234 鐨?`GateSnapshot` 鎯呮劅瀛楁銆?- 杈撳叆锛歚host_brain/governor/rules.py`锛汿ASK-0232锛坄GateSnapshot` 鎯呮劅瀛楁锛夛紱TASK-0234锛堟儏鎰熺姸鎬佹敞鍏ワ級銆?- 杈撳嚭锛?  - `host_brain/governor/rules.py`锛氭柊澧?`R8_EmotionGate` 瑙勫垯绫伙紱`ANGRY`/`FRUSTRATED` 鐘舵€佷笅鎷掔粷 `TOOL_CALL`/`SKILL_EXEC`锛沗critical` 鐘舵€佷笅娉ㄥ叆 `simplified_prompt=True` 鏍囪锛?  - `tests/unit/test_governor_r8_m28.py`锛堟柊澧烇級锛歍-GOV-R8-01~04銆?- 楠屾敹鏍囧噯锛?  - T-GOV-R8-01锛歚emotion_tag="ANGRY"` 鏃讹紝`TOOL_CALL` 琚?R8 鎷掔粷锛宍reason_code="R8_EMOTION_GATE"`锛?  - T-GOV-R8-02锛歚mood_state="critical"` 鏃讹紝杈撳嚭鍚?`simplified_prompt=True`锛?  - T-GOV-R8-03锛歚emotion_tag="HAPPY"` 鏃讹紝R8 涓嶈Е鍙戯紝姝ｅ父閫氳繃锛?  - T-GOV-R8-04锛歊8 鎷掔粷鏃讹紝瀹¤鏃ュ織璁板綍鎯呮劅鐘舵€佸揩鐓с€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/rules.py`锛沗tests/unit/test_governor_r8_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GOV-R8-001锛汿-GOV-R8-01~04銆?
+### TASK-0248 M28-E锛歟volve_hard_state 鎯呮劅浜嬩欢璇箟鎵╁睍锛圤PT-13锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚evolve_hard_state()` 鐨?`event_kind` 澧炲姞鎯呮劅璇箟浜嬩欢绫诲瀷锛坄EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`锛夛紝浣挎儏鎰熶簨浠惰兘瑙﹀彂瀵瑰簲鐨勭姸鎬佹紨鍖栭€昏緫銆?- 杈撳叆锛歚host_brain/core/metabolism.py`锛坄evolve_hard_state()`锛夈€?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛歚event_kind` 鏋氫妇鏂板 `EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`锛涘搴旀紨鍖栭€昏緫锛坄EMOTION_SPIKE` 鈫?`arousal` 涓婂崌锛宍EMOTION_CALM` 鈫?鍚戜腑鎬ф紓绉伙級锛?  - `tests/unit/test_evolve_hard_state_emotion_m28.py`锛堟柊澧烇級锛歍-EVOLVE-EMO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EVOLVE-EMO-01锛歚event_kind="EMOTION_SPIKE"` 鍚庯紝`emotion_vector.arousal` 涓婂崌 鈮?0.1锛?  - T-EVOLVE-EMO-02锛歚event_kind="EMOTION_CALM"` 鍚庯紝`emotion_vector.valence` 鍚?0 婕傜Щ锛?  - T-EVOLVE-EMO-03锛氭湭鐭?`event_kind` 涓嶆姤閿欙紝浣跨敤榛樿婕斿寲閫昏緫銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_evolve_hard_state_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-METABOLISM-EMOTION-001锛汿-EVOLVE-EMO-01~03銆?
+### TASK-0249 M28-F锛欱ondScoreState.trend 璇箟鍖栵紙OPT-14锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚BondScoreState.trend()` 杩斿洖涓枃璇箟鎻忚堪锛坄"涓婂崌"/"绋冲畾"/"涓嬮檷"`锛夎€岄潪鑻辨枃鏋氫妇锛屽苟澧炲姞瓒嬪娍寮哄害锛坄"蹇€熶笂鍗?/"缂撴參涓嬮檷"`锛夈€?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛坄BondScoreState`锛夈€?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛歚trend()` 杩斿洖涓枃璇箟瀛楃涓诧紱鏂板 `trend_intensity()` 杩斿洖瓒嬪娍寮哄害鎻忚堪锛?  - `tests/unit/test_bond_trend_semantic_m28.py`锛堟柊澧烇級锛歍-BOND-TREND-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BOND-TREND-01锛氱Н鍒嗚繛缁笂鍗囨椂锛宍trend()` 杩斿洖 `"涓婂崌"` 鎴?`"蹇€熶笂鍗?`锛?  - T-BOND-TREND-02锛氱Н鍒嗗钩绋虫椂锛宍trend()` 杩斿洖 `"绋冲畾"`锛?  - T-BOND-TREND-03锛歚trend()` 杩斿洖鍊间负涓枃瀛楃涓诧紝涓嶅惈鑻辨枃鏋氫妇銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗tests/unit/test_bond_trend_semantic_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-TREND-001锛汿-BOND-TREND-01~03銆?
+### TASK-0250 M28-G锛歄PTIONAL_SLOTS 鎵╁睍锛圤PT-16锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚prompt_context.py` 鐨?`OPTIONAL_SLOTS` 浠庡崟涓€妲戒綅鎵╁睍涓哄妲戒綅鏋舵瀯锛屾敮鎸?`emotion_pulse`/`bond_texture`/`memory_emotion_hint` 绛夋儏鎰熸Ы浣嶅姩鎬佹敞鍏ャ€?- 杈撳叆锛歚host_brain/core/prompt_context.py`銆?- 杈撳嚭锛?  - `host_brain/core/prompt_context.py`锛歚OPTIONAL_SLOTS` 鏀逛负 dict 缁撴瀯锛屾敮鎸佸妲戒綅娉ㄥ唽锛涙柊澧?`register_slot(name, builder_fn)` 鏂规硶锛沗build_prompt_context()` 閬嶅巻鎵€鏈夊凡娉ㄥ唽妲戒綅锛?  - `tests/unit/test_optional_slots_m28.py`锛堟柊澧烇級锛歍-OPT-SLOTS-01~04銆?- 楠屾敹鏍囧噯锛?  - T-OPT-SLOTS-01锛歚register_slot("emotion_pulse", fn)` 鍚庯紝`build_prompt_context()` 杈撳嚭鍚?`emotion_pulse` 瀛楁锛?  - T-OPT-SLOTS-02锛氭Ы浣?builder 鎶涘嚭寮傚父鏃讹紝璇ユЫ浣嶈璺宠繃锛屼笉褰卞搷鍏朵粬妲戒綅锛?  - T-OPT-SLOTS-03锛氭湭娉ㄥ唽妲戒綅涓嶅嚭鐜板湪杈撳嚭涓紱
+  - T-OPT-SLOTS-04锛氭棫浠ｇ爜璋冪敤 `build_prompt_context()` 涓嶆姤閿欙紙鍚戝悗鍏煎锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/prompt_context.py`锛沗tests/unit/test_optional_slots_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CONTEXT-SLOTS-001锛汿-OPT-SLOTS-01~04銆?
+### TASK-0251 M28-H锛欱ondScoreState.to_summary 涓枃鍖栵紙OPT-21锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚BondScoreState.to_summary()` 鐨?`trend` 瀛楁缁熶竴杈撳嚭涓枃璇箟鎻忚堪锛屾秷闄よ嫳涓枃鏋氫妇娣风敤闂锛岀‘淇濇敞鍏?LLM 鐨?bond_summary 鍏ㄩ儴涓轰腑鏂囥€?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛汿ASK-0249锛坄trend()` 涓枃鍖栵級銆?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛歚to_summary()` 鐨勬墍鏈夊瓧娈靛€肩粺涓€涓轰腑鏂囷紱
+  - `tests/unit/test_bond_to_summary_cn_m28.py`锛堟柊澧烇級锛歍-BOND-SUM-CN-01~02銆?- 楠屾敹鏍囧噯锛?  - T-BOND-SUM-CN-01锛歚to_summary()` 杩斿洖 dict 涓棤鑻辨枃鏋氫妇鍊硷紱
+  - T-BOND-SUM-CN-02锛歚to_summary()` 鐨?`stage` 瀛楁涓轰腑鏂囬樁娈靛悕锛堝 `"鏈嬪弸"`锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗tests/unit/test_bond_to_summary_cn_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-SUMMARY-CN-001锛汿-BOND-SUM-CN-01~02銆?
+### TASK-0252 M28-I锛欳ontextCompressor 淇濆瓨鐢ㄦ埛杞锛圤PT-28锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚ContextCompressor._pre_compress_save()` 鏀逛负鍚屾椂淇濆瓨 user 鍜?assistant 杞锛岀‘淇濈敤鎴锋儏鎰熻〃杈句笉琚涪寮冿紝闀挎湡璁板繂涓哄弻澹伴亾銆?- 杈撳叆锛歚host_brain/memory/context_compressor.py`銆?- 杈撳嚭锛?  - `host_brain/memory/context_compressor.py`锛歚_pre_compress_save()` 淇濆瓨 user + assistant 鍙岃疆娆★紱user 杞鎼哄甫 `emotion_tag` 瀛楁锛堣嫢鍙敤锛夛紱
+  - `tests/unit/test_context_compressor_user_m28.py`锛堟柊澧烇級锛歍-COMPRESS-USER-01~02銆?- 楠屾敹鏍囧噯锛?  - T-COMPRESS-USER-01锛氬帇缂╁悗鐨勮褰曞寘鍚?user 杞锛?  - T-COMPRESS-USER-02锛歶ser 杞鍚?`emotion_tag` 瀛楁锛堣嫢鍘熷鏁版嵁鏈夛級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/context_compressor.py`锛沗tests/unit/test_context_compressor_user_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-COMPRESS-EMOTION-001锛汿-COMPRESS-USER-01~02銆?
+### TASK-0253 M28-J锛歀ongTermDistiller 澧炲姞鎯呮劅鍏崇郴钂搁涓婚锛圤PT-29锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚LongTermMemoryDistiller` 鐨勮捀棣忎富棰樺垪琛ㄥ鍔?`"鎯呮劅鍏崇郴鍙?` 缁村害锛岃捀棣忓嚭鐢ㄦ埛涓?AI 涔嬮棿鐨勬儏鎰熷叧绯绘紨鍙樻憳瑕併€?- 杈撳叆锛歚host_brain/memory/long_term_distiller.py`銆?- 杈撳嚭锛?  - `host_brain/memory/long_term_distiller.py`锛氳捀棣忎富棰樻柊澧?`"鎯呮劅鍏崇郴鍙?`锛涘搴?prompt 妯℃澘锛涜捀棣忕粨鏋滃瓨鍏?`emotional_relationship_summary` 瀛楁锛?  - `tests/unit/test_distiller_emotion_m28.py`锛堟柊澧烇級锛歍-DISTILL-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-DISTILL-EMO-01锛氳捀棣忕粨鏋滃寘鍚?`emotional_relationship_summary` 瀛楁锛?  - T-DISTILL-EMO-02锛歚emotional_relationship_summary` 涓洪潪绌哄瓧绗︿覆锛坢ock LLM 杩斿洖锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/long_term_distiller.py`锛沗tests/unit/test_distiller_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-DISTILL-EMOTION-001锛汿-DISTILL-EMO-01~02銆?
+### TASK-0254 M28-K锛欳rossTimelineAggregator 澧炲姞鎯呮劅浜嬩欢锛圤PT-33锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚CrossTimelineAggregator` 鐨勬椂闂寸嚎澧炲姞鎯呮劅浜嬩欢绫诲瀷锛坄EMOTION_PEAK`/`EMOTION_SHIFT`锛夛紝浣挎儏鎰熷彉鍖栧湪鏃堕棿绾夸腑鍙銆?- 杈撳叆锛歚host_brain/obs/cross_timeline.py`锛堟垨瀵瑰簲璺緞锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛氭椂闂寸嚎浜嬩欢绫诲瀷鏂板 `EMOTION_PEAK`/`EMOTION_SHIFT`锛涙儏鎰熶簨浠舵惡甯?`emotion_tag`/`emotion_intensity` 瀛楁锛?  - `tests/unit/test_timeline_emotion_m28.py`锛堟柊澧烇級锛歍-TIMELINE-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-TIMELINE-EMO-01锛氭儏鎰熷己搴?> 0.8 鏃讹紝鑷姩鐢熸垚 `EMOTION_PEAK` 浜嬩欢锛?  - T-TIMELINE-EMO-02锛氭儏鎰熸爣绛惧彂鐢熷彉鍖栨椂锛岃嚜鍔ㄧ敓鎴?`EMOTION_SHIFT` 浜嬩欢銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/obs/cross_timeline.py`锛沗tests/unit/test_timeline_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TIMELINE-EMOTION-001锛汿-TIMELINE-EMO-01~02銆?
+### TASK-0255 M28-L锛欵MOTION_TO_EXPRESSION_ID 鎵╁睍鑷?6绉嶏紙OPT-34锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚EMOTION_TO_EXPRESSION_ID` 浠?6 绉嶆墿灞曡嚦瑕嗙洊鍏ㄩ儴 16 绉嶆儏鎰熸爣绛撅紝娑堥櫎 60% 鎯呮劅鐘舵€佽闄嶇骇涓?neutral 琛ㄦ儏鐨勯棶棰樸€?- 杈撳叆锛歚host_brain/channels/vts_mapping_store.py`锛堟垨瀵瑰簲璺緞锛夛紱褰撳墠 16 绉嶆儏鎰熸爣绛炬灇涓俱€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚EMOTION_TO_EXPRESSION_ID` 琛ュ叏 10 绉嶇己澶辨儏鎰熺殑琛ㄦ儏鏄犲皠锛涙柊澧?`EMOTION_FALLBACK_MAP` 澶勭悊鏈煡鎯呮劅锛?  - `tests/unit/test_vts_expression_map_m28.py`锛堟柊澧烇級锛歍-VTS-MAP-01~03銆?- 楠屾敹鏍囧噯锛?  - T-VTS-MAP-01锛?6 绉嶆儏鎰熸爣绛惧潎鏈夊搴旇〃鎯?ID锛屾棤 `None` 杩斿洖锛?  - T-VTS-MAP-02锛氭湭鐭ユ儏鎰熸爣绛捐繑鍥?fallback 琛ㄦ儏锛屼笉杩斿洖 `None`锛?  - T-VTS-MAP-03锛歚NEUTRAL` 鎯呮劅鏄犲皠鍒颁腑鎬ц〃鎯?ID銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/channels/vts_mapping_store.py`锛沗tests/unit/test_vts_expression_map_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-VTS-EXPRESSION-FULL-001锛汿-VTS-MAP-01~03銆?
+### TASK-0256 M28-M锛欳ameraRecognition 瑙嗚鎰熺煡瑙﹀彂鎯呮劅鍝嶅簲锛圤PT-35锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚CameraRecognitionServiceContract.detect()` 鐨勮瑙夎瘑鍒粨鏋滐紙琛ㄦ儏/濮挎€侊級瑙﹀彂鎯呮劅鍝嶅簲锛屽皢鐢ㄦ埛瑙嗚鎯呮劅淇″彿娉ㄥ叆 `EmotionVector`銆?- 杈撳叆锛歚host_brain/senses/camera.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚detect()` 杩斿洖缁撴灉鏂板 `user_emotion_hint: str` 瀛楁锛沗metabolism.py` 鏂板 `apply_visual_emotion_hint()` 鏂规硶锛?  - `tests/unit/test_camera_emotion_m28.py`锛堟柊澧烇級锛歍-CAM-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-CAM-EMO-01锛氭娴嬪埌鐢ㄦ埛寰瑧鏃讹紝`user_emotion_hint="HAPPY"`锛?  - T-CAM-EMO-02锛歚apply_visual_emotion_hint("HAPPY")` 鍚庯紝`emotion_vector.valence` 涓婂崌銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/senses/camera.py`锛沗host_brain/core/metabolism.py`锛沗tests/unit/test_camera_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CAMERA-EMOTION-001锛汿-CAM-EMO-01~02銆?
+### TASK-0257 M28-N锛歍oolMeta 澧炲姞鎯呮劅閫傜敤鎬у瓧娈碉紙OPT-39锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚ToolMeta` 澧炲姞 `emotion_requirement: list[str]` 瀛楁锛屾爣娉ㄥ伐鍏烽€傜敤鐨勬儏鎰熷満鏅紝MCP 宸ュ叿娉ㄥ唽鏃舵劅鐭ユ儏鎰熼€傜敤鎬с€?- 杈撳叆锛歚host_brain/mcp/tool_registry.py`锛堟垨瀵瑰簲璺緞锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚ToolMeta` 鏂板 `emotion_requirement: list[str] = []` 瀛楁锛涘伐鍏烽€夋嫨鏃惰繃婊や笉閫傜敤褰撳墠鎯呮劅鐘舵€佺殑宸ュ叿锛?  - `tests/unit/test_tool_meta_emotion_m28.py`锛堟柊澧烇級锛歍-TOOL-META-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-TOOL-META-EMO-01锛歚emotion_requirement=["HAPPY"]` 鐨勫伐鍏峰湪 `mood_state="tired"` 鏃朵笉琚€変腑锛?  - T-TOOL-META-EMO-02锛歚emotion_requirement=[]` 鐨勫伐鍏峰湪浠讳綍鎯呮劅鐘舵€佷笅鍧囧彲琚€変腑銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/mcp/tool_registry.py`锛沗tests/unit/test_tool_meta_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TOOL-EMOTION-FILTER-001锛汿-TOOL-META-EMO-01~02銆?
+### TASK-0258 M28-O锛歊erankerServiceContract 鎯呮劅鎰熺煡閲嶆帓搴忥紙OPT-40锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚RerankerServiceContract.rerank()` 澧炲姞 `emotion_context` 鍙傛暟锛岄噸鎺掑簭鏃朵紭鍏堝彫鍥炰笌褰撳墠鎯呮劅鐘舵€佸叡楦ｇ殑璁板繂銆?- 杈撳叆锛歚host_brain/retrieval/reranker.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚rerank()` 鏂板 `emotion_context: str | None = None` 鍙傛暟锛涙儏鎰熷尮閰嶇殑璁板綍棰濆鍔犳潈 1.3x锛?  - `tests/unit/test_reranker_emotion_m28.py`锛堟柊澧烇級锛歍-RERANK-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-RERANK-EMO-01锛歚emotion_context="HAPPY"` 鏃讹紝`emotion_tag="HAPPY"` 鐨勮褰曟帓鍚嶄笂鍗囷紱
+  - T-RERANK-EMO-02锛歚emotion_context=None` 鏃讹紝琛屼负涓庢棫鐗堜竴鑷淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/reranker.py`锛沗tests/unit/test_reranker_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-RERANK-EMOTION-001锛汿-RERANK-EMO-01~02銆?
+### TASK-0259 M28-P锛歊etrievalPipeline 浼犻€掓儏鎰熶笂涓嬫枃锛圤PT-41锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚RetrievalPipelineContract.run()` 澧炲姞 `emotion_context` 鍙傛暟骞朵紶閫掔粰 reranker 鍜?recall_fusion锛屾墦閫氬彫鍥炵绾跨殑鎯呮劅涓婁笅鏂囦紶閫掋€?- 杈撳叆锛歚host_brain/retrieval/pipeline.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0238锛坮ecall_fusion 鎯呮劅璺敱锛夛紱TASK-0258锛坮eranker 鎯呮劅鎰熺煡锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚run()` 鏂板 `emotion_context: str | None = None` 鍙傛暟锛涢€忎紶缁?reranker 鍜?recall_fusion锛?  - `tests/unit/test_retrieval_pipeline_emotion_m28.py`锛堟柊澧烇級锛歍-PIPELINE-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-PIPELINE-EMO-01锛歚emotion_context="SAD"` 鏃讹紝pipeline 灏嗗弬鏁伴€忎紶缁?reranker锛?  - T-PIPELINE-EMO-02锛歚emotion_context=None` 鏃讹紝琛屼负涓庢棫鐗堜竴鑷淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/pipeline.py`锛沗tests/unit/test_retrieval_pipeline_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PIPELINE-EMOTION-001锛汿-PIPELINE-EMO-01~02銆?
+### TASK-0260 M28-Q锛歀lmGatewayContract 鎼哄甫鎯呮劅涓婁笅鏂囷紙OPT-44锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚LlmGatewayContract.generate()` 鐨?`prompt_payload` 澧炲姞 `emotion_context` 瀛楁锛孡LM 璋冪敤鏃舵惡甯︽儏鎰熶笂涓嬫枃锛屾敮鎸佹儏鎰熸劅鐭ョ殑 prompt 娉ㄥ叆绛栫暐銆?- 杈撳叆锛歚host_brain/core/llm_gateway.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚generate()` prompt_payload 鏂板 `emotion_context: dict`锛堝惈 `mood_state`/`emotion_tag`/`emotion_range_hint`锛夛紱
+  - `tests/unit/test_llm_gateway_emotion_m28.py`锛堟柊澧烇級锛歍-LLM-GW-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-LLM-GW-EMO-01锛歚generate()` 鐨?prompt_payload 鍚?`emotion_context` 瀛楁锛?  - T-LLM-GW-EMO-02锛歚emotion_context` 缂哄け鏃朵娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/llm_gateway.py`锛沗tests/unit/test_llm_gateway_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-LLM-EMOTION-001锛汿-LLM-GW-EMO-01~02銆?
+### TASK-0261 M28-R锛欸raphExecutor 鑺傜偣鎵ц鎼哄甫鎯呮劅鐘舵€侊紙OPT-45锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚GraphExecutor._invoke_handler()` 鐨?`context` 鍙傛暟鎼哄甫鎯呮劅鐘舵€侊紝鍥捐妭鐐规墽琛屾椂鑳芥劅鐭ュ綋鍓嶆儏鎰熶笂涓嬫枃銆?- 杈撳叆锛歚host_brain/core/graph_executor.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0234锛堟儏鎰熺姸鎬佹潵婧愶級銆?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚_invoke_handler()` context 鏂板 `emotion_tag`/`mood_state` 瀛楁锛?  - `tests/unit/test_graph_executor_emotion_m28.py`锛堟柊澧烇級锛歍-GRAPH-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-GRAPH-EMO-01锛歨andler 鎺ユ敹鍒扮殑 context 鍚?`emotion_tag` 瀛楁锛?  - T-GRAPH-EMO-02锛歝ontext 鏃犳儏鎰熷瓧娈垫椂浣跨敤榛樿鍊硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/graph_executor.py`锛沗tests/unit/test_graph_executor_emotion_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-GRAPH-EMOTION-001锛汿-GRAPH-EMO-01~02銆?
+### TASK-0262 M28-S锛歋oVITS synthesize emotion_intensity 鐪熸浼犻€掞紙OPT-47锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶?`SoVITSModelManager.synthesize()` 鐨?`emotion_intensity` 鍙傛暟琚拷鐣ョ殑闂锛岀‘淇濆弬鏁扮湡姝ｄ紶閫掔粰搴曞眰 SDK锛屽奖鍝?TTS 璇皵骞呭害銆?- 杈撳叆锛歚edge_client/actuators/tts_engine.py`銆?- 杈撳嚭锛?  - `edge_client/actuators/tts_engine.py`锛歚synthesize()` 灏?`emotion_intensity` 鏄犲皠涓哄簳灞?SDK 鐨勫搴斿弬鏁帮紙濡?`speed_factor`/`energy_factor`锛夊苟浼犻€掞紱
+  - `tests/unit/test_tts_intensity_fix_m28.py`锛堟柊澧烇級锛歍-TTS-INTENSITY-FIX-01~02銆?- 楠屾敹鏍囧噯锛?  - T-TTS-INTENSITY-FIX-01锛歚emotion_intensity=0.9` 鏃讹紝搴曞眰 SDK 璋冪敤鍙傛暟涓?`emotion_intensity=0.3` 鏃朵笉鍚岋紱
+  - T-TTS-INTENSITY-FIX-02锛歚emotion_intensity` 瓒呭嚭 [0,1] 鏃惰鎴柇锛屼笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚edge_client/actuators/tts_engine.py`锛沗tests/unit/test_tts_intensity_fix_m28.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-TTS-INTENSITY-001锛汿-TTS-INTENSITY-FIX-01~02銆?
+### TASK-0263 M28-T锛歁28 鍙戝竷娓呭崟
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0244~0262 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M28 鍙戝竷娓呭崟锛岃褰?P1 鎯呮劅鏋舵瀯娣卞寲鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M28 閲岀▼纰戠姸鎬佷负 DONE锛涚敓鎴愪唬鐮佸鏌ユ姤鍛娿€?- 杈撳叆锛歍ASK-0244~0262 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?895 passed锛?857 + 38 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m28_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁28 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M28 灏忚妭锛?  - `docs/40_agents/full_code_review_report_2026-03-05-m28.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `emotion_vector_implemented=true`锛圗motionVector 鎯呯华杩炵画浣撳凡瀹炵幇锛夛紱
+  - `governor_r8_active=true`锛圧8 鎯呮劅闂ㄦ帶宸叉縺娲伙級锛?  - `bond_grade_refined=true`锛圔ond 浜掑姩璐ㄩ噺鍒嗙骇宸插疄鐜帮級锛?  - `vts_expression_full=true`锛圴TS 琛ㄦ儏鏄犲皠宸茶鐩?6绉嶆儏鎰燂級锛?  - `tts_intensity_fixed=true`锛圱TS 寮哄害鍙傛暟鏂矾宸蹭慨澶嶏級锛?  - `total_tests_passed 鈮?1895`锛?  - `zero_regressions=true`銆?- 娑夊強鏂囦欢璺緞锛歚docs/50_release/m28_release.json`锛沗docs/20_prd/PRD.md`锛沗docs/60_trace/requirements_trace.md`锛沗docs/40_agents/full_code_review_report_2026-03-05-m28.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-EMOTION-CONTINUUM-001锛汧R-GOV-R8-001锛汧R-BOND-GRADE-001锛汧R-VTS-EXPRESSION-FULL-001锛汧R-TTS-INTENSITY-001銆?
+---
+
+## M29 鎯呮劅浣撻獙澧炲己锛圥2 浼樺寲锛夛紙TASK-0264~0279锛?
+> **鐩爣锛?* 鍦?M27/M28 鍩虹璁炬柦鍜屾牳蹇冩灦鏋勫畬鎴愬悗锛屽疄鐜版儏鎰熶綋楠岀殑鍏ㄩ潰澧炲己锛欱ond 璐ㄦ劅灞傘€佹儏鎰熻蹇嗗彫鍥炪€佷富鍔ㄨЕ鍙戝櫒銆佽鐥曚慨澶嶃€佹儏鎰熷洖澹般€丩LM 鍙傛暟鍔ㄦ€佽皟鏁寸瓑 17 椤?P2 浼樺寲銆?> **渚濇嵁锛?* SOUL-OPT-2026-03-05 浼樺寲2/3/4/5/9/10/11/12/15/17/18/23/24/30/36/42/48
+> **鍓嶇疆锛?* M28 鍏ㄩ儴 DONE
+> **瀹屾垚鏃堕棿锛?* 2026-03-06
+> **鐘舵€侊細** 鉁?DONE锛?112 passed, 0 failed锛?
+### TASK-0264 M29-A锛欱ondEmotionalTexture 鎯呮劅璐ㄦ劅灞傦紙OPT-2锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `BondScoreState` 涓婂鍔?`BondEmotionalTexture` 鎯呮劅璐ㄦ劅灞傦紝鎰熺煡浜掑姩鑺傚锛堝钩鍧囧洖澶嶉棿闅旓級鍜屽叧绯绘俯搴︼紙杩戞湡鎯呮劅鍧囧€硷級锛屽奖鍝?AI 琛ㄨ揪椋庢牸銆?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛汿ASK-0246锛圔ond 浜掑姩鍒嗙骇锛夈€?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛氭柊澧?`BondEmotionalTexture` dataclass锛坄avg_response_gap_ms`/`recent_emotion_valence`/`intimacy_temperature`锛夛紱`BondScoreState` 鎸佹湁 `texture: BondEmotionalTexture`锛沗texture` 褰卞搷 `to_summary()` 鐨勯鏍兼弿杩帮紱
+  - `tests/unit/test_bond_texture_m29.py`锛堟柊澧烇級锛歍-BOND-TEX-01~04銆?- 楠屾敹鏍囧噯锛?  - T-BOND-TEX-01锛歚avg_response_gap_ms < 5000` 鏃讹紝`intimacy_temperature` 涓婂崌锛?  - T-BOND-TEX-02锛歚recent_emotion_valence > 0.5` 鏃讹紝`to_summary()` 鍚俯鏆栭鏍兼弿杩帮紱
+  - T-BOND-TEX-03锛歚BondEmotionalTexture` 涓嶅奖鍝?Bond 绉垎璁＄畻锛?  - T-BOND-TEX-04锛歚texture` 瀛楁缂哄け鏃朵娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗tests/unit/test_bond_texture_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-TEXTURE-001锛汿-BOND-TEX-01~04銆?
+### TASK-0265 M29-B锛氭儏鎰熻蹇嗘爣娉ㄤ笌鍔犳潈鍙洖锛圤PT-3锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚recall()` 鏀寔鎯呮劅鍔犳潈鍙洖锛堣涔?0% + 鎯呮劅鍏遍福30% + 鎯呮劅鏄捐憲搴?0%锛夛紝浣块珮鎯呮劅寮哄害鐨勮蹇嗗湪鐩稿叧鍦烘櫙涓嬩紭鍏堣鍙洖銆?- 杈撳叆锛歚host_brain/memory/episodic.py`锛汿ASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夛紱TASK-0238锛坮ecall_fusion 鎯呮劅璺敱锛夈€?- 杈撳嚭锛?  - `host_brain/memory/episodic.py`锛歚recall()` 鏂板鎯呮劅鍔犳潈璇勫垎锛坄emotion_resonance_score`锛夛紱鏈€缁堟帓搴忎负 `semantic*0.6 + resonance*0.3 + salience*0.1`锛?  - `tests/unit/test_episodic_weighted_recall_m29.py`锛堟柊澧烇級锛歍-EPISODIC-WR-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EPISODIC-WR-01锛氬綋鍓嶆儏鎰熶负 `HAPPY` 鏃讹紝`emotion_tag="HAPPY"` 鐨勮褰曟帓鍚嶉珮浜?`emotion_tag="SAD"` 鐨勫悓绛夎涔夎褰曪紱
+  - T-EPISODIC-WR-02锛歚emotion_salience > 0.8` 鐨勮褰曞湪鍚岀瓑鏉′欢涓嬫帓鍚嶆洿楂橈紱
+  - T-EPISODIC-WR-03锛氭棤鎯呮劅瀛楁鐨勬棫璁板綍涓嶈杩囨护锛屾甯稿弬涓庡彫鍥炪€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_episodic_weighted_recall_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EPISODIC-WEIGHTED-RECALL-001锛汿-EPISODIC-WR-01~03銆?
+### TASK-0266 M29-C锛歟motion_pulse 鍔ㄦ€佹Ы浣嶆敞鍏ワ紙OPT-4锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬埄鐢?TASK-0250 鐨?`OPTIONAL_SLOTS` 鏋舵瀯锛屾敞鍐?`emotion_pulse` 妲戒綅锛屽皢褰撳墠鎯呮劅鐘舵€佺殑鑷劧璇█鎻忚堪鍔ㄦ€佹敞鍏?`prompt_context`锛屼娇 LLM 鎰熺煡"姝ゅ埢鎰熷彈"銆?- 杈撳叆锛歚host_brain/core/prompt_context.py`锛汿ASK-0250锛坄OPTIONAL_SLOTS` 鎵╁睍锛夛紱TASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - `host_brain/core/prompt_context.py`锛氭敞鍐?`emotion_pulse` 妲戒綅锛宐uilder 浠?`EmotionVector` 鐢熸垚鑷劧璇█鎻忚堪锛堝 `"姝ゅ埢鎰熷埌鏈変簺寮€蹇冿紝绮惧姏鍏呮矝"`锛夛紱
+  - `tests/unit/test_emotion_pulse_m29.py`锛堟柊澧烇級锛歍-EMO-PULSE-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-PULSE-01锛歚prompt_context` 鍚?`emotion_pulse` 瀛楁锛?  - T-EMO-PULSE-02锛歚emotion_pulse` 涓轰腑鏂囪嚜鐒惰瑷€鎻忚堪锛屼笉鍚師濮嬫暟鍊硷紱
+  - T-EMO-PULSE-03锛歚EmotionVector` 涓嶅彲鐢ㄦ椂锛宍emotion_pulse` 浣跨敤榛樿鎻忚堪锛屼笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/prompt_context.py`锛沗tests/unit/test_emotion_pulse_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-PULSE-001锛汿-EMO-PULSE-01~03銆?
+### TASK-0267 M29-D锛氫富鍔ㄦ儏鎰熻Е鍙戝櫒锛圤PT-5锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬疄鐜颁富鍔ㄦ儏鎰熻Е鍙戝櫒锛屾劅鐭ユ矇榛樿秴鏃?鏃╂櫒闂€?绾康鏃?鐢ㄦ埛鍘嬪姏淇″彿锛岃嚜鍔ㄨЕ鍙戝搴旀儏鎰熷搷搴旓紙濡傛矇榛?10 鍒嗛挓鍚庝富鍔ㄥ叧蹇冿級銆?- 杈撳叆锛歚host_brain/scheduler/scheduler.py`锛汿ASK-0244锛坄EmotionVector`锛夛紱TASK-0242锛堣皟搴﹀櫒鎯呮劅鐘舵€侊級銆?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛氭柊澧?`ProactiveEmotionTrigger` 绫伙紝妫€娴嬫矇榛?鏃堕棿/绾康鏃?鍘嬪姏淇″彿锛涜Е鍙戞椂鐢熸垚瀵瑰簲鎯呮劅鎰忓浘锛?  - `tests/unit/test_proactive_emotion_trigger_m29.py`锛堟柊澧烇級锛歍-PROACTIVE-EMO-01~04銆?- 楠屾敹鏍囧噯锛?  - T-PROACTIVE-EMO-01锛氭矇榛樿秴杩?600 绉掓椂锛岃Е鍙?`PROACTIVE_CARE` 鎰忓浘锛?  - T-PROACTIVE-EMO-02锛氭棭鏅?7-9 鐐归娆″璇濇椂锛岃Е鍙?`MORNING_GREETING` 鎯呮劅锛?  - T-PROACTIVE-EMO-03锛氭娴嬪埌鐢ㄦ埛鍘嬪姏淇″彿锛坄emotion_tag="ANXIOUS"` 鎸佺画 3 杞級鏃讹紝瑙﹀彂 `COMFORT` 鎰忓浘锛?  - T-PROACTIVE-EMO-04锛氳Е鍙戦鐜囬檺鍒讹紙鍚岀被瑙﹀彂鍣?1 灏忔椂鍐呮渶澶?1 娆★級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/scheduler/scheduler.py`锛沗tests/unit/test_proactive_emotion_trigger_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PROACTIVE-EMOTION-001锛汿-PROACTIVE-EMO-01~04銆?
+### TASK-0268 M29-E锛氭儏鎰熸椂闂寸嚎閲嶅缓锛圤PT-9锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`recall_emotional_timeline()` 鏂规硶锛屽垎鏋愭儏鎰熷姬绾匡紙寮€濮?涓棿/缁撴潫锛夛紝鐢熸垚鏃堕棿绾挎憳瑕侊紝鏀寔 AI 鎻忚堪"閭ｆ鏃堕棿"鐨勬暣浣撴劅鍙椼€?- 杈撳叆锛歚host_brain/memory/episodic.py`锛汿ASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夛紱TASK-0254锛堟椂闂寸嚎鎯呮劅浜嬩欢锛夈€?- 杈撳嚭锛?  - `host_brain/memory/episodic.py`锛氭柊澧?`recall_emotional_timeline(time_range)` 鏂规硶锛岃繑鍥炴儏鎰熷姬绾挎憳瑕侊紙`start_emotion`/`peak_emotion`/`end_emotion`/`overall_valence`/`narrative`锛夛紱
+  - `tests/unit/test_emotional_timeline_m29.py`锛堟柊澧烇級锛歍-EMO-TIMELINE-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-TIMELINE-01锛氱粰瀹氭椂闂磋寖鍥村唴鏈夎褰曟椂锛岃繑鍥炲惈 `start_emotion`/`end_emotion` 鐨勬憳瑕侊紱
+  - T-EMO-TIMELINE-02锛歚overall_valence` 涓?[-1,1] 鑼冨洿鍐呯殑娴偣鏁帮紱
+  - T-EMO-TIMELINE-03锛氭椂闂磋寖鍥村唴鏃犺褰曟椂锛岃繑鍥為粯璁ゆ憳瑕侊紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_emotional_timeline_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTIONAL-TIMELINE-001锛汿-EMO-TIMELINE-01~03銆?
+### TASK-0269 M29-F锛歀LM 鎯呮劅鎰熺煡鐢熸垚鍙傛暟鍔ㄦ€佽皟鏁达紙OPT-10锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭牴鎹?`emotion_pulse` 鍔ㄦ€佽皟鏁?LLM 鐢熸垚鍙傛暟锛堝叴濂嬧啋temperature鈫戯紝鎮蹭激鈫抰emperature鈫擄級锛屼娇 AI 鍥炲椋庢牸涓庢儏鎰熺姸鎬佸尮閰嶃€?- 杈撳叆锛歚host_brain/core/llm_gateway.py`锛汿ASK-0260锛圠LM Gateway 鎯呮劅涓婁笅鏂囷級锛汿ASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - `host_brain/core/llm_gateway.py`锛歚generate()` 鏍规嵁 `emotion_context.arousal` 鍔ㄦ€佽皟鏁?`temperature`锛坄arousal > 0.7` 鈫?`temperature=0.9`锛宍arousal < 0.3` 鈫?`temperature=0.6`锛夛紱
+  - `tests/unit/test_llm_emotion_params_m29.py`锛堟柊澧烇級锛歍-LLM-EMO-PARAM-01~03銆?- 楠屾敹鏍囧噯锛?  - T-LLM-EMO-PARAM-01锛歚arousal=0.9` 鏃讹紝`temperature 鈮?0.85`锛?  - T-LLM-EMO-PARAM-02锛歚arousal=0.1` 鏃讹紝`temperature 鈮?0.65`锛?  - T-LLM-EMO-PARAM-03锛歚emotion_context` 缂哄け鏃讹紝浣跨敤榛樿 `temperature`锛屼笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/llm_gateway.py`锛沗tests/unit/test_llm_emotion_params_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-LLM-EMOTION-PARAMS-001锛汿-LLM-EMO-PARAM-01~03銆?
+### TASK-0270 M29-G锛欱ond 瑁傜棔淇鏈哄埗锛圤PT-11锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`BondRiftState` 瑁傜棔-淇鍙岃建鏈哄埗锛屽啿绐佸悗杩涘叆瑁傜棔鐘舵€侊紝淇鏈熼棿鑷姩璋冩暣 AI 琛ㄨ揪椋庢牸锛堟洿娓╂煍銆佹洿涓诲姩閬撴瓑锛夈€?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛沗host_brain/bond/bond_dynamics.py`銆?- 杈撳嚭锛?  - `host_brain/bond/bond_stage_engine.py`锛氭柊澧?`BondRiftState`锛坄rift_level`/`repair_progress`/`rift_cause`锛夛紱`BondScoreState` 鎸佹湁 `rift: BondRiftState | None`锛?  - `host_brain/bond/bond_dynamics.py`锛歚CONFLICT` 浜嬩欢瑙﹀彂瑁傜棔锛沗APOLOGY`/`COMFORT` 浜嬩欢鎺ㄨ繘淇锛?  - `tests/unit/test_bond_rift_m29.py`锛堟柊澧烇級锛歍-BOND-RIFT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-BOND-RIFT-01锛歚CONFLICT` 浜嬩欢鍚庯紝`rift_level > 0`锛?  - T-BOND-RIFT-02锛歚APOLOGY` 浜嬩欢鍚庯紝`repair_progress` 涓婂崌锛?  - T-BOND-RIFT-03锛歚repair_progress >= 1.0` 鏃讹紝`rift` 娓呴櫎锛?  - T-BOND-RIFT-04锛氳鐥曟湡闂达紝`to_summary()` 鍚慨澶嶉鏍兼彁绀恒€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗host_brain/bond/bond_dynamics.py`锛沗tests/unit/test_bond_rift_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-RIFT-001锛汿-BOND-RIFT-01~04銆?
+### TASK-0271 M29-H锛氭儏鎰熷洖澹版満鍒讹紙OPT-12锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`EmotionEcho` 妯″潡锛孉I 鎯呮劅鍙楃敤鎴锋儏鎰熸劅鏌擄紙Bond 瓒婃繁鍏辨儏瓒婂己锛夛紝闄岀敓浜洪樁娈垫劅鏌撶巼 5%锛岀伒榄備即渚ｉ樁娈垫劅鏌撶巼 65%銆?- 杈撳叆锛歚host_brain/core/metabolism.py`锛沗host_brain/bond/bond_stage_engine.py`锛汿ASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛氭柊澧?`apply_emotion_echo(user_emotion, bond_stage)` 鏂规硶锛涙劅鏌撶巼鐢?Bond 闃舵鍐冲畾锛?  - `tests/unit/test_emotion_echo_m29.py`锛堟柊澧烇級锛歍-EMO-ECHO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-ECHO-01锛歚bond_stage="STRANGER"` 鏃讹紝鎰熸煋鐜?鈮?0.1锛?  - T-EMO-ECHO-02锛歚bond_stage="SOULMATE"` 鏃讹紝鎰熸煋鐜?鈮?0.6锛?  - T-EMO-ECHO-03锛歚apply_emotion_echo()` 鍚庯紝AI `emotion_vector` 鍚戠敤鎴锋儏鎰熸柟鍚戞紓绉汇€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_emotion_echo_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-ECHO-001锛汿-EMO-ECHO-01~03銆?
+### TASK-0272 M29-I锛欵pisodicRecord decay_profile_id 瀹炶锛圤PT-15锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚EpisodicRecord.decay_profile_id` 浠庣┖澹冲彉涓虹湡瀹炵敓鏁堢殑琛板噺閰嶇疆锛屼笉鍚屾儏鎰熷己搴︾殑璁板繂浣跨敤涓嶅悓琛板噺鏇茬嚎锛堥珮鎯呮劅寮哄害璁板繂琛板噺鏇存參锛夈€?- 杈撳叆锛歚host_brain/memory/episodic.py`锛汿ASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夈€?- 杈撳嚭锛?  - `host_brain/memory/episodic.py`锛氭柊澧?`DECAY_PROFILES` dict锛坄fast`/`normal`/`slow`/`permanent`锛夛紱`decay_profile_id` 鐢?`emotion_intensity` 鑷姩鎺ㄥ锛沗recall()` 璇勫垎鏃跺簲鐢ㄨ“鍑忕郴鏁帮紱
+  - `tests/unit/test_episodic_decay_m29.py`锛堟柊澧烇級锛歍-EPISODIC-DECAY-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EPISODIC-DECAY-01锛歚emotion_intensity > 0.8` 鐨勮褰曚娇鐢?`slow` 琛板噺鏇茬嚎锛?  - T-EPISODIC-DECAY-02锛歚emotion_intensity < 0.3` 鐨勮褰曚娇鐢?`fast` 琛板噺鏇茬嚎锛?  - T-EPISODIC-DECAY-03锛氳“鍑忓悗鐨勮褰曡瘎鍒嗕綆浜庢湭琛板噺璁板綍锛堟椂闂磋秺涔呭垎瓒婁綆锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_episodic_decay_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EPISODIC-DECAY-001锛汿-EPISODIC-DECAY-01~03銆?
+### TASK-0273 M29-J锛欱ondDynamicsWriter payload 璇箟鏍囧噯鍖栵紙OPT-17锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚BondDynamicsWriter.apply_update()` 鐨?`payload` 瀛楁寤虹珛璇箟鏍囧噯鍖栬鑼冿紝涓嶅悓浜嬩欢绫诲瀷鏈夊搴旂殑 payload schema锛屾秷闄ゅ瓧娈甸殢鎰忔€с€?- 杈撳叆锛歚host_brain/bond/bond_dynamics.py`锛汿ASK-0236锛圔ond 浜嬩欢鎯呮劅瀛楁锛夈€?- 杈撳嚭锛?  - `host_brain/bond/bond_dynamics.py`锛氭柊澧?`BOND_EVENT_PAYLOAD_SCHEMA` dict锛屾瘡绉嶄簨浠剁被鍨嬪搴斿繀濉?鍙€夊瓧娈碉紱`apply_update()` 鏍￠獙 payload 鍚堣鎬э紱
+  - `tests/unit/test_bond_payload_schema_m29.py`锛堟柊澧烇級锛歍-BOND-PAYLOAD-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BOND-PAYLOAD-01锛歚INTERACTION` 浜嬩欢 payload 缂哄皯蹇呭～瀛楁鏃讹紝璁板綍璀﹀憡鏃ュ織锛堜笉鎷掔粷锛夛紱
+  - T-BOND-PAYLOAD-02锛歚DEEP_TALK` 浜嬩欢 payload 鍚?`topic` 瀛楁鏃讹紝姝ｅ父澶勭悊锛?  - T-BOND-PAYLOAD-03锛氭湭鐭ヤ簨浠剁被鍨嬬殑 payload 涓嶈鏍￠獙锛岀洿鎺ラ€氳繃銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_dynamics.py`锛沗tests/unit/test_bond_payload_schema_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-PAYLOAD-001锛汿-BOND-PAYLOAD-01~03銆?
+### TASK-0274 M29-K锛歨ard_state_summary 澧炲姞鎯呮劅鏃堕棿鎴筹紙OPT-18锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚governance_snapshot` 鐨?`hard_state_summary` 澧炲姞 `emotion_updated_at` 鏃堕棿鎴冲瓧娈碉紝鏀寔鎯呮劅鐘舵€佺殑鏃舵晥鎬у垽鏂€?- 杈撳叆锛歚host_brain/core/metabolism.py`锛坄HardStateSnapshot`锛夛紱`host_brain/governor/decision.py`銆?- 杈撳嚭锛?  - `host_brain/core/metabolism.py`锛歚HardStateSnapshot` 鏂板 `emotion_updated_at: int`锛堟绉掓椂闂存埑锛夛紱
+  - `host_brain/governor/decision.py`锛歚build_governance_snapshot()` 浼犻€?`emotion_updated_at`锛?  - `tests/unit/test_hard_state_timestamp_m29.py`锛堟柊澧烇級锛歍-HARD-TS-01~02銆?- 楠屾敹鏍囧噯锛?  - T-HARD-TS-01锛歚HardStateSnapshot` 鍚?`emotion_updated_at` 瀛楁锛屽€间负鍚堟硶姣鏃堕棿鎴筹紱
+  - T-HARD-TS-02锛氭儏鎰熺姸鎬佹洿鏂版椂锛宍emotion_updated_at` 鍚屾鏇存柊銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗host_brain/governor/decision.py`锛沗tests/unit/test_hard_state_timestamp_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-HARD-STATE-TS-001锛汿-HARD-TS-01~02銆?
+### TASK-0275 M29-L锛歷alidate_prompt_context bond_summary 璇箟鏍￠獙锛圤PT-23锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚validate_prompt_context()` 瀵?`bond_summary` 鐨?`stage`/`trend` 瀛楁澧炲姞璇箟鏍￠獙锛屾嫆缁濋潪娉曟灇涓惧€硷紙濡?`"S_BOND_UPDATE"`锛夈€?- 杈撳叆锛歚host_brain/core/prompt_context.py`锛汿ASK-0237锛坄derive_bond_summary` 淇锛夈€?- 杈撳嚭锛?  - `host_brain/core/prompt_context.py`锛歚validate_prompt_context()` 鏍￠獙 `bond_summary.stage` 涓哄悎娉?Bond 闃舵鏋氫妇锛沗bond_summary.trend` 涓哄悎娉曚腑鏂囪秼鍔挎弿杩帮紱闈炴硶鍊艰褰曡鍛婂苟浣跨敤榛樿鍊硷紱
+  - `tests/unit/test_prompt_context_bond_validate_m29.py`锛堟柊澧烇級锛歍-CP-BOND-VAL-01~03銆?- 楠屾敹鏍囧噯锛?  - T-CP-BOND-VAL-01锛歚bond_summary.stage="S_BOND_UPDATE"` 鏃讹紝鏍￠獙澶辫触锛屼娇鐢ㄩ粯璁ゅ€?`"STRANGER"`锛?  - T-CP-BOND-VAL-02锛歚bond_summary.stage="FRIEND"` 鏃讹紝鏍￠獙閫氳繃锛?  - T-CP-BOND-VAL-03锛氭牎楠屽け璐ユ椂璁板綍 WARNING 鏃ュ織锛屼笉鎶涘嚭寮傚父銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/prompt_context.py`锛沗tests/unit/test_prompt_context_bond_validate_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-CONTEXT-BOND-VALIDATE-001锛汿-CP-BOND-VAL-01~03銆?
+### TASK-0276 M29-M锛歜uild_fallback_output 鎯呮劅鎰熺煡闄嶇骇锛圤PT-24锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚build_fallback_output()` 闄嶇骇鍥炲鎰熺煡褰撳墠鎯呮劅鐘舵€侊紝鏍规嵁 `mood_state` 閫夋嫨瀵瑰簲鐨勯檷绾у洖澶嶆ā鏉匡紙濡?`tired` 鐘舵€佷娇鐢ㄦ俯鏌旈亾姝夎姘旓級銆?- 杈撳叆锛歚host_brain/core/qa.py`锛坄build_fallback_output()`锛夛紱TASK-0234锛堟儏鎰熺姸鎬佹潵婧愶級銆?- 杈撳嚭锛?  - `host_brain/core/qa.py`锛歚build_fallback_output()` 鎺ユ敹 `mood_state` 鍙傛暟锛涙柊澧?`FALLBACK_TEMPLATES` dict锛堟寜 `mood_state` 鍒嗙被锛夛紱
+  - `tests/unit/test_fallback_emotion_m29.py`锛堟柊澧烇級锛歍-FALLBACK-EMO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-FALLBACK-EMO-01锛歚mood_state="tired"` 鏃讹紝闄嶇骇鍥炲浣跨敤娓╂煍璇皵妯℃澘锛?  - T-FALLBACK-EMO-02锛歚mood_state="engaged"` 鏃讹紝闄嶇骇鍥炲浣跨敤娲绘臣璇皵妯℃澘锛?  - T-FALLBACK-EMO-03锛歚mood_state=None` 鏃讹紝浣跨敤榛樿闄嶇骇妯℃澘锛屼笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/qa.py`锛沗tests/unit/test_fallback_emotion_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FALLBACK-EMOTION-001锛汿-FALLBACK-EMO-01~03銆?
+### TASK-0277 M29-N锛歂atsumeScheduler 蹇冭烦鎰熺煡鎯呮劅鐘舵€侊紙OPT-30锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚NatsumeScheduler` 鐨勫績璺虫娴?Prompt 鎰熺煡褰撳墠鎯呮劅鐘舵€侊紝蹇冭烦鏃朵笉閲嶇疆鎯呮劅鐘舵€侊紝鑰屾槸鍦ㄦ儏鎰熶笂涓嬫枃涓墽琛屽績璺抽€昏緫銆?- 杈撳叆锛歚host_brain/scheduler/scheduler.py`锛汿ASK-0242锛堣皟搴﹀櫒鎯呮劅鐘舵€侊級锛汿ASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - `host_brain/scheduler/scheduler.py`锛氬績璺?Prompt 鎼哄甫褰撳墠 `emotion_pulse` 鎻忚堪锛涘績璺虫墽琛屽悗涓嶉噸缃?`EmotionVector`锛?  - `tests/unit/test_scheduler_heartbeat_emotion_m29.py`锛堟柊澧烇級锛歍-SCHED-HB-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-SCHED-HB-EMO-01锛氬績璺虫墽琛屽墠鍚庯紝`emotion_vector` 鏁板€间笉鍙橈紱
+  - T-SCHED-HB-EMO-02锛氬績璺?Prompt 鍚?`emotion_pulse` 瀛楁銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/scheduler/scheduler.py`锛沗tests/unit/test_scheduler_heartbeat_emotion_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-SCHED-HEARTBEAT-EMOTION-001锛汿-SCHED-HB-EMO-01~02銆?
+### TASK-0278 M29-O锛欻ybridFusionStrategy 鎯呮劅寮哄害鍔犳潈锛圤PT-36锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚HybridFusionStrategy.fuse()` 鐨勮瀺鍚堝垎鏁版劅鐭ユ儏鎰熷己搴︼紝楂樻儏鎰熷己搴︾殑璁板繂鍦ㄨ瀺鍚堟椂鑾峰緱棰濆鏉冮噸鍔犳垚銆?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0235锛坄EpisodicRecord` 鎯呮劅瀛楁锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚fuse()` 鏂板鎯呮劅寮哄害鍔犳潈锛坄emotion_intensity > 0.7` 鈫?铻嶅悎鍒嗘暟 脳 1.2锛夛紱
+  - `tests/unit/test_hybrid_fusion_emotion_m29.py`锛堟柊澧烇級锛歍-FUSION-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-FUSION-EMO-01锛歚emotion_intensity=0.9` 鐨勮褰曡瀺鍚堝垎鏁?鈮?`emotion_intensity=0.3` 鍚岀瓑璇箟璁板綍鐨?1.15 鍊嶏紱
+  - T-FUSION-EMO-02锛歚emotion_intensity` 缂哄け鏃讹紝浣跨敤榛樿鏉冮噸 1.0锛屼笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗tests/unit/test_hybrid_fusion_emotion_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-FUSION-EMOTION-001锛汿-FUSION-EMO-01~02銆?
+### TASK-0279 M29-P锛欰SRTranscriptEvent 澧炲姞鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁锛圤PT-48锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚ASRTranscriptEvent` 澧炲姞 `user_emotion_hint` 瀛楁锛孉SR 灞傛牴鎹闊崇壒寰侊紙璇€?闊抽噺/璇皟锛夋帹鏂敤鎴锋儏鎰燂紝涓烘儏鎰熷洖澹板拰涓诲姩瑙﹀彂鍣ㄦ彁渚涙暟鎹潵婧愩€?- 杈撳叆锛歚edge_client/senses/asr.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0271锛堟儏鎰熷洖澹帮級锛汿ASK-0267锛堜富鍔ㄨЕ鍙戝櫒锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚ASRTranscriptEvent` 鏂板 `user_emotion_hint: str | None` 瀛楁锛汚SR 澶勭悊鏃舵牴鎹闊崇壒寰佸～鍏咃紙鍙负 `None`锛夛紱
+  - `tests/unit/test_asr_emotion_hint_m29.py`锛堟柊澧烇級锛歍-ASR-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-ASR-EMO-01锛歚ASRTranscriptEvent` 鍚?`user_emotion_hint` 瀛楁锛?  - T-ASR-EMO-02锛歚user_emotion_hint=None` 鏃讹紝涓嬫父妯″潡涓嶆姤閿欙紙鎯呮劅鍥炲０浣跨敤榛樿鍊硷級銆?- 娑夊強鏂囦欢璺緞锛歚edge_client/senses/asr.py`锛沗tests/unit/test_asr_emotion_hint_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-ASR-EMOTION-001锛汿-ASR-EMO-01~02銆?
+### TASK-0280 M29-Q锛歁etricsCollector 澧炲姞鎯呮劅缁村害鎸囨爣锛圤PT-46锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚MetricsCollector.collect()` 澧炲姞鎯呮劅缁村害鎸囨爣锛坄emotion_tag_distribution`/`avg_emotion_intensity`/`bond_stage_distribution`锛夛紝浣胯娴嬪眰鑳芥劅鐭ユ儏鎰熷仴搴峰害銆?- 杈撳叆锛歚host_brain/obs/metrics.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0244锛坄EmotionVector`锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚collect()` 鏂板鎯呮劅鎸囨爣瀛楁锛涙寚鏍囨寜鏃堕棿绐楀彛鑱氬悎锛?  - `tests/unit/test_metrics_emotion_m29.py`锛堟柊澧烇級锛歍-METRICS-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-METRICS-EMO-01锛歚collect()` 杩斿洖鍚?`emotion_tag_distribution` 瀛楁锛?  - T-METRICS-EMO-02锛歚avg_emotion_intensity` 涓?[0,1] 鑼冨洿鍐呯殑娴偣鏁般€?- 娑夊強鏂囦欢璺緞锛歚host_brain/obs/metrics.py`锛沗tests/unit/test_metrics_emotion_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-METRICS-EMOTION-001锛汿-METRICS-EMO-01~02銆?
+### TASK-0281 M29-R锛欵dgeEventReporter 澧炲姞鎯呮劅瀛楁锛圤PT-42锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚EdgeEventReporter` 鐨?`EventReportItem` 澧炲姞 `emotion_tag`/`emotion_intensity` 瀛楁锛岃竟缂樼浜嬩欢涓婃姤鎼哄甫鎯呮劅淇℃伅锛屾敮鎸佸叏閾捐矾鎯呮劅杩借釜銆?- 杈撳叆锛歚edge_client/runtime/event_reporter.py`锛堟垨瀵瑰簲璺緞锛夛紱TASK-0279锛圓SR 鎯呮劅鎺ㄦ柇锛夈€?- 杈撳嚭锛?  - 瀵瑰簲鏂囦欢锛歚EventReportItem` 鏂板 `emotion_tag: str | None`銆乣emotion_intensity: float | None` 瀛楁锛?  - `tests/unit/test_edge_event_emotion_m29.py`锛堟柊澧烇級锛歍-EDGE-EMO-01~02銆?- 楠屾敹鏍囧噯锛?  - T-EDGE-EMO-01锛歚EventReportItem` 鍚?`emotion_tag` 瀛楁锛?  - T-EDGE-EMO-02锛歚emotion_tag=None` 鏃讹紝搴忓垪鍖栦笉鎶ラ敊銆?- 娑夊強鏂囦欢璺緞锛歚edge_client/runtime/event_reporter.py`锛沗tests/unit/test_edge_event_emotion_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EDGE-EMOTION-001锛汿-EDGE-EMO-01~02銆?
+---
+
+## M30锛氭祴璇曞悓姝ヤ慨澶嶏紙Test Sync Hotfix锛?
+**鐩爣锛?* 淇鏈€鏂颁唬鐮佹媺鍙栧悗鏆撮湶鐨?17 涓祴璇曞け璐ワ紝鍏ㄩ儴涓烘祴璇?浠ｇ爜鍚屾闂锛屾棤閫昏緫 Bug銆?**鍓嶇疆鏉′欢锛?* M29 PLANNED锛圡30 鐙珛浜?M29 鎵ц锛屼紭鍏堢骇楂樹簬 M29锛?**瀹屾垚鏍囧噯锛?* 鍏ㄩ噺娴嬭瘯 0 failed锛?094 passed锛?0 skipped
+**瀹為檯瀹屾垚锛?* 2026-03-06 10:18
+**鐘舵€侊細** 鉁?DONE
+
+### TASK-0283 M30-A锛氫慨澶?Bond fixture 闈炴硶 stage/trend 鍊?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶?5 涓?contract 娴嬭瘯鐨?fixture 涓?`bond_summary.stage` 浣跨敤浜嗛潪娉曞€硷紙`'warm'`/`'stable'`/`'ESTABLISHED'`/`'up'`锛夛紝鏇存柊涓哄悎娉曟灇涓惧€笺€?- 娑夊強鏂囦欢璺緞锛?  - `tests/fixtures/prompt_context/good/minimal_valid.json`锛歚stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"`
+  - `tests/fixtures/canon/world/prompt_context_with_world_canon.json`锛歚stage: "ESTABLISHED"鈫?STRANGER"`
+  - `tests/fixtures/llm_gateway/good/prompt_payload.json`锛歚stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"`
+  - `tests/fixtures/bond/good/bond_event_for_summary.json`锛歚stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"`
+  - `tests/contract/test_bond_summary_contract.py`锛氭洿鏂?`test_t_74` 鏈熸湜鍊?- 鍏宠仈澶辫触锛? 涓?contract 娴嬭瘯锛坆ond_summary_contract/prompt_context_contract/tool_catalog_contract/canon_store_contract/world_canon_slot_contract锛?
+### TASK-0284 M30-B锛氫慨澶?Bond 闆嗘垚娴嬭瘯涓嫳鏂囨灇涓句笉鍏煎
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚BondScoreState.to_summary()` 宸蹭腑鏂囧寲锛圡28-H锛夛紝浣嗛泦鎴愭祴璇曚粛鏈熸湜鑻辨枃鏋氫妇鍊硷紝鏇存柊涓轰腑鏂囨灇涓俱€?- 娑夊強鏂囦欢璺緞锛?  - `tests/integration/test_bond_routes_api.py`锛歚test_summary_stage_is_valid`/`test_summary_trend_is_valid`/`test_summary_stage_updates_after_promotion` 鏈熸湜鍊兼敼涓轰腑鏂?  - `tests/integration/test_bond_dynamics_stage_integration.py`锛歚test_summary_stage_matches_state` 鏈熸湜鍊兼敼涓?`"鐩歌瘑"`
+- 鍏宠仈澶辫触锛? 涓泦鎴愭祴璇?
+### TASK-0285 M30-C锛氫慨澶?Governor rule_trace 鏁伴噺纭紪鐮?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁28-D锛圤PT-8锛夋柊澧?R8 鎯呮劅闂ㄦ帶瑙勫垯锛宍rule_trace` 浠?7 鏉″鍔犲埌 8 鏉★紝鏇存柊娴嬭瘯纭紪鐮佹暟閲忋€?- 娑夊強鏂囦欢璺緞锛?  - `tests/contract/test_governor_rate_limit_contract.py`锛歚assertEqual(7, ...)鈫抋ssertEqual(8, ...)`
+  - `tests/contract/test_governor_rules_contract.py`锛歚assertEqual(7, ...)鈫抋ssertEqual(8, ...)`
+- 鍏宠仈澶辫触锛? 涓?contract 娴嬭瘯
+
+### TASK-0286 M30-D锛氫慨澶?Obs metrics required_keys 缂哄皯 emotion_metrics
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁29-Q锛圤PT-46锛夊湪 `MetricsCollector.collect()` 涓柊澧炰簡 `emotion_metrics` 瀛楁锛屾洿鏂版祴璇?`required_keys`銆?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_obs_metrics_contract.py`锛歚required_keys` 娣诲姞 `'emotion_metrics'`
+- 鍏宠仈澶辫触锛? 涓?contract 娴嬭瘯
+
+### TASK-0287 M30-E锛氬悓姝?edge_client VTS 鏄犲皠琛ㄨ嚦 16 绉?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁28-L锛圤PT-34锛夊凡灏?`host_brain/channels/vts.py` 鐨?`EMOTION_TO_EXPRESSION_ID` 鎵╁睍鑷?16 绉嶏紝鍚屾鏇存柊 `edge_client/actuators/vts_driver.py`锛屽苟淇鐩稿叧娴嬭瘯銆?- 娑夊強鏂囦欢璺緞锛?  - `edge_client/actuators/vts_driver.py`锛歚EMOTION_TO_EXPRESSION_ID` 浠?6 绉嶆墿灞曡嚦 16 绉?  - `tests/contract/test_vts_reconnect_contract.py`锛歚len == 6鈫?6`
+  - `tests/contract/test_vts_degraded_contract.py`锛氭湭鐭?tag 浠?`CONFUSED`/`excited` 鏀逛负 `SLEEPY`/`sleepy`
+  - `tests/fixtures/channels/vts_unknown_tag_degraded.json`锛歚emotion_tag: "CONFUSED"鈫?SLEEPY"`
+- 鍏宠仈澶辫触锛? 涓?contract 娴嬭瘯
+
+### TASK-0288 M30-F锛歁30 浠ｇ爜瀹℃煡鎶ュ憡
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氱敓鎴?M30 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?17 涓祴璇曚慨澶嶈鎯呭拰鏈€缁堟祴璇曠粨鏋溿€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m30_2026-03-06.md`锛堟柊澧烇級
 
 ---
 
-## M18 监控面板 v3 后端 API 扩展（DONE，2026-03-04）
+### TASK-0282 M29-S锛歁29 鍙戝竷娓呭崟
 
-> 目标：为 M17 前端提供完整的数据支撑 API，扩展现有 observability 路由，新增全服务健康聚合、会话列表、链路节点详情、指标时序四类端点。
-> 依赖：M17 可并行开发（前端先用 mock）；M18 完成后前端切换真实 API。
-> 所有任务当前状态：DONE（2026-03-04：26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；m18_release.json 已生成）。
-
-### TASK-0188 M18-A 全服务健康聚合 API
-- 状态：DONE
-- 任务描述：
-  实现 `GET /obs/services/health` 端点，并发探测双端所有已注册服务健康状态（Host 侧：LLM Gateway、Neo4j、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider；Edge 侧：ASR、TTS、VTS、Audio Playback、Edge RPC）；聚合返回统一结构；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host|edge` 过滤。
-- 输入：DevSpec §OBS-V3-API-001；FR-OBS-008；现有 `host_brain/app/obs_routes.py`（或等价）。
-- 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/services/health` 端点）；
-  - `host_brain/obs/service_health_aggregator.py`（ServiceHealthAggregator：并发探测 + 结果聚合）；
-  - `tests/unit/test_service_health_aggregator.py`（T-OBS-HEALTH-01~06）。
-- 验收标准：
-  - T-OBS-HEALTH-01~06 全部通过；
-  - 单服务超时时该服务 status=DOWN，其余正常返回；
-  - 响应时间 ≤500ms（并发探测）；
-  - 响应结构稳定（字段不随服务状态变化而缺失）；
-  - 全量测试 ≥1555 passed。
-- 关联需求/测试：FR-OBS-008；T-OBS-HEALTH-01~06。
-
-### TASK-0189 M18-B 会话列表 API
-- 状态：DONE
-- 任务描述：
-  实现 `GET /obs/sessions` 端点，从 SQLite Ledger 查询会话列表；支持过滤参数：start_time、end_time、status、channel、keyword；分页参数：page、page_size；响应包含 total_count；查询性能优化（必要时补充索引）。
-- 输入：DevSpec §OBS-V3-API-002；FR-OBS-009；现有 SQLite Ledger schema。
-- 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/sessions` 端点）；
-  - `host_brain/obs/session_query.py`（SessionQueryService：过滤 + 分页 + 性能优化）；
-  - `host_brain/audit/migrations/0019_obs_sessions_index.sql`（sessions 查询索引）；
-  - `tests/unit/test_session_query.py`（T-OBS-SESS-01~06）。
-- 验收标准：
-  - T-OBS-SESS-01~06 全部通过；
-  - 过滤参数组合正确生效；
-  - total_count 与实际数据一致；
-  - 空结果时返回 results=[] 而非 404；
-  - 全量测试 ≥1561 passed。
-- 关联需求/测试：FR-OBS-009；T-OBS-SESS-01~06。
-
-### TASK-0190 M18-C 链路节点详情 API
-- 状态：DONE
-- 任务描述：
-  实现 `GET /obs/trace/{request_id}` 端点，从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建结构化节点列表；每个节点包含 node_id、node_type、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input、output、reason_code、parent_node_id、side；支持 `?include_io=false` 参数；input/output 超 64KB 截断并标注 truncated=true。
-- 输入：DevSpec §OBS-V3-API-003；FR-OBS-010；现有审计链 schema（intent_log/governor_log/skill_exec_log）。
-- 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/trace/{request_id}` 端点）；
-  - `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder：多源日志聚合 + 节点树构建）；
-  - `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）。
-- 验收标准：
-  - T-OBS-TRACE-01~08 全部通过；
-  - 给定有效 request_id 返回完整节点列表；
-  - parent_node_id 正确反映执行树结构；
-  - 不存在的 request_id 返回 404 + 稳定错误结构；
-  - input/output 超限时 truncated=true 标注存在；
-  - 全量测试 ≥1569 passed。
-- 关联需求/测试：FR-OBS-010；T-OBS-TRACE-01~08。
-
-### TASK-0191 M18-D 指标时序 API
-- 状态：DONE
-- 任务描述：
-  实现 `GET /obs/metrics/timeseries` 端点，支持多维度时序数据查询（request_count / reject_rate / latency_p50 / latency_p95 / reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time、多 metric 批量查询；数据点上限 1000（超出自动降采样）；无数据区间返回 null 值点保证时序连续性。
-- 输入：DevSpec §OBS-V3-API-004；FR-OBS-011；现有 SQLite Ledger 审计数据。
-- 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/metrics/timeseries` 端点）；
-  - `host_brain/obs/metrics_timeseries.py`（MetricsTimeseriesService：时序聚合 + 降采样 + 批量查询）；
-  - `tests/unit/test_metrics_timeseries.py`（T-OBS-TS-01~06）。
-- 验收标准：
-  - T-OBS-TS-01~06 全部通过；
-  - 时序数据点时间间隔与 interval 参数一致；
-  - 降采样后数据点数量 ≤1000；
-  - 批量查询返回 {metrics: {metric_name: {data_points: [...]}}} 结构；
-  - 全量测试 ≥1575 passed。
-- 关联需求/测试：FR-OBS-011；T-OBS-TS-01~06。
-
-### TASK-0192 M18-E M18 发布清单
-- 状态：DONE
-- 任务描述：生成 M18 发布清单（m18_release.json），记录 M18-A~D 核心文件 hash + 测试通过数 + 质量门禁；同时更新 UI_UPGRADE_CHANGELOG.md 记录 v3.0 变更。
-- 输入：TASK-0188~0191 全部 DONE；TASK-0182~0186 全部 DONE（M17 前端切换真实 API 验证）。
-- 输出：
-  - `docs/50_release/m18_release.json`；
-  - `docs/50_project/UI_UPGRADE_CHANGELOG.md`（v3.0 条目）。
-- 验收标准：release_ready=true；all_api_endpoints_tested=true；frontend_api_integration_verified=true；zero_regressions=true；total_tests_passed ≥ 1575。
-- 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001。
-
+- 鐘舵€侊細PLANNED
+- 浠诲姟鎻忚堪锛歍ASK-0264~0281 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M29 鍙戝竷娓呭崟锛岃褰?P2 鎯呮劅浣撻獙澧炲己鏂囦欢娓呭崟 + 娴嬭瘯閫氳繃鏁?+ 璐ㄩ噺闂ㄧ锛涘悓姝ユ洿鏂?PRD.md M29 閲岀▼纰戠姸鎬佷负 DONE锛涚敓鎴愪唬鐮佸鏌ユ姤鍛娿€?- 杈撳叆锛歍ASK-0264~0281 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?鈮?941 passed锛?895 + 46 鏂板锛夛紝0 failed锛? warnings銆?- 杈撳嚭锛?  - `docs/50_release/m29_release.json`锛堟柊澧烇級锛?  - `docs/20_prd/PRD.md`锛歁29 閲岀▼纰戞潯鐩姸鎬佹洿鏂颁负 DONE锛?  - `docs/60_trace/requirements_trace.md`锛氭柊澧?M29 灏忚妭锛?  - `docs/40_agents/full_code_review_report_2026-03-05-m29.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - `release_ready=true`锛?  - `bond_texture_implemented=true`锛圔ond 鎯呮劅璐ㄦ劅灞傚凡瀹炵幇锛夛紱
+  - `emotion_echo_implemented=true`锛堟儏鎰熷洖澹版満鍒跺凡瀹炵幇锛夛紱
+  - `bond_rift_implemented=true`锛圔ond 瑁傜棔淇鏈哄埗宸插疄鐜帮級锛?  - `proactive_trigger_implemented=true`锛堜富鍔ㄦ儏鎰熻Е鍙戝櫒宸插疄鐜帮級锛?  - `emotion_timeline_implemented=true`锛堟儏鎰熸椂闂寸嚎閲嶅缓宸插疄鐜帮級锛?  - `total_tests_passed 鈮?1941`锛?  - `zero_regressions=true`銆?- 娑夊強鏂囦欢璺緞锛歚docs/50_release/m29_release.json`锛沗docs/20_prd/PRD.md`锛沗docs/60_trace/requirements_trace.md`锛沗docs/40_agents/full_code_review_report_2026-03-05-m29.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-BOND-TEXTURE-001锛汧R-EMOTION-ECHO-001锛汧R-BOND-RIFT-001锛汧R-PROACTIVE-EMOTION-001锛汧R-EMOTIONAL-TIMELINE-001銆?
 ---
 
-## M19 审查报告缺陷修复（P0/P1）（DONE）
+## M31锛氬叚搴?DevSpec 绗叓绔犲悎瑙勪慨澶嶏紙Six-Store Ch.8 Compliance Fix锛?
+**鐩爣**锛氫慨澶嶅叚搴撳疄鐜颁笌 DevSpec 绗叓绔犵害鏉熺殑 4 椤规槑纭繚瑙勫拰 3 椤归儴鍒嗗悎瑙勯棶棰橈紝纭繚 SSOT 鎺ュ彛瀹屾暣鎬с€佸璁″彲杩芥函鎬у拰瀛楁瑙勮寖鎬с€?
+**浼樺厛绾?*锛歅0锛圫SOT 鎺ュ彛杩濊锛夆啋 P1锛堝瓧娈靛悎瑙勶級鈫?P2锛堝懡鍚嶈鑼冿級
 
-> 目标：修复 M17/M18 代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中识别的全部 P0 级 Bug 和 P1 级架构问题，消除前后端字段名不一致、Route/Service 层脱节、全量数据加载等核心缺陷，提升监控面板可靠性与可维护性。
-> 依赖：M17、M18 全部 DONE。
-> 关联审查项：BUG-BE-001、BUG-BE-002、BUG-FE-001、WARN-FE-004、WARN-FE-005、WARN-FE-006、WARN-BE-001~003、WARN-BE-005、WARN-TEST-001~002。
-
-### TASK-0193 M19-A 修复 Trace 降级路径 AttributeError（BUG-BE-001）
-- 状态：DONE
-- 任务描述：
-  修复 `obs_routes.py` 中 `GET /obs/trace/{request_id}` 端点的降级路径（`row is None` 分支）：将直接属性访问 `ledger.governor_log` 改为正确的方法调用 `ledger.fetch_by_time_range("governor_log", 0, _now_ms())`，消除 `AttributeError` → 500 错误。同步检查同一端点中其他可能的直接属性访问，确保全部改为方法调用。
-- 输入：`host_brain/app/obs_routes.py`；`host_brain/audit/sqlite_ledger.py`（确认可用方法签名）；审查报告 BUG-BE-001。
-- 输出：
-  - `host_brain/app/obs_routes.py`（降级路径修复）；
-  - `tests/unit/test_obs_routes_trace_fallback.py`（T-OBS-ROUTE-TRACE-FALLBACK-01~03：验证降级路径正常返回、不存在 request_id 返回 404、ledger 方法调用正确）。
-- 验收标准：
-  - 降级路径（`row is None`）触发时不抛出 `AttributeError`，返回正常 JSON 响应；
-  - 不存在的 request_id 返回 404 + `{"error": "not_found", "request_id": "..."}`；
-  - T-OBS-ROUTE-TRACE-FALLBACK-01~03 全部通过；
-  - 全量测试 ≥1580 passed，0 failed。
-- 关联需求/测试：FR-OBS-010；BUG-BE-001；T-OBS-ROUTE-TRACE-FALLBACK-01~03。
-
-### TASK-0194 M19-B 修复 Overview 页字段名对齐（BUG-FE-001 + WARN-FE-004）
-- 状态：DONE
-- 任务描述：
-  修复前端 Overview 页两处字段名不匹配问题：
-  1. **BUG-FE-001**：`Overview.jsx` 汇总统计行将 `data?.summary` 改为直接读取顶层字段 `data?.total / data?.up / data?.degraded / data?.down`，并将显示标签从 `healthy` 对齐为 `up`；
-  2. **WARN-FE-004**：`ServiceCard.jsx` 组件 props 从 `name / latency / detail` 对齐为 `display_name / p95_ms / call_count`，同步更新 `Overview.jsx` 中传递给 `ServiceCard` 的属性映射。
-  修复后重新构建前端产物（`npm run build`），更新 `static/monitor/` 下的构建产物。
-- 输入：`monitor_ui/src/pages/Overview.jsx`；`monitor_ui/src/components/ServiceCard.jsx`；`host_brain/app/obs_routes.py`（确认 `ServicesHealthResponse` 字段）；审查报告 BUG-FE-001、WARN-FE-004。
-- 输出：
-  - `monitor_ui/src/pages/Overview.jsx`（字段读取修复）；
-  - `monitor_ui/src/components/ServiceCard.jsx`（props 字段名对齐）；
-  - `monitor_ui/dist/`（重新构建产物）；
-  - `host_brain/app/static/monitor/`（更新静态文件）。
-- 验收标准：
-  - Overview 页顶部 4 个统计卡片（Total / Up / Degraded / Down）正确显示数值，不再显示 `—`；
-  - ServiceCard 正确渲染 `display_name`、`p95_ms`、`call_count` 字段；
-  - 前端构建无报错（`npm run build` 0 errors）；
-  - 全量 Python 测试 ≥1580 passed，0 failed（前端修复不影响后端测试）。
-- 关联需求/测试：FR-OBS-003；FR-OBS-008；BUG-FE-001；WARN-FE-004。
-
-### TASK-0195 M19-C 修复 Trace API 路径 + Sessions 翻页闭包（WARN-FE-006 + WARN-FE-005）
-- 状态：DONE
-- 任务描述：
-  修复前端两处功能性问题：
-  1. **WARN-FE-006**：`monitor_ui/src/api/obs.js` 中 `fetchTraceNodes` 的调用路径从 `/obs/trace/${requestId}/nodes` 修正为 `/obs/trace/${requestId}`，与后端路由对齐；同步移除 Mock 分支中 `id.startsWith('mock')` 的特殊处理，改为统一的 `requestId === 'mock'` 开关；
-  2. **WARN-FE-005**：`Sessions.jsx` 翻页逻辑中，将 `load` 函数的 `useCallback` 依赖从 `[page, ...]` 改为接受 `pageNum` 参数，翻页时调用 `load(page + 1)` 传入新页码，消除闭包陈旧值问题。
-  修复后重新构建前端产物。
-- 输入：`monitor_ui/src/api/obs.js`；`monitor_ui/src/pages/Sessions.jsx`；`monitor_ui/src/pages/Trace.jsx`；审查报告 WARN-FE-006、WARN-FE-005。
-- 输出：
-  - `monitor_ui/src/api/obs.js`（Trace API 路径修正）；
-  - `monitor_ui/src/pages/Sessions.jsx`（翻页闭包修复）；
-  - `monitor_ui/dist/`（重新构建产物）；
-  - `host_brain/app/static/monitor/`（更新静态文件）。
-- 验收标准：
-  - `fetchTraceNodes` 调用路径为 `/obs/trace/{requestId}`（无 `/nodes` 后缀）；
-  - Sessions 页翻页时请求的 `page` 参数与点击的页码一致（无闭包陈旧值）；
-  - 前端构建无报错；
-  - 全量 Python 测试 ≥1580 passed，0 failed。
-- 关联需求/测试：FR-OBS-006；FR-OBS-009；WARN-FE-006；WARN-FE-005。
-
-### TASK-0196 M19-D 重构 obs_routes.py 调用 Service 层（WARN-BE-001~003）
-- 状态：DONE
-- 任务描述：
-  消除 `obs_routes.py` 与 Service 层的三组平行实现，将 Route 层改为调用已有 Service 层：
-  1. **WARN-BE-001**：`GET /obs/services/health` 端点改为调用 `ServiceHealthAggregator.aggregate(side=side)`，删除路由层内联的聚合逻辑；
-  2. **WARN-BE-002**：`GET /obs/sessions` 端点改为调用 `SessionQueryService.query(filters, page, page_size)`，删除路由层内联的查询逻辑；
-  3. **WARN-BE-003**：`GET /obs/metrics/timeseries` 端点改为调用 `MetricsTimeseriesService.query(metrics, interval, start_time, end_time)`，删除路由层内联的聚合逻辑。
-  重构后确保响应结构与原有结构兼容（前端无需修改），并补充必要的依赖注入（通过 `request.app.state` 或参数传递 `ledger` 实例）。
-- 输入：`host_brain/app/obs_routes.py`；`host_brain/obs/service_health_aggregator.py`；`host_brain/obs/session_query.py`；`host_brain/obs/metrics_timeseries.py`；审查报告 WARN-BE-001~003。
-- 输出：
-  - `host_brain/app/obs_routes.py`（三个端点重构为调用 Service 层，删除内联逻辑）；
-  - `host_brain/obs/service_health_aggregator.py`（如需调整接口签名以适配路由层调用）；
-  - `host_brain/obs/session_query.py`（如需调整接口签名）；
-  - `host_brain/obs/metrics_timeseries.py`（如需调整接口签名）。
-- 验收标准：
-  - `obs_routes.py` 三个端点不再包含内联业务逻辑，仅做参数解析 + Service 调用 + 响应序列化；
-  - 原有 T-OBS-HEALTH-01~06、T-OBS-SESS-01~06、T-OBS-TS-01~06 全部继续通过；
-  - 响应结构与重构前兼容（字段名、类型不变）；
-  - 全量测试 ≥1580 passed，0 failed。
-- 关联需求/测试：FR-OBS-008~011；WARN-BE-001；WARN-BE-002；WARN-BE-003；NFR-MAINT-001。
-
-### TASK-0197 M19-E 修复 TraceNodeBuilder 全量加载 + 并行分支推断（BUG-BE-002 + WARN-BE-005）
-- 状态：DONE
-- 任务描述：
-  修复 `trace_node_builder.py` 的两个核心问题：
-  1. **BUG-BE-002**：`_fetch_intent_nodes`、`_fetch_governor_nodes`、`_fetch_skill_nodes`、`_fetch_voice_nodes` 四个方法改为按 `request_id` 直接过滤查询（在 SQL 层过滤而非全量加载后内存过滤）。需在 `SQLiteLedger` 中新增 `fetch_by_request_id(table, request_id)` 方法（或扩展现有 `fetch_by_time_range` 支持 `request_id` 过滤参数），并在 `sqlite_ledger.py` 中为相关表的 `request_id` 列补充索引（migration 文件）；
-  2. **WARN-BE-005**：`_infer_parent_ids` 改为基于 `node_type` 的树形推断：`intent` 节点无 parent；`governor` 节点 parent 为 `intent`；`skill` / `llm` 节点 parent 为 `governor`；`asr` / `tts` / `vts` 节点 parent 为对应的 `skill` 节点（按 `start_ts_ms` 最近匹配）；支持多个节点共享同一 parent（并行分支）。
-- 输入：`host_brain/obs/trace_node_builder.py`；`host_brain/audit/sqlite_ledger.py`；审查报告 BUG-BE-002、WARN-BE-005；DevSpec §29.6.1。
-- 输出：
-  - `host_brain/obs/trace_node_builder.py`（SQL 级过滤 + 树形 parent 推断）；
-  - `host_brain/audit/sqlite_ledger.py`（新增 `fetch_by_request_id` 方法）；
-  - `host_brain/audit/migrations/0020_trace_request_id_index.sql`（request_id 索引）；
-  - `tests/unit/test_trace_node_builder.py`（更新 T-OBS-TRACE-03 断言，补充并行分支测试用例 T-OBS-TRACE-09~10）。
-- 验收标准：
-  - `_fetch_*_nodes` 方法不再拉取全量数据，仅返回指定 `request_id` 的行；
-  - 并行分支场景（两个 skill 节点共享同一 governor parent）正确推断 parent_node_id；
-  - T-OBS-TRACE-01~10 全部通过；
-  - 全量测试 ≥1582 passed，0 failed。
-- 关联需求/测试：FR-OBS-010；BUG-BE-002；WARN-BE-005；T-OBS-TRACE-01~10。
-
-### TASK-0198 M19-F 补充 obs_routes.py 集成测试（WARN-TEST-001~002）
-- 状态：DONE
-- 任务描述：
-  补充两类测试覆盖缺口：
-  1. **WARN-TEST-002**：为 `obs_routes.py` 的 4 个端点新增集成测试（使用 FastAPI `TestClient`），覆盖正常路径、参数过滤、边界条件（空结果、不存在 ID、参数缺失）；
-  2. **WARN-TEST-001**：更新 `test_trace_node_builder.py` 中 T-OBS-TRACE-03，补充并行分支断言（两个节点共享同一 parent_node_id）；新增 T-OBS-TRACE-09（并行 skill 节点 parent 均为 governor）和 T-OBS-TRACE-10（ASR/TTS 节点 parent 为对应 skill 节点）。
-  集成测试使用内存 SQLite（`:memory:`）+ 预置 fixture 数据，不依赖真实服务。
-- 输入：`host_brain/app/obs_routes.py`（M19-D 重构后）；`host_brain/obs/`（M19-E 修复后）；`tests/unit/test_trace_node_builder.py`；审查报告 WARN-TEST-001~002。
-- 输出：
-  - `tests/integration/test_obs_routes_integration.py`（T-OBS-ROUTE-INT-01~16：4 个端点 × 4 个场景）；
-  - `tests/unit/test_trace_node_builder.py`（更新 T-OBS-TRACE-03，新增 T-OBS-TRACE-09~10）。
-- 验收标准：
-  - T-OBS-ROUTE-INT-01~16 全部通过；
-  - T-OBS-TRACE-03、09、10 全部通过；
-  - 全量测试 ≥1598 passed，0 failed；
-  - `obs_routes.py` 4 个端点的集成测试覆盖率 ≥80%。
-- 关联需求/测试：FR-OBS-008~011；WARN-TEST-001；WARN-TEST-002；T-OBS-ROUTE-INT-01~16；T-OBS-TRACE-09~10。
-
-### TASK-0199 M19-G M19 发布清单
-- 状态：DONE
-- 任务描述：生成 M19 发布清单（m19_release.json），记录 M19-A~F 修复文件清单 + 测试通过数 + 质量门禁；同步更新代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中各修复项状态为 FIXED；更新 risk_registry.md 中对应风险条目状态为 MITIGATED。
-- 输入：TASK-0193~0198 全部 DONE。
-- 输出：
-  - `docs/50_release/m19_release.json`；
-  - `docs/40_agents/full_code_review_report_2026-03-04-m17m18.md`（修复项状态更新）；
-  - `docs/60_trace/risk_registry.md`（P0/P1 风险条目状态更新为 MITIGATED）。
-- 验收标准：
-  - release_ready=true；
-  - all_p0_bugs_fixed=true（BUG-BE-001、BUG-FE-001 均已修复）；
-  - all_p1_issues_resolved=true；
-  - zero_regressions=true；
-  - total_tests_passed ≥ 1598。
-- 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001；BUG-BE-001；BUG-BE-002；BUG-FE-001。
-
-### TASK-0200 M20-A：AgentHealthCheck — SchedulerEngine 心跳精神状态检测
-- 状态：DONE
-- 任务描述：在 `SchedulerEngine` 中注册 `agent_health_check` 定时任务（默认间隔 30 分钟），向 LLM 节点发送 Heartbeat Prompt，依据回复内容判断 Agent 精神状态；回复含 `HEARTBEAT_OK` 则静默丢弃，否则推送 `HEARTBEAT_ALERT` 事件至审计 Ledger 并写入可观测日志。
-- 输入：
-  - `host_brain/scheduler/scheduler.py`（SchedulerEngine 现有实现）；
-  - `host_brain/audit/sqlite_ledger.py`（审计写入接口）；
-  - DevSpec §21.4（SchedulerEngine 接口契约）；
-  - FR-OBS-001（关键指标与面板）。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`：新增 `AgentHealthCheckTask` 任务工厂，含 Heartbeat Prompt 模板（可配置）、最大回复字符限制（默认 300）、静默过滤逻辑（`HEARTBEAT_OK` 丢弃）、异常推送逻辑（写入 `heartbeat_alert` 审计事件）；
-  - `host_brain/scheduler/health_check_prompt.py`（新增）：Heartbeat Prompt 模板常量与 `parse_heartbeat_response(text) -> Literal["OK", "ALERT"]` 解析函数；
-  - `host_brain/audit/sqlite_ledger.py`：新增 `heartbeat_events` 表迁移引用（或复用现有 `scheduler_events` 表，增加 `event_type=HEARTBEAT_ALERT` 枚举值）；
-  - `tests/unit/test_agent_health_check.py`（新增）：T-HB-01~05（正常回复静默、异常回复推送、自定义 Prompt、字符截断、LLM 不可用降级）。
-- 验收标准：
-  - T-HB-01：回复含 `HEARTBEAT_OK` 时，`heartbeat_events` 表无新增记录，且不触发任何推送；
-  - T-HB-02：回复不含 `HEARTBEAT_OK` 时，`heartbeat_events` 表写入一条 `event_type=HEARTBEAT_ALERT` 记录，含 `ts_ms`、`raw_response`（截断至 300 字符）、`task_id`；
-  - T-HB-03：LLM 不可用（超时/异常）时，降级写入 `HEARTBEAT_ALERT`，`raw_response` 为 `"LLM_UNAVAILABLE"`，不抛出未捕获异常；
-  - T-HB-04：`parse_heartbeat_response` 对含 `HEARTBEAT_OK` 的任意大小写变体均返回 `"OK"`；
-  - T-HB-05：任务注册后可通过 `SchedulerEngine.list_health()` 查询到 `agent_health_check` 任务状态；
-  - 全量测试 ≥1598 passed，0 failed（在 M19 基线上新增）。
-- 涉及文件路径：
-  - `host_brain/scheduler/scheduler.py`；
-  - `host_brain/scheduler/health_check_prompt.py`（新增）；
-  - `host_brain/audit/sqlite_ledger.py`；
-  - `tests/unit/test_agent_health_check.py`（新增）。
-- 关联需求/测试：FR-OBS-001；FR-OBS-008；T-HB-01~05。
-
-### TASK-0201 M20-B：ContextCompressor 压缩前静默保存（COMPRESS_BEFORE_SAVE）
-- 状态：DONE
-- 任务描述：在 `ContextCompressor` 触发压缩（`summary` / `hybrid` 策略）前，先将当前对话中的重要信息静默写入 Episodic 记忆库，防止压缩操作导致关键上下文永久丢失；并在审计字段中增加 `COMPRESS_BEFORE_SAVE` 事件记录，标记压缩前保存的时机与内容摘要。
-- 输入：
-  - `host_brain/memory/context_compressor.py`（ContextCompressor 现有实现）；
-  - `host_brain/memory/episodic.py`（EpisodicStore 写入接口）；
-  - `host_brain/audit/sqlite_ledger.py`（审计写入接口）；
-  - DevSpec §24.2.2（ContextCompressor 接口）；
-  - FR-MEM-005（召回融合输出必须为证据包）。
-- 输出：
-  - `host_brain/memory/context_compressor.py`：在 `compress()` 方法中，当策略为 `summary` 或 `hybrid` 且消息数超过压缩阈值时，先调用 `_pre_compress_save(messages, episodic_writer)` 提取并写入重要片段（含 `evidence_refs`），再执行压缩；新增 `pre_compress_save_enabled: bool`（默认 `True`）配置项；
-  - `host_brain/audit/sqlite_ledger.py`：新增 `COMPRESS_BEFORE_SAVE` 审计事件类型（或复用现有 `memory_events` 表，增加 `event_type` 枚举值），记录字段：`ts_ms`、`session_id`、`saved_count`（保存片段数）、`strategy`（压缩策略名）；
-  - `tests/unit/test_context_compressor.py`：新增 T-CTX-06~08（压缩前保存触发、保存内容含 evidence_refs、pre_compress_save_enabled=False 时跳过保存）。
-- 验收标准：
-  - T-CTX-06：`summary` 策略触发压缩时，`_pre_compress_save` 被调用，Episodic 写入至少 1 条记录，且该记录含有效 `evidence_refs`；
-  - T-CTX-07：审计 Ledger 中存在 `event_type=COMPRESS_BEFORE_SAVE` 记录，含 `session_id`、`saved_count ≥ 1`、`strategy="summary"`；
-  - T-CTX-08：`pre_compress_save_enabled=False` 时，`_pre_compress_save` 不被调用，Episodic 无新增记录；
-  - T-CTX-09：`sliding_window` 策略不触发 `_pre_compress_save`（仅截断，无需保存）；
-  - 原有 T-CTX-01~05 全部继续通过；
-  - 全量测试 ≥1603 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/memory/context_compressor.py`；
-  - `host_brain/memory/episodic.py`（只读接口，不修改，仅调用）；
-  - `host_brain/audit/sqlite_ledger.py`；
-  - `tests/unit/test_context_compressor.py`。
-- 关联需求/测试：FR-MEM-005；T-CTX-01~09。
-
-### TASK-0202 M20-C：Episodic 混合检索增强（向量 70% + 全文 BM25/FTS5 30%）
-- 状态：DONE
-- 任务描述：在 `recall_fusion.py` 的 Episodic 检索管线中叠加全文检索（SQLite FTS5 或 BM25 算法），与现有向量检索结果按权重融合（向量 70%、全文 30%，权重可配置），提升对专有名词、人名、地名等语义向量不擅长内容的召回率；同时处理跨块语义断裂问题（相邻分块合并策略）。
-- 输入：
-  - `host_brain/retrieval/recall_fusion.py`（现有向量检索融合实现）；
-  - `host_brain/retrieval/pipeline.py`（检索管线）；
-  - `host_brain/memory/episodic.py`（EpisodicStore，含 SQLite 存储层）；
-  - `host_brain/audit/sqlite_ledger.py`（SQLite 连接复用）；
-  - FR-MEM-005（召回融合输出必须为证据包）；
-  - FR-MEM-003（文本嵌入服务必须存在且可降级）。
-- 输出：
-  - `host_brain/retrieval/recall_fusion.py`：新增 `FullTextSearcher` 类（基于 SQLite FTS5 虚拟表）+ `HybridFusionStrategy`（向量分数 × 0.7 + 全文分数 × 0.3，权重通过 `vector_weight` / `fts_weight` 参数可配置）；融合后结果去重（按 `doc_id`），保留最高分；
-  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（新增）：为 Episodic 记忆表的 `content` 字段创建 FTS5 虚拟表（`episodic_fts`），支持中文分词（`unicode61` tokenizer）；
-  - `host_brain/retrieval/pipeline.py`：`RetrievalPipeline` 新增 `use_hybrid: bool`（默认 `True`）配置项，`False` 时退化为纯向量检索（向后兼容）；
-  - `tests/unit/test_recall_fusion_hybrid.py`（新增）：T-RCL-HYB-01~06（纯向量、纯全文、混合融合、权重配置、去重、FTS5 不可用降级为纯向量）。
-- 验收标准：
-  - T-RCL-HYB-01：混合检索对专有名词查询（如人名"夏目"）的召回结果中，全文检索命中条目的最终分数 ≥ 纯向量检索同条目分数（体现全文权重贡献）；
-  - T-RCL-HYB-02：`use_hybrid=False` 时，`FullTextSearcher` 不被调用，结果与原有纯向量检索一致（向后兼容）；
-  - T-RCL-HYB-03：同一 `doc_id` 在向量和全文结果中均命中时，融合后只保留一条，分数为加权融合值；
-  - T-RCL-HYB-04：FTS5 虚拟表不可用（迁移未执行）时，自动降级为纯向量检索，不抛出未捕获异常；
-  - T-RCL-HYB-05：`vector_weight + fts_weight` 不等于 1.0 时，抛出 `ValueError`（配置校验）；
-  - T-RCL-HYB-06：融合结果仍为合法 `EvidencePack`（含 `doc_id`、`score`、`source_ref`、`content`）；
-  - 原有 Episodic 检索相关测试全部继续通过；
-  - 全量测试 ≥1609 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/retrieval/recall_fusion.py`；
-  - `host_brain/retrieval/pipeline.py`；
-  - `host_brain/memory/episodic.py`（只读接口，不修改）；
-  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（新增）；
-  - `tests/unit/test_recall_fusion_hybrid.py`（新增）。
-- 关联需求/测试：FR-MEM-003；FR-MEM-005；T-RCL-HYB-01~06。
-
-## M21 测试基线修复 + Canon 向量投影追踪 + 发布清单（TASK-0203~0206）
-
-> **里程碑目标**：消除全量测试中 11 个失败用例（P1 根因：`model_profiles.yaml` 缺失导致 `_load_model_plane_meta()` 抛出异常；P2：`panel_page` 缺少返回类型注解 + Web UI contract 假设 SSR）；补写 Canon 向量投影模块的需求追踪与 contract 测试；生成 M21 发布清单，使全量测试达到 ≥1661 passed，0 failed。
-
-### TASK-0203 M21-A：release_manifest.py `_load_model_plane_meta()` 优雅降级修复（P1）
-- 状态：DONE
-- 任务描述：修复 `release_manifest.py` 中 `_load_model_plane_meta()` 方法在 `configs/model_plane/model_profiles.yaml` 文件不存在时直接抛出 `FileNotFoundError` 的问题；改为文件存在性检查，缺失时返回 `None` 并记录 `WARNING`，使 model_plane 节点降级为 `DEGRADED` 而非 `FAILED`，从而恢复 9 个失败用例（4 个 `test_model_plane_release_contract` + 4 个 `test_orchestration_graph_contract` + 1 个 E2E drill）。
-- 输入：
-  - `host_brain/app/release_manifest.py`（`_load_model_plane_meta()` 现有实现）；
-  - `tests/contract/test_model_plane_release_contract.py`（4 个失败用例）；
-  - `tests/contract/test_orchestration_graph_contract.py`（4 个失败用例）；
-  - `tests/e2e/test_production_drill_e2e.py`（1 个失败用例）；
-  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 A/B/E2E 根因分析）。
-- 输出：
-  - `host_brain/app/release_manifest.py`：`_load_model_plane_meta()` 新增 `if not profiles_path.exists(): logger.warning(...); return None` 分支；调用方 `build_checklist()` 对 `None` 返回值做空值保护（跳过 model_plane 条目或填充 `status=DEGRADED`）；
-  - `tests/contract/test_model_plane_release_contract.py`：更新 `test_model_plane_version_parseable` 断言，允许文件不存在时返回 `None`（而非断言 `profiles_path.exists()`）；
-  - `tests/contract/test_orchestration_graph_contract.py`：更新 4 个用例的期望状态，允许 model_plane 节点为 `DEGRADED`（而非 `FAILED`）。
-- 验收标准：
-  - `_load_model_plane_meta()` 在 `model_profiles.yaml` 不存在时不抛出异常，返回 `None` 并写入 WARNING 日志；
-  - `test_model_plane_release_contract.py` 4 个用例全部通过；
-  - `test_orchestration_graph_contract.py` 4 个用例全部通过；
-  - `test_production_drill_e2e.py::test_t_drill_02_five_orchestration_control_scenarios_are_stable` 通过（`failed_count == 2`）；
-  - 全量测试较修复前净增 ≥9 个通过用例，0 新增失败。
-- 涉及文件路径：
-  - `host_brain/app/release_manifest.py`；
-  - `tests/contract/test_model_plane_release_contract.py`；
-  - `tests/contract/test_orchestration_graph_contract.py`；
-  - `tests/e2e/test_production_drill_e2e.py`（仅验证，不修改）。
-- 关联需求/测试：NFR-REL-001；NFR-MAINT-001；T-REL-MANIFEST-01~04；T-ORCH-02/04/05。
-
-### TASK-0204 M21-B：P2 代码质量修复（panel_page 类型注解 + Web UI contract CSR 适配）
-- 状态：DONE
-- 任务描述：修复两个 P2 质量问题：① `fastapi_app.py` 中 `panel_page` 路由函数缺少返回类型注解（`-> HTMLResponse`），导致 `test_quality_contract.py` 静态扫描失败；② `test_web_ui_contract.py` 假设 SSR 内嵌关键词（`request_id` / `searchInput`），与当前 React CSR 架构不符，需更新为检测 SPA 特征（`<div id="root">` 或 JS bundle 文件存在性）。
-- 输入：
-  - `host_brain/app/fastapi_app.py`（`panel_page` 函数现有实现）；
-  - `tests/contract/test_quality_contract.py`（`test_fastapi_panel_page_has_return_annotation` 失败用例）；
-  - `tests/contract/test_web_ui_contract.py`（`test_panel_contains_key_elements` 失败用例）；
-  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 C/D 根因分析）。
-- 输出：
-  - `host_brain/app/fastapi_app.py`：`panel_page` 函数签名添加 `-> HTMLResponse` 返回类型注解；
-  - `tests/contract/test_web_ui_contract.py`：`test_panel_contains_key_elements` 改为检测 `<div id="root">` 存在性（SPA 挂载点）或检测 `static/monitor/index.html` 文件存在性 + `<title>` 标签；移除对 `request_id` / `searchInput` 的 SSR 假设断言。
-- 验收标准：
-  - `test_fastapi_panel_page_has_return_annotation` 通过（`annotations` 含 `return` 键）；
-  - `test_panel_contains_key_elements` 通过（检测 SPA 特征而非 SSR 内嵌内容）；
-  - 原有 `test_quality_contract.py` 其余用例全部继续通过；
-  - 全量测试较修复前净增 ≥2 个通过用例，0 新增失败。
-- 涉及文件路径：
-  - `host_brain/app/fastapi_app.py`；
-  - `tests/contract/test_quality_contract.py`（仅验证，不修改）；
-  - `tests/contract/test_web_ui_contract.py`。
-- 关联需求/测试：FR-OBS-003；NFR-MAINT-001；T-QUALITY-PANEL-01；T-WEBUI-CONTRACT-01。
-
-### TASK-0205 M21-C：Canon 向量投影模块需求追踪补写 + contract 测试补充
-- 状态：DONE
-- 任务描述：为本次拉取新增的 `canon_vector_projection.py` 模块补写需求追踪条目（R-156~R-157），并在 contract 层补充 `test_canon_vector_projection_contract.py`，覆盖投影文档结构、向量 ID 确定性、Chroma 不可用降级、metadata 标量约束（tags 存为逗号分隔字符串）等关键契约点；同步更新 `requirements_trace.md`。
-- 输入：
-  - `host_brain/memory/canon_vector_projection.py`（Canon 向量投影现有实现）；
-  - `tests/unit/test_canon_vector_projection.py`（现有 2 个单元测试）；
-  - `docs/60_trace/CANON_VECTOR_PROJECTION_2026-03-04.md`（实现追踪文档）；
-  - `docs/60_trace/requirements_trace.md`（现有 R-155 为最新条目）；
-  - DevSpec §19（Canon 治理）；FR-CANON-001（Canon 文件 SSOT）。
-- 输出：
-  - `docs/60_trace/requirements_trace.md`：新增 M21-C 小节，补写 R-156（Canon 向量投影核心契约）、R-157（Canon 向量投影运行时脚本与降级策略）；
-  - `tests/contract/test_canon_vector_projection_contract.py`（新增）：
-    - T-CVP-CONTRACT-01：投影文档 `canon_kind` 字段必须为 `style` 或 `world`；
-    - T-CVP-CONTRACT-02：向量 ID 格式确定性（`canon_style::{canon_id}` / `canon_world::{doc_id}`）；
-    - T-CVP-CONTRACT-03：metadata `tags` 字段必须为逗号分隔字符串（非 list），`tags_count` 为整数；
-    - T-CVP-CONTRACT-04：Chroma 不可用时投影操作不抛出未捕获异常，返回降级结果；
-    - T-CVP-CONTRACT-05：投影文档不含 Canon SSOT 写路径（不直接修改 `canon_proposal_log` / `canon_change_log`）；
-    - T-CVP-CONTRACT-06：`--dry-run` 模式不写入 Chroma，仅返回 `docs_collected` 统计。
-- 验收标准：
-  - T-CVP-CONTRACT-01~06 全部通过；
-  - `requirements_trace.md` R-156~R-157 条目完整（含需求来源、实现描述、实现文件、测试编号、状态、里程碑）；
-  - 原有 `test_canon_vector_projection.py` 2 个单元测试继续通过；
-  - 全量测试较修复前净增 ≥6 个通过用例，0 新增失败。
-- 涉及文件路径：
-  - `host_brain/memory/canon_vector_projection.py`（只读，不修改）；
-  - `tests/contract/test_canon_vector_projection_contract.py`（新增）；
-  - `docs/60_trace/requirements_trace.md`（新增 R-156~R-157）。
-- 关联需求/测试：FR-CANON-001；NFR-REL-001；T-CVP-CONTRACT-01~06。
-
-### TASK-0206 M21-D：M21 发布清单
-- 状态：DONE
-- 任务描述：在 TASK-0203~0205 全部 DONE 后，生成 M21 发布清单（`m21_release.json`），记录 M21-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M21 里程碑状态为 DONE；更新 `requirements_trace.md` M21 小节状态。
-- 输入：TASK-0203~0205 全部 DONE；全量测试 ≥1661 passed，0 failed。
-- 输出：
-  - `docs/50_release/m21_release.json`（新增）：含 `release_ready`、`all_p1_fixed`、`all_p2_fixed`、`canon_vector_projection_traced`、`total_tests_passed`、`zero_regressions` 字段；
-  - `docs/20_prd/PRD.md`：M21 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：M21 小节 R-156~R-157 状态更新为 DONE。
-- 验收标准：
-  - `release_ready=true`；
-  - `all_p1_fixed=true`（`_load_model_plane_meta()` 降级修复已验证）；
-  - `all_p2_fixed=true`（`panel_page` 类型注解 + Web UI contract CSR 适配已验证）；
-  - `canon_vector_projection_traced=true`（R-156~R-157 已补写）；
-  - `total_tests_passed ≥ 1661`；
-  - `zero_regressions=true`。
-- 涉及文件路径：
-  - `docs/50_release/m21_release.json`（新增）；
-  - `docs/20_prd/PRD.md`；
-  - `docs/60_trace/requirements_trace.md`。
-- 关联需求：NFR-REL-001；NFR-MAINT-001。
-
-
-## M22 代码质量 Warning 清零 + 发布清单
-
-### TASK-0207 M22-A：HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 修复
-- 状态：DONE
-- 任务描述：FastAPI 新版本将 `HTTP_422_UNPROCESSABLE_ENTITY` 标记为 deprecated，应改为 `HTTP_422_UNPROCESSABLE_CONTENT`。修复 `tool_routes.py`（1 处）和 `scheduler_routes.py`（3 处）共 4 处。
-- 输入：全量测试 4 个 DeprecationWarning（`HTTP_422_UNPROCESSABLE_ENTITY`）。
-- 输出：
-  - `host_brain/app/tool_routes.py`：1 处 `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`；
-  - `host_brain/scheduler/scheduler_routes.py`：3 处 `HTTP_422_UNPROCESSABLE_ENTITY` → `HTTP_422_UNPROCESSABLE_CONTENT`。
-- 验收标准：全量测试无 `HTTP_422_UNPROCESSABLE_ENTITY` DeprecationWarning；0 新增失败。
-- 涉及文件路径：`host_brain/app/tool_routes.py`；`host_brain/scheduler/scheduler_routes.py`。
-- 关联需求：NFR-MAINT-001；代码审查报告 F-15（P2）。
-
-### TASK-0208 M22-B：asyncio.get_event_loop() DeprecationWarning 修复
-- 状态：DONE
-- 任务描述：Python 3.10+ 中 `asyncio.get_event_loop()` 在无当前事件循环时已弃用，应改为 `asyncio.new_event_loop()` + `run_until_complete()` + `close()`。修复 `tests/unit/test_canon_cursor_pagination.py`（2 处）和 `tests/unit/test_canon_routes_tx.py`（4 处）共 6 处。同时将 `test_webui_integration.py` 中的 `test_webui_routes` 重命名为 `run_webui_routes_check`（该函数需要真实 HTTP 服务器，不应被 pytest 自动收集）。
-- 输入：全量测试 2 个 DeprecationWarning（`asyncio.get_event_loop()`）+ 1 个 PytestReturnNotNoneWarning。
-- 输出：
-  - `tests/unit/test_canon_cursor_pagination.py`：2 处 `asyncio.get_event_loop().run_until_complete()` → `asyncio.new_event_loop().run_until_complete()`；
-  - `tests/unit/test_canon_routes_tx.py`：4 处 `asyncio.get_event_loop().run_until_complete()` → `asyncio.new_event_loop().run_until_complete()`；
-  - `test_webui_integration.py`：`test_webui_routes` 重命名为 `run_webui_routes_check`，消除 PytestReturnNotNoneWarning。
-- 验收标准：全量测试 0 warnings；0 新增失败；1677 passed，2 skipped。
-- 涉及文件路径：`tests/unit/test_canon_cursor_pagination.py`；`tests/unit/test_canon_routes_tx.py`；`test_webui_integration.py`。
-- 关联需求：NFR-MAINT-001；代码审查报告 F-25（P2）。
-
-### TASK-0209 M22-C：M22 发布清单
-- 状态：DONE
-- 任务描述：TASK-0207~0208 全部 DONE 后，生成 M22 发布清单（`m22_release.json`），记录 M22-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M22 里程碑状态为 DONE。
-- 输入：TASK-0207~0208 全部 DONE；全量测试 1677 passed，0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m22_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M22 里程碑条目状态更新为 DONE。
-- 验收标准：`release_ready=true`；`zero_warnings=true`；`total_tests_passed=1677`；`zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m22_release.json`；`docs/20_prd/PRD.md`。
-- 关联需求：NFR-REL-001；NFR-MAINT-001。
-
-
-## M23 FTS5 中文检索修复 + Edge 心跳探针集成
-
-### TASK-0210 M23-A：FTS5 中文词组检索修复
-- 状态：DONE
-- 任务描述：试运行报告（附录 10.4/10.13 P2-FTS）发现 `FullTextSearcher.search()` 使用 `unicode61` tokenizer，对中文多字词组（如 `猫咪`、`工作压力`）无法命中 FTS5 索引，导致混合检索（向量 70% + FTS5 30%）实际退化为纯向量检索，FTS5 权重未生效。修复方案：在 `FullTextSearcher.search()` 中对中文查询词进行字符级分割（`" ".join(list(query))`），使 FTS5 MATCH 语法能匹配单字索引；同时在 FTS5 写入时对中文文本同步进行字符级分割写入，保证索引与查询一致。
-- 输入：
-  - `host_brain/retrieval/full_text_searcher.py`（`FullTextSearcher.search()` 和写入逻辑）；
-  - `host_brain/audit/migrations/0021_episodic_fts5.sql`（FTS5 表定义，tokenizer=unicode61）；
-  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §10.4（P2-FTS 问题描述）；
-  - `tests/unit/test_recall_fusion_hybrid.py`（现有 19 个混合检索单元测试）。
-- 输出：
-  - `host_brain/retrieval/full_text_searcher.py`：
-    - `search()` 方法：对中文查询词进行字符级分割，生成 FTS5 MATCH 查询字符串（`" ".join(list(query))`）；
-    - `index_document()` / `index_documents()` 方法：对中文文本同步进行字符级分割后写入 FTS5 索引；
-    - 新增 `_split_chinese_query(text: str) -> str` 私有方法，封装分割逻辑（中文字符逐字分割，非中文保留原词）；
-  - `tests/unit/test_full_text_searcher.py`（新增或扩展）：
-    - T-FTS-01：中文词组查询命中（`猫咪` 查询命中含 `猫咪` 的文档）；
-    - T-FTS-02：中文单字查询命中；
-    - T-FTS-03：英文查询不受影响；
-    - T-FTS-04：混合中英文查询；
-    - T-FTS-05：FTS5 无结果时降级为纯向量（回归保护）；
-    - T-FTS-06：`hybrid_fused=True` 当 FTS5 有命中时（回归保护）。
-- 验收标准：
-  - T-FTS-01~06 全部通过；
-  - 现有 `test_recall_fusion_hybrid.py` 19 个用例全部继续通过（零回归）；
-  - 全量测试较修复前净增 ≥6 个通过用例，0 新增失败；
-  - 试运行追踪脚本重跑时，FTS5 查询 `猫咪` 命中数 ≥1（`hybrid_fused=True`）。
-- 涉及文件路径：
-  - `host_brain/retrieval/full_text_searcher.py`；
-  - `tests/unit/test_full_text_searcher.py`（新增或扩展）。
-- 关联需求/测试：FR-MEM-003；FR-MEM-005；T-FTS-01~06；T-RCL-HYB-02（回归）。
-
-### TASK-0211 M23-B：Edge 心跳探针集成 `build_edge_transport_probe_statuses`
-- 状态：DONE
-- 任务描述：试运行报告（附录 D.3 遗留问题）发现 `build_edge_transport_probe_statuses` 函数已定义但未被任何调用方使用，导致 edge 节点运行时宕机时 host 侧无法感知（edge 服务状态完全依赖配置驱动，不反映运行时真实状态）。修复方案：在 `AgentHealthCheck`（心跳检测）的 edge 健康检查逻辑中集成 `build_edge_transport_probe_statuses`，使 edge 节点运行时探针结果能反映到 host 侧健康报告中；同时在 `/health` 端点的 `runtime_statuses` 构建中合并 edge 传输层探针结果。
-- 输入：
-  - `host_brain/app/config.py`（`build_edge_transport_probe_statuses` 定义位置）；
-  - `host_brain/app/fastapi_app.py`（`/health` 端点，当前只调用 `build_host_runtime_statuses`）；
-  - `host_brain/obs/agent_health_check.py`（`AgentHealthCheck` 心跳检测实现）；
-  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §D.3（遗留问题描述）；
-  - `tests/unit/test_agent_health_check.py`（现有 19 个心跳检测单元测试）。
-- 输出：
-  - `host_brain/app/fastapi_app.py`：
-    - `/health` 端点的 `runtime_statuses` 构建中，合并 `build_edge_transport_probe_statuses` 的探针结果（`_runtime_statuses.update(build_edge_transport_probe_statuses(config))`）；
-    - 补充 `build_edge_transport_probe_statuses` 的导入；
-  - `host_brain/obs/agent_health_check.py`（或新增 `edge_probe_checker.py`）：
-    - 新增 `check_edge_transport_probes()` 方法，调用 `build_edge_transport_probe_statuses` 并将结果写入审计链（`EDGE_PROBE_ALERT` 事件，当任意 edge 传输层探针为 DOWN 时）；
-    - 心跳任务中集成 edge 传输层探针检查（在现有 LLM 心跳检查之后执行）；
-  - `tests/unit/test_agent_health_check.py`（扩展）：
-    - T-HB-07：edge 传输层探针全部 UP 时不写审计；
-    - T-HB-08：edge 传输层探针有 DOWN 时写 EDGE_PROBE_ALERT 审计事件；
-    - T-HB-09：`build_edge_transport_probe_statuses` 抛出异常时心跳任务不崩溃（降级处理）；
-  - `tests/contract/test_health_endpoint_contract.py`（新增或扩展）：
-    - T-HEALTH-EP-01：`/health` 端点返回的 `runtime_statuses` 包含 edge 传输层探针键；
-    - T-HEALTH-EP-02：edge 探针 DOWN 时 `/health` 端点 `boot_status` 为 DEGRADED。
-- 验收标准：
-  - T-HB-07~09 全部通过；
-  - T-HEALTH-EP-01~02 全部通过；
-  - 现有 `test_agent_health_check.py` 19 个用例全部继续通过（零回归）；
-  - `build_edge_transport_probe_statuses` 不再是"定义但未被调用"的孤立函数；
-  - 全量测试较修复前净增 ≥5 个通过用例，0 新增失败。
-- 涉及文件路径：
-  - `host_brain/app/fastapi_app.py`；
-  - `host_brain/obs/agent_health_check.py`；
-  - `host_brain/app/config.py`（只读，不修改）；
-  - `tests/unit/test_agent_health_check.py`（扩展）；
-  - `tests/contract/test_health_endpoint_contract.py`（新增或扩展）。
-- 关联需求/测试：FR-OBS-001；NFR-REL-001；T-HB-07~09；T-HEALTH-EP-01~02。
-
-### TASK-0212 M23-C：M23 发布清单
-- 状态：DONE
-- 任务描述：TASK-0210~0211 全部 DONE 后，生成 M23 发布清单（`m23_release.json`），记录 M23-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M23 里程碑状态为 DONE；更新 `requirements_trace.md` M23 小节状态。
-- 输入：TASK-0210~0211 全部 DONE；全量测试 ≥1688 passed（1677 + 11 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m23_release.json`（新增）：含 `release_ready`、`fts5_chinese_fixed`、`edge_probe_integrated`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
-  - `docs/20_prd/PRD.md`：M23 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M23 小节（R-158~R-159）。
-- 验收标准：
-  - `release_ready=true`；
-  - `fts5_chinese_fixed=true`（FTS5 中文词组检索修复已验证）；
-  - `edge_probe_integrated=true`（`build_edge_transport_probe_statuses` 已集成）；
-  - `total_tests_passed ≥ 1688`；
-  - `zero_regressions=true`；
-  - `zero_warnings=true`。
-- 涉及文件路径：
-  - `docs/50_release/m23_release.json`（新增）；
-  - `docs/20_prd/PRD.md`；
-  - `docs/60_trace/requirements_trace.md`。
-- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-MEM-003；FR-OBS-001。
-
-
-## M24 LLM 网关真实接入 + VTS 表情驱动完整链路 + 微信通道完整链路
-
-### TASK-0213 M24-A：LLM 网关真实接入
-- 状态：DONE
-- 任务描述：实现 Cloud LLM Gateway 的真实 API Key 接入、健康探测、AIRLOCK 出站净化完整链路、多模型路由降级策略。当前 LLM Gateway 仅有 mock/stub 实现，缺少真实 API Key 配置管理、出站净化报告生成、入站内容隔离分类、多模型路由切换等完整链路。
-- 输入：
-  - `host_brain/llm/llm_gateway.py`（当前 LLM Gateway 实现）；
-  - `host_brain/airlock/airlock.py`（AIRLOCK 出站净化实现）；
-  - `host_brain/app/config.py`（配置加载，含 LLM 相关配置）；
-  - `host_brain/scheduler/scheduler.py`（心跳任务，需集成 LLM 健康探测）；
-  - PRD §4.26（FR-LLM-GW-001~003）；
-  - `tests/unit/test_llm_gateway.py`（现有 LLM Gateway 测试）。
-- 输出：
-  - `host_brain/llm/llm_gateway.py`（扩展）：
-    - `LLMGatewayConfig`：支持从环境变量（`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OLLAMA_BASE_URL`）或加密配置文件读取 API Key；
-    - `LLMGateway.health_probe()`：探测主模型/备用模型/本地兜底可用性，返回 `{model_id, status, latency_ms}`；
-    - `LLMGateway.route_call()`：按优先级路由（主模型→备用→本地兜底），写入 `llm_route_log`；
-    - 本地兜底输出标记 `draft_only=true`；
-  - `host_brain/airlock/airlock.py`（扩展）：
-    - `AirlockEgress.sanitize()`：生成完整 `sanitization_report`（`removed_fields/redactions/payload_digest`）；
-    - `AirlockIngress.classify()`：对入站内容分类（`FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN`）；
-    - 净化失败时拒绝出站（`AIRLOCK_BLOCKED_EGRESS`）；
-  - `host_brain/app/fastapi_app.py`（扩展）：
-    - `/health` 端点 `runtime_statuses` 包含 `llm_gateway.status`；
-  - `tests/unit/test_llm_gateway.py`（扩展）：
-    - T-LLM-GW-01：有效 API Key 时 LLM 调用成功，llm_call_log 记录完整；
-    - T-LLM-GW-02：API Key 缺失时输出稳定，reason_code=LLM_UNAVAILABLE；
-    - T-LLM-GW-03：API Key 无效时输出稳定，reason_code=LLM_UNAVAILABLE；
-    - T-LLM-GW-04：心跳探测 LLM 可用性，结果写入审计事件；
-    - T-LLM-GW-05：LLM 不可用时不伪造"我没有任何想法"；
-    - T-LLM-GW-06：出站 payload 有 sanitization_report（removed_fields/redactions/payload_digest）；
-    - T-LLM-GW-07：净化失败时拒绝出站（AIRLOCK_BLOCKED_EGRESS）；
-    - T-LLM-GW-08：入站内容分类正确（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN）；
-    - T-LLM-GW-09：入站内容不直通执行，必须经 Governor；
-    - T-LLM-GW-10：AIRLOCK 出站净化移除硬状态原值；
-    - T-LLM-GW-11：主模型超时时自动切换备用，llm_route_log 记录切换原因；
-    - T-LLM-GW-12：所有模型不可用时输出稳定降级结构；
-    - T-LLM-GW-13：本地兜底输出标记 draft_only=true；
-    - T-LLM-GW-14：路由策略配置变更写 llm_route_config_log；
-    - T-LLM-GW-15：多模型路由决策写入 llm_route_log（model_id/reason/latency_ms）。
-- 验收标准：
-  - T-LLM-GW-01~15 全部通过；
-  - 现有 LLM Gateway 测试全部继续通过（零回归）；
-  - 全量测试净增 ≥15 个通过用例，0 新增失败；
-  - API Key 不硬编码（静态扫描验证）；
-  - AIRLOCK 出站净化覆盖率=100%（每次 LLM 调用都有 sanitization_report）。
-- 涉及文件路径：
-  - `host_brain/llm/llm_gateway.py`；
-  - `host_brain/airlock/airlock.py`；
-  - `host_brain/app/fastapi_app.py`；
-  - `host_brain/app/config.py`（只读，不修改）；
-  - `tests/unit/test_llm_gateway.py`（扩展）。
-- 关联需求/测试：FR-LLM-GW-001；FR-LLM-GW-002；FR-LLM-GW-003；FR-AIRLOCK-001；FR-AIRLOCK-002；T-LLM-GW-01~15。
-
-### TASK-0214 M24-B：VTS 表情驱动完整链路
-- 状态：DONE
-- 任务描述：实现 VTS 表情映射表持久化与版本化、VTS RPC 真实调用链路与审计串联、表情触发频率限制与队列管理。当前 VTS 表情驱动仅有枚举映射定义，缺少映射表持久化存储、版本化管理、RPC 真实调用审计串联、频率限制等完整链路。
-- 输入：
-  - `edge_client/rpc/vts.py`（当前 VTS RPC 实现）；
-  - `host_brain/avatar/vts_driver.py`（VTS 驱动层，含 emotion_tag→expression_id 映射）；
-  - PRD §4.27（FR-VTS-DRIVE-001~003）；
-  - `tests/unit/test_vts_driver.py`（现有 VTS 驱动测试）。
-- 输出：
-  - `host_brain/avatar/vts_mapping_store.py`（新增）：
-    - `VTSMappingStore`：映射表持久化（SQLite 表 `vts_expression_mapping`）；
-    - `load_mapping(version=None)`：按版本加载映射表；
-    - `save_mapping(mapping, version)`：保存映射表并写 `vts_mapping_change_log`；
-    - `get_expression_id(emotion_tag)`：查询映射，非法 tag 抛出 `AVATAR_INVALID_EMOTION_TAG`；
-  - `host_brain/avatar/vts_driver.py`（扩展）：
-    - 集成 `VTSMappingStore`，替换硬编码映射；
-    - `trigger_expression(emotion_tag, request_id, intent_id)`：调用 Edge RPC，写入 `vts_action_log`；
-    - VTS RPC 失败时降级（`EDGE_RPC_FAILED`），不伪造；
-  - `host_brain/avatar/vts_rate_limiter.py`（新增）：
-    - `VTSRateLimiter`：令牌桶算法，每秒最多 N 次（可配置）；
-    - 超限时写 `vts_rate_limit_log`（`reason_code=VTS_RATE_LIMIT_EXCEEDED`）；
-    - 支持热更新频率配置（不重启）；
-  - `tests/unit/test_vts_driver.py`（扩展）：
-    - T-VTS-DRIVE-01：映射表变更后版本号更新，vts_mapping_change_log 可追溯；
-    - T-VTS-DRIVE-02：非法 emotion_tag 被拒绝（AVATAR_INVALID_EMOTION_TAG）；
-    - T-VTS-DRIVE-03：映射表加载失败时降级（DEPENDENCY_UNAVAILABLE）；
-    - T-VTS-DRIVE-04：映射表版本化：同版本同输入输出一致；
-    - T-VTS-DRIVE-05：映射表持久化：重启后可恢复；
-    - T-VTS-DRIVE-06：VTS 调用成功，vts_action_log 记录完整（expression_id/status/latency_ms/request_id）；
-    - T-VTS-DRIVE-07：VTS 不可用时降级，reason_code=EDGE_RPC_FAILED，不伪造；
-    - T-VTS-DRIVE-08：每次触发有 evidence_ref 指向 vts_action_log；
-    - T-VTS-DRIVE-09：VTS RPC 超时时降级，结构稳定；
-    - T-VTS-DRIVE-10：vts_action_log 串联 request_id/intent_id；
-    - T-VTS-DRIVE-11：超限时触发丢弃/拒绝，vts_rate_limit_log 记录；
-    - T-VTS-DRIVE-12：频率配置热更新后立即生效；
-    - T-VTS-DRIVE-13：FIFO 丢弃策略：超限时丢弃最旧请求；
-    - T-VTS-DRIVE-14：频率超限 reason_code=VTS_RATE_LIMIT_EXCEEDED。
-- 验收标准：
-  - T-VTS-DRIVE-01~14 全部通过；
-  - 现有 VTS 驱动测试全部继续通过（零回归）；
-  - 全量测试净增 ≥14 个通过用例，0 新增失败；
-  - 映射表不再硬编码（持久化存储验证）；
-  - VTS RPC 调用 100% 有 vts_action_log 记录。
-- 涉及文件路径：
-  - `host_brain/avatar/vts_mapping_store.py`（新增）；
-  - `host_brain/avatar/vts_driver.py`（扩展）；
-  - `host_brain/avatar/vts_rate_limiter.py`（新增）；
-  - `edge_client/rpc/vts.py`（只读，不修改）；
-  - `tests/unit/test_vts_driver.py`（扩展）。
-- 关联需求/测试：FR-VTS-DRIVE-001；FR-VTS-DRIVE-002；FR-VTS-DRIVE-003；FR-AVATAR-001；T-VTS-DRIVE-01~14。
-
-### TASK-0215 M24-C：微信通道完整链路
-- 状态：DONE
-- 任务描述：实现微信 inbound 事件解析与审计串联、outbound 推送与频率限制、通道健康状态与降级策略。当前微信通道仅有基础事件建模，缺少完整的 inbound 解析（图片/语音/事件消息）、outbound 推送频率限制、通道健康状态管理等完整链路。
-- 输入：
-  - `host_brain/channel/wechat_channel.py`（当前微信通道实现）；
-  - `host_brain/airlock/airlock.py`（AIRLOCK 出站净化）；
-  - `host_brain/app/fastapi_app.py`（/health 端点）；
-  - PRD §4.28（FR-WECHAT-001~003）；
-  - `tests/unit/test_wechat_channel.py`（现有微信通道测试）。
-- 输出：
-  - `host_brain/channel/wechat_channel.py`（扩展）：
-    - `WeChatInboundParser`：解析文本/图片/语音/事件消息为 `WeChatInboundEvent`（`thread_key/msg_type/content_hash/ts_ms/request_id`）；
-    - 图片消息：触发 OCR 转写后进入 Intent 流程，`evidence_ref` 可追溯；
-    - 语音消息：触发 ASR 转写后进入 Intent 流程；
-    - 解析失败：`reason_code=WECHAT_PARSE_FAILED`，结构稳定；
-    - `WeChatOutboundSender`：经 AIRLOCK 净化后推送，写入 `wechat_outbound_log`；
-    - 频率限制：每个 `thread_key` 每分钟最多 N 条（可配置），超限拒绝（`RATE_LIMIT_EXCEEDED`）；
-    - 推送失败：`reason_code=WECHAT_SEND_FAILED`，不伪造；
-  - `host_brain/channel/wechat_health.py`（新增）：
-    - `WeChatChannelHealth`：维护健康状态（`last_recv_ts/last_send_ts/status/error_count`）；
-    - 连续失败 N 次后自动降级（`WECHAT_CHANNEL_DEGRADED`）；
-    - 降级时仍接受 inbound，停止 outbound；
-    - 恢复时写 `wechat_channel_recovery_log`；
-  - `host_brain/app/fastapi_app.py`（扩展）：
-    - `/health` 端点 `runtime_statuses` 包含 `wechat_channel.status`；
-  - `tests/unit/test_wechat_channel.py`（扩展）：
-    - T-WECHAT-01：文本消息解析成功，wechat_inbound_log 记录完整；
-    - T-WECHAT-02：图片消息 OCR 转写后进入 Intent 流程，evidence_ref 可追溯；
-    - T-WECHAT-03：语音消息 ASR 转写后进入 Intent 流程；
-    - T-WECHAT-04：解析失败 reason_code=WECHAT_PARSE_FAILED，结构稳定；
-    - T-WECHAT-05：消息内容不直通 LLM，先经 AIRLOCK 入站隔离；
-    - T-WECHAT-06：thread_key 与 request_id 关联，跨会话可追溯；
-    - T-WECHAT-07：推送成功，wechat_outbound_log 记录完整；
-    - T-WECHAT-08：频率超限拒绝推送，reason_code=RATE_LIMIT_EXCEEDED；
-    - T-WECHAT-09：推送失败降级，reason_code=WECHAT_SEND_FAILED，不伪造；
-    - T-WECHAT-10：出站内容经 AIRLOCK 净化，不含硬状态原值；
-    - T-WECHAT-11：频率限制配置可热更新；
-    - T-WECHAT-12：outbound 推送串联 request_id；
-    - T-WECHAT-13：连续失败 N 次后状态变为 DEGRADED，/health 端点反映；
-    - T-WECHAT-14：降级期间 inbound 正常处理，outbound 静默丢弃；
-    - T-WECHAT-15：恢复时自动重置降级状态，写 wechat_channel_recovery_log；
-    - T-WECHAT-16：健康状态 30 秒自动刷新。
-- 验收标准：
-  - T-WECHAT-01~16 全部通过；
-  - 现有微信通道测试全部继续通过（零回归）；
-  - 全量测试净增 ≥16 个通过用例，0 新增失败；
-  - 微信 outbound 推送 100% 经 AIRLOCK 净化；
-  - 通道健康状态暴露到 /health 端点。
-- 涉及文件路径：
-  - `host_brain/channel/wechat_channel.py`（扩展）；
-  - `host_brain/channel/wechat_health.py`（新增）；
-  - `host_brain/app/fastapi_app.py`（扩展）；
-  - `host_brain/airlock/airlock.py`（只读，不修改）；
-  - `tests/unit/test_wechat_channel.py`（扩展）。
-- 关联需求/测试：FR-WECHAT-001；FR-WECHAT-002；FR-WECHAT-003；FR-CHANNEL-001；FR-AIRLOCK-001；T-WECHAT-01~16。
-
-### TASK-0216 M24-D：M24 发布清单
-- 状态：DONE
-- 任务描述：TASK-0213~0215 全部 DONE 后，生成 M24 发布清单（`m24_release.json`），记录 M24-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M24 里程碑状态为 DONE；更新 `requirements_trace.md` M24 小节状态（R-160~R-165）。
-- 输入：TASK-0213~0215 全部 DONE；全量测试 ≥1776 passed（1731 + 45 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m24_release.json`（新增）：含 `release_ready`、`llm_gateway_integrated`、`vts_drive_complete`、`wechat_channel_complete`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
-  - `docs/20_prd/PRD.md`：M24 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M24 小节（R-160~R-165）。
-- 验收标准：
-  - `release_ready=true`；
-  - `llm_gateway_integrated=true`（LLM 网关真实接入已验证）；
-  - `vts_drive_complete=true`（VTS 表情驱动完整链路已验证）；
-  - `wechat_channel_complete=true`（微信通道完整链路已验证）；
-  - `total_tests_passed ≥ 1776`；
-  - `zero_regressions=true`；
-  - `zero_warnings=true`。
-- 涉及文件路径：
-  - `docs/50_release/m24_release.json`（新增）；
-  - `docs/20_prd/PRD.md`；
-  - `docs/60_trace/requirements_trace.md`。
-- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-LLM-GW-001~003；FR-VTS-DRIVE-001~003；FR-WECHAT-001~003。
-
+**鍓嶇疆鏉′欢**锛歁30 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?
 ---
 
-## M25 生产就绪加固 + SQLiteLedger 扩展 + 代码质量收口（TASK-0217~0221）
+### TASK-0289 M31-A锛氫慨澶?Artifact Vault 鏃佽矾璇诲彇锛圥0锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚recall_fusion.py` 鐨?`_search_artifact_vault()` 褰撳墠鐩存帴璁块棶 `self.ledger.vault_manifest_index`锛岀粫杩囦簡 `lsp/vault.py` 鐨?SSOT 鎺ュ彛灞傦紝杩濆弽 DevSpec 8.0 鍜?8.8 绾︽潫銆傞渶灏嗚鍙栬矾寰勬敼涓洪€氳繃 `self.artifact_vault`锛坄lsp/vault.py` 鏆撮湶鐨勬帴鍙ｏ級杩涜锛屽交搴曟秷闄ゆ梺璺€?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛沗host_brain/lsp/vault.py`銆?- 杈撳嚭锛?  - `host_brain/retrieval/recall_fusion.py`锛歚_search_artifact_vault()` 鏀逛负璋冪敤 `self.artifact_vault.search(query, topk)` 鎴栫瓑鏁堟帴鍙ｏ紝鍒犻櫎瀵?`self.ledger.vault_manifest_index` 鐨勭洿鎺ヨ闂紱
+  - `host_brain/lsp/vault.py`锛氳嫢 `search()` 鎺ュ彛涓嶅瓨鍦紝鏂板 `search(query: str, topk: int) -> list[dict]` 鏂规硶锛?  - `tests/unit/test_artifact_vault_ssot_m31.py`锛堟柊澧烇級锛歍-VAULT-SSOT-01~03銆?- 楠屾敹鏍囧噯锛?  - T-VAULT-SSOT-01锛歚_search_artifact_vault()` 璋冪敤璺緞涓笉鍑虹幇 `ledger.vault_manifest_index`锛堥潤鎬佹壂鎻忔柇瑷€锛夛紱
+  - T-VAULT-SSOT-02锛歚self.artifact_vault=None` 鏃讹紝`_search_artifact_vault()` 杩斿洖绌哄垪琛紝涓嶆姏寮傚父锛?  - T-VAULT-SSOT-03锛歚self.artifact_vault` 鎻愪緵鏈夋晥鏁版嵁鏃讹紝`_search_artifact_vault()` 姝ｇ‘杩斿洖鍊欓€夊垪琛ㄣ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗host_brain/lsp/vault.py`锛沗tests/unit/test_artifact_vault_ssot_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.0锛圫SOT 鍗曞啓鑰?鍗曡鑰呮帴鍙ｏ級锛汥evSpec 8.8锛圱-SSOT-01 闈欐€佹壂鎻忔柇瑷€锛夈€?
+### TASK-0290 M31-B锛氫慨澶嶅悇搴?reason_code 绮楃矑搴﹀綊骞讹紙P0锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚recall_fusion.py` 鐨?`_map_route_exception()` 瀵规墍鏈夐潪 `episodic_vector` 搴撶殑寮傚父缁熶竴杩斿洖 `RETR_RECALL_UNAVAILABLE`锛屼涪澶变簡鍙尯鍒嗙殑 reason_code锛岃繚鍙?DevSpec 8.1 瀹¤鍙拷婧€ц姹傘€傞渶涓烘瘡涓簱瀹氫箟涓撳睘 reason_code 鏋氫妇锛屽苟鍦?`_map_route_exception()` 涓寜 `store_id` 鍒嗗彂銆?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛沗host_brain/retrieval/constants.py`锛堟垨绛夋晥甯搁噺鏂囦欢锛夈€?- 杈撳嚭锛?  - `host_brain/retrieval/constants.py`锛堟垨绛夋晥鏂囦欢锛夛細鏂板浠ヤ笅 reason_code 甯搁噺锛?    - `RETR_LEDGER_UNAVAILABLE`锛坰qlite_ledger 涓嶅彲鐢級
+    - `RETR_BOND_UNAVAILABLE`锛坣eo4j_bond 涓嶅彲鐢級
+    - `RETR_STYLE_UNAVAILABLE`锛坰tyle_canon 涓嶅彲鐢級
+    - `RETR_WORLD_UNAVAILABLE`锛坵orld_canon 涓嶅彲鐢級
+    - `RETR_VAULT_UNAVAILABLE`锛坅rtifact_vault 涓嶅彲鐢級
+  - `host_brain/retrieval/recall_fusion.py`锛歚_map_route_exception()` 鎸?`store_id` 杩斿洖瀵瑰簲 reason_code锛?  - `tests/unit/test_reason_code_dispatch_m31.py`锛堟柊澧烇級锛歍-REASON-01~06銆?- 楠屾敹鏍囧噯锛?  - T-REASON-01锛歚store_id="sqlite_ledger"` 寮傚父 鈫?`RETR_LEDGER_UNAVAILABLE`锛?  - T-REASON-02锛歚store_id="neo4j_bond"` 寮傚父 鈫?`RETR_BOND_UNAVAILABLE`锛?  - T-REASON-03锛歚store_id="style_canon"` 寮傚父 鈫?`RETR_STYLE_UNAVAILABLE`锛?  - T-REASON-04锛歚store_id="world_canon"` 寮傚父 鈫?`RETR_WORLD_UNAVAILABLE`锛?  - T-REASON-05锛歚store_id="artifact_vault"` 寮傚父 鈫?`RETR_VAULT_UNAVAILABLE`锛?  - T-REASON-06锛歚store_id="episodic_vector"` 寮傚父 鈫?鍘熸湁 `RETR_RECALL_UNAVAILABLE`锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗host_brain/retrieval/constants.py`锛沗tests/unit/test_reason_code_dispatch_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.1锛坉ecision=REJECT 鈫?reason_code 闈炵┖涓旀潵鑷ǔ瀹氭灇涓撅級銆?
+### TASK-0291 M31-C锛氳ˉ鍏?intent_log 缂哄け瀛楁锛圥1锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛欴evSpec 8.1 A 瑕佹眰 `intent_log` 蹇呴』鍖呭惈 `tool_visibility_hash`锛堟湰杞毚闇茬殑宸ュ叿鍏冩暟鎹瓙闆嗗搱甯岋級鍜?`lint_result_json`锛坰chema/args 鏍￠獙鎽樿锛涚姝㈣嚜鐒惰瑷€"缁撹鍙?鏇夸唬锛夛紝褰撳墠瀹炵幇缂哄皯杩欎袱涓瓧娈点€?- 杈撳叆锛歚host_brain/audit/sqlite_ledger.py`锛沗host_brain/governor/decision.py`锛堟垨 intent 鍐欏叆璺緞锛夈€?- 杈撳嚭锛?  - `host_brain/audit/sqlite_ledger.py`锛歚intent_log` 琛ㄧ粨鏋勬柊澧?`tool_visibility_hash TEXT`銆乣lint_result_json TEXT` 鍒楋紱`log_intent()` 鏂规硶鎺ュ彈骞跺啓鍏ヨ繖涓や釜瀛楁锛?  - 璋冪敤鏂癸紙`decision.py` 鎴?`metabolism.py`锛夛細鍐欏叆 intent_log 鏃跺～鍏?`tool_visibility_hash`锛堝綋鍓嶈疆娆℃毚闇插伐鍏风殑鍏冩暟鎹搱甯岋紝鏃犲伐鍏锋椂涓虹┖瀛楃涓诧級鍜?`lint_result_json`锛圝SON 鏍煎紡鐨?schema/args 鏍￠獙鎽樿锛岀姝㈣嚜鐒惰瑷€锛夛紱
+  - `tests/unit/test_intent_log_fields_m31.py`锛堟柊澧烇級锛歍-INTENT-LOG-01~03銆?- 楠屾敹鏍囧噯锛?  - T-INTENT-LOG-01锛歚log_intent()` 鍐欏叆璁板綍鍚庯紝`SELECT tool_visibility_hash FROM intent_log` 杩斿洖闈?NULL 鍊硷紙鏃犲伐鍏锋椂涓虹┖瀛楃涓诧級锛?  - T-INTENT-LOG-02锛歚lint_result_json` 瀛楁涓哄悎娉?JSON 瀛楃涓诧紝涓嶅惈鑷劧璇█缁撹鍙ワ紱
+  - T-INTENT-LOG-03锛氭棫鐗堣皟鐢ㄦ柟涓嶄紶杩欎袱涓瓧娈垫椂锛岄粯璁ゅ€间负绌哄瓧绗︿覆锛屼笉鎶ラ敊锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/audit/sqlite_ledger.py`锛沗host_brain/governor/decision.py`锛沗tests/unit/test_intent_log_fields_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.1 A锛坕ntent_log 鏈€灏忓瓧娈碉級銆?
+### TASK-0292 M31-D锛氫慨澶?artifact_id 纭紪鐮?None锛圥1锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚recall_fusion.py` 鐨?`_search_artifact_vault()` 涓?`artifact_id` 琚‖缂栫爜涓?`None`锛岃繚鍙?DevSpec 8.6 瑕佹眰鐨?manifest 鏈€灏忓瓧娈碉紙`artifact_id` 蹇呴』浠?vault 鏁版嵁涓鍙栵級銆傛湰浠诲姟渚濊禆 TASK-0289锛圴ault SSOT 鎺ュ彛淇锛夊畬鎴愬悗锛屼粠 `self.artifact_vault.search()` 杩斿洖鐨勬暟鎹腑姝ｇ‘鎻愬彇 `artifact_id`銆?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛圱ASK-0289 淇鍚庣増鏈級锛沗host_brain/lsp/vault.py`銆?- 杈撳嚭锛?  - `host_brain/retrieval/recall_fusion.py`锛歚_search_artifact_vault()` 浠?vault 杩斿洖鏁版嵁涓彁鍙?`artifact_id`锛屼笉鍐嶇‖缂栫爜 `None`锛?  - `tests/unit/test_artifact_id_field_m31.py`锛堟柊澧烇級锛歍-VAULT-ID-01~02銆?- 楠屾敹鏍囧噯锛?  - T-VAULT-ID-01锛歷ault 杩斿洖鍚?`artifact_id` 鐨?manifest 鏃讹紝鍊欓€夌粨鏋滀腑 `artifact_id` 闈?`None`锛?  - T-VAULT-ID-02锛歷ault 杩斿洖涓嶅惈 `artifact_id` 鐨勬棫鏍煎紡鏁版嵁鏃讹紝`artifact_id` 闄嶇骇涓虹┖瀛楃涓诧紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗tests/unit/test_artifact_id_field_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.6锛坢anifest 鏈€灏忓瓧娈碉細`artifact_id`銆乣kind`銆乣hash`銆乣created_ts`銆乣evidence_refs`锛夈€?- 鍓嶇疆浠诲姟锛歍ASK-0289銆?
+### TASK-0293 M31-E锛氳ˉ鍏?summarizer 鍐欏洖 Neo4j 闈欐€佹壂鎻忔柇瑷€锛圥1锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛欴evSpec 8.2 瑕佹眰 `summarizer.py` 鍙兘娲剧敓 summary锛屼笉寰楀啓鍥?SSOT锛圢eo4j Bond锛夈€傚綋鍓嶇己灏戝搴旂殑闈欐€佹壂鎻忔柇瑷€娴嬭瘯锛圱-SSOT-01锛夛紝鏃犳硶鍦?CI 涓嚜鍔ㄦ嫤鎴繚瑙勫啓鍥炪€?- 杈撳叆锛歚host_brain/bond/summarizer.py`锛沗host_brain/bond/bond_dynamics.py`銆?- 杈撳嚭锛?  - `tests/unit/test_summarizer_ssot_m31.py`锛堟柊澧烇級锛歍-SSOT-SUMM-01~02锛?    - T-SSOT-SUMM-01锛氶潤鎬佹壂鎻?`summarizer.py` 婧愮爜锛屾柇瑷€涓嶅惈 `bond_dynamics`銆乣neo4j`銆乣write`銆乣upsert`銆乣create`銆乣merge` 绛夊啓鍏ュ叧閿瘝锛堟鍒欐壂鎻忥級锛?    - T-SSOT-SUMM-02锛歚derive_bond_summary()` 杩斿洖鍊间负绾暟鎹粨鏋勶紙dict/dataclass锛夛紝涓嶈Е鍙戜换浣曟暟鎹簱鍐欏叆鍓綔鐢ㄣ€?- 楠屾敹鏍囧噯锛?  - T-SSOT-SUMM-01锛氶潤鎬佹壂鎻忛€氳繃锛宍summarizer.py` 涓棤鍐欏叆鍏抽敭璇嶏紱
+  - T-SSOT-SUMM-02锛歮ock `bond_dynamics` 鍐欏叆鏂规硶鍚庯紝璋冪敤 `derive_bond_summary()` 涓嶈Е鍙戜换浣?mock 璋冪敤銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/summarizer.py`锛沗tests/unit/test_summarizer_ssot_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.2锛坰ummarizer 涓嶅緱鍐欏洖 SSOT锛夛紱DevSpec 8.8锛圱-SSOT-01锛夈€?
+### TASK-0294 M31-F锛氱粺涓€ evidence_ref 鍛藉悕鍙ｅ緞锛圥2锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歚recall_fusion.py` 涓?`evidence_ref`锛堝崟鏁帮級涓?`evidence_refs`锛堝鏁帮級鍛藉悕涓嶇粺涓€锛屼笌 DevSpec 8.3 瑙勮寖鐨?`evidence_refs`锛堝鏁帮級涓嶄竴鑷淬€傜粺涓€涓哄鏁板舰寮忥紝骞舵洿鏂版墍鏈夊紩鐢ㄣ€?- 杈撳叆锛歚host_brain/retrieval/recall_fusion.py`锛涚浉鍏虫祴璇曟枃浠躲€?- 杈撳嚭锛?  - `host_brain/retrieval/recall_fusion.py`锛氬皢鎵€鏈?`evidence_ref`锛堝崟鏁帮級閲嶅懡鍚嶄负 `evidence_refs`锛堝鏁帮級锛?  - 鐩稿叧娴嬭瘯鏂囦欢锛氬悓姝ユ洿鏂板瓧娈靛悕寮曠敤锛?  - `tests/unit/test_evidence_refs_naming_m31.py`锛堟柊澧烇級锛歍-EVREF-01銆?- 楠屾敹鏍囧噯锛?  - T-EVREF-01锛氶潤鎬佹壂鎻?`recall_fusion.py`锛屾柇瑷€涓嶅惈瀛ょ珛鐨?`evidence_ref`锛堝崟鏁帮紝鎺掗櫎 `evidence_refs` 鐨勫瓙涓插尮閰嶏級锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/retrieval/recall_fusion.py`锛沗tests/unit/test_evidence_refs_naming_m31.py`銆?- 鍏宠仈闇€姹傦細DevSpec 8.3.1锛圗vidence Pack 瀛楁鍛藉悕瑙勮寖锛夈€?
+### TASK-0295 M31-G锛歁31 浠ｇ爜瀹℃煡鎶ュ憡
 
-### TASK-0217 M25-A：SQLiteLedger log_llm_route() 正式方法
-
-- 状态：DONE
-- 任务描述：在 `SQLiteLedger` 中添加 `log_llm_route()` 正式方法 + `llm_route_log` 表 + 迁移脚本 `0039_llm_route_log.sql`；同步更新 `LlmGatewayContract._log_route_decision()` 直接调用 `ledger.log_llm_route()`，不再使用 `hasattr` 检查。
-- 输入：`request_id` / `model_id` / `reason` / `latency_ms` / `fallback_used` / `ts_ms`
-- 输出：
-  - `host_brain/audit/sqlite_ledger.py`：新增 `log_llm_route()` 方法；
-  - `host_brain/audit/migrations/0039_llm_route_log.sql`：新增迁移脚本；
-  - `host_brain/integrations/llm_gateway.py`：`_log_route_decision()` 直接调用 `ledger.log_llm_route()`；
-  - `tests/unit/test_llm_route_log.py`：T-AUDIT-LLM-01~05（5 个测试）。
-- 验收标准：
-  - `log_llm_route()` 写入成功，`llm_route_log` 表有记录（T-AUDIT-LLM-01）；
-  - `fallback_used=True` 时记录正确（T-AUDIT-LLM-02）；
-  - `ledger=None` 时不崩溃（T-AUDIT-LLM-03）；
-  - 迁移脚本幂等（T-AUDIT-LLM-04）；
-  - 时间窗口查询返回正确记录数（T-AUDIT-LLM-05）；
-  - 全量测试 ≥1782 passed，0 failed，0 warnings。
-- 涉及文件路径：
-  - `host_brain/audit/sqlite_ledger.py`；
-  - `host_brain/audit/migrations/0039_llm_route_log.sql`（新增）；
-  - `host_brain/integrations/llm_gateway.py`；
-  - `tests/unit/test_llm_route_log.py`（新增）。
-- 关联需求/测试：FR-AUDIT-LLM-001；FR-AUDIT-LLM-002；T-AUDIT-LLM-01~05。
-
-### TASK-0218 M25-B：WeChatChannelHealth GC + VTSMappingStore 生命周期加固
-
-- 状态：DONE
-- 任务描述：为 `WeChatChannelHealth._outbound_counts` 添加定期 GC 机制（清理超过 `inactive_threshold_s` 无活动的 `thread_key`，写 `wechat_gc_log`）；为 `VTSMappingStore` 添加 `db_path=":memory:"` 时的 WARNING 日志（生产可观测）。
-- 输入：`gc_interval_s`（默认 3600）/ `inactive_threshold_s`（默认 86400）
-- 输出：
-  - `host_brain/channels/wechat_health.py`：新增 `gc_inactive_threads()` 方法 + `_gc_interval_s` / `_inactive_threshold_s` 配置；
-  - `host_brain/channels/vts_mapping_store.py`：`__init__` 中 `db_path=":memory:"` 时写 `logging.warning()`；
-  - `tests/unit/test_channel_gc_m25.py`：T-CHANNEL-GC-01~03 + T-VTS-STORE-01（4 个测试）。
-- 验收标准：
-  - GC 后过期 `thread_key` 被清理（T-CHANNEL-GC-01）；
-  - 活跃 `thread_key` 不被清理（T-CHANNEL-GC-02）；
-  - GC 写审计日志（T-CHANNEL-GC-03）；
-  - `db_path=":memory:"` 时写 WARNING 日志（T-VTS-STORE-01）；
-  - 全量测试 ≥1782 passed，0 failed，0 warnings。
-- 涉及文件路径：
-  - `host_brain/channels/wechat_health.py`；
-  - `host_brain/channels/vts_mapping_store.py`；
-  - `tests/unit/test_channel_gc_m25.py`（新增）。
-- 关联需求/测试：FR-CHANNEL-GC-001；FR-CHANNEL-GC-002；T-CHANNEL-GC-01~03；T-VTS-STORE-01。
-
-### TASK-0219 M25-C：SQLiteLedger _table_has_column 缓存 + main.py print 修复
-
-- 状态：DONE
-- 任务描述：为 `SQLiteLedger._table_has_column()` 添加表结构缓存（`_table_schema_cache: dict[str, set[str]]`），首次查询后缓存，迁移后自动清空；将 `host_brain/app/main.py:908` 的裸 `print()` 替换为 `logger.info()`。
-- 输入：`table_name` / `column_name`
-- 输出：
-  - `host_brain/audit/sqlite_ledger.py`：新增 `_table_schema_cache` + `_invalidate_schema_cache()` + `_table_has_column()` 缓存逻辑；
-  - `host_brain/app/main.py`：`print()` → `logger.info()`；
-  - `tests/unit/test_perf_audit_m25.py`：T-PERF-AUDIT-01~02（2 个测试）。
-- 验收标准：
-  - 第二次调用 `_table_has_column` 不执行 `PRAGMA table_info`（T-PERF-AUDIT-01）；
-  - 迁移后缓存被清空（T-PERF-AUDIT-02）；
-  - `main.py` 无裸 `print()` 调用；
-  - 全量测试 ≥1782 passed，0 failed，0 warnings。
-- 涉及文件路径：
-  - `host_brain/audit/sqlite_ledger.py`；
-  - `host_brain/app/main.py`；
-  - `tests/unit/test_perf_audit_m25.py`（新增）。
-- 关联需求/测试：FR-PERF-AUDIT-001；T-PERF-AUDIT-01~02。
-
-### TASK-0220 M25-D：asyncio.get_event_loop() DeprecationWarning 修复
-
-- 状态：DONE
-- 任务描述：修复 `edge_client/actuators/vts_driver.py:685` 的 `asyncio.get_event_loop()` DeprecationWarning（Python 3.10+），改为 `asyncio.get_running_loop()`（在协程中）或 `asyncio.new_event_loop()`（在非协程中）；全量测试验证 0 warnings。
-- 输入：`edge_client/actuators/vts_driver.py:685`
-- 输出：
-  - `edge_client/actuators/vts_driver.py`：`asyncio.get_event_loop()` → `asyncio.get_running_loop()` 或 `asyncio.new_event_loop()`；
-  - `tests/unit/test_compat_m25.py`：T-COMPAT-01（1 个测试）。
-- 验收标准：
-  - 全量测试运行 0 DeprecationWarning（T-COMPAT-01）；
-  - `vts_driver.py` 无 `asyncio.get_event_loop()` 调用；
-  - 全量测试 ≥1782 passed，0 failed，0 warnings。
-- 涉及文件路径：
-  - `edge_client/actuators/vts_driver.py`；
-  - `tests/unit/test_compat_m25.py`（新增）。
-- 关联需求/测试：FR-COMPAT-001；T-COMPAT-01。
-
-### TASK-0221 M25-E：M25 发布清单
-
-- 状态：DONE
-- 任务描述：TASK-0217~0220 全部 DONE 后，生成 M25 发布清单（`m25_release.json`），记录 M25-A~D 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M25 里程碑状态为 DONE；更新 `requirements_trace.md` M25 小节状态（R-163~R-166）；生成代码审查报告 `full_code_review_report_2026-03-05-m25.md`。
-- 输入：TASK-0217~0220 全部 DONE；全量测试 ≥1794 passed（1782 + 12 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m25_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M25 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M25 小节（R-163~R-166）；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
-- 验收标准：
-  - `release_ready=true`；
-  - `log_llm_route_formal=true`（SQLiteLedger 正式方法已添加）；
-  - `wechat_gc_implemented=true`（GC 机制已实现）；
-  - `table_schema_cache=true`（表结构缓存已实现）；
-  - `zero_deprecation_warnings=true`；
-  - `total_tests_passed ≥ 1794`；
-  - `zero_regressions=true`；
-  - `zero_warnings=true`。
-- 涉及文件路径：
-  - `docs/50_release/m25_release.json`（新增）；
-  - `docs/20_prd/PRD.md`；
-  - `docs/60_trace/requirements_trace.md`；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
-- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-AUDIT-LLM-001~002；FR-CHANNEL-GC-001~002；FR-PERF-AUDIT-001；FR-COMPAT-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0289~0294 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M31 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曞叚搴撳悎瑙勪慨澶嶈鎯呫€佹祴璇曡鐩栨儏鍐靛拰鏈€缁堟祴璇曠粨鏋溿€?- 杈撳叆锛歍ASK-0289~0294 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛?  - `docs/60_trace/code_review_m31_2026-03-06.md`锛堟柊澧烇級锛氬寘鍚彉鏇存憳瑕併€佹祴璇曡鐩栥€佸悎瑙勬€у鐓ц〃銆佸悜鍚庡吋瀹规€ц鏄庛€?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0289~0294 鍏ㄩ儴 6 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?14 涓紙T-VAULT-SSOT-01~03銆乀-REASON-01~06銆乀-INTENT-LOG-01~03銆乀-VAULT-ID-01~02銆乀-SSOT-SUMM-01~02銆乀-EVREF-01锛夛紝鍏ㄩ儴閫氳繃锛?  - DevSpec 绗叓绔犲悎瑙勬€у鐓ц〃锛? 椤硅繚瑙勫叏閮ㄤ慨澶嶏紝3 椤归儴鍒嗗悎瑙勫叏閮ㄥ崌绾т负鍚堣锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m31_2026-03-06.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汥evSpec 8.0~8.8銆?
 ---
 
-## M26 生产就绪 II — 情感驱动交互 + 端到端集成验证 + 运行时健康加固
+## M32 鐏甸瓊娣卞寲琛ュ厖瀹炵幇锛圫oul Deepening Supplement锛夛紙TASK-0296~0310锛?
+> **鐩爣锛?* 鍦?M28/M29 鐏甸瓊鏋舵瀯鍩虹涓婏紝琛ュ厖瀹炵幇灏氭湭鏈変笓椤规祴璇曡鐩栫殑鐏甸瓊娣卞寲鍔熻兘銆?> **渚濇嵁锛?* M28/M29 DONE 鍚庣殑娴嬭瘯瑕嗙洊琛ュ厖锛汼OUL-OPT-2026-03-05 浼樺寲3/9/11/12/15/18
+> **鍓嶇疆锛?* M28 鍏ㄩ儴 DONE锛汳29 鍏ㄩ儴 DONE锛汳31 鍏ㄩ儴 DONE
+> **瀹屾垚鏃堕棿锛?* 2026-03-06
+> **鐘舵€侊細** 鉁?DONE锛?170 passed, 0 failed锛?
+### TASK-0296 M32-A锛氭儏鎰熻蹇嗗姞鏉冨彫鍥炰笓椤规祴璇曪紙OPT-3 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-B锛堟儏鎰熻蹇嗗姞鏉冨彫鍥烇級琛ュ厖涓撻」娴嬭瘯锛岄獙璇?`recall()` 鐨勬儏鎰熷姞鏉冭瘎鍒嗭紙璇箟60% + 鎯呮劅鍏遍福30% + 鎯呮劅鏄捐憲搴?0%锛夋纭敓鏁堛€?- 杈撳叆锛歚host_brain/memory/episodic.py`锛堝凡瀹炵幇鎯呮劅鍔犳潈鍙洖锛夈€?- 杈撳嚭锛?  - `tests/unit/test_episodic_weighted_recall_m29.py`锛堟柊澧烇級锛歍-EPISODIC-WR-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EPISODIC-WR-01锛氬綋鍓嶆儏鎰熶负 `HAPPY` 鏃讹紝`emotion_tag="HAPPY"` 鐨勮褰曟帓鍚嶉珮浜?`emotion_tag="SAD"` 鐨勫悓绛夎涔夎褰曪紱
+  - T-EPISODIC-WR-02锛歚emotion_salience > 0.8` 鐨勮褰曞湪鍚岀瓑鏉′欢涓嬫帓鍚嶆洿楂橈紱
+  - T-EPISODIC-WR-03锛氭棤鎯呮劅瀛楁鐨勬棫璁板綍涓嶈杩囨护锛屾甯稿弬涓庡彫鍥炪€?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_episodic_weighted_recall_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EPISODIC-WEIGHTED-RECALL-001锛汿-EPISODIC-WR-01~03銆?
+### TASK-0297 M32-B锛氭儏鎰熸椂闂寸嚎閲嶅缓涓撻」娴嬭瘯锛圤PT-9 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-E锛堟儏鎰熸椂闂寸嚎閲嶅缓锛夎ˉ鍏呬笓椤规祴璇曪紝楠岃瘉 `EmotionTimeline.rebuild_summary()` 鐨勬儏鎰熷姬绾垮垎鏋愭纭敓鏁堛€?- 杈撳叆锛歚host_brain/core/metabolism.py`锛堝凡瀹炵幇 `EmotionTimeline`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_emotional_timeline_m29.py`锛堟柊澧烇級锛歍-EMO-TIMELINE-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-TIMELINE-01锛氱粰瀹氭椂闂磋寖鍥村唴鏈夎褰曟椂锛岃繑鍥炲惈 `dominant_emotion`/`trend` 鐨勬憳瑕侊紱
+  - T-EMO-TIMELINE-02锛歚trend` 涓?`"improving"/"stable"/"declining"` 涔嬩竴锛?  - T-EMO-TIMELINE-03锛氭椂闂磋寖鍥村唴鏃犺褰曟椂锛岃繑鍥為粯璁ゆ憳瑕侊紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_emotional_timeline_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTIONAL-TIMELINE-001锛汿-EMO-TIMELINE-01~03銆?
+### TASK-0298 M32-C锛欱ond 瑁傜棔淇涓撻」娴嬭瘯锛圤PT-11 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-G锛圔ond 瑁傜棔淇鏈哄埗锛夎ˉ鍏呬笓椤规祴璇曪紝楠岃瘉 `BondRiftState` 鐨勮鐥?淇鍙岃建鏈哄埗姝ｇ‘鐢熸晥銆?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛堝凡瀹炵幇 `BondRiftState`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_bond_rift_m29.py`锛堟柊澧烇級锛歍-BOND-RIFT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-BOND-RIFT-01锛歚BondRiftState(rift_level=0.5)` 鐨?`is_active()` 杩斿洖 `True`锛?  - T-BOND-RIFT-02锛歚repair_progress >= 1.0` 鏃讹紝`is_active()` 杩斿洖 `False`锛?  - T-BOND-RIFT-03锛歚repair_hint()` 鍦ㄨ鐥曟椿璺冩椂杩斿洖闈炵┖涓枃瀛楃涓诧紱
+  - T-BOND-RIFT-04锛歚BondScoreState.to_summary()` 鍦ㄨ鐥曟椿璺冩椂鍚?`repair_hint` 瀛楁銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗tests/unit/test_bond_rift_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-RIFT-001锛汿-BOND-RIFT-01~04銆?
+### TASK-0299 M32-D锛氫富鍔ㄦ儏鎰熻Е鍙戝櫒涓撻」娴嬭瘯锛圤PT-5 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-D锛堜富鍔ㄦ儏鎰熻Е鍙戝櫒锛夎ˉ鍏呬笓椤规祴璇曪紝楠岃瘉 `register_emotion_trigger` 鍜?`evaluate_emotion_triggers` 鐨勮Е鍙戦€昏緫姝ｇ‘鐢熸晥銆?- 杈撳叆锛歚host_brain/core/metabolism.py`锛堝凡瀹炵幇 `register_emotion_trigger`/`evaluate_emotion_triggers`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_proactive_emotion_trigger_m29.py`锛堟柊澧烇級锛歍-PROACTIVE-EMO-01~04銆?- 楠屾敹鏍囧噯锛?  - T-PROACTIVE-EMO-01锛氭敞鍐岃Е鍙戣鍒欏悗锛屾弧瓒虫潯浠舵椂 `evaluate_emotion_triggers()` 杩斿洖瑙﹀彂浜嬩欢锛?  - T-PROACTIVE-EMO-02锛氫笉婊¤冻鏉′欢鏃讹紝杩斿洖绌哄垪琛紱
+  - T-PROACTIVE-EMO-03锛氳Е鍙戜簨浠跺惈 `emotion_tag`/`intensity`/`source` 瀛楁锛?  - T-PROACTIVE-EMO-04锛氳Е鍙戣鍒欐姏鍑哄紓甯告椂锛岃烦杩囪瑙勫垯锛屼笉褰卞搷鍏朵粬瑙勫垯銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_proactive_emotion_trigger_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-PROACTIVE-EMOTION-001锛汿-PROACTIVE-EMO-01~04銆?
+### TASK-0300 M32-E锛氭儏鎰熷洖澹颁笓椤规祴璇曪紙OPT-12 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-H锛堟儏鎰熷洖澹版満鍒讹級琛ュ厖涓撻」娴嬭瘯锛岄獙璇?`compute_emotion_echo()` 鐨勫叡鎯呭搷搴旈€昏緫姝ｇ‘鐢熸晥銆?- 杈撳叆锛歚host_brain/core/metabolism.py`锛堝凡瀹炵幇 `compute_emotion_echo`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_emotion_echo_m29.py`锛堟柊澧烇級锛歍-EMO-ECHO-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-ECHO-01锛歚compute_emotion_echo("HAPPY", ...)` 杩斿洖鍚?`echo_emotion_tag`/`response_hint` 鐨勫瓧鍏革紱
+  - T-EMO-ECHO-02锛歚echo_valence` 鍦?[-1.0, 1.0] 鑼冨洿鍐咃紱
+  - T-EMO-ECHO-03锛歚response_hint` 涓洪潪绌轰腑鏂囧瓧绗︿覆銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_emotion_echo_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-ECHO-001锛汿-EMO-ECHO-01~03銆?
+### TASK-0301 M32-F锛欵pisodicRecord 琛板噺閰嶇疆涓撻」娴嬭瘯锛圤PT-15 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-I锛圗pisodicRecord decay_profile_id 瀹炶锛夎ˉ鍏呬笓椤规祴璇曪紝楠岃瘉涓嶅悓鎯呮劅寮哄害鐨勮蹇嗕娇鐢ㄤ笉鍚岃“鍑忔洸绾裤€?- 杈撳叆锛歚host_brain/memory/episodic.py`锛堝凡瀹炵幇 `DECAY_PROFILES`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_episodic_decay_m29.py`锛堟柊澧烇級锛歍-EPISODIC-DECAY-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EPISODIC-DECAY-01锛歚emotion_intensity > 0.8` 鐨勮褰?`decay_profile_id` 涓?`"slow"` 鎴?`"permanent"`锛?  - T-EPISODIC-DECAY-02锛歚emotion_intensity < 0.3` 鐨勮褰?`decay_profile_id` 涓?`"fast"`锛?  - T-EPISODIC-DECAY-03锛歚DECAY_PROFILES` 鍖呭惈 `fast`/`normal`/`slow`/`permanent` 鍥涚閰嶇疆銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/memory/episodic.py`锛沗tests/unit/test_episodic_decay_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EPISODIC-DECAY-001锛汿-EPISODIC-DECAY-01~03銆?
+### TASK-0302 M32-G锛歨ard_state_summary 鎯呮劅鏃堕棿鎴充笓椤规祴璇曪紙OPT-18 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-K锛坔ard_state_summary 澧炲姞鎯呮劅鏃堕棿鎴筹級琛ュ厖涓撻」娴嬭瘯锛岄獙璇?`emotion_ts_ms` 瀛楁姝ｇ‘浼犻€掋€?- 杈撳叆锛歚host_brain/core/metabolism.py`锛堝凡瀹炵幇 `emotion_ts_ms`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_hard_state_timestamp_m29.py`锛堟柊澧烇級锛歍-HARD-TS-01~02銆?- 楠屾敹鏍囧噯锛?  - T-HARD-TS-01锛歚build_governance_snapshot()` 杩斿洖鐨?`hard_state_summary` 鍚?`emotion_ts_ms` 瀛楁锛?  - T-HARD-TS-02锛歚emotion_ts_ms` 涓洪潪璐熸暣鏁般€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/metabolism.py`锛沗tests/unit/test_hard_state_timestamp_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-HARD-STATE-TS-001锛汿-HARD-TS-01~02銆?
+### TASK-0303 M32-H锛欱ond 璐ㄦ劅灞備笓椤规祴璇曪紙OPT-2 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-A锛圔ondEmotionalTexture 鎯呮劅璐ㄦ劅灞傦級琛ュ厖涓撻」娴嬭瘯锛岄獙璇?`BondEmotionalTexture.update()` 鍜?`style_hint()` 鐨勯€昏緫姝ｇ‘鐢熸晥銆?- 杈撳叆锛歚host_brain/bond/bond_stage_engine.py`锛堝凡瀹炵幇 `BondEmotionalTexture`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_bond_texture_m29.py`锛堟柊澧烇級锛歍-BOND-TEX-01~04銆?- 楠屾敹鏍囧噯锛?  - T-BOND-TEX-01锛歚response_gap_ms < 5000` 鏃讹紝`intimacy_temperature` 涓婂崌锛?  - T-BOND-TEX-02锛歚recent_emotion_valence > 0.5` 鏃讹紝`style_hint()` 鍚俯鏆栨弿杩帮紱
+  - T-BOND-TEX-03锛歚BondEmotionalTexture` 涓嶅奖鍝?Bond 绉垎璁＄畻锛坄total_score` 涓嶅彉锛夛紱
+  - T-BOND-TEX-04锛歚texture` 瀛楁缂哄け鏃朵娇鐢ㄩ粯璁ゅ€硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/bond/bond_stage_engine.py`锛沗tests/unit/test_bond_texture_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-BOND-TEXTURE-001锛汿-BOND-TEX-01~04銆?
+### TASK-0304 M32-I锛歟motion_pulse 妲戒綅娉ㄥ叆涓撻」娴嬭瘯锛圤PT-4 琛ュ厖锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 M29-C锛坋motion_pulse 鍔ㄦ€佹Ы浣嶆敞鍏ワ級琛ュ厖涓撻」娴嬭瘯锛岄獙璇?`build_emotion_pulse_slot()` 鐨勬Ы浣嶆瀯寤洪€昏緫姝ｇ‘鐢熸晥銆?- 杈撳叆锛歚host_brain/core/prompt_context.py`锛堝凡瀹炵幇 `build_emotion_pulse_slot`锛夈€?- 杈撳嚭锛?  - `tests/unit/test_emotion_pulse_m29.py`锛堟柊澧烇級锛歍-EMO-PULSE-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EMO-PULSE-01锛歚build_emotion_pulse_slot()` 杩斿洖鍚?`emotion_tag`/`mood_state`/`style_hint` 鐨勫瓧鍏革紱
+  - T-EMO-PULSE-02锛歚style_hint` 涓洪潪绌轰腑鏂囧瓧绗︿覆锛?  - T-EMO-PULSE-03锛歚emotion_vector=None` 鏃讹紝浣跨敤榛樿鍊硷紝涓嶆姤閿欍€?- 娑夊強鏂囦欢璺緞锛歚host_brain/core/prompt_context.py`锛沗tests/unit/test_emotion_pulse_m29.py`銆?- 鍏宠仈闇€姹?娴嬭瘯锛欶R-EMOTION-PULSE-001锛汿-EMO-PULSE-01~03銆?
+### TASK-0305 M32-J锛歁32 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE（2026-03-05）
-- 目标：在对话链路中引入 emotion_tag 心情参数，驱动 VTS 表情 + TTS 语气联动；将 VTS 热键配置抽离为独立配置文件；建立端到端集成冒烟测试；加固运行时健康检查；LLM 路由配置热更新；VTS 映射表版本回滚。
-- 质量门禁：全量测试 ≥1832 passed（1802 + 30 新增），0 failed，0 warnings，零回归。
-
-### TASK-0222 M26-A：端到端集成冒烟测试套件
-
-- 状态：DONE（2026-03-05）
-- 任务描述：建立覆盖"用户输入 → Intent → Governor → Skill → Audit"完整链路的集成冒烟测试，确保各模块联动无断点；新增审计链完整性校验（request_id 串联三联画日志）。
-- 输入：`tests/e2e/` 目录；`tests/contract/` 目录；现有 host_brain 链路代码。
-- 输出：
-  - `tests/integration/test_e2e_smoke_m26.py`（新增）：覆盖 5 条核心链路（普通对话/执行/拒绝/降级/审计串联）；
-  - `tests/integration/test_audit_chain_integrity_m26.py`（新增）：审计链完整性校验（request_id 串联三联画日志）。
-- 验收标准：
-  - T-E2E-SMOKE-01：普通对话链路（无执行）完整走通，审计链可串联；
-  - T-E2E-SMOKE-02：执行链路（APPROVE + Skill）完整走通，token_ref 可追溯；
-  - T-E2E-SMOKE-03：拒绝链路（REJECT + reason_code）完整走通；
-  - T-E2E-SMOKE-04：降级链路（LLM 不可用 → 降级输出）完整走通；
-  - T-AUDIT-CHAIN-01~03：request_id 串联三联画日志（intent/governor/skill_exec）；
-  - 全量测试 ≥1802 passed，0 failed。
-- 涉及文件路径：
-  - `tests/integration/test_e2e_smoke_m26.py`（新增）；
-  - `tests/integration/test_audit_chain_integrity_m26.py`（新增）。
-- 关联需求/测试：FR-CORE-001；FR-AUDIT-001；FR-GOV-001；T-E2E-SMOKE-01~04；T-AUDIT-CHAIN-01~03。
-
-### TASK-0223 M26-B：运行时健康检查加固（/health 端点完整性）
-
-- 状态：DONE（2026-03-05）
-- 任务描述：确保 `/health` 端点聚合所有已注册服务的健康状态，并在服务降级时给出精确的 `reason_code`；新增 `validate_health_response()` 方法校验响应结构完整性。
-- 输入：`host_brain/app/main.py`；`host_brain/obs/health_aggregator.py`（若存在）。
-- 输出：
-  - `host_brain/obs/health_aggregator.py`：新增 `validate_health_response()` 方法（校验响应结构完整性）；
-  - `tests/unit/test_health_aggregator_m26.py`（新增）：T-HEALTH-AGG-01~04（4 个测试）。
-- 验收标准：
-  - T-HEALTH-AGG-01：所有已注册服务均出现在 `/health` 响应中；
-  - T-HEALTH-AGG-02：单服务超时时该服务 `status=DOWN`，其余正常返回；
-  - T-HEALTH-AGG-03：响应结构稳定（字段不随服务状态变化而缺失）；
-  - T-HEALTH-AGG-04：`validate_health_response()` 对缺字段响应返回 `False`；
-  - 全量测试 ≥1806 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/obs/health_aggregator.py`；
-  - `tests/unit/test_health_aggregator_m26.py`（新增）。
-- 关联需求/测试：FR-OBS-008；FR-OBS-004；T-HEALTH-AGG-01~04。
-
-### TASK-0224 M26-C：LLM 路由配置热更新 + 审计
-
-- 状态：DONE（2026-03-05）
-- 任务描述：`LlmGatewayContract` 的路由策略支持热更新（不重启），变更写 `llm_route_config_log`；新增 `update_route_config()` 方法 + `log_llm_route_config_change()` 审计方法。
-- 输入：`host_brain/integrations/llm_gateway.py`；`host_brain/audit/sqlite_ledger.py`。
-- 输出：
-  - `host_brain/integrations/llm_gateway.py`：新增 `update_route_config()` 方法 + `llm_route_config_log` 写入；
-  - `host_brain/audit/sqlite_ledger.py`：新增 `log_llm_route_config_change()` 方法 + `llm_route_config_log` 表；
-  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`（新增）；
-  - `tests/unit/test_llm_route_config_m26.py`（新增）：T-LLM-CFG-01~04（4 个测试）。
-- 验收标准：
-  - T-LLM-CFG-01：`update_route_config()` 热更新后立即生效；
-  - T-LLM-CFG-02：配置变更写 `llm_route_config_log`（含变更前后 hash）；
-  - T-LLM-CFG-03：迁移脚本幂等；
-  - T-LLM-CFG-04：配置非法时拒绝更新（`INVALID_ROUTE_CONFIG`）；
-  - 全量测试 ≥1810 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/integrations/llm_gateway.py`；
-  - `host_brain/audit/sqlite_ledger.py`；
-  - `host_brain/audit/migrations/0040_llm_route_config_log.sql`（新增）；
-  - `tests/unit/test_llm_route_config_m26.py`（新增）。
-- 关联需求/测试：FR-LLM-GW-003；T-LLM-CFG-01~04。
-
-### TASK-0225 M26-D：VTS 映射表热更新 + 版本回滚
-
-- 状态：CANCELLED（2026-03-05）
-- 取消原因：M24-B 已实现 `save_mapping(version=...)`/`load_mapping(version=...)`/`list_versions()` 完整版本化能力；M26-F 已将热键配置抽离为 `configs/vts/vts_hotkey_config.yaml` 静态文件，运行时不存在动态变更映射表的场景，`rollback_to_version()` 仅为语法糖且无实际使用场景，取消以聚焦更高优先级任务。
-- 任务描述：`VTSMappingStore` 支持映射表热更新（不重启）和版本回滚，变更写 `vts_mapping_change_log`；新增 `rollback_to_version()` 方法 + 版本历史存储。
-- 输入：`host_brain/channels/vts_mapping_store.py`。
-- 输出：
-  - `host_brain/channels/vts_mapping_store.py`：新增 `rollback_to_version()` 方法 + 版本历史存储；
-  - `tests/unit/test_vts_mapping_rollback_m26.py`（新增）：T-VTS-ROLL-01~03（3 个测试）。
-- 验收标准：
-  - T-VTS-ROLL-01：`rollback_to_version()` 回滚后映射表恢复历史版本；
-  - T-VTS-ROLL-02：回滚写 `vts_mapping_change_log`（含回滚原因）；
-  - T-VTS-ROLL-03：回滚到不存在的版本返回 `VERSION_NOT_FOUND`；
-  - 全量测试 ≥1813 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/channels/vts_mapping_store.py`；
-  - `tests/unit/test_vts_mapping_rollback_m26.py`（新增）。
-- 关联需求/测试：FR-VTS-DRIVE-001；T-VTS-ROLL-01~03。
-
-### TASK-0226 M26-E：情感驱动对话链路（Emotion-Driven Dialogue）
-
-- 状态：DONE（2026-03-05）
-- 任务描述：在对话链路中引入 `emotion_tag` 心情参数——LLM 输出契约 `narrative` 对象新增 `emotion_tag` 可选字段（枚举：NEUTRAL/HAPPY/SAD/ANGRY/SURPRISED/THINKING/CALM/EXCITED）；Host QA 校验 `emotion_tag` 合法性（非法值降级为 NEUTRAL）；Host 下发 Edge RPC 时透传 `emotion_tag`；Edge 同步触发 VTS `set_expression(emotion_tag)` + TTS `synthesize(emotion_tag=...)`，实现表情与语气联动。
-- 输入：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `host_brain/core/qa.py`（QA 校验）；
-  - `host_brain/app/main.py`（Host → Edge RPC 下发）；
-  - `edge_client/actuators/vts_driver.py`（VTS 表情触发）；
-  - `edge_client/actuators/tts_engine.py`（TTS 语气参数）。
-- 输出：
-  - `prompts/llm_contract/core_output_contract.json`：`narrative` 对象新增 `emotion_tag` 字段（可选，枚举约束）；
-  - `host_brain/core/qa.py`：新增 `_validate_emotion_tag()` 方法（非法值降级 NEUTRAL，写 QA 警告日志）；
-  - `host_brain/app/main.py`：speak 下发时透传 `emotion_tag`；
-  - `edge_client/actuators/vts_driver.py`：speak_event 处理时调用 `set_expression(emotion_tag)`；
-  - `edge_client/actuators/tts_engine.py`：`synthesize()` 接收并应用 `emotion_tag` 语气参数；
-  - `tests/unit/test_emotion_driven_dialogue_m26.py`（新增）：T-EMOTION-01~06（6 个测试）。
-- 验收标准：
-  - T-EMOTION-01：LLM 输出含合法 `emotion_tag` 时，VTS `set_expression` 被调用（emotion_tag 正确传递）；
-  - T-EMOTION-02：LLM 输出含合法 `emotion_tag` 时，TTS `synthesize` 接收到对应 `emotion_tag`；
-  - T-EMOTION-03：LLM 输出 `emotion_tag` 非法时，QA 降级为 `NEUTRAL`，不中断链路；
-  - T-EMOTION-04：LLM 输出缺少 `emotion_tag` 时，默认使用 `NEUTRAL`；
-  - T-EMOTION-05：`_validate_emotion_tag()` 对所有枚举值返回合法；
-  - T-EMOTION-06：`_validate_emotion_tag()` 对非枚举值返回 `NEUTRAL` 并写警告日志；
-  - 全量测试 ≥1819 passed，0 failed。
-- 涉及文件路径：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `host_brain/core/qa.py`；
-  - `host_brain/app/main.py`；
-  - `edge_client/actuators/vts_driver.py`；
-  - `edge_client/actuators/tts_engine.py`；
-  - `tests/unit/test_emotion_driven_dialogue_m26.py`（新增）。
-- 关联需求/测试：FR-EMOTION-DRIVE-001；FR-EMOTION-DRIVE-002；FR-EMOTION-DRIVE-003；T-EMOTION-01~06。
-
-### TASK-0227 M26-F：VTS 热键配置文件抽离 + 说明文档
-
-- 状态：DONE（2026-03-05）
-- 任务描述：将 VTS 所有热键配置（emotion_tag → expression_id 映射、热键 ID、触发参数等）从代码中抽离为独立的 YAML 配置文件 `configs/vts/vts_hotkey_config.yaml`；`VTSMappingStore` 支持从该配置文件加载初始映射表（替代硬编码的 `DEFAULT_EMOTION_MAPPING`）；新增配置说明文档 `docs/30_devspec/vts_hotkey_config_guide.md`，说明配置格式、字段含义、扩展方式及与 VTSMappingStore 的关联关系。
-- 输入：
-  - `host_brain/channels/vts_mapping_store.py`（`DEFAULT_EMOTION_MAPPING` 硬编码）；
-  - `edge_client/actuators/vts_driver.py`（热键触发逻辑）；
-  - `configs/` 目录（新增 `vts/` 子目录）。
-- 输出：
-  - `configs/vts/vts_hotkey_config.yaml`（新增）：包含所有 emotion_tag → expression_id 映射 + 热键触发参数（触发延迟、优先级、fallback 策略等）；
-  - `host_brain/channels/vts_mapping_store.py`：新增 `load_from_config_file(path)` 类方法，支持从 YAML 配置文件加载初始映射表；`DEFAULT_EMOTION_MAPPING` 保留为 fallback；
-  - `docs/30_devspec/vts_hotkey_config_guide.md`（新增）：配置文件格式说明、字段含义、扩展方式、与 VTSMappingStore 的关联关系、示例；
-  - `tests/unit/test_vts_hotkey_config_m26.py`（新增）：T-VTS-CFG-01~04（4 个测试）。
-- 验收标准：
-  - T-VTS-CFG-01：`load_from_config_file()` 从 YAML 文件加载映射表，与文件内容一致；
-  - T-VTS-CFG-02：YAML 文件缺失时 `load_from_config_file()` 抛出 `FileNotFoundError`（含明确错误信息）；
-  - T-VTS-CFG-03：YAML 文件格式非法时抛出 `ValueError`（含字段名）；
-  - T-VTS-CFG-04：`DEFAULT_EMOTION_MAPPING` 作为 fallback，YAML 未配置的 emotion_tag 使用默认值；
-  - `configs/vts/vts_hotkey_config.yaml` 存在且格式合法；
-  - `docs/30_devspec/vts_hotkey_config_guide.md` 存在且包含所有必要章节；
-  - 全量测试 ≥1823 passed，0 failed。
-- 涉及文件路径：
-  - `configs/vts/vts_hotkey_config.yaml`（新增）；
-  - `host_brain/channels/vts_mapping_store.py`；
-  - `docs/30_devspec/vts_hotkey_config_guide.md`（新增）；
-  - `tests/unit/test_vts_hotkey_config_m26.py`（新增）。
-- 关联需求/测试：FR-VTS-CFG-001；FR-VTS-CFG-002；T-VTS-CFG-01~04。
-
-### TASK-0228 M26-G：mood_state → emotion_tag 约束映射（情感系统深化 I）
-
-- 状态：DONE（2026-03-05）
-- 任务描述：在 `metabolism.py` 中新增 `mood_to_emotion_constraint()` 函数，将系统硬状态（calm/steady/engaged/tired/critical）映射为 emotion_tag 的允许范围；在 QA 校验时检查 emotion_tag 是否在当前 mood_state 的允许范围内，不在则降级到该范围的第一个值（写 QA 警告日志）。实现"系统状态感知"的情感约束，防止能量极低时输出 EXCITED 等不合理情感。
-- 输入：
-  - `host_brain/core/metabolism.py`（新增 `mood_to_emotion_constraint()` 函数）；
-  - `host_brain/core/qa.py`（集成 mood_state 约束校验）。
-- 输出：
-  - `host_brain/core/metabolism.py`：新增 `MOOD_EMOTION_CONSTRAINTS` 常量 + `mood_to_emotion_constraint(mood_state)` 函数；
-  - `host_brain/core/qa.py`：`_validate_emotion_tag()` 新增 `mood_state` 参数，支持约束范围校验；
-  - `tests/unit/test_mood_emotion_constraint_m26.py`（新增）：T-MOOD-CONST-01~04（4 个测试）。
-- 验收标准：
-  - T-MOOD-CONST-01：`mood_to_emotion_constraint("critical")` 返回 `["NEUTRAL", "SAD"]`；
-  - T-MOOD-CONST-02：`mood_to_emotion_constraint("engaged")` 返回包含 `EXCITED` 的列表；
-  - T-MOOD-CONST-03：`_validate_emotion_tag("EXCITED", mood_state="critical")` 降级为 `NEUTRAL` 并写警告日志；
-  - T-MOOD-CONST-04：`_validate_emotion_tag("HAPPY", mood_state="steady")` 返回 `HAPPY`（在允许范围内）；
-  - 全量测试 ≥1827 passed，0 failed。
-- 涉及文件路径：
-  - `host_brain/core/metabolism.py`；
-  - `host_brain/core/qa.py`；
-  - `tests/unit/test_mood_emotion_constraint_m26.py`（新增）。
-- 关联需求/测试：FR-EMOTION-DRIVE-004；T-MOOD-CONST-01~04。
-
-### TASK-0229 M26-H：sub_emotion 细粒度表情驱动（情感系统深化 II）
-
-- 状态：DONE（2026-03-05）
-- 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `sub_emotion`，映射到 `vts_hotkey_config.yaml` 中的具体热键（如 blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；`VTSMappingStore` 新增 `sub_emotion_to_hotkey()` 方法；`voice_pipeline.py` 在触发 `set_expression(emotion_tag)` 后，若 `sub_emotion` 存在则额外触发对应热键，充分利用模型的 15 个细粒度表情。
-- 输入：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `configs/vts/vts_hotkey_config.yaml`（TASK-0227 产出）；
-  - `host_brain/channels/vts_mapping_store.py`；
-  - `edge_client/runtime/voice_pipeline.py`。
-- 输出：
-  - `prompts/llm_contract/core_output_contract.json`：`narrative` 新增 `sub_emotion` 可选字段（枚举：blush/star_eye/heart_eye/cry/scissors_eye/dizzy/disdain/peace_sign）；
-  - `host_brain/channels/vts_mapping_store.py`：新增 `sub_emotion_to_hotkey(sub_emotion)` 方法；
-  - `edge_client/runtime/voice_pipeline.py`：`enqueue_speak` 时若 payload 含 `sub_emotion` 则额外触发对应热键；
-  - `tests/unit/test_sub_emotion_m26.py`（新增）：T-SUB-EMOTION-01~04（4 个测试）。
-- 验收标准：
-  - T-SUB-EMOTION-01：`sub_emotion_to_hotkey("blush")` 返回对应热键 ID；
-  - T-SUB-EMOTION-02：`sub_emotion_to_hotkey("unknown")` 返回 `None`（不触发，不报错）；
-  - T-SUB-EMOTION-03：speak payload 含 `sub_emotion="star_eye"` 时，VTS 额外触发对应热键；
-  - T-SUB-EMOTION-04：speak payload 无 `sub_emotion` 时，仅触发 `set_expression(emotion_tag)`，无额外热键；
-  - 全量测试 ≥1831 passed，0 failed。
-- 涉及文件路径：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `host_brain/channels/vts_mapping_store.py`；
-  - `edge_client/runtime/voice_pipeline.py`；
-  - `tests/unit/test_sub_emotion_m26.py`（新增）。
-- 关联需求/测试：FR-EMOTION-DRIVE-005；T-SUB-EMOTION-01~04。
-
-### TASK-0230 M26-I：emotion_intensity 强度参数（情感系统深化 III）
-
-- 状态：DONE（2026-03-05）
-- 任务描述：在 LLM 输出契约 `narrative` 对象中新增可选字段 `emotion_intensity`（float，0.0~1.0），影响 TTS 语气幅度；`SoVITSModelManager.synthesize()` 接收 `emotion_intensity` 参数并传递给底层模型；`VTubeStudioDriver.set_expression()` 接收 `intensity` 参数，影响表情触发的 `duration_ms`（强度越高持续越长）。
-- 输入：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `edge_client/actuators/tts_engine.py`；
-  - `edge_client/actuators/vts_driver.py`；
-  - `edge_client/runtime/voice_pipeline.py`。
-- 输出：
-  - `prompts/llm_contract/core_output_contract.json`：`narrative` 新增 `emotion_intensity` 可选字段（number，0.0~1.0）；
-  - `edge_client/actuators/tts_engine.py`：`synthesize()` 新增 `emotion_intensity` 参数（float，默认 0.5）；
-  - `edge_client/actuators/vts_driver.py`：`set_expression()` 新增 `intensity` 参数（float，默认 0.5），影响 `duration_ms`；
-  - `edge_client/runtime/voice_pipeline.py`：透传 `emotion_intensity` 到 TTS + VTS；
-  - `tests/unit/test_emotion_intensity_m26.py`（新增）：T-INTENSITY-01~04（4 个测试）。
-- 验收标准：
-  - T-INTENSITY-01：`synthesize(text, emotion_tag="HAPPY", emotion_intensity=0.9)` 正常调用不报错；
-  - T-INTENSITY-02：`set_expression("HAPPY", intensity=0.9)` 正常调用不报错；
-  - T-INTENSITY-03：`emotion_intensity` 超出 [0.0, 1.0] 范围时 QA 校验截断到合法范围（不拒绝）；
-  - T-INTENSITY-04：speak payload 含 `emotion_intensity=0.8` 时，TTS 和 VTS 均收到该参数；
-  - 全量测试 ≥1835 passed，0 failed。
-- 涉及文件路径：
-  - `prompts/llm_contract/core_output_contract.json`；
-  - `edge_client/actuators/tts_engine.py`；
-  - `edge_client/actuators/vts_driver.py`；
-  - `edge_client/runtime/voice_pipeline.py`；
-  - `tests/unit/test_emotion_intensity_m26.py`（新增）。
-- 关联需求/测试：FR-EMOTION-DRIVE-006；T-INTENSITY-01~04。
-
-### TASK-0231 M26-J：M26 发布清单
-
-- 状态：DONE（2026-03-05）
-- 任务描述：TASK-0222~0230 全部 DONE 后，生成 M26 发布清单（`m26_release.json`），记录 M26-A~I 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M26 里程碑状态为 DONE；更新 `requirements_trace.md` M26 小节（R-167~R-175）；生成代码审查报告 `full_code_review_report_2026-03-05-m26.md`。
-- 输入：TASK-0222~0230 全部 DONE；全量测试 ≥1835 passed（1802 + 33 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m26_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M26 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M26 小节（R-167~R-175）；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
-- 验收标准：
-  - `release_ready=true`；
-  - `emotion_driven_dialogue=true`（基础情感链路已实现）；
-  - `mood_emotion_constraint=true`（mood_state 约束映射已实现）；
-  - `sub_emotion_driven=true`（细粒度表情驱动已实现）；
-  - `emotion_intensity=true`（强度参数已实现）；
-  - `vts_hotkey_config_extracted=true`（VTS 热键配置已抽离）；
-  - `e2e_smoke_suite=true`（端到端冒烟测试套件已建立）；
-  - `health_aggregator_validated=true`（健康检查加固已完成）；
-  - `llm_route_hot_reload=true`（LLM 路由热更新已实现）；
-  - `total_tests_passed ≥ 1835`；
-  - `zero_regressions=true`；
-  - `zero_warnings=true`。
-- 涉及文件路径：
-  - `docs/50_release/m26_release.json`（新增）；
-  - `docs/20_prd/PRD.md`；
-  - `docs/60_trace/requirements_trace.md`；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
-- 关联需求：NFR-REL-001；NFR-MAINT-001；FR-EMOTION-DRIVE-001~006；FR-VTS-CFG-001~002；FR-CORE-001；FR-OBS-008；FR-LLM-GW-003；FR-VTS-DRIVE-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0296~0304 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M32 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曠伒榄傛繁鍖栬ˉ鍏呭疄鐜扮殑娴嬭瘯瑕嗙洊鎯呭喌鍜屾渶缁堟祴璇曠粨鏋溿€?- 杈撳叆锛歍ASK-0296~0304 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛?  - `docs/60_trace/code_review_m32_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0296~0304 鍏ㄩ儴 9 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?35 涓紝鍏ㄩ儴閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m32_2026-03-06.md`銆?- 鍏宠仈闇€姹傦細NFR-REL-001锛汧R-EMOTION-CONTINUUM-001锛汧R-BOND-TEXTURE-001锛汧R-BOND-RIFT-001銆?
 ---
 
-## M27 情感链路端到端连通（P0 基础设施修复）（TASK-0232~0242）
+## M33 鑺傜偣缂栨帓鍦烘櫙璺敱淇锛圫cene-Aware Node Routing锛夛紙TASK-0306~0313锛?
+> **鐩爣锛?* 淇褰撳墠"鏃犳潯浠跺叏璺?鑺傜偣"鐨勭紪鎺掗棶棰橈紝鎸?ModelPlane.md 搂4 鐨勫満鏅矾鐢辫鏍煎疄鐜版潯浠惰矾鐢憋細CHAT 鍦烘櫙鍙窇 2 涓繀瑕佽妭鐐癸紝`core_reasoner_secondary` 鏀逛负 primary 澶辫触鏃剁殑 fallback-only锛宍planner_constraints`/`tool_planner` 鍙湪 EXEC_INTENT 鍦烘櫙瑙﹀彂锛宍workbench_*` 鍙湪瀵瑰簲 WORK_* 鍦烘櫙瑙﹀彂锛宍safety_verifier`/`consistency_verifier` 鎸夐渶瑙﹀彂銆?> **渚濇嵁锛?* ModelPlane.md 搂4.1锛堝満鏅灇涓撅級銆伮?.2锛堜袱娈靛紡閾捐矾锛夛紱Trace 鏃ュ織鍒嗘瀽锛圚OST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md锛?> **鍓嶇疆锛?* M32 鍏ㄩ儴 DONE
+> **瀹屾垚鏍囧噯锛?* 鍏ㄩ噺娴嬭瘯 0 failed锛汣HAT 鍦烘櫙鑺傜偣鏁?= 2锛坧rimary + renderer锛夛紱secondary 浠呭湪 primary 澶辫触鏃跺嚭鐜板湪 trace 涓?
+### TASK-0306 M33-A锛氬満鏅妭鐐瑰簭鍒楄В鏋愬嚱鏁?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `fastapi_app.py` 涓柊澧?`_resolve_scene_node_sequence(scene_type)` 鍑芥暟锛屾寜鍦烘櫙杩斿洖搴旀墽琛岀殑鑺傜偣搴忓垪锛堜笉鍚?secondary fallback 鑺傜偣锛夈€?- 杈撳叆锛歚scene_type: str`锛圕HAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE锛夈€?- 杈撳嚭锛歚list[str]`锛堣妭鐐?ID 搴忓垪锛夈€?- 楠屾敹鏍囧噯锛?  - CHAT 鈫?`["core_reasoner_primary", "renderer_ja_c_style"]`锛?  - EXEC_INTENT 鈫?`["core_reasoner_primary", "planner_constraints", "tool_planner", "safety_verifier", "renderer_ja_c_style"]`锛?  - WORK_TRANSLATE 鈫?`["core_reasoner_primary", "workbench_translate", "renderer_ja_c_style"]`锛?  - WORK_CODE 鈫?`["core_reasoner_primary", "workbench_code_assist", "renderer_ja_c_style"]`锛?  - 鏈煡鍦烘櫙 鈫?閫€鍖栦负 CHAT 搴忓垪銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.1锛汿-SCENE-ROUTE-01~04銆?
+### TASK-0307 M33-B锛歘build_chat_graph_config 鎺ュ彈 scene_type 鍙傛暟
 
-> **目标：** 修复情感信息在全链路中的 11 个 P0 级断路点，使情感状态能从感知层流通到决策层、执行层、记忆层，形成完整的情感闭环。
-> **依据：** SOUL-OPT-2026-03-05 优化19/20/22/25/26/27/31/32/37/38/43
-> **前置：** M26 全部 DONE
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`_build_chat_graph_config` 鍑芥暟锛屾帴鍙?`scene_type` 鍙傛暟锛屼娇鐢?`_resolve_scene_node_sequence` 鏇夸唬纭紪鐮佺殑 `CHAT_GRAPH_NODE_ORDER`锛屽苟灏?`core_reasoner_secondary` 鏀逛负 fallback-only锛堜粎鍦?fallback_edges 涓嚭鐜帮級銆?- 杈撳叆锛歚scene_type: str`锛堥粯璁?"CHAT"锛夈€?- 杈撳嚭锛歚graph_config` 涓?`node_bindings`/`edges`/`entry_node` 鎸夊満鏅姩鎬佺敓鎴愩€?- 楠屾敹鏍囧噯锛?  - CHAT 鍦烘櫙锛歚node_bindings` 鍙惈 2 涓妭鐐癸紙primary + renderer锛夛紱
+  - `core_reasoner_secondary` 涓嶅湪 `node_bindings` 涓紝鍙湪 `fallback_edges` 涓紱
+  - `graph_meta.scene_type` 瀛楁璁板綍褰撳墠鍦烘櫙锛?  - 鍚戝悗鍏煎锛氫笉浼?`scene_type` 鏃堕粯璁?CHAT銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.2锛汿-SCENE-ROUTE-05~07銆?
+### TASK-0308 M33-C锛歝hat 绔偣浼犻€?scene_type
 
-### TASK-0232 M27-A：GateSnapshot 增加情感字段（OPT-19）
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `/v1/chat` 绔偣涓紝浠?`request_body` 鎴?intent 鍒嗘瀽缁撴灉涓彁鍙?`scene_type`锛屼紶閫掔粰 `_build_chat_graph_config`銆?- 杈撳叆锛歚request_body.scene_type`锛堝彲閫夛紝榛樿 "CHAT"锛夈€?- 杈撳嚭锛歚graph_config` 鎸夊疄闄呭満鏅瀯寤恒€?- 楠屾敹鏍囧噯锛?  - 涓嶄紶 `scene_type` 鏃讹紝榛樿 CHAT锛岃妭鐐规暟 = 2锛?  - 浼犲叆 `scene_type="EXEC_INTENT"` 鏃讹紝鑺傜偣鏁?= 5锛?  - `graph_meta.scene_type` 涓庝紶鍏ュ€间竴鑷淬€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.1锛汿-SCENE-ROUTE-08銆?
+### TASK-0309 M33-D锛氬満鏅矾鐢变笓椤规祴璇?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧炲満鏅矾鐢变笓椤规祴璇曪紝楠岃瘉鍚勫満鏅殑鑺傜偣搴忓垪姝ｇ‘鎬с€?- 杈撳叆锛歚_resolve_scene_node_sequence` 鍑芥暟銆?- 杈撳嚭锛歚tests/unit/test_scene_node_routing_m33.py`锛堟柊澧烇級锛歍-SCENE-ROUTE-01~08銆?- 楠屾敹鏍囧噯锛?  - T-SCENE-ROUTE-01锛欳HAT 鍦烘櫙鑺傜偣搴忓垪 = ["core_reasoner_primary", "renderer_ja_c_style"]锛?  - T-SCENE-ROUTE-02锛欵XEC_INTENT 鍦烘櫙鍚?planner_constraints 鍜?tool_planner锛?  - T-SCENE-ROUTE-03锛歐ORK_TRANSLATE 鍦烘櫙鍚?workbench_translate锛屼笉鍚?workbench_code_assist锛?  - T-SCENE-ROUTE-04锛歐ORK_CODE 鍦烘櫙鍚?workbench_code_assist锛屼笉鍚?workbench_translate锛?  - T-SCENE-ROUTE-05锛欳HAT 鍦烘櫙 graph_config 鐨?node_bindings 鍙湁 2 涓妭鐐癸紱
+  - T-SCENE-ROUTE-06锛歝ore_reasoner_secondary 涓嶅湪 CHAT 鍦烘櫙鐨?node_bindings 涓紱
+  - T-SCENE-ROUTE-07锛歝ore_reasoner_secondary 鍦?fallback_edges 涓紱
+  - T-SCENE-ROUTE-08锛氭湭鐭ュ満鏅€€鍖栦负 CHAT 搴忓垪銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_scene_node_routing_m33.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.1~4.2锛汿-SCENE-ROUTE-01~08銆?
+### TASK-0310 M33-E锛歡raph_meta 鍦烘櫙瀛楁瀹¤娴嬭瘯
 
-- 状态：PLANNED
-- 任务描述：`GateSnapshot` 增加 `mood_state`、`emotion_tag`、`emotion_intensity` 三个情感字段，使 Governor R8 门控能感知当前情感状态。
-- 输入：`host_brain/governor/rules.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）。
-- 输出：
-  - `host_brain/governor/rules.py`：`GateSnapshot` dataclass 新增 `mood_state: str`、`emotion_tag: str`、`emotion_intensity: float` 字段（均有默认值）；
-  - `tests/unit/test_gate_snapshot_m27.py`（新增）：T-GATE-SNAP-01~03。
-- 验收标准：
-  - T-GATE-SNAP-01：`GateSnapshot` 可携带 `mood_state="engaged"` 构造成功；
-  - T-GATE-SNAP-02：`GateSnapshot` 不传情感字段时使用默认值，不报错；
-  - T-GATE-SNAP-03：`GateSnapshot` 序列化为 dict 时包含三个情感字段。
-- 涉及文件路径：`host_brain/governor/rules.py`；`tests/unit/test_gate_snapshot_m27.py`。
-- 关联需求/测试：FR-GOV-EMOTION-001；T-GATE-SNAP-01~03。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氶獙璇?`graph_meta.scene_type` 瀛楁鍦ㄥ悇鍦烘櫙涓嬫纭褰曪紝鏀寔鍙娴嬫€ц拷韪€?- 杈撳叆锛歚_build_chat_graph_config` 鍑芥暟銆?- 杈撳嚭锛歚tests/unit/test_scene_node_routing_m33.py` 涓殑 T-SCENE-META-01~02銆?- 楠屾敹鏍囧噯锛?  - T-SCENE-META-01锛欳HAT 鍦烘櫙 `graph_meta.scene_type` = "CHAT"锛?  - T-SCENE-META-02锛欵XEC_INTENT 鍦烘櫙 `graph_meta.scene_type` = "EXEC_INTENT"銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`锛沗tests/unit/test_scene_node_routing_m33.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂6锛堝璁″瓧娈碉級锛汿-SCENE-META-01~02銆?
+### TASK-0311 M33-F锛欳HAT_GRAPH_NODE_ORDER 淇濈暀鍚戝悗鍏煎甯搁噺
 
-### TASK-0233 M27-B：extract_emotion_tag 传入 mood_state（OPT-20）
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫繚鐣?`CHAT_GRAPH_NODE_ORDER` 甯搁噺浣滀负"鍏ㄨ妭鐐规敞鍐岃〃"锛堢敤浜?model_node_overrides 鍒濆鍖栵級锛屼絾涓嶅啀鐢ㄤ簬 node_bindings/edges 鐨勬瀯寤恒€?- 杈撳叆锛氱幇鏈?`CHAT_GRAPH_NODE_ORDER` 瀹氫箟銆?- 杈撳嚭锛氭敞閲婃洿鏂帮紝璇存槑鍏剁敤閫斿彉鏇翠负"鑺傜偣娉ㄥ唽琛?鑰岄潪"鎵ц椤哄簭"銆?- 楠屾敹鏍囧噯锛?  - `CHAT_GRAPH_NODE_ORDER` 浠嶅寘鍚叏閮?9 涓妭鐐癸紙鐢ㄤ簬 model_node_overrides锛夛紱
+  - `node_bindings` 鍜?`edges` 涓嶅啀鐩存帴浣跨敤 `CHAT_GRAPH_NODE_ORDER`锛屾敼鐢?`_resolve_scene_node_sequence`銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂3.1锛涘悜鍚庡吋瀹规€с€?
+### TASK-0312 M33-G锛歁33 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：PLANNED
-- 任务描述：`qa.py` 中 `extract_emotion_tag()` 调用时传入当前 `mood_state`，使 `MOOD_EMOTION_CONSTRAINTS` 约束校验真正生效。
-- 输入：`host_brain/core/qa.py`；`host_brain/core/metabolism.py`（`mood_state` 来源）。
-- 输出：
-  - `host_brain/core/qa.py`：`extract_emotion_tag(raw_tag, mood_state)` 签名补全 `mood_state` 参数；调用处传入 `hard_state.mood_state`；
-  - `tests/unit/test_extract_emotion_tag_m27.py`（新增）：T-EXTRACT-TAG-01~03。
-- 验收标准：
-  - T-EXTRACT-TAG-01：`mood_state="tired"` 时，`HAPPY` 情感标签被约束为 `calm` 系列；
-  - T-EXTRACT-TAG-02：`mood_state="engaged"` 时，`HAPPY` 情感标签正常通过；
-  - T-EXTRACT-TAG-03：`mood_state=None` 时，不触发约束，行为与旧版一致。
-- 涉及文件路径：`host_brain/core/qa.py`；`tests/unit/test_extract_emotion_tag_m27.py`。
-- 关联需求/测试：FR-QA-EMOTION-001；T-EXTRACT-TAG-01~03。
-
-### TASK-0234 M27-C：build_governance_snapshot 传递 mood_state 给 GateSnapshot（OPT-22）
-
-- 状态：PLANNED
-- 任务描述：`build_governance_snapshot()` 构建 `GateSnapshot` 时，从 `hard_state_summary` 中提取 `mood_state` 并传入，打通情感状态到决策层的传递链路。
-- 输入：`host_brain/governor/decision.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）；TASK-0232（`GateSnapshot` 新字段）。
-- 输出：
-  - `host_brain/governor/decision.py`：`build_governance_snapshot()` 从 `hard_state_summary` 读取 `mood_state`/`emotion_tag`/`emotion_intensity` 并注入 `GateSnapshot`；
-  - `tests/unit/test_governance_snapshot_m27.py`（新增）：T-GOV-SNAP-01~02。
-- 验收标准：
-  - T-GOV-SNAP-01：`hard_state_summary.mood_state="critical"` 时，`GateSnapshot.mood_state` 为 `"critical"`；
-  - T-GOV-SNAP-02：`hard_state_summary` 无情感字段时，`GateSnapshot` 使用默认值，不报错。
-- 涉及文件路径：`host_brain/governor/decision.py`；`tests/unit/test_governance_snapshot_m27.py`。
-- 关联需求/测试：FR-GOV-EMOTION-002；T-GOV-SNAP-01~02。
-
-### TASK-0235 M27-D：EpisodicRecord 增加情感标注字段（OPT-25）
-
-- 状态：PLANNED
-- 任务描述：`EpisodicRecord` 增加 `emotion_tag`、`emotion_valence`、`emotion_arousal` 字段，使情节记忆具备情感标注，支持后续情感检索。
-- 输入：`host_brain/memory/episodic.py`。
-- 输出：
-  - `host_brain/memory/episodic.py`：`EpisodicRecord` dataclass 新增 `emotion_tag: str = "NEUTRAL"`、`emotion_valence: float = 0.0`、`emotion_arousal: float = 0.3` 字段；`save()` 方法持久化新字段；`recall()` 支持按 `emotion_tag` 过滤；
-  - `tests/unit/test_episodic_emotion_m27.py`（新增）：T-EPISODIC-EMO-01~04。
-- 验收标准：
-  - T-EPISODIC-EMO-01：保存含 `emotion_tag="HAPPY"` 的记录后，可按 `emotion_tag` 检索到；
-  - T-EPISODIC-EMO-02：旧记录（无情感字段）读取时使用默认值，不报错；
-  - T-EPISODIC-EMO-03：`recall(emotion_filter="HAPPY")` 只返回 `emotion_tag="HAPPY"` 的记录；
-  - T-EPISODIC-EMO-04：`emotion_valence` 超出 [-1.0, 1.0] 时被截断到合法范围。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_emotion_m27.py`。
-- 关联需求/测试：FR-MEM-EMOTION-001；T-EPISODIC-EMO-01~04。
-
-### TASK-0236 M27-E：BondDynamicsWriter.apply_update 增加情感字段（OPT-26）
-
-- 状态：PLANNED
-- 任务描述：`BondDynamicsWriter.apply_update()` 的 `payload` 增加 `emotion_tag`、`emotion_intensity` 字段，使 Bond 积分感知情感强度，高情感强度互动获得更高积分。
-- 输入：`host_brain/bond/bond_dynamics.py`。
-- 输出：
-  - `host_brain/bond/bond_dynamics.py`：`apply_update()` payload 新增 `emotion_tag: str`、`emotion_intensity: float` 字段；积分计算时 `emotion_intensity > 0.7` 的互动额外加权 1.5x；
-  - `tests/unit/test_bond_dynamics_emotion_m27.py`（新增）：T-BOND-DYN-EMO-01~03。
-- 验收标准：
-  - T-BOND-DYN-EMO-01：`emotion_intensity=0.9` 的 `INTERACTION` 事件积分 ≥ 普通 `INTERACTION` 的 1.5 倍；
-  - T-BOND-DYN-EMO-02：`emotion_intensity` 缺失时使用默认值 0.5，行为与旧版一致；
-  - T-BOND-DYN-EMO-03：`emotion_tag="SAD"` 的 `INTERACTION` 事件不被过滤，正常积分。
-- 涉及文件路径：`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_dynamics_emotion_m27.py`。
-- 关联需求/测试：FR-BOND-EMOTION-001；T-BOND-DYN-EMO-01~03。
-
-### TASK-0237 M27-F：derive_bond_summary 修复 stage/trend 字段读取（OPT-27）
-
-- 状态：PLANNED
-- 任务描述：修复 `bond/summarizer.py` 中 `derive_bond_summary()` 从 `event["stage"]` 读取 Bond 阶段的 Bug，改为从 `BondScoreState` 直接读取，确保注入 LLM 的 `bond_summary.stage` 正确。
-- 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_stage_engine.py`（`BondScoreState`）。
-- 输出：
-  - `host_brain/bond/summarizer.py`：`derive_bond_summary()` 从 `BondScoreState.stage` 读取阶段，从 `BondScoreState.trend()` 读取趋势，不再从 event dict 读取；
-  - `tests/unit/test_bond_summarizer_m27.py`（新增）：T-BOND-SUM-01~03。
-- 验收标准：
-  - T-BOND-SUM-01：`derive_bond_summary()` 返回的 `stage` 为 `"FRIEND"` 而非 `"S_BOND_UPDATE"`；
-  - T-BOND-SUM-02：`derive_bond_summary()` 返回的 `trend` 为中文语义描述（如 `"上升"`）；
-  - T-BOND-SUM-03：`BondScoreState` 为空时，`derive_bond_summary()` 返回默认值，不报错。
-- 涉及文件路径：`host_brain/bond/summarizer.py`；`tests/unit/test_bond_summarizer_m27.py`。
-- 关联需求/测试：FR-BOND-SUMMARY-001；T-BOND-SUM-01~03。
-
-### TASK-0238 M27-G：RecallFusionServiceContract 增加情感维度路由（OPT-31）
-
-- 状态：PLANNED
-- 任务描述：`RecallFusionServiceContract.recall()` 增加 `emotion_filter` 参数，支持情感记忆与普通记忆分池召回，高情感强度记忆优先排序。
-- 输入：`host_brain/retrieval/recall_fusion.py`（或对应 contract 文件）；TASK-0235（`EpisodicRecord` 情感字段）。
-- 输出：
-  - `host_brain/retrieval/recall_fusion.py`：`recall()` 新增 `emotion_filter: str | None = None` 参数；当 `emotion_filter` 非空时，优先召回匹配情感标签的记录；
-  - `tests/unit/test_recall_fusion_emotion_m27.py`（新增）：T-RECALL-EMO-01~03。
-- 验收标准：
-  - T-RECALL-EMO-01：`emotion_filter="HAPPY"` 时，返回结果中 `emotion_tag="HAPPY"` 的记录排在前列；
-  - T-RECALL-EMO-02：`emotion_filter=None` 时，行为与旧版一致；
-  - T-RECALL-EMO-03：无匹配情感记录时，降级为普通语义召回，不返回空列表。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_recall_fusion_emotion_m27.py`。
-- 关联需求/测试：FR-RECALL-EMOTION-001；T-RECALL-EMO-01~03。
-
-### TASK-0239 M27-H：IntentDecisionEngine 的 governance_snapshot 携带情感状态（OPT-32）
-
-- 状态：PLANNED
-- 任务描述：`IntentDecisionEngine.evaluate_intent()` 接收的 `governance_snapshot` 携带情感状态，决策引擎根据情感状态调整意图评估权重（如 `critical` 状态下拒绝高消耗操作）。
-- 输入：`host_brain/governor/decision.py`；TASK-0234（`GateSnapshot` 情感字段已注入）。
-- 输出：
-  - `host_brain/governor/decision.py`：`evaluate_intent()` 读取 `governance_snapshot.mood_state`，`critical` 状态下拒绝 `TOOL_CALL`/`SKILL_EXEC` 类意图；
-  - `tests/unit/test_intent_decision_emotion_m27.py`（新增）：T-INTENT-EMO-01~03。
-- 验收标准：
-  - T-INTENT-EMO-01：`mood_state="critical"` 时，`TOOL_CALL` 意图被拒绝，返回 `reason_code="EMOTION_GATE_BLOCKED"`；
-  - T-INTENT-EMO-02：`mood_state="engaged"` 时，`TOOL_CALL` 意图正常通过；
-  - T-INTENT-EMO-03：`mood_state` 缺失时，不触发情感门控，行为与旧版一致。
-- 涉及文件路径：`host_brain/governor/decision.py`；`tests/unit/test_intent_decision_emotion_m27.py`。
-- 关联需求/测试：FR-GOV-EMOTION-003；T-INTENT-EMO-01~03。
-
-### TASK-0240 M27-I：SkillLoader.execute 传递情感状态（OPT-37）
-
-- 状态：PLANNED
-- 任务描述：`SkillLoader.execute()` 的 `context` 参数增加 `emotion_tag`、`mood_state` 字段，使技能 handler 能感知当前情感状态并调整执行行为。
-- 输入：`host_brain/skills/loader.py`（或对应路径）；TASK-0234（情感状态来源）。
-- 输出：
-  - `host_brain/skills/loader.py`：`execute()` context 新增 `emotion_tag: str`、`mood_state: str` 字段；
-  - `tests/unit/test_skill_loader_emotion_m27.py`（新增）：T-SKILL-EMO-01~02。
-- 验收标准：
-  - T-SKILL-EMO-01：`execute(context={"emotion_tag": "HAPPY", "mood_state": "engaged"})` 正常调用不报错；
-  - T-SKILL-EMO-02：context 无情感字段时，使用默认值，不报错。
-- 涉及文件路径：`host_brain/skills/loader.py`；`tests/unit/test_skill_loader_emotion_m27.py`。
-- 关联需求/测试：FR-SKILL-EMOTION-001；T-SKILL-EMO-01~02。
-
-### TASK-0241 M27-J：ToolBroker.execute 传递情感状态（OPT-38）
-
-- 状态：PLANNED
-- 任务描述：`ToolBroker.execute()` 的 `context` 参数增加 `emotion_tag`、`mood_state` 字段，使工具 handler 能感知当前情感状态。
-- 输入：`host_brain/tools/broker.py`（或对应路径）；TASK-0234（情感状态来源）。
-- 输出：
-  - `host_brain/tools/broker.py`：`execute()` context 新增 `emotion_tag: str`、`mood_state: str` 字段；
-  - `tests/unit/test_tool_broker_emotion_m27.py`（新增）：T-TOOL-EMO-01~02。
-- 验收标准：
-  - T-TOOL-EMO-01：`execute(context={"emotion_tag": "SAD", "mood_state": "tired"})` 正常调用不报错；
-  - T-TOOL-EMO-02：context 无情感字段时，使用默认值，不报错。
-- 涉及文件路径：`host_brain/tools/broker.py`；`tests/unit/test_tool_broker_emotion_m27.py`。
-- 关联需求/测试：FR-TOOL-EMOTION-001；T-TOOL-EMO-01~02。
-
-### TASK-0242 M27-K：NatsumeScheduler._build_system_intent 携带情感状态（OPT-43）
-
-- 状态：PLANNED
-- 任务描述：`NatsumeScheduler._build_system_intent()` 构建调度意图时，从当前 `HardStateSnapshot` 读取情感状态并注入，使调度任务触发时不丢失情感上下文。
-- 输入：`host_brain/scheduler/scheduler.py`；`host_brain/core/metabolism.py`（`HardStateSnapshot`）。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`：`_build_system_intent()` 新增 `emotion_tag`、`mood_state` 字段注入；
-  - `tests/unit/test_scheduler_emotion_m27.py`（新增）：T-SCHED-EMO-01~02。
-- 验收标准：
-  - T-SCHED-EMO-01：调度意图 dict 包含 `emotion_tag` 和 `mood_state` 字段；
-  - T-SCHED-EMO-02：`HardStateSnapshot` 不可用时，使用默认情感值，不报错。
-- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_scheduler_emotion_m27.py`。
-- 关联需求/测试：FR-SCHED-EMOTION-001；T-SCHED-EMO-01~02。
-
-### TASK-0243 M27-L：M27 发布清单
-
-- 状态：PLANNED
-- 任务描述：TASK-0232~0242 全部 DONE 后，生成 M27 发布清单，记录 P0 情感链路修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M27 里程碑状态为 DONE；生成代码审查报告。
-- 输入：TASK-0232~0242 全部 DONE；全量测试 ≥1857 passed（1835 + 22 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m27_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M27 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M27 小节；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m27.md`（新增）。
-- 验收标准：
-  - `release_ready=true`；
-  - `emotion_gate_connected=true`（GateSnapshot 情感字段已连通）；
-  - `bond_summary_fixed=true`（derive_bond_summary Bug 已修复）；
-  - `episodic_emotion_tagged=true`（情节记忆情感标注已实现）；
-  - `recall_emotion_routed=true`（情感记忆分池召回已实现）；
-  - `total_tests_passed ≥ 1857`；
-  - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m27_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m27.md`。
-- 关联需求：NFR-REL-001；FR-GOV-EMOTION-001~003；FR-MEM-EMOTION-001；FR-BOND-EMOTION-001；FR-BOND-SUMMARY-001；FR-RECALL-EMOTION-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0306~0311 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M33 浠ｇ爜瀹℃煡鎶ュ憡銆?- 杈撳叆锛歍ASK-0306~0311 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m33_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0306~0311 鍏ㄩ儴 6 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?10 涓紝鍏ㄩ儴閫氳繃锛?  - CHAT 鍦烘櫙鑺傜偣鏁颁粠 9 闄嶈嚦 2锛屾垚鏈檷浣庣害 78%锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m33_2026-03-06.md`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4锛汵FR-COST-001锛汵FR-REL-001銆?
 ---
 
-## M28 核心情感架构深化（P1 优化）（TASK-0244~0262）
-
-> **目标：** 在 M27 P0 连通基础上，深化情感架构的核心能力：情绪连续体、Bond 质感层、情感记忆、Governor 门控、LLM 情感感知、VTS 表情扩展等 20 项 P1 优化。
-> **依据：** SOUL-OPT-2026-03-05 优化1/6/7/8/13/14/16/21/28/29/33/34/35/39/40/41/44/45/46/47
-> **前置：** M27 全部 DONE
-> **完成时间：** 2026-03-06
-> **状态：** ✅ DONE（2112 passed, 0 failed）
-
-### TASK-0244 M28-A：EmotionVector 情绪连续体（OPT-1）
-
-- 状态：DONE
-- 任务描述：在 `metabolism.py` 中引入 `EmotionVector` dataclass（VAD 三维模型），替代离散 `mood_state`，支持情绪衰减（`decay()`）和混合（`blend()`），并保留 `to_mood_state()` 向后兼容。
-- 输入：`host_brain/core/metabolism.py`。
-- 输出：
-  - `host_brain/core/metabolism.py`：新增 `EmotionVector` dataclass（`valence/arousal/dominance/ts_ms`）；`decay()`、`blend()`、`to_mood_state()` 方法；`HardStateSnapshot` 新增 `emotion_vector: EmotionVector` 字段；
-  - `tests/unit/test_emotion_vector_m28.py`（新增）：T-EMO-VEC-01~06。
-- 验收标准：
-  - T-EMO-VEC-01：`decay(elapsed_ms=300_000)` 后 `valence` 绝对值 ≤ 原值的 0.55；
-  - T-EMO-VEC-02：`blend(other, weight=0.3)` 结果在两者之间；
-  - T-EMO-VEC-03：`to_mood_state()` 覆盖 calm/steady/engaged/tired/critical 五种输出；
-  - T-EMO-VEC-04：`valence/arousal/dominance` 超出 [-1,1]/[0,1]/[0,1] 时被截断；
-  - T-EMO-VEC-05：`EmotionVector` 不暴露给 LLM（序列化时不含原始数值）；
-  - T-EMO-VEC-06：`HardStateSnapshot` 含 `emotion_vector` 字段，旧代码读取 `mood_state` 不报错。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotion_vector_m28.py`。
-- 关联需求/测试：FR-EMOTION-CONTINUUM-001；T-EMO-VEC-01~06。
-
-### TASK-0245 M28-B：emotion_tag 生成策略主动注入（OPT-6）
-
-- 状态：DONE
-- 任务描述：在 `hard_snapshot` 中增加 `allowed_emotion_tags` 和 `emotion_range_hint` 字段，主动告知 LLM 当前允许的情感标签范围，而非只做事后校验。
-- 输入：`host_brain/core/metabolism.py`（`HardStateSnapshot`）；`host_brain/core/qa.py`（`MOOD_EMOTION_CONSTRAINTS`）。
-- 输出：
-  - `host_brain/core/metabolism.py`：`HardStateSnapshot` 新增 `allowed_emotion_tags: list[str]`、`emotion_range_hint: str` 字段，由 `mood_state` 自动推导；
-  - `host_brain/core/qa.py`：`build_hard_snapshot()` 填充上述字段；
-  - `tests/unit/test_emotion_tag_strategy_m28.py`（新增）：T-EMO-TAG-STR-01~03。
-- 验收标准：
-  - T-EMO-TAG-STR-01：`mood_state="tired"` 时，`allowed_emotion_tags` 不含 `EXCITED`/`HAPPY`；
-  - T-EMO-TAG-STR-02：`mood_state="engaged"` 时，`allowed_emotion_tags` 含 `HAPPY`/`EXCITED`；
-  - T-EMO-TAG-STR-03：`emotion_range_hint` 为非空中文描述字符串。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`host_brain/core/qa.py`；`tests/unit/test_emotion_tag_strategy_m28.py`。
-- 关联需求/测试：FR-EMOTION-TAG-STRATEGY-001；T-EMO-TAG-STR-01~03。
-
-### TASK-0246 M28-C：Bond 积分情感事件分类精化（OPT-7）
-
-- 状态：DONE
-- 任务描述：新增 `INTERACTION_MINIMAL`/`INTERACTION_ENGAGED`/`INTERACTION_DEEP` 三级互动分类，根据文本长度、情感强度、问号数量自动推断互动质量，替代统一的 `INTERACTION=+1`。
-- 输入：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`：新增三级互动事件枚举及对应积分（MINIMAL=+0.5, ENGAGED=+1, DEEP=+3）；
-  - `host_brain/bond/bond_dynamics.py`：`classify_interaction()` 方法，根据 `text_len`/`emotion_intensity`/`question_count` 自动分级；
-  - `tests/unit/test_bond_interaction_grade_m28.py`（新增）：T-BOND-GRADE-01~04。
-- 验收标准：
-  - T-BOND-GRADE-01：文本长度 < 10 字且无问号 → `INTERACTION_MINIMAL`；
-  - T-BOND-GRADE-02：文本长度 > 50 字或含问号 → `INTERACTION_ENGAGED`；
-  - T-BOND-GRADE-03：`emotion_intensity > 0.8` 且文本长度 > 100 字 → `INTERACTION_DEEP`；
-  - T-BOND-GRADE-04：旧 `INTERACTION` 事件仍可处理，不报错（向后兼容）。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_interaction_grade_m28.py`。
-- 关联需求/测试：FR-BOND-GRADE-001；T-BOND-GRADE-01~04。
-
-### TASK-0247 M28-D：Governor R8 情感感知门控（OPT-8）
-
-- 状态：DONE
-- 任务描述：新增 Governor R8 门控规则：用户情感为 `ANGRY`/`FRUSTRATED` 时只允许对话操作；AI `critical` 状态时自动注入简化提示；依赖 TASK-0232/0234 的 `GateSnapshot` 情感字段。
-- 输入：`host_brain/governor/rules.py`；TASK-0232（`GateSnapshot` 情感字段）；TASK-0234（情感状态注入）。
-- 输出：
-  - `host_brain/governor/rules.py`：新增 `R8_EmotionGate` 规则类；`ANGRY`/`FRUSTRATED` 状态下拒绝 `TOOL_CALL`/`SKILL_EXEC`；`critical` 状态下注入 `simplified_prompt=True` 标记；
-  - `tests/unit/test_governor_r8_m28.py`（新增）：T-GOV-R8-01~04。
-- 验收标准：
-  - T-GOV-R8-01：`emotion_tag="ANGRY"` 时，`TOOL_CALL` 被 R8 拒绝，`reason_code="R8_EMOTION_GATE"`；
-  - T-GOV-R8-02：`mood_state="critical"` 时，输出含 `simplified_prompt=True`；
-  - T-GOV-R8-03：`emotion_tag="HAPPY"` 时，R8 不触发，正常通过；
-  - T-GOV-R8-04：R8 拒绝时，审计日志记录情感状态快照。
-- 涉及文件路径：`host_brain/governor/rules.py`；`tests/unit/test_governor_r8_m28.py`。
-- 关联需求/测试：FR-GOV-R8-001；T-GOV-R8-01~04。
-
-### TASK-0248 M28-E：evolve_hard_state 情感事件语义扩展（OPT-13）
-
-- 状态：DONE
-- 任务描述：`evolve_hard_state()` 的 `event_kind` 增加情感语义事件类型（`EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`），使情感事件能触发对应的状态演化逻辑。
-- 输入：`host_brain/core/metabolism.py`（`evolve_hard_state()`）。
-- 输出：
-  - `host_brain/core/metabolism.py`：`event_kind` 枚举新增 `EMOTION_SPIKE`/`EMOTION_CALM`/`BOND_DEEPEN`；对应演化逻辑（`EMOTION_SPIKE` → `arousal` 上升，`EMOTION_CALM` → 向中性漂移）；
-  - `tests/unit/test_evolve_hard_state_emotion_m28.py`（新增）：T-EVOLVE-EMO-01~03。
-- 验收标准：
-  - T-EVOLVE-EMO-01：`event_kind="EMOTION_SPIKE"` 后，`emotion_vector.arousal` 上升 ≥ 0.1；
-  - T-EVOLVE-EMO-02：`event_kind="EMOTION_CALM"` 后，`emotion_vector.valence` 向 0 漂移；
-  - T-EVOLVE-EMO-03：未知 `event_kind` 不报错，使用默认演化逻辑。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_evolve_hard_state_emotion_m28.py`。
-- 关联需求/测试：FR-METABOLISM-EMOTION-001；T-EVOLVE-EMO-01~03。
-
-### TASK-0249 M28-F：BondScoreState.trend 语义化（OPT-14）
-
-- 状态：DONE
-- 任务描述：`BondScoreState.trend()` 返回中文语义描述（`"上升"/"稳定"/"下降"`）而非英文枚举，并增加趋势强度（`"快速上升"/"缓慢下降"`）。
-- 输入：`host_brain/bond/bond_stage_engine.py`（`BondScoreState`）。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`：`trend()` 返回中文语义字符串；新增 `trend_intensity()` 返回趋势强度描述；
-  - `tests/unit/test_bond_trend_semantic_m28.py`（新增）：T-BOND-TREND-01~03。
-- 验收标准：
-  - T-BOND-TREND-01：积分连续上升时，`trend()` 返回 `"上升"` 或 `"快速上升"`；
-  - T-BOND-TREND-02：积分平稳时，`trend()` 返回 `"稳定"`；
-  - T-BOND-TREND-03：`trend()` 返回值为中文字符串，不含英文枚举。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_trend_semantic_m28.py`。
-- 关联需求/测试：FR-BOND-TREND-001；T-BOND-TREND-01~03。
-
-### TASK-0250 M28-G：OPTIONAL_SLOTS 扩展（OPT-16）
-
-- 状态：DONE
-- 任务描述：`context_pack.py` 的 `OPTIONAL_SLOTS` 从单一槽位扩展为多槽位架构，支持 `emotion_pulse`/`bond_texture`/`memory_emotion_hint` 等情感槽位动态注入。
-- 输入：`host_brain/core/context_pack.py`。
-- 输出：
-  - `host_brain/core/context_pack.py`：`OPTIONAL_SLOTS` 改为 dict 结构，支持多槽位注册；新增 `register_slot(name, builder_fn)` 方法；`build_context_pack()` 遍历所有已注册槽位；
-  - `tests/unit/test_optional_slots_m28.py`（新增）：T-OPT-SLOTS-01~04。
-- 验收标准：
-  - T-OPT-SLOTS-01：`register_slot("emotion_pulse", fn)` 后，`build_context_pack()` 输出含 `emotion_pulse` 字段；
-  - T-OPT-SLOTS-02：槽位 builder 抛出异常时，该槽位被跳过，不影响其他槽位；
-  - T-OPT-SLOTS-03：未注册槽位不出现在输出中；
-  - T-OPT-SLOTS-04：旧代码调用 `build_context_pack()` 不报错（向后兼容）。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_optional_slots_m28.py`。
-- 关联需求/测试：FR-CONTEXT-SLOTS-001；T-OPT-SLOTS-01~04。
-
-### TASK-0251 M28-H：BondScoreState.to_summary 中文化（OPT-21）
-
-- 状态：DONE
-- 任务描述：`BondScoreState.to_summary()` 的 `trend` 字段统一输出中文语义描述，消除英中文枚举混用问题，确保注入 LLM 的 bond_summary 全部为中文。
-- 输入：`host_brain/bond/bond_stage_engine.py`；TASK-0249（`trend()` 中文化）。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`：`to_summary()` 的所有字段值统一为中文；
-  - `tests/unit/test_bond_to_summary_cn_m28.py`（新增）：T-BOND-SUM-CN-01~02。
-- 验收标准：
-  - T-BOND-SUM-CN-01：`to_summary()` 返回 dict 中无英文枚举值；
-  - T-BOND-SUM-CN-02：`to_summary()` 的 `stage` 字段为中文阶段名（如 `"朋友"`）。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_to_summary_cn_m28.py`。
-- 关联需求/测试：FR-BOND-SUMMARY-CN-001；T-BOND-SUM-CN-01~02。
-
-### TASK-0252 M28-I：ContextCompressor 保存用户轮次（OPT-28）
-
-- 状态：DONE
-- 任务描述：`ContextCompressor._pre_compress_save()` 改为同时保存 user 和 assistant 轮次，确保用户情感表达不被丢弃，长期记忆为双声道。
-- 输入：`host_brain/memory/context_compressor.py`。
-- 输出：
-  - `host_brain/memory/context_compressor.py`：`_pre_compress_save()` 保存 user + assistant 双轮次；user 轮次携带 `emotion_tag` 字段（若可用）；
-  - `tests/unit/test_context_compressor_user_m28.py`（新增）：T-COMPRESS-USER-01~02。
-- 验收标准：
-  - T-COMPRESS-USER-01：压缩后的记录包含 user 轮次；
-  - T-COMPRESS-USER-02：user 轮次含 `emotion_tag` 字段（若原始数据有）。
-- 涉及文件路径：`host_brain/memory/context_compressor.py`；`tests/unit/test_context_compressor_user_m28.py`。
-- 关联需求/测试：FR-COMPRESS-EMOTION-001；T-COMPRESS-USER-01~02。
-
-### TASK-0253 M28-J：LongTermDistiller 增加情感关系蒸馏主题（OPT-29）
-
-- 状态：DONE
-- 任务描述：`LongTermMemoryDistiller` 的蒸馏主题列表增加 `"情感关系史"` 维度，蒸馏出用户与 AI 之间的情感关系演变摘要。
-- 输入：`host_brain/memory/long_term_distiller.py`。
-- 输出：
-  - `host_brain/memory/long_term_distiller.py`：蒸馏主题新增 `"情感关系史"`；对应 prompt 模板；蒸馏结果存入 `emotional_relationship_summary` 字段；
-  - `tests/unit/test_distiller_emotion_m28.py`（新增）：T-DISTILL-EMO-01~02。
-- 验收标准：
-  - T-DISTILL-EMO-01：蒸馏结果包含 `emotional_relationship_summary` 字段；
-  - T-DISTILL-EMO-02：`emotional_relationship_summary` 为非空字符串（mock LLM 返回）。
-- 涉及文件路径：`host_brain/memory/long_term_distiller.py`；`tests/unit/test_distiller_emotion_m28.py`。
-- 关联需求/测试：FR-DISTILL-EMOTION-001；T-DISTILL-EMO-01~02。
-
-### TASK-0254 M28-K：CrossTimelineAggregator 增加情感事件（OPT-33）
-
-- 状态：DONE
-- 任务描述：`CrossTimelineAggregator` 的时间线增加情感事件类型（`EMOTION_PEAK`/`EMOTION_SHIFT`），使情感变化在时间线中可见。
-- 输入：`host_brain/obs/cross_timeline.py`（或对应路径）。
-- 输出：
-  - 对应文件：时间线事件类型新增 `EMOTION_PEAK`/`EMOTION_SHIFT`；情感事件携带 `emotion_tag`/`emotion_intensity` 字段；
-  - `tests/unit/test_timeline_emotion_m28.py`（新增）：T-TIMELINE-EMO-01~02。
-- 验收标准：
-  - T-TIMELINE-EMO-01：情感强度 > 0.8 时，自动生成 `EMOTION_PEAK` 事件；
-  - T-TIMELINE-EMO-02：情感标签发生变化时，自动生成 `EMOTION_SHIFT` 事件。
-- 涉及文件路径：`host_brain/obs/cross_timeline.py`；`tests/unit/test_timeline_emotion_m28.py`。
-- 关联需求/测试：FR-TIMELINE-EMOTION-001；T-TIMELINE-EMO-01~02。
-
-### TASK-0255 M28-L：EMOTION_TO_EXPRESSION_ID 扩展至16种（OPT-34）
-
-- 状态：DONE
-- 任务描述：`EMOTION_TO_EXPRESSION_ID` 从 6 种扩展至覆盖全部 16 种情感标签，消除 60% 情感状态被降级为 neutral 表情的问题。
-- 输入：`host_brain/channels/vts_mapping_store.py`（或对应路径）；当前 16 种情感标签枚举。
-- 输出：
-  - 对应文件：`EMOTION_TO_EXPRESSION_ID` 补全 10 种缺失情感的表情映射；新增 `EMOTION_FALLBACK_MAP` 处理未知情感；
-  - `tests/unit/test_vts_expression_map_m28.py`（新增）：T-VTS-MAP-01~03。
-- 验收标准：
-  - T-VTS-MAP-01：16 种情感标签均有对应表情 ID，无 `None` 返回；
-  - T-VTS-MAP-02：未知情感标签返回 fallback 表情，不返回 `None`；
-  - T-VTS-MAP-03：`NEUTRAL` 情感映射到中性表情 ID。
-- 涉及文件路径：`host_brain/channels/vts_mapping_store.py`；`tests/unit/test_vts_expression_map_m28.py`。
-- 关联需求/测试：FR-VTS-EXPRESSION-FULL-001；T-VTS-MAP-01~03。
-
-### TASK-0256 M28-M：CameraRecognition 视觉感知触发情感响应（OPT-35）
-
-- 状态：DONE
-- 任务描述：`CameraRecognitionServiceContract.detect()` 的视觉识别结果（表情/姿态）触发情感响应，将用户视觉情感信号注入 `EmotionVector`。
-- 输入：`host_brain/senses/camera.py`（或对应路径）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - 对应文件：`detect()` 返回结果新增 `user_emotion_hint: str` 字段；`metabolism.py` 新增 `apply_visual_emotion_hint()` 方法；
-  - `tests/unit/test_camera_emotion_m28.py`（新增）：T-CAM-EMO-01~02。
-- 验收标准：
-  - T-CAM-EMO-01：检测到用户微笑时，`user_emotion_hint="HAPPY"`；
-  - T-CAM-EMO-02：`apply_visual_emotion_hint("HAPPY")` 后，`emotion_vector.valence` 上升。
-- 涉及文件路径：`host_brain/senses/camera.py`；`host_brain/core/metabolism.py`；`tests/unit/test_camera_emotion_m28.py`。
-- 关联需求/测试：FR-CAMERA-EMOTION-001；T-CAM-EMO-01~02。
-
-### TASK-0257 M28-N：ToolMeta 增加情感适用性字段（OPT-39）
-
-- 状态：DONE
-- 任务描述：`ToolMeta` 增加 `emotion_requirement: list[str]` 字段，标注工具适用的情感场景，MCP 工具注册时感知情感适用性。
-- 输入：`host_brain/mcp/tool_registry.py`（或对应路径）。
-- 输出：
-  - 对应文件：`ToolMeta` 新增 `emotion_requirement: list[str] = []` 字段；工具选择时过滤不适用当前情感状态的工具；
-  - `tests/unit/test_tool_meta_emotion_m28.py`（新增）：T-TOOL-META-EMO-01~02。
-- 验收标准：
-  - T-TOOL-META-EMO-01：`emotion_requirement=["HAPPY"]` 的工具在 `mood_state="tired"` 时不被选中；
-  - T-TOOL-META-EMO-02：`emotion_requirement=[]` 的工具在任何情感状态下均可被选中。
-- 涉及文件路径：`host_brain/mcp/tool_registry.py`；`tests/unit/test_tool_meta_emotion_m28.py`。
-- 关联需求/测试：FR-TOOL-EMOTION-FILTER-001；T-TOOL-META-EMO-01~02。
-
-### TASK-0258 M28-O：RerankerServiceContract 情感感知重排序（OPT-40）
-
-- 状态：DONE
-- 任务描述：`RerankerServiceContract.rerank()` 增加 `emotion_context` 参数，重排序时优先召回与当前情感状态共鸣的记忆。
-- 输入：`host_brain/retrieval/reranker.py`（或对应路径）；TASK-0235（`EpisodicRecord` 情感字段）。
-- 输出：
-  - 对应文件：`rerank()` 新增 `emotion_context: str | None = None` 参数；情感匹配的记录额外加权 1.3x；
-  - `tests/unit/test_reranker_emotion_m28.py`（新增）：T-RERANK-EMO-01~02。
-- 验收标准：
-  - T-RERANK-EMO-01：`emotion_context="HAPPY"` 时，`emotion_tag="HAPPY"` 的记录排名上升；
-  - T-RERANK-EMO-02：`emotion_context=None` 时，行为与旧版一致。
-- 涉及文件路径：`host_brain/retrieval/reranker.py`；`tests/unit/test_reranker_emotion_m28.py`。
-- 关联需求/测试：FR-RERANK-EMOTION-001；T-RERANK-EMO-01~02。
-
-### TASK-0259 M28-P：RetrievalPipeline 传递情感上下文（OPT-41）
-
-- 状态：DONE
-- 任务描述：`RetrievalPipelineContract.run()` 增加 `emotion_context` 参数并传递给 reranker 和 recall_fusion，打通召回管线的情感上下文传递。
-- 输入：`host_brain/retrieval/pipeline.py`（或对应路径）；TASK-0238（recall_fusion 情感路由）；TASK-0258（reranker 情感感知）。
-- 输出：
-  - 对应文件：`run()` 新增 `emotion_context: str | None = None` 参数；透传给 reranker 和 recall_fusion；
-  - `tests/unit/test_retrieval_pipeline_emotion_m28.py`（新增）：T-PIPELINE-EMO-01~02。
-- 验收标准：
-  - T-PIPELINE-EMO-01：`emotion_context="SAD"` 时，pipeline 将参数透传给 reranker；
-  - T-PIPELINE-EMO-02：`emotion_context=None` 时，行为与旧版一致。
-- 涉及文件路径：`host_brain/retrieval/pipeline.py`；`tests/unit/test_retrieval_pipeline_emotion_m28.py`。
-- 关联需求/测试：FR-PIPELINE-EMOTION-001；T-PIPELINE-EMO-01~02。
-
-### TASK-0260 M28-Q：LlmGatewayContract 携带情感上下文（OPT-44）
-
-- 状态：DONE
-- 任务描述：`LlmGatewayContract.generate()` 的 `prompt_payload` 增加 `emotion_context` 字段，LLM 调用时携带情感上下文，支持情感感知的 prompt 注入策略。
-- 输入：`host_brain/core/llm_gateway.py`（或对应路径）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - 对应文件：`generate()` prompt_payload 新增 `emotion_context: dict`（含 `mood_state`/`emotion_tag`/`emotion_range_hint`）；
-  - `tests/unit/test_llm_gateway_emotion_m28.py`（新增）：T-LLM-GW-EMO-01~02。
-- 验收标准：
-  - T-LLM-GW-EMO-01：`generate()` 的 prompt_payload 含 `emotion_context` 字段；
-  - T-LLM-GW-EMO-02：`emotion_context` 缺失时使用默认值，不报错。
-- 涉及文件路径：`host_brain/core/llm_gateway.py`；`tests/unit/test_llm_gateway_emotion_m28.py`。
-- 关联需求/测试：FR-LLM-EMOTION-001；T-LLM-GW-EMO-01~02。
-
-### TASK-0261 M28-R：GraphExecutor 节点执行携带情感状态（OPT-45）
-
-- 状态：DONE
-- 任务描述：`GraphExecutor._invoke_handler()` 的 `context` 参数携带情感状态，图节点执行时能感知当前情感上下文。
-- 输入：`host_brain/core/graph_executor.py`（或对应路径）；TASK-0234（情感状态来源）。
-- 输出：
-  - 对应文件：`_invoke_handler()` context 新增 `emotion_tag`/`mood_state` 字段；
-  - `tests/unit/test_graph_executor_emotion_m28.py`（新增）：T-GRAPH-EMO-01~02。
-- 验收标准：
-  - T-GRAPH-EMO-01：handler 接收到的 context 含 `emotion_tag` 字段；
-  - T-GRAPH-EMO-02：context 无情感字段时使用默认值，不报错。
-- 涉及文件路径：`host_brain/core/graph_executor.py`；`tests/unit/test_graph_executor_emotion_m28.py`。
-- 关联需求/测试：FR-GRAPH-EMOTION-001；T-GRAPH-EMO-01~02。
-
-### TASK-0262 M28-S：SoVITS synthesize emotion_intensity 真正传递（OPT-47）
-
-- 状态：DONE
-- 任务描述：修复 `SoVITSModelManager.synthesize()` 的 `emotion_intensity` 参数被忽略的问题，确保参数真正传递给底层 SDK，影响 TTS 语气幅度。
-- 输入：`edge_client/actuators/tts_engine.py`。
-- 输出：
-  - `edge_client/actuators/tts_engine.py`：`synthesize()` 将 `emotion_intensity` 映射为底层 SDK 的对应参数（如 `speed_factor`/`energy_factor`）并传递；
-  - `tests/unit/test_tts_intensity_fix_m28.py`（新增）：T-TTS-INTENSITY-FIX-01~02。
-- 验收标准：
-  - T-TTS-INTENSITY-FIX-01：`emotion_intensity=0.9` 时，底层 SDK 调用参数与 `emotion_intensity=0.3` 时不同；
-  - T-TTS-INTENSITY-FIX-02：`emotion_intensity` 超出 [0,1] 时被截断，不报错。
-- 涉及文件路径：`edge_client/actuators/tts_engine.py`；`tests/unit/test_tts_intensity_fix_m28.py`。
-- 关联需求/测试：FR-TTS-INTENSITY-001；T-TTS-INTENSITY-FIX-01~02。
-
-### TASK-0263 M28-T：M28 发布清单
-
-- 状态：DONE
-- 任务描述：TASK-0244~0262 全部 DONE 后，生成 M28 发布清单，记录 P1 情感架构深化文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M28 里程碑状态为 DONE；生成代码审查报告。
-- 输入：TASK-0244~0262 全部 DONE；全量测试 ≥1895 passed（1857 + 38 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m28_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M28 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M28 小节；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m28.md`（新增）。
-- 验收标准：
-  - `release_ready=true`；
-  - `emotion_vector_implemented=true`（EmotionVector 情绪连续体已实现）；
-  - `governor_r8_active=true`（R8 情感门控已激活）；
-  - `bond_grade_refined=true`（Bond 互动质量分级已实现）；
-  - `vts_expression_full=true`（VTS 表情映射已覆盖16种情感）；
-  - `tts_intensity_fixed=true`（TTS 强度参数断路已修复）；
-  - `total_tests_passed ≥ 1895`；
-  - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m28_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m28.md`。
-- 关联需求：NFR-REL-001；FR-EMOTION-CONTINUUM-001；FR-GOV-R8-001；FR-BOND-GRADE-001；FR-VTS-EXPRESSION-FULL-001；FR-TTS-INTENSITY-001。
-
----
-
-## M29 情感体验增强（P2 优化）（TASK-0264~0279）
-
-> **目标：** 在 M27/M28 基础设施和核心架构完成后，实现情感体验的全面增强：Bond 质感层、情感记忆召回、主动触发器、裂痕修复、情感回声、LLM 参数动态调整等 17 项 P2 优化。
-> **依据：** SOUL-OPT-2026-03-05 优化2/3/4/5/9/10/11/12/15/17/18/23/24/30/36/42/48
-> **前置：** M28 全部 DONE
-> **完成时间：** 2026-03-06
-> **状态：** ✅ DONE（2112 passed, 0 failed）
-
-### TASK-0264 M29-A：BondEmotionalTexture 情感质感层（OPT-2）
-
-- 状态：DONE
-- 任务描述：在 `BondScoreState` 上增加 `BondEmotionalTexture` 情感质感层，感知互动节奏（平均回复间隔）和关系温度（近期情感均值），影响 AI 表达风格。
-- 输入：`host_brain/bond/bond_stage_engine.py`；TASK-0246（Bond 互动分级）。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`：新增 `BondEmotionalTexture` dataclass（`avg_response_gap_ms`/`recent_emotion_valence`/`intimacy_temperature`）；`BondScoreState` 持有 `texture: BondEmotionalTexture`；`texture` 影响 `to_summary()` 的风格描述；
-  - `tests/unit/test_bond_texture_m29.py`（新增）：T-BOND-TEX-01~04。
-- 验收标准：
-  - T-BOND-TEX-01：`avg_response_gap_ms < 5000` 时，`intimacy_temperature` 上升；
-  - T-BOND-TEX-02：`recent_emotion_valence > 0.5` 时，`to_summary()` 含温暖风格描述；
-  - T-BOND-TEX-03：`BondEmotionalTexture` 不影响 Bond 积分计算；
-  - T-BOND-TEX-04：`texture` 字段缺失时使用默认值，不报错。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_texture_m29.py`。
-- 关联需求/测试：FR-BOND-TEXTURE-001；T-BOND-TEX-01~04。
-
-### TASK-0265 M29-B：情感记忆标注与加权召回（OPT-3）
-
-- 状态：DONE
-- 任务描述：`recall()` 支持情感加权召回（语义60% + 情感共鸣30% + 情感显著度10%），使高情感强度的记忆在相关场景下优先被召回。
-- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）；TASK-0238（recall_fusion 情感路由）。
-- 输出：
-  - `host_brain/memory/episodic.py`：`recall()` 新增情感加权评分（`emotion_resonance_score`）；最终排序为 `semantic*0.6 + resonance*0.3 + salience*0.1`；
-  - `tests/unit/test_episodic_weighted_recall_m29.py`（新增）：T-EPISODIC-WR-01~03。
-- 验收标准：
-  - T-EPISODIC-WR-01：当前情感为 `HAPPY` 时，`emotion_tag="HAPPY"` 的记录排名高于 `emotion_tag="SAD"` 的同等语义记录；
-  - T-EPISODIC-WR-02：`emotion_salience > 0.8` 的记录在同等条件下排名更高；
-  - T-EPISODIC-WR-03：无情感字段的旧记录不被过滤，正常参与召回。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_weighted_recall_m29.py`。
-- 关联需求/测试：FR-EPISODIC-WEIGHTED-RECALL-001；T-EPISODIC-WR-01~03。
-
-### TASK-0266 M29-C：emotion_pulse 动态槽位注入（OPT-4）
-
-- 状态：DONE
-- 任务描述：利用 TASK-0250 的 `OPTIONAL_SLOTS` 架构，注册 `emotion_pulse` 槽位，将当前情感状态的自然语言描述动态注入 `context_pack`，使 LLM 感知"此刻感受"。
-- 输入：`host_brain/core/context_pack.py`；TASK-0250（`OPTIONAL_SLOTS` 扩展）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - `host_brain/core/context_pack.py`：注册 `emotion_pulse` 槽位，builder 从 `EmotionVector` 生成自然语言描述（如 `"此刻感到有些开心，精力充沛"`）；
-  - `tests/unit/test_emotion_pulse_m29.py`（新增）：T-EMO-PULSE-01~03。
-- 验收标准：
-  - T-EMO-PULSE-01：`context_pack` 含 `emotion_pulse` 字段；
-  - T-EMO-PULSE-02：`emotion_pulse` 为中文自然语言描述，不含原始数值；
-  - T-EMO-PULSE-03：`EmotionVector` 不可用时，`emotion_pulse` 使用默认描述，不报错。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_emotion_pulse_m29.py`。
-- 关联需求/测试：FR-EMOTION-PULSE-001；T-EMO-PULSE-01~03。
-
-### TASK-0267 M29-D：主动情感触发器（OPT-5）
-
-- 状态：DONE
-- 任务描述：实现主动情感触发器，感知沉默超时/早晨问候/纪念日/用户压力信号，自动触发对应情感响应（如沉默 10 分钟后主动关心）。
-- 输入：`host_brain/scheduler/scheduler.py`；TASK-0244（`EmotionVector`）；TASK-0242（调度器情感状态）。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`：新增 `ProactiveEmotionTrigger` 类，检测沉默/时间/纪念日/压力信号；触发时生成对应情感意图；
-  - `tests/unit/test_proactive_emotion_trigger_m29.py`（新增）：T-PROACTIVE-EMO-01~04。
-- 验收标准：
-  - T-PROACTIVE-EMO-01：沉默超过 600 秒时，触发 `PROACTIVE_CARE` 意图；
-  - T-PROACTIVE-EMO-02：早晨 7-9 点首次对话时，触发 `MORNING_GREETING` 情感；
-  - T-PROACTIVE-EMO-03：检测到用户压力信号（`emotion_tag="ANXIOUS"` 持续 3 轮）时，触发 `COMFORT` 意图；
-  - T-PROACTIVE-EMO-04：触发频率限制（同类触发器 1 小时内最多 1 次）。
-- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_proactive_emotion_trigger_m29.py`。
-- 关联需求/测试：FR-PROACTIVE-EMOTION-001；T-PROACTIVE-EMO-01~04。
-
-### TASK-0268 M29-E：情感时间线重建（OPT-9）
-
-- 状态：DONE
-- 任务描述：新增 `recall_emotional_timeline()` 方法，分析情感弧线（开始/中间/结束），生成时间线摘要，支持 AI 描述"那段时间"的整体感受。
-- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）；TASK-0254（时间线情感事件）。
-- 输出：
-  - `host_brain/memory/episodic.py`：新增 `recall_emotional_timeline(time_range)` 方法，返回情感弧线摘要（`start_emotion`/`peak_emotion`/`end_emotion`/`overall_valence`/`narrative`）；
-  - `tests/unit/test_emotional_timeline_m29.py`（新增）：T-EMO-TIMELINE-01~03。
-- 验收标准：
-  - T-EMO-TIMELINE-01：给定时间范围内有记录时，返回含 `start_emotion`/`end_emotion` 的摘要；
-  - T-EMO-TIMELINE-02：`overall_valence` 为 [-1,1] 范围内的浮点数；
-  - T-EMO-TIMELINE-03：时间范围内无记录时，返回默认摘要，不报错。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_emotional_timeline_m29.py`。
-- 关联需求/测试：FR-EMOTIONAL-TIMELINE-001；T-EMO-TIMELINE-01~03。
-
-### TASK-0269 M29-F：LLM 情感感知生成参数动态调整（OPT-10）
-
-- 状态：DONE
-- 任务描述：根据 `emotion_pulse` 动态调整 LLM 生成参数（兴奋→temperature↑，悲伤→temperature↓），使 AI 回复风格与情感状态匹配。
-- 输入：`host_brain/core/llm_gateway.py`；TASK-0260（LLM Gateway 情感上下文）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - `host_brain/core/llm_gateway.py`：`generate()` 根据 `emotion_context.arousal` 动态调整 `temperature`（`arousal > 0.7` → `temperature=0.9`，`arousal < 0.3` → `temperature=0.6`）；
-  - `tests/unit/test_llm_emotion_params_m29.py`（新增）：T-LLM-EMO-PARAM-01~03。
-- 验收标准：
-  - T-LLM-EMO-PARAM-01：`arousal=0.9` 时，`temperature ≥ 0.85`；
-  - T-LLM-EMO-PARAM-02：`arousal=0.1` 时，`temperature ≤ 0.65`；
-  - T-LLM-EMO-PARAM-03：`emotion_context` 缺失时，使用默认 `temperature`，不报错。
-- 涉及文件路径：`host_brain/core/llm_gateway.py`；`tests/unit/test_llm_emotion_params_m29.py`。
-- 关联需求/测试：FR-LLM-EMOTION-PARAMS-001；T-LLM-EMO-PARAM-01~03。
-
-### TASK-0270 M29-G：Bond 裂痕修复机制（OPT-11）
-
-- 状态：DONE
-- 任务描述：新增 `BondRiftState` 裂痕-修复双轨机制，冲突后进入裂痕状态，修复期间自动调整 AI 表达风格（更温柔、更主动道歉）。
-- 输入：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`。
-- 输出：
-  - `host_brain/bond/bond_stage_engine.py`：新增 `BondRiftState`（`rift_level`/`repair_progress`/`rift_cause`）；`BondScoreState` 持有 `rift: BondRiftState | None`；
-  - `host_brain/bond/bond_dynamics.py`：`CONFLICT` 事件触发裂痕；`APOLOGY`/`COMFORT` 事件推进修复；
-  - `tests/unit/test_bond_rift_m29.py`（新增）：T-BOND-RIFT-01~04。
-- 验收标准：
-  - T-BOND-RIFT-01：`CONFLICT` 事件后，`rift_level > 0`；
-  - T-BOND-RIFT-02：`APOLOGY` 事件后，`repair_progress` 上升；
-  - T-BOND-RIFT-03：`repair_progress >= 1.0` 时，`rift` 清除；
-  - T-BOND-RIFT-04：裂痕期间，`to_summary()` 含修复风格提示。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_rift_m29.py`。
-- 关联需求/测试：FR-BOND-RIFT-001；T-BOND-RIFT-01~04。
-
-### TASK-0271 M29-H：情感回声机制（OPT-12）
-
-- 状态：DONE
-- 任务描述：新增 `EmotionEcho` 模块，AI 情感受用户情感感染（Bond 越深共情越强），陌生人阶段感染率 5%，灵魂伴侣阶段感染率 65%。
-- 输入：`host_brain/core/metabolism.py`；`host_brain/bond/bond_stage_engine.py`；TASK-0244（`EmotionVector`）。
-- 输出：
-  - `host_brain/core/metabolism.py`：新增 `apply_emotion_echo(user_emotion, bond_stage)` 方法；感染率由 Bond 阶段决定；
-  - `tests/unit/test_emotion_echo_m29.py`（新增）：T-EMO-ECHO-01~03。
-- 验收标准：
-  - T-EMO-ECHO-01：`bond_stage="STRANGER"` 时，感染率 ≤ 0.1；
-  - T-EMO-ECHO-02：`bond_stage="SOULMATE"` 时，感染率 ≥ 0.6；
-  - T-EMO-ECHO-03：`apply_emotion_echo()` 后，AI `emotion_vector` 向用户情感方向漂移。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotion_echo_m29.py`。
-- 关联需求/测试：FR-EMOTION-ECHO-001；T-EMO-ECHO-01~03。
-
-### TASK-0272 M29-I：EpisodicRecord decay_profile_id 实装（OPT-15）
-
-- 状态：DONE
-- 任务描述：`EpisodicRecord.decay_profile_id` 从空壳变为真实生效的衰减配置，不同情感强度的记忆使用不同衰减曲线（高情感强度记忆衰减更慢）。
-- 输入：`host_brain/memory/episodic.py`；TASK-0235（`EpisodicRecord` 情感字段）。
-- 输出：
-  - `host_brain/memory/episodic.py`：新增 `DECAY_PROFILES` dict（`fast`/`normal`/`slow`/`permanent`）；`decay_profile_id` 由 `emotion_intensity` 自动推导；`recall()` 评分时应用衰减系数；
-  - `tests/unit/test_episodic_decay_m29.py`（新增）：T-EPISODIC-DECAY-01~03。
-- 验收标准：
-  - T-EPISODIC-DECAY-01：`emotion_intensity > 0.8` 的记录使用 `slow` 衰减曲线；
-  - T-EPISODIC-DECAY-02：`emotion_intensity < 0.3` 的记录使用 `fast` 衰减曲线；
-  - T-EPISODIC-DECAY-03：衰减后的记录评分低于未衰减记录（时间越久分越低）。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_decay_m29.py`。
-- 关联需求/测试：FR-EPISODIC-DECAY-001；T-EPISODIC-DECAY-01~03。
-
-### TASK-0273 M29-J：BondDynamicsWriter payload 语义标准化（OPT-17）
-
-- 状态：DONE
-- 任务描述：`BondDynamicsWriter.apply_update()` 的 `payload` 字段建立语义标准化规范，不同事件类型有对应的 payload schema，消除字段随意性。
-- 输入：`host_brain/bond/bond_dynamics.py`；TASK-0236（Bond 事件情感字段）。
-- 输出：
-  - `host_brain/bond/bond_dynamics.py`：新增 `BOND_EVENT_PAYLOAD_SCHEMA` dict，每种事件类型对应必填/可选字段；`apply_update()` 校验 payload 合规性；
-  - `tests/unit/test_bond_payload_schema_m29.py`（新增）：T-BOND-PAYLOAD-01~03。
-- 验收标准：
-  - T-BOND-PAYLOAD-01：`INTERACTION` 事件 payload 缺少必填字段时，记录警告日志（不拒绝）；
-  - T-BOND-PAYLOAD-02：`DEEP_TALK` 事件 payload 含 `topic` 字段时，正常处理；
-  - T-BOND-PAYLOAD-03：未知事件类型的 payload 不被校验，直接通过。
-- 涉及文件路径：`host_brain/bond/bond_dynamics.py`；`tests/unit/test_bond_payload_schema_m29.py`。
-- 关联需求/测试：FR-BOND-PAYLOAD-001；T-BOND-PAYLOAD-01~03。
-
-### TASK-0274 M29-K：hard_state_summary 增加情感时间戳（OPT-18）
-
-- 状态：DONE
-- 任务描述：`governance_snapshot` 的 `hard_state_summary` 增加 `emotion_updated_at` 时间戳字段，支持情感状态的时效性判断。
-- 输入：`host_brain/core/metabolism.py`（`HardStateSnapshot`）；`host_brain/governor/decision.py`。
-- 输出：
-  - `host_brain/core/metabolism.py`：`HardStateSnapshot` 新增 `emotion_updated_at: int`（毫秒时间戳）；
-  - `host_brain/governor/decision.py`：`build_governance_snapshot()` 传递 `emotion_updated_at`；
-  - `tests/unit/test_hard_state_timestamp_m29.py`（新增）：T-HARD-TS-01~02。
-- 验收标准：
-  - T-HARD-TS-01：`HardStateSnapshot` 含 `emotion_updated_at` 字段，值为合法毫秒时间戳；
-  - T-HARD-TS-02：情感状态更新时，`emotion_updated_at` 同步更新。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`host_brain/governor/decision.py`；`tests/unit/test_hard_state_timestamp_m29.py`。
-- 关联需求/测试：FR-HARD-STATE-TS-001；T-HARD-TS-01~02。
-
-### TASK-0275 M29-L：validate_context_pack bond_summary 语义校验（OPT-23）
-
-- 状态：DONE
-- 任务描述：`validate_context_pack()` 对 `bond_summary` 的 `stage`/`trend` 字段增加语义校验，拒绝非法枚举值（如 `"S_BOND_UPDATE"`）。
-- 输入：`host_brain/core/context_pack.py`；TASK-0237（`derive_bond_summary` 修复）。
-- 输出：
-  - `host_brain/core/context_pack.py`：`validate_context_pack()` 校验 `bond_summary.stage` 为合法 Bond 阶段枚举；`bond_summary.trend` 为合法中文趋势描述；非法值记录警告并使用默认值；
-  - `tests/unit/test_context_pack_bond_validate_m29.py`（新增）：T-CP-BOND-VAL-01~03。
-- 验收标准：
-  - T-CP-BOND-VAL-01：`bond_summary.stage="S_BOND_UPDATE"` 时，校验失败，使用默认值 `"STRANGER"`；
-  - T-CP-BOND-VAL-02：`bond_summary.stage="FRIEND"` 时，校验通过；
-  - T-CP-BOND-VAL-03：校验失败时记录 WARNING 日志，不抛出异常。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_context_pack_bond_validate_m29.py`。
-- 关联需求/测试：FR-CONTEXT-BOND-VALIDATE-001；T-CP-BOND-VAL-01~03。
-
-### TASK-0276 M29-M：build_fallback_output 情感感知降级（OPT-24）
-
-- 状态：DONE
-- 任务描述：`build_fallback_output()` 降级回复感知当前情感状态，根据 `mood_state` 选择对应的降级回复模板（如 `tired` 状态使用温柔道歉语气）。
-- 输入：`host_brain/core/qa.py`（`build_fallback_output()`）；TASK-0234（情感状态来源）。
-- 输出：
-  - `host_brain/core/qa.py`：`build_fallback_output()` 接收 `mood_state` 参数；新增 `FALLBACK_TEMPLATES` dict（按 `mood_state` 分类）；
-  - `tests/unit/test_fallback_emotion_m29.py`（新增）：T-FALLBACK-EMO-01~03。
-- 验收标准：
-  - T-FALLBACK-EMO-01：`mood_state="tired"` 时，降级回复使用温柔语气模板；
-  - T-FALLBACK-EMO-02：`mood_state="engaged"` 时，降级回复使用活泼语气模板；
-  - T-FALLBACK-EMO-03：`mood_state=None` 时，使用默认降级模板，不报错。
-- 涉及文件路径：`host_brain/core/qa.py`；`tests/unit/test_fallback_emotion_m29.py`。
-- 关联需求/测试：FR-FALLBACK-EMOTION-001；T-FALLBACK-EMO-01~03。
-
-### TASK-0277 M29-N：NatsumeScheduler 心跳感知情感状态（OPT-30）
-
-- 状态：DONE
-- 任务描述：`NatsumeScheduler` 的心跳检测 Prompt 感知当前情感状态，心跳时不重置情感状态，而是在情感上下文中执行心跳逻辑。
-- 输入：`host_brain/scheduler/scheduler.py`；TASK-0242（调度器情感状态）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - `host_brain/scheduler/scheduler.py`：心跳 Prompt 携带当前 `emotion_pulse` 描述；心跳执行后不重置 `EmotionVector`；
-  - `tests/unit/test_scheduler_heartbeat_emotion_m29.py`（新增）：T-SCHED-HB-EMO-01~02。
-- 验收标准：
-  - T-SCHED-HB-EMO-01：心跳执行前后，`emotion_vector` 数值不变；
-  - T-SCHED-HB-EMO-02：心跳 Prompt 含 `emotion_pulse` 字段。
-- 涉及文件路径：`host_brain/scheduler/scheduler.py`；`tests/unit/test_scheduler_heartbeat_emotion_m29.py`。
-- 关联需求/测试：FR-SCHED-HEARTBEAT-EMOTION-001；T-SCHED-HB-EMO-01~02。
-
-### TASK-0278 M29-O：HybridFusionStrategy 情感强度加权（OPT-36）
-
-- 状态：DONE
-- 任务描述：`HybridFusionStrategy.fuse()` 的融合分数感知情感强度，高情感强度的记忆在融合时获得额外权重加成。
-- 输入：`host_brain/retrieval/recall_fusion.py`（或对应路径）；TASK-0235（`EpisodicRecord` 情感字段）。
-- 输出：
-  - 对应文件：`fuse()` 新增情感强度加权（`emotion_intensity > 0.7` → 融合分数 × 1.2）；
-  - `tests/unit/test_hybrid_fusion_emotion_m29.py`（新增）：T-FUSION-EMO-01~02。
-- 验收标准：
-  - T-FUSION-EMO-01：`emotion_intensity=0.9` 的记录融合分数 ≥ `emotion_intensity=0.3` 同等语义记录的 1.15 倍；
-  - T-FUSION-EMO-02：`emotion_intensity` 缺失时，使用默认权重 1.0，不报错。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_hybrid_fusion_emotion_m29.py`。
-- 关联需求/测试：FR-FUSION-EMOTION-001；T-FUSION-EMO-01~02。
-
-### TASK-0279 M29-P：ASRTranscriptEvent 增加用户情感推断字段（OPT-48）
-
-- 状态：DONE
-- 任务描述：`ASRTranscriptEvent` 增加 `user_emotion_hint` 字段，ASR 层根据语音特征（语速/音量/语调）推断用户情感，为情感回声和主动触发器提供数据来源。
-- 输入：`edge_client/senses/asr.py`（或对应路径）；TASK-0271（情感回声）；TASK-0267（主动触发器）。
-- 输出：
-  - 对应文件：`ASRTranscriptEvent` 新增 `user_emotion_hint: str | None` 字段；ASR 处理时根据语音特征填充（可为 `None`）；
-  - `tests/unit/test_asr_emotion_hint_m29.py`（新增）：T-ASR-EMO-01~02。
-- 验收标准：
-  - T-ASR-EMO-01：`ASRTranscriptEvent` 含 `user_emotion_hint` 字段；
-  - T-ASR-EMO-02：`user_emotion_hint=None` 时，下游模块不报错（情感回声使用默认值）。
-- 涉及文件路径：`edge_client/senses/asr.py`；`tests/unit/test_asr_emotion_hint_m29.py`。
-- 关联需求/测试：FR-ASR-EMOTION-001；T-ASR-EMO-01~02。
-
-### TASK-0280 M29-Q：MetricsCollector 增加情感维度指标（OPT-46）
-
-- 状态：DONE
-- 任务描述：`MetricsCollector.collect()` 增加情感维度指标（`emotion_tag_distribution`/`avg_emotion_intensity`/`bond_stage_distribution`），使观测层能感知情感健康度。
-- 输入：`host_brain/obs/metrics.py`（或对应路径）；TASK-0244（`EmotionVector`）。
-- 输出：
-  - 对应文件：`collect()` 新增情感指标字段；指标按时间窗口聚合；
-  - `tests/unit/test_metrics_emotion_m29.py`（新增）：T-METRICS-EMO-01~02。
-- 验收标准：
-  - T-METRICS-EMO-01：`collect()` 返回含 `emotion_tag_distribution` 字段；
-  - T-METRICS-EMO-02：`avg_emotion_intensity` 为 [0,1] 范围内的浮点数。
-- 涉及文件路径：`host_brain/obs/metrics.py`；`tests/unit/test_metrics_emotion_m29.py`。
-- 关联需求/测试：FR-METRICS-EMOTION-001；T-METRICS-EMO-01~02。
-
-### TASK-0281 M29-R：EdgeEventReporter 增加情感字段（OPT-42）
-
-- 状态：DONE
-- 任务描述：`EdgeEventReporter` 的 `EventReportItem` 增加 `emotion_tag`/`emotion_intensity` 字段，边缘端事件上报携带情感信息，支持全链路情感追踪。
-- 输入：`edge_client/runtime/event_reporter.py`（或对应路径）；TASK-0279（ASR 情感推断）。
-- 输出：
-  - 对应文件：`EventReportItem` 新增 `emotion_tag: str | None`、`emotion_intensity: float | None` 字段；
-  - `tests/unit/test_edge_event_emotion_m29.py`（新增）：T-EDGE-EMO-01~02。
-- 验收标准：
-  - T-EDGE-EMO-01：`EventReportItem` 含 `emotion_tag` 字段；
-  - T-EDGE-EMO-02：`emotion_tag=None` 时，序列化不报错。
-- 涉及文件路径：`edge_client/runtime/event_reporter.py`；`tests/unit/test_edge_event_emotion_m29.py`。
-- 关联需求/测试：FR-EDGE-EMOTION-001；T-EDGE-EMO-01~02。
-
----
-
-## M30：测试同步修复（Test Sync Hotfix）
-
-**目标：** 修复最新代码拉取后暴露的 17 个测试失败，全部为测试/代码同步问题，无逻辑 Bug。
-**前置条件：** M29 PLANNED（M30 独立于 M29 执行，优先级高于 M29）
-**完成标准：** 全量测试 0 failed，2094 passed，10 skipped
-**实际完成：** 2026-03-06 10:18
-**状态：** ✅ DONE
-
-### TASK-0283 M30-A：修复 Bond fixture 非法 stage/trend 值
-
-- 状态：DONE
-- 任务描述：修复 5 个 contract 测试的 fixture 中 `bond_summary.stage` 使用了非法值（`'warm'`/`'stable'`/`'ESTABLISHED'`/`'up'`），更新为合法枚举值。
-- 涉及文件路径：
-  - `tests/fixtures/context_pack/good/minimal_valid.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
-  - `tests/fixtures/canon/world/context_pack_with_world_canon.json`：`stage: "ESTABLISHED"→"STRANGER"`
-  - `tests/fixtures/llm_gateway/good/prompt_payload.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
-  - `tests/fixtures/bond/good/bond_event_for_summary.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
-  - `tests/contract/test_bond_summary_contract.py`：更新 `test_t_74` 期望值
-- 关联失败：5 个 contract 测试（bond_summary_contract/context_pack_contract/tool_catalog_contract/canon_store_contract/world_canon_slot_contract）
-
-### TASK-0284 M30-B：修复 Bond 集成测试中英文枚举不兼容
-
-- 状态：DONE
-- 任务描述：`BondScoreState.to_summary()` 已中文化（M28-H），但集成测试仍期望英文枚举值，更新为中文枚举。
-- 涉及文件路径：
-  - `tests/integration/test_bond_routes_api.py`：`test_summary_stage_is_valid`/`test_summary_trend_is_valid`/`test_summary_stage_updates_after_promotion` 期望值改为中文
-  - `tests/integration/test_bond_dynamics_stage_integration.py`：`test_summary_stage_matches_state` 期望值改为 `"相识"`
-- 关联失败：4 个集成测试
-
-### TASK-0285 M30-C：修复 Governor rule_trace 数量硬编码
-
-- 状态：DONE
-- 任务描述：M28-D（OPT-8）新增 R8 情感门控规则，`rule_trace` 从 7 条增加到 8 条，更新测试硬编码数量。
-- 涉及文件路径：
-  - `tests/contract/test_governor_rate_limit_contract.py`：`assertEqual(7, ...)→assertEqual(8, ...)`
-  - `tests/contract/test_governor_rules_contract.py`：`assertEqual(7, ...)→assertEqual(8, ...)`
-- 关联失败：2 个 contract 测试
-
-### TASK-0286 M30-D：修复 Obs metrics required_keys 缺少 emotion_metrics
-
-- 状态：DONE
-- 任务描述：M29-Q（OPT-46）在 `MetricsCollector.collect()` 中新增了 `emotion_metrics` 字段，更新测试 `required_keys`。
-- 涉及文件路径：`tests/contract/test_obs_metrics_contract.py`：`required_keys` 添加 `'emotion_metrics'`
-- 关联失败：1 个 contract 测试
-
-### TASK-0287 M30-E：同步 edge_client VTS 映射表至 16 种
-
-- 状态：DONE
-- 任务描述：M28-L（OPT-34）已将 `host_brain/channels/vts.py` 的 `EMOTION_TO_EXPRESSION_ID` 扩展至 16 种，同步更新 `edge_client/actuators/vts_driver.py`，并修复相关测试。
-- 涉及文件路径：
-  - `edge_client/actuators/vts_driver.py`：`EMOTION_TO_EXPRESSION_ID` 从 6 种扩展至 16 种
-  - `tests/contract/test_vts_reconnect_contract.py`：`len == 6→16`
-  - `tests/contract/test_vts_degraded_contract.py`：未知 tag 从 `CONFUSED`/`excited` 改为 `SLEEPY`/`sleepy`
-  - `tests/fixtures/channels/vts_unknown_tag_degraded.json`：`emotion_tag: "CONFUSED"→"SLEEPY"`
-- 关联失败：5 个 contract 测试
-
-### TASK-0288 M30-F：M30 代码审查报告
-
-- 状态：DONE
-- 任务描述：生成 M30 代码审查报告，记录 17 个测试修复详情和最终测试结果。
-- 涉及文件路径：`docs/60_trace/code_review_m30_2026-03-06.md`（新增）
-
----
-
-### TASK-0282 M29-S：M29 发布清单
-
-- 状态：PLANNED
-- 任务描述：TASK-0264~0281 全部 DONE 后，生成 M29 发布清单，记录 P2 情感体验增强文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M29 里程碑状态为 DONE；生成代码审查报告。
-- 输入：TASK-0264~0281 全部 DONE；全量测试 ≥1941 passed（1895 + 46 新增），0 failed，0 warnings。
-- 输出：
-  - `docs/50_release/m29_release.json`（新增）；
-  - `docs/20_prd/PRD.md`：M29 里程碑条目状态更新为 DONE；
-  - `docs/60_trace/requirements_trace.md`：新增 M29 小节；
-  - `docs/40_agents/full_code_review_report_2026-03-05-m29.md`（新增）。
-- 验收标准：
-  - `release_ready=true`；
-  - `bond_texture_implemented=true`（Bond 情感质感层已实现）；
-  - `emotion_echo_implemented=true`（情感回声机制已实现）；
-  - `bond_rift_implemented=true`（Bond 裂痕修复机制已实现）；
-  - `proactive_trigger_implemented=true`（主动情感触发器已实现）；
-  - `emotion_timeline_implemented=true`（情感时间线重建已实现）；
-  - `total_tests_passed ≥ 1941`；
-  - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m29_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m29.md`。
-- 关联需求：NFR-REL-001；FR-BOND-TEXTURE-001；FR-EMOTION-ECHO-001；FR-BOND-RIFT-001；FR-PROACTIVE-EMOTION-001；FR-EMOTIONAL-TIMELINE-001。
-
----
-
-## M31：六库 DevSpec 第八章合规修复（Six-Store Ch.8 Compliance Fix）
-
-**目标**：修复六库实现与 DevSpec 第八章约束的 4 项明确违规和 3 项部分合规问题，确保 SSOT 接口完整性、审计可追溯性和字段规范性。
-
-**优先级**：P0（SSOT 接口违规）→ P1（字段合规）→ P2（命名规范）
-
-**前置条件**：M30 全部 DONE；全量测试 0 failed。
-
----
-
-### TASK-0289 M31-A：修复 Artifact Vault 旁路读取（P0）
-
-- 状态：DONE
-- 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 当前直接访问 `self.ledger.vault_manifest_index`，绕过了 `lsp/vault.py` 的 SSOT 接口层，违反 DevSpec 8.0 和 8.8 约束。需将读取路径改为通过 `self.artifact_vault`（`lsp/vault.py` 暴露的接口）进行，彻底消除旁路。
-- 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/lsp/vault.py`。
-- 输出：
-  - `host_brain/retrieval/recall_fusion.py`：`_search_artifact_vault()` 改为调用 `self.artifact_vault.search(query, topk)` 或等效接口，删除对 `self.ledger.vault_manifest_index` 的直接访问；
-  - `host_brain/lsp/vault.py`：若 `search()` 接口不存在，新增 `search(query: str, topk: int) -> list[dict]` 方法；
-  - `tests/unit/test_artifact_vault_ssot_m31.py`（新增）：T-VAULT-SSOT-01~03。
-- 验收标准：
-  - T-VAULT-SSOT-01：`_search_artifact_vault()` 调用路径中不出现 `ledger.vault_manifest_index`（静态扫描断言）；
-  - T-VAULT-SSOT-02：`self.artifact_vault=None` 时，`_search_artifact_vault()` 返回空列表，不抛异常；
-  - T-VAULT-SSOT-03：`self.artifact_vault` 提供有效数据时，`_search_artifact_vault()` 正确返回候选列表。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`host_brain/lsp/vault.py`；`tests/unit/test_artifact_vault_ssot_m31.py`。
-- 关联需求：DevSpec 8.0（SSOT 单写者/单读者接口）；DevSpec 8.8（T-SSOT-01 静态扫描断言）。
-
-### TASK-0290 M31-B：修复各库 reason_code 粗粒度归并（P0）
-
-- 状态：DONE
-- 任务描述：`recall_fusion.py` 的 `_map_route_exception()` 对所有非 `episodic_vector` 库的异常统一返回 `RETR_RECALL_UNAVAILABLE`，丢失了可区分的 reason_code，违反 DevSpec 8.1 审计可追溯性要求。需为每个库定义专属 reason_code 枚举，并在 `_map_route_exception()` 中按 `store_id` 分发。
-- 输入：`host_brain/retrieval/recall_fusion.py`；`host_brain/retrieval/constants.py`（或等效常量文件）。
-- 输出：
-  - `host_brain/retrieval/constants.py`（或等效文件）：新增以下 reason_code 常量：
-    - `RETR_LEDGER_UNAVAILABLE`（sqlite_ledger 不可用）
-    - `RETR_BOND_UNAVAILABLE`（neo4j_bond 不可用）
-    - `RETR_STYLE_UNAVAILABLE`（style_canon 不可用）
-    - `RETR_WORLD_UNAVAILABLE`（world_canon 不可用）
-    - `RETR_VAULT_UNAVAILABLE`（artifact_vault 不可用）
-  - `host_brain/retrieval/recall_fusion.py`：`_map_route_exception()` 按 `store_id` 返回对应 reason_code；
-  - `tests/unit/test_reason_code_dispatch_m31.py`（新增）：T-REASON-01~06。
-- 验收标准：
-  - T-REASON-01：`store_id="sqlite_ledger"` 异常 → `RETR_LEDGER_UNAVAILABLE`；
-  - T-REASON-02：`store_id="neo4j_bond"` 异常 → `RETR_BOND_UNAVAILABLE`；
-  - T-REASON-03：`store_id="style_canon"` 异常 → `RETR_STYLE_UNAVAILABLE`；
-  - T-REASON-04：`store_id="world_canon"` 异常 → `RETR_WORLD_UNAVAILABLE`；
-  - T-REASON-05：`store_id="artifact_vault"` 异常 → `RETR_VAULT_UNAVAILABLE`；
-  - T-REASON-06：`store_id="episodic_vector"` 异常 → 原有 `RETR_RECALL_UNAVAILABLE`（向后兼容）。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`host_brain/retrieval/constants.py`；`tests/unit/test_reason_code_dispatch_m31.py`。
-- 关联需求：DevSpec 8.1（decision=REJECT → reason_code 非空且来自稳定枚举）。
-
-### TASK-0291 M31-C：补充 intent_log 缺失字段（P1）
-
-- 状态：DONE
-- 任务描述：DevSpec 8.1 A 要求 `intent_log` 必须包含 `tool_visibility_hash`（本轮暴露的工具元数据子集哈希）和 `lint_result_json`（schema/args 校验摘要；禁止自然语言"结论句"替代），当前实现缺少这两个字段。
-- 输入：`host_brain/audit/sqlite_ledger.py`；`host_brain/governor/decision.py`（或 intent 写入路径）。
-- 输出：
-  - `host_brain/audit/sqlite_ledger.py`：`intent_log` 表结构新增 `tool_visibility_hash TEXT`、`lint_result_json TEXT` 列；`log_intent()` 方法接受并写入这两个字段；
-  - 调用方（`decision.py` 或 `metabolism.py`）：写入 intent_log 时填充 `tool_visibility_hash`（当前轮次暴露工具的元数据哈希，无工具时为空字符串）和 `lint_result_json`（JSON 格式的 schema/args 校验摘要，禁止自然语言）；
-  - `tests/unit/test_intent_log_fields_m31.py`（新增）：T-INTENT-LOG-01~03。
-- 验收标准：
-  - T-INTENT-LOG-01：`log_intent()` 写入记录后，`SELECT tool_visibility_hash FROM intent_log` 返回非 NULL 值（无工具时为空字符串）；
-  - T-INTENT-LOG-02：`lint_result_json` 字段为合法 JSON 字符串，不含自然语言结论句；
-  - T-INTENT-LOG-03：旧版调用方不传这两个字段时，默认值为空字符串，不报错（向后兼容）。
-- 涉及文件路径：`host_brain/audit/sqlite_ledger.py`；`host_brain/governor/decision.py`；`tests/unit/test_intent_log_fields_m31.py`。
-- 关联需求：DevSpec 8.1 A（intent_log 最小字段）。
-
-### TASK-0292 M31-D：修复 artifact_id 硬编码 None（P1）
-
-- 状态：DONE
-- 任务描述：`recall_fusion.py` 的 `_search_artifact_vault()` 中 `artifact_id` 被硬编码为 `None`，违反 DevSpec 8.6 要求的 manifest 最小字段（`artifact_id` 必须从 vault 数据中读取）。本任务依赖 TASK-0289（Vault SSOT 接口修复）完成后，从 `self.artifact_vault.search()` 返回的数据中正确提取 `artifact_id`。
-- 输入：`host_brain/retrieval/recall_fusion.py`（TASK-0289 修复后版本）；`host_brain/lsp/vault.py`。
-- 输出：
-  - `host_brain/retrieval/recall_fusion.py`：`_search_artifact_vault()` 从 vault 返回数据中提取 `artifact_id`，不再硬编码 `None`；
-  - `tests/unit/test_artifact_id_field_m31.py`（新增）：T-VAULT-ID-01~02。
-- 验收标准：
-  - T-VAULT-ID-01：vault 返回含 `artifact_id` 的 manifest 时，候选结果中 `artifact_id` 非 `None`；
-  - T-VAULT-ID-02：vault 返回不含 `artifact_id` 的旧格式数据时，`artifact_id` 降级为空字符串，不报错。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_artifact_id_field_m31.py`。
-- 关联需求：DevSpec 8.6（manifest 最小字段：`artifact_id`、`kind`、`hash`、`created_ts`、`evidence_refs`）。
-- 前置任务：TASK-0289。
-
-### TASK-0293 M31-E：补充 summarizer 写回 Neo4j 静态扫描断言（P1）
-
-- 状态：DONE
-- 任务描述：DevSpec 8.2 要求 `summarizer.py` 只能派生 summary，不得写回 SSOT（Neo4j Bond）。当前缺少对应的静态扫描断言测试（T-SSOT-01），无法在 CI 中自动拦截违规写回。
-- 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_dynamics.py`。
-- 输出：
-  - `tests/unit/test_summarizer_ssot_m31.py`（新增）：T-SSOT-SUMM-01~02；
-    - T-SSOT-SUMM-01：静态扫描 `summarizer.py` 源码，断言不含 `bond_dynamics`、`neo4j`、`write`、`upsert`、`create`、`merge` 等写入关键词（正则扫描）；
-    - T-SSOT-SUMM-02：`derive_bond_summary()` 返回值为纯数据结构（dict/dataclass），不触发任何数据库写入副作用。
-- 验收标准：
-  - T-SSOT-SUMM-01：静态扫描通过，`summarizer.py` 中无写入关键词；
-  - T-SSOT-SUMM-02：mock `bond_dynamics` 写入方法后，调用 `derive_bond_summary()` 不触发任何 mock 调用。
-- 涉及文件路径：`host_brain/bond/summarizer.py`；`tests/unit/test_summarizer_ssot_m31.py`。
-- 关联需求：DevSpec 8.2（summarizer 不得写回 SSOT）；DevSpec 8.8（T-SSOT-01）。
-
-### TASK-0294 M31-F：统一 evidence_ref 命名口径（P2）
-
-- 状态：DONE
-- 任务描述：`recall_fusion.py` 中 `evidence_ref`（单数）与 `evidence_refs`（复数）命名不统一，与 DevSpec 8.3 规范的 `evidence_refs`（复数）不一致。统一为复数形式，并更新所有引用。
-- 输入：`host_brain/retrieval/recall_fusion.py`；相关测试文件。
-- 输出：
-  - `host_brain/retrieval/recall_fusion.py`：将所有 `evidence_ref`（单数）重命名为 `evidence_refs`（复数）；
-  - 相关测试文件：同步更新字段名引用；
-  - `tests/unit/test_evidence_refs_naming_m31.py`（新增）：T-EVREF-01。
-- 验收标准：
-  - T-EVREF-01：静态扫描 `recall_fusion.py`，断言不含孤立的 `evidence_ref`（单数，排除 `evidence_refs` 的子串匹配）；
-  - 全量测试无回归。
-- 涉及文件路径：`host_brain/retrieval/recall_fusion.py`；`tests/unit/test_evidence_refs_naming_m31.py`。
-- 关联需求：DevSpec 8.3.1（Evidence Pack 字段命名规范）。
-
-### TASK-0295 M31-G：M31 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0289~0294 全部 DONE 后，生成 M31 代码审查报告，记录六库合规修复详情、测试覆盖情况和最终测试结果。
-- 输入：TASK-0289~0294 全部 DONE；全量测试 0 failed。
-- 输出：
-  - `docs/60_trace/code_review_m31_2026-03-06.md`（新增）：包含变更摘要、测试覆盖、合规性对照表、向后兼容性说明。
-- 验收标准：
-  - 报告包含 TASK-0289~0294 全部 6 个任务的变更摘要；
-  - 新增测试 ≥ 14 个（T-VAULT-SSOT-01~03、T-REASON-01~06、T-INTENT-LOG-01~03、T-VAULT-ID-01~02、T-SSOT-SUMM-01~02、T-EVREF-01），全部通过；
-  - DevSpec 第八章合规性对照表：4 项违规全部修复，3 项部分合规全部升级为合规；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m31_2026-03-06.md`。
-- 关联需求：NFR-REL-001；DevSpec 8.0~8.8。
-
----
-
-## M32 灵魂深化补充实现（Soul Deepening Supplement）（TASK-0296~0310）
-
-> **目标：** 在 M28/M29 灵魂架构基础上，补充实现尚未有专项测试覆盖的灵魂深化功能。
-> **依据：** M28/M29 DONE 后的测试覆盖补充；SOUL-OPT-2026-03-05 优化3/9/11/12/15/18
-> **前置：** M28 全部 DONE；M29 全部 DONE；M31 全部 DONE
-> **完成时间：** 2026-03-06
-> **状态：** ✅ DONE（2170 passed, 0 failed）
-
-### TASK-0296 M32-A：情感记忆加权召回专项测试（OPT-3 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-B（情感记忆加权召回）补充专项测试，验证 `recall()` 的情感加权评分（语义60% + 情感共鸣30% + 情感显著度10%）正确生效。
-- 输入：`host_brain/memory/episodic.py`（已实现情感加权召回）。
-- 输出：
-  - `tests/unit/test_episodic_weighted_recall_m29.py`（新增）：T-EPISODIC-WR-01~03。
-- 验收标准：
-  - T-EPISODIC-WR-01：当前情感为 `HAPPY` 时，`emotion_tag="HAPPY"` 的记录排名高于 `emotion_tag="SAD"` 的同等语义记录；
-  - T-EPISODIC-WR-02：`emotion_salience > 0.8` 的记录在同等条件下排名更高；
-  - T-EPISODIC-WR-03：无情感字段的旧记录不被过滤，正常参与召回。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_weighted_recall_m29.py`。
-- 关联需求/测试：FR-EPISODIC-WEIGHTED-RECALL-001；T-EPISODIC-WR-01~03。
-
-### TASK-0297 M32-B：情感时间线重建专项测试（OPT-9 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-E（情感时间线重建）补充专项测试，验证 `EmotionTimeline.rebuild_summary()` 的情感弧线分析正确生效。
-- 输入：`host_brain/core/metabolism.py`（已实现 `EmotionTimeline`）。
-- 输出：
-  - `tests/unit/test_emotional_timeline_m29.py`（新增）：T-EMO-TIMELINE-01~03。
-- 验收标准：
-  - T-EMO-TIMELINE-01：给定时间范围内有记录时，返回含 `dominant_emotion`/`trend` 的摘要；
-  - T-EMO-TIMELINE-02：`trend` 为 `"improving"/"stable"/"declining"` 之一；
-  - T-EMO-TIMELINE-03：时间范围内无记录时，返回默认摘要，不报错。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotional_timeline_m29.py`。
-- 关联需求/测试：FR-EMOTIONAL-TIMELINE-001；T-EMO-TIMELINE-01~03。
-
-### TASK-0298 M32-C：Bond 裂痕修复专项测试（OPT-11 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-G（Bond 裂痕修复机制）补充专项测试，验证 `BondRiftState` 的裂痕-修复双轨机制正确生效。
-- 输入：`host_brain/bond/bond_stage_engine.py`（已实现 `BondRiftState`）。
-- 输出：
-  - `tests/unit/test_bond_rift_m29.py`（新增）：T-BOND-RIFT-01~04。
-- 验收标准：
-  - T-BOND-RIFT-01：`BondRiftState(rift_level=0.5)` 的 `is_active()` 返回 `True`；
-  - T-BOND-RIFT-02：`repair_progress >= 1.0` 时，`is_active()` 返回 `False`；
-  - T-BOND-RIFT-03：`repair_hint()` 在裂痕活跃时返回非空中文字符串；
-  - T-BOND-RIFT-04：`BondScoreState.to_summary()` 在裂痕活跃时含 `repair_hint` 字段。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_rift_m29.py`。
-- 关联需求/测试：FR-BOND-RIFT-001；T-BOND-RIFT-01~04。
-
-### TASK-0299 M32-D：主动情感触发器专项测试（OPT-5 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-D（主动情感触发器）补充专项测试，验证 `register_emotion_trigger` 和 `evaluate_emotion_triggers` 的触发逻辑正确生效。
-- 输入：`host_brain/core/metabolism.py`（已实现 `register_emotion_trigger`/`evaluate_emotion_triggers`）。
-- 输出：
-  - `tests/unit/test_proactive_emotion_trigger_m29.py`（新增）：T-PROACTIVE-EMO-01~04。
-- 验收标准：
-  - T-PROACTIVE-EMO-01：注册触发规则后，满足条件时 `evaluate_emotion_triggers()` 返回触发事件；
-  - T-PROACTIVE-EMO-02：不满足条件时，返回空列表；
-  - T-PROACTIVE-EMO-03：触发事件含 `emotion_tag`/`intensity`/`source` 字段；
-  - T-PROACTIVE-EMO-04：触发规则抛出异常时，跳过该规则，不影响其他规则。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_proactive_emotion_trigger_m29.py`。
-- 关联需求/测试：FR-PROACTIVE-EMOTION-001；T-PROACTIVE-EMO-01~04。
-
-### TASK-0300 M32-E：情感回声专项测试（OPT-12 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-H（情感回声机制）补充专项测试，验证 `compute_emotion_echo()` 的共情响应逻辑正确生效。
-- 输入：`host_brain/core/metabolism.py`（已实现 `compute_emotion_echo`）。
-- 输出：
-  - `tests/unit/test_emotion_echo_m29.py`（新增）：T-EMO-ECHO-01~03。
-- 验收标准：
-  - T-EMO-ECHO-01：`compute_emotion_echo("HAPPY", ...)` 返回含 `echo_emotion_tag`/`response_hint` 的字典；
-  - T-EMO-ECHO-02：`echo_valence` 在 [-1.0, 1.0] 范围内；
-  - T-EMO-ECHO-03：`response_hint` 为非空中文字符串。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_emotion_echo_m29.py`。
-- 关联需求/测试：FR-EMOTION-ECHO-001；T-EMO-ECHO-01~03。
-
-### TASK-0301 M32-F：EpisodicRecord 衰减配置专项测试（OPT-15 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-I（EpisodicRecord decay_profile_id 实装）补充专项测试，验证不同情感强度的记忆使用不同衰减曲线。
-- 输入：`host_brain/memory/episodic.py`（已实现 `DECAY_PROFILES`）。
-- 输出：
-  - `tests/unit/test_episodic_decay_m29.py`（新增）：T-EPISODIC-DECAY-01~03。
-- 验收标准：
-  - T-EPISODIC-DECAY-01：`emotion_intensity > 0.8` 的记录 `decay_profile_id` 为 `"slow"` 或 `"permanent"`；
-  - T-EPISODIC-DECAY-02：`emotion_intensity < 0.3` 的记录 `decay_profile_id` 为 `"fast"`；
-  - T-EPISODIC-DECAY-03：`DECAY_PROFILES` 包含 `fast`/`normal`/`slow`/`permanent` 四种配置。
-- 涉及文件路径：`host_brain/memory/episodic.py`；`tests/unit/test_episodic_decay_m29.py`。
-- 关联需求/测试：FR-EPISODIC-DECAY-001；T-EPISODIC-DECAY-01~03。
-
-### TASK-0302 M32-G：hard_state_summary 情感时间戳专项测试（OPT-18 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-K（hard_state_summary 增加情感时间戳）补充专项测试，验证 `emotion_ts_ms` 字段正确传递。
-- 输入：`host_brain/core/metabolism.py`（已实现 `emotion_ts_ms`）。
-- 输出：
-  - `tests/unit/test_hard_state_timestamp_m29.py`（新增）：T-HARD-TS-01~02。
-- 验收标准：
-  - T-HARD-TS-01：`build_governance_snapshot()` 返回的 `hard_state_summary` 含 `emotion_ts_ms` 字段；
-  - T-HARD-TS-02：`emotion_ts_ms` 为非负整数。
-- 涉及文件路径：`host_brain/core/metabolism.py`；`tests/unit/test_hard_state_timestamp_m29.py`。
-- 关联需求/测试：FR-HARD-STATE-TS-001；T-HARD-TS-01~02。
-
-### TASK-0303 M32-H：Bond 质感层专项测试（OPT-2 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-A（BondEmotionalTexture 情感质感层）补充专项测试，验证 `BondEmotionalTexture.update()` 和 `style_hint()` 的逻辑正确生效。
-- 输入：`host_brain/bond/bond_stage_engine.py`（已实现 `BondEmotionalTexture`）。
-- 输出：
-  - `tests/unit/test_bond_texture_m29.py`（新增）：T-BOND-TEX-01~04。
-- 验收标准：
-  - T-BOND-TEX-01：`response_gap_ms < 5000` 时，`intimacy_temperature` 上升；
-  - T-BOND-TEX-02：`recent_emotion_valence > 0.5` 时，`style_hint()` 含温暖描述；
-  - T-BOND-TEX-03：`BondEmotionalTexture` 不影响 Bond 积分计算（`total_score` 不变）；
-  - T-BOND-TEX-04：`texture` 字段缺失时使用默认值，不报错。
-- 涉及文件路径：`host_brain/bond/bond_stage_engine.py`；`tests/unit/test_bond_texture_m29.py`。
-- 关联需求/测试：FR-BOND-TEXTURE-001；T-BOND-TEX-01~04。
-
-### TASK-0304 M32-I：emotion_pulse 槽位注入专项测试（OPT-4 补充）
-
-- 状态：DONE
-- 任务描述：为 M29-C（emotion_pulse 动态槽位注入）补充专项测试，验证 `build_emotion_pulse_slot()` 的槽位构建逻辑正确生效。
-- 输入：`host_brain/core/context_pack.py`（已实现 `build_emotion_pulse_slot`）。
-- 输出：
-  - `tests/unit/test_emotion_pulse_m29.py`（新增）：T-EMO-PULSE-01~03。
-- 验收标准：
-  - T-EMO-PULSE-01：`build_emotion_pulse_slot()` 返回含 `emotion_tag`/`mood_state`/`style_hint` 的字典；
-  - T-EMO-PULSE-02：`style_hint` 为非空中文字符串；
-  - T-EMO-PULSE-03：`emotion_vector=None` 时，使用默认值，不报错。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_emotion_pulse_m29.py`。
-- 关联需求/测试：FR-EMOTION-PULSE-001；T-EMO-PULSE-01~03。
-
-### TASK-0305 M32-J：M32 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0296~0304 全部 DONE 后，生成 M32 代码审查报告，记录灵魂深化补充实现的测试覆盖情况和最终测试结果。
-- 输入：TASK-0296~0304 全部 DONE；全量测试 0 failed。
-- 输出：
-  - `docs/60_trace/code_review_m32_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0296~0304 全部 9 个任务的变更摘要；
-  - 新增测试 ≥ 35 个，全部通过；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m32_2026-03-06.md`。
-- 关联需求：NFR-REL-001；FR-EMOTION-CONTINUUM-001；FR-BOND-TEXTURE-001；FR-BOND-RIFT-001。
-
----
-
-## M33 节点编排场景路由修复（Scene-Aware Node Routing）（TASK-0306~0313）
-
-> **目标：** 修复当前"无条件全跑9节点"的编排问题，按 ModelPlane.md §4 的场景路由规格实现条件路由：CHAT 场景只跑 2 个必要节点，`core_reasoner_secondary` 改为 primary 失败时的 fallback-only，`planner_constraints`/`tool_planner` 只在 EXEC_INTENT 场景触发，`workbench_*` 只在对应 WORK_* 场景触发，`safety_verifier`/`consistency_verifier` 按需触发。
-> **依据：** ModelPlane.md §4.1（场景枚举）、§4.2（两段式链路）；Trace 日志分析（HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md）
-> **前置：** M32 全部 DONE
-> **完成标准：** 全量测试 0 failed；CHAT 场景节点数 = 2（primary + renderer）；secondary 仅在 primary 失败时出现在 trace 中
-
-### TASK-0306 M33-A：场景节点序列解析函数
-
-- 状态：DONE
-- 任务描述：在 `fastapi_app.py` 中新增 `_resolve_scene_node_sequence(scene_type)` 函数，按场景返回应执行的节点序列（不含 secondary fallback 节点）。
-- 输入：`scene_type: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE）。
-- 输出：`list[str]`（节点 ID 序列）。
-- 验收标准：
-  - CHAT → `["core_reasoner_primary", "renderer_ja_c_style"]`；
-  - EXEC_INTENT → `["core_reasoner_primary", "planner_constraints", "tool_planner", "safety_verifier", "renderer_ja_c_style"]`；
-  - WORK_TRANSLATE → `["core_reasoner_primary", "workbench_translate", "renderer_ja_c_style"]`；
-  - WORK_CODE → `["core_reasoner_primary", "workbench_code_assist", "renderer_ja_c_style"]`；
-  - 未知场景 → 退化为 CHAT 序列。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：ModelPlane.md §4.1；T-SCENE-ROUTE-01~04。
-
-### TASK-0307 M33-B：_build_chat_graph_config 接受 scene_type 参数
-
-- 状态：DONE
-- 任务描述：修改 `_build_chat_graph_config` 函数，接受 `scene_type` 参数，使用 `_resolve_scene_node_sequence` 替代硬编码的 `CHAT_GRAPH_NODE_ORDER`，并将 `core_reasoner_secondary` 改为 fallback-only（仅在 fallback_edges 中出现）。
-- 输入：`scene_type: str`（默认 "CHAT"）。
-- 输出：`graph_config` 中 `node_bindings`/`edges`/`entry_node` 按场景动态生成。
-- 验收标准：
-  - CHAT 场景：`node_bindings` 只含 2 个节点（primary + renderer）；
-  - `core_reasoner_secondary` 不在 `node_bindings` 中，只在 `fallback_edges` 中；
-  - `graph_meta.scene_type` 字段记录当前场景；
-  - 向后兼容：不传 `scene_type` 时默认 CHAT。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：ModelPlane.md §4.2；T-SCENE-ROUTE-05~07。
-
-### TASK-0308 M33-C：chat 端点传递 scene_type
-
-- 状态：DONE
-- 任务描述：在 `/v1/chat` 端点中，从 `request_body` 或 intent 分析结果中提取 `scene_type`，传递给 `_build_chat_graph_config`。
-- 输入：`request_body.scene_type`（可选，默认 "CHAT"）。
-- 输出：`graph_config` 按实际场景构建。
-- 验收标准：
-  - 不传 `scene_type` 时，默认 CHAT，节点数 = 2；
-  - 传入 `scene_type="EXEC_INTENT"` 时，节点数 = 5；
-  - `graph_meta.scene_type` 与传入值一致。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：ModelPlane.md §4.1；T-SCENE-ROUTE-08。
-
-### TASK-0309 M33-D：场景路由专项测试
-
-- 状态：DONE
-- 任务描述：新增场景路由专项测试，验证各场景的节点序列正确性。
-- 输入：`_resolve_scene_node_sequence` 函数。
-- 输出：`tests/unit/test_scene_node_routing_m33.py`（新增）：T-SCENE-ROUTE-01~08。
-- 验收标准：
-  - T-SCENE-ROUTE-01：CHAT 场景节点序列 = ["core_reasoner_primary", "renderer_ja_c_style"]；
-  - T-SCENE-ROUTE-02：EXEC_INTENT 场景含 planner_constraints 和 tool_planner；
-  - T-SCENE-ROUTE-03：WORK_TRANSLATE 场景含 workbench_translate，不含 workbench_code_assist；
-  - T-SCENE-ROUTE-04：WORK_CODE 场景含 workbench_code_assist，不含 workbench_translate；
-  - T-SCENE-ROUTE-05：CHAT 场景 graph_config 的 node_bindings 只有 2 个节点；
-  - T-SCENE-ROUTE-06：core_reasoner_secondary 不在 CHAT 场景的 node_bindings 中；
-  - T-SCENE-ROUTE-07：core_reasoner_secondary 在 fallback_edges 中；
-  - T-SCENE-ROUTE-08：未知场景退化为 CHAT 序列。
-- 涉及文件路径：`tests/unit/test_scene_node_routing_m33.py`。
-- 关联需求：ModelPlane.md §4.1~4.2；T-SCENE-ROUTE-01~08。
-
-### TASK-0310 M33-E：graph_meta 场景字段审计测试
-
-- 状态：DONE
-- 任务描述：验证 `graph_meta.scene_type` 字段在各场景下正确记录，支持可观测性追踪。
-- 输入：`_build_chat_graph_config` 函数。
-- 输出：`tests/unit/test_scene_node_routing_m33.py` 中的 T-SCENE-META-01~02。
-- 验收标准：
-  - T-SCENE-META-01：CHAT 场景 `graph_meta.scene_type` = "CHAT"；
-  - T-SCENE-META-02：EXEC_INTENT 场景 `graph_meta.scene_type` = "EXEC_INTENT"。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`；`tests/unit/test_scene_node_routing_m33.py`。
-- 关联需求：ModelPlane.md §6（审计字段）；T-SCENE-META-01~02。
-
-### TASK-0311 M33-F：CHAT_GRAPH_NODE_ORDER 保留向后兼容常量
-
-- 状态：DONE
-- 任务描述：保留 `CHAT_GRAPH_NODE_ORDER` 常量作为"全节点注册表"（用于 model_node_overrides 初始化），但不再用于 node_bindings/edges 的构建。
-- 输入：现有 `CHAT_GRAPH_NODE_ORDER` 定义。
-- 输出：注释更新，说明其用途变更为"节点注册表"而非"执行顺序"。
-- 验收标准：
-  - `CHAT_GRAPH_NODE_ORDER` 仍包含全部 9 个节点（用于 model_node_overrides）；
-  - `node_bindings` 和 `edges` 不再直接使用 `CHAT_GRAPH_NODE_ORDER`，改用 `_resolve_scene_node_sequence`。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：ModelPlane.md §3.1；向后兼容性。
-
-### TASK-0312 M33-G：M33 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0306~0311 全部 DONE 后，生成 M33 代码审查报告。
-- 输入：TASK-0306~0311 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m33_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0306~0311 全部 6 个任务的变更摘要；
-  - 新增测试 ≥ 10 个，全部通过；
-  - CHAT 场景节点数从 9 降至 2，成本降低约 78%；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m33_2026-03-06.md`。
-- 关联需求：ModelPlane.md §4；NFR-COST-001；NFR-REL-001。
-
----
-
-## M34 Governed Runtime 第一阶段 + 轻量意图预分类（TASK-0313~0322）
-
-> **目标：** 落地 `LangGraph_Governed_Runtime_Solution` 文档中**第一档优先做**的三项能力，并在 Host 层新增轻量规则预分类器，实现"LLM 调用前的场景快速判断"。
->
-> **两条主线：**
-> - **主线 A（轻量预分类）**：在 Host 层（`fastapi_app.py` 端点逻辑）新增规则/关键词驱动的 `pre_intent_classifier`，在 LLM 调用前快速判断 `scene_type_hint`，避免用全节点链路处理明显的 CHAT 请求。
-> - **主线 B（Governed Runtime 第一阶段）**：实现 `committed_route_token` 机制，将 Governor 的裁决结果编译为有限令牌，LangGraph 条件边只读取 `committed_route_token`，不直接消费 LLM 原始输出。
->
-> **依据：** `docs/50_project/LangGraph_Governed_Runtime_Solution_2026-03-06.md` §4.1、§6（第一阶段）、§11.3（第一档能力）；上一轮架构讨论结论（governed runtime 定位固定）
-> **前置：** M33 全部 DONE
-> **完成标准：** 全量测试 0 failed；`pre_intent_classifier` 对 CHAT/EXEC_INTENT/WORK_* 分类准确率 ≥ 95%（基于规则集）；`committed_route_token` 写入 Governor 裁决链路；条件边只读取 committed 字段
-
-### TASK-0313 M34-A：Host 层轻量规则预分类器
-
-- 状态：DONE
-- 任务描述：在 `fastapi_app.py` 中新增 `pre_intent_classifier(user_input: str) -> str` 函数，基于关键词/正则规则在 LLM 调用前快速判断 `scene_type_hint`。不使用 LLM，纯规则驱动，运行在 Host 层。
-- 输入：`user_input: str`（用户原始输入文本）。
-- 输出：`scene_type_hint: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI，默认 CHAT）。
-- 验收标准：
-  - 包含翻译关键词（翻译/translate/訳して等）→ WORK_TRANSLATE；
-  - 包含代码关键词（代码/code/编程/写个函数等）→ WORK_CODE；
-  - 包含执行意图关键词（执行/运行/帮我做/设置等）→ EXEC_INTENT；
-  - 包含 UI/截图关键词（截图/界面/看一下屏幕等）→ VISION_UI；
-  - 其余默认 → CHAT；
-  - 函数纯规则，无 LLM 调用，延迟 < 1ms；
-  - `scene_type_hint` 写入 `payload.scene_type_hint` 供后续链路使用。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §（意图预分类）；ModelPlane.md §4.1。
-
-### TASK-0314 M34-B：预分类结果接入场景路由
-
-- 状态：DONE
-- 任务描述：修改 `/v1/chat` 端点，在未显式传入 `scene_type` 时，使用 `pre_intent_classifier` 的结果作为 `scene_type_hint`，传递给 `_build_chat_graph_config`。显式传入优先级高于预分类结果。
-- 输入：`request_body.scene_type`（可选）；`pre_intent_classifier(user_input)` 结果。
-- 输出：`graph_config` 按最终 `scene_type` 构建；`graph_meta.scene_type_source` 记录来源（`explicit` / `pre_classifier`）。
-- 验收标准：
-  - 显式传入 `scene_type` 时，`scene_type_source = "explicit"`；
-  - 未传入时，使用预分类结果，`scene_type_source = "pre_classifier"`；
-  - `graph_meta` 新增 `scene_type_source` 字段；
-  - 预分类结果不影响 Governor 的最终裁决权（预分类只影响节点链路选择，不影响 intent 裁决）。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`。
-- 关联需求：ModelPlane.md §4.1；NFR-COST-001。
-
-### TASK-0315 M34-C：committed_route_token 数据结构定义
-
-- 状态：DONE
-- 任务描述：在 `host_brain/governor/` 中定义 `committed_route_token` 的数据结构和有限令牌枚举，作为 Governor 裁决结果的标准化输出格式。
-- 输入：Governor 裁决逻辑现有输出。
-- 输出：
-  - `host_brain/governor/route_token.py`（新增）：定义 `RouteToken` 枚举和 `CommittedRouteDecision` 数据类；
-  - 令牌枚举：`GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`。
-- 验收标准：
-  - `RouteToken` 枚举包含上述 4 个令牌；
-  - `CommittedRouteDecision` 包含字段：`token: RouteToken`、`reason_code: str`、`committed_at_ms: int`、`proposer_node_id: str`；
-  - 数据类不可变（frozen dataclass 或 Pydantic model）；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/governor/route_token.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1。
-
-### TASK-0316 M34-D：Governor 输出编译为 committed_route_token
-
-- 状态：DONE
-- 任务描述：修改 `host_brain/governor/` 中的 Governor 裁决逻辑，在 `evaluate_intent` 完成后，将裁决结果编译为 `CommittedRouteDecision`，写入 `graph_state.committed_route_token`。
-- 输入：现有 Governor `evaluate_intent` 输出（`approved: bool`、`reason` 等）。
-- 输出：`graph_state.committed_route_token: CommittedRouteDecision`（Host 写入，LLM 不可写）。
-- 验收标准：
-  - `approved=True` → `token = GOV_OK_RENDER`；
-  - `approved=False, reason=AIRLOCK` → `token = GOV_AIRLOCK_REVIEW`；
-  - `approved=False, reason=FALLBACK` → `token = GOV_FAIL_FALLBACK`；
-  - `committed_route_token` 只能由 Governor（Host 层）写入，LLM 节点不可写；
-  - `committed_at_ms` 记录编译时间戳；
-  - 写入后记录到 `intent_log`（`committed_route_token_ref` 字段）。
-- 涉及文件路径：`host_brain/governor/`（修改）；`host_brain/app/fastapi_app.py`（修改）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1、§6。
-
-### TASK-0317 M34-E：状态字段三分法（observed / proposed / committed）
-
-- 状态：DONE
-- 任务描述：在 `graph_state` 的字段命名规范中落实三分法：`observed_*`（观测值）、`proposed_*`（LLM 提案）、`committed_*`（Host 已提交决策）。对现有关键字段进行重命名或注释标注，确保语义清晰。
-- 输入：现有 `graph_state` 字段定义。
-- 输出：
-  - `graph_state` 中新增/重命名字段：`proposed_intent_draft`（原 `intent_draft`）、`committed_route_token`（新增）；
-  - 字段注释标注三分法归属；
-  - 相关测试同步更新。
-- 验收标准：
-  - `proposed_*` 字段只能由 LLM 节点写入；
-  - `committed_*` 字段只能由 Host Governor 写入；
-  - `observed_*` 字段只能由 Host 观测层写入；
-  - 现有测试无回归（字段重命名需同步更新引用）。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`；`host_brain/governor/`；相关测试文件。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1；ModelPlane.md §0.1。
-
-### TASK-0318 M34-F：预分类器专项测试
-
-- 状态：DONE
-- 任务描述：新增 `pre_intent_classifier` 专项测试，覆盖各场景的关键词命中、边界情况和默认退化。
-- 输入：`pre_intent_classifier` 函数。
-- 输出：`tests/unit/test_pre_intent_classifier_m34.py`（新增）：T-PIC-01~15。
-- 验收标准：
-  - T-PIC-01：中文翻译关键词 → WORK_TRANSLATE；
-  - T-PIC-02：英文 translate 关键词 → WORK_TRANSLATE；
-  - T-PIC-03：日文翻訳关键词 → WORK_TRANSLATE；
-  - T-PIC-04：代码关键词 → WORK_CODE；
-  - T-PIC-05：编程关键词 → WORK_CODE；
-  - T-PIC-06：执行意图关键词 → EXEC_INTENT；
-  - T-PIC-07：设置/配置关键词 → EXEC_INTENT；
-  - T-PIC-08：截图/界面关键词 → VISION_UI；
-  - T-PIC-09：普通闲聊 → CHAT；
-  - T-PIC-10：空字符串 → CHAT（默认）；
-  - T-PIC-11：混合关键词（优先级测试）→ 按优先级规则返回；
-  - T-PIC-12：`scene_type_source = "pre_classifier"` 当未显式传入时；
-  - T-PIC-13：`scene_type_source = "explicit"` 当显式传入时；
-  - T-PIC-14：`graph_meta.scene_type_source` 字段存在；
-  - T-PIC-15：预分类函数延迟 < 1ms（性能断言）。
-- 涉及文件路径：`tests/unit/test_pre_intent_classifier_m34.py`（新增）。
-- 关联需求：ModelPlane.md §4.1；NFR-PERF-001。
-
-### TASK-0319 M34-G：committed_route_token 专项测试
-
-- 状态：DONE
-- 任务描述：新增 `committed_route_token` 机制专项测试，验证 Governor 编译令牌的正确性和字段不可变性。
-- 输入：`RouteToken`、`CommittedRouteDecision`、Governor 编译逻辑。
-- 输出：`tests/unit/test_committed_route_token_m34.py`（新增）：T-CRT-01~10。
-- 验收标准：
-  - T-CRT-01：`approved=True` → `token = GOV_OK_RENDER`；
-  - T-CRT-02：`approved=False, AIRLOCK` → `token = GOV_AIRLOCK_REVIEW`；
-  - T-CRT-03：`approved=False, FALLBACK` → `token = GOV_FAIL_FALLBACK`；
-  - T-CRT-04：`CommittedRouteDecision` 不可变（修改抛出异常）；
-  - T-CRT-05：`committed_at_ms` 为正整数时间戳；
-  - T-CRT-06：`proposer_node_id` 为 Governor 节点 ID；
-  - T-CRT-07：LLM 节点不能写入 `committed_route_token`（权限校验）；
-  - T-CRT-08：`committed_route_token` 写入后记录到 `intent_log`；
-  - T-CRT-09：`proposed_intent_draft` 字段重命名后引用正确；
-  - T-CRT-10：`observed_*` / `proposed_*` / `committed_*` 字段归属注释存在。
-- 涉及文件路径：`tests/unit/test_committed_route_token_m34.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1、§11.3；ModelPlane.md §0.1、§6。
-
-### TASK-0320 M34-H：ModelPlane.md §4 补充 pre_intent_classifier 规范
-
-- 状态：DONE
-- 任务描述：在 `ModelPlane.md` §4（路由与链路）中补充 `pre_intent_classifier` 的规范条款，明确其定位（Host 层规则引擎，非 LangGraph 节点）、输入输出、优先级规则和与 Governor 的关系。
-- 输入：现有 ModelPlane.md §4.1。
-- 输出：ModelPlane.md §4.0（新增子节）：`pre_intent_classifier` 规范。
-- 验收标准：
-  - 明确 `pre_intent_classifier` 不是 LangGraph 节点，运行在 Host 端点层；
-  - 明确输出只影响节点链路选择，不影响 Governor 裁决权；
-  - 明确 `scene_type_source` 字段的语义；
-  - 明确显式传入优先于预分类结果。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §（意图预分类）；ModelPlane.md §4。
-
-### TASK-0321 M34-I：ModelPlane.md 补充 Governed Runtime Contract 条款
-
-- 状态：DONE
-- 任务描述：在 `ModelPlane.md` 中新增 §10（Governed Runtime Contract），将 `LangGraph_Governed_Runtime_Solution` 文档 §7.1 的五条契约条款正式写入 DevSpec，作为后续开发的硬约束。
-- 输入：`LangGraph_Governed_Runtime_Solution_2026-03-06.md` §7.1、§11.2、§11.3。
-- 输出：ModelPlane.md §10（新增）：Governed Runtime Contract，包含：
-  - Route Commitment Rule（条件边只能基于 `committed_route_token`）；
-  - Parallel Branch Pre-Issuance Rule（并行分支必须先获得 `branch_manifest`，M34 暂不实现，仅写入规范）；
-  - Transparent Subgraph Rule（子图内部节点必须对 Evidence Plane 透明，M34 暂不实现，仅写入规范）；
-  - Dual-Clock Rule（状态恢复与超时降级分别由 Execution Clock / Policy Clock 管理，M34 暂不实现，仅写入规范）；
-  - Phase-Locked Streaming Rule（三类流隔离，M34 暂不实现，仅写入规范）；
-  - 三档能力分类表（第一档/第二档/第三档）。
-- 验收标准：
-  - §10 条款与 `LangGraph_Governed_Runtime_Solution` §7.1 内容一致；
-  - 明确标注 M34 实现范围（Route Commitment Rule + pre_intent_classifier）；
-  - 明确标注后续里程碑待实现项。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §7、§11；ModelPlane.md §0.1。
-
-### TASK-0322 M34-J：M34 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0313~0321 全部 DONE 后，生成 M34 代码审查报告，记录轻量预分类器和 Governed Runtime 第一阶段的实现情况。
-- 输入：TASK-0313~0321 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m34_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0313~0321 全部 9 个任务的变更摘要；
-  - 新增测试 ≥ 25 个，全部通过；
-  - `pre_intent_classifier` 覆盖 5 种场景分类；
-  - `committed_route_token` 机制完整落地；
-  - ModelPlane.md §10 Governed Runtime Contract 写入；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m34_2026-03-06.md`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §4.1、§6、§7、§11；ModelPlane.md §4、§10；NFR-COST-001；NFR-REL-001。
-
+## M34 Governed Runtime 绗竴闃舵 + 杞婚噺鎰忓浘棰勫垎绫伙紙TASK-0313~0322锛?
+> **鐩爣锛?* 钀藉湴 `LangGraph_Governed_Runtime_Solution` 鏂囨。涓?*绗竴妗ｄ紭鍏堝仛**鐨勪笁椤硅兘鍔涳紝骞跺湪 Host 灞傛柊澧炶交閲忚鍒欓鍒嗙被鍣紝瀹炵幇"LLM 璋冪敤鍓嶇殑鍦烘櫙蹇€熷垽鏂?銆?>
+> **涓ゆ潯涓荤嚎锛?*
+> - **涓荤嚎 A锛堣交閲忛鍒嗙被锛?*锛氬湪 Host 灞傦紙`fastapi_app.py` 绔偣閫昏緫锛夋柊澧炶鍒?鍏抽敭璇嶉┍鍔ㄧ殑 `pre_intent_classifier`锛屽湪 LLM 璋冪敤鍓嶅揩閫熷垽鏂?`scene_type_hint`锛岄伩鍏嶇敤鍏ㄨ妭鐐归摼璺鐞嗘槑鏄剧殑 CHAT 璇锋眰銆?> - **涓荤嚎 B锛圙overned Runtime 绗竴闃舵锛?*锛氬疄鐜?`committed_route_token` 鏈哄埗锛屽皢 Governor 鐨勮鍐崇粨鏋滅紪璇戜负鏈夐檺浠ょ墝锛孡angGraph 鏉′欢杈瑰彧璇诲彇 `committed_route_token`锛屼笉鐩存帴娑堣垂 LLM 鍘熷杈撳嚭銆?>
+> **渚濇嵁锛?* `docs/50_project/LangGraph_Governed_Runtime_Solution_2026-03-06.md` 搂4.1銆伮?锛堢涓€闃舵锛夈€伮?1.3锛堢涓€妗ｈ兘鍔涳級锛涗笂涓€杞灦鏋勮璁虹粨璁猴紙governed runtime 瀹氫綅鍥哄畾锛?> **鍓嶇疆锛?* M33 鍏ㄩ儴 DONE
+> **瀹屾垚鏍囧噯锛?* 鍏ㄩ噺娴嬭瘯 0 failed锛沗pre_intent_classifier` 瀵?CHAT/EXEC_INTENT/WORK_* 鍒嗙被鍑嗙‘鐜?鈮?95%锛堝熀浜庤鍒欓泦锛夛紱`committed_route_token` 鍐欏叆 Governor 瑁佸喅閾捐矾锛涙潯浠惰竟鍙鍙?committed 瀛楁
+
+### TASK-0313 M34-A锛欻ost 灞傝交閲忚鍒欓鍒嗙被鍣?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `fastapi_app.py` 涓柊澧?`pre_intent_classifier(user_input: str) -> str` 鍑芥暟锛屽熀浜庡叧閿瘝/姝ｅ垯瑙勫垯鍦?LLM 璋冪敤鍓嶅揩閫熷垽鏂?`scene_type_hint`銆備笉浣跨敤 LLM锛岀函瑙勫垯椹卞姩锛岃繍琛屽湪 Host 灞傘€?- 杈撳叆锛歚user_input: str`锛堢敤鎴峰師濮嬭緭鍏ユ枃鏈級銆?- 杈撳嚭锛歚scene_type_hint: str`锛圕HAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI锛岄粯璁?CHAT锛夈€?- 楠屾敹鏍囧噯锛?  - 鍖呭惈缈昏瘧鍏抽敭璇嶏紙缈昏瘧/translate/瑷炽仐銇︾瓑锛夆啋 WORK_TRANSLATE锛?  - 鍖呭惈浠ｇ爜鍏抽敭璇嶏紙浠ｇ爜/code/缂栫▼/鍐欎釜鍑芥暟绛夛級鈫?WORK_CODE锛?  - 鍖呭惈鎵ц鎰忓浘鍏抽敭璇嶏紙鎵ц/杩愯/甯垜鍋?璁剧疆绛夛級鈫?EXEC_INTENT锛?  - 鍖呭惈 UI/鎴浘鍏抽敭璇嶏紙鎴浘/鐣岄潰/鐪嬩竴涓嬪睆骞曠瓑锛夆啋 VISION_UI锛?  - 鍏朵綑榛樿 鈫?CHAT锛?  - 鍑芥暟绾鍒欙紝鏃?LLM 璋冪敤锛屽欢杩?< 1ms锛?  - `scene_type_hint` 鍐欏叆 `payload.scene_type_hint` 渚涘悗缁摼璺娇鐢ㄣ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂锛堟剰鍥鹃鍒嗙被锛夛紱ModelPlane.md 搂4.1銆?
+### TASK-0314 M34-B锛氶鍒嗙被缁撴灉鎺ュ叆鍦烘櫙璺敱
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`/v1/chat` 绔偣锛屽湪鏈樉寮忎紶鍏?`scene_type` 鏃讹紝浣跨敤 `pre_intent_classifier` 鐨勭粨鏋滀綔涓?`scene_type_hint`锛屼紶閫掔粰 `_build_chat_graph_config`銆傛樉寮忎紶鍏ヤ紭鍏堢骇楂樹簬棰勫垎绫荤粨鏋溿€?- 杈撳叆锛歚request_body.scene_type`锛堝彲閫夛級锛沗pre_intent_classifier(user_input)` 缁撴灉銆?- 杈撳嚭锛歚graph_config` 鎸夋渶缁?`scene_type` 鏋勫缓锛沗graph_meta.scene_type_source` 璁板綍鏉ユ簮锛坄explicit` / `pre_classifier`锛夈€?- 楠屾敹鏍囧噯锛?  - 鏄惧紡浼犲叆 `scene_type` 鏃讹紝`scene_type_source = "explicit"`锛?  - 鏈紶鍏ユ椂锛屼娇鐢ㄩ鍒嗙被缁撴灉锛宍scene_type_source = "pre_classifier"`锛?  - `graph_meta` 鏂板 `scene_type_source` 瀛楁锛?  - 棰勫垎绫荤粨鏋滀笉褰卞搷 Governor 鐨勬渶缁堣鍐虫潈锛堥鍒嗙被鍙奖鍝嶈妭鐐归摼璺€夋嫨锛屼笉褰卞搷 intent 瑁佸喅锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.1锛汵FR-COST-001銆?
+### TASK-0315 M34-C锛歝ommitted_route_token 鏁版嵁缁撴瀯瀹氫箟
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/governor/` 涓畾涔?`committed_route_token` 鐨勬暟鎹粨鏋勫拰鏈夐檺浠ょ墝鏋氫妇锛屼綔涓?Governor 瑁佸喅缁撴灉鐨勬爣鍑嗗寲杈撳嚭鏍煎紡銆?- 杈撳叆锛欸overnor 瑁佸喅閫昏緫鐜版湁杈撳嚭銆?- 杈撳嚭锛?  - `host_brain/governor/route_token.py`锛堟柊澧烇級锛氬畾涔?`RouteToken` 鏋氫妇鍜?`CommittedRouteDecision` 鏁版嵁绫伙紱
+  - 浠ょ墝鏋氫妇锛歚GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`銆?- 楠屾敹鏍囧噯锛?  - `RouteToken` 鏋氫妇鍖呭惈涓婅堪 4 涓护鐗岋紱
+  - `CommittedRouteDecision` 鍖呭惈瀛楁锛歚token: RouteToken`銆乣reason_code: str`銆乣committed_at_ms: int`銆乣proposer_node_id: str`锛?  - 鏁版嵁绫讳笉鍙彉锛坒rozen dataclass 鎴?Pydantic model锛夛紱
+  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/route_token.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂4.1锛汳odelPlane.md 搂0.1銆?
+### TASK-0316 M34-D锛欸overnor 杈撳嚭缂栬瘧涓?committed_route_token
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`host_brain/governor/` 涓殑 Governor 瑁佸喅閫昏緫锛屽湪 `evaluate_intent` 瀹屾垚鍚庯紝灏嗚鍐崇粨鏋滅紪璇戜负 `CommittedRouteDecision`锛屽啓鍏?`graph_state.committed_route_token`銆?- 杈撳叆锛氱幇鏈?Governor `evaluate_intent` 杈撳嚭锛坄approved: bool`銆乣reason` 绛夛級銆?- 杈撳嚭锛歚graph_state.committed_route_token: CommittedRouteDecision`锛圚ost 鍐欏叆锛孡LM 涓嶅彲鍐欙級銆?- 楠屾敹鏍囧噯锛?  - `approved=True` 鈫?`token = GOV_OK_RENDER`锛?  - `approved=False, reason=AIRLOCK` 鈫?`token = GOV_AIRLOCK_REVIEW`锛?  - `approved=False, reason=FALLBACK` 鈫?`token = GOV_FAIL_FALLBACK`锛?  - `committed_route_token` 鍙兘鐢?Governor锛圚ost 灞傦級鍐欏叆锛孡LM 鑺傜偣涓嶅彲鍐欙紱
+  - `committed_at_ms` 璁板綍缂栬瘧鏃堕棿鎴筹紱
+  - 鍐欏叆鍚庤褰曞埌 `intent_log`锛坄committed_route_token_ref` 瀛楁锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/`锛堜慨鏀癸級锛沗host_brain/app/fastapi_app.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂4.1锛汳odelPlane.md 搂0.1銆伮?銆?
+### TASK-0317 M34-E锛氱姸鎬佸瓧娈典笁鍒嗘硶锛坥bserved / proposed / committed锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_state` 鐨勫瓧娈靛懡鍚嶈鑼冧腑钀藉疄涓夊垎娉曪細`observed_*`锛堣娴嬪€硷級銆乣proposed_*`锛圠LM 鎻愭锛夈€乣committed_*`锛圚ost 宸叉彁浜ゅ喅绛栵級銆傚鐜版湁鍏抽敭瀛楁杩涜閲嶅懡鍚嶆垨娉ㄩ噴鏍囨敞锛岀‘淇濊涔夋竻鏅般€?- 杈撳叆锛氱幇鏈?`graph_state` 瀛楁瀹氫箟銆?- 杈撳嚭锛?  - `graph_state` 涓柊澧?閲嶅懡鍚嶅瓧娈碉細`proposed_intent_draft`锛堝師 `intent_draft`锛夈€乣committed_route_token`锛堟柊澧烇級锛?  - 瀛楁娉ㄩ噴鏍囨敞涓夊垎娉曞綊灞烇紱
+  - 鐩稿叧娴嬭瘯鍚屾鏇存柊銆?- 楠屾敹鏍囧噯锛?  - `proposed_*` 瀛楁鍙兘鐢?LLM 鑺傜偣鍐欏叆锛?  - `committed_*` 瀛楁鍙兘鐢?Host Governor 鍐欏叆锛?  - `observed_*` 瀛楁鍙兘鐢?Host 瑙傛祴灞傚啓鍏ワ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙瀛楁閲嶅懡鍚嶉渶鍚屾鏇存柊寮曠敤锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`锛沗host_brain/governor/`锛涚浉鍏虫祴璇曟枃浠躲€?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂4.1锛汳odelPlane.md 搂0.1銆?
+### TASK-0318 M34-F锛氶鍒嗙被鍣ㄤ笓椤规祴璇?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`pre_intent_classifier` 涓撻」娴嬭瘯锛岃鐩栧悇鍦烘櫙鐨勫叧閿瘝鍛戒腑銆佽竟鐣屾儏鍐靛拰榛樿閫€鍖栥€?- 杈撳叆锛歚pre_intent_classifier` 鍑芥暟銆?- 杈撳嚭锛歚tests/unit/test_pre_intent_classifier_m34.py`锛堟柊澧烇級锛歍-PIC-01~15銆?- 楠屾敹鏍囧噯锛?  - T-PIC-01锛氫腑鏂囩炕璇戝叧閿瘝 鈫?WORK_TRANSLATE锛?  - T-PIC-02锛氳嫳鏂?translate 鍏抽敭璇?鈫?WORK_TRANSLATE锛?  - T-PIC-03锛氭棩鏂囩炕瑷冲叧閿瘝 鈫?WORK_TRANSLATE锛?  - T-PIC-04锛氫唬鐮佸叧閿瘝 鈫?WORK_CODE锛?  - T-PIC-05锛氱紪绋嬪叧閿瘝 鈫?WORK_CODE锛?  - T-PIC-06锛氭墽琛屾剰鍥惧叧閿瘝 鈫?EXEC_INTENT锛?  - T-PIC-07锛氳缃?閰嶇疆鍏抽敭璇?鈫?EXEC_INTENT锛?  - T-PIC-08锛氭埅鍥?鐣岄潰鍏抽敭璇?鈫?VISION_UI锛?  - T-PIC-09锛氭櫘閫氶棽鑱?鈫?CHAT锛?  - T-PIC-10锛氱┖瀛楃涓?鈫?CHAT锛堥粯璁わ級锛?  - T-PIC-11锛氭贩鍚堝叧閿瘝锛堜紭鍏堢骇娴嬭瘯锛夆啋 鎸変紭鍏堢骇瑙勫垯杩斿洖锛?  - T-PIC-12锛歚scene_type_source = "pre_classifier"` 褰撴湭鏄惧紡浼犲叆鏃讹紱
+  - T-PIC-13锛歚scene_type_source = "explicit"` 褰撴樉寮忎紶鍏ユ椂锛?  - T-PIC-14锛歚graph_meta.scene_type_source` 瀛楁瀛樺湪锛?  - T-PIC-15锛氶鍒嗙被鍑芥暟寤惰繜 < 1ms锛堟€ц兘鏂█锛夈€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_pre_intent_classifier_m34.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂4.1锛汵FR-PERF-001銆?
+### TASK-0319 M34-G锛歝ommitted_route_token 涓撻」娴嬭瘯
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`committed_route_token` 鏈哄埗涓撻」娴嬭瘯锛岄獙璇?Governor 缂栬瘧浠ょ墝鐨勬纭€у拰瀛楁涓嶅彲鍙樻€с€?- 杈撳叆锛歚RouteToken`銆乣CommittedRouteDecision`銆丟overnor 缂栬瘧閫昏緫銆?- 杈撳嚭锛歚tests/unit/test_committed_route_token_m34.py`锛堟柊澧烇級锛歍-CRT-01~10銆?- 楠屾敹鏍囧噯锛?  - T-CRT-01锛歚approved=True` 鈫?`token = GOV_OK_RENDER`锛?  - T-CRT-02锛歚approved=False, AIRLOCK` 鈫?`token = GOV_AIRLOCK_REVIEW`锛?  - T-CRT-03锛歚approved=False, FALLBACK` 鈫?`token = GOV_FAIL_FALLBACK`锛?  - T-CRT-04锛歚CommittedRouteDecision` 涓嶅彲鍙橈紙淇敼鎶涘嚭寮傚父锛夛紱
+  - T-CRT-05锛歚committed_at_ms` 涓烘鏁存暟鏃堕棿鎴筹紱
+  - T-CRT-06锛歚proposer_node_id` 涓?Governor 鑺傜偣 ID锛?  - T-CRT-07锛歀LM 鑺傜偣涓嶈兘鍐欏叆 `committed_route_token`锛堟潈闄愭牎楠岋級锛?  - T-CRT-08锛歚committed_route_token` 鍐欏叆鍚庤褰曞埌 `intent_log`锛?  - T-CRT-09锛歚proposed_intent_draft` 瀛楁閲嶅懡鍚嶅悗寮曠敤姝ｇ‘锛?  - T-CRT-10锛歚observed_*` / `proposed_*` / `committed_*` 瀛楁褰掑睘娉ㄩ噴瀛樺湪銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_committed_route_token_m34.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂4.1銆伮?1.3锛汳odelPlane.md 搂0.1銆伮?銆?
+### TASK-0320 M34-H锛歁odelPlane.md 搂4 琛ュ厖 pre_intent_classifier 瑙勮寖
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `ModelPlane.md` 搂4锛堣矾鐢变笌閾捐矾锛変腑琛ュ厖 `pre_intent_classifier` 鐨勮鑼冩潯娆撅紝鏄庣‘鍏跺畾浣嶏紙Host 灞傝鍒欏紩鎿庯紝闈?LangGraph 鑺傜偣锛夈€佽緭鍏ヨ緭鍑恒€佷紭鍏堢骇瑙勫垯鍜屼笌 Governor 鐨勫叧绯汇€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂4.1銆?- 杈撳嚭锛歁odelPlane.md 搂4.0锛堟柊澧炲瓙鑺傦級锛歚pre_intent_classifier` 瑙勮寖銆?- 楠屾敹鏍囧噯锛?  - 鏄庣‘ `pre_intent_classifier` 涓嶆槸 LangGraph 鑺傜偣锛岃繍琛屽湪 Host 绔偣灞傦紱
+  - 鏄庣‘杈撳嚭鍙奖鍝嶈妭鐐归摼璺€夋嫨锛屼笉褰卞搷 Governor 瑁佸喅鏉冿紱
+  - 鏄庣‘ `scene_type_source` 瀛楁鐨勮涔夛紱
+  - 鏄庣‘鏄惧紡浼犲叆浼樺厛浜庨鍒嗙被缁撴灉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂锛堟剰鍥鹃鍒嗙被锛夛紱ModelPlane.md 搂4銆?
+### TASK-0321 M34-I锛歁odelPlane.md 琛ュ厖 Governed Runtime Contract 鏉℃
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `ModelPlane.md` 涓柊澧?搂10锛圙overned Runtime Contract锛夛紝灏?`LangGraph_Governed_Runtime_Solution` 鏂囨。 搂7.1 鐨勪簲鏉″绾︽潯娆炬寮忓啓鍏?DevSpec锛屼綔涓哄悗缁紑鍙戠殑纭害鏉熴€?- 杈撳叆锛歚LangGraph_Governed_Runtime_Solution_2026-03-06.md` 搂7.1銆伮?1.2銆伮?1.3銆?- 杈撳嚭锛歁odelPlane.md 搂10锛堟柊澧烇級锛欸overned Runtime Contract锛屽寘鍚細
+  - Route Commitment Rule锛堟潯浠惰竟鍙兘鍩轰簬 `committed_route_token`锛夛紱
+  - Parallel Branch Pre-Issuance Rule锛堝苟琛屽垎鏀繀椤诲厛鑾峰緱 `branch_manifest`锛孧34 鏆備笉瀹炵幇锛屼粎鍐欏叆瑙勮寖锛夛紱
+  - Transparent Subgraph Rule锛堝瓙鍥惧唴閮ㄨ妭鐐瑰繀椤诲 Evidence Plane 閫忔槑锛孧34 鏆備笉瀹炵幇锛屼粎鍐欏叆瑙勮寖锛夛紱
+  - Dual-Clock Rule锛堢姸鎬佹仮澶嶄笌瓒呮椂闄嶇骇鍒嗗埆鐢?Execution Clock / Policy Clock 绠＄悊锛孧34 鏆備笉瀹炵幇锛屼粎鍐欏叆瑙勮寖锛夛紱
+  - Phase-Locked Streaming Rule锛堜笁绫绘祦闅旂锛孧34 鏆備笉瀹炵幇锛屼粎鍐欏叆瑙勮寖锛夛紱
+  - 涓夋。鑳藉姏鍒嗙被琛紙绗竴妗?绗簩妗?绗笁妗ｏ級銆?- 楠屾敹鏍囧噯锛?  - 搂10 鏉℃涓?`LangGraph_Governed_Runtime_Solution` 搂7.1 鍐呭涓€鑷达紱
+  - 鏄庣‘鏍囨敞 M34 瀹炵幇鑼冨洿锛圧oute Commitment Rule + pre_intent_classifier锛夛紱
+  - 鏄庣‘鏍囨敞鍚庣画閲岀▼纰戝緟瀹炵幇椤广€?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂7銆伮?1锛汳odelPlane.md 搂0.1銆?
+### TASK-0322 M34-J锛歁34 浠ｇ爜瀹℃煡鎶ュ憡
+
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0313~0321 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M34 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曡交閲忛鍒嗙被鍣ㄥ拰 Governed Runtime 绗竴闃舵鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0313~0321 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m34_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0313~0321 鍏ㄩ儴 9 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?25 涓紝鍏ㄩ儴閫氳繃锛?  - `pre_intent_classifier` 瑕嗙洊 5 绉嶅満鏅垎绫伙紱
+  - `committed_route_token` 鏈哄埗瀹屾暣钀藉湴锛?  - ModelPlane.md 搂10 Governed Runtime Contract 鍐欏叆锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m34_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂4.1銆伮?銆伮?銆伮?1锛汳odelPlane.md 搂4銆伮?0锛汵FR-COST-001锛汵FR-REL-001銆?
 
 
 ---
 
-## M35 Route Commitment Rule 完整落地 + Transparent Subgraph
+## M35 Route Commitment Rule 瀹屾暣钀藉湴 + Transparent Subgraph
 
-- **里程碑编号**：M35
-- **标题**：Route Commitment Rule 完整落地 + Transparent Subgraph 审计透明子图
-- **任务范围**：TASK-0323 ~ TASK-0334（共 12 个任务）
-- **前置依赖**：M34 DONE（committed_route_token 已编译写入）
-- **目标**：
-  1. 让 LangGraph 条件边真正读取 `committed_route_token`（Route Commitment Rule 完整落地）
-  2. 实现 `compile_governed_subgraph()` 工厂（Transparent Subgraph Rule 第一阶段）
-  3. 专项测试覆盖（T-RCR-01~10 + T-TSG-01~08）
-  4. ModelPlane.md §10 更新实现状态
-
+- **閲岀▼纰戠紪鍙?*锛歁35
+- **鏍囬**锛歊oute Commitment Rule 瀹屾暣钀藉湴 + Transparent Subgraph 瀹¤閫忔槑瀛愬浘
+- **浠诲姟鑼冨洿**锛歍ASK-0323 ~ TASK-0334锛堝叡 12 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁34 DONE锛坈ommitted_route_token 宸茬紪璇戝啓鍏ワ級
+- **鐩爣**锛?  1. 璁?LangGraph 鏉′欢杈圭湡姝ｈ鍙?`committed_route_token`锛圧oute Commitment Rule 瀹屾暣钀藉湴锛?  2. 瀹炵幇 `compile_governed_subgraph()` 宸ュ巶锛圱ransparent Subgraph Rule 绗竴闃舵锛?  3. 涓撻」娴嬭瘯瑕嗙洊锛圱-RCR-01~10 + T-TSG-01~08锛?  4. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0323 M35-A：GraphState 新增 committed_route_token 字段
+### TASK-0323 M35-A锛欸raphState 鏂板 committed_route_token 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 `committed_route_token` 字段（`str | None`），以及 `committed_route_token_detail` 字段（`dict[str, Any] | None`），供 Governor 写入、条件边读取。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.committed_route_token: str | None`（令牌字符串，如 `"GOV_OK_RENDER"`）；
-  - `GraphState.committed_route_token_detail: dict[str, Any] | None`（完整 CommittedRouteDecision 字典）；
-  - `GraphState.subgraph_trace: list[dict[str, Any]]`（透明子图节点追踪，M35-E 使用）。
-- 验收标准：
-  - `GraphState` 包含上述三个新字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归（TypedDict 新增字段向后兼容）。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧?`committed_route_token` 瀛楁锛坄str | None`锛夛紝浠ュ強 `committed_route_token_detail` 瀛楁锛坄dict[str, Any] | None`锛夛紝渚?Governor 鍐欏叆銆佹潯浠惰竟璇诲彇銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.committed_route_token: str | None`锛堜护鐗屽瓧绗︿覆锛屽 `"GOV_OK_RENDER"`锛夛紱
+  - `GraphState.committed_route_token_detail: dict[str, Any] | None`锛堝畬鏁?CommittedRouteDecision 瀛楀吀锛夛紱
+  - `GraphState.subgraph_trace: list[dict[str, Any]]`锛堥€忔槑瀛愬浘鑺傜偣杩借釜锛孧35-E 浣跨敤锛夈€?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈涓婅堪涓変釜鏂板瓧娈碉紱
+  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙TypedDict 鏂板瀛楁鍚戝悗鍏煎锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0324 M35-B锛歡raph_runtime.py 娉ㄥ叆 committed_route_token 鍒?initial_state
 
-### TASK-0324 M35-B：graph_runtime.py 注入 committed_route_token 到 initial_state
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃讹紝浠?`payload` 涓彁鍙?Governor 宸茬紪璇戠殑 `committed_route_token`锛堢敱 `/v1/chat` 绔偣鍦ㄨ皟鐢?`run_graph` 鍓嶆敞鍏ワ級锛屽啓鍏?`initial_state.committed_route_token`銆?- 杈撳叆锛歚payload.committed_route_token`锛堢敱 fastapi_app.py 鍦?Governor 瑁佸喅鍚庢敞鍏ワ級銆?- 杈撳嚭锛歚initial_state.committed_route_token` 宸叉纭～鍏呫€?- 楠屾敹鏍囧噯锛?  - `initial_state.committed_route_token` 浠?`payload` 涓彁鍙栵紱
+  - 鑻?`payload` 涓棤姝ゅ瓧娈碉紝榛樿涓?`None`锛?  - `initial_state.committed_route_token_detail` 鍚屾鎻愬彇锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0325 M35-C锛歠astapi_app.py 鍦ㄨ皟鐢?run_graph 鍓嶆敞鍏?committed_route_token
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时，从 `payload` 中提取 Governor 已编译的 `committed_route_token`（由 `/v1/chat` 端点在调用 `run_graph` 前注入），写入 `initial_state.committed_route_token`。
-- 输入：`payload.committed_route_token`（由 fastapi_app.py 在 Governor 裁决后注入）。
-- 输出：`initial_state.committed_route_token` 已正确填充。
-- 验收标准：
-  - `initial_state.committed_route_token` 从 `payload` 中提取；
-  - 若 `payload` 中无此字段，默认为 `None`；
-  - `initial_state.committed_route_token_detail` 同步提取；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`fastapi_app.py` 鐨?`/v1/chat` 绔偣锛屽湪 Governor `evaluate_intent` 瀹屾垚鍚庛€佽皟鐢?`run_graph` 鍓嶏紝灏?`committed_route_token` 鍜?`committed_route_token_detail` 娉ㄥ叆鍒?`payload` 涓紝渚?`graph_runtime.py` 鎻愬彇鍒?`initial_state`銆?- 杈撳叆锛欸overnor `evaluate_intent` 杩斿洖缁撴灉涓殑 `committed_route_token` 瀛楁銆?- 杈撳嚭锛歚payload["committed_route_token"]` 鍜?`payload["committed_route_token_detail"]` 宸叉敞鍏ャ€?- 楠屾敹鏍囧噯锛?  - Governor APPROVE 鏃讹紝`payload["committed_route_token"] = "GOV_OK_RENDER"`锛?  - Governor REJECT 鏃讹紝`payload["committed_route_token"] = "GOV_FAIL_FALLBACK"` 鎴?`"GOV_AIRLOCK_REVIEW"`锛?  - `payload["committed_route_token_detail"]` 鍖呭惈瀹屾暣浠ょ墝璇︽儏锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0326 M35-D锛歡raph_executor.py 鏉′欢杈硅鍙?committed_route_token
 
-### TASK-0325 M35-C：fastapi_app.py 在调用 run_graph 前注入 committed_route_token
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_route_after_step` 鏂规硶锛屽湪璺敱鍐崇瓥鏃朵紭鍏堣鍙?`state.committed_route_token`锛屾寜浠ょ墝鍊煎喅瀹氫笅涓€姝ワ細`GOV_OK_RENDER` 鈫?缁х画鎵ц锛沗GOV_FAIL_FALLBACK` 鈫?璺宠浆 fallback锛沗GOV_AIRLOCK_REVIEW` 鈫?璺宠浆 finish锛堢瓑寰呬汉宸ュ鏍革級锛沗GOV_SECONDARY_REASONER` 鈫?璺宠浆 secondary reasoner 鑺傜偣锛堣嫢瀛樺湪锛夈€?- 杈撳叆锛歚state.committed_route_token`锛坄str | None`锛夈€?- 杈撳嚭锛氭潯浠惰竟璺敱缁撴灉锛坄"step"` / `"finish"` / `"fallback"`锛夈€?- 楠屾敹鏍囧噯锛?  - `committed_route_token = "GOV_OK_RENDER"` 鈫?姝ｅ父鎵ц锛坄"step"` 鎴?`"finish"`锛夛紱
+  - `committed_route_token = "GOV_FAIL_FALLBACK"` 鈫?璺宠浆 fallback 閾捐矾锛?  - `committed_route_token = "GOV_AIRLOCK_REVIEW"` 鈫?璺宠浆 finish锛宍status = "AIRLOCK_PENDING"`锛?  - `committed_route_token = None` 鈫?淇濇寔鍘熸湁璺敱閫昏緫锛堝悜鍚庡吋瀹癸級锛?  - 鏉′欢杈逛笉鐩存帴娑堣垂 LLM 鍘熷杈撳嚭锛圧oute Commitment Rule 瀹屾暣钀藉湴锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0327 M35-E锛歝ompile_governed_subgraph() 宸ュ巶锛圱ransparent Subgraph 绗竴闃舵锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_subgraph.py`锛屽疄鐜?`compile_governed_subgraph()` 宸ュ巶鍑芥暟銆傚瓙鍥惧唴閮ㄨ妭鐐瑰繀椤诲 Evidence Plane 閫忔槑锛氭瘡涓妭鐐规墽琛屽墠鍚庡啓鍏?`subgraph_trace`锛屽瓙鍥剧粨鏉熸椂杈撳嚭 `subgraph_commit_summary`銆?- 杈撳叆锛氬瓙鍥捐妭鐐瑰垪琛紙`node_ids: list[str]`锛夈€佸瓙鍥?ID锛坄subgraph_id: str`锛夈€佽妭鐐瑰鐞嗗櫒锛坄handlers: dict[str, NodeHandler]`锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/graph_subgraph.py`锛堟柊澧烇級锛?  - `compile_governed_subgraph(subgraph_id, node_ids, handlers) -> CompiledSubgraph`锛?  - `CompiledSubgraph.invoke(state) -> GraphState`锛氭墽琛屽瓙鍥撅紝鍐欏叆 `subgraph_trace`锛?  - `subgraph_commit_summary: dict`锛氬瓙鍥炬墽琛屾憳瑕侊紙鑺傜偣鏁般€佹垚鍔熸暟銆佸け璐ユ暟銆乼race 灞曞钩锛夈€?- 楠屾敹鏍囧噯锛?  - 瀛愬浘姣忎釜鑺傜偣鎵ц鍚庡啓鍏?`subgraph_trace`锛堝惈 `node_id`銆乣status`銆乣ts_ms`锛夛紱
+  - 瀛愬浘缁撴潫鏃?`state.subgraph_trace` 鍖呭惈鎵€鏈夎妭鐐圭殑鎵ц璁板綍锛?  - `subgraph_commit_summary` 鍖呭惈 `subgraph_id`銆乣node_count`銆乣success_count`銆乣fail_count`銆乣graph_trace_flat`锛?  - 瀛愬浘涓嶅厑璁哥洿鎺ュ啓鍏?`committed_*` 瀛楁锛堟潈闄愮害鏉燂級锛?  - 瀛愬浘澶辫触鏃?`status = STATUS_DEGRADED`锛屼笉褰卞搷涓诲浘缁х画鎵ц銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_subgraph.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.2銆?
+### TASK-0328 M35-F锛歡raph_contract.py 鏂板 subgraph 鐩稿叧杈呭姪鍑芥暟
 
-- 状态：DONE
-- 任务描述：修改 `fastapi_app.py` 的 `/v1/chat` 端点，在 Governor `evaluate_intent` 完成后、调用 `run_graph` 前，将 `committed_route_token` 和 `committed_route_token_detail` 注入到 `payload` 中，供 `graph_runtime.py` 提取到 `initial_state`。
-- 输入：Governor `evaluate_intent` 返回结果中的 `committed_route_token` 字段。
-- 输出：`payload["committed_route_token"]` 和 `payload["committed_route_token_detail"]` 已注入。
-- 验收标准：
-  - Governor APPROVE 时，`payload["committed_route_token"] = "GOV_OK_RENDER"`；
-  - Governor REJECT 时，`payload["committed_route_token"] = "GOV_FAIL_FALLBACK"` 或 `"GOV_AIRLOCK_REVIEW"`；
-  - `payload["committed_route_token_detail"]` 包含完整令牌详情；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?`build_subgraph_commit_summary()` 杈呭姪鍑芥暟锛屽皢 `subgraph_trace` 灞曞钩涓?`graph_trace_flat`锛屼緵 Evidence Plane 鍐欏叆銆?- 杈撳叆锛歚subgraph_id: str`銆乣subgraph_trace: list[dict]`銆?- 杈撳嚭锛歚subgraph_commit_summary: dict`锛堝惈 `subgraph_id`銆乣node_count`銆乣success_count`銆乣fail_count`銆乣graph_trace_flat`銆乣committed_at_ms`锛夈€?- 楠屾敹鏍囧噯锛?  - `build_subgraph_commit_summary` 姝ｇ‘缁熻鎴愬姛/澶辫触鑺傜偣鏁帮紱
+  - `graph_trace_flat` 涓哄睍骞冲悗鐨勮妭鐐规墽琛岃褰曞垪琛紱
+  - `committed_at_ms` 涓哄綋鍓嶆椂闂存埑锛堟绉掞級锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｅ拰鍗曞厓娴嬭瘯銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.2銆?
+### TASK-0329 M35-G锛歊oute Commitment Rule 涓撻」娴嬭瘯锛圱-RCR-01~10锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Route Commitment Rule 瀹屾暣钀藉湴鐨勪笓椤规祴璇曪紝楠岃瘉鏉′欢杈瑰熀浜?`committed_route_token` 鐨勮矾鐢辫涓恒€?- 杈撳叆锛歚GraphExecutor._route_after_step`銆乣GraphState.committed_route_token`銆?- 杈撳嚭锛歚tests/unit/test_route_commitment_rule_m35.py`锛堟柊澧烇級锛歍-RCR-01~10銆?- 楠屾敹鏍囧噯锛?  - T-RCR-01锛歚committed_route_token = None` 鈫?淇濇寔鍘熸湁璺敱閫昏緫锛?  - T-RCR-02锛歚committed_route_token = "GOV_OK_RENDER"` 鈫?姝ｅ父鎵ц锛?  - T-RCR-03锛歚committed_route_token = "GOV_FAIL_FALLBACK"` 鈫?璺宠浆 fallback锛?  - T-RCR-04锛歚committed_route_token = "GOV_AIRLOCK_REVIEW"` 鈫?璺宠浆 finish锛宻tatus = AIRLOCK_PENDING锛?  - T-RCR-05锛歚committed_route_token = "GOV_SECONDARY_REASONER"` 鈫?璺宠浆 secondary锛堣嫢瀛樺湪锛夛紱
+  - T-RCR-06锛氭潯浠惰竟涓嶇洿鎺ユ秷璐?LLM 鍘熷杈撳嚭锛堝彧璇?committed_route_token锛夛紱
+  - T-RCR-07锛歚initial_state.committed_route_token` 浠?payload 姝ｇ‘鎻愬彇锛?  - T-RCR-08锛歠astapi_app.py 娉ㄥ叆 committed_route_token 鍒?payload锛?  - T-RCR-09锛欸overnor APPROVE 鈫?payload["committed_route_token"] = "GOV_OK_RENDER"锛?  - T-RCR-10锛欸overnor REJECT 鈫?payload["committed_route_token"] = "GOV_FAIL_FALLBACK" 鎴?"GOV_AIRLOCK_REVIEW"銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_route_commitment_rule_m35.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0330 M35-H锛歍ransparent Subgraph 涓撻」娴嬭瘯锛圱-TSG-01~08锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`compile_governed_subgraph` 涓撻」娴嬭瘯锛岄獙璇佸瓙鍥鹃€忔槑鎬у拰 Evidence Plane 鍐欏叆銆?- 杈撳叆锛歚compile_governed_subgraph`銆乣build_subgraph_commit_summary`銆?- 杈撳嚭锛歚tests/unit/test_transparent_subgraph_m35.py`锛堟柊澧烇級锛歍-TSG-01~08銆?- 楠屾敹鏍囧噯锛?  - T-TSG-01锛氬瓙鍥炬瘡涓妭鐐规墽琛屽悗鍐欏叆 subgraph_trace锛?  - T-TSG-02锛歴ubgraph_commit_summary 鍖呭惈姝ｇ‘鐨?node_count锛?  - T-TSG-03锛歴ubgraph_commit_summary 鍖呭惈姝ｇ‘鐨?success_count 鍜?fail_count锛?  - T-TSG-04锛歡raph_trace_flat 涓哄睍骞冲悗鐨勮妭鐐规墽琛岃褰曪紱
+  - T-TSG-05锛氬瓙鍥句笉鍏佽鍐欏叆 committed_* 瀛楁锛?  - T-TSG-06锛氬瓙鍥惧け璐ユ椂 status = STATUS_DEGRADED锛屼富鍥剧户缁紱
+  - T-TSG-07锛歜uild_subgraph_commit_summary 姝ｇ‘缁熻锛?  - T-TSG-08锛歝ommitted_at_ms 涓烘鏁存暟鏃堕棿鎴炽€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_transparent_subgraph_m35.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.2銆?
+### TASK-0331 M35-I锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏?`committed_route_token` 鏉′欢杈瑰拰 `transparent_subgraph` 鏍囪涓?M35 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M35 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `committed_route_token` 鏉′欢杈规爣娉?鉁?M35 宸插疄鐜帮紱
+  - `transparent_subgraph` 鏍囨敞 鉁?M35 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0332 M35-J锛歡raph_fallback.py 鏂板 AIRLOCK_PENDING 鐘舵€佸鐞?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_fallback.py` 涓柊澧?`handle_airlock_pending()` 鍑芥暟锛屽綋 `committed_route_token = "GOV_AIRLOCK_REVIEW"` 鏃讹紝灏嗗浘鐘舵€佽缃负 `STATUS_AIRLOCK_PENDING`锛岃褰曞埌 trace锛屽苟瀹夊叏缁堟鍥炬墽琛岋紙涓嶈Е鍙?fallback 閾捐矾锛夈€?- 杈撳叆锛歚state: GraphState`銆乣node_id: str`銆?- 杈撳嚭锛歚GraphState.status = "AIRLOCK_PENDING"`锛沗trace` 璁板綍 AIRLOCK 浜嬩欢銆?- 楠屾敹鏍囧噯锛?  - `handle_airlock_pending` 璁剧疆 `status = "AIRLOCK_PENDING"`锛?  - `trace` 鍖呭惈 `{"node_id": node_id, "status": "AIRLOCK_PENDING", "reason_code": "GOV_AIRLOCK_REVIEW"}`锛?  - 涓嶈Е鍙?fallback 閾捐矾锛堜笌 `GOV_FAIL_FALLBACK` 琛屼负鍖哄垎锛夛紱
+  - 鏈夊崟鍏冩祴璇曡鐩栥€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_fallback.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆?
+### TASK-0333 M35-K锛歡raph_contract.py 鏂板 STATUS_AIRLOCK_PENDING 甯搁噺
 
-### TASK-0326 M35-D：graph_executor.py 条件边读取 committed_route_token
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?`STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 甯搁噺锛屼緵 `graph_executor.py`銆乣graph_fallback.py` 鍜屾祴璇曚娇鐢ㄣ€?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛歚STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 甯搁噺銆?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - 鍦?`graph_executor.py` 鍜?`graph_fallback.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 1銆?
+### TASK-0334 M35-L锛歁35 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_route_after_step` 方法，在路由决策时优先读取 `state.committed_route_token`，按令牌值决定下一步：`GOV_OK_RENDER` → 继续执行；`GOV_FAIL_FALLBACK` → 跳转 fallback；`GOV_AIRLOCK_REVIEW` → 跳转 finish（等待人工审核）；`GOV_SECONDARY_REASONER` → 跳转 secondary reasoner 节点（若存在）。
-- 输入：`state.committed_route_token`（`str | None`）。
-- 输出：条件边路由结果（`"step"` / `"finish"` / `"fallback"`）。
-- 验收标准：
-  - `committed_route_token = "GOV_OK_RENDER"` → 正常执行（`"step"` 或 `"finish"`）；
-  - `committed_route_token = "GOV_FAIL_FALLBACK"` → 跳转 fallback 链路；
-  - `committed_route_token = "GOV_AIRLOCK_REVIEW"` → 跳转 finish，`status = "AIRLOCK_PENDING"`；
-  - `committed_route_token = None` → 保持原有路由逻辑（向后兼容）；
-  - 条件边不直接消费 LLM 原始输出（Route Commitment Rule 完整落地）。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
-
-### TASK-0327 M35-E：compile_governed_subgraph() 工厂（Transparent Subgraph 第一阶段）
-
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_subgraph.py`，实现 `compile_governed_subgraph()` 工厂函数。子图内部节点必须对 Evidence Plane 透明：每个节点执行前后写入 `subgraph_trace`，子图结束时输出 `subgraph_commit_summary`。
-- 输入：子图节点列表（`node_ids: list[str]`）、子图 ID（`subgraph_id: str`）、节点处理器（`handlers: dict[str, NodeHandler]`）。
-- 输出：
-  - `host_brain/integrations/graph_subgraph.py`（新增）；
-  - `compile_governed_subgraph(subgraph_id, node_ids, handlers) -> CompiledSubgraph`；
-  - `CompiledSubgraph.invoke(state) -> GraphState`：执行子图，写入 `subgraph_trace`；
-  - `subgraph_commit_summary: dict`：子图执行摘要（节点数、成功数、失败数、trace 展平）。
-- 验收标准：
-  - 子图每个节点执行后写入 `subgraph_trace`（含 `node_id`、`status`、`ts_ms`）；
-  - 子图结束时 `state.subgraph_trace` 包含所有节点的执行记录；
-  - `subgraph_commit_summary` 包含 `subgraph_id`、`node_count`、`success_count`、`fail_count`、`graph_trace_flat`；
-  - 子图不允许直接写入 `committed_*` 字段（权限约束）；
-  - 子图失败时 `status = STATUS_DEGRADED`，不影响主图继续执行。
-- 涉及文件路径：`host_brain/integrations/graph_subgraph.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
-
-### TASK-0328 M35-F：graph_contract.py 新增 subgraph 相关辅助函数
-
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 `build_subgraph_commit_summary()` 辅助函数，将 `subgraph_trace` 展平为 `graph_trace_flat`，供 Evidence Plane 写入。
-- 输入：`subgraph_id: str`、`subgraph_trace: list[dict]`。
-- 输出：`subgraph_commit_summary: dict`（含 `subgraph_id`、`node_count`、`success_count`、`fail_count`、`graph_trace_flat`、`committed_at_ms`）。
-- 验收标准：
-  - `build_subgraph_commit_summary` 正确统计成功/失败节点数；
-  - `graph_trace_flat` 为展平后的节点执行记录列表；
-  - `committed_at_ms` 为当前时间戳（毫秒）；
-  - 有完整类型注解和单元测试。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
-
-### TASK-0329 M35-G：Route Commitment Rule 专项测试（T-RCR-01~10）
-
-- 状态：DONE
-- 任务描述：新增 Route Commitment Rule 完整落地的专项测试，验证条件边基于 `committed_route_token` 的路由行为。
-- 输入：`GraphExecutor._route_after_step`、`GraphState.committed_route_token`。
-- 输出：`tests/unit/test_route_commitment_rule_m35.py`（新增）：T-RCR-01~10。
-- 验收标准：
-  - T-RCR-01：`committed_route_token = None` → 保持原有路由逻辑；
-  - T-RCR-02：`committed_route_token = "GOV_OK_RENDER"` → 正常执行；
-  - T-RCR-03：`committed_route_token = "GOV_FAIL_FALLBACK"` → 跳转 fallback；
-  - T-RCR-04：`committed_route_token = "GOV_AIRLOCK_REVIEW"` → 跳转 finish，status = AIRLOCK_PENDING；
-  - T-RCR-05：`committed_route_token = "GOV_SECONDARY_REASONER"` → 跳转 secondary（若存在）；
-  - T-RCR-06：条件边不直接消费 LLM 原始输出（只读 committed_route_token）；
-  - T-RCR-07：`initial_state.committed_route_token` 从 payload 正确提取；
-  - T-RCR-08：fastapi_app.py 注入 committed_route_token 到 payload；
-  - T-RCR-09：Governor APPROVE → payload["committed_route_token"] = "GOV_OK_RENDER"；
-  - T-RCR-10：Governor REJECT → payload["committed_route_token"] = "GOV_FAIL_FALLBACK" 或 "GOV_AIRLOCK_REVIEW"。
-- 涉及文件路径：`tests/unit/test_route_commitment_rule_m35.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
-
-### TASK-0330 M35-H：Transparent Subgraph 专项测试（T-TSG-01~08）
-
-- 状态：DONE
-- 任务描述：新增 `compile_governed_subgraph` 专项测试，验证子图透明性和 Evidence Plane 写入。
-- 输入：`compile_governed_subgraph`、`build_subgraph_commit_summary`。
-- 输出：`tests/unit/test_transparent_subgraph_m35.py`（新增）：T-TSG-01~08。
-- 验收标准：
-  - T-TSG-01：子图每个节点执行后写入 subgraph_trace；
-  - T-TSG-02：subgraph_commit_summary 包含正确的 node_count；
-  - T-TSG-03：subgraph_commit_summary 包含正确的 success_count 和 fail_count；
-  - T-TSG-04：graph_trace_flat 为展平后的节点执行记录；
-  - T-TSG-05：子图不允许写入 committed_* 字段；
-  - T-TSG-06：子图失败时 status = STATUS_DEGRADED，主图继续；
-  - T-TSG-07：build_subgraph_commit_summary 正确统计；
-  - T-TSG-08：committed_at_ms 为正整数时间戳。
-- 涉及文件路径：`tests/unit/test_transparent_subgraph_m35.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.2。
-
-### TASK-0331 M35-I：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 `committed_route_token` 条件边和 `transparent_subgraph` 标记为 M35 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M35 实现项标注 ✅）。
-- 验收标准：
-  - `committed_route_token` 条件边标注 ✅ M35 已实现；
-  - `transparent_subgraph` 标注 ✅ M35 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0332 M35-J：graph_fallback.py 新增 AIRLOCK_PENDING 状态处理
-
-- 状态：DONE
-- 任务描述：在 `graph_fallback.py` 中新增 `handle_airlock_pending()` 函数，当 `committed_route_token = "GOV_AIRLOCK_REVIEW"` 时，将图状态设置为 `STATUS_AIRLOCK_PENDING`，记录到 trace，并安全终止图执行（不触发 fallback 链路）。
-- 输入：`state: GraphState`、`node_id: str`。
-- 输出：`GraphState.status = "AIRLOCK_PENDING"`；`trace` 记录 AIRLOCK 事件。
-- 验收标准：
-  - `handle_airlock_pending` 设置 `status = "AIRLOCK_PENDING"`；
-  - `trace` 包含 `{"node_id": node_id, "status": "AIRLOCK_PENDING", "reason_code": "GOV_AIRLOCK_REVIEW"}`；
-  - 不触发 fallback 链路（与 `GOV_FAIL_FALLBACK` 行为区分）；
-  - 有单元测试覆盖。
-- 涉及文件路径：`host_brain/integrations/graph_fallback.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1；`LangGraph_Governed_Runtime_Solution` §4.1。
-
-### TASK-0333 M35-K：graph_contract.py 新增 STATUS_AIRLOCK_PENDING 常量
-
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 `STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 常量，供 `graph_executor.py`、`graph_fallback.py` 和测试使用。
-- 输入：现有常量定义区域。
-- 输出：`STATUS_AIRLOCK_PENDING = "AIRLOCK_PENDING"` 常量。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - 在 `graph_executor.py` 和 `graph_fallback.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 1。
-
-### TASK-0334 M35-L：M35 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0323~0333 全部 DONE 后，生成 M35 代码审查报告，记录 Route Commitment Rule 完整落地和 Transparent Subgraph 第一阶段的实现情况。
-- 输入：TASK-0323~0333 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m35_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0323~0333 全部 11 个任务的变更摘要；
-  - 新增测试 ≥ 18 个（T-RCR-01~10 + T-TSG-01~08），全部通过；
-  - Route Commitment Rule 完整落地（条件边基于 committed_route_token）；
-  - Transparent Subgraph 第一阶段实现（compile_governed_subgraph 工厂）；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m35_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.1、§5.2、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0323~0333 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M35 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Route Commitment Rule 瀹屾暣钀藉湴鍜?Transparent Subgraph 绗竴闃舵鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0323~0333 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m35_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0323~0333 鍏ㄩ儴 11 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?18 涓紙T-RCR-01~10 + T-TSG-01~08锛夛紝鍏ㄩ儴閫氳繃锛?  - Route Commitment Rule 瀹屾暣钀藉湴锛堟潯浠惰竟鍩轰簬 committed_route_token锛夛紱
+  - Transparent Subgraph 绗竴闃舵瀹炵幇锛坈ompile_governed_subgraph 宸ュ巶锛夛紱
+  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m35_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂4.1銆伮?.2銆伮?1.2銆?
 
 
 ---
 
-## M36 Dual-Clock Supervision + Evidence Plane 写入
+## M36 Dual-Clock Supervision + Evidence Plane 鍐欏叆
 
-- **里程碑编号**：M36
-- **标题**：Dual-Clock Supervision（双时钟监督）+ Evidence Plane SQLite 写入
-- **任务范围**：TASK-0335 ~ TASK-0348（共 14 个任务）
-- **前置依赖**：M35 DONE（committed_route_token 条件边 + transparent_subgraph 第一阶段）
-- **目标**：
-  1. 实现 Dual-Clock Supervision（Execution Clock + Policy Clock），集成到 `graph_executor.py`
-  2. 实现 Evidence Plane SQLite 写入（`graph_evidence.py`），将 trace/subgraph_commit_summary 持久化
-  3. 专项测试覆盖（T-DCK-01~10 + T-EVP-01~08）
-  4. ModelPlane.md §10 更新实现状态
-
+- **閲岀▼纰戠紪鍙?*锛歁36
+- **鏍囬**锛欴ual-Clock Supervision锛堝弻鏃堕挓鐩戠潱锛? Evidence Plane SQLite 鍐欏叆
+- **浠诲姟鑼冨洿**锛歍ASK-0335 ~ TASK-0348锛堝叡 14 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁35 DONE锛坈ommitted_route_token 鏉′欢杈?+ transparent_subgraph 绗竴闃舵锛?- **鐩爣**锛?  1. 瀹炵幇 Dual-Clock Supervision锛圗xecution Clock + Policy Clock锛夛紝闆嗘垚鍒?`graph_executor.py`
+  2. 瀹炵幇 Evidence Plane SQLite 鍐欏叆锛坄graph_evidence.py`锛夛紝灏?trace/subgraph_commit_summary 鎸佷箙鍖?  3. 涓撻」娴嬭瘯瑕嗙洊锛圱-DCK-01~10 + T-EVP-01~08锛?  4. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0335 M36-A：新建 graph_clock.py（Dual-Clock 核心实现）
+### TASK-0335 M36-A锛氭柊寤?graph_clock.py锛圖ual-Clock 鏍稿績瀹炵幇锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_clock.py`锛屽疄鐜板弻鏃堕挓鐩戠潱鏈哄埗銆?  - **Execution Clock**锛氳褰曟瘡涓妭鐐圭殑鎵ц寮€濮嬫椂闂存埑锛坄exec_start_ms`锛夊拰缁撴潫鏃堕棿鎴筹紙`exec_end_ms`锛夛紝璁＄畻鑺傜偣鑰楁椂锛坄exec_duration_ms`锛夛紝瓒呰繃鑺傜偣瓒呮椂闃堝€兼椂瑙﹀彂 `EXEC_TIMEOUT` 浜嬩欢銆?  - **Policy Clock**锛氳褰曟暣涓浘鎵ц鐨勭瓥鐣ユ椂閽燂紙`policy_start_ms`锛夛紝鍦ㄦ瘡涓妭鐐规墽琛屽墠妫€鏌ユ槸鍚﹁秴杩囧叏灞€绛栫暐瓒呮椂锛坄policy_timeout_ms`锛夛紝瓒呮椂鏃惰Е鍙?`POLICY_TIMEOUT` 浜嬩欢锛屽己鍒剁粓姝㈠浘鎵ц銆?- 杈撳叆锛氳妭鐐?ID銆佽妭鐐硅秴鏃堕槇鍊硷紙`node_timeout_ms`锛夈€佸叏灞€绛栫暐瓒呮椂锛坄policy_timeout_ms`锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/graph_clock.py`锛堟柊澧烇級锛?  - `ExecutionClock`锛氳妭鐐圭骇鎵ц鏃堕挓锛坄start()` / `stop()` / `elapsed_ms` / `is_timeout`锛夛紱
+  - `PolicyClock`锛氬浘绾х瓥鐣ユ椂閽燂紙`start()` / `check_policy_timeout()` / `elapsed_ms`锛夛紱
+  - `ClockEvent`锛氭椂閽熶簨浠舵暟鎹被锛坄event_type`銆乣node_id`銆乣elapsed_ms`銆乣threshold_ms`銆乣ts_ms`锛夛紱
+  - `DualClockSupervisor`锛氬弻鏃堕挓鐩戠潱鍣紝缁勫悎 ExecutionClock + PolicyClock锛屾彁渚?`supervise_node()` 涓婁笅鏂囩鐞嗗櫒銆?- 楠屾敹鏍囧噯锛?  - `ExecutionClock.is_timeout` 鍦?`elapsed_ms > node_timeout_ms` 鏃惰繑鍥?True锛?  - `PolicyClock.check_policy_timeout()` 鍦ㄥ叏灞€瓒呮椂鏃惰繑鍥?`ClockEvent(event_type="POLICY_TIMEOUT")`锛?  - `DualClockSupervisor.supervise_node()` 浣滀负涓婁笅鏂囩鐞嗗櫒锛岃妭鐐规墽琛屽墠妫€鏌?Policy Clock锛岃妭鐐规墽琛屽悗璁板綍 Execution Clock锛?  - 鎵€鏈夋椂閽熸搷浣滅函鍐呭瓨锛屾棤 I/O 渚濊禆锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_clock.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0336 M36-B锛欸raphState 鏂板鍙屾椂閽熷瓧娈?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧炲弻鏃堕挓鐩稿叧瀛楁銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.policy_start_ms: int | None`锛堝浘绾х瓥鐣ユ椂閽熷惎鍔ㄦ椂闂存埑锛夛紱
+  - `GraphState.policy_timeout_ms: int | None`锛堝叏灞€绛栫暐瓒呮椂闃堝€硷紝姣锛夛紱
+  - `GraphState.clock_events: list[dict[str, Any]]`锛堟椂閽熶簨浠跺垪琛紝鍚?EXEC_TIMEOUT / POLICY_TIMEOUT锛夛紱
+  - `GraphState.node_exec_stats: dict[str, dict[str, Any]]`锛堣妭鐐规墽琛岀粺璁★紝鍚?exec_start_ms / exec_end_ms / exec_duration_ms锛夈€?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈涓婅堪鍥涗釜鏂板瓧娈碉紱
+  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙TypedDict 鏂板瀛楁鍚戝悗鍏煎锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0337 M36-C锛歡raph_runtime.py 鍒濆鍖栧弻鏃堕挓瀛楁
 
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_clock.py`，实现双时钟监督机制。
-  - **Execution Clock**：记录每个节点的执行开始时间戳（`exec_start_ms`）和结束时间戳（`exec_end_ms`），计算节点耗时（`exec_duration_ms`），超过节点超时阈值时触发 `EXEC_TIMEOUT` 事件。
-  - **Policy Clock**：记录整个图执行的策略时钟（`policy_start_ms`），在每个节点执行前检查是否超过全局策略超时（`policy_timeout_ms`），超时时触发 `POLICY_TIMEOUT` 事件，强制终止图执行。
-- 输入：节点 ID、节点超时阈值（`node_timeout_ms`）、全局策略超时（`policy_timeout_ms`）。
-- 输出：
-  - `host_brain/integrations/graph_clock.py`（新增）；
-  - `ExecutionClock`：节点级执行时钟（`start()` / `stop()` / `elapsed_ms` / `is_timeout`）；
-  - `PolicyClock`：图级策略时钟（`start()` / `check_policy_timeout()` / `elapsed_ms`）；
-  - `ClockEvent`：时钟事件数据类（`event_type`、`node_id`、`elapsed_ms`、`threshold_ms`、`ts_ms`）；
-  - `DualClockSupervisor`：双时钟监督器，组合 ExecutionClock + PolicyClock，提供 `supervise_node()` 上下文管理器。
-- 验收标准：
-  - `ExecutionClock.is_timeout` 在 `elapsed_ms > node_timeout_ms` 时返回 True；
-  - `PolicyClock.check_policy_timeout()` 在全局超时时返回 `ClockEvent(event_type="POLICY_TIMEOUT")`；
-  - `DualClockSupervisor.supervise_node()` 作为上下文管理器，节点执行前检查 Policy Clock，节点执行后记录 Execution Clock；
-  - 所有时钟操作纯内存，无 I/O 依赖；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_clock.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃跺垵濮嬪寲鍙屾椂閽熷瓧娈碉細`policy_start_ms`锛堝綋鍓嶆椂闂存埑锛夈€乣policy_timeout_ms`锛堜粠 `graph_config` 鎴?`timeout_ms` 鎻愬彇锛夈€乣clock_events`锛堢┖鍒楄〃锛夈€乣node_exec_stats`锛堢┖瀛楀吀锛夈€?- 杈撳叆锛歚graph_config.policy_timeout_ms`锛堝彲閫夛紝榛樿绛変簬 `timeout_ms`锛夈€?- 杈撳嚭锛歚initial_state` 鍖呭惈鍙屾椂閽熷垵濮嬪€笺€?- 楠屾敹鏍囧噯锛?  - `initial_state.policy_start_ms` 涓哄綋鍓嶆椂闂存埑锛堟绉掞級锛?  - `initial_state.policy_timeout_ms` 浠?`graph_config` 鎻愬彇锛岄粯璁ょ瓑浜?`timeout_ms`锛?  - `initial_state.clock_events = []`锛?  - `initial_state.node_exec_stats = {}`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0338 M36-D锛歡raph_executor.py 闆嗘垚 DualClockSupervisor
 
-### TASK-0336 M36-B：GraphState 新增双时钟字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪鑺傜偣鎵ц鍓嶅悗浣跨敤 `DualClockSupervisor.supervise_node()` 涓婁笅鏂囩鐞嗗櫒锛?  - 鑺傜偣鎵ц鍓嶏細妫€鏌?Policy Clock锛岃嫢瓒呮椂鍒欒Е鍙?`POLICY_TIMEOUT` 浜嬩欢锛屽己鍒剁粓姝㈠浘鎵ц锛坄status = STATUS_FAILED`锛宍reason_code = "POLICY_TIMEOUT"`锛夛紱
+  - 鑺傜偣鎵ц鍚庯細璁板綍 Execution Clock 缁熻锛坄exec_start_ms`銆乣exec_end_ms`銆乣exec_duration_ms`锛夛紝鑻ヨ妭鐐硅秴鏃跺垯杩藉姞 `EXEC_TIMEOUT` 浜嬩欢鍒?`clock_events`锛?  - 鏃堕挓浜嬩欢鍐欏叆 `state.clock_events`锛岃妭鐐圭粺璁″啓鍏?`state.node_exec_stats`銆?- 杈撳叆锛歚DualClockSupervisor`銆乣state.policy_start_ms`銆乣state.policy_timeout_ms`銆?- 杈撳嚭锛歚state.clock_events` 鍜?`state.node_exec_stats` 宸叉洿鏂般€?- 楠屾敹鏍囧噯锛?  - Policy Clock 瓒呮椂鏃讹紝鍥炬墽琛屽己鍒剁粓姝紙`status = STATUS_FAILED`锛宍reason_code = "POLICY_TIMEOUT"`锛夛紱
+  - Execution Clock 瓒呮椂鏃讹紝`clock_events` 杩藉姞 `EXEC_TIMEOUT` 浜嬩欢锛堜笉寮哄埗缁堟锛屼粎璁板綍锛夛紱
+  - `node_exec_stats[node_id]` 鍖呭惈 `exec_start_ms`銆乣exec_end_ms`銆乣exec_duration_ms`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0339 M36-E锛氭柊寤?graph_evidence.py锛圗vidence Plane SQLite 鍐欏叆锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_evidence.py`锛屽疄鐜?Evidence Plane 鐨?SQLite 杞婚噺鍐欏叆銆?  - `EvidencePlane`锛欵vidence Plane 涓荤被锛屽皝瑁?SQLite 杩炴帴锛屾彁渚?`write_trace()`銆乣write_subgraph_summary()`銆乣write_clock_events()` 鏂规硶锛?  - 鏁版嵁搴撴枃浠惰矾寰勶細`data/evidence/evidence.db`锛堝彲閫氳繃鐜鍙橀噺 `EVIDENCE_DB_PATH` 瑕嗙洊锛夛紱
+  - 琛ㄧ粨鏋勶細`graph_trace`锛坮equest_id銆乬raph_id銆乶ode_id銆乻tatus銆乺eason_code銆乨etail銆乼s_ms锛夈€乣subgraph_summary`锛坮equest_id銆乻ubgraph_id銆乶ode_count銆乻uccess_count銆乫ail_count銆乧ommitted_at_ms銆乬raph_trace_flat_json锛夈€乣clock_events`锛坮equest_id銆乬raph_id銆乪vent_type銆乶ode_id銆乪lapsed_ms銆乼hreshold_ms銆乼s_ms锛夛紱
+  - 鍐欏叆澶辫触鏃朵笉褰卞搷涓绘祦绋嬶紙闈欓粯闄嶇骇锛岃褰曞埌 Python logging锛夈€?- 杈撳叆锛歚GraphState`锛堝惈 trace銆乻ubgraph_trace銆乧lock_events锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/graph_evidence.py`锛堟柊澧烇級锛?  - `EvidencePlane.write_trace(request_id, graph_id, trace)` 鈫?鍐欏叆 `graph_trace` 琛紱
+  - `EvidencePlane.write_subgraph_summary(request_id, summary)` 鈫?鍐欏叆 `subgraph_summary` 琛紱
+  - `EvidencePlane.write_clock_events(request_id, graph_id, clock_events)` 鈫?鍐欏叆 `clock_events` 琛紱
+  - `get_evidence_plane()` 鍗曚緥宸ュ巶鍑芥暟銆?- 楠屾敹鏍囧噯锛?  - `write_trace` 灏?trace 鍒楄〃鍐欏叆 SQLite `graph_trace` 琛紱
+  - `write_subgraph_summary` 灏?subgraph_commit_summary 鍐欏叆 SQLite `subgraph_summary` 琛紱
+  - `write_clock_events` 灏?clock_events 鍐欏叆 SQLite `clock_events` 琛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紙涓嶆姏鍑哄紓甯革紝璁板綍 logging.warning锛夛紱
+  - 鏁版嵁搴撴枃浠惰矾寰勫彲閫氳繃 `EVIDENCE_DB_PATH` 鐜鍙橀噺瑕嗙洊锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0340 M36-F锛歡raph_runtime.py 闆嗘垚 Evidence Plane 鍐欏叆
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增双时钟相关字段。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.policy_start_ms: int | None`（图级策略时钟启动时间戳）；
-  - `GraphState.policy_timeout_ms: int | None`（全局策略超时阈值，毫秒）；
-  - `GraphState.clock_events: list[dict[str, Any]]`（时钟事件列表，含 EXEC_TIMEOUT / POLICY_TIMEOUT）；
-  - `GraphState.node_exec_stats: dict[str, dict[str, Any]]`（节点执行统计，含 exec_start_ms / exec_end_ms / exec_duration_ms）。
-- 验收标准：
-  - `GraphState` 包含上述四个新字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归（TypedDict 新增字段向后兼容）。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鍥炬墽琛屽畬鎴愬悗璋冪敤 `EvidencePlane` 鍐欏叆 trace銆乻ubgraph_commit_summary 鍜?clock_events銆?- 杈撳叆锛氬浘鎵ц瀹屾垚鍚庣殑 `final_state`锛堝惈 trace銆乻ubgraph_trace銆乧lock_events锛夈€?- 杈撳嚭锛欵vidence Plane 宸插啓鍏ワ紙trace + subgraph_summary + clock_events锛夈€?- 楠屾敹鏍囧噯锛?  - 鍥炬墽琛屽畬鎴愬悗璋冪敤 `evidence_plane.write_trace()`锛?  - 鑻?`final_state.payload.subgraph_commit_summary` 瀛樺湪锛岃皟鐢?`evidence_plane.write_subgraph_summary()`锛?  - 鑻?`final_state.clock_events` 闈炵┖锛岃皟鐢?`evidence_plane.write_clock_events()`锛?  - Evidence Plane 鍐欏叆澶辫触鏃朵笉褰卞搷涓绘祦绋嬶紙闈欓粯闄嶇骇锛夛紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0341 M36-G锛歡raph_contract.py 鏂板鍙屾椂閽熺浉鍏冲父閲忓拰杈呭姪鍑芥暟
 
-### TASK-0337 M36-C：graph_runtime.py 初始化双时钟字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧炲弻鏃堕挓鐩稿叧甯搁噺鍜岃緟鍔╁嚱鏁般€?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛?  - `CLOCK_EVENT_EXEC_TIMEOUT = "EXEC_TIMEOUT"` 甯搁噺锛?  - `CLOCK_EVENT_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 甯搁噺锛?  - `DEFAULT_POLICY_TIMEOUT_MS = 30_000`锛堥粯璁ゅ叏灞€绛栫暐瓒呮椂 30 绉掞級锛?  - `build_clock_event(event_type, node_id, elapsed_ms, threshold_ms) -> dict` 杈呭姪鍑芥暟銆?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - `build_clock_event` 杩斿洖鍖呭惈 `event_type`銆乣node_id`銆乣elapsed_ms`銆乣threshold_ms`銆乣ts_ms` 鐨勫瓧鍏革紱
+  - 鍦?`graph_clock.py` 鍜?`graph_executor.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0342 M36-H锛欴ual-Clock Supervision 涓撻」娴嬭瘯锛圱-DCK-01~10锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Dual-Clock Supervision 涓撻」娴嬭瘯锛岄獙璇佸弻鏃堕挓鐩戠潱鏈哄埗鐨勬纭€с€?- 杈撳叆锛歚DualClockSupervisor`銆乣ExecutionClock`銆乣PolicyClock`銆乣GraphExecutor._run_single_step`銆?- 杈撳嚭锛歚tests/unit/test_dual_clock_supervision_m36.py`锛堟柊澧烇級锛歍-DCK-01~10銆?- 楠屾敹鏍囧噯锛?  - T-DCK-01锛欵xecutionClock.start/stop 姝ｇ‘璁板綍 exec_start_ms 鍜?exec_end_ms锛?  - T-DCK-02锛欵xecutionClock.elapsed_ms 姝ｇ‘璁＄畻鑰楁椂锛?  - T-DCK-03锛欵xecutionClock.is_timeout 鍦ㄨ秴鏃舵椂杩斿洖 True锛?  - T-DCK-04锛歅olicyClock.check_policy_timeout 鍦ㄥ叏灞€瓒呮椂鏃惰繑鍥?POLICY_TIMEOUT 浜嬩欢锛?  - T-DCK-05锛歅olicyClock.check_policy_timeout 鍦ㄦ湭瓒呮椂鏃惰繑鍥?None锛?  - T-DCK-06锛欴ualClockSupervisor.supervise_node 鑺傜偣鎵ц鍓嶆鏌?Policy Clock锛?  - T-DCK-07锛歅olicy Clock 瓒呮椂鏃跺浘鎵ц寮哄埗缁堟锛坰tatus = STATUS_FAILED锛夛紱
+  - T-DCK-08锛欵xecution Clock 瓒呮椂鏃?clock_events 杩藉姞 EXEC_TIMEOUT 浜嬩欢锛?  - T-DCK-09锛歯ode_exec_stats 鍖呭惈姝ｇ‘鐨?exec_duration_ms锛?  - T-DCK-10锛歜uild_clock_event 杩斿洖姝ｇ‘鐨勫瓧鍏哥粨鏋勩€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_dual_clock_supervision_m36.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2锛沗LangGraph_Governed_Runtime_Solution` 搂6.1銆?
+### TASK-0343 M36-I锛欵vidence Plane 涓撻」娴嬭瘯锛圱-EVP-01~08锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane SQLite 鍐欏叆涓撻」娴嬭瘯锛岄獙璇佸啓鍏ユ纭€у拰闈欓粯闄嶇骇琛屼负銆?- 杈撳叆锛歚EvidencePlane`銆乣get_evidence_plane`銆?- 杈撳嚭锛歚tests/unit/test_evidence_plane_m36.py`锛堟柊澧烇級锛歍-EVP-01~08銆?- 楠屾敹鏍囧噯锛?  - T-EVP-01锛歸rite_trace 灏?trace 鍐欏叆 SQLite graph_trace 琛紱
+  - T-EVP-02锛歸rite_subgraph_summary 灏?summary 鍐欏叆 SQLite subgraph_summary 琛紱
+  - T-EVP-03锛歸rite_clock_events 灏?clock_events 鍐欏叆 SQLite clock_events 琛紱
+  - T-EVP-04锛氬啓鍏ュけ璐ユ椂闈欓粯闄嶇骇锛堜笉鎶涘嚭寮傚父锛夛紱
+  - T-EVP-05锛氭暟鎹簱璺緞鍙€氳繃 EVIDENCE_DB_PATH 鐜鍙橀噺瑕嗙洊锛?  - T-EVP-06锛歡raph_trace 琛ㄥ寘鍚纭殑瀛楁锛坮equest_id銆乶ode_id銆乻tatus 绛夛級锛?  - T-EVP-07锛歴ubgraph_summary 琛ㄥ寘鍚纭殑瀛楁锛坰ubgraph_id銆乶ode_count 绛夛級锛?  - T-EVP-08锛歝lock_events 琛ㄥ寘鍚纭殑瀛楁锛坋vent_type銆乪lapsed_ms 绛夛級銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_plane_m36.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0344 M36-J锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏?`dual-clock supervision` 鍜?`Evidence Plane 鍐欏叆` 鏍囪涓?M36 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M36 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `dual-clock supervision` 鏍囨敞 鉁?M36 宸插疄鐜帮紱
+  - `Evidence Plane SQLite 鍐欏叆` 鏍囨敞 鉁?M36 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0345 M36-K锛歡raph_executor.py 鏂板 GraphExecutor.ledger 灞炴€ч泦鎴?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`GraphExecutor.__init__`锛屾帴鍙?`evidence_plane` 鍙傛暟锛坄EvidencePlane | None`锛夛紝鍦ㄨ妭鐐规墽琛屽畬鎴愬悗璋冪敤 `evidence_plane.write_trace()` 鍐欏叆鍗曡妭鐐?trace锛堝疄鏃跺啓鍏ワ紝涓嶇瓑寰呭浘鎵ц瀹屾垚锛夈€?- 杈撳叆锛歚evidence_plane: EvidencePlane | None`锛堝彲閫夛紝榛樿 None锛夈€?- 杈撳嚭锛歚GraphExecutor._evidence_plane` 灞炴€э紱鑺傜偣鎵ц鍚庡疄鏃跺啓鍏?trace銆?- 楠屾敹鏍囧噯锛?  - `GraphExecutor.__init__` 鎺ュ彈 `evidence_plane` 鍙傛暟锛?  - 鑺傜偣鎵ц瀹屾垚鍚庤皟鐢?`evidence_plane.write_trace()`锛堣嫢 evidence_plane 闈?None锛夛紱
+  - evidence_plane 鍐欏叆澶辫触鏃朵笉褰卞搷鑺傜偣鎵ц锛堥潤榛橀檷绾э級锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙evidence_plane=None 鏃惰涓轰笉鍙橈級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0346 M36-L锛歡raph_contract.py 鏂板 STATUS_POLICY_TIMEOUT 甯搁噺
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化双时钟字段：`policy_start_ms`（当前时间戳）、`policy_timeout_ms`（从 `graph_config` 或 `timeout_ms` 提取）、`clock_events`（空列表）、`node_exec_stats`（空字典）。
-- 输入：`graph_config.policy_timeout_ms`（可选，默认等于 `timeout_ms`）。
-- 输出：`initial_state` 包含双时钟初始值。
-- 验收标准：
-  - `initial_state.policy_start_ms` 为当前时间戳（毫秒）；
-  - `initial_state.policy_timeout_ms` 从 `graph_config` 提取，默认等于 `timeout_ms`；
-  - `initial_state.clock_events = []`；
-  - `initial_state.node_exec_stats = {}`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?`STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 甯搁噺锛屼緵 `graph_executor.py`銆乣graph_clock.py` 鍜屾祴璇曚娇鐢ㄣ€?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛歚STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 甯搁噺銆?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - 鍦?`graph_executor.py` 鍜?`graph_clock.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 2銆?
+### TASK-0347 M36-M锛歞ata/evidence/ 鐩綍鍒濆鍖?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪椤圭洰鏍圭洰褰曞垱寤?`data/evidence/` 鐩綍锛屾坊鍔?`.gitkeep` 鏂囦欢锛堜繚鎸佺洰褰曠粨鏋勶級锛屽苟鍦?`.gitignore` 涓坊鍔?`data/evidence/*.db` 瑙勫垯锛堜笉鎻愪氦 SQLite 鏁版嵁搴撴枃浠讹級銆?- 杈撳叆锛氶」鐩牴鐩綍銆?- 杈撳嚭锛歚data/evidence/.gitkeep`锛堟柊澧烇級锛沗.gitignore` 鏇存柊銆?- 楠屾敹鏍囧噯锛?  - `data/evidence/` 鐩綍瀛樺湪锛?  - `.gitignore` 鍖呭惈 `data/evidence/*.db` 瑙勫垯锛?  - `data/evidence/.gitkeep` 鏂囦欢瀛樺湪銆?- 娑夊強鏂囦欢璺緞锛歚data/evidence/.gitkeep`锛堟柊澧烇級锛沗.gitignore`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0348 M36-N锛歁36 浠ｇ爜瀹℃煡鎶ュ憡
 
-### TASK-0338 M36-D：graph_executor.py 集成 DualClockSupervisor
-
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行前后使用 `DualClockSupervisor.supervise_node()` 上下文管理器：
-  - 节点执行前：检查 Policy Clock，若超时则触发 `POLICY_TIMEOUT` 事件，强制终止图执行（`status = STATUS_FAILED`，`reason_code = "POLICY_TIMEOUT"`）；
-  - 节点执行后：记录 Execution Clock 统计（`exec_start_ms`、`exec_end_ms`、`exec_duration_ms`），若节点超时则追加 `EXEC_TIMEOUT` 事件到 `clock_events`；
-  - 时钟事件写入 `state.clock_events`，节点统计写入 `state.node_exec_stats`。
-- 输入：`DualClockSupervisor`、`state.policy_start_ms`、`state.policy_timeout_ms`。
-- 输出：`state.clock_events` 和 `state.node_exec_stats` 已更新。
-- 验收标准：
-  - Policy Clock 超时时，图执行强制终止（`status = STATUS_FAILED`，`reason_code = "POLICY_TIMEOUT"`）；
-  - Execution Clock 超时时，`clock_events` 追加 `EXEC_TIMEOUT` 事件（不强制终止，仅记录）；
-  - `node_exec_stats[node_id]` 包含 `exec_start_ms`、`exec_end_ms`、`exec_duration_ms`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
-
-### TASK-0339 M36-E：新建 graph_evidence.py（Evidence Plane SQLite 写入）
-
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_evidence.py`，实现 Evidence Plane 的 SQLite 轻量写入。
-  - `EvidencePlane`：Evidence Plane 主类，封装 SQLite 连接，提供 `write_trace()`、`write_subgraph_summary()`、`write_clock_events()` 方法；
-  - 数据库文件路径：`data/evidence/evidence.db`（可通过环境变量 `EVIDENCE_DB_PATH` 覆盖）；
-  - 表结构：`graph_trace`（request_id、graph_id、node_id、status、reason_code、detail、ts_ms）、`subgraph_summary`（request_id、subgraph_id、node_count、success_count、fail_count、committed_at_ms、graph_trace_flat_json）、`clock_events`（request_id、graph_id、event_type、node_id、elapsed_ms、threshold_ms、ts_ms）；
-  - 写入失败时不影响主流程（静默降级，记录到 Python logging）。
-- 输入：`GraphState`（含 trace、subgraph_trace、clock_events）。
-- 输出：
-  - `host_brain/integrations/graph_evidence.py`（新增）；
-  - `EvidencePlane.write_trace(request_id, graph_id, trace)` → 写入 `graph_trace` 表；
-  - `EvidencePlane.write_subgraph_summary(request_id, summary)` → 写入 `subgraph_summary` 表；
-  - `EvidencePlane.write_clock_events(request_id, graph_id, clock_events)` → 写入 `clock_events` 表；
-  - `get_evidence_plane()` 单例工厂函数。
-- 验收标准：
-  - `write_trace` 将 trace 列表写入 SQLite `graph_trace` 表；
-  - `write_subgraph_summary` 将 subgraph_commit_summary 写入 SQLite `subgraph_summary` 表；
-  - `write_clock_events` 将 clock_events 写入 SQLite `clock_events` 表；
-  - 写入失败时静默降级（不抛出异常，记录 logging.warning）；
-  - 数据库文件路径可通过 `EVIDENCE_DB_PATH` 环境变量覆盖；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0340 M36-F：graph_runtime.py 集成 Evidence Plane 写入
-
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在图执行完成后调用 `EvidencePlane` 写入 trace、subgraph_commit_summary 和 clock_events。
-- 输入：图执行完成后的 `final_state`（含 trace、subgraph_trace、clock_events）。
-- 输出：Evidence Plane 已写入（trace + subgraph_summary + clock_events）。
-- 验收标准：
-  - 图执行完成后调用 `evidence_plane.write_trace()`；
-  - 若 `final_state.payload.subgraph_commit_summary` 存在，调用 `evidence_plane.write_subgraph_summary()`；
-  - 若 `final_state.clock_events` 非空，调用 `evidence_plane.write_clock_events()`；
-  - Evidence Plane 写入失败时不影响主流程（静默降级）；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0341 M36-G：graph_contract.py 新增双时钟相关常量和辅助函数
-
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增双时钟相关常量和辅助函数。
-- 输入：现有常量定义区域。
-- 输出：
-  - `CLOCK_EVENT_EXEC_TIMEOUT = "EXEC_TIMEOUT"` 常量；
-  - `CLOCK_EVENT_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量；
-  - `DEFAULT_POLICY_TIMEOUT_MS = 30_000`（默认全局策略超时 30 秒）；
-  - `build_clock_event(event_type, node_id, elapsed_ms, threshold_ms) -> dict` 辅助函数。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - `build_clock_event` 返回包含 `event_type`、`node_id`、`elapsed_ms`、`threshold_ms`、`ts_ms` 的字典；
-  - 在 `graph_clock.py` 和 `graph_executor.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
-
-### TASK-0342 M36-H：Dual-Clock Supervision 专项测试（T-DCK-01~10）
-
-- 状态：DONE
-- 任务描述：新增 Dual-Clock Supervision 专项测试，验证双时钟监督机制的正确性。
-- 输入：`DualClockSupervisor`、`ExecutionClock`、`PolicyClock`、`GraphExecutor._run_single_step`。
-- 输出：`tests/unit/test_dual_clock_supervision_m36.py`（新增）：T-DCK-01~10。
-- 验收标准：
-  - T-DCK-01：ExecutionClock.start/stop 正确记录 exec_start_ms 和 exec_end_ms；
-  - T-DCK-02：ExecutionClock.elapsed_ms 正确计算耗时；
-  - T-DCK-03：ExecutionClock.is_timeout 在超时时返回 True；
-  - T-DCK-04：PolicyClock.check_policy_timeout 在全局超时时返回 POLICY_TIMEOUT 事件；
-  - T-DCK-05：PolicyClock.check_policy_timeout 在未超时时返回 None；
-  - T-DCK-06：DualClockSupervisor.supervise_node 节点执行前检查 Policy Clock；
-  - T-DCK-07：Policy Clock 超时时图执行强制终止（status = STATUS_FAILED）；
-  - T-DCK-08：Execution Clock 超时时 clock_events 追加 EXEC_TIMEOUT 事件；
-  - T-DCK-09：node_exec_stats 包含正确的 exec_duration_ms；
-  - T-DCK-10：build_clock_event 返回正确的字典结构。
-- 涉及文件路径：`tests/unit/test_dual_clock_supervision_m36.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 2；`LangGraph_Governed_Runtime_Solution` §6.1。
-
-### TASK-0343 M36-I：Evidence Plane 专项测试（T-EVP-01~08）
-
-- 状态：DONE
-- 任务描述：新增 Evidence Plane SQLite 写入专项测试，验证写入正确性和静默降级行为。
-- 输入：`EvidencePlane`、`get_evidence_plane`。
-- 输出：`tests/unit/test_evidence_plane_m36.py`（新增）：T-EVP-01~08。
-- 验收标准：
-  - T-EVP-01：write_trace 将 trace 写入 SQLite graph_trace 表；
-  - T-EVP-02：write_subgraph_summary 将 summary 写入 SQLite subgraph_summary 表；
-  - T-EVP-03：write_clock_events 将 clock_events 写入 SQLite clock_events 表；
-  - T-EVP-04：写入失败时静默降级（不抛出异常）；
-  - T-EVP-05：数据库路径可通过 EVIDENCE_DB_PATH 环境变量覆盖；
-  - T-EVP-06：graph_trace 表包含正确的字段（request_id、node_id、status 等）；
-  - T-EVP-07：subgraph_summary 表包含正确的字段（subgraph_id、node_count 等）；
-  - T-EVP-08：clock_events 表包含正确的字段（event_type、elapsed_ms 等）。
-- 涉及文件路径：`tests/unit/test_evidence_plane_m36.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0344 M36-J：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 `dual-clock supervision` 和 `Evidence Plane 写入` 标记为 M36 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M36 实现项标注 ✅）。
-- 验收标准：
-  - `dual-clock supervision` 标注 ✅ M36 已实现；
-  - `Evidence Plane SQLite 写入` 标注 ✅ M36 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0345 M36-K：graph_executor.py 新增 GraphExecutor.ledger 属性集成
-
-- 状态：DONE
-- 任务描述：修改 `GraphExecutor.__init__`，接受 `evidence_plane` 参数（`EvidencePlane | None`），在节点执行完成后调用 `evidence_plane.write_trace()` 写入单节点 trace（实时写入，不等待图执行完成）。
-- 输入：`evidence_plane: EvidencePlane | None`（可选，默认 None）。
-- 输出：`GraphExecutor._evidence_plane` 属性；节点执行后实时写入 trace。
-- 验收标准：
-  - `GraphExecutor.__init__` 接受 `evidence_plane` 参数；
-  - 节点执行完成后调用 `evidence_plane.write_trace()`（若 evidence_plane 非 None）；
-  - evidence_plane 写入失败时不影响节点执行（静默降级）；
-  - 现有测试无回归（evidence_plane=None 时行为不变）。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0346 M36-L：graph_contract.py 新增 STATUS_POLICY_TIMEOUT 常量
-
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 `STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量，供 `graph_executor.py`、`graph_clock.py` 和测试使用。
-- 输入：现有常量定义区域。
-- 输出：`STATUS_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - 在 `graph_executor.py` 和 `graph_clock.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 2。
-
-### TASK-0347 M36-M：data/evidence/ 目录初始化
-
-- 状态：DONE
-- 任务描述：在项目根目录创建 `data/evidence/` 目录，添加 `.gitkeep` 文件（保持目录结构），并在 `.gitignore` 中添加 `data/evidence/*.db` 规则（不提交 SQLite 数据库文件）。
-- 输入：项目根目录。
-- 输出：`data/evidence/.gitkeep`（新增）；`.gitignore` 更新。
-- 验收标准：
-  - `data/evidence/` 目录存在；
-  - `.gitignore` 包含 `data/evidence/*.db` 规则；
-  - `data/evidence/.gitkeep` 文件存在。
-- 涉及文件路径：`data/evidence/.gitkeep`（新增）；`.gitignore`（修改）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0348 M36-N：M36 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0335~0347 全部 DONE 后，生成 M36 代码审查报告，记录 Dual-Clock Supervision 和 Evidence Plane 写入的实现情况。
-- 输入：TASK-0335~0347 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m36_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0335~0347 全部 13 个任务的变更摘要；
-  - 新增测试 ≥ 18 个（T-DCK-01~10 + T-EVP-01~08），全部通过；
-  - Dual-Clock Supervision 完整落地（ExecutionClock + PolicyClock + DualClockSupervisor）；
-  - Evidence Plane SQLite 写入实现（graph_evidence.py）；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m36_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §5.3、§6.1、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0335~0347 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M36 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Dual-Clock Supervision 鍜?Evidence Plane 鍐欏叆鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0335~0347 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m36_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0335~0347 鍏ㄩ儴 13 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?18 涓紙T-DCK-01~10 + T-EVP-01~08锛夛紝鍏ㄩ儴閫氳繃锛?  - Dual-Clock Supervision 瀹屾暣钀藉湴锛圗xecutionClock + PolicyClock + DualClockSupervisor锛夛紱
+  - Evidence Plane SQLite 鍐欏叆瀹炵幇锛坓raph_evidence.py锛夛紱
+  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m36_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆伮?.1銆伮?1.2銆?
 
 
 ---
 
-## M37 只读并行分支 + Transparent Subgraph Evidence Plane 实时写入
+## M37 鍙骞惰鍒嗘敮 + Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆
 
-- **里程碑编号**：M37
-- **标题**：只读并行分支（branch_manifest）+ Transparent Subgraph Evidence Plane 实时写入
-- **任务范围**：TASK-0349 ~ TASK-0362（共 14 个任务）
-- **前置依赖**：M36 DONE（Dual-Clock Supervision + Evidence Plane SQLite 写入）
-- **目标**：
-  1. 实现只读并行分支执行器（`graph_branch.py`），分支结果汇总为 `branch_manifest`，分支不能写入 `committed_*` 字段（第二档能力）
-  2. Transparent Subgraph Evidence Plane 实时写入（子图节点级，修改 `graph_subgraph.py`）
-  3. GraphState 新增 `branch_manifest` 字段
-  4. 专项测试覆盖（T-BRN-01~10 + T-SGE-01~06）
-  5. ModelPlane.md §10 更新实现状态
-
+- **閲岀▼纰戠紪鍙?*锛歁37
+- **鏍囬**锛氬彧璇诲苟琛屽垎鏀紙branch_manifest锛? Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆
+- **浠诲姟鑼冨洿**锛歍ASK-0349 ~ TASK-0362锛堝叡 14 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁36 DONE锛圖ual-Clock Supervision + Evidence Plane SQLite 鍐欏叆锛?- **鐩爣**锛?  1. 瀹炵幇鍙骞惰鍒嗘敮鎵ц鍣紙`graph_branch.py`锛夛紝鍒嗘敮缁撴灉姹囨€讳负 `branch_manifest`锛屽垎鏀笉鑳藉啓鍏?`committed_*` 瀛楁锛堢浜屾。鑳藉姏锛?  2. Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆锛堝瓙鍥捐妭鐐圭骇锛屼慨鏀?`graph_subgraph.py`锛?  3. GraphState 鏂板 `branch_manifest` 瀛楁
+  4. 涓撻」娴嬭瘯瑕嗙洊锛圱-BRN-01~10 + T-SGE-01~06锛?  5. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0349 M37-A：新建 graph_branch.py（只读并行分支核心实现）
+### TASK-0349 M37-A锛氭柊寤?graph_branch.py锛堝彧璇诲苟琛屽垎鏀牳蹇冨疄鐜帮級
 
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_branch.py`，实现只读并行分支执行器。
-  - **只读约束**：分支节点不能写入 `committed_*` 字段（由 `_strip_committed_fields` 强制执行）；分支节点不能修改主图 `trace`、`status`、`reason_code` 等核心字段；分支结果只能写入 `branch_manifest`。
-  - **并行执行**：使用 `concurrent.futures.ThreadPoolExecutor` 并行执行多个分支，每个分支独立运行，互不影响。
-  - **branch_manifest**：分支执行结果汇总字典，包含每个分支的 `branch_id`、`status`、`output`、`exec_duration_ms`、`error`（若失败）。
-  - **主权保护**：分支失败不影响主图执行（静默降级，记录到 `branch_manifest`）。
-- 输入：分支定义列表（`branch_id`、`handler`、`payload`）、主图 `GraphState`。
-- 输出：
-  - `host_brain/integrations/graph_branch.py`（新增）；
-  - `BranchSpec`：分支规格数据类（`branch_id`、`handler`、`input_payload`）；
-  - `BranchResult`：分支执行结果数据类（`branch_id`、`status`、`output`、`exec_duration_ms`、`error`）；
-  - `BranchManifest`：分支清单数据类（`branches`、`total_count`、`success_count`、`fail_count`、`committed_at_ms`）；
-  - `run_parallel_branches(branch_specs, state, max_workers) -> BranchManifest`：并行执行所有分支，返回 `BranchManifest`；
-  - `build_branch_manifest_dict(manifest) -> dict`：将 `BranchManifest` 转换为字典，供 `GraphState.branch_manifest` 写入。
-- 验收标准：
-  - `run_parallel_branches` 并行执行所有分支（`ThreadPoolExecutor`）；
-  - 分支节点输出中的 `committed_*` 字段被自动移除（只读约束）；
-  - 分支失败时 `BranchResult.status = "FAILED"`，不影响其他分支和主图；
-  - `BranchManifest.success_count + fail_count == total_count`；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_branch.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4（第二档能力）；`LangGraph_Governed_Runtime_Solution` §7.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_branch.py`锛屽疄鐜板彧璇诲苟琛屽垎鏀墽琛屽櫒銆?  - **鍙绾︽潫**锛氬垎鏀妭鐐逛笉鑳藉啓鍏?`committed_*` 瀛楁锛堢敱 `_strip_committed_fields` 寮哄埗鎵ц锛夛紱鍒嗘敮鑺傜偣涓嶈兘淇敼涓诲浘 `trace`銆乣status`銆乣reason_code` 绛夋牳蹇冨瓧娈碉紱鍒嗘敮缁撴灉鍙兘鍐欏叆 `branch_manifest`銆?  - **骞惰鎵ц**锛氫娇鐢?`concurrent.futures.ThreadPoolExecutor` 骞惰鎵ц澶氫釜鍒嗘敮锛屾瘡涓垎鏀嫭绔嬭繍琛岋紝浜掍笉褰卞搷銆?  - **branch_manifest**锛氬垎鏀墽琛岀粨鏋滄眹鎬诲瓧鍏革紝鍖呭惈姣忎釜鍒嗘敮鐨?`branch_id`銆乣status`銆乣output`銆乣exec_duration_ms`銆乣error`锛堣嫢澶辫触锛夈€?  - **涓绘潈淇濇姢**锛氬垎鏀け璐ヤ笉褰卞搷涓诲浘鎵ц锛堥潤榛橀檷绾э紝璁板綍鍒?`branch_manifest`锛夈€?- 杈撳叆锛氬垎鏀畾涔夊垪琛紙`branch_id`銆乣handler`銆乣payload`锛夈€佷富鍥?`GraphState`銆?- 杈撳嚭锛?  - `host_brain/integrations/graph_branch.py`锛堟柊澧烇級锛?  - `BranchSpec`锛氬垎鏀鏍兼暟鎹被锛坄branch_id`銆乣handler`銆乣input_payload`锛夛紱
+  - `BranchResult`锛氬垎鏀墽琛岀粨鏋滄暟鎹被锛坄branch_id`銆乣status`銆乣output`銆乣exec_duration_ms`銆乣error`锛夛紱
+  - `BranchManifest`锛氬垎鏀竻鍗曟暟鎹被锛坄branches`銆乣total_count`銆乣success_count`銆乣fail_count`銆乣committed_at_ms`锛夛紱
+  - `run_parallel_branches(branch_specs, state, max_workers) -> BranchManifest`锛氬苟琛屾墽琛屾墍鏈夊垎鏀紝杩斿洖 `BranchManifest`锛?  - `build_branch_manifest_dict(manifest) -> dict`锛氬皢 `BranchManifest` 杞崲涓哄瓧鍏革紝渚?`GraphState.branch_manifest` 鍐欏叆銆?- 楠屾敹鏍囧噯锛?  - `run_parallel_branches` 骞惰鎵ц鎵€鏈夊垎鏀紙`ThreadPoolExecutor`锛夛紱
+  - 鍒嗘敮鑺傜偣杈撳嚭涓殑 `committed_*` 瀛楁琚嚜鍔ㄧЩ闄わ紙鍙绾︽潫锛夛紱
+  - 鍒嗘敮澶辫触鏃?`BranchResult.status = "FAILED"`锛屼笉褰卞搷鍏朵粬鍒嗘敮鍜屼富鍥撅紱
+  - `BranchManifest.success_count + fail_count == total_count`锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_branch.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛堢浜屾。鑳藉姏锛夛紱`LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0350 M37-B锛欸raphState 鏂板 branch_manifest 瀛楁
 
-### TASK-0350 M37-B：GraphState 新增 branch_manifest 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧?`branch_manifest` 瀛楁銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.branch_manifest: dict[str, Any] | None`锛堝彧璇诲苟琛屽垎鏀竻鍗曪紝鐢?`run_parallel_branches` 鍐欏叆锛夛紱
+  - `GraphState.branch_specs: list[dict[str, Any]]`锛堝垎鏀鏍煎垪琛紝鐢变富鍥鹃厤缃敞鍏ワ級銆?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈 `branch_manifest` 鍜?`branch_specs` 瀛楁锛?  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙TypedDict 鏂板瀛楁鍚戝悗鍏煎锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0351 M37-C锛歡raph_runtime.py 鍒濆鍖?branch_manifest 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 `branch_manifest` 字段。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.branch_manifest: dict[str, Any] | None`（只读并行分支清单，由 `run_parallel_branches` 写入）；
-  - `GraphState.branch_specs: list[dict[str, Any]]`（分支规格列表，由主图配置注入）。
-- 验收标准：
-  - `GraphState` 包含 `branch_manifest` 和 `branch_specs` 字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归（TypedDict 新增字段向后兼容）。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃跺垵濮嬪寲 `branch_manifest = None`銆乣branch_specs = []`銆?- 杈撳叆锛氱幇鏈?`initial_state` 鏋勫缓閫昏緫銆?- 杈撳嚭锛歚initial_state` 鍖呭惈 `branch_manifest = None`銆乣branch_specs = []`銆?- 楠屾敹鏍囧噯锛?  - `initial_state.branch_manifest = None`锛?  - `initial_state.branch_specs = []`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0352 M37-D锛歡raph_executor.py 闆嗘垚鍙骞惰鍒嗘敮鎵ц
 
-### TASK-0351 M37-C：graph_runtime.py 初始化 branch_manifest 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪鑺傜偣鎵ц瀹屾垚鍚庢鏌?`state.branch_specs`锛岃嫢闈炵┖鍒欒皟鐢?`run_parallel_branches()` 鎵ц骞惰鍒嗘敮锛屽皢 `BranchManifest` 鍐欏叆 `state.branch_manifest`銆?- 杈撳叆锛歚state.branch_specs`锛堝垎鏀鏍煎垪琛級銆乣run_parallel_branches`銆?- 杈撳嚭锛歚state.branch_manifest` 宸叉洿鏂帮紙鑻?`branch_specs` 闈炵┖锛夈€?- 楠屾敹鏍囧噯锛?  - `branch_specs` 闈炵┖鏃讹紝璋冪敤 `run_parallel_branches()` 骞跺皢缁撴灉鍐欏叆 `state.branch_manifest`锛?  - `branch_specs` 涓虹┖鏃讹紝琛屼负涓嶅彉锛堝悜鍚庡吋瀹癸級锛?  - 鍒嗘敮鎵ц澶辫触鏃朵笉褰卞搷涓诲浘鎵ц锛堥潤榛橀檷绾э級锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0353 M37-E锛歡raph_subgraph.py 闆嗘垚 Evidence Plane 瀹炴椂鍐欏叆
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 `branch_manifest = None`、`branch_specs = []`。
-- 输入：现有 `initial_state` 构建逻辑。
-- 输出：`initial_state` 包含 `branch_manifest = None`、`branch_specs = []`。
-- 验收标准：
-  - `initial_state.branch_manifest = None`；
-  - `initial_state.branch_specs = []`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_subgraph.py` 鐨?`CompiledSubgraph.invoke()` 鏂规硶锛屽湪姣忎釜瀛愬浘鑺傜偣鎵ц鍚庡疄鏃跺啓鍏?Evidence Plane锛坄subgraph_trace` 鍗曟潯璁板綍锛夈€?  - 鍐欏叆鏃舵満锛氭瘡涓瓙鍥捐妭鐐规墽琛屽畬鎴愬悗锛堟棤璁烘垚鍔熸垨澶辫触锛夛紝绔嬪嵆璋冪敤 `evidence_plane.write_trace()`锛?  - 鍐欏叆鍐呭锛氬崟鏉?`subgraph_trace` 璁板綍锛坄node_id`銆乣status`銆乣ts_ms`銆乣reason_code`銆乣detail`锛夛紱
+  - 闈欓粯闄嶇骇锛氬啓鍏ュけ璐ユ椂涓嶅奖鍝嶅瓙鍥炬墽琛岋紱
+  - `compile_governed_subgraph()` 鏂板 `evidence_plane` 鍙€夊弬鏁帮紙榛樿 None锛夈€?- 杈撳叆锛歚evidence_plane: EvidencePlane | None`锛堝彲閫夛級銆?- 杈撳嚭锛氬瓙鍥捐妭鐐规墽琛屽悗瀹炴椂鍐欏叆 Evidence Plane銆?- 楠屾敹鏍囧噯锛?  - `compile_governed_subgraph()` 鎺ュ彈 `evidence_plane` 鍙傛暟锛?  - 姣忎釜瀛愬浘鑺傜偣鎵ц鍚庤皟鐢?`evidence_plane.write_trace()`锛堣嫢 evidence_plane 闈?None锛夛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙evidence_plane=None 鏃惰涓轰笉鍙橈級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_subgraph.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0354 M37-F锛歡raph_contract.py 鏂板 branch 鐩稿叧甯搁噺鍜岃緟鍔╁嚱鏁?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧炲彧璇诲苟琛屽垎鏀浉鍏冲父閲忓拰杈呭姪鍑芥暟銆?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛?  - `BRANCH_STATUS_OK = "OK"` 甯搁噺锛?  - `BRANCH_STATUS_FAILED = "FAILED"` 甯搁噺锛?  - `DEFAULT_BRANCH_MAX_WORKERS = 4`锛堥粯璁ゅ苟琛屽垎鏀渶澶х嚎绋嬫暟锛夛紱
+  - `build_branch_manifest_summary(manifest_dict) -> dict` 杈呭姪鍑芥暟锛堟彁鍙?total_count銆乻uccess_count銆乫ail_count锛夈€?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - `build_branch_manifest_summary` 杩斿洖鍖呭惈 `total_count`銆乣success_count`銆乣fail_count` 鐨勫瓧鍏革紱
+  - 鍦?`graph_branch.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0355 M37-G锛氬彧璇诲苟琛屽垎鏀笓椤规祴璇曪紙T-BRN-01~10锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧炲彧璇诲苟琛屽垎鏀笓椤规祴璇曪紝楠岃瘉 `run_parallel_branches`銆乣BranchManifest`銆佸彧璇荤害鏉熺殑姝ｇ‘鎬с€?- 杈撳叆锛歚run_parallel_branches`銆乣BranchSpec`銆乣BranchManifest`銆乣build_branch_manifest_dict`銆?- 杈撳嚭锛歚tests/unit/test_parallel_branches_m37.py`锛堟柊澧烇級锛歍-BRN-01~10銆?- 楠屾敹鏍囧噯锛?  - T-BRN-01锛歳un_parallel_branches 骞惰鎵ц鎵€鏈夊垎鏀紱
+  - T-BRN-02锛氬垎鏀垚鍔熸椂 BranchResult.status = "OK"锛?  - T-BRN-03锛氬垎鏀け璐ユ椂 BranchResult.status = "FAILED"锛屼笉褰卞搷鍏朵粬鍒嗘敮锛?  - T-BRN-04锛氬垎鏀緭鍑轰腑鐨?committed_* 瀛楁琚嚜鍔ㄧЩ闄わ紙鍙绾︽潫锛夛紱
+  - T-BRN-05锛欱ranchManifest.success_count + fail_count == total_count锛?  - T-BRN-06锛歜uild_branch_manifest_dict 杩斿洖姝ｇ‘鐨勫瓧鍏哥粨鏋勶紱
+  - T-BRN-07锛歜ranch_specs 涓虹┖鏃?run_parallel_branches 杩斿洖绌?BranchManifest锛?  - T-BRN-08锛歮ax_workers 鍙傛暟鎺у埗骞惰绾跨▼鏁帮紱
+  - T-BRN-09锛氬垎鏀墽琛岃秴鏃舵椂 BranchResult.status = "FAILED"锛堝惈 error 淇℃伅锛夛紱
+  - T-BRN-10锛欱ranchManifest.committed_at_ms 涓哄悎娉曟椂闂存埑銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_parallel_branches_m37.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0356 M37-H锛歍ransparent Subgraph Evidence Plane 瀹炴椂鍐欏叆涓撻」娴嬭瘯锛圱-SGE-01~06锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆涓撻」娴嬭瘯锛岄獙璇佸瓙鍥捐妭鐐圭骇瀹炴椂鍐欏叆鐨勬纭€с€?- 杈撳叆锛歚compile_governed_subgraph`銆乣EvidencePlane`銆?- 杈撳嚭锛歚tests/unit/test_subgraph_evidence_m37.py`锛堟柊澧烇級锛歍-SGE-01~06銆?- 楠屾敹鏍囧噯锛?  - T-SGE-01锛歝ompile_governed_subgraph 鎺ュ彈 evidence_plane 鍙傛暟锛?  - T-SGE-02锛氬瓙鍥捐妭鐐规墽琛屾垚鍔熷悗璋冪敤 evidence_plane.write_trace()锛?  - T-SGE-03锛氬瓙鍥捐妭鐐规墽琛屽け璐ュ悗涔熻皟鐢?evidence_plane.write_trace()锛堣褰曞け璐ワ級锛?  - T-SGE-04锛歟vidence_plane=None 鏃惰涓轰笉鍙橈紙鍚戝悗鍏煎锛夛紱
+  - T-SGE-05锛歟vidence_plane 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紙涓嶅奖鍝嶅瓙鍥炬墽琛岋級锛?  - T-SGE-06锛氬啓鍏ョ殑 trace 璁板綍鍖呭惈姝ｇ‘鐨?node_id銆乻tatus銆乼s_ms 瀛楁銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_subgraph_evidence_m37.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 3锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0357 M37-I锛歡raph_executor.py 闆嗘垚娴嬭瘯锛圱-BRN-INT-01~03锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?graph_executor.py 闆嗘垚娴嬭瘯锛岄獙璇?`_run_single_step` 鍦?`branch_specs` 闈炵┖鏃舵纭皟鐢?`run_parallel_branches` 骞跺啓鍏?`branch_manifest`銆?- 杈撳叆锛歚GraphExecutor._run_single_step`銆乣branch_specs`銆?- 杈撳嚭锛歚tests/unit/test_branch_executor_integration_m37.py`锛堟柊澧烇級锛歍-BRN-INT-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BRN-INT-01锛歜ranch_specs 闈炵┖鏃讹紝_run_single_step 璋冪敤 run_parallel_branches锛?  - T-BRN-INT-02锛歜ranch_manifest 鍐欏叆 state锛?  - T-BRN-INT-03锛歜ranch_specs 涓虹┖鏃讹紝_run_single_step 琛屼负涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_branch_executor_integration_m37.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂7.1銆?
+### TASK-0358 M37-J锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏嗗彧璇诲苟琛屽垎鏀拰 Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆鏍囪涓?M37 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M37 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `鍙骞惰鍒嗘敮 + branch_manifest` 鏍囨敞 鉁?M37 宸插疄鐜帮紱
+  - `Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆` 鏍囨敞 鉁?M37 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0359 M37-K锛歡raph_contract.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0352 M37-D：graph_executor.py 集成只读并行分支执行
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁37 鏂板 branch 鐩稿叧甯搁噺鍜岃緟鍔╁嚱鏁板悗锛宍graph_contract.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛?00 琛岋級锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛?  - 濂戠害娴嬭瘯閫氳繃锛?  - 琛屾暟闄愬埗鍚堢悊锛堜笉瓒呰繃瀹為檯琛屾暟 + 50 鐨勪綑閲忥級銆?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0360 M37-L锛歡raph_runtime.py 闆嗘垚 Evidence Plane 鍐欏叆 branch_manifest
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行完成后检查 `state.branch_specs`，若非空则调用 `run_parallel_branches()` 执行并行分支，将 `BranchManifest` 写入 `state.branch_manifest`。
-- 输入：`state.branch_specs`（分支规格列表）、`run_parallel_branches`。
-- 输出：`state.branch_manifest` 已更新（若 `branch_specs` 非空）。
-- 验收标准：
-  - `branch_specs` 非空时，调用 `run_parallel_branches()` 并将结果写入 `state.branch_manifest`；
-  - `branch_specs` 为空时，行为不变（向后兼容）；
-  - 分支执行失败时不影响主图执行（静默降级）；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`_write_evidence` 鏂规硶锛屽湪鍥炬墽琛屽畬鎴愬悗鑻?`state.branch_manifest` 闈炵┖锛屽皢 `branch_manifest` 鍐欏叆 Evidence Plane锛堟柊澧?`write_branch_manifest` 鏂规硶鍒?`EvidencePlane`锛夈€?- 杈撳叆锛歚state.branch_manifest`锛堣嫢闈炵┖锛夈€?- 杈撳嚭锛?  - `EvidencePlane.write_branch_manifest(request_id, graph_id, manifest)` 鏂规硶锛堟柊澧烇級锛?  - `graph_evidence.py` 鏂板 `branch_manifest` 琛紙`request_id`銆乣graph_id`銆乣total_count`銆乣success_count`銆乣fail_count`銆乣committed_at_ms`銆乣branches_json`锛夛紱
+  - `graph_runtime.py._write_evidence` 璋冪敤 `write_branch_manifest`锛堣嫢 `branch_manifest` 闈炵┖锛夈€?- 楠屾敹鏍囧噯锛?  - `write_branch_manifest` 灏?branch_manifest 鍐欏叆 SQLite `branch_manifest` 琛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級锛沗host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆伮?.1銆?
+### TASK-0361 M37-M锛欵vidence Plane branch_manifest 鍐欏叆涓撻」娴嬭瘯锛圱-EVP-09~11锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane branch_manifest 鍐欏叆涓撻」娴嬭瘯銆?- 杈撳叆锛歚EvidencePlane.write_branch_manifest`銆?- 杈撳嚭锛氬湪 `tests/unit/test_evidence_plane_m36.py` 涓拷鍔?T-EVP-09~11锛堟垨鏂板缓 `test_evidence_branch_m37.py`锛夈€?- 楠屾敹鏍囧噯锛?  - T-EVP-09锛歸rite_branch_manifest 灏?manifest 鍐欏叆 SQLite branch_manifest 琛紱
+  - T-EVP-10锛歜ranch_manifest 琛ㄥ寘鍚纭殑瀛楁锛坱otal_count銆乻uccess_count銆乫ail_count 绛夛級锛?  - T-EVP-11锛歸rite_branch_manifest 鍐欏叆澶辫触鏃堕潤榛橀檷绾с€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_branch_m37.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆?
+### TASK-0362 M37-N锛歁37 浠ｇ爜瀹℃煡鎶ュ憡
 
-### TASK-0353 M37-E：graph_subgraph.py 集成 Evidence Plane 实时写入
-
-- 状态：DONE
-- 任务描述：修改 `graph_subgraph.py` 的 `CompiledSubgraph.invoke()` 方法，在每个子图节点执行后实时写入 Evidence Plane（`subgraph_trace` 单条记录）。
-  - 写入时机：每个子图节点执行完成后（无论成功或失败），立即调用 `evidence_plane.write_trace()`；
-  - 写入内容：单条 `subgraph_trace` 记录（`node_id`、`status`、`ts_ms`、`reason_code`、`detail`）；
-  - 静默降级：写入失败时不影响子图执行；
-  - `compile_governed_subgraph()` 新增 `evidence_plane` 可选参数（默认 None）。
-- 输入：`evidence_plane: EvidencePlane | None`（可选）。
-- 输出：子图节点执行后实时写入 Evidence Plane。
-- 验收标准：
-  - `compile_governed_subgraph()` 接受 `evidence_plane` 参数；
-  - 每个子图节点执行后调用 `evidence_plane.write_trace()`（若 evidence_plane 非 None）；
-  - 写入失败时静默降级；
-  - 现有测试无回归（evidence_plane=None 时行为不变）。
-- 涉及文件路径：`host_brain/integrations/graph_subgraph.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0354 M37-F：graph_contract.py 新增 branch 相关常量和辅助函数
-
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增只读并行分支相关常量和辅助函数。
-- 输入：现有常量定义区域。
-- 输出：
-  - `BRANCH_STATUS_OK = "OK"` 常量；
-  - `BRANCH_STATUS_FAILED = "FAILED"` 常量；
-  - `DEFAULT_BRANCH_MAX_WORKERS = 4`（默认并行分支最大线程数）；
-  - `build_branch_manifest_summary(manifest_dict) -> dict` 辅助函数（提取 total_count、success_count、fail_count）。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - `build_branch_manifest_summary` 返回包含 `total_count`、`success_count`、`fail_count` 的字典；
-  - 在 `graph_branch.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
-
-### TASK-0355 M37-G：只读并行分支专项测试（T-BRN-01~10）
-
-- 状态：DONE
-- 任务描述：新增只读并行分支专项测试，验证 `run_parallel_branches`、`BranchManifest`、只读约束的正确性。
-- 输入：`run_parallel_branches`、`BranchSpec`、`BranchManifest`、`build_branch_manifest_dict`。
-- 输出：`tests/unit/test_parallel_branches_m37.py`（新增）：T-BRN-01~10。
-- 验收标准：
-  - T-BRN-01：run_parallel_branches 并行执行所有分支；
-  - T-BRN-02：分支成功时 BranchResult.status = "OK"；
-  - T-BRN-03：分支失败时 BranchResult.status = "FAILED"，不影响其他分支；
-  - T-BRN-04：分支输出中的 committed_* 字段被自动移除（只读约束）；
-  - T-BRN-05：BranchManifest.success_count + fail_count == total_count；
-  - T-BRN-06：build_branch_manifest_dict 返回正确的字典结构；
-  - T-BRN-07：branch_specs 为空时 run_parallel_branches 返回空 BranchManifest；
-  - T-BRN-08：max_workers 参数控制并行线程数；
-  - T-BRN-09：分支执行超时时 BranchResult.status = "FAILED"（含 error 信息）；
-  - T-BRN-10：BranchManifest.committed_at_ms 为合法时间戳。
-- 涉及文件路径：`tests/unit/test_parallel_branches_m37.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
-
-### TASK-0356 M37-H：Transparent Subgraph Evidence Plane 实时写入专项测试（T-SGE-01~06）
-
-- 状态：DONE
-- 任务描述：新增 Transparent Subgraph Evidence Plane 实时写入专项测试，验证子图节点级实时写入的正确性。
-- 输入：`compile_governed_subgraph`、`EvidencePlane`。
-- 输出：`tests/unit/test_subgraph_evidence_m37.py`（新增）：T-SGE-01~06。
-- 验收标准：
-  - T-SGE-01：compile_governed_subgraph 接受 evidence_plane 参数；
-  - T-SGE-02：子图节点执行成功后调用 evidence_plane.write_trace()；
-  - T-SGE-03：子图节点执行失败后也调用 evidence_plane.write_trace()（记录失败）；
-  - T-SGE-04：evidence_plane=None 时行为不变（向后兼容）；
-  - T-SGE-05：evidence_plane 写入失败时静默降级（不影响子图执行）；
-  - T-SGE-06：写入的 trace 记录包含正确的 node_id、status、ts_ms 字段。
-- 涉及文件路径：`tests/unit/test_subgraph_evidence_m37.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 3；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0357 M37-I：graph_executor.py 集成测试（T-BRN-INT-01~03）
-
-- 状态：DONE
-- 任务描述：新增 graph_executor.py 集成测试，验证 `_run_single_step` 在 `branch_specs` 非空时正确调用 `run_parallel_branches` 并写入 `branch_manifest`。
-- 输入：`GraphExecutor._run_single_step`、`branch_specs`。
-- 输出：`tests/unit/test_branch_executor_integration_m37.py`（新增）：T-BRN-INT-01~03。
-- 验收标准：
-  - T-BRN-INT-01：branch_specs 非空时，_run_single_step 调用 run_parallel_branches；
-  - T-BRN-INT-02：branch_manifest 写入 state；
-  - T-BRN-INT-03：branch_specs 为空时，_run_single_step 行为不变。
-- 涉及文件路径：`tests/unit/test_branch_executor_integration_m37.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §7.1。
-
-### TASK-0358 M37-J：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将只读并行分支和 Transparent Subgraph Evidence Plane 实时写入标记为 M37 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M37 实现项标注 ✅）。
-- 验收标准：
-  - `只读并行分支 + branch_manifest` 标注 ✅ M37 已实现；
-  - `Transparent Subgraph Evidence Plane 实时写入` 标注 ✅ M37 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0359 M37-K：graph_contract.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M37 新增 branch 相关常量和辅助函数后，`graph_contract.py` 行数可能超出当前契约测试限制（400 行），需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：
-  - 契约测试通过；
-  - 行数限制合理（不超过实际行数 + 50 的余量）。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0360 M37-L：graph_runtime.py 集成 Evidence Plane 写入 branch_manifest
-
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.branch_manifest` 非空，将 `branch_manifest` 写入 Evidence Plane（新增 `write_branch_manifest` 方法到 `EvidencePlane`）。
-- 输入：`state.branch_manifest`（若非空）。
-- 输出：
-  - `EvidencePlane.write_branch_manifest(request_id, graph_id, manifest)` 方法（新增）；
-  - `graph_evidence.py` 新增 `branch_manifest` 表（`request_id`、`graph_id`、`total_count`、`success_count`、`fail_count`、`committed_at_ms`、`branches_json`）；
-  - `graph_runtime.py._write_evidence` 调用 `write_branch_manifest`（若 `branch_manifest` 非空）。
-- 验收标准：
-  - `write_branch_manifest` 将 branch_manifest 写入 SQLite `branch_manifest` 表；
-  - 写入失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §5.3、§7.1。
-
-### TASK-0361 M37-M：Evidence Plane branch_manifest 写入专项测试（T-EVP-09~11）
-
-- 状态：DONE
-- 任务描述：新增 Evidence Plane branch_manifest 写入专项测试。
-- 输入：`EvidencePlane.write_branch_manifest`。
-- 输出：在 `tests/unit/test_evidence_plane_m36.py` 中追加 T-EVP-09~11（或新建 `test_evidence_branch_m37.py`）。
-- 验收标准：
-  - T-EVP-09：write_branch_manifest 将 manifest 写入 SQLite branch_manifest 表；
-  - T-EVP-10：branch_manifest 表包含正确的字段（total_count、success_count、fail_count 等）；
-  - T-EVP-11：write_branch_manifest 写入失败时静默降级。
-- 涉及文件路径：`tests/unit/test_evidence_branch_m37.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §5.3。
-
-### TASK-0362 M37-N：M37 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0349~0361 全部 DONE 后，生成 M37 代码审查报告，记录只读并行分支和 Transparent Subgraph Evidence Plane 实时写入的实现情况。
-- 输入：TASK-0349~0361 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m37_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0349~0361 全部 13 个任务的变更摘要；
-  - 新增测试 ≥ 19 个（T-BRN-01~10 + T-SGE-01~06 + T-BRN-INT-01~03），全部通过；
-  - 只读并行分支完整落地（graph_branch.py + branch_manifest）；
-  - Transparent Subgraph Evidence Plane 实时写入实现；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m37_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §5.3、§7.1、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0349~0361 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M37 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曞彧璇诲苟琛屽垎鏀拰 Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0349~0361 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m37_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0349~0361 鍏ㄩ儴 13 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?19 涓紙T-BRN-01~10 + T-SGE-01~06 + T-BRN-INT-01~03锛夛紝鍏ㄩ儴閫氳繃锛?  - 鍙骞惰鍒嗘敮瀹屾暣钀藉湴锛坓raph_branch.py + branch_manifest锛夛紱
+  - Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆瀹炵幇锛?  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m37_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂5.3銆伮?.1銆伮?1.2銆?
 
 
 ---
 
-## M38 Phase-Locked Streaming（分相流式：Presence / Commit / Render 三类流隔离）
+## M38 Phase-Locked Streaming锛堝垎鐩告祦寮忥細Presence / Commit / Render 涓夌被娴侀殧绂伙級
 
-- **里程碑编号**：M38
-- **标题**：Phase-Locked Streaming — Presence / Commit / Render 三类流隔离
-- **任务范围**：TASK-0363 ~ TASK-0378（共 16 个任务）
-- **前置依赖**：M37 DONE（只读并行分支 + Transparent Subgraph Evidence Plane 实时写入）
-- **目标**：
-  1. 实现 Phase-Locked Streaming 核心模块（`graph_streaming.py`），包含三类流：Presence Stream（在场流）、Commit Stream（提交流）、Render Stream（渲染流）
-  2. 三类流严格隔离：Presence 只向 UI 单向输出，Render 只能消费 Commit 快照，Commit 只在 Governor 裁决后产生
-  3. GraphState 新增 streaming 相关字段（`presence_events`、`commit_snapshot`、`render_snapshot_ref`）
-  4. Evidence Plane 新增 streaming 事件写入（`stream_events` 表）
-  5. 专项测试覆盖（T-STR-01~12 + T-STR-INT-01~04）
-  6. ModelPlane.md §10 更新实现状态
-
+- **閲岀▼纰戠紪鍙?*锛歁38
+- **鏍囬**锛歅hase-Locked Streaming 鈥?Presence / Commit / Render 涓夌被娴侀殧绂?- **浠诲姟鑼冨洿**锛歍ASK-0363 ~ TASK-0378锛堝叡 16 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁37 DONE锛堝彧璇诲苟琛屽垎鏀?+ Transparent Subgraph Evidence Plane 瀹炴椂鍐欏叆锛?- **鐩爣**锛?  1. 瀹炵幇 Phase-Locked Streaming 鏍稿績妯″潡锛坄graph_streaming.py`锛夛紝鍖呭惈涓夌被娴侊細Presence Stream锛堝湪鍦烘祦锛夈€丆ommit Stream锛堟彁浜ゆ祦锛夈€丷ender Stream锛堟覆鏌撴祦锛?  2. 涓夌被娴佷弗鏍奸殧绂伙細Presence 鍙悜 UI 鍗曞悜杈撳嚭锛孯ender 鍙兘娑堣垂 Commit 蹇収锛孋ommit 鍙湪 Governor 瑁佸喅鍚庝骇鐢?  3. GraphState 鏂板 streaming 鐩稿叧瀛楁锛坄presence_events`銆乣commit_snapshot`銆乣render_snapshot_ref`锛?  4. Evidence Plane 鏂板 streaming 浜嬩欢鍐欏叆锛坄stream_events` 琛級
+  5. 涓撻」娴嬭瘯瑕嗙洊锛圱-STR-01~12 + T-STR-INT-01~04锛?  6. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0363 M38-A：新建 graph_streaming.py（Phase-Locked Streaming 核心实现）
+### TASK-0363 M38-A锛氭柊寤?graph_streaming.py锛圥hase-Locked Streaming 鏍稿績瀹炵幇锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_streaming.py`锛屽疄鐜?Phase-Locked Streaming 涓夌被娴併€?  - **Presence Stream锛堝湪鍦烘祦锛?*锛氶潪鏉冨▉锛屽彧鍚?UI 鍗曞悜杈撳嚭锛屼笉鍏佽浣滀负涓嬫父鑺傜偣杈撳叆锛涘寘鍚妭鐐归樁娈点€佷复鏃?narrative chunk銆佽繘搴﹀瀷鐘舵€侊紱鐢?`PresenceStreamEmitter` 瀹炵幇銆?  - **Commit Stream锛堟彁浜ゆ祦锛?*锛氭潈濞侊紝鍙湪 S1 瀹屾垚骞剁粡杩?Governor 鍚庝骇鐢燂紱鍖呭惈 `intent_commit`銆乣s1_output_hash`銆乣locked_fields`銆乣render_input_snapshot_ref`锛涚敱 `CommitStreamEmitter` 瀹炵幇銆?  - **Render Stream锛堟覆鏌撴祦锛?*锛氬彧鑳借鍙?Commit Stream 瀵瑰簲鐨勫揩鐓э紝涓嶅厑璁稿洖璇?Presence Stream 鐨勪复鏃?token锛涚敱 `RenderStreamEmitter` 瀹炵幇銆?  - **Phase-Lock 淇濊瘉**锛歊ender Stream 蹇呴』鍏堥獙璇?`commit_snapshot` 瀛樺湪涓?`intent_commit` 鏈彉鍖栵紝鎵嶈兘寮€濮嬫覆鏌撱€?  - **闅旂绾︽潫**锛氫笁绫绘祦浜掍笉骞叉壈锛孭resence 浜嬩欢涓嶈兘娴佸叆 Commit/Render锛孯ender 涓嶈兘娑堣垂鏈彁浜ょ姸鎬併€?- 杈撳叆锛歚GraphState`锛堝惈 `committed_route_token`銆乣payload`锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/graph_streaming.py`锛堟柊澧烇級锛?  - `StreamPhase`锛氭祦闃舵鏋氫妇锛坄PRESENCE`銆乣COMMIT`銆乣RENDER`锛夛紱
+  - `PresenceEvent`锛氬湪鍦烘祦浜嬩欢鏁版嵁绫伙紙`phase`銆乣node_id`銆乣event_type`銆乣chunk`銆乣ts_ms`锛夛紱
+  - `CommitSnapshot`锛氭彁浜ゅ揩鐓ф暟鎹被锛坄intent_commit`銆乣s1_output_hash`銆乣locked_fields`銆乣render_input_snapshot_ref`銆乣committed_at_ms`锛夛紱
+  - `RenderEvent`锛氭覆鏌撴祦浜嬩欢鏁版嵁绫伙紙`phase`銆乣snapshot_ref`銆乣chunk`銆乣ts_ms`锛夛紱
+  - `PresenceStreamEmitter`锛氬湪鍦烘祦鍙戝皠鍣紙`emit(node_id, event_type, chunk) -> PresenceEvent`锛夛紱
+  - `CommitStreamEmitter`锛氭彁浜ゆ祦鍙戝皠鍣紙`commit(state) -> CommitSnapshot`锛岄渶瑕?`committed_route_token` 闈炵┖锛夛紱
+  - `RenderStreamEmitter`锛氭覆鏌撴祦鍙戝皠鍣紙`render(snapshot, chunk) -> RenderEvent`锛岄渶瑕?`commit_snapshot` 瀛樺湪锛夛紱
+  - `PhaseLockGuard`锛氬垎鐩搁攣瀹堝崼锛坄validate_render_precondition(commit_snapshot, intent_commit) -> bool`锛夈€?- 楠屾敹鏍囧噯锛?  - `PresenceStreamEmitter.emit()` 杩斿洖 `PresenceEvent`锛宍phase = PRESENCE`锛?  - `CommitStreamEmitter.commit()` 鍦?`committed_route_token` 涓虹┖鏃舵姏鍑?`PhaseViolationError`锛?  - `RenderStreamEmitter.render()` 鍦?`commit_snapshot` 涓?None 鏃舵姏鍑?`PhaseViolationError`锛?  - `PhaseLockGuard.validate_render_precondition()` 鍦?`intent_commit` 鍙樺寲鏃惰繑鍥?False锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_streaming.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛圥hase-Locked Streaming Rule锛夛紱`LangGraph_Governed_Runtime_Solution` 搂4.5銆伮? 绗簲闃舵銆?
+### TASK-0364 M38-B锛欸raphState 鏂板 streaming 鐩稿叧瀛楁
 
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_streaming.py`，实现 Phase-Locked Streaming 三类流。
-  - **Presence Stream（在场流）**：非权威，只向 UI 单向输出，不允许作为下游节点输入；包含节点阶段、临时 narrative chunk、进度型状态；由 `PresenceStreamEmitter` 实现。
-  - **Commit Stream（提交流）**：权威，只在 S1 完成并经过 Governor 后产生；包含 `intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`；由 `CommitStreamEmitter` 实现。
-  - **Render Stream（渲染流）**：只能读取 Commit Stream 对应的快照，不允许回读 Presence Stream 的临时 token；由 `RenderStreamEmitter` 实现。
-  - **Phase-Lock 保证**：Render Stream 必须先验证 `commit_snapshot` 存在且 `intent_commit` 未变化，才能开始渲染。
-  - **隔离约束**：三类流互不干扰，Presence 事件不能流入 Commit/Render，Render 不能消费未提交状态。
-- 输入：`GraphState`（含 `committed_route_token`、`payload`）。
-- 输出：
-  - `host_brain/integrations/graph_streaming.py`（新增）；
-  - `StreamPhase`：流阶段枚举（`PRESENCE`、`COMMIT`、`RENDER`）；
-  - `PresenceEvent`：在场流事件数据类（`phase`、`node_id`、`event_type`、`chunk`、`ts_ms`）；
-  - `CommitSnapshot`：提交快照数据类（`intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`、`committed_at_ms`）；
-  - `RenderEvent`：渲染流事件数据类（`phase`、`snapshot_ref`、`chunk`、`ts_ms`）；
-  - `PresenceStreamEmitter`：在场流发射器（`emit(node_id, event_type, chunk) -> PresenceEvent`）；
-  - `CommitStreamEmitter`：提交流发射器（`commit(state) -> CommitSnapshot`，需要 `committed_route_token` 非空）；
-  - `RenderStreamEmitter`：渲染流发射器（`render(snapshot, chunk) -> RenderEvent`，需要 `commit_snapshot` 存在）；
-  - `PhaseLockGuard`：分相锁守卫（`validate_render_precondition(commit_snapshot, intent_commit) -> bool`）。
-- 验收标准：
-  - `PresenceStreamEmitter.emit()` 返回 `PresenceEvent`，`phase = PRESENCE`；
-  - `CommitStreamEmitter.commit()` 在 `committed_route_token` 为空时抛出 `PhaseViolationError`；
-  - `RenderStreamEmitter.render()` 在 `commit_snapshot` 为 None 时抛出 `PhaseViolationError`；
-  - `PhaseLockGuard.validate_render_precondition()` 在 `intent_commit` 变化时返回 False；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_streaming.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5（Phase-Locked Streaming Rule）；`LangGraph_Governed_Runtime_Solution` §4.5、§6 第五阶段。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧?streaming 鐩稿叧瀛楁銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.presence_events: list[dict[str, Any]]`锛堝湪鍦烘祦浜嬩欢鍒楄〃锛屽彧鍚?UI 杈撳嚭锛屼笉浣滀负涓嬫父杈撳叆锛夛紱
+  - `GraphState.commit_snapshot: dict[str, Any] | None`锛堟彁浜ゅ揩鐓э紝鐢?CommitStreamEmitter 鍐欏叆锛夛紱
+  - `GraphState.render_snapshot_ref: str | None`锛堟覆鏌撳揩鐓у紩鐢紝鐢?RenderStreamEmitter 鍐欏叆锛夛紱
+  - `GraphState.streaming_phase: str | None`锛堝綋鍓嶆祦闃舵锛歅RESENCE / COMMIT / RENDER / None锛夈€?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈 4 涓柊瀛楁锛?  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掞紙TypedDict 鏂板瀛楁鍚戝悗鍏煎锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0365 M38-C锛歡raph_contract.py 鏂板 streaming 鐩稿叧甯搁噺
 
-### TASK-0364 M38-B：GraphState 新增 streaming 相关字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?Phase-Locked Streaming 鐩稿叧甯搁噺銆?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛?  - `STREAM_PHASE_PRESENCE = "PRESENCE"` 甯搁噺锛?  - `STREAM_PHASE_COMMIT = "COMMIT"` 甯搁噺锛?  - `STREAM_PHASE_RENDER = "RENDER"` 甯搁噺锛?  - `STREAM_EVENT_NODE_START = "NODE_START"` 甯搁噺锛?  - `STREAM_EVENT_NODE_END = "NODE_END"` 甯搁噺锛?  - `STREAM_EVENT_CHUNK = "CHUNK"` 甯搁噺锛?  - `STREAM_EVENT_PROGRESS = "PROGRESS"` 甯搁噺銆?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - 鍦?`graph_streaming.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0366 M38-D锛歡raph_runtime.py 鍒濆鍖?streaming 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 streaming 相关字段。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.presence_events: list[dict[str, Any]]`（在场流事件列表，只向 UI 输出，不作为下游输入）；
-  - `GraphState.commit_snapshot: dict[str, Any] | None`（提交快照，由 CommitStreamEmitter 写入）；
-  - `GraphState.render_snapshot_ref: str | None`（渲染快照引用，由 RenderStreamEmitter 写入）；
-  - `GraphState.streaming_phase: str | None`（当前流阶段：PRESENCE / COMMIT / RENDER / None）。
-- 验收标准：
-  - `GraphState` 包含 4 个新字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归（TypedDict 新增字段向后兼容）。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃跺垵濮嬪寲 streaming 瀛楁銆?- 杈撳叆锛氱幇鏈?`initial_state` 鏋勫缓閫昏緫銆?- 杈撳嚭锛歚initial_state` 鍖呭惈 `presence_events = []`銆乣commit_snapshot = None`銆乣render_snapshot_ref = None`銆乣streaming_phase = None`銆?- 楠屾敹鏍囧噯锛?  - 4 涓?streaming 瀛楁姝ｇ‘鍒濆鍖栵紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0367 M38-E锛歡raph_executor.py 闆嗘垚 Presence Stream 鍙戝皠
 
-### TASK-0365 M38-C：graph_contract.py 新增 streaming 相关常量
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪鑺傜偣鎵ц鍓嶅悗鍙戝皠 Presence Stream 浜嬩欢锛圢ODE_START / NODE_END锛夛紝鍐欏叆 `state.presence_events`銆?  - 鑺傜偣鎵ц鍓嶏細鍙戝皠 `NODE_START` 浜嬩欢锛?  - 鑺傜偣鎵ц鍚庯細鍙戝皠 `NODE_END` 浜嬩欢锛?  - Presence 浜嬩欢鍙啓鍏?`presence_events`锛屼笉褰卞搷 `payload`銆乣trace` 绛夋牳蹇冨瓧娈碉紱
+  - 闈欓粯闄嶇骇锛氬彂灏勫け璐ユ椂涓嶅奖鍝嶄富鍥炬墽琛屻€?- 杈撳叆锛歚PresenceStreamEmitter`銆乣node_id`銆?- 杈撳嚭锛歚state.presence_events` 杩藉姞 NODE_START / NODE_END 浜嬩欢銆?- 楠屾敹鏍囧噯锛?  - 鑺傜偣鎵ц鍓嶅悗鍚勮拷鍔犱竴鏉?Presence 浜嬩欢锛?  - Presence 浜嬩欢涓嶅奖鍝?`payload`銆乣trace`锛?  - 鍙戝皠澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0368 M38-F锛歡raph_executor.py 闆嗘垚 Commit Stream 鍙戝皠
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 Phase-Locked Streaming 相关常量。
-- 输入：现有常量定义区域。
-- 输出：
-  - `STREAM_PHASE_PRESENCE = "PRESENCE"` 常量；
-  - `STREAM_PHASE_COMMIT = "COMMIT"` 常量；
-  - `STREAM_PHASE_RENDER = "RENDER"` 常量；
-  - `STREAM_EVENT_NODE_START = "NODE_START"` 常量；
-  - `STREAM_EVENT_NODE_END = "NODE_END"` 常量；
-  - `STREAM_EVENT_CHUNK = "CHUNK"` 常量；
-  - `STREAM_EVENT_PROGRESS = "PROGRESS"` 常量。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - 在 `graph_streaming.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪鑺傜偣鎵ц瀹屾垚涓?`committed_route_token` 涓?`GOV_OK_RENDER` 鏃讹紝璋冪敤 `CommitStreamEmitter.commit()` 鐢熸垚 `CommitSnapshot`锛屽啓鍏?`state.commit_snapshot`銆?  - 鍙湁 `committed_route_token == "GOV_OK_RENDER"` 鏃舵墠鐢熸垚 Commit Snapshot锛?  - `commit_snapshot` 鍖呭惈 `intent_commit`銆乣s1_output_hash`銆乣locked_fields`銆乣render_input_snapshot_ref`锛?  - 闈欓粯闄嶇骇锛氱敓鎴愬け璐ユ椂涓嶅奖鍝嶄富鍥炬墽琛屻€?- 杈撳叆锛歚CommitStreamEmitter`銆乣state.committed_route_token`銆乣state.payload`銆?- 杈撳嚭锛歚state.commit_snapshot` 宸叉洿鏂帮紙鑻?`committed_route_token == "GOV_OK_RENDER"`锛夈€?- 楠屾敹鏍囧噯锛?  - `committed_route_token == "GOV_OK_RENDER"` 鏃剁敓鎴?`commit_snapshot`锛?  - `committed_route_token` 涓哄叾浠栧€兼椂涓嶇敓鎴愶紱
+  - 鐢熸垚澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0369 M38-G锛歡raph_executor.py 闆嗘垚 Render Stream 鍙戝皠
 
-### TASK-0366 M38-D：graph_runtime.py 初始化 streaming 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_route_after_step` 鏂规硶锛屽湪璺敱鍒?`GOV_OK_RENDER` 鏃讹紝璋冪敤 `RenderStreamEmitter.render()` 鐢熸垚娓叉煋浜嬩欢锛屽啓鍏?`state.render_snapshot_ref`銆?  - 鍙湁 `commit_snapshot` 瀛樺湪鏃舵墠鍏佽娓叉煋锛?  - `PhaseLockGuard.validate_render_precondition()` 楠岃瘉 `intent_commit` 鏈彉鍖栵紱
+  - 楠岃瘉澶辫触鏃跺啓鍏?`RENDER_PRECONDITION_FAILED` 浜嬩欢鍒?`presence_events`锛堥檷绾ч€氱煡锛夛紱
+  - 闈欓粯闄嶇骇锛氭覆鏌撳け璐ユ椂涓嶅奖鍝嶄富鍥炬墽琛屻€?- 杈撳叆锛歚RenderStreamEmitter`銆乣PhaseLockGuard`銆乣state.commit_snapshot`銆?- 杈撳嚭锛歚state.render_snapshot_ref` 宸叉洿鏂帮紙鑻?`commit_snapshot` 瀛樺湪涓旈獙璇侀€氳繃锛夈€?- 楠屾敹鏍囧噯锛?  - `commit_snapshot` 瀛樺湪涓旈獙璇侀€氳繃鏃剁敓鎴?`render_snapshot_ref`锛?  - `commit_snapshot` 涓?None 鏃朵笉鐢熸垚锛?  - 楠岃瘉澶辫触鏃跺啓鍏ラ檷绾ч€氱煡鍒?`presence_events`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0370 M38-H锛歡raph_evidence.py 鏂板 stream_events 琛ㄥ拰鍐欏叆鏂规硶
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 streaming 字段。
-- 输入：现有 `initial_state` 构建逻辑。
-- 输出：`initial_state` 包含 `presence_events = []`、`commit_snapshot = None`、`render_snapshot_ref = None`、`streaming_phase = None`。
-- 验收标准：
-  - 4 个 streaming 字段正确初始化；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_evidence.py`锛屾柊澧?`stream_events` 琛ㄥ拰 `write_stream_events()` 鏂规硶锛岀敤浜庤褰曚笁绫绘祦浜嬩欢銆?- 杈撳叆锛歚presence_events`銆乣commit_snapshot`銆乣render_snapshot_ref`銆?- 杈撳嚭锛?  - `stream_events` 琛紙`request_id`銆乣graph_id`銆乣phase`銆乣event_type`銆乣node_id`銆乣chunk`銆乣ts_ms`锛夛紱
+  - `EvidencePlane.write_stream_events(request_id, graph_id, events)` 鏂规硶锛?  - `EvidencePlane.query_stream_events(request_id)` 鏂规硶锛堟祴璇曠敤锛夈€?- 楠屾敹鏍囧噯锛?  - `write_stream_events` 灏嗕簨浠跺垪琛ㄥ啓鍏?`stream_events` 琛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - `query_stream_events` 杩斿洖姝ｇ‘鐨勪簨浠跺垪琛紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0371 M38-I锛歡raph_runtime.py 闆嗘垚 streaming 浜嬩欢鍐欏叆 Evidence Plane
 
-### TASK-0367 M38-E：graph_executor.py 集成 Presence Stream 发射
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`_write_evidence` 鏂规硶锛屽湪鍥炬墽琛屽畬鎴愬悗鑻?`state.presence_events` 闈炵┖锛屽皢 streaming 浜嬩欢鍐欏叆 Evidence Plane銆?- 杈撳叆锛歚state.presence_events`锛堣嫢闈炵┖锛夈€?- 杈撳嚭锛歚EvidencePlane.write_stream_events()` 璋冪敤锛堣嫢 `presence_events` 闈炵┖锛夈€?- 楠屾敹鏍囧噯锛?  - `presence_events` 闈炵┖鏃惰皟鐢?`write_stream_events`锛?  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0372 M38-J锛歅hase-Locked Streaming 鏍稿績涓撻」娴嬭瘯锛圱-STR-01~12锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Phase-Locked Streaming 鏍稿績涓撻」娴嬭瘯锛岄獙璇佷笁绫绘祦鐨勬纭€у拰闅旂绾︽潫銆?- 杈撳叆锛歚PresenceStreamEmitter`銆乣CommitStreamEmitter`銆乣RenderStreamEmitter`銆乣PhaseLockGuard`銆?- 杈撳嚭锛歚tests/unit/test_phase_locked_streaming_m38.py`锛堟柊澧烇級锛歍-STR-01~12銆?- 楠屾敹鏍囧噯锛?  - T-STR-01锛歅resenceStreamEmitter.emit() 杩斿洖 PresenceEvent锛宲hase = PRESENCE锛?  - T-STR-02锛歅resenceEvent 涓嶅寘鍚?committed_* 瀛楁锛堥殧绂荤害鏉燂級锛?  - T-STR-03锛欳ommitStreamEmitter.commit() 鍦?committed_route_token 涓虹┖鏃舵姏鍑?PhaseViolationError锛?  - T-STR-04锛欳ommitStreamEmitter.commit() 鍦?committed_route_token = GOV_OK_RENDER 鏃惰繑鍥?CommitSnapshot锛?  - T-STR-05锛欳ommitSnapshot 鍖呭惈 intent_commit銆乻1_output_hash銆乴ocked_fields銆乺ender_input_snapshot_ref锛?  - T-STR-06锛歊enderStreamEmitter.render() 鍦?commit_snapshot 涓?None 鏃舵姏鍑?PhaseViolationError锛?  - T-STR-07锛歊enderStreamEmitter.render() 鍦?commit_snapshot 瀛樺湪鏃惰繑鍥?RenderEvent锛?  - T-STR-08锛歅haseLockGuard.validate_render_precondition() 鍦?intent_commit 鏈彉鍖栨椂杩斿洖 True锛?  - T-STR-09锛歅haseLockGuard.validate_render_precondition() 鍦?intent_commit 鍙樺寲鏃惰繑鍥?False锛?  - T-STR-10锛歅resence 浜嬩欢涓嶈兘浣滀负涓嬫父鑺傜偣杈撳叆锛坧resence_events 涓嶅湪 payload 涓級锛?  - T-STR-11锛歊ender 涓嶈兘娑堣垂鏈彁浜ょ姸鎬侊紙commit_snapshot 涓?None 鏃?render 澶辫触锛夛紱
+  - T-STR-12锛氫笁绫绘祦浜嬩欢鐨?ts_ms 涓哄悎娉曟椂闂存埑銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_phase_locked_streaming_m38.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0373 M38-K锛歡raph_executor.py streaming 闆嗘垚娴嬭瘯锛圱-STR-INT-01~04锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?graph_executor.py streaming 闆嗘垚娴嬭瘯锛岄獙璇?Presence / Commit / Render 涓夌被娴佸湪 _run_single_step 涓殑姝ｇ‘闆嗘垚銆?- 杈撳叆锛歚GraphExecutor._run_single_step`銆乣streaming_phase`銆?- 杈撳嚭锛歚tests/unit/test_streaming_executor_integration_m38.py`锛堟柊澧烇級锛歍-STR-INT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-STR-INT-01锛氳妭鐐规墽琛屽墠鍚庡悇杩藉姞涓€鏉?Presence 浜嬩欢锛圢ODE_START / NODE_END锛夛紱
+  - T-STR-INT-02锛歝ommitted_route_token = GOV_OK_RENDER 鏃剁敓鎴?commit_snapshot锛?  - T-STR-INT-03锛歝ommit_snapshot 瀛樺湪鏃剁敓鎴?render_snapshot_ref锛?  - T-STR-INT-04锛歱resence_events 涓嶅奖鍝?payload銆乼race 绛夋牳蹇冨瓧娈点€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_streaming_executor_integration_m38.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0374 M38-L锛欵vidence Plane stream_events 鍐欏叆涓撻」娴嬭瘯锛圱-EVP-12~14锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane stream_events 鍐欏叆涓撻」娴嬭瘯銆?- 杈撳叆锛歚EvidencePlane.write_stream_events`銆?- 杈撳嚭锛歚tests/unit/test_evidence_streaming_m38.py`锛堟柊澧烇級锛歍-EVP-12~14銆?- 楠屾敹鏍囧噯锛?  - T-EVP-12锛歸rite_stream_events 灏嗕簨浠跺啓鍏?SQLite stream_events 琛紱
+  - T-EVP-13锛歴tream_events 琛ㄥ寘鍚纭殑瀛楁锛坧hase銆乪vent_type銆乶ode_id 绛夛級锛?  - T-EVP-14锛歸rite_stream_events 鍐欏叆澶辫触鏃堕潤榛橀檷绾с€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_streaming_m38.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0375 M38-M锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏?Phase-Locked Streaming 鏍囪涓?M38 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M38 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `Presence Stream` 鏍囨敞 鉁?M38 宸插疄鐜帮紱
+  - `Commit Stream + Render Stream` 鏍囨敞 鉁?M38 宸插疄鐜帮紱
+  - `Phase-Locked Streaming Rule` 鏍囨敞 鉁?M38 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0376 M38-N锛歡raph_contract.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行前后发射 Presence Stream 事件（NODE_START / NODE_END），写入 `state.presence_events`。
-  - 节点执行前：发射 `NODE_START` 事件；
-  - 节点执行后：发射 `NODE_END` 事件；
-  - Presence 事件只写入 `presence_events`，不影响 `payload`、`trace` 等核心字段；
-  - 静默降级：发射失败时不影响主图执行。
-- 输入：`PresenceStreamEmitter`、`node_id`。
-- 输出：`state.presence_events` 追加 NODE_START / NODE_END 事件。
-- 验收标准：
-  - 节点执行前后各追加一条 Presence 事件；
-  - Presence 事件不影响 `payload`、`trace`；
-  - 发射失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁38 鏂板 streaming 鐩稿叧甯搁噺鍜屽瓧娈靛悗锛宍graph_contract.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛?  - 濂戠害娴嬭瘯閫氳繃锛?  - 琛屾暟闄愬埗鍚堢悊锛堜笉瓒呰繃瀹為檯琛屾暟 + 50 鐨勪綑閲忥級銆?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0377 M38-O锛歡raph_executor.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0368 M38-F：graph_executor.py 集成 Commit Stream 发射
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁38 鏂板 Presence / Commit / Render 涓夌被娴侀泦鎴愪唬鐮佸悗锛宍graph_executor.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛?50 琛岋級锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛?  - 濂戠害娴嬭瘯閫氳繃锛?  - 琛屾暟闄愬埗鍚堢悊锛堜笉瓒呰繃瀹為檯琛屾暟 + 50 鐨勪綑閲忥級銆?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0378 M38-P锛歁38 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在节点执行完成且 `committed_route_token` 为 `GOV_OK_RENDER` 时，调用 `CommitStreamEmitter.commit()` 生成 `CommitSnapshot`，写入 `state.commit_snapshot`。
-  - 只有 `committed_route_token == "GOV_OK_RENDER"` 时才生成 Commit Snapshot；
-  - `commit_snapshot` 包含 `intent_commit`、`s1_output_hash`、`locked_fields`、`render_input_snapshot_ref`；
-  - 静默降级：生成失败时不影响主图执行。
-- 输入：`CommitStreamEmitter`、`state.committed_route_token`、`state.payload`。
-- 输出：`state.commit_snapshot` 已更新（若 `committed_route_token == "GOV_OK_RENDER"`）。
-- 验收标准：
-  - `committed_route_token == "GOV_OK_RENDER"` 时生成 `commit_snapshot`；
-  - `committed_route_token` 为其他值时不生成；
-  - 生成失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0369 M38-G：graph_executor.py 集成 Render Stream 发射
-
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_route_after_step` 方法，在路由到 `GOV_OK_RENDER` 时，调用 `RenderStreamEmitter.render()` 生成渲染事件，写入 `state.render_snapshot_ref`。
-  - 只有 `commit_snapshot` 存在时才允许渲染；
-  - `PhaseLockGuard.validate_render_precondition()` 验证 `intent_commit` 未变化；
-  - 验证失败时写入 `RENDER_PRECONDITION_FAILED` 事件到 `presence_events`（降级通知）；
-  - 静默降级：渲染失败时不影响主图执行。
-- 输入：`RenderStreamEmitter`、`PhaseLockGuard`、`state.commit_snapshot`。
-- 输出：`state.render_snapshot_ref` 已更新（若 `commit_snapshot` 存在且验证通过）。
-- 验收标准：
-  - `commit_snapshot` 存在且验证通过时生成 `render_snapshot_ref`；
-  - `commit_snapshot` 为 None 时不生成；
-  - 验证失败时写入降级通知到 `presence_events`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0370 M38-H：graph_evidence.py 新增 stream_events 表和写入方法
-
-- 状态：DONE
-- 任务描述：修改 `graph_evidence.py`，新增 `stream_events` 表和 `write_stream_events()` 方法，用于记录三类流事件。
-- 输入：`presence_events`、`commit_snapshot`、`render_snapshot_ref`。
-- 输出：
-  - `stream_events` 表（`request_id`、`graph_id`、`phase`、`event_type`、`node_id`、`chunk`、`ts_ms`）；
-  - `EvidencePlane.write_stream_events(request_id, graph_id, events)` 方法；
-  - `EvidencePlane.query_stream_events(request_id)` 方法（测试用）。
-- 验收标准：
-  - `write_stream_events` 将事件列表写入 `stream_events` 表；
-  - 写入失败时静默降级；
-  - `query_stream_events` 返回正确的事件列表；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0371 M38-I：graph_runtime.py 集成 streaming 事件写入 Evidence Plane
-
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.presence_events` 非空，将 streaming 事件写入 Evidence Plane。
-- 输入：`state.presence_events`（若非空）。
-- 输出：`EvidencePlane.write_stream_events()` 调用（若 `presence_events` 非空）。
-- 验收标准：
-  - `presence_events` 非空时调用 `write_stream_events`；
-  - 写入失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0372 M38-J：Phase-Locked Streaming 核心专项测试（T-STR-01~12）
-
-- 状态：DONE
-- 任务描述：新增 Phase-Locked Streaming 核心专项测试，验证三类流的正确性和隔离约束。
-- 输入：`PresenceStreamEmitter`、`CommitStreamEmitter`、`RenderStreamEmitter`、`PhaseLockGuard`。
-- 输出：`tests/unit/test_phase_locked_streaming_m38.py`（新增）：T-STR-01~12。
-- 验收标准：
-  - T-STR-01：PresenceStreamEmitter.emit() 返回 PresenceEvent，phase = PRESENCE；
-  - T-STR-02：PresenceEvent 不包含 committed_* 字段（隔离约束）；
-  - T-STR-03：CommitStreamEmitter.commit() 在 committed_route_token 为空时抛出 PhaseViolationError；
-  - T-STR-04：CommitStreamEmitter.commit() 在 committed_route_token = GOV_OK_RENDER 时返回 CommitSnapshot；
-  - T-STR-05：CommitSnapshot 包含 intent_commit、s1_output_hash、locked_fields、render_input_snapshot_ref；
-  - T-STR-06：RenderStreamEmitter.render() 在 commit_snapshot 为 None 时抛出 PhaseViolationError；
-  - T-STR-07：RenderStreamEmitter.render() 在 commit_snapshot 存在时返回 RenderEvent；
-  - T-STR-08：PhaseLockGuard.validate_render_precondition() 在 intent_commit 未变化时返回 True；
-  - T-STR-09：PhaseLockGuard.validate_render_precondition() 在 intent_commit 变化时返回 False；
-  - T-STR-10：Presence 事件不能作为下游节点输入（presence_events 不在 payload 中）；
-  - T-STR-11：Render 不能消费未提交状态（commit_snapshot 为 None 时 render 失败）；
-  - T-STR-12：三类流事件的 ts_ms 为合法时间戳。
-- 涉及文件路径：`tests/unit/test_phase_locked_streaming_m38.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0373 M38-K：graph_executor.py streaming 集成测试（T-STR-INT-01~04）
-
-- 状态：DONE
-- 任务描述：新增 graph_executor.py streaming 集成测试，验证 Presence / Commit / Render 三类流在 _run_single_step 中的正确集成。
-- 输入：`GraphExecutor._run_single_step`、`streaming_phase`。
-- 输出：`tests/unit/test_streaming_executor_integration_m38.py`（新增）：T-STR-INT-01~04。
-- 验收标准：
-  - T-STR-INT-01：节点执行前后各追加一条 Presence 事件（NODE_START / NODE_END）；
-  - T-STR-INT-02：committed_route_token = GOV_OK_RENDER 时生成 commit_snapshot；
-  - T-STR-INT-03：commit_snapshot 存在时生成 render_snapshot_ref；
-  - T-STR-INT-04：presence_events 不影响 payload、trace 等核心字段。
-- 涉及文件路径：`tests/unit/test_streaming_executor_integration_m38.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0374 M38-L：Evidence Plane stream_events 写入专项测试（T-EVP-12~14）
-
-- 状态：DONE
-- 任务描述：新增 Evidence Plane stream_events 写入专项测试。
-- 输入：`EvidencePlane.write_stream_events`。
-- 输出：`tests/unit/test_evidence_streaming_m38.py`（新增）：T-EVP-12~14。
-- 验收标准：
-  - T-EVP-12：write_stream_events 将事件写入 SQLite stream_events 表；
-  - T-EVP-13：stream_events 表包含正确的字段（phase、event_type、node_id 等）；
-  - T-EVP-14：write_stream_events 写入失败时静默降级。
-- 涉及文件路径：`tests/unit/test_evidence_streaming_m38.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0375 M38-M：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 Phase-Locked Streaming 标记为 M38 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M38 实现项标注 ✅）。
-- 验收标准：
-  - `Presence Stream` 标注 ✅ M38 已实现；
-  - `Commit Stream + Render Stream` 标注 ✅ M38 已实现；
-  - `Phase-Locked Streaming Rule` 标注 ✅ M38 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0376 M38-N：graph_contract.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M38 新增 streaming 相关常量和字段后，`graph_contract.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：
-  - 契约测试通过；
-  - 行数限制合理（不超过实际行数 + 50 的余量）。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0377 M38-O：graph_executor.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M38 新增 Presence / Commit / Render 三类流集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制（350 行），需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：
-  - 契约测试通过；
-  - 行数限制合理（不超过实际行数 + 50 的余量）。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0378 M38-P：M38 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0363~0377 全部 DONE 后，生成 M38 代码审查报告，记录 Phase-Locked Streaming 三类流隔离的实现情况。
-- 输入：TASK-0363~0377 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m38_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0363~0377 全部 15 个任务的变更摘要；
-  - 新增测试 ≥ 19 个（T-STR-01~12 + T-STR-INT-01~04 + T-EVP-12~14），全部通过；
-  - Phase-Locked Streaming 三类流完整落地（graph_streaming.py）；
-  - 三类流严格隔离（Presence 不作为下游输入，Render 只消费 Commit 快照）；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m38_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.5、§6、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0363~0377 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M38 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Phase-Locked Streaming 涓夌被娴侀殧绂荤殑瀹炵幇鎯呭喌銆?- 杈撳叆锛歍ASK-0363~0377 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m38_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0363~0377 鍏ㄩ儴 15 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?19 涓紙T-STR-01~12 + T-STR-INT-01~04 + T-EVP-12~14锛夛紝鍏ㄩ儴閫氳繃锛?  - Phase-Locked Streaming 涓夌被娴佸畬鏁磋惤鍦帮紙graph_streaming.py锛夛紱
+  - 涓夌被娴佷弗鏍奸殧绂伙紙Presence 涓嶄綔涓轰笅娓歌緭鍏ワ紝Render 鍙秷璐?Commit 蹇収锛夛紱
+  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m38_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆伮?銆伮?1.2銆?
 
 
 ---
 
-## M39 Checkpoint / Interrupt / Resume（双时钟模型下的断点续跑）
-
-- **里程碑编号**：M39
-- **标题**：Checkpoint / Interrupt / Resume — 双时钟模型下的断点续跑
-- **任务范围**：TASK-0379 ~ TASK-0396（共 18 个任务）
-- **前置依赖**：M38 DONE（Phase-Locked Streaming 三类流隔离）
-- **目标**：
-  1. 实现 `graph_checkpoint.py`：Checkpoint 保存/恢复核心模块，支持 `save_checkpoint`、`load_checkpoint`、`interrupt`、`resume`
-  2. Host Policy Guard：恢复前由 Host 检查 `deadline_at_mono`、`degrade_stage`、`resume_deadline_at`，决定允不允许恢复
-  3. Synthetic Timeout Event：超时时写入 `TIMEOUT_SYNTHETIC` 事件而非直接恢复
-  4. GraphState 新增 checkpoint 相关字段（`checkpoint_id`、`interrupt_reason`、`resume_allowed`、`resume_deadline_at`）
-  5. Evidence Plane 新增 `checkpoints` 表和写入方法
-  6. 专项测试覆盖（T-CKP-01~12 + T-CKP-INT-01~04）
-  7. ModelPlane.md §10 更新实现状态
-
+## M39 Checkpoint / Interrupt / Resume锛堝弻鏃堕挓妯″瀷涓嬬殑鏂偣缁窇锛?
+- **閲岀▼纰戠紪鍙?*锛歁39
+- **鏍囬**锛欳heckpoint / Interrupt / Resume 鈥?鍙屾椂閽熸ā鍨嬩笅鐨勬柇鐐圭画璺?- **浠诲姟鑼冨洿**锛歍ASK-0379 ~ TASK-0396锛堝叡 18 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁38 DONE锛圥hase-Locked Streaming 涓夌被娴侀殧绂伙級
+- **鐩爣**锛?  1. 瀹炵幇 `graph_checkpoint.py`锛欳heckpoint 淇濆瓨/鎭㈠鏍稿績妯″潡锛屾敮鎸?`save_checkpoint`銆乣load_checkpoint`銆乣interrupt`銆乣resume`
+  2. Host Policy Guard锛氭仮澶嶅墠鐢?Host 妫€鏌?`deadline_at_mono`銆乣degrade_stage`銆乣resume_deadline_at`锛屽喅瀹氬厑涓嶅厑璁告仮澶?  3. Synthetic Timeout Event锛氳秴鏃舵椂鍐欏叆 `TIMEOUT_SYNTHETIC` 浜嬩欢鑰岄潪鐩存帴鎭㈠
+  4. GraphState 鏂板 checkpoint 鐩稿叧瀛楁锛坄checkpoint_id`銆乣interrupt_reason`銆乣resume_allowed`銆乣resume_deadline_at`锛?  5. Evidence Plane 鏂板 `checkpoints` 琛ㄥ拰鍐欏叆鏂规硶
+  6. 涓撻」娴嬭瘯瑕嗙洊锛圱-CKP-01~12 + T-CKP-INT-01~04锛?  7. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0379 M39-A：新建 graph_checkpoint.py（Checkpoint / Interrupt / Resume 核心实现）
+### TASK-0379 M39-A锛氭柊寤?graph_checkpoint.py锛圕heckpoint / Interrupt / Resume 鏍稿績瀹炵幇锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `host_brain/integrations/` 涓柊寤?`graph_checkpoint.py`锛屽疄鐜板弻鏃堕挓妯″瀷涓嬬殑鏂偣缁窇銆?  - **CheckpointStore**锛氬唴瀛?+ SQLite 鍙屽眰瀛樺偍锛宍save(state) -> checkpoint_id`锛宍load(checkpoint_id) -> GraphState`
+  - **InterruptSignal**锛氫腑鏂俊鍙锋暟鎹被锛坄checkpoint_id`銆乣interrupt_reason`銆乣interrupted_at_ms`銆乣resume_deadline_at`锛?  - **ResumeRequest**锛氭仮澶嶈姹傛暟鎹被锛坄checkpoint_id`銆乣requested_at_ms`銆乣requester`锛?  - **HostPolicyGuard**锛欻ost 绛栫暐瀹堝崼锛屾仮澶嶅墠妫€鏌?Policy Clock 鏄惁鍏佽鎭㈠锛坄check_resume_allowed(interrupt_signal, policy_clock) -> ResumeDecision`锛?  - **ResumeDecision**锛氭仮澶嶅喅绛栨暟鎹被锛坄allowed`銆乣reason`銆乣synthetic_event`锛?  - **SyntheticTimeoutEvent**锛氳秴鏃跺悎鎴愪簨浠讹紙`node_result = TIMEOUT_SYNTHETIC`銆乣error_code = DEADLINE_EXCEEDED`銆乣route_token = GOV_FALLBACK_SECONDARY`锛?  - **CheckpointManager**锛氱粍鍚?CheckpointStore + HostPolicyGuard锛屾彁渚?`interrupt(state) -> InterruptSignal`銆乣resume(interrupt_signal, policy_clock) -> ResumeDecision`
+- 杈撳叆锛歚GraphState`锛堝惈 `policy_start_ms`銆乣policy_timeout_ms`锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/graph_checkpoint.py`锛堟柊澧烇級锛?  - `CheckpointStore`锛歚save(state) -> str`锛宍load(checkpoint_id) -> GraphState | None`锛?  - `InterruptSignal`锛氫腑鏂俊鍙锋暟鎹被锛?  - `ResumeRequest`锛氭仮澶嶈姹傛暟鎹被锛?  - `HostPolicyGuard`锛歚check_resume_allowed(interrupt_signal, now_ms, policy_timeout_ms) -> ResumeDecision`锛?  - `ResumeDecision`锛歚allowed: bool`锛宍reason: str`锛宍synthetic_event: dict | None`锛?  - `SyntheticTimeoutEvent`锛歚to_dict() -> dict`锛?  - `CheckpointManager`锛歚interrupt(state) -> InterruptSignal`锛宍resume(interrupt_signal, policy_clock) -> ResumeDecision`銆?- 楠屾敹鏍囧噯锛?  - `CheckpointStore.save()` 杩斿洖鍞竴 `checkpoint_id`锛?  - `CheckpointStore.load()` 杩斿洖淇濆瓨鐨?`GraphState`锛?  - `HostPolicyGuard.check_resume_allowed()` 鍦ㄨ秴杩?`resume_deadline_at` 鏃惰繑鍥?`allowed=False`锛?  - `HostPolicyGuard.check_resume_allowed()` 鍦ㄦ湭瓒呮椂鏃惰繑鍥?`allowed=True`锛?  - `ResumeDecision.synthetic_event` 鍦?`allowed=False` 鏃跺寘鍚?`TIMEOUT_SYNTHETIC` 浜嬩欢锛?  - `CheckpointManager.interrupt()` 淇濆瓨 checkpoint 骞惰繑鍥?`InterruptSignal`锛?  - `CheckpointManager.resume()` 璋冪敤 `HostPolicyGuard` 楠岃瘉鍚庤繑鍥?`ResumeDecision`锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_checkpoint.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛圖ual-Clock Rule锛夛紱`LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0380 M39-B锛欸raphState 鏂板 checkpoint 鐩稿叧瀛楁
 
-- 状态：DONE
-- 任务描述：在 `host_brain/integrations/` 中新建 `graph_checkpoint.py`，实现双时钟模型下的断点续跑。
-  - **CheckpointStore**：内存 + SQLite 双层存储，`save(state) -> checkpoint_id`，`load(checkpoint_id) -> GraphState`
-  - **InterruptSignal**：中断信号数据类（`checkpoint_id`、`interrupt_reason`、`interrupted_at_ms`、`resume_deadline_at`）
-  - **ResumeRequest**：恢复请求数据类（`checkpoint_id`、`requested_at_ms`、`requester`）
-  - **HostPolicyGuard**：Host 策略守卫，恢复前检查 Policy Clock 是否允许恢复（`check_resume_allowed(interrupt_signal, policy_clock) -> ResumeDecision`）
-  - **ResumeDecision**：恢复决策数据类（`allowed`、`reason`、`synthetic_event`）
-  - **SyntheticTimeoutEvent**：超时合成事件（`node_result = TIMEOUT_SYNTHETIC`、`error_code = DEADLINE_EXCEEDED`、`route_token = GOV_FALLBACK_SECONDARY`）
-  - **CheckpointManager**：组合 CheckpointStore + HostPolicyGuard，提供 `interrupt(state) -> InterruptSignal`、`resume(interrupt_signal, policy_clock) -> ResumeDecision`
-- 输入：`GraphState`（含 `policy_start_ms`、`policy_timeout_ms`）。
-- 输出：
-  - `host_brain/integrations/graph_checkpoint.py`（新增）；
-  - `CheckpointStore`：`save(state) -> str`，`load(checkpoint_id) -> GraphState | None`；
-  - `InterruptSignal`：中断信号数据类；
-  - `ResumeRequest`：恢复请求数据类；
-  - `HostPolicyGuard`：`check_resume_allowed(interrupt_signal, now_ms, policy_timeout_ms) -> ResumeDecision`；
-  - `ResumeDecision`：`allowed: bool`，`reason: str`，`synthetic_event: dict | None`；
-  - `SyntheticTimeoutEvent`：`to_dict() -> dict`；
-  - `CheckpointManager`：`interrupt(state) -> InterruptSignal`，`resume(interrupt_signal, policy_clock) -> ResumeDecision`。
-- 验收标准：
-  - `CheckpointStore.save()` 返回唯一 `checkpoint_id`；
-  - `CheckpointStore.load()` 返回保存的 `GraphState`；
-  - `HostPolicyGuard.check_resume_allowed()` 在超过 `resume_deadline_at` 时返回 `allowed=False`；
-  - `HostPolicyGuard.check_resume_allowed()` 在未超时时返回 `allowed=True`；
-  - `ResumeDecision.synthetic_event` 在 `allowed=False` 时包含 `TIMEOUT_SYNTHETIC` 事件；
-  - `CheckpointManager.interrupt()` 保存 checkpoint 并返回 `InterruptSignal`；
-  - `CheckpointManager.resume()` 调用 `HostPolicyGuard` 验证后返回 `ResumeDecision`；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_checkpoint.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 6（Dual-Clock Rule）；`LangGraph_Governed_Runtime_Solution` §4.4。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧?checkpoint 鐩稿叧瀛楁銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.checkpoint_id: str | None`锛堝綋鍓?checkpoint ID锛岀敱 CheckpointManager 鍐欏叆锛夛紱
+  - `GraphState.interrupt_reason: str | None`锛堜腑鏂師鍥狅紝鐢?InterruptSignal 鍐欏叆锛夛紱
+  - `GraphState.resume_allowed: bool | None`锛堟槸鍚﹀厑璁告仮澶嶏紝鐢?HostPolicyGuard 鍐欏叆锛夛紱
+  - `GraphState.resume_deadline_at: int | None`锛堟仮澶嶆埅姝㈡椂闂存埑锛堟绉掞級锛岀敱 InterruptSignal 鍐欏叆锛夈€?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈 4 涓柊瀛楁锛?  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0381 M39-C锛歡raph_contract.py 鏂板 checkpoint 鐩稿叧甯搁噺
 
-### TASK-0380 M39-B：GraphState 新增 checkpoint 相关字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?Checkpoint / Interrupt / Resume 鐩稿叧甯搁噺銆?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛?  - `CHECKPOINT_STATUS_SAVED = "SAVED"` 甯搁噺锛?  - `CHECKPOINT_STATUS_LOADED = "LOADED"` 甯搁噺锛?  - `INTERRUPT_REASON_HUMAN_REVIEW = "HUMAN_REVIEW"` 甯搁噺锛?  - `INTERRUPT_REASON_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 甯搁噺锛?  - `INTERRUPT_REASON_AIRLOCK = "AIRLOCK"` 甯搁噺锛?  - `RESUME_DENIED_DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"` 甯搁噺锛?  - `RESUME_DENIED_POLICY_EXPIRED = "POLICY_EXPIRED"` 甯搁噺锛?  - `SYNTHETIC_EVENT_TIMEOUT = "TIMEOUT_SYNTHETIC"` 甯搁噺锛?  - `DEFAULT_RESUME_DEADLINE_MS = 300_000`锛堥粯璁ゆ仮澶嶆埅姝㈡椂闂达細5 鍒嗛挓锛夊父閲忋€?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - 鍦?`graph_checkpoint.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0382 M39-D锛歡raph_runtime.py 鍒濆鍖?checkpoint 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 checkpoint 相关字段。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.checkpoint_id: str | None`（当前 checkpoint ID，由 CheckpointManager 写入）；
-  - `GraphState.interrupt_reason: str | None`（中断原因，由 InterruptSignal 写入）；
-  - `GraphState.resume_allowed: bool | None`（是否允许恢复，由 HostPolicyGuard 写入）；
-  - `GraphState.resume_deadline_at: int | None`（恢复截止时间戳（毫秒），由 InterruptSignal 写入）。
-- 验收标准：
-  - `GraphState` 包含 4 个新字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃跺垵濮嬪寲 checkpoint 瀛楁銆?- 杈撳叆锛氱幇鏈?`initial_state` 鏋勫缓閫昏緫銆?- 杈撳嚭锛歚initial_state` 鍖呭惈 `checkpoint_id = None`銆乣interrupt_reason = None`銆乣resume_allowed = None`銆乣resume_deadline_at = None`銆?- 楠屾敹鏍囧噯锛?  - 4 涓?checkpoint 瀛楁姝ｇ‘鍒濆鍖栵紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0383 M39-E锛歡raph_executor.py 闆嗘垚 Interrupt 瑙﹀彂
 
-### TASK-0381 M39-C：graph_contract.py 新增 checkpoint 相关常量
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪 `GOV_AIRLOCK_REVIEW` 浠ょ墝瑙﹀彂鏃讹紝璋冪敤 `CheckpointManager.interrupt()` 淇濆瓨 checkpoint 骞跺啓鍏?`InterruptSignal` 鍒?state銆?  - 瑙﹀彂鏉′欢锛歚committed_route_token == "GOV_AIRLOCK_REVIEW"`锛?  - 淇濆瓨 checkpoint 骞跺啓鍏?`checkpoint_id`銆乣interrupt_reason = INTERRUPT_REASON_AIRLOCK`銆乣resume_deadline_at`锛?  - 闈欓粯闄嶇骇锛歝heckpoint 淇濆瓨澶辫触鏃朵笉褰卞搷涓诲浘鎵ц銆?- 杈撳叆锛歚CheckpointManager`銆乣state.committed_route_token`銆?- 杈撳嚭锛歚state.checkpoint_id`銆乣state.interrupt_reason`銆乣state.resume_deadline_at` 宸叉洿鏂帮紙鑻?`GOV_AIRLOCK_REVIEW`锛夈€?- 楠屾敹鏍囧噯锛?  - `GOV_AIRLOCK_REVIEW` 鏃朵繚瀛?checkpoint 骞跺啓鍏?`checkpoint_id`锛?  - checkpoint 淇濆瓨澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0384 M39-F锛歡raph_runtime.py 鏂板 resume_graph 鏂规硶
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 Checkpoint / Interrupt / Resume 相关常量。
-- 输入：现有常量定义区域。
-- 输出：
-  - `CHECKPOINT_STATUS_SAVED = "SAVED"` 常量；
-  - `CHECKPOINT_STATUS_LOADED = "LOADED"` 常量；
-  - `INTERRUPT_REASON_HUMAN_REVIEW = "HUMAN_REVIEW"` 常量；
-  - `INTERRUPT_REASON_POLICY_TIMEOUT = "POLICY_TIMEOUT"` 常量；
-  - `INTERRUPT_REASON_AIRLOCK = "AIRLOCK"` 常量；
-  - `RESUME_DENIED_DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"` 常量；
-  - `RESUME_DENIED_POLICY_EXPIRED = "POLICY_EXPIRED"` 常量；
-  - `SYNTHETIC_EVENT_TIMEOUT = "TIMEOUT_SYNTHETIC"` 常量；
-  - `DEFAULT_RESUME_DEADLINE_MS = 300_000`（默认恢复截止时间：5 分钟）常量。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - 在 `graph_checkpoint.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_runtime.py` 鐨?`GraphRuntimeContract` 涓柊澧?`resume_graph` 鏂规硶锛屾敮鎸佷粠 checkpoint 鎭㈠鍥炬墽琛屻€?  - 鎭㈠鍓嶈皟鐢?`HostPolicyGuard.check_resume_allowed()` 楠岃瘉锛?  - 楠岃瘉澶辫触鏃跺啓鍏?`SyntheticTimeoutEvent` 骞惰繑鍥?`STATUS_FAILED`锛?  - 楠岃瘉閫氳繃鏃朵粠 checkpoint 鍔犺浇 state 骞剁户缁墽琛岋紱
+  - 鎭㈠鍚庡啓鍏?Evidence Plane锛坈heckpoint 鎭㈠璁板綍锛夈€?- 杈撳叆锛歚checkpoint_id: str`銆乣request_id: str`銆?- 杈撳嚭锛歚GraphRunResult`锛堟仮澶嶆墽琛岀粨鏋滄垨 synthetic timeout 缁撴灉锛夈€?- 楠屾敹鏍囧噯锛?  - `checkpoint_id` 涓嶅瓨鍦ㄦ椂杩斿洖 `STATUS_FAILED`锛?  - `HostPolicyGuard` 楠岃瘉澶辫触鏃惰繑鍥?`STATUS_FAILED` + `SyntheticTimeoutEvent`锛?  - 楠岃瘉閫氳繃鏃朵粠 checkpoint 鎭㈠骞剁户缁墽琛岋紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0385 M39-G锛歡raph_evidence.py 鏂板 checkpoints 琛ㄥ拰鍐欏叆鏂规硶
 
-### TASK-0382 M39-D：graph_runtime.py 初始化 checkpoint 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_evidence.py`锛屾柊澧?`checkpoints` 琛ㄥ拰 `write_checkpoint`銆乣query_checkpoint` 鏂规硶銆?- 杈撳叆锛歚InterruptSignal`銆乣checkpoint_id`銆乣state`銆?- 杈撳嚭锛?  - `checkpoints` 琛紙`checkpoint_id`銆乣request_id`銆乣graph_id`銆乣interrupt_reason`銆乣interrupted_at_ms`銆乣resume_deadline_at`銆乣state_json`锛夛紱
+  - `EvidencePlane.write_checkpoint(checkpoint_id, request_id, graph_id, interrupt_signal, state_json)` 鏂规硶锛?  - `EvidencePlane.query_checkpoint(checkpoint_id)` 鏂规硶锛堟祴璇曠敤锛夈€?- 楠屾敹鏍囧噯锛?  - `write_checkpoint` 灏?checkpoint 鍐欏叆 `checkpoints` 琛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - `query_checkpoint` 杩斿洖姝ｇ‘鐨?checkpoint 璁板綍锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0386 M39-H锛歡raph_runtime.py 闆嗘垚 checkpoint 鍐欏叆 Evidence Plane
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 checkpoint 字段。
-- 输入：现有 `initial_state` 构建逻辑。
-- 输出：`initial_state` 包含 `checkpoint_id = None`、`interrupt_reason = None`、`resume_allowed = None`、`resume_deadline_at = None`。
-- 验收标准：
-  - 4 个 checkpoint 字段正确初始化；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`_write_evidence` 鏂规硶锛屽湪鍥炬墽琛屽畬鎴愬悗鑻?`state.checkpoint_id` 闈炵┖锛屽皢 checkpoint 淇℃伅鍐欏叆 Evidence Plane銆?- 杈撳叆锛歚state.checkpoint_id`锛堣嫢闈炵┖锛夈€乣state.interrupt_reason`銆乣state.resume_deadline_at`銆?- 杈撳嚭锛歚EvidencePlane.write_checkpoint()` 璋冪敤锛堣嫢 `checkpoint_id` 闈炵┖锛夈€?- 楠屾敹鏍囧噯锛?  - `checkpoint_id` 闈炵┖鏃惰皟鐢?`write_checkpoint`锛?  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0387 M39-I锛欳heckpoint / Interrupt / Resume 鏍稿績涓撻」娴嬭瘯锛圱-CKP-01~12锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Checkpoint / Interrupt / Resume 鏍稿績涓撻」娴嬭瘯锛岄獙璇佸弻鏃堕挓妯″瀷涓嬫柇鐐圭画璺戠殑姝ｇ‘鎬с€?- 杈撳叆锛歚CheckpointStore`銆乣HostPolicyGuard`銆乣CheckpointManager`銆乣SyntheticTimeoutEvent`銆?- 杈撳嚭锛歚tests/unit/test_checkpoint_m39.py`锛堟柊澧烇級锛歍-CKP-01~12銆?- 楠屾敹鏍囧噯锛?  - T-CKP-01锛欳heckpointStore.save() 杩斿洖鍞竴 checkpoint_id锛?  - T-CKP-02锛欳heckpointStore.load() 杩斿洖淇濆瓨鐨?GraphState锛?  - T-CKP-03锛欳heckpointStore.load() 鍦?checkpoint_id 涓嶅瓨鍦ㄦ椂杩斿洖 None锛?  - T-CKP-04锛欻ostPolicyGuard.check_resume_allowed() 鍦ㄦ湭瓒呮椂鏃惰繑鍥?allowed=True锛?  - T-CKP-05锛欻ostPolicyGuard.check_resume_allowed() 鍦ㄨ秴杩?resume_deadline_at 鏃惰繑鍥?allowed=False锛?  - T-CKP-06锛歊esumeDecision.synthetic_event 鍦?allowed=False 鏃跺寘鍚?TIMEOUT_SYNTHETIC 浜嬩欢锛?  - T-CKP-07锛歋yntheticTimeoutEvent 鍖呭惈 node_result=TIMEOUT_SYNTHETIC銆乪rror_code=DEADLINE_EXCEEDED銆乺oute_token=GOV_FALLBACK_SECONDARY锛?  - T-CKP-08锛欳heckpointManager.interrupt() 淇濆瓨 checkpoint 骞惰繑鍥?InterruptSignal锛?  - T-CKP-09锛欳heckpointManager.interrupt() 鍐欏叆 interrupt_reason 鍜?resume_deadline_at锛?  - T-CKP-10锛欳heckpointManager.resume() 鍦?allowed=True 鏃惰繑鍥?ResumeDecision(allowed=True)锛?  - T-CKP-11锛欳heckpointManager.resume() 鍦?allowed=False 鏃惰繑鍥?ResumeDecision(allowed=False, synthetic_event)锛?  - T-CKP-12锛氫袱娆?interrupt() 鐢熸垚涓嶅悓鐨?checkpoint_id锛堝敮涓€鎬э級銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_checkpoint_m39.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0388 M39-J锛歡raph_executor.py checkpoint 闆嗘垚娴嬭瘯锛圱-CKP-INT-01~04锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?graph_executor.py checkpoint 闆嗘垚娴嬭瘯锛岄獙璇?GOV_AIRLOCK_REVIEW 瑙﹀彂 interrupt 鐨勬纭泦鎴愩€?- 杈撳叆锛歚GraphExecutor._run_single_step`銆乣committed_route_token = GOV_AIRLOCK_REVIEW`銆?- 杈撳嚭锛歚tests/unit/test_checkpoint_executor_integration_m39.py`锛堟柊澧烇級锛歍-CKP-INT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-CKP-INT-01锛欸OV_AIRLOCK_REVIEW 鏃?state.checkpoint_id 闈炵┖锛?  - T-CKP-INT-02锛欸OV_AIRLOCK_REVIEW 鏃?state.interrupt_reason = INTERRUPT_REASON_AIRLOCK锛?  - T-CKP-INT-03锛欸OV_AIRLOCK_REVIEW 鏃?state.resume_deadline_at 涓哄悎娉曟椂闂存埑锛?  - T-CKP-INT-04锛歝heckpoint 淇濆瓨澶辫触鏃堕潤榛橀檷绾э紙涓嶅奖鍝嶄富鍥炬墽琛岋級銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_checkpoint_executor_integration_m39.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0389 M39-K锛欵vidence Plane checkpoints 鍐欏叆涓撻」娴嬭瘯锛圱-EVP-15~17锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane checkpoints 鍐欏叆涓撻」娴嬭瘯銆?- 杈撳叆锛歚EvidencePlane.write_checkpoint`銆?- 杈撳嚭锛歚tests/unit/test_evidence_checkpoint_m39.py`锛堟柊澧烇級锛歍-EVP-15~17銆?- 楠屾敹鏍囧噯锛?  - T-EVP-15锛歸rite_checkpoint 灏?checkpoint 鍐欏叆 SQLite checkpoints 琛紱
+  - T-EVP-16锛歝heckpoints 琛ㄥ寘鍚纭殑瀛楁锛坈heckpoint_id銆乮nterrupt_reason銆乺esume_deadline_at 绛夛級锛?  - T-EVP-17锛歸rite_checkpoint 鍐欏叆澶辫触鏃堕潤榛橀檷绾с€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_checkpoint_m39.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0390 M39-L锛歳esume_graph 闆嗘垚娴嬭瘯锛圱-CKP-RES-01~03锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?resume_graph 闆嗘垚娴嬭瘯锛岄獙璇佷粠 checkpoint 鎭㈠鍥炬墽琛岀殑姝ｇ‘鎬с€?- 杈撳叆锛歚GraphRuntimeContract.resume_graph`銆?- 杈撳嚭锛歚tests/unit/test_resume_graph_m39.py`锛堟柊澧烇級锛歍-CKP-RES-01~03銆?- 楠屾敹鏍囧噯锛?  - T-CKP-RES-01锛歝heckpoint_id 涓嶅瓨鍦ㄦ椂杩斿洖 STATUS_FAILED锛?  - T-CKP-RES-02锛欻ostPolicyGuard 楠岃瘉澶辫触鏃惰繑鍥?STATUS_FAILED + synthetic_event锛?  - T-CKP-RES-03锛氶獙璇侀€氳繃鏃朵粠 checkpoint 鎭㈠骞剁户缁墽琛岋紙杩斿洖 STATUS_OK 鎴?STATUS_DEGRADED锛夈€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_resume_graph_m39.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 6锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆?
+### TASK-0391 M39-M锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏?Checkpoint / Interrupt / Resume 鏍囪涓?M39 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M39 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `Checkpoint / Interrupt / Resume` 鏍囨敞 鉁?M39 宸插疄鐜帮紱
+  - `HostPolicyGuard锛堟仮澶嶅墠缃鏌ワ級` 鏍囨敞 鉁?M39 宸插疄鐜帮紱
+  - `SyntheticTimeoutEvent` 鏍囨敞 鉁?M39 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0392 M39-N锛歡raph_contract.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0383 M39-E：graph_executor.py 集成 Interrupt 触发
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁39 鏂板 checkpoint 鐩稿叧甯搁噺鍜屽瓧娈靛悗锛宍graph_contract.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0393 M39-O锛歡raph_executor.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在 `GOV_AIRLOCK_REVIEW` 令牌触发时，调用 `CheckpointManager.interrupt()` 保存 checkpoint 并写入 `InterruptSignal` 到 state。
-  - 触发条件：`committed_route_token == "GOV_AIRLOCK_REVIEW"`；
-  - 保存 checkpoint 并写入 `checkpoint_id`、`interrupt_reason = INTERRUPT_REASON_AIRLOCK`、`resume_deadline_at`；
-  - 静默降级：checkpoint 保存失败时不影响主图执行。
-- 输入：`CheckpointManager`、`state.committed_route_token`。
-- 输出：`state.checkpoint_id`、`state.interrupt_reason`、`state.resume_deadline_at` 已更新（若 `GOV_AIRLOCK_REVIEW`）。
-- 验收标准：
-  - `GOV_AIRLOCK_REVIEW` 时保存 checkpoint 并写入 `checkpoint_id`；
-  - checkpoint 保存失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁39 鏂板 checkpoint 闆嗘垚浠ｇ爜鍚庯紝`graph_executor.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0394 M39-P锛歡raph_runtime.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0384 M39-F：graph_runtime.py 新增 resume_graph 方法
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁39 鏂板 resume_graph 鏂规硶鍚庯紝`graph_runtime.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0395 M39-Q锛歡raph_checkpoint.py 濂戠害娴嬭瘯锛堟柊鏂囦欢琛屾暟闄愬埗锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负鏂板缓鐨?`graph_checkpoint.py` 娣诲姞濂戠害娴嬭瘯锛岀‘淇濇枃浠惰鏁板湪鍚堢悊鑼冨洿鍐呫€?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曟柊澧?`graph_checkpoint.py` 琛屾暟闄愬埗锛堜笂闄?350 琛岋級銆?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0396 M39-R锛歁39 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：在 `graph_runtime.py` 的 `GraphRuntimeContract` 中新增 `resume_graph` 方法，支持从 checkpoint 恢复图执行。
-  - 恢复前调用 `HostPolicyGuard.check_resume_allowed()` 验证；
-  - 验证失败时写入 `SyntheticTimeoutEvent` 并返回 `STATUS_FAILED`；
-  - 验证通过时从 checkpoint 加载 state 并继续执行；
-  - 恢复后写入 Evidence Plane（checkpoint 恢复记录）。
-- 输入：`checkpoint_id: str`、`request_id: str`。
-- 输出：`GraphRunResult`（恢复执行结果或 synthetic timeout 结果）。
-- 验收标准：
-  - `checkpoint_id` 不存在时返回 `STATUS_FAILED`；
-  - `HostPolicyGuard` 验证失败时返回 `STATUS_FAILED` + `SyntheticTimeoutEvent`；
-  - 验证通过时从 checkpoint 恢复并继续执行；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0385 M39-G：graph_evidence.py 新增 checkpoints 表和写入方法
-
-- 状态：DONE
-- 任务描述：修改 `graph_evidence.py`，新增 `checkpoints` 表和 `write_checkpoint`、`query_checkpoint` 方法。
-- 输入：`InterruptSignal`、`checkpoint_id`、`state`。
-- 输出：
-  - `checkpoints` 表（`checkpoint_id`、`request_id`、`graph_id`、`interrupt_reason`、`interrupted_at_ms`、`resume_deadline_at`、`state_json`）；
-  - `EvidencePlane.write_checkpoint(checkpoint_id, request_id, graph_id, interrupt_signal, state_json)` 方法；
-  - `EvidencePlane.query_checkpoint(checkpoint_id)` 方法（测试用）。
-- 验收标准：
-  - `write_checkpoint` 将 checkpoint 写入 `checkpoints` 表；
-  - 写入失败时静默降级；
-  - `query_checkpoint` 返回正确的 checkpoint 记录；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0386 M39-H：graph_runtime.py 集成 checkpoint 写入 Evidence Plane
-
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.checkpoint_id` 非空，将 checkpoint 信息写入 Evidence Plane。
-- 输入：`state.checkpoint_id`（若非空）、`state.interrupt_reason`、`state.resume_deadline_at`。
-- 输出：`EvidencePlane.write_checkpoint()` 调用（若 `checkpoint_id` 非空）。
-- 验收标准：
-  - `checkpoint_id` 非空时调用 `write_checkpoint`；
-  - 写入失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0387 M39-I：Checkpoint / Interrupt / Resume 核心专项测试（T-CKP-01~12）
-
-- 状态：DONE
-- 任务描述：新增 Checkpoint / Interrupt / Resume 核心专项测试，验证双时钟模型下断点续跑的正确性。
-- 输入：`CheckpointStore`、`HostPolicyGuard`、`CheckpointManager`、`SyntheticTimeoutEvent`。
-- 输出：`tests/unit/test_checkpoint_m39.py`（新增）：T-CKP-01~12。
-- 验收标准：
-  - T-CKP-01：CheckpointStore.save() 返回唯一 checkpoint_id；
-  - T-CKP-02：CheckpointStore.load() 返回保存的 GraphState；
-  - T-CKP-03：CheckpointStore.load() 在 checkpoint_id 不存在时返回 None；
-  - T-CKP-04：HostPolicyGuard.check_resume_allowed() 在未超时时返回 allowed=True；
-  - T-CKP-05：HostPolicyGuard.check_resume_allowed() 在超过 resume_deadline_at 时返回 allowed=False；
-  - T-CKP-06：ResumeDecision.synthetic_event 在 allowed=False 时包含 TIMEOUT_SYNTHETIC 事件；
-  - T-CKP-07：SyntheticTimeoutEvent 包含 node_result=TIMEOUT_SYNTHETIC、error_code=DEADLINE_EXCEEDED、route_token=GOV_FALLBACK_SECONDARY；
-  - T-CKP-08：CheckpointManager.interrupt() 保存 checkpoint 并返回 InterruptSignal；
-  - T-CKP-09：CheckpointManager.interrupt() 写入 interrupt_reason 和 resume_deadline_at；
-  - T-CKP-10：CheckpointManager.resume() 在 allowed=True 时返回 ResumeDecision(allowed=True)；
-  - T-CKP-11：CheckpointManager.resume() 在 allowed=False 时返回 ResumeDecision(allowed=False, synthetic_event)；
-  - T-CKP-12：两次 interrupt() 生成不同的 checkpoint_id（唯一性）。
-- 涉及文件路径：`tests/unit/test_checkpoint_m39.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0388 M39-J：graph_executor.py checkpoint 集成测试（T-CKP-INT-01~04）
-
-- 状态：DONE
-- 任务描述：新增 graph_executor.py checkpoint 集成测试，验证 GOV_AIRLOCK_REVIEW 触发 interrupt 的正确集成。
-- 输入：`GraphExecutor._run_single_step`、`committed_route_token = GOV_AIRLOCK_REVIEW`。
-- 输出：`tests/unit/test_checkpoint_executor_integration_m39.py`（新增）：T-CKP-INT-01~04。
-- 验收标准：
-  - T-CKP-INT-01：GOV_AIRLOCK_REVIEW 时 state.checkpoint_id 非空；
-  - T-CKP-INT-02：GOV_AIRLOCK_REVIEW 时 state.interrupt_reason = INTERRUPT_REASON_AIRLOCK；
-  - T-CKP-INT-03：GOV_AIRLOCK_REVIEW 时 state.resume_deadline_at 为合法时间戳；
-  - T-CKP-INT-04：checkpoint 保存失败时静默降级（不影响主图执行）。
-- 涉及文件路径：`tests/unit/test_checkpoint_executor_integration_m39.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0389 M39-K：Evidence Plane checkpoints 写入专项测试（T-EVP-15~17）
-
-- 状态：DONE
-- 任务描述：新增 Evidence Plane checkpoints 写入专项测试。
-- 输入：`EvidencePlane.write_checkpoint`。
-- 输出：`tests/unit/test_evidence_checkpoint_m39.py`（新增）：T-EVP-15~17。
-- 验收标准：
-  - T-EVP-15：write_checkpoint 将 checkpoint 写入 SQLite checkpoints 表；
-  - T-EVP-16：checkpoints 表包含正确的字段（checkpoint_id、interrupt_reason、resume_deadline_at 等）；
-  - T-EVP-17：write_checkpoint 写入失败时静默降级。
-- 涉及文件路径：`tests/unit/test_evidence_checkpoint_m39.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0390 M39-L：resume_graph 集成测试（T-CKP-RES-01~03）
-
-- 状态：DONE
-- 任务描述：新增 resume_graph 集成测试，验证从 checkpoint 恢复图执行的正确性。
-- 输入：`GraphRuntimeContract.resume_graph`。
-- 输出：`tests/unit/test_resume_graph_m39.py`（新增）：T-CKP-RES-01~03。
-- 验收标准：
-  - T-CKP-RES-01：checkpoint_id 不存在时返回 STATUS_FAILED；
-  - T-CKP-RES-02：HostPolicyGuard 验证失败时返回 STATUS_FAILED + synthetic_event；
-  - T-CKP-RES-03：验证通过时从 checkpoint 恢复并继续执行（返回 STATUS_OK 或 STATUS_DEGRADED）。
-- 涉及文件路径：`tests/unit/test_resume_graph_m39.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 6；`LangGraph_Governed_Runtime_Solution` §4.4。
-
-### TASK-0391 M39-M：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 Checkpoint / Interrupt / Resume 标记为 M39 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M39 实现项标注 ✅）。
-- 验收标准：
-  - `Checkpoint / Interrupt / Resume` 标注 ✅ M39 已实现；
-  - `HostPolicyGuard（恢复前置检查）` 标注 ✅ M39 已实现；
-  - `SyntheticTimeoutEvent` 标注 ✅ M39 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0392 M39-N：graph_contract.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M39 新增 checkpoint 相关常量和字段后，`graph_contract.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0393 M39-O：graph_executor.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M39 新增 checkpoint 集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0394 M39-P：graph_runtime.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M39 新增 resume_graph 方法后，`graph_runtime.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0395 M39-Q：graph_checkpoint.py 契约测试（新文件行数限制）
-
-- 状态：DONE
-- 任务描述：为新建的 `graph_checkpoint.py` 添加契约测试，确保文件行数在合理范围内。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试新增 `graph_checkpoint.py` 行数限制（上限 350 行）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0396 M39-R：M39 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0379~0395 全部 DONE 后，生成 M39 代码审查报告，记录 Checkpoint / Interrupt / Resume 双时钟模型下断点续跑的实现情况。
-- 输入：TASK-0379~0395 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m39_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0379~0395 全部 17 个任务的变更摘要；
-  - 新增测试 ≥ 19 个（T-CKP-01~12 + T-CKP-INT-01~04 + T-EVP-15~17 + T-CKP-RES-01~03），全部通过；
-  - Checkpoint / Interrupt / Resume 完整落地（graph_checkpoint.py）；
-  - HostPolicyGuard 恢复前置检查正确（超时时写入 SyntheticTimeoutEvent）；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m39_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.4、§6、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0379~0395 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M39 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Checkpoint / Interrupt / Resume 鍙屾椂閽熸ā鍨嬩笅鏂偣缁窇鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0379~0395 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m39_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0379~0395 鍏ㄩ儴 17 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?19 涓紙T-CKP-01~12 + T-CKP-INT-01~04 + T-EVP-15~17 + T-CKP-RES-01~03锛夛紝鍏ㄩ儴閫氳繃锛?  - Checkpoint / Interrupt / Resume 瀹屾暣钀藉湴锛坓raph_checkpoint.py锛夛紱
+  - HostPolicyGuard 鎭㈠鍓嶇疆妫€鏌ユ纭紙瓒呮椂鏃跺啓鍏?SyntheticTimeoutEvent锛夛紱
+  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m39_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂4.4銆伮?銆伮?1.2銆?
 ---
 
-## M40 barrier_join() + RenderGuard（并行分支 fan-in 校验 + 渲染输出授权）
-
-- **里程碑编号**：M40
-- **标题**：barrier_join() + RenderGuard — 并行分支 fan-in 校验与渲染输出授权
-- **任务范围**：TASK-0397 ~ TASK-0416（共 20 个任务）
-- **前置依赖**：M39 DONE（Checkpoint / Interrupt / Resume）
-- **目标**：
-  1. 实现 `barrier_join()`：并行分支 fan-in 校验，校验所有分支是否存在 `audit_commit`，缺任一证据则 fail closed，支持 `join_policy_ref`
-  2. 实现 `RenderGuard`：渲染输出授权，验证 render 输出只修改允许的派生字段，不允许修改 `locked_fields`
-  3. `graph_branch.py` 新增 `AuditTicket`、`BarrierJoinResult`、`barrier_join()` 函数
-  4. `graph_streaming.py` 新增 `RenderGuard` 类
-  5. `GraphState` 新增 `barrier_join_result`、`render_guard_result` 字段
-  6. `graph_executor.py` 集成 `barrier_join()` 和 `RenderGuard`
-  7. Evidence Plane 新增 `barrier_join_log` 表和写入方法
-  8. 专项测试覆盖（T-BJ-01~10 + T-RG-01~08）
-  9. ModelPlane.md §10 更新实现状态
-
+## M40 barrier_join() + RenderGuard锛堝苟琛屽垎鏀?fan-in 鏍￠獙 + 娓叉煋杈撳嚭鎺堟潈锛?
+- **閲岀▼纰戠紪鍙?*锛歁40
+- **鏍囬**锛歜arrier_join() + RenderGuard 鈥?骞惰鍒嗘敮 fan-in 鏍￠獙涓庢覆鏌撹緭鍑烘巿鏉?- **浠诲姟鑼冨洿**锛歍ASK-0397 ~ TASK-0416锛堝叡 20 涓换鍔★級
+- **鍓嶇疆渚濊禆**锛歁39 DONE锛圕heckpoint / Interrupt / Resume锛?- **鐩爣**锛?  1. 瀹炵幇 `barrier_join()`锛氬苟琛屽垎鏀?fan-in 鏍￠獙锛屾牎楠屾墍鏈夊垎鏀槸鍚﹀瓨鍦?`audit_commit`锛岀己浠讳竴璇佹嵁鍒?fail closed锛屾敮鎸?`join_policy_ref`
+  2. 瀹炵幇 `RenderGuard`锛氭覆鏌撹緭鍑烘巿鏉冿紝楠岃瘉 render 杈撳嚭鍙慨鏀瑰厑璁哥殑娲剧敓瀛楁锛屼笉鍏佽淇敼 `locked_fields`
+  3. `graph_branch.py` 鏂板 `AuditTicket`銆乣BarrierJoinResult`銆乣barrier_join()` 鍑芥暟
+  4. `graph_streaming.py` 鏂板 `RenderGuard` 绫?  5. `GraphState` 鏂板 `barrier_join_result`銆乣render_guard_result` 瀛楁
+  6. `graph_executor.py` 闆嗘垚 `barrier_join()` 鍜?`RenderGuard`
+  7. Evidence Plane 鏂板 `barrier_join_log` 琛ㄥ拰鍐欏叆鏂规硶
+  8. 涓撻」娴嬭瘯瑕嗙洊锛圱-BJ-01~10 + T-RG-01~08锛?  9. ModelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
 ---
 
-### TASK-0397 M40-A：graph_branch.py 新增 AuditTicket、BarrierJoinResult、barrier_join()
+### TASK-0397 M40-A锛歡raph_branch.py 鏂板 AuditTicket銆丅arrierJoinResult銆乥arrier_join()
 
-- 状态：DONE
-- 任务描述：在 `graph_branch.py` 中新增 `AuditTicket`、`BarrierJoinResult` 数据类和 `barrier_join()` 函数，实现并行分支 fan-in 校验。
-  - **AuditTicket**：审计工单数据类（`branch_id`、`audit_commit`、`input_digest`、`output_digest`、`issued_at_ms`）
-  - **BarrierJoinResult**：barrier_join 结果数据类（`passed`、`failed_branches`、`join_policy_ref`、`reason`）
-  - **barrier_join()**：校验所有分支是否存在 `audit_commit`，缺任一证据则 fail closed
-    - 校验 `branch_manifest` 中每个分支的 `audit_commit` 是否存在
-    - 校验 `output_digest` 是否与 `AuditTicket` 签发时一致（若提供 `audit_tickets`）
-    - 缺任一证据则 `passed=False`，记录 `failed_branches`
-    - 若允许部分成功，必须记录 `join_policy_ref`
-- 输入：`branch_manifest: dict`、`audit_tickets: list[AuditTicket] | None`、`join_policy: str`。
-- 输出：
-  - `AuditTicket` 数据类；
-  - `BarrierJoinResult` 数据类；
-  - `barrier_join(branch_manifest, audit_tickets, join_policy) -> BarrierJoinResult`；
-  - `build_audit_ticket(branch_id, input_payload) -> AuditTicket`（辅助函数）。
-- 验收标准：
-  - 所有分支有 `audit_commit` 时 `passed=True`；
-  - 任一分支缺 `audit_commit` 时 `passed=False`；
-  - `failed_branches` 包含所有缺证据的分支 ID；
-  - `join_policy_ref` 在 `join_policy != "strict"` 时记录；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_branch.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_branch.py` 涓柊澧?`AuditTicket`銆乣BarrierJoinResult` 鏁版嵁绫诲拰 `barrier_join()` 鍑芥暟锛屽疄鐜板苟琛屽垎鏀?fan-in 鏍￠獙銆?  - **AuditTicket**锛氬璁″伐鍗曟暟鎹被锛坄branch_id`銆乣audit_commit`銆乣input_digest`銆乣output_digest`銆乣issued_at_ms`锛?  - **BarrierJoinResult**锛歜arrier_join 缁撴灉鏁版嵁绫伙紙`passed`銆乣failed_branches`銆乣join_policy_ref`銆乣reason`锛?  - **barrier_join()**锛氭牎楠屾墍鏈夊垎鏀槸鍚﹀瓨鍦?`audit_commit`锛岀己浠讳竴璇佹嵁鍒?fail closed
+    - 鏍￠獙 `branch_manifest` 涓瘡涓垎鏀殑 `audit_commit` 鏄惁瀛樺湪
+    - 鏍￠獙 `output_digest` 鏄惁涓?`AuditTicket` 绛惧彂鏃朵竴鑷达紙鑻ユ彁渚?`audit_tickets`锛?    - 缂轰换涓€璇佹嵁鍒?`passed=False`锛岃褰?`failed_branches`
+    - 鑻ュ厑璁搁儴鍒嗘垚鍔燂紝蹇呴』璁板綍 `join_policy_ref`
+- 杈撳叆锛歚branch_manifest: dict`銆乣audit_tickets: list[AuditTicket] | None`銆乣join_policy: str`銆?- 杈撳嚭锛?  - `AuditTicket` 鏁版嵁绫伙紱
+  - `BarrierJoinResult` 鏁版嵁绫伙紱
+  - `barrier_join(branch_manifest, audit_tickets, join_policy) -> BarrierJoinResult`锛?  - `build_audit_ticket(branch_id, input_payload) -> AuditTicket`锛堣緟鍔╁嚱鏁帮級銆?- 楠屾敹鏍囧噯锛?  - 鎵€鏈夊垎鏀湁 `audit_commit` 鏃?`passed=True`锛?  - 浠讳竴鍒嗘敮缂?`audit_commit` 鏃?`passed=False`锛?  - `failed_branches` 鍖呭惈鎵€鏈夌己璇佹嵁鐨勫垎鏀?ID锛?  - `join_policy_ref` 鍦?`join_policy != "strict"` 鏃惰褰曪紱
+  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_branch.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂4.2銆?
+### TASK-0398 M40-B锛歡raph_streaming.py 鏂板 RenderGuard
 
-### TASK-0398 M40-B：graph_streaming.py 新增 RenderGuard
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_streaming.py` 涓柊澧?`RenderGuard` 绫伙紝瀹炵幇娓叉煋杈撳嚭鎺堟潈銆?  - **RenderGuard**锛氭覆鏌撹緭鍑烘巿鏉冨畧鍗?    - `validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`锛氶獙璇?render 杈撳嚭鍙慨鏀瑰厑璁哥殑娲剧敓瀛楁
+    - 涓嶅厑璁镐慨鏀?`locked_fields`锛堟潵鑷?`commit_snapshot`锛?    - 涓嶅厑璁镐慨鏀?`intent_commit`銆乣s1_output_hash`
+    - 鍏佽淇敼鐨勬淳鐢熷瓧娈碉細`render_text`銆乣render_html`銆乣render_markdown`銆乣display_*` 鍓嶇紑瀛楁
+  - **RenderGuardResult**锛氭覆鏌撳畧鍗粨鏋滄暟鎹被锛坄passed`銆乣violated_fields`銆乣reason`锛?- 杈撳叆锛歚render_output: dict`銆乣commit_snapshot: dict | CommitSnapshot`銆?- 杈撳嚭锛?  - `RenderGuardResult` 鏁版嵁绫伙紙`passed: bool`銆乣violated_fields: list[str]`銆乣reason: str`锛夛紱
+  - `RenderGuard.validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`锛?  - `RenderGuard.is_allowed_render_field(field_name) -> bool`锛堣緟鍔╂柟娉曪級銆?- 楠屾敹鏍囧噯锛?  - render 杈撳嚭鍙慨鏀瑰厑璁稿瓧娈垫椂 `passed=True`锛?  - render 杈撳嚭淇敼 `locked_fields` 涓殑瀛楁鏃?`passed=False`锛?  - render 杈撳嚭淇敼 `intent_commit` 鏃?`passed=False`锛?  - `violated_fields` 鍖呭惈鎵€鏈夎繚瑙勫瓧娈靛悕锛?  - 鏈夊畬鏁寸被鍨嬫敞瑙ｃ€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_streaming.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0399 M40-C锛欸raphState 鏂板 barrier_join_result銆乺ender_guard_result 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_streaming.py` 中新增 `RenderGuard` 类，实现渲染输出授权。
-  - **RenderGuard**：渲染输出授权守卫
-    - `validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`：验证 render 输出只修改允许的派生字段
-    - 不允许修改 `locked_fields`（来自 `commit_snapshot`）
-    - 不允许修改 `intent_commit`、`s1_output_hash`
-    - 允许修改的派生字段：`render_text`、`render_html`、`render_markdown`、`display_*` 前缀字段
-  - **RenderGuardResult**：渲染守卫结果数据类（`passed`、`violated_fields`、`reason`）
-- 输入：`render_output: dict`、`commit_snapshot: dict | CommitSnapshot`。
-- 输出：
-  - `RenderGuardResult` 数据类（`passed: bool`、`violated_fields: list[str]`、`reason: str`）；
-  - `RenderGuard.validate_render_output(render_output, commit_snapshot) -> RenderGuardResult`；
-  - `RenderGuard.is_allowed_render_field(field_name) -> bool`（辅助方法）。
-- 验收标准：
-  - render 输出只修改允许字段时 `passed=True`；
-  - render 输出修改 `locked_fields` 中的字段时 `passed=False`；
-  - render 输出修改 `intent_commit` 时 `passed=False`；
-  - `violated_fields` 包含所有违规字段名；
-  - 有完整类型注解。
-- 涉及文件路径：`host_brain/integrations/graph_streaming.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 鐨?`GraphState` TypedDict 涓柊澧?barrier_join 鍜?RenderGuard 鐩稿叧瀛楁銆?- 杈撳叆锛氱幇鏈?`GraphState` TypedDict 瀹氫箟銆?- 杈撳嚭锛?  - `GraphState.barrier_join_result: dict[str, Any] | None`锛坆arrier_join 缁撴灉锛岀敱 barrier_join() 鍐欏叆锛夛紱
+  - `GraphState.render_guard_result: dict[str, Any] | None`锛圧enderGuard 缁撴灉锛岀敱 RenderGuard 鍐欏叆锛夈€?- 楠屾敹鏍囧噯锛?  - `GraphState` 鍖呭惈 2 涓柊瀛楁锛?  - 瀛楁鏈夊畬鏁寸被鍨嬫敞瑙ｏ紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆丷ule 5銆?
+### TASK-0400 M40-D锛歡raph_contract.py 鏂板 barrier_join 鍜?RenderGuard 鐩稿叧甯搁噺
 
-### TASK-0399 M40-C：GraphState 新增 barrier_join_result、render_guard_result 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_contract.py` 涓柊澧?barrier_join 鍜?RenderGuard 鐩稿叧甯搁噺銆?- 杈撳叆锛氱幇鏈夊父閲忓畾涔夊尯鍩熴€?- 杈撳嚭锛?  - `BARRIER_JOIN_POLICY_STRICT = "strict"` 甯搁噺锛堜弗鏍兼ā寮忥細浠讳竴鍒嗘敮缂鸿瘉鎹垯 fail closed锛夛紱
+  - `BARRIER_JOIN_POLICY_PARTIAL = "partial"` 甯搁噺锛堥儴鍒嗘垚鍔熸ā寮忥細鍏佽閮ㄥ垎鍒嗘敮澶辫触锛屼絾蹇呴』璁板綍 join_policy_ref锛夛紱
+  - `BARRIER_JOIN_STATUS_PASSED = "PASSED"` 甯搁噺锛?  - `BARRIER_JOIN_STATUS_FAILED = "FAILED"` 甯搁噺锛?  - `RENDER_GUARD_STATUS_PASSED = "PASSED"` 甯搁噺锛?  - `RENDER_GUARD_STATUS_FAILED = "FAILED"` 甯搁噺锛?  - `RENDER_ALLOWED_FIELDS = frozenset({"render_text", "render_html", "render_markdown"})` 甯搁噺锛堝厑璁镐慨鏀圭殑娲剧敓瀛楁闆嗗悎锛夛紱
+  - `RENDER_ALLOWED_FIELD_PREFIX = "display_"` 甯搁噺锛堝厑璁镐慨鏀圭殑娲剧敓瀛楁鍓嶇紑锛夈€?- 楠屾敹鏍囧噯锛?  - 甯搁噺瀹氫箟鍦?`graph_contract.py` 鐨勫父閲忓尯鍩燂紱
+  - 鍦?`graph_branch.py` 鍜?`graph_streaming.py` 涓纭鍏ヤ娇鐢紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_contract.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆丷ule 5銆?
+### TASK-0401 M40-E锛歡raph_runtime.py 鍒濆鍖?barrier_join_result銆乺ender_guard_result 瀛楁
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 的 `GraphState` TypedDict 中新增 barrier_join 和 RenderGuard 相关字段。
-- 输入：现有 `GraphState` TypedDict 定义。
-- 输出：
-  - `GraphState.barrier_join_result: dict[str, Any] | None`（barrier_join 结果，由 barrier_join() 写入）；
-  - `GraphState.render_guard_result: dict[str, Any] | None`（RenderGuard 结果，由 RenderGuard 写入）。
-- 验收标准：
-  - `GraphState` 包含 2 个新字段；
-  - 字段有完整类型注解；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`run_graph` 鏂规硶锛屽湪鏋勫缓 `initial_state` 鏃跺垵濮嬪寲 barrier_join 鍜?RenderGuard 瀛楁銆?- 杈撳叆锛氱幇鏈?`initial_state` 鏋勫缓閫昏緫銆?- 杈撳嚭锛歚initial_state` 鍖呭惈 `barrier_join_result = None`銆乣render_guard_result = None`銆?- 楠屾敹鏍囧噯锛?  - 2 涓柊瀛楁姝ｇ‘鍒濆鍖栵紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆丷ule 5銆?
+### TASK-0402 M40-F锛歡raph_executor.py 闆嗘垚 barrier_join()
 
-### TASK-0400 M40-D：graph_contract.py 新增 barrier_join 和 RenderGuard 相关常量
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪骞惰鍒嗘敮鎵ц瀹屾垚鍚庤皟鐢?`barrier_join()` 杩涜 fan-in 鏍￠獙銆?  - 鍦?`branch_manifest` 鍐欏叆鍚庣珛鍗宠皟鐢?`barrier_join()`锛?  - `barrier_join` 澶辫触锛坄passed=False`锛夋椂鍐欏叆 `barrier_join_result` 骞堕檷绾э紙`STATUS_DEGRADED`锛夛紱
+  - `barrier_join` 閫氳繃鏃跺啓鍏?`barrier_join_result`锛坄passed=True`锛夛紱
+  - 闈欓粯闄嶇骇锛歚barrier_join` 澶辫触鏃朵笉褰卞搷涓诲浘鎵ц锛堝彧闄嶇骇锛屼笉缁堟锛夈€?- 杈撳叆锛歚branch_manifest`銆乣audit_tickets`锛堝彲閫夛級銆?- 杈撳嚭锛歚state.barrier_join_result` 宸叉洿鏂般€?- 楠屾敹鏍囧噯锛?  - `branch_manifest` 闈炵┖鏃惰皟鐢?`barrier_join()`锛?  - `barrier_join` 澶辫触鏃?`state.barrier_join_result.passed = False`锛?  - `barrier_join` 閫氳繃鏃?`state.barrier_join_result.passed = True`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂4.2銆?
+### TASK-0403 M40-G锛歡raph_executor.py 闆嗘垚 RenderGuard
 
-- 状态：DONE
-- 任务描述：在 `graph_contract.py` 中新增 barrier_join 和 RenderGuard 相关常量。
-- 输入：现有常量定义区域。
-- 输出：
-  - `BARRIER_JOIN_POLICY_STRICT = "strict"` 常量（严格模式：任一分支缺证据则 fail closed）；
-  - `BARRIER_JOIN_POLICY_PARTIAL = "partial"` 常量（部分成功模式：允许部分分支失败，但必须记录 join_policy_ref）；
-  - `BARRIER_JOIN_STATUS_PASSED = "PASSED"` 常量；
-  - `BARRIER_JOIN_STATUS_FAILED = "FAILED"` 常量；
-  - `RENDER_GUARD_STATUS_PASSED = "PASSED"` 常量；
-  - `RENDER_GUARD_STATUS_FAILED = "FAILED"` 常量；
-  - `RENDER_ALLOWED_FIELDS = frozenset({"render_text", "render_html", "render_markdown"})` 常量（允许修改的派生字段集合）；
-  - `RENDER_ALLOWED_FIELD_PREFIX = "display_"` 常量（允许修改的派生字段前缀）。
-- 验收标准：
-  - 常量定义在 `graph_contract.py` 的常量区域；
-  - 在 `graph_branch.py` 和 `graph_streaming.py` 中正确导入使用；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_contract.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_executor.py` 鐨?`_run_single_step` 鏂规硶锛屽湪 Render Stream 鍙戝皠鍚庤皟鐢?`RenderGuard.validate_render_output()` 杩涜娓叉煋杈撳嚭鎺堟潈銆?  - 鍦?`render_snapshot_ref` 鍐欏叆鍚庤皟鐢?`RenderGuard.validate_render_output()`锛?  - `RenderGuard` 澶辫触鏃跺啓鍏?`render_guard_result` 骞跺啓鍏ラ檷绾ч€氱煡鍒?`presence_events`锛?  - `RenderGuard` 閫氳繃鏃跺啓鍏?`render_guard_result`锛坄passed=True`锛夛紱
+  - 闈欓粯闄嶇骇锛歚RenderGuard` 澶辫触鏃朵笉褰卞搷涓诲浘鎵ц銆?- 杈撳叆锛歚render_output`锛堟潵鑷?payload锛夈€乣commit_snapshot`銆?- 杈撳嚭锛歚state.render_guard_result` 宸叉洿鏂般€?- 楠屾敹鏍囧噯锛?  - `render_snapshot_ref` 闈炵┖鏃惰皟鐢?`RenderGuard.validate_render_output()`锛?  - `RenderGuard` 澶辫触鏃?`state.render_guard_result.passed = False`锛?  - `RenderGuard` 閫氳繃鏃?`state.render_guard_result.passed = True`锛?  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_executor.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0404 M40-H锛歡raph_evidence.py 鏂板 barrier_join_log 琛ㄥ拰鍐欏叆鏂规硶
 
-### TASK-0401 M40-E：graph_runtime.py 初始化 barrier_join_result、render_guard_result 字段
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_evidence.py`锛屾柊澧?`barrier_join_log` 琛ㄥ拰 `write_barrier_join`銆乣query_barrier_join` 鏂规硶銆?- 杈撳叆锛歚BarrierJoinResult`銆乣request_id`銆乣graph_id`銆?- 杈撳嚭锛?  - `barrier_join_log` 琛紙`id`銆乣request_id`銆乣graph_id`銆乣passed`銆乣failed_branches_json`銆乣join_policy_ref`銆乣reason`銆乣ts_ms`锛夛紱
+  - `EvidencePlane.write_barrier_join(request_id, graph_id, barrier_join_result)` 鏂规硶锛?  - `EvidencePlane.query_barrier_join(request_id)` 鏂规硶锛堟祴璇曠敤锛夈€?- 楠屾敹鏍囧噯锛?  - `write_barrier_join` 灏?barrier_join 缁撴灉鍐欏叆 `barrier_join_log` 琛紱
+  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - `query_barrier_join` 杩斿洖姝ｇ‘鐨勮褰曪紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂4.2銆?
+### TASK-0405 M40-I锛歡raph_runtime.py 闆嗘垚 barrier_join_log 鍐欏叆 Evidence Plane
 
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `run_graph` 方法，在构建 `initial_state` 时初始化 barrier_join 和 RenderGuard 字段。
-- 输入：现有 `initial_state` 构建逻辑。
-- 输出：`initial_state` 包含 `barrier_join_result = None`、`render_guard_result = None`。
-- 验收标准：
-  - 2 个新字段正确初始化；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4、Rule 5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`graph_runtime.py` 鐨?`_write_evidence` 鏂规硶锛屽湪鍥炬墽琛屽畬鎴愬悗鑻?`state.barrier_join_result` 闈炵┖锛屽皢 barrier_join 缁撴灉鍐欏叆 Evidence Plane銆?- 杈撳叆锛歚state.barrier_join_result`锛堣嫢闈炵┖锛夈€?- 杈撳嚭锛歚EvidencePlane.write_barrier_join()` 璋冪敤锛堣嫢 `barrier_join_result` 闈炵┖锛夈€?- 楠屾敹鏍囧噯锛?  - `barrier_join_result` 闈炵┖鏃惰皟鐢?`write_barrier_join`锛?  - 鍐欏叆澶辫触鏃堕潤榛橀檷绾э紱
+  - 鐜版湁娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_runtime.py`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆?
+### TASK-0406 M40-J锛歜arrier_join() 鏍稿績涓撻」娴嬭瘯锛圱-BJ-01~10锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?barrier_join() 鏍稿績涓撻」娴嬭瘯锛岄獙璇佸苟琛屽垎鏀?fan-in 鏍￠獙鐨勬纭€с€?- 杈撳叆锛歚barrier_join`銆乣AuditTicket`銆乣BarrierJoinResult`銆乣build_audit_ticket`銆?- 杈撳嚭锛歚tests/unit/test_barrier_join_m40.py`锛堟柊澧烇級锛歍-BJ-01~10銆?- 楠屾敹鏍囧噯锛?  - T-BJ-01锛氭墍鏈夊垎鏀湁 audit_commit 鏃?passed=True锛?  - T-BJ-02锛氫换涓€鍒嗘敮缂?audit_commit 鏃?passed=False锛?  - T-BJ-03锛歠ailed_branches 鍖呭惈鎵€鏈夌己璇佹嵁鐨勫垎鏀?ID锛?  - T-BJ-04锛氱┖ branch_manifest 鏃?passed=True锛堟棤鍒嗘敮鏃犻渶鏍￠獙锛夛紱
+  - T-BJ-05锛歫oin_policy=strict 鏃朵换涓€澶辫触鍒?passed=False锛?  - T-BJ-06锛歫oin_policy=partial 鏃惰褰?join_policy_ref锛?  - T-BJ-07锛歜uild_audit_ticket 杩斿洖鏈夋晥 AuditTicket锛?  - T-BJ-08锛欰uditTicket.audit_commit 闈炵┖锛?  - T-BJ-09锛歰utput_digest 涓嶄竴鑷存椂 passed=False锛堣嫢鎻愪緵 audit_tickets锛夛紱
+  - T-BJ-10锛歰utput_digest 涓€鑷存椂 passed=True锛堣嫢鎻愪緵 audit_tickets锛夈€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_barrier_join_m40.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4锛沗LangGraph_Governed_Runtime_Solution` 搂4.2銆?
+### TASK-0407 M40-K锛歊enderGuard 鏍稿績涓撻」娴嬭瘯锛圱-RG-01~08锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?RenderGuard 鏍稿績涓撻」娴嬭瘯锛岄獙璇佹覆鏌撹緭鍑烘巿鏉冪殑姝ｇ‘鎬с€?- 杈撳叆锛歚RenderGuard`銆乣RenderGuardResult`銆乣CommitSnapshot`銆?- 杈撳嚭锛歚tests/unit/test_render_guard_m40.py`锛堟柊澧烇級锛歍-RG-01~08銆?- 楠屾敹鏍囧噯锛?  - T-RG-01锛歳ender 杈撳嚭鍙慨鏀瑰厑璁稿瓧娈垫椂 passed=True锛?  - T-RG-02锛歳ender 杈撳嚭淇敼 locked_fields 涓殑瀛楁鏃?passed=False锛?  - T-RG-03锛歳ender 杈撳嚭淇敼 intent_commit 鏃?passed=False锛?  - T-RG-04锛歷iolated_fields 鍖呭惈鎵€鏈夎繚瑙勫瓧娈靛悕锛?  - T-RG-05锛歳ender 杈撳嚭淇敼 display_ 鍓嶇紑瀛楁鏃?passed=True锛?  - T-RG-06锛歳ender 杈撳嚭淇敼 render_text 鏃?passed=True锛?  - T-RG-07锛歝ommit_snapshot 涓?None 鏃?passed=False锛?  - T-RG-08锛歳ender 杈撳嚭涓虹┖鏃?passed=True銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_render_guard_m40.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5锛沗LangGraph_Governed_Runtime_Solution` 搂4.5銆?
+### TASK-0408 M40-L锛歜arrier_join executor 闆嗘垚娴嬭瘯锛圱-BJ-INT-01~03锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?barrier_join executor 闆嗘垚娴嬭瘯锛岄獙璇?graph_executor.py 涓?barrier_join 鐨勬纭泦鎴愩€?- 杈撳叆锛歚GraphExecutor._run_single_step`銆乣branch_specs`銆乣branch_manifest`銆?- 杈撳嚭锛歚tests/unit/test_barrier_join_executor_integration_m40.py`锛堟柊澧烇級锛歍-BJ-INT-01~03銆?- 楠屾敹鏍囧噯锛?  - T-BJ-INT-01锛歜ranch_manifest 闈炵┖鏃?state.barrier_join_result 闈炵┖锛?  - T-BJ-INT-02锛氭墍鏈夊垎鏀湁 audit_commit 鏃?barrier_join_result.passed=True锛?  - T-BJ-INT-03锛氫换涓€鍒嗘敮缂?audit_commit 鏃?barrier_join_result.passed=False銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_barrier_join_executor_integration_m40.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆?
+### TASK-0409 M40-M锛歊enderGuard executor 闆嗘垚娴嬭瘯锛圱-RG-INT-01~03锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?RenderGuard executor 闆嗘垚娴嬭瘯锛岄獙璇?graph_executor.py 涓?RenderGuard 鐨勬纭泦鎴愩€?- 杈撳叆锛歚GraphExecutor._run_single_step`銆乣commit_snapshot`銆乣render_output`銆?- 杈撳嚭锛歚tests/unit/test_render_guard_executor_integration_m40.py`锛堟柊澧烇級锛歍-RG-INT-01~03銆?- 楠屾敹鏍囧噯锛?  - T-RG-INT-01锛歳ender_snapshot_ref 闈炵┖鏃?state.render_guard_result 闈炵┖锛?  - T-RG-INT-02锛歳ender 杈撳嚭鍚堟硶鏃?render_guard_result.passed=True锛?  - T-RG-INT-03锛歳ender 杈撳嚭杩濊鏃?render_guard_result.passed=False銆?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_render_guard_executor_integration_m40.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 5銆?
+### TASK-0410 M40-N锛欵vidence Plane barrier_join_log 鍐欏叆涓撻」娴嬭瘯锛圱-EVP-18~20锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane barrier_join_log 鍐欏叆涓撻」娴嬭瘯銆?- 杈撳叆锛歚EvidencePlane.write_barrier_join`銆?- 杈撳嚭锛歚tests/unit/test_evidence_barrier_join_m40.py`锛堟柊澧烇級锛歍-EVP-18~20銆?- 楠屾敹鏍囧噯锛?  - T-EVP-18锛歸rite_barrier_join 灏嗙粨鏋滃啓鍏?SQLite barrier_join_log 琛紱
+  - T-EVP-19锛歜arrier_join_log 琛ㄥ寘鍚纭殑瀛楁锛?  - T-EVP-20锛歸rite_barrier_join 鍐欏叆澶辫触鏃堕潤榛橀檷绾с€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_barrier_join_m40.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10 Rule 4銆?
+### TASK-0411 M40-O锛歁odelPlane.md 搂10 鏇存柊瀹炵幇鐘舵€?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭洿鏂?`ModelPlane.md` 搂10 涓殑鑳藉姏涓夋。鍒嗙被琛紝灏?barrier_join() 鍜?RenderGuard 鏍囪涓?M40 宸插疄鐜般€?- 杈撳叆锛氱幇鏈?ModelPlane.md 搂10銆?- 杈撳嚭锛歁odelPlane.md 搂10 鑳藉姏涓夋。鍒嗙被琛ㄦ洿鏂帮紙M40 瀹炵幇椤规爣娉?鉁咃級銆?- 楠屾敹鏍囧噯锛?  - `barrier_join()锛堝苟琛屽垎鏀?fan-in 鏍￠獙锛塦 鏍囨敞 鉁?M40 宸插疄鐜帮紱
+  - `RenderGuard锛堟覆鏌撹緭鍑烘巿鏉冿級` 鏍囨敞 鉁?M40 宸插疄鐜帮紱
+  - 鍏朵綑鍚庣画閲岀▼纰戦」淇濇寔涓嶅彉銆?- 娑夊強鏂囦欢璺緞锛歚docs/30_devspec/ModelPlane.md`锛堜慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂11.2銆?
+### TASK-0412 M40-P锛歡raph_branch.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0402 M40-F：graph_executor.py 集成 barrier_join()
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁40 鏂板 AuditTicket銆丅arrierJoinResult銆乥arrier_join() 鍚庯紝`graph_branch.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0413 M40-Q锛歡raph_streaming.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在并行分支执行完成后调用 `barrier_join()` 进行 fan-in 校验。
-  - 在 `branch_manifest` 写入后立即调用 `barrier_join()`；
-  - `barrier_join` 失败（`passed=False`）时写入 `barrier_join_result` 并降级（`STATUS_DEGRADED`）；
-  - `barrier_join` 通过时写入 `barrier_join_result`（`passed=True`）；
-  - 静默降级：`barrier_join` 失败时不影响主图执行（只降级，不终止）。
-- 输入：`branch_manifest`、`audit_tickets`（可选）。
-- 输出：`state.barrier_join_result` 已更新。
-- 验收标准：
-  - `branch_manifest` 非空时调用 `barrier_join()`；
-  - `barrier_join` 失败时 `state.barrier_join_result.passed = False`；
-  - `barrier_join` 通过时 `state.barrier_join_result.passed = True`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁40 鏂板 RenderGuard 鍚庯紝`graph_streaming.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0414 M40-R锛歡raph_executor.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-### TASK-0403 M40-G：graph_executor.py 集成 RenderGuard
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁40 鏂板 barrier_join 鍜?RenderGuard 闆嗘垚浠ｇ爜鍚庯紝`graph_executor.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0415 M40-S锛歡raph_evidence.py 濂戠害娴嬭瘯琛屾暟闄愬埗鏇存柊
 
-- 状态：DONE
-- 任务描述：修改 `graph_executor.py` 的 `_run_single_step` 方法，在 Render Stream 发射后调用 `RenderGuard.validate_render_output()` 进行渲染输出授权。
-  - 在 `render_snapshot_ref` 写入后调用 `RenderGuard.validate_render_output()`；
-  - `RenderGuard` 失败时写入 `render_guard_result` 并写入降级通知到 `presence_events`；
-  - `RenderGuard` 通过时写入 `render_guard_result`（`passed=True`）；
-  - 静默降级：`RenderGuard` 失败时不影响主图执行。
-- 输入：`render_output`（来自 payload）、`commit_snapshot`。
-- 输出：`state.render_guard_result` 已更新。
-- 验收标准：
-  - `render_snapshot_ref` 非空时调用 `RenderGuard.validate_render_output()`；
-  - `RenderGuard` 失败时 `state.render_guard_result.passed = False`；
-  - `RenderGuard` 通过时 `state.render_guard_result.passed = True`；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_executor.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁40 鏂板 barrier_join_log 琛ㄥ拰鍐欏叆鏂规硶鍚庯紝`graph_evidence.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10銆?
+### TASK-0416 M40-T锛歁40 浠ｇ爜瀹℃煡鎶ュ憡
 
-### TASK-0404 M40-H：graph_evidence.py 新增 barrier_join_log 表和写入方法
-
-- 状态：DONE
-- 任务描述：修改 `graph_evidence.py`，新增 `barrier_join_log` 表和 `write_barrier_join`、`query_barrier_join` 方法。
-- 输入：`BarrierJoinResult`、`request_id`、`graph_id`。
-- 输出：
-  - `barrier_join_log` 表（`id`、`request_id`、`graph_id`、`passed`、`failed_branches_json`、`join_policy_ref`、`reason`、`ts_ms`）；
-  - `EvidencePlane.write_barrier_join(request_id, graph_id, barrier_join_result)` 方法；
-  - `EvidencePlane.query_barrier_join(request_id)` 方法（测试用）。
-- 验收标准：
-  - `write_barrier_join` 将 barrier_join 结果写入 `barrier_join_log` 表；
-  - 写入失败时静默降级；
-  - `query_barrier_join` 返回正确的记录；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
-
-### TASK-0405 M40-I：graph_runtime.py 集成 barrier_join_log 写入 Evidence Plane
-
-- 状态：DONE
-- 任务描述：修改 `graph_runtime.py` 的 `_write_evidence` 方法，在图执行完成后若 `state.barrier_join_result` 非空，将 barrier_join 结果写入 Evidence Plane。
-- 输入：`state.barrier_join_result`（若非空）。
-- 输出：`EvidencePlane.write_barrier_join()` 调用（若 `barrier_join_result` 非空）。
-- 验收标准：
-  - `barrier_join_result` 非空时调用 `write_barrier_join`；
-  - 写入失败时静默降级；
-  - 现有测试无回归。
-- 涉及文件路径：`host_brain/integrations/graph_runtime.py`（修改）。
-- 关联需求：ModelPlane.md §10 Rule 4。
-
-### TASK-0406 M40-J：barrier_join() 核心专项测试（T-BJ-01~10）
-
-- 状态：DONE
-- 任务描述：新增 barrier_join() 核心专项测试，验证并行分支 fan-in 校验的正确性。
-- 输入：`barrier_join`、`AuditTicket`、`BarrierJoinResult`、`build_audit_ticket`。
-- 输出：`tests/unit/test_barrier_join_m40.py`（新增）：T-BJ-01~10。
-- 验收标准：
-  - T-BJ-01：所有分支有 audit_commit 时 passed=True；
-  - T-BJ-02：任一分支缺 audit_commit 时 passed=False；
-  - T-BJ-03：failed_branches 包含所有缺证据的分支 ID；
-  - T-BJ-04：空 branch_manifest 时 passed=True（无分支无需校验）；
-  - T-BJ-05：join_policy=strict 时任一失败则 passed=False；
-  - T-BJ-06：join_policy=partial 时记录 join_policy_ref；
-  - T-BJ-07：build_audit_ticket 返回有效 AuditTicket；
-  - T-BJ-08：AuditTicket.audit_commit 非空；
-  - T-BJ-09：output_digest 不一致时 passed=False（若提供 audit_tickets）；
-  - T-BJ-10：output_digest 一致时 passed=True（若提供 audit_tickets）。
-- 涉及文件路径：`tests/unit/test_barrier_join_m40.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4；`LangGraph_Governed_Runtime_Solution` §4.2。
-
-### TASK-0407 M40-K：RenderGuard 核心专项测试（T-RG-01~08）
-
-- 状态：DONE
-- 任务描述：新增 RenderGuard 核心专项测试，验证渲染输出授权的正确性。
-- 输入：`RenderGuard`、`RenderGuardResult`、`CommitSnapshot`。
-- 输出：`tests/unit/test_render_guard_m40.py`（新增）：T-RG-01~08。
-- 验收标准：
-  - T-RG-01：render 输出只修改允许字段时 passed=True；
-  - T-RG-02：render 输出修改 locked_fields 中的字段时 passed=False；
-  - T-RG-03：render 输出修改 intent_commit 时 passed=False；
-  - T-RG-04：violated_fields 包含所有违规字段名；
-  - T-RG-05：render 输出修改 display_ 前缀字段时 passed=True；
-  - T-RG-06：render 输出修改 render_text 时 passed=True；
-  - T-RG-07：commit_snapshot 为 None 时 passed=False；
-  - T-RG-08：render 输出为空时 passed=True。
-- 涉及文件路径：`tests/unit/test_render_guard_m40.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5；`LangGraph_Governed_Runtime_Solution` §4.5。
-
-### TASK-0408 M40-L：barrier_join executor 集成测试（T-BJ-INT-01~03）
-
-- 状态：DONE
-- 任务描述：新增 barrier_join executor 集成测试，验证 graph_executor.py 中 barrier_join 的正确集成。
-- 输入：`GraphExecutor._run_single_step`、`branch_specs`、`branch_manifest`。
-- 输出：`tests/unit/test_barrier_join_executor_integration_m40.py`（新增）：T-BJ-INT-01~03。
-- 验收标准：
-  - T-BJ-INT-01：branch_manifest 非空时 state.barrier_join_result 非空；
-  - T-BJ-INT-02：所有分支有 audit_commit 时 barrier_join_result.passed=True；
-  - T-BJ-INT-03：任一分支缺 audit_commit 时 barrier_join_result.passed=False。
-- 涉及文件路径：`tests/unit/test_barrier_join_executor_integration_m40.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4。
-
-### TASK-0409 M40-M：RenderGuard executor 集成测试（T-RG-INT-01~03）
-
-- 状态：DONE
-- 任务描述：新增 RenderGuard executor 集成测试，验证 graph_executor.py 中 RenderGuard 的正确集成。
-- 输入：`GraphExecutor._run_single_step`、`commit_snapshot`、`render_output`。
-- 输出：`tests/unit/test_render_guard_executor_integration_m40.py`（新增）：T-RG-INT-01~03。
-- 验收标准：
-  - T-RG-INT-01：render_snapshot_ref 非空时 state.render_guard_result 非空；
-  - T-RG-INT-02：render 输出合法时 render_guard_result.passed=True；
-  - T-RG-INT-03：render 输出违规时 render_guard_result.passed=False。
-- 涉及文件路径：`tests/unit/test_render_guard_executor_integration_m40.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 5。
-
-### TASK-0410 M40-N：Evidence Plane barrier_join_log 写入专项测试（T-EVP-18~20）
-
-- 状态：DONE
-- 任务描述：新增 Evidence Plane barrier_join_log 写入专项测试。
-- 输入：`EvidencePlane.write_barrier_join`。
-- 输出：`tests/unit/test_evidence_barrier_join_m40.py`（新增）：T-EVP-18~20。
-- 验收标准：
-  - T-EVP-18：write_barrier_join 将结果写入 SQLite barrier_join_log 表；
-  - T-EVP-19：barrier_join_log 表包含正确的字段；
-  - T-EVP-20：write_barrier_join 写入失败时静默降级。
-- 涉及文件路径：`tests/unit/test_evidence_barrier_join_m40.py`（新增）。
-- 关联需求：ModelPlane.md §10 Rule 4。
-
-### TASK-0411 M40-O：ModelPlane.md §10 更新实现状态
-
-- 状态：DONE
-- 任务描述：更新 `ModelPlane.md` §10 中的能力三档分类表，将 barrier_join() 和 RenderGuard 标记为 M40 已实现。
-- 输入：现有 ModelPlane.md §10。
-- 输出：ModelPlane.md §10 能力三档分类表更新（M40 实现项标注 ✅）。
-- 验收标准：
-  - `barrier_join()（并行分支 fan-in 校验）` 标注 ✅ M40 已实现；
-  - `RenderGuard（渲染输出授权）` 标注 ✅ M40 已实现；
-  - 其余后续里程碑项保持不变。
-- 涉及文件路径：`docs/30_devspec/ModelPlane.md`（修改）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §11.2。
-
-### TASK-0412 M40-P：graph_branch.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M40 新增 AuditTicket、BarrierJoinResult、barrier_join() 后，`graph_branch.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0413 M40-Q：graph_streaming.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M40 新增 RenderGuard 后，`graph_streaming.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0414 M40-R：graph_executor.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M40 新增 barrier_join 和 RenderGuard 集成代码后，`graph_executor.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0415 M40-S：graph_evidence.py 契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M40 新增 barrier_join_log 表和写入方法后，`graph_evidence.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §10。
-
-### TASK-0416 M40-T：M40 代码审查报告
-
-- 状态：DONE
-- 任务描述：TASK-0397~0415 全部 DONE 后，生成 M40 代码审查报告，记录 barrier_join() + RenderGuard 的实现情况。
-- 输入：TASK-0397~0415 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m40_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0397~0415 全部 19 个任务的变更摘要；
-  - 新增测试 ≥ 24 个（T-BJ-01~10 + T-RG-01~08 + T-BJ-INT-01~03 + T-RG-INT-01~03 + T-EVP-18~20），全部通过；
-  - barrier_join() 完整落地（AuditTicket + BarrierJoinResult + barrier_join()）；
-  - RenderGuard 完整落地（RenderGuardResult + validate_render_output()）；
-  - ModelPlane.md §10 实现状态更新；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m40_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；`LangGraph_Governed_Runtime_Solution` §4.2、§4.5、§6、§11.2。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0397~0415 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M40 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?barrier_join() + RenderGuard 鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0397~0415 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m40_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0397~0415 鍏ㄩ儴 19 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?24 涓紙T-BJ-01~10 + T-RG-01~08 + T-BJ-INT-01~03 + T-RG-INT-01~03 + T-EVP-18~20锛夛紝鍏ㄩ儴閫氳繃锛?  - barrier_join() 瀹屾暣钀藉湴锛圓uditTicket + BarrierJoinResult + barrier_join()锛夛紱
+  - RenderGuard 瀹屾暣钀藉湴锛圧enderGuardResult + validate_render_output()锛夛紱
+  - ModelPlane.md 搂10 瀹炵幇鐘舵€佹洿鏂帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m40_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛沗LangGraph_Governed_Runtime_Solution` 搂4.2銆伮?.5銆伮?銆伮?1.2銆?
 ---
 
-## M41：Evidence Plane 写入压力评估与分级写入优化
-
-> **里程碑目标**：评估 Governed Runtime Contract 五条规则全部落地后 Evidence Plane 的写入压力，实现分级写入策略（Critical 同步 / Non-critical 异步队列）、写入失败熔断机制、分区索引优化，防止 Evidence Plane 成为生产吞吐瓶颈。
->
-> **背景**：`LangGraph_Governed_Runtime_Solution` §11.1 明确指出：一旦子图透明化、分支 manifest、每节点前后摘要、`llm_call_log`、`replay_index`、`presence/commit/render` 三类事件流全部上线，写入量会从"审计日志"膨胀为"事件源系统"，Evidence Plane 将不再只是留痕，而会变成**吞吐瓶颈、延迟放大器、甚至故障传播点**。
->
-> **约束**：本里程碑为纯代码层工程优化，不依赖真实运行环境，全部通过单元测试 + mock 验证。
-
+## M41锛欵vidence Plane 鍐欏叆鍘嬪姏璇勪及涓庡垎绾у啓鍏ヤ紭鍖?
+> **閲岀▼纰戠洰鏍?*锛氳瘎浼?Governed Runtime Contract 浜旀潯瑙勫垯鍏ㄩ儴钀藉湴鍚?Evidence Plane 鐨勫啓鍏ュ帇鍔涳紝瀹炵幇鍒嗙骇鍐欏叆绛栫暐锛圕ritical 鍚屾 / Non-critical 寮傛闃熷垪锛夈€佸啓鍏ュけ璐ョ啍鏂満鍒躲€佸垎鍖虹储寮曚紭鍖栵紝闃叉 Evidence Plane 鎴愪负鐢熶骇鍚炲悙鐡堕銆?>
+> **鑳屾櫙**锛歚LangGraph_Governed_Runtime_Solution` 搂11.1 鏄庣‘鎸囧嚭锛氫竴鏃﹀瓙鍥鹃€忔槑鍖栥€佸垎鏀?manifest銆佹瘡鑺傜偣鍓嶅悗鎽樿銆乣llm_call_log`銆乣replay_index`銆乣presence/commit/render` 涓夌被浜嬩欢娴佸叏閮ㄤ笂绾匡紝鍐欏叆閲忎細浠?瀹¤鏃ュ織"鑶ㄨ儉涓?浜嬩欢婧愮郴缁?锛孍vidence Plane 灏嗕笉鍐嶅彧鏄暀鐥曪紝鑰屼細鍙樻垚**鍚炲悙鐡堕銆佸欢杩熸斁澶у櫒銆佺敋鑷虫晠闅滀紶鎾偣**銆?>
+> **绾︽潫**锛氭湰閲岀▼纰戜负绾唬鐮佸眰宸ョ▼浼樺寲锛屼笉渚濊禆鐪熷疄杩愯鐜锛屽叏閮ㄩ€氳繃鍗曞厓娴嬭瘯 + mock 楠岃瘉銆?
 ---
 
-### TASK-0417 M41-A：Evidence Plane 写入延迟基准测量工具
+### TASK-0417 M41-A锛欵vidence Plane 鍐欏叆寤惰繜鍩哄噯娴嬮噺宸ュ叿
 
-- 状态：DONE
-- 任务描述：新增 `EvidencePlane` 写入延迟基准测量工具，测量当前各写入方法的 P50/P95/P99 延迟，建立基准数据，为分级写入策略提供依据。
-- 输入：现有 `graph_evidence.py` 中的所有 `write_*` 方法（`write_route_token`、`write_branch_manifest`、`write_subgraph_trace`、`write_llm_call`、`write_barrier_join`、`write_render_event`）。
-- 输出：
-  - `host_brain/integrations/evidence_bench.py`（新增）：`EvidenceBench` 类，提供 `measure_write_latency(method, n=1000)` 方法，返回 `{p50, p95, p99, mean, max}` 延迟统计；
-  - `tests/unit/test_evidence_bench_m41.py`（新增）：T-EVP-BENCH-01~04。
-- 验收标准：
-  - T-EVP-BENCH-01：`measure_write_latency` 对 `write_route_token` 返回包含 p50/p95/p99 的字典；
-  - T-EVP-BENCH-02：`measure_write_latency` 对 `write_branch_manifest` 返回包含 p50/p95/p99 的字典；
-  - T-EVP-BENCH-03：`measure_write_latency` 对 `write_barrier_join` 返回包含 p50/p95/p99 的字典；
-  - T-EVP-BENCH-04：`measure_write_latency` 对 `write_render_event` 返回包含 p50/p95/p99 的字典。
-- 涉及文件路径：`host_brain/integrations/evidence_bench.py`（新增）；`tests/unit/test_evidence_bench_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`EvidencePlane` 鍐欏叆寤惰繜鍩哄噯娴嬮噺宸ュ叿锛屾祴閲忓綋鍓嶅悇鍐欏叆鏂规硶鐨?P50/P95/P99 寤惰繜锛屽缓绔嬪熀鍑嗘暟鎹紝涓哄垎绾у啓鍏ョ瓥鐣ユ彁渚涗緷鎹€?- 杈撳叆锛氱幇鏈?`graph_evidence.py` 涓殑鎵€鏈?`write_*` 鏂规硶锛坄write_route_token`銆乣write_branch_manifest`銆乣write_subgraph_trace`銆乣write_llm_call`銆乣write_barrier_join`銆乣write_render_event`锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/evidence_bench.py`锛堟柊澧烇級锛歚EvidenceBench` 绫伙紝鎻愪緵 `measure_write_latency(method, n=1000)` 鏂规硶锛岃繑鍥?`{p50, p95, p99, mean, max}` 寤惰繜缁熻锛?  - `tests/unit/test_evidence_bench_m41.py`锛堟柊澧烇級锛歍-EVP-BENCH-01~04銆?- 楠屾敹鏍囧噯锛?  - T-EVP-BENCH-01锛歚measure_write_latency` 瀵?`write_route_token` 杩斿洖鍖呭惈 p50/p95/p99 鐨勫瓧鍏革紱
+  - T-EVP-BENCH-02锛歚measure_write_latency` 瀵?`write_branch_manifest` 杩斿洖鍖呭惈 p50/p95/p99 鐨勫瓧鍏革紱
+  - T-EVP-BENCH-03锛歚measure_write_latency` 瀵?`write_barrier_join` 杩斿洖鍖呭惈 p50/p95/p99 鐨勫瓧鍏革紱
+  - T-EVP-BENCH-04锛歚measure_write_latency` 瀵?`write_render_event` 杩斿洖鍖呭惈 p50/p95/p99 鐨勫瓧鍏搞€?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/evidence_bench.py`锛堟柊澧烇級锛沗tests/unit/test_evidence_bench_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1銆?
 ---
 
-### TASK-0418 M41-B：Evidence Plane 写入优先级分级枚举
-
-- 状态：DONE
-- 任务描述：在 `graph_evidence.py` 中新增 `WritePriority` 枚举，将所有写入方法按主权影响分为 `CRITICAL`（同步必写）和 `NON_CRITICAL`（可异步）两级，并为每个 `write_*` 方法标注默认优先级。
-- 输入：现有 `graph_evidence.py`。
-- 输出：
-  - `graph_evidence.py`（修改）：新增 `WritePriority(Enum)` 枚举（`CRITICAL = "critical"`、`NON_CRITICAL = "non_critical"`）；各 `write_*` 方法新增 `priority: WritePriority` 参数（默认值按规则设定）；
-  - 分级规则：`write_route_token` → `CRITICAL`；`write_branch_manifest` → `CRITICAL`；`write_barrier_join` → `CRITICAL`；`write_llm_call` → `NON_CRITICAL`；`write_subgraph_trace` → `NON_CRITICAL`；`write_render_event` → `NON_CRITICAL`；
-  - `tests/unit/test_evidence_priority_m41.py`（新增）：T-EVP-PRI-01~06。
-- 验收标准：
-  - T-EVP-PRI-01：`WritePriority` 枚举包含 `CRITICAL` 和 `NON_CRITICAL` 两个值；
-  - T-EVP-PRI-02：`write_route_token` 默认优先级为 `CRITICAL`；
-  - T-EVP-PRI-03：`write_branch_manifest` 默认优先级为 `CRITICAL`；
-  - T-EVP-PRI-04：`write_barrier_join` 默认优先级为 `CRITICAL`；
-  - T-EVP-PRI-05：`write_llm_call` 默认优先级为 `NON_CRITICAL`；
-  - T-EVP-PRI-06：`write_render_event` 默认优先级为 `NON_CRITICAL`。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_priority_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+### TASK-0418 M41-B锛欵vidence Plane 鍐欏叆浼樺厛绾у垎绾ф灇涓?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `graph_evidence.py` 涓柊澧?`WritePriority` 鏋氫妇锛屽皢鎵€鏈夊啓鍏ユ柟娉曟寜涓绘潈褰卞搷鍒嗕负 `CRITICAL`锛堝悓姝ュ繀鍐欙級鍜?`NON_CRITICAL`锛堝彲寮傛锛変袱绾э紝骞朵负姣忎釜 `write_*` 鏂规硶鏍囨敞榛樿浼樺厛绾с€?- 杈撳叆锛氱幇鏈?`graph_evidence.py`銆?- 杈撳嚭锛?  - `graph_evidence.py`锛堜慨鏀癸級锛氭柊澧?`WritePriority(Enum)` 鏋氫妇锛坄CRITICAL = "critical"`銆乣NON_CRITICAL = "non_critical"`锛夛紱鍚?`write_*` 鏂规硶鏂板 `priority: WritePriority` 鍙傛暟锛堥粯璁ゅ€兼寜瑙勫垯璁惧畾锛夛紱
+  - 鍒嗙骇瑙勫垯锛歚write_route_token` 鈫?`CRITICAL`锛沗write_branch_manifest` 鈫?`CRITICAL`锛沗write_barrier_join` 鈫?`CRITICAL`锛沗write_llm_call` 鈫?`NON_CRITICAL`锛沗write_subgraph_trace` 鈫?`NON_CRITICAL`锛沗write_render_event` 鈫?`NON_CRITICAL`锛?  - `tests/unit/test_evidence_priority_m41.py`锛堟柊澧烇級锛歍-EVP-PRI-01~06銆?- 楠屾敹鏍囧噯锛?  - T-EVP-PRI-01锛歚WritePriority` 鏋氫妇鍖呭惈 `CRITICAL` 鍜?`NON_CRITICAL` 涓や釜鍊硷紱
+  - T-EVP-PRI-02锛歚write_route_token` 榛樿浼樺厛绾т负 `CRITICAL`锛?  - T-EVP-PRI-03锛歚write_branch_manifest` 榛樿浼樺厛绾т负 `CRITICAL`锛?  - T-EVP-PRI-04锛歚write_barrier_join` 榛樿浼樺厛绾т负 `CRITICAL`锛?  - T-EVP-PRI-05锛歚write_llm_call` 榛樿浼樺厛绾т负 `NON_CRITICAL`锛?  - T-EVP-PRI-06锛歚write_render_event` 榛樿浼樺厛绾т负 `NON_CRITICAL`銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級锛沗tests/unit/test_evidence_priority_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-### TASK-0419 M41-C：Evidence Plane 异步写入队列
+### TASK-0419 M41-C锛欵vidence Plane 寮傛鍐欏叆闃熷垪
 
-- 状态：DONE
-- 任务描述：新增 `EvidenceWriteQueue` 类，为 `NON_CRITICAL` 级写入提供异步队列缓冲，支持批量落库，避免非关键写入阻塞主流程。
-- 输入：`WritePriority` 枚举（TASK-0418）；现有 `EvidencePlane`。
-- 输出：
-  - `host_brain/integrations/evidence_write_queue.py`（新增）：`EvidenceWriteQueue` 类，提供 `enqueue(write_fn, *args, **kwargs)`、`flush(timeout_ms=500)`、`queue_size()` 方法；内部使用 `collections.deque` 作为缓冲区；`flush()` 批量执行队列中的写入操作；
-  - `EvidencePlane` 集成：`NON_CRITICAL` 写入自动路由到 `EvidenceWriteQueue`，`CRITICAL` 写入保持同步直写；
-  - `tests/unit/test_evidence_write_queue_m41.py`（新增）：T-EVP-QUEUE-01~06。
-- 验收标准：
-  - T-EVP-QUEUE-01：`enqueue()` 将写入任务加入队列，`queue_size()` 返回正确数量；
-  - T-EVP-QUEUE-02：`flush()` 执行队列中所有写入任务并清空队列；
-  - T-EVP-QUEUE-03：`flush(timeout_ms=100)` 超时后停止执行并返回剩余队列大小；
-  - T-EVP-QUEUE-04：`CRITICAL` 写入（`write_route_token`）绕过队列直接同步执行；
-  - T-EVP-QUEUE-05：`NON_CRITICAL` 写入（`write_llm_call`）进入队列，不立即执行；
-  - T-EVP-QUEUE-06：队列满时（超过 `max_size`）新写入触发 `flush()` 后再入队。
-- 涉及文件路径：`host_brain/integrations/evidence_write_queue.py`（新增）；`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_write_queue_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`EvidenceWriteQueue` 绫伙紝涓?`NON_CRITICAL` 绾у啓鍏ユ彁渚涘紓姝ラ槦鍒楃紦鍐诧紝鏀寔鎵归噺钀藉簱锛岄伩鍏嶉潪鍏抽敭鍐欏叆闃诲涓绘祦绋嬨€?- 杈撳叆锛歚WritePriority` 鏋氫妇锛圱ASK-0418锛夛紱鐜版湁 `EvidencePlane`銆?- 杈撳嚭锛?  - `host_brain/integrations/evidence_write_queue.py`锛堟柊澧烇級锛歚EvidenceWriteQueue` 绫伙紝鎻愪緵 `enqueue(write_fn, *args, **kwargs)`銆乣flush(timeout_ms=500)`銆乣queue_size()` 鏂规硶锛涘唴閮ㄤ娇鐢?`collections.deque` 浣滀负缂撳啿鍖猴紱`flush()` 鎵归噺鎵ц闃熷垪涓殑鍐欏叆鎿嶄綔锛?  - `EvidencePlane` 闆嗘垚锛歚NON_CRITICAL` 鍐欏叆鑷姩璺敱鍒?`EvidenceWriteQueue`锛宍CRITICAL` 鍐欏叆淇濇寔鍚屾鐩村啓锛?  - `tests/unit/test_evidence_write_queue_m41.py`锛堟柊澧烇級锛歍-EVP-QUEUE-01~06銆?- 楠屾敹鏍囧噯锛?  - T-EVP-QUEUE-01锛歚enqueue()` 灏嗗啓鍏ヤ换鍔″姞鍏ラ槦鍒楋紝`queue_size()` 杩斿洖姝ｇ‘鏁伴噺锛?  - T-EVP-QUEUE-02锛歚flush()` 鎵ц闃熷垪涓墍鏈夊啓鍏ヤ换鍔″苟娓呯┖闃熷垪锛?  - T-EVP-QUEUE-03锛歚flush(timeout_ms=100)` 瓒呮椂鍚庡仠姝㈡墽琛屽苟杩斿洖鍓╀綑闃熷垪澶у皬锛?  - T-EVP-QUEUE-04锛歚CRITICAL` 鍐欏叆锛坄write_route_token`锛夌粫杩囬槦鍒楃洿鎺ュ悓姝ユ墽琛岋紱
+  - T-EVP-QUEUE-05锛歚NON_CRITICAL` 鍐欏叆锛坄write_llm_call`锛夎繘鍏ラ槦鍒楋紝涓嶇珛鍗虫墽琛岋紱
+  - T-EVP-QUEUE-06锛氶槦鍒楁弧鏃讹紙瓒呰繃 `max_size`锛夋柊鍐欏叆瑙﹀彂 `flush()` 鍚庡啀鍏ラ槦銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/evidence_write_queue.py`锛堟柊澧烇級锛沗host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級锛沗tests/unit/test_evidence_write_queue_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-### TASK-0420 M41-D：Evidence Plane 写入失败熔断机制
+### TASK-0420 M41-D锛欵vidence Plane 鍐欏叆澶辫触鐔旀柇鏈哄埗
 
-- 状态：DONE
-- 任务描述：新增 `EvidenceCircuitBreaker` 类，当 Evidence Plane 写入连续失败超过阈值时触发熔断，降级为内存缓冲 + 批量落库，防止写入故障传播到主流程。
-- 输入：现有 `EvidencePlane`；`EvidenceWriteQueue`（TASK-0419）。
-- 输出：
-  - `host_brain/integrations/evidence_circuit_breaker.py`（新增）：`EvidenceCircuitBreaker` 类，状态机包含 `CLOSED`（正常）、`OPEN`（熔断）、`HALF_OPEN`（探测恢复）三态；`failure_threshold`（默认 5）、`recovery_timeout_ms`（默认 10000）可配置；熔断时写入转入内存缓冲 `_memory_buffer: list`；`HALF_OPEN` 状态下允许单次探测写入；
-  - `EvidencePlane` 集成：所有写入经过 `EvidenceCircuitBreaker` 保护；
-  - `tests/unit/test_evidence_circuit_breaker_m41.py`（新增）：T-EVP-CB-01~08。
-- 验收标准：
-  - T-EVP-CB-01：初始状态为 `CLOSED`，写入正常执行；
-  - T-EVP-CB-02：连续失败 `failure_threshold` 次后状态变为 `OPEN`；
-  - T-EVP-CB-03：`OPEN` 状态下写入不执行，转入 `_memory_buffer`；
-  - T-EVP-CB-04：`OPEN` 状态持续 `recovery_timeout_ms` 后自动转为 `HALF_OPEN`；
-  - T-EVP-CB-05：`HALF_OPEN` 状态下探测写入成功后状态恢复为 `CLOSED`；
-  - T-EVP-CB-06：`HALF_OPEN` 状态下探测写入失败后状态回退为 `OPEN`；
-  - T-EVP-CB-07：`CRITICAL` 写入在 `OPEN` 状态下仍写入 `_memory_buffer`，不丢失；
-  - T-EVP-CB-08：`get_buffer_snapshot()` 返回当前内存缓冲中的所有待写入记录。
-- 涉及文件路径：`host_brain/integrations/evidence_circuit_breaker.py`（新增）；`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_circuit_breaker_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`EvidenceCircuitBreaker` 绫伙紝褰?Evidence Plane 鍐欏叆杩炵画澶辫触瓒呰繃闃堝€兼椂瑙﹀彂鐔旀柇锛岄檷绾т负鍐呭瓨缂撳啿 + 鎵归噺钀藉簱锛岄槻姝㈠啓鍏ユ晠闅滀紶鎾埌涓绘祦绋嬨€?- 杈撳叆锛氱幇鏈?`EvidencePlane`锛沗EvidenceWriteQueue`锛圱ASK-0419锛夈€?- 杈撳嚭锛?  - `host_brain/integrations/evidence_circuit_breaker.py`锛堟柊澧烇級锛歚EvidenceCircuitBreaker` 绫伙紝鐘舵€佹満鍖呭惈 `CLOSED`锛堟甯革級銆乣OPEN`锛堢啍鏂級銆乣HALF_OPEN`锛堟帰娴嬫仮澶嶏級涓夋€侊紱`failure_threshold`锛堥粯璁?5锛夈€乣recovery_timeout_ms`锛堥粯璁?10000锛夊彲閰嶇疆锛涚啍鏂椂鍐欏叆杞叆鍐呭瓨缂撳啿 `_memory_buffer: list`锛沗HALF_OPEN` 鐘舵€佷笅鍏佽鍗曟鎺㈡祴鍐欏叆锛?  - `EvidencePlane` 闆嗘垚锛氭墍鏈夊啓鍏ョ粡杩?`EvidenceCircuitBreaker` 淇濇姢锛?  - `tests/unit/test_evidence_circuit_breaker_m41.py`锛堟柊澧烇級锛歍-EVP-CB-01~08銆?- 楠屾敹鏍囧噯锛?  - T-EVP-CB-01锛氬垵濮嬬姸鎬佷负 `CLOSED`锛屽啓鍏ユ甯告墽琛岋紱
+  - T-EVP-CB-02锛氳繛缁け璐?`failure_threshold` 娆″悗鐘舵€佸彉涓?`OPEN`锛?  - T-EVP-CB-03锛歚OPEN` 鐘舵€佷笅鍐欏叆涓嶆墽琛岋紝杞叆 `_memory_buffer`锛?  - T-EVP-CB-04锛歚OPEN` 鐘舵€佹寔缁?`recovery_timeout_ms` 鍚庤嚜鍔ㄨ浆涓?`HALF_OPEN`锛?  - T-EVP-CB-05锛歚HALF_OPEN` 鐘舵€佷笅鎺㈡祴鍐欏叆鎴愬姛鍚庣姸鎬佹仮澶嶄负 `CLOSED`锛?  - T-EVP-CB-06锛歚HALF_OPEN` 鐘舵€佷笅鎺㈡祴鍐欏叆澶辫触鍚庣姸鎬佸洖閫€涓?`OPEN`锛?  - T-EVP-CB-07锛歚CRITICAL` 鍐欏叆鍦?`OPEN` 鐘舵€佷笅浠嶅啓鍏?`_memory_buffer`锛屼笉涓㈠け锛?  - T-EVP-CB-08锛歚get_buffer_snapshot()` 杩斿洖褰撳墠鍐呭瓨缂撳啿涓殑鎵€鏈夊緟鍐欏叆璁板綍銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/evidence_circuit_breaker.py`锛堟柊澧烇級锛沗host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級锛沗tests/unit/test_evidence_circuit_breaker_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-### TASK-0421 M41-E：Evidence Plane 分区索引优化
+### TASK-0421 M41-E锛欵vidence Plane 鍒嗗尯绱㈠紩浼樺寲
 
-- 状态：DONE
-- 任务描述：为 `barrier_join_log`、`subgraph_trace`、`llm_call_log` 三张高写入量表新增分区索引，提升查询性能，并通过迁移脚本幂等添加索引。
-- 输入：现有 `graph_evidence.py` 中的 SQLite 表结构；现有迁移机制。
-- 输出：
-  - `graph_evidence.py`（修改）：`_ensure_tables()` 中为以下表新增索引：
-    - `barrier_join_log`：`CREATE INDEX IF NOT EXISTS idx_bjl_run_id ON barrier_join_log(run_id)`；`CREATE INDEX IF NOT EXISTS idx_bjl_ts ON barrier_join_log(timestamp_ms)`；
-    - `subgraph_trace`：`CREATE INDEX IF NOT EXISTS idx_sgt_run_id ON subgraph_trace(run_id)`；`CREATE INDEX IF NOT EXISTS idx_sgt_parent_path ON subgraph_trace(parent_path)`；
-    - `llm_call_log`：`CREATE INDEX IF NOT EXISTS idx_lcl_run_id ON llm_call_log(run_id)`；`CREATE INDEX IF NOT EXISTS idx_lcl_node_id ON llm_call_log(node_id)`；
-  - `tests/unit/test_evidence_index_m41.py`（新增）：T-EVP-IDX-01~06。
-- 验收标准：
-  - T-EVP-IDX-01：`barrier_join_log` 表存在 `idx_bjl_run_id` 索引；
-  - T-EVP-IDX-02：`barrier_join_log` 表存在 `idx_bjl_ts` 索引；
-  - T-EVP-IDX-03：`subgraph_trace` 表存在 `idx_sgt_run_id` 索引；
-  - T-EVP-IDX-04：`subgraph_trace` 表存在 `idx_sgt_parent_path` 索引；
-  - T-EVP-IDX-05：`llm_call_log` 表存在 `idx_lcl_run_id` 索引；
-  - T-EVP-IDX-06：`_ensure_tables()` 重复调用时索引创建幂等（`IF NOT EXISTS` 不报错）。
-- 涉及文件路径：`host_brain/integrations/graph_evidence.py`（修改）；`tests/unit/test_evidence_index_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫负 `barrier_join_log`銆乣subgraph_trace`銆乣llm_call_log` 涓夊紶楂樺啓鍏ラ噺琛ㄦ柊澧炲垎鍖虹储寮曪紝鎻愬崌鏌ヨ鎬ц兘锛屽苟閫氳繃杩佺Щ鑴氭湰骞傜瓑娣诲姞绱㈠紩銆?- 杈撳叆锛氱幇鏈?`graph_evidence.py` 涓殑 SQLite 琛ㄧ粨鏋勶紱鐜版湁杩佺Щ鏈哄埗銆?- 杈撳嚭锛?  - `graph_evidence.py`锛堜慨鏀癸級锛歚_ensure_tables()` 涓负浠ヤ笅琛ㄦ柊澧炵储寮曪細
+    - `barrier_join_log`锛歚CREATE INDEX IF NOT EXISTS idx_bjl_run_id ON barrier_join_log(run_id)`锛沗CREATE INDEX IF NOT EXISTS idx_bjl_ts ON barrier_join_log(timestamp_ms)`锛?    - `subgraph_trace`锛歚CREATE INDEX IF NOT EXISTS idx_sgt_run_id ON subgraph_trace(run_id)`锛沗CREATE INDEX IF NOT EXISTS idx_sgt_parent_path ON subgraph_trace(parent_path)`锛?    - `llm_call_log`锛歚CREATE INDEX IF NOT EXISTS idx_lcl_run_id ON llm_call_log(run_id)`锛沗CREATE INDEX IF NOT EXISTS idx_lcl_node_id ON llm_call_log(node_id)`锛?  - `tests/unit/test_evidence_index_m41.py`锛堟柊澧烇級锛歍-EVP-IDX-01~06銆?- 楠屾敹鏍囧噯锛?  - T-EVP-IDX-01锛歚barrier_join_log` 琛ㄥ瓨鍦?`idx_bjl_run_id` 绱㈠紩锛?  - T-EVP-IDX-02锛歚barrier_join_log` 琛ㄥ瓨鍦?`idx_bjl_ts` 绱㈠紩锛?  - T-EVP-IDX-03锛歚subgraph_trace` 琛ㄥ瓨鍦?`idx_sgt_run_id` 绱㈠紩锛?  - T-EVP-IDX-04锛歚subgraph_trace` 琛ㄥ瓨鍦?`idx_sgt_parent_path` 绱㈠紩锛?  - T-EVP-IDX-05锛歚llm_call_log` 琛ㄥ瓨鍦?`idx_lcl_run_id` 绱㈠紩锛?  - T-EVP-IDX-06锛歚_ensure_tables()` 閲嶅璋冪敤鏃剁储寮曞垱寤哄箓绛夛紙`IF NOT EXISTS` 涓嶆姤閿欙級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/integrations/graph_evidence.py`锛堜慨鏀癸級锛沗tests/unit/test_evidence_index_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-### TASK-0422 M41-F：EvidencePlane 写入压力专项测试
+### TASK-0422 M41-F锛欵videncePlane 鍐欏叆鍘嬪姏涓撻」娴嬭瘯
 
-- 状态：DONE
-- 任务描述：新增 Evidence Plane 写入压力专项测试，验证分级写入策略、熔断机制、异步队列在高并发写入场景下的正确性（mock 模拟，不依赖真实环境）。
-- 输入：`WritePriority`（TASK-0418）；`EvidenceWriteQueue`（TASK-0419）；`EvidenceCircuitBreaker`（TASK-0420）。
-- 输出：`tests/unit/test_evidence_perf_m41.py`（新增）：T-EVP-PERF-01~05。
-- 验收标准：
-  - T-EVP-PERF-01：连续 100 次 `CRITICAL` 写入全部同步完成，无丢失；
-  - T-EVP-PERF-02：连续 100 次 `NON_CRITICAL` 写入全部进入队列，`flush()` 后全部落库；
-  - T-EVP-PERF-03：混合 50 次 `CRITICAL` + 50 次 `NON_CRITICAL` 写入，`CRITICAL` 全部同步完成，`NON_CRITICAL` 全部进入队列；
-  - T-EVP-PERF-04：写入失败注入（mock SQLite 抛异常）触发熔断后，`CRITICAL` 写入转入内存缓冲，不丢失；
-  - T-EVP-PERF-05：熔断恢复后，内存缓冲中的记录可通过 `get_buffer_snapshot()` 取出并重放写入。
-- 涉及文件路径：`tests/unit/test_evidence_perf_m41.py`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?Evidence Plane 鍐欏叆鍘嬪姏涓撻」娴嬭瘯锛岄獙璇佸垎绾у啓鍏ョ瓥鐣ャ€佺啍鏂満鍒躲€佸紓姝ラ槦鍒楀湪楂樺苟鍙戝啓鍏ュ満鏅笅鐨勬纭€э紙mock 妯℃嫙锛屼笉渚濊禆鐪熷疄鐜锛夈€?- 杈撳叆锛歚WritePriority`锛圱ASK-0418锛夛紱`EvidenceWriteQueue`锛圱ASK-0419锛夛紱`EvidenceCircuitBreaker`锛圱ASK-0420锛夈€?- 杈撳嚭锛歚tests/unit/test_evidence_perf_m41.py`锛堟柊澧烇級锛歍-EVP-PERF-01~05銆?- 楠屾敹鏍囧噯锛?  - T-EVP-PERF-01锛氳繛缁?100 娆?`CRITICAL` 鍐欏叆鍏ㄩ儴鍚屾瀹屾垚锛屾棤涓㈠け锛?  - T-EVP-PERF-02锛氳繛缁?100 娆?`NON_CRITICAL` 鍐欏叆鍏ㄩ儴杩涘叆闃熷垪锛宍flush()` 鍚庡叏閮ㄨ惤搴擄紱
+  - T-EVP-PERF-03锛氭贩鍚?50 娆?`CRITICAL` + 50 娆?`NON_CRITICAL` 鍐欏叆锛宍CRITICAL` 鍏ㄩ儴鍚屾瀹屾垚锛宍NON_CRITICAL` 鍏ㄩ儴杩涘叆闃熷垪锛?  - T-EVP-PERF-04锛氬啓鍏ュけ璐ユ敞鍏ワ紙mock SQLite 鎶涘紓甯革級瑙﹀彂鐔旀柇鍚庯紝`CRITICAL` 鍐欏叆杞叆鍐呭瓨缂撳啿锛屼笉涓㈠け锛?  - T-EVP-PERF-05锛氱啍鏂仮澶嶅悗锛屽唴瀛樼紦鍐蹭腑鐨勮褰曞彲閫氳繃 `get_buffer_snapshot()` 鍙栧嚭骞堕噸鏀惧啓鍏ャ€?- 娑夊強鏂囦欢璺緞锛歚tests/unit/test_evidence_perf_m41.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-### TASK-0423 M41-G：契约测试行数限制更新
-
-- 状态：DONE
-- 任务描述：M41 新增 `EvidenceWriteQueue`、`EvidenceCircuitBreaker`、`WritePriority` 后，`graph_evidence.py` 行数可能超出当前契约测试限制，需更新契约测试行数限制。
-- 输入：现有契约测试 `test_orch_refactor_contract.py`。
-- 输出：契约测试行数限制更新（若超出则调整上限）。
-- 验收标准：契约测试通过；行数限制合理。
-- 涉及文件路径：`tests/contract/test_orch_refactor_contract.py`（可能修改）。
-- 关联需求：ModelPlane.md §6。
-
+### TASK-0423 M41-G锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歁41 鏂板 `EvidenceWriteQueue`銆乣EvidenceCircuitBreaker`銆乣WritePriority` 鍚庯紝`graph_evidence.py` 琛屾暟鍙兘瓒呭嚭褰撳墠濂戠害娴嬭瘯闄愬埗锛岄渶鏇存柊濂戠害娴嬭瘯琛屾暟闄愬埗銆?- 杈撳叆锛氱幇鏈夊绾︽祴璇?`test_orch_refactor_contract.py`銆?- 杈撳嚭锛氬绾︽祴璇曡鏁伴檺鍒舵洿鏂帮紙鑻ヨ秴鍑哄垯璋冩暣涓婇檺锛夈€?- 楠屾敹鏍囧噯锛氬绾︽祴璇曢€氳繃锛涜鏁伴檺鍒跺悎鐞嗐€?- 娑夊強鏂囦欢璺緞锛歚tests/contract/test_orch_refactor_contract.py`锛堝彲鑳戒慨鏀癸級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂6銆?
 ---
 
-### TASK-0424 M41-H：M41 代码审查报告
+### TASK-0424 M41-H锛歁41 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：TASK-0417~0423 全部 DONE 后，生成 M41 代码审查报告，记录 Evidence Plane 写入压力评估与分级写入优化的实现情况。
-- 输入：TASK-0417~0423 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m41_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0417~0423 全部 7 个任务的变更摘要；
-  - 新增测试 ≥ 29 个（T-EVP-BENCH-01~04 + T-EVP-PRI-01~06 + T-EVP-QUEUE-01~06 + T-EVP-CB-01~08 + T-EVP-IDX-01~06 + T-EVP-PERF-01~05），全部通过；
-  - `WritePriority` 枚举完整落地（CRITICAL / NON_CRITICAL 两级）；
-  - `EvidenceWriteQueue` 完整落地（enqueue / flush / timeout）；
-  - `EvidenceCircuitBreaker` 完整落地（CLOSED / OPEN / HALF_OPEN 三态）；
-  - 分区索引完整落地（barrier_join_log / subgraph_trace / llm_call_log）；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m41_2026-03-06.md`（新增）。
-- 关联需求：`LangGraph_Governed_Runtime_Solution` §11.1；ModelPlane.md §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0417~0423 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M41 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Evidence Plane 鍐欏叆鍘嬪姏璇勪及涓庡垎绾у啓鍏ヤ紭鍖栫殑瀹炵幇鎯呭喌銆?- 杈撳叆锛歍ASK-0417~0423 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m41_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0417~0423 鍏ㄩ儴 7 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?29 涓紙T-EVP-BENCH-01~04 + T-EVP-PRI-01~06 + T-EVP-QUEUE-01~06 + T-EVP-CB-01~08 + T-EVP-IDX-01~06 + T-EVP-PERF-01~05锛夛紝鍏ㄩ儴閫氳繃锛?  - `WritePriority` 鏋氫妇瀹屾暣钀藉湴锛圕RITICAL / NON_CRITICAL 涓ょ骇锛夛紱
+  - `EvidenceWriteQueue` 瀹屾暣钀藉湴锛坋nqueue / flush / timeout锛夛紱
+  - `EvidenceCircuitBreaker` 瀹屾暣钀藉湴锛圕LOSED / OPEN / HALF_OPEN 涓夋€侊級锛?  - 鍒嗗尯绱㈠紩瀹屾暣钀藉湴锛坆arrier_join_log / subgraph_trace / llm_call_log锛夛紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m41_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細`LangGraph_Governed_Runtime_Solution` 搂11.1锛汳odelPlane.md 搂6銆?
 ---
 
-## M42：Tiered Governance — 分层治理架构
+## M42锛歍iered Governance 鈥?鍒嗗眰娌荤悊鏋舵瀯
 
-> **里程碑目标**：实现 Governor 分层治理，利用 `SkillMeta.risk_level` 对 Skill 进行风险分层（L0~L4），为不同风险等级的 Skill 提供差异化审批通道（Policy Cache 直接放行 / 规则引擎审批 / 全量审批 + AIRLOCK），防止未来接入大量 Skills 时"强主权 + 全量细审 + 串行审批"导致体验崩溃。
->
-> **背景**：当前 Governor 对所有 Skill 一视同仁，没有利用 `SkillMeta.risk_level` 做差异化审批。当 Skill 数量从 5 个增长到 50 个、500 个时，延迟爆炸、体验断裂、审计链膨胀三个维度的问题会同时爆发。分层治理的本质是让主权**更聪明**：高风险的地方更严，低风险的地方更快。
->
-> **约束**：不削弱主权，只让主权更精准。`CRITICAL` 路径（L3/L4）保持全量审批 + AIRLOCK，`GOV_AIRLOCK_REVIEW` 只保留给 L4，不再滥用。
-
+> **閲岀▼纰戠洰鏍?*锛氬疄鐜?Governor 鍒嗗眰娌荤悊锛屽埄鐢?`SkillMeta.risk_level` 瀵?Skill 杩涜椋庨櫓鍒嗗眰锛圠0~L4锛夛紝涓轰笉鍚岄闄╃瓑绾х殑 Skill 鎻愪緵宸紓鍖栧鎵归€氶亾锛圥olicy Cache 鐩存帴鏀捐 / 瑙勫垯寮曟搸瀹℃壒 / 鍏ㄩ噺瀹℃壒 + AIRLOCK锛夛紝闃叉鏈潵鎺ュ叆澶ч噺 Skills 鏃?寮轰富鏉?+ 鍏ㄩ噺缁嗗 + 涓茶瀹℃壒"瀵艰嚧浣撻獙宕╂簝銆?>
+> **鑳屾櫙**锛氬綋鍓?Governor 瀵规墍鏈?Skill 涓€瑙嗗悓浠侊紝娌℃湁鍒╃敤 `SkillMeta.risk_level` 鍋氬樊寮傚寲瀹℃壒銆傚綋 Skill 鏁伴噺浠?5 涓闀垮埌 50 涓€?00 涓椂锛屽欢杩熺垎鐐搞€佷綋楠屾柇瑁傘€佸璁￠摼鑶ㄨ儉涓変釜缁村害鐨勯棶棰樹細鍚屾椂鐖嗗彂銆傚垎灞傛不鐞嗙殑鏈川鏄涓绘潈**鏇磋仾鏄?*锛氶珮椋庨櫓鐨勫湴鏂规洿涓ワ紝浣庨闄╃殑鍦版柟鏇村揩銆?>
+> **绾︽潫**锛氫笉鍓婂急涓绘潈锛屽彧璁╀富鏉冩洿绮惧噯銆俙CRITICAL` 璺緞锛圠3/L4锛変繚鎸佸叏閲忓鎵?+ AIRLOCK锛宍GOV_AIRLOCK_REVIEW` 鍙繚鐣欑粰 L4锛屼笉鍐嶆互鐢ㄣ€?
 ---
 
-### TASK-0425 M42-A：RouteToken 新增分层令牌
+### TASK-0425 M42-A锛歊outeToken 鏂板鍒嗗眰浠ょ墝
 
-- 状态：DONE
-- 任务描述：在 `route_token.py` 中新增 `GOV_OK_CACHED`（Policy Cache 命中直接放行）和 `GOV_OK_RULE`（规则引擎审批通过）两个令牌，并更新 `compile_route_decision` 支持新令牌。
-- 输入：现有 `RouteToken` 枚举（`GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`）。
-- 输出：
-  - `host_brain/governor/route_token.py`（修改）：新增 `GOV_OK_CACHED = "GOV_OK_CACHED"` 和 `GOV_OK_RULE = "GOV_OK_RULE"`；`compile_route_decision` 新增 `tier` 参数（`"cache"` / `"rule"` / `"full"`），按 tier 选择令牌；
-  - `tests/unit/test_tiered_governance_m42.py`（新增）：T-TG-TOKEN-01~04。
-- 验收标准：
-  - T-TG-TOKEN-01：`RouteToken` 枚举包含 `GOV_OK_CACHED` 和 `GOV_OK_RULE`；
-  - T-TG-TOKEN-02：`compile_route_decision(approved=True, tier="cache")` 返回 `GOV_OK_CACHED`；
-  - T-TG-TOKEN-03：`compile_route_decision(approved=True, tier="rule")` 返回 `GOV_OK_RULE`；
-  - T-TG-TOKEN-04：`compile_route_decision(approved=True, tier="full")` 返回 `GOV_OK_RENDER`（向后兼容）。
-- 涉及文件路径：`host_brain/governor/route_token.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（新增）。
-- 关联需求：ModelPlane.md §10；DevSpec §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氬湪 `route_token.py` 涓柊澧?`GOV_OK_CACHED`锛圥olicy Cache 鍛戒腑鐩存帴鏀捐锛夊拰 `GOV_OK_RULE`锛堣鍒欏紩鎿庡鎵归€氳繃锛変袱涓护鐗岋紝骞舵洿鏂?`compile_route_decision` 鏀寔鏂颁护鐗屻€?- 杈撳叆锛氱幇鏈?`RouteToken` 鏋氫妇锛坄GOV_OK_RENDER` / `GOV_FAIL_FALLBACK` / `GOV_AIRLOCK_REVIEW` / `GOV_SECONDARY_REASONER`锛夈€?- 杈撳嚭锛?  - `host_brain/governor/route_token.py`锛堜慨鏀癸級锛氭柊澧?`GOV_OK_CACHED = "GOV_OK_CACHED"` 鍜?`GOV_OK_RULE = "GOV_OK_RULE"`锛沗compile_route_decision` 鏂板 `tier` 鍙傛暟锛坄"cache"` / `"rule"` / `"full"`锛夛紝鎸?tier 閫夋嫨浠ょ墝锛?  - `tests/unit/test_tiered_governance_m42.py`锛堟柊澧烇級锛歍-TG-TOKEN-01~04銆?- 楠屾敹鏍囧噯锛?  - T-TG-TOKEN-01锛歚RouteToken` 鏋氫妇鍖呭惈 `GOV_OK_CACHED` 鍜?`GOV_OK_RULE`锛?  - T-TG-TOKEN-02锛歚compile_route_decision(approved=True, tier="cache")` 杩斿洖 `GOV_OK_CACHED`锛?  - T-TG-TOKEN-03锛歚compile_route_decision(approved=True, tier="rule")` 杩斿洖 `GOV_OK_RULE`锛?  - T-TG-TOKEN-04锛歚compile_route_decision(approved=True, tier="full")` 杩斿洖 `GOV_OK_RENDER`锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/route_token.py`锛堜慨鏀癸級锛沗tests/unit/test_tiered_governance_m42.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6銆?
 ---
 
-### TASK-0426 M42-B：GovernorTierPolicy — Skill 风险分层策略
+### TASK-0426 M42-B锛欸overnorTierPolicy 鈥?Skill 椋庨櫓鍒嗗眰绛栫暐
 
-- 状态：DONE
-- 任务描述：新增 `GovernorTierPolicy` 类，将 `SkillMeta.risk_level(1-5)` 映射到审批通道（`"cache"` / `"rule"` / `"full"` / `"airlock"`），并定义各通道的审计级别（`"light"` / `"standard"` / `"full"`）。
-- 输入：`SkillMeta.risk_level`（1-5）；`SkillMeta.clearance`（LOW/MEDIUM/HIGH）；`SkillMeta.reversible`。
-- 输出：
-  - `host_brain/governor/tier_policy.py`（新增）：
-    - `ApprovalTier(Enum)`：`CACHE = "cache"`、`RULE = "rule"`、`FULL = "full"`、`AIRLOCK = "airlock"`；
-    - `AuditTier(Enum)`：`LIGHT = "light"`、`STANDARD = "standard"`、`FULL_AUDIT = "full_audit"`；
-    - `GovernorTierPolicy` 类，提供 `get_approval_tier(meta: SkillMeta) -> ApprovalTier` 和 `get_audit_tier(meta: SkillMeta) -> AuditTier` 方法；
-    - 分层规则：`risk_level=1` → `CACHE`；`risk_level=2` → `RULE`；`risk_level=3` → `FULL`；`risk_level=4` → `FULL`；`risk_level=5` → `AIRLOCK`；不可逆（`reversible=False`）且 `risk_level>=3` → 升一级；
-    - 审计规则：`CACHE` → `LIGHT`；`RULE` → `STANDARD`；`FULL` → `STANDARD`；`AIRLOCK` → `FULL_AUDIT`；
-  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-TIER-01~08。
-- 验收标准：
-  - T-TG-TIER-01：`risk_level=1` → `ApprovalTier.CACHE`；
-  - T-TG-TIER-02：`risk_level=2` → `ApprovalTier.RULE`；
-  - T-TG-TIER-03：`risk_level=3` → `ApprovalTier.FULL`；
-  - T-TG-TIER-04：`risk_level=4` → `ApprovalTier.FULL`；
-  - T-TG-TIER-05：`risk_level=5` → `ApprovalTier.AIRLOCK`；
-  - T-TG-TIER-06：`risk_level=3, reversible=False` → `ApprovalTier.FULL`（不可逆升级）；
-  - T-TG-TIER-07：`CACHE` → `AuditTier.LIGHT`；
-  - T-TG-TIER-08：`AIRLOCK` → `AuditTier.FULL_AUDIT`。
-- 涉及文件路径：`host_brain/governor/tier_policy.py`（新增）；`tests/unit/test_tiered_governance_m42.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6.1。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`GovernorTierPolicy` 绫伙紝灏?`SkillMeta.risk_level(1-5)` 鏄犲皠鍒板鎵归€氶亾锛坄"cache"` / `"rule"` / `"full"` / `"airlock"`锛夛紝骞跺畾涔夊悇閫氶亾鐨勫璁＄骇鍒紙`"light"` / `"standard"` / `"full"`锛夈€?- 杈撳叆锛歚SkillMeta.risk_level`锛?-5锛夛紱`SkillMeta.clearance`锛圠OW/MEDIUM/HIGH锛夛紱`SkillMeta.reversible`銆?- 杈撳嚭锛?  - `host_brain/governor/tier_policy.py`锛堟柊澧烇級锛?    - `ApprovalTier(Enum)`锛歚CACHE = "cache"`銆乣RULE = "rule"`銆乣FULL = "full"`銆乣AIRLOCK = "airlock"`锛?    - `AuditTier(Enum)`锛歚LIGHT = "light"`銆乣STANDARD = "standard"`銆乣FULL_AUDIT = "full_audit"`锛?    - `GovernorTierPolicy` 绫伙紝鎻愪緵 `get_approval_tier(meta: SkillMeta) -> ApprovalTier` 鍜?`get_audit_tier(meta: SkillMeta) -> AuditTier` 鏂规硶锛?    - 鍒嗗眰瑙勫垯锛歚risk_level=1` 鈫?`CACHE`锛沗risk_level=2` 鈫?`RULE`锛沗risk_level=3` 鈫?`FULL`锛沗risk_level=4` 鈫?`FULL`锛沗risk_level=5` 鈫?`AIRLOCK`锛涗笉鍙€嗭紙`reversible=False`锛変笖 `risk_level>=3` 鈫?鍗囦竴绾э紱
+    - 瀹¤瑙勫垯锛歚CACHE` 鈫?`LIGHT`锛沗RULE` 鈫?`STANDARD`锛沗FULL` 鈫?`STANDARD`锛沗AIRLOCK` 鈫?`FULL_AUDIT`锛?  - `tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級锛歍-TG-TIER-01~08銆?- 楠屾敹鏍囧噯锛?  - T-TG-TIER-01锛歚risk_level=1` 鈫?`ApprovalTier.CACHE`锛?  - T-TG-TIER-02锛歚risk_level=2` 鈫?`ApprovalTier.RULE`锛?  - T-TG-TIER-03锛歚risk_level=3` 鈫?`ApprovalTier.FULL`锛?  - T-TG-TIER-04锛歚risk_level=4` 鈫?`ApprovalTier.FULL`锛?  - T-TG-TIER-05锛歚risk_level=5` 鈫?`ApprovalTier.AIRLOCK`锛?  - T-TG-TIER-06锛歚risk_level=3, reversible=False` 鈫?`ApprovalTier.FULL`锛堜笉鍙€嗗崌绾э級锛?  - T-TG-TIER-07锛歚CACHE` 鈫?`AuditTier.LIGHT`锛?  - T-TG-TIER-08锛歚AIRLOCK` 鈫?`AuditTier.FULL_AUDIT`銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/tier_policy.py`锛堟柊澧烇級锛沗tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6.1銆?
 ---
 
-### TASK-0427 M42-C：GovernorPolicyCache — L0/L1 审批结果缓存
+### TASK-0427 M42-C锛欸overnorPolicyCache 鈥?L0/L1 瀹℃壒缁撴灉缂撳瓨
 
-- 状态：DONE
-- 任务描述：新增 `GovernorPolicyCache` 类，为 `CACHE` 通道（risk_level=1）的 Skill 提供审批结果缓存（TTL），相同 `(skill_name, session_trust_level)` 组合在 TTL 内复用上次审批结果，不重复调用规则引擎。
-- 输入：`ApprovalTier`（TASK-0426）；`SkillMeta`。
-- 输出：
-  - `host_brain/governor/policy_cache.py`（新增）：`GovernorPolicyCache` 类，提供 `get(skill_name, trust_level) -> bool | None`、`put(skill_name, trust_level, approved: bool)`、`invalidate(skill_name)`、`clear()` 方法；内部使用 `dict` + 时间戳实现 TTL；默认 `ttl_ms=60_000`（1 分钟）；
-  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-CACHE-01~06。
-- 验收标准：
-  - T-TG-CACHE-01：`put` 后 `get` 在 TTL 内返回缓存值；
-  - T-TG-CACHE-02：`get` 在 TTL 过期后返回 `None`；
-  - T-TG-CACHE-03：`invalidate(skill_name)` 后 `get` 返回 `None`；
-  - T-TG-CACHE-04：`clear()` 后所有缓存清空；
-  - T-TG-CACHE-05：不同 `trust_level` 的缓存互不干扰；
-  - T-TG-CACHE-06：`put(approved=False)` 后 `get` 返回 `False`（拒绝结果也可缓存）。
-- 涉及文件路径：`host_brain/governor/policy_cache.py`（新增）；`tests/unit/test_tiered_governance_m42.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`GovernorPolicyCache` 绫伙紝涓?`CACHE` 閫氶亾锛坮isk_level=1锛夌殑 Skill 鎻愪緵瀹℃壒缁撴灉缂撳瓨锛圱TL锛夛紝鐩稿悓 `(skill_name, session_trust_level)` 缁勫悎鍦?TTL 鍐呭鐢ㄤ笂娆″鎵圭粨鏋滐紝涓嶉噸澶嶈皟鐢ㄨ鍒欏紩鎿庛€?- 杈撳叆锛歚ApprovalTier`锛圱ASK-0426锛夛紱`SkillMeta`銆?- 杈撳嚭锛?  - `host_brain/governor/policy_cache.py`锛堟柊澧烇級锛歚GovernorPolicyCache` 绫伙紝鎻愪緵 `get(skill_name, trust_level) -> bool | None`銆乣put(skill_name, trust_level, approved: bool)`銆乣invalidate(skill_name)`銆乣clear()` 鏂规硶锛涘唴閮ㄤ娇鐢?`dict` + 鏃堕棿鎴冲疄鐜?TTL锛涢粯璁?`ttl_ms=60_000`锛? 鍒嗛挓锛夛紱
+  - `tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級锛歍-TG-CACHE-01~06銆?- 楠屾敹鏍囧噯锛?  - T-TG-CACHE-01锛歚put` 鍚?`get` 鍦?TTL 鍐呰繑鍥炵紦瀛樺€硷紱
+  - T-TG-CACHE-02锛歚get` 鍦?TTL 杩囨湡鍚庤繑鍥?`None`锛?  - T-TG-CACHE-03锛歚invalidate(skill_name)` 鍚?`get` 杩斿洖 `None`锛?  - T-TG-CACHE-04锛歚clear()` 鍚庢墍鏈夌紦瀛樻竻绌猴紱
+  - T-TG-CACHE-05锛氫笉鍚?`trust_level` 鐨勭紦瀛樹簰涓嶅共鎵帮紱
+  - T-TG-CACHE-06锛歚put(approved=False)` 鍚?`get` 杩斿洖 `False`锛堟嫆缁濈粨鏋滀篃鍙紦瀛橈級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/policy_cache.py`锛堟柊澧烇級锛沗tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6銆?
 ---
 
-### TASK-0428 M42-D：IntentDecisionEngine 集成分层路由
+### TASK-0428 M42-D锛欼ntentDecisionEngine 闆嗘垚鍒嗗眰璺敱
 
-- 状态：DONE
-- 任务描述：修改 `IntentDecisionEngine.evaluate_intent()`，在 R1-R7 门控通过后，根据 `SkillMeta.risk_level` 选择审批通道（CACHE / RULE / FULL / AIRLOCK），并将通道信息写入 `committed_route_token`。
-- 输入：`GovernorTierPolicy`（TASK-0426）；`GovernorPolicyCache`（TASK-0427）；`SkillRegistry`（可选注入）；现有 `IntentDecisionEngine`。
-- 输出：
-  - `host_brain/governor/decision.py`（修改）：`IntentDecisionEngine.__init__` 新增 `registry: SkillRegistry | None = None` 和 `policy_cache: GovernorPolicyCache | None = None` 参数；`evaluate_intent` 在 R1-R7 通过后，若 `registry` 已注入则查询 `SkillMeta`，调用 `GovernorTierPolicy.get_approval_tier()` 选择通道；`CACHE` 通道命中缓存时直接返回 `GOV_OK_CACHED`；`RULE` 通道通过规则引擎（R1-R7 已通过即可）返回 `GOV_OK_RULE`；`FULL` 通道保持现有逻辑返回 `GOV_OK_RENDER`；`AIRLOCK` 通道返回 `GOV_AIRLOCK_REVIEW`；`committed_route_token` 中新增 `approval_tier` 字段；
-  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-ENGINE-01~08。
-- 验收标准：
-  - T-TG-ENGINE-01：注入 `registry`，`risk_level=1` Skill 且缓存命中 → `committed_route_token.token = GOV_OK_CACHED`；
-  - T-TG-ENGINE-02：注入 `registry`，`risk_level=1` Skill 且缓存未命中 → 规则引擎审批，结果写入缓存，返回 `GOV_OK_RULE`；
-  - T-TG-ENGINE-03：注入 `registry`，`risk_level=2` Skill → `GOV_OK_RULE`；
-  - T-TG-ENGINE-04：注入 `registry`，`risk_level=3` Skill → `GOV_OK_RENDER`；
-  - T-TG-ENGINE-05：注入 `registry`，`risk_level=5` Skill → `GOV_AIRLOCK_REVIEW`；
-  - T-TG-ENGINE-06：未注入 `registry` → 保持现有行为（`GOV_OK_RENDER`），向后兼容；
-  - T-TG-ENGINE-07：`committed_route_token` 包含 `approval_tier` 字段；
-  - T-TG-ENGINE-08：R1-R7 拒绝时，分层路由不执行（先门控后分层）。
-- 涉及文件路径：`host_brain/governor/decision.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`IntentDecisionEngine.evaluate_intent()`锛屽湪 R1-R7 闂ㄦ帶閫氳繃鍚庯紝鏍规嵁 `SkillMeta.risk_level` 閫夋嫨瀹℃壒閫氶亾锛圕ACHE / RULE / FULL / AIRLOCK锛夛紝骞跺皢閫氶亾淇℃伅鍐欏叆 `committed_route_token`銆?- 杈撳叆锛歚GovernorTierPolicy`锛圱ASK-0426锛夛紱`GovernorPolicyCache`锛圱ASK-0427锛夛紱`SkillRegistry`锛堝彲閫夋敞鍏ワ級锛涚幇鏈?`IntentDecisionEngine`銆?- 杈撳嚭锛?  - `host_brain/governor/decision.py`锛堜慨鏀癸級锛歚IntentDecisionEngine.__init__` 鏂板 `registry: SkillRegistry | None = None` 鍜?`policy_cache: GovernorPolicyCache | None = None` 鍙傛暟锛沗evaluate_intent` 鍦?R1-R7 閫氳繃鍚庯紝鑻?`registry` 宸叉敞鍏ュ垯鏌ヨ `SkillMeta`锛岃皟鐢?`GovernorTierPolicy.get_approval_tier()` 閫夋嫨閫氶亾锛沗CACHE` 閫氶亾鍛戒腑缂撳瓨鏃剁洿鎺ヨ繑鍥?`GOV_OK_CACHED`锛沗RULE` 閫氶亾閫氳繃瑙勫垯寮曟搸锛圧1-R7 宸查€氳繃鍗冲彲锛夎繑鍥?`GOV_OK_RULE`锛沗FULL` 閫氶亾淇濇寔鐜版湁閫昏緫杩斿洖 `GOV_OK_RENDER`锛沗AIRLOCK` 閫氶亾杩斿洖 `GOV_AIRLOCK_REVIEW`锛沗committed_route_token` 涓柊澧?`approval_tier` 瀛楁锛?  - `tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級锛歍-TG-ENGINE-01~08銆?- 楠屾敹鏍囧噯锛?  - T-TG-ENGINE-01锛氭敞鍏?`registry`锛宍risk_level=1` Skill 涓旂紦瀛樺懡涓?鈫?`committed_route_token.token = GOV_OK_CACHED`锛?  - T-TG-ENGINE-02锛氭敞鍏?`registry`锛宍risk_level=1` Skill 涓旂紦瀛樻湭鍛戒腑 鈫?瑙勫垯寮曟搸瀹℃壒锛岀粨鏋滃啓鍏ョ紦瀛橈紝杩斿洖 `GOV_OK_RULE`锛?  - T-TG-ENGINE-03锛氭敞鍏?`registry`锛宍risk_level=2` Skill 鈫?`GOV_OK_RULE`锛?  - T-TG-ENGINE-04锛氭敞鍏?`registry`锛宍risk_level=3` Skill 鈫?`GOV_OK_RENDER`锛?  - T-TG-ENGINE-05锛氭敞鍏?`registry`锛宍risk_level=5` Skill 鈫?`GOV_AIRLOCK_REVIEW`锛?  - T-TG-ENGINE-06锛氭湭娉ㄥ叆 `registry` 鈫?淇濇寔鐜版湁琛屼负锛坄GOV_OK_RENDER`锛夛紝鍚戝悗鍏煎锛?  - T-TG-ENGINE-07锛歚committed_route_token` 鍖呭惈 `approval_tier` 瀛楁锛?  - T-TG-ENGINE-08锛歊1-R7 鎷掔粷鏃讹紝鍒嗗眰璺敱涓嶆墽琛岋紙鍏堥棬鎺у悗鍒嗗眰锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/governor/decision.py`锛堜慨鏀癸級锛沗tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6锛汧R-GOV-001銆?
 ---
 
-### TASK-0429 M42-E：SkillLoader 集成分层审计
+### TASK-0429 M42-E锛歋killLoader 闆嗘垚鍒嗗眰瀹¤
 
-- 状态：DONE
-- 任务描述：修改 `SkillLoader.execute()`，根据 `committed_route_token.approval_tier` 选择审计级别（LIGHT / STANDARD / FULL_AUDIT），`LIGHT` 级只写 `skill_exec_log` 基础字段，`FULL_AUDIT` 级写完整字段 + 额外 manifest 记录。
-- 输入：`AuditTier`（TASK-0426）；现有 `SkillLoader`；`committed_route_token`（来自 `governor_output`）。
-- 输出：
-  - `host_brain/skills/loader.py`（修改）：`execute()` 从 `governor_output.committed_route_token.approval_tier` 读取审计级别；`LIGHT` 级：`skill_exec_log` 只写 `intent_id / skill_name / result_status / result_code / ts_ms`；`STANDARD` 级：现有完整字段；`FULL_AUDIT` 级：完整字段 + `audit_tier = "full_audit"` 标记；
-  - `tests/unit/test_tiered_governance_m42.py`（追加）：T-TG-AUDIT-01~04。
-- 验收标准：
-  - T-TG-AUDIT-01：`approval_tier="cache"` → `AuditTier.LIGHT`，`skill_exec_log` 包含基础字段；
-  - T-TG-AUDIT-02：`approval_tier="full"` → `AuditTier.STANDARD`，`skill_exec_log` 包含完整字段；
-  - T-TG-AUDIT-03：`approval_tier="airlock"` → `AuditTier.FULL_AUDIT`，`skill_exec_log` 包含 `audit_tier = "full_audit"` 标记；
-  - T-TG-AUDIT-04：未提供 `approval_tier` → 降级为 `STANDARD`（向后兼容）。
-- 涉及文件路径：`host_brain/skills/loader.py`（修改）；`tests/unit/test_tiered_governance_m42.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6.4；FR-AUDIT-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`SkillLoader.execute()`锛屾牴鎹?`committed_route_token.approval_tier` 閫夋嫨瀹¤绾у埆锛圠IGHT / STANDARD / FULL_AUDIT锛夛紝`LIGHT` 绾у彧鍐?`skill_exec_log` 鍩虹瀛楁锛宍FULL_AUDIT` 绾у啓瀹屾暣瀛楁 + 棰濆 manifest 璁板綍銆?- 杈撳叆锛歚AuditTier`锛圱ASK-0426锛夛紱鐜版湁 `SkillLoader`锛沗committed_route_token`锛堟潵鑷?`governor_output`锛夈€?- 杈撳嚭锛?  - `host_brain/skills/loader.py`锛堜慨鏀癸級锛歚execute()` 浠?`governor_output.committed_route_token.approval_tier` 璇诲彇瀹¤绾у埆锛沗LIGHT` 绾э細`skill_exec_log` 鍙啓 `intent_id / skill_name / result_status / result_code / ts_ms`锛沗STANDARD` 绾э細鐜版湁瀹屾暣瀛楁锛沗FULL_AUDIT` 绾э細瀹屾暣瀛楁 + `audit_tier = "full_audit"` 鏍囪锛?  - `tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級锛歍-TG-AUDIT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-TG-AUDIT-01锛歚approval_tier="cache"` 鈫?`AuditTier.LIGHT`锛宍skill_exec_log` 鍖呭惈鍩虹瀛楁锛?  - T-TG-AUDIT-02锛歚approval_tier="full"` 鈫?`AuditTier.STANDARD`锛宍skill_exec_log` 鍖呭惈瀹屾暣瀛楁锛?  - T-TG-AUDIT-03锛歚approval_tier="airlock"` 鈫?`AuditTier.FULL_AUDIT`锛宍skill_exec_log` 鍖呭惈 `audit_tier = "full_audit"` 鏍囪锛?  - T-TG-AUDIT-04锛氭湭鎻愪緵 `approval_tier` 鈫?闄嶇骇涓?`STANDARD`锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/skills/loader.py`锛堜慨鏀癸級锛沗tests/unit/test_tiered_governance_m42.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6.4锛汧R-AUDIT-001銆?
 ---
 
-### TASK-0430 M42-F：M42 代码审查报告
+### TASK-0430 M42-F锛歁42 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：TASK-0425~0429 全部 DONE 后，生成 M42 代码审查报告，记录分层治理架构的实现情况。
-- 输入：TASK-0425~0429 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_review_m42_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0425~0429 全部 5 个任务的变更摘要；
-  - 新增测试 ≥ 26 个（T-TG-TOKEN-01~04 + T-TG-TIER-01~08 + T-TG-CACHE-01~06 + T-TG-ENGINE-01~08 + T-TG-AUDIT-01~04），全部通过；
-  - `RouteToken` 新增 `GOV_OK_CACHED` / `GOV_OK_RULE` 完整落地；
-  - `GovernorTierPolicy` 完整落地（L0~L4 分层映射）；
-  - `GovernorPolicyCache` 完整落地（TTL 缓存）；
-  - `IntentDecisionEngine` 分层路由完整落地（向后兼容）；
-  - `SkillLoader` 分层审计完整落地（向后兼容）；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_review_m42_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0425~0429 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M42 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曞垎灞傛不鐞嗘灦鏋勭殑瀹炵幇鎯呭喌銆?- 杈撳叆锛歍ASK-0425~0429 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_review_m42_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0425~0429 鍏ㄩ儴 5 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?26 涓紙T-TG-TOKEN-01~04 + T-TG-TIER-01~08 + T-TG-CACHE-01~06 + T-TG-ENGINE-01~08 + T-TG-AUDIT-01~04锛夛紝鍏ㄩ儴閫氳繃锛?  - `RouteToken` 鏂板 `GOV_OK_CACHED` / `GOV_OK_RULE` 瀹屾暣钀藉湴锛?  - `GovernorTierPolicy` 瀹屾暣钀藉湴锛圠0~L4 鍒嗗眰鏄犲皠锛夛紱
+  - `GovernorPolicyCache` 瀹屾暣钀藉湴锛圱TL 缂撳瓨锛夛紱
+  - `IntentDecisionEngine` 鍒嗗眰璺敱瀹屾暣钀藉湴锛堝悜鍚庡吋瀹癸級锛?  - `SkillLoader` 鍒嗗眰瀹¤瀹屾暣钀藉湴锛堝悜鍚庡吋瀹癸級锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_review_m42_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6锛汧R-GOV-001锛汧R-SKILL-001銆?
 ---
 
-## M43：启动编排收口
-
-> **里程碑目标**：完成系统启动链路的最后收口，包括：启动健康快照冻结（StartupHealthSnapshot）、SQLite 迁移版本守卫（SQLiteMigrationVersionGuard）、迁移目录版本连续性修复、request_id 单键回放报告（ReplayReport）。这四个模块合起来构成"系统可观测性"的完整闭环：启动时知道系统状态，迁移时知道 Schema 版本，运行时知道每个请求的完整链路。
->
-> **背景**：M42 完成了分层治理架构，系统的"执行链路"已经完整。M43 的目标是完成"运维链路"：启动快照 → 迁移守卫 → 回放报告，三者串联构成完整的可观测性闭环。
->
-> **约束**：所有新增模块均为可选注入，不影响现有启动流程；迁移目录修复只补充缺失版本，不修改已有文件。
-
+## M43锛氬惎鍔ㄧ紪鎺掓敹鍙?
+> **閲岀▼纰戠洰鏍?*锛氬畬鎴愮郴缁熷惎鍔ㄩ摼璺殑鏈€鍚庢敹鍙ｏ紝鍖呮嫭锛氬惎鍔ㄥ仴搴峰揩鐓у喕缁擄紙StartupHealthSnapshot锛夈€丼QLite 杩佺Щ鐗堟湰瀹堝崼锛圫QLiteMigrationVersionGuard锛夈€佽縼绉荤洰褰曠増鏈繛缁€т慨澶嶃€乺equest_id 鍗曢敭鍥炴斁鎶ュ憡锛圧eplayReport锛夈€傝繖鍥涗釜妯″潡鍚堣捣鏉ユ瀯鎴?绯荤粺鍙娴嬫€?鐨勫畬鏁撮棴鐜細鍚姩鏃剁煡閬撶郴缁熺姸鎬侊紝杩佺Щ鏃剁煡閬?Schema 鐗堟湰锛岃繍琛屾椂鐭ラ亾姣忎釜璇锋眰鐨勫畬鏁撮摼璺€?>
+> **鑳屾櫙**锛歁42 瀹屾垚浜嗗垎灞傛不鐞嗘灦鏋勶紝绯荤粺鐨?鎵ц閾捐矾"宸茬粡瀹屾暣銆侻43 鐨勭洰鏍囨槸瀹屾垚"杩愮淮閾捐矾"锛氬惎鍔ㄥ揩鐓?鈫?杩佺Щ瀹堝崼 鈫?鍥炴斁鎶ュ憡锛屼笁鑰呬覆鑱旀瀯鎴愬畬鏁寸殑鍙娴嬫€ч棴鐜€?>
+> **绾︽潫**锛氭墍鏈夋柊澧炴ā鍧楀潎涓哄彲閫夋敞鍏ワ紝涓嶅奖鍝嶇幇鏈夊惎鍔ㄦ祦绋嬶紱杩佺Щ鐩綍淇鍙ˉ鍏呯己澶辩増鏈紝涓嶄慨鏀瑰凡鏈夋枃浠躲€?
 ---
 
-### TASK-0431 M43-A：SQLite 迁移目录版本连续性修复
-
-- 状态：DONE
-- 任务描述：修复 `host_brain/audit/migrations/` 目录中的版本连续性问题：存在两个 `0017_*` 文件（重复版本号）和版本跳跃（0018→0021，缺 0019/0020）。补充缺失的迁移文件，确保版本号连续。
-- 输入：`host_brain/audit/migrations/` 目录现状（0017 重复，0019/0020 缺失）。
-- 输出：
-  - `host_brain/audit/migrations/0017_canon_proposal_id_unique.sql`（保留，重命名为 `0017_canon_proposal_unique.sql`）；
-  - `host_brain/audit/migrations/0019_subgraph_trace.sql`（新增）：补充 M41 新增的 `subgraph_trace` 表；
-  - `host_brain/audit/migrations/0020_llm_call_log.sql`（新增）：补充 M41 新增的 `llm_call_log` 表；
-  - 删除重复的 `0017_canon_proposal_log_unique.sql`（内容合并到 `0017_canon_proposal_unique.sql`）；
-  - `tests/unit/test_migration_version_guard_m43.py`（新增）：T-MIG-VER-01~04。
-- 验收标准：
-  - T-MIG-VER-01：`migrations/` 目录版本号连续（0001~0022, 0039, 0040 → 修复后 0001~0022, 0039, 0040，无重复无跳跃）；
-  - T-MIG-VER-02：`SQLiteMigrationRunner` 能正确发现并排序所有迁移文件；
-  - T-MIG-VER-03：重复版本号检测：存在两个 `0017_*` 时，`discover_assets()` 返回错误；
-  - T-MIG-VER-04：版本跳跃检测：缺少 `0019` 时，`discover_assets()` 返回错误。
-- 涉及文件路径：`host_brain/audit/migrations/`（修改）；`tests/unit/test_migration_version_guard_m43.py`（新增）。
-- 关联需求：DevSpec §7；FR-AUDIT-001。
-
+### TASK-0431 M43-A锛歋QLite 杩佺Щ鐩綍鐗堟湰杩炵画鎬т慨澶?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨澶?`host_brain/audit/migrations/` 鐩綍涓殑鐗堟湰杩炵画鎬ч棶棰橈細瀛樺湪涓や釜 `0017_*` 鏂囦欢锛堥噸澶嶇増鏈彿锛夊拰鐗堟湰璺宠穬锛?018鈫?021锛岀己 0019/0020锛夈€傝ˉ鍏呯己澶辩殑杩佺Щ鏂囦欢锛岀‘淇濈増鏈彿杩炵画銆?- 杈撳叆锛歚host_brain/audit/migrations/` 鐩綍鐜扮姸锛?017 閲嶅锛?019/0020 缂哄け锛夈€?- 杈撳嚭锛?  - `host_brain/audit/migrations/0017_canon_proposal_id_unique.sql`锛堜繚鐣欙紝閲嶅懡鍚嶄负 `0017_canon_proposal_unique.sql`锛夛紱
+  - `host_brain/audit/migrations/0019_subgraph_trace.sql`锛堟柊澧烇級锛氳ˉ鍏?M41 鏂板鐨?`subgraph_trace` 琛紱
+  - `host_brain/audit/migrations/0020_llm_call_log.sql`锛堟柊澧烇級锛氳ˉ鍏?M41 鏂板鐨?`llm_call_log` 琛紱
+  - 鍒犻櫎閲嶅鐨?`0017_canon_proposal_log_unique.sql`锛堝唴瀹瑰悎骞跺埌 `0017_canon_proposal_unique.sql`锛夛紱
+  - `tests/unit/test_migration_version_guard_m43.py`锛堟柊澧烇級锛歍-MIG-VER-01~04銆?- 楠屾敹鏍囧噯锛?  - T-MIG-VER-01锛歚migrations/` 鐩綍鐗堟湰鍙疯繛缁紙0001~0022, 0039, 0040 鈫?淇鍚?0001~0022, 0039, 0040锛屾棤閲嶅鏃犺烦璺冿級锛?  - T-MIG-VER-02锛歚SQLiteMigrationRunner` 鑳芥纭彂鐜板苟鎺掑簭鎵€鏈夎縼绉绘枃浠讹紱
+  - T-MIG-VER-03锛氶噸澶嶇増鏈彿妫€娴嬶細瀛樺湪涓や釜 `0017_*` 鏃讹紝`discover_assets()` 杩斿洖閿欒锛?  - T-MIG-VER-04锛氱増鏈烦璺冩娴嬶細缂哄皯 `0019` 鏃讹紝`discover_assets()` 杩斿洖閿欒銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/audit/migrations/`锛堜慨鏀癸級锛沗tests/unit/test_migration_version_guard_m43.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細DevSpec 搂7锛汧R-AUDIT-001銆?
 ---
 
-### TASK-0432 M43-B：SQLiteMigrationVersionGuard — SQLite Schema 版本守卫
+### TASK-0432 M43-B锛歋QLiteMigrationVersionGuard 鈥?SQLite Schema 鐗堟湰瀹堝崼
 
-- 状态：DONE
-- 任务描述：新增 `SQLiteMigrationVersionGuard` 类，为 SQLite Ledger 提供 Schema 版本守卫，在启动时检查已应用的迁移版本与迁移目录的一致性，防止 Schema 漂移。
-- 输入：`host_brain/audit/migrations/` 目录；`SQLiteLedger`（可选）。
-- 输出：
-  - `host_brain/audit/migration_guard.py`（新增）：
-    - `SQLiteMigrationAsset(dataclass)`：`migration_id: int, name: str, path: Path, checksum: str`；
-    - `SQLiteMigrationVersionGuard` 类，提供：
-      - `discover_assets() -> list[SQLiteMigrationAsset]`：发现并排序迁移文件，检测重复版本号；
-      - `check_version_continuity(assets) -> list[str]`：检查版本连续性，返回问题列表；
-      - `build_guard_report(request_id, ts_ms) -> dict`：生成版本守卫报告（`status: READY/DEGRADED/FAILED`）；
-  - `tests/unit/test_migration_version_guard_m43.py`（追加）：T-MIG-GUARD-01~06。
-- 验收标准：
-  - T-MIG-GUARD-01：正常目录 → `build_guard_report` 返回 `status=READY`；
-  - T-MIG-GUARD-02：存在重复版本号 → `status=FAILED`，`reason_code=MIGRATION_SCHEMA_DRIFT`；
-  - T-MIG-GUARD-03：存在版本跳跃 → `status=DEGRADED`，`reason_code=MIGRATION_ASSET_MISSING`；
-  - T-MIG-GUARD-04：迁移目录不存在 → `status=FAILED`，`reason_code=MIGRATION_ASSET_MISSING`；
-  - T-MIG-GUARD-05：`discover_assets()` 返回按版本号排序的资产列表；
-  - T-MIG-GUARD-06：`check_version_continuity()` 正确识别跳跃区间。
-- 涉及文件路径：`host_brain/audit/migration_guard.py`（新增）；`tests/unit/test_migration_version_guard_m43.py`（追加）。
-- 关联需求：DevSpec §7；FR-AUDIT-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`SQLiteMigrationVersionGuard` 绫伙紝涓?SQLite Ledger 鎻愪緵 Schema 鐗堟湰瀹堝崼锛屽湪鍚姩鏃舵鏌ュ凡搴旂敤鐨勮縼绉荤増鏈笌杩佺Щ鐩綍鐨勪竴鑷存€э紝闃叉 Schema 婕傜Щ銆?- 杈撳叆锛歚host_brain/audit/migrations/` 鐩綍锛沗SQLiteLedger`锛堝彲閫夛級銆?- 杈撳嚭锛?  - `host_brain/audit/migration_guard.py`锛堟柊澧烇級锛?    - `SQLiteMigrationAsset(dataclass)`锛歚migration_id: int, name: str, path: Path, checksum: str`锛?    - `SQLiteMigrationVersionGuard` 绫伙紝鎻愪緵锛?      - `discover_assets() -> list[SQLiteMigrationAsset]`锛氬彂鐜板苟鎺掑簭杩佺Щ鏂囦欢锛屾娴嬮噸澶嶇増鏈彿锛?      - `check_version_continuity(assets) -> list[str]`锛氭鏌ョ増鏈繛缁€э紝杩斿洖闂鍒楄〃锛?      - `build_guard_report(request_id, ts_ms) -> dict`锛氱敓鎴愮増鏈畧鍗姤鍛婏紙`status: READY/DEGRADED/FAILED`锛夛紱
+  - `tests/unit/test_migration_version_guard_m43.py`锛堣拷鍔狅級锛歍-MIG-GUARD-01~06銆?- 楠屾敹鏍囧噯锛?  - T-MIG-GUARD-01锛氭甯哥洰褰?鈫?`build_guard_report` 杩斿洖 `status=READY`锛?  - T-MIG-GUARD-02锛氬瓨鍦ㄩ噸澶嶇増鏈彿 鈫?`status=FAILED`锛宍reason_code=MIGRATION_SCHEMA_DRIFT`锛?  - T-MIG-GUARD-03锛氬瓨鍦ㄧ増鏈烦璺?鈫?`status=DEGRADED`锛宍reason_code=MIGRATION_ASSET_MISSING`锛?  - T-MIG-GUARD-04锛氳縼绉荤洰褰曚笉瀛樺湪 鈫?`status=FAILED`锛宍reason_code=MIGRATION_ASSET_MISSING`锛?  - T-MIG-GUARD-05锛歚discover_assets()` 杩斿洖鎸夌増鏈彿鎺掑簭鐨勮祫浜у垪琛紱
+  - T-MIG-GUARD-06锛歚check_version_continuity()` 姝ｇ‘璇嗗埆璺宠穬鍖洪棿銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/audit/migration_guard.py`锛堟柊澧烇級锛沗tests/unit/test_migration_version_guard_m43.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細DevSpec 搂7锛汧R-AUDIT-001銆?
 ---
 
-### TASK-0433 M43-C：StartupHealthSnapshot — 启动健康快照冻结
+### TASK-0433 M43-C锛歋tartupHealthSnapshot 鈥?鍚姩鍋ュ悍蹇収鍐荤粨
 
-- 状态：DONE
-- 任务描述：新增 `StartupHealthSnapshot` 类，在系统启动时将 `build_startup_report()` 的结果冻结为不可变快照，供后续回放/演练/CI 引用。快照包含启动时间戳、服务状态摘要、迁移版本守卫报告。
-- 输入：`build_startup_report()` 返回值；`SQLiteMigrationVersionGuard`（TASK-0432）；`BondMigrationRunner`（可选）。
-- 输出：
-  - `host_brain/app/startup_snapshot.py`（新增）：
-    - `StartupHealthSnapshot(dataclass, frozen=True)`：`request_id, ts_ms, boot_status, service_summary, migration_guard_report, bond_migration_summary, snapshot_hash`；
-    - `build_startup_snapshot(startup_report, migration_guard_report, bond_result) -> StartupHealthSnapshot`：从启动报告构建快照；
-    - `snapshot_to_dict(snapshot) -> dict`：序列化为可审计的字典；
-  - `tests/unit/test_startup_snapshot_m43.py`（新增）：T-SNAP-01~06。
-- 验收标准：
-  - T-SNAP-01：`build_startup_snapshot()` 返回 `StartupHealthSnapshot` 实例；
-  - T-SNAP-02：`snapshot.boot_status` 与 `startup_report["summary"]["boot_status"]` 一致；
-  - T-SNAP-03：`snapshot.snapshot_hash` 是 `snapshot_to_dict()` 内容的 SHA256（不含 `snapshot_hash` 字段本身）；
-  - T-SNAP-04：`StartupHealthSnapshot` 是不可变的（`frozen=True`），修改字段抛出 `FrozenInstanceError`；
-  - T-SNAP-05：`migration_guard_report` 为 `None` 时，快照仍可构建（向后兼容）；
-  - T-SNAP-06：`snapshot_to_dict()` 包含所有字段，且 `snapshot_hash` 可验证。
-- 涉及文件路径：`host_brain/app/startup_snapshot.py`（新增）；`tests/unit/test_startup_snapshot_m43.py`（新增）。
-- 关联需求：DevSpec §8；FR-OPS-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`StartupHealthSnapshot` 绫伙紝鍦ㄧ郴缁熷惎鍔ㄦ椂灏?`build_startup_report()` 鐨勭粨鏋滃喕缁撲负涓嶅彲鍙樺揩鐓э紝渚涘悗缁洖鏀?婕旂粌/CI 寮曠敤銆傚揩鐓у寘鍚惎鍔ㄦ椂闂存埑銆佹湇鍔＄姸鎬佹憳瑕併€佽縼绉荤増鏈畧鍗姤鍛娿€?- 杈撳叆锛歚build_startup_report()` 杩斿洖鍊硷紱`SQLiteMigrationVersionGuard`锛圱ASK-0432锛夛紱`BondMigrationRunner`锛堝彲閫夛級銆?- 杈撳嚭锛?  - `host_brain/app/startup_snapshot.py`锛堟柊澧烇級锛?    - `StartupHealthSnapshot(dataclass, frozen=True)`锛歚request_id, ts_ms, boot_status, service_summary, migration_guard_report, bond_migration_summary, snapshot_hash`锛?    - `build_startup_snapshot(startup_report, migration_guard_report, bond_result) -> StartupHealthSnapshot`锛氫粠鍚姩鎶ュ憡鏋勫缓蹇収锛?    - `snapshot_to_dict(snapshot) -> dict`锛氬簭鍒楀寲涓哄彲瀹¤鐨勫瓧鍏革紱
+  - `tests/unit/test_startup_snapshot_m43.py`锛堟柊澧烇級锛歍-SNAP-01~06銆?- 楠屾敹鏍囧噯锛?  - T-SNAP-01锛歚build_startup_snapshot()` 杩斿洖 `StartupHealthSnapshot` 瀹炰緥锛?  - T-SNAP-02锛歚snapshot.boot_status` 涓?`startup_report["summary"]["boot_status"]` 涓€鑷达紱
+  - T-SNAP-03锛歚snapshot.snapshot_hash` 鏄?`snapshot_to_dict()` 鍐呭鐨?SHA256锛堜笉鍚?`snapshot_hash` 瀛楁鏈韩锛夛紱
+  - T-SNAP-04锛歚StartupHealthSnapshot` 鏄笉鍙彉鐨勶紙`frozen=True`锛夛紝淇敼瀛楁鎶涘嚭 `FrozenInstanceError`锛?  - T-SNAP-05锛歚migration_guard_report` 涓?`None` 鏃讹紝蹇収浠嶅彲鏋勫缓锛堝悜鍚庡吋瀹癸級锛?  - T-SNAP-06锛歚snapshot_to_dict()` 鍖呭惈鎵€鏈夊瓧娈碉紝涓?`snapshot_hash` 鍙獙璇併€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/startup_snapshot.py`锛堟柊澧烇級锛沗tests/unit/test_startup_snapshot_m43.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細DevSpec 搂8锛汧R-OPS-001銆?
 ---
 
-### TASK-0434 M43-D：ReplayReport — request_id 单键回放报告
+### TASK-0434 M43-D锛歊eplayReport 鈥?request_id 鍗曢敭鍥炴斁鎶ュ憡
 
-- 状态：DONE
-- 任务描述：新增 `ReplayReport` 类，基于 `build_request_observability_report()` 的结果，生成结构化的单键回放报告，包含时间线摘要、关键节点状态、异常链路标注。
-- 输入：`build_request_observability_report()` 返回值（`main.py`）；`request_id`。
-- 输出：
-  - `tools/replay/replay_report.py`（新增）：
-    - `ReplayReport(dataclass, frozen=True)`：`request_id, ts_ms, trace_status, timeline_total, key_events, anomalies, report_hash`；
-    - `build_replay_report(observability_report) -> ReplayReport`：从可观测性报告构建回放报告；
-    - `format_replay_report(report) -> str`：格式化为人类可读的文本报告；
-  - `tests/unit/test_replay_report_m43.py`（新增）：T-REPLAY-01~06。
-- 验收标准：
-  - T-REPLAY-01：`build_replay_report()` 返回 `ReplayReport` 实例；
-  - T-REPLAY-02：`report.timeline_total` 与 `observability_report["timeline_total"]` 一致；
-  - T-REPLAY-03：`report.key_events` 包含 `intent_log` 和 `governor_log` 的关键事件；
-  - T-REPLAY-04：`report.anomalies` 包含 `REJECT` 决策和 `error_log` 中的异常；
-  - T-REPLAY-05：`format_replay_report()` 返回包含 `request_id` 和时间线摘要的字符串；
-  - T-REPLAY-06：`report.report_hash` 是报告内容的 SHA256（不含 `report_hash` 字段本身）。
-- 涉及文件路径：`tools/replay/replay_report.py`（新增）；`tests/unit/test_replay_report_m43.py`（新增）。
-- 关联需求：DevSpec §9；FR-OPS-002。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`ReplayReport` 绫伙紝鍩轰簬 `build_request_observability_report()` 鐨勭粨鏋滐紝鐢熸垚缁撴瀯鍖栫殑鍗曢敭鍥炴斁鎶ュ憡锛屽寘鍚椂闂寸嚎鎽樿銆佸叧閿妭鐐圭姸鎬併€佸紓甯搁摼璺爣娉ㄣ€?- 杈撳叆锛歚build_request_observability_report()` 杩斿洖鍊硷紙`main.py`锛夛紱`request_id`銆?- 杈撳嚭锛?  - `tools/replay/replay_report.py`锛堟柊澧烇級锛?    - `ReplayReport(dataclass, frozen=True)`锛歚request_id, ts_ms, trace_status, timeline_total, key_events, anomalies, report_hash`锛?    - `build_replay_report(observability_report) -> ReplayReport`锛氫粠鍙娴嬫€ф姤鍛婃瀯寤哄洖鏀炬姤鍛婏紱
+    - `format_replay_report(report) -> str`锛氭牸寮忓寲涓轰汉绫诲彲璇荤殑鏂囨湰鎶ュ憡锛?  - `tests/unit/test_replay_report_m43.py`锛堟柊澧烇級锛歍-REPLAY-01~06銆?- 楠屾敹鏍囧噯锛?  - T-REPLAY-01锛歚build_replay_report()` 杩斿洖 `ReplayReport` 瀹炰緥锛?  - T-REPLAY-02锛歚report.timeline_total` 涓?`observability_report["timeline_total"]` 涓€鑷达紱
+  - T-REPLAY-03锛歚report.key_events` 鍖呭惈 `intent_log` 鍜?`governor_log` 鐨勫叧閿簨浠讹紱
+  - T-REPLAY-04锛歚report.anomalies` 鍖呭惈 `REJECT` 鍐崇瓥鍜?`error_log` 涓殑寮傚父锛?  - T-REPLAY-05锛歚format_replay_report()` 杩斿洖鍖呭惈 `request_id` 鍜屾椂闂寸嚎鎽樿鐨勫瓧绗︿覆锛?  - T-REPLAY-06锛歚report.report_hash` 鏄姤鍛婂唴瀹圭殑 SHA256锛堜笉鍚?`report_hash` 瀛楁鏈韩锛夈€?- 娑夊強鏂囦欢璺緞锛歚tools/replay/replay_report.py`锛堟柊澧烇級锛沗tests/unit/test_replay_report_m43.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細DevSpec 搂9锛汧R-OPS-002銆?
 ---
 
-### TASK-0435 M43-E：M43 代码审查报告
+### TASK-0435 M43-E锛歁43 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：TASK-0431~0434 全部 DONE 后，生成 M43 代码审查报告，记录启动编排收口的实现情况。
-- 输入：TASK-0431~0434 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0431~0434 全部 4 个任务的变更摘要；
-  - 新增测试 ≥ 22 个（T-MIG-VER-01~04 + T-MIG-GUARD-01~06 + T-SNAP-01~06 + T-REPLAY-01~06），全部通过；
-  - `SQLiteMigrationVersionGuard` 完整落地；
-  - `StartupHealthSnapshot` 完整落地（不可变 + SHA256 验证）；
-  - `ReplayReport` 完整落地；
-  - 迁移目录版本连续性修复完整落地；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
-- 关联需求：DevSpec §7~9；FR-OPS-001；FR-OPS-002；FR-AUDIT-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0431~0434 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M43 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曞惎鍔ㄧ紪鎺掓敹鍙ｇ殑瀹炵幇鎯呭喌銆?- 杈撳叆锛歍ASK-0431~0434 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0431~0434 鍏ㄩ儴 4 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?22 涓紙T-MIG-VER-01~04 + T-MIG-GUARD-01~06 + T-SNAP-01~06 + T-REPLAY-01~06锛夛紝鍏ㄩ儴閫氳繃锛?  - `SQLiteMigrationVersionGuard` 瀹屾暣钀藉湴锛?  - `StartupHealthSnapshot` 瀹屾暣钀藉湴锛堜笉鍙彉 + SHA256 楠岃瘉锛夛紱
+  - `ReplayReport` 瀹屾暣钀藉湴锛?  - 杩佺Щ鐩綍鐗堟湰杩炵画鎬т慨澶嶅畬鏁磋惤鍦帮紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細DevSpec 搂7~9锛汧R-OPS-001锛汧R-OPS-002锛汧R-AUDIT-001銆?
 ---
 
-## M44：分层治理运行时接入（Tiered Governance Runtime Integration）
-
-> **里程碑目标**：将 M42 实现的分层治理架构真正接入 `/v1/chat` 运行时端点。当前 `fastapi_app.py` 的 `get_intent_engine()` 创建 `IntentDecisionEngine` 时未注入 `registry` 和 `policy_cache`，导致 M42 的分层治理在生产链路中形同虚设——所有请求仍走 `GOV_OK_RENDER`（全量审批通道）。M44 修复这一接入缺口，同时注册内置 Skill 的风险等级元数据，让分层治理在运行时真正生效。
->
-> **背景**：M42 实现了完整的分层治理机制（`GovernorTierPolicy` / `GovernorPolicyCache` / `ApprovalTier`），但 `fastapi_app.py` 的 `get_intent_engine()` 工厂函数没有注入 `registry` 和 `policy_cache`，导致 `IntentDecisionEngine` 的分层路由代码永远不会执行（`self._registry is None` 恒为真）。这是一个典型的"实现完整但接入缺失"的问题。
->
-> **约束**：不改变 Governor 核心裁决逻辑；不削弱主权；向后兼容（未注册的 Skill 仍走 FULL 通道）。
-
+## M44锛氬垎灞傛不鐞嗚繍琛屾椂鎺ュ叆锛圱iered Governance Runtime Integration锛?
+> **閲岀▼纰戠洰鏍?*锛氬皢 M42 瀹炵幇鐨勫垎灞傛不鐞嗘灦鏋勭湡姝ｆ帴鍏?`/v1/chat` 杩愯鏃剁鐐广€傚綋鍓?`fastapi_app.py` 鐨?`get_intent_engine()` 鍒涘缓 `IntentDecisionEngine` 鏃舵湭娉ㄥ叆 `registry` 鍜?`policy_cache`锛屽鑷?M42 鐨勫垎灞傛不鐞嗗湪鐢熶骇閾捐矾涓舰鍚岃櫄璁锯€斺€旀墍鏈夎姹備粛璧?`GOV_OK_RENDER`锛堝叏閲忓鎵归€氶亾锛夈€侻44 淇杩欎竴鎺ュ叆缂哄彛锛屽悓鏃舵敞鍐屽唴缃?Skill 鐨勯闄╃瓑绾у厓鏁版嵁锛岃鍒嗗眰娌荤悊鍦ㄨ繍琛屾椂鐪熸鐢熸晥銆?>
+> **鑳屾櫙**锛歁42 瀹炵幇浜嗗畬鏁寸殑鍒嗗眰娌荤悊鏈哄埗锛坄GovernorTierPolicy` / `GovernorPolicyCache` / `ApprovalTier`锛夛紝浣?`fastapi_app.py` 鐨?`get_intent_engine()` 宸ュ巶鍑芥暟娌℃湁娉ㄥ叆 `registry` 鍜?`policy_cache`锛屽鑷?`IntentDecisionEngine` 鐨勫垎灞傝矾鐢变唬鐮佹案杩滀笉浼氭墽琛岋紙`self._registry is None` 鎭掍负鐪燂級銆傝繖鏄竴涓吀鍨嬬殑"瀹炵幇瀹屾暣浣嗘帴鍏ョ己澶?鐨勯棶棰樸€?>
+> **绾︽潫**锛氫笉鏀瑰彉 Governor 鏍稿績瑁佸喅閫昏緫锛涗笉鍓婂急涓绘潈锛涘悜鍚庡吋瀹癸紙鏈敞鍐岀殑 Skill 浠嶈蛋 FULL 閫氶亾锛夈€?
 ---
 
-### TASK-0436 M44-A：fastapi_app.py 注入 registry + policy_cache
+### TASK-0436 M44-A锛歠astapi_app.py 娉ㄥ叆 registry + policy_cache
 
-- 状态：DONE
-- 任务描述：修改 `fastapi_app.py` 的 `get_intent_engine()` 工厂函数，在创建 `IntentDecisionEngine` 时注入 `SkillRegistry` 和 `GovernorPolicyCache`，使 M42 分层治理在 `/v1/chat` 端点真正生效。
-- 输入：`GovernorPolicyCache`（M42-C）；`SkillRegistry`（M44-B 注册内置 Skill）；现有 `get_intent_engine()`。
-- 输出：
-  - `host_brain/app/fastapi_app.py`（修改）：
-    - 新增模块级单例 `_skill_registry: SkillRegistry | None = None` 和 `_policy_cache: GovernorPolicyCache | None = None`；
-    - 新增 `get_skill_registry() -> SkillRegistry` 工厂函数（延迟初始化，调用 `build_builtin_skill_registry()`）；
-    - 新增 `get_policy_cache() -> GovernorPolicyCache` 工厂函数（延迟初始化，TTL=60_000ms）；
-    - 修改 `get_intent_engine()`：注入 `registry=get_skill_registry()` 和 `policy_cache=get_policy_cache()`；
-  - `tests/unit/test_tiered_governance_runtime_m44.py`（新增）：T-TG-RT-01~04。
-- 验收标准：
-  - T-TG-RT-01：`get_intent_engine()` 返回的 `IntentDecisionEngine` 实例的 `_registry` 不为 `None`；
-  - T-TG-RT-02：`get_intent_engine()` 返回的实例的 `_policy_cache` 不为 `None`；
-  - T-TG-RT-03：`get_intent_engine()` 多次调用返回同一实例（单例）；
-  - T-TG-RT-04：`get_skill_registry()` 返回的 `SkillRegistry` 包含内置 Skill（`narrative_only` / `memory_recall` / `noop` / `read_only_status`）。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）；`tests/unit/test_tiered_governance_runtime_m44.py`（新增）。
-- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`fastapi_app.py` 鐨?`get_intent_engine()` 宸ュ巶鍑芥暟锛屽湪鍒涘缓 `IntentDecisionEngine` 鏃舵敞鍏?`SkillRegistry` 鍜?`GovernorPolicyCache`锛屼娇 M42 鍒嗗眰娌荤悊鍦?`/v1/chat` 绔偣鐪熸鐢熸晥銆?- 杈撳叆锛歚GovernorPolicyCache`锛圡42-C锛夛紱`SkillRegistry`锛圡44-B 娉ㄥ唽鍐呯疆 Skill锛夛紱鐜版湁 `get_intent_engine()`銆?- 杈撳嚭锛?  - `host_brain/app/fastapi_app.py`锛堜慨鏀癸級锛?    - 鏂板妯″潡绾у崟渚?`_skill_registry: SkillRegistry | None = None` 鍜?`_policy_cache: GovernorPolicyCache | None = None`锛?    - 鏂板 `get_skill_registry() -> SkillRegistry` 宸ュ巶鍑芥暟锛堝欢杩熷垵濮嬪寲锛岃皟鐢?`build_builtin_skill_registry()`锛夛紱
+    - 鏂板 `get_policy_cache() -> GovernorPolicyCache` 宸ュ巶鍑芥暟锛堝欢杩熷垵濮嬪寲锛孴TL=60_000ms锛夛紱
+    - 淇敼 `get_intent_engine()`锛氭敞鍏?`registry=get_skill_registry()` 鍜?`policy_cache=get_policy_cache()`锛?  - `tests/unit/test_tiered_governance_runtime_m44.py`锛堟柊澧烇級锛歍-TG-RT-01~04銆?- 楠屾敹鏍囧噯锛?  - T-TG-RT-01锛歚get_intent_engine()` 杩斿洖鐨?`IntentDecisionEngine` 瀹炰緥鐨?`_registry` 涓嶄负 `None`锛?  - T-TG-RT-02锛歚get_intent_engine()` 杩斿洖鐨勫疄渚嬬殑 `_policy_cache` 涓嶄负 `None`锛?  - T-TG-RT-03锛歚get_intent_engine()` 澶氭璋冪敤杩斿洖鍚屼竴瀹炰緥锛堝崟渚嬶級锛?  - T-TG-RT-04锛歚get_skill_registry()` 杩斿洖鐨?`SkillRegistry` 鍖呭惈鍐呯疆 Skill锛坄narrative_only` / `memory_recall` / `noop` / `read_only_status`锛夈€?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`锛堜慨鏀癸級锛沗tests/unit/test_tiered_governance_runtime_m44.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6锛汧R-GOV-001銆?
 ---
 
-### TASK-0437 M44-B：内置 Skill 注册表（build_builtin_skill_registry）
-
-- 状态：DONE
-- 任务描述：新增 `build_builtin_skill_registry()` 工厂函数，将系统内置的 4 个 Skill（`narrative_only` / `memory_recall` / `noop` / `read_only_status`）注册到 `SkillRegistry`，并设置正确的 `risk_level`，使分层治理能对这些 Skill 生效。
-- 输入：`SkillRegistry`；`SkillMeta`；`ACTION_ALLOWLIST`（`schemas.py`）。
-- 输出：
-  - `host_brain/skills/builtin_registry.py`（新增）：
-    - `build_builtin_skill_registry() -> SkillRegistry`：注册 4 个内置 Skill；
-    - `narrative_only`：`risk_level=1`（只读叙事，最低风险）；
-    - `memory_recall`：`risk_level=1`（只读记忆检索，最低风险）；
-    - `noop`：`risk_level=1`（空操作，最低风险）；
-    - `read_only_status`：`risk_level=1`（只读状态查询，最低风险）；
-    - 所有内置 Skill 均为 `reversible=True`，`clearance="LOW"`，`scope="host"`；
-    - handler 为 `lambda args, ctx: {"status": "OK", "result": "builtin_noop"}`（占位符，实际执行由上层链路处理）；
-  - `tests/unit/test_tiered_governance_runtime_m44.py`（追加）：T-TG-BUILTIN-01~04。
-- 验收标准：
-  - T-TG-BUILTIN-01：`build_builtin_skill_registry()` 返回包含 4 个内置 Skill 的 `SkillRegistry`；
-  - T-TG-BUILTIN-02：`narrative_only` 的 `risk_level=1`，`GovernorTierPolicy` 映射为 `ApprovalTier.CACHE`；
-  - T-TG-BUILTIN-03：`memory_recall` 的 `risk_level=1`，映射为 `ApprovalTier.CACHE`；
-  - T-TG-BUILTIN-04：`read_only_status` 的 `risk_level=1`，映射为 `ApprovalTier.CACHE`。
-- 涉及文件路径：`host_brain/skills/builtin_registry.py`（新增）；`tests/unit/test_tiered_governance_runtime_m44.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6.1；FR-SKILL-001。
-
+### TASK-0437 M44-B锛氬唴缃?Skill 娉ㄥ唽琛紙build_builtin_skill_registry锛?
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氭柊澧?`build_builtin_skill_registry()` 宸ュ巶鍑芥暟锛屽皢绯荤粺鍐呯疆鐨?4 涓?Skill锛坄narrative_only` / `memory_recall` / `noop` / `read_only_status`锛夋敞鍐屽埌 `SkillRegistry`锛屽苟璁剧疆姝ｇ‘鐨?`risk_level`锛屼娇鍒嗗眰娌荤悊鑳藉杩欎簺 Skill 鐢熸晥銆?- 杈撳叆锛歚SkillRegistry`锛沗SkillMeta`锛沗ACTION_ALLOWLIST`锛坄schemas.py`锛夈€?- 杈撳嚭锛?  - `host_brain/skills/builtin_registry.py`锛堟柊澧烇級锛?    - `build_builtin_skill_registry() -> SkillRegistry`锛氭敞鍐?4 涓唴缃?Skill锛?    - `narrative_only`锛歚risk_level=1`锛堝彧璇诲彊浜嬶紝鏈€浣庨闄╋級锛?    - `memory_recall`锛歚risk_level=1`锛堝彧璇昏蹇嗘绱紝鏈€浣庨闄╋級锛?    - `noop`锛歚risk_level=1`锛堢┖鎿嶄綔锛屾渶浣庨闄╋級锛?    - `read_only_status`锛歚risk_level=1`锛堝彧璇荤姸鎬佹煡璇紝鏈€浣庨闄╋級锛?    - 鎵€鏈夊唴缃?Skill 鍧囦负 `reversible=True`锛宍clearance="LOW"`锛宍scope="host"`锛?    - handler 涓?`lambda args, ctx: {"status": "OK", "result": "builtin_noop"}`锛堝崰浣嶇锛屽疄闄呮墽琛岀敱涓婂眰閾捐矾澶勭悊锛夛紱
+  - `tests/unit/test_tiered_governance_runtime_m44.py`锛堣拷鍔狅級锛歍-TG-BUILTIN-01~04銆?- 楠屾敹鏍囧噯锛?  - T-TG-BUILTIN-01锛歚build_builtin_skill_registry()` 杩斿洖鍖呭惈 4 涓唴缃?Skill 鐨?`SkillRegistry`锛?  - T-TG-BUILTIN-02锛歚narrative_only` 鐨?`risk_level=1`锛宍GovernorTierPolicy` 鏄犲皠涓?`ApprovalTier.CACHE`锛?  - T-TG-BUILTIN-03锛歚memory_recall` 鐨?`risk_level=1`锛屾槧灏勪负 `ApprovalTier.CACHE`锛?  - T-TG-BUILTIN-04锛歚read_only_status` 鐨?`risk_level=1`锛屾槧灏勪负 `ApprovalTier.CACHE`銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/skills/builtin_registry.py`锛堟柊澧烇級锛沗tests/unit/test_tiered_governance_runtime_m44.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6.1锛汧R-SKILL-001銆?
 ---
 
-### TASK-0438 M44-C：ChatResponse 透出 approval_tier 字段
+### TASK-0438 M44-C锛欳hatResponse 閫忓嚭 approval_tier 瀛楁
 
-- 状态：DONE
-- 任务描述：修改 `fastapi_app.py` 的 `ChatResponse` 模型和 `/v1/chat` 端点，将 `committed_route_token.approval_tier` 透出到响应体，供调用方感知当前请求走了哪个审批通道。
-- 输入：`governor_result["committed_route_token"]["approval_tier"]`（M42-D 已写入）；现有 `ChatResponse`。
-- 输出：
-  - `host_brain/app/fastapi_app.py`（修改）：
-    - `ChatResponse` 新增 `approval_tier: Optional[str]` 字段（`None` 表示未知/向后兼容）；
-    - `/v1/chat` 端点从 `governor_result["committed_route_token"]` 提取 `approval_tier` 并写入响应；
-  - `tests/unit/test_tiered_governance_runtime_m44.py`（追加）：T-TG-RESP-01~02。
-- 验收标准：
-  - T-TG-RESP-01：`ChatResponse` 包含 `approval_tier` 字段；
-  - T-TG-RESP-02：`approval_tier` 为 `None` 时不影响响应结构（向后兼容）。
-- 涉及文件路径：`host_brain/app/fastapi_app.py`（修改）；`tests/unit/test_tiered_governance_runtime_m44.py`（追加）。
-- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001。
-
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛氫慨鏀?`fastapi_app.py` 鐨?`ChatResponse` 妯″瀷鍜?`/v1/chat` 绔偣锛屽皢 `committed_route_token.approval_tier` 閫忓嚭鍒板搷搴斾綋锛屼緵璋冪敤鏂规劅鐭ュ綋鍓嶈姹傝蛋浜嗗摢涓鎵归€氶亾銆?- 杈撳叆锛歚governor_result["committed_route_token"]["approval_tier"]`锛圡42-D 宸插啓鍏ワ級锛涚幇鏈?`ChatResponse`銆?- 杈撳嚭锛?  - `host_brain/app/fastapi_app.py`锛堜慨鏀癸級锛?    - `ChatResponse` 鏂板 `approval_tier: Optional[str]` 瀛楁锛坄None` 琛ㄧず鏈煡/鍚戝悗鍏煎锛夛紱
+    - `/v1/chat` 绔偣浠?`governor_result["committed_route_token"]` 鎻愬彇 `approval_tier` 骞跺啓鍏ュ搷搴旓紱
+  - `tests/unit/test_tiered_governance_runtime_m44.py`锛堣拷鍔狅級锛歍-TG-RESP-01~02銆?- 楠屾敹鏍囧噯锛?  - T-TG-RESP-01锛歚ChatResponse` 鍖呭惈 `approval_tier` 瀛楁锛?  - T-TG-RESP-02锛歚approval_tier` 涓?`None` 鏃朵笉褰卞搷鍝嶅簲缁撴瀯锛堝悜鍚庡吋瀹癸級銆?- 娑夊強鏂囦欢璺緞锛歚host_brain/app/fastapi_app.py`锛堜慨鏀癸級锛沗tests/unit/test_tiered_governance_runtime_m44.py`锛堣拷鍔狅級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6锛汧R-GOV-001銆?
 ---
 
-### TASK-0439 M44-D：M44 代码审查报告
+### TASK-0439 M44-D锛歁44 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE
-- 任务描述：TASK-0436~0438 全部 DONE 后，生成 M44 代码审查报告，记录分层治理运行时接入的实现情况。
-- 输入：TASK-0436~0438 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0436~0438 全部 3 个任务的变更摘要；
-  - 新增测试 ≥ 10 个（T-TG-RT-01~04 + T-TG-BUILTIN-01~04 + T-TG-RESP-01~02），全部通过；
-  - `fastapi_app.py` 的 `get_intent_engine()` 已注入 `registry` + `policy_cache`；
-  - `build_builtin_skill_registry()` 完整落地（4 个内置 Skill）；
-  - `ChatResponse.approval_tier` 完整落地；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
+- 鐘舵€侊細DONE
+- 浠诲姟鎻忚堪锛歍ASK-0436~0438 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M44 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰曞垎灞傛不鐞嗚繍琛屾椂鎺ュ叆鐨勫疄鐜版儏鍐点€?- 杈撳叆锛歍ASK-0436~0438 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0436~0438 鍏ㄩ儴 3 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?10 涓紙T-TG-RT-01~04 + T-TG-BUILTIN-01~04 + T-TG-RESP-01~02锛夛紝鍏ㄩ儴閫氳繃锛?  - `fastapi_app.py` 鐨?`get_intent_engine()` 宸叉敞鍏?`registry` + `policy_cache`锛?  - `build_builtin_skill_registry()` 瀹屾暣钀藉湴锛? 涓唴缃?Skill锛夛紱
+  - `ChatResponse.approval_tier` 瀹屾暣钀藉湴锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂10锛汥evSpec 搂6锛汧R-GOV-001锛汧R-SKILL-001銆?
 
-
-## M45 Edge 运行时装配收口
-
-**目标**：补齐 `edge_client/runtime/` 目录（`bootstrap.py` + `health.py`），使 `python -m edge_client` 能够真正启动，Edge 进程形成完整闭环。
-
-**背景**：`edge_client/` 已具备 `app/fastapi_app.py`、`rpc/`、`actuators/`、`senses/` 等模块，但 `runtime/` 目录缺失，导致 `__main__.py` 的 `from edge_client.runtime.bootstrap import bootstrap` 在运行时报 `ModuleNotFoundError`，Edge 进程无法启动。
-
-**依赖**：M44 全部 DONE。
-
+## M45 Edge 杩愯鏃惰閰嶆敹鍙?
+**鐩爣**锛氳ˉ榻?`edge_client/runtime/` 鐩綍锛坄bootstrap.py` + `health.py`锛夛紝浣?`python -m edge_client` 鑳藉鐪熸鍚姩锛孍dge 杩涚▼褰㈡垚瀹屾暣闂幆銆?
+**鑳屾櫙**锛歚edge_client/` 宸插叿澶?`app/fastapi_app.py`銆乣rpc/`銆乣actuators/`銆乣senses/` 绛夋ā鍧楋紝浣?`runtime/` 鐩綍缂哄け锛屽鑷?`__main__.py` 鐨?`from edge_client.runtime.bootstrap import bootstrap` 鍦ㄨ繍琛屾椂鎶?`ModuleNotFoundError`锛孍dge 杩涚▼鏃犳硶鍚姩銆?
+**渚濊禆**锛歁44 鍏ㄩ儴 DONE銆?
 ---
 
-### TASK-0440 M45-A：edge_client/runtime/bootstrap.py
+### TASK-0440 M45-A锛歟dge_client/runtime/bootstrap.py
 
-- 状态：DONE（2026-03-06，`bootstrap/startup/shutdown` 已落地，含生命周期异常隔离与兼容别名）
-- 任务描述：新增 `edge_client/runtime/bootstrap.py`，实现 `bootstrap(config: EdgeConfig) -> EdgeRuntime` 函数，根据配置装配 ASR / TTS / VTS / Fallback / ResourceGate 等组件，统一管理生命周期（`startup` / `shutdown`）。
-- 输入：`EdgeConfig`（`edge_client/config.py`）；各组件工厂（`actuators/`、`senses/`、`rpc/`）。
-- 输出：
-  - `edge_client/runtime/__init__.py`（新增，空文件）；
-  - `edge_client/runtime/bootstrap.py`（新增）：
-    - `EdgeRuntime` dataclass：持有 `asr`、`tts`、`vts`、`fallback`、`resource_gate`、`rpc_client` 字段；
-    - `bootstrap(config: EdgeConfig) -> EdgeRuntime`：按配置实例化各组件，返回 `EdgeRuntime`；
-    - `async startup(runtime: EdgeRuntime) -> None`：依次调用各组件 `startup()`（若存在）；
-    - `async shutdown(runtime: EdgeRuntime) -> None`：依次调用各组件 `shutdown()`（若存在），顺序与 `startup` 相反；
-  - `tests/unit/test_edge_runtime_bootstrap_m45.py`（新增）：T-EDGE-BOOT-01~05。
-- 验收标准：
-  - T-EDGE-BOOT-01：`bootstrap(config)` 返回 `EdgeRuntime` 实例，字段不为 `None`（按配置启用的组件）；
-  - T-EDGE-BOOT-02：`startup()` 按顺序调用各组件 `startup()`，无异常；
-  - T-EDGE-BOOT-03：`shutdown()` 按逆序调用各组件 `shutdown()`，无异常；
-  - T-EDGE-BOOT-04：某组件 `startup()` 抛出异常时，`bootstrap` 捕获并记录日志，不影响其他组件；
-  - T-EDGE-BOOT-05：`EdgeRuntime` 可序列化为 `health` 快照所需的字段集合。
-- 涉及文件路径：`edge_client/runtime/__init__.py`（新增）；`edge_client/runtime/bootstrap.py`（新增）；`tests/unit/test_edge_runtime_bootstrap_m45.py`（新增）。
-- 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001。
-
+- 鐘舵€侊細DONE锛?026-03-06锛宍bootstrap/startup/shutdown` 宸茶惤鍦帮紝鍚敓鍛藉懆鏈熷紓甯搁殧绂讳笌鍏煎鍒悕锛?- 浠诲姟鎻忚堪锛氭柊澧?`edge_client/runtime/bootstrap.py`锛屽疄鐜?`bootstrap(config: EdgeConfig) -> EdgeRuntime` 鍑芥暟锛屾牴鎹厤缃閰?ASR / TTS / VTS / Fallback / ResourceGate 绛夌粍浠讹紝缁熶竴绠＄悊鐢熷懡鍛ㄦ湡锛坄startup` / `shutdown`锛夈€?- 杈撳叆锛歚EdgeConfig`锛坄edge_client/config.py`锛夛紱鍚勭粍浠跺伐鍘傦紙`actuators/`銆乣senses/`銆乣rpc/`锛夈€?- 杈撳嚭锛?  - `edge_client/runtime/__init__.py`锛堟柊澧烇紝绌烘枃浠讹級锛?  - `edge_client/runtime/bootstrap.py`锛堟柊澧烇級锛?    - `EdgeRuntime` dataclass锛氭寔鏈?`asr`銆乣tts`銆乣vts`銆乣fallback`銆乣resource_gate`銆乣rpc_client` 瀛楁锛?    - `bootstrap(config: EdgeConfig) -> EdgeRuntime`锛氭寜閰嶇疆瀹炰緥鍖栧悇缁勪欢锛岃繑鍥?`EdgeRuntime`锛?    - `async startup(runtime: EdgeRuntime) -> None`锛氫緷娆¤皟鐢ㄥ悇缁勪欢 `startup()`锛堣嫢瀛樺湪锛夛紱
+    - `async shutdown(runtime: EdgeRuntime) -> None`锛氫緷娆¤皟鐢ㄥ悇缁勪欢 `shutdown()`锛堣嫢瀛樺湪锛夛紝椤哄簭涓?`startup` 鐩稿弽锛?  - `tests/unit/test_edge_runtime_bootstrap_m45.py`锛堟柊澧烇級锛歍-EDGE-BOOT-01~05銆?- 楠屾敹鏍囧噯锛?  - T-EDGE-BOOT-01锛歚bootstrap(config)` 杩斿洖 `EdgeRuntime` 瀹炰緥锛屽瓧娈典笉涓?`None`锛堟寜閰嶇疆鍚敤鐨勭粍浠讹級锛?  - T-EDGE-BOOT-02锛歚startup()` 鎸夐『搴忚皟鐢ㄥ悇缁勪欢 `startup()`锛屾棤寮傚父锛?  - T-EDGE-BOOT-03锛歚shutdown()` 鎸夐€嗗簭璋冪敤鍚勭粍浠?`shutdown()`锛屾棤寮傚父锛?  - T-EDGE-BOOT-04锛氭煇缁勪欢 `startup()` 鎶涘嚭寮傚父鏃讹紝`bootstrap` 鎹曡幏骞惰褰曟棩蹇楋紝涓嶅奖鍝嶅叾浠栫粍浠讹紱
+  - T-EDGE-BOOT-05锛歚EdgeRuntime` 鍙簭鍒楀寲涓?`health` 蹇収鎵€闇€鐨勫瓧娈甸泦鍚堛€?- 娑夊強鏂囦欢璺緞锛歚edge_client/runtime/__init__.py`锛堟柊澧烇級锛沗edge_client/runtime/bootstrap.py`锛堟柊澧烇級锛沗tests/unit/test_edge_runtime_bootstrap_m45.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂8锛汥evSpec 搂5锛汧R-EDGE-001銆?
 ---
 
-### TASK-0441 M45-B：edge_client/runtime/health.py
+### TASK-0441 M45-B锛歟dge_client/runtime/health.py
 
-- 状态：DONE（2026-03-06，`collect_health` 聚合规则已落地，旧 `build_edge_health_snapshot` 保持兼容）
-- 任务描述：新增 `edge_client/runtime/health.py`，实现 `collect_health(runtime: EdgeRuntime) -> dict` 函数，聚合各组件 `health()` 输出、ResourceGate `snapshot()`、队列深度，输出稳定的 health schema，供 `/health` 端点使用。
-- 输入：`EdgeRuntime`（TASK-0440）；各组件 `health()` 接口；`ResourceGate.snapshot()`。
-- 输出：
-  - `edge_client/runtime/health.py`（新增）：
-    - `collect_health(runtime: EdgeRuntime) -> dict`：返回结构为 `{"status": "ok"|"degraded"|"down", "components": {...}, "resource_gate": {...}, "timestamp": <iso8601>}`；
-    - `status` 聚合规则：所有组件 `ok` → `ok`；任一 `degraded` → `degraded`；任一 `down` → `down`；
-    - 各组件 `health()` 调用失败时，该组件状态标记为 `"error"`，不影响其他组件；
-  - `tests/unit/test_edge_runtime_health_m45.py`（新增）：T-EDGE-HEALTH-01~05。
-- 验收标准：
-  - T-EDGE-HEALTH-01：所有组件正常时，`status` 为 `"ok"`；
-  - T-EDGE-HEALTH-02：任一组件返回 `"degraded"` 时，聚合 `status` 为 `"degraded"`；
-  - T-EDGE-HEALTH-03：任一组件返回 `"down"` 时，聚合 `status` 为 `"down"`；
-  - T-EDGE-HEALTH-04：某组件 `health()` 抛出异常时，该组件标记为 `"error"`，其余组件正常聚合；
-  - T-EDGE-HEALTH-05：返回结构包含 `timestamp` 字段（ISO 8601 格式）。
-- 涉及文件路径：`edge_client/runtime/health.py`（新增）；`tests/unit/test_edge_runtime_health_m45.py`（新增）。
-- 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-002。
-
+- 鐘舵€侊細DONE锛?026-03-06锛宍collect_health` 鑱氬悎瑙勫垯宸茶惤鍦帮紝鏃?`build_edge_health_snapshot` 淇濇寔鍏煎锛?- 浠诲姟鎻忚堪锛氭柊澧?`edge_client/runtime/health.py`锛屽疄鐜?`collect_health(runtime: EdgeRuntime) -> dict` 鍑芥暟锛岃仛鍚堝悇缁勪欢 `health()` 杈撳嚭銆丷esourceGate `snapshot()`銆侀槦鍒楁繁搴︼紝杈撳嚭绋冲畾鐨?health schema锛屼緵 `/health` 绔偣浣跨敤銆?- 杈撳叆锛歚EdgeRuntime`锛圱ASK-0440锛夛紱鍚勭粍浠?`health()` 鎺ュ彛锛沗ResourceGate.snapshot()`銆?- 杈撳嚭锛?  - `edge_client/runtime/health.py`锛堟柊澧烇級锛?    - `collect_health(runtime: EdgeRuntime) -> dict`锛氳繑鍥炵粨鏋勪负 `{"status": "ok"|"degraded"|"down", "components": {...}, "resource_gate": {...}, "timestamp": <iso8601>}`锛?    - `status` 鑱氬悎瑙勫垯锛氭墍鏈夌粍浠?`ok` 鈫?`ok`锛涗换涓€ `degraded` 鈫?`degraded`锛涗换涓€ `down` 鈫?`down`锛?    - 鍚勭粍浠?`health()` 璋冪敤澶辫触鏃讹紝璇ョ粍浠剁姸鎬佹爣璁颁负 `"error"`锛屼笉褰卞搷鍏朵粬缁勪欢锛?  - `tests/unit/test_edge_runtime_health_m45.py`锛堟柊澧烇級锛歍-EDGE-HEALTH-01~05銆?- 楠屾敹鏍囧噯锛?  - T-EDGE-HEALTH-01锛氭墍鏈夌粍浠舵甯告椂锛宍status` 涓?`"ok"`锛?  - T-EDGE-HEALTH-02锛氫换涓€缁勪欢杩斿洖 `"degraded"` 鏃讹紝鑱氬悎 `status` 涓?`"degraded"`锛?  - T-EDGE-HEALTH-03锛氫换涓€缁勪欢杩斿洖 `"down"` 鏃讹紝鑱氬悎 `status` 涓?`"down"`锛?  - T-EDGE-HEALTH-04锛氭煇缁勪欢 `health()` 鎶涘嚭寮傚父鏃讹紝璇ョ粍浠舵爣璁颁负 `"error"`锛屽叾浣欑粍浠舵甯歌仛鍚堬紱
+  - T-EDGE-HEALTH-05锛氳繑鍥炵粨鏋勫寘鍚?`timestamp` 瀛楁锛圛SO 8601 鏍煎紡锛夈€?- 娑夊強鏂囦欢璺緞锛歚edge_client/runtime/health.py`锛堟柊澧烇級锛沗tests/unit/test_edge_runtime_health_m45.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂8锛汥evSpec 搂5锛汧R-EDGE-002銆?
 ---
 
-### TASK-0442 M45-C：修复 edge_client/__main__.py 启动入口
+### TASK-0442 M45-C锛氫慨澶?edge_client/__main__.py 鍚姩鍏ュ彛
 
-- 状态：DONE（2026-03-06，`python -m edge_client` 接入 runtime 生命周期与 health 收口）
-- 任务描述：修复 `edge_client/__main__.py`，使其正确导入 `runtime.bootstrap` 和 `runtime.health`，完成 `python -m edge_client` 的完整启动流程（装配 → startup → 注册 `/health` 端点 → 启动 FastAPI）。
-- 输入：`edge_client/runtime/bootstrap.py`（TASK-0440）；`edge_client/runtime/health.py`（TASK-0441）；`edge_client/app/fastapi_app.py`。
-- 输出：
-  - `edge_client/__main__.py`（修改）：
-    - 导入 `bootstrap`、`startup`、`shutdown`（from `runtime.bootstrap`）；
-    - 导入 `collect_health`（from `runtime.health`）；
-    - 在 FastAPI `lifespan` 中调用 `await startup(runtime)` / `await shutdown(runtime)`；
-    - `/health` 端点调用 `collect_health(runtime)` 返回健康快照；
-  - `tests/unit/test_edge_main_m45.py`（新增）：T-EDGE-MAIN-01~03。
-- 验收标准：
-  - T-EDGE-MAIN-01：`python -m edge_client --help` 无 `ModuleNotFoundError`；
-  - T-EDGE-MAIN-02：FastAPI `lifespan` 正确调用 `startup` / `shutdown`；
-  - T-EDGE-MAIN-03：`/health` 端点返回 `collect_health` 的结构（`status` 字段存在）。
-- 涉及文件路径：`edge_client/__main__.py`（修改）；`tests/unit/test_edge_main_m45.py`（新增）。
-- 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001；FR-EDGE-002。
-
+- 鐘舵€侊細DONE锛?026-03-06锛宍python -m edge_client` 鎺ュ叆 runtime 鐢熷懡鍛ㄦ湡涓?health 鏀跺彛锛?- 浠诲姟鎻忚堪锛氫慨澶?`edge_client/__main__.py`锛屼娇鍏舵纭鍏?`runtime.bootstrap` 鍜?`runtime.health`锛屽畬鎴?`python -m edge_client` 鐨勫畬鏁村惎鍔ㄦ祦绋嬶紙瑁呴厤 鈫?startup 鈫?娉ㄥ唽 `/health` 绔偣 鈫?鍚姩 FastAPI锛夈€?- 杈撳叆锛歚edge_client/runtime/bootstrap.py`锛圱ASK-0440锛夛紱`edge_client/runtime/health.py`锛圱ASK-0441锛夛紱`edge_client/app/fastapi_app.py`銆?- 杈撳嚭锛?  - `edge_client/__main__.py`锛堜慨鏀癸級锛?    - 瀵煎叆 `bootstrap`銆乣startup`銆乣shutdown`锛坒rom `runtime.bootstrap`锛夛紱
+    - 瀵煎叆 `collect_health`锛坒rom `runtime.health`锛夛紱
+    - 鍦?FastAPI `lifespan` 涓皟鐢?`await startup(runtime)` / `await shutdown(runtime)`锛?    - `/health` 绔偣璋冪敤 `collect_health(runtime)` 杩斿洖鍋ュ悍蹇収锛?  - `tests/unit/test_edge_main_m45.py`锛堟柊澧烇級锛歍-EDGE-MAIN-01~03銆?- 楠屾敹鏍囧噯锛?  - T-EDGE-MAIN-01锛歚python -m edge_client --help` 鏃?`ModuleNotFoundError`锛?  - T-EDGE-MAIN-02锛欶astAPI `lifespan` 姝ｇ‘璋冪敤 `startup` / `shutdown`锛?  - T-EDGE-MAIN-03锛歚/health` 绔偣杩斿洖 `collect_health` 鐨勭粨鏋勶紙`status` 瀛楁瀛樺湪锛夈€?- 娑夊強鏂囦欢璺緞锛歚edge_client/__main__.py`锛堜慨鏀癸級锛沗tests/unit/test_edge_main_m45.py`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂8锛汥evSpec 搂5锛汧R-EDGE-001锛汧R-EDGE-002銆?
 ---
 
-### TASK-0443 M45-D：全量测试 + 回归验证
+### TASK-0443 M45-D锛氬叏閲忔祴璇?+ 鍥炲綊楠岃瘉
 
-- 状态：DONE（2026-03-06，M45 新增测试 13/13 通过；全量回归已执行并记录 3 个非 M45 失败项）
-- 任务描述：TASK-0440~0442 全部 DONE 后，运行全量测试，确保 M45 新增测试全部通过，且无回归。
-- 输入：TASK-0440~0442 全部 DONE。
-- 输出：全量测试报告（`pytest --tb=short -q` 输出），0 failed。
-- 验收标准：
-  - M45 新增测试 ≥ 13 个（T-EDGE-BOOT-01~05 + T-EDGE-HEALTH-01~05 + T-EDGE-MAIN-01~03），全部通过；
-  - 全量测试无回归（与 M44 基线相比，passed 数量只增不减）；
-  - `python -m edge_client --help` 无 `ModuleNotFoundError`。
-- 涉及文件路径：无新增文件（仅运行测试）。
-- 关联需求：ModelPlane.md §8；DevSpec §5。
-
+- 鐘舵€侊細DONE锛?026-03-06锛孧45 鏂板娴嬭瘯 13/13 閫氳繃锛涘叏閲忓洖褰掑凡鎵ц骞惰褰?3 涓潪 M45 澶辫触椤癸級
+- 浠诲姟鎻忚堪锛歍ASK-0440~0442 鍏ㄩ儴 DONE 鍚庯紝杩愯鍏ㄩ噺娴嬭瘯锛岀‘淇?M45 鏂板娴嬭瘯鍏ㄩ儴閫氳繃锛屼笖鏃犲洖褰掋€?- 杈撳叆锛歍ASK-0440~0442 鍏ㄩ儴 DONE銆?- 杈撳嚭锛氬叏閲忔祴璇曟姤鍛婏紙`pytest --tb=short -q` 杈撳嚭锛夛紝0 failed銆?- 楠屾敹鏍囧噯锛?  - M45 鏂板娴嬭瘯 鈮?13 涓紙T-EDGE-BOOT-01~05 + T-EDGE-HEALTH-01~05 + T-EDGE-MAIN-01~03锛夛紝鍏ㄩ儴閫氳繃锛?  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掞紙涓?M44 鍩虹嚎鐩告瘮锛宲assed 鏁伴噺鍙涓嶅噺锛夛紱
+  - `python -m edge_client --help` 鏃?`ModuleNotFoundError`銆?- 娑夊強鏂囦欢璺緞锛氭棤鏂板鏂囦欢锛堜粎杩愯娴嬭瘯锛夈€?- 鍏宠仈闇€姹傦細ModelPlane.md 搂8锛汥evSpec 搂5銆?
 ---
 
-### TASK-0444 M45-E：M45 代码审查报告
+### TASK-0444 M45-E锛歁45 浠ｇ爜瀹℃煡鎶ュ憡
 
-- 状态：DONE（2026-03-06，审查报告 `docs/60_trace/code_reviews/code_review_m45_2026-03-06.md` 已生成）
-- 任务描述：TASK-0440~0443 全部 DONE 后，生成 M45 代码审查报告，记录 Edge 运行时装配收口的实现情况。
-- 输入：TASK-0440~0443 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
-- 验收标准：
-  - 报告包含 TASK-0440~0443 全部 4 个任务的变更摘要；
-  - 新增测试 ≥ 13 个，全部通过；
-  - `edge_client/runtime/bootstrap.py` 完整落地（`EdgeRuntime` + `bootstrap` + `startup` + `shutdown`）；
-  - `edge_client/runtime/health.py` 完整落地（`collect_health` + 聚合规则）；
-  - `edge_client/__main__.py` 修复完成，`python -m edge_client --help` 无报错；
-  - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
-- 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001；FR-EDGE-002。
+- 鐘舵€侊細DONE锛?026-03-06锛屽鏌ユ姤鍛?`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md` 宸茬敓鎴愶級
+- 浠诲姟鎻忚堪锛歍ASK-0440~0443 鍏ㄩ儴 DONE 鍚庯紝鐢熸垚 M45 浠ｇ爜瀹℃煡鎶ュ憡锛岃褰?Edge 杩愯鏃惰閰嶆敹鍙ｇ殑瀹炵幇鎯呭喌銆?- 杈撳叆锛歍ASK-0440~0443 鍏ㄩ儴 DONE锛涘叏閲忔祴璇?0 failed銆?- 杈撳嚭锛歚docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`锛堟柊澧烇級銆?- 楠屾敹鏍囧噯锛?  - 鎶ュ憡鍖呭惈 TASK-0440~0443 鍏ㄩ儴 4 涓换鍔＄殑鍙樻洿鎽樿锛?  - 鏂板娴嬭瘯 鈮?13 涓紝鍏ㄩ儴閫氳繃锛?  - `edge_client/runtime/bootstrap.py` 瀹屾暣钀藉湴锛坄EdgeRuntime` + `bootstrap` + `startup` + `shutdown`锛夛紱
+  - `edge_client/runtime/health.py` 瀹屾暣钀藉湴锛坄collect_health` + 鑱氬悎瑙勫垯锛夛紱
+  - `edge_client/__main__.py` 淇瀹屾垚锛宍python -m edge_client --help` 鏃犳姤閿欙紱
+  - 鍏ㄩ噺娴嬭瘯鏃犲洖褰掋€?- 娑夊強鏂囦欢璺緞锛歚docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`锛堟柊澧烇級銆?- 鍏宠仈闇€姹傦細ModelPlane.md 搂8锛汥evSpec 搂5锛汧R-EDGE-001锛汧R-EDGE-002銆?

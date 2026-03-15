@@ -1,139 +1,125 @@
-# M30 代码审查报告
+﻿# M30 浠ｇ爜瀹℃煡鎶ュ憡
 
-**里程碑：** M30 — 测试同步修复（Test Sync Hotfix）
-**生成时间：** 2026-03-06 10:18
-**测试结果：** 0 failed / 2094 passed / 10 skipped（修复前：17 failed / 2077 passed）
-**状态：** ✅ DONE
+**閲岀▼纰戯細** M30 鈥?娴嬭瘯鍚屾淇锛圱est Sync Hotfix锛?**鐢熸垚鏃堕棿锛?* 2026-03-06 10:18
+**娴嬭瘯缁撴灉锛?* 0 failed / 2094 passed / 10 skipped锛堜慨澶嶅墠锛?7 failed / 2077 passed锛?**鐘舵€侊細** 鉁?DONE
 
 ---
 
-## 一、修复背景
+## 涓€銆佷慨澶嶈儗鏅?
+鏈€鏂颁唬鐮佹媺鍙栧悗锛圚EAD = `e8f41d7`锛夛紝鍏ㄩ噺娴嬭瘯鏆撮湶 **17 涓け璐?*锛屽叏閮ㄤ负娴嬭瘯/浠ｇ爜鍚屾闂锛屾棤閫昏緫 Bug銆傛牴鍥犲垎涓?5 绫伙細
 
-最新代码拉取后（HEAD = `e8f41d7`），全量测试暴露 **17 个失败**，全部为测试/代码同步问题，无逻辑 Bug。根因分为 5 类：
-
-| 类别 | 数量 | 根因 |
+| 绫诲埆 | 鏁伴噺 | 鏍瑰洜 |
 |------|------|------|
-| Bond fixture 非法 stage/trend 值 | 5 | fixture 未随 M28-H 中文化更新 |
-| Bond 集成测试中英文枚举不兼容 | 4 | 集成测试期望英文，`to_summary()` 返回中文 |
-| Governor R8 rule_trace 数量变化 | 2 | R8 规则加入后 trace 从 7 条变 8 条 |
-| Obs metrics 新字段 | 1 | `emotion_metrics` 字段新增，测试未更新 |
-| VTS edge/host 映射表不同步 | 5 | edge_client 仍是旧的 6 种，host 已扩展至 16 种 |
+| Bond fixture 闈炴硶 stage/trend 鍊?| 5 | fixture 鏈殢 M28-H 涓枃鍖栨洿鏂?|
+| Bond 闆嗘垚娴嬭瘯涓嫳鏂囨灇涓句笉鍏煎 | 4 | 闆嗘垚娴嬭瘯鏈熸湜鑻辨枃锛宍to_summary()` 杩斿洖涓枃 |
+| Governor R8 rule_trace 鏁伴噺鍙樺寲 | 2 | R8 瑙勫垯鍔犲叆鍚?trace 浠?7 鏉″彉 8 鏉?|
+| Obs metrics 鏂板瓧娈?| 1 | `emotion_metrics` 瀛楁鏂板锛屾祴璇曟湭鏇存柊 |
+| VTS edge/host 鏄犲皠琛ㄤ笉鍚屾 | 5 | edge_client 浠嶆槸鏃х殑 6 绉嶏紝host 宸叉墿灞曡嚦 16 绉?|
 
 ---
 
-## 二、修复详情
+## 浜屻€佷慨澶嶈鎯?
+### TASK-0283 M30-A锛欱ond fixture 闈炴硶 stage/trend 鍊硷紙5 涓け璐ワ級
 
-### TASK-0283 M30-A：Bond fixture 非法 stage/trend 值（5 个失败）
+**淇鏂囦欢锛?*
 
-**修复文件：**
-
-| 文件 | 修改内容 |
+| 鏂囦欢 | 淇敼鍐呭 |
 |------|---------|
-| `tests/fixtures/context_pack/good/minimal_valid.json` | `stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"` |
-| `tests/fixtures/canon/world/context_pack_with_world_canon.json` | `stage: "ESTABLISHED"→"STRANGER"` |
-| `tests/fixtures/llm_gateway/good/prompt_payload.json` | `stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"` |
-| `tests/fixtures/bond/good/bond_event_for_summary.json` | `stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"` |
-| `tests/contract/test_bond_summary_contract.py` | `test_t_74` 期望值同步更新 |
+| `tests/fixtures/prompt_context/good/minimal_valid.json` | `stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"` |
+| `tests/fixtures/canon/world/prompt_context_with_world_canon.json` | `stage: "ESTABLISHED"鈫?STRANGER"` |
+| `tests/fixtures/llm_gateway/good/prompt_payload.json` | `stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"` |
+| `tests/fixtures/bond/good/bond_event_for_summary.json` | `stage: "warm"鈫?STRANGER"`, `trend: "up"鈫?绋冲畾"` |
+| `tests/contract/test_bond_summary_contract.py` | `test_t_74` 鏈熸湜鍊煎悓姝ユ洿鏂?|
 
-**根因：** `context_pack.py` 的 `_validate_bond_summary_slot()` 校验 `stage` 必须在 `_VALID_STAGES_CN ∪ _VALID_STAGES_EN` 中，`"warm"/"stable"/"ESTABLISHED"` 均不合法。
-
+**鏍瑰洜锛?* `prompt_context.py` 鐨?`_validate_bond_summary_slot()` 鏍￠獙 `stage` 蹇呴』鍦?`_VALID_STAGES_CN 鈭?_VALID_STAGES_EN` 涓紝`"warm"/"stable"/"ESTABLISHED"` 鍧囦笉鍚堟硶銆?
 ---
 
-### TASK-0284 M30-B：Bond 集成测试中英文枚举不兼容（4 个失败）
+### TASK-0284 M30-B锛欱ond 闆嗘垚娴嬭瘯涓嫳鏂囨灇涓句笉鍏煎锛? 涓け璐ワ級
 
-**修复文件：**
+**淇鏂囦欢锛?*
 
-| 文件 | 修改内容 |
+| 鏂囦欢 | 淇敼鍐呭 |
 |------|---------|
-| `tests/integration/test_bond_routes_api.py` | `test_summary_stage_is_valid`：改为中文枚举集合校验 |
-| `tests/integration/test_bond_routes_api.py` | `test_summary_trend_is_valid`：`("RISING","STABLE","DECLINING")` → 中文趋势集合 |
-| `tests/integration/test_bond_routes_api.py` | `test_summary_stage_updates_after_promotion`：`STAGE_ACQUAINTANCE` → `"相识"` |
-| `tests/integration/test_bond_dynamics_stage_integration.py` | `test_summary_stage_matches_state`：`STAGE_ACQUAINTANCE` → `"相识"` |
+| `tests/integration/test_bond_routes_api.py` | `test_summary_stage_is_valid`锛氭敼涓轰腑鏂囨灇涓鹃泦鍚堟牎楠?|
+| `tests/integration/test_bond_routes_api.py` | `test_summary_trend_is_valid`锛歚("RISING","STABLE","DECLINING")` 鈫?涓枃瓒嬪娍闆嗗悎 |
+| `tests/integration/test_bond_routes_api.py` | `test_summary_stage_updates_after_promotion`锛歚STAGE_ACQUAINTANCE` 鈫?`"鐩歌瘑"` |
+| `tests/integration/test_bond_dynamics_stage_integration.py` | `test_summary_stage_matches_state`锛歚STAGE_ACQUAINTANCE` 鈫?`"鐩歌瘑"` |
 
-**根因：** M28-H（OPT-21）将 `BondScoreState.to_summary()` 全面中文化，`ACQUAINTANCE→"相识"`，`RISING→"上升"`，`STABLE→"稳定"`，`DECLINING→"下降"`。
-
+**鏍瑰洜锛?* M28-H锛圤PT-21锛夊皢 `BondScoreState.to_summary()` 鍏ㄩ潰涓枃鍖栵紝`ACQUAINTANCE鈫?鐩歌瘑"`锛宍RISING鈫?涓婂崌"`锛宍STABLE鈫?绋冲畾"`锛宍DECLINING鈫?涓嬮檷"`銆?
 ---
 
-### TASK-0285 M30-C：Governor rule_trace 数量硬编码（2 个失败）
+### TASK-0285 M30-C锛欸overnor rule_trace 鏁伴噺纭紪鐮侊紙2 涓け璐ワ級
 
-**修复文件：**
+**淇鏂囦欢锛?*
 
-| 文件 | 修改内容 |
+| 鏂囦欢 | 淇敼鍐呭 |
 |------|---------|
-| `tests/contract/test_governor_rate_limit_contract.py` | `assertEqual(7, len(rule_trace))` → `assertEqual(8, ...)` |
-| `tests/contract/test_governor_rules_contract.py` | `assertEqual(7, len(rule_trace))` → `assertEqual(8, ...)` |
+| `tests/contract/test_governor_rate_limit_contract.py` | `assertEqual(7, len(rule_trace))` 鈫?`assertEqual(8, ...)` |
+| `tests/contract/test_governor_rules_contract.py` | `assertEqual(7, len(rule_trace))` 鈫?`assertEqual(8, ...)` |
 
-**根因：** M28-D（OPT-8）新增 R8 情感门控规则，`evaluate_governor_gates()` 的 `rule_trace` 从 7 条增加到 8 条。
-
+**鏍瑰洜锛?* M28-D锛圤PT-8锛夋柊澧?R8 鎯呮劅闂ㄦ帶瑙勫垯锛宍evaluate_governor_gates()` 鐨?`rule_trace` 浠?7 鏉″鍔犲埌 8 鏉°€?
 ---
 
-### TASK-0286 M30-D：Obs metrics required_keys 缺少 emotion_metrics（1 个失败）
+### TASK-0286 M30-D锛歄bs metrics required_keys 缂哄皯 emotion_metrics锛? 涓け璐ワ級
 
-**修复文件：**
+**淇鏂囦欢锛?*
 
-| 文件 | 修改内容 |
+| 鏂囦欢 | 淇敼鍐呭 |
 |------|---------|
-| `tests/contract/test_obs_metrics_contract.py` | `required_keys` 添加 `'emotion_metrics'` |
+| `tests/contract/test_obs_metrics_contract.py` | `required_keys` 娣诲姞 `'emotion_metrics'` |
 
-**根因：** M29-Q（OPT-46）在 `MetricsCollector.collect()` 中新增了 `emotion_metrics` 字段，测试的 `required_keys` 集合未包含该字段。
-
+**鏍瑰洜锛?* M29-Q锛圤PT-46锛夊湪 `MetricsCollector.collect()` 涓柊澧炰簡 `emotion_metrics` 瀛楁锛屾祴璇曠殑 `required_keys` 闆嗗悎鏈寘鍚瀛楁銆?
 ---
 
-### TASK-0287 M30-E：edge_client VTS 映射表同步（5 个失败）
+### TASK-0287 M30-E锛歟dge_client VTS 鏄犲皠琛ㄥ悓姝ワ紙5 涓け璐ワ級
 
-**修复文件：**
+**淇鏂囦欢锛?*
 
-| 文件 | 修改内容 |
+| 鏂囦欢 | 淇敼鍐呭 |
 |------|---------|
-| `edge_client/actuators/vts_driver.py` | `EMOTION_TO_EXPRESSION_ID` 从 6 种扩展至 16 种（新增 EXCITED/CALM/FRUSTRATED/ANXIOUS/LOVING/EMBARRASSED/CONFUSED/BORED/PROUD/GRATEFUL） |
-| `tests/contract/test_vts_reconnect_contract.py` | `len == 6` → `len == 16` |
-| `tests/contract/test_vts_degraded_contract.py` | 未知 tag 从 `CONFUSED`/`excited` 改为 `SLEEPY`/`sleepy` |
-| `tests/fixtures/channels/vts_unknown_tag_degraded.json` | `emotion_tag: "CONFUSED"→"SLEEPY"` |
+| `edge_client/actuators/vts_driver.py` | `EMOTION_TO_EXPRESSION_ID` 浠?6 绉嶆墿灞曡嚦 16 绉嶏紙鏂板 EXCITED/CALM/FRUSTRATED/ANXIOUS/LOVING/EMBARRASSED/CONFUSED/BORED/PROUD/GRATEFUL锛?|
+| `tests/contract/test_vts_reconnect_contract.py` | `len == 6` 鈫?`len == 16` |
+| `tests/contract/test_vts_degraded_contract.py` | 鏈煡 tag 浠?`CONFUSED`/`excited` 鏀逛负 `SLEEPY`/`sleepy` |
+| `tests/fixtures/channels/vts_unknown_tag_degraded.json` | `emotion_tag: "CONFUSED"鈫?SLEEPY"` |
 
-**根因：** M28-L（OPT-34）已将 `host_brain/channels/vts.py` 的 `EMOTION_TO_EXPRESSION_ID` 扩展至 16 种，但 `edge_client/actuators/vts_driver.py` 的映射表仍是旧的 6 种，导致 `EXCITED`/`CONFUSED` 等新增标签在 edge 侧被当作未知 tag 处理。
-
+**鏍瑰洜锛?* M28-L锛圤PT-34锛夊凡灏?`host_brain/channels/vts.py` 鐨?`EMOTION_TO_EXPRESSION_ID` 鎵╁睍鑷?16 绉嶏紝浣?`edge_client/actuators/vts_driver.py` 鐨勬槧灏勮〃浠嶆槸鏃х殑 6 绉嶏紝瀵艰嚧 `EXCITED`/`CONFUSED` 绛夋柊澧炴爣绛惧湪 edge 渚ц褰撲綔鏈煡 tag 澶勭悊銆?
 ---
 
-## 三、最终测试结果
-
+## 涓夈€佹渶缁堟祴璇曠粨鏋?
 ```
 2094 passed, 0 failed, 10 skipped
 ```
 
-| 指标 | 修复前 | 修复后 | 变化 |
+| 鎸囨爣 | 淇鍓?| 淇鍚?| 鍙樺寲 |
 |------|--------|--------|------|
 | passed | 2077 | 2094 | +17 |
-| failed | 17 | 0 | -17 ✅ |
+| failed | 17 | 0 | -17 鉁?|
 | skipped | 10 | 10 | 0 |
 
 ---
 
-## 四、修改文件清单
-
-| 文件 | 类型 | 说明 |
+## 鍥涖€佷慨鏀规枃浠舵竻鍗?
+| 鏂囦欢 | 绫诲瀷 | 璇存槑 |
 |------|------|------|
-| `edge_client/actuators/vts_driver.py` | 源码 | VTS 映射表扩展至 16 种 |
-| `tests/fixtures/context_pack/good/minimal_valid.json` | fixture | stage/trend 合法化 |
-| `tests/fixtures/canon/world/context_pack_with_world_canon.json` | fixture | stage 合法化 |
-| `tests/fixtures/llm_gateway/good/prompt_payload.json` | fixture | stage/trend 合法化 |
-| `tests/fixtures/bond/good/bond_event_for_summary.json` | fixture | stage/trend 合法化 |
-| `tests/fixtures/channels/vts_unknown_tag_degraded.json` | fixture | emotion_tag 改为真正未知的 SLEEPY |
-| `tests/contract/test_bond_summary_contract.py` | 测试 | 期望值同步 |
-| `tests/contract/test_governor_rate_limit_contract.py` | 测试 | rule_trace 数量 7→8 |
-| `tests/contract/test_governor_rules_contract.py` | 测试 | rule_trace 数量 7→8 |
-| `tests/contract/test_obs_metrics_contract.py` | 测试 | required_keys 添加 emotion_metrics |
-| `tests/contract/test_vts_degraded_contract.py` | 测试 | 未知 tag 改为 SLEEPY，fixture 期望值同步 |
-| `tests/contract/test_vts_reconnect_contract.py` | 测试 | 映射表数量 6→16 |
-| `tests/contract/test_canon_store_contract.py` | 测试 | bond_summary.stage 合法化 |
-| `tests/integration/test_bond_routes_api.py` | 测试 | stage/trend 期望值改为中文枚举 |
-| `tests/integration/test_bond_dynamics_stage_integration.py` | 测试 | stage 期望值改为中文 |
+| `edge_client/actuators/vts_driver.py` | 婧愮爜 | VTS 鏄犲皠琛ㄦ墿灞曡嚦 16 绉?|
+| `tests/fixtures/prompt_context/good/minimal_valid.json` | fixture | stage/trend 鍚堟硶鍖?|
+| `tests/fixtures/canon/world/prompt_context_with_world_canon.json` | fixture | stage 鍚堟硶鍖?|
+| `tests/fixtures/llm_gateway/good/prompt_payload.json` | fixture | stage/trend 鍚堟硶鍖?|
+| `tests/fixtures/bond/good/bond_event_for_summary.json` | fixture | stage/trend 鍚堟硶鍖?|
+| `tests/fixtures/channels/vts_unknown_tag_degraded.json` | fixture | emotion_tag 鏀逛负鐪熸鏈煡鐨?SLEEPY |
+| `tests/contract/test_bond_summary_contract.py` | 娴嬭瘯 | 鏈熸湜鍊煎悓姝?|
+| `tests/contract/test_governor_rate_limit_contract.py` | 娴嬭瘯 | rule_trace 鏁伴噺 7鈫? |
+| `tests/contract/test_governor_rules_contract.py` | 娴嬭瘯 | rule_trace 鏁伴噺 7鈫? |
+| `tests/contract/test_obs_metrics_contract.py` | 娴嬭瘯 | required_keys 娣诲姞 emotion_metrics |
+| `tests/contract/test_vts_degraded_contract.py` | 娴嬭瘯 | 鏈煡 tag 鏀逛负 SLEEPY锛宖ixture 鏈熸湜鍊煎悓姝?|
+| `tests/contract/test_vts_reconnect_contract.py` | 娴嬭瘯 | 鏄犲皠琛ㄦ暟閲?6鈫?6 |
+| `tests/contract/test_canon_store_contract.py` | 娴嬭瘯 | bond_summary.stage 鍚堟硶鍖?|
+| `tests/integration/test_bond_routes_api.py` | 娴嬭瘯 | stage/trend 鏈熸湜鍊兼敼涓轰腑鏂囨灇涓?|
+| `tests/integration/test_bond_dynamics_stage_integration.py` | 娴嬭瘯 | stage 鏈熸湜鍊兼敼涓轰腑鏂?|
 
 ---
 
-## 五、质量门禁
+## 浜斻€佽川閲忛棬绂?
+- 鉁?`release_ready = true`
+- 鉁?`zero_regressions = true`锛? failed锛?- 鉁?`total_tests_passed = 2094`锛堚墺 2077 鍩虹嚎锛?- 鉁?`edge_host_vts_sync = true`锛坋dge/host 鏄犲皠琛ㄥ凡鍚屾锛?- 鉁?`bond_summary_cn_consistent = true`锛堜腑鏂囨灇涓惧叏閾捐矾涓€鑷达級
 
-- ✅ `release_ready = true`
-- ✅ `zero_regressions = true`（0 failed）
-- ✅ `total_tests_passed = 2094`（≥ 2077 基线）
-- ✅ `edge_host_vts_sync = true`（edge/host 映射表已同步）
-- ✅ `bond_summary_cn_consistent = true`（中文枚举全链路一致）
