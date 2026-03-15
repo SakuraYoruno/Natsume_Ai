@@ -153,7 +153,9 @@ class EdgeRpcClient(ClawdbotClient):
 
     def _build_envelope(self, *, request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """构建 Edge RPC 信封（与 edge_client.rpc.auth 协议保持一致）。"""
-        ts_ms = int(time.time() * 1000)
+        import os as _os
+        _clock_offset = int(_os.environ.get("HOST_EDGE_CLOCK_OFFSET_MS", "0") or "0")
+        ts_ms = int(time.time() * 1000) + _clock_offset
         nonce = str(uuid.uuid4())
         signature = "insecure"
         if self._hmac_key:

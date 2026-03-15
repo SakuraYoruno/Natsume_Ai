@@ -2291,6 +2291,16 @@ async def get_vault_stats(
         for r in recent_sorted
     ]
 
+    return VaultStatsResponse(
+        total_manifests=total,
+        active_count=active_count,
+        undone_count=undone_count,
+        gc_count=gc_count,
+        reversible_count=reversible_count,
+        reversible_rate=reversible_rate,
+        recent_manifests=recent_manifests,
+        timestamp=now,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3258,6 +3268,24 @@ async def get_memory_guard_stats(
                for tag in _mg_tags)
     ]
 
+    # Supplement with memory_ops_log (actual write/skip records from MemoryGuard path)
+    try:
+        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
+        if mem_ops:
+            for row in mem_ops:
+                op_kind = str(row.get("op_kind") or "").upper()
+                status = str(row.get("status") or "").upper()
+                if op_kind == "WRITE" and status == "SUCCESS":
+                    mg_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
+                elif op_kind == "WRITE" and status == "SKIPPED":
+                    reason = str(row.get("reason_code") or "")
+                    if "MEMORY_GUARD" in reason.upper():
+                        mg_rows.append({**row, "audit_tag": "MEMORY_GUARD_FILTERED"})
+                    else:
+                        mg_rows.append({**row, "audit_tag": "EPISODIC_SKIPPED"})
+    except Exception:
+        pass
+
     from collections import Counter
     total = len(mg_rows)
     passed_count = sum(1 for r in mg_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
@@ -3656,6 +3684,19 @@ async def get_episodic_store_stats(
         if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper()
                for tag in _ep_tags)
     ]
+
+    # Supplement with memory_ops_log (actual episodic write records)
+    try:
+        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
+        if mem_ops:
+            # Map memory_ops SUCCESS rows to EPISODIC_WRITTEN synthetic tags
+            for row in mem_ops:
+                if str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SUCCESS":
+                    ep_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
+                elif str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SKIPPED":
+                    ep_rows.append({**row, "audit_tag": "EPISODIC_SKIPPED"})
+    except Exception:
+        pass
 
     total = len(ep_rows)
     written_count = sum(1 for r in ep_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())

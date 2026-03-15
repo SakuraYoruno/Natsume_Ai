@@ -176,7 +176,9 @@ def persist_chat_episodic_memory(
         _guard = get_memory_guard()
         # 从 emotion_context 中提取轮次信息（默认 2，满足最低写入条件）
         _turn_count = int((emotion_context or {}).get("turn_count") or 2)
-        _emotion_tags = [tag] if tag and tag != "NEUTRAL" else []
+        # Include NEUTRAL as a valid emotion tag so chat turns always have at
+        # least one qualifying tag and pass the MemoryGuard episodic write check.
+        _emotion_tags = [tag] if tag else []
         _fact_tags = list((emotion_context or {}).get("fact_tags") or [])
         _pref_tags = list((emotion_context or {}).get("preference_tags") or [])
         _record = EpisodicRecord(

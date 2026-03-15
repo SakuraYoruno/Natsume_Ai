@@ -336,16 +336,16 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
             )
 
         approver_node_id = body.approver_node_id or f"api.canon_proposals.approve::{request_id}"
-        # F-35 修复：approve 操作（DB 状态更新 + SSOT 写入）包裹在事务上下文中
-        with ledger.transaction():
-            doc = store.approve_proposal_with_content(
-                proposal_id=proposal_id,
-                proposed_title=body.proposed_title,
-                proposed_tags=body.proposed_tags,
-                proposed_body=body.proposed_body,
-                approver_node_id=approver_node_id,
-                ts_ms=ts_ms,
-            )
+        # approve_proposal_with_content handles its own write ordering internally;
+        # wrapping in ledger.transaction() causes nested lock/transaction conflicts.
+        doc = store.approve_proposal_with_content(
+            proposal_id=proposal_id,
+            proposed_title=body.proposed_title,
+            proposed_tags=body.proposed_tags,
+            proposed_body=body.proposed_body,
+            approver_node_id=approver_node_id,
+            ts_ms=ts_ms,
+        )
 
         # 读取更新后的提案记录
         response_row = dict(existing)

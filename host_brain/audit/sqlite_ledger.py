@@ -74,7 +74,7 @@ class SQLiteLedger(
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
-        self._write_lock = threading.Lock()
+        self._write_lock = threading.RLock()  # RLock allows re-entrant acquisition within transaction()
         self._wal_status: str = "UNKNOWN"
         self._wal_degradation_reason: str | None = None
 

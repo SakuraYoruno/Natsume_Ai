@@ -1,4 +1,4 @@
-﻿{
+{
   "body": "鍗曞啓鑰呭師鍒欙細姣忎釜 Canon 鏂囨。鍙兘閫氳繃 WorldCanonStore.upsert_document 鍐欏叆锛岀姝㈢洿鎺ヤ慨鏀规枃浠躲€傚璁′笉鍙鏀癸細鎵€鏈?canon_change_log 鏉＄洰鍐欏叆鍚庝笉寰楀垹闄ゆ垨淇敼锛屼粎鍏佽杩藉姞銆傚垎妲介殧绂伙細World Canon 鏉＄洰鍙兘娉ㄥ叆 prompt_context.authoritative.world_canon 妲戒綅锛屼笉寰椾笌 style_pack銆乺etrieval.episodic 鎴?recent_events 娣锋Ы銆傚箓绛夊悓姝ワ細canon_sync 瀵圭浉鍚?hash 鐨勬潯鐩噸澶嶆壂鎻忎笉浜х敓閲嶅 change_log 鏉＄洰銆?,
   "doc_id": "wc-002-architecture-invariants",
   "hash": "5c67a32960090b597d12a950f0890d9f857a51c8aff95643d7aca7f422747297",

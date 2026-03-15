@@ -1,13 +1,13 @@
 {
-  "body": "??????\n\n封测验证条目:seal-prop-1773468164886",
+  "body": "[ROLLED_BACK from v8 by seal_test] F-21 最终回滚验证",
   "doc_id": "wc-001-system-terms",
-  "hash": "eb388688c203a07f82fcd2ca765a502aa8f88aab02439574cb8e62ce9dd140f5",
-  "status": "active",
+  "hash": "f787899d0de6455022a8ed92c14e46776869bdf991df9de0a2527324075b63fa",
+  "status": "rolled_back",
   "tags": [
-    "seal"
+    "f21_final"
   ],
-  "title": "??????",
-  "ts_ms": 1773468164891,
-  "updated_by": "seal-prop-1773468164886",
-  "version": 3
+  "title": "F-21 最终修复验证 - 夏目AI",
+  "ts_ms": 1773569614903,
+  "updated_by": "prop-f21-final-1773569614",
+  "version": 7
 }
