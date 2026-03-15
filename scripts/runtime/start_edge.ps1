@@ -319,6 +319,7 @@ if ($null -ne $wechatBridgeEnvRaw) {
 
 $wechatBridgePidFile = Join-Path $runtimeRoot "wechat_bridge.pid"
 $wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
+$wechatBridgeErrLog = Join-Path $LogDir "wechat_bridge.stderr.log"
 
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
@@ -500,7 +501,7 @@ if ($wechatBridgeEnabled) {
         -WindowStyle Hidden `
         -PassThru `
         -RedirectStandardOutput $wechatBridgeLog `
-        -RedirectStandardError $wechatBridgeLog
+        -RedirectStandardError $wechatBridgeErrLog
       $wechatBridgePid = [int]$bridgeProc.Id
       Set-Content -Path $wechatBridgePidFile -Value ([string]$wechatBridgePid) -Encoding ascii
       $wechatBridgeStatus = "started"
