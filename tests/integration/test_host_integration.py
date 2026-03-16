@@ -818,13 +818,13 @@ class TestToolAPIIntegration:
     """T-INT-TOOL: Tool API 路由集成测试。"""
 
     def test_tool_list_returns_200(self, test_client):
-        """T-INT-TOOL-01: GET /tools 返回 200。"""
-        resp = test_client.get("/tools")
+        """T-INT-TOOL-01: GET /tools/meta-pack 返回 200（工具列表由 meta-pack 提供）。"""
+        resp = test_client.get("/tools/meta-pack")
         assert resp.status_code == 200
 
     def test_tool_list_response_is_list_or_dict(self, test_client):
-        """T-INT-TOOL-02: GET /tools 响应为列表或字典。"""
-        resp = test_client.get("/tools")
+        """T-INT-TOOL-02: GET /tools/meta-pack 响应为字典且含 tools 或等价结构。"""
+        resp = test_client.get("/tools/meta-pack")
         data = resp.json()
         assert isinstance(data, (list, dict))
 

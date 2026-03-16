@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,6 +22,7 @@ if str(ROOT) not in sys.path:
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     CHAT_GRAPH_NODE_ORDER,
+    CHAT_RENDER_NODE_ID,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_WORK_CODE,
@@ -45,6 +48,11 @@ def _make_graph_config(scene_type: str = SCENE_CHAT) -> dict:
         provider_fn=mock_fn,
         scene_type=scene_type,
     )
+
+
+def _make_graph_config_reduced(monkeypatch: pytest.MonkeyPatch, scene_type: str = SCENE_CHAT) -> dict:
+    """Build graph by execution_profile (P1: 先选图再跑图). Env HOST_GRAPH_SCENE_ROUTER_ENABLED no longer used."""
+    return _make_graph_config(scene_type)
 
 
 class TestSceneNodeSequence:
@@ -110,100 +118,121 @@ class TestSceneNodeSequence:
 
 
 class TestGraphConfigSceneRouting:
-    def test_chat_scene_node_bindings_and_edges(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
-        node_ids = [nb["node_id"] for nb in config["node_bindings"]]
-        assert node_ids == [CHAT_DIRECT_NODE_ID]
-        assert config["edges"] == []
+    """Tests that expect reduced (per-scene) graph topology; scene router disabled."""
 
-    def test_secondary_not_in_chat_edges(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    def test_chat_scene_node_bindings_and_edges(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 Chat 图：chat_direct_ja → renderer_ja_c_style，一条边。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
+        node_ids = [nb["node_id"] for nb in config["node_bindings"]]
+        assert node_ids == [CHAT_DIRECT_NODE_ID, CHAT_RENDER_NODE_ID]
+        assert config["edges"] == [{"from": CHAT_DIRECT_NODE_ID, "to": CHAT_RENDER_NODE_ID}]
+
+    def test_secondary_not_in_chat_edges(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         edge_nodes = set()
         for edge in config["edges"]:
             edge_nodes.add(edge["from"])
             edge_nodes.add(edge["to"])
         assert "core_reasoner_secondary" not in edge_nodes
 
-    def test_chat_fast_path_falls_back_directly_to_renderer(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    def test_chat_fast_path_falls_back_directly_to_renderer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         fallback_edges = config["fallback_edges"]
         assert fallback_edges == []
 
-    def test_exec_intent_keeps_secondary_fallback_chain(self) -> None:
-        config = _make_graph_config(SCENE_EXEC_INTENT)
+    def test_exec_intent_keeps_secondary_fallback_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 Intent 图无 secondary fallback，固定链路 intent_agent → safety → judge → renderer。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_EXEC_INTENT)
         fallback_edges = config["fallback_edges"]
-        assert {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"} in fallback_edges
-        assert {"from": "core_reasoner_secondary", "to": "consistency_verifier"} in fallback_edges
+        assert fallback_edges == []
 
-    def test_exec_intent_node_bindings_count(self) -> None:
-        config = _make_graph_config(SCENE_EXEC_INTENT)
+    def test_exec_intent_node_bindings_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 Intent 图：intent_agent_entry → safety_verifier → judge_agent → renderer，共 4 节点 3 边。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_EXEC_INTENT)
         node_ids = [nb["node_id"] for nb in config["node_bindings"]]
-        assert "planner_constraints" in node_ids
-        assert "tool_planner" in node_ids
+        assert "intent_agent_entry" in node_ids
         assert "safety_verifier" in node_ids
-        assert "consistency_verifier" in node_ids
-        assert len(config["edges"]) == 5
-
-    def test_work_translate_node_bindings(self) -> None:
-        config = _make_graph_config(SCENE_WORK_TRANSLATE)
-        node_ids = [nb["node_id"] for nb in config["node_bindings"]]
-        assert "workbench_translate" in node_ids
-        assert "consistency_verifier" in node_ids
-        assert "workbench_code_assist" not in node_ids
+        assert "judge_agent_node" in node_ids
+        assert CHAT_RENDER_NODE_ID in node_ids
         assert len(config["edges"]) == 3
 
-    def test_work_code_node_bindings(self) -> None:
-        config = _make_graph_config(SCENE_WORK_CODE)
+    def test_work_translate_node_bindings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 WORK_TRANSLATE 走 Supervised 图：supervisor_dispatch → agent_dispatch → judge → renderer。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_WORK_TRANSLATE)
         node_ids = [nb["node_id"] for nb in config["node_bindings"]]
-        assert "workbench_code_assist" in node_ids
-        assert "consistency_verifier" in node_ids
-        assert "workbench_translate" not in node_ids
+        assert "supervisor_dispatch" in node_ids
+        assert "agent_dispatch_node" in node_ids
+        assert "judge_agent_node" in node_ids
+        assert CHAT_RENDER_NODE_ID in node_ids
         assert len(config["edges"]) == 3
 
-    def test_model_node_overrides_always_has_all_9_nodes(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    def test_work_code_node_bindings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 WORK_CODE 走 Supervised 图：supervisor_dispatch → agent_dispatch → judge → renderer。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_WORK_CODE)
+        node_ids = [nb["node_id"] for nb in config["node_bindings"]]
+        assert "supervisor_dispatch" in node_ids
+        assert "agent_dispatch_node" in node_ids
+        assert "judge_agent_node" in node_ids
+        assert CHAT_RENDER_NODE_ID in node_ids
+        assert len(config["edges"]) == 3
+
+    def test_model_node_overrides_always_has_all_9_nodes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         overrides = config["model_node_overrides"]
         for node_id in CHAT_GRAPH_NODE_ORDER:
             assert node_id in overrides, f"node {node_id} missing from model_node_overrides"
 
-    def test_entry_node_matches_scene_sequence(self) -> None:
-        assert _make_graph_config(SCENE_CHAT)["entry_node"] == CHAT_DIRECT_NODE_ID
-        for scene in [SCENE_EXEC_INTENT, SCENE_WORK_TRANSLATE, SCENE_WORK_CODE]:
-            config = _make_graph_config(scene)
-            assert config["entry_node"] == "core_reasoner_primary"
+    def test_entry_node_matches_scene_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 入口节点：CHAT→chat_direct_ja，EXEC_INTENT→intent_agent_entry，WORK_*→supervisor_dispatch。"""
+        assert _make_graph_config_reduced(monkeypatch, SCENE_CHAT)["entry_node"] == CHAT_DIRECT_NODE_ID
+        assert _make_graph_config_reduced(monkeypatch, SCENE_EXEC_INTENT)["entry_node"] == "intent_agent_entry"
+        for scene in [SCENE_WORK_TRANSLATE, SCENE_WORK_CODE]:
+            config = _make_graph_config_reduced(monkeypatch, scene)
+            assert config["entry_node"] == "supervisor_dispatch"
 
-    def test_edges_match_node_sequence(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
-        assert config["edges"] == []
+    def test_edges_match_node_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 Chat 图一条边：chat_direct_ja → renderer_ja_c_style。"""
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
+        assert config["edges"] == [{"from": CHAT_DIRECT_NODE_ID, "to": CHAT_RENDER_NODE_ID}]
 
 
 class TestGraphMetaSceneField:
-    def test_chat_scene_meta_type(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    """Tests that expect reduced graph meta; scene router disabled."""
+
+    def test_chat_scene_meta_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         assert config["graph_meta"]["scene_type"] == "CHAT"
 
-    def test_exec_intent_scene_meta_type(self) -> None:
-        config = _make_graph_config(SCENE_EXEC_INTENT)
+    def test_exec_intent_scene_meta_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_EXEC_INTENT)
         assert config["graph_meta"]["scene_type"] == "EXEC_INTENT"
 
-    def test_active_node_count_in_meta(self) -> None:
+    def test_active_node_count_in_meta(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """P1 三张图节点数：Chat=2，Intent=4，Supervised(WORK_*)=4。"""
+        expected_by_scene = {
+            SCENE_CHAT: 2,
+            SCENE_EXEC_INTENT: 4,
+            SCENE_WORK_TRANSLATE: 4,
+            SCENE_WORK_CODE: 4,
+        }
         for scene in [SCENE_CHAT, SCENE_EXEC_INTENT, SCENE_WORK_TRANSLATE, SCENE_WORK_CODE]:
-            config = _make_graph_config(scene)
-            expected_count = len(_resolve_scene_node_sequence(scene))
+            config = _make_graph_config_reduced(monkeypatch, scene)
+            expected_count = expected_by_scene[scene]
             assert config["graph_meta"]["active_node_count"] == expected_count, (
                 f"scene={scene}: active_node_count={config['graph_meta']['active_node_count']} != {expected_count}"
             )
 
-    def test_online_chain_updated(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    def test_online_chain_updated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         assert "scene_routed" in config["graph_meta"]["online_chain"]
 
-    def test_policy_timeout_budget_is_exposed(self) -> None:
-        config = _make_graph_config(SCENE_CHAT)
+    def test_policy_timeout_budget_is_exposed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _make_graph_config_reduced(monkeypatch, SCENE_CHAT)
         policy_timeout_ms = int(config.get("policy_timeout_ms") or 0)
         assert 8_000 <= policy_timeout_ms <= 12_000
 
-    def test_policy_timeout_budget_accounts_for_retry_and_fallback(self, monkeypatch) -> None:
+    def test_policy_timeout_budget_accounts_for_retry_and_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # P2：HOST_GRAPH_SCENE_ROUTER_ENABLED 已废弃，选图由 execution_profile 决定
         monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS", "3")
         monkeypatch.setenv("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS", "100")
         monkeypatch.delenv("HOST_GEMINI_PRIMARY_DISABLE_MODEL_FALLBACK", raising=False)
