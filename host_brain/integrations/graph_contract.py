@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, TypedDict
 from host_brain.core.errors import (
     ORCH_EDGE_INVALID,
     ORCH_NODE_MISSING,
+    ORCH_TIMEOUT,
 )
 
 # ---------------------------------------------------------------------------
@@ -171,6 +172,8 @@ class GraphState(TypedDict):
     agent_artifacts: dict[str, Any] | None
     # judge_result：JudgeAgent 裁判结果
     judge_result: dict[str, Any] | None
+    # execution_profile：入口层写入，决定跑哪张图；仅入口可写，下游只读
+    execution_profile: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -530,3 +533,161 @@ def build_subgraph_commit_summary(
         "graph_trace_flat": graph_trace_flat,
         "committed_at_ms": int(_time.time() * 1000),
     }
+
+
+# ---------------------------------------------------------------------------
+# P4 子图 payload 契约（MULTI_AGENT_P4_SCOPE §4 冻结）
+# 下游（safety_verifier / judge_agent）仅允许从以下固定键读取，禁止各自发明字段。
+# ---------------------------------------------------------------------------
+
+# 子图成功摘要：由 intent_agent_entry（或子图出口）写入 payload，形态由 build_subgraph_commit_summary 产出
+PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY = "subgraph_commit_summary"
+# 子图失败归一化输出：由 intent_agent_entry 写入 payload，最少包含以下键
+PAYLOAD_KEY_SUBGRAPH_FAILURE = "subgraph_failure"
+# subgraph_failure 必含字段（P4 §4.2）
+SUBGRAPH_FAILURE_KEYS = ("failed_node", "error_code", "safe_fallback_reason", "trace_ref")
+# subgraph_commit_summary 必含字段（与 build_subgraph_commit_summary 返回一致）
+SUBGRAPH_COMMIT_SUMMARY_KEYS = (
+    "subgraph_id", "node_count", "success_count", "fail_count",
+    "graph_trace_flat", "committed_at_ms",
+)
+
+
+# ---------------------------------------------------------------------------
+# P6 局部循环契约（MULTI_AGENT_P6_SCOPE §7、P6-1）
+# 边界控制字段名、失败码、虚拟节点名（用于 failed_node）。
+# ---------------------------------------------------------------------------
+
+# 循环边界配置键（由 context / node_binding 注入）
+LOCAL_LOOP_CONFIG_MAX_STEPS = "max_local_steps"
+LOCAL_LOOP_CONFIG_MAX_RETRY = "max_retry_count"
+LOCAL_LOOP_CONFIG_TIMEOUT_MS = "local_loop_timeout_ms"
+
+# 局部循环失败码（与 P4 subgraph_failure 共用外壳，error_code 用下列值）
+LOCAL_LOOP_FAILURE_MAX_STEPS = "LOCAL_LOOP_MAX_STEPS"
+LOCAL_LOOP_FAILURE_TIMEOUT = "LOCAL_LOOP_TIMEOUT"
+LOCAL_LOOP_FAILURE_INTERNAL_ERROR = "LOCAL_LOOP_INTERNAL_ERROR"
+LOCAL_LOOP_FAILURE_CODES = (
+    LOCAL_LOOP_FAILURE_MAX_STEPS,
+    LOCAL_LOOP_FAILURE_TIMEOUT,
+    LOCAL_LOOP_FAILURE_INTERNAL_ERROR,
+)
+
+# 局部循环虚拟节点名（subgraph_failure.failed_node 在循环边界/超时/内部错误时可用）
+LOCAL_LOOP_VIRTUAL_NODE_ID = "local_loop"
+
+
+# ---------------------------------------------------------------------------
+# P5 Supervisor proposal 契约（MULTI_AGENT_P5_SCOPE §5 §6）
+# LLM 只产出提案，handler 校验后编译；禁止 proposal 内含控图字段。
+# ---------------------------------------------------------------------------
+
+# Proposal 必含字段（selected_agent 必填；need_judge / risk_mode 可有默认值）
+SUPERVISOR_PROPOSAL_REQUIRED_KEYS = ("selected_agent",)
+# Proposal 允许的键（除禁止键外，仅允许以下或由 handler 忽略未知键）
+SUPERVISOR_PROPOSAL_ALLOWED_KEYS = frozenset({
+    "selected_agent", "reason", "need_judge", "risk_mode", "budget",
+})
+# risk_mode 仅允许既定枚举（§5.1）
+SUPERVISOR_PROPOSAL_VALID_RISK_MODES = frozenset({"safe", "guarded", "strict"})
+# Proposal 中禁止出现的键（控图 / 路由字段不得由 LLM 输出）
+SUPERVISOR_PROPOSAL_FORBIDDEN_KEYS = frozenset({
+    "__next_node__", "committed_route_token", "branch_specs",
+    "execution_profile", "active_agent_id",
+})
+# 禁止键前缀（凡以此前缀开头的键均不允许）
+SUPERVISOR_PROPOSAL_FORBIDDEN_PREFIX = "committed_"
+
+# LLM proposal 失败码（§6.1 统一归类，回退到 rule 时写入；P5-2 口径）
+# 分类：JSON 解析失败/非 JSON → BAD_JSON；可解析但缺 selected_agent/禁止键/非法 risk_mode → SCHEMA_INVALID；
+# agent 不在 allowlist → AGENT_NOT_ALLOWED；timeout → TIMEOUT；无 gateway/其它 → INTERNAL_ERROR
+SUPERVISOR_FAILURE_LLM_TIMEOUT = "LLM_TIMEOUT"
+SUPERVISOR_FAILURE_LLM_BAD_JSON = "LLM_BAD_JSON"
+SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID = "LLM_SCHEMA_INVALID"
+SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED = "LLM_AGENT_NOT_ALLOWED"
+SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR = "LLM_INTERNAL_ERROR"
+SUPERVISOR_PROPOSAL_FAILURE_CODES = (
+    SUPERVISOR_FAILURE_LLM_TIMEOUT,
+    SUPERVISOR_FAILURE_LLM_BAD_JSON,
+    SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID,
+    SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED,
+    SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR,
+)
+
+# 决策来源（§6.3 审计字段）
+SUPERVISOR_DECISION_SOURCE_RULE = "rule"
+SUPERVISOR_DECISION_SOURCE_LLM = "llm"
+SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE = "llm_fallback_rule"
+
+
+def validate_supervisor_proposal_for_graph(
+    proposal: Mapping[str, Any],
+    allowlist: list[str] | tuple[str, ...],
+) -> tuple[bool, str | None]:
+    """P5：按契约校验 Supervisor proposal，仅允许 allowlist 内 agent。
+
+    Args:
+        proposal: LLM 或规则产出的提案字典
+        allowlist: 当前图允许的 agent_id 列表（来自 node_binding agent_dispatch_allowlist）
+
+    Returns:
+        (is_valid, failure_code): 合法时 failure_code 为 None；非法时返回对应失败码。
+    """
+    if not isinstance(proposal, Mapping):
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+    allow_set = frozenset(str(a).strip() for a in (allowlist or []) if str(a).strip())
+    # 禁止键检查
+    for key in (proposal or {}).keys():
+        k = str(key).strip()
+        if k in SUPERVISOR_PROPOSAL_FORBIDDEN_KEYS:
+            return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+        if k.startswith(SUPERVISOR_PROPOSAL_FORBIDDEN_PREFIX):
+            return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+    # 必填字段
+    selected = str((proposal or {}).get("selected_agent") or "").strip()
+    if not selected:
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+    # allowlist 校验（P5 §3.4）
+    if allow_set and selected not in allow_set:
+        return False, SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED
+    # risk_mode 若存在则必须在枚举内
+    rm = str((proposal or {}).get("risk_mode") or "").strip().lower()
+    if rm and rm not in SUPERVISOR_PROPOSAL_VALID_RISK_MODES:
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+    return True, None
+
+
+# ---------------------------------------------------------------------------
+# P7 预算治理契约（MULTI_AGENT_P7_SCOPE §3.2）
+# 预算层级、配置键名、预算突破失败码集合；仅命名与观测，不改变既有执行逻辑。
+# ---------------------------------------------------------------------------
+
+# 预算层级（用于观测与失败矩阵分类）
+BUDGET_LEVEL_GRAPH = "graph"
+BUDGET_LEVEL_SUBGRAPH = "subgraph"
+BUDGET_LEVEL_NODE = "node"
+BUDGET_LEVELS = (BUDGET_LEVEL_GRAPH, BUDGET_LEVEL_SUBGRAPH, BUDGET_LEVEL_NODE)
+
+# 图级/子图级/节点级预算配置键名（与现有 graph_config / node_binding 一致，供文档与观测引用）
+BUDGET_CONFIG_GRAPH_TIMEOUT_MS = "policy_timeout_ms"
+BUDGET_CONFIG_NODE_TIMEOUT_MS = "timeout_ms"
+BUDGET_CONFIG_SUBGRAPH_TIMEOUT_MS = LOCAL_LOOP_CONFIG_TIMEOUT_MS
+BUDGET_CONFIG_SUBGRAPH_MAX_STEPS = LOCAL_LOOP_CONFIG_MAX_STEPS
+BUDGET_CONFIG_SUBGRAPH_MAX_RETRY = LOCAL_LOOP_CONFIG_MAX_RETRY
+
+# 预算突破失败码：所有表示“超时/超步数/重试耗尽”的失败码，供观测聚合与失败矩阵使用
+BUDGET_BREACH_FAILURE_CODES = frozenset({
+    ORCH_TIMEOUT,
+    CLOCK_EVENT_POLICY_TIMEOUT,
+    CLOCK_EVENT_EXEC_TIMEOUT,
+    LOCAL_LOOP_FAILURE_TIMEOUT,
+    LOCAL_LOOP_FAILURE_MAX_STEPS,
+    SUPERVISOR_FAILURE_LLM_TIMEOUT,
+})
+
+
+def is_budget_breach_failure_code(code: str | None) -> bool:
+    """P7：判断给定 failure/reason_code 是否属于预算突破类（用于观测与聚合）。"""
+    if not code:
+        return False
+    return str(code).strip() in BUDGET_BREACH_FAILURE_CODES

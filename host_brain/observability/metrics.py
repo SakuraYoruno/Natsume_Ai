@@ -15,6 +15,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import PERF_BASELINE_STALE
 from host_brain.core.ids import now_ms
+from host_brain.integrations.graph_contract import is_budget_breach_failure_code
 
 
 class ObsMode(str, Enum):
@@ -99,6 +100,10 @@ class MetricsCollector:
         emotion_metrics = self._query_emotion_metrics()
         # M-MA4：多 agent 专项指标
         agent_metrics = self._query_agent_metrics()
+        # P5-4：Supervisor 决策观测（rule/llm/llm_fallback_rule、failure_code、selected_agent）
+        supervisor_metrics = self._query_supervisor_metrics()
+        # P7-3：预算突破观测（从 supervisor_decision_log 等聚合 budget breach 类失败码）
+        budget_breach_metrics = self._query_budget_breach_metrics()
 
         payload: dict[str, Any] = {
             "request_id": request_id,
@@ -113,6 +118,10 @@ class MetricsCollector:
             "emotion_metrics": emotion_metrics,
             # M-MA4：多 agent 专项指标
             "agent_metrics": agent_metrics,
+            # P5-4：Supervisor 决策观测
+            "supervisor_metrics": supervisor_metrics,
+            # P7-3：预算突破观测（超时/超步数/重试耗尽等）
+            "budget_breach_metrics": budget_breach_metrics,
             "debug_trace": None,
         }
 
@@ -531,10 +540,9 @@ class MetricsCollector:
                 return False
             return default
 
-        # 灰度开关状态（直接读 env，不依赖 ledger）
+        # 能力开关状态（P2 收敛：SUPERVISOR_MODE=rule|llm，不再用 SUPERVISOR_AUTO_ENABLED）
         switches = {
-            "MULTI_AGENT_ENABLED": _parse_bool_env("MULTI_AGENT_ENABLED"),
-            "SUPERVISOR_AUTO_ENABLED": _parse_bool_env("SUPERVISOR_AUTO_ENABLED"),
+            "SUPERVISOR_MODE": str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower(),
             "INTENT_SUBGRAPH_ENABLED": _parse_bool_env("INTENT_SUBGRAPH_ENABLED"),
             "READONLY_PARALLEL_ENABLED": _parse_bool_env("READONLY_PARALLEL_ENABLED"),
         }
@@ -608,6 +616,82 @@ class MetricsCollector:
                 "avg_hops_threshold": avg_hops_threshold,
                 "active_alerts": active_alerts,
             },
+        }
+
+    def _query_supervisor_metrics(self) -> dict[str, Any]:
+        """P5-4：从 supervisor_decision_log 聚合 Supervisor 决策观测。
+
+        统计：rule/llm/llm_fallback_rule 次数；failure_code 分布；selected_agent 分布；llm 模式 fallback 率。
+        """
+        rows: list[dict[str, Any]] = []
+        try:
+            rows = getattr(self.ledger, "supervisor_decision_log", None) or []
+        except Exception:
+            pass
+
+        decision_source_count: dict[str, int] = {}
+        failure_code_count: dict[str, int] = {}
+        selected_agent_count: dict[str, int] = {}
+        llm_mode_total = 0
+        llm_mode_fallback = 0
+
+        for r in rows:
+            src = str(r.get("supervisor_decision_source") or "rule").strip()
+            decision_source_count[src] = decision_source_count.get(src, 0) + 1
+            agent = str(r.get("supervisor_selected_agent") or "").strip()
+            if agent:
+                selected_agent_count[agent] = selected_agent_count.get(agent, 0) + 1
+            fc = r.get("supervisor_failure_code")
+            if fc:
+                failure_code_count[str(fc)] = failure_code_count.get(str(fc), 0) + 1
+            mode = str(r.get("supervisor_mode") or "rule").strip()
+            if mode == "llm":
+                llm_mode_total += 1
+                if src == "llm_fallback_rule":
+                    llm_mode_fallback += 1
+
+        llm_fallback_rate_pct = _rate_pct(llm_mode_fallback, llm_mode_total) if llm_mode_total > 0 else 0.0
+
+        return {
+            "decision_source_count": decision_source_count,
+            "failure_code_count": failure_code_count,
+            "selected_agent_count": selected_agent_count,
+            "llm_mode_total": llm_mode_total,
+            "llm_mode_fallback_count": llm_mode_fallback,
+            "llm_fallback_rate_pct": llm_fallback_rate_pct,
+            "total_decisions": len(rows),
+        }
+
+    def _query_budget_breach_metrics(self) -> dict[str, Any]:
+        """P7-3：从 supervisor_decision_log 聚合预算突破类失败（超时/超步数等）。
+
+        统计：budget_breach_count（Supervisor 决策中 failure_code 属于 BUDGET_BREACH 的数量）、
+        budget_breach_by_code 分布。子图/local loop 的 budget breach 当前由 run 输出 subgraph_failure 承载，
+        若需纳入聚合可后续扩展 ledger 或 run 级采样。
+        """
+        rows: list[dict[str, Any]] = []
+        try:
+            rows = getattr(self.ledger, "supervisor_decision_log", None) or []
+        except Exception:
+            pass
+
+        budget_breach_by_code: dict[str, int] = {}
+        budget_breach_count = 0
+        for r in rows:
+            fc = r.get("supervisor_failure_code")
+            if fc and is_budget_breach_failure_code(str(fc)):
+                budget_breach_count += 1
+                code = str(fc).strip()
+                budget_breach_by_code[code] = budget_breach_by_code.get(code, 0) + 1
+
+        total_supervisor = len(rows)
+        budget_breach_rate_pct = _rate_pct(budget_breach_count, total_supervisor) if total_supervisor > 0 else 0.0
+
+        return {
+            "budget_breach_count": budget_breach_count,
+            "budget_breach_by_code": budget_breach_by_code,
+            "budget_breach_rate_pct": budget_breach_rate_pct,
+            "total_supervisor_decisions": total_supervisor,
         }
 
     def _query_emotion_metrics(self) -> dict[str, Any]:

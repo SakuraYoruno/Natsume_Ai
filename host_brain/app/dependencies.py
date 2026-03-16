@@ -18,6 +18,8 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
 from host_brain.app.graph_config_builder import (
+    AGENT_DISPATCH_HANDLER_ID,
+    INTENT_AGENT_ENTRY_HANDLER_ID,
     SCENE_ROUTER_ENTRY_HANDLER_ID,
     SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SUPERVISOR_DISPATCH_HANDLER_ID,
@@ -209,6 +211,12 @@ def get_graph_runtime() -> GraphRuntimeContract:
             SUPERVISOR_DISPATCH_HANDLER_ID,
             supervisor_dispatch_handler,
         )
+        # P3：Agent 分派边界（Supervised 图内唯一显式分派入口）
+        from host_brain.app.handlers.agent_dispatch_handler import agent_dispatch_handler  # noqa: PLC0415
+        _graph_runtime.register_node_handler(AGENT_DISPATCH_HANDLER_ID, agent_dispatch_handler)
+        # P4：Intent 图入口（透明子图实现）
+        from host_brain.app.handlers.intent_agent_entry_handler import intent_agent_entry_handler  # noqa: PLC0415
+        _graph_runtime.register_node_handler(INTENT_AGENT_ENTRY_HANDLER_ID, intent_agent_entry_handler)
         # M-MA5：注册各 Agent Handler（只产出工件，不写 __next_node__）
         from host_brain.app.handlers.chat_agent_handler import chat_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.code_agent_handler import code_agent_handler  # noqa: PLC0415

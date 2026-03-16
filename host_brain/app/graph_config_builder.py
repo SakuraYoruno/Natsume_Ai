@@ -20,6 +20,12 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
 )
+from host_brain.app.execution_profile import (
+    PROFILE_CHAT_FAST,
+    PROFILE_INTENT_EXEC,
+    PROFILE_WORKFLOW_SUPERVISED,
+    resolve_execution_profile,
+)
 from host_brain.app.prompt_builder import (
     CHAT_DIRECT_NODE_ID,
     CHAT_RENDER_NODE_ID,
@@ -70,19 +76,27 @@ TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
 TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
 INTENT_AGENT_NODE_ID = "intent_agent_node"
 INTENT_AGENT_HANDLER_ID = "intent_agent"
+# P1/P4 意图图入口节点：内部实现为 intent_agent_subgraph（透明子图）
+INTENT_AGENT_ENTRY_NODE_ID = "intent_agent_entry"
+INTENT_AGENT_ENTRY_HANDLER_ID = "intent_agent_entry"
 JUDGE_AGENT_NODE_ID = "judge_agent_node"
 JUDGE_AGENT_HANDLER_ID = "judge_agent"
+# 完整多 agent 治理：虚拟节点，由 agent_dispatch_handler 做唯一分派边界（P3）
+AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
+AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"
 
 # 客户端允许显式指定的场景类型白名单
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
 # [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
 # 注意：VISION_UI 场景需要客户端传入 image_upload_consent=true 才允许上传图片
+# AUTO：显式走多 agent 编排（scene_router_entry → supervisor_dispatch）；默认已统一图+动态路由，可不传
 ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
     SCENE_CHAT,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
+    SCENE_TYPE_AUTO,
 })
 
 HOST_CHAT_ROUTE_HOST_8B = "host_8b"
@@ -455,7 +469,7 @@ def resolve_scene_node_sequence(scene_type: str) -> list[str]:
 
 def _normalize_scene_type(scene_type: str | None) -> str:
     scene = str(scene_type or "").strip().upper()
-    if scene in {SCENE_CHAT, SCENE_EXEC_INTENT, SCENE_WORK_TRANSLATE, SCENE_WORK_CODE}:
+    if scene in {SCENE_CHAT, SCENE_EXEC_INTENT, SCENE_WORK_TRANSLATE, SCENE_WORK_CODE, SCENE_TYPE_AUTO, SCENE_VISION_UI}:
         return scene
     return SCENE_CHAT
 
@@ -500,6 +514,9 @@ def resolve_graph_entry_scene_type(*, payload: dict[str, Any]) -> tuple[str, str
 
 
 def _scene_router_entry_next_node(scene_type: str) -> str:
+    # AUTO：走多 agent 编排，先经 supervisor_dispatch 再选子 agent
+    if scene_type == SCENE_TYPE_AUTO:
+        return SUPERVISOR_DISPATCH_NODE_ID
     if scene_type in {SCENE_EXEC_INTENT, SCENE_WORK_TRANSLATE, SCENE_WORK_CODE}:
         return CHAT_INTENT_SOURCE_NODE_ID
     return CHAT_DIRECT_NODE_ID
@@ -1001,8 +1018,181 @@ async def _resolve_host_llm_runtime_core(
     }
 
 
+def build_chat_graph(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_CHAT,
+    scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
+    cloud_provider_name: str | None = None,
+    cloud_model_id: str | None = None,
+    cloud_timeout_ms: int | None = None,
+    cloud_api_key: str | None = None,
+    cloud_available: bool | None = None,
+    chat_base_url_override: str | None = None,
+    cloud_base_url_override: str | None = None,
+    execution_profile: str = PROFILE_CHAT_FAST,
+) -> dict[str, Any]:
+    """Chat 图：START → chat_agent → renderer，无 Supervisor/agent_dispatch。"""
+    return _build_graph_config_by_profile(
+        execution_profile=execution_profile,
+        provider_name=provider_name,
+        model_id=model_id,
+        timeout_ms=timeout_ms,
+        available=available,
+        api_key=api_key,
+        provider_fn=provider_fn,
+        scene_type=scene_type,
+        scene_type_source=scene_type_source,
+        render_target_lang=render_target_lang,
+        cloud_provider_name=cloud_provider_name,
+        cloud_model_id=cloud_model_id,
+        cloud_timeout_ms=cloud_timeout_ms,
+        cloud_api_key=cloud_api_key,
+        cloud_available=cloud_available,
+        chat_base_url_override=chat_base_url_override,
+        cloud_base_url_override=cloud_base_url_override,
+    )
+
+
+def build_supervised_graph(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_CHAT,
+    scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
+    cloud_provider_name: str | None = None,
+    cloud_model_id: str | None = None,
+    cloud_timeout_ms: int | None = None,
+    cloud_api_key: str | None = None,
+    cloud_available: bool | None = None,
+    chat_base_url_override: str | None = None,
+    cloud_base_url_override: str | None = None,
+    execution_profile: str = PROFILE_WORKFLOW_SUPERVISED,
+) -> dict[str, Any]:
+    """Supervised 图：START → supervisor_dispatch → agent_dispatch → judge_agent → renderer。"""
+    return _build_graph_config_by_profile(
+        execution_profile=execution_profile,
+        provider_name=provider_name,
+        model_id=model_id,
+        timeout_ms=timeout_ms,
+        available=available,
+        api_key=api_key,
+        provider_fn=provider_fn,
+        scene_type=scene_type,
+        scene_type_source=scene_type_source,
+        render_target_lang=render_target_lang,
+        cloud_provider_name=cloud_provider_name,
+        cloud_model_id=cloud_model_id,
+        cloud_timeout_ms=cloud_timeout_ms,
+        cloud_api_key=cloud_api_key,
+        cloud_available=cloud_available,
+        chat_base_url_override=chat_base_url_override,
+        cloud_base_url_override=cloud_base_url_override,
+    )
+
+
+def build_intent_graph(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_EXEC_INTENT,
+    scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
+    cloud_provider_name: str | None = None,
+    cloud_model_id: str | None = None,
+    cloud_timeout_ms: int | None = None,
+    cloud_api_key: str | None = None,
+    cloud_available: bool | None = None,
+    chat_base_url_override: str | None = None,
+    cloud_base_url_override: str | None = None,
+    execution_profile: str = PROFILE_INTENT_EXEC,
+) -> dict[str, Any]:
+    """Intent 图：START → intent_agent_entry → safety_verifier → judge_agent → renderer（P1 占位，P4 可替换为 subgraph）。"""
+    return _build_graph_config_by_profile(
+        execution_profile=execution_profile,
+        provider_name=provider_name,
+        model_id=model_id,
+        timeout_ms=timeout_ms,
+        available=available,
+        api_key=api_key,
+        provider_fn=provider_fn,
+        scene_type=scene_type,
+        scene_type_source=scene_type_source,
+        render_target_lang=render_target_lang,
+        cloud_provider_name=cloud_provider_name,
+        cloud_model_id=cloud_model_id,
+        cloud_timeout_ms=cloud_timeout_ms,
+        cloud_api_key=cloud_api_key,
+        cloud_available=cloud_available,
+        chat_base_url_override=chat_base_url_override,
+        cloud_base_url_override=cloud_base_url_override,
+    )
+
+
 def build_chat_graph_config(
     *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    available: bool,
+    api_key: str | None,
+    provider_fn: Callable[[dict[str, Any]], Any],
+    scene_type: str = SCENE_CHAT,
+    scene_type_source: str = "explicit",
+    render_target_lang: str | None = None,
+    cloud_provider_name: str | None = None,
+    cloud_model_id: str | None = None,
+    cloud_timeout_ms: int | None = None,
+    cloud_api_key: str | None = None,
+    cloud_available: bool | None = None,
+    chat_base_url_override: str | None = None,
+    cloud_base_url_override: str | None = None,
+    execution_profile: str | None = None,
+) -> dict[str, Any]:
+    """按 execution_profile 选图；未传时由 scene_type 解析（兼容旧调用）。"""
+    profile = (
+        str(execution_profile or "").strip()
+        or resolve_execution_profile(scene_type)
+    )
+    return _build_graph_config_by_profile(
+        execution_profile=profile,
+        provider_name=provider_name,
+        model_id=model_id,
+        timeout_ms=timeout_ms,
+        available=available,
+        api_key=api_key,
+        provider_fn=provider_fn,
+        scene_type=scene_type,
+        scene_type_source=scene_type_source,
+        render_target_lang=render_target_lang,
+        cloud_provider_name=cloud_provider_name,
+        cloud_model_id=cloud_model_id,
+        cloud_timeout_ms=cloud_timeout_ms,
+        cloud_api_key=cloud_api_key,
+        cloud_available=cloud_available,
+        chat_base_url_override=chat_base_url_override,
+        cloud_base_url_override=cloud_base_url_override,
+    )
+
+
+def _build_graph_config_by_profile(
+    *,
+    execution_profile: str,
     provider_name: str,
     model_id: str,
     timeout_ms: int,
@@ -1022,9 +1212,9 @@ def build_chat_graph_config(
 ) -> dict[str, Any]:
     _ = provider_fn
     resolved_scene_type = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
-    scene_router_enabled = _parse_bool(os.environ.get("HOST_GRAPH_SCENE_ROUTER_ENABLED"), default=True)
-    use_scene_router = bool(scene_router_enabled and resolved_scene_type == SCENE_TYPE_AUTO)
-    is_chat_fast_path = resolved_scene_type == SCENE_CHAT
+    is_chat_fast_path = execution_profile == PROFILE_CHAT_FAST
+    use_supervised = execution_profile == PROFILE_WORKFLOW_SUPERVISED
+    is_intent = execution_profile == PROFILE_INTENT_EXEC
     resolved_render_lang = str(render_target_lang or "").strip().lower()
     if resolved_render_lang not in {"zh", "ja"}:
         resolved_render_lang = "ja"
@@ -1135,7 +1325,7 @@ def build_chat_graph_config(
         node_timeouts["core_reasoner_primary"] = min(base_timeout_ms, 5000)
         node_timeouts["core_reasoner_secondary"] = min(base_timeout_ms, 3000)
         node_timeouts["renderer_ja_c_style"] = min(base_timeout_ms, 4000)
-    elif use_scene_router:
+    elif use_supervised:
         # AUTO 路由下保留 chat_direct 快速回复模型，复杂任务仍走 primary 链路。
         node_model_ids[CHAT_DIRECT_NODE_ID] = resolved_chat_model_id
         node_timeouts[CHAT_DIRECT_NODE_ID] = max(resolved_chat_timeout_ms, 10_000)
@@ -1169,85 +1359,109 @@ def build_chat_graph_config(
             ),
         }
         # 需求 2.1：CHAT 快速路径下，chat_direct_ja 节点限制 max_output_tokens=200
-        # 日常对话 2-3 句即可，减少生成时间约 30%
-        if (is_chat_fast_path or use_scene_router) and node_id == CHAT_DIRECT_NODE_ID:
+        if (is_chat_fast_path or use_supervised) and node_id == CHAT_DIRECT_NODE_ID:
             node_override["max_output_tokens"] = 200
         model_node_overrides[node_id] = node_override
 
-    if use_scene_router:
+    if is_intent:
+        # P4：Intent 图主图仅 4 节点；子图节点仅入 node_bindings 供 entry handler 调用，不入 scene_node_sequence/edges
         scene_node_sequence = [
-            SCENE_ROUTER_ENTRY_NODE_ID,
-            SUPERVISOR_DISPATCH_NODE_ID,
-            CHAT_DIRECT_NODE_ID,
-            CHAT_INTENT_SOURCE_NODE_ID,
-            SCENE_ROUTER_POST_CORE_NODE_ID,
-            "planner_constraints",
-            "tool_planner",
+            INTENT_AGENT_ENTRY_NODE_ID,
             "safety_verifier",
-            "workbench_translate",
-            "workbench_code_assist",
-            "consistency_verifier",
+            JUDGE_AGENT_NODE_ID,
             CHAT_RENDER_NODE_ID,
         ]
         node_bindings = [
             {
-                "node_id": SCENE_ROUTER_ENTRY_NODE_ID,
-                "handler_id": SCENE_ROUTER_ENTRY_HANDLER_ID,
-                "task": "scene_router_entry",
+                "node_id": INTENT_AGENT_ENTRY_NODE_ID,
+                "handler_id": INTENT_AGENT_ENTRY_HANDLER_ID,
+                "task": "intent_agent_entry",
+                "require_approval_token": False,
+                # P6-2：局部循环边界配置（P6-1 建议默认值）
+                "max_local_steps": 10,
+                "max_retry_count": 2,
+                "local_loop_timeout_ms": 60_000,
+            },
+            {"node_id": "safety_verifier", "model_node_id": "safety_verifier", "task": "safety_verifier", "require_approval_token": False},
+            {
+                "node_id": JUDGE_AGENT_NODE_ID,
+                "handler_id": JUDGE_AGENT_HANDLER_ID,
+                "task": "judge_agent",
                 "require_approval_token": False,
             },
+            {"node_id": CHAT_RENDER_NODE_ID, "model_node_id": CHAT_RENDER_NODE_ID, "task": CHAT_RENDER_NODE_ID, "require_approval_token": False},
+            {"node_id": "core_reasoner_primary", "model_node_id": "core_reasoner_primary", "task": "core_reasoner_primary", "require_approval_token": False},
+            {"node_id": "planner_constraints", "model_node_id": "planner_constraints", "task": "planner_constraints", "require_approval_token": False},
+            {"node_id": "tool_planner", "model_node_id": "tool_planner", "task": "tool_planner", "require_approval_token": False},
+        ]
+        entry_node_id = INTENT_AGENT_ENTRY_NODE_ID
+        edges = [
+            {"from": INTENT_AGENT_ENTRY_NODE_ID, "to": "safety_verifier"},
+            {"from": "safety_verifier", "to": JUDGE_AGENT_NODE_ID},
+            {"from": JUDGE_AGENT_NODE_ID, "to": CHAT_RENDER_NODE_ID},
+        ]
+        fallback_edges = []
+        chain_budget_ms = sum(
+            int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence
+        )
+        primary_budget_node_id = INTENT_AGENT_ENTRY_NODE_ID
+    elif use_supervised:
+        # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer（无 scene_router_entry）
+        scene_node_sequence = [
+            SUPERVISOR_DISPATCH_NODE_ID,
+            AGENT_DISPATCH_NODE_ID,
+            JUDGE_AGENT_NODE_ID,
+            CHAT_RENDER_NODE_ID,
+        ]
+        # P3.5：allowlist 由图配置提供；workbench_* 为 handler 可调用的 model 节点，不入边序列
+        node_bindings = [
             {
-                # M-MA1：Supervisor 分派 handler 节点（trusted handler，可写 __next_node__）
                 "node_id": SUPERVISOR_DISPATCH_NODE_ID,
                 "handler_id": SUPERVISOR_DISPATCH_HANDLER_ID,
                 "task": "supervisor_dispatch",
                 "require_approval_token": False,
+                # P5-2：与 agent_dispatch 使用同一 allowlist，供 Supervisor 校验 proposal
+                "agent_dispatch_allowlist": [CODE_AGENT_HANDLER_ID, TRANSLATE_AGENT_HANDLER_ID],
             },
             {
-                "node_id": SCENE_ROUTER_POST_CORE_NODE_ID,
-                "handler_id": SCENE_ROUTER_POST_CORE_HANDLER_ID,
-                "task": "scene_router_post_core",
+                "node_id": AGENT_DISPATCH_NODE_ID,
+                "handler_id": AGENT_DISPATCH_HANDLER_ID,
+                "task": "agent_dispatch",
+                "require_approval_token": False,
+                "agent_dispatch_allowlist": [CODE_AGENT_HANDLER_ID, TRANSLATE_AGENT_HANDLER_ID],
+            },
+            {
+                "node_id": JUDGE_AGENT_NODE_ID,
+                "handler_id": JUDGE_AGENT_HANDLER_ID,
+                "task": "judge_agent",
                 "require_approval_token": False,
             },
-        ] + [
-            {
-                "node_id": node_id,
-                "model_node_id": node_id,
-                "task": node_id,
-                "require_approval_token": False,
-            }
-            for node_id in CHAT_GRAPH_NODE_ORDER
+            {"node_id": CHAT_RENDER_NODE_ID, "model_node_id": CHAT_RENDER_NODE_ID, "task": CHAT_RENDER_NODE_ID, "require_approval_token": False},
+            {"node_id": "workbench_code_assist", "model_node_id": "workbench_code_assist", "task": "workbench_code_assist", "require_approval_token": False},
+            {"node_id": "workbench_translate", "model_node_id": "workbench_translate", "task": "workbench_translate", "require_approval_token": False},
         ]
-        entry_node_id = SCENE_ROUTER_ENTRY_NODE_ID
+        entry_node_id = SUPERVISOR_DISPATCH_NODE_ID
         edges = [
-            {"from": SCENE_ROUTER_ENTRY_NODE_ID, "to": CHAT_DIRECT_NODE_ID},
-            {"from": CHAT_INTENT_SOURCE_NODE_ID, "to": SCENE_ROUTER_POST_CORE_NODE_ID},
-            {"from": SCENE_ROUTER_POST_CORE_NODE_ID, "to": "planner_constraints"},
-            {"from": "planner_constraints", "to": "tool_planner"},
-            {"from": "tool_planner", "to": "safety_verifier"},
-            {"from": "safety_verifier", "to": "consistency_verifier"},
-            {"from": "workbench_translate", "to": "consistency_verifier"},
-            {"from": "workbench_code_assist", "to": "consistency_verifier"},
-            {"from": "consistency_verifier", "to": CHAT_RENDER_NODE_ID},
+            {"from": SUPERVISOR_DISPATCH_NODE_ID, "to": AGENT_DISPATCH_NODE_ID},
+            {"from": AGENT_DISPATCH_NODE_ID, "to": JUDGE_AGENT_NODE_ID},
+            {"from": JUDGE_AGENT_NODE_ID, "to": CHAT_RENDER_NODE_ID},
         ]
-        fallback_edges = [
-            {"from": CHAT_INTENT_SOURCE_NODE_ID, "to": "core_reasoner_secondary"},
-            {"from": "core_reasoner_secondary", "to": SCENE_ROUTER_POST_CORE_NODE_ID},
-        ]
-        budget_routes = [
-            [CHAT_DIRECT_NODE_ID],
-            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "planner_constraints", "tool_planner", "safety_verifier", "consistency_verifier", CHAT_RENDER_NODE_ID],
-            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "workbench_translate", "consistency_verifier", CHAT_RENDER_NODE_ID],
-            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "workbench_code_assist", "consistency_verifier", CHAT_RENDER_NODE_ID],
-        ]
-        chain_budget_ms = max(
-            sum(int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in route)
-            for route in budget_routes
-        ) + int(node_timeouts.get("core_reasoner_secondary", base_timeout_ms))
-        primary_budget_node_id = CHAT_INTENT_SOURCE_NODE_ID
+        fallback_edges = []
+        chain_budget_ms = sum(
+            int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence
+        )
+        primary_budget_node_id = SUPERVISOR_DISPATCH_NODE_ID
     else:
-        scene_node_sequence = resolve_scene_node_sequence(scene_type)
-        fallback_only_nodes = [] if is_chat_fast_path else ["core_reasoner_secondary"]
+        # Chat 图：chat_direct → renderer（仅快路径两节点）
+        # P3：code/translate 已迁入 Supervised 图，此处不再用旧长链做主路由；误入时强制快路径
+        use_chat_sequence = is_chat_fast_path or (
+            str(scene_type or "").strip().upper() in (SCENE_WORK_CODE, SCENE_WORK_TRANSLATE)
+        )
+        if use_chat_sequence:
+            scene_node_sequence = [CHAT_DIRECT_NODE_ID, CHAT_RENDER_NODE_ID]
+        else:
+            scene_node_sequence = resolve_scene_node_sequence(scene_type)
+        fallback_only_nodes = [] if use_chat_sequence else ["core_reasoner_secondary"]
         all_registered_nodes = scene_node_sequence + [
             n for n in fallback_only_nodes if n not in scene_node_sequence
         ]
@@ -1265,14 +1479,14 @@ def build_chat_graph_config(
             for i in range(len(scene_node_sequence) - 1)
         ]
         entry_node_id = scene_node_sequence[0]
-        fallback_target_node = CHAT_RENDER_NODE_ID if is_chat_fast_path else (
+        fallback_target_node = CHAT_RENDER_NODE_ID if use_chat_sequence else (
             "consistency_verifier"
             if "consistency_verifier" in scene_node_sequence
             else CHAT_RENDER_NODE_ID
         )
         fallback_edges = (
             []
-            if is_chat_fast_path
+            if use_chat_sequence
             else [
                 {"from": "core_reasoner_primary", "to": "core_reasoner_secondary"},
                 {"from": "core_reasoner_secondary", "to": fallback_target_node},
@@ -1282,7 +1496,7 @@ def build_chat_graph_config(
             sum(int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence)
             + (
                 int(node_timeouts.get("core_reasoner_secondary", base_timeout_ms))
-                if not is_chat_fast_path
+                if not use_chat_sequence
                 else 0
             )
         )
@@ -1309,9 +1523,9 @@ def build_chat_graph_config(
             else 0
         )
     policy_timeout_ms = chain_budget_ms + retry_budget_ms + fallback_budget_ms + 5_000
-    if is_chat_fast_path:
+    if is_chat_fast_path or (not use_supervised and not is_intent and use_chat_sequence):
         policy_timeout_ms = max(8_000, min(int(policy_timeout_ms), 12_000))
-    elif use_scene_router:
+    elif use_supervised:
         policy_timeout_ms = max(30_000, min(int(policy_timeout_ms), 240_000))
     else:
         policy_timeout_ms = max(90_000, min(int(policy_timeout_ms), 240_000))
@@ -1327,13 +1541,18 @@ def build_chat_graph_config(
         "fallback_edges": fallback_edges,
         "model_node_overrides": model_node_overrides,
         "graph_meta": {
+            "execution_profile": execution_profile,
             "online_chain": (
-                "graph_entry_scene_router + supervisor_dispatch + scene_routed_langgraph"
-                if use_scene_router
+                "intent_agent + safety_verifier + judge + renderer"
+                if is_intent
                 else (
-                    "chat_direct_single_node + scene_routed_langgraph"
-                    if is_chat_fast_path
-                    else "six_recall + scene_routed_langgraph + targeted_renderer"
+                    "supervisor_dispatch + agent_dispatch + judge + renderer"
+                    if use_supervised
+                    else (
+                        "chat_direct_single_node + scene_routed_langgraph"
+                        if is_chat_fast_path
+                        else "six_recall + scene_routed_langgraph + targeted_renderer"
+                    )
                 )
             ),
             "provider": resolved_chat_provider,

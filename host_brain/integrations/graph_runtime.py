@@ -5,6 +5,7 @@ Public symbols remain re-exported for backward compatibility.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
@@ -57,6 +58,27 @@ _atexit.register(_evidence_executor.shutdown, wait=False, cancel_futures=True)
 _build_edge_map = build_edge_map
 _pick_model_profile_id = pick_model_profile_id
 _build_model_param_hash = build_model_param_hash
+
+_logger = logging.getLogger(__name__)
+
+
+def _inject_execution_profile_from_payload_only(
+    payload_dict: Mapping[str, Any],
+    graph_config: Mapping[str, Any],
+    request_id: str,
+) -> str | None:
+    """§14.3：execution_profile 唯一真相源为 payload；graph_meta 仅用于一致性校验与日志。"""
+    from_payload = str((payload_dict.get("execution_profile") or "").strip()) or None
+    meta = graph_config.get("graph_meta") or {}
+    from_meta = str((meta.get("execution_profile") or "").strip()) or None
+    if from_meta and from_payload and from_meta != from_payload:
+        _logger.warning(
+            "execution_profile mismatch: payload=%r vs graph_meta=%r; using payload (request_id=%s)",
+            from_payload,
+            from_meta,
+            request_id,
+        )
+    return from_payload
 
 
 class GraphRuntimeContract:
@@ -254,14 +276,35 @@ class GraphRuntimeContract:
             },
             "agent_artifacts": {},
             "judge_result": None,
+            # §14.3 真相源单源：仅从 payload 注入；graph_meta 仅做一致性校验与日志
+            "execution_profile": _inject_execution_profile_from_payload_only(
+                payload_dict=payload_dict,
+                graph_config=graph_config,
+                request_id=request_id,
+            ),
         }
         initial_state["payload"] = payload_dict
         state = compiled.invoke(initial_state)
 
+        # P5-4：Supervisor 决策写入 ledger，供 metrics 聚合
+        _sd = (state.get("payload") or {}).get("supervisor_dispatch")
+        if isinstance(_sd, dict) and self.ledger is not None:
+            try:
+                self.ledger.log_supervisor_decision({
+                    "request_id": request_id,
+                    "ts_ms": now_value,
+                    "supervisor_mode": str(_sd.get("supervisor_mode") or "rule").strip(),
+                    "supervisor_decision_source": str(_sd.get("supervisor_decision_source") or "rule").strip(),
+                    "supervisor_failure_code": str(_sd.get("supervisor_failure_code") or "").strip() or None,
+                    "supervisor_selected_agent": str(_sd.get("supervisor_selected_agent") or _sd.get("selected_agent") or "").strip(),
+                })
+            except Exception:
+                pass  # 静默降级，不影响主流程
+
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）
         _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
 
-        # 4. 最终化输出
+        # 4. 最终化输出（P4/P6：subgraph_trace 由 handler 写入 state，一并返回供审计/验收）
         return self._finalize(
             request_id=request_id,
             status=str(state["status"]),
@@ -274,6 +317,7 @@ class GraphRuntimeContract:
             model_calls=list(state.get("model_calls") or []),
             model_profile_id=state.get("model_profile_id"),
             ts_ms=now_value,
+            subgraph_trace=state.get("subgraph_trace"),
         )
 
     def resume_graph(
@@ -466,6 +510,7 @@ class GraphRuntimeContract:
         model_calls: list[dict[str, Any]],
         model_profile_id: str | None,
         ts_ms: int,
+        subgraph_trace: list[dict[str, Any]] | None = None,
     ) -> GraphRunResult:
         """Finalize result: log errors and model control, build output dict."""
         if reason_code is not None:
@@ -497,6 +542,8 @@ class GraphRuntimeContract:
             "payload": payload,
             "ts_ms": int(ts_ms),
         }
+        if subgraph_trace is not None:
+            output["subgraph_trace"] = list(subgraph_trace)
         return GraphRunResult(
             status=status,
             reason_code=reason_code,

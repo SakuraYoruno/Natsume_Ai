@@ -110,9 +110,15 @@ def code_agent_handler(
 
         else:
             # ----------------------------------------------------------------
-            # 向后兼容：读取现有节点链输出
+            # P3.5：无前置 model 输出时由本 handler 调用 workbench_code_assist（executor 不再先跑 model）
             # ----------------------------------------------------------------
-            code_node_output = dict(payload.get("workbench_code_assist") or {})
+            if not out.get("workbench_code_assist") and callable(ctx.get("invoke_model_node")):
+                model_out = ctx["invoke_model_node"]("workbench_code_assist")
+                if model_out:
+                    out["workbench_code_assist"] = model_out.get("workbench_code_assist") or model_out
+                    if isinstance(model_out.get("__model_calls__"), list):
+                        out["__model_calls__"] = list(out.get("__model_calls__") or []) + model_out["__model_calls__"]
+            code_node_output = dict(out.get("workbench_code_assist") or {})
             draft_summary = str(
                 code_node_output.get("payload", {}).get("code_draft")
                 or code_node_output.get("payload", {}).get("response_text")

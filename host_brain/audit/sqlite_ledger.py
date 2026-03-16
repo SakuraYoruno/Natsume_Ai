@@ -163,6 +163,11 @@ class SQLiteLedger(
         return self._fetch_all("agent_loop_log")
 
     @property
+    def supervisor_decision_log(self) -> list[dict[str, Any]]:
+        """P5-4：Supervisor 决策观测日志（rule/llm/llm_fallback_rule、failure_code、selected_agent）。"""
+        return self._fetch_all("supervisor_decision_log")
+
+    @property
     def service_health_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("service_health_log")
 
@@ -222,6 +227,18 @@ class SQLiteLedger(
     def log_model_control(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in MODEL_CONTROL_COLUMNS}
         self._insert("model_control_log", payload)
+
+    def log_supervisor_decision(self, row: dict[str, Any]) -> None:
+        """P5-4：记录一次 Supervisor 决策（rule/llm/llm_fallback_rule、failure_code、selected_agent）。"""
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "ts_ms": int(row.get("ts_ms") or 0),
+            "supervisor_mode": str(row.get("supervisor_mode") or "rule").strip(),
+            "supervisor_decision_source": str(row.get("supervisor_decision_source") or "rule").strip(),
+            "supervisor_failure_code": str(row.get("supervisor_failure_code") or "").strip() or None,
+            "supervisor_selected_agent": str(row.get("supervisor_selected_agent") or "").strip(),
+        }
+        self._insert("supervisor_decision_log", payload)
 
     def log_error(self, *, request_id: str | None, stage: str, reason_code: str, detail: str) -> None:
         self._insert(

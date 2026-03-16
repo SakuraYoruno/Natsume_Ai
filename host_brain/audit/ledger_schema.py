@@ -574,6 +574,19 @@ CREATE TABLE IF NOT EXISTS agent_loop_log (
 CREATE INDEX IF NOT EXISTS idx_agent_loop_request_id ON agent_loop_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_agent_loop_session_id ON agent_loop_log (session_id);
 CREATE INDEX IF NOT EXISTS idx_agent_loop_ts_ms      ON agent_loop_log (ts_ms);
+
+-- P5-4: Supervisor 决策观测表（rule/llm/llm_fallback_rule、failure_code、selected_agent）
+CREATE TABLE IF NOT EXISTS supervisor_decision_log (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id                TEXT    NOT NULL,
+    ts_ms                     INTEGER NOT NULL,
+    supervisor_mode           TEXT    NOT NULL,
+    supervisor_decision_source TEXT  NOT NULL,
+    supervisor_failure_code   TEXT,
+    supervisor_selected_agent TEXT   NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_supervisor_decision_request ON supervisor_decision_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_supervisor_decision_ts ON supervisor_decision_log (ts_ms);
 """
 
 

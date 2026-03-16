@@ -36,6 +36,13 @@ from host_brain.app.dependencies import (
     get_retrieval_orchestrator,
 )
 from host_brain.app.emotion_context import build_chat_emotion_snapshot
+from host_brain.app.execution_profile import (
+    PROFILE_CHAT_FAST,
+    PROFILE_INTENT_EXEC,
+    PROFILE_WORKFLOW_SUPERVISED,
+    resolve_execution_profile,
+)
+from host_brain.app.entry_routing import is_narrative_only_fast_pass
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     CHAT_GRAPH_NODE_ORDER,
@@ -46,8 +53,10 @@ from host_brain.app.graph_config_builder import (
     SCENE_EXEC_INTENT,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
+    build_chat_graph,
+    build_intent_graph,
+    build_supervised_graph,
     build_unified_route_decision,
-    build_chat_graph_config,
     resolve_chat_retrieval_gate,
     resolve_host_llm_runtime_async as resolve_host_llm_runtime,  # 修复审计问题 #1：使用异步版本
 )
@@ -329,7 +338,24 @@ async def _complex_scene_sse_generator(
         cloud_available = bool(llm_runtime.get("cloud_available", available))
         chat_base_url_override = str(llm_runtime.get("chat_base_url_override") or "").strip() or None
         cloud_base_url_override = str(llm_runtime.get("cloud_base_url_override") or "").strip() or None
-        graph_config = build_chat_graph_config(
+        # §14.2：narrative_only = fast-pass 命中；classifier_says_exec = 分类器/规则明确判定为执行型
+        narrative_only = (
+            graph_scene_type == SCENE_CHAT
+            and is_narrative_only_fast_pass(request_body.message)
+        )
+        classifier_says_exec = graph_scene_type == SCENE_EXEC_INTENT
+        execution_profile = resolve_execution_profile(
+            graph_scene_type,
+            narrative_only=narrative_only,
+            classifier_says_exec=classifier_says_exec,
+        )
+        if execution_profile == PROFILE_INTENT_EXEC:
+            build_graph_fn = build_intent_graph
+        elif execution_profile == PROFILE_WORKFLOW_SUPERVISED:
+            build_graph_fn = build_supervised_graph
+        else:
+            build_graph_fn = build_chat_graph
+        graph_config = build_graph_fn(
             provider_name=provider_name,
             model_id=model_id,
             timeout_ms=timeout_ms,
@@ -348,7 +374,8 @@ async def _complex_scene_sse_generator(
             cloud_base_url_override=cloud_base_url_override,
         )
         dependency_statuses: dict[str, dict[str, Any]] = {}
-        for node_id in CHAT_GRAPH_NODE_ORDER:
+        graph_node_ids = [b["node_id"] for b in graph_config.get("node_bindings", []) if b.get("node_id")]
+        for node_id in graph_node_ids:
             is_chat_node = node_id == CHAT_DIRECT_NODE_ID
             node_available = available if is_chat_node else cloud_available
             dependency_statuses[node_id] = {
@@ -384,7 +411,8 @@ async def _complex_scene_sse_generator(
 
         # ── 节点级进度通知：通知客户端 LangGraph 开始执行 ─────────────────
         from host_brain.app.graph_config_builder import resolve_scene_node_sequence  # noqa: PLC0415
-        active_scene_nodes = resolve_scene_node_sequence(scene_type)
+        graph_meta = graph_config.get("graph_meta") or {}
+        active_scene_nodes = graph_meta.get("active_nodes") or resolve_scene_node_sequence(scene_type)
         yield _sse({
             "phase": "GRAPH_START",
             "scene_type": scene_type,
@@ -402,11 +430,12 @@ async def _complex_scene_sse_generator(
                 _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
             except Exception as _sm_exc:
                 _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)
+        graph_payload = {**dict(llm_prompt_payload), "execution_profile": execution_profile}
         graph_result = await asyncio.to_thread(
             get_graph_runtime().run_graph,
             request_id=request_id,
             graph_config=graph_config,
-            payload=dict(llm_prompt_payload),
+            payload=graph_payload,
             dependency_statuses=dependency_statuses,
             ts_ms=graph_start_ms,
         )
@@ -588,6 +617,8 @@ async def _complex_scene_sse_generator(
             "model_profile_id": graph_output.get("model_profile_id"),
             "scene_type": runtime_scene_type,
             "scene_type_source": runtime_scene_type_source,
+            "execution_profile": execution_profile,
+            "graph_entry_node": str(graph_config.get("entry_node") or "").strip() or None,
             "render_target_lang": get_chat_runtime_render_target_lang(llm_prompt_payload),
             "latency_ms": graph_latency_ms,
             "draft_only": bool(dict(render_payload.get("meta") or {}).get("draft_only", True)),

@@ -9,6 +9,10 @@
 - 不写 committed_route_token
 
 JudgeAgent 是多 agent 编排的统一收口，所有非聊天场景都经过此 handler。
+
+P4 下游消费口径（MULTI_AGENT_P4_SCOPE §8）：
+- Intent 图下若需判断子图成败，仅从 payload["subgraph_failure"]（优先）与
+  payload["subgraph_commit_summary"] 读取；不得使用其它字段或别名。
 """
 
 from __future__ import annotations

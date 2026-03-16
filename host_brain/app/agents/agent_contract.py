@@ -207,26 +207,46 @@ def build_artifact(
     )
 
 
-def validate_supervisor_proposal(proposal_dict: dict[str, Any]) -> tuple[bool, str]:
+def validate_supervisor_proposal(
+    proposal_dict: dict[str, Any],
+    allowlist: list[str] | None = None,
+) -> tuple[bool, str]:
     """校验 Supervisor 分派提案合法性。
 
+    P5：当提供 allowlist 时，selected_agent 必须在 allowlist 内（当前图允许的 agent）；
+    未提供时沿用全局 AGENT_ALLOWLIST。失败时返回的 reason 使用 graph_contract 失败码以便统一观测。
+
     Returns:
-        (is_valid, reason)：is_valid=True 表示提案合法，可以编译为 agent_runtime.plan
+        (is_valid, reason)：is_valid=True 表示提案合法；否则 reason 为失败码或带详情的字符串。
     """
+    from host_brain.integrations.graph_contract import (
+        SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED,
+        SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID,
+        validate_supervisor_proposal_for_graph,
+    )
+
+    if allowlist is not None:
+        valid, failure_code = validate_supervisor_proposal_for_graph(
+            proposal_dict, list(allowlist)
+        )
+        if not valid:
+            return False, failure_code or SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+        return True, "PROPOSAL_VALID"
+
     selected_agent = str(proposal_dict.get("selected_agent") or "").strip()
     if not selected_agent:
-        return False, "PROPOSAL_MISSING_AGENT"
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
 
     if not is_agent_allowed(selected_agent):
-        return False, f"PROPOSAL_AGENT_NOT_ALLOWED:{selected_agent}"
+        return False, SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED
 
     risk_mode = str(proposal_dict.get("risk_mode") or RISK_MODE_SAFE).strip()
     if risk_mode not in VALID_RISK_MODES:
-        return False, f"PROPOSAL_INVALID_RISK_MODE:{risk_mode}"
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
 
     budget = proposal_dict.get("budget") or {}
     max_hops = int(budget.get("max_hops") or 2)
     if max_hops < 1 or max_hops > 5:
-        return False, f"PROPOSAL_INVALID_MAX_HOPS:{max_hops}"
+        return False, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
 
     return True, "PROPOSAL_VALID"

@@ -36,8 +36,16 @@ def translate_agent_handler(
 
     out = dict(payload)
 
+    # P3.5：无前置 model 输出时由本 handler 调用 workbench_translate（executor 不再先跑 model）
+    if not out.get("workbench_translate") and callable(ctx.get("invoke_model_node")):
+        model_out = ctx["invoke_model_node"]("workbench_translate")
+        if model_out:
+            out["workbench_translate"] = model_out.get("workbench_translate") or model_out
+            if isinstance(model_out.get("__model_calls__"), list):
+                out["__model_calls__"] = list(out.get("__model_calls__") or []) + model_out["__model_calls__"]
+
     try:
-        translate_node_output = dict(payload.get("workbench_translate") or {})
+        translate_node_output = dict(out.get("workbench_translate") or {})
         draft_summary = str(
             translate_node_output.get("payload", {}).get("translation")
             or translate_node_output.get("payload", {}).get("response_text")

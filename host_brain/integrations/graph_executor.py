@@ -72,15 +72,7 @@ _MODEL_OUTPUT_CONTROL_FIELDS: frozenset[str] = frozenset({
     # __next_node__ 和 __orchestration_* 由执行器内部处理，不在此剥离
 })
 
-# M-MA6：agent handler 映射表（active_agent_id → handler_id）
-# 图执行器根据 GraphState.active_agent_id 动态选择对应 handler
-_AGENT_HANDLER_MAP: dict[str, str] = {
-    "chat_agent":      "chat_agent",
-    "code_agent":      "code_agent",
-    "translate_agent": "translate_agent",
-    "intent_agent":    "intent_agent",
-    "judge_agent":     "judge_agent",
-}
+# P3.5：executor 不再持有 agent 映射与 model 节点业务知识，分派与执行由 agent_dispatch_handler 与各 handler 负责。
 
 
 class GraphExecutor:
@@ -113,28 +105,12 @@ class GraphExecutor:
         graph.add_edge("finish", END)
         return graph.compile()
 
-    def _dispatch_to_agent(self, state: GraphState) -> str:
-        """根据 active_agent_id 返回对应的 handler_id。
-
-        M-MA6 核心：图执行器根据 GraphState.active_agent_id 动态选择 handler，
-        而不是固定节点序列。返回空字符串时降级到 chat_agent。
-        """
-        active_agent_id = str(state.get("active_agent_id") or "").strip()
-        handler_id = _AGENT_HANDLER_MAP.get(active_agent_id, "")
-        if not handler_id:
-            # 降级：active_agent_id 未知时使用 chat_agent
-            handler_id = _AGENT_HANDLER_MAP.get("chat_agent", "")
-        return handler_id
-
     def _run_single_step(self, state: GraphState) -> GraphState:
         node_id = str(state.get("pending_node_id") or "").strip()
         if not node_id:
             return set_finish(state)
 
-        # M-MA6：agent_dispatch_node 虚拟节点 —— 根据 active_agent_id 动态路由
-        # 不走 node_bindings 查找，直接调用对应 agent handler
-        if node_id == "agent_dispatch_node":
-            return self._run_agent_dispatch(state)
+        # P3.5：agent_dispatch_node 与普通 handler 节点一致，无业务特判；分派与下一跳由 agent_dispatch_handler 负责。
 
         # M35-D：Route Commitment Rule — 在节点执行前检查 committed_route_token
         # AIRLOCK 令牌：安全终止，不执行任何节点
@@ -259,7 +235,19 @@ class GraphExecutor:
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
 
+        # P3.5：handler 可能写 agent_artifacts 到 payload，同步到 state 顶层供下游（如 judge）读取
+        agent_artifacts = dict(state.get("agent_artifacts") or {})
+        if isinstance(payload.get("agent_artifacts"), dict):
+            agent_artifacts = {**agent_artifacts, **payload["agent_artifacts"]}
+        # P4：handler 可能写 subgraph_trace 到 payload，同步到 state 顶层供审计
+        subgraph_trace = list(state.get("subgraph_trace") or [])
+        if isinstance(payload.get("subgraph_trace"), list):
+            subgraph_trace = subgraph_trace + payload["subgraph_trace"]
+            payload.pop("subgraph_trace", None)
+
         new_state = {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
+                "agent_artifacts": agent_artifacts,
+                "subgraph_trace": subgraph_trace,
                 "status": (orch_status if orch_status in {STATUS_OK, STATUS_DEGRADED, STATUS_FAILED} else STATUS_OK),
                 "reason_code": orch_reason, "detail": orch_detail,
                 # M36-D：双时钟字段更新
@@ -411,91 +399,48 @@ class GraphExecutor:
 
         return new_state
 
-    def _run_agent_dispatch(self, state: GraphState) -> GraphState:
-        """M-MA6：agent_dispatch_node 虚拟节点的执行逻辑。
-
-        根据 active_agent_id 动态选择对应 agent handler 执行，
-        执行完成后根据 need_judge 决定下一跳（judge_agent_node 或 renderer）。
-        """
-        from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
-
-        node_id = "agent_dispatch_node"
-        handler_id = self._dispatch_to_agent(state)
-        presence_events = list(state.get("presence_events") or [])
-
-        # 发射 AGENT_START 事件
-        try:
-            start_event = self._presence_emitter.emit(node_id=node_id, event_type="AGENT_START")
-            active_agent = str(state.get("active_agent_id") or "").strip()
-            presence_events.append({**start_event.to_dict(), "agent_id": active_agent})
-        except Exception:
-            pass
-
-        try:
-            output = self._invoke_handler(
-                handler_id=handler_id,
-                node_id=node_id,
-                state=state,
-            )
-        except Exception as exc:
-            return handle_execution_error(
-                state=state, node_id=node_id, handler_id=handler_id, error=exc
-            )
-
-        # 发射 AGENT_END 事件
-        try:
-            end_event = self._presence_emitter.emit(node_id=node_id, event_type="AGENT_END")
-            active_agent = str(state.get("active_agent_id") or "").strip()
-            presence_events.append({**end_event.to_dict(), "agent_id": active_agent})
-        except Exception:
-            pass
-
-        payload = dict(output or state.get("payload") or {})
-        model_calls = list(state.get("model_calls") or [])
-        if isinstance(payload.get("__model_calls__"), list):
-            model_calls = list(payload.pop("__model_calls__") or model_calls)
-
-        # agent handler 不写 __next_node__，由此处根据 need_judge 决定下一跳
-        payload.pop("__next_node__", None)
-        agent_runtime = dict(payload.get("agent_runtime") or {})
-        need_judge = bool(agent_runtime.get("need_judge", True))
-        if need_judge:
-            from host_brain.app.graph_config_builder import JUDGE_AGENT_NODE_ID  # noqa: PLC0415
-            next_node = JUDGE_AGENT_NODE_ID
-        else:
-            next_node = CHAT_RENDER_NODE_ID
-
-        trace = list(state.get("trace") or [])
-        trace.append({
-            "node_id": node_id,
-            "handler_id": handler_id,
-            "status": "OK",
-            "reason_code": None,
-            "detail": f"agent_dispatch: active_agent={state.get('active_agent_id')}, next={next_node}",
-        })
-
-        return {
-            **state,
-            "payload": payload,
-            "trace": trace,
-            "pending_node_id": next_node,
-            "model_calls": model_calls,
-            "presence_events": presence_events,
-        }
-
     def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -> dict[str, Any]:
         handler = self._handlers.get(handler_id)
         if handler is None:
             raise KeyError(f"handler missing for node={node_id}, handler_id={handler_id}")
         # M28-R（OPT-45）：context 携带情感状态，使图节点执行时能感知当前情感上下文
         emotion_ctx = state.get("emotion_context") or {}
-        return handler(dict(state.get("payload") or {}), {
-            "request_id": str(state.get("request_id") or ""), "node_id": node_id,
-            "graph_id": str(state.get("graph_id") or ""), "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms),
-            # M28-R：情感状态字段（默认值保证向后兼容）
+        binding = dict((state.get("node_bindings") or {}).get(node_id) or {})
+        context = {
+            "request_id": str(state.get("request_id") or ""),
+            "node_id": node_id,
+            "graph_id": str(state.get("graph_id") or ""),
+            "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms),
             "emotion_tag": str(emotion_ctx.get("emotion_tag") or state.get("emotion_tag") or "NEUTRAL"),
             "mood_state": str(emotion_ctx.get("mood_state") or state.get("mood_state") or "steady"),
-        })
+            "node_binding": binding,
+        }
+        # P3.5：图本地配置 — allowlist 等由 binding 提供，handler 从 context 读取
+        allowlist = binding.get("agent_dispatch_allowlist")
+        if allowlist is not None:
+            context["agent_dispatch_allowlist"] = list(allowlist) if isinstance(allowlist, (list, tuple)) else [allowlist]
+        # P3.5：子 handler 需调用 model 时由各自 handler 通过 invoke_model_node 执行，executor 仅提供能力
+        # P4：payload_override 用于子图链式调用，使下一节点能读到上一节点输出
+        def _invoke_model_node(node_id_to_run: str, payload_override: dict[str, Any] | None = None) -> dict[str, Any]:
+            b = (state.get("node_bindings") or {}).get(node_id_to_run)
+            if not b:
+                return {}
+            state_use = {**state, "payload": dict(payload_override or state.get("payload") or {})} if payload_override is not None else state
+            out = self._invoke_model_node(node_id=node_id_to_run, binding=b, state=state_use)
+            for ctrl in ("__next_node__", "__orchestration_status__", "__orchestration_reason_code__", "__orchestration_detail__"):
+                out.pop(ctrl, None)
+            return out
+
+        context["invoke_model_node"] = _invoke_model_node
+        # P3.5：agent_dispatch 仅做分派，需 invoke_handler 调用 code_agent / translate_agent
+        handlers = self._handlers
+
+        def invoke_handler(h_id: str, pl: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+            fn = handlers.get(h_id)
+            return fn(pl, ctx) if fn else pl
+
+        context["invoke_handler"] = invoke_handler
+        return handler(dict(state.get("payload") or {}), context)
 
     def _invoke_model_node(self, *, node_id: str, binding: Mapping[str, Any], state: GraphState) -> dict[str, Any]:
         model_node_id = str(binding.get("model_node_id") or node_id).strip()

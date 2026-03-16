@@ -33,6 +33,17 @@ from host_brain.app.agents.agent_registry import (
     AGENT_ID_TRANSLATE,
     get_agent_meta,
 )
+from host_brain.app.graph_config_builder import AGENT_DISPATCH_NODE_ID
+from host_brain.integrations.graph_contract import (
+    SUPERVISOR_DECISION_SOURCE_LLM,
+    SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE,
+    SUPERVISOR_DECISION_SOURCE_RULE,
+    SUPERVISOR_FAILURE_LLM_BAD_JSON,
+    SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR,
+    SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID,
+    SUPERVISOR_FAILURE_LLM_TIMEOUT,
+    SUPERVISOR_PROPOSAL_VALID_RISK_MODES,
+)
 from host_brain.app.prompt_builder import (
     CHAT_DIRECT_NODE_ID,
     SCENE_CHAT,
@@ -116,71 +127,73 @@ def supervisor_dispatch_handler(
     # 1. 读取场景类型
     scene_type = str(payload.get("scene_type") or SCENE_CHAT).strip().upper() or SCENE_CHAT
 
-    # 2. 检查多 agent 开关（灰度控制）
-    multi_agent_enabled = _parse_bool(
-        os.environ.get("MULTI_AGENT_ENABLED"),
-        default=False,  # 默认关闭，灰度上线
-    )
-    supervisor_auto_enabled = _parse_bool(
-        os.environ.get("SUPERVISOR_AUTO_ENABLED"),
-        default=False,
-    )
+    # 2. SUPERVISOR_MODE 只允许 rule 或 llm（P5-2）
+    _raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
+    supervisor_mode = "llm" if _raw_mode == "llm" else "rule"
+    use_llm_proposal = supervisor_mode == "llm"
 
-    # 3. 选派 agent（规则路由 or LLM 提案）
-    selected_agent = _SCENE_DEFAULT_AGENT.get(scene_type, AGENT_ID_CHAT)
-    risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
-    need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
-    proposal_source = "rule"
+    # 3. 图内 allowlist：与 agent_dispatch_handler 后续使用的保持一致（P5-2）
+    allowlist_raw = ctx.get("agent_dispatch_allowlist")
+    allowlist: list[str] | None = None
+    if isinstance(allowlist_raw, (list, tuple)):
+        allowlist = [str(x).strip() for x in allowlist_raw if str(x).strip()]
 
-    # M-MA6：SUPERVISOR_AUTO_ENABLED=true 时，调用 LLM 产出分派提案
-    if supervisor_auto_enabled and multi_agent_enabled:
-        llm_proposal = _try_llm_proposal(
+    # 4. 规则默认值（用于 rule 路径与 llm 失败回退）
+    rule_agent = _SCENE_DEFAULT_AGENT.get(scene_type, AGENT_ID_CHAT)
+    rule_risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
+    rule_need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
+
+    selected_agent = rule_agent
+    risk_mode = rule_risk_mode
+    need_judge = rule_need_judge
+    decision_source = SUPERVISOR_DECISION_SOURCE_RULE
+    supervisor_failure_code: str | None = None
+
+    if use_llm_proposal:
+        # P5-2：LLM 模式四步 — 调 LLM、解析 JSON、契约校验、编译为运行时字段；失败统一回退 rule
+        llm_proposal, failure_code = _try_llm_proposal(
             payload=payload,
             scene_type=scene_type,
             context=ctx,
         )
-        if llm_proposal is not None:
-            selected_agent = llm_proposal.get("selected_agent", selected_agent)
-            risk_mode = llm_proposal.get("risk_mode", risk_mode)
-            need_judge = bool(llm_proposal.get("need_judge", need_judge))
-            proposal_source = "llm"
+        if llm_proposal is None:
+            selected_agent = rule_agent
+            risk_mode = rule_risk_mode
+            need_judge = rule_need_judge
+            decision_source = SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE
+            supervisor_failure_code = failure_code or SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
+        else:
+            # 契约口径（P5）：缺失 need_judge/risk_mode 允许，handler 补 rule 默认；显式非法 risk_mode 判 LLM_SCHEMA_INVALID
+            raw_rm = str(llm_proposal.get("risk_mode") or "").strip().lower()
+            proposal_to_validate = {
+                "selected_agent": str(llm_proposal.get("selected_agent") or "").strip(),
+                "risk_mode": raw_rm if raw_rm else rule_risk_mode,  # 仅缺失时补默认，显式非法则原样送校验
+                "need_judge": _parse_bool(llm_proposal.get("need_judge"), rule_need_judge),
+            }
+            is_valid, validation_failure = validate_supervisor_proposal(proposal_to_validate, allowlist=allowlist)
+            if not is_valid:
+                selected_agent = rule_agent
+                risk_mode = rule_risk_mode
+                need_judge = rule_need_judge
+                decision_source = SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE
+                supervisor_failure_code = validation_failure or SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
+            else:
+                selected_agent = proposal_to_validate["selected_agent"]
+                risk_mode = proposal_to_validate["risk_mode"]
+                need_judge = proposal_to_validate["need_judge"]
+                decision_source = SUPERVISOR_DECISION_SOURCE_LLM
 
-    # 4. 构建分派提案
-    proposal_dict = {
-        "selected_agent": selected_agent,
-        "reason": f"scene_type={scene_type} {proposal_source}路由",
-        "risk_mode": risk_mode,
-        "need_judge": need_judge,
-        "budget": {
-            "max_hops": 2,
-            "timeout_ms": 12000,
-        },
-    }
-
-    # 5. 校验提案合法性（allowlist 校验）
-    is_valid, validation_reason = validate_supervisor_proposal(proposal_dict)
-    if not is_valid:
-        # 提案非法：降级到聊天快路径
-        selected_agent = AGENT_ID_CHAT
-        risk_mode = RISK_MODE_SAFE
-        need_judge = False
-        validation_reason = f"PROPOSAL_INVALID_FALLBACK_TO_CHAT:{validation_reason}"
-
-    # 6. 确定下一跳节点（trusted handler 专属权）
-    next_node = _AGENT_TO_NODE.get(selected_agent, CHAT_DIRECT_NODE_ID)
-
-    # 7. 获取 agent 元数据（用于 trace）
+    # 5. 下一跳与输出（仅写安全字段，不写控图键）
+    next_node = AGENT_DISPATCH_NODE_ID
     agent_meta = get_agent_meta(selected_agent) or {}
 
-    # 8. 构建输出（第三阶段：直接写 GraphState 顶层字段，不再写 payload["agent_runtime"]）
     out = dict(payload)
-    # 写入 GraphState 顶层 agent 字段
     out["active_agent_id"] = selected_agent
     out["handoff_history"] = [
         {
             "from": "supervisor",
             "to": selected_agent,
-            "reason": f"scene_type={scene_type} 规则路由",
+            "reason": f"scene_type={scene_type} {decision_source}",
             "ts_ms": int(time.time() * 1000),
         }
     ]
@@ -191,22 +204,21 @@ def supervisor_dispatch_handler(
     }
     out["agent_artifacts"] = {}
     out["judge_result"] = None
-    # supervisor_dispatch 追踪信息（不影响路由）
+    # P5-2：观测字段落稳，供 P5-4 metrics 消费
     out["supervisor_dispatch"] = {
         "dispatcher_node": node_id,
         "scene_type": scene_type,
+        "supervisor_mode": supervisor_mode,
+        "supervisor_decision_source": decision_source,
+        "supervisor_failure_code": supervisor_failure_code,
+        "supervisor_selected_agent": selected_agent,
         "selected_agent": selected_agent,
         "agent_display_name": str(agent_meta.get("display_name") or selected_agent),
         "next_node": next_node,
         "risk_mode": risk_mode,
         "need_judge": need_judge,
-        "validation_reason": validation_reason,
-        "proposal_source": proposal_source,          # M-MA6：rule / llm
-        "multi_agent_enabled": multi_agent_enabled,
-        "supervisor_auto_enabled": supervisor_auto_enabled,
         "dispatched_at_ms": int(time.time() * 1000),
     }
-    # trusted handler 写入 __next_node__（不经过 LLM 直接输出）
     out["__next_node__"] = next_node
 
     return out
@@ -246,24 +258,19 @@ def _try_llm_proposal(
     payload: dict[str, Any],
     scene_type: str,
     context: dict[str, Any],
-) -> dict[str, Any] | None:
-    """尝试调用 LLM 产出 Supervisor 分派提案。
+) -> tuple[dict[str, Any] | None, str | None]:
+    """P5-2：调 LLM 拿 proposal 原文、解析 JSON；不在此做 schema/allowlist 校验。
 
-    失败时返回 None（降级到规则路由）。
-
-    Args:
-        payload: 当前图 payload
-        scene_type: 场景类型
-        context: 执行上下文
+    失败时返回 (None, failure_code)，由 handler 统一回退 rule。
 
     Returns:
-        解析后的提案字典，或 None（失败时）
+        (proposal_dict, None) 成功；(None, failure_code) 失败。
     """
     import json as _json
 
     gateway = context.get("gateway") or payload.get("_gateway")
     if gateway is None:
-        return None  # 无 gateway，降级到规则路由
+        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
 
     user_input = str(
         payload.get("user_input")
@@ -271,7 +278,7 @@ def _try_llm_proposal(
         or ""
     ).strip()
     if not user_input:
-        return None
+        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
 
     try:
         messages = [
@@ -286,7 +293,9 @@ def _try_llm_proposal(
             or ""
         ).strip()
 
-        # 提取 JSON
+        if not raw:
+            return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
+
         if "```json" in raw:
             start = raw.find("```json") + 7
             end = raw.find("```", start)
@@ -298,10 +307,15 @@ def _try_llm_proposal(
 
         proposal = _json.loads(raw)
         if not isinstance(proposal, dict):
-            return None
-        if not proposal.get("selected_agent"):
-            return None
-        return proposal
+            return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
+        # JSON 可解析但缺 selected_agent → schema invalid，非 bad json
+        if not str(proposal.get("selected_agent") or "").strip():
+            return None, SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+        return proposal, None
 
+    except TimeoutError:
+        return None, SUPERVISOR_FAILURE_LLM_TIMEOUT
+    except (_json.JSONDecodeError, TypeError, ValueError):
+        return None, SUPERVISOR_FAILURE_LLM_BAD_JSON
     except Exception:
-        return None  # 任何异常都降级到规则路由
+        return None, SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR

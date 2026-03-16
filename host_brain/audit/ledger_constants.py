@@ -421,6 +421,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "llm_route_log",
     "llm_node_call_log",
     "graph_run_trace",
+    "supervisor_decision_log",
 })
 
 
