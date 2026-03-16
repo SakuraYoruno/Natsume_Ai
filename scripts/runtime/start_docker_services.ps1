@@ -4,7 +4,7 @@ param(
   [string]$ComposeFile = "",
   [string]$ProjectName = "natsume-ext",
   [int]$DockerDaemonWaitSeconds = 90,
-  [int]$Neo4jWaitSeconds = 45,
+  [int]$Neo4jWaitSeconds = 90,
   [int]$ChromaWaitSeconds = 30,
   [int]$RedisWaitSeconds = 20
 )
@@ -341,8 +341,17 @@ if ($authParts.Length -ne 2 -or -not $authParts[0] -or -not $authParts[1]) {
 $neo4jUser = [string]$authParts[0]
 $neo4jPassword = [string]$authParts[1]
 
-$chromaEndpoint = if ($envValues.ContainsKey("CHROMA_ENDPOINT")) { [string]$envValues["CHROMA_ENDPOINT"] } elseif ($env:CHROMA_ENDPOINT) { [string]$env:CHROMA_ENDPOINT } else { "http://127.0.0.1:8000" }
-$chromaPort = Get-PortFromUri -UriText $chromaEndpoint -DefaultPort 8000
+# Windows 常保留 8000/8100 等端口，Chroma 默认改用 18000
+$chromaDefaultPort = 18000
+$chromaEndpoint = if ($envValues.ContainsKey("CHROMA_ENDPOINT")) { [string]$envValues["CHROMA_ENDPOINT"] } elseif ($env:CHROMA_ENDPOINT) { [string]$env:CHROMA_ENDPOINT } else { "http://127.0.0.1:$chromaDefaultPort" }
+$chromaPort = Get-PortFromUri -UriText $chromaEndpoint -DefaultPort $chromaDefaultPort
+# 若为 Windows 常见保留端口，强制改为 18000
+if ($chromaPort -eq 8100 -or $chromaPort -eq 8000) {
+  Write-Warning "Chroma port $chromaPort is often reserved on Windows; using $chromaDefaultPort for Docker. Set CHROMA_ENDPOINT=http://127.0.0.1:$chromaDefaultPort and CHROMA_PORT=$chromaDefaultPort in .env."
+  $chromaPort = $chromaDefaultPort
+}
+$chromaPortEnv = if ($envValues.ContainsKey("CHROMA_PORT")) { try { [int]$envValues["CHROMA_PORT"] } catch { 0 } } else { 0 }
+if ($chromaPortEnv -eq 8100 -or $chromaPortEnv -eq 8000) { $chromaPort = $chromaDefaultPort }
 $redisUrl = if ($envValues.ContainsKey("HOST_RATE_LIMIT_REDIS_URL")) { [string]$envValues["HOST_RATE_LIMIT_REDIS_URL"] } elseif ($env:HOST_RATE_LIMIT_REDIS_URL) { [string]$env:HOST_RATE_LIMIT_REDIS_URL } else { "redis://127.0.0.1:6379/0" }
 $redisPort = Get-RedisPortFromUrl -RedisUrl $redisUrl -DefaultPort 6379
 
@@ -357,6 +366,12 @@ $env:NATSUME_NEO4J_BOLT_PORT = [string]$neo4jPort
 $env:NATSUME_NEO4J_HTTP_PORT = [string]$neo4jHttpPort
 $env:NATSUME_CHROMA_PORT = [string]$chromaPort
 $env:NATSUME_REDIS_PORT = [string]$redisPort
+# 禁止 Docker 使用 8000/8100（Windows 常保留），最后一刻强制
+if ($chromaPort -eq 8000 -or $chromaPort -eq 8100) {
+  $env:NATSUME_CHROMA_PORT = "18000"
+  $chromaPort = 18000
+}
+Write-Host "Chroma host port: $env:NATSUME_CHROMA_PORT (container stays 8000)"
 
 & $dockerExe compose -f $ComposeFile -p $ProjectName up -d
 if ($LASTEXITCODE -ne 0) {
@@ -364,7 +379,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not (Wait-TcpPort -Port $neo4jPort -TimeoutSeconds $Neo4jWaitSeconds)) {
-  throw "neo4j docker service failed to listen on port $neo4jPort"
+  $hint = "Check: docker logs natsume-neo4j (or $ProjectName-neo4j-1). Retry with -Neo4jWaitSeconds 120 or 180 if Neo4j is still starting."
+  throw "neo4j docker service failed to listen on port $neo4jPort. $hint"
 }
 if (-not (Wait-Http -Url "http://127.0.0.1:$chromaPort/api/v2/heartbeat" -TimeoutSeconds $ChromaWaitSeconds)) {
   throw "chroma docker service failed heartbeat on port $chromaPort"

@@ -9,7 +9,7 @@ param(
   [string]$DockerComposeFile = "",
   [string]$DockerProjectName = "natsume-ext",
   [int]$WaitSeconds = 40,
-  [int]$Neo4jWaitSeconds = 45,
+  [int]$Neo4jWaitSeconds = 90,
   [int]$ChromaWaitSeconds = 30,
   [switch]$ForceRestart,
   [switch]$StartupCheck,

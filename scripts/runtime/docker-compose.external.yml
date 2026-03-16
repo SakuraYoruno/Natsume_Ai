@@ -8,9 +8,10 @@ services:
       NEO4J_server_memory_heap_initial__size: "512m"
       NEO4J_server_memory_heap_max__size: "512m"
       NEO4J_dbms_security_auth__minimum__password__length: "8"
+    # 主机端口：7474 可用；7687 在 Windows 保留区 7681-7780，改用 17687
     ports:
       - "${NATSUME_NEO4J_HTTP_PORT:-7474}:7474"
-      - "${NATSUME_NEO4J_BOLT_PORT:-7687}:7687"
+      - "17687:7687"
     volumes:
       - ../../runtime/docker/neo4j/data:/data
       - ../../runtime/docker/neo4j/logs:/logs
@@ -23,8 +24,9 @@ services:
       IS_PERSISTENT: "TRUE"
       PERSIST_DIRECTORY: "/chroma/chroma"
       ANONYMIZED_TELEMETRY: "FALSE"
+    # 主机端口固定 18000，避免 Windows 保留 8000/8100 导致 bind 失败（不再使用 NATSUME_CHROMA_PORT）
     ports:
-      - "${NATSUME_CHROMA_PORT:-8000}:8000"
+      - "18000:8000"
     volumes:
       - ../../runtime/docker/chroma/data:/chroma/chroma
 
