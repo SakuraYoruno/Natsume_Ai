@@ -245,6 +245,31 @@ class GraphRuntimeContract:
             "barrier_join_result": None,
             "render_guard_result": None,
         }
+
+        # M-MA1：注入 agent_runtime 默认结构（多 agent 第一阶段放入 payload）
+        import os as _os
+        _multi_agent_enabled = str(_os.environ.get("MULTI_AGENT_ENABLED") or "false").strip().lower() in {"1", "true", "yes", "on"}
+        if "agent_runtime" not in payload_dict:
+            payload_dict["agent_runtime"] = {
+                "plan_id": None,
+                "active_agent_id": None,
+                "agent_hops": 0,
+                "max_hops": 2,
+                "risk_mode": "safe",
+                "need_judge": False,
+                "budget": {
+                    "max_hops": 2,
+                    "per_agent_timeout_ms": 12000,
+                    "total_budget_ms": 30000,
+                },
+                "artifacts": {},
+                "handoff_history": [],
+                "multi_agent_enabled": _multi_agent_enabled,
+            }
+        else:
+            # 确保 multi_agent_enabled 标记存在
+            payload_dict["agent_runtime"].setdefault("multi_agent_enabled", _multi_agent_enabled)
+        initial_state["payload"] = payload_dict
         state = compiled.invoke(initial_state)
 
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）

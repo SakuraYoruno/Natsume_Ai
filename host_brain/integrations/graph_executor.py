@@ -48,6 +48,28 @@ from host_brain.integrations.graph_fallback import (
 from host_brain.integrations.llm_gateway import LlmGatewayContract
 
 
+# ---------------------------------------------------------------------------
+# M-MA1：Trusted Handler Allowlist
+# 只有此列表内的 handler_id 可以写入控制字段（__next_node__ 等）
+# model node 输出的控制字段会被统一剥离，不允许 model node 直接控图
+# ---------------------------------------------------------------------------
+
+_TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
+    "scene_router_entry",
+    "scene_router_post_core",
+    "supervisor_dispatch",
+    # 未来新增 trusted handler 在此注册
+})
+
+# model node 输出中需要剥离的控制字段（防止 model node 直接控图）
+_MODEL_OUTPUT_CONTROL_FIELDS: frozenset[str] = frozenset({
+    "committed_route_token",
+    "committed_route_token_detail",
+    "branch_specs",
+    # __next_node__ 和 __orchestration_* 由执行器内部处理，不在此剥离
+})
+
+
 class GraphExecutor:
     """Executes graph nodes step-by-step using LangGraph runtime."""
 
@@ -184,6 +206,12 @@ class GraphExecutor:
         model_calls = list(state.get("model_calls") or [])
         if isinstance(payload.get("__model_calls__"), list):
             model_calls = list(payload.pop("__model_calls__") or model_calls)
+
+        # M-MA1：model node 控制字段剥离
+        # handler node 不剥离（trusted handler 有权写控制字段）
+        if not handler_id:
+            for _ctrl_field in _MODEL_OUTPUT_CONTROL_FIELDS:
+                payload.pop(_ctrl_field, None)
         orch_status = str(payload.pop("__orchestration_status__", "") or "").strip().upper() or STATUS_OK
         prev_status = str(state.get("status") or STATUS_OK).upper()
         if prev_status == STATUS_FAILED:
@@ -199,6 +227,20 @@ class GraphExecutor:
         trace.append({"node_id": node_id, "handler_id": handler_id, "status": "OK", "reason_code": orch_reason, "detail": orch_detail})
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
+
+        # M-MA1：agent 切换事件（仅观测，不反向作为图输入）
+        try:
+            agent_runtime = payload.get("agent_runtime") or {}
+            active_agent = str(agent_runtime.get("active_agent_id") or "").strip()
+            prev_agent = str((state.get("payload") or {}).get("agent_runtime", {}).get("active_agent_id") or "").strip()
+            if active_agent and active_agent != prev_agent:
+                agent_event = self._presence_emitter.emit(
+                    node_id=node_id,
+                    event_type="AGENT_SELECTED",
+                )
+                presence_events.append({**agent_event.to_dict(), "agent_id": active_agent})
+        except Exception:
+            pass  # 静默降级
 
         new_state = {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
                 "status": (orch_status if orch_status in {STATUS_OK, STATUS_DEGRADED, STATUS_FAILED} else STATUS_OK),

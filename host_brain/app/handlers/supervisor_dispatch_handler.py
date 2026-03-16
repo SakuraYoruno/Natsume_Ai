@@ -1,0 +1,197 @@
+"""Supervisor 分派 Handler：多 agent 编排的主 agent 入口。
+
+职责：
+1. 读取 scene_type、user_input、agent_runtime 预算
+2. 根据场景规则（或 LLM 提案）选派子 agent
+3. 校验提案合法性（agent_id 在 allowlist 内、risk_mode 合规）
+4. 写入 payload["agent_runtime"]["plan"]
+5. 写入 __next_node__（trusted handler 专属权）
+
+关键约束（来自 ModelPlane.md）：
+- LLM 输出只是提案，handler 负责校验和编译
+- 不得直接把 LLM 输出的 selected_agent 写入 __next_node__，必须经过 allowlist 校验
+- 不得写 committed_route_token（只有 Host Governor 可以写）
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from typing import Any
+
+from host_brain.app.agents.agent_contract import (
+    RISK_MODE_GUARDED,
+    RISK_MODE_SAFE,
+    RISK_MODE_STRICT,
+    build_agent_runtime_default,
+    validate_supervisor_proposal,
+)
+from host_brain.app.agents.agent_registry import (
+    AGENT_ID_CHAT,
+    AGENT_ID_CODE,
+    AGENT_ID_INTENT,
+    AGENT_ID_JUDGE,
+    AGENT_ID_TRANSLATE,
+    get_agent_meta,
+)
+from host_brain.app.prompt_builder import (
+    CHAT_DIRECT_NODE_ID,
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
+)
+
+# ---------------------------------------------------------------------------
+# 场景 → 默认 agent 映射（规则路由，不依赖 LLM）
+# ---------------------------------------------------------------------------
+
+_SCENE_DEFAULT_AGENT: dict[str, str] = {
+    SCENE_CHAT: AGENT_ID_CHAT,
+    SCENE_WORK_CODE: AGENT_ID_CODE,
+    SCENE_WORK_TRANSLATE: AGENT_ID_TRANSLATE,
+    SCENE_EXEC_INTENT: AGENT_ID_INTENT,
+    SCENE_VISION_UI: AGENT_ID_INTENT,
+}
+
+# 场景 → 默认风险模式
+_SCENE_DEFAULT_RISK_MODE: dict[str, str] = {
+    SCENE_CHAT: RISK_MODE_SAFE,
+    SCENE_WORK_CODE: RISK_MODE_GUARDED,
+    SCENE_WORK_TRANSLATE: RISK_MODE_SAFE,
+    SCENE_EXEC_INTENT: RISK_MODE_STRICT,
+    SCENE_VISION_UI: RISK_MODE_STRICT,
+}
+
+# 场景 → 是否需要 judge
+_SCENE_NEED_JUDGE: dict[str, bool] = {
+    SCENE_CHAT: False,       # 聊天快路径不需要 judge
+    SCENE_WORK_CODE: True,
+    SCENE_WORK_TRANSLATE: True,
+    SCENE_EXEC_INTENT: True,
+    SCENE_VISION_UI: True,
+}
+
+# agent_id → 对应的图节点 ID（用于写入 __next_node__）
+_AGENT_TO_NODE: dict[str, str] = {
+    AGENT_ID_CHAT: CHAT_DIRECT_NODE_ID,
+    AGENT_ID_CODE: "workbench_code_assist",
+    AGENT_ID_TRANSLATE: "workbench_translate",
+    AGENT_ID_INTENT: "core_reasoner_primary",
+    AGENT_ID_JUDGE: "consistency_verifier",
+}
+
+
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def supervisor_dispatch_handler(
+    payload: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Supervisor 分派 handler（trusted handler，可写 __next_node__）。
+
+    第一阶段：基于规则路由（不调用 LLM），直接按 scene_type 选派 agent。
+    第二阶段：可扩展为 LLM 提案 + handler 校验模式。
+
+    Args:
+        payload: 当前图 payload
+        context: 执行上下文（含 request_id、node_id 等）
+
+    Returns:
+        更新后的 payload，含 __next_node__ 和 agent_runtime
+    """
+    ctx = dict(context or {})
+    request_id = str(ctx.get("request_id") or payload.get("request_id") or "").strip()
+    node_id = str(ctx.get("node_id") or "supervisor_dispatch").strip()
+
+    # 1. 读取场景类型
+    scene_type = str(payload.get("scene_type") or SCENE_CHAT).strip().upper() or SCENE_CHAT
+
+    # 2. 检查多 agent 开关（灰度控制）
+    multi_agent_enabled = _parse_bool(
+        os.environ.get("MULTI_AGENT_ENABLED"),
+        default=False,  # 默认关闭，灰度上线
+    )
+    supervisor_auto_enabled = _parse_bool(
+        os.environ.get("SUPERVISOR_AUTO_ENABLED"),
+        default=False,
+    )
+
+    # 3. 选派 agent（规则路由）
+    selected_agent = _SCENE_DEFAULT_AGENT.get(scene_type, AGENT_ID_CHAT)
+    risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
+    need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
+
+    # 4. 构建分派提案（第一阶段：规则提案，不调用 LLM）
+    proposal_dict = {
+        "selected_agent": selected_agent,
+        "reason": f"scene_type={scene_type} 规则路由",
+        "risk_mode": risk_mode,
+        "need_judge": need_judge,
+        "budget": {
+            "max_hops": 2,
+            "timeout_ms": 12000,
+        },
+    }
+
+    # 5. 校验提案合法性（allowlist 校验）
+    is_valid, validation_reason = validate_supervisor_proposal(proposal_dict)
+    if not is_valid:
+        # 提案非法：降级到聊天快路径
+        selected_agent = AGENT_ID_CHAT
+        risk_mode = RISK_MODE_SAFE
+        need_judge = False
+        validation_reason = f"PROPOSAL_INVALID_FALLBACK_TO_CHAT:{validation_reason}"
+
+    # 6. 构建 agent_runtime
+    agent_runtime = build_agent_runtime_default(
+        request_id=request_id,
+        active_agent_id=selected_agent,
+        risk_mode=risk_mode,
+        max_hops=2,
+        need_judge=need_judge,
+    )
+    agent_runtime_dict = agent_runtime.to_dict()
+    agent_runtime_dict["dispatch_plan"] = {
+        "proposal": proposal_dict,
+        "validation_reason": validation_reason,
+        "dispatcher_node": node_id,
+        "dispatched_at_ms": int(time.time() * 1000),
+        "multi_agent_enabled": multi_agent_enabled,
+        "supervisor_auto_enabled": supervisor_auto_enabled,
+    }
+
+    # 7. 确定下一跳节点（trusted handler 专属权）
+    next_node = _AGENT_TO_NODE.get(selected_agent, CHAT_DIRECT_NODE_ID)
+
+    # 8. 获取 agent 元数据（用于 trace）
+    agent_meta = get_agent_meta(selected_agent) or {}
+
+    # 9. 构建输出 payload
+    out = dict(payload)
+    out["agent_runtime"] = agent_runtime_dict
+    out["supervisor_dispatch"] = {
+        "dispatcher_node": node_id,
+        "scene_type": scene_type,
+        "selected_agent": selected_agent,
+        "agent_display_name": str(agent_meta.get("display_name") or selected_agent),
+        "next_node": next_node,
+        "risk_mode": risk_mode,
+        "need_judge": need_judge,
+        "validation_reason": validation_reason,
+        "dispatched_at_ms": int(time.time() * 1000),
+    }
+    # trusted handler 写入 __next_node__（不经过 LLM 直接输出）
+    out["__next_node__"] = next_node
+
+    return out

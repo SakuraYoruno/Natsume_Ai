@@ -57,6 +57,10 @@ SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
 SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
 
+# M-MA1：Supervisor 分派节点常量
+SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
+SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
+
 # 客户端允许显式指定的场景类型白名单
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
 # [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
@@ -1161,6 +1165,7 @@ def build_chat_graph_config(
     if use_scene_router:
         scene_node_sequence = [
             SCENE_ROUTER_ENTRY_NODE_ID,
+            SUPERVISOR_DISPATCH_NODE_ID,
             CHAT_DIRECT_NODE_ID,
             CHAT_INTENT_SOURCE_NODE_ID,
             SCENE_ROUTER_POST_CORE_NODE_ID,
@@ -1177,6 +1182,13 @@ def build_chat_graph_config(
                 "node_id": SCENE_ROUTER_ENTRY_NODE_ID,
                 "handler_id": SCENE_ROUTER_ENTRY_HANDLER_ID,
                 "task": "scene_router_entry",
+                "require_approval_token": False,
+            },
+            {
+                # M-MA1：Supervisor 分派 handler 节点（trusted handler，可写 __next_node__）
+                "node_id": SUPERVISOR_DISPATCH_NODE_ID,
+                "handler_id": SUPERVISOR_DISPATCH_HANDLER_ID,
+                "task": "supervisor_dispatch",
                 "require_approval_token": False,
             },
             {
@@ -1212,9 +1224,9 @@ def build_chat_graph_config(
         ]
         budget_routes = [
             [CHAT_DIRECT_NODE_ID],
-            [CHAT_INTENT_SOURCE_NODE_ID, "planner_constraints", "tool_planner", "safety_verifier", "consistency_verifier", CHAT_RENDER_NODE_ID],
-            [CHAT_INTENT_SOURCE_NODE_ID, "workbench_translate", "consistency_verifier", CHAT_RENDER_NODE_ID],
-            [CHAT_INTENT_SOURCE_NODE_ID, "workbench_code_assist", "consistency_verifier", CHAT_RENDER_NODE_ID],
+            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "planner_constraints", "tool_planner", "safety_verifier", "consistency_verifier", CHAT_RENDER_NODE_ID],
+            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "workbench_translate", "consistency_verifier", CHAT_RENDER_NODE_ID],
+            [SUPERVISOR_DISPATCH_NODE_ID, CHAT_INTENT_SOURCE_NODE_ID, "workbench_code_assist", "consistency_verifier", CHAT_RENDER_NODE_ID],
         ]
         chain_budget_ms = max(
             sum(int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in route)
@@ -1304,7 +1316,7 @@ def build_chat_graph_config(
         "model_node_overrides": model_node_overrides,
         "graph_meta": {
             "online_chain": (
-                "graph_entry_scene_router + scene_routed_langgraph"
+                "graph_entry_scene_router + supervisor_dispatch + scene_routed_langgraph"
                 if use_scene_router
                 else (
                     "chat_direct_single_node + scene_routed_langgraph"
