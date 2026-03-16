@@ -9,7 +9,7 @@
 
 用法：
   python scripts/generate_m12_release.py
-  python scripts/generate_m12_release.py --output docs/50_release/m12_release.json
+python scripts/generate_m12_release.py --output configs/release/m12_release.json
 """
 
 from __future__ import annotations
@@ -228,8 +228,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="生成 M12 发布清单")
     parser.add_argument(
         "--output",
-        default="docs/50_release/m12_release.json",
-        help="输出路径（默认: docs/50_release/m12_release.json）",
+default="configs/release/m12_release.json",
+help="输出路径（默认: configs/release/m12_release.json）",
     )
     parser.add_argument(
         "--workspace",

@@ -1,0 +1,107 @@
+{
+  "milestone": "M24",
+  "release_date": "2026-03-05",
+  "base_milestone": "M23",
+  "release_ready": true,
+  "llm_gateway_real_integration": true,
+  "vts_drive_complete": true,
+  "wechat_channel_complete": true,
+  "total_tests_passed": 1782,
+  "total_tests_skipped": 10,
+  "total_tests_failed": 0,
+  "zero_regressions": true,
+  "zero_warnings": true,
+  "net_new_tests": 51,
+  "tasks": [
+    {
+      "task_id": "TASK-0213",
+      "name": "M24-A LLM 网关真实接入",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/integrations/llm_gateway.py",
+        "host_brain/core/errors.py",
+        "tests/unit/test_llm_gateway_m24.py"
+      ],
+      "new_tests": 16,
+      "description": "新增 LLMHealthProbeResult/LLMRouteResult 数据类；health_probe() 方法（探测主模型可用性）；route_call() 方法（多模型路由：主模型→备用→本地兜底）；_load_api_key_from_env() 从环境变量读取 API Key；_log_route_decision() 写入 llm_route_log；fallback_providers 配置支持"
+    },
+    {
+      "task_id": "TASK-0214",
+      "name": "M24-B VTS 表情驱动完整链路",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/channels/vts_mapping_store.py",
+        "host_brain/channels/vts_rate_limiter.py",
+        "host_brain/core/errors.py",
+        "tests/unit/test_vts_drive_m24.py"
+      ],
+      "new_tests": 16,
+      "description": "新增 VTSMappingStore（映射表持久化、版本化、vts_mapping_change_log）；VTSRateLimiter（令牌桶算法、热更新、vts_rate_limit_log）；新增错误码 AVATAR_INVALID_EMOTION_TAG/VTS_RATE_LIMIT_EXCEEDED/VTS_MAPPING_LOAD_FAILED/EDGE_RPC_FAILED"
+    },
+    {
+      "task_id": "TASK-0215",
+      "name": "M24-C 微信通道完整链路",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/channels/wechat_health.py",
+        "host_brain/core/errors.py",
+        "tests/unit/test_wechat_channel_m24.py"
+      ],
+      "new_tests": 19,
+      "description": "新增 WeChatChannelHealth（健康状态管理、频率限制、降级策略、恢复日志）；新增错误码 WECHAT_PARSE_FAILED/WECHAT_SEND_FAILED/WECHAT_CHANNEL_DEGRADED/WECHAT_RATE_LIMIT_EXCEEDED；连续失败 N 次自动降级；降级时 inbound 正常/outbound 阻断；恢复时写 wechat_channel_recovery_log"
+    },
+    {
+      "task_id": "TASK-0216",
+      "name": "M24-D M24 发布清单",
+      "status": "DONE",
+      "files_changed": [
+        "configs/release/",
+        "docs/20_prd/PRD.md",
+        "docs/60_trace/requirements_trace.md",
+        "docs/30_devspec/DevTasks.md"
+      ],
+      "new_tests": 0,
+      "description": "生成 M24 发布清单，更新 PRD 和 requirements_trace"
+    }
+  ],
+  "quality_gates": {
+    "all_m24a_tests_pass": true,
+    "all_m24b_tests_pass": true,
+    "all_m24c_tests_pass": true,
+    "api_key_from_env_not_hardcoded": true,
+    "llm_health_probe_integrated": true,
+    "multi_model_route_fallback_works": true,
+    "vts_mapping_persistent_versioned": true,
+    "vts_rate_limiter_hot_update": true,
+    "wechat_degraded_inbound_ok_outbound_blocked": true,
+    "wechat_recovery_log_written": true,
+    "zero_regressions": true,
+    "zero_warnings": true
+  },
+  "new_modules": [
+    "host_brain/channels/vts_mapping_store.py",
+    "host_brain/channels/vts_rate_limiter.py",
+    "host_brain/channels/wechat_health.py"
+  ],
+  "new_error_codes": [
+    "LLM_UNAVAILABLE",
+    "LLM_ROUTE_FALLBACK",
+    "LLM_ROUTE_ALL_FAILED",
+    "LLM_HEALTH_PROBE_FAILED",
+    "AVATAR_INVALID_EMOTION_TAG",
+    "VTS_RATE_LIMIT_EXCEEDED",
+    "VTS_MAPPING_LOAD_FAILED",
+    "EDGE_RPC_FAILED",
+    "WECHAT_PARSE_FAILED",
+    "WECHAT_SEND_FAILED",
+    "WECHAT_CHANNEL_DEGRADED",
+    "WECHAT_RATE_LIMIT_EXCEEDED"
+  ],
+  "test_summary": {
+    "unit": {"passed": 591, "failed": 0, "skipped": 0},
+    "contract": {"passed": 988, "failed": 0, "skipped": 0},
+    "integration": {"passed": 111, "failed": 0, "skipped": 2},
+    "e2e": {"passed": 92, "failed": 0, "skipped": 8},
+    "total": {"passed": 1782, "failed": 0, "skipped": 10}
+  }
+}

@@ -185,8 +185,8 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 5. `docs/60_trace/dataflow_report_20260311.md`
 6. `docs/60_trace/requirements_trace.md`
 7. `docs/60_trace/risk_registry.md`
-8. `docs/60_trace/ROLLBACK_RUNBOOK_2026-03-10.md`
-9. `docs/60_trace/RELEASE_ROLLBACK_GATE_20260310_010648.md`
+8. `docs/50_release/rollback/ROLLBACK_RUNBOOK_2026-03-10.md`
+9. `docs/50_release/rollback/RELEASE_ROLLBACK_GATE_20260310_010648.md`
 10. `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md`
 
 ### 9.2 文档关注点 -> 代码测试锚点映射

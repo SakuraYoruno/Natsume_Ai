@@ -8,7 +8,7 @@ Host 全面试运行里程碑测试套件
 - 不使用 mock，全部使用真实服务
 - 模型相关测试（LLM 推理、ASR、TTS）标记 @pytest.mark.skip_model 并跳过
 - 所有链路节点的出入参数、状态均写入 SQLite 账本留痕
-- 每个测试结束后导出 JSON 报告到 docs/60_trace/trial_run_reports/
+- 每个测试结束后导出 JSON 报告到 artifacts/trial_run_reports/
 
 覆盖服务（14 个）：
   host.audit.sqlite_ledger       ✅ 真实测试
@@ -40,7 +40,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # 报告输出目录
 # ---------------------------------------------------------------------------
-_REPORT_DIR = Path("docs/60_trace/trial_run_reports")
+_REPORT_DIR = Path("artifacts/trial_run_reports")
 _REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 _RUN_TS = int(time.time() * 1000)

@@ -109,11 +109,6 @@ configs/secrets/key_profiles.runtime.json
 GPT_SoVITS/
 data/evidence/*.db
 
-# --- trial run reports (runtime-generated, never commit) ---
-docs/60_trace/trial_run_reports/
-run_report_*.json
-FULL_RUN_REPORT_*.json
-
 # --- Windows device file artifacts ---
 nul
 # pip 安装时产生的垃圾文件（如 =1.4.0）
@@ -131,7 +126,7 @@ test_webui_integration.py
 flows/exports/
 
 # --- release 构建产物 ---
-release/
+/release/
 !host_brain/release/
 !host_brain/release/__init__.py
 !host_brain/release/release_manifest.py

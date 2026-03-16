@@ -1,0 +1,53 @@
+{
+  "milestone": "M29",
+  "title": "情感体验增强",
+  "date": "2026-03-05",
+  "status": "DONE",
+  "tasks": [
+    {"id": "TASK-0264", "label": "M29-A", "title": "BondEmotionalTexture 情感质感层", "status": "DONE", "file": "host_brain/bond/bond_stage_engine.py"},
+    {"id": "TASK-0265", "label": "M29-B", "title": "EpisodicMemory 情感上下文加权召回", "status": "DONE", "file": "host_brain/memory/episodic.py"},
+    {"id": "TASK-0266", "label": "M29-C", "title": "build_emotion_pulse_slot 动态槽位注入", "status": "DONE", "file": "host_brain/core/context_pack.py"},
+    {"id": "TASK-0267", "label": "M29-D", "title": "主动情感触发器 register/evaluate", "status": "DONE", "file": "host_brain/core/metabolism.py"},
+    {"id": "TASK-0268", "label": "M29-E", "title": "EmotionTimeline 情感时间线重建", "status": "DONE", "file": "host_brain/core/metabolism.py"},
+    {"id": "TASK-0269", "label": "M29-F", "title": "LLM 情感感知生成参数动态调整", "status": "DONE", "file": "host_brain/integrations/llm_gateway.py"},
+    {"id": "TASK-0270", "label": "M29-G", "title": "BondRiftState 裂痕修复机制", "status": "DONE", "file": "host_brain/bond/bond_stage_engine.py"},
+    {"id": "TASK-0271", "label": "M29-H", "title": "compute_emotion_echo 情感回声机制", "status": "DONE", "file": "host_brain/core/metabolism.py"},
+    {"id": "TASK-0272", "label": "M29-I", "title": "EpisodicMemory 三档衰减配置实装", "status": "DONE", "file": "host_brain/memory/episodic.py"},
+    {"id": "TASK-0273", "label": "M29-J", "title": "BondDynamicsWriter payload 语义标准化", "status": "DONE", "file": "host_brain/bond/bond_dynamics.py"},
+    {"id": "TASK-0274", "label": "M29-K", "title": "build_governance_snapshot emotion_ts_ms 时间戳", "status": "DONE", "file": "host_brain/core/metabolism.py"},
+    {"id": "TASK-0275", "label": "M29-L", "title": "validate_context_pack bond_summary 语义校验", "status": "DONE", "file": "host_brain/core/context_pack.py"},
+    {"id": "TASK-0276", "label": "M29-M", "title": "build_fallback_output 情感感知降级", "status": "DONE", "file": "host_brain/core/qa.py"},
+    {"id": "TASK-0277", "label": "M29-N", "title": "NatsumeScheduler 心跳感知情感状态", "status": "DONE", "file": "host_brain/scheduler/scheduler.py"},
+    {"id": "TASK-0278", "label": "M29-O", "title": "HybridFusionStrategy 情感强度加权", "status": "DONE", "file": "host_brain/retrieval/recall_fusion.py"},
+    {"id": "TASK-0279", "label": "M29-P", "title": "ASRTranscriptEvent 用户情感推断字段", "status": "DONE", "file": "edge_client/senses/asr.py"},
+    {"id": "TASK-0280", "label": "M29-Q", "title": "MetricsCollector 情感维度指标", "status": "DONE", "file": "host_brain/obs/metrics.py"},
+    {"id": "TASK-0281", "label": "M29-R", "title": "EdgeEventReporter 情感字段", "status": "DONE", "file": "edge_client/rpc/event_reporter.py"},
+    {"id": "TASK-0282", "label": "M29-S", "title": "M29 发布清单", "status": "DONE", "file": "configs/release/"}
+  ],
+  "test_summary": {
+    "total_passed": 884,
+    "total_failed": 0,
+    "m29_new_tests": 46,
+    "test_pass_rate": "100%"
+  },
+  "key_changes": [
+    "BondEmotionalTexture VAD 情感质感层（平均回复间隔/情感效价/亲密温度）",
+    "EpisodicMemory 情感上下文加权召回（1.3x 加权）",
+    "build_emotion_pulse_slot 动态槽位注入（EmotionVector 降采样）",
+    "主动情感触发器（register_emotion_trigger/evaluate_emotion_triggers）",
+    "EmotionTimeline 情感时间线重建（历史轨迹记录）",
+    "LLM 情感感知生成参数（EXCITED→temperature=0.85，SAD→0.55）",
+    "BondRiftState 裂痕修复机制（CONFLICT/APOLOGY/COMFORT 事件处理）",
+    "compute_emotion_echo 情感回声（Natsume 对用户情感的共鸣响应）",
+    "EpisodicMemory 三档衰减配置（FAST/SLOW/PERMANENT）",
+    "BondDynamicsWriter payload 语义标准化（semantic_label 推断）",
+    "build_governance_snapshot emotion_ts_ms 情感时间戳",
+    "validate_context_pack bond_summary stage/trend 语义校验（中英文枚举）",
+    "build_fallback_output 情感感知降级（SAD/ANGRY/HAPPY 不同文本）",
+    "NatsumeScheduler critical 情感状态下跳过低优先级任务",
+    "HybridFusionStrategy 情感强度加权（emotion_boost_factor=1.2x）",
+    "ASRTranscriptEvent user_emotion_hint/user_emotion_confidence 字段",
+    "MetricsCollector emotion_metrics 情感维度指标（分布/强度/门控统计）",
+    "EdgeEventReporter emotion_tag/emotion_intensity 情感字段"
+  ]
+}

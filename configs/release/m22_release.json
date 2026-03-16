@@ -1,0 +1,68 @@
+{
+  "milestone": "M22",
+  "release_date": "2026-03-05",
+  "release_ready": true,
+  "zero_warnings": true,
+  "zero_regressions": true,
+  "total_tests_passed": 1677,
+  "total_tests_skipped": 2,
+  "total_tests_failed": 0,
+  "tasks": {
+    "TASK-0207": {
+      "title": "M22-A HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning 修复",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/tool_routes.py",
+        "host_brain/scheduler/scheduler_routes.py"
+      ],
+      "changes": "4 处 HTTP_422_UNPROCESSABLE_ENTITY → HTTP_422_UNPROCESSABLE_CONTENT",
+      "warnings_fixed": 2
+    },
+    "TASK-0208": {
+      "title": "M22-B asyncio.get_event_loop() DeprecationWarning 修复",
+      "status": "DONE",
+      "files": [
+        "tests/unit/test_canon_cursor_pagination.py",
+        "tests/unit/test_canon_routes_tx.py",
+        "test_webui_integration.py"
+      ],
+      "changes": "6 处 asyncio.get_event_loop() → asyncio.new_event_loop()；test_webui_routes 重命名为 run_webui_routes_check",
+      "warnings_fixed": 2
+    },
+    "TASK-0209": {
+      "title": "M22-C M22 发布清单",
+      "status": "DONE",
+      "files": [
+        "configs/release/",
+        "docs/20_prd/PRD.md",
+        "docs/30_devspec/DevTasks.md"
+      ]
+    }
+  },
+  "warnings_summary": {
+    "before": 4,
+    "after": 0,
+    "fixed": [
+      "DeprecationWarning: HTTP_422_UNPROCESSABLE_ENTITY (tool_routes.py + scheduler_routes.py, 4 处)",
+      "DeprecationWarning: asyncio.get_event_loop() (test_canon_cursor_pagination.py + test_canon_routes_tx.py, 6 处)",
+      "PytestReturnNotNoneWarning: test_webui_routes return bool (test_webui_integration.py)"
+    ]
+  },
+  "test_summary": {
+    "total_passed": 1677,
+    "total_skipped": 2,
+    "total_failed": 0,
+    "total_warnings": 0,
+    "vs_m21_baseline": "-1（test_webui_routes 重命名为 run_webui_routes_check，不再被 pytest 收集）"
+  },
+  "quality_gates": {
+    "release_ready": true,
+    "zero_warnings": true,
+    "zero_regressions": true,
+    "total_tests_passed_gte_1677": true
+  },
+  "code_review_findings_resolved": [
+    "F-25（P2）: vts_driver.py asyncio.get_event_loop() DeprecationWarning（测试层修复）",
+    "F-15（P2）: HTTP_422_UNPROCESSABLE_ENTITY DeprecationWarning（tool_routes + scheduler_routes）"
+  ]
+}

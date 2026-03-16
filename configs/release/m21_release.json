@@ -1,0 +1,96 @@
+{
+  "milestone": "M21",
+  "release_date": "2026-03-05",
+  "release_ready": true,
+  "all_p1_fixed": true,
+  "all_p2_fixed": true,
+  "canon_vector_projection_traced": true,
+  "zero_regressions": true,
+  "total_tests_passed": 1678,
+  "total_tests_skipped": 2,
+  "total_tests_failed": 0,
+  "tasks": {
+    "TASK-0203": {
+      "title": "M21-A release_manifest.py _load_model_plane_meta() 优雅降级修复（P1）",
+      "status": "DONE",
+      "files": [
+        "host_brain/release/release_manifest.py",
+        "configs/model_plane/model_profiles.yaml",
+        "configs/model_plane/node_registry.yaml",
+        "tests/contract/test_model_plane_release_contract.py"
+      ],
+      "tests": "T-REL-MANIFEST-01~05 (5/5 passed); T-ORCH-02/04/05 (4/4 passed); T-Drill-02 (1/1 passed)"
+    },
+    "TASK-0204": {
+      "title": "M21-B P2 代码质量修复（panel_page 类型注解 + Web UI contract CSR 适配）",
+      "status": "DONE",
+      "files": [
+        "host_brain/app/fastapi_app.py",
+        "tests/contract/test_web_ui_contract.py"
+      ],
+      "tests": "T-QUALITY-PANEL-01 (1/1 passed); T-WEBUI-CONTRACT-01 (1/1 passed)"
+    },
+    "TASK-0205": {
+      "title": "M21-C Canon 向量投影模块需求追踪补写 + contract 测试补充",
+      "status": "DONE",
+      "files": [
+        "tests/contract/test_canon_vector_projection_contract.py",
+        "docs/60_trace/requirements_trace.md"
+      ],
+      "tests": "T-CVP-CONTRACT-01~06 (20/20 passed)"
+    },
+    "TASK-0206": {
+      "title": "M21-D M21 发布清单",
+      "status": "DONE",
+      "files": [
+        "configs/release/",
+        "docs/20_prd/PRD.md",
+        "docs/60_trace/requirements_trace.md"
+      ],
+      "tests": "T-REL-01（复用）"
+    }
+  },
+  "fixed_issues": {
+    "P1": [
+      {
+        "issue": "model_profiles.yaml 缺失导致 _load_model_plane_meta() 抛出 FileNotFoundError",
+        "fix": "重建 configs/model_plane/model_profiles.yaml + node_registry.yaml；release_manifest.py 添加 logging import + logger 定义",
+        "affected_tests": 9
+      }
+    ],
+    "P2": [
+      {
+        "issue": "panel_page 缺少返回类型注解",
+        "fix": "fastapi_app.py panel_page 函数签名添加 -> RedirectResponse 返回类型注解",
+        "affected_tests": 1
+      },
+      {
+        "issue": "test_web_ui_contract.py 假设 SSR 内嵌内容（request_id/searchInput）",
+        "fix": "改为检测 SPA 特征（static/monitor/index.html 存在性 + <title> 标签）",
+        "affected_tests": 1
+      }
+    ]
+  },
+  "new_modules": [
+    "tests/contract/test_canon_vector_projection_contract.py",
+    "configs/model_plane/model_profiles.yaml",
+    "configs/model_plane/node_registry.yaml"
+  ],
+  "test_summary": {
+    "new_tests": 20,
+    "p1_tests_recovered": 9,
+    "p2_tests_recovered": 2,
+    "total_passed": 1678,
+    "total_skipped": 2,
+    "total_failed": 0,
+    "vs_m18_baseline": "+101"
+  },
+  "quality_gates": {
+    "release_ready": true,
+    "all_p1_fixed": true,
+    "all_p2_fixed": true,
+    "canon_vector_projection_traced": true,
+    "total_tests_passed_gte_1661": true,
+    "zero_regressions": true
+  }
+}

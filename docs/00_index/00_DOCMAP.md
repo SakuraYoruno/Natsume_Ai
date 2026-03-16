@@ -80,19 +80,19 @@
   用途：风险登记册，记录已识别风险、缓解措施与状态。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/test_report_2026-03-05.md
+- docs/45_testing/test_reports/test_report_2026-03-05.md
   用途：全量测试报告（2026-03-05）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/EDGE_OPTIMIZATION_AND_TEST_REPORT_2026-03-04.md
+- docs/45_testing/test_reports/EDGE_OPTIMIZATION_AND_TEST_REPORT_2026-03-04.md
   用途：Edge 优化与测试报告（2026-03-04）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/UI_UPGRADE_CHANGELOG.md
+- docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md
+- docs/50_release/changelog/MODEL_LOCAL_CLOUD_CHANGELOG_2026-03-05.md
   用途：模型本地/云端切换变更日志（2026-03-05）。
   读者：MASTER、Project（文档代理）。
 
@@ -104,21 +104,21 @@
   用途：Canon 向量投影分析（2026-03-04）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md
-  docs/60_trace/HOST_CHAT_REAL_CHAIN_JA_RENDER_VERIFY_2026-03-05.md
-  docs/60_trace/HOST_CHAT_REAL_CHAIN_TRACE_req_*.md
-  docs/60_trace/HOST_FULL_CHAIN_REAL_RUN_2026-03-05.md
-  docs/60_trace/HOST_REAL_RUN_TEST_2026-03-04.md
+- docs/45_testing/test_reports/host_chat/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md
+  docs/45_testing/test_reports/host_chat/HOST_CHAT_REAL_CHAIN_JA_RENDER_VERIFY_2026-03-05.md
+  docs/45_testing/test_reports/host_chat/HOST_CHAT_REAL_CHAIN_TRACE_req_*.md
+  docs/45_testing/test_reports/host_chat/HOST_FULL_CHAIN_REAL_RUN_2026-03-05.md
+  docs/45_testing/test_reports/host_chat/HOST_REAL_RUN_TEST_2026-03-04.md
   用途：真实链路运行追踪报告（按日期/请求ID归档）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/HOST_CHAT_*_req_*.json
-  docs/60_trace/CANON_STYLE_SYNC_*.json
-  docs/60_trace/canon_sync_summary_*.json
+- artifacts/trace/HOST_CHAT_*_req_*.json
+  artifacts/trace/CANON_STYLE_SYNC_*.json
+  artifacts/trace/canon_sync_summary_*.json
   用途：运行时原始 JSON 追踪数据（模型控制、检索事件、Canon 同步等）。
   读者：MASTER（调试/回放用）。
 
-- docs/60_trace/audit_report_20260311.md
+- docs/35_quality/audits/audit_report_20260311.md
   用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
   读者：MASTER、Project（文档代理）。
 
@@ -126,11 +126,11 @@
   用途：Natsume AI 系统数据流全景报告（2026-03-11，持续更新）。覆盖双端通信、各功能/模块数据流、Agent 治理与路由、Graph 编排；含严格代码审计与修复记录（§13/§16）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/trial_run_reports/
+- artifacts/trial_run_reports/
   用途：自动化试运行报告（T1-x 系列，按时间戳归档）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/code_reviews/
+- docs/35_quality/code_reviews/
   用途：代码审查报告归档目录（含全量审查报告与各里程碑专项审查报告）。
   命名规范：
     - 全量审查：full_code_review_report_YYYY-MM-DD[-vN|-mXX].md
@@ -185,16 +185,20 @@
   读者：MASTER、实现层（按 DevSpec 与运行脚本约束实现与回归）。
 
 11）发布目录（Release）
-- docs/50_release/mXX_release.json
+- configs/release/mXX_release.json
   用途：各里程碑发布清单（JSON 格式），记录发布版本、变更摘要、测试通过情况。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_release/release_catalog.json
+- configs/release/release_catalog.json
   用途：发布资产目录（M0~M3 里程碑发布清单，含资产路径、依赖服务、配置快照引用）。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_release/release_rollback_map.json
+- configs/release/release_rollback_map.json
   用途：发布回滚映射表，记录各里程碑的回滚目标版本与回滚步骤引用。
+  读者：MASTER、Project（文档代理）。
+
+- artifacts/release/reports/
+  用途：发布报告（T1-x 系列，按时间戳归档）。
   读者：MASTER、Project（文档代理）。
 
 ---
@@ -211,10 +215,10 @@
   - `标题：...`
 
 附：文档归类规则（v1.2 新增）
-- 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/60_trace/code_reviews/
+- 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/35_quality/code_reviews/
 - 测试报告、运行追踪报告、变更日志、审计报告、数据流报告 → docs/60_trace/
 - 架构全景、架构分析、理论推导、设计方案 → docs/15_theory/
 - 配置指南、运行手册、项目协作文档、Flow 资产索引 → docs/50_project/
-- 发布清单（JSON）、发布目录、回滚映射 → docs/50_release/
+- 发布清单（JSON）、发布目录、回滚映射 → configs/release/
 - 开发规范、任务清单、模型平面 → docs/30_devspec/
 - 任务看板、TODO 追踪 → docs/40_agents/

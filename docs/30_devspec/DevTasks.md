@@ -2422,7 +2422,7 @@ TASK-XXXX 标题
 - 关联需求：FR-TOOL-001/002/003；FR-MEM-004/005；FR-SKILL-001/002。
 
 ### TASK-0161 M12 发布清单
-- 状态：DONE（2026-03-04，scripts/generate_m12_release.py NEW；docs/50_release/m12_release.json 生成；11 核心文件 0 缺失；1240 passed；release_ready=true）
+- 状态：DONE（2026-03-04，scripts/generate_m12_release.py NEW；configs/release/ 生成；11 核心文件 0 缺失；1240 passed；release_ready=true）
 - 任务描述：生成 `m12_release.json`（含 M12-A~D 核心文件 hash + 测试通过数）。
 - 输入：TASK-0155~0160 全部 DONE。
 - 输出：`host_brain/release/manifests/m12_release.json`。
@@ -2475,7 +2475,7 @@ TASK-XXXX 标题
 - 状态：DONE（2026-03-04，m13_release.json NEW）
 - 任务描述：生成 M13 发布清单，记录所有里程碑状态、核心文件 SHA-256 hash、测试通过数、质量门禁。
 - 输入：M13-A/B/C 全部完成；全量测试 1342 passed。
-- 输出：`docs/50_release/m13_release.json`（4 个里程碑 DONE；4 个核心文件 hash；102 个 M13 测试通过；1342 全量通过）。
+- 输出：`configs/release/`（4 个里程碑 DONE；4 个核心文件 hash；102 个 M13 测试通过；1342 全量通过）。
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
 - 关联需求/测试：M13-A/B/C/D 全部 DONE。
 
@@ -2543,7 +2543,7 @@ TASK-XXXX 标题
 - 状态：DONE（2026-03-04，m14_release.json NEW）
 - 任务描述：生成 M14 发布清单（m14_release.json），记录 M14-A~C 核心文件 hash + 测试通过数 + 质量门禁。
 - 输入：TASK-0166~0169 全部 DONE。
-- 输出：`docs/50_release/m14_release.json`。
+- 输出：`configs/release/`。
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true。
 - 关联需求：NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001。
 
@@ -2613,7 +2613,7 @@ TASK-XXXX 标题
 - 状态：DONE（2026-03-04，m15_release.json NEW）
 - 任务描述：生成 M15 发布清单（m15_release.json），记录 M15-A~E 核心文件 hash + 测试通过数 + 质量门禁。
 - 输入：TASK-0171~0176 全部 DONE。
-- 输出：`docs/50_release/m15_release.json`。
+- 输出：`configs/release/`。
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1445。
 - 关联需求：NFR-REL-001；FR-VOICE-001~005。
 
@@ -2656,7 +2656,7 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：生成 M16 发布清单（m16_release.json），记录 M16-A~C 核心文件 hash + 测试通过数 + 质量门禁。
 - 输入：TASK-0178~0180 全部 DONE。
-- 输出：`docs/50_release/m16_release.json`。
+- 输出：`configs/release/`。
 - 验收标准：release_ready=true；all_core_files_present=true；zero_regressions=true；total_tests_passed ≥ 1549。
 - 关联需求：NFR-REL-001；FR-CANON-GOV-001；FR-MEM-PAGE-001；FR-SCHED-PERSIST-001。
 
@@ -2794,7 +2794,7 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：生成 M17 发布清单（m17_release.json），记录 M17-A~E 核心文件清单 + 页面功能验收状态 + 质量门禁。
 - 输入：TASK-0182~0186 全部 DONE。
-- 输出：`docs/50_release/m17_release.json`。
+- 输出：`configs/release/`。
 - 验收标准：release_ready=true；all_pages_functional=true；zero_js_errors=true；design_review_passed=true。
 - 关联需求：FR-OBS-003~007；NFR-MAINT-001。
 
@@ -2881,7 +2881,7 @@ TASK-XXXX 标题
 - 任务描述：生成 M18 发布清单（m18_release.json），记录 M18-A~D 核心文件 hash + 测试通过数 + 质量门禁；同时更新 UI_UPGRADE_CHANGELOG.md 记录 v3.0 变更。
 - 输入：TASK-0188~0191 全部 DONE；TASK-0182~0186 全部 DONE（M17 前端切换真实 API 验证）。
 - 输出：
-  - `docs/50_release/m18_release.json`；
+  - `configs/release/`；
   - `docs/50_project/UI_UPGRADE_CHANGELOG.md`（v3.0 条目）。
 - 验收标准：release_ready=true；all_api_endpoints_tested=true；frontend_api_integration_verified=true；zero_regressions=true；total_tests_passed ≥ 1575。
 - 关联需求：FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001。
@@ -3012,7 +3012,7 @@ TASK-XXXX 标题
 - 任务描述：生成 M19 发布清单（m19_release.json），记录 M19-A~F 修复文件清单 + 测试通过数 + 质量门禁；同步更新代码审查报告（full_code_review_report_2026-03-04-m17m18.md）中各修复项状态为 FIXED；更新 risk_registry.md 中对应风险条目状态为 MITIGATED。
 - 输入：TASK-0193~0198 全部 DONE。
 - 输出：
-  - `docs/50_release/m19_release.json`；
+  - `configs/release/`；
   - `docs/40_agents/full_code_review_report_2026-03-04-m17m18.md`（修复项状态更新）；
   - `docs/60_trace/risk_registry.md`（P0/P1 风险条目状态更新为 MITIGATED）。
 - 验收标准：
@@ -3121,7 +3121,7 @@ TASK-XXXX 标题
   - `tests/contract/test_model_plane_release_contract.py`（4 个失败用例）；
   - `tests/contract/test_orchestration_graph_contract.py`（4 个失败用例）；
   - `tests/e2e/test_production_drill_e2e.py`（1 个失败用例）；
-  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 A/B/E2E 根因分析）。
+  - 测试报告 `docs/45_testing/test_reports/test_report_2026-03-05.md`（失败组 A/B/E2E 根因分析）。
 - 输出：
   - `host_brain/app/release_manifest.py`：`_load_model_plane_meta()` 新增 `if not profiles_path.exists(): logger.warning(...); return None` 分支；调用方 `build_checklist()` 对 `None` 返回值做空值保护（跳过 model_plane 条目或填充 `status=DEGRADED`）；
   - `tests/contract/test_model_plane_release_contract.py`：更新 `test_model_plane_version_parseable` 断言，允许文件不存在时返回 `None`（而非断言 `profiles_path.exists()`）；
@@ -3146,7 +3146,7 @@ TASK-XXXX 标题
   - `host_brain/app/fastapi_app.py`（`panel_page` 函数现有实现）；
   - `tests/contract/test_quality_contract.py`（`test_fastapi_panel_page_has_return_annotation` 失败用例）；
   - `tests/contract/test_web_ui_contract.py`（`test_panel_contains_key_elements` 失败用例）；
-  - 测试报告 `docs/60_trace/test_report_2026-03-05.md`（失败组 C/D 根因分析）。
+  - 测试报告 `docs/45_testing/test_reports/test_report_2026-03-05.md`（失败组 C/D 根因分析）。
 - 输出：
   - `host_brain/app/fastapi_app.py`：`panel_page` 函数签名添加 `-> HTMLResponse` 返回类型注解；
   - `tests/contract/test_web_ui_contract.py`：`test_panel_contains_key_elements` 改为检测 `<div id="root">` 存在性（SPA 挂载点）或检测 `static/monitor/index.html` 文件存在性 + `<title>` 标签；移除对 `request_id` / `searchInput` 的 SSR 假设断言。
@@ -3195,7 +3195,7 @@ TASK-XXXX 标题
 - 任务描述：在 TASK-0203~0205 全部 DONE 后，生成 M21 发布清单（`m21_release.json`），记录 M21-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M21 里程碑状态为 DONE；更新 `requirements_trace.md` M21 小节状态。
 - 输入：TASK-0203~0205 全部 DONE；全量测试 ≥1661 passed，0 failed。
 - 输出：
-  - `docs/50_release/m21_release.json`（新增）：含 `release_ready`、`all_p1_fixed`、`all_p2_fixed`、`canon_vector_projection_traced`、`total_tests_passed`、`zero_regressions` 字段；
+  - `configs/release/`（新增）：含 `release_ready`、`all_p1_fixed`、`all_p2_fixed`、`canon_vector_projection_traced`、`total_tests_passed`、`zero_regressions` 字段；
   - `docs/20_prd/PRD.md`：M21 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：M21 小节 R-156~R-157 状态更新为 DONE。
 - 验收标准：
@@ -3206,7 +3206,7 @@ TASK-XXXX 标题
   - `total_tests_passed ≥ 1661`；
   - `zero_regressions=true`。
 - 涉及文件路径：
-  - `docs/50_release/m21_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`；
   - `docs/60_trace/requirements_trace.md`。
 - 关联需求：NFR-REL-001；NFR-MAINT-001。
@@ -3242,10 +3242,10 @@ TASK-XXXX 标题
 - 任务描述：TASK-0207~0208 全部 DONE 后，生成 M22 发布清单（`m22_release.json`），记录 M22-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M22 里程碑状态为 DONE。
 - 输入：TASK-0207~0208 全部 DONE；全量测试 1677 passed，0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m22_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M22 里程碑条目状态更新为 DONE。
 - 验收标准：`release_ready=true`；`zero_warnings=true`；`total_tests_passed=1677`；`zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m22_release.json`；`docs/20_prd/PRD.md`。
+- 涉及文件路径：`configs/release/`；`docs/20_prd/PRD.md`。
 - 关联需求：NFR-REL-001；NFR-MAINT-001。
 
 
@@ -3257,7 +3257,7 @@ TASK-XXXX 标题
 - 输入：
   - `host_brain/retrieval/full_text_searcher.py`（`FullTextSearcher.search()` 和写入逻辑）；
   - `host_brain/audit/migrations/0021_episodic_fts5.sql`（FTS5 表定义，tokenizer=unicode61）；
-  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §10.4（P2-FTS 问题描述）；
+  - 试运行报告 `docs/45_testing/test_reports/test_report_2026-03-05.md` §10.4（P2-FTS 问题描述）；
   - `tests/unit/test_recall_fusion_hybrid.py`（现有 19 个混合检索单元测试）。
 - 输出：
   - `host_brain/retrieval/full_text_searcher.py`：
@@ -3288,7 +3288,7 @@ TASK-XXXX 标题
   - `host_brain/app/config.py`（`build_edge_transport_probe_statuses` 定义位置）；
   - `host_brain/app/fastapi_app.py`（`/health` 端点，当前只调用 `build_host_runtime_statuses`）；
   - `host_brain/obs/agent_health_check.py`（`AgentHealthCheck` 心跳检测实现）；
-  - 试运行报告 `docs/60_trace/test_report_2026-03-05.md` §D.3（遗留问题描述）；
+  - 试运行报告 `docs/45_testing/test_reports/test_report_2026-03-05.md` §D.3（遗留问题描述）；
   - `tests/unit/test_agent_health_check.py`（现有 19 个心跳检测单元测试）。
 - 输出：
   - `host_brain/app/fastapi_app.py`：
@@ -3323,7 +3323,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0210~0211 全部 DONE 后，生成 M23 发布清单（`m23_release.json`），记录 M23-A~B 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M23 里程碑状态为 DONE；更新 `requirements_trace.md` M23 小节状态。
 - 输入：TASK-0210~0211 全部 DONE；全量测试 ≥1688 passed（1677 + 11 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m23_release.json`（新增）：含 `release_ready`、`fts5_chinese_fixed`、`edge_probe_integrated`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
+  - `configs/release/`（新增）：含 `release_ready`、`fts5_chinese_fixed`、`edge_probe_integrated`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
   - `docs/20_prd/PRD.md`：M23 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M23 小节（R-158~R-159）。
 - 验收标准：
@@ -3334,7 +3334,7 @@ TASK-XXXX 标题
   - `zero_regressions=true`；
   - `zero_warnings=true`。
 - 涉及文件路径：
-  - `docs/50_release/m23_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`；
   - `docs/60_trace/requirements_trace.md`。
 - 关联需求：NFR-REL-001；NFR-MAINT-001；FR-MEM-003；FR-OBS-001。
@@ -3506,7 +3506,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0213~0215 全部 DONE 后，生成 M24 发布清单（`m24_release.json`），记录 M24-A~C 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M24 里程碑状态为 DONE；更新 `requirements_trace.md` M24 小节状态（R-160~R-165）。
 - 输入：TASK-0213~0215 全部 DONE；全量测试 ≥1776 passed（1731 + 45 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m24_release.json`（新增）：含 `release_ready`、`llm_gateway_integrated`、`vts_drive_complete`、`wechat_channel_complete`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
+  - `configs/release/`（新增）：含 `release_ready`、`llm_gateway_integrated`、`vts_drive_complete`、`wechat_channel_complete`、`total_tests_passed`、`zero_regressions`、`zero_warnings` 字段；
   - `docs/20_prd/PRD.md`：M24 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M24 小节（R-160~R-165）。
 - 验收标准：
@@ -3518,7 +3518,7 @@ TASK-XXXX 标题
   - `zero_regressions=true`；
   - `zero_warnings=true`。
 - 涉及文件路径：
-  - `docs/50_release/m24_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`；
   - `docs/60_trace/requirements_trace.md`。
 - 关联需求：NFR-REL-001；NFR-MAINT-001；FR-LLM-GW-001~003；FR-VTS-DRIVE-001~003；FR-WECHAT-001~003。
@@ -3615,7 +3615,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0217~0220 全部 DONE 后，生成 M25 发布清单（`m25_release.json`），记录 M25-A~D 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M25 里程碑状态为 DONE；更新 `requirements_trace.md` M25 小节状态（R-163~R-166）；生成代码审查报告 `full_code_review_report_2026-03-05-m25.md`。
 - 输入：TASK-0217~0220 全部 DONE；全量测试 ≥1794 passed（1782 + 12 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m25_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M25 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M25 小节（R-163~R-166）；
   - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
@@ -3629,7 +3629,7 @@ TASK-XXXX 标题
   - `zero_regressions=true`；
   - `zero_warnings=true`。
 - 涉及文件路径：
-  - `docs/50_release/m25_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`；
   - `docs/60_trace/requirements_trace.md`；
   - `docs/40_agents/full_code_review_report_2026-03-05-m25.md`（新增）。
@@ -3871,7 +3871,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0222~0230 全部 DONE 后，生成 M26 发布清单（`m26_release.json`），记录 M26-A~I 修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M26 里程碑状态为 DONE；更新 `requirements_trace.md` M26 小节（R-167~R-175）；生成代码审查报告 `full_code_review_report_2026-03-05-m26.md`。
 - 输入：TASK-0222~0230 全部 DONE；全量测试 ≥1835 passed（1802 + 33 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m26_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M26 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M26 小节（R-167~R-175）；
   - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
@@ -3889,7 +3889,7 @@ TASK-XXXX 标题
   - `zero_regressions=true`；
   - `zero_warnings=true`。
 - 涉及文件路径：
-  - `docs/50_release/m26_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`；
   - `docs/60_trace/requirements_trace.md`；
   - `docs/40_agents/full_code_review_report_2026-03-05-m26.md`（新增）。
@@ -4071,7 +4071,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0232~0242 全部 DONE 后，生成 M27 发布清单，记录 P0 情感链路修复文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M27 里程碑状态为 DONE；生成代码审查报告。
 - 输入：TASK-0232~0242 全部 DONE；全量测试 ≥1857 passed（1835 + 22 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m27_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M27 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M27 小节；
   - `docs/40_agents/full_code_review_report_2026-03-05-m27.md`（新增）。
@@ -4083,7 +4083,7 @@ TASK-XXXX 标题
   - `recall_emotion_routed=true`（情感记忆分池召回已实现）；
   - `total_tests_passed ≥ 1857`；
   - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m27_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m27.md`。
+- 涉及文件路径：`configs/release/`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m27.md`。
 - 关联需求：NFR-REL-001；FR-GOV-EMOTION-001~003；FR-MEM-EMOTION-001；FR-BOND-EMOTION-001；FR-BOND-SUMMARY-001；FR-RECALL-EMOTION-001。
 
 ---
@@ -4384,7 +4384,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0244~0262 全部 DONE 后，生成 M28 发布清单，记录 P1 情感架构深化文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M28 里程碑状态为 DONE；生成代码审查报告。
 - 输入：TASK-0244~0262 全部 DONE；全量测试 ≥1895 passed（1857 + 38 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m28_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M28 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M28 小节；
   - `docs/40_agents/full_code_review_report_2026-03-05-m28.md`（新增）。
@@ -4397,7 +4397,7 @@ TASK-XXXX 标题
   - `tts_intensity_fixed=true`（TTS 强度参数断路已修复）；
   - `total_tests_passed ≥ 1895`；
   - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m28_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m28.md`。
+- 涉及文件路径：`configs/release/`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m28.md`。
 - 关联需求：NFR-REL-001；FR-EMOTION-CONTINUUM-001；FR-GOV-R8-001；FR-BOND-GRADE-001；FR-VTS-EXPRESSION-FULL-001；FR-TTS-INTENSITY-001。
 
 ---
@@ -4751,7 +4751,7 @@ TASK-XXXX 标题
 - 任务描述：TASK-0264~0281 全部 DONE 后，生成 M29 发布清单，记录 P2 情感体验增强文件清单 + 测试通过数 + 质量门禁；同步更新 PRD.md M29 里程碑状态为 DONE；生成代码审查报告。
 - 输入：TASK-0264~0281 全部 DONE；全量测试 ≥1941 passed（1895 + 46 新增），0 failed，0 warnings。
 - 输出：
-  - `docs/50_release/m29_release.json`（新增）；
+  - `configs/release/`（新增）；
   - `docs/20_prd/PRD.md`：M29 里程碑条目状态更新为 DONE；
   - `docs/60_trace/requirements_trace.md`：新增 M29 小节；
   - `docs/40_agents/full_code_review_report_2026-03-05-m29.md`（新增）。
@@ -4764,7 +4764,7 @@ TASK-XXXX 标题
   - `emotion_timeline_implemented=true`（情感时间线重建已实现）；
   - `total_tests_passed ≥ 1941`；
   - `zero_regressions=true`。
-- 涉及文件路径：`docs/50_release/m29_release.json`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m29.md`。
+- 涉及文件路径：`configs/release/`；`docs/20_prd/PRD.md`；`docs/60_trace/requirements_trace.md`；`docs/40_agents/full_code_review_report_2026-03-05-m29.md`。
 - 关联需求：NFR-REL-001；FR-BOND-TEXTURE-001；FR-EMOTION-ECHO-001；FR-BOND-RIFT-001；FR-PROACTIVE-EMOTION-001；FR-EMOTIONAL-TIMELINE-001。
 
 ---
@@ -7365,7 +7365,7 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：TASK-0431~0434 全部 DONE 后，生成 M43 代码审查报告，记录启动编排收口的实现情况。
 - 输入：TASK-0431~0434 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
+- 输出：`docs/35_quality/code_reviews/code_review_m43_2026-03-06.md`（新增）。
 - 验收标准：
   - 报告包含 TASK-0431~0434 全部 4 个任务的变更摘要；
   - 新增测试 ≥ 22 个（T-MIG-VER-01~04 + T-MIG-GUARD-01~06 + T-SNAP-01~06 + T-REPLAY-01~06），全部通过；
@@ -7374,7 +7374,7 @@ TASK-XXXX 标题
   - `ReplayReport` 完整落地；
   - 迁移目录版本连续性修复完整落地；
   - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m43_2026-03-06.md`（新增）。
+- 涉及文件路径：`docs/35_quality/code_reviews/code_review_m43_2026-03-06.md`（新增）。
 - 关联需求：DevSpec §7~9；FR-OPS-001；FR-OPS-002；FR-AUDIT-001。
 
 ---
@@ -7459,7 +7459,7 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：TASK-0436~0438 全部 DONE 后，生成 M44 代码审查报告，记录分层治理运行时接入的实现情况。
 - 输入：TASK-0436~0438 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
+- 输出：`docs/35_quality/code_reviews/code_review_m44_2026-03-06.md`（新增）。
 - 验收标准：
   - 报告包含 TASK-0436~0438 全部 3 个任务的变更摘要；
   - 新增测试 ≥ 10 个（T-TG-RT-01~04 + T-TG-BUILTIN-01~04 + T-TG-RESP-01~02），全部通过；
@@ -7467,7 +7467,7 @@ TASK-XXXX 标题
   - `build_builtin_skill_registry()` 完整落地（4 个内置 Skill）；
   - `ChatResponse.approval_tier` 完整落地；
   - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m44_2026-03-06.md`（新增）。
+- 涉及文件路径：`docs/35_quality/code_reviews/code_review_m44_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §10；DevSpec §6；FR-GOV-001；FR-SKILL-001。
 
 
@@ -7565,10 +7565,10 @@ TASK-XXXX 标题
 
 ### TASK-0444 M45-E：M45 代码审查报告
 
-- 状态：DONE（2026-03-06，审查报告 `docs/60_trace/code_reviews/code_review_m45_2026-03-06.md` 已生成）
+- 状态：DONE（2026-03-06，审查报告 `docs/35_quality/code_reviews/code_review_m45_2026-03-06.md` 已生成）
 - 任务描述：TASK-0440~0443 全部 DONE 后，生成 M45 代码审查报告，记录 Edge 运行时装配收口的实现情况。
 - 输入：TASK-0440~0443 全部 DONE；全量测试 0 failed。
-- 输出：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
+- 输出：`docs/35_quality/code_reviews/code_review_m45_2026-03-06.md`（新增）。
 - 验收标准：
   - 报告包含 TASK-0440~0443 全部 4 个任务的变更摘要；
   - 新增测试 ≥ 13 个，全部通过；
@@ -7576,5 +7576,5 @@ TASK-XXXX 标题
   - `edge_client/runtime/health.py` 完整落地（`collect_health` + 聚合规则）；
   - `edge_client/__main__.py` 修复完成，`python -m edge_client --help` 无报错；
   - 全量测试无回归。
-- 涉及文件路径：`docs/60_trace/code_reviews/code_review_m45_2026-03-06.md`（新增）。
+- 涉及文件路径：`docs/35_quality/code_reviews/code_review_m45_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001；FR-EDGE-002。

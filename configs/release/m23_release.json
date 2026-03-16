@@ -1,0 +1,82 @@
+{
+  "milestone": "M23",
+  "release_date": "2026-03-05",
+  "base_milestone": "M22",
+  "release_ready": true,
+  "fts5_chinese_fixed": true,
+  "edge_probe_integrated": true,
+  "total_tests_passed": 1731,
+  "total_tests_skipped": 10,
+  "total_tests_failed": 0,
+  "zero_regressions": true,
+  "zero_warnings": true,
+  "net_new_tests": 54,
+  "tasks": [
+    {
+      "task_id": "TASK-0210",
+      "name": "M23-A FTS5 中文词组检索修复",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/retrieval/recall_fusion.py",
+        "tests/unit/test_full_text_searcher.py"
+      ],
+      "new_tests": 21,
+      "description": "新增 _split_chinese_query 静态方法，对中文字符进行字符级分割；修复 index_memory 写入时同步分割；修复 search 查询时同步分割；修复 fts_score 单条命中归一化 bug（score_range=0 时返回 1.0）"
+    },
+    {
+      "task_id": "TASK-0211",
+      "name": "M23-B Edge 心跳探针集成",
+      "status": "DONE",
+      "files_changed": [
+        "host_brain/app/fastapi_app.py",
+        "host_brain/scheduler/scheduler.py",
+        "tests/unit/test_agent_health_check.py",
+        "tests/contract/test_health_endpoint_contract.py"
+      ],
+      "new_tests": 7,
+      "description": "fastapi_app.py /health 端点集成 build_edge_transport_probe_statuses；scheduler.py 新增 _check_edge_transport_probes 和 _log_edge_probe_alert 方法；_run_agent_health_check 在 LLM 心跳检查后执行 edge 探针检查；build_edge_transport_probe_statuses 不再是孤立的未调用函数"
+    },
+    {
+      "task_id": "TASK-0212",
+      "name": "M23-C 发布清单",
+      "status": "DONE",
+      "files_changed": [
+        "configs/release/",
+        "docs/20_prd/PRD.md",
+        "docs/60_trace/requirements_trace.md"
+      ],
+      "new_tests": 0,
+      "description": "生成 M23 发布清单，更新 PRD 和 requirements_trace"
+    }
+  ],
+  "quality_gates": {
+    "all_m23a_tests_pass": true,
+    "all_m23b_tests_pass": true,
+    "fts5_chinese_word_query_hits": true,
+    "fts5_score_positive_on_hit": true,
+    "edge_probe_called_in_health_endpoint": true,
+    "edge_probe_alert_written_on_down": true,
+    "edge_probe_exception_no_crash": true,
+    "zero_regressions": true,
+    "zero_warnings": true
+  },
+  "test_summary": {
+    "unit": {"passed": 540, "failed": 0, "skipped": 0},
+    "contract": {"passed": 988, "failed": 0, "skipped": 0},
+    "integration": {"passed": 111, "failed": 0, "skipped": 2},
+    "e2e": {"passed": 92, "failed": 0, "skipped": 8},
+    "total": {"passed": 1731, "failed": 0, "skipped": 10}
+  },
+  "issues_resolved": [
+    {
+      "id": "P2-FTS",
+      "description": "FTS5 unicode61 tokenizer 无法匹配中文词组，混合检索退化为纯向量",
+      "resolution": "字符级分割（_split_chinese_query），写入和查询时均使用空格分隔的单字序列"
+    },
+    {
+      "id": "ORPHAN-FUNC",
+      "description": "build_edge_transport_probe_statuses 定义但未被调用，edge 运行时宕机 host 侧无法感知",
+      "resolution": "集成到 /health 端点和 AgentHealthCheck 心跳任务中"
+    }
+  ]
+}

@@ -411,7 +411,7 @@ def main() -> int:
     parser.add_argument("--chat-message", default="おはよう、今日もよろしくね。短く返事して。", help="Chat message")
     parser.add_argument("--sse-timeout-s", type=float, default=150.0, help="SSE timeout seconds")
     parser.add_argument("--http-timeout-s", type=float, default=10.0, help="HTTP timeout seconds")
-    parser.add_argument("--report-dir", default="docs/50_release/reports", help="Report output directory")
+    parser.add_argument("--report-dir", default="artifacts/release/reports", help="Report output directory")
     parser.add_argument("--allow-degraded-tts", action="store_true", help="Treat TTS DEGRADED as pass")
     parser.add_argument("--allow-degraded-vts", action="store_true", help="Treat VTS DEGRADED as pass")
     args = parser.parse_args()

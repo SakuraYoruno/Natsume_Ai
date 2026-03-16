@@ -109,7 +109,7 @@ python scripts/runtime/sync_canon_vector_index.py `
   --env-file .env `
   --backend http `
   --collection canon `
-  --summary-out docs/60_trace/canon_sync_summary_2026-03-04.json
+  --summary-out artifacts/trace/canon_sync_summary_2026-03-04.json
 ```
 
 Result:
@@ -118,7 +118,7 @@ Result:
 - `vector_dim=384`
 - `docs_synced=4`
 - `collection_count=4`
-- summary artifact: `docs/60_trace/canon_sync_summary_2026-03-04.json`
+- summary artifact: `artifacts/trace/canon_sync_summary_2026-03-04.json`
 
 ### Retrieval-side verification (direct Chroma read)
 

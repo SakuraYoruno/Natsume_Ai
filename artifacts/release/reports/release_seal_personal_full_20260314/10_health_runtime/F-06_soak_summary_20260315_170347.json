@@ -1,0 +1,9 @@
+{
+  "version": "f06_soak.v1",
+  "started_at_utc": "2026-03-15T09:03:47.385107+00:00",
+  "completed_at_utc": "2026-03-15T15:06:40.989033+00:00",
+  "sample_count": 180,
+  "ok_count": 145,
+  "error_count": 35,
+  "jsonl_path": "artifacts/release/reports/release_seal_personal_full_20260314/10_health_runtime/F-06_soak_samples_20260315_170347.jsonl"
+}

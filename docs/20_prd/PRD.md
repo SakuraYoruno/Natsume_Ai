@@ -898,7 +898,7 @@ M13-D M13 发布清单：m13_release.json（4 核心文件 hash；102 M13 测试
 - PRD.md：M13-A~D 状态更新为 DONE；本收口条目填写完成
 - DevTasks.md：TASK-0162~0165 状态均为 DONE；M14 任务卡（TASK-0166~0170）已写入
 - requirements_trace.md：R-121~R-130 已补写（M12 R-121~R-125；M13 R-126~R-130）
-- docs/50_release/m13_release.json：已生成（release_ready=true）
+- configs/release/m13_release.json：已生成（release_ready=true）
 
 M14 通道 + 外显 + MCP 治理收口：
 M14-A 微信通道 I/O 事件化：FR-CHANNEL-001（WeChat inbound/outbound 建模为确定性通道事件 + 审计串联 + thread_key/request_id 可追溯）— **DONE**（2026-03-04）

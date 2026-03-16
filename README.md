@@ -927,7 +927,7 @@ MetricsCollector emotion_metrics 情感维度指标
 | 🧩 外置服务配置 | `docs/50_project/ExternalServices_Config.md` | 全部外置服务清单与配置方式 |
 | 📦 发布清单 | `docs/50_release/` | 各里程碑 release.json 归档 |
 | 🔗 Trace | `docs/60_trace/` | 可追溯性矩阵（需求 → 设计 → 测试）|
-| 🔍 代码审查报告 | `docs/60_trace/code_reviews/` | 各里程碑代码审查报告归档 |
+| 🔍 代码审查报告 | `docs/35_quality/code_reviews/` | 各里程碑代码审查报告归档 |
 | ⚠️ 风险登记册 | `docs/60_trace/risk_registry.md` | 项目风险登记与跟踪 |
 
 ---
@@ -959,7 +959,7 @@ pre-commit run -a
 | **契约测试** | `tests/contract/` | 跨模块接口契约验证 |
 | **端到端测试** | `tests/e2e/` | 完整链路集成测试 |
 | **性能基准** | `tools/bench/` | Ledger WAL 读写吞吐基准 |
-| **试运行报告** | `docs/60_trace/trial_run_reports/` | 自动化试运行 JSON 报告 |
+| **试运行报告** | `artifacts/trial_run_reports/` | 自动化试运行 JSON 报告 |
 
 ### 审计链保障
 

@@ -204,5 +204,5 @@ LangGraph 在当前系统中被**主动降级使用**：
 | `docs/30_devspec/ModelPlane.md` | 核心约束规格文档 |
 | `host_brain/integrations/graph_executor.py` | LangGraph 图编译与执行 |
 | `host_brain/integrations/graph_runtime.py` | 运行时合约层 |
-| `docs/60_trace/HOST_CHAT_REAL_CHAIN_TRACE_req_bc56917feac740b4adea1486d88a6435.md` | 真实调用链路 Trace |
-| `docs/60_trace/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md` | 节点编排问题分析报告 |
+| `docs/45_testing/test_reports/host_chat/HOST_CHAT_REAL_CHAIN_TRACE_req_bc56917feac740b4adea1486d88a6435.md` | 真实调用链路 Trace |
+| `docs/45_testing/test_reports/host_chat/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md` | 节点编排问题分析报告 |

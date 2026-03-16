@@ -177,7 +177,7 @@ def main() -> int:
     parser.add_argument(
         "--report-dir",
         default=None,
-        help="Report output dir (default: docs/50_release/reports/.../20_chain_quality)",
+        help="输出报告目录（默认：artifacts/release/reports）",
     )
     parser.add_argument("--session-prefix", default="diag-embed-rerank-cpu", help="Session id prefix")
     parser.add_argument(

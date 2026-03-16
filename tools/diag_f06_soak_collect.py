@@ -2,8 +2,8 @@
 F-06 长稳 soak 持续采集：按间隔采样 Host 进程 RSS、/health，追加到报告目录。
 
 用法:
-  python tools/diag_f06_soak_collect.py --interval 30 --report-dir docs/50_release/reports/.../10_health_runtime
-  (默认 interval=30 分钟，report-dir 默认 docs/50_release/reports/.../10_health_runtime)
+  python tools/diag_f06_soak_collect.py --interval 30 --report-dir artifacts/release/reports/.../10_health_runtime
+  (默认 interval=30 分钟，report-dir 默认 artifacts/release/reports/.../10_health_runtime)
 
 后台运行示例:
   nohup python tools/diag_f06_soak_collect.py --interval 30 &
@@ -24,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_REPORT_DIR = (
-    REPO_ROOT / "docs" / "50_release" / "reports" / "release_seal_personal_full_20260314" / "10_health_runtime"
+    REPO_ROOT / "artifacts" / "release" / "reports" / "release_seal_personal_full_20260314" / "10_health_runtime"
 )
 DEFAULT_PID_FILE = REPO_ROOT / "runtime" / "host" / "host.pid"
 DEFAULT_HEALTH_URL = "http://127.0.0.1:18080/health"

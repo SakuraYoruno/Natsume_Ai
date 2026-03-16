@@ -973,7 +973,7 @@
 | R-132 | FR-CHANNEL-001 | send_wechat_message_authorized()：outbound 三重校验（thread_key/intent_id/approval_token）；失败返回 reason_code + stage；写入审计链；LLM 不得自行决定发送 | host_brain/channels/wechat.py；host_brain/core/errors.py（CHANNEL_SEND_UNAUTHORIZED/CHANNEL_INTENT_MISSING/CHANNEL_THREAD_KEY_MISSING） | T-CHAN-03~05；T-CHAN-AUDIT-03 | DONE | M14-A |
 | R-133 | FR-AVATAR-001 | VTSExpressionMap.resolve()：emotion_tag→expression_id 固定枚举映射（EmotionTag + EXPRESSION_MAP）；非法 tag → VTS_TAG_UNKNOWN；自由动作参数 → VTS_EXPRESSION_INVALID；同版本同输入输出一致（可回放） | edge_client/actuators/vts_expression_map.py；host_brain/core/errors.py（VTS_TAG_UNKNOWN/VTS_EXPRESSION_INVALID/VTS_INTENSITY_OUT_OF_RANGE/VTS_DURATION_INVALID） | T-VTS-01~05 | DONE | M14-B |
 | R-134 | FR-MCP-001 | MCPAdapter.sync_provider_tools()：同步 MCP provider 工具为 ToolMeta 列表（含 READ/WRITE 分级）；MCPAdapter.execute_mcp_tool()：WRITE 必须有 approval_token_ref（MCP_WRITE_UNAUTHORIZED）；出站经 AIRLOCK 净化（SanitizationReport）；缺 sanitization_report → AIRLOCK_BLOCKED_EGRESS；执行无 evidence_ref → MCP_AUDIT_REF_MISSING | host_brain/tools/mcp_adapter.py（ToolMeta + SanitizationReport + sync_provider_tools + execute_mcp_tool + _airlock_sanitize） | T-MCP-GOV-01~05；T-MCP-AUDIT-01~03 | DONE | M14-C |
-| R-135 | NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001 | M14 发布清单锁定（m14_release.json）：4 个核心文件 hash；79 个 M14 测试通过；1421 全量通过；release_ready=true；audit_chain_verified=true | docs/50_release/m14_release.json | T-REL-01（复用） | DONE | M14-D |
+| R-135 | NFR-REL-001；FR-CHANNEL-001；FR-AVATAR-001；FR-MCP-001 | M14 发布清单锁定（m14_release.json）：4 个核心文件 hash；79 个 M14 测试通过；1421 全量通过；release_ready=true；audit_chain_verified=true | configs/release/ | T-REL-01（复用） | DONE | M14-D |
 
 ## M15 语音链路深化收口（R-136~R-140）
 
@@ -981,7 +981,7 @@
 | R-137 | FR-VOICE-002 | TTSPlaybackEvent（frozen dataclass）：request_id（必填）/intent_id/text/emotion_tag/status（queued/playing/done/interrupted/failed）/reason_code/stage/ts_ms/evidence_ref（必填）；build_tts_playback_event 工厂函数：缺 request_id/evidence_ref 或 status 非法 → VOICE_SCHEMA_INVALID；Host 只下发最终口径文本与情绪标签 | edge_client/actuators/tts_engine.py（TTSPlaybackEvent + build_tts_playback_event） | T-TTS-QUEUE-01~05 | DONE | M15-B |
 | R-138 | FR-VOICE-003 | BargeInEvent（frozen dataclass）：session_id/interrupted_request_id（必填）/trigger_ts_ms/asr_continued（默认True）/evidence_ref（必填）；打断不构成执行事实（无 intent_draft/execution_claim/decision 字段）；ASR 不被阻塞（asr_continued=True）；缺 interrupted_request_id/evidence_ref → VOICE_SCHEMA_INVALID | edge_client/actuators/tts_engine.py（BargeInEvent + build_barge_in_event） | T-BARGE-01~04 | DONE | M15-C |
 | R-139 | FR-VOICE-004 | FallbackModelGate：默认卸载（is_available=False）/按需加载（load()/unload()）/generate() 输出永远 draft_only=True；不可用时快速失败（FALLBACK_MODEL_UNAVAILABLE）；task_type 非法 → VOICE_SCHEMA_INVALID；不得包含裁决或执行事实宣告（as_dict 无 decision/execution_claim/intent_draft 字段） | edge_client/fallback_model.py（FallbackModelGate + FallbackOutput + VALID_TASK_TYPES） | T-FALLBACK-01~05 | DONE | M15-D |
-| R-140 | FR-VOICE-005；NFR-REL-001 | ResourcePreemptionEvent（frozen dataclass）：preemptor/preempted/reason_code=RESOURCE_GATE_PREEMPTED/ts_ms/evidence_ref（必填）；build_resource_preemption_event 工厂函数：preemptor/preempted 必须是合法 TASK_* 常量；VoiceResourceGate 优先级 ASR>PLAYBACK>TTS_SYNTH>FALLBACK_LLM；压力下 ASR 始终保证；M15 发布清单（m15_release.json）：1534 全量通过；release_ready=true | edge_client/rpc/resource_gate.py（ResourcePreemptionEvent + build_resource_preemption_event）；docs/50_release/m15_release.json | T-RGATE-01~05 | DONE | M15-E/F |
+| R-140 | FR-VOICE-005；NFR-REL-001 | ResourcePreemptionEvent（frozen dataclass）：preemptor/preempted/reason_code=RESOURCE_GATE_PREEMPTED/ts_ms/evidence_ref（必填）；build_resource_preemption_event 工厂函数：preemptor/preempted 必须是合法 TASK_* 常量；VoiceResourceGate 优先级 ASR>PLAYBACK>TTS_SYNTH>FALLBACK_LLM；压力下 ASR 始终保证；M15 发布清单（m15_release.json）：1534 全量通过；release_ready=true | edge_client/rpc/resource_gate.py（ResourcePreemptionEvent + build_resource_preemption_event）；configs/release/ | T-RGATE-01~05 | DONE | M15-E/F |
 
 ## M16 Canon 治理强化 + 记忆检索优化 + 调度器持久化（R-141~R-145）
 
@@ -991,7 +991,7 @@
 | R-142 | FR-CANON-GOV-001（F-29 修复） | Canon 路由依赖注入强化：`_ledger_provider` 可注入替换，降级路径 `:memory:` 仅用于测试场景；`_get_ledger_from_app()` 延迟导入循环引用风险通过 provider 模式消除 | host_brain/app/canon_routes.py | T-CANON-TX-01~06（复用） | DONE | M16-A |
 | R-143 | FR-MEM-PAGE-001（F-38 修复） | 长期记忆检索强化：`list_proposals()` cursor-based 分页（`after_id` 参数）已在 SQLiteLedger 实现；`canon_routes.py` `/canon/proposals` 端点暴露 `after_id` 查询参数；深页码性能从 O(N) 降为 O(log N) | host_brain/app/canon_routes.py；host_brain/audit/sqlite_ledger.py | T-CURSOR-01~05 | DONE | M16-B |
 | R-144 | FR-SCHED-PERSIST-001（F-40 修复） | 调度器任务持久化：`NatsumeScheduler.register_task()` 将任务序列化写入 `scheduler_tasks` 表；`start()` 启动时调用 `_load_persisted_tasks()` 自动恢复；`unregister_task()` 同步删除持久化记录；新增 migration `0018_scheduler_tasks.sql`；`SQLiteLedger` 新增 `save_scheduler_task / load_scheduler_tasks / delete_scheduler_task` 三个 CRUD 方法 | host_brain/scheduler/scheduler.py；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0018_scheduler_tasks.sql | T-SCHED-PERSIST-01~05 | DONE | M16-C |
-| R-145 | NFR-REL-001 | M16 发布清单锁定（m16_release.json）：7 个核心文件 hash；1564 全量通过（+31 vs M15）；release_ready=true；F-28/F-29/F-35/F-36/F-38/F-40 全部修复标注 | docs/50_release/m16_release.json | T-REL-01（复用） | DONE | M16-D |
+| R-145 | NFR-REL-001 | M16 发布清单锁定（m16_release.json）：7 个核心文件 hash；1564 全量通过（+31 vs M15）；release_ready=true；F-28/F-29/F-35/F-36/F-38/F-40 全部修复标注 | configs/release/ | T-REL-01（复用） | DONE | M16-D |
 
 ## M17 监控面板 v3 前端重建（R-146~R-150）
 
@@ -1011,7 +1011,7 @@
 | R-152 | FR-OBS-009 | SessionQueryService：从 SQLite Ledger 查询会话列表；支持过滤参数（start_time/end_time/status/channel/keyword 模糊匹配）；分页参数（page/page_size，默认 20，最大 100）；响应含 total_count；空结果返回 results=[] 而非 404；`GET /obs/sessions` 端点注册到 obs_routes.py | host_brain/obs/session_query.py; host_brain/app/obs_routes.py | T-OBS-SESS-01~06 | DONE | M18-B |
 | R-153 | FR-OBS-010 | TraceNodeBuilder：从多源审计日志（intent_log/governor_log/skill_exec_log/asr_log/tts_log/vts_log 等）聚合构建结构化节点列表；每节点含 node_id/node_type/node_name/status/start_ts_ms/end_ts_ms/duration_ms/input/output/reason_code/parent_node_id/side；节点按 start_ts_ms 排序；input/output 超 64KB 截断并标注 truncated=true；支持 `?include_io=false` 参数；不存在的 request_id 返回 404 + 稳定错误结构；`GET /obs/trace/{request_id}` 端点注册到 obs_routes.py | host_brain/obs/trace_node_builder.py; host_brain/app/obs_routes.py | T-OBS-TRACE-01~08 | DONE | M18-C |
 | R-154 | FR-OBS-011 | MetricsTimeseriesService：多维度时序数据查询（request_count/reject_rate/latency_p50/latency_p95/reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time；数据点上限 1000（超出自动降采样，步长 = ceil(total/1000)）；无数据区间返回 null 值点保证时序连续性；支持多 metric 批量查询（返回 {metrics: {metric_name: {data_points: [...]}}} 结构）；`GET /obs/metrics/timeseries` 端点注册到 obs_routes.py | host_brain/obs/metrics_timeseries.py; host_brain/app/obs_routes.py | T-OBS-TS-01~06 | DONE | M18-D |
-| R-155 | FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001 | M17+M18 发布清单锁定：m17_release.json（前端 SPA 构建成功；四页面全量可用；zero_js_errors=true；design_review_passed=true）+ m18_release.json（26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；release_ready=true；all_api_endpoints_tested=true）；UI_UPGRADE_CHANGELOG.md v3.0 条目更新为已完成 | docs/50_release/m17_release.json; docs/50_release/m18_release.json; docs/50_project/UI_UPGRADE_CHANGELOG.md | T-REL-01（复用） | DONE | M18-E |
+| R-155 | FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001 | M17+M18 发布清单锁定：m17_release.json（前端 SPA 构建成功；四页面全量可用；zero_js_errors=true；design_review_passed=true）+ m18_release.json（26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；release_ready=true；all_api_endpoints_tested=true）；UI_UPGRADE_CHANGELOG.md v3.0 条目更新为已完成 | configs/release/; configs/release/; docs/50_project/UI_UPGRADE_CHANGELOG.md | T-REL-01（复用） | DONE | M18-E |
 
 
 ## M21 测试基线修复 + Canon 向量投影追踪（R-156~R-157）
@@ -1235,7 +1235,7 @@
 - DevSpec 落点：DevSpec §M41
 - DevTasks（TASK）：TASK-0423；TASK-0424
 - 验收测试（T-xx）：T-EVP-BENCH-01~04；T-EVP-PRI-01~06；T-EVP-QUEUE-01~06；T-EVP-CB-01~08；T-EVP-IDX-01~06；T-EVP-PERF-01~05（全量 ≥29 项）
-- 当前进展（2026-03-06）：契约测试行数限制已更新；`docs/60_trace/code_reviews/code_review_m41_2026-03-06.md` 已生成；全量测试无回归。
+- 当前进展（2026-03-06）：契约测试行数限制已更新；`docs/35_quality/code_reviews/code_review_m41_2026-03-06.md` 已生成；全量测试无回归。
 - 覆盖状态：DONE
 
 

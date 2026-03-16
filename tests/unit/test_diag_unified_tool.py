@@ -157,9 +157,9 @@ def test_diag_unified_dashboard_command_supports_longterm_threshold_flags(tmp_pa
 def test_extract_artifact_paths_parses_downstream_report_lines() -> None:
     stdout = (
         "step\n"
-        "json_report: docs/60_trace/a.json\n"
-        "markdown_report: docs/60_trace/a.md\n"
+        "json_report: artifacts/trace/a.json\n"
+        "markdown_report: artifacts/trace/a.md\n"
     )
     artifacts = extract_artifact_paths(stdout)
-    assert artifacts["json_report"] == "docs/60_trace/a.json"
-    assert artifacts["markdown_report"] == "docs/60_trace/a.md"
+    assert artifacts["json_report"] == "artifacts/trace/a.json"
+    assert artifacts["markdown_report"] == "artifacts/trace/a.md"
