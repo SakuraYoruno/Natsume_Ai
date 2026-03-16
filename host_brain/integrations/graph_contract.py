@@ -160,7 +160,7 @@ class GraphState(TypedDict):
     barrier_join_result: dict[str, Any] | None
     # render_guard_result：RenderGuard 结果（由 RenderGuard.validate_render_output() 写入）
     render_guard_result: dict[str, Any] | None
-    # M-MA2：Multi-Agent 字段（第二阶段从 payload["agent_runtime"] 提升到顶层）
+    # M-MA3：Multi-Agent 字段（第三阶段统一到 GraphState 顶层，不再写 payload["agent_runtime"]）
     # active_agent_id：当前活跃的子 agent ID
     active_agent_id: str | None
     # handoff_history：agent handoff 历史记录列表
@@ -412,7 +412,7 @@ def build_clock_event(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# M-MA2：Multi-Agent 校验辅助函数
+# M-MA3：Multi-Agent 校验辅助函数
 # ---------------------------------------------------------------------------
 
 def validate_agent_handoff_target(
@@ -468,9 +468,9 @@ def validate_risk_mode(risk_mode: str) -> tuple[bool, str]:
 
 
 def extract_agent_runtime(state: "GraphState") -> dict[str, Any]:
-    """从 GraphState 中提取 agent_runtime 结构。
+    """从 GraphState 顶层字段提取 agent_runtime 结构。
 
-    优先读取顶层字段（第二阶段），回退到 payload["agent_runtime"]（第一阶段）。
+    第三阶段已统一到 GraphState 顶层，直接读取顶层字段。
 
     Args:
         state: 当前图状态
@@ -478,19 +478,13 @@ def extract_agent_runtime(state: "GraphState") -> dict[str, Any]:
     Returns:
         agent_runtime 字典（可能为空字典）
     """
-    # 第二阶段：优先读取顶层字段
-    active_agent_id = state.get("active_agent_id")
-    if active_agent_id is not None:
-        return {
-            "active_agent_id": active_agent_id,
-            "handoff_history": list(state.get("handoff_history") or []),
-            "agent_budget": dict(state.get("agent_budget") or {}),
-            "agent_artifacts": dict(state.get("agent_artifacts") or {}),
-            "judge_result": state.get("judge_result"),
-        }
-    # 第一阶段：回退到 payload["agent_runtime"]
-    payload = dict(state.get("payload") or {})
-    return dict(payload.get("agent_runtime") or {})
+    return {
+        "active_agent_id": state.get("active_agent_id"),
+        "handoff_history": list(state.get("handoff_history") or []),
+        "agent_budget": dict(state.get("agent_budget") or {}),
+        "agent_artifacts": dict(state.get("agent_artifacts") or {}),
+        "judge_result": state.get("judge_result"),
+    }
 
 
 def build_subgraph_commit_summary(

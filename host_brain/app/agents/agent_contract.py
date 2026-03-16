@@ -3,7 +3,7 @@
 设计原则：
 - 子 agent 只产出 AgentArtifact（工件），不直接控制流程
 - handoff_recommendation 只是建议，真正下一跳由 handler 编译决定
-- agent_runtime 第一阶段放入 payload["agent_runtime"]，不扩 GraphState 顶层
+- agent 运行态统一存储在 GraphState 顶层字段（M-MA3）
 """
 
 from __future__ import annotations
@@ -71,9 +71,10 @@ class AgentArtifact:
 
 @dataclass
 class AgentRuntime:
-    """agent_runtime payload 结构（第一阶段放入 payload["agent_runtime"]）。
+    """agent_runtime 结构（M-MA3：统一存储在 GraphState 顶层字段）。
 
     由 Supervisor handler 初始化并维护，子 agent 只读不写。
+    对应 GraphState 字段：active_agent_id / handoff_history / agent_budget / agent_artifacts / judge_result
     """
     plan_id: str
     active_agent_id: str

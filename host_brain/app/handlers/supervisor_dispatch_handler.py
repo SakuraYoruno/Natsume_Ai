@@ -23,7 +23,6 @@ from host_brain.app.agents.agent_contract import (
     RISK_MODE_GUARDED,
     RISK_MODE_SAFE,
     RISK_MODE_STRICT,
-    build_agent_runtime_default,
     validate_supervisor_proposal,
 )
 from host_brain.app.agents.agent_registry import (
@@ -153,33 +152,32 @@ def supervisor_dispatch_handler(
         need_judge = False
         validation_reason = f"PROPOSAL_INVALID_FALLBACK_TO_CHAT:{validation_reason}"
 
-    # 6. 构建 agent_runtime
-    agent_runtime = build_agent_runtime_default(
-        request_id=request_id,
-        active_agent_id=selected_agent,
-        risk_mode=risk_mode,
-        max_hops=2,
-        need_judge=need_judge,
-    )
-    agent_runtime_dict = agent_runtime.to_dict()
-    agent_runtime_dict["dispatch_plan"] = {
-        "proposal": proposal_dict,
-        "validation_reason": validation_reason,
-        "dispatcher_node": node_id,
-        "dispatched_at_ms": int(time.time() * 1000),
-        "multi_agent_enabled": multi_agent_enabled,
-        "supervisor_auto_enabled": supervisor_auto_enabled,
-    }
-
-    # 7. 确定下一跳节点（trusted handler 专属权）
+    # 6. 确定下一跳节点（trusted handler 专属权）
     next_node = _AGENT_TO_NODE.get(selected_agent, CHAT_DIRECT_NODE_ID)
 
-    # 8. 获取 agent 元数据（用于 trace）
+    # 7. 获取 agent 元数据（用于 trace）
     agent_meta = get_agent_meta(selected_agent) or {}
 
-    # 9. 构建输出 payload
+    # 8. 构建输出（第三阶段：直接写 GraphState 顶层字段，不再写 payload["agent_runtime"]）
     out = dict(payload)
-    out["agent_runtime"] = agent_runtime_dict
+    # 写入 GraphState 顶层 agent 字段
+    out["active_agent_id"] = selected_agent
+    out["handoff_history"] = [
+        {
+            "from": "supervisor",
+            "to": selected_agent,
+            "reason": f"scene_type={scene_type} 规则路由",
+            "ts_ms": int(time.time() * 1000),
+        }
+    ]
+    out["agent_budget"] = {
+        "max_hops": 2,
+        "per_agent_timeout_ms": 12000,
+        "total_budget_ms": 30000,
+    }
+    out["agent_artifacts"] = {}
+    out["judge_result"] = None
+    # supervisor_dispatch 追踪信息（不影响路由）
     out["supervisor_dispatch"] = {
         "dispatcher_node": node_id,
         "scene_type": scene_type,
@@ -189,6 +187,8 @@ def supervisor_dispatch_handler(
         "risk_mode": risk_mode,
         "need_judge": need_judge,
         "validation_reason": validation_reason,
+        "multi_agent_enabled": multi_agent_enabled,
+        "supervisor_auto_enabled": supervisor_auto_enabled,
         "dispatched_at_ms": int(time.time() * 1000),
     }
     # trusted handler 写入 __next_node__（不经过 LLM 直接输出）

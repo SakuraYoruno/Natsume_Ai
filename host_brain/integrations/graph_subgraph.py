@@ -268,8 +268,8 @@ def compile_code_refine_subgraph(
     )
 
 
-def write_agent_artifact_to_payload(
-    payload: dict[str, Any],
+def write_agent_artifact_to_state(
+    state: dict[str, Any],
     *,
     agent_id: str,
     artifact_ref: str,
@@ -277,23 +277,25 @@ def write_agent_artifact_to_payload(
     confidence: float = 0.0,
     risk_flags: list[str] | None = None,
 ) -> None:
-    """将子 agent 输出工件写入 payload["agent_runtime"]["artifacts"]。
+    """将子 agent 输出工件写入 GraphState 顶层 agent_artifacts 字段（M-MA3）。
 
-    子 agent 执行完毕后调用此函数，将工件摘要写入 agent_runtime，
+    子 agent 执行完毕后调用此函数，将工件摘要写入 GraphState.agent_artifacts，
     供 JudgeAgent 和 Supervisor 读取。
 
     Args:
-        payload: 当前图 payload（原地修改）
+        state: 当前图状态字典（GraphState，原地修改）
         agent_id: 子 agent ID
         artifact_ref: 工件引用（artifact://...）
         summary: 工件摘要
         confidence: 置信度（0.0 ~ 1.0）
         risk_flags: 风险标记列表
     """
-    if not isinstance(payload, dict):
+    if not isinstance(state, dict):
         return
-    agent_runtime = payload.setdefault("agent_runtime", {})
-    artifacts = agent_runtime.setdefault("artifacts", {})
+    artifacts = state.setdefault("agent_artifacts", {})
+    if not isinstance(artifacts, dict):
+        state["agent_artifacts"] = {}
+        artifacts = state["agent_artifacts"]
     artifacts[str(agent_id)] = {
         "artifact_ref": str(artifact_ref),
         "summary": str(summary),
@@ -301,3 +303,7 @@ def write_agent_artifact_to_payload(
         "risk_flags": list(risk_flags or []),
         "ts_ms": int(time.time() * 1000),
     }
+
+
+# 向后兼容别名（第三阶段迁移期间保留，后续版本删除）
+write_agent_artifact_to_payload = write_agent_artifact_to_state

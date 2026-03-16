@@ -437,9 +437,9 @@ agent 内部路由状态维护在：
 
 聊天应是"**轻治理 + 强边界**"，不是"执行级重审查"。
 
-### 11.6 透明子图扩展（M-MA2）
+### 11.6 透明子图扩展（M-MA3）
 
-第二阶段新增两个透明子图工厂（`graph_subgraph.py`）：
+第三阶段新增两个透明子图工厂（`graph_subgraph.py`），并统一 agent 状态到 `GraphState` 顶层：
 
 - **`compile_intent_agent_subgraph()`**：封装 `core_reasoner_primary → planner_constraints → tool_planner`
 - **`compile_code_refine_subgraph()`**：封装 `workbench_code_assist → consistency_verifier`
