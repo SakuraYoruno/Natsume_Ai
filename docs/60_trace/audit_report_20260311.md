@@ -1,154 +1,177 @@
-﻿# Natsume AI 娣卞害瀹¤鎶ュ憡
+# Natsume AI 深度审计报告
 
-> 瀹¤鏃堕棿锛?026-03-11 09:45
-> 瀹¤鑼冨洿锛氭剰鍥捐瘑鍒?路 妯″瀷缂栨帓鎺у埗 路 Agent 璺敱 路 SSE 鍙岀瀵归綈 路 鎯呮劅灞傛帴鍏?路 Bond 浼樺寲
-
----
-
-## 鐩綍
-
-1. [鎰忓浘璇嗗埆锛圛ntent Recognition锛塢(#涓€鎰忓浘璇嗗埆intent-recognition)
-2. [妯″瀷缂栨帓鎺у埗锛圡odel Orchestration锛塢(#浜屾ā鍨嬬紪鎺掓帶鍒秏odel-orchestration)
-3. [Agent 璺敱](#涓塧gent-璺敱)
-4. [SSE 鍙岀瀵归綈](#鍥泂se-鍙岀瀵归綈)
-5. [鎵€鏈夎矾鐢辩殑鎯呮劅灞傛帴鍏ユ儏鍐礭(#浜旀墍鏈夎矾鐢辩殑鎯呮劅灞傛帴鍏ユ儏鍐?
-6. [鎯呮劅灞傚湪鏁翠釜绯荤粺鐨勮繛閫氭€(#鍏儏鎰熷眰鍦ㄦ暣涓郴缁熺殑杩為€氭€?
-7. [Bond 浼樺寲鎯呭喌](#涓僢ond-浼樺寲鎯呭喌)
-8. [姹囨€伙細闇€瑕佷慨澶嶇殑鍏抽敭闂](#鍏眹鎬婚渶瑕佷慨澶嶇殑鍏抽敭闂)
+> 审计时间：2026-03-11 09:45
+> 审计范围：意图识别 · 模型编排控制 · Agent 路由 · SSE 双端对齐 · 情感层接入 · Bond 优化
 
 ---
 
-## 涓€銆佹剰鍥捐瘑鍒紙Intent Recognition锛?
-### 鏋舵瀯灞傛
+## 目录
 
-鎰忓浘璇嗗埆鍒嗕负**涓ゅ眰**锛?
-#### 绗竴灞傦細杞婚噺瑙勫垯棰勫垎绫诲櫒锛坄pre_intent_classifier`锛?
+1. [意图识别（Intent Recognition）](#一意图识别intent-recognition)
+2. [模型编排控制（Model Orchestration）](#二模型编排控制model-orchestration)
+3. [Agent 路由](#三agent-路由)
+4. [SSE 双端对齐](#四sse-双端对齐)
+5. [所有路由的情感层接入情况](#五所有路由的情感层接入情况)
+6. [情感层在整个系统的连通性](#六情感层在整个系统的连通性)
+7. [Bond 优化情况](#七bond-优化情况)
+8. [汇总：需要修复的关键问题](#八汇总需要修复的关键问题)
+
+---
+
+## 一、意图识别（Intent Recognition）
+
+### 架构层次
+
+意图识别分为**两层**：
+
+#### 第一层：轻量规则预分类器（`pre_intent_classifier`）
+
 ```python
 # graph_config_builder.py
 def pre_intent_classifier(user_input: str) -> str:
-    # 浼樺厛绾э細VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT
+    # 优先级：VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT
 ```
 
-杩欐槸涓€涓函鍏抽敭璇嶅尮閰嶇殑瑙勫垯寮曟搸锛屽湪 Governor 閴存潈**涔嬪悗**鎵ц锛坄_unified_chat_sse_generator` 涓厛 Governor 鍐嶅垎绫伙級銆傚叧閿瘝闆嗗悎瑕嗙洊涓嫳鏃ヤ笁璇紝骞舵湁濞变箰鍏抽敭璇嶇櫧鍚嶅崟闃叉璇垽銆?
-#### 绗簩灞傦細Governor 鎰忓浘鍐崇瓥寮曟搸锛坄IntentDecisionEngine`锛?
+这是一个纯关键词匹配的规则引擎，在 Governor 鉴权**之后**执行（`_unified_chat_sse_generator` 中先 Governor 再分类）。关键词集合覆盖中英日三语，并有娱乐关键词白名单防止误判。
+
+#### 第二层：Governor 意图决策引擎（`IntentDecisionEngine`）
+
 ```python
 # governor/decision.py
 def evaluate_intent(self, raw_intent, ...) -> dict:
-    # S_INTENT_PARSE 鈫?S_INTENT_VALIDATE 鈫?S_INTENT_REPLAY 鈫?S_INTENT_SEQ
-    # 鈫?S_INTENT_EXPIRED 鈫?S_GOV_GATES 鈫?S_GOV_EMOTION_GATE 鈫?S_INTENT_OK
+    # S_INTENT_PARSE → S_INTENT_VALIDATE → S_INTENT_REPLAY → S_INTENT_SEQ
+    # → S_INTENT_EXPIRED → S_GOV_GATES → S_GOV_EMOTION_GATE → S_INTENT_OK
 ```
 
-杩欐槸鐪熸鐨勬剰鍥鹃壌鏉冨眰锛屾墽琛?8 涓覆琛岄棬鎺э紙R1-R7 + R8 鎯呮劅闂ㄦ帶锛夛紝骞舵敮鎸侊細
-- **M42 鍒嗗眰娌荤悊**锛歚registry` 娉ㄥ叆鍚庢寜 Skill 鐨?`risk_level` 閫夋嫨 `CACHE/RULE/AIRLOCK` 涓夐€氶亾
-- **P2-A 蹇€熼€氶亾**锛歚narrative_only` + policy_cache 鍛戒腑鏃惰烦杩囧畬鏁?gate 璇勪及锛堣妭鐪?20-30ms锛?- **R8 鎯呮劅闂ㄦ帶**锛歚critical` 鐘舵€佷笅鎷掔粷 `TOOL_CALL/SKILL_EXEC`
+这是真正的意图鉴权层，执行 8 个串行门控（R1-R7 + R8 情感门控），并支持：
+- **M42 分层治理**：`registry` 注入后按 Skill 的 `risk_level` 选择 `CACHE/RULE/AIRLOCK` 三通道
+- **P2-A 快速通道**：`narrative_only` + policy_cache 命中时跳过完整 gate 评估（节省 20-30ms）
+- **R8 情感门控**：`critical` 状态下拒绝 `TOOL_CALL/SKILL_EXEC`
 
-### 闂娓呭崟
+### 问题清单
 
-| # | 闂 | 浣嶇疆 | 涓ラ噸搴?|
+| # | 问题 | 位置 | 严重度 |
 |---|------|------|--------|
-| 1 | `pre_intent_classifier` 鏄函鍏抽敭璇嶅尮閰嶏紝鏃犺涔夌悊瑙ｈ兘鍔涳紝"甯垜瀹夎涓€涓嬭繖棣栨瓕" 涔熶細鍛戒腑 `EXEC_INTENT`锛坄瀹夎` 鍦?`_PIC_EXEC_INTENT_KEYWORDS`锛?| `graph_config_builder.py` | 馃煛 涓嵄 |
-| 2 | `intent_draft.action` 鍦ㄩ壌鏉冨墠鍥哄畾涓?`narrative_only`锛孏overnor 鏃犳硶鎰熺煡鐪熷疄鎰忓浘绫诲瀷锛孍XEC_INTENT 涔熶互 `narrative_only` 閫氳繃閴存潈锛岀粫杩囨儏鎰熼棬鎺?| `chat_handler.py:L47-60` | 馃煚 涓珮鍗?|
-| 3 | `scene_type` 瀛楁鍙瀹㈡埛绔樉寮忚鐩栵紝鏃?Governor 鏍￠獙锛屽鎴风鍙己鍒惰矾鐢卞埌浠绘剰鍦烘櫙 | `chat_handler.py:L130-136` | 馃煚 涓珮鍗?|
+| 1 | `pre_intent_classifier` 是纯关键词匹配，无语义理解能力，"帮我安装一下这首歌" 也会命中 `EXEC_INTENT`（`安装` 在 `_PIC_EXEC_INTENT_KEYWORDS`） | `graph_config_builder.py` | 🟡 中危 |
+| 2 | `intent_draft.action` 在鉴权前固定为 `narrative_only`，Governor 无法感知真实意图类型，EXEC_INTENT 也以 `narrative_only` 通过鉴权，绕过情感门控 | `chat_handler.py:L47-60` | 🟠 中高危 |
+| 3 | `scene_type` 字段可被客户端显式覆盖，无 Governor 校验，客户端可强制路由到任意场景 | `chat_handler.py:L130-136` | 🟠 中高危 |
 
 ---
 
-## 浜屻€佹ā鍨嬬紪鎺掓帶鍒讹紙Model Orchestration锛?
-### 鏋舵瀯
+## 二、模型编排控制（Model Orchestration）
+
+### 架构
 
 ```
-SCENE_CHAT锛堟棩甯稿璇濓級
-  鈹斺攢 host_8b锛坬wen3:8b锛屾湰鍦?Ollama锛夆啋 token 绾ф祦寮?SSE
-  鈹斺攢 [gaming 妯″紡] edge_3b锛圗dge RPC锛夆啋 鏈€灏忚矾寰?SSE
+SCENE_CHAT（日常对话）
+  └─ host_8b（qwen3:8b，本地 Ollama）→ token 级流式 SSE
+  └─ [gaming 模式] edge_3b（Edge RPC）→ 最小路径 SSE
 
-SCENE_WORK_CODE / WORK_TRANSLATE / EXEC_INTENT锛堝鏉傚満鏅級
-  鈹斺攢 LangGraph 澶氳妭鐐癸紙Gemini 2.5 Pro/Flash锛夆啋 鑺傜偣绾ц繘搴?SSE
-     core_reasoner_primary 鈫?[scene_router_post_core] 鈫?workbench_*/planner_constraints
-     鈫?consistency_verifier 鈫?renderer_ja_c_style
+SCENE_WORK_CODE / WORK_TRANSLATE / EXEC_INTENT（复杂场景）
+  └─ LangGraph 多节点（Gemini 2.5 Pro/Flash）→ 节点级进度 SSE
+     core_reasoner_primary → [scene_router_post_core] → workbench_*/planner_constraints
+     → consistency_verifier → renderer_ja_c_style
 ```
 
-**璺敱鐭╅樀锛坄resolve_host_llm_runtime`锛?* 瀹炵幇浜嗗畬鏁寸殑鐏板害鍙戝竷鏈哄埗锛?- `HOST_CHAT_FORCE_CLOUD` 寮哄埗浜戠
-- `HOST_CHAT_HOST_8B_ENABLED` 鎺у埗鏈湴 8B 寮€鍏?- `gaming` 妯″紡寮哄埗璧?edge_3b
-- SHA-256 绋冲畾妗剁伆搴︼紙0-99 鍒嗘《锛屾敮鎸佺敤鎴风骇鐏板害锛?- 鏈湴 8B 鍋ュ悍鎺㈡祴锛坄/v1/models`銆乣/health`銆乣/api/tags` 涓夎矾鎺㈡祴锛?
-**鑺傜偣瓒呮椂鐭╅樀锛坄build_chat_graph_config`锛?*锛?- CHAT 蹇€熻矾寰勶細`chat_direct_ja` 鏈€浣?10s锛宍core_reasoner_primary` 鏈€楂?5s
-- 澶嶆潅鍦烘櫙锛歚core_reasoner_primary` 12s锛宍workbench_*` 10s锛屾€婚绠?90-240s
+**路由矩阵（`resolve_host_llm_runtime`）** 实现了完整的灰度发布机制：
+- `HOST_CHAT_FORCE_CLOUD` 强制云端
+- `HOST_CHAT_HOST_8B_ENABLED` 控制本地 8B 开关
+- `gaming` 模式强制走 edge_3b
+- SHA-256 稳定桶灰度（0-99 分桶，支持用户级灰度）
+- 本地 8B 健康探测（`/v1/models`、`/health`、`/api/tags` 三路探测）
 
-### 闂娓呭崟
+**节点超时矩阵（`build_chat_graph_config`）**：
+- CHAT 快速路径：`chat_direct_ja` 最低 10s，`core_reasoner_primary` 最高 5s
+- 复杂场景：`core_reasoner_primary` 12s，`workbench_*` 10s，总预算 90-240s
 
-| # | 闂 | 浣嶇疆 | 涓ラ噸搴?|
+### 问题清单
+
+| # | 问题 | 位置 | 严重度 |
 |---|------|------|--------|
-| 1 | `_resolve_host_8b_health_status` 鏄?*鍚屾 HTTP 鎺㈡祴**锛坄urllib.request.urlopen`锛夛紝鍦ㄤ簨浠跺惊鐜腑鐩存帴璋冪敤锛屼細闃诲浜嬩欢寰幆鏈€澶?3s | `chat_stream_handler.py:L430-440` | 馃敶 楂樺嵄 |
-| 2 | `MainChain`锛坄main_chain.py`锛変腑鎵€鏈夎妭鐐瑰疄鐜板潎涓洪鏋讹紙`logger.debug` + `return True`锛夛紝`MainChain` 鍦?`dependencies.py` 涓凡鍒濆鍖栦絾**浠庢湭琚换浣曡矾鐢辫皟鐢?*锛屾暣涓富閾捐矾缂栨帓鍣ㄦ槸姝讳唬鐮?| `main_chain.py:L155-220` | 馃煚 涓珮鍗?|
-| 3 | `RoutingMatrix`銆乣RecallPackBuilder`銆乣MemoryGuard`銆乣StateArbiter` 鍥涗釜鏂版ā鍧楀湪 `dependencies.py` 涓湁宸ュ巶鍑芥暟锛屼絾**娌℃湁浠讳綍璺敱鎴栧鐞嗗櫒璋冪敤瀹冧滑** | `dependencies.py:L340-447` | 馃煛 涓嵄 |
+| 1 | `_resolve_host_8b_health_status` 是**同步 HTTP 探测**（`urllib.request.urlopen`），在事件循环中直接调用，会阻塞事件循环最多 3s | `chat_stream_handler.py:L430-440` | 🔴 高危 |
+| 2 | `MainChain`（`main_chain.py`）中所有节点实现均为骨架（`logger.debug` + `return True`），`MainChain` 在 `dependencies.py` 中已初始化但**从未被任何路由调用**，整个主链路编排器是死代码 | `main_chain.py:L155-220` | 🟠 中高危 |
+| 3 | `RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个新模块在 `dependencies.py` 中有工厂函数，但**没有任何路由或处理器调用它们** | `dependencies.py:L340-447` | 🟡 中危 |
 
 ---
 
-## 涓夈€丄gent 璺敱
+## 三、Agent 路由
 
-### 璺敱鍐崇瓥閾?
+### 路由决策链
+
 ```
 POST /v1/chat
-  鈫?handle_chat
-    鈫?_unified_chat_sse_generator
-      鈫?Governor.evaluate_intent锛堥壌鏉冿級
-      鈫?pre_intent_classifier锛堝垎绫伙級
-      鈫?SCENE_CHAT锛?          鈹溾攢 gaming + edge_enabled 鈫?_gaming_edge_chat_sse_generator
-          鈹?    鈹斺攢 edge 澶辫触 鈫?_complex_scene_sse_generator锛坒allback锛?          鈹斺攢 鏅€?鈫?_sse_event_generator锛坱oken 绾ф祦寮忥級
-      鈫?澶嶆潅鍦烘櫙 鈫?_complex_scene_sse_generator
-            鈫?GraphRuntimeContract.run_graph锛圠angGraph锛?```
+  → handle_chat
+    → _unified_chat_sse_generator
+      → Governor.evaluate_intent（鉴权）
+      → pre_intent_classifier（分类）
+      → SCENE_CHAT？
+          ├─ gaming + edge_enabled → _gaming_edge_chat_sse_generator
+          │     └─ edge 失败 → _complex_scene_sse_generator（fallback）
+          └─ 普通 → _sse_event_generator（token 级流式）
+      → 复杂场景 → _complex_scene_sse_generator
+            → GraphRuntimeContract.run_graph（LangGraph）
+```
 
-`SceneRouter`锛坄main_chain.py`锛夋槸鍙︿竴濂楄矾鐢辨満鍒讹紝浣嗗涓婃墍杩版槸姝讳唬鐮侊紝瀹為檯璺敱瀹屽叏鐢?`_unified_chat_sse_generator` 涓殑 `if scene_type == SCENE_CHAT` 鍒嗘敮鎺у埗銆?
-### 闂娓呭崟
+`SceneRouter`（`main_chain.py`）是另一套路由机制，但如上所述是死代码，实际路由完全由 `_unified_chat_sse_generator` 中的 `if scene_type == SCENE_CHAT` 分支控制。
 
-| # | 闂 | 浣嶇疆 | 涓ラ噸搴?|
+### 问题清单
+
+| # | 问题 | 位置 | 严重度 |
 |---|------|------|--------|
-| 1 | 瀛樺湪**涓ゅ骞惰鐨勮矾鐢辨満鍒?*锛歚SceneRouter`锛坄main_chain.py`锛夊拰 `_unified_chat_sse_generator` 涓殑 if-else 鍒嗘敮锛屽墠鑰呮槸姝讳唬鐮侊紝鍚庤€呮槸瀹為檯鎵ц璺緞锛屾灦鏋勬贩涔?| `main_chain.py` vs `chat_handler.py` | 馃煚 涓珮鍗?|
-| 2 | `SCENE_VISION_UI` 鍙鍒嗙被鍑烘潵锛屼絾 `_unified_chat_sse_generator` 涓病鏈夊搴斿鐞嗗垎鏀紝`resolve_scene_node_sequence("SCENE_VISION_UI")` 杩斿洖 `[CHAT_DIRECT_NODE_ID]`锛岃瑙夊満鏅疄闄呰蛋鏅€?chat 鑺傜偣 | `graph_config_builder.py:L310-325` | 馃煛 涓嵄 |
+| 1 | 存在**两套并行的路由机制**：`SceneRouter`（`main_chain.py`）和 `_unified_chat_sse_generator` 中的 if-else 分支，前者是死代码，后者是实际执行路径，架构混乱 | `main_chain.py` vs `chat_handler.py` | 🟠 中高危 |
+| 2 | `SCENE_VISION_UI` 可被分类出来，但 `_unified_chat_sse_generator` 中没有对应处理分支，`resolve_scene_node_sequence("SCENE_VISION_UI")` 返回 `[CHAT_DIRECT_NODE_ID]`，视觉场景实际走普通 chat 节点 | `graph_config_builder.py:L310-325` | 🟡 中危 |
 
 ---
 
-## 鍥涖€丼SE 鍙岀瀵归綈
+## 四、SSE 双端对齐
 
-### 浜嬩欢鍗忚
+### 事件协议
 
-鎵€鏈夎矾寰勫潎閬靛惊缁熶竴鐨?SSE 浜嬩欢鍗忚锛?
+所有路径均遵循统一的 SSE 事件协议：
+
 ```
 PRESENCE(THINKING)
-鈫?PRESENCE(GOV_APPROVED)
-鈫?[PRESENCE(SCENE_ROUTED)]          # 澶嶆潅鍦烘櫙棰濆
-鈫?[GRAPH_START]                     # 澶嶆潅鍦烘櫙棰濆
-鈫?RENDER(chunk)*                    # 浠?token 绾ф祦寮?鈫?SENTENCE(sentence)*               # 浠?token 绾ф祦寮?鈫?[GRAPH_DONE]                      # 澶嶆潅鍦烘櫙棰濆
-鈫?COMMIT(narrative, audit_refs)
+→ PRESENCE(GOV_APPROVED)
+→ [PRESENCE(SCENE_ROUTED)]          # 复杂场景额外
+→ [GRAPH_START]                     # 复杂场景额外
+→ RENDER(chunk)*                    # 仅 token 级流式
+→ SENTENCE(sentence)*               # 仅 token 级流式
+→ [GRAPH_DONE]                      # 复杂场景额外
+→ COMMIT(narrative, audit_refs)
 ```
 
-**COMMIT 浜嬩欢鐨?`audit_refs` 缁撴瀯**鍦ㄤ笁鏉¤矾寰勪腑楂樺害涓€鑷达紝鍧囧寘鍚細
-- `intent_id`銆乣retrieval`銆乣llm`锛堝惈 `route_decision`銆乣emotion_snapshot`锛?- `episodic_memory`銆乣trace_metrics`
+**COMMIT 事件的 `audit_refs` 结构**在三条路径中高度一致，均包含：
+- `intent_id`、`retrieval`、`llm`（含 `route_decision`、`emotion_snapshot`）
+- `episodic_memory`、`trace_metrics`
 
-### 闂娓呭崟
+### 问题清单
 
-| # | 闂 | 浣嶇疆 | 涓ラ噸搴?|
+| # | 问题 | 位置 | 严重度 |
 |---|------|------|--------|
-| 1 | `_sse_event_generator` 鍦?`_pre_approved_governor_result` 浼犲叆鏃惰烦杩?`GOV_APPROVED` 浜嬩欢锛岃嫢琚洿鎺ヨ皟鐢紙涓嶇粡杩?`_unified_chat_sse_generator`锛夛紝瀹㈡埛绔細鏀朵笉鍒?`GOV_APPROVED` 浜嬩欢 | `chat_stream_handler.py:L530-535` | 馃煛 涓嵄 |
-| 2 | Gaming Edge 璺緞鐨?COMMIT 浜嬩欢缂哄皯 `prompt_context_validation` 鍜?`prompt_context_observability` 瀛楁锛堣涓虹┖ `{}`锛夛紝瀹㈡埛绔鏋滀緷璧栬繖浜涘瓧娈典細鍑虹幇 KeyError | `chat_handler_edge.py:L310-315` | 馃煝 浣庡嵄 |
-| 3 | `_complex_scene_sse_generator` 鐨?COMMIT 浜嬩欢涓?`audit_refs` 娌℃湁椤跺眰 `vts` 瀛楁锛岃€?`_sse_event_generator` 鏈夛紝涓ゆ潯璺緞鐨?COMMIT 缁撴瀯涓嶅畬鍏ㄥ绉?| `chat_handler_complex.py:L430` vs `chat_stream_handler.py:L700` | 馃煝 浣庡嵄 |
+| 1 | `_sse_event_generator` 在 `_pre_approved_governor_result` 传入时跳过 `GOV_APPROVED` 事件，若被直接调用（不经过 `_unified_chat_sse_generator`），客户端会收不到 `GOV_APPROVED` 事件 | `chat_stream_handler.py:L530-535` | 🟡 中危 |
+| 2 | Gaming Edge 路径的 COMMIT 事件缺少 `context_pack_validation` 和 `context_pack_observability` 字段（设为空 `{}`），客户端如果依赖这些字段会出现 KeyError | `chat_handler_edge.py:L310-315` | 🟢 低危 |
+| 3 | `_complex_scene_sse_generator` 的 COMMIT 事件中 `audit_refs` 没有顶层 `vts` 字段，而 `_sse_event_generator` 有，两条路径的 COMMIT 结构不完全对称 | `chat_handler_complex.py:L430` vs `chat_stream_handler.py:L700` | 🟢 低危 |
 
 ---
 
-## 浜斻€佹墍鏈夎矾鐢辩殑鎯呮劅灞傛帴鍏ユ儏鍐?
-| 璺敱 | 鎯呮劅灞傛帴鍏?| 鎺ュ叆鏂瑰紡 | 瀹屾暣搴?|
+## 五、所有路由的情感层接入情况
+
+| 路由 | 情感层接入 | 接入方式 | 完整度 |
 |------|-----------|---------|--------|
-| `POST /v1/chat`锛圫CENE_CHAT锛宼oken 娴佸紡锛?| 鉁?瀹屾暣 | `resolve_chat_emotion_context` 鈫?`build_chat_governance_snapshot` 鈫?Governor 鈫?`adjust_gen_params_for_emotion` 鈫?VTS 椹卞姩 鈫?`emotion_snapshot` 鍐欏叆 COMMIT | 鍏ㄩ摼璺?|
-| `POST /v1/chat`锛堝鏉傚満鏅紝LangGraph锛?| 鉁?瀹屾暣 | 鍚屼笂 + `emotion_snapshot` 娉ㄥ叆 `graph_config` payload + Bond 鎯呮劅鍔犳潈 | 鍏ㄩ摼璺?|
-| `POST /v1/chat`锛圙aming Edge锛?| 鈿狅笍 閮ㄥ垎 | `_build_edge_emotion_context_payload` 浼犵粰 Edge RPC锛屼絾**鏃?VTS 椹卞姩銆佹棤 Bond 鏇存柊銆佹棤 episodic 鍐欏叆** | 鏈€灏忚矾寰?|
-| `POST /bond/event` | 鉂?鏃?| `BondEventRequest` 鏃?`emotion_tag`/`emotion_intensity` 瀛楁锛宍apply_event` 璋冪敤鏃?`emotion_intensity` 鍥哄畾涓洪粯璁ゅ€?0.5 | 缂哄け |
-| `GET /bond/stage`銆乣GET /bond/summary` | N/A | 鍙鎺ュ彛 | 鈥?|
-| `POST /v1/edge/events` | 鉂?鏃?| `receive_edge_events_response` 鏃犳儏鎰熶笂涓嬫枃澶勭悊 | 缂哄け |
-| `GET /health`銆乣GET /ready`銆乣GET /metrics` | N/A | 鍩虹璁炬柦鎺ュ彛 | 鈥?|
-| Canon/Scheduler/Tool/Obs 璺敱 | 鉂?鏃?| 绠＄悊绫绘帴鍙ｏ紝鏃犳儏鎰熷眰锛堣璁″姝わ級 | 鈥?|
+| `POST /v1/chat`（SCENE_CHAT，token 流式） | ✅ 完整 | `resolve_chat_emotion_context` → `build_chat_governance_snapshot` → Governor → `adjust_gen_params_for_emotion` → VTS 驱动 → `emotion_snapshot` 写入 COMMIT | 全链路 |
+| `POST /v1/chat`（复杂场景，LangGraph） | ✅ 完整 | 同上 + `emotion_snapshot` 注入 `graph_config` payload + Bond 情感加权 | 全链路 |
+| `POST /v1/chat`（Gaming Edge） | ⚠️ 部分 | `_build_edge_emotion_context_payload` 传给 Edge RPC，但**无 VTS 驱动、无 Bond 更新、无 episodic 写入** | 最小路径 |
+| `POST /bond/event` | ❌ 无 | `BondEventRequest` 无 `emotion_tag`/`emotion_intensity` 字段，`apply_event` 调用时 `emotion_intensity` 固定为默认值 0.5 | 缺失 |
+| `GET /bond/stage`、`GET /bond/summary` | N/A | 只读接口 | — |
+| `POST /v1/edge/events` | ❌ 无 | `receive_edge_events_response` 无情感上下文处理 | 缺失 |
+| `GET /health`、`GET /ready`、`GET /metrics` | N/A | 基础设施接口 | — |
+| Canon/Scheduler/Tool/Obs 路由 | ❌ 无 | 管理类接口，无情感层（设计如此） | — |
 
 ---
 
-## 鍏€佹儏鎰熷眰鍦ㄦ暣涓郴缁熺殑杩為€氭€?
-### 杩為€氭€ф祦绋嬪浘
+## 六、情感层在整个系统的连通性
+
+### 连通性流程图
 
 ```mermaid
 flowchart TD
@@ -163,36 +186,36 @@ flowchart TD
     B --> E["build_chat_governance_snapshot"]
     E --> F["Governor.evaluate_intent"]
 
-    F -->|"critical + TOOL_CALL"| G["鉂?REJECT\nEMOTION_GATE_BLOCKED"]
-    F -->|"APPROVE"| H["emotion_context 浼犻€?]
+    F -->|"critical + TOOL_CALL"| G["❌ REJECT\nEMOTION_GATE_BLOCKED"]
+    F -->|"APPROVE"| H["emotion_context 传递"]
 
     H --> I["adjust_gen_params_for_emotion\nllm_helpers.py"]
-    I --> I1["temperature / top_p 鍔ㄦ€佽皟鏁?]
+    I --> I1["temperature / top_p 动态调整"]
 
-    H --> J["build_chat_emotion_snapshot\n娉ㄥ叆 prompt payload"]
+    H --> J["build_chat_emotion_snapshot\n注入 prompt payload"]
 
-    H --> K["_drive_stream_vts_emotion\n鈿狅笍 浠?SCENE_CHAT"]
+    H --> K["_drive_stream_vts_emotion\n⚠️ 仅 SCENE_CHAT"]
     K --> K1["resolve_vts_expression\nchannels/vts.py"]
-    K1 --> K2["16 绉嶆儏鎰?鈫?琛ㄦ儏 ID 鏄犲皠"]
+    K1 --> K2["16 种情感 → 表情 ID 映射"]
 
-    H --> L["BondDynamicsWriter.classify_interaction\nemotion_intensity 鍔犳潈"]
-    L --> M["BondStageEngine.apply_event\n鈿狅笍 浠呭鏉傚満鏅?]
+    H --> L["BondDynamicsWriter.classify_interaction\nemotion_intensity 加权"]
+    L --> M["BondStageEngine.apply_event\n⚠️ 仅复杂场景"]
     M --> M1{"emotion_intensity > 0.7?"}
-    M1 -->|"鏄?| M2["1.5x 绉垎鍔犳潈"]
-    M1 -->|"鍚?| M3["姝ｅ父绉垎"]
+    M1 -->|"是"| M2["1.5x 积分加权"]
+    M1 -->|"否"| M3["正常积分"]
     M2 --> N["BondScoreState"]
     M3 --> N
     N --> O["to_summary\nstyle_hint / repair_hint"]
-    O --> P["PromptContext 娉ㄥ叆 LLM prompt"]
+    O --> P["ContextPack 注入 LLM prompt"]
 
-    subgraph ISOLATED ["鉂?瀛ょ珛妯″潡锛堝畾涔夊畬鏁翠絾鏃犺皟鐢ㄦ柟锛?]
+    subgraph ISOLATED ["❌ 孤立模块（定义完整但无调用方）"]
         direction LR
-        Z1["EmotionVector\nVAD 涓夌淮妯″瀷"]
+        Z1["EmotionVector\nVAD 三维模型"]
         Z2["EmotionTimeline"]
         Z3["compute_emotion_echo"]
         Z4["evaluate_emotion_triggers"]
         Z5["apply_visual_emotion_hint"]
-        Z6["BondEmotionalTexture.update()\napply_event 涓粠鏈皟鐢?]
+        Z6["BondEmotionalTexture.update()\napply_event 中从未调用"]
     end
 
     style G fill:#ff4d4d,color:#fff
@@ -207,96 +230,102 @@ flowchart TD
     style M fill:#fff3cd,stroke:#ffc107
 ```
 
-### 杩為€氭€ц瘎浼拌〃
+### 连通性评估表
 
-| 鎯呮劅妯″潡 | 杩為€氱姸鎬?| 璇存槑 |
+| 情感模块 | 连通状态 | 说明 |
 |---------|---------|------|
-| `normalize_hard_state` + `build_hard_snapshot` | 鉁?宸叉帴鍏?| 姣忔璇锋眰閮界粡杩?|
-| `build_governance_snapshot` | 鉁?宸叉帴鍏?| Governor 閴存潈蹇呯粡 |
-| R8 鎯呮劅闂ㄦ帶锛坄critical` 鐘舵€佹嫤鎴級 | 鉁?宸叉帴鍏?| Governor 鍐呴儴 |
-| `adjust_gen_params_for_emotion` | 鉁?宸叉帴鍏?| 涓ゆ潯涓昏矾寰勫潎鏈?|
-| VTS 琛ㄦ儏椹卞姩锛?6 绉嶆儏鎰熸槧灏勶級 | 鈿狅笍 閮ㄥ垎鎺ュ叆 | 浠?SCENE_CHAT锛屽鏉傚満鏅?*鏈帴鍏?* |
-| Bond 鎯呮劅鍔犳潈锛?.5x锛?| 鈿狅笍 閮ㄥ垎鎺ュ叆 | 浠呭鏉傚満鏅紝SCENE_CHAT 娴佸紡璺緞**鏈帴鍏?* |
-| `EmotionVector`锛圴AD 涓夌淮妯″瀷锛?| 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣浣嗘棤璋冪敤鏂?|
-| `EmotionTimeline` | 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣浣嗘棤璋冪敤鏂?|
-| `compute_emotion_echo` | 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣浣嗘棤璋冪敤鏂?|
-| `evaluate_emotion_triggers` | 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣浣嗘棤璋冪敤鏂?|
-| `apply_visual_emotion_hint` | 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣浣嗘棤璋冪敤鏂?|
-| `BondEmotionalTexture.update()` | 鉂?**瀛ょ珛** | 瀹氫箟瀹屾暣锛宍apply_event` 涓?*浠庢湭璋冪敤** |
+| `normalize_hard_state` + `build_hard_snapshot` | ✅ 已接入 | 每次请求都经过 |
+| `build_governance_snapshot` | ✅ 已接入 | Governor 鉴权必经 |
+| R8 情感门控（`critical` 状态拦截） | ✅ 已接入 | Governor 内部 |
+| `adjust_gen_params_for_emotion` | ✅ 已接入 | 两条主路径均有 |
+| VTS 表情驱动（16 种情感映射） | ⚠️ 部分接入 | 仅 SCENE_CHAT，复杂场景**未接入** |
+| Bond 情感加权（1.5x） | ⚠️ 部分接入 | 仅复杂场景，SCENE_CHAT 流式路径**未接入** |
+| `EmotionVector`（VAD 三维模型） | ❌ **孤立** | 定义完整但无调用方 |
+| `EmotionTimeline` | ❌ **孤立** | 定义完整但无调用方 |
+| `compute_emotion_echo` | ❌ **孤立** | 定义完整但无调用方 |
+| `evaluate_emotion_triggers` | ❌ **孤立** | 定义完整但无调用方 |
+| `apply_visual_emotion_hint` | ❌ **孤立** | 定义完整但无调用方 |
+| `BondEmotionalTexture.update()` | ❌ **孤立** | 定义完整，`apply_event` 中**从未调用** |
 
-### 鏈€涓ラ噸鐨勮繛閫氭€ф柇瑁?
-1. **`BondEmotionalTexture` 浠庢湭琚洿鏂?*锛歚BondStageEngine.apply_event` 涓绠椾簡绉垎銆佽Е鍙戜簡鏅嬬骇锛屼絾 `state.texture.update(response_gap_ms=..., emotion_valence=...)` 浠庢湭琚皟鐢紝`intimacy_temperature` 姘歌繙鏄垵濮嬪€?0.5锛宍to_summary()` 涓殑 `style_hint` 姘歌繙涓嶄細鍑虹幇锛堝洜涓?`0.5 < 0.7`锛夈€?
-2. **`EmotionVector` VAD 妯″瀷瀹屽叏瀛ょ珛**锛歚metabolism.py` 涓畾涔変簡瀹屾暣鐨?VAD 涓夌淮鎯呯华妯″瀷锛堣“鍑忋€佹贩鍚堛€佹槧灏勶級锛屼絾鏁翠釜绯荤粺涓病鏈変换浣曞湴鏂瑰垱寤烘垨浣跨敤 `EmotionVector` 瀹炰緥銆?
-3. **VTS 椹卞姩浠呭湪 SCENE_CHAT 娴佸紡璺緞鎺ュ叆**锛屽鏉傚満鏅紙WORK_CODE/WORK_TRANSLATE/EXEC_INTENT锛夋墽琛屽畬 LangGraph 鍚庢病鏈夎Е鍙?VTS 琛ㄦ儏鏇存柊銆?
+### 最严重的连通性断裂
+
+1. **`BondEmotionalTexture` 从未被更新**：`BondStageEngine.apply_event` 中计算了积分、触发了晋级，但 `state.texture.update(response_gap_ms=..., emotion_valence=...)` 从未被调用，`intimacy_temperature` 永远是初始值 0.5，`to_summary()` 中的 `style_hint` 永远不会出现（因为 `0.5 < 0.7`）。
+
+2. **`EmotionVector` VAD 模型完全孤立**：`metabolism.py` 中定义了完整的 VAD 三维情绪模型（衰减、混合、映射），但整个系统中没有任何地方创建或使用 `EmotionVector` 实例。
+
+3. **VTS 驱动仅在 SCENE_CHAT 流式路径接入**，复杂场景（WORK_CODE/WORK_TRANSLATE/EXEC_INTENT）执行完 LangGraph 后没有触发 VTS 表情更新。
+
 ---
 
-## 涓冦€丅ond 浼樺寲鎯呭喌
+## 七、Bond 优化情况
 
-### 缁撹
+### 结论
 
-> **宸茶秴瓒婄畝鍗曟父鎴忔暟鍊煎寲锛屼絾鏍稿績鎯呮劅璐ㄦ劅灞傛湭婵€娲汇€?*
+> **已超越简单游戏数值化，但核心情感质感层未激活。**
 
-### 宸插疄鐜扮殑浼樺寲锛堣秴瓒婃暟鍊煎寲鐨勯儴鍒嗭級
+### 已实现的优化（超越数值化的部分）
 
-| 浼樺寲椤?| 瀹炵幇浣嶇疆 | 璐ㄩ噺 |
+| 优化项 | 实现位置 | 质量 |
 |--------|---------|------|
-| **涓夌骇浜掑姩鍒嗙被**锛圡INIMAL/ENGAGED/DEEP锛夊熀浜庢枃鏈暱搴?+ 鎯呮劅寮哄害 + 闂彿鏁伴噺 | `BondDynamicsWriter.classify_interaction` | 鉁?鏈夎涔?|
-| **鎯呮劅寮哄害鍔犳潈**锛坄emotion_intensity > 0.7` 鈫?1.5x 绉垎锛?| `BondStageEngine.apply_event` | 鉁?鏈夋儏鎰熸劅鐭?|
-| **瑁傜棔-淇鍙岃建鏈哄埗**锛圕ONFLICT/APOLOGY/COMFORT 浜嬩欢瑙﹀彂瑁傜棔/淇锛?| `BondDynamicsWriter._apply_rift_event` | 鉁?鏈夊叧绯诲姩鎬?|
-| **`BondEmotionalTexture`**锛堜翰瀵嗘俯搴?= 鍥炲鑺傚 脳 鎯呮劅鍧囧€硷級 | `BondScoreState.texture` | 鈿狅笍 瀹氫箟瀹屾暣浣?*浠庢湭鏇存柊** |
-| **`to_summary()` 鍏ㄤ腑鏂囪涔夎緭鍑?*锛堜笉鍚暟鍊硷紝渚?LLM 娑堣垂锛?| `BondScoreState.to_summary` | 鉁?璁捐姝ｇ‘ |
-| **`repair_hint` 淇椋庢牸鎻愮ず**锛堟敞鍏?LLM prompt锛?| `BondRiftState.repair_hint` | 鈿狅笍 閫昏緫姝ｇ‘浣?`style_hint` 姘歌繙涓嶈Е鍙?|
-| **闃舵鍚嶇О涓枃鏄犲皠**锛堥檶鐢熶汉鈫掔浉璇嗏啋鏈嬪弸鈫掓寶鍙嬧啋鐭ュ繁鈫掔伒榄備即渚ｏ級 | `_STAGE_CN_MAP` | 鉁?|
+| **三级互动分类**（MINIMAL/ENGAGED/DEEP）基于文本长度 + 情感强度 + 问号数量 | `BondDynamicsWriter.classify_interaction` | ✅ 有语义 |
+| **情感强度加权**（`emotion_intensity > 0.7` → 1.5x 积分） | `BondStageEngine.apply_event` | ✅ 有情感感知 |
+| **裂痕-修复双轨机制**（CONFLICT/APOLOGY/COMFORT 事件触发裂痕/修复） | `BondDynamicsWriter._apply_rift_event` | ✅ 有关系动态 |
+| **`BondEmotionalTexture`**（亲密温度 = 回复节奏 × 情感均值） | `BondScoreState.texture` | ⚠️ 定义完整但**从未更新** |
+| **`to_summary()` 全中文语义输出**（不含数值，供 LLM 消费） | `BondScoreState.to_summary` | ✅ 设计正确 |
+| **`repair_hint` 修复风格提示**（注入 LLM prompt） | `BondRiftState.repair_hint` | ⚠️ 逻辑正确但 `style_hint` 永远不触发 |
+| **阶段名称中文映射**（陌生人→相识→朋友→挚友→知己→灵魂伴侣） | `_STAGE_CN_MAP` | ✅ |
 
-### 浠嶆槸娓告垙鏁板€煎寲鐨勯儴鍒?
-| 闂 | 璇存槑 |
+### 仍是游戏数值化的部分
+
+| 问题 | 说明 |
 |------|------|
-| **绉垎闃堝€兼槸纭紪鐮佸父閲?*锛圫TRANGER=0, ACQUAINTANCE=10, FRIEND=30...SOULMATE=300锛夛紝鏃犲姩鎬佽皟鏁存満鍒?| `DEFAULT_STAGE_THRESHOLDS` |
-| **`BondEmotionalTexture.update()` 浠庢湭琚皟鐢?*锛宍intimacy_temperature` 姘歌繙鏄?0.5锛屼翰瀵嗘俯搴﹀姛鑳藉舰鍚岃櫄璁?| `BondStageEngine.apply_event` 涓己灏?`state.texture = state.texture.update(...)` |
-| **`POST /bond/event` 鎺ュ彛鏃犳儏鎰熷弬鏁?*锛屽閮ㄦ彁浜?Bond 浜嬩欢鏃舵棤娉曚紶鍏?`emotion_tag`/`emotion_intensity`锛屾儏鎰熷姞鏉冨け鏁?| `bond_routes.py:BondEventRequest` |
-| **Bond 鏇存柊浠呭湪澶嶆潅鍦烘櫙璺緞瑙﹀彂**锛孲CENE_CHAT 娴佸紡璺緞涓病鏈?Bond 鏇存柊閫昏緫锛屾棩甯稿璇濅笉绉疮 Bond 绉垎 | `chat_stream_handler.py` |
-| **`BondDynamicsWriter` 浣跨敤 `InMemoryNeo4jBondClient`**锛岃繘绋嬮噸鍚悗鎵€鏈?Bond 鐘舵€佷涪澶憋紝鏃犳寔涔呭寲 | `bond_dynamics.py:L30` |
+| **积分阈值是硬编码常量**（STRANGER=0, ACQUAINTANCE=10, FRIEND=30...SOULMATE=300），无动态调整机制 | `DEFAULT_STAGE_THRESHOLDS` |
+| **`BondEmotionalTexture.update()` 从未被调用**，`intimacy_temperature` 永远是 0.5，亲密温度功能形同虚设 | `BondStageEngine.apply_event` 中缺少 `state.texture = state.texture.update(...)` |
+| **`POST /bond/event` 接口无情感参数**，外部提交 Bond 事件时无法传入 `emotion_tag`/`emotion_intensity`，情感加权失效 | `bond_routes.py:BondEventRequest` |
+| **Bond 更新仅在复杂场景路径触发**，SCENE_CHAT 流式路径中没有 Bond 更新逻辑，日常对话不积累 Bond 积分 | `chat_stream_handler.py` |
+| **`BondDynamicsWriter` 使用 `InMemoryNeo4jBondClient`**，进程重启后所有 Bond 状态丢失，无持久化 | `bond_dynamics.py:L30` |
 
 ---
 
-## 鍏€佹眹鎬伙細闇€瑕佷慨澶嶇殑鍏抽敭闂
+## 八、汇总：需要修复的关键问题
 
-> **淇鐘舵€佹洿鏂帮細2026-03-11 14:10**
-> 鎵€鏈?12 涓棶棰樺凡鍏ㄩ儴淇锛?511 涓崟鍏冩祴璇曞叏閮ㄩ€氳繃锛堟柊澧?15 涓祴璇曪級銆?> #4锛圡ainChain 閫傞厤灞傦級鍜?#10锛圔ond SQLite 鎸佷箙鍖栵級宸插畬鎴愭灦鏋勭骇淇銆?
-| # | 闂 | 鏂囦欢 | 涓ラ噸搴?| 鐘舵€?|
+> **修复状态更新：2026-03-11 14:10**
+> 所有 12 个问题已全部修复，1511 个单元测试全部通过（新增 15 个测试）。
+> #4（MainChain 适配层）和 #10（Bond SQLite 持久化）已完成架构级修复。
+
+| # | 问题 | 文件 | 严重度 | 状态 |
 |---|------|------|--------|------|
-| 1 | `resolve_host_llm_runtime` 涓悓姝?HTTP 鍋ュ悍鎺㈡祴鍦ㄤ簨浠跺惊鐜腑鐩存帴璋冪敤锛岄樆濉炴渶澶?3s | `graph_config_builder.py` | 馃敶 楂樺嵄 | 鉁?宸蹭慨澶?|
-| 2 | `intent_draft.action` 鍥哄畾涓?`narrative_only`锛孏overnor 鏃犳硶鎰熺煡鐪熷疄鎰忓浘绫诲瀷锛孍XEC_INTENT 缁曡繃鎯呮劅闂ㄦ帶 | `chat_handler.py` | 馃煚 涓珮鍗?| 鉁?宸蹭慨澶?|
-| 3 | `scene_type` 鍙瀹㈡埛绔樉寮忚鐩栵紝鏃?Governor 鏍￠獙 | `chat_handler.py` | 馃煚 涓珮鍗?| 鉁?宸蹭慨澶?|
-| 4 | `MainChain` 鏄浠ｇ爜锛屼笌瀹為檯璺敱瀹屽叏鑴辫妭 | `main_chain.py` | 馃煚 涓珮鍗?| 鉁?宸蹭慨澶嶏紙杩佺Щ涓?`_unified_chat_sse_generator` 閫傞厤灞傦級 |
-| 5 | `BondEmotionalTexture.update()` 浠庢湭琚皟鐢紝浜插瘑娓╁害姘歌繙鏄?0.5 | `bond_stage_engine.py` | 馃煚 涓珮鍗?| 鉁?宸蹭慨澶?|
-| 6 | `EmotionVector`/`EmotionTimeline`/`compute_emotion_echo`/`evaluate_emotion_triggers` 瀹屽叏瀛ょ珛锛孷AD 鎯呮劅妯″瀷鏃犺皟鐢ㄦ柟 | `emotion_context.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶?|
-| 7 | VTS 椹卞姩浠呭湪 SCENE_CHAT 鎺ュ叆锛屽鏉傚満鏅棤 VTS 瑙﹀彂 | `chat_handler_complex.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶?|
-| 8 | SCENE_CHAT 娴佸紡璺緞鏃?Bond 鏇存柊锛屾棩甯稿璇濅笉绉疮 Bond 绉垎 | `chat_stream_handler.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶?|
-| 9 | `POST /bond/event` 鏃犳儏鎰熷弬鏁帮紝澶栭儴 Bond 浜嬩欢鎯呮劅鍔犳潈澶辨晥 | `bond_routes.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶?|
-| 10 | `BondDynamicsWriter` 浣跨敤鍐呭瓨 Neo4j 瀹㈡埛绔紝杩涚▼閲嶅惎鍚?Bond 鐘舵€佷涪澶?| `bond_dynamics.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶嶏紙`SqliteBondClient` + 鐜鍙橀噺鍒囨崲锛?|
-| 11 | `SCENE_VISION_UI` 鍒嗙被鍚庤蛋 `chat_direct` 鑺傜偣锛岃瑙夊満鏅棤涓撶敤澶勭悊 | `chat_handler.py` | 馃煛 涓嵄 | 鉁?宸蹭慨澶嶏紙鎷︽埅骞惰繑鍥?SCENE_VISION_UI_NOT_SUPPORTED锛?|
-| 12 | `_complex_scene_sse_generator` COMMIT 缂哄皯 `vts` 瀛楁锛孲SE 鍙岀涓嶅绉?| `chat_handler_complex.py` | 馃煝 浣庡嵄 | 鉁?宸蹭慨澶?|
+| 1 | `resolve_host_llm_runtime` 中同步 HTTP 健康探测在事件循环中直接调用，阻塞最多 3s | `graph_config_builder.py` | 🔴 高危 | ✅ 已修复 |
+| 2 | `intent_draft.action` 固定为 `narrative_only`，Governor 无法感知真实意图类型，EXEC_INTENT 绕过情感门控 | `chat_handler.py` | 🟠 中高危 | ✅ 已修复 |
+| 3 | `scene_type` 可被客户端显式覆盖，无 Governor 校验 | `chat_handler.py` | 🟠 中高危 | ✅ 已修复 |
+| 4 | `MainChain` 是死代码，与实际路由完全脱节 | `main_chain.py` | 🟠 中高危 | ✅ 已修复（迁移为 `_unified_chat_sse_generator` 适配层） |
+| 5 | `BondEmotionalTexture.update()` 从未被调用，亲密温度永远是 0.5 | `bond_stage_engine.py` | 🟠 中高危 | ✅ 已修复 |
+| 6 | `EmotionVector`/`EmotionTimeline`/`compute_emotion_echo`/`evaluate_emotion_triggers` 完全孤立，VAD 情感模型无调用方 | `emotion_context.py` | 🟡 中危 | ✅ 已修复 |
+| 7 | VTS 驱动仅在 SCENE_CHAT 接入，复杂场景无 VTS 触发 | `chat_handler_complex.py` | 🟡 中危 | ✅ 已修复 |
+| 8 | SCENE_CHAT 流式路径无 Bond 更新，日常对话不积累 Bond 积分 | `chat_stream_handler.py` | 🟡 中危 | ✅ 已修复 |
+| 9 | `POST /bond/event` 无情感参数，外部 Bond 事件情感加权失效 | `bond_routes.py` | 🟡 中危 | ✅ 已修复 |
+| 10 | `BondDynamicsWriter` 使用内存 Neo4j 客户端，进程重启后 Bond 状态丢失 | `bond_dynamics.py` | 🟡 中危 | ✅ 已修复（`SqliteBondClient` + 环境变量切换） |
+| 11 | `SCENE_VISION_UI` 分类后走 `chat_direct` 节点，视觉场景无专用处理 | `chat_handler.py` | 🟡 中危 | ✅ 已修复（拦截并返回 SCENE_VISION_UI_NOT_SUPPORTED） |
+| 12 | `_complex_scene_sse_generator` COMMIT 缺少 `vts` 字段，SSE 双端不对称 | `chat_handler_complex.py` | 🟢 低危 | ✅ 已修复 |
 
-### 淇鎽樿
+### 修复摘要
 
-| 淇缂栧彿 | 淇鍐呭 | 鍏抽敭鏀瑰姩 |
+| 修复编号 | 修复内容 | 关键改动 |
 |---------|---------|---------|
-| #1 | 鍚屾 HTTP 鍋ュ悍鎺㈡祴鏀逛负寮傛 | 鏂板 `_resolve_host_8b_health_status_async`锛坄asyncio.to_thread` 鍖呰锛夛紝`resolve_host_llm_runtime_async` 浣跨敤寮傛鐗堟湰锛沗chat_stream_handler.py` 鍜?`chat_handler_complex.py` 鍧囨敼鐢ㄥ紓姝ョ増鏈?|
-| #2 | `intent_draft.action` 鍔ㄦ€佹槧灏?| `chat_handler.py` 涓?`_action_map` 鎸?`pre_intent_classifier` 缁撴灉璁剧疆 `action`锛坄exec_intent`/`work_code`/`work_translate`/`narrative_only`锛夛紱`governor/schemas.py` 鏂板瀵瑰簲 `ACTION_ALLOWLIST` 鍜?`ACTION_ARGS_RULES` |
-| #3 | `scene_type` 瀹㈡埛绔牎楠?| `chat_handler.py` 涓鏄惧紡 `scene_type` 鍋?`ALLOWED_EXPLICIT_SCENE_TYPES` 鐧藉悕鍗曟牎楠岋紝闈炴硶鍊奸檷绾т负 `SCENE_CHAT` |
-| #5 | `BondEmotionalTexture.update()` 婵€娲?| `bond_stage_engine.py:apply_event` 涓柊澧?`state.texture = state.texture.update(response_gap_ms=..., emotion_valence=...)` |
-| #6 | VAD 鎯呮劅妯″瀷鎺ュ叆 | `emotion_context.py` 涓?`normalize_chat_emotion_context` 鍒涘缓 `EmotionVector`銆佽褰?`EmotionTimeline`銆佽皟鐢?`compute_emotion_echo` 鍜?`evaluate_emotion_triggers`锛岀粨鏋滄敞鍏?`emotion_context` 瀛楀吀 |
-| #7 | 澶嶆潅鍦烘櫙 VTS 椹卞姩 | `chat_handler_complex.py` 鍚庡鐞嗛樁娈佃皟鐢?`_drive_stream_vts_emotion`锛宍vts_summary` 鍐欏叆 COMMIT `audit_refs` |
-| #8 | SCENE_CHAT 娴佸紡 Bond 鏇存柊 | `chat_stream_handler.py` 鍚庡鐞?`asyncio.gather` 涓柊澧?`_run_bond()` 鍗忕▼锛屼笌 Airlock/Episodic/VTS 骞惰鎵ц |
-| #9 | `POST /bond/event` 鎯呮劅鍙傛暟 | `bond_routes.py:BondEventRequest` 鏂板 `emotion_tag`/`emotion_intensity` 瀛楁锛沗submit_bond_event` 灏?`emotion_intensity` 浼犲叆 `engine.apply_event` |
-| #11 | SCENE_VISION_UI 鎷︽埅 | `chat_handler.py` 涓?`SCENE_VISION_UI` 鍒嗘敮杩斿洖 `SCENE_VISION_UI_NOT_SUPPORTED` 閿欒锛屼笉鍐嶉潤榛樿蛋 `chat_direct` 鑺傜偣 |
-| #12 | COMMIT `vts` 瀛楁琛ュ叏 | `chat_handler_complex.py` COMMIT 浜嬩欢 `audit_refs` 涓柊澧?`"vts": vts_summary` |
-| #4 | MainChain 杩佺Щ涓洪€傞厤灞?| `main_chain.py` 鏂板 `run_as_sse_adapter()` 鏂规硶锛屽鎵樼粰 `_unified_chat_sse_generator`锛沗dependencies.py` 鏂板 `run_chat_via_main_chain()` 杈呭姪鍑芥暟锛涙柊澧?`test_main_chain_sse_adapter.py`锛? 涓祴璇曪級 |
-| #10 | Bond SQLite 鎸佷箙鍖?| `neo4j_client.py` 宸叉湁 `SqliteBondClient` 瀹炵幇锛沗dependencies.py:get_bond_update_queue()` 鐨?`writer_factory` 鏀圭敤 `get_bond_neo4j_client()`锛堟敮鎸?`HOST_BOND_BACKEND=sqlite` 鐜鍙橀噺鍒囨崲锛夛紱鏂板 `test_bond_sqlite_persistence.py`锛?0 涓祴璇曪級 |
+| #1 | 同步 HTTP 健康探测改为异步 | 新增 `_resolve_host_8b_health_status_async`（`asyncio.to_thread` 包装），`resolve_host_llm_runtime_async` 使用异步版本；`chat_stream_handler.py` 和 `chat_handler_complex.py` 均改用异步版本 |
+| #2 | `intent_draft.action` 动态映射 | `chat_handler.py` 中 `_action_map` 按 `pre_intent_classifier` 结果设置 `action`（`exec_intent`/`work_code`/`work_translate`/`narrative_only`）；`governor/schemas.py` 新增对应 `ACTION_ALLOWLIST` 和 `ACTION_ARGS_RULES` |
+| #3 | `scene_type` 客户端校验 | `chat_handler.py` 中对显式 `scene_type` 做 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单校验，非法值降级为 `SCENE_CHAT` |
+| #5 | `BondEmotionalTexture.update()` 激活 | `bond_stage_engine.py:apply_event` 中新增 `state.texture = state.texture.update(response_gap_ms=..., emotion_valence=...)` |
+| #6 | VAD 情感模型接入 | `emotion_context.py` 中 `normalize_chat_emotion_context` 创建 `EmotionVector`、记录 `EmotionTimeline`、调用 `compute_emotion_echo` 和 `evaluate_emotion_triggers`，结果注入 `emotion_context` 字典 |
+| #7 | 复杂场景 VTS 驱动 | `chat_handler_complex.py` 后处理阶段调用 `_drive_stream_vts_emotion`，`vts_summary` 写入 COMMIT `audit_refs` |
+| #8 | SCENE_CHAT 流式 Bond 更新 | `chat_stream_handler.py` 后处理 `asyncio.gather` 中新增 `_run_bond()` 协程，与 Airlock/Episodic/VTS 并行执行 |
+| #9 | `POST /bond/event` 情感参数 | `bond_routes.py:BondEventRequest` 新增 `emotion_tag`/`emotion_intensity` 字段；`submit_bond_event` 将 `emotion_intensity` 传入 `engine.apply_event` |
+| #11 | SCENE_VISION_UI 拦截 | `chat_handler.py` 中 `SCENE_VISION_UI` 分支返回 `SCENE_VISION_UI_NOT_SUPPORTED` 错误，不再静默走 `chat_direct` 节点 |
+| #12 | COMMIT `vts` 字段补全 | `chat_handler_complex.py` COMMIT 事件 `audit_refs` 中新增 `"vts": vts_summary` |
+| #4 | MainChain 迁移为适配层 | `main_chain.py` 新增 `run_as_sse_adapter()` 方法，委托给 `_unified_chat_sse_generator`；`dependencies.py` 新增 `run_chat_via_main_chain()` 辅助函数；新增 `test_main_chain_sse_adapter.py`（5 个测试） |
+| #10 | Bond SQLite 持久化 | `neo4j_client.py` 已有 `SqliteBondClient` 实现；`dependencies.py:get_bond_update_queue()` 的 `writer_factory` 改用 `get_bond_neo4j_client()`（支持 `HOST_BOND_BACKEND=sqlite` 环境变量切换）；新增 `test_bond_sqlite_persistence.py`（10 个测试） |
 
 ---
 
-*鎶ュ憡鐢熸垚鏃堕棿锛?026-03-11 09:45 | 瀹¤妯″瀷锛歝laude-4.6-sonnet*
-*淇瀹屾垚鏃堕棿锛?026-03-11 14:10 | 淇妯″瀷锛歝laude-4.6-sonnet | 娴嬭瘯缁撴灉锛?511 passed锛堟柊澧?15 涓祴璇曪級*
-
+*报告生成时间：2026-03-11 09:45 | 审计模型：claude-4.6-sonnet*
+*修复完成时间：2026-03-11 14:10 | 修复模型：claude-4.6-sonnet | 测试结果：1511 passed（新增 15 个测试）*

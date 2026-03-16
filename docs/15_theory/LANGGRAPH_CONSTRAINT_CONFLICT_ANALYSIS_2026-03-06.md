@@ -1,23 +1,31 @@
-﻿# LangGraph 瀹屾暣缂栨帓鑳藉姏 vs 鏍稿績绾︽潫鍐茬獊鍒嗘瀽鎶ュ憡
+# LangGraph 完整编排能力 vs 核心约束冲突分析报告
 
-- **鏂囨。缂栧彿**锛歀ANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS
-- **鐢熸垚鏃ユ湡**锛?026-03-06
-- **瑙勬牸渚濇嵁**锛歚docs/30_devspec/ModelPlane.md`
-- **鍒嗘瀽瀵硅薄**锛歚host_brain/integrations/graph_executor.py` / `graph_runtime.py`
-- **缁撹鎽樿**锛歀angGraph 鐨?5 椤归珮绾х紪鎺掕兘鍔涗笌 ModelPlane.md 鐨勭‖绾︽潫瀛樺湪缁撴瀯鎬у啿绐侊紝褰撳墠鏋舵瀯涓烘湁鎰忛檷绾т娇鐢紝灞炰簬娌荤悊浼樺厛浜庢鏋惰兘鍔涚殑涓诲姩鍙栬垗銆?
----
-
-## 涓€銆丩angGraph 瀹屾暣缂栨帓鑳藉姏娓呭崟
-
-LangGraph 鍘熺敓鏀寔鐨勫畬鏁村浘缂栨帓鑳藉姏锛?
-```
-鐪熸鐨勫鑺傜偣鍥剧粨鏋?鈹溾攢鈹€ 鏉′欢杈癸紙conditional_edges锛夆€斺€?渚濊禆鑺傜偣杈撳嚭鍔ㄦ€佽矾鐢?鈹溾攢鈹€ 骞惰鍒嗘敮锛坒an-out / fan-in锛夆€斺€?澶氳妭鐐瑰悓鏃舵墽琛?鈹溾攢鈹€ 瀛愬浘锛圫ubGraph锛夆€斺€?宓屽缂栨帓锛岀埗鍥捐皟鐢ㄥ瓙鍥?鈹溾攢鈹€ 娴佸紡杈撳嚭锛坰tream_mode锛夆€斺€?閫?token 娴佸紡鎺ㄩ€?鈹斺攢鈹€ 鏂偣缁窇锛圕heckpointer锛夆€斺€?interrupt_before/after + 浜哄伐浠嬪叆
-```
+- **文档编号**：LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS
+- **生成日期**：2026-03-06
+- **规格依据**：`docs/30_devspec/ModelPlane.md`
+- **分析对象**：`host_brain/integrations/graph_executor.py` / `graph_runtime.py`
+- **结论摘要**：LangGraph 的 5 项高级编排能力与 ModelPlane.md 的硬约束存在结构性冲突，当前架构为有意降级使用，属于治理优先于框架能力的主动取舍。
 
 ---
 
-## 浜屻€佸綋鍓嶅疄闄呬娇鐢ㄧ殑鍥剧粨鏋?
-`compile_runtime_graph()` 缂栬瘧鍑虹殑瀹為檯鍥撅細
+## 一、LangGraph 完整编排能力清单
+
+LangGraph 原生支持的完整图编排能力：
+
+```
+真正的多节点图结构
+├── 条件边（conditional_edges）—— 依赖节点输出动态路由
+├── 并行分支（fan-out / fan-in）—— 多节点同时执行
+├── 子图（SubGraph）—— 嵌套编排，父图调用子图
+├── 流式输出（stream_mode）—— 逐 token 流式推送
+└── 断点续跑（Checkpointer）—— interrupt_before/after + 人工介入
+```
+
+---
+
+## 二、当前实际使用的图结构
+
+`compile_runtime_graph()` 编译出的实际图：
 
 ```python
 graph.add_node("step",   RunnableLambda(self._run_single_step))
@@ -28,134 +36,173 @@ graph.add_conditional_edges("step", self._route_after_step,
 graph.add_edge("finish", END)
 ```
 
-**瀹為檯鎷撴墤**锛?
+**实际拓扑**：
+
 ```
-START 鈫?step 鉄?(while loop) 鈫?finish 鈫?END
+START → step ⟲ (while loop) → finish → END
 ```
 
-LangGraph 鍦ㄦ浠呬綔涓?**鐘舵€佷紶鎾鍣?* 鍜?**鍙娴嬩笂涓嬫枃**锛屾墍鏈夌紪鎺掑喅绛栨潈鏀跺洖 Host 渚?`edge_map` 瀛楀吀銆?
+LangGraph 在此仅作为 **状态传播容器** 和 **可观测上下文**，所有编排决策权收回 Host 侧 `edge_map` 字典。
+
 ---
 
-## 涓夈€侀€愭潯鍐茬獊鍒嗘瀽
+## 三、逐条冲突分析
 
-### 鍐茬獊 1锛氭潯浠惰竟锛圠LM 椹卞姩璺敱锛塿s 搂0.1 涓绘潈绾︽潫
+### 冲突 1：条件边（LLM 驱动路由）vs §0.1 主权约束
 
-| 缁村害 | LangGraph 鍘熺敓 | 褰撳墠瀹炵幇 |
+| 维度 | LangGraph 原生 | 当前实现 |
 |------|---------------|---------|
-| **璺敱鍐崇瓥鑰?* | LLM 鑺傜偣杈撳嚭 鈫?`conditional_edges` 鍔ㄦ€佸喅瀹氫笅涓€鑺傜偣 | `edge_map` 瀛楀吀锛圥ython dict锛孒ost 渚ч潤鎬佸畾涔夛級 |
-| **鍐茬獊鏉℃** | 搂0.1锛?LLM 鑺傜偣姘歌繙涓嶈鍐炽€佷笉鎵ц" | 鈥?|
-| **椋庨櫓** | 鑻?`safety_verifier` 杈撳嚭 `verdict=FAIL` 鍚庣敱 LangGraph 鏉′欢杈瑰喅瀹氳矾鐢憋紝鍒欒矾鐢卞喅绛栨潈鍦?LLM 杈撳嚭锛岃繚鍙嶄富鏉冪害鏉?| 鈥?|
+| **路由决策者** | LLM 节点输出 → `conditional_edges` 动态决定下一节点 | `edge_map` 字典（Python dict，Host 侧静态定义） |
+| **冲突条款** | §0.1："LLM 节点永远不裁决、不执行" | — |
+| **风险** | 若 `safety_verifier` 输出 `verdict=FAIL` 后由 LangGraph 条件边决定路由，则路由决策权在 LLM 输出，违反主权约束 | — |
 
-**鏍规湰鐭涚浘**锛歀angGraph 鐨勬潯浠惰竟澶╃劧璁捐涓?璁╄妭鐐硅緭鍑哄喅瀹氫笅涓€姝?锛岃€?搂0.1 瑕佹眰"LLM 涓嶅緱瑁佸喅"銆?
-**褰撳墠鏇夸唬鏂规**锛歚edge_map` 瀛楀吀鐢?Host 渚ч潤鎬佸畾涔夛紝LLM 杈撳嚭鍙奖鍝?payload锛屼笉褰卞搷鍥剧粨鏋勩€?
+**根本矛盾**：LangGraph 的条件边天然设计为"让节点输出决定下一步"，而 §0.1 要求"LLM 不得裁决"。
+
+**当前替代方案**：`edge_map` 字典由 Host 侧静态定义，LLM 输出只影响 payload，不影响图结构。
+
 ---
 
-### 鍐茬獊 2锛氬苟琛屽垎鏀紙fan-out锛塿s 搂0.2 AIRLOCK 涓茶瀹¤
+### 冲突 2：并行分支（fan-out）vs §0.2 AIRLOCK 串行审计
 
-**LangGraph 骞惰鍐欐硶**锛?
+**LangGraph 并行写法**：
+
 ```python
 graph.add_edge("node_a", "node_b")
-graph.add_edge("node_a", "node_c")  # b 鍜?c 骞惰鎵ц
+graph.add_edge("node_a", "node_c")  # b 和 c 并行执行
 ```
 
-**鍐茬獊鏉℃**锛毬?.2 瑕佹眰姣忔鍑虹珯蹇呴』鐢熸垚 `sanitization_report_ref` 涓?`payload_digest`锛堝啓鍏?`airlock_log`锛夛紝鍚﹀垯**闃绘柇澶栧彂**銆?
-**鍏蜂綋椋庨櫓**锛?- 骞惰鍑虹綉鏃舵棤娉曚繚璇佹瘡涓垎鏀兘鏈夌嫭绔嬬殑 `sanitization_report_ref`
-- 鏃犳硶淇濊瘉瀹¤鍐欏叆鍦ㄥ嚭缃戝墠瀹屾垚锛坮ace condition锛?- `payload_digest` 闇€瑕佸姣忎釜鍒嗘敮鐨?`prompt_context` 鍗曠嫭璁＄畻锛屽苟鍙戝満鏅笅璁＄畻椤哄簭涓嶅彲鎺?
-**褰撳墠鏇夸唬鏂规**锛歚while` 寰幆寮哄埗涓茶锛屾瘡涓妭鐐规墽琛屽悗鍚屾鍐欏璁★紝褰诲簳瑙勯伩骞跺彂瀹¤闂銆?
+**冲突条款**：§0.2 要求每次出站必须生成 `sanitization_report_ref` 与 `payload_digest`（写入 `airlock_log`），否则**阻断外发**。
+
+**具体风险**：
+- 并行出网时无法保证每个分支都有独立的 `sanitization_report_ref`
+- 无法保证审计写入在出网前完成（race condition）
+- `payload_digest` 需要对每个分支的 `context_pack` 单独计算，并发场景下计算顺序不可控
+
+**当前替代方案**：`while` 循环强制串行，每个节点执行后同步写审计，彻底规避并发审计问题。
+
 ---
 
-### 鍐茬獊 3锛氬瓙鍥撅紙SubGraph锛塿s 搂6 瀹¤閾惧畬鏁存€?/ 鍙洖鏀炬€?
-**LangGraph 瀛愬浘鍐欐硶**锛?
+### 冲突 3：子图（SubGraph）vs §6 审计链完整性 / 可回放性
+
+**LangGraph 子图写法**：
+
 ```python
 subgraph = StateGraph(SubState)
-# ... 瀛愬浘鍐呴儴閫昏緫
+# ... 子图内部逻辑
 parent_graph.add_node("sub", subgraph.compile())
 ```
 
-**鍐茬獊鏉℃**锛毬? 瑕佹眰姣忔璋冪敤蹇呴』鍐欏叆锛?
+**冲突条款**：§6 要求每次调用必须写入：
+
 ```
 model_profile_id / node_id / provider / model_id
-prompt_profile_id锛堜粎瀛樺紩鐢?鍝堝笇锛?input_digest / output_digest
+prompt_profile_id（仅存引用/哈希）
+input_digest / output_digest
 tool_visibility_hash
 sanitization_report_ref
 ```
 
-**鍏蜂綋椋庨櫓**锛?- 瀛愬浘鍐呴儴鑺傜偣瀵圭埗鍥炬槸**榛戠洅**锛宍graph_trace` 鏃犳硶鎹曡幏瀛愬浘鍐呴儴姣忎釜鑺傜偣鐨勮皟鐢?- 瀹¤閾炬柇瑁傦細瀛愬浘鍐呴儴鑺傜偣涓嶅啓 `llm_call_log`
-- 鏃犳硶鍥炴斁锛歚replay_ref` 鍙兘瀹氫綅鍒板瓙鍥捐妭鐐癸紝涓嶈兘瀹氫綅鍒板瓙鍥惧唴閮ㄨ妭鐐?
-**褰撳墠鏇夸唬鏂规**锛氭墍鏈夎妭鐐规墎骞冲寲鍦ㄥ悓涓€涓?`_run_single_step` 寰幆涓紝`trace` 鍒楄〃瀹屾暣璁板綍姣忎釜鑺傜偣鎵ц锛宍model_calls` 瀹屾暣璁板綍姣忔 LLM 璋冪敤銆?
+**具体风险**：
+- 子图内部节点对父图是**黑盒**，`graph_trace` 无法捕获子图内部每个节点的调用
+- 审计链断裂：子图内部节点不写 `llm_call_log`
+- 无法回放：`replay_ref` 只能定位到子图节点，不能定位到子图内部节点
+
+**当前替代方案**：所有节点扁平化在同一个 `_run_single_step` 循环中，`trace` 列表完整记录每个节点执行，`model_calls` 完整记录每次 LLM 调用。
+
 ---
 
-### 鍐茬獊 4锛氭柇鐐圭画璺戯紙Checkpointer锛塿s 搂4.3 鏃堕棿椹卞姩闄嶇骇閾捐矾
+### 冲突 4：断点续跑（Checkpointer）vs §4.3 时间驱动降级链路
 
-**LangGraph Checkpointer 鍐欐硶**锛?
+**LangGraph Checkpointer 写法**：
+
 ```python
 graph.compile(checkpointer=MemorySaver())
-# interrupt_before=["node_x"] 鏆傚仠锛屼汉宸ヤ粙鍏ュ悗缁х画
+# interrupt_before=["node_x"] 暂停，人工介入后继续
 ```
 
-**鍐茬獊鏉℃**锛毬?.3 闄嶇骇閾捐矾涓烘椂闂撮┍鍔細
+**冲突条款**：§4.3 降级链路为时间驱动：
 
 ```
-t0: Host 绔嬪嵆杈撳嚭"鍦ㄥ満鍥炲簲妯℃澘"
-t1: core_reasoner_primary 瓒呮椂 鈫?core_reasoner_secondary
-t2: 浠嶅け璐?鈫?host_fallback_policy
+t0: Host 立即输出"在场回应模板"
+t1: core_reasoner_primary 超时 → core_reasoner_secondary
+t2: 仍失败 → host_fallback_policy
 ```
 
-**鍏蜂綋椋庨櫓**锛?- LangGraph checkpointer 鏄?*鐘舵€侀┍鍔?*锛堢瓑寰呬汉宸ヤ粙鍏ユ垨澶栭儴浜嬩欢锛夛紝鑰岄檷绾ф槸**鏃堕棿椹卞姩**锛坄timeout_ms`锛?- checkpointer 鏆傚仠鏃讹紝`t1` 瓒呮椂璁℃椂鍣ㄥ凡缁忓け鏁?- 闄嶇骇鍐欏叆 `error_log/quality.stage` 闇€瑕佸湪 Host 渚х簿纭帶鍒讹紝checkpointer 鐨勬仮澶嶆椂鏈轰笉鍙帶
+**具体风险**：
+- LangGraph checkpointer 是**状态驱动**（等待人工介入或外部事件），而降级是**时间驱动**（`timeout_ms`）
+- checkpointer 暂停时，`t1` 超时计时器已经失效
+- 降级写入 `error_log/quality.stage` 需要在 Host 侧精确控制，checkpointer 的恢复时机不可控
 
-**褰撳墠鏇夸唬鏂规**锛歚handle_timeout()` / `handle_dependency_unavailable()` / `pick_fallback_node()` 鍏ㄩ儴鍦?`_run_single_step` 鍐呴儴鍚屾澶勭悊锛岄檷绾ч€昏緫瀹屽叏鍦?Host 渚у彲鎺с€?
+**当前替代方案**：`handle_timeout()` / `handle_dependency_unavailable()` / `pick_fallback_node()` 全部在 `_run_single_step` 内部同步处理，降级逻辑完全在 Host 侧可控。
+
 ---
 
-### 鍐茬獊 5锛氭祦寮忚緭鍑猴紙stream_mode锛塿s 搂4.2 浜屾寮忚緭鍑鸿竟鐣岄攣瀹?
-**LangGraph 娴佸紡鍐欐硶**锛?
+### 冲突 5：流式输出（stream_mode）vs §4.2 二段式输出边界锁定
+
+**LangGraph 流式写法**：
+
 ```python
 for chunk in graph.stream(input, stream_mode="values"):
-    yield chunk  # 閫?token 鎺ㄩ€?```
-
-**鍐茬獊鏉℃**锛毬?.2 寮哄埗浜屾寮忚緭鍑猴細
-
-```
-S1: core_reasoner_primary 鈫?safety_verifier 鈫?Host QA/Governor
-S2: renderer_ja_c_style 鈫?Host RenderGuard
-瑙勫垯锛歩ntent_draft 鍙兘鏉ヨ嚜 S1锛汼2 涓嶅緱鏂板/淇敼 intent_draft
+    yield chunk  # 逐 token 推送
 ```
 
-**鍏蜂綋椋庨櫓**锛?- 娴佸紡杈撳嚭鎰忓懗鐫€ S1 鐨?`narrative_zh` 杩樻湭瀹屾垚鏃讹紝S2 鐨勬覆鏌撳櫒鍙兘宸插紑濮嬪伐浣?- `RenderGuard` 鏃犳硶鏍￠獙"S2 鏄惁鍔犳枡"锛圫1 杈撳嚭涓嶅畬鏁存椂鏃犳硶寤虹珛鍩哄噯锛?- `intent_draft` 杈圭晫鏃犳硶閿佸畾锛圫1 娴佸紡杈撳嚭涓€?S2 鍙兘璇诲埌涓嶅畬鏁寸殑 `intent_draft`锛?
-**褰撳墠鏇夸唬鏂规**锛氫弗鏍间覆琛岋紝S1 瀹屾暣杈撳嚭鍚庢墠杩涘叆 S2锛宍edge_map` 淇濊瘉椤哄簭锛宍RenderGuard` 鍦?S1 瀹屾垚鍚庡 `intent_draft` 鍔犻攣銆?
+**冲突条款**：§4.2 强制二段式输出：
+
+```
+S1: core_reasoner_primary → safety_verifier → Host QA/Governor
+S2: renderer_ja_c_style → Host RenderGuard
+规则：intent_draft 只能来自 S1；S2 不得新增/修改 intent_draft
+```
+
+**具体风险**：
+- 流式输出意味着 S1 的 `narrative_zh` 还未完成时，S2 的渲染器可能已开始工作
+- `RenderGuard` 无法校验"S2 是否加料"（S1 输出不完整时无法建立基准）
+- `intent_draft` 边界无法锁定（S1 流式输出中途 S2 可能读到不完整的 `intent_draft`）
+
+**当前替代方案**：严格串行，S1 完整输出后才进入 S2，`edge_map` 保证顺序，`RenderGuard` 在 S1 完成后对 `intent_draft` 加锁。
+
 ---
 
-## 鍥涖€佸啿绐佺煩闃垫€昏
+## 四、冲突矩阵总览
 
-| LangGraph 鑳藉姏 | 琚樆鏂殑绾︽潫鏉℃ | 鍐茬獊绫诲瀷 | 褰撳墠鏇夸唬鏂规 |
+| LangGraph 能力 | 被阻断的约束条款 | 冲突类型 | 当前替代方案 |
 |---------------|----------------|---------|------------|
-| 鏉′欢杈癸紙LLM 椹卞姩璺敱锛?| 搂0.1 涓绘潈绾︽潫 | 鍐崇瓥鏉冨綊灞炲啿绐?| `edge_map` 瀛楀吀锛圚ost 闈欐€佸畾涔夛級 |
-| 骞惰鍒嗘敮锛坒an-out锛?| 搂0.2 AIRLOCK 涓茶瀹¤ | 骞跺彂瀹夊叏鍐茬獊 | `while` 寰幆寮哄埗涓茶 |
-| 瀛愬浘锛圫ubGraph锛?| 搂6 瀹¤閾惧畬鏁存€?鍙洖鏀炬€?| 鍙娴嬫€у啿绐?| 鎵佸钩鍖?`trace` 鍒楄〃 |
-| 鏂偣缁窇锛圕heckpointer锛?| 搂4.3 鏃堕棿椹卞姩闄嶇骇閾捐矾 | 瑙﹀彂鏈哄埗鍐茬獊 | 鍚屾 `handle_timeout()` |
-| 娴佸紡杈撳嚭锛坰tream_mode锛?| 搂4.2 浜屾寮忚緭鍑鸿竟鐣岄攣瀹?| 杈撳嚭杈圭晫鍐茬獊 | 涓ユ牸涓茶 S1鈫扴2 |
+| 条件边（LLM 驱动路由） | §0.1 主权约束 | 决策权归属冲突 | `edge_map` 字典（Host 静态定义） |
+| 并行分支（fan-out） | §0.2 AIRLOCK 串行审计 | 并发安全冲突 | `while` 循环强制串行 |
+| 子图（SubGraph） | §6 审计链完整性/可回放性 | 可观测性冲突 | 扁平化 `trace` 列表 |
+| 断点续跑（Checkpointer） | §4.3 时间驱动降级链路 | 触发机制冲突 | 同步 `handle_timeout()` |
+| 流式输出（stream_mode） | §4.2 二段式输出边界锁定 | 输出边界冲突 | 严格串行 S1→S2 |
 
 ---
 
-## 浜斻€佹灦鏋勫喅绛栫粨璁?
-### 5.1 褰撳墠鏋舵瀯鐨勬湰璐?
-LangGraph 鍦ㄥ綋鍓嶇郴缁熶腑琚?*涓诲姩闄嶇骇浣跨敤**锛?
-- **淇濈暀**锛歚StateGraph` 鐘舵€佷紶鎾€乣compile()` 鍙娴嬩笂涓嬫枃銆乣RunnableLambda` 鑺傜偣灏佽
-- **鏀惧純**锛氭潯浠惰竟銆佸苟琛屽垎鏀€佸瓙鍥俱€佹柇鐐圭画璺戙€佹祦寮忚緭鍑?
-### 5.2 杩欐槸鎶€鏈€哄悧锛?
-**鍚?*銆傝繖鏄不鐞嗕紭鍏堜簬妗嗘灦鑳藉姏鐨勬湁鎰忓彇鑸嶏細
+## 五、架构决策结论
 
-> LangGraph 鐨勬瘡涓€椤归珮绾ц兘鍔涢兘涓?ModelPlane.md 鐨勬煇鏉＄‖绾︽潫瀛樺湪缁撴瀯鎬у啿绐併€?> 鍦?AI 娌荤悊鍚堣瑕佹眰涓嬶紝妗嗘灦鑳藉姏蹇呴』鏈嶄粠绾︽潫浣撶郴锛岃€岄潪鍙嶈繃鏉ャ€?
-### 5.3 鏈潵鎵╁睍璺緞
+### 5.1 当前架构的本质
 
-鑻ユ湭鏉ラ渶瑕佸紩鍏?LangGraph 楂樼骇鑳藉姏锛岄渶鍏堝湪 ModelPlane.md 涓负瀵瑰簲绾︽潫鏉℃澧炲姞璞佸厤鏉′欢锛屽苟閫氳繃瀹屾暣鐨勫畨鍏ㄨ瘎瀹★紝鏂瑰彲瑙ｉ攣瀵瑰簲鑳藉姏銆?
+LangGraph 在当前系统中被**主动降级使用**：
+
+- **保留**：`StateGraph` 状态传播、`compile()` 可观测上下文、`RunnableLambda` 节点封装
+- **放弃**：条件边、并行分支、子图、断点续跑、流式输出
+
+### 5.2 这是技术债吗？
+
+**否**。这是治理优先于框架能力的有意取舍：
+
+> LangGraph 的每一项高级能力都与 ModelPlane.md 的某条硬约束存在结构性冲突。
+> 在 AI 治理合规要求下，框架能力必须服从约束体系，而非反过来。
+
+### 5.3 未来扩展路径
+
+若未来需要引入 LangGraph 高级能力，需先在 ModelPlane.md 中为对应约束条款增加豁免条件，并通过完整的安全评审，方可解锁对应能力。
+
 ---
 
-## 鍏€佺浉鍏虫枃浠剁储寮?
-| 鏂囦欢 | 璇存槑 |
+## 六、相关文件索引
+
+| 文件 | 说明 |
 |------|------|
-| `docs/30_devspec/ModelPlane.md` | 鏍稿績绾︽潫瑙勬牸鏂囨。 |
-| `host_brain/integrations/graph_executor.py` | LangGraph 鍥剧紪璇戜笌鎵ц |
-| `host_brain/integrations/graph_runtime.py` | 杩愯鏃跺悎绾﹀眰 |
-| `docs/60_trace/HOST_CHAT_REAL_CHAIN_TRACE_req_bc56917feac740b4adea1486d88a6435.md` | 鐪熷疄璋冪敤閾捐矾 Trace |
-| `docs/60_trace/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md` | 鑺傜偣缂栨帓闂鍒嗘瀽鎶ュ憡 |
-
+| `docs/30_devspec/ModelPlane.md` | 核心约束规格文档 |
+| `host_brain/integrations/graph_executor.py` | LangGraph 图编译与执行 |
+| `host_brain/integrations/graph_runtime.py` | 运行时合约层 |
+| `docs/60_trace/HOST_CHAT_REAL_CHAIN_TRACE_req_bc56917feac740b4adea1486d88a6435.md` | 真实调用链路 Trace |
+| `docs/60_trace/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md` | 节点编排问题分析报告 |

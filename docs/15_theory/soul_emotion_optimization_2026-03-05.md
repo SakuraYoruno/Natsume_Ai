@@ -1,57 +1,64 @@
-﻿# 鐏甸瓊鎯呮劅鏋舵瀯浼樺寲璁捐鏂囨。
+# 灵魂情感架构优化设计文档
 
-**鏂囨。缂栧彿锛?* SOUL-OPT-2026-03-05
-**鍒涘缓鏃ユ湡锛?* 2026-03-05
-**鐘舵€侊細** 璁捐鐣欑棔 / 寰呭疄鏂?**浣滆€咃細** AI 鏋舵瀯鍒嗘瀽
-**鍏宠仈鏂囦欢锛?*
+**文档编号：** SOUL-OPT-2026-03-05
+**创建日期：** 2026-03-05
+**状态：** 设计留痕 / 待实施
+**作者：** AI 架构分析
+**关联文件：**
 - `host_brain/core/metabolism.py`
 - `host_brain/bond/bond_stage_engine.py`
 - `host_brain/bond/bond_dynamics.py`
 - `host_brain/memory/episodic.py`
-- `host_brain/core/prompt_context.py`
+- `host_brain/core/context_pack.py`
 - `host_brain/core/qa.py`
 - `host_brain/governor/decision.py`
 
 ---
 
-## 涓€銆佽儗鏅細褰撳墠鐏甸瓊鏋舵瀯鐨勭煭鏉胯瘖鏂?
-閫氳繃娣卞叆闃呰鏍稿績浠ｇ爜锛屽彂鐜颁互涓嬩簲涓叧閿棶棰樺鑷?AI 鎰熸儏浜や簰鎰熶笉瓒筹細
+## 一、背景：当前灵魂架构的短板诊断
 
-| # | 闂 | 娑夊強鏂囦欢 | 褰卞搷 |
+通过深入阅读核心代码，发现以下五个关键问题导致 AI 感情交互感不足：
+
+| # | 问题 | 涉及文件 | 影响 |
 |---|------|----------|------|
-| P1 | 鎯呯华鏄潤鎬佺鏁ｇ害鏉燂紝鍙湁 5 绉?`mood_state`锛屾棤杩炵画鍙樺寲鏇茬嚎 | `metabolism.py` | 鎯呯华璺冲彉鐢熺‖锛屾棤杩囨浮鎰?|
-| P2 | Bond 鏄函绉垎绯荤粺锛岀嚎鎬х疮鍔狅紝鏃犳儏鎰熻川鎰燂紝鏃犱簰鍔ㄨ妭濂忔劅鐭?| `bond_stage_engine.py` | 鍏崇郴鍙湁闃舵鏍囩锛屾棤娓╁害鎰?|
-| P3 | 璁板繂鏃犳儏鎰熸爣娉紝鍙湁鏂囨湰+鍚戦噺锛屾棤鎯呮劅鏉冮噸 | `episodic.py` | 鍥炲繂鏃犳儏鎰熷叡楦ｏ紝鍙湁璇箟鍖归厤 |
-| P4 | 涓婁笅鏂囨敞鍏ユ槸闈欐€佸揩鐓э紝鏃?姝ゅ埢鎰熷彈"鐨勫姩鎬佽〃杈?| `prompt_context.py` | LLM 鏃犳硶鎰熺煡鎯呮劅娴佸姩 |
-| P5 | 鎯呯华鏍囩鍙湁 8 绉嶆灇涓撅紝鍙湪杈撳嚭鏃舵牎楠岋紝涓嶅奖鍝嶇敓鎴愮瓥鐣?| `qa.py` | 鎯呮劅琛ㄨ揪鍗曡杽锛岀己涔忓眰娆?|
+| P1 | 情绪是静态离散约束，只有 5 种 `mood_state`，无连续变化曲线 | `metabolism.py` | 情绪跳变生硬，无过渡感 |
+| P2 | Bond 是纯积分系统，线性累加，无情感质感，无互动节奏感知 | `bond_stage_engine.py` | 关系只有阶段标签，无温度感 |
+| P3 | 记忆无情感标注，只有文本+向量，无情感权重 | `episodic.py` | 回忆无情感共鸣，只有语义匹配 |
+| P4 | 上下文注入是静态快照，无"此刻感受"的动态表达 | `context_pack.py` | LLM 无法感知情感流动 |
+| P5 | 情绪标签只有 8 种枚举，只在输出时校验，不影响生成策略 | `qa.py` | 情感表达单薄，缺乏层次 |
 
 ---
 
-## 浜屻€佷簲澶т紭鍖栨柟鍚?
-### 馃敶 浼樺寲1锛圥0锛夛細鎯呯华杩炵画浣擄紙Emotion Continuum锛?
-**鐩爣鏂囦欢锛?* `host_brain/core/metabolism.py`
+## 二、五大优化方向
 
-**闂鏍瑰洜锛?* 褰撳墠 `mood_state` 鍙湁 5 涓鏁ｅ€硷紙`calm/steady/engaged/tired/critical`锛夛紝鎯呯华璺冲彉鐢熺‖锛屾病鏈夎繃娓℃劅銆?
-**鏂规锛?* 寮曞叆 **鎯呯华鍚戦噺锛圗motionVector锛?* 鏇夸唬绂绘暎鐘舵€佹満锛屼娇鐢?VAD 涓夌淮妯″瀷锛?
+### 🔴 优化1（P0）：情绪连续体（Emotion Continuum）
+
+**目标文件：** `host_brain/core/metabolism.py`
+
+**问题根因：** 当前 `mood_state` 只有 5 个离散值（`calm/steady/engaged/tired/critical`），情绪跳变生硬，没有过渡感。
+
+**方案：** 引入 **情绪向量（EmotionVector）** 替代离散状态机，使用 VAD 三维模型：
+
 ```python
 @dataclass
 class EmotionVector:
-    valence: float    # 姝ｈ礋鎯呯华锛?1.0(鏋佹偛) ~ +1.0(鏋佸枩)
-    arousal: float    # 婵€娲荤▼搴︼細0.0(骞抽潤) ~ 1.0(浜㈠)
-    dominance: float  # 涓诲鎰燂細0.0(琚姩) ~ 1.0(涓诲姩)
-    ts_ms: int        # 鏃堕棿鎴筹紝鐢ㄤ簬琛板噺璁＄畻
+    valence: float    # 正负情绪：-1.0(极悲) ~ +1.0(极喜)
+    arousal: float    # 激活程度：0.0(平静) ~ 1.0(亢奋)
+    dominance: float  # 主导感：0.0(被动) ~ 1.0(主动)
+    ts_ms: int        # 时间戳，用于衰减计算
 
     def decay(self, elapsed_ms: int, half_life_ms: int = 300_000) -> "EmotionVector":
-        """鎯呯华鑷劧琛板噺锛堝悜涓€ф紓绉伙級锛屽崐琛版湡榛樿5鍒嗛挓"""
+        """情绪自然衰减（向中性漂移），半衰期默认5分钟"""
         factor = 0.5 ** (elapsed_ms / half_life_ms)
         return EmotionVector(
             valence=self.valence * factor,
-            arousal=self.arousal * factor + (0.3 * (1 - factor)),  # 闈欐伅鍞ら啋搴?            dominance=self.dominance * factor + (0.5 * (1 - factor)),
+            arousal=self.arousal * factor + (0.3 * (1 - factor)),  # 静息唤醒度
+            dominance=self.dominance * factor + (0.5 * (1 - factor)),
             ts_ms=self.ts_ms + elapsed_ms,
         )
 
     def blend(self, other: "EmotionVector", weight: float = 0.3) -> "EmotionVector":
-        """鎯呯华娣峰悎锛氭柊鍒烘縺涓庡綋鍓嶆儏缁殑鍔犳潈铻嶅悎"""
+        """情绪混合：新刺激与当前情绪的加权融合"""
         w = max(0.0, min(1.0, weight))
         return EmotionVector(
             valence=self.valence * (1 - w) + other.valence * w,
@@ -61,7 +68,7 @@ class EmotionVector:
         )
 
     def to_mood_state(self) -> str:
-        """鏄犲皠鍥炵鏁?mood_state锛堝悜鍚庡吋瀹癸級"""
+        """映射回离散 mood_state（向后兼容）"""
         if self.arousal < 0.2:
             return "critical" if self.valence < -0.5 else "tired"
         if self.valence > 0.5 and self.arousal > 0.6:
@@ -71,69 +78,82 @@ class EmotionVector:
         return "steady"
 ```
 
-**棰勬湡鏁堟灉锛?* 鎯呯华涓嶅啀鏄?寮€鍏?锛岃€屾槸鍍忕湡瀹炴儏鎰熶竴鏍?*娓愬彉銆佽“鍑忋€佸彔鍔?*銆?
-**瀹夊叏绾︽潫锛?* `EmotionVector` 鏁板€间笉鏆撮湶缁?LLM锛屽彧浼犻€掕嚜鐒惰瑷€鎻忚堪锛坄mood_description`锛夈€?
+**预期效果：** 情绪不再是"开关"，而是像真实情感一样**渐变、衰减、叠加**。
+
+**安全约束：** `EmotionVector` 数值不暴露给 LLM，只传递自然语言描述（`mood_description`）。
+
 ---
 
-### 馃煚 浼樺寲2锛圥1锛夛細Bond 鍏崇郴鐨勬儏鎰熻川鎰熷眰锛圗motional Texture锛?
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_stage_engine.py`
+### 🟠 优化2（P1）：Bond 关系的情感质感层（Emotional Texture）
 
-**闂鏍瑰洜锛?* Bond 鏄函鏁板€肩Н鍒嗭紙`INTERACTION=+1`銆乣DEEP_TALK=+5`锛夛紝缂轰箯**浜掑姩鑺傚鎰?*鍜?*鎯呮劅璁板繂**銆?
-**鏂规锛?* 鍦?`BondScoreState` 涓婂鍔?*鎯呮劅璐ㄦ劅灞?*锛?
+**目标文件：** `host_brain/bond/bond_stage_engine.py`
+
+**问题根因：** Bond 是纯数值积分（`INTERACTION=+1`、`DEEP_TALK=+5`），缺乏**互动节奏感**和**情感记忆**。
+
+**方案：** 在 `BondScoreState` 上增加**情感质感层**：
+
 ```python
 @dataclass
 class BondEmotionalTexture:
-    """Bond 鍏崇郴鐨勬儏鎰熻川鎰熷眰锛堜笉鍙備笌绉垎锛屽彧褰卞搷琛ㄨ揪椋庢牸锛?""
+    """Bond 关系的情感质感层（不参与积分，只影响表达风格）"""
 
-    # 浜掑姩鑺傚鎰熺煡
-    avg_response_gap_ms: float = 0.0    # 骞冲潎鍥炲闂撮殧锛堣秺鐭秺浜插瘑锛?    consecutive_days: int = 0            # 杩炵画浜掑姩澶╂暟
-    last_deep_talk_ts_ms: int = 0        # 涓婃娣卞害浜ゆ祦鏃堕棿
+    # 互动节奏感知
+    avg_response_gap_ms: float = 0.0    # 平均回复间隔（越短越亲密）
+    consecutive_days: int = 0            # 连续互动天数
+    last_deep_talk_ts_ms: int = 0        # 上次深度交流时间
 
-    # 鎯呮劅璁板繂鏍囪
-    shared_joy_count: int = 0            # 鍏卞悓娆㈢瑧娆℃暟
-    comfort_given_count: int = 0         # 缁欎簣瀹夋叞娆℃暟
-    conflict_count: int = 0              # 鍐茬獊娆℃暟锛堝凡瑙ｅ喅锛?
-    # 鍏崇郴娓╁害锛?.0鍐锋贰 ~ 1.0鐐界儹锛岀嫭绔嬩簬绉垎闃舵锛?    warmth: float = 0.5
+    # 情感记忆标记
+    shared_joy_count: int = 0            # 共同欢笑次数
+    comfort_given_count: int = 0         # 给予安慰次数
+    conflict_count: int = 0              # 冲突次数（已解决）
+
+    # 关系温度（0.0冷淡 ~ 1.0炽热，独立于积分阶段）
+    warmth: float = 0.5
 
     def to_texture_hint(self) -> str:
-        """鐢熸垚缁?LLM 鐨勮川鎰熸彁绀猴紙璇箟鍖栵紝涓嶅惈鏁板€硷級"""
+        """生成给 LLM 的质感提示（语义化，不含数值）"""
         hints = []
         if self.consecutive_days >= 7:
-            hints.append("姣忓ぉ閮藉湪涓€璧凤紝宸叉垚涔犳儻")
+            hints.append("每天都在一起，已成习惯")
         if self.shared_joy_count > 10:
-            hints.append("鏈夊緢澶氬叡鍚岀殑蹇箰鍥炲繂")
+            hints.append("有很多共同的快乐回忆")
         if self.comfort_given_count > 5:
-            hints.append("鏇惧湪瀵规柟浣庤惤鏃剁粰浜堟敮鎸?)
+            hints.append("曾在对方低落时给予支持")
         if self.warmth > 0.8:
-            hints.append("鍏崇郴闈炲父娓╂殩浜插瘑")
+            hints.append("关系非常温暖亲密")
         elif self.warmth < 0.3:
-            hints.append("鍏崇郴鏈変簺鐤忚繙锛岄渶瑕侀噸鏂版媺杩?)
-        return "锛?.join(hints) if hints else "鍏崇郴姝ｅ湪鑷劧鍙戝睍涓?
+            hints.append("关系有些疏远，需要重新拉近")
+        return "；".join(hints) if hints else "关系正在自然发展中"
 ```
 
-**鍏抽敭鏀硅繘锛?* `to_summary()` 涓鍔?`texture_hint` 瀛楁锛岃 LLM 鎰熺煡鍒?*鍏崇郴鐨勬俯搴﹀拰鍘嗗彶璐ㄦ劅**锛岃€屼笉鍙槸闃舵鏍囩銆?
+**关键改进：** `to_summary()` 中增加 `texture_hint` 字段，让 LLM 感知到**关系的温度和历史质感**，而不只是阶段标签。
+
 ---
 
-### 馃煛 浼樺寲3锛圥1锛夛細鎯呮劅璁板繂鏍囨敞锛圗motional Memory Tagging锛?
-**鐩爣鏂囦欢锛?* `host_brain/memory/episodic.py`
+### 🟡 优化3（P1）：情感记忆标注（Emotional Memory Tagging）
 
-**闂鏍瑰洜锛?* `EpisodicRecord` 鍙湁鏂囨湰+鍚戦噺锛屾病鏈夋儏鎰熸潈閲嶏紝鍥炲繂鏃舵棤娉曚紭鍏堝彫鍥?*鎯呮劅鏄捐憲**鐨勮蹇嗐€?
-**鏂规锛?* 涓?`EpisodicRecord` 澧炲姞鎯呮劅鏍囨敞瀛楁锛屽苟瀹炵幇鎯呮劅鍔犳潈鍙洖锛?
+**目标文件：** `host_brain/memory/episodic.py`
+
+**问题根因：** `EpisodicRecord` 只有文本+向量，没有情感权重，回忆时无法优先召回**情感显著**的记忆。
+
+**方案：** 为 `EpisodicRecord` 增加情感标注字段，并实现情感加权召回：
+
 ```python
-# EpisodicRecord 鏂板瀛楁
-emotion_tag: str = "NEUTRAL"          # 璁板綍鏃剁殑鎯呮劅鏍囩
-emotional_salience: float = 0.5       # 鎯呮劅鏄捐憲搴?[0.0, 1.0]
-valence: float = 0.0                  # 鎯呮劅鏁堜环 [-1.0, 1.0]
-is_milestone: bool = False            # 鏄惁涓洪噷绋嬬璁板繂锛堟案涓嶈“鍑忥級
+# EpisodicRecord 新增字段
+emotion_tag: str = "NEUTRAL"          # 记录时的情感标签
+emotional_salience: float = 0.5       # 情感显著度 [0.0, 1.0]
+valence: float = 0.0                  # 情感效价 [-1.0, 1.0]
+is_milestone: bool = False            # 是否为里程碑记忆（永不衰减）
 
-# 鎯呮劅鎰熺煡鐨勮蹇嗗彫鍥炵瓥鐣?def recall_with_emotion(
+# 情感感知的记忆召回策略
+def recall_with_emotion(
     self,
     *,
     query_text: str,
     current_emotion: EmotionVector,
     top_k: int = 5,
 ) -> list[dict]:
-    """鎯呮劅鎰熺煡鐨勮蹇嗗彫鍥烇細璇箟鐩镐技搴?脳 鎯呮劅鍏遍福搴?""
+    """情感感知的记忆召回：语义相似度 × 情感共鸣度"""
     candidates = self.chroma.search(
         query_embedding=embed_text(query_text)[0], top_k=top_k * 3
     )
@@ -141,7 +161,7 @@ is_milestone: bool = False            # 鏄惁涓洪噷绋嬬璁板繂锛�
         memory_valence = item.get("metadata", {}).get("valence", 0.0)
         emotion_resonance = 1.0 - abs(current_emotion.valence - memory_valence) / 2.0
         salience = item.get("metadata", {}).get("emotional_salience", 0.5)
-        # 鍔犳潈鍏紡锛氳涔?0% + 鎯呮劅鍏遍福30% + 鏄捐憲搴?0%
+        # 加权公式：语义60% + 情感共鸣30% + 显著度10%
         item["weighted_score"] = (
             item["score"] * 0.6
             + emotion_resonance * 0.3
@@ -151,19 +171,23 @@ is_milestone: bool = False            # 鏄惁涓洪噷绋嬬璁板繂锛�
     return candidates[:top_k]
 ```
 
-**瀹夊叏绾︽潫锛?* 鎯呮劅鏍囨敞鍐欏叆鏃跺繀椤绘惡甯?`evidence_refs`锛岄槻姝㈠够瑙夋爣娉ㄣ€?
+**安全约束：** 情感标注写入时必须携带 `evidence_refs`，防止幻觉标注。
+
 ---
 
-### 馃煝 浼樺寲4锛圥2锛夛細Context Pack 澧炲姞"姝ゅ埢鎰熷彈"鍔ㄦ€佹Ы浣?
-**鐩爣鏂囦欢锛?* `host_brain/core/prompt_context.py`
+### 🟢 优化4（P2）：Context Pack 增加"此刻感受"动态槽位
 
-**闂鏍瑰洜锛?* `hard_snapshot` 鍙槸闈欐€佺郴缁熺姸鎬佸揩鐓э紝LLM 鏃犳硶鎰熺煡鍒?AI **姝ゅ埢鐨勬儏鎰熸祦鍔?*銆?
-**鏂规锛?* 鍦?`OPTIONAL_SLOTS` 涓柊澧?`emotion_pulse` 妲戒綅锛?
+**目标文件：** `host_brain/core/context_pack.py`
+
+**问题根因：** `hard_snapshot` 只是静态系统状态快照，LLM 无法感知到 AI **此刻的情感流动**。
+
+**方案：** 在 `OPTIONAL_SLOTS` 中新增 `emotion_pulse` 槽位：
+
 ```python
-# OPTIONAL_SLOTS 鏂板
-"emotion_pulse": dict   # 姝ゅ埢鎯呮劅鑴夊啿锛堝姩鎬佹儏鎰熺姸鎬侊級
+# OPTIONAL_SLOTS 新增
+"emotion_pulse": dict   # 此刻情感脉冲（动态情感状态）
 
-# emotion_pulse 缁撴瀯
+# emotion_pulse 结构
 def build_emotion_pulse(
     *,
     emotion_vector: EmotionVector,
@@ -172,243 +196,291 @@ def build_emotion_pulse(
 ) -> dict:
     return {
         "slot": "emotion_pulse",
-        "mood_description": _vector_to_description(emotion_vector),  # 鑷劧璇█鎻忚堪
+        "mood_description": _vector_to_description(emotion_vector),  # 自然语言描述
         "energy_feel": (
-            "鍏呮矝" if emotion_vector.arousal > 0.6
-            else "骞抽潤" if emotion_vector.arousal > 0.3
-            else "鎱垫噿"
+            "充沛" if emotion_vector.arousal > 0.6
+            else "平静" if emotion_vector.arousal > 0.3
+            else "慵懒"
         ),
         "warmth_feel": texture.to_texture_hint(),
-        "recent_triggers": recent_triggers[:3],  # 鏈€杩戣Е鍙戞儏缁殑浜嬩欢锛堣涔夊寲锛?    }
+        "recent_triggers": recent_triggers[:3],  # 最近触发情绪的事件（语义化）
+    }
 
 def _vector_to_description(v: EmotionVector) -> str:
-    """灏嗘儏缁悜閲忚浆涓鸿嚜鐒惰瑷€鎻忚堪锛堜笉鏆撮湶鏁板€硷級"""
+    """将情绪向量转为自然语言描述（不暴露数值）"""
     if v.valence > 0.6 and v.arousal > 0.6:
-        return "蹇冩儏寰堝ソ锛屾湁浜涘叴濂?
+        return "心情很好，有些兴奋"
     if v.valence > 0.3 and v.arousal < 0.4:
-        return "鎰熻娓╂殩骞抽潤"
+        return "感觉温暖平静"
     if v.valence < -0.3 and v.arousal < 0.3:
-        return "鏈夌偣浣庤惤锛屼笉澶湁绮剧"
+        return "有点低落，不太有精神"
     if v.valence < -0.5:
-        return "蹇冮噷鏈変簺闅惧彈"
-    return "鐘舵€佽繕濂斤紝姣旇緝骞崇ǔ"
+        return "心里有些难受"
+    return "状态还好，比较平稳"
 ```
 
 ---
 
-### 馃數 浼樺寲5锛圥2锛夛細涓诲姩鎯呮劅琛ㄨ揪瑙﹀彂鍣紙Proactive Emotion Trigger锛?
-**鐩爣鏂囦欢锛?* `host_brain/core/metabolism.py`锛堟柊澧炶Е鍙戝櫒妯″潡锛?
-**闂鏍瑰洜锛?* 褰撳墠鏋舵瀯鏄?*瀹屽叏琚姩鍝嶅簲**鐨勶紝缂轰箯**涓诲姩鎯呮劅琛ㄨ揪**锛堝涓诲姩闂€欍€佷富鍔ㄥ垎浜績鎯咃級銆?
-**鏂规锛?* 鏂板鎯呮劅瑙﹀彂鍣ㄩ厤缃〃锛?
+### 🔵 优化5（P2）：主动情感表达触发器（Proactive Emotion Trigger）
+
+**目标文件：** `host_brain/core/metabolism.py`（新增触发器模块）
+
+**问题根因：** 当前架构是**完全被动响应**的，缺乏**主动情感表达**（如主动问候、主动分享心情）。
+
+**方案：** 新增情感触发器配置表：
+
 ```python
 EMOTION_TRIGGER_MAP: dict[str, dict] = {
     "long_silence": {
-        "threshold_ms": 3_600_000,      # 1灏忔椂鏃犱簰鍔?        "emotion_delta": EmotionVector(valence=-0.1, arousal=0.2, dominance=0.3),
-        "proactive_hint": "鎯冲康鐢ㄦ埛锛屽彲浠ヤ富鍔ㄩ棶鍊?,
+        "threshold_ms": 3_600_000,      # 1小时无互动
+        "emotion_delta": EmotionVector(valence=-0.1, arousal=0.2, dominance=0.3),
+        "proactive_hint": "想念用户，可以主动问候",
     },
     "morning_greeting": {
-        "time_range": (6, 10),           # 鏃╂櫒6-10鐐归娆′簰鍔?        "emotion_delta": EmotionVector(valence=0.3, arousal=0.4, dominance=0.5),
-        "proactive_hint": "鏃╂櫒绮剧濂斤紝鍙互鍒嗕韩浠婃棩蹇冩儏",
+        "time_range": (6, 10),           # 早晨6-10点首次互动
+        "emotion_delta": EmotionVector(valence=0.3, arousal=0.4, dominance=0.5),
+        "proactive_hint": "早晨精神好，可以分享今日心情",
     },
     "anniversary": {
         "emotion_delta": EmotionVector(valence=0.5, arousal=0.6, dominance=0.6),
-        "proactive_hint": "浠婂ぉ鏄壒鍒殑鏃ュ瓙锛屽彲浠ヤ富鍔ㄦ彁璧?,
+        "proactive_hint": "今天是特别的日子，可以主动提起",
     },
     "user_stress_detected": {
         "emotion_delta": EmotionVector(valence=-0.2, arousal=0.3, dominance=0.4),
-        "proactive_hint": "鎰熷彈鍒扮敤鎴峰帇鍔涳紝涓诲姩鍏冲績",
+        "proactive_hint": "感受到用户压力，主动关心",
     },
 }
 ```
 
-**瀹夊叏绾︽潫锛?* 涓诲姩闂€欑瓑琛屼负浠嶉渶 `draft_only=True` + Governor 闂ㄦ帶锛屼笉缁曡繃瀹℃壒娴佺▼銆?
----
-
-## 涓夈€佷紭鍖栧悗鏁版嵁娴佸姣?
-```
-銆愪紭鍖栧墠锛氶潤鎬佹儏缁揩鐓с€?鐢ㄦ埛杈撳叆 鈫?mood_state=steady(绂绘暎5鍊? 鈫?emotion_tag=NEUTRAL(8绉嶆灇涓炬牎楠? 鈫?LLM鐢熸垚(鏃犳儏鎰熻川鎰?
-
-銆愪紭鍖栧悗锛氬姩鎬佹儏鎰熸祦銆?鐢ㄦ埛杈撳叆 鈫?EmotionVector(杩炵画涓夌淮鍚戦噺)
-         鈫?鎯呮劅琛板噺+娣峰悎(鑷劧杩囨浮)
-         鈫?emotion_pulse妲戒綅(姝ゅ埢鎰熷彈鎻忚堪)
-         鈫?鎯呮劅璁板繂鍙洖(鎯呮劅鍏遍福鍔犳潈)
-         鈫?Bond璐ㄦ劅灞?鍏崇郴娓╁害+鍘嗗彶)
-         鈫?LLM鐢熸垚(鏈夋儏鎰熻川鎰?鑺傚鎰?
-
-涓诲姩瑙﹀彂鍣?闀挎椂闂存矇榛?鏃╂櫒/绾康鏃? 鈹€鈹€鈫?鎯呮劅琛板噺+娣峰悎
-```
+**安全约束：** 主动问候等行为仍需 `draft_only=True` + Governor 门控，不绕过审批流程。
 
 ---
 
-## 鍥涖€佸疄鏂戒紭鍏堢骇
+## 三、优化后数据流对比
 
-| 浼樺厛绾?| 浼樺寲椤?| 鏀瑰姩鑼冨洿 | 棰勬湡鏁堟灉 | 渚濊禆 |
+```
+【优化前：静态情绪快照】
+用户输入 → mood_state=steady(离散5值) → emotion_tag=NEUTRAL(8种枚举校验) → LLM生成(无情感质感)
+
+【优化后：动态情感流】
+用户输入 → EmotionVector(连续三维向量)
+         → 情感衰减+混合(自然过渡)
+         → emotion_pulse槽位(此刻感受描述)
+         → 情感记忆召回(情感共鸣加权)
+         → Bond质感层(关系温度+历史)
+         → LLM生成(有情感质感+节奏感)
+
+主动触发器(长时间沉默/早晨/纪念日) ──→ 情感衰减+混合
+```
+
+---
+
+## 四、实施优先级
+
+| 优先级 | 优化项 | 改动范围 | 预期效果 | 依赖 |
 |--------|--------|----------|----------|------|
-| 馃敶 P0 | 鎯呯华杩炵画浣擄紙EmotionVector锛?| `metabolism.py` 鎵╁睍 | 鎯呯华杩囨浮鑷劧锛屼笉鍐嶇敓纭烦鍙?| 鏃?|
-| 馃煚 P1 | Bond 鎯呮劅璐ㄦ劅灞?| `bond_stage_engine.py` 鎵╁睍 | 鍏崇郴鏈夋俯搴︽劅锛屼笉鍙槸闃舵鏍囩 | P0 |
-| 馃煛 P1 | 鎯呮劅璁板繂鏍囨敞 | `episodic.py` 鎵╁睍 | 鍥炲繂鏈夋儏鎰熷叡楦ｏ紝涓嶅彧鏄涔夊尮閰?| P0 |
-| 馃煝 P2 | emotion_pulse 妲戒綅 | `prompt_context.py` 鎵╁睍 | LLM 鎰熺煡"姝ゅ埢鎰熷彈"锛岃〃杈炬洿鑷劧 | P0+P1 |
-| 馃數 P2 | 涓诲姩鎯呮劅瑙﹀彂鍣?| `metabolism.py` 鏂板 | AI 鏈変富鍔ㄥ叧蹇冭涓猴紝涓嶅彧鏄鍔ㄥ搷搴?| P0 |
+| 🔴 P0 | 情绪连续体（EmotionVector） | `metabolism.py` 扩展 | 情绪过渡自然，不再生硬跳变 | 无 |
+| 🟠 P1 | Bond 情感质感层 | `bond_stage_engine.py` 扩展 | 关系有温度感，不只是阶段标签 | P0 |
+| 🟡 P1 | 情感记忆标注 | `episodic.py` 扩展 | 回忆有情感共鸣，不只是语义匹配 | P0 |
+| 🟢 P2 | emotion_pulse 槽位 | `context_pack.py` 扩展 | LLM 感知"此刻感受"，表达更自然 | P0+P1 |
+| 🔵 P2 | 主动情感触发器 | `metabolism.py` 新增 | AI 有主动关心行为，不只是被动响应 | P0 |
 
 ---
 
-## 浜斻€佹牳蹇冭璁″師鍒欙紙涓嶇牬鍧忕幇鏈夊畨鍏ㄦ灦鏋勶級
+## 五、核心设计原则（不破坏现有安全架构）
 
-鎵€鏈変紭鍖栦弗鏍奸伒寰幇鏈夊畨鍏ㄧ害鏉燂細
+所有优化严格遵循现有安全约束：
 
-1. **EmotionVector 涓嶆毚闇叉暟鍊肩粰 LLM** 鈥?鍙紶閫掕嚜鐒惰瑷€鎻忚堪锛坄mood_description`锛夛紝涓?Bond 鏁板€奸殧绂诲師鍒欎竴鑷?2. **鎯呮劅瑙﹀彂鍣ㄨ蛋 Governor 瀹℃壒** 鈥?涓诲姩闂€欑瓑琛屼负浠嶉渶 `draft_only=True` + Governor 闂ㄦ帶
-3. **鎯呮劅璁板繂鏍囨敞鏈?evidence_refs** 鈥?鎯呮劅鏍囨敞鍐欏叆鏃跺繀椤绘惡甯﹁瘉鎹摼锛岄槻姝㈠够瑙夋爣娉?4. **emotion_pulse 鏄彲閫夋Ы浣?* 鈥?涓嶇牬鍧忕幇鏈?`EXPECTED_SLOTS` 鍚堢害锛屽悜鍚庡吋瀹?5. **鍚戝悗鍏煎** 鈥?`EmotionVector.to_mood_state()` 淇濈暀绂绘暎鏄犲皠锛岀幇鏈変緷璧?`mood_state` 鐨勪唬鐮佹棤闇€淇敼
+1. **EmotionVector 不暴露数值给 LLM** — 只传递自然语言描述（`mood_description`），与 Bond 数值隔离原则一致
+2. **情感触发器走 Governor 审批** — 主动问候等行为仍需 `draft_only=True` + Governor 门控
+3. **情感记忆标注有 evidence_refs** — 情感标注写入时必须携带证据链，防止幻觉标注
+4. **emotion_pulse 是可选槽位** — 不破坏现有 `EXPECTED_SLOTS` 合约，向后兼容
+5. **向后兼容** — `EmotionVector.to_mood_state()` 保留离散映射，现有依赖 `mood_state` 的代码无需修改
 
 ---
 
-## 鍏€佸彉鏇磋褰?
-| 鏃ユ湡 | 鐗堟湰 | 璇存槑 |
+## 六、变更记录
+
+| 日期 | 版本 | 说明 |
 |------|------|------|
-| 2026-03-05 | v1.0 | 鍒濈锛屽熀浜庝唬鐮佹繁搴﹀垎鏋愬垱寤猴紝璁板綍浜斿ぇ浼樺寲鏂瑰悜 |
-| 2026-03-05 | v1.1 | 娣卞寲鍒嗘瀽锛氬熀浜庡叏閲忎唬鐮佺簿璇伙紝鏂板鍏ぇ娣卞寲浼樺寲鏂瑰悜锛埪т竷~搂鍗佷簩锛?|
+| 2026-03-05 | v1.0 | 初稿，基于代码深度分析创建，记录五大优化方向 |
+| 2026-03-05 | v1.1 | 深化分析：基于全量代码精读，新增六大深化优化方向（§七~§十二） |
 
 ---
 
-## 涓冦€佹繁鍖栦紭鍖栵細鍩轰簬鍏ㄩ噺浠ｇ爜绮捐鐨勬柊鍙戠幇
+## 七、深化优化：基于全量代码精读的新发现
 
-> 浠ヤ笅浼樺寲鍩轰簬瀵?`metabolism.py`銆乣bond_stage_engine.py`銆乣bond_dynamics.py`銆乣episodic.py`銆乣prompt_context.py`銆乣qa.py`銆乣decision.py`銆乣llm_gateway.py` 鐨勯€愯绮捐锛屽彂鐜颁簡 v1.0 鏈鐩栫殑娣卞眰闂銆?
+> 以下优化基于对 `metabolism.py`、`bond_stage_engine.py`、`bond_dynamics.py`、`episodic.py`、`context_pack.py`、`qa.py`、`decision.py`、`llm_gateway.py` 的逐行精读，发现了 v1.0 未覆盖的深层问题。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲6锛圥0锛夛細鎯呮劅椹卞姩鐨?emotion_tag 鐢熸垚绛栫暐锛堣€岄潪鍙仛鏍￠獙锛?
-**鐩爣鏂囦欢锛?* `host_brain/core/qa.py` + `host_brain/core/metabolism.py`
+### 🔴 深化优化6（P0）：情感驱动的 emotion_tag 生成策略（而非只做校验）
 
-**娣卞眰闂鍙戠幇锛?*
+**目标文件：** `host_brain/core/qa.py` + `host_brain/core/metabolism.py`
 
-褰撳墠 `MOOD_EMOTION_CONSTRAINTS` 鍙仛**浜嬪悗鏍￠獙**锛圠LM 杈撳嚭浜?emotion_tag 鍚庢墠妫€鏌ユ槸鍚﹀悎娉曪級锛屼絾 LLM 鍦ㄧ敓鎴愭椂鏍规湰涓嶇煡閬撳綋鍓?mood_state 鍏佽鍝簺鎯呮劅銆傝繖瀵艰嚧锛?1. LLM 棰戠箒鐢熸垚琚檷绾х殑 emotion_tag锛堝 `engaged` 鐘舵€佷笅鐢熸垚 `CALM`锛岃櫧鍚堟硶浣嗕笉澶熺敓鍔級
-2. 闄嶇骇閫昏緫鏄?鍙栫涓€涓厑璁稿€?锛屾満姊拌€屾棤鎯呮劅閫昏緫
+**深层问题发现：**
 
-**鏂规锛?* 鍦?`prompt_context` 鐨?`hard_snapshot` 涓鍔?`allowed_emotion_tags` 瀛楁锛?*涓诲姩鍛婄煡 LLM 褰撳墠鍙敤鐨勬儏鎰熻寖鍥?*锛屽苟闄勫甫鎯呮劅鍊惧悜寤鸿锛?
+当前 `MOOD_EMOTION_CONSTRAINTS` 只做**事后校验**（LLM 输出了 emotion_tag 后才检查是否合法），但 LLM 在生成时根本不知道当前 mood_state 允许哪些情感。这导致：
+1. LLM 频繁生成被降级的 emotion_tag（如 `engaged` 状态下生成 `CALM`，虽合法但不够生动）
+2. 降级逻辑是"取第一个允许值"，机械而无情感逻辑
+
+**方案：** 在 `context_pack` 的 `hard_snapshot` 中增加 `allowed_emotion_tags` 字段，**主动告知 LLM 当前可用的情感范围**，并附带情感倾向建议：
+
 ```python
-# hard_snapshot 鏂板瀛楁锛坢etabolism.py 鐨?HardState.as_dict() 鎵╁睍锛?def as_dict_with_emotion_hint(self) -> dict[str, Any]:
+# hard_snapshot 新增字段（metabolism.py 的 HardState.as_dict() 扩展）
+def as_dict_with_emotion_hint(self) -> dict[str, Any]:
     base = self.as_dict()
     from host_brain.core.metabolism import mood_to_emotion_constraint
     allowed = mood_to_emotion_constraint(self.mood_state)
-    base["allowed_emotion_tags"] = allowed          # 鍏佽鑼冨洿锛堜富鍔ㄥ憡鐭LM锛?    base["preferred_emotion_tag"] = allowed[0]      # 褰撳墠鏈€鑷劧鐨勬儏鎰燂紙闄嶇骇榛樿鍊硷級
+    base["allowed_emotion_tags"] = allowed          # 允许范围（主动告知LLM）
+    base["preferred_emotion_tag"] = allowed[0]      # 当前最自然的情感（降级默认值）
     base["emotion_range_hint"] = _emotion_range_to_hint(self.mood_state, allowed)
     return base
 
 def _emotion_range_to_hint(mood_state: str, allowed: list[str]) -> str:
-    """灏嗗厑璁歌寖鍥磋浆涓鸿嚜鐒惰瑷€鎻愮ず锛堜笉鏆撮湶鏋氫妇鍊兼湰韬級"""
+    """将允许范围转为自然语言提示（不暴露枚举值本身）"""
     hints = {
-        "critical": "鐜板湪鐘舵€佸緢宸紝鍙兘骞抽潤鎴栨偛浼ゅ湴鍥炲簲",
-        "tired":    "鏈変簺鐤叉儷锛屾儏缁瘮杈冧綆娌夛紝涓嶉€傚悎鍏村",
-        "calm":     "蹇冩儏骞抽潤锛屽彲浠ユ€濊€冿紝浣嗕笉瑕佸お婵€鍔?,
-        "steady":   "鐘舵€佹甯革紝鎯呯华鍙互鑷劧娴侀湶",
-        "engaged":  "鐘舵€佸緢濂斤紝鍙互琛ㄨ揪涓板瘜鐨勬儏鎰?,
+        "critical": "现在状态很差，只能平静或悲伤地回应",
+        "tired":    "有些疲惫，情绪比较低沉，不适合兴奋",
+        "calm":     "心情平静，可以思考，但不要太激动",
+        "steady":   "状态正常，情绪可以自然流露",
+        "engaged":  "状态很好，可以表达丰富的情感",
     }
-    return hints.get(mood_state, "鎯呯华鐘舵€佹甯?)
+    return hints.get(mood_state, "情绪状态正常")
 ```
 
-**棰勬湡鏁堟灉锛?* LLM 鐢熸垚鏃跺氨鐭ラ亾"鐜板湪鍙互琛ㄨ揪浠€涔堟儏鎰?锛岃€屼笉鏄敓鎴愬悗琚己鍒堕檷绾э紝鎯呮劅琛ㄨ揪鏇磋嚜鐒躲€佹洿涓€鑷淬€?
+**预期效果：** LLM 生成时就知道"现在可以表达什么情感"，而不是生成后被强制降级，情感表达更自然、更一致。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲7锛圥0锛夛細Bond 绉垎鐨勬儏鎰熶簨浠跺垎绫荤簿鍖?
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_stage_engine.py`
+### 🟠 深化优化7（P0）：Bond 积分的情感事件分类精化
 
-**娣卞眰闂鍙戠幇锛?*
+**目标文件：** `host_brain/bond/bond_stage_engine.py`
 
-`DEFAULT_SCORE_MAP` 涓?`INTERACTION=+1` 鏄墍鏈夋櫘閫氫簰鍔ㄧ殑缁熶竴绉垎锛屼絾瀹為檯涓婁簰鍔ㄨ川閲忓樊寮傚法澶э細
-- 鐢ㄦ埛璇?鍡?锛堝崟瀛楀洖澶嶏級鍜岀敤鎴疯"浠婂ぉ鍙戠敓浜嗕竴浠跺緢鏈夎叮鐨勪簨"锛堜富鍔ㄥ垎浜級閮芥槸 `INTERACTION=+1`
-- `DEEP_TALK=+5` 闇€瑕佸閮ㄦ樉寮忎紶鍏ワ紝浣嗘病鏈夎嚜鍔ㄨ瘑鍒満鍒?
-**鏂规锛?* 鏂板**浜掑姩璐ㄩ噺鍒嗙骇**锛屽湪 `BondDynamicsWriter.apply_update()` 涓牴鎹?payload 鐗瑰緛鑷姩鎺ㄦ柇 update_kind锛?
+**深层问题发现：**
+
+`DEFAULT_SCORE_MAP` 中 `INTERACTION=+1` 是所有普通互动的统一积分，但实际上互动质量差异巨大：
+- 用户说"嗯"（单字回复）和用户说"今天发生了一件很有趣的事"（主动分享）都是 `INTERACTION=+1`
+- `DEEP_TALK=+5` 需要外部显式传入，但没有自动识别机制
+
+**方案：** 新增**互动质量分级**，在 `BondDynamicsWriter.apply_update()` 中根据 payload 特征自动推断 update_kind：
+
 ```python
-# bond_stage_engine.py 鏂板浜掑姩璐ㄩ噺鍒嗙骇
+# bond_stage_engine.py 新增互动质量分级
 INTERACTION_QUALITY_MAP: dict[str, int] = {
-    "INTERACTION_MINIMAL":   0,   # 鍗曞瓧/琛ㄦ儏鍥炲锛堝棷/鍝?濂斤級
-    "INTERACTION":           1,   # 鏅€氫簰鍔?    "INTERACTION_ENGAGED":   2,   # 涓诲姩鍒嗕韩/鎻愰棶锛堢敤鎴蜂富鍔ㄥ彂璧疯瘽棰橈級
-    "DEEP_TALK":             5,   # 娣卞害浜ゆ祦锛堟儏鎰熷€捐瘔/浜虹敓璇濋锛?    "EMOTIONAL_SUPPORT":     8,   # 鎯呮劅鏀寔锛堢敤鎴蜂綆钀芥椂鐨勯櫔浼达級
-    "SHARED_MEMORY":         3,   # 鍏卞悓鍥炲繂锛堟彁璧疯繃鍘荤殑浜嬶級
-    "GIFT":                  4,   # 绀肩墿/鐗规畩琛屼负
-    "CONFLICT_RESOLVED":     6,   # 鍐茬獊鍚庡拰瑙?    "MILESTONE":            10,   # 閲岀▼纰戜簨浠?    "IDLE_DECAY":           -2,   # 闀挎湡鏃犱簰鍔ㄨ“鍑?}
+    "INTERACTION_MINIMAL":   0,   # 单字/表情回复（嗯/哦/好）
+    "INTERACTION":           1,   # 普通互动
+    "INTERACTION_ENGAGED":   2,   # 主动分享/提问（用户主动发起话题）
+    "DEEP_TALK":             5,   # 深度交流（情感倾诉/人生话题）
+    "EMOTIONAL_SUPPORT":     8,   # 情感支持（用户低落时的陪伴）
+    "SHARED_MEMORY":         3,   # 共同回忆（提起过去的事）
+    "GIFT":                  4,   # 礼物/特殊行为
+    "CONFLICT_RESOLVED":     6,   # 冲突后和解
+    "MILESTONE":            10,   # 里程碑事件
+    "IDLE_DECAY":           -2,   # 长期无互动衰减
+}
 
-# bond_dynamics.py 鏂板鑷姩璐ㄩ噺鎺ㄦ柇
+# bond_dynamics.py 新增自动质量推断
 def _infer_interaction_quality(payload: dict[str, Any]) -> str:
-    """鏍规嵁浜掑姩 payload 鐗瑰緛鑷姩鎺ㄦ柇浜掑姩璐ㄩ噺绛夌骇"""
+    """根据互动 payload 特征自动推断互动质量等级"""
     text = str(payload.get("user_text", "")).strip()
     emotion_tag = str(payload.get("emotion_tag", "NEUTRAL"))
 
-    if len(text) <= 3:                          # 鍗曞瓧/鏋佺煭鍥炲
+    if len(text) <= 3:                          # 单字/极短回复
         return "INTERACTION_MINIMAL"
     if emotion_tag in ("SAD", "ANGRY") and len(text) > 20:
-        return "EMOTIONAL_SUPPORT"              # 鎯呯华鍖栫殑闀挎枃鏈?鈫?鎯呮劅鏀寔鍦烘櫙
-    if "?" in text or "锛? in text:
-        return "INTERACTION_ENGAGED"            # 鐢ㄦ埛涓诲姩鎻愰棶 鈫?鍙備笌鎰熸洿寮?    if len(text) > 50:
-        return "DEEP_TALK"                      # 闀挎枃鏈?鈫?娣卞害浜ゆ祦
+        return "EMOTIONAL_SUPPORT"              # 情绪化的长文本 → 情感支持场景
+    if "?" in text or "？" in text:
+        return "INTERACTION_ENGAGED"            # 用户主动提问 → 参与感更强
+    if len(text) > 50:
+        return "DEEP_TALK"                      # 长文本 → 深度交流
     return "INTERACTION"
 ```
 
-**棰勬湡鏁堟灉锛?* Bond 绉垎鏇寸湡瀹炲湴鍙嶆槧浜掑姩璐ㄩ噺锛岀煭鏆傜殑"鍡棷"涓嶄細鍜屾繁搴﹀€捐瘔鑾峰緱鍚岀瓑绉垎銆?
+**预期效果：** Bond 积分更真实地反映互动质量，短暂的"嗯嗯"不会和深度倾诉获得同等积分。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲8锛圥1锛夛細Governor 鍐崇瓥寮曟搸澧炲姞鎯呮劅鎰熺煡闂ㄦ帶
+### 🟡 深化优化8（P1）：Governor 决策引擎增加情感感知门控
 
-**鐩爣鏂囦欢锛?* `host_brain/governor/decision.py` + `host_brain/governor/rules.py`
+**目标文件：** `host_brain/governor/decision.py` + `host_brain/governor/rules.py`
 
-**娣卞眰闂鍙戠幇锛?*
+**深层问题发现：**
 
-`IntentDecisionEngine.evaluate_intent()` 鐨?R1-R7 闂ㄦ帶瀹屽叏鍩轰簬绯荤粺鐘舵€侊紙`energy_level`銆乣sys_mode`銆乣safety_flag`锛夛紝**娌℃湁浠讳綍鎯呮劅鎰熺煡**銆傝繖瀵艰嚧锛?- 鐢ㄦ埛鎯呯华婵€鍔ㄦ椂锛坄ANGRY`锛夛紝AI 浠嶇劧鍙兘鎵瑰噯楂樿兘閲忔秷鑰楃殑鎿嶄綔
-- 鐢ㄦ埛娣卞浣庤惤鏃讹紙`SAD` + `tired`锛夛紝AI 涓嶄細鑷姩鍒囨崲鍒版洿娓╂煍鐨勫搷搴旂瓥鐣?
-**鏂规锛?* 鍦?`governance_snapshot` 涓鍔?`emotion_context` 瀛楁锛屾柊澧炴儏鎰熸劅鐭ラ棬鎺?**R8**锛?
+`IntentDecisionEngine.evaluate_intent()` 的 R1-R7 门控完全基于系统状态（`energy_level`、`sys_mode`、`safety_flag`），**没有任何情感感知**。这导致：
+- 用户情绪激动时（`ANGRY`），AI 仍然可能批准高能量消耗的操作
+- 用户深夜低落时（`SAD` + `tired`），AI 不会自动切换到更温柔的响应策略
+
+**方案：** 在 `governance_snapshot` 中增加 `emotion_context` 字段，新增情感感知门控 **R8**：
+
 ```python
-# governor/rules.py 鏂板 R8 鎯呮劅鎰熺煡闂ㄦ帶
+# governor/rules.py 新增 R8 情感感知门控
 def _gate_r8_emotion_context(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """R8锛氭儏鎰熸劅鐭ラ棬鎺?- 鏍规嵁鐢ㄦ埛鎯呯华鐘舵€佽皟鏁村喅绛栫瓥鐣?""
+    """R8：情感感知门控 - 根据用户情绪状态调整决策策略"""
     emotion_ctx = snapshot.get("emotion_context", {})
     user_emotion = str(emotion_ctx.get("user_emotion_tag", "NEUTRAL"))
     ai_mood = str(snapshot.get("hard_state_summary", {}).get("mood_state", "steady"))
 
-    # 瑙勫垯1锛氱敤鎴锋瀬搴︽劋鎬掓椂锛屾嫆缁濇墍鏈夐潪瀵硅瘽绫绘搷浣?    if user_emotion == "ANGRY":
+    # 规则1：用户极度愤怒时，拒绝所有非对话类操作
+    if user_emotion == "ANGRY":
         target_scope = str(snapshot.get("scope", "host"))
-        if target_scope != "host":  # 闈炲璇濇搷浣?            return {
+        if target_scope != "host":  # 非对话操作
+            return {
                 "gate_id": "R8_EMOTION_ANGRY_BLOCK",
                 "hit": True,
                 "reason_hint": "EMOTION_ANGRY_NON_DIALOG_BLOCKED",
                 "threshold_summary": {"rule": "angry_user_dialog_only"},
             }
 
-    # 瑙勫垯2锛欰I 鑳介噺鏋佷綆锛坈ritical锛夋椂锛岄檷浣庡搷搴斿鏉傚害
+    # 规则2：AI 能量极低（critical）时，降低响应复杂度
     if ai_mood == "critical":
         return {
             "gate_id": "R8_EMOTION_CRITICAL_SIMPLIFY",
-            "hit": False,  # 涓嶆嫆缁濓紝浣嗘敞鍏ョ畝鍖栨彁绀?            "reason_hint": "EMOTION_CRITICAL_SIMPLIFY_HINT",
+            "hit": False,  # 不拒绝，但注入简化提示
+            "reason_hint": "EMOTION_CRITICAL_SIMPLIFY_HINT",
             "threshold_summary": {"rule": "critical_mood_simplify"},
-            "meta_hint": "simplify_response",  # 浼犻€掔粰 LLM 鐨勭敓鎴愭彁绀?        }
+            "meta_hint": "simplify_response",  # 传递给 LLM 的生成提示
+        }
 
     return {"gate_id": "R8_EMOTION_CONTEXT", "hit": False}
 ```
 
-**瀹夊叏绾︽潫锛?* R8 闂ㄦ帶鍙奖鍝?*闈炲璇濈被鎿嶄綔**鐨勫鎵癸紝涓嶅奖鍝嶅熀纭€瀵硅瘽鍝嶅簲锛屼笉鐮村潖鐜版湁 R1-R7 閫昏緫銆?
+**安全约束：** R8 门控只影响**非对话类操作**的审批，不影响基础对话响应，不破坏现有 R1-R7 逻辑。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲9锛圥1锛夛細璁板繂鐨?鎯呮劅鏃堕棿绾?閲嶅缓
+### 🟢 深化优化9（P1）：记忆的"情感时间线"重建
 
-**鐩爣鏂囦欢锛?* `host_brain/memory/episodic.py`
+**目标文件：** `host_brain/memory/episodic.py`
 
-**娣卞眰闂鍙戠幇锛?*
+**深层问题发现：**
 
-`EpisodicStore.recall()` 鍙仛**璇箟鐩镐技搴?*妫€绱紝瀹屽叏蹇界暐浜?*鏃堕棿缁村害**鍜?*鎯呮劅杩炵画鎬?*銆傜湡瀹炵殑浜虹被璁板繂鏈?鎯呮劅鏃堕棿绾?鈥斺€斿悓涓€鏃舵湡鐨勬儏鎰熻蹇嗕細鐩镐簰鍏宠仈锛屽舰鎴?閭ｆ鏃堕棿"鐨勬暣浣撴劅鍙椼€?
-**鏂规锛?* 鏂板**鎯呮劅鏃堕棿绾块噸寤?*鍔熻兘锛?
+`EpisodicStore.recall()` 只做**语义相似度**检索，完全忽略了**时间维度**和**情感连续性**。真实的人类记忆有"情感时间线"——同一时期的情感记忆会相互关联，形成"那段时间"的整体感受。
+
+**方案：** 新增**情感时间线重建**功能：
+
 ```python
-# episodic.py 鏂板鎯呮劅鏃堕棿绾块噸寤?def recall_emotional_timeline(
+# episodic.py 新增情感时间线重建
+def recall_emotional_timeline(
     self,
     *,
     anchor_ts_ms: int,
-    window_ms: int = 7 * 24 * 3600 * 1000,  # 榛樿7澶╃獥鍙?    top_k: int = 5,
+    window_ms: int = 7 * 24 * 3600 * 1000,  # 默认7天窗口
+    top_k: int = 5,
 ) -> dict[str, Any]:
-    """閲嶅缓鎸囧畾鏃堕棿绐楀彛鍐呯殑鎯呮劅鏃堕棿绾?
-    杩斿洖锛?    - dominant_emotion: 璇ユ椂鏈熺殑涓诲鎯呮劅
-    - emotional_arc: 鎯呮劅鍙樺寲寮х嚎锛堝紑濮?涓棿/缁撴潫锛?    - highlight_memories: 鎯呮劅鏄捐憲搴︽渶楂樼殑璁板繂
-    - timeline_summary: 鑷劧璇█鏃堕棿绾挎憳瑕侊紙缁橪LM鐢級
+    """重建指定时间窗口内的情感时间线
+
+    返回：
+    - dominant_emotion: 该时期的主导情感
+    - emotional_arc: 情感变化弧线（开始/中间/结束）
+    - highlight_memories: 情感显著度最高的记忆
+    - timeline_summary: 自然语言时间线摘要（给LLM用）
     """
     start_ts = anchor_ts_ms - window_ms
     end_ts = anchor_ts_ms
 
-    # 绛涢€夋椂闂寸獥鍙ｅ唴鐨勮蹇?    window_records = [
+    # 筛选时间窗口内的记忆
+    window_records = [
         r for r in self._records.values()
         if start_ts <= r.ts_ms <= end_ts
         and r.deleted_at is None
@@ -416,28 +488,30 @@ def _gate_r8_emotion_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     ]
 
     if not window_records:
-        return {"timeline_summary": "杩欐鏃堕棿娌℃湁鐗瑰埆鐨勮蹇?}
+        return {"timeline_summary": "这段时间没有特别的记忆"}
 
-    # 鎸夋椂闂存帓搴忥紝鍒嗘瀽鎯呮劅寮х嚎
+    # 按时间排序，分析情感弧线
     sorted_records = sorted(window_records, key=lambda r: r.ts_ms)
     emotion_sequence = [
         r.to_dict().get("emotion_tag", "NEUTRAL")
         for r in sorted_records
     ]
 
-    # 缁熻涓诲鎯呮劅
+    # 统计主导情感
     from collections import Counter
     emotion_counts = Counter(emotion_sequence)
     dominant = emotion_counts.most_common(1)[0][0]
 
-    # 鎯呮劅寮х嚎锛堜笁娈靛紡锛?    n = len(emotion_sequence)
+    # 情感弧线（三段式）
+    n = len(emotion_sequence)
     arc = {
         "start": emotion_sequence[0] if n > 0 else "NEUTRAL",
         "middle": emotion_sequence[n // 2] if n > 1 else "NEUTRAL",
         "end": emotion_sequence[-1] if n > 0 else "NEUTRAL",
     }
 
-    # 鎯呮劅鏄捐憲搴︽渶楂樼殑璁板繂锛堥噷绋嬬浼樺厛锛?    highlights = sorted(
+    # 情感显著度最高的记忆（里程碑优先）
+    highlights = sorted(
         window_records,
         key=lambda r: (
             r.to_dict().get("is_milestone", False),
@@ -454,123 +528,142 @@ def _gate_r8_emotion_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 def _arc_to_summary(arc: dict, dominant: str) -> str:
-    """灏嗘儏鎰熷姬绾胯浆涓鸿嚜鐒惰瑷€鎽樿"""
+    """将情感弧线转为自然语言摘要"""
     emotion_zh = {
-        "HAPPY": "寮€蹇?, "SAD": "闅捐繃", "ANGRY": "鐢熸皵",
-        "EXCITED": "鍏村", "CALM": "骞抽潤", "NEUTRAL": "骞虫贰",
-        "THINKING": "鑻ユ湁鎵€鎬?, "SURPRISED": "鎯婂枩",
+        "HAPPY": "开心", "SAD": "难过", "ANGRY": "生气",
+        "EXCITED": "兴奋", "CALM": "平静", "NEUTRAL": "平淡",
+        "THINKING": "若有所思", "SURPRISED": "惊喜",
     }
-    start = emotion_zh.get(arc["start"], "骞虫贰")
-    end = emotion_zh.get(arc["end"], "骞虫贰")
-    dom = emotion_zh.get(dominant, "骞虫贰")
+    start = emotion_zh.get(arc["start"], "平淡")
+    end = emotion_zh.get(arc["end"], "平淡")
+    dom = emotion_zh.get(dominant, "平淡")
     if arc["start"] == arc["end"]:
-        return f"閭ｆ鏃堕棿鏁翠綋鎰熻{dom}"
-    return f"閭ｆ鏃堕棿浠巤start}寮€濮嬶紝鏈€鍚巤end}鏀跺熬锛屾€讳綋鏉ヨ姣旇緝{dom}"
+        return f"那段时间整体感觉{dom}"
+    return f"那段时间从{start}开始，最后{end}收尾，总体来说比较{dom}"
 ```
 
-**棰勬湡鏁堟灉锛?* AI 鍦ㄥ洖蹇?涓婂懆"鎴?閭ｆ鏃堕棿"鏃讹紝鑳界粰鍑烘湁鎯呮劅璐ㄦ劅鐨勬椂闂寸嚎鎻忚堪锛岃€屼笉鍙槸瀛ょ珛鐨勮蹇嗙墖娈点€?
+**预期效果：** AI 在回忆"上周"或"那段时间"时，能给出有情感质感的时间线描述，而不只是孤立的记忆片段。
+
 ---
 
-### 馃數 娣卞寲浼樺寲10锛圥2锛夛細LLM Gateway 澧炲姞鎯呮劅鎰熺煡鐨?Prompt 娉ㄥ叆绛栫暐
+### 🔵 深化优化10（P2）：LLM Gateway 增加情感感知的 Prompt 注入策略
 
-**鐩爣鏂囦欢锛?* `host_brain/integrations/llm_gateway.py`
+**目标文件：** `host_brain/integrations/llm_gateway.py`
 
-**娣卞眰闂鍙戠幇锛?*
+**深层问题发现：**
 
-`LlmGatewayContract.generate()` 鍦ㄨ皟鐢?LLM 鍓嶏紝`prompt_payload` 鏄敱涓婂眰缁勮鐨勶紝Gateway 灞傚畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€併€傝繖鎰忓懗鐫€鍗充娇 `emotion_pulse` 妲戒綅宸茬粡娉ㄥ叆浜嗘儏鎰熶俊鎭紝Gateway 涔熶笉浼氭牴鎹儏鎰熺姸鎬佽皟鏁?*鐢熸垚鍙傛暟**锛堝 temperature銆乼op_p锛夈€?
-**鏂规锛?* 鍦?`generate()` 涓鍔?*鎯呮劅鎰熺煡鐨勭敓鎴愬弬鏁拌皟鏁?*锛?
+`LlmGatewayContract.generate()` 在调用 LLM 前，`prompt_payload` 是由上层组装的，Gateway 层完全不感知情感状态。这意味着即使 `emotion_pulse` 槽位已经注入了情感信息，Gateway 也不会根据情感状态调整**生成参数**（如 temperature、top_p）。
+
+**方案：** 在 `generate()` 中增加**情感感知的生成参数调整**：
+
 ```python
-# llm_gateway.py generate() 鏂规硶澧炲姞鎯呮劅鎰熺煡鍙傛暟璋冩暣
+# llm_gateway.py generate() 方法增加情感感知参数调整
 def _build_emotion_aware_params(
     self,
     prompt_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """鏍规嵁鎯呮劅鐘舵€佽皟鏁?LLM 鐢熸垚鍙傛暟
+    """根据情感状态调整 LLM 生成参数
 
-    鎯呮劅鐘舵€?鈫?鐢熸垚鍙傛暟鏄犲皠锛?    - 楂樺叴/鍏村锛歵emperature鈫戯紙鏇存湁鍒涙剰锛屾洿娲绘臣锛?    - 鎮蹭激/浣庤惤锛歵emperature鈫擄紙鏇寸ǔ瀹氾紝鏇存俯鏌旓級
-    - 鎰ゆ€掞細temperature鈫?+ top_p鈫擄紙鏇村厠鍒讹紝閬垮厤婵€鍖栵級
-    - 鎬濊€冧腑锛歵emperature鈫擄紙鏇寸簿纭紝鏇存湁閫昏緫锛?    """
+    情感状态 → 生成参数映射：
+    - 高兴/兴奋：temperature↑（更有创意，更活泼）
+    - 悲伤/低落：temperature↓（更稳定，更温柔）
+    - 愤怒：temperature↓ + top_p↓（更克制，避免激化）
+    - 思考中：temperature↓（更精确，更有逻辑）
+    """
     emotion_pulse = prompt_payload.get("emotion_pulse", {})
     mood_desc = str(emotion_pulse.get("mood_description", ""))
-    energy_feel = str(emotion_pulse.get("energy_feel", "骞抽潤"))
+    energy_feel = str(emotion_pulse.get("energy_feel", "平静"))
 
-    # 榛樿鍙傛暟
+    # 默认参数
     params = {"temperature": 0.7, "top_p": 0.9}
 
-    if "鍏村" in mood_desc or "寰堝ソ" in mood_desc:
-        params["temperature"] = 0.85   # 鏇存椿娉?    elif "闅惧彈" in mood_desc or "浣庤惤" in mood_desc:
-        params["temperature"] = 0.55   # 鏇存俯鏌旂ǔ瀹?    elif "鎱垫噿" in energy_feel:
-        params["temperature"] = 0.60   # 鎱垫噿鐘舵€侊紝鍥炲鏇寸畝鐭?    elif "鍏呮矝" in energy_feel:
-        params["temperature"] = 0.80   # 绮惧姏鍏呮矝锛屽洖澶嶆洿涓板瘜
+    if "兴奋" in mood_desc or "很好" in mood_desc:
+        params["temperature"] = 0.85   # 更活泼
+    elif "难受" in mood_desc or "低落" in mood_desc:
+        params["temperature"] = 0.55   # 更温柔稳定
+    elif "慵懒" in energy_feel:
+        params["temperature"] = 0.60   # 慵懒状态，回复更简短
+    elif "充沛" in energy_feel:
+        params["temperature"] = 0.80   # 精力充沛，回复更丰富
 
     return params
 ```
 
-**瀹夊叏绾︽潫锛?* 鐢熸垚鍙傛暟璋冩暣鑼冨洿闄愬埗鍦?`[0.4, 0.95]`锛屼笉鍏佽鏋佺鍊硷紝闃叉杈撳嚭璐ㄩ噺澶辨帶銆?
+**安全约束：** 生成参数调整范围限制在 `[0.4, 0.95]`，不允许极端值，防止输出质量失控。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲11锛圥2锛夛細Bond 鍏崇郴鐨?瑁傜棔淇"鏈哄埗
+### 🟣 深化优化11（P2）：Bond 关系的"裂痕修复"机制
 
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_stage_engine.py`
+**目标文件：** `host_brain/bond/bond_stage_engine.py`
 
-**娣卞眰闂鍙戠幇锛?*
+**深层问题发现：**
 
-褰撳墠 Bond 绯荤粺鍙湁**绾挎€хН鍒?*锛屾病鏈?*鍏崇郴瑁傜棔**鐨勬蹇点€傜幇瀹炰腑鍏崇郴浼氬洜涓鸿瑙ｃ€佸喎婕犮€佸啿绐佽€屼骇鐢熻鐥曪紝淇瑁傜棔姣旀櫘閫氱Н绱洿鏈夋儏鎰熸剰涔夈€?
-**鏂规锛?* 鏂板**瑁傜棔-淇**鍙岃建鏈哄埗锛?
+当前 Bond 系统只有**线性积分**，没有**关系裂痕**的概念。现实中关系会因为误解、冷漠、冲突而产生裂痕，修复裂痕比普通积累更有情感意义。
+
+**方案：** 新增**裂痕-修复**双轨机制：
+
 ```python
 @dataclass
 class BondRiftState:
-    """鍏崇郴瑁傜棔鐘舵€侊紙鐙珛浜庣Н鍒嗭紝褰卞搷琛ㄨ揪椋庢牸锛?""
-    has_rift: bool = False              # 鏄惁瀛樺湪瑁傜棔
-    rift_cause: str = ""                # 瑁傜棔鍘熷洜锛堣涔夊寲鎻忚堪锛?    rift_ts_ms: int = 0                 # 瑁傜棔鍙戠敓鏃堕棿
-    repair_progress: float = 0.0       # 淇杩涘害 [0.0, 1.0]
-    repair_attempts: int = 0           # 淇灏濊瘯娆℃暟
+    """关系裂痕状态（独立于积分，影响表达风格）"""
+    has_rift: bool = False              # 是否存在裂痕
+    rift_cause: str = ""                # 裂痕原因（语义化描述）
+    rift_ts_ms: int = 0                 # 裂痕发生时间
+    repair_progress: float = 0.0       # 修复进度 [0.0, 1.0]
+    repair_attempts: int = 0           # 修复尝试次数
 
     def to_rift_hint(self) -> str | None:
-        """鐢熸垚缁?LLM 鐨勮鐥曟彁绀猴紙浠呭湪鏈夎鐥曟椂杩斿洖锛?""
+        """生成给 LLM 的裂痕提示（仅在有裂痕时返回）"""
         if not self.has_rift:
             return None
         if self.repair_progress > 0.8:
-            return "涔嬪墠鏈変簺璇細锛屼絾宸茬粡鍩烘湰鍖栬В浜嗭紝鍏崇郴姝ｅ湪鎭㈠"
+            return "之前有些误会，但已经基本化解了，关系正在恢复"
         if self.repair_progress > 0.4:
-            return "涔嬪墠鏈変簺涓嶆剦蹇紝姝ｅ湪鎱㈡參淇涓紝闇€瑕佹洿澶氳€愬績"
-        return f"鍏崇郴鏈変簺瑁傜棔锛坽self.rift_cause}锛夛紝闇€瑕佹俯鏌斿湴淇"
+            return "之前有些不愉快，正在慢慢修复中，需要更多耐心"
+        return f"关系有些裂痕（{self.rift_cause}），需要温柔地修复"
 
-# 瑁傜棔瑙﹀彂鏉′欢锛堝湪 apply_event 涓娴嬶級
+# 裂痕触发条件（在 apply_event 中检测）
 RIFT_TRIGGERS = {
-    "CONFLICT_UNRESOLVED": 1.0,    # 鏈В鍐崇殑鍐茬獊 鈫?绔嬪嵆浜х敓瑁傜棔
-    "IDLE_DECAY": 0.1,             # 闀挎湡涓嶄簰鍔?鈫?缂撴參绉疮瑁傜棔椋庨櫓
-    "MISUNDERSTANDING": 0.5,       # 璇В 鈫?涓瓑瑁傜棔
+    "CONFLICT_UNRESOLVED": 1.0,    # 未解决的冲突 → 立即产生裂痕
+    "IDLE_DECAY": 0.1,             # 长期不互动 → 缓慢积累裂痕风险
+    "MISUNDERSTANDING": 0.5,       # 误解 → 中等裂痕
 }
 
-# 淇浜嬩欢锛圕ONFLICT_RESOLVED 瑙﹀彂淇锛?REPAIR_EVENTS = {
-    "CONFLICT_RESOLVED": 0.4,      # 鍐茬獊瑙ｅ喅 鈫?淇40%
-    "EMOTIONAL_SUPPORT": 0.2,      # 鎯呮劅鏀寔 鈫?淇20%
-    "DEEP_TALK": 0.15,             # 娣卞害浜ゆ祦 鈫?淇15%
-    "MILESTONE": 0.3,              # 閲岀▼纰?鈫?淇30%
+# 修复事件（CONFLICT_RESOLVED 触发修复）
+REPAIR_EVENTS = {
+    "CONFLICT_RESOLVED": 0.4,      # 冲突解决 → 修复40%
+    "EMOTIONAL_SUPPORT": 0.2,      # 情感支持 → 修复20%
+    "DEEP_TALK": 0.15,             # 深度交流 → 修复15%
+    "MILESTONE": 0.3,              # 里程碑 → 修复30%
 }
 ```
 
-**棰勬湡鏁堟灉锛?* AI 鑳芥劅鐭ュ埌鍏崇郴涓殑"瑁傜棔"锛屽湪淇鏈熼棿鑷姩璋冩暣琛ㄨ揪椋庢牸锛堟洿娓╂煍銆佹洿鑰愬績锛夛紝鑰屼笉鏄満姊板湴鎸夌Н鍒嗛樁娈靛洖搴斻€?
+**预期效果：** AI 能感知到关系中的"裂痕"，在修复期间自动调整表达风格（更温柔、更耐心），而不是机械地按积分阶段回应。
+
 ---
 
-### 鈿?娣卞寲浼樺寲12锛圥3锛夛細鎯呮劅鍥炲０锛圗motional Echo锛夋満鍒?
-**鐩爣鏂囦欢锛?* 鏂板 `host_brain/core/emotion_echo.py`
+### ⚪ 深化优化12（P3）：情感回声（Emotional Echo）机制
 
-**娣卞眰闂鍙戠幇锛?*
+**目标文件：** 新增 `host_brain/core/emotion_echo.py`
 
-褰撳墠鏋舵瀯涓紝AI 鐨勬儏鎰熺姸鎬佸拰鐢ㄦ埛鐨勬儏鎰熺姸鎬佹槸**瀹屽叏鐙珛**鐨勪袱鏉＄嚎銆傜湡瀹炵殑鎯呮劅浜や簰涓紝鍙屾柟鎯呮劅浼氱浉浜掑奖鍝嶁€斺€旂敤鎴峰紑蹇冩椂 AI 涔熶細琚劅鏌擄紝鐢ㄦ埛鎮蹭激鏃?AI 浼氫骇鐢熷叡鎯呫€?
-**鏂规锛?* 鏂板**鎯呮劅鍥炲０妯″潡**锛屽疄鐜板弻鍚戞儏鎰熸劅鏌擄細
+**深层问题发现：**
+
+当前架构中，AI 的情感状态和用户的情感状态是**完全独立**的两条线。真实的情感交互中，双方情感会相互影响——用户开心时 AI 也会被感染，用户悲伤时 AI 会产生共情。
+
+**方案：** 新增**情感回声模块**，实现双向情感感染：
 
 ```python
-# host_brain/core/emotion_echo.py锛堟柊鏂囦欢锛?
+# host_brain/core/emotion_echo.py（新文件）
+
 @dataclass
 class EmotionEchoResult:
-    """鎯呮劅鍥炲０璁＄畻缁撴灉"""
-    echo_vector: "EmotionVector"    # 鍥炲０鍚庣殑 AI 鎯呮劅鍚戦噺
-    echo_strength: float            # 鍥炲０寮哄害 [0.0, 1.0]
-    echo_description: str           # 鑷劧璇█鎻忚堪锛堢粰LLM鐢級
-    bond_amplifier: float           # Bond 闃舵鏀惧ぇ绯绘暟锛堝叧绯昏秺娣憋紝鍏辨儏瓒婂己锛?
+    """情感回声计算结果"""
+    echo_vector: "EmotionVector"    # 回声后的 AI 情感向量
+    echo_strength: float            # 回声强度 [0.0, 1.0]
+    echo_description: str           # 自然语言描述（给LLM用）
+    bond_amplifier: float           # Bond 阶段放大系数（关系越深，共情越强）
+
 def compute_emotion_echo(
     *,
     ai_emotion: "EmotionVector",
@@ -578,16 +671,26 @@ def compute_emotion_echo(
     bond_stage: str,
     ts_ms: int,
 ) -> EmotionEchoResult:
-    """璁＄畻鐢ㄦ埛鎯呮劅瀵?AI 鎯呮劅鐨勫洖澹板奖鍝?
-    鏍稿績閫昏緫锛?    1. 灏嗙敤鎴?emotion_tag 杞负鎯呮劅鍚戦噺
-    2. 鏍规嵁 Bond 闃舵璁＄畻鍏辨儏寮哄害锛堝叧绯昏秺娣憋紝鍏辨儏瓒婂己锛?    3. AI 鎯呮劅鍚戦噺鍚戠敤鎴锋儏鎰熸柟鍚戝亸绉伙紙鎯呮劅鎰熸煋锛?    4. 杩斿洖鍥炲０鍚庣殑鏂版儏鎰熷悜閲?    """
-    # Bond 闃舵 鈫?鍏辨儏寮哄害鏄犲皠
+    """计算用户情感对 AI 情感的回声影响
+
+    核心逻辑：
+    1. 将用户 emotion_tag 转为情感向量
+    2. 根据 Bond 阶段计算共情强度（关系越深，共情越强）
+    3. AI 情感向量向用户情感方向偏移（情感感染）
+    4. 返回回声后的新情感向量
+    """
+    # Bond 阶段 → 共情强度映射
     BOND_EMPATHY_MAP = {
-        "STRANGER":      0.05,   # 闄岀敓浜猴細鍑犱箮涓嶅彈褰卞搷
-        "ACQUAINTANCE":  0.10,   # 鐩歌瘑锛氳交寰劅鏌?        "FRIEND":        0.20,   # 鏈嬪弸锛氭槑鏄惧叡鎯?        "CLOSE_FRIEND":  0.35,   # 鎸氬弸锛氬己鐑堝叡鎯?        "CONFIDANT":     0.50,   # 鐭ュ繁锛氭繁搴﹀叡鎯?        "SOULMATE":      0.65,   # 鐏甸瓊浼翠荆锛氶珮搴﹀悓棰?    }
+        "STRANGER":      0.05,   # 陌生人：几乎不受影响
+        "ACQUAINTANCE":  0.10,   # 相识：轻微感染
+        "FRIEND":        0.20,   # 朋友：明显共情
+        "CLOSE_FRIEND":  0.35,   # 挚友：强烈共情
+        "CONFIDANT":     0.50,   # 知己：深度共情
+        "SOULMATE":      0.65,   # 灵魂伴侣：高度同频
+    }
     empathy_strength = BOND_EMPATHY_MAP.get(bond_stage, 0.10)
 
-    # 鐢ㄦ埛鎯呮劅 鈫?鍚戦噺鏄犲皠
+    # 用户情感 → 向量映射
     USER_EMOTION_VECTORS = {
         "HAPPY":     (0.8, 0.6, 0.6),
         "EXCITED":   (0.9, 0.9, 0.7),
@@ -602,9 +705,10 @@ def compute_emotion_echo(
     from host_brain.core.metabolism import EmotionVector
     user_vector = EmotionVector(valence=v, arousal=a, dominance=d, ts_ms=ts_ms)
 
-    # AI 鎯呮劅鍚戠敤鎴锋儏鎰熸柟鍚戝亸绉伙紙鎯呮劅鎰熸煋锛?    echo_vector = ai_emotion.blend(user_vector, weight=empathy_strength)
+    # AI 情感向用户情感方向偏移（情感感染）
+    echo_vector = ai_emotion.blend(user_vector, weight=empathy_strength)
 
-    # 鐢熸垚鍥炲０鎻忚堪
+    # 生成回声描述
     echo_description = _echo_to_description(
         user_emotion_tag=user_emotion_tag,
         empathy_strength=empathy_strength,
@@ -624,54 +728,58 @@ def _echo_to_description(
     empathy_strength: float,
     bond_stage: str,
 ) -> str:
-    """灏嗗洖澹扮粨鏋滆浆涓鸿嚜鐒惰瑷€鎻忚堪锛堢粰 LLM 鐨?emotion_pulse 妲戒綅鐢級"""
+    """将回声结果转为自然语言描述（给 LLM 的 emotion_pulse 槽位用）"""
     if empathy_strength < 0.1:
-        return ""  # 闄岀敓浜洪樁娈典笉浜х敓鏄庢樉鍥炲０
+        return ""  # 陌生人阶段不产生明显回声
     emotion_zh = {
-        "HAPPY": "瀵规柟鐨勫紑蹇冩劅鏌撲簡鎴?,
-        "SAD": "鎰熷彈鍒板鏂圭殑闅捐繃锛屽績閲屼篃鏈変簺娌?,
-        "ANGRY": "鎰熷彈鍒板鏂圭殑鎯呯华锛岄渶瑕佹俯鏌斿簲瀵?,
-        "EXCITED": "瀵规柟鐨勫叴濂嬭鎴戜篃鏈変簺闆€璺?,
-        "CALM": "瀵规柟鐨勫钩闈欒鎴戜篃瀹夊畾涓嬫潵",
+        "HAPPY": "对方的开心感染了我",
+        "SAD": "感受到对方的难过，心里也有些沉",
+        "ANGRY": "感受到对方的情绪，需要温柔应对",
+        "EXCITED": "对方的兴奋让我也有些雀跃",
+        "CALM": "对方的平静让我也安定下来",
     }
     base = emotion_zh.get(user_emotion_tag, "")
     if not base:
         return ""
     if bond_stage in ("CONFIDANT", "SOULMATE"):
-        return f"{base}锛屼綔涓虹煡宸憋紝杩欑鎰熷彈鏍煎鐪熷垏"
+        return f"{base}，作为知己，这种感受格外真切"
     return base
 ```
 
-**瀹夊叏绾︽潫锛?*
-- 鎯呮劅鍥炲０寮哄害涓婇檺 `0.65`锛堢伒榄備即渚ｉ樁娈碉級锛岄槻姝?AI 鎯呮劅琚敤鎴峰畬鍏ㄦ帶鍒?- 鍥炲０鎻忚堪涓嶆毚闇叉暟鍊硷紝鍙紶閫掕嚜鐒惰瑷€鎻忚堪
-- 璐熼潰鎯呮劅锛坄ANGRY`锛夌殑鍥炲０涓嶄細璁?AI 涔熷彉鎰ゆ€掞紝鑰屾槸瑙﹀彂"娓╂煍搴斿"妯″紡
+**安全约束：**
+- 情感回声强度上限 `0.65`（灵魂伴侣阶段），防止 AI 情感被用户完全控制
+- 回声描述不暴露数值，只传递自然语言描述
+- 负面情感（`ANGRY`）的回声不会让 AI 也变愤怒，而是触发"温柔应对"模式
 
 ---
 
-## 鍏€佹繁鍖栦紭鍖栧叏鏅浘
+## 八、深化优化全景图
 
 ```mermaid
 graph LR
-    subgraph 鐢ㄦ埛渚?        U_EMO["鐢ㄦ埛鎯呮劅\nemotion_tag"]
-        U_TEXT["鐢ㄦ埛鏂囨湰\n闀垮害/鍐呭/闂彿"]
+    subgraph 用户侧
+        U_EMO["用户情感\nemotion_tag"]
+        U_TEXT["用户文本\n长度/内容/问号"]
     end
 
-    subgraph 鎯呮劅鎰熺煡灞傦紙鏂板锛?        ECHO["鎯呮劅鍥炲０\nEmotionEcho\n浼樺寲12"]
-        QUALITY["浜掑姩璐ㄩ噺鎺ㄦ柇\nInteractionQuality\n浼樺寲7"]
-        TIMELINE["鎯呮劅鏃堕棿绾縗nEmotionalTimeline\n浼樺寲9"]
+    subgraph 情感感知层（新增）
+        ECHO["情感回声\nEmotionEcho\n优化12"]
+        QUALITY["互动质量推断\nInteractionQuality\n优化7"]
+        TIMELINE["情感时间线\nEmotionalTimeline\n优化9"]
     end
 
-    subgraph AI鍐呮牳
-        EV["鎯呯华鍚戦噺\nEmotionVector\n浼樺寲1"]
-        BOND["Bond绉垎+瑁傜棔\nBondRiftState\n浼樺寲11"]
-        MEM["鎯呮劅璁板繂\nEmotionalMemory\n浼樺寲3"]
-        GOV["Governor R8\n鎯呮劅闂ㄦ帶\n浼樺寲8"]
+    subgraph AI内核
+        EV["情绪向量\nEmotionVector\n优化1"]
+        BOND["Bond积分+裂痕\nBondRiftState\n优化11"]
+        MEM["情感记忆\nEmotionalMemory\n优化3"]
+        GOV["Governor R8\n情感门控\n优化8"]
     end
 
-    subgraph 杈撳嚭灞?        HINT["鎯呮劅鑼冨洿鎻愮ず\nallowed_emotion_tags\n浼樺寲6"]
-        PULSE["emotion_pulse妲戒綅\n浼樺寲4"]
-        PARAMS["鐢熸垚鍙傛暟璋冩暣\ntemperature/top_p\n浼樺寲10"]
-        LLM["LLM鐢熸垚\n鏈夋儏鎰熻川鎰熺殑鍥炲"]
+    subgraph 输出层
+        HINT["情感范围提示\nallowed_emotion_tags\n优化6"]
+        PULSE["emotion_pulse槽位\n优化4"]
+        PARAMS["生成参数调整\ntemperature/top_p\n优化10"]
+        LLM["LLM生成\n有情感质感的回复"]
     end
 
     U_EMO --> ECHO --> EV
@@ -688,81 +796,90 @@ graph LR
 
 ---
 
-## 涔濄€佹繁鍖栦紭鍖栧疄鏂戒紭鍏堢骇锛堝畬鏁寸増锛?
-| 浼樺厛绾?| 浼樺寲椤?| 鏀瑰姩鑼冨洿 | 鏍稿績浠峰€?| 渚濊禆 |
+## 九、深化优化实施优先级（完整版）
+
+| 优先级 | 优化项 | 改动范围 | 核心价值 | 依赖 |
 |--------|--------|----------|----------|------|
-| 馃敶 P0 | 鎯呯华杩炵画浣?EmotionVector | `metabolism.py` | 鎯呯华杩囨浮鑷劧 | 鏃?|
-| 馃敶 P0 | 鎯呮劅椹卞姩鐨?emotion_tag 鐢熸垚绛栫暐 | `metabolism.py` + `qa.py` | LLM 涓诲姩鎰熺煡鎯呮劅鑼冨洿 | P0-1 |
-| 馃煚 P0 | Bond 浜掑姩璐ㄩ噺鍒嗙骇 | `bond_stage_engine.py` | 绉垎鏇寸湡瀹?| 鏃?|
-| 馃煚 P1 | Bond 鎯呮劅璐ㄦ劅灞?| `bond_stage_engine.py` | 鍏崇郴鏈夋俯搴︽劅 | P0-1 |
-| 馃煚 P1 | Bond 瑁傜棔淇鏈哄埗 | `bond_stage_engine.py` | 鍏崇郴鏈夎捣浼忔劅 | P1-Bond |
-| 馃煛 P1 | 鎯呮劅璁板繂鏍囨敞 | `episodic.py` | 鍥炲繂鏈夋儏鎰熷叡楦?| P0-1 |
-| 馃煛 P1 | 鎯呮劅鏃堕棿绾块噸寤?| `episodic.py` | 鍥炲繂鏈夋椂闂磋川鎰?| P1-Mem |
-| 馃煝 P1 | Governor R8 鎯呮劅闂ㄦ帶 | `governor/decision.py` | 鍐崇瓥鎰熺煡鎯呮劅 | P0-1 |
-| 馃煝 P2 | emotion_pulse 鍔ㄦ€佹Ы浣?| `prompt_context.py` | LLM 鎰熺煡姝ゅ埢鎰熷彈 | P0+P1 |
-| 馃數 P2 | 涓诲姩鎯呮劅瑙﹀彂鍣?| `metabolism.py` | AI 涓诲姩鍏冲績 | P0-1 |
-| 馃數 P2 | LLM 鎯呮劅鎰熺煡鐢熸垚鍙傛暟 | `llm_gateway.py` | 鐢熸垚椋庢牸闅忔儏鎰熷彉鍖?| P2-pulse |
-| 馃煟 P2 | 鎯呮劅鍥炲０鏈哄埗 | 鏂板 `emotion_echo.py` | 鍙屽悜鎯呮劅鎰熸煋 | P0+Bond |
+| 🔴 P0 | 情绪连续体 EmotionVector | `metabolism.py` | 情绪过渡自然 | 无 |
+| 🔴 P0 | 情感驱动的 emotion_tag 生成策略 | `metabolism.py` + `qa.py` | LLM 主动感知情感范围 | P0-1 |
+| 🟠 P0 | Bond 互动质量分级 | `bond_stage_engine.py` | 积分更真实 | 无 |
+| 🟠 P1 | Bond 情感质感层 | `bond_stage_engine.py` | 关系有温度感 | P0-1 |
+| 🟠 P1 | Bond 裂痕修复机制 | `bond_stage_engine.py` | 关系有起伏感 | P1-Bond |
+| 🟡 P1 | 情感记忆标注 | `episodic.py` | 回忆有情感共鸣 | P0-1 |
+| 🟡 P1 | 情感时间线重建 | `episodic.py` | 回忆有时间质感 | P1-Mem |
+| 🟢 P1 | Governor R8 情感门控 | `governor/decision.py` | 决策感知情感 | P0-1 |
+| 🟢 P2 | emotion_pulse 动态槽位 | `context_pack.py` | LLM 感知此刻感受 | P0+P1 |
+| 🔵 P2 | 主动情感触发器 | `metabolism.py` | AI 主动关心 | P0-1 |
+| 🔵 P2 | LLM 情感感知生成参数 | `llm_gateway.py` | 生成风格随情感变化 | P2-pulse |
+| 🟣 P2 | 情感回声机制 | 新增 `emotion_echo.py` | 双向情感感染 | P0+Bond |
 
 ---
 
-## 鍗併€佺涓夎疆娣卞寲浼樺寲锛氫唬鐮佺簿璇诲悗鐨勭洸鍖哄彂鐜?
-> **v1.2 鏂板**锛?026-03-05锛夈€傚熀浜庡鎵€鏈夋牳蹇冩枃浠剁殑閫愯绮捐锛屽彂鐜?v1.0/v1.1 瀹屽叏鏈Е鍙婄殑 6 涓繁灞傛灦鏋勭洸鍖恒€傝繖浜涢棶棰樻洿闅愯斀锛屼絾瀵?娲荤伒娲荤幇"鐨勫奖鍝嶆洿鏍规湰銆?
+## 十、第三轮深化优化：代码精读后的盲区发现
+
+> **v1.2 新增**（2026-03-05）。基于对所有核心文件的逐行精读，发现 v1.0/v1.1 完全未触及的 6 个深层架构盲区。这些问题更隐蔽，但对"活灵活现"的影响更根本。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲13锛圥0锛夛細`evolve_hard_state` 鐨勬儏鎰熶簨浠惰涔夌己澶?
-**鐩爣鏂囦欢锛?* `host_brain/core/metabolism.py`
+### 🔴 深化优化13（P0）：`evolve_hard_state` 的情感事件语义缺失
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/core/metabolism.py`
 
-`evolve_hard_state()` 鐨?`event_kind` 鍙傛暟鍙湁 `"interaction"/"reward"/"success"/"positive"/"warning"/"risk"` 杩欏嚑涓€硷紝涓斿彧鐢ㄤ簬 `_normalize_mood()` 鐨?mood 鎺ㄦ柇銆備絾 `_normalize_mood()` 鐨勯€昏緫鏋佸叾绠€鍗曪細
+**精读发现：**
+
+`evolve_hard_state()` 的 `event_kind` 参数只有 `"interaction"/"reward"/"success"/"positive"/"warning"/"risk"` 这几个值，且只用于 `_normalize_mood()` 的 mood 推断。但 `_normalize_mood()` 的逻辑极其简单：
 
 ```python
-# 褰撳墠閫昏緫锛堣繃浜庣畝鍗曪級
+# 当前逻辑（过于简单）
 if kind in {"reward", "success", "positive"} and energy >= 60:
     return "engaged"
 if kind in {"warning", "risk"}:
     return "calm"
-return "steady"  # 鍏朵粬鎵€鏈夋儏鍐甸兘鏄?steady
+return "steady"  # 其他所有情况都是 steady
 ```
 
-**闂锛?* 99% 鐨勪簰鍔ㄩ兘璧?`return "steady"` 杩欐潯璺紝`event_kind` 褰㈠悓铏氳銆傛儏鎰熶簨浠剁殑璇箟锛堢敤鎴峰垎浜簡鍠滀簨銆佺敤鎴峰湪鍝常銆佺敤鎴峰湪鐢熸皵锛夊畬鍏ㄦ病鏈変紶閫掑埌 mood 鎺ㄦ柇涓€?
-**鏂规锛?* 鎵╁睍 `event_kind` 璇箟闆嗭紝骞剁粏鍖?`_normalize_mood()` 鐨勬帹鏂€昏緫锛?
+**问题：** 99% 的互动都走 `return "steady"` 这条路，`event_kind` 形同虚设。情感事件的语义（用户分享了喜事、用户在哭泣、用户在生气）完全没有传递到 mood 推断中。
+
+**方案：** 扩展 `event_kind` 语义集，并细化 `_normalize_mood()` 的推断逻辑：
+
 ```python
-# 鎵╁睍鍚庣殑 event_kind 璇箟闆?EMOTIONAL_EVENT_KINDS = {
-    # 姝ｅ悜浜嬩欢
+# 扩展后的 event_kind 语义集
+EMOTIONAL_EVENT_KINDS = {
+    # 正向事件
     "reward", "success", "positive",
     "user_happy", "user_excited", "shared_joy",
     "milestone_reached", "deep_connection",
-    # 璐熷悜浜嬩欢
+    # 负向事件
     "warning", "risk",
     "user_sad", "user_angry", "user_stressed",
     "conflict", "misunderstanding",
-    # 涓€т簨浠?    "interaction", "user_thinking", "user_calm",
-    "long_silence_broken",  # 娌夐粯鍚庨噸鏂颁簰鍔?}
+    # 中性事件
+    "interaction", "user_thinking", "user_calm",
+    "long_silence_broken",  # 沉默后重新互动
+}
 
-# 缁嗗寲鍚庣殑 _normalize_mood()
+# 细化后的 _normalize_mood()
 def _normalize_mood(value: Any, *, energy: int, event_kind: str = "interaction") -> str:
     text = str(value or "").strip().lower()
     if text in ALLOWED_MOOD_STATES:
         return text
     kind = str(event_kind or "").strip().lower()
 
-    # 鑳介噺浼樺厛锛堟瀬绔儏鍐碉級
+    # 能量优先（极端情况）
     if energy < 20:
         return "critical"
     if energy < 40:
         return "tired"
 
-    # 鎯呮劅浜嬩欢璇箟鎺ㄦ柇锛堟柊澧烇級
+    # 情感事件语义推断（新增）
     if kind in {"user_happy", "shared_joy", "milestone_reached", "deep_connection"}:
         return "engaged" if energy >= 50 else "steady"
     if kind in {"user_excited", "reward", "success", "positive"} and energy >= 60:
         return "engaged"
     if kind in {"user_sad", "user_stressed", "conflict"}:
-        return "calm"   # 閬囧埌璐熼潰鎯呯华锛孉I 杩涘叆骞抽潤/闄即妯″紡
+        return "calm"   # 遇到负面情绪，AI 进入平静/陪伴模式
     if kind in {"user_angry", "misunderstanding"}:
-        return "steady"  # 閬囧埌鎰ゆ€掞紝AI 淇濇寔绋冲畾
+        return "steady"  # 遇到愤怒，AI 保持稳定
     if kind in {"long_silence_broken"}:
         return "steady" if energy >= 50 else "tired"
     if kind in {"warning", "risk"}:
@@ -771,19 +888,21 @@ def _normalize_mood(value: Any, *, energy: int, event_kind: str = "interaction")
     return "steady"
 ```
 
-**棰勬湡鏁堟灉锛?* `evolve_hard_state()` 璋冪敤鏃朵紶鍏ヨ涔夊寲鐨?`event_kind`锛宮ood 鎺ㄦ柇灏辫兘鐪熸鍙嶆槧鎯呮劅浜嬩欢鐨勬€ц川锛岃€屼笉鏄案杩滆繑鍥?`steady`銆?
+**预期效果：** `evolve_hard_state()` 调用时传入语义化的 `event_kind`，mood 推断就能真正反映情感事件的性质，而不是永远返回 `steady`。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲14锛圥0锛夛細`BondScoreState` 鐨?`trend()` 鏂规硶璇箟澶辩湡
+### 🟠 深化优化14（P0）：`BondScoreState` 的 `trend()` 方法语义失真
 
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_stage_engine.py`
+**目标文件：** `host_brain/bond/bond_stage_engine.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`BondScoreState.trend()` 鐨勫垽鏂€昏緫瀛樺湪涓ラ噸鐨勮涔夊け鐪燂細
+`BondScoreState.trend()` 的判断逻辑存在严重的语义失真：
 
 ```python
-# 褰撳墠閫昏緫锛堟湁闂锛?def trend(self) -> str:
+# 当前逻辑（有问题）
+def trend(self) -> str:
     if len(self.recent_scores) < 2:
         return "STABLE"
     recent = self.recent_scores[-TREND_WINDOW:]
@@ -796,15 +915,17 @@ def _normalize_mood(value: Any, *, energy: int, event_kind: str = "interaction")
     return "STABLE"
 ```
 
-**闂锛?*
-1. `TREND_WINDOW=5`锛屼絾 `recent_scores` 瀛樺偍鐨勬槸 `TREND_WINDOW * 2 = 10` 鏉★紝鍙?`[-TREND_WINDOW:]` 鍙湅鏈€杩?鏉★紝浣嗗垵濮嬪寲鏃?`recent_scores=[]`锛屽墠鍑犳浜掑姩姘歌繙杩斿洖 `STABLE`
-2. `IDLE_DECAY=-2` 鐨勮礋鍒嗗拰 `INTERACTION_MINIMAL=0` 鐨勯浂鍒嗛兘浼氳璁″叆锛屽鑷?浠€涔堥兘娌″仛"涔熷奖鍝嶈秼鍔?3. `to_summary()` 鐩存帴鎶?`trend()` 缁撴灉浼犵粰 LLM锛屼絾 `RISING/STABLE/DECLINING` 杩欎笁涓嫳鏂囨灇涓惧 LLM 鐨勮涔夊紩瀵兼晥鏋滃緢宸?
-**鏂规锛?* 閲嶆瀯 `trend()` 骞跺鍔?`trend_hint()` 璇箟鍖栬緭鍑猴細
+**问题：**
+1. `TREND_WINDOW=5`，但 `recent_scores` 存储的是 `TREND_WINDOW * 2 = 10` 条，取 `[-TREND_WINDOW:]` 只看最近5条，但初始化时 `recent_scores=[]`，前几次互动永远返回 `STABLE`
+2. `IDLE_DECAY=-2` 的负分和 `INTERACTION_MINIMAL=0` 的零分都会被计入，导致"什么都没做"也影响趋势
+3. `to_summary()` 直接把 `trend()` 结果传给 LLM，但 `RISING/STABLE/DECLINING` 这三个英文枚举对 LLM 的语义引导效果很差
+
+**方案：** 重构 `trend()` 并增加 `trend_hint()` 语义化输出：
 
 ```python
 def trend(self) -> str:
-    """鏍规嵁鏈€杩戠Н鍒嗚秼鍔垮垽鏂?RISING/STABLE/DECLINING銆?""
-    # 杩囨护闆跺垎浜嬩欢锛圛DLE_DECAY 鍜?INTERACTION_MINIMAL 涓嶅弬涓庤秼鍔垮垽鏂級
+    """根据最近积分趋势判断 RISING/STABLE/DECLINING。"""
+    # 过滤零分事件（IDLE_DECAY 和 INTERACTION_MINIMAL 不参与趋势判断）
     meaningful_scores = [s for s in self.recent_scores if s != 0]
     if len(meaningful_scores) < 2:
         return "STABLE"
@@ -812,53 +933,58 @@ def trend(self) -> str:
     positive = sum(1 for s in recent if s > 0)
     negative = sum(1 for s in recent if s < 0)
     total = len(recent)
-    if positive >= total * 0.6:   # 60% 浠ヤ笂姝ｅ悜 鈫?RISING
+    if positive >= total * 0.6:   # 60% 以上正向 → RISING
         return "RISING"
-    if negative >= total * 0.6:   # 60% 浠ヤ笂璐熷悜 鈫?DECLINING
+    if negative >= total * 0.6:   # 60% 以上负向 → DECLINING
         return "DECLINING"
     return "STABLE"
 
 def trend_hint(self) -> str:
-    """灏嗚秼鍔胯浆涓鸿嚜鐒惰瑷€鎻愮ず锛堢粰 LLM 鐢紝鏇夸唬鑻辨枃鏋氫妇锛?""
+    """将趋势转为自然语言提示（给 LLM 用，替代英文枚举）"""
     t = self.trend()
     stage = self.current_stage
     hints = {
-        ("RISING", "STRANGER"):      "鍒濇鐩歌瘑锛屾劅瑙夎繕涓嶉敊",
-        ("RISING", "ACQUAINTANCE"):  "鍏崇郴鍦ㄥ崌娓╋紝瓒婃潵瓒婄啛鎮?,
-        ("RISING", "FRIEND"):        "鍙嬭皧鍦ㄥ姞娣憋紝浜掑姩瓒婃潵瓒婂",
-        ("RISING", "CLOSE_FRIEND"):  "鍏崇郴瓒婃潵瓒婁翰瀵?,
-        ("RISING", "CONFIDANT"):     "褰兼瓒婃潵瓒婁俊浠?,
-        ("RISING", "SOULMATE"):      "鐏甸瓊濂戝悎锛岃秺鏉ヨ秺娣?,
-        ("DECLINING", "FRIEND"):     "鏈€杩戜簰鍔ㄥ皯浜嗕簺锛屾湁浜涚枏杩?,
-        ("DECLINING", "CLOSE_FRIEND"): "鍏崇郴鏈変簺闄嶆俯锛岄渶瑕佸鑱旂郴",
-        ("DECLINING", "CONFIDANT"):  "鎰熻鏈変簺璺濈锛岄渶瑕侀噸鏂版媺杩?,
-        ("STABLE", "STRANGER"):      "杩樺湪鐩镐簰浜嗚В涓?,
-        ("STABLE", "FRIEND"):        "鍏崇郴绋冲畾锛屾棩甯搁櫔浼?,
-        ("STABLE", "SOULMATE"):      "榛樺鍗佽冻锛屾棤闇€澶氳█",
+        ("RISING", "STRANGER"):      "初次相识，感觉还不错",
+        ("RISING", "ACQUAINTANCE"):  "关系在升温，越来越熟悉",
+        ("RISING", "FRIEND"):        "友谊在加深，互动越来越多",
+        ("RISING", "CLOSE_FRIEND"):  "关系越来越亲密",
+        ("RISING", "CONFIDANT"):     "彼此越来越信任",
+        ("RISING", "SOULMATE"):      "灵魂契合，越来越深",
+        ("DECLINING", "FRIEND"):     "最近互动少了些，有些疏远",
+        ("DECLINING", "CLOSE_FRIEND"): "关系有些降温，需要多联系",
+        ("DECLINING", "CONFIDANT"):  "感觉有些距离，需要重新拉近",
+        ("STABLE", "STRANGER"):      "还在相互了解中",
+        ("STABLE", "FRIEND"):        "关系稳定，日常陪伴",
+        ("STABLE", "SOULMATE"):      "默契十足，无需多言",
     }
-    return hints.get((t, stage), f"鍏崇郴{{'RISING':'鍗囨俯','STABLE':'绋冲畾','DECLINING':'闄嶆俯'}.get(t,'绋冲畾')}")
+    return hints.get((t, stage), f"关系{{'RISING':'升温','STABLE':'稳定','DECLINING':'降温'}.get(t,'稳定')}")
 ```
 
-**棰勬湡鏁堟灉锛?* `to_summary()` 涓敤 `trend_hint()` 鏇夸唬 `trend()`锛孡LM 鏀跺埌鐨勬槸"鍏崇郴鍦ㄥ崌娓╋紝瓒婃潵瓒婄啛鎮?鑰屼笉鏄?RISING"锛岃涔夊紩瀵兼晥鏋滃ぇ骞呮彁鍗囥€?
+**预期效果：** `to_summary()` 中用 `trend_hint()` 替代 `trend()`，LLM 收到的是"关系在升温，越来越熟悉"而不是"RISING"，语义引导效果大幅提升。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲15锛圥1锛夛細`EpisodicRecord` 鐨?`decay_profile_id` 鏄┖澹?
-**鐩爣鏂囦欢锛?* `host_brain/memory/episodic.py`
+### 🟡 深化优化15（P1）：`EpisodicRecord` 的 `decay_profile_id` 是空壳
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/memory/episodic.py`
 
-`EpisodicRecord.decay_profile_id` 瀛楁瀛樺湪锛宍decay_memory()` 鏂规硶涔熷瓨鍦紝浣嗭細
-1. `decay_profile_id` 鍙槸涓€涓瓧绗︿覆鏍囩锛坄"default"`锛夛紝**娌℃湁浠讳綍瀹為檯鐨勮“鍑忛€昏緫**
-2. `decay_memory()` 鍙槸鏇存柊浜?`decay_profile_id` 瀛楁锛?*娌℃湁浠讳綍瀹為檯鏁堟灉**
-3. `recall()` 鍦ㄦ绱㈡椂瀹屽叏涓嶈€冭檻璁板繂鐨?鏂伴矞搴?锛?0骞村墠鐨勮蹇嗗拰鏄ㄥぉ鐨勮蹇嗘潈閲嶇浉鍚?
-**鏂规锛?* 瀹炵幇鐪熸鐨?*璁板繂鏂伴矞搴﹁“鍑?*锛屽湪 `recall()` 涓姞鍏ユ椂闂存潈閲嶏細
+**精读发现：**
+
+`EpisodicRecord.decay_profile_id` 字段存在，`decay_memory()` 方法也存在，但：
+1. `decay_profile_id` 只是一个字符串标签（`"default"`），**没有任何实际的衰减逻辑**
+2. `decay_memory()` 只是更新了 `decay_profile_id` 字段，**没有任何实际效果**
+3. `recall()` 在检索时完全不考虑记忆的"新鲜度"，10年前的记忆和昨天的记忆权重相同
+
+**方案：** 实现真正的**记忆新鲜度衰减**，在 `recall()` 中加入时间权重：
 
 ```python
-# 琛板噺閰嶇疆琛紙decay_profile_id 鈫?鍗婅“鏈燂級
+# 衰减配置表（decay_profile_id → 半衰期）
 DECAY_PROFILES: dict[str, int] = {
-    "default":      30 * 24 * 3600 * 1000,   # 30澶╁崐琛版湡锛堟櫘閫氳蹇嗭級
-    "milestone":    365 * 24 * 3600 * 1000,  # 1骞村崐琛版湡锛堥噷绋嬬锛屽嚑涔庝笉琛板噺锛?    "emotional":    14 * 24 * 3600 * 1000,   # 14澶╁崐琛版湡锛堟儏鎰熻蹇嗭紝琛板噺杈冨揩锛?    "factual":      90 * 24 * 3600 * 1000,   # 90澶╁崐琛版湡锛堜簨瀹炴€ц蹇嗭級
-    "volatile":     3 * 24 * 3600 * 1000,    # 3澶╁崐琛版湡锛堜复鏃舵€ц蹇嗭級
+    "default":      30 * 24 * 3600 * 1000,   # 30天半衰期（普通记忆）
+    "milestone":    365 * 24 * 3600 * 1000,  # 1年半衰期（里程碑，几乎不衰减）
+    "emotional":    14 * 24 * 3600 * 1000,   # 14天半衰期（情感记忆，衰减较快）
+    "factual":      90 * 24 * 3600 * 1000,   # 90天半衰期（事实性记忆）
+    "volatile":     3 * 24 * 3600 * 1000,    # 3天半衰期（临时性记忆）
 }
 
 def _compute_freshness(
@@ -867,19 +993,21 @@ def _compute_freshness(
     now_ms: int,
     decay_profile_id: str,
 ) -> float:
-    """璁＄畻璁板繂鏂伴矞搴?[0.0, 1.0]锛屽熀浜庢寚鏁拌“鍑?""
+    """计算记忆新鲜度 [0.0, 1.0]，基于指数衰减"""
     half_life_ms = DECAY_PROFILES.get(decay_profile_id, DECAY_PROFILES["default"])
     elapsed_ms = max(0, now_ms - ts_ms)
     return 0.5 ** (elapsed_ms / half_life_ms)
 
-# 鏀硅繘鍚庣殑 recall()锛屽姞鍏ユ椂闂存潈閲?def recall(
+# 改进后的 recall()，加入时间权重
+def recall(
     self,
     *,
     query_text: str,
     top_k: int = 5,
     now_ms: int | None = None,
-    freshness_weight: float = 0.2,  # 鏂伴矞搴︽潈閲嶏紙榛樿20%锛?) -> list[dict[str, Any]]:
-    """璇箟鐩镐技搴?+ 鏃堕棿鏂伴矞搴﹀姞鏉冨彫鍥?""
+    freshness_weight: float = 0.2,  # 新鲜度权重（默认20%）
+) -> list[dict[str, Any]]:
+    """语义相似度 + 时间新鲜度加权召回"""
     current_ms = int(now_ms if now_ms is not None else _now_ms())
     embedding, _ = embed_text(query_text)
     candidates = self.chroma.search(query_embedding=embedding, top_k=top_k * 3)
@@ -891,7 +1019,7 @@ def _compute_freshness(
         freshness = _compute_freshness(
             ts_ms=ts, now_ms=current_ms, decay_profile_id=decay_id
         )
-        # 鍔犳潈锛氳涔夌浉浼煎害(1-freshness_weight) + 鏂伴矞搴?freshness_weight)
+        # 加权：语义相似度(1-freshness_weight) + 新鲜度(freshness_weight)
         item["freshness"] = freshness
         item["weighted_score"] = (
             item["score"] * (1 - freshness_weight)
@@ -902,31 +1030,35 @@ def _compute_freshness(
     return candidates[:top_k]
 ```
 
-**棰勬湡鏁堟灉锛?* 鏈€杩戝彂鐢熺殑浜嬫儏浼氳浼樺厛鍙洖锛屼箙杩滅殑璁板繂鑷劧娣″嚭锛岀鍚堢湡瀹炶蹇嗚寰嬨€傞噷绋嬬璁板繂锛坄milestone` profile锛夊嚑涔庝笉琛板噺锛屾案杩滀繚鎸侀珮鏉冮噸銆?
+**预期效果：** 最近发生的事情会被优先召回，久远的记忆自然淡出，符合真实记忆规律。里程碑记忆（`milestone` profile）几乎不衰减，永远保持高权重。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲16锛圥1锛夛細`prompt_context` 鐨?`OPTIONAL_SLOTS` 鍙湁涓€涓Ы浣嶏紝鎵╁睍鎬т笉瓒?
-**鐩爣鏂囦欢锛?* `host_brain/core/prompt_context.py`
+### 🟢 深化优化16（P1）：`context_pack` 的 `OPTIONAL_SLOTS` 只有一个槽位，扩展性不足
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/core/context_pack.py`
 
-`OPTIONAL_SLOTS` 鐩墠鍙湁 `semantic_slot` 涓€涓彲閫夋Ы浣嶏紝浣?v1.0/v1.1 璁捐鐨?`emotion_pulse`銆乣bond_rift_hint`銆乣emotional_timeline` 绛夋柊妲戒綅閮介渶瑕佸湪杩欓噷娉ㄥ唽锛屽惁鍒?`validate_prompt_context()` 浼氭姤 `CP_UNKNOWN_SLOT` 閿欒锛屽鑷存墍鏈夋儏鎰熷寮哄姛鑳芥棤娉曟敞鍏ャ€?
-**鏂规锛?* 鎵╁睍 `OPTIONAL_SLOTS`锛屽苟涓烘瘡涓柊妲戒綅澧炲姞瀵瑰簲鐨勯獙璇佸嚱鏁帮細
+**精读发现：**
+
+`OPTIONAL_SLOTS` 目前只有 `semantic_slot` 一个可选槽位，但 v1.0/v1.1 设计的 `emotion_pulse`、`bond_rift_hint`、`emotional_timeline` 等新槽位都需要在这里注册，否则 `validate_context_pack()` 会报 `CP_UNKNOWN_SLOT` 错误，导致所有情感增强功能无法注入。
+
+**方案：** 扩展 `OPTIONAL_SLOTS`，并为每个新槽位增加对应的验证函数：
 
 ```python
-# prompt_context.py OPTIONAL_SLOTS 鎵╁睍
+# context_pack.py OPTIONAL_SLOTS 扩展
 OPTIONAL_SLOTS: dict[str, type] = {
-    "semantic_slot":       list,   # 璇箟璁板繂妲戒綅锛圡10-C锛屽凡鏈夛級
-    "emotion_pulse":       dict,   # 姝ゅ埢鎯呮劅鑴夊啿锛堜紭鍖?锛屾柊澧烇級
-    "bond_rift_hint":      dict,   # Bond瑁傜棔鎻愮ず锛堜紭鍖?1锛屾柊澧烇級
-    "emotional_timeline":  dict,   # 鎯呮劅鏃堕棿绾匡紙浼樺寲9锛屾柊澧烇級
-    "echo_hint":           dict,   # 鎯呮劅鍥炲０鎻愮ず锛堜紭鍖?2锛屾柊澧烇級
+    "semantic_slot":       list,   # 语义记忆槽位（M10-C，已有）
+    "emotion_pulse":       dict,   # 此刻情感脉冲（优化4，新增）
+    "bond_rift_hint":      dict,   # Bond裂痕提示（优化11，新增）
+    "emotional_timeline":  dict,   # 情感时间线（优化9，新增）
+    "echo_hint":           dict,   # 情感回声提示（优化12，新增）
 }
 
-# 鍚勬柊妲戒綅鐨勯獙璇佽鍒?def _validate_emotion_pulse_slot(
-    emotion_pulse: dict[str, Any], result: PromptContextValidationResult
+# 各新槽位的验证规则
+def _validate_emotion_pulse_slot(
+    emotion_pulse: dict[str, Any], result: ContextPackValidationResult
 ) -> None:
-    """楠岃瘉 emotion_pulse 妲戒綅鏍煎紡锛堜笉鍏佽鍖呭惈鏁板€煎瀷鎯呮劅鍙傛暟锛?""
+    """验证 emotion_pulse 槽位格式（不允许包含数值型情感参数）"""
     forbidden_numeric_keys = {"valence", "arousal", "dominance", "echo_strength"}
     for key in forbidden_numeric_keys:
         if key in emotion_pulse:
@@ -945,27 +1077,32 @@ OPTIONAL_SLOTS: dict[str, type] = {
             )
 ```
 
-**鍏抽敭浠峰€硷細** 杩欐槸鎵€鏈夋儏鎰熷寮哄姛鑳借兘澶熸甯稿伐浣滅殑**鍩虹璁炬柦**銆傛病鏈夎繖涓墿灞曪紝浼樺寲4/9/11/12 鐨勬Ы浣嶆敞鍏ラ兘浼氳 `validate_prompt_context()` 鎷掔粷銆?
+**关键价值：** 这是所有情感增强功能能够正常工作的**基础设施**。没有这个扩展，优化4/9/11/12 的槽位注入都会被 `validate_context_pack()` 拒绝。
+
 ---
 
-### 馃數 娣卞寲浼樺寲17锛圥2锛夛細`BondDynamicsWriter.apply_update()` 缂哄皯鎯呮劅浜嬩欢鐨?payload 璇箟鏍囧噯鍖?
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_dynamics.py`
+### 🔵 深化优化17（P2）：`BondDynamicsWriter.apply_update()` 缺少情感事件的 payload 语义标准化
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/bond/bond_dynamics.py`
 
-`apply_update()` 鐨?`payload` 鍙傛暟鏄?`dict[str, Any] | None`锛屽畬鍏ㄨ嚜鐢辨牸寮忥紝娌℃湁浠讳綍缁撴瀯绾︽潫銆傝繖瀵艰嚧锛?1. 涓婂眰璋冪敤鑰呬紶鍏ョ殑 payload 鏍煎紡鍚勫紓锛屾棤娉曞湪 `BondStageEngine` 涓仛鑷姩璐ㄩ噺鎺ㄦ柇锛堜紭鍖?闇€瑕?`user_text` 鍜?`emotion_tag` 瀛楁锛?2. 瀹¤閾句腑鐨?payload 鏁版嵁鏃犳硶琚悗缁垎鏋愬伐鍏疯В鏋?
-**鏂规锛?* 瀹氫箟 `BondEventPayload` 鏍囧噯缁撴瀯锛屽苟鍦?`apply_update()` 涓仛瑙勮寖鍖栵細
+**精读发现：**
+
+`apply_update()` 的 `payload` 参数是 `dict[str, Any] | None`，完全自由格式，没有任何结构约束。这导致：
+1. 上层调用者传入的 payload 格式各异，无法在 `BondStageEngine` 中做自动质量推断（优化7需要 `user_text` 和 `emotion_tag` 字段）
+2. 审计链中的 payload 数据无法被后续分析工具解析
+
+**方案：** 定义 `BondEventPayload` 标准结构，并在 `apply_update()` 中做规范化：
 
 ```python
-# bond_dynamics.py 鏂板 BondEventPayload 鏍囧噯缁撴瀯
+# bond_dynamics.py 新增 BondEventPayload 标准结构
 @dataclass
 class BondEventPayload:
-    """Bond 浜嬩欢 payload 鏍囧噯缁撴瀯锛堢敤浜庤川閲忔帹鏂拰瀹¤锛?""
-    user_text: str = ""             # 鐢ㄦ埛鍘熷鏂囨湰锛堢敤浜庤川閲忔帹鏂級
-    emotion_tag: str = "NEUTRAL"    # 鐢ㄦ埛鎯呮劅鏍囩锛堢敤浜庤川閲忔帹鏂級
-    topic_hint: str = ""            # 璇濋鎻愮ず锛堣涔夊寲锛屼笉鍚晱鎰熶俊鎭級
-    session_duration_ms: int = 0    # 鏈浼氳瘽鏃堕暱锛堢敤浜庤妭濂忔劅鐭ワ級
-    is_user_initiated: bool = True  # 鏄惁鐢ㄦ埛涓诲姩鍙戣捣锛堝奖鍝嶈川閲忓垎绾э級
+    """Bond 事件 payload 标准结构（用于质量推断和审计）"""
+    user_text: str = ""             # 用户原始文本（用于质量推断）
+    emotion_tag: str = "NEUTRAL"    # 用户情感标签（用于质量推断）
+    topic_hint: str = ""            # 话题提示（语义化，不含敏感信息）
+    session_duration_ms: int = 0    # 本次会话时长（用于节奏感知）
+    is_user_initiated: bool = True  # 是否用户主动发起（影响质量分级）
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -978,11 +1115,11 @@ class BondEventPayload:
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any] | None) -> "BondEventPayload":
-        """浠庡師濮?payload 瑙勮寖鍖栵紙瀹归敊澶勭悊锛?""
+        """从原始 payload 规范化（容错处理）"""
         if not isinstance(raw, dict):
             return cls()
         return cls(
-            user_text=str(raw.get("user_text", ""))[:500],  # 鎴柇闃叉杩囬暱
+            user_text=str(raw.get("user_text", ""))[:500],  # 截断防止过长
             emotion_tag=str(raw.get("emotion_tag", "NEUTRAL")),
             topic_hint=str(raw.get("topic_hint", ""))[:100],
             session_duration_ms=int(raw.get("session_duration_ms", 0)),
@@ -990,15 +1127,18 @@ class BondEventPayload:
         )
 ```
 
-**棰勬湡鏁堟灉锛?* `apply_update()` 鍐呴儴璋冪敤 `BondEventPayload.from_raw(payload)` 瑙勮寖鍖栧悗锛宍BondStageEngine` 鐨勮嚜鍔ㄨ川閲忔帹鏂紙浼樺寲7锛夊氨鑳藉彲闈犲湴浠?payload 涓鍙?`user_text` 鍜?`emotion_tag`銆?
+**预期效果：** `apply_update()` 内部调用 `BondEventPayload.from_raw(payload)` 规范化后，`BondStageEngine` 的自动质量推断（优化7）就能可靠地从 payload 中读取 `user_text` 和 `emotion_tag`。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲18锛圥2锛夛細`governance_snapshot` 鐨?`hard_state_summary` 缂哄皯鎯呮劅鏃堕棿鎴?
-**鐩爣鏂囦欢锛?* `host_brain/core/metabolism.py`
+### 🟣 深化优化18（P2）：`governance_snapshot` 的 `hard_state_summary` 缺少情感时间戳
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/core/metabolism.py`
 
-`build_governance_snapshot()` 鐢熸垚鐨?`hard_state_summary` 鍖呭惈锛?```python
+**精读发现：**
+
+`build_governance_snapshot()` 生成的 `hard_state_summary` 包含：
+```python
 "hard_state_summary": {
     "energy_bucket": ...,
     "mood_state": ...,
@@ -1008,90 +1148,104 @@ class BondEventPayload:
 }
 ```
 
-**闂锛?* 娌℃湁 `ts_ms`锛堟椂闂存埑锛夊瓧娈点€傝繖瀵艰嚧锛?1. Governor 闂ㄦ帶锛圧8锛屼紭鍖?锛夋棤娉曞垽鏂?杩欎釜 mood_state 鏄涔呭墠鐨?鈥斺€斾竴涓?灏忔椂鍓嶇殑 `critical` 鐘舵€佸拰鍒氬垰鍙戠敓鐨?`critical` 鐘舵€侊紝瀵瑰喅绛栫殑褰卞搷搴旇瀹屽叏涓嶅悓
-2. `emotion_pulse` 妲戒綅锛堜紭鍖?锛夋棤娉曡绠楁儏鎰熺殑"鏂伴矞搴?锛屼笉鐭ラ亾褰撳墠鎯呮劅鏄垰鍙戠敓鐨勮繕鏄凡缁忚“鍑忎簡
+**问题：** 没有 `ts_ms`（时间戳）字段。这导致：
+1. Governor 门控（R8，优化8）无法判断"这个 mood_state 是多久前的"——一个5小时前的 `critical` 状态和刚刚发生的 `critical` 状态，对决策的影响应该完全不同
+2. `emotion_pulse` 槽位（优化4）无法计算情感的"新鲜度"，不知道当前情感是刚发生的还是已经衰减了
 
-**鏂规锛?* 鍦?`hard_state_summary` 涓鍔?`state_age_hint` 瀛楁锛?
+**方案：** 在 `hard_state_summary` 中增加 `state_age_hint` 字段：
+
 ```python
-# build_governance_snapshot() 涓?hard_state_summary 鎵╁睍
+# build_governance_snapshot() 中 hard_state_summary 扩展
 def build_governance_snapshot(
     state: HardState,
     *,
     overrides: Mapping[str, Any] | None = None,
-    now_ms: int | None = None,  # 鏂板鍙傛暟
+    now_ms: int | None = None,  # 新增参数
 ) -> dict[str, Any]:
     current_ms = int(now_ms if now_ms is not None else _now_ms())
     state_age_ms = max(0, current_ms - state.ts_ms) if state.ts_ms > 0 else 0
 
-    # state_age_hint锛氬皢鏃堕棿宸浆涓鸿涔夊寲鎻忚堪
-    if state_age_ms < 60_000:           # 1鍒嗛挓鍐?        state_age_hint = "鍒氬垰鍙戠敓"
-    elif state_age_ms < 600_000:        # 10鍒嗛挓鍐?        state_age_hint = "涓嶄箙鍓?
-    elif state_age_ms < 3_600_000:      # 1灏忔椂鍐?        state_age_hint = "涓€浼氬効鍓?
-    elif state_age_ms < 86_400_000:     # 1澶╁唴
-        state_age_hint = "浠婂ぉ鏃╀簺鏃跺€?
+    # state_age_hint：将时间差转为语义化描述
+    if state_age_ms < 60_000:           # 1分钟内
+        state_age_hint = "刚刚发生"
+    elif state_age_ms < 600_000:        # 10分钟内
+        state_age_hint = "不久前"
+    elif state_age_ms < 3_600_000:      # 1小时内
+        state_age_hint = "一会儿前"
+    elif state_age_ms < 86_400_000:     # 1天内
+        state_age_hint = "今天早些时候"
     else:
-        state_age_hint = "寰堜箙浠ュ墠"
+        state_age_hint = "很久以前"
 
-    # ... 鍘熸湁閫昏緫 ...
+    # ... 原有逻辑 ...
     return {
-        # ... 鍘熸湁瀛楁 ...
+        # ... 原有字段 ...
         "hard_state_summary": {
             "energy_bucket": energy_bucket(state.energy_level),
             "mood_state": state.mood_state,
             "sys_mode": state.sys_mode,
             "safety_flag": safety_flag,
             "last_event_id": state.last_event_id,
-            "state_age_hint": state_age_hint,      # 鏂板锛氭儏鎰熸椂闂磋涔?            "state_age_ms": state_age_ms,          # 鏂板锛氬師濮嬫椂闂村樊锛堜緵闂ㄦ帶閫昏緫浣跨敤锛?        },
+            "state_age_hint": state_age_hint,      # 新增：情感时间语义
+            "state_age_ms": state_age_ms,          # 新增：原始时间差（供门控逻辑使用）
+        },
     }
 ```
 
-**棰勬湡鏁堟灉锛?* Governor R8 闂ㄦ帶鍙互鍒ゆ柇"杩欎釜 `critical` 鐘舵€佹槸鍒氬垰鍙戠敓鐨勮繕鏄?灏忔椂鍓嶇殑"锛屼粠鑰屽仛鍑烘洿绮惧噯鐨勫喅绛栥€侺LM 涔熻兘鎰熺煡鍒?AI 鍒氬垰缁忓巻浜嗕粈涔?銆?
+**预期效果：** Governor R8 门控可以判断"这个 `critical` 状态是刚刚发生的还是5小时前的"，从而做出更精准的决策。LLM 也能感知到"AI 刚刚经历了什么"。
+
 ---
 
-## 鍗佷竴銆佺涓夎疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 十一、第三轮优化的核心价值总结
 
-绗笁杞紭鍖栬仛鐒︿簬**淇鐜版湁浠ｇ爜涓殑璇箟绌哄３闂**鈥斺€旈偅浜涘瓧娈靛瓨鍦ㄣ€佹柟娉曞瓨鍦紝浣嗗疄闄呬笂娌℃湁浠讳綍鏁堟灉鐨?鍋囧姛鑳?锛?
-| 浼樺寲椤?| 鍙戠幇鐨?鍋囧姛鑳? | 淇鏂规 |
+第三轮优化聚焦于**修复现有代码中的语义空壳问题**——那些字段存在、方法存在，但实际上没有任何效果的"假功能"：
+
+| 优化项 | 发现的"假功能" | 修复方案 |
 |--------|--------------|---------|
-| **浼樺寲13** | `event_kind` 99%璧?`steady` 鍒嗘敮锛屽舰鍚岃櫄璁?| 鎵╁睍璇箟闆嗭紝缁嗗寲鎺ㄦ柇閫昏緫 |
-| **浼樺寲14** | `trend()` 杩囨护閫昏緫鏈夌己闄凤紝`trend_hint` 缁橪LM鑻辨枃鏋氫妇 | 淇杩囨护閫昏緫锛屽鍔犺涔夊寲 `trend_hint()` |
-| **浼樺寲15** | `decay_profile_id` 鍙槸鏍囩锛宍decay_memory()` 鏃犲疄闄呮晥鏋?| 瀹炵幇鐪熸鐨勬寚鏁拌“鍑忥紝`recall()` 鍔犲叆鏃堕棿鏉冮噸 |
-| **浼樺寲16** | 鏂版儏鎰熸Ы浣嶆棤娉曟敞鍏ワ紙浼氳 `CP_UNKNOWN_SLOT` 鎷掔粷锛?| 鎵╁睍 `OPTIONAL_SLOTS`锛岃ˉ鍏呴獙璇佸嚱鏁?|
-| **浼樺寲17** | `payload` 鑷敱鏍煎紡锛岃川閲忔帹鏂棤娉曞彲闈犺鍙栧瓧娈?| 瀹氫箟 `BondEventPayload` 鏍囧噯缁撴瀯 |
-| **浼樺寲18** | `hard_state_summary` 鏃犳椂闂存埑锛岄棬鎺ф棤娉曞垽鏂儏鎰熸柊椴滃害 | 澧炲姞 `state_age_hint` + `state_age_ms` |
+| **优化13** | `event_kind` 99%走 `steady` 分支，形同虚设 | 扩展语义集，细化推断逻辑 |
+| **优化14** | `trend()` 过滤逻辑有缺陷，`trend_hint` 给LLM英文枚举 | 修复过滤逻辑，增加语义化 `trend_hint()` |
+| **优化15** | `decay_profile_id` 只是标签，`decay_memory()` 无实际效果 | 实现真正的指数衰减，`recall()` 加入时间权重 |
+| **优化16** | 新情感槽位无法注入（会被 `CP_UNKNOWN_SLOT` 拒绝） | 扩展 `OPTIONAL_SLOTS`，补充验证函数 |
+| **优化17** | `payload` 自由格式，质量推断无法可靠读取字段 | 定义 `BondEventPayload` 标准结构 |
+| **优化18** | `hard_state_summary` 无时间戳，门控无法判断情感新鲜度 | 增加 `state_age_hint` + `state_age_ms` |
 
 ---
 
-## 鍗佷簩銆佸畬鏁翠紭鍖栧叏鏅浘锛坴1.2锛?8椤癸級
+## 十二、完整优化全景图（v1.2，18项）
 
 ```mermaid
 graph TD
-    subgraph 鍩虹璁炬柦灞傦紙蹇呴』鍏堝仛锛?        OPT16["浼樺寲16\nOPTIONAL_SLOTS鎵╁睍\n锛堟柊妲戒綅娉ㄥ唽锛?]
-        OPT17["浼樺寲17\nBondEventPayload鏍囧噯鍖朶n锛坧ayload瑙勮寖锛?]
-        OPT18["浼樺寲18\nstate_age_hint\n锛堟儏鎰熸椂闂存埑锛?]
+    subgraph 基础设施层（必须先做）
+        OPT16["优化16\nOPTIONAL_SLOTS扩展\n（新槽位注册）"]
+        OPT17["优化17\nBondEventPayload标准化\n（payload规范）"]
+        OPT18["优化18\nstate_age_hint\n（情感时间戳）"]
     end
 
-    subgraph 鎯呮劅鍐呮牳灞傦紙P0锛?        OPT1["浼樺寲1\nEmotionVector\n锛堣繛缁儏缁級"]
-        OPT13["浼樺寲13\nevent_kind璇箟鎵╁睍\n锛坢ood鎺ㄦ柇淇锛?]
-        OPT6["浼樺寲6\nemotion_tag鐢熸垚绛栫暐\n锛堜富鍔ㄥ憡鐭LM锛?]
-        OPT7["浼樺寲7\nBond璐ㄩ噺鍒嗙骇\n锛堢Н鍒嗙湡瀹炲寲锛?]
-        OPT14["浼樺寲14\ntrend_hint璇箟鍖朶n锛堣秼鍔挎弿杩颁慨澶嶏級"]
+    subgraph 情感内核层（P0）
+        OPT1["优化1\nEmotionVector\n（连续情绪）"]
+        OPT13["优化13\nevent_kind语义扩展\n（mood推断修复）"]
+        OPT6["优化6\nemotion_tag生成策略\n（主动告知LLM）"]
+        OPT7["优化7\nBond质量分级\n（积分真实化）"]
+        OPT14["优化14\ntrend_hint语义化\n（趋势描述修复）"]
     end
 
-    subgraph 璁板繂灞傦紙P1锛?        OPT3["浼樺寲3\n鎯呮劅璁板繂鏍囨敞\n锛堟儏鎰熷姞鏉冨彫鍥烇級"]
-        OPT15["浼樺寲15\n璁板繂鏂伴矞搴﹁“鍑廫n锛堟椂闂存潈閲嶏級"]
-        OPT9["浼樺寲9\n鎯呮劅鏃堕棿绾块噸寤篭n锛堝姬绾垮垎鏋愶級"]
+    subgraph 记忆层（P1）
+        OPT3["优化3\n情感记忆标注\n（情感加权召回）"]
+        OPT15["优化15\n记忆新鲜度衰减\n（时间权重）"]
+        OPT9["优化9\n情感时间线重建\n（弧线分析）"]
     end
 
-    subgraph 鍏崇郴灞傦紙P1锛?        OPT2["浼樺寲2\nBond璐ㄦ劅灞俓n锛堟俯搴︽劅鐭ワ級"]
-        OPT11["浼樺寲11\nBond瑁傜棔淇\n锛堣捣浼忔劅锛?]
-        OPT8["浼樺寲8\nGovernor R8\n锛堟儏鎰熼棬鎺э級"]
+    subgraph 关系层（P1）
+        OPT2["优化2\nBond质感层\n（温度感知）"]
+        OPT11["优化11\nBond裂痕修复\n（起伏感）"]
+        OPT8["优化8\nGovernor R8\n（情感门控）"]
     end
 
-    subgraph 杈撳嚭灞傦紙P2锛?        OPT4["浼樺寲4\nemotion_pulse妲戒綅\n锛堟鍒绘劅鍙楋級"]
-        OPT5["浼樺寲5\n涓诲姩瑙﹀彂鍣╘n锛堜富鍔ㄥ叧蹇冿級"]
-        OPT10["浼樺寲10\nLLM鐢熸垚鍙傛暟\n锛坱emperature璋冩暣锛?]
-        OPT12["浼樺寲12\n鎯呮劅鍥炲０\n锛堝弻鍚戞劅鏌擄級"]
+    subgraph 输出层（P2）
+        OPT4["优化4\nemotion_pulse槽位\n（此刻感受）"]
+        OPT5["优化5\n主动触发器\n（主动关心）"]
+        OPT10["优化10\nLLM生成参数\n（temperature调整）"]
+        OPT12["优化12\n情感回声\n（双向感染）"]
     end
 
     OPT16 --> OPT4
@@ -1116,31 +1270,36 @@ graph TD
 
 ---
 
-## 鍗佷笁銆佸彉鏇磋褰曪紙瀹屾暣鐗堬級
+## 十三、变更记录（完整版）
 
-| 鏃ユ湡 | 鐗堟湰 | 璇存槑 |
+| 日期 | 版本 | 说明 |
 |------|------|------|
-| 2026-03-05 | v1.0 | 鍒濈锛屽熀浜庝唬鐮佹繁搴﹀垎鏋愬垱寤猴紝璁板綍浜斿ぇ浼樺寲鏂瑰悜锛埪т竴~搂浜旓級 |
-| 2026-03-05 | v1.1 | 娣卞寲鍒嗘瀽锛氬熀浜庡叏閲忎唬鐮佺簿璇伙紝鏂板鍏ぇ娣卞寲浼樺寲鏂瑰悜锛埪т竷~搂涔濓級 |
-| 2026-03-05 | v1.2 | 绗笁杞繁鍖栵細鍙戠幇6涓?鍋囧姛鑳?绌哄３闂锛屾柊澧炰紭鍖?3~18锛埪у崄~搂鍗佷簩锛?|
-| 2026-03-05 | v1.3 | 绗洓杞繁鍖栵細鍙戠幇6涓?鏋舵瀯鏂眰"闂锛屾柊澧炰紭鍖?9~24锛埪у崄鍥泘搂鍗佸叚锛?|
+| 2026-03-05 | v1.0 | 初稿，基于代码深度分析创建，记录五大优化方向（§一~§五） |
+| 2026-03-05 | v1.1 | 深化分析：基于全量代码精读，新增六大深化优化方向（§七~§九） |
+| 2026-03-05 | v1.2 | 第三轮深化：发现6个"假功能"空壳问题，新增优化13~18（§十~§十二） |
+| 2026-03-05 | v1.3 | 第四轮深化：发现6个"架构断层"问题，新增优化19~24（§十四~§十六） |
 
 ---
 
-## 鍗佸洓銆佺鍥涜疆娣卞寲浼樺寲锛氭灦鏋勬柇灞傚彂鐜?
-> **v1.3 鏂板**锛?026-03-05锛夈€傛湰杞熀浜庡 `rules.py`銆乣decision.py`銆乣prompt_context.py`銆乣bond_stage_engine.py`銆乣qa.py`銆乣metabolism.py` 鐨勫畬鏁撮€愯绮捐锛屽彂鐜颁簡鍓嶄笁杞湭瑙﹀強鐨?**6 涓灦鏋勬柇灞?*鈥斺€旇繖浜涢棶棰樹笉鏄?鍋囧姛鑳?锛岃€屾槸**鍔熻兘涔嬮棿鐨勮繛鎺ユ柇瑁?*锛屽鑷存儏鎰熶俊鎭湪娴佽浆杩囩▼涓倓鐒朵涪澶便€?
+## 十四、第四轮深化优化：架构断层发现
+
+> **v1.3 新增**（2026-03-05）。本轮基于对 `rules.py`、`decision.py`、`context_pack.py`、`bond_stage_engine.py`、`qa.py`、`metabolism.py` 的完整逐行精读，发现了前三轮未触及的 **6 个架构断层**——这些问题不是"假功能"，而是**功能之间的连接断裂**，导致情感信息在流转过程中悄然丢失。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲19锛圥0锛夛細`GateSnapshot` 瀹屽叏涓嶆劅鐭ユ儏鎰熲€斺€擱8 闂ㄦ帶鏃犳硶钀藉湴
+### 🔴 深化优化19（P0）：`GateSnapshot` 完全不感知情感——R8 门控无法落地
 
-**鐩爣鏂囦欢锛?* `host_brain/governor/rules.py`
+**目标文件：** `host_brain/governor/rules.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-v1.1 鐨勪紭鍖?锛圙overnor R8 鎯呮劅闂ㄦ帶锛夎璁′簡 `_gate_r8_emotion_context()` 鍑芥暟锛屼絾**鏃犳硶钀藉湴**锛屽師鍥犳槸锛?
-`GateSnapshot` 鏁版嵁绫诲彧鏈?7 涓瓧娈碉紙`trust_level/energy_level/sys_mode/rate_limit_hit/scope/safety_flag/airlock_blocked`锛夛紝**瀹屽叏娌℃湁鎯呮劅鐩稿叧瀛楁**銆俙_normalize_snapshot()` 浠?`input_snapshot` 涓鍙栬繖 7 涓瓧娈碉紝鍏朵粬瀛楁鍏ㄩ儴涓㈠純銆?
-鍗充娇涓婂眰鍦?`governance_snapshot` 涓敞鍏ヤ簡 `emotion_context`锛屽埌杈?`evaluate_governor_gates()` 鏃朵篃浼氳 `_normalize_snapshot()` 闈欓粯涓㈠純锛孯8 闂ㄦ帶姘歌繙璇讳笉鍒版儏鎰熸暟鎹€?
-**鏂规锛?* 鍦?`GateSnapshot` 涓鍔犳儏鎰熸劅鐭ュ瓧娈碉紝骞跺湪 `_normalize_snapshot()` 涓鍙栵細
+v1.1 的优化8（Governor R8 情感门控）设计了 `_gate_r8_emotion_context()` 函数，但**无法落地**，原因是：
+
+`GateSnapshot` 数据类只有 7 个字段（`trust_level/energy_level/sys_mode/rate_limit_hit/scope/safety_flag/airlock_blocked`），**完全没有情感相关字段**。`_normalize_snapshot()` 从 `input_snapshot` 中读取这 7 个字段，其他字段全部丢弃。
+
+即使上层在 `governance_snapshot` 中注入了 `emotion_context`，到达 `evaluate_governor_gates()` 时也会被 `_normalize_snapshot()` 静默丢弃，R8 门控永远读不到情感数据。
+
+**方案：** 在 `GateSnapshot` 中增加情感感知字段，并在 `_normalize_snapshot()` 中读取：
 
 ```python
 @dataclass(frozen=True)
@@ -1153,47 +1312,53 @@ class GateSnapshot:
     scope_allowlist: tuple[str, ...]
     safety_flag: bool
     airlock_blocked: bool
-    # Rate Limit 鎵╁睍瀛楁锛堝凡鏈夛級
+    # Rate Limit 扩展字段（已有）
     rate_limit_backend: str | None = None
     rate_limit_degraded: bool = False
     rate_limit_degraded_from: str | None = None
     rate_limit_reason_code: str | None = None
-    # 馃啎 鎯呮劅鎰熺煡瀛楁锛坴1.3 鏂板锛岀敤浜?R8 闂ㄦ帶锛?    user_emotion_tag: str = "NEUTRAL"       # 鐢ㄦ埛褰撳墠鎯呮劅鏍囩
-    ai_mood_state: str = "steady"           # AI 褰撳墠 mood_state
-    state_age_ms: int = 0                   # 鎯呮劅鐘舵€佽窛浠婃椂闀匡紙姣锛?
+    # 🆕 情感感知字段（v1.3 新增，用于 R8 门控）
+    user_emotion_tag: str = "NEUTRAL"       # 用户当前情感标签
+    ai_mood_state: str = "steady"           # AI 当前 mood_state
+    state_age_ms: int = 0                   # 情感状态距今时长（毫秒）
+
 def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
-    # ... 鍘熸湁瀛楁璇诲彇 ...
-    # 馃啎 鎯呮劅鎰熺煡瀛楁璇诲彇
+    # ... 原有字段读取 ...
+    # 🆕 情感感知字段读取
     emotion_ctx = raw.get("emotion_context", {})
     if isinstance(emotion_ctx, dict):
         user_emotion_tag = str(emotion_ctx.get("user_emotion_tag", "NEUTRAL")).upper()
         ai_mood_state = str(emotion_ctx.get("ai_mood_state", "steady")).lower()
         state_age_ms = int(emotion_ctx.get("state_age_ms", 0))
     else:
-        # 鍏煎鏃ф牸寮忥細浠?hard_state_summary 璇诲彇
+        # 兼容旧格式：从 hard_state_summary 读取
         hard_summary = raw.get("hard_state_summary", {})
         ai_mood_state = str(hard_summary.get("mood_state", "steady")).lower()
         state_age_ms = int(hard_summary.get("state_age_ms", 0))
         user_emotion_tag = "NEUTRAL"
     return GateSnapshot(
-        # ... 鍘熸湁瀛楁 ...
+        # ... 原有字段 ...
         user_emotion_tag=user_emotion_tag,
         ai_mood_state=ai_mood_state,
         state_age_ms=state_age_ms,
     )
 ```
 
-**鍏抽敭浠峰€硷細** 杩欐槸 R8 闂ㄦ帶锛堜紭鍖?锛夎兘澶熺湡姝ｈ惤鍦扮殑**蹇呰鍓嶆彁**銆傛病鏈夎繖涓慨澶嶏紝浼樺寲8鐨勬墍鏈夎璁￠兘鏄┖涓ゼ闃併€?
+**关键价值：** 这是 R8 门控（优化8）能够真正落地的**必要前提**。没有这个修复，优化8的所有设计都是空中楼阁。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲20锛圥0锛夛細`extract_emotion_tag()` 涓嶄紶 `mood_state`鈥斺€攎ood 绾︽潫鏍￠獙姘歌繙涓嶈Е鍙?
-**鐩爣鏂囦欢锛?* `host_brain/core/qa.py`
+### 🟠 深化优化20（P0）：`extract_emotion_tag()` 不传 `mood_state`——mood 约束校验永远不触发
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/core/qa.py`
 
-`_validate_emotion_tag()` 鏈夊畬鏁寸殑 `mood_state` 绾︽潫鏍￠獙閫昏緫锛圡26-G锛夛紝浣?`extract_emotion_tag()` 璋冪敤鏃?*浠庝笉浼?`mood_state` 鍙傛暟**锛?
+**精读发现：**
+
+`_validate_emotion_tag()` 有完整的 `mood_state` 约束校验逻辑（M26-G），但 `extract_emotion_tag()` 调用时**从不传 `mood_state` 参数**：
+
 ```python
-# 褰撳墠瀹炵幇锛堟湁闂锛?def extract_emotion_tag(
+# 当前实现（有问题）
+def extract_emotion_tag(
     payload: dict[str, Any],
     *,
     ledger: Any | None = None,
@@ -1202,134 +1367,155 @@ def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
     narrative = payload.get("narrative") if isinstance(payload, dict) else None
     raw_tag = narrative.get("emotion_tag") if isinstance(narrative, dict) else None
     return _validate_emotion_tag(raw_tag, ledger=ledger, request_id=request_id)
-    # 鈫?娌℃湁浼?mood_state锛乵ood_state 绾︽潫鏍￠獙姘歌繙涓嶈Е鍙?```
+    # ↑ 没有传 mood_state！mood_state 约束校验永远不触发
+```
 
-杩欐剰鍛崇潃锛?1. `MOOD_EMOTION_CONSTRAINTS` 鐨勭害鏉熸槧灏勶紙`metabolism.py` 涓簿蹇冭璁＄殑锛?*姘歌繙涓嶄細琚?`extract_emotion_tag()` 浣跨敤**
-2. `tired` 鐘舵€佷笅 LLM 杈撳嚭 `EXCITED`锛宍extract_emotion_tag()` 浼氱洿鎺ヨ繑鍥?`EXCITED`锛屼笉鍋氫换浣曢檷绾?3. 鍙湁鐩存帴璋冪敤 `_validate_emotion_tag(tag, mood_state=...)` 鎵嶈兘瑙﹀彂绾︽潫锛屼絾杩欎釜鍐呴儴鍑芥暟娌℃湁鍏紑鎺ュ彛
+这意味着：
+1. `MOOD_EMOTION_CONSTRAINTS` 的约束映射（`metabolism.py` 中精心设计的）**永远不会被 `extract_emotion_tag()` 使用**
+2. `tired` 状态下 LLM 输出 `EXCITED`，`extract_emotion_tag()` 会直接返回 `EXCITED`，不做任何降级
+3. 只有直接调用 `_validate_emotion_tag(tag, mood_state=...)` 才能触发约束，但这个内部函数没有公开接口
 
-**鏂规锛?* 涓?`extract_emotion_tag()` 澧炲姞 `mood_state` 鍙傛暟锛屽苟鍦ㄨ皟鐢ㄩ摼涓紶閫掞細
+**方案：** 为 `extract_emotion_tag()` 增加 `mood_state` 参数，并在调用链中传递：
 
 ```python
 def extract_emotion_tag(
     payload: dict[str, Any],
     *,
-    mood_state: str | None = None,   # 馃啎 鏂板鍙傛暟
+    mood_state: str | None = None,   # 🆕 新增参数
     ledger: Any | None = None,
     request_id: str | None = None,
 ) -> str:
-    """浠?LLM 杈撳嚭 payload 涓彁鍙栧苟鏍￠獙 emotion_tag銆?
-    鑻ユ彁渚?mood_state锛屼細棰濆妫€鏌?emotion_tag 鏄惁鍦ㄥ綋鍓?mood_state 鐨勫厑璁歌寖鍥村唴銆?    """
+    """从 LLM 输出 payload 中提取并校验 emotion_tag。
+
+    若提供 mood_state，会额外检查 emotion_tag 是否在当前 mood_state 的允许范围内。
+    """
     narrative = payload.get("narrative") if isinstance(payload, dict) else None
     raw_tag = narrative.get("emotion_tag") if isinstance(narrative, dict) else None
     return _validate_emotion_tag(
         raw_tag,
-        mood_state=mood_state,   # 馃啎 浼犻€?mood_state
+        mood_state=mood_state,   # 🆕 传递 mood_state
         ledger=ledger,
         request_id=request_id,
     )
 ```
 
-**璋冪敤鏂逛慨鏀癸細** 鎵€鏈夎皟鐢?`extract_emotion_tag(payload)` 鐨勫湴鏂癸紝鏀逛负 `extract_emotion_tag(payload, mood_state=current_mood_state)`銆?
-**棰勬湡鏁堟灉锛?* `MOOD_EMOTION_CONSTRAINTS` 鐨勭害鏉熸槧灏勭粓浜庤兘鍦ㄥ疄闄呰皟鐢ㄩ摼涓敓鏁堬紝`tired` 鐘舵€佷笅鐨?`EXCITED` 浼氳姝ｇ‘闄嶇骇涓?`NEUTRAL`銆?
+**调用方修改：** 所有调用 `extract_emotion_tag(payload)` 的地方，改为 `extract_emotion_tag(payload, mood_state=current_mood_state)`。
+
+**预期效果：** `MOOD_EMOTION_CONSTRAINTS` 的约束映射终于能在实际调用链中生效，`tired` 状态下的 `EXCITED` 会被正确降级为 `NEUTRAL`。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲21锛圥1锛夛細`BondScoreState.to_summary()` 鐨?`trend` 瀛楁缁?LLM 浼犺嫳鏂囨灇涓?
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_stage_engine.py`
+### 🟡 深化优化21（P1）：`BondScoreState.to_summary()` 的 `trend` 字段给 LLM 传英文枚举
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/bond/bond_stage_engine.py`
 
-`to_summary()` 鐨勫疄鐜帮細
+**精读发现：**
+
+`to_summary()` 的实现：
 
 ```python
 def to_summary(self) -> dict[str, Any]:
     return {
-        "stage": self.current_stage,          # "FRIEND"锛堣嫳鏂囨灇涓撅級
-        "trend": self.trend(),                 # "RISING"锛堣嫳鏂囨灇涓撅級
-        "capability_hint": self.capability_hint(),  # "鏈嬪弸锛屽彲娣卞叆浜ゆ祦"锛堜腑鏂囷級
+        "stage": self.current_stage,          # "FRIEND"（英文枚举）
+        "trend": self.trend(),                 # "RISING"（英文枚举）
+        "capability_hint": self.capability_hint(),  # "朋友，可深入交流"（中文）
     }
 ```
 
-`stage` 鍜?`trend` 閮芥槸鑻辨枃鏋氫妇锛屼絾 `capability_hint` 鏄腑鏂囥€傝繖绉?*娣峰悎璇█**鐨?summary 瀵?LLM 鐨勮涔夊紩瀵兼晥鏋滃緢宸細
-- LLM 鐪嬪埌 `"stage": "FRIEND"` 鏃讹紝闇€瑕佽嚜宸辨帹鏂繖鏄粈涔堟剰鎬?- LLM 鐪嬪埌 `"trend": "RISING"` 鏃讹紝鏃犳硶鐩存帴鎰熺煡"鍏崇郴鍦ㄥ崌娓?鐨勬儏鎰熷惈涔?- `capability_hint` 鏄腑鏂囷紝浣?`stage` 鏄嫳鏂囷紝璇箟涓嶄竴鑷?
-v1.1 鐨勪紭鍖?4 璁捐浜?`trend_hint()` 鏂规硶锛屼絾 `to_summary()` 浠嶇劧璋冪敤 `self.trend()` 鑰屼笉鏄?`self.trend_hint()`銆?
-**鏂规锛?* 閲嶆瀯 `to_summary()`锛岀粺涓€浣跨敤璇箟鍖栦腑鏂囨弿杩帮細
+`stage` 和 `trend` 都是英文枚举，但 `capability_hint` 是中文。这种**混合语言**的 summary 对 LLM 的语义引导效果很差：
+- LLM 看到 `"stage": "FRIEND"` 时，需要自己推断这是什么意思
+- LLM 看到 `"trend": "RISING"` 时，无法直接感知"关系在升温"的情感含义
+- `capability_hint` 是中文，但 `stage` 是英文，语义不一致
+
+v1.1 的优化14 设计了 `trend_hint()` 方法，但 `to_summary()` 仍然调用 `self.trend()` 而不是 `self.trend_hint()`。
+
+**方案：** 重构 `to_summary()`，统一使用语义化中文描述：
 
 ```python
 def to_summary(self) -> dict[str, Any]:
-    """鐢熸垚 context-pack-safe 鐨?Bond Summary锛堢粺涓€璇箟鍖栵紝涓嶅惈鏁板€硷級銆?""
+    """生成 context-pack-safe 的 Bond Summary（统一语义化，不含数值）。"""
     stage_zh = {
-        STAGE_STRANGER:     "鍒濊瘑",
-        STAGE_ACQUAINTANCE: "鐩歌瘑",
-        STAGE_FRIEND:       "鏈嬪弸",
-        STAGE_CLOSE_FRIEND: "鎸氬弸",
-        STAGE_CONFIDANT:    "鐭ュ繁",
-        STAGE_SOULMATE:     "鐏甸瓊浼翠荆",
+        STAGE_STRANGER:     "初识",
+        STAGE_ACQUAINTANCE: "相识",
+        STAGE_FRIEND:       "朋友",
+        STAGE_CLOSE_FRIEND: "挚友",
+        STAGE_CONFIDANT:    "知己",
+        STAGE_SOULMATE:     "灵魂伴侣",
     }
     return {
-        "stage": self.current_stage,                    # 淇濈暀鑻辨枃鏋氫妇锛堜緵绋嬪簭閫昏緫浣跨敤锛?        "stage_hint": stage_zh.get(                     # 馃啎 鏂板涓枃璇箟锛堜緵LLM浣跨敤锛?            self.current_stage, self.current_stage
+        "stage": self.current_stage,                    # 保留英文枚举（供程序逻辑使用）
+        "stage_hint": stage_zh.get(                     # 🆕 新增中文语义（供LLM使用）
+            self.current_stage, self.current_stage
         ),
-        "trend": self.trend(),                          # 淇濈暀鑻辨枃鏋氫妇锛堜緵绋嬪簭閫昏緫浣跨敤锛?        "trend_hint": self._trend_hint(),               # 馃啎 鏂板涓枃璇箟锛堜緵LLM浣跨敤锛?        "capability_hint": self.capability_hint(),      # 宸叉湁涓枃鎻忚堪
+        "trend": self.trend(),                          # 保留英文枚举（供程序逻辑使用）
+        "trend_hint": self._trend_hint(),               # 🆕 新增中文语义（供LLM使用）
+        "capability_hint": self.capability_hint(),      # 已有中文描述
     }
 
 def _trend_hint(self) -> str:
-    """灏嗚秼鍔胯浆涓鸿嚜鐒惰瑷€鎻愮ず锛堢粰 LLM 鐢級"""
+    """将趋势转为自然语言提示（给 LLM 用）"""
     t = self.trend()
     stage = self.current_stage
     hints = {
-        ("RISING",    STAGE_STRANGER):     "鍒濇鐩歌瘑锛屾劅瑙夎繕涓嶉敊",
-        ("RISING",    STAGE_ACQUAINTANCE): "鍏崇郴鍦ㄥ崌娓╋紝瓒婃潵瓒婄啛鎮?,
-        ("RISING",    STAGE_FRIEND):       "鍙嬭皧鍦ㄥ姞娣憋紝浜掑姩瓒婃潵瓒婂",
-        ("RISING",    STAGE_CLOSE_FRIEND): "鍏崇郴瓒婃潵瓒婁翰瀵?,
-        ("RISING",    STAGE_CONFIDANT):    "褰兼瓒婃潵瓒婁俊浠?,
-        ("RISING",    STAGE_SOULMATE):     "鐏甸瓊濂戝悎锛岃秺鏉ヨ秺娣?,
-        ("DECLINING", STAGE_FRIEND):       "鏈€杩戜簰鍔ㄥ皯浜嗕簺锛屾湁浜涚枏杩?,
-        ("DECLINING", STAGE_CLOSE_FRIEND): "鍏崇郴鏈変簺闄嶆俯锛岄渶瑕佸鑱旂郴",
-        ("DECLINING", STAGE_CONFIDANT):    "鎰熻鏈変簺璺濈锛岄渶瑕侀噸鏂版媺杩?,
-        ("STABLE",    STAGE_STRANGER):     "杩樺湪鐩镐簰浜嗚В涓?,
-        ("STABLE",    STAGE_FRIEND):       "鍏崇郴绋冲畾锛屾棩甯搁櫔浼?,
-        ("STABLE",    STAGE_SOULMATE):     "榛樺鍗佽冻锛屾棤闇€澶氳█",
+        ("RISING",    STAGE_STRANGER):     "初次相识，感觉还不错",
+        ("RISING",    STAGE_ACQUAINTANCE): "关系在升温，越来越熟悉",
+        ("RISING",    STAGE_FRIEND):       "友谊在加深，互动越来越多",
+        ("RISING",    STAGE_CLOSE_FRIEND): "关系越来越亲密",
+        ("RISING",    STAGE_CONFIDANT):    "彼此越来越信任",
+        ("RISING",    STAGE_SOULMATE):     "灵魂契合，越来越深",
+        ("DECLINING", STAGE_FRIEND):       "最近互动少了些，有些疏远",
+        ("DECLINING", STAGE_CLOSE_FRIEND): "关系有些降温，需要多联系",
+        ("DECLINING", STAGE_CONFIDANT):    "感觉有些距离，需要重新拉近",
+        ("STABLE",    STAGE_STRANGER):     "还在相互了解中",
+        ("STABLE",    STAGE_FRIEND):       "关系稳定，日常陪伴",
+        ("STABLE",    STAGE_SOULMATE):     "默契十足，无需多言",
     }
-    return hints.get((t, stage), "鍏崇郴姝ｅ湪鍙戝睍涓?)
+    return hints.get((t, stage), "关系正在发展中")
 ```
 
-**棰勬湡鏁堟灉锛?* LLM 鍦?`bond_summary` 妲戒綅涓悓鏃剁湅鍒?`stage_hint="鏈嬪弸"` 鍜?`trend_hint="鍙嬭皧鍦ㄥ姞娣憋紝浜掑姩瓒婃潵瓒婂"`锛岃涔夊紩瀵兼晥鏋滃ぇ骞呮彁鍗囷紝涓嶅啀闇€瑕佽嚜宸辨帹鏂嫳鏂囨灇涓剧殑鍚箟銆?
+**预期效果：** LLM 在 `bond_summary` 槽位中同时看到 `stage_hint="朋友"` 和 `trend_hint="友谊在加深，互动越来越多"`，语义引导效果大幅提升，不再需要自己推断英文枚举的含义。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲22锛圥1锛夛細`build_governance_snapshot()` 涓嶄紶閫?`hard_state_summary.mood_state` 缁?`GateSnapshot`
+### 🟢 深化优化22（P1）：`build_governance_snapshot()` 不传递 `hard_state_summary.mood_state` 给 `GateSnapshot`
 
-**鐩爣鏂囦欢锛?* `host_brain/core/metabolism.py` + `host_brain/governor/rules.py`
+**目标文件：** `host_brain/core/metabolism.py` + `host_brain/governor/rules.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`build_governance_snapshot()` 鐢熸垚鐨勫揩鐓т腑鏈?`hard_state_summary.mood_state`锛屼絾 `_normalize_snapshot()` 鍦ㄦ瀯寤?`GateSnapshot` 鏃?*涓嶈鍙?`hard_state_summary`**锛屽彧璇诲彇椤跺眰瀛楁锛?
+`build_governance_snapshot()` 生成的快照中有 `hard_state_summary.mood_state`，但 `_normalize_snapshot()` 在构建 `GateSnapshot` 时**不读取 `hard_state_summary`**，只读取顶层字段：
+
 ```python
-# _normalize_snapshot() 璇诲彇鐨勫瓧娈碉紙褰撳墠锛?trust_level = raw.get("trust_level", 50)       # 椤跺眰
-energy_level = raw.get("energy_level", 60)     # 椤跺眰
-sys_mode = raw.get("sys_mode", "normal")       # 椤跺眰
+# _normalize_snapshot() 读取的字段（当前）
+trust_level = raw.get("trust_level", 50)       # 顶层
+energy_level = raw.get("energy_level", 60)     # 顶层
+sys_mode = raw.get("sys_mode", "normal")       # 顶层
 # ...
 
-# hard_state_summary 涓殑 mood_state 瀹屽叏琚拷鐣ワ紒
-# raw["hard_state_summary"]["mood_state"] 鈫?姘歌繙璇讳笉鍒?```
+# hard_state_summary 中的 mood_state 完全被忽略！
+# raw["hard_state_summary"]["mood_state"] → 永远读不到
+```
 
-杩欏鑷达細
-1. `GateSnapshot.ai_mood_state`锛堜紭鍖?9鏂板锛夊鏋滀粠椤跺眰璇诲彇锛屼細璇诲埌 `sys_mode`锛堢郴缁熸ā寮忥級锛岃€屼笉鏄?`mood_state`锛堟儏鎰熺姸鎬侊級
-2. `hard_state_summary` 涓簿蹇冪淮鎶ょ殑 `mood_state` 瀵?Governor 闂ㄦ帶瀹屽叏閫忔槑
+这导致：
+1. `GateSnapshot.ai_mood_state`（优化19新增）如果从顶层读取，会读到 `sys_mode`（系统模式），而不是 `mood_state`（情感状态）
+2. `hard_state_summary` 中精心维护的 `mood_state` 对 Governor 门控完全透明
 
-**鏂规锛?* 鍦?`_normalize_snapshot()` 涓鍔犲 `hard_state_summary` 鐨勮鍙栵紝骞跺湪 `build_governance_snapshot()` 涓皢 `mood_state` 鎻愬崌鍒伴《灞傦細
+**方案：** 在 `_normalize_snapshot()` 中增加对 `hard_state_summary` 的读取，并在 `build_governance_snapshot()` 中将 `mood_state` 提升到顶层：
 
 ```python
-# metabolism.py锛歜uild_governance_snapshot() 鎵╁睍
+# metabolism.py：build_governance_snapshot() 扩展
 def build_governance_snapshot(
     state: HardState,
     *,
     overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    # ... 鍘熸湁閫昏緫 ...
+    # ... 原有逻辑 ...
     return {
         "trust_level": trust,
         "energy_level": int(state.energy_level),
         "sys_mode": str(state.sys_mode),
-        "mood_state": str(state.mood_state),    # 馃啎 鎻愬崌鍒伴《灞傦紙渚?GateSnapshot 璇诲彇锛?        "rate_limit_hit": rate_limit_hit,
+        "mood_state": str(state.mood_state),    # 🆕 提升到顶层（供 GateSnapshot 读取）
+        "rate_limit_hit": rate_limit_hit,
         "scope": scope,
         "scope_allowlist": list(allowlist),
         "safety_flag": safety_flag,
@@ -1343,44 +1529,56 @@ def build_governance_snapshot(
         },
     }
 
-# rules.py锛歘normalize_snapshot() 澧炲姞 mood_state 璇诲彇
+# rules.py：_normalize_snapshot() 增加 mood_state 读取
 def _normalize_snapshot(raw: dict[str, Any]) -> GateSnapshot:
-    # ... 鍘熸湁瀛楁 ...
-    # 馃啎 mood_state 璇诲彇锛堜紭鍏堥《灞傦紝鍥為€€鍒?hard_state_summary锛?    hard_summary = raw.get("hard_state_summary", {})
+    # ... 原有字段 ...
+    # 🆕 mood_state 读取（优先顶层，回退到 hard_state_summary）
+    hard_summary = raw.get("hard_state_summary", {})
     ai_mood_state = str(
-        raw.get("mood_state")                           # 椤跺眰锛堜紭鍏堬級
-        or hard_summary.get("mood_state", "steady")    # hard_state_summary锛堝洖閫€锛?    ).lower()
+        raw.get("mood_state")                           # 顶层（优先）
+        or hard_summary.get("mood_state", "steady")    # hard_state_summary（回退）
+    ).lower()
     return GateSnapshot(
-        # ... 鍘熸湁瀛楁 ...
+        # ... 原有字段 ...
         ai_mood_state=ai_mood_state,
     )
 ```
 
-**棰勬湡鏁堟灉锛?* `mood_state` 淇℃伅涓嶅啀鍦?`build_governance_snapshot()` 鈫?`_normalize_snapshot()` 鐨勪紶閫掕繃绋嬩腑涓㈠け锛孯8 闂ㄦ帶鑳藉姝ｇ‘璇诲彇 AI 褰撳墠鐨勬儏鎰熺姸鎬併€?
+**预期效果：** `mood_state` 信息不再在 `build_governance_snapshot()` → `_normalize_snapshot()` 的传递过程中丢失，R8 门控能够正确读取 AI 当前的情感状态。
+
 ---
 
-### 馃數 娣卞寲浼樺寲23锛圥2锛夛細`validate_prompt_context()` 瀵?`bond_summary` 鐨?`stage`/`trend` 瀛楁鏃犺涔夋牎楠?
-**鐩爣鏂囦欢锛?* `host_brain/core/prompt_context.py`
+### 🔵 深化优化23（P2）：`validate_context_pack()` 对 `bond_summary` 的 `stage`/`trend` 字段无语义校验
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/core/context_pack.py`
 
-`_validate_bond_summary_slot()` 鍙仛涓や欢浜嬶細
-1. 妫€鏌ユ槸鍚﹀寘鍚暟鍊硷紙`CP_BOND_NUMERIC_FORBIDDEN`锛?2. 妫€鏌ユ槸鍚︽湁鏈煡瀛楁锛坄CP_BOND_SUMMARY_FIELD_INVALID`锛?
-浣嗗 `stage` 鍜?`trend` 瀛楁鐨?*鏋氫妇鍊煎悎娉曟€?*瀹屽叏涓嶆牎楠岋細
+**精读发现：**
+
+`_validate_bond_summary_slot()` 只做两件事：
+1. 检查是否包含数值（`CP_BOND_NUMERIC_FORBIDDEN`）
+2. 检查是否有未知字段（`CP_BOND_SUMMARY_FIELD_INVALID`）
+
+但对 `stage` 和 `trend` 字段的**枚举值合法性**完全不校验：
 
 ```python
-# 褰撳墠鏍￠獙锛堜笉瀹屾暣锛?def _validate_bond_summary_slot(bond_summary, result):
+# 当前校验（不完整）
+def _validate_bond_summary_slot(bond_summary, result):
     for value in _iter_values(bond_summary):
         if isinstance(value, (int, float)):
-            result.add(CP_BOND_NUMERIC_FORBIDDEN, ...)  # 鍙鏌ユ暟鍊?    unknown = sorted(set(bond_summary.keys()) - set(BOND_SUMMARY_ALLOWED_KEYS))
+            result.add(CP_BOND_NUMERIC_FORBIDDEN, ...)  # 只检查数值
+    unknown = sorted(set(bond_summary.keys()) - set(BOND_SUMMARY_ALLOWED_KEYS))
     if unknown:
-        result.add(CP_BOND_SUMMARY_FIELD_INVALID, ...)  # 鍙鏌ユ湭鐭ュ瓧娈?    # 鈫?娌℃湁妫€鏌?stage 鏄惁鏄悎娉曠殑 Bond 闃舵鏋氫妇锛?    # 鈫?娌℃湁妫€鏌?trend 鏄惁鏄?RISING/STABLE/DECLINING锛?```
+        result.add(CP_BOND_SUMMARY_FIELD_INVALID, ...)  # 只检查未知字段
+    # ↑ 没有检查 stage 是否是合法的 Bond 阶段枚举！
+    # ↑ 没有检查 trend 是否是 RISING/STABLE/DECLINING！
+```
 
-杩欐剰鍛崇潃 `bond_summary["stage"] = "BEST_FRIEND"` 鎴?`bond_summary["trend"] = "GOING_UP"` 杩欐牱鐨勯潪娉曞€间細鐩存帴娉ㄥ叆 LLM锛屽鑷磋涔夋贩涔便€?
-**鏂规锛?* 鍦?`_validate_bond_summary_slot()` 涓鍔犳灇涓惧€兼牎楠岋細
+这意味着 `bond_summary["stage"] = "BEST_FRIEND"` 或 `bond_summary["trend"] = "GOING_UP"` 这样的非法值会直接注入 LLM，导致语义混乱。
+
+**方案：** 在 `_validate_bond_summary_slot()` 中增加枚举值校验：
 
 ```python
-# 鍚堟硶鐨?Bond 闃舵鏋氫妇锛堜笌 bond_stage_engine.py 淇濇寔涓€鑷达級
+# 合法的 Bond 阶段枚举（与 bond_stage_engine.py 保持一致）
 VALID_BOND_STAGES = frozenset({
     "STRANGER", "ACQUAINTANCE", "FRIEND",
     "CLOSE_FRIEND", "CONFIDANT", "SOULMATE",
@@ -1388,12 +1586,13 @@ VALID_BOND_STAGES = frozenset({
 VALID_BOND_TRENDS = frozenset({"RISING", "STABLE", "DECLINING"})
 
 def _validate_bond_summary_slot(
-    bond_summary: dict[str, Any], result: PromptContextValidationResult
+    bond_summary: dict[str, Any], result: ContextPackValidationResult
 ) -> None:
-    # ... 鍘熸湁鏁板€兼鏌?...
-    # ... 鍘熸湁鏈煡瀛楁妫€鏌?...
+    # ... 原有数值检查 ...
+    # ... 原有未知字段检查 ...
 
-    # 馃啎 鏋氫妇鍊煎悎娉曟€ф牎楠?    stage = bond_summary.get("stage")
+    # 🆕 枚举值合法性校验
+    stage = bond_summary.get("stage")
     if stage is not None and str(stage) not in VALID_BOND_STAGES:
         result.add(
             CP_BOND_SUMMARY_FIELD_INVALID,
@@ -1412,21 +1611,23 @@ def _validate_bond_summary_slot(
         )
 ```
 
-**棰勬湡鏁堟灉锛?* 闈炴硶鐨?Bond 闃舵/瓒嬪娍鏋氫妇鍊煎湪娉ㄥ叆 LLM 鍓嶈鎷︽埅锛岄槻姝㈣涔夋贩涔便€?
+**预期效果：** 非法的 Bond 阶段/趋势枚举值在注入 LLM 前被拦截，防止语义混乱。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲24锛圥2锛夛細`build_fallback_output()` 鐨勯檷绾у洖澶嶆棤鎯呮劅鎰熺煡鈥斺€旈檷绾ф椂 AI 鎯呮劅鏂眰
+### 🟣 深化优化24（P2）：`build_fallback_output()` 的降级回复无情感感知——降级时 AI 情感断层
 
-**鐩爣鏂囦欢锛?* `host_brain/core/qa.py`
+**目标文件：** `host_brain/core/qa.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-褰?QA 鏍￠獙澶辫触瑙﹀彂闄嶇骇鏃讹紝`build_fallback_output()` 鐢熸垚鐨勫洖澶嶆槸锛?
+当 QA 校验失败触发降级时，`build_fallback_output()` 生成的回复是：
+
 ```python
 def build_fallback_output(*, reason_code: str, stage: str) -> dict[str, Any]:
     return {
         "narrative": {
-            "text": "褰撳墠鏃犳硶纭鎵ц缁撴灉锛屾垜浼氬厛淇濇寔鑽夋鍥炲骞剁瓑寰呭悗缁不鐞嗐€?,
+            "text": "当前无法确认执行结果，我会先保持草案回复并等待后续治理。",
         },
         "intent_draft": {},
         "meta": {
@@ -1438,29 +1639,31 @@ def build_fallback_output(*, reason_code: str, stage: str) -> dict[str, Any]:
     }
 ```
 
-**闂锛?*
-1. 闄嶇骇鍥炲鏄?*鍥哄畾鏂囨湰**锛屽畬鍏ㄤ笉鎰熺煡褰撳墠鎯呮劅鐘舵€佲€斺€擿engaged` 鐘舵€佷笅闄嶇骇鍜?`tired` 鐘舵€佷笅闄嶇骇锛岀敤鎴风湅鍒扮殑鏄畬鍏ㄧ浉鍚岀殑鍐峰啺鍐扮殑绯荤粺鎻愮ず
-2. 闄嶇骇鍥炲娌℃湁 `emotion_tag` 瀛楁锛屼細瀵艰嚧鍚庣画 `extract_emotion_tag()` 杩斿洖 `NEUTRAL`锛屾儏鎰熺姸鎬佽寮哄埗閲嶇疆
-3. 闄嶇骇鏃?AI 鐨勬儏鎰熺姸鎬佸簲璇ユ槸"鏈変簺鍥版儜/鎶辨瓑"锛岃€屼笉鏄満姊扮殑绯荤粺鎻愮ず
+**问题：**
+1. 降级回复是**固定文本**，完全不感知当前情感状态——`engaged` 状态下降级和 `tired` 状态下降级，用户看到的是完全相同的冷冰冰的系统提示
+2. 降级回复没有 `emotion_tag` 字段，会导致后续 `extract_emotion_tag()` 返回 `NEUTRAL`，情感状态被强制重置
+3. 降级时 AI 的情感状态应该是"有些困惑/抱歉"，而不是机械的系统提示
 
-**鏂规锛?* 涓?`build_fallback_output()` 澧炲姞鎯呮劅鎰熺煡鍙傛暟锛?
+**方案：** 为 `build_fallback_output()` 增加情感感知参数：
+
 ```python
-# 闄嶇骇鍥炲鐨勬儏鎰熸劅鐭ユ枃鏈槧灏?_FALLBACK_TEXT_BY_MOOD: dict[str, tuple[str, str]] = {
-    # mood_state 鈫?(fallback_text, emotion_tag)
-    "engaged":  ("鍟婏紝鍒氭墠濂藉儚鍑轰簡鐐瑰皬闂锛岃鎴戦噸鏂版暣鐞嗕竴涓嬫€濊矾锝?, "THINKING"),
-    "steady":   ("鍒氭墠閬囧埌浜嗕竴鐐圭姸鍐碉紝鎴戝厛缂撲竴缂撳啀鍥炲浣犮€?, "THINKING"),
-    "calm":     ("鍡€︹€﹀垰鎵嶆湁浜涘湴鏂规病澶勭悊濂斤紝绋嶇瓑涓€涓嬨€?, "CALM"),
-    "tired":    ("鏈夌偣绱簡锛屽垰鎵嶆病鑳藉ソ濂藉洖搴旓紝鎶辨瓑鈥︹€?, "SAD"),
-    "critical": ("鈥︹€︾幇鍦ㄧ姸鎬佷笉澶ソ锛屽厛浼戞伅涓€涓嬨€?, "SAD"),
+# 降级回复的情感感知文本映射
+_FALLBACK_TEXT_BY_MOOD: dict[str, tuple[str, str]] = {
+    # mood_state → (fallback_text, emotion_tag)
+    "engaged":  ("啊，刚才好像出了点小问题，让我重新整理一下思路～", "THINKING"),
+    "steady":   ("刚才遇到了一点状况，我先缓一缓再回复你。", "THINKING"),
+    "calm":     ("嗯……刚才有些地方没处理好，稍等一下。", "CALM"),
+    "tired":    ("有点累了，刚才没能好好回应，抱歉……", "SAD"),
+    "critical": ("……现在状态不太好，先休息一下。", "SAD"),
 }
 
 def build_fallback_output(
     *,
     reason_code: str,
     stage: str,
-    mood_state: str = "steady",   # 馃啎 鏂板鍙傛暟
+    mood_state: str = "steady",   # 🆕 新增参数
 ) -> dict[str, Any]:
-    """鐢熸垚鎯呮劅鎰熺煡鐨勯檷绾у洖澶嶏紙涓嶅啀鏄浐瀹氭枃鏈級銆?""
+    """生成情感感知的降级回复（不再是固定文本）。"""
     text, emotion_tag = _FALLBACK_TEXT_BY_MOOD.get(
         str(mood_state).lower(),
         _FALLBACK_TEXT_BY_MOOD["steady"],
@@ -1468,7 +1671,8 @@ def build_fallback_output(
     return {
         "narrative": {
             "text": text,
-            "emotion_tag": emotion_tag,   # 馃啎 闄嶇骇鏃朵篃鏈夋儏鎰熸爣绛?        },
+            "emotion_tag": emotion_tag,   # 🆕 降级时也有情感标签
+        },
         "intent_draft": {},
         "meta": {
             "draft_only": True,
@@ -1479,52 +1683,90 @@ def build_fallback_output(
     }
 ```
 
-**璋冪敤鏂逛慨鏀癸細** `_downgrade()` 鍑芥暟闇€瑕佹帴鏀跺苟浼犻€?`mood_state` 鍙傛暟銆?
-**棰勬湡鏁堟灉锛?* 鍗充娇鍦?QA 闄嶇骇鏃讹紝AI 鐨勬儏鎰熺姸鎬佷篃鑳借嚜鐒舵祦闇诧紝涓嶄細鍑虹幇"鎯呮劅鏂眰"鈥斺€旂敤鎴蜂笉浼氱獊鐒剁湅鍒颁竴鏉″喎鍐板啺鐨勭郴缁熸彁绀烘墦鏂儏鎰熸祦銆?
+**调用方修改：** `_downgrade()` 函数需要接收并传递 `mood_state` 参数。
+
+**预期效果：** 即使在 QA 降级时，AI 的情感状态也能自然流露，不会出现"情感断层"——用户不会突然看到一条冷冰冰的系统提示打断情感流。
+
 ---
 
-## 鍗佷簲銆佺鍥涜疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 十五、第四轮优化的核心价值总结
 
-绗洓杞紭鍖栬仛鐒︿簬**淇鍔熻兘涔嬮棿鐨勮繛鎺ユ柇瑁?*鈥斺€旈偅浜涘崟鐙湅姣忎釜鍔熻兘閮芥槸瀹屾暣鐨勶紝浣嗙粍鍚堣捣鏉ュ嵈鏃犳硶鍗忓悓宸ヤ綔鐨?鏋舵瀯鏂眰"锛?
-| 浼樺寲椤?| 鍙戠幇鐨?鏋舵瀯鏂眰" | 鏂眰浣嶇疆 | 淇鏂规 |
+第四轮优化聚焦于**修复功能之间的连接断裂**——那些单独看每个功能都是完整的，但组合起来却无法协同工作的"架构断层"：
+
+| 优化项 | 发现的"架构断层" | 断层位置 | 修复方案 |
 |--------|----------------|---------|---------|
-| **浼樺寲19** 馃敶 | R8 闂ㄦ帶鏃犳硶钀藉湴锛歚GateSnapshot` 涓嶅惈鎯呮劅瀛楁锛屾儏鎰熸暟鎹 `_normalize_snapshot()` 闈欓粯涓㈠純 | `rules.py` 鈫?`decision.py` | 鎵╁睍 `GateSnapshot`锛宍_normalize_snapshot()` 璇诲彇鎯呮劅瀛楁 |
-| **浼樺寲20** 馃煚 | `MOOD_EMOTION_CONSTRAINTS` 姘歌繙涓嶇敓鏁堬細`extract_emotion_tag()` 浠庝笉浼?`mood_state` | `qa.py` 鈫?`metabolism.py` | 涓?`extract_emotion_tag()` 澧炲姞 `mood_state` 鍙傛暟 |
-| **浼樺寲21** 馃煛 | `to_summary()` 娣峰悎鑻辨枃鏋氫妇鍜屼腑鏂囨弿杩帮紝LLM 璇箟寮曞鏁堟灉宸?| `bond_stage_engine.py` 鈫?LLM | 澧炲姞 `stage_hint`/`trend_hint` 涓枃璇箟瀛楁 |
-| **浼樺寲22** 馃煝 | `mood_state` 鍦ㄥ揩鐓т紶閫掍腑涓㈠け锛歚build_governance_snapshot()` 涓嶅皢 `mood_state` 鎻愬崌鍒伴《灞?| `metabolism.py` 鈫?`rules.py` | 灏?`mood_state` 鎻愬崌鍒板揩鐓ч《灞?|
-| **浼樺寲23** 馃數 | `bond_summary` 鏋氫妇鍊兼棤鏍￠獙锛氶潪娉?`stage`/`trend` 鍊煎彲鐩存帴娉ㄥ叆 LLM | `prompt_context.py` | 澧炲姞鏋氫妇鍊煎悎娉曟€ф牎楠?|
-| **浼樺寲24** 馃煟 | 闄嶇骇鏃舵儏鎰熸柇灞傦細`build_fallback_output()` 鍥哄畾鏂囨湰锛屾儏鎰熺姸鎬佽寮哄埗閲嶇疆涓?`NEUTRAL` | `qa.py` 鈫?鎯呮劅娴?| 闄嶇骇鍥炲鎰熺煡 `mood_state`锛屼繚鎸佹儏鎰熻繛缁€?|
+| **优化19** 🔴 | R8 门控无法落地：`GateSnapshot` 不含情感字段，情感数据被 `_normalize_snapshot()` 静默丢弃 | `rules.py` ↔ `decision.py` | 扩展 `GateSnapshot`，`_normalize_snapshot()` 读取情感字段 |
+| **优化20** 🟠 | `MOOD_EMOTION_CONSTRAINTS` 永远不生效：`extract_emotion_tag()` 从不传 `mood_state` | `qa.py` ↔ `metabolism.py` | 为 `extract_emotion_tag()` 增加 `mood_state` 参数 |
+| **优化21** 🟡 | `to_summary()` 混合英文枚举和中文描述，LLM 语义引导效果差 | `bond_stage_engine.py` ↔ LLM | 增加 `stage_hint`/`trend_hint` 中文语义字段 |
+| **优化22** 🟢 | `mood_state` 在快照传递中丢失：`build_governance_snapshot()` 不将 `mood_state` 提升到顶层 | `metabolism.py` ↔ `rules.py` | 将 `mood_state` 提升到快照顶层 |
+| **优化23** 🔵 | `bond_summary` 枚举值无校验：非法 `stage`/`trend` 值可直接注入 LLM | `context_pack.py` | 增加枚举值合法性校验 |
+| **优化24** 🟣 | 降级时情感断层：`build_fallback_output()` 固定文本，情感状态被强制重置为 `NEUTRAL` | `qa.py` ↔ 情感流 | 降级回复感知 `mood_state`，保持情感连续性 |
 
 ---
 
-## 鍗佸叚銆佸畬鏁翠紭鍖栧叏鏅浘锛坴1.3锛?4椤癸級
+## 十六、完整优化全景图（v1.3，24项）
 
-### 鎸夊眰娆″垎绫?
+### 按层次分类
+
 ```
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鍩虹璁炬柦灞傦紙蹇呴』鍏堝仛锛?                         鈹?鈹? OPT16: OPTIONAL_SLOTS鎵╁睍    OPT17: BondEventPayload鏍囧噯鍖?     鈹?鈹? OPT18: state_age_hint        OPT19: GateSnapshot鎯呮劅瀛楁        鈹?鈹? OPT22: mood_state鎻愬崌鍒伴《灞? OPT23: bond_summary鏋氫妇鏍￠獙        鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈫?鍩虹璁炬柦灏辩华鍚?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鎯呮劅鍐呮牳灞傦紙P0锛?                              鈹?鈹? OPT1: EmotionVector          OPT13: event_kind璇箟鎵╁睍          鈹?鈹? OPT6: emotion_tag鐢熸垚绛栫暐    OPT20: extract_emotion_tag淇     鈹?鈹? OPT7: Bond璐ㄩ噺鍒嗙骇           OPT14: trend_hint璇箟鍖?           鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈫?鎯呮劅鍐呮牳灏辩华鍚?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   璁板繂灞傦紙P1锛?                                  鈹?鈹? OPT3: 鎯呮劅璁板繂鏍囨敞           OPT15: 璁板繂鏂伴矞搴﹁“鍑?             鈹?鈹? OPT9: 鎯呮劅鏃堕棿绾块噸寤?                                           鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   鍏崇郴灞傦紙P1锛?                                  鈹?鈹? OPT2: Bond璐ㄦ劅灞?            OPT11: Bond瑁傜棔淇                鈹?鈹? OPT8: Governor R8闂ㄦ帶        OPT21: to_summary璇箟鍖?           鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈫?鏍稿績灞傚氨缁悗
-鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                   杈撳嚭灞傦紙P2锛?                                  鈹?鈹? OPT4: emotion_pulse妲戒綅      OPT5: 涓诲姩瑙﹀彂鍣?                  鈹?鈹? OPT10: LLM鐢熸垚鍙傛暟           OPT12: 鎯呮劅鍥炲０                    鈹?鈹? OPT24: 闄嶇骇鎯呮劅鎰熺煡                                             鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?```
+┌─────────────────────────────────────────────────────────────────┐
+│                    基础设施层（必须先做）                          │
+│  OPT16: OPTIONAL_SLOTS扩展    OPT17: BondEventPayload标准化      │
+│  OPT18: state_age_hint        OPT19: GateSnapshot情感字段        │
+│  OPT22: mood_state提升到顶层  OPT23: bond_summary枚举校验        │
+└─────────────────────────────────────────────────────────────────┘
+         ↓ 基础设施就绪后
+┌─────────────────────────────────────────────────────────────────┐
+│                    情感内核层（P0）                               │
+│  OPT1: EmotionVector          OPT13: event_kind语义扩展          │
+│  OPT6: emotion_tag生成策略    OPT20: extract_emotion_tag修复     │
+│  OPT7: Bond质量分级           OPT14: trend_hint语义化            │
+└─────────────────────────────────────────────────────────────────┘
+         ↓ 情感内核就绪后
+┌─────────────────────────────────────────────────────────────────┐
+│                    记忆层（P1）                                   │
+│  OPT3: 情感记忆标注           OPT15: 记忆新鲜度衰减              │
+│  OPT9: 情感时间线重建                                            │
+└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    关系层（P1）                                   │
+│  OPT2: Bond质感层             OPT11: Bond裂痕修复                │
+│  OPT8: Governor R8门控        OPT21: to_summary语义化            │
+└─────────────────────────────────────────────────────────────────┘
+         ↓ 核心层就绪后
+┌─────────────────────────────────────────────────────────────────┐
+│                    输出层（P2）                                   │
+│  OPT4: emotion_pulse槽位      OPT5: 主动触发器                   │
+│  OPT10: LLM生成参数           OPT12: 情感回声                    │
+│  OPT24: 降级情感感知                                             │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 瀹炴柦璺嚎鍥撅紙鎸変紭鍏堢骇锛?
-| 鎵规 | 浼樺寲椤?| 鏍稿績鐩爣 |
+### 实施路线图（按优先级）
+
+| 批次 | 优化项 | 核心目标 |
 |------|--------|---------|
-| **Batch 1锛堝熀纭€璁炬柦锛?* | OPT16, OPT17, OPT18, OPT19, OPT22, OPT23 | 鎵撻€氭暟鎹祦锛屼慨澶嶆灦鏋勬柇灞?|
-| **Batch 2锛堟儏鎰熷唴鏍革級** | OPT1, OPT13, OPT20, OPT6, OPT7, OPT14 | 寤虹珛杩炵画鎯呮劅鐘舵€佹満 |
-| **Batch 3锛堣蹇?鍏崇郴锛?* | OPT3, OPT15, OPT9, OPT2, OPT11, OPT8, OPT21 | 鎯呮劅璁板繂+鍏崇郴娓╁害 |
-| **Batch 4锛堣緭鍑哄寮猴級** | OPT4, OPT5, OPT10, OPT12, OPT24 | 鎯呮劅鎰熺煡鐨勮緭鍑哄眰 |
+| **Batch 1（基础设施）** | OPT16, OPT17, OPT18, OPT19, OPT22, OPT23 | 打通数据流，修复架构断层 |
+| **Batch 2（情感内核）** | OPT1, OPT13, OPT20, OPT6, OPT7, OPT14 | 建立连续情感状态机 |
+| **Batch 3（记忆+关系）** | OPT3, OPT15, OPT9, OPT2, OPT11, OPT8, OPT21 | 情感记忆+关系温度 |
+| **Batch 4（输出增强）** | OPT4, OPT5, OPT10, OPT12, OPT24 | 情感感知的输出层 |
 
 ---
 
-## 鍗佷竷銆佺浜旇疆娣卞寲浼樺寲锛氳法妯″潡鎯呮劅鐩插尯
+## 十七、第五轮深化优化：跨模块情感盲区
 
-> **v1.4 鏂板**锛?026-03-05锛夈€傛湰杞熀浜庡 `memory/episodic.py`銆乣bond/bond_dynamics.py`銆乣bond/summarizer.py`銆乣memory/context_compressor.py`銆乣memory/long_term_distiller.py`銆乣scheduler/scheduler.py` 鐨勫畬鏁撮€愯绮捐锛屽彂鐜颁簡鍓嶅洓杞畬鍏ㄦ湭瑙﹀強鐨?**6 涓法妯″潡鎯呮劅鐩插尯**鈥斺€旇繖浜涢棶棰樺垎甯冨湪璁板繂灞傘€佸叧绯诲眰銆佽皟搴﹀眰锛屾槸鎯呮劅淇℃伅鍦?瀛樺偍鈫掕捀棣忊啋璋冨害鈫掕緭鍑?鍏ㄩ摼璺腑鐨勭郴缁熸€х己澶便€?
+> **v1.4 新增**（2026-03-05）。本轮基于对 `memory/episodic.py`、`bond/bond_dynamics.py`、`bond/summarizer.py`、`memory/context_compressor.py`、`memory/long_term_distiller.py`、`scheduler/scheduler.py` 的完整逐行精读，发现了前四轮完全未触及的 **6 个跨模块情感盲区**——这些问题分布在记忆层、关系层、调度层，是情感信息在"存储→蒸馏→调度→输出"全链路中的系统性缺失。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲25锛圥0锛夛細`EpisodicRecord` 鏃犳儏鎰熸爣娉ㄥ瓧娈碘€斺€旀儏鎰熻蹇嗘棤娉曡鎯呮劅妫€绱?
-**鐩爣鏂囦欢锛?* `host_brain/memory/episodic.py`
+### 🔴 深化优化25（P0）：`EpisodicRecord` 无情感标注字段——情感记忆无法被情感检索
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/memory/episodic.py`
 
-`EpisodicRecord` 鏁版嵁绫荤殑瀛楁锛?
+**精读发现：**
+
+`EpisodicRecord` 数据类的字段：
+
 ```python
 @dataclass
 class EpisodicRecord:
@@ -1538,9 +1780,11 @@ class EpisodicRecord:
     embedding_model_id: str
     merged_into: str | None = None
     deleted_at: int | None = None
-    # 鈫?瀹屽叏娌℃湁鎯呮劅鐩稿叧瀛楁锛?```
+    # ↑ 完全没有情感相关字段！
+```
 
-`write_memory()` 鐨勫弬鏁颁篃娌℃湁鎯呮劅瀛楁锛?
+`write_memory()` 的参数也没有情感字段：
+
 ```python
 def write_memory(
     self,
@@ -1552,10 +1796,11 @@ def write_memory(
     decay_profile_id: str = "default",
     visibility: str = "internal",
     ts_ms: int | None = None,
-    # 鈫?娌℃湁 emotion_tag銆乵ood_state銆乥ond_stage 绛夋儏鎰熷瓧娈?) -> MemoryOpResult:
+    # ↑ 没有 emotion_tag、mood_state、bond_stage 等情感字段
+) -> MemoryOpResult:
 ```
 
-Chroma 鍚戦噺搴撶殑 `metadata` 涔熶笉鍚儏鎰熷瓧娈碉細
+Chroma 向量库的 `metadata` 也不含情感字段：
 
 ```python
 self.chroma.upsert(
@@ -1568,13 +1813,17 @@ self.chroma.upsert(
         "visibility": record.visibility,
         "evidence_refs": list(evidence_refs),
         "embedding_model_id": model_id,
-        # 鈫?娌℃湁 emotion_tag锛佹棤娉曟寜鎯呮劅杩囨护妫€绱?    },
+        # ↑ 没有 emotion_tag！无法按情感过滤检索
+    },
 )
 ```
 
-杩欐剰鍛崇潃锛?1. 鎵€鏈夋儏鑺傝蹇嗛兘鏄?鎯呮劅鐩?鐨勨€斺€旀棤娉曠煡閬撹繖鏉¤蹇嗘槸鍦ㄤ粈涔堟儏鎰熺姸鎬佷笅浜х敓鐨?2. `recall()` 鍙兘鍋氳涔夋绱紝鏃犳硶鍋?妫€绱㈡垜浠紑蹇冩椂鐨勮蹇?杩欐牱鐨勬儏鎰熻繃婊?3. 浼樺寲3锛堟儏鎰熻蹇嗘爣娉級鍜屼紭鍖?锛堟儏鎰熸椂闂寸嚎閲嶅缓锛夌殑瀹炵幇鍓嶆彁瀹屽叏缂哄け
+这意味着：
+1. 所有情节记忆都是"情感盲"的——无法知道这条记忆是在什么情感状态下产生的
+2. `recall()` 只能做语义检索，无法做"检索我们开心时的记忆"这样的情感过滤
+3. 优化3（情感记忆标注）和优化9（情感时间线重建）的实现前提完全缺失
 
-**鏂规锛?* 涓?`EpisodicRecord` 澧炲姞鎯呮劅鏍囨敞瀛楁锛屽苟鍦?`write_memory()` 鍜?Chroma metadata 涓紶閫掞細
+**方案：** 为 `EpisodicRecord` 增加情感标注字段，并在 `write_memory()` 和 Chroma metadata 中传递：
 
 ```python
 @dataclass
@@ -1589,10 +1838,11 @@ class EpisodicRecord:
     embedding_model_id: str
     merged_into: str | None = None
     deleted_at: int | None = None
-    # 馃啎 鎯呮劅鏍囨敞瀛楁锛坴1.4 鏂板锛?    emotion_tag: str = "NEUTRAL"        # 璁板繂浜х敓鏃剁殑鎯呮劅鏍囩
-    mood_state: str = "steady"          # 璁板繂浜х敓鏃剁殑 AI mood_state
-    bond_stage: str = "STRANGER"        # 璁板繂浜х敓鏃剁殑 Bond 闃舵
-    emotional_intensity: float = 0.0    # 鎯呮劅寮哄害锛?.0~1.0锛岀敤浜庤“鍑忔潈閲嶏級
+    # 🆕 情感标注字段（v1.4 新增）
+    emotion_tag: str = "NEUTRAL"        # 记忆产生时的情感标签
+    mood_state: str = "steady"          # 记忆产生时的 AI mood_state
+    bond_stage: str = "STRANGER"        # 记忆产生时的 Bond 阶段
+    emotional_intensity: float = 0.0    # 情感强度（0.0~1.0，用于衰减权重）
 
 def write_memory(
     self,
@@ -1604,14 +1854,14 @@ def write_memory(
     decay_profile_id: str = "default",
     visibility: str = "internal",
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅鏍囨敞鍙傛暟
+    # 🆕 情感标注参数
     emotion_tag: str = "NEUTRAL",
     mood_state: str = "steady",
     bond_stage: str = "STRANGER",
     emotional_intensity: float = 0.0,
 ) -> MemoryOpResult:
     # ...
-    # Chroma metadata 澧炲姞鎯呮劅瀛楁
+    # Chroma metadata 增加情感字段
     self.chroma.upsert(
         memory_id=memory_id,
         text=normalized_text,
@@ -1622,15 +1872,15 @@ def write_memory(
             "visibility": record.visibility,
             "evidence_refs": list(evidence_refs),
             "embedding_model_id": model_id,
-            "emotion_tag": emotion_tag,           # 馃啎
-            "mood_state": mood_state,             # 馃啎
-            "bond_stage": bond_stage,             # 馃啎
-            "emotional_intensity": emotional_intensity,  # 馃啎
+            "emotion_tag": emotion_tag,           # 🆕
+            "mood_state": mood_state,             # 🆕
+            "bond_stage": bond_stage,             # 🆕
+            "emotional_intensity": emotional_intensity,  # 🆕
         },
     )
 ```
 
-**鏂板鎯呮劅妫€绱㈡帴鍙ｏ細**
+**新增情感检索接口：**
 
 ```python
 def recall_by_emotion(
@@ -1641,10 +1891,11 @@ def recall_by_emotion(
     bond_stage: str | None = None,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """鎸夋儏鎰熸爣绛捐繃婊ょ殑鎯呮劅璁板繂妫€绱€?""
+    """按情感标签过滤的情感记忆检索。"""
     embedding, _ = embed_text(query_text)
     results = self.chroma.search(query_embedding=embedding, top_k=top_k * 3)
-    # 鎸夋儏鎰熻繃婊?    filtered = [
+    # 按情感过滤
+    filtered = [
         r for r in results
         if (emotion_tag is None or r.get("metadata", {}).get("emotion_tag") == emotion_tag)
         and (bond_stage is None or r.get("metadata", {}).get("bond_stage") == bond_stage)
@@ -1652,15 +1903,17 @@ def recall_by_emotion(
     return filtered[:top_k]
 ```
 
-**棰勬湡鏁堟灉锛?* 鎯呰妭璁板繂浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屾敮鎸?妫€绱㈡垜浠紑蹇冩椂鐨勮蹇?銆?妫€绱㈡寶鍙嬮樁娈电殑璁板繂"绛夋儏鎰熺淮搴︾殑妫€绱紝鏄紭鍖?鍜屼紭鍖?鐨勫繀瑕佸熀纭€璁炬柦銆?
+**预期效果：** 情节记忆从"情感盲"变为"情感感知"，支持"检索我们开心时的记忆"、"检索挚友阶段的记忆"等情感维度的检索，是优化3和优化9的必要基础设施。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲26锛圥0锛夛細`BondDynamicsWriter.apply_update()` 鐨?`payload` 鏃犳儏鎰熷瓧娈碘€斺€擝ond 浜嬩欢鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/bond/bond_dynamics.py`
+### 🟠 深化优化26（P0）：`BondDynamicsWriter.apply_update()` 的 `payload` 无情感字段——Bond 事件情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/bond/bond_dynamics.py`
 
-`apply_update()` 鐨?`payload` 鍙傛暟鏄?`dict[str, Any] | None`锛屽畬鍏ㄨ嚜鐢辨牸寮忥紝娌℃湁浠讳綍鎯呮劅瀛楁鐨勭害瀹氾細
+**精读发现：**
+
+`apply_update()` 的 `payload` 参数是 `dict[str, Any] | None`，完全自由格式，没有任何情感字段的约定：
 
 ```python
 def apply_update(
@@ -1674,14 +1927,15 @@ def apply_update(
     topic_id: str,
     capability_hint: str,
     evidence_refs: list[str],
-    payload: dict[str, Any] | None = None,   # 鈫?鑷敱鏍煎紡锛屾棤鎯呮劅绾﹀畾
+    payload: dict[str, Any] | None = None,   # ← 自由格式，无情感约定
     update_kind: str = "INTERACTION",
     event_id: str | None = None,
     ts_ms: int | None = None,
 ) -> BondUpdateResult:
 ```
 
-鍐欏叆 Neo4j 鐨勪簨浠朵篃涓嶅惈鎯呮劅瀛楁锛?
+写入 Neo4j 的事件也不含情感字段：
+
 ```python
 written = self.neo4j_client.write_bond_event(
     writer_id=BOND_WRITER_ID,
@@ -1691,14 +1945,17 @@ written = self.neo4j_client.write_bond_event(
     topic_id=str(topic_id),
     capability_hint=str(capability_hint),
     evidence_refs=refs,
-    payload=dict(payload or {}),   # 鈫?payload 鍐呭瀹屽叏涓嶇‘瀹?    ts_ms=now_value,
+    payload=dict(payload or {}),   # ← payload 内容完全不确定
+    ts_ms=now_value,
 )
 ```
 
-杩欐剰鍛崇潃锛?1. Bond 浜嬩欢鍥捐氨涓病鏈夋儏鎰熺淮搴︹€斺€旀棤娉曠煡閬?杩欐浜掑姩鏄湪浠€涔堟儏鎰熺姸鎬佷笅鍙戠敓鐨?
-2. `BondStageEngine.apply_event()` 鐨勭Н鍒嗚绠椾笉鎰熺煡鎯呮劅鈥斺€擿EXCITED` 鐘舵€佷笅鐨勪簰鍔ㄥ拰 `SAD` 鐘舵€佷笅鐨勪簰鍔ㄥ緱鍒嗙浉鍚?3. 鏃犳硶鍋?鎯呮劅鍔犳潈鐨?Bond 绉垎"鈥斺€旀繁搴︽儏鎰熶簰鍔ㄥ簲璇ユ瘮鏅€氫簰鍔ㄨ础鐚洿澶?Bond 绉垎
+这意味着：
+1. Bond 事件图谱中没有情感维度——无法知道"这次互动是在什么情感状态下发生的"
+2. `BondStageEngine.apply_event()` 的积分计算不感知情感——`EXCITED` 状态下的互动和 `SAD` 状态下的互动得分相同
+3. 无法做"情感加权的 Bond 积分"——深度情感互动应该比普通互动贡献更多 Bond 积分
 
-**鏂规锛?* 涓?`apply_update()` 澧炲姞鎯呮劅鍙傛暟锛屽苟鍦?`BondStageEngine.apply_event()` 涓敮鎸佹儏鎰熷姞鏉冿細
+**方案：** 为 `apply_update()` 增加情感参数，并在 `BondStageEngine.apply_event()` 中支持情感加权：
 
 ```python
 def apply_update(
@@ -1716,13 +1973,13 @@ def apply_update(
     update_kind: str = "INTERACTION",
     event_id: str | None = None,
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅鍙傛暟
+    # 🆕 情感参数
     emotion_tag: str = "NEUTRAL",
     mood_state: str = "steady",
     emotional_intensity: float = 0.0,
 ) -> BondUpdateResult:
     # ...
-    # 灏嗘儏鎰熷瓧娈垫敞鍏?payload
+    # 将情感字段注入 payload
     enriched_payload = dict(payload or {})
     enriched_payload.update({
         "emotion_tag": emotion_tag,
@@ -1730,39 +1987,44 @@ def apply_update(
         "emotional_intensity": round(float(emotional_intensity), 4),
     })
     # ...
-    # BondStageEngine 浼犻€掓儏鎰熷己搴︼紙鐢ㄤ簬鍔犳潈绉垎锛?    if self._stage_engine is not None:
+    # BondStageEngine 传递情感强度（用于加权积分）
+    if self._stage_engine is not None:
         stage_transition = self._stage_engine.apply_event(
             user_id=str(user_id),
             update_kind=str(update_kind),
             evidence_refs=refs,
             request_id=request_id,
             ts_ms=now_value,
-            emotional_intensity=emotional_intensity,  # 馃啎 鎯呮劅鍔犳潈
+            emotional_intensity=emotional_intensity,  # 🆕 情感加权
         )
 ```
 
-**鎯呮劅鍔犳潈绉垎瑙勫垯锛堝湪 `BondStageEngine` 涓疄鐜帮級锛?*
+**情感加权积分规则（在 `BondStageEngine` 中实现）：**
 
 ```python
-# 鎯呮劅寮哄害鍔犳潈绯绘暟
+# 情感强度加权系数
 EMOTION_INTENSITY_MULTIPLIER = {
-    "EXCITED":  1.5,   # 鍏村鐘舵€佺殑浜掑姩璐＄尞 1.5x 绉垎
-    "HAPPY":    1.3,   # 寮€蹇冪姸鎬佽础鐚?1.3x
-    "NEUTRAL":  1.0,   # 涓€х姸鎬佽础鐚?1.0x锛堝熀鍑嗭級
-    "CALM":     0.9,   # 骞抽潤鐘舵€佽础鐚?0.9x
-    "SAD":      0.7,   # 鎮蹭激鐘舵€佽础鐚?0.7x锛堟儏鎰熶綆钀芥椂浜掑姩璐ㄩ噺涓嬮檷锛?    "ANGRY":    0.5,   # 鎰ゆ€掔姸鎬佽础鐚?0.5x锛堣礋闈㈡儏鎰熷鍏崇郴鏈夋崯鑰楋級
+    "EXCITED":  1.5,   # 兴奋状态的互动贡献 1.5x 积分
+    "HAPPY":    1.3,   # 开心状态贡献 1.3x
+    "NEUTRAL":  1.0,   # 中性状态贡献 1.0x（基准）
+    "CALM":     0.9,   # 平静状态贡献 0.9x
+    "SAD":      0.7,   # 悲伤状态贡献 0.7x（情感低落时互动质量下降）
+    "ANGRY":    0.5,   # 愤怒状态贡献 0.5x（负面情感对关系有损耗）
 }
 ```
 
-**棰勬湡鏁堟灉锛?* Bond 绉垎浠?浜掑姩娆℃暟璁℃暟"鍗囩骇涓?鎯呮劅鍔犳潈鐨勫叧绯昏川閲忚瘎浼?锛屾繁搴︽儏鎰熶簰鍔紙`EXCITED`/`HAPPY`锛夋瘮鏅€氫簰鍔ㄨ础鐚洿澶?Bond 绉垎锛屽叧绯诲彂灞曟洿鐪熷疄銆?
+**预期效果：** Bond 积分从"互动次数计数"升级为"情感加权的关系质量评估"，深度情感互动（`EXCITED`/`HAPPY`）比普通互动贡献更多 Bond 积分，关系发展更真实。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲27锛圥1锛夛細`bond/summarizer.py` 鐨?`derive_bond_summary()` 浠?event 璇诲彇 `stage`/`trend`鈥斺€斾絾 Bond 浜嬩欢涓嶅惈杩欎袱涓瓧娈?
-**鐩爣鏂囦欢锛?* `host_brain/bond/summarizer.py`
+### 🟡 深化优化27（P1）：`bond/summarizer.py` 的 `derive_bond_summary()` 从 event 读取 `stage`/`trend`——但 Bond 事件不含这两个字段
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/bond/summarizer.py`
 
-`derive_bond_summary()` 浠?`event` 瀛楀吀涓鍙?`stage` 鍜?`trend`锛?
+**精读发现：**
+
+`derive_bond_summary()` 从 `event` 字典中读取 `stage` 和 `trend`：
+
 ```python
 def derive_bond_summary(event: dict[str, Any] | None) -> dict[str, Any]:
     return {
@@ -1777,7 +2039,8 @@ def derive_bond_summary(event: dict[str, Any] | None) -> dict[str, Any]:
     }
 ```
 
-浣?`BondDynamicsWriter.apply_update()` 鍐欏叆 Neo4j 鐨勪簨浠剁粨鏋勬槸锛?
+但 `BondDynamicsWriter.apply_update()` 写入 Neo4j 的事件结构是：
+
 ```python
 event = {
     "request_id": ...,
@@ -1787,45 +2050,51 @@ event = {
     "event_id": ...,
     "user_id": ...,
     "topic_id": ...,
-    "capability_hint": ...,   # 鈫?鏈?capability_hint
+    "capability_hint": ...,   # ← 有 capability_hint
     "update_kind": ...,
     "evidence_refs": ...,
     "payload": ...,
     "neo4j_event": ...,
-    "stage": "S_BOND_UPDATE",  # 鈫?杩欐槸娴佹按绾块樁娈靛悕锛屼笉鏄?Bond 闃舵锛?    "status": ...,
+    "stage": "S_BOND_UPDATE",  # ← 这是流水线阶段名，不是 Bond 阶段！
+    "status": ...,
     "reason_code": ...,
     "ts_ms": ...,
     "stage_transition": {
         "from_stage": ...,
-        "to_stage": ...,       # 鈫?Bond 闃舵鍦ㄨ繖閲岋紝涓嶅湪椤跺眰锛?        "transition_status": ...,
+        "to_stage": ...,       # ← Bond 阶段在这里，不在顶层！
+        "transition_status": ...,
         "score_delta": ...,
         "total_score": ...,
     },
 }
 ```
 
-**闂锛?*
-1. `event["stage"]` 鏄?`"S_BOND_UPDATE"`锛堟祦姘寸嚎闃舵鍚嶏級锛屼笉鏄?`"FRIEND"` 杩欐牱鐨?Bond 闃舵
-2. `event["trend"]` 鏍规湰涓嶅瓨鍦紝`derive_bond_summary()` 浼氳繑鍥?`DEFAULT_TREND = "STABLE"`
-3. 鐪熸鐨?Bond 闃舵鍦?`event["stage_transition"]["to_stage"]` 閲岋紝浣?`derive_bond_summary()` 涓嶈杩欎釜瀛楁
+**问题：**
+1. `event["stage"]` 是 `"S_BOND_UPDATE"`（流水线阶段名），不是 `"FRIEND"` 这样的 Bond 阶段
+2. `event["trend"]` 根本不存在，`derive_bond_summary()` 会返回 `DEFAULT_TREND = "STABLE"`
+3. 真正的 Bond 阶段在 `event["stage_transition"]["to_stage"]` 里，但 `derive_bond_summary()` 不读这个字段
 
-杩欐剰鍛崇潃锛?*`derive_bond_summary()` 姘歌繙杩斿洖閿欒鐨?`stage`锛坄"S_BOND_UPDATE"`锛夊拰榛樿鐨?`trend`锛坄"STABLE"`锛?*锛屾敞鍏?LLM 鐨?Bond 淇℃伅瀹屽叏澶辩湡銆?
-**鏂规锛?* 淇 `derive_bond_summary()` 鐨勫瓧娈佃鍙栭€昏緫锛?
+这意味着：**`derive_bond_summary()` 永远返回错误的 `stage`（`"S_BOND_UPDATE"`）和默认的 `trend`（`"STABLE"`）**，注入 LLM 的 Bond 信息完全失真。
+
+**方案：** 修复 `derive_bond_summary()` 的字段读取逻辑：
+
 ```python
 def derive_bond_summary(event: dict[str, Any] | None) -> dict[str, Any]:
-    """浠?Bond 浜嬩欢璁板綍鏋勫缓 context-pack-safe 鐨?Bond Summary銆?
-    淇锛欱ond 闃舵鍦?stage_transition.to_stage锛屼笉鍦ㄩ《灞?stage 瀛楁銆?    """
+    """从 Bond 事件记录构建 context-pack-safe 的 Bond Summary。
+
+    修复：Bond 阶段在 stage_transition.to_stage，不在顶层 stage 字段。
+    """
     if not isinstance(event, dict):
         event = {}
 
-    # 馃啎 淇锛氫粠 stage_transition 璇诲彇鐪熷疄鐨?Bond 闃舵
+    # 🆕 修复：从 stage_transition 读取真实的 Bond 阶段
     stage_transition = event.get("stage_transition") or {}
     bond_stage = (
         _as_text_bucket(stage_transition.get("to_stage"), default="")
         or _as_text_bucket(event.get("bond_stage"), default=DEFAULT_STAGE)
     )
 
-    # 馃啎 淇锛氫粠 stage_transition 鎺ㄦ柇瓒嬪娍
+    # 🆕 修复：从 stage_transition 推断趋势
     transition_status = str(stage_transition.get("transition_status") or "").upper()
     score_delta = int(stage_transition.get("score_delta") or 0)
     if transition_status == "PROMOTED":
@@ -1851,24 +2120,27 @@ def derive_bond_summary(event: dict[str, Any] | None) -> dict[str, Any]:
     }
 ```
 
-**棰勬湡鏁堟灉锛?* `derive_bond_summary()` 缁堜簬鑳借繑鍥炴纭殑 Bond 闃舵鍜岃秼鍔匡紝娉ㄥ叆 LLM 鐨?Bond 淇℃伅涓嶅啀澶辩湡銆傝繖鏄暣涓?Bond 淇℃伅閾捐矾鐨勫叧閿慨澶嶃€?
+**预期效果：** `derive_bond_summary()` 终于能返回正确的 Bond 阶段和趋势，注入 LLM 的 Bond 信息不再失真。这是整个 Bond 信息链路的关键修复。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲28锛圥1锛夛細`ContextCompressor._pre_compress_save()` 鍙繚瀛?assistant 杞鈥斺€旂敤鎴锋儏鎰熶俊鎭涓㈠純
+### 🟢 深化优化28（P1）：`ContextCompressor._pre_compress_save()` 只保存 assistant 轮次——用户情感信息被丢弃
 
-**鐩爣鏂囦欢锛?* `host_brain/memory/context_compressor.py`
+**目标文件：** `host_brain/memory/context_compressor.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`_pre_compress_save()` 鐨勮繃婊ら€昏緫锛?
+`_pre_compress_save()` 的过滤逻辑：
+
 ```python
 for idx, turn in enumerate(turns):
     role = str(turn.get("role") or "user")
     content = str(turn.get("content") or "").strip()
     if not content:
         continue
-    # 浠呬繚瀛?assistant 鍥炲锛堝惈鏈夊疄璐ㄦ€т俊鎭殑杞锛?    if role != "assistant":
-        continue   # 鈫?鐢ㄦ埛杞琚畬鍏ㄨ烦杩囷紒
+    # 仅保存 assistant 回复（含有实质性信息的轮次）
+    if role != "assistant":
+        continue   # ← 用户轮次被完全跳过！
     evidence_ref = f"compress://pre_save/{session_id or 'unknown'}/turn_{idx:03d}"
     try:
         self._episodic_writer(content, [evidence_ref])
@@ -1877,29 +2149,35 @@ for idx, turn in enumerate(turns):
         pass
 ```
 
-**闂锛?*
-1. 鐢ㄦ埛鐨勬儏鎰熻〃杈撅紙"鎴戜粖澶╁緢闅捐繃"銆?杩欒鎴戝緢寮€蹇?锛夎瀹屽叏涓㈠純锛屽彧淇濆瓨 AI 鐨勫洖澶?2. 鐢ㄦ埛鐨勯噸瑕侀檲杩帮紙"鎴戞槑澶╄鍘婚潰璇?銆?鎴戝濡堢敓鐥呬簡"锛変篃琚涪寮?3. 鍘嬬缉鍓嶄繚瀛樼殑璁板繂鏄?鍗曞０閬?鐨勨€斺€斿彧鏈?AI 鐨勫０闊筹紝娌℃湁鐢ㄦ埛鐨勫０闊?4. 杩欏鑷撮暱鏈熻蹇嗚捀棣忥紙`LongTermMemoryDistiller`锛夌殑鍘熸潗鏂欎弗閲嶅亸鏂?
-**鏂规锛?* 鏀逛负淇濆瓨"楂樹环鍊艰疆娆?锛屽寘鎷敤鎴风殑鎯呮劅琛ㄨ揪鍜岄噸瑕侀檲杩帮細
+**问题：**
+1. 用户的情感表达（"我今天很难过"、"这让我很开心"）被完全丢弃，只保存 AI 的回复
+2. 用户的重要陈述（"我明天要去面试"、"我妈妈生病了"）也被丢弃
+3. 压缩前保存的记忆是"单声道"的——只有 AI 的声音，没有用户的声音
+4. 这导致长期记忆蒸馏（`LongTermMemoryDistiller`）的原材料严重偏斜
+
+**方案：** 改为保存"高价值轮次"，包括用户的情感表达和重要陈述：
 
 ```python
-# 楂樹环鍊艰疆娆″垽鏂鍒?_EMOTION_KEYWORDS = frozenset({
-    "闅捐繃", "寮€蹇?, "楂樺叴", "浼ゅ績", "鐢熸皵", "瀹虫€?, "鎷呭績", "鍏村",
-    "鎰熻阿", "鎶辨瓑", "瀵逛笉璧?, "鍠滄", "璁ㄥ帉", "鐖?, "鎭?,
+# 高价值轮次判断规则
+_EMOTION_KEYWORDS = frozenset({
+    "难过", "开心", "高兴", "伤心", "生气", "害怕", "担心", "兴奋",
+    "感谢", "抱歉", "对不起", "喜欢", "讨厌", "爱", "恨",
     "sad", "happy", "angry", "scared", "excited", "love", "hate",
 })
 
 def _is_high_value_turn(turn: dict[str, Any]) -> bool:
-    """鍒ゆ柇鏄惁涓洪珮浠峰€艰疆娆★紙鍊煎緱鍦ㄥ帇缂╁墠淇濆瓨锛夈€?""
+    """判断是否为高价值轮次（值得在压缩前保存）。"""
     role = str(turn.get("role") or "user")
     content = str(turn.get("content") or "").strip()
     if not content:
         return False
-    # assistant 杞锛氬缁堜繚瀛橈紙鍘熸湁閫昏緫锛?    if role == "assistant":
+    # assistant 轮次：始终保存（原有逻辑）
+    if role == "assistant":
         return True
-    # user 杞锛氬彧淇濆瓨鍚儏鎰熷叧閿瘝鎴栬緝闀跨殑閲嶈闄堣堪
+    # user 轮次：只保存含情感关键词或较长的重要陈述
     if any(kw in content for kw in _EMOTION_KEYWORDS):
         return True
-    if len(content) > 50:  # 瓒呰繃50瀛楃殑鐢ㄦ埛闄堣堪瑙嗕负閲嶈
+    if len(content) > 50:  # 超过50字的用户陈述视为重要
         return True
     return False
 
@@ -1912,7 +2190,7 @@ def _pre_compress_save(
 ) -> int:
     # ...
     for idx, turn in enumerate(turns):
-        if not _is_high_value_turn(turn):   # 馃啎 鏇挎崲鍘熸湁鐨?role != "assistant" 杩囨护
+        if not _is_high_value_turn(turn):   # 🆕 替换原有的 role != "assistant" 过滤
             continue
         role = str(turn.get("role") or "user")
         content = str(turn.get("content") or "").strip()
@@ -1924,65 +2202,70 @@ def _pre_compress_save(
             pass
 ```
 
-**棰勬湡鏁堟灉锛?* 鍘嬬缉鍓嶄繚瀛樼殑璁板繂浠?鍙湁 AI 澹伴煶"鍙樹负"鍙屽０閬?锛岀敤鎴风殑鎯呮劅琛ㄨ揪鍜岄噸瑕侀檲杩颁篃琚繚瀛橈紝闀挎湡璁板繂钂搁鐨勫師鏉愭枡鏇村姞瀹屾暣鍜岀湡瀹炪€?
+**预期效果：** 压缩前保存的记忆从"只有 AI 声音"变为"双声道"，用户的情感表达和重要陈述也被保存，长期记忆蒸馏的原材料更加完整和真实。
+
 ---
 
-### 馃數 娣卞寲浼樺寲29锛圥1锛夛細`LongTermMemoryDistiller` 鐨勮捀棣忎富棰樺垪琛ㄤ笉鍚?鎯呮劅鍏崇郴"缁村害
+### 🔵 深化优化29（P1）：`LongTermMemoryDistiller` 的蒸馏主题列表不含"情感关系"维度
 
-**鐩爣鏂囦欢锛?* `host_brain/memory/long_term_distiller.py`
+**目标文件：** `host_brain/memory/long_term_distiller.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`DEFAULT_DISTILL_TOPICS` 鐨勫畾涔夛細
+`DEFAULT_DISTILL_TOPICS` 的定义：
 
 ```python
 DEFAULT_DISTILL_TOPICS: list[str] = [
-    "鐢ㄦ埛鏃ュ父涔犳儻涓庡亸濂?,
-    "閲嶈浜嬩欢涓庨噷绋嬬",
-    "鎯呮劅鐘舵€佷笌蹇冪悊鍙樺寲",   # 鈫?鏈夋儏鎰燂紝浣嗗お瀹芥硾
-    "鐢ㄦ埛鐩爣涓庤鍒?,
-    "鍏崇郴涓庣ぞ浜や簰鍔?,
+    "用户日常习惯与偏好",
+    "重要事件与里程碑",
+    "情感状态与心理变化",   # ← 有情感，但太宽泛
+    "用户目标与计划",
+    "关系与社交互动",
 ]
 ```
 
-**闂锛?*
-1. `"鎯呮劅鐘舵€佷笌蹇冪悊鍙樺寲"` 澶娉涳紝鏃犳硶绮剧‘鍙洖鐗瑰畾鎯呮劅鐨勮蹇?2. 娌℃湁"涓?AI 鐨勬儏鎰熶簰鍔?缁村害鈥斺€旀棤娉曡捀棣忓嚭"鐢ㄦ埛鍜?AI 涔嬮棿鐨勬儏鎰熷叧绯诲彶"
-3. 娌℃湁"鎯呮劅杞姌鐐?缁村害鈥斺€旀棤娉曡瘑鍒?鐢ㄦ埛鎯呮劅鍙戠敓閲嶅ぇ鍙樺寲鐨勬椂鍒?
-4. 娌℃湁"鐢ㄦ埛鐨勬儏鎰熼渶姹?缁村害鈥斺€旀棤娉曡捀棣忓嚭"鐢ㄦ埛鍦ㄤ粈涔堟儏鍐典笅闇€瑕佹儏鎰熸敮鎸?
-5. 钂搁缁撴灉鍐欏叆鐨?`DISTILL_TARGET_DOC_ID = "wc-distilled-long-term-memory"` 鏄崟涓€鏂囨。锛屾墍鏈変富棰樻贩鍦ㄤ竴璧凤紝鏃犳硶鎸夋儏鎰熺淮搴︽绱?
-**鏂规锛?* 鎵╁睍钂搁涓婚鍒楄〃锛屽鍔犳儏鎰熷叧绯荤淮搴︼紝骞朵负涓嶅悓缁村害浣跨敤涓嶅悓鐨勭洰鏍囨枃妗ｏ細
+**问题：**
+1. `"情感状态与心理变化"` 太宽泛，无法精确召回特定情感的记忆
+2. 没有"与 AI 的情感互动"维度——无法蒸馏出"用户和 AI 之间的情感关系史"
+3. 没有"情感转折点"维度——无法识别"用户情感发生重大变化的时刻"
+4. 没有"用户的情感需求"维度——无法蒸馏出"用户在什么情况下需要情感支持"
+5. 蒸馏结果写入的 `DISTILL_TARGET_DOC_ID = "wc-distilled-long-term-memory"` 是单一文档，所有主题混在一起，无法按情感维度检索
+
+**方案：** 扩展蒸馏主题列表，增加情感关系维度，并为不同维度使用不同的目标文档：
 
 ```python
-# 馃啎 鎯呮劅鍏崇郴涓撻」钂搁涓婚锛坴1.4 鏂板锛?EMOTION_DISTILL_TOPICS: list[str] = [
-    "鐢ㄦ埛涓嶢I涔嬮棿鐨勬儏鎰熶簰鍔ㄤ笌鍏崇郴鍙戝睍",
-    "鐢ㄦ埛鎯呮劅杞姌鐐逛笌閲嶈鎯呮劅鏃跺埢",
-    "鐢ㄦ埛鐨勬儏鎰熼渶姹備笌鎯呮劅鏀寔妯″紡",
-    "鐢ㄦ埛琛ㄨ揪杩囩殑鍠滃ソ銆佸帉鎭朵笌鎯呮劅鍋忓ソ",
-    "鐢ㄦ埛鍦ㄥ洶闅炬椂鏈熺殑鎯呮劅鐘舵€佷笌搴斿鏂瑰紡",
+# 🆕 情感关系专项蒸馏主题（v1.4 新增）
+EMOTION_DISTILL_TOPICS: list[str] = [
+    "用户与AI之间的情感互动与关系发展",
+    "用户情感转折点与重要情感时刻",
+    "用户的情感需求与情感支持模式",
+    "用户表达过的喜好、厌恶与情感偏好",
+    "用户在困难时期的情感状态与应对方式",
 ]
 
-# 馃啎 鎯呮劅钂搁涓撶敤鐩爣鏂囨。
+# 🆕 情感蒸馏专用目标文档
 EMOTION_DISTILL_TARGET_DOC_ID = "wc-distilled-emotion-relationship"
 
 DEFAULT_DISTILL_TOPICS: list[str] = [
-    "鐢ㄦ埛鏃ュ父涔犳儻涓庡亸濂?,
-    "閲嶈浜嬩欢涓庨噷绋嬬",
-    "鐢ㄦ埛鎯呮劅鐘舵€佷笌蹇冪悊鍙樺寲",
-    "鐢ㄦ埛鐩爣涓庤鍒?,
-    "鍏崇郴涓庣ぞ浜や簰鍔?,
-    # 馃啎 鎯呮劅鍏崇郴缁村害
-    "鐢ㄦ埛涓嶢I涔嬮棿鐨勬儏鎰熶簰鍔ㄤ笌鍏崇郴鍙戝睍",
-    "鐢ㄦ埛鎯呮劅杞姌鐐逛笌閲嶈鎯呮劅鏃跺埢",
-    "鐢ㄦ埛鐨勬儏鎰熼渶姹備笌鎯呮劅鏀寔妯″紡",
+    "用户日常习惯与偏好",
+    "重要事件与里程碑",
+    "用户情感状态与心理变化",
+    "用户目标与计划",
+    "关系与社交互动",
+    # 🆕 情感关系维度
+    "用户与AI之间的情感互动与关系发展",
+    "用户情感转折点与重要情感时刻",
+    "用户的情感需求与情感支持模式",
 ]
 ```
 
-**鍚屾椂淇 `_build_proposal_body()` 鐨勭洰鏍囨枃妗ｈ矾鐢憋細**
+**同时修复 `_build_proposal_body()` 的目标文档路由：**
 
 ```python
 def _submit_canon_proposal(self, *, semantic_id, topic, source_count, request_id, ts_ms):
-    # 馃啎 鎯呮劅涓婚璺敱鍒颁笓鐢ㄦ枃妗?    is_emotion_topic = any(
-        kw in topic for kw in ["鎯呮劅", "蹇冪悊", "鍏崇郴鍙戝睍", "鎯呮劅闇€姹?]
+    # 🆕 情感主题路由到专用文档
+    is_emotion_topic = any(
+        kw in topic for kw in ["情感", "心理", "关系发展", "情感需求"]
     )
     target_doc = (
         EMOTION_DISTILL_TARGET_DOC_ID if is_emotion_topic
@@ -1991,15 +2274,17 @@ def _submit_canon_proposal(self, *, semantic_id, topic, source_count, request_id
     # ...
 ```
 
-**棰勬湡鏁堟灉锛?* 闀挎湡璁板繂钂搁鑳藉涓撻棬鎻愮偧"鎯呮劅鍏崇郴鍙?锛岀敓鎴愮殑 Canon 鎻愭鍖呭惈鐢ㄦ埛涓?AI 涔嬮棿鐨勬儏鎰熷彂灞曡剦缁滐紝涓?LLM 鎻愪緵鏇翠赴瀵岀殑鎯呮劅鑳屾櫙銆?
+**预期效果：** 长期记忆蒸馏能够专门提炼"情感关系史"，生成的 Canon 提案包含用户与 AI 之间的情感发展脉络，为 LLM 提供更丰富的情感背景。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲30锛圥2锛夛細`NatsumeScheduler` 鐨勫績璺虫娴?Prompt 涓嶆劅鐭ユ儏鎰熺姸鎬佲€斺€斿績璺虫椂 AI 鎯呮劅琚噸缃?
-**鐩爣鏂囦欢锛?* `host_brain/scheduler/scheduler.py`
+### 🟣 深化优化30（P2）：`NatsumeScheduler` 的心跳检测 Prompt 不感知情感状态——心跳时 AI 情感被重置
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/scheduler/scheduler.py`
 
-`_run_agent_health_check()` 鐨勫疄鐜帮細
+**精读发现：**
+
+`_run_agent_health_check()` 的实现：
 
 ```python
 def _run_agent_health_check(self) -> dict[str, Any]:
@@ -2016,13 +2301,15 @@ def _run_agent_health_check(self) -> dict[str, Any]:
     # ...
 ```
 
-`DEFAULT_HEARTBEAT_PROMPT` 鏄浐瀹氭枃鏈紙鏉ヨ嚜 `health_check_prompt.py`锛夛紝涓嶅寘鍚綋鍓嶆儏鎰熺姸鎬併€?
-**闂锛?*
-1. 蹇冭烦妫€娴嬫瘡 30 鍒嗛挓瑙﹀彂涓€娆★紝浣跨敤鍥哄畾 Prompt锛屼笉鎰熺煡褰撳墠 `mood_state`
-2. 濡傛灉 AI 褰撳墠澶勪簬 `tired` 鐘舵€侊紝蹇冭烦 Prompt 浠嶇劧鏄?姝ｅ父"鐨勶紝LLM 浼氱敓鎴?姝ｅ父"鐨勫洖澶嶏紝瀵艰嚧鎯呮劅鐘舵€佽闅愬紡閲嶇疆
-3. 蹇冭烦妫€娴嬬殑 `llm_caller` 璋冪敤浼氫骇鐢熶竴娆?LLM 鎺ㄧ悊锛屼絾杩欐鎺ㄧ悊鐨勭粨鏋滀笉浼氭洿鏂?`HardState`锛屾儏鎰熺姸鎬佸湪蹇冭烦鏈熼棿澶勪簬"鎮┖"鐘舵€?4. 蹇冭烦 OK 鏃?闈欓粯涓㈠純"锛堜笉鍐欏璁★級锛屼絾濡傛灉蹇冭烦鏈熼棿鎯呮劅鐘舵€佸彂鐢熶簡鍙樺寲锛岃繖涓彉鍖栦篃琚潤榛樹涪寮冧簡
+`DEFAULT_HEARTBEAT_PROMPT` 是固定文本（来自 `health_check_prompt.py`），不包含当前情感状态。
 
-**鏂规锛?* 涓哄績璺虫娴嬪鍔犳儏鎰熺姸鎬佹劅鐭ワ紝骞跺湪蹇冭烦 OK 鏃惰褰曟儏鎰熷揩鐓э細
+**问题：**
+1. 心跳检测每 30 分钟触发一次，使用固定 Prompt，不感知当前 `mood_state`
+2. 如果 AI 当前处于 `tired` 状态，心跳 Prompt 仍然是"正常"的，LLM 会生成"正常"的回复，导致情感状态被隐式重置
+3. 心跳检测的 `llm_caller` 调用会产生一次 LLM 推理，但这次推理的结果不会更新 `HardState`，情感状态在心跳期间处于"悬空"状态
+4. 心跳 OK 时"静默丢弃"（不写审计），但如果心跳期间情感状态发生了变化，这个变化也被静默丢弃了
+
+**方案：** 为心跳检测增加情感状态感知，并在心跳 OK 时记录情感快照：
 
 ```python
 def register_agent_health_check(
@@ -2032,9 +2319,11 @@ def register_agent_health_check(
     heartbeat_prompt: str | None = None,
     max_response_chars: int = MAX_RESPONSE_CHARS,
     llm_caller: Any | None = None,
-    get_mood_state: Callable[[], str] | None = None,   # 馃啎 鎯呮劅鐘舵€佽幏鍙栧嚱鏁?) -> None:
+    get_mood_state: Callable[[], str] | None = None,   # 🆕 情感状态获取函数
+) -> None:
     # ...
-    self._heartbeat_get_mood_state = get_mood_state  # 馃啎 淇濆瓨鎯呮劅鐘舵€佽幏鍙栧嚱鏁?
+    self._heartbeat_get_mood_state = get_mood_state  # 🆕 保存情感状态获取函数
+
 def _run_agent_health_check(self) -> dict[str, Any]:
     prompt = getattr(self, "_heartbeat_prompt", DEFAULT_HEARTBEAT_PROMPT)
     max_chars = getattr(self, "_heartbeat_max_chars", MAX_RESPONSE_CHARS)
@@ -2042,14 +2331,14 @@ def _run_agent_health_check(self) -> dict[str, Any]:
     get_mood_state = getattr(self, "_heartbeat_get_mood_state", None)
     ts = now_ms()
 
-    # 馃啎 鑾峰彇褰撳墠鎯呮劅鐘舵€侊紝娉ㄥ叆蹇冭烦 Prompt
+    # 🆕 获取当前情感状态，注入心跳 Prompt
     current_mood = get_mood_state() if get_mood_state else "steady"
     mood_aware_prompt = _build_mood_aware_heartbeat_prompt(prompt, current_mood)
 
     raw_response: str
     if llm_caller is not None:
         try:
-            raw_response = str(llm_caller(mood_aware_prompt))  # 馃啎 浣跨敤鎯呮劅鎰熺煡 Prompt
+            raw_response = str(llm_caller(mood_aware_prompt))  # 🆕 使用情感感知 Prompt
         except Exception as exc:
             raw_response = LLM_UNAVAILABLE_RESPONSE
     else:
@@ -2059,84 +2348,94 @@ def _run_agent_health_check(self) -> dict[str, Any]:
     truncated = truncate_response(raw_response, max_chars)
 
     if state == "OK":
-        # 馃啎 蹇冭烦 OK 鏃惰褰曟儏鎰熷揩鐓э紙涓嶅啀瀹屽叏闈欓粯锛?        self._log_heartbeat_emotion_snapshot(mood_state=current_mood, ts_ms=ts)
+        # 🆕 心跳 OK 时记录情感快照（不再完全静默）
+        self._log_heartbeat_emotion_snapshot(mood_state=current_mood, ts_ms=ts)
         self._check_edge_transport_probes(ts_ms=ts)
         return {"status": HEARTBEAT_EVENT_TYPE_OK, "mood_state": current_mood, "ts_ms": ts}
 
     # ...
 
 def _build_mood_aware_heartbeat_prompt(base_prompt: str, mood_state: str) -> str:
-    """涓哄績璺?Prompt 娉ㄥ叆褰撳墠鎯呮劅鐘舵€佷笂涓嬫枃銆?""
+    """为心跳 Prompt 注入当前情感状态上下文。"""
     mood_hints = {
-        "engaged":  "锛堝綋鍓嶇姸鎬侊細绮惧姏鍏呮矝锛岀Н鏋佹姇鍏ワ級",
-        "steady":   "锛堝綋鍓嶇姸鎬侊細骞崇ǔ姝ｅ父锛?,
-        "calm":     "锛堝綋鍓嶇姸鎬侊細骞抽潤鏀炬澗锛?,
-        "tired":    "锛堝綋鍓嶇姸鎬侊細鏈変簺鐤叉儷锛岄渶瑕佷紤鎭級",
-        "critical": "锛堝綋鍓嶇姸鎬侊細鑳介噺鏋佷綆锛岄渶瑕佺珛鍗充紤鎭級",
+        "engaged":  "（当前状态：精力充沛，积极投入）",
+        "steady":   "（当前状态：平稳正常）",
+        "calm":     "（当前状态：平静放松）",
+        "tired":    "（当前状态：有些疲惫，需要休息）",
+        "critical": "（当前状态：能量极低，需要立即休息）",
     }
     hint = mood_hints.get(str(mood_state).lower(), "")
-    return f"{base_prompt}\n\n[绯荤粺鎻愮ず锛氬綋鍓嶆儏鎰熺姸鎬?{hint}]"
+    return f"{base_prompt}\n\n[系统提示：当前情感状态 {hint}]"
 ```
 
-**棰勬湡鏁堟灉锛?* 蹇冭烦妫€娴嬩笉鍐嶆槸鎯呮劅鐘舵€佺殑"榛戞礊"锛宍tired` 鐘舵€佷笅鐨勫績璺充細浣跨敤鎰熺煡鐤叉儷鐨?Prompt锛孡LM 鐨勫洖澶嶄細鍙嶆槧鐪熷疄鐨勬儏鎰熺姸鎬侊紝蹇冭烦 OK 鏃朵篃浼氳褰曟儏鎰熷揩鐓т緵鍚庣画鍒嗘瀽銆?
+**预期效果：** 心跳检测不再是情感状态的"黑洞"，`tired` 状态下的心跳会使用感知疲惫的 Prompt，LLM 的回复会反映真实的情感状态，心跳 OK 时也会记录情感快照供后续分析。
+
 ---
 
-## 鍗佸叓銆佺浜旇疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 十八、第五轮优化的核心价值总结
 
-绗簲杞紭鍖栬仛鐒︿簬**璺ㄦā鍧楁儏鎰熶俊鎭殑绯荤粺鎬х己澶?*鈥斺€旀儏鎰熶俊鎭湪"瀛樺偍鈫掕捀棣忊啋璋冨害鈫掕緭鍑?鍏ㄩ摼璺腑鐨勬柇鐐癸細
+第五轮优化聚焦于**跨模块情感信息的系统性缺失**——情感信息在"存储→蒸馏→调度→输出"全链路中的断点：
 
-| 浼樺寲椤?| 鍙戠幇鐨?璺ㄦā鍧楃洸鍖? | 褰卞搷鑼冨洿 | 淇鏂规 |
+| 优化项 | 发现的"跨模块盲区" | 影响范围 | 修复方案 |
 |--------|------------------|---------|---------|
-| **浼樺寲25** 馃敶 | `EpisodicRecord` 鏃犳儏鎰熷瓧娈碉紝鎯呮劅璁板繂鏃犳硶琚儏鎰熸绱?| `episodic.py` 鈫?鏁翠釜璁板繂灞?| 澧炲姞鎯呮劅鏍囨敞瀛楁锛屾敮鎸佹儏鎰熻繃婊ゆ绱?|
-| **浼樺寲26** 馃煚 | Bond 浜嬩欢鏃犳儏鎰熷瓧娈碉紝Bond 绉垎涓嶆劅鐭ユ儏鎰熷己搴?| `bond_dynamics.py` 鈫?Bond 绉垎 | 鎯呮劅鍔犳潈 Bond 绉垎锛屾繁搴︽儏鎰熶簰鍔ㄨ础鐚洿澶氱Н鍒?|
-| **浼樺寲27** 馃煛 | `derive_bond_summary()` 璇诲彇閿欒瀛楁锛孊ond 淇℃伅瀹屽叏澶辩湡 | `summarizer.py` 鈫?LLM 杈撳叆 | 淇瀛楁璇诲彇閫昏緫锛屼粠 `stage_transition` 璇诲彇鐪熷疄 Bond 闃舵 |
-| **浼樺寲28** 馃煝 | 鍘嬬缉鍓嶅彧淇濆瓨 assistant 杞锛岀敤鎴锋儏鎰熶俊鎭涓㈠純 | `context_compressor.py` 鈫?闀挎湡璁板繂 | 鏀逛负淇濆瓨楂樹环鍊艰疆娆★紝鍖呮嫭鐢ㄦ埛鎯呮劅琛ㄨ揪 |
-| **浼樺寲29** 馃數 | 钂搁涓婚涓嶅惈鎯呮劅鍏崇郴缁村害锛屾棤娉曡捀棣忔儏鎰熷叧绯诲彶 | `long_term_distiller.py` 鈫?Canon | 澧炲姞鎯呮劅鍏崇郴涓撻」钂搁涓婚 |
-| **浼樺寲30** 馃煟 | 蹇冭烦妫€娴嬩笉鎰熺煡鎯呮劅鐘舵€侊紝蹇冭烦鏈熼棿鎯呮劅琚殣寮忛噸缃?| `scheduler.py` 鈫?鎯呮劅杩炵画鎬?| 蹇冭烦 Prompt 娉ㄥ叆鎯呮劅鐘舵€侊紝璁板綍鎯呮劅蹇収 |
+| **优化25** 🔴 | `EpisodicRecord` 无情感字段，情感记忆无法被情感检索 | `episodic.py` → 整个记忆层 | 增加情感标注字段，支持情感过滤检索 |
+| **优化26** 🟠 | Bond 事件无情感字段，Bond 积分不感知情感强度 | `bond_dynamics.py` → Bond 积分 | 情感加权 Bond 积分，深度情感互动贡献更多积分 |
+| **优化27** 🟡 | `derive_bond_summary()` 读取错误字段，Bond 信息完全失真 | `summarizer.py` → LLM 输入 | 修复字段读取逻辑，从 `stage_transition` 读取真实 Bond 阶段 |
+| **优化28** 🟢 | 压缩前只保存 assistant 轮次，用户情感信息被丢弃 | `context_compressor.py` → 长期记忆 | 改为保存高价值轮次，包括用户情感表达 |
+| **优化29** 🔵 | 蒸馏主题不含情感关系维度，无法蒸馏情感关系史 | `long_term_distiller.py` → Canon | 增加情感关系专项蒸馏主题 |
+| **优化30** 🟣 | 心跳检测不感知情感状态，心跳期间情感被隐式重置 | `scheduler.py` → 情感连续性 | 心跳 Prompt 注入情感状态，记录情感快照 |
 
 ---
 
-## 鍗佷節銆佸畬鏁翠紭鍖栧叏鏅浘锛坴1.4锛?0椤癸級
+## 十九、完整优化全景图（v1.4，30项）
 
-### 浜旇疆浼樺寲鐨勫眰娆￠€掕繘
+### 五轮优化的层次递进
 
 ```
-绗竴杞紙v1.0锛夛細鍙戠幇5涓?缂哄け鍔熻兘"     鈫?闇€瑕佹柊澧炰粈涔?绗簩杞紙v1.1锛夛細鍙戠幇6涓?娣卞眰闂"     鈫?鐜版湁鏈哄埗鍝噷涓嶅娣?绗笁杞紙v1.2锛夛細鍙戠幇6涓?鍋囧姛鑳界┖澹?   鈫?鐜版湁浠ｇ爜鍝噷鐪嬭捣鏉ユ湁浣嗗疄闄呮病鐢?绗洓杞紙v1.3锛夛細鍙戠幇6涓?鏋舵瀯鏂眰"     鈫?鍔熻兘涔嬮棿鐨勮繛鎺ュ湪鍝噷鏂
-绗簲杞紙v1.4锛夛細鍙戠幇6涓?璺ㄦā鍧楃洸鍖?   鈫?鎯呮劅淇℃伅鍦ㄥ叏閾捐矾涓殑绯荤粺鎬х己澶?```
+第一轮（v1.0）：发现5个"缺失功能"     → 需要新增什么
+第二轮（v1.1）：发现6个"深层问题"     → 现有机制哪里不够深
+第三轮（v1.2）：发现6个"假功能空壳"   → 现有代码哪里看起来有但实际没用
+第四轮（v1.3）：发现6个"架构断层"     → 功能之间的连接在哪里断裂
+第五轮（v1.4）：发现6个"跨模块盲区"   → 情感信息在全链路中的系统性缺失
+```
 
-### 鎸変紭鍏堢骇鍒嗙被锛?0椤瑰叏鏅級
+### 按优先级分类（30项全景）
 
-| 浼樺厛绾?| 浼樺寲椤?| 鏍稿績闂 |
+| 优先级 | 优化项 | 核心问题 |
 |--------|--------|---------|
-| **P0锛堝繀椤讳慨澶嶏級** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27 | 鏋舵瀯鏂眰 + 璺ㄦā鍧楃洸鍖轰腑鐨勫叧閿矾寰?|
-| **P1锛堥噸瑕佷紭鍖栵級** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29 | 鎯呮劅鍐呮牳 + 鍏崇郴灞?+ 璁板繂灞?|
-| **P2锛堜綋楠屽寮猴級** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30 | 杈撳嚭灞?+ 缁嗚妭鎵撶（ |
+| **P0（必须修复）** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27 | 架构断层 + 跨模块盲区中的关键路径 |
+| **P1（重要优化）** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29 | 情感内核 + 关系层 + 记忆层 |
+| **P2（体验增强）** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30 | 输出层 + 细节打磨 |
 
-### 鍙樻洿璁板綍锛堝畬鏁寸増锛?
-| 鏃ユ湡 | 鐗堟湰 | 璇存槑 |
+### 变更记录（完整版）
+
+| 日期 | 版本 | 说明 |
 |------|------|------|
-| 2026-03-05 | v1.0 | 鍒濈锛屽熀浜庝唬鐮佹繁搴﹀垎鏋愬垱寤猴紝璁板綍浜斿ぇ浼樺寲鏂瑰悜锛埪т竴~搂浜旓級 |
-| 2026-03-05 | v1.1 | 娣卞寲鍒嗘瀽锛氬熀浜庡叏閲忎唬鐮佺簿璇伙紝鏂板鍏ぇ娣卞寲浼樺寲鏂瑰悜锛埪т竷~搂涔濓級 |
-| 2026-03-05 | v1.2 | 绗笁杞繁鍖栵細鍙戠幇6涓?鍋囧姛鑳?绌哄３闂锛屾柊澧炰紭鍖?3~18锛埪у崄~搂鍗佷簩锛?|
-| 2026-03-05 | v1.3 | 绗洓杞繁鍖栵細鍙戠幇6涓?鏋舵瀯鏂眰"闂锛屾柊澧炰紭鍖?9~24锛埪у崄鍥泘搂鍗佸叚锛?|
-| 2026-03-05 | v1.4 | 绗簲杞繁鍖栵細鍙戠幇6涓?璺ㄦā鍧楁儏鎰熺洸鍖?锛屾柊澧炰紭鍖?5~30锛埪у崄涓儈搂鍗佷節锛?|
-| 2026-03-05 | v1.5 | 绗叚杞繁鍖栵細鍙戠幇6涓?鎰熺煡灞傛儏鎰熸柇璺?锛屾柊澧炰紭鍖?1~36锛埪т簩鍗亊搂浜屽崄浜岋級 |
-| 2026-03-05 | v1.6 | 绗竷杞繁鍖栵細鍙戠幇6涓?鎵ц灞傛儏鎰熺湡绌?锛屾柊澧炰紭鍖?7~42锛埪т簩鍗佷笁~搂浜屽崄浜旓級 |
-| 2026-03-05 | v1.7 | 绗叓杞繁鍖栵細鍙戠幇6涓?鍩虹璁炬柦鎯呮劅鐩插尯"锛屾柊澧炰紭鍖?3~48锛埪т簩鍗佸叚~搂浜屽崄鍏級 |
+| 2026-03-05 | v1.0 | 初稿，基于代码深度分析创建，记录五大优化方向（§一~§五） |
+| 2026-03-05 | v1.1 | 深化分析：基于全量代码精读，新增六大深化优化方向（§七~§九） |
+| 2026-03-05 | v1.2 | 第三轮深化：发现6个"假功能"空壳问题，新增优化13~18（§十~§十二） |
+| 2026-03-05 | v1.3 | 第四轮深化：发现6个"架构断层"问题，新增优化19~24（§十四~§十六） |
+| 2026-03-05 | v1.4 | 第五轮深化：发现6个"跨模块情感盲区"，新增优化25~30（§十七~§十九） |
+| 2026-03-05 | v1.5 | 第六轮深化：发现6个"感知层情感断路"，新增优化31~36（§二十~§二十二） |
+| 2026-03-05 | v1.6 | 第七轮深化：发现6个"执行层情感真空"，新增优化37~42（§二十三~§二十五） |
+| 2026-03-05 | v1.7 | 第八轮深化：发现6个"基础设施情感盲区"，新增优化43~48（§二十六~§二十八） |
 
 ---
 
-## 浜屽崄鍏€佺鍏疆娣卞寲浼樺寲锛氬熀纭€璁炬柦鎯呮劅鐩插尯
+## 二十六、第八轮深化优化：基础设施情感盲区
 
-> **v1.7 鏂板**锛?026-03-05锛夈€傛湰杞熀浜庡 `scheduler/scheduler.py`銆乣integrations/llm_gateway.py`銆乣integrations/graph_executor.py`銆乣obs/metrics.py`銆乣edge_client/actuators/tts_engine.py`銆乣edge_client/senses/asr.py` 鐨勫畬鏁撮€愯绮捐锛屽彂鐜颁簡鍓嶄竷杞畬鍏ㄦ湭瑙﹀強鐨?**6 涓熀纭€璁炬柦鎯呮劅鐩插尯**鈥斺€旇繖浜涢棶棰樺垎甯冨湪璋冨害灞傘€丩LM缃戝叧灞傘€佸浘鎵ц灞傘€佹寚鏍囪娴嬪眰銆乀TS寮曟搸灞傘€丄SR鎰熺煡灞傦紝鏄儏鎰熶俊鎭湪"鍩虹璁炬柦鈫掓劅鐭モ啋杈撳嚭"閾捐矾涓殑绯荤粺鎬х洸鍖恒€?
+> **v1.7 新增**（2026-03-05）。本轮基于对 `scheduler/scheduler.py`、`integrations/llm_gateway.py`、`integrations/graph_executor.py`、`obs/metrics.py`、`edge_client/actuators/tts_engine.py`、`edge_client/senses/asr.py` 的完整逐行精读，发现了前七轮完全未触及的 **6 个基础设施情感盲区**——这些问题分布在调度层、LLM网关层、图执行层、指标观测层、TTS引擎层、ASR感知层，是情感信息在"基础设施→感知→输出"链路中的系统性盲区。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲43锛圥0锛夛細`NatsumeScheduler._build_system_intent()` 涓嶆惡甯︽儏鎰熺姸鎬佲€斺€旇皟搴︿换鍔¤Е鍙戞椂鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/scheduler/scheduler.py`
+### 🔴 深化优化43（P0）：`NatsumeScheduler._build_system_intent()` 不携带情感状态——调度任务触发时情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/scheduler/scheduler.py`
 
-`_build_system_intent()` 鐢熸垚鐨?`system_initiated_intent`锛?
+**精读发现：**
+
+`_build_system_intent()` 生成的 `system_initiated_intent`：
+
 ```python
 def _build_system_intent(
     self,
@@ -2156,20 +2455,20 @@ def _build_system_intent(
         "priority": task.priority.value,
         "trigger_mode": task.trigger_mode.value,
         "ts_ms": now_ms(),
-        # 鈫?娌℃湁鎯呮劅鐘舵€佸瓧娈碉紒
+        # ↑ 没有情感状态字段！
     }
 ```
 
-`_trigger_task()` 鐨勯棬鎺ф鏌ワ細
+`_trigger_task()` 的门控检查：
 
 ```python
-# sys_mode 闂ㄦ帶
+# sys_mode 门控
 current_mode = self._get_sys_mode()
 if not task.is_allowed_in_mode(current_mode):
-    # 鈫?鍙鏌?sys_mode锛屼笉妫€鏌ユ儏鎰熺姸鎬侊紒
+    # ↑ 只检查 sys_mode，不检查情感状态！
 ```
 
-`_log_scheduler_event()` 鐨勫璁¤褰曪細
+`_log_scheduler_event()` 的审计记录：
 
 ```python
 self._ledger.log_scheduler_event({
@@ -2182,14 +2481,16 @@ self._ledger.log_scheduler_event({
     "mode_at_trigger": mode_at_trigger,
     "error_detail": error_detail,
     "ts_ms": ts_ms,
-    # 鈫?娌℃湁鎯呮劅鐘舵€佸瓧娈碉紒
+    # ↑ 没有情感状态字段！
 })
 ```
 
-杩欐剰鍛崇潃锛?1. 璋冨害浠诲姟瑙﹀彂鏃跺畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€佲€斺€擿critical` 鎯呮劅鐘舵€佷笅锛圓I 鑳介噺鏋佷綆锛夛紝楂樻秷鑰楃殑瀹氭椂浠诲姟锛堝姣?0鍒嗛挓鐨勪富鍔ㄩ棶鍊欎换鍔★級浠嶇劧浼氳瑙﹀彂
-2. `_build_system_intent()` 鐢熸垚鐨?intent 涓嶆惡甯︽儏鎰熺姸鎬侊紝涓嬫父鐨?Governor 鏃犳硶鎰熺煡杩欐槸鍦ㄤ粈涔堟儏鎰熺姸鎬佷笅瑙﹀彂鐨勮皟搴︿换鍔?3. 璋冨害瀹¤鏃ュ織涓嶅惈鎯呮劅瀛楁锛屾棤娉曞垎鏋?鍝簺鎯呮劅鐘舵€佷笅璋冨害浠诲姟鎵ц鎴愬姛鐜囨洿楂?
+这意味着：
+1. 调度任务触发时完全不感知情感状态——`critical` 情感状态下（AI 能量极低），高消耗的定时任务（如每30分钟的主动问候任务）仍然会被触发
+2. `_build_system_intent()` 生成的 intent 不携带情感状态，下游的 Governor 无法感知这是在什么情感状态下触发的调度任务
+3. 调度审计日志不含情感字段，无法分析"哪些情感状态下调度任务执行成功率更高"
 
-**鏂规锛?* 涓鸿皟搴﹀櫒澧炲姞鎯呮劅鐘舵€佹劅鐭ヨ兘鍔涳細
+**方案：** 为调度器增加情感状态感知能力：
 
 ```python
 class NatsumeScheduler:
@@ -2200,24 +2501,27 @@ class NatsumeScheduler:
         *,
         intent_dispatcher: IntentDispatcher | None = None,
         get_sys_mode: Callable[[], str] | None = None,
-        # 馃啎 鎯呮劅鐘舵€佽幏鍙栧嚱鏁帮紙v1.7 鏂板锛?        get_emotion_state: Callable[[], dict[str, Any]] | None = None,
+        # 🆕 情感状态获取函数（v1.7 新增）
+        get_emotion_state: Callable[[], dict[str, Any]] | None = None,
         ledger: Any | None = None,
         persist_tasks: bool = True,
     ) -> None:
         # ...
-        # 馃啎 鎯呮劅鐘舵€佽幏鍙栧嚱鏁帮紙杩斿洖 {"emotion_tag": ..., "mood_state": ..., "bond_stage": ...}锛?        self._get_emotion_state = get_emotion_state or (lambda: {})
+        # 🆕 情感状态获取函数（返回 {"emotion_tag": ..., "mood_state": ..., "bond_stage": ...}）
+        self._get_emotion_state = get_emotion_state or (lambda: {})
 ```
 
-**鎯呮劅闂ㄦ帶锛?*
+**情感门控：**
 
 ```python
 def _trigger_task(self, task_id: str) -> dict[str, Any]:
     # ...
-    # 馃啎 鎯呮劅鐘舵€侀棬鎺э紙v1.7 鏂板锛?    emotion_state = self._get_emotion_state()
+    # 🆕 情感状态门控（v1.7 新增）
+    emotion_state = self._get_emotion_state()
     mood_state = str(emotion_state.get("mood_state") or "steady").lower()
     emotion_tag = str(emotion_state.get("emotion_tag") or "NEUTRAL").upper()
 
-    # critical 鐘舵€佷笅锛孧EDIUM/HIGH 浼樺厛绾т换鍔¤鏆傜紦
+    # critical 状态下，MEDIUM/HIGH 优先级任务被暂缓
     if mood_state == "critical" and task.priority.value in ("MEDIUM", "HIGH"):
         reason = "EMOTION_CRITICAL_THROTTLE"
         self._log_scheduler_event(
@@ -2233,44 +2537,48 @@ def _trigger_task(self, task_id: str) -> dict[str, Any]:
         return {"status": "THROTTLED", "reason_code": reason, "task_id": task_id, "mood_state": mood_state}
 ```
 
-**`_build_system_intent()` 鎼哄甫鎯呮劅鐘舵€侊細**
+**`_build_system_intent()` 携带情感状态：**
 
 ```python
 def _build_system_intent(self, task, *, intent_id, request_id) -> dict[str, Any]:
     emotion_state = self._get_emotion_state()
     return {
-        # ... 鍘熸湁瀛楁 ...
-        # 馃啎 鎯呮劅鐘舵€佸瓧娈?        "emotion_tag": emotion_state.get("emotion_tag", "NEUTRAL"),
+        # ... 原有字段 ...
+        # 🆕 情感状态字段
+        "emotion_tag": emotion_state.get("emotion_tag", "NEUTRAL"),
         "mood_state": emotion_state.get("mood_state", "steady"),
         "bond_stage": emotion_state.get("bond_stage", "STRANGER"),
     }
 ```
 
-**棰勬湡鏁堟灉锛?* 璋冨害鍣ㄤ粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛宍critical` 鐘舵€佷笅楂樻秷鑰椾换鍔¤鑷姩鏆傜紦锛岃皟搴?intent 鎼哄甫鎯呮劅鐘舵€佷緵涓嬫父 Governor 鎰熺煡锛屽璁℃棩蹇楀彲鍒嗘瀽鎯呮劅鐘舵€佷笌璋冨害鎵ц鐨勭浉鍏虫€с€?
+**预期效果：** 调度器从"情感盲"变为"情感感知"，`critical` 状态下高消耗任务被自动暂缓，调度 intent 携带情感状态供下游 Governor 感知，审计日志可分析情感状态与调度执行的相关性。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲44锛圥1锛夛細`LlmGatewayContract.generate()` 鐨?`prompt_payload` 涓嶆惡甯︽儏鎰熶笂涓嬫枃鈥斺€擫LM 璋冪敤鏃舵儏鎰熺洸
+### 🟠 深化优化44（P1）：`LlmGatewayContract.generate()` 的 `prompt_payload` 不携带情感上下文——LLM 调用时情感盲
 
-**鐩爣鏂囦欢锛?* `host_brain/integrations/llm_gateway.py`
+**目标文件：** `host_brain/integrations/llm_gateway.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`generate()` 鐨?`prompt_payload` 鍙傛暟锛?
+`generate()` 的 `prompt_payload` 参数：
+
 ```python
 def generate(
     self,
     *,
     request_id: str,
     model_profile_id: str,
-    prompt_payload: dict[str, Any],   # 鈫?鑷敱鏍煎紡 dict锛屾病鏈夋儏鎰熷瓧娈电害瀹?    ts_ms: int | None = None,
+    prompt_payload: dict[str, Any],   # ← 自由格式 dict，没有情感字段约定
+    ts_ms: int | None = None,
 ) -> GatewayResult:
 ```
 
-`_degrade()` 鐨勯檷绾у洖澶嶏細
+`_degrade()` 的降级回复：
 
 ```python
 fallback_payload = {
-    "narrative": {"text": "褰撳墠澶栭儴璇箟鏈嶅姟涓嶅彲鐢紝鎴戝厛缁欏嚭鑽夋鍥炲銆?},
+    "narrative": {"text": "当前外部语义服务不可用，我先给出草案回复。"},
     "intent_draft": {},
     "meta": {
         "draft_only": True,
@@ -2278,11 +2586,11 @@ fallback_payload = {
         "reason_code": reason_code,
         "stage": stage,
     },
-    # 鈫?闄嶇骇鍥炲瀹屽叏涓嶆劅鐭ユ儏鎰熺姸鎬侊紒
+    # ↑ 降级回复完全不感知情感状态！
 }
 ```
 
-`GatewayResult` 鐨勮緭鍑虹粨鏋勶細
+`GatewayResult` 的输出结构：
 
 ```python
 output = {
@@ -2296,11 +2604,16 @@ output = {
     "latency_ms": latency_ms,
     "payload": qa_result.payload,
     "airlock": {...},
-    # 鈫?娌℃湁鎯呮劅瀛楁锛?}
+    # ↑ 没有情感字段！
+}
 ```
 
-杩欐剰鍛崇潃锛?1. LLM 璋冪敤鏃?`prompt_payload` 涓嶆惡甯︽儏鎰熶笂涓嬫枃鈥斺€擫LM 鏃犳硶鎰熺煡褰撳墠 AI 鐨勬儏鎰熺姸鎬侊紝鐢熸垚鐨勫洖澶嶄笉浼氫綋鐜版儏鎰熻壊褰?2. 闄嶇骇鍥炲锛坄_degrade()`锛夊畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€佲€斺€擿HAPPY` 鐘舵€佷笅鐨勯檷绾у洖澶嶅拰 `SAD` 鐘舵€佷笅鐨勯檷绾у洖澶嶅畬鍏ㄧ浉鍚?3. `GatewayResult.output` 涓嶅惈鎯呮劅瀛楁鈥斺€斾笅娓告棤娉曟劅鐭?LLM 璋冪敤鏃剁殑鎯呮劅鐘舵€?
-**鏂规锛?* 涓?`generate()` 澧炲姞鎯呮劅涓婁笅鏂囧弬鏁帮紝骞跺湪闄嶇骇鍥炲涓綋鐜版儏鎰熺姸鎬侊細
+这意味着：
+1. LLM 调用时 `prompt_payload` 不携带情感上下文——LLM 无法感知当前 AI 的情感状态，生成的回复不会体现情感色彩
+2. 降级回复（`_degrade()`）完全不感知情感状态——`HAPPY` 状态下的降级回复和 `SAD` 状态下的降级回复完全相同
+3. `GatewayResult.output` 不含情感字段——下游无法感知 LLM 调用时的情感状态
+
+**方案：** 为 `generate()` 增加情感上下文参数，并在降级回复中体现情感状态：
 
 ```python
 def generate(
@@ -2310,8 +2623,10 @@ def generate(
     model_profile_id: str,
     prompt_payload: dict[str, Any],
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅涓婁笅鏂囧弬鏁帮紙v1.7 鏂板锛?    emotion_context: dict[str, Any] | None = None,
-    # emotion_context 缁撴瀯锛?    # {
+    # 🆕 情感上下文参数（v1.7 新增）
+    emotion_context: dict[str, Any] | None = None,
+    # emotion_context 结构：
+    # {
     #   "emotion_tag": "HAPPY",
     #   "mood_state": "engaged",
     #   "bond_stage": "FRIEND",
@@ -2319,13 +2634,13 @@ def generate(
     # }
 ) -> GatewayResult:
     # ...
-    # 馃啎 灏嗘儏鎰熶笂涓嬫枃娉ㄥ叆 prompt_payload
+    # 🆕 将情感上下文注入 prompt_payload
     if emotion_context:
         prompt_payload = dict(prompt_payload)
         prompt_payload["__emotion_context__"] = emotion_context
 ```
 
-**鎯呮劅鎰熺煡闄嶇骇鍥炲锛?*
+**情感感知降级回复：**
 
 ```python
 def _degrade(self, ..., emotion_context: dict[str, Any] | None = None) -> GatewayResult:
@@ -2333,12 +2648,12 @@ def _degrade(self, ..., emotion_context: dict[str, Any] | None = None) -> Gatewa
     emotion_tag = str(ec.get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str(ec.get("mood_state") or "steady").lower()
 
-    # 馃啎 鏍规嵁鎯呮劅鐘舵€侀€夋嫨闄嶇骇鍥炲鏂囨湰
+    # 🆕 根据情感状态选择降级回复文本
     DEGRADED_NARRATIVES = {
-        "HAPPY": "鍡紝鐜板湪鏈夌偣灏忛棶棰橈紝涓嶈繃娌″叧绯伙紝鎴戜滑绋嶅悗鍐嶈瘯鍚э綖",
-        "SAD": "鎶辨瓑锛岀幇鍦ㄩ亣鍒颁簡涓€浜涢棶棰樷€︹€︽垜浼氬敖蹇仮澶嶇殑銆?,
-        "ANXIOUS": "鍟婏紝鍑轰簡鐐圭姸鍐碉紝璇风◢绛変竴涓嬧€︹€?,
-        "NEUTRAL": "褰撳墠澶栭儴璇箟鏈嶅姟涓嶅彲鐢紝鎴戝厛缁欏嚭鑽夋鍥炲銆?,
+        "HAPPY": "嗯，现在有点小问题，不过没关系，我们稍后再试吧～",
+        "SAD": "抱歉，现在遇到了一些问题……我会尽快恢复的。",
+        "ANXIOUS": "啊，出了点状况，请稍等一下……",
+        "NEUTRAL": "当前外部语义服务不可用，我先给出草案回复。",
     }
     narrative_text = DEGRADED_NARRATIVES.get(emotion_tag, DEGRADED_NARRATIVES["NEUTRAL"])
 
@@ -2350,23 +2665,25 @@ def _degrade(self, ..., emotion_context: dict[str, Any] | None = None) -> Gatewa
             "degraded": True,
             "reason_code": reason_code,
             "stage": stage,
-            # 馃啎 鎯呮劅瀛楁
+            # 🆕 情感字段
             "emotion_tag": emotion_tag,
             "mood_state": mood_state,
         },
     }
 ```
 
-**棰勬湡鏁堟灉锛?* LLM 缃戝叧浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛孡LM 璋冪敤鏃舵惡甯︽儏鎰熶笂涓嬫枃锛岄檷绾у洖澶嶆牴鎹儏鎰熺姸鎬侀€夋嫨鍚堥€傜殑鏂囨湰锛宍GatewayResult` 杈撳嚭鍖呭惈鎯呮劅瀛楁渚涗笅娓告劅鐭ャ€?
+**预期效果：** LLM 网关从"情感盲"变为"情感感知"，LLM 调用时携带情感上下文，降级回复根据情感状态选择合适的文本，`GatewayResult` 输出包含情感字段供下游感知。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲45锛圥1锛夛細`GraphExecutor._invoke_handler()` 鐨?`context` 鍙傛暟涓嶆惡甯︽儏鎰熺姸鎬佲€斺€斿浘鑺傜偣鎵ц鏃舵儏鎰熺洸
+### 🟡 深化优化45（P1）：`GraphExecutor._invoke_handler()` 的 `context` 参数不携带情感状态——图节点执行时情感盲
 
-**鐩爣鏂囦欢锛?* `host_brain/integrations/graph_executor.py`
+**目标文件：** `host_brain/integrations/graph_executor.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`_invoke_handler()` 鐨?`context` 鍙傛暟锛?
+`_invoke_handler()` 的 `context` 参数：
+
 ```python
 def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -> dict[str, Any]:
     handler = self._handlers.get(handler_id)
@@ -2377,11 +2694,12 @@ def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -
         "node_id": node_id,
         "graph_id": str(state.get("graph_id") or ""),
         "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms)
-        # 鈫?context 閲屾病鏈夋儏鎰熷瓧娈碉紒
+        # ↑ context 里没有情感字段！
     })
 ```
 
-`_invoke_model_node()` 鐨?`prompt_payload`锛?
+`_invoke_model_node()` 的 `prompt_payload`：
+
 ```python
 result = gateway.generate(
     request_id=str(state.get("request_id") or ""),
@@ -2392,12 +2710,12 @@ result = gateway.generate(
         "task": str(binding.get("task") or node_id),
         "input": dict(state.get("payload") or {}),
         "model": {...},
-        # 鈫?prompt_payload 閲屾病鏈夋儏鎰熷瓧娈碉紒
+        # ↑ prompt_payload 里没有情感字段！
     }
 )
 ```
 
-`GraphState` 鐨勫瓧娈靛畾涔夛紙鏉ヨ嚜 `graph_contract.py`锛夛細
+`GraphState` 的字段定义（来自 `graph_contract.py`）：
 
 ```python
 class GraphState(TypedDict, total=False):
@@ -2416,23 +2734,28 @@ class GraphState(TypedDict, total=False):
     reason_code: str | None
     detail: str
     timeout_ms: int
-    # 鈫?娌℃湁鎯呮劅瀛楁锛?```
-
-杩欐剰鍛崇潃锛?1. 鍥捐妭鐐规墽琛屾椂 handler 鐨?context 涓嶅惈鎯呮劅瀛楁鈥斺€斿浘鑺傜偣 handler 鏃犳硶鏍规嵁鎯呮劅鐘舵€佽皟鏁存墽琛岃涓?2. 鍥捐妭鐐硅皟鐢?LLM 鏃?`prompt_payload` 涓嶅惈鎯呮劅瀛楁鈥斺€斿嵆浣夸紭鍖?4瀹炴柦浜嗭紝鍥炬墽琛屽櫒涔熸棤娉曚紶閫掓儏鎰熶笂涓嬫枃
-3. `GraphState` 涓嶅惈鎯呮劅瀛楁鈥斺€旀儏鎰熶俊鎭棤娉曞湪鍥炬墽琛岀殑澶氫釜鑺傜偣涔嬮棿浼犻€?
-**鏂规锛?* 涓?`GraphState` 澧炲姞鎯呮劅瀛楁锛屽苟鍦?handler context 鍜?prompt_payload 涓紶閫掞細
-
-```python
-# 馃啎 GraphState 澧炲姞鎯呮劅瀛楁锛坴1.7 鏂板锛?class GraphState(TypedDict, total=False):
-    # ... 鍘熸湁瀛楁 ...
-    # 馃啎 鎯呮劅瀛楁
-    emotion_tag: str           # 褰撳墠鎯呮劅鏍囩
-    mood_state: str            # 褰撳墠 mood_state
-    bond_stage: str            # 褰撳墠 Bond 闃舵
-    emotional_intensity: float # 鎯呮劅寮哄害
+    # ↑ 没有情感字段！
 ```
 
-**`_invoke_handler()` 浼犻€掓儏鎰熷瓧娈碉細**
+这意味着：
+1. 图节点执行时 handler 的 context 不含情感字段——图节点 handler 无法根据情感状态调整执行行为
+2. 图节点调用 LLM 时 `prompt_payload` 不含情感字段——即使优化44实施了，图执行器也无法传递情感上下文
+3. `GraphState` 不含情感字段——情感信息无法在图执行的多个节点之间传递
+
+**方案：** 为 `GraphState` 增加情感字段，并在 handler context 和 prompt_payload 中传递：
+
+```python
+# 🆕 GraphState 增加情感字段（v1.7 新增）
+class GraphState(TypedDict, total=False):
+    # ... 原有字段 ...
+    # 🆕 情感字段
+    emotion_tag: str           # 当前情感标签
+    mood_state: str            # 当前 mood_state
+    bond_stage: str            # 当前 Bond 阶段
+    emotional_intensity: float # 情感强度
+```
+
+**`_invoke_handler()` 传递情感字段：**
 
 ```python
 def _invoke_handler(self, *, handler_id, node_id, state) -> dict[str, Any]:
@@ -2442,7 +2765,7 @@ def _invoke_handler(self, *, handler_id, node_id, state) -> dict[str, Any]:
         "node_id": node_id,
         "graph_id": str(state.get("graph_id") or ""),
         "timeout_ms": int(state.get("timeout_ms") or self._default_timeout_ms),
-        # 馃啎 鎯呮劅瀛楁
+        # 🆕 情感字段
         "emotion_tag": str(state.get("emotion_tag") or "NEUTRAL"),
         "mood_state": str(state.get("mood_state") or "steady"),
         "bond_stage": str(state.get("bond_stage") or "STRANGER"),
@@ -2450,15 +2773,17 @@ def _invoke_handler(self, *, handler_id, node_id, state) -> dict[str, Any]:
     })
 ```
 
-**棰勬湡鏁堟灉锛?* 鍥炬墽琛屽櫒浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屽浘鑺傜偣 handler 鍙互鏍规嵁鎯呮劅鐘舵€佽皟鏁存墽琛岃涓猴紝LLM 璋冪敤鏃舵惡甯︽儏鎰熶笂涓嬫枃锛屾儏鎰熶俊鎭彲浠ュ湪鍥炬墽琛岀殑澶氫釜鑺傜偣涔嬮棿浼犻€掋€?
+**预期效果：** 图执行器从"情感盲"变为"情感感知"，图节点 handler 可以根据情感状态调整执行行为，LLM 调用时携带情感上下文，情感信息可以在图执行的多个节点之间传递。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲46锛圥1锛夛細`MetricsCollector.collect()` 涓嶅寘鍚儏鎰熺淮搴︽寚鏍団€斺€旇娴嬪眰鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/obs/metrics.py`
+### 🟢 深化优化46（P1）：`MetricsCollector.collect()` 不包含情感维度指标——观测层情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/obs/metrics.py`
 
-`collect()` 鐨勮繑鍥炵粨鏋勶細
+**精读发现：**
+
+`collect()` 的返回结构：
 
 ```python
 payload: dict[str, Any] = {
@@ -2471,10 +2796,11 @@ payload: dict[str, Any] = {
     "recent_chains": recent_chains,
     "latency_baseline": latency_baseline,
     "debug_trace": None,
-    # 鈫?娌℃湁鎯呮劅缁村害鎸囨爣锛?}
+    # ↑ 没有情感维度指标！
+}
 ```
 
-`_query_governor_stats()` 鐨勭粺璁★細
+`_query_governor_stats()` 的统计：
 
 ```python
 return {
@@ -2483,10 +2809,11 @@ return {
     "rejected": rejected,
     "degraded": degraded,
     "pseudo_exec_blocked": pseudo_exec_blocked,
-    # 鈫?娌℃湁鎯呮劅鐩稿叧缁熻锛?}
+    # ↑ 没有情感相关统计！
+}
 ```
 
-`_query_recent_chains()` 鐨勯摼璺俊鎭細
+`_query_recent_chains()` 的链路信息：
 
 ```python
 chain: dict[str, Any] = {
@@ -2496,27 +2823,33 @@ chain: dict[str, Any] = {
     "decision": None,
     "reason_code": None,
     "skill_name": None,
-    # 鈫?娌℃湁鎯呮劅瀛楁锛?}
+    # ↑ 没有情感字段！
+}
 ```
 
-杩欐剰鍛崇潃锛?1. `/obs/metrics` 绔偣涓嶅寘鍚儏鎰熺淮搴︽寚鏍団€斺€旇繍缁翠汉鍛樻棤娉曢€氳繃鐩戞帶闈㈡澘鎰熺煡 AI 鐨勬儏鎰熺姸鎬佸彉鍖栬秼鍔?2. `_query_governor_stats()` 涓嶇粺璁℃儏鎰熺浉鍏崇殑 Governor 鍐崇瓥鈥斺€旀棤娉曞垎鏋?鏈夊灏戞鍥犳儏鎰熶繚鎶ら棬鎺э紙R8锛夎鎷掔粷"
-3. `_query_recent_chains()` 涓嶅惈鎯呮劅瀛楁鈥斺€旀棤娉曞湪閾捐矾杩借釜涓湅鍒版瘡娆¤姹傛椂鐨勬儏鎰熺姸鎬?
-**鏂规锛?* 涓?`MetricsCollector` 澧炲姞鎯呮劅缁村害鎸囨爣锛?
+这意味着：
+1. `/obs/metrics` 端点不包含情感维度指标——运维人员无法通过监控面板感知 AI 的情感状态变化趋势
+2. `_query_governor_stats()` 不统计情感相关的 Governor 决策——无法分析"有多少次因情感保护门控（R8）被拒绝"
+3. `_query_recent_chains()` 不含情感字段——无法在链路追踪中看到每次请求时的情感状态
+
+**方案：** 为 `MetricsCollector` 增加情感维度指标：
+
 ```python
 def collect(self, ...) -> dict[str, Any]:
     # ...
-    # 馃啎 鎯呮劅缁村害鎸囨爣锛坴1.7 鏂板锛?    emotion_stats = self._query_emotion_stats()
+    # 🆕 情感维度指标（v1.7 新增）
+    emotion_stats = self._query_emotion_stats()
 
     payload: dict[str, Any] = {
-        # ... 鍘熸湁瀛楁 ...
-        # 馃啎 鎯呮劅缁村害鎸囨爣
+        # ... 原有字段 ...
+        # 🆕 情感维度指标
         "emotion_stats": emotion_stats,
     }
     return payload
 
 def _query_emotion_stats(self) -> dict[str, Any]:
-    """缁熻鎯呮劅缁村害鎸囨爣锛氭儏鎰熷垎甯冦€佹儏鎰熶繚鎶ら棬鎺цЕ鍙戞鏁般€佹儏鎰熷彉鍖栬秼鍔裤€?""
-    # 浠?governor_log 缁熻鎯呮劅淇濇姢闂ㄦ帶瑙﹀彂娆℃暟
+    """统计情感维度指标：情感分布、情感保护门控触发次数、情感变化趋势。"""
+    # 从 governor_log 统计情感保护门控触发次数
     emotion_gate_blocked = 0
     try:
         for r in self.ledger.governor_log:
@@ -2525,7 +2858,7 @@ def _query_emotion_stats(self) -> dict[str, Any]:
     except Exception:
         pass
 
-    # 浠?skill_exec_log 缁熻鎯呮劅鏍囩鍒嗗竷
+    # 从 skill_exec_log 统计情感标签分布
     emotion_distribution: dict[str, int] = {}
     try:
         for r in self.ledger.skill_exec_log:
@@ -2541,7 +2874,7 @@ def _query_emotion_stats(self) -> dict[str, Any]:
     }
 ```
 
-**`_query_recent_chains()` 澧炲姞鎯呮劅瀛楁锛?*
+**`_query_recent_chains()` 增加情感字段：**
 
 ```python
 chain: dict[str, Any] = {
@@ -2551,22 +2884,24 @@ chain: dict[str, Any] = {
     "decision": None,
     "reason_code": None,
     "skill_name": None,
-    # 馃啎 鎯呮劅瀛楁
+    # 🆕 情感字段
     "emotion_tag": row.get("emotion_tag"),
     "mood_state": row.get("mood_state"),
 }
 ```
 
-**棰勬湡鏁堟灉锛?* 瑙傛祴灞備粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛岃繍缁翠汉鍛樺彲浠ラ€氳繃鐩戞帶闈㈡澘鎰熺煡 AI 鐨勬儏鎰熺姸鎬佸彉鍖栬秼鍔匡紝鍒嗘瀽鎯呮劅淇濇姢闂ㄦ帶瑙﹀彂棰戠巼锛屽湪閾捐矾杩借釜涓湅鍒版瘡娆¤姹傛椂鐨勬儏鎰熺姸鎬併€?
+**预期效果：** 观测层从"情感盲"变为"情感感知"，运维人员可以通过监控面板感知 AI 的情感状态变化趋势，分析情感保护门控触发频率，在链路追踪中看到每次请求时的情感状态。
+
 ---
 
-### 馃數 娣卞寲浼樺寲47锛圥1锛夛細`SoVITSModelManager.synthesize()` 鐨?`emotion_intensity` 鍙傛暟涓嶄紶閫掔粰搴曞眰 SDK鈥斺€擳TS 鎯呮劅寮哄害鏂矾
+### 🔵 深化优化47（P1）：`SoVITSModelManager.synthesize()` 的 `emotion_intensity` 参数不传递给底层 SDK——TTS 情感强度断路
 
-**鐩爣鏂囦欢锛?* `edge_client/actuators/tts_engine.py`
+**目标文件：** `edge_client/actuators/tts_engine.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`synthesize()` 鎺ユ敹 `emotion_intensity` 鍙傛暟锛?
+`synthesize()` 接收 `emotion_intensity` 参数：
+
 ```python
 def synthesize(
     self,
@@ -2574,14 +2909,15 @@ def synthesize(
     *,
     language: str | None = None,
     emotion_tag: str | None = None,
-    emotion_intensity: float | None = None,   # 鈫?鎺ユ敹浜嗘儏鎰熷己搴﹀弬鏁?    voice_profile: str | None = None,
+    emotion_intensity: float | None = None,   # ← 接收了情感强度参数
+    voice_profile: str | None = None,
 ) -> TtsSynthResult:
-    # M26-I锛歟motion_intensity 鑼冨洿鎴柇
+    # M26-I：emotion_intensity 范围截断
     if emotion_intensity is not None:
         emotion_intensity = max(0.0, min(1.0, float(emotion_intensity)))
 ```
 
-浣?`_synthesize_audio()` 璋冪敤鏃讹細
+但 `_synthesize_audio()` 调用时：
 
 ```python
 audio_data, sr = _synthesize_audio(
@@ -2589,12 +2925,13 @@ audio_data, sr = _synthesize_audio(
     text=text.strip(),
     language=language or self._config.language,
     emotion_tag=emotion_tag,
-    emotion_intensity=emotion_intensity,   # 鈫?浼犻€掍簡 emotion_intensity
+    emotion_intensity=emotion_intensity,   # ← 传递了 emotion_intensity
     timeout_s=self._config.synth_timeout_s,
 )
 ```
 
-`_synthesize_audio()` 鍐呴儴锛?
+`_synthesize_audio()` 内部：
+
 ```python
 def _synthesize_audio(
     *,
@@ -2602,7 +2939,7 @@ def _synthesize_audio(
     text: str,
     language: str,
     emotion_tag: str | None,
-    emotion_intensity: float | None = None,   # 鈫?鎺ユ敹浜?emotion_intensity
+    emotion_intensity: float | None = None,   # ← 接收了 emotion_intensity
     timeout_s: float,
 ) -> tuple[Any, int]:
     # ...
@@ -2610,10 +2947,11 @@ def _synthesize_audio(
         text=text,
         language=language,
         emotion=emotion_tag,
-        # 鈫?emotion_intensity 娌℃湁浼犻€掔粰 model.synthesize()锛?    )
+        # ↑ emotion_intensity 没有传递给 model.synthesize()！
+    )
 ```
 
-`_ModernSoVITSAdapter.synthesize()` 鐨勫弬鏁帮細
+`_ModernSoVITSAdapter.synthesize()` 的参数：
 
 ```python
 def synthesize(
@@ -2622,15 +2960,20 @@ def synthesize(
     text: str,
     language: str,
     emotion: str | None = None,
-    # 鈫?娌℃湁 emotion_intensity 鍙傛暟锛?) -> dict[str, Any]:
+    # ↑ 没有 emotion_intensity 参数！
+) -> dict[str, Any]:
 ```
 
-杩欐剰鍛崇潃锛?1. `emotion_intensity` 鍙傛暟鍦?`SoVITSModelManager.synthesize()` 涓鎺ユ敹锛屼絾鍦?`_synthesize_audio()` 涓病鏈変紶閫掔粰 `model.synthesize()`
-2. `_ModernSoVITSAdapter.synthesize()` 娌℃湁 `emotion_intensity` 鍙傛暟锛屽嵆浣夸紶閫掍簡涔熸棤娉曚娇鐢?3. 杩欐槸涓€涓?*鍙傛暟浼犻€掓柇璺?*鈥斺€擿emotion_intensity` 鍦ㄦ暣涓?TTS 閾捐矾涓"鍚炴帀"浜嗭紝瀵瑰疄闄呰闊冲悎鎴愭病鏈変换浣曞奖鍝?
-**鏂规锛?* 淇 `emotion_intensity` 鐨勪紶閫掗摼璺細
+这意味着：
+1. `emotion_intensity` 参数在 `SoVITSModelManager.synthesize()` 中被接收，但在 `_synthesize_audio()` 中没有传递给 `model.synthesize()`
+2. `_ModernSoVITSAdapter.synthesize()` 没有 `emotion_intensity` 参数，即使传递了也无法使用
+3. 这是一个**参数传递断路**——`emotion_intensity` 在整个 TTS 链路中被"吞掉"了，对实际语音合成没有任何影响
+
+**方案：** 修复 `emotion_intensity` 的传递链路：
 
 ```python
-# 馃啎 _synthesize_audio() 浼犻€?emotion_intensity锛坴1.7 鏂板锛?def _synthesize_audio(
+# 🆕 _synthesize_audio() 传递 emotion_intensity（v1.7 新增）
+def _synthesize_audio(
     *,
     model: Any,
     text: str,
@@ -2643,11 +2986,11 @@ def synthesize(
         text=text,
         language=language,
         emotion=emotion_tag,
-        emotion_intensity=emotion_intensity,  # 馃啎 浼犻€?emotion_intensity
+        emotion_intensity=emotion_intensity,  # 🆕 传递 emotion_intensity
     )
 ```
 
-**`_ModernSoVITSAdapter.synthesize()` 澧炲姞 `emotion_intensity` 鍙傛暟锛?*
+**`_ModernSoVITSAdapter.synthesize()` 增加 `emotion_intensity` 参数：**
 
 ```python
 def synthesize(
@@ -2656,7 +2999,7 @@ def synthesize(
     text: str,
     language: str,
     emotion: str | None = None,
-    emotion_intensity: float | None = None,  # 馃啎 鏂板鍙傛暟
+    emotion_intensity: float | None = None,  # 🆕 新增参数
 ) -> dict[str, Any]:
     # ...
     inputs = {
@@ -2664,32 +3007,33 @@ def synthesize(
         "text_lang": text_lang,
         "ref_audio_path": self._ref_audio_path,
         # ...
-        # 馃啎 鎯呮劅寮哄害褰卞搷 temperature锛堣姘斿箙搴︼級
-        # emotion_intensity=1.0 鈫?temperature=1.0锛堟渶澶ц姘斿箙搴︼級
-        # emotion_intensity=0.0 鈫?temperature=0.3锛堟渶灏忚姘斿箙搴︼級
-        # emotion_intensity=None 鈫?temperature=0.7锛堥粯璁わ級
+        # 🆕 情感强度影响 temperature（语气幅度）
+        # emotion_intensity=1.0 → temperature=1.0（最大语气幅度）
+        # emotion_intensity=0.0 → temperature=0.3（最小语气幅度）
+        # emotion_intensity=None → temperature=0.7（默认）
         "temperature": _map_intensity_to_temperature(emotion_intensity),
     }
 
 def _map_intensity_to_temperature(intensity: float | None) -> float:
-    """灏嗘儏鎰熷己搴︽槧灏勫埌 TTS temperature锛堣姘斿箙搴︼級銆?""
+    """将情感强度映射到 TTS temperature（语气幅度）。"""
     if intensity is None:
-        return 0.7  # 榛樿
+        return 0.7  # 默认
     clamped = max(0.0, min(1.0, float(intensity)))
-    # 绾挎€ф槧灏勶細[0.0, 1.0] 鈫?[0.3, 1.0]
+    # 线性映射：[0.0, 1.0] → [0.3, 1.0]
     return round(0.3 + clamped * 0.7, 3)
 ```
 
-**棰勬湡鏁堟灉锛?* TTS 鎯呮劅寮哄害浠?鍙傛暟鏂矾"鍙樹负"鍏ㄩ摼璺紶閫?锛宍emotion_intensity=1.0` 鏃惰闊冲悎鎴愪娇鐢ㄦ渶澶ц姘斿箙搴︼紝`emotion_intensity=0.0` 鏃朵娇鐢ㄦ渶灏忚姘斿箙搴︼紝瀹炵幇鎯呮劅寮哄害瀵硅闊宠緭鍑虹殑瀹為檯褰卞搷銆?
+**预期效果：** TTS 情感强度从"参数断路"变为"全链路传递"，`emotion_intensity=1.0` 时语音合成使用最大语气幅度，`emotion_intensity=0.0` 时使用最小语气幅度，实现情感强度对语音输出的实际影响。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲48锛圥2锛夛細`ASRTranscriptEvent` 涓嶅惈鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁鈥斺€擜SR 鎰熺煡灞傛儏鎰熺洸
+### 🟣 深化优化48（P2）：`ASRTranscriptEvent` 不含用户情感推断字段——ASR 感知层情感盲
 
-**鐩爣鏂囦欢锛?* `edge_client/senses/asr.py`
+**目标文件：** `edge_client/senses/asr.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`ASRTranscriptEvent` 鐨勫瓧娈靛畾涔夛細
+`ASRTranscriptEvent` 的字段定义：
 
 ```python
 @dataclass(frozen=True)
@@ -2706,9 +3050,10 @@ class ASRTranscriptEvent:
     evidence_ref: str
     low_confidence: bool
     reason_code: str | None
-    # 鈫?娌℃湁鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁锛?```
+    # ↑ 没有用户情感推断字段！
+```
 
-`build_asr_transcript_event()` 鐨勫伐鍘傚嚱鏁帮細
+`build_asr_transcript_event()` 的工厂函数：
 
 ```python
 def build_asr_transcript_event(
@@ -2724,12 +3069,16 @@ def build_asr_transcript_event(
     evidence_ref: str | None = None,
     event_id: str | None = None,
 ) -> ASRTranscriptEvent:
-    # 鈫?娌℃湁鐢ㄦ埛鎯呮劅鎺ㄦ柇鍙傛暟锛?```
+    # ↑ 没有用户情感推断参数！
+```
 
-杩欐剰鍛崇潃锛?1. ASR 杞啓浜嬩欢涓嶅惈鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁鈥斺€斿嵆浣?faster-whisper 鍙互閫氳繃璇煶鐗瑰緛锛堣閫熴€侀煶璋冦€佸仠椤匡級鎺ㄦ柇鐢ㄦ埛鎯呮劅锛岃繖浜涗俊鎭篃鏃犳硶浼犻€掔粰 Host
-2. `ASRTranscriptEvent` 鍙湁鏂囨湰鍐呭锛屾病鏈夎闊崇壒寰佷俊鎭紙璇€熴€侀煶璋冨彉鍖栥€佸仠椤挎椂闀匡級鈥斺€擧ost 鏃犳硶鎰熺煡鐢ㄦ埛鐨勬儏鎰熺姸鎬?3. 浼樺寲42涓彁鍒扮殑 `user_emotion_hint` 瀛楁锛堝湪 `EventReportItem` 涓級娌℃湁鏁版嵁鏉ユ簮鈥斺€斿洜涓?ASR 灞傛牴鏈笉鎻愬彇鐢ㄦ埛鎯呮劅淇℃伅
+这意味着：
+1. ASR 转写事件不含用户情感推断字段——即使 faster-whisper 可以通过语音特征（语速、音调、停顿）推断用户情感，这些信息也无法传递给 Host
+2. `ASRTranscriptEvent` 只有文本内容，没有语音特征信息（语速、音调变化、停顿时长）——Host 无法感知用户的情感状态
+3. 优化42中提到的 `user_emotion_hint` 字段（在 `EventReportItem` 中）没有数据来源——因为 ASR 层根本不提取用户情感信息
 
-**鏂规锛?* 涓?`ASRTranscriptEvent` 澧炲姞鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁锛?
+**方案：** 为 `ASRTranscriptEvent` 增加用户情感推断字段：
+
 ```python
 @dataclass(frozen=True)
 class ASRTranscriptEvent:
@@ -2745,12 +3094,14 @@ class ASRTranscriptEvent:
     evidence_ref: str
     low_confidence: bool
     reason_code: str | None
-    # 馃啎 鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁锛坴1.7 鏂板锛?    speech_rate_wpm: float | None = None      # 璇€燂紙璇?鍒嗛挓锛夛紝楂樿閫熷彲鑳借〃绀哄叴濂?鐒﹁檻
-    pause_ratio: float | None = None          # 鍋滈】姣斾緥锛?.0~1.0锛夛紝楂樺仠椤垮彲鑳借〃绀烘偛浼?鐘硅鲍
-    user_emotion_hint: str | None = None      # 鐢ㄦ埛鎯呮劅鎺ㄦ柇锛?EXCITED"/"SAD"/"ANXIOUS" 绛夛級
-    user_emotion_confidence: float | None = None  # 鎯呮劅鎺ㄦ柇缃俊搴︼紙0.0~1.0锛?```
+    # 🆕 用户情感推断字段（v1.7 新增）
+    speech_rate_wpm: float | None = None      # 语速（词/分钟），高语速可能表示兴奋/焦虑
+    pause_ratio: float | None = None          # 停顿比例（0.0~1.0），高停顿可能表示悲伤/犹豫
+    user_emotion_hint: str | None = None      # 用户情感推断（"EXCITED"/"SAD"/"ANXIOUS" 等）
+    user_emotion_confidence: float | None = None  # 情感推断置信度（0.0~1.0）
+```
 
-**`build_asr_transcript_event()` 澧炲姞鐢ㄦ埛鎯呮劅鎺ㄦ柇鍙傛暟锛?*
+**`build_asr_transcript_event()` 增加用户情感推断参数：**
 
 ```python
 def build_asr_transcript_event(
@@ -2765,7 +3116,7 @@ def build_asr_transcript_event(
     alternates: list[str] | None = None,
     evidence_ref: str | None = None,
     event_id: str | None = None,
-    # 馃啎 鐢ㄦ埛鎯呮劅鎺ㄦ柇鍙傛暟
+    # 🆕 用户情感推断参数
     speech_rate_wpm: float | None = None,
     pause_ratio: float | None = None,
     user_emotion_hint: str | None = None,
@@ -2773,7 +3124,7 @@ def build_asr_transcript_event(
 ) -> ASRTranscriptEvent:
 ```
 
-**璇€?鍋滈】鑷姩璁＄畻锛?*
+**语速/停顿自动计算：**
 
 ```python
 def _estimate_speech_features(
@@ -2782,13 +3133,13 @@ def _estimate_speech_features(
     ts_start_ms: int,
     ts_end_ms: int,
 ) -> dict[str, float | None]:
-    """浠庤浆鍐欐枃鏈拰鏃堕棿鎴充及绠楄闊崇壒寰併€?""
+    """从转写文本和时间戳估算语音特征。"""
     duration_s = max(0.001, (ts_end_ms - ts_start_ms) / 1000.0)
     word_count = len(text.split())
     speech_rate_wpm = round(word_count / duration_s * 60, 1) if word_count > 0 else None
 
-    # 绠€鍗曠殑鍋滈】姣斾緥浼扮畻锛堝熀浜庢枃鏈腑鐨勬爣鐐圭鍙峰瘑搴︼級
-    pause_chars = sum(1 for c in text if c in "锛屻€傦紒锛熲€︺€?.")
+    # 简单的停顿比例估算（基于文本中的标点符号密度）
+    pause_chars = sum(1 for c in text if c in "，。！？…、,.")
     pause_ratio = round(pause_chars / max(1, len(text)), 3)
 
     return {
@@ -2797,114 +3148,164 @@ def _estimate_speech_features(
     }
 ```
 
-**棰勬湡鏁堟灉锛?* ASR 鎰熺煡灞備粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛孉SR 杞啓浜嬩欢鎼哄甫鐢ㄦ埛鎯呮劅鎺ㄦ柇淇℃伅锛孒ost 鍙互鎰熺煡鐢ㄦ埛鐨勬儏鎰熺姸鎬侊紙閫氳繃璇€熴€佸仠椤跨瓑璇煶鐗瑰緛锛夛紝涓轰紭鍖?2涓殑 `user_emotion_hint` 瀛楁鎻愪緵鏁版嵁鏉ユ簮锛屽疄鐜?鐢ㄦ埛鎯呮劅鈫扐I鎯呮劅鍝嶅簲"鐨勫畬鏁撮棴鐜€?
+**预期效果：** ASR 感知层从"情感盲"变为"情感感知"，ASR 转写事件携带用户情感推断信息，Host 可以感知用户的情感状态（通过语速、停顿等语音特征），为优化42中的 `user_emotion_hint` 字段提供数据来源，实现"用户情感→AI情感响应"的完整闭环。
+
 ---
 
-## 浜屽崄涓冦€佺鍏疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 二十七、第八轮优化的核心价值总结
 
-绗叓杞紭鍖栬仛鐒︿簬**鍩虹璁炬柦鎯呮劅鐩插尯**鈥斺€旀儏鎰熶俊鎭湪"璋冨害鈫扡LM缃戝叧鈫掑浘鎵ц鈫掕娴嬧啋TTS鈫扐SR"鍩虹璁炬柦閾捐矾涓殑绯荤粺鎬х洸鍖猴細
+第八轮优化聚焦于**基础设施情感盲区**——情感信息在"调度→LLM网关→图执行→观测→TTS→ASR"基础设施链路中的系统性盲区：
 
-| 浼樺寲椤?| 鍙戠幇鐨?鍩虹璁炬柦鐩插尯" | 褰卞搷鑼冨洿 | 淇鏂规 |
+| 优化项 | 发现的"基础设施盲区" | 影响范围 | 修复方案 |
 |--------|-----------------|---------|---------|
-| **浼樺寲43** 馃敶 | 璋冨害浠诲姟瑙﹀彂涓嶆劅鐭ユ儏鎰熺姸鎬侊紝critical 鐘舵€佷笅楂樻秷鑰椾换鍔′粛琚Е鍙?| `scheduler.py` 鈫?璋冨害灞?| 澧炲姞鎯呮劅闂ㄦ帶锛宑ritical 鐘舵€佷笅鏆傜紦 MEDIUM/HIGH 浼樺厛绾т换鍔?|
-| **浼樺寲44** 馃煚 | LLM 璋冪敤涓嶆惡甯︽儏鎰熶笂涓嬫枃锛岄檷绾у洖澶嶄笉鎰熺煡鎯呮劅鐘舵€?| `llm_gateway.py` 鈫?LLM 缃戝叧 | 澧炲姞 emotion_context 鍙傛暟锛岄檷绾у洖澶嶆牴鎹儏鎰熺姸鎬侀€夋嫨鏂囨湰 |
-| **浼樺寲45** 馃煛 | 鍥捐妭鐐规墽琛?context 涓嶅惈鎯呮劅瀛楁锛孏raphState 鏃犳儏鎰熷瓧娈?| `graph_executor.py` 鈫?鍥炬墽琛?| GraphState 澧炲姞鎯呮劅瀛楁锛宧andler context 浼犻€掓儏鎰熺姸鎬?|
-| **浼樺寲46** 馃煝 | 瑙傛祴鎸囨爣涓嶅惈鎯呮劅缁村害锛岃繍缁存棤娉曟劅鐭ユ儏鎰熺姸鎬佸彉鍖栬秼鍔?| `obs/metrics.py` 鈫?瑙傛祴灞?| 澧炲姞 emotion_stats 鎸囨爣锛宺ecent_chains 澧炲姞鎯呮劅瀛楁 |
-| **浼樺寲47** 馃數 | TTS emotion_intensity 鍙傛暟鍦ㄩ摼璺腑琚?鍚炴帀"锛屽璇煶鍚堟垚鏃犲疄闄呭奖鍝?| `tts_engine.py` 鈫?TTS 寮曟搸 | 淇鍙傛暟浼犻€掓柇璺紝emotion_intensity 鏄犲皠鍒?TTS temperature |
-| **浼樺寲48** 馃煟 | ASR 杞啓浜嬩欢涓嶅惈鐢ㄦ埛鎯呮劅鎺ㄦ柇锛孒ost 鏃犳硶鎰熺煡鐢ㄦ埛鎯呮劅鐘舵€?| `senses/asr.py` 鈫?ASR 鎰熺煡 | 澧炲姞 speech_rate_wpm/pause_ratio/user_emotion_hint 瀛楁 |
+| **优化43** 🔴 | 调度任务触发不感知情感状态，critical 状态下高消耗任务仍被触发 | `scheduler.py` → 调度层 | 增加情感门控，critical 状态下暂缓 MEDIUM/HIGH 优先级任务 |
+| **优化44** 🟠 | LLM 调用不携带情感上下文，降级回复不感知情感状态 | `llm_gateway.py` → LLM 网关 | 增加 emotion_context 参数，降级回复根据情感状态选择文本 |
+| **优化45** 🟡 | 图节点执行 context 不含情感字段，GraphState 无情感字段 | `graph_executor.py` → 图执行 | GraphState 增加情感字段，handler context 传递情感状态 |
+| **优化46** 🟢 | 观测指标不含情感维度，运维无法感知情感状态变化趋势 | `obs/metrics.py` → 观测层 | 增加 emotion_stats 指标，recent_chains 增加情感字段 |
+| **优化47** 🔵 | TTS emotion_intensity 参数在链路中被"吞掉"，对语音合成无实际影响 | `tts_engine.py` → TTS 引擎 | 修复参数传递断路，emotion_intensity 映射到 TTS temperature |
+| **优化48** 🟣 | ASR 转写事件不含用户情感推断，Host 无法感知用户情感状态 | `senses/asr.py` → ASR 感知 | 增加 speech_rate_wpm/pause_ratio/user_emotion_hint 字段 |
 
 ---
 
-### 绗叓杞殑鐗规畩鍙戠幇锛?*浼樺寲47 鏄竴涓?鍙傛暟榛戞礊"**
+### 第八轮的特殊发现：**优化47 是一个"参数黑洞"**
 
-浼樺寲47锛圱TS emotion_intensity 鏂矾锛夋槸涓€涓壒娈婄殑闂鈥斺€擿emotion_intensity` 鍙傛暟鍦?`SoVITSModelManager.synthesize()` 涓鎺ユ敹锛屽湪 `_synthesize_audio()` 涓浼犻€掞紝浣嗗湪 `_ModernSoVITSAdapter.synthesize()` 涓瀹屽叏蹇界暐锛屾病鏈変紶閫掔粰搴曞眰 SDK銆傝繖鏄竴涓吀鍨嬬殑"鍙傛暟榛戞礊"鈥斺€斿弬鏁板湪鏁翠釜璋冪敤閾句腑琚紶閫掞紝浣嗘渶缁堟病鏈変换浣曞疄闄呮晥鏋溿€?
-### 绗叓杞殑鍙︿竴涓壒娈婂彂鐜帮細**浼樺寲48 鏄紭鍖?2鐨?鏁版嵁鏉ユ簮"**
+优化47（TTS emotion_intensity 断路）是一个特殊的问题——`emotion_intensity` 参数在 `SoVITSModelManager.synthesize()` 中被接收，在 `_synthesize_audio()` 中被传递，但在 `_ModernSoVITSAdapter.synthesize()` 中被完全忽略，没有传递给底层 SDK。这是一个典型的"参数黑洞"——参数在整个调用链中被传递，但最终没有任何实际效果。
 
-浼樺寲48锛圓SR 鐢ㄦ埛鎯呮劅鎺ㄦ柇锛変笌浼樺寲42锛圗ventReportItem 鐨?`user_emotion_hint` 瀛楁锛夊舰鎴愪簡涓€涓畬鏁寸殑闂幆锛氫紭鍖?2涓?`EventReportItem` 澧炲姞浜?`user_emotion_hint` 瀛楁锛屼絾杩欎釜瀛楁鐨勬暟鎹潵婧愭槸 ASR 灞傗€斺€斿鏋?ASR 灞備笉鎻愬彇鐢ㄦ埛鎯呮劅淇℃伅锛宍user_emotion_hint` 瀛楁灏辨案杩滄槸 `None`銆備紭鍖?8淇浜嗚繖涓暟鎹潵婧愰棶棰樸€?
+### 第八轮的另一个特殊发现：**优化48 是优化42的"数据来源"**
+
+优化48（ASR 用户情感推断）与优化42（EventReportItem 的 `user_emotion_hint` 字段）形成了一个完整的闭环：优化42为 `EventReportItem` 增加了 `user_emotion_hint` 字段，但这个字段的数据来源是 ASR 层——如果 ASR 层不提取用户情感信息，`user_emotion_hint` 字段就永远是 `None`。优化48修复了这个数据来源问题。
+
 ---
 
-## 浜屽崄鍏€佸畬鏁翠紭鍖栧叏鏅浘锛坴1.7锛?8椤癸級
+## 二十八、完整优化全景图（v1.7，48项）
 
-### 鍏疆浼樺寲鐨勫眰娆￠€掕繘
+### 八轮优化的层次递进
 
 ```
-绗竴杞紙v1.0锛夛細鍙戠幇5涓?缂哄け鍔熻兘"       鈫?闇€瑕佹柊澧炰粈涔?绗簩杞紙v1.1锛夛細鍙戠幇6涓?娣卞眰闂"       鈫?鐜版湁鏈哄埗鍝噷涓嶅娣?绗笁杞紙v1.2锛夛細鍙戠幇6涓?鍋囧姛鑳界┖澹?     鈫?鐜版湁浠ｇ爜鍝噷鐪嬭捣鏉ユ湁浣嗗疄闄呮病鐢?绗洓杞紙v1.3锛夛細鍙戠幇6涓?鏋舵瀯鏂眰"       鈫?鍔熻兘涔嬮棿鐨勮繛鎺ュ湪鍝噷鏂
-绗簲杞紙v1.4锛夛細鍙戠幇6涓?璺ㄦā鍧楃洸鍖?     鈫?鎯呮劅淇℃伅鍦ㄥ叏閾捐矾涓殑绯荤粺鎬х己澶?绗叚杞紙v1.5锛夛細鍙戠幇6涓?鎰熺煡灞傛柇璺?     鈫?鎯呮劅淇℃伅鍦ㄦ劅鐭モ啋鍐崇瓥鈫掕緭鍑衡啋瑙傛祴涓殑鏂矾
-绗竷杞紙v1.6锛夛細鍙戠幇6涓?鎵ц灞傜湡绌?     鈫?鎯呮劅淇℃伅鍦ㄦ墽琛屸啋鍙嶉鈫掕竟缂樼閾捐矾涓殑鐪熺┖
-绗叓杞紙v1.7锛夛細鍙戠幇6涓?鍩虹璁炬柦鐩插尯"   鈫?鎯呮劅淇℃伅鍦ㄨ皟搴︹啋LLM鈫掑浘鎵ц鈫掕娴嬧啋TTS鈫扐SR涓殑鐩插尯
+第一轮（v1.0）：发现5个"缺失功能"       → 需要新增什么
+第二轮（v1.1）：发现6个"深层问题"       → 现有机制哪里不够深
+第三轮（v1.2）：发现6个"假功能空壳"     → 现有代码哪里看起来有但实际没用
+第四轮（v1.3）：发现6个"架构断层"       → 功能之间的连接在哪里断裂
+第五轮（v1.4）：发现6个"跨模块盲区"     → 情感信息在全链路中的系统性缺失
+第六轮（v1.5）：发现6个"感知层断路"     → 情感信息在感知→决策→输出→观测中的断路
+第七轮（v1.6）：发现6个"执行层真空"     → 情感信息在执行→反馈→边缘端链路中的真空
+第八轮（v1.7）：发现6个"基础设施盲区"   → 情感信息在调度→LLM→图执行→观测→TTS→ASR中的盲区
 ```
 
-### 鎸変紭鍏堢骇鍒嗙被锛?8椤瑰叏鏅級
+### 按优先级分类（48项全景）
 
-| 浼樺厛绾?| 浼樺寲椤?| 鏍稿績闂 |
+| 优先级 | 优化项 | 核心问题 |
 |--------|--------|---------|
-| **P0锛堝繀椤讳慨澶嶏級** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32, OPT37, OPT38, OPT43 | 鏋舵瀯鏂眰 + 璺ㄦā鍧楃洸鍖?+ 鎰熺煡灞傛柇璺?+ 鎵ц灞傜湡绌?+ 璋冨害灞傛儏鎰熺洸 |
-| **P1锛堥噸瑕佷紭鍖栵級** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35, OPT39, OPT40, OPT41, OPT44, OPT45, OPT46, OPT47, OPT48 | 鎯呮劅鍐呮牳 + 鍏崇郴灞?+ 璁板繂灞?+ 鎰熺煡灞?+ 鎵ц灞?+ 鍩虹璁炬柦灞?|
-| **P2锛堜綋楠屽寮猴級** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36, OPT42 | 杈撳嚭灞?+ 缁嗚妭鎵撶（ + 杈圭紭绔?|
+| **P0（必须修复）** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32, OPT37, OPT38, OPT43 | 架构断层 + 跨模块盲区 + 感知层断路 + 执行层真空 + 调度层情感盲 |
+| **P1（重要优化）** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35, OPT39, OPT40, OPT41, OPT44, OPT45, OPT46, OPT47, OPT48 | 情感内核 + 关系层 + 记忆层 + 感知层 + 执行层 + 基础设施层 |
+| **P2（体验增强）** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36, OPT42 | 输出层 + 细节打磨 + 边缘端 |
 
-### 鎯呮劅淇℃伅鍏ㄩ摼璺鐩栧浘锛坴1.7 鏈€缁堢増锛?
+### 情感信息全链路覆盖图（v1.7 最终版）
+
 ```
-鐢ㄦ埛璇煶杈撳叆
-    鈫?[ASR 鎰熺煡灞俔 edge_client/senses/asr.py
-    OPT48: ASRTranscriptEvent 鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁锛堟柊澧烇級鈫?鏁版嵁鏉ユ簮
-    鈫?[杈圭紭绔簨浠朵笂鎶 edge_client/rpc/event_reporter.py
-    OPT42: EventReportItem 鎯呮劅瀛楁 + 璺ㄧ鏋氫妇缁熶竴锛堢涓冭疆锛?    鈫?[瑙嗚鎰熺煡灞俔 vision/camera_event.py
-    OPT35: 瑙嗚璇嗗埆 鈫?鎯呮劅瑙﹀彂锛堢鍏疆锛?    鈫?[璋冨害灞俔 scheduler/scheduler.py
-    OPT43: 鎯呮劅闂ㄦ帶 + system_intent 鎼哄甫鎯呮劅鐘舵€侊紙鏂板锛?    鈫?[鍙洖绠＄嚎灞俔 retrieval/pipeline.py
-    OPT41: emotion_context 鍙傛暟璐€氾紙绗竷杞級
-    鈫?[鍙洖灞俔 retrieval/recall_fusion.py
-    OPT31: 鎯呮劅缁村害璺敱锛堢鍏疆锛?    OPT36: 鎯呮劅寮哄害鍔犳潈铻嶅悎锛堢鍏疆锛?    鈫?[閲嶆帓搴忓眰] retrieval/reranker.py
-    OPT40: 鎯呮劅鍋忓ソ閲嶆帓锛堢涓冭疆锛?    鈫?[鍐崇瓥灞俔 governor/decision.py
-    OPT32: R8 鎯呮劅淇濇姢闂ㄦ帶锛堢鍏疆锛?    鈫?[鎯呮劅鍐呮牳] core/metabolism.py
-    OPT6/7/8: EmotionVector 娣卞寲锛堢浜岃疆锛?    鈫?[鍏崇郴灞俔 bond/
-    OPT26: 鎯呮劅鍔犳潈 Bond 绉垎锛堢浜旇疆锛?    OPT27: Bond Summary 淇锛堢浜旇疆锛?    鈫?[璁板繂灞俔 memory/
-    OPT25/28/29: 鎯呮劅璁板繂鏍囨敞/淇濆瓨/钂搁锛堢浜旇疆锛?    鈫?[杈撳嚭灞俔 core/qa.py + core/prompt_context.py
-    OPT19/20/22: 鏋舵瀯鏂眰淇锛堢鍥涜疆锛?    鈫?[LLM 缃戝叧灞俔 integrations/llm_gateway.py
-    OPT44: emotion_context 娉ㄥ叆 prompt_payload锛堟柊澧烇級
-    鈫?[鍥炬墽琛屽眰] integrations/graph_executor.py
-    OPT45: GraphState 鎯呮劅瀛楁 + handler context 浼犻€掞紙鏂板锛?    鈫?[宸ュ叿娉ㄥ唽灞俔 mcp/tool_registry.py
-    OPT39: ToolMeta 鎯呮劅閫傜敤鎬у瓧娈碉紙绗竷杞級
-    鈫?[鎵ц灞俔 skills/loader.py + tools/broker.py
-    OPT37: 鎶€鑳芥墽琛?context 鎯呮劅瀛楁锛堢涓冭疆锛?    OPT38: 宸ュ叿鎵ц context 鎯呮劅瀛楁锛堢涓冭疆锛?    鈫?[閫氶亾灞俔 channels/vts.py
-    OPT34: VTS 琛ㄦ儏鏄犲皠鎵╁睍锛堢鍏疆锛?    鈫?[TTS 寮曟搸灞俔 edge_client/actuators/tts_engine.py
-    OPT47: emotion_intensity 鍙傛暟榛戞礊淇锛堟柊澧烇級
-    鈫?[瑙傛祴灞俔 observability/cross_timeline.py + obs/metrics.py
-    OPT33: 鎯呮劅浜嬩欢绾冲叆鏃堕棿绾匡紙绗叚杞級
-    OPT46: emotion_stats 鎸囨爣锛堟柊澧烇級
-    鈫?鐢ㄦ埛鎰熺煡鍒扮殑鎯呮劅杈撳嚭锛堣闊?+ 琛ㄦ儏 + 鏂囧瓧锛?```
+用户语音输入
+    ↓
+[ASR 感知层] edge_client/senses/asr.py
+    OPT48: ASRTranscriptEvent 用户情感推断字段（新增）← 数据来源
+    ↓
+[边缘端事件上报] edge_client/rpc/event_reporter.py
+    OPT42: EventReportItem 情感字段 + 跨端枚举统一（第七轮）
+    ↓
+[视觉感知层] vision/camera_event.py
+    OPT35: 视觉识别 → 情感触发（第六轮）
+    ↓
+[调度层] scheduler/scheduler.py
+    OPT43: 情感门控 + system_intent 携带情感状态（新增）
+    ↓
+[召回管线层] retrieval/pipeline.py
+    OPT41: emotion_context 参数贯通（第七轮）
+    ↓
+[召回层] retrieval/recall_fusion.py
+    OPT31: 情感维度路由（第六轮）
+    OPT36: 情感强度加权融合（第六轮）
+    ↓
+[重排序层] retrieval/reranker.py
+    OPT40: 情感偏好重排（第七轮）
+    ↓
+[决策层] governor/decision.py
+    OPT32: R8 情感保护门控（第六轮）
+    ↓
+[情感内核] core/metabolism.py
+    OPT6/7/8: EmotionVector 深化（第二轮）
+    ↓
+[关系层] bond/
+    OPT26: 情感加权 Bond 积分（第五轮）
+    OPT27: Bond Summary 修复（第五轮）
+    ↓
+[记忆层] memory/
+    OPT25/28/29: 情感记忆标注/保存/蒸馏（第五轮）
+    ↓
+[输出层] core/qa.py + core/context_pack.py
+    OPT19/20/22: 架构断层修复（第四轮）
+    ↓
+[LLM 网关层] integrations/llm_gateway.py
+    OPT44: emotion_context 注入 prompt_payload（新增）
+    ↓
+[图执行层] integrations/graph_executor.py
+    OPT45: GraphState 情感字段 + handler context 传递（新增）
+    ↓
+[工具注册层] mcp/tool_registry.py
+    OPT39: ToolMeta 情感适用性字段（第七轮）
+    ↓
+[执行层] skills/loader.py + tools/broker.py
+    OPT37: 技能执行 context 情感字段（第七轮）
+    OPT38: 工具执行 context 情感字段（第七轮）
+    ↓
+[通道层] channels/vts.py
+    OPT34: VTS 表情映射扩展（第六轮）
+    ↓
+[TTS 引擎层] edge_client/actuators/tts_engine.py
+    OPT47: emotion_intensity 参数黑洞修复（新增）
+    ↓
+[观测层] observability/cross_timeline.py + obs/metrics.py
+    OPT33: 情感事件纳入时间线（第六轮）
+    OPT46: emotion_stats 指标（新增）
+    ↓
+用户感知到的情感输出（语音 + 表情 + 文字）
+```
 
 ---
 
-## 浜屽崄涓夈€佺涓冭疆娣卞寲浼樺寲锛氭墽琛屽眰鎯呮劅鐪熺┖
+## 二十三、第七轮深化优化：执行层情感真空
 
-> **v1.6 鏂板**锛?026-03-05锛夈€傛湰杞熀浜庡 `skills/loader.py`銆乣tools/broker.py`銆乣mcp/tool_registry.py`銆乣retrieval/reranker.py`銆乣retrieval/pipeline.py`銆乣edge_client/actuators/vts_expression_map.py`銆乣edge_client/rpc/event_reporter.py` 鐨勫畬鏁撮€愯绮捐锛屽彂鐜颁簡鍓嶅叚杞畬鍏ㄦ湭瑙﹀強鐨?**6 涓墽琛屽眰鎯呮劅鐪熺┖**鈥斺€旇繖浜涢棶棰樺垎甯冨湪鎶€鑳芥墽琛屽眰銆佸伐鍏蜂唬鐞嗗眰銆丮CP娉ㄥ唽灞傘€侀噸鎺掑簭灞傘€佸彫鍥炵绾垮眰銆佽竟缂樼琛ㄦ儏鏄犲皠灞傦紝鏄儏鎰熶俊鎭湪"鎵ц鈫掑弽棣堚啋杈圭紭绔?閾捐矾涓殑绯荤粺鎬х湡绌恒€?
+> **v1.6 新增**（2026-03-05）。本轮基于对 `skills/loader.py`、`tools/broker.py`、`mcp/tool_registry.py`、`retrieval/reranker.py`、`retrieval/pipeline.py`、`edge_client/actuators/vts_expression_map.py`、`edge_client/rpc/event_reporter.py` 的完整逐行精读，发现了前六轮完全未触及的 **6 个执行层情感真空**——这些问题分布在技能执行层、工具代理层、MCP注册层、重排序层、召回管线层、边缘端表情映射层，是情感信息在"执行→反馈→边缘端"链路中的系统性真空。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲37锛圥0锛夛細`SkillLoader.execute()` 鐨?`context` 鍙傛暟涓嶄紶閫掓儏鎰熺姸鎬佲€斺€旀妧鑳芥墽琛屾椂鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/skills/loader.py`
+### 🔴 深化优化37（P0）：`SkillLoader.execute()` 的 `context` 参数不传递情感状态——技能执行时情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/skills/loader.py`
 
-`execute()` 鐨?`context` 鍙傛暟锛?
+**精读发现：**
+
+`execute()` 的 `context` 参数：
+
 ```python
 def execute(
     self,
     *,
     intent: dict[str, Any],
     governor_output: dict[str, Any],
-    context: dict[str, Any] | None = None,   # 鈫?鑷敱鏍煎紡 dict锛屾病鏈夋儏鎰熷瓧娈电害瀹?    now_ts_ms: int | None = None,
+    context: dict[str, Any] | None = None,   # ← 自由格式 dict，没有情感字段约定
+    now_ts_ms: int | None = None,
 ) -> SkillExecutionResult:
 ```
 
-`handler_result = meta.handler(args, context)` 璋冪敤鏃讹細
+`handler_result = meta.handler(args, context)` 调用时：
 
 ```python
 try:
     handler_result = meta.handler(args, context)
-    # 鈫?context 浼犵粰鎶€鑳?handler锛屼絾 context 閲屾病鏈夋儏鎰熷瓧娈碉紒
+    # ↑ context 传给技能 handler，但 context 里没有情感字段！
 ```
 
-`_log_and_return()` 鍐欏叆瀹¤鐨?row锛?
+`_log_and_return()` 写入审计的 row：
+
 ```python
 row = {
     "request_id": request_id or None,
@@ -2921,20 +3322,25 @@ row = {
     "manifest_ref": manifest_ref,
     "undo_token_ref": undo_token_ref,
     "ts_ms": ts_ms,
-    # 鈫?娌℃湁 emotion_tag銆乵ood_state 瀛楁锛?}
+    # ↑ 没有 emotion_tag、mood_state 字段！
+}
 ```
 
-杩欐剰鍛崇潃锛?1. 鎶€鑳芥墽琛屾椂瀹屽叏涓嶆劅鐭ユ儏鎰熺姸鎬佲€斺€擿EXCITED` 鐘舵€佷笅鎵ц鐨勬妧鑳藉拰 `SAD` 鐘舵€佷笅鎵ц鐨勬妧鑳藉緱鍒扮浉鍚岀殑 context
-2. 鎶€鑳?handler 鏃犳硶鏍规嵁鎯呮劅鐘舵€佽皟鏁存墽琛岃涓猴紙渚嬪锛歚EXCITED` 鐘舵€佷笅鐨勯煶涔愭挱鏀炬妧鑳藉簲璇ラ€夋嫨娆㈠揩鐨勬瓕鏇诧級
-3. 鎶€鑳芥墽琛屽璁℃棩蹇椾笉鍚儏鎰熷瓧娈碉紝鏃犳硶浜嬪悗鍒嗘瀽"鍝簺鎯呮劅鐘舵€佷笅鎶€鑳芥墽琛屾垚鍔熺巼鏇撮珮"
+这意味着：
+1. 技能执行时完全不感知情感状态——`EXCITED` 状态下执行的技能和 `SAD` 状态下执行的技能得到相同的 context
+2. 技能 handler 无法根据情感状态调整执行行为（例如：`EXCITED` 状态下的音乐播放技能应该选择欢快的歌曲）
+3. 技能执行审计日志不含情感字段，无法事后分析"哪些情感状态下技能执行成功率更高"
 
-**鏂规锛?* 涓?`context` 澧炲姞鎯呮劅瀛楁绾﹀畾锛屽苟鍦ㄥ璁℃棩蹇椾腑璁板綍鎯呮劅鐘舵€侊細
+**方案：** 为 `context` 增加情感字段约定，并在审计日志中记录情感状态：
 
 ```python
-# 馃啎 鎶€鑳芥墽琛?context 鎯呮劅瀛楁绾﹀畾锛坴1.6 鏂板锛?SKILL_CONTEXT_EMOTION_FIELDS = {
-    "emotion_tag": str,        # AI 褰撳墠鎯呮劅鏍囩锛?NEUTRAL"/"HAPPY"/"SAD" 绛夛級
-    "mood_state": str,         # AI 褰撳墠鎯呮劅鐘舵€侊紙"engaged"/"steady"/"calm"/"tired"/"critical"锛?    "bond_stage": str,         # 褰撳墠 Bond 闃舵锛?STRANGER"/"FRIEND" 绛夛級
-    "emotional_intensity": float,  # 鎯呮劅寮哄害锛?.0~1.0锛?}
+# 🆕 技能执行 context 情感字段约定（v1.6 新增）
+SKILL_CONTEXT_EMOTION_FIELDS = {
+    "emotion_tag": str,        # AI 当前情感标签（"NEUTRAL"/"HAPPY"/"SAD" 等）
+    "mood_state": str,         # AI 当前情感状态（"engaged"/"steady"/"calm"/"tired"/"critical"）
+    "bond_stage": str,         # 当前 Bond 阶段（"STRANGER"/"FRIEND" 等）
+    "emotional_intensity": float,  # 情感强度（0.0~1.0）
+}
 
 def execute(
     self,
@@ -2945,33 +3351,36 @@ def execute(
     now_ts_ms: int | None = None,
 ) -> SkillExecutionResult:
     # ...
-    # 馃啎 浠?context 涓彁鍙栨儏鎰熷瓧娈碉紝鐢ㄤ簬瀹¤鏃ュ織
+    # 🆕 从 context 中提取情感字段，用于审计日志
     emotion_tag = str((context or {}).get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str((context or {}).get("mood_state") or "steady").lower()
     bond_stage = str((context or {}).get("bond_stage") or "STRANGER").upper()
 ```
 
-**瀹¤鏃ュ織澧炲姞鎯呮劅瀛楁锛?*
+**审计日志增加情感字段：**
 
 ```python
 row = {
-    # ... 鍘熸湁瀛楁 ...
-    # 馃啎 鎯呮劅瀛楁
+    # ... 原有字段 ...
+    # 🆕 情感字段
     "emotion_tag": emotion_tag,
     "mood_state": mood_state,
     "bond_stage": bond_stage,
 }
 ```
 
-**棰勬湡鏁堟灉锛?* 鎶€鑳芥墽琛屼粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屾妧鑳?handler 鍙互鏍规嵁鎯呮劅鐘舵€佽皟鏁存墽琛岃涓猴紝瀹¤鏃ュ織鍙互鍒嗘瀽鎯呮劅鐘舵€佷笌鎶€鑳芥墽琛岀粨鏋滅殑鐩稿叧鎬с€?
+**预期效果：** 技能执行从"情感盲"变为"情感感知"，技能 handler 可以根据情感状态调整执行行为，审计日志可以分析情感状态与技能执行结果的相关性。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲38锛圥0锛夛細`ToolBroker.execute()` 鐨?`context` 鍙傛暟涓嶄紶閫掓儏鎰熺姸鎬佲€斺€斿伐鍏锋墽琛屾椂鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/tools/broker.py`
+### 🟠 深化优化38（P0）：`ToolBroker.execute()` 的 `context` 参数不传递情感状态——工具执行时情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/tools/broker.py`
 
-`execute()` 鐨?`context` 鍙傛暟锛?
+**精读发现：**
+
+`execute()` 的 `context` 参数：
+
 ```python
 def execute(
     self,
@@ -2982,7 +3391,8 @@ def execute(
     seq: int,
     tool_id: str,
     args: dict[str, Any] | None = None,
-    context: dict[str, Any] | None = None,   # 鈫?鑷敱鏍煎紡 dict锛屾病鏈夋儏鎰熷瓧娈电害瀹?    approval_token_ref: str | None = None,
+    context: dict[str, Any] | None = None,   # ← 自由格式 dict，没有情感字段约定
+    approval_token_ref: str | None = None,
     confirm_token_ref: str | None = None,
     thread_id: str | None = None,
     turn_id: str | None = None,
@@ -2990,15 +3400,16 @@ def execute(
 ) -> ToolExecutionResult:
 ```
 
-`output = handler(safe_args, context)` 璋冪敤鏃讹細
+`output = handler(safe_args, context)` 调用时：
 
 ```python
 try:
     output = handler(safe_args, context)
-    # 鈫?context 浼犵粰宸ュ叿 handler锛屼絾 context 閲屾病鏈夋儏鎰熷瓧娈碉紒
+    # ↑ context 传给工具 handler，但 context 里没有情感字段！
 ```
 
-`_log_and_return()` 鍐欏叆瀹¤鐨?row锛?
+`_log_and_return()` 写入审计的 row：
+
 ```python
 row = {
     "request_id": request_id,
@@ -3015,15 +3426,20 @@ row = {
     "manifest_ref": None,
     "undo_token_ref": None,
     "ts_ms": ts_ms,
-    # 鈫?娌℃湁 emotion_tag銆乵ood_state 瀛楁锛?}
+    # ↑ 没有 emotion_tag、mood_state 字段！
+}
 ```
 
-杩欐剰鍛崇潃锛?1. 宸ュ叿鎵ц鏃跺畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€佲€斺€擿HAPPY` 鐘舵€佷笅璋冪敤鐨勫伐鍏峰拰 `SAD` 鐘舵€佷笅璋冪敤鐨勫伐鍏峰緱鍒扮浉鍚岀殑 context
-2. 宸ュ叿 handler 鏃犳硶鏍规嵁鎯呮劅鐘舵€佽皟鏁磋緭鍑猴紙渚嬪锛歚SAD` 鐘舵€佷笅鐨勫ぉ姘旀煡璇㈠伐鍏峰簲璇ラ檮鍔犳俯鏆栫殑璇皵锛?3. 宸ュ叿鎵ц瀹¤鏃ュ織涓嶅惈鎯呮劅瀛楁锛屾棤娉曞垎鏋愭儏鎰熺姸鎬佷笌宸ュ叿璋冪敤妯″紡鐨勭浉鍏虫€?
-**鏂规锛?* 涓庝紭鍖?7涓€鑷达紝涓?`context` 澧炲姞鎯呮劅瀛楁绾﹀畾锛屽苟鍦ㄥ璁℃棩蹇椾腑璁板綍鎯呮劅鐘舵€侊細
+这意味着：
+1. 工具执行时完全不感知情感状态——`HAPPY` 状态下调用的工具和 `SAD` 状态下调用的工具得到相同的 context
+2. 工具 handler 无法根据情感状态调整输出（例如：`SAD` 状态下的天气查询工具应该附加温暖的语气）
+3. 工具执行审计日志不含情感字段，无法分析情感状态与工具调用模式的相关性
+
+**方案：** 与优化37一致，为 `context` 增加情感字段约定，并在审计日志中记录情感状态：
 
 ```python
-# 馃啎 宸ュ叿鎵ц context 鎯呮劅瀛楁绾﹀畾锛坴1.6 鏂板锛?TOOL_CONTEXT_EMOTION_FIELDS = {
+# 🆕 工具执行 context 情感字段约定（v1.6 新增）
+TOOL_CONTEXT_EMOTION_FIELDS = {
     "emotion_tag": str,
     "mood_state": str,
     "bond_stage": str,
@@ -3032,19 +3448,22 @@ row = {
 
 def execute(self, ...) -> ToolExecutionResult:
     # ...
-    # 馃啎 浠?context 涓彁鍙栨儏鎰熷瓧娈?    emotion_tag = str((context or {}).get("emotion_tag") or "NEUTRAL").upper()
+    # 🆕 从 context 中提取情感字段
+    emotion_tag = str((context or {}).get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str((context or {}).get("mood_state") or "steady").lower()
 ```
 
-**棰勬湡鏁堟灉锛?* 宸ュ叿鎵ц浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屽伐鍏?handler 鍙互鏍规嵁鎯呮劅鐘舵€佽皟鏁磋緭鍑洪鏍硷紝瀹¤鏃ュ織鍙互鍒嗘瀽鎯呮劅鐘舵€佷笌宸ュ叿璋冪敤妯″紡鐨勭浉鍏虫€с€?
+**预期效果：** 工具执行从"情感盲"变为"情感感知"，工具 handler 可以根据情感状态调整输出风格，审计日志可以分析情感状态与工具调用模式的相关性。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲39锛圥1锛夛細`ToolMeta` 娌℃湁鎯呮劅閫傜敤鎬у瓧娈碘€斺€擬CP 宸ュ叿娉ㄥ唽涓嶆劅鐭ユ儏鎰熷満鏅?
-**鐩爣鏂囦欢锛?* `host_brain/mcp/tool_registry.py`
+### 🟡 深化优化39（P1）：`ToolMeta` 没有情感适用性字段——MCP 工具注册不感知情感场景
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/mcp/tool_registry.py`
 
-`ToolMeta` 鐨勫瓧娈靛畾涔夛細
+**精读发现：**
+
+`ToolMeta` 的字段定义：
 
 ```python
 @dataclass
@@ -3059,24 +3478,33 @@ class ToolMeta:
     version: str = "1.0.0"
     schema_hash: str = ""
     domain_tags: list[str] = field(default_factory=list)
-    # 鈫?娌℃湁鎯呮劅閫傜敤鎬у瓧娈碉紒
+    # ↑ 没有情感适用性字段！
 ```
 
-`VALID_ACCESS_LEVELS` 鍜?`VALID_RISK_LEVELS` 鐨勫畾涔夛細
+`VALID_ACCESS_LEVELS` 和 `VALID_RISK_LEVELS` 的定义：
 
 ```python
 VALID_ACCESS_LEVELS = frozenset({"PUBLIC", "INTERNAL", "RESTRICTED"})
 VALID_RISK_LEVELS = frozenset({"LOW", "MEDIUM", "HIGH"})
-# 鈫?娌℃湁鎯呮劅鍦烘櫙绾︽潫锛?```
+# ↑ 没有情感场景约束！
+```
 
-杩欐剰鍛崇潃锛?1. MCP 宸ュ叿娉ㄥ唽鏃舵病鏈夋儏鎰熼€傜敤鎬х害鏉熲€斺€擿HIGH` 椋庨櫓宸ュ叿鍦?`critical` 鎯呮劅鐘舵€佷笅涔熷彲浠ヨ璋冪敤
-2. 宸ュ叿鐨?`domain_tags` 鏄嚜鐢卞瓧绗︿覆鍒楄〃锛屾病鏈夋儏鎰熷満鏅爣绛剧殑绾﹀畾锛堝 `emotion:happy_only`銆乣mood:engaged_required`锛?3. `prompt_context.py` 鐨?`tool_meta_pack` 妲戒綅娉ㄥ叆宸ュ叿鍏冩暟鎹椂锛孡LM 鏃犳硶鐭ラ亾鍝簺宸ュ叿閫傚悎褰撳墠鎯呮劅鐘舵€?
-**鏂规锛?* 涓?`ToolMeta` 澧炲姞鎯呮劅閫傜敤鎬у瓧娈碉細
+这意味着：
+1. MCP 工具注册时没有情感适用性约束——`HIGH` 风险工具在 `critical` 情感状态下也可以被调用
+2. 工具的 `domain_tags` 是自由字符串列表，没有情感场景标签的约定（如 `emotion:happy_only`、`mood:engaged_required`）
+3. `context_pack.py` 的 `tool_meta_pack` 槽位注入工具元数据时，LLM 无法知道哪些工具适合当前情感状态
+
+**方案：** 为 `ToolMeta` 增加情感适用性字段：
 
 ```python
-# 馃啎 鎯呮劅閫傜敤鎬х害鏉燂紙v1.6 鏂板锛?VALID_EMOTION_REQUIREMENTS = frozenset({
-    "NONE",           # 鏃犳儏鎰熻姹傦紙榛樿锛?    "POSITIVE_ONLY",  # 鍙湪姝ｉ潰鎯呮劅锛圚APPY/EXCITED/CALM锛変笅鍙敤
-    "CALM_REQUIRED",  # 闇€瑕佸钩闈欑姸鎬侊紙CALM/NEUTRAL锛?    "ENGAGED_ONLY",   # 鍙湪 engaged mood_state 涓嬪彲鐢?    "ANY",            # 浠讳綍鎯呮劅鐘舵€佸潎鍙?})
+# 🆕 情感适用性约束（v1.6 新增）
+VALID_EMOTION_REQUIREMENTS = frozenset({
+    "NONE",           # 无情感要求（默认）
+    "POSITIVE_ONLY",  # 只在正面情感（HAPPY/EXCITED/CALM）下可用
+    "CALM_REQUIRED",  # 需要平静状态（CALM/NEUTRAL）
+    "ENGAGED_ONLY",   # 只在 engaged mood_state 下可用
+    "ANY",            # 任何情感状态均可
+})
 
 @dataclass
 class ToolMeta:
@@ -3090,37 +3518,42 @@ class ToolMeta:
     version: str = "1.0.0"
     schema_hash: str = ""
     domain_tags: list[str] = field(default_factory=list)
-    # 馃啎 鎯呮劅閫傜敤鎬у瓧娈?    emotion_requirement: str = "NONE"    # 鎯呮劅鍦烘櫙绾︽潫
-    min_bond_stage: str = "STRANGER"     # 鏈€浣?Bond 闃舵瑕佹眰
-    energy_cost: str = "LOW"             # 鎵ц鑳介噺娑堣€楋紙LOW/MEDIUM/HIGH锛?```
+    # 🆕 情感适用性字段
+    emotion_requirement: str = "NONE"    # 情感场景约束
+    min_bond_stage: str = "STRANGER"     # 最低 Bond 阶段要求
+    energy_cost: str = "LOW"             # 执行能量消耗（LOW/MEDIUM/HIGH）
+```
 
-**鍦?`prompt_context.py` 鐨?`tool_meta_pack` 涓敞鍏ユ儏鎰熼€傜敤鎬т俊鎭細**
+**在 `context_pack.py` 的 `tool_meta_pack` 中注入情感适用性信息：**
 
 ```python
-# 馃啎 tool_meta_pack 澧炲姞鎯呮劅閫傜敤鎬у瓧娈碉紙v1.6 鏂板锛?tool_meta_item = {
+# 🆕 tool_meta_pack 增加情感适用性字段（v1.6 新增）
+tool_meta_item = {
     "tool_id": meta.tool_id,
     "name": meta.name,
     "description": meta.description,
     "risk_level": meta.risk_level,
     "domain_tags": meta.domain_tags,
-    # 馃啎 鎯呮劅閫傜敤鎬?    "emotion_requirement": meta.emotion_requirement,
+    # 🆕 情感适用性
+    "emotion_requirement": meta.emotion_requirement,
     "min_bond_stage": meta.min_bond_stage,
     "energy_cost": meta.energy_cost,
-    # 馃啎 褰撳墠鎯呮劅鐘舵€佷笅鏄惁閫傜敤锛堢敱绯荤粺璁＄畻锛屼笉鏆撮湶鍘熷鏁板€硷級
+    # 🆕 当前情感状态下是否适用（由系统计算，不暴露原始数值）
     "available_in_current_mood": _check_emotion_availability(meta, current_mood_state),
 }
 ```
 
-**棰勬湡鏁堟灉锛?* MCP 宸ュ叿娉ㄥ唽浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛孡LM 鍦ㄩ€夋嫨宸ュ叿鏃跺彲浠ユ劅鐭ュ摢浜涘伐鍏烽€傚悎褰撳墠鎯呮劅鐘舵€侊紝閬垮厤鍦?`critical` 鐘舵€佷笅璋冪敤楂樿兘閲忔秷鑰楃殑宸ュ叿銆?
+**预期效果：** MCP 工具注册从"情感盲"变为"情感感知"，LLM 在选择工具时可以感知哪些工具适合当前情感状态，避免在 `critical` 状态下调用高能量消耗的工具。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲40锛圥1锛夛細`RerankerServiceContract.rerank()` 涓嶆劅鐭ユ儏鎰熺姸鎬佲€斺€旈噸鎺掑簭鏃舵儏鎰熺洸
+### 🟢 深化优化40（P1）：`RerankerServiceContract.rerank()` 不感知情感状态——重排序时情感盲
 
-**鐩爣鏂囦欢锛?* `host_brain/retrieval/reranker.py`
+**目标文件：** `host_brain/retrieval/reranker.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`rerank()` 鐨勫弬鏁帮細
+`rerank()` 的参数：
 
 ```python
 def rerank(
@@ -3133,10 +3566,12 @@ def rerank(
     top_k: int | None = None,
     timeout_ms: int | None = None,
     ts_ms: int | None = None,
-    # 鈫?瀹屽叏娌℃湁鎯呮劅缁村害鍙傛暟锛?) -> RerankerResult:
+    # ↑ 完全没有情感维度参数！
+) -> RerankerResult:
 ```
 
-`_default_rerank_provider()` 鐨勮瘎鍒嗛€昏緫锛?
+`_default_rerank_provider()` 的评分逻辑：
+
 ```python
 def _default_rerank_provider(
     query: str,
@@ -3154,10 +3589,10 @@ def _default_rerank_provider(
         recall_bias = _fallback_score_by_rank(idx, len(candidates)) * 0.01
         scores.append(round(min(1.0, lexical_score + recall_bias), 6))
     return scores, RERANK_MODEL_ID
-    # 鈫?绾瘝姹囬噸鍙犺瘎鍒嗭紝瀹屽叏涓嶆劅鐭ユ儏鎰燂紒
+    # ↑ 纯词汇重叠评分，完全不感知情感！
 ```
 
-`_build_topk()` 鐨勮緭鍑虹粨鏋勶細
+`_build_topk()` 的输出结构：
 
 ```python
 {
@@ -3167,13 +3602,16 @@ def _default_rerank_provider(
     "score": ...,
     "confidence": ...,
     "metadata": ...,
-    # 鈫?娌℃湁鎯呮劅鐩稿叧瀛楁锛?}
+    # ↑ 没有情感相关字段！
+}
 ```
 
-杩欐剰鍛崇潃锛?1. 閲嶆帓搴忔椂瀹屽叏涓嶆劅鐭ユ儏鎰熺姸鎬佲€斺€斿綋鐢ㄦ埛璇?鎴戝緢闅捐繃锛屼綘杩樿寰楁垜浠紑蹇冪殑鏃跺€欏悧"锛岄噸鎺掑簭鍣ㄦ棤娉曚紭鍏堣繑鍥?`emotion_tag=HAPPY` 鐨勮蹇?2. `_default_rerank_provider()` 鐨勮瘝姹囬噸鍙犺瘎鍒嗕笉鎰熺煡鎯呮劅璇箟鈥斺€?寮€蹇?鍜?蹇箰"鐨勮涔夌浉浼兼€ф棤娉曡璇嗗埆
-3. 閲嶆帓搴忚緭鍑虹殑 `topk` 涓嶅惈鎯呮劅瀛楁锛屼笅娓哥殑 `evidence_pack` 鏃犳硶鎰熺煡鎯呮劅缁村害
+这意味着：
+1. 重排序时完全不感知情感状态——当用户说"我很难过，你还记得我们开心的时候吗"，重排序器无法优先返回 `emotion_tag=HAPPY` 的记忆
+2. `_default_rerank_provider()` 的词汇重叠评分不感知情感语义——"开心"和"快乐"的语义相似性无法被识别
+3. 重排序输出的 `topk` 不含情感字段，下游的 `evidence_pack` 无法感知情感维度
 
-**鏂规锛?* 涓?`rerank()` 澧炲姞鎯呮劅鎰熺煡鍙傛暟锛屽苟鍦?`_build_topk()` 杈撳嚭涓繚鐣欐儏鎰熷瓧娈碉細
+**方案：** 为 `rerank()` 增加情感感知参数，并在 `_build_topk()` 输出中保留情感字段：
 
 ```python
 def rerank(
@@ -3186,11 +3624,13 @@ def rerank(
     top_k: int | None = None,
     timeout_ms: int | None = None,
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅鎰熺煡鍙傛暟
-    current_emotion_tag: str | None = None,   # 褰撳墠鎯呮劅鏍囩锛岀敤浜庢儏鎰熷亸濂介噸鎺?    emotion_preference_weight: float = 0.0,   # 鎯呮劅鍋忓ソ鍔犳潈锛?.0~0.2锛?) -> RerankerResult:
+    # 🆕 情感感知参数
+    current_emotion_tag: str | None = None,   # 当前情感标签，用于情感偏好重排
+    emotion_preference_weight: float = 0.0,   # 情感偏好加权（0.0~0.2）
+) -> RerankerResult:
 ```
 
-**鎯呮劅鍋忓ソ閲嶆帓閫昏緫锛?*
+**情感偏好重排逻辑：**
 
 ```python
 def _apply_emotion_preference(
@@ -3199,14 +3639,16 @@ def _apply_emotion_preference(
     current_emotion_tag: str,
     emotion_preference_weight: float,
 ) -> list[dict[str, Any]]:
-    """瀵?topk 缁撴灉搴旂敤鎯呮劅鍋忓ソ閲嶆帓銆?
-    鍚屾儏鎰熸爣绛剧殑璁板繂寰楀埌棰濆鍔犲垎锛屼娇 AI 鍦ㄧ壒瀹氭儏鎰熺姸鎬佷笅
-    鏇村€惧悜浜庡彫鍥炲悓鎯呮劅鐨勮蹇嗭紙鎯呮劅鍏遍福鏁堝簲锛夈€?    """
+    """对 topk 结果应用情感偏好重排。
+
+    同情感标签的记忆得到额外加分，使 AI 在特定情感状态下
+    更倾向于召回同情感的记忆（情感共鸣效应）。
+    """
     result = []
     for item in topk:
         metadata = item.get("metadata") or {}
         item_emotion = str(metadata.get("emotion_tag") or "NEUTRAL").upper()
-        # 鎯呮劅鍖归厤鍔犲垎
+        # 情感匹配加分
         emotion_match = (item_emotion == current_emotion_tag.upper())
         boost = emotion_preference_weight if emotion_match else 0.0
         new_score = round(min(1.0, float(item["score"]) + boost), 6)
@@ -3215,19 +3657,21 @@ def _apply_emotion_preference(
         new_item["metadata"] = dict(metadata)
         new_item["metadata"]["emotion_preference_boosted"] = emotion_match
         result.append(new_item)
-    # 閲嶆柊鎺掑簭
+    # 重新排序
     return sorted(result, key=lambda r: (-float(r["score"]), str(r["doc_id"])))
 ```
 
-**棰勬湡鏁堟灉锛?* 閲嶆帓搴忎粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屽綋 AI 澶勪簬 `HAPPY` 鐘舵€佹椂锛岄噸鎺掑簭浼氫紭鍏堣繑鍥?`emotion_tag=HAPPY` 鐨勮蹇嗭紝瀹炵幇鎯呮劅鍏遍福鏁堝簲銆?
+**预期效果：** 重排序从"情感盲"变为"情感感知"，当 AI 处于 `HAPPY` 状态时，重排序会优先返回 `emotion_tag=HAPPY` 的记忆，实现情感共鸣效应。
+
 ---
 
-### 馃數 娣卞寲浼樺寲41锛圥1锛夛細`RetrievalPipelineContract.run()` 涓嶄紶閫掓儏鎰熶笂涓嬫枃鈥斺€斿彫鍥炵绾挎儏鎰熸柇璺?
-**鐩爣鏂囦欢锛?* `host_brain/retrieval/pipeline.py`
+### 🔵 深化优化41（P1）：`RetrievalPipelineContract.run()` 不传递情感上下文——召回管线情感断路
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/retrieval/pipeline.py`
 
-`run()` 鐨勫弬鏁帮細
+**精读发现：**
+
+`run()` 的参数：
 
 ```python
 def run(
@@ -3238,10 +3682,11 @@ def run(
     intent_id: str | None = None,
     top_k: int | None = None,
     ts_ms: int | None = None,
-    # 鈫?瀹屽叏娌℃湁鎯呮劅缁村害鍙傛暟锛?) -> RetrievalPipelineResult:
+    # ↑ 完全没有情感维度参数！
+) -> RetrievalPipelineResult:
 ```
 
-`recall_service.recall()` 璋冪敤鏃讹細
+`recall_service.recall()` 调用时：
 
 ```python
 recall_result = self.recall_service.recall(
@@ -3250,10 +3695,11 @@ recall_result = self.recall_service.recall(
     query_embedding=embedding_vector,
     intent_id=intent_id,
     ts_ms=now_value,
-    # 鈫?娌℃湁浼犻€掓儏鎰熷弬鏁帮紒鍗充娇 recall_service 鏀寔鎯呮劅杩囨护锛堜紭鍖?1锛夛紝涔熸棤娉曚娇鐢?)
+    # ↑ 没有传递情感参数！即使 recall_service 支持情感过滤（优化31），也无法使用
+)
 ```
 
-`reranker_service.rerank()` 璋冪敤鏃讹細
+`reranker_service.rerank()` 调用时：
 
 ```python
 rerank_result = self.reranker_service.rerank(
@@ -3263,11 +3709,17 @@ rerank_result = self.reranker_service.rerank(
     intent_id=intent_id,
     top_k=top_k,
     ts_ms=now_value,
-    # 鈫?娌℃湁浼犻€掓儏鎰熷弬鏁帮紒鍗充娇 reranker_service 鏀寔鎯呮劅鍋忓ソ锛堜紭鍖?0锛夛紝涔熸棤娉曚娇鐢?)
+    # ↑ 没有传递情感参数！即使 reranker_service 支持情感偏好（优化40），也无法使用
+)
 ```
 
-杩欐剰鍛崇潃锛?1. 鍗充娇浼樺寲31锛堝彫鍥炴儏鎰熻矾鐢憋級鍜屼紭鍖?0锛堥噸鎺掑簭鎯呮劅鍋忓ソ锛夐兘瀹炴柦浜嗭紝鍙洖绠＄嚎涔熸棤娉曚娇鐢ㄨ繖浜涘姛鑳解€斺€斿洜涓?`pipeline.run()` 涓嶄紶閫掓儏鎰熷弬鏁?2. 鍙洖绠＄嚎鏄儏鎰熶俊鎭殑"鏈€鍚庝竴閬撳叧鍗?锛屼絾瀹冨畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€?3. 杩欐槸涓€涓?*鏋舵瀯绾ф柇璺?*鈥斺€斾紭鍖?1鍜屼紭鍖?0鐨勬垚鏋滆绠＄嚎灞傚畬鍏ㄥ睆钄?
-**鏂规锛?* 涓?`run()` 澧炲姞鎯呮劅涓婁笅鏂囧弬鏁帮紝骞朵紶閫掔粰涓嬫父鏈嶅姟锛?
+这意味着：
+1. 即使优化31（召回情感路由）和优化40（重排序情感偏好）都实施了，召回管线也无法使用这些功能——因为 `pipeline.run()` 不传递情感参数
+2. 召回管线是情感信息的"最后一道关卡"，但它完全不感知情感状态
+3. 这是一个**架构级断路**——优化31和优化40的成果被管线层完全屏蔽
+
+**方案：** 为 `run()` 增加情感上下文参数，并传递给下游服务：
+
 ```python
 def run(
     self,
@@ -3277,14 +3729,16 @@ def run(
     intent_id: str | None = None,
     top_k: int | None = None,
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅涓婁笅鏂囧弬鏁帮紙v1.6 鏂板锛?    emotion_context: dict[str, Any] | None = None,
-    # emotion_context 缁撴瀯锛?    # {
-    #   "emotion_tag": "HAPPY",          # 褰撳墠鎯呮劅鏍囩
-    #   "mood_state": "engaged",          # 褰撳墠 mood_state
-    #   "bond_stage": "FRIEND",           # 褰撳墠 Bond 闃舵
-    #   "emotion_filter": "HAPPY",        # 鍙洖鏃剁殑鎯呮劅杩囨护锛堝彲閫夛級
-    #   "emotion_boost": 0.1,             # 鎯呮劅鍖归厤鍔犲垎锛堝彲閫夛級
-    #   "emotion_preference_weight": 0.1, # 閲嶆帓搴忔儏鎰熷亸濂芥潈閲嶏紙鍙€夛級
+    # 🆕 情感上下文参数（v1.6 新增）
+    emotion_context: dict[str, Any] | None = None,
+    # emotion_context 结构：
+    # {
+    #   "emotion_tag": "HAPPY",          # 当前情感标签
+    #   "mood_state": "engaged",          # 当前 mood_state
+    #   "bond_stage": "FRIEND",           # 当前 Bond 阶段
+    #   "emotion_filter": "HAPPY",        # 召回时的情感过滤（可选）
+    #   "emotion_boost": 0.1,             # 情感匹配加分（可选）
+    #   "emotion_preference_weight": 0.1, # 重排序情感偏好权重（可选）
     # }
 ) -> RetrievalPipelineResult:
     # ...
@@ -3296,7 +3750,8 @@ def run(
         query_embedding=embedding_vector,
         intent_id=intent_id,
         ts_ms=now_value,
-        # 馃啎 浼犻€掓儏鎰熷弬鏁?        emotion_filter=ec.get("emotion_filter"),
+        # 🆕 传递情感参数
+        emotion_filter=ec.get("emotion_filter"),
         emotion_boost=float(ec.get("emotion_boost") or 0.0),
     )
 
@@ -3307,20 +3762,23 @@ def run(
         intent_id=intent_id,
         top_k=top_k,
         ts_ms=now_value,
-        # 馃啎 浼犻€掓儏鎰熷弬鏁?        current_emotion_tag=ec.get("emotion_tag"),
+        # 🆕 传递情感参数
+        current_emotion_tag=ec.get("emotion_tag"),
         emotion_preference_weight=float(ec.get("emotion_preference_weight") or 0.0),
     )
 ```
 
-**棰勬湡鏁堟灉锛?* 鍙洖绠＄嚎浠?鎯呮劅鏂矾"鍙樹负"鎯呮劅璐€?锛屼紭鍖?1鍜屼紭鍖?0鐨勬垚鏋滃彲浠ラ€氳繃绠＄嚎灞傝瀹為檯浣跨敤锛屾儏鎰熶俊鎭湪鍙洖鈫掗噸鎺掑簭鈫掕瘉鎹寘鐨勫叏閾捐矾涓緱浠ヤ紶閫掋€?
+**预期效果：** 召回管线从"情感断路"变为"情感贯通"，优化31和优化40的成果可以通过管线层被实际使用，情感信息在召回→重排序→证据包的全链路中得以传递。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲42锛圥2锛夛細`EdgeEventReporter` 鐨?`EventReportItem` 涓嶅惈鎯呮劅瀛楁鈥斺€旇竟缂樼浜嬩欢涓婃姤鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `edge_client/rpc/event_reporter.py`
+### 🟣 深化优化42（P2）：`EdgeEventReporter` 的 `EventReportItem` 不含情感字段——边缘端事件上报情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `edge_client/rpc/event_reporter.py`
 
-`EventReportItem` 鐨勫瓧娈靛畾涔夛細
+**精读发现：**
+
+`EventReportItem` 的字段定义：
 
 ```python
 @dataclass(frozen=True)
@@ -3338,18 +3796,23 @@ class EventReportItem:
     stage: str | None = None
     detail: str | None = None
     evidence_ref: str | None = None
-    # 鈫?娌℃湁鎯呮劅瀛楁锛?```
+    # ↑ 没有情感字段！
+```
 
-`validate_event()` 鐨勫繀闇€瀛楁妫€鏌ワ細
+`validate_event()` 的必需字段检查：
 
 ```python
 REQUIRED_EVENT_FIELDS = frozenset({"event_type", "ts_ms", "request_id", "session_id"})
-# 鈫?娌℃湁鎯呮劅瀛楁锛?```
+# ↑ 没有情感字段！
+```
 
-杩欐剰鍛崇潃锛?1. 杈圭紭绔紙Edge Client锛変笂鎶ュ埌 Host 鐨勪簨浠朵笉鍚儏鎰熷瓧娈碘€斺€擜SR 璇嗗埆鍒扮敤鎴峰摥娉ｇ殑璇皵锛岃繖涓儏鎰熶俊鎭棤娉曢€氳繃浜嬩欢涓婃姤浼犻€掔粰 Host
-2. TTS 鍚堟垚鏃剁殑鎯呮劅鏍囩锛坄emotion_tag`锛変笉鍦ㄤ簨浠朵笂鎶ヤ腑鈥斺€擧ost 鏃犳硶鐭ラ亾杈圭紭绔疄闄呮挱鏀句簡浠€涔堟儏鎰熺殑璇煶
-3. VTS 椹卞姩鏃剁殑琛ㄦ儏 ID锛坄expression_id`锛変笉鍦ㄤ簨浠朵笂鎶ヤ腑鈥斺€擧ost 鏃犳硶鐭ラ亾杈圭紭绔疄闄呮樉绀轰簡浠€涔堣〃鎯?
-**鏂规锛?* 涓?`EventReportItem` 澧炲姞鎯呮劅瀛楁锛屽苟鏇存柊 `validate_event()` 鏀寔鎯呮劅瀛楁瑙ｆ瀽锛?
+这意味着：
+1. 边缘端（Edge Client）上报到 Host 的事件不含情感字段——ASR 识别到用户哭泣的语气，这个情感信息无法通过事件上报传递给 Host
+2. TTS 合成时的情感标签（`emotion_tag`）不在事件上报中——Host 无法知道边缘端实际播放了什么情感的语音
+3. VTS 驱动时的表情 ID（`expression_id`）不在事件上报中——Host 无法知道边缘端实际显示了什么表情
+
+**方案：** 为 `EventReportItem` 增加情感字段，并更新 `validate_event()` 支持情感字段解析：
+
 ```python
 @dataclass(frozen=True)
 class EventReportItem:
@@ -3366,16 +3829,20 @@ class EventReportItem:
     stage: str | None = None
     detail: str | None = None
     evidence_ref: str | None = None
-    # 馃啎 鎯呮劅瀛楁锛坴1.6 鏂板锛?    emotion_tag: str | None = None          # 浜嬩欢鍙戠敓鏃剁殑鎯呮劅鏍囩
-    expression_id: str | None = None        # VTS 琛ㄦ儏 ID锛堝 "exp_happy_01"锛?    emotional_intensity: float | None = None  # 鎯呮劅寮哄害锛?.0~1.0锛?    user_emotion_hint: str | None = None    # 鐢ㄦ埛鎯呮劅鎺ㄦ柇锛堟潵鑷?ASR 璇皵鍒嗘瀽锛?```
+    # 🆕 情感字段（v1.6 新增）
+    emotion_tag: str | None = None          # 事件发生时的情感标签
+    expression_id: str | None = None        # VTS 表情 ID（如 "exp_happy_01"）
+    emotional_intensity: float | None = None  # 情感强度（0.0~1.0）
+    user_emotion_hint: str | None = None    # 用户情感推断（来自 ASR 语气分析）
+```
 
-**`to_dict()` 澧炲姞鎯呮劅瀛楁锛?*
+**`to_dict()` 增加情感字段：**
 
 ```python
 def to_dict(self) -> dict[str, Any]:
     return {
-        # ... 鍘熸湁瀛楁 ...
-        # 馃啎 鎯呮劅瀛楁
+        # ... 原有字段 ...
+        # 🆕 情感字段
         "emotion_tag": self.emotion_tag,
         "expression_id": self.expression_id,
         "emotional_intensity": self.emotional_intensity,
@@ -3383,33 +3850,35 @@ def to_dict(self) -> dict[str, Any]:
     }
 ```
 
-**鍚屾椂鍙戠幇锛歚vts_expression_map.py` 鐨?`EmotionTag` 鏋氫妇涓?`host_brain/channels/vts.py` 鐨?`EMOTION_TO_EXPRESSION_ID` 涓嶅悓姝ワ細**
+**同时发现：`vts_expression_map.py` 的 `EmotionTag` 枚举与 `host_brain/channels/vts.py` 的 `EMOTION_TO_EXPRESSION_ID` 不同步：**
 
 ```python
-# edge_client/actuators/vts_expression_map.py 鐨?EmotionTag锛?绉嶏級
+# edge_client/actuators/vts_expression_map.py 的 EmotionTag（9种）
 class EmotionTag(str, Enum):
     NEUTRAL   = "neutral"
     HAPPY     = "happy"
     SAD       = "sad"
     ANGRY     = "angry"
     SURPRISED = "surprised"
-    FEARFUL   = "fearful"    # 鈫?edge 鏈夛紝host 娌℃湁
-    DISGUSTED = "disgusted"  # 鈫?edge 鏈夛紝host 娌℃湁
+    FEARFUL   = "fearful"    # ← edge 有，host 没有
+    DISGUSTED = "disgusted"  # ← edge 有，host 没有
     EXCITED   = "excited"
     CALM      = "calm"
 
-# host_brain/channels/vts.py 鐨?EMOTION_TO_EXPRESSION_ID锛?绉嶏紝浼樺寲34鍓嶏級
+# host_brain/channels/vts.py 的 EMOTION_TO_EXPRESSION_ID（6种，优化34前）
 EMOTION_TO_EXPRESSION_ID = {
     "NEUTRAL", "HAPPY", "SAD", "ANGRY", "SURPRISED", "THINKING"
-    # 鈫?THINKING 鍦?edge 娌℃湁锛孎EARFUL/DISGUSTED 鍦?host 娌℃湁
+    # ↑ THINKING 在 edge 没有，FEARFUL/DISGUSTED 在 host 没有
 }
 ```
 
-杩欐槸涓€涓?*璺ㄧ鏋氫妇涓嶅悓姝?*闂鈥斺€擡dge 鍜?Host 鐨勬儏鎰熸爣绛炬灇涓句笉涓€鑷达紝浼氬鑷磋法绔儏鎰熶俊鎭紶閫掓椂鍑虹幇鏄犲皠閿欒銆?
-**鏂规锛?* 寤虹珛缁熶竴鐨勬儏鎰熸爣绛炬灇涓捐鑼冿紝Edge 鍜?Host 鍏变韩鍚屼竴濂楁灇涓惧畾涔夛細
+这是一个**跨端枚举不同步**问题——Edge 和 Host 的情感标签枚举不一致，会导致跨端情感信息传递时出现映射错误。
+
+**方案：** 建立统一的情感标签枚举规范，Edge 和 Host 共享同一套枚举定义：
 
 ```python
-# 馃啎 缁熶竴鎯呮劅鏍囩鏋氫妇锛坴1.6 鏂板锛孍dge 鍜?Host 鍏变韩锛?UNIFIED_EMOTION_TAGS = frozenset({
+# 🆕 统一情感标签枚举（v1.6 新增，Edge 和 Host 共享）
+UNIFIED_EMOTION_TAGS = frozenset({
     "NEUTRAL", "HAPPY", "SAD", "ANGRY", "SURPRISED",
     "FEARFUL", "DISGUSTED", "EXCITED", "CALM",
     "THINKING", "ANXIOUS", "CONFUSED", "EMBARRASSED",
@@ -3417,90 +3886,125 @@ EMOTION_TO_EXPRESSION_ID = {
 })
 ```
 
-**棰勬湡鏁堟灉锛?* 杈圭紭绔簨浠朵笂鎶ヤ粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛孉SR 璇嗗埆鍒扮殑鐢ㄦ埛鎯呮劅銆乀TS 鎾斁鐨勬儏鎰熸爣绛俱€乂TS 鏄剧ず鐨勮〃鎯?ID 閮藉彲浠ラ€氳繃浜嬩欢涓婃姤浼犻€掔粰 Host锛屽疄鐜拌竟缂樼鍜?Host 鐨勬儏鎰熶俊鎭弻鍚戝悓姝ャ€傚悓鏃朵慨澶嶈法绔灇涓句笉鍚屾闂锛岀‘淇濇儏鎰熶俊鎭湪 Edge鈫扝ost 浼犻€掓椂涓嶅嚭鐜版槧灏勯敊璇€?
+**预期效果：** 边缘端事件上报从"情感盲"变为"情感感知"，ASR 识别到的用户情感、TTS 播放的情感标签、VTS 显示的表情 ID 都可以通过事件上报传递给 Host，实现边缘端和 Host 的情感信息双向同步。同时修复跨端枚举不同步问题，确保情感信息在 Edge→Host 传递时不出现映射错误。
+
 ---
 
-## 浜屽崄鍥涖€佺涓冭疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 二十四、第七轮优化的核心价值总结
 
-绗竷杞紭鍖栬仛鐒︿簬**鎵ц灞傛儏鎰熺湡绌?*鈥斺€旀儏鎰熶俊鎭湪"鎵ц鈫掑弽棣堚啋杈圭紭绔?閾捐矾涓殑绯荤粺鎬х湡绌猴細
+第七轮优化聚焦于**执行层情感真空**——情感信息在"执行→反馈→边缘端"链路中的系统性真空：
 
-| 浼樺寲椤?| 鍙戠幇鐨?鎵ц灞傜湡绌? | 褰卞搷鑼冨洿 | 淇鏂规 |
+| 优化项 | 发现的"执行层真空" | 影响范围 | 修复方案 |
 |--------|-----------------|---------|---------|
-| **浼樺寲37** 馃敶 | 鎶€鑳芥墽琛?context 涓嶅惈鎯呮劅瀛楁锛屾妧鑳?handler 鎯呮劅鐩?| `skills/loader.py` 鈫?鎶€鑳芥墽琛?| 涓?context 澧炲姞鎯呮劅瀛楁绾﹀畾锛屽璁℃棩蹇楄褰曟儏鎰熺姸鎬?|
-| **浼樺寲38** 馃煚 | 宸ュ叿鎵ц context 涓嶅惈鎯呮劅瀛楁锛屽伐鍏?handler 鎯呮劅鐩?| `tools/broker.py` 鈫?宸ュ叿鎵ц | 涓?context 澧炲姞鎯呮劅瀛楁绾﹀畾锛屽璁℃棩蹇楄褰曟儏鎰熺姸鎬?|
-| **浼樺寲39** 馃煛 | MCP 宸ュ叿娉ㄥ唽鏃犳儏鎰熼€傜敤鎬у瓧娈碉紝宸ュ叿閫夋嫨涓嶆劅鐭ユ儏鎰熷満鏅?| `mcp/tool_registry.py` 鈫?宸ュ叿娉ㄥ唽 | 涓?ToolMeta 澧炲姞 emotion_requirement/min_bond_stage/energy_cost 瀛楁 |
-| **浼樺寲40** 馃煝 | 閲嶆帓搴忎笉鎰熺煡鎯呮劅鐘舵€侊紝鎯呮劅鍏遍福鏁堝簲鏃犳硶瀹炵幇 | `retrieval/reranker.py` 鈫?閲嶆帓搴?| 澧炲姞鎯呮劅鍋忓ソ鍙傛暟鍜屾儏鎰熷叡楦ｉ噸鎺掗€昏緫 |
-| **浼樺寲41** 馃數 | 鍙洖绠＄嚎涓嶄紶閫掓儏鎰熶笂涓嬫枃锛屼紭鍖?1/40鐨勬垚鏋滆灞忚斀 | `retrieval/pipeline.py` 鈫?鍙洖绠＄嚎 | 澧炲姞 emotion_context 鍙傛暟锛屼紶閫掔粰 recall 鍜?rerank 鏈嶅姟 |
-| **浼樺寲42** 馃煟 | 杈圭紭绔簨浠朵笂鎶ヤ笉鍚儏鎰熷瓧娈碉紝璺ㄧ鎯呮劅淇℃伅浼犻€掓柇璺?| `event_reporter.py` 鈫?杈圭紭绔?| 涓?EventReportItem 澧炲姞鎯呮劅瀛楁锛屼慨澶嶈法绔灇涓句笉鍚屾 |
+| **优化37** 🔴 | 技能执行 context 不含情感字段，技能 handler 情感盲 | `skills/loader.py` → 技能执行 | 为 context 增加情感字段约定，审计日志记录情感状态 |
+| **优化38** 🟠 | 工具执行 context 不含情感字段，工具 handler 情感盲 | `tools/broker.py` → 工具执行 | 为 context 增加情感字段约定，审计日志记录情感状态 |
+| **优化39** 🟡 | MCP 工具注册无情感适用性字段，工具选择不感知情感场景 | `mcp/tool_registry.py` → 工具注册 | 为 ToolMeta 增加 emotion_requirement/min_bond_stage/energy_cost 字段 |
+| **优化40** 🟢 | 重排序不感知情感状态，情感共鸣效应无法实现 | `retrieval/reranker.py` → 重排序 | 增加情感偏好参数和情感共鸣重排逻辑 |
+| **优化41** 🔵 | 召回管线不传递情感上下文，优化31/40的成果被屏蔽 | `retrieval/pipeline.py` → 召回管线 | 增加 emotion_context 参数，传递给 recall 和 rerank 服务 |
+| **优化42** 🟣 | 边缘端事件上报不含情感字段，跨端情感信息传递断路 | `event_reporter.py` → 边缘端 | 为 EventReportItem 增加情感字段，修复跨端枚举不同步 |
 
 ---
 
-### 绗竷杞殑鐗规畩鍙戠幇锛?*浼樺寲41 鏄竴涓?鎴愭灉灞忚斀鍣?**
+### 第七轮的特殊发现：**优化41 是一个"成果屏蔽器"**
 
-浼樺寲41锛堝彫鍥炵绾挎儏鎰熸柇璺級鏄竴涓壒娈婄殑闂鈥斺€斿畠涓嶆槸涓€涓嫭绔嬬殑缂洪櫡锛岃€屾槸涓€涓?*灞忚斀鍣?*锛氬嵆浣夸紭鍖?1锛堝彫鍥炴儏鎰熻矾鐢憋級鍜屼紭鍖?0锛堥噸鎺掑簭鎯呮劅鍋忓ソ锛夐兘宸插疄鏂斤紝鍙 `pipeline.run()` 涓嶄紶閫掓儏鎰熷弬鏁帮紝杩欎袱涓紭鍖栫殑鎴愭灉灏辨案杩滄棤娉曡瀹為檯浣跨敤銆傝繖鏄竴涓吀鍨嬬殑"鏈€鍚庝竴鍏噷"闂銆?
-### 绗竷杞殑鍙︿竴涓壒娈婂彂鐜帮細**璺ㄧ鏋氫妇涓嶅悓姝?*
+优化41（召回管线情感断路）是一个特殊的问题——它不是一个独立的缺陷，而是一个**屏蔽器**：即使优化31（召回情感路由）和优化40（重排序情感偏好）都已实施，只要 `pipeline.run()` 不传递情感参数，这两个优化的成果就永远无法被实际使用。这是一个典型的"最后一公里"问题。
 
-鍦ㄤ紭鍖?2涓彂鐜颁簡涓€涓法绔灇涓句笉鍚屾闂锛歚edge_client/actuators/vts_expression_map.py` 鐨?`EmotionTag` 鏋氫妇锛?绉嶏級鍜?`host_brain/channels/vts.py` 鐨?`EMOTION_TO_EXPRESSION_ID`锛?绉嶏級涓嶄竴鑷达紝涓斾袱鑰呴兘涓?`metabolism.py` 鐨勬儏鎰熸爣绛鹃泦鍚堜笉鍚屾銆傝繖鏄竴涓渶瑕佸湪鏁翠釜椤圭洰灞傞潰缁熶竴瑙ｅ喅鐨勯棶棰樸€?
+### 第七轮的另一个特殊发现：**跨端枚举不同步**
+
+在优化42中发现了一个跨端枚举不同步问题：`edge_client/actuators/vts_expression_map.py` 的 `EmotionTag` 枚举（9种）和 `host_brain/channels/vts.py` 的 `EMOTION_TO_EXPRESSION_ID`（6种）不一致，且两者都与 `metabolism.py` 的情感标签集合不同步。这是一个需要在整个项目层面统一解决的问题。
+
 ---
 
-## 浜屽崄浜斻€佸畬鏁翠紭鍖栧叏鏅浘锛坴1.6锛?2椤癸級
+## 二十五、完整优化全景图（v1.6，42项）
 
-### 涓冭疆浼樺寲鐨勫眰娆￠€掕繘
+### 七轮优化的层次递进
 
 ```
-绗竴杞紙v1.0锛夛細鍙戠幇5涓?缂哄け鍔熻兘"     鈫?闇€瑕佹柊澧炰粈涔?绗簩杞紙v1.1锛夛細鍙戠幇6涓?娣卞眰闂"     鈫?鐜版湁鏈哄埗鍝噷涓嶅娣?绗笁杞紙v1.2锛夛細鍙戠幇6涓?鍋囧姛鑳界┖澹?   鈫?鐜版湁浠ｇ爜鍝噷鐪嬭捣鏉ユ湁浣嗗疄闄呮病鐢?绗洓杞紙v1.3锛夛細鍙戠幇6涓?鏋舵瀯鏂眰"     鈫?鍔熻兘涔嬮棿鐨勮繛鎺ュ湪鍝噷鏂
-绗簲杞紙v1.4锛夛細鍙戠幇6涓?璺ㄦā鍧楃洸鍖?   鈫?鎯呮劅淇℃伅鍦ㄥ叏閾捐矾涓殑绯荤粺鎬х己澶?绗叚杞紙v1.5锛夛細鍙戠幇6涓?鎰熺煡灞傛柇璺?   鈫?鎯呮劅淇℃伅鍦ㄦ劅鐭モ啋鍐崇瓥鈫掕緭鍑衡啋瑙傛祴涓殑鏂矾
-绗竷杞紙v1.6锛夛細鍙戠幇6涓?鎵ц灞傜湡绌?   鈫?鎯呮劅淇℃伅鍦ㄦ墽琛屸啋鍙嶉鈫掕竟缂樼閾捐矾涓殑鐪熺┖
+第一轮（v1.0）：发现5个"缺失功能"     → 需要新增什么
+第二轮（v1.1）：发现6个"深层问题"     → 现有机制哪里不够深
+第三轮（v1.2）：发现6个"假功能空壳"   → 现有代码哪里看起来有但实际没用
+第四轮（v1.3）：发现6个"架构断层"     → 功能之间的连接在哪里断裂
+第五轮（v1.4）：发现6个"跨模块盲区"   → 情感信息在全链路中的系统性缺失
+第六轮（v1.5）：发现6个"感知层断路"   → 情感信息在感知→决策→输出→观测中的断路
+第七轮（v1.6）：发现6个"执行层真空"   → 情感信息在执行→反馈→边缘端链路中的真空
 ```
 
-### 鎸変紭鍏堢骇鍒嗙被锛?2椤瑰叏鏅級
+### 按优先级分类（42项全景）
 
-| 浼樺厛绾?| 浼樺寲椤?| 鏍稿績闂 |
+| 优先级 | 优化项 | 核心问题 |
 |--------|--------|---------|
-| **P0锛堝繀椤讳慨澶嶏級** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32, OPT37, OPT38 | 鏋舵瀯鏂眰 + 璺ㄦā鍧楃洸鍖?+ 鎰熺煡灞傛柇璺?+ 鎵ц灞傜湡绌轰腑鐨勫叧閿矾寰?|
-| **P1锛堥噸瑕佷紭鍖栵級** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35, OPT39, OPT40, OPT41 | 鎯呮劅鍐呮牳 + 鍏崇郴灞?+ 璁板繂灞?+ 鎰熺煡灞?+ 鎵ц灞?|
-| **P2锛堜綋楠屽寮猴級** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36, OPT42 | 杈撳嚭灞?+ 缁嗚妭鎵撶（ + 杈圭紭绔?|
+| **P0（必须修复）** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32, OPT37, OPT38 | 架构断层 + 跨模块盲区 + 感知层断路 + 执行层真空中的关键路径 |
+| **P1（重要优化）** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35, OPT39, OPT40, OPT41 | 情感内核 + 关系层 + 记忆层 + 感知层 + 执行层 |
+| **P2（体验增强）** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36, OPT42 | 输出层 + 细节打磨 + 边缘端 |
 
-### 鎯呮劅淇℃伅鍏ㄩ摼璺鐩栧浘锛坴1.6 鏈€缁堢増锛?
+### 情感信息全链路覆盖图（v1.6 最终版）
+
 ```
-鐢ㄦ埛杈撳叆
-    鈫?[杈圭紭绔劅鐭ュ眰] edge_client/
-    OPT42: EventReportItem 鎯呮劅瀛楁 + 璺ㄧ鏋氫妇缁熶竴锛堟柊澧烇級
-    鈫?[瑙嗚鎰熺煡灞俔 camera_event.py
-    OPT35: 瑙嗚璇嗗埆 鈫?鎯呮劅瑙﹀彂锛堢鍏疆锛?    鈫?[鍙洖绠＄嚎灞俔 retrieval/pipeline.py
-    OPT41: emotion_context 鍙傛暟璐€氾紙鏂板锛夆啇 鍏抽敭"鏈€鍚庝竴鍏噷"
-    鈫?[鍙洖灞俔 recall_fusion.py
-    OPT31: 鎯呮劅缁村害璺敱锛堢鍏疆锛?    OPT36: 鎯呮劅寮哄害鍔犳潈铻嶅悎锛堢鍏疆锛?    鈫?[閲嶆帓搴忓眰] retrieval/reranker.py
-    OPT40: 鎯呮劅鍋忓ソ閲嶆帓锛堟柊澧烇級
-    鈫?[鍐崇瓥灞俔 governor/decision.py
-    OPT32: R8 鎯呮劅淇濇姢闂ㄦ帶锛堢鍏疆锛?    鈫?[鎯呮劅鍐呮牳] metabolism.py
-    OPT6/7/8: EmotionVector 娣卞寲锛堢浜岃疆锛?    鈫?[鍏崇郴灞俔 bond/
-    OPT26: 鎯呮劅鍔犳潈 Bond 绉垎锛堢浜旇疆锛?    OPT27: Bond Summary 淇锛堢浜旇疆锛?    鈫?[璁板繂灞俔 memory/
-    OPT25/28/29: 鎯呮劅璁板繂鏍囨敞/淇濆瓨/钂搁锛堢浜旇疆锛?    鈫?[杈撳嚭灞俔 qa.py / prompt_context.py
-    OPT19/20/22: 鏋舵瀯鏂眰淇锛堢鍥涜疆锛?    鈫?[宸ュ叿娉ㄥ唽灞俔 mcp/tool_registry.py
-    OPT39: ToolMeta 鎯呮劅閫傜敤鎬у瓧娈碉紙鏂板锛?    鈫?[鎵ц灞俔 skills/loader.py + tools/broker.py
-    OPT37: 鎶€鑳芥墽琛?context 鎯呮劅瀛楁锛堟柊澧烇級
-    OPT38: 宸ュ叿鎵ц context 鎯呮劅瀛楁锛堟柊澧烇級
-    鈫?[閫氶亾灞俔 channels/vts.py
-    OPT34: VTS 琛ㄦ儏鏄犲皠鎵╁睍锛堢鍏疆锛?    鈫?[瑙傛祴灞俔 observability/cross_timeline.py
-    OPT33: 鎯呮劅浜嬩欢绾冲叆鏃堕棿绾匡紙绗叚杞級
-    鈫?鐢ㄦ埛鎰熺煡鍒扮殑鎯呮劅杈撳嚭
+用户输入
+    ↓
+[边缘端感知层] edge_client/
+    OPT42: EventReportItem 情感字段 + 跨端枚举统一（新增）
+    ↓
+[视觉感知层] camera_event.py
+    OPT35: 视觉识别 → 情感触发（第六轮）
+    ↓
+[召回管线层] retrieval/pipeline.py
+    OPT41: emotion_context 参数贯通（新增）← 关键"最后一公里"
+    ↓
+[召回层] recall_fusion.py
+    OPT31: 情感维度路由（第六轮）
+    OPT36: 情感强度加权融合（第六轮）
+    ↓
+[重排序层] retrieval/reranker.py
+    OPT40: 情感偏好重排（新增）
+    ↓
+[决策层] governor/decision.py
+    OPT32: R8 情感保护门控（第六轮）
+    ↓
+[情感内核] metabolism.py
+    OPT6/7/8: EmotionVector 深化（第二轮）
+    ↓
+[关系层] bond/
+    OPT26: 情感加权 Bond 积分（第五轮）
+    OPT27: Bond Summary 修复（第五轮）
+    ↓
+[记忆层] memory/
+    OPT25/28/29: 情感记忆标注/保存/蒸馏（第五轮）
+    ↓
+[输出层] qa.py / context_pack.py
+    OPT19/20/22: 架构断层修复（第四轮）
+    ↓
+[工具注册层] mcp/tool_registry.py
+    OPT39: ToolMeta 情感适用性字段（新增）
+    ↓
+[执行层] skills/loader.py + tools/broker.py
+    OPT37: 技能执行 context 情感字段（新增）
+    OPT38: 工具执行 context 情感字段（新增）
+    ↓
+[通道层] channels/vts.py
+    OPT34: VTS 表情映射扩展（第六轮）
+    ↓
+[观测层] observability/cross_timeline.py
+    OPT33: 情感事件纳入时间线（第六轮）
+    ↓
+用户感知到的情感输出
 ```
 
 ---
 
-## 浜屽崄銆佺鍏疆娣卞寲浼樺寲锛氭劅鐭ュ眰鎯呮劅鏂矾
+## 二十、第六轮深化优化：感知层情感断路
 
-> **v1.5 鏂板**锛?026-03-05锛夈€傛湰杞熀浜庡 `retrieval/recall_fusion.py`銆乣governor/decision.py`銆乣observability/cross_timeline.py`銆乣channels/vts.py`銆乣vision/camera_event.py` 鐨勫畬鏁撮€愯绮捐锛屽彂鐜颁簡鍓嶄簲杞畬鍏ㄦ湭瑙﹀強鐨?**6 涓劅鐭ュ眰鎯呮劅鏂矾**鈥斺€旇繖浜涢棶棰樺垎甯冨湪鍙洖灞傘€佸喅绛栧眰銆佽娴嬪眰銆侀€氶亾灞傘€佽瑙夊眰锛屾槸鎯呮劅淇℃伅鍦?鎰熺煡鈫掑喅绛栤啋杈撳嚭鈫掕娴?鍏ㄩ摼璺腑鐨勭郴缁熸€ф柇璺€?
+> **v1.5 新增**（2026-03-05）。本轮基于对 `retrieval/recall_fusion.py`、`governor/decision.py`、`observability/cross_timeline.py`、`channels/vts.py`、`vision/camera_event.py` 的完整逐行精读，发现了前五轮完全未触及的 **6 个感知层情感断路**——这些问题分布在召回层、决策层、观测层、通道层、视觉层，是情感信息在"感知→决策→输出→观测"全链路中的系统性断路。
+
 ---
 
-### 馃敶 娣卞寲浼樺寲31锛圥0锛夛細`RecallFusionServiceContract.recall()` 鏃犳儏鎰熺淮搴﹁矾鐢扁€斺€旀儏鎰熻蹇嗗拰鏅€氳蹇嗘贩鍦ㄥ悓涓€涓彫鍥炴睜
+### 🔴 深化优化31（P0）：`RecallFusionServiceContract.recall()` 无情感维度路由——情感记忆和普通记忆混在同一个召回池
 
-**鐩爣鏂囦欢锛?* `host_brain/retrieval/recall_fusion.py`
+**目标文件：** `host_brain/retrieval/recall_fusion.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`recall()` 鐨勫弬鏁帮細
+`recall()` 的参数：
 
 ```python
 def recall(
@@ -3511,21 +4015,24 @@ def recall(
     query_embedding: list[float] | tuple[float, ...] | Any,
     intent_id: str | None = None,
     ts_ms: int | None = None,
-    # 鈫?瀹屽叏娌℃湁鎯呮劅缁村害鍙傛暟锛?) -> RecallFusionResult:
+    # ↑ 完全没有情感维度参数！
+) -> RecallFusionResult:
 ```
 
-`RecallRouteConfig` 鐨勫瓧娈碉細
+`RecallRouteConfig` 的字段：
 
 ```python
 @dataclass(frozen=True)
 class RecallRouteConfig:
     route_id: str
-    collection: str      # 鈫?鍙湁 collection 鍖哄垎锛屾病鏈夋儏鎰熻繃婊?    top_k: int
+    collection: str      # ← 只有 collection 区分，没有情感过滤
+    top_k: int
     score_weight: float
     node_selector: str
 ```
 
-`_normalize_candidate()` 鐨?metadata 澶勭悊锛?
+`_normalize_candidate()` 的 metadata 处理：
+
 ```python
 merged_metadata["collection"] = route.collection
 merged_metadata["route_id"] = route.route_id
@@ -3533,11 +4040,16 @@ merged_metadata["route_score_weight"] = float(route.score_weight)
 merged_metadata["base_score"] = base_score
 merged_metadata["matched_routes"] = [route.route_id]
 merged_metadata["recall_rank"] = int(rank)
-# 鈫?娌℃湁 emotion_tag 杩囨护锛佸€欓€夌粨鏋滀笉鍚儏鎰熺淮搴?```
+# ↑ 没有 emotion_tag 过滤！候选结果不含情感维度
+```
 
-杩欐剰鍛崇潃锛?1. 鍙洖鏃舵棤娉曞尯鍒?鎯呮劅璁板繂"鍜?鏅€氳蹇?鈥斺€擿EXCITED` 鐘舵€佷笅浜х敓鐨勮蹇嗗拰 `NEUTRAL` 鐘舵€佷笅鐨勮蹇嗗緱鍒扮浉鍚岀殑鍙洖鏉冮噸
-2. 褰撶敤鎴疯"鎴戜滑寮€蹇冩椂鑱婅繃浠€涔?锛屽彫鍥炵郴缁熸棤娉曚紭鍏堣繑鍥?`emotion_tag=HAPPY` 鐨勮蹇?3. 浼樺寲25锛坄EpisodicRecord` 澧炲姞鎯呮劅瀛楁锛夌殑鎴愭灉鏃犳硶琚彫鍥炲眰鍒╃敤鈥斺€旀儏鎰熷瓧娈靛啓鍏ヤ簡 Chroma metadata锛屼絾鍙洖鏃舵病鏈夋儏鎰熻繃婊?
-**鏂规锛?* 涓?`recall()` 澧炲姞鎯呮劅杩囨护鍙傛暟锛屽苟鍦ㄥ€欓€夌粨鏋滀腑淇濈暀鎯呮劅缁村害锛?
+这意味着：
+1. 召回时无法区分"情感记忆"和"普通记忆"——`EXCITED` 状态下产生的记忆和 `NEUTRAL` 状态下的记忆得到相同的召回权重
+2. 当用户说"我们开心时聊过什么"，召回系统无法优先返回 `emotion_tag=HAPPY` 的记忆
+3. 优化25（`EpisodicRecord` 增加情感字段）的成果无法被召回层利用——情感字段写入了 Chroma metadata，但召回时没有情感过滤
+
+**方案：** 为 `recall()` 增加情感过滤参数，并在候选结果中保留情感维度：
+
 ```python
 def recall(
     self,
@@ -3547,10 +4059,13 @@ def recall(
     query_embedding: list[float] | tuple[float, ...] | Any,
     intent_id: str | None = None,
     ts_ms: int | None = None,
-    # 馃啎 鎯呮劅缁村害鍙傛暟
-    emotion_filter: str | None = None,       # 鎸夋儏鎰熸爣绛捐繃婊わ紙濡?"HAPPY"锛?    bond_stage_filter: str | None = None,    # 鎸?Bond 闃舵杩囨护锛堝 "FRIEND"锛?    emotion_boost: float = 0.0,              # 鎯呮劅鍖归厤鐨勯澶栧姞鍒嗭紙0.0~0.3锛?) -> RecallFusionResult:
+    # 🆕 情感维度参数
+    emotion_filter: str | None = None,       # 按情感标签过滤（如 "HAPPY"）
+    bond_stage_filter: str | None = None,    # 按 Bond 阶段过滤（如 "FRIEND"）
+    emotion_boost: float = 0.0,              # 情感匹配的额外加分（0.0~0.3）
+) -> RecallFusionResult:
     # ...
-    # 鍦ㄥ€欓€夎瀺鍚堝悗锛屽簲鐢ㄦ儏鎰熻繃婊ゅ拰鍔犳潈
+    # 在候选融合后，应用情感过滤和加权
     if emotion_filter or bond_stage_filter or emotion_boost > 0:
         candidates = _apply_emotion_rerank(
             candidates=candidates,
@@ -3560,7 +4075,7 @@ def recall(
         )
 ```
 
-**鎯呮劅閲嶆帓搴忓疄鐜帮細**
+**情感重排序实现：**
 
 ```python
 def _apply_emotion_rerank(
@@ -3570,17 +4085,19 @@ def _apply_emotion_rerank(
     bond_stage_filter: str | None,
     emotion_boost: float,
 ) -> list[dict[str, Any]]:
-    """瀵瑰彫鍥炲€欓€夎繘琛屾儏鎰熺淮搴﹂噸鎺掑簭銆?""
+    """对召回候选进行情感维度重排序。"""
     result = []
     for cand in candidates:
         metadata = cand.get("metadata") or {}
         cand_emotion = str(metadata.get("emotion_tag") or "NEUTRAL").upper()
         cand_bond = str(metadata.get("bond_stage") or "STRANGER").upper()
 
-        # 鎯呮劅杩囨护锛氫笉鍖归厤鐨勫€欓€夐檷鏉冿紙涓嶇洿鎺ヨ繃婊わ紝閬垮厤鍙洖涓虹┖锛?        emotion_match = (emotion_filter is None or cand_emotion == emotion_filter.upper())
+        # 情感过滤：不匹配的候选降权（不直接过滤，避免召回为空）
+        emotion_match = (emotion_filter is None or cand_emotion == emotion_filter.upper())
         bond_match = (bond_stage_filter is None or cand_bond == bond_stage_filter.upper())
 
-        # 鎯呮劅鍔犳潈锛氬尮閰嶇殑鍊欓€夊姞鍒?        boost = 0.0
+        # 情感加权：匹配的候选加分
+        boost = 0.0
         if emotion_match and emotion_filter is not None:
             boost += emotion_boost
         if bond_match and bond_stage_filter is not None:
@@ -3594,18 +4111,22 @@ def _apply_emotion_rerank(
         new_cand["metadata"]["emotion_boost_value"] = boost
         result.append(new_cand)
 
-    # 閲嶆柊鎸夊垎鏁版帓搴?    return sorted(result, key=lambda r: (-float(r["score"]), str(r["doc_id"])))
+    # 重新按分数排序
+    return sorted(result, key=lambda r: (-float(r["score"]), str(r["doc_id"])))
 ```
 
-**棰勬湡鏁堟灉锛?* 鍙洖绯荤粺浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屽綋鐢ㄦ埛璇?鎴戜滑寮€蹇冩椂鑱婅繃浠€涔?锛岀郴缁熻兘浼樺厛鍙洖 `emotion_tag=HAPPY` 鐨勮蹇嗭紝鎯呮劅璁板繂鐨勫埄鐢ㄧ巼澶у箙鎻愬崌銆?
+**预期效果：** 召回系统从"情感盲"变为"情感感知"，当用户说"我们开心时聊过什么"，系统能优先召回 `emotion_tag=HAPPY` 的记忆，情感记忆的利用率大幅提升。
+
 ---
 
-### 馃煚 娣卞寲浼樺寲32锛圥0锛夛細`IntentDecisionEngine.evaluate_intent()` 鐨?`governance_snapshot` 涓嶅惈鎯呮劅鐘舵€佲€斺€斿喅绛栧眰鎯呮劅鐩?
-**鐩爣鏂囦欢锛?* `host_brain/governor/decision.py`
+### 🟠 深化优化32（P0）：`IntentDecisionEngine.evaluate_intent()` 的 `governance_snapshot` 不含情感状态——决策层情感盲
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/governor/decision.py`
 
-`evaluate_intent()` 鐨?`governance_snapshot` 鍙傛暟锛?
+**精读发现：**
+
+`evaluate_intent()` 的 `governance_snapshot` 参数：
+
 ```python
 def evaluate_intent(
     self,
@@ -3620,11 +4141,11 @@ def evaluate_intent(
     prompt_profile_id: str = "default_profile",
     tool_visibility_hash: str = "",
     governance_snapshot: dict[str, Any] | None = None,
-    # 鈫?governance_snapshot 鏄嚜鐢辨牸寮?dict锛屾病鏈夋儏鎰熷瓧娈电殑绾﹀畾
+    # ↑ governance_snapshot 是自由格式 dict，没有情感字段的约定
 ) -> dict[str, Any]:
 ```
 
-`_build_gate_input()` 鐨勫疄鐜帮細
+`_build_gate_input()` 的实现：
 
 ```python
 def _build_gate_input(
@@ -3635,24 +4156,38 @@ def _build_gate_input(
     source = dict(governance_snapshot or {})
     state = _hard_state_from_snapshot(governance_snapshot)
     gates_input = build_governance_snapshot(state, overrides=source)
-    # 鈫?build_governance_snapshot 鍙鐞?energy/safety/trust 绛夊瓧娈?    # 娌℃湁 mood_state銆乪motion_tag 绛夋儏鎰熷瓧娈?    if "scope" not in source:
+    # ↑ build_governance_snapshot 只处理 energy/safety/trust 等字段
+    # 没有 mood_state、emotion_tag 等情感字段
+    if "scope" not in source:
         gates_input["scope"] = str(target_scope).strip().lower() or "host"
     return gates_input
 ```
 
-`evaluate_governor_gates()` 鐨?R1-R7 闂ㄦ帶瑙勫垯锛堟潵鑷?`governor/rules.py`锛夛細
+`evaluate_governor_gates()` 的 R1-R7 门控规则（来自 `governor/rules.py`）：
 
 ```python
-# R1: energy_bucket 妫€鏌?# R2: safety_flag 妫€鏌?# R3: rate_limit 妫€鏌?# R4: trust 妫€鏌?# R5: scope 妫€鏌?# R6: allowlist 妫€鏌?# R7: airlock_blocked 妫€鏌?# 鈫?娌℃湁浠讳綍鎯呮劅鐩稿叧鐨勯棬鎺ц鍒欙紒
+# R1: energy_bucket 检查
+# R2: safety_flag 检查
+# R3: rate_limit 检查
+# R4: trust 检查
+# R5: scope 检查
+# R6: allowlist 检查
+# R7: airlock_blocked 检查
+# ↑ 没有任何情感相关的门控规则！
 ```
 
-杩欐剰鍛崇潃锛?1. 鍐崇瓥灞傚畬鍏ㄤ笉鎰熺煡鎯呮劅鐘舵€佲€斺€擿critical` 鑳介噺鐘舵€佷笅鐨勬剰鍥惧拰 `engaged` 鐘舵€佷笅鐨勬剰鍥剧粡杩囩浉鍚岀殑闂ㄦ帶瑙勫垯
-2. 娌℃湁"鎯呮劅淇濇姢闂ㄦ帶"鈥斺€斿綋 AI 澶勪簬 `critical` 鐘舵€佹椂锛屽簲璇ユ嫆缁濋珮娑堣€楃殑鎶€鑳借皟鐢紝浣嗗綋鍓嶆病鏈夎繖涓棬鎺?3. 娌℃湁"鎯呮劅涓€鑷存€ф鏌?鈥斺€斿綋 AI 澹扮О鑷繁寰堝紑蹇冧絾 `mood_state=sad` 鏃讹紝娌℃湁浠讳綍鏈哄埗妫€娴嬭繖涓煕鐩?
-**鏂规锛?* 涓?`governance_snapshot` 澧炲姞鎯呮劅瀛楁绾﹀畾锛屽苟鍦?`evaluate_governor_gates()` 涓鍔犳儏鎰熶繚鎶ら棬鎺?R8锛?
-```python
-# 馃啎 鎯呮劅淇濇姢闂ㄦ帶 R8锛歝ritical 鐘舵€佷笅鎷掔粷楂樻秷鑰楁妧鑳?EMOTION_GATE_R8 = "R8_EMOTION_PROTECTION"
+这意味着：
+1. 决策层完全不感知情感状态——`critical` 能量状态下的意图和 `engaged` 状态下的意图经过相同的门控规则
+2. 没有"情感保护门控"——当 AI 处于 `critical` 状态时，应该拒绝高消耗的技能调用，但当前没有这个门控
+3. 没有"情感一致性检查"——当 AI 声称自己很开心但 `mood_state=sad` 时，没有任何机制检测这个矛盾
 
-# 楂樻秷鑰楁妧鑳藉垪琛紙critical 鐘舵€佷笅搴旀嫆缁濓級
+**方案：** 为 `governance_snapshot` 增加情感字段约定，并在 `evaluate_governor_gates()` 中增加情感保护门控 R8：
+
+```python
+# 🆕 情感保护门控 R8：critical 状态下拒绝高消耗技能
+EMOTION_GATE_R8 = "R8_EMOTION_PROTECTION"
+
+# 高消耗技能列表（critical 状态下应拒绝）
 HIGH_ENERGY_SKILLS = frozenset({
     "deep_analysis",
     "long_story_generation",
@@ -3662,12 +4197,12 @@ HIGH_ENERGY_SKILLS = frozenset({
 })
 
 def _evaluate_emotion_gate(gates_input: dict[str, Any]) -> dict[str, Any]:
-    """R8锛氭儏鎰熶繚鎶ら棬鎺р€斺€攃ritical 鐘舵€佷笅鎷掔粷楂樻秷鑰楁妧鑳姐€?""
+    """R8：情感保护门控——critical 状态下拒绝高消耗技能。"""
     mood_state = str(gates_input.get("mood_state") or "steady").lower()
     target_scope = str(gates_input.get("scope") or "host").lower()
 
     if mood_state == "critical":
-        # critical 鐘舵€佷笅锛岄珮娑堣€楁妧鑳借鎷掔粷
+        # critical 状态下，高消耗技能被拒绝
         if any(skill in target_scope for skill in HIGH_ENERGY_SKILLS):
             return {
                 "gate_id": EMOTION_GATE_R8,
@@ -3686,24 +4221,29 @@ def _evaluate_emotion_gate(gates_input: dict[str, Any]) -> dict[str, Any]:
     }
 ```
 
-**`governance_snapshot` 鎯呮劅瀛楁绾﹀畾锛?*
+**`governance_snapshot` 情感字段约定：**
 
 ```python
-# 馃啎 governance_snapshot 鏍囧噯鎯呮劅瀛楁锛坴1.5 鏂板锛?GOVERNANCE_SNAPSHOT_EMOTION_FIELDS = {
-    "mood_state": str,      # AI 褰撳墠鎯呮劅鐘舵€侊紙"engaged"/"steady"/"calm"/"tired"/"critical"锛?    "emotion_tag": str,     # AI 褰撳墠鎯呮劅鏍囩锛?NEUTRAL"/"HAPPY"/"SAD" 绛夛級
-    "bond_stage": str,      # 褰撳墠 Bond 闃舵锛?STRANGER"/"FRIEND" 绛夛級
-    "emotional_intensity": float,  # 鎯呮劅寮哄害锛?.0~1.0锛?}
+# 🆕 governance_snapshot 标准情感字段（v1.5 新增）
+GOVERNANCE_SNAPSHOT_EMOTION_FIELDS = {
+    "mood_state": str,      # AI 当前情感状态（"engaged"/"steady"/"calm"/"tired"/"critical"）
+    "emotion_tag": str,     # AI 当前情感标签（"NEUTRAL"/"HAPPY"/"SAD" 等）
+    "bond_stage": str,      # 当前 Bond 阶段（"STRANGER"/"FRIEND" 等）
+    "emotional_intensity": float,  # 情感强度（0.0~1.0）
+}
 ```
 
-**棰勬湡鏁堟灉锛?* 鍐崇瓥灞備粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛宍critical` 鐘舵€佷笅鐨勯珮娑堣€楁妧鑳借皟鐢ㄤ細琚?R8 闂ㄦ帶鎷掔粷锛屼繚鎶?AI 鐨勬儏鎰熺姸鎬佷笉琚繃搴︽秷鑰椼€?
+**预期效果：** 决策层从"情感盲"变为"情感感知"，`critical` 状态下的高消耗技能调用会被 R8 门控拒绝，保护 AI 的情感状态不被过度消耗。
+
 ---
 
-### 馃煛 娣卞寲浼樺寲33锛圥1锛夛細`CrossTimelineAggregator` 鐨勬椂闂寸嚎涓嶅惈鎯呮劅浜嬩欢鈥斺€旀儏鎰熷彉鍖栧湪鏃堕棿绾夸腑涓嶅彲瑙?
-**鐩爣鏂囦欢锛?* `host_brain/observability/cross_timeline.py`
+### 🟡 深化优化33（P1）：`CrossTimelineAggregator` 的时间线不含情感事件——情感变化在时间线中不可见
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/observability/cross_timeline.py`
 
-`VALID_EDGE_EVENT_TYPES` 鐨勫畾涔夛細
+**精读发现：**
+
+`VALID_EDGE_EVENT_TYPES` 的定义：
 
 ```python
 VALID_EDGE_EVENT_TYPES = frozenset({
@@ -3715,10 +4255,11 @@ VALID_EDGE_EVENT_TYPES = frozenset({
     EDGE_EVENT_TTS_SYNTH,       # "TTS_SYNTH"
     EDGE_EVENT_VTS_EXPRESSION,  # "VTS_EXPRESSION"
     EDGE_EVENT_VTS_TALK_GATE,   # "VTS_TALK_GATE"
-    # 鈫?娌℃湁鎯呮劅浜嬩欢绫诲瀷锛?})
+    # ↑ 没有情感事件类型！
+})
 ```
 
-`HOST_LOG_TABLES` 鐨勫畾涔夛細
+`HOST_LOG_TABLES` 的定义：
 
 ```python
 HOST_LOG_TABLES = (
@@ -3734,17 +4275,21 @@ HOST_LOG_TABLES = (
     "service_health_log",
     "error_log",
     "config_snapshot_log",
-    # 鈫?娌℃湁 emotion_state_log銆乥ond_event_log锛?)
+    # ↑ 没有 emotion_state_log、bond_event_log！
+)
 ```
 
-杩欐剰鍛崇潃锛?1. 璺ㄧ鏃堕棿绾夸腑瀹屽叏娌℃湁鎯呮劅浜嬩欢鈥斺€旀棤娉曠湅鍒?AI 鍦ㄤ粈涔堟椂鍒绘儏鎰熷彂鐢熶簡鍙樺寲"
-2. 鏃犳硶鍋?鎯呮劅鏃堕棿绾垮垎鏋?鈥斺€旀棤娉曞洖绛?杩欐瀵硅瘽涓?AI 鐨勬儏鎰熸槸濡備綍鍙樺寲鐨?
-3. Bond 浜嬩欢锛坄bond_dynamics.py` 鍐欏叆 Neo4j锛変笉鍦ㄦ椂闂寸嚎涓€斺€旀棤娉曠湅鍒?Bond 闃舵鍦ㄤ粈涔堟椂鍒诲彂鐢熶簡鍙樺寲"
-4. 鎯呮劅鐘舵€佸彉鍖栵紙`metabolism.py` 鐨?`HardState` 鏇存柊锛変笉鍦ㄦ椂闂寸嚎涓€斺€旀儏鎰熷彉鍖栧瑙傛祴灞傚畬鍏ㄤ笉鍙
+这意味着：
+1. 跨端时间线中完全没有情感事件——无法看到"AI 在什么时刻情感发生了变化"
+2. 无法做"情感时间线分析"——无法回答"这次对话中 AI 的情感是如何变化的"
+3. Bond 事件（`bond_dynamics.py` 写入 Neo4j）不在时间线中——无法看到"Bond 阶段在什么时刻发生了变化"
+4. 情感状态变化（`metabolism.py` 的 `HardState` 更新）不在时间线中——情感变化对观测层完全不可见
 
-**鏂规锛?* 澧炲姞鎯呮劅浜嬩欢绫诲瀷锛屽苟灏嗘儏鎰熺浉鍏崇殑瀹¤琛ㄧ撼鍏ユ椂闂寸嚎锛?
+**方案：** 增加情感事件类型，并将情感相关的审计表纳入时间线：
+
 ```python
-# 馃啎 鎯呮劅浜嬩欢绫诲瀷锛坴1.5 鏂板锛?EDGE_EVENT_EMOTION_CHANGE = "EMOTION_CHANGE"
+# 🆕 情感事件类型（v1.5 新增）
+EDGE_EVENT_EMOTION_CHANGE = "EMOTION_CHANGE"
 EDGE_EVENT_BOND_UPDATE = "BOND_UPDATE"
 EDGE_EVENT_MOOD_TRANSITION = "MOOD_TRANSITION"
 
@@ -3757,11 +4302,12 @@ VALID_EDGE_EVENT_TYPES = frozenset({
     EDGE_EVENT_TTS_SYNTH,
     EDGE_EVENT_VTS_EXPRESSION,
     EDGE_EVENT_VTS_TALK_GATE,
-    EDGE_EVENT_EMOTION_CHANGE,    # 馃啎 鎯呮劅鐘舵€佸彉鍖栦簨浠?    EDGE_EVENT_BOND_UPDATE,       # 馃啎 Bond 绉垎鏇存柊浜嬩欢
-    EDGE_EVENT_MOOD_TRANSITION,   # 馃啎 mood_state 杞崲浜嬩欢
+    EDGE_EVENT_EMOTION_CHANGE,    # 🆕 情感状态变化事件
+    EDGE_EVENT_BOND_UPDATE,       # 🆕 Bond 积分更新事件
+    EDGE_EVENT_MOOD_TRANSITION,   # 🆕 mood_state 转换事件
 })
 
-# 馃啎 鎯呮劅鐩稿叧瀹¤琛ㄧ撼鍏ユ椂闂寸嚎
+# 🆕 情感相关审计表纳入时间线
 HOST_LOG_TABLES = (
     "intent_log",
     "governor_log",
@@ -3775,11 +4321,12 @@ HOST_LOG_TABLES = (
     "service_health_log",
     "error_log",
     "config_snapshot_log",
-    "emotion_state_log",    # 馃啎 鎯呮劅鐘舵€佸彉鍖栨棩蹇?    "bond_event_log",       # 馃啎 Bond 浜嬩欢鏃ュ織
+    "emotion_state_log",    # 🆕 情感状态变化日志
+    "bond_event_log",       # 🆕 Bond 事件日志
 )
 ```
 
-**鍚屾椂涓?`UnifiedTimelineEntry` 澧炲姞鎯呮劅瀛楁锛?*
+**同时为 `UnifiedTimelineEntry` 增加情感字段：**
 
 ```python
 @dataclass(frozen=True)
@@ -3796,20 +4343,21 @@ class UnifiedTimelineEntry:
     request_id: str
     session_id: str | None = None
     clock_drift_flag: bool = False
-    # 馃啎 鎯呮劅瀛楁
-    emotion_tag: str | None = None       # 浜嬩欢鍙戠敓鏃剁殑鎯呮劅鏍囩
-    mood_state: str | None = None        # 浜嬩欢鍙戠敓鏃剁殑 mood_state
-    bond_stage: str | None = None        # 浜嬩欢鍙戠敓鏃剁殑 Bond 闃舵
+    # 🆕 情感字段
+    emotion_tag: str | None = None       # 事件发生时的情感标签
+    mood_state: str | None = None        # 事件发生时的 mood_state
+    bond_stage: str | None = None        # 事件发生时的 Bond 阶段
 ```
 
-**棰勬湡鏁堟灉锛?* 璺ㄧ鏃堕棿绾夸粠"鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屽彲浠ユ竻鏅扮湅鍒?AI 鍦ㄤ粈涔堟椂鍒绘儏鎰熷彂鐢熶簡鍙樺寲"銆?Bond 闃舵鍦ㄤ粈涔堟椂鍒诲彂鐢熶簡鍙樺寲"锛屼负鎯呮劅鍒嗘瀽鍜岃皟璇曟彁渚涘畬鏁寸殑鍙娴嬫€с€?
+**预期效果：** 跨端时间线从"情感盲"变为"情感感知"，可以清晰看到"AI 在什么时刻情感发生了变化"、"Bond 阶段在什么时刻发生了变化"，为情感分析和调试提供完整的可观测性。
+
 ---
 
-### 馃煝 娣卞寲浼樺寲34锛圥1锛夛細`EMOTION_TO_EXPRESSION_ID` 鍙湁6绉嶆儏鎰熲€斺€擵TS 琛ㄦ儏鏄犲皠涓ラ噸涓嶈冻
+### 🟢 深化优化34（P1）：`EMOTION_TO_EXPRESSION_ID` 只有6种情感——VTS 表情映射严重不足
 
-**鐩爣鏂囦欢锛?* `host_brain/channels/vts.py`
+**目标文件：** `host_brain/channels/vts.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
 ```python
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
@@ -3819,51 +4367,57 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
     "ANGRY": "exp_angry_01",
     "SURPRISED": "exp_surprised_01",
     "THINKING": "exp_thinking_01",
-    # 鈫?鍙湁6绉嶏紒
+    # ↑ 只有6种！
 }
 ```
 
-浣?`metabolism.py` 鐨?`EmotionVector` 鏀寔鐨勬儏鎰熸爣绛捐繙涓嶆杩?绉嶏細
+但 `metabolism.py` 的 `EmotionVector` 支持的情感标签远不止这6种：
 
 ```python
-# metabolism.py 涓殑鎯呮劅鏍囩锛堟潵鑷墠鍑犺疆鍒嗘瀽锛?ALLOWED_EMOTION_TAGS = frozenset({
+# metabolism.py 中的情感标签（来自前几轮分析）
+ALLOWED_EMOTION_TAGS = frozenset({
     "NEUTRAL", "HAPPY", "SAD", "ANGRY", "SURPRISED", "THINKING",
     "EXCITED", "CALM", "ANXIOUS", "CONFUSED", "EMBARRASSED",
     "GRATEFUL", "LONELY", "PROUD", "SCARED", "DISGUSTED",
-    # 鈫?鑷冲皯16绉嶆儏鎰熸爣绛?})
+    # ↑ 至少16种情感标签
+})
 ```
 
-杩欐剰鍛崇潃锛?1. 褰?AI 澶勪簬 `EXCITED`銆乣CALM`銆乣ANXIOUS` 绛夌姸鎬佹椂锛宍resolve_vts_expression()` 浼氳繑鍥?`STATUS_DEGRADED` + neutral 闄嶇骇
-2. 瓒呰繃60%鐨勬儏鎰熸爣绛炬棤娉曟槧灏勫埌瀵瑰簲鐨?VTS 琛ㄦ儏锛屽叏閮ㄩ檷绾т负 neutral
-3. 鐢ㄦ埛鐪嬪埌鐨勮櫄鎷熷舰璞¤〃鎯呭拰 AI 鐨勫疄闄呮儏鎰熺姸鎬佷弗閲嶄笉绗︹€斺€擜I 璇磋嚜宸卞緢鍏村锛屼絾铏氭嫙褰㈣薄闈㈡棤琛ㄦ儏
+这意味着：
+1. 当 AI 处于 `EXCITED`、`CALM`、`ANXIOUS` 等状态时，`resolve_vts_expression()` 会返回 `STATUS_DEGRADED` + neutral 降级
+2. 超过60%的情感标签无法映射到对应的 VTS 表情，全部降级为 neutral
+3. 用户看到的虚拟形象表情和 AI 的实际情感状态严重不符——AI 说自己很兴奋，但虚拟形象面无表情
 
-**鏂规锛?* 鎵╁睍 `EMOTION_TO_EXPRESSION_ID` 鏄犲皠琛紝瑕嗙洊鎵€鏈?`EmotionVector` 鏀寔鐨勬儏鎰熸爣绛撅細
+**方案：** 扩展 `EMOTION_TO_EXPRESSION_ID` 映射表，覆盖所有 `EmotionVector` 支持的情感标签：
 
 ```python
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
-    # 鍩虹鎯呮劅锛堝師鏈夛級
+    # 基础情感（原有）
     "NEUTRAL":    "exp_neutral_01",
     "HAPPY":      "exp_happy_01",
     "SAD":        "exp_sad_01",
     "ANGRY":      "exp_angry_01",
     "SURPRISED":  "exp_surprised_01",
     "THINKING":   "exp_thinking_01",
-    # 馃啎 鎵╁睍鎯呮劅锛坴1.5 鏂板锛?    "EXCITED":    "exp_excited_01",      # 鍏村
-    "CALM":       "exp_calm_01",         # 骞抽潤
-    "ANXIOUS":    "exp_anxious_01",      # 鐒﹁檻
-    "CONFUSED":   "exp_confused_01",     # 鍥版儜
-    "EMBARRASSED":"exp_embarrassed_01",  # 灏村艾
-    "GRATEFUL":   "exp_grateful_01",     # 鎰熸縺
-    "LONELY":     "exp_lonely_01",       # 瀛ょ嫭
-    "PROUD":      "exp_proud_01",        # 鑷豹
-    "SCARED":     "exp_scared_01",       # 瀹虫€?    "DISGUSTED":  "exp_disgusted_01",    # 鍘屾伓
-    # 馃啎 mood_state 鍒拌〃鎯呯殑鏄犲皠锛堝綋 emotion_tag 涓嶅彲鐢ㄦ椂鐨勫閫夛級
-    "ENGAGED":    "exp_engaged_01",      # 绮惧姏鍏呮矝
-    "TIRED":      "exp_tired_01",        # 鐤叉儷
-    "CRITICAL":   "exp_critical_01",     # 鑳介噺鏋佷綆
+    # 🆕 扩展情感（v1.5 新增）
+    "EXCITED":    "exp_excited_01",      # 兴奋
+    "CALM":       "exp_calm_01",         # 平静
+    "ANXIOUS":    "exp_anxious_01",      # 焦虑
+    "CONFUSED":   "exp_confused_01",     # 困惑
+    "EMBARRASSED":"exp_embarrassed_01",  # 尴尬
+    "GRATEFUL":   "exp_grateful_01",     # 感激
+    "LONELY":     "exp_lonely_01",       # 孤独
+    "PROUD":      "exp_proud_01",        # 自豪
+    "SCARED":     "exp_scared_01",       # 害怕
+    "DISGUSTED":  "exp_disgusted_01",    # 厌恶
+    # 🆕 mood_state 到表情的映射（当 emotion_tag 不可用时的备选）
+    "ENGAGED":    "exp_engaged_01",      # 精力充沛
+    "TIRED":      "exp_tired_01",        # 疲惫
+    "CRITICAL":   "exp_critical_01",     # 能量极低
 }
 
-# 馃啎 mood_state 鍒?emotion_tag 鐨勬槧灏勶紙鐢ㄤ簬 mood_state 椹卞姩琛ㄦ儏锛?MOOD_STATE_TO_EMOTION_TAG: dict[str, str] = {
+# 🆕 mood_state 到 emotion_tag 的映射（用于 mood_state 驱动表情）
+MOOD_STATE_TO_EMOTION_TAG: dict[str, str] = {
     "engaged":  "EXCITED",
     "steady":   "NEUTRAL",
     "calm":     "CALM",
@@ -3872,7 +4426,7 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
 }
 ```
 
-**鍚屾椂淇 `resolve_vts_expression()` 鐨勯檷绾ч€昏緫锛?*
+**同时修复 `resolve_vts_expression()` 的降级逻辑：**
 
 ```python
 def resolve_vts_expression(
@@ -3885,26 +4439,27 @@ def resolve_vts_expression(
     raw_action_params: dict[str, Any] | None = None,
     ts_ms: int | None = None,
     edge_available: bool = True,
-    mood_state: str | None = None,   # 馃啎 澶囬€夛細褰?emotion_tag 涓嶅彲鐢ㄦ椂鐢?mood_state 鎺ㄦ柇
+    mood_state: str | None = None,   # 🆕 备选：当 emotion_tag 不可用时用 mood_state 推断
 ) -> VTSActionResult:
     # ...
-    # 馃啎 emotion_tag 涓虹┖鏃讹紝灏濊瘯浠?mood_state 鎺ㄦ柇
+    # 🆕 emotion_tag 为空时，尝试从 mood_state 推断
     if not normalized_tag and mood_state:
         inferred_tag = MOOD_STATE_TO_EMOTION_TAG.get(str(mood_state).lower())
         if inferred_tag:
             normalized_tag = inferred_tag
 ```
 
-**棰勬湡鏁堟灉锛?* VTS 琛ㄦ儏鏄犲皠浠?绉嶆墿灞曞埌16+绉嶏紝瑕嗙洊鎵€鏈?`EmotionVector` 鏀寔鐨勬儏鎰熸爣绛撅紝铏氭嫙褰㈣薄琛ㄦ儏鍜?AI 鎯呮劅鐘舵€佺殑涓€鑷存€т粠40%鎻愬崌鍒版帴杩?00%銆?
+**预期效果：** VTS 表情映射从6种扩展到16+种，覆盖所有 `EmotionVector` 支持的情感标签，虚拟形象表情和 AI 情感状态的一致性从40%提升到接近100%。
+
 ---
 
-### 馃數 娣卞寲浼樺寲35锛圥1锛夛細`CameraRecognitionServiceContract.detect()` 鐨勮瑙夎瘑鍒粨鏋滀笉瑙﹀彂鎯呮劅鍝嶅簲鈥斺€旇瑙夋劅鐭ヤ笌鎯呮劅绯荤粺瀹屽叏鏂紑
+### 🔵 深化优化35（P1）：`CameraRecognitionServiceContract.detect()` 的视觉识别结果不触发情感响应——视觉感知与情感系统完全断开
 
-**鐩爣鏂囦欢锛?* `host_brain/vision/camera_event.py`
+**目标文件：** `host_brain/vision/camera_event.py`
 
-**绮捐鍙戠幇锛?*
+**精读发现：**
 
-`detect()` 鐨勮緭鍑虹粨鏋勶細
+`detect()` 的输出结构：
 
 ```python
 output = {
@@ -3924,26 +4479,34 @@ output = {
         "low_confidence_count": low_conf_count,
     },
     "quality": {"stage": S_VISION_CAMERA, "reason_code": None},
-    # 鈫?娌℃湁浠讳綍鎯呮劅鐩稿叧瀛楁锛?}
+    # ↑ 没有任何情感相关字段！
+}
 ```
 
-`_log_event()` 鍐欏叆瀹¤鐨?payload锛?
+`_log_event()` 写入审计的 payload：
+
 ```python
 payload={
     "detector_id": output["detector_id"],
     "object_count": len(objects),
     "low_confidence_count": low_conf_count,
     "latency_ms": latency_ms,
-    # 鈫?娌℃湁鎯呮劅瑙﹀彂淇℃伅锛?},
+    # ↑ 没有情感触发信息！
+},
 ```
 
-杩欐剰鍛崇潃锛?1. 瑙嗚璇嗗埆缁撴灉锛堟娴嬪埌鐢ㄦ埛鐨勮〃鎯呫€佸Э鎬併€佺墿浣擄級瀹屽叏涓嶈Е鍙戞儏鎰熷搷搴?2. 濡傛灉鎽勫儚澶存娴嬪埌鐢ㄦ埛鍦ㄥ摥娉ｏ紙`label="crying_face"`锛夛紝AI 涓嶄細鍥犳浜х敓鎯呮劅鍙嶅簲
-3. 濡傛灉妫€娴嬪埌鐢ㄦ埛鍦ㄥ井绗戯紙`label="smiling_face"`锛夛紝AI 涓嶄細鍥犳鎰熷埌寮€蹇?4. 瑙嗚鎰熺煡鍜屾儏鎰熺郴缁熶箣闂存病鏈変换浣曡繛鎺モ€斺€旇瑙夋槸"鎯呮劅鐩?鐨?
-**鏂规锛?* 涓鸿瑙夎瘑鍒粨鏋滃鍔犳儏鎰熸帹鏂紝骞跺湪妫€娴嬪埌鎯呮劅鐩稿叧鐗╀綋鏃惰Е鍙戞儏鎰熷搷搴旓細
+这意味着：
+1. 视觉识别结果（检测到用户的表情、姿态、物体）完全不触发情感响应
+2. 如果摄像头检测到用户在哭泣（`label="crying_face"`），AI 不会因此产生情感反应
+3. 如果检测到用户在微笑（`label="smiling_face"`），AI 不会因此感到开心
+4. 视觉感知和情感系统之间没有任何连接——视觉是"情感盲"的
+
+**方案：** 为视觉识别结果增加情感推断，并在检测到情感相关物体时触发情感响应：
 
 ```python
-# 馃啎 瑙嗚鎯呮劅瑙﹀彂瑙勫垯锛坴1.5 鏂板锛?VISION_EMOTION_TRIGGERS: dict[str, tuple[str, float]] = {
-    # label 鈫?(emotion_tag, intensity)
+# 🆕 视觉情感触发规则（v1.5 新增）
+VISION_EMOTION_TRIGGERS: dict[str, tuple[str, float]] = {
+    # label → (emotion_tag, intensity)
     "crying_face":    ("SAD",      0.8),
     "smiling_face":   ("HAPPY",    0.7),
     "angry_face":     ("ANXIOUS",  0.6),
@@ -3957,16 +4520,19 @@ payload={
 def _infer_emotion_from_objects(
     objects: list[dict[str, Any]],
 ) -> tuple[str | None, float]:
-    """浠庤瑙夎瘑鍒粨鏋滄帹鏂儏鎰熻Е鍙戙€?
+    """从视觉识别结果推断情感触发。
+
     Returns:
-        (emotion_tag, intensity) 鎴?(None, 0.0) 濡傛灉鏃犳儏鎰熻Е鍙?    """
+        (emotion_tag, intensity) 或 (None, 0.0) 如果无情感触发
+    """
     best_emotion: str | None = None
     best_intensity: float = 0.0
 
     for obj in objects:
         label = str(obj.get("label") or "").lower()
         conf = float(obj.get("conf") or 0.0)
-        if conf < 0.6:  # 浣庣疆淇″害涓嶈Е鍙戞儏鎰?            continue
+        if conf < 0.6:  # 低置信度不触发情感
+            continue
         trigger = VISION_EMOTION_TRIGGERS.get(label)
         if trigger:
             emotion_tag, base_intensity = trigger
@@ -3978,47 +4544,58 @@ def _infer_emotion_from_objects(
     return best_emotion, best_intensity
 ```
 
-**鍦?`detect()` 涓泦鎴愭儏鎰熸帹鏂細**
+**在 `detect()` 中集成情感推断：**
 
 ```python
 objects = _normalize_objects(raw_objects, low_conf_threshold=self.low_conf_threshold)
-# 馃啎 浠庤瑙夎瘑鍒粨鏋滄帹鏂儏鎰熻Е鍙?inferred_emotion, emotion_intensity = _infer_emotion_from_objects(objects)
+# 🆕 从视觉识别结果推断情感触发
+inferred_emotion, emotion_intensity = _infer_emotion_from_objects(objects)
 
 output = {
-    # ... 鍘熸湁瀛楁 ...
-    # 馃啎 鎯呮劅鎺ㄦ柇缁撴灉
+    # ... 原有字段 ...
+    # 🆕 情感推断结果
     "inferred_emotion": inferred_emotion,
     "emotion_intensity": emotion_intensity,
     "emotion_triggered": inferred_emotion is not None,
 }
 ```
 
-**棰勬湡鏁堟灉锛?* 瑙嗚鎰熺煡浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛屾憚鍍忓ご妫€娴嬪埌鐢ㄦ埛鍝常鏃?AI 浼氫骇鐢?`SAD` 鎯呮劅鍝嶅簲锛屾娴嬪埌鐢ㄦ埛寰瑧鏃?AI 浼氫骇鐢?`HAPPY` 鎯呮劅鍝嶅簲锛岃瑙夋劅鐭ュ拰鎯呮劅绯荤粺瀹炵幇鐪熸鐨勮繛鎺ャ€?
+**预期效果：** 视觉感知从"情感盲"变为"情感感知"，摄像头检测到用户哭泣时 AI 会产生 `SAD` 情感响应，检测到用户微笑时 AI 会产生 `HAPPY` 情感响应，视觉感知和情感系统实现真正的连接。
+
 ---
 
-### 馃煟 娣卞寲浼樺寲36锛圥2锛夛細`HybridFusionStrategy.fuse()` 鐨勮瀺鍚堝垎鏁颁笉鎰熺煡鎯呮劅寮哄害鈥斺€旈珮鎯呮劅寮哄害鐨勮蹇嗗拰浣庢儏鎰熷己搴︾殑璁板繂寰楀埌鐩稿悓鐨勮瀺鍚堟潈閲?
-**鐩爣鏂囦欢锛?* `host_brain/retrieval/recall_fusion.py`
+### 🟣 深化优化36（P2）：`HybridFusionStrategy.fuse()` 的融合分数不感知情感强度——高情感强度的记忆和低情感强度的记忆得到相同的融合权重
 
-**绮捐鍙戠幇锛?*
+**目标文件：** `host_brain/retrieval/recall_fusion.py`
 
-`HybridFusionStrategy.fuse()` 鐨勮瀺鍚堝叕寮忥細
+**精读发现：**
+
+`HybridFusionStrategy.fuse()` 的融合公式：
 
 ```python
 final_score = round(
     vector_score * self.vector_weight + fts_score * self.fts_weight,
     6,
 )
-# 鈫?鍙湁鍚戦噺鍒嗘暟鍜屽叏鏂囧垎鏁帮紝娌℃湁鎯呮劅寮哄害鍔犳潈锛?```
+# ↑ 只有向量分数和全文分数，没有情感强度加权！
+```
 
-`_normalize_candidate()` 鐨?metadata 澶勭悊锛?
+`_normalize_candidate()` 的 metadata 处理：
+
 ```python
 merged_metadata["base_score"] = base_score
 merged_metadata["matched_routes"] = [route.route_id]
 merged_metadata["recall_rank"] = int(rank)
-# 鈫?娌℃湁 emotional_intensity 瀛楁锛?```
+# ↑ 没有 emotional_intensity 字段！
+```
 
-杩欐剰鍛崇潃锛?1. 涓€鏉?鎯呮劅寮哄害=0.9"鐨勮蹇嗭紙鐢ㄦ埛鍝常鏃朵骇鐢熺殑璁板繂锛夊拰涓€鏉?鎯呮劅寮哄害=0.1"鐨勮蹇嗭紙鏅€氶棽鑱婃椂浜х敓鐨勮蹇嗭級鍦ㄨ瀺鍚堟椂寰楀埌鐩稿悓鐨勬潈閲?2. 楂樻儏鎰熷己搴︾殑璁板繂搴旇鍦ㄥ彫鍥炴椂寰楀埌鏇撮珮鐨勪紭鍏堢骇锛屼絾褰撳墠铻嶅悎绛栫暐瀹屽叏蹇界暐浜嗚繖涓€鐐?3. 杩欏鑷?AI 鍦ㄥ洖蹇嗘椂锛屾櫘閫氶棽鑱婄殑璁板繂鍜屾繁搴︽儏鎰熶簰鍔ㄧ殑璁板繂琚悓绛夊寰?
-**鏂规锛?* 涓?`HybridFusionStrategy` 澧炲姞鎯呮劅寮哄害鍔犳潈鍙傛暟锛?
+这意味着：
+1. 一条"情感强度=0.9"的记忆（用户哭泣时产生的记忆）和一条"情感强度=0.1"的记忆（普通闲聊时产生的记忆）在融合时得到相同的权重
+2. 高情感强度的记忆应该在召回时得到更高的优先级，但当前融合策略完全忽略了这一点
+3. 这导致 AI 在回忆时，普通闲聊的记忆和深度情感互动的记忆被同等对待
+
+**方案：** 为 `HybridFusionStrategy` 增加情感强度加权参数：
+
 ```python
 class HybridFusionStrategy:
     def __init__(
@@ -4026,7 +4603,8 @@ class HybridFusionStrategy:
         *,
         vector_weight: float = DEFAULT_VECTOR_WEIGHT,
         fts_weight: float = DEFAULT_FTS_WEIGHT,
-        emotion_intensity_weight: float = 0.0,   # 馃啎 鎯呮劅寮哄害鍔犳潈锛堥粯璁?锛屼笉褰卞搷鐜版湁琛屼负锛?    ) -> None:
+        emotion_intensity_weight: float = 0.0,   # 🆕 情感强度加权（默认0，不影响现有行为）
+    ) -> None:
         # ...
         self.emotion_intensity_weight = float(emotion_intensity_weight)
 
@@ -4037,7 +4615,7 @@ class HybridFusionStrategy:
         fts_candidates: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         # ...
-        # 馃啎 鎯呮劅寮哄害鍔犳潈
+        # 🆕 情感强度加权
         if self.emotion_intensity_weight > 0:
             for doc_id, entry in fused.items():
                 metadata = entry.get("metadata") or {}
@@ -4051,59 +4629,81 @@ class HybridFusionStrategy:
                 entry["metadata"]["emotion_intensity_boost"] = emotion_boost
 ```
 
-**棰勬湡鏁堟灉锛?* 娣峰悎铻嶅悎绛栫暐浠?鎯呮劅鐩?鍙樹负"鎯呮劅鎰熺煡"锛岄珮鎯呮劅寮哄害鐨勮蹇嗭紙娣卞害鎯呮劅浜掑姩鏃朵骇鐢熺殑璁板繂锛夊湪鍙洖鏃跺緱鍒版洿楂樼殑浼樺厛绾э紝AI 鐨勫洖蹇嗘洿鍊惧悜浜庢儏鎰熸繁鍒荤殑鏃跺埢銆?
+**预期效果：** 混合融合策略从"情感盲"变为"情感感知"，高情感强度的记忆（深度情感互动时产生的记忆）在召回时得到更高的优先级，AI 的回忆更倾向于情感深刻的时刻。
+
 ---
 
-## 浜屽崄涓€銆佺鍏疆浼樺寲鐨勬牳蹇冧环鍊兼€荤粨
+## 二十一、第六轮优化的核心价值总结
 
-绗叚杞紭鍖栬仛鐒︿簬**鎰熺煡灞傛儏鎰熸柇璺?*鈥斺€旀儏鎰熶俊鎭湪"鎰熺煡鈫掑喅绛栤啋杈撳嚭鈫掕娴?鍏ㄩ摼璺腑鐨勭郴缁熸€ф柇璺細
+第六轮优化聚焦于**感知层情感断路**——情感信息在"感知→决策→输出→观测"全链路中的系统性断路：
 
-| 浼樺寲椤?| 鍙戠幇鐨?鎰熺煡灞傛柇璺? | 褰卞搷鑼冨洿 | 淇鏂规 |
+| 优化项 | 发现的"感知层断路" | 影响范围 | 修复方案 |
 |--------|-----------------|---------|---------|
-| **浼樺寲31** 馃敶 | 鍙洖绯荤粺鏃犳儏鎰熺淮搴﹁矾鐢憋紝鎯呮劅璁板繂鍜屾櫘閫氳蹇嗘贩鍦ㄥ悓涓€鍙洖姹?| `recall_fusion.py` 鈫?璁板繂鍙洖 | 澧炲姞鎯呮劅杩囨护鍙傛暟鍜屾儏鎰熼噸鎺掑簭 |
-| **浼樺寲32** 馃煚 | 鍐崇瓥灞備笉鎰熺煡鎯呮劅鐘舵€侊紝critical 鐘舵€佷笅楂樻秷鑰楁妧鑳戒笉琚嫆缁?| `decision.py` 鈫?闂ㄦ帶瑙勫垯 | 澧炲姞 R8 鎯呮劅淇濇姢闂ㄦ帶 |
-| **浼樺寲33** 馃煛 | 璺ㄧ鏃堕棿绾夸笉鍚儏鎰熶簨浠讹紝鎯呮劅鍙樺寲瀵硅娴嬪眰涓嶅彲瑙?| `cross_timeline.py` 鈫?鍙娴嬫€?| 澧炲姞鎯呮劅浜嬩欢绫诲瀷鍜屾儏鎰熷璁¤〃 |
-| **浼樺寲34** 馃煝 | VTS 琛ㄦ儏鏄犲皠鍙湁6绉嶏紝60%+鎯呮劅鏍囩闄嶇骇涓?neutral | `vts.py` 鈫?铏氭嫙褰㈣薄 | 鎵╁睍鏄犲皠琛ㄥ埌16+绉嶏紝澧炲姞 mood_state 澶囬€?|
-| **浼樺寲35** 馃數 | 瑙嗚璇嗗埆缁撴灉涓嶈Е鍙戞儏鎰熷搷搴旓紝瑙嗚鎰熺煡涓庢儏鎰熺郴缁熷畬鍏ㄦ柇寮€ | `camera_event.py` 鈫?瑙嗚鎰熺煡 | 澧炲姞瑙嗚鎯呮劅瑙﹀彂瑙勫垯锛屾娴嬪埌鐢ㄦ埛琛ㄦ儏鏃惰Е鍙戞儏鎰熷搷搴?|
-| **浼樺寲36** 馃煟 | 娣峰悎铻嶅悎鍒嗘暟涓嶆劅鐭ユ儏鎰熷己搴︼紝楂樻儏鎰熷己搴﹁蹇嗗拰鏅€氳蹇嗗悓绛夊寰?| `recall_fusion.py` 鈫?铻嶅悎绛栫暐 | 澧炲姞鎯呮劅寮哄害鍔犳潈鍙傛暟 |
+| **优化31** 🔴 | 召回系统无情感维度路由，情感记忆和普通记忆混在同一召回池 | `recall_fusion.py` → 记忆召回 | 增加情感过滤参数和情感重排序 |
+| **优化32** 🟠 | 决策层不感知情感状态，critical 状态下高消耗技能不被拒绝 | `decision.py` → 门控规则 | 增加 R8 情感保护门控 |
+| **优化33** 🟡 | 跨端时间线不含情感事件，情感变化对观测层不可见 | `cross_timeline.py` → 可观测性 | 增加情感事件类型和情感审计表 |
+| **优化34** 🟢 | VTS 表情映射只有6种，60%+情感标签降级为 neutral | `vts.py` → 虚拟形象 | 扩展映射表到16+种，增加 mood_state 备选 |
+| **优化35** 🔵 | 视觉识别结果不触发情感响应，视觉感知与情感系统完全断开 | `camera_event.py` → 视觉感知 | 增加视觉情感触发规则，检测到用户表情时触发情感响应 |
+| **优化36** 🟣 | 混合融合分数不感知情感强度，高情感强度记忆和普通记忆同等对待 | `recall_fusion.py` → 融合策略 | 增加情感强度加权参数 |
 
 ---
 
-## 浜屽崄浜屻€佸畬鏁翠紭鍖栧叏鏅浘锛坴1.5锛?6椤癸級
+## 二十二、完整优化全景图（v1.5，36项）
 
-### 鍏疆浼樺寲鐨勫眰娆￠€掕繘
+### 六轮优化的层次递进
 
 ```
-绗竴杞紙v1.0锛夛細鍙戠幇5涓?缂哄け鍔熻兘"     鈫?闇€瑕佹柊澧炰粈涔?绗簩杞紙v1.1锛夛細鍙戠幇6涓?娣卞眰闂"     鈫?鐜版湁鏈哄埗鍝噷涓嶅娣?绗笁杞紙v1.2锛夛細鍙戠幇6涓?鍋囧姛鑳界┖澹?   鈫?鐜版湁浠ｇ爜鍝噷鐪嬭捣鏉ユ湁浣嗗疄闄呮病鐢?绗洓杞紙v1.3锛夛細鍙戠幇6涓?鏋舵瀯鏂眰"     鈫?鍔熻兘涔嬮棿鐨勮繛鎺ュ湪鍝噷鏂
-绗簲杞紙v1.4锛夛細鍙戠幇6涓?璺ㄦā鍧楃洸鍖?   鈫?鎯呮劅淇℃伅鍦ㄥ叏閾捐矾涓殑绯荤粺鎬х己澶?绗叚杞紙v1.5锛夛細鍙戠幇6涓?鎰熺煡灞傛柇璺?   鈫?鎯呮劅淇℃伅鍦ㄦ劅鐭モ啋鍐崇瓥鈫掕緭鍑衡啋瑙傛祴涓殑鏂矾
+第一轮（v1.0）：发现5个"缺失功能"     → 需要新增什么
+第二轮（v1.1）：发现6个"深层问题"     → 现有机制哪里不够深
+第三轮（v1.2）：发现6个"假功能空壳"   → 现有代码哪里看起来有但实际没用
+第四轮（v1.3）：发现6个"架构断层"     → 功能之间的连接在哪里断裂
+第五轮（v1.4）：发现6个"跨模块盲区"   → 情感信息在全链路中的系统性缺失
+第六轮（v1.5）：发现6个"感知层断路"   → 情感信息在感知→决策→输出→观测中的断路
 ```
 
-### 鎸変紭鍏堢骇鍒嗙被锛?6椤瑰叏鏅級
+### 按优先级分类（36项全景）
 
-| 浼樺厛绾?| 浼樺寲椤?| 鏍稿績闂 |
+| 优先级 | 优化项 | 核心问题 |
 |--------|--------|---------|
-| **P0锛堝繀椤讳慨澶嶏級** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32 | 鏋舵瀯鏂眰 + 璺ㄦā鍧楃洸鍖?+ 鎰熺煡灞傛柇璺腑鐨勫叧閿矾寰?|
-| **P1锛堥噸瑕佷紭鍖栵級** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35 | 鎯呮劅鍐呮牳 + 鍏崇郴灞?+ 璁板繂灞?+ 鎰熺煡灞?|
-| **P2锛堜綋楠屽寮猴級** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36 | 杈撳嚭灞?+ 缁嗚妭鎵撶（ |
+| **P0（必须修复）** | OPT19, OPT20, OPT22, OPT25, OPT26, OPT27, OPT31, OPT32 | 架构断层 + 跨模块盲区 + 感知层断路中的关键路径 |
+| **P1（重要优化）** | OPT1, OPT6, OPT7, OPT8, OPT13, OPT14, OPT16, OPT17, OPT18, OPT21, OPT28, OPT29, OPT33, OPT34, OPT35 | 情感内核 + 关系层 + 记忆层 + 感知层 |
+| **P2（体验增强）** | OPT2, OPT3, OPT4, OPT5, OPT9, OPT10, OPT11, OPT12, OPT15, OPT23, OPT24, OPT30, OPT36 | 输出层 + 细节打磨 |
 
-### 鎯呮劅淇℃伅鍏ㄩ摼璺鐩栧浘锛坴1.5锛?
-```
-鐢ㄦ埛杈撳叆
-    鈫?[瑙嗚鎰熺煡灞俔 camera_event.py
-    OPT35: 瑙嗚璇嗗埆 鈫?鎯呮劅瑙﹀彂锛堟柊澧烇級
-    鈫?[鍙洖灞俔 recall_fusion.py
-    OPT31: 鎯呮劅缁村害璺敱锛堟柊澧烇級
-    OPT36: 鎯呮劅寮哄害鍔犳潈铻嶅悎锛堟柊澧烇級
-    鈫?[鍐崇瓥灞俔 governor/decision.py
-    OPT32: R8 鎯呮劅淇濇姢闂ㄦ帶锛堟柊澧烇級
-    鈫?[鎯呮劅鍐呮牳] metabolism.py
-    OPT6/7/8: EmotionVector 娣卞寲锛堝墠鍑犺疆锛?    鈫?[鍏崇郴灞俔 bond/
-    OPT26: 鎯呮劅鍔犳潈 Bond 绉垎锛堢浜旇疆锛?    OPT27: derive_bond_summary 淇锛堢浜旇疆锛?    鈫?[璁板繂灞俔 memory/
-    OPT25: EpisodicRecord 鎯呮劅瀛楁锛堢浜旇疆锛?    OPT28: 鍘嬬缉鍓嶄繚瀛樼敤鎴锋儏鎰燂紙绗簲杞級
-    OPT29: 鎯呮劅鍏崇郴钂搁涓婚锛堢浜旇疆锛?    鈫?[杈撳嚭灞俔 qa.py / prompt_context.py
-    OPT19/20/22: 鏋舵瀯鏂眰淇锛堢鍥涜疆锛?    鈫?[閫氶亾灞俔 channels/vts.py
-    OPT34: VTS 琛ㄦ儏鏄犲皠鎵╁睍锛堢鍏疆锛?    鈫?[瑙傛祴灞俔 observability/cross_timeline.py
-    OPT33: 鎯呮劅浜嬩欢绾冲叆鏃堕棿绾匡紙绗叚杞級
-    鈫?鐢ㄦ埛鎰熺煡鍒扮殑鎯呮劅杈撳嚭
-```
+### 情感信息全链路覆盖图（v1.5）
 
+```
+用户输入
+    ↓
+[视觉感知层] camera_event.py
+    OPT35: 视觉识别 → 情感触发（新增）
+    ↓
+[召回层] recall_fusion.py
+    OPT31: 情感维度路由（新增）
+    OPT36: 情感强度加权融合（新增）
+    ↓
+[决策层] governor/decision.py
+    OPT32: R8 情感保护门控（新增）
+    ↓
+[情感内核] metabolism.py
+    OPT6/7/8: EmotionVector 深化（前几轮）
+    ↓
+[关系层] bond/
+    OPT26: 情感加权 Bond 积分（第五轮）
+    OPT27: derive_bond_summary 修复（第五轮）
+    ↓
+[记忆层] memory/
+    OPT25: EpisodicRecord 情感字段（第五轮）
+    OPT28: 压缩前保存用户情感（第五轮）
+    OPT29: 情感关系蒸馏主题（第五轮）
+    ↓
+[输出层] qa.py / context_pack.py
+    OPT19/20/22: 架构断层修复（第四轮）
+    ↓
+[通道层] channels/vts.py
+    OPT34: VTS 表情映射扩展（第六轮）
+    ↓
+[观测层] observability/cross_timeline.py
+    OPT33: 情感事件纳入时间线（第六轮）
+    ↓
+用户感知到的情感输出
+```

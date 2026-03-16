@@ -1,6 +1,6 @@
-﻿{
+{
   "milestone": "M28",
-  "title": "鏍稿績鎯呮劅鏋舵瀯娣卞寲锛圥1 浼樺寲锛?,
+  "title": "核心情感架构深化（P1 优化）",
   "release_date": "2026-03-05",
   "release_ready": true,
   "quality_gate": {
@@ -30,32 +30,32 @@
     "optional_slots_multi_slot": true
   },
   "tasks_completed": [
-    "TASK-0244 M28-A: EmotionVector 鎯呯华杩炵画浣擄紙OPT-1锛?,
-    "TASK-0245 M28-B: emotion_tag 鐢熸垚绛栫暐涓诲姩娉ㄥ叆锛圤PT-6锛?,
-    "TASK-0246 M28-C: Bond 绉垎鎯呮劅浜嬩欢鍒嗙被绮惧寲锛圤PT-7锛?,
-    "TASK-0247 M28-D: Governor R8 鎯呮劅鎰熺煡闂ㄦ帶锛圤PT-8锛?,
-    "TASK-0248 M28-E: evolve_hard_state 鎯呮劅浜嬩欢璇箟鎵╁睍锛圤PT-13锛?,
-    "TASK-0249 M28-F: BondScoreState.trend 璇箟鍖栵紙OPT-14锛?,
-    "TASK-0250 M28-G: OPTIONAL_SLOTS 鎵╁睍锛圤PT-16锛?,
-    "TASK-0251 M28-H: BondScoreState.to_summary 涓枃鍖栵紙OPT-21锛?,
-    "TASK-0252 M28-I: ContextCompressor 淇濆瓨鐢ㄦ埛杞锛圤PT-28锛?,
-    "TASK-0253 M28-J: LongTermDistiller 澧炲姞鎯呮劅鍏崇郴钂搁涓婚锛圤PT-29锛?,
-    "TASK-0254 M28-K: CrossTimelineAggregator 澧炲姞鎯呮劅浜嬩欢锛圤PT-33锛?,
-    "TASK-0255 M28-L: EMOTION_TO_EXPRESSION_ID 鎵╁睍鑷?6绉嶏紙OPT-34锛?,
-    "TASK-0256 M28-M: CameraRecognition 瑙嗚鎰熺煡瑙﹀彂鎯呮劅鍝嶅簲锛圤PT-35锛?,
-    "TASK-0257 M28-N: ToolMeta 澧炲姞鎯呮劅閫傜敤鎬у瓧娈碉紙OPT-39锛?,
-    "TASK-0258 M28-O: RerankerServiceContract 鎯呮劅鎰熺煡閲嶆帓搴忥紙OPT-40锛?,
-    "TASK-0259 M28-P: RetrievalPipeline 浼犻€掓儏鎰熶笂涓嬫枃锛圤PT-41锛?,
-    "TASK-0260 M28-Q: LlmGatewayContract 鎼哄甫鎯呮劅涓婁笅鏂囷紙OPT-44锛?,
-    "TASK-0261 M28-R: GraphExecutor 鑺傜偣鎵ц鎼哄甫鎯呮劅鐘舵€侊紙OPT-45锛?,
-    "TASK-0262 M28-S: SoVITS synthesize emotion_intensity 鐪熸浼犻€掞紙OPT-47锛?
+    "TASK-0244 M28-A: EmotionVector 情绪连续体（OPT-1）",
+    "TASK-0245 M28-B: emotion_tag 生成策略主动注入（OPT-6）",
+    "TASK-0246 M28-C: Bond 积分情感事件分类精化（OPT-7）",
+    "TASK-0247 M28-D: Governor R8 情感感知门控（OPT-8）",
+    "TASK-0248 M28-E: evolve_hard_state 情感事件语义扩展（OPT-13）",
+    "TASK-0249 M28-F: BondScoreState.trend 语义化（OPT-14）",
+    "TASK-0250 M28-G: OPTIONAL_SLOTS 扩展（OPT-16）",
+    "TASK-0251 M28-H: BondScoreState.to_summary 中文化（OPT-21）",
+    "TASK-0252 M28-I: ContextCompressor 保存用户轮次（OPT-28）",
+    "TASK-0253 M28-J: LongTermDistiller 增加情感关系蒸馏主题（OPT-29）",
+    "TASK-0254 M28-K: CrossTimelineAggregator 增加情感事件（OPT-33）",
+    "TASK-0255 M28-L: EMOTION_TO_EXPRESSION_ID 扩展至16种（OPT-34）",
+    "TASK-0256 M28-M: CameraRecognition 视觉感知触发情感响应（OPT-35）",
+    "TASK-0257 M28-N: ToolMeta 增加情感适用性字段（OPT-39）",
+    "TASK-0258 M28-O: RerankerServiceContract 情感感知重排序（OPT-40）",
+    "TASK-0259 M28-P: RetrievalPipeline 传递情感上下文（OPT-41）",
+    "TASK-0260 M28-Q: LlmGatewayContract 携带情感上下文（OPT-44）",
+    "TASK-0261 M28-R: GraphExecutor 节点执行携带情感状态（OPT-45）",
+    "TASK-0262 M28-S: SoVITS synthesize emotion_intensity 真正传递（OPT-47）"
   ],
   "files_modified": [
     "host_brain/core/metabolism.py",
     "host_brain/bond/bond_stage_engine.py",
     "host_brain/bond/bond_dynamics.py",
     "host_brain/governor/rules.py",
-    "host_brain/core/prompt_context.py",
+    "host_brain/core/context_pack.py",
     "host_brain/memory/context_compressor.py",
     "host_brain/memory/long_term_distiller.py",
     "host_brain/observability/cross_timeline.py",
@@ -90,9 +90,8 @@
     "tests/unit/test_tts_intensity_fix_m28.py"
   ],
   "regressions_fixed": [
-    "BondDynamicsWriter._stage_engine 灞炴€х己澶憋紙classify_interaction 姝讳唬鐮佸鑷达級",
-    "test_bond_stage_engine.py 鏃ф祴璇曟湡鏈涜嫳鏂囨灇涓惧€硷紙M28-F/H 涓枃鍖栧悗鍏煎淇锛?,
-    "test_bond_summarizer_m27.py 鏃ф祴璇曟湡鏈涜嫳鏂?trend锛圡28-F 涓枃鍖栧悗鍏煎淇锛?
+    "BondDynamicsWriter._stage_engine 属性缺失（classify_interaction 死代码导致）",
+    "test_bond_stage_engine.py 旧测试期望英文枚举值（M28-F/H 中文化后兼容修复）",
+    "test_bond_summarizer_m27.py 旧测试期望英文 trend（M28-F 中文化后兼容修复）"
   ]
 }
-

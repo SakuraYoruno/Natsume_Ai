@@ -1,113 +1,141 @@
-﻿# M29 浠ｇ爜瀹℃煡鎶ュ憡
+# M29 代码审查报告
 
-**閲岀▼纰?*锛歁29 鈥?鎯呮劅浣撻獙澧炲己
-**鏃ユ湡**锛?026-03-05
-**瀹℃煡浜?*锛欰I CodeBuddy
-**鐘舵€?*锛氣渽 PASSED
+**里程碑**：M29 — 情感体验增强
+**日期**：2026-03-05
+**审查人**：AI CodeBuddy
+**状态**：✅ PASSED
 
 ---
 
-## 涓€銆侀噷绋嬬姒傝堪
+## 一、里程碑概述
 
-M29 鍦?M28 鏍稿績鎯呮劅鏋舵瀯鍩虹涓婏紝瀹炵幇浜嗘儏鎰熶綋楠岀殑鍏ㄩ潰澧炲己锛屽叡瀹屾垚 19 椤瑰瓙浠诲姟锛圱ASK-0264~0282锛孧29-A~S锛夈€傛牳蹇冪洰鏍囨槸璁?Natsume 鐨勬儏鎰熸劅鐭ヨ兘鍔涗粠"缁撴瀯鍖栧瓨鍌?鍗囩骇涓?鍔ㄦ€佹劅鐭ヤ笌鍝嶅簲"銆?
+M29 在 M28 核心情感架构基础上，实现了情感体验的全面增强，共完成 19 项子任务（TASK-0264~0282，M29-A~S）。核心目标是让 Natsume 的情感感知能力从"结构化存储"升级为"动态感知与响应"。
+
 ---
 
-## 浜屻€佹祴璇曠粨鏋?
-| 鎸囨爣 | 鏁板€?|
+## 二、测试结果
+
+| 指标 | 数值 |
 |------|------|
-| 鍏ㄩ噺娴嬭瘯閫氳繃 | **884 passed** |
-| 鍏ㄩ噺娴嬭瘯澶辫触 | **0 failed** |
-| M29 鏂板娴嬭瘯 | **46 涓?* |
-| M29 娴嬭瘯閫氳繃鐜?| **100%** |
+| 全量测试通过 | **884 passed** |
+| 全量测试失败 | **0 failed** |
+| M29 新增测试 | **46 个** |
+| M29 测试通过率 | **100%** |
 
 ---
 
-## 涓夈€佸瓙浠诲姟瀹℃煡
+## 三、子任务审查
 
-### M29-A锛欱ondEmotionalTexture 鎯呮劅璐ㄦ劅灞?- **鏂囦欢**锛歚host_brain/bond/bond_stage_engine.py`
-- **瀹炵幇**锛氭柊澧?`BondEmotionalTexture` dataclass锛屽寘鍚钩鍧囧洖澶嶉棿闅斻€佹儏鎰熸晥浠枫€佷翰瀵嗘俯搴︾瓑瀛楁
-- **璇勫**锛氣渽 瀛楁璁捐鍚堢悊锛岄粯璁ゅ€煎畨鍏紝`to_summary()` 姝ｇ‘闆嗘垚
+### M29-A：BondEmotionalTexture 情感质感层
+- **文件**：`host_brain/bond/bond_stage_engine.py`
+- **实现**：新增 `BondEmotionalTexture` dataclass，包含平均回复间隔、情感效价、亲密温度等字段
+- **评审**：✅ 字段设计合理，默认值安全，`to_summary()` 正确集成
 
-### M29-B锛欵pisodicMemory 鎯呮劅涓婁笅鏂囧姞鏉冨彫鍥?- **鏂囦欢**锛歚host_brain/memory/episodic.py`
-- **瀹炵幇**锛歚recall()` 鏂规硶涓?emotion_context 鍖归厤鐨勮褰曞垎鏁板姞鏉?1.3x
-- **璇勫**锛氣渽 鍔犳潈閫昏緫姝ｇ‘锛屼笉褰卞搷鏃犳儏鎰熶笂涓嬫枃鐨勫彫鍥?
-### M29-C锛歜uild_emotion_pulse_slot 鍔ㄦ€佹Ы浣嶆敞鍏?- **鏂囦欢**锛歚host_brain/core/prompt_context.py`
-- **瀹炵幇**锛氬皢 EmotionVector 闄嶉噰鏍蜂负 emotion_pulse 妲戒綅锛屽寘鍚儏鎰熸爣绛俱€佹晥浠枫€佸敜閱掑害銆佸己搴︺€侀鏍兼彁绀?- **璇勫**锛氣渽 闄嶉噰鏍烽€昏緫娓呮櫚锛屾Ы浣嶇粨鏋勬爣鍑?
-### M29-D锛氫富鍔ㄦ儏鎰熻Е鍙戝櫒
-- **鏂囦欢**锛歚host_brain/core/metabolism.py`
-- **瀹炵幇**锛歚register_emotion_trigger()` 鍜?`evaluate_emotion_triggers()` 鍑芥暟
-- **璇勫**锛氣渽 瑙﹀彂鍣ㄦ敞鍐?璇勪及閫昏緫瀹屾暣锛屾敮鎸佹潯浠跺尮閰?
-### M29-E锛欵motionTimeline 鎯呮劅鏃堕棿绾块噸寤?- **鏂囦欢**锛歚host_brain/core/metabolism.py`
-- **瀹炵幇**锛歚EmotionTimelineEntry` 鍜?`EmotionTimeline` 绫伙紝鏀寔鎯呮劅鍘嗗彶璁板綍鍜岃建杩归噸寤?- **璇勫**锛氣渽 鏃堕棿绾跨粨鏋勬竻鏅帮紝鏀寔鎸夋椂闂存帓搴忔煡璇?
-### M29-F锛歀LM 鎯呮劅鎰熺煡鐢熸垚鍙傛暟鍔ㄦ€佽皟鏁?- **鏂囦欢**锛歚host_brain/integrations/llm_gateway.py`
-- **瀹炵幇**锛歚_inject_emotion_gen_params()` 鍑芥暟锛屾牴鎹儏鎰熸爣绛惧姩鎬佽皟鏁?temperature/top_p
-  - EXCITED/HAPPY/SURPRISED 鈫?temperature=0.85
-  - ANGRY/FRUSTRATED/ANXIOUS 鈫?temperature=0.60
-  - SAD/TIRED/critical 鈫?temperature=0.55
-  - NEUTRAL 鈫?temperature=0.70锛堥粯璁わ級
-- **璇勫**锛氣渽 鍙傛暟璋冩暣閫昏緫鍚堢悊锛屼笉淇敼鍘熷 payload锛実en_params 瀛楁鏍囧噯
+### M29-B：EpisodicMemory 情感上下文加权召回
+- **文件**：`host_brain/memory/episodic.py`
+- **实现**：`recall()` 方法中 emotion_context 匹配的记录分数加权 1.3x
+- **评审**：✅ 加权逻辑正确，不影响无情感上下文的召回
 
-### M29-G锛欱ondRiftState 瑁傜棔淇鏈哄埗
-- **鏂囦欢**锛歚host_brain/bond/bond_stage_engine.py`
-- **瀹炵幇**锛氭柊澧?`BondRiftState` dataclass锛宍_apply_rift_event()` 澶勭悊 CONFLICT/APOLOGY/COMFORT 浜嬩欢
-- **璇勫**锛氣渽 瑁傜棔绋嬪害/淇杩涘害瀛楁璁捐鍚堢悊锛屼簨浠跺鐞嗛€昏緫姝ｇ‘
+### M29-C：build_emotion_pulse_slot 动态槽位注入
+- **文件**：`host_brain/core/context_pack.py`
+- **实现**：将 EmotionVector 降采样为 emotion_pulse 槽位，包含情感标签、效价、唤醒度、强度、风格提示
+- **评审**：✅ 降采样逻辑清晰，槽位结构标准
 
-### M29-H锛歝ompute_emotion_echo 鎯呮劅鍥炲０鏈哄埗
-- **鏂囦欢**锛歚host_brain/core/metabolism.py`
-- **瀹炵幇**锛歚compute_emotion_echo()` 鍑芥暟锛屽疄鐜?Natsume 瀵圭敤鎴锋儏鎰熺殑鍏遍福鍝嶅簲
-- **璇勫**锛氣渽 鍏遍福鍝嶅簲閫昏緫娓呮櫚锛屾敮鎸佹儏鎰熷己搴﹁“鍑?
-### M29-I锛欵pisodicMemory 涓夋。琛板噺閰嶇疆瀹炶
-- **鏂囦欢**锛歚host_brain/memory/episodic.py`
-- **瀹炵幇**锛欶AST/SLOW/PERMANENT 涓夋。 decay_profile_id锛宍get_decay_profile()` 鍜?`is_expired()` 鏂规硶
-- **璇勫**锛氣渽 琛板噺閰嶇疆瀹屾暣锛岃繃鏈熷垽鏂€昏緫姝ｇ‘
+### M29-D：主动情感触发器
+- **文件**：`host_brain/core/metabolism.py`
+- **实现**：`register_emotion_trigger()` 和 `evaluate_emotion_triggers()` 函数
+- **评审**：✅ 触发器注册/评估逻辑完整，支持条件匹配
 
-### M29-J锛欱ondDynamicsWriter payload 璇箟鏍囧噯鍖?- **鏂囦欢**锛歚host_brain/bond/bond_dynamics.py`
-- **瀹炵幇**锛歚_normalize_bond_payload()` 鍑芥暟锛屾敞鍏?update_kind/emotion_tag/emotion_intensity/semantic_label
-- **璇勫**锛氣渽 鏍囧噯鍖栭€昏緫瀹屾暣锛屼笉瑕嗙洊宸叉湁瀛楁锛岃涔夋爣绛炬帹鏂噯纭?
-### M29-K锛歜uild_governance_snapshot emotion_ts_ms 鏃堕棿鎴?- **鏂囦欢**锛歚host_brain/core/metabolism.py`
-- **瀹炵幇**锛歚hard_state_summary` 涓鍔?`emotion_ts_ms` 鎯呮劅鏃堕棿鎴冲瓧娈?- **璇勫**锛氣渽 鏃堕棿鎴冲瓧娈垫纭敞鍏ワ紝涓嶅奖鍝嶇幇鏈夊揩鐓х粨鏋?
-### M29-L锛歷alidate_prompt_context bond_summary 璇箟鏍￠獙
-- **鏂囦欢**锛歚host_brain/core/prompt_context.py`
-- **瀹炵幇**锛歚_validate_bond_summary_slot()` 涓鍔?stage/trend 涓嫳鏂囨灇涓惧€兼牎楠?- **璇勫**锛氣渽 涓嫳鏂囨灇涓惧€煎畬鏁达紝鏍￠獙閫昏緫鍦ㄦ湭鐭ュ瓧娈垫鏌ヤ箣鍚庢墽琛?
-### M29-M锛歜uild_fallback_output 鎯呮劅鎰熺煡闄嶇骇
-- **鏂囦欢**锛歚host_brain/core/qa.py`
-- **瀹炵幇**锛歚build_fallback_output()` 鏂板 `emotion_context` 鍙傛暟锛宍_build_emotion_aware_fallback_text()` 鏍规嵁鎯呮劅鐘舵€佺敓鎴愪笉鍚岄檷绾ф枃鏈?- **璇勫**锛氣渽 鎯呮劅鎰熺煡闄嶇骇鏂囨湰鍚堢悊锛屽悜鍚庡吋瀹癸紙emotion_context 鍙€夛級
+### M29-E：EmotionTimeline 情感时间线重建
+- **文件**：`host_brain/core/metabolism.py`
+- **实现**：`EmotionTimelineEntry` 和 `EmotionTimeline` 类，支持情感历史记录和轨迹重建
+- **评审**：✅ 时间线结构清晰，支持按时间排序查询
 
-### M29-N锛歂atsumeScheduler 蹇冭烦鎰熺煡鎯呮劅鐘舵€?- **鏂囦欢**锛歚host_brain/scheduler/scheduler.py`
-- **瀹炵幇**锛歚__init__` 鏂板 `get_emotion_state` 鍙傛暟锛宍_trigger_task` 涓?critical 鐘舵€佷笅璺宠繃闈?HIGH 浼樺厛绾т换鍔?- **璇勫**锛氣渽 鎯呮劅闂ㄦ帶閫昏緫姝ｇ‘锛岄粯璁ゆ儏鎰熺姸鎬佷负 steady锛堜笉褰卞搷鐜版湁琛屼负锛?
-### M29-O锛欻ybridFusionStrategy 鎯呮劅寮哄害鍔犳潈
-- **鏂囦欢**锛歚host_brain/retrieval/recall_fusion.py`
-- **瀹炵幇**锛歚fuse()` 鏂板 `emotion_context` 鍜?`emotion_boost_factor` 鍙傛暟锛屽尮閰嶆儏鎰熸爣绛剧殑鍊欓€夐」鍒嗘暟鍔犳潈
-- **璇勫**锛氣渽 鍔犳潈閫昏緫姝ｇ‘锛屽垎鏁颁笂闄?1.0锛屽悜鍚庡吋瀹?
-### M29-P锛欰SRTranscriptEvent 鐢ㄦ埛鎯呮劅鎺ㄦ柇瀛楁
-- **鏂囦欢**锛歚edge_client/senses/asr.py`
-- **瀹炵幇**锛氭柊澧?`user_emotion_hint` 鍜?`user_emotion_confidence` 瀛楁锛宍as_dict()` 浠呭湪鏈夊€兼椂杈撳嚭
-- **璇勫**锛氣渽 瀛楁璁捐鍚堢悊锛岄粯璁?None锛宎s_dict() 杈撳嚭姝ｇ‘
+### M29-F：LLM 情感感知生成参数动态调整
+- **文件**：`host_brain/integrations/llm_gateway.py`
+- **实现**：`_inject_emotion_gen_params()` 函数，根据情感标签动态调整 temperature/top_p
+  - EXCITED/HAPPY/SURPRISED → temperature=0.85
+  - ANGRY/FRUSTRATED/ANXIOUS → temperature=0.60
+  - SAD/TIRED/critical → temperature=0.55
+  - NEUTRAL → temperature=0.70（默认）
+- **评审**：✅ 参数调整逻辑合理，不修改原始 payload，gen_params 字段标准
 
-### M29-Q锛歁etricsCollector 鎯呮劅缁村害鎸囨爣
-- **鏂囦欢**锛歚host_brain/obs/metrics.py`
-- **瀹炵幇**锛歚collect()` 杈撳嚭鏂板 `emotion_metrics` 瀛楁锛宍_query_emotion_metrics()` 缁熻鎯呮劅鏍囩鍒嗗竷/骞冲潎寮哄害/闂ㄦ帶鎷掔粷娆℃暟
-- **璇勫**锛氣渽 鎸囨爣缁熻閫昏緫瀹屾暣锛屽紓甯稿畨鍏紙try/except 淇濇姢锛?
-### M29-R锛欵dgeEventReporter 鎯呮劅瀛楁
-- **鏂囦欢**锛歚edge_client/rpc/event_reporter.py`
-- **瀹炵幇**锛歚EventReportItem` 鏂板 `emotion_tag` 鍜?`emotion_intensity` 瀛楁锛宍to_dict()` 浠呭湪鏈夊€兼椂杈撳嚭
-- **璇勫**锛氣渽 瀛楁璁捐鍚堢悊锛屽悜鍚庡吋瀹?
-### M29-S锛歁29 鍙戝竷娓呭崟
-- **鏂囦欢**锛歚docs/50_release/m29_release.json`
-- **璇勫**锛氣渽 鍙戝竷娓呭崟瀹屾暣锛屽寘鍚墍鏈?19 椤瑰瓙浠诲姟
+### M29-G：BondRiftState 裂痕修复机制
+- **文件**：`host_brain/bond/bond_stage_engine.py`
+- **实现**：新增 `BondRiftState` dataclass，`_apply_rift_event()` 处理 CONFLICT/APOLOGY/COMFORT 事件
+- **评审**：✅ 裂痕程度/修复进度字段设计合理，事件处理逻辑正确
+
+### M29-H：compute_emotion_echo 情感回声机制
+- **文件**：`host_brain/core/metabolism.py`
+- **实现**：`compute_emotion_echo()` 函数，实现 Natsume 对用户情感的共鸣响应
+- **评审**：✅ 共鸣响应逻辑清晰，支持情感强度衰减
+
+### M29-I：EpisodicMemory 三档衰减配置实装
+- **文件**：`host_brain/memory/episodic.py`
+- **实现**：FAST/SLOW/PERMANENT 三档 decay_profile_id，`get_decay_profile()` 和 `is_expired()` 方法
+- **评审**：✅ 衰减配置完整，过期判断逻辑正确
+
+### M29-J：BondDynamicsWriter payload 语义标准化
+- **文件**：`host_brain/bond/bond_dynamics.py`
+- **实现**：`_normalize_bond_payload()` 函数，注入 update_kind/emotion_tag/emotion_intensity/semantic_label
+- **评审**：✅ 标准化逻辑完整，不覆盖已有字段，语义标签推断准确
+
+### M29-K：build_governance_snapshot emotion_ts_ms 时间戳
+- **文件**：`host_brain/core/metabolism.py`
+- **实现**：`hard_state_summary` 中增加 `emotion_ts_ms` 情感时间戳字段
+- **评审**：✅ 时间戳字段正确注入，不影响现有快照结构
+
+### M29-L：validate_context_pack bond_summary 语义校验
+- **文件**：`host_brain/core/context_pack.py`
+- **实现**：`_validate_bond_summary_slot()` 中增加 stage/trend 中英文枚举值校验
+- **评审**：✅ 中英文枚举值完整，校验逻辑在未知字段检查之后执行
+
+### M29-M：build_fallback_output 情感感知降级
+- **文件**：`host_brain/core/qa.py`
+- **实现**：`build_fallback_output()` 新增 `emotion_context` 参数，`_build_emotion_aware_fallback_text()` 根据情感状态生成不同降级文本
+- **评审**：✅ 情感感知降级文本合理，向后兼容（emotion_context 可选）
+
+### M29-N：NatsumeScheduler 心跳感知情感状态
+- **文件**：`host_brain/scheduler/scheduler.py`
+- **实现**：`__init__` 新增 `get_emotion_state` 参数，`_trigger_task` 中 critical 状态下跳过非 HIGH 优先级任务
+- **评审**：✅ 情感门控逻辑正确，默认情感状态为 steady（不影响现有行为）
+
+### M29-O：HybridFusionStrategy 情感强度加权
+- **文件**：`host_brain/retrieval/recall_fusion.py`
+- **实现**：`fuse()` 新增 `emotion_context` 和 `emotion_boost_factor` 参数，匹配情感标签的候选项分数加权
+- **评审**：✅ 加权逻辑正确，分数上限 1.0，向后兼容
+
+### M29-P：ASRTranscriptEvent 用户情感推断字段
+- **文件**：`edge_client/senses/asr.py`
+- **实现**：新增 `user_emotion_hint` 和 `user_emotion_confidence` 字段，`as_dict()` 仅在有值时输出
+- **评审**：✅ 字段设计合理，默认 None，as_dict() 输出正确
+
+### M29-Q：MetricsCollector 情感维度指标
+- **文件**：`host_brain/obs/metrics.py`
+- **实现**：`collect()` 输出新增 `emotion_metrics` 字段，`_query_emotion_metrics()` 统计情感标签分布/平均强度/门控拒绝次数
+- **评审**：✅ 指标统计逻辑完整，异常安全（try/except 保护）
+
+### M29-R：EdgeEventReporter 情感字段
+- **文件**：`edge_client/rpc/event_reporter.py`
+- **实现**：`EventReportItem` 新增 `emotion_tag` 和 `emotion_intensity` 字段，`to_dict()` 仅在有值时输出
+- **评审**：✅ 字段设计合理，向后兼容
+
+### M29-S：M29 发布清单
+- **文件**：`docs/50_release/m29_release.json`
+- **评审**：✅ 发布清单完整，包含所有 19 项子任务
 
 ---
 
-## 鍥涖€侀闄╀笌娉ㄦ剰浜嬮」
+## 四、风险与注意事项
 
-| 椋庨櫓 | 绾у埆 | 璇存槑 |
+| 风险 | 级别 | 说明 |
 |------|------|------|
-| `_validate_bond_summary_slot` 涓?stage/trend 鏍￠獙鍦ㄦ湭鐭ュ瓧娈垫鏌ヤ箣鍚庢墽琛?| 浣?| 鑻?bond_summary 鍚湭鐭ュ瓧娈碉紝stage/trend 鏍￠獙涓嶄細鎵ц锛堢鍚堥鏈燂細鍏堟嫆缁濇湭鐭ュ瓧娈碉級 |
-| `NatsumeScheduler` critical 鎯呮劅闂ㄦ帶浠呴樆鏂?LOW/MEDIUM 浠诲姟 | 浣?| HIGH 浼樺厛绾т换鍔′笉鍙楀奖鍝嶏紝绗﹀悎璁捐鎰忓浘 |
-| `_inject_emotion_gen_params` 涓嶄慨鏀瑰師濮?payload | 鏃?| 杩斿洖鏂?dict锛屽師濮?payload 涓嶅彉 |
+| `_validate_bond_summary_slot` 中 stage/trend 校验在未知字段检查之后执行 | 低 | 若 bond_summary 含未知字段，stage/trend 校验不会执行（符合预期：先拒绝未知字段） |
+| `NatsumeScheduler` critical 情感门控仅阻断 LOW/MEDIUM 任务 | 低 | HIGH 优先级任务不受影响，符合设计意图 |
+| `_inject_emotion_gen_params` 不修改原始 payload | 无 | 返回新 dict，原始 payload 不变 |
 
 ---
 
-## 浜斻€佹€荤粨
+## 五、总结
 
-M29 閲岀▼纰戝叏閮?19 椤瑰瓙浠诲姟鍧囧凡瀹屾垚锛?84 涓祴璇曞叏閮ㄩ€氳繃锛? 澶辫触锛夈€傛儏鎰熶綋楠屽寮虹郴缁熷凡瑕嗙洊浠?Edge 绔紙ASR 鎯呮劅鎺ㄦ柇銆佷簨浠朵笂鎶ワ級鍒?Host 绔紙鎯呮劅璐ㄦ劅銆佹椂闂寸嚎銆佽Е鍙戝櫒銆丩LM 鍙傛暟銆佽皟搴﹂棬鎺э級鐨勫畬鏁撮摼璺€?
+M29 里程碑全部 19 项子任务均已完成，884 个测试全部通过（0 失败）。情感体验增强系统已覆盖从 Edge 端（ASR 情感推断、事件上报）到 Host 端（情感质感、时间线、触发器、LLM 参数、调度门控）的完整链路。
