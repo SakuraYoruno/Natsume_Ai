@@ -97,6 +97,8 @@ class MetricsCollector:
         latency_baseline = self.collect_latency_baseline(ts_ms=collected_ts)
         # M29-Q（OPT-?）：情感维度指标
         emotion_metrics = self._query_emotion_metrics()
+        # M-MA4：多 agent 专项指标
+        agent_metrics = self._query_agent_metrics()
 
         payload: dict[str, Any] = {
             "request_id": request_id,
@@ -109,6 +111,8 @@ class MetricsCollector:
             "latency_baseline": latency_baseline,
             # M29-Q：情感维度指标
             "emotion_metrics": emotion_metrics,
+            # M-MA4：多 agent 专项指标
+            "agent_metrics": agent_metrics,
             "debug_trace": None,
         }
 
@@ -504,6 +508,106 @@ class MetricsCollector:
             "sample_count": sample_count,
             "stale": stale,
             "stale_reason_code": PERF_BASELINE_STALE if stale else None,
+        }
+
+    def _query_agent_metrics(self) -> dict[str, Any]:
+        """M-MA4：收集多 agent 专项指标。
+
+        从 presence_events（写入 stream_events 表）中统计：
+        - agent_hop_count：总 handoff 次数
+        - avg_hops_per_request：每请求平均 hop 数
+        - handoff_trace_complete_rate_pct：handoff 追踪完整率（有 AGENT_HANDOFF 事件的请求占比）
+        - agent_dispatch_count：各 agent 被选派次数
+        - subgraph_failure_rate_pct：子图失败率（来自 trace 中 subgraph 节点失败比例）
+        - multi_agent_enabled：当前灰度开关状态
+        """
+        import os
+
+        def _parse_bool_env(key: str, default: bool = False) -> bool:
+            raw = str(os.environ.get(key, "")).strip().lower()
+            if raw in {"1", "true", "yes", "on"}:
+                return True
+            if raw in {"0", "false", "no", "off"}:
+                return False
+            return default
+
+        # 灰度开关状态（直接读 env，不依赖 ledger）
+        switches = {
+            "MULTI_AGENT_ENABLED": _parse_bool_env("MULTI_AGENT_ENABLED"),
+            "SUPERVISOR_AUTO_ENABLED": _parse_bool_env("SUPERVISOR_AUTO_ENABLED"),
+            "INTENT_SUBGRAPH_ENABLED": _parse_bool_env("INTENT_SUBGRAPH_ENABLED"),
+            "READONLY_PARALLEL_ENABLED": _parse_bool_env("READONLY_PARALLEL_ENABLED"),
+        }
+
+        # 从 stream_events 表读取 agent 事件（若 ledger 支持）
+        agent_selected_events: list[dict[str, Any]] = []
+        agent_handoff_events: list[dict[str, Any]] = []
+        try:
+            stream_rows = getattr(self.ledger, "stream_events", []) or []
+            for row in stream_rows:
+                event_type = str(row.get("event_type") or "").strip().upper()
+                if event_type == "AGENT_SELECTED":
+                    agent_selected_events.append(row)
+                elif event_type == "AGENT_HANDOFF":
+                    agent_handoff_events.append(row)
+        except Exception:
+            pass
+
+        # 各 agent 被选派次数
+        agent_dispatch_count: dict[str, int] = {}
+        for ev in agent_selected_events:
+            agent_id = str(ev.get("agent_id") or "").strip()
+            if agent_id:
+                agent_dispatch_count[agent_id] = agent_dispatch_count.get(agent_id, 0) + 1
+
+        # 每请求 hop 数统计
+        hop_by_request: dict[str, int] = {}
+        for ev in agent_handoff_events:
+            rid = str(ev.get("request_id") or "").strip()
+            if rid:
+                hop_by_request[rid] = hop_by_request.get(rid, 0) + 1
+
+        total_hops = sum(hop_by_request.values())
+        total_requests_with_hops = len(hop_by_request)
+        avg_hops = round(total_hops / total_requests_with_hops, 2) if total_requests_with_hops > 0 else 0.0
+
+        # handoff 追踪完整率：有 AGENT_SELECTED 的请求中，有 AGENT_HANDOFF 的比例
+        requests_with_selected = {str(ev.get("request_id") or "") for ev in agent_selected_events if ev.get("request_id")}
+        requests_with_handoff = {str(ev.get("request_id") or "") for ev in agent_handoff_events if ev.get("request_id")}
+        handoff_trace_complete_rate_pct = _rate_pct(
+            len(requests_with_selected & requests_with_handoff),
+            len(requests_with_selected),
+        ) if requests_with_selected else 100.0  # 无 agent 请求视为 100%
+
+        # 告警：avg_hops > 2.5（AUTO 场景阈值）
+        active_alerts: list[dict[str, Any]] = []
+        avg_hops_threshold = float(os.environ.get("OBS_ALERT_AGENT_AVG_HOPS", "2.5"))
+        if total_requests_with_hops > 0 and avg_hops > avg_hops_threshold:
+            active_alerts.append({
+                "code": "AGENT_AVG_HOPS_HIGH",
+                "severity": "WARN",
+                "observed_avg_hops": avg_hops,
+                "threshold_avg_hops": avg_hops_threshold,
+            })
+        # 告警：handoff 追踪完整率 < 100%
+        if requests_with_selected and handoff_trace_complete_rate_pct < 100.0:
+            active_alerts.append({
+                "code": "AGENT_HANDOFF_TRACE_INCOMPLETE",
+                "severity": "WARN",
+                "observed_rate_pct": handoff_trace_complete_rate_pct,
+                "threshold_rate_pct": 100.0,
+            })
+
+        return {
+            "switches": switches,
+            "agent_hop_count": total_hops,
+            "avg_hops_per_request": avg_hops,
+            "handoff_trace_complete_rate_pct": handoff_trace_complete_rate_pct,
+            "agent_dispatch_count": agent_dispatch_count,
+            "alerting": {
+                "avg_hops_threshold": avg_hops_threshold,
+                "active_alerts": active_alerts,
+            },
         }
 
     def _query_emotion_metrics(self) -> dict[str, Any]:

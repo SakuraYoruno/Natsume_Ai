@@ -230,17 +230,33 @@ class GraphExecutor:
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
 
-        # M-MA1：agent 切换事件（仅观测，不反向作为图输入）
+        # M-MA4：agent 切换事件（仅观测，不反向作为图输入）
+        # M-MA3 后 active_agent_id 已提升为 GraphState 顶层字段，不再读 payload["agent_runtime"]
         try:
-            agent_runtime = payload.get("agent_runtime") or {}
-            active_agent = str(agent_runtime.get("active_agent_id") or "").strip()
-            prev_agent = str((state.get("payload") or {}).get("agent_runtime", {}).get("active_agent_id") or "").strip()
+            active_agent = str(new_state.get("active_agent_id") or "").strip()
+            prev_agent = str(state.get("active_agent_id") or "").strip()
             if active_agent and active_agent != prev_agent:
+                # AGENT_SELECTED：agent 切换
                 agent_event = self._presence_emitter.emit(
                     node_id=node_id,
                     event_type="AGENT_SELECTED",
                 )
                 presence_events.append({**agent_event.to_dict(), "agent_id": active_agent})
+            # AGENT_HANDOFF：handoff_history 有新增时触发
+            new_handoff = list(new_state.get("handoff_history") or [])
+            prev_handoff = list(state.get("handoff_history") or [])
+            if len(new_handoff) > len(prev_handoff):
+                latest_hop = new_handoff[-1]
+                handoff_event = self._presence_emitter.emit(
+                    node_id=node_id,
+                    event_type="AGENT_HANDOFF",
+                )
+                presence_events.append({
+                    **handoff_event.to_dict(),
+                    "from_agent": str(latest_hop.get("from") or ""),
+                    "to_agent": str(latest_hop.get("to") or ""),
+                    "reason": str(latest_hop.get("reason") or ""),
+                })
         except Exception:
             pass  # 静默降级
 
