@@ -66,6 +66,10 @@
   用途：Flow 资产追溯索引（按环境），记录 flows/active.pointer 指向的当前生效 Flow 导出物；支撑 T-Flow-02 回归口径。
   读者：MASTER、Project（文档代理）。
 
+- docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md
+  用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
+  读者：MASTER、Project（文档代理）。
+
 6）可追溯性（Trace）
 - docs/60_trace/requirements_trace.md
   用途：审阅"需求→设计→任务→测试"覆盖情况。
