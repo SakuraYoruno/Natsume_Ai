@@ -24,6 +24,17 @@ from host_brain.app.agents.agent_contract import (
     build_artifact,
     validate_supervisor_proposal,
 )
+from host_brain.app.agents.react_loop import (
+    ReactResult,
+    ReactStep,
+    run_react_loop,
+)
+from host_brain.app.agents.tool_registry import (
+    ToolSpec,
+    execute_tool,
+    get_tools_for_agent,
+    is_tool_allowed,
+)
 
 __all__ = [
     # registry
@@ -44,4 +55,13 @@ __all__ = [
     "build_agent_runtime_default",
     "build_artifact",
     "validate_supervisor_proposal",
+    # react_loop（M-MA6）
+    "ReactResult",
+    "ReactStep",
+    "run_react_loop",
+    # tool_registry（M-MA6）
+    "ToolSpec",
+    "execute_tool",
+    "get_tools_for_agent",
+    "is_tool_allowed",
 ]

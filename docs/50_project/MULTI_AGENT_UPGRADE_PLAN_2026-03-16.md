@@ -712,7 +712,196 @@ def _dispatch_to_agent(self, state: GraphState) -> str:
 
 ---
 
+---
+
+## 十二、第六阶段：ReAct Agent 实现（M-MA6）
+
+> 版本：v1.2 | 日期：2026-03-16
+> M-MA5 完成了 Agent Handler 骨架和 JudgeAgent 裁判逻辑，但 agent 还不是真正的 ReAct agent。
+> 本阶段实现 ReAct（Reason + Act）循环，让 agent 能够：观察上下文 → 推理 → 选择行动 → 执行 → 观察结果 → 循环。
+
+### 12.1 当前缺口（M-MA5 完成后的真实状态）
+
+| 缺失项 | 说明 |
+|--------|------|
+| **Supervisor 无 LLM 决策** | `SUPERVISOR_AUTO_ENABLED=true` 时没有 LLM 提案逻辑，仍是硬编码规则路由 |
+| **Agent 无 ReAct 循环** | Agent handler 只执行一次产出工件，没有 Observe→Think→Act 循环 |
+| **无 agent 路由分发** | `graph_executor` 没有根据 `active_agent_id` 动态选择 handler 的逻辑 |
+| **Agent handler 不调 LLM** | `chat_agent_handler` 只读取 `chat_direct_ja` 的输出，不是真正的 ReAct agent |
+| **无工具调用循环** | `intent_agent_handler` 没有 tool_call → observe → continue 的循环 |
+
+### 12.2 ReAct 模式定义（在 Governed Runtime 约束下）
+
+ReAct = **Re**ason + **Act**，在本系统的约束下：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ReAct Agent Loop（在 governed runtime 约束内）              │
+│                                                             │
+│  Observe：读取 state（用户输入 + 上下文 + 历史工件）          │
+│      ↓                                                      │
+│  Think：LLM 推理，产出 thought + action（JSON 格式）         │
+│      ↓                                                      │
+│  Act：handler 校验 action，执行对应工具/节点                  │
+│      ↓                                                      │
+│  Observe：读取执行结果，写入 observation                     │
+│      ↓                                                      │
+│  判断：是否需要继续循环（max_steps 限制）                     │
+│      ↓ 继续                    ↓ 停止                       │
+│  Think（下一轮）          产出 AgentArtifact                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**关键约束（不可突破）：**
+- LLM 产出的 `action` 只是提案，handler 负责校验和执行
+- 工具调用结果写入 `react_scratchpad`（只读观测），不直接修改 `GraphState` 控制字段
+- `max_steps` 硬限制（默认 3），防止无限循环
+- 有副作用的工具调用（写操作）只允许在 `SCENE_EXEC_INTENT` 场景
+
+### 12.3 ReAct 数据结构
+
+#### react_scratchpad（ReAct 工作区，写入 payload）
+
+```json
+{
+  "react_scratchpad": {
+    "agent_id": "intent_agent",
+    "steps": [
+      {
+        "step": 1,
+        "thought": "用户想要查询天气，需要调用 weather_tool",
+        "action": {"tool": "weather_tool", "args": {"city": "北京"}},
+        "observation": {"result": "北京今天晴，25°C"},
+        "ts_ms": 1710000000000
+      }
+    ],
+    "final_answer": "北京今天晴，25°C，适合出行",
+    "total_steps": 1,
+    "stopped_reason": "FINAL_ANSWER"
+  }
+}
+```
+
+#### ReAct LLM 输出格式（JSON）
+
+```json
+{
+  "thought": "用户想要查询天气，我需要调用 weather_tool",
+  "action_type": "tool_call",
+  "action": {
+    "tool": "weather_tool",
+    "args": {"city": "北京"}
+  }
+}
+```
+
+或停止：
+
+```json
+{
+  "thought": "已获取天气信息，可以回答用户",
+  "action_type": "final_answer",
+  "final_answer": "北京今天晴，25°C，适合出行"
+}
+```
+
+### 12.4 文件改动清单
+
+#### 新增文件
+
+| 文件路径 | 说明 |
+|---------|------|
+| `host_brain/app/agents/react_loop.py` | ReAct 循环核心实现（`run_react_loop()`） |
+| `host_brain/app/agents/tool_registry.py` | 工具注册表（agent 可调用的工具列表） |
+
+#### 修改文件
+
+| 文件路径 | 改动说明 |
+|---------|---------|
+| `host_brain/app/handlers/supervisor_dispatch_handler.py` | 新增 LLM 提案模式（`SUPERVISOR_AUTO_ENABLED=true` 时调用 LLM） |
+| `host_brain/app/handlers/intent_agent_handler.py` | 接入 `run_react_loop()`，实现真正的 ReAct 循环 |
+| `host_brain/app/handlers/code_agent_handler.py` | 接入 `run_react_loop()`（只读工具，无副作用） |
+| `host_brain/integrations/graph_executor.py` | 新增 `_dispatch_to_agent()`：根据 `active_agent_id` 动态路由 |
+
+### 12.5 react_loop.py 设计规范
+
+```python
+def run_react_loop(
+    *,
+    agent_id: str,
+    user_input: str,
+    system_prompt: str,
+    tools: list[ToolSpec],
+    gateway,                    # LLM gateway
+    max_steps: int = 3,
+    allow_side_effects: bool = False,
+    context: dict | None = None,
+) -> ReactResult:
+    """
+    执行 ReAct 循环。
+
+    Returns:
+        ReactResult(
+            final_answer: str,
+            steps: list[ReactStep],
+            stopped_reason: str,  # FINAL_ANSWER / MAX_STEPS / ERROR
+            total_steps: int,
+        )
+    """
+```
+
+**循环约束：**
+- `max_steps` 默认 3，`SCENE_EXEC_INTENT` 可配置到 5
+- `allow_side_effects=False` 时，工具调用只允许只读工具
+- LLM 输出必须是合法 JSON，否则视为 `final_answer`
+- 工具调用失败时写入 `observation.error`，继续循环（不中断）
+
+### 12.6 Supervisor LLM 提案模式
+
+`SUPERVISOR_AUTO_ENABLED=true` 时，`supervisor_dispatch_handler` 调用 LLM：
+
+```
+用户输入 + scene_type + 历史上下文
+    ↓
+Supervisor LLM（system prompt：你是任务分派专家，选择最合适的 agent）
+    ↓
+输出 JSON：{"selected_agent": "code_agent", "reason": "...", "risk_mode": "guarded"}
+    ↓
+Handler 校验（allowlist + risk_mode）
+    ↓
+写入 active_agent_id + __next_node__
+```
+
+### 12.7 graph_executor agent 路由分发
+
+在 `_run_single_step()` 中，当 `node_id == "agent_dispatch_node"` 时，根据 `active_agent_id` 动态选择 handler：
+
+```python
+# M-MA6：agent 路由分发
+_AGENT_HANDLER_MAP: dict[str, str] = {
+    "chat_agent":      "chat_agent_handler",
+    "code_agent":      "code_agent_handler",
+    "translate_agent": "translate_agent_handler",
+    "intent_agent":    "intent_agent_handler",
+    "judge_agent":     "judge_agent_handler",
+}
+```
+
+### 12.8 验收标准
+
+| 验收项 | 标准 |
+|--------|------|
+| ReAct 循环可运行 | `run_react_loop()` 可独立调用，返回 `ReactResult` |
+| `react_scratchpad` 有内容 | IntentAgent 执行后 `react_scratchpad.steps` 非空 |
+| `max_steps` 硬限制生效 | 超过 `max_steps` 时 `stopped_reason == "MAX_STEPS"` |
+| Supervisor LLM 提案 | `SUPERVISOR_AUTO_ENABLED=true` 时 Supervisor 调用 LLM 产出提案 |
+| agent 路由分发 | `graph_executor` 根据 `active_agent_id` 选择对应 handler |
+| 验证脚本通过 | `_tmp_verify_ma6.py` 全部检查点通过 |
+
+---
+
 ## 变更记录
 
 - 2026-03-16 v1.0：初版，基于当前仓库代码审计与多轮架构讨论产出。
 - 2026-03-16 v1.1：补充第五阶段（M-MA5）设计方案。M-MA1~M-MA4 已完成，M-MA5 待实施。
+- 2026-03-16 v1.2：补充第六阶段（M-MA6）ReAct Agent 设计方案。M-MA5 已完成，M-MA6 待实施。

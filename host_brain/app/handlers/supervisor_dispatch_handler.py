@@ -126,15 +126,29 @@ def supervisor_dispatch_handler(
         default=False,
     )
 
-    # 3. 选派 agent（规则路由）
+    # 3. 选派 agent（规则路由 or LLM 提案）
     selected_agent = _SCENE_DEFAULT_AGENT.get(scene_type, AGENT_ID_CHAT)
     risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
     need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
+    proposal_source = "rule"
 
-    # 4. 构建分派提案（第一阶段：规则提案，不调用 LLM）
+    # M-MA6：SUPERVISOR_AUTO_ENABLED=true 时，调用 LLM 产出分派提案
+    if supervisor_auto_enabled and multi_agent_enabled:
+        llm_proposal = _try_llm_proposal(
+            payload=payload,
+            scene_type=scene_type,
+            context=ctx,
+        )
+        if llm_proposal is not None:
+            selected_agent = llm_proposal.get("selected_agent", selected_agent)
+            risk_mode = llm_proposal.get("risk_mode", risk_mode)
+            need_judge = bool(llm_proposal.get("need_judge", need_judge))
+            proposal_source = "llm"
+
+    # 4. 构建分派提案
     proposal_dict = {
         "selected_agent": selected_agent,
-        "reason": f"scene_type={scene_type} 规则路由",
+        "reason": f"scene_type={scene_type} {proposal_source}路由",
         "risk_mode": risk_mode,
         "need_judge": need_judge,
         "budget": {
@@ -187,6 +201,7 @@ def supervisor_dispatch_handler(
         "risk_mode": risk_mode,
         "need_judge": need_judge,
         "validation_reason": validation_reason,
+        "proposal_source": proposal_source,          # M-MA6：rule / llm
         "multi_agent_enabled": multi_agent_enabled,
         "supervisor_auto_enabled": supervisor_auto_enabled,
         "dispatched_at_ms": int(time.time() * 1000),
@@ -195,3 +210,98 @@ def supervisor_dispatch_handler(
     out["__next_node__"] = next_node
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# M-MA6：Supervisor LLM 提案模式
+# ---------------------------------------------------------------------------
+
+_SUPERVISOR_SYSTEM_PROMPT = """你是一个任务分派专家，负责根据用户输入和场景类型，选择最合适的 AI agent 来处理任务。
+
+可用的 agent：
+- chat_agent：处理普通聊天、问答、闲聊（低风险，快路径）
+- code_agent：处理代码生成、代码修改、代码解释（中风险）
+- translate_agent：处理文本翻译（低风险）
+- intent_agent：处理执行意图、工具调用、复杂任务规划（高风险）
+
+你必须返回合法的 JSON 格式：
+{
+  "selected_agent": "agent_id",
+  "reason": "选择原因",
+  "risk_mode": "safe|guarded|strict",
+  "need_judge": true|false
+}
+
+规则：
+- 只能选择上面列出的 agent
+- 聊天/问答 → chat_agent，risk_mode=safe，need_judge=false
+- 代码相关 → code_agent，risk_mode=guarded，need_judge=true
+- 翻译相关 → translate_agent，risk_mode=safe，need_judge=true
+- 执行/工具/复杂任务 → intent_agent，risk_mode=strict，need_judge=true
+- 不确定时 → chat_agent（保守选择）
+"""
+
+
+def _try_llm_proposal(
+    payload: dict[str, Any],
+    scene_type: str,
+    context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """尝试调用 LLM 产出 Supervisor 分派提案。
+
+    失败时返回 None（降级到规则路由）。
+
+    Args:
+        payload: 当前图 payload
+        scene_type: 场景类型
+        context: 执行上下文
+
+    Returns:
+        解析后的提案字典，或 None（失败时）
+    """
+    import json as _json
+
+    gateway = context.get("gateway") or payload.get("_gateway")
+    if gateway is None:
+        return None  # 无 gateway，降级到规则路由
+
+    user_input = str(
+        payload.get("user_input")
+        or payload.get("query")
+        or ""
+    ).strip()
+    if not user_input:
+        return None
+
+    try:
+        messages = [
+            {"role": "system", "content": _SUPERVISOR_SYSTEM_PROMPT},
+            {"role": "user", "content": f"场景类型：{scene_type}\n用户输入：{user_input}"},
+        ]
+        response = gateway.complete(messages)
+        raw = str(
+            response.get("content")
+            or response.get("text")
+            or response.get("response_text")
+            or ""
+        ).strip()
+
+        # 提取 JSON
+        if "```json" in raw:
+            start = raw.find("```json") + 7
+            end = raw.find("```", start)
+            raw = raw[start:end].strip() if end > start else raw
+        elif "```" in raw:
+            start = raw.find("```") + 3
+            end = raw.find("```", start)
+            raw = raw[start:end].strip() if end > start else raw
+
+        proposal = _json.loads(raw)
+        if not isinstance(proposal, dict):
+            return None
+        if not proposal.get("selected_agent"):
+            return None
+        return proposal
+
+    except Exception:
+        return None  # 任何异常都降级到规则路由
