@@ -340,3 +340,135 @@
 > LangGraph 在该系统中的定位固定为 **governed runtime**，而非 **autonomous orchestrator**。
 > Host 主权约束决定了图内自治只能存在于执行层，不能进入裁决层。
 > 系统优化目标不是"释放 LangGraph 全能力"，而是"**以最小治理成本换取最高执行收益**"。
+
+---
+
+## 11. Multi-Agent Governed Extension（M-MA）
+
+> 版本：v1.0 | 日期：2026-03-16
+> 本章节是对第 10 节 LangGraph Governed Runtime 的扩展，定义多 agent 编排在 governed runtime 约束下的合法边界。
+
+### 11.1 多 agent 编排的定位
+
+多 agent 编排在本系统中的定位是：
+
+**"多 agent 语义 + 单图执行 + Host 主权不下放"**
+
+- **不是** autonomous multi-agent（agent 之间自由协商、自由路由）
+- **不是** agent 投票后直接输出
+- **是** Host 受控下的"主 agent 提案 + 子 agent 专家执行 + Judge 收口"
+
+### 11.2 角色权限边界
+
+| 角色 | 可以做 | 不可以做 |
+|------|--------|---------|
+| **Host Governor** | 写 `committed_route_token`；最终裁决；审计闭锁 | 不可下放 commit 权 |
+| **Supervisor（主 agent）** | 产出分派提案；写 `__next_node__`（handler 专属）；写 `agent_runtime.plan` | 不可写 `committed_route_token`；不可直接 commit |
+| **子 agent** | 产出 `AgentArtifact`（工件）；写 `agent_runtime.artifacts` | 不可写 `__next_node__`；不可写 `committed_*`；不可自闭环有副作用工具调用 |
+| **JudgeAgent** | 裁判汇总子 agent 输出；写 `judge_result` | 不可直接 commit；不可写 `committed_route_token` |
+
+### 11.3 路由控制硬规则（Route Control Hard Rules）
+
+**Rule MA-1：LLM 不直接控图**
+
+Supervisor LLM 输出只是"分派提案"（JSON），必须经过 trusted handler 校验后才能写入 `__next_node__`。
+
+```
+Supervisor LLM 输出 → 分派提案（JSON）
+                              ↓
+                    Supervisor Handler 校验（allowlist + risk_mode）
+                              ↓
+                    写入 agent_runtime.plan
+                              ↓
+                    写入 __next_node__（handler 专属权）
+```
+
+**Rule MA-2：model node 输出统一剥离控制字段**
+
+所有 model node 输出在合并到 payload 前，必须剥离以下字段：
+- `committed_route_token`
+- `committed_route_token_detail`
+- `branch_specs`
+
+只有 `_TRUSTED_HANDLER_ALLOWLIST` 内的 handler 可以写控制字段。
+
+**Rule MA-3：子 agent 只产出工件**
+
+子 agent 输出统一为 `AgentArtifact` 契约：
+- `agent_id`、`artifact_kind`、`draft_summary`、`artifact_ref`
+- `confidence`、`risk_flags`
+- `handoff_recommendation`（只是建议，不是命令）
+
+真正下一跳由 handler / judge 编译决定，子 agent 不直接控图。
+
+**Rule MA-4：不重载 committed_route_token**
+
+`committed_route_token` 是 Governor 级治理令牌，多 agent 内部 handoff 不复用它。
+
+agent 内部路由状态维护在：
+- `payload["agent_runtime"]["dispatch_plan"]`
+- `payload["agent_runtime"]["active_agent_id"]`（第一阶段）
+- `GraphState.active_agent_id`（第二阶段提升后）
+
+### 11.4 Agent Allowlist
+
+合法 agent_id 必须在 `host_brain/app/agents/agent_registry.py` 的 `AGENT_ALLOWLIST` 中注册：
+
+| agent_id | 对应节点 | 风险级别 | 可并行 |
+|----------|---------|---------|--------|
+| `chat_agent` | `chat_direct_ja` | low | 否 |
+| `code_agent` | `workbench_code_assist` | medium | 否 |
+| `translate_agent` | `workbench_translate` | low | 是（只读） |
+| `intent_agent` | `core_reasoner_primary`（链入口） | high | 否 |
+| `safety_agent` | `safety_verifier` | low | 否 |
+| `judge_agent` | `consistency_verifier` | low | 否 |
+| `renderer_agent` | `renderer_ja_c_style` | low | 否 |
+
+### 11.5 聊天场景安全分层
+
+| 安全层 | 聊天默认开启 | 说明 |
+|--------|------------|------|
+| 边界安全（不泄露、不伪执行、不越权） | **是** | 所有场景必须 |
+| 基础输出轻校验 | **是** | 所有场景必须 |
+| `safety_verifier` | **否（条件触发）** | 仅高风险聊天时插入 |
+| `planner_constraints` | **否** | 仅执行意图场景 |
+| `tool_planner` | **否** | 仅执行意图场景 |
+| approval / confirm / token 审查 | **否** | 仅执行意图场景 |
+
+聊天应是"**轻治理 + 强边界**"，不是"执行级重审查"。
+
+### 11.6 透明子图扩展（M-MA2）
+
+第二阶段新增两个透明子图工厂（`graph_subgraph.py`）：
+
+- **`compile_intent_agent_subgraph()`**：封装 `core_reasoner_primary → planner_constraints → tool_planner`
+- **`compile_code_refine_subgraph()`**：封装 `workbench_code_assist → consistency_verifier`
+
+子图约束与第 10 节 Rule 3 一致：
+- 每个节点执行后写入 `subgraph_trace`
+- 子图结束时输出 `subgraph_commit_summary`
+- 子图不允许写入 `committed_*` 字段
+
+### 11.7 灰度开关
+
+| 开关 | 默认值 | 说明 |
+|------|--------|------|
+| `MULTI_AGENT_ENABLED` | `false` | 多 agent 总开关 |
+| `SUPERVISOR_AUTO_ENABLED` | `false` | Supervisor 自动分派（LLM 提案模式） |
+| `INTENT_SUBGRAPH_ENABLED` | `false` | IntentAgentSubgraph 启用 |
+| `READONLY_PARALLEL_ENABLED` | `false` | 只读并行 agent 启用 |
+
+灰度上线顺序：`WORK_CODE` → `WORK_TRANSLATE` → `AUTO` → `EXEC_INTENT` → `CHAT`（最后）
+
+### 11.8 严禁设计
+
+以下设计在任何情况下都不允许引入：
+
+1. 主 agent 变成纯 LLM node（必须是 handler + LLM proposal）
+2. 子 agent 之间自由长对话
+3. model node 直接输出 `__next_node__`
+4. 任何 agent 写 `committed_route_token`
+5. 对聊天默认套执行级安全链
+6. 带副作用的并行 agent
+7. 子 agent 直接 commit
+8. agent 之间投票后直接输出

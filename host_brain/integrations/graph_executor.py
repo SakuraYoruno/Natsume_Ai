@@ -58,6 +58,8 @@ _TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
     "scene_router_entry",
     "scene_router_post_core",
     "supervisor_dispatch",
+    "intent_agent_subgraph_entry",   # M-MA2：IntentAgentSubgraph 入口 handler
+    "code_refine_subgraph_entry",    # M-MA2：CodeRefineSubgraph 入口 handler
     # 未来新增 trusted handler 在此注册
 })
 

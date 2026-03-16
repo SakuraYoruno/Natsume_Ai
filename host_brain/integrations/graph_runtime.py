@@ -270,6 +270,17 @@ class GraphRuntimeContract:
             # 确保 multi_agent_enabled 标记存在
             payload_dict["agent_runtime"].setdefault("multi_agent_enabled", _multi_agent_enabled)
         initial_state["payload"] = payload_dict
+
+        # M-MA2：GraphState 顶层 agent 字段初始化（第二阶段提升）
+        initial_state.setdefault("active_agent_id", None)
+        initial_state.setdefault("handoff_history", [])
+        initial_state.setdefault("agent_budget", {
+            "max_hops": 2,
+            "per_agent_timeout_ms": 12000,
+            "total_budget_ms": 30000,
+        })
+        initial_state.setdefault("agent_artifacts", {})
+        initial_state.setdefault("judge_result", None)
         state = compiled.invoke(initial_state)
 
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）

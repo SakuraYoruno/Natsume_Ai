@@ -191,3 +191,113 @@ def _strip_committed_fields(output: dict[str, Any]) -> None:
     committed_keys = [k for k in list(output.keys()) if str(k or "").startswith("committed_")]
     for key in committed_keys:
         del output[key]
+
+
+# ---------------------------------------------------------------------------
+# M-MA2：Multi-Agent 透明子图工厂（第二阶段）
+# ---------------------------------------------------------------------------
+
+def compile_intent_agent_subgraph(
+    handlers: dict[str, NodeHandler],
+    evidence_plane: Any = None,
+) -> CompiledSubgraph:
+    """编译执行意图 agent 透明子图（IntentAgentSubgraph）。
+
+    封装 SCENE_EXEC_INTENT 的核心推理链为透明子图：
+        core_reasoner_primary → planner_constraints → tool_planner
+
+    子图约束（继承自 compile_governed_subgraph）：
+    - 每个节点执行后写入 subgraph_trace
+    - 子图结束时输出 subgraph_commit_summary
+    - 子图不允许写入 committed_* 字段
+    - 子图失败时 status = STATUS_DEGRADED，不影响主图继续执行
+
+    Args:
+        handlers: 节点处理器字典，必须包含以下节点的处理器：
+            - core_reasoner_primary
+            - planner_constraints
+            - tool_planner
+        evidence_plane: Evidence Plane 实例（可选，M37-E 新增）
+
+    Returns:
+        CompiledSubgraph（可调用 .invoke(state) 执行）
+    """
+    _INTENT_SUBGRAPH_NODES = [
+        "core_reasoner_primary",
+        "planner_constraints",
+        "tool_planner",
+    ]
+    return compile_governed_subgraph(
+        subgraph_id="intent_agent_subgraph",
+        node_ids=_INTENT_SUBGRAPH_NODES,
+        handlers=handlers,
+        evidence_plane=evidence_plane,
+    )
+
+
+def compile_code_refine_subgraph(
+    handlers: dict[str, NodeHandler],
+    evidence_plane: Any = None,
+) -> CompiledSubgraph:
+    """编译代码精炼 agent 透明子图（CodeRefineSubgraph）。
+
+    封装代码场景的多步精炼链为透明子图：
+        workbench_code_assist → consistency_verifier
+
+    适用于需要多轮精炼的复杂代码任务。
+    简单代码任务仍走单节点 workbench_code_assist。
+
+    Args:
+        handlers: 节点处理器字典，必须包含以下节点的处理器：
+            - workbench_code_assist
+            - consistency_verifier
+        evidence_plane: Evidence Plane 实例（可选）
+
+    Returns:
+        CompiledSubgraph（可调用 .invoke(state) 执行）
+    """
+    _CODE_REFINE_SUBGRAPH_NODES = [
+        "workbench_code_assist",
+        "consistency_verifier",
+    ]
+    return compile_governed_subgraph(
+        subgraph_id="code_refine_subgraph",
+        node_ids=_CODE_REFINE_SUBGRAPH_NODES,
+        handlers=handlers,
+        evidence_plane=evidence_plane,
+    )
+
+
+def write_agent_artifact_to_payload(
+    payload: dict[str, Any],
+    *,
+    agent_id: str,
+    artifact_ref: str,
+    summary: str,
+    confidence: float = 0.0,
+    risk_flags: list[str] | None = None,
+) -> None:
+    """将子 agent 输出工件写入 payload["agent_runtime"]["artifacts"]。
+
+    子 agent 执行完毕后调用此函数，将工件摘要写入 agent_runtime，
+    供 JudgeAgent 和 Supervisor 读取。
+
+    Args:
+        payload: 当前图 payload（原地修改）
+        agent_id: 子 agent ID
+        artifact_ref: 工件引用（artifact://...）
+        summary: 工件摘要
+        confidence: 置信度（0.0 ~ 1.0）
+        risk_flags: 风险标记列表
+    """
+    if not isinstance(payload, dict):
+        return
+    agent_runtime = payload.setdefault("agent_runtime", {})
+    artifacts = agent_runtime.setdefault("artifacts", {})
+    artifacts[str(agent_id)] = {
+        "artifact_ref": str(artifact_ref),
+        "summary": str(summary),
+        "confidence": float(confidence),
+        "risk_flags": list(risk_flags or []),
+        "ts_ms": int(time.time() * 1000),
+    }

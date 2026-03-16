@@ -160,6 +160,17 @@ class GraphState(TypedDict):
     barrier_join_result: dict[str, Any] | None
     # render_guard_result：RenderGuard 结果（由 RenderGuard.validate_render_output() 写入）
     render_guard_result: dict[str, Any] | None
+    # M-MA2：Multi-Agent 字段（第二阶段从 payload["agent_runtime"] 提升到顶层）
+    # active_agent_id：当前活跃的子 agent ID
+    active_agent_id: str | None
+    # handoff_history：agent handoff 历史记录列表
+    handoff_history: list[dict[str, Any]]
+    # agent_budget：agent 预算（max_hops / per_agent_timeout_ms / total_budget_ms）
+    agent_budget: dict[str, Any] | None
+    # agent_artifacts：子 agent 输出工件集合 {agent_id: artifact_dict}
+    agent_artifacts: dict[str, Any] | None
+    # judge_result：JudgeAgent 裁判结果
+    judge_result: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +410,88 @@ def build_clock_event(
 # ---------------------------------------------------------------------------
 # M35-F：Transparent Subgraph 辅助函数
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# M-MA2：Multi-Agent 校验辅助函数
+# ---------------------------------------------------------------------------
+
+def validate_agent_handoff_target(
+    target_agent_id: str,
+    allowed_agents: frozenset[str] | None = None,
+) -> tuple[bool, str]:
+    """校验 handoff 目标 agent_id 是否合法。
+
+    Args:
+        target_agent_id: 目标 agent ID
+        allowed_agents: 允许的 agent ID 集合（None 时使用默认 allowlist）
+
+    Returns:
+        (is_valid, reason)：is_valid=True 表示目标合法
+    """
+    if allowed_agents is None:
+        # 延迟导入，避免循环依赖
+        try:
+            from host_brain.app.agents.agent_registry import AGENT_ALLOWLIST  # noqa: PLC0415
+            allowed_agents = AGENT_ALLOWLIST
+        except ImportError:
+            return False, "AGENT_REGISTRY_UNAVAILABLE"
+
+    target = str(target_agent_id or "").strip()
+    if not target:
+        return False, "HANDOFF_TARGET_EMPTY"
+    if target not in allowed_agents:
+        return False, f"HANDOFF_TARGET_NOT_ALLOWED:{target}"
+    return True, "HANDOFF_TARGET_VALID"
+
+
+def validate_risk_mode(risk_mode: str) -> tuple[bool, str]:
+    """校验 risk_mode 是否合法。
+
+    Args:
+        risk_mode: 风险模式字符串
+
+    Returns:
+        (is_valid, reason)
+    """
+    try:
+        from host_brain.app.agents.agent_contract import VALID_RISK_MODES  # noqa: PLC0415
+        valid_modes = VALID_RISK_MODES
+    except ImportError:
+        valid_modes = frozenset({"safe", "guarded", "strict"})
+
+    mode = str(risk_mode or "").strip()
+    if not mode:
+        return False, "RISK_MODE_EMPTY"
+    if mode not in valid_modes:
+        return False, f"RISK_MODE_INVALID:{mode}"
+    return True, "RISK_MODE_VALID"
+
+
+def extract_agent_runtime(state: "GraphState") -> dict[str, Any]:
+    """从 GraphState 中提取 agent_runtime 结构。
+
+    优先读取顶层字段（第二阶段），回退到 payload["agent_runtime"]（第一阶段）。
+
+    Args:
+        state: 当前图状态
+
+    Returns:
+        agent_runtime 字典（可能为空字典）
+    """
+    # 第二阶段：优先读取顶层字段
+    active_agent_id = state.get("active_agent_id")
+    if active_agent_id is not None:
+        return {
+            "active_agent_id": active_agent_id,
+            "handoff_history": list(state.get("handoff_history") or []),
+            "agent_budget": dict(state.get("agent_budget") or {}),
+            "agent_artifacts": dict(state.get("agent_artifacts") or {}),
+            "judge_result": state.get("judge_result"),
+        }
+    # 第一阶段：回退到 payload["agent_runtime"]
+    payload = dict(state.get("payload") or {})
+    return dict(payload.get("agent_runtime") or {})
+
 
 def build_subgraph_commit_summary(
     *,
