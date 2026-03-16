@@ -9,6 +9,8 @@
 - docs/30_devspec/ModelPlane.md（模型平面规格与治理约束）
 - docs/15_theory/LangGraph_Governed_Runtime_Solution_2026-03-06.md（Governed Runtime 理论基础）
 
+**架构重构约束（2026-03）**：**实施顺序与架构形态以 `MULTI_AGENT_ARCH_REFACTOR_2026-03.md` 为准**。先完成「图拆分 + 概念收口 + 开关收敛」（P0～P4），再推进 M-MA5/M-MA6 能力扩张；不再维护一张万能主图，不再用 MULTI_AGENT_ENABLED 切换路由模型。本升级计划保留为能力与契约参考。
+
 ---
 
 ## 一、升级背景与目标
