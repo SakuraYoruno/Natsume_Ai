@@ -900,8 +900,83 @@ _AGENT_HANDLER_MAP: dict[str, str] = {
 
 ---
 
+---
+
+## 十三、M-MA6 遗漏项补完（M-MA6-FIX）
+
+> 版本：v1.3 | 日期：2026-03-16
+> M-MA6 主体完成后，审计发现两个遗漏项未实施，本节记录补完方案。
+
+### 13.1 遗漏项清单
+
+| 遗漏项 | 文件 | 说明 |
+|--------|------|------|
+| **code_agent_handler 未接入 ReAct** | `host_brain/app/handlers/code_agent_handler.py` | 文档 12.4 要求接入 `run_react_loop()`，但实际只读取 `workbench_code_assist` 节点输出 |
+| **graph_executor 无动态路由** | `host_brain/integrations/graph_executor.py` | 文档 12.7 要求新增 `_dispatch_to_agent()` 和 `_AGENT_HANDLER_MAP`，但实际未实现 |
+
+### 13.2 code_agent_handler ReAct 接入方案
+
+参考 `intent_agent_handler.py` 的双模式设计：
+
+- **`CODE_AGENT_REACT_ENABLED=true`**：走 `run_react_loop()`，只读工具（`allow_side_effects=False`），`max_steps=3`
+- **`CODE_AGENT_REACT_ENABLED=false`（默认）**：向后兼容，读取 `workbench_code_assist` 节点输出
+
+关键约束：
+- `allow_side_effects=False`（代码场景无副作用）
+- `max_steps=3`（代码场景不需要多步推理）
+- 工具集：`["analyze_code", "search_knowledge"]`（来自 `tool_registry.py`）
+
+### 13.3 graph_executor 动态路由方案
+
+在 `GraphExecutor` 类中新增：
+
+```python
+# M-MA6：agent handler 映射表（active_agent_id → handler_id）
+_AGENT_HANDLER_MAP: dict[str, str] = {
+    "chat_agent":      "chat_agent",
+    "code_agent":      "code_agent",
+    "translate_agent": "translate_agent",
+    "intent_agent":    "intent_agent",
+    "judge_agent":     "judge_agent",
+}
+
+def _dispatch_to_agent(self, state: GraphState) -> str:
+    """根据 active_agent_id 返回对应的 handler_id。
+    M-MA6 核心：图执行器根据 GraphState.active_agent_id 动态选择 handler。
+    """
+    active_agent_id = str(state.get("active_agent_id") or "").strip()
+    return _AGENT_HANDLER_MAP.get(active_agent_id, "")
+```
+
+在 `_run_single_step()` 中，当 `node_id == "agent_dispatch_node"` 时，调用 `_dispatch_to_agent()` 获取 handler_id，然后走 `_invoke_handler()` 路径。
+
+**关键约束**：
+- `agent_dispatch_node` 是虚拟节点，不在 `node_bindings` 中注册 model_node
+- `_dispatch_to_agent()` 返回空字符串时，降级到 `chat_agent` handler
+- agent handler 不写 `__next_node__`，由 `graph_executor` 根据 `need_judge` 决定下一跳
+
+### 13.4 文件改动清单
+
+| 文件 | 改动说明 |
+|------|---------|
+| `host_brain/app/handlers/code_agent_handler.py` | 新增 ReAct 双模式（`CODE_AGENT_REACT_ENABLED` 开关） |
+| `host_brain/integrations/graph_executor.py` | 新增 `_AGENT_HANDLER_MAP` + `_dispatch_to_agent()` + `agent_dispatch_node` 分支 |
+
+### 13.5 验收标准
+
+| 验收项 | 标准 |
+|--------|------|
+| CodeAgent ReAct 可运行 | `CODE_AGENT_REACT_ENABLED=true` 时 `code_agent_handler` 调用 `run_react_loop()` |
+| `react_scratchpad` 有内容 | CodeAgent ReAct 模式执行后 `react_scratchpad.steps` 非空 |
+| `_dispatch_to_agent()` 可调用 | `GraphExecutor._dispatch_to_agent()` 根据 `active_agent_id` 返回正确 handler_id |
+| `agent_dispatch_node` 路由正确 | `node_id == "agent_dispatch_node"` 时走动态路由分发，不走 model node |
+| 验证脚本通过 | `_tmp_verify_ma6_fix.py` 全部检查点通过 |
+
+---
+
 ## 变更记录
 
 - 2026-03-16 v1.0：初版，基于当前仓库代码审计与多轮架构讨论产出。
 - 2026-03-16 v1.1：补充第五阶段（M-MA5）设计方案。M-MA1~M-MA4 已完成，M-MA5 待实施。
 - 2026-03-16 v1.2：补充第六阶段（M-MA6）ReAct Agent 设计方案。M-MA5 已完成，M-MA6 待实施。
+- 2026-03-16 v1.3：补充 M-MA6 遗漏项补完方案（M-MA6-FIX）。code_agent_handler ReAct 接入 + graph_executor 动态路由。
