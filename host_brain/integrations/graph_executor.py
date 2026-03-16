@@ -60,7 +60,8 @@ _TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
     "supervisor_dispatch",
     "intent_agent_subgraph_entry",   # M-MA2：IntentAgentSubgraph 入口 handler
     "code_refine_subgraph_entry",    # M-MA2：CodeRefineSubgraph 入口 handler
-    # 未来新增 trusted handler 在此注册
+    # M-MA5：各 Agent Handler（只产出工件，不写 __next_node__，不在此列表）
+    # Agent handler 不是 trusted handler，不需要写控制字段
 })
 
 # model node 输出中需要剥离的控制字段（防止 model node 直接控图）
@@ -230,6 +231,16 @@ class GraphExecutor:
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
 
+        new_state = {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
+                "status": (orch_status if orch_status in {STATUS_OK, STATUS_DEGRADED, STATUS_FAILED} else STATUS_OK),
+                "reason_code": orch_reason, "detail": orch_detail,
+                # M36-D：双时钟字段更新
+                "clock_events": new_clock_events,
+                "node_exec_stats": new_exec_stats,
+                # M38-E：Presence 事件列表更新（不影响 payload/trace）
+                "presence_events": presence_events,
+                }
+
         # M-MA4：agent 切换事件（仅观测，不反向作为图输入）
         # M-MA3 后 active_agent_id 已提升为 GraphState 顶层字段，不再读 payload["agent_runtime"]
         try:
@@ -241,7 +252,9 @@ class GraphExecutor:
                     node_id=node_id,
                     event_type="AGENT_SELECTED",
                 )
-                presence_events.append({**agent_event.to_dict(), "agent_id": active_agent})
+                new_presence = list(new_state.get("presence_events") or [])
+                new_presence.append({**agent_event.to_dict(), "agent_id": active_agent})
+                new_state = {**new_state, "presence_events": new_presence}
             # AGENT_HANDOFF：handoff_history 有新增时触发
             new_handoff = list(new_state.get("handoff_history") or [])
             prev_handoff = list(state.get("handoff_history") or [])
@@ -251,24 +264,16 @@ class GraphExecutor:
                     node_id=node_id,
                     event_type="AGENT_HANDOFF",
                 )
-                presence_events.append({
+                new_presence = list(new_state.get("presence_events") or [])
+                new_presence.append({
                     **handoff_event.to_dict(),
                     "from_agent": str(latest_hop.get("from") or ""),
                     "to_agent": str(latest_hop.get("to") or ""),
                     "reason": str(latest_hop.get("reason") or ""),
                 })
+                new_state = {**new_state, "presence_events": new_presence}
         except Exception:
             pass  # 静默降级
-
-        new_state = {**state, "payload": payload, "trace": trace, "pending_node_id": next_node, "model_calls": model_calls,
-                "status": (orch_status if orch_status in {STATUS_OK, STATUS_DEGRADED, STATUS_FAILED} else STATUS_OK),
-                "reason_code": orch_reason, "detail": orch_detail,
-                # M36-D：双时钟字段更新
-                "clock_events": new_clock_events,
-                "node_exec_stats": new_exec_stats,
-                # M38-E：Presence 事件列表更新（不影响 payload/trace）
-                "presence_events": presence_events,
-                }
 
         # M38-F：Commit Stream 发射（committed_route_token = GOV_OK_RENDER 时生成 CommitSnapshot）
         token = str(new_state.get("committed_route_token") or "").strip()

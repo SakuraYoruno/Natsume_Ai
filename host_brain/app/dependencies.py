@@ -21,6 +21,11 @@ from host_brain.app.graph_config_builder import (
     SCENE_ROUTER_ENTRY_HANDLER_ID,
     SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SUPERVISOR_DISPATCH_HANDLER_ID,
+    CHAT_AGENT_HANDLER_ID,
+    CODE_AGENT_HANDLER_ID,
+    TRANSLATE_AGENT_HANDLER_ID,
+    INTENT_AGENT_HANDLER_ID,
+    JUDGE_AGENT_HANDLER_ID,
     graph_scene_router_entry_handler,
     graph_scene_router_post_core_handler,
 )
@@ -204,6 +209,17 @@ def get_graph_runtime() -> GraphRuntimeContract:
             SUPERVISOR_DISPATCH_HANDLER_ID,
             supervisor_dispatch_handler,
         )
+        # M-MA5：注册各 Agent Handler（只产出工件，不写 __next_node__）
+        from host_brain.app.handlers.chat_agent_handler import chat_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.code_agent_handler import code_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.translate_agent_handler import translate_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.intent_agent_handler import intent_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.judge_agent_handler import judge_agent_handler  # noqa: PLC0415
+        _graph_runtime.register_node_handler(CHAT_AGENT_HANDLER_ID, chat_agent_handler)
+        _graph_runtime.register_node_handler(CODE_AGENT_HANDLER_ID, code_agent_handler)
+        _graph_runtime.register_node_handler(TRANSLATE_AGENT_HANDLER_ID, translate_agent_handler)
+        _graph_runtime.register_node_handler(INTENT_AGENT_HANDLER_ID, intent_agent_handler)
+        _graph_runtime.register_node_handler(JUDGE_AGENT_HANDLER_ID, judge_agent_handler)
     return _graph_runtime
 
 

@@ -591,6 +591,128 @@ agent 内部路由状态维护在：
 
 ---
 
+---
+
+## 十一、第五阶段：真正的多 Agent 运行时（M-MA5）
+
+> 版本：v1.1 | 日期：2026-03-16
+> 前四阶段完成了"语义多 agent 化基础设施"，本阶段实现各 Agent 的真实执行逻辑、Supervisor LLM 决策、handoff 循环驱动和 JudgeAgent。
+
+### 11.1 当前缺口（M-MA4 完成后的真实状态）
+
+| 缺失项 | 说明 |
+|--------|------|
+| **Agent 实体不存在** | `chat_agent`、`code_agent` 等只是字符串 ID，没有对应的执行 handler |
+| **Supervisor 不调 LLM** | 当前是硬编码规则路由（`scene_type` → `agent_id`），不是真正的 Supervisor 决策 |
+| **子图没有接入路由** | `compile_intent_agent_subgraph()` 已定义，但没有节点在 `active_agent_id` 驱动下调用它 |
+| **没有 handoff 循环** | `handoff_history` 只写了一条，没有循环驱动机制 |
+| **JudgeAgent 未实现** | `judge_result` 字段存在但没有任何节点写入它 |
+
+### 11.2 第五阶段目标
+
+**让系统真正按 `active_agent_id` 动态选择执行路径，而不是固定节点序列。**
+
+具体目标：
+1. **各 Agent Handler 实现**：`chat_agent_handler`、`code_agent_handler`、`translate_agent_handler`、`intent_agent_handler`，每个 handler 调用对应的节点/子图
+2. **图执行器支持 agent 路由**：`graph_executor` 根据 `active_agent_id` 动态选择下一个执行的节点，而不是固定节点序列
+3. **JudgeAgent Handler 实现**：读取 `agent_artifacts`，写入 `judge_result`
+4. **Supervisor LLM 提案模式**（`SUPERVISOR_AUTO_ENABLED=true` 时）：调用 LLM 产出分派提案，handler 校验后写入路由
+
+### 11.3 文件改动清单
+
+#### 新增文件
+
+| 文件路径 | 说明 |
+|---------|------|
+| `host_brain/app/handlers/chat_agent_handler.py` | ChatAgent handler，调用 `chat_direct_ja` 节点 |
+| `host_brain/app/handlers/code_agent_handler.py` | CodeAgent handler，调用 `workbench_code_assist` 节点 |
+| `host_brain/app/handlers/translate_agent_handler.py` | TranslateAgent handler，调用 `workbench_translate` 节点 |
+| `host_brain/app/handlers/intent_agent_handler.py` | IntentAgent handler，调用 `intent_agent_subgraph` |
+| `host_brain/app/handlers/judge_agent_handler.py` | JudgeAgent handler，读取 `agent_artifacts`，写入 `judge_result` |
+
+#### 修改文件
+
+| 文件路径 | 改动说明 |
+|---------|---------|
+| `host_brain/app/handlers/supervisor_dispatch_handler.py` | 新增 LLM 提案模式（`SUPERVISOR_AUTO_ENABLED=true` 时调用 LLM） |
+| `host_brain/integrations/graph_executor.py` | 新增 agent 路由分发：根据 `active_agent_id` 选择对应 handler 执行 |
+| `host_brain/app/graph_config_builder.py` | 注册各 agent handler 节点绑定 |
+| `host_brain/app/dependencies.py` | 注册各 agent handler 到 `GraphRuntimeContract` |
+
+### 11.4 Agent Handler 设计规范
+
+每个 Agent Handler 必须遵守以下规范：
+
+```python
+def xxx_agent_handler(
+    payload: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    1. 从 payload 读取用户输入和上下文
+    2. 调用对应的节点/子图执行
+    3. 将输出写入 agent_artifacts（通过 write_agent_artifact_to_state）
+    4. 不写 __next_node__（由 graph_executor 的 agent 路由分发决定）
+    5. 不写 committed_route_token
+    """
+```
+
+**关键约束**：
+- Agent handler 只产出工件，不直接控图
+- `__next_node__` 由 `graph_executor` 根据 `need_judge` 决定（有 judge → `judge_agent`，无 judge → `renderer`）
+- Agent handler 失败时写入 `agent_artifacts[agent_id]["error"]`，不抛异常
+
+### 11.5 JudgeAgent 设计规范
+
+```python
+def judge_agent_handler(
+    payload: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    1. 读取 state["agent_artifacts"]（所有子 agent 的输出工件）
+    2. 评估工件质量（置信度、风险标记）
+    3. 选择最优工件或合并多个工件
+    4. 写入 state["judge_result"]
+    5. 不写 __next_node__（由 graph_executor 决定下一跳为 renderer）
+    """
+```
+
+### 11.6 graph_executor agent 路由分发设计
+
+在 `graph_executor.py` 中新增 `_dispatch_to_agent()` 方法：
+
+```python
+def _dispatch_to_agent(self, state: GraphState) -> str:
+    """根据 active_agent_id 返回对应的节点 ID。
+
+    这是 M-MA5 的核心：图执行器根据 GraphState.active_agent_id
+    动态选择下一个执行的节点，而不是固定节点序列。
+    """
+    active_agent_id = state.get("active_agent_id") or ""
+    agent_to_node = {
+        "chat_agent": "chat_agent_node",
+        "code_agent": "code_agent_node",
+        "translate_agent": "translate_agent_node",
+        "intent_agent": "intent_agent_node",
+        "judge_agent": "judge_agent_node",
+    }
+    return agent_to_node.get(active_agent_id, CHAT_DIRECT_NODE_ID)
+```
+
+### 11.7 验收标准
+
+| 验收项 | 标准 |
+|--------|------|
+| `active_agent_id` 驱动路由 | `graph_executor` 根据 `active_agent_id` 选择对应 handler，不走固定节点序列 |
+| 各 Agent Handler 可调用 | 5 个 agent handler 均可独立 import 和调用 |
+| `agent_artifacts` 有内容 | 每次 agent 执行后 `agent_artifacts[agent_id]` 有工件记录 |
+| `judge_result` 有内容 | `need_judge=true` 的场景执行后 `judge_result` 不为 None |
+| 验证脚本通过 | `_tmp_verify_ma5.py` 全部检查点通过 |
+
+---
+
 ## 变更记录
 
 - 2026-03-16 v1.0：初版，基于当前仓库代码审计与多轮架构讨论产出。
+- 2026-03-16 v1.1：补充第五阶段（M-MA5）设计方案。M-MA1~M-MA4 已完成，M-MA5 待实施。

@@ -61,6 +61,18 @@ SCENE_TYPE_AUTO = "AUTO"
 SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
 SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
 
+# M-MA5：各 Agent Handler 节点常量
+CHAT_AGENT_NODE_ID = "chat_agent_node"
+CHAT_AGENT_HANDLER_ID = "chat_agent"
+CODE_AGENT_NODE_ID = "code_agent_node"
+CODE_AGENT_HANDLER_ID = "code_agent"
+TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
+TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
+INTENT_AGENT_NODE_ID = "intent_agent_node"
+INTENT_AGENT_HANDLER_ID = "intent_agent"
+JUDGE_AGENT_NODE_ID = "judge_agent_node"
+JUDGE_AGENT_HANDLER_ID = "judge_agent"
+
 # 客户端允许显式指定的场景类型白名单
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
 # [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
