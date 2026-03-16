@@ -196,13 +196,14 @@
 | **P5** | Supervisor 决策升级：rule/llm 双模，灰度与回退（不改三图、不引入 ReAct）。 | **完成并正式验收通过**（2026-03 封板） |
 | **P6** | 仅在 intent_agent_subgraph 内试点局部循环（硬边界、失败码、step 级 trace）。 | **完成并正式验收通过**（2026-03 封板） |
 | **P7** | 治理与稳定性基线：预算契约、统一回退矩阵、观测聚合、压测与故障注入；不改三图、不扩 executor、不新增 Agent。 | **完成并正式验收通过**（2026-03 封板） |
+| **P8** | 下一轮候选基线：可控能力演进或收口增强（规划中）；范围与验收以 P8_SCOPE 为准。 | 待启动（**下一轮候选基线，规划中**） |
 
 **基线说明**：  
 - **第一轮正式基线**：P1～P4，已封板。P4 范围与契约以 **MULTI_AGENT_P4_SCOPE_2026-03.md** 为准。  
 - **第二轮正式基线**：P5，已封板。P5 范围、8 条验收标准与实施建议以 **MULTI_AGENT_P5_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P5_SEAL_RESULT_2026-03.md** 为准。  
 - **第三轮正式基线**：P6，完成并正式验收通过，已封板。P6 范围与验收以 **MULTI_AGENT_P6_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P6_SEAL_RESULT_2026-03.md** 为准。  
 - **第四轮正式基线**：P7，完成并正式验收通过，已封板。P7 范围与验收以 **MULTI_AGENT_P7_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P7_SEAL_RESULT_2026-03.md** 为准。  
-- **当前阶段**：P1～P7 已全部形成完整封板链路，项目正式进入**下一轮候选基线规划阶段**。
+- **当前阶段**：P1～P7 已全部形成完整封板链路；**下一轮候选基线 P8 规划已启动**，范围与验收以 **MULTI_AGENT_P8_SCOPE_2026-03.md** 为准。
 
 ---
 
@@ -224,6 +225,7 @@
 - **MULTI_AGENT_P7_4_FAULT_INJECTION_BASELINE_2026-03.md**：P7-4 压测与故障注入基线；三图故障注入用例索引、压测结果摘要模板与最小结果示例。  
 - **MULTI_AGENT_P7_3_OBSERVABILITY_SCOPE_2026-03.md**：P7-3 当前统一观测面范围边界；最小观测面 vs subgraph/local loop 全量聚合。  
 - **MULTI_AGENT_P7_ACCEPTANCE_PREVIEW_2026-03.md**：P7 验收汇总预审；8 条逐条定性、3.4/3.6 口径；已由 P7_SEAL_RESULT 正式验收取代。  
+- **MULTI_AGENT_P8_SCOPE_2026-03.md**：P8 下一轮候选基线；范围与验收（规划稿）；可选方向含 ReAct/Handoff 试点、观测增强等，待定稿；P8 待启动，单独规划。  
 - **MULTI_AGENT_SEAL_RESULT.md**：在完成 P1～P2 后更新为「新架构下的封测结论」。
 
 ---
