@@ -449,16 +449,17 @@ agent 内部路由状态维护在：
 - 子图结束时输出 `subgraph_commit_summary`
 - 子图不允许写入 `committed_*` 字段
 
-### 11.7 灰度开关
+### 11.7 执行模式与开关（P2 收敛后）
+
+路由由 **execution_profile** 决定（入口层写入），不再使用 `MULTI_AGENT_ENABLED` / `HOST_GRAPH_SCENE_ROUTER_ENABLED`。见 `docs/50_project/MULTI_AGENT_ARCH_REFACTOR_2026-03.md` §4。
 
 | 开关 | 默认值 | 说明 |
 |------|--------|------|
-| `MULTI_AGENT_ENABLED` | `false` | 多 agent 总开关 |
-| `SUPERVISOR_AUTO_ENABLED` | `false` | Supervisor 自动分派（LLM 提案模式） |
-| `INTENT_SUBGRAPH_ENABLED` | `false` | IntentAgentSubgraph 启用 |
+| `SUPERVISOR_MODE` | `rule` | Supervisor 分派：`rule` = 规则路由，`llm` = LLM 提案分派（原 SUPERVISOR_AUTO_ENABLED 收敛为此） |
+| `INTENT_EXEC_MODE` | （可选） | 执行意图模式：`chain` / `subgraph`（原 INTENT_SUBGRAPH_ENABLED 收敛为此） |
 | `READONLY_PARALLEL_ENABLED` | `false` | 只读并行 agent 启用 |
 
-灰度上线顺序：`WORK_CODE` → `WORK_TRANSLATE` → `AUTO` → `EXEC_INTENT` → `CHAT`（最后）
+灰度上线顺序：以 REFACTOR P0～P6 为准（下一轮正式基线仅 P5，P6 再下一轮单独规划）；选图由 execution_profile 决定，不再按布尔开关切换路径。
 
 ### 11.8 严禁设计
 

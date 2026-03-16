@@ -1,6 +1,6 @@
 # Natsume AI 上线前封测计划（草案）
 
-更新时间：2026-03-13
+更新时间：2026-03-16
 状态：Draft（仅仓库扫描与计划，不执行正式实测）
 
 ## 1. 扫描结果快照
@@ -188,6 +188,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 8. `docs/50_release/rollback/ROLLBACK_RUNBOOK_2026-03-10.md`
 9. `docs/50_release/rollback/RELEASE_ROLLBACK_GATE_20260310_010648.md`
 10. `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md`
+11. `docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`（多智能体架构升级，M-MA1~M-MA6 阶段与验收标准）
 
 ### 9.2 文档关注点 -> 代码测试锚点映射
 
@@ -203,11 +204,22 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 | 记忆蒸馏/遗忘/保留策略 | `host_brain/app/memory/*` | D-01, D-03 |
 | Canon 演化与回滚 | `host_brain/app/canon_routes.py` `host_brain/*canon*` | D-02, R-01 |
 | 发布回滚门禁 | `docs/60_trace/*rollback*` + `tests/*rollback*` | R-01 |
+| 多智能体编排与 Governed Runtime | `host_brain/app/handlers/supervisor_dispatch_handler.py` `host_brain/integrations/graph_executor.py` `host_brain/app/handlers/*_agent_handler.py` `host_brain/app/agents/react_loop.py` | P4-06（场景矩阵）、O-02（handoff/trace） |
 
 ### 9.3 维度扩充结论
 
 1. 当前计划已从“功能面”扩充到“治理、安全、可观测、生命周期、回滚”全域。
 2. 正式实测时将按新增矩阵项执行，不只做接口通断。
 3. 所有文档派生项都会落到“可执行测试 + 证据文件”两层，不做口头通过。
+
+## 10. 多智能体架构升级与封测
+
+多智能体架构升级方案已纳入封测计划参考范围：
+
+- **方案文档**：`docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`
+- **与封测关系**：
+  - 当前封测矩阵（含 P4-06 场景矩阵、O-02 审计闭环）覆盖现有单 agent 多节点路由与 Governed Runtime 行为。
+  - 升级方案中 M-MA1～M-MA6 各阶段的**验收标准**（功能/性能/治理）在对应阶段落地后，按该文档第八章、第十一～十三章执行验收。
+  - 封测通过视为“当前架构基线通过”；多智能体各阶段上线前需在该文档基础上做阶段专项验收，并更新本封测计划（补充矩阵项或专项小节）。
 
 ---
