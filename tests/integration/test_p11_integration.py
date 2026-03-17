@@ -64,7 +64,7 @@ class TestRetrievalAgentInSupervisedContext:
             context={"request_id": "p11-int-001", "execution_profile": "WORKFLOW_SUPERVISED"},
         )
         assert "retrieval_agent_trace" in result
-        assert result["retrieval_agent_trace"]["mode"] == "legacy_chain"
+        assert result["retrieval_agent_trace"]["mode"] == "react_loop"
 
     def test_artifact_ref_non_empty_in_supervised_context(self):
         """Supervised 图上下文中 artifact_ref 非空。"""
@@ -98,11 +98,12 @@ class TestRetrievalAgentInSupervisedContext:
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
         result = retrieval_agent_handler(_make_supervised_payload())
         trace = result["retrieval_agent_trace"]
-        required = {"agent_id", "mode", "artifact_ref", "retrieval_source", "result_count", "ts_ms"}
+        required = {"agent_id", "mode", "artifact_ref", "retrieval_source", "result_count",
+                   "total_steps", "stopped_reason", "ts_ms"}
         for field in required:
             assert field in trace, f"trace 缺少字段: {field!r}"
         assert trace["agent_id"] == AGENT_ID_RETRIEVAL
-        assert trace["mode"] == "legacy_chain"
+        assert trace["mode"] == "react_loop"
         assert "react_enabled" not in trace, "react_enabled 预留字段已删除"
 
     def test_does_not_modify_supervisor_decision(self):
@@ -395,7 +396,7 @@ class TestRetrievalAgentHandlerErrorSafetyIntegration:
         result_retrieval = retrieval_agent_handler(payload_retrieval)
         result_translate = translate_agent_handler(payload_translate, context={"gateway": gateway})
 
-        assert result_retrieval["retrieval_agent_trace"]["mode"] == "legacy_chain"
+        assert result_retrieval["retrieval_agent_trace"]["mode"] == "react_loop"
         assert result_translate["translate_agent_trace"]["mode"] == "react_loop"
         assert "retrieval_agent_trace" not in result_translate
         assert "translate_agent_trace" not in result_retrieval

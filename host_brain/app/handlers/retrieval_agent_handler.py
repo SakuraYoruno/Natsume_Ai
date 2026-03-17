@@ -1,19 +1,23 @@
-"""RetrievalAgent Handler（P11）。
+"""RetrievalAgent Handler（P12）。
 
 职责：
 - 处理知识库检索请求（SCENE_WORK_RETRIEVAL）
-- 读取上游 workbench_retrieval 节点输出，封装为 AgentArtifact
-- 写入 retrieval_agent_trace（字段契约已在 P11_SCOPE §3.3 写死）
+- 接入 ReAct 循环（run_react_loop，只读工具，allow_side_effects=False）
+- 产出 AgentArtifact 工件，写入 state["agent_artifacts"]
+- 写入 retrieval_agent_trace（字段契约已在 P12_SCOPE §4 写死）
 
-P12 将在此基础上接入 ReAct 循环（run_react_loop）。
+P12 直接替换 legacy_chain 为 ReAct 模式，不引入双模式开关。
 """
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 from host_brain.app.agents.agent_registry import AGENT_ID_RETRIEVAL
+from host_brain.app.agents.react_loop import run_react_loop
+from host_brain.app.agents.tool_registry import get_tools_for_agent
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 
@@ -21,10 +25,9 @@ def retrieval_agent_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """RetrievalAgent handler（P11）。
+    """RetrievalAgent handler（P12，ReAct 模式）。
 
-    读取 workbench_retrieval 节点输出，封装为 AgentArtifact，
-    写入 retrieval_agent_trace（字段契约见 P11_SCOPE §3.3）。
+    Observe → Think（LLM）→ Act（只读工具）→ Observe → ... → final_answer
 
     Args:
         payload: 当前图 payload
@@ -39,63 +42,65 @@ def retrieval_agent_handler(
     out = dict(payload)
 
     try:
-        # ----------------------------------------------------------------
-        # P11：legacy_chain 模式 — 读取 workbench_retrieval 节点输出
-        # ----------------------------------------------------------------
-        if not out.get("workbench_retrieval") and callable(ctx.get("invoke_model_node")):
-            model_out = ctx["invoke_model_node"]("workbench_retrieval")
-            if model_out:
-                out["workbench_retrieval"] = model_out.get("workbench_retrieval") or model_out
-                if isinstance(model_out.get("__model_calls__"), list):
-                    out["__model_calls__"] = list(out.get("__model_calls__") or []) + model_out["__model_calls__"]
+        user_input = str(
+            payload.get("user_input")
+            or payload.get("query")
+            or ""
+        ).strip()
 
-        retrieval_node_output = dict(out.get("workbench_retrieval") or {})
+        # 获取 RetrievalAgent 可用工具（只读，allow_side_effects=False）
+        tools = get_tools_for_agent(AGENT_ID_RETRIEVAL, allow_side_effects=False)
 
-        # 检索结果摘要
+        # 获取 LLM gateway（从 context 或 payload 中读取）
+        gateway = ctx.get("gateway") or payload.get("_gateway")
+
+        # 执行 ReAct 循环（最多 3 步，检索场景无需多步推理）
+        react_result = run_react_loop(
+            agent_id=AGENT_ID_RETRIEVAL,
+            user_input=user_input,
+            tools=tools,
+            gateway=gateway,
+            system_prompt_extra="你是检索专家，负责从知识库中提取相关信息。",
+            max_steps=int(os.environ.get("RETRIEVAL_AGENT_REACT_MAX_STEPS") or "3"),
+            allow_side_effects=False,
+            context=ctx,
+        )
+
+        # 写入 react_scratchpad（工作区，供 JudgeAgent 和 trace 读取）
+        out["react_scratchpad"] = react_result.to_scratchpad_dict()
+
+        # 从 react_scratchpad 中提取检索相关信息
+        scratchpad = out["react_scratchpad"]
+        retrieval_source = str(
+            payload.get("workbench_retrieval", {}).get("payload", {}).get("source")
+            or "knowledge_base"
+        ).strip()
         result_items = (
-            retrieval_node_output.get("payload", {}).get("results")
-            or retrieval_node_output.get("payload", {}).get("items")
+            payload.get("workbench_retrieval", {}).get("payload", {}).get("results")
+            or payload.get("workbench_retrieval", {}).get("payload", {}).get("items")
             or []
         )
         result_count = len(result_items) if isinstance(result_items, list) else 0
 
-        draft_summary = str(
-            retrieval_node_output.get("payload", {}).get("summary")
-            or retrieval_node_output.get("payload", {}).get("response_text")
-            or (f"检索到 {result_count} 条结果" if result_count > 0 else "检索完成，无匹配结果")
-        ).strip()[:200]
-
-        # 检索来源标识
-        retrieval_source = str(
-            retrieval_node_output.get("payload", {}).get("source")
-            or retrieval_node_output.get("source")
-            or "knowledge_base"
-        ).strip()
-
-        gateway_status = str(retrieval_node_output.get("gateway_status") or "OK").strip().upper()
-        confidence = 0.85 if gateway_status == "OK" else 0.2
-        risk_flags: list[str] = []
-        if gateway_status != "OK":
-            risk_flags.append(f"GATEWAY_STATUS:{gateway_status}")
-
         artifact_ref = f"artifact://{request_id}/{AGENT_ID_RETRIEVAL}_{int(time.time() * 1000)}"
-
         write_agent_artifact_to_state(
             out,
             agent_id=AGENT_ID_RETRIEVAL,
             artifact_ref=artifact_ref,
-            summary=draft_summary,
-            confidence=confidence,
-            risk_flags=risk_flags,
+            summary=react_result.final_answer[:200],
+            confidence=react_result.confidence,
+            risk_flags=react_result.risk_flags,
         )
 
-        # P11 §3.3 契约字段（已写死，不得自行增减必填字段）
+        # P12 §4 契约字段（已写死，不得自行增减必填字段）
         out["retrieval_agent_trace"] = {
             "agent_id": AGENT_ID_RETRIEVAL,
-            "mode": "legacy_chain",
+            "mode": "react_loop",
             "artifact_ref": artifact_ref,
             "retrieval_source": retrieval_source,
             "result_count": result_count,
+            "total_steps": react_result.total_steps,
+            "stopped_reason": react_result.stopped_reason,
             "ts_ms": int(time.time() * 1000),
         }
 
