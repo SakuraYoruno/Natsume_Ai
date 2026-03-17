@@ -1,7 +1,7 @@
 # Natsume AI 上线前封测计划（草案）
 
-更新时间：2026-03-16
-状态：Draft（仅仓库扫描与计划，不执行正式实测）
+更新时间：2026-03-17
+状态：Draft（仅仓库扫描与计划，不执行正式实测）；已纳入**多智能体（P1～P16 封板）**专项封测矩阵 MA-01～MA-06
 
 ## 1. 扫描结果快照
 
@@ -72,8 +72,9 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 3. 57 个 skills 全量执行路径覆盖（handler + executor）。
 4. 语音链路具备可追溯证据（输入 -> chat -> tts -> vts）。
 5. 七路召回、情感注入、VTS 表情/口型在同链路内联动可证。
-6. WebUI（监控面板）入口、静态资源、数据 API、页面路由和关键交互可用。
-7. 形成可复跑、可判定上线门禁的报告产物。
+6. **多智能体编排**：复杂场景（AUTO/代码/翻译/执行意图）由 **多 Agent** 执行——execution_profile 选图、Supervisor 分派、专家 Agent（code/translate/retrieval）+ Judge 收口、ReAct/观测/失败收口可追溯；封测覆盖三图主链与多 Agent 专项（见 §4 多智能体矩阵）。
+7. WebUI（监控面板）入口、静态资源、数据 API、页面路由和关键交互可用。
+8. 形成可复跑、可判定上线门禁的报告产物。
 
 ## 4. 正式封测矩阵（待确认）
 
@@ -95,7 +96,13 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 | P4-03 | `/v1/chat` 主链路 | SCENE_CHAT SSE | COMMIT=APPROVE 且含审计引用 | 阻断 |
 | P4-04 | 七路召回 | 同链路核验 | route_count>=7 | 阻断 |
 | P4-05 | 情感+VTS | 同链路核验 | emotion+vts证据完整 | 阻断 |
-| P4-06 | 场景矩阵 | CHAT/WORK_CODE/WORK_TRANSLATE/EXEC_INTENT/VISION_UI(同意/不同意) | 全场景可解释提交 | 阻断 |
+| P4-06 | 场景矩阵（多 Agent） | CHAT/WORK_CODE/WORK_TRANSLATE/EXEC_INTENT/VISION_UI(同意/不同意)；各场景对应 execution_profile 选图，Supervisor + 专家 Agent + Judge 链路可解释提交 | 全场景可解释提交 | 阻断 |
+| **MA-01** | **多 Agent：execution_profile 选图** | 入口层写入 execution_profile，按 profile 加载 chat_graph / supervised_graph / intent_graph | 选图正确、无混图 | 阻断 |
+| **MA-02** | **多 Agent：Supervised 图主链** | supervisor_dispatch → agent_dispatch → judge_agent → renderer；rule/llm 双模、active_agent_id 分派 | 主链可达、决策与分派可追溯 | 阻断 |
+| **MA-03** | **多 Agent：专家 Agent 执行** | code_agent / translate_agent / retrieval_agent 在 Supervised 图内可被分派并执行；ReAct 模式（若启用）有 step/trace | handler 可执行、artifact/trace 可查 | 阻断 |
+| **MA-04** | **多 Agent：Judge 收口** | judge_agent 对多工件裁判、输出统一；失败/降级按失败矩阵收口 | 裁判结果稳定、失败码与 trace 一致 | 阻断 |
+| **MA-05** | **多 Agent：Intent 图与子图** | INTENT_EXEC 走 intent_graph；intent_agent_subgraph 局部循环/契约（subgraph_trace、失败码） | 图内收口、不跨图逃逸 | 阻断 |
+| **MA-06** | **多 Agent：观测与审计** | /obs/metrics、ledger 聚合、subgraph_trace、budget_breach、失败矩阵可查 | 观测面完整、request_id 可追溯 | 阻断 |
 | W-01 | WebUI 入口与静态资源 | `/panel` + `/static/monitor/index.html` + 关键 assets | 可访问且资源可加载 | 阻断 |
 | W-02 | WebUI API 合约（链路面板） | `/api/ui/timeline` `/api/ui/status-distribution` `/api/ui/request/{id}` `/api/ui/link-topology` `/api/ui/search-requests` | 状态码与结构满足约定 | 阻断 |
 | W-03 | WebUI API 合约（观测面板） | `monitor_ui/src/api/obs.js` 引用的 `/obs/*` `/v1/agent/*` | 页面依赖端点可用，无 5xx | 阻断 |
@@ -124,7 +131,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 1. P0 静态扫描与语法检查。
 2. P1/P2 双端健康与合约。
 3. P3 Edge RPC 功能面联测。
-4. P4 主链路与场景矩阵。
+4. P4 主链路与场景矩阵；**MA-01～MA-06 多智能体专项**（与 P4-06 场景矩阵同步或紧接执行）。
 5. W WebUI 入口/API/路由/交互专项。
 6. S/C/E/O/D/F/R 安全、配置、依赖、观测、数据、失败、回滚专项。
 7. P5 Skills 全调用。
@@ -145,7 +152,8 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 4. `scheduler 未初始化` 与 `tools catalog_size=0` 强阻断
 5. WebUI 路由烟测要求必须“真实浏览器”执行（建议：必须，避免仅接口通过但页面白屏）。
 6. 回滚演练（R-01）纳入本次上线前“必做阻断项”。
-7. 报告必须包含“失败项修复建议 + 回归命令”
+7. 报告必须包含“失败项修复建议 + 回归命令”。
+8. **多智能体专项** MA-01～MA-06 为阻断项；复杂场景（P4-06）按多 Agent 编排验收，与 REFACTOR P1～P16 封板基线一致。
 
 ## 8. WebUI 现有覆盖与缺口
 
@@ -188,7 +196,9 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 8. `docs/50_release/rollback/ROLLBACK_RUNBOOK_2026-03-10.md`
 9. `docs/50_release/rollback/RELEASE_ROLLBACK_GATE_20260310_010648.md`
 10. `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md`
-11. `docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`（多智能体架构升级，M-MA1~M-MA6 阶段与验收标准）
+11. `docs/50_project/MULTI_AGENT_ARCH_REFACTOR_2026-03.md`（多智能体架构定版，P0～P16 实施顺序与最终封板）。
+12. `docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`（多智能体能力与契约参考，M-MA1～M-MA6）。
+13. `docs/60_trace/dataflow_report_20260311.md`（数据流全景，含 P15/P16 多智能体分派数据流 §十三）。
 
 ### 9.2 文档关注点 -> 代码测试锚点映射
 
@@ -204,7 +214,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 | 记忆蒸馏/遗忘/保留策略 | `host_brain/app/memory/*` | D-01, D-03 |
 | Canon 演化与回滚 | `host_brain/app/canon_routes.py` `host_brain/*canon*` | D-02, R-01 |
 | 发布回滚门禁 | `docs/60_trace/*rollback*` + `tests/*rollback*` | R-01 |
-| 多智能体编排与 Governed Runtime | `host_brain/app/handlers/supervisor_dispatch_handler.py` `host_brain/integrations/graph_executor.py` `host_brain/app/handlers/*_agent_handler.py` `host_brain/app/agents/react_loop.py` | P4-06（场景矩阵）、O-02（handoff/trace） |
+| 多智能体编排与 Governed Runtime（P1～P16 封板） | `host_brain/app/entry_routing.py` `host_brain/app/execution_profile.py` `host_brain/app/handlers/supervisor_dispatch_handler.py` `host_brain/integrations/graph_executor.py` `host_brain/app/handlers/*_agent_handler.py` `host_brain/app/agents/react_loop.py` `host_brain/observability/metrics.py` `host_brain/audit/sqlite_ledger.py` | P4-06（场景矩阵）、**MA-01～MA-06**（多 Agent 专项）、O-02（handoff/trace） |
 
 ### 9.3 维度扩充结论
 
@@ -214,12 +224,16 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 
 ## 10. 多智能体架构升级与封测
 
-多智能体架构升级方案已纳入封测计划参考范围：
+**多智能体重构升级已完成最终封板（P1～P16）**，封测计划已将多智能体纳入正式矩阵：
 
-- **方案文档**：`docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`
-- **与封测关系**：
-  - 当前封测矩阵（含 P4-06 场景矩阵、O-02 审计闭环）覆盖现有单 agent 多节点路由与 Governed Runtime 行为。
-  - 升级方案中 M-MA1～M-MA6 各阶段的**验收标准**（功能/性能/治理）在对应阶段落地后，按该文档第八章、第十一～十三章执行验收。
-  - 封测通过视为“当前架构基线通过”；多智能体各阶段上线前需在该文档基础上做阶段专项验收，并更新本封测计划（补充矩阵项或专项小节）。
+- **架构与阶段依据**：
+  - `docs/50_project/MULTI_AGENT_ARCH_REFACTOR_2026-03.md`（定版方案，P0～P16 实施顺序与基线说明）
+  - `docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`（能力与契约参考）
+  - P1～P16 各轮 SCOPE/SEAL_RESULT（范围与验收结论）
+- **封测中的多智能体覆盖**：
+  - **P4-06** 场景矩阵：CHAT / WORK_CODE / WORK_TRANSLATE / EXEC_INTENT / VISION_UI 等场景均按 **多 Agent** 编排（execution_profile 选图、Supervisor + 专家 Agent + Judge）；“复杂场景”即多 Agent 场景，验收标准为全场景可解释提交。
+  - **MA-01～MA-06** 多智能体专项：execution_profile 选图、Supervised 图主链、专家 Agent 执行与 Judge 收口、Intent 图与子图、观测与审计；与 P4-06 同步或紧接执行（见 §4 封测矩阵、§5 执行顺序）。
+  - **O-02** 审计闭环：trace 覆盖 intent/governor/retrieval/voice/avatar 及 **handoff/agent 分派**，多 Agent 链路可追溯。
+- **通过标准**：封测通过即包含多智能体基线通过；MA-01～MA-06 为阻断项，与 P4-06 一并判定上线门禁。
 
 ---

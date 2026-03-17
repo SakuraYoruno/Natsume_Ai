@@ -564,11 +564,22 @@ class MetricsCollector:
             "READONLY_PARALLEL_ENABLED": _parse_bool_env("READONLY_PARALLEL_ENABLED"),
         }
 
-        # 从 stream_events 表读取 agent 事件（若 ledger 支持）
+        # 从 EvidencePlane.stream_events 按时间范围读取 agent 事件（优先）；否则回退 ledger.stream_events
         agent_selected_events: list[dict[str, Any]] = []
         agent_handoff_events: list[dict[str, Any]] = []
+        now_ts = now_ms()
+        since_ts = now_ts - 60 * 60 * 1000  # 近 60 分钟
         try:
-            stream_rows = getattr(self.ledger, "stream_events", []) or []
+            try:
+                from host_brain.integrations.graph_evidence import get_evidence_plane
+                ep = get_evidence_plane()
+                stream_rows = ep.query_stream_events_by_time(
+                    since_ms=since_ts,
+                    end_ms=now_ts,
+                    event_types=["AGENT_SELECTED", "AGENT_HANDOFF"],
+                )
+            except Exception:
+                stream_rows = getattr(self.ledger, "stream_events", []) or []
             for row in stream_rows:
                 event_type = str(row.get("event_type") or "").strip().upper()
                 if event_type == "AGENT_SELECTED":
@@ -578,10 +589,10 @@ class MetricsCollector:
         except Exception:
             pass
 
-        # 各 agent 被选派次数
+        # 各 agent 被选派次数（EvidencePlane 无 agent_id 时用 node_id 表示选派节点）
         agent_dispatch_count: dict[str, int] = {}
         for ev in agent_selected_events:
-            agent_id = str(ev.get("agent_id") or "").strip()
+            agent_id = str(ev.get("agent_id") or ev.get("node_id") or "").strip()
             if agent_id:
                 agent_dispatch_count[agent_id] = agent_dispatch_count.get(agent_id, 0) + 1
 

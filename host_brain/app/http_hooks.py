@@ -708,9 +708,21 @@ async def runtime_lifespan(
                 degraded_modules,
                 extra={"degraded_modules": degraded_modules},
             )
+
+        # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
+        try:
+            from host_brain.observability.service_health_heartbeat import start_heartbeat
+            start_heartbeat(interval_sec=30.0)
+        except Exception as hb_exc:
+            logger.warning("Service health heartbeat start skipped: %s", hb_exc)
     except Exception as exc:
         logger.warning("Startup probe degraded", extra={"error": str(exc)})
     yield
+    try:
+        from host_brain.observability.service_health_heartbeat import stop_heartbeat
+        await stop_heartbeat()
+    except Exception:
+        pass
     logger.info("Natsume AI Host Brain shutting down ...")
 
 

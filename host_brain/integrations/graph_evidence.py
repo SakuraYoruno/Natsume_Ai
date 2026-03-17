@@ -413,6 +413,37 @@ class EvidencePlane:
             logger.warning("EvidencePlane.query_stream_events 失败: %s", exc)
             return []
 
+    def query_stream_events_by_time(
+        self,
+        *,
+        since_ms: int,
+        end_ms: int,
+        event_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """按时间范围查询 stream_events，供 /obs/metrics agent_metrics 使用。"""
+        if not self._initialized:
+            return []
+        try:
+            with self._connect() as conn:
+                if event_types:
+                    placeholders = ",".join("?" * len(event_types))
+                    sql = (
+                        "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
+                        "FROM stream_events WHERE ts_ms >= ? AND ts_ms <= ? AND event_type IN (" + placeholders + ") ORDER BY ts_ms"
+                    )
+                    cursor = conn.execute(sql, (since_ms, end_ms, *event_types))
+                else:
+                    cursor = conn.execute(
+                        "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
+                        "FROM stream_events WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms",
+                        (since_ms, end_ms),
+                    )
+                cols = ["request_id", "graph_id", "phase", "event_type", "node_id", "chunk", "ts_ms"]
+                return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception as exc:
+            logger.warning("EvidencePlane.query_stream_events_by_time 失败: %s", exc)
+            return []
+
     def write_checkpoint(
         self,
         *,

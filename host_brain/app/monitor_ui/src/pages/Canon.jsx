@@ -457,7 +457,7 @@ export default function Canon() {
             </div>
           )}
           {/* 最近 Manifest 列表 */}
-          {vaultData.recent_manifests.length > 0 && (
+          {vaultData.recent_manifests?.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b border-gray-100">
@@ -471,7 +471,7 @@ export default function Canon() {
                   {vaultData.recent_manifests.map((m, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-1.5 font-mono text-violet-600 truncate max-w-[100px]" title={m.manifest_id}>
-                        {m.manifest_id.slice(0, 12)}…
+                        {m.manifest_id?.slice(0, 12)}…
                       </td>
                       <td className="px-3 py-1.5 text-gray-500">{m.artifact_type || '—'}</td>
                       <td className="px-3 py-1.5">

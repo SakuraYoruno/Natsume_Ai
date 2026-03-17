@@ -31,7 +31,7 @@ from host_brain.scheduler.scheduler_routes import (
     set_scheduler_providers as _set_scheduler_providers,
 )
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router  # TODO-108: HostTaskScheduler 管理路由
-from host_brain.app.tool_routes import router as tool_router, set_tool_providers as _set_tool_providers
+from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.app.health_routes import router as health_router
@@ -177,6 +177,7 @@ app.include_router(host_scheduler_router, prefix="/host-scheduler")
 # 注册 ToolBroker REST API 路由（M12-A TASK-0156: 工具元数据包 + 执行入口）
 # ---------------------------------------------------------------------------
 app.include_router(tool_router)
+app.include_router(tool_kits_alias_router)  # GET /tool_kits 别名，兼容 UAT/外部前端
 
 # ---------------------------------------------------------------------------
 # 注册 Bond 阶段 REST API 路由（M13-A: Bond 阶段积分 + 自动晋级）

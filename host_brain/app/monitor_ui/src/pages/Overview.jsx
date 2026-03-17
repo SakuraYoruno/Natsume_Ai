@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse } from 'lucide-react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse, Cpu, Users } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
-import { fetchServicesHealth, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
+import StatusBadge from '../components/StatusBadge.jsx'
+import { fetchServicesHealth, fetchSubsystemsStats, fetchAgentLoopStats, fetchObsMetrics, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -17,6 +18,9 @@ export default function Overview() {
   const [pbData, setPbData] = useState(null)  // TODO-73: PromptBuilder 注入检测摘要
   const [canonData, setCanonData] = useState(null)  // TODO-79: Canon 提案待审核警告
   const [chainData, setChainData] = useState(null)  // TODO-90: 主链路健康评分
+  const [subsysData, setSubsysData] = useState(null)  // 子系统健康（Memory/Retrieval/Skill 等）
+  const [agentLoopData, setAgentLoopData] = useState(null)  // Agent Loop 达成率、轮次
+  const [obsMetricsData, setObsMetricsData] = useState(null)  // /obs/metrics（含 agent_metrics 多 Agent 专项）
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -26,14 +30,20 @@ export default function Overview() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [res, dispRes, pbRes, canonRes, chainRes] = await Promise.all([
+      const [res, subsysRes, agentLoopRes, obsMetricsRes, dispRes, pbRes, canonRes, chainRes] = await Promise.all([
         fetchServicesHealth({ window_minutes: windowMinutes }),
+        fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
+        fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 5 }).catch(() => null),
+        fetchObsMetrics().catch(() => null),
         fetchInputDispatchStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchPromptBuilderStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchCanonProposalStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchChainStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
       setData(res)
+      setSubsysData(subsysRes)
+      setAgentLoopData(agentLoopRes)
+      setObsMetricsData(obsMetricsRes)
       setDispatchData(dispRes)
       setPbData(pbRes)
       setCanonData(canonRes)
@@ -58,6 +68,7 @@ export default function Overview() {
   const up       = data?.up       ?? '—'
   const degraded = data?.degraded ?? '—'
   const down     = data?.down     ?? '—'
+  const unknown  = data?.unknown  ?? '—'
 
   // 分组：边缘服务 vs LLM 节点
   const edgeServices = services.filter((s) => s.service_type === 'edge')
@@ -69,7 +80,7 @@ export default function Overview() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">全服务健康总览</h1>
-          <p className="text-sm text-gray-500 mt-0.5">双端所有服务实时状态，每 {pollingInterval}s 自动刷新</p>
+          <p className="text-sm text-gray-500 mt-0.5 whitespace-nowrap sm:whitespace-normal">双端所有服务实时状态，每 {pollingInterval}s 自动刷新</p>
         </div>
         <div className="flex items-center gap-2">
           {/* 统计窗口选择 */}
@@ -95,13 +106,14 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* 汇总统计行 */}
-      <div className="grid grid-cols-4 gap-4">
+      {/* 汇总统计行（含未知：窗口内无记录时由后端 7 日回退计算，仍无则显示未知数） */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
         {[
           { label: '总服务数', value: total,    color: 'text-gray-800'   },
           { label: '健康(Up)', value: up,       color: 'text-green-600'  },
           { label: '降级',     value: degraded, color: 'text-orange-500' },
           { label: '故障',     value: down,     color: 'text-red-500'    },
+          { label: '未知',     value: unknown,  color: 'text-gray-500'   },
         ].map(({ label, value, color }) => (
           <div key={label} className="card p-4 text-center">
             <div className={`text-2xl font-bold ${color}`}>{value}</div>
@@ -131,7 +143,7 @@ export default function Overview() {
                 <h2 className="text-sm font-semibold text-gray-700">边缘服务</h2>
                 <span className="text-xs text-gray-400">({edgeServices.length})</span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {edgeServices.map((svc) => (
                   <ServiceCard
                     key={svc.service_id ?? svc.display_name}
@@ -159,7 +171,7 @@ export default function Overview() {
                 <h2 className="text-sm font-semibold text-gray-700">LLM 云节点</h2>
                 <span className="text-xs text-gray-400">({llmNodes.length})</span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                 {llmNodes.map((svc) => (
                   <ServiceCard
                     key={svc.service_id ?? svc.display_name}
@@ -178,6 +190,123 @@ export default function Overview() {
               </div>
             </div>
           )}
+
+          {/* 子系统健康（始终展示；无调用时显示 0/无数据） */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Cpu size={15} className="text-gray-500" />
+              <h2 className="text-sm font-semibold text-gray-700">子系统健康</h2>
+              <span className="text-xs text-gray-400">（近 {windowMinutes} 分钟{subsysData?.subsystems?.length != null ? `，共 ${subsysData.subsystems.length} 项` : ''}）</span>
+            </div>
+            {subsysData?.subsystems?.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+                {(subsysData.subsystems || []).map((s) => {
+                  const rate = s.success_rate
+                  const status = rate == null ? 'unknown' : rate >= 80 ? 'up' : rate >= 50 ? 'degraded' : 'down'
+                  const borderCls = status === 'up' ? 'border-l-green-500' : status === 'degraded' ? 'border-l-orange-400' : status === 'down' ? 'border-l-red-500' : 'border-l-gray-300'
+                  return (
+                    <div key={s.subsystem} className={`card-hover p-4 border-l-4 ${borderCls}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-medium text-gray-800 truncate text-sm">{s.display_name || s.subsystem}</span>
+                        <StatusBadge status={status} />
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                        {rate != null ? (
+                          <span>成功率 {rate}%</span>
+                        ) : (
+                          <span>无近期数据</span>
+                        )}
+                        {s.total != null && <span>· {s.total} 次</span>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="card p-4 text-center text-sm text-gray-500">近 {windowMinutes} 分钟暂无子系统调用记录</div>
+            )}
+          </div>
+
+          {/* 多 Agent：始终展示；含 Agent Loop 达成率、Handoff/选派、能力开关与告警 */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Users size={15} className="text-gray-500" />
+              <h2 className="text-sm font-semibold text-gray-700">多 Agent</h2>
+              <span className="text-xs text-gray-400">（近 {windowMinutes} 分钟）</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              <div className="card p-3 text-center">
+                <div className="text-xl font-bold text-gray-800">{agentLoopData?.total_loops ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-0.5">Agent Loop 执行</div>
+              </div>
+              <div className="card p-3 text-center">
+                <div className="text-xl font-bold text-green-600">{agentLoopData?.achieved ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-0.5">目标达成</div>
+              </div>
+              <div className="card p-3 text-center">
+                <div className={`text-xl font-bold ${(agentLoopData?.achievement_rate ?? 0) >= 80 ? 'text-green-600' : (agentLoopData?.achievement_rate ?? 0) >= 50 ? 'text-orange-500' : 'text-gray-500'}`}>
+                  {agentLoopData?.achievement_rate != null ? `${agentLoopData.achievement_rate}%` : '—'}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">达成率</div>
+              </div>
+              <div className="card p-3 text-center">
+                <div className="text-xl font-bold text-gray-700">{agentLoopData?.avg_rounds ?? '—'}</div>
+                <div className="text-xs text-gray-500 mt-0.5">平均轮次</div>
+              </div>
+              <div className="card p-3 text-center">
+                <div className="text-xl font-bold text-blue-600">{obsMetricsData?.agent_metrics?.agent_hop_count ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-0.5">Handoff 次数</div>
+              </div>
+              <div className="card p-3 text-center">
+                <div className="text-xl font-bold text-gray-700">{obsMetricsData?.agent_metrics?.avg_hops_per_request ?? '—'}</div>
+                <div className="text-xs text-gray-500 mt-0.5">均 hop/请求</div>
+              </div>
+            </div>
+            {/* 能力开关与 Handoff 追踪完整率 */}
+            {(obsMetricsData?.agent_metrics?.switches || obsMetricsData?.agent_metrics?.handoff_trace_complete_rate_pct != null) && (
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                {obsMetricsData?.agent_metrics?.switches && Object.keys(obsMetricsData.agent_metrics.switches).length > 0 && (
+                  <span className="text-gray-500">
+                    开关: {Object.entries(obsMetricsData.agent_metrics.switches).map(([k, v]) => `${k}=${v}`).join(', ')}
+                  </span>
+                )}
+                {obsMetricsData?.agent_metrics?.handoff_trace_complete_rate_pct != null && (
+                  <span className={obsMetricsData.agent_metrics.handoff_trace_complete_rate_pct >= 100 ? 'text-green-600' : 'text-orange-500'}>
+                    Handoff 追踪完整率 {obsMetricsData.agent_metrics.handoff_trace_complete_rate_pct}%
+                  </span>
+                )}
+              </div>
+            )}
+            {/* 告警 */}
+            {obsMetricsData?.agent_metrics?.alerting?.active_alerts?.length > 0 && (
+              <div className="mt-2 card p-3 border-l-4 border-orange-400">
+                <div className="text-xs font-medium text-orange-700 mb-1">多 Agent 告警</div>
+                <ul className="text-xs text-orange-600 space-y-0.5">
+                  {obsMetricsData.agent_metrics.alerting.active_alerts.map((a, i) => (
+                    <li key={i}>{a.code}: {a.observed_avg_hops != null ? `均 hop ${a.observed_avg_hops} > ${a.threshold_avg_hops}` : `完整率 ${a.observed_rate_pct}%`}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* 各 Agent 选派次数 */}
+            {obsMetricsData?.agent_metrics?.agent_dispatch_count && Object.keys(obsMetricsData.agent_metrics.agent_dispatch_count).length > 0 ? (
+              <div className="mt-3 card p-3">
+                <div className="text-xs font-medium text-gray-500 mb-2">各 Agent 选派次数</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(obsMetricsData.agent_metrics.agent_dispatch_count)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 10)
+                    .map(([agentId, count]) => (
+                      <span key={agentId} className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs font-medium">
+                        {agentId} <span className="text-gray-500 ml-1">{count}</span>
+                      </span>
+                    ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-gray-400">暂无 handoff/选派事件数据（依赖 stream_events 写入）</div>
+            )}
+          </div>
 
           {/* 无数据 */}
           {services.length === 0 && (
