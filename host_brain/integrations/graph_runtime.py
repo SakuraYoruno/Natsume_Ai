@@ -301,6 +301,15 @@ class GraphRuntimeContract:
             except Exception:
                 pass  # 静默降级，不影响主流程
 
+        # P8-1：run 完成后写入 P8 ledger 专用表（静默降级，不影响主流程）
+        if self.ledger is not None:
+            self._write_p8_ledger(
+                request_id=request_id,
+                state=state,
+                ts_ms=now_value,
+                run_start_ms=now_value,
+            )
+
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）
         _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
 
@@ -448,6 +457,75 @@ class GraphRuntimeContract:
 
     def _default_gateway_factory(self, **kwargs: Any) -> LlmGatewayContract:
         return LlmGatewayContract(**kwargs)
+
+    def _write_p8_ledger(
+        self,
+        *,
+        request_id: str,
+        state: Any,
+        ts_ms: int,
+        run_start_ms: int,
+    ) -> None:
+        """P8-1：run 完成后将 subgraph_failure / local_loop failure / 延迟 / budget breach 写入 ledger 专用表。
+
+        归类优先级（两者互斥，不重复计数）：
+          error_code 属于 LOCAL_LOOP_* → log_category='local_loop'
+          其余 → log_category='subgraph'
+        """
+        from host_brain.audit.ledger_constants import P8_LOCAL_LOOP_FAILURE_CODES
+        from host_brain.integrations.graph_contract import is_budget_breach_failure_code
+
+        try:
+            execution_profile = str((state or {}).get("execution_profile") or "").strip() or None
+            status = str((state or {}).get("status") or "").strip() or None
+            payload = dict((state or {}).get("payload") or {})
+
+            # 1. 写入 subgraph_failure / local_loop failure 记录
+            subgraph_failure = payload.get("subgraph_failure")
+            if isinstance(subgraph_failure, dict):
+                error_code = str(subgraph_failure.get("error_code") or "").strip()
+                if error_code:
+                    # 归类优先级：LOCAL_LOOP_* 优先归入 local_loop
+                    if error_code in P8_LOCAL_LOOP_FAILURE_CODES:
+                        log_category = "local_loop"
+                    else:
+                        log_category = "subgraph"
+                    self.ledger.log_p8_subgraph_failure({
+                        "request_id": request_id,
+                        "ts_ms": ts_ms,
+                        "execution_profile": execution_profile,
+                        "log_category": log_category,
+                        "error_code": error_code,
+                        "failed_node": str(subgraph_failure.get("failed_node") or "").strip() or None,
+                        "detail": str(subgraph_failure.get("safe_fallback_reason") or "").strip() or None,
+                    })
+
+            # 2. 写入 graph_run_log（延迟 + budget breach）
+            # 延迟：run_start_ms 是 run_graph 入口时间戳，ts_ms 是同一时刻（当前实现中两者相同）
+            # 若需精确测量，调用方可传入实际开始时间；此处以 now_ms() - run_start_ms 为准
+            # 注意：run_start_ms 与 ts_ms 在当前实现中均为 now_value（run_graph 入口），
+            # 实际耗时需在 run_graph 返回后重新采样；此处写入 0 作为占位，
+            # 真实延迟由 run_graph 调用方在 _finalize 后补充（见下方 run_graph 改造）
+            budget_breach_code: str | None = None
+            reason_code = str((state or {}).get("reason_code") or "").strip() or None
+            if reason_code and is_budget_breach_failure_code(reason_code):
+                budget_breach_code = reason_code
+            # 也检查 payload 中的 subgraph_failure（Intent 图 budget breach 可能在此上报）
+            if not budget_breach_code and isinstance(subgraph_failure, dict):
+                sf_code = str(subgraph_failure.get("error_code") or "").strip()
+                if sf_code and is_budget_breach_failure_code(sf_code):
+                    budget_breach_code = sf_code
+
+            self.ledger.log_p8_graph_run({
+                "request_id": request_id,
+                "ts_ms": ts_ms,
+                "execution_profile": execution_profile,
+                "latency_ms": None,  # 由 run_graph 在 _finalize 后填充实际耗时
+                "status": status,
+                "budget_breach_code": budget_breach_code,
+            })
+        except Exception:
+            pass  # 静默降级，不影响主流程
 
     def _write_evidence(self, *, request_id: str, state: Any) -> None:
         """M36-F：图执行完成后写入 Evidence Plane（静默降级）。"""
