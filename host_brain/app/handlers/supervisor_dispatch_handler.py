@@ -129,8 +129,11 @@ def supervisor_dispatch_handler(
     scene_type = str(payload.get("scene_type") or SCENE_CHAT).strip().upper() or SCENE_CHAT
 
     # 2. SUPERVISOR_MODE 只允许 rule 或 llm（P5-2）
+    # P15：同时支持 SUPERVISOR_AUTO_ENABLED=true 作为 SUPERVISOR_MODE=llm 的别名
+    # 优先级：SUPERVISOR_MODE=llm > SUPERVISOR_AUTO_ENABLED=true > 默认 rule
     _raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
-    supervisor_mode = "llm" if _raw_mode == "llm" else "rule"
+    _auto_enabled = _parse_bool(os.environ.get("SUPERVISOR_AUTO_ENABLED"), default=False)
+    supervisor_mode = "llm" if (_raw_mode == "llm" or _auto_enabled) else "rule"
     use_llm_proposal = supervisor_mode == "llm"
 
     # 3. 图内 allowlist：与 agent_dispatch_handler 后续使用的保持一致（P5-2）

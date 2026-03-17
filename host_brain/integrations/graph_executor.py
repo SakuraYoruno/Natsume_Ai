@@ -64,6 +64,21 @@ _TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
     # Agent handler 不是 trusted handler，不需要写控制字段
 })
 
+# ---------------------------------------------------------------------------
+# M-MA6：Agent Handler 映射表（active_agent_id → handler_id）
+# graph_executor 根据 GraphState.active_agent_id 动态选择对应 handler，
+# 而不是固定节点序列。这是 M-MA6 动态路由的核心。
+# ---------------------------------------------------------------------------
+
+_AGENT_HANDLER_MAP: dict[str, str] = {
+    "chat_agent":      "chat_agent",
+    "code_agent":      "code_agent",
+    "translate_agent": "translate_agent",
+    "intent_agent":    "intent_agent",
+    "judge_agent":     "judge_agent",
+    "retrieval_agent": "retrieval_agent",
+}
+
 # model node 输出中需要剥离的控制字段（防止 model node 直接控图）
 _MODEL_OUTPUT_CONTROL_FIELDS: frozenset[str] = frozenset({
     "committed_route_token",
@@ -110,7 +125,63 @@ class GraphExecutor:
         if not node_id:
             return set_finish(state)
 
-        # P3.5：agent_dispatch_node 与普通 handler 节点一致，无业务特判；分派与下一跳由 agent_dispatch_handler 负责。
+        # M-MA6：agent_dispatch_node 动态路由分发
+        # 当 node_id == "agent_dispatch_node" 时，根据 active_agent_id 动态选择对应 handler 执行，
+        # 而不是走固定节点序列。这是 M-MA6 的核心：图执行器根据 GraphState.active_agent_id 动态路由。
+        if node_id == "agent_dispatch_node":
+            handler_id = self._dispatch_to_agent(state)
+            if handler_id:
+                try:
+                    output = self._invoke_handler(
+                        handler_id=handler_id,
+                        node_id=node_id,
+                        state=state,
+                    )
+                except Exception as exc:
+                    return handle_execution_error(
+                        state=state,
+                        node_id=node_id,
+                        handler_id=handler_id,
+                        error=exc,
+                    )
+                # agent handler 不写 __next_node__，由 edge_map 决定下一跳
+                # 安全约束：先 pop __next_node__，再用 edge_map 决定，防止 agent handler 控图
+                payload = dict(output or state.get("payload") or {})
+                payload.pop("__next_node__", None)
+                next_node = (state.get("edge_map") or {}).get(node_id)
+                # 同步 agent_artifacts 到 state 顶层
+                agent_artifacts = dict(state.get("agent_artifacts") or {})
+                if isinstance(payload.get("agent_artifacts"), dict):
+                    agent_artifacts = {**agent_artifacts, **payload["agent_artifacts"]}
+                trace = list(state.get("trace") or [])
+                trace.append({
+                    "node_id": node_id,
+                    "handler_id": handler_id,
+                    "status": "OK",
+                    "reason_code": None,
+                    "detail": f"agent_dispatch_node → {handler_id}",
+                })
+                return {
+                    **state,
+                    "payload": payload,
+                    "trace": trace,
+                    "pending_node_id": next_node,
+                    "agent_artifacts": agent_artifacts,
+                    "active_agent_id": str(state.get("active_agent_id") or ""),
+                }
+            # handler_id 为空时降级：直接跳到下一跳（edge_map 决定）
+            next_node = (state.get("edge_map") or {}).get(node_id)
+            return {
+                **state,
+                "pending_node_id": next_node,
+                "trace": list(state.get("trace") or []) + [{
+                    "node_id": node_id,
+                    "handler_id": "",
+                    "status": "DEGRADED",
+                    "reason_code": "AGENT_DISPATCH_NO_HANDLER",
+                    "detail": f"active_agent_id={state.get('active_agent_id')!r} 无对应 handler，跳过",
+                }],
+            }
 
         # M35-D：Route Commitment Rule — 在节点执行前检查 committed_route_token
         # AIRLOCK 令牌：安全终止，不执行任何节点
@@ -398,6 +469,18 @@ class GraphExecutor:
                 pass  # 静默降级，不影响主图执行
 
         return new_state
+
+    def _dispatch_to_agent(self, state: GraphState) -> str:
+        """M-MA6：根据 active_agent_id 返回对应的 handler_id。
+
+        这是 M-MA6 的核心：图执行器根据 GraphState.active_agent_id
+        动态选择下一个执行的 handler，而不是固定节点序列。
+
+        Returns:
+            对应的 handler_id 字符串；若 active_agent_id 未注册则返回空字符串（降级）。
+        """
+        active_agent_id = str(state.get("active_agent_id") or "").strip()
+        return _AGENT_HANDLER_MAP.get(active_agent_id, "")
 
     def _invoke_handler(self, *, handler_id: str, node_id: str, state: GraphState) -> dict[str, Any]:
         handler = self._handlers.get(handler_id)
