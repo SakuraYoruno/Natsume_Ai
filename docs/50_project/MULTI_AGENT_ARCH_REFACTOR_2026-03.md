@@ -202,6 +202,7 @@
 | **P10** | 第七轮候选基线：translate_agent 受控 ReAct 化（handler 改造 + 验收 + 契约固化 + 封板）；范围与验收以 P10_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
 | **P11** | 第八轮候选基线：retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，新增 handler + allowlist 扩展 + 验收 + 契约固化 + 封板）；范围与验收以 P11_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
 | **P12** | 第九轮候选基线：retrieval_agent 直接替换为 ReAct 模式（无开关，无双模式 + 验收 + 契约固化 + 封板）；范围与验收以 P12_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
+| **P13** | 第十轮候选基线：tool_registry 工具实现升级（search_knowledge 真实接入 + retrieval_agent 专属工具扩展 + 验收 + 契约固化 + 封板）；范围与验收以 P13_SCOPE 为准。 | 规划中 |
 
 **基线说明**：
 - **第一轮正式基线**：P1～P4，已封板。P4 范围与契约以 **MULTI_AGENT_P4_SCOPE_2026-03.md** 为准。
@@ -213,7 +214,7 @@
 - **第七轮正式基线**：P10，完成并正式验收通过，已封板。P10 范围与验收以 **MULTI_AGENT_P10_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P10_SEAL_RESULT_2026-03.md** 为准。
 - **第八轮正式基线**：P11，完成并正式验收通过，已封板。P11 范围与验收以 **MULTI_AGENT_P11_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md** 为准。
 - **第九轮正式基线**：P12，完成并正式验收通过，已封板。P12 范围与验收以 **MULTI_AGENT_P12_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P12_SEAL_RESULT_2026-03.md** 为准。
-- **当前阶段**：P1～P12 已全部形成完整封板链路；P13 为下一轮独立规划，须单独规划，不得以旧阶段补丁名义混入。
+- **当前阶段**：P13 规划中（tool_registry 工具实现升级，search_knowledge 真实接入）；P13 范围与验收以 **MULTI_AGENT_P13_SCOPE_2026-03.md** 为准；P14 或更晚阶段不得以 P13 名义混入。
 
 ---
 
@@ -245,6 +246,7 @@
 - **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md**：P11 验收结论（3 条逐条结论、58 用例全通过、与 P10 兼容性说明、冻结非目标）；第八轮正式基线 = P11。
 - **MULTI_AGENT_P12_SCOPE_2026-03.md**：P12 第九轮正式基线；范围与验收（定稿）；唯一目标为 retrieval_agent 直接替换为 ReAct 模式（无开关，无双模式，P12-1），2 条验收标准已写死；已封板。
 - **MULTI_AGENT_P12_SEAL_RESULT_2026-03.md**：P12 验收结论（2 条逐条结论、85 用例全通过、与 P11 兼容性说明、冻结非目标）；第九轮正式基线 = P12。
+- **MULTI_AGENT_P13_SCOPE_2026-03.md**：P13 第十轮正式基线；范围与验收（定稿）；唯一目标为 tool_registry 工具实现升级（search_knowledge 真实接入 + retrieval_agent 专属工具扩展，P13-1），3 条验收标准已写死；规划中。
 - **MULTI_AGENT_SEAL_RESULT.md**：在完成 P1～P2 后更新为「新架构下的封测结论」。
 
 ---
