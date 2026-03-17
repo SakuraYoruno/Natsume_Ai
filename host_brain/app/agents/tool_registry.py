@@ -353,6 +353,120 @@ def _tool_analyze_code(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tool_evaluate_artifact(args: dict[str, Any]) -> dict[str, Any]:
+    """工件质量评估工具（只读）。对单个 AgentArtifact 进行结构化质量评估。"""
+    artifact = args.get("artifact") or {}
+    agent_id = str(args.get("agent_id") or artifact.get("agent_id") or "").strip()
+    if not artifact:
+        return {"error": "MISSING_ARTIFACT", "result": None}
+
+    confidence = float(artifact.get("confidence") or 0.0)
+    summary = str(artifact.get("summary") or "").strip()
+    risk_flags = list(artifact.get("risk_flags") or [])
+    artifact_ref = str(artifact.get("artifact_ref") or "").strip()
+    error = artifact.get("error")
+
+    # 评估维度
+    issues = []
+    score = confidence
+
+    if error:
+        issues.append(f"工件含错误: {error}")
+        score = 0.0
+    if not summary:
+        issues.append("摘要为空")
+        score = max(0.0, score - 0.2)
+    if not artifact_ref:
+        issues.append("artifact_ref 缺失")
+        score = max(0.0, score - 0.1)
+    if confidence < 0.3:
+        issues.append(f"置信度偏低（{confidence:.2f}）")
+    high_risk = any(
+        flag in risk_flags
+        for flag in {"SAFETY_RISK:HIGH", "SAFETY_RISK:CRITICAL"}
+    )
+    if high_risk:
+        issues.append("含高风险标记")
+        score = 0.0
+
+    quality = "HIGH" if score >= 0.7 else ("MEDIUM" if score >= 0.4 else "LOW")
+
+    result_text = (
+        f"工件评估完成（agent={agent_id}, 置信度={confidence:.2f}, "
+        f"质量={quality}, 风险标记={risk_flags}）"
+    )
+    if issues:
+        result_text += f"；问题: {'; '.join(issues)}"
+
+    return {
+        "result": result_text,
+        "agent_id": agent_id,
+        "quality": quality,
+        "score": round(score, 4),
+        "confidence": confidence,
+        "risk_flags": risk_flags,
+        "issues": issues,
+        "has_error": bool(error),
+    }
+
+
+def _tool_compare_artifacts(args: dict[str, Any]) -> dict[str, Any]:
+    """多工件比较工具（只读）。比较多个 AgentArtifact，推荐最优工件。"""
+    artifacts = args.get("artifacts") or {}
+    if not artifacts or not isinstance(artifacts, dict):
+        return {"error": "MISSING_ARTIFACTS", "result": None}
+
+    # 过滤有错误的工件
+    valid: dict[str, dict] = {
+        aid: art for aid, art in artifacts.items()
+        if not art.get("error")
+    }
+    if not valid:
+        return {
+            "result": "所有工件均含错误，无法比较",
+            "recommended": None,
+            "reason": "ALL_FAILED",
+            "scores": {},
+        }
+
+    # 计算每个工件的综合评分
+    scores: dict[str, float] = {}
+    for aid, art in valid.items():
+        confidence = float(art.get("confidence") or 0.0)
+        risk_flags = list(art.get("risk_flags") or [])
+        summary = str(art.get("summary") or "")
+        high_risk = any(
+            flag in risk_flags
+            for flag in {"SAFETY_RISK:HIGH", "SAFETY_RISK:CRITICAL"}
+        )
+        score = 0.0 if high_risk else confidence
+        # 摘要非空加分
+        if summary:
+            score = min(1.0, score + 0.05)
+        scores[aid] = round(score, 4)
+
+    best_agent = max(scores, key=lambda k: scores[k])
+    best_score = scores[best_agent]
+
+    # 构建比较摘要
+    comparison_lines = [
+        f"{aid}: score={scores[aid]:.2f}" for aid in sorted(scores)
+    ]
+    result_text = (
+        f"比较 {len(valid)} 个有效工件，推荐 {best_agent}（score={best_score:.2f}）。"
+        f" 详情: {', '.join(comparison_lines)}"
+    )
+
+    return {
+        "result": result_text,
+        "recommended": best_agent,
+        "reason": "HIGHEST_SCORE",
+        "scores": scores,
+        "valid_count": len(valid),
+        "total_count": len(artifacts),
+    }
+
+
 def _tool_translate_text(args: dict[str, Any]) -> dict[str, Any]:
     """文本翻译工具（只读）。检测源语言并返回翻译元数据；实际翻译由 LLM 完成。"""
     text = str(args.get("text") or "").strip()
@@ -509,6 +623,35 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
         has_side_effects=False,
         executor=_tool_translate_text,
     ),
+    "evaluate_artifact": ToolSpec(
+        tool_id="evaluate_artifact",
+        display_name="工件质量评估",
+        description="对单个 AgentArtifact 进行结构化质量评估，返回质量等级、评分和问题列表",
+        parameters={
+            "type": "object",
+            "properties": {
+                "artifact": {"type": "object", "description": "要评估的工件对象（含 confidence、summary、risk_flags 等字段）"},
+                "agent_id": {"type": "string", "description": "工件所属 agent ID（可选，用于标识）"},
+            },
+            "required": ["artifact"],
+        },
+        has_side_effects=False,
+        executor=_tool_evaluate_artifact,
+    ),
+    "compare_artifacts": ToolSpec(
+        tool_id="compare_artifacts",
+        display_name="多工件比较",
+        description="比较多个 AgentArtifact，基于置信度和风险标记推荐最优工件",
+        parameters={
+            "type": "object",
+            "properties": {
+                "artifacts": {"type": "object", "description": "工件字典，key 为 agent_id，value 为工件对象"},
+            },
+            "required": ["artifacts"],
+        },
+        has_side_effects=False,
+        executor=_tool_compare_artifacts,
+    ),
 }
 
 # 各 agent 可用的工具集合（只读工具）
@@ -518,7 +661,7 @@ _AGENT_TOOLS: dict[str, list[str]] = {
     "translate_agent": ["translate_text", "search_knowledge"],
     "retrieval_agent": ["search_knowledge", "search_by_keyword", "search_by_vector", "get_context"],
     "intent_agent":    ["search_knowledge", "get_context", "analyze_code"],
-    "judge_agent":     [],  # JudgeAgent 不调用工具，只裁判工件
+    "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
 }
 
 

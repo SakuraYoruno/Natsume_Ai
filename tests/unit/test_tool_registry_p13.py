@@ -481,9 +481,11 @@ class TestToolRegistryContractUnchanged:
         assert isinstance(result, bool)
 
     def test_judge_agent_has_no_tools(self):
-        """judge_agent 工具列表为空（P12 基线契约）。"""
+        """judge_agent 工具列表（P14 更新为 2 个裁判工具）。"""
         tools = get_tools_for_agent("judge_agent")
-        assert tools == []
+        tool_ids = {t.tool_id for t in tools}
+        assert "evaluate_artifact" in tool_ids
+        assert "compare_artifacts" in tool_ids
 
     def test_all_registered_tools_have_executor(self):
         """所有注册工具均有 executor（无 None）。"""

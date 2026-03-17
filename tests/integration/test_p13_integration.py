@@ -238,9 +238,11 @@ class TestP12BaselineNotDegraded:
         assert isinstance(allowed, bool)
 
     def test_judge_agent_still_no_tools(self):
-        """judge_agent 工具列表仍为空（P12 基线契约）。"""
+        """judge_agent 工具列表（P14 更新为 2 个裁判工具）。"""
         tools = get_tools_for_agent("judge_agent")
-        assert tools == []
+        tool_ids = {t.tool_id for t in tools}
+        assert "evaluate_artifact" in tool_ids
+        assert "compare_artifacts" in tool_ids
 
     def test_three_agents_coexist_no_interference(self):
         """三个 agent handler 在同一进程中交替调用不互相干扰。"""
