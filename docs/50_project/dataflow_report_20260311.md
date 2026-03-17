@@ -252,36 +252,36 @@ flowchart TD
 
 ## 四、复杂场景数据流（LangGraph 多节点）
 
+> **P15 重构说明**：所有复杂场景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT / AUTO）统一走 `PROFILE_WORKFLOW_SUPERVISED` 图，
+> 旧的 `core_reasoner_primary → scene_router_post_core → workbench_*` 长链已废弃，
+> 现在统一入口为 `supervisor_dispatch → agent_dispatch → judge_agent → chat_render_node`。
+
 ```mermaid
 flowchart TD
-    A["_unified_chat_sse_generator"] -->|"SCENE_WORK_CODE\nSCENE_WORK_TRANSLATE\nSCENE_EXEC_INTENT\nSCENE_MULTI_AGENT"| B["SceneRouter.route_sse\n→ _complex_scene_sse_generator"]
+    A["_unified_chat_sse_generator"] -->|"SCENE_WORK_CODE\nSCENE_WORK_TRANSLATE\nSCENE_EXEC_INTENT\nSCENE_TYPE_AUTO"| B["SceneRouter.route_sse\n→ _complex_scene_sse_generator"]
 
     B --> C["PRESENCE(SCENE_ROUTED)"]
     C --> D["resolve_host_llm_runtime_async\n强制云端 Gemini"]
-    D --> E["build_chat_graph_config\n构建 LangGraph 配置"]
+    D --> E["build_chat_graph_config\nexecution_profile=PROFILE_WORKFLOW_SUPERVISED"]
 
     E --> F["GraphRuntimeContract.run_graph\nLangGraph 执行引擎"]
     F --> G["GRAPH_START 事件"]
 
-    subgraph LANGGRAPH["LangGraph 节点执行（按场景）"]
+    subgraph LANGGRAPH["LangGraph 节点执行（PROFILE_WORKFLOW_SUPERVISED）"]
         direction LR
-        N1["core_reasoner_primary\ngemini-2.5-pro\n12s 超时"]
-        N2["scene_router_post_core\n场景后路由"]
-        N3_CODE["workbench_code_assist\ngemini-2.5-pro\n10s 超时"]
-        N3_TRANS["workbench_translate\ngemini-2.5-pro\n10s 超时"]
-        N3_EXEC["planner_constraints\ngemini-2.5-pro\n8s 超时"]
-        N3_AGENT["supervisor_dispatch_node\n→ agent_dispatch_node\n多智能体路由"]
-        N4["consistency_verifier\ngemini-2.5-flash-lite\n7s 超时"]
-        N5["renderer_ja_c_style\ngemini-2.5-flash\n9s 超时"]
+        SD["supervisor_dispatch\nhandler: supervisor_dispatch_handler\n规则路由 or LLM 提案"]
+        AD["agent_dispatch_node\ngraph_executor 直接分派\n根据 active_agent_id 动态路由"]
+        AG["Agent Handler\nchat/code/translate/intent/retrieval"]
+        JD["judge_agent_node\nhandler: judge_agent\nneed_judge=true 时执行"]
+        CR["chat_render_node\n最终渲染输出"]
     end
 
-    N1 --> N2
-    N2 -->|"WORK_CODE"| N3_CODE
-    N2 -->|"WORK_TRANSLATE"| N3_TRANS
-    N2 -->|"EXEC_INTENT"| N3_EXEC
-    N2 -->|"MULTI_AGENT"| N3_AGENT
-    N3_CODE & N3_TRANS & N3_EXEC & N3_AGENT --> N4
-    N4 --> N5
+    SD --> AD
+    AD -->|"need_judge=true"| JD
+    AD -->|"need_judge=false（快路径）"| CR
+    AD --> AG
+    AG --> AD
+    JD --> CR
 
     F --> LANGGRAPH
     LANGGRAPH --> H["GRAPH_DONE 事件"]
@@ -294,22 +294,24 @@ flowchart TD
 
     I1 & I2 & I3 & I4 --> J["COMMIT(APPROVE)\n含完整 audit_refs"]
 
-    style N1 fill:#339af0,color:#fff
-    style N3_CODE fill:#51cf66,color:#fff
-    style N3_TRANS fill:#51cf66,color:#fff
-    style N3_EXEC fill:#51cf66,color:#fff
-    style N3_AGENT fill:#cc5de8,color:#fff
+    style SD fill:#339af0,color:#fff
+    style AD fill:#cc5de8,color:#fff
+    style AG fill:#51cf66,color:#fff
+    style JD fill:#ffd43b,color:#333
+    style CR fill:#51cf66,color:#fff
 ```
 
-### 4.1 场景节点序列
+### 4.1 场景节点序列（P15 重构后）
 
-| 场景 | 节点序列 | 总预算 |
-|------|---------|--------|
-| SCENE_CHAT | `chat_direct_ja` | 10-15s |
-| SCENE_WORK_CODE | `core_reasoner_primary → workbench_code_assist → consistency_verifier → renderer_ja_c_style` | 90-240s |
-| SCENE_WORK_TRANSLATE | `core_reasoner_primary → workbench_translate → consistency_verifier → renderer_ja_c_style` | 90-240s |
-| SCENE_EXEC_INTENT | `core_reasoner_primary → planner_constraints → tool_planner → safety_verifier → consistency_verifier → renderer_ja_c_style` | 90-240s |
-| SCENE_MULTI_AGENT | `core_reasoner_primary → supervisor_dispatch_node → agent_dispatch_node → [judge_agent_node] → chat_render_node` | 30-120s |
+| 场景 | execution_profile | 节点序列 | 总预算 |
+|------|------------------|---------|--------|
+| SCENE_CHAT | `PROFILE_CHAT_FAST` | `chat_direct_ja → chat_render_node` | 8-12s |
+| SCENE_WORK_CODE | `PROFILE_WORKFLOW_SUPERVISED` | `supervisor_dispatch → agent_dispatch → [judge_agent] → chat_render_node` | 30-240s |
+| SCENE_WORK_TRANSLATE | `PROFILE_WORKFLOW_SUPERVISED` | `supervisor_dispatch → agent_dispatch → [judge_agent] → chat_render_node` | 30-240s |
+| SCENE_EXEC_INTENT | `PROFILE_INTENT_EXEC` | `intent_agent_entry → safety_verifier → judge_agent → chat_render_node` | 30-240s |
+| SCENE_TYPE_AUTO | `PROFILE_WORKFLOW_SUPERVISED` | `supervisor_dispatch → agent_dispatch → [judge_agent] → chat_render_node` | 30-240s |
+
+> **注**：`workbench_code_assist` / `workbench_translate` 仍注册为 model 节点，供 agent handler 内部通过 `invoke_model_node` 调用，不再作为主图边序列节点。
 
 ---
 
@@ -380,10 +382,10 @@ flowchart TD
     A["_unified_chat_sse_generator\n鉴权通过后"] --> B["pre_intent_classifier\n关键词预分类"]
 
     B -->|"截图/屏幕/界面关键词"| C["SCENE_VISION_UI"]
-    B -->|"代码/编程关键词"| D["SCENE_WORK_CODE"]
-    B -->|"翻译关键词"| E["SCENE_WORK_TRANSLATE"]
-    B -->|"执行/安装/配置关键词"| F["SCENE_EXEC_INTENT"]
-    B -->|"其他（含娱乐白名单）"| G["SCENE_CHAT"]
+    B -->|"代码/编程关键词\n（娱乐关键词不触发）"| D["SCENE_WORK_CODE"]
+    B -->|"翻译关键词\n（无娱乐关键词时）"| E["SCENE_WORK_TRANSLATE"]
+    B -->|"执行/安装/配置关键词\n（无娱乐关键词时）"| F["SCENE_EXEC_INTENT"]
+    B -->|"娱乐关键词命中\n或其他"| G["SCENE_CHAT"]
 
     C & D & E & F & G --> H["scene_type 合法性校验\nALLOWED_EXPLICIT_SCENE_TYPES"]
     H -->|"非法 scene_type"| H1["降级为 SCENE_CHAT"]
@@ -413,7 +415,19 @@ flowchart TD
     style M fill:#339af0,color:#fff
 ```
 
-### 6.1 路由决策优先级
+### 6.1 pre_intent_classifier 路由优先级
+
+```
+优先级（VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT）：
+1. 截图/屏幕/界面关键词                → SCENE_VISION_UI（最高优先级）
+2. 代码/编程关键词                     → SCENE_WORK_CODE（娱乐关键词不触发代码路由）
+3. 娱乐关键词命中（动漫/音乐/游戏等）  → 强制 SCENE_CHAT（修复问题A：防止"安装这首歌"误判为 EXEC_INTENT）
+4. 翻译关键词（无娱乐关键词时）        → SCENE_WORK_TRANSLATE
+5. 执行/安装/配置关键词（无娱乐关键词时）→ SCENE_EXEC_INTENT
+6. 其他（默认）                        → SCENE_CHAT
+```
+
+### 6.2 LLM 路由矩阵（resolve_host_llm_runtime）
 
 ```
 1. HOST_CHAT_FORCE_CLOUD=true          → 强制云端（最高优先级）
@@ -522,35 +536,36 @@ flowchart TD
     style E fill:#51cf66,color:#fff
 ```
 
-### 7.4 LangGraph 图配置（build_chat_graph_config）
+### 7.4 LangGraph 图配置（build_chat_graph_config / _build_graph_config_by_profile）
+
+> **P15 重构说明**：`build_chat_graph_config` 现在通过 `execution_profile` 选择图结构，不再按 `scene_type` 直接映射节点链路。
 
 ```mermaid
 flowchart TD
-    A["build_chat_graph_config\ngraph_config_builder.py"] --> B{场景类型}
+    A["build_chat_graph_config\ngraph_config_builder.py"] --> B["resolve_execution_profile\n按 scene_type 解析"]
 
-    B -->|"SCENE_CHAT（快速路径）"| C["单节点图\nchat_direct_ja\n超时: max(chat_timeout, 10000ms)"]
+    B -->|"SCENE_CHAT\n→ PROFILE_CHAT_FAST"| C["Chat 快速图\nchat_direct_ja → chat_render_node\n超时: max(chat_timeout, 10000ms)\nmax_output_tokens=200"]
 
-    B -->|"AUTO（场景路由器）"| D["scene_router_entry\n→ 动态分流"]
-    D --> D1["chat_direct_ja（CHAT）"]
-    D --> D2["core_reasoner_primary（复杂）"]
-    D2 --> D3["scene_router_post_core"]
-    D3 --> D4["workbench_*/planner_constraints"]
-    D4 --> D5["consistency_verifier"]
-    D5 --> D6["renderer_ja_c_style"]
+    B -->|"SCENE_WORK_CODE / WORK_TRANSLATE / AUTO\n→ PROFILE_WORKFLOW_SUPERVISED"| D["Supervised 图\nsupervisor_dispatch → agent_dispatch_node\n→ judge_agent_node → chat_render_node"]
+    D --> D1["agent_dispatch_allowlist\n[chat/code/translate/intent/judge/retrieval]"]
+    D --> D2["workbench_code_assist / workbench_translate\n注册为 model 节点（供 handler 内部调用）"]
 
-    B -->|"SCENE_WORK_CODE"| E["core_reasoner_primary\n→ workbench_code_assist\n→ consistency_verifier\n→ renderer_ja_c_style"]
-
-    B -->|"SCENE_WORK_TRANSLATE"| F["core_reasoner_primary\n→ workbench_translate\n→ consistency_verifier\n→ renderer_ja_c_style"]
-
-    B -->|"SCENE_EXEC_INTENT"| G["core_reasoner_primary\n→ planner_constraints\n→ tool_planner\n→ safety_verifier\n→ consistency_verifier\n→ renderer_ja_c_style"]
+    B -->|"SCENE_EXEC_INTENT\n→ PROFILE_INTENT_EXEC"| E["Intent 图\nintent_agent_entry → safety_verifier\n→ judge_agent_node → chat_render_node"]
 
     subgraph NODE_MODELS["节点模型分配"]
-        M1["chat_direct_ja → 本地 qwen3:8b"]
+        M1["chat_direct_ja → 本地 qwen3:8b（PROFILE_CHAT_FAST）"]
         M2["core_reasoner_primary → gemini-2.5-pro"]
         M3["core_reasoner_secondary → gemini-2.5-flash（fallback）"]
-        M4["workbench_* → gemini-2.5-pro"]
+        M4["workbench_* → gemini-2.5-pro（model 节点，不入主图边序列）"]
         M5["consistency_verifier → gemini-2.5-flash-lite"]
-        M6["renderer_ja_c_style → gemini-2.5-flash"]
+        M6["renderer_ja_c_style / chat_render_node → gemini-2.5-flash"]
+        M7["safety_verifier → gemini-2.5-flash-lite"]
+    end
+
+    subgraph POLICY_TIMEOUT["Policy Timeout 预算"]
+        PT1["PROFILE_CHAT_FAST → 8-12s"]
+        PT2["PROFILE_WORKFLOW_SUPERVISED → 30-240s"]
+        PT3["PROFILE_INTENT_EXEC → 30-240s"]
     end
 ```
 
@@ -870,6 +885,7 @@ sequenceDiagram
 
 ---
 
-*报告最后更新：2026-03-17 18:10 | 生成模型：claude-4.6-sonnet*
+*报告最后更新：2026-03-17 18:21 | 生成模型：claude-4.6-sonnet*
 *基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块，含 P16 多智能体技术债清理*
+*P15 重构后数据流图已全量更新：图4/图6/图7.4 对齐 PROFILE_WORKFLOW_SUPERVISED 新链路*
 
