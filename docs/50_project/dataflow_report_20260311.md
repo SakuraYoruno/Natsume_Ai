@@ -1,6 +1,6 @@
 # Natsume AI 系统数据流全景报告
 
-> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 17:58（P16 多智能体技术债清理）
+> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 18:10（P16 数据流图更新）
 > 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排
 > 报告模型：claude-4.6-sonnet
 > 本次修复：问题 A/B/C/D/F 已按优先级处理（见第十三节）；严格代码审计已完成（见第十六节）
@@ -21,11 +21,7 @@
 10. [Bond 关系层数据流](#十bond-关系层数据流)
 11. [Edge 端各功能数据流](#十一edge-端各功能数据流)
 12. [双端通信打通状态评估](#十二双端通信打通状态评估)
-13. [关键问题与修复状态](#十三关键问题与修复状态)
-14. [本次修复变更摘要（2026-03-11 17:28）](#十四本次修复变更摘要2026-03-11-1728)
-15. [选项一/二/三 实施记录（2026-03-11 17:52）](#十五选项一二三-实施记录2026-03-11-1752)
-16. [严格代码审计报告（2026-03-11 18:12）](#十六严格代码审计报告2026-03-11-1812)
-17. [P16 多智能体技术债清理（2026-03-17）](#十七p16-多智能体技术债清理2026-03-17)
+13. [多智能体分派数据流（P15/P16）](#十三多智能体分派数据流p15p16)
 
 ---
 
@@ -258,7 +254,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["_unified_chat_sse_generator"] -->|"SCENE_WORK_CODE\nSCENE_WORK_TRANSLATE\nSCENE_EXEC_INTENT"| B["SceneRouter.route_sse\n→ _complex_scene_sse_generator"]
+    A["_unified_chat_sse_generator"] -->|"SCENE_WORK_CODE\nSCENE_WORK_TRANSLATE\nSCENE_EXEC_INTENT\nSCENE_MULTI_AGENT"| B["SceneRouter.route_sse\n→ _complex_scene_sse_generator"]
 
     B --> C["PRESENCE(SCENE_ROUTED)"]
     C --> D["resolve_host_llm_runtime_async\n强制云端 Gemini"]
@@ -274,6 +270,7 @@ flowchart TD
         N3_CODE["workbench_code_assist\ngemini-2.5-pro\n10s 超时"]
         N3_TRANS["workbench_translate\ngemini-2.5-pro\n10s 超时"]
         N3_EXEC["planner_constraints\ngemini-2.5-pro\n8s 超时"]
+        N3_AGENT["supervisor_dispatch_node\n→ agent_dispatch_node\n多智能体路由"]
         N4["consistency_verifier\ngemini-2.5-flash-lite\n7s 超时"]
         N5["renderer_ja_c_style\ngemini-2.5-flash\n9s 超时"]
     end
@@ -282,7 +279,8 @@ flowchart TD
     N2 -->|"WORK_CODE"| N3_CODE
     N2 -->|"WORK_TRANSLATE"| N3_TRANS
     N2 -->|"EXEC_INTENT"| N3_EXEC
-    N3_CODE & N3_TRANS & N3_EXEC --> N4
+    N2 -->|"MULTI_AGENT"| N3_AGENT
+    N3_CODE & N3_TRANS & N3_EXEC & N3_AGENT --> N4
     N4 --> N5
 
     F --> LANGGRAPH
@@ -292,7 +290,7 @@ flowchart TD
     I --> I1["Airlock 检疫"]
     I --> I2["情节记忆写入"]
     I --> I3["Bond 更新"]
-    I --> I4["VTS 表情驱动\n（已修复 #7）"]
+    I --> I4["VTS 表情驱动"]
 
     I1 & I2 & I3 & I4 --> J["COMMIT(APPROVE)\n含完整 audit_refs"]
 
@@ -300,6 +298,7 @@ flowchart TD
     style N3_CODE fill:#51cf66,color:#fff
     style N3_TRANS fill:#51cf66,color:#fff
     style N3_EXEC fill:#51cf66,color:#fff
+    style N3_AGENT fill:#cc5de8,color:#fff
 ```
 
 ### 4.1 场景节点序列
@@ -310,6 +309,7 @@ flowchart TD
 | SCENE_WORK_CODE | `core_reasoner_primary → workbench_code_assist → consistency_verifier → renderer_ja_c_style` | 90-240s |
 | SCENE_WORK_TRANSLATE | `core_reasoner_primary → workbench_translate → consistency_verifier → renderer_ja_c_style` | 90-240s |
 | SCENE_EXEC_INTENT | `core_reasoner_primary → planner_constraints → tool_planner → safety_verifier → consistency_verifier → renderer_ja_c_style` | 90-240s |
+| SCENE_MULTI_AGENT | `core_reasoner_primary → supervisor_dispatch_node → agent_dispatch_node → [judge_agent_node] → chat_render_node` | 30-120s |
 
 ---
 
@@ -470,7 +470,59 @@ flowchart LR
 > `run_as_sse_adapter()` 已具备前置节点执行、SSE 事件观测、后置节点收尾，不再是纯透传。
 > 对外 SSE 协议保持兼容，真实路由仍委托 `_unified_chat_sse_generator`。
 
-### 7.2 LangGraph 图配置（build_chat_graph_config）
+### 7.2 graph_executor agent_dispatch_node 数据流（P15/P16）
+
+```mermaid
+flowchart TD
+    A["supervisor_dispatch_node\nsupervisor_dispatch_handler\n写 payload['active_agent_id']\n写 supervisor_dispatch.need_judge"] --> B["graph_executor._run_single_step\nnode_id == 'agent_dispatch_node'"]
+
+    B --> C["P16 active_agent_id 同步\npayload_active = payload['active_agent_id']\nresolved = payload_active or state_active\nstate = {**state, active_agent_id: resolved}"]
+
+    C --> D["allowlist 校验\nfrom node_bindings['agent_dispatch_allowlist']\n6 个 agent: chat/code/translate/intent/judge/retrieval"]
+    D -->|"不在 allowlist"| D1["DEGRADED\nAGENT_NOT_IN_ALLOWLIST\n→ edge_map 下一跳"]
+    D -->|"通过"| E["_dispatch_to_agent(state)\n_AGENT_HANDLER_MAP[active_agent_id]"]
+
+    E -->|"无 handler"| E1["DEGRADED\nAGENT_DISPATCH_NO_HANDLER\n→ edge_map 下一跳"]
+    E -->|"有 handler"| F["_invoke_handler(handler_id)"]
+
+    F --> G["读 supervisor_dispatch.need_judge"]
+    G -->|"need_judge=true"| H["next_node = edge_map['agent_dispatch_node']\n→ judge_agent_node"]
+    G -->|"need_judge=false"| I["next_node = CHAT_RENDER_NODE_ID\n快路径：跳过 judge"]
+
+    H & I --> J["返回新 state\n{payload, trace, pending_node_id,\nagent_artifacts, active_agent_id}"]
+
+    style D1 fill:#ff6b6b,color:#fff
+    style E1 fill:#ff6b6b,color:#fff
+    style I fill:#51cf66,color:#fff
+    style J fill:#51cf66,color:#fff
+```
+
+### 7.3 supervisor_dispatch_handler 决策流（P15）
+
+```mermaid
+flowchart TD
+    A["supervisor_dispatch_handler\n{scene_type, user_input}"] --> B["读取 SUPERVISOR_MODE 环境变量"]
+
+    B -->|"SUPERVISOR_MODE=rule（默认）"| C["规则路由\n_rule_based_dispatch(scene_type)"]
+    B -->|"SUPERVISOR_MODE=llm"| D["LLM 提案模式\n_llm_based_dispatch(user_input, gateway)"]
+
+    C --> C1["scene_type → agent_id 映射\nWORK_CODE → code_agent\nWORK_TRANSLATE → translate_agent\nEXEC_INTENT → intent_agent\n其他 → chat_agent"]
+    C1 --> C2["supervisor_dispatch\n{supervisor_mode: 'rule'\nsupervisor_decision_source: 'rule'\nneed_judge: false/true}"]
+
+    D --> D1{"gateway 可用？"}
+    D1 -->|"否"| D2["回退 rule 模式\nsupervisor_decision_source: 'llm_fallback_rule'"]
+    D1 -->|"是"| D3["gateway.complete(prompt)\n→ JSON 解析\n{selected_agent, reason, risk_mode, need_judge}"]
+    D3 -->|"解析失败"| D2
+    D3 -->|"解析成功"| D4["supervisor_dispatch\n{supervisor_mode: 'llm'\nsupervisor_decision_source: 'llm'\nneed_judge: true/false}"]
+
+    C2 & D2 & D4 --> E["写入 payload['active_agent_id']\n写入 payload['supervisor_dispatch']\n返回 result"]
+
+    style D2 fill:#ffd43b,color:#333
+    style D4 fill:#51cf66,color:#fff
+    style E fill:#51cf66,color:#fff
+```
+
+### 7.4 LangGraph 图配置（build_chat_graph_config）
 
 ```mermaid
 flowchart TD
@@ -767,41 +819,54 @@ flowchart TD
 
 ---
 
-## 十三、关键问题与修复状态
+## 十三、多智能体分派数据流（P15/P16）
 
-### 13.1 已修复问题（截至 2026-03-11 14:10）
+### 13.1 _AGENT_HANDLER_MAP 与 AGENT_ALLOWLIST 对齐状态（P16 后）
 
-| # | 问题描述 | 严重度 | 修复状态 |
-|---|---------|--------|---------|
-| 1 | 同步 HTTP 健康探测阻塞事件循环（最多 3s） | 🔴 高危 | ✅ 已修复：`asyncio.to_thread` 包装 |
-| 2 | `intent_draft.action` 固定为 `narrative_only`，EXEC_INTENT 绕过情感门控 | 🟠 中高危 | ✅ 已修复：动态 `_action_map` 映射 |
-| 3 | `scene_type` 可被客户端强制覆盖，无 Governor 校验 | 🟠 中高危 | ✅ 已修复：`ALLOWED_EXPLICIT_SCENE_TYPES` 白名单 |
-| 4 | `MainChain` 是死代码，与实际路由完全脱节 | 🟠 中高危 | ✅ 已修复：迁移为 `run_as_sse_adapter` 适配层 |
-| 5 | `BondEmotionalTexture.update()` 从未被调用 | 🟠 中高危 | ✅ 已修复：`apply_event` 中激活 |
-| 6 | VAD 情感模型（EmotionVector/EmotionTimeline）完全孤立 | 🟡 中危 | ✅ 已修复：接入 `normalize_chat_emotion_context` |
-| 7 | VTS 驱动仅在 SCENE_CHAT，复杂场景无 VTS 触发 | 🟡 中危 | ✅ 已修复：`chat_handler_complex.py` 后处理接入 |
-| 8 | SCENE_CHAT 流式路径无 Bond 更新 | 🟡 中危 | ✅ 已修复：`_run_bond()` 并行协程 |
-| 9 | `POST /bond/event` 无情感参数 | 🟡 中危 | ✅ 已修复：新增 `emotion_tag`/`emotion_intensity` |
-| 10 | Bond 状态进程重启丢失（内存存储） | 🟡 中危 | ✅ 已修复：`SqliteBondClient` + 环境变量切换 |
-| 11 | `SCENE_VISION_UI` 静默走 `chat_direct` 节点 | 🟡 中危 | ✅ 已修复：显式路由到 `_vision_ui_sse_generator`（支持 consent 门控与视觉审计） |
-| 12 | 复杂场景 COMMIT 缺少 `vts` 字段 | 🟢 低危 | ✅ 已修复：补全 `audit_refs.vts` |
+| agent_id | `_AGENT_HANDLER_MAP` | `AGENT_ALLOWLIST` | handler 文件 | need_judge | 说明 |
+|----------|---------------------|-------------------|-------------|-----------|------|
+| `chat_agent` | ✅ | ✅ | `chat_agent_handler.py` | false | 快路径，跳过 judge |
+| `code_agent` | ✅ | ✅ | `code_agent_handler.py` | true | P9 新增 |
+| `translate_agent` | ✅ | ✅ | `translate_agent_handler.py` | true | P10 新增 |
+| `intent_agent` | ✅ | ✅ | `intent_agent_handler.py` | true | 高风险 |
+| `judge_agent` | ✅ | ✅ | `judge_agent_handler.py` | — | 裁判节点 |
+| `retrieval_agent` | ✅ | ✅ | `retrieval_agent_handler.py` | false | P11 新增，P16 补注册 |
+| `safety_agent` | ❌ | ❌ | 无 | — | 待 P17+ 补充 handler |
+| `renderer_agent` | ❌ | ❌ | 无 | — | 待 P17+ 补充 handler |
 
-### 13.2 本次修复的架构问题（2026-03-11 17:28）
+### 13.2 多智能体完整链路时序
 
-| # | 问题描述 | 严重度 | 修复方式 | 修复文件 |
-|---|---------|--------|---------|--------|
-| **B（P1）** | `POST /v1/edge/events` 接收到的 Edge 事件无情感处理、无 Bond 更新、无 VTS 驱动 | 🟡 中危 | ✅ 已修复：情感事件（ASR_FINAL/EMOTION_DETECTED 等）触发 Bond 更新 + VTS 驱动（fire-and-forget） | `system_handler.py` |
-| **A（P2）** | `pre_intent_classifier` 误判：娱乐+EXEC_INTENT 关键词同时命中时（如"帮我安装一下这首歌"）误判为 EXEC_INTENT | 🟡 中危 | ✅ 已修复：娱乐关键词优先级高于 EXEC_INTENT，同时命中时归为 SCENE_CHAT | `graph_config_builder.py` |
-| **C（P3）** | Gaming Edge 路径无 VTS/Bond/Episodic，设计意图不明确 | 🟢 低危 | ✅ 已修复：补充最小路径设计说明注释，明确有意跳过的功能及原因 | `chat_handler_edge.py` |
-| **D（P4）** | `input_routes.py` 调用 `run_main_chain_from_input` 但该函数不存在，ASR/微信输入上报无法触发完整 chat 流程 | 🟡 中危 | ✅ 已修复：在 `main_chain.py` 中实现 `run_main_chain_from_input`，构建 ChatRequest 并触发完整链路 | `graph/main_chain.py` |
-| **F（P5）** | Bond 积分阈值硬编码（STRANGER=0, SOULMATE=300），无法运行时调整 | 🟢 低危 | ✅ 已修复：`get_bond_stage_engine()` 支持通过 `HOST_BOND_STAGE_THRESHOLDS` / `HOST_BOND_SCORE_MAP` 环境变量覆盖 | `dependencies.py` |
+```mermaid
+sequenceDiagram
+    participant SR as SceneRouter
+    participant SD as supervisor_dispatch_node
+    participant GE as graph_executor
+    participant AD as agent_dispatch_node
+    participant AG as Agent Handler
+    participant JD as judge_agent_node
+    participant CR as chat_render_node
 
-### 13.3 仍存在的架构问题（已全部解决，见第十五节）
+    SR->>SD: state {scene_type, user_input}
+    SD->>SD: SUPERVISOR_MODE=rule → 规则路由
+    SD->>SD: SUPERVISOR_MODE=llm → LLM 提案（失败回退 rule）
+    SD-->>GE: payload['active_agent_id'] = 'code_agent'
+    SD-->>GE: payload['supervisor_dispatch'] = {need_judge: true, ...}
 
-| # | 问题描述 | 严重度 | 状态 |
-|---|---------|--------|------|
-| D-残留 | `RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个模块有工厂函数但无调用方 | 🟡 中危 | ✅ 已解决（选项二，2026-03-11 17:40） |
-| E | `SCENE_VISION_UI` 仅“路径放行”，缺少联调证据 | 🟡 中危 | ✅ 已解决（2026-03-11）：双端联调证据已补齐（含 consent true/false 分支） |
+    GE->>AD: node_id == 'agent_dispatch_node'
+    AD->>AD: P16 同步 active_agent_id 到 state
+    AD->>AD: allowlist 校验（6 个 agent）
+    AD->>AG: _dispatch_to_agent → _invoke_handler('code_agent_handler')
+    AG-->>AD: agent_artifacts
+
+    alt need_judge=true
+        AD->>JD: next_node = judge_agent_node
+        JD-->>CR: 裁判通过后 → chat_render_node
+    else need_judge=false（快路径）
+        AD->>CR: next_node = CHAT_RENDER_NODE_ID（跳过 judge）
+    end
+
+    CR-->>SR: GRAPH_DONE
+```
 
 ---
 
@@ -827,591 +892,10 @@ flowchart TD
 | `HOST_CHAT_GRAY_PERCENT` | `100` | 灰度发布百分比（0-100） |
 | `GEMINI_API_KEY` | — | Gemini API 密钥 |
 | `OPENAI_API_KEY` | — | OpenAI API 密钥 |
+| `SUPERVISOR_MODE` | `rule` | 多智能体分派模式（rule / llm） |
 
 ---
 
-*报告初版生成时间：2026-03-11 17:20 | 最后更新：2026-03-11 17:52 | 生成模型：claude-4.6-sonnet*
-*基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块*
+*报告最后更新：2026-03-17 18:10 | 生成模型：claude-4.6-sonnet*
+*基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块，含 P16 多智能体技术债清理*
 
----
-
-## 十四、本次修复变更摘要（2026-03-11 17:28）
-
-### 修复文件清单
-
-| 文件 | 修改内容 | 问题编号 |
-|------|---------|--------|
-| `host_brain/app/system_handler.py` | `receive_edge_events_response` 新增情感事件后处理：Bond 更新 + VTS 驱动（fire-and-forget） | B |
-| `host_brain/app/graph_config_builder.py` | `pre_intent_classifier` 修复娱乐关键词优先级，防止误判为 EXEC_INTENT | A |
-| `host_brain/app/chat_handler_edge.py` | `_gaming_edge_chat_sse_generator` 补充最小路径设计说明注释 | C |
-| `host_brain/app/graph/main_chain.py` | 新增 `run_main_chain_from_input` 函数，打通 ASR/微信输入上报→完整 chat 流程 | D |
-| `host_brain/app/dependencies.py` | `get_bond_stage_engine` 支持通过环境变量覆盖积分阈值和积分映射 | F |
-
-### 双端通信打通状态（修复后）
-
-```
-修复前：
-  Edge → Host 事件上报（/v1/edge/events）：仅写 ledger 日志，无情感处理
-  Edge → Host 输入上报（/v1/host/input）：接口存在，但 run_main_chain_from_input 未实现
-
-修复后：
-  Edge → Host 事件上报（/v1/edge/events）：✅ 情感事件触发 Bond 更新 + VTS 驱动
-  Edge → Host 输入上报（/v1/host/input）：✅ run_main_chain_from_input 已实现，触发完整 chat 流程
-
-仍存在的限制（有意设计）：
-  Gaming Edge 路径：最小路径设计，无 VTS/Bond/Episodic（已补充设计说明）
-
-后续已解决（2026-03-11 17:52）：
-  SCENE_VISION_UI：✅ 已加入白名单，视觉链路完整接入（见第十五节）
-  孤立模块：✅ RoutingMatrix/ContextPackBuilder/MemoryGuard/StateArbiter 全部接入（见第十五节）
-```
-
----
-
-## 十五、选项一/二/三 实施记录（2026-03-11 17:52）
-
-### 15.1 选项一：SCENE_VISION_UI 视觉链路完整接入
-
-**背景**：`chat_handler_vision.py` 已有完整的 `_vision_ui_sse_generator` 实现（Gemini Vision 多模态分析链路），但 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单中不含 `SCENE_VISION_UI`，导致客户端无法显式指定该场景。
-
-**修复内容**：
-- `graph_config_builder.py`：将 `SCENE_VISION_UI` 加入 `ALLOWED_EXPLICIT_SCENE_TYPES` 白名单
-- 注释更新：说明 VISION_UI 场景需要 `image_upload_consent=true` 才允许上传图片
-
-**视觉链路数据流**：
-
-```mermaid
-flowchart TD
-    A["客户端 POST /v1/chat
-{scene_type: SCENE_VISION_UI,
-vision_context: {...}}"] --> B["chat_handler._unified_chat_sse_generator"]
-    B --> C["SceneRouter.route_sse()
-SCENE_VISION_UI 分支"]
-    C --> D["chat_handler_vision._vision_ui_sse_generator"]
-    D --> E["vision_context_parser
-解析 base64/url/text"]
-    E --> F{"check_image_upload_allowed()
-REQUIRE_CONSENT 策略"}
-    F -->|"consent=true"| G["Airlock image_filter
-元数据检查 + 敏感词扫描"]
-    F -->|"consent=false"| H["降级：纯文字模式"]
-    G --> I["Gemini Vision 多模态分析"]
-    H --> I
-    I --> J["vision_renderer
-可选 ActionPlan 生成"]
-    J --> K["COMMIT(APPROVE)
-audit_refs.vision_input"]
-```
-
-**支持的输入模式**：
-
-| 模式 | 条件 | 说明 |
-|------|------|------|
-| `image` | `vision_context.image_base64` 或 `image_url` 非空 + `image_upload_consent=true` | 真实多模态分析 |
-| `text_description` | `vision_context.screen_description` 等文字字段非空 | 降级文字模式 |
-| `text_only` | 无 vision_context | 最低优先级，纯文字分析 |
-
----
-
-### 15.2 选项二：孤立模块接入实际路由
-
-**背景**：`RoutingMatrix`、`ContextPackBuilder`、`MemoryGuard`、`StateArbiter` 四个模块有完整实现和工厂函数，但未接入实际路由，形成孤立代码。
-
-#### 15.2.1 RoutingMatrix 接入
-
-**接入点**：`graph_config_builder._resolve_host_llm_runtime_core` 返回值
-
-**修复内容**：在 `_resolve_host_llm_runtime_core` 中调用 `RoutingMatrix.select_with_fallback()` 后，不仅写入 `routing_matrix_decision`，还将 `selected_model` 映射回真实 `provider_name/model_id` 选择（`cloud` / `host_8b`），并保留 8B 健康探测与策略门控作为 fallback。结果透传至 `COMMIT.audit_refs.routing_matrix_decision`，可观测。
-
-**场景映射**：
-
-| SCENE_TYPE | TaskType | 说明 |
-|-----------|---------|------|
-| SCENE_CHAT | CHAT | 普通聊天 |
-| SCENE_EXEC_INTENT | REASONING | 执行/规划场景优先云端推理 |
-| SCENE_WORK_CODE | CODE | 代码辅助 |
-| SCENE_WORK_TRANSLATE | TRANSLATE | 翻译任务 |
-| SCENE_VISION_UI | CHAT | 视觉场景复用 CHAT 路由 |
-
-**降级策略**：
-- RoutingMatrix 调用失败时返回 `{"status": "DEGRADED", "reason": "..."}`，保持原有运行时选择
-- 当 RoutingMatrix 选择 `host_8b` 但 8B 不可用（策略禁用/灰度排除/健康检查失败）时，不强制切换，保留原有 cloud 路径，并在 `routing_matrix_decision.not_applied_reason` 记录原因
-
-#### 15.2.2 ContextPackBuilder 接入
-
-**接入点**：`chat_stream_handler._sse_event_generator`，在 `_build_stream_chat_prompt` 调用之前
-
-**修复内容**：从 `retrieval_evidence_items` 中提取各路召回文本，调用 `ContextPackBuilder.build()` 执行 token 预算控制；在 `HOST_CONTEXT_PACK_ACTIVE=true`（默认）时，将截断结果回写到 `retrieval_evidence_items`，并把摘要附加到 `COMMIT.audit_refs.context_pack_builder`。
-
-**数据流**：
-```
-_run_retrieval() → retrieval_evidence_items
-  → [新增] ContextPackBuilder.build(recall_results, task_type="chat")
-    → token 预算截断（world_canon≤800 / style_canon≤400 / episodic_vector≤600 等）
-    → 语义冲突检测（world_canon vs episodic_vector）
-    → 全局截断（总量超 2700 tokens 时按优先级丢弃）
-  → [新增] HOST_CONTEXT_PACK_ACTIVE=true 且有有效截断结果时，回写 retrieval_evidence_items
-  → context_pack_builder_summary 附加到 COMMIT.audit_refs
-  → _build_stream_chat_prompt()（使用回写后的 retrieval_evidence_items）
-```
-
-**降级策略**：ContextPackBuilder 调用失败或无有效截断结果时返回 `{"status": "DEGRADED"}` / `{"status": "SKIPPED"}`，不影响主链路，prompt 构建继续使用原始 `retrieval_evidence_items`。
-
-#### 15.2.3 MemoryGuard 接入
-
-**接入点**：`observability_persist.persist_chat_episodic_memory`
-
-**修复内容**：在写入 EpisodicStore 前，调用 `MemoryGuard.check_episodic_write()` 进行宪法校验。校验失败时返回 `SKIPPED` 状态（不抛出异常），降级策略保证主链路不中断。同时调用 `aggregate_emotion_tags()` 进行 session 粒度情绪聚合。
-
-**校验规则**：
-- 对话轮次 ≥ 2（从 `emotion_context.turn_count` 读取，默认 2）
-- 包含情感标签 OR 事实标签 OR 偏好标签（至少一类）
-
-**数据流**：
-```
-persist_chat_episodic_memory()
-  → [新增] MemoryGuard.check_episodic_write(EpisodicRecord)
-    → 校验通过 → 继续写入 EpisodicStore
-    → 校验失败 → 返回 {status: "SKIPPED", reason_code: "MEMORY_GUARD_REJECTED:..."}
-  → [新增] MemoryGuard.aggregate_emotion_tags(session_id, emotion_tags)
-  → episodic_store.write_memory()（原有逻辑）
-```
-
-#### 15.2.4 StateArbiter 接入
-
-**接入点**：
-- `http_hooks.runtime_lifespan`（应用启动时注册状态源）
-- `chat_stream_handler._sse_event_generator`（流式主链查询事实）
-
-**修复内容**：
-- 启动时注册三个状态源（WorldCanonStore、StyleCanonStore、EpisodicStore），使用适配 getter（`world_canon_facts` / `style_canon_facts` / `episodic_latest`）避免无效方法引用
-- 在流式主链调用 `StateArbiter.resolve("world_canon_facts", session_id)`；命中时将结果注入 `retrieval_evidence_items`（`slot_name=world_canon`）并写入 `retrieval_summary.world_canon`
-- COMMIT 附加 `audit_refs.state_arbiter`，可观测是否真实命中与降级
-
-**优先级顺序**：
-```
-WorldCanonStore(SSOT) > StyleCanonStore > EpisodicStore > BondGraph > ChromaDB > EdgeRuntime
-```
-
-**数据流**：
-```
-runtime_lifespan() 启动时
-  → [新增] StateArbiter.register_source(WORLD_CANON, _world_get_fact)
-  → [新增] StateArbiter.register_source(STYLE_CANON, _style_get_fact)
-  → [新增] StateArbiter.register_source(EPISODIC_STORE, _episodic_get_fact)
-  → 各源注册失败时独立降级，记录 new_module_statuses["state_arbiter_sources"]
-
-流式主链（SCENE_CHAT）：
-  → StateArbiter.resolve("world_canon_facts", session_id)
-    → 命中时写入 retrieval_summary.state_arbiter + retrieval_summary.world_canon
-    → 构造 world_canon evidence 注入 retrieval_evidence_items
-    → COMMIT.audit_refs.state_arbiter 输出 status/source/fallback/conflict
-```
-
----
-
-### 15.3 选项三：单元测试补充
-
-**新增测试文件**：`tests/unit/test_isolated_modules_integration.py`
-
-**测试覆盖**（18 个测试，全部通过）：
-
-| 测试类 | 测试数 | 覆盖内容 |
-|--------|--------|----------|
-| `TestSceneVisionUIWhitelist` | 2 | SCENE_VISION_UI 已加入白名单；所有预期场景均在白名单中 |
-| `TestRoutingMatrixIntegration` | 5 | CHAT→HOST_8B；REASONING→CLOUD；降级链跳过失败模型；路由日志写入 |
-| `TestContextPackBuilderIntegration` | 4 | 空召回；world_canon 组装；token 截断；style_canon 任务冲突降级 |
-| `TestMemoryGuardIntegration` | 4 | 情感标签通过；轮次不足拒绝；无标签拒绝；persist 函数降级路径 |
-| `TestStateArbiterIntegration` | 3 | 最高优先级返回；不可达降级；全空返回 None |
-
----
-
-### 15.4 选项四：端到端联调验证（TODO）
-
-> **TODO**：启动 Host + Edge 双端，实际验证本次修复的通信链路是否真正打通。
->
-> 验证清单：
-> - [ ] ASR 输入 → `POST /v1/host/input` → `run_main_chain_from_input` → 完整 chat 流程
-> - [ ] Edge 情感事件 → `POST /v1/edge/events` → Bond 更新 + VTS 驱动
-> - [ ] `SCENE_VISION_UI` 请求 → Gemini Vision 分析 → SSE 流式回复
-> - [ ] RoutingMatrix 路由决策出现在 `COMMIT.audit_refs` 中
-> - [ ] MemoryGuard 校验失败时 episodic 写入被跳过（reason_code 可观测）
-> - [ ] StateArbiter 冲突事件写入 triptych 审计
-
----
-
-### 15.5 本次修改文件清单
-
-| 文件 | 修改内容 | 选项 |
-|------|---------|------|
-| `host_brain/app/graph_config_builder.py` | `ALLOWED_EXPLICIT_SCENE_TYPES` 加入 `SCENE_VISION_UI`；RoutingMatrix 决策映射回真实 runtime（`provider/model`），并保留策略/健康兜底；返回值附加 `routing_matrix_decision.runtime_applied` | 选项一、选项二 |
-| `host_brain/app/chat_stream_handler.py` | `_sse_event_generator` 接入 `ContextPackBuilder`；默认回写截断后的 `retrieval_evidence_items`（`HOST_CONTEXT_PACK_ACTIVE` 可回退）；调用 `StateArbiter.resolve("world_canon_facts")` 注入 world_canon evidence；COMMIT 附加 `state_arbiter` | 选项二 |
-| `host_brain/app/system_handler.py` | `receive_edge_events_response` 增加 `ALLOWED_EDGE_EVENT_TYPES` 与 `ALLOWED_EDGE_EVENT_SOURCES` 校验，非法输入返回 400 | 选项二 |
-| `host_brain/app/observability_persist.py` | `persist_chat_episodic_memory` 接入 `MemoryGuard` 宪法校验 | 选项二 |
-| `host_brain/app/http_hooks.py` | `runtime_lifespan` 注册 `StateArbiter` 状态源适配 getter（world/style/episodic），修复无效类名/方法引用导致的注册降级 | 选项二 |
-| `tests/unit/test_isolated_modules_integration.py` | 新增 18 个单元测试，全部通过 | 选项三 |
-| `tests/unit/test_chat_stream_handler_p0_stream_retrieval.py` | 增加 `test_stream_context_pack_builder_active_rewrites_prompt_inputs`、`test_stream_state_arbiter_resolve_injects_world_canon_into_prompt` | 选项三 |
-| `tests/unit/test_host_8b_runtime_route.py` | 增加 `test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cloud`，验证 RoutingMatrix 真实改写 runtime | 选项三 |
-| `tests/unit/test_edge_events_whitelist.py` | 新增白名单安全边界测试（允许合法类型、拒绝未知类型/来源） | 选项三 |
-
----
-
-*最后更新：2026-03-11 21:07 | 本节由 claude-4.6-sonnet 自动生成*
-
----
-
-## 十六、严格代码审计报告（2026-03-11 21:07）
-
-> 本节基于对所有关键文件的逐行代码审计，以代码真实执行语义为准。
-> 凡与前序章节存在冲突，以本节为准。
-
-### 16.1 唯一可信执行时序
-
-#### /v1/chat 主链路
-
-```mermaid
-sequenceDiagram
-    participant C as 客户端
-    participant H as handle_chat<br/>chat_handler.py
-    participant U as _unified_chat_sse_generator
-    participant G as Governor.evaluate_intent
-    participant P as pre_intent_classifier
-    participant SR as SceneRouter.route_sse<br/>main_chain.py
-    participant SSE as 各场景 SSE 生成器
-
-    C->>H: POST /v1/chat {message, session_id, ...}
-    H->>H: pre_intent_classifier(message) → _pre_scene
-    H->>H: 构建 intent_draft（action 动态映射）
-    H->>U: _unified_chat_sse_generator(...)
-    U-->>C: PRESENCE(THINKING)
-    U->>G: evaluate_intent(intent_draft)
-    G-->>U: {decision: APPROVE, intent_id}
-    U-->>C: PRESENCE(GOV_APPROVED)
-    U->>P: pre_intent_classifier(message) 或复用 _pre_scene
-    P-->>U: scene_type
-    alt scene_type != SCENE_CHAT
-        U-->>C: PRESENCE(SCENE_ROUTED)
-    end
-    U->>SR: route_sse(scene_type, ...)
-    SR->>SSE: 分流到对应生成器
-    SSE-->>C: 各阶段 SSE 事件流
-    SSE-->>C: COMMIT(APPROVE)
-```
-
-**关键事实**：
-- `pre_intent_classifier` 在 `handle_chat` 中调用一次（构建 `intent_draft`），在 `_unified_chat_sse_generator` 中**复用结果**（`_pre_classified_scene`），不重复调用
-- `Governor.evaluate_intent` 在 `_unified_chat_sse_generator` 中调用，`_sse_event_generator`（SCENE_CHAT）通过 `_pre_approved_governor_result` 跳过重复鉴权
-- `SceneRouter.route_sse` 是真实路由入口；`MainChain.run_as_sse_adapter` 为前后置编排适配层（执行 pre/post 节点并观测 SSE，再委托 `_unified_chat_sse_generator`）
-
-#### /v1/host/input 链路
-
-```mermaid
-sequenceDiagram
-    participant E as Edge Client
-    participant IR as input_routes.py
-    participant MC as run_main_chain_from_input<br/>main_chain.py
-    participant U as _unified_chat_sse_generator
-
-    E->>IR: POST /v1/host/input {source, text, session_id}
-    IR-->>E: {success: true}（立即返回）
-    IR->>MC: asyncio.create_task（fire-and-forget）
-    MC->>MC: 构建 ChatRequest + intent_draft
-    MC->>U: MainChain.run_as_sse_adapter(...)
-    U->>U: 完整 Governor+LLM+Bond+VTS 流程
-    Note over U: 无 SSE 客户端，事件被消费但不推送
-```
-
-**关键事实**：
-- HTTP 200 在 `asyncio.create_task` 之后立即返回，副作用（LLM 生成、Bond 更新、VTS 驱动）在后台异步执行
-- 副作用完成与否对调用方不可观测（fire-and-forget）
-- 这是**有意设计**（ASR/微信输入不需要等待 LLM 响应）
-
-### 16.2 模块成熟度重分级表
-
-| 模块 | 当前等级 | 理由 | 证据（文件/函数） | 建议升级 | 下一步最小改动 |
-|------|---------|------|----------------|---------|--------------|
-| `MainChain` | `ACTIVE`（深度业务化，2026-03-12） | 各节点已具备最小可执行语义（输入净化、任务类型映射、召回/LLM/QA/审计/出口净化状态）；`run_as_sse_adapter` 执行 pre/post 节点并观测 COMMIT，不再纯透传 | `graph/main_chain.py::AirlockQuarantineNode.execute`、`GovernorNode.execute`、`MainChain.run_as_sse_adapter`、`_observe_adapter_sse_event` | 是（向 AUTHORITATIVE 演进） | 将 Governor/Recall/QA 的“占位语义”替换为真实业务调用并保持 SSE 契约稳定 |
-| `RoutingMatrix` | `ACTIVE`（策略门控） | 在 `_resolve_host_llm_runtime_core` 中调用 `select_with_fallback()` 后，将 `selected_model` 映射回真实 `provider_name/model_id`（支持 cloud/host_8b）；并保留 8B 健康探测与策略门控 fallback；`routing_matrix_decision.runtime_applied` 标记是否真的改写 runtime | `graph_config_builder.py::_resolve_host_llm_runtime_core`（`route_target/provider_name/model_id` 在 RoutingMatrix 后可变） | 否（已达预期） | 扩展 `skills/edge_3b` 到主链 runtime 映射，补充对应回退策略测试 |
-| `ContextPackBuilder` | `ACTIVE`（可回退） | 在 `_sse_event_generator` 中调用 `_cpb.build()` 后，将截断结果在 `HOST_CONTEXT_PACK_ACTIVE=true` 时回写到 `retrieval_evidence_items`，真实影响 `_build_stream_chat_prompt`；同时保留 `audit_refs.context_pack_builder` 观测 | `chat_stream_handler.py::_sse_event_generator`，`retrieval_evidence_items = _rewritten_items`，`context_pack_builder_summary.mode/applied_to_prompt` | 否（已达预期） | 继续监控 `rewritten_item_count` 与回复质量，按需调优 slot token 配额 |
-| `MemoryGuard` | `ACTIVE` ✅ | 在 `persist_chat_episodic_memory` 中调用 `check_episodic_write()`，校验失败时**真实跳过** episodic 写入 | `observability_persist.py::persist_chat_episodic_memory`，`_guard.check_episodic_write(_record)` 抛出异常时 `return {status: SKIPPED}` | 否（已达预期） | 补充 E2E 测试验证校验失败路径 |
-| `StateArbiter` | `ACTIVE`（局部路径） | 启动时注册 world/style/episodic 三个适配状态源；流式主链调用 `resolve("world_canon_facts")`，命中结果会注入 `retrieval_evidence_items` 和 `retrieval_summary.world_canon`，并写入 `audit_refs.state_arbiter` | `http_hooks.py::runtime_lifespan`（源注册）；`chat_stream_handler.py::_resolve_state_arbiter_world_fact` + `_sse_event_generator`（业务调用） | 否（已达预期） | 扩展更多 fact_key（如 style/episodic）到主链查询，并补冲突路径观测测试 |
-| `SCENE_VISION_UI` | `PROD_READY`（最小加固，2026-03-12） | 在 `E2E_VERIFIED` 基础上新增：`_VisionSLAMonitor` 追踪连续失败/降级率/延迟，超阈值写入 ledger 告警；请求来源校验（`HOST_VISION_REQUIRE_INTERNAL_ORIGIN`）；`COMMIT.audit_refs.sla_monitor` 可观测；所有加固均有降级策略不阻断主链路 | `chat_handler_vision.py::_VisionSLAMonitor`、`_call_vision_llm`（SLA 记录）、`_vision_ui_sse_generator`（来源校验+延迟告警）；`tests/unit/test_main_chain_deep_business.py::TestVisionSLAMonitor`（4 passed） | 否（已达最小 PROD_READY） | 补充多租户鉴权（HMAC/签名）；将 ledger 告警推送到外部监控系统（如 Prometheus/PagerDuty） |，`_vision_ui_sse_generator` 可达；`image_upload_consent=true/false` 两分支均完成双端实测，`audit_refs.vision_input` 按预期写入 | `chat_handler.py`（scene_type 规范化+白名单）、`chat_handler_vision.py::_vision_ui_sse_generator`、双端联调日志（2026-03-11） | 是（向 PROD_READY） | 增加生产鉴权/签名与真实云模型 SLA 监控，补异常回退演练 |
-| `/v1/host/input` | `ACTIVE`（非闭环） | `run_main_chain_from_input` 已实现，fire-and-forget 触发完整链路；但副作用不可观测，HTTP 200 只代表 accepted | `main_chain.py::run_main_chain_from_input`，`input_routes.py` 调用 `asyncio.create_task` | 否（当前设计合理） | 补充后台任务完成状态的可观测性（如写入 ledger） |
-| `/v1/edge/events` | `ACTIVE`（非闭环） | Bond/VTS 是 fire-and-forget，HTTP 200 只代表 accepted；但已补充最小安全边界：来源白名单 + 事件类型白名单（非法输入返回 400） | `system_handler.py::ALLOWED_EDGE_EVENT_TYPES/ALLOWED_EDGE_EVENT_SOURCES`，`receive_edge_events_response` 中 `HTTPException(400)` 校验 | 否（当前设计合理） | 进一步补充鉴权（HMAC/签名）与网络层 ACL，增强防伪造能力 |
-
-### 16.3 /v1/edge/events 安全边界审计（修订后）
-
-**当前真实语义分层**：
-
-```
-Layer 1: request accepted    → HTTP 200（ledger.log_voice_event 成功）
-Layer 2: side effect dispatched → Bond 队列入队 / VTS ensure_future 调度
-Layer 3: side effect completed  → ❌ 不可观测（fire-and-forget）
-Layer 4: side effect observed   → ❌ 不可观测
-```
-
-**已落地的最小安全边界**：
-- 已增加来源白名单：`ALLOWED_EDGE_EVENT_SOURCES = {"edge", "edge_client", "host_edge_bridge"}`
-- 已增加事件类型白名单：`ALLOWED_EDGE_EVENT_TYPES`（覆盖 ASR/TTS/VTS/FALLBACK/HEALTH 等事件）
-- `source` 统一转小写校验；`event_type` 统一转大写校验
-- 非法来源 / 非法事件类型立即返回 `HTTP 400`，不会写入 ledger
-
-**当前安全前提**（必须满足才能接受上述风险）：
-1. Host Brain 仅部署在内网，不暴露公网
-2. Edge Client 与 Host Brain 在同一受信任网络
-3. 无多租户场景（单用户部署）
-
-**剩余风险**：
-- 仍无 HMAC/签名鉴权（与 Host→Edge 方向不对称）
-- 仍依赖内网隔离与部署策略，应用层未强制来源身份认证
-- 仍是非闭环语义：HTTP success 仅代表 accepted / dispatched，非 side effect completed
-
-**代码证据**：
-- `host_brain/app/system_handler.py::ALLOWED_EDGE_EVENT_TYPES`
-- `host_brain/app/system_handler.py::ALLOWED_EDGE_EVENT_SOURCES`
-- `host_brain/app/system_handler.py::receive_edge_events_response`（`Unknown edge event source/type` → 400）
-
-### 16.4 ContextPackBuilder 升级结果（SHADOW → ACTIVE）
-
-**当前状态**：已升级为 `ACTIVE`（带回退开关）。
-
-**已实现改动**：
-- 在 `_sse_event_generator` 中将 `retrieval_evidence_items` 归一化为 recall slots（`_build_context_pack_recall_results`）
-- 调用 `_cpb.build(...)` 后，将 ContextPack 槽位转换为 prompt 输入项（`_context_pack_to_retrieval_evidence_items`）
-- 当 `HOST_CONTEXT_PACK_ACTIVE=true` 且存在有效结果时，执行 `retrieval_evidence_items = _rewritten_items`
-- `context_pack_builder_summary` 增加 `mode/active_enabled/applied_to_prompt/rewritten_item_count/input_item_count`，用于审计是否真正影响 prompt
-
-**风险**：
-- 若 `ContextPackBuilder.build()` 截断过激，可能丢失重要召回结果
-- 槽位归一化依赖召回条目中的 `slot_name/source/store_id` 映射质量，错误映射会影响压缩精度
-
-**回退方式**：设置 `HOST_CONTEXT_PACK_ACTIVE=false`，保留构建与审计但不回写 prompt 输入（退回 `SHADOW` 语义）。
-
-**建议**：持续观察 `applied_to_prompt`、`rewritten_item_count` 与回答质量指标，按需调优 slot 配额和映射规则。
-
-### 16.5 StateArbiter 接入结果（WIRED → ACTIVE）
-
-**当前状态**：已接入业务查询路径（局部 ACTIVE）。
-
-**已实现改动**：
-- `runtime_lifespan` 注册 3 个可执行适配 getter（world/style/episodic）
-- `_sse_event_generator` 调用 `StateArbiter.resolve("world_canon_facts", session_id)`
-- 命中时将结果注入 `retrieval_evidence_items`（`slot_name=world_canon`）并写入 `retrieval_summary.world_canon`
-- COMMIT 增加 `audit_refs.state_arbiter`，输出 `status/source/is_fallback/conflict_detected` 等字段
-
-**风险与边界**：
-- 目前仅接入 `world_canon_facts` 主路径，其他 fact_key 仍未统一接入
-- 冲突审计依赖事实键覆盖率；当前覆盖范围有限，仍需扩展
-
-**回退方式**：StateArbiter 调用失败时自动降级，不阻断主链，`state_arbiter.status=DEGRADED` 可观测。
-
-### 16.6 旧报告冲突点修正
-
-| 冲突点 | 旧报告表述 | 修正后表述 |
-|--------|-----------|-----------|
-| ContextPackBuilder | "已完成接入主链" | `ACTIVE`（可回退）：截断结果默认回写到 `retrieval_evidence_items` 并影响 prompt，`HOST_CONTEXT_PACK_ACTIVE=false` 可退回 `SHADOW` |
-| RoutingMatrix | "已接入路由决策" | `ACTIVE`（策略门控）：决策可真实改写 `provider/model`（cloud/host_8b），并保留策略与健康兜底 |
-| StateArbiter | "已注册状态源" | `ACTIVE`（局部路径）：`resolve("world_canon_facts")` 已接入流式主链并影响 prompt 输入 |
-| MainChain | "主链路编排器" | `ACTIVE`（轻编排适配层）：节点有最小可执行语义，适配层执行 pre/post 并观测 SSE，路由仍委托 `_unified_chat_sse_generator` |
-| `/v1/edge/events` | "完整闭环已打通" | `ACTIVE`（非闭环）：HTTP 200 只代表 accepted；副作用 fire-and-forget；已补充来源/事件类型白名单 |
-| `SCENE_VISION_UI` | "视觉链路完整实现" | `PROD_READY`（最小加固）：SLA 监控 + 来源校验 + 延迟告警已上线，`audit_refs.sla_monitor` 可观测 |
-| `/v1/host/input` | "完整闭环" | `ACTIVE`（非闭环）：fire-and-forget，副作用不可观测 |
-
-### 16.7 仍未解决的问题
-
-> 更新于 2026-03-12：以下两个 P2 问题已完成最小必要改动，等级已升级。
-
-| 问题 | 原等级 | 当前等级 | 说明 |
-|------|--------|---------|------|
-| ~~SCENE_VISION_UI 生产化加固~~ | P2 | **已完成** | 已升级为 `PROD_READY`（最小加固）：SLA 监控（连续失败/降级率/延迟告警）、请求来源校验（`HOST_VISION_REQUIRE_INTERNAL_ORIGIN`）、`COMMIT.audit_refs.sla_monitor` 可观测 |
-| ~~MainChain 深度业务化~~ | P2 | **已完成** | 已升级为 `ACTIVE`（深度业务化）：GovernorNode 接入真实 IntentDecisionEngine（含适配层跳过逻辑）、RecallFusionNode 接入真实 RetrievalOrchestrator 七路召回、QAContractNode 接入真实内容合规校验（格式/长度/安全词/Null字节） |
-
-**当前无未解决的 P0/P1/P2 问题。**
-
-**仍需关注（P3，非阻塞）**：
-- `SCENE_VISION_UI` 的 `PROD_READY` 是"最小加固"，尚未覆盖：
-  - 多租户场景下的完整鉴权（当前仅内网 IP 校验）
-  - 云模型 SLA 的外部告警推送（当前仅写入 ledger）
-- ~~`MainChain` 的 `GovernorNode` 在适配层模式下跳过真实鉴权（`adapter_mode=sse`），
-  真实鉴权由 `_unified_chat_sse_generator` 负责，双重鉴权路径尚未统一~~
-  → **已解决（2026-03-12）**：适配层也执行真实鉴权，结果通过 `pre_governor_result` 传递，两条路径已统一（见 §16.10）
-- ~~`RecallFusionNode` 的七路召回结果写入 `ctx.recall_context_pack`，
-  但 `run_as_sse_adapter` 中该结果是否真实传递给 `_unified_chat_sse_generator` 尚未 E2E 验证~~
-  → **已解决（2026-03-12）**：`_pre_recall_evidence` 参数已透传，链路闭环（见 TODO-9）
-
-### 16.10 本次修改摘要（2026-03-12，第二批）
-
-**问题1：`build_chat_context_pack` 使用 CPB slot 输出**
-
-改动文件：`host_brain/app/chat_context_builder.py`、`host_brain/app/chat_stream_handler.py`
-
-| 改动点 | 说明 |
-|--------|------|
-| `build_chat_context_pack` 增加 `cpb_slots` 参数 | 接收 `ContextPackBuilder.build()` 输出的 slot 数据并注入 prompt 构建 |
-| `chat_stream_handler.py` 提取 CPB slot | 在调用 `build_chat_context_pack` 前提取 CPB slot 并透传 |
-
-**问题2：GovernorNode 两条鉴权路径统一**
-
-改动文件：`host_brain/app/graph/main_chain.py`、`host_brain/app/chat_stream_handler.py`
-
-| 改动点 | 说明 |
-|--------|------|
-| `GovernorNode` 适配层模式执行真实鉴权 | 不再跳过，执行完整 R1-R7 门控 |
-| `pre_governor_result` 参数透传 | 鉴权结果通过参数传递给 `_unified_chat_sse_generator`，避免重复执行 |
-| `_unified_chat_sse_generator` 接收 `pre_governor_result` | 有预鉴权结果时直接使用，无则执行自身鉴权逻辑 |
-
-**测试验证**：合并运行 62 passed（含所有相关单元测试，无回归）
-
----
-
-### 16.9 本次修改摘要（2026-03-12，第一批）
-
-**问题1：SCENE_VISION_UI 生产化加固**
-
-改动文件：`host_brain/app/chat_handler_vision.py`
-
-| 改动点 | 说明 |
-|--------|------|
-| 新增 `_VisionSLAMonitor` 类 | 模块级单例，追踪连续失败/降级率/总调用次数 |
-| `_call_vision_llm` 接入 SLA 监控 | 每次调用后记录状态，触发告警写入 ledger |
-| `_vision_ui_sse_generator` 延迟告警 | 单次调用超过阈值时写入 `S_VISION_SLA_LATENCY_WARN` |
-| 请求来源校验 | `HOST_VISION_REQUIRE_INTERNAL_ORIGIN=true` 时校验 origin_ip |
-| `COMMIT.audit_refs.sla_monitor` | 输出 SLA 监控摘要（可观测） |
-
-环境变量：
-- `HOST_VISION_SLA_FAIL_THRESHOLD`（默认 3）：连续失败告警阈值
-- `HOST_VISION_SLA_DEGRADE_RATE_THRESHOLD`（默认 0.5）：降级率告警阈值
-- `HOST_VISION_SLA_LATENCY_WARN_MS`（默认 10000）：延迟告警阈值（ms）
-- `HOST_VISION_REQUIRE_INTERNAL_ORIGIN`（默认 false）：是否启用来源校验
-- `HOST_VISION_ALLOWED_ORIGINS`（默认 `127.0.0.1,::1,localhost`）：允许的来源 IP
-
-**问题2：MainChain 深度业务化**
-
-改动文件：`host_brain/app/graph/main_chain.py`
-
-| 节点 | 改动点 | 说明 |
-|------|--------|------|
-| `GovernorNode` | 接入 `IntentDecisionEngine.evaluate_intent` | 执行完整 R1-R7 门控；适配层模式（`adapter_mode=sse`）自动跳过避免双重鉴权 |
-| `RecallFusionNode` | 接入 `RetrievalOrchestrator.arun` | 七路并行召回，结果写入 `ctx.recall_context_pack` |
-| `QAContractNode` | 接入真实内容合规校验 | 格式规范化 + 长度截断 + 安全词检测 + Null字节清除 |
-
-所有节点均有降级策略：业务组件不可用时退回最小状态语义，不阻断链路。
-
-**测试验证**：
-- `tests/unit/test_main_chain_deep_business.py`（18 passed）：新增测试，覆盖真实业务调用和降级策略
-- `tests/unit/test_main_chain_sse_adapter.py`（5 passed）：适配层兼容性验证（无回归）
-- 合并运行：60 passed（含所有相关单元测试）
-
-
-
-### 16.8 SCENE_VISION_UI 双端联调证据（2026-03-11）
-
-**执行方式**：本地同时启动 `host_brain`（8000）与 `edge_client`（17800），发送两组 `/v1/chat` 请求：
-- `scene_type=SCENE_VISION_UI` + `image_upload_consent=true`
-- `scene_type=SCENE_VISION_UI` + `image_upload_consent=false`
-
-**实测结果摘录**：
-- `edge_health_status=ACCEPTED`
-- `host_health_status=OK`
-- `consent_true.graph_start_scene_type=VISION_UI`
-- `consent_true.vision_input.image_upload_allowed=true`
-- `consent_false.vision_input.image_upload_allowed=false`
-- 两组请求 `COMMIT.decision` 均为 `APPROVE`
-
-**说明**：
-- 此证据证明了“可达性 + 策略分支 + 审计落盘”已完成端到端验证（`E2E_VERIFIED`）。
-- 该结论不等价于 `PROD_READY`；生产可用性仍需补鉴权、告警和云模型 SLA 监控。
-
----
-
-*严格审计时间：2026-03-11 21:07 | 审计模型：claude-4.6-sonnet*
-*审计范围：chat_handler.py / chat_stream_handler.py / graph_config_builder.py / http_hooks.py / system_handler.py / observability_persist.py / chat_handler_vision.py / main_chain.py / dependencies.py*
-*审计原则：以代码真实执行语义为准，不允许脑补，不允许把 SHADOW 写成 ACTIVE*
-
----
-
-## 十七、P16 多智能体技术债清理（2026-03-17）
-
-> 本节记录 P16 对 P1-P15 中积累的技术债、孤岛模块、兼容性冗余的统一清理结果。
-> 清理原则：以 P15 路径（`graph_executor._dispatch_to_agent`）为唯一分派路径，删除 P3 孤岛路径。
-
-### 17.1 核心问题与修复
-
-| 问题 | 严重度 | 根因 | 修复方式 |
-|------|--------|------|---------|
-| `active_agent_id` state 顶层传播断点 | 🔴 P0 | `supervisor_dispatch_handler` 写 `payload["active_agent_id"]`，但 `graph_executor` 读 `state["active_agent_id"]`，两者不同步 | `agent_dispatch_node` 分支执行前先从 `payload["active_agent_id"]` 同步到 `state["active_agent_id"]` |
-| `agent_dispatch_handler` 孤岛模块 | 🔴 P0 | P3 创建了 `agent_dispatch_handler.py`，注册到 handler 表，但 `graph_executor` 的 `agent_dispatch_node` 分支直接调用 `_dispatch_to_agent`，永远不经过该 handler | 删除 `agent_dispatch_handler.py`，从 `dependencies.py` 移除注册 |
-| `need_judge=false` 快路径缺失 | 🟠 P1 | `chat_agent` 等不需要 judge 时，`agent_dispatch_node` 仍强制走 `edge_map` 到 `judge_agent_node` | 读取 `supervisor_dispatch.need_judge`，`false` 时直接跳 `chat_render_node` |
-| `_AGENT_TO_NODE` 孤岛符号 | 🟠 P1 | `supervisor_dispatch_handler.py` 中定义但从未被引用 | 删除 |
-| `safety_agent`/`renderer_agent` 在 allowlist 但无 handler | 🟠 P1 | LLM 提案可能选到这两个 agent，触发 `AGENT_DISPATCH_NO_HANDLER` 降级 | 从 `AGENT_ALLOWLIST` 移除，注释说明待 P17+ 补充 handler 后再加入 |
-| `SUPERVISOR_AUTO_ENABLED` 双开关冗余 | 🟡 P2 | P15 引入了 `SUPERVISOR_AUTO_ENABLED` 作为 `SUPERVISOR_MODE=llm` 的别名，造成两个开关同时存在 | 删除别名逻辑，只保留 `SUPERVISOR_MODE` |
-| `agent_dispatch_allowlist` 硬编码 2 个 agent | 🟡 P2 | `graph_config_builder` 中 allowlist 只有 `code_agent` 和 `translate_agent`，与 `_AGENT_HANDLER_MAP` 的 6 个 agent 不一致 | 扩展为全量 6 个，与 `_AGENT_HANDLER_MAP` 对齐 |
-| `retrieval_agent_handler` P11 遗漏注册 | 🟡 P2 | P11 新增了 `retrieval_agent_handler.py` 但未在 `dependencies.py` 注册 | 补充注册 |
-
-### 17.2 P16 后 agent_dispatch_node 完整数据流
-
-```mermaid
-flowchart TD
-    A["supervisor_dispatch_handler\n写 payload['active_agent_id']\n写 supervisor_dispatch.need_judge"] --> B["graph_executor._run_single_step\nnode_id == 'agent_dispatch_node'"]
-
-    B --> C["P16 同步\npayload_active = payload['active_agent_id']\nresolved = payload_active or state_active\nstate = {**state, active_agent_id: resolved}"]
-
-    C --> D["allowlist 校验\nfrom node_bindings['agent_dispatch_allowlist']"]
-    D -->|"不在 allowlist"| D1["DEGRADED\nAGENT_NOT_IN_ALLOWLIST\n→ edge_map 下一跳"]
-    D -->|"通过"| E["_dispatch_to_agent(state)\n_AGENT_HANDLER_MAP[active_agent_id]"]
-
-    E -->|"无 handler"| E1["DEGRADED\nAGENT_DISPATCH_NO_HANDLER\n→ edge_map 下一跳"]
-    E -->|"有 handler"| F["_invoke_handler(handler_id)"]
-
-    F --> G["读 supervisor_dispatch.need_judge"]
-    G -->|"need_judge=true"| H["next_node = edge_map['agent_dispatch_node']\n→ judge_agent_node"]
-    G -->|"need_judge=false"| I["next_node = CHAT_RENDER_NODE_ID\n快路径：跳过 judge"]
-
-    H & I --> J["返回新 state\n{payload, trace, pending_node_id,\nagent_artifacts, active_agent_id}"]
-
-    style D1 fill:#ff6b6b,color:#fff
-    style E1 fill:#ff6b6b,color:#fff
-    style I fill:#51cf66,color:#fff
-    style J fill:#51cf66,color:#fff
-```
-
-### 17.3 P16 变更文件清单
-
-| 文件 | 变更内容 |
-|------|---------|
-| `host_brain/integrations/graph_executor.py` | `agent_dispatch_node` 分支：补充 `active_agent_id` 同步、allowlist 校验、`need_judge` 快路径；删除过时注释 |
-| `host_brain/app/handlers/agent_dispatch_handler.py` | **删除**（P3 孤岛模块） |
-| `host_brain/app/handlers/supervisor_dispatch_handler.py` | 删除 `_AGENT_TO_NODE` 孤岛符号；删除 `SUPERVISOR_AUTO_ENABLED` 别名逻辑；更新注释 |
-| `host_brain/app/graph_config_builder.py` | `agent_dispatch_allowlist` 从 2 个扩展为 6 个；`AGENT_DISPATCH_NODE_ID` binding `handler_id` 改为空；新增 `RETRIEVAL_AGENT_NODE_ID`/`RETRIEVAL_AGENT_HANDLER_ID` 常量；更新注释 |
-| `host_brain/app/dependencies.py` | 删除 `agent_dispatch_handler` 注册；补充 `retrieval_agent_handler` 注册；import 新增 `RETRIEVAL_AGENT_HANDLER_ID` |
-| `host_brain/app/agents/agent_registry.py` | 从 `AGENT_ALLOWLIST` 移除 `safety_agent`/`renderer_agent`（无 handler） |
-| `tests/unit/test_agent_dispatch_handler.py` | 重写：测试 P16 的 `_dispatch_to_agent` 和 allowlist 校验 |
-| `tests/unit/test_p35_structural.py` | 更新：将"executor 无 agent_dispatch 特判"改为"executor 使用 `_dispatch_to_agent`" |
-| `tests/unit/test_p15_dispatch_to_agent.py` | 更新：`TestSupervisorAutoEnabled` 改为测试 `SUPERVISOR_MODE`，新增 `test_supervisor_auto_enabled_ignored_in_p16` |
-| `tests/integration/test_p11_integration.py` | 更新：`TestAgentDispatchAllowlistExtension` 改为测试 `_AGENT_HANDLER_MAP` 和 `graph_config allowlist` |
-| `tests/integration/test_p12_integration.py` | 更新：`DEFAULT_AGENT_DISPATCH_ALLOWLIST` 引用改为 `_AGENT_HANDLER_MAP` |
-| `tests/integration/test_p15_integration.py` | 更新：`TestP15SupervisorAutoEnabledIntegration` 改为测试 `SUPERVISOR_MODE`，新增 `test_supervisor_auto_enabled_ignored_in_p16` |
-| `tests/unit/test_retrieval_agent_handler.py` | 更新：`DEFAULT_AGENT_DISPATCH_ALLOWLIST` 引用改为 `_AGENT_HANDLER_MAP` |
-
-### 17.4 P16 后 _AGENT_HANDLER_MAP 与 AGENT_ALLOWLIST 对齐状态
-
-| agent_id | `_AGENT_HANDLER_MAP` | `AGENT_ALLOWLIST` | handler 文件 | 说明 |
-|----------|---------------------|-------------------|-------------|------|
-| `chat_agent` | ✅ | ✅ | `chat_agent_handler.py` | 快路径，`need_judge=false` |
-| `code_agent` | ✅ | ✅ | `code_agent_handler.py` | P9 新增 |
-| `translate_agent` | ✅ | ✅ | `translate_agent_handler.py` | P10 新增 |
-| `intent_agent` | ✅ | ✅ | `intent_agent_handler.py` | 高风险，`need_judge=true` |
-| `judge_agent` | ✅ | ✅ | `judge_agent_handler.py` | 裁判节点 |
-| `retrieval_agent` | ✅ | ✅ | `retrieval_agent_handler.py` | P11 新增，P16 补注册 |
-| `safety_agent` | ❌ | ❌ | 无 | 待 P17+ 补充 handler |
-| `renderer_agent` | ❌ | ❌ | 无 | 待 P17+ 补充 handler |
-
-### 17.5 测试结果
-
-- P16 相关测试：**113 passed**（含 P11/P12/P15/P16 全部相关测试）
-- 无回归
-
----
-
-*P16 清理时间：2026-03-17 17:58 | 执行模型：claude-4.6-sonnet*
-*清理原则：以代码真实执行语义为准，删除孤岛模块，统一分派路径*
