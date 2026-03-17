@@ -1,9 +1,9 @@
 # Natsume AI 系统数据流全景报告
 
-> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 18:10（P16 数据流图更新）
-> 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排
+> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 18:19（P16 数据流图更新）
+> 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排 · 多智能体分派
 > 报告模型：claude-4.6-sonnet
-> 本次修复：问题 A/B/C/D/F 已按优先级处理（见第十三节）；严格代码审计已完成（见第十六节）
+> 当前状态：P1-P16 全部完成，多智能体重构升级已封板（含 supervisor_dispatch / agent_dispatch / judge 完整链路）
 
 ---
 
@@ -867,32 +867,6 @@ sequenceDiagram
 
     CR-->>SR: GRAPH_DONE
 ```
-
----
-
-## 附录：关键配置环境变量
-
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `HOST_CHAT_HOST_8B_ENABLED` | `true` | 是否启用本地 8B 模型 |
-| `HOST_CHAT_FORCE_CLOUD` | `false` | 强制使用云端 LLM |
-| `HOST_CHAT_HOST_8B_BASE_URL` | `http://127.0.0.1:11434/v1` | 本地 Ollama 地址 |
-| `HOST_CHAT_HOST_8B_MODEL_ID` | `qwen3:8b` | 本地模型 ID |
-| `HOST_SYS_MODE` | `normal` | 系统模式（normal/gaming） |
-| `HOST_GAMING_EDGE_CHAT_ENABLED` | `false` | 是否启用 Gaming Edge 路由 |
-| `HOST_ENABLE_EDGE_RPC` | `true` | 是否启用 Edge RPC |
-| `HOST_ENABLE_RETRIEVAL` | `true` | 是否启用七路召回 |
-| `HOST_CHAT_DISABLE_RETRIEVAL` | `false` | 是否禁用 SCENE_CHAT 召回 |
-| `HOST_STREAM_RETRIEVAL_TIMEOUT_MS` | `1200` | 流式召回超时（ms） |
-| `HOST_STREAM_VTS_EMOTION_ENABLED` | `true` | 是否启用流式 VTS 情感驱动 |
-| `HOST_BOND_BACKEND` | `memory` | Bond 存储后端（memory/sqlite/neo4j） |
-| `HOST_BOND_STAGE_THRESHOLDS` | — | Bond 阶段积分阈值 JSON 覆盖（如 `{"SOULMATE":200}`）（本次新增） |
-| `HOST_BOND_SCORE_MAP` | — | Bond 积分映射 JSON 覆盖（如 `{"INTERACTION_DEEP":8}`）（本次新增） |
-| `HOST_CHAT_GRAY_ENABLED` | `false` | 是否启用灰度发布 |
-| `HOST_CHAT_GRAY_PERCENT` | `100` | 灰度发布百分比（0-100） |
-| `GEMINI_API_KEY` | — | Gemini API 密钥 |
-| `OPENAI_API_KEY` | — | OpenAI API 密钥 |
-| `SUPERVISOR_MODE` | `rule` | 多智能体分派模式（rule / llm） |
 
 ---
 
