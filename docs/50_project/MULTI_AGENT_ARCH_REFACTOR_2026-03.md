@@ -201,7 +201,7 @@
 | **P9** | 第六轮候选基线：code_agent 受控 ReAct 化（验收 + 契约固化 + 封板）；范围与验收以 P9_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
 | **P10** | 第七轮候选基线：translate_agent 受控 ReAct 化（handler 改造 + 验收 + 契约固化 + 封板）；范围与验收以 P10_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
 | **P11** | 第八轮候选基线：retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，新增 handler + allowlist 扩展 + 验收 + 契约固化 + 封板）；范围与验收以 P11_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
-| **P12** | 第九轮候选基线：retrieval_agent 受控 ReAct 化（RETRIEVAL_AGENT_REACT_ENABLED 开关，双模式共存 + 验收 + 契约固化 + 封板）；范围与验收以 P12_SCOPE 为准。 | 定稿/待实施 |
+| **P12** | 第九轮候选基线：retrieval_agent 直接替换为 ReAct 模式（无开关，无双模式 + 验收 + 契约固化 + 封板）；范围与验收以 P12_SCOPE 为准。 | 定稿/待实施 |
 
 **基线说明**：
 - **第一轮正式基线**：P1～P4，已封板。P4 范围与契约以 **MULTI_AGENT_P4_SCOPE_2026-03.md** 为准。
@@ -243,7 +243,7 @@
 - **MULTI_AGENT_P10_SEAL_RESULT_2026-03.md**：P10 验收结论（3 条逐条结论、45 用例全通过、与 P9 兼容性说明、冻结非目标）；第七轮正式基线 = P10。
 - **MULTI_AGENT_P11_SCOPE_2026-03.md**：P11 第八轮正式基线；范围与验收（定稿）；唯一目标为 retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，P11-1），3 条验收标准已写死；已封板。
 - **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md**：P11 验收结论（3 条逐条结论、58 用例全通过、与 P10 兼容性说明、冻结非目标）；第八轮正式基线 = P11。
-- **MULTI_AGENT_P12_SCOPE_2026-03.md**：P12 第九轮正式基线候选；范围与验收（定稿）；唯一目标为 retrieval_agent 受控 ReAct 化（RETRIEVAL_AGENT_REACT_ENABLED 开关，双模式共存，P12-1），3 条验收标准已写死；待实施。
+- **MULTI_AGENT_P12_SCOPE_2026-03.md**：P12 第九轮正式基线候选；范围与验收（定稿）；唯一目标为 retrieval_agent 直接替换为 ReAct 模式（无开关，无双模式，P12-1），2 条验收标准已写死；待实施。
 - **MULTI_AGENT_SEAL_RESULT.md**：在完成 P1～P2 后更新为「新架构下的封测结论」。
 
 ---

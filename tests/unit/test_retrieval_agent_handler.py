@@ -137,7 +137,7 @@ class TestRetrievalAgentTraceContract:
 
     REQUIRED_FIELDS = {
         "agent_id", "mode", "artifact_ref",
-        "retrieval_source", "result_count", "react_enabled", "ts_ms",
+        "retrieval_source", "result_count", "ts_ms",
     }
 
     def _get_trace(self, **kwargs: Any) -> dict[str, Any]:
@@ -164,10 +164,10 @@ class TestRetrievalAgentTraceContract:
         trace = self._get_trace()
         assert trace["mode"] == "legacy_chain"
 
-    def test_react_enabled_is_false(self):
-        """react_enabled 固定为 False（P11 不做 ReAct）。"""
+    def test_no_react_enabled_field(self):
+        """trace 不含 react_enabled 字段（预留字段已删除）。"""
         trace = self._get_trace()
-        assert trace["react_enabled"] is False
+        assert "react_enabled" not in trace
 
     def test_result_count_is_int(self):
         """result_count 为 int 类型，≥ 0。"""

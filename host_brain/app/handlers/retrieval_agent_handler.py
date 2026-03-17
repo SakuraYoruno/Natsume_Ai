@@ -1,15 +1,11 @@
 """RetrievalAgent Handler（P11）。
 
 职责：
-- 处理知识库检索请求（legacy_chain 模式，P11 不实现 ReAct）
+- 处理知识库检索请求（SCENE_WORK_RETRIEVAL）
 - 读取上游 workbench_retrieval 节点输出，封装为 AgentArtifact
 - 写入 retrieval_agent_trace（字段契约已在 P11_SCOPE §3.3 写死）
-- react_enabled 固定为 False，预留字段供 P12 扩展
 
-P11 约束：
-- 无独立开关（legacy_chain 默认启用，P12 做 ReAct 化时再引入 RETRIEVAL_AGENT_REACT_ENABLED）
-- 不调用工具循环（只读检索，无副作用）
-- 不修改 P9/P10 已封板契约
+P12 将在此基础上接入 ReAct 循环（run_react_loop）。
 """
 
 from __future__ import annotations
@@ -25,7 +21,7 @@ def retrieval_agent_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """RetrievalAgent handler（P11，legacy_chain 模式）。
+    """RetrievalAgent handler（P11）。
 
     读取 workbench_retrieval 节点输出，封装为 AgentArtifact，
     写入 retrieval_agent_trace（字段契约见 P11_SCOPE §3.3）。
@@ -100,7 +96,6 @@ def retrieval_agent_handler(
             "artifact_ref": artifact_ref,
             "retrieval_source": retrieval_source,
             "result_count": result_count,
-            "react_enabled": False,  # P11 固定 False，预留供 P12 扩展
             "ts_ms": int(time.time() * 1000),
         }
 

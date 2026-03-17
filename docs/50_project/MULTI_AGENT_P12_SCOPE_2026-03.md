@@ -2,7 +2,7 @@
 
 **日期**：2026-03
 **状态**：定稿/待实施
-**定位**：在 P1～P11 全部封板的前提下，将 `retrieval_agent` 从 legacy_chain 模式升级为受控 ReAct 模式（引入 `RETRIEVAL_AGENT_REACT_ENABLED` 开关），不破坏八轮基线
+**定位**：在 P1～P11 全部封板的前提下，将 `retrieval_agent` 从 legacy_chain 模式**直接替换**为 ReAct 模式，不引入双模式开关，不破坏已封板基线
 **总原则**：先定范围与验收再实施；不把未在 P12_SCOPE 明确纳入的能力混入 P12；不得回改已封板结论。
 
 ---
@@ -27,10 +27,10 @@
   - subgraph/local loop 全量 ledger 聚合（补全 P7 观测缺口）；三图全链路均可跨请求量化
 
 - **第六轮正式基线**：P9，已封板
-  - code_agent 受控 ReAct 化（CODE_AGENT_REACT_ENABLED 开关、react_scratchpad、code_agent_trace 契约固化）
+  - code_agent ReAct 化（react_scratchpad、code_agent_trace 契约固化）
 
 - **第七轮正式基线**：P10，已封板
-  - translate_agent 受控 ReAct 化（TRANSLATE_AGENT_REACT_ENABLED 开关、translate_agent_trace 契约固化）
+  - translate_agent ReAct 化（translate_agent_trace 契约固化）
 
 - **第八轮正式基线**：P11，已封板
   - retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，retrieval_agent_trace 契约固化，allowlist 扩展）
@@ -43,9 +43,9 @@
 4. **Intent 图** 外层仍为 intent_agent_entry → safety_verifier → judge_agent → renderer
 5. **subgraph_commit_summary / subgraph_failure / subgraph_trace** 及 P7 预算/回退/观测契约已固化
 6. **P8 新增 ledger 聚合**（p8_subgraph_failure_log / p8_graph_run_log）及 P8_EXTENDED_METRICS_ENABLED 开关已固化
-7. **P9 新增 code_agent ReAct 双模式**（CODE_AGENT_REACT_ENABLED 开关、code_agent_trace 契约）已固化
-8. **P10 新增 translate_agent ReAct 双模式**（TRANSLATE_AGENT_REACT_ENABLED 开关、translate_agent_trace 契约）已固化
-9. **P11 新增 retrieval_agent legacy_chain 接入**（retrieval_agent_trace 契约，7 个字段，react_enabled=False 预留）已固化
+7. **P9 新增 code_agent ReAct 模式**（code_agent_trace 契约）已固化
+8. **P10 新增 translate_agent ReAct 模式**（translate_agent_trace 契约）已固化
+9. **P11 新增 retrieval_agent legacy_chain 接入**（retrieval_agent_trace 契约，6 个字段）已固化
 10. **P1～P11 已全部封板**，后续工作不得以旧阶段补丁名义混入
 
 ---
@@ -69,49 +69,43 @@
 ## 2. P12 唯一目标（窄定义）— 定稿
 
 **一句话定位**：
-在遵守三图与 execution_profile、不撤销已封板结论的前提下，将 `retrieval_agent_handler` 从 legacy_chain 模式升级为**受控 ReAct 模式**（引入 `RETRIEVAL_AGENT_REACT_ENABLED` 开关，双模式共存），并补全对应的验收测试与契约文档。
+在遵守三图与 execution_profile、不撤销已封板结论的前提下，将 `retrieval_agent_handler` 从 legacy_chain 模式**直接替换**为 ReAct 模式，不引入双模式开关，补全对应的验收测试与契约文档。
 
-### 2.1 选择 P12 方向的理由
+### 2.1 选择直接替换而非双模式的理由
 
-P11 已将 `retrieval_agent` 以 legacy_chain 模式最小接入 Supervised Graph，并在 `retrieval_agent_trace` 中预留了 `react_enabled` 字段（固定为 `False`）。P11 冻结非目标中明确指出：**retrieval_agent 的 ReAct 化留给 P12**。
+P9/P10 引入了双模式开关（`CODE_AGENT_REACT_ENABLED`、`TRANSLATE_AGENT_REACT_ENABLED`），这是为了在生产环境灰度验证 ReAct 路径的安全性。但该项目**尚未正式上线**，双模式开关的核心价值（生产灰度 + 快速回滚）不存在，保留 if/else 分支只会增加代码复杂度和维护成本。
 
-P9（code_agent ReAct 化）和 P10（translate_agent ReAct 化）已验证了受控 ReAct 双模式的可行性与安全性。P12 沿用相同模式，将 `retrieval_agent` 升级为 ReAct 模式，完成三个专家 Agent 的 ReAct 化闭环。
-
-**为什么 P12 只做 ReAct 化，不做 RAG 深度集成**：
-- 遵循"先收口再扩能力"总原则：先让 retrieval_agent 具备 ReAct 能力，验证三图主链不退化
-- RAG 全链路（记忆、向量库深度集成）属于能力扩张，留给 P13 或更晚阶段
-- 避免 P12 同时承载"ReAct 化 + RAG 全链路"两个目标
+因此 P12 决策：
+- **直接替换**：`retrieval_agent_handler` 只保留 ReAct 路径，删除 legacy_chain 分支
+- **不引入开关**：不新增 `RETRIEVAL_AGENT_REACT_ENABLED` 环境变量
+- **同步清理**：P9/P10 的双模式开关（`CODE_AGENT_REACT_ENABLED`、`TRANSLATE_AGENT_REACT_ENABLED`）也已在 P12 前统一清理，三个 handler 均为纯 ReAct 模式
 
 ### 2.2 现状说明（重要）
 
 `retrieval_agent_handler.py` 当前为 **legacy_chain 模式**（P11 封板状态）：
 
-- `react_enabled` 字段固定为 `False`（预留字段，P11 未实现 ReAct 骨架）
 - 无 `react_scratchpad` 字段
 - 无工具循环（legacy_chain 不调用工具循环）
-- `RETRIEVAL_AGENT_REACT_ENABLED` 开关**不存在**
+- `retrieval_agent_trace` 包含 6 个字段（`agent_id`、`mode`、`artifact_ref`、`retrieval_source`、`result_count`、`ts_ms`）
 
-**P12 需要新增/修改的内容**：
-1. 修改 `retrieval_agent_handler.py`：新增 ReAct 模式分支（`RETRIEVAL_AGENT_REACT_ENABLED=true` 时走 ReAct 路径，`false` 时走 legacy_chain 路径）
-2. 引入 `RETRIEVAL_AGENT_REACT_ENABLED` 环境变量开关（默认 `false`，保持 P11 基线行为）
-3. 扩展 `retrieval_agent_trace` 契约：新增 `react_scratchpad` 字段（ReAct 模式专用，legacy 模式为 `None`）
-4. 补全测试与文档
+**P12 需要修改的内容**：
+1. 改造 `retrieval_agent_handler.py`：删除 legacy_chain 逻辑，接入 `run_react_loop`，写入 `react_scratchpad`
+2. 更新 `retrieval_agent_trace` 契约：`mode="react_loop"`，新增 `total_steps`、`stopped_reason`，写入 `react_scratchpad`
+3. 补全测试与文档
 
-**参照模板**：`code_agent_handler.py`（P9 封板状态，双模式共存，`CODE_AGENT_REACT_ENABLED` 开关）
+**参照模板**：`code_agent_handler.py`（P12 清理后状态，纯 ReAct 模式）
 
 ### 2.3 纳入范围（P12 唯一目标）
 
-**P12-1：retrieval_agent 受控 ReAct 化（双模式共存）**
+**P12-1：retrieval_agent ReAct 化（直接替换）**
 
 | 子项 | 说明 |
 |------|------|
-| P12-1a | 修改 `retrieval_agent_handler.py`：新增 ReAct 模式分支；`RETRIEVAL_AGENT_REACT_ENABLED=true` 时走 ReAct 路径（工具循环），`false` 时走 legacy_chain 路径（P11 行为不变） |
-| P12-1b | 引入 `RETRIEVAL_AGENT_REACT_ENABLED` 环境变量开关（默认 `false`） |
-| P12-1c | 扩展 `retrieval_agent_trace` 契约：新增 `react_scratchpad` 字段（ReAct 模式专用，legacy 模式为 `None`） |
-| P12-1d | 更新 `.env.example`：新增 `RETRIEVAL_AGENT_REACT_ENABLED` 说明 |
-| P12-1e | 补全 `tests/unit/test_retrieval_agent_handler.py`：新增 ReAct 模式用例（开关行为 + react_scratchpad 契约 + 异常安全） |
-| P12-1f | 补全 `tests/integration/test_p12_integration.py`（ReAct 路径验证 + P11 基线不退化 + 文件完整性） |
-| P12-1g | 封板文档（P12_SEAL_RESULT） |
+| P12-1a | 改造 `retrieval_agent_handler.py`：删除 legacy_chain 逻辑，接入 `run_react_loop`（只读工具，`allow_side_effects=False`） |
+| P12-1b | 更新 `retrieval_agent_trace` 契约：`mode="react_loop"`，新增 `total_steps`、`stopped_reason`，写入 `react_scratchpad` |
+| P12-1c | 更新 `tests/unit/test_retrieval_agent_handler.py`：改造为 ReAct 模式用例（react_scratchpad 契约 + 异常安全） |
+| P12-1d | 新增 `tests/integration/test_p12_integration.py`（ReAct 路径验证 + P11 基线不退化 + 文件完整性） |
+| P12-1e | 封板文档（P12_SEAL_RESULT） |
 
 ### 2.4 范围外（硬约束）
 
@@ -124,124 +118,67 @@ P12 **不得**：
 - 将多 Agent 循环 handoff、并行 agent 纳入 P12
 - 以 P12 名义回改 REFACTOR 三条硬性约束或八轮基线定义
 - 将未在 P12_SCOPE 明确纳入的能力以"顺带""优化"名义混入
-- 修改 `code_agent_handler.py`（P9 已封板）
-- 修改 `translate_agent_handler.py`（P10 已封板）
 
 ---
 
-## 3. P12 验收标准（定稿，共 3 条）
+## 3. P12 验收标准（定稿，共 2 条）
 
 实施完成后须逐条满足以下验收条件：
 
-### 3.1 RETRIEVAL_AGENT_REACT_ENABLED=true 时 ReAct 路径可运行
+### 3.1 retrieval_agent_handler ReAct 路径可运行
 
-- `RETRIEVAL_AGENT_REACT_ENABLED=true` 时，`retrieval_agent_handler` 走 ReAct 路径（工具循环）
-- `retrieval_agent_trace.react_enabled` 为 `True`
-- `retrieval_agent_trace.react_scratchpad` 非 `None`，包含至少一个 step 记录
+- `retrieval_agent_handler` 走 ReAct 路径（工具循环）
+- `retrieval_agent_trace.mode` 为 `"react_loop"`
+- `react_scratchpad` 非 `None`，包含至少一个 step 记录
 - `agent_artifacts["retrieval_agent"]` 存在且 `artifact_ref` 非空
 - 有对应单元测试验证上述字段
 
-### 3.2 RETRIEVAL_AGENT_REACT_ENABLED=false 时 P11 基线（legacy_chain）不退化
+### 3.2 P11 基线不退化
 
-- `RETRIEVAL_AGENT_REACT_ENABLED=false`（默认值）时，`retrieval_agent_handler` 行为与 P11 封板状态完全一致
-- `retrieval_agent_trace.react_enabled` 为 `False`
-- `retrieval_agent_trace.react_scratchpad` 为 `None`（legacy 模式不写 scratchpad）
 - P11 集成测试（`test_p11_integration.py`）全部通过
 - `code_agent_handler`（P9 已封板）行为不变
 - `translate_agent_handler`（P10 已封板）行为不变
 - 三图主链结构（节点与边）未被修改
 - 有对应集成测试验证 P11 基线不退化
 
-### 3.3 retrieval_agent_trace 字段契约扩展固化
+---
 
-`retrieval_agent_trace` 字段结构已扩展并写死，实现不得自行增减必填字段：
+## 4. retrieval_agent_trace 字段契约（P12 定稿）
 
-**Legacy 模式（`react_enabled=False`，P11 行为不变）**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `agent_id` | str | 固定为 `"retrieval_agent"` |
-| `mode` | str | 固定为 `"legacy_chain"` |
-| `artifact_ref` | str | 非空，格式 `artifact://{request_id}/{agent_id}_{ts}` |
-| `retrieval_source` | str | 检索来源标识，如 `"knowledge_base"`、`"vector_store"` 或 `"mock"` |
-| `result_count` | int | 检索结果条数，≥ 0 |
-| `react_enabled` | bool | 固定为 `False` |
-| `react_scratchpad` | None | legacy 模式固定为 `None` |
-| `ts_ms` | int | Unix 毫秒时间戳 |
-
-**ReAct 模式（`react_enabled=True`，P12 新增）**：
+`retrieval_agent_trace` 字段结构（P12 后唯一模式）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `agent_id` | str | 固定为 `"retrieval_agent"` |
-| `mode` | str | 固定为 `"react"` |
+| `mode` | str | 固定为 `"react_loop"` |
 | `artifact_ref` | str | 非空，格式 `artifact://{request_id}/{agent_id}_{ts}` |
-| `retrieval_source` | str | 检索来源标识 |
+| `retrieval_source` | str | 检索来源标识，如 `"knowledge_base"` |
 | `result_count` | int | 检索结果条数，≥ 0 |
-| `react_enabled` | bool | 固定为 `True` |
-| `react_scratchpad` | list[dict] | 非 `None`，至少包含一个 step 记录；每个 step 含 `step`(int)、`action`(str)、`observation`(str) |
+| `total_steps` | int | ReAct 循环实际步数，≥ 1 |
+| `stopped_reason` | str | 停止原因：`FINAL_ANSWER`、`MAX_STEPS`、`ERROR`、`NO_LLM` |
 | `ts_ms` | int | Unix 毫秒时间戳 |
-
-> **注意**：P12 在 P11 契约基础上新增 `react_scratchpad` 字段（legacy 模式为 `None`，ReAct 模式为 list）。P11 已有的 7 个字段语义不变，P12 只做向后兼容扩展。
 
 ---
 
-## 4. 实现约束（定稿）
+## 5. 实现约束（定稿）
 
-### 4.1 retrieval_agent_handler 改造要求（已写死）
+### 5.1 retrieval_agent_handler 改造要求
 
 | 参数 | 值 | 说明 |
 |------|----|------|
-| 开关 | `RETRIEVAL_AGENT_REACT_ENABLED`（默认 `false`） | 与 P9/P10 模式一致；`false` 时走 legacy_chain，`true` 时走 ReAct |
-| legacy_chain 行为 | 与 P11 封板状态完全一致 | 不得修改 P11 已固化的 legacy_chain 逻辑 |
-| ReAct 路径 | 参照 `code_agent_handler.py` P9 封板状态 | 工具循环，写入 `react_scratchpad` |
-| `react_scratchpad` 字段 | legacy 模式为 `None`，ReAct 模式为 list[dict] | 每个 step 含 `step`、`action`、`observation` |
+| 模式 | 纯 ReAct 模式 | 无开关，无 legacy 分支 |
+| 工具 | 只读工具，`allow_side_effects=False` | 与 code_agent/translate_agent 一致 |
+| `react_scratchpad` | 写入 `out["react_scratchpad"]` | 供 JudgeAgent 和 trace 读取 |
 | `system_prompt_extra` | `"你是检索专家，负责从知识库中提取相关信息。"` | 不得在 P12 中修改 |
 | `AGENT_ID_RETRIEVAL` | `"retrieval_agent"` | 常量不变 |
+| max_steps 配置 | `RETRIEVAL_AGENT_REACT_MAX_STEPS`（默认 3） | 与 code_agent/translate_agent 模式一致 |
 
-### 4.2 开关行为约束
+### 5.2 与 P8/P9/P10/P11 观测的兼容性
 
-- `RETRIEVAL_AGENT_REACT_ENABLED=false`（默认）：行为与 P11 封板状态完全一致，`react_scratchpad=None`
-- `RETRIEVAL_AGENT_REACT_ENABLED=true`：走 ReAct 路径，`react_scratchpad` 非 `None`
-- 开关只影响 `retrieval_agent_handler` 内部路径，不影响三图主链结构
-- 开关不影响 `code_agent_handler`（P9）和 `translate_agent_handler`（P10）的行为
-
-### 4.3 与 P8/P9/P10/P11 观测的兼容性
-
-- P8 新增的 `p8_subgraph_failure_log`、`p8_graph_run_log` ledger 表不受影响
-- `P8_EXTENDED_METRICS_ENABLED` 开关行为不变
+- P8 新增的 ledger 表不受影响
 - P9 新增的 `code_agent_trace` 契约不受影响
 - P10 新增的 `translate_agent_trace` 契约不受影响
-- P11 新增的 `retrieval_agent_trace` 7 个字段语义不变（P12 只做向后兼容扩展）
-
-### 4.4 不破坏 P1～P11 契约
-
-- 不改动 `graph_contract.py` 中 P1～P11 已定义的字段语义
-- 不改动三图 builder 的节点与边
-- 不改动 `execution_profile` 的写入逻辑与语义
-- 不改动 `code_agent_handler.py`（P9 已封板）
-- 不改动 `translate_agent_handler.py`（P10 已封板）
-- 不改动 `agent_dispatch_handler.py` 的 allowlist（P11 已扩展，P12 不需要再改）
-- 不改动 `supervisor_dispatch_handler.py` 的候选 agent 列表（P11 已扩展，P12 不需要再改）
-
----
-
-## 5. 冻结非目标（不纳入 P12）
-
-以下事项**不属于 P12**，不得以任何名义混入：
-
-- RAG 全链路（记忆、向量库深度集成）
-- 全局 ReAct 全量默认开启
-- 多 Agent 循环 handoff 无界扩展
-- 并行 agent 试点
-- executor 业务扩权
-- 三图结构或 execution_profile 语义变更
-- 前端改造
-- P8 ledger 聚合逻辑的扩展或修改
-- P9 `code_agent_trace` 契约的修改
-- P10 `translate_agent_trace` 契约的修改
-- P11 `retrieval_agent_trace` 已有 7 个字段语义的修改（P12 只做向后兼容扩展）
-- P13 或更晚阶段能力
+- P11 新增的 `retrieval_agent_trace` 6 个字段中，`agent_id`、`artifact_ref`、`retrieval_source`、`result_count`、`ts_ms` 语义不变；`mode` 从 `"legacy_chain"` 改为 `"react_loop"`（P12 唯一破坏性变更，可接受，因未上线）
 
 ---
 
@@ -251,52 +188,54 @@ P12 **不得**：
 
 | 文件路径 | 改动说明 |
 |---------|----------|
-| `host_brain/app/handlers/retrieval_agent_handler.py` | 新增 ReAct 模式分支（`RETRIEVAL_AGENT_REACT_ENABLED` 开关）；扩展 `retrieval_agent_trace` 新增 `react_scratchpad` 字段 |
-| `.env.example` | 新增 `RETRIEVAL_AGENT_REACT_ENABLED=false` 说明 |
-| `tests/unit/test_retrieval_agent_handler.py` | 新增 ReAct 模式用例（开关行为 + react_scratchpad 契约 + 异常安全） |
+| `host_brain/app/handlers/retrieval_agent_handler.py` | 删除 legacy_chain 逻辑，接入 `run_react_loop`，更新 trace 契约 |
+| `.env.example` | 新增 `RETRIEVAL_AGENT_REACT_MAX_STEPS=3` 说明 |
+| `tests/unit/test_retrieval_agent_handler.py` | 改造为 ReAct 模式用例 |
 
 ### 新增文件
 
 | 文件路径 | 说明 |
 |---------|------|
-| `tests/integration/test_p12_integration.py` | P12 集成测试（ReAct 路径验证 + P11 基线不退化 + 文件完整性） |
+| `tests/integration/test_p12_integration.py` | P12 集成测试 |
 
 ### 不需要修改的文件（已就绪）
 
 | 文件路径 | 说明 |
 |---------|------|
 | `host_brain/app/handlers/agent_dispatch_handler.py` | P11 已扩展 allowlist，P12 不需要再改 |
-| `host_brain/app/handlers/supervisor_dispatch_handler.py` | P11 已扩展候选列表，P12 不需要再改 |
-| `host_brain/app/handlers/code_agent_handler.py` | P9 已封板，P12 不改动 |
-| `host_brain/app/handlers/translate_agent_handler.py` | P10 已封板，P12 不改动 |
+| `host_brain/app/handlers/code_agent_handler.py` | P9 已封板（P12 前已清理双模式），P12 不改动 |
+| `host_brain/app/handlers/translate_agent_handler.py` | P10 已封板（P12 前已清理双模式），P12 不改动 |
 | `host_brain/app/agents/react_loop.py` | P12 复用现有 ReAct 循环，不改动 |
 | `host_brain/app/agents/tool_registry.py` | P12 复用现有工具注册，不改动 |
 
-> **P12 与 P9/P10 的关键相似点**：P12 是对已有 handler（P11 封板状态）做 ReAct 化改造，与 P9（code_agent）、P10（translate_agent）的改造模式完全一致。改动面极窄（只改 `retrieval_agent_handler.py` + 测试文件 + `.env.example`）。
-
 ---
 
-## 7. 与现有文档的关系
+## 7. 冻结非目标（不纳入 P12）
 
-- **MULTI_AGENT_ARCH_REFACTOR_2026-03.md**：架构总则、阶段顺序与文档关系仍以此为总表；P12 作为第九轮正式基线候选，范围与验收以本文档为准。
-- **MULTI_AGENT_P11_SCOPE_2026-03.md**：P11 已封板，P12 以 P11 为基线前提，不回改 P11 结论。
-- **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md**：P12 不回改 P11 封板结论；P12 新增测试须与 P11 集成测试共存，不退化。
-- **MULTI_AGENT_P9_SCOPE_2026-03.md**：P12 ReAct 化模式参照 P9（code_agent ReAct 化）的实现模式。
-- **MULTI_AGENT_P10_SCOPE_2026-03.md**：P12 ReAct 化模式参照 P10（translate_agent ReAct 化）的实现模式。
+以下事项**不属于 P12**，不得以任何名义混入：
 
-若 P12_SCOPE 与其它文档在 P12 范围上冲突，以本文档为准；若涉及 P1～P11 已封板事实，以对应 seal result 为准。
+- RAG 全链路（记忆、向量库深度集成）
+- 多 Agent 循环 handoff 无界扩展
+- 并行 agent 试点
+- executor 业务扩权
+- 三图结构或 execution_profile 语义变更
+- 前端改造
+- P8 ledger 聚合逻辑的扩展或修改
+- P9 `code_agent_trace` 契约的修改
+- P10 `translate_agent_trace` 契约的修改
+- P13 或更晚阶段能力
 
 ---
 
 ## 8. 结论（待实施）
 
 - **P1～P11 已全部形成完整封板链路。**
-- **P12 唯一目标**：retrieval_agent 受控 ReAct 化（RETRIEVAL_AGENT_REACT_ENABLED 开关，双模式共存，P12-1）。
-- **3 条验收标准**：待实施后逐条验证。
+- **P12 唯一目标**：retrieval_agent 直接替换为 ReAct 模式（无开关，无双模式）。
+- **2 条验收标准**：待实施后逐条验证。
 - **第九轮正式基线候选 = P12**，待实施并验收通过后封板。
 
 ---
 
 ## 变更记录
 
-- 2026-03-17 v1.0：定稿。P12 唯一目标确定为「retrieval_agent 受控 ReAct 化」；3 条验收标准写死；实现约束、文件改动清单、冻结非目标补全。
+- 2026-03-17 v1.0：定稿。P12 唯一目标确定为「retrieval_agent ReAct 化」；原双模式方案调整为直接替换，不引入开关；同步记录 P9/P10 双模式清理结论。

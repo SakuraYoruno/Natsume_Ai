@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,6 @@ from host_brain.app.agents.agent_registry import AGENT_ID_RETRIEVAL
 # ---------------------------------------------------------------------------
 
 def _make_supervised_payload(request_id: str = "p11-int-001") -> dict[str, Any]:
-    """模拟 Supervised 图中 agent_dispatch 后传入 retrieval_agent_handler 的 payload。"""
     return {
         "request_id": request_id,
         "execution_profile": "WORKFLOW_SUPERVISED",
@@ -73,7 +73,7 @@ class TestRetrievalAgentInSupervisedContext:
         artifacts = result.get("agent_artifacts") or {}
         art = artifacts.get(AGENT_ID_RETRIEVAL)
         assert art is not None
-        assert art.get("artifact_ref"), "artifact_ref 不得为空"
+        assert art.get("artifact_ref")
 
     def test_artifact_ref_contains_request_id(self):
         """artifact_ref 包含 request_id。"""
@@ -98,15 +98,15 @@ class TestRetrievalAgentInSupervisedContext:
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
         result = retrieval_agent_handler(_make_supervised_payload())
         trace = result["retrieval_agent_trace"]
-        required = {"agent_id", "mode", "artifact_ref", "retrieval_source", "result_count", "react_enabled", "ts_ms"}
+        required = {"agent_id", "mode", "artifact_ref", "retrieval_source", "result_count", "ts_ms"}
         for field in required:
             assert field in trace, f"trace 缺少字段: {field!r}"
         assert trace["agent_id"] == AGENT_ID_RETRIEVAL
         assert trace["mode"] == "legacy_chain"
-        assert trace["react_enabled"] is False
+        assert "react_enabled" not in trace, "react_enabled 预留字段已删除"
 
     def test_does_not_modify_supervisor_decision(self):
-        """retrieval_agent_handler 不修改 supervisor_decision（不破坏 Supervised 图主链）。"""
+        """retrieval_agent_handler 不修改 supervisor_decision。"""
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
         payload = _make_supervised_payload()
         original_decision = dict(payload["supervisor_decision"])
@@ -124,7 +124,7 @@ class TestRetrievalAgentInSupervisedContext:
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
         result = retrieval_agent_handler(_make_supervised_payload())
         trace = result["retrieval_agent_trace"]
-        assert trace["result_count"] == 2  # _make_supervised_payload 中有 2 条结果
+        assert trace["result_count"] == 2
 
     def test_retrieval_source_from_workbench_output(self):
         """retrieval_source 从 workbench_retrieval 读取。"""
@@ -187,9 +187,7 @@ class TestAgentDispatchAllowlistExtension:
             },
         )
         artifacts = result.get("agent_artifacts") or {}
-        assert AGENT_ID_RETRIEVAL in artifacts, (
-            "agent_dispatch_handler 应将 retrieval_agent 分派到 retrieval_agent_handler"
-        )
+        assert AGENT_ID_RETRIEVAL in artifacts
 
 
 # ---------------------------------------------------------------------------
@@ -203,60 +201,56 @@ class TestP10BaselineNotDegraded:
         """P10 translate_agent_handler 仍可导入。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler  # noqa: F401
 
-    def test_translate_agent_trace_legacy_mode_still_works(self):
-        """P10 translate_agent_handler legacy 模式在 P11 后仍正常工作。"""
+    def test_translate_agent_trace_react_mode_still_works(self):
+        """P10 translate_agent_handler ReAct 模式在 P11 后仍正常工作。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-        payload = {
-            "request_id": "p11-p10-baseline-001",
-            "user_input": "翻译这段文字",
-            "workbench_translate": {
-                "gateway_status": "OK",
-                "payload": {"translation": "Translate this text"},
-            },
+        gateway = MagicMock()
+        gateway.complete.return_value = {
+            "content": json.dumps(
+                {"thought": "直接翻译", "action_type": "final_answer", "final_answer": "Artificial Intelligence"},
+                ensure_ascii=False,
+            )
         }
-        with patch.dict(os.environ, {"TRANSLATE_AGENT_REACT_ENABLED": "false"}):
-            result = translate_agent_handler(payload)
+        payload = {"request_id": "p11-p10-baseline-001", "user_input": "翻译这段文字"}
+        result = translate_agent_handler(payload, context={"gateway": gateway})
         trace = result.get("translate_agent_trace") or {}
-        assert trace.get("mode") == "legacy_chain"
-        assert trace.get("react_enabled") is False
+        assert trace.get("mode") == "react_loop"
 
     def test_translate_agent_trace_contract_unchanged(self):
-        """P10 translate_agent_trace 契约字段不变。"""
+        """P10 translate_agent_trace 契约字段不变（react_enabled 已删除）。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-        payload = {
-            "request_id": "p11-p10-contract-001",
-            "workbench_translate": {
-                "gateway_status": "OK",
-                "payload": {"translation": "Hello"},
-            },
+        gateway = MagicMock()
+        gateway.complete.return_value = {
+            "content": json.dumps(
+                {"thought": "翻译", "action_type": "final_answer", "final_answer": "Hello"},
+                ensure_ascii=False,
+            )
         }
-        with patch.dict(os.environ, {"TRANSLATE_AGENT_REACT_ENABLED": "false"}):
-            result = translate_agent_handler(payload)
+        payload = {"request_id": "p11-p10-contract-001", "user_input": "翻译"}
+        result = translate_agent_handler(payload, context={"gateway": gateway})
         trace = result.get("translate_agent_trace") or {}
-        # P10 契约字段
-        for field in ("agent_id", "mode", "artifact_ref", "gateway_status", "react_enabled", "ts_ms"):
+        for field in ("agent_id", "mode", "artifact_ref", "total_steps", "stopped_reason", "ts_ms"):
             assert field in trace, f"P10 translate_agent_trace 字段 {field!r} 不得消失"
+        assert "react_enabled" not in trace
 
     def test_code_agent_handler_importable(self):
         """P9 code_agent_handler 仍可导入。"""
         from host_brain.app.handlers.code_agent_handler import code_agent_handler  # noqa: F401
 
-    def test_code_agent_trace_legacy_mode_still_works(self):
-        """P9 code_agent_handler legacy 模式在 P11 后仍正常工作。"""
+    def test_code_agent_trace_react_mode_still_works(self):
+        """P9 code_agent_handler ReAct 模式在 P11 后仍正常工作。"""
         from host_brain.app.handlers.code_agent_handler import code_agent_handler
-        payload = {
-            "request_id": "p11-p9-baseline-001",
-            "user_input": "写代码",
-            "workbench_code_assist": {
-                "gateway_status": "OK",
-                "payload": {"code_draft": "def foo(): pass"},
-            },
+        gateway = MagicMock()
+        gateway.complete.return_value = {
+            "content": json.dumps(
+                {"thought": "直接给出答案", "action_type": "final_answer", "final_answer": "代码草案"},
+                ensure_ascii=False,
+            )
         }
-        with patch.dict(os.environ, {"CODE_AGENT_REACT_ENABLED": "false"}):
-            result = code_agent_handler(payload)
+        payload = {"request_id": "p11-p9-baseline-001", "user_input": "写代码"}
+        result = code_agent_handler(payload, context={"gateway": gateway})
         trace = result.get("code_agent_trace") or {}
-        assert trace.get("mode") == "legacy_chain"
-        assert trace.get("react_enabled") is False
+        assert trace.get("mode") == "react_loop"
 
     def test_p10_integration_test_still_importable(self):
         """P10 集成测试模块仍可导入（不退化）。"""
@@ -299,11 +293,11 @@ class TestP10BaselineNotDegraded:
             "budget_breach_metrics", "agent_metrics",
         ]
         for field in required_p7_fields:
-            assert field in result, f"P7 字段 {field!r} 在 P11 后不得消失"
+            assert field in result
 
 
 # ---------------------------------------------------------------------------
-# P11-1d：文件完整性（P11 新增文件存在，P10 基线文件不退化）
+# P11-1d：文件完整性
 # ---------------------------------------------------------------------------
 
 def test_p11_new_files_exist():
@@ -389,20 +383,19 @@ class TestRetrievalAgentHandlerErrorSafetyIntegration:
                 "payload": {"results": [{"id": "doc-1"}], "summary": "找到结果"},
             },
         }
-        payload_translate = {
-            "request_id": "p11-coexist-002",
-            "workbench_translate": {
-                "gateway_status": "OK",
-                "payload": {"translation": "Hello"},
-            },
+        gateway = MagicMock()
+        gateway.complete.return_value = {
+            "content": json.dumps(
+                {"thought": "翻译", "action_type": "final_answer", "final_answer": "Hello"},
+                ensure_ascii=False,
+            )
         }
+        payload_translate = {"request_id": "p11-coexist-002", "user_input": "翻译B"}
 
         result_retrieval = retrieval_agent_handler(payload_retrieval)
-        with patch.dict(os.environ, {"TRANSLATE_AGENT_REACT_ENABLED": "false"}):
-            result_translate = translate_agent_handler(payload_translate)
+        result_translate = translate_agent_handler(payload_translate, context={"gateway": gateway})
 
         assert result_retrieval["retrieval_agent_trace"]["mode"] == "legacy_chain"
-        assert result_translate["translate_agent_trace"]["mode"] == "legacy_chain"
-        # 互不干扰
+        assert result_translate["translate_agent_trace"]["mode"] == "react_loop"
         assert "retrieval_agent_trace" not in result_translate
         assert "translate_agent_trace" not in result_retrieval
