@@ -39,6 +39,9 @@ _logger = logging.getLogger("Natsume.tool_routes")
 # ---------------------------------------------------------------------------
 router = APIRouter(prefix="/tools", tags=["tools"])
 
+# 别名路由：兼容请求 /tool_kits 的前端（如 UAT 场景），返回与 /tools/meta-pack 相同结构
+tool_kits_alias_router = APIRouter(prefix="", tags=["tools"])
+
 # ---------------------------------------------------------------------------
 # 依赖注入（外部注入 broker/catalog/ledger provider，消除循环导入风险）
 # ---------------------------------------------------------------------------
@@ -248,6 +251,12 @@ async def get_tool_meta_pack(
     except Exception as exc:
         _logger.error("get_tool_meta_pack failed: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@tool_kits_alias_router.get("/tool_kits", response_model=ToolMetaPackResponse)
+async def get_tool_kits_alias() -> ToolMetaPackResponse:
+    """兼容别名：GET /tool_kits 与 GET /tools/meta-pack 返回相同结构，便于 UAT/外部前端统一访问。"""
+    return await get_tool_meta_pack(query="", k=20, include_write=True)
 
 
 # ---------------------------------------------------------------------------

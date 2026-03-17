@@ -22,6 +22,8 @@ TOOL_META_REQUIRED_KEYS = (
 TOOL_META_ALLOWED_KEYS = set(TOOL_META_REQUIRED_KEYS)
 SIDE_EFFECT_LEVELS = {"READ", "WRITE"}
 AUTH_LEVELS = {"NONE", "APPROVAL", "CONFIRM"}
+# 兼容 MCP 等来源的别名：LOW/MEDIUM/HIGH -> NONE/APPROVAL/CONFIRM
+AUTH_LEVEL_ALIASES = {"LOW": "NONE", "MEDIUM": "APPROVAL", "HIGH": "CONFIRM"}
 
 
 @dataclass(frozen=True)
@@ -123,8 +125,11 @@ def normalize_tool_meta(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("tool meta schema_hash must start with sha256:")
     if normalized["side_effect_level"] not in SIDE_EFFECT_LEVELS:
         raise ValueError(f"unsupported side_effect_level: {normalized['side_effect_level']}")
+    raw_auth = normalized["auth_level"]
+    if raw_auth in AUTH_LEVEL_ALIASES:
+        normalized["auth_level"] = AUTH_LEVEL_ALIASES[raw_auth]
     if normalized["auth_level"] not in AUTH_LEVELS:
-        raise ValueError(f"unsupported auth_level: {normalized['auth_level']}")
+        raise ValueError(f"unsupported auth_level: {raw_auth}")
     if not normalized["domain_tags"]:
         raise ValueError("tool meta domain_tags must be non-empty list[str]")
     return normalized

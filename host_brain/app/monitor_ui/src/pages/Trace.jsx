@@ -10,11 +10,11 @@ import {
   MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2, Bookmark, Activity } from 'lucide-react'
+import { Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2, Bookmark, Activity, Users } from 'lucide-react'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import { applyDagreLayout } from '../utils/traceLayout.js'
-import { fetchTraceNodes, fetchCheckpoints, fetchChainStats } from '../api/obs.js'
+import { fetchTraceNodes, fetchTraceStreamEvents, fetchGraphSchema, fetchCheckpoints, fetchChainStats, fetchObsMetrics } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
@@ -405,6 +405,9 @@ export default function Trace() {
   const [traceData, setTraceData] = useState(null)   // 原始 trace 数据（甘特图用）
   const [viewMode, setViewMode] = useState('dag')    // 'dag' | 'gantt'
   const [checkpoints, setCheckpoints] = useState([]) // TODO-42: checkpoint 列表
+  const [streamEvents, setStreamEvents] = useState(null) // Chat Stream SSE 事件流
+  const [graphSchema, setGraphSchema] = useState(null)   // 图编排（节点/边定义）
+  const [agentMetrics, setAgentMetrics] = useState(null) // Agent 编排（选派 / handoff）
   const containerRef = useRef(null)
 
   const handleSelect = useCallback((data) => setSelectedNode(data), [])
@@ -426,6 +429,10 @@ export default function Trace() {
       const { nodes: ln, edges: le } = buildFlowData(data, handleSelect)
       setNodes(ln)
       setEdges(le)
+      setStreamEvents(null)
+      if (id !== 'mock-req-001' && !id.startsWith('mock')) {
+        fetchTraceStreamEvents(id).then(setStreamEvents).catch(() => setStreamEvents({ events: [], count: 0 }))
+      }
       // TODO-42: 加载与该 request_id 关联的 checkpoint
       try {
         const cpData = await fetchCheckpoints({ limit: 10 })
@@ -446,6 +453,14 @@ export default function Trace() {
   useEffect(() => {
     if (initialId) load(initialId)
   }, []) // eslint-disable-line
+
+  useEffect(() => {
+    fetchGraphSchema().then(setGraphSchema).catch(() => setGraphSchema(null))
+  }, [])
+
+  useEffect(() => {
+    fetchObsMetrics().then((d) => setAgentMetrics(d?.agent_metrics ?? null)).catch(() => setAgentMetrics(null))
+  }, [])
 
   const toggleFullscreen = () => {
     if (!fullscreen) {
@@ -647,6 +662,146 @@ export default function Trace() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Chat Stream SSE 事件流 + 图编排 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* SSE 事件流：当前 request 的 stream 事件 */}
+        <div className="card overflow-hidden flex flex-col">
+          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <Activity size={14} className="text-slate-600" />
+            <span className="text-sm font-semibold text-slate-700">Chat Stream SSE 事件流</span>
+            {streamEvents != null && (
+              <span className="text-xs text-slate-500">共 {streamEvents.count ?? streamEvents.events?.length ?? 0} 条</span>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto max-h-64 min-h-[120px]">
+            {streamEvents == null && traceData && !inputId.startsWith('mock') && (
+              <div className="p-4 text-center text-gray-400 text-sm">加载 SSE 事件中…</div>
+            )}
+            {streamEvents != null && (!streamEvents.events?.length) && (
+              <div className="p-4 text-center text-gray-400 text-sm">该请求暂无 SSE 事件记录</div>
+            )}
+            {streamEvents?.events?.length > 0 && (
+              <ul className="divide-y divide-gray-100 text-xs">
+                {streamEvents.events.map((ev, i) => (
+                  <li key={i} className="px-4 py-2 flex flex-wrap gap-x-3 gap-y-1">
+                    <span className="font-mono text-gray-500">{ev.ts_ms != null ? `${ev.ts_ms}ms` : '-'}</span>
+                    <span className="text-blue-600">{ev.phase ?? '-'}</span>
+                    <span className="text-amber-600">{ev.event_type ?? '-'}</span>
+                    {ev.node_id && <span className="text-gray-700">node: {ev.node_id}</span>}
+                    {ev.chunk != null && ev.chunk !== '' && (
+                      <span className="text-gray-500 truncate max-w-[200px]" title={String(ev.chunk)}>
+                        {String(ev.chunk).slice(0, 40)}{String(ev.chunk).length > 40 ? '…' : ''}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!traceData && (
+              <div className="p-4 text-center text-gray-400 text-sm">查询链路后显示该请求的 SSE 事件</div>
+            )}
+          </div>
+        </div>
+
+        {/* 图编排：当前图定义（节点与边） */}
+        <div className="card overflow-hidden flex flex-col">
+          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <GitBranch size={14} className="text-slate-600" />
+            <span className="text-sm font-semibold text-slate-700">图编排</span>
+            {graphSchema && (
+              <span className="text-xs text-slate-500">
+                {graphSchema.graph_id ?? 'default'} · {graphSchema.nodes?.length ?? 0} 节点 · {graphSchema.edges?.length ?? 0} 边
+              </span>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto max-h-64 min-h-[120px]">
+            {!graphSchema && (
+              <div className="p-4 text-center text-gray-400 text-sm">加载图定义中…</div>
+            )}
+            {graphSchema && (
+              <div className="p-4 space-y-3 text-xs">
+                <div>
+                  <span className="text-gray-500">入口节点：</span>
+                  <span className="font-mono text-gray-800">{graphSchema.entry_node ?? '-'}</span>
+                </div>
+                {graphSchema.active_nodes?.length > 0 && (
+                  <div>
+                    <span className="text-gray-500">活跃节点：</span>
+                    <span className="font-mono text-gray-800">{graphSchema.active_nodes.join(', ')}</span>
+                  </div>
+                )}
+                {graphSchema.nodes?.length > 0 && (
+                  <div>
+                    <div className="text-gray-500 mb-1">节点列表</div>
+                    <ul className="font-mono text-gray-700 space-y-0.5">
+                      {(graphSchema.nodes.slice(0, 20)).map((n, i) => (
+                        <li key={i}>{n.node_id ?? n.display_name ?? '-'}</li>
+                      ))}
+                      {graphSchema.nodes.length > 20 && (
+                        <li className="text-gray-400">… 共 {graphSchema.nodes.length} 个</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+                {graphSchema.edges?.length > 0 && (
+                  <div>
+                    <div className="text-gray-500 mb-1">边</div>
+                    <ul className="font-mono text-gray-700 space-y-0.5">
+                      {(graphSchema.edges.slice(0, 15)).map((e, i) => (
+                        <li key={i}>{e.source ?? e.from} → {e.target ?? e.to}</li>
+                      ))}
+                      {graphSchema.edges.length > 15 && (
+                        <li className="text-gray-400">… 共 {graphSchema.edges.length} 条</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Agent 编排：所有 agent 选派 / handoff 汇总 */}
+      <div className="card overflow-hidden flex flex-col">
+        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+          <Users size={14} className="text-slate-600" />
+          <span className="text-sm font-semibold text-slate-700">Agent 编排</span>
+          {agentMetrics && (
+            <span className="text-xs text-slate-500">
+              Handoff {agentMetrics.agent_hop_count ?? 0} 次 · 均 {agentMetrics.avg_hops_per_request ?? '—'} hop/请求
+              {agentMetrics.handoff_trace_complete_rate_pct != null && ` · 完整率 ${agentMetrics.handoff_trace_complete_rate_pct}%`}
+            </span>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto max-h-48 min-h-[80px] p-4">
+          {!agentMetrics && (
+            <div className="text-center text-gray-400 text-sm">加载 Agent 指标中…</div>
+          )}
+          {agentMetrics?.agent_dispatch_count && Object.keys(agentMetrics.agent_dispatch_count).length > 0 ? (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-gray-500">各 Agent 选派次数</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(agentMetrics.agent_dispatch_count)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([agentId, count]) => (
+                    <span key={agentId} className="inline-flex items-center px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-medium">
+                      {agentId} <span className="text-slate-500 ml-1">{count}</span>
+                    </span>
+                  ))}
+              </div>
+              {agentMetrics.switches && Object.keys(agentMetrics.switches).length > 0 && (
+                <div className="text-xs text-gray-500 mt-2">
+                  能力开关: {Object.entries(agentMetrics.switches).map(([k, v]) => `${k}=${v}`).join(', ')}
+                </div>
+              )}
+            </div>
+          ) : agentMetrics && (
+            <div className="text-sm text-gray-400">暂无 Agent 选派数据（依赖 stream_events 写入）</div>
+          )}
+        </div>
       </div>
 
       {/* TODO-72: Top 5 最慢节点排行榜（有 traceData 时显示） */}

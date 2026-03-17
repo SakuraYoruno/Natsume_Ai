@@ -34,6 +34,13 @@ export function fetchServicesHealth(params = {}) {
   return request(`/obs/services/health${qs ? '?' + qs : ''}`)
 }
 
+/**
+ * 观测聚合指标（含 M-MA4 多 agent 专项：agent_hop_count、agent_dispatch_count、switches 等）
+ */
+export function fetchObsMetrics() {
+  return request('/obs/metrics')
+}
+
 // ===== Sessions =====
 
 /**
@@ -60,6 +67,21 @@ export function fetchSessions(params = {}) {
  */
 export function fetchTraceNodes(requestId) {
   return request(`/obs/trace/${encodeURIComponent(requestId)}`)
+}
+
+/**
+ * 获取指定 request_id 的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED 等）
+ * @param {string} requestId
+ */
+export function fetchTraceStreamEvents(requestId) {
+  return request(`/obs/trace/${encodeURIComponent(requestId)}/stream_events`)
+}
+
+/**
+ * 获取当前 Host 图编排定义（节点、边），供展示图拓扑
+ */
+export function fetchGraphSchema() {
+  return request('/obs/graph/schema')
 }
 
 // ===== Metrics =====
@@ -220,6 +242,17 @@ export function rollbackCanonProposal(proposalId, body = {}) {
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+/**
+ * TODO-44: ArtifactVault Manifest 统计（ACTIVE/UNDONE/GC、可逆比例、最近 manifest 列表）
+ * @param {object} params - { limit }
+ */
+export function fetchVaultStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/vault/stats${qs ? '?' + qs : ''}`)
 }
 
 // ===== TODO-82: 主链路节点统计 =====

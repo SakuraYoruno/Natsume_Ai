@@ -144,8 +144,20 @@ class EdgeVoicePipeline:
             ):
                 active = self.speech_queue.active_playback or {}
                 synth_event = dict(active.get("synth_event") or {})
+                speak_event = dict(active.get("speak_event") or {})
+                payload_for_vts = dict(payload)
+                if not payload_for_vts.get("emotion_tag") and speak_event.get("emotion_tag"):
+                    payload_for_vts["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
+                if "emotion_intensity" not in payload_for_vts and speak_event.get("emotion_intensity") is not None:
+                    payload_for_vts["emotion_intensity"] = speak_event["emotion_intensity"]
+                _etag = str(payload_for_vts.get("emotion_tag") or "NEUTRAL").strip().upper()
+                _has_audio = bool(synth_event and synth_event.get("audio_data"))
+                LOGGER.info(
+                    "VTS start: emotion_tag=%s synth_has_audio=%s (mouth_sync needs audio)",
+                    _etag, _has_audio,
+                )
                 expression_result, talk_result, mouth_sync_debug = self._start_vts_for_payload(
-                    payload,
+                    payload_for_vts,
                     synth_event=synth_event,
                 )
 
@@ -192,8 +204,13 @@ class EdgeVoicePipeline:
                 and next_start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
             ):
                 active = self.speech_queue.active_playback or {}
-                payload = dict(active.get("payload") or active.get("speak_event") or {})
+                payload = dict(active.get("payload") or {})
+                speak_event = dict(active.get("speak_event") or {})
                 synth_event = dict(active.get("synth_event") or {})
+                if not payload.get("emotion_tag") and speak_event.get("emotion_tag"):
+                    payload["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
+                if "emotion_intensity" not in payload and speak_event.get("emotion_intensity") is not None:
+                    payload["emotion_intensity"] = speak_event["emotion_intensity"]
                 self._start_vts_for_payload(payload, synth_event=synth_event)
         return result
 
@@ -385,6 +402,9 @@ class EdgeVoicePipeline:
             mouth_sync_debug = self._start_mouth_sync(synth_event)
         elif not synth_event:
             mouth_sync_debug["reason"] = "missing_synth_event"
+            LOGGER.warning(
+                "VTS mouth sync skipped: no synth_event (Edge needs local TTS with audio_data, e.g. SoVITS, for lip sync)"
+            )
         self._mouth_sync_debug = dict(mouth_sync_debug)
         return expression_result, talk_result, dict(mouth_sync_debug)
 
@@ -430,7 +450,10 @@ class EdgeVoicePipeline:
             debug["state"] = "skipped"
             debug["reason"] = "empty_envelope"
             self._mouth_sync_debug = dict(debug)
-            LOGGER.warning("mouth sync skipped: %s", debug)
+            LOGGER.warning(
+                "VTS mouth sync skipped: empty_envelope (synth_event has no audio_data or sample_rate; "
+                "ensure Edge TTS returns audio_data, e.g. SoVITS synthesizer)"
+            )
             return debug
         debug["envelope_min"] = round(min(envelope), 4)
         debug["envelope_max"] = round(max(envelope), 4)
@@ -462,13 +485,18 @@ class EdgeVoicePipeline:
                 debug["state"] = "stopped"
             self._mouth_sync_debug = dict(debug)
 
+        plan = getattr(self.vts_driver, "_mouth_parameter_plan", None) or {}
+        param_names = list(plan.get("selected") or plan.get("mouth") or [])
+        LOGGER.info(
+            "mouth sync started: envelope_points=%s param_names=%s",
+            len(envelope), param_names or "(fallback)",
+        )
         self._mouth_sync_thread = threading.Thread(
             target=_runner,
             name="edge-vts-mouth-sync",
             daemon=True,
         )
         self._mouth_sync_thread.start()
-        LOGGER.info("mouth sync started: %s", debug)
         return dict(debug)
 
     @staticmethod

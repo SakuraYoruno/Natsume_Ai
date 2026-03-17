@@ -387,6 +387,7 @@ def _normalize_auth_level(value: Any, *, side_effect: str) -> str:
     if value is None or str(value).strip() == "":
         return "APPROVAL" if side_effect == "WRITE" else "NONE"
     auth = str(value).strip().upper()
+    auth = {"LOW": "NONE", "MEDIUM": "APPROVAL", "HIGH": "CONFIRM"}.get(auth, auth)
     if auth not in AUTH_LEVELS:
         raise ValueError(f"unsupported MCP auth_level: {value}")
     if side_effect == "READ" and auth != "NONE":

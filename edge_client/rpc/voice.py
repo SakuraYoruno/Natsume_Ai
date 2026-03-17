@@ -215,6 +215,13 @@ class VoiceRpcContract:
                 ts_ms=now_value,
             )
 
+        raw_intensity = payload.get("emotion_intensity")
+        emotion_intensity: float | None = None
+        if raw_intensity is not None:
+            try:
+                emotion_intensity = max(0.0, min(1.0, float(raw_intensity)))
+            except (TypeError, ValueError):
+                pass
         event = {
             "session_id": session_id,
             "event_type": EVENT_SPEAK,
@@ -227,6 +234,8 @@ class VoiceRpcContract:
             "voice_profile": str(payload.get("voice_profile") or "default"),
             "ts_ms": now_value,
         }
+        if emotion_intensity is not None:
+            event["emotion_intensity"] = emotion_intensity
         return self._accept(
             request_id=request_id,
             session_id=session_id,

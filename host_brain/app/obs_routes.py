@@ -44,8 +44,14 @@ _LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
     "workbench_code_assist":    {"role": "代码辅助",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
 }
 
-# 边缘服务列表
-_EDGE_SERVICES = ["ASR", "TTS", "VTS", "VOICE_RESOURCE_GATE", "AIRLOCK", "GOVERNOR"]
+# 边缘服务：与 ServiceHealthAggregator 的 _EDGE_SERVICES 一致（service_id）；value 为 voice_event_log 的 event_type 前缀列表
+_EDGE_SERVICE_EVENT_PREFIXES: Dict[str, List[str]] = {
+    "asr": ["ASR"],
+    "tts": ["TTS"],
+    "vts": ["VTS"],
+    "audio_playback": ["VOICE_RESOURCE_GATE", "AUDIO", "AUDIO_PLAYBACK"],
+    "edge_rpc": ["EDGE", "RPC", "GOVERNOR", "AIRLOCK"],
+}
 
 # ---------------------------------------------------------------------------
 # 依赖注入
@@ -378,33 +384,83 @@ async def get_services_health(
 
 
 def _build_probe_registry(ledger, since_ms: int):
-    """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。"""
-    from host_brain.observability.service_health_aggregator import ServiceHealthResult
+    """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
+    若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
+    优先使用心跳缓存（service_health_heartbeat）：若某服务在 TTL 内有心跳结果，则直接返回，不再依赖 ledger。
+    """
+    from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
+    from host_brain.observability import service_health_heartbeat as heartbeat
 
-    # 预加载所需数据
+    now_ms = _now_ms()
+    host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
+    # 预加载当前窗口数据
     try:
-        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=_now_ms())
+        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now_ms)
     except Exception:
         voice_rows = []
     try:
-        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
+        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now_ms)
     except Exception:
         llm_rows = []
+
+    # 若当前窗口无任何记录，用 7 日窗口回退，以便至少能显示历史状态
+    fallback_since_ms = now_ms - 7 * 24 * 60 * 60 * 1000
+    if (not voice_rows and not llm_rows) and since_ms > fallback_since_ms:
+        try:
+            voice_rows = ledger.fetch_by_time_range(
+                "voice_event_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
+            )
+        except Exception:
+            pass
+        try:
+            llm_rows = ledger.fetch_by_time_range(
+                "llm_node_call_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
+            )
+        except Exception:
+            pass
 
     registry = {}
     extra_data = {}  # service_id -> {success_rate, call_count, role, provider, model_id}
 
-    # 边缘服务探测
-    for svc in _EDGE_SERVICES:
-        svc_rows = [r for r in voice_rows if str(r.get("event_type", "")).upper().startswith(svc)]
+    # 边缘服务探测：优先用心跳缓存，否则用 ledger
+    for sid, prefixes in _EDGE_SERVICE_EVENT_PREFIXES.items():
+        cached = heartbeat.get_cached(sid)
+        if cached:
+            cap = (
+                str(cached.get("status") or "UNKNOWN").strip().upper(),
+                cached.get("latency_ms"),
+                cached.get("last_check_ts"),
+                sid,
+                cached.get("name") or sid.upper().replace("_", " "),
+            )
+
+            async def _make_edge_probe_cached(_sid_ignored=None, c=cap):
+                st, p95, last_ts, sid_val, dname = c
+                try:
+                    p95_int = int(p95) if p95 is not None else None
+                except (TypeError, ValueError):
+                    p95_int = None
+                try:
+                    last_int = int(last_ts) if last_ts is not None else None
+                except (TypeError, ValueError):
+                    last_int = None
+                return ServiceHealthResult(sid_val, dname, "edge", st, latency_ms=p95_int, last_check_ts=last_int)
+
+            registry[sid] = _make_edge_probe_cached
+            extra_data[sid] = {"success_rate": None, "call_count": 0}
+            continue
+        svc_rows = [
+            r for r in voice_rows
+            if any(str(r.get("event_type", "")).upper().startswith(p) for p in prefixes)
+        ]
         health = _compute_node_health(svc_rows)
         _status = health["status"]
         _p95 = health["p95_ms"]
         _last = health["last_call_ts"]
-        sid = svc.lower()
+        display_name = sid.upper().replace("_", " ") if sid == "edge_rpc" else sid.upper()
 
-        async def _make_edge_probe(s=_status, p=_p95, l=_last, _sid=sid):
-            return ServiceHealthResult(_sid, _sid.upper(), "edge", s, latency_ms=p, last_check_ts=l)
+        async def _make_edge_probe(s=_status, p=_p95, l=_last, _sid=sid, _dname=display_name):
+            return ServiceHealthResult(_sid, _dname, "edge", s, latency_ms=p, last_check_ts=l)
 
         registry[sid] = _make_edge_probe
         extra_data[sid] = {
@@ -412,8 +468,69 @@ def _build_probe_registry(ledger, since_ms: int):
             "call_count":   health.get("call_count", 0),
         }
 
-    # LLM 节点探测
+    # Host 侧 15 服务（llm_gateway, neo4j, ...）：优先用心跳缓存，否则无 probe → aggregator 返回 UNKNOWN
+    for svc in host_services_for_aggregator:
+        sid = svc["service_id"]
+        if sid in registry:
+            continue
+        cached = heartbeat.get_cached(sid)
+        if cached:
+            cap = (
+                str(cached.get("status") or "UNKNOWN").strip().upper(),
+                cached.get("latency_ms"),
+                cached.get("last_check_ts"),
+                sid,
+                cached.get("name") or svc.get("name") or sid,
+            )
+
+            async def _make_host_probe_cached(_sid_ignored=None, c=cap):
+                st, p95, last_ts, sid_val, dname = c
+                try:
+                    p95_int = int(p95) if p95 is not None else None
+                except (TypeError, ValueError):
+                    p95_int = None
+                try:
+                    last_int = int(last_ts) if last_ts is not None else None
+                except (TypeError, ValueError):
+                    last_int = None
+                return ServiceHealthResult(sid_val, dname, "host", st, latency_ms=p95_int, last_check_ts=last_int)
+
+            registry[sid] = _make_host_probe_cached
+            extra_data[sid] = {"success_rate": None, "call_count": 0}
+
+    # LLM 节点探测：优先用心跳缓存（Host 整体），否则用 ledger
     for node_id, meta in _LLM_NODE_REGISTRY.items():
+        cached = heartbeat.get_cached(node_id)
+        if cached:
+            cap = (
+                str(cached.get("status") or "UNKNOWN").strip().upper(),
+                cached.get("latency_ms"),
+                cached.get("last_check_ts"),
+                node_id,
+                meta,
+            )
+
+            async def _make_llm_probe_cached(_sid_ignored=None, c=cap):
+                st, p95, last_ts, nid, m = c
+                try:
+                    p95_int = int(p95) if p95 is not None else None
+                except (TypeError, ValueError):
+                    p95_int = None
+                try:
+                    last_int = int(last_ts) if last_ts is not None else None
+                except (TypeError, ValueError):
+                    last_int = None
+                return ServiceHealthResult(nid, m["role"], "host", st, latency_ms=p95_int, last_check_ts=last_int)
+
+            registry[node_id] = _make_llm_probe_cached
+            extra_data[node_id] = {
+                "role": meta["role"],
+                "provider": meta["provider"],
+                "model_id": meta["model_id"],
+                "success_rate": None,
+                "call_count": 0,
+            }
+            continue
         node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
         health = _compute_node_health(node_rows)
         _status = health["status"]
@@ -637,6 +754,131 @@ async def get_trace(request_id: str):
         ts_ms=row_dict.get("ts_ms", _now_ms()),
         timestamp=_now_ms(),
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
+# ---------------------------------------------------------------------------
+class StreamEventItem(BaseModel):
+    request_id: str
+    graph_id: str
+    phase: str
+    event_type: str
+    node_id: Optional[str] = None
+    chunk: Optional[str] = None
+    ts_ms: int
+
+
+class TraceStreamEventsResponse(BaseModel):
+    request_id: str
+    events: List[StreamEventItem]
+    count: int
+    timestamp: int
+
+
+@router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
+async def get_trace_stream_events(request_id: str):
+    """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
+    try:
+        from host_brain.integrations.graph_evidence import get_evidence_plane
+        ep = get_evidence_plane()
+        rows = ep.query_stream_events(request_id=request_id)
+    except Exception as exc:
+        logger.debug("get_trace_stream_events: %s", exc)
+        rows = []
+    events = [
+        StreamEventItem(
+            request_id=str(r.get("request_id", "")),
+            graph_id=str(r.get("graph_id", "")),
+            phase=str(r.get("phase", "")),
+            event_type=str(r.get("event_type", "")),
+            node_id=r.get("node_id"),
+            chunk=r.get("chunk"),
+            ts_ms=int(r.get("ts_ms") or 0),
+        )
+        for r in rows
+    ]
+    return TraceStreamEventsResponse(
+        request_id=request_id,
+        events=events,
+        count=len(events),
+        timestamp=_now_ms(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/graph/schema — 图的编排（当前 Host 图定义：节点与边）
+# ---------------------------------------------------------------------------
+class GraphSchemaNode(BaseModel):
+    node_id: str
+    display_name: Optional[str] = None
+
+
+class GraphSchemaEdge(BaseModel):
+    source: str
+    target: str
+
+
+class GraphSchemaResponse(BaseModel):
+    graph_id: str
+    version: str
+    entry_node: Optional[str] = None
+    active_nodes: List[str] = Field(default_factory=list)
+    nodes: List[GraphSchemaNode] = Field(default_factory=list)
+    edges: List[GraphSchemaEdge] = Field(default_factory=list)
+    graph_meta: Optional[Dict[str, Any]] = None
+    timestamp: int
+
+
+@router.get("/graph/schema", response_model=GraphSchemaResponse)
+async def get_graph_schema():
+    """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
+    try:
+        from host_brain.app.graph_config_builder import (
+            CHAT_GRAPH_NODE_ORDER,
+            _build_graph_config_by_profile,
+            _HOST_CHAT_8B_DEFAULT_PROVIDER,
+            _HOST_CHAT_8B_DEFAULT_MODEL_ID,
+        )
+        from host_brain.app.execution_profile import PROFILE_CHAT_FAST
+
+        # 使用默认参数构建图结构（不依赖运行时 LLM），仅用于展示拓扑
+        graph_config = _build_graph_config_by_profile(
+            execution_profile=PROFILE_CHAT_FAST,
+            provider_name=_HOST_CHAT_8B_DEFAULT_PROVIDER,
+            model_id=_HOST_CHAT_8B_DEFAULT_MODEL_ID or "gemini-2.5-flash",
+            timeout_ms=60000,
+            available=False,
+            api_key=None,
+            provider_fn=lambda _: None,
+        )
+        edges_raw = graph_config.get("edges") or []
+        graph_meta = graph_config.get("graph_meta") or {}
+        active = list(graph_meta.get("active_nodes") or CHAT_GRAPH_NODE_ORDER)
+        nodes = [GraphSchemaNode(node_id=n) for n in active]
+        edges = [GraphSchemaEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw if isinstance(e, dict)]
+        return GraphSchemaResponse(
+            graph_id=graph_config.get("graph_id", "host.chat.realtime"),
+            version=graph_config.get("version", "v1"),
+            entry_node=graph_config.get("entry_node"),
+            active_nodes=active,
+            nodes=nodes,
+            edges=edges,
+            graph_meta=graph_meta,
+            timestamp=_now_ms(),
+        )
+    except Exception as exc:
+        logger.warning("get_graph_schema failed: %s", exc)
+        from host_brain.app.graph_config_builder import CHAT_GRAPH_NODE_ORDER
+        return GraphSchemaResponse(
+            graph_id="host.chat.realtime",
+            version="v1",
+            active_nodes=CHAT_GRAPH_NODE_ORDER,
+            nodes=[GraphSchemaNode(node_id=n) for n in CHAT_GRAPH_NODE_ORDER],
+            edges=[],
+            timestamp=_now_ms(),
+        )
+
 
 # ---------------------------------------------------------------------------
 # GET /obs/metrics/timeseries
@@ -2254,19 +2496,21 @@ class VaultStatsResponse(BaseModel):
 async def get_vault_stats(
     limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
 ):
-    """TODO-44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。"""
+    """TODO-44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
     ledger = _get_ledger()
     now = _now_ms()
 
     rows = []
-    for table in ("vault_manifest", "artifact_vault_manifest"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=0, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    try:
+        # 表名为 vault_manifest_index（与 ledger_schema / _ALLOWED_TABLES 一致）
+        rows = ledger.fetch_by_time_range(
+            "vault_manifest_index",
+            start_ms=0,
+            end_ms=now,
+            limit=10_000,
+        )
+    except Exception as e:
+        logger.warning("get_vault_stats fetch vault_manifest_index failed: %s", e)
 
     total = len(rows)
     active_count = sum(1 for r in rows if str(r.get("status") or "").upper() == "ACTIVE")
@@ -2275,18 +2519,18 @@ async def get_vault_stats(
     reversible_count = sum(1 for r in rows if bool(r.get("is_reversible") or r.get("reversible")))
     reversible_rate = round(reversible_count / total * 100, 1) if total > 0 else None
 
-    # 最近 N 条（按创建时间倒序）
-    recent_sorted = sorted(rows, key=lambda r: r.get("created_at_ms") or r.get("ts_ms") or 0, reverse=True)[:limit]
+    # 最近 N 条（按 ts_ms 倒序）；vault_manifest_index 字段: manifest_id, status, ts_ms, reversible, skill_name, manifest_path
+    recent_sorted = sorted(rows, key=lambda r: int(r.get("ts_ms") or 0), reverse=True)[:limit]
     recent_manifests = [
         VaultManifestItem(
             manifest_id=str(r.get("manifest_id") or r.get("id") or ""),
-            artifact_type=r.get("artifact_type"),
+            artifact_type=r.get("skill_name") or r.get("artifact_type"),
             status=str(r.get("status") or "UNKNOWN").upper(),
-            created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0) or None,
+            created_at_ms=int(r.get("ts_ms") or 0) or None,
             undone_at_ms=int(r.get("undone_at_ms") or 0) or None,
             gc_at_ms=int(r.get("gc_at_ms") or 0) or None,
             is_reversible=bool(r.get("is_reversible") or r.get("reversible")),
-            summary=(r.get("summary") or r.get("detail") or "")[:120] or None,
+            summary=(r.get("manifest_path") or r.get("skill_name") or r.get("summary") or "")[:120] or None,
         )
         for r in recent_sorted
     ]

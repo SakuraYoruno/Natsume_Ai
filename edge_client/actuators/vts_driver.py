@@ -371,6 +371,10 @@ class VTubeStudioDriver:
                     expression_id=resolved_hotkey_id,
                     emotion_tag=normalized,
                 )
+            logger.info(
+                "VTS expression: emotion_tag=%s -> hotkey_id=%s (%s)",
+                normalized, resolved_hotkey_id, resolved_label,
+            )
             _trigger_vts_hotkey(
                 vts=self._vts,
                 hotkey_id=resolved_hotkey_id,
@@ -504,7 +508,8 @@ class VTubeStudioDriver:
                 self._refresh_input_parameter_plan()
             except Exception as exc:
                 logger.debug("VTS mouth parameter discovery refresh failed: %s", exc)
-        parameter_payload = _build_mouth_parameter_payload(self._mouth_parameter_plan, normalized)
+        plan = self._mouth_parameter_plan
+        parameter_payload = _build_mouth_parameter_payload(plan, normalized)
         try:
             _set_vts_parameters(
                 vts=self._vts,

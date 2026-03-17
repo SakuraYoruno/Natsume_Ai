@@ -395,6 +395,7 @@ async def post_speak(
     speed: float = 1.0,
     pitch: float = 0.0,
     emotion_tag: str | None = None,
+    emotion_intensity: float | None = None,
 ) -> EdgeRpcCallResult:
     """驱动 Edge TTS 语音合成。
 
@@ -402,7 +403,8 @@ async def post_speak(
     voice_id: 声线 ID（可选，Edge 端有默认值）
     speed: 语速倍率（0.5~2.0）
     pitch: 音调偏移（-1.0~1.0）
-    emotion_tag: 情感标签（可选，影响语调）
+    emotion_tag: 情感标签（可选，影响语调与 VTS 表情）
+    emotion_intensity: 情感强度 [0,1]（可选，供 TTS/VTS 使用）
     """
     req_id = request_id or new_request_id()
     resolved_session_id = str(session_id or "").strip() or f"sess::{req_id}"
@@ -426,6 +428,8 @@ async def post_speak(
         payload["voice_id"] = str(voice_id).strip()
     if emotion_tag:
         payload["emotion_tag"] = str(emotion_tag).strip().upper()
+    if emotion_intensity is not None:
+        payload["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
     result = await _post_to_edge(
         path="/v1/edge/speak",
         payload=payload,

@@ -86,6 +86,27 @@ _stream_vts_rate_limiter = VTSRateLimiter(max_per_second=2.0, burst_size=2.0)
 _stream_vts_rate_limit_per_second = 2.0
 _CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 
+# 回复内容简单情感推断（仅当当前为 NEUTRAL 时用于 TTS/VTS 表情，与 vts_runtime_mapping 标签一致）
+_EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
+    ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶"),
+    ("SAD", "难过|伤心|哭|呜|抱歉|对不起"),
+    ("ANGRY", "生气|气死|烦"),
+    ("LOVING", "谢谢|感谢|感动|喜欢|爱你"),
+    ("SURPRISED", "哇|真的吗|竟然"),
+]
+
+def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
+    """当 current_tag 为 NEUTRAL 时，根据回复文案简单推断 emotion_tag 供 TTS/VTS 使用。"""
+    import re
+    if not narrative or str(current_tag or "").strip().upper() != "NEUTRAL":
+        return str(current_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    text = (narrative or "")[:500]
+    for tag, pattern in _EMOTION_INFER_KEYWORDS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return tag
+    return "NEUTRAL"
+
+
 # ---------------------------------------------------------------------------
 # 内部辅助：构建 prompt
 # ---------------------------------------------------------------------------
@@ -1646,11 +1667,20 @@ async def _sse_event_generator(
                 return {"status": "SKIPPED", "reason_code": "NARRATIVE_EMPTY"}, 0
             try:
                 from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
-                _etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                _base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                _etag = _infer_emotion_tag_for_tts(narrative, _base_etag)
+                _intensity_raw = emotion_context.get("emotion_intensity")
+                _intensity = None
+                if _intensity_raw is not None:
+                    try:
+                        _intensity = max(0.0, min(1.0, float(_intensity_raw)))
+                    except (TypeError, ValueError):
+                        pass
                 _tts_result = await _post_speak(
                     text=narrative,
                     request_id=request_id,
                     emotion_tag=_etag,
+                    emotion_intensity=_intensity,
                 )
                 return _tts_result.as_dict(), max(0, int(time.time() * 1000) - _t0)
             except Exception as exc:
