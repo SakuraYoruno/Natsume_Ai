@@ -1,11 +1,12 @@
-"""P15 单元测试：_dispatch_to_agent、agent_dispatch_node 动态路由、SUPERVISOR_AUTO_ENABLED 开关。
+"""P15/P16 单元测试：_dispatch_to_agent、agent_dispatch_node 动态路由、SUPERVISOR_MODE 开关。
+P16 说明：SUPERVISOR_AUTO_ENABLED 别名已删除，统一使用 SUPERVISOR_MODE=llm。
 
 验收标准：
 - _dispatch_to_agent() 根据 active_agent_id 返回正确 handler_id
 - _AGENT_HANDLER_MAP 包含所有预期 agent
 - agent_dispatch_node 分支：有 handler 时正常执行，无 handler 时降级
-- SUPERVISOR_AUTO_ENABLED=true 触发 LLM 提案模式
-- SUPERVISOR_MODE=llm 与 SUPERVISOR_AUTO_ENABLED=true 等价
+- SUPERVISOR_MODE=llm 触发 LLM 提案模式（P16 后唯一开关）
+- SUPERVISOR_AUTO_ENABLED 别名已在 P16 删除
 """
 
 from __future__ import annotations
@@ -312,10 +313,11 @@ class TestAgentDispatchNodeNoHandler(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 5. SUPERVISOR_AUTO_ENABLED 开关测试
+# 5. SUPERVISOR_MODE 开关测试（P16：SUPERVISOR_AUTO_ENABLED 别名已删除）
 # ---------------------------------------------------------------------------
 
 class TestSupervisorAutoEnabled(unittest.TestCase):
+    """P16 更新：SUPERVISOR_AUTO_ENABLED 别名已删除，统一使用 SUPERVISOR_MODE=llm。"""
 
     def _call_handler(self, env_overrides: dict, gateway=None) -> dict:
         from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
@@ -327,45 +329,45 @@ class TestSupervisorAutoEnabled(unittest.TestCase):
         with patch.dict(os.environ, env_overrides, clear=False):
             return supervisor_dispatch_handler(payload, context)
 
-    def test_supervisor_auto_enabled_false_uses_rule(self):
-        """SUPERVISOR_AUTO_ENABLED=false 时应走规则路由"""
-        result = self._call_handler({"SUPERVISOR_AUTO_ENABLED": "false", "SUPERVISOR_MODE": "rule"})
+    def test_supervisor_mode_rule_uses_rule(self):
+        """SUPERVISOR_MODE=rule 时应走规则路由（P16：替代 SUPERVISOR_AUTO_ENABLED=false）"""
+        result = self._call_handler({"SUPERVISOR_MODE": "rule"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "rule")
 
-    def test_supervisor_auto_enabled_true_triggers_llm_mode(self):
-        """SUPERVISOR_AUTO_ENABLED=true 时应触发 LLM 模式（无 gateway 时回退 rule）"""
-        result = self._call_handler({"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"})
+    def test_supervisor_mode_llm_triggers_llm_mode(self):
+        """SUPERVISOR_MODE=llm 时应触发 LLM 模式（无 gateway 时回退 rule）"""
+        result = self._call_handler({"SUPERVISOR_MODE": "llm"})
         dispatch = result.get("supervisor_dispatch") or {}
         # 无 gateway 时 LLM 失败，回退 rule，但 supervisor_mode 应为 llm
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
 
-    def test_supervisor_mode_llm_takes_priority_over_auto_enabled(self):
-        """SUPERVISOR_MODE=llm 优先级高于 SUPERVISOR_AUTO_ENABLED"""
-        result = self._call_handler({"SUPERVISOR_MODE": "llm", "SUPERVISOR_AUTO_ENABLED": "false"})
+    def test_supervisor_mode_llm_explicit(self):
+        """SUPERVISOR_MODE=llm 显式设置应触发 LLM 模式"""
+        result = self._call_handler({"SUPERVISOR_MODE": "llm"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
 
-    def test_supervisor_auto_enabled_true_with_mock_gateway_uses_llm(self):
-        """SUPERVISOR_AUTO_ENABLED=true + mock gateway 时应走 LLM 路径"""
+    def test_supervisor_mode_llm_with_mock_gateway_uses_llm(self):
+        """SUPERVISOR_MODE=llm + mock gateway 时应走 LLM 路径（P16：替代 SUPERVISOR_AUTO_ENABLED=true）"""
         mock_gateway = MagicMock()
         mock_gateway.complete.return_value = {
             "content": '{"selected_agent": "code_agent", "reason": "代码任务", "risk_mode": "guarded", "need_judge": true}'
         }
         result = self._call_handler(
-            {"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "llm"},
             gateway=mock_gateway,
         )
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
         self.assertEqual(dispatch.get("supervisor_decision_source"), "llm")
 
-    def test_supervisor_auto_enabled_true_llm_failure_fallback_rule(self):
-        """SUPERVISOR_AUTO_ENABLED=true + LLM 失败时应回退 rule"""
+    def test_supervisor_mode_llm_failure_fallback_rule(self):
+        """SUPERVISOR_MODE=llm + LLM 失败时应回退 rule（P16：替代 SUPERVISOR_AUTO_ENABLED=true + 失败）"""
         mock_gateway = MagicMock()
         mock_gateway.complete.side_effect = RuntimeError("LLM 不可用")
         result = self._call_handler(
-            {"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "llm"},
             gateway=mock_gateway,
         )
         dispatch = result.get("supervisor_dispatch") or {}
@@ -373,20 +375,18 @@ class TestSupervisorAutoEnabled(unittest.TestCase):
         # 失败时回退 rule，decision_source 应为 llm_fallback_rule
         self.assertIn("fallback", str(dispatch.get("supervisor_decision_source") or "").lower())
 
-    def test_supervisor_auto_enabled_default_is_false(self):
-        """默认情况下 SUPERVISOR_AUTO_ENABLED 应为 false（规则路由）"""
-        env = {k: v for k, v in os.environ.items()}
-        env.pop("SUPERVISOR_AUTO_ENABLED", None)
-        env.pop("SUPERVISOR_MODE", None)
-        result = self._call_handler({"SUPERVISOR_AUTO_ENABLED": "", "SUPERVISOR_MODE": ""})
+    def test_supervisor_mode_default_is_rule(self):
+        """默认情况下 SUPERVISOR_MODE 应为 rule（规则路由）"""
+        result = self._call_handler({"SUPERVISOR_MODE": ""})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "rule")
 
-    def test_supervisor_auto_enabled_1_triggers_llm_mode(self):
-        """SUPERVISOR_AUTO_ENABLED=1 也应触发 LLM 模式"""
-        result = self._call_handler({"SUPERVISOR_AUTO_ENABLED": "1", "SUPERVISOR_MODE": "rule"})
+    def test_supervisor_auto_enabled_ignored_in_p16(self):
+        """P16：SUPERVISOR_AUTO_ENABLED 别名已删除，设置 true 不再触发 LLM 模式（需同时设 SUPERVISOR_MODE=llm）"""
+        # 只设 SUPERVISOR_AUTO_ENABLED=true，不设 SUPERVISOR_MODE=llm → 应走 rule
+        result = self._call_handler({"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"})
         dispatch = result.get("supervisor_dispatch") or {}
-        self.assertEqual(dispatch.get("supervisor_mode"), "llm")
+        self.assertEqual(dispatch.get("supervisor_mode"), "rule")
 
     def test_supervisor_auto_enabled_true_result_has_selected_agent(self):
         """SUPERVISOR_AUTO_ENABLED=true 时结果应包含 selected_agent"""

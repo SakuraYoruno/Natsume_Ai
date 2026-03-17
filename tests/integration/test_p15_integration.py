@@ -204,11 +204,11 @@ class TestP15AgentDispatchNodeIntegration(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# P15-3.3：SUPERVISOR_AUTO_ENABLED 完整验收
+# P15-3.3：SUPERVISOR_MODE 完整验收（P16：SUPERVISOR_AUTO_ENABLED 别名已删除）
 # ---------------------------------------------------------------------------
 
 class TestP15SupervisorAutoEnabledIntegration(unittest.TestCase):
-    """P15-3.3：SUPERVISOR_AUTO_ENABLED=true 触发 LLM 模式，失败时回退 rule"""
+    """P15-3.3：SUPERVISOR_MODE=llm 触发 LLM 模式，失败时回退 rule（P16：SUPERVISOR_AUTO_ENABLED 别名已删除）"""
 
     def _call_supervisor(self, env_overrides: dict, gateway=None) -> dict:
         from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
@@ -221,28 +221,28 @@ class TestP15SupervisorAutoEnabledIntegration(unittest.TestCase):
             return supervisor_dispatch_handler(payload, context)
 
     def test_auto_enabled_false_rule_mode(self):
-        """SUPERVISOR_AUTO_ENABLED=false → rule 模式"""
-        result = self._call_supervisor({"SUPERVISOR_AUTO_ENABLED": "false", "SUPERVISOR_MODE": "rule"})
+        """SUPERVISOR_MODE=rule → rule 模式（P16：替代 SUPERVISOR_AUTO_ENABLED=false）"""
+        result = self._call_supervisor({"SUPERVISOR_MODE": "rule"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "rule")
         self.assertEqual(dispatch.get("supervisor_decision_source"), "rule")
 
     def test_auto_enabled_true_llm_mode_no_gateway(self):
-        """SUPERVISOR_AUTO_ENABLED=true + 无 gateway → LLM 模式但回退 rule"""
-        result = self._call_supervisor({"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"})
+        """SUPERVISOR_MODE=llm + 无 gateway → LLM 模式但回退 rule（P16：替代 SUPERVISOR_AUTO_ENABLED=true）"""
+        result = self._call_supervisor({"SUPERVISOR_MODE": "llm"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
         # 无 gateway 时回退 rule
         self.assertIn("fallback", str(dispatch.get("supervisor_decision_source") or "").lower())
 
     def test_auto_enabled_true_with_valid_llm_response(self):
-        """SUPERVISOR_AUTO_ENABLED=true + 有效 LLM 响应 → LLM 决策"""
+        """SUPERVISOR_MODE=llm + 有效 LLM 响应 → LLM 决策（P16：替代 SUPERVISOR_AUTO_ENABLED=true）"""
         mock_gw = MagicMock()
         mock_gw.complete.return_value = {
             "content": '{"selected_agent": "code_agent", "reason": "代码任务", "risk_mode": "guarded", "need_judge": true}'
         }
         result = self._call_supervisor(
-            {"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "llm"},
             gateway=mock_gw,
         )
         dispatch = result.get("supervisor_dispatch") or {}
@@ -251,11 +251,11 @@ class TestP15SupervisorAutoEnabledIntegration(unittest.TestCase):
         self.assertEqual(result.get("active_agent_id"), "code_agent")
 
     def test_auto_enabled_true_with_bad_json_fallback(self):
-        """SUPERVISOR_AUTO_ENABLED=true + LLM 返回非法 JSON → 回退 rule"""
+        """SUPERVISOR_MODE=llm + LLM 返回非法 JSON → 回退 rule（P16：替代 SUPERVISOR_AUTO_ENABLED=true）"""
         mock_gw = MagicMock()
         mock_gw.complete.return_value = {"content": "这不是 JSON"}
         result = self._call_supervisor(
-            {"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "llm"},
             gateway=mock_gw,
         )
         dispatch = result.get("supervisor_dispatch") or {}
@@ -264,21 +264,21 @@ class TestP15SupervisorAutoEnabledIntegration(unittest.TestCase):
 
     def test_supervisor_mode_llm_env_var_still_works(self):
         """原有 SUPERVISOR_MODE=llm 开关应继续有效"""
-        result = self._call_supervisor({"SUPERVISOR_MODE": "llm", "SUPERVISOR_AUTO_ENABLED": "false"})
+        result = self._call_supervisor({"SUPERVISOR_MODE": "llm"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
 
     def test_both_enabled_llm_mode(self):
-        """SUPERVISOR_MODE=llm + SUPERVISOR_AUTO_ENABLED=true 同时设置 → llm 模式"""
-        result = self._call_supervisor({"SUPERVISOR_MODE": "llm", "SUPERVISOR_AUTO_ENABLED": "true"})
+        """SUPERVISOR_MODE=llm 显式设置 → llm 模式（P16：SUPERVISOR_AUTO_ENABLED 已删除，无影响）"""
+        result = self._call_supervisor({"SUPERVISOR_MODE": "llm"})
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
 
     def test_result_always_has_active_agent_id(self):
         """无论何种模式，结果都应包含 active_agent_id"""
         for env in [
-            {"SUPERVISOR_AUTO_ENABLED": "false", "SUPERVISOR_MODE": "rule"},
-            {"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "rule"},
+            {"SUPERVISOR_MODE": "llm"},
         ]:
             result = self._call_supervisor(env)
             self.assertIn("active_agent_id", result)
@@ -286,11 +286,17 @@ class TestP15SupervisorAutoEnabledIntegration(unittest.TestCase):
 
     def test_result_always_has_supervisor_dispatch_field(self):
         """结果应包含 supervisor_dispatch 观测字段"""
-        result = self._call_supervisor({"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"})
+        result = self._call_supervisor({"SUPERVISOR_MODE": "llm"})
         self.assertIn("supervisor_dispatch", result)
         dispatch = result["supervisor_dispatch"]
         self.assertIn("supervisor_mode", dispatch)
         self.assertIn("supervisor_decision_source", dispatch)
+
+    def test_supervisor_auto_enabled_ignored_in_p16(self):
+        """P16：SUPERVISOR_AUTO_ENABLED 别名已删除，单独设置 true 不再触发 LLM 模式"""
+        result = self._call_supervisor({"SUPERVISOR_AUTO_ENABLED": "true", "SUPERVISOR_MODE": "rule"})
+        dispatch = result.get("supervisor_dispatch") or {}
+        self.assertEqual(dispatch.get("supervisor_mode"), "rule")
 
 
 # ---------------------------------------------------------------------------

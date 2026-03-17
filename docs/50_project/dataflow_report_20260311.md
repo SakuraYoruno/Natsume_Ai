@@ -1,6 +1,6 @@
 # Natsume AI 系统数据流全景报告
 
-> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-11 18:12（严格审计修订）
+> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 17:58（P16 多智能体技术债清理）
 > 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排
 > 报告模型：claude-4.6-sonnet
 > 本次修复：问题 A/B/C/D/F 已按优先级处理（见第十三节）；严格代码审计已完成（见第十六节）
@@ -25,6 +25,7 @@
 14. [本次修复变更摘要（2026-03-11 17:28）](#十四本次修复变更摘要2026-03-11-1728)
 15. [选项一/二/三 实施记录（2026-03-11 17:52）](#十五选项一二三-实施记录2026-03-11-1752)
 16. [严格代码审计报告（2026-03-11 18:12）](#十六严格代码审计报告2026-03-11-1812)
+17. [P16 多智能体技术债清理（2026-03-17）](#十七p16-多智能体技术债清理2026-03-17)
 
 ---
 
@@ -1326,3 +1327,91 @@ Layer 4: side effect observed   → ❌ 不可观测
 *严格审计时间：2026-03-11 21:07 | 审计模型：claude-4.6-sonnet*
 *审计范围：chat_handler.py / chat_stream_handler.py / graph_config_builder.py / http_hooks.py / system_handler.py / observability_persist.py / chat_handler_vision.py / main_chain.py / dependencies.py*
 *审计原则：以代码真实执行语义为准，不允许脑补，不允许把 SHADOW 写成 ACTIVE*
+
+---
+
+## 十七、P16 多智能体技术债清理（2026-03-17）
+
+> 本节记录 P16 对 P1-P15 中积累的技术债、孤岛模块、兼容性冗余的统一清理结果。
+> 清理原则：以 P15 路径（`graph_executor._dispatch_to_agent`）为唯一分派路径，删除 P3 孤岛路径。
+
+### 17.1 核心问题与修复
+
+| 问题 | 严重度 | 根因 | 修复方式 |
+|------|--------|------|---------|
+| `active_agent_id` state 顶层传播断点 | 🔴 P0 | `supervisor_dispatch_handler` 写 `payload["active_agent_id"]`，但 `graph_executor` 读 `state["active_agent_id"]`，两者不同步 | `agent_dispatch_node` 分支执行前先从 `payload["active_agent_id"]` 同步到 `state["active_agent_id"]` |
+| `agent_dispatch_handler` 孤岛模块 | 🔴 P0 | P3 创建了 `agent_dispatch_handler.py`，注册到 handler 表，但 `graph_executor` 的 `agent_dispatch_node` 分支直接调用 `_dispatch_to_agent`，永远不经过该 handler | 删除 `agent_dispatch_handler.py`，从 `dependencies.py` 移除注册 |
+| `need_judge=false` 快路径缺失 | 🟠 P1 | `chat_agent` 等不需要 judge 时，`agent_dispatch_node` 仍强制走 `edge_map` 到 `judge_agent_node` | 读取 `supervisor_dispatch.need_judge`，`false` 时直接跳 `chat_render_node` |
+| `_AGENT_TO_NODE` 孤岛符号 | 🟠 P1 | `supervisor_dispatch_handler.py` 中定义但从未被引用 | 删除 |
+| `safety_agent`/`renderer_agent` 在 allowlist 但无 handler | 🟠 P1 | LLM 提案可能选到这两个 agent，触发 `AGENT_DISPATCH_NO_HANDLER` 降级 | 从 `AGENT_ALLOWLIST` 移除，注释说明待 P17+ 补充 handler 后再加入 |
+| `SUPERVISOR_AUTO_ENABLED` 双开关冗余 | 🟡 P2 | P15 引入了 `SUPERVISOR_AUTO_ENABLED` 作为 `SUPERVISOR_MODE=llm` 的别名，造成两个开关同时存在 | 删除别名逻辑，只保留 `SUPERVISOR_MODE` |
+| `agent_dispatch_allowlist` 硬编码 2 个 agent | 🟡 P2 | `graph_config_builder` 中 allowlist 只有 `code_agent` 和 `translate_agent`，与 `_AGENT_HANDLER_MAP` 的 6 个 agent 不一致 | 扩展为全量 6 个，与 `_AGENT_HANDLER_MAP` 对齐 |
+| `retrieval_agent_handler` P11 遗漏注册 | 🟡 P2 | P11 新增了 `retrieval_agent_handler.py` 但未在 `dependencies.py` 注册 | 补充注册 |
+
+### 17.2 P16 后 agent_dispatch_node 完整数据流
+
+```mermaid
+flowchart TD
+    A["supervisor_dispatch_handler\n写 payload['active_agent_id']\n写 supervisor_dispatch.need_judge"] --> B["graph_executor._run_single_step\nnode_id == 'agent_dispatch_node'"]
+
+    B --> C["P16 同步\npayload_active = payload['active_agent_id']\nresolved = payload_active or state_active\nstate = {**state, active_agent_id: resolved}"]
+
+    C --> D["allowlist 校验\nfrom node_bindings['agent_dispatch_allowlist']"]
+    D -->|"不在 allowlist"| D1["DEGRADED\nAGENT_NOT_IN_ALLOWLIST\n→ edge_map 下一跳"]
+    D -->|"通过"| E["_dispatch_to_agent(state)\n_AGENT_HANDLER_MAP[active_agent_id]"]
+
+    E -->|"无 handler"| E1["DEGRADED\nAGENT_DISPATCH_NO_HANDLER\n→ edge_map 下一跳"]
+    E -->|"有 handler"| F["_invoke_handler(handler_id)"]
+
+    F --> G["读 supervisor_dispatch.need_judge"]
+    G -->|"need_judge=true"| H["next_node = edge_map['agent_dispatch_node']\n→ judge_agent_node"]
+    G -->|"need_judge=false"| I["next_node = CHAT_RENDER_NODE_ID\n快路径：跳过 judge"]
+
+    H & I --> J["返回新 state\n{payload, trace, pending_node_id,\nagent_artifacts, active_agent_id}"]
+
+    style D1 fill:#ff6b6b,color:#fff
+    style E1 fill:#ff6b6b,color:#fff
+    style I fill:#51cf66,color:#fff
+    style J fill:#51cf66,color:#fff
+```
+
+### 17.3 P16 变更文件清单
+
+| 文件 | 变更内容 |
+|------|---------|
+| `host_brain/integrations/graph_executor.py` | `agent_dispatch_node` 分支：补充 `active_agent_id` 同步、allowlist 校验、`need_judge` 快路径；删除过时注释 |
+| `host_brain/app/handlers/agent_dispatch_handler.py` | **删除**（P3 孤岛模块） |
+| `host_brain/app/handlers/supervisor_dispatch_handler.py` | 删除 `_AGENT_TO_NODE` 孤岛符号；删除 `SUPERVISOR_AUTO_ENABLED` 别名逻辑；更新注释 |
+| `host_brain/app/graph_config_builder.py` | `agent_dispatch_allowlist` 从 2 个扩展为 6 个；`AGENT_DISPATCH_NODE_ID` binding `handler_id` 改为空；新增 `RETRIEVAL_AGENT_NODE_ID`/`RETRIEVAL_AGENT_HANDLER_ID` 常量；更新注释 |
+| `host_brain/app/dependencies.py` | 删除 `agent_dispatch_handler` 注册；补充 `retrieval_agent_handler` 注册；import 新增 `RETRIEVAL_AGENT_HANDLER_ID` |
+| `host_brain/app/agents/agent_registry.py` | 从 `AGENT_ALLOWLIST` 移除 `safety_agent`/`renderer_agent`（无 handler） |
+| `tests/unit/test_agent_dispatch_handler.py` | 重写：测试 P16 的 `_dispatch_to_agent` 和 allowlist 校验 |
+| `tests/unit/test_p35_structural.py` | 更新：将"executor 无 agent_dispatch 特判"改为"executor 使用 `_dispatch_to_agent`" |
+| `tests/unit/test_p15_dispatch_to_agent.py` | 更新：`TestSupervisorAutoEnabled` 改为测试 `SUPERVISOR_MODE`，新增 `test_supervisor_auto_enabled_ignored_in_p16` |
+| `tests/integration/test_p11_integration.py` | 更新：`TestAgentDispatchAllowlistExtension` 改为测试 `_AGENT_HANDLER_MAP` 和 `graph_config allowlist` |
+| `tests/integration/test_p12_integration.py` | 更新：`DEFAULT_AGENT_DISPATCH_ALLOWLIST` 引用改为 `_AGENT_HANDLER_MAP` |
+| `tests/integration/test_p15_integration.py` | 更新：`TestP15SupervisorAutoEnabledIntegration` 改为测试 `SUPERVISOR_MODE`，新增 `test_supervisor_auto_enabled_ignored_in_p16` |
+| `tests/unit/test_retrieval_agent_handler.py` | 更新：`DEFAULT_AGENT_DISPATCH_ALLOWLIST` 引用改为 `_AGENT_HANDLER_MAP` |
+
+### 17.4 P16 后 _AGENT_HANDLER_MAP 与 AGENT_ALLOWLIST 对齐状态
+
+| agent_id | `_AGENT_HANDLER_MAP` | `AGENT_ALLOWLIST` | handler 文件 | 说明 |
+|----------|---------------------|-------------------|-------------|------|
+| `chat_agent` | ✅ | ✅ | `chat_agent_handler.py` | 快路径，`need_judge=false` |
+| `code_agent` | ✅ | ✅ | `code_agent_handler.py` | P9 新增 |
+| `translate_agent` | ✅ | ✅ | `translate_agent_handler.py` | P10 新增 |
+| `intent_agent` | ✅ | ✅ | `intent_agent_handler.py` | 高风险，`need_judge=true` |
+| `judge_agent` | ✅ | ✅ | `judge_agent_handler.py` | 裁判节点 |
+| `retrieval_agent` | ✅ | ✅ | `retrieval_agent_handler.py` | P11 新增，P16 补注册 |
+| `safety_agent` | ❌ | ❌ | 无 | 待 P17+ 补充 handler |
+| `renderer_agent` | ❌ | ❌ | 无 | 待 P17+ 补充 handler |
+
+### 17.5 测试结果
+
+- P16 相关测试：**113 passed**（含 P11/P12/P15/P16 全部相关测试）
+- 无回归
+
+---
+
+*P16 清理时间：2026-03-17 17:58 | 执行模型：claude-4.6-sonnet*
+*清理原则：以代码真实执行语义为准，删除孤岛模块，统一分派路径*
