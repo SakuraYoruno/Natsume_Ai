@@ -30,9 +30,10 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_CODE,
     AGENT_ID_TRANSLATE,
     AGENT_ID_INTENT,
-    AGENT_ID_SAFETY,
+    # AGENT_ID_SAFETY 和 AGENT_ID_RENDERER 暂不加入 allowlist：
+    # 无对应 handler 文件，LLM 提案选到会触发 AGENT_DISPATCH_NO_HANDLER 降级。
+    # 待 P17+ 补充 handler 后再加入。
     AGENT_ID_JUDGE,
-    AGENT_ID_RENDERER,
     AGENT_ID_RETRIEVAL,  # P11 新增
 })
 

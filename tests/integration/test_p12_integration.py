@@ -227,10 +227,10 @@ class TestP11BaselineNotDegraded:
     def test_agent_dispatch_allowlist_unchanged(self):
         """agent_dispatch allowlist 仍包含三个 agent（P12 不改 allowlist）。"""
         from host_brain.app.agents.agent_registry import AGENT_ID_CODE, AGENT_ID_TRANSLATE
-        from host_brain.app.handlers.agent_dispatch_handler import DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_CODE in DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_TRANSLATE in DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_RETRIEVAL in DEFAULT_AGENT_DISPATCH_ALLOWLIST
+        from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
+        assert AGENT_ID_CODE in _AGENT_HANDLER_MAP
+        assert AGENT_ID_TRANSLATE in _AGENT_HANDLER_MAP
+        assert AGENT_ID_RETRIEVAL in _AGENT_HANDLER_MAP
 
 
 # ---------------------------------------------------------------------------

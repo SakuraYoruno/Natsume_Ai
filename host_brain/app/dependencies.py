@@ -28,6 +28,7 @@ from host_brain.app.graph_config_builder import (
     TRANSLATE_AGENT_HANDLER_ID,
     INTENT_AGENT_HANDLER_ID,
     JUDGE_AGENT_HANDLER_ID,
+    RETRIEVAL_AGENT_HANDLER_ID,  # P11/P16 新增
     graph_scene_router_entry_handler,
     graph_scene_router_post_core_handler,
 )
@@ -211,9 +212,7 @@ def get_graph_runtime() -> GraphRuntimeContract:
             SUPERVISOR_DISPATCH_HANDLER_ID,
             supervisor_dispatch_handler,
         )
-        # P3：Agent 分派边界（Supervised 图内唯一显式分派入口）
-        from host_brain.app.handlers.agent_dispatch_handler import agent_dispatch_handler  # noqa: PLC0415
-        _graph_runtime.register_node_handler(AGENT_DISPATCH_HANDLER_ID, agent_dispatch_handler)
+        # P16：agent_dispatch_handler 已删除（P3 孤岛模块），graph_executor 直接分派
         # P4：Intent 图入口（透明子图实现）
         from host_brain.app.handlers.intent_agent_entry_handler import intent_agent_entry_handler  # noqa: PLC0415
         _graph_runtime.register_node_handler(INTENT_AGENT_ENTRY_HANDLER_ID, intent_agent_entry_handler)
@@ -223,11 +222,13 @@ def get_graph_runtime() -> GraphRuntimeContract:
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.intent_agent_handler import intent_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.judge_agent_handler import judge_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler  # noqa: PLC0415
         _graph_runtime.register_node_handler(CHAT_AGENT_HANDLER_ID, chat_agent_handler)
         _graph_runtime.register_node_handler(CODE_AGENT_HANDLER_ID, code_agent_handler)
         _graph_runtime.register_node_handler(TRANSLATE_AGENT_HANDLER_ID, translate_agent_handler)
         _graph_runtime.register_node_handler(INTENT_AGENT_HANDLER_ID, intent_agent_handler)
         _graph_runtime.register_node_handler(JUDGE_AGENT_HANDLER_ID, judge_agent_handler)
+        _graph_runtime.register_node_handler(RETRIEVAL_AGENT_HANDLER_ID, retrieval_agent_handler)  # P11/P16 补充注册
     return _graph_runtime
 
 

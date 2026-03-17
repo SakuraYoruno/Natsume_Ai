@@ -81,9 +81,11 @@ INTENT_AGENT_ENTRY_NODE_ID = "intent_agent_entry"
 INTENT_AGENT_ENTRY_HANDLER_ID = "intent_agent_entry"
 JUDGE_AGENT_NODE_ID = "judge_agent_node"
 JUDGE_AGENT_HANDLER_ID = "judge_agent"
-# 完整多 agent 治理：虚拟节点，由 agent_dispatch_handler 做唯一分派边界（P3）
+RETRIEVAL_AGENT_NODE_ID = "retrieval_agent_node"  # P11 新增
+RETRIEVAL_AGENT_HANDLER_ID = "retrieval_agent"    # P11 新增
+# P16：M-MA6 动态路由虚拟节点（graph_executor 直接分派，不再经过 agent_dispatch_handler）
 AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
-AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"
+AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"  # 保留常量供其他模块引用，不再用于 binding
 
 # 客户端允许显式指定的场景类型白名单
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
@@ -1414,6 +1416,15 @@ def _build_graph_config_by_profile(
             CHAT_RENDER_NODE_ID,
         ]
         # P3.5：allowlist 由图配置提供；workbench_* 为 handler 可调用的 model 节点，不入边序列
+        # P16：allowlist 对齐 _AGENT_HANDLER_MAP（graph_executor 内的全量 agent）
+        _dispatch_allowlist = [
+            CHAT_AGENT_HANDLER_ID,
+            CODE_AGENT_HANDLER_ID,
+            TRANSLATE_AGENT_HANDLER_ID,
+            INTENT_AGENT_HANDLER_ID,
+            JUDGE_AGENT_HANDLER_ID,
+            RETRIEVAL_AGENT_HANDLER_ID,
+        ]
         node_bindings = [
             {
                 "node_id": SUPERVISOR_DISPATCH_NODE_ID,
@@ -1421,14 +1432,14 @@ def _build_graph_config_by_profile(
                 "task": "supervisor_dispatch",
                 "require_approval_token": False,
                 # P5-2：与 agent_dispatch 使用同一 allowlist，供 Supervisor 校验 proposal
-                "agent_dispatch_allowlist": [CODE_AGENT_HANDLER_ID, TRANSLATE_AGENT_HANDLER_ID],
+                "agent_dispatch_allowlist": _dispatch_allowlist,
             },
             {
                 "node_id": AGENT_DISPATCH_NODE_ID,
-                "handler_id": AGENT_DISPATCH_HANDLER_ID,
+                "handler_id": "",  # P16：不再绑定 handler，由 graph_executor 直接分派
                 "task": "agent_dispatch",
                 "require_approval_token": False,
-                "agent_dispatch_allowlist": [CODE_AGENT_HANDLER_ID, TRANSLATE_AGENT_HANDLER_ID],
+                "agent_dispatch_allowlist": _dispatch_allowlist,
             },
             {
                 "node_id": JUDGE_AGENT_NODE_ID,

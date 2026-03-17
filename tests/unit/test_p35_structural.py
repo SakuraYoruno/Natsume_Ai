@@ -1,4 +1,4 @@
-"""P3.5 结构性断言：executor 无 agent_dispatch 业务特判，code/translate 仅经 agent_dispatch_handler。"""
+"""P3.5/P16 结构性断言：executor agent_dispatch_node 分派逻辑统一到 graph_executor，不再经过 agent_dispatch_handler。"""
 
 from __future__ import annotations
 
@@ -8,21 +8,23 @@ import pytest
 
 
 def test_executor_has_no_run_agent_dispatch() -> None:
-    """graph_executor 不再包含 _run_agent_dispatch 方法。"""
+    """graph_executor 不再包含 _run_agent_dispatch 方法（P3.5 遗留方法已清理）。"""
     from host_brain.integrations import graph_executor
     assert not hasattr(graph_executor.GraphExecutor, "_run_agent_dispatch"), (
         "P3.5: executor 应已移除 _run_agent_dispatch"
     )
 
 
-def test_executor_source_has_no_agent_dispatch_business_branch() -> None:
-    """graph_executor._run_single_step 内无对 agent_dispatch_node 的业务特判（无 AGENT_DISPATCH_NODE_ID 分支）。"""
+def test_executor_agent_dispatch_node_uses_dispatch_to_agent() -> None:
+    """P16：graph_executor._run_single_step 对 agent_dispatch_node 使用 _dispatch_to_agent 动态路由。"""
     from host_brain.integrations import graph_executor
     source = inspect.getsource(graph_executor.GraphExecutor._run_single_step)
-    assert "AGENT_DISPATCH_NODE_ID" not in source or "P3.5" in source, (
-        "P3.5: _run_single_step 不应包含对 agent_dispatch_node 的业务分支"
+    assert "agent_dispatch_node" in source, (
+        "P16: _run_single_step 应包含 agent_dispatch_node 分支"
     )
-    # 允许注释中出现 AGENT_DISPATCH_NODE_ID，但不允许 if node_id == AGENT_DISPATCH_NODE_ID: return ...
+    assert "_dispatch_to_agent" in source, (
+        "P16: _run_single_step 应调用 _dispatch_to_agent"
+    )
     assert "_run_agent_dispatch" not in source, (
         "P3.5: _run_single_step 不应调用 _run_agent_dispatch"
     )

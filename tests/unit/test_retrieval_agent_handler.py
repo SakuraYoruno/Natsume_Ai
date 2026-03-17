@@ -346,9 +346,9 @@ def test_agent_id_retrieval_in_allowlist():
 
 
 def test_agent_id_retrieval_in_dispatch_allowlist():
-    """AGENT_ID_RETRIEVAL 已加入 DEFAULT_AGENT_DISPATCH_ALLOWLIST。"""
-    from host_brain.app.handlers.agent_dispatch_handler import DEFAULT_AGENT_DISPATCH_ALLOWLIST
-    assert AGENT_ID_RETRIEVAL in DEFAULT_AGENT_DISPATCH_ALLOWLIST
+    """AGENT_ID_RETRIEVAL 已加入 _AGENT_HANDLER_MAP（P16：改为测试 executor 映射表）。"""
+    from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
+    assert AGENT_ID_RETRIEVAL in _AGENT_HANDLER_MAP
 
 
 def test_retrieval_agent_handler_importable():

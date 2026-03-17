@@ -84,15 +84,6 @@ _SCENE_NEED_JUDGE: dict[str, bool] = {
     SCENE_VISION_UI: True,
 }
 
-# agent_id → 对应的图节点 ID（用于写入 __next_node__）
-_AGENT_TO_NODE: dict[str, str] = {
-    AGENT_ID_CHAT: CHAT_DIRECT_NODE_ID,
-    AGENT_ID_CODE: "workbench_code_assist",
-    AGENT_ID_TRANSLATE: "workbench_translate",
-    AGENT_ID_INTENT: "core_reasoner_primary",
-    AGENT_ID_JUDGE: "consistency_verifier",
-}
-
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -129,14 +120,11 @@ def supervisor_dispatch_handler(
     scene_type = str(payload.get("scene_type") or SCENE_CHAT).strip().upper() or SCENE_CHAT
 
     # 2. SUPERVISOR_MODE 只允许 rule 或 llm（P5-2）
-    # P15：同时支持 SUPERVISOR_AUTO_ENABLED=true 作为 SUPERVISOR_MODE=llm 的别名
-    # 优先级：SUPERVISOR_MODE=llm > SUPERVISOR_AUTO_ENABLED=true > 默认 rule
     _raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
-    _auto_enabled = _parse_bool(os.environ.get("SUPERVISOR_AUTO_ENABLED"), default=False)
-    supervisor_mode = "llm" if (_raw_mode == "llm" or _auto_enabled) else "rule"
+    supervisor_mode = "llm" if _raw_mode == "llm" else "rule"
     use_llm_proposal = supervisor_mode == "llm"
 
-    # 3. 图内 allowlist：与 agent_dispatch_handler 后续使用的保持一致（P5-2）
+    # 3. 图内 allowlist：供 Supervisor 校验 LLM proposal（P5-2）；P16 后 agent_dispatch 由 graph_executor 直接分派
     allowlist_raw = ctx.get("agent_dispatch_allowlist")
     allowlist: list[str] | None = None
     if isinstance(allowlist_raw, (list, tuple)):

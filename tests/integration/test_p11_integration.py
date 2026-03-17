@@ -136,59 +136,49 @@ class TestRetrievalAgentInSupervisedContext:
 
 
 # ---------------------------------------------------------------------------
-# P11-1b：agent_dispatch_handler allowlist 扩展（验收 3.1）
+# P11-1b：agent_dispatch allowlist 扩展（验收 3.1）
+# P16：改为测试 _AGENT_HANDLER_MAP 和 graph_config_builder allowlist
 # ---------------------------------------------------------------------------
 
 class TestAgentDispatchAllowlistExtension:
-    """agent_dispatch_handler allowlist 已扩展，retrieval_agent 可被分派。"""
+    """P16：_AGENT_HANDLER_MAP 已包含 retrieval_agent，graph_config allowlist 对齐。"""
 
-    def test_retrieval_agent_in_default_allowlist(self):
-        """DEFAULT_AGENT_DISPATCH_ALLOWLIST 包含 retrieval_agent。"""
-        from host_brain.app.handlers.agent_dispatch_handler import DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_RETRIEVAL in DEFAULT_AGENT_DISPATCH_ALLOWLIST
+    def test_retrieval_agent_in_handler_map(self):
+        """_AGENT_HANDLER_MAP 包含 retrieval_agent。"""
+        from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
+        assert AGENT_ID_RETRIEVAL in _AGENT_HANDLER_MAP
 
-    def test_code_agent_still_in_allowlist(self):
-        """P9 code_agent 仍在 allowlist（不退化）。"""
+    def test_code_agent_still_in_handler_map(self):
+        """P9 code_agent 仍在 _AGENT_HANDLER_MAP（不退化）。"""
         from host_brain.app.agents.agent_registry import AGENT_ID_CODE
-        from host_brain.app.handlers.agent_dispatch_handler import DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_CODE in DEFAULT_AGENT_DISPATCH_ALLOWLIST
+        from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
+        assert AGENT_ID_CODE in _AGENT_HANDLER_MAP
 
-    def test_translate_agent_still_in_allowlist(self):
-        """P10 translate_agent 仍在 allowlist（不退化）。"""
+    def test_translate_agent_still_in_handler_map(self):
+        """P10 translate_agent 仍在 _AGENT_HANDLER_MAP（不退化）。"""
         from host_brain.app.agents.agent_registry import AGENT_ID_TRANSLATE
-        from host_brain.app.handlers.agent_dispatch_handler import DEFAULT_AGENT_DISPATCH_ALLOWLIST
-        assert AGENT_ID_TRANSLATE in DEFAULT_AGENT_DISPATCH_ALLOWLIST
+        from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
+        assert AGENT_ID_TRANSLATE in _AGENT_HANDLER_MAP
 
-    def test_agent_dispatch_routes_to_retrieval_handler(self):
-        """agent_dispatch_handler 可将 retrieval_agent 分派到 retrieval_agent_handler。"""
-        from host_brain.app.handlers.agent_dispatch_handler import agent_dispatch_handler
-        from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
-
-        def mock_invoke(handler_id: str, payload: dict, ctx: dict) -> dict:
-            if handler_id == "retrieval_agent":
-                return retrieval_agent_handler(
-                    {**payload, "workbench_retrieval": {
-                        "gateway_status": "OK",
-                        "payload": {"results": [{"id": "doc-1"}], "summary": "找到结果"},
-                    }},
-                    context=ctx,
-                )
-            return payload
-
-        payload = {
-            "request_id": "p11-dispatch-001",
-            "active_agent_id": AGENT_ID_RETRIEVAL,
-            "supervisor_dispatch": {"need_judge": True},
-        }
-        result = agent_dispatch_handler(
-            payload,
-            context={
-                "request_id": "p11-dispatch-001",
-                "invoke_handler": mock_invoke,
-            },
+    def test_graph_config_allowlist_contains_retrieval_agent(self):
+        """graph_config_builder allowlist 包含 retrieval_agent，可被分派到 retrieval_agent_handler。"""
+        from host_brain.app.graph_config_builder import (
+            AGENT_DISPATCH_NODE_ID,
+            build_supervised_graph,
         )
-        artifacts = result.get("agent_artifacts") or {}
-        assert AGENT_ID_RETRIEVAL in artifacts
+        config = build_supervised_graph(
+            provider_name="mock",
+            model_id="mock",
+            timeout_ms=5000,
+            available=True,
+            api_key=None,
+            provider_fn=lambda _: None,
+        )
+        bindings = {b["node_id"]: b for b in config.get("node_bindings", [])}
+        agent_binding = bindings.get(AGENT_DISPATCH_NODE_ID)
+        assert agent_binding is not None
+        allowlist = set(agent_binding.get("agent_dispatch_allowlist") or [])
+        assert AGENT_ID_RETRIEVAL in allowlist
 
 
 # ---------------------------------------------------------------------------

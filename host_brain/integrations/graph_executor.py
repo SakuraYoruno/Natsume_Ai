@@ -87,8 +87,6 @@ _MODEL_OUTPUT_CONTROL_FIELDS: frozenset[str] = frozenset({
     # __next_node__ 和 __orchestration_* 由执行器内部处理，不在此剥离
 })
 
-# P3.5：executor 不再持有 agent 映射与 model 节点业务知识，分派与执行由 agent_dispatch_handler 与各 handler 负责。
-
 
 class GraphExecutor:
     """Executes graph nodes step-by-step using LangGraph runtime."""
@@ -129,6 +127,33 @@ class GraphExecutor:
         # 当 node_id == "agent_dispatch_node" 时，根据 active_agent_id 动态选择对应 handler 执行，
         # 而不是走固定节点序列。这是 M-MA6 的核心：图执行器根据 GraphState.active_agent_id 动态路由。
         if node_id == "agent_dispatch_node":
+            # P16：active_agent_id 优先从 payload 同步到 state 顶层（supervisor_dispatch_handler 写 payload["active_agent_id"]）
+            payload_active = str((state.get("payload") or {}).get("active_agent_id") or "").strip()
+            state_active = str(state.get("active_agent_id") or "").strip()
+            resolved_active_agent = payload_active or state_active
+            if resolved_active_agent != state_active:
+                state = {**state, "active_agent_id": resolved_active_agent}
+
+            # P16：allowlist 校验（从 node_bindings 读取，防止 LLM 提案选到无 handler 的 agent）
+            binding = (state.get("node_bindings") or {}).get(node_id) or {}
+            allowlist_raw = binding.get("agent_dispatch_allowlist")
+            if isinstance(allowlist_raw, (list, tuple)) and allowlist_raw:
+                allowlist = frozenset(str(x).strip() for x in allowlist_raw if str(x).strip())
+                if resolved_active_agent and resolved_active_agent not in allowlist:
+                    # 不在 allowlist：安全降级，跳到下一跳
+                    next_node = (state.get("edge_map") or {}).get(node_id)
+                    return {
+                        **state,
+                        "pending_node_id": next_node,
+                        "trace": list(state.get("trace") or []) + [{
+                            "node_id": node_id,
+                            "handler_id": "",
+                            "status": "DEGRADED",
+                            "reason_code": "AGENT_NOT_IN_ALLOWLIST",
+                            "detail": f"active_agent_id={resolved_active_agent!r} 不在 allowlist={sorted(allowlist)}，安全降级",
+                        }],
+                    }
+
             handler_id = self._dispatch_to_agent(state)
             if handler_id:
                 try:
@@ -144,11 +169,21 @@ class GraphExecutor:
                         handler_id=handler_id,
                         error=exc,
                     )
-                # agent handler 不写 __next_node__，由 edge_map 决定下一跳
-                # 安全约束：先 pop __next_node__，再用 edge_map 决定，防止 agent handler 控图
+                # agent handler 不写 __next_node__，由 need_judge 快路径或 edge_map 决定下一跳
+                # 安全约束：先 pop __next_node__，防止 agent handler 控图
                 payload = dict(output or state.get("payload") or {})
                 payload.pop("__next_node__", None)
-                next_node = (state.get("edge_map") or {}).get(node_id)
+
+                # P16：need_judge 快路径（chat_agent 等不需要 judge 时直接跳 chat_render_node）
+                supervisor_info = dict(payload.get("supervisor_dispatch") or {})
+                need_judge = bool(supervisor_info.get("need_judge", True))
+                if need_judge:
+                    next_node = (state.get("edge_map") or {}).get(node_id)
+                else:
+                    # 快路径：跳过 judge，直接到 chat_render_node
+                    from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
+                    next_node = CHAT_RENDER_NODE_ID
+
                 # 同步 agent_artifacts 到 state 顶层
                 agent_artifacts = dict(state.get("agent_artifacts") or {})
                 if isinstance(payload.get("agent_artifacts"), dict):
@@ -159,7 +194,7 @@ class GraphExecutor:
                     "handler_id": handler_id,
                     "status": "OK",
                     "reason_code": None,
-                    "detail": f"agent_dispatch_node → {handler_id}",
+                    "detail": f"agent_dispatch_node → {handler_id} (need_judge={need_judge})",
                 })
                 return {
                     **state,
@@ -167,7 +202,7 @@ class GraphExecutor:
                     "trace": trace,
                     "pending_node_id": next_node,
                     "agent_artifacts": agent_artifacts,
-                    "active_agent_id": str(state.get("active_agent_id") or ""),
+                    "active_agent_id": resolved_active_agent,
                 }
             # handler_id 为空时降级：直接跳到下一跳（edge_map 决定）
             next_node = (state.get("edge_map") or {}).get(node_id)
@@ -179,7 +214,7 @@ class GraphExecutor:
                     "handler_id": "",
                     "status": "DEGRADED",
                     "reason_code": "AGENT_DISPATCH_NO_HANDLER",
-                    "detail": f"active_agent_id={state.get('active_agent_id')!r} 无对应 handler，跳过",
+                    "detail": f"active_agent_id={resolved_active_agent!r} 无对应 handler，跳过",
                 }],
             }
 
@@ -306,7 +341,7 @@ class GraphExecutor:
         next_node = pick_next_node(output=payload, default_next=(state.get("edge_map") or {}).get(node_id))
         payload.pop("__next_node__", None)
 
-        # P3.5：handler 可能写 agent_artifacts 到 payload，同步到 state 顶层供下游（如 judge）读取
+        # P16：handler 可能写 agent_artifacts 到 payload，同步到 state 顶层供下游（如 judge）读取
         agent_artifacts = dict(state.get("agent_artifacts") or {})
         if isinstance(payload.get("agent_artifacts"), dict):
             agent_artifacts = {**agent_artifacts, **payload["agent_artifacts"]}
