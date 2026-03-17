@@ -16,6 +16,10 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import PERF_BASELINE_STALE
 from host_brain.core.ids import now_ms
 from host_brain.integrations.graph_contract import is_budget_breach_failure_code
+from host_brain.observability.p8_extended_metrics import (
+    P8ExtendedMetricsCollector,
+    is_p8_enabled,
+)
 
 
 class ObsMode(str, Enum):
@@ -105,6 +109,12 @@ class MetricsCollector:
         # P7-3：预算突破观测（从 supervisor_decision_log 等聚合 budget breach 类失败码）
         budget_breach_metrics = self._query_budget_breach_metrics()
 
+        # P8-1：扩展观测聚合（开关控制，默认关闭）
+        p8_metrics: dict[str, Any] | None = None
+        if is_p8_enabled():
+            p8_collector = P8ExtendedMetricsCollector(ledger=self.ledger)
+            p8_metrics = p8_collector.collect_all()
+
         payload: dict[str, Any] = {
             "request_id": request_id,
             "ts_ms": collected_ts,
@@ -120,10 +130,17 @@ class MetricsCollector:
             "agent_metrics": agent_metrics,
             # P5-4：Supervisor 决策观测
             "supervisor_metrics": supervisor_metrics,
-            # P7-3：预算突破观测（超时/超步数/重试耗尽等）
+            # P7-3：预算突破观测（超时/超步数等）
             "budget_breach_metrics": budget_breach_metrics,
             "debug_trace": None,
         }
+
+        # P8-1：开关开启时追加扩展观测字段（不修改已有字段）
+        if p8_metrics is not None:
+            payload["subgraph_failure_metrics"] = p8_metrics["subgraph_failure_metrics"]
+            payload["local_loop_failure_metrics"] = p8_metrics["local_loop_failure_metrics"]
+            payload["intent_budget_breach_metrics"] = p8_metrics["intent_budget_breach_metrics"]
+            payload["graph_latency_metrics"] = p8_metrics["graph_latency_metrics"]
 
         if mode == ObsMode.DEV and request_id:
             payload["debug_trace"] = self._build_debug_trace(request_id)

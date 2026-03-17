@@ -342,6 +342,39 @@ SCHEDULER_EVENT_COLUMNS = (
     "ts_ms",
 )
 
+# P8-1: subgraph/local loop 失败分布聚合表列定义
+P8_SUBGRAPH_FAILURE_LOG_COLUMNS = (
+    "request_id",
+    "ts_ms",
+    "execution_profile",
+    "log_category",
+    "error_code",
+    "failed_node",
+    "detail",
+)
+
+# P8-1: 三图 run_graph 执行记录表列定义
+P8_GRAPH_RUN_LOG_COLUMNS = (
+    "request_id",
+    "ts_ms",
+    "execution_profile",
+    "latency_ms",
+    "status",
+    "budget_breach_code",
+)
+
+# P8-1: P6 封板的 local loop 失败码（与 graph_contract.LOCAL_LOOP_FAILURE_CODES 保持一致）
+# 归类优先级：error_code 属于此集合 → 归入 local_loop_failure_metrics，不计入 subgraph_failure_metrics
+P8_LOCAL_LOOP_FAILURE_CODES: frozenset[str] = frozenset({
+    "LOCAL_LOOP_TIMEOUT",
+    "LOCAL_LOOP_MAX_STEPS",
+    "LOCAL_LOOP_INTERNAL_ERROR",
+})
+
+# P8-1: 表名常量
+P8_TABLE_SUBGRAPH_FAILURE_LOG = "p8_subgraph_failure_log"
+P8_TABLE_GRAPH_RUN_LOG = "p8_graph_run_log"
+
 MODEL_CONTROL_COLUMNS = (
     "request_id",
     "node_id",
@@ -361,6 +394,8 @@ MODEL_CONTROL_COLUMNS = (
 )
 
 JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
+    "p8_subgraph_failure_log": set(),
+    "p8_graph_run_log": set(),
     "intent_log": {"normalized_json", "proposed_intent_draft_json", "lint_result"},
     "governor_log": {"rule_trace", "tokens", "snapshot_refs"},
     "skill_exec_log": set(),
@@ -422,6 +457,9 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "llm_node_call_log",
     "graph_run_trace",
     "supervisor_decision_log",
+    # P8-1: 新增聚合表
+    "p8_subgraph_failure_log",
+    "p8_graph_run_log",
 })
 
 

@@ -42,6 +42,8 @@ from host_brain.audit.ledger_constants import (
     BOND_UPDATE_COLUMNS,
     SANDBOX_EXEC_COLUMNS,
     SCHEDULER_EVENT_COLUMNS,
+    P8_SUBGRAPH_FAILURE_LOG_COLUMNS,
+    P8_GRAPH_RUN_LOG_COLUMNS,
     WalConfig,
 )
 from host_brain.audit.ledger_fetch_mixin import LedgerFetchMixin
@@ -166,6 +168,16 @@ class SQLiteLedger(
     def supervisor_decision_log(self) -> list[dict[str, Any]]:
         """P5-4：Supervisor 决策观测日志（rule/llm/llm_fallback_rule、failure_code、selected_agent）。"""
         return self._fetch_all("supervisor_decision_log")
+
+    @property
+    def p8_subgraph_failure_log(self) -> list[dict[str, Any]]:
+        """P8-1：subgraph/local loop 失败分布聚合日志。"""
+        return self._fetch_all("p8_subgraph_failure_log")
+
+    @property
+    def p8_graph_run_log(self) -> list[dict[str, Any]]:
+        """P8-1：三图 run_graph 执行记录（延迟聚合 + Intent budget breach 聚合）。"""
+        return self._fetch_all("p8_graph_run_log")
 
     @property
     def service_health_log(self) -> list[dict[str, Any]]:
@@ -363,6 +375,24 @@ class SQLiteLedger(
     def log_scheduler_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SCHEDULER_EVENT_COLUMNS}
         self._insert("scheduler_event_log", payload)
+
+    def log_p8_subgraph_failure(self, row: dict[str, Any]) -> None:
+        """P8-1：写入 subgraph/local loop 失败记录。
+
+        必填字段：request_id, ts_ms, log_category ('subgraph' | 'local_loop'), error_code
+        可选字段：execution_profile, failed_node, detail
+        """
+        payload = {key: row.get(key) for key in P8_SUBGRAPH_FAILURE_LOG_COLUMNS}
+        self._insert("p8_subgraph_failure_log", payload)
+
+    def log_p8_graph_run(self, row: dict[str, Any]) -> None:
+        """P8-1：写入一次 run_graph 执行记录（延迟 + budget breach）。
+
+        必填字段：request_id, ts_ms
+        可选字段：execution_profile, latency_ms, status, budget_breach_code
+        """
+        payload = {key: row.get(key) for key in P8_GRAPH_RUN_LOG_COLUMNS}
+        self._insert("p8_graph_run_log", payload)
 
     # -------------------------------------------------------------------
     # Canon 提案查询与更新

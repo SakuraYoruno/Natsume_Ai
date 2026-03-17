@@ -12,19 +12,20 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from host_brain.app.agents.agent_registry import AGENT_ID_CODE, AGENT_ID_TRANSLATE
+from host_brain.app.agents.agent_registry import AGENT_ID_CODE, AGENT_ID_RETRIEVAL, AGENT_ID_TRANSLATE
 from host_brain.app.graph_config_builder import (
     CHAT_RENDER_NODE_ID,
     JUDGE_AGENT_NODE_ID,
 )
 
 # 默认 allowlist（当图配置未提供 agent_dispatch_allowlist 时）；结构测试可断言
-DEFAULT_AGENT_DISPATCH_ALLOWLIST: frozenset[str] = frozenset({AGENT_ID_CODE, AGENT_ID_TRANSLATE})
+DEFAULT_AGENT_DISPATCH_ALLOWLIST: frozenset[str] = frozenset({AGENT_ID_CODE, AGENT_ID_TRANSLATE, AGENT_ID_RETRIEVAL})
 
 # agent_id → handler_id（与注册名一致）
 _ALLOWLIST_HANDLER_MAP: dict[str, str] = {
     AGENT_ID_CODE: "code_agent",
     AGENT_ID_TRANSLATE: "translate_agent",
+    AGENT_ID_RETRIEVAL: "retrieval_agent",  # P11 新增
 }
 
 

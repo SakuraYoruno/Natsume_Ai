@@ -587,6 +587,39 @@ CREATE TABLE IF NOT EXISTS supervisor_decision_log (
 );
 CREATE INDEX IF NOT EXISTS idx_supervisor_decision_request ON supervisor_decision_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_supervisor_decision_ts ON supervisor_decision_log (ts_ms);
+
+-- P8-1: subgraph/local loop 失败分布聚合表
+-- 每次 run_graph 完成后，若存在 subgraph_failure，写入一行；
+-- error_code 前缀为 LOCAL_LOOP_* 的归入 log_category='local_loop'，其余归入 'subgraph'
+CREATE TABLE IF NOT EXISTS p8_subgraph_failure_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id      TEXT    NOT NULL,
+    ts_ms           INTEGER NOT NULL,
+    execution_profile TEXT,
+    log_category    TEXT    NOT NULL,   -- 'subgraph' | 'local_loop'（归类优先级见 P8_SCOPE §4.1）
+    error_code      TEXT    NOT NULL,
+    failed_node     TEXT,
+    detail          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_p8_subgraph_failure_request ON p8_subgraph_failure_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_p8_subgraph_failure_category ON p8_subgraph_failure_log (log_category);
+CREATE INDEX IF NOT EXISTS idx_p8_subgraph_failure_code ON p8_subgraph_failure_log (error_code);
+CREATE INDEX IF NOT EXISTS idx_p8_subgraph_failure_ts ON p8_subgraph_failure_log (ts_ms);
+
+-- P8-1: 三图 run_graph 执行记录表（延迟聚合 + Intent budget breach 聚合）
+-- 每次 run_graph 完成后写入一行，记录 execution_profile、总耗时、budget breach 信息
+CREATE TABLE IF NOT EXISTS p8_graph_run_log (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id           TEXT    NOT NULL,
+    ts_ms                INTEGER NOT NULL,
+    execution_profile    TEXT,           -- CHAT_FAST | WORKFLOW_SUPERVISED | INTENT_EXEC
+    latency_ms           INTEGER,        -- run_graph 总耗时（毫秒）
+    status               TEXT,           -- OK | FAILED 等
+    budget_breach_code   TEXT            -- Intent 图 budget breach 失败码（若有）
+);
+CREATE INDEX IF NOT EXISTS idx_p8_graph_run_request ON p8_graph_run_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_p8_graph_run_profile ON p8_graph_run_log (execution_profile);
+CREATE INDEX IF NOT EXISTS idx_p8_graph_run_ts ON p8_graph_run_log (ts_ms);
 """
 
 

@@ -19,6 +19,7 @@ AGENT_ID_INTENT = "intent_agent"
 AGENT_ID_SAFETY = "safety_agent"
 AGENT_ID_JUDGE = "judge_agent"
 AGENT_ID_RENDERER = "renderer_agent"
+AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
 
 # ---------------------------------------------------------------------------
 # Agent Allowlist（Supervisor 分派时的合法目标集合）
@@ -32,6 +33,7 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_SAFETY,
     AGENT_ID_JUDGE,
     AGENT_ID_RENDERER,
+    AGENT_ID_RETRIEVAL,  # P11 新增
 })
 
 # ---------------------------------------------------------------------------
@@ -108,6 +110,16 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": False,
         "risk_level": "low",
         "description": "最终成文输出",
+    },
+    AGENT_ID_RETRIEVAL: {  # P11 新增
+        "agent_id": AGENT_ID_RETRIEVAL,
+        "display_name": "RetrievalAgent",
+        "node_id": "workbench_retrieval",
+        "fast_path": False,
+        "allow_parallel": True,                # 只读检索，允许并行
+        "has_side_effects": False,
+        "risk_level": "low",
+        "description": "知识库检索，只读，产出检索工件",
     },
 }
 

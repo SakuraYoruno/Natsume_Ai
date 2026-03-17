@@ -30,6 +30,7 @@ from host_brain.app.agents.agent_registry import (
     AGENT_ID_CODE,
     AGENT_ID_INTENT,
     AGENT_ID_JUDGE,
+    AGENT_ID_RETRIEVAL,
     AGENT_ID_TRANSLATE,
     get_agent_meta,
 )
@@ -235,6 +236,7 @@ _SUPERVISOR_SYSTEM_PROMPT = """你是一个任务分派专家，负责根据用�
 - code_agent：处理代码生成、代码修改、代码解释（中风险）
 - translate_agent：处理文本翻译（低风险）
 - intent_agent：处理执行意图、工具调用、复杂任务规划（高风险）
+- retrieval_agent：处理知识库检索、信息查找（低风险，只读）
 
 你必须返回合法的 JSON 格式：
 {
@@ -250,6 +252,7 @@ _SUPERVISOR_SYSTEM_PROMPT = """你是一个任务分派专家，负责根据用�
 - 代码相关 → code_agent，risk_mode=guarded，need_judge=true
 - 翻译相关 → translate_agent，risk_mode=safe，need_judge=true
 - 执行/工具/复杂任务 → intent_agent，risk_mode=strict，need_judge=true
+- 检索/查找知识库 → retrieval_agent，risk_mode=safe，need_judge=true
 - 不确定时 → chat_agent（保守选择）
 """
 
