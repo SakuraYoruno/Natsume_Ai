@@ -1,7 +1,7 @@
 # 多 Agent 架构重构：图拆分与概念收口（可执行方案）
 
-**日期**：2026-03  
-**状态**：定版方案，作为 P0～P7 实施依据；P1～P7 已全部封板，当前进入**下一轮候选基线规划阶段**  
+**日期**：2026-03
+**状态**：定版方案，作为 P0～P7 实施依据；P1～P7 已全部封板，当前进入**下一轮候选基线规划阶段**
 **原则**：先选图再跑图；先收口再扩能力；先让路径可解释，再让 Agent 更聪明。
 
 ---
@@ -40,9 +40,9 @@
 
 职责仅三件事：
 
-1. Airlock / Governor 前置校验  
-2. 基于 scene_type / 风险级别 / narrative_only 判定 **execution_profile**  
-3. 写入 execution_profile，将请求发往对应 graph  
+1. Airlock / Governor 前置校验
+2. 基于 scene_type / 风险级别 / narrative_only 判定 **execution_profile**
+3. 写入 execution_profile，将请求发往对应 graph
 
 **不负责**：编排、任务拆解、Agent handoff。
 
@@ -58,21 +58,21 @@
 ### 2.2 Chat Graph（独立快路径图）
 
 - **专门处理显式聊天**，不混入 Supervisor、planner、tool_planner、intent 子图。
-- **固定链路**：`START → chat_agent → light_guard(optional) → renderer → END`  
-- **约束**：不进 Supervisor、不进 Judge（除非后续明确需求）、不进执行级安全链、不使用 active_agent_id 动态分发。  
+- **固定链路**：`START → chat_agent → light_guard(optional) → renderer → END`
+- **约束**：不进 Supervisor、不进 Judge（除非后续明确需求）、不进执行级安全链、不使用 active_agent_id 动态分发。
 - **目标**：低延迟、低心智负担、强边界。
 
 ### 2.3 Supervised Graph（AUTO / code / translate 统一图）
 
 - **只承载**「Supervisor → 单专家 Agent → Judge → Renderer」。
-- **固定链路**：`START → supervisor_dispatch → agent_dispatch → judge_agent → renderer → END`  
+- **固定链路**：`START → supervisor_dispatch → agent_dispatch → judge_agent → renderer → END`
 - **agent_dispatch**：trusted handler 入口，根据 agent_runtime.active_agent_id 调度到 code_agent_handler / translate_agent_handler（及后续 retrieval_agent_handler 等）；**不是** model node。
 - **本图内不包含**：planner_constraints、tool_planner、safety_verifier 长链（执行意图走 Intent Graph）。
 
 ### 2.4 Intent Graph（执行意图专用图）
 
 - **执行意图单独一张图**，不与 AUTO/多 Agent 图混用。
-- **固定链路**：`START → intent_agent_entry → intent_agent_subgraph → safety_verifier → judge_agent → renderer → END`  
+- **固定链路**：`START → intent_agent_entry → intent_agent_subgraph → safety_verifier → judge_agent → renderer → END`
 - **intent_agent_subgraph** 内部封装：`core_reasoner_primary → planner_constraints → tool_planner`，不暴露在主图 edges 上。
 
 ---
@@ -93,8 +93,8 @@
 
 ### 4.1 必删
 
-- **MULTI_AGENT_ENABLED**  
-- **HOST_GRAPH_SCENE_ROUTER_ENABLED**  
+- **MULTI_AGENT_ENABLED**
+- **HOST_GRAPH_SCENE_ROUTER_ENABLED**
 
 二者本质是在切换「系统哲学」，不应为 bool 开关。
 
@@ -114,14 +114,14 @@
 
 以下提升为一等运行时字段，避免一半在 payload、一半在 GraphState、一半隐式：
 
-- **execution_profile**: str — 入口层写，agent 不可改  
-- **scene_type**: str  
-- **active_agent_id**: str | None — 仅 Supervisor / trusted handler 可改  
-- **need_judge**: bool — 由 profile 或 supervisor plan 决定  
-- **risk_mode**: str  
-- **agent_runtime**: dict  
-- **judge_result**: dict | None — 仅 judge_agent_handler 可写  
-- **committed_route_token** — 仅 Governor 可写；**完全退出 Agent 路由语义**，不参与多 Agent 内部 handoff  
+- **execution_profile**: str — 入口层写，agent 不可改
+- **scene_type**: str
+- **active_agent_id**: str | None — 仅 Supervisor / trusted handler 可改
+- **need_judge**: bool — 由 profile 或 supervisor plan 决定
+- **risk_mode**: str
+- **agent_runtime**: dict
+- **judge_result**: dict | None — 仅 judge_agent_handler 可写
+- **committed_route_token** — 仅 Governor 可写；**完全退出 Agent 路由语义**，不参与多 Agent 内部 handoff
 
 原则：execution_profile 决定跑哪张图；active_agent_id 只在 Supervised Graph 内有效。
 
@@ -131,16 +131,17 @@
 
 ### 6.1 现在只保留（且仅存在于 WORKFLOW_SUPERVISED 图内）
 
-- supervisor_dispatch_handler  
-- agent_dispatch_handler（见下）  
-- code_agent_handler、translate_agent_handler、judge_agent_handler  
+- supervisor_dispatch_handler
+- agent_dispatch_handler（见下）
+- code_agent_handler、translate_agent_handler、judge_agent_handler
 
 ### 6.2 暂缓（冻结，不进入主线）
 
-- code_agent ReAct、translate_agent ReAct  
-- graph_executor 的全局动态 agent 路由  
-- 通用 react_scratchpad  
-- 多 Agent 循环 handoff  
+- ~~code_agent ReAct~~（**P9 已封板**）
+- ~~translate_agent ReAct~~（**P10 纳入，待实施**）
+- graph_executor 的全局动态 agent 路由
+- 通用 react_scratchpad
+- 多 Agent 循环 handoff
 
 ### 6.3 唯一例外
 
@@ -166,9 +167,9 @@
 
 任意请求的执行路径必须可用下面三句话之一说清：
 
-1. **聊天**：「显式聊天在入口层打成 CHAT_FAST，只跑 chat_agent → light_guard → renderer。」  
-2. **AUTO / 工作辅助**：「AUTO 或代码/翻译类在入口层进入 WORKFLOW_SUPERVISED，Supervisor 选一个专家 Agent，专家产出工件，Judge 收口，Renderer 输出。」  
-3. **执行意图**：「执行意图在入口层进入 INTENT_EXEC，跑 Intent 子图、安全校验、Judge、Renderer，不与聊天快路径混图。」  
+1. **聊天**：「显式聊天在入口层打成 CHAT_FAST，只跑 chat_agent → light_guard → renderer。」
+2. **AUTO / 工作辅助**：「AUTO 或代码/翻译类在入口层进入 WORKFLOW_SUPERVISED，Supervisor 选一个专家 Agent，专家产出工件，Judge 收口，Renderer 输出。」
+3. **执行意图**：「执行意图在入口层进入 INTENT_EXEC，跑 Intent 子图、安全校验、Judge、Renderer，不与聊天快路径混图。」
 
 若无法用这三句解释，则设计未收口。
 
@@ -196,36 +197,50 @@
 | **P5** | Supervisor 决策升级：rule/llm 双模，灰度与回退（不改三图、不引入 ReAct）。 | **完成并正式验收通过**（2026-03 封板） |
 | **P6** | 仅在 intent_agent_subgraph 内试点局部循环（硬边界、失败码、step 级 trace）。 | **完成并正式验收通过**（2026-03 封板） |
 | **P7** | 治理与稳定性基线：预算契约、统一回退矩阵、观测聚合、压测与故障注入；不改三图、不扩 executor、不新增 Agent。 | **完成并正式验收通过**（2026-03 封板） |
-| **P8** | 下一轮候选基线：可控能力演进或收口增强（规划中）；范围与验收以 P8_SCOPE 为准。 | 待启动（**下一轮候选基线，规划中**） |
+| **P8** | 下一轮候选基线：subgraph/local loop 全量 ledger 聚合，补全 P7 遗留观测缺口（定稿）；范围与验收以 P8_SCOPE 为准。 | **完成并正式验收通过**（2026-03 封板） |
+| **P9** | 第六轮候选基线：code_agent 受控 ReAct 化（验收 + 契约固化 + 封板）；范围与验收以 P9_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
+| **P10** | 第七轮候选基线：translate_agent 受控 ReAct 化（handler 改造 + 验收 + 契约固化 + 封板）；范围与验收以 P10_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
+| **P11** | 第八轮候选基线：retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，新增 handler + allowlist 扩展 + 验收 + 契约固化 + 封板）；范围与验收以 P11_SCOPE 为准。 | **完成并正式验收通过（2026-03 封板）** |
 
-**基线说明**：  
-- **第一轮正式基线**：P1～P4，已封板。P4 范围与契约以 **MULTI_AGENT_P4_SCOPE_2026-03.md** 为准。  
-- **第二轮正式基线**：P5，已封板。P5 范围、8 条验收标准与实施建议以 **MULTI_AGENT_P5_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P5_SEAL_RESULT_2026-03.md** 为准。  
-- **第三轮正式基线**：P6，完成并正式验收通过，已封板。P6 范围与验收以 **MULTI_AGENT_P6_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P6_SEAL_RESULT_2026-03.md** 为准。  
-- **第四轮正式基线**：P7，完成并正式验收通过，已封板。P7 范围与验收以 **MULTI_AGENT_P7_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P7_SEAL_RESULT_2026-03.md** 为准。  
-- **当前阶段**：P1～P7 已全部形成完整封板链路；**下一轮候选基线 P8 规划已启动**，范围与验收以 **MULTI_AGENT_P8_SCOPE_2026-03.md** 为准。
+**基线说明**：
+- **第一轮正式基线**：P1～P4，已封板。P4 范围与契约以 **MULTI_AGENT_P4_SCOPE_2026-03.md** 为准。
+- **第二轮正式基线**：P5，已封板。P5 范围、8 条验收标准与实施建议以 **MULTI_AGENT_P5_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P5_SEAL_RESULT_2026-03.md** 为准。
+- **第三轮正式基线**：P6，完成并正式验收通过，已封板。P6 范围与验收以 **MULTI_AGENT_P6_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P6_SEAL_RESULT_2026-03.md** 为准。
+- **第四轮正式基线**：P7，完成并正式验收通过，已封板。P7 范围与验收以 **MULTI_AGENT_P7_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P7_SEAL_RESULT_2026-03.md** 为准。
+- **第五轮正式基线**：P8，完成并正式验收通过，已封板。P8 范围与验收以 **MULTI_AGENT_P8_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P8_SEAL_RESULT_2026-03.md** 为准。
+- **第六轮正式基线**：P9，完成并正式验收通过，已封板。P9 范围与验收以 **MULTI_AGENT_P9_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P9_SEAL_RESULT_2026-03.md** 为准。
+- **第七轮正式基线**：P10，完成并正式验收通过，已封板。P10 范围与验收以 **MULTI_AGENT_P10_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P10_SEAL_RESULT_2026-03.md** 为准。
+- **第八轮正式基线**：P11，完成并正式验收通过，已封板。P11 范围与验收以 **MULTI_AGENT_P11_SCOPE_2026-03.md** 为准；验收结论以 **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md** 为准。
+- **当前阶段**：P1～P11 已全部形成完整封板链路；P12 正在规划中，须单独规划，不得以旧阶段补丁名义混入。
 
 ---
 
 ## 11. 与现有文档的关系
 
-- **MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md**：保留为能力与契约参考；**实施顺序与架构形态以本文档为准**，先图拆分再扩能力。  
-- **MULTI_AGENT_ARCH_SIMPLIFICATION_2026-03.md**：合并进本文档，简化方案以「三张图 + execution_profile」为准。  
-- **MULTI_AGENT_P4_SCOPE_2026-03.md**：P4 范围、验收标准与下游契约；P4 已验收封板。  
-- **MULTI_AGENT_P5_SCOPE_2026-03.md**：P5 范围、8 条验收标准与实施建议；P5 已验收封板。  
-- **MULTI_AGENT_P5_SEAL_RESULT_2026-03.md**：P5 验收结论（8 条逐条结论、测试覆盖、冻结非目标）。  
-- **MULTI_AGENT_P6_SCOPE_2026-03.md**：P6 范围、唯一目标（窄定义）、验收标准与冻结非目标；P6 已验收封板。  
-- **MULTI_AGENT_P6_SEAL_RESULT_2026-03.md**：P6 验收结论（6 条逐条结论、测试覆盖、观测约定、冻结非目标）。  
-- **MULTI_AGENT_P6_1_LOCAL_LOOP_CONTRACT_2026-03.md**：P6-1 局部循环契约与最小闭环设计；边界字段、失败码、subgraph_trace step 级、入口/出口不变；P6 实现契约依据。  
-- **MULTI_AGENT_P6_2_IMPLEMENTATION_2026-03.md**：P6-2 实现目标、最小实现面、验收 5 条；实施与验收依据。  
-- **MULTI_AGENT_P6_3_INTEGRATION_ACCEPTANCE_2026-03.md**：P6-3 集成验收补齐（4 条）；已通过并封板。  
-- **MULTI_AGENT_P7_SCOPE_2026-03.md**：P7 治理与稳定性基线；范围、8 条验收标准、实现约束、冻结非目标；P7 已验收封板。  
-- **MULTI_AGENT_P7_SEAL_RESULT_2026-03.md**：P7 验收结论（8 条逐条结论、3.4/3.6 收窄口径说明、测试与文档覆盖、冻结非目标）。  
-- **MULTI_AGENT_P7_2_FAILURE_MATRIX_2026-03.md**：P7-2 三图失败收口矩阵；失败位置、类型、收口策略、可见输出。  
-- **MULTI_AGENT_P7_4_FAULT_INJECTION_BASELINE_2026-03.md**：P7-4 压测与故障注入基线；三图故障注入用例索引、压测结果摘要模板与最小结果示例。  
-- **MULTI_AGENT_P7_3_OBSERVABILITY_SCOPE_2026-03.md**：P7-3 当前统一观测面范围边界；最小观测面 vs subgraph/local loop 全量聚合。  
-- **MULTI_AGENT_P7_ACCEPTANCE_PREVIEW_2026-03.md**：P7 验收汇总预审；8 条逐条定性、3.4/3.6 口径；已由 P7_SEAL_RESULT 正式验收取代。  
-- **MULTI_AGENT_P8_SCOPE_2026-03.md**：P8 下一轮候选基线；范围与验收（规划稿）；可选方向含 ReAct/Handoff 试点、观测增强等，待定稿；P8 待启动，单独规划。  
+- **MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md**：保留为能力与契约参考；**实施顺序与架构形态以本文档为准**，先图拆分再扩能力。
+- **MULTI_AGENT_ARCH_SIMPLIFICATION_2026-03.md**：合并进本文档，简化方案以「三张图 + execution_profile」为准。
+- **MULTI_AGENT_P4_SCOPE_2026-03.md**：P4 范围、验收标准与下游契约；P4 已验收封板。
+- **MULTI_AGENT_P5_SCOPE_2026-03.md**：P5 范围、8 条验收标准与实施建议；P5 已验收封板。
+- **MULTI_AGENT_P5_SEAL_RESULT_2026-03.md**：P5 验收结论（8 条逐条结论、测试覆盖、冻结非目标）。
+- **MULTI_AGENT_P6_SCOPE_2026-03.md**：P6 范围、唯一目标（窄定义）、验收标准与冻结非目标；P6 已验收封板。
+- **MULTI_AGENT_P6_SEAL_RESULT_2026-03.md**：P6 验收结论（6 条逐条结论、测试覆盖、观测约定、冻结非目标）。
+- **MULTI_AGENT_P6_1_LOCAL_LOOP_CONTRACT_2026-03.md**：P6-1 局部循环契约与最小闭环设计；边界字段、失败码、subgraph_trace step 级、入口/出口不变；P6 实现契约依据。
+- **MULTI_AGENT_P6_2_IMPLEMENTATION_2026-03.md**：P6-2 实现目标、最小实现面、验收 5 条；实施与验收依据。
+- **MULTI_AGENT_P6_3_INTEGRATION_ACCEPTANCE_2026-03.md**：P6-3 集成验收补齐（4 条）；已通过并封板。
+- **MULTI_AGENT_P7_SCOPE_2026-03.md**：P7 治理与稳定性基线；范围、8 条验收标准、实现约束、冻结非目标；P7 已验收封板。
+- **MULTI_AGENT_P7_SEAL_RESULT_2026-03.md**：P7 验收结论（8 条逐条结论、3.4/3.6 收窄口径说明、测试与文档覆盖、冻结非目标）。
+- **MULTI_AGENT_P7_2_FAILURE_MATRIX_2026-03.md**：P7-2 三图失败收口矩阵；失败位置、类型、收口策略、可见输出。
+- **MULTI_AGENT_P7_4_FAULT_INJECTION_BASELINE_2026-03.md**：P7-4 压测与故障注入基线；三图故障注入用例索引、压测结果摘要模板与最小结果示例。
+- **MULTI_AGENT_P7_3_OBSERVABILITY_SCOPE_2026-03.md**：P7-3 当前统一观测面范围边界；最小观测面 vs subgraph/local loop 全量聚合。
+- **MULTI_AGENT_P7_ACCEPTANCE_PREVIEW_2026-03.md**：P7 验收汇总预审；8 条逐条定性、3.4/3.6 口径；已由 P7_SEAL_RESULT 正式验收取代。
+- **MULTI_AGENT_P8_SCOPE_2026-03.md**：P8 第五轮正式基线；范围与验收（定稿）；唯一目标为 subgraph/local loop 全量 ledger 聚合（P8-1），5 条验收标准已写死；P8 已封板。
+- **MULTI_AGENT_P8_SEAL_RESULT_2026-03.md**：P8 验收结论（5/5 验收满足、ledger 与聚合范围、与 P7 兼容性说明、冻结非目标）；第五轮正式基线 = P8。
+- **MULTI_AGENT_P9_SCOPE_2026-03.md**：P9 第六轮正式基线；范围与验收（定稿）；唯一目标为 code_agent 受控 ReAct 化（P9-1），3 条验收标准已写死；P9 已封板。
+- **MULTI_AGENT_P9_SEAL_RESULT_2026-03.md**：P9 验收结论（3 条逐条结论、44 用例全通过、与 P8 兼容性说明、冻结非目标）；第六轮正式基线 = P9。
+- **MULTI_AGENT_P10_SCOPE_2026-03.md**：P10 第七轮正式基线；范围与验收（定稿）；唯一目标为 translate_agent 受控 ReAct 化（P10-1），3 条验收标准已写死；已封板。
+- **MULTI_AGENT_P10_SEAL_RESULT_2026-03.md**：P10 验收结论（3 条逐条结论、45 用例全通过、与 P9 兼容性说明、冻结非目标）；第七轮正式基线 = P10。
+- **MULTI_AGENT_P11_SCOPE_2026-03.md**：P11 第八轮正式基线；范围与验收（定稿）；唯一目标为 retrieval_agent 最小接入 Supervised Graph（legacy_chain 模式，P11-1），3 条验收标准已写死；已封板。
+- **MULTI_AGENT_P11_SEAL_RESULT_2026-03.md**：P11 验收结论（3 条逐条结论、58 用例全通过、与 P10 兼容性说明、冻结非目标）；第八轮正式基线 = P11。
 - **MULTI_AGENT_SEAL_RESULT.md**：在完成 P1～P2 后更新为「新架构下的封测结论」。
 
 ---
@@ -321,16 +336,16 @@ P2:  P1 最小可交付 → 删 MULTI_AGENT_ENABLED / HOST_GRAPH_SCENE_ROUTER �
 
 Entry Layer 的定位是**前置路由层 / graph selector**，不是第四张业务图。其职责仅限于：
 
-1. Airlock / Governor 前置校验  
-2. 解析 `scene_type`、`narrative_only`、风险级别等输入信号  
-3. 调用 `resolve_execution_profile()` 得到 `execution_profile`  
-4. 选择并调用对应的 graph builder（`build_chat_graph()` / `build_supervised_graph()` / `build_intent_graph()`）  
-5. 将 `execution_profile` 写入 payload / GraphState 后启动对应图执行  
+1. Airlock / Governor 前置校验
+2. 解析 `scene_type`、`narrative_only`、风险级别等输入信号
+3. 调用 `resolve_execution_profile()` 得到 `execution_profile`
+4. 选择并调用对应的 graph builder（`build_chat_graph()` / `build_supervised_graph()` / `build_intent_graph()`）
+5. 将 `execution_profile` 写入 payload / GraphState 后启动对应图执行
 
 **明确约束：**
-- 不新增 `build_entry_graph()`  
-- Entry Layer 不承载业务编排，不引入 Supervisor / Agent / Judge / Subgraph 节点  
-- Entry Layer 不维护业务 edges，不形成新的“隐形万能图”  
+- 不新增 `build_entry_graph()`
+- Entry Layer 不承载业务编排，不引入 Supervisor / Agent / Judge / Subgraph 节点
+- Entry Layer 不维护业务 edges，不形成新的“隐形万能图”
 - `graph_config_builder.py` 只负责三张业务图：
   - `build_chat_graph()`
   - `build_supervised_graph()`
@@ -349,7 +364,7 @@ Entry Layer 的定位是**前置路由层 / graph selector**，不是第四张�
 
 #### 14.2.2 设计理由
 
-`fast-pass` 的作用是优先锁定纯聊天快路径，而不是作为“未命中即升级治理链”的触发器。  
+`fast-pass` 的作用是优先锁定纯聊天快路径，而不是作为“未命中即升级治理链”的触发器。
 否则将导致：
 - 普通聊天误入监督图
 - 聊天延迟升高
@@ -391,10 +406,10 @@ Entry Layer 的定位是**前置路由层 / graph selector**，不是第四张�
 
 推荐顺序如下：
 
-1. 入口层调用 `resolve_execution_profile()`  
-2. 将结果写入 `payload["execution_profile"]`  
-3. 选择对应 graph builder  
-4. `graph_runtime.build_initial_state()` 从 payload 注入 `GraphState.execution_profile`  
+1. 入口层调用 `resolve_execution_profile()`
+2. 将结果写入 `payload["execution_profile"]`
+3. 选择对应 graph builder
+4. `graph_runtime.build_initial_state()` 从 payload 注入 `GraphState.execution_profile`
 5. 后续所有节点只读该字段，不可覆盖
 
 ### 14.4 fallback / 降级矩阵按 profile 固化，不允许跨图逃逸
