@@ -13,6 +13,7 @@ from edge_client.actuators.speech import (
     EVENT_TTS_PLAYBACK_STARTED,
     SpeechPlaybackQueue,
     SpeechQueueResult,
+    BeforePlaybackHook,
 )
 from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult, VtsState
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
@@ -74,6 +75,8 @@ class EdgeVoicePipeline:
             "started": False,
             "reason": "not_started",
         }
+        # 将 VTS 驱动注册为播放前钩子，确保表情/口型在音频播放前就绪
+        self.speech_queue._before_playback_hook = self._vts_before_playback_hook
 
     def asr_chunk(
         self,
@@ -135,6 +138,8 @@ class EdgeVoicePipeline:
         mouth_sync_debug: dict[str, Any] | None = None
 
         if queue_result.success and auto_start:
+            # 重置 VTS 钩子的结果缓存，准备接收本次播放的 VTS 结果
+            self._pending_vts_result: dict[str, Any] = {}
             start_result = self.speech_queue.start_next(ts_ms=event_ts)
             self._report_voice_queue_result(request_id=request_id, result=start_result)
             if (
@@ -142,24 +147,11 @@ class EdgeVoicePipeline:
                 and start_result.success
                 and start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
             ):
-                active = self.speech_queue.active_playback or {}
-                synth_event = dict(active.get("synth_event") or {})
-                speak_event = dict(active.get("speak_event") or {})
-                payload_for_vts = dict(payload)
-                if not payload_for_vts.get("emotion_tag") and speak_event.get("emotion_tag"):
-                    payload_for_vts["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
-                if "emotion_intensity" not in payload_for_vts and speak_event.get("emotion_intensity") is not None:
-                    payload_for_vts["emotion_intensity"] = speak_event["emotion_intensity"]
-                _etag = str(payload_for_vts.get("emotion_tag") or "NEUTRAL").strip().upper()
-                _has_audio = bool(synth_event and synth_event.get("audio_data"))
-                LOGGER.info(
-                    "VTS start: emotion_tag=%s synth_has_audio=%s (mouth_sync needs audio)",
-                    _etag, _has_audio,
-                )
-                expression_result, talk_result, mouth_sync_debug = self._start_vts_for_payload(
-                    payload_for_vts,
-                    synth_event=synth_event,
-                )
+                # VTS 已在 before_playback_hook 中提前驱动，从缓存中取结果
+                vts_cached = getattr(self, "_pending_vts_result", {})
+                expression_result = vts_cached.get("expression_result")
+                talk_result = vts_cached.get("talk_result")
+                mouth_sync_debug = vts_cached.get("mouth_sync_debug")
 
         success = bool(
             queue_result.success
@@ -193,25 +185,12 @@ class EdgeVoicePipeline:
             self._stop_mouth_sync()
             self.vts_driver.reset_to_neutral()
         if result is not None and result.success:
+            # before_playback_hook 会在 start_next 内部自动驱动 VTS，无需额外调用
             next_start_result = self.speech_queue.start_next(ts_ms=event_ts)
             self._report_voice_queue_result(
                 request_id=str(result.event.get("request_id") or ""),
                 result=next_start_result,
             )
-            if (
-                next_start_result is not None
-                and next_start_result.success
-                and next_start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
-            ):
-                active = self.speech_queue.active_playback or {}
-                payload = dict(active.get("payload") or {})
-                speak_event = dict(active.get("speak_event") or {})
-                synth_event = dict(active.get("synth_event") or {})
-                if not payload.get("emotion_tag") and speak_event.get("emotion_tag"):
-                    payload["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
-                if "emotion_intensity" not in payload and speak_event.get("emotion_intensity") is not None:
-                    payload["emotion_intensity"] = speak_event["emotion_intensity"]
-                self._start_vts_for_payload(payload, synth_event=synth_event)
         return result
 
     def barge_in(
@@ -343,6 +322,33 @@ class EdgeVoicePipeline:
             "vram_total_mb": int(metrics.get("vram_total_mb", 0)),
             "vram_used_mb": int(metrics.get("vram_used_mb", 0)),
             "queue_depth": queue_depth,
+        }
+
+    def _vts_before_playback_hook(
+        self,
+        speak_event: dict[str, Any],
+        synth_event: dict[str, Any],
+    ) -> None:
+        """在音频播放启动前驱动 VTS 表情和口型，消除滞后。"""
+        payload = dict(speak_event)
+        # 合并 emotion_tag / emotion_intensity
+        if not payload.get("emotion_tag") and speak_event.get("emotion_tag"):
+            payload["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
+        _etag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
+        _has_audio = bool(synth_event and synth_event.get("audio_data"))
+        LOGGER.info(
+            "VTS start (pre-playback): emotion_tag=%s synth_has_audio=%s",
+            _etag, _has_audio,
+        )
+        expression_result, talk_result, mouth_sync_debug = self._start_vts_for_payload(
+            payload,
+            synth_event=synth_event,
+        )
+        # 缓存结果供 enqueue_speak / complete_playback 读取
+        self._pending_vts_result = {
+            "expression_result": expression_result,
+            "talk_result": talk_result,
+            "mouth_sync_debug": mouth_sync_debug,
         }
 
     def _start_vts_for_payload(

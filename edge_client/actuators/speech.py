@@ -35,6 +35,8 @@ S_VOICE_TTS_PLAYBACK = "S_VOICE_TTS_PLAYBACK"
 
 Synthesizer = Callable[[dict[str, Any]], dict[str, Any]]
 PlaybackStarter = Callable[[dict[str, Any], dict[str, Any]], None]
+# 在播放启动前触发的钩子（speak_event, synth_event），用于提前驱动 VTS 表情/口型
+BeforePlaybackHook = Callable[[dict[str, Any], dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class SpeechPlaybackQueue:
         resource_gate: VoiceResourceGate | None = None,
         synthesizer: Synthesizer | None = None,
         playback_starter: PlaybackStarter | None = None,
+        before_playback_hook: BeforePlaybackHook | None = None,
     ) -> None:
         self.rpc = rpc
         self.resource_gate = resource_gate
@@ -65,6 +68,7 @@ class SpeechPlaybackQueue:
         self._active: dict[str, Any] | None = None
         self._synthesizer = synthesizer or _default_synthesizer
         self._playback_starter = playback_starter or _default_playback_starter
+        self._before_playback_hook: BeforePlaybackHook | None = before_playback_hook
 
     @property
     def queue_depth(self) -> int:
@@ -305,6 +309,15 @@ class SpeechPlaybackQueue:
             "payload": payload,
             "synth_event": synth_event,
         }
+        # 在播放启动前触发钩子（如 VTS 表情/口型同步），确保与音频同步
+        if self._before_playback_hook is not None:
+            try:
+                self._before_playback_hook(speak_event, synth_event)
+            except Exception as hook_exc:  # pragma: no cover - 钩子失败不阻断播放
+                import logging as _logging
+                _logging.getLogger("Natsume.edge.speech").warning(
+                    "before_playback_hook raised: %s", hook_exc
+                )
         try:
             self._playback_starter(speak_event, synth_event)
         except Exception as exc:  # pragma: no cover - defensive catch for callback
