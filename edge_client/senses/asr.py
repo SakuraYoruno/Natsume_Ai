@@ -728,6 +728,20 @@ class AsrService:
     ) -> None:
         self._rpc_event_callback = callback
 
+    def startup(self) -> None:
+        """Edge 启动时由 bootstrap.startup() 通过 _invoke_lifecycle 自动调用。
+
+        内部调用 start_session() 完成模型加载和麦克风监听启动。
+        失败时仅记录警告，不抛出异常，保证其他组件正常启动。
+        """
+        result = self.start_session()
+        if not result.success:
+            logger.warning(
+                "ASR startup failed (reason=%s): %s",
+                result.reason_code,
+                result.detail,
+            )
+
     def start_session(self, session_id: str | None = None) -> AsrResult:
         """Initialize ASR model and start audio capture for a session."""
         with self._lock:
