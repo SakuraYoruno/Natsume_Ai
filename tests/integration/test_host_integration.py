@@ -73,6 +73,8 @@ def test_client(mem_ledger):
     # 注入内存账本
     import host_brain.app.dependencies as _deps
     _deps._ledger = mem_ledger
+    _deps._bond_stage_engine = None
+    _deps._bond_update_queue = None
 
     # mock LLM 推理（避免真实 API 调用）
     # resolve_host_llm_runtime_async 在 chat_stream_handler 中被重新绑定为 resolve_host_llm_runtime
@@ -90,6 +92,16 @@ def test_client(mem_ledger):
         yield "你好，我是夏目。"
 
     with (
+        patch.dict(
+            os.environ,
+            {
+                "HOST_BOND_BACKEND": "memory",
+                "HOST_BOND_SQLITE_PATH": "",
+                "HOST_BOND_STAGE_THRESHOLDS": "",
+                "HOST_BOND_SCORE_MAP": "",
+            },
+            clear=False,
+        ),
         patch("host_brain.app.chat_stream_handler.resolve_host_llm_runtime",
               new=_mock_llm_runtime),
         patch("host_brain.app.chat_stream_handler.astream_llm_chunks",
@@ -104,6 +116,7 @@ def test_client(mem_ledger):
     _deps._intent_engine = None
     _deps._skill_registry = None
     _deps._bond_stage_engine = None
+    _deps._bond_update_queue = None
     _deps._retrieval_pipeline = None
     _deps._obs_metrics_collector = None
 

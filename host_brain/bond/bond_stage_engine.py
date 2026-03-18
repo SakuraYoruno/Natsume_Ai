@@ -471,7 +471,9 @@ class BondStageEngine:
                     "SELECT update_kind, COUNT(*), MAX(ts_ms) FROM bond_update_log "
                     "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
                     "AND status IN ('OK','SUCCESS') "
-                    "GROUP BY update_kind"
+                    "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                    "GROUP BY update_kind",
+                    (user_id,),
                 ).fetchall()
                 total_score = 0
                 event_count = 0
