@@ -89,7 +89,8 @@ class TestDiaryGenerate:
         assert "今天是美好的一天" in diary_file.read_text(encoding="utf-8")
 
         # Episodic 写入
-        assert len(written) == 1
+        # 写入 2 条：日记条目 + interaction_hint
+        assert len(written) == 2
         assert written[0]["category"] == DIARY_CATEGORY
         assert written[0]["date"] == _today()
 
@@ -175,7 +176,8 @@ class TestDiaryFileSystemUnavailable:
         assert result["file_result"] is not None
         assert "error" in result["file_result"]
         # Episodic 仍应写入（降级策略）
-        assert len(written) == 1
+        # 写入 2 条：日记条目 + interaction_hint
+        assert len(written) == 2
 
 
 # ── T-DIARY-04 ──

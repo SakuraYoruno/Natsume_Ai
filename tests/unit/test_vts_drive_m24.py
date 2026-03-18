@@ -118,12 +118,12 @@ class TestVTSRPCCallAndAudit:
             edge_available=True,
         )
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == "exp_happy_01"
+        assert result.expression_id == "HK_Happy"
         assert result.request_id == "req_vts_06"
         # 审计日志被调用
         assert mock_ledger.log_avatar_action.called
         call_args = mock_ledger.log_avatar_action.call_args[0][0]
-        assert call_args["expression_id"] == "exp_happy_01"
+        assert call_args["expression_id"] == "HK_Happy"
         assert call_args["request_id"] == "req_vts_06"
 
     def test_t_vts_drive_07_edge_unavailable_degraded_not_fake(self):
@@ -143,7 +143,8 @@ class TestVTSRPCCallAndAudit:
         assert result.status == STATUS_DEGRADED
         assert result.reason_code == VTS_DEGRADED_FALLBACK
         # 降级到 neutral，不伪造"表情已触发"
-        assert result.expression_id == "exp_neutral_01"
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID as _EMAP
+        assert result.expression_id == _EMAP["NEUTRAL"]
 
     def test_t_vts_drive_08_evidence_ref_in_audit(self):
         """T-VTS-DRIVE-08：每次触发有 evidence_ref 指向 vts_action_log（request_id 串联）。"""
@@ -176,7 +177,8 @@ class TestVTSRPCCallAndAudit:
             edge_available=True,
         )
         assert result.status == STATUS_DEGRADED
-        assert result.expression_id == "exp_neutral_01"
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID as _EMAP
+        assert result.expression_id == _EMAP["NEUTRAL"]
 
     def test_t_vts_drive_10_audit_log_contains_intent_id(self):
         """T-VTS-DRIVE-10：vts_action_log 串联 request_id（intent_id 通过 request_id 关联）。"""

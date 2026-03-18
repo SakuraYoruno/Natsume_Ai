@@ -26,13 +26,17 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
         self.policy = GovernorTierPolicy()
 
     def test_registry_contains_four_builtin_skills(self) -> None:
-        """T-TG-BUILTIN-01：build_builtin_skill_registry() 返回包含 4 个内置 Skill 的 SkillRegistry。"""
+        """T-TG-BUILTIN-01：build_builtin_skill_registry() 返回包含内置 Skill 的 SkillRegistry（当前 7 个）。"""
         names = self.registry.list_skill_names()
         self.assertIn("narrative_only", names)
         self.assertIn("memory_recall", names)
         self.assertIn("noop", names)
         self.assertIn("read_only_status", names)
-        self.assertEqual(4, len(names))
+        # M44 后新增：emotion_query / bond_query / session_summary
+        self.assertIn("emotion_query", names)
+        self.assertIn("bond_query", names)
+        self.assertIn("session_summary", names)
+        self.assertEqual(7, len(names))
 
     def test_narrative_only_is_cache_tier(self) -> None:
         """T-TG-BUILTIN-02：narrative_only 的 risk_level=1，GovernorTierPolicy 映射为 ApprovalTier.CACHE。"""
@@ -67,11 +71,11 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
         self.assertEqual(ApprovalTier.CACHE, tier)
 
     def test_all_builtin_skills_are_reversible(self) -> None:
-        """所有内置 Skill 均为 reversible=True。"""
+        """所有内置 Skill 均为只读操作，reversible=False（无副作用，不需要撤销）。"""
         for name in self.registry.list_skill_names():
             meta = self.registry.get(name)
             self.assertIsNotNone(meta)
-            self.assertTrue(meta.reversible, f"{name} should be reversible")
+            self.assertFalse(meta.reversible, f"{name} should be reversible=False (read-only, no side effects)")
 
     def test_all_builtin_skills_have_low_clearance(self) -> None:
         """所有内置 Skill 均为 clearance='LOW'。"""
@@ -226,16 +230,22 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
     """验证分层治理在 narrative_only 请求中真正生效（缓存命中路径）。"""
 
     def setUp(self) -> None:
+        import os
         import host_brain.app.dependencies as dep
+        os.environ["Natsume_AUDIT_DB"] = ":memory:"
         dep._intent_engine = None
         dep._skill_registry = None
         dep._policy_cache = None
+        dep._ledger = None  # 重置 ledger，避免 seq 记录污染
 
     def tearDown(self) -> None:
+        import os
         import host_brain.app.dependencies as dep
         dep._intent_engine = None
         dep._skill_registry = None
         dep._policy_cache = None
+        dep._ledger = None  # 清理 ledger
+        os.environ.pop("Natsume_AUDIT_DB", None)
 
     def test_narrative_only_uses_cache_or_rule_tier(self) -> None:
         """narrative_only 请求应走 CACHE 或 RULE 通道（不走 FULL 通道）。"""

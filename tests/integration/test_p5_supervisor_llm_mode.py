@@ -135,7 +135,8 @@ def test_p5_fallback_agent_not_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.unit.conftest import mock_llm_runtime
     mock_llm_runtime(monkeypatch)
 
-    proposal_not_in_allowlist = {"selected_agent": "intent_agent", "risk_mode": "strict", "need_judge": True}
+    # safety_agent 不在 _dispatch_allowlist 中，用于测试 AGENT_NOT_ALLOWED 路径
+    proposal_not_in_allowlist = {"selected_agent": "safety_agent", "risk_mode": "strict", "need_judge": True}
     out = _run_supervised_graph_with_supervisor_mock(
         monkeypatch, llm_returns=(proposal_not_in_allowlist, None), scene_type="WORK_CODE"
     )

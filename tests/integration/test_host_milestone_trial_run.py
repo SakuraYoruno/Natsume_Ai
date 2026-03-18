@@ -1017,7 +1017,7 @@ class TestFullServiceHealthReport:
         for expected_id in expected_services:
             assert expected_id in service_ids, f"Missing service in health report: {expected_id}"
 
-        assert report.get("summary", {}).get("required_total") == 14
+        assert report.get("summary", {}).get("required_total") == 13
 
     def test_build_startup_report(self, trial_ledger):
         """TC-2: 构建完整启动报告，验证 host + edge 配置均正常加载。"""

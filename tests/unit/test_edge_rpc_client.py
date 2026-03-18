@@ -128,7 +128,7 @@ class TestBuildEnvelope(unittest.TestCase):
 
 class TestPostVts(unittest.TestCase):
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_post_vts_success(self):
         from host_brain.channels.edge_rpc_client import post_vts
@@ -140,7 +140,7 @@ class TestPostVts(unittest.TestCase):
             "status": "ACCEPTED",
             "reason_code": None,
             "detail": "vts ok",
-            "event": {"expression_id": "exp_happy_01"},
+            "event": {"expression_id": "HK_Happy"},
             "ts_ms": 1700000000000,
         }
         mock_response.headers = {"content-type": "application/json"}
@@ -202,7 +202,7 @@ class TestPostVts(unittest.TestCase):
 
 class TestPostSpeak(unittest.TestCase):
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_post_speak_success(self):
         from host_brain.channels.edge_rpc_client import post_speak
@@ -273,7 +273,7 @@ class TestPostSpeak(unittest.TestCase):
 
 class TestPostScreenshot(unittest.TestCase):
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_post_screenshot_success(self):
         from host_brain.channels.edge_rpc_client import post_screenshot
@@ -335,9 +335,9 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
                 await asyncio.sleep(0.05)
             return result
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         self.assertEqual(result.status, "APPLIED")
-        self.assertEqual(result.expression_id, "exp_happy_01")
+        self.assertEqual(result.expression_id, "HK_Happy")
         # fire-and-forget 应已触发
         self.assertEqual(len(fired_calls), 1)
         self.assertEqual(fired_calls[0]["action"], "set_expression")
@@ -369,7 +369,7 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
                 await asyncio.sleep(0.05)
             return result
 
-        result = asyncio.get_event_loop().run_until_complete(_run())
+        result = asyncio.run(_run())
         self.assertEqual(result.status, "DEGRADED")
         # edge_available=False 时不触发 HTTP 调用
         self.assertEqual(len(fired_calls), 0)
@@ -381,7 +381,7 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
 
 class TestProbeEdgeRpcHealth(unittest.TestCase):
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_probe_returns_available_on_200(self):
         from host_brain.app.dependencies import probe_edge_rpc_health

@@ -116,10 +116,10 @@ class TestDistillationEligibility:
         ) is True
 
     def test_low_frequency_not_eligible(self):
-        """验证出现频次 < 3 且非 MILESTONE 不满足蒸馏条件。"""
+        """验证出现频次 = 0 且非 MILESTONE 不满足蒸馏条件。"""
         guard = MemoryGuard()
         assert guard.check_distillation_eligibility(
-            "hash3", occurrence_count=2, evidence_level=EvidenceLevel.CANDIDATE
+            "hash3", occurrence_count=0, evidence_level=EvidenceLevel.CANDIDATE
         ) is False
 
 

@@ -76,10 +76,12 @@ class TestDreamSleepTrigger:
         )
         assert result["status"] == STATUS_EXECUTED
         assert result["reason_code"] is None
-        assert len(written) == 1
+        # 写入 2 条：梦境条目 + interaction_hint
+        assert len(written) == 2
         entry = written[0]
         assert entry["category"] == DREAM_CATEGORY
         assert entry["evidence_level"] == EVIDENCE_LEVEL
+        assert written[1]["category"] == "interaction_hint"
 
     def test_dream_manifest_fields(self) -> None:
         writer, _ = _make_episodic_writer()
@@ -156,7 +158,9 @@ class TestDreamEpisodicUnavailable:
             ),
         )
         assert result["status"] == STATUS_EXECUTED
-        assert len(written) == 1
+        # 写入 2 条：梦境条目 + interaction_hint
+        assert len(written) == 2
+        assert written[0]["category"] == DREAM_CATEGORY
 
     def test_episodic_reader_exception_degraded_gracefully(self) -> None:
         def _bad_reader(s, e, k):
@@ -191,7 +195,8 @@ class TestDreamEvidenceLevel:
                 llm_generator=_make_llm_generator("叙事梦境"),
             ),
         )
-        assert len(written) == 1
+        # 写入 2 条：梦境条目 + interaction_hint
+        assert len(written) == 2
         assert written[0]["evidence_level"] == "NARRATIVE_ONLY"
 
     def test_dream_manifest_evidence_level(self) -> None:

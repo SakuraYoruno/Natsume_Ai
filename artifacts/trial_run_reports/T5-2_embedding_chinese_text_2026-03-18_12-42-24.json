@@ -1,0 +1,14 @@
+{
+  "test_id": "T5-2",
+  "service": "host.retrieval.embedding",
+  "operation": "embed_chinese",
+  "params_in": {
+    "text": "今天天气很好，我想出去散步"
+  },
+  "params_out": {
+    "status": "OK",
+    "vector_dim": 16
+  },
+  "status": "PASS",
+  "ts_ms": 1773808944023
+}

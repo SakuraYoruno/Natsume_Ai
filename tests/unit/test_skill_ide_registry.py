@@ -16,6 +16,7 @@ def test_build_ide_skill_registry_contains_cursor_pycharm_codex() -> None:
         "open_cursor",
         "run_pycharm_action",
         "codex_task",
+        "open_file_in_editor",
     }
 
 

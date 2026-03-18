@@ -1,0 +1,21 @@
+{
+  "test_id": "T1-3",
+  "service": "host.audit.sqlite_ledger",
+  "operation": "log_service_health",
+  "params_in": {
+    "request_id": "req_1c7d3846d4ad407a9d8cabdd1eb1f473",
+    "service_id": "host.audit.sqlite_ledger",
+    "owner": "host",
+    "required": 1,
+    "status": "UP",
+    "reason_code": null,
+    "stage": "S_SERVICE_HEALTH",
+    "detail": "trial run health check",
+    "ts_ms": 1773814543937
+  },
+  "params_out": {
+    "matched_count": 1
+  },
+  "status": "PASS",
+  "ts_ms": 1773814543452
+}

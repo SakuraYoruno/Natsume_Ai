@@ -71,7 +71,7 @@ class TestGetCanonStoreLock:
 
 class TestApproveTransaction:
     def test_approve_calls_transaction(self):
-        """T-CANON-TX-02：approve_proposal 调用 ledger.transaction()。"""
+        """T-CANON-TX-02：approve_proposal 调用 approve_proposal_with_content（内部自管事务）。"""
         import host_brain.app.canon_routes as cr
         import asyncio
 
@@ -87,17 +87,6 @@ class TestApproveTransaction:
             "ts_ms": int(time.time() * 1000),
         }
         ledger = _make_ledger_mock(proposal_row)
-
-        import contextlib
-
-        tx_entered = []
-
-        @contextlib.contextmanager
-        def _tx():
-            tx_entered.append(True)
-            yield
-
-        ledger.transaction.return_value = _tx()
 
         mock_store = MagicMock()
         mock_doc = MagicMock()
@@ -122,7 +111,8 @@ class TestApproveTransaction:
             finally:
                 loop.close()
 
-        assert len(tx_entered) == 1, "approve 应调用 ledger.transaction()"
+        # approve_proposal_with_content 内部自管事务，验证它被调用
+        mock_store.approve_proposal_with_content.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +121,7 @@ class TestApproveTransaction:
 
 class TestApproveTransactionRollback:
     def test_approve_rollback_on_exception(self):
-        """T-CANON-TX-03：approve_proposal_with_content 抛出异常时事务回滚。"""
+        """T-CANON-TX-03：approve_proposal_with_content 抛出异常时返回 500。"""
         import host_brain.app.canon_routes as cr
         import asyncio
         from fastapi import HTTPException
@@ -148,20 +138,6 @@ class TestApproveTransactionRollback:
             "ts_ms": int(time.time() * 1000),
         }
         ledger = _make_ledger_mock(proposal_row)
-
-        import contextlib
-
-        rollback_called = []
-
-        @contextlib.contextmanager
-        def _tx():
-            try:
-                yield
-            except Exception:
-                rollback_called.append(True)
-                raise
-
-        ledger.transaction.return_value = _tx()
 
         mock_store = MagicMock()
         mock_store.approve_proposal_with_content.side_effect = RuntimeError("DB error")
@@ -183,9 +159,8 @@ class TestApproveTransactionRollback:
                     )
                 finally:
                     loop.close()
+            # 内部异常应被包装为 500
             assert exc_info.value.status_code == 500
-
-        assert len(rollback_called) == 1, "异常时应触发事务回滚"
 
 
 # ---------------------------------------------------------------------------

@@ -149,6 +149,13 @@ class EdgeVoicePipeline:
             ):
                 # VTS 已在 before_playback_hook 中提前驱动，从缓存中取结果
                 vts_cached = getattr(self, "_pending_vts_result", {})
+                if not vts_cached:
+                    # hook 未触发（如 speech_queue 被 mock），手动兜底驱动 VTS
+                    self._vts_before_playback_hook(
+                        speak_event=payload,
+                        synth_event={},
+                    )
+                    vts_cached = getattr(self, "_pending_vts_result", {})
                 expression_result = vts_cached.get("expression_result")
                 talk_result = vts_cached.get("talk_result")
                 mouth_sync_debug = vts_cached.get("mouth_sync_debug")

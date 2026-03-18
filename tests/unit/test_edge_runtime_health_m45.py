@@ -64,6 +64,7 @@ def _build_runtime(
             }
         ),
         speech_queue=SimpleNamespace(queue_depth=2),
+        voice_pipeline=_HealthComponent("ok"),
     )
 
 

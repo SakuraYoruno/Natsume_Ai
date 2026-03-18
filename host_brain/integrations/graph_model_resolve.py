@@ -57,7 +57,10 @@ def resolve_model_nodes(
     resolved: dict[str, dict[str, Any]] = {}
     for node_id, binding in node_bindings.items():
         handler_id = str(binding.get("handler_id") or "").strip()
-        if handler_id:
+        # handler 节点（含 agent_dispatch_node 等 handler_id="" 的虚拟节点）跳过 model node 解析；
+        # 虚拟节点由 graph_executor 直接分派，不需要 model node。
+        # 判断：binding 中显式设置了 handler_id 字段（含空字符串），且没有 model_node_id，则跳过。
+        if "handler_id" in binding and not str(binding.get("model_node_id") or "").strip():
             continue
 
         route = _pick_profile_route(profile=profile, binding=binding)
