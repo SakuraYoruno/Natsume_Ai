@@ -118,12 +118,12 @@ class TestVTSRPCCallAndAudit:
             edge_available=True,
         )
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == "HK_Happy"
+        assert result.expression_id == "exp_happy_01"
         assert result.request_id == "req_vts_06"
         # 审计日志被调用
         assert mock_ledger.log_avatar_action.called
         call_args = mock_ledger.log_avatar_action.call_args[0][0]
-        assert call_args["expression_id"] == "HK_Happy"
+        assert call_args["expression_id"] == "exp_happy_01"
         assert call_args["request_id"] == "req_vts_06"
 
     def test_t_vts_drive_07_edge_unavailable_degraded_not_fake(self):

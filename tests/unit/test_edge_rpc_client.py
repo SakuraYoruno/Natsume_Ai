@@ -140,7 +140,7 @@ class TestPostVts(unittest.TestCase):
             "status": "ACCEPTED",
             "reason_code": None,
             "detail": "vts ok",
-            "event": {"expression_id": "HK_Happy"},
+            "event": {"expression_id": "exp_happy_01"},
             "ts_ms": 1700000000000,
         }
         mock_response.headers = {"content-type": "application/json"}
@@ -337,7 +337,7 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
 
         result = asyncio.run(_run())
         self.assertEqual(result.status, "APPLIED")
-        self.assertEqual(result.expression_id, "HK_Happy")
+        self.assertEqual(result.expression_id, "exp_happy_01")
         # fire-and-forget 应已触发
         self.assertEqual(len(fired_calls), 1)
         self.assertEqual(fired_calls[0]["action"], "set_expression")

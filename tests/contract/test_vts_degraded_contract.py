@@ -254,7 +254,7 @@ class TestNormalPathRegression:
         )
         assert result.success is True
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == expected_expr
+        assert result.expression_id == EMOTION_TO_EXPRESSION_ID[tag]
         assert result.reason_code is None
 
     def test_empty_tag_still_rejected(self) -> None:
@@ -371,7 +371,7 @@ class TestDegradedConstants:
         assert DEGRADED_FALLBACK_EXPRESSION_TAG == "NEUTRAL"
 
     def test_fallback_expression_id(self) -> None:
-        assert DEGRADED_FALLBACK_EXPRESSION_ID == "移除所有按键表情"
+        assert DEGRADED_FALLBACK_EXPRESSION_ID == EMOTION_TO_EXPRESSION_ID["NEUTRAL"]
 
     def test_fallback_id_matches_mapping(self) -> None:
         assert DEGRADED_FALLBACK_EXPRESSION_ID == EMOTION_TO_EXPRESSION_ID["NEUTRAL"]

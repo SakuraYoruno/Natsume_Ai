@@ -232,18 +232,6 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             min_value=0.1,
             max_value=300.0,
         ),
-        mouth_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_MOUTH_PARAM_CANDIDATES"),
-            default=("MouthOpen", "ParamMouthOpenY"),
-        ),
-        mouth_volume_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_MOUTH_VOLUME_PARAM_CANDIDATES"),
-            default=("VoiceVolumePlusMouthOpen", "VoiceVolume"),
-        ),
-        voice_silence_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_VOICE_SILENCE_PARAM_CANDIDATES"),
-            default=("VoiceSilence",),
-        ),
         reconnect=ReconnectConfig(
             max_attempts=_parse_int(
                 _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),

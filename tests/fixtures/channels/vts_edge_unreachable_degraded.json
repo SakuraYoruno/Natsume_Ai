@@ -1,5 +1,5 @@
 {
-  "description": "VTS Edge 不可达 → DEGRADED 降级到 neutral fixture",
+  "description": "VTS Edge 不可达 -> DEGRADED 降级到 neutral fixture",
   "scenario": "vts_edge_unreachable_degraded",
   "input": {
     "emotion_tag": "HAPPY",
@@ -12,7 +12,7 @@
     "status": "DEGRADED",
     "reason_code": "VTS_DEGRADED_FALLBACK",
     "emotion_tag": "HAPPY",
-    "expression_id": "移除所有按键表情",
+    "expression_id": "exp_neutral_01",
     "stage": "S_AVATAR_EXPRESSION_MAP",
     "detail_contains": "edge not available",
     "audit_logged": true
