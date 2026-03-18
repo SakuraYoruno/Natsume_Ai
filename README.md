@@ -89,7 +89,7 @@ Natsume_Ai/
 │   │   ├── skills/          #    Skill/MCP 权限模型（PermissionGuard + HotLoader）
 │   │   ├── vision/          #    UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
 │   │   └── failure_matrix.py #   统一失败语义矩阵（7个标准化失败事件）
-│   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
+│   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱，错误信息标准化英文）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 异步写入队列 + 迁移）
 │   ├── canon/               #    正典系统（Style Canon / World Canon，治理 API 事务化）
@@ -109,8 +109,8 @@ Natsume_Ai/
 │   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 │
 ├── edge_client/             # 🎙️ Edge 边缘客户端
-│   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连）
-│   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD）
+│   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连，VTS 驱动提前到音频播放前执行）
+│   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD，startup() 自动开始监听）
 │   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控 / 事件上报）
 │   ├── proofs/              #    资源证明与门控
 │   ├── fallback_model.py    #    兜底小模型门控（FallbackModelGate，draft_only 标记）
@@ -186,9 +186,9 @@ Natsume_Ai/
 | **语音合成** | GPT-SoVITS | Edge 端 TTS（全 GPU 常驻） |
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
 | **HTTP 框架** | FastAPI | Host 服务入口 + 监控面板 API + REST API |
-| **前端框架** | React 18 + Vite | 监控面板 SPA（Overview / Sessions / Trace / Metrics）|
-| **链路可视化** | React Flow | Dify 风格链路节点图 |
-| **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级） |
+| **前端框架** | React 18 + Vite | 监控面板 SPA（Overview / Sessions / Trace / Metrics / Insights）|
+| **链路可视化** | React Flow | 全链路拓扑图（32 节点 DAG，含 ASR/七路召回/Agent/LLM/TTS/VTS）+ 动态高亮激活链路 |
+| **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级，错误信息标准化英文） |
 | **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表 + scheduler_tasks 持久化）|
 | **调度器** | APScheduler + SQLite | CRON 任务持久化，进程重启自动恢复 |
 | **混合检索** | ChromaDB + SQLite FTS5 | 向量检索（0.7）+ 全文检索（0.3），FTS5 不可用时自动降级 |
@@ -403,6 +403,8 @@ Evidence Plane 是 LangGraph 运行时的写入治理层，负责将图执行过
 AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 → LlmGateway → QAContract → EpisodicStore → Audit → AirlockSanitizer
 ```
+
+> 完整双端全链路拓扑（32 节点）可在监控面板 **Trace** 页实时查看，支持静态全图展示与请求链路动态高亮。
 
 - 每个节点有标准 TypedDict 输入/输出、最大超时常量和降级策略
 - 任意节点失败统一走 `FailureHandler`，不各自处理
