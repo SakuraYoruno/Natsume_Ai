@@ -19,41 +19,218 @@ import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
 
-// ===== Mock 数据（开发阶段） =====
+// ===== 双端全链路静态图定义（含 ASR/七路召回/Agent/TTS/VTS 等所有节点）=====
+// 这是系统的完整拓扑，页面加载时直接展示，请求时高亮经过的链路
+const FULL_CHAIN_SCHEMA = {
+  graph_id: 'natsume.full_chain',
+  version: 'v1',
+  entry_node: 'asr',
+  nodes: [
+    // ── Edge 端节点 ──
+    { node_id: 'asr',              node_type: 'asr',       display_name: 'ASR 语音识别',       layer: 'edge' },
+    { node_id: 'wechat_listener',  node_type: 'system',    display_name: '微信监听',            layer: 'edge' },
+    { node_id: 'input_reporter',   node_type: 'system',    display_name: '输入上报',            layer: 'edge' },
+    // ── Host 入口 ──
+    { node_id: 'host_input',       node_type: 'router',    display_name: 'Host Input 路由',    layer: 'host' },
+    { node_id: 'pre_classifier',   node_type: 'intent',    display_name: '预分类器',            layer: 'host' },
+    { node_id: 'governor',         node_type: 'governor',  display_name: 'Governor 鉴权',      layer: 'host' },
+    { node_id: 'scene_router',     node_type: 'router',    display_name: 'Scene Router',       layer: 'host' },
+    // ── 七路召回 ──
+    { node_id: 'recall_episodic',  node_type: 'recall',    display_name: '情节记忆召回',        layer: 'host' },
+    { node_id: 'recall_semantic',  node_type: 'recall',    display_name: '语义向量召回',        layer: 'host' },
+    { node_id: 'recall_keyword',   node_type: 'recall',    display_name: '关键词召回',          layer: 'host' },
+    { node_id: 'recall_bond',      node_type: 'recall',    display_name: 'Bond 关系召回',      layer: 'host' },
+    { node_id: 'recall_canon',     node_type: 'recall',    display_name: 'Canon 世界观召回',   layer: 'host' },
+    { node_id: 'recall_skill',     node_type: 'recall',    display_name: 'Skill 工具召回',     layer: 'host' },
+    { node_id: 'recall_emotion',   node_type: 'recall',    display_name: '情感上下文召回',      layer: 'host' },
+    { node_id: 'recall_rerank',    node_type: 'retrieval', display_name: 'Rerank 融合',        layer: 'host' },
+    // ── 多 Agent 编排 ──
+    { node_id: 'supervisor_dispatch', node_type: 'agent',  display_name: 'Supervisor 分派',   layer: 'host' },
+    { node_id: 'agent_dispatch',   node_type: 'agent',     display_name: 'Agent Dispatch',    layer: 'host' },
+    { node_id: 'chat_agent',       node_type: 'agent',     display_name: 'Chat Agent',        layer: 'host' },
+    { node_id: 'code_agent',       node_type: 'agent',     display_name: 'Code Agent',        layer: 'host' },
+    { node_id: 'translate_agent',  node_type: 'agent',     display_name: 'Translate Agent',   layer: 'host' },
+    { node_id: 'retrieval_agent',  node_type: 'agent',     display_name: 'Retrieval Agent',   layer: 'host' },
+    { node_id: 'judge_agent',      node_type: 'judge',     display_name: 'Judge Agent',       layer: 'host' },
+    // ── LLM 推理 ──
+    { node_id: 'llm_local',        node_type: 'llm',       display_name: 'LLM 本地 (qwen3:8b)', layer: 'host', provider: 'openai', model_id: 'qwen3:8b' },
+    { node_id: 'llm_cloud',        node_type: 'llm',       display_name: 'LLM 云端 (Gemini)',  layer: 'host', provider: 'gemini', model_id: 'gemini-2.5-flash' },
+    // ── 后处理 ──
+    { node_id: 'airlock',          node_type: 'governor',  display_name: 'Airlock 检疫',       layer: 'host' },
+    { node_id: 'episodic_write',   node_type: 'memory',    display_name: '情节记忆写入',        layer: 'host' },
+    { node_id: 'bond_update',      node_type: 'bond',      display_name: 'Bond 积分更新',      layer: 'host' },
+    { node_id: 'vts_ctrl',         node_type: 'vts',       display_name: 'VTS 控制',           layer: 'host' },
+    { node_id: 'chat_render',      node_type: 'system',    display_name: 'Chat Render 输出',   layer: 'host' },
+    // ── Edge 端输出 ──
+    { node_id: 'tts',              node_type: 'tts',       display_name: 'TTS 语音合成',       layer: 'edge' },
+    { node_id: 'vts_driver',       node_type: 'vts',       display_name: 'VTS 表情驱动',       layer: 'edge' },
+  ],
+  edges: [
+    // Edge → Host 输入
+    { source: 'asr',             target: 'host_input'       },
+    { source: 'wechat_listener', target: 'host_input'       },
+    { source: 'input_reporter',  target: 'host_input'       },
+    // Host 入口链路
+    { source: 'host_input',      target: 'pre_classifier'   },
+    { source: 'pre_classifier',  target: 'governor'         },
+    { source: 'governor',        target: 'scene_router'     },
+    // 七路召回（并行）
+    { source: 'scene_router',    target: 'recall_episodic'  },
+    { source: 'scene_router',    target: 'recall_semantic'  },
+    { source: 'scene_router',    target: 'recall_keyword'   },
+    { source: 'scene_router',    target: 'recall_bond'      },
+    { source: 'scene_router',    target: 'recall_canon'     },
+    { source: 'scene_router',    target: 'recall_skill'     },
+    { source: 'scene_router',    target: 'recall_emotion'   },
+    { source: 'recall_episodic', target: 'recall_rerank'    },
+    { source: 'recall_semantic', target: 'recall_rerank'    },
+    { source: 'recall_keyword',  target: 'recall_rerank'    },
+    { source: 'recall_bond',     target: 'recall_rerank'    },
+    { source: 'recall_canon',    target: 'recall_rerank'    },
+    { source: 'recall_skill',    target: 'recall_rerank'    },
+    { source: 'recall_emotion',  target: 'recall_rerank'    },
+    // 多 Agent 编排
+    { source: 'scene_router',    target: 'supervisor_dispatch' },
+    { source: 'supervisor_dispatch', target: 'agent_dispatch' },
+    { source: 'agent_dispatch',  target: 'chat_agent'       },
+    { source: 'agent_dispatch',  target: 'code_agent'       },
+    { source: 'agent_dispatch',  target: 'translate_agent'  },
+    { source: 'agent_dispatch',  target: 'retrieval_agent'  },
+    { source: 'chat_agent',      target: 'judge_agent'      },
+    { source: 'code_agent',      target: 'judge_agent'      },
+    { source: 'translate_agent', target: 'judge_agent'      },
+    { source: 'retrieval_agent', target: 'judge_agent'      },
+    // LLM 推理
+    { source: 'recall_rerank',   target: 'llm_local'        },
+    { source: 'recall_rerank',   target: 'llm_cloud'        },
+    { source: 'judge_agent',     target: 'llm_local'        },
+    { source: 'judge_agent',     target: 'llm_cloud'        },
+    // 后处理（并行）
+    { source: 'llm_local',       target: 'airlock'          },
+    { source: 'llm_cloud',       target: 'airlock'          },
+    { source: 'airlock',         target: 'episodic_write'   },
+    { source: 'airlock',         target: 'bond_update'      },
+    { source: 'airlock',         target: 'vts_ctrl'         },
+    { source: 'airlock',         target: 'chat_render'      },
+    // Host → Edge 输出
+    { source: 'chat_render',     target: 'tts'              },
+    { source: 'vts_ctrl',        target: 'vts_driver'       },
+  ],
+}
+
+// ===== Mock 数据（开发阶段）— 扩充为完整双端全链路 =====
 const MOCK_TRACE = {
   request_id: 'mock-req-001',
   status: 'OK',
-  total_latency_ms: 1240,
+  total_latency_ms: 1580,
   nodes: [
-    { node_id: 'intent',    node_type: 'intent',   display_name: 'Intent Parser',   status: 'OK',   latency_ms: 45,  input_data: { text: '你好，今天天气怎么样？' }, output_data: { action: 'chat', type: 'DIALOGUE' } },
-    { node_id: 'governor',  node_type: 'governor', display_name: 'Governor Gate',   status: 'OK',   latency_ms: 12,  input_data: { intent_id: 'i-001' }, output_data: { decision: 'APPROVE' } },
-    { node_id: 'memory',    node_type: 'memory',   display_name: 'Memory Recall',   status: 'OK',   latency_ms: 89,  input_data: { query: '天气' }, output_data: { evidence_count: 3 } },
-    { node_id: 'llm_main',  node_type: 'llm',      display_name: 'Core Reasoner',   status: 'OK',   latency_ms: 820, provider: 'openai',   model_id: 'gpt-5.2',    input_data: { messages: ['...'] }, output_data: { narrative: '今天天气晴朗...' } },
-    { node_id: 'llm_safe',  node_type: 'llm',      display_name: 'Safety Verifier', status: 'OK',   latency_ms: 95,  provider: 'openai',   model_id: 'gpt-4.1-mini', input_data: { text: '...' }, output_data: { safe: true } },
-    { node_id: 'tts',       node_type: 'tts',      display_name: 'TTS Synthesis',   status: 'OK',   latency_ms: 180, input_data: { text: '今天天气晴朗...' }, output_data: { audio_ms: 2400 } },
-    { node_id: 'vts',       node_type: 'vts',      display_name: 'VTS Expression',  status: 'OK',   latency_ms: 22,  input_data: { emotion_tag: 'happy' }, output_data: { expression_id: 'smile_01' } },
+    { node_id: 'asr',             node_type: 'asr',       display_name: 'ASR 语音识别',       status: 'OK', latency_ms: 35,  layer: 'edge', input_data: { audio_ms: 1200 }, output_data: { text: '你好，今天天气怎么样？' } },
+    { node_id: 'host_input',      node_type: 'router',    display_name: 'Host Input 路由',    status: 'OK', latency_ms: 5,   layer: 'host', input_data: { source: 'asr' }, output_data: { routed: true } },
+    { node_id: 'pre_classifier',  node_type: 'intent',    display_name: '预分类器',            status: 'OK', latency_ms: 8,   layer: 'host', input_data: { text: '你好，今天天气怎么样？' }, output_data: { scene: 'SCENE_CHAT' } },
+    { node_id: 'governor',        node_type: 'governor',  display_name: 'Governor 鉴权',      status: 'OK', latency_ms: 22,  layer: 'host', input_data: { intent_id: 'i-001' }, output_data: { decision: 'APPROVE' } },
+    { node_id: 'scene_router',    node_type: 'router',    display_name: 'Scene Router',       status: 'OK', latency_ms: 6,   layer: 'host', input_data: { scene: 'SCENE_CHAT' }, output_data: { route: 'chat_fast' } },
+    { node_id: 'recall_episodic', node_type: 'recall',    display_name: '情节记忆召回',        status: 'OK', latency_ms: 45,  layer: 'host', input_data: { query: '天气' }, output_data: { hits: 2 } },
+    { node_id: 'recall_semantic', node_type: 'recall',    display_name: '语义向量召回',        status: 'OK', latency_ms: 120, layer: 'host', input_data: { query: '天气' }, output_data: { hits: 5 } },
+    { node_id: 'recall_bond',     node_type: 'recall',    display_name: 'Bond 关系召回',      status: 'OK', latency_ms: 18,  layer: 'host', input_data: { user_id: 'u-001' }, output_data: { bond_stage: 'FAMILIAR' } },
+    { node_id: 'recall_emotion',  node_type: 'recall',    display_name: '情感上下文召回',      status: 'OK', latency_ms: 12,  layer: 'host', input_data: {}, output_data: { emotion_tag: 'NEUTRAL' } },
+    { node_id: 'recall_rerank',   node_type: 'retrieval', display_name: 'Rerank 融合',        status: 'OK', latency_ms: 35,  layer: 'host', input_data: { candidates: 7 }, output_data: { top_k: 5 } },
+    { node_id: 'llm_local',       node_type: 'llm',       display_name: 'LLM 本地 (qwen3:8b)', status: 'OK', latency_ms: 820, layer: 'host', provider: 'openai', model_id: 'qwen3:8b', input_data: { messages: ['...'] }, output_data: { narrative: '今天天气晴朗...' } },
+    { node_id: 'airlock',         node_type: 'governor',  display_name: 'Airlock 检疫',       status: 'OK', latency_ms: 15,  layer: 'host', input_data: { text: '...' }, output_data: { safe: true } },
+    { node_id: 'episodic_write',  node_type: 'memory',    display_name: '情节记忆写入',        status: 'OK', latency_ms: 28,  layer: 'host', input_data: { narrative: '...' }, output_data: { written: true } },
+    { node_id: 'bond_update',     node_type: 'bond',      display_name: 'Bond 积分更新',      status: 'OK', latency_ms: 12,  layer: 'host', input_data: { event: 'chat' }, output_data: { delta: 1 } },
+    { node_id: 'vts_ctrl',        node_type: 'vts',       display_name: 'VTS 控制',           status: 'OK', latency_ms: 8,   layer: 'host', input_data: { emotion_tag: 'happy' }, output_data: { expression: 'smile_01' } },
+    { node_id: 'chat_render',     node_type: 'system',    display_name: 'Chat Render 输出',   status: 'OK', latency_ms: 5,   layer: 'host', input_data: {}, output_data: { tokens: 42 } },
+    { node_id: 'tts',             node_type: 'tts',       display_name: 'TTS 语音合成',       status: 'OK', latency_ms: 180, layer: 'edge', input_data: { text: '今天天气晴朗...' }, output_data: { audio_ms: 2400 } },
+    { node_id: 'vts_driver',      node_type: 'vts',       display_name: 'VTS 表情驱动',       status: 'OK', latency_ms: 22,  layer: 'edge', input_data: { expression_id: 'smile_01' }, output_data: { applied: true } },
   ],
   edges: [
-    { source: 'intent',   target: 'governor'  },
-    { source: 'governor', target: 'memory'    },
-    { source: 'governor', target: 'llm_safe'  },
-    { source: 'memory',   target: 'llm_main'  },
-    { source: 'llm_main', target: 'tts'       },
-    { source: 'llm_safe', target: 'tts'       },
-    { source: 'tts',      target: 'vts'       },
+    { source: 'asr',             target: 'host_input'       },
+    { source: 'host_input',      target: 'pre_classifier'   },
+    { source: 'pre_classifier',  target: 'governor'         },
+    { source: 'governor',        target: 'scene_router'     },
+    { source: 'scene_router',    target: 'recall_episodic'  },
+    { source: 'scene_router',    target: 'recall_semantic'  },
+    { source: 'scene_router',    target: 'recall_bond'      },
+    { source: 'scene_router',    target: 'recall_emotion'   },
+    { source: 'recall_episodic', target: 'recall_rerank'    },
+    { source: 'recall_semantic', target: 'recall_rerank'    },
+    { source: 'recall_bond',     target: 'recall_rerank'    },
+    { source: 'recall_emotion',  target: 'recall_rerank'    },
+    { source: 'recall_rerank',   target: 'llm_local'        },
+    { source: 'llm_local',       target: 'airlock'          },
+    { source: 'airlock',         target: 'episodic_write'   },
+    { source: 'airlock',         target: 'bond_update'      },
+    { source: 'airlock',         target: 'vts_ctrl'         },
+    { source: 'airlock',         target: 'chat_render'      },
+    { source: 'chat_render',     target: 'tts'              },
+    { source: 'vts_ctrl',        target: 'vts_driver'       },
   ],
 }
 
 // ===== 将 API 数据转换为 React Flow 格式 =====
-function buildFlowData(traceData, onSelect) {
+// mode: 'full'   → 全图静态展示（所有节点灰色 inactive）
+// mode: 'trace'  → 仅展示 trace 经过的节点（正常彩色）
+// mode: 'overlay'→ 全图 + 高亮 trace 链路（inactive + active 叠加）
+function buildFlowData(traceData, onSelect, mode = 'trace', activeNodeIds = null) {
   const rawNodes = traceData.nodes ?? []
   const rawEdges = traceData.edges ?? []
+
+  const activeSet = activeNodeIds ? new Set(activeNodeIds) : null
+
+  const flowNodes = rawNodes.map((n) => {
+    let inactive = false
+    let active = false
+    if (mode === 'full') {
+      inactive = true
+    } else if (mode === 'overlay' && activeSet) {
+      inactive = !activeSet.has(n.node_id)
+      active   =  activeSet.has(n.node_id)
+    }
+    return {
+      id: n.node_id,
+      type: 'customNode',
+      position: { x: 0, y: 0 }, // Dagre 会覆盖
+      data: { ...n, onSelect, inactive, active },
+    }
+  })
+
+  const flowEdges = rawEdges.map((e) => {
+    // overlay 模式：只有两端节点都激活的边才高亮
+    const isActiveEdge = mode === 'overlay' && activeSet
+      ? activeSet.has(e.source) && activeSet.has(e.target)
+      : mode !== 'full'
+    return {
+      id: `e-${e.source}-${e.target}`,
+      source: e.source,
+      target: e.target,
+      type: 'smoothstep',
+      animated: isActiveEdge,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: isActiveEdge ? '#2970FF' : '#D0D5DD',
+        width: 16, height: 16,
+      },
+      style: {
+        stroke: isActiveEdge ? '#2970FF' : '#D0D5DD',
+        strokeWidth: isActiveEdge ? 2.5 : 1.5,
+        opacity: mode === 'full' ? 0.3 : (mode === 'overlay' && !isActiveEdge ? 0.2 : 1),
+      },
+    }
+  })
+
+  return applyDagreLayout(flowNodes, flowEdges)
+}
+
+// ===== 从 graphSchema 或 FULL_CHAIN_SCHEMA 构建完整静态图（全灰 inactive）=====
+function buildFullChainFlowData(schema, onSelect) {
+  const rawNodes = schema.nodes ?? []
+  const rawEdges = schema.edges ?? []
 
   const flowNodes = rawNodes.map((n) => ({
     id: n.node_id,
     type: 'customNode',
-    position: { x: 0, y: 0 }, // Dagre 会覆盖
-    data: { ...n, onSelect },
+    position: { x: 0, y: 0 },
+    data: { ...n, onSelect, inactive: true, active: false },
   }))
 
   const flowEdges = rawEdges.map((e) => ({
@@ -61,11 +238,54 @@ function buildFlowData(traceData, onSelect) {
     source: e.source,
     target: e.target,
     type: 'smoothstep',
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#D0D5DD', width: 16, height: 16 },
-    style: { stroke: '#D0D5DD', strokeWidth: 1.5 },
+    animated: false,
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#D0D5DD', width: 14, height: 14 },
+    style: { stroke: '#D0D5DD', strokeWidth: 1.2, opacity: 0.4 },
   }))
 
   return applyDagreLayout(flowNodes, flowEdges)
+}
+
+// ===== 将 trace 激活节点叠加到全图上（高亮链路）=====
+function applyTraceHighlight(fullNodes, fullEdges, traceData) {
+  const activeNodeIds = new Set((traceData.nodes ?? []).map((n) => n.node_id))
+  const traceNodeMap  = Object.fromEntries((traceData.nodes ?? []).map((n) => [n.node_id, n]))
+
+  const updatedNodes = fullNodes.map((node) => {
+    const isActive = activeNodeIds.has(node.id)
+    const traceNode = traceNodeMap[node.id]
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        // 激活节点：合并 trace 数据（含 latency_ms、status 等）
+        ...(isActive && traceNode ? traceNode : {}),
+        onSelect: node.data.onSelect,
+        inactive: !isActive,
+        active:    isActive,
+      },
+    }
+  })
+
+  const updatedEdges = fullEdges.map((edge) => {
+    const isActiveEdge = activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target)
+    return {
+      ...edge,
+      animated: isActiveEdge,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: isActiveEdge ? '#2970FF' : '#D0D5DD',
+        width: 16, height: 16,
+      },
+      style: {
+        stroke: isActiveEdge ? '#2970FF' : '#D0D5DD',
+        strokeWidth: isActiveEdge ? 2.5 : 1.2,
+        opacity: isActiveEdge ? 1 : 0.2,
+      },
+    }
+  })
+
+  return { nodes: updatedNodes, edges: updatedEdges }
 }
 
 // ===== 甘特图：基于 edges 拓扑推算各节点开始时间 =====
@@ -408,9 +628,22 @@ export default function Trace() {
   const [streamEvents, setStreamEvents] = useState(null) // Chat Stream SSE 事件流
   const [graphSchema, setGraphSchema] = useState(null)   // 图编排（节点/边定义）
   const [agentMetrics, setAgentMetrics] = useState(null) // Agent 编排（选派 / handoff）
+  // 全图静态节点/边（页面加载时立即构建，不依赖 trace 查询）
+  const [fullChainNodes, setFullChainNodes] = useState([])
+  const [fullChainEdges, setFullChainEdges] = useState([])
   const containerRef = useRef(null)
 
   const handleSelect = useCallback((data) => setSelectedNode(data), [])
+
+  // ===== 构建全图静态拓扑（页面加载时立即展示）=====
+  const buildFullChain = useCallback((schema) => {
+    const { nodes: fn, edges: fe } = buildFullChainFlowData(schema, handleSelect)
+    setFullChainNodes(fn)
+    setFullChainEdges(fe)
+    // 初始状态：DAG 展示全图（全灰）
+    setNodes(fn)
+    setEdges(fe)
+  }, [handleSelect, setNodes, setEdges])
 
   const load = useCallback(async (id) => {
     if (!id?.trim()) return
@@ -426,9 +659,19 @@ export default function Trace() {
       }
       setTraceData(data)
       setTraceInfo({ status: data.status, latency: data.total_latency_ms, nodeCount: (data.nodes ?? []).length })
-      const { nodes: ln, edges: le } = buildFlowData(data, handleSelect)
-      setNodes(ln)
-      setEdges(le)
+
+      // 将 trace 激活节点高亮叠加到全图上（overlay 模式）
+      if (fullChainNodes.length > 0) {
+        const { nodes: hn, edges: he } = applyTraceHighlight(fullChainNodes, fullChainEdges, data)
+        setNodes(hn)
+        setEdges(he)
+      } else {
+        // 全图尚未加载时，退回到仅展示 trace 节点
+        const { nodes: ln, edges: le } = buildFlowData(data, handleSelect, 'trace')
+        setNodes(ln)
+        setEdges(le)
+      }
+
       setStreamEvents(null)
       if (id !== 'mock-req-001' && !id.startsWith('mock')) {
         fetchTraceStreamEvents(id).then(setStreamEvents).catch(() => setStreamEvents({ events: [], count: 0 }))
@@ -448,15 +691,28 @@ export default function Trace() {
     } finally {
       setLoading(false)
     }
-  }, [setNodes, setEdges, handleSelect])
+  }, [setNodes, setEdges, handleSelect, fullChainNodes, fullChainEdges])
 
   useEffect(() => {
     if (initialId) load(initialId)
   }, []) // eslint-disable-line
 
+  // 页面加载时立即用 FULL_CHAIN_SCHEMA 构建全图（不等待 graphSchema API）
   useEffect(() => {
-    fetchGraphSchema().then(setGraphSchema).catch(() => setGraphSchema(null))
-  }, [])
+    buildFullChain(FULL_CHAIN_SCHEMA)
+  }, []) // eslint-disable-line
+
+  // graphSchema API 加载成功后，用真实图定义更新全图（若 API 返回了更多节点）
+  useEffect(() => {
+    fetchGraphSchema().then((schema) => {
+      setGraphSchema(schema)
+      // 若 API 返回的节点数比 FULL_CHAIN_SCHEMA 多，则用 API 数据重建全图
+      // 否则保持 FULL_CHAIN_SCHEMA（更完整）
+      if (schema && (schema.nodes?.length ?? 0) > FULL_CHAIN_SCHEMA.nodes.length) {
+        buildFullChain(schema)
+      }
+    }).catch(() => setGraphSchema(null))
+  }, []) // eslint-disable-line
 
   useEffect(() => {
     fetchObsMetrics().then((d) => setAgentMetrics(d?.agent_metrics ?? null)).catch(() => setAgentMetrics(null))
@@ -484,21 +740,59 @@ export default function Trace() {
             <input
               className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded font-mono
                          focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary"
-              placeholder="输入 request_id（试试 mock-req-001）…"
+              placeholder="输入 request_id 高亮链路（试试 mock-req-001）…"
               value={inputId}
               onChange={(e) => setInputId(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && load(inputId)}
             />
           </div>
           <button className="btn-primary shrink-0" onClick={() => load(inputId)}>
-            查询
+            高亮链路
           </button>
+          {/* 重置全图：清除高亮，恢复全灰静态图 */}
+          {traceData && (
+            <button
+              className="btn-secondary shrink-0 text-xs"
+              onClick={() => {
+                setTraceData(null)
+                setTraceInfo(null)
+                setStreamEvents(null)
+                setNodes(fullChainNodes)
+                setEdges(fullChainEdges)
+                setSelectedNode(null)
+              }}
+              title="清除高亮，恢复全图静态展示"
+            >
+              <RefreshCw size={12} />
+              重置
+            </button>
+          )}
+        </div>
+
+        {/* 图例 */}
+        <div className="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded border-2 border-gray-300 opacity-50" />
+            <span>未激活节点</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded border-2 border-blue-500" style={{ boxShadow: '0 0 4px rgba(41,112,255,0.4)' }} />
+            <span>激活链路</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded" style={{ background: '#ECFDF5', border: '1px solid #059669' }} />
+            <span className="text-green-600">Edge 端</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded" style={{ background: '#EEF4FF', border: '1px solid #2970FF' }} />
+            <span className="text-blue-600">Host 端</span>
+          </div>
         </div>
 
         {/* 链路摘要 */}
         {traceInfo && (
           <div className="flex items-center gap-3 text-xs text-gray-500">
-            <span>节点 {traceInfo.nodeCount}</span>
+            <span>激活节点 {traceInfo.nodeCount}</span>
             {traceInfo.latency != null && <span>总耗时 {traceInfo.latency}ms</span>}
             <span className={traceInfo.status === 'OK' ? 'text-green-600' : 'text-red-500'}>
               {traceInfo.status}
@@ -566,15 +860,15 @@ export default function Trace() {
               {error}
             </div>
           )}
-          {!loading && !error && !traceData && (
+          {/* 全图已展示时不再显示空状态提示 */}
+          {!loading && !error && nodes.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm gap-2">
               <Search size={32} className="text-gray-200" />
-              <span>请输入 request_id 查询链路</span>
-              <span className="text-xs text-gray-300">可输入 mock-req-001 查看示例</span>
+              <span>加载全链路拓扑图中…</span>
             </div>
           )}
 
-          {/* DAG 视图 */}
+          {/* DAG 视图：全图始终展示，trace 查询后高亮链路 */}
           {!loading && viewMode === 'dag' && nodes.length > 0 && (
             <ReactFlow
               nodes={nodes}
@@ -583,15 +877,17 @@ export default function Trace() {
               onEdgesChange={onEdgesChange}
               nodeTypes={NODE_TYPES}
               fitView
-              fitViewOptions={{ padding: 0.2 }}
+              fitViewOptions={{ padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
-              minZoom={0.2}
+              minZoom={0.1}
               maxZoom={2}
             >
               <Background color="#F2F4F7" gap={20} size={1} />
               <Controls showInteractive={false} />
               <MiniMap
                 nodeColor={(n) => {
+                  if (n.data?.inactive) return '#E4E7EC'
+                  if (n.data?.active) return '#2970FF'
                   const s = n.data?.status ?? ''
                   if (['OK', 'UP', 'success', 'healthy'].includes(s)) return '#12B76A'
                   if (['FAIL', 'DOWN', 'error'].includes(s)) return '#F04438'
@@ -664,7 +960,7 @@ export default function Trace() {
         )}
       </div>
 
-      {/* Chat Stream SSE 事件流 + 图编排 */}
+      {/* Chat Stream SSE 事件流 + Agent 编排可视化 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* SSE 事件流：当前 request 的 stream 事件 */}
         <div className="card overflow-hidden flex flex-col">
@@ -700,107 +996,94 @@ export default function Trace() {
               </ul>
             )}
             {!traceData && (
-              <div className="p-4 text-center text-gray-400 text-sm">查询链路后显示该请求的 SSE 事件</div>
+              <div className="p-4 text-center text-gray-400 text-sm">输入 request_id 高亮链路后显示该请求的 SSE 事件</div>
             )}
           </div>
         </div>
 
-        {/* 图编排：当前图定义（节点与边） */}
+        {/* Agent 编排可视化：所有 agent 节点 + 选派统计 */}
         <div className="card overflow-hidden flex flex-col">
           <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
-            <GitBranch size={14} className="text-slate-600" />
-            <span className="text-sm font-semibold text-slate-700">图编排</span>
-            {graphSchema && (
+            <Users size={14} className="text-slate-600" />
+            <span className="text-sm font-semibold text-slate-700">Agent 编排</span>
+            {agentMetrics && (
               <span className="text-xs text-slate-500">
-                {graphSchema.graph_id ?? 'default'} · {graphSchema.nodes?.length ?? 0} 节点 · {graphSchema.edges?.length ?? 0} 边
+                Handoff {agentMetrics.agent_hop_count ?? 0} 次 · 均 {agentMetrics.avg_hops_per_request ?? '—'} hop/请求
               </span>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto max-h-64 min-h-[120px]">
-            {!graphSchema && (
-              <div className="p-4 text-center text-gray-400 text-sm">加载图定义中…</div>
-            )}
-            {graphSchema && (
-              <div className="p-4 space-y-3 text-xs">
-                <div>
-                  <span className="text-gray-500">入口节点：</span>
-                  <span className="font-mono text-gray-800">{graphSchema.entry_node ?? '-'}</span>
-                </div>
-                {graphSchema.active_nodes?.length > 0 && (
-                  <div>
-                    <span className="text-gray-500">活跃节点：</span>
-                    <span className="font-mono text-gray-800">{graphSchema.active_nodes.join(', ')}</span>
-                  </div>
-                )}
-                {graphSchema.nodes?.length > 0 && (
-                  <div>
-                    <div className="text-gray-500 mb-1">节点列表</div>
-                    <ul className="font-mono text-gray-700 space-y-0.5">
-                      {(graphSchema.nodes.slice(0, 20)).map((n, i) => (
-                        <li key={i}>{n.node_id ?? n.display_name ?? '-'}</li>
-                      ))}
-                      {graphSchema.nodes.length > 20 && (
-                        <li className="text-gray-400">… 共 {graphSchema.nodes.length} 个</li>
-                      )}
-                    </ul>
-                  </div>
-                )}
-                {graphSchema.edges?.length > 0 && (
-                  <div>
-                    <div className="text-gray-500 mb-1">边</div>
-                    <ul className="font-mono text-gray-700 space-y-0.5">
-                      {(graphSchema.edges.slice(0, 15)).map((e, i) => (
-                        <li key={i}>{e.source ?? e.from} → {e.target ?? e.to}</li>
-                      ))}
-                      {graphSchema.edges.length > 15 && (
-                        <li className="text-gray-400">… 共 {graphSchema.edges.length} 条</li>
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Agent 编排：所有 agent 选派 / handoff 汇总 */}
-      <div className="card overflow-hidden flex flex-col">
-        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
-          <Users size={14} className="text-slate-600" />
-          <span className="text-sm font-semibold text-slate-700">Agent 编排</span>
-          {agentMetrics && (
-            <span className="text-xs text-slate-500">
-              Handoff {agentMetrics.agent_hop_count ?? 0} 次 · 均 {agentMetrics.avg_hops_per_request ?? '—'} hop/请求
-              {agentMetrics.handoff_trace_complete_rate_pct != null && ` · 完整率 ${agentMetrics.handoff_trace_complete_rate_pct}%`}
-            </span>
-          )}
-        </div>
-        <div className="flex-1 overflow-y-auto max-h-48 min-h-[80px] p-4">
-          {!agentMetrics && (
-            <div className="text-center text-gray-400 text-sm">加载 Agent 指标中…</div>
-          )}
-          {agentMetrics?.agent_dispatch_count && Object.keys(agentMetrics.agent_dispatch_count).length > 0 ? (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-gray-500">各 Agent 选派次数</div>
+          <div className="flex-1 overflow-y-auto max-h-64 min-h-[120px] p-4">
+            {/* Agent 节点拓扑（静态展示所有 agent，激活时高亮） */}
+            <div className="mb-3">
+              <div className="text-xs font-medium text-gray-500 mb-2">Agent 节点（全部）</div>
               <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'supervisor_dispatch', label: 'Supervisor', color: '#7C3AED', bg: '#F5F3FF' },
+                  { id: 'agent_dispatch',      label: 'Dispatch',   color: '#0891B2', bg: '#ECFEFF' },
+                  { id: 'chat_agent',          label: 'Chat',       color: '#059669', bg: '#ECFDF5' },
+                  { id: 'code_agent',          label: 'Code',       color: '#2970FF', bg: '#EEF4FF' },
+                  { id: 'translate_agent',     label: 'Translate',  color: '#D97706', bg: '#FFFBEB' },
+                  { id: 'retrieval_agent',     label: 'Retrieval',  color: '#0891B2', bg: '#ECFEFF' },
+                  { id: 'judge_agent',         label: 'Judge',      color: '#059669', bg: '#ECFDF5' },
+                ].map(({ id, label, color, bg }) => {
+                  // 判断该 agent 是否在当前 trace 中被激活
+                  const isActive = traceData?.nodes?.some((n) => n.node_id === id)
+                  const dispatchCount = agentMetrics?.agent_dispatch_count?.[id]
+                  return (
+                    <div
+                      key={id}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border-2 text-xs font-medium transition-all"
+                      style={{
+                        borderColor: isActive ? color : '#E4E7EC',
+                        background: isActive ? bg : '#F9FAFB',
+                        color: isActive ? color : '#98A2B3',
+                        opacity: isActive ? 1 : 0.6,
+                        boxShadow: isActive ? `0 0 0 2px ${color}22` : undefined,
+                      }}
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ background: isActive ? color : '#D0D5DD' }}
+                      />
+                      {label}
+                      {dispatchCount != null && (
+                        <span className="ml-1 text-xs opacity-70">{dispatchCount}</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 选派统计 */}
+            {agentMetrics?.agent_dispatch_count && Object.keys(agentMetrics.agent_dispatch_count).length > 0 ? (
+              <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                <div className="text-xs font-medium text-gray-500">各 Agent 历史选派次数（近 24h）</div>
                 {Object.entries(agentMetrics.agent_dispatch_count)
                   .sort((a, b) => b[1] - a[1])
-                  .map(([agentId, count]) => (
-                    <span key={agentId} className="inline-flex items-center px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-medium">
-                      {agentId} <span className="text-slate-500 ml-1">{count}</span>
-                    </span>
-                  ))}
+                  .map(([agentId, count]) => {
+                    const maxCount = Math.max(...Object.values(agentMetrics.agent_dispatch_count))
+                    const pct = maxCount > 0 ? (count / maxCount) * 100 : 0
+                    return (
+                      <div key={agentId} className="flex items-center gap-2">
+                        <div className="w-28 text-xs text-gray-600 truncate shrink-0">{agentId}</div>
+                        <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="h-1.5 rounded-full bg-indigo-400"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <div className="w-8 text-xs text-right text-gray-500 shrink-0">{count}</div>
+                      </div>
+                    )
+                  })}
               </div>
-              {agentMetrics.switches && Object.keys(agentMetrics.switches).length > 0 && (
-                <div className="text-xs text-gray-500 mt-2">
-                  能力开关: {Object.entries(agentMetrics.switches).map(([k, v]) => `${k}=${v}`).join(', ')}
-                </div>
-              )}
-            </div>
-          ) : agentMetrics && (
-            <div className="text-sm text-gray-400">暂无 Agent 选派数据（依赖 stream_events 写入）</div>
-          )}
+            ) : !agentMetrics ? (
+              <div className="text-center text-gray-400 text-sm border-t border-gray-100 pt-3">加载 Agent 指标中…</div>
+            ) : (
+              <div className="text-sm text-gray-400 border-t border-gray-100 pt-3">暂无 Agent 选派数据</div>
+            )}
+          </div>
         </div>
       </div>
 
