@@ -28,7 +28,7 @@ from host_brain.app.emotion_context import (  # noqa: E402
     map_emotion_tag_to_vad,
     normalize_chat_emotion_context,
 )
-from host_brain.app.chat_context_builder import build_chat_runtime_payload  # noqa: E402
+from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload  # noqa: E402
 from host_brain.app.chat_runtime_input import build_chat_runtime_input  # noqa: E402
 from host_brain.app.prompt_builder import render_node_generation_prompt  # noqa: E402
 from host_brain.channels.vts import (  # noqa: E402
@@ -215,7 +215,7 @@ def _build_runtime_payload(
         emotion_state=normalized,
         emotion_snapshot=snapshot,
     )
-    runtime_payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    runtime_payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     runtime_payload.update(
         {
             "core_reasoner_primary": {

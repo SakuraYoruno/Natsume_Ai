@@ -28,7 +28,7 @@ if env_path.exists():
 print("GEMINI_API_KEY set:", bool(os.environ.get("GEMINI_API_KEY")))
 print("HOST_LLM_PROVIDER:", os.environ.get("HOST_LLM_PROVIDER"))
 
-from host_brain.app.chat_context_builder import build_chat_runtime_payload
+from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.dependencies import get_graph_runtime, get_ledger, get_retrieval_pipeline
 from host_brain.app.emotion_context import resolve_chat_emotion_context
@@ -101,7 +101,7 @@ try:
         scene_type=scene_type,
         scene_type_source=scene_type_source,
     )
-    llm_prompt_payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    llm_prompt_payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     print("  llm_prompt_payload: OK")
 
     graph_config = build_chat_graph_config(

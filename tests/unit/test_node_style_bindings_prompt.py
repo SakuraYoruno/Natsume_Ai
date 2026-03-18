@@ -59,7 +59,7 @@ def _make_runtime_payload(
     recall_slot_text: dict[str, str] | None = None,
     emotion_state: dict | None = None,
 ):
-    from host_brain.app.chat_context_builder import build_chat_runtime_payload
+    from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
     from host_brain.app.chat_runtime_input import build_chat_runtime_input
 
     runtime_input = build_chat_runtime_input(
@@ -73,7 +73,7 @@ def _make_runtime_payload(
         emotion_state=emotion_state or {},
         render_target_lang="ja",
     )
-    payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     payload.update(
         {
             "core_reasoner_primary": {
@@ -89,7 +89,7 @@ def _make_runtime_payload(
     return payload
 
 
-def test_build_chat_runtime_payload_uses_recall_slots_for_background() -> None:
+def test_build_chat_prompt_runtime_payload_uses_recall_slots_for_background() -> None:
     payload = _make_runtime_payload(
         request_id="req_recall_slots",
         session_id="session_recall_slots",
@@ -115,13 +115,13 @@ def test_build_chat_runtime_payload_uses_recall_slots_for_background() -> None:
     style_rows = list(style_pack.get("style_canon") or [])
     authoritative = list(prompt_context.get("authoritative") or [])
     assert len(style_rows) == 1
-    assert style_rows[0].get("source") == "recall_pack_builder"
+    assert style_rows[0].get("citation") == "context_pack_builder://style_canon"
     assert style_rows[0].get("instruction") == "JA_STYLE_HINT"
     assert len(authoritative) == 1
-    assert authoritative[0].get("citation") == "recall_pack_builder://world_canon"
+    assert authoritative[0].get("citation") == "context_pack_builder://world_canon"
 
 
-def test_build_chat_runtime_payload_includes_valid_prompt_context() -> None:
+def test_build_chat_prompt_runtime_payload_includes_valid_prompt_context() -> None:
     payload = _make_runtime_payload(
         request_id="req_prompt_context",
         session_id="session_prompt_context",
@@ -175,7 +175,7 @@ def test_build_chat_runtime_payload_includes_valid_prompt_context() -> None:
     style_pack = dict(prompt_context.get("style_pack") or {})
     style_rows = list(style_pack.get("style_canon") or [])
     assert len(style_rows) == 1
-    assert style_rows[0].get("source") == "recall_pack_builder"
+    assert style_rows[0].get("citation") == "context_pack_builder://style_canon"
 
     emotion_section = dict(payload.get("emotion") or {})
     emotion_state = dict(emotion_section.get("state") or {})
@@ -187,7 +187,7 @@ def test_build_chat_runtime_payload_includes_valid_prompt_context() -> None:
     assert dict(prompt_context.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
 
 
-def test_build_chat_runtime_payload_marks_persona_utterance_rows() -> None:
+def test_build_chat_prompt_runtime_payload_marks_persona_utterance_rows() -> None:
     payload = _make_runtime_payload(
         request_id="req_prompt_context_persona",
         session_id="session_prompt_context_persona",

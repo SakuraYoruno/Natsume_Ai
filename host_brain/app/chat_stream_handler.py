@@ -311,7 +311,7 @@ async def _build_stream_chat_prompt(
     resolved_emotion_context = dict(runtime_input.emotion_state)
 
     from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        build_chat_runtime_payload as _build_runtime_payload,
+        build_chat_prompt_runtime_payload as _build_prompt_runtime_payload,
     )
     from host_brain.app.prompt_builder import (  # noqa: PLC0415
         render_node_generation_prompt,
@@ -319,7 +319,7 @@ async def _build_stream_chat_prompt(
     )
 
     render_target_lang = str(runtime_input.render_target_lang).strip().lower() or "ja"
-    prompt_payload = _build_runtime_payload(runtime_input=runtime_input)
+    prompt_payload = _build_prompt_runtime_payload(runtime_input=runtime_input)
     if resolved_emotion_context:
         prompt_payload = adjust_gen_params_for_emotion(prompt_payload, resolved_emotion_context)
 

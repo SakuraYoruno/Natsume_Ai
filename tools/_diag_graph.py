@@ -26,7 +26,7 @@ if env_path.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from host_brain.app.chat_context_builder import build_chat_runtime_payload
+from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.dependencies import get_graph_runtime
 from host_brain.app.graph_config_builder import CHAT_GRAPH_NODE_ORDER, build_chat_graph_config, resolve_host_llm_runtime
@@ -77,7 +77,7 @@ try:
         scene_type=scene_type,
         scene_type_source=scene_type_source,
     )
-    llm_prompt_payload = build_chat_runtime_payload(runtime_input=runtime_input)
+    llm_prompt_payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     print("llm_prompt_payload: OK")
 
     graph_config = build_chat_graph_config(

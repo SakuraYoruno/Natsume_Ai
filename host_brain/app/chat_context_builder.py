@@ -12,10 +12,10 @@ from typing import Any, Mapping
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
-from host_brain.core.context_pack import (
+from host_brain.core.prompt_context import (
     build_emotion_pulse_slot,
     build_world_canon_slot,
-    validate_context_pack,
+    validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
 from host_brain.memory.canon_style_store import StyleCanonStore
@@ -308,7 +308,7 @@ def build_chat_context_pack(
     if degraded_validation.valid:
         return (
             degraded_pack,
-            {"valid": True, "degraded": True, "reason_code": "CONTEXT_PACK_DEGRADED", "violation_count": len(violations), "violations": violations},
+            {"valid": True, "degraded": True, "reason_code": "PROMPT_CONTEXT_DEGRADED", "violation_count": len(violations), "violations": violations},
         )
 
     minimal_pack = {
@@ -317,7 +317,7 @@ def build_chat_context_pack(
     }
     return (
         minimal_pack,
-        {"valid": True, "degraded": True, "reason_code": "CONTEXT_PACK_MINIMAL_FALLBACK", "violation_count": len(violations), "violations": violations},
+        {"valid": True, "degraded": True, "reason_code": "PROMPT_CONTEXT_MINIMAL_FALLBACK", "violation_count": len(violations), "violations": violations},
     )
 
 
@@ -373,10 +373,10 @@ def _classify_retrieval_path_for_obs(
 def _select_context_degrade_tier(
     *,
     retrieval_summary: Mapping[str, Any],
-    context_pack_validation: Mapping[str, Any],
+    prompt_context_validation: Mapping[str, Any],
     slot_item_counts: Mapping[str, int],
 ) -> tuple[str, str]:
-    validation_reason = str(context_pack_validation.get("reason_code") or "").strip().upper()
+    validation_reason = str(prompt_context_validation.get("reason_code") or "").strip().upper()
     retrieval_status = str(retrieval_summary.get("status") or "").strip().upper()
     retrieval_degraded = bool(retrieval_summary.get("degraded", False))
     route_count = _coerce_non_negative_int(retrieval_summary.get("route_count"))
@@ -388,13 +388,13 @@ def _select_context_degrade_tier(
     )
     total_items = sum(_coerce_non_negative_int(value) for value in slot_item_counts.values())
 
-    if validation_reason == "CONTEXT_PACK_MINIMAL_FALLBACK":
+    if validation_reason == "PROMPT_CONTEXT_MINIMAL_FALLBACK":
         if total_items == 0:
-            return "bare_llm", "context_pack_minimal_fallback_and_empty_slots"
-        return "minimal_context", "context_pack_minimal_fallback"
+            return "bare_llm", "prompt_context_minimal_fallback_and_empty_slots"
+        return "minimal_context", "prompt_context_minimal_fallback"
 
-    if validation_reason == "CONTEXT_PACK_DEGRADED":
-        return "minimal_context", "context_pack_authoritative_slot_degraded"
+    if validation_reason == "PROMPT_CONTEXT_DEGRADED":
+        return "minimal_context", "prompt_context_authoritative_slot_degraded"
 
     if route_count >= 6 and retrieval_items > 0 and retrieval_status == "OK" and not retrieval_degraded:
         return "six_route", "full_six_route_retrieval_ready"
@@ -411,18 +411,18 @@ def _select_context_degrade_tier(
     return "bare_llm", "no_context_slots_available"
 
 
-def build_context_pack_observability(
+def build_prompt_context_observability(
     *,
-    context_pack: Mapping[str, Any],
-    context_pack_validation: Mapping[str, Any],
+    prompt_context: Mapping[str, Any],
+    prompt_context_validation: Mapping[str, Any],
     retrieval_summary: Mapping[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    authoritative_rows = list(context_pack.get("authoritative") or []) if isinstance(context_pack.get("authoritative"), list) else []
-    retrieval_rows = list(context_pack.get("retrieval") or []) if isinstance(context_pack.get("retrieval"), list) else []
-    tool_meta_rows = list(context_pack.get("tool_meta_pack") or []) if isinstance(context_pack.get("tool_meta_pack"), list) else []
+    authoritative_rows = list(prompt_context.get("authoritative") or []) if isinstance(prompt_context.get("authoritative"), list) else []
+    retrieval_rows = list(prompt_context.get("retrieval") or []) if isinstance(prompt_context.get("retrieval"), list) else []
+    tool_meta_rows = list(prompt_context.get("tool_meta_pack") or []) if isinstance(prompt_context.get("tool_meta_pack"), list) else []
 
-    style_pack_raw = context_pack.get("style_pack")
+    style_pack_raw = prompt_context.get("style_pack")
     style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
     style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
     node_bindings_raw = style_pack.get("node_bindings")
@@ -438,7 +438,7 @@ def build_context_pack_observability(
 
     selected_tier, selected_reason = _select_context_degrade_tier(
         retrieval_summary=retrieval_summary,
-        context_pack_validation=context_pack_validation,
+        prompt_context_validation=prompt_context_validation,
         slot_item_counts=slot_item_counts,
     )
 
@@ -454,8 +454,8 @@ def build_context_pack_observability(
                 "authoritative": authoritative_rows,
                 "retrieval": retrieval_rows,
                 "style_pack": style_pack,
-                "constraints": dict(context_pack.get("constraints") or {}),
-                "emotion_pulse": dict(context_pack.get("emotion_pulse") or {}),
+                "constraints": dict(prompt_context.get("constraints") or {}),
+                "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -467,7 +467,7 @@ def build_context_pack_observability(
     retrieval_item_cap = 10
 
     return {
-        "version": "context_pack_obs.v1",
+        "version": "prompt_context_obs.v1",
         "degrade_order": list(CONTEXT_DEGRADE_ORDER),
         "selected_tier": selected_tier,
         "selected_tier_rank": list(CONTEXT_DEGRADE_ORDER).index(selected_tier),
@@ -497,6 +497,7 @@ def build_context_pack_observability(
             "retrieval_item_cap": retrieval_item_cap,
             "retrieval_trimmed_items": max(0, retrieval_input_count - retrieval_used_count),
             "world_authoritative_items": len(authoritative_rows),
+            "style_prompt_rows": len(style_rows),
             "style_binding_nodes": len(node_bindings),
         },
         "context_size_chars": context_chars,
@@ -534,7 +535,7 @@ def build_chat_generation_prompt_payload(
     resolved_render_lang = str(render_target_lang or "").strip().lower()
     if resolved_render_lang not in {"zh", "ja"}:
         resolved_render_lang = infer_render_target_lang(user_message=user_message)
-    context_pack, context_pack_validation = build_chat_context_pack(
+    prompt_context, prompt_context_validation = build_chat_context_pack(
         request_id=request_id,
         session_id=session_id,
         thread_id=thread_id,
@@ -544,9 +545,9 @@ def build_chat_generation_prompt_payload(
         emotion_context=normalized_emotion_context,
         cpb_slots=cpb_slots,
     )
-    context_pack_observability = build_context_pack_observability(
-        context_pack=context_pack,
-        context_pack_validation=context_pack_validation,
+    prompt_context_observability = build_prompt_context_observability(
+        prompt_context=prompt_context,
+        prompt_context_validation=prompt_context_validation,
         retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
     )
@@ -564,9 +565,9 @@ def build_chat_generation_prompt_payload(
             "emotion_intensity": normalized_emotion_context.get("emotion_intensity"),
         },
         "emotion_snapshot": normalized_emotion_snapshot,
-        "context_pack": context_pack,
-        "context_pack_validation": context_pack_validation,
-        "context_pack_observability": context_pack_observability,
+        "prompt_context": prompt_context,
+        "prompt_context_validation": prompt_context_validation,
+        "prompt_context_observability": prompt_context_observability,
         "retrieval": {
             "status": retrieval_summary.get("status"),
             "reason_code": retrieval_summary.get("reason_code"),
@@ -577,6 +578,58 @@ def build_chat_generation_prompt_payload(
             "evidence_items": retrieval_evidence_items,
         },
     }
+
+
+def build_chat_prompt_runtime_payload(
+    *,
+    runtime_input: Any,
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    from host_brain.app.chat_runtime_input import ChatRuntimeInput  # noqa: PLC0415
+
+    if not isinstance(runtime_input, ChatRuntimeInput):
+        raise TypeError("runtime_input must be ChatRuntimeInput")
+
+    render_target_lang = str(runtime_input.render_target_lang or "").strip().lower()
+    resolved_style_bindings = (
+        normalize_node_style_bindings(style_bindings)
+        if style_bindings is not None
+        else build_node_style_bindings(render_target_lang=render_target_lang)
+    )
+
+    recall_slot_text = dict(runtime_input.recall_slot_text or {})
+    merged_slots = dict(cpb_slots or {})
+    for slot_name in ("style_canon", "world_canon"):
+        slot_text = str(recall_slot_text.get(slot_name) or "").strip()
+        if slot_text and not str(merged_slots.get(slot_name) or "").strip():
+            merged_slots[slot_name] = slot_text
+
+    generation_payload = build_chat_generation_prompt_payload(
+        request_id=str(runtime_input.request_id or "").strip(),
+        session_id=str(runtime_input.session_id or "").strip(),
+        thread_id=runtime_input.thread_id,
+        user_message=str(runtime_input.user_message or ""),
+        retrieval_summary=dict(runtime_input.retrieval_summary or {}),
+        retrieval_evidence_items=list(runtime_input.retrieval_evidence_items or []),
+        style_bindings=resolved_style_bindings,
+        emotion_context=dict(runtime_input.emotion_state or {}),
+        emotion_snapshot=dict(runtime_input.emotion_snapshot or {}),
+        render_target_lang=render_target_lang or None,
+        cpb_slots=(merged_slots or None),
+    )
+
+    prompt_context = dict(generation_payload.get("prompt_context") or {})
+    prompt_context_validation = dict(generation_payload.get("prompt_context_validation") or {})
+    prompt_context_observability = dict(generation_payload.get("prompt_context_observability") or {})
+
+    runtime_payload = runtime_input.to_runtime_payload(
+        prompt_context=prompt_context,
+        prompt_context_validation=prompt_context_validation,
+        prompt_context_observability=prompt_context_observability,
+    )
+    runtime_payload["style_bindings"] = resolved_style_bindings
+    return runtime_payload
 
 
 def extract_chat_graph_node_entry(graph_output: dict[str, Any], *, node_id: str) -> dict[str, Any]:

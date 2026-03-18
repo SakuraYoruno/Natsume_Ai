@@ -16,7 +16,7 @@ import time
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
 from host_brain.app.chat_context_builder import (
-    build_chat_runtime_payload as _build_chat_runtime_payload,
+    build_chat_prompt_runtime_payload as _build_chat_prompt_runtime_payload,
     extract_chat_graph_gateway_payload as _extract_chat_graph_gateway_payload,
 )
 from host_brain.app.chat_runtime_input import (
@@ -306,7 +306,7 @@ async def _complex_scene_sse_generator(
             committed_route_token_detail=governor_result.get("committed_route_token"),
             skill_manifest=_skill_manifest_for_graph,
         )
-        llm_prompt_payload = _build_chat_runtime_payload(
+        llm_prompt_payload = _build_chat_prompt_runtime_payload(
             runtime_input=runtime_input,
         )
         if emotion_context:
