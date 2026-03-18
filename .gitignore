@@ -41,6 +41,7 @@ pip-wheel-metadata/
 .coverage.*
 coverage.xml
 htmlcov/
+artifacts/trial_run_reports/*.json
 
 # --- Temp / logs ---
 *.log
