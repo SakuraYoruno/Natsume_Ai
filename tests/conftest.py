@@ -1,6 +1,10 @@
 """全局测试配置：在每个测试后重置 host_brain 全局单例，防止测试间污染。"""
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import inspect
+
 import pytest
 
 
@@ -20,5 +24,31 @@ def _reset_host_brain_singletons():
         dep._skill_registry = None
         dep._policy_cache = None
         dep._ledger = None
+        dep._bond_stage_engine = None
+        dep._retrieval_pipeline = None
+        dep._obs_metrics_collector = None
+        bond_queue = getattr(dep, "_bond_update_queue", None)
+        if bond_queue is not None:
+            with contextlib.suppress(Exception):
+                bond_queue.shutdown()
+        dep._bond_update_queue = None
     except Exception:
         pass
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "asyncio: run test in asyncio event loop")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem: pytest.Function):
+    test_fn = pyfuncitem.obj
+    if not inspect.iscoroutinefunction(test_fn):
+        return None
+
+    fixture_args = {
+        arg_name: pyfuncitem.funcargs[arg_name]
+        for arg_name in pyfuncitem._fixtureinfo.argnames
+    }
+    asyncio.run(test_fn(**fixture_args))
+    return True
