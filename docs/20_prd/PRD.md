@@ -2,9 +2,9 @@
 标题：产品需求文档（PRD）
 
 # Natsume Ai 产品需求文档（PRD）
-版本：v1.4.1（可验收基线）
-基线白皮书：v1.4（意识主权宪法与人格设定）
-适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
+版本：v1.5（可验收基线）
+基线白皮书：v1.5（意识主权宪法与人格设定）
+适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
 
 ---
 
@@ -246,7 +246,7 @@ FR-INTENT-003 重放与顺序保护
 ### 4.4 Governor 裁决与拒绝码（GOV）
 
 FR-GOV-001 Gate 体系可配置且可审计
-- 描述：至少包含 Trust/Energy/SysMode/RateLimit/Scope/Safety/Airlock Gate；规则版本化。
+- 描述：至少包含 Trust/Energy/SysMode/RateLimit/Scope/Safety/Airlock/Emotion Gate（R1~R8）；规则版本化。
 - 验收：每次裁决输出 rule_trace，能定位阈值与快照摘要；同输入可回放得到一致结论。
 
 FR-GOV-002 统一拒绝码强制
@@ -406,9 +406,9 @@ FR-WCANON-003 注入分槽隔离（authoritative.world_canon）
 
 ### 4.13 sys_mode 与路由（MODE）
 
-FR-MODE-001 三模式行为差异
-- 描述：Normal/Gaming/Sleep 影响能力矩阵、输出节奏、资源预算。
-- 验收：Gaming 禁止 clawd_ui_action；Sleep 禁止 CONTROL 类执行；拒绝码 SYSMODE_FORBIDDEN。
+FR-MODE-001 六模式行为差异
+- 描述：normal/focus/gaming/maintenance/locked/sleep 共同决定能力矩阵、输出节奏与资源预算。
+- 验收：gaming 禁止 clawd_ui_action；maintenance/locked 阻断执行类路径；sleep 禁止 CONTROL 类执行；拒绝码 SYSMODE_FORBIDDEN（或子类）稳定可统计。
 
 FR-MODE-002 来源可审计
 - 描述：sys_mode 切换必须有来源证据（观测/用户授权/定时策略）。
@@ -1074,7 +1074,7 @@ M26-J M26 发布清单 **DONE（2026-03-05）**
 
 - 用户故事：作为……我希望……（可选，但建议保留）
 - 输入/输出（黑盒）：输入是什么；输出结构是什么
-- 约束：风险等级、门禁、模式影响（Normal/Gaming/Sleep）、是否可撤销
+- 约束：风险等级、门禁、模式影响（normal/focus/gaming/maintenance/locked/sleep）、是否可撤销
 - 验收标准：至少覆盖 3 类用例
   1) 正向成功
   2) 门禁/拒绝（reason_code 断言）
@@ -1082,4 +1082,3 @@ M26-J M26 发布清单 **DONE（2026-03-05）**
 
 建议每个需求条目落地后，都在 Trace 表中写：
 - FR-xxx ↔ DevSpec 章节 ↔ 测试编号（T-xx） ↔ 日志字段/表
-

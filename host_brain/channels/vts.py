@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.channels.vts_runtime_mapping import load_runtime_emotion_mapping
 from host_brain.core.errors import (
     AVATAR_FREE_ACTION_BLOCKED,
     AVATAR_TAG_INVALID,
@@ -34,12 +33,35 @@ TALK_END = "TALK_END"
 TRIGGER_HOST = "HOST"
 TRIGGER_LLM = "LLM"
 
-EMOTION_TO_EXPRESSION_ID: dict[str, str] = load_runtime_emotion_mapping()
+EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
+    # 原有 6 种
+    "NEUTRAL": "exp_neutral_01",
+    "HAPPY": "exp_happy_01",
+    "SAD": "exp_sad_01",
+    "ANGRY": "exp_angry_01",
+    "SURPRISED": "exp_surprised_01",
+    "THINKING": "exp_thinking_01",
+    # M28-L（OPT-34）：补全 10 种缺失情感的表情映射
+    "EXCITED": "exp_excited_01",
+    "CALM": "exp_calm_01",
+    "FRUSTRATED": "exp_frustrated_01",
+    "ANXIOUS": "exp_anxious_01",
+    "LOVING": "exp_loving_01",
+    "EMBARRASSED": "exp_embarrassed_01",
+    "CONFUSED": "exp_confused_01",
+    "BORED": "exp_bored_01",
+    "PROUD": "exp_proud_01",
+    "GRATEFUL": "exp_grateful_01",
+}
 
+# M28-L（OPT-34）：未知情感 fallback 映射（按情感极性分组）
 EMOTION_FALLBACK_MAP: dict[str, str] = {
-    "POSITIVE": EMOTION_TO_EXPRESSION_ID.get("HAPPY", EMOTION_TO_EXPRESSION_ID["NEUTRAL"]),
-    "NEGATIVE": EMOTION_TO_EXPRESSION_ID.get("SAD", EMOTION_TO_EXPRESSION_ID["NEUTRAL"]),
-    "UNKNOWN": EMOTION_TO_EXPRESSION_ID["NEUTRAL"],
+    # 正向情感 → happy
+    "POSITIVE": "exp_happy_01",
+    # 负向情感 → sad
+    "NEGATIVE": "exp_sad_01",
+    # 中性/未知 → neutral
+    "UNKNOWN": "exp_neutral_01",
 }
 
 DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"
@@ -115,12 +137,14 @@ def resolve_vts_expression(
 ) -> VTSActionResult:
     """Resolve emotion tag to fixed expression mapping and block free actions.
 
-    褰?``edge_available=False`` 鎴栨槧灏勫け璐ヤ絾鏈?neutral 闄嶇骇澶囬€夋椂锛岃繑鍥?    ``status=DEGRADED`` + neutral 琛ㄦ儏锛岃€岄潪鐩存帴 REJECTED锛涘璁″啓鍏ラ檷绾ц鎯呫€?    """
+    当 ``edge_available=False`` 或映射失败但有 neutral 降级备选时，返回
+    ``status=DEGRADED`` + neutral 表情，而非直接 REJECTED；审计写入降级详情。
+    """
 
     req_id = request_id or new_request_id()
     now_value = int(ts_ms if ts_ms is not None else now_ms())
 
-    # 鈹€鈹€ Edge 涓嶅彲杈?鈫?DEGRADED 鈹€鈹€
+    # ── Edge 不可达 → DEGRADED ──
     if not edge_available:
         return _log_result(
             ledger=ledger,
@@ -166,7 +190,7 @@ def resolve_vts_expression(
 
     expression_id = EMOTION_TO_EXPRESSION_ID.get(normalized_tag)
     if not expression_id:
-        # 鈹€鈹€ 鏄犲皠鏈煡 鈫?DEGRADED锛坣eutral 澶囬€夛級 鈹€鈹€
+        # ── 映射未知 → DEGRADED（neutral 备选） ──
         return _log_result(
             ledger=ledger,
             request_id=req_id,
@@ -193,8 +217,9 @@ def resolve_vts_expression(
         ts_ms=now_value,
     )
 
-    # 鈹€鈹€ 鐪熸椹卞姩 Edge VTS锛坒ire-and-forget锛屼笉闃诲璋冪敤鏂癸級鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-    # Edge dispatch is best-effort and must not block audit resolution.
+    # ── 真正驱动 Edge VTS（fire-and-forget，不阻塞调用方）──────────────────
+    # 通过 EdgeRpcClient 发送 HTTP POST /v1/edge/vts，让 Edge 端执行表情切换。
+    # 若无事件循环（同步调用场景）则跳过，不影响审计结果。
     try:
         from host_brain.channels.edge_rpc_client import post_vts as _post_vts  # noqa: PLC0415
 
@@ -207,7 +232,7 @@ def resolve_vts_expression(
                 )
             except Exception as exc:
                 _logger.debug(
-                    "Edge VTS HTTP 璋冪敤澶辫触锛堥檷绾э級: %s (request_id=%s)",
+                    "Edge VTS HTTP 调用失败（降级）: %s (request_id=%s)",
                     exc, req_id,
                 )
 
@@ -216,7 +241,7 @@ def resolve_vts_expression(
             if loop.is_running():
                 asyncio.ensure_future(_fire_edge_vts())
         except RuntimeError:
-            pass  # 鏃犱簨浠跺惊鐜椂璺宠繃
+            pass  # 无事件循环时跳过
     except ImportError:
         pass
 
@@ -267,4 +292,3 @@ def _log_result(
         stage=stage,
         detail=detail,
     )
-

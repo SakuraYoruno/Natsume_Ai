@@ -106,7 +106,7 @@ DevTasks 禁止写：
 2) DevSpec：补齐对应接口/Schema/错误码/日志/测试点（至少 1 个 T-xx）
 3) DevTasks：新增或更新 1+ 条 TASK（引用 FR/T/章节，含输入/输出/验收/涉及路径）
 4) Trace：新增/更新映射条目（FR → DevSpec → TASK → Tests（T-xx））
-5) DocMap：如目录结构或入口变化，更新 `docs/00_DOCMAP.md`
+5) DocMap：如目录结构或入口变化，更新 `docs/00_index/00_DOCMAP.md`
 6) 如涉及 Flow 资产：同步更新 `docs/60_trace/flows/index.md`（并满足 T-Flow-02 的一致性断言口径）
 
 ### 3.2 冲突优先级（不可协商）

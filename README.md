@@ -19,59 +19,215 @@
 
 ---
 
+## 🗺️ 阅读导航
+
+> 🚀 新读者建议顺序：`项目简介` → `系统架构` → `快速开始` → `核心概念` → `Agent 编排` → `质量门禁`
+
+| 模块 | 入口 | 适合谁 |
+|------|------|------|
+| 🌸 项目定位 | `## 📖 项目简介` | 首次了解项目的成员 |
+| 🏗️ 架构全貌 | `## 🏗️ 系统架构` | 关注系统分层与依赖关系 |
+| 🚀 上手运行 | `## 🚀 快速开始` | 需要本地启动 Host/Edge |
+| 📐 设计原则 | `## 📐 核心概念` | 需要理解治理与执行边界 |
+| 🔀 图编排细节 | `## 🔀 Agent 编排（Graph Runtime）` | 需要对齐运行时执行链路 |
+| 🔒 交付标准 | `## 🔒 质量门禁` | 需要对齐 CI 与本地验收口径 |
+
+---
+
 ## 📖 项目简介
 
-**Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统。不同于传统的对话 AI，本项目以"法律在先、人格可控、执行可审计"为核心原则，构建了一套 **Host-Edge 分体架构**：
+**Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统，采用 **Host-Edge 分体架构**。  
+它不是“模型直连执行器”的助手，而是“模型参与表达、Host 负责裁决与执行治理”的工程化系统。
 
-- **Host Brain（主脑）**：运行在服务端，负责终审裁决、状态治理、审计链、检索增强（RAG）、技能编排与关系图谱等核心能力
-- **Edge Client（边缘端）**：运行在本地设备，负责语音链路（ASR/TTS）、VTube Studio 驱动、兜底小模型等感知与执行能力
+### ✨ 当前系统定位
 
-> 🎯 核心理念：**语言模型只负责解释与表达**，最终权力与事实判据必须落在 Host 的代码与审计链上。任何影响现实的动作必须走**单向链**与**票据化执行**。
+- 🧠 **Host Brain（主脑）**：统一入口、意图治理、场景路由、图编排运行时、审计与证据写入都在 Host 收口。  
+- 🎙️ **Edge Client（边缘端）**：提供 ASR/TTS、VTS 驱动、资源门控与兜底能力，负责本地感知与执行。  
+- 🔀 **链路策略**：默认以单链路主图优先；仅在特定执行画像下进入监督式多 Agent 分支。  
+- 🧾 **请求主链**：`/v1/chat → Governor → SceneRouter → 场景处理器/Graph Runtime → COMMIT → Audit`。  
+- 🛡️ **治理原则**：任何影响现实的动作必须票据化、可回放、可审计。  
+
+> 🎯 核心理念：**语言模型只负责解释与表达**，最终权力与事实判据必须落在 Host 代码与审计链上。  
+> 📍 架构总览见 `## 🏗️ 系统架构`，实现对齐见 `## 🧭 当前实现对齐（2026-03-18）`。
 
 ---
 
 ## 🏗️ 系统架构
 
-```
-┌──────────────────────────────────────────────────────┐
-│                   Host Brain (Python)                │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Governor  │  │  Audit   │  │   LangGraph 编排   │  │
-│  │(规则引擎) │  │ (审计链) │  │  (Agent 编排器)    │  │
-│  └────┬─────┘  └────┬─────┘  └─────────┬─────────┘  │
-│       │              │                  │            │
-│  ┌────┴─────┐  ┌────┴──────┐  ┌────────┴────────┐   │
-│  │  Bond    │  │  Memory   │  │   Retrieval     │   │
-│  │(关系图谱)│  │ (记忆系统) │  │  (检索/重排)     │   │
-│  │  Neo4j   │  │ ChromaDB  │  │  Embedding/RAG  │   │
-│  └──────────┘  └───────────┘  └─────────────────┘   │
-│                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Airlock  │  │  Skills  │  │    Vision         │  │
-│  │(气闸隔离)│  │ (技能系统)│  │  (视觉/OCR)      │  │
-│  └──────────┘  └──────────┘  └───────────────────┘  │
-│                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Evidence │  │ Emotion  │  │   Observability   │  │
-│  │  Plane   │  │  System  │  │  (可观测性/指标)   │  │
-│  │(写入治理)│  │ (情感系统)│  │                   │  │
-│  └──────────┘  └──────────┘  └───────────────────┘  │
-└──────────────────────┬───────────────────────────────┘
-                       │ RPC
-┌──────────────────────┴───────────────────────────────┐
-│                  Edge Client (本地)                    │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │   ASR    │  │   TTS    │  │   VTube Studio    │  │
-│  │(语音识别)│  │(语音合成)│  │   (Live2D 驱动)   │  │
-│  └──────────┘  └──────────┘  └───────────────────┘  │
-│  ┌──────────────────┐  ┌─────────────────────────┐   │
-│  │ Fallback LLM     │  │   Resource Gate         │   │
-│  │ (3B 兜底小模型)   │  │   (资源门控)            │   │
-│  └──────────────────┘  └─────────────────────────┘   │
-└──────────────────────────────────────────────────────┘
+### 🧱 完整架构总览图（合并版，2026-03-18）
+
+> 说明：该图为组件分层与依赖关系图，已合并原总览图与当前代码架构图。
+
+```mermaid
+graph TB
+    USER["用户与入口层<br/>网页界面 / 微信通道 / 自动化任务"]
+
+    subgraph HOST["主脑（服务端）"]
+        direction TB
+
+        subgraph HENTRY["接入层"]
+            HAPI["主脑接口网关<br/>聊天接口 / 代理运行 / 边缘事件接收"]
+            PANEL["监控面板与观测接口"]
+        end
+
+        subgraph HGOV["治理与安全层"]
+            GOV["意图决策引擎"]
+            RULE["规则门控与分层治理"]
+            TOKEN["限流与令牌服务"]
+            AIR["气闸隔离与沙箱"]
+        end
+
+        subgraph HORCH["编排执行层"]
+            ROUTE["场景路由器"]
+            PROFILE["执行画像解析器"]
+            GCFG["图配置构建器"]
+            GRUN["图运行时"]
+            GEXEC["图执行器"]
+        end
+
+        subgraph HAGENT["多代理治理层"]
+            SUP["监督分派节点"]
+            DISPATCH["代理分派节点"]
+            AGENTS["子代理处理器<br/>聊天 / 代码 / 翻译 / 意图 / 检索"]
+            JUDGE["裁判代理节点"]
+            RENDER["回复渲染节点"]
+        end
+
+        subgraph HCAP["能力域"]
+            RETR["检索增强子系统"]
+            MEM["记忆子系统"]
+            BOND["关系图谱与关系动力"]
+            SKILL["技能系统与工具桥接"]
+            VISION["视觉与屏幕识别"]
+            EMO["情感系统与上下文"]
+            EVID["证据平面与写入治理"]
+            CHAN["通道适配（含边缘调用）"]
+        end
+
+        subgraph HINFRA["基础设施层"]
+            AUDIT["审计账本"]
+            OBS["可观测性与指标"]
+            SCHED["任务调度器"]
+            RELEASE["发布清单与模型平面"]
+        end
+    end
+
+    subgraph EDGE["边缘客户端（本地）"]
+        direction TB
+        EAPI["边缘接口网关"]
+        ERUN["边缘运行时装配"]
+        ESENSE["感知层<br/>语音识别 / 语音活动检测"]
+        EACT["执行层<br/>语音合成 / 虚拟形象驱动"]
+        EFALL["兜底小模型"]
+        EGATE["资源门控"]
+        EREPORT["事件上报"]
+    end
+
+    USER --> HAPI
+    PANEL --> HAPI
+    HAPI --> GOV
+    HAPI --> AIR
+    HAPI --> ROUTE
+    GOV --> RULE
+    GOV --> TOKEN
+    GOV --> ROUTE
+    ROUTE --> PROFILE --> GCFG --> GRUN --> GEXEC
+    GEXEC --> SUP --> DISPATCH --> AGENTS --> JUDGE --> RENDER
+    GEXEC --> RETR
+    GEXEC --> MEM
+    GEXEC --> BOND
+    GEXEC --> SKILL
+    GEXEC --> VISION
+    GEXEC --> EMO
+    GEXEC --> EVID
+    GEXEC --> CHAN
+    HAPI --> AUDIT
+    GEXEC --> AUDIT
+    AUDIT --> OBS
+    SCHED --> SKILL
+    RELEASE --> GCFG
+    CHAN --> EAPI
+    EAPI --> ERUN
+    ERUN --> ESENSE
+    ERUN --> EACT
+    ERUN --> EFALL
+    ERUN --> EGATE
+    ERUN --> EREPORT
+    EREPORT --> HAPI
 ```
 
----
+> 数据流图请见：`docs/50_project/dataflow_report_20260311.md`
+
+## 🧭 当前实现对齐（2026-03-18）
+
+> 本节补充“当前代码已实现事实”，用于快速理解入口、治理、路由、多 Agent 与图编排的真实落点。
+
+### 🚪 统一入口与意图治理（发生时机）
+
+1. `POST /v1/chat` 进入 `host_brain/app/fastapi_app.py` → `handle_chat()`。  
+2. 若请求未携带 `intent_draft`，Host 会在入口层根据 `pre_intent_classifier` 结果生成草案并映射 `action`。  
+3. 统一流式入口 `_unified_chat_sse_generator()` 调用 `IntentDecisionEngine.evaluate_intent()` 做 Governor 裁决。  
+4. 若 `decision=REJECT` 直接返回 `COMMIT(REJECT)`；仅在 `APPROVE` 后进入场景路由。  
+
+对应代码：
+- `host_brain/app/chat_handler.py`
+- `host_brain/app/graph_config_builder.py`（`pre_intent_classifier`）
+- `host_brain/governor/decision.py`
+
+### 🔀 场景识别与动态路由（发生顺序）
+
+场景识别优先级：
+- 客户端显式 `scene_type`（必须在白名单 `ALLOWED_EXPLICIT_SCENE_TYPES` 内）
+- 否则复用入口预分类结果 `_pre_classified_scene`
+- 否则再执行一次 `pre_intent_classifier(message)`
+
+动态路由入口：
+- `SceneRouter.route_sse()` 统一分发
+  - `SCENE_CHAT` → `chat_stream_handler`
+  - `SCENE_VISION_UI` → `chat_handler_vision`
+  - 其他复杂场景 → `chat_handler_complex`
+
+对应代码：
+- `host_brain/app/chat_handler.py`
+- `host_brain/app/graph/main_chain.py`
+
+### 🔗 服务请求链路（当前主链）
+
+- **聊天链路**：`/v1/chat` → `handle_chat` → `Governor` → `SceneRouter` → 对应场景处理器 → `COMMIT`
+- **边缘事件回流**：`edge_client/rpc/event_reporter.py` → `POST /v1/edge/events` → `receive_edge_events_response`
+- **自动化链路**：`POST /v1/agent/run` → `agent_routes` → `Agent Loop SSE`
+
+对应代码：
+- `host_brain/app/fastapi_app.py`
+- `host_brain/app/agent_routes.py`
+- `edge_client/rpc/event_reporter.py`
+
+### 🤖 多 Agent 治理（当前定位）
+
+当前实现是“主链路优先，按执行画像进入多 Agent 分支”：
+- `resolve_execution_profile()` 解析执行画像：`CHAT_FAST / WORKFLOW_SUPERVISED / INTENT_EXEC`
+- `WORKFLOW_SUPERVISED` 下使用监督图：`supervisor_dispatch → agent_dispatch_node → judge_agent_node → chat_render_node`
+- `GraphExecutor` 在 `agent_dispatch_node` 按 `active_agent_id` 动态分派，并执行 allowlist 校验
+- 子 Agent 只产出 `AgentArtifact`，不允许直接控图（执行器会剥离控图字段）
+
+对应代码：
+- `host_brain/app/execution_profile.py`
+- `host_brain/app/graph_config_builder.py`
+- `host_brain/app/handlers/supervisor_dispatch_handler.py`
+- `host_brain/integrations/graph_executor.py`
+- `host_brain/app/agents/agent_contract.py`
+
+### 🕸️ 图编排（Graph Runtime）在代码中的落点
+
+- 图构建：`build_chat_graph()` / `build_supervised_graph()` / `build_intent_graph()`
+- 图运行时：`GraphRuntimeContract.run_graph()`
+- 图执行器：`GraphExecutor`（步进执行、动态分派、降级与 trace）
+
+对应代码：
+- `host_brain/app/chat_handler_complex.py`
+- `host_brain/app/graph_config_builder.py`
+- `host_brain/integrations/graph_runtime.py`
+- `host_brain/integrations/graph_executor.py`
 
 ## 📁 项目结构
 
@@ -79,16 +235,19 @@
 Natsume_Ai/
 ├── host_brain/              # 🧠 Host 主脑（核心服务）
 │   ├── app/                 #    应用入口（FastAPI + 监控面板 API + 配置 + 健康检查）
+│   │   ├── agents/          #    多 Agent 契约与注册（agent_contract / registry / react_loop）
+│   │   ├── automation/      #    Host 侧任务调度路由（host scheduler API）
 │   │   ├── monitor_ui/      #    监控面板前端源码（React + Vite SPA）
 │   │   ├── static/monitor/  #    监控面板构建产物（FastAPI 静态托管）
 │   │   ├── schemas/         #    核心数据结构与枚举（ProposalType / TaskType / ContextPack 等）
 │   │   ├── graph/           #    主聊天链路时序编排器（MainChain 9节点 + SceneRouter）
+│   │   ├── handlers/        #    多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
 │   │   ├── memory/          #    状态源仲裁器（StateArbiter）+ 记忆写入宪法守卫（MemoryGuard）
 │   │   ├── recall/          #    ContextPack 组装器（token 预算截断 + 冲突检测）
 │   │   ├── llm/             #    模型路由矩阵（能力路由 + cloud→host_8b→edge_3b 降级链）
 │   │   ├── skills/          #    Skill/MCP 权限模型（PermissionGuard + HotLoader）
 │   │   ├── vision/          #    UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
-│   │   └── failure_matrix.py #   统一失败语义矩阵（7个标准化失败事件）
+│   │   └── failure_matrix.py #   统一失败语义矩阵（主线失败事件 + 注入防护扩展）
 │   ├── airlock/             #    气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱，错误信息标准化英文）
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 异步写入队列 + 迁移）
@@ -97,19 +256,26 @@ Natsume_Ai/
 │   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
 │   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
 │   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关 / Evidence Plane）
+│   ├── data/                #    Host 本地数据目录
 │   ├── lsp/                 #    Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
+│   ├── mcp/                 #    MCP 注册与桥接
 │   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
+│   ├── obs/                 #    观测数据适配层
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
 │   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
 │   ├── scheduler/           #    调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
+│   ├── scene/               #    场景层模块
 │   ├── skills/              #    技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
 │   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
 │   ├── app/emotion_context.py #  情感上下文模块（归一化 / 快照 / 治理快照 / VAD 映射）
 │   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 │
 ├── edge_client/             # 🎙️ Edge 边缘客户端
+│   ├── app/                 #    Edge FastAPI RPC 网关入口（/v1/edge/*）
 │   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连，VTS 驱动提前到音频播放前执行）
+│   ├── channels/            #    Edge 渠道接入（本地消息监听/回调）
+│   ├── runtime/             #    运行时装配与启动流程
 │   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD，startup() 自动开始监听）
 │   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控 / 事件上报）
 │   ├── proofs/              #    资源证明与门控
@@ -119,9 +285,11 @@ Natsume_Ai/
 ├── configs/                 # ⚙️ 配置中心
 │   ├── deploy/              #    部署配置（节点清单）
 │   ├── model_plane/         #    模型平面（节点注册 / 模型档案）
-│   ├── models/              #    模型路由配置（Embedding / Recall / Reranker）
-│   ├── runtime/             #    运行时环境配置
-│   └── secrets/             #    密钥配置模板
+│   ├── models/              #    模型路由配置（历史/预留）
+│   ├── runtime/             #    运行时环境配置（历史/预留）
+│   ├── release/             #    发布配置
+│   ├── secrets/             #    密钥配置模板
+│   └── vts/                 #    VTS 相关配置
 │
 ├── prompts/                 # 💬 提示词资产
 │   ├── CODEX_PROMPT.md      #    实现层入口提示词
@@ -138,8 +306,12 @@ Natsume_Ai/
 │   ├── 15_theory/           #    理论文档（架构哲学与方法论）
 │   ├── 20_prd/              #    需求文档（PRD）
 │   ├── 30_devspec/          #    开发规范（DevSpec + DevTasks + ModelPlane）
+│   ├── 35_quality/          #    质量报告与代码审查
 │   ├── 40_agents/           #    代理行为规范（AGENTS）
+│   ├── 45_testing/          #    测试报告（历史阶段）
 │   ├── 50_project/          #    项目管理（工作表 / 发布目录）
+│   ├── 50_release/          #    发布计划/报告/回滚文档
+│   ├── 55_testing/          #    指标与稳定性周报
 │   └── 60_trace/            #    可追溯性矩阵（需求 → 设计 → 测试）
 │
 ├── scripts/                 # 🛠️ 运维脚本
@@ -147,6 +319,8 @@ Natsume_Ai/
 │       └── sync_persona_utterance_vector_index.py  # Persona 语料向量索引同步脚本
 │
 ├── tests/                   # 🧪 测试
+│   ├── unit/                #    单元测试
+│   ├── integration/         #    集成测试
 │   ├── contract/            #    契约测试（Airlock / Audit / Avatar…）
 │   ├── e2e/                 #    端到端测试
 │   └── fixtures/            #    测试夹具
@@ -178,7 +352,7 @@ Natsume_Ai/
 | 类别 | 技术 | 说明 |
 |------|------|------|
 | **语言** | Python 3.11+ | 主开发语言 |
-| **AI 编排** | LangChain / LangGraph | Agent 编排与工作流引擎（五场景路由 + 治理运行时契约）|
+| **AI 编排** | LangGraph | Agent 编排与工作流引擎（多场景路由 + 治理运行时契约）|
 | **LLM 网关** | OpenAI / DeepSeek / Gemini | 多模型支持 + 降级策略 |
 | **关系图谱** | Neo4j 6.x | Bond 关系动力学（SSOT） |
 | **向量存储** | ChromaDB 1.4+ | 情景记忆 / Canon 存储 |
@@ -187,9 +361,9 @@ Natsume_Ai/
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
 | **HTTP 框架** | FastAPI | Host 服务入口 + 监控面板 API + REST API |
 | **前端框架** | React 18 + Vite | 监控面板 SPA（Overview / Sessions / Trace / Metrics / Insights）|
-| **链路可视化** | React Flow | 全链路拓扑图（32 节点 DAG，含 ASR/七路召回/Agent/LLM/TTS/VTS）+ 动态高亮激活链路 |
+| **链路可视化** | React Flow | 监控面板链路拓扑可视化（含 Host/Edge 关键节点与动态高亮） |
 | **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级，错误信息标准化英文） |
-| **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 21 张审计表 + scheduler_tasks 持久化）|
+| **审计存储** | SQLite (WAL) | 本地审计链（Triptych 三联画 + 多审计表 + scheduler_tasks 持久化）|
 | **调度器** | APScheduler + SQLite | CRON 任务持久化，进程重启自动恢复 |
 | **混合检索** | ChromaDB + SQLite FTS5 | 向量检索（0.7）+ 全文检索（0.3），FTS5 不可用时自动降级 |
 | **技能治理** | SkillRegistry + MCP Bridge | 装饰器注册 / 权限分级（LOW/MEDIUM/HIGH）/ MCP 工具统一纳管 |
@@ -199,21 +373,21 @@ Natsume_Ai/
 
 ## 🚀 快速开始
 
-### 前置要求
+### ✅ 前置要求
 
 - **Python** ≥ 3.11
 - **Neo4j** ≥ 6.1（本地或远程）
 - **ChromaDB** ≥ 1.4（本地服务）
 - **GPU**（推荐）：Edge 端 TTS/ASR 依赖 GPU 加速
 
-### 1. 克隆仓库
+### 📥 1. 克隆仓库
 
 ```bash
 git clone <repo-url> Natsume_Ai
 cd Natsume_Ai
 ```
 
-### 2. 安装依赖
+### 📦 2. 安装依赖
 
 ```bash
 # 运行时依赖
@@ -227,7 +401,7 @@ pip install -e host_brain[dev]
 pip install -e edge_client[dev]
 ```
 
-### 3. 配置环境变量
+### ⚙️ 3. 配置环境变量
 
 ```bash
 # 复制模板并填入实际值
@@ -251,7 +425,7 @@ cp .env.example .env
 >
 > 完整变量清单请参考 [.env.example](.env.example)。
 
-### 4. 启动本地服务
+### 🐳 4. 启动本地服务
 
 ```powershell
 # Windows PowerShell - 一键启动 Docker 外置服务（Neo4j + ChromaDB + Redis）
@@ -261,19 +435,19 @@ cp .env.example .env
 .\scripts\runtime\stop_docker_services.ps1
 ```
 
-### 5. 环境就绪检查
+### 🧪 5. 环境就绪检查
 
 ```bash
 python scripts/runtime/check_external_env.py
 ```
 
-### 6. 运行测试
+### ✅ 6. 运行测试
 
 ```bash
 pytest tests/
 ```
 
-### 7. 启动 Host 端（含依赖服务）
+### 🧠 7. 启动 Host 端（含依赖服务）
 
 ```powershell
 # 拉起 Neo4j + Chroma + Host API
@@ -282,7 +456,14 @@ pytest tests/
 
 默认会自动探测 Neo4j Desktop 目录（`~/.Neo4jDesktop2/Data/dbmss/*`）；也可用 `-Neo4jHome` 手工指定。
 
-### 8. 启动 Edge 网关（调试/本地运行）
+#### 🖥️ Host 前台直启（可选）
+
+```bash
+# 直接以前台方式启动 Host（便于调试）
+python -m host_brain --host 127.0.0.1 --port 18080 --startup-check
+```
+
+### 🎙️ 8. 启动 Edge 网关（调试/本地运行）
 
 ```powershell
 # 前台启动（调试）
@@ -298,7 +479,7 @@ python -m edge_client
 .\scripts\runtime\stop_edge.ps1
 ```
 
-#### Edge 最小可运行门槛
+#### 📌 Edge 最小可运行门槛
 
 - 必需配置：
   - `Natsume_ENV` 必须为 `dev/test/prod` 之一
@@ -311,7 +492,7 @@ python -m edge_client
   - `GET /v1/edge/health` 返回 `success=true`，且 capability matrix 与开关一致
   - `python -m edge_client` 可稳定启动/关闭，不遗留僵尸进程或失效 pid 文件
 
-#### Edge 故障回退模式
+#### 🛡️ Edge 故障回退模式
 
 | 回退模式 | 配置开关 | 预期行为 |
 |------|------|------|
@@ -319,18 +500,38 @@ python -m edge_client
 | 禁用 speak | `EDGE_TTS_ENABLED=false`<br>`EDGE_BARGE_IN_ENABLED=false` | `/v1/edge/speak` 与 `/v1/edge/barge_in` 拒绝；health 与其他能力保持可用 |
 | 禁用 ASR 上行 | `EDGE_ASR_ENABLED=false` | 停止 ASR 采集与上送；TTS/health 可继续运行 |
 
+### 🚀 9. 一键拉起 Host + Edge（可选）
+
+```powershell
+# 本地模式（Host + Edge）统一启动
+.\scripts\runtime\start_distributed_services.ps1 -EdgeMode local
+
+# 统一停止（可选同时停 Docker 外置依赖）
+.\scripts\runtime\stop_distributed_services.ps1 -StopLocalServices
+```
+
+### 🔍 10. 本地烟雾检查（推荐）
+
+```bash
+# 外置依赖就绪检查（Neo4j/Chroma/Redis 等）
+python scripts/runtime/check_external_env.py
+
+# Host 基础端点检查（health/ready/metrics/canon_sync）
+python scripts/runtime/test_basic_endpoints.py
+```
+
 ---
 
 ## 📐 核心概念
 
-### 意识主权（Consciousness Sovereignty）
+### 👑 意识主权（Consciousness Sovereignty）
 
 系统对三类终审权的掌控：
 - **状态真相**：内部状态是什么、从何而来
 - **动作合法性**：某动作在当前状态下是否允许
 - **叙事约束**：系统如何在一致人格与风格下解释动作/拒绝
 
-### 单向链执行
+### ➡️ 单向链执行
 
 ```
 输入 → 语义内核(叙事+Intent草案) → Host(Governor裁决) → Skills(执行) → Audit(回放)
@@ -338,37 +539,43 @@ python -m edge_client
 
 所有执行必须走此链路，语言模型不可直接触发动作。
 
-### 票据化执行（Tokenized Execution）
+### 🎟️ 票据化执行（Tokenized Execution）
 
 - **approval_token**：Host 对 Intent 的可执行许可
 - **confirm_token**：高风险/不可逆操作的二次确认
 - **undo_token**：可逆动作的回滚票据
 
-### Governor 治理引擎
+### ⚖️ Governor 治理引擎
 
-7 大门禁规则（按顺序执行）：
+当前代码中的门禁规则（按顺序执行）：
 
 | 门禁 | 说明 |
 |------|------|
-| **Trust Gate** | 信任等级校验 |
-| **Energy Gate** | 能量/资源门控 |
-| **SysMode Gate** | 系统模式门控（Normal / Gaming / Sleep）|
-| **Rate Limit** | 频率限制（可插拔存储：InMemory / SQLite / Redis）|
-| **Scope Policy** | 作用域策略 |
-| **Safety Gate** | 安全门控 |
-| **External Data Gate** | 外部数据访问门控 |
+| **R1_TRUST** | 信任等级门控（阈值不足拒绝） |
+| **R2_ENERGY** | 能量/资源门控 |
+| **R3_SYSMODE** | 系统模式门控（`locked/maintenance` 拒绝） |
+| **R4_RATE_LIMIT** | 频率限制（`memory/sqlite/redis` 后端可插拔） |
+| **R5_SCOPE** | 作用域 allowlist 门控 |
+| **R6_SAFETY** | 安全标记门控 |
+| **R7_AIRLOCK** | 气闸阻断门控 |
+| **R8_EMOTION** | 情感门控（critical + angry/frustrated 组合拒绝） |
 
-### sys_mode 系统模式
+> 实际规则实现以 `host_brain/governor/rules.py` 与 `host_brain/governor/decision.py` 为准。
+
+### 🧭 sys_mode 系统模式
 
 | 模式 | 说明 |
 |------|------|
-| **Normal** | 完整链路，门禁允许范围内全能力 |
-| **Gaming** | 不打扰优先，禁用视觉/UI 自动化 |
-| **Sleep** | 低干预，禁止执行类技能，仅记录与延后 |
+| **normal** | 默认完整模式 |
+| **focus** | 专注模式（调度与技能能力受限） |
+| **gaming** | 低干预优先（部分视觉/交互能力受限） |
+| **maintenance** | 维护模式（Governor R3 阻断） |
+| **locked** | 锁定模式（Governor R3 阻断） |
+| **sleep** | 调度侧可用于低频任务门控（由任务策略决定） |
 
-### 编排四层架构（Graph Runtime）
+### 🧩 编排四层架构（Graph Runtime）
 
-graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可测试：
+Graph Runtime 由四个核心层与多个扩展模块组成：
 
 | 层 | 文件 | 职责 |
 |---|------|------|
@@ -377,7 +584,14 @@ graph_runtime 拆分为四个独立层（每层 ≤ 300 行），职责清晰可
 | **降级层** | `graph_fallback.py` | 超时/依赖不可用统一降级处理 |
 | **路由层** | `graph_model_resolve.py` | Model Plane 配置解析与节点路由 |
 
-### Evidence Plane（证据平面）
+扩展模块：
+- 并行分支：`graph_branch.py`
+- 流式守卫：`graph_streaming.py`
+- 断点恢复：`graph_checkpoint.py`
+- 双时钟：`graph_clock.py`
+- 证据写入：`graph_evidence.py`
+
+### 🧾 Evidence Plane（证据平面）
 
 Evidence Plane 是 LangGraph 运行时的写入治理层，负责将图执行过程中的关键事件持久化到 SQLite，并提供分级写入保障：
 
@@ -395,22 +609,28 @@ Evidence Plane 是 LangGraph 运行时的写入治理层，负责将图执行过
 
 架构优化层是对现有系统「概念层成熟度高于实现层收敛度」问题的系统性补齐，位于 `host_brain/app/` 下，提供**宪法级约束**与**确定性执行保障**。
 
-### 主聊天链路时序编排器（MainChain）
+### 🛣️ 主聊天链路时序编排器（MainChain）
 
-`host_brain/app/graph/main_chain.py` 定义了 80% 请求走的固定主链路，节点数量不超过 12 个：
+`host_brain/app/graph/main_chain.py` 当前定位为**主链路适配层 + SceneRouter 路由核心**：
+
+- 适配层入口：`MainChain.run_as_sse_adapter()`
+- 实际统一路由入口：`host_brain/app/chat_handler.py::_unified_chat_sse_generator`
+- Governor 放行后由 `SceneRouter.route_sse()` 分流到 chat/vision/complex 分支
+
+主链节点定义仍保留在 `main_chain.py`（用于时序编排与审计语义）：
 
 ```
 AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 → LlmGateway → QAContract → EpisodicStore → Audit → AirlockSanitizer
 ```
 
-> 完整双端全链路拓扑（32 节点）可在监控面板 **Trace** 页实时查看，支持静态全图展示与请求链路动态高亮。
+> 完整链路拓扑以监控面板 **Trace** 页与 `obs_routes` 输出为准。
 
 - 每个节点有标准 TypedDict 输入/输出、最大超时常量和降级策略
 - 任意节点失败统一走 `FailureHandler`，不各自处理
 - `SceneRouter` 在 Governor 放行后根据 `task_type` 分流到专用子链
 
-### 全局状态源优先级仲裁器（StateArbiter）
+### 🧮 全局状态源优先级仲裁器（StateArbiter）
 
 `host_brain/app/memory/state_arbiter.py` 解决多状态源事实冲突问题：
 
@@ -426,7 +646,7 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 - 状态源不可达时自动降级并写入 `STATE_SOURCE_FALLBACK` 审计事件
 - `SESSION_OVERRIDE` 场景下新信息不直接写入 Canon，等待蒸馏周期处理
 
-### 记忆写入宪法守卫（MemoryGuard）
+### 🛡️ 记忆写入宪法守卫（MemoryGuard）
 
 `host_brain/app/memory/memory_guard.py` 强制执行 7 条记忆写入硬性规则：
 
@@ -440,9 +660,9 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 | **Dream 拦截** | dream 内容 `evidence_level` 强制设为 `NARRATIVE_ONLY` |
 | **情绪聚合** | 情绪标签以 session 粒度聚合，不以单轮覆盖 |
 
-### ContextPack 组装器（ContextPackBuilder）
+### 📦 RecallPack 组装器（RecallPackBuilder）
 
-`host_brain/app/recall/context_pack_builder.py` 按 token 预算组装七路召回证据：
+`host_brain/app/recall/recall_pack_builder.py` 按 token 预算组装七路召回证据（供后续上下文构建消费）：
 
 | 证据路 | Token 上限 |
 |--------|-----------|
@@ -455,7 +675,7 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 
 超出总量时按优先级从低到高丢弃；`world_canon` 与 `episodic` 语义冲突时将 episodic 标记为 `[CONFLICT_SUPPRESSED]`。
 
-### 模型路由矩阵（RoutingMatrix）
+### 🚦 模型路由矩阵（RoutingMatrix）
 
 `host_brain/app/llm/routing_matrix.py` 实现能力路由而非仅故障切换：
 
@@ -467,7 +687,7 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 | `HIGH` risk_level | 禁止路由到 `edge_3b` |
 | 主路由失败 | `cloud → host_8b → edge_3b` 降级链 |
 
-### 统一失败语义矩阵（FailureHandler）
+### 🚨 统一失败语义矩阵（FailureHandler）
 
 `host_brain/app/failure_matrix.py` 替代各模块分散的 try/except：
 
@@ -481,16 +701,16 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 | `VISION_LOW_CONFIDENCE` | 请求用户确认或回退文本指导 | ✅ |
 | `MODULE_TIMEOUT` | 超时提示，触发降级 | ✅ |
 
-### Skill/MCP 权限模型（PermissionGuard + HotLoader）
+### 🔐 Skill/MCP 权限模型（PermissionGuard + HotLoader）
 
-`host_brain/app/skills/tool_meta.py` 强化工具权限治理：
+`host_brain/skills/registry.py` + `host_brain/skills/hot_loader.py` 强化工具权限治理：
 
 - **ToolMeta 必填字段**：`access_level` / `risk_level` / `reversible` / `requires_human_approval` / `scheduler_allowed`
 - **SCHEDULER 严格限制**：`max_tool_calls ≤ 3` / 禁止 `HIGH` risk / 禁止 `ClawdUIAction`
 - **HotLoader**：热加载前验证元数据完整性，缺少必填字段拒绝加载
 - **人工确认流程**：`requires_human_approval=true` 工具执行前等待用户明确批准
 
-### Vision/UI 自动化断言协议（UIAssertionGuard）
+### 👁️ Vision/UI 自动化断言协议（UIAssertionGuard）
 
 `host_brain/app/vision/ui_assertion.py` 验证「交互语义正确性」：
 
@@ -515,9 +735,11 @@ ClawdUIAction 准备执行
 
 
 
+### 🗜️ 上下文压缩系统（ContextCompressor）
+
 上下文压缩系统（`host_brain/memory/context_compressor.py`）负责在多轮对话中管理 Token 预算，确保送入 LLM 的上下文始终在可控范围内，同时不丢失关键记忆。
 
-### 三种压缩策略
+### 🧷 三种压缩策略
 
 | 策略 | 说明 | 适用场景 |
 |------|------|----------|
@@ -525,7 +747,7 @@ ClawdUIAction 准备执行
 | **summary** | 调用 LLM 将历史轮次生成摘要；LLM 不可用时自动降级为 sliding_window | 长对话 / 摘要质量优先 |
 | **hybrid**（默认） | 保留最近 N 轮（默认 6 轮）+ 对更早历史生成摘要；超出预算时进一步截断 recent | 兼顾近期细节与历史摘要 |
 
-### 压缩数据流
+### 🔄 压缩数据流
 
 ```
 多轮对话 turns
@@ -552,7 +774,7 @@ ClawdUIAction 准备执行
            └─ EvidencePack（pack_id / hash / candidates / total_tokens）
 ```
 
-### 压缩前静默保存（COMPRESS_BEFORE_SAVE）
+### 💾 压缩前静默保存（COMPRESS_BEFORE_SAVE）
 
 在 `summary` / `hybrid` 策略执行**前**，系统会将当前对话中的 `user` 和 `assistant` 轮次静默写入 Episodic 记忆库（双声道记忆），确保即将被压缩的内容不会永久丢失：
 
@@ -560,7 +782,7 @@ ClawdUIAction 准备执行
 - 写入失败静默降级，不影响压缩主流程
 - 写入事件记录到 SQLite 审计链（`COMPRESS_BEFORE_SAVE` 事件类型）
 
-### 降级策略
+### ⬇️ 降级策略
 
 | 场景 | 降级行为 | reason_code |
 |------|----------|-------------|
@@ -574,7 +796,45 @@ ClawdUIAction 准备执行
 
 Agent 编排系统基于 LangGraph 构建，采用**治理运行时契约（Governed Runtime Contract）**，确保图执行过程中的每一步都受 Host 主权约束。
 
-### 编排文件结构
+### 🧵 当前代码调用链（/v1/chat）
+
+> 以当前实现为准：先 Governor，再 SceneRouter，再按场景决定是否进入 Graph Runtime。
+
+```text
+POST /v1/chat
+  -> handle_chat
+  -> _unified_chat_sse_generator
+  -> IntentDecisionEngine.evaluate_intent
+  -> SceneRouter.route_sse
+      -> SCENE_CHAT      : chat_stream_handler
+      -> SCENE_VISION_UI : chat_handler_vision
+      -> 复杂场景         : chat_handler_complex
+          -> resolve_execution_profile
+          -> build_chat/supervised/intent_graph
+          -> GraphRuntimeContract.run_graph
+```
+
+对应代码：
+- `host_brain/app/chat_handler.py`
+- `host_brain/app/graph/main_chain.py`
+- `host_brain/app/chat_handler_complex.py`
+- `host_brain/app/execution_profile.py`
+
+### ⚖️ 多 Agent 与单链路的关系（当前实现）
+
+- 默认聊天与视觉场景以单链路为主（`CHAT_FAST`），优先保证低延迟与稳定输出。
+- `WORKFLOW_SUPERVISED` 执行画像下进入监督图：`supervisor_dispatch -> agent_dispatch_node -> judge_agent_node -> chat_render_node`。
+- `agent_dispatch_node` 由 `GraphExecutor` 依据 `active_agent_id` 动态分派，且会执行 allowlist 校验与降级。
+- 子 Agent 只允许产出工件（`AgentArtifact`），不允许直接控图；最终由 Judge 汇总收口。
+
+对应代码：
+- `host_brain/app/graph_config_builder.py`
+- `host_brain/integrations/graph_executor.py`
+- `host_brain/app/handlers/supervisor_dispatch_handler.py`
+- `host_brain/app/handlers/judge_agent_handler.py`
+- `host_brain/app/agents/agent_contract.py`
+
+### 🗂️ 编排文件结构
 
 | 文件 | 职责 |
 |------|------|
@@ -586,10 +846,10 @@ Agent 编排系统基于 LangGraph 构建，采用**治理运行时契约（Gove
 | `graph_branch.py` | 只读并行分支执行器（ThreadPoolExecutor + branch_manifest）|
 | `graph_streaming.py` | Phase-Locked Streaming（Presence / Commit / Render 三类流）|
 | `graph_checkpoint.py` | Checkpoint / Interrupt / Resume（双时钟模型下断点续跑）|
-| `graph_evidence.py` | Evidence Plane SQLite 写入（21 张审计表 + 分区索引）|
+| `graph_evidence.py` | Evidence Plane SQLite 写入（trace/stream/checkpoint/barrier 等运行时审计表）|
 | `graph_clock.py` | DualClockSupervisor（Policy Clock / Execution Clock 双时钟）|
 
-### 治理运行时契约（Governed Runtime Contract）
+### 📜 治理运行时契约（Governed Runtime Contract）
 
 图执行必须遵守以下五项契约规则：
 
@@ -601,7 +861,7 @@ Agent 编排系统基于 LangGraph 构建，采用**治理运行时契约（Gove
 | **Dual-Clock Rule** | 状态恢复与超时降级分别由 Execution Clock / Policy Clock 管理，超时时写入 `TIMEOUT_SYNTHETIC` 事件而非直接恢复 |
 | **Phase-Locked Streaming Rule** | Presence / Commit / Render 三类流严格隔离，Render 只能消费 committed snapshot，Presence 不能作为下游节点输入 |
 
-### 图执行流程
+### ▶️ 图执行流程
 
 ```
 run_graph(request_id, intent, config)
@@ -641,7 +901,7 @@ run_graph(request_id, intent, config)
     ▼ GraphRunResult（status / trace / reason_code / evidence_pack）
 ```
 
-### 并行分支执行（Parallel Branches）
+### 🧬 并行分支执行（Parallel Branches）
 
 ```
 prepare_parallel_branches()
@@ -670,7 +930,7 @@ prepare_parallel_branches()
 
 **暂不开放**：带副作用的并行分支（写入外部状态 / 触发 Skill）
 
-### Phase-Locked Streaming（分相流式）
+### 🌊 Phase-Locked Streaming（分相流式）
 
 三类流严格隔离，防止未提交状态泄漏到渲染层：
 
@@ -691,7 +951,7 @@ Render Stream（渲染流）
     └─ 违规 → PhaseViolationError / RENDER_GUARD_STATUS_FAILED
 ```
 
-### Checkpoint / Interrupt / Resume
+### ⏯️ Checkpoint / Interrupt / Resume
 
 双时钟模型下的断点续跑机制：
 
@@ -704,7 +964,7 @@ Render Stream（渲染流）
 | **Interrupt** | 主动中断图执行，写入 `interrupt_reason` 到 GraphState |
 | **Resume** | 从 checkpoint 恢复执行，必须通过 HostPolicyGuard 前置检查 |
 
-### 检索链（Retrieval）
+### 🔎 检索链（Retrieval）
 
 检索链负责从多路数据源召回相关记忆与知识，并通过重排序提升精度：
 
@@ -735,7 +995,7 @@ Render Stream（渲染流）
         path: success / partial_failure / all_failure
 ```
 
-### 技能系统（Skills）
+### 🧰 技能系统（Skills）
 
 技能系统采用三层架构，将 Host 的执行能力模块化，统一纳入权限治理：
 
@@ -756,7 +1016,7 @@ MCPToolRegistry（MCP 工具元数据）
 | **IDE 技能包** | `ide_registry.py`：`open_cursor`（LOW/2）/ `run_pycharm_action`（MEDIUM/3）/ `codex_task`（MEDIUM/3）|
 | **ClawdBot UI** | 监控面板技能实现（系统状态查询 / 日志检索）|
 
-### 可观测性（Observability）
+### 📈 可观测性（Observability）
 
 可观测性系统提供跨端时间线聚合与时钟漂移检测能力，支持 Host 与 Edge 的联合监控。
 
@@ -767,7 +1027,7 @@ MCPToolRegistry（MCP 工具元数据）
 | **阈值告警** | 指标超阈值时自动触发告警事件 |
 | **长期 KPI 仪表盘** | `LONGTERM_METRIC_DASHBOARD`，支持跨周期趋势分析 |
 
-### 发布治理
+### 🚀 发布治理
 
 发布清单管理（`host_brain/release/`）提供 model_plane digest 门禁，确保每次发布的模型配置可追溯。
 
@@ -789,7 +1049,7 @@ MCPToolRegistry（MCP 工具元数据）
 
 Natsume Ai 的"灵魂"由多个相互协作的子系统共同构成，形成一个有记忆、有情感、有人格约束的完整意识体。
 
-### 人格宪法（Canon）
+### 📜 人格宪法（Canon）
 
 Canon 是 Natsume 人格的不可变法律层，分为两类：
 
@@ -800,7 +1060,7 @@ Canon 是 Natsume 人格的不可变法律层，分为两类：
 
 所有 LLM 生成内容必须经过 Canon 约束校验，违反 Canon 的输出将被拦截并触发 `CANON_VIOLATION` 错误码。
 
-### 记忆系统（Memory）
+### 🧠 记忆系统（Memory）
 
 Natsume 拥有三层记忆结构：
 
@@ -819,7 +1079,7 @@ Natsume 拥有三层记忆结构：
 - **衰减策略**：三档衰减配置（FAST / SLOW / PERMANENT），控制记忆的遗忘速率
 - **情感加权召回**：情感上下文匹配时给予 1.3x 权重提升
 
-### Bond 系统（Bond）
+### 🔗 Bond 系统（Bond）
 
 Bond 系统以 Neo4j 图数据库为 SSOT，记录 Natsume 与用户之间的关系动力学：
 
@@ -832,11 +1092,11 @@ Bond 系统以 Neo4j 图数据库为 SSOT，记录 Natsume 与用户之间的关
 | **BondSummary** | 关系摘要语义校验（防止 LLM 篡改关系事实）|
 | **BondUpdateQueue** | 异步写入队列（容量 1024，守护线程 worker，队满降级 `BOND_QUEUE_FULL`，支持 `drain()` 优雅关闭）|
 
-### 情感系统（Emotion System）
+### ❤️ 情感系统（Emotion System）
 
 情感系统是 Natsume 区别于普通对话 AI 的核心能力层，覆盖从感知到表达的完整链路。
 
-#### 情感链路数据流
+#### 🔄 情感链路数据流
 
 ```
 用户输入（ASR）
@@ -882,7 +1142,7 @@ EdgeEventReporter emotion_tag / emotion_intensity
 MetricsCollector emotion_metrics 情感维度指标
 ```
 
-#### 情感状态机（EmotionState）
+#### ⚙️ 情感状态机（EmotionState）
 
 | 状态 | 说明 | 门控行为 |
 |------|------|----------|
@@ -890,7 +1150,7 @@ MetricsCollector emotion_metrics 情感维度指标
 | `tired` | 疲惫状态 | `HAPPY`/`EXCITED` 标签降级为 `NEUTRAL` |
 | `critical` | 临界/崩溃状态 | 拒绝所有 `TOOL_CALL`/`SKILL_EXEC`，返回 `EMOTION_GATE_BLOCKED` |
 
-#### 情感核心组件
+#### 🧩 情感核心组件
 
 | 组件 | 模块 | 功能 |
 |------|------|------|
@@ -903,7 +1163,7 @@ MetricsCollector emotion_metrics 情感维度指标
 | **EmotionPulseSlot** | `core/context_pack.py` | 动态槽位注入（EmotionVector → LLM Prompt）|
 | **EmotionFilter** | `retrieval/recall_fusion.py` | 情感路由与加权融合（1.2x boost）|
 
-#### 情感感知降级策略
+#### 🛟 情感感知降级策略
 
 当情感感知链路不可用时，`build_fallback_output` 根据情感状态返回差异化文本：
 - `SAD` → 安慰性回复
@@ -926,6 +1186,8 @@ MetricsCollector emotion_metrics 情感维度指标
 | 🔧 DevSpec | `docs/30_devspec/` | 开发规范 + 任务清单（怎么做）|
 | 🤖 AGENTS | `docs/40_agents/` | 实现层代理行为规范 |
 | 📊 项目管理 | `docs/50_project/` | 工作表 / 发布 / 环境检查 |
+| 🏗️ 当前代码架构 | `docs/50_project/CURRENT_CODE_ARCHITECTURE_2026-03-18.md` | 当前代码目录、架构、链路与多 Agent 治理对齐文档 |
+| 🔄 数据流图 | `docs/50_project/dataflow_report_20260311.md` | 请求/事件数据流与回流链路（独立于架构图） |
 | 🧩 外置服务配置 | `docs/50_project/ExternalServices_Config.md` | 全部外置服务清单与配置方式 |
 | 📦 发布清单 | `docs/50_release/` | 各里程碑 release.json 归档 |
 | 🔗 Trace | `docs/60_trace/` | 可追溯性矩阵（需求 → 设计 → 测试）|
@@ -952,22 +1214,38 @@ pre-commit install
 pre-commit run -a
 ```
 
-### 测试分层
+### 🧪 本地对齐 CI 命令（推荐）
+
+```bash
+# 与 CI pytest 作业口径一致
+python -m pytest tests/ -q --tb=short -p no:warnings
+
+# 与 CI delivery-gate 作业口径一致（静态扫描 + 文档门禁）
+python tools/doc_lint/delivery_gate.py --root . --checks static_scan,doc_gate --report-file delivery_gate_report.json
+```
+
+可选：全量交付门禁（含 contract/e2e）：
+
+```bash
+python tools/doc_lint/delivery_gate.py --root . --checks contract,e2e,static_scan,doc_gate --report-file delivery_gate_full_report.json
+```
+
+### 🧱 测试分层
 
 | 层级 | 目录 | 说明 |
 |------|------|------|
-| **单元测试** | `tests/unit/` | 各模块独立测试（StateArbiter / MemoryGuard / ContextPackBuilder / RoutingMatrix / FailureHandler / PermissionGuard / UIAssertionGuard）|
+| **单元测试** | `tests/unit/` | 各模块独立测试（StateArbiter / MemoryGuard / RecallPackBuilder / RoutingMatrix / FailureHandler / PermissionGuard / UIAssertionGuard）|
 | **集成测试** | `tests/integration/` | 主链路集成测试（正常流 / Governor 拦截流 / 模型降级流）|
 | **契约测试** | `tests/contract/` | 跨模块接口契约验证 |
 | **端到端测试** | `tests/e2e/` | 完整链路集成测试 |
 | **性能基准** | `tools/bench/` | Ledger WAL 读写吞吐基准 |
 | **试运行报告** | `artifacts/trial_run_reports/` | 自动化试运行 JSON 报告 |
 
-### 审计链保障
+### 🧾 审计链保障
 
-所有影响现实的动作均写入 SQLite WAL 审计链（21 张审计表），支持：
+所有影响现实的动作均写入 SQLite WAL 审计链（多审计表），支持：
 - **回放**：`tools/replay/` 审计回放工具（请求回放 + 生产演练）
-- **统计**：70+ 统一 reason_code，含 `EMOTION_GATE_BLOCKED` 等情感相关码
+- **统计**：统一 reason_code 体系（含 `EMOTION_GATE_BLOCKED` 等情感相关码）
 - **保留策略**：`audit/` 模块内置日志迁移与保留策略
 
 ---

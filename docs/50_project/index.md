@@ -1,14 +1,22 @@
 受众：MASTER
 标题：Flow 资产追溯索引（按环境）
 
-版本：v0.2
-日期：2026-03-04
+版本：v0.3
+日期：2026-03-18
 定位：记录 flows/active.pointer 指向的“当前生效 Flow 导出物”，以及最小变更摘要；用于与 active.pointer 形成双锚点，支撑 T-Flow-02（索引一致性）回归口径。
 
 引用：
 - 需求：FR-FLOW-001
 - 任务：TASK-0002（以及后续 Flow 相关任务）
 - 测试：T-Flow-01、T-Flow-02
+
+---
+
+## 0. 相关入口（架构/链路）
+
+- 当前代码架构：`docs/50_project/CURRENT_CODE_ARCHITECTURE_2026-03-18.md`
+- 数据流全景：`docs/50_project/dataflow_report_20260311.md`
+- 仓库总览入口：`README.md`
 
 ---
 
@@ -43,3 +51,4 @@
 
 ## 3. 变更记录（可选但建议）
 - 2026-03-04：dev/staging/prod：补全 current_export 与 active.pointer 一致性占位信息（refs：TASK-0002 / T-Flow-01~02）
+- 2026-03-18：补充“相关入口（架构/链路）”导航，联动当前代码架构与数据流文档。

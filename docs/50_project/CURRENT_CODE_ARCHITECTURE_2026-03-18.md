@@ -1,0 +1,290 @@
+受众：MASTER
+标题：当前代码架构总览（2026-03-18）
+
+版本：v1.1
+日期：2026-03-18
+
+# 🏗️ 当前代码架构总览（2026-03-18）
+
+> 本文档是“当前代码事实对齐稿”，用于快速回答：目录怎么分层、请求怎么流转、多 Agent 在哪里生效、图编排如何落地。
+
+## 0. 快速导航
+
+- 🧭 入口与范围：第 1 节
+- 🧱 目录结构：第 3 节
+- 🔗 服务请求链路：第 6 节
+- 🤖 多 Agent 治理：第 7 节
+- 🕸️ 图编排：第 8 节
+- 📡 对外 API：第 9 节
+
+## 1. 目标与范围
+
+本文件基于当前仓库代码结构整理，覆盖以下主题：
+
+- 目录结构
+- 分层架构
+- 功能模块
+- 服务请求链路
+- 多 Agent 治理
+- 图编排（Graph Orchestration）
+
+> 说明：本文只描述“当前代码已实现事实”，不按历史重构阶段或未落地方案叙述。
+
+## 2. 代码证据入口
+
+- Host API 入口：`host_brain/app/fastapi_app.py`
+- Chat 总入口：`host_brain/app/chat_handler.py`
+- Chat 流式链路：`host_brain/app/chat_stream_handler.py`
+- 复杂场景链路：`host_brain/app/chat_handler_complex.py`
+- 场景路由与主链：`host_brain/app/graph/main_chain.py`
+- 图配置构建：`host_brain/app/graph_config_builder.py`
+- 执行画像：`host_brain/app/execution_profile.py`
+- 图运行时（门面）：`host_brain/integrations/graph_runtime.py`
+- 图执行器：`host_brain/integrations/graph_executor.py`
+- 图契约/降级/模型解析：`host_brain/integrations/graph_contract.py`、`host_brain/integrations/graph_fallback.py`、`host_brain/integrations/graph_model_resolve.py`
+- 多 Agent handlers：`host_brain/app/handlers/*.py`
+- Agent Loop API：`host_brain/app/agent_routes.py`
+- Edge RPC 网关：`edge_client/app/fastapi_app.py`
+
+## 3. 目录结构（当前主干）
+
+```text
+Natsume_Ai/
+├─ host_brain/
+│  ├─ app/             # FastAPI、chat入口、graph配置、handlers
+│  ├─ integrations/    # graph_runtime / graph_executor / llm_gateway 等
+│  ├─ governor/        # 意图裁决、规则、token、限流
+│  ├─ retrieval/       # 检索管线与编排器
+│  ├─ memory/          # 记忆存储与检索
+│  ├─ bond/            # 关系动力学与阶段引擎
+│  ├─ audit/           # SQLite 审计账本
+│  ├─ channels/        # Edge RPC / VTS 渠道适配
+│  ├─ scheduler/       # 调度任务与路由
+│  ├─ skills/          # 技能注册与桥接
+│  └─ observability/   # 指标聚合与可观测
+├─ edge_client/
+│  ├─ app/             # Edge FastAPI RPC 网关
+│  ├─ runtime/         # 运行时引导与健康快照
+│  ├─ senses/          # ASR/VAD 感知
+│  ├─ actuators/       # TTS/VTS 执行
+│  ├─ rpc/             # 事件上报、认证、协议
+│  └─ channels/        # 本地渠道适配（如微信监听）
+├─ configs/
+│  └─ model_plane/     # model profiles / node registry
+├─ flows/              # Flow 导出与 active.pointer
+├─ docs/
+├─ scripts/
+├─ tests/
+└─ tools/
+```
+
+## 4. 分层架构
+
+### 4.1 接入层（API Entry）
+
+- Host FastAPI：`host_brain/app/fastapi_app.py`
+  - 核心入口：`POST /v1/chat`
+  - 辅助入口：`POST /v1/edge/events`、`GET /metrics`、`GET /panel`、`GET /`
+  - 通过 `include_router` 挂载 `web_ui/canon/scheduler/tool/bond/obs/agent/input/health`
+- Edge FastAPI：`edge_client/app/fastapi_app.py`
+  - 核心端点：`/v1/edge/health`、`/v1/edge/speak`、`/v1/edge/vts`、`/v1/edge/screenshot`、`/v1/edge/automate` 等
+
+### 4.2 治理层（Governor + 约束）
+
+- Chat 主链在 `_unified_chat_sse_generator` 中先做 Governor 裁决：
+  - 审批通过才进入场景路由
+  - 拒绝立即返回 `COMMIT: REJECT`
+- 图执行态通过 `GraphState` 维护治理字段：
+  - `committed_route_token`
+  - `execution_profile`
+  - `active_agent_id`
+  - `handoff_history`
+
+### 4.3 编排层（Scene + Graph）
+
+- 场景级分流：`SceneRouter.route_sse`
+  - `SCENE_CHAT` → token stream
+  - `SCENE_VISION_UI` → vision 链路
+  - 其他复杂场景 → graph 链路
+- 图构建层：`graph_config_builder.py`
+  - `build_chat_graph`
+  - `build_supervised_graph`
+  - `build_intent_graph`
+  - `build_chat_graph_config`
+- 图运行时层：`GraphRuntimeContract.run_graph` + `GraphExecutor`
+
+### 4.4 业务能力层（Retrieval/Memory/Bond/Audit/Edge）
+
+- Retrieval：`get_retrieval_orchestrator()` + `RetrievalPipelineContract`
+- 记忆：`persist_chat_episodic_memory` + `EpisodicStore`
+- Bond：`BondDynamicsWriter` + `BondStageEngine`
+- 审计：`SQLiteLedger`（Host 与图运行时写入）
+- 端侧执行：TTS/VTS/截图/自动化通过 Edge RPC 通道落地
+
+## 5. 功能模块拆分
+
+### 5.1 Host 侧核心模块
+
+| 模块 | 代码位置 | 职责 |
+|---|---|---|
+| Chat 入口 | `host_brain/app/chat_handler.py` | Governor 鉴权 + 场景分类 + SceneRouter 分发 |
+| Chat 流式 | `host_brain/app/chat_stream_handler.py` | `SCENE_CHAT` token SSE、检索、后处理、COMMIT |
+| 复杂场景 | `host_brain/app/chat_handler_complex.py` | 构图、跑图、节点级进度 SSE、最终 COMMIT |
+| Scene Router | `host_brain/app/graph/main_chain.py` | 按 scene_type 路由到 vision/chat/complex |
+| 多 Agent handlers | `host_brain/app/handlers/*.py` | supervisor/chat/code/translate/intent/retrieval/judge |
+| 图运行时 | `host_brain/integrations/graph_runtime.py` | 校验配置、解析模型、执行图、返回统一结果 |
+| 图执行器 | `host_brain/integrations/graph_executor.py` | 单步执行、动态分派、降级、trace 记录 |
+
+### 5.2 Edge 侧核心模块
+
+| 模块 | 代码位置 | 职责 |
+|---|---|---|
+| RPC 网关 | `edge_client/app/fastapi_app.py` | 对外提供 `/v1/edge/*`，含鉴权与能力开关 |
+| 运行时引导 | `edge_client/runtime/bootstrap.py` | 组装 ASR/TTS/VTS/Reporter 等运行组件 |
+| 语音感知 | `edge_client/senses/asr.py` | ASR 采集与状态控制 |
+| 执行动作 | `edge_client/actuators/vts_driver.py` | `talk_start/talk_end/set_expression/trigger_hotkey` |
+| 事件上报 | `edge_client/rpc/event_reporter.py` | 批量上报到 Host `/v1/edge/events` |
+
+## 6. 服务请求链路
+
+### 6.1 `POST /v1/chat` 端到端链路
+
+```mermaid
+flowchart TD
+    A["POST /v1/chat"] --> B["handle_chat"]
+    B --> C["_unified_chat_sse_generator"]
+    C --> D["Governor evaluate_intent"]
+    D -->|REJECT| E["COMMIT(REJECT)"]
+    D -->|APPROVE| F["pre_intent_classifier / explicit scene"]
+    F --> G["SceneRouter.route_sse"]
+    G -->|SCENE_CHAT| H["_sse_event_generator"]
+    G -->|SCENE_VISION_UI| I["_vision_ui_sse_generator"]
+    G -->|复杂场景| J["_complex_scene_sse_generator"]
+```
+
+#### 6.1.1 `SCENE_CHAT` 分支
+
+- 文件：`host_brain/app/chat_stream_handler.py`
+- 关键流程：
+  1. 检索（可跳过/降级）
+  2. 构建 prompt/context
+  3. LLM 流式输出 token/SENTENCE
+  4. 并行后处理：Airlock、Episodic、Bond、VTS、TTS
+  5. 发出 `COMMIT(APPROVE)`
+
+#### 6.1.2 复杂场景分支
+
+- 文件：`host_brain/app/chat_handler_complex.py`
+- 关键流程：
+  1. `resolve_execution_profile`
+  2. `build_*_graph`
+  3. `get_graph_runtime().run_graph(...)`
+  4. 输出 `GRAPH_START/NODE_*/GRAPH_DONE/COMMIT`
+
+### 6.2 `POST /v1/edge/events` 回流链路
+
+- Host 接收端：`host_brain/app/fastapi_app.py` → `receive_edge_events_response`
+- Edge 上报端：`edge_client/rpc/event_reporter.py`（批量上报）
+
+### 6.3 `POST /v1/agent/run` 自动化链路
+
+- 入口：`host_brain/app/agent_routes.py`
+- SSE 循环：`_agent_loop_sse_generator`
+- 可选执行后端：
+  - `MockClawdbotClient`
+  - `ClawdbotClient`
+  - `EdgeRpcClient`
+
+## 7. 多 Agent 治理（当前实现）
+
+### 7.1 角色与职责
+
+- `supervisor_dispatch_handler`：从 scene/rule/LLM proposal 选择 `active_agent_id`
+- `agent_dispatch_node`：由 `GraphExecutor` 按 `active_agent_id` 动态分派 handler
+- 子 Agent handlers：只产出 `agent_artifacts`，不直接改图控制流
+- `judge_agent_handler`：汇总工件并产出 `judge_result`
+
+### 7.2 关键治理约束
+
+- 分派白名单：`agent_dispatch_allowlist`
+  - 配置来源：`graph_config_builder.py` 的 node binding
+  - 执行兜底：`graph_executor.py` 再次校验
+- 动态分派映射：`_AGENT_HANDLER_MAP`
+  - `chat_agent/code_agent/translate_agent/intent_agent/judge_agent/retrieval_agent`
+- `need_judge` 快路径：
+  - `false` 时可跳过 judge 直达渲染节点
+
+## 8. 图编排（Graph Orchestration）
+
+### 8.1 执行画像与图形态
+
+- 执行画像常量：`host_brain/app/execution_profile.py`
+  - `PROFILE_CHAT_FAST`
+  - `PROFILE_WORKFLOW_SUPERVISED`
+  - `PROFILE_INTENT_EXEC`
+
+- 图构建函数：`host_brain/app/graph_config_builder.py`
+  - `build_chat_graph(...)`
+  - `build_supervised_graph(...)`
+  - `build_intent_graph(...)`
+
+### 8.2 典型节点序列
+
+```mermaid
+flowchart LR
+    S["supervisor_dispatch"] --> A["agent_dispatch_node"]
+    A --> J["judge_agent_node"]
+    J --> R["chat_render_node"]
+```
+
+```mermaid
+flowchart LR
+    I["intent_agent_entry"] --> SV["safety_verifier"]
+    SV --> J["judge_agent_node"]
+    J --> R["chat_render_node"]
+```
+
+### 8.3 运行时分层
+
+| 层 | 代码 | 责任 |
+|---|---|---|
+| 契约层 | `graph_contract.py` | 图配置校验、共享类型、状态常量 |
+| 模型解析层 | `graph_model_resolve.py` | node/profile 解析与参数哈希 |
+| 执行层 | `graph_executor.py` | 节点调度、动态分派、trace、降级跳转 |
+| 降级层 | `graph_fallback.py` | timeout/dependency/error 的统一降级 |
+| 门面层 | `graph_runtime.py` | run_graph 主流程编排与结果归一 |
+
+## 9. 当前对外 API（关键入口）
+
+### 9.1 Host（`host_brain/app/fastapi_app.py`）
+
+- `POST /v1/chat`
+- `POST /v1/edge/events`
+- `GET /metrics`
+- `GET /panel`
+- `GET /`
+- `POST /v1/agent/run`（通过 `agent_router` 挂载）
+- `GET /v1/agent/info`（通过 `agent_router` 挂载）
+
+### 9.2 Edge（`edge_client/app/fastapi_app.py`）
+
+- `GET /v1/edge/health`
+- `POST /v1/edge/speak`
+- `POST /v1/edge/barge_in`
+- `POST /v1/edge/vts`
+- `POST /v1/edge/screenshot`
+- `POST /v1/edge/automate`
+- `POST /v1/edge/proactive_push`
+- `GET /v1/edge/proactive_messages`
+
+## 10. 维护约定
+
+- 当 `host_brain/app/graph_config_builder.py`、`host_brain/integrations/graph_*`、`host_brain/app/handlers/*` 发生结构变更时，需同步更新本文。
+- 当 `/v1/chat` 主链分支规则变化时，需同步更新“6.1 请求链路”。
+- 当新增 Agent 或调整 dispatch/judge 规则时，需同步更新“7. 多 Agent 治理”。
+
+## 11. 关联文档
+
+- 架构总览入口：`README.md`
+- 数据流文档：`docs/50_project/dataflow_report_20260311.md`
+- 多 Agent 历史演进：`docs/50_project/AGENT_ORCHESTRATION_DETAIL_2026-03-09.md`

@@ -1,11 +1,66 @@
-# Agent 编排详情文档
+受众：MASTER
+标题：Agent 编排详情（当前实现对齐 + 历史草稿）
 
-> 生成时间：2026-03-09
-> 版本：当前主干（host_brain）
+版本：v1.1
+日期：2026-03-18
+
+# 🔀 Agent 编排详情（当前实现对齐）
+
+> 使用优先级：先看本文件“2026-03-18 当前口径”，历史草稿仅作留痕参考。
 
 ---
 
-## 一、FastAPI 主控路由总览
+## 0. 2026-03-18 当前口径（优先）
+
+### 0.1 Host/Edge 关键入口
+
+| 侧别 | 路径 | 说明 |
+|------|------|------|
+| Host | `POST /v1/chat` | 统一聊天入口，返回 SSE |
+| Host | `POST /v1/edge/events` | 接收 Edge 事件回流 |
+| Host | `POST /v1/agent/run` | Agent Loop SSE |
+| Edge | `/v1/edge/*` | speak/barge_in/vts/screenshot/automate/proactive 等 |
+
+### 0.2 /v1/chat 当前调用链
+
+```text
+POST /v1/chat
+  -> handle_chat
+  -> _unified_chat_sse_generator
+  -> IntentDecisionEngine.evaluate_intent (Governor)
+  -> SceneRouter.route_sse
+      -> SCENE_CHAT      : chat_stream_handler
+      -> SCENE_VISION_UI : chat_handler_vision
+      -> 复杂场景         : chat_handler_complex
+          -> resolve_execution_profile
+          -> build_*_graph
+          -> GraphRuntimeContract.run_graph
+```
+
+### 0.3 多 Agent 当前定位
+
+- 默认路径仍是单链路优先（`CHAT_FAST`）。
+- 仅在特定执行画像（如 `WORKFLOW_SUPERVISED`）进入监督式多 Agent 分支。
+- `agent_dispatch_node` 由 `GraphExecutor` 基于 `active_agent_id` 动态分派，并执行 allowlist 校验。
+- 子 Agent 只产出 `AgentArtifact`，最终由 `judge_agent_node` 收口。
+
+### 0.4 代码证据入口
+
+- `host_brain/app/chat_handler.py`
+- `host_brain/app/graph/main_chain.py`
+- `host_brain/app/graph_config_builder.py`
+- `host_brain/app/execution_profile.py`
+- `host_brain/integrations/graph_runtime.py`
+- `host_brain/integrations/graph_executor.py`
+- `host_brain/app/agent_routes.py`
+
+---
+
+## 附录A：2026-03-09 历史草稿（留痕）
+
+> ⚠️ 下述章节保留历史快照，部分路由/节点/模型口径可能与当前代码不一致。
+
+## 一、FastAPI 主控路由总览（历史）
 
 | 方法 | 路径 | 处理函数 | 说明 |
 |------|------|----------|------|
@@ -19,7 +74,7 @@
 
 ---
 
-## 二、场景路由（pre_intent_classifier）
+## 二、场景路由（pre_intent_classifier，历史）
 
 ```
 用户输入文本
@@ -49,7 +104,7 @@
 
 ---
 
-## 三、各场景节点编排连线 & 模型配置
+## 三、各场景节点编排连线 & 模型配置（历史）
 
 ### 场景 A：`SCENE_CHAT`（快速路径，最常见）
 
@@ -193,7 +248,7 @@ END
 
 ---
 
-## 四、全节点模型配置汇总表
+## 四、全节点模型配置汇总表（历史）
 
 | 节点 ID | 角色 | 模型（非CHAT场景） | 模型（CHAT场景） | 超时（非CHAT） | 超时（CHAT） | max_tokens |
 |---------|------|-----------------|----------------|-------------|------------|-----------|
@@ -210,7 +265,7 @@ END
 
 ---
 
-## 五、图内治理层（Governor Token 路由）
+## 五、图内治理层（Governor Token 路由，历史）
 
 | `committed_route_token` 值 | 图内行为 |
 |---------------------------|---------|
@@ -222,7 +277,7 @@ END
 
 ---
 
-## 六、LangGraph 物理拓扑
+## 六、LangGraph 物理拓扑（历史）
 
 ```mermaid
 graph TD
@@ -241,7 +296,7 @@ graph TD
 
 ---
 
-## 七、流式 Chat 与 Graph Chat 对比
+## 七、流式 Chat 与 Graph Chat 对比（历史）
 
 | 维度 | `/v1/chat`（Graph） | `/v1/chat/stream`（流式） |
 |------|-------------------|------------------------|

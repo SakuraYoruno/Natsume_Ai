@@ -1,7 +1,7 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.5
+版本：v1.6
 
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
 
@@ -1238,4 +1238,23 @@
 - 当前进展（2026-03-06）：契约测试行数限制已更新；`docs/35_quality/code_reviews/code_review_m41_2026-03-06.md` 已生成；全量测试无回归。
 - 覆盖状态：DONE
 
+## R-176（2026-03-18 白皮书口径联动：主链路优先 + 受控多 Agent）
+- 系统级需求：系统默认“主链路优先”，多 Agent 仅可作为受治理约束的受控分支，不得替代 Host 终审与统一审计链。
+- PRD 需求编号（FR）：FR-CORE-001；FR-GOV-001；FR-MODE-001
+- 来源：whitepaper 0/5/6（v1.5）
+- DevSpec 落点：DevSpec 2.1；DevSpec 14.4
+- DevTasks（TASK）：待补（当前为文档口径对齐，未新增实现任务）
+- 验收测试（T-xx）：T-Gov-01；T-Orch-01
+- 当前进展（2026-03-18）：PRD/DevSpec 已同步“主链路优先 + 受控多 Agent”口径，等待后续任务卡补齐编号映射。
+- 覆盖状态：SPEC_READY
+
+## R-177（2026-03-18 白皮书口径联动：R1~R8 与六模式 sys_mode）
+- 系统级需求：Governor 门禁规则对齐为 R1~R8（新增 Emotion Gate）；sys_mode 对齐为 normal/focus/gaming/maintenance/locked/sleep 六模式，并映射到调度与路由门控。
+- PRD 需求编号（FR）：FR-GOV-001；FR-MODE-001~003
+- 来源：whitepaper 6/11/13（v1.5）
+- DevSpec 落点：DevSpec 4；DevSpec 14.4；DevSpec 15.1.3
+- DevTasks（TASK）：待补（当前为文档口径对齐，未新增实现任务）
+- 验收测试（T-xx）：T-Gov-01；T-GOV-R8-01~04；T-SCHED-02
+- 当前进展（2026-03-18）：PRD/DevSpec 已同步 R1~R8 与六模式 sys_mode 门控矩阵，测试映射已登记。
+- 覆盖状态：SPEC_READY
 

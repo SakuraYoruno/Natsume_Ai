@@ -1,5 +1,7 @@
-"""Chat 涓婁笅鏂囨瀯寤鸿緟鍔╁嚱鏁般€?
-浠?chat_handler.py 鎷嗗垎锛岃礋璐ｆ瀯寤?context pack銆乻tyle bindings 鍜?generation prompt payload銆?"""
+"""Chat 上下文构建辅助函数。
+
+从 chat_handler.py 拆分，负责构建 context pack、style bindings 和 generation prompt payload。
+"""
 
 from __future__ import annotations
 
@@ -7,14 +9,16 @@ import json
 import os
 from typing import Any, Mapping
 
-from host_brain.app.chat_runtime_input import ChatRuntimeInput
 from host_brain.app.dependencies import get_ledger
-from host_brain.app.prompt_builder import _truncate_for_prompt
-from host_brain.core.prompt_context import (
+from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
+from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
+from host_brain.core.context_pack import (
     build_emotion_pulse_slot,
-    validate_prompt_context,
+    build_world_canon_slot,
+    validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
+from host_brain.memory.canon_style_store import StyleCanonStore
 
 
 CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
@@ -25,55 +29,164 @@ CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
 )
 
 
-def build_prompt_context(
-    *,
-    runtime_input: ChatRuntimeInput,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build prompt_context for prompt injection."""
-    request_id = runtime_input.request_id
-    session_id = runtime_input.session_id
-    thread_id = runtime_input.thread_id
-    retrieval_summary = dict(runtime_input.retrieval_summary)
-    retrieval_evidence_items = list(runtime_input.retrieval_evidence_items)
-    normalized_emotion_context = dict(runtime_input.emotion_state)
-    recall_slot_text = dict(runtime_input.recall_slot_text)
+def normalize_node_style_bindings(
+    style_bindings: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    normalized: dict[str, dict[str, Any]] = {}
+    for node_id, row in dict(style_bindings or {}).items():
+        if not isinstance(row, Mapping):
+            continue
+        normalized[str(node_id)] = {
+            "canon_id": str(row.get("canon_id") or "").strip(),
+            "version": row.get("version"),
+            "hash": str(row.get("hash") or "").strip(),
+            "tone_only": bool(row.get("tone_only", True)),
+            "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
+            "style_instruction": str(row.get("style_instruction") or "").strip(),
+            "citation": str(row.get("citation") or "").strip(),
+        }
+    return normalized
 
-    # style_canon and world_canon only enter prompt_context through RecallPack.
-    _cpb_style = recall_slot_text.get("style_canon")
+
+def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
+    style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
+    core_canon_id = str(os.environ.get("HOST_STYLE_CORE_CANON_ID") or "natsume_ai_cn").strip()
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    explicit_render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_CANON_ID") or "").strip()
+    if explicit_render_canon_id:
+        render_canon_id = explicit_render_canon_id
+    elif resolved_render_lang == "zh":
+        render_canon_id = (
+            str(os.environ.get("HOST_STYLE_RENDER_CN_CANON_ID") or "").strip()
+            or core_canon_id
+            or "natsume_ai_cn"
+        )
+    else:
+        render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_JA_CANON_ID") or "natsume_ai_ja").strip()
+    secondary_canon_id = str(os.environ.get("HOST_STYLE_SECONDARY_CANON_ID") or core_canon_id).strip()
+
+    store = StyleCanonStore(style_root=style_root, ledger=get_ledger())
+    resolved: dict[str, dict[str, Any]] = {}
+    mapping = [
+        ("core_reasoner_primary", core_canon_id),
+        ("core_reasoner_secondary", secondary_canon_id),
+        (CHAT_DIRECT_NODE_ID, render_canon_id),
+        ("renderer_ja_c_style", render_canon_id),
+    ]
+    for node_id, canon_id in mapping:
+        if not canon_id:
+            continue
+        try:
+            entry = store.get(canon_id)
+        except Exception:
+            continue
+        if entry is None:
+            continue
+        resolved[node_id] = {
+            "canon_id": entry.canon_id,
+            "version": int(entry.version),
+            "hash": entry.hash,
+            "tone_only": bool(entry.tone_only),
+            "unsafe_as_fact": bool(entry.unsafe_as_fact),
+            "style_instruction": entry.content,
+            "citation": f"style_canon:{entry.canon_id}@v{entry.version}:{entry.hash[:12]}",
+        }
+    return resolved
+
+
+def build_chat_context_pack(
+    *,
+    request_id: str,
+    session_id: str,
+    thread_id: str | None,
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    style_bindings: Mapping[str, Mapping[str, Any]] | None,
+    emotion_context: Mapping[str, Any] | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """构建 context_pack。
+
+    当 cpb_slots 传入时（来自 ContextPackBuilder.build() 的 slot 输出），
+    直接使用 CPB 的 authoritative/style_pack slot 内容，
+    跳过默认的 world_canon_slot 和 style_bindings 构建逻辑，
+    统一两套 context_pack 构建路径。
+    """
+    from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
+    normalized_style_bindings = normalize_node_style_bindings(style_bindings)
+    normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
+
+    # ── style_pack slot ──────────────────────────────────────────────────
+    # 优先使用 CPB 的 style_canon slot 内容（已经过 token 预算控制）
+    _cpb_style = dict(cpb_slots or {}).get("style_canon") if cpb_slots else None
     style_rows: list[dict[str, Any]] = []
     if _cpb_style and str(_cpb_style).strip():
+        # CPB 路径：将 style_canon slot 内容包装为单条 style_row
         style_rows.append(
             {
                 "slot": "style_pack",
                 "kind": "style_canon",
-                "node_id": "recall_pack_builder",
+                "node_id": "context_pack_builder",
                 "canon_id": None,
                 "version": None,
                 "hash": None,
                 "tone_only": True,
                 "unsafe_as_fact": True,
-                "citation": "recall_pack_builder://style_canon",
+                "citation": "context_pack_builder://style_canon",
                 "instruction": _truncate_for_prompt(str(_cpb_style), limit=1600),
-                "source": "recall_pack_builder",
             }
         )
+    else:
+        # 默认路径：从 style_bindings 构建
+        for node_id, row in normalized_style_bindings.items():
+            style_rows.append(
+                {
+                    "slot": "style_pack",
+                    "kind": "style_canon",
+                    "node_id": node_id,
+                    "canon_id": row.get("canon_id"),
+                    "version": row.get("version"),
+                    "hash": row.get("hash"),
+                    "tone_only": bool(row.get("tone_only", True)),
+                    "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
+                    "citation": row.get("citation"),
+                    "instruction": _truncate_for_prompt(row.get("style_instruction"), limit=1600),
+                }
+            )
 
-    _cpb_world = recall_slot_text.get("world_canon")
+    # ── authoritative slot ───────────────────────────────────────────────
+    # 优先使用 CPB 的 world_canon slot 内容（已经过冲突检测和 token 预算控制）
+    _cpb_world = dict(cpb_slots or {}).get("world_canon") if cpb_slots else None
     authoritative_rows: list[dict[str, Any]] = []
     if _cpb_world and str(_cpb_world).strip():
+        # CPB 路径：将 world_canon slot 内容包装为单条 authoritative_row
         authoritative_rows.append(
             {
                 "slot": "authoritative",
                 "kind": "world_canon",
-                "source_ref": "recall_pack_builder://world_canon",
+                "source_ref": "context_pack_builder://world_canon",
                 "content": _truncate_for_prompt(str(_cpb_world), limit=800),
-                "citation": "recall_pack_builder://world_canon",
+                "citation": "context_pack_builder://world_canon",
             }
         )
-
-    for row in authoritative_rows:
-        if isinstance(row, dict) and "source" not in row:
-            row["source"] = "recall_pack_builder"
+    else:
+        # 默认路径：从 world_canon_slot 构建
+        world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "").strip() or None
+        try:
+            world_top_k = int(str(os.environ.get("HOST_WCANON_TOP_K") or "3").strip())
+        except ValueError:
+            world_top_k = 3
+        world_top_k = max(1, min(world_top_k, 10))
+        try:
+            authoritative_rows = build_world_canon_slot(world_root=world_root, top_k=world_top_k)
+        except Exception as exc:
+            check_wcanon_slot_violation(
+                slot_name="world_canon_slot",
+                detail=f"world canon slot 构建失败: {exc}",
+                ledger=get_ledger(),
+                request_id=request_id,
+            )
+            authoritative_rows = []
 
     retrieval_rows: list[dict[str, Any]] = []
     for row in retrieval_evidence_items[:10]:
@@ -127,41 +240,13 @@ def build_prompt_context(
         "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
-    # Bond summary：从 runtime_input 读取，用于注入关系上下文和动态 tone_policy
-    bond_summary_raw = dict(runtime_input.bond_summary) if runtime_input.bond_summary else {}
-    bond_stage = str(bond_summary_raw.get("stage") or "").strip().upper()
-    bond_trend = str(bond_summary_raw.get("trend") or "").strip()
-    bond_capability_hint = str(bond_summary_raw.get("capability_hint") or "").strip()
-
-    # tone_policy 按关系阶段动态调整
-    _STAGE_TONE_MAP = {
-        "STRANGER":     "restrained",
-        "ACQUAINTANCE": "warm_concise",
-        "FRIEND":       "warm_concise",
-        "CLOSE_FRIEND": "warm_playful",
-        "CONFIDANT":    "warm_playful",
-        "SOULMATE":     "intimate_playful",
-    }
-    tone_policy = _STAGE_TONE_MAP.get(bond_stage, "warm_concise")
-
-    # 构建注入 prompt 的 bond_summary（非空时才注入）
-    bond_summary_for_prompt: dict = {}
-    if bond_stage:
-        bond_summary_for_prompt = {
-            "stage": bond_stage,
-            "trend": bond_trend,
-            "capability_hint": bond_capability_hint,
-        }
-
     bond_texture = {
         "mood_state": mood_state,
         "emotion_tag": emotion_tag,
         "tone_hint": str(emotion_pulse.get("style_hint") or ""),
-        "bond_stage": bond_stage,
-        "bond_trend": bond_trend,
     }
 
-    prompt_context = {
+    context_pack = {
         "hard_snapshot": {
             "session_id": session_id,
             "thread_id": thread_id,
@@ -170,18 +255,18 @@ def build_prompt_context(
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
         },
-        "bond_summary": bond_summary_for_prompt,
+        "bond_summary": {},
         "authoritative": authoritative_rows,
         "retrieval": retrieval_rows,
         "style_pack": {
             "style_canon": style_rows,
+            "node_bindings": normalized_style_bindings,
         },
         "constraints": {
             "strict_json_output": True,
             "no_false_execution_claim": True,
             "no_canon_as_fact": True,
-            "tone_policy": tone_policy,
-            "follow_up_hint": "如果用户陈述了事实或情绪，优先复述确认再追问一个短问题",
+            "tone_policy": "short_restrained",
             "contract_versions": {
                 "core": "CoreDraft.v1",
                 "render": "RenderDraft.v1",
@@ -196,14 +281,14 @@ def build_prompt_context(
         "bond_texture": bond_texture,
     }
 
-    validation = validate_prompt_context(prompt_context)
+    validation = validate_context_pack(context_pack)
     violations = [
         {"code": item.code, "detail": item.detail, "slot": item.slot}
         for item in validation.violations
     ]
     if validation.valid:
         return (
-            prompt_context,
+            context_pack,
             {"valid": True, "degraded": False, "reason_code": None, "violation_count": 0, "violations": []},
         )
 
@@ -217,22 +302,22 @@ def build_prompt_context(
             )
             break
 
-    degraded_pack = dict(prompt_context)
+    degraded_pack = dict(context_pack)
     degraded_pack["authoritative"] = []
-    degraded_validation = validate_prompt_context(degraded_pack)
+    degraded_validation = validate_context_pack(degraded_pack)
     if degraded_validation.valid:
         return (
             degraded_pack,
-            {"valid": True, "degraded": True, "reason_code": "PROMPT_CONTEXT_DEGRADED", "violation_count": len(violations), "violations": violations},
+            {"valid": True, "degraded": True, "reason_code": "CONTEXT_PACK_DEGRADED", "violation_count": len(violations), "violations": violations},
         )
 
     minimal_pack = {
         "hard_snapshot": {}, "bond_summary": {}, "authoritative": [], "retrieval": [],
-        "style_pack": {"style_canon": []}, "constraints": {}, "tool_meta_pack": [],
+        "style_pack": {}, "constraints": {}, "tool_meta_pack": [],
     }
     return (
         minimal_pack,
-        {"valid": True, "degraded": True, "reason_code": "PROMPT_CONTEXT_MINIMAL_FALLBACK", "violation_count": len(violations), "violations": violations},
+        {"valid": True, "degraded": True, "reason_code": "CONTEXT_PACK_MINIMAL_FALLBACK", "violation_count": len(violations), "violations": violations},
     )
 
 
@@ -288,10 +373,10 @@ def _classify_retrieval_path_for_obs(
 def _select_context_degrade_tier(
     *,
     retrieval_summary: Mapping[str, Any],
-    prompt_context_validation: Mapping[str, Any],
+    context_pack_validation: Mapping[str, Any],
     slot_item_counts: Mapping[str, int],
 ) -> tuple[str, str]:
-    validation_reason = str(prompt_context_validation.get("reason_code") or "").strip().upper()
+    validation_reason = str(context_pack_validation.get("reason_code") or "").strip().upper()
     retrieval_status = str(retrieval_summary.get("status") or "").strip().upper()
     retrieval_degraded = bool(retrieval_summary.get("degraded", False))
     route_count = _coerce_non_negative_int(retrieval_summary.get("route_count"))
@@ -303,13 +388,13 @@ def _select_context_degrade_tier(
     )
     total_items = sum(_coerce_non_negative_int(value) for value in slot_item_counts.values())
 
-    if validation_reason == "PROMPT_CONTEXT_MINIMAL_FALLBACK":
+    if validation_reason == "CONTEXT_PACK_MINIMAL_FALLBACK":
         if total_items == 0:
-            return "bare_llm", "prompt_context_minimal_fallback_and_empty_slots"
-        return "minimal_context", "prompt_context_minimal_fallback"
+            return "bare_llm", "context_pack_minimal_fallback_and_empty_slots"
+        return "minimal_context", "context_pack_minimal_fallback"
 
-    if validation_reason == "PROMPT_CONTEXT_DEGRADED":
-        return "minimal_context", "prompt_context_authoritative_slot_degraded"
+    if validation_reason == "CONTEXT_PACK_DEGRADED":
+        return "minimal_context", "context_pack_authoritative_slot_degraded"
 
     if route_count >= 6 and retrieval_items > 0 and retrieval_status == "OK" and not retrieval_degraded:
         return "six_route", "full_six_route_retrieval_ready"
@@ -326,30 +411,34 @@ def _select_context_degrade_tier(
     return "bare_llm", "no_context_slots_available"
 
 
-def build_prompt_context_observability(
+def build_context_pack_observability(
     *,
-    prompt_context: Mapping[str, Any],
-    prompt_context_validation: Mapping[str, Any],
+    context_pack: Mapping[str, Any],
+    context_pack_validation: Mapping[str, Any],
     retrieval_summary: Mapping[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    authoritative_rows = list(prompt_context.get("authoritative") or []) if isinstance(prompt_context.get("authoritative"), list) else []
-    retrieval_rows = list(prompt_context.get("retrieval") or []) if isinstance(prompt_context.get("retrieval"), list) else []
-    tool_meta_rows = list(prompt_context.get("tool_meta_pack") or []) if isinstance(prompt_context.get("tool_meta_pack"), list) else []
+    authoritative_rows = list(context_pack.get("authoritative") or []) if isinstance(context_pack.get("authoritative"), list) else []
+    retrieval_rows = list(context_pack.get("retrieval") or []) if isinstance(context_pack.get("retrieval"), list) else []
+    tool_meta_rows = list(context_pack.get("tool_meta_pack") or []) if isinstance(context_pack.get("tool_meta_pack"), list) else []
 
-    style_pack_raw = prompt_context.get("style_pack")
+    style_pack_raw = context_pack.get("style_pack")
     style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
     style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
+    node_bindings_raw = style_pack.get("node_bindings")
+    node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
+
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
         "retrieval": len(retrieval_rows),
         "style_canon": len(style_rows),
+        "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
     }
 
     selected_tier, selected_reason = _select_context_degrade_tier(
         retrieval_summary=retrieval_summary,
-        prompt_context_validation=prompt_context_validation,
+        context_pack_validation=context_pack_validation,
         slot_item_counts=slot_item_counts,
     )
 
@@ -365,8 +454,8 @@ def build_prompt_context_observability(
                 "authoritative": authoritative_rows,
                 "retrieval": retrieval_rows,
                 "style_pack": style_pack,
-                "constraints": dict(prompt_context.get("constraints") or {}),
-                "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
+                "constraints": dict(context_pack.get("constraints") or {}),
+                "emotion_pulse": dict(context_pack.get("emotion_pulse") or {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -378,7 +467,7 @@ def build_prompt_context_observability(
     retrieval_item_cap = 10
 
     return {
-        "version": "prompt_context_obs.v1",
+        "version": "context_pack_obs.v1",
         "degrade_order": list(CONTEXT_DEGRADE_ORDER),
         "selected_tier": selected_tier,
         "selected_tier_rank": list(CONTEXT_DEGRADE_ORDER).index(selected_tier),
@@ -408,30 +497,86 @@ def build_prompt_context_observability(
             "retrieval_item_cap": retrieval_item_cap,
             "retrieval_trimmed_items": max(0, retrieval_input_count - retrieval_used_count),
             "world_authoritative_items": len(authoritative_rows),
-            "style_prompt_rows": len(style_rows),
+            "style_binding_nodes": len(node_bindings),
         },
         "context_size_chars": context_chars,
     }
 
 
-def build_chat_runtime_payload(
+def build_chat_generation_prompt_payload(
     *,
-    runtime_input: ChatRuntimeInput,
+    request_id: str,
+    session_id: str,
+    thread_id: str | None,
+    user_message: str,
+    retrieval_summary: dict[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    emotion_context: Mapping[str, Any] | None = None,
+    emotion_snapshot: Mapping[str, Any] | None = None,
+    render_target_lang: str | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    prompt_context, prompt_context_validation = build_prompt_context(
-        runtime_input=runtime_input,
+    from host_brain.app.emotion_context import (  # noqa: PLC0415
+        build_chat_emotion_snapshot,
+        normalize_chat_emotion_context,
     )
-    prompt_context_observability = build_prompt_context_observability(
-        prompt_context=prompt_context,
-        prompt_context_validation=prompt_context_validation,
-        retrieval_summary=runtime_input.retrieval_summary,
-        retrieval_evidence_items=runtime_input.retrieval_evidence_items,
+    normalized_style_bindings = normalize_node_style_bindings(style_bindings)
+    normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
+    normalized_emotion_snapshot = (
+        dict(emotion_snapshot)
+        if isinstance(emotion_snapshot, Mapping)
+        else build_chat_emotion_snapshot(
+            emotion_context=normalized_emotion_context,
+            source="prompt_payload",
+        )
     )
-    return runtime_input.to_runtime_payload(
-        prompt_context=prompt_context,
-        prompt_context_validation=prompt_context_validation,
-        prompt_context_observability=prompt_context_observability,
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+    if resolved_render_lang not in {"zh", "ja"}:
+        resolved_render_lang = infer_render_target_lang(user_message=user_message)
+    context_pack, context_pack_validation = build_chat_context_pack(
+        request_id=request_id,
+        session_id=session_id,
+        thread_id=thread_id,
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        style_bindings=normalized_style_bindings,
+        emotion_context=normalized_emotion_context,
+        cpb_slots=cpb_slots,
     )
+    context_pack_observability = build_context_pack_observability(
+        context_pack=context_pack,
+        context_pack_validation=context_pack_validation,
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+    )
+    return {
+        "request_id": request_id,
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "user_message": user_message,
+        "render_target_lang": resolved_render_lang,
+        "style_bindings": normalized_style_bindings,
+        "emotion_context": {
+            "mood_state": normalized_emotion_context.get("mood_state"),
+            "emotion_tag": normalized_emotion_context.get("emotion_tag"),
+            "emotion_range_hint": normalized_emotion_context.get("emotion_range_hint"),
+            "emotion_intensity": normalized_emotion_context.get("emotion_intensity"),
+        },
+        "emotion_snapshot": normalized_emotion_snapshot,
+        "context_pack": context_pack,
+        "context_pack_validation": context_pack_validation,
+        "context_pack_observability": context_pack_observability,
+        "retrieval": {
+            "status": retrieval_summary.get("status"),
+            "reason_code": retrieval_summary.get("reason_code"),
+            "route_count": retrieval_summary.get("route_count"),
+            "candidate_count": retrieval_summary.get("candidate_count"),
+            "rerank_topk": retrieval_summary.get("rerank_topk"),
+            "degraded": retrieval_summary.get("degraded"),
+            "evidence_items": retrieval_evidence_items,
+        },
+    }
 
 
 def extract_chat_graph_node_entry(graph_output: dict[str, Any], *, node_id: str) -> dict[str, Any]:

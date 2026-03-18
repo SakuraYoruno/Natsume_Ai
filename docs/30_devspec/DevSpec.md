@@ -4,9 +4,9 @@
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
 # Natsume Ai 产品开发文档（Dev Spec）
-版本：v1.6
-日期：2026-03-04
-适用架构：Host_Brain（Python，含 LangGraph 编排） + Natsume_Body（Edge） + Cloud Exocortex + ClawdBot
+版本：v1.7
+日期：2026-03-18
+适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
 
 本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。
 目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
@@ -70,7 +70,8 @@ DevSpec 写作规则（工程契约级）：
 │     ├─ core_output_contract.json # LLM→Host Strict JSON 输出契约示例（结构示例，不是实现）
 │     └─ refusal_templates.md # 统一拒绝叙事范式（非事实）
 ├─ docs/
-│  ├─ 00_DOCMAP.md
+│  ├─ 00_index/
+│  │  └─ 00_DOCMAP.md
 │  ├─ 10_whitepaper/
 │  │  └─ whitepaper_constitution_persona.md
 │  ├─ 15_theory/
@@ -106,7 +107,7 @@ DevSpec 写作规则（工程契约级）：
 │  │  └─ errors.py # reason_code 与错误对象（稳定枚举）
 │  ├─ governor/
 │  │  ├─ schemas.py # Intent/GovernorOutput/Token/Manifest（Schema/验证器）
-│  │  ├─ rules.py # R1–R7 Gate（trust/energy/sys_mode/scope/safety/airlock）
+│  │  ├─ rules.py # R1–R8 Gate（trust/energy/sys_mode/rate/scope/safety/airlock/emotion）
 │  │  ├─ decision.py # 裁决入口：输入→校验→决策→写审计
 │  │  └─ tokens.py # approval/confirm/undo 票据绑定与校验规则
 │  ├─ skills/
@@ -183,7 +184,7 @@ M0：骨架可解析（不接外部依赖也能闭环）
 
 M1：Governor 可治理（门禁可回归）
 交付物：
-- R1–R7 Gate 的规则骨架（即使阈值未调优也必须可观测）
+- R1–R8 Gate 的规则骨架（即使阈值未调优也必须可观测）
 - approval/confirm/undo 的绑定字段与校验逻辑（含幂等）
 
 验证点：
@@ -266,10 +267,8 @@ active.pointer 格式（必须）：
 
 ## 2. 运行时进程拓扑与通信
 
-## 2. 运行时进程拓扑与通信
-
 2.1 Host 进程（主权裁决与统一编排）
-- 对外提供：`POST /v1/chat`（用户输入 → 输出 narrative（rendered_ja） + intent_draft + quality；可选 debug.core_narrative_zh）
+- 对外提供：`POST /v1/chat`（统一 SSE 入口：Governor 裁决 → SceneRouter 分流 → 场景处理链路）
 - 统一编排：所有 Agent 与链路编排仅在 Host 发生；Edge 端组件仅作为“远程能力提供者”被调用（draft-only，不具终审权）。
 - 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Neo4j Bond SSOT、Episodic 向量库、Embedding、Reranker、Recall/Fusion、Screen Capture、OCR/Vision、ClawdBot、Cloud Gateway + AIRLOCK、Observability。
 - 运行时不可用：任一服务不可用必须可观测降级并保持输出结构稳定（不得伪执行）。
@@ -371,7 +370,7 @@ Intent 进入 Governor 前，至少要在 intent_log（或等价审计表）记�
 GovernorOutput 必须为单个 JSON 对象，字段语义固定：
 - decision：APPROVE | REJECT
 - reason_code：仅当 decision=REJECT 必须存在（稳定枚举）
-- rule_trace：命中的 Gate 列表（R1–R7）+ 阈值摘要 + 快照摘要（可定位）
+- rule_trace：命中的 Gate 列表（R1–R8）+ 阈值摘要 + 快照摘要（可定位）
 - tokens：
   - APPROVE：必须含 approval_token_ref（可选含 confirm_token_ref/undo_token_ref）
   - REJECT：不得下发 approval_token_ref
@@ -385,7 +384,7 @@ GovernorOutput 必须为单个 JSON 对象，字段语义固定：
 
 ### 4.3 rule_trace 最小结构（建议固定字段）
 每条 Gate 记录至少包含：
-- gate_id：R1..R7
+- gate_id：R1..R8
 - hit：true/false
 - threshold_summary：阈值摘要（不泄露敏感原值）
 - snapshot_summary：输入快照摘要（桶化）
@@ -999,8 +998,8 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 目标：把裁决与授权的关键逻辑做成“版本化规则”，而不是散落在业务代码里。
 
 必须实现且可版本化的规则族：
-1）Governor Gates（R1–R7）
-- trust / energy / sys_mode / rate_limit / scope_policy / safety / airlock
+1）Governor Gates（R1–R8）
+- trust / energy / sys_mode / rate_limit / scope_policy / safety / airlock / emotion
 - 每次裁决必须产出 rule_trace（包含命中门、阈值摘要、快照摘要）
 
 2）工具与执行门禁
@@ -1118,11 +1117,11 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 
 15.1.3 sys_mode 门控矩阵
 
-| 任务优先级 | Normal | Sleep | Gaming | Focus（Normal子模式） |
-|-----------|--------|-------|--------|---------------------|
-| HIGH（如日记） | ✅ | ✅ | ❌ | ✅ |
-| MEDIUM（如梦境） | ✅ | ✅ | ❌ | ❌ |
-| LOW（如主动对话） | ✅ | 仅问候 | ❌ | ❌ |
+| 任务优先级 | normal | focus | gaming | maintenance | locked | sleep |
+|-----------|--------|-------|--------|-------------|--------|-------|
+| HIGH（如日记） | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| MEDIUM（如梦境） | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| LOW（如主动对话） | ✅ | ❌ | ❌ | ❌ | ❌ | 仅问候 |
 
 15.1.4 审计字段
 - `scheduler_event_log`（新增审计表）：task_id/trigger_ts/intent_id/status/reason_code/mode_at_trigger/error_detail。
@@ -4277,4 +4276,3 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 | `frontend_api_integration_verified` | 前端切换真实 API 验证通过 |
 | `zero_regressions` | failed=0 |
 | `total_tests_passed` | ≥ 1575 |
-
