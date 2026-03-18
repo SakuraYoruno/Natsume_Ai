@@ -1,0 +1,18 @@
+{
+  "test_id": "T5-1",
+  "service": "host.retrieval.embedding",
+  "operation": "embed",
+  "params_in": {
+    "text": "夏目友人帐，妖怪与人类的故事",
+    "request_id": "req_19dfe8b4d6e344cb9a89649e0dc9b96b"
+  },
+  "params_out": {
+    "status": "DEGRADED",
+    "reason_code": "RETR_EMBED_UNAVAILABLE",
+    "vector_dim": 0,
+    "vector_sample": [],
+    "model_id": null
+  },
+  "status": "FAIL",
+  "ts_ms": 1773750377673
+}

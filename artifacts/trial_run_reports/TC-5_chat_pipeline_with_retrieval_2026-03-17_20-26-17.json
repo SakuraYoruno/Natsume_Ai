@@ -1,0 +1,23 @@
+{
+  "test_id": "TC-5",
+  "service": "CHAT_PIPELINE",
+  "operation": "governor_plus_retrieval",
+  "params_in": {
+    "request_id": "req_cb479fc4bd21435380e8922efd9fdaad",
+    "message": "夏目友人帐的故事"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "retrieval": {
+      "status": "DEGRADED",
+      "reason_code": "RETR_EMBED_UNAVAILABLE",
+      "recall_candidates": 0,
+      "rerank_topk": 0,
+      "evidence_refs": 0,
+      "degraded": true
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1773750377673
+}
