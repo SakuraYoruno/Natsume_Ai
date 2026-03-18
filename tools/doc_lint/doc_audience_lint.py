@@ -39,7 +39,13 @@ SKIP_DIR_NAMES = {
     ".mypy_cache",
     ".ruff_cache",
 }
-SKIP_SUBSTRINGS = ("/tests/fixtures/",)
+SKIP_SUBSTRINGS = (
+    "/tests/fixtures/",
+    "/artifacts/",
+    "/runtime/",
+    "/runtime_logs/",
+    "/models/",
+)
 
 
 def scan_markdown_files(
