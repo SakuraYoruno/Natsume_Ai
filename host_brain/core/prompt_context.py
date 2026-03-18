@@ -36,15 +36,16 @@ OPTIONAL_SLOTS: dict[str, type] = {
     "memory_emotion_hint": dict,
 }
 
-# M28-G锛氬姩鎬佹Ы浣嶆敞鍐岃〃锛圤PT-16锛?# slot_name 鈫?builder_fn(context_data: dict) -> Any
+# M28-G：动态槽位注册表（OPT-16）
+# slot_name → builder_fn(context_data: dict) -> Any
 _DYNAMIC_SLOT_REGISTRY: dict[str, Any] = {}
 
 
 def register_slot(name: str, builder_fn: Any) -> None:
-    """娉ㄥ唽鍔ㄦ€佹Ы浣嶆瀯寤哄嚱鏁帮紙M28-G OPT-16锛夈€?
+    """注册动态槽位构建函数（M28-G OPT-16）。
     Args:
-        name: 妲戒綅鍚嶇О
-        builder_fn: 鎺ュ彈 context_data dict 骞惰繑鍥炴Ы浣嶅€肩殑鍑芥暟
+        name: 槽位名称
+        builder_fn: 接受 context_data dict 并返回槽位值的函数
     """
     _DYNAMIC_SLOT_REGISTRY[str(name)] = builder_fn
 
@@ -423,7 +424,8 @@ def _iter_values(value: Any) -> Iterable[Any]:
 
 
 # ---------------------------------------------------------------------------
-# World Canon 鐙珛妲戒綅娉ㄥ叆锛圱ASK-0113 / FR-WCANON-001锛?# ---------------------------------------------------------------------------
+# World Canon 独立槽位注入（TASK-0113 / FR-WCANON-001）
+# ---------------------------------------------------------------------------
 
 def build_world_canon_slot(
     *,
@@ -439,7 +441,7 @@ def build_world_canon_slot(
     store = WorldCanonStore(world_root=root, ledger=None)  # type: ignore[arg-type]
     docs, _issues = store.scan_documents()
 
-    # 杩囨护 status锛屾寜 ts_ms 闄嶅簭鍙?Top-K
+    # 过滤 status，按 ts_ms 降序取 Top-K
     filtered = [d for d in docs if d.status == status_filter]
     filtered.sort(key=lambda d: d.ts_ms, reverse=True)
     selected = filtered[:top_k]
@@ -467,7 +469,7 @@ def build_world_canon_slot(
 
 
 # ---------------------------------------------------------------------------
-# M10-C: 璇箟璁板繂妲戒綅锛堣蹇嗚捀棣忕粨鏋滄敞鍏ワ級
+# M10-C: 语义记忆槽位（记忆蒸馏结果注入）
 # ---------------------------------------------------------------------------
 
 def _validate_semantic_slot(
