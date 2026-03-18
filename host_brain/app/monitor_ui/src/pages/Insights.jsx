@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Flame } from 'lucide-react'
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Flame, ArrowLeft } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import {
@@ -58,6 +59,15 @@ const WINDOW_OPTIONS = [
   { label: '7d',  value: 10080 },
 ]
 
+const INSIGHT_GROUPS = [
+  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: 'Governor决策、全局错误追踪、热力图、主链路节点、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
+  { id: 'memory', title: '子系统与记忆', icon: Database, desc: '子系统健康、Memory统计、EpisodicStore、ContextCompressor', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
+  { id: 'llm', title: 'Agent与LLM', icon: Bot, desc: 'Agent Loop、LLM成本、路由决策、Prompt构建、RecallPack', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
+  { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: 'QA违规、权限拒绝、宪法校验、UI断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
+  { id: 'state', title: '状态与规范', icon: GitMerge, desc: '事实仲裁、Canon提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
+  { id: 'vts', title: 'VTS通道', icon: Tv, desc: 'VTS通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },
+]
+
 // ===== 子组件：统计卡片 =====
 function StatCard({ label, value, sub, color = 'text-gray-800' }) {
   return (
@@ -83,6 +93,10 @@ function SectionTitle({ icon: Icon, title, color = 'text-gray-700' }) {
 export default function Insights() {
   const pollingEnabled  = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const currentGroup = location.pathname.split('/').pop()
+  const isRoot = currentGroup === 'insights' || currentGroup === ''
 
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [loading, setLoading] = useState(true)
@@ -166,8 +180,39 @@ export default function Insights() {
       </div>
 
       {error && <div className="card p-4 text-red-500 text-sm">加载失败：{error}</div>}
+      {isRoot ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+          {INSIGHT_GROUPS.map(g => (
+            <div
+              key={g.id}
+              className={`rounded-xl p-6 cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col gap-4 ${g.bg}`}
+              onClick={() => navigate(`/insights/${g.id}`)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-lg ${g.iconBg} ${g.color} shadow-sm`}>
+                    <g.icon size={24} strokeWidth={2} />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800 tracking-tight">{g.title}</h3>
+                </div>
+                <div className={`text-xs font-medium px-2 py-1 rounded-full ${g.iconBg} ${g.color} bg-opacity-50 flex items-center gap-1`}>
+                  <span>进入</span>
+                  <ArrowLeft size={12} className="rotate-180" />
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 leading-relaxed">{g.desc}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-8 mt-6">
+          <button className="btn-secondary" onClick={() => navigate('/insights')}>
+            <ArrowLeft size={16} /> 返回分组
+          </button>
 
-      {/* ===== P1: Governor 决策漏斗 ===== */}
+          {currentGroup === 'global' && (
+            <>
+              {/* ===== P1: Governor 决策漏斗 ===== */}
       <section>
         <SectionTitle icon={ShieldCheck} title="Governor 决策漏斗" color="text-blue-600" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -211,8 +256,7 @@ export default function Insights() {
           </div>
         </div>
       </section>
-
-      {/* ===== P1: 全局错误追踪 ===== */}
+              {/* ===== P1: 全局错误追踪 ===== */}
       <section>
         <SectionTitle icon={AlertTriangle} title="全局错误追踪" color="text-red-500" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -276,8 +320,15 @@ export default function Insights() {
           </div>
         )}
       </section>
+              <ErrorHeatmapSection windowMinutes={windowMinutes} />
+              <ChainStatsSection windowMinutes={windowMinutes} />
+              <FailureStatsSection windowMinutes={windowMinutes} />
+            </>
+          )}
 
-      {/* ===== P2: 子系统健康矩阵 ===== */}
+          {currentGroup === 'memory' && (
+            <>
+              {/* ===== P2: 子系统健康矩阵 ===== */}
       <section>
         <SectionTitle icon={Cpu} title="子系统健康矩阵" color="text-purple-600" />
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -310,8 +361,78 @@ export default function Insights() {
           )}
         </div>
       </section>
+              {/* ===== TODO-32: Memory 子系统统计 ===== */}
+      <section>
+        <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
+        {/* 聚合指标卡片 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard
+            label="EpisodicStore 写入量"
+            value={memoryData?.total_writes ?? '—'}
+            color="text-teal-600"
+          />
+          <StatCard
+            label="MemoryGuard 拒绝率"
+            value={memoryData?.guard_reject_rate != null ? `${memoryData.guard_reject_rate}%` : '—'}
+            color={memoryData?.guard_reject_rate > 30 ? 'text-red-500' : memoryData?.guard_reject_rate > 10 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="ContextCompressor 压缩率"
+            value={memoryData?.compress_rate != null ? `${memoryData.compress_rate}%` : '—'}
+            color="text-blue-600"
+          />
+          <StatCard
+            label="LongTermDistiller 蒸馏次数"
+            value={memoryData?.distill_count ?? '—'}
+            color="text-purple-600"
+          />
+        </div>
+        {/* 子系统详情卡片 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {(memoryData?.subsystems ?? []).map((s) => (
+            <div key={s.subsystem} className={`card p-3 border ${statusBg(s.success_rate)}`}>
+              <div className="text-xs font-medium text-gray-700 mb-2 truncate" title={s.display_name}>
+                {s.display_name}
+              </div>
+              <div className={`text-xl font-bold ${statusColor(s.success_rate)}`}>
+                {s.success_rate != null ? `${s.success_rate}%` : '—'}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                {s.total > 0 ? `${s.success}/${s.total} 成功` : '无数据'}
+              </div>
+              {/* 子系统专属指标 */}
+              {s.extra?.reject_rate != null && (
+                <div className="text-xs text-red-500 mt-0.5">拒绝率 {s.extra.reject_rate}%</div>
+              )}
+              {s.extra?.avg_compress_rate_pct != null && (
+                <div className="text-xs text-blue-500 mt-0.5">压缩率 {s.extra.avg_compress_rate_pct}%</div>
+              )}
+              {s.extra?.distill_count != null && (
+                <div className="text-xs text-purple-500 mt-0.5">蒸馏 {s.extra.distill_count} 次</div>
+              )}
+              {s.last_ts && (
+                <div className="text-xs text-gray-300 mt-1 truncate" title={formatTime(s.last_ts)}>
+                  {formatTime(s.last_ts)}
+                </div>
+              )}
+            </div>
+          ))}
+          {(memoryData?.subsystems ?? []).length === 0 && (
+            <div className="col-span-full text-center py-8 text-gray-400 text-sm">
+              <Database size={24} className="mx-auto mb-2 text-gray-300" />
+              暂无 Memory 子系统数据
+            </div>
+          )}
+        </div>
+      </section>
+              <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
+              <ContextCompressorStatsSection windowMinutes={windowMinutes} />
+            </>
+          )}
 
-      {/* ===== P3: Agent Loop 统计 ===== */}
+          {currentGroup === 'llm' && (
+            <>
+              {/* ===== P3: Agent Loop 统计 ===== */}
       <section>
         <SectionTitle icon={Bot} title="Agent Loop 统计" color="text-indigo-600" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -372,173 +493,7 @@ export default function Insights() {
           </div>
         )}
       </section>
-
-      {/* ===== TODO-38: VTS 通道统计 ===== */}
-      <section>
-        <SectionTitle icon={Tv} title="VTS 通道统计" color="text-pink-600" />
-        {/* 聚合指标卡片 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-          <StatCard
-            label="总事件数"
-            value={vtsData?.total_events ?? '—'}
-          />
-          <StatCard
-            label="表情应用率"
-            value={vtsData?.apply_rate != null ? `${vtsData.apply_rate}%` : '—'}
-            color={vtsData?.apply_rate >= 80 ? 'text-green-600' : vtsData?.apply_rate >= 50 ? 'text-orange-500' : 'text-red-500'}
-          />
-          <StatCard
-            label="降级率"
-            value={vtsData?.degrade_rate != null ? `${vtsData.degrade_rate}%` : '—'}
-            color={vtsData?.degrade_rate > 20 ? 'text-orange-500' : 'text-green-600'}
-          />
-          <StatCard
-            label="拒绝率"
-            value={vtsData?.reject_rate != null ? `${vtsData.reject_rate}%` : '—'}
-            color={vtsData?.reject_rate > 10 ? 'text-red-500' : 'text-green-600'}
-          />
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Top 情感标签横向柱状图 */}
-          <div className="card p-4">
-            {(vtsData?.top_emotions?.length ?? 0) > 0 ? (
-              <BarChart
-                title="Top 情感标签分布"
-                direction="horizontal"
-                categories={(vtsData?.top_emotions ?? []).map((e) => e.emotion_tag)}
-                series={[{ name: '次数', data: (vtsData?.top_emotions ?? []).map((e) => e.count), color: '#EC4899' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <Tv size={24} className="mb-2 text-gray-300" />
-                <span className="text-xs font-medium text-gray-500">Top 情感标签分布</span>
-                <span className="mt-1">暂无 VTS 事件数据</span>
-              </div>
-            )}
-          </div>
-          {/* Talk Gate 统计 */}
-          <div className="card p-4">
-            <div className="text-xs font-medium text-gray-500 mb-3">Talk Gate 统计</div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-700">{vtsData?.talk_gate_total ?? '—'}</div>
-                <div className="text-xs text-gray-400 mt-1">总请求</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">{vtsData?.talk_gate_allowed ?? '—'}</div>
-                <div className="text-xs text-gray-400 mt-1">允许</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-red-500">{vtsData?.talk_gate_blocked ?? '—'}</div>
-                <div className="text-xs text-gray-400 mt-1">拒绝</div>
-              </div>
-            </div>
-            {vtsData?.talk_gate_total > 0 && (
-              <div className="mt-4">
-                <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>允许率</span>
-                  <span>{Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%</span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-2">
-                  <div
-                    className="bg-green-500 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-            {(vtsData?.talk_gate_total ?? 0) === 0 && (
-              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
-                <span>暂无 Talk Gate 数据</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ===== TODO-40: QA 违规统计 ===== */}
-      <section>
-        <SectionTitle icon={FileWarning} title="QA 违规统计" color="text-red-600" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-          <StatCard
-            label="违规总数"
-            value={qaData?.total_violations ?? '—'}
-            color={qaData?.total_violations > 0 ? 'text-red-500' : 'text-green-600'}
-          />
-          <StatCard
-            label="降级次数"
-            value={qaData?.degraded_count ?? '—'}
-            color={qaData?.degraded_count > 0 ? 'text-orange-500' : 'text-green-600'}
-          />
-          <StatCard
-            label="降级率"
-            value={qaData?.degrade_rate != null ? `${qaData.degrade_rate}%` : '—'}
-            color={qaData?.degrade_rate > 30 ? 'text-red-500' : qaData?.degrade_rate > 10 ? 'text-orange-500' : 'text-green-600'}
-          />
-          <StatCard
-            label="重写成功率"
-            value={qaData?.rewrite_success_rate != null ? `${qaData.rewrite_success_rate}%` : '—'}
-            color={qaData?.rewrite_success_rate >= 80 ? 'text-green-600' : 'text-orange-500'}
-          />
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* 违规码分布 */}
-          <div className="card p-4">
-            {(qaData?.violation_codes?.length ?? 0) > 0 ? (
-              <BarChart
-                title="违规码分布"
-                direction="horizontal"
-                categories={(qaData?.violation_codes ?? []).map((c) => c.violation_code)}
-                series={[{ name: '次数', data: (qaData?.violation_codes ?? []).map((c) => c.count), color: '#F04438' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <FileWarning size={24} className="mb-2 text-green-400" />
-                <span className="text-xs font-medium text-gray-500">违规码分布</span>
-                <span className="mt-1">暂无 QA 违规记录</span>
-              </div>
-            )}
-          </div>
-          {/* 违规时序趋势 */}
-          <div className="card p-4">
-            <LineChart
-              title="违规趋势"
-              xData={qaData?.timeseries_labels ?? []}
-              series={[{ name: '违规数', data: qaData?.timeseries_counts ?? [], color: '#F04438' }]}
-            />
-          </div>
-        </div>
-        {/* 最近违规列表 */}
-        {(qaData?.recent_violations?.length ?? 0) > 0 && (
-          <div className="card overflow-hidden mt-4">
-            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              最近 QA 违规
-            </div>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {['时间', '节点', '违规码', '处置', '详情'].map((h) => (
-                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {(qaData?.recent_violations ?? []).map((v, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{formatTime(v.ts_ms)}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{v.node_id ?? '—'}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-red-600">{v.violation_code ?? '—'}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-orange-500">{v.action ?? '—'}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-xs" title={v.detail}>{v.detail || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ===== TODO-41: LLM 调用成本统计 ===== */}
+              {/* ===== TODO-41: LLM 调用成本统计 ===== */}
       <section>
         <SectionTitle icon={Zap} title="LLM 调用成本统计" color="text-amber-600" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -622,110 +577,197 @@ export default function Insights() {
           </div>
         )}
       </section>
+              <RouteStatsSection windowMinutes={windowMinutes} />
+              <PromptBuilderStatsSection windowMinutes={windowMinutes} />
+              <RecallPackSection windowMinutes={windowMinutes} />
+            </>
+          )}
 
-      {/* ===== TODO-47: LLM 路由决策统计 ===== */}
-      <RouteStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-49: RecallPack token budget stats ===== */}
-      <RecallPackSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-50: UIAssertion 统计 ===== */}
-      <UIAssertionSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-53: FailureMatrix 失败事件统计 ===== */}
-      <FailureStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
-      <PermissionStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-59: MemoryGuard 宪法校验统计 ===== */}
-      <MemoryGuardStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-60: StateArbiter 事实仲裁统计 ===== */}
-      <StateArbiterStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-61: ContextCompressor 压缩效率统计 ===== */}
-      <ContextCompressorStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-65: PromptBuilder 构建统计 ===== */}
-      <PromptBuilderStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-66: EpisodicStore 写入统计 ===== */}
-      <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-77: Canon 提案统计 ===== */}
-      <CanonProposalStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-84: 主链路节点统计 ===== */}
-      <ChainStatsSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-89: 错误热力图 ===== */}
-      <ErrorHeatmapSection windowMinutes={windowMinutes} />
-
-      {/* ===== TODO-32: Memory 子系统统计 ===== */}
+          {currentGroup === 'safety' && (
+            <>
+              {/* ===== TODO-40: QA 违规统计 ===== */}
       <section>
-        <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
+        <SectionTitle icon={FileWarning} title="QA 违规统计" color="text-red-600" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          <StatCard
+            label="违规总数"
+            value={qaData?.total_violations ?? '—'}
+            color={qaData?.total_violations > 0 ? 'text-red-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="降级次数"
+            value={qaData?.degraded_count ?? '—'}
+            color={qaData?.degraded_count > 0 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="降级率"
+            value={qaData?.degrade_rate != null ? `${qaData.degrade_rate}%` : '—'}
+            color={qaData?.degrade_rate > 30 ? 'text-red-500' : qaData?.degrade_rate > 10 ? 'text-orange-500' : 'text-green-600'}
+          />
+          <StatCard
+            label="重写成功率"
+            value={qaData?.rewrite_success_rate != null ? `${qaData.rewrite_success_rate}%` : '—'}
+            color={qaData?.rewrite_success_rate >= 80 ? 'text-green-600' : 'text-orange-500'}
+          />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 违规码分布 */}
+          <div className="card p-4">
+            {(qaData?.violation_codes?.length ?? 0) > 0 ? (
+              <BarChart
+                title="违规码分布"
+                direction="horizontal"
+                categories={(qaData?.violation_codes ?? []).map((c) => c.violation_code)}
+                series={[{ name: '次数', data: (qaData?.violation_codes ?? []).map((c) => c.count), color: '#F04438' }]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
+                <FileWarning size={24} className="mb-2 text-green-400" />
+                <span className="text-xs font-medium text-gray-500">违规码分布</span>
+                <span className="mt-1">暂无 QA 违规记录</span>
+              </div>
+            )}
+          </div>
+          {/* 违规时序趋势 */}
+          <div className="card p-4">
+            <LineChart
+              title="违规趋势"
+              xData={qaData?.timeseries_labels ?? []}
+              series={[{ name: '违规数', data: qaData?.timeseries_counts ?? [], color: '#F04438' }]}
+            />
+          </div>
+        </div>
+        {/* 最近违规列表 */}
+        {(qaData?.recent_violations?.length ?? 0) > 0 && (
+          <div className="card overflow-hidden mt-4">
+            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+              最近 QA 违规
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  {['时间', '节点', '违规码', '处置', '详情'].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(qaData?.recent_violations ?? []).map((v, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{formatTime(v.ts_ms)}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-blue-600">{v.node_id ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-red-600">{v.violation_code ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-orange-500">{v.action ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-xs" title={v.detail}>{v.detail || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+              <PermissionStatsSection windowMinutes={windowMinutes} />
+              <MemoryGuardStatsSection windowMinutes={windowMinutes} />
+              <UIAssertionSection windowMinutes={windowMinutes} />
+            </>
+          )}
+
+          {currentGroup === 'state' && (
+            <>
+              <StateArbiterStatsSection windowMinutes={windowMinutes} />
+              <CanonProposalStatsSection windowMinutes={windowMinutes} />
+            </>
+          )}
+
+          {currentGroup === 'vts' && (
+            <>
+              {/* ===== TODO-38: VTS 通道统计 ===== */}
+      <section>
+        <SectionTitle icon={Tv} title="VTS 通道统计" color="text-pink-600" />
         {/* 聚合指标卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard
-            label="EpisodicStore 写入量"
-            value={memoryData?.total_writes ?? '—'}
-            color="text-teal-600"
+            label="总事件数"
+            value={vtsData?.total_events ?? '—'}
           />
           <StatCard
-            label="MemoryGuard 拒绝率"
-            value={memoryData?.guard_reject_rate != null ? `${memoryData.guard_reject_rate}%` : '—'}
-            color={memoryData?.guard_reject_rate > 30 ? 'text-red-500' : memoryData?.guard_reject_rate > 10 ? 'text-orange-500' : 'text-green-600'}
+            label="表情应用率"
+            value={vtsData?.apply_rate != null ? `${vtsData.apply_rate}%` : '—'}
+            color={vtsData?.apply_rate >= 80 ? 'text-green-600' : vtsData?.apply_rate >= 50 ? 'text-orange-500' : 'text-red-500'}
           />
           <StatCard
-            label="ContextCompressor 压缩率"
-            value={memoryData?.compress_rate != null ? `${memoryData.compress_rate}%` : '—'}
-            color="text-blue-600"
+            label="降级率"
+            value={vtsData?.degrade_rate != null ? `${vtsData.degrade_rate}%` : '—'}
+            color={vtsData?.degrade_rate > 20 ? 'text-orange-500' : 'text-green-600'}
           />
           <StatCard
-            label="LongTermDistiller 蒸馏次数"
-            value={memoryData?.distill_count ?? '—'}
-            color="text-purple-600"
+            label="拒绝率"
+            value={vtsData?.reject_rate != null ? `${vtsData.reject_rate}%` : '—'}
+            color={vtsData?.reject_rate > 10 ? 'text-red-500' : 'text-green-600'}
           />
         </div>
-        {/* 子系统详情卡片 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(memoryData?.subsystems ?? []).map((s) => (
-            <div key={s.subsystem} className={`card p-3 border ${statusBg(s.success_rate)}`}>
-              <div className="text-xs font-medium text-gray-700 mb-2 truncate" title={s.display_name}>
-                {s.display_name}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Top 情感标签横向柱状图 */}
+          <div className="card p-4">
+            {(vtsData?.top_emotions?.length ?? 0) > 0 ? (
+              <BarChart
+                title="Top 情感标签分布"
+                direction="horizontal"
+                categories={(vtsData?.top_emotions ?? []).map((e) => e.emotion_tag)}
+                series={[{ name: '次数', data: (vtsData?.top_emotions ?? []).map((e) => e.count), color: '#EC4899' }]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
+                <Tv size={24} className="mb-2 text-gray-300" />
+                <span className="text-xs font-medium text-gray-500">Top 情感标签分布</span>
+                <span className="mt-1">暂无 VTS 事件数据</span>
               </div>
-              <div className={`text-xl font-bold ${statusColor(s.success_rate)}`}>
-                {s.success_rate != null ? `${s.success_rate}%` : '—'}
+            )}
+          </div>
+          {/* Talk Gate 统计 */}
+          <div className="card p-4">
+            <div className="text-xs font-medium text-gray-500 mb-3">Talk Gate 统计</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-gray-700">{vtsData?.talk_gate_total ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">总请求</div>
               </div>
-              <div className="text-xs text-gray-400 mt-1">
-                {s.total > 0 ? `${s.success}/${s.total} 成功` : '无数据'}
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">{vtsData?.talk_gate_allowed ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">允许</div>
               </div>
-              {/* 子系统专属指标 */}
-              {s.extra?.reject_rate != null && (
-                <div className="text-xs text-red-500 mt-0.5">拒绝率 {s.extra.reject_rate}%</div>
-              )}
-              {s.extra?.avg_compress_rate_pct != null && (
-                <div className="text-xs text-blue-500 mt-0.5">压缩率 {s.extra.avg_compress_rate_pct}%</div>
-              )}
-              {s.extra?.distill_count != null && (
-                <div className="text-xs text-purple-500 mt-0.5">蒸馏 {s.extra.distill_count} 次</div>
-              )}
-              {s.last_ts && (
-                <div className="text-xs text-gray-300 mt-1 truncate" title={formatTime(s.last_ts)}>
-                  {formatTime(s.last_ts)}
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-500">{vtsData?.talk_gate_blocked ?? '—'}</div>
+                <div className="text-xs text-gray-400 mt-1">拒绝</div>
+              </div>
+            </div>
+            {vtsData?.talk_gate_total > 0 && (
+              <div className="mt-4">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span>允许率</span>
+                  <span>{Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%</span>
                 </div>
-              )}
-            </div>
-          ))}
-          {(memoryData?.subsystems ?? []).length === 0 && (
-            <div className="col-span-full text-center py-8 text-gray-400 text-sm">
-              <Database size={24} className="mx-auto mb-2 text-gray-300" />
-              暂无 Memory 子系统数据
-            </div>
-          )}
+                <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    className="bg-green-500 h-2 rounded-full transition-all"
+                    style={{ width: `${Math.round((vtsData.talk_gate_allowed / vtsData.talk_gate_total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {(vtsData?.talk_gate_total ?? 0) === 0 && (
+              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
+                <span>暂无 Talk Gate 数据</span>
+              </div>
+            )}
+          </div>
         </div>
       </section>
+            </>
+          )}
+        </div>
+      )}
+
     </div>
   )
 }

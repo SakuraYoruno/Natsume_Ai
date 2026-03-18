@@ -101,9 +101,9 @@ const CustomNode = memo(({ data, selected }) => {
       className="relative rounded-lg border-2 bg-white shadow-card cursor-pointer select-none transition-all hover:shadow-card-hover"
       style={{
         borderColor: selected ? '#2970FF' : borderColor,
-        minWidth: 160,
-        maxWidth: 210,
-        opacity: isInactive ? 0.45 : 1,
+        minWidth: 130,
+        maxWidth: 170,
+        opacity: isInactive ? 0.72 : 1,
         // 激活态：外发光效果
         boxShadow: selected
           ? '0 0 0 3px rgba(41,112,255,0.2)'
@@ -127,13 +127,13 @@ const CustomNode = memo(({ data, selected }) => {
           <span
             className="flex items-center justify-center w-6 h-6 rounded"
             style={{
-              background: isInactive ? '#F2F4F7' : cfg.bg,
-              color: isInactive ? '#98A2B3' : cfg.color,
+              background: isInactive ? '#EAECF0' : cfg.bg,
+              color: isInactive ? '#667085' : cfg.color,
             }}
           >
             <Icon size={13} />
           </span>
-          <span className={`text-xs font-semibold truncate flex-1 ${isInactive ? 'text-gray-400' : 'text-gray-800'}`}>
+          <span className={`text-xs font-semibold truncate flex-1 ${isInactive ? 'text-gray-600' : 'text-gray-800'}`}>
             {data.display_name || data.label || cfg.label}
           </span>
         </div>
@@ -171,9 +171,9 @@ const CustomNode = memo(({ data, selected }) => {
         style={{ background: isInactive ? '#D0D5DD' : isActive ? cfg.color : borderColor }}
       />
 
-      {/* React Flow 连接点 */}
-      <Handle type="target" position={Position.Left}  style={{ background: '#D0D5DD', width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ background: '#D0D5DD', width: 8, height: 8 }} />
+      {/* React Flow 连接点（LR 布局：左入右出） */}
+      <Handle type="target" position={Position.Left}  style={{ background: '#D0D5DD', width: 7, height: 7 }} />
+      <Handle type="source" position={Position.Right} style={{ background: '#D0D5DD', width: 7, height: 7 }} />
     </div>
   )
 })

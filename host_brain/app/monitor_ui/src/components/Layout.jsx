@@ -39,7 +39,7 @@ export default function Layout() {
   const setPollingInterval = useAppStore((s) => s.setPollingInterval)
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="h-full flex flex-col bg-gray-50">
       {/* 顶部导航栏 */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
         <div className="w-full mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
@@ -100,7 +100,7 @@ export default function Layout() {
       </header>
 
       {/* 页面内容 */}
-      <main className="flex-1 w-full min-w-0 mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 w-full min-w-0 mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col">
         <Outlet />
       </main>
     </div>

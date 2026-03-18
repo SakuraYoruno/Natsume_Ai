@@ -21,10 +21,9 @@ export default function App() {
           <Route index element={<Navigate to="/overview" replace />} />
           <Route path="overview" element={<Overview />} />
           <Route path="sessions" element={<Sessions />} />
-          <Route path="trace" element={<Trace />} />
-          <Route path="trace/:requestId" element={<Trace />} />
+          <Route path="trace/*" element={<Trace />} />
           <Route path="metrics" element={<Metrics />} />
-          <Route path="insights" element={<Insights />} />
+          <Route path="insights/*" element={<Insights />} />
           <Route path="canon" element={<Canon />} />
           <Route path="bond" element={<Bond />} />
           <Route path="tools" element={<Tools />} />
