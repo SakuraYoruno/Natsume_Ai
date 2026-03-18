@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M36 代码审查报告
+
 # M36 代码审查报告
 
 - **里程碑**：M36 Dual-Clock Supervision + Evidence Plane SQLite 写入

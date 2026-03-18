@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Natsume AI 整体架构全景文档
+
 # Natsume AI 整体架构全景文档
 
 > 生成时间：2026-03-10

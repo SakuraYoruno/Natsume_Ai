@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P8 封板结果（SEAL RESULT）
+
 # P8 封板结果（SEAL RESULT）
 
 **日期**：2026-03

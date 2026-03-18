@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Chat A/B Diagnostic Report
+
 # Chat A/B Diagnostic Report
 
 - generated_at: 2026-03-09T21:28:03

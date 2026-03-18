@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Natsume AI 封测执行报告（2026-03-16）
+
 # Natsume AI 封测执行报告（2026-03-16）
 
 **计划文档**：`docs/50_release/release_seal_test_plan_20260313.md`、`release_seal_test_plan_supplement_20260315.md`  

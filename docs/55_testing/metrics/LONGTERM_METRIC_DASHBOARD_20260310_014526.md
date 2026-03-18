@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Long-Term Metric Dashboard
+
 # Long-Term Metric Dashboard
 
 - generated_at: 2026-03-09T17:45:26+00:00

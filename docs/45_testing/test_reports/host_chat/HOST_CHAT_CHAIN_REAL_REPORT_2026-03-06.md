@@ -1,4 +1,7 @@
-﻿# HOST Real Chain Report (Doc-Aligned Node Order)
+受众：MASTER
+标题：HOST Real Chain Report (Doc-Aligned Node Order)
+
+# HOST Real Chain Report (Doc-Aligned Node Order)
 
 - Generated At: 2026-03-06 02:02:15
 - Request ID: `req_f1efcf15bcb7445d8a1e54db5003e69e`

@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：第二轮正式基线规划：P5 Supervisor 决策升级
+
 # 第二轮正式基线规划：P5 Supervisor 决策升级
 
 **日期**：2026-03  

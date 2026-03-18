@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M32 代码审查报告
+
 # M32 代码审查报告
 
 **里程碑：** M32 — 灵魂深化补充实现（Soul Deepening Supplement）

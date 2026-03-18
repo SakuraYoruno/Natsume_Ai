@@ -1,3 +1,6 @@
+受众：MASTER
+标题：RetrievalOrchestrator Design (2026-03-09)
+
 # RetrievalOrchestrator Design (2026-03-09)
 
 ## 1. Goal

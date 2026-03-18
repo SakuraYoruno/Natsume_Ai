@@ -1,3 +1,6 @@
+受众：MASTER
+标题：LangGraph 高级编排能力与核心约束冲突的更优解法
+
 # LangGraph 高级编排能力与核心约束冲突的更优解法
 
 - **文档编号**：`LANGGRAPH_GOVERNED_RUNTIME_SOLUTION`

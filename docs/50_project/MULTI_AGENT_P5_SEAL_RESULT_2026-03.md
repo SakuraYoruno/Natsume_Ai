@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P5：Supervisor 决策升级 — 验收结论
+
 # P5：Supervisor 决策升级 — 验收结论
 
 **日期**：2026-03  

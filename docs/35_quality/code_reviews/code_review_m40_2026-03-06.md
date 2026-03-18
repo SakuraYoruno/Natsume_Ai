@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M40 代码审查报告：barrier_join() + RenderGuard
+
 # M40 代码审查报告：barrier_join() + RenderGuard
 
 - **文档编号**：`CODE_REVIEW_M40`

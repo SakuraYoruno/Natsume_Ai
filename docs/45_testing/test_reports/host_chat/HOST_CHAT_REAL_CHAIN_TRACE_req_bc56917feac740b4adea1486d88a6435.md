@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Host Chat Real Chain Trace
+
 # Host Chat Real Chain Trace
 
 - request_id: `req_bc56917feac740b4adea1486d88a6435`

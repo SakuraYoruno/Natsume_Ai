@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M39 代码审查报告
+
 # M39 代码审查报告
 
 - **里程碑**：M39 Checkpoint / Interrupt / Resume（双时钟模型下的断点续跑）

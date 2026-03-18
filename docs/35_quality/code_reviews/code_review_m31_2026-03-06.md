@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M31 代码审查报告
+
 # M31 代码审查报告
 
 **里程碑**：M31 — 六库 DevSpec 第八章合规修复（Six-Store Ch.8 Compliance Fix）

@@ -1,3 +1,6 @@
+受众：MASTER
+标题：BATCH4：全自动封测执行（2026-03-16）
+
 # BATCH4：全自动封测执行（2026-03-16）
 
 **执行方式**：全自动，无人工介入。Chat/路由/Governor/Tools/Obs/WebUI 等由集成与合约测试覆盖；ASR/TTS 在 chat 链路中按需拉起。

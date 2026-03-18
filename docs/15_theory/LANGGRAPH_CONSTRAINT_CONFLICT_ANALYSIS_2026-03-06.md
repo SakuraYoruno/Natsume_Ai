@@ -1,3 +1,6 @@
+受众：MASTER
+标题：LangGraph 完整编排能力 vs 核心约束冲突分析报告
+
 # LangGraph 完整编排能力 vs 核心约束冲突分析报告
 
 - **文档编号**：LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS

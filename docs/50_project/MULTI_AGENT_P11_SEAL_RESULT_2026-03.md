@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P11 验收结论（Seal Result）
+
 # P11 验收结论（Seal Result）
 
 **日期**：2026-03

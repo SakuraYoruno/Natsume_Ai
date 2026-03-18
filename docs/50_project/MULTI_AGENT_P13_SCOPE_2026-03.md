@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P13 SCOPE：tool_registry 工具实现升级（search_knowledge 真实接入）
+
 # P13 SCOPE：tool_registry 工具实现升级（search_knowledge 真实接入）
 
 **日期**：2026-03

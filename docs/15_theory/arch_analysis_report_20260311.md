@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Natsume AI 架构分析报告
+
 # Natsume AI 架构分析报告
 
 ## 一、总体判断

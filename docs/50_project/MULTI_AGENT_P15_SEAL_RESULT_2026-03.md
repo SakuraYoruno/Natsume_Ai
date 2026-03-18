@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P15 SEAL RESULT：终点封板（Supervisor LLM 提案 + graph_executor 动态路由）
+
 # P15 SEAL RESULT：终点封板（Supervisor LLM 提案 + graph_executor 动态路由）
 
 **日期**：2026-03-17

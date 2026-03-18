@@ -1,3 +1,6 @@
+受众：MASTER
+标题：ENV Single-Source Migration Trace (2026-03-04)
+
 # ENV Single-Source Migration Trace (2026-03-04)
 
 ## Decision

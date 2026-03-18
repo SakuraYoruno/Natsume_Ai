@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M35 代码审查报告
+
 # M35 代码审查报告
 
 - **里程碑**：M35 Route Commitment Rule 完整落地 + Transparent Subgraph 审计透明子图

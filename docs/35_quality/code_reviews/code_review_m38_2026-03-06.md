@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M38 代码审查报告
+
 # M38 代码审查报告
 
 - **里程碑**：M38 Phase-Locked Streaming（分相流式：Presence / Commit / Render 三类流隔离）

@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Canon Vector Projection Trace (2026-03-04)
+
 # Canon Vector Projection Trace (2026-03-04)
 
 ## Decision

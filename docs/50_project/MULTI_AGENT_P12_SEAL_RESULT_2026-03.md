@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：P12 验收结论（SEAL_RESULT）
+
 # P12 验收结论（SEAL_RESULT）
 
 **日期**：2026-03

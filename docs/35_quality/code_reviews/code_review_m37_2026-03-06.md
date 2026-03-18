@@ -1,3 +1,6 @@
+受众：MASTER
+标题：M37 代码审查报告
+
 # M37 代码审查报告
 
 - **里程碑**：M37 只读并行分支（branch_manifest）+ Transparent Subgraph Evidence Plane 实时写入

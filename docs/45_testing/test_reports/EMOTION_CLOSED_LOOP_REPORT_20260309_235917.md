@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Emotion Closed Loop Validation Report
+
 # Emotion Closed Loop Validation Report
 
 - generated_at: 2026-03-09 23:59:17

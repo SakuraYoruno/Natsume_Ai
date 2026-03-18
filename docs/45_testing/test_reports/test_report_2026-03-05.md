@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Natsume_Ai Host 端全量运测报告
+
 # Natsume_Ai Host 端全量运测报告
 
 **报告版本**：v1.0
