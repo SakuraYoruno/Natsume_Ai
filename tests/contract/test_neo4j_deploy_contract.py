@@ -28,7 +28,7 @@ MIGRATION_FIXTURES = ROOT / "tests" / "fixtures" / "migrations" / "bond" / "good
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestNeo4jDeployContract(unittest.TestCase):

@@ -15,7 +15,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "prompt_context"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestPromptContextContract(unittest.TestCase):

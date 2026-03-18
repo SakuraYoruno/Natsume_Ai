@@ -14,7 +14,7 @@ TOOLS_FIX = ROOT / "tests" / "fixtures" / "tools"
 
 
 def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _read_tool(_args: dict, _context: dict | None) -> dict:

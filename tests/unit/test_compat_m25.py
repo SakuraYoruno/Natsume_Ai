@@ -27,7 +27,7 @@ class TestAsyncioCompatibility:
         )
         assert vts_driver_path.exists(), f"vts_driver.py 不存在: {vts_driver_path}"
 
-        source = vts_driver_path.read_text(encoding="utf-8")
+        source = vts_driver_path.read_text(encoding="utf-8-sig")
         # 检查是否有 asyncio.get_event_loop() 调用（排除注释行）
         lines_with_issue = []
         for i, line in enumerate(source.splitlines(), start=1):
@@ -48,7 +48,7 @@ class TestAsyncioCompatibility:
             Path(__file__).parent.parent.parent
             / "edge_client" / "actuators" / "vts_driver.py"
         )
-        source = vts_driver_path.read_text(encoding="utf-8")
+        source = vts_driver_path.read_text(encoding="utf-8-sig")
 
         has_new_event_loop = "asyncio.new_event_loop()" in source
         has_get_running_loop = "asyncio.get_running_loop()" in source
@@ -69,7 +69,7 @@ class TestAsyncioCompatibility:
 
         issues: list[tuple[str, int, str]] = []
         for py_file in edge_client_path.rglob("*.py"):
-            source = py_file.read_text(encoding="utf-8", errors="replace")
+            source = py_file.read_text(encoding="utf-8-sig", errors="replace")
             for i, line in enumerate(source.splitlines(), start=1):
                 stripped = line.strip()
                 if stripped.startswith("#"):

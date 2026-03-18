@@ -376,10 +376,11 @@ class EdgeEventReporter:
                 )
             return send_result
         else:
-            # 发送失败，缓存所有有效事件
+            # 发送失败，缓存所有有效事件，并在后台线程中带退避重试
             for item in valid_items:
                 self.cache.push(item.to_dict())
             self._total_failed += len(valid_items)
+            self._retry_executor.submit(self._retry_flush_background)
 
             return BatchReportResult(
                 success=False,
@@ -471,17 +472,13 @@ class EdgeEventReporter:
             self._network_available = False
             self._total_retried += 1
             logger.warning("Event report failed (will retry in background): %s", exc)
-            # 将失败事件缓存，并在后台线程中带退避重试
-            for event in events:
-                self.cache.push(event)
-            self._retry_executor.submit(self._retry_flush_background)
             return BatchReportResult(
                 success=False,
                 total=len(events),
                 accepted=0,
                 rejected=len(events),
                 reason_code=RPC_EVENT_NETWORK_UNAVAILABLE,
-                detail=f"send failed, queued {len(events)} events for background retry: {exc}",
+                detail=f"send failed: {exc}",
             )
 
     def _retry_flush_background(self) -> None:

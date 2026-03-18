@@ -14,7 +14,7 @@ VAULT_FIX = ROOT / "tests" / "fixtures" / "vault" / "good" / "reversible_manifes
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestAuditRetentionContract(unittest.TestCase):

@@ -62,7 +62,7 @@ class TestPanelRendering:
         project_root = Path(__file__).resolve().parents[2]
         spa_index = project_root / "static" / "monitor" / "index.html"
         if spa_index.exists():
-            body = spa_index.read_text(encoding="utf-8")
+            body = spa_index.read_text(encoding="utf-8-sig")
             # SPA index.html 应含 <title> 或 <div id="root">
             assert "<title>" in body or '<div id="root">' in body, (
                 "static/monitor/index.html 不含 SPA 挂载点特征"

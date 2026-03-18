@@ -31,13 +31,13 @@ def test_diag_unified_dry_run_retrieval_writes_reports(tmp_path: Path) -> None:
     assert "_diag_retrieval.py" in " ".join(list(report.get("command") or []))
     assert output_json.exists()
     assert output_md.exists()
-    data = json.loads(output_json.read_text(encoding="utf-8"))
+    data = json.loads(output_json.read_text(encoding="utf-8-sig"))
     assert data["domain"] == "retrieval"
 
 
 def test_diag_unified_emotion_command_includes_threshold_and_case_file(tmp_path: Path) -> None:
     case_file = tmp_path / "cases.json"
-    case_file.write_text("[]\n", encoding="utf-8")
+    case_file.write_text("[]\n", encoding="utf-8-sig")
 
     report = run(
         [

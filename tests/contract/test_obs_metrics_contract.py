@@ -19,7 +19,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "obs"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _seed_ledger(ledger: SQLiteLedger, ts_base: int = 1_800_000_000_000) -> str:
@@ -118,6 +118,9 @@ class TestObsMetricsContract(unittest.TestCase):
             "hard_snapshot_staleness_ms", "recent_chains", "debug_trace",
             "latency_baseline",  # M8 TASK-0109 新增
             "emotion_metrics",   # M29-Q TASK-0280 新增
+            "supervisor_metrics",    # 新增
+            "budget_breach_metrics", # 新增
+            "agent_metrics",         # 新增
         }
         self.assertEqual(required_keys, set(result.keys()))
 

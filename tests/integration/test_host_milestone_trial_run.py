@@ -52,7 +52,7 @@ def _save_report(name: str, data: dict[str, Any]) -> Path:
     path = _REPORT_DIR / f"{name}_{_RUN_DATE}.json"
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     return path
 
@@ -1249,7 +1249,7 @@ class TestMilestoneSummaryReport:
         reports = []
         for f in report_files:
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
+                data = json.loads(f.read_text(encoding="utf-8-sig"))
                 reports.append({
                     "file": f.name,
                     "test_id": data.get("test_id"),

@@ -55,7 +55,7 @@ NOW_MS = 1_800_000_100_000
 
 def _load_fixture(name: str) -> dict[str, Any]:
     path = FIXTURES_DIR / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _make_ledger() -> SQLiteLedger:
@@ -97,7 +97,7 @@ class TestEdgeUnavailableDegraded:
             ts_ms=NOW_MS,
         )
         assert result.emotion_tag == "ANGRY"
-        assert result.expression_id == "exp_neutral_01"
+        assert result.expression_id == DEGRADED_FALLBACK_EXPRESSION_ID
 
     def test_edge_unavailable_with_none_tag(self) -> None:
         """Edge 不可达 + 无 tag → 使用 NEUTRAL 作为 tag。"""
@@ -130,7 +130,7 @@ class TestEdgeUnavailableDegraded:
         assert row["request_id"] == "req_deg_004"
         assert row["status"] == STATUS_DEGRADED
         assert row["reason_code"] == VTS_DEGRADED_FALLBACK
-        assert row["expression_id"] == "exp_neutral_01"
+        assert row["expression_id"] == DEGRADED_FALLBACK_EXPRESSION_ID
         assert row["stage"] == S_AVATAR_EXPRESSION_MAP
 
     def test_edge_unavailable_fixture_driven(self) -> None:
@@ -187,7 +187,7 @@ class TestUnknownTagDegraded:
             ts_ms=NOW_MS,
         )
         assert result.emotion_tag == "SLEEPY"
-        assert result.expression_id == "exp_neutral_01"
+        assert result.expression_id == DEGRADED_FALLBACK_EXPRESSION_ID
         assert result.status == STATUS_DEGRADED
 
     def test_unknown_tag_audit_logged(self) -> None:
@@ -205,7 +205,7 @@ class TestUnknownTagDegraded:
         assert row["emotion_tag"] == "SLEEPY"
         assert row["status"] == STATUS_DEGRADED
         assert row["reason_code"] == VTS_DEGRADED_FALLBACK
-        assert row["expression_id"] == "exp_neutral_01"
+        assert row["expression_id"] == DEGRADED_FALLBACK_EXPRESSION_ID
 
     def test_unknown_tag_fixture_driven(self) -> None:
         """基于 fixture 验证未知 tag 降级。"""
@@ -236,12 +236,12 @@ class TestNormalPathRegression:
     """确保正常路径（APPLIED/REJECTED）行为无变化。"""
 
     @pytest.mark.parametrize("tag,expected_expr", [
-        ("HAPPY", "exp_happy_01"),
-        ("SAD", "exp_sad_01"),
-        ("ANGRY", "exp_angry_01"),
-        ("NEUTRAL", "exp_neutral_01"),
-        ("SURPRISED", "exp_surprised_01"),
-        ("THINKING", "exp_thinking_01"),
+        ("HAPPY", "HK_Happy"),
+        ("SAD", "哭哭"),
+        ("ANGRY", "HK_Angry"),
+        ("NEUTRAL", "移除所有按键表情"),
+        ("SURPRISED", "圈圈眼"),
+        ("THINKING", "无语眼"),
     ])
     def test_known_tags_still_applied(self, tag: str, expected_expr: str) -> None:
         """已知 tag + edge_available=True → APPLIED（无回归）。"""
@@ -371,7 +371,7 @@ class TestDegradedConstants:
         assert DEGRADED_FALLBACK_EXPRESSION_TAG == "NEUTRAL"
 
     def test_fallback_expression_id(self) -> None:
-        assert DEGRADED_FALLBACK_EXPRESSION_ID == "exp_neutral_01"
+        assert DEGRADED_FALLBACK_EXPRESSION_ID == "移除所有按键表情"
 
     def test_fallback_id_matches_mapping(self) -> None:
         assert DEGRADED_FALLBACK_EXPRESSION_ID == EMOTION_TO_EXPRESSION_ID["NEUTRAL"]

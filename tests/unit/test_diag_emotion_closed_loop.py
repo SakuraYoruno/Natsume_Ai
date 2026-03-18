@@ -84,7 +84,7 @@ def test_emotion_closed_loop_accepts_custom_case_file(tmp_path: Path) -> None:
             indent=2,
         )
         + "\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     report = run_closed_loop_validation(threshold=1.0, case_file=str(case_file))
@@ -95,6 +95,6 @@ def test_emotion_closed_loop_accepts_custom_case_file(tmp_path: Path) -> None:
 
 def test_load_emotion_cases_raises_for_invalid_payload(tmp_path: Path) -> None:
     case_file = tmp_path / "invalid.json"
-    case_file.write_text("{}", encoding="utf-8")
+    case_file.write_text("{}", encoding="utf-8-sig")
     with pytest.raises(ValueError):
         load_emotion_cases(case_file)

@@ -1,0 +1,22 @@
+﻿{
+  "test_id": "T3-2",
+  "service": "host.skills.loader",
+  "operation": "SkillRegistry.get",
+  "params_in": {
+    "skill_names": [
+      "diary",
+      "desktop_note",
+      "dream"
+    ]
+  },
+  "params_out": {
+    "found": [],
+    "missing": [
+      "diary",
+      "desktop_note",
+      "dream"
+    ]
+  },
+  "status": "PASS",
+  "ts_ms": 1773822405465
+}

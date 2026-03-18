@@ -183,7 +183,7 @@ def test_longterm_dashboard_generates_warn_report(tmp_path: Path) -> None:
     assert int(report["summary"]["alert_count"]) >= 4
     assert output_json.exists()
     assert output_md.exists()
-    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    payload = json.loads(output_json.read_text(encoding="utf-8-sig"))
     assert payload["version"] == "longterm_metric_dashboard.v1"
     assert "quality" in payload
     assert "latency" in payload

@@ -28,7 +28,7 @@ FIXTURES_DIR = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "sc
 
 def _load_fixture(name: str) -> dict:
     path = FIXTURES_DIR / name
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

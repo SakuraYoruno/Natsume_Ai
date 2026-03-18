@@ -83,7 +83,7 @@ def configure_neo4j(neo4j_home: pathlib.Path, java_home: pathlib.Path) -> None:
         print(f"  [警告] 找不到配置文件: {conf_file}")
         return
 
-    conf_text = conf_file.read_text(encoding="utf-8", errors="replace")
+    conf_text = conf_file.read_text(encoding="utf-8-sig", errors="replace")
     changes = {
         # 监听地址
         "#server.default_listen_address=0.0.0.0": "server.default_listen_address=127.0.0.1",

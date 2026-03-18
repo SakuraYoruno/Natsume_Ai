@@ -11,7 +11,7 @@ NODE_INVENTORY_FIXTURE = ROOT / "tests" / "fixtures" / "services" / "good" / "no
 
 
 def _load_node_inventory() -> tuple[list[dict], int]:
-    payload = json.loads(NODE_INVENTORY_FIXTURE.read_text(encoding="utf-8"))
+    payload = json.loads(NODE_INVENTORY_FIXTURE.read_text(encoding="utf-8-sig"))
     return list(payload.get("nodes") or []), int(payload.get("expected_node_count") or 0)
 
 

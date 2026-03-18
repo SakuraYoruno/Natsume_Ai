@@ -24,7 +24,7 @@ from host_brain.channels.vts_mapping_store import DEFAULT_EMOTION_MAPPING, VTSMa
 
 def _write_yaml(tmp_path: Path, content: str) -> str:
     p = tmp_path / "vts_hotkey_config.yaml"
-    p.write_text(textwrap.dedent(content), encoding="utf-8")
+    p.write_text(textwrap.dedent(content), encoding="utf-8-sig")
     return str(p)
 
 

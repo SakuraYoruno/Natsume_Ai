@@ -49,7 +49,7 @@ def load_env_file(path: str | Path) -> dict[str, str]:
     env_path = Path(path)
     if not env_path.exists() or not env_path.is_file():
         return values
-    for raw in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw in env_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -371,7 +371,7 @@ def _collect_world_docs(world_root: Path) -> tuple[list[CanonProjectionDocument]
 
 def _read_json_file(path: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         return {}, {
             "code": "CANON_JSON_INVALID",

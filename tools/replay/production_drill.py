@@ -512,7 +512,7 @@ def _first_reason(rows: list[dict[str, Any]]) -> str | None:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -35,7 +35,7 @@ def _resolve_output_path(raw: str, *, fallback: Path) -> Path:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must be a JSON object")
     return payload

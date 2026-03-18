@@ -18,7 +18,7 @@ def load_install_info() -> dict:
         print(f"[Neo4j] 找不到安装信息文件: {INFO_FILE}")
         print("[Neo4j] 请先运行: python tools/install_neo4j.py")
         sys.exit(1)
-    return json.loads(INFO_FILE.read_text(encoding="utf-8"))
+    return json.loads(INFO_FILE.read_text(encoding="utf-8-sig"))
 
 
 def is_running() -> bool:
@@ -96,7 +96,7 @@ def main() -> None:
         log_file = ROOT / "data" / "neo4j_server.log"
         if log_file.exists():
             print("[Neo4j] 最近日志:")
-            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = log_file.read_text(encoding="utf-8-sig", errors="replace").splitlines()
             for line in lines[-20:]:
                 print(f"  {line}")
         sys.exit(1)

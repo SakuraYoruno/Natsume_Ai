@@ -1,12 +1,11 @@
-﻿{
+{
   "doc_id": "wc-002-architecture-invariants",
-  "title": "鏋舵瀯涓嶅彉閲?,
+  "title": "架构不变量",
   "tags": [
     "architecture",
     "invariant",
     "constraint"
   ],
-  "body": "鍗曞啓鑰呭師鍒欙細姣忎釜 Canon 鏂囨。鍙兘閫氳繃 WorldCanonStore.upsert_document 鍐欏叆锛岀姝㈢洿鎺ヤ慨鏀规枃浠躲€傚璁′笉鍙鏀癸細鎵€鏈?canon_change_log 鏉＄洰鍐欏叆鍚庝笉寰楀垹闄ゆ垨淇敼锛屼粎鍏佽杩藉姞銆傚垎妲介殧绂伙細World Canon 鏉＄洰鍙兘娉ㄥ叆 prompt_context.authoritative.world_canon 妲戒綅锛屼笉寰椾笌 style_pack銆乺etrieval.episodic 鎴?recent_events 娣锋Ы銆傚箓绛夊悓姝ワ細canon_sync 瀵圭浉鍚?hash 鐨勬潯鐩噸澶嶆壂鎻忎笉浜х敓閲嶅 change_log 鏉＄洰銆?,
+  "body": "单写者原则：每个 Canon 文档只能通过 WorldCanonStore.upsert_document 写入，禁止直接修改文件。审计不可篡改：所有 canon_change_log 条目写入后不得删除或修改，仅允许追加。分槽隔离：World Canon 条目只能注入 prompt_context.authoritative.world_canon 槽位，不得与 style_pack、retrieval.episodic 或 recent_events 混槽。幂等同步：canon_sync 对相同 hash 的条目重复扫描不产生重复 change_log 条目。",
   "status": "active"
 }
-

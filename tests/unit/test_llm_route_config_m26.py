@@ -82,7 +82,7 @@ class TestLlmRouteConfigM26(unittest.TestCase):
             / "host_brain" / "audit" / "migrations" / "0040_llm_route_config_log.sql"
         )
         self.assertTrue(migration_path.exists(), "迁移脚本文件不存在")
-        sql = migration_path.read_text(encoding="utf-8")
+        sql = migration_path.read_text(encoding="utf-8-sig")
 
         # 重复执行两次，不应报错
         import sqlite3

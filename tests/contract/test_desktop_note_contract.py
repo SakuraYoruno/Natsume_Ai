@@ -28,7 +28,7 @@ FIXTURES_DIR = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "de
 
 def _load_fixture(name: str) -> dict:
     path = FIXTURES_DIR / name
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -47,7 +47,7 @@ class TestDesktopNoteCreate:
         assert result["status"] == STATUS_EXECUTED
         assert result["reason_code"] is None
         assert "manifest" in result
-        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "hello world"
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8-sig") == "hello world"
         manifest = result["manifest"]
         assert manifest["action"] == "create"
         assert manifest["before_hash"] is None
@@ -59,16 +59,16 @@ class TestDesktopNoteCreate:
             {"sys_mode": "normal"},
         )
         assert result["status"] == STATUS_EXECUTED
-        assert (tmp_path / "sub" / "note.txt").read_text(encoding="utf-8") == "sub dir"
+        assert (tmp_path / "sub" / "note.txt").read_text(encoding="utf-8-sig") == "sub dir"
 
     def test_update_file(self, tmp_path: pathlib.Path) -> None:
-        (tmp_path / "note.txt").write_text("old content", encoding="utf-8")
+        (tmp_path / "note.txt").write_text("old content", encoding="utf-8-sig")
         result = execute_desktop_note(
             {"action": "update", "filename": "note.txt", "content": "new content", "base_dir": str(tmp_path)},
             {"sys_mode": "normal"},
         )
         assert result["status"] == STATUS_EXECUTED
-        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "new content"
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8-sig") == "new content"
         manifest = result["manifest"]
         assert manifest["before_hash"] is not None
         assert manifest["after_hash"] is not None
@@ -82,7 +82,7 @@ class TestDesktopNoteCreate:
         assert result["reason_code"] == "DESKTOP_NOTE_FILE_NOT_FOUND"
 
     def test_delete_file_quarantine(self, tmp_path: pathlib.Path) -> None:
-        (tmp_path / "to_delete.txt").write_text("bye", encoding="utf-8")
+        (tmp_path / "to_delete.txt").write_text("bye", encoding="utf-8-sig")
         result = execute_desktop_note(
             {"action": "delete", "filename": "to_delete.txt", "base_dir": str(tmp_path)},
             {"sys_mode": "normal"},
@@ -115,7 +115,7 @@ class TestDesktopNoteCreate:
 
     def test_undo_update(self, tmp_path: pathlib.Path) -> None:
         """更新后撤销 → 恢复原内容。"""
-        (tmp_path / "note.txt").write_text("original", encoding="utf-8")
+        (tmp_path / "note.txt").write_text("original", encoding="utf-8-sig")
         result = execute_desktop_note(
             {"action": "update", "filename": "note.txt", "content": "modified", "base_dir": str(tmp_path)},
             {"sys_mode": "normal"},
@@ -123,11 +123,11 @@ class TestDesktopNoteCreate:
         manifest = result["manifest"]
         undo_result = undo_desktop_note(manifest, before_content="original")
         assert undo_result["status"] == "UNDO_COMPLETED"
-        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "original"
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8-sig") == "original"
 
     def test_undo_delete(self, tmp_path: pathlib.Path) -> None:
         """删除后撤销 → 文件从 quarantine 恢复。"""
-        (tmp_path / "restore.txt").write_text("keep me", encoding="utf-8")
+        (tmp_path / "restore.txt").write_text("keep me", encoding="utf-8-sig")
         result = execute_desktop_note(
             {"action": "delete", "filename": "restore.txt", "base_dir": str(tmp_path)},
             {"sys_mode": "normal"},
@@ -136,7 +136,7 @@ class TestDesktopNoteCreate:
         undo_result = undo_desktop_note(manifest)
         assert undo_result["status"] == "UNDO_COMPLETED"
         assert (tmp_path / "restore.txt").exists()
-        assert (tmp_path / "restore.txt").read_text(encoding="utf-8") == "keep me"
+        assert (tmp_path / "restore.txt").read_text(encoding="utf-8-sig") == "keep me"
 
     def test_fixture_create_success(self, tmp_path: pathlib.Path) -> None:
         fixture = _load_fixture("create_success.json")
@@ -174,7 +174,7 @@ class TestDesktopNoteSecurity:
     def test_symlink_rejected(self, tmp_path: pathlib.Path) -> None:
         """symlink 目标被拒绝。"""
         target = tmp_path / "real.txt"
-        target.write_text("real", encoding="utf-8")
+        target.write_text("real", encoding="utf-8-sig")
         link = tmp_path / "link.txt"
         try:
             link.symlink_to(target)

@@ -1,0 +1,16 @@
+﻿{
+  "test_id": "T1-4",
+  "service": "host.audit.sqlite_ledger",
+  "operation": "trace_request",
+  "params_in": {
+    "request_id": "req_b2ac69a9ffa44f6bb631d1e9c1569d46"
+  },
+  "params_out": {
+    "status": "COMPLETE",
+    "stage": "S_GOV_APPROVE",
+    "intent_count": 1,
+    "governor_count": 1
+  },
+  "status": "PASS",
+  "ts_ms": 1773822682479
+}

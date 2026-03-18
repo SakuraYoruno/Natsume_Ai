@@ -21,7 +21,7 @@ FIXTURE_WORLD = ROOT / "tests" / "fixtures" / "canon" / "world"
 
 
 def _apply_migration(conn: sqlite3.Connection, sql_path: Path) -> None:
-    sql = sql_path.read_text(encoding="utf-8")
+    sql = sql_path.read_text(encoding="utf-8-sig")
     conn.executescript(sql)
 
 
@@ -136,7 +136,7 @@ class TestWorldCanonMigrationContract(unittest.TestCase):
         """sync_result_expected.json fixture 存在且字段完整。"""
         fixture_path = FIXTURE_WORLD / "sync_result_expected.json"
         self.assertTrue(fixture_path.exists(), msg=f"fixture 不存在: {fixture_path}")
-        data = json.loads(fixture_path.read_text(encoding="utf-8"))
+        data = json.loads(fixture_path.read_text(encoding="utf-8-sig"))
         # 顶层字段
         for field in ("sync_ts_ms", "records", "total"):
             self.assertIn(field, data, msg=f"sync_result_expected.json 缺少字段: {field}")

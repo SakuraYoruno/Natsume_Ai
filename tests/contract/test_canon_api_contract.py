@@ -46,7 +46,7 @@ def tmp_world_root(tmp_path: Path) -> Path:
     from host_brain.memory.canon_world_store import compute_world_canon_hash
     seed["hash"] = compute_world_canon_hash(seed)
     (world_dir / "wc-001-system-terms.json").write_text(
-        json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8-sig"
     )
     return world_dir
 
@@ -214,7 +214,7 @@ def test_reject_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger, t
     """T-Canon-API-06: 拒绝成功，status=rejected，SSOT 文件不变。"""
     # 记录 SSOT 文件原始内容
     ssot_path = tmp_world_root / "wc-001-system-terms.json"
-    original_content = ssot_path.read_text(encoding="utf-8")
+    original_content = ssot_path.read_text(encoding="utf-8-sig")
 
     store.submit_proposal(
         proposal_id="prop-reject",
@@ -235,7 +235,7 @@ def test_reject_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger, t
     assert row["reject_reason"] == "内容不符合规范"
 
     # SSOT 文件不变
-    assert ssot_path.read_text(encoding="utf-8") == original_content
+    assert ssot_path.read_text(encoding="utf-8-sig") == original_content
 
     # ledger 中 status 已更新
     updated = ledger.get_proposal("prop-reject")

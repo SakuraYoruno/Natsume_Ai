@@ -33,7 +33,7 @@ def test_model_node_overrides_are_merged_into_resolved_nodes(tmp_path: Path) -> 
             allow_unicode=True,
             sort_keys=False,
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     (model_plane_dir / "model_profiles.yaml").write_text(
         yaml.safe_dump(
@@ -52,7 +52,7 @@ def test_model_node_overrides_are_merged_into_resolved_nodes(tmp_path: Path) -> 
             allow_unicode=True,
             sort_keys=False,
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     def _mock_provider(_payload: dict[str, object]) -> str:
@@ -119,7 +119,7 @@ def test_model_node_overrides_refresh_expected_param_hash(tmp_path: Path) -> Non
             allow_unicode=True,
             sort_keys=False,
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     (model_plane_dir / "model_profiles.yaml").write_text(
         yaml.safe_dump(
@@ -138,7 +138,7 @@ def test_model_node_overrides_refresh_expected_param_hash(tmp_path: Path) -> Non
             allow_unicode=True,
             sort_keys=False,
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     graph_config = {

@@ -28,7 +28,7 @@ FIXTURE_WORLD = ROOT / "tests" / "fixtures" / "canon" / "world"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _make_temp_store():

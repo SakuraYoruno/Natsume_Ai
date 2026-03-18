@@ -28,7 +28,7 @@ def _write_stability_report(path: Path, *, alert_count: int, retrieval_rates: di
             "failure_rate_pct": float(governor_rates.get("failure_rate_pct", 0.0)),
         },
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
 
 
 def test_release_rollback_gate_requires_rollback_when_thresholds_exceeded(tmp_path: Path) -> None:

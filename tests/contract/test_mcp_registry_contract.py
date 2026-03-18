@@ -21,7 +21,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "mcp"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _make_read_meta(provider_id: str = "github", tool_id: str = "search_issues") -> ToolMeta:

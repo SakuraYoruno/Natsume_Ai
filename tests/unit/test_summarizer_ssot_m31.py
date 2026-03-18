@@ -38,7 +38,7 @@ def test_ssot_summ_01_no_write_keywords_in_summarizer():
     source_path = Path(__file__).parent.parent.parent / "host_brain" / "bond" / "summarizer.py"
     assert source_path.exists(), f"T-SSOT-SUMM-01 FAILED: summarizer.py 不存在: {source_path}"
 
-    source = source_path.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8-sig")
 
     # 过滤掉注释行和文档字符串，只扫描实际代码行
     code_lines: list[str] = []

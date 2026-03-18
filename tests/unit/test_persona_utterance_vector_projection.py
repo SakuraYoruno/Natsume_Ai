@@ -10,7 +10,7 @@ from host_brain.memory.persona_utterance_vector_projection import (
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fp:
+    with path.open("w", encoding="utf-8-sig") as fp:
         for row in rows:
             fp.write(json.dumps(row, ensure_ascii=False) + "\n")
 

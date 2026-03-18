@@ -190,7 +190,7 @@ class TestRecallFusionNodeDeepBusiness:
         assert result is True
         assert ctx.metadata["recall_fusion"]["mode"] == "ACTIVE"
         assert ctx.metadata["recall_fusion"]["evidence_count"] == 1
-        assert ctx.recall_context_pack is not None
+        assert ctx.recall_payload is not None
         assert "RECALL_EVIDENCE_COUNT:1" in ctx.audit_tags
 
     def test_recall_active_mode_empty_evidence(self):

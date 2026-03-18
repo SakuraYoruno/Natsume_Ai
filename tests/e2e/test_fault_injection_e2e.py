@@ -23,7 +23,7 @@ class TestFaultInjectionMatrix:
     def test_fault_injection_matrix_fixture_valid(self):
         """故障注入矩阵 fixture 为合法 JSON，包含 4 种场景。"""
         path = FIXTURES_DIR / "fault_injection_matrix.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         scenarios = data.get("fault_scenarios") or []
         assert len(scenarios) == 4
         ids = {s["id"] for s in scenarios}
@@ -95,7 +95,7 @@ class TestFaultInjectionMatrix:
         from host_brain.core.qa import build_fallback_output
 
         path = FIXTURES_DIR / "fault_injection_matrix.json"
-        matrix = json.loads(path.read_text(encoding="utf-8"))
+        matrix = json.loads(path.read_text(encoding="utf-8-sig"))
 
         for scenario in matrix["fault_scenarios"]:
             reason_code = scenario.get("expected_reason_code", "DEPENDENCY_UNAVAILABLE")

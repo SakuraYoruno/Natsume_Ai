@@ -1,0 +1,46 @@
+﻿{
+  "test_id": "TC-3",
+  "service": "HOST_SERVICES",
+  "operation": "build_host_runtime_statuses",
+  "params_in": {
+    "llm_provider": "openai",
+    "enable_retrieval": true,
+    "enable_vision": true
+  },
+  "params_out": {
+    "host.audit.sqlite_ledger": {
+      "available": true,
+      "detail": "sqlite ledger using in-memory db (test mode)"
+    },
+    "host.governor.decision": {
+      "available": true,
+      "detail": "governor decision engine ready"
+    },
+    "host.skills.loader": {
+      "available": true,
+      "detail": "skills loader ready (env=dev)"
+    },
+    "host.integrations.llm_gateway": {
+      "available": false,
+      "detail": "OPENAI_API_KEY missing"
+    },
+    "host.retrieval.embedding": {
+      "available": true,
+      "detail": "retrieval embedding enabled"
+    },
+    "host.retrieval.reranker": {
+      "available": true,
+      "detail": "retrieval reranker enabled"
+    },
+    "host.vision.screen_ocr": {
+      "available": true,
+      "detail": "vision screen_ocr enabled"
+    },
+    "host.vision.camera_recognizer": {
+      "available": true,
+      "detail": "vision camera_recognizer enabled"
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1773824737490
+}

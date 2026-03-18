@@ -9,7 +9,7 @@ FLOW_INDEX = ROOT / "docs" / "60_trace" / "flows" / "index.md"
 
 
 def _load_active_pointer() -> dict:
-    return json.loads(ACTIVE_POINTER.read_text(encoding="utf-8"))
+    return json.loads(ACTIVE_POINTER.read_text(encoding="utf-8-sig"))
 
 
 class TestFlowAssetsContract(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestFlowAssetsContract(unittest.TestCase):
 
     def test_t_flow_02_index_matches_active_pointer(self) -> None:
         pointer = _load_active_pointer()
-        index_text = FLOW_INDEX.read_text(encoding="utf-8")
+        index_text = FLOW_INDEX.read_text(encoding="utf-8-sig")
 
         for env, rel_path in pointer.items():
             self.assertIn(rel_path, index_text, f"{env} path not found in flow index: {rel_path}")

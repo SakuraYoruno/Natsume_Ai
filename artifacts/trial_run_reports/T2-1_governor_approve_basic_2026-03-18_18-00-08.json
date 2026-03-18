@@ -1,0 +1,30 @@
+﻿{
+  "test_id": "T2-1",
+  "service": "host.governor.decision",
+  "operation": "evaluate_intent",
+  "params_in": {
+    "intent": {
+      "schema_version": "Natsume.intent.v1",
+      "id": "intent::req_dbc972772bb8430290e1013f1787586d",
+      "ts_ms": 1773828089091,
+      "session_id": "session::trial::req_dbc972772bb8430290e1013f1787586d",
+      "seq": 1,
+      "type": "query",
+      "action": "narrative_only",
+      "target": "host",
+      "args": {
+        "text": "你好，夏目"
+      },
+      "nonce": "nonce::req_dbc972772bb8430290e1013f1787586d"
+    },
+    "request_id": "req_dbc972772bb8430290e1013f1787586d"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "stage": "S_INTENT_OK",
+    "intent_id": "intent::req_dbc972772bb8430290e1013f1787586d"
+  },
+  "status": "PASS",
+  "ts_ms": 1773828008594
+}

@@ -66,7 +66,7 @@ def _rollback_commands() -> list[dict[str, str]]:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("stability report must be a JSON object")

@@ -13,7 +13,7 @@ TOOL_PATH = ROOT / "scripts" / "runtime" / "generate_env_readiness_report.py"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _load_tool_module():

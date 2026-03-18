@@ -52,7 +52,7 @@ def ledger() -> SQLiteLedger:
 
 def _load_fixture(name: str) -> dict[str, Any]:
     path = FIXTURES_DIR / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 # ---------------------------------------------------------------------------

@@ -93,7 +93,9 @@ class TestDreamGeneratorTrigger:
     def test_episodic_entry_written(self) -> None:
         written = []
         def capturing_writer(entry):
-            written.append(entry)
+            if entry.get("category") == DREAM_CATEGORY:
+                written.append(entry)
+            return {"status": "OK"}
             return {"status": "OK"}
 
         execute_dream_generator(

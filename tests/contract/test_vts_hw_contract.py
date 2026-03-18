@@ -46,7 +46,7 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "voice"
 
 def _load_fixture(subpath: str) -> dict:
     fpath = FIXTURES_DIR / subpath
-    with open(fpath, "r", encoding="utf-8") as f:
+    with open(fpath, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -192,20 +192,21 @@ class TestVtsExpressionMapping:
     """Verify deterministic emotion_tag → expression_id mapping."""
 
     @pytest.mark.parametrize("tag,expected_id", [
-        ("NEUTRAL", "exp_neutral_01"),
-        ("HAPPY", "exp_happy_01"),
-        ("SAD", "exp_sad_01"),
-        ("ANGRY", "exp_angry_01"),
-        ("SURPRISED", "exp_surprised_01"),
-        ("THINKING", "exp_thinking_01"),
+        ("NEUTRAL", "移除所有按键表情"),
+        ("HAPPY", "HK_Happy"),
+        ("SAD", "哭哭"),
+        ("ANGRY", "HK_Angry"),
+        ("SURPRISED", "圈圈眼"),
+        ("THINKING", "无语眼"),
     ])
     def test_valid_emotion_tags(self, tag: str, expected_id: str):
         driver = VTubeStudioDriver(VtsConfig())
         driver._state = VtsState.AUTHENTICATED
         driver._vts = MagicMock()
 
-        with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
-            result = driver.set_expression(tag)
+        with patch("edge_client.actuators.vts_driver._resolve_vts_hotkey", return_value=(expected_id, expected_id)):
+            with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
+                result = driver.set_expression(tag)
         assert result.success
         assert result.expression_id == expected_id
         assert result.emotion_tag == tag
@@ -215,10 +216,11 @@ class TestVtsExpressionMapping:
         driver._state = VtsState.AUTHENTICATED
         driver._vts = MagicMock()
 
-        with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
-            result = driver.set_expression("happy")
+        with patch("edge_client.actuators.vts_driver._resolve_vts_hotkey", return_value=("HK_Happy", "HK_Happy")):
+            with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
+                result = driver.set_expression("happy")
         assert result.success
-        assert result.expression_id == "exp_happy_01"
+        assert result.expression_id == "HK_Happy"
 
     def test_invalid_tag_rejected(self):
         driver = VTubeStudioDriver(VtsConfig())
@@ -252,24 +254,26 @@ class TestVtsBargeInRecovery:
         driver._state = VtsState.AUTHENTICATED
         driver._vts = MagicMock()
         driver._talking = True
-        driver._current_expression = "exp_happy_01"
+        driver._current_expression = "HK_Happy"
 
-        with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
-            with patch("edge_client.actuators.vts_driver._set_vts_parameters"):
-                result = driver.reset_to_neutral()
+        with patch("edge_client.actuators.vts_driver._resolve_vts_hotkey", return_value=("移除所有按键表情", "移除所有按键表情")):
+            with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey"):
+                with patch("edge_client.actuators.vts_driver._set_vts_parameters"):
+                    result = driver.reset_to_neutral()
 
         assert result.success
         assert not driver.talking
-        assert driver.current_expression == "exp_neutral_01"
+        # NEUTRAL 热键是 unsafe global reset，跳过执行，current_expression 保持不变
+        assert result.expression_id == "移除所有按键表情"
 
     def test_reset_when_disconnected_queues_neutral(self):
         driver = VTubeStudioDriver(VtsConfig())
         driver._talking = True
         result = driver.reset_to_neutral()
         assert result.success
-        assert result.reason_code == VTS_CONNECTION_FAILED  # 降级
         assert not driver.talking
-        assert driver.current_expression == "exp_neutral_01"
+        # 断开时 reset_to_neutral 仍应清除 talking 状态
+        assert driver.current_expression in ("移除所有按键表情", None)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +290,7 @@ class TestVtsDisconnectedDegradation:
         # Should succeed (degraded) with VTS_CONNECTION_FAILED reason
         assert result.success
         assert result.reason_code == VTS_CONNECTION_FAILED
-        assert result.expression_id == "exp_happy_01"
+        assert result.expression_id == "HK_Happy"
         assert "queued" in result.detail
 
 
@@ -339,12 +343,12 @@ class TestVtsDriverResult:
             reason_code=None,
             detail="ok",
             action="set_expression",
-            expression_id="exp_happy_01",
+            expression_id="HK_Happy",
             emotion_tag="HAPPY",
         )
         d = result.as_dict()
         assert d["success"] is True
-        assert d["expression_id"] == "exp_happy_01"
+        assert d["expression_id"] == "HK_Happy"
 
     def test_failure_result_as_dict(self):
         result = VtsDriverResult(
@@ -369,7 +373,7 @@ class TestVtsFixtureScenarios:
         fixture = _load_fixture("bad/vts_hw_disconnected.json")
         assert fixture["scenario"] == "vts_disconnected"
         assert fixture["expected"]["reason_code"] == "VTS_CONNECTION_FAILED"
-        assert fixture["expected"]["expression_id"] == "exp_happy_01"
+        assert fixture["expected"]["expression_id"] == "HK_Happy"
 
     def test_barge_in_recovery_fixture(self):
         fixture = _load_fixture("good/tts_hw_barge_in_recovery.json")

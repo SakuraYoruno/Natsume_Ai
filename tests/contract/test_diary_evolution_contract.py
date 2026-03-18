@@ -34,7 +34,7 @@ FIXTURE_DIARY = ROOT / "tests" / "fixtures" / "diary"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _make_temp_store():

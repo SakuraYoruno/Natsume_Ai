@@ -23,7 +23,7 @@ PROMPT_FIX = ROOT / "tests" / "fixtures" / "llm_gateway" / "good" / "prompt_payl
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _read_only_status(args: dict, _ctx: dict | None) -> dict:

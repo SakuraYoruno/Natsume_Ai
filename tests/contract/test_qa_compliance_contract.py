@@ -20,7 +20,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "qa"
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")
 
 
 class TestQAComplianceContract(unittest.TestCase):

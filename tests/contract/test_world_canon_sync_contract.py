@@ -148,7 +148,7 @@ class TestWorldCanonSyncIdempotency(unittest.TestCase):
 
             # 写入损坏的 JSON 文件
             broken = world_root / "broken_doc.json"
-            broken.write_text("{invalid_json_content", encoding="utf-8")
+            broken.write_text("{invalid_json_content", encoding="utf-8-sig")
 
             ledger = SQLiteLedger(db_path=db_path)
             try:

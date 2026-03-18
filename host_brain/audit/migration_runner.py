@@ -206,7 +206,7 @@ class SQLiteMigrationRunner:
 
                 started = perf_counter()
                 try:
-                    script = asset.path.read_text(encoding="utf-8")
+                    script = asset.path.read_text(encoding="utf-8-sig")
                     conn.executescript(script)
                     conn.execute(
                         """
@@ -298,7 +298,7 @@ class SQLiteMigrationRunner:
                 continue
             migration_id = int(match.group(1))
             name = match.group(2)
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8-sig")
             assets.append(
                 MigrationAsset(
                     migration_id=migration_id,

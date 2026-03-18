@@ -102,7 +102,7 @@ def test_weekly_stability_report_generates_alerts_and_artifacts(tmp_path: Path) 
     assert output_json.exists()
     assert output_md.exists()
 
-    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    payload = json.loads(output_json.read_text(encoding="utf-8-sig"))
     assert payload["version"] == "stability_weekly.v1"
     assert payload["governor"]["total"] == 10
     assert payload["retrieval"]["event_count"] == 10

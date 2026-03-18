@@ -190,6 +190,7 @@ class EdgeVoicePipeline:
             and self.vts_driver is not None
         ):
             self._stop_mouth_sync()
+            self.vts_driver.talk_end()
             self.vts_driver.reset_to_neutral()
         if result is not None and result.success:
             # before_playback_hook 会在 start_next 内部自动驱动 VTS，无需额外调用

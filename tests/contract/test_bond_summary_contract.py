@@ -12,7 +12,7 @@ CONTEXT_FIXTURES = ROOT / "tests" / "fixtures" / "prompt_context"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestBondSummaryContract(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestBondSummaryContract(unittest.TestCase):
             set(summary.keys()),
         )
         self.assertEqual("STRANGER", summary["stage"])
-        self.assertEqual("绋冲畾", summary["trend"])
+        self.assertEqual("稳定", summary["trend"])
         self.assertEqual("SUPPORTIVE", summary["capability_hint"])
         self.assertEqual("bond_evt_summary_001", summary["event_id"])
         self.assertEqual(["evidence::bond::summary::001"], summary["evidence_refs"])

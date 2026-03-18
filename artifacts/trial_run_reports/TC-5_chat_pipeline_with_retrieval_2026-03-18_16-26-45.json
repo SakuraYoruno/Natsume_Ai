@@ -1,0 +1,19 @@
+﻿{
+  "test_id": "TC-5",
+  "service": "CHAT_PIPELINE",
+  "operation": "governor_plus_retrieval",
+  "params_in": {
+    "request_id": "req_433f016a44ff4caa984c8885b1a6cef9",
+    "message": "夏目友人帐的故事"
+  },
+  "params_out": {
+    "decision": "APPROVE",
+    "reason_code": null,
+    "retrieval": {
+      "error": "{\"detail\":\"Not Found\"}",
+      "status": "ERROR"
+    }
+  },
+  "status": "PASS",
+  "ts_ms": 1773822405465
+}

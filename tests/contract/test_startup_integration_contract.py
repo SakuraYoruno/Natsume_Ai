@@ -33,7 +33,7 @@ VALID_STATUSES = {"started", "already_running"}
 
 def _load_fixture(name: str) -> dict:
     path = FIXTURES_DIR / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 # ── T-RT-01-A: 正常启动 fixture 字段完整性 ──────────────────────────────────

@@ -205,8 +205,8 @@ def _load_model_plane_meta(root: str | Path) -> dict[str, Any] | None:
     if not profiles_path.exists() or not registry_path.exists():
         return None
 
-    profile_version = _extract_version_from_text(profiles_path.read_text(encoding="utf-8"))
-    registry_version = _extract_version_from_text(registry_path.read_text(encoding="utf-8"))
+    profile_version = _extract_version_from_text(profiles_path.read_text(encoding="utf-8-sig"))
+    registry_version = _extract_version_from_text(registry_path.read_text(encoding="utf-8-sig"))
     asset_digests = {
         str(profiles_rel).replace("\\", "/"): _sha256_of_file(profiles_path),
         str(registry_rel).replace("\\", "/"): _sha256_of_file(registry_path),

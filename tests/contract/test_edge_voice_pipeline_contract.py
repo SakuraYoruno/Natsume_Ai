@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from edge_client.actuators.speech import SpeechPlaybackQueue
-from edge_client.actuators.vts_driver import VtsDriverResult
+from edge_client.actuators.vts_driver import VtsDriverResult, VtsState
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import STATUS_ACCEPTED, STATUS_REJECTED, VoiceRpcContract
@@ -17,7 +17,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "edge" / "voice"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class _MockVtsDriver:
@@ -27,6 +27,7 @@ class _MockVtsDriver:
         self.reset_calls = 0
         self.set_expression_calls: list[str] = []
         self.trigger_hotkey_calls: list[str] = []
+        self.state = VtsState.AUTHENTICATED
 
     def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
         self.set_expression_calls.append(emotion_tag)
@@ -47,6 +48,12 @@ class _MockVtsDriver:
     def reset_to_neutral(self) -> VtsDriverResult:
         self.reset_calls += 1
         return VtsDriverResult(success=True, reason_code=None, detail="reset", action="RESET")
+
+    def health(self) -> dict:
+        return {"state": self.state.value, "mouth_parameters": {}}
+
+    def connect(self) -> VtsDriverResult:
+        return VtsDriverResult(success=True, reason_code=None, detail="connected", action="CONNECT")
 
 
 def _success_batch(total: int) -> BatchReportResult:
@@ -227,7 +234,7 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         )
         self.assertTrue(interrupted.success, msg=interrupted)
         self.assertEqual(VOICE_INTERRUPTED, interrupted.barge_result.reason_code)
-        self.assertEqual(1, vts.reset_calls)
+        self.assertEqual(2, vts.reset_calls)
 
         start_second = pipeline.enqueue_speak(
             request_id=fixture["speak_second"]["request_id"],

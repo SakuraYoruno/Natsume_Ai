@@ -41,7 +41,7 @@ class TestM8ManifestExpectedFixture:
 
     def setup_method(self):
         path = FIXTURES_DIR / "m8_manifest_expected.json"
-        self.data = json.loads(path.read_text(encoding="utf-8"))
+        self.data = json.loads(path.read_text(encoding="utf-8-sig"))
 
     def test_required_fields_present(self):
         """所有必须字段均存在。"""

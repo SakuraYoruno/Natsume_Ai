@@ -132,7 +132,7 @@ def main() -> None:
         print(" 超时！请检查日志:", LOG_FILE)
         # 打印日志内容
         if LOG_FILE.exists():
-            print(LOG_FILE.read_text(encoding="utf-8", errors="replace")[:2000])
+            print(LOG_FILE.read_text(encoding="utf-8-sig", errors="replace")[:2000])
         sys.exit(1)
 
     print(f" 就绪！")

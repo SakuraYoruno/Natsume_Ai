@@ -21,7 +21,7 @@ from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 def test_vault_ssot_01_no_direct_ledger_access():
     """T-VAULT-SSOT-01：_search_artifact_vault() 调用路径中不出现 ledger.vault_manifest_index（代码行，排除注释）。"""
     source_path = Path(__file__).parent.parent.parent / "host_brain" / "retrieval" / "recall_fusion.py"
-    source = source_path.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8-sig")
     tree = ast.parse(source)
 
     # 找到 _search_artifact_vault 方法体

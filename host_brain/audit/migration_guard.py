@@ -110,7 +110,7 @@ class SQLiteMigrationVersionGuard:
                 continue
             migration_id = int(match.group(1))
             name = match.group(2)
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8-sig")
             asset = SQLiteMigrationAsset(
                 migration_id=migration_id,
                 name=name,

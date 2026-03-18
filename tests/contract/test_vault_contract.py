@@ -105,12 +105,12 @@ class TestVaultContract(unittest.TestCase):
             assert created.manifest_ref is not None
 
             manifest_path = Path(temp_dir) / "vault" / "manifests" / f"{created.manifest_id}.json"
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
             tamper = _load_json(FIXTURES / "bad" / "manifest_digest_tamper.json")
             payload[tamper["tamper_field"]] = "tampered"
             manifest_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
+                encoding="utf-8-sig",
             )
 
             undo = vault.undo_manifest(

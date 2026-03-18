@@ -47,7 +47,7 @@ def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
 
@@ -56,7 +56,7 @@ def test_collect_projection_docs_reports_invalid_json(tmp_path: Path) -> None:
     world_root = tmp_path / "world"
     style_root.mkdir(parents=True, exist_ok=True)
     world_root.mkdir(parents=True, exist_ok=True)
-    (style_root / "broken.json").write_text("{", encoding="utf-8")
+    (style_root / "broken.json").write_text("{", encoding="utf-8-sig")
 
     docs, issues = collect_canon_projection_documents(
         style_root=style_root,

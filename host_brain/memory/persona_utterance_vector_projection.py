@@ -37,7 +37,7 @@ def load_env_file(path: str | Path) -> dict[str, str]:
     env_path = Path(path)
     if not env_path.exists() or not env_path.is_file():
         return values
-    for raw in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw in env_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -86,7 +86,7 @@ def collect_persona_utterance_projection_documents(
 
         canon_id = file_path.stem.replace("_speaker_lines", "").strip() or "unknown_canon"
         try:
-            rows = file_path.read_text(encoding="utf-8").splitlines()
+            rows = file_path.read_text(encoding="utf-8-sig").splitlines()
         except OSError as exc:
             issues.append(
                 {

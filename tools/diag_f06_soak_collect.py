@@ -38,7 +38,7 @@ def _read_pid(pid_file: Path) -> int | None:
     if not pid_file.exists():
         return None
     try:
-        raw = pid_file.read_text(encoding="utf-8").strip()
+        raw = pid_file.read_text(encoding="utf-8-sig").strip()
         return int(raw) if raw else None
     except Exception:
         return None

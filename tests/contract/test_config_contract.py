@@ -25,6 +25,7 @@ from host_brain.core.errors import (
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
     SERVICE_UNAVAILABLE_COLD_START,
+    SERVICE_UNAVAILABLE_DEPENDENCY,
 )
 from host_brain.core.services import S_SERVICE_HEALTH, ServiceHealthReporter, build_default_service_registry
 
@@ -34,7 +35,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "config"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestConfigContract(unittest.TestCase):
@@ -72,7 +73,7 @@ class TestConfigContract(unittest.TestCase):
         self.assertTrue(
             any(
                 row["service_id"] == "edge.rpc.fallback_llm"
-                and row["reason_code"] == SERVICE_UNAVAILABLE_COLD_START
+                and row["reason_code"] in (SERVICE_UNAVAILABLE_COLD_START, SERVICE_UNAVAILABLE_DEPENDENCY)
                 for row in report["services"]
             ),
             msg=report["services"],

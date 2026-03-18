@@ -25,7 +25,7 @@ class TestColdStartE2E:
     def test_cold_start_input_fixture_valid(self):
         """冷启动输入 fixture 为合法 JSON，包含必须字段。"""
         path = FIXTURES_DIR / "cold_start_input.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         assert "request_id" in data
         assert "session_id" in data
         assert "user_input" in data

@@ -28,7 +28,7 @@ def scan_file(
         return []
 
     try:
-        source = path.read_text(encoding="utf-8")
+        source = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return []
     try:

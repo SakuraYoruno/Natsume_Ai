@@ -19,7 +19,7 @@ def test_evref_01_no_singular_evidence_ref():
     source_path = Path(__file__).parent.parent.parent / "host_brain" / "retrieval" / "recall_fusion.py"
     assert source_path.exists(), f"T-EVREF-01 FAILED: recall_fusion.py 不存在: {source_path}"
 
-    source = source_path.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8-sig")
 
     # 查找孤立的 evidence_ref（单数）：
     # 匹配 "evidence_ref" 但不是 "evidence_refs" 的子串

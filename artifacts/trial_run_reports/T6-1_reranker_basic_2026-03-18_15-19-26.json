@@ -1,0 +1,22 @@
+{
+  "test_id": "T6-1",
+  "service": "host.retrieval.reranker",
+  "operation": "rerank",
+  "params_in": {
+    "query": "夏目友人帐",
+    "candidate_count": 5,
+    "top_k": 3
+  },
+  "params_out": {
+    "status": "OK",
+    "reason_code": null,
+    "topk_count": 3,
+    "topk_ids": [
+      null,
+      null,
+      null
+    ]
+  },
+  "status": "PASS",
+  "ts_ms": 1773818366711
+}

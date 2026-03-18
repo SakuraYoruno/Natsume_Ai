@@ -51,7 +51,7 @@ FIXTURE_DIR = ROOT / "tests" / "fixtures" / "governor_rate_limit"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestInMemoryRateLimitStore(unittest.TestCase):

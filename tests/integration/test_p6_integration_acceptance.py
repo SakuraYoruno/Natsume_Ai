@@ -278,5 +278,5 @@ def test_p6_3_structure_executor_no_p6_business_branch():
     """executor 未新增 P6 业务特判（无 LOCAL_LOOP 分支逻辑）。"""
     root = Path(__file__).resolve().parents[2]
     executor_path = root / "host_brain" / "integrations" / "graph_executor.py"
-    text = executor_path.read_text(encoding="utf-8")
+    text = executor_path.read_text(encoding="utf-8-sig")
     assert "LOCAL_LOOP" not in text, "graph_executor 不得包含 LOCAL_LOOP 业务分支，P6 逻辑仅在 handler 内"

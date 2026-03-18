@@ -54,7 +54,7 @@ def scan_markdown_files(
     for path in md_paths:
         rel_path = _to_rel(path, repo_root)
         try:
-            raw = path.read_text(encoding="utf-8")
+            raw = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             failures.append(
                 _failure(

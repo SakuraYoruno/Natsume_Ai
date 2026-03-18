@@ -15,7 +15,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "mcp"
 
 
 def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _search_issues(args: dict, _context: dict | None) -> dict:

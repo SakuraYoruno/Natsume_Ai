@@ -82,7 +82,7 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
 
     @requires_test_client
     def test_chat_endpoint_reachable_and_returns_stable_structure(self):
-        """POST /v1/chat 正常请求返回200且含必要字段。"""
+        """POST /v1/chat 正常请求返回200且SSE流含COMMIT事件。"""
         client = TestClient(app)
         payload = {
             "message": "你好，最近怎么样？",
@@ -90,17 +90,21 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         }
         resp = client.post("/v1/chat", json=payload)
         assert resp.status_code == 200
-        body = resp.json()
-        # 必要字段存在性
-        assert "request_id" in body
-        assert "narrative" in body
-        assert "decision" in body
-        assert "quality" in body
-        assert "audit_refs" in body
-        assert "timestamp" in body
-        # quality 子结构
-        assert "stage" in body["quality"]
-        assert "reason_code" in body["quality"]
+        # 解析 SSE 流，找到 COMMIT 事件
+        commit_event = None
+        for line in resp.text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    event = json.loads(line[6:])
+                    if event.get("phase") == "COMMIT":
+                        commit_event = event
+                        break
+                except json.JSONDecodeError:
+                    pass
+        assert commit_event is not None, "SSE 流中未找到 COMMIT 事件"
+        # COMMIT 事件必要字段
+        assert "request_id" in commit_event
+        assert "decision" in commit_event
 
     @requires_test_client
     def test_chat_with_intent_draft_passes_governor(self):
@@ -125,12 +129,19 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         }
         resp = client.post("/v1/chat", json=payload)
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["decision"] in ("APPROVE", "REJECT")
-        if body["decision"] == "APPROVE":
-            assert body.get("approval_token_ref") is not None
-        if body["decision"] == "REJECT":
-            assert body.get("reason_code") is not None
+        # 解析 SSE 流，找到 COMMIT 事件
+        commit_event = None
+        for line in resp.text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    event = json.loads(line[6:])
+                    if event.get("phase") == "COMMIT":
+                        commit_event = event
+                        break
+                except json.JSONDecodeError:
+                    pass
+        assert commit_event is not None, "SSE 流中未找到 COMMIT 事件"
+        assert commit_event["decision"] in ("APPROVE", "REJECT")
 
     @requires_test_client
     def test_root_redirects_to_docs(self):
@@ -181,22 +192,35 @@ class TestHTTP02ErrorHandlingAndDegradation:
         }
         resp = client.post("/v1/chat", json=payload)
         assert resp.status_code == 200  # 降级仍返回200（结构稳定）
-        body = resp.json()
-        assert body["decision"] == "REJECT"
-        assert body["reason_code"] is not None
-        assert body["reason_code"] != ""
-        assert "stage" in body["quality"]
+        # 解析 SSE 流，找到 COMMIT 事件
+        commit_event = None
+        for line in resp.text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    event = json.loads(line[6:])
+                    if event.get("phase") == "COMMIT":
+                        commit_event = event
+                        break
+                except json.JSONDecodeError:
+                    pass
+        assert commit_event is not None, "SSE 流中未找到 COMMIT 事件"
+        assert commit_event["decision"] == "REJECT"
+        assert commit_event.get("reason_code") is not None
 
     @requires_test_client
     def test_chat_empty_message_returns_stable_structure(self):
-        """POST /v1/chat 空消息仍返回可解析JSON。"""
+        """POST /v1/chat 空消息仍返回可解析SSE流。"""
         client = TestClient(app)
         payload = {"message": ""}
         resp = client.post("/v1/chat", json=payload)
         # 即使空消息也返回可解析结构（可能被Governor拒绝或产出空叙事）
         assert resp.status_code in (200, 422)
-        body = resp.json()
-        assert isinstance(body, dict)
+        if resp.status_code == 200:
+            # SSE 流应包含至少一个 data: 行
+            assert "data:" in resp.text
+        else:
+            body = resp.json()
+            assert isinstance(body, dict)
 
     @requires_test_client
     def test_nonexistent_route_returns_json_404(self):

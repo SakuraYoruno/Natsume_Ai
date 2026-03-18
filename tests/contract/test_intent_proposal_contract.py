@@ -12,7 +12,7 @@ PROPOSERS_FIX = ROOT / "tests" / "fixtures" / "intent" / "proposals" / "proposer
 
 
 def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestIntentProposalContract(unittest.TestCase):

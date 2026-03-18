@@ -292,7 +292,7 @@ def test_p12_baseline_files_still_exist():
 def test_no_placeholder_in_tool_registry_source():
     """tool_registry.py 源码中不含旧占位字符串。"""
     root = Path(__file__).resolve().parents[2]
-    source = (root / "host_brain" / "app" / "agents" / "tool_registry.py").read_text(encoding="utf-8")
+    source = (root / "host_brain" / "app" / "agents" / "tool_registry.py").read_text(encoding="utf-8-sig")
     placeholder_patterns = [
         "[知识库检索占位]",
         "[代码分析占位]",

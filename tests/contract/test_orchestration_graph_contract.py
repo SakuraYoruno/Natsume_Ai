@@ -26,7 +26,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "orchestration"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _plan_handler(payload: dict, _ctx: dict | None) -> dict:

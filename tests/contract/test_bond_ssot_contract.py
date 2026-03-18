@@ -24,7 +24,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "bond"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestBondSsotContract(unittest.TestCase):
@@ -170,7 +170,7 @@ class TestBondSsotContract(unittest.TestCase):
         self.assertTrue(any("CREATE INDEX" in stmt for stmt in statements))
 
         summarizer_path = ROOT / "host_brain" / "bond" / "summarizer.py"
-        tree = ast.parse(summarizer_path.read_text(encoding="utf-8"), filename=str(summarizer_path))
+        tree = ast.parse(summarizer_path.read_text(encoding="utf-8-sig"), filename=str(summarizer_path))
         writes = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):

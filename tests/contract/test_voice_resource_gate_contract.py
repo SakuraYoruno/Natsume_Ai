@@ -31,7 +31,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "voice"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestVoiceResourceGateContract(unittest.TestCase):

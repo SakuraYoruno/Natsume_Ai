@@ -128,7 +128,7 @@ class TestCanonStoreContract(unittest.TestCase):
                 target = world_root / "academy_rules.json"
                 target.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
+                    encoding="utf-8-sig",
                 )
 
                 records = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1700000000999)
@@ -236,7 +236,7 @@ class TestCanonStoreContract(unittest.TestCase):
                 target = world_root / "academy_rules.json"
                 target.write_text(
                     json.dumps(tampered, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
+                    encoding="utf-8-sig",
                 )
 
                 drifts = detect_world_version_drift(world_root=world_root, ledger=ledger)
@@ -255,7 +255,7 @@ class TestCanonStoreContract(unittest.TestCase):
             ledger = SQLiteLedger(db_path=db_path)
             try:
                 broken_path = world_root / "broken.json"
-                broken_path.write_text("{invalid_json", encoding="utf-8")
+                broken_path.write_text("{invalid_json", encoding="utf-8-sig")
 
                 synced = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1700000000400)
                 self.assertEqual([], synced)

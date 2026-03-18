@@ -79,13 +79,13 @@ def build_emotion_pulse_slot(
             pass
     intensity = round(arousal * 0.7 + abs(valence) * 0.3, 4)
     if arousal > 0.7 and valence > 0.3:
-        style_hint = "high energy, expressive delivery"
+        style_hint = "活泼/高涨，表达积极热情"
     elif arousal > 0.7 and valence < -0.3:
-        style_hint = "heightened agitation, keep the tone gentle"
+        style_hint = "激动/安抚，保持语气温和"
     elif arousal < 0.3:
-        style_hint = "calm mood, keep the tone soft"
+        style_hint = "平静/温和，语调轻柔舒缓"
     else:
-        style_hint = "steady mood, keep the tone natural"
+        style_hint = "平稳/自然，保持语调流畅"
     return {
         "emotion_tag": str(emotion_tag).strip().upper() or "NEUTRAL",
         "mood_state": str(mood_state).strip() or "steady",

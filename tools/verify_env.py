@@ -22,7 +22,7 @@ def load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
         return values
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -77,8 +77,8 @@ if not all_exist:
 
 # ── 2. 加载配置 ────────────────────────────────────────────────
 env_values = load_env_file(ENV_FILE)
-secret_store = json.loads(SECRET_STORE_FILE.read_text(encoding="utf-8"))
-key_profiles_data = json.loads(KEY_PROFILES_FILE.read_text(encoding="utf-8"))
+secret_store = json.loads(SECRET_STORE_FILE.read_text(encoding="utf-8-sig"))
+key_profiles_data = json.loads(KEY_PROFILES_FILE.read_text(encoding="utf-8-sig"))
 
 print()
 print("【2】配置文件内容统计")

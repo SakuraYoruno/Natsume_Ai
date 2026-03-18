@@ -626,7 +626,7 @@ class WorldCanonStore:
         return self.world_root / f"{_normalize_doc_id(doc_id)}.json"
 
     def _load_from_path(self, path: Path) -> WorldCanonDocument:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
         doc_id = _normalize_doc_id(str(payload["doc_id"]))
         version = int(payload["version"])
         status = str(payload.get("status", "active"))

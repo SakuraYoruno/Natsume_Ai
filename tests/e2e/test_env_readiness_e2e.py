@@ -12,7 +12,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "services"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _load_nodes_from_fixture(fixture: dict) -> tuple[list[dict], int]:

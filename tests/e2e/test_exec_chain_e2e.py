@@ -23,7 +23,7 @@ class TestExecChainE2E:
     def test_exec_chain_input_fixture_valid(self):
         """执行链路输入 fixture 为合法 JSON，包含必须字段。"""
         path = FIXTURES_DIR / "exec_chain_input.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         assert "request_id" in data
         assert "approval_token" in data
         assert "undo_token" in data

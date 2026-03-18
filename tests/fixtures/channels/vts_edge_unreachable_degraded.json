@@ -12,7 +12,7 @@
     "status": "DEGRADED",
     "reason_code": "VTS_DEGRADED_FALLBACK",
     "emotion_tag": "HAPPY",
-    "expression_id": "exp_neutral_01",
+    "expression_id": "移除所有按键表情",
     "stage": "S_AVATAR_EXPRESSION_MAP",
     "detail_contains": "edge not available",
     "audit_logged": true

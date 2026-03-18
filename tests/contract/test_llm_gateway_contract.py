@@ -29,11 +29,11 @@ FIXTURES = ROOT / "tests" / "fixtures" / "llm_gateway"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _load_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")
 
 
 class TestLlmGatewayContract(unittest.TestCase):

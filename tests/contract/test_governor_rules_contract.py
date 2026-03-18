@@ -10,7 +10,7 @@ FIX = ROOT / "tests" / "fixtures" / "governor_rules"
 
 
 def _load(name: str) -> dict:
-    return json.loads((FIX / name).read_text(encoding="utf-8"))
+    return json.loads((FIX / name).read_text(encoding="utf-8-sig"))
 
 
 class TestGovernorRulesContract(unittest.TestCase):

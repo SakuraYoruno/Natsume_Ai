@@ -312,7 +312,7 @@ def _write_reminder_to_queue(entry: dict[str, Any]) -> None:
     queue: list[dict[str, Any]] = []
     if _REMINDER_QUEUE_FILE.exists():
         try:
-            queue = json.loads(_REMINDER_QUEUE_FILE.read_text(encoding="utf-8"))
+            queue = json.loads(_REMINDER_QUEUE_FILE.read_text(encoding="utf-8-sig"))
         except Exception:
             queue = []
     queue.append(entry)

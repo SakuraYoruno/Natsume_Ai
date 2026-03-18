@@ -16,7 +16,7 @@ CTX_FIX = ROOT / "tests" / "fixtures" / "prompt_context" / "good" / "minimal_val
 
 
 def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestToolCatalogContract(unittest.TestCase):

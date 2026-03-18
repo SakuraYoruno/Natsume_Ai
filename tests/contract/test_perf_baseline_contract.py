@@ -35,7 +35,7 @@ class TestPerfBaselineFixture:
 
     def setup_method(self):
         path = FIXTURES_DIR / "metrics_with_latency.json"
-        self.data = json.loads(path.read_text(encoding="utf-8"))
+        self.data = json.loads(path.read_text(encoding="utf-8-sig"))
 
     def test_latency_baseline_field_present(self):
         """latency_baseline 字段存在于 /obs/metrics 响应中。"""

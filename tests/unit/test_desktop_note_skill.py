@@ -60,10 +60,10 @@ class TestDesktopNoteCreate:
         assert m["before_hash"] is None          # 文件原本不存在
         assert m["after_hash"] is not None       # 写入后有 hash
         assert m["path"].endswith("hello.txt")
-        assert Path(m["path"]).read_text(encoding="utf-8") == "你好，夏目"
+        assert Path(m["path"]).read_text(encoding="utf-8-sig") == "你好，夏目"
 
     def test_create_overwrites_existing(self, tmp_path: Path) -> None:
-        (tmp_path / "note.txt").write_text("旧内容", encoding="utf-8")
+        (tmp_path / "note.txt").write_text("旧内容", encoding="utf-8-sig")
         result = execute_desktop_note(
             _args("create", "note.txt", str(tmp_path), "新内容"),
             _ctx(),
@@ -94,7 +94,7 @@ class TestDesktopNoteUndo:
 
     def test_undo_update_restores_content(self, tmp_path: Path) -> None:
         original = "原始内容"
-        (tmp_path / "update_me.txt").write_text(original, encoding="utf-8")
+        (tmp_path / "update_me.txt").write_text(original, encoding="utf-8-sig")
 
         result = execute_desktop_note(
             _args("update", "update_me.txt", str(tmp_path), "更新后内容"),
@@ -105,7 +105,7 @@ class TestDesktopNoteUndo:
 
         undo_result = undo_desktop_note(manifest, before_content=original)
         assert undo_result["status"] == "UNDO_COMPLETED"
-        assert Path(manifest["path"]).read_text(encoding="utf-8") == original
+        assert Path(manifest["path"]).read_text(encoding="utf-8-sig") == original
 
 
 # ── T-DESK-03 ──
@@ -225,7 +225,7 @@ class TestDesktopNoteDeleteQuarantine:
     """T-DESK-07：delete 默认 move-to-quarantine，undo 可恢复。"""
 
     def test_delete_moves_to_quarantine(self, tmp_path: Path) -> None:
-        (tmp_path / "del_me.txt").write_text("要删除的内容", encoding="utf-8")
+        (tmp_path / "del_me.txt").write_text("要删除的内容", encoding="utf-8-sig")
         result = execute_desktop_note(
             _args("delete", "del_me.txt", str(tmp_path)),
             _ctx(),
@@ -242,7 +242,7 @@ class TestDesktopNoteDeleteQuarantine:
 
     def test_delete_undo_restores_file(self, tmp_path: Path) -> None:
         original_content = "可恢复的内容"
-        (tmp_path / "restore_me.txt").write_text(original_content, encoding="utf-8")
+        (tmp_path / "restore_me.txt").write_text(original_content, encoding="utf-8-sig")
 
         result = execute_desktop_note(
             _args("delete", "restore_me.txt", str(tmp_path)),
@@ -255,7 +255,7 @@ class TestDesktopNoteDeleteQuarantine:
         assert undo_result["status"] == "UNDO_COMPLETED"
         restored = tmp_path / "restore_me.txt"
         assert restored.exists()
-        assert restored.read_text(encoding="utf-8") == original_content
+        assert restored.read_text(encoding="utf-8-sig") == original_content
 
 
 # ── T-DESK-08 ──
@@ -280,7 +280,7 @@ class TestDesktopNoteAuditTrail:
         assert "action" in m
 
     def test_manifest_before_after_hash_differ(self, tmp_path: Path) -> None:
-        (tmp_path / "track.txt").write_text("原始内容", encoding="utf-8")
+        (tmp_path / "track.txt").write_text("原始内容", encoding="utf-8-sig")
         result = execute_desktop_note(
             _args("update", "track.txt", str(tmp_path), "更新内容"),
             _ctx(),

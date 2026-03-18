@@ -25,7 +25,7 @@ def _write_style_entry(root: Path, *, canon_id: str, content: str) -> None:
     }
     (root / f"{canon_id}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
 
@@ -45,7 +45,7 @@ def _write_world_doc(root: Path, *, doc_id: str, title: str, body: str) -> None:
     payload["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     (root / f"{doc_id}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
 

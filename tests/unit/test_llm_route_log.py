@@ -119,7 +119,7 @@ class TestMigrationIdempotent:
         )
         assert migration_path.exists(), f"迁移脚本不存在: {migration_path}"
 
-        sql = migration_path.read_text(encoding="utf-8")
+        sql = migration_path.read_text(encoding="utf-8-sig")
         conn = sqlite3.connect(":memory:")
         # 执行两次，验证幂等
         conn.executescript(sql)

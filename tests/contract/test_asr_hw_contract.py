@@ -52,7 +52,7 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "voice"
 
 def _load_fixture(subpath: str) -> dict:
     fpath = FIXTURES_DIR / subpath
-    with open(fpath, "r", encoding="utf-8") as f:
+    with open(fpath, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

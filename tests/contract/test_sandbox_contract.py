@@ -53,7 +53,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "airlock"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestSandboxNormalExecution(unittest.TestCase):
@@ -487,7 +487,7 @@ class TestExistingT39T40NoRegression(unittest.TestCase):
     def test_t40_ingress_still_works(self) -> None:
         """T-40：入站内容仍被隔离且不直接执行。"""
         from host_brain.airlock.quarantine import CLASS_DRAFT_INSTRUCTION
-        draft_instruction = (FIXTURES / "bad" / "ingress_direct_exec.txt").read_text(encoding="utf-8")
+        draft_instruction = (FIXTURES / "bad" / "ingress_direct_exec.txt").read_text(encoding="utf-8-sig")
         result = quarantine_ingress(
             draft_instruction,
             request_id="req_t40_regression",

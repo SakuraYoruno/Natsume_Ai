@@ -616,7 +616,7 @@ def _load_constraint_statements(paths: list[str | Path]) -> list[str]:
         file_path = Path(path)
         if not file_path.exists():
             continue
-        text = file_path.read_text(encoding="utf-8")
+        text = file_path.read_text(encoding="utf-8-sig")
         for raw in text.split(";"):
             line = raw.strip()
             if not line:

@@ -231,7 +231,7 @@ class ArtifactVault:
 
         for manifest_path in sorted(self.manifests_dir.glob("manifest_*.json")):
             try:
-                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
             except Exception as exc:  # pragma: no cover - defensive guard
                 self.ledger.log_error(
                     request_id=request_id,
@@ -368,7 +368,7 @@ class ArtifactVault:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8-sig"))
         except Exception:
             return None
 

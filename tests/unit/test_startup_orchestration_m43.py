@@ -39,11 +39,11 @@ def _make_migrations_dir(
     tmp = Path(tempfile.mkdtemp())
     for v in versions:
         sql_file = tmp / f"{v:04d}_test_migration.sql"
-        sql_file.write_text(f"-- Migration {v:04d}\nCREATE TABLE IF NOT EXISTS t{v} (id INTEGER);", encoding="utf-8")
+        sql_file.write_text(f"-- Migration {v:04d}\nCREATE TABLE IF NOT EXISTS t{v} (id INTEGER);", encoding="utf-8-sig")
     if duplicate is not None:
         # 创建重复版本号的文件
         dup_file = tmp / f"{duplicate:04d}_duplicate_migration.sql"
-        dup_file.write_text(f"-- Duplicate Migration {duplicate:04d}\nCREATE TABLE IF NOT EXISTS dup{duplicate} (id INTEGER);", encoding="utf-8")
+        dup_file.write_text(f"-- Duplicate Migration {duplicate:04d}\nCREATE TABLE IF NOT EXISTS dup{duplicate} (id INTEGER);", encoding="utf-8-sig")
     return tmp
 
 

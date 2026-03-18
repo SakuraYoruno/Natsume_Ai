@@ -46,7 +46,7 @@ FIXTURE_DIR = ROOT / "tests" / "fixtures" / "observability"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _seed_host_events(ledger: SQLiteLedger, host_events: dict[str, Any]) -> None:

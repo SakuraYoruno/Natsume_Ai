@@ -100,7 +100,7 @@ class TestThreeGraphStructureUnchanged:
         """executor 未新增 P8 业务特判（P8 逻辑仅在 graph_runtime / ledger 层）。"""
         root = Path(__file__).resolve().parents[2]
         executor_path = root / "host_brain" / "integrations" / "graph_executor.py"
-        text = executor_path.read_text(encoding="utf-8")
+        text = executor_path.read_text(encoding="utf-8-sig")
         assert "p8_" not in text.lower(), "graph_executor 不得包含 P8 业务分支"
         assert "P8_EXTENDED" not in text, "graph_executor 不得引用 P8 开关"
 

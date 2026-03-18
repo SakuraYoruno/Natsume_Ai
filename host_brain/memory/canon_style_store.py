@@ -70,7 +70,7 @@ class StyleCanonStore:
         if not path.exists():
             return None
 
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
         return StyleCanonEntry(
             canon_id=str(payload["canon_id"]),
             version=int(payload["version"]),
@@ -87,7 +87,7 @@ class StyleCanonStore:
         entries: list[StyleCanonEntry] = []
         for path in sorted(self.style_root.glob("*.json")):
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload = json.loads(path.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError:
                 continue
             if "canon_id" not in payload:

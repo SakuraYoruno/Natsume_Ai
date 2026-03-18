@@ -42,7 +42,7 @@ class _PrintCallVisitor(ast.NodeVisitor):
 
     def check_file(self, filepath: str) -> None:
         self._file = filepath
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding="utf-8-sig") as f:
             source = f.read()
         try:
             tree = ast.parse(source, filename=filepath)
@@ -211,7 +211,7 @@ def test_requirements_txt_marks_redis_optional() -> None:
     """F-12: requirements.txt 中 redis 必须标注为可选依赖。"""
     req_path = PROJECT_ROOT / "requirements.txt"
     assert req_path.exists(), "requirements.txt 不存在"
-    content = req_path.read_text(encoding="utf-8")
+    content = req_path.read_text(encoding="utf-8-sig")
     # 必须有"可选"相关注释 + redis 字样
     assert "redis" in content.lower(), "requirements.txt 中未提及 redis"
     assert "可选" in content or "optional" in content.lower(), (

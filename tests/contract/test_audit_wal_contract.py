@@ -42,7 +42,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "audit"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 class TestWalModeActivation(unittest.TestCase):
@@ -316,7 +316,10 @@ class TestWriteRetry(unittest.TestCase):
         ledger = SQLiteLedger(db_path=":memory:")
         try:
             self.assertIsNotNone(ledger._write_lock)
-            self.assertIsInstance(ledger._write_lock, type(threading.Lock()))
+            # RLock 允许事务内重入，Lock 不允许；两者都能序列化写入
+            lock_type = type(threading.Lock())
+            rlock_type = type(threading.RLock())
+            self.assertIsInstance(ledger._write_lock, (lock_type, rlock_type))
         finally:
             ledger.close()
 

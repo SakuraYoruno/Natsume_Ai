@@ -1,4 +1,4 @@
-"""M10-C 记忆蒸馏系统单元测试。
+﻿"""M10-C 记忆蒸馏系统单元测试。
 
 T-Distill-01：distill_top_k 正常蒸馏 — 有情节记忆时应返回 semantic_id，写入 semantic_memory 表。
 T-Distill-02：幂等检查 — 相同 source_memory_ids 组合重复蒸馏应跳过（skipped=True）。
@@ -195,7 +195,7 @@ def test_context_pack_semantic_slot_missing_required_field():
     result = validate_prompt_context(cp)
     assert not result.valid
     codes = [v.code for v in result.violations]
-    assert "CONTEXT_PACK_TYPE_INVALID" in codes
+    assert "PROMPT_CONTEXT_TYPE_INVALID" in codes
 
 
 def test_context_pack_without_semantic_slot_still_valid():

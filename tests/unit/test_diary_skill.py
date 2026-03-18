@@ -86,7 +86,7 @@ class TestDiaryGenerate:
         # 文件写入
         diary_file = tmp_path / "diary" / f"{_today()}.md"
         assert diary_file.exists()
-        assert "今天是美好的一天" in diary_file.read_text(encoding="utf-8")
+        assert "今天是美好的一天" in diary_file.read_text(encoding="utf-8-sig")
 
         # Episodic 写入
         # 写入 2 条：日记条目 + interaction_hint

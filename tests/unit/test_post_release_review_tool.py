@@ -13,7 +13,7 @@ from tools.post_release_review import run
 
 
 def _write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
 
 
 def test_post_release_review_complete_when_age_gte_24h(tmp_path: Path) -> None:

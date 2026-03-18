@@ -20,7 +20,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "services"
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _find_node_row(rows: list[dict], node_id: str) -> dict:

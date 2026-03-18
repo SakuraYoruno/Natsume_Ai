@@ -184,7 +184,7 @@ class BondMigrationRunner:
 
             started = perf_counter()
             try:
-                text = asset.path.read_text(encoding="utf-8")
+                text = asset.path.read_text(encoding="utf-8-sig")
                 statements = _extract_cypher_statements(text)
                 if not statements:
                     raise ValueError("migration has no executable cypher statements")
@@ -277,7 +277,7 @@ class BondMigrationRunner:
                 continue
             migration_id = int(match.group(1))
             name = match.group(2)
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8-sig")
             assets.append(
                 BondMigrationAsset(
                     migration_id=migration_id,

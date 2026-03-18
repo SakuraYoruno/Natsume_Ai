@@ -37,7 +37,7 @@ _VERSION_PATTERN = re.compile(r"^\s*#\s*版本\s*[：:]\s*(\S+)\s*$")
 
 
 def _load_active_pointer(path: Path) -> dict[str, str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if set(data.keys()) != set(ALLOWED_FLOW_ENVS):
         raise ValueError("active.pointer must contain dev/staging/prod only")
     return {env: str(data[env]) for env in ALLOWED_FLOW_ENVS}
@@ -65,8 +65,8 @@ def _load_model_plane_meta(root: Path) -> dict[str, Any] | None:
         )
         return None
 
-    profile_text = profile_path.read_text(encoding="utf-8")
-    registry_text = registry_path.read_text(encoding="utf-8")
+    profile_text = profile_path.read_text(encoding="utf-8-sig")
+    registry_text = registry_path.read_text(encoding="utf-8-sig")
 
     profile_version = _extract_version_tag(profile_text)
     registry_version = _extract_version_tag(registry_text)
@@ -150,11 +150,11 @@ def _get_git_commit_hash(repo_root: Path) -> str | None:
         head_file = repo_root / ".git" / "HEAD"
         if not head_file.exists():
             return None
-        head_text = head_file.read_text(encoding="utf-8").strip()
+        head_text = head_file.read_text(encoding="utf-8-sig").strip()
         if head_text.startswith("ref: "):
             ref_path = repo_root / ".git" / head_text[5:].strip()
             if ref_path.exists():
-                return ref_path.read_text(encoding="utf-8").strip()
+                return ref_path.read_text(encoding="utf-8-sig").strip()
             return None
         if len(head_text) == 40 and all(c in "0123456789abcdef" for c in head_text.lower()):
             return head_text

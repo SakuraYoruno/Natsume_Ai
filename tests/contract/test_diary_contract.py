@@ -58,7 +58,7 @@ class TestDiaryWriterNormal:
         # 文件写入检查
         diary_file = tmp_path / "diary" / "2026-03-03.md"
         assert diary_file.exists()
-        content = diary_file.read_text(encoding="utf-8")
+        content = diary_file.read_text(encoding="utf-8-sig")
         assert "2026-03-03" in content
         # Manifest 结构
         manifest = result["manifest"]
@@ -103,7 +103,8 @@ class TestDiaryWriterNormal:
     def test_episodic_entry_written(self) -> None:
         written = []
         def capturing_writer(entry):
-            written.append(entry)
+            if entry.get("category") == DIARY_CATEGORY:
+                written.append(entry)
             return {"status": "OK"}
 
         execute_diary_writer(

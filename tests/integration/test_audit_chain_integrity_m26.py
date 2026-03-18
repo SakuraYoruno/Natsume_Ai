@@ -21,7 +21,7 @@ INTENT_FIX = ROOT / "tests" / "fixtures" / "intent" / "good" / "intent_v1_valid.
 
 
 def _load_intent() -> dict:
-    return json.loads(INTENT_FIX.read_text(encoding="utf-8"))
+    return json.loads(INTENT_FIX.read_text(encoding="utf-8-sig"))
 
 
 def _noop_skill(args: dict, _ctx: dict | None) -> dict:

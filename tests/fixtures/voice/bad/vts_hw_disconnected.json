@@ -6,7 +6,7 @@
   "expected": {
     "success_degraded": true,
     "reason_code": "VTS_CONNECTION_FAILED",
-    "expression_id": "exp_happy_01",
+    "expression_id": "HK_Happy",
     "detail_contains": "queued"
   }
 }

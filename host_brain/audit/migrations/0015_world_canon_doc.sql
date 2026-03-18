@@ -1,4 +1,7 @@
-﻿-- Migration 0015: world_canon_doc 绱㈠紩琛紙M9 World Canon 闂幆锛?-- 瀛樺偍 World Canon 鏂囦欢鎵弿鍚庣殑绱㈠紩蹇収锛屼緵 prompt_context 娉ㄥ叆鍜?drift 妫€娴嬩娇鐢ㄣ€?-- 骞傜瓑锛欳REATE TABLE IF NOT EXISTS + ON CONFLICT UPSERT銆?-- 鍏宠仈锛欴evSpec 搂19.1.2锛汧R-WCANON-002锛汿ASK-0112銆?
+﻿-- Migration 0015: world_canon_doc 索引表（M9 World Canon 闭环）
+-- 存储 World Canon 文件扫描后的索引快照，供 prompt_context 注入和 drift 检测使用。
+-- 幂等：CREATE TABLE IF NOT EXISTS + ON CONFLICT UPSERT。
+-- 关联：DevSpec §19.1.2，FR-WCANON-002，TASK-0112。
 CREATE TABLE IF NOT EXISTS world_canon_doc (
     doc_id      TEXT    PRIMARY KEY,
     version     INTEGER NOT NULL,
@@ -8,10 +11,10 @@ CREATE TABLE IF NOT EXISTS world_canon_doc (
     updated_ts  INTEGER NOT NULL
 );
 
--- 鎸?status 杩囨护 active 鏉＄洰锛坈ontext_pack Top-K 娉ㄥ叆锛?CREATE INDEX IF NOT EXISTS idx_world_canon_doc_status
+-- 按 status 过滤 active 条目（context_pack Top-K 注入）
+CREATE INDEX IF NOT EXISTS idx_world_canon_doc_status
     ON world_canon_doc(status);
 
--- 鎸夋洿鏂版椂闂存帓搴忥紙drift 妫€娴?/ 鏈€杩戝彉鏇存煡璇級
+-- 按更新时间排序（drift 检测 / 最近变更查询）
 CREATE INDEX IF NOT EXISTS idx_world_canon_doc_updated_ts
     ON world_canon_doc(updated_ts);
-
