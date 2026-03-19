@@ -7,7 +7,8 @@ param(
   [string]$DefaultShell = "powershell",
   [string]$ShellPath = "",
   [switch]$SkipFirewallRules,
-  [switch]$SkipSshConfigTuning
+  [switch]$SkipSshConfigTuning,
+  [switch]$NoSelfElevate
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,10 +19,104 @@ function Test-IsAdministrator {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Ensure-Administrator {
-  if (-not (Test-IsAdministrator)) {
-    throw "setup_remote_access.ps1 must run in an elevated PowerShell session."
+function Get-CurrentPowerShellPath {
+  $currentProcess = Get-Process -Id $PID -ErrorAction SilentlyContinue
+  if ($null -ne $currentProcess -and -not [string]::IsNullOrWhiteSpace($currentProcess.Path)) {
+    return $currentProcess.Path
   }
+
+  $fallback = Join-Path $PSHOME "powershell.exe"
+  if (Test-Path -Path $fallback) {
+    return $fallback
+  }
+
+  $cmd = Get-Command powershell.exe -ErrorAction SilentlyContinue
+  if ($null -ne $cmd) {
+    return $cmd.Source
+  }
+
+  throw "Unable to locate powershell.exe for self-elevation."
+}
+
+function Format-PowerShellArgument {
+  param([Parameter(Mandatory = $true)][string]$Value)
+
+  if ($Value -match '[\s"`]') {
+    return '"' + ($Value -replace '`', '``' -replace '"', '`"') + '"'
+  }
+  return $Value
+}
+
+function Get-SelfElevationCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptPath,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$BoundParameters
+  )
+
+  $arguments = New-Object System.Collections.Generic.List[string]
+  [void]$arguments.Add("-NoLogo")
+  [void]$arguments.Add("-NoProfile")
+  [void]$arguments.Add("-ExecutionPolicy")
+  [void]$arguments.Add("Bypass")
+  [void]$arguments.Add("-File")
+  [void]$arguments.Add((Format-PowerShellArgument -Value $ScriptPath))
+
+  foreach ($entry in $BoundParameters.GetEnumerator() | Sort-Object Key) {
+    if ($entry.Key -eq "NoSelfElevate") {
+      continue
+    }
+
+    if ($entry.Value -is [switch]) {
+      if ($entry.Value.IsPresent) {
+        [void]$arguments.Add("-$($entry.Key)")
+      }
+      continue
+    }
+
+    if ($entry.Value -is [bool]) {
+      [void]$arguments.Add("-$($entry.Key):$($entry.Value.ToString().ToLowerInvariant())")
+      continue
+    }
+
+    [void]$arguments.Add("-$($entry.Key)")
+    [void]$arguments.Add((Format-PowerShellArgument -Value ([string]$entry.Value)))
+  }
+
+  [void]$arguments.Add("-NoSelfElevate")
+
+  return [ordered]@{
+    file_path = Get-CurrentPowerShellPath
+    argument_list = @($arguments)
+    printable_command = ("{0} {1}" -f (Format-PowerShellArgument -Value (Get-CurrentPowerShellPath)), ($arguments -join " "))
+  }
+}
+
+function Ensure-Administrator {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ScriptPath,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$BoundParameters
+  )
+
+  if (Test-IsAdministrator) {
+    return
+  }
+
+  $elevationCommand = Get-SelfElevationCommand -ScriptPath $ScriptPath -BoundParameters $BoundParameters
+  if (-not $NoSelfElevate.IsPresent -and [Environment]::UserInteractive) {
+    try {
+      $proc = Start-Process -FilePath $elevationCommand.file_path -ArgumentList $elevationCommand.argument_list -Verb RunAs -Wait -PassThru -ErrorAction Stop
+      exit $proc.ExitCode
+    } catch {
+      $detail = $_.Exception.Message
+      throw "setup_remote_access.ps1 requires administrator privileges. Auto-elevation failed: $detail`nRun this command in an elevated PowerShell session:`n$($elevationCommand.printable_command)"
+    }
+  }
+
+  throw "setup_remote_access.ps1 requires administrator privileges. Run this command in an elevated PowerShell session:`n$($elevationCommand.printable_command)"
 }
 
 function Ensure-ServiceState {
@@ -302,7 +397,7 @@ function Get-WinRmListenerSummary {
   return $items
 }
 
-Ensure-Administrator
+Ensure-Administrator -ScriptPath $PSCommandPath -BoundParameters $PSBoundParameters
 
 $sshResult = [ordered]@{
   enabled = $EnableOpenSsh
