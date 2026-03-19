@@ -1,8 +1,8 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.4
-日期：2026-03-18
+版本：v1.5
+日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -100,6 +100,10 @@
   用途：Edge 优化与测试报告（2026-03-04）。
   读者：MASTER、Project（文档代理）。
 
+- docs/45_testing/test_reports/EMOTION_CLOSED_LOOP_REPORT_20260309_235917.md
+  用途：情感闭环测试报告（2026-03-09）。验证情感状态写入、读取与回流的完整闭环链路。
+  读者：MASTER、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
@@ -108,12 +112,61 @@
   用途：模型本地/云端切换变更日志（2026-03-05）。
   读者：MASTER、Project（文档代理）。
 
+- docs/50_release/release_seal_test_plan_20260313.md
+  用途：封板测试计划（2026-03-13）。定义封板前必须通过的测试项目、验收标准与执行顺序。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/release_seal_test_plan_supplement_20260315.md
+  用途：封板测试计划补充（2026-03-15）。对 20260313 测试计划的补充与修订。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/release_seal_execution_report_20260316.md
+  用途：封板执行报告（2026-03-16）。记录封板测试的实际执行结果、通过/失败项与最终封板决策。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/reports/release_seal_20260316/00_index/BATCH1_20260316_p0_entry.md
+  docs/50_release/reports/release_seal_20260316/00_index/BATCH2_20260316_p1_p2_formal.md
+  docs/50_release/reports/release_seal_20260316/00_index/BATCH3_20260316_automated.md
+  docs/50_release/reports/release_seal_20260316/00_index/BATCH4_20260316_full_auto.md
+  docs/50_release/reports/release_seal_20260316/00_index/MULTI_AGENT_SEAL_RESULT.md
+  docs/50_release/reports/release_seal_20260316/00_index/README.md
+  用途：2026-03-16 封板批次报告（P0 入口、P1/P2 正式、自动化、全自动、多 Agent 封板结果与索引）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/rollback/ROLLBACK_RUNBOOK_2026-03-10.md
+  用途：回滚操作手册（2026-03-10）。定义各里程碑的回滚步骤、前置条件与验证口径。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/rollback/RELEASE_ROLLBACK_GATE_20260310_010648.md
+  用途：发布回滚门控记录（2026-03-10）。记录回滚决策触发条件与实际执行情况。
+  读者：MASTER、Project（文档代理）。
+
+- docs/50_release/rollback/POST_RELEASE_REVIEW_20260310_010918.md
+  用途：发布后复盘报告（2026-03-10）。记录发布后问题、根因分析与改进措施。
+  读者：MASTER、Project（文档代理）。
+
 - docs/60_trace/ENV_SINGLE_SOURCE_MIGRATION_2026-03-04.md
   用途：环境变量单一来源迁移记录（2026-03-04）。
   读者：MASTER、Project（文档代理）。
 
 - docs/60_trace/CANON_VECTOR_PROJECTION_2026-03-04.md
   用途：Canon 向量投影分析（2026-03-04）。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/ARCH_REVIEW_AND_ROADMAP_2026-03-09.md
+  用途：架构评审与路线图（2026-03-09）。对当前架构的评审结论与后续演进路线规划。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/retrieval_orchestrator_design_2026-03-09.md
+  用途：检索编排器设计文档（2026-03-09）。记录检索层编排逻辑、优先级策略与接口设计。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/README_trial_run_reports.md
+  用途：试运行报告目录说明（README）。解释 artifacts/trial_run_reports/ 下各报告的命名规范与阅读方式。
+  读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/VTS_VOICE_TROUBLESHOOTING.md
+  用途：VTS 语音故障排查手册。记录语音链路常见问题、排查步骤与已知解决方案。
   读者：MASTER、Project（文档代理）。
 
 - docs/45_testing/test_reports/host_chat/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md
@@ -182,12 +235,27 @@
   用途：Natsume AI 架构分析报告（2026-03-11）。对整体架构全景文档的深度评审：成熟特征、薄弱环节、优先级建议与落地路径。
   读者：MASTER、Project（文档代理）。
 
-9）协作与运行手册（Worksheet：分工/流程/落地节奏）
+9）性能与稳定性监控（Metrics & Stability）
+- docs/55_testing/metrics/baseline_stream_metrics_2026-03-09.md
+  用途：流式响应基线性能指标（2026-03-09）。记录 SSE 流式输出的延迟、吞吐量与稳定性基线数据。
+  读者：MASTER、Project（文档代理）。
+
+- docs/55_testing/metrics/LONGTERM_METRIC_DASHBOARD_20260310_014526.md
+  用途：长期指标看板（2026-03-10）。汇总多维度性能指标趋势，用于长期健康度追踪。
+  读者：MASTER、Project（文档代理）。
+
+- docs/55_testing/stability_weekly/WEEKLY_STABILITY_REPORT_20260310_005912.md
+  用途：周度稳定性报告（2026-03-10）。记录一周内系统稳定性数据、异常事件与改进建议。
+  读者：MASTER、Project（文档代理）。
+
+10）协作与运行手册（Worksheet：分工/流程/落地节奏）
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
   用途：明确 Project×实现层×Master 的分工边界、交接物与防污染规则；不包含终端指令片段。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
-10）配置资产入口（非文档，但属于"可部署/可回放"真相源的一部分）
+（注：docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、ENV_EXTERNAL_SERVICES_CHECKLIST.md、ExternalServices_Config.md、vts_hotkey_config_guide.md、index.md、CURRENT_CODE_ARCHITECTURE.md、dataflow_report.md、MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
+
+11）配置资产入口（非文档，但属于“可部署/可回放”真相源的一部分）
 - flows/
   用途：Flow 导出物与环境指针（exports/ + active.pointer）；由 Trace（docs/60_trace/flows/index.md）指向当前生效版本。
   读者：MASTER、实现层（按 DevSpec/DevTasks 约束维护与回归）。
@@ -196,7 +264,7 @@
   用途：运行时单一配置源（`.env`）与示例/降级模板（`.env.example`）；用于 Host/Edge/Neo4j/Chroma/Retrieval 统一配置。
   读者：MASTER、实现层（按 DevSpec 与运行脚本约束实现与回归）。
 
-11）发布目录（Release）
+12）发布目录（Release）
 - configs/release/mXX_release.json
   用途：各里程碑发布清单（JSON 格式），记录发布版本、变更摘要、测试通过情况。
   读者：MASTER、Project（文档代理）。
@@ -226,11 +294,13 @@
   - `受众：MASTER|CODEX|PROJECT`
   - `标题：...`
 
-附：文档归类规则（v1.2 新增）
+附：文档归类规则（v1.2 新增，v1.5 补充）
 - 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/35_quality/code_reviews/
 - 测试报告、运行追踪报告、变更日志、审计报告、数据流报告 → docs/60_trace/
 - 架构全景、架构分析、理论推导、设计方案 → docs/15_theory/
 - 配置指南、运行手册、项目协作文档、Flow 资产索引 → docs/50_project/
 - 发布清单（JSON）、发布目录、回滚映射 → configs/release/
+- 封板测试计划、封板执行报告、回滚手册、发布后复盘 → docs/50_release/
+- 性能基线指标、长期指标看板、周度稳定性报告 → docs/55_testing/
 - 开发规范、任务清单、模型平面 → docs/30_devspec/
 - 任务看板、TODO 追踪 → docs/40_agents/
