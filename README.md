@@ -36,18 +36,18 @@
 
 ## 📖 项目简介
 
-**Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统，采用 **Host-Edge 分体架构**。  
+**Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统，采用 **Host-Edge 分体架构**。
 它不是“模型直连执行器”的助手，而是“模型参与表达、Host 负责裁决与执行治理”的工程化系统。
 
 ### ✨ 当前系统定位
 
-- 🧠 **Host Brain（主脑）**：统一入口、意图治理、场景路由、图编排运行时、审计与证据写入都在 Host 收口。  
-- 🎙️ **Edge Client（边缘端）**：提供 ASR/TTS、VTS 驱动、资源门控与兜底能力，负责本地感知与执行。  
-- 🔀 **链路策略**：默认以单链路主图优先；仅在特定执行画像下进入监督式多 Agent 分支。  
-- 🧾 **请求主链**：`/v1/chat → Governor → SceneRouter → 场景处理器/Graph Runtime → COMMIT → Audit`。  
-- 🛡️ **治理原则**：任何影响现实的动作必须票据化、可回放、可审计。  
+- 🧠 **Host Brain（主脑）**：统一入口、意图治理、场景路由、图编排运行时、审计与证据写入都在 Host 收口。
+- 🎙️ **Edge Client（边缘端）**：提供 ASR/TTS、VTS 驱动、资源门控与兜底能力，负责本地感知与执行。
+- 🔀 **链路策略**：默认以单链路主图优先；仅在特定执行画像下进入监督式多 Agent 分支。
+- 🧾 **请求主链**：`/v1/chat → Governor → SceneRouter → 场景处理器/Graph Runtime → COMMIT → Audit`。
+- 🛡️ **治理原则**：任何影响现实的动作必须票据化、可回放、可审计。
 
-> 🎯 核心理念：**语言模型只负责解释与表达**，最终权力与事实判据必须落在 Host 代码与审计链上。  
+> 🎯 核心理念：**语言模型只负责解释与表达**，最终权力与事实判据必须落在 Host 代码与审计链上。
 > 📍 架构总览见 `## 🏗️ 系统架构`，实现对齐见 `## 🧭 当前实现对齐（2026-03-18）`。
 
 ---
@@ -164,10 +164,10 @@ graph TB
 
 ### 🚪 统一入口与意图治理（发生时机）
 
-1. `POST /v1/chat` 进入 `host_brain/app/fastapi_app.py` → `handle_chat()`。  
-2. 若请求未携带 `intent_draft`，Host 会在入口层根据 `pre_intent_classifier` 结果生成草案并映射 `action`。  
-3. 统一流式入口 `_unified_chat_sse_generator()` 调用 `IntentDecisionEngine.evaluate_intent()` 做 Governor 裁决。  
-4. 若 `decision=REJECT` 直接返回 `COMMIT(REJECT)`；仅在 `APPROVE` 后进入场景路由。  
+1. `POST /v1/chat` 进入 `host_brain/app/fastapi_app.py` → `handle_chat()`。
+2. 若请求未携带 `intent_draft`，Host 会在入口层根据 `pre_intent_classifier` 结果生成草案并映射 `action`。
+3. 统一流式入口 `_unified_chat_sse_generator()` 调用 `IntentDecisionEngine.evaluate_intent()` 做 Governor 裁决。
+4. 若 `decision=REJECT` 直接返回 `COMMIT(REJECT)`；仅在 `APPROVE` 后进入场景路由。
 
 对应代码：
 - `host_brain/app/chat_handler.py`
@@ -265,7 +265,6 @@ Natsume_Ai/
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
 │   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
 │   ├── scheduler/           #    调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
-│   ├── scene/               #    场景层模块
 │   ├── skills/              #    技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
 │   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
 │   ├── app/emotion_context.py #  情感上下文模块（归一化 / 快照 / 治理快照 / VAD 映射）
