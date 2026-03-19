@@ -1,7 +1,7 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v2.0
+版本：v2.1
 日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
@@ -296,6 +296,14 @@
 
 - docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md
   用途：host_brain/tools/ + memory/ 层接口契约（2026-03-19）。覆盖 ToolMeta 元数据契约、ToolCatalog 注册表、ToolBroker WRITE 令牌门控与情感上下文注入（M27-J）、MCP 适配器；Canon 同步机制（sync_world_canon_index/detect_world_version_drift）、情节记忆、蒸馏与上下文压缩。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md
+  用途：host_brain 外围层接口契约（2026-03-19）。覆盖 airlock 入站隔离分类（quarantine_ingress/SandboxExecutor）、bond 情感关系图谱写入（BondDynamicsWriter/BondStageEngine 六阶段晋级）、channels 双通道 I/O（VTS 16 种情感表情映射/WeChat 幂等去重）、vision 多检测器并行聚合（MultiDetectorAggregator）、lsp/ArtifactVault 可逆工件库（commit/undo/gc）、mcp/MCPToolRegistry 工具元数据注册与变更追踪。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md
+  用途：host_brain 核心应用层契约（2026-03-19）。覆盖 app 层场景分类（CHAT/EXEC_INTENT/WORK_CODE/WORK_TRANSLATE/VISION_UI）、聊天处理链路（Governor→场景分类→SceneRouter）、Prompt 构建与注入检测；audit/SQLiteLedger 全系统唯一审计账本（26 张表、WAL 模式、append-only 约束）；skills/SkillRegistry 技能元数据契约（clearance/risk_level/scope/reversible）与 17 个技能实现；observability 指标采集（ObsMode PROD/DEV、debug_trace 安全约束）。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 9）性能与稳定性监控（Metrics & Stability）
