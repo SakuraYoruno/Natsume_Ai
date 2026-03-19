@@ -260,7 +260,6 @@ Natsume_Ai/
 │   ├── lsp/                 #    Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
 │   ├── mcp/                 #    MCP 注册与桥接
 │   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
-│   ├── obs/                 #    观测数据适配层
 │   ├── obs/                 #    观测数据适配层（向后兼容 shim，实体已迁移至 observability/）
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
@@ -1182,6 +1181,13 @@ MetricsCollector emotion_metrics 情感维度指标
 | 📍 文档地图 | `docs/00_index/00_DOCMAP.md` | 所有文档的唯一入口 |
 | 📜 白皮书 | `docs/10_whitepaper/` | 宪法 + 人格设定（不可变法律）|
 | 🔬 理论文档 | `docs/15_theory/` | 架构哲学与方法论 |
+| 🧩 Core 层模块参考 | `docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md` | prompt_context 槽位契约、metabolism 硬状态与情感向量、emotion_timeline、services 注册表 |
+| 🔗 Integrations 层契约 | `docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md` | GraphState 全字段语义、Evidence Plane 写入机制、治理约束规则（Rule 1–6）、Multi-Agent 契约 |
+| 🔍 Retrieval 层契约 | `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` | 检索四阶段（Embed→RecallFusion→Rerank→EvidencePack）、缓存机制、降级路径、情感上下文透传 |
+| ⚖️ Governor+Scheduler 契约 | `docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md` | R1–R8 八条门控规则、GateSnapshot、TokenService；调度器三种触发模式、任务持久化、情感门控 |
+| 🛠️ Tools+Memory 层契约 | `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` | ToolMeta/ToolCatalog/ToolBroker WRITE 令牌门控；Canon 同步、情节记忆、蒸馏与上下文压缩 |
+| 🌐 外围层契约 | `docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md` | airlock 隔离、bond 六阶段晋级、channels VTS/WeChat、vision 多检测器、ArtifactVault、MCPToolRegistry |
+| 🏛️ App+Audit+Skills 契约 | `docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` | 场景分类与聊天链路、SQLiteLedger 26 张审计表、SkillRegistry 元数据契约、ObsMode 安全约束 |
 | 📋 PRD | `docs/20_prd/` | 需求文档（做什么 + 验收）|
 | 🔧 DevSpec | `docs/30_devspec/` | 开发规范 + 任务清单（怎么做）|
 | 🤖 AGENTS | `docs/40_agents/` | 实现层代理行为规范 |
