@@ -211,7 +211,7 @@
   用途：Canon 向量投影分析（2026-03-04）。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/ARCH_REVIEW_AND_ROADMAP_2026-03-09.md
+- docs/60_trace/ARCH_REVIEW_AND_ROADMAP.md
   用途：架构评审与路线图（2026-03-09）。对当前架构的评审结论与后续演进路线规划。
   读者：MASTER、Project（文档代理）。
 
