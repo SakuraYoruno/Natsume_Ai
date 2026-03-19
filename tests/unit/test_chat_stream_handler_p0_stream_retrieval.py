@@ -298,7 +298,7 @@ def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any)
     assert any(e.get("phase") == "RENDER" for e in events)
 
 
-def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order(
+def test_stream_commit_exposes_prompt_context_observability_and_logs_degrade_order(
     monkeypatch: Any,
     caplog,
 ) -> None:
@@ -330,15 +330,15 @@ def test_stream_commit_exposes_context_pack_observability_and_logs_degrade_order
                 "prompt_context_validation": {
                     "valid": True,
                     "degraded": True,
-                    "reason_code": "CONTEXT_PACK_DEGRADED",
+                    "reason_code": "PROMPT_CONTEXT_DEGRADED",
                     "violation_count": 1,
                     "violations": [],
                 },
                 "prompt_context_observability": {
-                    "version": "context_pack_obs.v1",
+                    "version": "prompt_context_obs.v1",
                     "degrade_order": ["six_route", "core_three", "minimal_context", "bare_llm"],
                     "selected_tier": "minimal_context",
-                    "selected_reason": "context_pack_authoritative_slot_degraded",
+                    "selected_reason": "prompt_context_authoritative_slot_degraded",
                     "slot_item_counts": {
                         "authoritative": 1,
                         "retrieval": 0,
