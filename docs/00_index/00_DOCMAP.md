@@ -1,7 +1,7 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.8
+版本：v1.9
 日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
@@ -55,7 +55,7 @@
 5）Project 指令（文档生产，不含代码）
 - docs/50_project/PROJECT_BRIEF.md
 - docs/50_project/PROJECT_TASKS.md
-- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
+- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md（⚠️ 文件已删除，待补充）
 - docs/50_project/arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md
 - docs/50_project/arch/ExternalServices_Config.md
 - docs/50_project/guides/vts_hotkey_config_guide.md
@@ -227,13 +227,6 @@
   用途：VTS 语音故障排查手册。记录语音链路常见问题、排查步骤与已知解决方案。
   读者：MASTER、Project（文档代理）。
 
-- docs/45_testing/test_reports/host_chat/HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md
-  docs/45_testing/test_reports/host_chat/HOST_CHAT_REAL_CHAIN_JA_RENDER_VERIFY_2026-03-05.md
-  docs/45_testing/test_reports/host_chat/HOST_CHAT_REAL_CHAIN_TRACE_req_*.md
-  docs/45_testing/test_reports/host_chat/HOST_FULL_CHAIN_REAL_RUN_2026-03-05.md
-  docs/45_testing/test_reports/host_chat/HOST_REAL_RUN_TEST_2026-03-04.md
-  用途：真实链路运行追踪报告（按日期/请求ID归档）。
-  读者：MASTER、Project（文档代理）。
 
 - artifacts/trace/HOST_CHAT_*_req_*.json
   artifacts/trace/CANON_STYLE_SYNC_*.json
@@ -243,10 +236,6 @@
 
 - docs/35_quality/audits/audit_report_20260311.md
   用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
-  读者：MASTER、Project（文档代理）。
-
-- docs/50_project/arch/dataflow_report.md
-  用途：Natsume AI 系统数据流全景报告（2026-03-11，持续更新）。覆盖双端通信、各功能/模块数据流、Agent 治理与路由、Graph 编排；含严格代码审计与修复记录（§13/§16）。
   读者：MASTER、Project（文档代理）。
 
 - artifacts/trial_run_reports/
@@ -289,10 +278,6 @@
   用途：Natsume AI 整体架构全景文档（2026-03-10）。含双端总体架构、Host Brain 各模块、Edge 各模块、数据流、记忆层、治理层的完整 Mermaid 图与说明。
   读者：MASTER、Project（文档代理）。
 
-- docs/15_theory/arch_analysis_report_20260311.md
-  用途：Natsume AI 架构分析报告（2026-03-11）。对整体架构全景文档的深度评审：成熟特征、薄弱环节、优先级建议与落地路径。
-  读者：MASTER、Project（文档代理）。
-
 - docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md
   用途：host_brain/core/ 层模块参考（2026-03-19）。覆盖 prompt_context 槽位契约与验证规则、metabolism 硬状态与情感向量机制、emotion_timeline 情感时间线、services 服务注册表与健康报告的完整接口语义与约束说明。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
@@ -315,9 +300,7 @@
   读者：MASTER、Project（文档代理）。
 
 10）协作与运行手册（Worksheet：分工/流程/落地节奏）
-- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
-  用途：明确 Project×实现层×Master 的分工边界、交接物与防污染规则；不包含终端指令片段。
-  读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
+- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md（已在第 5 节登记）
 
 （注：docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
 
