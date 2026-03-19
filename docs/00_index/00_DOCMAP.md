@@ -55,7 +55,6 @@
 5）Project 指令（文档生产，不含代码）
 - docs/50_project/PROJECT_BRIEF.md
 - docs/50_project/PROJECT_TASKS.md
-- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md（⚠️ 文件已删除，待补充）
 - docs/50_project/arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md
 - docs/50_project/arch/ExternalServices_Config.md
 - docs/50_project/guides/vts_hotkey_config_guide.md
@@ -320,9 +319,8 @@
   读者：MASTER、Project（文档代理）。
 
 10）协作与运行手册（Worksheet：分工/流程/落地节奏）
-- docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md（已在第 5 节登记）
 
-（注：docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
+（注：协作工作表 WORKSHEET_Project_Codex_Git_Flow.md 已删除，暂无替代文件。docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
 
 11）配置资产入口（非文档，但属于“可部署/可回放”真相源的一部分）
 - flows/
