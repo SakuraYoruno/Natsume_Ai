@@ -1,3 +1,6 @@
+受众：MASTER
+标题：host_brain/integrations/ 层接口契约
+
 # host_brain/integrations/ 层接口契约
 
 版本：v1.0

@@ -1,7 +1,7 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.9
+版本：v2.0
 日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
@@ -284,6 +284,18 @@
 
 - docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md
   用途：host_brain/integrations/ 层接口契约（2026-03-19）。覆盖 GraphState 全字段语义、graph_contract 核心函数、Evidence Plane 写入机制（CRITICAL/NON_CRITICAL/EvidenceWriteQueue）、治理约束规则（Rule 1–6）与 Multi-Agent 契约（P4–P7）。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md
+  用途：host_brain/retrieval/ 层接口契约（2026-03-19）。覆盖检索四阶段（Embed→RecallFusion→Rerank→EvidencePack）、RetrievalOrchestrator 入口契约与缓存机制、路径分类（success/partial_failure/all_failure）、降级摘要、情感上下文透传（OPT-41）与工厂函数 build_retrieval_pipeline_from_env。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md
+  用途：host_brain/governor/ + scheduler/ 层接口契约（2026-03-19）。覆盖 R1–R8 八条门控规则（含 R8 情感感知门控）、GateSnapshot 快照归一化、TokenService WRITE 令牌验证；NatsumeScheduler 三种触发模式、任务持久化（F-40）、心跳健康检测（TASK-0200）、Edge 探针检查（TASK-0211）与情感状态门控（M29-N）。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md
+  用途：host_brain/tools/ + memory/ 层接口契约（2026-03-19）。覆盖 ToolMeta 元数据契约、ToolCatalog 注册表、ToolBroker WRITE 令牌门控与情感上下文注入（M27-J）、MCP 适配器；Canon 同步机制（sync_world_canon_index/detect_world_version_drift）、情节记忆、蒸馏与上下文压缩。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 9）性能与稳定性监控（Metrics & Stability）

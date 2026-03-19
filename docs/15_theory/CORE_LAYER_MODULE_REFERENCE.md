@@ -1,3 +1,6 @@
+受众：MASTER
+标题：host_brain/core/ 层模块参考
+
 # host_brain/core/ 层模块参考
 
 版本：v1.0
