@@ -14,8 +14,8 @@
 
 ## 0. 相关入口（架构/链路）
 
-- 当前代码架构：`docs/50_project/CURRENT_CODE_ARCHITECTURE_2026-03-18.md`
-- 数据流全景：`docs/50_project/dataflow_report_20260311.md`
+- 当前代码架构：`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+- 数据流全景：`docs/50_project/arch/dataflow_report.md`
 - 仓库总览入口：`README.md`
 
 ---

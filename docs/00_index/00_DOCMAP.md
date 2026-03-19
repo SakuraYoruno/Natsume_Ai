@@ -1,7 +1,7 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.7
+版本：v1.8
 日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
@@ -56,9 +56,9 @@
 - docs/50_project/PROJECT_BRIEF.md
 - docs/50_project/PROJECT_TASKS.md
 - docs/50_project/WORKSHEET_Project_Codex_Git_Flow.md
-- docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md
-- docs/50_project/ExternalServices_Config.md
-- docs/50_project/vts_hotkey_config_guide.md
+- docs/50_project/arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md
+- docs/50_project/arch/ExternalServices_Config.md
+- docs/50_project/guides/vts_hotkey_config_guide.md
   用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；配置指南与外部服务清单；不包含终端指令片段。
   读者：Project（主要）、MASTER。实现层不应把它当任务来源。
 
@@ -66,73 +66,73 @@
   用途：Flow 资产追溯索引（按环境），记录 flows/active.pointer 指向的当前生效 Flow 导出物；支撑 T-Flow-02 回归口径。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_project/CURRENT_CODE_ARCHITECTURE.md
+- docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md
   用途：当前代码目录、系统分层、服务请求链路、多 Agent 治理与 Graph 编排落点对齐文档（以代码事实为准）。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
-- docs/50_project/dataflow_report.md
+- docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
-- docs/50_project/MULTI_AGENT_UPGRADE_PLAN.md
+- docs/50_project/phases/MULTI_AGENT_UPGRADE_PLAN.md
   用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_project/AGENT_ORCHESTRATION_DETAIL.md
+- docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md
   用途：Agent 编排详情（2026-03-18，当前实现对齐）。记录当前 Supervisor/子 agent/Judge 编排的实际实现口径，含历史草稿留痕。以本文件"当前口径"章节为准，历史草稿仅作参考。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
-- docs/50_project/MULTI_AGENT_P4_SCOPE.md
+- docs/50_project/phases/MULTI_AGENT_P4_SCOPE.md
   用途：P4 范围与验收标准（意图子图透明封装）。定义 P4 阶段的交付范围、验收条件与完成标准。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P5_SCOPE.md
-  docs/50_project/MULTI_AGENT_P5_SEAL_RESULT.md
+- docs/50_project/phases/MULTI_AGENT_P5_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P5_SEAL_RESULT.md
   用途：P5 范围与验收标准（Supervisor 决策升级）+ P5 验收结论。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P6_SCOPE.md
-  docs/50_project/MULTI_AGENT_P6_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P6_1_LOCAL_LOOP_CONTRACT.md
-  docs/50_project/MULTI_AGENT_P6_2_IMPLEMENTATION.md
-  docs/50_project/MULTI_AGENT_P6_3_INTEGRATION_ACCEPTANCE.md
+- docs/50_project/phases/MULTI_AGENT_P6_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P6_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P6_1_LOCAL_LOOP_CONTRACT.md
+  docs/50_project/phases/MULTI_AGENT_P6_2_IMPLEMENTATION.md
+  docs/50_project/phases/MULTI_AGENT_P6_3_INTEGRATION_ACCEPTANCE.md
   用途：P6 范围与验收标准（Intent 子图局部循环）+ P6 验收结论 + P6 子文档（局部循环契约、最小闭环实现、集成验收补齐）。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P7_SCOPE.md
-  docs/50_project/MULTI_AGENT_P7_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P7_2_FAILURE_MATRIX.md
-  docs/50_project/MULTI_AGENT_P7_3_OBSERVABILITY_SCOPE.md
-  docs/50_project/MULTI_AGENT_P7_4_FAULT_INJECTION_BASELINE.md
-  docs/50_project/MULTI_AGENT_P7_ACCEPTANCE_PREVIEW.md
+- docs/50_project/phases/MULTI_AGENT_P7_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P7_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P7_2_FAILURE_MATRIX.md
+  docs/50_project/phases/MULTI_AGENT_P7_3_OBSERVABILITY_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P7_4_FAULT_INJECTION_BASELINE.md
+  docs/50_project/phases/MULTI_AGENT_P7_ACCEPTANCE_PREVIEW.md
   用途：P7 范围与验收标准（治理与稳定性基线）+ P7 验收结论 + P7 子文档（三图失败收口矩阵、统一观测面范围、压测与故障注入基线、验收汇总预审）。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P8_SCOPE.md
-  docs/50_project/MULTI_AGENT_P8_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P9_SCOPE.md
-  docs/50_project/MULTI_AGENT_P9_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P10_SCOPE.md
-  docs/50_project/MULTI_AGENT_P10_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P11_SCOPE.md
-  docs/50_project/MULTI_AGENT_P11_SEAL_RESULT.md
-  docs/50_project/MULTI_AGENT_P12_SCOPE.md
-  docs/50_project/MULTI_AGENT_P12_SEAL_RESULT.md
+- docs/50_project/phases/MULTI_AGENT_P8_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P8_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P9_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P9_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P10_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P10_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P11_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P11_SEAL_RESULT.md
+  docs/50_project/phases/MULTI_AGENT_P12_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P12_SEAL_RESULT.md
   用途：P8–P12 各阶段范围与验收标准 + 对应封板结论（P8–P12 为候选基线迭代阶段）。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P13_SCOPE.md
-  docs/50_project/MULTI_AGENT_P13_SEAL_RESULT.md
+- docs/50_project/phases/MULTI_AGENT_P13_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P13_SEAL_RESULT.md
   用途：P13 范围与封板结论（tool_registry 工具实现升级，search_knowledge 真实接入）。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P14_SCOPE.md
-  docs/50_project/MULTI_AGENT_P14_SEAL_RESULT.md
+- docs/50_project/phases/MULTI_AGENT_P14_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P14_SEAL_RESULT.md
   用途：P14 范围与封板结论（judge_agent ReAct 化）。
   读者：Project（文档代理）。
 
-- docs/50_project/MULTI_AGENT_P15_SCOPE.md
-  docs/50_project/MULTI_AGENT_P15_SEAL_RESULT.md
+- docs/50_project/phases/MULTI_AGENT_P15_SCOPE.md
+  docs/50_project/phases/MULTI_AGENT_P15_SEAL_RESULT.md
   用途：P15 范围与封板结论（终点封板：Supervisor LLM 提案 + graph_executor 动态路由）。
   读者：Project（文档代理）。
 
@@ -245,7 +245,7 @@
   用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_project/dataflow_report.md
+- docs/50_project/arch/dataflow_report.md
   用途：Natsume AI 系统数据流全景报告（2026-03-11，持续更新）。覆盖双端通信、各功能/模块数据流、Agent 治理与路由、Graph 编排；含严格代码审计与修复记录（§13/§16）。
   读者：MASTER、Project（文档代理）。
 
@@ -319,7 +319,7 @@
   用途：明确 Project×实现层×Master 的分工边界、交接物与防污染规则；不包含终端指令片段。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
-（注：docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、ENV_EXTERNAL_SERVICES_CHECKLIST.md、ExternalServices_Config.md、vts_hotkey_config_guide.md、index.md、CURRENT_CODE_ARCHITECTURE.md、dataflow_report.md、MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
+（注：docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
 
 11）配置资产入口（非文档，但属于“可部署/可回放”真相源的一部分）
 - flows/
@@ -364,8 +364,10 @@
 - 代码审查报告（code_review_*.md、full_code_review_report_*.md）→ docs/35_quality/code_reviews/
 - 测试报告、运行追踪报告、变更日志、审计报告、数据流报告 → docs/60_trace/
 - 架构全景、架构分析、理论推导、设计方案 → docs/15_theory/
-- 配置指南、运行手册、项目协作文档、Flow 资产索引 → docs/50_project/
-- Multi-Agent 各阶段范围文档（MULTI_AGENT_Pxx_SCOPE.md）、封板结论（MULTI_AGENT_Pxx_SEAL_RESULT.md）、子阶段文档（MULTI_AGENT_Pxx_y_*.md）→ docs/50_project/
+- 配置指南 → docs/50_project/guides/
+- 运行手册、项目协作文档、Flow 资产索引 → docs/50_project/
+- 架构文档（代码架构、数据流、Agent 编排、外部服务配置）→ docs/50_project/arch/
+- Multi-Agent 各阶段范围文档（MULTI_AGENT_Pxx_SCOPE.md）、封板结论（MULTI_AGENT_Pxx_SEAL_RESULT.md）、子阶段文档（MULTI_AGENT_Pxx_y_*.md）→ docs/50_project/phases/
 - 发布清单（JSON）、发布目录、回滚映射 → configs/release/
 - 封板测试计划、封板执行报告、回滚手册、发布后复盘 → docs/50_release/
 - 性能基线指标、长期指标看板、周度稳定性报告 → docs/55_testing/
