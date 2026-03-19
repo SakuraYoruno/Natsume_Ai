@@ -3,7 +3,7 @@
 
 # Natsume AI 整体架构全景文档
 
-> 生成时间：2026-03-10
+> 生成时间：2026-03-10 | 最后更新：2026-03-19（代码重构后文档同步）
 
 ---
 
@@ -54,6 +54,8 @@ graph TB
             CANO[WorldCanonStore<br/>世界观SSOT]
             STYLE[StyleCanonStore<br/>风格Canon]
             CHROMA[ChromaDB<br/>向量数据库]
+            ARBITER[StateArbiter<br/>六路状态源仲裁]
+            GUARD[MemoryGuard<br/>写入守卫7规则]
         end
         subgraph RETR["检索层 Retrieval（七路召回）"]
             RF[RecallFusion<br/>融合召回]
@@ -62,6 +64,7 @@ graph TB
             HF[HybridFusion<br/>混合融合]
             RR[Reranker<br/>重排序]
             EP[EvidencePack<br/>证据包]
+            RPB[RecallPackBuilder<br/>token预算组装]
         end
         subgraph BOND["关系层 Bond"]
             BD[BondDynamics<br/>关系动力学]
@@ -81,13 +84,13 @@ graph TB
             CUA[ClawdUIAction<br/>UI操控]
         end
         subgraph MCP_L["MCP层"]
-            TB[ToolBroker<br/>工具代理]
+            TB[ToolBroker<br/>工具代理 mcp/tool_broker.py]
             TREG[ToolRegistry<br/>工具注册]
             MSB[McpSkillBridge<br/>技能桥接]
         end
         subgraph AUDIT["审计层 Audit"]
             LED[SQLiteLedger<br/>审计账本]
-            VAULT[ArtifactVault<br/>制品库]
+            VAULT[ArtifactVault<br/>制品库 lsp/vault.py]
             RET[Retention<br/>数据保留]
         end
         subgraph VIS["视觉层 Vision"]
@@ -226,21 +229,22 @@ graph LR
 
 ### 4. Agent 编排层（Integrations / LangGraph）
 
+> **P15 重构说明**：所有复杂场景统一走 `PROFILE_WORKFLOW_SUPERVISED` 图，入口为 `supervisor_dispatch → agent_dispatch → judge_agent → chat_render_node`。旧的 `core_reasoner_primary → scene_router_post_core → workbench_*` 长链已废弃。
+
 ```mermaid
 graph TD
     GCB[GraphConfigBuilder<br/>图配置构建] --> GE
     GE[GraphExecutor] --> |step| NODE
-    subgraph NODE["节点执行"]
-        N1[chat_direct_ja<br/>直接对话]
-        N2[core_reasoner_primary<br/>核心推理]
-        N3[core_reasoner_secondary<br/>二级推理]
-        N4[planner_constraints<br/>约束规划]
-        N5[tool_planner<br/>工具规划]
-        N6[safety_verifier<br/>安全验证]
-        N7[consistency_verifier<br/>一致性验证]
-        N8[renderer_ja_c_style<br/>日文渲染]
-        N9[workbench_translate<br/>翻译工作台]
-        N10[workbench_code_assist<br/>代码辅助]
+    subgraph NODE["节点执行（PROFILE_WORKFLOW_SUPERVISED）"]
+        N1[supervisor_dispatch<br/>规则/LLM路由]
+        N2[agent_dispatch_node<br/>动态分派]
+        N3[chat_agent_handler<br/>对话Agent]
+        N4[code_agent_handler<br/>代码Agent]
+        N5[translate_agent_handler<br/>翻译Agent]
+        N6[intent_agent_handler<br/>意图Agent]
+        N7[retrieval_agent_handler<br/>检索Agent]
+        N8[judge_agent_node<br/>裁判节点]
+        N9[chat_render_node<br/>最终渲染]
     end
     GE --> GBR[GraphBranch 并行分支]
     GE --> GCK[GraphCheckpoint 断点续跑]
@@ -251,13 +255,13 @@ graph TD
 
 **场景路由（SceneRouter）：**
 
-| 场景 | 触发条件 | 路由目标 |
-|------|----------|----------|
-| `SCENE_CHAT` | 普通对话 | `chat_direct_ja` / `core_reasoner_primary` |
-| `SCENE_EXEC_INTENT` | 执行意图关键词 | `tool_planner` |
-| `SCENE_WORK_CODE` | 代码关键词 | `workbench_code_assist` |
-| `SCENE_WORK_TRANSLATE` | 翻译关键词 | `workbench_translate` |
-| `SCENE_VISION_UI` | 截图/界面关键词 | 视觉处理节点 |
+| 场景 | 触发条件 | execution_profile | 节点序列 |
+|------|----------|------|------|
+| `SCENE_CHAT` | 普通对话 | `PROFILE_CHAT_FAST` | `chat_direct_ja → chat_render_node` |
+| `SCENE_EXEC_INTENT` | 执行意图关键词 | `PROFILE_INTENT_EXEC` | `intent_agent_entry → safety_verifier → judge_agent → chat_render_node` |
+| `SCENE_WORK_CODE` | 代码关键词 | `PROFILE_WORKFLOW_SUPERVISED` | `supervisor_dispatch → agent_dispatch → [judge_agent] → chat_render_node` |
+| `SCENE_WORK_TRANSLATE` | 翻译关键词 | `PROFILE_WORKFLOW_SUPERVISED` | `supervisor_dispatch → agent_dispatch → [judge_agent] → chat_render_node` |
+| `SCENE_VISION_UI` | 截图/界面关键词 | — | 视觉处理节点 |
 
 ---
 
@@ -314,7 +318,9 @@ graph TD
     R1 & R2 & R3 & R4 & R5 & R6 & R7 --> HF[HybridFusion<br/>混合融合]
     HF --> RR[Reranker<br/>Qwen3-Reranker-0.6B]
     RR --> EP[EvidencePack<br/>证据包]
-    EP --> CTX[ContextPack 注入]
+    EP --> RPB[RecallPackBuilder<br/>token预算截断+冲突检测<br/>总上限2700 tokens]
+    RPB --> ARB[StateArbiter<br/>六路状态源仲裁]
+    ARB --> CTX[ContextPack 注入]
 ```
 
 **混合检索权重：** 向量检索 70% + 全文检索（FTS5）30%

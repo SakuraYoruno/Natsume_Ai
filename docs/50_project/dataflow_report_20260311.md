@@ -3,10 +3,10 @@
 
 # Natsume AI 系统数据流全景报告
 
-> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-17 18:19（P16 数据流图更新）
-> 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排 · 多智能体分派
+> 报告生成时间：2026-03-11 17:20（初版）| 最后更新：2026-03-19 16:38（代码重构后文档同步更新）
+> 报告范围：双端通信 · 各功能数据流 · 各模块数据流 · Agent 治理 · Agent 路由 · Graph 编排 · 多智能体分派 · StateArbiter/MemoryGuard/RecallPackBuilder
 > 报告模型：claude-4.6-sonnet
-> 当前状态：P1-P16 全部完成，多智能体重构升级已封板（含 supervisor_dispatch / agent_dispatch / judge 完整链路）
+> 当前状态：P1-P16 全部完成，多智能体重构升级已封板（含 supervisor_dispatch / agent_dispatch / judge 完整链路）；代码重构后新增 StateArbiter / MemoryGuard / RecallPackBuilder / Vault(lsp) / MCP 模块数据流
 
 ---
 
@@ -25,6 +25,7 @@
 11. [Edge 端各功能数据流](#十一edge-端各功能数据流)
 12. [双端通信打通状态评估](#十二双端通信打通状态评估)
 13. [多智能体分派数据流（P15/P16）](#十三多智能体分派数据流p15p16)
+14. [StateArbiter / MemoryGuard / RecallPackBuilder 数据流（重构新增）](#十四statearbiter--memoryguard--recallpackbuilder-数据流重构新增)
 
 ---
 
@@ -51,15 +52,20 @@ graph TB
     end
 
     subgraph HOST["Host Brain（云端/服务端）\nPort: 8000"]
-        H_CHAT["POST /v1/chat\nchat_handler.py"]
+    H_CHAT["POST /v1/chat\nchat_handler.py"]
         H_GOV["Governor 鉴权\ngovernor/decision.py"]
         H_ROUTER["SceneRouter\ngraph/main_chain.py"]
         H_RETRIEVAL["七路召回\nretrieval/orchestrator.py"]
+        H_RECALL["RecallPackBuilder\napp/recall/recall_pack_builder.py"]
         H_LLM["LLM Gateway\nintegrations/llm_gateway.py"]
         H_AIRLOCK["Airlock 检疫\nairlock/quarantine.py"]
         H_EPISODIC["情节记忆\nmemory/episodic_store.py"]
+        H_ARBITER["StateArbiter\napp/memory/state_arbiter.py"]
+        H_GUARD["MemoryGuard\napp/memory/memory_guard.py"]
         H_BOND["Bond 关系层\nbond/bond_dynamics.py"]
         H_VTS_CTRL["VTS 控制\nchannels/vts.py"]
+        H_VAULT["Artifact Vault\nlsp/vault.py"]
+        H_MCP["MCP Broker\nmcp/tool_broker.py"]
         H_EDGE_EVENTS["POST /v1/edge/events\nsystem_handler.py"]
         H_INPUT["POST /v1/host/input\ninput_routes.py"]
         H_AGENT["Agent Loop\napp/vision/agent_loop.py"]
@@ -98,9 +104,14 @@ graph TB
     H_LLM -->|"本地推理"| LLM_LOCAL
     H_LLM -->|"云端推理"| LLM_CLOUD
 
+    H_RETRIEVAL --> H_RECALL
+    H_RECALL --> H_ARBITER
+    H_ARBITER --> H_GUARD
+    H_GUARD --> H_EPISODIC
     H_RETRIEVAL --> DB_CHROMA
     H_BOND --> DB_NEO4J
     H_EPISODIC --> DB_EPISODIC
+    H_VAULT --> DB_EPISODIC
 
     E_TTS --> U1
     E_VTS -->|"Live2D 表情"| U3
@@ -215,12 +226,14 @@ flowchart TD
 
     J --> K["并行启动 Retrieval\nasyncio.create_task"]
     K --> L["RetrievalOrchestrator.arun\n七路召回 + Rerank\n超时: 1200ms"]
+    L --> L2["RecallPackBuilder.build\napp/recall/recall_pack_builder.py\ntoken 预算截断（总上限 2700）\n+ 冲突检测"]
+    L2 --> L3["StateArbiter.resolve\napp/memory/state_arbiter.py\n六路状态源优先级仲裁"]
 
     J --> M["resolve_host_llm_runtime_async\n路由矩阵决策"]
     M -->|"host_8b 健康"| M1["本地 qwen3:8b\nOllama :11434"]
     M -->|"host_8b 不健康"| M2["云端 Gemini/OpenAI"]
 
-    L --> N["_build_stream_chat_prompt\n注入 Retrieval + Emotion 上下文"]
+    L3 --> N["_build_stream_chat_prompt\n注入 RecallPack + Emotion 上下文"]
     M --> N
 
     N --> O["astream_llm_chunks\n流式 token 生成"]
@@ -230,7 +243,7 @@ flowchart TD
 
     R --> S["asyncio.gather 并行后处理"]
     S --> S1["Airlock.quarantine_ingress\n出口安全检疫"]
-    S --> S2["persist_chat_episodic_memory\n情节记忆写入"]
+    S --> S2["persist_chat_episodic_memory\nMemoryGuard.check_episodic_write\n→ EpisodicStore 写入"]
     S --> S3["BondDynamicsWriter\nBond 积分更新"]
     S --> S4["_drive_stream_vts_emotion\nVTS 表情驱动"]
 
@@ -888,7 +901,141 @@ sequenceDiagram
 
 ---
 
-*报告最后更新：2026-03-17 18:21 | 生成模型：claude-4.6-sonnet*
+---
+
+## 十四、StateArbiter / MemoryGuard / RecallPackBuilder 数据流（重构新增）
+
+### 14.1 StateArbiter 六路状态源仲裁数据流
+
+```mermaid
+flowchart TD
+    A["RecallPackBuilder 输出\n七路召回证据"] --> B["StateArbiter.resolve\napp/memory/state_arbiter.py"]
+
+    subgraph SOURCES["六路状态源（优先级从高到低）"]
+        S1["1. WorldCanon\n世界观 SSOT\n最高优先级"]
+        S2["2. StyleCanon\n风格 Canon"]
+        S3["3. Episodic\n情节记忆"]
+        S4["4. Bond\n关系状态"]
+        S5["5. Chroma\n向量检索"]
+        S6["6. Edge\n边缘状态\n最低优先级"]
+    end
+
+    B --> SOURCES
+    SOURCES --> C["冲突检测\n高优先级源覆盖低优先级"]
+    C --> D["SESSION_OVERRIDE 检查\n会话级临时覆盖"]
+    D --> E["ResolvedStateBundle\n{world_state, style_state, episodic_state,\nbond_state, chroma_state, edge_state}"]
+
+    E --> F["注入 ContextPack\n影响 LLM 生成"]
+    E --> G["蒸馏后清理\nclear_session_override\n（DistillationEngine 调用）"]
+
+    style S1 fill:#ff6b6b,color:#fff
+    style S2 fill:#ff922b,color:#fff
+    style S3 fill:#ffd43b,color:#333
+    style S4 fill:#51cf66,color:#fff
+    style S5 fill:#339af0,color:#fff
+    style S6 fill:#cc5de8,color:#fff
+    style E fill:#51cf66,color:#fff
+```
+
+### 14.2 MemoryGuard 七条写入规则数据流
+
+```mermaid
+flowchart TD
+    A["记忆写入请求\nEpisodicRecord / DistillationRecord"] --> B["MemoryGuard.check_episodic_write\napp/memory/memory_guard.py"]
+
+    B --> R1["规则1: 轮次限制\n同一轮次不重复写入"]
+    R1 -->|"违规"| BLOCK1["❌ MemoryGuardError\nDUPLICATE_TURN"]
+    R1 -->|"通过"| R2["规则2: 标签合法性\nemotion_tag 必须在白名单"]
+    R2 -->|"违规"| BLOCK2["❌ MemoryGuardError\nINVALID_EMOTION_TAG"]
+    R2 -->|"通过"| R3["规则3: 蒸馏条件\n频次 ≥ 3 OR MILESTONE 级别"]
+    R3 -->|"不满足"| SKIP3["⏭️ 跳过蒸馏（非错误）"]
+    R3 -->|"满足"| R4["规则4: 幂等保护\nsource_hash 去重"]
+    R4 -->|"已存在"| BLOCK4["❌ MemoryGuardError\nIDEMPOTENT_DUPLICATE"]
+    R4 -->|"通过"| R5["规则5: Dream 拦截\ncategory=dream 不写入情节记忆"]
+    R5 -->|"违规"| BLOCK5["❌ MemoryGuardError\nDREAM_WRITE_BLOCKED"]
+    R5 -->|"通过"| R6["规则6: 内容长度\n最小 10 字符"]
+    R6 -->|"违规"| BLOCK6["❌ MemoryGuardError\nCONTENT_TOO_SHORT"]
+    R6 -->|"通过"| R7["规则7: 执行性表述拦截\n禁止写入'已执行/已完成'等"]
+    R7 -->|"违规"| BLOCK7["❌ MemoryGuardError\nEXECUTION_FACT_BLOCKED"]
+    R7 -->|"通过"| PASS["✅ 允许写入"]
+
+    PASS --> WRITE["EpisodicStore.write\n实际写入"]
+
+    style BLOCK1 fill:#ff6b6b,color:#fff
+    style BLOCK2 fill:#ff6b6b,color:#fff
+    style BLOCK4 fill:#ff6b6b,color:#fff
+    style BLOCK5 fill:#ff6b6b,color:#fff
+    style BLOCK6 fill:#ff6b6b,color:#fff
+    style BLOCK7 fill:#ff6b6b,color:#fff
+    style SKIP3 fill:#ffd43b,color:#333
+    style PASS fill:#51cf66,color:#fff
+    style WRITE fill:#51cf66,color:#fff
+```
+
+### 14.3 RecallPackBuilder token 预算截断数据流
+
+```mermaid
+flowchart TD
+    A["RetrievalOrchestrator 输出\nEvidencePack（七路召回结果）"] --> B["RecallPackBuilder.build\napp/recall/recall_pack_builder.py"]
+
+    B --> C["StateArbiter.resolve\n六路状态源仲裁"]
+    C --> D["按优先级排序证据\nWorldCanon > StyleCanon > Episodic > Bond > Chroma > Edge"]
+
+    D --> E{"token 预算检查\n总上限: 2700 tokens"}
+    E -->|"超出预算"| F["截断低优先级证据\n保留高优先级"]
+    E -->|"未超出"| G["全量保留"]
+
+    F & G --> H["冲突检测\n同一 key 多源冲突时\n高优先级源覆盖"]
+    H --> I["RecallPack\n{world_canon_items, style_canon_items,\nepisodic_items, bond_items,\nchroma_items, edge_items,\ntotal_tokens, truncated}"]
+
+    I --> J["注入 _build_stream_chat_prompt\n构建 LLM 上下文"]
+
+    subgraph BUDGET["token 预算分配（参考）"]
+        B1["WorldCanon: 最高优先，不截断"]
+        B2["StyleCanon: 次优先，不截断"]
+        B3["Episodic: 最多 800 tokens"]
+        B4["Bond: 最多 300 tokens"]
+        B5["Chroma: 最多 600 tokens"]
+        B6["Edge: 最多 200 tokens"]
+    end
+
+    style I fill:#51cf66,color:#fff
+    style J fill:#51cf66,color:#fff
+```
+
+### 14.4 Vault（lsp）制品仓库数据流
+
+```mermaid
+flowchart TD
+    A["写入请求\n（唯一授权入口）"] --> B["ArtifactVault\nhost_brain/lsp/vault.py"]
+
+    subgraph WRITERS["授权写入来源"]
+        W1["ClawdBot\nbefore/after 截图"]
+        W2["edge_client/proofs/resource_gate.py\n资源证明（before/after 证据）"]
+        W3["DiaryWriter\n日记产物"]
+        W4["DreamGenerator\n梦境产物"]
+    end
+
+    WRITERS --> B
+    B --> C["SHA-256 内容哈希\n幂等写入"]
+    C --> D["SQLiteLedger\nvault_schema 审计"]
+    D --> E["ChromaDB\n向量索引（七路召回 Route 6）"]
+
+    subgraph READERS["读取来源"]
+        R1["七路召回 artifact_vault 路由"]
+        R2["GET /api/obs/vault/stats"]
+    end
+
+    E --> READERS
+
+    style B fill:#339af0,color:#fff
+    style E fill:#51cf66,color:#fff
+```
+
+---
+
+*报告最后更新：2026-03-19 16:38 | 生成模型：claude-4.6-sonnet*
 *基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块，含 P16 多智能体技术债清理*
 *P15 重构后数据流图已全量更新：图4/图6/图7.4 对齐 PROFILE_WORKFLOW_SUPERVISED 新链路*
+*代码重构后同步更新：新增第十四节 StateArbiter/MemoryGuard/RecallPackBuilder/Vault 数据流；主聊天链路图补充 RecallPackBuilder/MemoryGuard 节点；系统架构概览图补充新模块*
 
