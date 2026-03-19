@@ -215,7 +215,7 @@
   用途：架构评审与路线图（2026-03-09）。对当前架构的评审结论与后续演进路线规划。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/retrieval_orchestrator_design_2026-03-09.md
+- docs/60_trace/RETRIEVAL_ORCHESTRATOR_DESIGN.md
   用途：检索编排器设计文档（2026-03-09）。记录检索层编排逻辑、优先级策略与接口设计。
   读者：MASTER、Project（文档代理）。
 
