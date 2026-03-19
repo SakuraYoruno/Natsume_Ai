@@ -66,16 +66,16 @@
   用途：Flow 资产追溯索引（按环境），记录 flows/active.pointer 指向的当前生效 Flow 导出物；支撑 T-Flow-02 回归口径。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_project/CURRENT_CODE_ARCHITECTURE_2026-03-18.md
+- docs/50_project/CURRENT_CODE_ARCHITECTURE.md
   用途：当前代码目录、系统分层、服务请求链路、多 Agent 治理与 Graph 编排落点对齐文档（以代码事实为准）。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
-- docs/50_project/dataflow_report_20260311.md
+- docs/50_project/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
-- docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md
-  用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
+- docs/50_project/MULTI_AGENT_UPGRADE_PLAN.md
+  用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为“Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口”体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
   读者：MASTER、Project（文档代理）。
 
 6）可追溯性（Trace）
@@ -134,7 +134,7 @@
   用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
   读者：MASTER、Project（文档代理）。
 
-- docs/50_project/dataflow_report_20260311.md
+- docs/50_project/dataflow_report.md
   用途：Natsume AI 系统数据流全景报告（2026-03-11，持续更新）。覆盖双端通信、各功能/模块数据流、Agent 治理与路由、Graph 编排；含严格代码审计与修复记录（§13/§16）。
   读者：MASTER、Project（文档代理）。
 
@@ -162,19 +162,19 @@
   用途：解释"为什么这样设计"、关键机制的理论依据与判定口径；不作为实现任务清单。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源（除非 MASTER 任务卡点名引用）。
 
-- docs/15_theory/soul_emotion_optimization_2026-03-05.md
+- docs/15_theory/soul_emotion_optimization.md
   用途：灵魂情感架构优化设计留痕文档（2026-03-05）。记录五大优化方向：①情绪连续体 EmotionVector、②Bond 情感质感层、③情感记忆标注、④emotion_pulse 动态槽位、⑤主动情感触发器。含完整伪代码设计方案、优先级排序与安全约束说明。待实施，不作为当前任务来源。
   读者：MASTER、Project（文档代理）。
 
-- docs/15_theory/LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS_2026-03-06.md
+- docs/15_theory/LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS.md
   用途：LangGraph 高级能力与 Host 治理约束冲突分析（2026-03-06）。分析五项冲突点（条件边、并行分支、子图、断点续跑、流式输出）与当前系统约束的关系。
   读者：MASTER、Project（文档代理）。
 
-- docs/15_theory/LangGraph_Governed_Runtime_Solution_2026-03-06.md
+- docs/15_theory/LangGraph_Governed_Runtime_Solution.md
   用途：LangGraph Governed Runtime 更优解法方案（2026-03-06）。提出三层架构（Policy Plane / Execution Plane / Evidence Plane）、Host Governance Overlay 方案、五阶段能力恢复路径与三句话架构结论。
   读者：MASTER、Project（文档代理）。
 
-- docs/15_theory/architecture_overview_20260310.md
+- docs/15_theory/architecture_overview.md
   用途：Natsume AI 整体架构全景文档（2026-03-10）。含双端总体架构、Host Brain 各模块、Edge 各模块、数据流、记忆层、治理层的完整 Mermaid 图与说明。
   读者：MASTER、Project（文档代理）。
 
