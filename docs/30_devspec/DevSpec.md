@@ -98,7 +98,17 @@ DevSpec 写作规则（工程契约级）：
 │  ├─ pyproject.toml # 或 requirements*；必须可复现依赖版本
 │  ├─ app/
 │  │  ├─ main.py # HTTP API 入口（健康检查/链路入口）
-│  │  └─ config.py # 配置加载（分层：defaults/local/secret）
+│  │  ├─ config.py # 配置加载（分层：defaults/local/secret）
+│  │  ├─ agents/ # 多 Agent 契约与注册（agent_contract / registry / react_loop）
+│  │  ├─ automation/ # Host 侧任务调度路由（scheduler_routes / task_scheduler）
+│  │  ├─ graph/ # 主链路时序编排器（MainChain + SceneRouter）
+│  │  ├─ handlers/ # 多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
+│  │  ├─ llm/ # 模型路由矩阵（能力路由 + 降级链）
+│  │  ├─ memory/ # 状态源仲裁器（StateArbiter）+ 记忆写入守卫（MemoryGuard）
+│  │  ├─ recall/ # RecallPack 组装器（token 预算截断 + 冲突检测）
+│  │  ├─ schemas/ # 核心数据结构与枚举（ProposalType / TaskType / ContextPack 等）
+│  │  ├─ skills/ # Skill/MCP 权限模型（PermissionGuard + HotLoader）
+│  │  └─ vision/ # UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
 │  ├─ core/
 │  │  ├─ context_pack.py # Host→LLM 输入打包（分槽隔离）
 │  │  ├─ qa.py # 输出合规：Strict JSON/伪执行/Canon-as-fact
@@ -146,8 +156,58 @@ DevSpec 写作规则（工程契约级）：
 │  ├─ channels/
 │  │  ├─ wechat.py # 微信 I/O 事件化与审计串联
 │  │  └─ vts.py # emotion_tag→expression_id 固定映射与 talk gate
-│  └─ integrations/
-│     └─ llm_gateway.py # LLM 调用封装（blocking/streaming 统一入口）
+│  ├─ integrations/
+│  │  ├─ llm_gateway.py # LLM 调用封装（blocking/streaming 统一入口）
+│  │  ├─ graph_runtime.py # 图运行时门面（run_graph 主流程编排与结果归一）
+│  │  ├─ graph_executor.py # 图执行器（节点调度、动态分派、trace、降级跳转）
+│  │  ├─ graph_contract.py # 图配置校验、共享类型、状态常量
+│  │  ├─ graph_fallback.py # timeout/dependency/error 统一降级
+│  │  ├─ graph_model_resolve.py # node/profile 解析与参数哈希
+│  │  ├─ graph_branch.py # 只读并行分支执行器
+│  │  ├─ graph_streaming.py # Phase-Locked Streaming（三类流隔离）
+│  │  ├─ graph_checkpoint.py # Checkpoint/Interrupt/Resume（双时钟断点续跑）
+│  │  ├─ graph_evidence.py # Evidence Plane SQLite 写入
+│  │  ├─ graph_clock.py # DualClockSupervisor（Policy/Execution 双时钟）
+│  │  ├─ graph_subgraph.py # 子图透明执行
+│  │  ├─ evidence_write_queue.py # 异步写入队列（NON_CRITICAL 路由）
+│  │  ├─ evidence_circuit_breaker.py # 熔断机制（CLOSED/OPEN/HALF_OPEN）
+│  │  ├─ evidence_bench.py # 写入延迟基准测量
+│  │  └─ evidence_priority.py # 写入优先级枚举（CRITICAL/NON_CRITICAL）
+│  ├─ mcp/
+│  │  ├─ tool_broker.py # MCP 工具执行代理
+│  │  └─ tool_registry.py # MCP 工具注册表
+│  ├─ observability/
+│  │  ├─ metrics.py # 指标采集
+│  │  ├─ metrics_timeseries.py # 时序指标
+│  │  ├─ cross_timeline.py # 跨端时间线聚合
+│  │  ├─ service_health_aggregator.py # 服务健康聚合
+│  │  ├─ service_health_heartbeat.py # 心跳检测
+│  │  ├─ session_query.py # 会话查询
+│  │  ├─ trace_node_builder.py # Trace 节点构建
+│  │  ├─ p8_extended_metrics.py # P8 扩展指标
+│  │  └─ routes.py # 观测路由
+│  ├─ obs/ # 向后兼容 shim 层（实体已迁移至 observability/）
+│  ├─ release/
+│  │  ├─ release_manifest.py # 发布清单（model_plane digest 门禁）
+│  │  ├─ manifest_generators.py # 清单生成器
+│  │  └─ manifest_helpers.py # 清单辅助工具
+│  ├─ retrieval/
+│  │  ├─ orchestrator.py # 检索编排器（统一入口，LRU 缓存）
+│  │  ├─ pipeline.py # 检索管线
+│  │  ├─ recall_fusion.py # 多路召回融合
+│  │  ├─ hybrid_fusion.py # 混合检索融合（向量 0.7 + FTS5 0.3）
+│  │  ├─ reranker.py # 重排序
+│  │  ├─ embedding.py # 向量化服务
+│  │  └─ evidence_pack.py # 证据包输出
+│  ├─ scheduler/
+│  │  ├─ scheduler.py # CRON 任务调度（APScheduler + SQLite 持久化）
+│  │  ├─ task_registry.py # 任务注册表
+│  │  └─ scheduler_routes.py # 调度路由
+│  ├─ vision/
+│  │  ├─ screen_ocr.py # 屏幕 OCR
+│  │  ├─ camera_event.py # 摄像头事件
+│  │  └─ detector_registry.py # 多检测器注册表
+│  └─ data/ # Host 本地数据目录（含 vault/）
 ├─ edge_client/
 │  ├─ pyproject.toml
 │  ├─ senses/ # ears/eyes：采集与摘要（不裁决）

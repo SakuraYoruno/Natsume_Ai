@@ -261,6 +261,7 @@ Natsume_Ai/
 │   ├── mcp/                 #    MCP 注册与桥接
 │   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
 │   ├── obs/                 #    观测数据适配层
+│   ├── obs/                 #    观测数据适配层（向后兼容 shim，实体已迁移至 observability/）
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
 │   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）

@@ -1,8 +1,8 @@
 受众：MASTER
 标题：当前代码架构总览（2026-03-18）
 
-版本：v1.1
-日期：2026-03-18
+版本：v1.2
+日期：2026-03-19
 
 # 🏗️ 当前代码架构总览（2026-03-18）
 
@@ -52,30 +52,67 @@
 Natsume_Ai/
 ├─ host_brain/
 │  ├─ app/             # FastAPI、chat入口、graph配置、handlers
-│  ├─ integrations/    # graph_runtime / graph_executor / llm_gateway 等
-│  ├─ governor/        # 意图裁决、规则、token、限流
-│  ├─ retrieval/       # 检索管线与编排器
-│  ├─ memory/          # 记忆存储与检索
-│  ├─ bond/            # 关系动力学与阶段引擎
-│  ├─ audit/           # SQLite 审计账本
+│  │  ├─ agents/       # 多 Agent 契约与注册（agent_contract / registry / react_loop）
+│  │  ├─ automation/   # Host 侧任务调度路由（scheduler_routes / task_scheduler）
+│  │  ├─ graph/        # 主链路时序编排器（MainChain + SceneRouter）
+│  │  ├─ handlers/     # 多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
+│  │  ├─ llm/          # 模型路由矩阵（能力路由 + 降级链）
+│  │  ├─ memory/       # 状态源仲裁器（StateArbiter）+ 记忆写入守卫（MemoryGuard）
+│  │  ├─ recall/       # RecallPack 组装器（token 预算截断 + 冲突检测）
+│  │  ├─ schemas/      # 核心数据结构与枚举（ProposalType / TaskType / ContextPack 等）
+│  │  ├─ skills/       # Skill/MCP 权限模型（PermissionGuard + HotLoader）
+│  │  ├─ vision/       # UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
+│  │  ├─ monitor_ui/   # 监控面板前端源码（React + Vite SPA）
+│  │  └─ static/       # 监控面板构建产物（FastAPI 静态托管）
+│  ├─ airlock/         # 气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
+│  ├─ audit/           # SQLite 审计账本（WAL + 迁移 + 保留策略）
+│  ├─ bond/            # 关系动力学与阶段引擎（Neo4j SSOT + 异步写入队列）
+│  ├─ canon/           # 正典资产（style/ + world/ 条目文件）
 │  ├─ channels/        # Edge RPC / VTS 渠道适配
-│  ├─ scheduler/       # 调度任务与路由
-│  ├─ skills/          # 技能注册与桥接
-│  └─ observability/   # 指标聚合与可观测
+│  ├─ core/            # 核心模块（配置快照、错误码、ID、QA、Key Profile、情感时间线）
+│  ├─ data/            # Host 本地数据目录（含 vault/）
+│  ├─ governor/        # 意图裁决、规则、token、限流（含 Redis/SQLite 后端）
+│  ├─ integrations/    # 集成层（LangGraph 图编排四层 + LLM 网关 + Evidence Plane）
+│  ├─ lsp/             # Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
+│  ├─ mcp/             # MCP 注册与桥接（tool_broker / tool_registry）
+│  ├─ memory/          # 记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步 / 向量投影）
+│  ├─ obs/             # 观测数据适配层（向后兼容 shim，实体已迁移至 observability/）
+│  ├─ observability/   # 可观测性（跨端时间线 / 时钟漂移 / 阈值告警 / 长期 KPI）
+│  ├─ release/         # 发布清单管理（model_plane digest 门禁）
+│  ├─ retrieval/       # 检索管线（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
+│  ├─ scheduler/       # 调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
+│  ├─ skills/          # 技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
+│  ├─ tools/           # 工具系统（Broker / Catalog / MCP 适配 / Selector）
+│  └─ vision/          # 视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 ├─ edge_client/
-│  ├─ app/             # Edge FastAPI RPC 网关
+│  ├─ app/             # Edge FastAPI RPC 网关（/v1/edge/*）
+│  ├─ actuators/       # TTS/VTS 执行（语音合成 + VTS WebSocket 驱动）
+│  ├─ channels/        # 本地渠道适配（如微信监听）
+│  ├─ proofs/          # 资源证明与门控（before/after 证据采集）
+│  ├─ rpc/             # 事件上报、认证、协议（含 fallback_llm / resource_gate）
 │  ├─ runtime/         # 运行时引导与健康快照
-│  ├─ senses/          # ASR/VAD 感知
-│  ├─ actuators/       # TTS/VTS 执行
-│  ├─ rpc/             # 事件上报、认证、协议
-│  └─ channels/        # 本地渠道适配（如微信监听）
+│  └─ senses/          # ASR/VAD 感知
 ├─ configs/
-│  └─ model_plane/     # model profiles / node registry
+│  ├─ model_plane/     # model profiles / node registry
+│  ├─ deploy/          # 部署配置（节点清单）
+│  ├─ release/         # 发布配置（里程碑 JSON）
+│  ├─ secrets/         # 密钥配置模板
+│  └─ vts/             # VTS 相关配置
 ├─ flows/              # Flow 导出与 active.pointer
 ├─ docs/
 ├─ scripts/
+│  └─ runtime/         # 本地服务启停 / 环境检查 / 报告生成
 ├─ tests/
+│  ├─ unit/
+│  ├─ integration/
+│  ├─ contract/
+│  ├─ e2e/
+│  └─ fixtures/
 └─ tools/
+   ├─ bench/           # 性能基准测试
+   ├─ doc_lint/        # 文档检查与交付门禁
+   ├─ replay/          # 审计回放工具
+   └─ static_scan/     # 静态扫描工具（Bond SSOT 单写者检查）
 ```
 
 ## 4. 分层架构
@@ -134,6 +171,18 @@ Natsume_Ai/
 | 多 Agent handlers | `host_brain/app/handlers/*.py` | supervisor/chat/code/translate/intent/retrieval/judge |
 | 图运行时 | `host_brain/integrations/graph_runtime.py` | 校验配置、解析模型、执行图、返回统一结果 |
 | 图执行器 | `host_brain/integrations/graph_executor.py` | 单步执行、动态分派、降级、trace 记录 |
+| 状态源仲裁器 | `host_brain/app/memory/state_arbiter.py` | 六路状态源优先级仲裁（WorldCanon > StyleCanon > Episodic > Bond > Chroma > Edge）|
+| 记忆写入守卫 | `host_brain/app/memory/memory_guard.py` | 7 条记忆写入硬性规则（轮次/标签/蒸馏/幂等/Dream 拦截等）|
+| RecallPack 组装器 | `host_brain/app/recall/recall_pack_builder.py` | 七路召回证据按 token 预算组装（总上限 2700）|
+| 模型路由矩阵 | `host_brain/app/llm/routing_matrix.py` | 能力路由（chat/reasoning/dream/diary）+ 降级链 |
+| 失败语义矩阵 | `host_brain/app/failure_matrix.py` | 统一失败事件处理（替代各模块分散 try/except）|
+| 情感上下文 | `host_brain/app/emotion_context.py` | 情感归一化 / 快照 / 治理快照 / VAD 映射 |
+| Artifact Vault | `host_brain/lsp/vault.py` | 产物仓库读写（唯一授权写入入口）|
+| MCP 桥接 | `host_brain/mcp/tool_broker.py` | MCP 工具注册与桥接 |
+| 可观测性 | `host_brain/observability/` | 跨端时间线聚合 / 时钟漂移 / 阈值告警 / 长期 KPI |
+| 观测适配层 | `host_brain/obs/` | 向后兼容 shim（实体已迁移至 observability/）|
+| 发布清单 | `host_brain/release/` | model_plane digest 门禁与发布清单管理 |
+| 视觉链 | `host_brain/vision/` | 多检测器注册表 / 摄像头事件 / 屏幕 OCR |
 
 ### 5.2 Edge 侧核心模块
 
@@ -144,6 +193,8 @@ Natsume_Ai/
 | 语音感知 | `edge_client/senses/asr.py` | ASR 采集与状态控制 |
 | 执行动作 | `edge_client/actuators/vts_driver.py` | `talk_start/talk_end/set_expression/trigger_hotkey` |
 | 事件上报 | `edge_client/rpc/event_reporter.py` | 批量上报到 Host `/v1/edge/events` |
+| 资源证明 | `edge_client/proofs/resource_gate.py` | before/after 证据采集（写入 Vault 的原始材料来源）|
+| 兜底模型门控 | `edge_client/fallback_model.py` | FallbackModelGate（draft_only 标记，默认卸载）|
 
 ## 6. 服务请求链路
 
@@ -258,13 +309,47 @@ flowchart LR
 
 ### 9.1 Host（`host_brain/app/fastapi_app.py`）
 
+**直接挂载：**
 - `POST /v1/chat`
 - `POST /v1/edge/events`
 - `GET /metrics`
 - `GET /panel`
 - `GET /`
-- `POST /v1/agent/run`（通过 `agent_router` 挂载）
-- `GET /v1/agent/info`（通过 `agent_router` 挂载）
+
+**通过 `agent_router` 挂载（前缀 `/v1/agent`）：**
+- `POST /v1/agent/run`
+- `GET /v1/agent/info`
+
+**通过 `health_router` 挂载：**
+- `GET /health`
+- `GET /ready`
+- `GET /obs/metrics`
+- `GET /health/mcp`
+- `GET /health/canon_sync`
+- `POST /observability/trace`
+- `GET /startup`
+
+**通过 `obs_router` 挂载（前缀 `/api/obs`）：**
+- `GET /api/obs/services/health`
+- `GET /api/obs/sessions`
+- `GET /api/obs/trace/{request_id}`
+- `GET /api/obs/metrics/timeseries`
+- `GET /api/obs/governor/stats`
+- `GET /api/obs/errors`
+- `GET /api/obs/memory/stats`
+- `GET /api/obs/checkpoints`
+- `GET /api/obs/vault/stats`
+- 及其他观测端点（详见 `host_brain/app/obs_routes.py`）
+
+**通过 `bond_router` 挂载（前缀 `/v1/bond`）：**
+- `GET /v1/bond/health`
+- `GET /v1/bond/users`
+- `GET /v1/bond/summary/{user_id}`
+- `GET /v1/bond/stage/{user_id}`
+- `POST /v1/bond/event`
+
+**通过 `input_router` 挂载：**
+- `POST /input`
 
 ### 9.2 Edge（`edge_client/app/fastapi_app.py`）
 
@@ -280,8 +365,11 @@ flowchart LR
 ## 10. 维护约定
 
 - 当 `host_brain/app/graph_config_builder.py`、`host_brain/integrations/graph_*`、`host_brain/app/handlers/*` 发生结构变更时，需同步更新本文。
-- 当 `/v1/chat` 主链分支规则变化时，需同步更新“6.1 请求链路”。
-- 当新增 Agent 或调整 dispatch/judge 规则时，需同步更新“7. 多 Agent 治理”。
+- 当 `/v1/chat` 主链分支规则变化时，需同步更新"6.1 请求链路"。
+- 当新增 Agent 或调整 dispatch/judge 规则时，需同步更新"7. 多 Agent 治理"。
+- 当新增顶层目录或 `host_brain/app/` 下新增子目录时，需同步更新"3. 目录结构"。
+- 当新增 Host 或 Edge 对外 API 端点时，需同步更新"9. 当前对外 API"。
+- 当 `host_brain/obs/` → `host_brain/observability/` 迁移完成（shim 层移除）后，需同步更新"3. 目录结构"与"5.1 功能模块拆分"。
 
 ## 11. 关联文档
 
