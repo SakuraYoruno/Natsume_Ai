@@ -1,7 +1,7 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v1.5
+版本：v1.6
 日期：2026-03-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
@@ -234,6 +234,14 @@
 - docs/15_theory/arch_analysis_report_20260311.md
   用途：Natsume AI 架构分析报告（2026-03-11）。对整体架构全景文档的深度评审：成熟特征、薄弱环节、优先级建议与落地路径。
   读者：MASTER、Project（文档代理）。
+
+- docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md
+  用途：host_brain/core/ 层模块参考（2026-03-19）。覆盖 prompt_context 槽位契约与验证规则、metabolism 硬状态与情感向量机制、emotion_timeline 情感时间线、services 服务注册表与健康报告的完整接口语义与约束说明。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md
+  用途：host_brain/integrations/ 层接口契约（2026-03-19）。覆盖 GraphState 全字段语义、graph_contract 核心函数、Evidence Plane 写入机制（CRITICAL/NON_CRITICAL/EvidenceWriteQueue）、治理约束规则（Rule 1–6）与 Multi-Agent 契约（P4–P7）。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 9）性能与稳定性监控（Metrics & Stability）
 - docs/55_testing/metrics/baseline_stream_metrics_2026-03-09.md
