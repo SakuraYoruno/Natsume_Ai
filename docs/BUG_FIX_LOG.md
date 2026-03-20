@@ -680,3 +680,31 @@
 **第28轮排查文件：16 个 | 累计已排查：约 240 个 | 剩余约 27 个**
 
 *文档最后更新：第 28 轮排查完成*
+
+---
+
+#### 🟡 P2 — `audit/ledger_query_mixin.py`：`mark_intent_seen` / `update_seq` 缺少 `_write_lock` 保护，并发写入时 `database is locked`
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/audit/ledger_query_mixin.py` `LedgerQueryMixin.mark_intent_seen` / `update_seq` |
+| **根因** | `mark_intent_seen` 和 `update_seq` 直接使用 `with self._conn:` 执行写入，**完全绕过了 `self._write_lock`**。`SQLiteLedger` 的所有写入方法（`_insert`、`update_proposal_status` 等）都通过 `_write_lock` 保护并发安全，而这两个方法是高频并发写入路径（`governor/decision.py` 中每次 intent 处理都会调用 `mark_intent_seen` 3 次），在多线程并发场景下会与 `_insert` 竞争同一个 SQLite 连接，触发 `sqlite3.OperationalError: database is locked` |
+| **影响** | 高并发场景下（多个 intent 并发处理），重放守卫写入和序号守卫写入失败，导致重放攻击防护和序号去重功能失效 |
+| **修复** | 在 `mark_intent_seen` 和 `update_seq` 中添加 `with self._write_lock:` 外层保护，与 `_insert` 方法保持一致的并发安全策略 |
+
+---
+
+#### 🟡 P2 — `audit/sqlite_ledger.py`：`upsert_world_canon_doc` 缺少 `_write_lock` 保护，并发写入时 `database is locked`
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/audit/sqlite_ledger.py` `SQLiteLedger.upsert_world_canon_doc` |
+| **根因** | `upsert_world_canon_doc` 直接使用 `with self._conn:` 执行 UPSERT，**完全绕过了 `self._write_lock`**。在 `canon_sync.py` 和 `canon_world_store.py` 中被调用，若与其他写入操作并发执行，会触发 `sqlite3.OperationalError: database is locked` |
+| **影响** | Canon 世界文档同步时与其他审计写入并发，触发 SQLite 锁错误，导致 Canon 文档状态更新失败，世界观数据不一致 |
+| **修复** | 在 `upsert_world_canon_doc` 中添加 `with self._write_lock:` 外层保护，与其他写入方法保持一致 |
+
+---
+
+**第29轮排查文件：8 个 | 累计已排查：约 248 个 | 剩余约 19 个**
+
+*文档最后更新：第 29 轮排查完成*
