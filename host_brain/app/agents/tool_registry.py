@@ -58,13 +58,40 @@ def _get_semantic_recaller():
 
 
 def _run_async(coro):
-    """在同步上下文中运行异步协程。"""
+    """在同步上下文中运行异步协程。
+
+    注意：工具执行器（executor）均为同步函数，在 ReAct 循环中被同步调用。
+    若调用方在事件循环线程中（FastAPI async 上下文），直接在事件循环线程中
+    调用 run_coroutine_threadsafe().result() 会死锁（result() 阻塞事件循环）。
+    正确做法：在独立线程中执行，通过 run_coroutine_threadsafe 提交到事件循环。
+    若无事件循环（纯同步测试环境），直接 asyncio.run()。
+    """
     try:
         loop = asyncio.get_running_loop()
-        # 已有运行中的事件循环（如 FastAPI 环境）：用 run_coroutine_threadsafe
+        # 已有运行中的事件循环：必须在独立线程中调用 result()，
+        # 否则会死锁（当前线程就是事件循环线程）。
+        # 使用 concurrent.futures 在线程池中执行阻塞等待。
         import concurrent.futures  # noqa: PLC0415
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result(timeout=5.0)
+        import threading  # noqa: PLC0415
+
+        result_holder: list = []
+        exc_holder: list = []
+
+        def _run_in_thread():
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                result_holder.append(future.result(timeout=5.0))
+            except Exception as exc:
+                exc_holder.append(exc)
+
+        t = threading.Thread(target=_run_in_thread, daemon=True)
+        t.start()
+        t.join(timeout=6.0)
+        if exc_holder:
+            raise exc_holder[0]
+        if result_holder:
+            return result_holder[0]
+        raise TimeoutError("_run_async: 协程执行超时（>6s）")
     except RuntimeError:
         # 没有运行中的事件循环：直接 asyncio.run
         return asyncio.run(coro)

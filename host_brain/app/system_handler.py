@@ -516,7 +516,7 @@ def receive_edge_events_response(
                                 )
 
                         try:
-                            loop = _asyncio.get_event_loop()
+                            loop = _asyncio.get_running_loop()
                             if loop.is_running():
                                 _asyncio.ensure_future(
                                     _fire_vts(
