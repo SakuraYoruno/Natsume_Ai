@@ -182,6 +182,7 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
+            checkpoint_manager=self._checkpoint_manager,  # 修复：共享 CheckpointManager，确保 interrupt/resume 使用同一存储
         )
         compiled = executor.compile_runtime_graph()
         # M36-C：初始化双时钟字段
@@ -428,6 +429,7 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
+            checkpoint_manager=self._checkpoint_manager,  # 修复：共享 CheckpointManager，确保 interrupt/resume 使用同一存储
         )
         compiled = executor.compile_runtime_graph()
         # 更新 state：清除 checkpoint 中断标记，重置 resume_allowed

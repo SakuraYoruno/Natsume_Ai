@@ -93,7 +93,8 @@ class GraphExecutor:
 
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
-                 evidence_plane: Any = None) -> None:
+                 evidence_plane: Any = None,
+                 checkpoint_manager: CheckpointManager | None = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
@@ -106,8 +107,8 @@ class GraphExecutor:
         self._render_emitter = RenderStreamEmitter()
         self._phase_lock_guard = PhaseLockGuard()
         self._render_guard = RenderGuard()
-        # M39-E：Checkpoint 管理器
-        self._checkpoint_manager = CheckpointManager()
+        # M39-E：Checkpoint 管理器（优先使用外部传入的共享实例，确保 interrupt/resume 使用同一存储）
+        self._checkpoint_manager = checkpoint_manager if checkpoint_manager is not None else CheckpointManager()
 
     def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
