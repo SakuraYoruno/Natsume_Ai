@@ -464,12 +464,65 @@ class BondStageEngine:
                         "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
                         "ORDER BY ts_ms DESC LIMIT 1",
                     ).fetchone()
-                # 无论 STAGE_TRANSITION 是否存在，都直接累加所有历史事件积分
-                # 这样即使每次重启都从 1 开始，也能正确恢复真实历史积分
+
                 import json as _json
+
+                # 策略1：优先从最近一条 STAGE_TRANSITION 的 payload 中读取 total_score
+                # 这是最可靠的恢复方式，避免累加历史负分事件导致积分偏低
+                if row is not None:
+                    try:
+                        payload_data = _json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
+                        saved_score = int(payload_data.get("total_score", 0))
+                        saved_ts = int(row[1] or 0)
+                        if saved_score > 0:
+                            # 在 STAGE_TRANSITION 之后的增量事件也需要累加
+                            delta_rows = conn.execute(
+                                "SELECT update_kind, COUNT(*) FROM bond_update_log "
+                                "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
+                                "AND status IN ('OK','SUCCESS') "
+                                "AND ts_ms > ? "
+                                "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                                "GROUP BY update_kind",
+                                (saved_ts, user_id),
+                            ).fetchall()
+                            delta_score = 0
+                            delta_count = 0
+                            last_ts = saved_ts
+                            for kind, cnt in delta_rows:
+                                base = self._score_map.get(str(kind).strip(), 1)
+                                delta_score += base * cnt
+                                delta_count += cnt
+                            total_score = max(0, saved_score + delta_score)
+                            event_count_row = conn.execute(
+                                "SELECT COUNT(*), MAX(ts_ms) FROM bond_update_log "
+                                "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
+                                "AND status IN ('OK','SUCCESS') "
+                                "AND (user_id=? OR user_id IS NULL OR user_id='')",
+                                (user_id,),
+                            ).fetchone()
+                            event_count = int(event_count_row[0] or 0) if event_count_row else delta_count
+                            if event_count_row and event_count_row[1]:
+                                last_ts = max(last_ts, int(event_count_row[1]))
+                            stage = self._compute_stage(total_score)
+                            state = BondScoreState(
+                                user_id=user_id,
+                                total_score=total_score,
+                                current_stage=stage,
+                                event_count=event_count,
+                                last_event_ts_ms=last_ts,
+                            )
+                            _logger.info(
+                                "Bond 状态从 STAGE_TRANSITION 恢复: user=%s stage=%s score=%d events=%d",
+                                user_id, stage, total_score, event_count,
+                            )
+                            return state
+                    except Exception as _parse_exc:
+                        _logger.warning("Bond STAGE_TRANSITION payload 解析失败，降级为累加模式: %s", _parse_exc)
+
+                # 策略2：无 STAGE_TRANSITION 时，累加所有历史事件积分（排除负分衰减事件）
                 event_rows = conn.execute(
                     "SELECT update_kind, COUNT(*), MAX(ts_ms) FROM bond_update_log "
-                    "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
+                    "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION','IDLE_DECAY') "
                     "AND status IN ('OK','SUCCESS') "
                     "AND (user_id=? OR user_id IS NULL OR user_id='') "
                     "GROUP BY update_kind",

@@ -15,6 +15,8 @@ Error codes:
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -138,7 +140,23 @@ class MCPToolBroker:
             )
 
         try:
-            output = handler(args or {})
+            raw_output = handler(args or {})
+            # 支持 async handler：若返回 coroutine，则在当前事件循环中执行
+            if inspect.isawaitable(raw_output):
+                try:
+                    loop = asyncio.get_event_loop()
+                    output = loop.run_until_complete(raw_output)
+                except RuntimeError:
+                    # 已在事件循环中（如 FastAPI 路由），使用 asyncio.ensure_future 不可行
+                    # 此时 handler 应注册为同步版本，记录警告并返回 None
+                    import logging as _logging
+                    _logging.getLogger("Natsume.mcp.tool_broker").warning(
+                        "async handler %s/%s 在事件循环中被同步调用，无法 await，返回 None",
+                        provider_id, tool_id,
+                    )
+                    output = None
+            else:
+                output = raw_output
         except Exception as exc:
             return self._reject(
                 exec_id=exec_id,
