@@ -276,14 +276,6 @@ async def _complex_scene_sse_generator(
         if retrieval_latency_ms is not None:
             retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
 
-        _skill_manifest_for_graph: list[dict] = []
-        if scene_type == SCENE_EXEC_INTENT:
-            try:
-                from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
-                _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
-            except Exception as _sm_exc:
-                _logger.warning("[%s] skill_manifest 鏋勫缓澶辫触锛堥檷绾т负绌哄垪琛級: %s", request_id, _sm_exc)
-
         render_target_lang = infer_render_target_lang(user_message=request_body.message)
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
@@ -429,7 +421,7 @@ async def _complex_scene_sse_generator(
                 from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
                 _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
             except Exception as _sm_exc:
-                _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)
+                _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)  # noqa: PERF401
         graph_payload = {**dict(llm_prompt_payload), "execution_profile": execution_profile}
         graph_result = await asyncio.to_thread(
             get_graph_runtime().run_graph,
