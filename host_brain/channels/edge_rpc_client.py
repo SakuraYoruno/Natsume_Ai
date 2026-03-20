@@ -19,6 +19,7 @@ import hmac as _hmac
 import json
 import logging
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -32,6 +33,7 @@ _EDGE_CLOCK_OFFSET_CACHE: dict[str, Any] = {
     "offset_ms": 0,
     "expires_at_ms": 0,
 }
+_EDGE_CLOCK_OFFSET_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # 结果数据类
@@ -133,16 +135,17 @@ def _extract_edge_ts_ms(body: Mapping[str, Any]) -> int | None:
 
 
 def _invalidate_edge_clock_offset_cache(*, base_url: str | None = None) -> None:
-    cached_base_url = str(_EDGE_CLOCK_OFFSET_CACHE.get("base_url") or "")
-    if base_url is not None and cached_base_url and cached_base_url != str(base_url):
-        return
-    _EDGE_CLOCK_OFFSET_CACHE.update(
-        {
-            "base_url": "",
-            "offset_ms": 0,
-            "expires_at_ms": 0,
-        }
-    )
+    with _EDGE_CLOCK_OFFSET_LOCK:
+        cached_base_url = str(_EDGE_CLOCK_OFFSET_CACHE.get("base_url") or "")
+        if base_url is not None and cached_base_url and cached_base_url != str(base_url):
+            return
+        _EDGE_CLOCK_OFFSET_CACHE.update(
+            {
+                "base_url": "",
+                "offset_ms": 0,
+                "expires_at_ms": 0,
+            }
+        )
 
 
 async def _resolve_edge_clock_offset_ms(
@@ -153,11 +156,12 @@ async def _resolve_edge_clock_offset_ms(
     import time
 
     now_value = int(time.time() * 1000)
-    if (
-        _EDGE_CLOCK_OFFSET_CACHE.get("base_url") == base_url
-        and int(_EDGE_CLOCK_OFFSET_CACHE.get("expires_at_ms") or 0) > now_value
-    ):
-        return int(_EDGE_CLOCK_OFFSET_CACHE.get("offset_ms") or 0)
+    with _EDGE_CLOCK_OFFSET_LOCK:
+        if (
+            _EDGE_CLOCK_OFFSET_CACHE.get("base_url") == base_url
+            and int(_EDGE_CLOCK_OFFSET_CACHE.get("expires_at_ms") or 0) > now_value
+        ):
+            return int(_EDGE_CLOCK_OFFSET_CACHE.get("offset_ms") or 0)
 
     try:
         import httpx
@@ -179,18 +183,20 @@ async def _resolve_edge_clock_offset_ms(
             return 0
         midpoint_ms = (local_before_ms + local_after_ms) // 2
         offset_ms = int(edge_ts_ms) - int(midpoint_ms)
-        _EDGE_CLOCK_OFFSET_CACHE.update(
-            {
-                "base_url": base_url,
-                "offset_ms": offset_ms,
-                "expires_at_ms": local_after_ms + _EDGE_CLOCK_OFFSET_TTL_MS,
-            }
-        )
+        with _EDGE_CLOCK_OFFSET_LOCK:
+            _EDGE_CLOCK_OFFSET_CACHE.update(
+                {
+                    "base_url": base_url,
+                    "offset_ms": offset_ms,
+                    "expires_at_ms": local_after_ms + _EDGE_CLOCK_OFFSET_TTL_MS,
+                }
+            )
         return offset_ms
     except Exception as exc:
         _logger.debug("edge clock calibration skipped", extra={"base_url": base_url, "error": str(exc)})
-        if _EDGE_CLOCK_OFFSET_CACHE.get("base_url") == base_url:
-            return int(_EDGE_CLOCK_OFFSET_CACHE.get("offset_ms") or 0)
+        with _EDGE_CLOCK_OFFSET_LOCK:
+            if _EDGE_CLOCK_OFFSET_CACHE.get("base_url") == base_url:
+                return int(_EDGE_CLOCK_OFFSET_CACHE.get("offset_ms") or 0)
         return 0
 
 
