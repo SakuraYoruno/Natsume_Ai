@@ -99,14 +99,15 @@ class LedgerQueryMixin:
         return row is not None
 
     def mark_intent_seen(self, *, intent_id: str, session_id: str, nonce: str) -> None:
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT OR IGNORE INTO replay_guard(intent_id, session_id, nonce, ts_ms)
-                VALUES (?, ?, ?, ?)
-                """,
-                (intent_id, session_id, nonce, now_ms()),
-            )
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO replay_guard(intent_id, session_id, nonce, ts_ms)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (intent_id, session_id, nonce, now_ms()),
+                )
 
     def is_seq_invalid(self, *, session_id: str, seq: int) -> bool:
         row = self._conn.execute(
@@ -118,17 +119,18 @@ class LedgerQueryMixin:
         return int(seq) <= int(row["seq"])
 
     def update_seq(self, *, session_id: str, seq: int) -> None:
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO session_seq_guard(session_id, seq, updated_ts_ms)
-                VALUES (?, ?, ?)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    seq = excluded.seq,
-                    updated_ts_ms = excluded.updated_ts_ms
-                """,
-                (session_id, seq, now_ms()),
-            )
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO session_seq_guard(session_id, seq, updated_ts_ms)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        seq = excluded.seq,
+                        updated_ts_ms = excluded.updated_ts_ms
+                    """,
+                    (session_id, seq, now_ms()),
+                )
 
     def has_skill_exec_for_intent(self, *, intent_id: str) -> bool:
         row = self._conn.execute(

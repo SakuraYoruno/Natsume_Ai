@@ -495,27 +495,28 @@ class SQLiteLedger(
         if not payload.get("doc_id"):
             raise ValueError("world_canon_doc requires doc_id")
 
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO world_canon_doc(doc_id, version, hash, status, source_path, updated_ts)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(doc_id) DO UPDATE SET
-                    version = excluded.version,
-                    hash = excluded.hash,
-                    status = excluded.status,
-                    source_path = excluded.source_path,
-                    updated_ts = excluded.updated_ts
-                """,
-                (
-                    payload["doc_id"],
-                    payload["version"],
-                    payload["hash"],
-                    payload["status"],
-                    payload["source_path"],
-                    payload["updated_ts"],
-                ),
-            )
+        with self._write_lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO world_canon_doc(doc_id, version, hash, status, source_path, updated_ts)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(doc_id) DO UPDATE SET
+                        version = excluded.version,
+                        hash = excluded.hash,
+                        status = excluded.status,
+                        source_path = excluded.source_path,
+                        updated_ts = excluded.updated_ts
+                    """,
+                    (
+                        payload["doc_id"],
+                        payload["version"],
+                        payload["hash"],
+                        payload["status"],
+                        payload["source_path"],
+                        payload["updated_ts"],
+                    ),
+                )
 
     def get_world_canon_doc(self, doc_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
