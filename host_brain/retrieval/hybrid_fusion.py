@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 
 logger = logging.getLogger("Natsume.retrieval.hybrid_fusion")
 
 DEFAULT_VECTOR_WEIGHT: float = 0.7
 DEFAULT_FTS_WEIGHT: float = 0.3
+DEFAULT_RECALL_TOP_K: int = 8
 
 class HybridFusionStrategy:
     """向量检索 + 全文检索混合融合策略。

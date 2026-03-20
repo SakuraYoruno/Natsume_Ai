@@ -160,6 +160,7 @@ class RetrievalPipelineContract:
             intent_id=intent_id,
             session_id=session_id,
             ts_ms=now_value,
+            emotion_filter=emotion_context,
         )
 
         recall_candidates = list(recall_result.output.get("candidates") or [])

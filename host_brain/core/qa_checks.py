@@ -8,6 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.core.qa import (
+    LintResult,
+    QAViolation,
+    VIOLATION_CANON_AS_FACT,
+    _validate_canon_as_fact,
+)
+
 DEFAULT_EMOTION_TAG = "NEUTRAL"
 VIOLATION_WCANON_SLOT = "WCANON_SLOT_VIOLATION"
 VIOLATION_INVALID_EMOTION_TAG = "LLM_INVALID_EMOTION_TAG"
