@@ -82,7 +82,7 @@ def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
+            torch_dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
         )
         model.to(runtime_device)
         model.eval()
@@ -176,7 +176,7 @@ def _apply_emotion_boost(
             break
         candidate_emotion = str(
             candidate.get("emotion_tag") or
-            candidate.get("meta", {}).get("emotion_tag") or ""
+            candidate.get("metadata", {}).get("emotion_tag") or ""
         ).strip().upper()
         if candidate_emotion == normalized_emotion:
             boosted[i] = min(1.0, boosted[i] * boost_factor)
