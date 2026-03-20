@@ -164,26 +164,26 @@ class MemoryGuard:
         """
         self._processed_hashes.add(source_hash)
         # 异步写入审计日志（fire-and-forget，不阻塞调用方）
+        # 使用 get_running_loop()（Python 3.7+），无运行中事件循环时抛出 RuntimeError，
+        # 此时降级为同步写入；避免使用已废弃的 get_event_loop()（Python 3.12+ 会直接报错）
         import asyncio as _asyncio
         try:
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(
-                    self._write_audit(
-                        "CANON_HASH_PROCESSED",
-                        {"source_hash": source_hash},
-                    )
+            loop = _asyncio.get_running_loop()
+            # 在运行中的事件循环中：异步 fire-and-forget
+            loop.create_task(
+                self._write_audit(
+                    "CANON_HASH_PROCESSED",
+                    {"source_hash": source_hash},
                 )
-            else:
-                # 同步上下文：直接调用同步版本
-                if self._audit_writer is not None:
-                    try:
-                        if not _asyncio.iscoroutinefunction(self._audit_writer):
-                            self._audit_writer("CANON_HASH_PROCESSED", {"source_hash": source_hash})
-                    except Exception:
-                        pass
+            )
         except RuntimeError:
-            pass
+            # 同步上下文（无运行中事件循环）：直接调用同步版本
+            if self._audit_writer is not None:
+                try:
+                    if not _asyncio.iscoroutinefunction(self._audit_writer):
+                        self._audit_writer("CANON_HASH_PROCESSED", {"source_hash": source_hash})
+                except Exception:
+                    pass
 
     def restore_processed_hashes(self, hashes: Set[str]) -> None:
         """从持久化层恢复已处理的 source_hash 集合（进程启动时调用）。
