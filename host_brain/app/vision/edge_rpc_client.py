@@ -215,10 +215,11 @@ def _convert_plan_to_desktop_actions(plan: ActionPlan) -> list[dict[str, Any]]:
             item["x"] = action.x
         if action.y is not None:
             item["y"] = action.y
-        if action.x2 is not None:
-            item["x2"] = action.x2
-        if action.y2 is not None:
-            item["y2"] = action.y2
+        # 拖拽终点：Action 模型字段名为 to_x/to_y，Edge 端接收 x2/y2
+        if action.to_x is not None:
+            item["x2"] = action.to_x
+        if action.to_y is not None:
+            item["y2"] = action.to_y
         if action.text:
             item["text"] = action.text
         if action.scroll_amount is not None:

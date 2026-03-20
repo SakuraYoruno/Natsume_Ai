@@ -450,13 +450,34 @@ class BondStageEngine:
             conn = _sqlite3.connect(db_path)
             try:
                 # 优先：读最近一条 STAGE_TRANSITION 的 payload.total_score
-                row = conn.execute(
-                    "SELECT payload, ts_ms FROM bond_update_log "
-                    "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
-                    "AND (user_id=? OR user_id IS NULL OR user_id='') "
-                    "ORDER BY ts_ms DESC LIMIT 1",
-                    (user_id,),
-                ).fetchone()
+                # 注意：STAGE_TRANSITION 可能写入 bond_stage_transition_log 或 bond_update_log，
+                # 需要同时查两张表，取最新的一条
+                row = None
+                # 先尝试 bond_stage_transition_log（log_bond_stage_transition 路径）
+                try:
+                    row = conn.execute(
+                        "SELECT payload, ts_ms FROM bond_stage_transition_log "
+                        "WHERE transition_status IN ('PROMOTED','DEMOTED','STABLE') "
+                        "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                        "ORDER BY ts_ms DESC LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
+                    if row is None:
+                        row = conn.execute(
+                            "SELECT payload, ts_ms FROM bond_stage_transition_log "
+                            "ORDER BY ts_ms DESC LIMIT 1",
+                        ).fetchone()
+                except Exception:
+                    pass  # 表不存在时降级到 bond_update_log
+                # 再尝试 bond_update_log（log_bond_update 路径）
+                if row is None:
+                    row = conn.execute(
+                        "SELECT payload, ts_ms FROM bond_update_log "
+                        "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
+                        "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                        "ORDER BY ts_ms DESC LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
                 # 如果 user_id 过滤无结果，放宽到全局最新（单用户场景）
                 if row is None:
                     row = conn.execute(
