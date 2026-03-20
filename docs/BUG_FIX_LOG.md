@@ -551,3 +551,31 @@
 **第23轮排查文件：8 个 | 累计已排查：约 172 个 | 剩余约 95 个**
 
 *文档最后更新：第 23 轮排查完成*
+
+---
+
+#### 🔴 P1 — `app/vision/edge_rpc_client.py`：`capture_screenshot` 返回字段名 `image_b64` 与 `agent_loop.py` 消费字段名 `image_base64` 不一致
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/vision/edge_rpc_client.py` `EdgeRpcClient.capture_screenshot()` |
+| **根因** | `EdgeRpcClient.capture_screenshot()` 返回字典中使用 `image_b64` 字段名，但 `agent_loop.py` 中消费时使用 `screenshot_data.get("image_base64", "")`，导致使用 `EdgeRpcClient` 时截图数据永远为空字符串 |
+| **影响** | Agent Loop 每轮截图后 `vision_context["image_base64"]` 始终为 `""`，LLM 无法获取截图内容，每轮都生成降级计划（`PLAN_FAILED`），Agent Loop 无法正常工作 |
+| **修复** | 将 `EdgeRpcClient.capture_screenshot()` 返回字段统一改为 `image_base64`，同时兼容 Edge 端可能返回 `image_b64` 或 `image_base64` 两种字段名 |
+
+---
+
+#### 🟠 P2 — `app/vision/agent_loop.py`：`goal_achieved` 判断错误依赖 `report.status == ActionStatus.SUCCESS`
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/vision/agent_loop.py` `run_agent_loop()` 步骤4 |
+| **根因** | `if report.goal_achieved or report.status == ActionStatus.SUCCESS` 中，`status == SUCCESS` 仅表示所有指令执行成功，不代表语义目标达成。当 ClawdBot 执行完所有指令但目标未达成时（`goal_achieved=False, status=SUCCESS`），此处会错误地将 `goal_achieved` 置为 `True` |
+| **影响** | Agent Loop 在目标未达成时提前终止，不再继续下一轮截图分析，导致自动化任务在"指令执行成功但目标未达成"的场景下无法继续重试 |
+| **修复** | 移除 `or report.status == ActionStatus.SUCCESS` 条件，仅依赖 `report.goal_achieved` 判断目标是否达成，并添加注释说明两者语义区别 |
+
+---
+
+**第24轮排查文件：8 个 | 累计已排查：约 180 个 | 剩余约 87 个**
+
+*文档最后更新：第 24 轮排查完成*
