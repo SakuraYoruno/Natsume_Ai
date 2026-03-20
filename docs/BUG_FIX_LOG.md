@@ -435,8 +435,9 @@
 | **第19轮** | 🟠 P1 | `app/agents/tool_registry.py` | `_run_async` 在事件循环线程中调用 `run_coroutine_threadsafe().result()` 导致死锁 |
 | **第19轮** | 🟠 P1 | `app/system_handler.py` | VTS 驱动使用 `get_event_loop()` 已废弃，Python 3.12+ 抛出 `RuntimeError` |
 | **第20轮** | 🟡 P3 | `app/handlers/intent_agent_entry_handler.py` | `for...else` 死代码块（`else` 永远不执行）+ 循环体缩进错误 |
+| **第21轮** | 🔴 P1 | `integrations/graph_executor.py` + `integrations/graph_runtime.py` | `CheckpointManager` 实例不共享：`run_graph` 中 `GraphExecutor` 创建独立实例，`resume_graph` 使用 `GraphRuntimeContract` 的实例，`interrupt()` 保存的 checkpoint 在 `load_state()` 中永远找不到 |
 
-**第20轮排查文件：16 个 | 累计已排查：约 148 个 | 剩余约 119 个**
+**第21轮排查文件：8 个 | 累计已排查：约 156 个 | 剩余约 111 个**
 
 ---
 
@@ -452,7 +453,18 @@
 
 ---
 
-*文档最后更新：第 20 轮排查完成*
+#### 🔴 P1 — `integrations/graph_executor.py` + `integrations/graph_runtime.py`：`CheckpointManager` 实例不共享
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/integrations/graph_executor.py` `GraphExecutor.__init__` + `host_brain/integrations/graph_runtime.py` `GraphRuntimeContract.run_graph` / `resume_graph` |
+| **根因** | `GraphExecutor.__init__` 中 `self._checkpoint_manager = CheckpointManager()` 创建了一个**独立的内存 CheckpointManager**。`run_graph` 中每次调用 `GraphExecutor(...)` 都创建新实例，`graph_executor.py` 中 `interrupt()` 将 checkpoint 保存到 `GraphExecutor._checkpoint_manager._store`（内存字典）。而 `resume_graph` 中使用 `self._checkpoint_manager`（`GraphRuntimeContract` 的实例），这是**另一个独立的 CheckpointManager**，其 `_store` 为空，`load_state()` 永远返回 `None`，导致 `resume_graph` 始终返回 `CHECKPOINT_NOT_FOUND` |
+| **影响** | 断点续跑（M39-F）功能完全失效：所有 AIRLOCK 暂停后的恢复请求都会返回 `CHECKPOINT_NOT_FOUND`，无法从中断点继续执行 |
+| **修复** | `GraphExecutor.__init__` 新增 `checkpoint_manager` 参数（可选），若传入则使用外部共享实例，否则创建新实例。`GraphRuntimeContract.run_graph` 和 `resume_graph` 中创建 `GraphExecutor` 时传入 `checkpoint_manager=self._checkpoint_manager`，确保两者共享同一个 `CheckpointManager` 实例 |
+
+---
+
+*文档最后更新：第 21 轮排查完成*
 
 #### 🟠 P1 — `app/agents/tool_registry.py`：`_run_async` 在事件循环线程中死锁
 
