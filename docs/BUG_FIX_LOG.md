@@ -725,3 +725,47 @@
 **第30轮排查文件：10 个 | 累计已排查：约 258 个 | 剩余约 9 个**
 
 *文档最后更新：第 30 轮排查完成*
+
+---
+
+### 第 31 轮（最终轮）
+
+**排查范围：** `vision/camera_event.py`、`vision/detector_registry.py`、`vision/screen_ocr.py`、`lsp/vault.py`、`release/release_manifest.py`、`release/manifest_generators.py`、`release/manifest_helpers.py`、`skills/mcp_skill_bridge.py`、`tools/selector.py`、`observability/service_health_heartbeat.py`、`skills/hot_loader.py`、`skills/loader.py`
+
+**结论：本轮未发现新 Bug，所有文件均通过审查。**
+
+| 文件 | 审查结论 |
+|------|---------|
+| `vision/camera_event.py` | ✅ 无 Bug。`_infer_user_emotion_hint` 正确跳过低置信度对象；`detect_multi` 正确处理 ALL_FAILED/PARTIAL/OK 三种状态 |
+| `vision/detector_registry.py` | ✅ 无 Bug。`DetectorRegistry` 线程安全；`MultiDetectorAggregator._aggregate` 正确聚合多检测器结果 |
+| `vision/screen_ocr.py` | ✅ 无 Bug。gaming 模式门控、超时处理、降级路径均正确 |
+| `lsp/vault.py` | ✅ 无 Bug。`_verify_manifest_digest` 正确排除 `integrity_digest` 字段后重新计算；`_has_active_undo_window` 正确检查 token 有效期 |
+| `release/release_manifest.py` | ✅ 无 Bug。`validate_release_bundle` 正确处理 model_plane digest 校验；`_hash_file_relaxed` 文件不存在时返回全零 hash 而非抛异常 |
+| `release/manifest_generators.py` | ✅ 无 Bug。各里程碑清单生成函数结构一致，`_optional_hash` 正确处理文件不存在的情况 |
+| `release/manifest_helpers.py` | ✅ 无 Bug。`_get_git_commit_hash` 通过读取 `.git/HEAD` 文件而非 subprocess，避免了依赖 git 命令的问题 |
+| `skills/mcp_skill_bridge.py` | ✅ 无 Bug。`_handler` 闭包通过默认参数正确绑定 `_provider_id`/`_tool_id`，避免了循环变量捕获问题 |
+| `tools/selector.py` | ✅ 无 Bug。`_rank_tools` 使用 `(-score, tool.id, tool)` 三元组排序，保证了确定性和稳定性 |
+| `observability/service_health_heartbeat.py` | ✅ 无 Bug。`run_once` 正确处理 Edge/Host 分别探测失败的情况；`get_cached` 正确检查 TTL |
+| `skills/hot_loader.py` | ✅ 无 Bug。`reload_skill` 直接访问 `_registry._skills` 是有意设计（注释说明 SkillRegistry 不支持覆盖） |
+| `skills/loader.py` | ✅ 无 Bug。`_EXECUTOR_MAP` 中 `execute_ide_skill` 直接映射（单参数），与 `execute_file_skill`/`execute_shell_skill` 一致；`execute_diary_writer` 等双参数函数正确使用 lambda 包装 |
+
+---
+
+## 🎉 全量排查完成
+
+**第31轮排查文件：12 个 | 累计已排查：267 个（全部） | 剩余：0 个**
+
+---
+
+## 最终统计
+
+| 项目 | 数量 |
+|------|------|
+| 总文件数 | 267 个 `.py` 文件 |
+| 已排查 | **267 个（100%）** |
+| 累计修复 Bug | **29 个** |
+| P0（崩溃/功能完全失效） | 6 个 |
+| P1（功能异常/数据错误） | 15 个 |
+| P2（并发竞态/性能/兼容性） | 8 个 |
+
+*文档最后更新：第 31 轮排查完成（全量封板）*
