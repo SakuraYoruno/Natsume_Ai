@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
@@ -241,6 +242,8 @@ class PermissionGuard:
         self._scheduler_call_counts: Dict[str, int] = {}
         self._scheduler_count_timestamps: Dict[str, float] = {}
         self._count_ttl_seconds: float = 3600.0
+        # 线程安全锁：保护 _scheduler_call_counts 和 _scheduler_count_timestamps 的并发读写
+        self._lock = threading.Lock()
 
     def check(
         self,
@@ -294,19 +297,20 @@ class PermissionGuard:
         count_key = session_id if session_id else "_global_"
         now = _time.monotonic()
 
-        last_ts = self._scheduler_count_timestamps.get(count_key, 0.0)
-        if now - last_ts > self._count_ttl_seconds:
-            self._scheduler_call_counts.pop(count_key, None)
-            self._scheduler_count_timestamps.pop(count_key, None)
+        with self._lock:
+            last_ts = self._scheduler_count_timestamps.get(count_key, 0.0)
+            if now - last_ts > self._count_ttl_seconds:
+                self._scheduler_call_counts.pop(count_key, None)
+                self._scheduler_count_timestamps.pop(count_key, None)
 
-        count = self._scheduler_call_counts.get(count_key, 0)
-        if count >= self.SCHEDULER_MAX_TOOL_CALLS:
-            raise PermissionGuardError(
-                f"SCHEDULER 本周期调用次数 {count} 已达上限 {self.SCHEDULER_MAX_TOOL_CALLS}",
-                skill_meta.skill_name,
-            )
-        self._scheduler_call_counts[count_key] = count + 1
-        self._scheduler_count_timestamps[count_key] = now
+            count = self._scheduler_call_counts.get(count_key, 0)
+            if count >= self.SCHEDULER_MAX_TOOL_CALLS:
+                raise PermissionGuardError(
+                    f"SCHEDULER 本周期调用次数 {count} 已达上限 {self.SCHEDULER_MAX_TOOL_CALLS}",
+                    skill_meta.skill_name,
+                )
+            self._scheduler_call_counts[count_key] = count + 1
+            self._scheduler_count_timestamps[count_key] = now
 
         logger.debug(
             "SCHEDULER 权限校验通过: skill=%s, session=%s",
@@ -324,4 +328,5 @@ class PermissionGuard:
 
     def reset_scheduler_count(self, session_id: str) -> None:
         """重置指定 session 的 SCHEDULER 调用计数（周期结束时调用）。"""
-        self._scheduler_call_counts.pop(session_id, None)
+        with self._lock:
+            self._scheduler_call_counts.pop(session_id, None)
