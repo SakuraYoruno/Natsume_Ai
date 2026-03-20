@@ -374,13 +374,13 @@ class ContextCompressor:
         # 若超出预算，进一步截断 recent
         if total > max_tokens:
             kept: list[dict[str, Any]] = []
-            budget = max_tokens - summary_tokens
+            accumulated = summary_tokens
             for turn in reversed(recent):
                 tokens = _estimate_tokens(turn)
-                if budget - tokens < 0 and kept:
+                if accumulated + tokens > max_tokens and kept:
                     break
                 kept.insert(0, turn)
-                budget -= tokens
+                accumulated += tokens
             recent = kept
             recent_tokens = sum(_estimate_tokens(t) for t in recent)
             total = recent_tokens + summary_tokens

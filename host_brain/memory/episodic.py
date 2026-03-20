@@ -7,6 +7,8 @@ import hashlib
 from typing import Any
 import uuid
 
+import logging
+
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     MEMORY_EVIDENCE_REQUIRED,
@@ -15,6 +17,8 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.memory.chroma_client import InMemoryChromaClient, embed_text
+
+_logger = logging.getLogger("Natsume.episodic")
 
 
 @dataclass
@@ -522,7 +526,7 @@ class EpisodicStore:
         # LRU 淘汰：超过上限时移除最旧的记录（仅从内存中移除，Chroma 和 Ledger 保留）
         while len(self._records) > self._MAX_RECORDS:
             oldest_id, _ = self._records.popitem(last=False)
-            logger.debug("EpisodicStore LRU 淘汰内存记录: %s", oldest_id)
+            _logger.debug("EpisodicStore LRU 淘汰内存记录: %s", oldest_id)
         self.chroma.upsert(
             memory_id=memory_id,
             text=normalized_text,

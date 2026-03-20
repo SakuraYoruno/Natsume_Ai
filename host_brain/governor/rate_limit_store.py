@@ -585,7 +585,7 @@ class RateLimitChecker:
 
         if isinstance(self._store, DegradingRateLimitStore) and self._store.degraded:
             degraded = True
-            degraded_from = BACKEND_REDIS  # 降级前是外部后端
+            degraded_from = self._store._primary_name  # 使用实际的主后端名称
             reason_code = self._store.degrade_reason
 
         return RateLimitResult(
@@ -612,7 +612,7 @@ class RateLimitChecker:
 
         if isinstance(self._store, DegradingRateLimitStore) and self._store.degraded:
             degraded = True
-            degraded_from = BACKEND_REDIS
+            degraded_from = self._store._primary_name  # 使用实际的主后端名称
             reason_code = self._store.degrade_reason
 
         return RateLimitResult(

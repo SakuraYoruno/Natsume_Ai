@@ -564,9 +564,9 @@ class EmotionTimeline:
             tag_counts[e.emotion_tag] = tag_counts.get(e.emotion_tag, 0) + 1
         dominant = max(tag_counts, key=lambda k: tag_counts[k])
         # 情感趋势：比较前半段和后半段的 valence 均值
-        mid = len(recent) // 2
-        first_half = recent[:mid] if mid > 0 else recent
-        second_half = recent[mid:] if mid > 0 else recent
+        mid = max(1, len(recent) // 2)
+        first_half = recent[:mid]
+        second_half = recent[mid:] if len(recent) > mid else recent[-1:]
         avg_first = sum(e.valence for e in first_half) / len(first_half)
         avg_second = sum(e.valence for e in second_half) / len(second_half)
         if avg_second - avg_first > 0.15:

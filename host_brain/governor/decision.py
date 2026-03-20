@@ -206,6 +206,7 @@ class IntentDecisionEngine:
                     thread_id=thread_id,
                     snapshot_refs=snapshot_refs,
                     proposer_node_id=proposer_node_id,
+                    governance_snapshot=governance_snapshot,
                 )
             elif _cached is None:
                 # 首次未命中：本次走正常 gate 评估路径，gate 通过后再写入缓存
@@ -415,12 +416,34 @@ class IntentDecisionEngine:
         thread_id: str | None,
         snapshot_refs: dict[str, Any],
         proposer_node_id: str = "governor",
+        governance_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """P2-A 快速审批通道：policy cache 命中时跳过完整 gate 评估，直接返回 APPROVE。
 
         仅用于 narrative_only 且 policy_cache 已预热命中的场景，
         可节省约 20-30ms 的 gate 评估开销。
+        注意：M27-H 情感门控不可绕过，即使 policy cache 命中也必须检查。
         """
+        # M27-H：情感状态门控不可绕过（OPT-32）：critical 状态下拒绝 TOOL_CALL/SKILL_EXEC
+        mood_state = _extract_mood_state(governance_snapshot)
+        if mood_state == "critical" and envelope.action in ("TOOL_CALL", "SKILL_EXEC"):
+            return self._reject(
+                req_id,
+                envelope.id,
+                "EMOTION_GATE_BLOCKED",
+                stage="S_GOV_EMOTION_GATE",
+                turn_id=turn,
+                thread_id=thread_id,
+                rule_trace=[{
+                    "gate_id": "R8_EMOTION_GATE",
+                    "hit": True,
+                    "reason_hint": "EMOTION_GATE_BLOCKED",
+                    "threshold_summary": {"blocked_mood_states": ["critical"]},
+                    "snapshot_summary": {"mood_state": mood_state, "action": envelope.action},
+                }],
+                ts_ms=now,
+                snapshot_refs=snapshot_refs,
+            )
         approval_token_ref = f"approval::{envelope.id}"
         if self.token_service is not None:
             approval_token_ref = self.token_service.issue_approval_token(

@@ -63,9 +63,37 @@ def receive_wechat_event(
 ) -> WeChatIngressResult:
     """Normalize ingress event and persist a channel_io_log row."""
 
-    normalized = _normalize_ingress(raw_event)
-    req_id = request_id or str(raw_event.get("request_id") or new_request_id())
+    req_id = request_id or str(raw_event.get("request_id") or new_request_id()) if isinstance(raw_event, dict) else new_request_id()
     now_value = int(ts_ms if ts_ms is not None else now_ms())
+    try:
+        normalized = _normalize_ingress(raw_event)
+    except (ValueError, TypeError) as exc:
+        ledger.log_channel_io(
+            {
+                "request_id": req_id,
+                "channel": CHANNEL_WECHAT,
+                "direction": DIRECTION_INGRESS,
+                "thread_key": "",
+                "message_id": "",
+                "user_id": None,
+                "status": STATUS_FAILED,
+                "reason_code": CHANNEL_PAYLOAD_INVALID,
+                "stage": S_CHANNEL_INGRESS,
+                "detail": str(exc),
+                "payload_digest": "",
+                "ts_ms": now_value,
+            }
+        )
+        return WeChatIngressResult(
+            accepted=False,
+            duplicate=False,
+            request_id=req_id,
+            thread_key="",
+            message_id="",
+            status=STATUS_FAILED,
+            reason_code=CHANNEL_PAYLOAD_INVALID,
+            payload={},
+        )
     duplicate = ledger.has_channel_message(
         channel=CHANNEL_WECHAT,
         direction=DIRECTION_INGRESS,
@@ -223,11 +251,41 @@ def receive_wechat_event_v2(
     - 写入审计链（channel_io_log）
     - 返回结构化事件（含 thread_key + request_id 可追溯）
     """
-    normalized = _normalize_ingress(raw_event)
-    req_id = request_id or str(raw_event.get("request_id") or new_request_id())
+    req_id = request_id or str(raw_event.get("request_id") or new_request_id()) if isinstance(raw_event, dict) else new_request_id()
     now_value = int(ts_ms if ts_ms is not None else now_ms())
     event_id = new_request_id()
     audit_ref = f"channel_io_log::{req_id}"
+    try:
+        normalized = _normalize_ingress(raw_event)
+    except (ValueError, TypeError) as exc:
+        ledger.log_channel_io(
+            {
+                "request_id": req_id,
+                "channel": CHANNEL_WECHAT,
+                "direction": DIRECTION_INGRESS,
+                "thread_key": "",
+                "message_id": "",
+                "user_id": None,
+                "status": STATUS_FAILED,
+                "reason_code": CHANNEL_PAYLOAD_INVALID,
+                "stage": S_CHANNEL_INGRESS,
+                "detail": str(exc),
+                "payload_digest": "",
+                "ts_ms": now_value,
+            }
+        )
+        return WeChatChannelEvent(
+            event_id=event_id,
+            event_type="inbound",
+            thread_key="",
+            request_id=req_id,
+            intent_id=None,
+            payload={},
+            audit_ref=audit_ref,
+            ts_ms=now_value,
+            reason_code=CHANNEL_PAYLOAD_INVALID,
+            stage=S_CHANNEL_INGRESS,
+        )
 
     duplicate = ledger.has_channel_message(
         channel=CHANNEL_WECHAT,
