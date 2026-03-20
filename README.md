@@ -156,7 +156,7 @@ graph TB
     EREPORT --> HAPI
 ```
 
-> 数据流图请见：`docs/50_project/dataflow_report_20260311.md`
+> 数据流图请见：`docs/50_project/dataflow_report.md`
 
 ## 🧭 当前实现对齐（2026-03-18）
 
