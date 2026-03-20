@@ -434,10 +434,25 @@
 | **第18轮** | 🟡 P2 | `scheduler/task_registry.py` | `SchedulerTaskRegistry._tasks` 无实例锁保护，并发注册/注销竞态 |
 | **第19轮** | 🟠 P1 | `app/agents/tool_registry.py` | `_run_async` 在事件循环线程中调用 `run_coroutine_threadsafe().result()` 导致死锁 |
 | **第19轮** | 🟠 P1 | `app/system_handler.py` | VTS 驱动使用 `get_event_loop()` 已废弃，Python 3.12+ 抛出 `RuntimeError` |
+| **第20轮** | 🟡 P3 | `app/handlers/intent_agent_entry_handler.py` | `for...else` 死代码块（`else` 永远不执行）+ 循环体缩进错误 |
 
-**第19轮排查文件：16 个 | 累计已排查：约 132 个 | 剩余约 135 个**
+**第20轮排查文件：16 个 | 累计已排查：约 148 个 | 剩余约 119 个**
 
 ---
+
+#### 🟡 P3 — `app/handlers/intent_agent_entry_handler.py`：`for...else` 死代码块 + 缩进错误
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/handlers/intent_agent_entry_handler.py` `intent_agent_entry_handler` |
+| **根因 1** | `for attempt in range(...): ... break ... except: ... if attempt >= max_retry_count: return ...` 后跟 `else: if last_exc is not None: return ...`。Python `for...else` 的 `else` 块只在循环未被 `break` 中断时执行。但失败路径已通过 `return` 退出，`else` 块**永远不会执行**，是死代码，会误导维护者认为有兜底逻辑 |
+| **根因 2** | `for attempt` 循环体的 `try/except` 块缩进多了一级（12空格而非8空格），虽然 Python 允许，但与项目其他代码风格不一致，且与 `for` 语句的缩进关系不直观 |
+| **影响** | 死代码不影响功能，但维护者可能误以为 `else` 块是有效的兜底逻辑，在修改重试逻辑时产生误判 |
+| **修复** | 移除 `last_exc` 变量和 `for...else` 的 `else` 块，修正 `try/except` 缩进为标准4空格 |
+
+---
+
+*文档最后更新：第 20 轮排查完成*
 
 #### 🟠 P1 — `app/agents/tool_registry.py`：`_run_async` 在事件循环线程中死锁
 
