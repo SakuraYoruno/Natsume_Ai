@@ -436,8 +436,9 @@
 | **第19轮** | 🟠 P1 | `app/system_handler.py` | VTS 驱动使用 `get_event_loop()` 已废弃，Python 3.12+ 抛出 `RuntimeError` |
 | **第20轮** | 🟡 P3 | `app/handlers/intent_agent_entry_handler.py` | `for...else` 死代码块（`else` 永远不执行）+ 循环体缩进错误 |
 | **第21轮** | 🔴 P1 | `integrations/graph_executor.py` + `integrations/graph_runtime.py` | `CheckpointManager` 实例不共享：`run_graph` 中 `GraphExecutor` 创建独立实例，`resume_graph` 使用 `GraphRuntimeContract` 的实例，`interrupt()` 保存的 checkpoint 在 `load_state()` 中永远找不到 |
+| **第22轮** | 🟠 P2 | `integrations/graph_subgraph.py` | `invoke()` 中 `final_status` 逻辑错误：子图 `DEGRADED` 状态覆盖主图已有的 `FAILED` 状态，应取两者中更严重的状态 |
 
-**第21轮排查文件：8 个 | 累计已排查：约 156 个 | 剩余约 111 个**
+**第22轮排查文件：8 个 | 累计已排查：约 164 个 | 剩余约 103 个**
 
 ---
 
@@ -464,7 +465,12 @@
 
 ---
 
-*文档最后更新：第 21 轮排查完成*
+#### 🟠 P2 — `integrations/graph_subgraph.py`：`invoke()` 中 `final_status` 逻辑错误
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/integrations/graph_subgraph.py` `CompiledSubgraph.invoke()` |
+| **根因** | `final_status` 计算逻辑错误：`final_status if final_status != STATUS_OK else str(state.get("status") or STATUS_OK)`。当子图有节点失败（`current_status = DEGRADED`）时，`final_status = DEGRADED`，直接写入 `state["status"]`，**覆盖了主图已有的 `FAILED` 状态**。注释写的是
 
 #### 🟠 P1 — `app/agents/tool_registry.py`：`_run_async` 在事件循环线程中死锁
 
@@ -513,3 +519,18 @@
 ---
 
 *文档最后更新：第 18 轮排查完成*
+
+---
+
+#### 🟠 P2 — `integrations/graph_subgraph.py`：`invoke()` 中 `final_status` 逻辑错误
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/integrations/graph_subgraph.py` `CompiledSubgraph.invoke()` |
+| **根因** | `final_status` 计算逻辑错误：`final_status if final_status != STATUS_OK else str(state.get("status") or STATUS_OK)`。当子图有节点失败（`current_status = DEGRADED`）时，`final_status = DEGRADED`，直接写入 `state["status"]`，**覆盖了主图已有的 `FAILED` 状态**。注释写的是 `# 子图状态降级时，主图状态同步（但不覆盖 FAILED）`，但实现是反的 |
+| **影响** | 主图执行过程中若某节点已将 `state["status"]` 设为 `FAILED`，子图执行后若有节点失败（`DEGRADED`），会将主图状态从 `FAILED` 降级为 `DEGRADED`，导致后续节点误判主图状态，可能继续执行本应终止的流程 |
+| **修复** | 引入 `_STATUS_SEVERITY` 优先级字典（`FAILED=2 > DEGRADED=1 > OK=0`），取 `current_status` 和 `original_status` 中严重度更高的那个作为 `final_status`，确保 `FAILED` 状态不被 `DEGRADED` 覆盖 |
+
+---
+
+*文档最后更新：第 22 轮排查完成*
