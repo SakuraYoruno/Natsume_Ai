@@ -80,8 +80,10 @@ class EdgeRpcClient(ClawdbotClient):
                 return {"error": error, "image_b64": "", "image_mime": "image/png"}
 
             event = data.get("event") or {}
+            # 兼容 Edge 端返回 image_b64 或 image_base64 两种字段名
+            image_base64 = event.get("image_base64") or event.get("image_b64", "")
             return {
-                "image_b64": event.get("image_b64", ""),
+                "image_base64": image_base64,
                 "image_mime": event.get("image_mime", "image/png"),
                 "width": event.get("width", 0),
                 "height": event.get("height", 0),

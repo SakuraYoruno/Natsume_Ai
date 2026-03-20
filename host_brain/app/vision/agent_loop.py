@@ -379,7 +379,9 @@ async def run_agent_loop(
                 })
 
                 # ── 步骤 4：判断是否达成目标 ──────────────────────────────
-                if report.goal_achieved or report.status == ActionStatus.SUCCESS:
+                # 注意：report.status == SUCCESS 仅表示所有指令执行成功，
+                # 不代表语义目标达成；目标达成必须由 ClawdBot 的 goal_achieved 字段决定。
+                if report.goal_achieved:
                     goal_achieved = True
                     final_status = "SUCCESS"
                     yield _sse({
