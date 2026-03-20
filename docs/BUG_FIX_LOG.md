@@ -385,4 +385,54 @@
 
 ---
 
-*文档最后更新：第 16 轮排查完成*
+---
+
+#### 🟡 P2 — `skills/registry.py`：`PermissionGuard` 调度器计数器无锁保护，多线程并发竞态
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/skills/registry.py` |
+| **根因** | `PermissionGuard._check_scheduler_permissions` 中对 `_scheduler_call_counts` 和 `_scheduler_count_timestamps` 的读写（`pop`、`get`、`__setitem__`）没有任何锁保护。在 FastAPI 多线程场景下，并发的 SCHEDULER 调用可能导致计数器竞态，使得调用次数超过 `SCHEDULER_MAX_TOOL_CALLS=3` 的限制，允许超额调用高风险工具 |
+| **影响** | SCHEDULER 来源的工具调用次数限制失效，可能允许超过 3 次/周期的调用，绕过安全限制 |
+| **修复** | 在 `__init__` 中添加 `self._lock = threading.Lock()`，在 `_check_scheduler_permissions` 和 `reset_scheduler_count` 中用 `with self._lock:` 保护所有计数器读写操作 |
+
+---
+
+### 📊 累计修复汇总（全部轮次）
+
+| 轮次 | 优先级 | 文件 | 修复内容 |
+|------|--------|------|---------|
+| 第1轮 | 🔴 P0 | `memory/episodic.py` | `_logger` 未定义 |
+| 第1轮 | 🟠 P1 | `governor/decision.py` | `_approve_fast` 跳过情感门控 |
+| 第1轮 | 🟠 P1 | `memory/context_compressor.py` | `_hybrid` token 截断逻辑错误 |
+| 第1轮 | 🟡 P2 | `core/metabolism.py` | 单条记录趋势永远 stable |
+| 第1轮 | 🟡 P2 | `governor/rate_limit_store.py` | `degraded_from` 硬编码 BACKEND_REDIS |
+| 第1轮 | 🟡 P2 | `channels/wechat.py` | `_normalize_ingress` 未捕获异常 |
+| 第2轮 | 🔴 P0 | `bond/bond_stage_engine.py` | 积分恢复逻辑完全失效 |
+| 第2轮 | 🟠 P1 | `mcp/tool_broker.py` | async handler 返回 coroutine 对象 |
+| 第3轮 | 🔴 P0 | `airlock/sandbox.py` | `stderr=` 缩进错误 |
+| 第4轮 | 🔴 P0 | `scheduler/scheduler.py` | 心跳检测从未执行 |
+| 第4轮 | 🟠 P1 | `retrieval/reranker.py` | 情感加权字段路径错误 |
+| 第4轮 | 🟡 P2 | `memory/long_term_distiller.py` | `get_pending_proposals` 调用不存在方法 |
+| 第5轮 | 🟠 P1 | `integrations/graph_branch.py` | `barrier_join` partial 模式语义错误 |
+| 第5轮 | 🟡 P2 | `governor/tokens.py` | `TokenService` 并发修改 dict |
+| 第6轮 | 🟠 P1 | `app/graph/main_chain.py` | 熔断器失败通知 `await` 同步方法 |
+| 第7轮 | 🟠 P1 | `app/memory/memory_guard.py` | `get_event_loop()` 已废弃，Python 3.12+ 审计日志丢失 |
+| 第8轮 | 🔴 P0 | `skills/impl/notification_executor.py` | `get_event_loop()` 已废弃 + 死锁风险 |
+| 第9轮 | 🟠 P1 | `audit/retention.py` | `_delete_older_than` 绕过 `_write_lock`，并发 `database is locked` |
+| 第10轮 | 🟠 P1 | `app/http_hooks.py` | `asyncio` 未导入，VTS 注册 `NameError` |
+| 第11轮 | 🟠 P1 | `app/chat_handler_complex.py` | `_skill_manifest_for_graph` 重复构建 + 日志乱码 |
+| 第12轮 | 🟠 P1 | `integrations/graph_runtime.py` | P8 图运行延迟监控 `latency_ms` 永远为 `None` |
+| 第13轮 | 🟠 P1 | `integrations/graph_evidence.py` | `_connect()` 每次创建新连接不关闭，文件描述符泄漏 |
+| 第14轮 | 🟡 P2 | `governor/policy_cache.py` | `GovernorPolicyCache` 无锁保护，多线程并发竞态 |
+| 第15轮 | 🟡 P2 | `channels/edge_rpc_client.py` | `_EDGE_CLOCK_OFFSET_CACHE` 全局 dict 无锁保护，多线程并发竞态 |
+| 第16轮 | 🔴 P0 | `core/qa_checks.py` | `check_canon_as_fact()` 引用未导入符号，`NameError` 完全失效 |
+| 第16轮 | 🟠 P1 | `retrieval/pipeline.py` | `recall()` 未传 `emotion_filter`，情感维度路由 M27-G 完全失效 |
+| 第16轮 | 🟡 P2 | `retrieval/hybrid_fusion.py` | `_apply_hybrid_fusion_impl` 引用未定义 `DEFAULT_RECALL_TOP_K` |
+| **第17轮** | 🟡 P2 | `skills/registry.py` | `PermissionGuard` 调度器计数器无锁保护，多线程并发竞态 |
+
+**第17轮排查文件：16 个 | 累计已排查：约 100 个 | 剩余约 167 个**
+
+---
+
+*文档最后更新：第 17 轮排查完成*
