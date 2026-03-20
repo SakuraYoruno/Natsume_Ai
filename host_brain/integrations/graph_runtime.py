@@ -284,7 +284,10 @@ class GraphRuntimeContract:
             ),
         }
         initial_state["payload"] = payload_dict
+        # 修复 P1：在图执行前记录真实开始时间戳，用于计算 latency_ms
+        _graph_run_start_ms = now_ms()
         state = compiled.invoke(initial_state)
+        _graph_run_end_ms = now_ms()
 
         # P5-4：Supervisor 决策写入 ledger，供 metrics 聚合
         _sd = (state.get("payload") or {}).get("supervisor_dispatch")
@@ -306,8 +309,8 @@ class GraphRuntimeContract:
             self._write_p8_ledger(
                 request_id=request_id,
                 state=state,
-                ts_ms=now_value,
-                run_start_ms=now_value,
+                ts_ms=_graph_run_end_ms,
+                run_start_ms=_graph_run_start_ms,
             )
 
         # M36-F：图执行完成后异步写入 Evidence Plane（不阻塞主流程返回）
@@ -501,11 +504,8 @@ class GraphRuntimeContract:
                     })
 
             # 2. 写入 graph_run_log（延迟 + budget breach）
-            # 延迟：run_start_ms 是 run_graph 入口时间戳，ts_ms 是同一时刻（当前实现中两者相同）
-            # 若需精确测量，调用方可传入实际开始时间；此处以 now_ms() - run_start_ms 为准
-            # 注意：run_start_ms 与 ts_ms 在当前实现中均为 now_value（run_graph 入口），
-            # 实际耗时需在 run_graph 返回后重新采样；此处写入 0 作为占位，
-            # 真实延迟由 run_graph 调用方在 _finalize 后补充（见下方 run_graph 改造）
+            # latency_ms = ts_ms（图执行结束时间）- run_start_ms（图执行开始时间）
+            actual_latency_ms = max(0, int(ts_ms) - int(run_start_ms)) if run_start_ms else None
             budget_breach_code: str | None = None
             reason_code = str((state or {}).get("reason_code") or "").strip() or None
             if reason_code and is_budget_breach_failure_code(reason_code):
@@ -520,7 +520,7 @@ class GraphRuntimeContract:
                 "request_id": request_id,
                 "ts_ms": ts_ms,
                 "execution_profile": execution_profile,
-                "latency_ms": None,  # 由 run_graph 在 _finalize 后填充实际耗时
+                "latency_ms": actual_latency_ms,
                 "status": status,
                 "budget_breach_code": budget_breach_code,
             })
