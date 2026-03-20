@@ -708,3 +708,20 @@
 **第29轮排查文件：8 个 | 累计已排查：约 248 个 | 剩余约 19 个**
 
 *文档最后更新：第 29 轮排查完成*
+
+---
+
+#### 🔴 P1 — `mcp/tool_broker.py`：async handler 在事件循环中被同步调用时静默失败（`success=True`，`output=None`）
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/mcp/tool_broker.py` `MCPToolBroker.call` |
+| **根因** | 当 async handler 在 FastAPI 事件循环中被同步调用时，`loop.run_until_complete(raw_output)` 抛出 `RuntimeError: This event loop is already running`，原代码的 `except RuntimeError` 分支只是记录警告并将 `output = None`，然后继续执行成功路径，返回 `MCPCallResult(success=True, output=None)`。调用方收到 `success=True` 但 `output=None`，误以为工具执行成功但没有输出，而实际上工具根本没有执行 |
+| **影响** | 所有注册了 async handler 的 MCP 工具在 FastAPI 路由中被调用时，工具执行静默失败，但调用方无法感知，导致 MCP 工具功能完全失效且无错误反馈 |
+| **修复** | 将 `except RuntimeError` 分支改为调用 `self._reject()`，返回 `MCPCallResult(success=False, reason_code=MCP_PROVIDER_UNAVAILABLE)`，并将日志级别从 `warning` 升级为 `error` |
+
+---
+
+**第30轮排查文件：10 个 | 累计已排查：约 258 个 | 剩余约 9 个**
+
+*文档最后更新：第 30 轮排查完成*
