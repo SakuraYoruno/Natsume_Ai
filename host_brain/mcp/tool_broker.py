@@ -147,14 +147,25 @@ class MCPToolBroker:
                     loop = asyncio.get_event_loop()
                     output = loop.run_until_complete(raw_output)
                 except RuntimeError:
-                    # 已在事件循环中（如 FastAPI 路由），使用 asyncio.ensure_future 不可行
-                    # 此时 handler 应注册为同步版本，记录警告并返回 None
+                    # 已在事件循环中（如 FastAPI 路由），无法 run_until_complete
+                    # 此时 handler 应注册为同步版本，直接拒绝并记录错误
                     import logging as _logging
-                    _logging.getLogger("Natsume.mcp.tool_broker").warning(
-                        "async handler %s/%s 在事件循环中被同步调用，无法 await，返回 None",
+                    _logging.getLogger("Natsume.mcp.tool_broker").error(
+                        "async handler %s/%s 在事件循环中被同步调用，无法 await，拒绝本次调用",
                         provider_id, tool_id,
                     )
-                    output = None
+                    return self._reject(
+                        exec_id=exec_id,
+                        request_id=req_id,
+                        intent_id=intent_id,
+                        session_id=session_id,
+                        seq=seq,
+                        provider_id=provider_id,
+                        tool_id=tool_id,
+                        reason_code=MCP_PROVIDER_UNAVAILABLE,
+                        detail=f"async handler {provider_id}/{tool_id} 在事件循环中被同步调用，无法执行",
+                        ts_ms=now_value,
+                    )
             else:
                 output = raw_output
         except Exception as exc:
