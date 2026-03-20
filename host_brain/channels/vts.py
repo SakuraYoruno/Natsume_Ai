@@ -219,7 +219,9 @@ def resolve_vts_expression(
 
     # ── 真正驱动 Edge VTS（fire-and-forget，不阻塞调用方）──────────────────
     # 通过 EdgeRpcClient 发送 HTTP POST /v1/edge/vts，让 Edge 端执行表情切换。
-    # 若无事件循环（同步调用场景）则跳过，不影响审计结果。
+    # 本函数可能在 asyncio.to_thread 的 worker 线程中被调用，因此必须使用
+    # run_coroutine_threadsafe 而非 ensure_future，以确保协程被提交到正确的
+    # 事件循环（主线程循环）。若无运行中的事件循环则跳过，不影响审计结果。
     try:
         from host_brain.channels.edge_rpc_client import post_vts as _post_vts  # noqa: PLC0415
 
@@ -237,9 +239,15 @@ def resolve_vts_expression(
                 )
 
         try:
-            loop = asyncio.get_event_loop()
+            # 使用 run_coroutine_threadsafe 确保在 worker 线程中也能正确提交到主事件循环。
+            # get_running_loop() 在 worker 线程中会抛出 RuntimeError（无运行中的循环），
+            # 此时改用 get_event_loop() 尝试获取主线程循环；若仍无法获取则静默跳过。
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(_fire_edge_vts())
+                asyncio.run_coroutine_threadsafe(_fire_edge_vts(), loop)
         except RuntimeError:
             pass  # 无事件循环时跳过
     except ImportError:
