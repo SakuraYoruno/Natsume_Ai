@@ -184,16 +184,19 @@ def execute_notify_tts_speak(payload: dict[str, Any]) -> dict[str, Any]:
             )
             return result.as_dict()
 
+        # 使用 get_running_loop()（Python 3.7+），避免已废弃的 get_event_loop()
+        # （Python 3.12+ 无运行中事件循环时 get_event_loop() 直接报错）
+        # 在已有事件循环中（如 FastAPI）：使用 run_coroutine_threadsafe + 线程池，
+        # 避免在事件循环线程上调用 future.result() 造成死锁
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 在已有事件循环中（如 FastAPI），使用 run_coroutine_threadsafe
-                import concurrent.futures
-                future = asyncio.run_coroutine_threadsafe(_call(), loop)
+            loop = asyncio.get_running_loop()
+            # 有运行中的事件循环：在独立线程中执行，避免阻塞事件循环线程
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, _call())
                 tts_result = future.result(timeout=30)
-            else:
-                tts_result = loop.run_until_complete(_call())
         except RuntimeError:
+            # 无运行中的事件循环（同步上下文）：直接 asyncio.run()
             tts_result = asyncio.run(_call())
 
         return {
