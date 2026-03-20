@@ -430,9 +430,33 @@
 | 第16轮 | 🟠 P1 | `retrieval/pipeline.py` | `recall()` 未传 `emotion_filter`，情感维度路由 M27-G 完全失效 |
 | 第16轮 | 🟡 P2 | `retrieval/hybrid_fusion.py` | `_apply_hybrid_fusion_impl` 引用未定义 `DEFAULT_RECALL_TOP_K` |
 | **第17轮** | 🟡 P2 | `skills/registry.py` | `PermissionGuard` 调度器计数器无锁保护，多线程并发竞态 |
+| **第18轮** | 🟠 P1 | `integrations/llm_gateway.py` | `update_route_config` 热更新无锁保护，并发读写竞态 |
+| **第18轮** | 🟡 P2 | `scheduler/task_registry.py` | `SchedulerTaskRegistry._tasks` 无实例锁保护，并发注册/注销竞态 |
 
-**第17轮排查文件：16 个 | 累计已排查：约 100 个 | 剩余约 167 个**
+**第18轮排查文件：16 个 | 累计已排查：约 116 个 | 剩余约 151 个**
 
 ---
 
-*文档最后更新：第 17 轮排查完成*
+#### 🟠 P1 — `integrations/llm_gateway.py`：`update_route_config` 热更新无锁保护，并发读写竞态
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/integrations/llm_gateway.py` |
+| **根因** | `update_route_config` 直接修改 `self.provider_name`、`self.available`、`self.timeout_ms`、`self.fallback_providers`，而 `generate`、`route_call`、`_provider_available` 同时读取这些字段，没有任何锁保护。在 FastAPI 多线程并发场景下（热更新 API + 正常请求并发），可能读到中间状态（如 `provider_name` 已更新但 `api_key` 还是旧值），导致路由决策错误 |
+| **影响** | LLM 路由热更新期间，并发请求可能使用不一致的配置（新 provider_name + 旧 api_key），导致 API Key 校验失败或路由到错误的模型 |
+| **修复** | 引入 `self._route_lock = threading.Lock()`，在 `_provider_available` 中用锁保护配置字段读取，在 `update_route_config` 中用锁保护 before_state 读取和新配置写入（原子操作） |
+
+---
+
+#### 🟡 P2 — `scheduler/task_registry.py`：`SchedulerTaskRegistry._tasks` 无实例锁保护，并发注册/注销竞态
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/scheduler/task_registry.py` |
+| **根因** | `SchedulerTaskRegistry` 的类级别 `_lock` 仅用于单例创建（双重检查锁），实例方法 `register`、`unregister`、`get`、`all_tasks`、`enabled_tasks`、`count` 直接读写 `self._tasks` dict，没有实例级别的锁保护。在调度器启动时并发注册任务，或运行时动态注销任务时，可能导致 dict 竞态 |
+| **影响** | 并发注册任务时可能绕过 `task_id` 重复检查，导致任务被覆盖；并发读写时可能触发 `RuntimeError: dictionary changed size during iteration` |
+| **修复** | 在 `__init__` 中添加 `self._tasks_lock = threading.Lock()`，所有 `_tasks` 读写操作均通过 `with self._tasks_lock:` 保护 |
+
+---
+
+*文档最后更新：第 18 轮排查完成*
