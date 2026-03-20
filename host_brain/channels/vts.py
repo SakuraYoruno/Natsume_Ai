@@ -19,6 +19,23 @@ from host_brain.core.ids import new_request_id, now_ms
 
 _logger = logging.getLogger("Natsume.vts")
 
+# 模块级主事件循环引用。
+# 在 asyncio.to_thread 的 worker 线程中，get_event_loop() 会抛出 RuntimeError，
+# 必须在主线程启动时通过 register_main_loop() 保存引用。
+_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def register_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Register the main event loop for use in worker threads.
+
+    应在应用启动时（FastAPI lifespan startup）调用，确保
+    asyncio.to_thread 的 worker 线程能通过 run_coroutine_threadsafe
+    将协程提交到主事件循环。
+    """
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
+    _logger.debug("VTS 主事件循环已注册: %s", loop)
+
 
 S_AVATAR_TALK_GATE = "S_AVATAR_TALK_GATE"
 S_AVATAR_EXPRESSION_MAP = "S_AVATAR_EXPRESSION_MAP"
@@ -238,18 +255,16 @@ def resolve_vts_expression(
                     exc, req_id,
                 )
 
+        # 获取主事件循环：
+        # 1. 优先尝试 get_running_loop()（在主线程 async 上下文中直接调用时有效）
+        # 2. fallback 到模块级 _MAIN_LOOP（在 asyncio.to_thread 的 worker 线程中，
+        #    get_event_loop() 会抛出 RuntimeError，必须使用预先保存的主循环引用）
         try:
-            # 使用 run_coroutine_threadsafe 确保在 worker 线程中也能正确提交到主事件循环。
-            # get_running_loop() 在 worker 线程中会抛出 RuntimeError（无运行中的循环），
-            # 此时改用 get_event_loop() 尝试获取主线程循环；若仍无法获取则静默跳过。
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.run_coroutine_threadsafe(_fire_edge_vts(), loop)
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass  # 无事件循环时跳过
+            loop = _MAIN_LOOP
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_fire_edge_vts(), loop)
     except ImportError:
         pass
 

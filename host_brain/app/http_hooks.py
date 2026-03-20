@@ -709,6 +709,15 @@ async def runtime_lifespan(
                 extra={"degraded_modules": degraded_modules},
             )
 
+        # 注册主事件循环到 vts 模块，确保 asyncio.to_thread worker 线程能通过
+        # run_coroutine_threadsafe 正确提交 VTS 驱动协程到主循环。
+        try:
+            from host_brain.channels.vts import register_main_loop as _register_vts_loop  # noqa: PLC0415
+            _register_vts_loop(asyncio.get_running_loop())
+            logger.info("VTS 主事件循环已注册")
+        except Exception as _vts_loop_exc:
+            logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
+
         # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
         try:
             from host_brain.observability.service_health_heartbeat import start_heartbeat
