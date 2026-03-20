@@ -89,7 +89,9 @@ def run_retention_policy(
 ) -> RetentionResult:
     active = policy or RetentionPolicy()
     now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
+    # 使用 ledger._conn 但所有写操作必须通过 _write_lock 保护（见 _delete_older_than）
     conn = ledger._conn
+    write_lock = ledger._write_lock
 
     candidate_counts: dict[str, int] = {}
     deleted_counts: dict[str, int] = {}
@@ -113,7 +115,7 @@ def run_retention_policy(
         if active.dry_run or count <= 0:
             deleted_counts[table] = 0
             continue
-        deleted = _delete_older_than(conn, table=table, cutoff_ts_ms=cutoff)
+        deleted = _delete_older_than(conn, write_lock=write_lock, table=table, cutoff_ts_ms=cutoff)
         deleted_counts[table] = deleted
 
     vault_gc = None
@@ -173,12 +175,14 @@ def _count_older_than(conn: Any, *, table: str, cutoff_ts_ms: int) -> int:
     return int(row["c"])
 
 
-def _delete_older_than(conn: Any, *, table: str, cutoff_ts_ms: int) -> int:
-    with conn:
-        cursor = conn.execute(
-            f"DELETE FROM {table} WHERE ts_ms < ?",
-            (int(cutoff_ts_ms),),
-        )
+def _delete_older_than(conn: Any, *, write_lock: Any, table: str, cutoff_ts_ms: int) -> int:
+    # 通过 _write_lock 保护并发写入安全，与 SQLiteLedger._insert 保持一致
+    with write_lock:
+        with conn:
+            cursor = conn.execute(
+                f"DELETE FROM {table} WHERE ts_ms < ?",
+                (int(cutoff_ts_ms),),
+            )
     return int(cursor.rowcount or 0)
 
 
