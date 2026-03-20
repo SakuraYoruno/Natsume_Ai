@@ -28,6 +28,9 @@ _DEFAULT_DB_PATH = Path("data/evidence/evidence.db")
 _SINGLETON: "EvidencePlane | None" = None
 _SINGLETON_LOCK = threading.Lock()
 
+# 线程本地存储：每个线程缓存一个 SQLite 连接，避免重复创建和文件描述符泄漏
+_thread_local = threading.local()
+
 
 def get_evidence_plane() -> "EvidencePlane":
     """获取 EvidencePlane 单例（懒初始化，线程安全双重检查锁）。"""
@@ -171,13 +174,19 @@ class EvidencePlane:
             self._initialized = False
 
     def _connect(self) -> sqlite3.Connection:
-        """创建 SQLite 连接（check_same_thread=False 支持多线程）。
+        """获取当前线程的 SQLite 连接（线程本地缓存，避免重复创建和文件描述符泄漏）。
 
         :memory: 模式下复用缓存连接，确保所有操作在同一数据库实例上执行。
+        非 :memory: 模式下使用线程本地存储缓存连接，每个线程复用同一连接。
         """
         if self._memory_conn is not None:
             return self._memory_conn
-        return sqlite3.connect(str(self._db_path), check_same_thread=False)
+        # 线程本地缓存：避免每次写入都创建新连接（文件描述符泄漏）
+        conn = getattr(_thread_local, "evidence_conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            _thread_local.evidence_conn = conn
+        return conn
 
     def write_trace(
         self,
