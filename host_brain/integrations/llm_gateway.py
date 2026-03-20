@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from queue import Empty, Queue
-from threading import Thread
+from threading import Lock, Thread
 from time import perf_counter
 import json
 import os
@@ -135,6 +135,8 @@ class LlmGatewayContract:
         self.ingress_quarantine_fn = ingress_quarantine_fn or quarantine_ingress
         # M24-A：备用模型列表（按优先级降级）
         self.fallback_providers: list[dict[str, Any]] = fallback_providers or []
+        # 线程安全锁：保护路由配置字段的并发读写（update_route_config 热更新）
+        self._route_lock: Lock = Lock()
 
     def health_probe(
         self,
@@ -471,17 +473,21 @@ class LlmGatewayContract:
         )
 
     def _provider_available(self) -> tuple[bool, str, str]:
-        if not self.available:
+        with self._route_lock:
+            available = self.available
+            provider_name = self.provider_name
+            api_key = self.api_key
+        if not available:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
-        if self.provider_name == PROVIDER_DISABLED:
+        if provider_name == PROVIDER_DISABLED:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
         provider_to_env_key = {
             PROVIDER_OPENAI: "OPENAI_API_KEY",
             PROVIDER_GEMINI: "GEMINI_API_KEY",
             PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         }
-        if self.provider_name in provider_to_env_key and not self.api_key:
-            missing_key = provider_to_env_key[self.provider_name]
+        if provider_name in provider_to_env_key and not api_key:
+            missing_key = provider_to_env_key[provider_name]
             return False, SERVICE_UNAVAILABLE_COLD_START, f"{missing_key} missing"
         return True, "", ""
 
@@ -594,33 +600,34 @@ class LlmGatewayContract:
             raise ValueError("INVALID_ROUTE_CONFIG: fallback_providers 必须是列表")
 
         # 记录变更前 hash
-        before_state = {
-            "provider_name": self.provider_name,
-            "available": self.available,
-            "timeout_ms": self.timeout_ms,
-            "fallback_providers": self.fallback_providers,
-        }
+        with self._route_lock:
+            before_state = {
+                "provider_name": self.provider_name,
+                "available": self.available,
+                "timeout_ms": self.timeout_ms,
+                "fallback_providers": self.fallback_providers,
+            }
         before_hash = hashlib.sha256(
             json.dumps(before_state, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()[:16]
 
-        # 应用新配置（热更新立即生效）
-        if "provider_name" in new_config:
-            self.provider_name = str(new_config["provider_name"])
-        if "available" in new_config:
-            self.available = bool(new_config["available"])
-        if "timeout_ms" in new_config:
-            self.timeout_ms = int(new_config["timeout_ms"])
-        if "fallback_providers" in new_config:
-            self.fallback_providers = list(new_config["fallback_providers"])
+        # 应用新配置（热更新立即生效，加锁保护）
+        with self._route_lock:
+            if "provider_name" in new_config:
+                self.provider_name = str(new_config["provider_name"])
+            if "available" in new_config:
+                self.available = bool(new_config["available"])
+            if "timeout_ms" in new_config:
+                self.timeout_ms = int(new_config["timeout_ms"])
+            if "fallback_providers" in new_config:
+                self.fallback_providers = list(new_config["fallback_providers"])
 
-        # 记录变更后 hash
-        after_state = {
-            "provider_name": self.provider_name,
-            "available": self.available,
-            "timeout_ms": self.timeout_ms,
-            "fallback_providers": self.fallback_providers,
-        }
+            after_state = {
+                "provider_name": self.provider_name,
+                "available": self.available,
+                "timeout_ms": self.timeout_ms,
+                "fallback_providers": self.fallback_providers,
+            }
         after_hash = hashlib.sha256(
             json.dumps(after_state, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()[:16]

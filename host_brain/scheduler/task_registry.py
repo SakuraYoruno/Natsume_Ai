@@ -95,25 +95,30 @@ class SchedulerTaskRegistry:
 
     def __init__(self) -> None:
         self._tasks: dict[str, SchedulerTaskConfig] = {}
+        # 实例级别锁：保护 _tasks dict 的并发读写（类级别 _lock 仅用于单例创建）
+        self._tasks_lock: threading.Lock = threading.Lock()
 
     def register(self, config: SchedulerTaskConfig) -> None:
         """注册一个调度任务。"""
         config.validate()
-        if config.task_id in self._tasks:
-            raise ValueError(f"scheduler task already registered: {config.task_id}")
-        self._tasks[config.task_id] = config
+        with self._tasks_lock:
+            if config.task_id in self._tasks:
+                raise ValueError(f"scheduler task already registered: {config.task_id}")
+            self._tasks[config.task_id] = config
         logger.info("Scheduler task registered: %s (trigger=%s, priority=%s)",
                      config.task_id, config.trigger_mode.value, config.priority.value)
 
     def unregister(self, task_id: str) -> SchedulerTaskConfig | None:
         """注销一个调度任务，返回被注销的配置。"""
-        removed = self._tasks.pop(task_id, None)
+        with self._tasks_lock:
+            removed = self._tasks.pop(task_id, None)
         if removed:
             logger.info("Scheduler task unregistered: %s", task_id)
         return removed
 
     def get(self, task_id: str) -> SchedulerTaskConfig | None:
-        return self._tasks.get(task_id)
+        with self._tasks_lock:
+            return self._tasks.get(task_id)
 
     def require(self, task_id: str) -> SchedulerTaskConfig:
         config = self.get(task_id)
@@ -122,10 +127,13 @@ class SchedulerTaskRegistry:
         return config
 
     def all_tasks(self) -> list[SchedulerTaskConfig]:
-        return list(self._tasks.values())
+        with self._tasks_lock:
+            return list(self._tasks.values())
 
     def enabled_tasks(self) -> list[SchedulerTaskConfig]:
-        return [t for t in self._tasks.values() if t.enabled]
+        with self._tasks_lock:
+            return [t for t in self._tasks.values() if t.enabled]
 
     def count(self) -> int:
-        return len(self._tasks)
+        with self._tasks_lock:
+            return len(self._tasks)
