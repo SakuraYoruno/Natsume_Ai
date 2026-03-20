@@ -51,6 +51,10 @@ class SchedulerHealthReporter:
             "updated_ts": now_ms(),
         }
 
+    def get_task_state(self, task_id: str) -> dict[str, Any]:
+        """获取单个任务的运行状态（供 list_health 使用）。"""
+        return dict(self._task_states.get(task_id, {}))
+
     def build_health_snapshot(self) -> dict[str, Any]:
         """构建调度器整体健康快照。"""
         tasks_snapshot: list[dict[str, Any]] = []
