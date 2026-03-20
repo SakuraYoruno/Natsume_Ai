@@ -246,11 +246,18 @@ class MemoryGuard:
         content_hash: str,
         occurrence_count: int,
         evidence_level: EvidenceLevel,
+        min_occurrence: int = 3,
     ) -> bool:
         """
         校验内容是否满足从 EpisodicStore 蒸馏为语义记忆的条件。
 
-        条件：出现频次 ≥ 3 OR 被标记为 MILESTONE 级别（需求 3.3）
+        条件：出现频次 ≥ min_occurrence OR 被标记为 MILESTONE 级别（需求 3.3）
+
+        Args:
+            content_hash: 内容哈希（用于日志）
+            occurrence_count: 该内容的历史出现次数
+            evidence_level: 证据可信度等级
+            min_occurrence: 蒸馏最小出现频次（默认 3，与 DistillationEngine 保持一致）
 
         Returns:
             True 表示满足蒸馏条件，False 表示不满足。
@@ -258,16 +265,15 @@ class MemoryGuard:
         if evidence_level == EvidenceLevel.MILESTONE:
             logger.debug("内容 %s 为 MILESTONE 级别，满足蒸馏条件", content_hash)
             return True
-        # 降低阈值：频次 ≥ 1 即可蒸馏（每条对话记忆都有价值）
-        if occurrence_count >= 1:
+        if occurrence_count >= min_occurrence:
             logger.debug(
-                "内容 %s 出现频次 %d ≥ 1，满足蒸馏条件",
-                content_hash, occurrence_count,
+                "内容 %s 出现频次 %d ≥ %d，满足蒸馏条件",
+                content_hash, occurrence_count, min_occurrence,
             )
             return True
         logger.debug(
-            "内容 %s 不满足蒸馏条件（频次=%d, level=%s）",
-            content_hash, occurrence_count, evidence_level,
+            "内容 %s 不满足蒸馏条件（频次=%d < %d, level=%s）",
+            content_hash, occurrence_count, min_occurrence, evidence_level,
         )
         return False
 

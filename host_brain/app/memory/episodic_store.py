@@ -65,6 +65,7 @@ class EpisodicStore:
         ledger: Optional["SQLiteLedger"] = None,
         audit_writer: Optional[Callable] = None,
         max_in_memory: int = 1000,
+        min_occurrence: int = 3,
     ) -> None:
         """
         Args:
@@ -72,11 +73,13 @@ class EpisodicStore:
             ledger: SQLiteLedger 实例（None 时仅内存存储）
             audit_writer: 审计写入回调
             max_in_memory: 内存中最多保留的记录数（LRU 淘汰）
+            min_occurrence: 蒸馏最小出现频次（默认 3，与 DistillationEngine 保持一致）
         """
         self._guard = memory_guard or MemoryGuard(audit_writer=audit_writer)
         self._ledger = ledger
         self._audit_writer = audit_writer
         self._max_in_memory = max_in_memory
+        self._min_occurrence = min_occurrence
 
         # 内存存储：record_id → EpisodicRecord
         self._records: Dict[str, EpisodicRecord] = {}
@@ -156,11 +159,12 @@ class EpisodicStore:
         self._occurrence_counts[content_key] = self._occurrence_counts.get(content_key, 0) + 1
         occurrence_count = self._occurrence_counts[content_key]
 
-        # 判断蒸馏资格
+        # 判断蒸馏资格（与 DistillationEngine.min_occurrence 保持一致）
         distill_eligible = self._guard.check_distillation_eligibility(
             content_hash=content_key,
             occurrence_count=occurrence_count,
             evidence_level=record.evidence_level,
+            min_occurrence=self._min_occurrence,
         )
 
         # 可选：写入 SQLiteLedger
