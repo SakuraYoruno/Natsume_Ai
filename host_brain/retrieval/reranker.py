@@ -1091,7 +1091,7 @@ def _apply_emotion_boost(
             break
         candidate_emotion = str(
             candidate.get("emotion_tag") or
-            candidate.get("meta", {}).get("emotion_tag") or ""
+            candidate.get("metadata", {}).get("emotion_tag") or ""
         ).strip().upper()
         if candidate_emotion == normalized_emotion:
             boosted[i] = min(1.0, boosted[i] * boost_factor)

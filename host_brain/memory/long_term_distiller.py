@@ -272,16 +272,20 @@ class LongTermMemoryDistiller:
         """获取所有 pending 状态的 Canon 提案（蒸馏生成）。"""
         if self._ledger is None:
             return []
-        if not hasattr(self._ledger, "list_canon_proposals"):
+        # 修复：使用正确的方法名 list_proposals（list_canon_proposals 不存在）
+        if not hasattr(self._ledger, "list_proposals"):
             return []
         try:
-            proposals, _ = self._ledger.list_canon_proposals(
+            proposals, _ = self._ledger.list_proposals(
                 status="pending",
-                proposer_node_id="long_term_distiller",
                 limit=50,
                 offset=0,
             )
-            return proposals
+            # 过滤出由 long_term_distiller 提交的提案
+            return [
+                p for p in proposals
+                if str(p.get("proposer_node_id", "")) == "long_term_distiller"
+            ]
         except Exception as exc:
             _logger.warning("get_pending_proposals failed: %s", exc)
             return []

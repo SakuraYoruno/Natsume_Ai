@@ -307,8 +307,20 @@ class NatsumeScheduler:
         )
 
         # 分发执行
+        # 修复：agent_health_check 任务直接调用内部 _run_agent_health_check 方法，
+        # 而非通过 dispatcher 分发（dispatcher 不知道如何路由到内部心跳检测逻辑）。
         result: dict[str, Any]
-        if self._dispatcher:
+        if task_id == "agent_health_check" and hasattr(self, "_heartbeat_llm_caller"):
+            try:
+                result = self._run_agent_health_check()
+                exec_status = result.get("status", "OK")
+                exec_reason = result.get("reason_code")
+            except Exception as exc:
+                logger.error("AgentHealthCheck execution failed: %s", exc, exc_info=True)
+                exec_status = "ERROR"
+                exec_reason = str(exc)
+                result = {"status": "ERROR", "reason_code": str(exc)}
+        elif self._dispatcher:
             try:
                 result = self._dispatcher(system_intent)
                 exec_status = result.get("status", "OK")
