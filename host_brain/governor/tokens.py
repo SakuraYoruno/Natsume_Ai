@@ -180,6 +180,8 @@ class TokenService:
         require_confirm: bool,
         now_ts_ms: int | None = None,
     ) -> TokenValidationResult:
+        # 修复（M28-L）：先验证 approval_token（不消费），再验证 confirm_token（不消费），
+        # 两者均通过后才依次消费，防止 approval_token 被消费后 confirm 验证失败导致 intent 无法重试。
         approval_result = self.validate_bound_token(
             approval_token_ref,
             expected_type=TOKEN_TYPE_APPROVAL,
@@ -188,7 +190,7 @@ class TokenService:
             session_id=session_id,
             seq=seq,
             now_ts_ms=now_ts_ms,
-            consume=True,
+            consume=False,  # 先不消费，等 confirm 验证通过后再消费
         )
         if not approval_result.valid:
             return approval_result
@@ -200,7 +202,31 @@ class TokenService:
                     reason_code=CONFIRM_REQUIRED,
                     detail="confirm token required",
                 )
+            # 先验证 confirm_token（不消费），通过后再统一消费两个 token
             confirm_result = self.validate_bound_token(
+                confirm_token_ref,
+                expected_type=TOKEN_TYPE_CONFIRM,
+                intent_id=intent_id,
+                skill_name=skill_name,
+                session_id=session_id,
+                seq=seq,
+                now_ts_ms=now_ts_ms,
+                consume=False,
+            )
+            if not confirm_result.valid:
+                return confirm_result
+            # 两者均通过，依次消费
+            self.validate_bound_token(
+                approval_token_ref,
+                expected_type=TOKEN_TYPE_APPROVAL,
+                intent_id=intent_id,
+                skill_name=skill_name,
+                session_id=session_id,
+                seq=seq,
+                now_ts_ms=now_ts_ms,
+                consume=True,
+            )
+            self.validate_bound_token(
                 confirm_token_ref,
                 expected_type=TOKEN_TYPE_CONFIRM,
                 intent_id=intent_id,
@@ -210,8 +236,18 @@ class TokenService:
                 now_ts_ms=now_ts_ms,
                 consume=True,
             )
-            if not confirm_result.valid:
-                return confirm_result
+        else:
+            # 不需要 confirm，直接消费 approval_token
+            self.validate_bound_token(
+                approval_token_ref,
+                expected_type=TOKEN_TYPE_APPROVAL,
+                intent_id=intent_id,
+                skill_name=skill_name,
+                session_id=session_id,
+                seq=seq,
+                now_ts_ms=now_ts_ms,
+                consume=True,
+            )
 
         return TokenValidationResult(valid=True, token=approval_result.token)
 
