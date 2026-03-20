@@ -579,3 +579,31 @@
 **第24轮排查文件：8 个 | 累计已排查：约 180 个 | 剩余约 87 个**
 
 *文档最后更新：第 24 轮排查完成*
+
+---
+
+#### 🔴 P1 — `app/vision/edge_rpc_client.py`：`_convert_plan_to_desktop_actions` 读取 `action.x2/action.y2`，但 `Action` 模型字段名为 `to_x/to_y`（上轮遗留技术债，本轮修复）
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/vision/edge_rpc_client.py` `_convert_plan_to_desktop_actions()` |
+| **根因** | `Action` 是 Pydantic `BaseModel`，拖拽终点字段名为 `to_x/to_y`，但 `_convert_plan_to_desktop_actions` 中读取 `action.x2/action.y2`，访问不存在的字段会抛 `AttributeError`，被外层 `try/except` 吞掉，返回 `FAILED` |
+| **影响** | 所有包含 `DRAG` 操作的 `ActionPlan` 执行时，拖拽终点坐标丢失，Edge 端收到的 `x2/y2` 为空，拖拽操作全部失败 |
+| **修复** | 将 `action.x2/action.y2` 改为 `action.to_x/action.to_y`，并添加注释说明字段名映射关系 |
+
+---
+
+#### 🔴 P1 — `bond/bond_stage_engine.py`：`_restore_state_from_log` 只查 `bond_update_log`，漏查 `bond_stage_transition_log`，导致进程重启后 Bond 积分恢复偏差
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/bond/bond_stage_engine.py` `BondStageEngine._restore_state_from_log()` |
+| **根因** | `_log_transition` 中优先调用 `ledger.log_bond_stage_transition()`，将 `STAGE_TRANSITION` 记录写入 `bond_stage_transition_log` 表；但 `_restore_state_from_log` 只查 `bond_update_log` 表，导致找不到 `STAGE_TRANSITION` 记录，降级为累加模式 |
+| **影响** | 进程重启后，Bond 积分恢复时无法找到最近的 `STAGE_TRANSITION` 快照，只能从头累加历史事件积分，可能因历史负分事件（`IDLE_DECAY`）导致积分偏低，关系阶段计算错误 |
+| **修复** | 在 `_restore_state_from_log` 中先查 `bond_stage_transition_log`，再查 `bond_update_log`，取最新的一条 `STAGE_TRANSITION` 记录作为恢复基准 |
+
+---
+
+**第25轮排查文件：12 个 | 累计已排查：约 192 个 | 剩余约 75 个**
+
+*文档最后更新：第 25 轮排查完成*
