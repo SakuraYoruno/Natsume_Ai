@@ -833,14 +833,14 @@ class RecallFusionNode(ChainNode):
 
         except Exception as exc:
             # 召回失败：通知熔断器记录失败
+            # 注意：EvidenceCircuitBreaker.call 是同步方法，不能 await；
+            # 传入一个会抛出异常的同步函数，让熔断器感知失败并累计计数。
             if _circuit_breaker is not None:
                 try:
-                    async def _noop():
-                        raise exc  # type: ignore[misc]
-                    try:
-                        await _circuit_breaker.call(_noop)
-                    except Exception:
-                        pass
+                    _exc_to_raise = exc
+                    def _fail_fn() -> None:
+                        raise _exc_to_raise  # noqa: B023
+                    _circuit_breaker.call(_fail_fn)
                 except Exception:
                     pass
             # 降级：RetrievalOrchestrator 不可用时退回最小状态语义
