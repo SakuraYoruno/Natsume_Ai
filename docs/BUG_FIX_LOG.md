@@ -607,3 +607,20 @@
 **第25轮排查文件：12 个 | 累计已排查：约 192 个 | 剩余约 75 个**
 
 *文档最后更新：第 25 轮排查完成*
+
+---
+
+#### 🔴 P1 — `core/qa.py`：`VALID_EMOTION_TAGS` 缺少 M28-L 新增的 8 种情感标签，合法 emotion_tag 被错误降级为 NEUTRAL
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/core/qa.py` `VALID_EMOTION_TAGS` |
+| **根因** | `VALID_EMOTION_TAGS` 只包含 8 种情感（原有 6 种 + M26-E 补充 2 种），但 M28-L（OPT-34）在 `channels/vts.py` 和 `vts_mapping_store.py` 中新增了 8 种情感（`FRUSTRATED/ANXIOUS/LOVING/EMBARRASSED/CONFUSED/BORED/PROUD/GRATEFUL`）。`_validate_emotion_tag` 遇到这 8 种合法情感时，因不在 `VALID_EMOTION_TAGS` 中而将其降级为 `NEUTRAL` 并写 QA 警告日志 |
+| **影响** | LLM 输出 M28-L 新增的 8 种情感时，表情驱动全部失效（降级为 NEUTRAL 表情），情感表达能力退化为 8 种，与 VTS 映射表不一致 |
+| **修复** | 将 M28-L 新增的 8 种情感标签补充到 `VALID_EMOTION_TAGS` 中，与 `channels/vts.py EMOTION_TO_EXPRESSION_ID` 保持一致 |
+
+---
+
+**第26轮排查文件：16 个 | 累计已排查：约 208 个 | 剩余约 59 个**
+
+*文档最后更新：第 26 轮排查完成*
