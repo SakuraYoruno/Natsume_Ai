@@ -114,17 +114,23 @@ class CompiledSubgraph:
         )
         payload["subgraph_commit_summary"] = summary
 
-        # 子图状态降级时，主图状态同步降级（但不 FAILED）
-        final_status = current_status
-        if str(state.get("status") or STATUS_OK) == STATUS_FAILED:
-            final_status = STATUS_FAILED
+        # 子图状态降级时，主图状态同步降级（但不覆盖 FAILED）
+        # 优先级：FAILED > DEGRADED > OK
+        # 修复：取 current_status 和 state["status"] 中"更严重"的那个，
+        # 避免子图 DEGRADED 覆盖主图已有的 FAILED 状态
+        _STATUS_SEVERITY = {STATUS_FAILED: 2, STATUS_DEGRADED: 1, STATUS_OK: 0}
+        original_status = str(state.get("status") or STATUS_OK)
+        final_status = (
+            original_status
+            if _STATUS_SEVERITY.get(original_status, 0) >= _STATUS_SEVERITY.get(current_status, 0)
+            else current_status
+        )
 
         return {
             **state,
             "payload": payload,
             "subgraph_trace": subgraph_trace,
-            # 子图状态降级时，主图状态同步（但不覆盖 FAILED）
-            "status": final_status if final_status != STATUS_OK else str(state.get("status") or STATUS_OK),
+            "status": final_status,
         }
 
     def _write_node_trace(self, *, request_id: str, graph_id: str, entry: dict[str, Any]) -> None:
