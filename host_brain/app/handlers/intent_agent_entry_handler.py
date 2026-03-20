@@ -98,7 +98,6 @@ def intent_agent_entry_handler(
             )
 
         node_id = SUBGRAPH_NODE_IDS[step_index]
-        last_exc: Exception | None = None
         for attempt in range(max_retry_count + 1):
             try:
                 node_out = invoke(node_id, out)
@@ -109,7 +108,6 @@ def intent_agent_entry_handler(
                 _append_step(subgraph_trace, step_index, node_id, STATUS_OK, None, "subgraph node executed")
                 break
             except Exception as exc:
-                last_exc = exc
                 _append_step(subgraph_trace, step_index, node_id, STATUS_FAILED, "SUBGRAPH_NODE_ERROR", str(exc))
                 if attempt >= max_retry_count:
                     return _emit_local_loop_failure(
@@ -117,13 +115,6 @@ def intent_agent_entry_handler(
                         failed_node=node_id,
                         safe_fallback_reason=f"子图节点 {node_id} 执行异常（重试{max_retry_count}次后）: {exc!s}",
                     )
-        else:
-            if last_exc is not None:
-                return _emit_local_loop_failure(
-                    out, request_id, LOCAL_LOOP_FAILURE_INTERNAL_ERROR, subgraph_trace,
-                    failed_node=node_id,
-                    safe_fallback_reason=f"子图节点 {node_id} 执行异常: {last_exc!s}",
-                )
 
     # 未在 max_local_steps 内跑完所有节点
     if step_index + 1 < len(SUBGRAPH_NODE_IDS):
