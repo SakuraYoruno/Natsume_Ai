@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import threading
 import uuid
 
 from host_brain.core.errors import CONFIRM_REQUIRED, TOKEN_INVALID
@@ -55,6 +56,7 @@ class TokenService:
         self.undo_ttl_ms = undo_ttl_ms
         self._tokens: dict[str, TokenRecord] = {}
         self._issue_count: int = 0
+        self._lock = threading.Lock()
 
     def issue_approval_token(
         self,
@@ -237,15 +239,21 @@ class TokenService:
             expiry_ts_ms=issued + ttl_ms,
             nonce=f"nonce::{uuid.uuid4().hex}",
         )
-        self._tokens[token_ref] = token
-        # 定期清理过期/已使用的 token，防止内存无限增长
-        self._issue_count += 1
-        if self._issue_count % self._CLEANUP_INTERVAL == 0:
-            self._purge_expired_tokens()
+        with self._lock:
+            self._tokens[token_ref] = token
+            # 定期清理过期/已使用的 token，防止内存无限增长
+            self._issue_count += 1
+            if self._issue_count % self._CLEANUP_INTERVAL == 0:
+                self._purge_expired_tokens_locked(issued)
         return token_ref
 
     def _purge_expired_tokens(self, now_ts_ms: int | None = None) -> int:
         """清理所有已过期或已使用的 token，返回清理数量。"""
+        with self._lock:
+            return self._purge_expired_tokens_locked(now_ts_ms)
+
+    def _purge_expired_tokens_locked(self, now_ts_ms: int | None = None) -> int:
+        """清理所有已过期或已使用的 token（调用方必须持有 self._lock）。"""
         now_value = now_ts_ms if now_ts_ms is not None else now_ms()
         expired_refs = [
             ref for ref, t in self._tokens.items()
