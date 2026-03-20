@@ -534,3 +534,20 @@
 ---
 
 *文档最后更新：第 22 轮排查完成*
+
+---
+
+#### 🔴 P1 — `app/memory/memory_guard.py`：`check_distillation_eligibility` 阈值硬编码为 1，与需求 3.3 不符
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/memory/memory_guard.py` `MemoryGuard.check_distillation_eligibility()` |
+| **根因** | 方法内注释写 `# 降低阈值：频次 ≥ 1 即可蒸馏`，阈值硬编码为 `>= 1`，但需求 3.3 明确要求 `频次 ≥ 3 OR MILESTONE`，且 `DistillationEngine` 的 `min_occurrence` 默认值也是 3。导致 `EpisodicStore.write()` 中每条写入的记录都被标记为 `distill_eligible=True`，`EpisodicWriteResult.distill_eligible` 字段语义失真 |
+| **影响** | 调用方若依赖 `distill_eligible=True` 决定是否立即触发单条蒸馏（`distill_single()`），会对所有写入记录都触发蒸馏，绕过频次门槛，导致低质量记忆被过早蒸馏为 Canon 提案 |
+| **修复** | 为 `check_distillation_eligibility()` 添加 `min_occurrence: int = 3` 参数，恢复正确阈值；同步为 `EpisodicStore.__init__()` 添加 `min_occurrence: int = 3` 参数，并在 `write()` 中传入 `self._min_occurrence`，确保两者保持一致 |
+
+---
+
+**第23轮排查文件：8 个 | 累计已排查：约 172 个 | 剩余约 95 个**
+
+*文档最后更新：第 23 轮排查完成*
