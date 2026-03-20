@@ -432,10 +432,36 @@
 | **第17轮** | 🟡 P2 | `skills/registry.py` | `PermissionGuard` 调度器计数器无锁保护，多线程并发竞态 |
 | **第18轮** | 🟠 P1 | `integrations/llm_gateway.py` | `update_route_config` 热更新无锁保护，并发读写竞态 |
 | **第18轮** | 🟡 P2 | `scheduler/task_registry.py` | `SchedulerTaskRegistry._tasks` 无实例锁保护，并发注册/注销竞态 |
+| **第19轮** | 🟠 P1 | `app/agents/tool_registry.py` | `_run_async` 在事件循环线程中调用 `run_coroutine_threadsafe().result()` 导致死锁 |
+| **第19轮** | 🟠 P1 | `app/system_handler.py` | VTS 驱动使用 `get_event_loop()` 已废弃，Python 3.12+ 抛出 `RuntimeError` |
 
-**第18轮排查文件：16 个 | 累计已排查：约 116 个 | 剩余约 151 个**
+**第19轮排查文件：16 个 | 累计已排查：约 132 个 | 剩余约 135 个**
 
 ---
+
+#### 🟠 P1 — `app/agents/tool_registry.py`：`_run_async` 在事件循环线程中死锁
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/agents/tool_registry.py` |
+| **根因** | `_run_async` 检测到已有运行中的事件循环时，使用 `asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=5.0)`。`result()` 是阻塞调用，会阻塞当前线程。若当前线程**就是**事件循环线程（FastAPI async 上下文中同步调用工具），则 `result()` 永久阻塞（死锁），因为事件循环被阻塞无法执行提交的协程 |
+| **影响** | 在 FastAPI async 上下文中调用任何使用 `_run_async` 的工具（`search_knowledge`、`search_by_keyword`、`search_by_vector`）时，请求永久挂起，直到 5s 超时后抛出 `concurrent.futures.TimeoutError` |
+| **修复** | 改为在独立线程中执行阻塞等待：创建 `threading.Thread`，在线程中调用 `run_coroutine_threadsafe().result()`，主线程通过 `t.join(timeout=6.0)` 等待结果，避免阻塞事件循环线程 |
+
+---
+
+#### 🟠 P1 — `app/system_handler.py`：VTS 驱动使用 `get_event_loop()` 已废弃
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/app/system_handler.py` `receive_edge_events_response` |
+| **根因** | `loop = _asyncio.get_event_loop()` 在 Python 3.10+ 的非 async 上下文中已废弃，Python 3.12+ 会直接抛出 `DeprecationWarning` 并最终升级为 `RuntimeError`。`receive_edge_events_response` 是同步函数，在 FastAPI 的同步路由中调用，属于非 async 上下文 |
+| **影响** | Python 3.12+ 环境下，Edge 事件上报中包含情感事件时，VTS 驱动代码抛出 `RuntimeError`，导致整个情感事件后处理块失败（Bond 更新和 VTS 驱动均跳过） |
+| **修复** | 将 `_asyncio.get_event_loop()` 改为 `_asyncio.get_running_loop()`，在非 async 上下文中 `get_running_loop()` 会抛出 `RuntimeError`，被已有的 `except RuntimeError: pass` 捕获，正确跳过 VTS 驱动 |
+
+---
+
+*文档最后更新：第 19 轮排查完成*
 
 #### 🟠 P1 — `integrations/llm_gateway.py`：`update_route_config` 热更新无锁保护，并发读写竞态
 
