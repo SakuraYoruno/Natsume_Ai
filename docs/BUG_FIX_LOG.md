@@ -624,3 +624,20 @@
 **第26轮排查文件：16 个 | 累计已排查：约 208 个 | 剩余约 59 个**
 
 *文档最后更新：第 26 轮排查完成*
+
+---
+
+#### 🔴 P1 — `governor/tokens.py`：`validate_execution_tokens` 中 approval_token 在 confirm 验证失败时已被消费无法回滚
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/governor/tokens.py` `TokenService.validate_execution_tokens` |
+| **根因** | 原实现先以 `consume=True` 消费 `approval_token`，再验证 `confirm_token`。若 `confirm_token` 验证失败，`approval_token` 已被标记为 `used=True` 无法回滚，导致该 intent 无法重试（approval token 已失效，下次调用会返回 `TOKEN_INVALID: token already used`） |
+| **影响** | 需要二次确认（`require_confirm=True`）的高风险 Skill（risk_level=4/5）在 confirm 验证失败后，用户无法重试，必须重新发起完整的 intent 流程 |
+| **修复** | 修改为"先验证（不消费）再统一消费"策略：先以 `consume=False` 验证 approval_token，再以 `consume=False` 验证 confirm_token，两者均通过后才依次以 `consume=True` 消费两个 token |
+
+---
+
+**第27轮排查文件：16 个 | 累计已排查：约 224 个 | 剩余约 43 个**
+
+*文档最后更新：第 27 轮排查完成*
