@@ -778,9 +778,13 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _ev_lines.append(f"- {_truncate_for_prompt(_ev_item, limit=200)}")
             elif isinstance(_ev_item, dict):
                 _ev_text = _truncate_for_prompt(_ev_item.get("text") or _ev_item.get("content") or "", limit=200)
-                _ev_score = _ev_item.get("score") or _ev_item.get("similarity")
+                _ev_score_raw = _ev_item.get("score") or _ev_item.get("similarity")
+                try:
+                    _ev_score = float(_ev_score_raw) if _ev_score_raw is not None else None
+                except (TypeError, ValueError):
+                    _ev_score = None
                 if _ev_text:
-                    _ev_lines.append(f"- [{_ev_score:.2f}] {_ev_text}" if _ev_score else f"- {_ev_text}")
+                    _ev_lines.append(f"- [{_ev_score:.2f}] {_ev_text}" if _ev_score is not None else f"- {_ev_text}")
         _episodic_vector_text = "\n".join(_ev_lines)
 
     episodic_vector_block = ""
