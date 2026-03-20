@@ -641,3 +641,42 @@
 **第27轮排查文件：16 个 | 累计已排查：约 224 个 | 剩余约 43 个**
 
 *文档最后更新：第 27 轮排查完成*
+
+---
+
+#### 🔴 P1 — `retrieval/reranker_providers.py`：`_build_qwen3_reranker_provider` 中 `from_pretrained` 参数名 `dtype` 应为 `torch_dtype`
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/retrieval/reranker_providers.py` `_build_qwen3_reranker_provider._get_model_and_tokenizer` |
+| **根因** | `AutoModelForCausalLM.from_pretrained` 不接受 `dtype` 参数（会被静默忽略），正确参数名为 `torch_dtype`。`reranker.py` 中同一函数使用了正确的 `torch_dtype`，但 `reranker_providers.py` 拆分时引入了错误 |
+| **影响** | CUDA 环境下 Qwen3-Reranker 模型始终以 `float32` 加载，显存占用翻倍（约 1.2GB → 2.4GB），可能导致 OOM；CPU 环境下无影响 |
+| **修复** | 将 `dtype=` 改为 `torch_dtype=` |
+
+---
+
+#### 🟡 P2 — `retrieval/reranker_providers.py`：`_apply_emotion_boost` 中读取 `metadata` 字段使用了错误的 `meta`
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/retrieval/reranker_providers.py` `_apply_emotion_boost` |
+| **根因** | `_normalize_candidates` 将候选项的 metadata 规范化为 `metadata` 字段，但 `reranker_providers.py` 中的 `_apply_emotion_boost` 读取的是 `meta` 字段（不存在），导致情感感知重排序功能在此版本中永远无法命中 metadata 中的 `emotion_tag` |
+| **影响** | 情感感知重排序（M28-O OPT-40）功能在 `reranker_providers.py` 版本中静默失效，情感匹配的候选项不会获得 1.3x 加权 |
+| **修复** | 将 `candidate.get("meta", {})` 改为 `candidate.get("metadata", {})` |
+
+---
+
+#### 🔴 P1 — `scheduler/health.py`：`SchedulerHealthReporter` 缺少 `get_task_state` 方法
+
+| 字段 | 内容 |
+|------|------|
+| **文件** | `host_brain/scheduler/health.py` `SchedulerHealthReporter` |
+| **根因** | `scheduler.py` 的 `list_health` 方法调用 `self._health.get_task_state(task.task_id)`，但 `SchedulerHealthReporter` 只有 `update_task_state` 和 `build_health_snapshot`，没有 `get_task_state`。代码用 `hasattr` 做了防御，导致 `state` 永远是 `{}`，所有任务状态都返回 `STATUS_OK` |
+| **影响** | `list_health()` API 返回的任务状态永远是 `STATUS_OK`，无法反映真实的错误/暂停状态，运维监控失效 |
+| **修复** | 在 `SchedulerHealthReporter` 中添加 `get_task_state(task_id)` 方法，返回 `_task_states` 中对应任务的状态字典 |
+
+---
+
+**第28轮排查文件：16 个 | 累计已排查：约 240 个 | 剩余约 27 个**
+
+*文档最后更新：第 28 轮排查完成*
