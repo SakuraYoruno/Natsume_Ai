@@ -154,7 +154,8 @@ function Invoke-SchtasksBreakaway {
   param(
     [string]$TaskName,
     [string]$TaskCommand,
-    [string]$FailureContext = "breakaway launch"
+    [string]$FailureContext = "breakaway launch",
+    [bool]$InteractiveTask = $false
   )
   $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
   if ($null -eq $schtasksCmd) {
@@ -173,8 +174,14 @@ function Invoke-SchtasksBreakaway {
   foreach ($taskDate in $taskDateCandidates) {
     $createOutput = @()
     $createExitCode = 1
+    $createArgs = @(
+      "/Create", "/TN", $TaskName, "/SC", "ONCE", "/SD", $taskDate, "/ST", $taskTime, "/TR", $TaskCommand, "/F"
+    )
+    if ($InteractiveTask) {
+      $createArgs += "/IT"
+    }
     try {
-      $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /SD $taskDate /ST $taskTime /TR $TaskCommand /F 2>&1
+      $createOutput = & $schtasksCmd.Source @createArgs 2>&1
       $createExitCode = [int]$LASTEXITCODE
     } catch {
       if ($LASTEXITCODE -ne 0) {
@@ -195,8 +202,14 @@ function Invoke-SchtasksBreakaway {
   if (-not $created) {
     $createOutput = @()
     $createExitCode = 1
+    $createArgs = @(
+      "/Create", "/TN", $TaskName, "/SC", "ONCE", "/ST", $taskTime, "/TR", $TaskCommand, "/F"
+    )
+    if ($InteractiveTask) {
+      $createArgs += "/IT"
+    }
     try {
-      $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /ST $taskTime /TR $TaskCommand /F 2>&1
+      $createOutput = & $schtasksCmd.Source @createArgs 2>&1
       $createExitCode = [int]$LASTEXITCODE
     } catch {
       if ($LASTEXITCODE -ne 0) {
@@ -317,7 +330,8 @@ function Invoke-BreakawayCommand {
     [string]$LauncherScriptPath,
     [string]$CommandLine,
     [hashtable]$EnvVars = @{},
-    [string]$TaskPrefix = "NatsumeLaunch"
+    [string]$TaskPrefix = "NatsumeLaunch",
+    [bool]$InteractiveTask = $false
   )
   if (-not $LauncherScriptPath) {
     throw "launcher script path is required for breakaway launch"
@@ -346,7 +360,7 @@ function Invoke-BreakawayCommand {
   }
   $taskName = "{0}_{1}" -f $prefix, ([Guid]::NewGuid().ToString('N').Substring(0, 10))
   $taskCommand = "`"$LauncherScriptPath`""
-  Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext $prefix
+  Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext $prefix -InteractiveTask $InteractiveTask
 }
 
 function Find-ProcessIdByCommandLine {
@@ -443,7 +457,8 @@ function Start-WeChatBridgeProcess {
       -LauncherScriptPath $LauncherScriptPath `
       -CommandLine $commandLine `
       -EnvVars $EnvVars `
-      -TaskPrefix "NatsumeWechatBridge"
+      -TaskPrefix "NatsumeWechatBridge" `
+      -InteractiveTask $true
     return [pscustomobject]@{ Id = 0 }
   }
 
