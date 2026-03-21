@@ -1521,6 +1521,11 @@ if ($wechatBridgeEnabled) {
       $edgeUrl = "http://127.0.0.1:$port"
       if (Test-Path -Path $bridgeScript) {
         try {
+          # Truncate bridge logs on every launch to avoid stale diagnostics.
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText($wechatBridgeLog, "", $utf8NoBom)
+          [System.IO.File]::WriteAllText($wechatBridgeErrLog, "", $utf8NoBom)
+
           $bridgeProc = Start-WeChatBridgeProcess `
             -PythonPath $pythonCmd.Source `
             -BridgeScriptPath $bridgeScript `
