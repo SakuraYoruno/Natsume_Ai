@@ -309,6 +309,43 @@ function Find-ProcessIdByCommandLine {
   return $null
 }
 
+function Get-ProcessIdsByCommandLine {
+  param(
+    [string]$ImageName,
+    [string]$ContainsText
+  )
+  $ids = New-Object System.Collections.Generic.List[int]
+  if ([string]::IsNullOrWhiteSpace($ImageName) -or [string]::IsNullOrWhiteSpace($ContainsText)) {
+    return @()
+  }
+  $needle = $ContainsText.ToLowerInvariant()
+  $rows = Get-CimInstance -ClassName Win32_Process -Filter ("Name = '{0}'" -f $ImageName) -ErrorAction SilentlyContinue
+  foreach ($row in $rows) {
+    $cmd = [string]$row.CommandLine
+    if (-not $cmd) {
+      continue
+    }
+    if ($cmd.ToLowerInvariant().Contains($needle)) {
+      $ids.Add([int]$row.ProcessId) | Out-Null
+    }
+  }
+  return @($ids | Select-Object -Unique)
+}
+
+function Stop-ProcessesByIdList {
+  param([int[]]$Ids)
+  $stopped = New-Object System.Collections.Generic.List[int]
+  foreach ($pid in ($Ids | Where-Object { $_ -gt 0 } | Select-Object -Unique)) {
+    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    if ($null -eq $proc) {
+      continue
+    }
+    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    $stopped.Add([int]$pid) | Out-Null
+  }
+  return @($stopped)
+}
+
 function Start-WeChatBridgeProcess {
   param(
     [string]$PythonPath,
@@ -1177,6 +1214,15 @@ if ($wechatBridgeEnabled) {
       }
     }
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+  }
+
+  $bridgeScriptNeedle = "wechat_wcferry_bridge.py"
+  $existingBridgePids = Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
+  if ($existingBridgePids.Count -gt 0) {
+    $stoppedBridgePids = Stop-ProcessesByIdList -Ids $existingBridgePids
+    if ($stoppedBridgePids.Count -gt 0) {
+      Start-Sleep -Milliseconds 300
+    }
   }
 
   $wechatProc = Get-RunningProcessByName -Names $wechatClientNames
