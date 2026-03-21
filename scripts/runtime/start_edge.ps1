@@ -1022,8 +1022,15 @@ if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("wcferry", "pywechat", "external")) {
-    $wechatBridgeBackend = $candidateBackend
+  if ($candidateBackend -in @("wcferry", "uia", "pywechat", "external")) {
+    if ($candidateBackend -eq "pywechat") {
+      $wechatBridgeBackend = "uia"
+      if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_BACKEND_PYWECHAT_REMOVED")) {
+        $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_PYWECHAT_REMOVED"
+      }
+    } else {
+      $wechatBridgeBackend = $candidateBackend
+    }
   } else {
     $wechatBridgeBackend = "wcferry"
     $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
@@ -1068,7 +1075,7 @@ $wechatBridgeErrLog = Join-Path $LogDir "wechat_bridge.stderr.log"
 $wechatCommandQueueFile = Join-Path $runtimeRoot "wechat_command_queue.jsonl"
 $wechatCommandResultFile = Join-Path $runtimeRoot "wechat_command_result.jsonl"
 
-if ($wechatBridgeBackend -eq "pywechat") {
+if ($wechatBridgeBackend -eq "uia") {
   $queuePathRaw = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_COMMAND_QUEUE_FILE")
   if (-not [string]::IsNullOrWhiteSpace($queuePathRaw)) {
     if ([System.IO.Path]::IsPathRooted($queuePathRaw)) {
@@ -1119,8 +1126,8 @@ if (Test-Path -Path $pidFile) {
         wechat_bridge_enabled = $wechatBridgeEnabled
         wechat_bridge_backend = $wechatBridgeBackend
         wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-        wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
-        wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
+        wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
+        wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
       }
       $result | ConvertTo-Json -Depth 4
       exit 0
@@ -1150,8 +1157,8 @@ if ($null -ne $listeningPid) {
       wechat_bridge_enabled = $wechatBridgeEnabled
       wechat_bridge_backend = $wechatBridgeBackend
       wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-      wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
-      wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
+      wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
+      wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
     }
     $result | ConvertTo-Json -Depth 4
     exit 0
@@ -1361,7 +1368,7 @@ if ($null -eq $vtsConn) {
 # ────────────────────────────────────────────────────────────────────────────
 
 # 微信桥接（可选）：
-#   EDGE_WECHAT_BRIDGE_BACKEND=wcferry|pywechat|external
+#   EDGE_WECHAT_BRIDGE_BACKEND=wcferry|uia|external
 #   external: 不拉起本地注入桥接，仅保留 /v1/edge/wechat/callback 供外部插件直推
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
@@ -1382,7 +1389,7 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_pywechat_bridge.py")
+  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_uia_bridge.py", "wechat_pywechat_bridge.py")
   $existingBridgePids = @()
   foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
     $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1487,10 +1494,10 @@ if ($wechatBridgeEnabled) {
     $bridgeDependencyModule = "wcferry"
     $bridgeDependencyHint = "pip install wcferry"
     $bridgeExtraArgs = @()
-    if ($wechatBridgeBackend -eq "pywechat") {
-      $bridgeScript = Join-Path $repoRoot "tools\wechat_pywechat_bridge.py"
-      $bridgeDependencyModule = "pywechat"
-      $bridgeDependencyHint = "pip install pywechat127"
+    if ($wechatBridgeBackend -eq "uia") {
+      $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
+      $bridgeDependencyModule = "pyautogui"
+      $bridgeDependencyHint = "pip install pyautogui pywinauto"
       $utf8NoBom = New-Object System.Text.UTF8Encoding $false
       [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
       [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)
@@ -1642,8 +1649,8 @@ $result = [ordered]@{
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
   wechat_bridge_backend = $wechatBridgeBackend
   wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-  wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
-  wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
+  wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
+  wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
   wechat_bridge_callback_url_local = "http://127.0.0.1:$port/v1/edge/wechat/callback"
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
