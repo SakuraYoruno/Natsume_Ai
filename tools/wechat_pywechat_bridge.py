@@ -27,6 +27,7 @@ from typing import Any
 DEFAULT_EDGE_URL = "http://127.0.0.1:17800"
 CALLBACK_PATH = "/v1/edge/wechat/callback"
 TIMEOUT_S = 10
+DEFAULT_COMMAND_POLL_INTERVAL_S = 0.5
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS = "WeChatMainWndForPC"
 
@@ -295,6 +296,205 @@ def _ensure_main_window_visible(wechat_path: str, timeout_s: float = 8.0) -> boo
     return False
 
 
+def _normalize_optional_path(path_value: str) -> str:
+    text = str(path_value or "").strip()
+    if not text:
+        return ""
+    return os.path.abspath(text)
+
+
+def _ensure_parent_dir(path_value: str) -> None:
+    parent = os.path.dirname(path_value)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+def _read_jsonl_rows_from_offset(path_value: str, offset: int) -> tuple[list[dict[str, Any]], int]:
+    if not path_value:
+        return [], max(0, int(offset))
+
+    _ensure_parent_dir(path_value)
+    if not os.path.exists(path_value):
+        with open(path_value, "a", encoding="utf-8"):
+            pass
+
+    current_offset = max(0, int(offset))
+    try:
+        file_size = os.path.getsize(path_value)
+        if current_offset > file_size:
+            current_offset = 0
+    except Exception:
+        current_offset = 0
+
+    rows: list[dict[str, Any]] = []
+    try:
+        with open(path_value, "r", encoding="utf-8") as handle:
+            handle.seek(current_offset, os.SEEK_SET)
+            while True:
+                raw_line = handle.readline()
+                if not raw_line:
+                    break
+                current_offset = handle.tell()
+                line = str(raw_line).strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    logger.warning("invalid command json line dropped: %.120s", line)
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+    except Exception as exc:
+        logger.warning("failed to read command queue %s: %s", path_value, exc)
+    return rows, current_offset
+
+
+def _append_jsonl_row(path_value: str, row: dict[str, Any]) -> None:
+    if not path_value:
+        return
+    _ensure_parent_dir(path_value)
+    line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+    with open(path_value, "a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.write("\n")
+
+
+def _run_pywechat_call(fn: Any, kwargs: dict[str, Any]) -> tuple[bool, str]:
+    try:
+        fn(**kwargs)
+        return True, "ok"
+    except TypeError:
+        pass
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+    # Fallback for older pywechat signatures.
+    compatibility = dict(kwargs)
+    compatibility.pop("is_maximize", None)
+    compatibility.pop("close_wechat", None)
+    try:
+        fn(**compatibility)
+        return True, "ok(compat)"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
+def _execute_command(
+    command: dict[str, Any],
+    *,
+    send_message_to_friend: Any,
+    voice_call: Any,
+    video_call: Any,
+    wechat_path: str,
+) -> dict[str, Any]:
+    action = str(command.get("action") or "").strip().lower()
+    target = str(command.get("target") or "").strip()
+    content = str(command.get("content") or "")
+    command_id = str(command.get("command_id") or "")
+    request_id = str(command.get("request_id") or "")
+    now_ms = int(time.time() * 1000)
+
+    if not command_id:
+        command_id = f"bridge-{now_ms}-{hashlib.sha1(str(command).encode('utf-8')).hexdigest()[:10]}"
+
+    base_row = {
+        "command_id": command_id,
+        "request_id": request_id,
+        "action": action,
+        "target": target,
+        "finished_ts_ms": now_ms,
+    }
+
+    if action not in {"send_text", "voice_call", "video_call"}:
+        return {
+            **base_row,
+            "status": "error",
+            "success": False,
+            "reason_code": "WECHAT_COMMAND_ACTION_INVALID",
+            "detail": f"unsupported action: {action}",
+        }
+    if not target:
+        return {
+            **base_row,
+            "status": "error",
+            "success": False,
+            "reason_code": "WECHAT_COMMAND_TARGET_MISSING",
+            "detail": "target is required",
+        }
+    if action == "send_text" and not content.strip():
+        return {
+            **base_row,
+            "status": "error",
+            "success": False,
+            "reason_code": "WECHAT_COMMAND_CONTENT_MISSING",
+            "detail": "send_text requires non-empty content",
+        }
+
+    common_kwargs = {
+        "friend": target,
+        "wechat_path": (wechat_path or None),
+        "is_maximize": True,
+        "close_wechat": False,
+    }
+    if action == "send_text":
+        ok, detail = _run_pywechat_call(
+            send_message_to_friend,
+            kwargs={**common_kwargs, "message": content},
+        )
+    elif action == "voice_call":
+        ok, detail = _run_pywechat_call(
+            voice_call,
+            kwargs=common_kwargs,
+        )
+    else:
+        ok, detail = _run_pywechat_call(
+            video_call,
+            kwargs=common_kwargs,
+        )
+
+    return {
+        **base_row,
+        "status": ("ok" if ok else "error"),
+        "success": bool(ok),
+        "reason_code": (None if ok else "WECHAT_COMMAND_EXEC_FAILED"),
+        "detail": detail,
+    }
+
+
+def _process_command_queue(
+    *,
+    queue_file: str,
+    result_file: str,
+    offset: int,
+    send_message_to_friend: Any,
+    voice_call: Any,
+    video_call: Any,
+    wechat_path: str,
+) -> tuple[int, int, int]:
+    rows, next_offset = _read_jsonl_rows_from_offset(queue_file, offset)
+    if not rows:
+        return next_offset, 0, 0
+
+    success_count = 0
+    for command in rows:
+        result = _execute_command(
+            command,
+            send_message_to_friend=send_message_to_friend,
+            voice_call=voice_call,
+            video_call=video_call,
+            wechat_path=wechat_path,
+        )
+        if bool(result.get("success")):
+            success_count += 1
+        if result_file:
+            try:
+                _append_jsonl_row(result_file, result)
+            except Exception as exc:
+                logger.warning("failed to append command result: %s", exc)
+    return next_offset, len(rows), success_count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Poll pywechat unread messages and forward to Edge callback."
@@ -326,10 +526,31 @@ def main() -> int:
         default=1024,
         help="Recent message fingerprint cache size (default: 1024)",
     )
+    parser.add_argument(
+        "--command-queue-file",
+        default=(os.environ.get("EDGE_WECHAT_COMMAND_QUEUE_FILE") or "").strip(),
+        help="Optional JSONL command queue path for outbound operations.",
+    )
+    parser.add_argument(
+        "--command-result-file",
+        default=(os.environ.get("EDGE_WECHAT_COMMAND_RESULT_FILE") or "").strip(),
+        help="Optional JSONL command result path.",
+    )
+    parser.add_argument(
+        "--command-poll-interval",
+        type=float,
+        default=DEFAULT_COMMAND_POLL_INTERVAL_S,
+        help=f"Command queue poll interval in seconds (default: {DEFAULT_COMMAND_POLL_INTERVAL_S})",
+    )
     args = parser.parse_args()
 
     try:
-        from pywechat.WechatAuto import check_new_message
+        from pywechat.WechatAuto import (
+            check_new_message,
+            send_message_to_friend,
+            video_call,
+            voice_call,
+        )
         import pywechat.WechatAuto as pywechat_auto
         import pywechat.WechatTools as pywechat_tools
     except Exception as exc:
@@ -339,18 +560,39 @@ def main() -> int:
     poll_interval = max(0.5, float(args.poll_interval))
     dedup_size = max(128, int(args.dedup_size))
     resolved_wechat_path = (args.wechat_path or os.environ.get("EDGE_WECHAT_EXECUTABLE_PATH") or "").strip()
+    command_queue_file = _normalize_optional_path(args.command_queue_file)
+    command_result_file = _normalize_optional_path(args.command_result_file)
+    command_poll_interval = max(0.1, float(args.command_poll_interval))
+    if command_queue_file:
+        poll_interval = min(poll_interval, command_poll_interval)
     dedup_queue: deque[str] = deque(maxlen=dedup_size)
     dedup_set: set[str] = set()
     total_sent = 0
+    total_commands = 0
+    total_command_success = 0
     last_wechat_running: bool | None = None
+    command_offset = 0
+
+    if command_queue_file:
+        _ensure_parent_dir(command_queue_file)
+        if not os.path.exists(command_queue_file):
+            with open(command_queue_file, "a", encoding="utf-8"):
+                pass
+    if command_result_file:
+        _ensure_parent_dir(command_result_file)
+        if not os.path.exists(command_result_file):
+            with open(command_result_file, "a", encoding="utf-8"):
+                pass
 
     _patch_pywechat_process_probe(pywechat_auto=pywechat_auto, pywechat_tools=pywechat_tools)
 
     logger.info(
-        "pywechat bridge started, edge_url=%s poll_interval=%.2fs wechat_path=%s",
+        "pywechat bridge started, edge_url=%s poll_interval=%.2fs wechat_path=%s command_queue=%s command_result=%s",
         args.edge_url,
         poll_interval,
         resolved_wechat_path or "(auto)",
+        command_queue_file or "(disabled)",
+        command_result_file or "(disabled)",
     )
     while True:
         try:
@@ -371,21 +613,23 @@ def main() -> int:
                 )
                 last_wechat_running = wechat_running
 
+            skip_message_poll = False
             if not has_main_window:
                 ready = _ensure_main_window_visible(resolved_wechat_path)
                 if not ready:
-                    logger.warning("wechat main window unavailable; skip this poll cycle")
-                    time.sleep(poll_interval)
-                    continue
+                    logger.warning("wechat main window unavailable; skip message polling this cycle")
+                    skip_message_poll = True
 
-            raw = check_new_message(
-                duration=None,
-                save_file=False,
-                target_folder=None,
-                wechat_path=wechat_path_arg,
-                close_wechat=False,
-            )
-            normalized = _normalize_batch(raw)
+            normalized: list[NormalizedMessage] = []
+            if not skip_message_poll:
+                raw = check_new_message(
+                    duration=None,
+                    save_file=False,
+                    target_folder=None,
+                    wechat_path=wechat_path_arg,
+                    close_wechat=False,
+                )
+                normalized = _normalize_batch(raw)
             if normalized:
                 logger.info("captured %d new message(s)", len(normalized))
             for msg in normalized:
@@ -406,8 +650,35 @@ def main() -> int:
                         dedup_set = set(dedup_queue)
                 else:
                     logger.warning("failed to forward message: sender=%s content=%.40s", msg.sender, msg.content)
+
+            if command_queue_file:
+                command_offset, batch_count, batch_success = _process_command_queue(
+                    queue_file=command_queue_file,
+                    result_file=command_result_file,
+                    offset=command_offset,
+                    send_message_to_friend=send_message_to_friend,
+                    voice_call=voice_call,
+                    video_call=video_call,
+                    wechat_path=resolved_wechat_path,
+                )
+                if batch_count > 0:
+                    total_commands += batch_count
+                    total_command_success += batch_success
+                    logger.info(
+                        "processed command batch: total=%d success=%d failed=%d cumulative_total=%d cumulative_success=%d",
+                        batch_count,
+                        batch_success,
+                        batch_count - batch_success,
+                        total_commands,
+                        total_command_success,
+                    )
         except KeyboardInterrupt:
-            logger.info("interrupted; total_sent=%d", total_sent)
+            logger.info(
+                "interrupted; total_sent=%d total_commands=%d command_success=%d",
+                total_sent,
+                total_commands,
+                total_command_success,
+            )
             return 0
         except Exception as exc:
             logger.warning("poll cycle failed: %s", exc)

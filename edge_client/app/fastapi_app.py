@@ -11,6 +11,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from edge_client.app.schemas import EdgeRpcEnvelope, EdgeRpcResponse, parse_edge_rpc_envelope
+from edge_client.channels.wechat_command_queue import (
+    ALLOWED_WECHAT_COMMAND_ACTIONS,
+    enqueue_wechat_command,
+    resolve_command_file_paths,
+    wait_wechat_command_result,
+)
 from edge_client.config import EdgeConfig, load_edge_config
 from edge_client.rpc.auth import NonceReplayCache, validate_edge_rpc_auth
 from edge_client.runtime import (
@@ -258,6 +264,19 @@ def create_edge_fastapi_app(
                 event={"stage": "S_EDGE_WECHAT_CALLBACK"},
                 ts_ms=ts,
             ))
+
+    @app.post("/v1/edge/wechat/command")
+    async def edge_wechat_command(request: Request) -> JSONResponse:
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wechat_command,
+        )
 
     @app.post("/v1/edge/screenshot")
     async def edge_screenshot(request: Request) -> JSONResponse:
@@ -650,6 +669,114 @@ def _handle_fallback_context_compress(runtime: EdgeRuntime, envelope: EdgeRpcEnv
     )
 
 
+def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    payload = dict(envelope.payload or {})
+    action = str(payload.get("action") or "").strip().lower()
+    target = str(payload.get("target") or "").strip()
+    content = str(payload.get("content") or payload.get("text") or "")
+    wait_result = _parse_bool_like(payload.get("wait_result"), default=False)
+    timeout_ms = _parse_int_clamped(
+        payload.get("timeout_ms"),
+        default=8000,
+        min_value=300,
+        max_value=120000,
+    )
+
+    if action not in ALLOWED_WECHAT_COMMAND_ACTIONS:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail=f"wechat action must be one of {sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)}",
+            event={"allowed_actions": sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)},
+        )
+    if not target:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail="wechat command requires non-empty target",
+            event={},
+        )
+    if action == "send_text" and not str(content).strip():
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail="send_text requires non-empty content",
+            event={},
+        )
+
+    queue_file, result_file = resolve_command_file_paths()
+    try:
+        command = enqueue_wechat_command(
+            action=action,
+            target=target,
+            content=content,
+            request_id=envelope.request_id,
+            queue_file=queue_file,
+            ts_ms=envelope.ts_ms,
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail=f"wechat command enqueue failed: {exc}",
+            event={"queue_file": str(queue_file)},
+        )
+
+    event: dict[str, Any] = {
+        "command": dict(command),
+        "queue_file": str(queue_file),
+        "result_file": str(result_file),
+    }
+    if not wait_result:
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail="wechat command queued",
+            event=event,
+        )
+
+    command_id = str(command.get("command_id") or "")
+    result = wait_wechat_command_result(
+        command_id=command_id,
+        timeout_ms=timeout_ms,
+        result_file=result_file,
+    )
+    if result is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WECHAT_COMMAND_TIMEOUT",
+            stage="S_EDGE_WECHAT_COMMAND",
+            detail=f"wechat command timed out after {timeout_ms}ms",
+            event=event,
+        )
+
+    event["result"] = dict(result)
+    success = _parse_bool_like(result.get("success"), default=False)
+    if not success:
+        status_text = str(result.get("status") or "").strip().lower()
+        success = status_text in {"ok", "success", "done"}
+
+    return EdgeGatewayResult(
+        success=bool(success),
+        status=(STATUS_ACCEPTED if success else STATUS_REJECTED),
+        reason_code=(None if success else str(result.get("reason_code") or "WECHAT_COMMAND_FAILED")),
+        stage="S_EDGE_WECHAT_COMMAND",
+        detail=str(result.get("detail") or ("wechat command succeeded" if success else "wechat command failed")),
+        event=event,
+    )
+
+
 def _handle_screenshot(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
     """处理截图请求：调用 DesktopController 截图并返回 base64 图像。"""
     try:
@@ -849,6 +976,31 @@ def _drain_proactive_queue(runtime: EdgeRuntime) -> list[dict]:
     messages = list(queue)
     queue.clear()
     return messages
+
+
+def _parse_bool_like(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_clamped(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    if parsed < min_value:
+        return int(min_value)
+    if parsed > max_value:
+        return int(max_value)
+    return int(parsed)
 
 
 def build_edge_app_from_env() -> FastAPI:

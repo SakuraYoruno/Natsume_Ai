@@ -413,6 +413,7 @@ function Start-WeChatBridgeProcess {
     [string]$PythonPath,
     [string]$BridgeScriptPath,
     [string]$EdgeUrl,
+    [string[]]$ExtraArgs = @(),
     [string]$RepoRoot,
     [string]$StdoutLog,
     [string]$StderrLog,
@@ -421,7 +422,22 @@ function Start-WeChatBridgeProcess {
     [hashtable]$EnvVars = @{}
   )
   if ($UseBreakawayLaunch) {
-    $commandLine = "`"$PythonPath`" `"$BridgeScriptPath`" --edge-url `"$EdgeUrl`" 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $argParts = @(
+      "`"$BridgeScriptPath`"",
+      "--edge-url",
+      "`"$EdgeUrl`""
+    )
+    foreach ($extraArg in $ExtraArgs) {
+      if ([string]::IsNullOrWhiteSpace([string]$extraArg)) {
+        continue
+      }
+      $text = [string]$extraArg
+      if ($text.Contains(" ")) {
+        $text = "`"$text`""
+      }
+      $argParts += $text
+    }
+    $commandLine = "`"$PythonPath`" $($argParts -join ' ') 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
     Invoke-BreakawayCommand `
       -RepoRoot $RepoRoot `
       -LauncherScriptPath $LauncherScriptPath `
@@ -431,8 +447,16 @@ function Start-WeChatBridgeProcess {
     return [pscustomobject]@{ Id = 0 }
   }
 
+  $bridgeArgs = @($BridgeScriptPath, "--edge-url", $EdgeUrl)
+  foreach ($extraArg in $ExtraArgs) {
+    if ([string]::IsNullOrWhiteSpace([string]$extraArg)) {
+      continue
+    }
+    $bridgeArgs += [string]$extraArg
+  }
+
   return (Start-Process -FilePath $PythonPath `
-    -ArgumentList @($BridgeScriptPath, "--edge-url", $EdgeUrl) `
+    -ArgumentList $bridgeArgs `
     -WorkingDirectory $RepoRoot `
     -WindowStyle Hidden `
     -PassThru `
@@ -1026,6 +1050,41 @@ $wechatRegistryCompatDetail = "wechat bridge disabled"
 $wechatBridgePidFile = Join-Path $runtimeRoot "wechat_bridge.pid"
 $wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
 $wechatBridgeErrLog = Join-Path $LogDir "wechat_bridge.stderr.log"
+$wechatCommandQueueFile = Join-Path $runtimeRoot "wechat_command_queue.jsonl"
+$wechatCommandResultFile = Join-Path $runtimeRoot "wechat_command_result.jsonl"
+
+if ($wechatBridgeBackend -eq "pywechat") {
+  $queuePathRaw = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_COMMAND_QUEUE_FILE")
+  if (-not [string]::IsNullOrWhiteSpace($queuePathRaw)) {
+    if ([System.IO.Path]::IsPathRooted($queuePathRaw)) {
+      $wechatCommandQueueFile = $queuePathRaw
+    } else {
+      $wechatCommandQueueFile = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $queuePathRaw))
+    }
+  }
+  $resultPathRaw = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_COMMAND_RESULT_FILE")
+  if (-not [string]::IsNullOrWhiteSpace($resultPathRaw)) {
+    if ([System.IO.Path]::IsPathRooted($resultPathRaw)) {
+      $wechatCommandResultFile = $resultPathRaw
+    } else {
+      $wechatCommandResultFile = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $resultPathRaw))
+    }
+  }
+
+  $queueDir = Split-Path -Parent $wechatCommandQueueFile
+  $resultDir = Split-Path -Parent $wechatCommandResultFile
+  if (-not [string]::IsNullOrWhiteSpace($queueDir)) {
+    Ensure-Directory -Path $queueDir
+  }
+  if (-not [string]::IsNullOrWhiteSpace($resultDir)) {
+    Ensure-Directory -Path $resultDir
+  }
+
+  $envValues["EDGE_WECHAT_COMMAND_QUEUE_FILE"] = [string]$wechatCommandQueueFile
+  $envValues["EDGE_WECHAT_COMMAND_RESULT_FILE"] = [string]$wechatCommandResultFile
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_QUEUE_FILE", [string]$wechatCommandQueueFile, "Process")
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
+}
 
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
@@ -1045,6 +1104,8 @@ if (Test-Path -Path $pidFile) {
         wechat_bridge_enabled = $wechatBridgeEnabled
         wechat_bridge_backend = $wechatBridgeBackend
         wechat_bridge_backend_raw = $wechatBridgeBackendRaw
+        wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
+        wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
       }
       $result | ConvertTo-Json -Depth 4
       exit 0
@@ -1072,6 +1133,10 @@ if ($null -ne $listeningPid) {
       breakaway_launcher_used = $useBreakawayLauncher
       wechat_bridge_env_raw = $wechatBridgeEnvRaw
       wechat_bridge_enabled = $wechatBridgeEnabled
+      wechat_bridge_backend = $wechatBridgeBackend
+      wechat_bridge_backend_raw = $wechatBridgeBackendRaw
+      wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
+      wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
     }
     $result | ConvertTo-Json -Depth 4
     exit 0
@@ -1406,10 +1471,20 @@ if ($wechatBridgeEnabled) {
     $bridgeScript = $null
     $bridgeDependencyModule = "wcferry"
     $bridgeDependencyHint = "pip install wcferry"
+    $bridgeExtraArgs = @()
     if ($wechatBridgeBackend -eq "pywechat") {
       $bridgeScript = Join-Path $repoRoot "tools\wechat_pywechat_bridge.py"
       $bridgeDependencyModule = "pywechat"
       $bridgeDependencyHint = "pip install pywechat127"
+      $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+      [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
+      [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)
+      $bridgeExtraArgs = @(
+        "--command-queue-file",
+        $wechatCommandQueueFile,
+        "--command-result-file",
+        $wechatCommandResultFile
+      )
     } else {
       $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
     }
@@ -1428,6 +1503,7 @@ if ($wechatBridgeEnabled) {
             -PythonPath $pythonCmd.Source `
             -BridgeScriptPath $bridgeScript `
             -EdgeUrl $edgeUrl `
+            -ExtraArgs $bridgeExtraArgs `
             -RepoRoot $repoRoot `
             -StdoutLog $wechatBridgeLog `
             -StderrLog $wechatBridgeErrLog `
@@ -1551,6 +1627,8 @@ $result = [ordered]@{
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
   wechat_bridge_backend = $wechatBridgeBackend
   wechat_bridge_backend_raw = $wechatBridgeBackendRaw
+  wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandQueueFile } else { $null }
+  wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "pywechat") { $wechatCommandResultFile } else { $null }
   wechat_bridge_callback_url_local = "http://127.0.0.1:$port/v1/edge/wechat/callback"
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
