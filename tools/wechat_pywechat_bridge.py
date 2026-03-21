@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 import time
 import urllib.error
@@ -227,14 +228,16 @@ def main() -> int:
 
     poll_interval = max(0.5, float(args.poll_interval))
     dedup_size = max(128, int(args.dedup_size))
+    resolved_wechat_path = (args.wechat_path or os.environ.get("EDGE_WECHAT_EXECUTABLE_PATH") or "").strip()
     dedup_queue: deque[str] = deque(maxlen=dedup_size)
     dedup_set: set[str] = set()
     total_sent = 0
 
     logger.info(
-        "pywechat bridge started, edge_url=%s poll_interval=%.2fs",
+        "pywechat bridge started, edge_url=%s poll_interval=%.2fs wechat_path=%s",
         args.edge_url,
         poll_interval,
+        resolved_wechat_path or "(auto)",
     )
     while True:
         try:
@@ -242,7 +245,7 @@ def main() -> int:
                 duration=None,
                 save_file=False,
                 target_folder=None,
-                wechat_path=(args.wechat_path or None),
+                wechat_path=(resolved_wechat_path or None),
                 close_wechat=False,
             )
             normalized = _normalize_batch(raw)

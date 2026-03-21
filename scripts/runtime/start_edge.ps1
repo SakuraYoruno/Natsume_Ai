@@ -1011,6 +1011,10 @@ if ($null -ne $wechatAutoStartWaitRaw) {
 }
 
 $wechatExecutablePath = Resolve-WeChatExecutablePath -EnvValues $envValues
+if (-not [string]::IsNullOrWhiteSpace([string]$wechatExecutablePath)) {
+  $envValues["EDGE_WECHAT_EXECUTABLE_PATH"] = [string]$wechatExecutablePath
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_EXECUTABLE_PATH", [string]$wechatExecutablePath, "Process")
+}
 $wechatClientStatus = "skipped"
 $wechatClientDetail = "wechat bridge disabled"
 $wechatClientPid = $null
