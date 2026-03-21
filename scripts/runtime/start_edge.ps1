@@ -335,13 +335,13 @@ function Get-ProcessIdsByCommandLine {
 function Stop-ProcessesByIdList {
   param([int[]]$Ids)
   $stopped = New-Object System.Collections.Generic.List[int]
-  foreach ($pid in ($Ids | Where-Object { $_ -gt 0 } | Select-Object -Unique)) {
-    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  foreach ($procId in ($Ids | Where-Object { $_ -gt 0 } | Select-Object -Unique)) {
+    $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
     if ($null -eq $proc) {
       continue
     }
-    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-    $stopped.Add([int]$pid) | Out-Null
+    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    $stopped.Add([int]$procId) | Out-Null
   }
   return @($stopped)
 }
