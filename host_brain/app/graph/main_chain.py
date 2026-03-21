@@ -2718,7 +2718,8 @@ async def run_main_chain_from_input(
         "type": "query",
         "action": _action_map.get(pre_scene, "narrative_only"),
         "target": "host",
-        "args": {"text": text, "source": source},
+        # narrative_only 仅接受 text，额外字段会触发 Governor INTENT_ARGS_INVALID。
+        "args": {"text": text},
         "nonce": f"nonce::{request_id}",
     }
 
