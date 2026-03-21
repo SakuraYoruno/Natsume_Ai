@@ -4,7 +4,8 @@ param(
   [string]$LogDir = "",
   [int]$WaitSeconds = 60,
   [switch]$ForceRestart,
-  [bool]$AutoDegradeOnAsrCrash = $false
+  [bool]$AutoDegradeOnAsrCrash = $false,
+  [bool]$EnforceCnAsrJaTtsMode = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +20,8 @@ $edgeRaw = & $startEdgeScript `
   -LogDir $LogDir `
   -WaitSeconds $WaitSeconds `
   -ForceRestart:$ForceRestart.IsPresent `
-  -AutoDegradeOnAsrCrash:$AutoDegradeOnAsrCrash
+  -AutoDegradeOnAsrCrash:$AutoDegradeOnAsrCrash `
+  -EnforceCnAsrJaTtsMode:$EnforceCnAsrJaTtsMode
 
 $edgeJson = ($edgeRaw | Out-String).Trim()
 if (-not $edgeJson) {

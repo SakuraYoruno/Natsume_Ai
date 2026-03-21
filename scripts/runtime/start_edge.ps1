@@ -7,7 +7,8 @@ param(
   [switch]$ShowConsoleWindow,
   [int]$StabilityWaitSeconds = 8,
   [bool]$AutoDegradeOnAsrCrash = $true,
-  [bool]$BreakawayFromSsh = $true
+  [bool]$BreakawayFromSsh = $true,
+  [bool]$EnforceCnAsrJaTtsMode = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -465,18 +466,43 @@ $useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+$startupPreWarnings = @()
 $startupEnvDefaultsApplied = @()
-if (Ensure-ProcessEnvDefault -Key "EDGE_ASR_LANGUAGE" -DefaultValue "zh") {
-  $envValues["EDGE_ASR_LANGUAGE"] = "zh"
-  $startupEnvDefaultsApplied += "EDGE_ASR_LANGUAGE=zh"
-}
-if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "ja") {
-  $envValues["EDGE_TTS_LANGUAGE"] = "ja"
-  $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=ja"
-}
-if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
-  $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
-  $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
+$startupEnvEnforcedApplied = @()
+
+if ($EnforceCnAsrJaTtsMode) {
+  $enforcedVoiceEnv = [ordered]@{
+    EDGE_ASR_LANGUAGE = "zh"
+    EDGE_TTS_LANGUAGE = "ja"
+    EDGE_BARGE_IN_ENABLED = "false"
+  }
+  foreach ($enforcedKey in $enforcedVoiceEnv.Keys) {
+    $desiredValue = [string]$enforcedVoiceEnv[$enforcedKey]
+    $existingValue = [string]([Environment]::GetEnvironmentVariable($enforcedKey, "Process"))
+    [Environment]::SetEnvironmentVariable($enforcedKey, $desiredValue, "Process")
+    $envValues[$enforcedKey] = $desiredValue
+    if ($existingValue.Trim().ToLowerInvariant() -ne $desiredValue.ToLowerInvariant()) {
+      $startupEnvEnforcedApplied += "$enforcedKey=$desiredValue"
+      if (-not [string]::IsNullOrWhiteSpace($existingValue)) {
+        if (-not ($startupPreWarnings -contains "VOICE_MODE_ENV_OVERRIDDEN")) {
+          $startupPreWarnings += "VOICE_MODE_ENV_OVERRIDDEN"
+        }
+      }
+    }
+  }
+} else {
+  if (Ensure-ProcessEnvDefault -Key "EDGE_ASR_LANGUAGE" -DefaultValue "zh") {
+    $envValues["EDGE_ASR_LANGUAGE"] = "zh"
+    $startupEnvDefaultsApplied += "EDGE_ASR_LANGUAGE=zh"
+  }
+  if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "ja") {
+    $envValues["EDGE_TTS_LANGUAGE"] = "ja"
+    $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=ja"
+  }
+  if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
+    $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
+    $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
+  }
 }
 
 $resolvedAsrLanguage = [string]([Environment]::GetEnvironmentVariable("EDGE_ASR_LANGUAGE", "Process"))
@@ -719,7 +745,7 @@ $ttsStatus = "ok"
 $vtsStatus = "ok"
 $vtsAutoStartStatus = "skipped"
 $vtsAutoStartDetail = "EDGE_VTS_AUTOSTART disabled"
-$startupWarnings = @()
+$startupWarnings = @($startupPreWarnings)
 
 # ASR 健康探测（/health/asr 或 /asr/health）
 try {
@@ -863,10 +889,12 @@ $result = [ordered]@{
   wechat_bridge_error = $wechatBridgeError
   wechat_bridge_log = if ($wechatBridgeEnabled) { $wechatBridgeLog } else { $null }
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
+  enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
   tts_language = $resolvedTtsLanguage
   barge_in_enabled = $resolvedBargeInEnabled
   startup_env_defaults_applied = $startupEnvDefaultsApplied
+  startup_env_enforced_applied = $startupEnvEnforcedApplied
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4
