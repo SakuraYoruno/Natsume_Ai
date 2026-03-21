@@ -126,9 +126,8 @@ def _run_msg_loop(edge_url: str, self_wxid: str) -> None:
                 pass
 
         # 只在可确认 sender=self_wxid 时过滤 self-loop，避免误伤。
-        if from_self and self_wxid and msg_sender == self_wxid:
-            logger.debug("skip self message id=%s sender=%s", msg_id, msg_sender)
-            continue
+        # Keep self-sent text messages by default so local typed messages can trigger input.
+        # Loop prevention belongs in upper-layer session policy, not bridge hard-drop.
         if not is_text:
             logger.debug("skip non-text message id=%s type=%s", msg_id, msg_type)
             continue
