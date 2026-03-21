@@ -232,6 +232,18 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             min_value=0.1,
             max_value=300.0,
         ),
+        mouth_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_MOUTH_PARAM_CANDIDATES"),
+            default=("MouthOpen", "ParamMouthOpenY"),
+        ),
+        mouth_volume_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_MOUTH_VOLUME_PARAM_CANDIDATES"),
+            default=("VoiceVolumePlusMouthOpen", "VoiceVolume"),
+        ),
+        voice_silence_param_candidates=_parse_csv_tuple(
+            _env_get(env_lookup, "EDGE_VTS_VOICE_SILENCE_PARAM_CANDIDATES"),
+            default=("VoiceSilence",),
+        ),
         reconnect=ReconnectConfig(
             max_attempts=_parse_int(
                 _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),
@@ -367,6 +379,16 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             default=30.0,
             min_value=1.0,
             max_value=600.0,
+        ),
+        vad_retry_without_filter_on_empty=_parse_bool(
+            _env_get(env_lookup, "EDGE_ASR_VAD_RETRY_WITHOUT_FILTER_ON_EMPTY"),
+            default=True,
+        ),
+        vad_retry_min_peak=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_VAD_RETRY_MIN_PEAK"),
+            default=0.015,
+            min_value=0.0,
+            max_value=1.0,
         ),
         language=_as_text(_env_get(env_lookup, "EDGE_ASR_LANGUAGE"), "ja"),
         initial_prompt=_as_optional_text(_env_get(env_lookup, "EDGE_ASR_INITIAL_PROMPT")),
@@ -514,9 +536,9 @@ async def shutdown(runtime: EdgeRuntime) -> None:
 
 def _iter_lifecycle_components(runtime: EdgeRuntime) -> list[tuple[str, Any]]:
     ordered_names = (
-        "asr",
         "tts",
         "vts",
+        "asr",
         "fallback",
         "resource_gate",
         "rpc_client",
