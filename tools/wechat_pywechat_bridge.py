@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -25,6 +26,7 @@ from typing import Any
 DEFAULT_EDGE_URL = "http://127.0.0.1:17800"
 CALLBACK_PATH = "/v1/edge/wechat/callback"
 TIMEOUT_S = 10
+WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 
 logger = logging.getLogger("Natsume.wechat_pywechat_bridge")
 logging.basicConfig(
@@ -187,6 +189,85 @@ def _build_payload(msg: NormalizedMessage, ts_ms: int, self_wxid: str) -> dict[s
     }
 
 
+def _is_wechat_client_running() -> bool:
+    # pywechat's built-in probe only checks WeChat.exe in some versions.
+    # Weixin.exe is also valid in production deployments.
+    cmd = ["tasklist", "/fo", "csv", "/nh"]
+    for encoding in ("utf-8", "gbk"):
+        try:
+            output = subprocess.check_output(
+                cmd,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding=encoding,
+                errors="ignore",
+            )
+            break
+        except Exception:
+            output = ""
+    else:
+        output = ""
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith('"'):
+            process_name = line.split('","', 1)[0].strip('"').lower()
+        else:
+            process_name = line.split(",", 1)[0].strip().lower()
+        if process_name in WECHAT_PROCESS_NAMES:
+            return True
+    return False
+
+
+def _patch_pywechat_process_probe(pywechat_auto: Any, pywechat_tools: Any) -> None:
+    def _compat_is_wechat_running() -> bool:
+        return _is_wechat_client_running()
+
+    patched_targets: list[str] = []
+    try:
+        if hasattr(pywechat_tools, "Tools"):
+            setattr(
+                pywechat_tools.Tools,
+                "is_wechat_running",
+                staticmethod(_compat_is_wechat_running),
+            )
+            patched_targets.append("WechatTools.Tools.is_wechat_running")
+    except Exception as exc:
+        logger.warning("failed to patch WechatTools.Tools.is_wechat_running: %s", exc)
+
+    try:
+        if hasattr(pywechat_tools, "is_wechat_running"):
+            setattr(pywechat_tools, "is_wechat_running", _compat_is_wechat_running)
+            patched_targets.append("WechatTools.is_wechat_running")
+    except Exception as exc:
+        logger.warning("failed to patch WechatTools.is_wechat_running: %s", exc)
+
+    try:
+        if hasattr(pywechat_auto, "Tools"):
+            setattr(
+                pywechat_auto.Tools,
+                "is_wechat_running",
+                staticmethod(_compat_is_wechat_running),
+            )
+            patched_targets.append("WechatAuto.Tools.is_wechat_running")
+    except Exception as exc:
+        logger.warning("failed to patch WechatAuto.Tools.is_wechat_running: %s", exc)
+
+    try:
+        if hasattr(pywechat_auto, "is_wechat_running"):
+            setattr(pywechat_auto, "is_wechat_running", _compat_is_wechat_running)
+            patched_targets.append("WechatAuto.is_wechat_running")
+    except Exception as exc:
+        logger.warning("failed to patch WechatAuto.is_wechat_running: %s", exc)
+
+    if patched_targets:
+        logger.info("patched pywechat process probes: %s", ", ".join(patched_targets))
+    else:
+        logger.warning("did not patch any pywechat process probe target")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Poll pywechat unread messages and forward to Edge callback."
@@ -222,6 +303,8 @@ def main() -> int:
 
     try:
         from pywechat.WechatAuto import check_new_message
+        import pywechat.WechatAuto as pywechat_auto
+        import pywechat.WechatTools as pywechat_tools
     except Exception as exc:
         logger.error("failed to import pywechat check_new_message: %s", exc)
         return 1
@@ -232,6 +315,9 @@ def main() -> int:
     dedup_queue: deque[str] = deque(maxlen=dedup_size)
     dedup_set: set[str] = set()
     total_sent = 0
+    last_wechat_running: bool | None = None
+
+    _patch_pywechat_process_probe(pywechat_auto=pywechat_auto, pywechat_tools=pywechat_tools)
 
     logger.info(
         "pywechat bridge started, edge_url=%s poll_interval=%.2fs wechat_path=%s",
@@ -241,11 +327,26 @@ def main() -> int:
     )
     while True:
         try:
+            wechat_running = _is_wechat_client_running()
+            wechat_path_arg = None
+            if resolved_wechat_path and not wechat_running:
+                # Only pass path when client is not running, to avoid pywechat
+                # repeatedly trying to "open" an already running Weixin process.
+                wechat_path_arg = resolved_wechat_path
+
+            if last_wechat_running is None or wechat_running != last_wechat_running:
+                logger.info(
+                    "wechat process running=%s path_arg=%s",
+                    wechat_running,
+                    wechat_path_arg or "(auto)",
+                )
+                last_wechat_running = wechat_running
+
             raw = check_new_message(
                 duration=None,
                 save_file=False,
                 target_folder=None,
-                wechat_path=(resolved_wechat_path or None),
+                wechat_path=wechat_path_arg,
                 close_wechat=False,
             )
             normalized = _normalize_batch(raw)
