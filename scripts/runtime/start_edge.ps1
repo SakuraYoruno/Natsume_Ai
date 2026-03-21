@@ -4,7 +4,10 @@ param(
   [string]$LogDir = "",
   [int]$WaitSeconds = 20,
   [switch]$ForceRestart,
-  [switch]$ShowConsoleWindow
+  [switch]$ShowConsoleWindow,
+  [int]$StabilityWaitSeconds = 8,
+  [bool]$AutoDegradeOnAsrCrash = $true,
+  [bool]$BreakawayFromSsh = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,6 +71,128 @@ function Wait-Port {
   while ((Get-Date) -lt $deadline) {
     if (Get-ListeningPid -Port $Port) {
       return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
+function Start-EdgeProcess {
+  param(
+    [string]$PythonPath,
+    [string]$RepoRoot,
+    [string]$StdoutLog,
+    [string]$StderrLog,
+    [bool]$ShowConsoleWindow,
+    [bool]$UseBreakawayLaunch = $false,
+    [string]$LauncherScriptPath = "",
+    [int]$Port = 0,
+    [hashtable]$EnvVars = @{}
+  )
+  if ($UseBreakawayLaunch) {
+    if (-not $LauncherScriptPath) {
+      throw "launcher script path is required for breakaway launch"
+    }
+    $launcherLines = @(
+      "@echo off",
+      "cd /d `"$RepoRoot`"",
+      "setlocal"
+    )
+    foreach ($envKey in $EnvVars.Keys) {
+      $envName = ([string]$envKey).Trim()
+      if (-not $envName) {
+        continue
+      }
+      $envValue = [string]$EnvVars[$envKey]
+      $safeValue = $envValue -replace '%', '%%'
+      $launcherLines += ("set `"{0}={1}`"" -f $envName, $safeValue)
+    }
+    $launcherLines += "`"$PythonPath`" -m edge_client 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $launcherLines += "endlocal"
+    Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
+
+    $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
+    if ($null -eq $schtasksCmd) {
+      throw "schtasks.exe not found; cannot launch edge in breakaway mode"
+    }
+    $taskName = "NatsumeEdgeLaunch_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
+    $taskTime = (Get-Date).AddMinutes(2).ToString("HH:mm")
+    $taskCommand = "`"$LauncherScriptPath`""
+
+    $createOutput = & $schtasksCmd.Source /Create /TN $taskName /SC ONCE /ST $taskTime /TR $taskCommand /F 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+      throw "failed to create breakaway task $taskName.`n$detail"
+    }
+    $runOutput = & $schtasksCmd.Source /Run /TN $taskName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
+      & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+      throw "failed to run breakaway task $taskName.`n$detail"
+    }
+    & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+
+    if ($Port -gt 0) {
+      $deadline = (Get-Date).AddSeconds(2)
+      while ((Get-Date) -lt $deadline) {
+        $detectedPid = Get-ListeningPid -Port $Port
+        if ($null -ne $detectedPid) {
+          return (Get-Process -Id $detectedPid -ErrorAction SilentlyContinue)
+        }
+        Start-Sleep -Milliseconds 200
+      }
+    }
+    return [pscustomobject]@{ Id = 0 }
+  }
+
+  $startProcessArgs = @{
+    FilePath = $PythonPath
+    ArgumentList = @("-m", "edge_client")
+    WorkingDirectory = $RepoRoot
+    PassThru = $true
+    RedirectStandardOutput = $StdoutLog
+    RedirectStandardError = $StderrLog
+  }
+  if (-not $ShowConsoleWindow) {
+    $startProcessArgs["WindowStyle"] = "Hidden"
+  }
+  return (Start-Process @startProcessArgs)
+}
+
+function Wait-Process-And-Port-Stable {
+  param(
+    [int]$ProcessId,
+    [int]$Port,
+    [int]$TimeoutSeconds
+  )
+  $deadline = (Get-Date).AddSeconds([Math]::Max(0, $TimeoutSeconds))
+  while ((Get-Date) -lt $deadline) {
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $proc) {
+      return $false
+    }
+    $listeningPid = Get-ListeningPid -Port $Port
+    if ($null -eq $listeningPid) {
+      return $false
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return $true
+}
+
+function Wait-HttpHealthy {
+  param(
+    [string]$Url,
+    [int]$TimeoutSeconds = 8
+  )
+  $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+        return $true
+      }
+    } catch {
     }
     Start-Sleep -Milliseconds 500
   }
@@ -262,6 +387,9 @@ Ensure-Directory -Path $LogDir
 $pidFile = Join-Path $runtimeRoot "edge.pid"
 $stdoutLog = Join-Path $LogDir "edge.stdout.log"
 $stderrLog = Join-Path $LogDir "edge.stderr.log"
+$launcherScriptPath = Join-Path $runtimeRoot "launch_edge.cmd"
+$sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+$useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
@@ -278,6 +406,20 @@ if ($envValues.ContainsKey("VTS_API_PORT")) {
   $vtsPort = [int]$envValues["VTS_API_PORT"]
 } elseif ($env:VTS_API_PORT) {
   $vtsPort = [int]$env:VTS_API_PORT
+}
+
+$asrPort = 17801
+if ($envValues.ContainsKey("EDGE_ASR_PORT")) {
+  $asrPort = [int]$envValues["EDGE_ASR_PORT"]
+} elseif ($env:EDGE_ASR_PORT) {
+  $asrPort = [int]$env:EDGE_ASR_PORT
+}
+
+$ttsPort = 17802
+if ($envValues.ContainsKey("EDGE_TTS_PORT")) {
+  $ttsPort = [int]$envValues["EDGE_TTS_PORT"]
+} elseif ($env:EDGE_TTS_PORT) {
+  $ttsPort = [int]$env:EDGE_TTS_PORT
 }
 
 $vtsAutoStart = $false
@@ -333,6 +475,8 @@ if (Test-Path -Path $pidFile) {
         pid_file = $pidFile
         port = $port
         env_file = $EnvFile
+        ssh_session_detected = $sshSessionDetected
+        breakaway_launcher_used = $useBreakawayLauncher
         wechat_bridge_env_raw = $wechatBridgeEnvRaw
         wechat_bridge_enabled = $wechatBridgeEnabled
       }
@@ -358,6 +502,8 @@ if ($null -ne $listeningPid) {
       pid_file = $pidFile
       port = $port
       env_file = $EnvFile
+      ssh_session_detected = $sshSessionDetected
+      breakaway_launcher_used = $useBreakawayLauncher
       wechat_bridge_env_raw = $wechatBridgeEnvRaw
       wechat_bridge_enabled = $wechatBridgeEnabled
     }
@@ -373,25 +519,96 @@ if ($null -eq $pythonCmd) {
   throw "python executable not found in PATH"
 }
 
-$startProcessArgs = @{
-  FilePath = $pythonCmd.Source
-  ArgumentList = @("-m", "edge_client")
-  WorkingDirectory = $repoRoot
-  PassThru = $true
-  RedirectStandardOutput = $stdoutLog
-  RedirectStandardError = $stderrLog
-}
-if (-not $ShowConsoleWindow.IsPresent) {
-  $startProcessArgs["WindowStyle"] = "Hidden"
-}
-$proc = Start-Process @startProcessArgs
+$forcedAsrDisabled = $false
+$startupMode = "normal"
+$attemptErrors = New-Object System.Collections.Generic.List[string]
 
-if (-not (Wait-Port -Port $port -TimeoutSeconds $WaitSeconds)) {
-  $stderrTail = ""
-  if (Test-Path -Path $stderrLog) {
-    $stderrTail = (Get-Content -Path $stderrLog -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
+function Start-EdgeAttempt {
+  param(
+    [string]$ModeLabel,
+    [hashtable]$EnvOverrides
+  )
+  $launchEnvValues = @{}
+  foreach ($baseKey in $envValues.Keys) {
+    $launchEnvValues[$baseKey] = [string]$envValues[$baseKey]
   }
-  throw "edge rpc gateway failed to listen on port $port within $WaitSeconds seconds.`n$stderrTail"
+  foreach ($key in $EnvOverrides.Keys) {
+    $launchEnvValues[$key] = [string]$EnvOverrides[$key]
+    [Environment]::SetEnvironmentVariable($key, [string]$EnvOverrides[$key], "Process")
+  }
+  $proc = Start-EdgeProcess `
+    -PythonPath $pythonCmd.Source `
+    -RepoRoot $repoRoot `
+    -StdoutLog $stdoutLog `
+    -StderrLog $stderrLog `
+    -ShowConsoleWindow $ShowConsoleWindow.IsPresent `
+    -UseBreakawayLaunch $useBreakawayLauncher `
+    -LauncherScriptPath $launcherScriptPath `
+    -Port $port `
+    -EnvVars $launchEnvValues
+
+  if (-not (Wait-Port -Port $port -TimeoutSeconds $WaitSeconds)) {
+    $stderrTail = ""
+    if (Test-Path -Path $stderrLog) {
+      $stderrTail = (Get-Content -Path $stderrLog -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
+    }
+    throw "[$ModeLabel] edge rpc gateway failed to listen on port $port within $WaitSeconds seconds.`n$stderrTail"
+  }
+  $procId = $null
+  if ($null -ne $proc) {
+    try {
+      $procId = [int]$proc.Id
+    } catch {
+      $procId = $null
+    }
+  }
+  if ($null -eq $procId -or $procId -le 0) {
+    $procId = Get-ListeningPid -Port $port
+  }
+  if ($null -eq $procId -or $procId -le 0) {
+    throw "[$ModeLabel] edge rpc is listening on $port but owning process id could not be resolved."
+  }
+  if (-not (Wait-Process-And-Port-Stable -ProcessId $procId -Port $port -TimeoutSeconds $StabilityWaitSeconds)) {
+    $stderrTail = ""
+    if (Test-Path -Path $stderrLog) {
+      $stderrTail = (Get-Content -Path $stderrLog -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
+    }
+    throw "[$ModeLabel] edge process became unstable during ${StabilityWaitSeconds}s stabilization window (pid=$procId, port=$port).`n$stderrTail"
+  }
+  if ($ModeLabel -eq "normal" -and $AutoDegradeOnAsrCrash) {
+    $asrHealthUrl = "http://127.0.0.1:$asrPort/health"
+    if (-not (Wait-HttpHealthy -Url $asrHealthUrl -TimeoutSeconds 8)) {
+      throw "[$ModeLabel] asr health probe failed at $asrHealthUrl; triggering asr_disabled_fallback."
+    }
+  }
+  return (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+}
+
+$proc = $null
+try {
+  $proc = Start-EdgeAttempt -ModeLabel "normal" -EnvOverrides @{}
+} catch {
+  $attemptErrors.Add($_.Exception.Message) | Out-Null
+}
+
+if (($null -eq $proc) -and $AutoDegradeOnAsrCrash) {
+  $oldPid = Get-ListeningPid -Port $port
+  if ($null -ne $oldPid) {
+    Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+  }
+  try {
+    $proc = Start-EdgeAttempt -ModeLabel "asr_disabled_fallback" -EnvOverrides @{ EDGE_ASR_ENABLED = "false" }
+    $forcedAsrDisabled = $true
+    $startupMode = "asr_disabled_fallback"
+  } catch {
+    $attemptErrors.Add($_.Exception.Message) | Out-Null
+  }
+}
+
+if ($null -eq $proc) {
+  $detail = ($attemptErrors -join "`n---`n")
+  throw "edge startup failed after all attempts.`n$detail"
 }
 
 $edgePid = [int]$proc.Id
@@ -407,8 +624,6 @@ $vtsAutoStartDetail = "EDGE_VTS_AUTOSTART disabled"
 $startupWarnings = @()
 
 # ASR 健康探测（/health/asr 或 /asr/health）
-$asrPort = 17801
-if ($envValues.ContainsKey("EDGE_ASR_PORT")) { $asrPort = [int]$envValues["EDGE_ASR_PORT"] }
 try {
   $asrResp = Invoke-WebRequest -Uri "http://$edgeHost`:$asrPort/health" -UseBasicParsing -TimeoutSec 5
   if ($asrResp.StatusCode -lt 200 -or $asrResp.StatusCode -ge 300) {
@@ -417,10 +632,14 @@ try {
 } catch {
   $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
 }
+if ($forcedAsrDisabled) {
+  $asrStatus = "degraded"
+  if (-not ($startupWarnings -contains "STARTUP_ASR_FORCE_DISABLED")) {
+    $startupWarnings += "STARTUP_ASR_FORCE_DISABLED"
+  }
+}
 
 # TTS 健康探测
-$ttsPort = 17802
-if ($envValues.ContainsKey("EDGE_TTS_PORT")) { $ttsPort = [int]$envValues["EDGE_TTS_PORT"] }
 try {
   $ttsResp = Invoke-WebRequest -Uri "http://$edgeHost`:$ttsPort/health" -UseBasicParsing -TimeoutSec 5
   if ($ttsResp.StatusCode -lt 200 -or $ttsResp.StatusCode -ge 300) {
@@ -526,6 +745,10 @@ $result = [ordered]@{
   env_file = $EnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
+  startup_mode = $startupMode
+  asr_forced_disabled = $forcedAsrDisabled
+  ssh_session_detected = $sshSessionDetected
+  breakaway_launcher_used = $useBreakawayLauncher
   asr_status = $asrStatus
   tts_status = $ttsStatus
   vts_status = $vtsStatus
