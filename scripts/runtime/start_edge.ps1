@@ -938,6 +938,7 @@ $wechatClientStatus = "skipped"
 $wechatClientDetail = "wechat bridge disabled"
 $wechatClientPid = $null
 $wechatClientProcessName = $null
+$wechatClientUnsupportedForWcf = $false
 $wechatRegistryCompatStatus = "skipped"
 $wechatRegistryCompatDetail = "wechat bridge disabled"
 
@@ -1232,6 +1233,7 @@ if ($wechatBridgeEnabled) {
     $wechatClientProcessName = [string]$wechatProc.ProcessName
     $wechatClientDetail = "wechat process is running ($wechatClientProcessName pid=$wechatClientPid)"
     if ($wechatClientProcessName -and $wechatClientProcessName.Equals("Weixin", [StringComparison]::OrdinalIgnoreCase)) {
+      $wechatClientUnsupportedForWcf = $true
       if (-not ($startupWarnings -contains "WECHAT_CLIENT_WEIXIN_ONLY")) {
         $startupWarnings += "WECHAT_CLIENT_WEIXIN_ONLY"
       }
@@ -1298,6 +1300,12 @@ if ($wechatBridgeEnabled) {
     $wechatBridgeError = "wechat process not available; $wechatClientDetail"
     if (-not ($startupWarnings -contains "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING")) {
       $startupWarnings += "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING"
+    }
+  } elseif ($wechatClientUnsupportedForWcf) {
+    $wechatBridgeStatus = "unsupported_client"
+    $wechatBridgeError = "detected Weixin.exe only; current wcferry sdk requires WeChat.exe. install and login classic WeChat desktop client."
+    if (-not ($startupWarnings -contains "WECHAT_BRIDGE_UNSUPPORTED_CLIENT")) {
+      $startupWarnings += "WECHAT_BRIDGE_UNSUPPORTED_CLIENT"
     }
   } elseif (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName "wcferry")) {
     $wechatBridgeStatus = "dependency_missing"
