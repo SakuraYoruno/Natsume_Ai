@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
+from host_brain.app.intent_seq import allocate_intent_seq, sync_intent_seq
+
 from ..schemas import TaskType
 from ..schemas.memory_types import ProposerClass
 from ..failure_matrix import FailureHandler, FailureEvent
@@ -337,12 +339,19 @@ class GovernorNode(ChainNode):
 
                 # 构建 intent_draft（若 metadata 中已有则复用）
                 intent_action = str(ctx.metadata.get("intent_action") or "narrative_only").strip() or "narrative_only"
+                intent_seq_hint = ctx.metadata.get("intent_seq")
+                if isinstance(intent_seq_hint, int) and intent_seq_hint > 0:
+                    intent_seq = intent_seq_hint
+                    sync_intent_seq(session_id=ctx.session_id, seq=intent_seq)
+                else:
+                    intent_seq = allocate_intent_seq(session_id=ctx.session_id)
+                ctx.metadata["intent_seq"] = intent_seq
                 intent_draft = {
                     "schema_version": "Natsume.intent.v1",
                     "id": f"intent::{ctx.request_id}",
                     "ts_ms": now_ms(),
                     "session_id": ctx.session_id,
-                    "seq": 1,
+                    "seq": intent_seq,
                     "type": "query",
                     "action": intent_action,
                     "target": "host",
@@ -2522,6 +2531,13 @@ class MainChain:
         ctx.audit_tags.append("main_chain_adapter")
         ctx.metadata["adapter_mode"] = "sse"
         ctx.metadata["intent_action"] = str((intent_draft or {}).get("action") or "")
+        _intent_seq_raw = (intent_draft or {}).get("seq")
+        try:
+            _intent_seq = int(_intent_seq_raw)
+            if _intent_seq > 0:
+                ctx.metadata["intent_seq"] = _intent_seq
+        except (TypeError, ValueError):
+            pass
 
         # ── Skill Manifest 注入：将当前可用 skill 列表写入 metadata，供 tool_planner 节点使用 ──
         try:
@@ -2709,12 +2725,20 @@ async def run_main_chain_from_input(
         "SCENE_WORK_CODE": "work_code",
         "SCENE_WORK_TRANSLATE": "work_translate",
     }
+    seq_hint: int | None = None
+    try:
+        seq_hint_raw = payload.get("seq")
+        if seq_hint_raw is not None:
+            seq_hint = int(seq_hint_raw)
+    except (TypeError, ValueError):
+        seq_hint = None
+    intent_seq = allocate_intent_seq(session_id=session_id, min_seq=seq_hint)
     intent_draft = {
         "schema_version": "Natsume.intent.v1",
         "id": f"intent::{request_id}",
         "ts_ms": ts_ms,
         "session_id": session_id,
-        "seq": 1,
+        "seq": intent_seq,
         "type": "query",
         "action": _action_map.get(pre_scene, "narrative_only"),
         "target": "host",

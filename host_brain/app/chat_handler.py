@@ -31,6 +31,7 @@ from host_brain.app.emotion_context import (
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
+from host_brain.app.intent_seq import allocate_intent_seq
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
@@ -82,12 +83,13 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             SCENE_WORK_TRANSLATE: "work_translate",
         }
         _draft_action = _action_map.get(_pre_scene, "narrative_only")
+        _intent_seq = allocate_intent_seq(session_id=session_id)
         intent_draft = {
             "schema_version": "Natsume.intent.v1",
             "id": f"intent::{request_id}",
             "ts_ms": ts_ms,
             "session_id": session_id,
-            "seq": 1,
+            "seq": _intent_seq,
             "type": "query",
             "action": _draft_action,
             "target": "host",

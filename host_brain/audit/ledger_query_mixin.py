@@ -118,6 +118,18 @@ class LedgerQueryMixin:
             return False
         return int(seq) <= int(row["seq"])
 
+    def get_session_seq(self, *, session_id: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT seq FROM session_seq_guard WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return int(row["seq"])
+        except (TypeError, ValueError):
+            return None
+
     def update_seq(self, *, session_id: str, seq: int) -> None:
         with self._write_lock:
             with self._conn:

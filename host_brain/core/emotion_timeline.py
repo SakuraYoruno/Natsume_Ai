@@ -144,6 +144,8 @@ def compute_emotion_echo(
     Returns:
         包含 echo_emotion_tag、echo_vector、response_hint 的字典
     """
+    from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+
     # 用户情感 → EmotionVector 映射
     _USER_EMOTION_MAP: dict[str, dict[str, float]] = {
         "HAPPY":      {"valence": 0.6, "arousal": 0.4},
@@ -179,4 +181,3 @@ def compute_emotion_echo(
         "echo_arousal": round(echo_vec.arousal, 4),
         "response_hint": response_hint,
     }
-

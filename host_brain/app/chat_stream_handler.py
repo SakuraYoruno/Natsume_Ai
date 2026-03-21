@@ -29,6 +29,7 @@ from host_brain.app.dependencies import (
     get_ledger,
     get_retrieval_orchestrator,
 )
+from host_brain.app.intent_seq import allocate_intent_seq
 from host_brain.app.emotion_context import (
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
@@ -1042,12 +1043,13 @@ async def _sse_event_generator(
 
         # ── 1. 构建 intent_draft ──────────────────────────────────────────
         if intent_draft is None:
+            intent_seq = allocate_intent_seq(session_id=session_id)
             intent_draft = {
                 "schema_version": "Natsume.intent.v1",
                 "id": f"intent::{request_id}",
                 "ts_ms": ts_ms,
                 "session_id": session_id,
-                "seq": 1,
+                "seq": intent_seq,
                 "type": "query",
                 "action": "narrative_only",
                 "target": "host",
