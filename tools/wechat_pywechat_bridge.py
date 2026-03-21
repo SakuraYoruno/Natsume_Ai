@@ -680,14 +680,18 @@ def main() -> int:
 
             normalized: list[NormalizedMessage] = []
             if not skip_message_poll:
-                raw = check_new_message(
-                    duration=None,
-                    save_file=False,
-                    target_folder=None,
-                    wechat_path=wechat_path_arg,
-                    close_wechat=False,
-                )
-                normalized = _normalize_batch(raw)
+                try:
+                    raw = check_new_message(
+                        duration=None,
+                        save_file=False,
+                        target_folder=None,
+                        wechat_path=wechat_path_arg,
+                        close_wechat=False,
+                    )
+                    normalized = _normalize_batch(raw)
+                except Exception as exc:
+                    logger.warning("check_new_message failed; continue with command queue: %s", exc)
+                    normalized = []
             if normalized:
                 logger.info("captured %d new message(s)", len(normalized))
             for msg in normalized:
