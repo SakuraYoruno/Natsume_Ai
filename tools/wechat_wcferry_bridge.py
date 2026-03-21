@@ -102,17 +102,52 @@ def _run_msg_loop(edge_url: str, self_wxid: str) -> None:
             continue
         if msg is None:
             continue
-        # 可选：只转发别人发来的文本，不转发自己发的
-        if getattr(msg, "from_self", lambda: False)():
+
+        msg_sender = str(getattr(msg, "sender", "") or "")
+        msg_type = str(getattr(msg, "type", "") or "")
+        msg_roomid = str(getattr(msg, "roomid", "") or "")
+        msg_id = str(getattr(msg, "id", "") or "")
+        msg_content = str(getattr(msg, "content", "") or "")
+
+        from_self = False
+        _from_self_fn = getattr(msg, "from_self", None)
+        if callable(_from_self_fn):
+            try:
+                from_self = bool(_from_self_fn())
+            except Exception:
+                from_self = False
+
+        is_text = msg_type == "1"
+        _is_text_fn = getattr(msg, "is_text", None)
+        if callable(_is_text_fn):
+            try:
+                is_text = is_text or bool(_is_text_fn())
+            except Exception:
+                pass
+
+        # 只在可确认 sender=self_wxid 时过滤 self-loop，避免误伤。
+        if from_self and self_wxid and msg_sender == self_wxid:
+            logger.debug("skip self message id=%s sender=%s", msg_id, msg_sender)
             continue
-        if not getattr(msg, "is_text", lambda: True)():
+        if not is_text:
+            logger.debug("skip non-text message id=%s type=%s", msg_id, msg_type)
             continue
+
+        logger.info(
+            "wcf msg recv id=%s sender=%s room=%s type=%s from_self=%s content=%.60s",
+            msg_id or "(none)",
+            msg_sender or "(none)",
+            msg_roomid or "(none)",
+            msg_type or "(none)",
+            from_self,
+            msg_content,
+        )
         body = _wxmsg_to_body(msg, self_wxid)
         if not body.get("content") and not body.get("text"):
             continue
         ok = _post_to_edge(edge_url, body)
         if ok:
-            logger.debug("已推送 msg_id=%s -> Edge", body.get("id") or body.get("msg_id"))
+            logger.info("wcf msg forwarded msg_id=%s", body.get("id") or body.get("msg_id"))
         else:
             logger.warning("推送失败 sender=%s content=%.40s", body.get("sender"), body.get("content", ""))
 
