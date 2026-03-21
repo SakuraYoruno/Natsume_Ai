@@ -46,6 +46,65 @@ function Set-ProcessEnv {
   }
 }
 
+function Get-NvidiaCudaDllDirs {
+  param([string]$PythonRoot)
+  $dirs = New-Object System.Collections.Generic.List[string]
+  if (-not $PythonRoot) {
+    return @()
+  }
+  $sitePackages = Join-Path $PythonRoot "Lib\site-packages"
+  $candidates = @(
+    (Join-Path $sitePackages "nvidia\cublas\bin"),
+    (Join-Path $sitePackages "nvidia\cudnn\bin")
+  )
+  foreach ($candidate in $candidates) {
+    if (-not $candidate) {
+      continue
+    }
+    if (Test-Path -Path $candidate) {
+      $dirs.Add((Resolve-Path -Path $candidate).Path) | Out-Null
+    }
+  }
+  return @($dirs)
+}
+
+function Merge-PathEntries {
+  param(
+    [string]$CurrentPath,
+    [string[]]$ExtraEntries
+  )
+  $merged = New-Object System.Collections.Generic.List[string]
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+
+  if ($CurrentPath) {
+    foreach ($segment in $CurrentPath.Split(';')) {
+      $item = [string]$segment
+      if (-not $item) {
+        continue
+      }
+      $trimmed = $item.Trim()
+      if (-not $trimmed) {
+        continue
+      }
+      if ($seen.Add($trimmed)) {
+        $merged.Add($trimmed) | Out-Null
+      }
+    }
+  }
+
+  foreach ($entry in ($ExtraEntries | Where-Object { $_ })) {
+    $trimmed = ([string]$entry).Trim()
+    if (-not $trimmed) {
+      continue
+    }
+    if ($seen.Add($trimmed)) {
+      $merged.Add($trimmed) | Out-Null
+    }
+  }
+
+  return ($merged -join ';')
+}
+
 function Ensure-Directory {
   param([string]$Path)
   if (-not (Test-Path -Path $Path)) {
@@ -519,6 +578,15 @@ if ($null -eq $pythonCmd) {
   throw "python executable not found in PATH"
 }
 
+$cudaRuntimeDirs = Get-NvidiaCudaDllDirs -PythonRoot (Split-Path -Parent $pythonCmd.Source)
+$cudaRuntimePathInjected = $false
+if ($cudaRuntimeDirs.Count -gt 0) {
+  $mergedPath = Merge-PathEntries -CurrentPath ([string]$env:PATH) -ExtraEntries $cudaRuntimeDirs
+  [Environment]::SetEnvironmentVariable("PATH", $mergedPath, "Process")
+  $envValues["PATH"] = $mergedPath
+  $cudaRuntimePathInjected = $true
+}
+
 $forcedAsrDisabled = $false
 $startupMode = "normal"
 $attemptErrors = New-Object System.Collections.Generic.List[string]
@@ -749,6 +817,8 @@ $result = [ordered]@{
   asr_forced_disabled = $forcedAsrDisabled
   ssh_session_detected = $sshSessionDetected
   breakaway_launcher_used = $useBreakawayLauncher
+  cuda_runtime_path_injected = $cudaRuntimePathInjected
+  cuda_runtime_paths = @($cudaRuntimeDirs)
   asr_status = $asrStatus
   tts_status = $ttsStatus
   vts_status = $vtsStatus
