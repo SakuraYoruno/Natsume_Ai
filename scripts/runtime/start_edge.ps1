@@ -983,7 +983,7 @@ if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("wcferry", "pywechat")) {
+  if ($candidateBackend -in @("wcferry", "pywechat", "external")) {
     $wechatBridgeBackend = $candidateBackend
   } else {
     $wechatBridgeBackend = "wcferry"
@@ -992,12 +992,12 @@ if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([st
 }
 
 $wechatClientNames = @("WeChat", "Weixin")
-$wechatAutoStart = $wechatBridgeEnabled
+$wechatAutoStart = ($wechatBridgeEnabled -and $wechatBridgeBackend -ne "external")
 $wechatAutoStartRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_AUTOSTART"
 if ($null -ne $wechatAutoStartRaw) {
-  $wechatAutoStart = Parse-Bool -Value $wechatAutoStartRaw -Default $wechatBridgeEnabled
+  $wechatAutoStart = Parse-Bool -Value $wechatAutoStartRaw -Default $wechatAutoStart
 } elseif ($null -ne $env:EDGE_WECHAT_AUTOSTART -and -not [string]::IsNullOrWhiteSpace([string]$env:EDGE_WECHAT_AUTOSTART)) {
-  $wechatAutoStart = Parse-Bool -Value $env:EDGE_WECHAT_AUTOSTART -Default $wechatBridgeEnabled
+  $wechatAutoStart = Parse-Bool -Value $env:EDGE_WECHAT_AUTOSTART -Default $wechatAutoStart
 }
 
 $wechatAutoStartWaitSeconds = 12
@@ -1280,7 +1280,9 @@ if ($null -eq $vtsConn) {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
-# 微信桥接（可选）：EDGE_WECHAT_BRIDGE_ENABLED=1 时启动 wcferry 桥接，将微信消息 POST 到 Edge /v1/edge/wechat/callback
+# 微信桥接（可选）：
+#   EDGE_WECHAT_BRIDGE_BACKEND=wcferry|pywechat|external
+#   external: 不拉起本地注入桥接，仅保留 /v1/edge/wechat/callback 供外部插件直推
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
 $wechatBridgeError = $null
@@ -1300,8 +1302,12 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedle = "wechat_wcferry_bridge.py"
-  $existingBridgePids = Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
+  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_pywechat_bridge.py")
+  $existingBridgePids = @()
+  foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
+    $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
+  }
+  $existingBridgePids = @($existingBridgePids | Select-Object -Unique)
   if ($existingBridgePids.Count -gt 0) {
     $stoppedBridgePids = Stop-ProcessesByIdList -Ids $existingBridgePids
     if ($stoppedBridgePids.Count -gt 0) {
@@ -1309,6 +1315,14 @@ if ($wechatBridgeEnabled) {
     }
   }
 
+  if ($wechatBridgeBackend -eq "external") {
+    $wechatClientStatus = "external_managed"
+    $wechatClientDetail = "external plugin/webhook mode; local injector bridge disabled"
+    $wechatRegistryCompatStatus = "external_managed"
+    $wechatRegistryCompatDetail = "external backend skips local registry compatibility"
+    $wechatBridgeStatus = "external_callback_only"
+    $wechatBridgeError = $null
+  } else {
   $wechatProc = Get-RunningProcessByName -Names $wechatClientNames
   if ($null -ne $wechatProc) {
     $wechatClientStatus = "running"
@@ -1493,6 +1507,7 @@ if ($wechatBridgeEnabled) {
       }
     }
   }
+  }
 }
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -1536,6 +1551,7 @@ $result = [ordered]@{
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
   wechat_bridge_backend = $wechatBridgeBackend
   wechat_bridge_backend_raw = $wechatBridgeBackendRaw
+  wechat_bridge_callback_url_local = "http://127.0.0.1:$port/v1/edge/wechat/callback"
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
   tts_language = $resolvedTtsLanguage
