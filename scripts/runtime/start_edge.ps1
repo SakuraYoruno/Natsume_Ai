@@ -164,32 +164,52 @@ function Invoke-SchtasksBreakaway {
   $targetTime = (Get-Date).AddMinutes(3)
   $taskTime = $targetTime.ToString("HH:mm")
   $taskDateCandidates = @(
-    $targetTime.ToString("MM/dd/yyyy", [System.Globalization.CultureInfo]::InvariantCulture),
-    $targetTime.ToString("yyyy/MM/dd", [System.Globalization.CultureInfo]::InvariantCulture)
+    $targetTime.ToString("yyyy/MM/dd", [System.Globalization.CultureInfo]::InvariantCulture),
+    $targetTime.ToString("MM/dd/yyyy", [System.Globalization.CultureInfo]::InvariantCulture)
   )
 
   $created = $false
   $createErrors = New-Object System.Collections.Generic.List[string]
   foreach ($taskDate in $taskDateCandidates) {
-    $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /SD $taskDate /ST $taskTime /TR $TaskCommand /F 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $createOutput = @()
+    $createExitCode = 1
+    try {
+      $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /SD $taskDate /ST $taskTime /TR $TaskCommand /F 2>&1
+      $createExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $createExitCode = [int]$LASTEXITCODE
+      }
+      $createOutput = @($_.Exception.Message)
+    }
+    if ($createExitCode -eq 0) {
       $created = $true
       break
     }
     $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
     if (-not [string]::IsNullOrWhiteSpace($detail)) {
-      $createErrors.Add("[/SD $taskDate] $detail") | Out-Null
+      $createErrors.Add("[/SD $taskDate] (exit=$createExitCode) $detail") | Out-Null
     }
   }
 
   if (-not $created) {
-    $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /ST $taskTime /TR $TaskCommand /F 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $createOutput = @()
+    $createExitCode = 1
+    try {
+      $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /ST $taskTime /TR $TaskCommand /F 2>&1
+      $createExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $createExitCode = [int]$LASTEXITCODE
+      }
+      $createOutput = @($_.Exception.Message)
+    }
+    if ($createExitCode -eq 0) {
       $created = $true
     } else {
       $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
       if (-not [string]::IsNullOrWhiteSpace($detail)) {
-        $createErrors.Add("[no /SD] $detail") | Out-Null
+        $createErrors.Add("[no /SD] (exit=$createExitCode) $detail") | Out-Null
       }
     }
   }
@@ -203,13 +223,26 @@ function Invoke-SchtasksBreakaway {
   }
 
   try {
-    $runOutput = & $schtasksCmd.Source /Run /TN $TaskName 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $runOutput = @()
+    $runExitCode = 1
+    try {
+      $runOutput = & $schtasksCmd.Source /Run /TN $TaskName 2>&1
+      $runExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $runExitCode = [int]$LASTEXITCODE
+      }
+      $runOutput = @($_.Exception.Message)
+    }
+    if ($runExitCode -ne 0) {
       $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
-      throw "failed to run breakaway task $TaskName ($FailureContext).`n$detail"
+      throw "failed to run breakaway task $TaskName ($FailureContext).`n(exit=$runExitCode) $detail"
     }
   } finally {
-    & $schtasksCmd.Source /Delete /TN $TaskName /F 2>&1 | Out-Null
+    try {
+      & $schtasksCmd.Source /Delete /TN $TaskName /F 2>&1 | Out-Null
+    } catch {
+    }
   }
 }
 
