@@ -150,6 +150,69 @@ function Wait-Port {
   return $false
 }
 
+function Invoke-SchtasksBreakaway {
+  param(
+    [string]$TaskName,
+    [string]$TaskCommand,
+    [string]$FailureContext = "breakaway launch"
+  )
+  $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
+  if ($null -eq $schtasksCmd) {
+    throw "schtasks.exe not found; cannot launch breakaway process"
+  }
+
+  $targetTime = (Get-Date).AddMinutes(3)
+  $taskTime = $targetTime.ToString("HH:mm")
+  $taskDateCandidates = @(
+    $targetTime.ToString("MM/dd/yyyy", [System.Globalization.CultureInfo]::InvariantCulture),
+    $targetTime.ToString("yyyy/MM/dd", [System.Globalization.CultureInfo]::InvariantCulture)
+  )
+
+  $created = $false
+  $createErrors = New-Object System.Collections.Generic.List[string]
+  foreach ($taskDate in $taskDateCandidates) {
+    $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /SD $taskDate /ST $taskTime /TR $TaskCommand /F 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $created = $true
+      break
+    }
+    $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+    if (-not [string]::IsNullOrWhiteSpace($detail)) {
+      $createErrors.Add("[/SD $taskDate] $detail") | Out-Null
+    }
+  }
+
+  if (-not $created) {
+    $createOutput = & $schtasksCmd.Source /Create /TN $TaskName /SC ONCE /ST $taskTime /TR $TaskCommand /F 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $created = $true
+    } else {
+      $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+      if (-not [string]::IsNullOrWhiteSpace($detail)) {
+        $createErrors.Add("[no /SD] $detail") | Out-Null
+      }
+    }
+  }
+
+  if (-not $created) {
+    $detail = ($createErrors -join "`n---`n")
+    if (-not $detail) {
+      $detail = "unknown create failure"
+    }
+    throw "failed to create breakaway task $TaskName ($FailureContext).`n$detail"
+  }
+
+  try {
+    $runOutput = & $schtasksCmd.Source /Run /TN $TaskName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
+      throw "failed to run breakaway task $TaskName ($FailureContext).`n$detail"
+    }
+  } finally {
+    & $schtasksCmd.Source /Delete /TN $TaskName /F 2>&1 | Out-Null
+  }
+}
+
 function Start-EdgeProcess {
   param(
     [string]$PythonPath,
@@ -184,26 +247,9 @@ function Start-EdgeProcess {
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
 
-    $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
-    if ($null -eq $schtasksCmd) {
-      throw "schtasks.exe not found; cannot launch edge in breakaway mode"
-    }
     $taskName = "NatsumeEdgeLaunch_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
-    $taskTime = (Get-Date).AddMinutes(2).ToString("HH:mm")
     $taskCommand = "`"$LauncherScriptPath`""
-
-    $createOutput = & $schtasksCmd.Source /Create /TN $taskName /SC ONCE /ST $taskTime /TR $taskCommand /F 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
-      throw "failed to create breakaway task $taskName.`n$detail"
-    }
-    $runOutput = & $schtasksCmd.Source /Run /TN $taskName 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
-      & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
-      throw "failed to run breakaway task $taskName.`n$detail"
-    }
-    & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+    Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext "edge launch"
 
     if ($Port -gt 0) {
       $deadline = (Get-Date).AddSeconds(2)
@@ -261,30 +307,13 @@ function Invoke-BreakawayCommand {
   $launcherLines += "endlocal"
   Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
 
-  $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
-  if ($null -eq $schtasksCmd) {
-    throw "schtasks.exe not found; cannot launch breakaway process"
-  }
   $prefix = [string]$TaskPrefix
   if (-not $prefix) {
     $prefix = "NatsumeLaunch"
   }
   $taskName = "{0}_{1}" -f $prefix, ([Guid]::NewGuid().ToString('N').Substring(0, 10))
-  $taskTime = (Get-Date).AddMinutes(2).ToString("HH:mm")
   $taskCommand = "`"$LauncherScriptPath`""
-
-  $createOutput = & $schtasksCmd.Source /Create /TN $taskName /SC ONCE /ST $taskTime /TR $taskCommand /F 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
-    throw "failed to create breakaway task $taskName.`n$detail"
-  }
-  $runOutput = & $schtasksCmd.Source /Run /TN $taskName 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
-    & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
-    throw "failed to run breakaway task $taskName.`n$detail"
-  }
-  & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+  Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext $prefix
 }
 
 function Find-ProcessIdByCommandLine {
