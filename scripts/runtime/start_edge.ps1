@@ -617,6 +617,75 @@ function Start-WeChatClient {
   }
 }
 
+function Ensure-WeChatRegistryCompatibility {
+  param([string]$ExecutablePath = "")
+
+  $wechatRegPath = "Registry::HKEY_CURRENT_USER\Software\Tencent\WeChat"
+  $weixinRegPath = "Registry::HKEY_CURRENT_USER\Software\Tencent\Weixin"
+  $currentInstallPath = ""
+  try {
+    $currentInstallPath = [string]((Get-ItemProperty -Path $wechatRegPath -Name InstallPath -ErrorAction Stop).InstallPath)
+  } catch {
+    $currentInstallPath = ""
+  }
+  if (-not [string]::IsNullOrWhiteSpace($currentInstallPath)) {
+    return [ordered]@{
+      success = $true
+      changed = $false
+      status = "already_present"
+      detail = "HKCU\\Software\\Tencent\\WeChat\\InstallPath already exists"
+      install_path = $currentInstallPath
+    }
+  }
+
+  $candidateInstallPath = ""
+  try {
+    $candidateInstallPath = [string]((Get-ItemProperty -Path $weixinRegPath -Name InstallPath -ErrorAction Stop).InstallPath)
+  } catch {
+    $candidateInstallPath = ""
+  }
+
+  if ([string]::IsNullOrWhiteSpace($candidateInstallPath) -and -not [string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    if (Test-Path -Path $ExecutablePath -PathType Leaf) {
+      $candidateInstallPath = Split-Path -Parent $ExecutablePath
+    } elseif (Test-Path -Path $ExecutablePath -PathType Container) {
+      $candidateInstallPath = $ExecutablePath
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($candidateInstallPath)) {
+    return [ordered]@{
+      success = $false
+      changed = $false
+      status = "missing_candidate"
+      detail = "cannot infer WeChat InstallPath from registry or EDGE_WECHAT_EXECUTABLE_PATH"
+      install_path = $null
+    }
+  }
+
+  try {
+    if (-not (Test-Path -Path $wechatRegPath)) {
+      New-Item -Path $wechatRegPath -Force | Out-Null
+    }
+    New-ItemProperty -Path $wechatRegPath -Name InstallPath -Value $candidateInstallPath -PropertyType String -Force | Out-Null
+    return [ordered]@{
+      success = $true
+      changed = $true
+      status = "created_from_weixin"
+      detail = "created HKCU\\Software\\Tencent\\WeChat\\InstallPath for wcferry compatibility"
+      install_path = $candidateInstallPath
+    }
+  } catch {
+    return [ordered]@{
+      success = $false
+      changed = $false
+      status = "create_failed"
+      detail = "failed to create WeChat registry compatibility key: $($_.Exception.Message)"
+      install_path = $candidateInstallPath
+    }
+  }
+}
+
 function Test-PythonImport {
   param(
     [string]$PythonPath,
@@ -722,6 +791,8 @@ $wechatClientStatus = "skipped"
 $wechatClientDetail = "wechat bridge disabled"
 $wechatClientPid = $null
 $wechatClientProcessName = $null
+$wechatRegistryCompatStatus = "skipped"
+$wechatRegistryCompatDetail = "wechat bridge disabled"
 
 $wechatBridgePidFile = Join-Path $runtimeRoot "wechat_bridge.pid"
 $wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
@@ -1046,6 +1117,20 @@ if ($wechatBridgeEnabled) {
     }
   }
 
+  if ($wechatProc) {
+    $wechatRegistryCompat = Ensure-WeChatRegistryCompatibility -ExecutablePath $wechatExecutablePath
+    $wechatRegistryCompatStatus = [string]$wechatRegistryCompat.status
+    $wechatRegistryCompatDetail = [string]$wechatRegistryCompat.detail
+    if (-not [bool]$wechatRegistryCompat.success) {
+      if (-not ($startupWarnings -contains "WECHAT_REGISTRY_COMPAT_DEGRADED")) {
+        $startupWarnings += "WECHAT_REGISTRY_COMPAT_DEGRADED"
+      }
+    }
+  } else {
+    $wechatRegistryCompatStatus = "skipped_no_wechat_process"
+    $wechatRegistryCompatDetail = "wechat process is not available; skip registry compatibility"
+  }
+
   if (-not $wechatProc) {
     $wechatBridgeStatus = "wechat_not_running"
     $wechatBridgeError = "wechat process not available; $wechatClientDetail"
@@ -1071,13 +1156,14 @@ if ($wechatBridgeEnabled) {
         -RedirectStandardOutput $wechatBridgeLog `
         -RedirectStandardError $wechatBridgeErrLog
       $wechatBridgePid = [int]$bridgeProc.Id
-      Start-Sleep -Seconds 3
+      Start-Sleep -Seconds 8
       $bridgeAlive = Get-Process -Id $wechatBridgePid -ErrorAction SilentlyContinue
       if ($null -eq $bridgeAlive) {
         $errTail = ""
         if (Test-Path -Path $wechatBridgeErrLog) {
           $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
         }
+        $wechatBridgePid = $null
         $wechatBridgeStatus = "start_failed"
         $wechatBridgeError = if ($errTail) { "wechat bridge exited immediately.`n$errTail" } else { "wechat bridge exited immediately without stderr output" }
         if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
@@ -1089,6 +1175,7 @@ if ($wechatBridgeEnabled) {
         $wechatBridgeStatus = "started"
       }
     } catch {
+      $wechatBridgePid = $null
       $wechatBridgeStatus = "start_failed"
       $wechatBridgeError = $_.Exception.Message
       if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
@@ -1134,6 +1221,8 @@ $result = [ordered]@{
   wechat_client_detail = $wechatClientDetail
   wechat_client_process_name = $wechatClientProcessName
   wechat_client_pid = $wechatClientPid
+  wechat_registry_compat_status = $wechatRegistryCompatStatus
+  wechat_registry_compat_detail = $wechatRegistryCompatDetail
   wechat_bridge_enabled = $wechatBridgeEnabled
   wechat_bridge_status = $wechatBridgeStatus
   wechat_bridge_pid = $wechatBridgePid
