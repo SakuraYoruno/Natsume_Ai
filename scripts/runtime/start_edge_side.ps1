@@ -2,7 +2,7 @@
 param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
-  [int]$WaitSeconds = 20,
+  [int]$WaitSeconds = 60,
   [switch]$ForceRestart,
   [bool]$AutoDegradeOnAsrCrash = $false
 )
