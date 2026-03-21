@@ -46,6 +46,19 @@ function Set-ProcessEnv {
   }
 }
 
+function Ensure-ProcessEnvDefault {
+  param(
+    [string]$Key,
+    [string]$DefaultValue
+  )
+  $current = [Environment]::GetEnvironmentVariable($Key, "Process")
+  if (-not [string]::IsNullOrWhiteSpace([string]$current)) {
+    return $false
+  }
+  [Environment]::SetEnvironmentVariable($Key, [string]$DefaultValue, "Process")
+  return $true
+}
+
 function Get-NvidiaCudaDllDirs {
   param([string]$PythonRoot)
   $dirs = New-Object System.Collections.Generic.List[string]
@@ -452,6 +465,23 @@ $useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+$startupEnvDefaultsApplied = @()
+if (Ensure-ProcessEnvDefault -Key "EDGE_ASR_LANGUAGE" -DefaultValue "zh") {
+  $envValues["EDGE_ASR_LANGUAGE"] = "zh"
+  $startupEnvDefaultsApplied += "EDGE_ASR_LANGUAGE=zh"
+}
+if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "ja") {
+  $envValues["EDGE_TTS_LANGUAGE"] = "ja"
+  $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=ja"
+}
+if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
+  $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
+  $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
+}
+
+$resolvedAsrLanguage = [string]([Environment]::GetEnvironmentVariable("EDGE_ASR_LANGUAGE", "Process"))
+$resolvedTtsLanguage = [string]([Environment]::GetEnvironmentVariable("EDGE_TTS_LANGUAGE", "Process"))
+$resolvedBargeInEnabled = Parse-Bool -Value ([Environment]::GetEnvironmentVariable("EDGE_BARGE_IN_ENABLED", "Process")) -Default $false
 
 $port = 17800
 if ($envValues.ContainsKey("EDGE_RPC_PORT")) {
@@ -833,6 +863,10 @@ $result = [ordered]@{
   wechat_bridge_error = $wechatBridgeError
   wechat_bridge_log = if ($wechatBridgeEnabled) { $wechatBridgeLog } else { $null }
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
+  asr_language = $resolvedAsrLanguage
+  tts_language = $resolvedTtsLanguage
+  barge_in_enabled = $resolvedBargeInEnabled
+  startup_env_defaults_applied = $startupEnvDefaultsApplied
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 4
