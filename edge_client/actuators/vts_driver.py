@@ -1,7 +1,7 @@
 """VTube Studio driver: WebSocket API connection, talk gate, and expression mapping.
 
 Provides deterministic VTS integration with talk gate (TALK_START/TALK_END)
-and emotion_tag → expression_id mapping. Falls back gracefully when VTS
+and emotion_tag ?expression_id mapping. Falls back gracefully when VTS
 is disconnected or API calls fail.
 """
 
@@ -46,16 +46,14 @@ DEFAULT_API_TIMEOUT_S = 5.0
 TALK_START = "TALK_START"
 TALK_END = "TALK_END"
 
-# 确定性表情映射表（与 host_brain/channels/vts.py 一致）
+# Keep this map aligned with host_brain/channels/vts.py.
 EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
-    # 原有6种
     "NEUTRAL": "exp_neutral_01",
     "HAPPY": "exp_happy_01",
     "SAD": "exp_sad_01",
     "ANGRY": "exp_angry_01",
     "SURPRISED": "exp_surprised_01",
     "THINKING": "exp_thinking_01",
-    # M28-L（OPT-34）：同步 host_brain/channels/vts.py 新增 10 种
     "EXCITED": "exp_excited_01",
     "CALM": "exp_calm_01",
     "FRUSTRATED": "exp_frustrated_01",
@@ -68,13 +66,45 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
     "GRATEFUL": "exp_grateful_01",
 }
 
-# VTS 参数映射（口型用 mouth_open_level）
+# VTS mouth/lip related input parameters.
 VTS_MOUTH_PARAM = "MouthOpen"
+DEFAULT_MOUTH_PARAM_CANDIDATES: tuple[str, ...] = ("MouthOpen", "ParamMouthOpenY")
+DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES: tuple[str, ...] = (
+    "VoiceVolumePlusMouthOpen",
+    "VoiceVolume",
+)
+DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES: tuple[str, ...] = ("VoiceSilence",)
 VTS_MOUTH_OPEN_VALUE = 1.0
 VTS_MOUTH_CLOSE_VALUE = 0.0
+EMOTION_HOTKEY_HINTS: dict[str, tuple[str, ...]] = {
+    "NEUTRAL": ("neutral", "default", "normal", "idle"),
+    "HAPPY": ("happy", "smile", "joy", "grin"),
+    "SAD": ("sad", "cry", "tear"),
+    "ANGRY": ("angry", "mad", "rage"),
+    "SURPRISED": ("surpris", "wow", "shock"),
+    "THINKING": ("think", "ponder"),
+    "EXCITED": ("excit", "energetic"),
+    "CALM": ("calm", "relax"),
+    "FRUSTRATED": ("frustrat", "annoy"),
+    "ANXIOUS": ("anx", "nervous", "worry"),
+    "LOVING": ("love", "heart"),
+    "EMBARRASSED": ("embarrass", "shy"),
+    "CONFUSED": ("confus", "question"),
+    "BORED": ("bore", "tired"),
+    "PROUD": ("proud",),
+    "GRATEFUL": ("grateful", "thanks"),
+}
+EXPRESSION_HOTKEY_BLOCKED_TOKENS: tuple[str, ...] = (
+    "watermark",
+    "logo",
+    "remove watermark",
+    "remove_watermark",
+    "去水印",
+    "水印",
+)
 
 
-# ── 重连配置常量 ──
+#   
 DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
 DEFAULT_RECONNECT_BASE_DELAY_S = 1.0
 DEFAULT_RECONNECT_MAX_DELAY_S = 16.0
@@ -93,7 +123,7 @@ class VtsState(str, Enum):
 
 @dataclass
 class ReconnectConfig:
-    """VTS WebSocket 自动重连配置。"""
+    """VTS WebSocket auto-reconnect configuration."""
     max_attempts: int = DEFAULT_MAX_RECONNECT_ATTEMPTS
     base_delay_s: float = DEFAULT_RECONNECT_BASE_DELAY_S
     max_delay_s: float = DEFAULT_RECONNECT_MAX_DELAY_S
@@ -117,6 +147,13 @@ class VtsConfig:
     plugin_developer: str = DEFAULT_VTS_PLUGIN_DEVELOPER
     token_path: str = DEFAULT_VTS_TOKEN_PATH
     api_timeout_s: float = DEFAULT_API_TIMEOUT_S
+    mouth_param_candidates: tuple[str, ...] = field(default_factory=lambda: DEFAULT_MOUTH_PARAM_CANDIDATES)
+    mouth_volume_param_candidates: tuple[str, ...] = field(
+        default_factory=lambda: DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES
+    )
+    voice_silence_param_candidates: tuple[str, ...] = field(
+        default_factory=lambda: DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES
+    )
     reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
 
     def as_dict(self) -> dict[str, Any]:
@@ -127,6 +164,9 @@ class VtsConfig:
             "plugin_developer": self.plugin_developer,
             "token_path": self.token_path,
             "api_timeout_s": self.api_timeout_s,
+            "mouth_param_candidates": list(self.mouth_param_candidates),
+            "mouth_volume_param_candidates": list(self.mouth_volume_param_candidates),
+            "voice_silence_param_candidates": list(self.voice_silence_param_candidates),
             "reconnect": self.reconnect.as_dict(),
         }
 
@@ -162,8 +202,8 @@ class VTubeStudioDriver:
     Provides:
     - Connection lifecycle (connect/authenticate/disconnect)
     - Talk gate (TALK_START -> mouth open, TALK_END -> mouth close)
-    - Emotion tag → expression_id deterministic mapping
-    - Barge-in recovery (stop talking → reset to NEUTRAL)
+    - Emotion tag ?expression_id deterministic mapping
+    - Barge-in recovery (stop talking ?reset to NEUTRAL)
     - Graceful degradation when VTS is unavailable
     """
 
@@ -175,13 +215,36 @@ class VTubeStudioDriver:
         self._connection_error: str | None = None
         self._current_expression: str | None = None
         self._talking = False
-        # ── 重连状态 ──
+        #  ?
         self._reconnect_attempts = 0
         self._total_reconnects = 0
         self._total_reconnect_failures = 0
         self._reconnect_thread: threading.Thread | None = None
         self._reconnect_events: list[dict[str, Any]] = []
         self._shutdown_event = threading.Event()
+        self._expression_hotkey_overrides: dict[str, str] = {}
+        self._hotkey_catalog: list[dict[str, str]] = []
+        initial_mouth = [str(item).strip() for item in self._config.mouth_param_candidates if str(item).strip()]
+        if not initial_mouth:
+            initial_mouth = list(DEFAULT_MOUTH_PARAM_CANDIDATES)
+        initial_volume = [
+            str(item).strip()
+            for item in self._config.mouth_volume_param_candidates
+            if str(item).strip()
+        ] or list(DEFAULT_MOUTH_VOLUME_PARAM_CANDIDATES)
+        initial_silence = [
+            str(item).strip()
+            for item in self._config.voice_silence_param_candidates
+            if str(item).strip()
+        ] or list(DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES)
+        self._mouth_parameter_plan: dict[str, Any] = {
+            "selected": list(initial_mouth[:1]),
+            "mouth": list(initial_mouth),
+            "volume": list(initial_volume),
+            "silence": list(initial_silence),
+            "available": [],
+            "last_value": 0.0,
+        }
 
     @property
     def state(self) -> VtsState:
@@ -194,6 +257,15 @@ class VTubeStudioDriver:
     @property
     def current_expression(self) -> str | None:
         return self._current_expression
+
+    def startup(self) -> None:
+        self._shutdown_event.clear()
+        result = self.connect()
+        if not result.success:
+            logger.warning("VTS startup degraded: %s", result.detail)
+
+    def shutdown(self) -> None:
+        self.disconnect()
 
     def connect(self) -> VtsDriverResult:
         """Connect to VTube Studio and authenticate."""
@@ -213,7 +285,7 @@ class VTubeStudioDriver:
                 self._vts = vts_instance
                 self._state = VtsState.CONNECTED
 
-                # 认证
+                # 
                 _authenticate_vts(
                     vts=vts_instance,
                     plugin_name=self._config.plugin_name,
@@ -221,6 +293,11 @@ class VTubeStudioDriver:
                     token_path=self._config.token_path,
                 )
                 self._state = VtsState.AUTHENTICATED
+                self._refresh_mouth_parameter_plan()
+                self._hotkey_catalog = _list_vts_hotkeys(
+                    vts=self._vts,
+                    timeout_s=self._config.api_timeout_s,
+                )
                 logger.info(
                     "VTS connected and authenticated: %s:%d",
                     self._config.host,
@@ -281,35 +358,22 @@ class VTubeStudioDriver:
                     action=TALK_START,
                 )
 
-        try:
-            _set_vts_parameter(
-                vts=self._vts,
-                param_name=VTS_MOUTH_PARAM,
-                value=VTS_MOUTH_OPEN_VALUE,
-                timeout_s=self._config.api_timeout_s,
-            )
-            self._talking = True
-            logger.debug("VTS talk gate: START")
-            return VtsDriverResult(
-                success=True,
-                reason_code=None,
-                detail="talk gate started (mouth open)",
-                action=TALK_START,
-            )
-        except TimeoutError as e:
+        mouth_result = self.set_mouth_open_level(VTS_MOUTH_OPEN_VALUE)
+        if not mouth_result.success:
             return VtsDriverResult(
                 success=False,
-                reason_code=VTS_EXPRESSION_TIMEOUT,
-                detail=f"talk start timeout: {e}",
+                reason_code=mouth_result.reason_code,
+                detail=f"talk start error: {mouth_result.detail}",
                 action=TALK_START,
             )
-        except Exception as e:
-            return VtsDriverResult(
-                success=False,
-                reason_code=VTS_API_ERROR,
-                detail=f"talk start error: {e}",
-                action=TALK_START,
-            )
+        self._talking = True
+        logger.debug("VTS talk gate: START")
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="talk gate started (mouth open)",
+            action=TALK_START,
+        )
 
     def talk_end(self) -> VtsDriverResult:
         """Signal talk gate end (close mouth, reset expression to NEUTRAL)."""
@@ -323,36 +387,136 @@ class VTubeStudioDriver:
                 action=TALK_END,
             )
 
-        try:
-            _set_vts_parameter(
-                vts=self._vts,
-                param_name=VTS_MOUTH_PARAM,
-                value=VTS_MOUTH_CLOSE_VALUE,
-                timeout_s=self._config.api_timeout_s,
-            )
-            logger.debug("VTS talk gate: END")
+        mouth_result = self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
+        if not mouth_result.success:
             return VtsDriverResult(
-                success=True,
-                reason_code=None,
-                detail="talk gate ended (mouth closed)",
+                success=False,
+                reason_code=mouth_result.reason_code,
+                detail=f"talk end error: {mouth_result.detail}",
                 action=TALK_END,
             )
-        except Exception as e:
+        logger.debug("VTS talk gate: END")
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="talk gate ended (mouth closed)",
+            action=TALK_END,
+        )
+
+    def set_mouth_open_level(self, value: float) -> VtsDriverResult:
+        """Drive mouth-open related VTS parameters with runtime fallback."""
+        try:
+            level = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            level = 0.0
+
+        if self._state != VtsState.AUTHENTICATED:
+            conn_result = self.connect()
+            if not conn_result.success:
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail=f"cannot set mouth level: {conn_result.detail}",
+                    action="set_mouth_open_level",
+                )
+
+        mouth_params = self._preferred_mouth_parameters()
+        plan = dict(self._mouth_parameter_plan or {})
+        available_params = {
+            str(item or "").strip()
+            for item in (plan.get("available") or [])
+            if str(item or "").strip()
+        }
+        if available_params:
+            available_mouth_params = [item for item in mouth_params if item in available_params]
+            if available_mouth_params:
+                mouth_params = available_mouth_params
+        errors: list[str] = []
+        selected_primary: str | None = None
+
+        for param in mouth_params:
+            try:
+                _set_vts_parameter(
+                    vts=self._vts,
+                    param_name=param,
+                    value=level,
+                    timeout_s=self._config.api_timeout_s,
+                )
+                selected_primary = param
+                break
+            except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+                errors.append(f"{param}: {exc}")
+
+        if selected_primary is None:
+            detail = "all mouth parameters failed"
+            if errors:
+                detail = f"{detail}: {'; '.join(errors)}"
             return VtsDriverResult(
                 success=False,
                 reason_code=VTS_API_ERROR,
-                detail=f"talk end error: {e}",
-                action=TALK_END,
+                detail=detail,
+                action="set_mouth_open_level",
             )
 
+        # Optional companion parameters: failures here should not fail playback.
+        volume_params = [
+            str(item)
+            for item in (plan.get("volume") or self._candidate_tuple(self._config.mouth_volume_param_candidates))
+            if str(item).strip()
+        ]
+        silence_params = [
+            str(item)
+            for item in (plan.get("silence") or self._candidate_tuple(self._config.voice_silence_param_candidates))
+            if str(item).strip()
+        ]
+        if available_params:
+            filtered_volume = [item for item in volume_params if item in available_params]
+            filtered_silence = [item for item in silence_params if item in available_params]
+            if filtered_volume:
+                volume_params = filtered_volume
+            if filtered_silence:
+                silence_params = filtered_silence
+
+        volume_params = [item for item in volume_params if item != selected_primary]
+        silence_params = [item for item in silence_params if item != selected_primary]
+
+        for volume_param in volume_params:
+            try:
+                _set_vts_parameter(
+                    vts=self._vts,
+                    param_name=volume_param,
+                    value=level,
+                    timeout_s=self._config.api_timeout_s,
+                )
+            except Exception:
+                continue
+        for silence_param in silence_params:
+            try:
+                _set_vts_parameter(
+                    vts=self._vts,
+                    param_name=silence_param,
+                    value=max(0.0, min(1.0, 1.0 - level)),
+                    timeout_s=self._config.api_timeout_s,
+                )
+            except Exception:
+                continue
+
+        plan = dict(self._mouth_parameter_plan)
+        plan["selected"] = [selected_primary]
+        plan["last_value"] = round(level, 4)
+        self._mouth_parameter_plan = plan
+
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail=f"mouth level set via {selected_primary}: {level:.3f}",
+            action="set_mouth_open_level",
+        )
+
     def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
-        """Set expression via deterministic emotion_tag → expression_id mapping.
+        """Set expression via deterministic emotion_tag -> expression_id mapping.
 
         Rejects unknown tags and free-form parameters.
-
-        Args:
-            emotion_tag: 情感标签（枚举值）。
-            intensity: 情感强度（0.0~1.0），影响表情持续时间（M26-I）。缺省为 0.5。
         """
         normalized = str(emotion_tag or "").strip().upper()
         if not normalized:
@@ -375,7 +539,7 @@ class VTubeStudioDriver:
             )
 
         if self._state != VtsState.AUTHENTICATED:
-            # 降级：记录但不阻断
+            # Degrade gracefully when VTS is unavailable.
             self._current_expression = expression_id
             return VtsDriverResult(
                 success=True,
@@ -386,19 +550,24 @@ class VTubeStudioDriver:
                 emotion_tag=normalized,
             )
 
+        override_hotkey = str(self._expression_hotkey_overrides.get(normalized) or "").strip()
+        if override_hotkey and self._is_disallowed_expression_hotkey(override_hotkey):
+            self._expression_hotkey_overrides.pop(normalized, None)
+            override_hotkey = ""
+        hotkey_id = override_hotkey or expression_id
         try:
             _trigger_vts_hotkey(
                 vts=self._vts,
-                hotkey_id=expression_id,
+                hotkey_id=hotkey_id,
                 timeout_s=self._config.api_timeout_s,
             )
-            self._current_expression = expression_id
+            self._current_expression = hotkey_id
             return VtsDriverResult(
                 success=True,
                 reason_code=None,
-                detail=f"expression set: {normalized} -> {expression_id}",
+                detail=f"expression set: {normalized} -> {hotkey_id}",
                 action="set_expression",
-                expression_id=expression_id,
+                expression_id=hotkey_id,
                 emotion_tag=normalized,
             )
         except TimeoutError as e:
@@ -407,16 +576,42 @@ class VTubeStudioDriver:
                 reason_code=VTS_EXPRESSION_TIMEOUT,
                 detail=f"expression timeout: {e}",
                 action="set_expression",
-                expression_id=expression_id,
+                expression_id=hotkey_id,
                 emotion_tag=normalized,
             )
         except Exception as e:
+            fallback_hotkey = self._resolve_hotkey_for_emotion(
+                emotion_tag=normalized,
+                preferred_hotkey=expression_id,
+            )
+            if fallback_hotkey and fallback_hotkey != hotkey_id:
+                try:
+                    _trigger_vts_hotkey(
+                        vts=self._vts,
+                        hotkey_id=fallback_hotkey,
+                        timeout_s=self._config.api_timeout_s,
+                    )
+                    self._expression_hotkey_overrides[normalized] = fallback_hotkey
+                    self._current_expression = fallback_hotkey
+                    return VtsDriverResult(
+                        success=True,
+                        reason_code=None,
+                        detail=(
+                            f"expression set via fallback: {normalized} -> {fallback_hotkey} "
+                            f"(preferred={expression_id})"
+                        ),
+                        action="set_expression",
+                        expression_id=fallback_hotkey,
+                        emotion_tag=normalized,
+                    )
+                except Exception:
+                    pass
             return VtsDriverResult(
                 success=False,
                 reason_code=VTS_API_ERROR,
                 detail=f"expression error: {e}",
                 action="set_expression",
-                expression_id=expression_id,
+                expression_id=hotkey_id,
                 emotion_tag=normalized,
             )
 
@@ -425,32 +620,22 @@ class VTubeStudioDriver:
         self._talking = False
         result = self.set_expression("NEUTRAL")
 
-        # 同时关闭嘴巴
+        # 
         if self._state == VtsState.AUTHENTICATED:
             try:
-                _set_vts_parameter(
-                    vts=self._vts,
-                    param_name=VTS_MOUTH_PARAM,
-                    value=VTS_MOUTH_CLOSE_VALUE,
-                    timeout_s=self._config.api_timeout_s,
-                )
+                self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
             except Exception:
                 pass
 
         return result
 
     def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
-        """触发指定 VTS 热键（M26-H：sub_emotion 细粒度表情驱动）。
-
-        用于触发 sub_emotion 对应的细粒度热键（如脸红、星星眼、爱心眼等）。
-        VTS 未连接时降级处理（记录日志，不阻断链路）。
-
+        """ VTS 26-Hub_emotion ?
+         sub_emotion ?        VTS ?
         Args:
-            hotkey_id: VTS 热键 ID（对应 configs/vts/vts_hotkey_config.yaml 中的 hotkey_id）。
-
+            hotkey_id: VTS  ID?configs/vts/vts_hotkey_config.yaml  hotkey_id?
         Returns:
-            VtsDriverResult，success=True 表示热键触发成功或降级处理。
-        """
+            VtsDriverResultuccess=True ?        """
         if not hotkey_id or not str(hotkey_id).strip():
             return VtsDriverResult(
                 success=False,
@@ -462,7 +647,6 @@ class VTubeStudioDriver:
         normalized_id = str(hotkey_id).strip()
 
         if self._state != VtsState.AUTHENTICATED:
-            # 降级：记录但不阻断
             logger.debug("VTS trigger_hotkey degraded (not connected): %s", normalized_id)
             return VtsDriverResult(
                 success=True,
@@ -499,24 +683,219 @@ class VTubeStudioDriver:
                 action="trigger_hotkey",
             )
 
+    @staticmethod
+    def _candidate_tuple(values: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+        out: list[str] = []
+        for raw in values or ():
+            text = str(raw or "").strip()
+            if text:
+                out.append(text)
+        return tuple(out)
+
+    @staticmethod
+    def _pick_parameter_candidates(
+        available: list[str],
+        *,
+        preferred_exact: tuple[str, ...],
+        token_groups: tuple[tuple[str, ...], ...],
+        fallback_tokens: tuple[str, ...] = (),
+        limit: int = 3,
+    ) -> list[str]:
+        ordered: list[str] = []
+        available_set = {str(item or "").strip() for item in available if str(item or "").strip()}
+        for exact in preferred_exact:
+            text = str(exact or "").strip()
+            if text and text in available_set:
+                ordered.append(text)
+        for item in available:
+            text = str(item or "").strip()
+            if text:
+                ordered.append(text)
+
+        selected: list[str] = []
+        seen: set[str] = set()
+        for text in ordered:
+            if text in seen:
+                continue
+            lowered = text.lower()
+            matched = False
+            for tokens in token_groups:
+                if not tokens:
+                    continue
+                if all(token in lowered for token in tokens):
+                    matched = True
+                    break
+            if matched:
+                seen.add(text)
+                selected.append(text)
+            if len(selected) >= max(1, int(limit)):
+                break
+
+        if selected:
+            return selected
+        normalized_fallback_tokens = tuple(
+            token.strip().lower()
+            for token in fallback_tokens
+            if str(token).strip()
+        )
+        if not normalized_fallback_tokens:
+            return selected
+        for text in ordered:
+            if text in seen:
+                continue
+            lowered = text.lower()
+            if any(token in lowered for token in normalized_fallback_tokens):
+                seen.add(text)
+                selected.append(text)
+            if len(selected) >= max(1, int(limit)):
+                break
+        return selected
+
+    def _refresh_mouth_parameter_plan(self) -> None:
+        available = _list_vts_input_parameter_ids(
+            vts=self._vts,
+            timeout_s=self._config.api_timeout_s,
+        )
+
+        mouth_candidates = self._candidate_tuple(self._config.mouth_param_candidates)
+        volume_candidates = self._candidate_tuple(self._config.mouth_volume_param_candidates)
+        silence_candidates = self._candidate_tuple(self._config.voice_silence_param_candidates)
+
+        if available:
+            available_set = set(available)
+            selected_mouth = [item for item in mouth_candidates if item in available_set]
+            selected_volume = [item for item in volume_candidates if item in available_set]
+            selected_silence = [item for item in silence_candidates if item in available_set]
+
+            if not selected_mouth:
+                selected_mouth = self._pick_parameter_candidates(
+                    available,
+                    preferred_exact=mouth_candidates,
+                    token_groups=(
+                        ("mouthopen",),
+                        ("mouth", "open"),
+                        ("param", "mouth", "open"),
+                        ("jaw", "open"),
+                    ),
+                    fallback_tokens=("mouthopen", "jawopen"),
+                    limit=3,
+                )
+            if not selected_volume:
+                selected_volume = self._pick_parameter_candidates(
+                    available,
+                    preferred_exact=volume_candidates,
+                    token_groups=(
+                        ("voicevolumeplusmouthopen",),
+                        ("voice", "volume"),
+                        ("volume",),
+                    ),
+                    fallback_tokens=("volume", "voice"),
+                    limit=2,
+                )
+            if not selected_silence:
+                selected_silence = self._pick_parameter_candidates(
+                    available,
+                    preferred_exact=silence_candidates,
+                    token_groups=(
+                        ("voicesilence",),
+                        ("voice", "silence"),
+                        ("silence",),
+                    ),
+                    fallback_tokens=("silence", "voice"),
+                    limit=2,
+                )
+        else:
+            selected_mouth = list(mouth_candidates)
+            selected_volume = list(volume_candidates)
+            selected_silence = list(silence_candidates)
+
+        if not selected_mouth:
+            if selected_volume:
+                selected_mouth = [selected_volume[0]]
+            else:
+                selected_mouth = [VTS_MOUTH_PARAM]
+
+        self._mouth_parameter_plan = {
+            "selected": list(selected_mouth),
+            "mouth": list(selected_mouth),
+            "volume": list(selected_volume),
+            "silence": list(selected_silence),
+            "available": list(available),
+            "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
+        }
+
+    def _preferred_mouth_parameters(self) -> list[str]:
+        plan = dict(self._mouth_parameter_plan or {})
+        selected = [str(item) for item in (plan.get("selected") or []) if str(item).strip()]
+        plan_mouth = [str(item) for item in (plan.get("mouth") or []) if str(item).strip()]
+        cfg_candidates = [str(item) for item in self._candidate_tuple(self._config.mouth_param_candidates)]
+        plan_volume = [str(item) for item in (plan.get("volume") or []) if str(item).strip()]
+        cfg_volume = [str(item) for item in self._candidate_tuple(self._config.mouth_volume_param_candidates)]
+        ordered = selected + plan_mouth + cfg_candidates + plan_volume + cfg_volume + [VTS_MOUTH_PARAM]
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in ordered:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        return deduped or [VTS_MOUTH_PARAM]
+
+    def _is_disallowed_expression_hotkey(self, hotkey_id: str, *, name: str = "") -> bool:
+        lowered = f"{hotkey_id} {name}".lower()
+        return any(token in lowered for token in EXPRESSION_HOTKEY_BLOCKED_TOKENS)
+
+    def _resolve_hotkey_for_emotion(
+        self,
+        *,
+        emotion_tag: str,
+        preferred_hotkey: str,
+    ) -> str | None:
+        catalog = list(self._hotkey_catalog or [])
+        if not catalog:
+            catalog = _list_vts_hotkeys(vts=self._vts, timeout_s=self._config.api_timeout_s)
+            self._hotkey_catalog = list(catalog)
+        if not catalog:
+            return None
+
+        preferred_norm = str(preferred_hotkey or "").strip().lower()
+        if preferred_norm:
+            for row in catalog:
+                hotkey_id = str(row.get("id") or "").strip()
+                name = str(row.get("name") or "").strip()
+                if hotkey_id.lower() == preferred_norm and not self._is_disallowed_expression_hotkey(
+                    hotkey_id,
+                    name=name,
+                ):
+                    return hotkey_id
+
+        hints = EMOTION_HOTKEY_HINTS.get(str(emotion_tag or "").strip().upper(), ())
+        ordered_hints = tuple(hints)
+        for hint in ordered_hints:
+            hint_norm = str(hint or "").strip().lower()
+            if not hint_norm:
+                continue
+            for row in catalog:
+                hotkey_id = str(row.get("id") or "").strip()
+                name = str(row.get("name") or "").strip()
+                if self._is_disallowed_expression_hotkey(hotkey_id, name=name):
+                    continue
+                if hint_norm in hotkey_id.lower() or hint_norm in name.lower():
+                    return hotkey_id
+        return None
+
     # -----------------------------------------------------------------
-    # WebSocket 自动重连（TASK-0080）
-    # -----------------------------------------------------------------
+    # WebSocket ASK-0080?    # -----------------------------------------------------------------
 
     def _reconnect_loop(self) -> None:
-        """指数退避 WebSocket 自动重连循环。
-
-        在独立线程中运行。重连成功后恢复 neutral 表情并上报
-        VTS_RECONNECTED 事件；全部失败后进入 DISCONNECTED 并上报
-        VTS_RECONNECT_EXHAUSTED。
-        """
+        """?WebSocket ?
+         neutral ?        VTS_RECONNECTED  DISCONNECTED ?        VTS_RECONNECT_EXHAUSTED?        """
         rc = self._config.reconnect
         delay = rc.base_delay_s
         self._reconnect_attempts = 0
 
-        # 注意：state 已由 trigger_reconnect 在 lock 内设置为 RECONNECTING
-        # 此处无需重复设置，避免竞态
-
+        # tate  trigger_reconnect ?lock  RECONNECTING
+        # ?
         logger.info(
             "VTS reconnect loop started (max_attempts=%d, base_delay=%.1fs)",
             rc.max_attempts, rc.base_delay_s,
@@ -536,7 +915,7 @@ class VTubeStudioDriver:
             try:
                 result = self.connect()
                 if result.success:
-                    # 重连成功——恢复 neutral
+                    # ?neutral
                     self._total_reconnects += 1
                     neutral_result = self.reset_to_neutral()
                     event = {
@@ -552,7 +931,7 @@ class VTubeStudioDriver:
                     )
                     return
                 else:
-                    # connect 失败，确保 state 保持 RECONNECTING
+                    # connect ?state  RECONNECTING
                     with self._lock:
                         if self._state != VtsState.SHUTDOWN:
                             self._state = VtsState.RECONNECTING
@@ -564,13 +943,13 @@ class VTubeStudioDriver:
                     if self._state != VtsState.SHUTDOWN:
                         self._state = VtsState.RECONNECTING
 
-            # 等待退避时间（可被 shutdown 中断）
+            # Wait with backoff; allow shutdown to cancel reconnect loop.
             if self._shutdown_event.wait(timeout=min(delay, rc.max_delay_s)):
                 logger.info("VTS reconnect cancelled by shutdown during wait")
                 return
             delay = min(delay * 2, rc.max_delay_s)
 
-        # 全部重连失败
+        # 
         self._total_reconnect_failures += 1
         with self._lock:
             self._state = VtsState.DISCONNECTED
@@ -587,11 +966,8 @@ class VTubeStudioDriver:
         )
 
     def trigger_reconnect(self) -> VtsDriverResult:
-        """触发 WebSocket 自动重连（非阻塞）。
-
-        通常由 API 调用失败时自动触发，也可手动调用。
-        如果已在重连中则返回 no-op。
-        """
+        """ WebSocket ?
+        ?API ?         no-op?        """
         rc = self._config.reconnect
         if not rc.auto_reconnect:
             return VtsDriverResult(
@@ -616,7 +992,7 @@ class VTubeStudioDriver:
                     detail="driver is shutdown",
                     action="trigger_reconnect",
                 )
-            # 在 lock 内提前设置 RECONNECTING，避免线程启动前的竞态
+            # Set state before thread starts to avoid race windows.
             self._state = VtsState.RECONNECTING
 
         self._shutdown_event.clear()
@@ -635,7 +1011,7 @@ class VTubeStudioDriver:
         )
 
     def _maybe_trigger_reconnect(self, reason: str) -> None:
-        """API 调用失败时检查是否需要自动重连。"""
+        """Trigger reconnect when API calls indicate lost connection."""
         rc = self._config.reconnect
         if not rc.auto_reconnect:
             return
@@ -646,7 +1022,7 @@ class VTubeStudioDriver:
 
     @property
     def reconnect_events(self) -> list[dict[str, Any]]:
-        """返回重连事件日志（可写入审计）。"""
+        """Return reconnect audit events."""
         return list(self._reconnect_events)
 
     def health(self) -> dict[str, Any]:
@@ -655,9 +1031,19 @@ class VTubeStudioDriver:
             "state": self._state.value,
             "talking": self._talking,
             "current_expression": self._current_expression,
+            "mouth_parameters": {
+                "selected": list(self._mouth_parameter_plan.get("selected") or []),
+                "mouth": list(self._mouth_parameter_plan.get("mouth") or []),
+                "volume": list(self._mouth_parameter_plan.get("volume") or []),
+                "silence": list(self._mouth_parameter_plan.get("silence") or []),
+                "available": list(self._mouth_parameter_plan.get("available") or []),
+                "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
+            },
             "config": self._config.as_dict(),
             "connection_error": self._connection_error,
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
+            "hotkey_catalog_size": len(self._hotkey_catalog),
+            "expression_overrides": dict(self._expression_hotkey_overrides),
             "reconnect": {
                 "total_reconnects": self._total_reconnects,
                 "total_reconnect_failures": self._total_reconnect_failures,
@@ -758,10 +1144,13 @@ def _set_vts_parameter(
                 ],
             },
         )
-        await asyncio.wait_for(
+        response = await asyncio.wait_for(
             vts.request(request),
             timeout=timeout_s,
         )
+        error = _extract_vts_api_error(response, default="")
+        if error:
+            raise RuntimeError(error)
 
     _run_in_vts_loop(_set(), timeout_s=timeout_s + 1.0)
 
@@ -783,12 +1172,89 @@ def _trigger_vts_hotkey(
                 "hotkeyID": hotkey_id,
             },
         )
-        await asyncio.wait_for(
+        response = await asyncio.wait_for(
             vts.request(request),
             timeout=timeout_s,
         )
+        error = _extract_vts_api_error(response, default="")
+        if error:
+            raise RuntimeError(error)
 
     _run_in_vts_loop(_trigger(), timeout_s=timeout_s + 1.0)
+
+
+def _list_vts_input_parameter_ids(*, vts: Any, timeout_s: float) -> list[str]:
+    """Fetch runtime-available VTS input parameter IDs."""
+    if vts is None:
+        return []
+
+    async def _list() -> list[str]:
+        request = vts.vts_request.BaseRequest("InputParameterListRequest", {})
+        response = await asyncio.wait_for(vts.request(request), timeout=timeout_s)
+        error = _extract_vts_api_error(response, default="")
+        if error:
+            raise RuntimeError(error)
+        data = dict(response.get("data") or {})
+        ids: list[str] = []
+        for key in ("modelParameters", "defaultParameters", "parameters"):
+            rows = data.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                pid = str(row.get("id") or "").strip()
+                if pid:
+                    ids.append(pid)
+        seen: set[str] = set()
+        unique: list[str] = []
+        for item in ids:
+            if item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+        return unique
+
+    try:
+        return list(_run_in_vts_loop(_list(), timeout_s=timeout_s + 1.0) or [])
+    except Exception:
+        return []
+
+
+def _list_vts_hotkeys(*, vts: Any, timeout_s: float) -> list[dict[str, str]]:
+    """Fetch hotkeys in current VTS model."""
+    if vts is None:
+        return []
+
+    async def _list() -> list[dict[str, str]]:
+        request = vts.vts_request.BaseRequest("HotkeysInCurrentModelRequest", {})
+        response = await asyncio.wait_for(vts.request(request), timeout=timeout_s)
+        error = _extract_vts_api_error(response, default="")
+        if error:
+            raise RuntimeError(error)
+        data = dict(response.get("data") or {})
+        rows = data.get("availableHotkeys")
+        if not isinstance(rows, list):
+            return []
+        out: list[dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            hotkey_id = str(row.get("hotkeyID") or row.get("id") or "").strip()
+            if not hotkey_id:
+                continue
+            out.append(
+                {
+                    "id": hotkey_id,
+                    "name": str(row.get("name") or row.get("hotkeyName") or "").strip(),
+                }
+            )
+        return out
+
+    try:
+        return list(_run_in_vts_loop(_list(), timeout_s=timeout_s + 1.0) or [])
+    except Exception:
+        return []
 
 
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
@@ -825,10 +1291,21 @@ def _extract_vts_api_error(response: Any, *, default: str) -> str:
     if not isinstance(response, dict):
         return str(default)
     data = dict(response.get("data") or {})
-    message = str(data.get("message") or "").strip()
+    message = str(data.get("message") or response.get("message") or "").strip()
     error_id = data.get("errorID")
-    if message and error_id is not None:
-        return f"VTS API error {error_id}: {message}"
-    if message:
-        return f"VTS API error: {message}"
+    if error_id is None:
+        error_id = response.get("errorID")
+    try:
+        error_id_int = int(error_id) if error_id is not None else 0
+    except (TypeError, ValueError):
+        error_id_int = 0
+
+    # VTS uses errorID=0 for success.
+    if error_id_int > 0:
+        if message:
+            return f"VTS API error {error_id_int}: {message}"
+        return f"VTS API error {error_id_int}"
+    if str(response.get("messageType") or "").strip().lower() == "apierror":
+        return f"VTS API error: {message or default}"
     return str(default)
+

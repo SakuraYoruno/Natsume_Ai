@@ -343,7 +343,7 @@ class EdgeVoicePipeline:
         if not payload.get("emotion_tag") and speak_event.get("emotion_tag"):
             payload["emotion_tag"] = str(speak_event["emotion_tag"]).strip().upper()
         _etag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
-        _has_audio = bool(synth_event and synth_event.get("audio_data"))
+        _has_audio = self._synth_event_has_audio(synth_event)
         LOGGER.info(
             "VTS start (pre-playback): emotion_tag=%s synth_has_audio=%s",
             _etag, _has_audio,
@@ -412,15 +412,35 @@ class EdgeVoicePipeline:
             "intensity": round(float(intensity), 4),
             "vts_parameters": dict(vts_health.get("mouth_parameters") or {}),
         }
-        if synth_event and talk_result.success:
+        has_audio = self._synth_event_has_audio(synth_event)
+        if has_audio and talk_result.success:
             mouth_sync_debug = self._start_mouth_sync(synth_event)
-        elif not synth_event:
+        elif not has_audio:
             mouth_sync_debug["reason"] = "missing_synth_event"
             LOGGER.warning(
                 "VTS mouth sync skipped: no synth_event (Edge needs local TTS with audio_data, e.g. SoVITS, for lip sync)"
             )
         self._mouth_sync_debug = dict(mouth_sync_debug)
         return expression_result, talk_result, dict(mouth_sync_debug)
+
+    @staticmethod
+    def _synth_event_has_audio(synth_event: dict[str, Any] | None) -> bool:
+        if not isinstance(synth_event, dict):
+            return False
+        if "audio_data" not in synth_event:
+            return False
+        audio_data = synth_event.get("audio_data")
+        if audio_data is None:
+            return False
+        size_attr = getattr(audio_data, "size", None)
+        if isinstance(size_attr, int):
+            return size_attr > 0
+        if isinstance(audio_data, (bytes, bytearray, memoryview, str)):
+            return len(audio_data) > 0
+        try:
+            return len(audio_data) > 0  # type: ignore[arg-type]
+        except Exception:
+            return True
 
     def _stop_mouth_sync(self) -> None:
         self._mouth_sync_stop.set()
@@ -472,6 +492,20 @@ class EdgeVoicePipeline:
         debug["envelope_min"] = round(min(envelope), 4)
         debug["envelope_max"] = round(max(envelope), 4)
         debug["envelope_avg"] = round(sum(envelope) / len(envelope), 4)
+        probe_value = max(0.18, min(0.92, float(envelope[0])))
+        debug["probe_value"] = round(probe_value, 4)
+        probe_result = self.vts_driver.set_mouth_open_level(probe_value)
+        if not probe_result.success:
+            debug["state"] = "blocked"
+            debug["reason"] = "mouth_param_unwritable"
+            debug["detail"] = probe_result.detail
+            self._mouth_sync_debug = dict(debug)
+            LOGGER.warning(
+                "VTS mouth sync blocked: %s",
+                probe_result.detail,
+            )
+            return debug
+        self.vts_driver.set_mouth_open_level(0.0)
 
         stop_event = self._mouth_sync_stop
         frame_interval_s = max(0.02, min(0.08, 1.0 / 24.0))
