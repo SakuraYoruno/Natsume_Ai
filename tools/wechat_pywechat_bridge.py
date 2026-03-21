@@ -9,6 +9,7 @@ messages to Edge callback endpoint:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import logging
@@ -27,6 +28,7 @@ DEFAULT_EDGE_URL = "http://127.0.0.1:17800"
 CALLBACK_PATH = "/v1/edge/wechat/callback"
 TIMEOUT_S = 10
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
+WECHAT_MAIN_WINDOW_CLASS = "WeChatMainWndForPC"
 
 logger = logging.getLogger("Natsume.wechat_pywechat_bridge")
 logging.basicConfig(
@@ -268,6 +270,31 @@ def _patch_pywechat_process_probe(pywechat_auto: Any, pywechat_tools: Any) -> No
         logger.warning("did not patch any pywechat process probe target")
 
 
+def _find_main_window_handle() -> int:
+    try:
+        return int(ctypes.windll.user32.FindWindowW(WECHAT_MAIN_WINDOW_CLASS, None))
+    except Exception:
+        return 0
+
+
+def _ensure_main_window_visible(wechat_path: str, timeout_s: float = 8.0) -> bool:
+    if _find_main_window_handle():
+        return True
+
+    if wechat_path:
+        try:
+            subprocess.Popen([wechat_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as exc:
+            logger.warning("failed to launch wechat executable: %s", exc)
+
+    deadline = time.time() + max(1.0, float(timeout_s))
+    while time.time() < deadline:
+        if _find_main_window_handle():
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Poll pywechat unread messages and forward to Edge callback."
@@ -328,6 +355,7 @@ def main() -> int:
     while True:
         try:
             wechat_running = _is_wechat_client_running()
+            has_main_window = _find_main_window_handle() > 0
             wechat_path_arg = None
             if resolved_wechat_path and not wechat_running:
                 # Only pass path when client is not running, to avoid pywechat
@@ -336,11 +364,19 @@ def main() -> int:
 
             if last_wechat_running is None or wechat_running != last_wechat_running:
                 logger.info(
-                    "wechat process running=%s path_arg=%s",
+                    "wechat process running=%s main_window=%s path_arg=%s",
                     wechat_running,
+                    has_main_window,
                     wechat_path_arg or "(auto)",
                 )
                 last_wechat_running = wechat_running
+
+            if not has_main_window:
+                ready = _ensure_main_window_visible(resolved_wechat_path)
+                if not ready:
+                    logger.warning("wechat main window unavailable; skip this poll cycle")
+                    time.sleep(poll_interval)
+                    continue
 
             raw = check_new_message(
                 duration=None,
