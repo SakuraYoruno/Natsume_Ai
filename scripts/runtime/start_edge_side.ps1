@@ -3,7 +3,8 @@ param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
   [int]$WaitSeconds = 20,
-  [switch]$ForceRestart
+  [switch]$ForceRestart,
+  [bool]$AutoDegradeOnAsrCrash = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +18,8 @@ $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `
   -LogDir $LogDir `
   -WaitSeconds $WaitSeconds `
-  -ForceRestart:$ForceRestart.IsPresent
+  -ForceRestart:$ForceRestart.IsPresent `
+  -AutoDegradeOnAsrCrash:$AutoDegradeOnAsrCrash
 
 $edgeJson = ($edgeRaw | Out-String).Trim()
 if (-not $edgeJson) {
