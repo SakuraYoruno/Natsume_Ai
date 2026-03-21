@@ -438,6 +438,86 @@ def _run_pywechat_call(fn: Any, kwargs: dict[str, Any]) -> tuple[bool, str]:
         return False, f"{exc.__class__.__name__}: {exc}"
 
 
+def _set_clipboard_text(text: str) -> tuple[bool, str]:
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    cf_unicode_text = 13
+    gmem_moveable = 0x0002
+    payload = (str(text or "") + "\x00").encode("utf-16-le")
+
+    if not bool(user32.OpenClipboard(0)):
+        return False, "OpenClipboard failed"
+    h_mem = None
+    try:
+        if not bool(user32.EmptyClipboard()):
+            return False, "EmptyClipboard failed"
+        h_mem = kernel32.GlobalAlloc(gmem_moveable, len(payload))
+        if not h_mem:
+            return False, "GlobalAlloc failed"
+        ptr = kernel32.GlobalLock(h_mem)
+        if not ptr:
+            return False, "GlobalLock failed"
+        ctypes.memmove(ptr, payload, len(payload))
+        kernel32.GlobalUnlock(h_mem)
+        if not bool(user32.SetClipboardData(cf_unicode_text, h_mem)):
+            return False, "SetClipboardData failed"
+        h_mem = None
+        return True, "ok"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+    finally:
+        if h_mem:
+            kernel32.GlobalFree(h_mem)
+        user32.CloseClipboard()
+
+
+def _focus_wechat_main_window() -> tuple[bool, str]:
+    hwnd = _find_main_window_handle()
+    if not hwnd:
+        return False, "wechat main window not found"
+    try:
+        user32 = ctypes.windll.user32
+        sw_restore = 9
+        user32.ShowWindow(hwnd, sw_restore)
+        user32.SetForegroundWindow(hwnd)
+        time.sleep(0.2)
+        return True, f"focused hwnd=0x{hwnd:X}"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
+def _send_text_via_hotkeys(target: str, content: str) -> tuple[bool, str]:
+    try:
+        import pyautogui
+    except Exception as exc:
+        return False, f"pyautogui import failed: {exc}"
+
+    focus_ok, focus_detail = _focus_wechat_main_window()
+    if not focus_ok:
+        return False, focus_detail
+
+    clip_ok, clip_detail = _set_clipboard_text(content)
+    if not clip_ok:
+        return False, f"clipboard failed: {clip_detail}"
+
+    try:
+        pyautogui.FAILSAFE = False
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.25)
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("backspace")
+        pyautogui.write(str(target or ""), interval=0.02)
+        time.sleep(0.2)
+        pyautogui.press("enter")
+        time.sleep(0.35)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.12)
+        pyautogui.press("enter")
+        return True, f"ok ({focus_detail})"
+    except Exception as exc:
+        return False, f"hotkey send failed: {exc.__class__.__name__}: {exc}"
+
+
 def _execute_command(
     command: dict[str, Any],
     *,
@@ -500,6 +580,13 @@ def _execute_command(
             send_message_to_friend,
             kwargs={**common_kwargs, "message": content},
         )
+        if not ok:
+            fallback_ok, fallback_detail = _send_text_via_hotkeys(target=target, content=content)
+            if fallback_ok:
+                ok = True
+                detail = f"{detail}; fallback_hotkeys={fallback_detail}"
+            else:
+                detail = f"{detail}; fallback_hotkeys_failed={fallback_detail}"
     elif action == "voice_call":
         ok, detail = _run_pywechat_call(
             voice_call,
