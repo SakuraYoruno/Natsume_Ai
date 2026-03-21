@@ -30,6 +30,12 @@ TIMEOUT_S = 10
 DEFAULT_COMMAND_POLL_INTERVAL_S = 0.5
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS = "WeChatMainWndForPC"
+WECHAT_MAIN_WINDOW_CLASS_HINTS = {
+    "wechatmainwndforpc",
+    "weixinmainwndforpc",
+    "weixinmainwnd",
+}
+WECHAT_WINDOW_TITLE_HINTS = ("微信", "Weixin", "WeChat")
 
 logger = logging.getLogger("Natsume.wechat_pywechat_bridge")
 logging.basicConfig(
@@ -273,9 +279,60 @@ def _patch_pywechat_process_probe(pywechat_auto: Any, pywechat_tools: Any) -> No
 
 def _find_main_window_handle() -> int:
     try:
-        return int(ctypes.windll.user32.FindWindowW(WECHAT_MAIN_WINDOW_CLASS, None))
+        exact = int(ctypes.windll.user32.FindWindowW(WECHAT_MAIN_WINDOW_CLASS, None))
+        if exact:
+            return exact
     except Exception:
-        return 0
+        pass
+
+    for hwnd, class_name, title in _enum_visible_windows():
+        class_key = str(class_name or "").strip().lower()
+        title_text = str(title or "").strip()
+        if class_key in WECHAT_MAIN_WINDOW_CLASS_HINTS:
+            return int(hwnd)
+        if title_text and any(hint in title_text for hint in WECHAT_WINDOW_TITLE_HINTS):
+            return int(hwnd)
+    return 0
+
+
+def _enum_visible_windows() -> list[tuple[int, str, str]]:
+    windows: list[tuple[int, str, str]] = []
+    user32 = ctypes.windll.user32
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+
+    def _callback(hwnd: int, _lparam: int) -> bool:
+        try:
+            if not bool(user32.IsWindowVisible(hwnd)):
+                return True
+            length = int(user32.GetWindowTextLengthW(hwnd))
+            title_buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title_buf, length + 1)
+            class_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, class_buf, 256)
+            title = str(title_buf.value or "").strip()
+            class_name = str(class_buf.value or "").strip()
+            if title or class_name:
+                windows.append((int(hwnd), class_name, title))
+        except Exception:
+            return True
+        return True
+
+    try:
+        user32.EnumWindows(enum_proc(_callback), 0)
+    except Exception:
+        return []
+    return windows
+
+
+def _log_window_probe_snapshot(limit: int = 20) -> None:
+    rows = _enum_visible_windows()
+    if not rows:
+        logger.info("window probe snapshot: no visible top-level windows")
+        return
+    parts = []
+    for hwnd, class_name, title in rows[: max(1, int(limit))]:
+        parts.append(f"0x{hwnd:X} class={class_name!r} title={title!r}")
+    logger.info("window probe snapshot (%d): %s", len(rows), " | ".join(parts))
 
 
 def _ensure_main_window_visible(wechat_path: str, timeout_s: float = 8.0) -> bool:
@@ -293,6 +350,7 @@ def _ensure_main_window_visible(wechat_path: str, timeout_s: float = 8.0) -> boo
         if _find_main_window_handle():
             return True
         time.sleep(0.25)
+    _log_window_probe_snapshot(limit=15)
     return False
 
 
