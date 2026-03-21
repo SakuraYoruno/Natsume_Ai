@@ -1231,6 +1231,12 @@ if ($wechatBridgeEnabled) {
     $wechatClientPid = [int]$wechatProc.Id
     $wechatClientProcessName = [string]$wechatProc.ProcessName
     $wechatClientDetail = "wechat process is running ($wechatClientProcessName pid=$wechatClientPid)"
+    if ($wechatClientProcessName -and $wechatClientProcessName.Equals("Weixin", [StringComparison]::OrdinalIgnoreCase)) {
+      if (-not ($startupWarnings -contains "WECHAT_CLIENT_WEIXIN_ONLY")) {
+        $startupWarnings += "WECHAT_CLIENT_WEIXIN_ONLY"
+      }
+      $wechatClientDetail = "$wechatClientDetail; detected Weixin.exe (wcferry compatibility may be limited)"
+    }
   } else {
     if ($wechatAutoStart) {
       $wechatClientStatus = "autostarting"
