@@ -232,6 +232,115 @@ function Start-EdgeProcess {
   return (Start-Process @startProcessArgs)
 }
 
+function Invoke-BreakawayCommand {
+  param(
+    [string]$RepoRoot,
+    [string]$LauncherScriptPath,
+    [string]$CommandLine,
+    [hashtable]$EnvVars = @{},
+    [string]$TaskPrefix = "NatsumeLaunch"
+  )
+  if (-not $LauncherScriptPath) {
+    throw "launcher script path is required for breakaway launch"
+  }
+  $launcherLines = @(
+    "@echo off",
+    "cd /d `"$RepoRoot`"",
+    "setlocal"
+  )
+  foreach ($envKey in $EnvVars.Keys) {
+    $envName = ([string]$envKey).Trim()
+    if (-not $envName) {
+      continue
+    }
+    $envValue = [string]$EnvVars[$envKey]
+    $safeValue = $envValue -replace '%', '%%'
+    $launcherLines += ("set `"{0}={1}`"" -f $envName, $safeValue)
+  }
+  $launcherLines += $CommandLine
+  $launcherLines += "endlocal"
+  Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
+
+  $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
+  if ($null -eq $schtasksCmd) {
+    throw "schtasks.exe not found; cannot launch breakaway process"
+  }
+  $prefix = [string]$TaskPrefix
+  if (-not $prefix) {
+    $prefix = "NatsumeLaunch"
+  }
+  $taskName = "{0}_{1}" -f $prefix, ([Guid]::NewGuid().ToString('N').Substring(0, 10))
+  $taskTime = (Get-Date).AddMinutes(2).ToString("HH:mm")
+  $taskCommand = "`"$LauncherScriptPath`""
+
+  $createOutput = & $schtasksCmd.Source /Create /TN $taskName /SC ONCE /ST $taskTime /TR $taskCommand /F 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+    throw "failed to create breakaway task $taskName.`n$detail"
+  }
+  $runOutput = & $schtasksCmd.Source /Run /TN $taskName 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
+    & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+    throw "failed to run breakaway task $taskName.`n$detail"
+  }
+  & $schtasksCmd.Source /Delete /TN $taskName /F 2>&1 | Out-Null
+}
+
+function Find-ProcessIdByCommandLine {
+  param(
+    [string]$ImageName,
+    [string]$ContainsText
+  )
+  if ([string]::IsNullOrWhiteSpace($ImageName) -or [string]::IsNullOrWhiteSpace($ContainsText)) {
+    return $null
+  }
+  $needle = $ContainsText.ToLowerInvariant()
+  $rows = Get-CimInstance -ClassName Win32_Process -Filter ("Name = '{0}'" -f $ImageName) -ErrorAction SilentlyContinue
+  foreach ($row in $rows) {
+    $cmd = [string]$row.CommandLine
+    if (-not $cmd) {
+      continue
+    }
+    if ($cmd.ToLowerInvariant().Contains($needle)) {
+      return [int]$row.ProcessId
+    }
+  }
+  return $null
+}
+
+function Start-WeChatBridgeProcess {
+  param(
+    [string]$PythonPath,
+    [string]$BridgeScriptPath,
+    [string]$EdgeUrl,
+    [string]$RepoRoot,
+    [string]$StdoutLog,
+    [string]$StderrLog,
+    [bool]$UseBreakawayLaunch = $false,
+    [string]$LauncherScriptPath = "",
+    [hashtable]$EnvVars = @{}
+  )
+  if ($UseBreakawayLaunch) {
+    $commandLine = "`"$PythonPath`" `"$BridgeScriptPath`" --edge-url `"$EdgeUrl`" 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    Invoke-BreakawayCommand `
+      -RepoRoot $RepoRoot `
+      -LauncherScriptPath $LauncherScriptPath `
+      -CommandLine $commandLine `
+      -EnvVars $EnvVars `
+      -TaskPrefix "NatsumeWechatBridge"
+    return [pscustomobject]@{ Id = 0 }
+  }
+
+  return (Start-Process -FilePath $PythonPath `
+    -ArgumentList @($BridgeScriptPath, "--edge-url", $EdgeUrl) `
+    -WorkingDirectory $RepoRoot `
+    -WindowStyle Hidden `
+    -PassThru `
+    -RedirectStandardOutput $StdoutLog `
+    -RedirectStandardError $StderrLog)
+}
+
 function Wait-Process-And-Port-Stable {
   param(
     [int]$ProcessId,
@@ -461,6 +570,7 @@ $pidFile = Join-Path $runtimeRoot "edge.pid"
 $stdoutLog = Join-Path $LogDir "edge.stdout.log"
 $stderrLog = Join-Path $LogDir "edge.stderr.log"
 $launcherScriptPath = Join-Path $runtimeRoot "launch_edge.cmd"
+$wechatBridgeLauncherScriptPath = Join-Path $runtimeRoot "launch_wechat_bridge.cmd"
 $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
 $useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
@@ -1148,17 +1258,55 @@ if ($wechatBridgeEnabled) {
   $edgeUrl = "http://127.0.0.1:$port"
   if (Test-Path -Path $bridgeScript) {
     try {
-      $bridgeProc = Start-Process -FilePath $pythonCmd.Source `
-        -ArgumentList @($bridgeScript, "--edge-url", $edgeUrl) `
-        -WorkingDirectory $repoRoot `
-        -WindowStyle Hidden `
-        -PassThru `
-        -RedirectStandardOutput $wechatBridgeLog `
-        -RedirectStandardError $wechatBridgeErrLog
-      $wechatBridgePid = [int]$bridgeProc.Id
-      Start-Sleep -Seconds 8
-      $bridgeAlive = Get-Process -Id $wechatBridgePid -ErrorAction SilentlyContinue
-      if ($null -eq $bridgeAlive) {
+      $bridgeProc = Start-WeChatBridgeProcess `
+        -PythonPath $pythonCmd.Source `
+        -BridgeScriptPath $bridgeScript `
+        -EdgeUrl $edgeUrl `
+        -RepoRoot $repoRoot `
+        -StdoutLog $wechatBridgeLog `
+        -StderrLog $wechatBridgeErrLog `
+        -UseBreakawayLaunch $useBreakawayLauncher `
+        -LauncherScriptPath $wechatBridgeLauncherScriptPath `
+        -EnvVars $envValues
+
+      $bridgeProcId = $null
+      if ($null -ne $bridgeProc) {
+        try {
+          $bridgeProcId = [int]$bridgeProc.Id
+        } catch {
+          $bridgeProcId = $null
+        }
+      }
+
+      if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
+        $bridgeNeedle = [System.IO.Path]::GetFileName($bridgeScript)
+        $probeDeadline = (Get-Date).AddSeconds(15)
+        while ((Get-Date) -lt $probeDeadline) {
+          $bridgeProcId = Find-ProcessIdByCommandLine -ImageName "python.exe" -ContainsText $bridgeNeedle
+          if ($null -ne $bridgeProcId -and $bridgeProcId -gt 0) {
+            break
+          }
+          Start-Sleep -Milliseconds 500
+        }
+      } else {
+        Start-Sleep -Seconds 8
+      }
+
+      if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
+        $wechatBridgePid = $null
+        $errTail = ""
+        if (Test-Path -Path $wechatBridgeErrLog) {
+          $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+        }
+        $wechatBridgeStatus = "start_failed"
+        $wechatBridgeError = if ($errTail) { "wechat bridge process not detected after launch.`n$errTail" } else { "wechat bridge process not detected after launch" }
+        if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
+          $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
+        }
+        Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+      } else {
+        $bridgeAlive = Get-Process -Id $bridgeProcId -ErrorAction SilentlyContinue
+        if ($null -eq $bridgeAlive) {
         $errTail = ""
         if (Test-Path -Path $wechatBridgeErrLog) {
           $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
@@ -1171,8 +1319,10 @@ if ($wechatBridgeEnabled) {
         }
         Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
       } else {
+        $wechatBridgePid = [int]$bridgeProcId
         Set-Content -Path $wechatBridgePidFile -Value ([string]$wechatBridgePid) -Encoding ascii
         $wechatBridgeStatus = "started"
+      }
       }
     } catch {
       $wechatBridgePid = $null
