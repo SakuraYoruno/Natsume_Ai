@@ -1363,12 +1363,6 @@ if ($wechatBridgeEnabled) {
     if (-not ($startupWarnings -contains "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING")) {
       $startupWarnings += "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING"
     }
-  } elseif ($wechatClientUnsupportedForWcf) {
-    $wechatBridgeStatus = "unsupported_client"
-    $wechatBridgeError = "detected Weixin.exe only; current wcferry sdk requires WeChat.exe. install and login classic WeChat desktop client."
-    if (-not ($startupWarnings -contains "WECHAT_BRIDGE_UNSUPPORTED_CLIENT")) {
-      $startupWarnings += "WECHAT_BRIDGE_UNSUPPORTED_CLIENT"
-    }
   } elseif (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName "wcferry")) {
     $wechatBridgeStatus = "dependency_missing"
     $wechatBridgeError = "python dependency missing: wcferry (install with: pip install wcferry)"
@@ -1376,6 +1370,9 @@ if ($wechatBridgeEnabled) {
       $startupWarnings += "WECHAT_BRIDGE_DEPENDENCY_MISSING"
     }
   } else {
+  if ($wechatClientUnsupportedForWcf -and -not ($startupWarnings -contains "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL")) {
+    $startupWarnings += "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL"
+  }
   $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
   $edgeUrl = "http://127.0.0.1:$port"
   if (Test-Path -Path $bridgeScript) {
