@@ -976,6 +976,21 @@ if ($null -ne $wechatBridgeEnvRaw) {
   $wechatBridgeEnvRaw = $env:EDGE_WECHAT_BRIDGE_ENABLED
 }
 
+$wechatBridgeBackend = "wcferry"
+$wechatBridgeBackendRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_BRIDGE_BACKEND"
+if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
+  $wechatBridgeBackendRaw = $env:EDGE_WECHAT_BRIDGE_BACKEND
+}
+if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
+  $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
+  if ($candidateBackend -in @("wcferry", "pywechat")) {
+    $wechatBridgeBackend = $candidateBackend
+  } else {
+    $wechatBridgeBackend = "wcferry"
+    $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
+  }
+}
+
 $wechatClientNames = @("WeChat", "Weixin")
 $wechatAutoStart = $wechatBridgeEnabled
 $wechatAutoStartRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_AUTOSTART"
@@ -1024,6 +1039,8 @@ if (Test-Path -Path $pidFile) {
         breakaway_launcher_used = $useBreakawayLauncher
         wechat_bridge_env_raw = $wechatBridgeEnvRaw
         wechat_bridge_enabled = $wechatBridgeEnabled
+        wechat_bridge_backend = $wechatBridgeBackend
+        wechat_bridge_backend_raw = $wechatBridgeBackendRaw
       }
       $result | ConvertTo-Json -Depth 4
       exit 0
@@ -1363,101 +1380,114 @@ if ($wechatBridgeEnabled) {
     if (-not ($startupWarnings -contains "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING")) {
       $startupWarnings += "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING"
     }
-  } elseif (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName "wcferry")) {
-    $wechatBridgeStatus = "dependency_missing"
-    $wechatBridgeError = "python dependency missing: wcferry (install with: pip install wcferry)"
-    if (-not ($startupWarnings -contains "WECHAT_BRIDGE_DEPENDENCY_MISSING")) {
-      $startupWarnings += "WECHAT_BRIDGE_DEPENDENCY_MISSING"
-    }
   } else {
-  if ($wechatClientUnsupportedForWcf -and -not ($startupWarnings -contains "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL")) {
-    $startupWarnings += "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL"
-  }
-  $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
-  $edgeUrl = "http://127.0.0.1:$port"
-  if (Test-Path -Path $bridgeScript) {
-    try {
-      $bridgeProc = Start-WeChatBridgeProcess `
-        -PythonPath $pythonCmd.Source `
-        -BridgeScriptPath $bridgeScript `
-        -EdgeUrl $edgeUrl `
-        -RepoRoot $repoRoot `
-        -StdoutLog $wechatBridgeLog `
-        -StderrLog $wechatBridgeErrLog `
-        -UseBreakawayLaunch $useBreakawayLauncher `
-        -LauncherScriptPath $wechatBridgeLauncherScriptPath `
-        -EnvVars $envValues
+    if ($wechatClientUnsupportedForWcf -and $wechatBridgeBackend -eq "wcferry" -and -not ($startupWarnings -contains "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL")) {
+      $startupWarnings += "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL"
+    }
 
-      $bridgeProcId = $null
-      if ($null -ne $bridgeProc) {
+    $bridgeScript = $null
+    $bridgeDependencyModule = "wcferry"
+    $bridgeDependencyHint = "pip install wcferry"
+    if ($wechatBridgeBackend -eq "pywechat") {
+      $bridgeScript = Join-Path $repoRoot "tools\wechat_pywechat_bridge.py"
+      $bridgeDependencyModule = "pywechat"
+      $bridgeDependencyHint = "pip install pywechat127"
+    } else {
+      $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
+    }
+
+    if (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName $bridgeDependencyModule)) {
+      $wechatBridgeStatus = "dependency_missing"
+      $wechatBridgeError = "python dependency missing: $bridgeDependencyModule (install with: $bridgeDependencyHint)"
+      if (-not ($startupWarnings -contains "WECHAT_BRIDGE_DEPENDENCY_MISSING")) {
+        $startupWarnings += "WECHAT_BRIDGE_DEPENDENCY_MISSING"
+      }
+    } else {
+      $edgeUrl = "http://127.0.0.1:$port"
+      if (Test-Path -Path $bridgeScript) {
         try {
-          $bridgeProcId = [int]$bridgeProc.Id
-        } catch {
+          $bridgeProc = Start-WeChatBridgeProcess `
+            -PythonPath $pythonCmd.Source `
+            -BridgeScriptPath $bridgeScript `
+            -EdgeUrl $edgeUrl `
+            -RepoRoot $repoRoot `
+            -StdoutLog $wechatBridgeLog `
+            -StderrLog $wechatBridgeErrLog `
+            -UseBreakawayLaunch $useBreakawayLauncher `
+            -LauncherScriptPath $wechatBridgeLauncherScriptPath `
+            -EnvVars $envValues
+
           $bridgeProcId = $null
-        }
-      }
-
-      if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
-        $bridgeNeedle = [System.IO.Path]::GetFileName($bridgeScript)
-        $probeDeadline = (Get-Date).AddSeconds(15)
-        while ((Get-Date) -lt $probeDeadline) {
-          $bridgeProcId = Find-ProcessIdByCommandLine -ImageName "python.exe" -ContainsText $bridgeNeedle
-          if ($null -ne $bridgeProcId -and $bridgeProcId -gt 0) {
-            break
+          if ($null -ne $bridgeProc) {
+            try {
+              $bridgeProcId = [int]$bridgeProc.Id
+            } catch {
+              $bridgeProcId = $null
+            }
           }
-          Start-Sleep -Milliseconds 500
-        }
-      } else {
-        Start-Sleep -Seconds 8
-      }
 
-      if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
-        $wechatBridgePid = $null
-        $errTail = ""
-        if (Test-Path -Path $wechatBridgeErrLog) {
-          $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+          if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
+            $bridgeNeedle = [System.IO.Path]::GetFileName($bridgeScript)
+            $probeDeadline = (Get-Date).AddSeconds(15)
+            while ((Get-Date) -lt $probeDeadline) {
+              $bridgeProcId = Find-ProcessIdByCommandLine -ImageName "python.exe" -ContainsText $bridgeNeedle
+              if ($null -ne $bridgeProcId -and $bridgeProcId -gt 0) {
+                break
+              }
+              Start-Sleep -Milliseconds 500
+            }
+          } else {
+            Start-Sleep -Seconds 8
+          }
+
+          if ($null -eq $bridgeProcId -or $bridgeProcId -le 0) {
+            $wechatBridgePid = $null
+            $errTail = ""
+            if (Test-Path -Path $wechatBridgeErrLog) {
+              $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+            }
+            $wechatBridgeStatus = "start_failed"
+            $wechatBridgeError = if ($errTail) { "wechat bridge process not detected after launch.`n$errTail" } else { "wechat bridge process not detected after launch" }
+            if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
+              $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
+            }
+            Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+          } else {
+            $bridgeAlive = Get-Process -Id $bridgeProcId -ErrorAction SilentlyContinue
+            if ($null -eq $bridgeAlive) {
+              $errTail = ""
+              if (Test-Path -Path $wechatBridgeErrLog) {
+                $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+              }
+              $wechatBridgePid = $null
+              $wechatBridgeStatus = "start_failed"
+              $wechatBridgeError = if ($errTail) { "wechat bridge exited immediately.`n$errTail" } else { "wechat bridge exited immediately without stderr output" }
+              if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
+                $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
+              }
+              Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+            } else {
+              $wechatBridgePid = [int]$bridgeProcId
+              Set-Content -Path $wechatBridgePidFile -Value ([string]$wechatBridgePid) -Encoding ascii
+              $wechatBridgeStatus = "started"
+            }
+          }
+        } catch {
+          $wechatBridgePid = $null
+          $wechatBridgeStatus = "start_failed"
+          $wechatBridgeError = $_.Exception.Message
+          if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
+            $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
+          }
         }
-        $wechatBridgeStatus = "start_failed"
-        $wechatBridgeError = if ($errTail) { "wechat bridge process not detected after launch.`n$errTail" } else { "wechat bridge process not detected after launch" }
-        if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
-          $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
-        }
-        Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
       } else {
-        $bridgeAlive = Get-Process -Id $bridgeProcId -ErrorAction SilentlyContinue
-        if ($null -eq $bridgeAlive) {
-        $errTail = ""
-        if (Test-Path -Path $wechatBridgeErrLog) {
-          $errTail = (Get-Content -Path $wechatBridgeErrLog -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+        $wechatBridgeStatus = "script_not_found"
+        $wechatBridgeError = "script not found: $bridgeScript"
+        if (-not ($startupWarnings -contains "WECHAT_BRIDGE_SCRIPT_NOT_FOUND")) {
+          $startupWarnings += "WECHAT_BRIDGE_SCRIPT_NOT_FOUND"
         }
-        $wechatBridgePid = $null
-        $wechatBridgeStatus = "start_failed"
-        $wechatBridgeError = if ($errTail) { "wechat bridge exited immediately.`n$errTail" } else { "wechat bridge exited immediately without stderr output" }
-        if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
-          $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
-        }
-        Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
-      } else {
-        $wechatBridgePid = [int]$bridgeProcId
-        Set-Content -Path $wechatBridgePidFile -Value ([string]$wechatBridgePid) -Encoding ascii
-        $wechatBridgeStatus = "started"
-      }
-      }
-    } catch {
-      $wechatBridgePid = $null
-      $wechatBridgeStatus = "start_failed"
-      $wechatBridgeError = $_.Exception.Message
-      if (-not ($startupWarnings -contains "WECHAT_BRIDGE_START_FAILED")) {
-        $startupWarnings += "WECHAT_BRIDGE_START_FAILED"
       }
     }
-  } else {
-    $wechatBridgeStatus = "script_not_found"
-    $wechatBridgeError = "script not found: $bridgeScript"
-    if (-not ($startupWarnings -contains "WECHAT_BRIDGE_SCRIPT_NOT_FOUND")) {
-      $startupWarnings += "WECHAT_BRIDGE_SCRIPT_NOT_FOUND"
-    }
-  }
   }
 }
 # ────────────────────────────────────────────────────────────────────────────
@@ -1500,6 +1530,8 @@ $result = [ordered]@{
   wechat_bridge_log = if ($wechatBridgeEnabled) { $wechatBridgeLog } else { $null }
   wechat_bridge_error_log = if ($wechatBridgeEnabled) { $wechatBridgeErrLog } else { $null }
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
+  wechat_bridge_backend = $wechatBridgeBackend
+  wechat_bridge_backend_raw = $wechatBridgeBackendRaw
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
   tts_language = $resolvedTtsLanguage
