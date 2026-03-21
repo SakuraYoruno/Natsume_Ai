@@ -445,6 +445,26 @@ def _set_clipboard_text(text: str) -> tuple[bool, str]:
     gmem_moveable = 0x0002
     payload = (str(text or "") + "\x00").encode("utf-16-le")
 
+    try:
+        user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+        user32.OpenClipboard.restype = ctypes.c_bool
+        user32.EmptyClipboard.argtypes = []
+        user32.EmptyClipboard.restype = ctypes.c_bool
+        user32.CloseClipboard.argtypes = []
+        user32.CloseClipboard.restype = ctypes.c_bool
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.restype = ctypes.c_bool
+        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalFree.restype = ctypes.c_void_p
+    except Exception:
+        pass
+
     if not bool(user32.OpenClipboard(0)):
         return False, "OpenClipboard failed"
     h_mem = None
