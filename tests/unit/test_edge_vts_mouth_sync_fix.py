@@ -180,3 +180,29 @@ def test_set_expression_skips_blocked_hotkey_and_uses_safe_hint_match(monkeypatc
     assert result.success is True
     assert result.expression_id == "hotkey_exp_happy"
     assert calls == ["exp_happy_01", "hotkey_exp_happy"]
+
+
+def test_set_expression_neutral_skips_reset_all_hotkey(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_trigger(*, vts, hotkey_id: str, timeout_s: float) -> None:
+        _ = (vts, timeout_s)
+        calls.append(hotkey_id)
+        if hotkey_id == "exp_neutral_01":
+            raise RuntimeError("not found")
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._trigger_vts_hotkey", _fake_trigger)
+
+    driver = VTubeStudioDriver(VtsConfig())
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._hotkey_catalog = [
+        {"id": "hotkey_reset_all", "name": "移除所有按键表情"},
+        {"id": "hotkey_neutral_eye", "name": "无语眼"},
+    ]
+
+    result = driver.set_expression("NEUTRAL")
+
+    assert result.success is True
+    assert result.expression_id == "hotkey_neutral_eye"
+    assert calls == ["exp_neutral_01", "hotkey_neutral_eye"]

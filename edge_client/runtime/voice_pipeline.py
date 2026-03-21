@@ -394,7 +394,6 @@ class EdgeVoicePipeline:
         if emotion_tag == "NEUTRAL":
             expression_result = self.vts_driver.reset_to_neutral()
         else:
-            self.vts_driver.reset_to_neutral()
             expression_result = self.vts_driver.set_expression(emotion_tag, intensity=intensity)
         sub_emotion = payload.get("sub_emotion")
         if sub_emotion:

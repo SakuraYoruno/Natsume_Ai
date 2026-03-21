@@ -123,6 +123,11 @@ EXPRESSION_HOTKEY_BLOCKED_TOKENS: tuple[str, ...] = (
     "phone",
     "game",
     "chibi",
+    "移除所有按键表情",
+    "remove all",
+    "reset all",
+    "all hotkey",
+    "all expression",
 )
 
 
