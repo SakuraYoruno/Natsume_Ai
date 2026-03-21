@@ -122,7 +122,7 @@ export function fetchMetrics() {
 
 export function fetchRecentRequests(params = {}) {
   const qs = new URLSearchParams(params).toString()
-  return request(`/ui/search-requests${qs ? '?' + qs : ''}`)
+  return request(`/api/ui/search-requests${qs ? '?' + qs : ''}`)
 }
 
 // ===== P1: Governor 决策统计 =====

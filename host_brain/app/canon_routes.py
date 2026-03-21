@@ -20,6 +20,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -293,6 +294,16 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
 @router.get("/proposals/{proposal_id}", response_model=CanonProposalResponse)
 async def get_proposal(proposal_id: str) -> CanonProposalResponse:
     """查询单个 World Canon 提案详情。"""
+    # Compatibility fallback:
+    # `/proposals/stats` is a dedicated endpoint, but this dynamic route is
+    # registered earlier and may catch "stats" first in some runtimes.
+    if str(proposal_id).strip().lower() == "stats":
+        stats = await get_proposal_stats()
+        payload = stats.model_dump() if hasattr(stats, "model_dump") else (
+            stats.dict() if hasattr(stats, "dict") else stats
+        )
+        return JSONResponse(status_code=200, content=payload)
+
     request_id = new_request_id()
 
     try:
