@@ -956,10 +956,6 @@ class WeChatUiInboundBridge:
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         hwnd = _find_wechat_main_window()
         if not hwnd:
-            now_mono = time.monotonic()
-            if (now_mono - self._last_vision_diag_at) >= 10.0:
-                self._last_vision_diag_at = now_mono
-                logger.info("vision inbound skipped: wechat main window not found")
             return []
         try:
             from pywinauto import Desktop
@@ -1705,10 +1701,21 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         hwnd = _find_wechat_main_window()
         if not hwnd:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info("vision inbound skipped: wechat main window not found")
             return []
 
         if self._vision_unavailable:
-            return super()._collect_chat_previews()
+            return []
+
+        if not _is_window_foreground_or_child(int(hwnd)):
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info("vision inbound skipped: wechat window is not foreground")
+            return []
 
         now_mono = time.monotonic()
         if now_mono < self._next_vision_call_at:
@@ -1750,18 +1757,6 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             return [extracted]
 
         self._vision_fail_streak += 1
-        # Hybrid mode: after repeated empty/failed vision reads, fallback to OCR/UIA once.
-        # This keeps vision as primary path but avoids long periods of no inbound detection.
-        if self._vision_fail_streak >= 4:
-            fallback = super()._collect_chat_previews()
-            if fallback:
-                logger.info(
-                    "vision inbound fallback via ocr/uia: rows=%d fail_streak=%d",
-                    len(fallback),
-                    int(self._vision_fail_streak),
-                )
-                self._vision_fail_streak = 0
-                return fallback
         return []
 
     def _infer_latest_inbound_via_vision(
@@ -2052,11 +2047,7 @@ def _find_wechat_main_window() -> int:
     best_hint_area = 0
     for hwnd, class_name, title in windows:
         class_key = str(class_name or "").strip().lower()
-        title_text = str(title or "").strip()
-        if not (
-            class_key in WECHAT_MAIN_WINDOW_CLASS_HINTS
-            or (title_text and any(hint in title_text for hint in WECHAT_WINDOW_TITLE_HINTS))
-        ):
+        if class_key not in WECHAT_MAIN_WINDOW_CLASS_HINTS:
             continue
         rect = _get_window_rect(int(hwnd))
         if rect is None:
@@ -2105,6 +2096,22 @@ def _find_wechat_main_window() -> int:
     except Exception:
         pass
     return 0
+
+
+def _is_window_foreground_or_child(hwnd: int) -> bool:
+    base_hwnd = int(hwnd or 0)
+    if base_hwnd <= 0:
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        foreground = int(user32.GetForegroundWindow() or 0)
+        if foreground <= 0:
+            return False
+        if foreground == base_hwnd:
+            return True
+        return bool(user32.IsChild(base_hwnd, foreground))
+    except Exception:
+        return False
 
 
 def _focus_wechat_main_window(wechat_path: str) -> tuple[bool, str]:
