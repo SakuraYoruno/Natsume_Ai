@@ -30,7 +30,6 @@ DEFAULT_CALLBACK_TIMEOUT_S = 6.0
 DEFAULT_LISTENER_POLL_INTERVAL_S = 1.2
 DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 DEFAULT_INBOUND_BACKEND = "uia_hook"
-DEFAULT_WCF_LOGIN_WAIT_S = 12.0
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "wechatmainwndforpc",
@@ -206,239 +205,6 @@ def _post_to_edge_callback(edge_url: str, body: dict[str, Any], *, timeout_s: fl
     except Exception as exc:
         logger.warning("wechat callback request failed: %s", exc)
     return False
-
-
-class WeChatWcferryInboundBridge:
-    """Inbound bridge using wcferry message receive channel."""
-
-    def __init__(
-        self,
-        *,
-        edge_url: str,
-        enabled: bool,
-        callback_timeout_s: float,
-        login_wait_s: float = DEFAULT_WCF_LOGIN_WAIT_S,
-    ) -> None:
-        self._edge_url = str(edge_url or DEFAULT_EDGE_URL).strip()
-        self._enabled = bool(enabled)
-        self._callback_timeout_s = max(0.2, float(callback_timeout_s))
-        self._login_wait_s = max(0.0, float(login_wait_s))
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._wcf = None
-        self._self_wxid = ""
-        self._stats = {
-            "messages_forwarded": 0,
-            "messages_deduped": 0,
-            "errors": 0,
-        }
-        self._recent_msg_ids: dict[str, float] = {}
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    @property
-    def stats(self) -> dict[str, int]:
-        return dict(self._stats)
-
-    def start(self) -> None:
-        if not self._enabled:
-            logger.info("wcferry inbound listener disabled")
-            return
-        self._thread = threading.Thread(
-            target=self._run_loop,
-            name="wechat_wcferry_inbound",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        try:
-            if self._wcf is not None and hasattr(self._wcf, "disable_receiving_msg"):
-                self._wcf.disable_receiving_msg()  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-
-    def process_cycle(self) -> int:
-        # wcferry loop is push-driven in background thread.
-        return 0
-
-    def _is_duplicate_msg(self, msg_id: str) -> bool:
-        value = str(msg_id or "").strip()
-        if not value:
-            return False
-        now_mono = time.monotonic()
-        stale = [k for k, ts in self._recent_msg_ids.items() if (now_mono - ts) > 60.0]
-        for item in stale:
-            self._recent_msg_ids.pop(item, None)
-        if value in self._recent_msg_ids:
-            return True
-        self._recent_msg_ids[value] = now_mono
-        return False
-
-    def _run_loop(self) -> None:
-        logger.info("wcferry inbound init start")
-        try:
-            from wcferry import Wcf
-        except Exception as exc:
-            logger.warning("wcferry import failed for inbound backend: %s", exc)
-            return
-        try:
-            # Force non-blocking dial during constructor; some Weixin builds
-            # can stall forever in Pair1.dial(block=True).
-            patched = False
-            pair1_dial = None
-            try:
-                import pynng  # type: ignore
-
-                pair1_cls = getattr(pynng, "Pair1", None)
-                pair1_dial = getattr(pair1_cls, "dial", None) if pair1_cls else None
-                if callable(pair1_dial):
-                    def _dial_non_block(self_obj, address, block=True):  # type: ignore[no-redef]
-                        return pair1_dial(self_obj, address, block=False)
-
-                    setattr(pair1_cls, "dial", _dial_non_block)
-                    patched = True
-            except Exception:
-                patched = False
-
-            try:
-                # block=False avoids constructor-level login wait loop.
-                self._wcf = Wcf(debug=False, block=False)
-            finally:
-                if patched:
-                    try:
-                        import pynng  # type: ignore
-
-                        pair1_cls = getattr(pynng, "Pair1", None)
-                        if pair1_cls is not None and callable(pair1_dial):
-                            setattr(pair1_cls, "dial", pair1_dial)
-                    except Exception:
-                        pass
-        except Exception as exc:
-            logger.warning("wcferry init failed: %s", exc)
-            return
-        logger.info("wcferry inbound init ok")
-
-        login_state = None
-        if hasattr(self._wcf, "is_login"):
-            start_mono = time.monotonic()
-            while not self._stop_event.is_set():
-                try:
-                    login_state = bool(self._wcf.is_login())
-                except Exception:
-                    login_state = None
-                if login_state:
-                    break
-                if (time.monotonic() - start_mono) >= self._login_wait_s:
-                    break
-                time.sleep(0.8)
-        logger.info(
-            "wcferry login probe: is_login=%s wait_s=%.1f",
-            login_state,
-            self._login_wait_s,
-        )
-
-        try:
-            self._self_wxid = str(getattr(self._wcf, "self_wxid", "") or "").strip()
-        except Exception:
-            self._self_wxid = ""
-
-        try:
-            ok = bool(self._wcf.enable_receiving_msg(pyq=False))
-        except Exception as exc:
-            logger.warning("wcferry enable_receiving_msg failed: %s", exc)
-            return
-        if not ok:
-            logger.warning("wcferry inbound enable_receiving_msg returned false")
-            return
-
-        logger.info("wcferry inbound started self_wxid=%s", self._self_wxid or "(unknown)")
-        while not self._stop_event.is_set():
-            try:
-                msg = self._wcf.get_msg(block=True)
-            except Exception as exc:
-                self._stats["errors"] += 1
-                logger.debug("wcferry get_msg failed: %s", exc)
-                continue
-            if msg is None:
-                continue
-
-            msg_type = str(getattr(msg, "type", "") or "").strip()
-            if msg_type != "1":
-                continue
-
-            from_self = False
-            from_self_fn = getattr(msg, "from_self", None)
-            if callable(from_self_fn):
-                try:
-                    from_self = bool(from_self_fn())
-                except Exception:
-                    from_self = False
-            if from_self:
-                continue
-
-            sender = str(getattr(msg, "sender", "") or "").strip()
-            content = _normalize_message_text(str(getattr(msg, "content", "") or ""))
-            room_id = str(getattr(msg, "roomid", "") or "").strip()
-            msg_id = str(getattr(msg, "id", "") or "").strip()
-            ts_raw = getattr(msg, "ts", None)
-
-            if not sender or not content:
-                continue
-            if self._self_wxid and sender == self._self_wxid:
-                continue
-            if _is_recent_outbound_echo(content):
-                continue
-            if self._is_duplicate_msg(msg_id):
-                self._stats["messages_deduped"] += 1
-                continue
-
-            ts_ms = int(time.time() * 1000)
-            if ts_raw is not None:
-                try:
-                    ts_ms = int(float(ts_raw))
-                    if ts_ms < 10_000_000_000:
-                        ts_ms *= 1000
-                except Exception:
-                    ts_ms = int(time.time() * 1000)
-
-            if not msg_id:
-                msg_id = _build_hook_msg_id(sender=sender, content=content, ts_ms=ts_ms)
-
-            body = {
-                "id": msg_id,
-                "msg_id": msg_id,
-                "sender": sender,
-                "from_wxid": sender,
-                "receiver": self._self_wxid or "local_wechat",
-                "to_wxid": self._self_wxid or "local_wechat",
-                "content": content,
-                "text": content,
-                "type": 1,
-                "msg_type": "1",
-                "roomid": room_id,
-                "ts": int(ts_ms / 1000),
-                "bridge_backend": "wcferry_inbound",
-            }
-            ok = _post_to_edge_callback(
-                edge_url=self._edge_url,
-                body=body,
-                timeout_s=self._callback_timeout_s,
-            )
-            if ok:
-                self._stats["messages_forwarded"] += 1
-                logger.info(
-                    "wcferry inbound forwarded sender=%s room=%s msg_id=%s content=%.80s",
-                    sender,
-                    room_id or "(private)",
-                    msg_id,
-                    content,
-                )
 
 
 class _WinMsg(ctypes.Structure):
@@ -1375,7 +1141,7 @@ def main() -> int:
     parser.add_argument(
         "--inbound-backend",
         default=(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or DEFAULT_INBOUND_BACKEND).strip(),
-        help=f"Inbound backend: uia_hook|wcferry|off (default: {DEFAULT_INBOUND_BACKEND}).",
+        help=f"Inbound backend: uia_hook|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
         "--listener-poll-interval",
@@ -1406,18 +1172,9 @@ def main() -> int:
     if inbound_backend in {"none", "off", "disabled"}:
         listener_enabled = False
         inbound_backend = "off"
-    elif inbound_backend not in {"uia_hook", "wcferry"}:
+    elif inbound_backend not in {"uia_hook"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
-    if inbound_backend == "wcferry":
-        wechat_base = os.path.basename(str(wechat_path or "").replace("/", "\\")).strip().lower()
-        running_names = _list_wechat_client_process_names()
-        weixin_only_runtime = ("weixin.exe" in running_names and "wechat.exe" not in running_names)
-        if wechat_base == "weixin.exe" or weixin_only_runtime:
-            logger.warning(
-                "wcferry disabled on Weixin runtime (WxInitSDK inject unsupported/unstable); fallback to uia_hook"
-            )
-            inbound_backend = "uia_hook"
     if not queue_file or not result_file:
         logger.error("queue/result file path is required")
         return 2
@@ -1447,20 +1204,13 @@ def main() -> int:
         inbound_backend,
     )
 
-    if inbound_backend == "wcferry":
-        inbound_bridge = WeChatWcferryInboundBridge(
-            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
-            enabled=listener_enabled,
-            callback_timeout_s=float(args.callback_timeout),
-        )
-    else:
-        inbound_bridge = WeChatUiInboundBridge(
-            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
-            enabled=listener_enabled,
-            poll_interval_s=float(args.listener_poll_interval),
-            callback_timeout_s=float(args.callback_timeout),
-            dedup_window_s=float(args.listener_dedup_window),
-        )
+    inbound_bridge = WeChatUiInboundBridge(
+        edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+        enabled=listener_enabled,
+        poll_interval_s=float(args.listener_poll_interval),
+        callback_timeout_s=float(args.callback_timeout),
+        dedup_window_s=float(args.listener_dedup_window),
+    )
     inbound_bridge.start()
 
     offset = 0

@@ -920,7 +920,7 @@ function Ensure-WeChatRegistryCompatibility {
       success = $true
       changed = $true
       status = "created_from_weixin"
-      detail = "created HKCU\\Software\\Tencent\\WeChat\\InstallPath for wcferry compatibility"
+      detail = "created HKCU\\Software\\Tencent\\WeChat\\InstallPath from Weixin install path"
       install_path = $candidateInstallPath
     }
   } catch {
@@ -1015,17 +1015,17 @@ if ($null -ne $wechatBridgeEnvRaw) {
   $wechatBridgeEnvRaw = $env:EDGE_WECHAT_BRIDGE_ENABLED
 }
 
-$wechatBridgeBackend = "wcferry"
+$wechatBridgeBackend = "uia"
 $wechatBridgeBackendRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_BRIDGE_BACKEND"
 if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
   $wechatBridgeBackendRaw = $env:EDGE_WECHAT_BRIDGE_BACKEND
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("wcferry", "uia", "external")) {
+  if ($candidateBackend -in @("uia", "external")) {
     $wechatBridgeBackend = $candidateBackend
   } else {
-    $wechatBridgeBackend = "wcferry"
+    $wechatBridgeBackend = "uia"
     $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
   }
 }
@@ -1058,7 +1058,6 @@ $wechatClientStatus = "skipped"
 $wechatClientDetail = "wechat bridge disabled"
 $wechatClientPid = $null
 $wechatClientProcessName = $null
-$wechatClientUnsupportedForWcf = $false
 $wechatRegistryCompatStatus = "skipped"
 $wechatRegistryCompatDetail = "wechat bridge disabled"
 
@@ -1361,8 +1360,8 @@ if ($null -eq $vtsConn) {
 # ────────────────────────────────────────────────────────────────────────────
 
 # 微信桥接（可选）：
-#   EDGE_WECHAT_BRIDGE_BACKEND=wcferry|uia|external
-#   external: 不拉起本地注入桥接，仅保留 /v1/edge/wechat/callback 供外部插件直推
+#   EDGE_WECHAT_BRIDGE_BACKEND=uia|external
+#   external: 不拉起本地桥接，仅保留 /v1/edge/wechat/callback 供外部插件直推
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
 $wechatBridgeError = $null
@@ -1382,7 +1381,7 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_uia_bridge.py")
+  $bridgeScriptNeedles = @("wechat_uia_bridge.py")
   $existingBridgePids = @()
   foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
     $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1410,11 +1409,7 @@ if ($wechatBridgeEnabled) {
     $wechatClientProcessName = [string]$wechatProc.ProcessName
     $wechatClientDetail = "wechat process is running ($wechatClientProcessName pid=$wechatClientPid)"
     if ($wechatClientProcessName -and $wechatClientProcessName.Equals("Weixin", [StringComparison]::OrdinalIgnoreCase)) {
-      $wechatClientUnsupportedForWcf = $true
-      if (-not ($startupWarnings -contains "WECHAT_CLIENT_WEIXIN_ONLY")) {
-        $startupWarnings += "WECHAT_CLIENT_WEIXIN_ONLY"
-      }
-      $wechatClientDetail = "$wechatClientDetail; detected Weixin.exe (wcferry compatibility may be limited)"
+      $wechatClientDetail = "$wechatClientDetail; detected Weixin.exe"
     }
   } else {
     if ($wechatAutoStart) {
@@ -1479,30 +1474,20 @@ if ($wechatBridgeEnabled) {
       $startupWarnings += "WECHAT_BRIDGE_SKIPPED_WECHAT_NOT_RUNNING"
     }
   } else {
-    if ($wechatClientUnsupportedForWcf -and $wechatBridgeBackend -eq "wcferry" -and -not ($startupWarnings -contains "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL")) {
-      $startupWarnings += "WECHAT_BRIDGE_WEIXIN_EXPERIMENTAL"
-    }
-
     $bridgeScript = $null
-    $bridgeDependencyModule = "wcferry"
-    $bridgeDependencyHint = "pip install wcferry"
+    $bridgeDependencyModule = "pyautogui"
+    $bridgeDependencyHint = "pip install pyautogui pywinauto"
     $bridgeExtraArgs = @()
-    if ($wechatBridgeBackend -eq "uia") {
-      $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
-      $bridgeDependencyModule = "pyautogui"
-      $bridgeDependencyHint = "pip install pyautogui pywinauto"
-      $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-      [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
-      [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)
-      $bridgeExtraArgs = @(
-        "--command-queue-file",
-        $wechatCommandQueueFile,
-        "--command-result-file",
-        $wechatCommandResultFile
-      )
-    } else {
-      $bridgeScript = Join-Path $repoRoot "tools\wechat_wcferry_bridge.py"
-    }
+    $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
+    [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)
+    $bridgeExtraArgs = @(
+      "--command-queue-file",
+      $wechatCommandQueueFile,
+      "--command-result-file",
+      $wechatCommandResultFile
+    )
 
     if (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName $bridgeDependencyModule)) {
       $wechatBridgeStatus = "dependency_missing"
