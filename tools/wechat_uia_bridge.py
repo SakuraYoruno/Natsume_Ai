@@ -868,6 +868,10 @@ class WeChatUiInboundBridge:
         )
 
 def _is_wechat_client_running() -> bool:
+    return bool(_list_wechat_client_process_names())
+
+
+def _list_wechat_client_process_names() -> set[str]:
     cmd = ["tasklist", "/fo", "csv", "/nh"]
     for encoding in ("utf-8", "gbk"):
         try:
@@ -884,6 +888,7 @@ def _is_wechat_client_running() -> bool:
     else:
         output = ""
 
+    names: set[str] = set()
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line:
@@ -893,8 +898,8 @@ def _is_wechat_client_running() -> bool:
         else:
             process_name = line.split(",", 1)[0].strip().lower()
         if process_name in WECHAT_PROCESS_NAMES:
-            return True
-    return False
+            names.add(process_name)
+    return names
 
 
 def _launch_wechat_if_needed(wechat_path: str) -> None:
@@ -1404,6 +1409,15 @@ def main() -> int:
     elif inbound_backend not in {"uia_hook", "wcferry"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
+    if inbound_backend == "wcferry":
+        wechat_base = os.path.basename(str(wechat_path or "").replace("/", "\\")).strip().lower()
+        running_names = _list_wechat_client_process_names()
+        weixin_only_runtime = ("weixin.exe" in running_names and "wechat.exe" not in running_names)
+        if wechat_base == "weixin.exe" or weixin_only_runtime:
+            logger.warning(
+                "wcferry disabled on Weixin runtime (WxInitSDK inject unsupported/unstable); fallback to uia_hook"
+            )
+            inbound_backend = "uia_hook"
     if not queue_file or not result_file:
         logger.error("queue/result file path is required")
         return 2
