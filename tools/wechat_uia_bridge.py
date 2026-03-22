@@ -246,6 +246,7 @@ class WeChatUiInboundBridge:
 
         self._next_poll_at = 0.0
         self._baseline_ready = False
+        self._last_diag_log_at = 0.0
         self._last_preview_by_chat: dict[str, str] = {}
         self._recent_forwarded: dict[str, float] = {}
         self._stats = {
@@ -304,6 +305,14 @@ class WeChatUiInboundBridge:
         forwarded = 0
         try:
             previews = self._collect_chat_previews()
+            if (not previews) and ((now_mono - self._last_diag_log_at) >= 12.0):
+                self._last_diag_log_at = now_mono
+                logger.info(
+                    "inbound listener heartbeat: events=%d previews=%d baseline=%s",
+                    int(self._stats.get("events") or 0),
+                    len(previews),
+                    self._baseline_ready,
+                )
             if not self._baseline_ready:
                 for sender, preview in previews:
                     sender_value = str(sender or "").strip()
