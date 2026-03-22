@@ -288,8 +288,37 @@ class WeChatWcferryInboundBridge:
             logger.warning("wcferry import failed for inbound backend: %s", exc)
             return
         try:
-            # block=False avoids constructor-level indefinite login wait.
-            self._wcf = Wcf(debug=False, block=False)
+            # Force non-blocking dial during constructor; some Weixin builds
+            # can stall forever in Pair1.dial(block=True).
+            patched = False
+            pair1_dial = None
+            try:
+                import pynng  # type: ignore
+
+                pair1_cls = getattr(pynng, "Pair1", None)
+                pair1_dial = getattr(pair1_cls, "dial", None) if pair1_cls else None
+                if callable(pair1_dial):
+                    def _dial_non_block(self_obj, address, block=True):  # type: ignore[no-redef]
+                        return pair1_dial(self_obj, address, block=False)
+
+                    setattr(pair1_cls, "dial", _dial_non_block)
+                    patched = True
+            except Exception:
+                patched = False
+
+            try:
+                # block=False avoids constructor-level login wait loop.
+                self._wcf = Wcf(debug=False, block=False)
+            finally:
+                if patched:
+                    try:
+                        import pynng  # type: ignore
+
+                        pair1_cls = getattr(pynng, "Pair1", None)
+                        if pair1_cls is not None and callable(pair1_dial):
+                            setattr(pair1_cls, "dial", pair1_dial)
+                    except Exception:
+                        pass
         except Exception as exc:
             logger.warning("wcferry init failed: %s", exc)
             return
