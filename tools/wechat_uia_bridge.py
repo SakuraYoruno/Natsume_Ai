@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import difflib
 import hashlib
 import html
 import json
@@ -45,6 +46,18 @@ WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "weixinmainwnd",
 }
 WECHAT_WINDOW_TITLE_HINTS = ("微信", "Weixin", "WeChat")
+ACTIVE_CHAT_TARGET_HINTS = {
+    "active_chat",
+    "activechat",
+    "current_chat",
+    "currentchat",
+    "local_wechat",
+    "localwechat",
+    "wechat_active",
+    "wechatactive",
+    "当前会话",
+}
+WECHAT_SYSTEM_LIST_TITLES = {"聊天", "通讯录", "发现", "我", "设置"}
 
 EVENT_OBJECT_SHOW = 0x8002
 EVENT_OBJECT_NAMECHANGE = 0x800C
@@ -142,6 +155,44 @@ def _normalize_message_text(text: str) -> str:
     return value
 
 
+def _normalize_target_hint(text: str) -> str:
+    normalized = _normalize_message_text(text).lower()
+    normalized = normalized.replace(" ", "").replace("_", "")
+    return normalized
+
+
+def _is_active_chat_target(target: str) -> bool:
+    raw = str(target or "").strip()
+    if not raw:
+        return False
+    if raw in ACTIVE_CHAT_TARGET_HINTS:
+        return True
+    normalized = _normalize_target_hint(raw)
+    return normalized in ACTIVE_CHAT_TARGET_HINTS
+
+
+def _extract_element_text_candidates(element: Any) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    try:
+        self_text = _normalize_message_text(element.window_text())
+        if self_text and self_text not in seen:
+            seen.add(self_text)
+            values.append(self_text)
+    except Exception:
+        pass
+    try:
+        for child in element.descendants(control_type="Text"):
+            text_value = _normalize_message_text(child.window_text())
+            if not text_value or text_value in seen:
+                continue
+            seen.add(text_value)
+            values.append(text_value)
+    except Exception:
+        pass
+    return values
+
+
 def _is_probably_time_or_badge(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
@@ -165,7 +216,35 @@ _RECENT_OUTBOUND_LOCK = threading.Lock()
 _RECENT_OUTBOUND_TEXTS: dict[str, float] = {}
 
 
-def _remember_outbound_text(text: str, *, ttl_s: float = 20.0) -> None:
+def _normalize_echo_compare_text(text: str) -> str:
+    value = _normalize_message_text(text).lower()
+    if not value:
+        return ""
+    value = re.sub(r"^(me|you)\s*[:：]\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^(我|你|本人|对方)\s*[:：]\s*", "", value)
+    value = re.sub(r"[\s\.,!?;:，。！？；：“”\"'`~\-_\(\)\[\]\{\}<>|\\/]+", "", value)
+    return value
+
+
+def _looks_like_outbound_echo(candidate: str, outbound_text: str) -> bool:
+    left = _normalize_echo_compare_text(candidate)
+    right = _normalize_echo_compare_text(outbound_text)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    min_len = min(len(left), len(right))
+    max_len = max(len(left), len(right))
+    if min_len >= 4 and (left in right or right in left):
+        return True
+    if min_len >= 4 and max_len <= 64:
+        ratio = difflib.SequenceMatcher(a=left, b=right).ratio()
+        if ratio >= 0.78:
+            return True
+    return False
+
+
+def _remember_outbound_text(text: str, *, ttl_s: float = 75.0) -> None:
     key = _normalize_message_text(text)
     if not key:
         return
@@ -177,7 +256,7 @@ def _remember_outbound_text(text: str, *, ttl_s: float = 20.0) -> None:
         _RECENT_OUTBOUND_TEXTS[key] = now_mono
 
 
-def _is_recent_outbound_echo(text: str, *, ttl_s: float = 20.0) -> bool:
+def _is_recent_outbound_echo(text: str, *, ttl_s: float = 75.0) -> bool:
     key = _normalize_message_text(text)
     if not key:
         return False
@@ -194,6 +273,9 @@ def _is_recent_outbound_echo(text: str, *, ttl_s: float = 20.0) -> bool:
                 stripped = key[len(prefix) :].strip()
                 if stripped and stripped in _RECENT_OUTBOUND_TEXTS:
                     return True
+        for recent_outbound in _RECENT_OUTBOUND_TEXTS.keys():
+            if _looks_like_outbound_echo(key, recent_outbound):
+                return True
         return False
 
 
@@ -903,7 +985,7 @@ class WeChatUiInboundBridge:
                 continue
 
             sender = clean[0]
-            if sender in {"聊天", "通讯录", "发现", "我", "设置"}:
+            if sender in WECHAT_SYSTEM_LIST_TITLES:
                 continue
             preview = ""
             for candidate in clean[1:]:
@@ -1488,6 +1570,31 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                 return _normalize_message_text(title_candidates[0][1]) or self._last_ocr_sender
         except Exception:
             pass
+        # Fallback: inspect Win32 child titles in case UIA header is opaque.
+        try:
+            child_rows = _enum_child_windows(hwnd)
+            fallback_titles: list[tuple[int, str]] = []
+            for _child_hwnd, _class_name, title in child_rows:
+                title_value = _normalize_message_text(title)
+                if not title_value:
+                    continue
+                if title_value in WECHAT_SYSTEM_LIST_TITLES:
+                    continue
+                if title_value in {"聊天信息", "搜索", "搜一搜"}:
+                    continue
+                if _is_probably_time_or_badge(title_value):
+                    continue
+                if title_value in {"微信", "WeChat", "Weixin"}:
+                    continue
+                fallback_titles.append((len(title_value), title_value))
+            if fallback_titles:
+                fallback_titles.sort(key=lambda x: x[0], reverse=True)
+                resolved = _normalize_message_text(fallback_titles[0][1])
+                if resolved:
+                    self._last_ocr_sender = resolved
+                    return resolved
+        except Exception:
+            pass
         return self._last_ocr_sender
 
 def _is_wechat_client_running() -> bool:
@@ -1666,6 +1773,32 @@ def _focus_message_input_area(wechat_path: str) -> tuple[bool, str]:
     if width <= 0 or height <= 0:
         return False, "invalid window rect"
 
+    # Prefer UIA editor focus when control tree is available.
+    try:
+        from pywinauto import Desktop
+
+        window = Desktop(backend="uia").window(handle=hwnd)
+        editor_candidates: list[tuple[int, Any]] = []
+        for node in window.descendants(control_type="Edit"):
+            try:
+                node_rect = node.rectangle()
+                cx = int((int(node_rect.left) + int(node_rect.right)) / 2)
+                cy = int((int(node_rect.top) + int(node_rect.bottom)) / 2)
+            except Exception:
+                continue
+            if cx <= (left + int(width * 0.45)):
+                continue
+            if cy <= (top + int(height * 0.55)):
+                continue
+            editor_candidates.append((cy, node))
+        if editor_candidates:
+            editor_candidates.sort(key=lambda row: row[0], reverse=True)
+            editor_candidates[0][1].click_input()
+            time.sleep(0.10)
+            return True, "message_input_uia_edit"
+    except Exception:
+        pass
+
     # WeChat message editor is usually in the lower-right panel.
     click_x = int(left + width * 0.74)
     click_y = int(top + height * 0.88)
@@ -1731,6 +1864,105 @@ def _set_clipboard_text(text: str) -> tuple[bool, str]:
         user32.CloseClipboard()
 
 
+def _target_text_matches(candidate: str, target: str) -> bool:
+    target_key = _normalize_target_hint(target)
+    candidate_key = _normalize_target_hint(candidate)
+    if not target_key or not candidate_key:
+        return False
+    if target_key == candidate_key:
+        return True
+    if target_key in candidate_key:
+        return True
+    if candidate_key in target_key and min(len(candidate_key), len(target_key)) >= 2:
+        return True
+    return False
+
+
+def _try_open_chat_by_list_click(target: str) -> tuple[bool, str]:
+    try:
+        from pywinauto import Desktop
+    except Exception as exc:
+        return False, f"pywinauto import failed: {exc}"
+
+    hwnd = _find_wechat_main_window()
+    if not hwnd:
+        return False, "wechat main window not found"
+    try:
+        window = Desktop(backend="uia").window(handle=hwnd)
+        rect = window.rectangle()
+        left = int(rect.left)
+        top = int(rect.top)
+        right = int(rect.right)
+        bottom = int(rect.bottom)
+        width = max(0, right - left)
+        height = max(0, bottom - top)
+    except Exception as exc:
+        return False, f"bind window failed: {exc}"
+
+    if width <= 0 or height <= 0:
+        return False, "invalid window rect"
+
+    exact_candidates: list[tuple[int, Any, str]] = []
+    fuzzy_candidates: list[tuple[int, Any, str]] = []
+    try:
+        list_items = window.descendants(control_type="ListItem")
+    except Exception as exc:
+        return False, f"list item enumerate failed: {exc}"
+
+    for item in list_items[:160]:
+        try:
+            item_rect = item.rectangle()
+            cx = int((int(item_rect.left) + int(item_rect.right)) / 2)
+            cy = int((int(item_rect.top) + int(item_rect.bottom)) / 2)
+        except Exception:
+            continue
+        if cx > (left + int(width * 0.45)):
+            continue
+        if cy <= (top + int(height * 0.10)) or cy >= (top + int(height * 0.92)):
+            continue
+
+        texts = _extract_element_text_candidates(item)
+        if not texts:
+            continue
+
+        best_text = ""
+        exact_hit = False
+        fuzzy_hit = False
+        for text_value in texts:
+            if not text_value:
+                continue
+            if _is_probably_time_or_badge(text_value):
+                continue
+            if text_value in WECHAT_SYSTEM_LIST_TITLES:
+                continue
+            if _target_text_matches(text_value, target):
+                best_text = text_value
+                if _normalize_target_hint(text_value) == _normalize_target_hint(target):
+                    exact_hit = True
+                else:
+                    fuzzy_hit = True
+                break
+            if not best_text:
+                best_text = text_value
+
+        if exact_hit:
+            exact_candidates.append((cy, item, best_text))
+        elif fuzzy_hit:
+            fuzzy_candidates.append((cy, item, best_text))
+
+    candidate_rows = exact_candidates if exact_candidates else fuzzy_candidates
+    if not candidate_rows:
+        return False, f"chat list no match for target={target}"
+    candidate_rows.sort(key=lambda row: row[0])
+    _, selected_item, selected_text = candidate_rows[0]
+    try:
+        selected_item.click_input()
+        time.sleep(0.22)
+        return True, f"open_chat_by_list_click target={target} matched={selected_text}"
+    except Exception as exc:
+        return False, f"list_click failed: {exc.__class__.__name__}: {exc}"
+
+
 def _open_chat_by_target(target: str, wechat_path: str) -> tuple[bool, str]:
     try:
         import pyautogui
@@ -1740,6 +1972,12 @@ def _open_chat_by_target(target: str, wechat_path: str) -> tuple[bool, str]:
     ok, detail = _focus_wechat_main_window(wechat_path)
     if not ok:
         return False, detail
+    if _is_active_chat_target(target):
+        return True, f"{detail}; active_chat_target"
+
+    list_ok, list_detail = _try_open_chat_by_list_click(target=target)
+    if list_ok:
+        return True, f"{detail}; {list_detail}"
 
     def _is_soso_page_active() -> bool:
         try:
@@ -1782,12 +2020,12 @@ def _open_chat_by_target(target: str, wechat_path: str) -> tuple[bool, str]:
 
     primary_ok, primary_detail = _try_open_with_hotkey("n")
     if primary_ok:
-        return True, f"{detail}; {primary_detail}"
+        return True, f"{detail}; {primary_detail}; list_click={list_detail}"
 
     fallback_ok, fallback_detail = _try_open_with_hotkey("f")
     if fallback_ok:
-        return True, f"{detail}; {fallback_detail}"
-    return False, f"open_chat failed: primary={primary_detail}; fallback={fallback_detail}"
+        return True, f"{detail}; {fallback_detail}; list_click={list_detail}"
+    return False, f"open_chat failed: list={list_detail}; primary={primary_detail}; fallback={fallback_detail}"
 
 
 def _send_text(content: str, wechat_path: str) -> tuple[bool, str]:
