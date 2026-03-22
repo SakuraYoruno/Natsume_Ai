@@ -1,0 +1,283 @@
+{
+  "captured_at": "2026-03-21T22:12:57",
+  "edge": {
+    "base_url": "http://192.168.1.101:17800",
+    "asr_language": "zh",
+    "asr_device": "cuda",
+    "asr_status": "ok",
+    "barge_in_enabled": false,
+    "seq": 231
+  },
+  "recent_asr_chunks": [
+    {
+      "id": 4919,
+      "ts_ms": 1774102374007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4918,
+      "ts_ms": 1774102372507,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4917,
+      "ts_ms": 1774102371008,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4916,
+      "ts_ms": 1774102369506,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4915,
+      "ts_ms": 1774102368007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4914,
+      "ts_ms": 1774102366506,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "谢谢大家",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4913,
+      "ts_ms": 1774102365007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4912,
+      "ts_ms": 1774102363508,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4911,
+      "ts_ms": 1774102362007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4910,
+      "ts_ms": 1774102360507,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "谢谢大家",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4909,
+      "ts_ms": 1774102359007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4908,
+      "ts_ms": 1774102357507,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "還是臭",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4907,
+      "ts_ms": 1774102356007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "谢谢大家",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4906,
+      "ts_ms": 1774102354507,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4905,
+      "ts_ms": 1774102353007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4904,
+      "ts_ms": 1774102351507,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4903,
+      "ts_ms": 1774102350007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4902,
+      "ts_ms": 1774102348508,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4901,
+      "ts_ms": 1774102347007,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4900,
+      "ts_ms": 1774102344399,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "中文字幕志愿者 杨茜茜",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4899,
+      "ts_ms": 1774102342899,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "感谢观看",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4898,
+      "ts_ms": 1774102341400,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "谢谢大家",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4897,
+      "ts_ms": 1774102339229,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "中文字幕志愿者 李宗盛",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4896,
+      "ts_ms": 1774102337729,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "你會扭嗎",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4895,
+      "ts_ms": 1774102335502,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4894,
+      "ts_ms": 1774102332217,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "真的假的",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4893,
+      "ts_ms": 1774102329822,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4892,
+      "ts_ms": 1774102328323,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "谢谢大家",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4891,
+      "ts_ms": 1774102325965,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    },
+    {
+      "id": 4890,
+      "ts_ms": 1774102324464,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "text": "[ASR_VAD_NO_SPEECH]",
+      "confidence": 0.0,
+      "final": 0
+    }
+  ]
+}

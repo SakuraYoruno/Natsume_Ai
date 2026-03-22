@@ -1,0 +1,1866 @@
+{
+  "meta": {
+    "script": "test_voice_dual_chain_full_nodes_refactored.py",
+    "mode": "synthetic_asr_injection",
+    "started_at": "2026-03-21T11:18:18.537694+00:00",
+    "finished_at": "2026-03-21T11:18:33.254209+00:00"
+  },
+  "inputs": {
+    "host_url": "http://127.0.0.1:18080",
+    "edge_url": "http://192.168.1.101:17800",
+    "session_id": "sess-refactor-06b55b04b3ea",
+    "asr_request_id": "asr-refactor-efaeb7857068",
+    "chat_message": "おはよう、今日もよろしくね。短く返事して。",
+    "env_file": ".env"
+  },
+  "steps": {
+    "host_health": {
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 27,
+      "body": {
+        "status": "OK",
+        "version": "0.1.0",
+        "timestamp": 1774091898546,
+        "details": {
+          "request_id": "req_1fe9dd5a5eda4c469b02aa095f17964b",
+          "stage": "S_SERVICE_HEALTH",
+          "reason_code": null,
+          "summary": {
+            "overall_status": "UP",
+            "required_total": 13,
+            "required_unavailable": 0,
+            "optional_unavailable": 0
+          },
+          "services": [
+            {
+              "service_id": "host.audit.sqlite_ledger",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+            },
+            {
+              "service_id": "host.governor.decision",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "governor decision engine ready"
+            },
+            {
+              "service_id": "host.skills.loader",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "skills loader ready (env=dev)"
+            },
+            {
+              "service_id": "host.integrations.llm_gateway",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "llm gateway enabled"
+            },
+            {
+              "service_id": "host.retrieval.embedding",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "retrieval embedding enabled"
+            },
+            {
+              "service_id": "host.retrieval.reranker",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "retrieval reranker enabled"
+            },
+            {
+              "service_id": "host.vision.screen_ocr",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "vision screen_ocr enabled"
+            },
+            {
+              "service_id": "host.vision.camera_recognizer",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "vision camera_recognizer enabled"
+            },
+            {
+              "service_id": "edge.rpc.gateway",
+              "owner": "edge",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge rpc reachable (17ms)"
+            },
+            {
+              "service_id": "edge.rpc.asr",
+              "owner": "edge",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge rpc reachable (17ms)"
+            },
+            {
+              "service_id": "edge.rpc.tts",
+              "owner": "edge",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge rpc reachable (17ms)"
+            },
+            {
+              "service_id": "edge.rpc.barge_in",
+              "owner": "edge",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge rpc reachable (17ms)"
+            },
+            {
+              "service_id": "edge.rpc.fallback_llm",
+              "owner": "edge",
+              "required": false,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "service healthy"
+            },
+            {
+              "service_id": "edge.rpc.resource_gate",
+              "owner": "edge",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge rpc reachable (17ms)"
+            }
+          ],
+          "ts_ms": 1774091898546
+        }
+      },
+      "parse_error": null
+    },
+    "host_ready": {
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 32,
+      "body": {
+        "ready": true,
+        "status": "READY",
+        "reason_code": null,
+        "timestamp": 1774091898578,
+        "summary": {
+          "request_id": "req_ab37fc3fa69f4c13b7d4dfcb71cc7b78",
+          "stage": "S_ENV_READY",
+          "env": "dev",
+          "node_count": 2,
+          "key_profiles": {
+            "total": 0,
+            "active": 0,
+            "rows": []
+          },
+          "services": {
+            "summary": {
+              "boot_status": "READY",
+              "issue_count": 0,
+              "probe_total": 5,
+              "probe_unavailable": 0,
+              "required_total": 13,
+              "required_unavailable": 0,
+              "optional_unavailable": 1
+            },
+            "rows": [
+              {
+                "service_id": "host.audit.sqlite_ledger",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+              },
+              {
+                "service_id": "host.governor.decision",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "governor decision engine ready"
+              },
+              {
+                "service_id": "host.skills.loader",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "skills loader ready (env=dev)"
+              },
+              {
+                "service_id": "host.integrations.llm_gateway",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "llm gateway enabled"
+              },
+              {
+                "service_id": "host.retrieval.embedding",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval embedding enabled"
+              },
+              {
+                "service_id": "host.retrieval.reranker",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval reranker enabled"
+              },
+              {
+                "service_id": "host.vision.screen_ocr",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision screen_ocr enabled"
+              },
+              {
+                "service_id": "host.vision.camera_recognizer",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision camera_recognizer enabled"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.asr",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.fallback_llm",
+                "owner": "edge",
+                "required": false,
+                "status": "DEGRADED",
+                "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              }
+            ]
+          },
+          "graph_runtime": {
+            "status": "SKIPPED",
+            "reason_code": null,
+            "detail": "graph runtime probe not provided"
+          },
+          "dependency_matrix": [
+            {
+              "component_id": "graph_runtime",
+              "service_id": "graph_runtime",
+              "component_type": "graph_runtime",
+              "available": true,
+              "reason_code": null,
+              "detail": "graph runtime probe not provided"
+            },
+            {
+              "component_id": "edge.rpc.asr",
+              "service_id": "edge.rpc.asr",
+              "component_type": "service_probe",
+              "available": true,
+              "reason_code": null,
+              "detail": "edge rpc reachable (14ms)"
+            },
+            {
+              "component_id": "edge.rpc.barge_in",
+              "service_id": "edge.rpc.barge_in",
+              "component_type": "service_probe",
+              "available": true,
+              "reason_code": null,
+              "detail": "edge rpc reachable (14ms)"
+            },
+            {
+              "component_id": "edge.rpc.gateway",
+              "service_id": "edge.rpc.gateway",
+              "component_type": "service_probe",
+              "available": true,
+              "reason_code": null,
+              "detail": "edge rpc reachable (14ms)"
+            },
+            {
+              "component_id": "edge.rpc.resource_gate",
+              "service_id": "edge.rpc.resource_gate",
+              "component_type": "service_probe",
+              "available": true,
+              "reason_code": null,
+              "detail": "edge rpc reachable (14ms)"
+            },
+            {
+              "component_id": "edge.rpc.tts",
+              "service_id": "edge.rpc.tts",
+              "component_type": "service_probe",
+              "available": true,
+              "reason_code": null,
+              "detail": "edge rpc reachable (14ms)"
+            }
+          ],
+          "dependency_summary": {
+            "total": 6,
+            "unavailable": 0,
+            "reason_counts": {},
+            "unavailable_ids": []
+          },
+          "drill_summary": [],
+          "orchestration_control_coverage": {
+            "status": "PARTIAL",
+            "required_total": 5,
+            "covered_count": 0,
+            "missing_scenarios": [
+              "drill.orch.missing_profile",
+              "drill.orch.selector_no_candidate",
+              "drill.orch.param_drift",
+              "drill.orch.approval_token_missing",
+              "drill.dependency.provider_down"
+            ],
+            "scenario_total": 0
+          },
+          "startup_report": {
+            "request_id": "req_ab37fc3fa69f4c13b7d4dfcb71cc7b78",
+            "stage": "S_SERVICE_BOOTSTRAP",
+            "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+            "summary": {
+              "boot_status": "READY",
+              "issue_count": 0,
+              "probe_total": 5,
+              "probe_unavailable": 0,
+              "required_total": 13,
+              "required_unavailable": 0,
+              "optional_unavailable": 1
+            },
+            "startup_issues": [],
+            "dependency_probes": [
+              {
+                "service_id": "edge.rpc.asr",
+                "available": true,
+                "unavailable_kind": null,
+                "reason_code": null,
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "available": true,
+                "unavailable_kind": null,
+                "reason_code": null,
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "available": true,
+                "unavailable_kind": null,
+                "reason_code": null,
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "available": true,
+                "unavailable_kind": null,
+                "reason_code": null,
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "available": true,
+                "unavailable_kind": null,
+                "reason_code": null,
+                "detail": "edge rpc reachable (14ms)"
+              }
+            ],
+            "services": [
+              {
+                "service_id": "host.audit.sqlite_ledger",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+              },
+              {
+                "service_id": "host.governor.decision",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "governor decision engine ready"
+              },
+              {
+                "service_id": "host.skills.loader",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "skills loader ready (env=dev)"
+              },
+              {
+                "service_id": "host.integrations.llm_gateway",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "llm gateway enabled"
+              },
+              {
+                "service_id": "host.retrieval.embedding",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval embedding enabled"
+              },
+              {
+                "service_id": "host.retrieval.reranker",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval reranker enabled"
+              },
+              {
+                "service_id": "host.vision.screen_ocr",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision screen_ocr enabled"
+              },
+              {
+                "service_id": "host.vision.camera_recognizer",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision camera_recognizer enabled"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.asr",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              },
+              {
+                "service_id": "edge.rpc.fallback_llm",
+                "owner": "edge",
+                "required": false,
+                "status": "DEGRADED",
+                "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "owner": "edge",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge rpc reachable (14ms)"
+              }
+            ],
+            "service_health": {
+              "request_id": "req_ab37fc3fa69f4c13b7d4dfcb71cc7b78",
+              "stage": "S_SERVICE_HEALTH",
+              "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+              "summary": {
+                "overall_status": "DEGRADED",
+                "required_total": 13,
+                "required_unavailable": 0,
+                "optional_unavailable": 1
+              },
+              "services": [
+                {
+                  "service_id": "host.audit.sqlite_ledger",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                },
+                {
+                  "service_id": "host.governor.decision",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "governor decision engine ready"
+                },
+                {
+                  "service_id": "host.skills.loader",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "skills loader ready (env=dev)"
+                },
+                {
+                  "service_id": "host.integrations.llm_gateway",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "llm gateway enabled"
+                },
+                {
+                  "service_id": "host.retrieval.embedding",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "retrieval embedding enabled"
+                },
+                {
+                  "service_id": "host.retrieval.reranker",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "retrieval reranker enabled"
+                },
+                {
+                  "service_id": "host.vision.screen_ocr",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "vision screen_ocr enabled"
+                },
+                {
+                  "service_id": "host.vision.camera_recognizer",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "vision camera_recognizer enabled"
+                },
+                {
+                  "service_id": "edge.rpc.gateway",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge rpc reachable (14ms)"
+                },
+                {
+                  "service_id": "edge.rpc.asr",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge rpc reachable (14ms)"
+                },
+                {
+                  "service_id": "edge.rpc.tts",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge rpc reachable (14ms)"
+                },
+                {
+                  "service_id": "edge.rpc.barge_in",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge rpc reachable (14ms)"
+                },
+                {
+                  "service_id": "edge.rpc.fallback_llm",
+                  "owner": "edge",
+                  "required": false,
+                  "status": "DEGRADED",
+                  "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+                },
+                {
+                  "service_id": "edge.rpc.resource_gate",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge rpc reachable (14ms)"
+                }
+              ],
+              "ts_ms": 1774091898578
+            },
+            "ts_ms": 1774091898578,
+            "config": {
+              "host": {
+                "success": true,
+                "stage": "S_HOST_CONFIG",
+                "reason_code": null,
+                "config": {
+                  "env": "dev",
+                  "llm_provider": "gemini",
+                  "openai_api_key_set": false,
+                  "openai_api_key_ref": "sec://openai/natsu-node-01",
+                  "gemini_api_key_set": true,
+                  "gemini_api_key_ref": "sec://gemini/natsu-node-01",
+                  "deepseek_api_key_set": false,
+                  "deepseek_api_key_ref": null,
+                  "llm_api_key_set": true,
+                  "llm_api_key_ref": "sec://gemini/natsu-node-01",
+                  "key_profile_status": null,
+                  "llm_timeout_ms": 8000,
+                  "llm_max_retries": 1,
+                  "cold_start_allowed": true,
+                  "enable_retrieval": true,
+                  "enable_vision": true,
+                  "enable_edge_rpc": true,
+                  "rate_limit_backend": "memory",
+                  "rate_limit_window_ms": 60000,
+                  "rate_limit_max_requests": 30
+                },
+                "issues": []
+              },
+              "edge": {
+                "success": true,
+                "stage": "S_EDGE_CONFIG",
+                "reason_code": null,
+                "config": {
+                  "env": "dev",
+                  "rpc_host": "192.168.1.101",
+                  "rpc_port": 17800,
+                  "hmac_shared_key_set": true,
+                  "hmac_shared_key_ref": null,
+                  "key_profile_status": null,
+                  "allow_insecure_auth": false,
+                  "rpc_auth_window_ms": 15000,
+                  "rpc_nonce_window_ms": 120000,
+                  "rpc_gateway_enabled": true,
+                  "asr_enabled": true,
+                  "tts_enabled": true,
+                  "barge_in_enabled": true,
+                  "fallback_llm_enabled": false,
+                  "resource_gate_enabled": true,
+                  "max_vram_mb": 4096,
+                  "max_queue_length": 8
+                },
+                "issues": []
+              }
+            }
+          },
+          "node_deployment": {
+            "request_id": "req_ab37fc3fa69f4c13b7d4dfcb71cc7b78",
+            "stage": "S_INFRA_NODE_CATALOG",
+            "status": "READY",
+            "reason_code": null,
+            "summary": {
+              "node_count": 2,
+              "service_count": 13,
+              "issue_count": 0,
+              "node_down": 0
+            },
+            "node_catalog": [
+              {
+                "node_id": "personal-edge-vts",
+                "region": "lan",
+                "role": "edge_realtime",
+                "services": [
+                  "edge.rpc.asr",
+                  "edge.rpc.barge_in",
+                  "edge.rpc.gateway",
+                  "edge.rpc.resource_gate",
+                  "edge.rpc.tts"
+                ],
+                "health_endpoint": "http://192.168.1.101:17800/v1/edge/health",
+                "key_profile_id": "edge-lan-runtime"
+              },
+              {
+                "node_id": "personal-host-main",
+                "region": "lan",
+                "role": "orchestrator",
+                "services": [
+                  "host.audit.sqlite_ledger",
+                  "host.governor.decision",
+                  "host.integrations.llm_gateway",
+                  "host.retrieval.embedding",
+                  "host.retrieval.reranker",
+                  "host.skills.loader",
+                  "host.vision.camera_recognizer",
+                  "host.vision.screen_ocr"
+                ],
+                "health_endpoint": "http://127.0.0.1:18080/health",
+                "key_profile_id": "host-local-runtime"
+              }
+            ],
+            "service_mapping": {
+              "edge.rpc.asr": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.barge_in": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.gateway": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.resource_gate": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.tts": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "host.audit.sqlite_ledger": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.governor.decision": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.integrations.llm_gateway": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.retrieval.embedding": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.retrieval.reranker": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.skills.loader": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.vision.camera_recognizer": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.vision.screen_ocr": {
+                "primary": "personal-host-main",
+                "secondary": []
+              }
+            },
+            "validation": {
+              "stage": "S_INFRA_NODE_CATALOG",
+              "status": "READY",
+              "reason_code": null,
+              "summary": {
+                "node_count": 2,
+                "role_count": 2,
+                "service_count": 13,
+                "issue_count": 0
+              },
+              "issues": [],
+              "nodes": [
+                {
+                  "node_id": "personal-edge-vts",
+                  "region": "lan",
+                  "role": "edge_realtime",
+                  "services": [
+                    "edge.rpc.asr",
+                    "edge.rpc.barge_in",
+                    "edge.rpc.gateway",
+                    "edge.rpc.resource_gate",
+                    "edge.rpc.tts"
+                  ],
+                  "health_endpoint": "http://192.168.1.101:17800/v1/edge/health",
+                  "key_profile_id": "edge-lan-runtime"
+                },
+                {
+                  "node_id": "personal-host-main",
+                  "region": "lan",
+                  "role": "orchestrator",
+                  "services": [
+                    "host.audit.sqlite_ledger",
+                    "host.governor.decision",
+                    "host.integrations.llm_gateway",
+                    "host.retrieval.embedding",
+                    "host.retrieval.reranker",
+                    "host.skills.loader",
+                    "host.vision.camera_recognizer",
+                    "host.vision.screen_ocr"
+                  ],
+                  "health_endpoint": "http://127.0.0.1:18080/health",
+                  "key_profile_id": "host-local-runtime"
+                }
+              ],
+              "service_mapping": {
+                "edge.rpc.asr": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.barge_in": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.gateway": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.resource_gate": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.tts": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "host.audit.sqlite_ledger": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.governor.decision": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.integrations.llm_gateway": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.retrieval.embedding": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.retrieval.reranker": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.skills.loader": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.vision.camera_recognizer": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.vision.screen_ocr": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                }
+              }
+            },
+            "node_probe": {
+              "request_id": "req_ab37fc3fa69f4c13b7d4dfcb71cc7b78",
+              "stage": "S_INFRA_NODE_PROBE",
+              "status": "UP",
+              "reason_code": null,
+              "summary": {
+                "node_total": 2,
+                "node_down": 0,
+                "node_up": 2
+              },
+              "nodes": [
+                {
+                  "node_id": "personal-edge-vts",
+                  "region": "lan",
+                  "role": "edge_realtime",
+                  "node_status": "UP",
+                  "reason_code": null,
+                  "stage": "S_INFRA_NODE_PROBE",
+                  "detail": "node healthy"
+                },
+                {
+                  "node_id": "personal-host-main",
+                  "region": "lan",
+                  "role": "orchestrator",
+                  "node_status": "UP",
+                  "reason_code": null,
+                  "stage": "S_INFRA_NODE_PROBE",
+                  "detail": "node healthy"
+                }
+              ],
+              "ts_ms": 1774091898578
+            },
+            "ts_ms": 1774091898578
+          },
+          "readiness_status": "READY",
+          "reason_code": null,
+          "ts_ms": 1774091898578,
+          "node_inventory_path": "configs\\deploy\\node_inventory_personal_lan.json"
+        }
+      },
+      "parse_error": null
+    },
+    "edge_health": {
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 31,
+      "body": {
+        "success": true,
+        "status": "ACCEPTED",
+        "reason_code": null,
+        "detail": "edge health snapshot",
+        "event": {
+          "stage": "S_EDGE_HEALTH",
+          "status": "ok",
+          "timestamp": "2026-03-21T11:18:17.510000Z",
+          "services": {
+            "edge.rpc.gateway": {
+              "available": true,
+              "detail": "edge rpc gateway enabled"
+            },
+            "edge.rpc.asr": {
+              "available": false,
+              "unavailable_kind": "dependency",
+              "detail": "edge asr disabled by config"
+            },
+            "edge.rpc.tts": {
+              "available": true,
+              "detail": "edge tts enabled"
+            },
+            "edge.rpc.barge_in": {
+              "available": true,
+              "detail": "edge barge-in enabled"
+            },
+            "edge.rpc.fallback_llm": {
+              "available": false,
+              "unavailable_kind": "dependency",
+              "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+            },
+            "edge.rpc.resource_gate": {
+              "available": true,
+              "detail": "edge resource gate enabled"
+            }
+          },
+          "resources": {
+            "vram_total_mb": 0,
+            "vram_used_mb": 0,
+            "queue_depth": 0
+          },
+          "components": {
+            "asr": {
+              "enabled": false,
+              "available": false,
+              "status": "ok",
+              "detail": "edge asr disabled by config"
+            },
+            "tts": {
+              "enabled": true,
+              "available": true,
+              "status": "ok",
+              "detail": "component loaded",
+              "health": {
+                "state": "READY",
+                "model_path": "D:/AI_Models/GPT-SoVITS-v2pro-20250604-nvidia50",
+                "device": "cuda",
+                "config_device": "cuda",
+                "sample_rate": 32000,
+                "load_error": null
+              }
+            },
+            "vts": {
+              "enabled": true,
+              "available": true,
+              "status": "ok",
+              "detail": "component loaded",
+              "health": {
+                "state": "AUTHENTICATED",
+                "talking": false,
+                "current_expression": "1d7c9c5f71804900bd3a3941657c4775",
+                "mouth_parameters": {
+                  "selected": [
+                    "MouthOpen"
+                  ],
+                  "mouth": [
+                    "MouthOpen",
+                    "ParamMouthOpenY"
+                  ],
+                  "volume": [
+                    "VoiceVolumePlusMouthOpen",
+                    "VoiceVolume"
+                  ],
+                  "silence": [
+                    "VoiceSilence"
+                  ],
+                  "available": [],
+                  "last_value": 0.0
+                },
+                "config": {
+                  "host": "localhost",
+                  "port": 8001,
+                  "plugin_name": "NastumeAi",
+                  "plugin_developer": "Natsume",
+                  "token_path": ".vts_token",
+                  "api_timeout_s": 5.0,
+                  "mouth_param_candidates": [
+                    "MouthOpen",
+                    "ParamMouthOpenY"
+                  ],
+                  "mouth_volume_param_candidates": [
+                    "VoiceVolumePlusMouthOpen",
+                    "VoiceVolume"
+                  ],
+                  "voice_silence_param_candidates": [
+                    "VoiceSilence"
+                  ],
+                  "reconnect": {
+                    "max_attempts": 10,
+                    "base_delay_s": 1.0,
+                    "max_delay_s": 16.0,
+                    "auto_reconnect": true
+                  }
+                },
+                "connection_error": null,
+                "emotion_map_size": 16,
+                "hotkey_catalog_size": 54,
+                "expression_overrides": {
+                  "NEUTRAL": "1d7c9c5f71804900bd3a3941657c4775",
+                  "HAPPY": "8bab2dee930d408381db550315a99d51",
+                  "SAD": "f50542219a9d4555ae687925e200e0ac",
+                  "ANGRY": "8fd5955d1b4e4b1ab9d9ff8c434e0383",
+                  "SURPRISED": "c28816035da74658bc258e8e0c8f1d77",
+                  "THINKING": "2da60cb91bec4e85ac64242d28014137",
+                  "CALM": "ba0b9ff0a7d049f6995ffd6b020de7de",
+                  "LOVING": "a05c1aeac6f84188ab89d5c37fe075fb",
+                  "EMBARRASSED": "16c29e87c5a44cb8a06976fb26e2af37",
+                  "BORED": "5b2e6f5be24f465895dba7fc3317adae",
+                  "GRATEFUL": "1e749d12bdf04627a84dc46ee63a91d9"
+                },
+                "reconnect": {
+                  "total_reconnects": 0,
+                  "total_reconnect_failures": 0,
+                  "reconnect_attempts": 0,
+                  "reconnecting": false,
+                  "reconnect_events_count": 0
+                }
+              }
+            },
+            "voice_pipeline": {
+              "enabled": true,
+              "available": true,
+              "status": "ok",
+              "detail": "component loaded",
+              "health": {
+                "mouth_sync": {
+                  "state": "stopped",
+                  "started": true,
+                  "audio_type": "ndarray",
+                  "sample_rate": 32000,
+                  "envelope_points": 52,
+                  "source": "synth_event.audio_data",
+                  "envelope_min": 0.0,
+                  "envelope_max": 0.9317,
+                  "envelope_avg": 0.3315,
+                  "probe_value": 0.18,
+                  "frame_interval_s": 0.0417,
+                  "frames_sent": 23,
+                  "last_value": 0.199
+                },
+                "mouth_sync_thread_alive": false
+              }
+            },
+            "fallback": {
+              "enabled": false,
+              "available": false,
+              "status": "ok",
+              "detail": "edge fallback llm disabled by default",
+              "default_unloaded": true,
+              "model_id": "ollama:3b-q4"
+            },
+            "event_reporter": {
+              "enabled": true,
+              "available": true,
+              "status": "ok",
+              "detail": "component loaded",
+              "health": {
+                "network_available": true,
+                "total_sent": 12,
+                "total_failed": 0,
+                "total_retried": 0,
+                "cache": {
+                  "cached_events": 0,
+                  "cached_bytes": 0,
+                  "max_events": 1000,
+                  "max_bytes": 10485760,
+                  "total_cached": 0,
+                  "total_evicted": 0
+                }
+              }
+            },
+            "resource_gate": {
+              "enabled": true,
+              "available": true,
+              "status": "ok",
+              "detail": "edge resource gate enabled",
+              "snapshot": {
+                "stage": "S_VOICE_RESOURCE_GATE",
+                "priority_order": [
+                  "ASR_INGRESS",
+                  "PLAYBACK",
+                  "TTS_SYNTH",
+                  "FALLBACK_LLM"
+                ],
+                "active_tasks": [],
+                "metrics": {
+                  "vram_total_mb": 0,
+                  "vram_used_mb": 0,
+                  "queue_depth": 0,
+                  "vram_utilization": 0.0
+                }
+              }
+            }
+          },
+          "resource_gate": {
+            "status": "ok",
+            "detail": "edge resource gate enabled",
+            "snapshot": {
+              "stage": "S_VOICE_RESOURCE_GATE",
+              "priority_order": [
+                "ASR_INGRESS",
+                "PLAYBACK",
+                "TTS_SYNTH",
+                "FALLBACK_LLM"
+              ],
+              "active_tasks": [],
+              "metrics": {
+                "vram_total_mb": 0,
+                "vram_used_mb": 0,
+                "queue_depth": 0,
+                "vram_utilization": 0.0
+              }
+            },
+            "queue_depth": 0
+          },
+          "config_snapshot": {
+            "env": "dev",
+            "rpc_host": "0.0.0.0",
+            "rpc_port": 17800,
+            "hmac_shared_key_set": true,
+            "hmac_shared_key_ref": null,
+            "key_profile_status": null,
+            "allow_insecure_auth": false,
+            "rpc_auth_window_ms": 15000,
+            "rpc_nonce_window_ms": 120000,
+            "rpc_gateway_enabled": true,
+            "asr_enabled": false,
+            "tts_enabled": true,
+            "barge_in_enabled": true,
+            "fallback_llm_enabled": false,
+            "resource_gate_enabled": true,
+            "max_vram_mb": 4096,
+            "max_queue_length": 8
+          },
+          "ts_ms": 1774091897510
+        },
+        "ts_ms": 1774091897510
+      },
+      "parse_error": null
+    },
+    "edge_events_ingest": {
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 5,
+      "body": {
+        "success": true,
+        "total": 2,
+        "accepted": 2,
+        "rejected": 0,
+        "reason_code": null,
+        "detail": "all 2 events accepted",
+        "rejected_indices": [],
+        "timestamp": 1774091898632
+      },
+      "parse_error": null
+    },
+    "chat_sse": {
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 14616,
+      "event_count": 7,
+      "line_count": 14,
+      "phase_counts": {
+        "PRESENCE": 3,
+        "RENDER": 1,
+        "SENTENCE": 2,
+        "COMMIT": 1
+      },
+      "commit_event": {
+        "phase": "COMMIT",
+        "done": true,
+        "decision": "APPROVE",
+        "narrative": "おはようございます。今日もよろしくお願いしますね。",
+        "intent_draft": {},
+        "request_id": "req_df640cb9cf6e490ab983efaacf2d089d",
+        "audit_refs": {
+          "intent_id": "intent::req_df640cb9cf6e490ab983efaacf2d089d",
+          "retrieval": {
+            "status": "DEGRADED",
+            "reason_code": "RETRIEVAL_TIMEOUT",
+            "route_count": 0,
+            "routes": [],
+            "route_rows": [],
+            "route_errors": [],
+            "candidate_count": 0,
+            "rerank_topk": 0,
+            "evidence_refs": [],
+            "reason_chain": [],
+            "degraded": true,
+            "latency_ms": 1218,
+            "state_arbiter": {
+              "status": "APPLIED",
+              "reason_code": null,
+              "fact_key": "world_canon_facts",
+              "source": "WorldCanonStore",
+              "is_fallback": false,
+              "fallback_chain": [],
+              "conflict_detected": false,
+              "conflict_detail": null,
+              "value_chars": 782
+            },
+            "world_canon": {
+              "status": "INJECTED",
+              "source": "state_arbiter",
+              "fact_key": "world_canon_facts"
+            },
+            "style_canon": {
+              "status": "APPLIED",
+              "reason_code": null,
+              "fact_key": "style_canon_facts",
+              "source": "StyleCanonStore",
+              "is_fallback": false,
+              "conflict_detected": false,
+              "value_chars": 1375,
+              "injected": true
+            },
+            "episodic_latest": {
+              "status": "SKIPPED",
+              "reason_code": "NO_MATCH",
+              "fact_key": "episodic_latest"
+            },
+            "bond_graph": {
+              "status": "APPLIED",
+              "reason_code": null,
+              "fact_key": "bond_graph_state",
+              "bond_stage": "STRANGER",
+              "bond_score": 2.0,
+              "value_chars": 49,
+              "injected": true
+            }
+          },
+          "llm": {
+            "status": "OK",
+            "reason_code": null,
+            "provider": "gemini",
+            "model_id": "gemini-2.5-flash",
+            "route_target": "cloud",
+            "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY",
+            "emotion_snapshot": {
+              "version": "chat_emotion_snapshot.v1",
+              "source": "stream_pre_llm",
+              "captured_ts_ms": 1774091899872,
+              "emotion_ts_ms": 1774091898650,
+              "age_ms": 1222,
+              "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "HAPPY",
+                "emotion_range_hint": "当前状态正常，可以表达多种情感",
+                "emotion_intensity": 0.5
+              },
+              "allowed_emotion_tags": [
+                "NEUTRAL",
+                "CALM",
+                "HAPPY",
+                "THINKING",
+                "SAD",
+                "ANGRY"
+              ]
+            },
+            "prompt_context_validation": {
+              "valid": true,
+              "degraded": false,
+              "reason_code": null,
+              "violation_count": 0,
+              "violations": []
+            },
+            "prompt_context_observability": {
+              "version": "prompt_context_obs.v1",
+              "degrade_order": [
+                "six_route",
+                "core_three",
+                "minimal_context",
+                "bare_llm"
+              ],
+              "selected_tier": "core_three",
+              "selected_tier_rank": 1,
+              "selected_reason": "partial_retrieval_context_ready",
+              "slot_item_counts": {
+                "authoritative": 1,
+                "retrieval": 3,
+                "style_canon": 1,
+                "style_node_bindings": 4,
+                "tool_meta_pack": 0
+              },
+              "kind_breakdown": {
+                "authoritative": {
+                  "world_canon": 1
+                },
+                "retrieval": {
+                  "episodic": 3
+                },
+                "style_canon": {
+                  "style_canon": 1
+                }
+              },
+              "retrieval_metrics": {
+                "status": "DEGRADED",
+                "reason_code": "RETRIEVAL_TIMEOUT",
+                "degraded": true,
+                "path": "partial_failure",
+                "route_count": 0,
+                "candidate_count": 0,
+                "rerank_topk": 0,
+                "route_ids": [],
+                "cache_hit": false,
+                "cache_ttl_ms": 0,
+                "cache_age_ms": 0
+              },
+              "source_stats": {
+                "retrieval_input_items": 3,
+                "retrieval_used_items": 3,
+                "retrieval_item_cap": 10,
+                "retrieval_trimmed_items": 0,
+                "world_authoritative_items": 1,
+                "style_prompt_rows": 1,
+                "style_binding_nodes": 4
+              },
+              "context_size_chars": 7792
+            },
+            "latency_ms": 2499,
+            "intent_draft": {},
+            "node_count": 1,
+            "nodes": [
+              {
+                "node_id": "chat_direct_ja",
+                "status": "OK",
+                "reason_code": null,
+                "provider": "gemini",
+                "model_id": "gemini-2.5-flash",
+                "latency_ms": 2499,
+                "input": {
+                  "user_message": "おはよう、今日もよろしくね。短く返事して。",
+                  "render_target_lang": "ja",
+                  "retrieval_status": "DEGRADED",
+                  "prompt_context_validation": {
+                    "valid": true,
+                    "degraded": false,
+                    "reason_code": null,
+                    "violation_count": 0,
+                    "violations": []
+                  }
+                },
+                "output": {
+                  "narrative": "おはようございます。今日もよろしくお願いしますね。",
+                  "contract_payload": {
+                    "narrative": {
+                      "text": "おはようございます。今日もよろしくお願いしますね。"
+                    },
+                    "intent_draft": {},
+                    "meta": {
+                      "draft_only": true
+                    }
+                  },
+                  "emotion_snapshot": {
+                    "version": "chat_emotion_snapshot.v1",
+                    "source": "stream_pre_llm",
+                    "captured_ts_ms": 1774091899872,
+                    "emotion_ts_ms": 1774091898650,
+                    "age_ms": 1222,
+                    "emotion_context": {
+                      "mood_state": "steady",
+                      "emotion_tag": "HAPPY",
+                      "emotion_range_hint": "当前状态正常，可以表达多种情感",
+                      "emotion_intensity": 0.5
+                    },
+                    "allowed_emotion_tags": [
+                      "NEUTRAL",
+                      "CALM",
+                      "HAPPY",
+                      "THINKING",
+                      "SAD",
+                      "ANGRY"
+                    ]
+                  }
+                }
+              }
+            ],
+            "route_decision": {
+              "version": "route.v1",
+              "target": "cloud",
+              "targets": {
+                "host": false,
+                "edge": false,
+                "cloud": true,
+                "skills": false
+              },
+              "route_target": "cloud",
+              "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY",
+              "scene_type": "CHAT",
+              "scene_type_source": "stream_request",
+              "next_node": "chat_direct_ja",
+              "router_node": "stream_chat_handler",
+              "provider": "gemini",
+              "model_id": "gemini-2.5-flash",
+              "sys_mode": "normal"
+            }
+          },
+          "route_decision": {
+            "version": "route.v1",
+            "target": "cloud",
+            "targets": {
+              "host": false,
+              "edge": false,
+              "cloud": true,
+              "skills": false
+            },
+            "route_target": "cloud",
+            "route_reason_code": "HOST_CHAT_HOST_8B_UNHEALTHY",
+            "scene_type": "CHAT",
+            "scene_type_source": "stream_request",
+            "next_node": "chat_direct_ja",
+            "router_node": "stream_chat_handler",
+            "provider": "gemini",
+            "model_id": "gemini-2.5-flash",
+            "sys_mode": "normal"
+          },
+          "emotion_snapshot": {
+            "version": "chat_emotion_snapshot.v1",
+            "source": "stream_pre_llm",
+            "captured_ts_ms": 1774091899872,
+            "emotion_ts_ms": 1774091898650,
+            "age_ms": 1222,
+            "emotion_context": {
+              "mood_state": "steady",
+              "emotion_tag": "HAPPY",
+              "emotion_range_hint": "当前状态正常，可以表达多种情感",
+              "emotion_intensity": 0.5
+            },
+            "allowed_emotion_tags": [
+              "NEUTRAL",
+              "CALM",
+              "HAPPY",
+              "THINKING",
+              "SAD",
+              "ANGRY"
+            ]
+          },
+          "prompt_context_validation": {
+            "valid": true,
+            "degraded": false,
+            "reason_code": null,
+            "violation_count": 0,
+            "violations": []
+          },
+          "prompt_context_observability": {
+            "version": "prompt_context_obs.v1",
+            "degrade_order": [
+              "six_route",
+              "core_three",
+              "minimal_context",
+              "bare_llm"
+            ],
+            "selected_tier": "core_three",
+            "selected_tier_rank": 1,
+            "selected_reason": "partial_retrieval_context_ready",
+            "slot_item_counts": {
+              "authoritative": 1,
+              "retrieval": 3,
+              "style_canon": 1,
+              "style_node_bindings": 4,
+              "tool_meta_pack": 0
+            },
+            "kind_breakdown": {
+              "authoritative": {
+                "world_canon": 1
+              },
+              "retrieval": {
+                "episodic": 3
+              },
+              "style_canon": {
+                "style_canon": 1
+              }
+            },
+            "retrieval_metrics": {
+              "status": "DEGRADED",
+              "reason_code": "RETRIEVAL_TIMEOUT",
+              "degraded": true,
+              "path": "partial_failure",
+              "route_count": 0,
+              "candidate_count": 0,
+              "rerank_topk": 0,
+              "route_ids": [],
+              "cache_hit": false,
+              "cache_ttl_ms": 0,
+              "cache_age_ms": 0
+            },
+            "source_stats": {
+              "retrieval_input_items": 3,
+              "retrieval_used_items": 3,
+              "retrieval_item_cap": 10,
+              "retrieval_trimmed_items": 0,
+              "world_authoritative_items": 1,
+              "style_prompt_rows": 1,
+              "style_binding_nodes": 4
+            },
+            "context_size_chars": 7792
+          },
+          "vts": {
+            "status": "APPLIED",
+            "reason_code": null,
+            "emotion_tag": "HAPPY",
+            "expression_id": "exp_happy_01",
+            "trigger": "HOST",
+            "detail": "expression resolved via fixed mapping"
+          },
+          "tts": {
+            "success": true,
+            "status": "ACCEPTED",
+            "reason_code": null,
+            "detail": "tts queued; tts playback started",
+            "event": {
+              "request_id": "req_df640cb9cf6e490ab983efaacf2d089d",
+              "session_id": "sess::req_df640cb9cf6e490ab983efaacf2d089d",
+              "utterance_id": "utt::req_df640cb9cf6e490ab983efaacf2d089d",
+              "event_type": "TTS_PLAYBACK_STARTED",
+              "audio_ref": "memory://tts_req_5a0ea791717c4301bb7060e3e9595b17",
+              "ts_ms": 1774091908998,
+              "queue_event": {
+                "request_id": "req_df640cb9cf6e490ab983efaacf2d089d",
+                "session_id": "sess::req_df640cb9cf6e490ab983efaacf2d089d",
+                "utterance_id": "utt::req_df640cb9cf6e490ab983efaacf2d089d",
+                "event_type": "TTS_QUEUED",
+                "queue_depth": 1,
+                "ts_ms": 1774091908998
+              },
+              "start_event": {
+                "request_id": "req_df640cb9cf6e490ab983efaacf2d089d",
+                "session_id": "sess::req_df640cb9cf6e490ab983efaacf2d089d",
+                "utterance_id": "utt::req_df640cb9cf6e490ab983efaacf2d089d",
+                "event_type": "TTS_PLAYBACK_STARTED",
+                "audio_ref": "memory://tts_req_5a0ea791717c4301bb7060e3e9595b17",
+                "ts_ms": 1774091908998
+              },
+              "start_status": "ACCEPTED",
+              "start_reason_code": null,
+              "start_stage": "S_VOICE_TTS_PLAYBACK",
+              "start_detail": "tts playback started",
+              "vts_expression_result": {
+                "success": true,
+                "reason_code": null,
+                "detail": "expression set: HAPPY -> 8bab2dee930d408381db550315a99d51",
+                "action": "set_expression",
+                "expression_id": "8bab2dee930d408381db550315a99d51",
+                "emotion_tag": "HAPPY"
+              },
+              "vts_talk_result": {
+                "success": true,
+                "reason_code": null,
+                "detail": "talk gate started (mouth open)",
+                "action": "TALK_START",
+                "expression_id": null,
+                "emotion_tag": null
+              },
+              "vts_mouth_sync": {
+                "state": "running",
+                "started": true,
+                "audio_type": "ndarray",
+                "sample_rate": 32000,
+                "envelope_points": 93,
+                "source": "synth_event.audio_data",
+                "envelope_min": 0.0,
+                "envelope_max": 0.9844,
+                "envelope_avg": 0.3328,
+                "probe_value": 0.18,
+                "frame_interval_s": 0.0417,
+                "frames_sent": 0,
+                "last_value": 0.0
+              },
+              "stage": "S_VOICE_TTS_PLAYBACK",
+              "insecure_auth": false
+            },
+            "latency_ms": 2683
+          },
+          "airlock": {
+            "ingress_classification": "FACT",
+            "quarantine_digest": "sha256:d778774ee0e1e8e599727c00d4c7fc8135369fe736f1e4e23416a45296bca13a"
+          },
+          "episodic_memory": {
+            "status": "OK",
+            "reason_code": null,
+            "memory_id": "mem_22c01e8b248b43c9af786c0429026263",
+            "detail": "memory written",
+            "emotion_tag": "HAPPY"
+          },
+          "trace_metrics": {
+            "retrieval_latency_ms": 1218,
+            "first_token_latency_ms": 2497,
+            "background_tasks_latency_ms": {
+              "observability_persist_ms": 0,
+              "airlock_ingress_ms": 7,
+              "episodic_memory_ms": 7,
+              "vts_emotion_ms": 14,
+              "bond_update_ms": 0,
+              "tts_speak_ms": 2683,
+              "total_ms": 2684
+            }
+          },
+          "recall_pack_builder": {
+            "status": "OK",
+            "mode": "ACTIVE",
+            "active_enabled": true,
+            "applied_to_prompt": true,
+            "rewritten_item_count": 3,
+            "input_item_count": 3,
+            "total_tokens": 861,
+            "slot_count": 3,
+            "conflict_events": 0,
+            "subgraph_trace_count": 3,
+            "recall_slot_text_injected": [
+              "world_canon",
+              "style_canon",
+              "bond_graph"
+            ]
+          },
+          "routing_matrix_decision": {
+            "task_type": "chat",
+            "selected_model": "host_8b",
+            "latency_budget": "<5s",
+            "is_fallback": false,
+            "fallback_reason": null,
+            "runtime_applied": false,
+            "runtime_selected_target": "cloud",
+            "not_applied_reason": "HOST_8B_UNAVAILABLE:HOST_8B_PROBE_FAILED:url_error:<urlopen error [WinError 10061] 由于目标计算机积极拒绝，无法连接。>"
+          },
+          "state_arbiter": {
+            "status": "APPLIED",
+            "reason_code": null,
+            "fact_key": "world_canon_facts",
+            "source": "WorldCanonStore",
+            "is_fallback": false,
+            "fallback_chain": [],
+            "conflict_detected": false,
+            "conflict_detail": null,
+            "value_chars": 782
+          }
+        }
+      },
+      "error": null,
+      "body": null
+    }
+  },
+  "audit_db": {
+    "available": true,
+    "db_path": "D:\\Natsume_Ai\\host_brain\\data\\audit.sqlite3",
+    "voice_event_count": 2,
+    "voice_event_latest": [
+      {
+        "event_type": "ASR_FINAL",
+        "status": "RECEIVED",
+        "stage": "S_ASR_FINAL",
+        "reason_code": null,
+        "ts_ms": 1774091898538
+      },
+      {
+        "event_type": "ASR_CHUNK",
+        "status": "RECEIVED",
+        "stage": "S_ASR_CHUNK",
+        "reason_code": null,
+        "ts_ms": 1774091898537
+      }
+    ],
+    "avatar_action_count": 1,
+    "avatar_action_latest": [
+      {
+        "trigger": "HOST",
+        "emotion_tag": "HAPPY",
+        "expression_id": "exp_happy_01",
+        "status": "APPLIED",
+        "reason_code": null,
+        "stage": "S_AVATAR_EXPRESSION_MAP",
+        "ts_ms": 1774091898644
+      }
+    ]
+  },
+  "matrix": [
+    {
+      "node": "host.health",
+      "passed": true,
+      "detail": "status_code=200"
+    },
+    {
+      "node": "host.ready",
+      "passed": true,
+      "detail": "ready=True"
+    },
+    {
+      "node": "edge.health",
+      "passed": true,
+      "detail": "status_code=200, tts=OK, vts=OK"
+    },
+    {
+      "node": "edge.vts.connection",
+      "passed": true,
+      "detail": "vts_state=AUTHENTICATED"
+    },
+    {
+      "node": "asr.synthetic_ingest",
+      "passed": true,
+      "detail": "status_code=200, accepted=2/2, source=synthetic_injection(/v1/edge/events)"
+    },
+    {
+      "node": "asr.real_capture",
+      "passed": true,
+      "detail": "synthetic ASR accepted by --allow-synthetic-asr"
+    },
+    {
+      "node": "chat.commit",
+      "passed": true,
+      "detail": "decision=APPROVE, done=True"
+    },
+    {
+      "node": "tts.rpc",
+      "passed": true,
+      "detail": "status=ACCEPTED, reason=, event_type=TTS_PLAYBACK_STARTED, start_event_type=TTS_PLAYBACK_STARTED"
+    },
+    {
+      "node": "vts.rpc",
+      "passed": true,
+      "detail": "status=APPLIED, reason="
+    }
+  ],
+  "overall": {
+    "passed": true,
+    "failed_nodes": []
+  }
+}

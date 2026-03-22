@@ -1,0 +1,23 @@
+{
+  "ts_ms": 1774020908565,
+  "checks": [
+    {
+      "name": "edge_health_local",
+      "ok": true,
+      "elapsed_ms": 4,
+      "detail": "status=200"
+    },
+    {
+      "name": "host_health_local",
+      "ok": true,
+      "elapsed_ms": 10,
+      "detail": "status=200"
+    },
+    {
+      "name": "rpc_screenshot",
+      "ok": true,
+      "elapsed_ms": 27630,
+      "detail": "{\"success\": true, \"status\": \"ACCEPTED\", \"reason\": null, \"latency_ms\": 27541, \"img_len\": 7680708}"
+    }
+  ]
+}

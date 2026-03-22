@@ -1,0 +1,230 @@
+{
+  "captured_at": "2026-03-21T21:34:05",
+  "target_text": "なつめエーエスアール検証です。あいことばは、みかん、りんご、ばなな。いちにさん。",
+  "target_text_norm": "なつめエーエスアール検証ですあいことばはみかんりんごばなないちにさん",
+  "before_id": 3512,
+  "speak_result": {
+    "success": true,
+    "status": "ACCEPTED",
+    "reason_code": null,
+    "detail": "tts queued; tts playback started",
+    "event": {
+      "request_id": "req_776464dc94644d3d9a25eee4bec49afc",
+      "session_id": "sess::req_776464dc94644d3d9a25eee4bec49afc",
+      "utterance_id": "utt::req_776464dc94644d3d9a25eee4bec49afc",
+      "event_type": "TTS_PLAYBACK_STARTED",
+      "audio_ref": "memory://tts_req_c52049ff59594a5297c25393de01aac2",
+      "ts_ms": 1774100024573,
+      "queue_event": {
+        "request_id": "req_776464dc94644d3d9a25eee4bec49afc",
+        "session_id": "sess::req_776464dc94644d3d9a25eee4bec49afc",
+        "utterance_id": "utt::req_776464dc94644d3d9a25eee4bec49afc",
+        "event_type": "TTS_QUEUED",
+        "queue_depth": 1,
+        "ts_ms": 1774100024573
+      },
+      "start_event": {
+        "request_id": "req_776464dc94644d3d9a25eee4bec49afc",
+        "session_id": "sess::req_776464dc94644d3d9a25eee4bec49afc",
+        "utterance_id": "utt::req_776464dc94644d3d9a25eee4bec49afc",
+        "event_type": "TTS_PLAYBACK_STARTED",
+        "audio_ref": "memory://tts_req_c52049ff59594a5297c25393de01aac2",
+        "ts_ms": 1774100024573
+      },
+      "start_status": "ACCEPTED",
+      "start_reason_code": null,
+      "start_stage": "S_VOICE_TTS_PLAYBACK",
+      "start_detail": "tts playback started",
+      "vts_expression_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "expression set via fallback: NEUTRAL -> 2da60cb91bec4e85ac64242d28014137 (preferred=exp_neutral_01)",
+        "action": "set_expression",
+        "expression_id": "2da60cb91bec4e85ac64242d28014137",
+        "emotion_tag": "NEUTRAL"
+      },
+      "vts_talk_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "talk gate started (mouth open)",
+        "action": "TALK_START",
+        "expression_id": null,
+        "emotion_tag": null
+      },
+      "vts_mouth_sync": {
+        "state": "running",
+        "started": true,
+        "audio_type": "ndarray",
+        "sample_rate": 32000,
+        "envelope_points": 133,
+        "source": "synth_event.audio_data",
+        "envelope_min": 0.0,
+        "envelope_max": 0.81,
+        "envelope_avg": 0.3058,
+        "probe_value": 0.18,
+        "frame_interval_s": 0.0417,
+        "frames_sent": 0,
+        "last_value": 0.0
+      },
+      "stage": "S_VOICE_TTS_PLAYBACK",
+      "insecure_auth": false
+    },
+    "latency_ms": 5977
+  },
+  "new_asr_rows": [
+    {
+      "id": 3514,
+      "ts_ms": 1774100023284,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3515,
+      "ts_ms": 1774100024783,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0889
+    },
+    {
+      "id": 3516,
+      "ts_ms": 1774100026284,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3517,
+      "ts_ms": 1774100027783,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0889
+    },
+    {
+      "id": 3519,
+      "ts_ms": 1774100029808,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3520,
+      "ts_ms": 1774100031309,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "夏目SR検証です。",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.1905
+    },
+    {
+      "id": 3521,
+      "ts_ms": 1774100032808,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "先生、合言葉を",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0
+    },
+    {
+      "id": 3522,
+      "ts_ms": 1774100034309,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "カミカン、リンゴ",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0
+    },
+    {
+      "id": 3524,
+      "ts_ms": 1774100035808,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "バナナ?",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0
+    },
+    {
+      "id": 3525,
+      "ts_ms": 1774100037308,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3526,
+      "ts_ms": 1774100038808,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3527,
+      "ts_ms": 1774100040309,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0833
+    },
+    {
+      "id": 3528,
+      "ts_ms": 1774100041809,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false,
+      "similarity_to_target": 0.0889
+    }
+  ],
+  "best_match": {
+    "id": 3520,
+    "ts_ms": 1774100031309,
+    "status": "ACCEPTED",
+    "reason_code": "VOICE_LOW_CONFIDENCE",
+    "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+    "text": "夏目SR検証です。",
+    "confidence": 0.0,
+    "final": false,
+    "similarity_to_target": 0.1905
+  }
+}

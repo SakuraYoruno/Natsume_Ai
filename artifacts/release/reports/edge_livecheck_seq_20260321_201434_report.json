@@ -1,0 +1,142 @@
+{
+  "started_at": "2026-03-21T20:14:35",
+  "ensure_vts_cycle": 1,
+  "files": {
+    "before": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_before.png",
+    "after": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_after.png",
+    "during": [
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_01.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_02.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_03.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_04.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_05.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_06.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_07.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_08.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_09.png",
+      "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_10.png"
+    ]
+  },
+  "diff": {
+    "mouth_mad_vs_first": [
+      {
+        "frame": 1,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_01.png",
+        "mouth_mad_vs_first": 0.0
+      },
+      {
+        "frame": 2,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_02.png",
+        "mouth_mad_vs_first": 0.6047
+      },
+      {
+        "frame": 3,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_03.png",
+        "mouth_mad_vs_first": 0.61
+      },
+      {
+        "frame": 4,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_04.png",
+        "mouth_mad_vs_first": 0.3249
+      },
+      {
+        "frame": 5,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_05.png",
+        "mouth_mad_vs_first": 0.1483
+      },
+      {
+        "frame": 6,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_06.png",
+        "mouth_mad_vs_first": 0.1168
+      },
+      {
+        "frame": 7,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_07.png",
+        "mouth_mad_vs_first": 0.3368
+      },
+      {
+        "frame": 8,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_08.png",
+        "mouth_mad_vs_first": 0.6042
+      },
+      {
+        "frame": 9,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_09.png",
+        "mouth_mad_vs_first": 0.5947
+      },
+      {
+        "frame": 10,
+        "file": "artifacts\\release\\reports\\edge_livecheck_seq_20260321_201434_during_10.png",
+        "mouth_mad_vs_first": 0.1633
+      }
+    ]
+  },
+  "speak": {
+    "success": true,
+    "status": "ACCEPTED",
+    "reason_code": null,
+    "detail": "tts queued; tts playback started",
+    "event": {
+      "request_id": "req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+      "session_id": "sess::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+      "utterance_id": "utt::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+      "event_type": "TTS_PLAYBACK_STARTED",
+      "audio_ref": "memory://tts_req_f8f357c42138438a920a5267a284a0a0",
+      "ts_ms": 1774095274570,
+      "queue_event": {
+        "request_id": "req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "session_id": "sess::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "utterance_id": "utt::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "event_type": "TTS_QUEUED",
+        "queue_depth": 1,
+        "ts_ms": 1774095274570
+      },
+      "start_event": {
+        "request_id": "req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "session_id": "sess::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "utterance_id": "utt::req_9b1fbddc7c8c4f5ab0c7a34ecc3e4c86",
+        "event_type": "TTS_PLAYBACK_STARTED",
+        "audio_ref": "memory://tts_req_f8f357c42138438a920a5267a284a0a0",
+        "ts_ms": 1774095274570
+      },
+      "start_status": "ACCEPTED",
+      "start_reason_code": null,
+      "start_stage": "S_VOICE_TTS_PLAYBACK",
+      "start_detail": "tts playback started",
+      "vts_expression_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "expression set: HAPPY -> 8bab2dee930d408381db550315a99d51",
+        "action": "set_expression",
+        "expression_id": "8bab2dee930d408381db550315a99d51",
+        "emotion_tag": "HAPPY"
+      },
+      "vts_talk_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "talk gate started (mouth open)",
+        "action": "TALK_START",
+        "expression_id": null,
+        "emotion_tag": null
+      },
+      "vts_mouth_sync": {
+        "state": "running",
+        "started": true,
+        "audio_type": "ndarray",
+        "sample_rate": 32000,
+        "envelope_points": 285,
+        "source": "synth_event.audio_data",
+        "envelope_min": 0.0,
+        "envelope_max": 0.8484,
+        "envelope_avg": 0.2502,
+        "probe_value": 0.18,
+        "frame_interval_s": 0.0417,
+        "frames_sent": 0,
+        "last_value": 0.0
+      },
+      "stage": "S_VOICE_TTS_PLAYBACK",
+      "insecure_auth": false
+    },
+    "latency_ms": 4095
+  }
+}

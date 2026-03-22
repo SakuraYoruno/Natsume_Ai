@@ -1,0 +1,1098 @@
+{
+  "probe": "formal_dual_node_real_machine",
+  "ts_ms": 1774019105307,
+  "host_base": "http://127.0.0.1:18080",
+  "edge_base": "http://192.168.1.101:17800",
+  "strict_rule": "any degraded/unavailable => BLOCK",
+  "steps": [
+    {
+      "name": "host_health",
+      "url": "http://127.0.0.1:18080/health",
+      "http_status": 200,
+      "ok": false,
+      "elapsed_ms": 5040,
+      "detail": "$.details.services[8].status=down; $.details.services[9].status=down; $.details.services[10].status=down; $.details.services[11].status=down; $.details.services[13].status=down",
+      "body": {
+        "status": "OK",
+        "version": "0.1.0",
+        "timestamp": 1774019105396,
+        "details": {
+          "request_id": "req_fab9f328492944ebb4d282aa7078fd2f",
+          "stage": "S_SERVICE_HEALTH",
+          "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+          "summary": {
+            "overall_status": "DEGRADED",
+            "required_total": 13,
+            "required_unavailable": 5,
+            "optional_unavailable": 0
+          },
+          "services": [
+            {
+              "service_id": "host.audit.sqlite_ledger",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+            },
+            {
+              "service_id": "host.governor.decision",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "governor decision engine ready"
+            },
+            {
+              "service_id": "host.skills.loader",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "skills loader ready (env=dev)"
+            },
+            {
+              "service_id": "host.integrations.llm_gateway",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "llm gateway enabled"
+            },
+            {
+              "service_id": "host.retrieval.embedding",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "retrieval embedding enabled"
+            },
+            {
+              "service_id": "host.retrieval.reranker",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "retrieval reranker enabled"
+            },
+            {
+              "service_id": "host.vision.screen_ocr",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "vision screen_ocr enabled"
+            },
+            {
+              "service_id": "host.vision.camera_recognizer",
+              "owner": "host",
+              "required": true,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "vision camera_recognizer enabled"
+            },
+            {
+              "service_id": "edge.rpc.gateway",
+              "owner": "edge",
+              "required": true,
+              "status": "DOWN",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "service_id": "edge.rpc.asr",
+              "owner": "edge",
+              "required": true,
+              "status": "DOWN",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "service_id": "edge.rpc.tts",
+              "owner": "edge",
+              "required": true,
+              "status": "DOWN",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "service_id": "edge.rpc.barge_in",
+              "owner": "edge",
+              "required": true,
+              "status": "DOWN",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "service_id": "edge.rpc.fallback_llm",
+              "owner": "edge",
+              "required": false,
+              "status": "UP",
+              "reason_code": null,
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "service healthy"
+            },
+            {
+              "service_id": "edge.rpc.resource_gate",
+              "owner": "edge",
+              "required": true,
+              "status": "DOWN",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "stage": "S_SERVICE_HEALTH",
+              "detail": "edge health returned HTTP 502"
+            }
+          ],
+          "ts_ms": 1774019105396
+        }
+      }
+    },
+    {
+      "name": "host_ready",
+      "url": "http://127.0.0.1:18080/ready",
+      "http_status": 200,
+      "ok": false,
+      "elapsed_ms": 5030,
+      "detail": "$.status=degraded; $.summary.services.rows[8].status=down; $.summary.services.rows[9].status=down; $.summary.services.rows[10].status=down; $.summary.services.rows[11].status=down; $.summary.services.rows[12].status=degraded; $.summary.services.rows[13].status=down; $.summary.dependency_matrix[1].available=false",
+      "body": {
+        "ready": false,
+        "status": "DEGRADED",
+        "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+        "timestamp": 1774019110432,
+        "summary": {
+          "request_id": "req_f16375689ccf4d37ad7ae2fdea09e4e9",
+          "stage": "S_ENV_READY",
+          "env": "dev",
+          "node_count": 2,
+          "key_profiles": {
+            "total": 0,
+            "active": 0,
+            "rows": []
+          },
+          "services": {
+            "summary": {
+              "boot_status": "DEGRADED",
+              "issue_count": 0,
+              "probe_total": 5,
+              "probe_unavailable": 5,
+              "required_total": 13,
+              "required_unavailable": 5,
+              "optional_unavailable": 1
+            },
+            "rows": [
+              {
+                "service_id": "host.audit.sqlite_ledger",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+              },
+              {
+                "service_id": "host.governor.decision",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "governor decision engine ready"
+              },
+              {
+                "service_id": "host.skills.loader",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "skills loader ready (env=dev)"
+              },
+              {
+                "service_id": "host.integrations.llm_gateway",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "llm gateway enabled"
+              },
+              {
+                "service_id": "host.retrieval.embedding",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval embedding enabled"
+              },
+              {
+                "service_id": "host.retrieval.reranker",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval reranker enabled"
+              },
+              {
+                "service_id": "host.vision.screen_ocr",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision screen_ocr enabled"
+              },
+              {
+                "service_id": "host.vision.camera_recognizer",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision camera_recognizer enabled"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.asr",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.fallback_llm",
+                "owner": "edge",
+                "required": false,
+                "status": "DEGRADED",
+                "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              }
+            ]
+          },
+          "graph_runtime": {
+            "status": "SKIPPED",
+            "reason_code": null,
+            "detail": "graph runtime probe not provided"
+          },
+          "dependency_matrix": [
+            {
+              "component_id": "graph_runtime",
+              "service_id": "graph_runtime",
+              "component_type": "graph_runtime",
+              "available": true,
+              "reason_code": null,
+              "detail": "graph runtime probe not provided"
+            },
+            {
+              "component_id": "edge.rpc.asr",
+              "service_id": "edge.rpc.asr",
+              "component_type": "service_probe",
+              "available": false,
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "component_id": "edge.rpc.barge_in",
+              "service_id": "edge.rpc.barge_in",
+              "component_type": "service_probe",
+              "available": false,
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "component_id": "edge.rpc.gateway",
+              "service_id": "edge.rpc.gateway",
+              "component_type": "service_probe",
+              "available": false,
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "component_id": "edge.rpc.resource_gate",
+              "service_id": "edge.rpc.resource_gate",
+              "component_type": "service_probe",
+              "available": false,
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "detail": "edge health returned HTTP 502"
+            },
+            {
+              "component_id": "edge.rpc.tts",
+              "service_id": "edge.rpc.tts",
+              "component_type": "service_probe",
+              "available": false,
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "detail": "edge health returned HTTP 502"
+            }
+          ],
+          "dependency_summary": {
+            "total": 6,
+            "unavailable": 5,
+            "reason_counts": {
+              "SERVICE_UNAVAILABLE_EDGE_RPC": 5
+            },
+            "unavailable_ids": [
+              "edge.rpc.asr",
+              "edge.rpc.barge_in",
+              "edge.rpc.gateway",
+              "edge.rpc.resource_gate",
+              "edge.rpc.tts"
+            ]
+          },
+          "drill_summary": [],
+          "orchestration_control_coverage": {
+            "status": "PARTIAL",
+            "required_total": 5,
+            "covered_count": 0,
+            "missing_scenarios": [
+              "drill.orch.missing_profile",
+              "drill.orch.selector_no_candidate",
+              "drill.orch.param_drift",
+              "drill.orch.approval_token_missing",
+              "drill.dependency.provider_down"
+            ],
+            "scenario_total": 0
+          },
+          "startup_report": {
+            "request_id": "req_f16375689ccf4d37ad7ae2fdea09e4e9",
+            "stage": "S_SERVICE_BOOTSTRAP",
+            "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+            "summary": {
+              "boot_status": "DEGRADED",
+              "issue_count": 0,
+              "probe_total": 5,
+              "probe_unavailable": 5,
+              "required_total": 13,
+              "required_unavailable": 5,
+              "optional_unavailable": 1
+            },
+            "startup_issues": [],
+            "dependency_probes": [
+              {
+                "service_id": "edge.rpc.asr",
+                "available": false,
+                "unavailable_kind": "edge_rpc",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "available": false,
+                "unavailable_kind": "edge_rpc",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "available": false,
+                "unavailable_kind": "edge_rpc",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "available": false,
+                "unavailable_kind": "edge_rpc",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "available": false,
+                "unavailable_kind": "edge_rpc",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "detail": "edge health returned HTTP 502"
+              }
+            ],
+            "services": [
+              {
+                "service_id": "host.audit.sqlite_ledger",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+              },
+              {
+                "service_id": "host.governor.decision",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "governor decision engine ready"
+              },
+              {
+                "service_id": "host.skills.loader",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "skills loader ready (env=dev)"
+              },
+              {
+                "service_id": "host.integrations.llm_gateway",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "llm gateway enabled"
+              },
+              {
+                "service_id": "host.retrieval.embedding",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval embedding enabled"
+              },
+              {
+                "service_id": "host.retrieval.reranker",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "retrieval reranker enabled"
+              },
+              {
+                "service_id": "host.vision.screen_ocr",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision screen_ocr enabled"
+              },
+              {
+                "service_id": "host.vision.camera_recognizer",
+                "owner": "host",
+                "required": true,
+                "status": "UP",
+                "reason_code": null,
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "vision camera_recognizer enabled"
+              },
+              {
+                "service_id": "edge.rpc.gateway",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.asr",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.tts",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.barge_in",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              },
+              {
+                "service_id": "edge.rpc.fallback_llm",
+                "owner": "edge",
+                "required": false,
+                "status": "DEGRADED",
+                "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+              },
+              {
+                "service_id": "edge.rpc.resource_gate",
+                "owner": "edge",
+                "required": true,
+                "status": "DOWN",
+                "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                "stage": "S_SERVICE_HEALTH",
+                "detail": "edge health returned HTTP 502"
+              }
+            ],
+            "service_health": {
+              "request_id": "req_f16375689ccf4d37ad7ae2fdea09e4e9",
+              "stage": "S_SERVICE_HEALTH",
+              "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+              "summary": {
+                "overall_status": "DEGRADED",
+                "required_total": 13,
+                "required_unavailable": 5,
+                "optional_unavailable": 1
+              },
+              "services": [
+                {
+                  "service_id": "host.audit.sqlite_ledger",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "sqlite ledger path accessible: host_brain/data/audit.sqlite3"
+                },
+                {
+                  "service_id": "host.governor.decision",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "governor decision engine ready"
+                },
+                {
+                  "service_id": "host.skills.loader",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "skills loader ready (env=dev)"
+                },
+                {
+                  "service_id": "host.integrations.llm_gateway",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "llm gateway enabled"
+                },
+                {
+                  "service_id": "host.retrieval.embedding",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "retrieval embedding enabled"
+                },
+                {
+                  "service_id": "host.retrieval.reranker",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "retrieval reranker enabled"
+                },
+                {
+                  "service_id": "host.vision.screen_ocr",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "vision screen_ocr enabled"
+                },
+                {
+                  "service_id": "host.vision.camera_recognizer",
+                  "owner": "host",
+                  "required": true,
+                  "status": "UP",
+                  "reason_code": null,
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "vision camera_recognizer enabled"
+                },
+                {
+                  "service_id": "edge.rpc.gateway",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "DOWN",
+                  "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge health returned HTTP 502"
+                },
+                {
+                  "service_id": "edge.rpc.asr",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "DOWN",
+                  "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge health returned HTTP 502"
+                },
+                {
+                  "service_id": "edge.rpc.tts",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "DOWN",
+                  "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge health returned HTTP 502"
+                },
+                {
+                  "service_id": "edge.rpc.barge_in",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "DOWN",
+                  "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge health returned HTTP 502"
+                },
+                {
+                  "service_id": "edge.rpc.fallback_llm",
+                  "owner": "edge",
+                  "required": false,
+                  "status": "DEGRADED",
+                  "reason_code": "SERVICE_UNAVAILABLE_DEPENDENCY",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)"
+                },
+                {
+                  "service_id": "edge.rpc.resource_gate",
+                  "owner": "edge",
+                  "required": true,
+                  "status": "DOWN",
+                  "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+                  "stage": "S_SERVICE_HEALTH",
+                  "detail": "edge health returned HTTP 502"
+                }
+              ],
+              "ts_ms": 1774019110432
+            },
+            "ts_ms": 1774019110432,
+            "config": {
+              "host": {
+                "success": true,
+                "stage": "S_HOST_CONFIG",
+                "reason_code": null,
+                "config": {
+                  "env": "dev",
+                  "llm_provider": "gemini",
+                  "openai_api_key_set": false,
+                  "openai_api_key_ref": "sec://openai/natsu-node-01",
+                  "gemini_api_key_set": true,
+                  "gemini_api_key_ref": "sec://gemini/natsu-node-01",
+                  "deepseek_api_key_set": false,
+                  "deepseek_api_key_ref": null,
+                  "llm_api_key_set": true,
+                  "llm_api_key_ref": "sec://gemini/natsu-node-01",
+                  "key_profile_status": null,
+                  "llm_timeout_ms": 8000,
+                  "llm_max_retries": 1,
+                  "cold_start_allowed": true,
+                  "enable_retrieval": true,
+                  "enable_vision": true,
+                  "enable_edge_rpc": true,
+                  "rate_limit_backend": "memory",
+                  "rate_limit_window_ms": 60000,
+                  "rate_limit_max_requests": 30
+                },
+                "issues": []
+              },
+              "edge": {
+                "success": true,
+                "stage": "S_EDGE_CONFIG",
+                "reason_code": null,
+                "config": {
+                  "env": "dev",
+                  "rpc_host": "192.168.1.101",
+                  "rpc_port": 17800,
+                  "hmac_shared_key_set": true,
+                  "hmac_shared_key_ref": null,
+                  "key_profile_status": null,
+                  "allow_insecure_auth": false,
+                  "rpc_auth_window_ms": 15000,
+                  "rpc_nonce_window_ms": 120000,
+                  "rpc_gateway_enabled": true,
+                  "asr_enabled": true,
+                  "tts_enabled": true,
+                  "barge_in_enabled": true,
+                  "fallback_llm_enabled": false,
+                  "resource_gate_enabled": true,
+                  "max_vram_mb": 4096,
+                  "max_queue_length": 8
+                },
+                "issues": []
+              }
+            }
+          },
+          "node_deployment": {
+            "request_id": "req_f16375689ccf4d37ad7ae2fdea09e4e9",
+            "stage": "S_INFRA_NODE_CATALOG",
+            "status": "READY",
+            "reason_code": null,
+            "summary": {
+              "node_count": 2,
+              "service_count": 13,
+              "issue_count": 0,
+              "node_down": 0
+            },
+            "node_catalog": [
+              {
+                "node_id": "personal-edge-vts",
+                "region": "lan",
+                "role": "edge_realtime",
+                "services": [
+                  "edge.rpc.asr",
+                  "edge.rpc.barge_in",
+                  "edge.rpc.gateway",
+                  "edge.rpc.resource_gate",
+                  "edge.rpc.tts"
+                ],
+                "health_endpoint": "http://192.168.1.101:17800/v1/edge/health",
+                "key_profile_id": "edge-lan-runtime"
+              },
+              {
+                "node_id": "personal-host-main",
+                "region": "lan",
+                "role": "orchestrator",
+                "services": [
+                  "host.audit.sqlite_ledger",
+                  "host.governor.decision",
+                  "host.integrations.llm_gateway",
+                  "host.retrieval.embedding",
+                  "host.retrieval.reranker",
+                  "host.skills.loader",
+                  "host.vision.camera_recognizer",
+                  "host.vision.screen_ocr"
+                ],
+                "health_endpoint": "http://127.0.0.1:18080/health",
+                "key_profile_id": "host-local-runtime"
+              }
+            ],
+            "service_mapping": {
+              "edge.rpc.asr": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.barge_in": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.gateway": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.resource_gate": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "edge.rpc.tts": {
+                "primary": "personal-edge-vts",
+                "secondary": []
+              },
+              "host.audit.sqlite_ledger": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.governor.decision": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.integrations.llm_gateway": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.retrieval.embedding": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.retrieval.reranker": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.skills.loader": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.vision.camera_recognizer": {
+                "primary": "personal-host-main",
+                "secondary": []
+              },
+              "host.vision.screen_ocr": {
+                "primary": "personal-host-main",
+                "secondary": []
+              }
+            },
+            "validation": {
+              "stage": "S_INFRA_NODE_CATALOG",
+              "status": "READY",
+              "reason_code": null,
+              "summary": {
+                "node_count": 2,
+                "role_count": 2,
+                "service_count": 13,
+                "issue_count": 0
+              },
+              "issues": [],
+              "nodes": [
+                {
+                  "node_id": "personal-edge-vts",
+                  "region": "lan",
+                  "role": "edge_realtime",
+                  "services": [
+                    "edge.rpc.asr",
+                    "edge.rpc.barge_in",
+                    "edge.rpc.gateway",
+                    "edge.rpc.resource_gate",
+                    "edge.rpc.tts"
+                  ],
+                  "health_endpoint": "http://192.168.1.101:17800/v1/edge/health",
+                  "key_profile_id": "edge-lan-runtime"
+                },
+                {
+                  "node_id": "personal-host-main",
+                  "region": "lan",
+                  "role": "orchestrator",
+                  "services": [
+                    "host.audit.sqlite_ledger",
+                    "host.governor.decision",
+                    "host.integrations.llm_gateway",
+                    "host.retrieval.embedding",
+                    "host.retrieval.reranker",
+                    "host.skills.loader",
+                    "host.vision.camera_recognizer",
+                    "host.vision.screen_ocr"
+                  ],
+                  "health_endpoint": "http://127.0.0.1:18080/health",
+                  "key_profile_id": "host-local-runtime"
+                }
+              ],
+              "service_mapping": {
+                "edge.rpc.asr": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.barge_in": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.gateway": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.resource_gate": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "edge.rpc.tts": {
+                  "primary": "personal-edge-vts",
+                  "secondary": []
+                },
+                "host.audit.sqlite_ledger": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.governor.decision": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.integrations.llm_gateway": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.retrieval.embedding": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.retrieval.reranker": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.skills.loader": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.vision.camera_recognizer": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                },
+                "host.vision.screen_ocr": {
+                  "primary": "personal-host-main",
+                  "secondary": []
+                }
+              }
+            },
+            "node_probe": {
+              "request_id": "req_f16375689ccf4d37ad7ae2fdea09e4e9",
+              "stage": "S_INFRA_NODE_PROBE",
+              "status": "UP",
+              "reason_code": null,
+              "summary": {
+                "node_total": 2,
+                "node_down": 0,
+                "node_up": 2
+              },
+              "nodes": [
+                {
+                  "node_id": "personal-edge-vts",
+                  "region": "lan",
+                  "role": "edge_realtime",
+                  "node_status": "UP",
+                  "reason_code": null,
+                  "stage": "S_INFRA_NODE_PROBE",
+                  "detail": "node healthy"
+                },
+                {
+                  "node_id": "personal-host-main",
+                  "region": "lan",
+                  "role": "orchestrator",
+                  "node_status": "UP",
+                  "reason_code": null,
+                  "stage": "S_INFRA_NODE_PROBE",
+                  "detail": "node healthy"
+                }
+              ],
+              "ts_ms": 1774019110432
+            },
+            "ts_ms": 1774019110432
+          },
+          "readiness_status": "DEGRADED",
+          "reason_code": "SERVICE_UNAVAILABLE_EDGE_RPC",
+          "ts_ms": 1774019110432,
+          "node_inventory_path": "configs\\deploy\\node_inventory_personal_lan.json"
+        }
+      }
+    },
+    {
+      "name": "edge_health",
+      "url": "http://192.168.1.101:17800/v1/edge/health",
+      "http_status": 502,
+      "ok": false,
+      "elapsed_ms": 5001,
+      "detail": "http_status=502",
+      "body": {
+        "raw_text": ""
+      }
+    },
+    {
+      "name": "edge_vts_set_expression",
+      "ok": false,
+      "elapsed_ms": 13083,
+      "rpc_latency_ms": 13082,
+      "status": "DEGRADED",
+      "reason_code": "EDGE_RPC_CALL_FAILED",
+      "detail": "HTTP 502",
+      "event": {}
+    },
+    {
+      "name": "edge_vts_talk_start",
+      "ok": false,
+      "elapsed_ms": 13070,
+      "rpc_latency_ms": 13068,
+      "status": "DEGRADED",
+      "reason_code": "EDGE_RPC_CALL_FAILED",
+      "detail": "HTTP 502",
+      "event": {}
+    },
+    {
+      "name": "edge_vts_talk_end",
+      "ok": false,
+      "elapsed_ms": 13078,
+      "rpc_latency_ms": 13077,
+      "status": "DEGRADED",
+      "reason_code": "EDGE_RPC_CALL_FAILED",
+      "detail": "HTTP 502",
+      "event": {}
+    },
+    {
+      "name": "edge_tts_speak",
+      "ok": false,
+      "elapsed_ms": 13072,
+      "rpc_latency_ms": 13071,
+      "status": "DEGRADED",
+      "reason_code": "EDGE_RPC_CALL_FAILED",
+      "detail": "HTTP 502",
+      "event": {}
+    },
+    {
+      "name": "edge_screenshot",
+      "ok": false,
+      "elapsed_ms": 13076,
+      "rpc_latency_ms": 13074,
+      "status": "DEGRADED",
+      "reason_code": "EDGE_RPC_CALL_FAILED",
+      "detail": "HTTP 502",
+      "event_meta": {
+        "width": null,
+        "height": null,
+        "image_b64_len": 0,
+        "image_mime": null
+      }
+    }
+  ],
+  "block_reasons": [
+    "host_health: $.details.services[8].status=down; $.details.services[9].status=down; $.details.services[10].status=down; $.details.services[11].status=down; $.details.services[13].status=down",
+    "host_ready: $.status=degraded; $.summary.services.rows[8].status=down; $.summary.services.rows[9].status=down; $.summary.services.rows[10].status=down; $.summary.services.rows[11].status=down; $.summary.services.rows[12].status=degraded; $.summary.services.rows[13].status=down; $.summary.dependency_matrix[1].available=false",
+    "edge_health: http_status=502",
+    "edge_vts_set_expression: EDGE_RPC_CALL_FAILED",
+    "edge_vts_talk_start: EDGE_RPC_CALL_FAILED",
+    "edge_vts_talk_end: EDGE_RPC_CALL_FAILED",
+    "edge_tts_speak: EDGE_RPC_CALL_FAILED",
+    "edge_screenshot: EDGE_RPC_CALL_FAILED"
+  ],
+  "total_elapsed_ms": 80450,
+  "result": "BLOCK"
+}

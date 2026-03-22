@@ -1,0 +1,131 @@
+{
+  "captured_at": "2026-03-21T21:36:16",
+  "target": "ご視聴ありがとうございました。",
+  "before_id": 3618,
+  "speak_result": {
+    "success": true,
+    "status": "ACCEPTED",
+    "reason_code": null,
+    "detail": "tts queued; tts playback started",
+    "event": {
+      "request_id": "req_921a0366a28c405e9fa12820139fe2cc",
+      "session_id": "sess::req_921a0366a28c405e9fa12820139fe2cc",
+      "utterance_id": "utt::req_921a0366a28c405e9fa12820139fe2cc",
+      "event_type": "TTS_PLAYBACK_STARTED",
+      "audio_ref": "memory://tts_req_cb34d5d0859d46ff85474b29cf5d76f7",
+      "ts_ms": 1774100166296,
+      "queue_event": {
+        "request_id": "req_921a0366a28c405e9fa12820139fe2cc",
+        "session_id": "sess::req_921a0366a28c405e9fa12820139fe2cc",
+        "utterance_id": "utt::req_921a0366a28c405e9fa12820139fe2cc",
+        "event_type": "TTS_QUEUED",
+        "queue_depth": 1,
+        "ts_ms": 1774100166296
+      },
+      "start_event": {
+        "request_id": "req_921a0366a28c405e9fa12820139fe2cc",
+        "session_id": "sess::req_921a0366a28c405e9fa12820139fe2cc",
+        "utterance_id": "utt::req_921a0366a28c405e9fa12820139fe2cc",
+        "event_type": "TTS_PLAYBACK_STARTED",
+        "audio_ref": "memory://tts_req_cb34d5d0859d46ff85474b29cf5d76f7",
+        "ts_ms": 1774100166296
+      },
+      "start_status": "ACCEPTED",
+      "start_reason_code": null,
+      "start_stage": "S_VOICE_TTS_PLAYBACK",
+      "start_detail": "tts playback started",
+      "vts_expression_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "expression set: NEUTRAL -> 2da60cb91bec4e85ac64242d28014137",
+        "action": "set_expression",
+        "expression_id": "2da60cb91bec4e85ac64242d28014137",
+        "emotion_tag": "NEUTRAL"
+      },
+      "vts_talk_result": {
+        "success": true,
+        "reason_code": null,
+        "detail": "talk gate started (mouth open)",
+        "action": "TALK_START",
+        "expression_id": null,
+        "emotion_tag": null
+      },
+      "vts_mouth_sync": {
+        "state": "running",
+        "started": true,
+        "audio_type": "ndarray",
+        "sample_rate": 32000,
+        "envelope_points": 47,
+        "source": "synth_event.audio_data",
+        "envelope_min": 0.0,
+        "envelope_max": 0.9813,
+        "envelope_avg": 0.5148,
+        "probe_value": 0.18,
+        "frame_interval_s": 0.0417,
+        "frames_sent": 0,
+        "last_value": 0.0
+      },
+      "stage": "S_VOICE_TTS_PLAYBACK",
+      "insecure_auth": false
+    },
+    "latency_ms": 1311
+  },
+  "new_rows": [
+    {
+      "id": 3621,
+      "ts_ms": 1774100166101,
+      "text": "ご視聴ありがとうございました",
+      "similarity": 1.0,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    },
+    {
+      "id": 3622,
+      "ts_ms": 1774100167602,
+      "text": "ご視聴ありがとうございました",
+      "similarity": 1.0,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    },
+    {
+      "id": 3624,
+      "ts_ms": 1774100169101,
+      "text": "ありがとうございました。",
+      "similarity": 0.88,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    },
+    {
+      "id": 3625,
+      "ts_ms": 1774100170602,
+      "text": "おやすみなさい",
+      "similarity": 0.0952,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    },
+    {
+      "id": 3626,
+      "ts_ms": 1774100172102,
+      "text": "ご視聴ありがとうございました。",
+      "similarity": 1.0,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    },
+    {
+      "id": 3627,
+      "ts_ms": 1774100173601,
+      "text": "ご視聴ありがとうございました",
+      "similarity": 1.0,
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "status": "ACCEPTED"
+    }
+  ],
+  "best": {
+    "id": 3621,
+    "ts_ms": 1774100166101,
+    "text": "ご視聴ありがとうございました",
+    "similarity": 1.0,
+    "reason_code": "VOICE_LOW_CONFIDENCE",
+    "status": "ACCEPTED"
+  }
+}

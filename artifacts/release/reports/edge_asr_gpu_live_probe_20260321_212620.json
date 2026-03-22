@@ -1,0 +1,417 @@
+{
+  "captured_at": "2026-03-21T21:26:20",
+  "edge_health": {
+    "status": "ACCEPTED",
+    "success": true,
+    "asr_enabled": true,
+    "asr_available": true,
+    "asr_status": "ok",
+    "asr_detail": "component loaded",
+    "asr_model_state": "READY",
+    "asr_model_device": "cuda",
+    "asr_seq": 72
+  },
+  "recent_asr_chunk_events": [
+    {
+      "id": 3221,
+      "ts_ms": 1774099576711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3220,
+      "ts_ms": 1774099575210,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3219,
+      "ts_ms": 1774099573711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3218,
+      "ts_ms": 1774099572212,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3217,
+      "ts_ms": 1774099570711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3216,
+      "ts_ms": 1774099569211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3215,
+      "ts_ms": 1774099567712,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3214,
+      "ts_ms": 1774099566211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3213,
+      "ts_ms": 1774099564712,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3212,
+      "ts_ms": 1774099563211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "この子も救われるぞ",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3211,
+      "ts_ms": 1774099561711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3210,
+      "ts_ms": 1774099560211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3209,
+      "ts_ms": 1774099558711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ウーブ機動車ですね",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3208,
+      "ts_ms": 1774099557211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3207,
+      "ts_ms": 1774099555711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3206,
+      "ts_ms": 1774099554212,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3205,
+      "ts_ms": 1774099552712,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3204,
+      "ts_ms": 1774099551211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3203,
+      "ts_ms": 1774099549712,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3202,
+      "ts_ms": 1774099548211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3201,
+      "ts_ms": 1774099546711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3200,
+      "ts_ms": 1774099545211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3199,
+      "ts_ms": 1774099543710,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3198,
+      "ts_ms": 1774099542210,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3197,
+      "ts_ms": 1774099540711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3196,
+      "ts_ms": 1774099539211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3195,
+      "ts_ms": 1774099537711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3194,
+      "ts_ms": 1774099536212,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3193,
+      "ts_ms": 1774099534711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3192,
+      "ts_ms": 1774099533211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3191,
+      "ts_ms": 1774099531711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3190,
+      "ts_ms": 1774099530211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3189,
+      "ts_ms": 1774099528711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3188,
+      "ts_ms": 1774099527211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3187,
+      "ts_ms": 1774099525711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3186,
+      "ts_ms": 1774099524211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3185,
+      "ts_ms": 1774099522712,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3184,
+      "ts_ms": 1774099521210,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました。",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3183,
+      "ts_ms": 1774099519711,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ご視聴ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    },
+    {
+      "id": 3182,
+      "ts_ms": 1774099518211,
+      "status": "ACCEPTED",
+      "reason_code": "VOICE_LOW_CONFIDENCE",
+      "detail": "asr_chunk accepted with low confidence: 0.000 < 0.60",
+      "text": "ありがとうございました",
+      "confidence": 0.0,
+      "final": false
+    }
+  ],
+  "model_unavailable_hits_in_recent": []
+}
