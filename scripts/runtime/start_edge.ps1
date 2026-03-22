@@ -40,6 +40,26 @@ function Read-EnvFile {
   return $values
 }
 
+function Read-ProcessEnvOverrides {
+  param([string[]]$Keys)
+  $result = @{}
+  foreach ($key in $Keys) {
+    if ([string]::IsNullOrWhiteSpace([string]$key)) {
+      continue
+    }
+    $value = [Environment]::GetEnvironmentVariable($key, "Process")
+    if ($null -eq $value) {
+      continue
+    }
+    $text = [string]$value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+      continue
+    }
+    $result[$key] = $text
+  }
+  return $result
+}
+
 function Set-ProcessEnv {
   param([hashtable]$Values)
   foreach ($key in $Values.Keys) {
@@ -712,7 +732,25 @@ $wechatBridgeLauncherScriptPath = Join-Path $runtimeRoot "launch_wechat_bridge.c
 $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
 $useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
+$wechatEnvOverrideKeys = @(
+  "EDGE_WECHAT_BRIDGE_ENABLED",
+  "EDGE_WECHAT_BRIDGE_BACKEND",
+  "EDGE_WECHAT_INBOUND_BACKEND",
+  "EDGE_WECHAT_LISTENER_ENABLED",
+  "EDGE_WECHAT_LISTENER_POLL_INTERVAL_S",
+  "EDGE_WECHAT_LISTENER_DEDUP_WINDOW_S",
+  "EDGE_WECHAT_CALLBACK_TIMEOUT_S",
+  "EDGE_WECHAT_OCR_MIN_SCORE",
+  "EDGE_WECHAT_OCR_INBOUND_X_RATIO_MAX",
+  "EDGE_WECHAT_AUTOSTART",
+  "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS"
+)
+$processWechatOverrides = Read-ProcessEnvOverrides -Keys $wechatEnvOverrideKeys
+
 $envValues = Read-EnvFile -Path $EnvFile
+foreach ($overrideKey in $processWechatOverrides.Keys) {
+  $envValues[$overrideKey] = [string]$processWechatOverrides[$overrideKey]
+}
 Set-ProcessEnv -Values $envValues
 $startupPreWarnings = @()
 $startupEnvDefaultsApplied = @()
