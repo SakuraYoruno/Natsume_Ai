@@ -12,7 +12,6 @@ import ctypes
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
@@ -319,41 +318,53 @@ def _open_chat_by_target(target: str, wechat_path: str) -> tuple[bool, str]:
     if not ok:
         return False, detail
 
-    try:
-        pyautogui.FAILSAFE = False
-        pyautogui.hotkey("ctrl", "f")
-        time.sleep(0.25)
-        pyautogui.hotkey("ctrl", "a")
-        pyautogui.press("backspace")
-        pyautogui.write(str(target or ""), interval=0.02)
-        time.sleep(0.30)
-        # Prefer explicit result activation over plain Enter to reduce
-        # "still-focused-search-box" cases.
-        pyautogui.press("down")
-        time.sleep(0.08)
-        pyautogui.press("enter")
-        time.sleep(0.35)
-        pyautogui.press("escape")
-        time.sleep(0.10)
-
-        # UIA verification: try to find target title in current window.
+    def _is_soso_page_active() -> bool:
         try:
             from pywinauto import Desktop
-
-            hwnd = _find_wechat_main_window()
-            if hwnd:
-                window = Desktop(backend="uia").window(handle=hwnd)
-                if bool(
-                    window.child_window(
-                        title_re=rf".*{re.escape(str(target or '').strip())}.*"
-                    ).exists(timeout=0.8)
-                ):
-                    return True, detail
         except Exception:
-            pass
-        return True, detail
-    except Exception as exc:
-        return False, f"open_chat failed: {exc.__class__.__name__}: {exc}"
+            return False
+        hwnd = _find_wechat_main_window()
+        if not hwnd:
+            return False
+        try:
+            window = Desktop(backend="uia").window(handle=hwnd)
+            if bool(window.child_window(title="搜一搜").exists(timeout=0.2)):
+                return True
+            if bool(window.child_window(title="搜索发现").exists(timeout=0.2)):
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _try_open_with_hotkey(hotkey_second: str) -> tuple[bool, str]:
+        try:
+            pyautogui.FAILSAFE = False
+            pyautogui.hotkey("ctrl", hotkey_second)
+            time.sleep(0.28)
+            pyautogui.hotkey("ctrl", "a")
+            pyautogui.press("backspace")
+            pyautogui.write(str(target or ""), interval=0.02)
+            time.sleep(0.28)
+            pyautogui.press("down")
+            time.sleep(0.08)
+            pyautogui.press("enter")
+            time.sleep(0.38)
+            pyautogui.press("escape")
+            time.sleep(0.10)
+            if _is_soso_page_active():
+                return False, "stuck_on_soso_page"
+            return True, f"open_chat_hotkey=ctrl+{hotkey_second}"
+        except Exception as exc:
+            return False, f"{exc.__class__.__name__}: {exc}"
+
+    primary_ok, primary_detail = _try_open_with_hotkey("n")
+    if primary_ok:
+        return True, f"{detail}; {primary_detail}"
+
+    fallback_ok, fallback_detail = _try_open_with_hotkey("f")
+    if fallback_ok:
+        return True, f"{detail}; {fallback_detail}"
+    return False, f"open_chat failed: primary={primary_detail}; fallback={fallback_detail}"
 
 
 def _send_text(content: str, wechat_path: str) -> tuple[bool, str]:
