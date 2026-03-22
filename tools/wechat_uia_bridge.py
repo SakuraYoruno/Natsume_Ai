@@ -1717,13 +1717,31 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
 
         roi = self._resolve_message_roi(hwnd)
         if roi is None:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info("vision inbound skipped: roi not available")
             return []
         left, top, width, height = roi
         if width <= 20 or height <= 20:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info(
+                    "vision inbound skipped: invalid roi size left=%d top=%d width=%d height=%d",
+                    int(left),
+                    int(top),
+                    int(width),
+                    int(height),
+                )
             return []
 
         image = self._capture_region_bgr(left=left, top=top, width=width, height=height)
         if image is None:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info("vision inbound skipped: screenshot capture failed")
             return []
 
         extracted = self._infer_latest_inbound_via_vision(image_bgr=image, hwnd=hwnd)
