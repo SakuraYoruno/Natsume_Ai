@@ -278,6 +278,7 @@ class WeChatWcferryInboundBridge:
         return False
 
     def _run_loop(self) -> None:
+        logger.info("wcferry inbound init start")
         try:
             from wcferry import Wcf
         except Exception as exc:
@@ -288,6 +289,7 @@ class WeChatWcferryInboundBridge:
         except Exception as exc:
             logger.warning("wcferry init failed: %s", exc)
             return
+        logger.info("wcferry inbound init ok")
 
         try:
             self._self_wxid = str(getattr(self._wcf, "self_wxid", "") or "").strip()
