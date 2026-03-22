@@ -1066,21 +1066,60 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         if not hwnd:
             return []
 
-        roi = self._resolve_message_roi(hwnd)
-        if roi is None:
-            return []
-        left, top, width, height = roi
-        if width <= 20 or height <= 20:
-            return []
+        right_ocr_rows: list[tuple[int, int, str, float]] = []
+        right_roi = self._resolve_message_roi(hwnd)
+        if right_roi is not None:
+            r_left, r_top, r_width, r_height = right_roi
+            if r_width > 20 and r_height > 20:
+                image = self._capture_region_bgr(left=r_left, top=r_top, width=r_width, height=r_height)
+                if image is not None:
+                    right_ocr_rows = self._run_ocr(image)
+                    inbound_candidates = self._extract_inbound_candidates_from_message_roi(
+                        ocr_rows=right_ocr_rows,
+                        roi_width=r_width,
+                    )
+                    if inbound_candidates:
+                        inbound_candidates.sort(key=lambda x: x[0])
+                        latest_text = inbound_candidates[-1][1]
+                        sender = self._infer_active_chat_sender(hwnd=hwnd)
+                        self._last_ocr_sender = sender
+                        return [(sender, latest_text)]
 
-        image = self._capture_region_bgr(left=left, top=top, width=width, height=height)
-        if image is None:
-            return []
-        ocr_rows = self._run_ocr(image)
-        if not ocr_rows:
-            return []
+        list_ocr_rows: list[tuple[int, int, str, float]] = []
+        list_roi = self._resolve_chat_list_roi(hwnd)
+        if list_roi is not None:
+            l_left, l_top, l_width, l_height = list_roi
+            if l_width > 20 and l_height > 20:
+                image = self._capture_region_bgr(left=l_left, top=l_top, width=l_width, height=l_height)
+                if image is not None:
+                    list_ocr_rows = self._run_ocr(image)
+                    list_previews = self._extract_chat_list_previews_from_ocr(
+                        ocr_rows=list_ocr_rows,
+                        roi_height=l_height,
+                    )
+                    if list_previews:
+                        return list_previews
 
-        # Keep only likely inbound bubbles on left side.
+        now_mono = time.monotonic()
+        if (now_mono - self._last_ocr_diag_at) >= 18.0:
+            self._last_ocr_diag_at = now_mono
+            logger.info(
+                "ocr inbound heartbeat: right_rows=%d list_rows=%d score>=%.2f x_max=%.2f right_samples=%s list_samples=%s",
+                len(right_ocr_rows),
+                len(list_ocr_rows),
+                self._ocr_min_score,
+                self._inbound_x_ratio_max,
+                self._format_ocr_samples(right_ocr_rows),
+                self._format_ocr_samples(list_ocr_rows),
+            )
+        return []
+
+    def _extract_inbound_candidates_from_message_roi(
+        self,
+        *,
+        ocr_rows: list[tuple[int, int, str, float]],
+        roi_width: int,
+    ) -> list[tuple[int, str]]:
         inbound_candidates: list[tuple[int, str]] = []
         for cy, cx, text_value, score in ocr_rows:
             if score < self._ocr_min_score:
@@ -1088,31 +1127,146 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             norm = _normalize_message_text(text_value)
             if not norm:
                 continue
+            if len(norm) <= 1:
+                continue
             if _is_probably_time_or_badge(norm):
                 continue
-            if cx > int(width * self._inbound_x_ratio_max):
+            if self._is_probably_ui_noise_text(norm):
+                continue
+            if cx > int(roi_width * self._inbound_x_ratio_max):
+                continue
+            inbound_candidates.append((cy, norm))
+        return inbound_candidates
+
+    def _extract_chat_list_previews_from_ocr(
+        self,
+        *,
+        ocr_rows: list[tuple[int, int, str, float]],
+        roi_height: int,
+    ) -> list[tuple[str, str]]:
+        filtered_rows: list[tuple[int, str]] = []
+        for cy, _cx, text_value, score in ocr_rows:
+            if score < self._ocr_min_score:
+                continue
+            norm = _normalize_message_text(text_value)
+            if not norm:
                 continue
             if len(norm) <= 1:
                 continue
-            inbound_candidates.append((cy, norm))
+            if _is_probably_time_or_badge(norm):
+                continue
+            if self._is_probably_ui_noise_text(norm):
+                continue
+            filtered_rows.append((cy, norm))
 
-        if not inbound_candidates:
-            now_mono = time.monotonic()
-            if (now_mono - self._last_ocr_diag_at) >= 18.0:
-                self._last_ocr_diag_at = now_mono
-                logger.info(
-                    "ocr inbound heartbeat: rows=%d inbound=0 score>=%.2f x_max=%.2f",
-                    len(ocr_rows),
-                    self._ocr_min_score,
-                    self._inbound_x_ratio_max,
-                )
+        if len(filtered_rows) < 2:
             return []
 
-        inbound_candidates.sort(key=lambda x: x[0])
-        latest_text = inbound_candidates[-1][1]
-        sender = self._infer_active_chat_sender(hwnd=hwnd)
-        self._last_ocr_sender = sender
-        return [(sender, latest_text)]
+        filtered_rows.sort(key=lambda x: x[0])
+        line_gap = max(18, int(roi_height * 0.03))
+        lines: list[tuple[int, list[str]]] = []
+        for cy, text_value in filtered_rows:
+            if (not lines) or abs(cy - lines[-1][0]) > line_gap:
+                lines.append((cy, [text_value]))
+                continue
+            lines[-1][1].append(text_value)
+
+        line_rows: list[tuple[int, str]] = []
+        for y_value, texts in lines:
+            if not texts:
+                continue
+            best = max(texts, key=lambda item: len(item))
+            if not best:
+                continue
+            line_rows.append((y_value, best))
+
+        if len(line_rows) < 2:
+            return []
+
+        row_gap_max = max(56, int(roi_height * 0.16))
+        pairs: list[tuple[int, str, str]] = []
+        for idx in range(len(line_rows) - 1):
+            sender_y, sender = line_rows[idx]
+            preview_y, preview = line_rows[idx + 1]
+            gap = int(preview_y - sender_y)
+            if gap <= 0 or gap > row_gap_max:
+                continue
+            if not self._is_probably_chat_sender(sender):
+                continue
+            if not self._is_probably_chat_preview(preview, sender=sender):
+                continue
+            pairs.append((preview_y, sender, preview))
+
+        if not pairs:
+            return []
+
+        pairs.sort(key=lambda x: x[0])
+        dedup: dict[str, tuple[int, str]] = {}
+        for y_value, sender, preview in pairs:
+            dedup[sender] = (y_value, preview)
+
+        result: list[tuple[str, str]] = []
+        for sender, (_y, preview) in dedup.items():
+            result.append((sender, preview))
+        return result
+
+    def _is_probably_chat_sender(self, text_value: str) -> bool:
+        value = _normalize_message_text(text_value)
+        if not value:
+            return False
+        if len(value) > 48:
+            return False
+        if _is_probably_time_or_badge(value):
+            return False
+        if self._is_probably_ui_noise_text(value):
+            return False
+        return True
+
+    def _is_probably_chat_preview(self, text_value: str, *, sender: str) -> bool:
+        value = _normalize_message_text(text_value)
+        if not value:
+            return False
+        if len(value) < 2:
+            return False
+        if value == _normalize_message_text(sender):
+            return False
+        if _is_probably_time_or_badge(value):
+            return False
+        if self._is_probably_ui_noise_text(value):
+            return False
+        return True
+
+    @staticmethod
+    def _is_probably_ui_noise_text(text_value: str) -> bool:
+        value = _normalize_message_text(text_value)
+        if not value:
+            return True
+        lowered = value.lower()
+        if lowered in {
+            "weixin",
+            "wechat",
+            "chat",
+            "chats",
+            "search",
+            "messages",
+            "message",
+            "send",
+            "voice call",
+            "video call",
+        }:
+            return True
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return True
+        if re.fullmatch(r"[A-Za-z]{1,3}\d{5,}", value):
+            return True
+        return False
+
+    @staticmethod
+    def _format_ocr_samples(ocr_rows: list[tuple[int, int, str, float]]) -> list[str]:
+        samples: list[str] = []
+        for cy, cx, text_value, score in ocr_rows[:8]:
+            samples.append(f"({cy},{cx},{score:.2f}){_normalize_message_text(text_value)[:24]}")
+        return samples
 
     def _resolve_message_roi(self, hwnd: int) -> tuple[int, int, int, int] | None:
         try:
@@ -1134,10 +1288,39 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             return None
 
         # Right message panel body.
-        roi_left = left + int(width * 0.42)
-        roi_top = top + int(height * 0.18)
+        roi_left = left + int(width * 0.34)
+        roi_top = top + int(height * 0.12)
         roi_right = left + int(width * 0.97)
-        roi_bottom = top + int(height * 0.84)
+        roi_bottom = top + int(height * 0.90)
+        roi_w = max(0, roi_right - roi_left)
+        roi_h = max(0, roi_bottom - roi_top)
+        return roi_left, roi_top, roi_w, roi_h
+
+    def _resolve_chat_list_roi(self, hwnd: int) -> tuple[int, int, int, int] | None:
+        try:
+            from pywinauto import Desktop
+        except Exception:
+            return None
+        try:
+            window = Desktop(backend="uia").window(handle=hwnd)
+            rect = window.rectangle()
+            left = int(rect.left)
+            top = int(rect.top)
+            right = int(rect.right)
+            bottom = int(rect.bottom)
+        except Exception:
+            return None
+
+        width = right - left
+        height = bottom - top
+        if width <= 0 or height <= 0:
+            return None
+
+        # Left conversation list panel (excluding sidebar and title/search areas).
+        roi_left = left + int(width * 0.06)
+        roi_top = top + int(height * 0.10)
+        roi_right = left + int(width * 0.43)
+        roi_bottom = top + int(height * 0.88)
         roi_w = max(0, roi_right - roi_left)
         roi_h = max(0, roi_bottom - roi_top)
         return roi_left, roi_top, roi_w, roi_h
