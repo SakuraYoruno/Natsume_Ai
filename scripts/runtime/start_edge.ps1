@@ -745,6 +745,7 @@ $wechatEnvOverrideKeys = @(
   "EDGE_WECHAT_UIA_SCAN_CHAT_LIST",
   "EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET",
   "EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX",
+  "EDGE_WECHAT_ALLOW_EXTERNAL_CALLBACK_ONLY",
   "EDGE_WECHAT_AUTOSTART",
   "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS"
 )
@@ -1068,6 +1069,29 @@ if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([st
   } else {
     $wechatBridgeBackend = "uia"
     $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
+  }
+}
+
+$wechatAllowExternalCallbackOnly = $false
+$wechatAllowExternalRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_ALLOW_EXTERNAL_CALLBACK_ONLY"
+if ($null -eq $wechatAllowExternalRaw -and $env:EDGE_WECHAT_ALLOW_EXTERNAL_CALLBACK_ONLY) {
+  $wechatAllowExternalRaw = $env:EDGE_WECHAT_ALLOW_EXTERNAL_CALLBACK_ONLY
+}
+if ($null -ne $wechatAllowExternalRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatAllowExternalRaw)) {
+  $wechatAllowExternalCallbackOnly = Parse-Bool -Value $wechatAllowExternalRaw -Default $false
+}
+
+if ($wechatBridgeEnabled -and $wechatBridgeBackend -eq "external" -and -not $wechatAllowExternalCallbackOnly) {
+  $wechatBridgeBackend = "uia"
+  if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
+    $wechatBridgeBackendRaw = "$wechatBridgeBackendRaw (auto->uia)"
+  } else {
+    $wechatBridgeBackendRaw = "external(auto->uia)"
+  }
+  $envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = "uia"
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", "uia", "Process")
+  if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_UIA")) {
+    $startupPreWarnings += "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_UIA"
   }
 }
 
