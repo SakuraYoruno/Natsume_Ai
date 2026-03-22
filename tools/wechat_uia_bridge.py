@@ -590,6 +590,17 @@ class WeChatUiInboundBridge:
         return dedup_rows
 
     def _log_tree_diagnostics(self, window: Any) -> None:
+        main_hwnd = _find_wechat_main_window()
+        win32_children = _enum_child_windows(main_hwnd)
+        win32_samples: list[str] = []
+        for _, cls, title in win32_children[:80]:
+            title_value = _normalize_message_text(title)
+            if not title_value:
+                continue
+            win32_samples.append(f"{cls}:{title_value[:40]}")
+            if len(win32_samples) >= 12:
+                break
+
         try:
             descendants = window.descendants()
         except Exception as exc:
@@ -614,7 +625,12 @@ class WeChatUiInboundBridge:
             text_samples.append(f"{control_type}:{text_value[:40]}")
 
         top_types = sorted(type_counter.items(), key=lambda x: x[1], reverse=True)[:10]
-        logger.info("inbound tree diag: top_types=%s sample_texts=%s", top_types, text_samples)
+        logger.info(
+            "inbound tree diag: top_types=%s sample_texts=%s win32_child_texts=%s",
+            top_types,
+            text_samples,
+            win32_samples,
+        )
 
 def _is_wechat_client_running() -> bool:
     cmd = ["tasklist", "/fo", "csv", "/nh"]
@@ -681,6 +697,34 @@ def _enum_visible_windows() -> list[tuple[int, str, str]]:
 
     try:
         user32.EnumWindows(enum_proc(_callback), 0)
+    except Exception:
+        return []
+    return windows
+
+
+def _enum_child_windows(hwnd: int) -> list[tuple[int, str, str]]:
+    if int(hwnd or 0) <= 0:
+        return []
+    user32 = ctypes.windll.user32
+    windows: list[tuple[int, str, str]] = []
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+
+    def _callback(child_hwnd: int, _lparam: int) -> bool:
+        try:
+            length = int(user32.GetWindowTextLengthW(child_hwnd))
+            title_buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(child_hwnd, title_buf, length + 1)
+            class_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(child_hwnd, class_buf, 256)
+            title = str(title_buf.value or "").strip()
+            class_name = str(class_buf.value or "").strip()
+            windows.append((int(child_hwnd), class_name, title))
+        except Exception:
+            return True
+        return True
+
+    try:
+        user32.EnumChildWindows(int(hwnd), enum_proc(_callback), 0)
     except Exception:
         return []
     return windows
