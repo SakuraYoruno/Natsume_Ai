@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-"""Fresh full-chain dual-end test for the refactored voice pipeline.
+"""Dual-end voice chain probe for runtime connectivity and RPC behavior.
 
-Flow (real calls, no mocks):
+Flow:
 1. Host health/readiness probe.
 2. Edge health probe.
-3. Inject ASR events to Host via /v1/edge/events.
+3. Inject synthetic ASR events to Host via /v1/edge/events.
 4. Trigger /v1/chat SSE and wait for COMMIT.
 5. Validate COMMIT audit_refs.tts / audit_refs.vts.
 6. Optionally verify audit rows from SQLite ledger.
@@ -264,6 +264,9 @@ def _is_tts_ok(tts_summary: Any, *, allow_degraded: bool) -> bool:
     if not isinstance(tts_summary, dict):
         return False
     status = str(tts_summary.get("status") or "").upper()
+    reason_code = str(tts_summary.get("reason_code") or "").strip()
+    if reason_code:
+        return False
     event = tts_summary.get("event") if isinstance(tts_summary.get("event"), dict) else {}
     start_event = event.get("start_event") if isinstance(event.get("start_event"), dict) else {}
     event_type = str(event.get("event_type") or "").upper()
@@ -272,24 +275,86 @@ def _is_tts_ok(tts_summary: Any, *, allow_degraded: bool) -> bool:
         event_type in {"TTS_PLAYBACK_STARTED", "TTS_PLAYBACK_FINISHED"}
         or start_event_type in {"TTS_PLAYBACK_STARTED", "TTS_PLAYBACK_FINISHED"}
     )
-    if bool(tts_summary.get("success")) and status not in {"REJECTED", "FAILED", "DEGRADED"} and playback_evidence:
+    if not playback_evidence:
+        return False
+    if bool(tts_summary.get("success")) and status not in {"REJECTED", "FAILED", "DEGRADED"}:
         return True
     if allow_degraded and status == "DEGRADED":
         return True
     return False
 
 
-def _is_vts_ok(vts_summary: Any, *, allow_degraded: bool) -> bool:
+def _is_vts_ok(
+    vts_summary: Any,
+    *,
+    allow_degraded: bool,
+    require_mouth_sync: bool,
+    runtime_event: Any = None,
+) -> bool:
     if not isinstance(vts_summary, dict):
         return False
     status = str(vts_summary.get("status") or "").upper()
-    if status in {"APPLIED", "ACCEPTED", "OK"}:
-        return True
-    if bool(vts_summary.get("success")) and status not in {"REJECTED", "FAILED", "DEGRADED", "SKIPPED"}:
-        return True
+    reason_code = str(vts_summary.get("reason_code") or "").strip()
+    if reason_code:
+        return False
     if allow_degraded and status == "DEGRADED":
         return True
-    return False
+    if status in {"REJECTED", "FAILED", "SKIPPED", "DEGRADED"}:
+        return False
+    if ("success" in vts_summary) and (not bool(vts_summary.get("success"))):
+        return False
+
+    event = (
+        vts_summary.get("event")
+        if isinstance(vts_summary.get("event"), dict)
+        else (runtime_event if isinstance(runtime_event, dict) else {})
+    )
+    expression_result = event.get("vts_expression_result") if isinstance(event.get("vts_expression_result"), dict) else {}
+    talk_result = event.get("vts_talk_result") if isinstance(event.get("vts_talk_result"), dict) else {}
+    mouth_sync = event.get("vts_mouth_sync") if isinstance(event.get("vts_mouth_sync"), dict) else {}
+
+    if expression_result and not bool(expression_result.get("success")):
+        return False
+    if talk_result and not bool(talk_result.get("success")):
+        return False
+    if require_mouth_sync:
+        if not bool(mouth_sync.get("started")):
+            return False
+        mouth_state = str(mouth_sync.get("state") or "").strip().lower()
+        if mouth_state not in {"running", "finished", "stopped"}:
+            return False
+    if status in {"APPLIED", "ACCEPTED", "OK"}:
+        return True
+    return bool(vts_summary.get("success"))
+
+
+def _is_synthetic_asr_ingest_ok(edge_events_result: JsonDict) -> bool:
+    edge_events_body = edge_events_result.get("body") if isinstance(edge_events_result.get("body"), dict) else {}
+    edge_events_success = bool(edge_events_body.get("success"))
+    edge_events_total = int(edge_events_body.get("total") or 0)
+    edge_events_accepted = int(edge_events_body.get("accepted") or 0)
+    return bool(edge_events_result.get("ok")) and int(edge_events_result.get("status_code") or 0) == 200 and edge_events_success and edge_events_total > 0 and edge_events_total == edge_events_accepted
+
+
+def _format_synthetic_asr_detail(edge_events_result: JsonDict) -> str:
+    edge_events_body = edge_events_result.get("body") if isinstance(edge_events_result.get("body"), dict) else {}
+    edge_events_total = int(edge_events_body.get("total") or 0)
+    edge_events_accepted = int(edge_events_body.get("accepted") or 0)
+    return (
+        f"status_code={edge_events_result.get('status_code')}, "
+        f"accepted={edge_events_accepted}/{edge_events_total}, "
+        "source=synthetic_injection(/v1/edge/events)"
+    )
+
+
+def _real_asr_gate(allow_synthetic_asr: bool) -> tuple[bool, str]:
+    if allow_synthetic_asr:
+        return True, "synthetic ASR accepted by --allow-synthetic-asr"
+    return (
+        False,
+        "real ASR not executed in this script (only synthetic /v1/edge/events injection); "
+        "rerun with --allow-synthetic-asr only for non-ASR smoke checks",
+    )
 
 
 def _resolve_audit_db_path(env_file: dict[str, str]) -> Path:
@@ -403,7 +468,12 @@ def _extract_edge_component_health_state(edge_health_body: Any, component_name: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Refactored full voice-chain dual-end test (real calls only)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Dual-end voice probe (synthetic ASR injection + real chat/TTS/VTS checks). "
+            "By default ASR real-capture gate fails unless --allow-synthetic-asr is set."
+        )
+    )
     parser.add_argument("--env-file", default=".env", help="Path to .env for defaults")
     parser.add_argument("--host-url", default="", help="Host base URL, e.g. http://127.0.0.1:18080")
     parser.add_argument("--edge-url", default="", help="Edge base URL, e.g. http://192.168.1.101:17800")
@@ -414,6 +484,16 @@ def main() -> int:
     parser.add_argument("--report-dir", default="artifacts/release/reports", help="Report output directory")
     parser.add_argument("--allow-degraded-tts", action="store_true", help="Treat TTS DEGRADED as pass")
     parser.add_argument("--allow-degraded-vts", action="store_true", help="Treat VTS DEGRADED as pass")
+    parser.add_argument(
+        "--allow-vts-no-mouth-sync",
+        action="store_true",
+        help="Allow VTS pass when mouth_sync.started is false",
+    )
+    parser.add_argument(
+        "--allow-synthetic-asr",
+        action="store_true",
+        help="Allow synthetic ASR injection to satisfy ASR gate (strict mode otherwise fails)",
+    )
     args = parser.parse_args()
 
     env_file_path = Path(args.env_file)
@@ -513,16 +593,18 @@ def main() -> int:
     tts_event_type = str(tts_event.get("event_type") or "").strip()
     tts_start_event_type = str(tts_start_event.get("event_type") or "").strip()
 
-    edge_events_body = edge_events_result.get("body") if isinstance(edge_events_result.get("body"), dict) else {}
-    edge_events_success = bool(edge_events_body.get("success"))
-    edge_events_total = int(edge_events_body.get("total") or 0)
-    edge_events_accepted = int(edge_events_body.get("accepted") or 0)
-
     commit_decision = str(commit_payload.get("decision") or "").upper()
     commit_done = bool(commit_payload.get("done"))
     chat_commit_ok = commit_done and commit_decision == "APPROVE"
     tts_ok = _is_tts_ok(tts_summary, allow_degraded=args.allow_degraded_tts)
-    vts_ok = _is_vts_ok(vts_summary, allow_degraded=args.allow_degraded_vts)
+    vts_ok = _is_vts_ok(
+        vts_summary,
+        allow_degraded=args.allow_degraded_vts,
+        require_mouth_sync=(not args.allow_vts_no_mouth_sync),
+        runtime_event=tts_event,
+    )
+    synthetic_asr_ok = _is_synthetic_asr_ingest_ok(edge_events_result)
+    real_asr_ok, real_asr_detail = _real_asr_gate(args.allow_synthetic_asr)
 
     host_health_ok = bool(host_health.get("ok")) and int(host_health.get("status_code") or 0) == 200
     host_ready_ok = (
@@ -569,16 +651,14 @@ def main() -> int:
             "detail": f"vts_state={edge_vts_state or 'UNKNOWN'}",
         },
         {
-            "node": "asr.ingest",
-            "passed": bool(edge_events_result.get("ok"))
-            and int(edge_events_result.get("status_code") or 0) == 200
-            and edge_events_success
-            and edge_events_total > 0
-            and edge_events_total == edge_events_accepted,
-            "detail": (
-                f"status_code={edge_events_result.get('status_code')}, "
-                f"accepted={edge_events_accepted}/{edge_events_total}"
-            ),
+            "node": "asr.synthetic_ingest",
+            "passed": synthetic_asr_ok,
+            "detail": _format_synthetic_asr_detail(edge_events_result),
+        },
+        {
+            "node": "asr.real_capture",
+            "passed": real_asr_ok,
+            "detail": real_asr_detail,
         },
         {
             "node": "chat.commit",
@@ -611,6 +691,7 @@ def main() -> int:
     report: JsonDict = {
         "meta": {
             "script": "test_voice_dual_chain_full_nodes_refactored.py",
+            "mode": "synthetic_asr_injection",
             "started_at": started_at,
             "finished_at": _iso_now(),
         },

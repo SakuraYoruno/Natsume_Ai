@@ -137,3 +137,85 @@ def test_reranker_retries_once_after_slow_cold_start(monkeypatch) -> None:
     assert result.success
     assert result.output["warm_retry_used"] is True
     assert call_count == 2
+
+
+def test_embedding_falls_back_after_local_provider_error() -> None:
+    from host_brain.core.errors import RETR_EMBED_UNAVAILABLE
+    from host_brain.retrieval import embedding as embmod
+
+    def _provider(_text, _route):  # noqa: ANN001
+        raise RuntimeError("torch missing")
+
+    runtime_config = embmod.EmbeddingRuntimeConfig(
+        enabled=True,
+        default_route="trial",
+        routes={
+            "trial": embmod.EmbeddingRouteConfig(
+                route_id="trial",
+                provider="sentence_transformers",
+                model_id="local-embed",
+                dim=6,
+                timeout_ms=100,
+                node_selector="default",
+            )
+        },
+    )
+
+    service = embmod.EmbeddingServiceContract(
+        runtime_config=runtime_config,
+        provider_registry={"sentence_transformers": _provider},
+        available=True,
+    )
+    result = service.embed(request_id="req-embed-provider-error", text="hello")
+
+    assert result.success
+    assert result.output["fallback_used"] is True
+    assert result.output["fallback_reason_code"] == RETR_EMBED_UNAVAILABLE
+    assert result.output["effective_provider"] == embmod.DEFAULT_EMBED_PROVIDER
+    assert result.output["embedding_model_id"] == "hash-embed-v1"
+    assert len(result.output["embedding_vector"]) == 6
+
+
+def test_reranker_falls_back_after_local_provider_error() -> None:
+    from host_brain.core.errors import RETR_RERANK_UNAVAILABLE
+    from host_brain.retrieval import reranker as rermod
+
+    def _provider(_query, _candidates, _route):  # noqa: ANN001
+        raise RuntimeError("torch missing")
+
+    runtime_config = rermod.RerankRuntimeConfig(
+        enabled=True,
+        default_route="trial",
+        routes={
+            "trial": rermod.RerankRouteConfig(
+                route_id="trial",
+                provider="qwen3_reranker",
+                model_id="local-rerank",
+                top_k=2,
+                timeout_ms=100,
+                node_selector="default",
+            )
+        },
+    )
+
+    service = rermod.RerankerServiceContract(
+        runtime_config=runtime_config,
+        provider_registry={"qwen3_reranker": _provider},
+        available=True,
+    )
+    result = service.rerank(
+        request_id="req-rerank-provider-error",
+        query="natsume",
+        candidates=[
+            {"doc_id": "m1", "text": "natsume and youkai"},
+            {"doc_id": "m2", "text": "weather forecast"},
+        ],
+        top_k=1,
+    )
+
+    assert result.success
+    assert result.output["fallback_used"] is True
+    assert result.output["fallback_reason_code"] == RETR_RERANK_UNAVAILABLE
+    assert result.output["effective_provider"] == rermod.DEFAULT_RERANK_PROVIDER
+    assert result.output["rerank_model_id"] == rermod.RERANK_MODEL_ID
+    assert len(result.output["topk"]) == 1

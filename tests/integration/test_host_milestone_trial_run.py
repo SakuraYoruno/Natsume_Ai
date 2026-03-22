@@ -498,17 +498,33 @@ class TestSkillsLoader:
 # 服务 4：host.integrations.llm_gateway — LLM 网关
 # ⚠️ 跳过：需要真实 API Key（OPENAI_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY）
 # ===========================================================================
-@pytest.mark.skip(reason="[SKIP_MODEL] LLM 网关需要真实 API Key，跳过模型相关测试")
 class TestLLMGateway:
-    """host.integrations.llm_gateway — 跳过（需 API Key）。"""
+    """host.integrations.llm_gateway 正式可用性测试（无 mock）。"""
 
     def test_llm_gateway_generate(self):
-        """T4-1: [SKIP_MODEL] LLM 生成调用。需配置 OPENAI_API_KEY 等。"""
-        pass
+        """T4-1: LLM 网关配置必须可用（缺 key 直接失败）。"""
+        from host_brain.app.config import load_host_config, build_host_runtime_statuses
 
-    def test_llm_gateway_streaming(self):
-        """T4-2: [SKIP_MODEL] LLM 流式输出。"""
-        pass
+        cfg = load_host_config(env=os.environ)
+        assert cfg.success, f"Host config load failed: {cfg.reason_code}"
+        statuses = build_host_runtime_statuses(cfg.config)
+        llm_status = statuses.get("host.integrations.llm_gateway", {})
+        assert llm_status.get("available") is True, f"LLM gateway unavailable: {llm_status}"
+
+    def test_llm_gateway_health_probe(self):
+        """T4-2: LLM provider key 必须存在（正式测试不允许 mock）。"""
+        provider = str(os.environ.get("HOST_LLM_PROVIDER") or "").strip().lower()
+        key_map = {
+            "openai": "OPENAI_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+        }
+        if provider in key_map:
+            key_name = key_map[provider]
+            assert str(os.environ.get(key_name) or "").strip(), f"{key_name} is required for formal run"
+        else:
+            # 非受支持 provider 直接判失败，避免隐式回退到 mock。
+            assert provider in {"openai", "gemini", "deepseek"}, f"unsupported HOST_LLM_PROVIDER={provider!r}"
 
 
 # ===========================================================================
@@ -741,26 +757,36 @@ class TestRetrievalReranker:
 # 服务 7：host.vision.screen_ocr — 屏幕 OCR
 # ⚠️ 跳过：需要屏幕截图能力和 OCR 模型
 # ===========================================================================
-@pytest.mark.skip(reason="[SKIP_MODEL] 屏幕 OCR 需要屏幕截图能力和 OCR 模型，跳过")
 class TestVisionScreenOCR:
-    """host.vision.screen_ocr — 跳过（需 OCR 模型）。"""
+    """host.vision.screen_ocr 正式可用性测试（无 mock）。"""
 
     def test_screen_ocr_capture(self):
-        """T7-1: [SKIP_MODEL] 屏幕截图 + OCR 识别。"""
-        pass
+        """T7-1: vision.screen_ocr 必须在运行时状态中可用。"""
+        from host_brain.app.config import load_host_config, build_host_runtime_statuses
+
+        cfg = load_host_config(env=os.environ)
+        assert cfg.success, f"Host config load failed: {cfg.reason_code}"
+        statuses = build_host_runtime_statuses(cfg.config)
+        svc = statuses.get("host.vision.screen_ocr", {})
+        assert svc.get("available") is True, f"screen_ocr unavailable: {svc}"
 
 
 # ===========================================================================
 # 服务 8：host.vision.camera_recognizer — 摄像头识别
 # ⚠️ 跳过：需要摄像头硬件
 # ===========================================================================
-@pytest.mark.skip(reason="[SKIP_MODEL] 摄像头识别需要摄像头硬件，跳过")
 class TestVisionCameraRecognizer:
-    """host.vision.camera_recognizer — 跳过（需摄像头）。"""
+    """host.vision.camera_recognizer 正式可用性测试（无 mock）。"""
 
     def test_camera_recognize(self):
-        """T8-1: [SKIP_MODEL] 摄像头帧识别。"""
-        pass
+        """T8-1: vision.camera_recognizer 必须在运行时状态中可用。"""
+        from host_brain.app.config import load_host_config, build_host_runtime_statuses
+
+        cfg = load_host_config(env=os.environ)
+        assert cfg.success, f"Host config load failed: {cfg.reason_code}"
+        statuses = build_host_runtime_statuses(cfg.config)
+        svc = statuses.get("host.vision.camera_recognizer", {})
+        assert svc.get("available") is True, f"camera_recognizer unavailable: {svc}"
 
 
 # ===========================================================================
@@ -859,40 +885,93 @@ class TestEdgeRPCGateway:
 # 服务 10-13：edge.rpc.asr / tts / barge_in / fallback_llm
 # ⚠️ 跳过：需要 ASR/TTS 模型和 edge 节点在线
 # ===========================================================================
-@pytest.mark.skip(reason="[SKIP_MODEL] ASR 需要 faster-whisper 模型和 edge 节点在线，跳过")
 class TestEdgeRPCASR:
-    """edge.rpc.asr — 跳过（需 ASR 模型）。"""
+    """edge.rpc.asr 正式可用性测试（无 mock）。"""
 
     def test_asr_transcribe(self):
-        """T10-1: [SKIP_MODEL] ASR 语音转文字。"""
-        pass
+        """T10-1: edge.rpc.asr 运行时状态必须可用。"""
+        from edge_client.config import load_edge_config, build_edge_runtime_statuses
+
+        cfg = load_edge_config(env=os.environ)
+        assert cfg.success, f"Edge config load failed: {cfg.reason_code}"
+        statuses = build_edge_runtime_statuses(cfg.config)
+        svc = statuses.get("edge.rpc.asr", {})
+        assert svc.get("available") is True, f"edge.rpc.asr unavailable: {svc}"
 
 
-@pytest.mark.skip(reason="[SKIP_MODEL] TTS 需要 GPT-SoVITS 模型和 edge 节点在线，跳过")
 class TestEdgeRPCTTS:
-    """edge.rpc.tts — 跳过（需 TTS 模型）。"""
+    """edge.rpc.tts 正式可用性测试（无 mock）。"""
 
     def test_tts_synthesize(self):
-        """T11-1: [SKIP_MODEL] TTS 文字转语音。"""
-        pass
+        """T11-1: edge.rpc.tts 运行时状态必须可用。"""
+        from edge_client.config import load_edge_config, build_edge_runtime_statuses
+
+        cfg = load_edge_config(env=os.environ)
+        assert cfg.success, f"Edge config load failed: {cfg.reason_code}"
+        statuses = build_edge_runtime_statuses(cfg.config)
+        svc = statuses.get("edge.rpc.tts", {})
+        assert svc.get("available") is True, f"edge.rpc.tts unavailable: {svc}"
 
 
-@pytest.mark.skip(reason="[SKIP_MODEL] Barge-in 依赖 TTS 服务，跳过")
 class TestEdgeRPCBargeIn:
-    """edge.rpc.barge_in — 跳过（依赖 TTS）。"""
+    """edge.rpc.barge_in 正式可用性测试（无 mock）。"""
 
     def test_barge_in_interrupt(self):
-        """T12-1: [SKIP_MODEL] Barge-in 打断检测。"""
-        pass
+        """T12-1: edge.rpc.barge_in 运行时状态必须可用。"""
+        from edge_client.config import load_edge_config, build_edge_runtime_statuses
+
+        cfg = load_edge_config(env=os.environ)
+        assert cfg.success, f"Edge config load failed: {cfg.reason_code}"
+        statuses = build_edge_runtime_statuses(cfg.config)
+        svc = statuses.get("edge.rpc.barge_in", {})
+        assert svc.get("available") is True, f"edge.rpc.barge_in unavailable: {svc}"
 
 
-@pytest.mark.skip(reason="[SKIP_MODEL] Fallback LLM 需要本地 Ollama 模型，跳过")
 class TestEdgeRPCFallbackLLM:
-    """edge.rpc.fallback_llm — 跳过（需本地 LLM）。"""
+    """edge.rpc.fallback_llm 正式可用性测试（无 mock）。"""
 
     def test_fallback_llm_generate(self):
-        """T13-1: [SKIP_MODEL] Fallback LLM 本地推理。"""
-        pass
+        """T13-1: edge.rpc.fallback_llm 正式可用性（启用时必可用；禁用时条件放行）。"""
+        from edge_client.config import load_edge_config, build_edge_runtime_statuses
+
+        cfg = load_edge_config(env=os.environ)
+        assert cfg.success, f"Edge config load failed: {cfg.reason_code}"
+        statuses = build_edge_runtime_statuses(cfg.config)
+        svc = statuses.get("edge.rpc.fallback_llm", {})
+        enabled = bool(getattr(cfg.config, "fallback_llm_enabled", False))
+        available = bool(svc.get("available"))
+
+        # 封测计划（2026-03-13, §7）：edge.rpc.fallback_llm=false 可带条件放行。
+        if enabled:
+            result = {
+                "test_id": "T13-1",
+                "service": "edge.rpc.fallback_llm",
+                "operation": "fallback_runtime_probe",
+                "params_in": {"EDGE_FALLBACK_LLM_ENABLED": os.environ.get("EDGE_FALLBACK_LLM_ENABLED")},
+                "params_out": svc,
+                "status": "PASS" if available else "FAIL",
+                "gate_mode": "required_when_enabled",
+                "ts_ms": _RUN_TS,
+            }
+            _save_report("T13-1_fallback_llm_runtime", result)
+            assert available is True, f"edge.rpc.fallback_llm unavailable while enabled: {svc}"
+        else:
+            result = {
+                "test_id": "T13-1",
+                "service": "edge.rpc.fallback_llm",
+                "operation": "fallback_runtime_probe",
+                "params_in": {"EDGE_FALLBACK_LLM_ENABLED": os.environ.get("EDGE_FALLBACK_LLM_ENABLED")},
+                "params_out": svc,
+                "status": "PASS",
+                "gate_mode": "conditional_pass_disabled",
+                "policy_ref": "docs/50_release/release_seal_test_plan_20260313.md#7-已确认",
+                "ts_ms": _RUN_TS,
+            }
+            _save_report("T13-1_fallback_llm_runtime", result)
+            assert available is False, (
+                "edge.rpc.fallback_llm should be unavailable when EDGE_FALLBACK_LLM_ENABLED=false; "
+                f"got: {svc}"
+            )
 
 
 # ===========================================================================

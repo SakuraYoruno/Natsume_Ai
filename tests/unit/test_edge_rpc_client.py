@@ -268,6 +268,61 @@ class TestPostSpeak(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 测试 post_wechat_command
+# ---------------------------------------------------------------------------
+
+class TestPostWeChatCommand(unittest.TestCase):
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def test_post_wechat_command_success_and_payload(self):
+        from host_brain.channels.edge_rpc_client import post_wechat_command
+
+        captured_payload: dict = {}
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "status": "ACCEPTED",
+            "reason_code": None,
+            "detail": "wechat command queued",
+            "event": {"command_id": "wechatcmd-1"},
+            "ts_ms": 1700000000000,
+        }
+        mock_response.headers = {"content-type": "application/json"}
+
+        async def _capture_post(url, json=None, **kwargs):
+            nonlocal captured_payload
+            captured_payload = dict(json or {})
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = _capture_post
+
+        with patch.dict(os.environ, {"EDGE_ALLOW_INSECURE_AUTH": "true"}):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = self._run(
+                    post_wechat_command(
+                        action="send_text",
+                        target="alice",
+                        content="hello",
+                        request_id="req-wechat-001",
+                        wait_result=True,
+                        timeout_ms=9000,
+                    )
+                )
+
+        self.assertTrue(result.success)
+        self.assertEqual("send_text", captured_payload["payload"]["action"])
+        self.assertEqual("alice", captured_payload["payload"]["target"])
+        self.assertEqual("hello", captured_payload["payload"]["content"])
+        self.assertEqual(9000, captured_payload["payload"]["timeout_ms"])
+        self.assertTrue(captured_payload["payload"]["wait_result"])
+
+
+# ---------------------------------------------------------------------------
 # 测试 post_screenshot
 # ---------------------------------------------------------------------------
 

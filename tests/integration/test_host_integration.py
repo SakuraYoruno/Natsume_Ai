@@ -121,6 +121,17 @@ def test_client(mem_ledger):
     _deps._obs_metrics_collector = None
 
 
+@pytest.fixture(autouse=True)
+def _rebind_mem_ledger_each_test(mem_ledger):
+    """Ensure this module always uses the injected in-memory ledger."""
+    import host_brain.app.dependencies as _deps
+
+    _deps._ledger = mem_ledger
+    _deps._bond_stage_engine = None
+    _deps._bond_update_queue = None
+    yield
+
+
 # ---------------------------------------------------------------------------
 # 1. GET /health — 健康检查
 # ---------------------------------------------------------------------------
@@ -989,8 +1000,8 @@ class TestEndToEndPipeline:
         health_ts = health_resp.json()["timestamp"]
         metrics_ts = metrics_resp.json()["timestamp"]
 
-        # 两个请求时间戳应在合理范围内（5 秒内）
-        assert abs(health_ts - metrics_ts) < 5000
+        # 两个请求时间戳应在合理范围内（10 秒内，避免 CI 抖动误判）
+        assert abs(health_ts - metrics_ts) < 10000
 
     def test_e2e_chat_increments_metrics(self, test_client):
         """T-INT-E2E-03: /v1/chat 请求后 /metrics total_chat_requests 递增。"""

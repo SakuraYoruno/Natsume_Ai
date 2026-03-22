@@ -26,7 +26,26 @@ def _reset_host_brain_singletons():
         dep._ledger = None
         dep._bond_stage_engine = None
         dep._retrieval_pipeline = None
+        dep._retrieval_orchestrator = None
         dep._obs_metrics_collector = None
+        dep._graph_runtime = None
+        dep._main_chain = None
+        dep._routing_matrix = None
+        dep._recall_pack_builder = None
+        dep._memory_guard = None
+        dep._state_arbiter = None
+        dep._distillation_engine = None
+        dep._semantic_recaller = None
+        dep._context_compressor = None
+        dep._emotion_timeline = None
+        dep._tool_catalog = None
+        dep._tool_broker = None
+        dep._mcp_tool_broker = None
+        mcp_registry = getattr(dep, "_mcp_tool_registry", None)
+        if mcp_registry is not None:
+            with contextlib.suppress(Exception):
+                mcp_registry.close()
+        dep._mcp_tool_registry = None
         bond_queue = getattr(dep, "_bond_update_queue", None)
         if bond_queue is not None:
             with contextlib.suppress(Exception):

@@ -9,6 +9,7 @@ import json
 import pathlib
 import tempfile
 import pytest
+from unittest.mock import patch
 
 from host_brain.skills.impl.desktop_note import (
     execute_desktop_note,
@@ -178,12 +179,19 @@ class TestDesktopNoteSecurity:
         link = tmp_path / "link.txt"
         try:
             link.symlink_to(target)
+            result = execute_desktop_note(
+                {"action": "update", "filename": "link.txt", "content": "evil", "base_dir": str(tmp_path)},
+                {"sys_mode": "normal"},
+            )
         except (OSError, NotImplementedError):
-            pytest.skip("symlink not supported on this platform")
-        result = execute_desktop_note(
-            {"action": "update", "filename": "link.txt", "content": "evil", "base_dir": str(tmp_path)},
-            {"sys_mode": "normal"},
-        )
+            # Windows 非开发者模式等环境可能无法创建 symlink；
+            # 用 mock 强制触发 is_symlink 分支，保证契约测试仍可执行。
+            link.write_text("placeholder", encoding="utf-8-sig")
+            with patch("pathlib.Path.is_symlink", return_value=True):
+                result = execute_desktop_note(
+                    {"action": "update", "filename": "link.txt", "content": "evil", "base_dir": str(tmp_path)},
+                    {"sys_mode": "normal"},
+                )
         assert result["status"] == STATUS_REJECTED
         assert result["reason_code"] == SCOPE_VIOLATION
 
