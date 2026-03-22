@@ -35,6 +35,9 @@ DEFAULT_CALLBACK_TIMEOUT_S = 6.0
 DEFAULT_LISTENER_POLL_INTERVAL_S = 1.2
 DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 DEFAULT_INBOUND_BACKEND = "uia_hook"
+DEFAULT_UIA_SCAN_CHAT_LIST = False
+DEFAULT_FORCE_ACTIVE_CHAT_TARGET = True
+DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = 0.70
 DEFAULT_NOTIFY_DB_PATH = r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db"
 DEFAULT_NOTIFY_HANDLER_KEYWORDS = ("weixin", "wechat", "tencent")
 DEFAULT_NOTIFY_PAYLOAD_KEYWORDS = ("微信", "weixin", "wechat", "tencent")
@@ -705,12 +708,18 @@ class WeChatUiInboundBridge:
         poll_interval_s: float,
         callback_timeout_s: float,
         dedup_window_s: float,
+        scan_chat_list: bool = DEFAULT_UIA_SCAN_CHAT_LIST,
+        force_active_chat_target: bool = DEFAULT_FORCE_ACTIVE_CHAT_TARGET,
+        active_inbound_x_ratio_max: float = DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX,
     ) -> None:
         self._edge_url = str(edge_url or DEFAULT_EDGE_URL).strip()
         self._enabled = bool(enabled)
         self._poll_interval_s = max(0.2, float(poll_interval_s))
         self._callback_timeout_s = max(0.2, float(callback_timeout_s))
         self._dedup_window_s = max(1.0, float(dedup_window_s))
+        self._scan_chat_list = bool(scan_chat_list)
+        self._force_active_chat_target = bool(force_active_chat_target)
+        self._active_inbound_x_ratio_max = max(0.45, min(0.90, float(active_inbound_x_ratio_max)))
 
         self._stop_event = threading.Event()
         self._dirty_event = threading.Event()
@@ -954,62 +963,58 @@ class WeChatUiInboundBridge:
 
         rows: list[tuple[str, str]] = []
 
-        try:
-            list_items = window.descendants(control_type="ListItem")
-        except Exception:
-            list_items = []
-
-        for item in list_items[:80]:
+        if self._scan_chat_list:
             try:
-                texts: list[str] = []
-                item_title = _normalize_message_text(item.window_text())
-                if item_title:
-                    texts.append(item_title)
-                for child in item.descendants(control_type="Text"):
-                    text_value = _normalize_message_text(child.window_text())
-                    if text_value:
-                        texts.append(text_value)
+                list_items = window.descendants(control_type="ListItem")
             except Exception:
-                continue
+                list_items = []
 
-            if not texts:
-                continue
-            clean: list[str] = []
-            seen: set[str] = set()
-            for text_value in texts:
-                if not text_value or text_value in seen:
+            for item in list_items[:80]:
+                try:
+                    texts: list[str] = []
+                    item_title = _normalize_message_text(item.window_text())
+                    if item_title:
+                        texts.append(item_title)
+                    for child in item.descendants(control_type="Text"):
+                        text_value = _normalize_message_text(child.window_text())
+                        if text_value:
+                            texts.append(text_value)
+                except Exception:
                     continue
-                seen.add(text_value)
-                clean.append(text_value)
-            if len(clean) < 2:
-                continue
 
-            sender = clean[0]
-            if sender in WECHAT_SYSTEM_LIST_TITLES:
-                continue
-            preview = ""
-            for candidate in clean[1:]:
-                if candidate == sender:
+                if not texts:
                     continue
-                if _is_probably_time_or_badge(candidate):
+                clean: list[str] = []
+                seen: set[str] = set()
+                for text_value in texts:
+                    if not text_value or text_value in seen:
+                        continue
+                    seen.add(text_value)
+                    clean.append(text_value)
+                if len(clean) < 2:
                     continue
-                preview = candidate
-                break
-            if not preview:
-                continue
-            rows.append((sender, preview))
 
-        dedup_rows: list[tuple[str, str]] = []
-        seen_sender: set[str] = set()
+                sender = clean[0]
+                if sender in WECHAT_SYSTEM_LIST_TITLES:
+                    continue
+                preview = ""
+                for candidate in clean[1:]:
+                    if candidate == sender:
+                        continue
+                    if _is_probably_time_or_badge(candidate):
+                        continue
+                    preview = candidate
+                    break
+                if not preview:
+                    continue
+                rows.append((sender, preview))
+
+        dedup_map: dict[str, str] = {}
         for sender, preview in rows:
-            if sender in seen_sender:
-                continue
-            seen_sender.add(sender)
-            dedup_rows.append((sender, preview))
+            if sender and preview and sender not in dedup_map:
+                dedup_map[sender] = preview
 
-        # Some Weixin builds expose weak/obfuscated chat-list control trees.
-        # Fallback: derive current chat title + newest visible bubble text
-        # from right-side message area.
+        # Always inspect active chat pane and prefer inbound-side text.
         try:
             rect = window.rectangle()
             left = int(rect.left)
@@ -1021,6 +1026,9 @@ class WeChatUiInboundBridge:
             if width > 0 and height > 0:
                 title_candidates: list[tuple[int, str]] = []
                 message_candidates: list[tuple[int, int, str]] = []
+                panel_left = left + int(width * 0.34)
+                panel_right = left + int(width * 0.97)
+                inbound_x_max = left + int(width * self._active_inbound_x_ratio_max)
                 text_nodes = window.descendants(control_type="Text")
                 for node in text_nodes:
                     try:
@@ -1033,7 +1041,7 @@ class WeChatUiInboundBridge:
                     except Exception:
                         continue
 
-                    if cx < (left + int(width * 0.45)):
+                    if cx < panel_left or cx > panel_right:
                         continue
                     if cy <= (top + int(height * 0.18)):
                         if not _is_probably_time_or_badge(text_value):
@@ -1042,6 +1050,8 @@ class WeChatUiInboundBridge:
                     if cy >= (top + int(height * 0.83)):
                         continue
                     if _is_probably_time_or_badge(text_value):
+                        continue
+                    if cx > inbound_x_max:
                         continue
                     if text_value in {"发送(S)", "聊天信息"}:
                         continue
@@ -1054,11 +1064,14 @@ class WeChatUiInboundBridge:
                     if title_candidates:
                         title_candidates.sort(key=lambda x: x[0], reverse=True)
                         chat_title = title_candidates[0][1]
-                    if chat_title not in seen_sender:
-                        dedup_rows.append((chat_title, latest_text))
+                    if self._force_active_chat_target:
+                        chat_title = "active_chat"
+                    if chat_title and latest_text:
+                        dedup_map[chat_title] = latest_text
         except Exception:
             pass
 
+        dedup_rows = list(dedup_map.items())
         if (not dedup_rows) and ((time.monotonic() - self._last_tree_diag_at) >= 45.0):
             self._last_tree_diag_at = time.monotonic()
             self._log_tree_diagnostics(window)
@@ -1121,6 +1134,9 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         dedup_window_s: float,
         ocr_min_score: float,
         inbound_x_ratio_max: float,
+        scan_chat_list: bool = DEFAULT_UIA_SCAN_CHAT_LIST,
+        force_active_chat_target: bool = DEFAULT_FORCE_ACTIVE_CHAT_TARGET,
+        active_inbound_x_ratio_max: float = DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX,
     ) -> None:
         super().__init__(
             edge_url=edge_url,
@@ -1128,6 +1144,9 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             poll_interval_s=poll_interval_s,
             callback_timeout_s=callback_timeout_s,
             dedup_window_s=dedup_window_s,
+            scan_chat_list=scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=active_inbound_x_ratio_max,
         )
         self._ocr_min_score = max(0.1, min(0.99, float(ocr_min_score)))
         self._inbound_x_ratio_max = max(0.2, min(0.95, float(inbound_x_ratio_max)))
@@ -1136,14 +1155,25 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         self._last_ocr_diag_at = 0.0
         self._last_ocr_sender = "active_chat"
         self._last_focus_retry_at = 0.0
+        self._ocr_empty_cycles = 0
 
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         # OCR mode must prioritize OCR extraction to avoid UIA text noise loops.
         previews = self._collect_chat_previews_via_ocr()
         if previews:
+            self._ocr_empty_cycles = 0
             return previews
-        if self._ocr_disabled:
-            return super()._collect_chat_previews()
+        self._ocr_empty_cycles += 1
+        if self._ocr_disabled or self._ocr_empty_cycles >= 4:
+            fallback = super()._collect_chat_previews()
+            if fallback:
+                logger.info(
+                    "ocr inbound fallback via uia: rows=%d empty_cycles=%d",
+                    len(fallback),
+                    self._ocr_empty_cycles,
+                )
+                self._ocr_empty_cycles = 0
+            return fallback
         return []
 
     def _collect_chat_previews_via_ocr(self) -> list[tuple[str, str]]:
@@ -2241,6 +2271,22 @@ def main() -> int:
         help=f"Inbound backend: uia_hook|uia_ocr|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
+        "--uia-scan-chat-list",
+        default=(os.environ.get("EDGE_WECHAT_UIA_SCAN_CHAT_LIST") or "0").strip(),
+        help="UIA inbound: include left chat-list scanning (default: 0).",
+    )
+    parser.add_argument(
+        "--force-active-chat-target",
+        default=(os.environ.get("EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET") or "1").strip(),
+        help="UIA inbound: force sender/session_id to active_chat (default: 1).",
+    )
+    parser.add_argument(
+        "--uia-active-inbound-x-ratio-max",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX") or "0.70"),
+        help="UIA active-chat X ratio max for inbound-side text (default: 0.70).",
+    )
+    parser.add_argument(
         "--listener-poll-interval",
         type=float,
         default=float(os.environ.get("EDGE_WECHAT_LISTENER_POLL_INTERVAL_S") or DEFAULT_LISTENER_POLL_INTERVAL_S),
@@ -2294,6 +2340,12 @@ def main() -> int:
     elif inbound_backend not in {"uia_hook", "uia_ocr", "win_notify"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
+    uia_scan_chat_list = _parse_bool(args.uia_scan_chat_list, default=DEFAULT_UIA_SCAN_CHAT_LIST)
+    force_active_chat_target = _parse_bool(
+        args.force_active_chat_target,
+        default=DEFAULT_FORCE_ACTIVE_CHAT_TARGET,
+    )
+    uia_active_inbound_x_ratio_max = max(0.45, min(0.90, float(args.uia_active_inbound_x_ratio_max)))
     notify_keywords = [
         part.strip().lower()
         for part in str(args.notify_handler_keywords or "").split(",")
@@ -2319,13 +2371,20 @@ def main() -> int:
         return 3
 
     logger.info(
-        "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s listener_enabled=%s inbound_backend=%s",
+        (
+            "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s "
+            "listener_enabled=%s inbound_backend=%s scan_chat_list=%s "
+            "force_active_chat_target=%s active_x_max=%.2f"
+        ),
         args.edge_url,
         queue_file,
         result_file,
         wechat_path or "(auto)",
         listener_enabled,
         inbound_backend,
+        uia_scan_chat_list,
+        force_active_chat_target,
+        uia_active_inbound_x_ratio_max,
     )
 
     if inbound_backend == "win_notify":
@@ -2347,6 +2406,9 @@ def main() -> int:
             dedup_window_s=float(args.listener_dedup_window),
             ocr_min_score=float(args.ocr_min_score),
             inbound_x_ratio_max=float(args.ocr_inbound_x_ratio_max),
+            scan_chat_list=uia_scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=uia_active_inbound_x_ratio_max,
         )
     else:
         inbound_bridge = WeChatUiInboundBridge(
@@ -2355,6 +2417,9 @@ def main() -> int:
             poll_interval_s=float(args.listener_poll_interval),
             callback_timeout_s=float(args.callback_timeout),
             dedup_window_s=float(args.listener_dedup_window),
+            scan_chat_list=uia_scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=uia_active_inbound_x_ratio_max,
         )
     inbound_bridge.start()
 

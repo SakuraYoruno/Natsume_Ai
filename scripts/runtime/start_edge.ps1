@@ -742,6 +742,9 @@ $wechatEnvOverrideKeys = @(
   "EDGE_WECHAT_CALLBACK_TIMEOUT_S",
   "EDGE_WECHAT_OCR_MIN_SCORE",
   "EDGE_WECHAT_OCR_INBOUND_X_RATIO_MAX",
+  "EDGE_WECHAT_UIA_SCAN_CHAT_LIST",
+  "EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET",
+  "EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX",
   "EDGE_WECHAT_AUTOSTART",
   "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS"
 )
@@ -1136,6 +1139,21 @@ if ($wechatBridgeBackend -eq "uia") {
   $envValues["EDGE_WECHAT_COMMAND_RESULT_FILE"] = [string]$wechatCommandResultFile
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_QUEUE_FILE", [string]$wechatCommandQueueFile, "Process")
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
+
+  $uiaDefaultEnv = [ordered]@{
+    EDGE_WECHAT_UIA_SCAN_CHAT_LIST = "0"
+    EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET = "1"
+    EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = "0.70"
+  }
+  foreach ($uiaKey in $uiaDefaultEnv.Keys) {
+    $currentUiaValue = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key $uiaKey)
+    if (-not [string]::IsNullOrWhiteSpace($currentUiaValue)) {
+      continue
+    }
+    $defaultUiaValue = [string]$uiaDefaultEnv[$uiaKey]
+    $envValues[$uiaKey] = $defaultUiaValue
+    [Environment]::SetEnvironmentVariable($uiaKey, $defaultUiaValue, "Process")
+  }
 }
 
 if (Test-Path -Path $pidFile) {
