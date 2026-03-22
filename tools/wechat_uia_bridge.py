@@ -12,6 +12,7 @@ import ctypes
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -204,6 +205,57 @@ def _focus_wechat_main_window(wechat_path: str) -> tuple[bool, str]:
         return False, f"{exc.__class__.__name__}: {exc}"
 
 
+def _get_window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    rect = RECT()
+    user32 = ctypes.windll.user32
+    if not bool(user32.GetWindowRect(hwnd, ctypes.byref(rect))):
+        return None
+    return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+
+
+def _focus_message_input_area(wechat_path: str) -> tuple[bool, str]:
+    try:
+        import pyautogui
+    except Exception as exc:
+        return False, f"pyautogui import failed: {exc}"
+
+    ok, detail = _focus_wechat_main_window(wechat_path)
+    if not ok:
+        return False, detail
+
+    hwnd = _find_wechat_main_window()
+    if not hwnd:
+        return False, "wechat main window not found"
+
+    rect = _get_window_rect(hwnd)
+    if rect is None:
+        return False, "GetWindowRect failed"
+    left, top, right, bottom = rect
+    width = max(0, right - left)
+    height = max(0, bottom - top)
+    if width <= 0 or height <= 0:
+        return False, "invalid window rect"
+
+    # WeChat message editor is usually in the lower-right panel.
+    click_x = int(left + width * 0.74)
+    click_y = int(top + height * 0.88)
+    try:
+        pyautogui.FAILSAFE = False
+        pyautogui.click(x=click_x, y=click_y)
+        time.sleep(0.12)
+        return True, f"message_input_clicked x={click_x} y={click_y}"
+    except Exception as exc:
+        return False, f"focus_input_click failed: {exc.__class__.__name__}: {exc}"
+
+
 def _set_clipboard_text(text: str) -> tuple[bool, str]:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
@@ -274,15 +326,37 @@ def _open_chat_by_target(target: str, wechat_path: str) -> tuple[bool, str]:
         pyautogui.hotkey("ctrl", "a")
         pyautogui.press("backspace")
         pyautogui.write(str(target or ""), interval=0.02)
-        time.sleep(0.25)
+        time.sleep(0.30)
+        # Prefer explicit result activation over plain Enter to reduce
+        # "still-focused-search-box" cases.
+        pyautogui.press("down")
+        time.sleep(0.08)
         pyautogui.press("enter")
         time.sleep(0.35)
+        pyautogui.press("escape")
+        time.sleep(0.10)
+
+        # UIA verification: try to find target title in current window.
+        try:
+            from pywinauto import Desktop
+
+            hwnd = _find_wechat_main_window()
+            if hwnd:
+                window = Desktop(backend="uia").window(handle=hwnd)
+                if bool(
+                    window.child_window(
+                        title_re=rf".*{re.escape(str(target or '').strip())}.*"
+                    ).exists(timeout=0.8)
+                ):
+                    return True, detail
+        except Exception:
+            pass
         return True, detail
     except Exception as exc:
         return False, f"open_chat failed: {exc.__class__.__name__}: {exc}"
 
 
-def _send_text(content: str) -> tuple[bool, str]:
+def _send_text(content: str, wechat_path: str) -> tuple[bool, str]:
     try:
         import pyautogui
     except Exception as exc:
@@ -292,11 +366,15 @@ def _send_text(content: str) -> tuple[bool, str]:
     if not clip_ok:
         return False, f"clipboard failed: {clip_detail}"
 
+    input_ok, input_detail = _focus_message_input_area(wechat_path=wechat_path)
+    if not input_ok:
+        return False, f"focus_input failed: {input_detail}"
+
     try:
         pyautogui.hotkey("ctrl", "v")
         time.sleep(0.15)
         pyautogui.press("enter")
-        return True, "ok"
+        return True, f"ok ({input_detail})"
     except Exception as exc:
         return False, f"send_text failed: {exc.__class__.__name__}: {exc}"
 
@@ -389,7 +467,7 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
                 "reason_code": "WECHAT_UI_OPEN_CHAT_FAILED",
                 "detail": open_detail,
             }
-        ok, detail = _send_text(content=content)
+        ok, detail = _send_text(content=content, wechat_path=wechat_path)
         if ok:
             detail = f"{detail} ({open_detail})"
     elif action == "voice_call":
