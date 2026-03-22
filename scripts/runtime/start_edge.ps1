@@ -1022,15 +1022,8 @@ if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("wcferry", "uia", "pywechat", "external")) {
-    if ($candidateBackend -eq "pywechat") {
-      $wechatBridgeBackend = "uia"
-      if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_BACKEND_PYWECHAT_REMOVED")) {
-        $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_PYWECHAT_REMOVED"
-      }
-    } else {
-      $wechatBridgeBackend = $candidateBackend
-    }
+  if ($candidateBackend -in @("wcferry", "uia", "external")) {
+    $wechatBridgeBackend = $candidateBackend
   } else {
     $wechatBridgeBackend = "wcferry"
     $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
@@ -1389,7 +1382,7 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_uia_bridge.py", "wechat_pywechat_bridge.py")
+  $bridgeScriptNeedles = @("wechat_wcferry_bridge.py", "wechat_uia_bridge.py")
   $existingBridgePids = @()
   foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
     $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle

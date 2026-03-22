@@ -2,7 +2,7 @@
 WeChat desktop UI automation bridge.
 
 This bridge consumes outbound command queue records and executes them on the
-interactive WeChat/Weixin desktop client without pywechat dependency.
+interactive WeChat/Weixin desktop client.
 """
 
 from __future__ import annotations
