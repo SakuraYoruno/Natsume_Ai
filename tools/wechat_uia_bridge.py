@@ -36,6 +36,7 @@ DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 DEFAULT_INBOUND_BACKEND = "uia_hook"
 DEFAULT_NOTIFY_DB_PATH = r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db"
 DEFAULT_NOTIFY_HANDLER_KEYWORDS = ("weixin", "wechat", "tencent")
+DEFAULT_NOTIFY_PAYLOAD_KEYWORDS = ("微信", "weixin", "wechat", "tencent")
 FILETIME_1601_TO_1970 = 116444736000000000
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS_HINTS = {
@@ -237,6 +238,7 @@ class WeChatWindowsNotificationInboundBridge:
         self._handler_keywords = [str(k or "").strip().lower() for k in handler_keywords if str(k or "").strip()]
         if not self._handler_keywords:
             self._handler_keywords = list(DEFAULT_NOTIFY_HANDLER_KEYWORDS)
+        self._payload_keywords = list(DEFAULT_NOTIFY_PAYLOAD_KEYWORDS)
 
         self._next_poll_at = 0.0
         self._baseline_ready = False
@@ -290,7 +292,7 @@ class WeChatWindowsNotificationInboundBridge:
                 logger.warning("notification inbound cycle failed: %s", exc)
             return 0
 
-        if handler_count <= 0:
+        if handler_count <= 0 and (not events):
             if (now_mono - self._last_no_target_log_at) >= 20.0:
                 self._last_no_target_log_at = now_mono
                 logger.info(
@@ -407,27 +409,43 @@ class WeChatWindowsNotificationInboundBridge:
             cur = con.cursor()
             try:
                 handler_rows = self._query_target_handlers(cur)
-                if not handler_rows:
-                    return int(last_notification_id or 0), [], 0
                 handler_ids = [int(row["handler_id"]) for row in handler_rows]
                 max_seen_id = int(last_notification_id or 0)
                 events: list[dict[str, Any]] = []
-                placeholder = ",".join("?" for _ in handler_ids)
-                sql = f"""
-                SELECT
-                  n.Id,
-                  n.HandlerId,
-                  nh.PrimaryId,
-                  n.ArrivalTime,
-                  n.Payload
-                FROM Notification n
-                JOIN NotificationHandler nh ON nh.RecordId = n.HandlerId
-                WHERE n.HandlerId IN ({placeholder}) AND n.Id > ?
-                ORDER BY n.Id ASC
-                LIMIT 180
-                """
-                params: list[Any] = list(handler_ids)
-                params.append(int(last_notification_id or 0))
+                if handler_ids:
+                    placeholder = ",".join("?" for _ in handler_ids)
+                    sql = f"""
+                    SELECT
+                      n.Id,
+                      n.HandlerId,
+                      nh.PrimaryId,
+                      n.ArrivalTime,
+                      n.Payload
+                    FROM Notification n
+                    JOIN NotificationHandler nh ON nh.RecordId = n.HandlerId
+                    WHERE n.HandlerId IN ({placeholder}) AND n.Id > ?
+                    ORDER BY n.Id ASC
+                    LIMIT 180
+                    """
+                    params: list[Any] = list(handler_ids)
+                    params.append(int(last_notification_id or 0))
+                    require_wechat_hint = False
+                else:
+                    sql = """
+                    SELECT
+                      n.Id,
+                      n.HandlerId,
+                      nh.PrimaryId,
+                      n.ArrivalTime,
+                      n.Payload
+                    FROM Notification n
+                    JOIN NotificationHandler nh ON nh.RecordId = n.HandlerId
+                    WHERE n.Id > ?
+                    ORDER BY n.Id ASC
+                    LIMIT 180
+                    """
+                    params = [int(last_notification_id or 0)]
+                    require_wechat_hint = True
                 rows = cur.execute(sql, params).fetchall()
                 for row in rows:
                     notification_id = int(row[0] or 0)
@@ -443,6 +461,7 @@ class WeChatWindowsNotificationInboundBridge:
                         primary_id=primary_id,
                         arrival_filetime=arrival,
                         payload=payload,
+                        require_wechat_hint=require_wechat_hint,
                     )
                     if event is None:
                         continue
@@ -494,6 +513,7 @@ class WeChatWindowsNotificationInboundBridge:
         primary_id: str,
         arrival_filetime: Any,
         payload: Any,
+        require_wechat_hint: bool,
     ) -> dict[str, Any] | None:
         payload_text = ""
         if isinstance(payload, bytes):
@@ -501,6 +521,8 @@ class WeChatWindowsNotificationInboundBridge:
         else:
             payload_text = str(payload or "")
         texts = self._extract_payload_texts(payload_text)
+        if require_wechat_hint and (not self._payload_looks_like_wechat(primary_id=primary_id, payload_text=payload_text, texts=texts)):
+            return None
         if not texts:
             return None
         sender = texts[0]
@@ -517,6 +539,26 @@ class WeChatWindowsNotificationInboundBridge:
             "content": content,
             "ts_ms": self._filetime_to_unix_ms(arrival_filetime),
         }
+
+    def _payload_looks_like_wechat(self, *, primary_id: str, payload_text: str, texts: list[str]) -> bool:
+        primary_lower = str(primary_id or "").lower()
+        for keyword in self._handler_keywords:
+            if keyword and keyword in primary_lower:
+                return True
+        payload_lower = str(payload_text or "").lower()
+        merged_text = " ".join(texts)
+        merged_lower = merged_text.lower()
+        for keyword in self._payload_keywords:
+            if keyword == "微信":
+                if ("微信" in payload_text) or ("微信" in merged_text):
+                    return True
+                continue
+            kw = str(keyword or "").strip().lower()
+            if not kw:
+                continue
+            if (kw in payload_lower) or (kw in merged_lower):
+                return True
+        return False
 
     @staticmethod
     def _fallback_sender(*, primary_id: str, handler_id: int) -> str:
