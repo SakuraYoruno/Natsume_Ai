@@ -247,6 +247,7 @@ class WeChatUiInboundBridge:
         self._next_poll_at = 0.0
         self._baseline_ready = False
         self._last_diag_log_at = 0.0
+        self._last_tree_diag_at = 0.0
         self._last_preview_by_chat: dict[str, str] = {}
         self._recent_forwarded: dict[str, float] = {}
         self._stats = {
@@ -583,7 +584,37 @@ class WeChatUiInboundBridge:
         except Exception:
             pass
 
+        if (not dedup_rows) and ((time.monotonic() - self._last_tree_diag_at) >= 45.0):
+            self._last_tree_diag_at = time.monotonic()
+            self._log_tree_diagnostics(window)
         return dedup_rows
+
+    def _log_tree_diagnostics(self, window: Any) -> None:
+        try:
+            descendants = window.descendants()
+        except Exception as exc:
+            logger.info("inbound tree diag: descendants failed: %s", exc)
+            return
+        type_counter: dict[str, int] = {}
+        text_samples: list[str] = []
+        for node in descendants[:500]:
+            try:
+                control_type = str(getattr(node.element_info, "control_type", "") or "Unknown")
+            except Exception:
+                control_type = "Unknown"
+            type_counter[control_type] = int(type_counter.get(control_type, 0)) + 1
+            if len(text_samples) >= 18:
+                continue
+            try:
+                text_value = _normalize_message_text(node.window_text())
+            except Exception:
+                text_value = ""
+            if not text_value:
+                continue
+            text_samples.append(f"{control_type}:{text_value[:40]}")
+
+        top_types = sorted(type_counter.items(), key=lambda x: x[1], reverse=True)[:10]
+        logger.info("inbound tree diag: top_types=%s sample_texts=%s", top_types, text_samples)
 
 def _is_wechat_client_running() -> bool:
     cmd = ["tasklist", "/fo", "csv", "/nh"]
