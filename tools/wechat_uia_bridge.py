@@ -1138,11 +1138,13 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         self._last_focus_retry_at = 0.0
 
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
-        # Reuse UIA path first; when UIA tree is opaque fallback to OCR.
-        previews = super()._collect_chat_previews()
+        # OCR mode must prioritize OCR extraction to avoid UIA text noise loops.
+        previews = self._collect_chat_previews_via_ocr()
         if previews:
             return previews
-        return self._collect_chat_previews_via_ocr()
+        if self._ocr_disabled:
+            return super()._collect_chat_previews()
+        return []
 
     def _collect_chat_previews_via_ocr(self) -> list[tuple[str, str]]:
         hwnd = _find_wechat_main_window()
