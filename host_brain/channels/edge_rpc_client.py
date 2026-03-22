@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import threading
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -170,7 +171,7 @@ async def _resolve_edge_clock_offset_ms(
 
     probe_timeout_s = max(0.2, min(float(timeout_ms) / 1000.0, 3.0))
     try:
-        async with httpx.AsyncClient(timeout=probe_timeout_s) as client:
+        async with httpx.AsyncClient(timeout=probe_timeout_s, trust_env=False) as client:
             local_before_ms = int(time.time() * 1000)
             response = await client.get(f"{base_url}/v1/edge/health")
             local_after_ms = int(time.time() * 1000)
@@ -206,6 +207,10 @@ async def _resolve_edge_clock_offset_ms(
 
 
 def _resolve_edge_base_url() -> str:
+    base_url_override = str(os.environ.get("HOST_EDGE_RPC_BASE_URL") or "").strip()
+    if base_url_override:
+        return _normalize_base_url(base_url_override)
+
     host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip()
     port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
     try:
@@ -213,6 +218,47 @@ def _resolve_edge_base_url() -> str:
     except ValueError:
         port = 17800
     return f"http://{host}:{port}"
+
+
+def _normalize_base_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    parsed = urllib.parse.urlparse(raw)
+    scheme = parsed.scheme or "http"
+    netloc = parsed.netloc or parsed.path
+    if not netloc:
+        return ""
+    return f"{scheme}://{netloc}".rstrip("/")
+
+
+def _resolve_edge_base_urls() -> list[str]:
+    primary = _resolve_edge_base_url()
+    host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 17800
+
+    candidates = [primary, f"http://{host}:{port}"]
+    allow_local_fallback = str(os.environ.get("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if allow_local_fallback and host not in {"127.0.0.1", "localhost"}:
+        candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in candidates:
+        url = _normalize_base_url(item)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append(url)
+    return result
 
 
 def _resolve_hmac_key() -> str | None:
@@ -255,7 +301,7 @@ async def _post_to_edge(
     payload: dict[str, Any],
     request_id: str | None = None,
 ) -> EdgeRpcCallResult:
-    """构建 HMAC 信封并异步 POST 到 Edge 端点。"""
+    """Build envelope and asynchronously POST to Edge endpoint."""
     import time
 
     try:
@@ -265,105 +311,108 @@ async def _post_to_edge(
             success=False,
             status="DEGRADED",
             reason_code="HTTPX_NOT_INSTALLED",
-            detail="httpx 未安装，无法调用 Edge RPC",
+            detail="httpx not installed",
             event={},
             latency_ms=0,
         )
 
     req_id = request_id or new_request_id()
-    base_url = _resolve_edge_base_url()
+    base_urls = _resolve_edge_base_urls()
     shared_key = _resolve_hmac_key()
     allow_insecure = _resolve_allow_insecure()
     timeout_ms = _resolve_timeout_ms()
     retries = _resolve_retries()
 
-    url = f"{base_url}{path}"
     t0 = int(time.time() * 1000)
     last_exc: Exception | None = None
-    clock_offset_ms = await _resolve_edge_clock_offset_ms(
-        base_url=base_url,
-        timeout_ms=timeout_ms,
-    )
-    forced_recalibrated = False
+    attempts: list[str] = []
 
-    for attempt in range(retries + 1):
-        envelope = _build_envelope(
-            request_id=req_id,
-            payload=payload,
-            shared_key=shared_key,
-            allow_insecure=allow_insecure,
-            ts_ms=int(now_ms()) + int(clock_offset_ms),
+    for base_url in base_urls:
+        url = f"{base_url}{path}"
+        clock_offset_ms = await _resolve_edge_clock_offset_ms(
+            base_url=base_url,
+            timeout_ms=timeout_ms,
         )
-        try:
-            async with httpx.AsyncClient(timeout=float(timeout_ms) / 1000.0) as client:
-                resp = await client.post(url, json=envelope)
-            latency_ms = max(0, int(time.time() * 1000) - t0)
+        forced_recalibrated = False
 
-            if resp.status_code == 200:
-                try:
-                    body = resp.json()
-                except Exception:
-                    body = {}
-                result = EdgeRpcCallResult(
-                    success=bool(body.get("success", True)),
-                    status=str(body.get("status") or "ACCEPTED"),
-                    reason_code=body.get("reason_code"),
-                    detail=str(body.get("detail") or "ok"),
-                    event=dict(body.get("event") or {}),
-                    latency_ms=latency_ms,
-                )
-                if (
-                    result.reason_code == "EDGE_RPC_AUTH_EXPIRED"
-                    and not forced_recalibrated
-                ):
-                    forced_recalibrated = True
-                    _invalidate_edge_clock_offset_cache(base_url=base_url)
-                    clock_offset_ms = await _resolve_edge_clock_offset_ms(
-                        base_url=base_url,
-                        timeout_ms=timeout_ms,
-                    )
-                    _logger.info(
-                        "Edge RPC %s auth expired; recalibrated edge clock offset to %dms and retrying once",
-                        path,
-                        clock_offset_ms,
-                    )
-                    continue
-                return result
-            else:
+        for attempt in range(retries + 1):
+            envelope = _build_envelope(
+                request_id=req_id,
+                payload=payload,
+                shared_key=shared_key,
+                allow_insecure=allow_insecure,
+                ts_ms=int(now_ms()) + int(clock_offset_ms),
+            )
+            try:
+                async with httpx.AsyncClient(timeout=float(timeout_ms) / 1000.0, trust_env=False) as client:
+                    resp = await client.post(url, json=envelope)
                 latency_ms = max(0, int(time.time() * 1000) - t0)
+
+                if resp.status_code == 200:
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        body = {}
+                    result = EdgeRpcCallResult(
+                        success=bool(body.get("success", True)),
+                        status=str(body.get("status") or "ACCEPTED"),
+                        reason_code=body.get("reason_code"),
+                        detail=str(body.get("detail") or "ok"),
+                        event=dict(body.get("event") or {}),
+                        latency_ms=latency_ms,
+                    )
+                    if result.reason_code == "EDGE_RPC_AUTH_EXPIRED" and not forced_recalibrated:
+                        forced_recalibrated = True
+                        _invalidate_edge_clock_offset_cache(base_url=base_url)
+                        clock_offset_ms = await _resolve_edge_clock_offset_ms(
+                            base_url=base_url,
+                            timeout_ms=timeout_ms,
+                        )
+                        _logger.info(
+                            "Edge RPC %s auth expired; recalibrated edge clock offset to %dms and retrying once",
+                            path,
+                            clock_offset_ms,
+                        )
+                        continue
+                    return result
+
                 _logger.warning(
-                    "Edge RPC %s 返回非 200 状态码: %d (attempt=%d)",
-                    path, resp.status_code, attempt,
+                    "Edge RPC %s returned non-200 status: %d (base=%s attempt=%d)",
+                    path,
+                    resp.status_code,
+                    base_url,
+                    attempt,
                 )
                 last_exc = RuntimeError(f"HTTP {resp.status_code}")
-        except Exception as exc:
-            latency_ms = max(0, int(time.time() * 1000) - t0)
-            last_exc = exc
-            if attempt < retries:
-                _logger.debug(
-                    "Edge RPC %s 第 %d 次调用失败，重试: %s",
-                    path, attempt + 1, exc,
-                )
+                attempts.append(f"{base_url}#{attempt}:HTTP{resp.status_code}")
+            except Exception as exc:
+                last_exc = exc
+                attempts.append(f"{base_url}#{attempt}:{exc.__class__.__name__}")
+                if attempt < retries:
+                    _logger.debug(
+                        "Edge RPC %s attempt failed and will retry (base=%s attempt=%d): %s",
+                        path,
+                        base_url,
+                        attempt + 1,
+                        exc,
+                    )
 
     latency_ms = max(0, int(time.time() * 1000) - t0)
     _logger.warning(
-        "Edge RPC %s 全部 %d 次尝试失败: %s",
-        path, retries + 1, last_exc,
+        "Edge RPC %s failed across endpoints after %d attempts: %s",
+        path,
+        len(attempts),
+        last_exc,
     )
+    attempted_detail = ", ".join(attempts[-8:]) if attempts else "no_endpoint_attempted"
     return EdgeRpcCallResult(
         success=False,
         status="DEGRADED",
         reason_code="EDGE_RPC_CALL_FAILED",
-        detail=str(last_exc or "unknown error"),
+        detail=f"{last_exc or 'unknown error'}; attempted={attempted_detail}",
         event={},
         latency_ms=latency_ms,
     )
-
-
-# ---------------------------------------------------------------------------
-# 公开 API
-# ---------------------------------------------------------------------------
-
 
 async def post_vts(
     *,
@@ -444,6 +493,40 @@ async def post_speak(
     _logger.debug(
         "post_speak text_len=%d → %s latency=%dms",
         len(normalized_text), result.status, result.latency_ms,
+    )
+    return result
+
+
+async def post_wechat_command(
+    *,
+    action: str,
+    target: str,
+    content: str | None = None,
+    request_id: str | None = None,
+    wait_result: bool = True,
+    timeout_ms: int = 10000,
+) -> EdgeRpcCallResult:
+    """Send WeChat command to edge command queue."""
+    payload: dict[str, Any] = {
+        "action": str(action or "").strip().lower(),
+        "target": str(target or "").strip(),
+        "wait_result": bool(wait_result),
+        "timeout_ms": int(timeout_ms),
+    }
+    if content is not None:
+        payload["content"] = str(content)
+    result = await _post_to_edge(
+        path="/v1/edge/wechat/command",
+        payload=payload,
+        request_id=request_id,
+    )
+    _logger.debug(
+        "post_wechat_command action=%s target=%s wait=%s -> %s latency=%dms",
+        payload["action"],
+        payload["target"],
+        payload["wait_result"],
+        result.status,
+        result.latency_ms,
     )
     return result
 

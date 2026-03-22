@@ -227,6 +227,28 @@ $stderrLog = Join-Path $LogDir "host.stderr.log"
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
 
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS") -and -not $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS) {
+  $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS") -and -not $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS) {
+  $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_AUTO_REPLY") -and -not $env:HOST_INPUT_WECHAT_AUTO_REPLY) {
+  $env:HOST_INPUT_WECHAT_AUTO_REPLY = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_REPLY_WAIT_RESULT") -and -not $env:HOST_INPUT_WECHAT_REPLY_WAIT_RESULT) {
+  $env:HOST_INPUT_WECHAT_REPLY_WAIT_RESULT = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_REPLY_TIMEOUT_MS") -and -not $env:HOST_INPUT_WECHAT_REPLY_TIMEOUT_MS) {
+  $env:HOST_INPUT_WECHAT_REPLY_TIMEOUT_MS = "12000"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_FALLBACK_ON_REJECT") -and -not $env:HOST_INPUT_WECHAT_FALLBACK_ON_REJECT) {
+  $env:HOST_INPUT_WECHAT_FALLBACK_ON_REJECT = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT") -and -not $env:HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT) {
+  $env:HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT = "System busy, please retry."
+}
+
 if (-not $BindHost) {
   if ($envValues.ContainsKey("HOST_APP_HOST")) {
     $BindHost = [string]$envValues["HOST_APP_HOST"]

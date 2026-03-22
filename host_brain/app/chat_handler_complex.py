@@ -85,6 +85,19 @@ from host_brain.retrieval.orchestrator import (
 _logger = logging.getLogger("Natsume.chat_handler")
 
 
+def _coerce_request_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def _log_prompt_context_observability(
     *,
     request_id: str,
@@ -282,6 +295,15 @@ async def _complex_scene_sse_generator(
             source="chat_pre_llm",
             ts_ms=int(time.time() * 1000),
         )
+        # EXEC_INTENT 场景需要把可用 skill 清单注入运行时输入，供路由与执行规划使用。
+        _skill_manifest_for_graph: list[dict] = []
+        if scene_type == SCENE_EXEC_INTENT:
+            try:
+                from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+                _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
+            except Exception as _sm_exc:
+                _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)
+
         runtime_input = build_chat_runtime_input(
             request_id=request_id,
             session_id=session_id,
@@ -414,14 +436,6 @@ async def _complex_scene_sse_generator(
         })
 
         graph_start_ms = int(time.time() * 1000)
-        # ── Skill Manifest 注入：EXEC_INTENT 场景下将可用 skill 列表注入 payload ──
-        _skill_manifest_for_graph: list[dict] = []
-        if scene_type == SCENE_EXEC_INTENT:
-            try:
-                from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
-                _skill_manifest_for_graph = get_skill_registry().build_skill_manifest(max_risk_level=3)
-            except Exception as _sm_exc:
-                _logger.warning("[%s] skill_manifest 构建失败（降级为空列表）: %s", request_id, _sm_exc)  # noqa: PERF401
         graph_payload = {**dict(llm_prompt_payload), "execution_profile": execution_profile}
         graph_result = await asyncio.to_thread(
             get_graph_runtime().run_graph,
@@ -725,15 +739,22 @@ async def _complex_scene_sse_generator(
         from host_brain.app.chat_stream_handler import _drive_stream_vts_emotion  # noqa: PLC0415
         _vts_started_ms = int(time.time() * 1000)
         vts_summary: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
-        try:
-            vts_summary = await _drive_stream_vts_emotion(
-                request_id=request_id,
-                emotion_context=emotion_context,
-                ts_ms=ts_ms,
-            )
-        except Exception as exc:
-            vts_summary = {"status": "DEGRADED", "reason_code": str(exc)}
-            _logger.debug("complex scene VTS drive skipped", extra={"request_id": request_id, "error": str(exc)})
+        suppress_edge_vts = _coerce_request_bool(
+            getattr(request_body, "suppress_edge_vts", None),
+            default=False,
+        )
+        if suppress_edge_vts:
+            vts_summary = {"status": "SKIPPED", "reason_code": "SUPPRESSED_BY_INPUT_POLICY"}
+        else:
+            try:
+                vts_summary = await _drive_stream_vts_emotion(
+                    request_id=request_id,
+                    emotion_context=emotion_context,
+                    ts_ms=ts_ms,
+                )
+            except Exception as exc:
+                vts_summary = {"status": "DEGRADED", "reason_code": str(exc)}
+                _logger.debug("complex scene VTS drive skipped", extra={"request_id": request_id, "error": str(exc)})
         vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
 
         background_tasks_latency_ms = {
@@ -780,7 +801,11 @@ async def _complex_scene_sse_generator(
     except Exception as exc:
         import traceback as _tb
         _tb_str = _tb.format_exc()
-        metrics.inc_error()
+        if metrics is not None:
+            try:
+                metrics.inc_error()
+            except Exception:
+                pass
         _logger.error(
             "complex scene SSE generator failed",
             extra={"request_id": request_id, "error": str(exc), "traceback": _tb_str},

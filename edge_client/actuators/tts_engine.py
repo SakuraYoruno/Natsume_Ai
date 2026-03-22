@@ -36,6 +36,7 @@ DEFAULT_DEVICE = "cuda"
 DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
+_TORCHAUDIO_LOAD_PATCHED = False
 
 
 class TtsState(str, Enum):
@@ -313,6 +314,14 @@ class SoVITSModelManager:
     @property
     def actual_device(self) -> str:
         return self._actual_device
+
+    def startup(self) -> None:
+        result = self.load()
+        if not result.success:
+            logger.warning("GPT-SoVITS startup degraded: %s", result.detail)
+
+    def shutdown(self) -> None:
+        self.unload()
 
     def load(self) -> TtsSynthResult:
         """Load the GPT-SoVITS model. Thread-safe, idempotent."""
@@ -769,6 +778,7 @@ def _load_modern_sovits_model(
 
     _ensure_modern_sdk_paths(model_root)
     _ensure_jieba_fast_alias()
+    _patch_torchaudio_load_fallback()
     _configure_modern_sv_path(model_root)
 
     try:
@@ -943,6 +953,67 @@ def _ensure_jieba_fast_alias() -> None:
     except ImportError:
         return
     sys.modules["jieba_fast"] = jieba_fallback
+
+
+def _patch_torchaudio_load_fallback() -> None:
+    """Patch torchaudio.load to fallback to soundfile on torchcodec runtime failures."""
+    global _TORCHAUDIO_LOAD_PATCHED
+    if _TORCHAUDIO_LOAD_PATCHED:
+        return
+
+    try:
+        import torchaudio
+    except ImportError:
+        return
+
+    original_load = getattr(torchaudio, "load", None)
+    if original_load is None:
+        return
+
+    doc = str(getattr(original_load, "__doc__", "") or "").lower()
+    # Torchaudio >= 2.9 routes decoding through torchcodec.
+    if "torchcodec" not in doc:
+        _TORCHAUDIO_LOAD_PATCHED = True
+        return
+
+    try:
+        import numpy as np
+        import soundfile as sf
+        import torch
+    except ImportError:
+        # Keep original behavior if fallback dependencies are unavailable.
+        return
+
+    def _load_with_soundfile_fallback(
+        uri: Any,
+        frame_offset: int = 0,
+        num_frames: int = -1,
+        normalize: bool = True,  # noqa: ARG001 - compatibility with torchaudio.load
+        channels_first: bool = True,
+        format: str | None = None,  # noqa: ARG001
+        buffer_size: int = 4096,  # noqa: ARG001
+        backend: str | None = None,  # noqa: ARG001
+    ) -> tuple[Any, int]:
+        if hasattr(uri, "read"):
+            waveform, sample_rate = sf.read(uri, dtype="float32", always_2d=True)
+        else:
+            waveform, sample_rate = sf.read(str(uri), dtype="float32", always_2d=True)
+
+        start = max(int(frame_offset), 0)
+        if start:
+            waveform = waveform[start:]
+        if int(num_frames) >= 0:
+            waveform = waveform[: int(num_frames)]
+
+        if channels_first:
+            waveform = waveform.T
+
+        tensor = torch.from_numpy(np.asarray(waveform, dtype=np.float32))
+        logger.debug("torchaudio.load replaced with soundfile decoder for uri=%s", uri)
+        return tensor, int(sample_rate)
+
+    setattr(torchaudio, "load", _load_with_soundfile_fallback)
+    _TORCHAUDIO_LOAD_PATCHED = True
 
 
 def _configure_modern_sv_path(model_root: str) -> None:
@@ -1214,12 +1285,18 @@ def _synthesize_audio(
             speed_factor=speed_factor,
             energy_factor=energy_factor,
         )
-    except TypeError as exc:
-        message = str(exc)
-        if "unexpected keyword argument" not in message:
+    except Exception as exc:
+        message = str(exc or "")
+        lowered = message.lower()
+        can_retry_without_prosody = (
+            ("unexpected keyword argument" in lowered)
+            or ("invalid argument" in lowered)
+            or ("errno 22" in lowered)
+        )
+        if not can_retry_without_prosody:
             raise
-        logger.debug(
-            "TTS adapter does not support speed/energy factors; fallback to basic synthesize: %s",
+        logger.warning(
+            "TTS synth with speed/energy failed, retrying without prosody controls: %s",
             message,
         )
         result = model.synthesize(

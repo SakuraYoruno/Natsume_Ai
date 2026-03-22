@@ -2109,6 +2109,8 @@ class SceneRouter:
         )
 
         normalized_scene = str(scene_type or "").strip().upper()
+        _suppress_edge_tts = _parse_bool(getattr(request_body, "suppress_edge_tts", None), default=False)
+        _suppress_edge_vts = _parse_bool(getattr(request_body, "suppress_edge_vts", None), default=False)
 
         # ── 1. 检查自定义注册表 ────────────────────────────────────────────
         custom_generator = cls._sse_generators.get(normalized_scene)
@@ -2204,6 +2206,8 @@ class SceneRouter:
                 intent_draft=intent_draft,
                 _pre_approved_governor_result=governor_result,
                 _pre_recall_evidence=_pre_recall_evidence,
+                suppress_edge_tts=bool(_suppress_edge_tts),
+                suppress_edge_vts=bool(_suppress_edge_vts),
             ):
                 yield event
             return
@@ -2699,16 +2703,88 @@ async def run_main_chain_from_input(
         source, session_id, request_id, text,
     )
 
+    import os as _os  # noqa: PLC0415
+
+    source_upper = str(source or "").strip().upper()
+
+    def _parse_bool_env(name: str, default: bool) -> bool:
+        raw = str(_os.environ.get(name) or "").strip().lower()
+        if not raw:
+            return bool(default)
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
+
+    def _parse_int_env(name: str, *, default: int, min_value: int, max_value: int) -> int:
+        raw = str(_os.environ.get(name) or "").strip()
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = int(default)
+        return max(min_value, min(max_value, value))
+
+    def _parse_sse_payload(raw_event: Any) -> dict[str, Any] | None:
+        if not isinstance(raw_event, str):
+            return None
+        text_event = raw_event.strip()
+        if not text_event.startswith("data:"):
+            return None
+        payload_raw = text_event[len("data:"):].strip()
+        if not payload_raw:
+            return None
+        try:
+            parsed = json.loads(payload_raw)
+        except Exception:
+            return None
+        return dict(parsed) if isinstance(parsed, dict) else None
+
     # 构建 ChatRequest（从 Edge 输入上报转换）
     emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
     mood_state = str(payload.get("mood_state") or "steady").strip().lower() or "steady"
+    thread_id_value = str(
+        payload.get("session_id")
+        or payload.get("room_wxid")
+        or session_id
+    ).strip() or session_id
+
+    suppress_edge_tts = False
+    suppress_edge_vts = False
+    auto_reply_wechat = False
+    reply_channel: str | None = None
+    reply_target: str | None = None
+
+    if source_upper == "WECHAT":
+        suppress_edge_tts = _parse_bool_env("HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS", True)
+        suppress_edge_vts = _parse_bool_env("HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS", True)
+        auto_reply_wechat = _parse_bool_env("HOST_INPUT_WECHAT_AUTO_REPLY", True)
+        room_wxid = str(payload.get("room_wxid") or "").strip()
+        from_wxid = str(payload.get("from_wxid") or "").strip()
+        reply_target = room_wxid or from_wxid or None
+        if auto_reply_wechat and reply_target:
+            reply_channel = "WECHAT"
+        logger.info(
+            "run_main_chain_from_input: wechat policy source=%s suppress_tts=%s suppress_vts=%s auto_reply=%s target=%s",
+            source_upper,
+            suppress_edge_tts,
+            suppress_edge_vts,
+            auto_reply_wechat,
+            (reply_target or ""),
+        )
+
     try:
         request_body = ChatRequest(
             message=text,
             session_id=session_id,
-            thread_id=str(payload.get("session_id") or session_id),
+            thread_id=thread_id_value,
             emotion_tag=emotion_tag,
             mood_state=mood_state,
+            input_source=source_upper,
+            suppress_edge_tts=(suppress_edge_tts if source_upper == "WECHAT" else None),
+            suppress_edge_vts=(suppress_edge_vts if source_upper == "WECHAT" else None),
+            reply_channel=reply_channel,
+            reply_target=reply_target,
         )
     except Exception as exc:
         logger.error(
@@ -2751,6 +2827,10 @@ async def run_main_chain_from_input(
     chain = get_main_chain()
 
     # 消费 SSE 事件（fire-and-forget，不推送给客户端）
+    reply_narrative = ""
+    commit_decision = ""
+    commit_reason_code = ""
+    commit_detail = ""
     try:
         async for _event in chain.run_as_sse_adapter(
             request_body=request_body,
@@ -2761,9 +2841,100 @@ async def run_main_chain_from_input(
             metrics=metrics,
             _pre_classified_scene=pre_scene,
         ):
-            pass  # 消费事件，不推送（无 SSE 客户端）
+            event_payload = _parse_sse_payload(_event)
+            if not event_payload:
+                continue
+            if str(event_payload.get("phase") or "").strip().upper() != "COMMIT":
+                continue
+            if not bool(event_payload.get("done")):
+                continue
+            commit_decision = str(event_payload.get("decision") or "").strip().upper()
+            commit_reason_code = str(event_payload.get("reason_code") or "").strip().upper()
+            commit_detail = str(event_payload.get("detail") or "").strip()
+            candidate_narrative = str(event_payload.get("narrative") or "").strip()
+            if candidate_narrative:
+                reply_narrative = candidate_narrative
     except Exception as exc:
         logger.error(
             "run_main_chain_from_input: 处理异常 request_id=%s: %s",
             request_id, exc,
+        )
+        return
+
+    if source_upper != "WECHAT" or not auto_reply_wechat:
+        return
+    if not reply_target:
+        logger.warning(
+            "run_main_chain_from_input: wechat auto reply skipped (missing target) request_id=%s",
+            request_id,
+        )
+        return
+    fallback_on_reject = _parse_bool_env("HOST_INPUT_WECHAT_FALLBACK_ON_REJECT", True)
+    fallback_text_default = "刚刚处理超时了，请再发一次，我这边立即重试。"
+    fallback_text = str(
+        _os.environ.get("HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT") or fallback_text_default
+    ).strip() or fallback_text_default
+    if commit_decision != "APPROVE":
+        if not fallback_on_reject:
+            logger.info(
+                "run_main_chain_from_input: wechat auto reply skipped (decision=%s fallback_disabled) request_id=%s",
+                (commit_decision or "UNKNOWN"),
+                request_id,
+            )
+            return
+        if not reply_narrative:
+            reply_narrative = fallback_text
+        logger.warning(
+            "run_main_chain_from_input: wechat auto reply fallback enabled request_id=%s decision=%s reason=%s detail=%s",
+            request_id,
+            (commit_decision or "UNKNOWN"),
+            (commit_reason_code or ""),
+            commit_detail,
+        )
+    if not reply_narrative:
+        logger.info(
+            "run_main_chain_from_input: wechat auto reply skipped (empty narrative) request_id=%s",
+            request_id,
+        )
+        return
+
+    try:
+        from host_brain.channels.edge_rpc_client import post_wechat_command  # noqa: PLC0415
+
+        wait_result = _parse_bool_env("HOST_INPUT_WECHAT_REPLY_WAIT_RESULT", True)
+        timeout_ms = _parse_int_env(
+            "HOST_INPUT_WECHAT_REPLY_TIMEOUT_MS",
+            default=12000,
+            min_value=300,
+            max_value=120000,
+        )
+        send_result = await post_wechat_command(
+            action="send_text",
+            target=reply_target,
+            content=reply_narrative,
+            request_id=request_id,
+            wait_result=wait_result,
+            timeout_ms=timeout_ms,
+        )
+        if send_result.success:
+            logger.info(
+                "run_main_chain_from_input: wechat auto reply sent request_id=%s target=%s status=%s",
+                request_id,
+                reply_target,
+                send_result.status,
+            )
+        else:
+            logger.warning(
+                "run_main_chain_from_input: wechat auto reply failed request_id=%s target=%s reason=%s detail=%s",
+                request_id,
+                reply_target,
+                (send_result.reason_code or ""),
+                send_result.detail,
+            )
+    except Exception as exc:
+        logger.error(
+            "run_main_chain_from_input: wechat auto reply exception request_id=%s target=%s error=%s",
+            request_id,
+            (reply_target or ""),
+            exc,
         )

@@ -10,8 +10,8 @@ from typing import Any, Callable, Mapping
 
 from fastapi import HTTPException, status
 
-from edge_client.rpc.health import build_edge_transport_probe_statuses
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
+from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import (
     build_env_readiness_report,
     build_request_observability_report,
@@ -132,11 +132,7 @@ def health_check_response(
         if host_result.success and host_result.config is not None:
             runtime_statuses = build_host_runtime_statuses(host_result.config)
         try:
-            edge_available = runtime_statuses.get("edge.rpc.gateway", {}).get("available", True)
-            edge_probes = build_edge_transport_probe_statuses(available=bool(edge_available))
-            for svc_id, probe in edge_probes.items():
-                if svc_id not in runtime_statuses:
-                    runtime_statuses[svc_id] = probe
+            runtime_statuses.update(collect_dependency_probes_sync())
         except Exception as edge_exc:
             logger.warning("Edge transport probe failed (degraded): %s", edge_exc)
         health_report = build_service_health_report(
@@ -168,10 +164,12 @@ def environment_readiness_response(
     ts_ms = int(time.time() * 1000)
     try:
         node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
+        dependency_probes = collect_dependency_probes_sync()
         readiness_report = build_env_readiness_report(
             env=str(os.environ.get("Natsume_ENV") or "dev"),
             node_inventory=node_inventory,
             expected_node_count=expected_node_count,
+            dependency_probes=dependency_probes,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,
@@ -319,9 +317,10 @@ def startup_report_payload(
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     try:
+        dependency_probes = collect_dependency_probes_sync()
         report = build_startup_report(
             runtime_statuses={},
-            dependency_probes={},
+            dependency_probes=dependency_probes,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,

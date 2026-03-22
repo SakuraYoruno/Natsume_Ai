@@ -148,7 +148,10 @@ async def runtime_lifespan(
 
         # [P1] Edge RPC 健康探测：启动时检查 Edge 是否可达
         try:
-            from host_brain.app.dependencies import probe_edge_rpc_health  # noqa: PLC0415
+            from host_brain.app.dependencies import (  # noqa: PLC0415
+                build_edge_dependency_probe_statuses,
+                probe_edge_rpc_health,
+            )
             _edge_health = await probe_edge_rpc_health()
             _edge_available = bool(_edge_health.get("available", False))
             new_module_statuses["edge_rpc"] = (
@@ -691,9 +694,10 @@ async def runtime_lifespan(
             new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
             logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
 
+        dependency_probes = await probe_edge_rpc_health()
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
-            dependency_probes={},
+            dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
             request_id=new_request_id(),
             ledger=ledger,
             ts_ms=int(time.time() * 1000),

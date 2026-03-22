@@ -45,6 +45,7 @@ DEFAULT_RERANK_TOP_K = 5
 DEFAULT_RERANK_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
 _COLD_START_RETRYABLE_RERANK_PROVIDERS = frozenset({"cross_encoder", "qwen3_reranker"})
+_UNAVAILABLE_FALLBACK_RERANK_PROVIDERS = frozenset({"cross_encoder", "qwen3_reranker"})
 
 RerankProvider = Callable[..., tuple[list[float], str]]
 logger = logging.getLogger("Natsume.retrieval.reranker")
@@ -195,6 +196,11 @@ class RerankerServiceContract:
                 ts_ms=now_value,
             )
         warm_retry_used = False
+        fallback_used = False
+        fallback_reason_code: str | None = None
+        fallback_detail: str | None = None
+        effective_provider = route.provider
+        configured_model_id = str(route.model_id)
         attempt = 1
         while True:
             start = perf_counter()
@@ -238,6 +244,22 @@ class RerankerServiceContract:
                 )
             except Exception as exc:
                 latency_ms = int(round((perf_counter() - start) * 1000))
+                if _should_fallback_reranker_unavailable(route.provider):
+                    scores, model_id = _build_unavailable_fallback_reranker(
+                        normalized_query,
+                        normalized_candidates,
+                    )
+                    fallback_used = True
+                    fallback_reason_code = RETR_RERANK_UNAVAILABLE
+                    fallback_detail = f"reranker provider unavailable: {exc}"
+                    effective_provider = DEFAULT_RERANK_PROVIDER
+                    logger.warning(
+                        "Using heuristic reranker fallback after provider error (%s/%s): %s",
+                        route.provider,
+                        route.model_id,
+                        exc,
+                    )
+                    break
                 fallback_scores = _build_fallback_scores(normalized_candidates)
                 fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
                 return self._degrade(
@@ -324,6 +346,8 @@ class RerankerServiceContract:
             "scores": normalized_scores,
             "rerank_model_id": str(model_id or route.model_id),
             "provider": route.provider,
+            "effective_provider": effective_provider,
+            "configured_model_id": configured_model_id,
             "route_id": route.route_id,
             "node_id": self.node_id,
             "node_selector": route.node_selector,
@@ -334,24 +358,31 @@ class RerankerServiceContract:
             "reason_code": None,
             "degraded": False,
             "warm_retry_used": warm_retry_used,
+            "fallback_used": fallback_used,
+            "fallback_reason_code": fallback_reason_code,
+            "fallback_detail": fallback_detail,
             "topk": topk,
         }
+        success_detail = "rerank completed via heuristic fallback" if fallback_used else "rerank completed"
         self._log_event(
             request_id=request_id,
             intent_id=intent_id,
             status=STATUS_OK,
             reason_code=None,
-            detail="rerank completed",
+            detail=success_detail,
             payload={
                 "query_length": len(normalized_query),
                 "candidate_count": len(normalized_candidates),
                 "topk_count": len(topk),
                 "expected_top_k": topk_value,
                 "provider": route.provider,
+                "effective_provider": effective_provider,
                 "route_id": route.route_id,
                 "node_selector": route.node_selector,
                 "latency_ms": latency_ms,
                 "output_status": STATUS_OK,
+                "fallback_used": fallback_used,
+                "fallback_reason_code": fallback_reason_code,
             },
             ts_ms=now_value,
         )
@@ -360,7 +391,7 @@ class RerankerServiceContract:
             status=STATUS_OK,
             reason_code=None,
             stage=S_RET_RERANK,
-            detail="rerank completed",
+            detail=success_detail,
             output=output,
         )
 
@@ -921,6 +952,17 @@ def _provider_accepts_route(provider: RerankProvider) -> bool:
 
 def _should_retry_reranker_cold_start(provider_name: str, attempt: int) -> bool:
     return int(attempt) < 2 and str(provider_name or "").strip().lower() in _COLD_START_RETRYABLE_RERANK_PROVIDERS
+
+
+def _should_fallback_reranker_unavailable(provider_name: str) -> bool:
+    return str(provider_name or "").strip().lower() in _UNAVAILABLE_FALLBACK_RERANK_PROVIDERS
+
+
+def _build_unavailable_fallback_reranker(
+    query: str,
+    candidates: list[dict[str, Any]],
+) -> tuple[list[float], str]:
+    return _default_rerank_provider(query, candidates)
 
 
 def _build_cross_encoder_provider(*, device: str) -> RerankProvider:

@@ -84,16 +84,8 @@ def receive_wechat_event(
                 "ts_ms": now_value,
             }
         )
-        return WeChatIngressResult(
-            accepted=False,
-            duplicate=False,
-            request_id=req_id,
-            thread_key="",
-            message_id="",
-            status=STATUS_FAILED,
-            reason_code=CHANNEL_PAYLOAD_INVALID,
-            payload={},
-        )
+        # M24 契约：入站关键字段缺失应显式抛出，便于上层快速拦截。
+        raise ValueError(str(exc)) from exc
     duplicate = ledger.has_channel_message(
         channel=CHANNEL_WECHAT,
         direction=DIRECTION_INGRESS,

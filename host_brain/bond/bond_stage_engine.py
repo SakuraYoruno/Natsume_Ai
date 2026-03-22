@@ -458,15 +458,10 @@ class BondStageEngine:
                     row = conn.execute(
                         "SELECT payload, ts_ms FROM bond_stage_transition_log "
                         "WHERE transition_status IN ('PROMOTED','DEMOTED','STABLE') "
-                        "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                        "AND user_id=? "
                         "ORDER BY ts_ms DESC LIMIT 1",
                         (user_id,),
                     ).fetchone()
-                    if row is None:
-                        row = conn.execute(
-                            "SELECT payload, ts_ms FROM bond_stage_transition_log "
-                            "ORDER BY ts_ms DESC LIMIT 1",
-                        ).fetchone()
                 except Exception:
                     pass  # 表不存在时降级到 bond_update_log
                 # 再尝试 bond_update_log（log_bond_update 路径）
@@ -474,16 +469,9 @@ class BondStageEngine:
                     row = conn.execute(
                         "SELECT payload, ts_ms FROM bond_update_log "
                         "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
-                        "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                        "AND user_id=? "
                         "ORDER BY ts_ms DESC LIMIT 1",
                         (user_id,),
-                    ).fetchone()
-                # 如果 user_id 过滤无结果，放宽到全局最新（单用户场景）
-                if row is None:
-                    row = conn.execute(
-                        "SELECT payload, ts_ms FROM bond_update_log "
-                        "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
-                        "ORDER BY ts_ms DESC LIMIT 1",
                     ).fetchone()
 
                 import json as _json
@@ -502,7 +490,7 @@ class BondStageEngine:
                                 "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
                                 "AND status IN ('OK','SUCCESS') "
                                 "AND ts_ms > ? "
-                                "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                                "AND user_id=? "
                                 "GROUP BY update_kind",
                                 (saved_ts, user_id),
                             ).fetchall()
@@ -518,7 +506,7 @@ class BondStageEngine:
                                 "SELECT COUNT(*), MAX(ts_ms) FROM bond_update_log "
                                 "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
                                 "AND status IN ('OK','SUCCESS') "
-                                "AND (user_id=? OR user_id IS NULL OR user_id='')",
+                                "AND user_id=?",
                                 (user_id,),
                             ).fetchone()
                             event_count = int(event_count_row[0] or 0) if event_count_row else delta_count
@@ -545,7 +533,7 @@ class BondStageEngine:
                     "SELECT update_kind, COUNT(*), MAX(ts_ms) FROM bond_update_log "
                     "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION','IDLE_DECAY') "
                     "AND status IN ('OK','SUCCESS') "
-                    "AND (user_id=? OR user_id IS NULL OR user_id='') "
+                    "AND user_id=? "
                     "GROUP BY update_kind",
                     (user_id,),
                 ).fetchall()

@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, status
 
-from host_brain.app.dependencies import get_ledger, get_obs_metrics_collector
+from host_brain.app.dependencies import collect_dependency_probes, get_ledger, get_obs_metrics_collector
 from host_brain.app.main import (
     build_env_readiness_report,
     build_request_observability_report,
@@ -39,7 +39,6 @@ from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
 from host_brain.observability.routes import build_obs_metrics_response
 from edge_client.rpc.health import build_edge_transport_probe_statuses
-
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()
@@ -102,13 +101,23 @@ async def health_check() -> HealthResponse:
         if _host_result.success and _host_result.config is not None:
             _runtime_statuses = build_host_runtime_statuses(_host_result.config)
         try:
-            _edge_available = _runtime_statuses.get("edge.rpc.gateway", {}).get("available", True)
-            _edge_probes = build_edge_transport_probe_statuses(available=bool(_edge_available))
-            for _svc_id, _probe in _edge_probes.items():
-                if _svc_id not in _runtime_statuses:
-                    _runtime_statuses[_svc_id] = _probe
+            _dep_probes = await collect_dependency_probes()
+            _runtime_statuses.update(_dep_probes)
+            _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
+            _runtime_statuses.update(
+                build_edge_transport_probe_statuses(
+                    available=bool(_edge_gateway.get("available", False)),
+                    detail=str(_edge_gateway.get("detail") or "").strip() or None,
+                )
+            )
         except Exception as _edge_exc:
             _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
+            _runtime_statuses.update(
+                build_edge_transport_probe_statuses(
+                    available=False,
+                    detail=str(_edge_exc),
+                )
+            )
         health_report = build_service_health_report(
             runtime_statuses=_runtime_statuses,
             request_id=request_id,
@@ -138,10 +147,12 @@ async def environment_readiness() -> ReadinessResponse:
 
     try:
         node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
+        dependency_probes = await collect_dependency_probes()
         readiness_report = build_env_readiness_report(
             env=str(os.environ.get("Natsume_ENV") or "dev"),
             node_inventory=node_inventory,
             expected_node_count=expected_node_count,
+            dependency_probes=dependency_probes,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,
@@ -291,9 +302,10 @@ async def startup_report() -> Dict[str, Any]:
     ts_ms = int(time.time() * 1000)
 
     try:
+        dependency_probes = await collect_dependency_probes()
         report = build_startup_report(
             runtime_statuses={},
-            dependency_probes={},
+            dependency_probes=dependency_probes,
             request_id=request_id,
             ledger=get_ledger(),
             ts_ms=ts_ms,

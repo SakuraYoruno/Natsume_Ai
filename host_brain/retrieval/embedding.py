@@ -114,6 +114,7 @@ DEFAULT_EMBED_TIMEOUT_MS = 500
 DEFAULT_NODE_SELECTOR = "default"
 _COLD_START_RETRYABLE_EMBED_PROVIDERS = frozenset({"sentence_transformers"})
 _TIMEOUT_FALLBACK_EMBED_PROVIDERS = frozenset({"sentence_transformers"})
+_UNAVAILABLE_FALLBACK_EMBED_PROVIDERS = frozenset({"sentence_transformers"})
 
 EmbeddingProvider = Callable[..., tuple[list[float], str]]
 logger = logging.getLogger("Natsume.retrieval.embedding")
@@ -279,6 +280,19 @@ class EmbeddingServiceContract:
                 )
             except Exception as exc:
                 latency_ms = int(round((perf_counter() - start) * 1000))
+                if _should_fallback_embedding_unavailable(route.provider):
+                    vector, model_id = _build_timeout_fallback_embedding(normalized, route)
+                    fallback_used = True
+                    fallback_reason_code = RETR_EMBED_UNAVAILABLE
+                    fallback_detail = f"embedding provider unavailable: {exc}"
+                    effective_provider = DEFAULT_EMBED_PROVIDER
+                    logger.warning(
+                        "Using builtin embedding fallback after provider error (%s/%s): %s",
+                        route.provider,
+                        route.model_id,
+                        exc,
+                    )
+                    break
                 return self._degrade(
                     request_id=request_id,
                     intent_id=intent_id,
@@ -874,6 +888,10 @@ def _should_retry_embedding_cold_start(provider_name: str, attempt: int) -> bool
 
 def _should_fallback_embedding_timeout(provider_name: str) -> bool:
     return str(provider_name or "").strip().lower() in _TIMEOUT_FALLBACK_EMBED_PROVIDERS
+
+
+def _should_fallback_embedding_unavailable(provider_name: str) -> bool:
+    return str(provider_name or "").strip().lower() in _UNAVAILABLE_FALLBACK_EMBED_PROVIDERS
 
 
 def _build_timeout_fallback_embedding(

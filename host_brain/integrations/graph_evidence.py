@@ -181,11 +181,35 @@ class EvidencePlane:
         """
         if self._memory_conn is not None:
             return self._memory_conn
-        # 线程本地缓存：避免每次写入都创建新连接（文件描述符泄漏）
+        # 线程本地缓存：连接必须与当前 db_path 一一对应，避免跨实例串库。
+        db_path_str = str(self._db_path)
         conn = getattr(_thread_local, "evidence_conn", None)
-        if conn is None:
-            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-            _thread_local.evidence_conn = conn
+        conn_path = getattr(_thread_local, "evidence_conn_path", None)
+
+        if conn is not None and str(conn_path or "") == db_path_str:
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _thread_local.evidence_conn = None
+                _thread_local.evidence_conn_path = None
+                conn = None
+
+        if conn is not None and str(conn_path or "") != db_path_str:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _thread_local.evidence_conn = None
+            _thread_local.evidence_conn_path = None
+
+        conn = sqlite3.connect(db_path_str, check_same_thread=False)
+        _thread_local.evidence_conn = conn
+        _thread_local.evidence_conn_path = db_path_str
         return conn
 
     def write_trace(

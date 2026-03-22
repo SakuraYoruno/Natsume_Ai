@@ -392,10 +392,11 @@ def barrier_join(
             reason=f"strict 模式：{len(failed_branches)} 个分支缺 audit_commit，fail closed",
         )
     else:
-        # partial 模式：允许部分失败，passed=True 但记录 join_policy_ref 供审计
+        # partial 模式：允许继续流程，但 barrier_join 结果仍判定为未完全通过。
+        # 上层可基于 join_policy_ref 审计“带缺口放行”的决策。
         join_policy_ref = f"partial::{int(time.time() * 1000)}::failed={','.join(failed_branches)}"
         return BarrierJoinResult(
-            passed=True,
+            passed=False,
             failed_branches=failed_branches,
             join_policy_ref=join_policy_ref,
             reason=f"partial 模式：{len(failed_branches)} 个分支缺 audit_commit，已记录 join_policy_ref",

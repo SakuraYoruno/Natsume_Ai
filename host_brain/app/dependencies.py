@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.async_queue import BondUpdateQueue
@@ -73,6 +74,13 @@ from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 
 _logger = logging.getLogger("Natsume.dependencies")
+_EDGE_RPC_DEPENDENCY_SERVICE_IDS = (
+    "edge.rpc.gateway",
+    "edge.rpc.asr",
+    "edge.rpc.tts",
+    "edge.rpc.barge_in",
+    "edge.rpc.resource_gate",
+)
 
 # 全局单例
 _ledger: Optional[SQLiteLedger] = None
@@ -859,9 +867,14 @@ def get_edge_base_url() -> str:
     """返回 Edge RPC 服务的 base URL（由环境变量决定）。
 
     环境变量：
+      HOST_EDGE_RPC_BASE_URL  Host 侧显式 Edge RPC 地址（优先）
       EDGE_RPC_HOST  Edge 监听地址（默认 127.0.0.1）
       EDGE_RPC_PORT  Edge 监听端口（默认 17800）
     """
+    override = str(os.environ.get("HOST_EDGE_RPC_BASE_URL") or "").strip()
+    if override:
+        return _normalize_base_url(override)
+
     host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip()
     port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
     try:
@@ -869,6 +882,51 @@ def get_edge_base_url() -> str:
     except ValueError:
         port = 17800
     return f"http://{host}:{port}"
+
+
+def _normalize_base_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    return raw.rstrip("/")
+
+
+def get_edge_base_urls() -> list[str]:
+    primary = get_edge_base_url()
+    host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 17800
+
+    candidates = [primary, f"http://{host}:{port}"]
+    allow_local_fallback = str(os.environ.get("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if allow_local_fallback and host not in {"127.0.0.1", "localhost"}:
+        candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
+
+    seen: set[str] = set()
+    urls: list[str] = []
+    for item in candidates:
+        url = _normalize_base_url(item)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+def _resolve_edge_probe_timeout_s() -> float:
+    raw = str(os.environ.get("HOST_EDGE_RPC_TIMEOUT_MS") or "3000").strip()
+    try:
+        timeout_ms = int(raw)
+    except ValueError:
+        timeout_ms = 3000
+    return max(1.0, min(float(timeout_ms) / 1000.0, 10.0))
 
 
 async def probe_edge_rpc_health() -> dict:
@@ -880,26 +938,36 @@ async def probe_edge_rpc_health() -> dict:
     import time
 
     t0 = int(time.time() * 1000)
-    base_url = get_edge_base_url()
+    base_urls = get_edge_base_urls()
+    base_url = base_urls[0] if base_urls else get_edge_base_url()
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{base_url}/v1/edge/health")
-        latency_ms = max(0, int(time.time() * 1000) - t0)
-        if resp.status_code == 200:
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            return {
-                "available": True,
-                "status": str(body.get("status") or "OK"),
-                "detail": "edge rpc reachable",
-                "latency_ms": latency_ms,
-                "base_url": base_url,
-            }
+        last_error_detail = "edge rpc unreachable"
+        attempts: list[str] = []
+        for candidate in base_urls:
+            try:
+                async with httpx.AsyncClient(timeout=_resolve_edge_probe_timeout_s(), trust_env=False) as client:
+                    resp = await client.get(f"{candidate}/v1/edge/health")
+                latency_ms = max(0, int(time.time() * 1000) - t0)
+                if resp.status_code == 200:
+                    body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                    return {
+                        "available": True,
+                        "status": str(body.get("status") or "OK"),
+                        "detail": "edge rpc reachable",
+                        "latency_ms": latency_ms,
+                        "base_url": candidate,
+                    }
+                last_error_detail = f"edge health returned HTTP {resp.status_code}"
+                attempts.append(f"{candidate}:HTTP{resp.status_code}")
+            except Exception as candidate_exc:
+                last_error_detail = f"edge rpc unreachable: {candidate_exc.__class__.__name__}"
+                attempts.append(f"{candidate}:{candidate_exc.__class__.__name__}")
         return {
             "available": False,
             "status": "DEGRADED",
-            "detail": f"edge health returned HTTP {resp.status_code}",
-            "latency_ms": latency_ms,
+            "detail": f"{last_error_detail}; attempted={', '.join(attempts[-6:])}",
+            "latency_ms": max(0, int(time.time() * 1000) - t0),
             "base_url": base_url,
         }
     except ImportError:
@@ -912,10 +980,64 @@ async def probe_edge_rpc_health() -> dict:
         }
     except Exception as exc:
         latency_ms = max(0, int(time.time() * 1000) - t0)
+        error_text = str(exc).strip()
+        error_name = exc.__class__.__name__
+        detail = f"edge rpc unreachable: {error_name}"
+        if error_text:
+            detail = f"{detail}: {error_text}"
         return {
             "available": False,
             "status": "DEGRADED",
-            "detail": f"edge rpc unreachable: {exc}",
+            "detail": detail,
             "latency_ms": latency_ms,
             "base_url": base_url,
         }
+
+
+def build_edge_dependency_probe_statuses(
+    probe: Mapping[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(probe, Mapping):
+        return {}
+
+    available = bool(probe.get("available", False))
+    detail = str(probe.get("detail") or "").strip()
+    latency_raw = probe.get("latency_ms")
+    try:
+        latency_ms = max(0, int(latency_raw))
+    except (TypeError, ValueError):
+        latency_ms = 0
+
+    if not detail:
+        detail = "edge rpc reachable" if available else "edge rpc unreachable"
+    if available and latency_ms > 0:
+        detail = f"{detail} ({latency_ms}ms)"
+
+    status = (
+        {
+            "available": True,
+            "detail": detail,
+        }
+        if available
+        else {
+            "available": False,
+            "unavailable_kind": "edge_rpc",
+            "detail": detail,
+        }
+    )
+    return {
+        service_id: dict(status)
+        for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS
+    }
+
+
+async def collect_dependency_probes() -> dict[str, dict[str, Any]]:
+    return build_edge_dependency_probe_statuses(await probe_edge_rpc_health())
+
+
+def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(collect_dependency_probes())
+    return {}

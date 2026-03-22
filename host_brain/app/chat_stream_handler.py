@@ -986,10 +986,20 @@ async def _wrap_vts_with_latency(
     request_id: str,
     emotion_context: Dict[str, Any] | None,
     ts_ms: int,
+    suppress_edge_vts: bool = False,
 ) -> tuple[Dict[str, Any], int]:
     """包装 _drive_stream_vts_emotion，返回 (result_dict, latency_ms) 元组，
     以便与 asyncio.gather 中其他返回 tuple 的协程统一解包。"""
     _t0 = int(time.time() * 1000)
+    if bool(suppress_edge_vts):
+        return {
+            "status": "SKIPPED",
+            "reason_code": "SUPPRESSED_BY_INPUT_POLICY",
+            "emotion_tag": None,
+            "expression_id": None,
+            "trigger": "HOST",
+            "detail": "edge VTS suppressed by input policy",
+        }, 0
     result = await _drive_stream_vts_emotion(
         request_id=request_id,
         emotion_context=emotion_context,
@@ -1014,6 +1024,8 @@ async def _sse_event_generator(
     intent_draft: Dict[str, Any] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
     _pre_recall_evidence: list[dict[str, Any]] | None = None,
+    suppress_edge_tts: bool = False,
+    suppress_edge_vts: bool = False,
 ) -> AsyncGenerator[str, None]:
     """完整链路 SSE 事件生成器（SCENE_CHAT 专用，token 级流式输出）。
 
@@ -1662,6 +1674,8 @@ async def _sse_event_generator(
             通过 EdgeRpcClient.post_speak() 发送 HTTP POST /v1/edge/speak。
             """
             _t0 = int(time.time() * 1000)
+            if bool(suppress_edge_tts):
+                return {"status": "SKIPPED", "reason_code": "SUPPRESSED_BY_INPUT_POLICY"}, 0
             _tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
             if _tts_enabled not in {"1", "true", "yes", "on"}:
                 return {"status": "SKIPPED", "reason_code": "HOST_STREAM_TTS_DISABLED"}, 0
@@ -1711,6 +1725,7 @@ async def _sse_event_generator(
                 request_id=request_id,
                 emotion_context=emotion_context,
                 ts_ms=ts_ms,
+                suppress_edge_vts=bool(suppress_edge_vts),
             ),
             _run_tts(),
         )

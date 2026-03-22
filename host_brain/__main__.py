@@ -27,6 +27,7 @@ def _load_dotenv_file() -> None:
 _load_dotenv_file()
 
 from host_brain.app.fastapi_app import app
+from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
@@ -100,10 +101,11 @@ def run_startup_check(db_path: str) -> bool:
 
     try:
         ledger = SQLiteLedger(db_path=db_path)
+        dependency_probes = collect_dependency_probes_sync()
 
         report = build_startup_report(
             runtime_statuses={},
-            dependency_probes={},
+            dependency_probes=dependency_probes,
             request_id=request_id,
             ledger=ledger,
             # 修复：原代码 ts_ms=new_request_id() 将 UUID 字符串传给整数时间戳参数，

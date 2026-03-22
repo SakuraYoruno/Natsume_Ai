@@ -253,9 +253,7 @@ def _extract_component_status(health: dict[str, Any]) -> str:
     ).strip().lower()
     if raw in {"down", "error", "unavailable", "shutdown"}:
         return "down"
-    if raw in {"degraded", "loading", "recovering", "warning"}:
-        return "degraded"
-    if raw in {"unloaded"}:
+    if raw in {"degraded", "loading", "recovering", "warning", "unloaded", "disconnected", "connecting", "reconnecting"}:
         return "degraded"
     return "ok"
 

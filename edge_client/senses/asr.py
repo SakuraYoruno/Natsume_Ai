@@ -95,6 +95,8 @@ class AsrConfig:
     silence_duration_s: float = DEFAULT_SILENCE_DURATION_S
     min_speech_duration_s: float = DEFAULT_MIN_SPEECH_DURATION_S
     max_speech_duration_s: float = DEFAULT_MAX_SPEECH_DURATION_S
+    vad_retry_without_filter_on_empty: bool = True
+    vad_retry_min_peak: float = 0.015
     language: str = "ja"
     initial_prompt: str | None = None
     recovery: DeviceRecoveryConfig = field(default_factory=DeviceRecoveryConfig)
@@ -112,6 +114,8 @@ class AsrConfig:
             "silence_duration_s": self.silence_duration_s,
             "min_speech_duration_s": self.min_speech_duration_s,
             "max_speech_duration_s": self.max_speech_duration_s,
+            "vad_retry_without_filter_on_empty": self.vad_retry_without_filter_on_empty,
+            "vad_retry_min_peak": self.vad_retry_min_peak,
             "language": self.language,
             "recovery": self.recovery.as_dict(),
         }
@@ -400,51 +404,86 @@ class WhisperModelManager:
 
         t0 = time.monotonic()
         try:
-            segments_gen, info = self._model.transcribe(
-                audio_data,
-                language=language or self._config.language,
-                beam_size=beam_size or self._config.beam_size,
-                initial_prompt=initial_prompt or self._config.initial_prompt,
-                vad_filter=vad_filter,
-                vad_parameters=effective_vad_params if vad_filter else None,
-                word_timestamps=True,
-            )
-
-            segments: list[TranscriptionSegment] = []
-            for seg in segments_gen:
-                words = []
-                if hasattr(seg, "words") and seg.words:
-                    words = [
-                        {
-                            "word": w.word,
-                            "start": w.start,
-                            "end": w.end,
-                            "probability": w.probability,
-                        }
-                        for w in seg.words
-                    ]
-                avg_prob = seg.avg_log_prob if hasattr(seg, "avg_log_prob") else 0.0
-                # Convert log probability to confidence (0~1)
-                import math
-                confidence = math.exp(avg_prob) if avg_prob < 0 else min(avg_prob, 1.0)
-
-                segments.append(
-                    TranscriptionSegment(
-                        text=seg.text.strip(),
-                        start=seg.start,
-                        end=seg.end,
-                        confidence=round(confidence, 4),
-                        words=words,
+            def _collect_segments(segments_gen: Any) -> list[TranscriptionSegment]:
+                rows: list[TranscriptionSegment] = []
+                for seg in segments_gen:
+                    words = []
+                    if hasattr(seg, "words") and seg.words:
+                        words = [
+                            {
+                                "word": w.word,
+                                "start": w.start,
+                                "end": w.end,
+                                "probability": w.probability,
+                            }
+                            for w in seg.words
+                        ]
+                    avg_prob = seg.avg_log_prob if hasattr(seg, "avg_log_prob") else 0.0
+                    # Convert log probability to confidence (0~1)
+                    import math
+                    confidence = math.exp(avg_prob) if avg_prob < 0 else min(avg_prob, 1.0)
+                    rows.append(
+                        TranscriptionSegment(
+                            text=seg.text.strip(),
+                            start=seg.start,
+                            end=seg.end,
+                            confidence=round(confidence, 4),
+                            words=words,
+                        )
                     )
+                return rows
+
+            def _run_once(*, use_vad_filter: bool) -> tuple[list[TranscriptionSegment], Any]:
+                seg_gen, info_obj = self._model.transcribe(
+                    audio_data,
+                    language=language or self._config.language,
+                    beam_size=beam_size or self._config.beam_size,
+                    initial_prompt=initial_prompt or self._config.initial_prompt,
+                    vad_filter=use_vad_filter,
+                    vad_parameters=effective_vad_params if use_vad_filter else None,
+                    word_timestamps=True,
                 )
+                return _collect_segments(seg_gen), info_obj
+
+            attempted_vad_retry = False
+            measured_peak = 0.0
+            segments, info = _run_once(use_vad_filter=vad_filter)
+
+            # Some microphones produce valid speech frames that faster-whisper VAD discards.
+            # Retry once without VAD when audio peak suggests non-silent input.
+            if (
+                not segments
+                and vad_filter
+                and self._config.vad_retry_without_filter_on_empty
+            ):
+                measured_peak = self._estimate_audio_peak(audio_data)
+                if measured_peak >= self._config.vad_retry_min_peak:
+                    attempted_vad_retry = True
+                    logger.info(
+                        "ASR empty after VAD; retry without VAD (peak=%.5f, min=%.5f)",
+                        measured_peak,
+                        self._config.vad_retry_min_peak,
+                    )
+                    segments, info = _run_once(use_vad_filter=False)
 
             processing_time = time.monotonic() - t0
 
             if not segments:
+                detail = "no speech detected in audio"
+                if attempted_vad_retry:
+                    detail = (
+                        "no speech detected in audio (retried without VAD, "
+                        f"peak={measured_peak:.5f})"
+                    )
+                elif vad_filter and self._config.vad_retry_without_filter_on_empty:
+                    detail = (
+                        "no speech detected in audio (skip no-VAD retry, "
+                        f"peak={measured_peak:.5f} < min={self._config.vad_retry_min_peak:.5f})"
+                    )
                 return AsrResult(
                     success=True,
                     reason_code=ASR_VAD_NO_SPEECH,
-                    detail="no speech detected in audio",
+                    detail=detail,
                     segments=[],
                     language=getattr(info, "language", ""),
                     language_probability=getattr(info, "language_probability", 0.0),
@@ -452,10 +491,13 @@ class WhisperModelManager:
                     processing_time_s=round(processing_time, 4),
                 )
 
+            detail = f"transcribed {len(segments)} segment(s)"
+            if attempted_vad_retry:
+                detail = f"{detail} (after no-VAD retry)"
             return AsrResult(
                 success=True,
                 reason_code=None,
-                detail=f"transcribed {len(segments)} segment(s)",
+                detail=detail,
                 segments=segments,
                 language=getattr(info, "language", ""),
                 language_probability=getattr(info, "language_probability", 0.0),
@@ -501,6 +543,31 @@ class WhisperModelManager:
         if self._config.device == "cuda":
             return ["cuda", "cpu"]
         return [self._config.device]
+
+    @staticmethod
+    def _estimate_audio_peak(audio_data: Any) -> float:
+        try:
+            import numpy as np
+
+            arr = np.asarray(audio_data, dtype=float)
+            if arr.size == 0:
+                return 0.0
+            arr = np.abs(arr)
+            if arr.ndim > 1:
+                arr = np.max(arr, axis=1)
+            return float(np.max(arr))
+        except Exception:
+            pass
+        try:
+            if isinstance(audio_data, (list, tuple)):
+                if not audio_data:
+                    return 0.0
+                return max(abs(float(v)) for v in audio_data if isinstance(v, (int, float)))
+            if isinstance(audio_data, (int, float)):
+                return abs(float(audio_data))
+        except Exception:
+            return 0.0
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
