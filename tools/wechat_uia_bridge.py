@@ -42,7 +42,7 @@ DEFAULT_FORCE_ACTIVE_CHAT_TARGET = True
 DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = 0.70
 DEFAULT_VISION_MODEL = "qwen2.5vl:3b"
 DEFAULT_VISION_API_URL = "http://127.0.0.1:11434/api/chat"
-DEFAULT_VISION_TIMEOUT_S = 12.0
+DEFAULT_VISION_TIMEOUT_S = 30.0
 DEFAULT_VISION_MIN_CONFIDENCE = 0.50
 DEFAULT_VISION_MIN_INTERVAL_S = 1.8
 DEFAULT_NOTIFY_DB_PATH = r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db"
@@ -1728,8 +1728,9 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             return [extracted]
 
         self._vision_fail_streak += 1
-        if self._vision_fail_streak >= 4:
-            # Vision path is not yielding output; degrade to OCR/UIA path.
+        # Only degrade when vision model is unavailable (e.g. not pulled).
+        # For timeout/slow inference, keep vision-only to avoid OCR noise loops.
+        if self._vision_unavailable and self._vision_fail_streak >= 2:
             return super()._collect_chat_previews()
         return []
 
