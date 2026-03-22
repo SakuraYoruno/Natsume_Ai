@@ -1156,6 +1156,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         self._last_ocr_sender = "active_chat"
         self._last_focus_retry_at = 0.0
         self._ocr_empty_cycles = 0
+        self._last_ocr_side_fallback_diag_at = 0.0
 
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         # OCR mode must prioritize OCR extraction to avoid UIA text noise loops.
@@ -1272,7 +1273,8 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         ocr_rows: list[tuple[int, int, str, float]],
         roi_width: int,
     ) -> list[tuple[int, str]]:
-        inbound_candidates: list[tuple[int, str]] = []
+        left_side_candidates: list[tuple[int, str]] = []
+        all_candidates: list[tuple[int, int, str]] = []
         for cy, cx, text_value, score in ocr_rows:
             if score < self._ocr_min_score:
                 continue
@@ -1285,10 +1287,27 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                 continue
             if self._is_probably_ui_noise_text(norm):
                 continue
-            if cx > int(roi_width * self._inbound_x_ratio_max):
-                continue
-            inbound_candidates.append((cy, norm))
-        return inbound_candidates
+            all_candidates.append((cy, cx, norm))
+            if cx <= int(roi_width * self._inbound_x_ratio_max):
+                left_side_candidates.append((cy, norm))
+
+        if left_side_candidates:
+            return left_side_candidates
+
+        # Some WeChat UI variants render inbound bubbles beyond the configured
+        # x-ratio threshold. Fallback to all visible message candidates and let
+        # outbound-echo suppression + dedup handle self messages.
+        fallback_candidates = [(cy, norm) for cy, _cx, norm in all_candidates]
+        if fallback_candidates:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_ocr_side_fallback_diag_at) >= 12.0:
+                self._last_ocr_side_fallback_diag_at = now_mono
+                logger.info(
+                    "ocr inbound side-fallback: no left-side rows; using all candidates=%d x_max=%.2f",
+                    len(fallback_candidates),
+                    self._inbound_x_ratio_max,
+                )
+        return fallback_candidates
 
     def _extract_chat_list_previews_from_ocr(
         self,
