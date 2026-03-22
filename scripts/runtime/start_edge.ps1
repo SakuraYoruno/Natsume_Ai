@@ -1165,6 +1165,7 @@ if ($wechatBridgeBackend -eq "uia") {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
 
   $uiaDefaultEnv = [ordered]@{
+    EDGE_WECHAT_INBOUND_BACKEND = "uia_ocr"
     EDGE_WECHAT_UIA_SCAN_CHAT_LIST = "0"
     EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET = "1"
     EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = "0.70"
