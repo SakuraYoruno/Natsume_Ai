@@ -26,20 +26,35 @@ if (-not (Test-Path -Path $startEdgeScript)) {
 if (-not [string]::IsNullOrWhiteSpace($WeChatInboundBackend)) {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", $WeChatInboundBackend, "Process")
 }
-if (-not [string]::IsNullOrWhiteSpace($WeChatVisionModel)) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MODEL", $WeChatVisionModel, "Process")
+$resolvedVisionModel = $WeChatVisionModel
+$resolvedVisionTimeoutS = $WeChatVisionTimeoutS
+$resolvedVisionMinIntervalS = $WeChatVisionMinIntervalS
+if ($WeChatInboundBackend -eq "vision") {
+  if ([string]::IsNullOrWhiteSpace($resolvedVisionModel)) {
+    # qwen2.5vl:3b is often CPU-only on edge; gemma3:4b is faster and uses GPU on common setups.
+    $resolvedVisionModel = "gemma3:4b"
+  }
+  if ($resolvedVisionTimeoutS -le 0) {
+    $resolvedVisionTimeoutS = 60
+  }
+  if ($resolvedVisionMinIntervalS -le 0) {
+    $resolvedVisionMinIntervalS = 2.5
+  }
+}
+if (-not [string]::IsNullOrWhiteSpace($resolvedVisionModel)) {
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MODEL", $resolvedVisionModel, "Process")
 }
 if (-not [string]::IsNullOrWhiteSpace($WeChatVisionApiUrl)) {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_API_URL", $WeChatVisionApiUrl, "Process")
 }
-if ($WeChatVisionTimeoutS -gt 0) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_TIMEOUT_S", ([string]$WeChatVisionTimeoutS), "Process")
+if ($resolvedVisionTimeoutS -gt 0) {
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_TIMEOUT_S", ([string]$resolvedVisionTimeoutS), "Process")
 }
 if ($WeChatVisionMinConfidence -ge 0) {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MIN_CONFIDENCE", ([string]$WeChatVisionMinConfidence), "Process")
 }
-if ($WeChatVisionMinIntervalS -gt 0) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MIN_INTERVAL_S", ([string]$WeChatVisionMinIntervalS), "Process")
+if ($resolvedVisionMinIntervalS -gt 0) {
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MIN_INTERVAL_S", ([string]$resolvedVisionMinIntervalS), "Process")
 }
 
 $edgeRaw = & $startEdgeScript `
