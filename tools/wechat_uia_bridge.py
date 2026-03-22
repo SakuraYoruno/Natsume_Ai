@@ -245,6 +245,7 @@ class WeChatUiInboundBridge:
         self._hook_cb_fn = None
 
         self._next_poll_at = 0.0
+        self._baseline_ready = False
         self._last_preview_by_chat: dict[str, str] = {}
         self._recent_forwarded: dict[str, float] = {}
         self._stats = {
@@ -303,6 +304,16 @@ class WeChatUiInboundBridge:
         forwarded = 0
         try:
             previews = self._collect_chat_previews()
+            if not self._baseline_ready:
+                for sender, preview in previews:
+                    sender_value = str(sender or "").strip()
+                    preview_value = _normalize_message_text(preview)
+                    if sender_value and preview_value:
+                        self._last_preview_by_chat[sender_value] = preview_value
+                self._baseline_ready = True
+                logger.info("inbound listener baseline initialized: chats=%d", len(self._last_preview_by_chat))
+                return 0
+
             ts_ms = int(time.time() * 1000)
             for sender, preview in previews:
                 sender_value = str(sender or "").strip()
@@ -452,13 +463,18 @@ class WeChatUiInboundBridge:
             return []
         try:
             window = Desktop(backend="uia").window(handle=hwnd)
-            list_items = window.descendants(control_type="ListItem")
         except Exception as exc:
-            logger.warning("failed to collect list items from wechat window: %s", exc)
+            logger.warning("failed to bind wechat window for inbound collect: %s", exc)
             return []
 
         rows: list[tuple[str, str]] = []
-        for item in list_items[:60]:
+
+        try:
+            list_items = window.descendants(control_type="ListItem")
+        except Exception:
+            list_items = []
+
+        for item in list_items[:80]:
             try:
                 texts: list[str] = []
                 item_title = _normalize_message_text(item.window_text())
@@ -505,6 +521,59 @@ class WeChatUiInboundBridge:
                 continue
             seen_sender.add(sender)
             dedup_rows.append((sender, preview))
+
+        # Some Weixin builds expose weak/obfuscated chat-list control trees.
+        # Fallback: derive current chat title + newest visible bubble text
+        # from right-side message area.
+        try:
+            rect = window.rectangle()
+            left = int(rect.left)
+            top = int(rect.top)
+            right = int(rect.right)
+            bottom = int(rect.bottom)
+            width = max(0, right - left)
+            height = max(0, bottom - top)
+            if width > 0 and height > 0:
+                title_candidates: list[tuple[int, str]] = []
+                message_candidates: list[tuple[int, int, str]] = []
+                text_nodes = window.descendants(control_type="Text")
+                for node in text_nodes:
+                    try:
+                        text_value = _normalize_message_text(node.window_text())
+                        if not text_value:
+                            continue
+                        node_rect = node.rectangle()
+                        cx = int((int(node_rect.left) + int(node_rect.right)) / 2)
+                        cy = int((int(node_rect.top) + int(node_rect.bottom)) / 2)
+                    except Exception:
+                        continue
+
+                    if cx < (left + int(width * 0.45)):
+                        continue
+                    if cy <= (top + int(height * 0.18)):
+                        if not _is_probably_time_or_badge(text_value):
+                            title_candidates.append((len(text_value), text_value))
+                        continue
+                    if cy >= (top + int(height * 0.83)):
+                        continue
+                    if _is_probably_time_or_badge(text_value):
+                        continue
+                    if text_value in {"发送(S)", "聊天信息"}:
+                        continue
+                    message_candidates.append((cy, cx, text_value))
+
+                if message_candidates:
+                    message_candidates.sort(key=lambda x: (x[0], x[1]))
+                    latest_text = message_candidates[-1][2]
+                    chat_title = "active_chat"
+                    if title_candidates:
+                        title_candidates.sort(key=lambda x: x[0], reverse=True)
+                        chat_title = title_candidates[0][1]
+                    if chat_title not in seen_sender:
+                        dedup_rows.append((chat_title, latest_text))
+        except Exception:
+            pass
+
         return dedup_rows
 
 def _is_wechat_client_running() -> bool:
