@@ -9,17 +9,26 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
 from typing import Any
 
 
 DEFAULT_EDGE_URL = "http://127.0.0.1:17800"
+CALLBACK_PATH = "/v1/edge/wechat/callback"
 DEFAULT_COMMAND_POLL_INTERVAL_S = 0.5
+DEFAULT_CALLBACK_TIMEOUT_S = 6.0
+DEFAULT_LISTENER_POLL_INTERVAL_S = 1.2
+DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "wechatmainwndforpc",
@@ -27,6 +36,13 @@ WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "weixinmainwnd",
 }
 WECHAT_WINDOW_TITLE_HINTS = ("微信", "Weixin", "WeChat")
+
+EVENT_OBJECT_SHOW = 0x8002
+EVENT_OBJECT_NAMECHANGE = 0x800C
+EVENT_OBJECT_VALUECHANGE = 0x800E
+WINEVENT_OUTOFCONTEXT = 0x0000
+PM_REMOVE = 0x0001
+WM_QUIT = 0x0012
 
 
 logger = logging.getLogger("Natsume.wechat_uia_bridge")
@@ -99,6 +115,397 @@ def _append_jsonl_row(path_value: str, row: dict[str, Any]) -> None:
         handle.write(line)
         handle.write("\n")
 
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def _normalize_message_text(text: str) -> str:
+    value = str(text or "").replace("\u200b", "").strip()
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def _is_probably_time_or_badge(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return True
+    if re.fullmatch(r"\d{1,2}:\d{2}", value):
+        return True
+    if re.fullmatch(r"\d+", value):
+        return True
+    if re.fullmatch(r"\d+\s*条", value):
+        return True
+    return False
+
+
+def _build_hook_msg_id(sender: str, content: str, ts_ms: int) -> str:
+    payload = f"{sender}\n{content}\n{ts_ms}"
+    digest = hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return f"uiahook-{ts_ms}-{digest}"
+
+
+_RECENT_OUTBOUND_LOCK = threading.Lock()
+_RECENT_OUTBOUND_TEXTS: dict[str, float] = {}
+
+
+def _remember_outbound_text(text: str, *, ttl_s: float = 20.0) -> None:
+    key = _normalize_message_text(text)
+    if not key:
+        return
+    now_mono = time.monotonic()
+    with _RECENT_OUTBOUND_LOCK:
+        stale = [k for k, t in _RECENT_OUTBOUND_TEXTS.items() if (now_mono - t) > ttl_s]
+        for item in stale:
+            _RECENT_OUTBOUND_TEXTS.pop(item, None)
+        _RECENT_OUTBOUND_TEXTS[key] = now_mono
+
+
+def _is_recent_outbound_echo(text: str, *, ttl_s: float = 20.0) -> bool:
+    key = _normalize_message_text(text)
+    if not key:
+        return False
+    now_mono = time.monotonic()
+    with _RECENT_OUTBOUND_LOCK:
+        stale = [k for k, t in _RECENT_OUTBOUND_TEXTS.items() if (now_mono - t) > ttl_s]
+        for item in stale:
+            _RECENT_OUTBOUND_TEXTS.pop(item, None)
+        if key in _RECENT_OUTBOUND_TEXTS:
+            return True
+        # Common preview format for self-sent messages.
+        for prefix in ("我: ", "我：", "You: ", "Me: "):
+            if key.startswith(prefix):
+                stripped = key[len(prefix) :].strip()
+                if stripped and stripped in _RECENT_OUTBOUND_TEXTS:
+                    return True
+        return False
+
+
+def _post_to_edge_callback(edge_url: str, body: dict[str, Any], *, timeout_s: float) -> bool:
+    url = f"{str(edge_url or DEFAULT_EDGE_URL).rstrip('/')}{CALLBACK_PATH}"
+    try:
+        req = urllib.request.Request(
+            url=url,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=max(0.2, float(timeout_s))) as resp:
+            return int(getattr(resp, "status", 0) or 0) == 200
+    except urllib.error.HTTPError as exc:
+        logger.warning("wechat callback http error: code=%s reason=%s", exc.code, exc.reason)
+    except Exception as exc:
+        logger.warning("wechat callback request failed: %s", exc)
+    return False
+
+
+class _WinMsg(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("message", ctypes.c_uint),
+        ("wParam", ctypes.c_size_t),
+        ("lParam", ctypes.c_ssize_t),
+        ("time", ctypes.c_uint),
+        ("pt_x", ctypes.c_long),
+        ("pt_y", ctypes.c_long),
+        ("lPrivate", ctypes.c_uint),
+    ]
+
+
+class WeChatUiInboundBridge:
+    """Inbound bridge: WinEvent hook triggers + UIA extraction + callback POST."""
+
+    def __init__(
+        self,
+        *,
+        edge_url: str,
+        enabled: bool,
+        poll_interval_s: float,
+        callback_timeout_s: float,
+        dedup_window_s: float,
+    ) -> None:
+        self._edge_url = str(edge_url or DEFAULT_EDGE_URL).strip()
+        self._enabled = bool(enabled)
+        self._poll_interval_s = max(0.2, float(poll_interval_s))
+        self._callback_timeout_s = max(0.2, float(callback_timeout_s))
+        self._dedup_window_s = max(1.0, float(dedup_window_s))
+
+        self._stop_event = threading.Event()
+        self._dirty_event = threading.Event()
+        self._hook_thread: threading.Thread | None = None
+        self._hook_thread_id = 0
+        self._hook_handles: list[int] = []
+        self._hook_cb_fn = None
+
+        self._next_poll_at = 0.0
+        self._last_preview_by_chat: dict[str, str] = {}
+        self._recent_forwarded: dict[str, float] = {}
+        self._stats = {
+            "events": 0,
+            "messages_forwarded": 0,
+            "messages_deduped": 0,
+            "errors": 0,
+        }
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return dict(self._stats)
+
+    def start(self) -> None:
+        if not self._enabled:
+            logger.info("inbound listener disabled")
+            return
+        self._hook_thread = threading.Thread(
+            target=self._hook_loop,
+            name="wechat_uia_win_event_hook",
+            daemon=True,
+        )
+        self._hook_thread.start()
+        # Trigger first snapshot to establish baseline quickly.
+        self._dirty_event.set()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._hook_thread_id > 0:
+            try:
+                ctypes.windll.user32.PostThreadMessageW(int(self._hook_thread_id), WM_QUIT, 0, 0)
+            except Exception:
+                pass
+        if self._hook_thread is not None:
+            self._hook_thread.join(timeout=2.0)
+
+    def process_cycle(self) -> int:
+        if not self._enabled:
+            return 0
+
+        now_mono = time.monotonic()
+        should_process = False
+        if self._dirty_event.is_set():
+            should_process = True
+        elif now_mono >= self._next_poll_at:
+            should_process = True
+        if not should_process:
+            return 0
+
+        self._dirty_event.clear()
+        self._next_poll_at = now_mono + self._poll_interval_s
+        forwarded = 0
+        try:
+            previews = self._collect_chat_previews()
+            ts_ms = int(time.time() * 1000)
+            for sender, preview in previews:
+                sender_value = str(sender or "").strip()
+                preview_value = _normalize_message_text(preview)
+                if not sender_value or not preview_value:
+                    continue
+
+                last_value = self._last_preview_by_chat.get(sender_value)
+                if last_value == preview_value:
+                    continue
+                self._last_preview_by_chat[sender_value] = preview_value
+
+                if _is_recent_outbound_echo(preview_value):
+                    continue
+
+                if self._is_recent_duplicate(sender=sender_value, content=preview_value):
+                    self._stats["messages_deduped"] += 1
+                    continue
+
+                msg_id = _build_hook_msg_id(sender=sender_value, content=preview_value, ts_ms=ts_ms)
+                body = {
+                    "id": msg_id,
+                    "msg_id": msg_id,
+                    "sender": sender_value,
+                    "from_wxid": sender_value,
+                    "receiver": "local_wechat",
+                    "to_wxid": "local_wechat",
+                    "content": preview_value,
+                    "text": preview_value,
+                    "type": 1,
+                    "msg_type": "1",
+                    "ts": int(ts_ms / 1000),
+                    "bridge_backend": "uia_hook",
+                }
+                ok = _post_to_edge_callback(
+                    edge_url=self._edge_url,
+                    body=body,
+                    timeout_s=self._callback_timeout_s,
+                )
+                if ok:
+                    forwarded += 1
+                    self._stats["messages_forwarded"] += 1
+                    logger.info(
+                        "forwarded inbound preview sender=%s content=%.80s msg_id=%s",
+                        sender_value,
+                        preview_value,
+                        msg_id,
+                    )
+        except Exception as exc:
+            self._stats["errors"] += 1
+            logger.warning("inbound process cycle failed: %s", exc)
+        return forwarded
+
+    def _is_recent_duplicate(self, *, sender: str, content: str) -> bool:
+        signature = f"{sender}|{content}"
+        now_mono = time.monotonic()
+        stale = [k for k, ts in self._recent_forwarded.items() if (now_mono - ts) > self._dedup_window_s]
+        for item in stale:
+            self._recent_forwarded.pop(item, None)
+        if signature in self._recent_forwarded:
+            return True
+        self._recent_forwarded[signature] = now_mono
+        return False
+
+    def _hook_loop(self) -> None:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        win_event_proc = ctypes.WINFUNCTYPE(
+            None,
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_long,
+            ctypes.c_long,
+            ctypes.c_uint,
+            ctypes.c_uint,
+        )
+        self._hook_cb_fn = win_event_proc(self._on_win_event)
+        self._hook_thread_id = int(kernel32.GetCurrentThreadId())
+        for event_code in (EVENT_OBJECT_SHOW, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_VALUECHANGE):
+            try:
+                handle = user32.SetWinEventHook(
+                    event_code,
+                    event_code,
+                    0,
+                    self._hook_cb_fn,
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                )
+            except Exception:
+                handle = 0
+            if handle:
+                self._hook_handles.append(int(handle))
+
+        msg = _WinMsg()
+        while not self._stop_event.is_set():
+            has_msg = bool(user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, PM_REMOVE))
+            if has_msg:
+                if int(msg.message) == WM_QUIT:
+                    break
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+            else:
+                time.sleep(0.05)
+
+        for handle in self._hook_handles:
+            try:
+                user32.UnhookWinEvent(ctypes.c_void_p(handle))
+            except Exception:
+                pass
+        self._hook_handles.clear()
+
+    def _on_win_event(
+        self,
+        _h_win_event_hook: Any,
+        _event: int,
+        hwnd: Any,
+        _id_object: int,
+        _id_child: int,
+        _event_thread: int,
+        _event_time: int,
+    ) -> None:
+        try:
+            self._stats["events"] += 1
+            main_hwnd = _find_wechat_main_window()
+            if not main_hwnd:
+                return
+            hwnd_value = int(hwnd or 0)
+            if hwnd_value <= 0:
+                self._dirty_event.set()
+                return
+            user32 = ctypes.windll.user32
+            if hwnd_value == main_hwnd or bool(user32.IsChild(main_hwnd, hwnd_value)):
+                self._dirty_event.set()
+        except Exception:
+            return
+
+    def _collect_chat_previews(self) -> list[tuple[str, str]]:
+        hwnd = _find_wechat_main_window()
+        if not hwnd:
+            return []
+        try:
+            from pywinauto import Desktop
+        except Exception as exc:
+            logger.warning("pywinauto import failed for inbound collect: %s", exc)
+            return []
+        try:
+            window = Desktop(backend="uia").window(handle=hwnd)
+            list_items = window.descendants(control_type="ListItem")
+        except Exception as exc:
+            logger.warning("failed to collect list items from wechat window: %s", exc)
+            return []
+
+        rows: list[tuple[str, str]] = []
+        for item in list_items[:60]:
+            try:
+                texts: list[str] = []
+                item_title = _normalize_message_text(item.window_text())
+                if item_title:
+                    texts.append(item_title)
+                for child in item.descendants(control_type="Text"):
+                    text_value = _normalize_message_text(child.window_text())
+                    if text_value:
+                        texts.append(text_value)
+            except Exception:
+                continue
+
+            if not texts:
+                continue
+            clean: list[str] = []
+            seen: set[str] = set()
+            for text_value in texts:
+                if not text_value or text_value in seen:
+                    continue
+                seen.add(text_value)
+                clean.append(text_value)
+            if len(clean) < 2:
+                continue
+
+            sender = clean[0]
+            if sender in {"聊天", "通讯录", "发现", "我", "设置"}:
+                continue
+            preview = ""
+            for candidate in clean[1:]:
+                if candidate == sender:
+                    continue
+                if _is_probably_time_or_badge(candidate):
+                    continue
+                preview = candidate
+                break
+            if not preview:
+                continue
+            rows.append((sender, preview))
+
+        dedup_rows: list[tuple[str, str]] = []
+        seen_sender: set[str] = set()
+        for sender, preview in rows:
+            if sender in seen_sender:
+                continue
+            seen_sender.add(sender)
+            dedup_rows.append((sender, preview))
+        return dedup_rows
 
 def _is_wechat_client_running() -> bool:
     cmd = ["tasklist", "/fo", "csv", "/nh"]
@@ -480,6 +887,7 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             }
         ok, detail = _send_text(content=content, wechat_path=wechat_path)
         if ok:
+            _remember_outbound_text(content)
             detail = f"{detail} ({open_detail})"
     elif action == "voice_call":
         open_ok, open_detail = _open_chat_by_target(target=target, wechat_path=wechat_path)
@@ -566,12 +974,36 @@ def main() -> int:
         default=(os.environ.get("EDGE_WECHAT_EXECUTABLE_PATH") or "").strip(),
         help="Optional WeChat/Weixin executable path.",
     )
+    parser.add_argument(
+        "--listener-enabled",
+        default=(os.environ.get("EDGE_WECHAT_LISTENER_ENABLED") or "1").strip(),
+        help="Enable inbound WinEvent/UIA listener (default from EDGE_WECHAT_LISTENER_ENABLED).",
+    )
+    parser.add_argument(
+        "--listener-poll-interval",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_LISTENER_POLL_INTERVAL_S") or DEFAULT_LISTENER_POLL_INTERVAL_S),
+        help=f"Inbound preview poll interval in seconds (default: {DEFAULT_LISTENER_POLL_INTERVAL_S}).",
+    )
+    parser.add_argument(
+        "--listener-dedup-window",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_LISTENER_DEDUP_WINDOW_S") or DEFAULT_LISTENER_DEDUP_WINDOW_S),
+        help=f"Inbound dedup window in seconds (default: {DEFAULT_LISTENER_DEDUP_WINDOW_S}).",
+    )
+    parser.add_argument(
+        "--callback-timeout",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_CALLBACK_TIMEOUT_S") or DEFAULT_CALLBACK_TIMEOUT_S),
+        help=f"Timeout for posting /v1/edge/wechat/callback (default: {DEFAULT_CALLBACK_TIMEOUT_S}).",
+    )
     args = parser.parse_args()
 
     queue_file = _normalize_optional_path(args.command_queue_file)
     result_file = _normalize_optional_path(args.command_result_file)
     wechat_path = str(args.wechat_path or "").strip()
     poll_interval = max(0.1, float(args.command_poll_interval))
+    listener_enabled = _parse_bool(args.listener_enabled, default=True)
     if not queue_file or not result_file:
         logger.error("queue/result file path is required")
         return 2
@@ -592,45 +1024,68 @@ def main() -> int:
         return 3
 
     logger.info(
-        "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s",
+        "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s listener_enabled=%s",
         args.edge_url,
         queue_file,
         result_file,
         wechat_path or "(auto)",
+        listener_enabled,
     )
+
+    inbound_bridge = WeChatUiInboundBridge(
+        edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+        enabled=listener_enabled,
+        poll_interval_s=float(args.listener_poll_interval),
+        callback_timeout_s=float(args.callback_timeout),
+        dedup_window_s=float(args.listener_dedup_window),
+    )
+    inbound_bridge.start()
 
     offset = 0
     total = 0
     total_success = 0
-    while True:
-        try:
-            offset, batch_count, batch_success = _process_command_queue(
-                queue_file=queue_file,
-                result_file=result_file,
-                offset=offset,
-                wechat_path=wechat_path,
-            )
-            if batch_count > 0:
-                total += batch_count
-                total_success += batch_success
-                logger.info(
-                    "processed command batch: total=%d success=%d failed=%d cumulative_total=%d cumulative_success=%d",
-                    batch_count,
-                    batch_success,
-                    batch_count - batch_success,
-                    total,
-                    total_success,
+    inbound_total = 0
+    try:
+        while True:
+            try:
+                offset, batch_count, batch_success = _process_command_queue(
+                    queue_file=queue_file,
+                    result_file=result_file,
+                    offset=offset,
+                    wechat_path=wechat_path,
                 )
-        except KeyboardInterrupt:
-            logger.info(
-                "interrupted; total_commands=%d command_success=%d",
-                total,
-                total_success,
-            )
-            return 0
-        except Exception as exc:
-            logger.warning("command poll cycle failed: %s", exc)
-        time.sleep(poll_interval)
+                inbound_forwarded = inbound_bridge.process_cycle()
+                if inbound_forwarded > 0:
+                    inbound_total += inbound_forwarded
+                    logger.info(
+                        "forwarded inbound messages: batch=%d cumulative=%d",
+                        inbound_forwarded,
+                        inbound_total,
+                    )
+                if batch_count > 0:
+                    total += batch_count
+                    total_success += batch_success
+                    logger.info(
+                        "processed command batch: total=%d success=%d failed=%d cumulative_total=%d cumulative_success=%d",
+                        batch_count,
+                        batch_success,
+                        batch_count - batch_success,
+                        total,
+                        total_success,
+                    )
+            except Exception as exc:
+                logger.warning("bridge poll cycle failed: %s", exc)
+            time.sleep(poll_interval)
+    except KeyboardInterrupt:
+        logger.info(
+            "interrupted; total_commands=%d command_success=%d inbound_forwarded=%d",
+            total,
+            total_success,
+            inbound_total,
+        )
+        return 0
+    finally:
+        inbound_bridge.stop()
 
 
 if __name__ == "__main__":
