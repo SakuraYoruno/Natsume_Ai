@@ -956,6 +956,10 @@ class WeChatUiInboundBridge:
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         hwnd = _find_wechat_main_window()
         if not hwnd:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info("vision inbound skipped: wechat main window not found")
             return []
         try:
             from pywinauto import Desktop
@@ -1751,6 +1755,15 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             "inbound_text要求: 当前会话中最新一条'对方发来的文本消息'；"
             "如果无法确定则返回空字符串。"
         )
+        # Prefer ASCII prompt to avoid mojibake/encoding issues in runtime environments.
+        prompt = (
+            "You are reading a screenshot of a WeChat desktop chat panel. "
+            "Return strict JSON only, no markdown and no explanation. "
+            "Fields: inbound_text (string), confidence (number 0-1). "
+            "inbound_text must be the latest inbound text message from the other side "
+            "in the current active conversation. "
+            "If uncertain or no readable inbound message exists, return empty inbound_text."
+        )
         payload = {
             "model": self._vision_model,
             "stream": False,
@@ -1896,6 +1909,44 @@ def _list_wechat_client_process_names() -> set[str]:
     return names
 
 
+def _list_wechat_client_pids() -> set[int]:
+    cmd = ["tasklist", "/fo", "csv", "/nh"]
+    for encoding in ("utf-8", "gbk"):
+        try:
+            output = subprocess.check_output(
+                cmd,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding=encoding,
+                errors="ignore",
+            )
+            break
+        except Exception:
+            output = ""
+    else:
+        output = ""
+
+    pids: set[int] = set()
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith('"'):
+            parts = [part.strip('"') for part in line.split('","')]
+        else:
+            parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
+        process_name = str(parts[0] or "").strip().lower()
+        if process_name not in WECHAT_PROCESS_NAMES:
+            continue
+        try:
+            pids.add(int(str(parts[1]).strip()))
+        except Exception:
+            continue
+    return pids
+
+
 def _launch_wechat_if_needed(wechat_path: str) -> None:
     if _is_wechat_client_running():
         return
@@ -1965,13 +2016,30 @@ def _enum_child_windows(hwnd: int) -> list[tuple[int, str, str]]:
 
 
 def _find_wechat_main_window() -> int:
-    for hwnd, class_name, title in _enum_visible_windows():
+    windows = _enum_visible_windows()
+    for hwnd, class_name, title in windows:
         class_key = str(class_name or "").strip().lower()
         title_text = str(title or "").strip()
         if class_key in WECHAT_MAIN_WINDOW_CLASS_HINTS:
             return int(hwnd)
         if title_text and any(hint in title_text for hint in WECHAT_WINDOW_TITLE_HINTS):
             return int(hwnd)
+    # Fallback for new client variants: match top-level visible windows by WeChat process pid.
+    try:
+        wechat_pids = _list_wechat_client_pids()
+        if wechat_pids:
+            user32 = ctypes.windll.user32
+            pid_ref = ctypes.c_ulong(0)
+            for hwnd, _class_name, _title in windows:
+                pid_ref.value = 0
+                try:
+                    user32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid_ref))
+                except Exception:
+                    continue
+                if int(pid_ref.value or 0) in wechat_pids:
+                    return int(hwnd)
+    except Exception:
+        pass
     return 0
 
 
