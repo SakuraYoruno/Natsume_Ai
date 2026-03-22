@@ -1025,6 +1025,232 @@ class WeChatUiInboundBridge:
             win32_samples,
         )
 
+
+class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
+    """Inbound bridge: WinEvent hook + OCR parse of active chat message area."""
+
+    def __init__(
+        self,
+        *,
+        edge_url: str,
+        enabled: bool,
+        poll_interval_s: float,
+        callback_timeout_s: float,
+        dedup_window_s: float,
+        ocr_min_score: float,
+        inbound_x_ratio_max: float,
+    ) -> None:
+        super().__init__(
+            edge_url=edge_url,
+            enabled=enabled,
+            poll_interval_s=poll_interval_s,
+            callback_timeout_s=callback_timeout_s,
+            dedup_window_s=dedup_window_s,
+        )
+        self._ocr_min_score = max(0.1, min(0.99, float(ocr_min_score)))
+        self._inbound_x_ratio_max = max(0.2, min(0.95, float(inbound_x_ratio_max)))
+        self._ocr_engine = None
+        self._ocr_disabled = False
+        self._last_ocr_diag_at = 0.0
+        self._last_ocr_sender = "active_chat"
+
+    def _collect_chat_previews(self) -> list[tuple[str, str]]:
+        # Reuse UIA path first; when UIA tree is opaque fallback to OCR.
+        previews = super()._collect_chat_previews()
+        if previews:
+            return previews
+        return self._collect_chat_previews_via_ocr()
+
+    def _collect_chat_previews_via_ocr(self) -> list[tuple[str, str]]:
+        hwnd = _find_wechat_main_window()
+        if not hwnd:
+            return []
+
+        roi = self._resolve_message_roi(hwnd)
+        if roi is None:
+            return []
+        left, top, width, height = roi
+        if width <= 20 or height <= 20:
+            return []
+
+        image = self._capture_region_bgr(left=left, top=top, width=width, height=height)
+        if image is None:
+            return []
+        ocr_rows = self._run_ocr(image)
+        if not ocr_rows:
+            return []
+
+        # Keep only likely inbound bubbles on left side.
+        inbound_candidates: list[tuple[int, str]] = []
+        for cy, cx, text_value, score in ocr_rows:
+            if score < self._ocr_min_score:
+                continue
+            norm = _normalize_message_text(text_value)
+            if not norm:
+                continue
+            if _is_probably_time_or_badge(norm):
+                continue
+            if cx > int(width * self._inbound_x_ratio_max):
+                continue
+            if len(norm) <= 1:
+                continue
+            inbound_candidates.append((cy, norm))
+
+        if not inbound_candidates:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_ocr_diag_at) >= 18.0:
+                self._last_ocr_diag_at = now_mono
+                logger.info(
+                    "ocr inbound heartbeat: rows=%d inbound=0 score>=%.2f x_max=%.2f",
+                    len(ocr_rows),
+                    self._ocr_min_score,
+                    self._inbound_x_ratio_max,
+                )
+            return []
+
+        inbound_candidates.sort(key=lambda x: x[0])
+        latest_text = inbound_candidates[-1][1]
+        sender = self._infer_active_chat_sender(hwnd=hwnd)
+        self._last_ocr_sender = sender
+        return [(sender, latest_text)]
+
+    def _resolve_message_roi(self, hwnd: int) -> tuple[int, int, int, int] | None:
+        try:
+            from pywinauto import Desktop
+        except Exception:
+            return None
+        try:
+            window = Desktop(backend="uia").window(handle=hwnd)
+            rect = window.rectangle()
+            left = int(rect.left)
+            top = int(rect.top)
+            right = int(rect.right)
+            bottom = int(rect.bottom)
+        except Exception:
+            return None
+        width = right - left
+        height = bottom - top
+        if width <= 0 or height <= 0:
+            return None
+
+        # Right message panel body.
+        roi_left = left + int(width * 0.42)
+        roi_top = top + int(height * 0.18)
+        roi_right = left + int(width * 0.97)
+        roi_bottom = top + int(height * 0.84)
+        roi_w = max(0, roi_right - roi_left)
+        roi_h = max(0, roi_bottom - roi_top)
+        return roi_left, roi_top, roi_w, roi_h
+
+    def _capture_region_bgr(self, *, left: int, top: int, width: int, height: int) -> Any:
+        try:
+            import mss
+            import numpy as np
+        except Exception as exc:
+            if not self._ocr_disabled:
+                logger.warning("ocr capture dependency missing: %s", exc)
+                self._ocr_disabled = True
+            return None
+        monitor = {"left": int(left), "top": int(top), "width": int(width), "height": int(height)}
+        try:
+            with mss.mss() as sct:
+                shot = sct.grab(monitor)
+            arr = np.array(shot)
+            if arr.ndim != 3 or arr.shape[2] < 3:
+                return None
+            # BGRA -> BGR
+            return arr[:, :, :3].copy()
+        except Exception:
+            return None
+
+    def _ensure_ocr_engine(self) -> Any:
+        if self._ocr_disabled:
+            return None
+        if self._ocr_engine is not None:
+            return self._ocr_engine
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except Exception as exc:
+            logger.warning("rapidocr unavailable for inbound ocr: %s", exc)
+            self._ocr_disabled = True
+            return None
+        try:
+            self._ocr_engine = RapidOCR()
+            logger.info("ocr inbound engine initialized: rapidocr_onnxruntime")
+            return self._ocr_engine
+        except Exception as exc:
+            logger.warning("rapidocr init failed: %s", exc)
+            self._ocr_disabled = True
+            return None
+
+    def _run_ocr(self, image_bgr: Any) -> list[tuple[int, int, str, float]]:
+        engine = self._ensure_ocr_engine()
+        if engine is None:
+            return []
+        try:
+            result, _ = engine(image_bgr)
+        except Exception as exc:
+            logger.warning("ocr run failed: %s", exc)
+            return []
+        if not result:
+            return []
+
+        rows: list[tuple[int, int, str, float]] = []
+        for item in result:
+            try:
+                box = item[0]
+                text_value = str(item[1] or "")
+                score = float(item[2] or 0.0)
+                points = [(int(p[0]), int(p[1])) for p in box]
+                xs = [p[0] for p in points]
+                ys = [p[1] for p in points]
+                cx = int(sum(xs) / max(1, len(xs)))
+                cy = int(sum(ys) / max(1, len(ys)))
+            except Exception:
+                continue
+            rows.append((cy, cx, text_value, score))
+        rows.sort(key=lambda x: (x[0], x[1]))
+        return rows
+
+    def _infer_active_chat_sender(self, *, hwnd: int) -> str:
+        # Prefer UIA header text when available.
+        try:
+            from pywinauto import Desktop
+            window = Desktop(backend="uia").window(handle=hwnd)
+            rect = window.rectangle()
+            left = int(rect.left)
+            top = int(rect.top)
+            right = int(rect.right)
+            bottom = int(rect.bottom)
+            width = right - left
+            height = bottom - top
+            title_candidates: list[tuple[int, str]] = []
+            for node in window.descendants(control_type="Text"):
+                try:
+                    text_value = _normalize_message_text(node.window_text())
+                    if not text_value:
+                        continue
+                    node_rect = node.rectangle()
+                    cx = int((int(node_rect.left) + int(node_rect.right)) / 2)
+                    cy = int((int(node_rect.top) + int(node_rect.bottom)) / 2)
+                except Exception:
+                    continue
+                if cx < (left + int(width * 0.42)):
+                    continue
+                if cy > (top + int(height * 0.18)):
+                    continue
+                if _is_probably_time_or_badge(text_value):
+                    continue
+                if text_value in {"聊天信息", "搜索"}:
+                    continue
+                title_candidates.append((len(text_value), text_value))
+            if title_candidates:
+                title_candidates.sort(key=lambda x: x[0], reverse=True)
+                return _normalize_message_text(title_candidates[0][1]) or self._last_ocr_sender
+        except Exception:
+            pass
+        return self._last_ocr_sender
+
 def _is_wechat_client_running() -> bool:
     return bool(_list_wechat_client_process_names())
 
@@ -1533,7 +1759,7 @@ def main() -> int:
     parser.add_argument(
         "--inbound-backend",
         default=(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or DEFAULT_INBOUND_BACKEND).strip(),
-        help=f"Inbound backend: uia_hook|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
+        help=f"Inbound backend: uia_hook|uia_ocr|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
         "--listener-poll-interval",
@@ -1563,6 +1789,18 @@ def main() -> int:
         default=(os.environ.get("EDGE_WECHAT_NOTIFY_HANDLER_KEYWORDS") or ",".join(DEFAULT_NOTIFY_HANDLER_KEYWORDS)).strip(),
         help="Comma-separated keywords for NotificationHandler.PrimaryId matching.",
     )
+    parser.add_argument(
+        "--ocr-min-score",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_OCR_MIN_SCORE") or "0.45"),
+        help="OCR minimum score threshold for inbound extraction.",
+    )
+    parser.add_argument(
+        "--ocr-inbound-x-ratio-max",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_OCR_INBOUND_X_RATIO_MAX") or "0.62"),
+        help="Right-panel X ratio max for inbound bubble candidates (left side only).",
+    )
     args = parser.parse_args()
 
     queue_file = _normalize_optional_path(args.command_queue_file)
@@ -1574,7 +1812,7 @@ def main() -> int:
     if inbound_backend in {"none", "off", "disabled"}:
         listener_enabled = False
         inbound_backend = "off"
-    elif inbound_backend not in {"uia_hook", "win_notify"}:
+    elif inbound_backend not in {"uia_hook", "uia_ocr", "win_notify"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
     notify_keywords = [
@@ -1620,6 +1858,16 @@ def main() -> int:
             dedup_window_s=float(args.listener_dedup_window),
             db_path=str(args.notify_db_path or DEFAULT_NOTIFY_DB_PATH),
             handler_keywords=notify_keywords,
+        )
+    elif inbound_backend == "uia_ocr":
+        inbound_bridge = WeChatUiOcrInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+            ocr_min_score=float(args.ocr_min_score),
+            inbound_x_ratio_max=float(args.ocr_inbound_x_ratio_max),
         )
     else:
         inbound_bridge = WeChatUiInboundBridge(
