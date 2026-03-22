@@ -1750,10 +1750,18 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             return [extracted]
 
         self._vision_fail_streak += 1
-        # Only degrade when vision model is unavailable (e.g. not pulled).
-        # For timeout/slow inference, keep vision-only to avoid OCR noise loops.
-        if self._vision_unavailable and self._vision_fail_streak >= 2:
-            return super()._collect_chat_previews()
+        # Hybrid mode: after repeated empty/failed vision reads, fallback to OCR/UIA once.
+        # This keeps vision as primary path but avoids long periods of no inbound detection.
+        if self._vision_fail_streak >= 4:
+            fallback = super()._collect_chat_previews()
+            if fallback:
+                logger.info(
+                    "vision inbound fallback via ocr/uia: rows=%d fail_streak=%d",
+                    len(fallback),
+                    int(self._vision_fail_streak),
+                )
+                self._vision_fail_streak = 0
+                return fallback
         return []
 
     def _infer_latest_inbound_via_vision(
