@@ -1053,6 +1053,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         self._ocr_disabled = False
         self._last_ocr_diag_at = 0.0
         self._last_ocr_sender = "active_chat"
+        self._last_focus_retry_at = 0.0
 
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
         # Reuse UIA path first; when UIA tree is opaque fallback to OCR.
@@ -1066,7 +1067,58 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         if not hwnd:
             return []
 
+        right_ocr_rows, list_ocr_rows, right_previews, list_previews = self._collect_ocr_from_rois(hwnd=hwnd)
+        if right_previews:
+            return right_previews
+        if list_previews:
+            return list_previews
+
+        now_mono = time.monotonic()
+        if (not right_ocr_rows) and (not list_ocr_rows) and ((now_mono - self._last_focus_retry_at) >= 20.0):
+            self._last_focus_retry_at = now_mono
+            focused, focus_detail = _focus_wechat_main_window(wechat_path="")
+            if focused:
+                time.sleep(0.18)
+                retry_right_rows, retry_list_rows, retry_right_previews, retry_list_previews = self._collect_ocr_from_rois(
+                    hwnd=hwnd
+                )
+                if retry_right_previews:
+                    return retry_right_previews
+                if retry_list_previews:
+                    return retry_list_previews
+                if retry_right_rows:
+                    right_ocr_rows = retry_right_rows
+                if retry_list_rows:
+                    list_ocr_rows = retry_list_rows
+            else:
+                logger.info("ocr inbound focus retry skipped: %s", focus_detail)
+
+        now_mono = time.monotonic()
+        if (now_mono - self._last_ocr_diag_at) >= 18.0:
+            self._last_ocr_diag_at = now_mono
+            logger.info(
+                "ocr inbound heartbeat: right_rows=%d list_rows=%d score>=%.2f x_max=%.2f right_samples=%s list_samples=%s",
+                len(right_ocr_rows),
+                len(list_ocr_rows),
+                self._ocr_min_score,
+                self._inbound_x_ratio_max,
+                self._format_ocr_samples(right_ocr_rows),
+                self._format_ocr_samples(list_ocr_rows),
+            )
+        return []
+
+    def _collect_ocr_from_rois(
+        self,
+        *,
+        hwnd: int,
+    ) -> tuple[
+        list[tuple[int, int, str, float]],
+        list[tuple[int, int, str, float]],
+        list[tuple[str, str]],
+        list[tuple[str, str]],
+    ]:
         right_ocr_rows: list[tuple[int, int, str, float]] = []
+        right_previews: list[tuple[str, str]] = []
         right_roi = self._resolve_message_roi(hwnd)
         if right_roi is not None:
             r_left, r_top, r_width, r_height = right_roi
@@ -1083,9 +1135,10 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                         latest_text = inbound_candidates[-1][1]
                         sender = self._infer_active_chat_sender(hwnd=hwnd)
                         self._last_ocr_sender = sender
-                        return [(sender, latest_text)]
+                        right_previews = [(sender, latest_text)]
 
         list_ocr_rows: list[tuple[int, int, str, float]] = []
+        list_previews: list[tuple[str, str]] = []
         list_roi = self._resolve_chat_list_roi(hwnd)
         if list_roi is not None:
             l_left, l_top, l_width, l_height = list_roi
@@ -1097,22 +1150,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                         ocr_rows=list_ocr_rows,
                         roi_height=l_height,
                     )
-                    if list_previews:
-                        return list_previews
-
-        now_mono = time.monotonic()
-        if (now_mono - self._last_ocr_diag_at) >= 18.0:
-            self._last_ocr_diag_at = now_mono
-            logger.info(
-                "ocr inbound heartbeat: right_rows=%d list_rows=%d score>=%.2f x_max=%.2f right_samples=%s list_samples=%s",
-                len(right_ocr_rows),
-                len(list_ocr_rows),
-                self._ocr_min_score,
-                self._inbound_x_ratio_max,
-                self._format_ocr_samples(right_ocr_rows),
-                self._format_ocr_samples(list_ocr_rows),
-            )
-        return []
+        return right_ocr_rows, list_ocr_rows, right_previews, list_previews
 
     def _extract_inbound_candidates_from_message_roi(
         self,
@@ -1326,14 +1364,32 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         return roi_left, roi_top, roi_w, roi_h
 
     def _capture_region_bgr(self, *, left: int, top: int, width: int, height: int) -> Any:
+        pil_error: Exception | None = None
+        try:
+            from PIL import ImageGrab
+            import numpy as np
+
+            bbox = (int(left), int(top), int(left + width), int(top + height))
+            image = ImageGrab.grab(bbox=bbox, all_screens=True)
+            arr = np.array(image)
+            if arr.ndim == 3 and arr.shape[2] >= 3:
+                # RGB -> BGR
+                return arr[:, :, :3][:, :, ::-1].copy()
+        except Exception as exc:
+            pil_error = exc
+
         try:
             import mss
             import numpy as np
         except Exception as exc:
             if not self._ocr_disabled:
-                logger.warning("ocr capture dependency missing: %s", exc)
+                detail = str(exc)
+                if pil_error is not None:
+                    detail = f"pil={pil_error}; mss={exc}"
+                logger.warning("ocr capture dependency missing: %s", detail)
                 self._ocr_disabled = True
             return None
+
         monitor = {"left": int(left), "top": int(top), "width": int(width), "height": int(height)}
         try:
             with mss.mss() as sct:
