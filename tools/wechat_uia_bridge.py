@@ -8,10 +8,12 @@ interactive WeChat/Weixin desktop client.
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 import difflib
 import hashlib
 import html
+import io
 import json
 import logging
 import os
@@ -38,6 +40,11 @@ DEFAULT_INBOUND_BACKEND = "uia_hook"
 DEFAULT_UIA_SCAN_CHAT_LIST = False
 DEFAULT_FORCE_ACTIVE_CHAT_TARGET = True
 DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = 0.70
+DEFAULT_VISION_MODEL = "qwen2.5vl:3b"
+DEFAULT_VISION_API_URL = "http://127.0.0.1:11434/api/chat"
+DEFAULT_VISION_TIMEOUT_S = 12.0
+DEFAULT_VISION_MIN_CONFIDENCE = 0.50
+DEFAULT_VISION_MIN_INTERVAL_S = 1.8
 DEFAULT_NOTIFY_DB_PATH = r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db"
 DEFAULT_NOTIFY_HANDLER_KEYWORDS = ("weixin", "wechat", "tencent")
 DEFAULT_NOTIFY_PAYLOAD_KEYWORDS = ("微信", "weixin", "wechat", "tencent")
@@ -1648,6 +1655,211 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             pass
         return self._last_ocr_sender
 
+
+class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
+    """Inbound bridge: screenshot + Ollama vision model extraction."""
+
+    def __init__(
+        self,
+        *,
+        edge_url: str,
+        enabled: bool,
+        poll_interval_s: float,
+        callback_timeout_s: float,
+        dedup_window_s: float,
+        scan_chat_list: bool,
+        force_active_chat_target: bool,
+        active_inbound_x_ratio_max: float,
+        vision_model: str,
+        vision_api_url: str,
+        vision_timeout_s: float,
+        vision_min_confidence: float,
+        vision_min_interval_s: float,
+    ) -> None:
+        super().__init__(
+            edge_url=edge_url,
+            enabled=enabled,
+            poll_interval_s=poll_interval_s,
+            callback_timeout_s=callback_timeout_s,
+            dedup_window_s=dedup_window_s,
+            ocr_min_score=0.45,
+            inbound_x_ratio_max=0.62,
+            scan_chat_list=scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=active_inbound_x_ratio_max,
+        )
+        self._vision_model = str(vision_model or DEFAULT_VISION_MODEL).strip() or DEFAULT_VISION_MODEL
+        self._vision_api_url = str(vision_api_url or DEFAULT_VISION_API_URL).strip() or DEFAULT_VISION_API_URL
+        self._vision_timeout_s = max(1.0, float(vision_timeout_s))
+        self._vision_min_confidence = max(0.05, min(0.99, float(vision_min_confidence)))
+        self._vision_min_interval_s = max(0.6, float(vision_min_interval_s))
+        self._next_vision_call_at = 0.0
+        self._vision_unavailable = False
+        self._vision_fail_streak = 0
+        self._last_vision_diag_at = 0.0
+
+    def _collect_chat_previews(self) -> list[tuple[str, str]]:
+        hwnd = _find_wechat_main_window()
+        if not hwnd:
+            return []
+
+        if self._vision_unavailable:
+            return super()._collect_chat_previews()
+
+        now_mono = time.monotonic()
+        if now_mono < self._next_vision_call_at:
+            return []
+        self._next_vision_call_at = now_mono + self._vision_min_interval_s
+
+        roi = self._resolve_message_roi(hwnd)
+        if roi is None:
+            return []
+        left, top, width, height = roi
+        if width <= 20 or height <= 20:
+            return []
+
+        image = self._capture_region_bgr(left=left, top=top, width=width, height=height)
+        if image is None:
+            return []
+
+        extracted = self._infer_latest_inbound_via_vision(image_bgr=image, hwnd=hwnd)
+        if extracted:
+            self._vision_fail_streak = 0
+            return [extracted]
+
+        self._vision_fail_streak += 1
+        if self._vision_fail_streak >= 4:
+            # Vision path is not yielding output; degrade to OCR/UIA path.
+            return super()._collect_chat_previews()
+        return []
+
+    def _infer_latest_inbound_via_vision(
+        self,
+        *,
+        image_bgr: Any,
+        hwnd: int,
+    ) -> tuple[str, str] | None:
+        image_b64 = self._encode_png_base64(image_bgr=image_bgr)
+        if not image_b64:
+            return None
+
+        prompt = (
+            "你在读取微信PC端当前会话截图。"
+            "请只返回严格JSON对象，不要markdown、不要解释。"
+            "字段: inbound_text(字符串), confidence(0到1数字)。"
+            "inbound_text要求: 当前会话中最新一条'对方发来的文本消息'；"
+            "如果无法确定则返回空字符串。"
+        )
+        payload = {
+            "model": self._vision_model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [image_b64],
+                }
+            ],
+            "options": {"temperature": 0},
+        }
+        try:
+            req = urllib.request.Request(
+                url=self._vision_api_url,
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self._vision_timeout_s) as resp:
+                body = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        except Exception as exc:
+            detail = str(exc)
+            if "model" in detail.lower() and "not found" in detail.lower():
+                self._vision_unavailable = True
+                logger.warning(
+                    "vision inbound model unavailable (%s); fallback to ocr/uia",
+                    detail,
+                )
+            else:
+                logger.warning("vision inbound request failed: %s", detail)
+            return None
+
+        raw_content = ""
+        if isinstance(body, dict):
+            message_obj = body.get("message")
+            if isinstance(message_obj, dict):
+                raw_content = str(message_obj.get("content") or "")
+            elif "response" in body:
+                raw_content = str(body.get("response") or "")
+            elif "content" in body:
+                raw_content = str(body.get("content") or "")
+        parsed = self._parse_vision_json(raw_content)
+        inbound_text = _normalize_message_text(str(parsed.get("inbound_text") or parsed.get("text") or ""))
+        try:
+            confidence = float(parsed.get("confidence") or 0.0)
+        except Exception:
+            confidence = 0.0
+
+        if not inbound_text:
+            return None
+        if confidence < self._vision_min_confidence:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                logger.info(
+                    "vision inbound low confidence: conf=%.2f threshold=%.2f text=%.80s",
+                    confidence,
+                    self._vision_min_confidence,
+                    inbound_text,
+                )
+            return None
+        if _is_recent_outbound_echo(inbound_text):
+            return None
+
+        sender = "active_chat" if self._force_active_chat_target else self._infer_active_chat_sender(hwnd=hwnd)
+        sender_value = _normalize_message_text(sender) or "active_chat"
+        return sender_value, inbound_text
+
+    @staticmethod
+    def _encode_png_base64(*, image_bgr: Any) -> str:
+        try:
+            import numpy as np
+            from PIL import Image
+        except Exception:
+            return ""
+        try:
+            arr = np.asarray(image_bgr)
+            if arr.ndim != 3 or arr.shape[2] < 3:
+                return ""
+            rgb = arr[:, :, :3][:, :, ::-1]
+            image = Image.fromarray(rgb)
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            return base64.b64encode(buffer.getvalue()).decode("ascii")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _parse_vision_json(raw_content: str) -> dict[str, Any]:
+        text = str(raw_content or "").strip()
+        if not text:
+            return {}
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        candidates = [text]
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            candidates.append(match.group(0))
+        for candidate in candidates:
+            try:
+                payload = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return {}
+
 def _is_wechat_client_running() -> bool:
     return bool(_list_wechat_client_process_names())
 
@@ -2287,7 +2499,7 @@ def main() -> int:
     parser.add_argument(
         "--inbound-backend",
         default=(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or DEFAULT_INBOUND_BACKEND).strip(),
-        help=f"Inbound backend: uia_hook|uia_ocr|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
+        help=f"Inbound backend: uia_hook|uia_ocr|vision|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
         "--uia-scan-chat-list",
@@ -2345,6 +2557,34 @@ def main() -> int:
         default=float(os.environ.get("EDGE_WECHAT_OCR_INBOUND_X_RATIO_MAX") or "0.62"),
         help="Right-panel X ratio max for inbound bubble candidates (left side only).",
     )
+    parser.add_argument(
+        "--vision-model",
+        default=(os.environ.get("EDGE_WECHAT_VISION_MODEL") or DEFAULT_VISION_MODEL).strip(),
+        help=f"Ollama vision model id (default: {DEFAULT_VISION_MODEL}).",
+    )
+    parser.add_argument(
+        "--vision-api-url",
+        default=(os.environ.get("EDGE_WECHAT_VISION_API_URL") or DEFAULT_VISION_API_URL).strip(),
+        help=f"Ollama chat API URL (default: {DEFAULT_VISION_API_URL}).",
+    )
+    parser.add_argument(
+        "--vision-timeout",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_VISION_TIMEOUT_S") or DEFAULT_VISION_TIMEOUT_S),
+        help=f"Ollama vision request timeout in seconds (default: {DEFAULT_VISION_TIMEOUT_S}).",
+    )
+    parser.add_argument(
+        "--vision-min-confidence",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_VISION_MIN_CONFIDENCE") or DEFAULT_VISION_MIN_CONFIDENCE),
+        help=f"Minimum confidence accepted from vision output (default: {DEFAULT_VISION_MIN_CONFIDENCE}).",
+    )
+    parser.add_argument(
+        "--vision-min-interval",
+        type=float,
+        default=float(os.environ.get("EDGE_WECHAT_VISION_MIN_INTERVAL_S") or DEFAULT_VISION_MIN_INTERVAL_S),
+        help=f"Minimum interval between vision calls in seconds (default: {DEFAULT_VISION_MIN_INTERVAL_S}).",
+    )
     args = parser.parse_args()
 
     queue_file = _normalize_optional_path(args.command_queue_file)
@@ -2356,7 +2596,7 @@ def main() -> int:
     if inbound_backend in {"none", "off", "disabled"}:
         listener_enabled = False
         inbound_backend = "off"
-    elif inbound_backend not in {"uia_hook", "uia_ocr", "win_notify"}:
+    elif inbound_backend not in {"uia_hook", "uia_ocr", "vision", "win_notify"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
     uia_scan_chat_list = _parse_bool(args.uia_scan_chat_list, default=DEFAULT_UIA_SCAN_CHAT_LIST)
@@ -2365,6 +2605,11 @@ def main() -> int:
         default=DEFAULT_FORCE_ACTIVE_CHAT_TARGET,
     )
     uia_active_inbound_x_ratio_max = max(0.45, min(0.90, float(args.uia_active_inbound_x_ratio_max)))
+    vision_model = str(args.vision_model or DEFAULT_VISION_MODEL).strip() or DEFAULT_VISION_MODEL
+    vision_api_url = str(args.vision_api_url or DEFAULT_VISION_API_URL).strip() or DEFAULT_VISION_API_URL
+    vision_timeout_s = max(1.0, float(args.vision_timeout))
+    vision_min_confidence = max(0.05, min(0.99, float(args.vision_min_confidence)))
+    vision_min_interval_s = max(0.6, float(args.vision_min_interval))
     notify_keywords = [
         part.strip().lower()
         for part in str(args.notify_handler_keywords or "").split(",")
@@ -2393,7 +2638,7 @@ def main() -> int:
         (
             "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s "
             "listener_enabled=%s inbound_backend=%s scan_chat_list=%s "
-            "force_active_chat_target=%s active_x_max=%.2f"
+            "force_active_chat_target=%s active_x_max=%.2f vision_model=%s"
         ),
         args.edge_url,
         queue_file,
@@ -2404,6 +2649,7 @@ def main() -> int:
         uia_scan_chat_list,
         force_active_chat_target,
         uia_active_inbound_x_ratio_max,
+        vision_model,
     )
 
     if inbound_backend == "win_notify":
@@ -2415,6 +2661,22 @@ def main() -> int:
             dedup_window_s=float(args.listener_dedup_window),
             db_path=str(args.notify_db_path or DEFAULT_NOTIFY_DB_PATH),
             handler_keywords=notify_keywords,
+        )
+    elif inbound_backend == "vision":
+        inbound_bridge = WeChatVisionInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+            scan_chat_list=uia_scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=uia_active_inbound_x_ratio_max,
+            vision_model=vision_model,
+            vision_api_url=vision_api_url,
+            vision_timeout_s=vision_timeout_s,
+            vision_min_confidence=vision_min_confidence,
+            vision_min_interval_s=vision_min_interval_s,
         )
     elif inbound_backend == "uia_ocr":
         inbound_bridge = WeChatUiOcrInboundBridge(
