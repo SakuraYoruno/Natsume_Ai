@@ -1815,6 +1815,11 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             confidence = 0.0
 
         if not inbound_text:
+            now_mono = time.monotonic()
+            if (now_mono - self._last_vision_diag_at) >= 10.0:
+                self._last_vision_diag_at = now_mono
+                raw_preview = _normalize_message_text(raw_content)[:120]
+                logger.info("vision inbound empty result: raw=%.120s", raw_preview)
             return None
         if confidence < self._vision_min_confidence:
             now_mono = time.monotonic()
@@ -2017,27 +2022,60 @@ def _enum_child_windows(hwnd: int) -> list[tuple[int, str, str]]:
 
 def _find_wechat_main_window() -> int:
     windows = _enum_visible_windows()
+    best_hint_hwnd = 0
+    best_hint_area = 0
     for hwnd, class_name, title in windows:
         class_key = str(class_name or "").strip().lower()
         title_text = str(title or "").strip()
-        if class_key in WECHAT_MAIN_WINDOW_CLASS_HINTS:
-            return int(hwnd)
-        if title_text and any(hint in title_text for hint in WECHAT_WINDOW_TITLE_HINTS):
-            return int(hwnd)
+        if not (
+            class_key in WECHAT_MAIN_WINDOW_CLASS_HINTS
+            or (title_text and any(hint in title_text for hint in WECHAT_WINDOW_TITLE_HINTS))
+        ):
+            continue
+        rect = _get_window_rect(int(hwnd))
+        if rect is None:
+            continue
+        left, top, right, bottom = rect
+        width = max(0, int(right) - int(left))
+        height = max(0, int(bottom) - int(top))
+        area = int(width * height)
+        if width < 280 or height < 220:
+            continue
+        if area > best_hint_area:
+            best_hint_area = area
+            best_hint_hwnd = int(hwnd)
+    if best_hint_hwnd:
+        return int(best_hint_hwnd)
     # Fallback for new client variants: match top-level visible windows by WeChat process pid.
     try:
         wechat_pids = _list_wechat_client_pids()
         if wechat_pids:
             user32 = ctypes.windll.user32
             pid_ref = ctypes.c_ulong(0)
+            best_pid_hwnd = 0
+            best_pid_area = 0
             for hwnd, _class_name, _title in windows:
                 pid_ref.value = 0
                 try:
                     user32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid_ref))
                 except Exception:
                     continue
-                if int(pid_ref.value or 0) in wechat_pids:
-                    return int(hwnd)
+                if int(pid_ref.value or 0) not in wechat_pids:
+                    continue
+                rect = _get_window_rect(int(hwnd))
+                if rect is None:
+                    continue
+                left, top, right, bottom = rect
+                width = max(0, int(right) - int(left))
+                height = max(0, int(bottom) - int(top))
+                area = int(width * height)
+                if width < 280 or height < 220:
+                    continue
+                if area > best_pid_area:
+                    best_pid_area = area
+                    best_pid_hwnd = int(hwnd)
+            if best_pid_hwnd:
+                return int(best_pid_hwnd)
     except Exception:
         pass
     return 0
