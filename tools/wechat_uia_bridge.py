@@ -10,14 +10,18 @@ from __future__ import annotations
 import argparse
 import ctypes
 import hashlib
+import html
 import json
 import logging
 import os
 import re
+import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
+import tempfile
 import urllib.error
 import urllib.request
 from typing import Any
@@ -30,6 +34,9 @@ DEFAULT_CALLBACK_TIMEOUT_S = 6.0
 DEFAULT_LISTENER_POLL_INTERVAL_S = 1.2
 DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 DEFAULT_INBOUND_BACKEND = "uia_hook"
+DEFAULT_NOTIFY_DB_PATH = r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db"
+DEFAULT_NOTIFY_HANDLER_KEYWORDS = ("weixin", "wechat", "tencent")
+FILETIME_1601_TO_1970 = 116444736000000000
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "wechatmainwndforpc",
@@ -205,6 +212,349 @@ def _post_to_edge_callback(edge_url: str, body: dict[str, Any], *, timeout_s: fl
     except Exception as exc:
         logger.warning("wechat callback request failed: %s", exc)
     return False
+
+
+class WeChatWindowsNotificationInboundBridge:
+    """Inbound bridge: poll Windows notification DB and forward WeChat notifications."""
+
+    def __init__(
+        self,
+        *,
+        edge_url: str,
+        enabled: bool,
+        poll_interval_s: float,
+        callback_timeout_s: float,
+        dedup_window_s: float,
+        db_path: str,
+        handler_keywords: list[str],
+    ) -> None:
+        self._edge_url = str(edge_url or DEFAULT_EDGE_URL).strip()
+        self._enabled = bool(enabled)
+        self._poll_interval_s = max(0.5, float(poll_interval_s))
+        self._callback_timeout_s = max(0.2, float(callback_timeout_s))
+        self._dedup_window_s = max(1.0, float(dedup_window_s))
+        self._db_path = os.path.expandvars(str(db_path or DEFAULT_NOTIFY_DB_PATH).strip())
+        self._handler_keywords = [str(k or "").strip().lower() for k in handler_keywords if str(k or "").strip()]
+        if not self._handler_keywords:
+            self._handler_keywords = list(DEFAULT_NOTIFY_HANDLER_KEYWORDS)
+
+        self._next_poll_at = 0.0
+        self._baseline_ready = False
+        self._last_notification_id = 0
+        self._last_no_target_log_at = 0.0
+        self._last_error_log_at = 0.0
+        self._last_heartbeat_at = 0.0
+        self._recent_forwarded: dict[str, float] = {}
+        self._stats = {
+            "events": 0,
+            "messages_forwarded": 0,
+            "messages_deduped": 0,
+            "errors": 0,
+        }
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return dict(self._stats)
+
+    def start(self) -> None:
+        if not self._enabled:
+            logger.info("notification inbound listener disabled")
+            return
+        logger.info(
+            "notification inbound listener enabled db=%s keywords=%s",
+            self._db_path,
+            ",".join(self._handler_keywords),
+        )
+
+    def stop(self) -> None:
+        return
+
+    def process_cycle(self) -> int:
+        if not self._enabled:
+            return 0
+        now_mono = time.monotonic()
+        if now_mono < self._next_poll_at:
+            return 0
+        self._next_poll_at = now_mono + self._poll_interval_s
+
+        try:
+            max_id, events, handler_count = self._read_new_events_since(self._last_notification_id)
+        except Exception as exc:
+            self._stats["errors"] += 1
+            if (now_mono - self._last_error_log_at) >= 12.0:
+                self._last_error_log_at = now_mono
+                logger.warning("notification inbound cycle failed: %s", exc)
+            return 0
+
+        if handler_count <= 0:
+            if (now_mono - self._last_no_target_log_at) >= 20.0:
+                self._last_no_target_log_at = now_mono
+                logger.info(
+                    "notification inbound: no target handlers matched keywords=%s",
+                    ",".join(self._handler_keywords),
+                )
+            return 0
+
+        if not self._baseline_ready:
+            self._last_notification_id = max(self._last_notification_id, int(max_id))
+            self._baseline_ready = True
+            logger.info(
+                "notification inbound baseline initialized: max_id=%d handlers=%d",
+                self._last_notification_id,
+                handler_count,
+            )
+            return 0
+
+        forwarded = 0
+        for event in events:
+            notification_id = int(event.get("notification_id") or 0)
+            if notification_id > self._last_notification_id:
+                self._last_notification_id = notification_id
+
+            sender = str(event.get("sender") or "").strip()
+            content = _normalize_message_text(str(event.get("content") or ""))
+            if not sender or not content:
+                continue
+            if _is_probably_time_or_badge(content):
+                continue
+            if _is_recent_outbound_echo(content):
+                continue
+            if self._is_recent_duplicate(sender=sender, content=content):
+                self._stats["messages_deduped"] += 1
+                continue
+
+            ts_ms = int(event.get("ts_ms") or 0) or int(time.time() * 1000)
+            msg_id = f"notify-{notification_id}"
+            body = {
+                "id": msg_id,
+                "msg_id": msg_id,
+                "sender": sender,
+                "from_wxid": sender,
+                "receiver": "local_wechat",
+                "to_wxid": "local_wechat",
+                "content": content,
+                "text": content,
+                "type": 1,
+                "msg_type": "1",
+                "ts": int(ts_ms / 1000),
+                "bridge_backend": "win_notify",
+                "roomid": "",
+            }
+            ok = _post_to_edge_callback(
+                edge_url=self._edge_url,
+                body=body,
+                timeout_s=self._callback_timeout_s,
+            )
+            if ok:
+                forwarded += 1
+                self._stats["messages_forwarded"] += 1
+                logger.info(
+                    "notification inbound forwarded sender=%s msg_id=%s content=%.80s",
+                    sender,
+                    msg_id,
+                    content,
+                )
+
+        if (now_mono - self._last_heartbeat_at) >= 15.0:
+            self._last_heartbeat_at = now_mono
+            logger.info(
+                "notification inbound heartbeat: max_id=%d handlers=%d scanned=%d",
+                self._last_notification_id,
+                handler_count,
+                len(events),
+            )
+        return forwarded
+
+    def _is_recent_duplicate(self, *, sender: str, content: str) -> bool:
+        key = f"{str(sender or '').strip()}|{_normalize_message_text(content)}"
+        if not key.strip("|"):
+            return False
+        now_mono = time.monotonic()
+        stale = [k for k, ts in self._recent_forwarded.items() if (now_mono - ts) > self._dedup_window_s]
+        for item in stale:
+            self._recent_forwarded.pop(item, None)
+        if key in self._recent_forwarded:
+            return True
+        self._recent_forwarded[key] = now_mono
+        return False
+
+    def _read_new_events_since(self, last_notification_id: int) -> tuple[int, list[dict[str, Any]], int]:
+        db_copy = ""
+        wal_copy = ""
+        shm_copy = ""
+        if not os.path.exists(self._db_path):
+            raise RuntimeError(f"notification db not found: {self._db_path}")
+        try:
+            db_copy = tempfile.NamedTemporaryFile(prefix="natsume_wpn_", suffix=".db", delete=False).name
+            shutil.copy2(self._db_path, db_copy)
+            wal_src = self._db_path + "-wal"
+            shm_src = self._db_path + "-shm"
+            wal_copy = db_copy + "-wal"
+            shm_copy = db_copy + "-shm"
+            if os.path.exists(wal_src):
+                shutil.copy2(wal_src, wal_copy)
+            if os.path.exists(shm_src):
+                shutil.copy2(shm_src, shm_copy)
+        except Exception as exc:
+            raise RuntimeError(f"copy notification db failed: {exc}") from exc
+
+        try:
+            con = sqlite3.connect(db_copy, timeout=2.0)
+            cur = con.cursor()
+            try:
+                handler_rows = self._query_target_handlers(cur)
+                if not handler_rows:
+                    return int(last_notification_id or 0), [], 0
+                handler_ids = [int(row["handler_id"]) for row in handler_rows]
+                max_seen_id = int(last_notification_id or 0)
+                events: list[dict[str, Any]] = []
+                placeholder = ",".join("?" for _ in handler_ids)
+                sql = f"""
+                SELECT
+                  n.Id,
+                  n.HandlerId,
+                  nh.PrimaryId,
+                  n.ArrivalTime,
+                  n.Payload
+                FROM Notification n
+                JOIN NotificationHandler nh ON nh.RecordId = n.HandlerId
+                WHERE n.HandlerId IN ({placeholder}) AND n.Id > ?
+                ORDER BY n.Id ASC
+                LIMIT 180
+                """
+                params: list[Any] = list(handler_ids)
+                params.append(int(last_notification_id or 0))
+                rows = cur.execute(sql, params).fetchall()
+                for row in rows:
+                    notification_id = int(row[0] or 0)
+                    handler_id = int(row[1] or 0)
+                    primary_id = str(row[2] or "")
+                    arrival = row[3]
+                    payload = row[4]
+                    if notification_id > max_seen_id:
+                        max_seen_id = notification_id
+                    event = self._build_notification_event(
+                        notification_id=notification_id,
+                        handler_id=handler_id,
+                        primary_id=primary_id,
+                        arrival_filetime=arrival,
+                        payload=payload,
+                    )
+                    if event is None:
+                        continue
+                    events.append(event)
+                self._stats["events"] += len(events)
+                return max_seen_id, events, len(handler_ids)
+            finally:
+                con.close()
+        finally:
+            for path_value in (db_copy, wal_copy, shm_copy):
+                if not path_value:
+                    continue
+                try:
+                    if os.path.exists(path_value):
+                        os.remove(path_value)
+                except Exception:
+                    pass
+
+    def _query_target_handlers(self, cur: sqlite3.Cursor) -> list[dict[str, Any]]:
+        where_parts: list[str] = []
+        params: list[str] = []
+        for keyword in self._handler_keywords:
+            where_parts.append("lower(PrimaryId) LIKE ?")
+            params.append(f"%{keyword}%")
+        if not where_parts:
+            return []
+        sql = (
+            "SELECT RecordId, PrimaryId "
+            "FROM NotificationHandler "
+            f"WHERE {' OR '.join(where_parts)} "
+            "ORDER BY RecordId"
+        )
+        rows = cur.execute(sql, params).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            result.append(
+                {
+                    "handler_id": int(row[0] or 0),
+                    "primary_id": str(row[1] or ""),
+                }
+            )
+        return result
+
+    def _build_notification_event(
+        self,
+        *,
+        notification_id: int,
+        handler_id: int,
+        primary_id: str,
+        arrival_filetime: Any,
+        payload: Any,
+    ) -> dict[str, Any] | None:
+        payload_text = ""
+        if isinstance(payload, bytes):
+            payload_text = payload.decode("utf-8", errors="ignore")
+        else:
+            payload_text = str(payload or "")
+        texts = self._extract_payload_texts(payload_text)
+        if not texts:
+            return None
+        sender = texts[0]
+        content = texts[1] if len(texts) >= 2 else texts[0]
+        sender = _normalize_message_text(sender)
+        content = _normalize_message_text(content)
+        if not sender:
+            sender = self._fallback_sender(primary_id=primary_id, handler_id=handler_id)
+        if not sender or not content:
+            return None
+        return {
+            "notification_id": int(notification_id),
+            "sender": sender,
+            "content": content,
+            "ts_ms": self._filetime_to_unix_ms(arrival_filetime),
+        }
+
+    @staticmethod
+    def _fallback_sender(*, primary_id: str, handler_id: int) -> str:
+        text = str(primary_id or "").strip()
+        if text:
+            tail = text.rsplit("!", 1)[-1]
+            return _normalize_message_text(tail or text)
+        return f"handler_{handler_id}"
+
+    @staticmethod
+    def _filetime_to_unix_ms(value: Any) -> int:
+        try:
+            v = int(value)
+        except Exception:
+            return int(time.time() * 1000)
+        if v <= 0:
+            return int(time.time() * 1000)
+        ts_ms = int((v - FILETIME_1601_TO_1970) / 10_000)
+        if ts_ms <= 0:
+            return int(time.time() * 1000)
+        return ts_ms
+
+    @staticmethod
+    def _extract_payload_texts(payload_text: str) -> list[str]:
+        if not payload_text:
+            return []
+        xml_texts = re.findall(r"<text[^>]*>(.*?)</text>", payload_text, flags=re.IGNORECASE | re.DOTALL)
+        result: list[str] = []
+        for raw in xml_texts:
+            value = html.unescape(str(raw or ""))
+            value = re.sub(r"<[^>]+>", " ", value)
+            value = _normalize_message_text(value)
+            if not value:
+                continue
+            if value in result:
+                continue
+            result.append(value)
+        return result
 
 
 class _WinMsg(ctypes.Structure):
@@ -1136,12 +1486,12 @@ def main() -> int:
     parser.add_argument(
         "--listener-enabled",
         default=(os.environ.get("EDGE_WECHAT_LISTENER_ENABLED") or "1").strip(),
-        help="Enable inbound WinEvent/UIA listener (default from EDGE_WECHAT_LISTENER_ENABLED).",
+        help="Enable inbound listener (UIA hook / notification poll).",
     )
     parser.add_argument(
         "--inbound-backend",
         default=(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or DEFAULT_INBOUND_BACKEND).strip(),
-        help=f"Inbound backend: uia_hook|off (default: {DEFAULT_INBOUND_BACKEND}).",
+        help=f"Inbound backend: uia_hook|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
         "--listener-poll-interval",
@@ -1161,6 +1511,16 @@ def main() -> int:
         default=float(os.environ.get("EDGE_WECHAT_CALLBACK_TIMEOUT_S") or DEFAULT_CALLBACK_TIMEOUT_S),
         help=f"Timeout for posting /v1/edge/wechat/callback (default: {DEFAULT_CALLBACK_TIMEOUT_S}).",
     )
+    parser.add_argument(
+        "--notify-db-path",
+        default=(os.environ.get("EDGE_WECHAT_NOTIFY_DB_PATH") or DEFAULT_NOTIFY_DB_PATH).strip(),
+        help=f"Windows notification DB path (default: {DEFAULT_NOTIFY_DB_PATH}).",
+    )
+    parser.add_argument(
+        "--notify-handler-keywords",
+        default=(os.environ.get("EDGE_WECHAT_NOTIFY_HANDLER_KEYWORDS") or ",".join(DEFAULT_NOTIFY_HANDLER_KEYWORDS)).strip(),
+        help="Comma-separated keywords for NotificationHandler.PrimaryId matching.",
+    )
     args = parser.parse_args()
 
     queue_file = _normalize_optional_path(args.command_queue_file)
@@ -1172,9 +1532,14 @@ def main() -> int:
     if inbound_backend in {"none", "off", "disabled"}:
         listener_enabled = False
         inbound_backend = "off"
-    elif inbound_backend not in {"uia_hook"}:
+    elif inbound_backend not in {"uia_hook", "win_notify"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
+    notify_keywords = [
+        part.strip().lower()
+        for part in str(args.notify_handler_keywords or "").split(",")
+        if part.strip()
+    ]
     if not queue_file or not result_file:
         logger.error("queue/result file path is required")
         return 2
@@ -1204,13 +1569,24 @@ def main() -> int:
         inbound_backend,
     )
 
-    inbound_bridge = WeChatUiInboundBridge(
-        edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
-        enabled=listener_enabled,
-        poll_interval_s=float(args.listener_poll_interval),
-        callback_timeout_s=float(args.callback_timeout),
-        dedup_window_s=float(args.listener_dedup_window),
-    )
+    if inbound_backend == "win_notify":
+        inbound_bridge = WeChatWindowsNotificationInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+            db_path=str(args.notify_db_path or DEFAULT_NOTIFY_DB_PATH),
+            handler_keywords=notify_keywords,
+        )
+    else:
+        inbound_bridge = WeChatUiInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+        )
     inbound_bridge.start()
 
     offset = 0
