@@ -30,6 +30,7 @@ DEFAULT_CALLBACK_TIMEOUT_S = 6.0
 DEFAULT_LISTENER_POLL_INTERVAL_S = 1.2
 DEFAULT_LISTENER_DEDUP_WINDOW_S = 12.0
 DEFAULT_INBOUND_BACKEND = "uia_hook"
+DEFAULT_WCF_LOGIN_WAIT_S = 12.0
 WECHAT_PROCESS_NAMES = {"wechat.exe", "weixin.exe"}
 WECHAT_MAIN_WINDOW_CLASS_HINTS = {
     "wechatmainwndforpc",
@@ -216,10 +217,12 @@ class WeChatWcferryInboundBridge:
         edge_url: str,
         enabled: bool,
         callback_timeout_s: float,
+        login_wait_s: float = DEFAULT_WCF_LOGIN_WAIT_S,
     ) -> None:
         self._edge_url = str(edge_url or DEFAULT_EDGE_URL).strip()
         self._enabled = bool(enabled)
         self._callback_timeout_s = max(0.2, float(callback_timeout_s))
+        self._login_wait_s = max(0.0, float(login_wait_s))
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._wcf = None
@@ -285,11 +288,31 @@ class WeChatWcferryInboundBridge:
             logger.warning("wcferry import failed for inbound backend: %s", exc)
             return
         try:
-            self._wcf = Wcf(debug=False)
+            # block=False avoids constructor-level indefinite login wait.
+            self._wcf = Wcf(debug=False, block=False)
         except Exception as exc:
             logger.warning("wcferry init failed: %s", exc)
             return
         logger.info("wcferry inbound init ok")
+
+        login_state = None
+        if hasattr(self._wcf, "is_login"):
+            start_mono = time.monotonic()
+            while not self._stop_event.is_set():
+                try:
+                    login_state = bool(self._wcf.is_login())
+                except Exception:
+                    login_state = None
+                if login_state:
+                    break
+                if (time.monotonic() - start_mono) >= self._login_wait_s:
+                    break
+                time.sleep(0.8)
+        logger.info(
+            "wcferry login probe: is_login=%s wait_s=%.1f",
+            login_state,
+            self._login_wait_s,
+        )
 
         try:
             self._self_wxid = str(getattr(self._wcf, "self_wxid", "") or "").strip()
