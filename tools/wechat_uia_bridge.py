@@ -1900,6 +1900,47 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
                 return payload
         return {}
 
+
+class WeChatVisionNotifyInboundBridge:
+    """Inbound bridge: vision when WeChat is foreground, else notification DB polling."""
+
+    def __init__(
+        self,
+        *,
+        vision_bridge: WeChatVisionInboundBridge,
+        notify_bridge: WeChatWindowsNotificationInboundBridge,
+    ) -> None:
+        self._vision_bridge = vision_bridge
+        self._notify_bridge = notify_bridge
+        self._last_mode = ""
+        self._last_mode_log_at = 0.0
+
+    def start(self) -> None:
+        self._vision_bridge.start()
+        self._notify_bridge.start()
+
+    def stop(self) -> None:
+        self._vision_bridge.stop()
+        self._notify_bridge.stop()
+
+    def process_cycle(self) -> int:
+        hwnd = _find_wechat_main_window()
+        foreground = _is_window_foreground_or_child(int(hwnd or 0))
+        mode = "vision" if foreground else "win_notify"
+        now_mono = time.monotonic()
+        if mode != self._last_mode or (now_mono - self._last_mode_log_at) >= 20.0:
+            self._last_mode = mode
+            self._last_mode_log_at = now_mono
+            logger.info(
+                "vision_notify mode=%s hwnd=0x%X foreground=%s",
+                mode,
+                int(hwnd or 0),
+                bool(foreground),
+            )
+        if foreground:
+            return int(self._vision_bridge.process_cycle() or 0)
+        return int(self._notify_bridge.process_cycle() or 0)
+
 def _is_wechat_client_running() -> bool:
     return bool(_list_wechat_client_process_names())
 
@@ -2639,7 +2680,7 @@ def main() -> int:
     parser.add_argument(
         "--inbound-backend",
         default=(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or DEFAULT_INBOUND_BACKEND).strip(),
-        help=f"Inbound backend: uia_hook|uia_ocr|vision|win_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
+        help=f"Inbound backend: uia_hook|uia_ocr|vision|win_notify|vision_notify|off (default: {DEFAULT_INBOUND_BACKEND}).",
     )
     parser.add_argument(
         "--uia-scan-chat-list",
@@ -2736,7 +2777,7 @@ def main() -> int:
     if inbound_backend in {"none", "off", "disabled"}:
         listener_enabled = False
         inbound_backend = "off"
-    elif inbound_backend not in {"uia_hook", "uia_ocr", "vision", "win_notify"}:
+    elif inbound_backend not in {"uia_hook", "uia_ocr", "vision", "win_notify", "vision_notify"}:
         logger.warning("invalid inbound backend %s, fallback to uia_hook", inbound_backend)
         inbound_backend = "uia_hook"
     uia_scan_chat_list = _parse_bool(args.uia_scan_chat_list, default=DEFAULT_UIA_SCAN_CHAT_LIST)
@@ -2792,7 +2833,36 @@ def main() -> int:
         vision_model,
     )
 
-    if inbound_backend == "win_notify":
+    if inbound_backend == "vision_notify":
+        vision_bridge = WeChatVisionInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+            scan_chat_list=uia_scan_chat_list,
+            force_active_chat_target=force_active_chat_target,
+            active_inbound_x_ratio_max=uia_active_inbound_x_ratio_max,
+            vision_model=vision_model,
+            vision_api_url=vision_api_url,
+            vision_timeout_s=vision_timeout_s,
+            vision_min_confidence=vision_min_confidence,
+            vision_min_interval_s=vision_min_interval_s,
+        )
+        notify_bridge = WeChatWindowsNotificationInboundBridge(
+            edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
+            enabled=listener_enabled,
+            poll_interval_s=float(args.listener_poll_interval),
+            callback_timeout_s=float(args.callback_timeout),
+            dedup_window_s=float(args.listener_dedup_window),
+            db_path=str(args.notify_db_path or DEFAULT_NOTIFY_DB_PATH),
+            handler_keywords=notify_keywords,
+        )
+        inbound_bridge = WeChatVisionNotifyInboundBridge(
+            vision_bridge=vision_bridge,
+            notify_bridge=notify_bridge,
+        )
+    elif inbound_backend == "win_notify":
         inbound_bridge = WeChatWindowsNotificationInboundBridge(
             edge_url=str(args.edge_url or DEFAULT_EDGE_URL),
             enabled=listener_enabled,

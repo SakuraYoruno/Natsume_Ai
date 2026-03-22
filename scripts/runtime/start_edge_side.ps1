@@ -7,7 +7,7 @@ param(
   [switch]$ForceRestart,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
-  [ValidateSet("", "uia", "uia_ocr", "vision")]
+  [ValidateSet("", "uia", "uia_ocr", "vision", "win_notify", "vision_notify")]
   [string]$WeChatInboundBackend = "",
   [string]$WeChatVisionModel = "",
   [string]$WeChatVisionApiUrl = "",
@@ -29,7 +29,7 @@ if (-not [string]::IsNullOrWhiteSpace($WeChatInboundBackend)) {
 $resolvedVisionModel = $WeChatVisionModel
 $resolvedVisionTimeoutS = $WeChatVisionTimeoutS
 $resolvedVisionMinIntervalS = $WeChatVisionMinIntervalS
-if ($WeChatInboundBackend -eq "vision") {
+if ($WeChatInboundBackend -in @("vision", "vision_notify")) {
   if ([string]::IsNullOrWhiteSpace($resolvedVisionModel)) {
     # qwen2.5vl:3b is often CPU-only on edge; gemma3:4b is faster and uses GPU on common setups.
     $resolvedVisionModel = "gemma3:4b"
