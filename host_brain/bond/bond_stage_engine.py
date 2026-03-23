@@ -389,7 +389,50 @@ class BondStageEngine:
 
         # 写入审计链
         self._log_transition(result, req_id)
+
+        # Phase IV：阶段晋级时触发人格成长
+        if transition_status == TRANSITION_STATUS_PROMOTED:
+            self._trigger_persona_growth(
+                user_id=uid,
+                from_stage=from_stage,
+                to_stage=new_stage,
+                ts_ms=ts,
+            )
+
         return result
+
+    # ── Phase IV：人格成长触发 ────────────────────────────────────────────
+
+    def _trigger_persona_growth(
+        self,
+        *,
+        user_id: str,
+        from_stage: str,
+        to_stage: str,
+        ts_ms: int,
+    ) -> None:
+        """阶段晋级时触发 PersonaGrowthTracker。
+
+        降级处理：如果 PersonaGrowthTracker 不可用，仅记录日志。
+        """
+        try:
+            from host_brain.persona.persona_growth import PersonaGrowthTracker
+            tracker = PersonaGrowthTracker()
+            result = tracker.on_stage_promoted(
+                user_id=user_id,
+                from_stage=from_stage,
+                to_stage=to_stage,
+                ts_ms=ts_ms,
+            )
+            _logger.info(
+                "人格成长触发: user=%s %s→%s applied=%s reason=%s",
+                user_id, from_stage, to_stage, result.applied, result.reason,
+            )
+        except Exception as exc:
+            _logger.warning(
+                "人格成长触发失败（降级跳过）: user=%s %s→%s error=%s",
+                user_id, from_stage, to_stage, exc,
+            )
 
     def get_state(self, user_id: str) -> BondScoreState:
         """获取用户当前 Bond 积分状态。"""

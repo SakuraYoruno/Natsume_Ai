@@ -35,6 +35,15 @@ from host_brain.persona.self_reflection import (
     SelfReflection,
     build_self_reflection_pulse,
 )
+from host_brain.persona.trait_drift_guard import (
+    TraitDriftGuard,
+    GuardCheckResult,
+)
+from host_brain.persona.persona_growth import (
+    PersonaGrowthTracker,
+    GrowthApplyResult,
+    GrowthRule,
+)
 
 __all__ = [
     # personality_traits.py
@@ -57,4 +66,11 @@ __all__ = [
     # self_reflection.py (Phase III)
     "SelfReflection",
     "build_self_reflection_pulse",
+    # trait_drift_guard.py (Phase IV)
+    "TraitDriftGuard",
+    "GuardCheckResult",
+    # persona_growth.py (Phase IV)
+    "PersonaGrowthTracker",
+    "GrowthApplyResult",
+    "GrowthRule",
 ]
