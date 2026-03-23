@@ -5163,6 +5163,38 @@ def _send_text(content: str, wechat_path: str, *, target: str) -> tuple[bool, st
         return False, f"send_text failed: {exc.__class__.__name__}: {exc}"
 
 
+def _send_text_active_chat_fast(content: str) -> tuple[bool, str]:
+    try:
+        import pyautogui
+    except Exception as exc:
+        return False, f"pyautogui import failed: {exc}"
+
+    clip_ok, clip_detail = _set_clipboard_text(content)
+    if not clip_ok:
+        return False, f"clipboard failed: {clip_detail}"
+
+    hwnd = _find_wechat_main_window()
+    if not hwnd:
+        return False, "wechat main window not found"
+    try:
+        user32 = ctypes.windll.user32
+        sw_restore = 9
+        user32.ShowWindow(hwnd, sw_restore)
+        user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+    try:
+        pyautogui.FAILSAFE = False
+        time.sleep(0.08)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.12)
+        pyautogui.press("enter")
+        return True, "active_chat_fast_paste_enter"
+    except Exception as exc:
+        return False, f"active_chat_fast_send failed: {exc.__class__.__name__}: {exc}"
+
+
 def _click_call_button(mode: str, wechat_path: str) -> tuple[bool, str]:
     ok, detail = _focus_wechat_main_window(wechat_path)
     if not ok:
@@ -5275,6 +5307,20 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             "reason_code": "WECHAT_COMMAND_CONTENT_MISSING",
             "detail": "send_text requires non-empty content",
         }
+
+    if action == "send_text":
+        active_only = bool(target_candidates) and all(_is_active_chat_target(item) for item in target_candidates)
+        if active_only:
+            send_ok, send_detail = _send_text_active_chat_fast(content=content)
+            return {
+                **base_row,
+                "status": ("ok" if send_ok else "error"),
+                "success": bool(send_ok),
+                "reason_code": (None if send_ok else "WECHAT_COMMAND_EXEC_FAILED"),
+                "detail": send_detail,
+                "resolved_target": "active_chat",
+                "target_candidates": target_candidates,
+            }
 
     focus_ok, focus_detail = _focus_wechat_main_window(wechat_path)
     if not focus_ok:
