@@ -4165,9 +4165,15 @@ def _focus_message_input_area(wechat_path: str) -> tuple[bool, str]:
                 editor_candidates.append((cy, node))
         if editor_candidates:
             editor_candidates.sort(key=lambda row: row[0], reverse=True)
-            editor_candidates[0][1].click_input()
-            time.sleep(0.10)
-            return True, "message_input_uia_edit"
+            editor = editor_candidates[0][1]
+            try:
+                editor.set_focus()
+                time.sleep(0.08)
+                return True, "message_input_uia_set_focus"
+            except Exception:
+                editor.click_input()
+                time.sleep(0.10)
+                return True, "message_input_uia_click"
     except Exception:
         pass
 
@@ -4182,6 +4188,13 @@ def _focus_message_input_area(wechat_path: str) -> tuple[bool, str]:
     )
     if editor_exists is False and require_editor:
         return False, "message_input_edit_not_found"
+
+    allow_mouse_fallback = _parse_bool(
+        os.environ.get("EDGE_WECHAT_ALLOW_INPUT_FALLBACK_CLICK"),
+        default=False,
+    )
+    if not allow_mouse_fallback:
+        return False, "message_input_mouse_fallback_disabled"
 
     # WeChat message editor is usually in the lower-right panel.
     click_x = int(left + width * 0.74)

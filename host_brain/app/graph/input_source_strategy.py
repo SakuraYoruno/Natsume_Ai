@@ -271,7 +271,7 @@ class WechatInputSourceStrategy(InputSourceStrategy):
                 context.request_id,
             )
             return True
-        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", False)
+        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", True)
         if _is_active_chat_target(policy.reply_target) and (not allow_active_target_reply):
             logger.info(
                 "run_main_chain_from_input: wechat direct reply skipped (active_chat target) request_id=%s",
@@ -317,7 +317,7 @@ class WechatInputSourceStrategy(InputSourceStrategy):
                 context.request_id,
             )
             return
-        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", False)
+        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", True)
         if _is_active_chat_target(policy.reply_target) and (not allow_active_target_reply):
             logger.info(
                 "run_main_chain_from_input: wechat auto reply skipped (active_chat target) request_id=%s",
