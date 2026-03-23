@@ -68,32 +68,78 @@ def build_emotion_pulse_slot(
     *,
     emotion_tag: str = "NEUTRAL",
     mood_state: str = "steady",
+    inner_monologue: str = "",
+    timeline_summary: "dict[str, Any] | None" = None,
+    echo_result: "dict[str, Any] | None" = None,
 ) -> dict[str, Any]:
-    """Convert the current emotion state into an emotion_pulse slot."""
+    """将当前情感状态转为 emotion_pulse 槽位（Phase 3 升级版）。
+
+    相比原版增加：
+    - inner_monologue: 基于 VAD 向量的第一人称内心独白（替代机械 style_hint）
+    - 情感时间线趋势的情绪流动描述
+    - 情感回声的共情描述
+    """
     valence = 0.0
     arousal = 0.3
+    dominance = 0.0
     if emotion_vector is not None:
         try:
             valence = float(getattr(emotion_vector, "valence", 0.0))
             arousal = float(getattr(emotion_vector, "arousal", 0.3))
+            dominance = float(getattr(emotion_vector, "dominance", 0.0))
         except Exception:
             pass
     intensity = round(arousal * 0.7 + abs(valence) * 0.3, 4)
-    if arousal > 0.7 and valence > 0.3:
-        style_hint = "活泼/高涨，表达积极热情"
-    elif arousal > 0.7 and valence < -0.3:
-        style_hint = "激动/安抚，保持语气温和"
-    elif arousal < 0.3:
-        style_hint = "平静/温和，语调轻柔舒缓"
+
+    # Phase 3: 构建丰富的 style_hint（渐进式，非二元）
+    style_parts: list[str] = []
+    if valence > 0.5:
+        style_parts.append("语气带着温暖和愉悦")
+    elif valence > 0.2:
+        style_parts.append("语气轻快自然")
+    elif valence < -0.5:
+        style_parts.append("语气温柔而克制")
+    elif valence < -0.2:
+        style_parts.append("语气略带沉静")
     else:
-        style_hint = "平稳/自然，保持语调流畅"
+        style_parts.append("语气平稳自然")
+    if arousal > 0.6:
+        style_parts.append("节奏稍快，表达有活力")
+    elif arousal < -0.2:
+        style_parts.append("节奏放慢，语调轻柔舒缓")
+    if dominance > 0.4:
+        style_parts.append("态度自信坚定")
+    elif dominance < -0.3:
+        style_parts.append("姿态柔软温顺")
+    style_hint = "，".join(style_parts)
+
+    # Phase 3: 情绪流动描述（基于时间线趋势）
+    flow_hint = ""
+    if timeline_summary and isinstance(timeline_summary, dict):
+        trend = str(timeline_summary.get("trend") or "stable").strip()
+        if trend == "improving":
+            flow_hint = "心情正在慢慢变好"
+        elif trend == "declining":
+            flow_hint = "感觉有些低落，不如刚才那么好了"
+
+    # Phase 3: 共情描述（基于情感回声）
+    empathy_hint = ""
+    if echo_result and isinstance(echo_result, dict):
+        empathy_hint = str(echo_result.get("response_hint") or "").strip()
+
+    # 组合完整的内心独白
+    monologue_parts = [p for p in [inner_monologue, flow_hint, empathy_hint] if p]
+    full_monologue = "。".join(monologue_parts) if monologue_parts else ""
+
     return {
         "emotion_tag": str(emotion_tag).strip().upper() or "NEUTRAL",
         "mood_state": str(mood_state).strip() or "steady",
         "valence": round(valence, 4),
         "arousal": round(arousal, 4),
+        "dominance": round(dominance, 4),
         "intensity": intensity,
         "style_hint": style_hint,
+        "inner_monologue": full_monologue,
     }
 
 

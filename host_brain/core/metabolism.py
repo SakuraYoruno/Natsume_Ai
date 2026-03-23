@@ -595,53 +595,104 @@ def compute_emotion_echo(
     *,
     current_vector: "EmotionVector",
     echo_weight: float = 0.4,
+    bond_stage: str = "",
 ) -> dict[str, Any]:
-    """计算情感回声——Natsume 对用户情感的共鸣响应（M29-H OPT-12）。
+    """计算情感回声——Natsume 对用户情感的共鸣响应（M29-H OPT-12 / Phase 5 升级）。
 
-    情感回声：Natsume 的情感状态向用户情感靠近（共情），
-    但保持一定的独立性（不完全镜像）。
+    Phase 5 升级：
+    - 用户情感映射扩展到 16 种标签（含 LOVING/PROUD/GRATEFUL 等）
+    - response_hint 根据关系深度（bond_stage）差异化
+    - 新增 echo_intensity 字段（回声强度，0.0~1.0）
 
     Args:
         user_emotion_tag: 用户当前情感标签
         current_vector: Natsume 当前情绪向量
         echo_weight: 回声权重（0.0~1.0），默认 0.4
+        bond_stage: 当前关系阶段（STRANGER~SOULMATE），为空时按 FRIEND 处理
 
     Returns:
-        包含 echo_emotion_tag、echo_vector、response_hint 的字典
+        包含 echo_emotion_tag、echo_vector、response_hint、echo_intensity 的字典
     """
-    # 用户情感 → EmotionVector 映射
+    # Phase 5: 扩展到 16 种用户情感标签的 VAD 映射
     _USER_EMOTION_MAP: dict[str, dict[str, float]] = {
-        "HAPPY":      {"valence": 0.6, "arousal": 0.4},
-        "EXCITED":    {"valence": 0.7, "arousal": 0.7},
-        "SAD":        {"valence": -0.5, "arousal": -0.3},
-        "ANGRY":      {"valence": -0.6, "arousal": 0.5},
-        "ANXIOUS":    {"valence": -0.3, "arousal": 0.4},
-        "FRUSTRATED": {"valence": -0.4, "arousal": 0.3},
-        "CALM":       {"valence": 0.2, "arousal": -0.3},
-        "NEUTRAL":    {"valence": 0.0, "arousal": 0.0},
-        "THINKING":   {"valence": 0.0, "arousal": 0.1},
+        "HAPPY":        {"valence":  0.6, "arousal":  0.4, "dominance":  0.2},
+        "EXCITED":      {"valence":  0.7, "arousal":  0.7, "dominance":  0.3},
+        "SAD":          {"valence": -0.5, "arousal": -0.3, "dominance": -0.3},
+        "ANGRY":        {"valence": -0.6, "arousal":  0.5, "dominance":  0.5},
+        "ANXIOUS":      {"valence": -0.3, "arousal":  0.4, "dominance": -0.3},
+        "FRUSTRATED":   {"valence": -0.4, "arousal":  0.3, "dominance":  0.2},
+        "CALM":         {"valence":  0.2, "arousal": -0.3, "dominance":  0.0},
+        "NEUTRAL":      {"valence":  0.0, "arousal":  0.0, "dominance":  0.0},
+        "THINKING":     {"valence":  0.0, "arousal":  0.1, "dominance":  0.3},
+        "LOVING":       {"valence":  0.7, "arousal":  0.3, "dominance":  0.1},
+        "EMBARRASSED":  {"valence": -0.2, "arousal":  0.4, "dominance": -0.4},
+        "CONFUSED":     {"valence": -0.1, "arousal":  0.2, "dominance": -0.2},
+        "BORED":        {"valence": -0.3, "arousal": -0.4, "dominance":  0.0},
+        "PROUD":        {"valence":  0.6, "arousal":  0.4, "dominance":  0.5},
+        "GRATEFUL":     {"valence":  0.6, "arousal":  0.2, "dominance": -0.2},
+        "SURPRISED":    {"valence":  0.3, "arousal":  0.6, "dominance":  0.0},
     }
-    user_vad = _USER_EMOTION_MAP.get(str(user_emotion_tag or "").upper(), {"valence": 0.0, "arousal": 0.0})
+    user_vad = _USER_EMOTION_MAP.get(
+        str(user_emotion_tag or "").upper(),
+        {"valence": 0.0, "arousal": 0.0, "dominance": 0.0},
+    )
     user_vec = EmotionVector(
         valence=user_vad["valence"],
         arousal=user_vad["arousal"],
-        dominance=0.0,
+        dominance=user_vad.get("dominance", 0.0),
         ts_ms=current_vector.ts_ms,
     )
     # 情感回声：当前向量向用户情感靠近
     echo_vec = current_vector.blend(user_vec, weight=echo_weight)
     echo_tag = echo_vec.to_emotion_tag()
-    # 响应提示
-    if echo_vec.valence > 0.3:
-        response_hint = "以积极温暖的语气回应"
-    elif echo_vec.valence < -0.3:
-        response_hint = "以温柔关怀的语气回应，表达理解和支持"
+
+    # Phase 5: 关系深度判定（shallow / medium / deep）
+    _stage = str(bond_stage or "").strip().upper()
+    _DEEP_STAGES = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
+    _MEDIUM_STAGES = {"FRIEND", "ACQUAINTANCE"}
+    if _stage in _DEEP_STAGES:
+        depth = "deep"
+    elif _stage in _MEDIUM_STAGES:
+        depth = "medium"
+    elif _stage in {"STRANGER"}:
+        depth = "shallow"
     else:
-        response_hint = "以平静自然的语气回应"
+        depth = "medium"
+
+    # Phase 5: 差异化响应提示（情绪方向 × 关系深度）
+    _valence_dir = (
+        "positive" if echo_vec.valence > 0.3
+        else "negative" if echo_vec.valence < -0.3
+        else "neutral"
+    )
+    _ECHO_HINTS: dict[tuple[str, str], str] = {
+        ("positive", "shallow"):  "对方心情不错，给予适当的回应，但保持分寸",
+        ("positive", "medium"):   "感受到对方的开心，也被感染了，可以自在地表达愉悦",
+        ("positive", "deep"):     "被对方的快乐深深感染，可以更自在地分享喜悦，甚至撒个小娇",
+        ("negative", "shallow"):  "对方似乎不太开心，表达基本的关心就好",
+        ("negative", "medium"):   "能感受到对方的不开心，想好好安慰一下，语气温柔些",
+        ("negative", "deep"):     "心疼对方，想好好陪着，可以说一些只有亲近的人才会说的话",
+        ("neutral",  "shallow"):  "正常交流，保持友好的距离",
+        ("neutral",  "medium"):   "自然平和地交流，像朋友一样轻松",
+        ("neutral",  "deep"):     "虽然话题平淡，但这种日常感也很舒服，享受陪伴的感觉",
+    }
+    response_hint = _ECHO_HINTS.get(
+        (_valence_dir, depth),
+        "以自然真诚的语气回应",
+    )
+
+    # 回声强度
+    echo_intensity = min(1.0, (
+        abs(echo_vec.valence - current_vector.valence) +
+        abs(echo_vec.arousal - current_vector.arousal)
+    ) / 2.0)
+
     return {
         "echo_emotion_tag": echo_tag,
         "echo_valence": round(echo_vec.valence, 4),
         "echo_arousal": round(echo_vec.arousal, 4),
         "response_hint": response_hint,
+        "echo_intensity": round(echo_intensity, 4),
+        "bond_depth": depth,
     }
 

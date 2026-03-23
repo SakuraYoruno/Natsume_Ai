@@ -820,15 +820,20 @@ def get_emotion_timeline():
             )
             _rows: list = []
             if _db_path:
+                # Phase 2: 精细化 16 种标签的 VAD 映射
                 _valence_map = {
-                    "HAPPY": 0.6, "EXCITED": 0.7, "CALM": 0.2, "THINKING": 0.0,
-                    "NEUTRAL": 0.0, "SAD": -0.5, "ANGRY": -0.6,
-                    "ANXIOUS": -0.3, "FRUSTRATED": -0.4,
+                    "HAPPY": 0.60, "EXCITED": 0.80, "CALM": 0.20, "THINKING": 0.0,
+                    "NEUTRAL": 0.0, "SAD": -0.60, "ANGRY": -0.70,
+                    "ANXIOUS": -0.40, "FRUSTRATED": -0.50,
+                    "LOVING": 0.80, "EMBARRASSED": -0.20, "CONFUSED": -0.10,
+                    "BORED": -0.30, "PROUD": 0.70, "GRATEFUL": 0.70, "SURPRISED": 0.30,
                 }
                 _arousal_map = {
-                    "HAPPY": 0.4, "EXCITED": 0.7, "CALM": -0.3, "THINKING": 0.1,
-                    "NEUTRAL": 0.0, "SAD": -0.3, "ANGRY": 0.5,
-                    "ANXIOUS": 0.4, "FRUSTRATED": 0.3,
+                    "HAPPY": 0.40, "EXCITED": 0.80, "CALM": -0.40, "THINKING": 0.20,
+                    "NEUTRAL": 0.0, "SAD": -0.20, "ANGRY": 0.80,
+                    "ANXIOUS": 0.70, "FRUSTRATED": 0.60,
+                    "LOVING": 0.30, "EMBARRASSED": 0.50, "CONFUSED": 0.30,
+                    "BORED": -0.50, "PROUD": 0.50, "GRATEFUL": 0.20, "SURPRISED": 0.70,
                 }
                 _since_ms = int(_time.time() * 1000) - 24 * 3600 * 1000
                 _conn = _sqlite3.connect(_db_path)

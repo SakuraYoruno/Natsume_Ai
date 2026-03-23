@@ -47,22 +47,22 @@ class TestEmotionPulseSlot:
         assert result["emotion_tag"] == "HAPPY"
 
     def test_high_arousal_positive_valence_style(self):
-        """高唤醒度 + 正效价时，style_hint 含活泼描述"""
+        """高唤醒度 + 正效价时，style_hint 含温暖/愉悦描述"""
         vector = EmotionVector(valence=0.8, arousal=0.9, dominance=0.0, ts_ms=0)
         result = build_emotion_pulse_slot(vector, emotion_tag="EXCITED", mood_state="engaged")
-        assert "活泼" in result["style_hint"] or "高涨" in result["style_hint"]
+        assert "温暖" in result["style_hint"] or "愉悦" in result["style_hint"] or "活力" in result["style_hint"]
 
     def test_high_arousal_negative_valence_style(self):
-        """高唤醒度 + 负效价时，style_hint 含安抚描述"""
+        """高唤醒度 + 负效价时，style_hint 含克制/温柔描述"""
         vector = EmotionVector(valence=-0.8, arousal=0.9, dominance=0.0, ts_ms=0)
         result = build_emotion_pulse_slot(vector, emotion_tag="ANGRY", mood_state="critical")
-        assert "安抚" in result["style_hint"] or "激动" in result["style_hint"]
+        assert "克制" in result["style_hint"] or "温柔" in result["style_hint"] or "活力" in result["style_hint"]
 
     def test_low_arousal_style(self):
-        """低唤醒度时，style_hint 含平静描述"""
-        vector = EmotionVector(valence=0.0, arousal=0.1, dominance=0.0, ts_ms=0)
+        """低唤醒度时，style_hint 含平静/舒缓描述"""
+        vector = EmotionVector(valence=0.0, arousal=-0.3, dominance=0.0, ts_ms=0)
         result = build_emotion_pulse_slot(vector, emotion_tag="CALM", mood_state="calm")
-        assert "平静" in result["style_hint"] or "温和" in result["style_hint"]
+        assert "舒缓" in result["style_hint"] or "平稳" in result["style_hint"] or "轻柔" in result["style_hint"]
 
     def test_intensity_in_valid_range(self):
         """intensity 在 [0.0, 1.0] 范围内"""

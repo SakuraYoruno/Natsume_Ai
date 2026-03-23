@@ -165,7 +165,7 @@ def persist_chat_episodic_memory(
 
     raw_tag = (emotion_context or {}).get("emotion_tag")
     tag = str(raw_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-    valence, arousal = map_emotion_tag_to_vad(tag)
+    valence, arousal, _dominance = map_emotion_tag_to_vad(tag)
 
     # [选项二] 接入 MemoryGuard：在写入 EpisodicStore 前进行宪法校验
     # 校验条件：对话轮次 ≥ 2 且包含情感/事实/偏好标签

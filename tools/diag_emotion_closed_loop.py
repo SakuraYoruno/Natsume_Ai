@@ -281,7 +281,7 @@ def _eval_case(case: EmotionCase, *, ts_ms: int) -> CaseResult:
     )
     vts_ok = bool(vts_result.status == STATUS_APPLIED and vts_result.expression_id)
 
-    valence, _ = map_emotion_tag_to_vad(normalized_tag)
+    valence, _, _ = map_emotion_tag_to_vad(normalized_tag)
     if case.expected_valence_sign > 0:
         valence_sign_ok = bool(valence > 0.0)
     elif case.expected_valence_sign < 0:

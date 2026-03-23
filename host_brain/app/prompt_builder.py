@@ -713,7 +713,18 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _et_entry_count = int(emotion_timeline.get("entry_count") or 0)
     _et_mode = str(emotion_timeline.get("mode") or "").strip()
     _echo_tag = str(emotion_echo.get("echo_emotion_tag") or "").strip() or "NONE"
-    _echo_hint = _truncate_for_prompt(emotion_echo.get("echo_hint"), limit=160) or "NONE"
+    _echo_hint = _truncate_for_prompt(emotion_echo.get("response_hint"), limit=160) or "NONE"  # Phase 5: 修复字段名 echo_hint→response_hint
+    _echo_intensity = emotion_echo.get("echo_intensity", 0.0)
+    _echo_bond_depth = str(emotion_echo.get("bond_depth") or "medium").strip()
+
+    # Phase 3: 内心独白（来自 emotion_context 的 VAD→自然语言转换）
+    _inner_monologue = _truncate_for_prompt(
+        runtime_payload.get("inner_monologue")
+        or merged_emotion_context.get("inner_monologue")
+        or prompt_context_emotion.get("inner_monologue")
+        or "",
+        limit=200,
+    )
 
     # 仅在 EmotionTimeline 有效数据时注入（mode 不为 SKIPPED/DEGRADED）
     _et_active = _et_mode not in ("SKIPPED", "SKIPPED_NOT_WIRED", "DEGRADED") and _et_entry_count > 0
@@ -729,6 +740,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- snapshot_age_ms: {snapshot_age_ms}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
+        # Phase 3: 内心独白注入（替代机械 style_hint 的核心升级）
+        + (f"- inner_monologue: {_inner_monologue}\n" if _inner_monologue else "")
         + (
             f"- bond_stage: {_bt_stage}\n"
             f"- bond_trend: {_bt_trend}\n"
@@ -745,6 +758,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- emotion_timeline_entry_count: {_et_entry_count}\n"
             f"- emotion_echo_tag: {_echo_tag}\n"
             f"- emotion_echo_hint: {_echo_hint}\n"
+            f"- emotion_echo_intensity: {_echo_intensity:.3f}\n"
+            f"- emotion_echo_bond_depth: {_echo_bond_depth}\n"
             if _et_active else
             "- emotion_timeline_dominant: NONE\n"
             "- emotion_timeline_trend: NONE\n"

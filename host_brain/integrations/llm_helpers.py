@@ -118,15 +118,22 @@ def _inject_emotion_gen_params(
     temperature = 0.55
     top_p = 0.85
 
-    if emotion_tag in ("EXCITED", "HAPPY", "SURPRISED"):
+    # Phase 2: 扩展到 16 种标签的精细化参数
+    if emotion_tag in ("EXCITED", "HAPPY", "SURPRISED", "LOVING", "PROUD"):
         temperature = 0.72
         top_p = 0.92
     elif emotion_tag in ("ANGRY", "FRUSTRATED", "ANXIOUS"):
         temperature = 0.50
         top_p = 0.82
-    elif emotion_tag in ("SAD", "TIRED") or mood_state in ("tired", "critical"):
+    elif emotion_tag in ("SAD", "TIRED", "BORED") or mood_state in ("tired", "critical"):
         temperature = 0.45
         top_p = 0.80
+    elif emotion_tag in ("CALM", "GRATEFUL"):
+        temperature = 0.52
+        top_p = 0.85
+    elif emotion_tag in ("EMBARRASSED", "CONFUSED"):
+        temperature = 0.58
+        top_p = 0.88
 
     result = dict(prompt_payload)
     result["gen_params"] = {
