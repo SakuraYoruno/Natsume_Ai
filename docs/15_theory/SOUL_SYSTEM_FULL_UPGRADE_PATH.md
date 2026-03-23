@@ -84,7 +84,37 @@ Phase VII → 跨会话情感连续性（持久化 + 衰减恢复模型）
 Phase VIII → 场景化主动表达（场景感知 + 人格驱动 + 节日问候）
 ```
 
-每阶段独立可交付，无硬依赖（建议按顺序实施，但允许跳阶段）。
+每阶段独立可交付，建议按顺序实施，但允许跳阶段（需注意软依赖）。
+
+### 2.0.1 阶段依赖关系图
+
+```mermaid
+graph TD
+    PI["Phase I<br/>人格引擎基座"] --> PII["Phase II<br/>情感-人格耦合"]
+    PI --> PIII["Phase III<br/>自我意识模型"]
+    PI --> PIV["Phase IV<br/>人格成长系统"]
+    PI --> PVI["Phase VI<br/>人格漂移检测"]
+    PII --> PVIII["Phase VIII<br/>场景化主动表达"]
+    PIII -.->|"可选：自省数据丰富叙事"| PV["Phase V<br/>Bond 深化"]
+    PIV -.->|"可选：成长事件作为里程碑"| PV
+    PVII["Phase VII<br/>跨会话情感连续性"] -.->|"独立，无前置依赖"| PVII
+
+    style PI fill:#ff6b6b,color:#fff
+    style PII fill:#ff6b6b,color:#fff
+    style PIII fill:#ffa502,color:#fff
+    style PIV fill:#ffa502,color:#fff
+    style PV fill:#ffa502,color:#fff
+    style PVI fill:#2ed573,color:#fff
+    style PVII fill:#ffa502,color:#fff
+    style PVIII fill:#2ed573,color:#fff
+```
+
+**依赖说明**：
+- **实线箭头** = 硬依赖（必须先完成上游）
+- **虚线箭头** = 软依赖（不完成也可独立运行，但完成后体验更好）
+- Phase I 是核心基座，Phase II / III / IV / VI 均依赖其 `PersonalityTraits` 数据结构
+- Phase V（Bond 深化）和 Phase VII（情感持久化）无硬前置依赖，可独立实施
+- Phase VIII 依赖 Phase II 的 `ExpressionHint` 来做人格化表达
 
 ---
 
@@ -132,6 +162,15 @@ class PersonaEngine:
 |------|------|
 | `wc-003-persona-core.json` | 新增 `personality_traits_baseline` 字段（7 维初始值） |
 
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-I-1 | `PersonaEngine` 单例可从 Canon 加载 7 维特质向量 | 单测：加载后断言 7 维值与 Canon 基线一致 |
+| V-I-2 | `get_traits(user_id)` 返回 `PersonalityTraits` 对象，字段齐全且值在 [0,1] 范围内 | 单测 |
+| V-I-3 | `wc-003-persona-core.json` 包含 `personality_traits_baseline` 字段 | 文件检查 |
+| V-I-4 | `PersonalityTraits` 支持向量运算：加、减、缩放、距离计算 | 单测 |
+
 ---
 
 ### 2.2 Phase II：情感-人格耦合
@@ -162,6 +201,15 @@ class PersonaEngine:
 | `metabolism.py` | `compute_emotion_echo()` 接收 `PersonalityTraits` 参数 |
 | `prompt_context.py` | `build_emotion_pulse_slot()` 接收 `ExpressionHint` 参数 |
 | `prompt_builder.py` | 注入 `persona_expression_hint` 到 LLM prompt |
+
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-II-1 | `EmotionReactivityProfile` 可根据特质向量 + 情感场景输出调制系数 | 单测：高敏感度 + SAD → echo_weight ≥ 0.5 |
+| V-II-2 | `PersonaExpressionAdapter` 根据 (traits, emotion, bond_stage) 输出 `ExpressionHint` | 单测 |
+| V-II-3 | `compute_emotion_echo()` 实际接收并使用 `PersonalityTraits` 参数 | 集成测试：对比有/无人格调制的回声差异 |
+| V-II-4 | `prompt_builder` 输出的 system prompt 中包含 `persona_expression_hint` 段落 | prompt 快照断言 |
 
 ---
 
@@ -219,6 +267,15 @@ OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 | `prompt_builder.py` | 注入 `self_reflection_pulse` 到 LLM system prompt |
 | `scheduler/` | 新增定期自省任务（每 N 轮对话触发一次） |
 
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-III-1 | `SelfModelSnapshot` 可从当前 EmotionTimeline + Bond 状态生成 | 单测：模拟数据 → 快照字段均非空 |
+| V-III-2 | `self_reflection_pulse` 槽位成功注入 system prompt | prompt 快照断言包含 `self_awareness` 字段 |
+| V-III-3 | 自省内容概率注入（每 5-10 轮触发一次），非每轮注入 | 集成测试：20 轮对话中注入次数在 2-4 次 |
+| V-III-4 | 自省内容与当前 Bond 阶段/情感趋势一致（不出现矛盾描述） | 场景测试：Bond=ACQUAINTANCE 时不出现"很亲近" |
+
 ---
 
 ### 2.4 Phase IV：人格成长系统（PersonaGrowth）
@@ -258,6 +315,16 @@ OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 | `bond_stage_engine.py` | 阶段晋级事件触发 PersonaGrowthTracker |
 | `canon_routes.py` | 新增 Canon Evolution 提案审批接口（可选） |
 
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-IV-1 | Bond 阶段晋级时触发 `PersonaGrowthTracker`，特质变化写入持久化 | 集成测试：模拟晋级 → 断言特质值变化 |
+| V-IV-2 | 单次变化幅度 ≤ 0.05，每周累计 ≤ 0.1 | 单测：超限变化被拒绝 |
+| V-IV-3 | 连续同向变化 > 3 次时生成 Canon Evolution 提案 | 单测：模拟 4 次同向 → 提案生成 |
+| V-IV-4 | warmth 超出 0.85 ± 0.15 范围的变化被阻止 | 单测：尝试设为 0.5 → 被拒绝 |
+| V-IV-5 | 审计日志记录每次变化，支持回滚 | 集成测试：回滚后特质恢复 |
+
 ---
 
 ### 2.5 Phase V：Bond 深化（共同记忆 + 里程碑）
@@ -296,6 +363,15 @@ OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 |------|------|
 | `bond_stage_engine.py` | `BondScoreState.to_summary()` 新增 `milestone_hint`、`shared_memory_count` |
 | `prompt_builder.py` / `chat_context_builder.py` | 注入 `bond_narrative` 叙事层 |
+
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-V-1 | `SharedMemoryIndex` 可从 episodic 中按情感浓度抽取共同记忆 | 单测：插入高 valence 记忆 → 可检索 |
+| V-V-2 | `MilestoneTracker` 在首次深度对话 / 关系天数达标时检测到里程碑 | 单测：模拟事件 → 里程碑列表非空 |
+| V-V-3 | `BondNarrativeLayer` 输出自然语言叙事，且注入 prompt 限制 ≤ 3 条 | prompt 快照断言 |
+| V-V-4 | `BondScoreState.to_summary()` 新增 `milestone_hint` 和 `shared_memory_count` | 单测 |
 
 ---
 
@@ -337,6 +413,15 @@ class DriftCheckResult:
 |------|------|
 | `main_chain.py` | 每 N 轮触发漂移检测 |
 | `qa.py` | SEVERE 漂移时注入校正提示 |
+
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-VI-1 | 每 10 轮对话触发一次漂移检测 | 集成测试：30 轮对话中检测触发 3 次 |
+| V-VI-2 | 漂移分数 < 0.2 时不产生任何副作用 | 单测 |
+| V-VI-3 | 漂移分数 ≥ 0.5 时校正提示注入到下一轮 system prompt | 集成测试 |
+| V-VI-4 | `persona_drift_log` 审计表正确记录 MILD / SEVERE 级事件 | DB 断言 |
 
 ---
 
@@ -390,6 +475,15 @@ class PersistedEmotionState:
 | `emotion_context.py` | 会话开始时调用 `restore_with_decay()` |
 | `main_chain.py` | 会话结束/超时时调用 `persist_emotion_state()` |
 
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-VII-1 | 会话结束时情感向量持久化到 `emotion_state_snapshot` 表 | DB 断言 |
+| V-VII-2 | 新会话开始时恢复情感向量，离线 1h 保留 ≥ 85% | 单测：模拟 1h → 断言 decay_factor |
+| V-VII-3 | 离线 48h+ 情感完全回归基线 | 单测：模拟 48h → 向量 ≈ baseline |
+| V-VII-4 | 无持久化记录时（首次用户），从中性基线启动 | 单测 |
+
 ---
 
 ### 2.8 Phase VIII：场景化主动表达
@@ -423,6 +517,15 @@ class PersistedEmotionState:
 | curiosity | 追问用户近况 | 简单问候 |
 | humor | 偶尔加入幽默 | 温柔正经 |
 
+#### 验收标准
+
+| # | 验收条件 | 验证方式 |
+|---|---------|----------|
+| V-VIII-1 | 深夜时段（23:00-02:00）+ 用户在线时触发主动表达 | 集成测试：模拟时间 + 在线状态 |
+| V-VIII-2 | 主动表达内容受人格特质影响（高 warmth → 关心类；高 playfulness → 俏皮类） | 场景测试：不同特质配置 → 输出风格差异 |
+| V-VIII-3 | 离线 > 3 天的用户回归时触发"久别重逢"表达 | 集成测试 |
+| V-VIII-4 | 主动表达频率有节制（同类型触发间隔 ≥ 24h） | 单测：连续触发被去重 |
+
 ---
 
 ## 三、新增文件清单汇总
@@ -442,7 +545,55 @@ class PersistedEmotionState:
 
 ---
 
-## 四、升级后灵魂系统完整架构
+## 四、运行时请求链路时序图
+
+以下时序图展示一次完整对话中，人格 / 情感 / Bond 系统如何协同工作：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户消息
+    participant MC as main_chain
+    participant EP as EmotionPersistence
+    participant PE as PersonaEngine
+    participant ELI as EmotionLLMInference
+    participant ER as EmotionReactivity
+    participant EA as ExpressionAdapter
+    participant SM as SelfModel
+    participant PB as prompt_builder
+    participant LLM as LLM 生成
+    participant DD as DriftDetector
+
+    U->>MC: 用户输入
+    MC->>EP: 1. 恢复持久化情感（首轮）
+    EP-->>MC: 衰减后的 EmotionVector
+    MC->>PE: 2. 获取当前人格特质
+    PE-->>MC: PersonalityTraits (7维)
+    MC->>ELI: 3. 情感推理（三级级联）
+    ELI-->>MC: emotion_tag + EmotionVector
+    MC->>ER: 4. 人格调制情感反应
+    ER-->>MC: 调制后的 echo_weight / arousal
+    MC->>EA: 5. 生成表达策略
+    EA-->>MC: ExpressionHint (style_hint, tone)
+    MC->>SM: 6. 获取自省快照（概率触发）
+    SM-->>MC: SelfModelSnapshot / None
+    MC->>PB: 7. 注入所有槽位到 prompt
+    Note over PB: emotion_pulse<br/>persona_expression_hint<br/>self_reflection_pulse<br/>bond_narrative
+    PB->>LLM: 8. 完整 system prompt + 用户消息
+    LLM-->>MC: 9. 生成回复
+    MC->>DD: 10. 漂移检测（每N轮）
+    DD-->>MC: DriftCheckResult
+    MC->>EP: 11. 持久化当前情感状态
+```
+
+**关键数据流说明**：
+- 步骤 2→4→5 是人格-情感耦合的核心链路：特质 → 调制情感 → 生成表达策略
+- 步骤 6 是概率性的，每 5-10 轮触发一次自省注入
+- 步骤 10 是守护性的，每 10 轮触发一次漂移检测
+- 步骤 1 和 11 构成跨会话情感持久化的读写闭环
+
+---
+
+## 五、升级后灵魂系统完整架构
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -503,7 +654,7 @@ class PersistedEmotionState:
 
 ---
 
-## 五、实施路线图
+## 六、实施路线图
 
 | 阶段 | 核心交付 | 预计工作量 | 优先级 |
 |------|---------|-----------|--------|
@@ -520,7 +671,7 @@ class PersistedEmotionState:
 
 ---
 
-## 六、风险与缓解
+## 七、风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
@@ -532,9 +683,9 @@ class PersistedEmotionState:
 
 ---
 
-## 七、与已有系统的关系
+## 八、与已有系统的关系
 
-### 7.1 与方向 A-G（已实施）的关系
+### 8.1 与方向 A-G（已实施）的关系
 
 | 已实施方向 | 与本文档的关系 |
 |-----------|---------------|
@@ -546,7 +697,7 @@ class PersistedEmotionState:
 | **方向 F**：用户情感画像 | Phase II 情感-人格耦合使用画像数据 |
 | **方向 G**：LLM 情感推理 + Agent | Phase II 表达策略注入级联管线 |
 
-### 7.2 与 Multi-Agent 体系的关系
+### 8.2 与 Multi-Agent 体系的关系
 
 本文档新增的所有模块**不改变 Agent 体系架构**，仅通过以下接口与之交互：
 - `prompt_context.py` 槽位注入（emotion_pulse / self_reflection_pulse / persona_expression_hint）
