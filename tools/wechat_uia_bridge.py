@@ -2142,6 +2142,19 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             return [extracted]
 
         self._vision_fail_streak += 1
+        if self._vision_fail_streak >= 3:
+            fallback_rows = super()._collect_chat_previews()
+            if fallback_rows:
+                now_mono = time.monotonic()
+                if (now_mono - self._last_vision_diag_at) >= 8.0:
+                    self._last_vision_diag_at = now_mono
+                    logger.info(
+                        "vision inbound fallback to ocr: fail_streak=%d previews=%d",
+                        self._vision_fail_streak,
+                        len(fallback_rows),
+                    )
+                self._vision_fail_streak = 0
+                return fallback_rows
         return []
 
     def _infer_latest_inbound_via_vision(
