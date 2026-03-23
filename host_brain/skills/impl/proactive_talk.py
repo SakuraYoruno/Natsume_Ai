@@ -16,6 +16,69 @@ from host_brain.core.ids import now_ms, new_event_id
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 方向 B：情感驱动问候——情感上下文融合到主动对话
+# ---------------------------------------------------------------------------
+
+def _build_emotion_hint_for_proactive(
+    emotion_context: dict[str, Any] | None,
+) -> str:
+    """方向 B：从情感上下文构建 LLM prompt 情感提示。
+
+    Args:
+        emotion_context: 包含以下可选字段：
+            - emotion_tag: 当前情感标签
+            - mood_state: 当前心情状态
+            - user_emotion_profile: 用户情感画像摘要
+            - emotion_timeline_summary: 情感时间线摘要
+            - triggered_emotions: 主动情感触发器结果
+            - emotion_diary: 最近情感日记
+
+    Returns:
+        拼接好的情感提示文本（可直接注入 LLM prompt）
+    """
+    if not emotion_context or not isinstance(emotion_context, dict):
+        return ""
+
+    hints: list[str] = []
+
+    # 1. 当前情感状态
+    tag = str(emotion_context.get("emotion_tag") or "").strip()
+    mood = str(emotion_context.get("mood_state") or "").strip()
+    if tag and tag != "NEUTRAL":
+        _EMOTION_ZH: dict[str, str] = {
+            "HAPPY": "开心", "EXCITED": "兴奋", "SAD": "有点难过",
+            "ANGRY": "有些生气", "CALM": "平静", "THINKING": "沉思",
+            "LOVING": "充满爱意", "EMBARRASSED": "害羞", "CONFUSED": "困惑",
+            "BORED": "有点无聊", "PROUD": "自豪", "GRATEFUL": "感激",
+            "ANXIOUS": "有些焦虑", "FRUSTRATED": "沮丧", "SURPRISED": "惊喜",
+        }
+        zh = _EMOTION_ZH.get(tag, tag)
+        hints.append(f"你现在的心情是{zh}的")
+
+    # 2. 用户情感画像（方向 F 输出）
+    profile = emotion_context.get("user_emotion_profile")
+    if isinstance(profile, dict):
+        profile_hint = str(profile.get("profile_hint") or "").strip()
+        if profile_hint:
+            hints.append(profile_hint)
+
+    # 3. 主动情感触发器结果
+    triggers = emotion_context.get("triggered_emotions")
+    if isinstance(triggers, list) and triggers:
+        trigger_tags = [str(t.get("emotion_tag", "")) for t in triggers[:2] if isinstance(t, dict)]
+        if trigger_tags:
+            hints.append(f"你感受到了{'、'.join(trigger_tags)}的情绪涌上来")
+
+    # 4. 情感日记片段（方向 D 输出）
+    diary = emotion_context.get("emotion_diary")
+    if isinstance(diary, dict):
+        diary_text = str(diary.get("diary_text") or "").strip()
+        if diary_text:
+            hints.append(f"你最近的情感日记写道：{diary_text[:60]}")
+
+    return "；".join(hints) + "。" if hints else ""
+
 # Skill 元数据常量
 SKILL_NAME = "proactive_talk"
 SKILL_CLEARANCE = "LOW"
@@ -75,6 +138,7 @@ def execute_proactive_talk(
         bond_summary: Bond 摘要（可选）
         user_name: 用户昵称
         time_period: 时段（覆盖自动检测）
+        emotion_context: 方向B 情感上下文（可选，含 emotion_tag/user_emotion_profile/triggered_emotions）
     """
     ctx = context or {}
     ts = now_ms()
@@ -114,6 +178,10 @@ def execute_proactive_talk(
     time_period = str(ctx.get("time_period", "")).strip() or _get_time_period()
     user_name = str(ctx.get("user_name", "主人")).strip()
 
+    # 方向 B：读取情感上下文
+    emotion_context: dict[str, Any] | None = ctx.get("emotion_context")
+    emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
+
     # LLM 生成主动问候
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
@@ -127,6 +195,9 @@ def execute_proactive_talk(
                 "topic_hint": args.get("topic_hint"),
                 "bond_summary": ctx.get("bond_summary", {}),
                 "ts_ms": ts,
+                # 方向 B：情感驱动问候上下文
+                "emotion_hint": emotion_hint,
+                "emotion_context": emotion_context or {},
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
@@ -167,6 +238,8 @@ def execute_proactive_talk(
         "time_period": time_period,
         "event_id": event_id,
         "ts_ms": ts,
+        # 方向 B：携带情感上下文供 UI 渲染（如表情切换）
+        "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
     }
 
     ui_pusher: UIPusher | None = ctx.get("ui_pusher")
@@ -188,4 +261,7 @@ def execute_proactive_talk(
         "request_id": request_id,
         "intent_id": intent_id,
         "ts_ms": ts,
+        # 方向 B：审计字段
+        "emotion_driven": bool(emotion_hint),
+        "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
     }

@@ -395,8 +395,21 @@ class NatsumeScheduler:
         """根据任务模板生成 system_initiated_intent。
 
         M27-K（OPT-39）：携带情感状态字段 emotion_tag / mood_state。
+        方向 B：携带 triggered_emotions 供 proactive_talk 消费。
         """
         template = dict(task.intent_template)
+
+        # 方向 B：评估主动情感触发器
+        triggered_emotions: list[dict[str, Any]] = []
+        try:
+            from host_brain.core.metabolism import evaluate_emotion_triggers  # noqa: PLC0415
+            triggered_emotions = evaluate_emotion_triggers({
+                "emotion_tag": emotion_tag,
+                "mood_state": mood_state,
+            })
+        except Exception:
+            pass
+
         return {
             "intent_id": intent_id,
             "request_id": request_id,
@@ -410,6 +423,8 @@ class NatsumeScheduler:
             # M27-K：情感状态字段
             "emotion_tag": emotion_tag,
             "mood_state": mood_state,
+            # 方向 B：主动情感触发器结果
+            "triggered_emotions": triggered_emotions,
         }
 
     # ── 审计写入 ──

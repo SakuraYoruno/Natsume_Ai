@@ -438,6 +438,8 @@ async def runtime_lifespan(
                     _stage = _bond.get("stage", "")
                     _hint = _bond.get("capability_hint", "")
                     _topics_str = "、".join(_recent_topics[:3]) if _recent_topics else ""
+                    # 方向 B：情感驱动问候的 emotion_hint
+                    _emotion_hint = str(llm_input.get("emotion_hint") or "").strip()
 
                     _prompt_parts = [
                         f"你是夏目藍，现在是{_time_period}时段。",
@@ -445,6 +447,9 @@ async def runtime_lifespan(
                     ]
                     if _stage:
                         _prompt_parts.append(f"当前关系阶段：{_stage}，{_hint}。")
+                    # 方向 B：注入情感提示（在关系阶段之后、话题素材之前）
+                    if _emotion_hint:
+                        _prompt_parts.append(f"你的情感状态：{_emotion_hint}")
                     # 梦境/日记优先作为话题素材
                     if _dream_snippet:
                         _prompt_parts.append(f"你昨晚做了一个梦，可以自然地提起：{_dream_snippet[:60]}。")
@@ -486,6 +491,38 @@ async def runtime_lifespan(
                         logger.warning("proactive_talk LLM 生成失败: %s", _exc)
                         return {}
 
+                # 方向 B：读取情感上下文并传递给 proactive_talk Skill
+                _emotion_context: dict = {}
+                try:
+                    from host_brain.app.emotion_context import (  # noqa: PLC0415
+                        get_user_emotion_profile,
+                        _global_emotion_timeline,
+                    )
+                    # 情感标签从 system_intent 获取（调度器已携带）
+                    _emotion_context["emotion_tag"] = system_intent.get("emotion_tag", "NEUTRAL")
+                    _emotion_context["mood_state"] = system_intent.get("mood_state", "steady")
+                    # 用户情感画像（方向 F 输出）
+                    _profile = get_user_emotion_profile()
+                    _emotion_context["user_emotion_profile"] = _profile.to_summary()
+                    # 情感时间线摘要（最近 6 小时）
+                    try:
+                        _tl_summary = _global_emotion_timeline.rebuild_summary(window_ms=6 * 3600 * 1000)
+                        _emotion_context["emotion_timeline_summary"] = _tl_summary
+                    except Exception:
+                        pass
+                    # 情感日记（方向 D 最新输出）
+                    try:
+                        _diary = _global_emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
+                        if _diary.get("diary_text"):
+                            _emotion_context["emotion_diary"] = {
+                                "diary_text": str(_diary["diary_text"])[:120],
+                                "dominant_emotion": _diary.get("dominant_emotion"),
+                            }
+                    except Exception:
+                        pass
+                except Exception as _emo_exc:
+                    logger.debug("方向B: 情感上下文读取异常（忽略）: %s", _emo_exc)
+
                 context = {
                     "sys_mode": system_intent.get("mood_state", "normal"),
                     "request_id": system_intent.get("request_id"),
@@ -495,6 +532,8 @@ async def runtime_lifespan(
                     "bond_summary": _bond_summary,
                     "llm_generator": _llm_generator,
                     "user_name": "主人",
+                    # 方向 B：情感驱动上下文
+                    "emotion_context": _emotion_context,
                 }
                 return execute_proactive_talk(args=args, context=context)
 
