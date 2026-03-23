@@ -676,6 +676,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _bt_trend = str(bond_texture.get("bond_trend") or "").strip()
     _bt_mood = str(bond_texture.get("mood_state") or "").strip()
     _bt_tone = str(bond_texture.get("tone_hint") or "").strip()
+    # Phase 4: 亲密温度和裂痕提示（让关系有温度）
+    _bt_texture_hint = str(bond_texture.get("texture_hint") or "").strip()
+    _bt_rift_active = bool(bond_texture.get("rift_active", False))
+    _bt_rift_hint = str(bond_texture.get("rift_hint") or "").strip()
 
     # bond_stage → 自然语言行为指令
     _STAGE_INSTRUCTION_MAP = {
@@ -729,6 +733,20 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     # 仅在 EmotionTimeline 有效数据时注入（mode 不为 SKIPPED/DEGRADED）
     _et_active = _et_mode not in ("SKIPPED", "SKIPPED_NOT_WIRED", "DEGRADED") and _et_entry_count > 0
 
+    # Phase 6: 读取情感推理结果（LLM 情感推理节点的输出）
+    _inferred_emotion_raw = runtime_payload.get("inferred_emotion")
+    _inferred_emotion = dict(_inferred_emotion_raw) if isinstance(_inferred_emotion_raw, Mapping) else {}
+    _ie_mode = str(_inferred_emotion.get("mode") or "").strip()
+    _ie_user_emotion = str(_inferred_emotion.get("user_emotion") or "").strip()
+    _ie_natsume_emotion = str(_inferred_emotion.get("natsume_emotion") or "").strip()
+    _ie_reason = _truncate_for_prompt(_inferred_emotion.get("reason"), limit=120) or ""
+    _ie_confidence = 0.0
+    try:
+        _ie_confidence = float(_inferred_emotion.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        pass
+    _ie_active = _ie_mode == "ACTIVE" and _ie_confidence >= 0.4
+
     emotion_binding_block = (
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
@@ -748,6 +766,9 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- bond_mood: {_bt_mood}\n"
             f"- bond_tone_hint: {_bt_tone or 'NONE'}\n"
             f"- bond_stage_instruction: {_bond_stage_instruction}\n"
+            # Phase 4: 亲密温度和裂痕提示（让关系有温度）
+            + (f"- bond_texture_hint: {_bt_texture_hint}\n" if _bt_texture_hint else "")
+            + (f"- bond_rift_hint: {_bt_rift_hint}\n" if _bt_rift_active and _bt_rift_hint else "")
             if _bt_stage else
             "- bond_stage: UNKNOWN\n"
             "- bond_stage_instruction: Be warm and genuine.\n"
@@ -773,6 +794,15 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- emotion_vad_valence: NONE\n"
             "- emotion_vad_arousal: NONE\n"
             "- emotion_vad_dominance: NONE\n"
+        )
+        # ── Phase 6：情感推理结果（AI 自己判断的情绪）────────────────────
+        + (
+            f"- inferred_user_emotion: {_ie_user_emotion}\n"
+            f"- inferred_natsume_emotion: {_ie_natsume_emotion}\n"
+            f"- inferred_emotion_reason: {_ie_reason}\n"
+            f"- inferred_emotion_confidence: {_ie_confidence:.2f}\n"
+            if _ie_active else
+            ""
         )
         + "\n"
     )

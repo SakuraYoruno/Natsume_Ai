@@ -1181,6 +1181,147 @@ class LlmGatewayNode(ChainNode):
 
         logger.debug("[%s] LlmGateway 执行 raw_output_present=%s", ctx.request_id, has_raw_output)
 
+        # ── Phase 6：LLM 情感推理节点 ───────────────────────────────────
+        # 让 AI 根据对话内容自己判断"此刻应该有什么感受"，
+        # 而不是完全依赖前端传入或规则映射。
+        # 策略：用规则引擎从用户消息和 LLM 输出中推断情感，
+        # 推理结果写入 ctx.metadata["inferred_emotion"]，供下游 prompt 使用。
+        inferred_emotion_meta: dict[str, Any] = {"mode": "SKIPPED"}
+        try:
+            _user_msg = str(ctx.user_message or "").strip()
+            _llm_output_text = ""
+            _llm_gw_for_emotion = ctx.metadata.get("llm_gateway") or {}
+            if isinstance(_llm_gw_for_emotion, dict):
+                _narrative_raw = _llm_gw_for_emotion.get("narrative") or {}
+                if isinstance(_narrative_raw, dict):
+                    _llm_output_text = str(_narrative_raw.get("text") or "").strip()
+                elif isinstance(_narrative_raw, str):
+                    _llm_output_text = _narrative_raw.strip()
+
+            # 规则推理引擎：从用户消息中提取情感信号
+            _inferred_user_emotion = "NEUTRAL"
+            _inferred_natsume_emotion = _emotion_tag  # 默认沿用现有标签
+            _infer_reason = ""
+            _infer_confidence = 0.5
+
+            # 用户情感关键词检测（中日双语）
+            _POSITIVE_TOKENS = (
+                "开心", "高兴", "好棒", "太好了", "谢谢", "感谢", "喜欢", "爱",
+                "哈哈", "嘻嘻", "wwww", "笑", "嗯嗯", "好的呢",
+                "うれしい", "ありがとう", "好き", "楽しい", "嬉しい",
+                "素晴らしい", "最高", "やった", "幸せ",
+            )
+            _NEGATIVE_TOKENS = (
+                "难过", "伤心", "不开心", "烦", "讨厌", "累", "无聊", "不想",
+                "生气", "愤怒", "焦虑", "担心", "害怕", "孤独", "寂寞",
+                "悲しい", "つらい", "疲れ", "嫌い", "怖い", "不安",
+                "寂しい", "辛い", "ムカつく",
+            )
+            _SURPRISE_TOKENS = (
+                "啊", "哇", "天哪", "不会吧", "真的吗", "居然", "竟然",
+                "え？", "マジ", "すごい", "びっくり", "まさか",
+            )
+            _QUESTION_TOKENS = (
+                "怎么办", "怎么了", "为什么", "什么", "吗", "呢",
+                "どうして", "なぜ", "なんで", "どうしよう",
+            )
+            _LOVE_TOKENS = (
+                "想你", "喜欢你", "爱你", "好想", "抱抱", "亲亲",
+                "会いたい", "好きだよ", "愛してる", "ぎゅ",
+            )
+
+            _user_lower = _user_msg.lower()
+            _positive_hits = sum(1 for t in _POSITIVE_TOKENS if t in _user_lower)
+            _negative_hits = sum(1 for t in _NEGATIVE_TOKENS if t in _user_lower)
+            _surprise_hits = sum(1 for t in _SURPRISE_TOKENS if t in _user_lower)
+            _question_hits = sum(1 for t in _QUESTION_TOKENS if t in _user_lower)
+            _love_hits = sum(1 for t in _LOVE_TOKENS if t in _user_lower)
+
+            # 根据关键词命中率判断用户情感
+            if _love_hits > 0:
+                _inferred_user_emotion = "LOVING"
+                _inferred_natsume_emotion = "LOVING"
+                _infer_reason = "检测到亲密/爱意表达"
+                _infer_confidence = min(1.0, 0.7 + _love_hits * 0.1)
+            elif _positive_hits > _negative_hits and _positive_hits >= 2:
+                _inferred_user_emotion = "HAPPY"
+                _inferred_natsume_emotion = "HAPPY"
+                _infer_reason = "检测到多个积极情感信号"
+                _infer_confidence = min(1.0, 0.6 + _positive_hits * 0.1)
+            elif _negative_hits > _positive_hits and _negative_hits >= 2:
+                # 区分悲伤、愤怒和焦虑
+                if any(t in _user_lower for t in ("生气", "愤怒", "讨厌", "嫌い", "ムカつく")):
+                    _inferred_user_emotion = "ANGRY"
+                    _inferred_natsume_emotion = "CALM"  # 对方生气时，Natsume 保持冷静
+                    _infer_reason = "检测到愤怒情感信号"
+                elif any(t in _user_lower for t in ("焦虑", "担心", "害怕", "不安", "怖い")):
+                    _inferred_user_emotion = "ANXIOUS"
+                    _inferred_natsume_emotion = "CALM"
+                    _infer_reason = "检测到焦虑/不安信号"
+                else:
+                    _inferred_user_emotion = "SAD"
+                    _inferred_natsume_emotion = "CALM"  # 对方悲伤时，Natsume 保持温和平静
+                    _infer_reason = "检测到消极情感信号"
+                _infer_confidence = min(1.0, 0.6 + _negative_hits * 0.1)
+            elif _surprise_hits > 0:
+                _inferred_user_emotion = "SURPRISED"
+                _inferred_natsume_emotion = "EXCITED"
+                _infer_reason = "检测到惊讶表达"
+                _infer_confidence = min(1.0, 0.5 + _surprise_hits * 0.15)
+            elif _positive_hits == 1:
+                _inferred_user_emotion = "HAPPY"
+                _inferred_natsume_emotion = "HAPPY"
+                _infer_reason = "检测到轻微积极信号"
+                _infer_confidence = 0.5
+            elif _negative_hits == 1:
+                _inferred_user_emotion = "SAD"
+                _inferred_natsume_emotion = "CALM"
+                _infer_reason = "检测到轻微消极信号"
+                _infer_confidence = 0.5
+            elif len(_user_msg) > 100 and _question_hits > 0:
+                _inferred_user_emotion = "THINKING"
+                _inferred_natsume_emotion = "THINKING"
+                _infer_reason = "长文本+提问，推断为深度思考"
+                _infer_confidence = 0.5
+            else:
+                _infer_reason = "无明显情感信号，保持中性"
+                _infer_confidence = 0.3
+
+            inferred_emotion_meta = {
+                "mode": "ACTIVE",
+                "user_emotion": _inferred_user_emotion,
+                "natsume_emotion": _inferred_natsume_emotion,
+                "reason": _infer_reason,
+                "confidence": round(_infer_confidence, 3),
+                "signal_counts": {
+                    "positive": _positive_hits,
+                    "negative": _negative_hits,
+                    "surprise": _surprise_hits,
+                    "love": _love_hits,
+                    "question": _question_hits,
+                },
+            }
+
+            # 高置信度时覆盖 emotion_tag（让推理结果影响实际情感状态）
+            if _infer_confidence >= 0.6 and _inferred_natsume_emotion != _emotion_tag:
+                ctx.metadata["emotion_tag"] = _inferred_natsume_emotion
+                ctx.audit_tags.append(f"EMOTION_INFERRED:{_inferred_natsume_emotion}")
+                logger.debug(
+                    "[%s] Phase 6 情感推理覆盖 %s→%s (confidence=%.2f reason=%s)",
+                    ctx.request_id, _emotion_tag, _inferred_natsume_emotion,
+                    _infer_confidence, _infer_reason,
+                )
+
+            ctx.metadata["inferred_emotion"] = inferred_emotion_meta
+            logger.debug(
+                "[%s] Phase 6 情感推理完成 user=%s natsume=%s confidence=%.2f",
+                ctx.request_id, _inferred_user_emotion, _inferred_natsume_emotion, _infer_confidence,
+            )
+        except Exception as _ie_exc:
+            inferred_emotion_meta = {"mode": "DEGRADED", "error": str(_ie_exc)[:100]}
+            ctx.metadata["inferred_emotion"] = inferred_emotion_meta
+            logger.warning("[%s] Phase 6 情感推理异常（降级）: %s", ctx.request_id, _ie_exc)
+
         # ── TODO-58：StateArbiter SESSION_OVERRIDE 写入 ──────────────────
         # 将 LLM 输出中提取的新事实写入 SESSION_OVERRIDE（不直接写 Canon，等待蒸馏周期）
         session_override_meta: dict[str, Any] = {"mode": "SKIPPED"}

@@ -245,6 +245,45 @@ def build_chat_context_pack(
         "emotion_tag": emotion_tag,
         "tone_hint": str(emotion_pulse.get("style_hint") or ""),
     }
+    # Phase 4: 注入 BondEmotionalTexture 亲密温度和裂痕状态（让关系有温度）
+    try:
+        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+        _bse = get_bond_stage_engine()
+        if _bse is not None:
+            _user_id = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+            _bond_state = _bse.get_state(_user_id)
+            bond_texture["bond_stage"] = _bond_state.current_stage
+            bond_texture["bond_trend"] = _bond_state.trend()
+            # 亲密温度
+            _texture = _bond_state.texture
+            bond_texture["intimacy_temperature"] = round(_texture.intimacy_temperature, 3)
+            # 亲密温度 → 自然语言描述
+            if _texture.intimacy_temperature > 0.8:
+                bond_texture["texture_hint"] = "和对方的关系很亲密，可以自在地表达真实想法，偶尔撒娇也没关系"
+            elif _texture.intimacy_temperature > 0.6:
+                bond_texture["texture_hint"] = "关系不错，交流起来很舒适，可以分享更多内心感受"
+            elif _texture.intimacy_temperature > 0.4:
+                bond_texture["texture_hint"] = "关系在自然发展中，保持真诚和适度的温暖"
+            elif _texture.intimacy_temperature > 0.2:
+                bond_texture["texture_hint"] = "关系还比较生疏，表达上注意分寸，多一些耐心"
+            else:
+                bond_texture["texture_hint"] = "初识阶段，保持礼貌和善意，不要过分亲密"
+            # 裂痕状态
+            _rift = _bond_state.rift
+            if _rift is not None and _rift.is_active():
+                bond_texture["rift_active"] = True
+                bond_texture["rift_cause"] = _rift.rift_cause
+                bond_texture["rift_repair_progress"] = round(_rift.repair_progress, 2)
+                if _rift.repair_progress > 0.7:
+                    bond_texture["rift_hint"] = "之前的小误会正在化解，气氛已经好多了，继续温暖互动"
+                elif _rift.repair_progress > 0.3:
+                    bond_texture["rift_hint"] = "之前有些不愉快，正在修复中，需要更多耐心和温柔"
+                else:
+                    bond_texture["rift_hint"] = f"关系有些裂痕（{_rift.rift_cause}），说话要特别小心，多表达关心"
+            else:
+                bond_texture["rift_active"] = False
+    except (ImportError, AttributeError, Exception):
+        pass  # BondStageEngine 不可用时静默降级
 
     context_pack = {
         "hard_snapshot": {
