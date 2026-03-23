@@ -1534,6 +1534,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                     inbound_candidates = self._extract_inbound_candidates_from_message_roi(
                         ocr_rows=right_ocr_rows,
                         roi_width=r_width,
+                        roi_height=r_height,
                     )
                     if inbound_candidates:
                         inbound_candidates.sort(key=lambda x: x[0])
@@ -1572,11 +1573,18 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         *,
         ocr_rows: list[tuple[int, int, str, float]],
         roi_width: int,
+        roi_height: int,
     ) -> list[tuple[int, str]]:
         left_side_candidates: list[tuple[int, str]] = []
         all_candidates: list[tuple[int, int, str]] = []
+        top_ignore_y = max(6, int(roi_height * 0.06))
+        bottom_ignore_y = max(top_ignore_y + 8, int(roi_height * 0.84))
         for cy, cx, text_value, score in ocr_rows:
             if score < self._ocr_min_score:
+                continue
+            if cy <= top_ignore_y:
+                continue
+            if cy >= bottom_ignore_y:
                 continue
             norm = _normalize_message_text(text_value)
             if not norm:
@@ -1787,6 +1795,8 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             "voice call",
             "video call",
         }:
+            return True
+        if ("聊天页" in value) or ("进入聊天页" in value):
             return True
         if lowered.startswith("http://") or lowered.startswith("https://"):
             return True
