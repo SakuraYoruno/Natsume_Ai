@@ -110,6 +110,35 @@ class TestEdgeWechatCommandRpc(unittest.TestCase):
         self.assertEqual("Alice", rows[0]["target"])
         self.assertEqual("hello", rows[0]["content"])
 
+    def test_wechat_command_queue_keeps_target_candidates(self) -> None:
+        client = self._build_client()
+        response = client.post(
+            "/v1/edge/wechat/command",
+            json=self._build_envelope(
+                {
+                    "action": "send_text",
+                    "target": "wxid_alice",
+                    "target_candidates": ["wxid_alice", "Alice", "Alice"],
+                    "content": "hello",
+                    "wait_result": False,
+                }
+            ),
+        )
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertTrue(body["success"])
+        self.assertEqual("ACCEPTED", body["status"])
+        self.assertEqual(None, body["reason_code"])
+
+        rows = [
+            json.loads(line)
+            for line in self.queue_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(1, len(rows))
+        self.assertEqual("wxid_alice", rows[0]["target"])
+        self.assertEqual(["wxid_alice", "Alice"], rows[0].get("target_candidates"))
+
     def test_wechat_command_rejects_invalid_action(self) -> None:
         client = self._build_client()
         response = client.post(
@@ -146,4 +175,3 @@ class TestEdgeWechatCommandRpc(unittest.TestCase):
         self.assertFalse(body["success"])
         self.assertEqual("REJECTED", body["status"])
         self.assertEqual("WECHAT_COMMAND_TIMEOUT", body["reason_code"])
-

@@ -68,6 +68,11 @@ class ChatRequest(BaseModel):
     emotion_intensity: Optional[float] = Field(None, description="Optional emotion intensity [0,1]")
     emotion_context: Optional[Dict[str, Any]] = Field(None, description="Optional emotion context")
     emotion_range_hint: Optional[str] = Field(None, description="Optional emotion range hint")
+    input_source: Optional[str] = Field(None, description="Optional input source, e.g. ASR/WECHAT")
+    suppress_edge_tts: Optional[bool] = Field(None, description="Optional per-request flag to suppress edge TTS")
+    suppress_edge_vts: Optional[bool] = Field(None, description="Optional per-request flag to suppress edge VTS")
+    reply_channel: Optional[str] = Field(None, description="Optional reply channel, e.g. WECHAT")
+    reply_target: Optional[str] = Field(None, description="Optional reply target id for channel delivery")
     # [任务4] SCENE_VISION_UI 专用字段：视觉上下文
     # 支持格式：
     #   image_base64: str       — Base64 编码的截图（优先级最高）

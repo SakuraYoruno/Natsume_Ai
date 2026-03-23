@@ -268,6 +268,17 @@ class WeChatListener:
         if not msg_id:
             msg_id = f"{from_wxid}_{ts_ms}"
 
+        raw_extra_payload = {
+            k: v for k, v in raw.items() if k not in (
+                "id", "msg_id", "sender", "receiver", "content", "roomid", "type", "ts"
+            )
+        }
+        nested_extra = raw.get("raw_extra")
+        if isinstance(nested_extra, dict):
+            for extra_key, extra_value in nested_extra.items():
+                if extra_key not in raw_extra_payload:
+                    raw_extra_payload[extra_key] = extra_value
+
         return WeChatMessage(
             msg_id=msg_id,
             from_wxid=from_wxid,
@@ -276,9 +287,7 @@ class WeChatListener:
             msg_type=msg_type,
             room_wxid=room_wxid,
             ts_ms=ts_ms,
-            raw_extra={k: v for k, v in raw.items() if k not in (
-                "id", "msg_id", "sender", "receiver", "content", "roomid", "type", "ts"
-            )},
+            raw_extra=raw_extra_payload,
         )
 
     def _process(self, msg: WeChatMessage) -> bool:

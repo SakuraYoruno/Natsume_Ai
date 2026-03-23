@@ -227,6 +227,13 @@ $stderrLog = Join-Path $LogDir "host.stderr.log"
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
 
+if (-not $envValues.ContainsKey("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") -and -not $env:HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK) {
+  $env:HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK = "false"
+}
+if (-not $envValues.ContainsKey("HOST_EDGE_RPC_BLOCK_LOOPBACK_WECHAT") -and -not $env:HOST_EDGE_RPC_BLOCK_LOOPBACK_WECHAT) {
+  $env:HOST_EDGE_RPC_BLOCK_LOOPBACK_WECHAT = "true"
+}
+
 if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS") -and -not $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS) {
   $env:HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS = "true"
 }
@@ -235,6 +242,15 @@ if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS") -and -not
 }
 if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_AUTO_REPLY") -and -not $env:HOST_INPUT_WECHAT_AUTO_REPLY) {
   $env:HOST_INPUT_WECHAT_AUTO_REPLY = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_DIRECT_REPLY_ONLY") -and -not $env:HOST_INPUT_WECHAT_DIRECT_REPLY_ONLY) {
+  $env:HOST_INPUT_WECHAT_DIRECT_REPLY_ONLY = "true"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_DIRECT_REPLY_TEXT") -and -not $env:HOST_INPUT_WECHAT_DIRECT_REPLY_TEXT) {
+  $env:HOST_INPUT_WECHAT_DIRECT_REPLY_TEXT = "收到"
+}
+if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_BLOCK_FILEHELPER") -and -not $env:HOST_INPUT_WECHAT_BLOCK_FILEHELPER) {
+  $env:HOST_INPUT_WECHAT_BLOCK_FILEHELPER = "true"
 }
 if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_REPLY_WAIT_RESULT") -and -not $env:HOST_INPUT_WECHAT_REPLY_WAIT_RESULT) {
   $env:HOST_INPUT_WECHAT_REPLY_WAIT_RESULT = "true"

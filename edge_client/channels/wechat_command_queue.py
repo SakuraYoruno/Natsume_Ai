@@ -31,6 +31,7 @@ def enqueue_wechat_command(
     *,
     action: str,
     target: str,
+    target_candidates: list[str] | None = None,
     content: str = "",
     request_id: str = "",
     queue_file: Path | None = None,
@@ -54,6 +55,19 @@ def enqueue_wechat_command(
         "content": content_value,
         "ts_ms": now_value,
     }
+    candidates: list[str] = []
+    seen_candidate: set[str] = set()
+    for item in list(target_candidates or []):
+        value = str(item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen_candidate:
+            continue
+        seen_candidate.add(key)
+        candidates.append(value)
+    if candidates:
+        row["target_candidates"] = candidates
     _append_jsonl_row(queue_path, row)
     return row
 
@@ -135,4 +149,3 @@ def _iter_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     except Exception:
         return []
     return rows
-

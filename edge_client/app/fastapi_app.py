@@ -673,6 +673,21 @@ def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> 
     payload = dict(envelope.payload or {})
     action = str(payload.get("action") or "").strip().lower()
     target = str(payload.get("target") or "").strip()
+    target_candidates_raw = payload.get("target_candidates")
+    target_candidates: list[str] = []
+    if isinstance(target_candidates_raw, list):
+        seen: set[str] = set()
+        for item in target_candidates_raw:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            target_candidates.append(value)
+    if (not target) and target_candidates:
+        target = str(target_candidates[0] or "").strip()
     content = str(payload.get("content") or payload.get("text") or "")
     wait_result = _parse_bool_like(payload.get("wait_result"), default=False)
     timeout_ms = _parse_int_clamped(
@@ -715,6 +730,7 @@ def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> 
         command = enqueue_wechat_command(
             action=action,
             target=target,
+            target_candidates=target_candidates,
             content=content,
             request_id=envelope.request_id,
             queue_file=queue_file,

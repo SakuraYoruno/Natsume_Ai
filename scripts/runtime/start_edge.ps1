@@ -309,7 +309,12 @@ function Start-EdgeProcess {
       $safeValue = $envValue -replace '%', '%%'
       $launcherLines += ("set `"{0}={1}`"" -f $envName, $safeValue)
     }
-    $launcherLines += "`"$PythonPath`" -m edge_client 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $pythonEscaped = ([string]$PythonPath).Replace("'", "''")
+    $repoEscaped = ([string]$RepoRoot).Replace("'", "''")
+    $stdoutEscaped = ([string]$StdoutLog).Replace("'", "''")
+    $stderrEscaped = ([string]$StderrLog).Replace("'", "''")
+    $psStartCommand = "Start-Process -FilePath '$pythonEscaped' -ArgumentList @('-m','edge_client') -WorkingDirectory '$repoEscaped' -WindowStyle Hidden -RedirectStandardOutput '$stdoutEscaped' -RedirectStandardError '$stderrEscaped'"
+    $launcherLines += "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$psStartCommand`""
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
 
@@ -456,22 +461,23 @@ function Start-WeChatBridgeProcess {
     [hashtable]$EnvVars = @{}
   )
   if ($UseBreakawayLaunch) {
-    $argParts = @(
-      "`"$BridgeScriptPath`"",
-      "--edge-url",
-      "`"$EdgeUrl`""
-    )
+    $argumentItems = New-Object System.Collections.Generic.List[string]
+    $argumentItems.Add((([string]$BridgeScriptPath).Replace("'", "''"))) | Out-Null
+    $argumentItems.Add("--edge-url") | Out-Null
+    $argumentItems.Add((([string]$EdgeUrl).Replace("'", "''"))) | Out-Null
     foreach ($extraArg in $ExtraArgs) {
       if ([string]::IsNullOrWhiteSpace([string]$extraArg)) {
         continue
       }
-      $text = [string]$extraArg
-      if ($text.Contains(" ")) {
-        $text = "`"$text`""
-      }
-      $argParts += $text
+      $argumentItems.Add((([string]$extraArg).Replace("'", "''"))) | Out-Null
     }
-    $commandLine = "`"$PythonPath`" $($argParts -join ' ') 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $argumentListLiteral = ($argumentItems | ForEach-Object { "'$_'" }) -join ","
+    $pythonEscaped = ([string]$PythonPath).Replace("'", "''")
+    $repoEscaped = ([string]$RepoRoot).Replace("'", "''")
+    $stdoutEscaped = ([string]$StdoutLog).Replace("'", "''")
+    $stderrEscaped = ([string]$StderrLog).Replace("'", "''")
+    $psStartCommand = "Start-Process -FilePath '$pythonEscaped' -ArgumentList @($argumentListLiteral) -WorkingDirectory '$repoEscaped' -WindowStyle Hidden -RedirectStandardOutput '$stdoutEscaped' -RedirectStandardError '$stderrEscaped'"
+    $commandLine = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$psStartCommand`""
     Invoke-BreakawayCommand `
       -RepoRoot $RepoRoot `
       -LauncherScriptPath $LauncherScriptPath `

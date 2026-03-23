@@ -2469,8 +2469,36 @@ class SceneRouter:
         )
 
         normalized_scene = str(scene_type or "").strip().upper()
-        _suppress_edge_tts = _parse_bool(getattr(request_body, "suppress_edge_tts", None), default=False)
-        _suppress_edge_vts = _parse_bool(getattr(request_body, "suppress_edge_vts", None), default=False)
+        _input_source = str(getattr(request_body, "input_source", "") or "").strip().upper()
+        _reply_channel = str(getattr(request_body, "reply_channel", "") or "").strip().upper()
+        _wechat_like_channel = _reply_channel in {"WECHAT", "WX", "WEIXIN"}
+        _suppress_edge_tts = _parse_bool(
+            getattr(request_body, "suppress_edge_tts", None),
+            default=_wechat_like_channel,
+        )
+        _suppress_edge_vts = _parse_bool(
+            getattr(request_body, "suppress_edge_vts", None),
+            default=_wechat_like_channel,
+        )
+        if _wechat_like_channel or _input_source == "WECHAT":
+            logger.info(
+                "[%s] SceneRouter suppress context input_source=%s reply_channel=%s raw_tts=%r raw_vts=%r",
+                request_id,
+                _input_source,
+                _reply_channel,
+                getattr(request_body, "suppress_edge_tts", None),
+                getattr(request_body, "suppress_edge_vts", None),
+            )
+        if _wechat_like_channel:
+            logger.info(
+                "[%s] SceneRouter wechat suppress flags reply_channel=%s raw_tts=%r raw_vts=%r parsed_tts=%s parsed_vts=%s",
+                request_id,
+                _reply_channel,
+                getattr(request_body, "suppress_edge_tts", None),
+                getattr(request_body, "suppress_edge_vts", None),
+                _suppress_edge_tts,
+                _suppress_edge_vts,
+            )
 
         # ── 1. 检查自定义注册表 ────────────────────────────────────────────
         custom_generator = cls._sse_generators.get(normalized_scene)
@@ -3056,7 +3084,11 @@ async def run_main_chain_from_input(
         ts_ms: 消息时间戳（毫秒）
     """
     from host_brain.app.schemas import ChatRequest  # noqa: PLC0415
-    from host_brain.app.dependencies import get_main_chain, get_obs_metrics_collector  # noqa: PLC0415
+    from host_brain.app.graph.input_source_strategy import (  # noqa: PLC0415
+        CommitResult,
+        InputSourceRuntimeContext,
+        resolve_input_source_strategy,
+    )
 
     logger.info(
         "run_main_chain_from_input: source=%s session_id=%s request_id=%s text=%.60s",
@@ -3066,24 +3098,6 @@ async def run_main_chain_from_input(
     import os as _os  # noqa: PLC0415
 
     source_upper = str(source or "").strip().upper()
-
-    def _parse_bool_env(name: str, default: bool) -> bool:
-        raw = str(_os.environ.get(name) or "").strip().lower()
-        if not raw:
-            return bool(default)
-        if raw in {"1", "true", "yes", "on"}:
-            return True
-        if raw in {"0", "false", "no", "off"}:
-            return False
-        return bool(default)
-
-    def _parse_int_env(name: str, *, default: int, min_value: int, max_value: int) -> int:
-        raw = str(_os.environ.get(name) or "").strip()
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            value = int(default)
-        return max(min_value, min(max_value, value))
 
     def _parse_sse_payload(raw_event: Any) -> dict[str, Any] | None:
         if not isinstance(raw_event, str):
@@ -3100,7 +3114,6 @@ async def run_main_chain_from_input(
             return None
         return dict(parsed) if isinstance(parsed, dict) else None
 
-    # 构建 ChatRequest（从 Edge 输入上报转换）
     emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
     mood_state = str(payload.get("mood_state") or "steady").strip().lower() or "steady"
     thread_id_value = str(
@@ -3109,29 +3122,16 @@ async def run_main_chain_from_input(
         or session_id
     ).strip() or session_id
 
-    suppress_edge_tts = False
-    suppress_edge_vts = False
-    auto_reply_wechat = False
-    reply_channel: str | None = None
-    reply_target: str | None = None
-
-    if source_upper == "WECHAT":
-        suppress_edge_tts = _parse_bool_env("HOST_INPUT_WECHAT_SUPPRESS_EDGE_TTS", True)
-        suppress_edge_vts = _parse_bool_env("HOST_INPUT_WECHAT_SUPPRESS_EDGE_VTS", True)
-        auto_reply_wechat = _parse_bool_env("HOST_INPUT_WECHAT_AUTO_REPLY", True)
-        room_wxid = str(payload.get("room_wxid") or "").strip()
-        from_wxid = str(payload.get("from_wxid") or "").strip()
-        reply_target = room_wxid or from_wxid or None
-        if auto_reply_wechat and reply_target:
-            reply_channel = "WECHAT"
-        logger.info(
-            "run_main_chain_from_input: wechat policy source=%s suppress_tts=%s suppress_vts=%s auto_reply=%s target=%s",
-            source_upper,
-            suppress_edge_tts,
-            suppress_edge_vts,
-            auto_reply_wechat,
-            (reply_target or ""),
-        )
+    runtime_context = InputSourceRuntimeContext(
+        request_id=request_id,
+        source_upper=source_upper,
+        payload=payload,
+        environ=_os.environ,
+    )
+    source_strategy = resolve_input_source_strategy(source_upper)
+    source_policy = source_strategy.build_policy(context=runtime_context)
+    if await source_strategy.pre_chain(context=runtime_context, policy=source_policy):
+        return
 
     try:
         request_body = ChatRequest(
@@ -3141,10 +3141,17 @@ async def run_main_chain_from_input(
             emotion_tag=emotion_tag,
             mood_state=mood_state,
             input_source=source_upper,
-            suppress_edge_tts=(suppress_edge_tts if source_upper == "WECHAT" else None),
-            suppress_edge_vts=(suppress_edge_vts if source_upper == "WECHAT" else None),
-            reply_channel=reply_channel,
-            reply_target=reply_target,
+            suppress_edge_tts=source_policy.suppress_edge_tts,
+            suppress_edge_vts=source_policy.suppress_edge_vts,
+            reply_channel=source_policy.reply_channel,
+            reply_target=source_policy.reply_target,
+        )
+        logger.info(
+            "run_main_chain_from_input: request_body policy input_source=%s reply_channel=%s suppress_tts_field=%r suppress_vts_field=%r",
+            str(getattr(request_body, "input_source", "") or ""),
+            str(getattr(request_body, "reply_channel", "") or ""),
+            getattr(request_body, "suppress_edge_tts", None),
+            getattr(request_body, "suppress_edge_vts", None),
         )
     except Exception as exc:
         logger.error(
@@ -3153,7 +3160,6 @@ async def run_main_chain_from_input(
         )
         return
 
-    # 构建 intent_draft
     from host_brain.app.graph_config_builder import pre_intent_classifier  # noqa: PLC0415
     pre_scene = pre_intent_classifier(text)
     _action_map = {
@@ -3178,19 +3184,16 @@ async def run_main_chain_from_input(
         "type": "query",
         "action": _action_map.get(pre_scene, "narrative_only"),
         "target": "host",
-        # narrative_only 仅接受 text，额外字段会触发 Governor INTENT_ARGS_INVALID。
         "args": {"text": text},
         "nonce": f"nonce::{request_id}",
     }
 
+    from host_brain.app.dependencies import get_main_chain, get_obs_metrics_collector  # noqa: PLC0415
+
     metrics = get_obs_metrics_collector()
     chain = get_main_chain()
 
-    # 消费 SSE 事件（fire-and-forget，不推送给客户端）
-    reply_narrative = ""
-    commit_decision = ""
-    commit_reason_code = ""
-    commit_detail = ""
+    commit_result = CommitResult()
     try:
         async for _event in chain.run_as_sse_adapter(
             request_body=request_body,
@@ -3208,12 +3211,12 @@ async def run_main_chain_from_input(
                 continue
             if not bool(event_payload.get("done")):
                 continue
-            commit_decision = str(event_payload.get("decision") or "").strip().upper()
-            commit_reason_code = str(event_payload.get("reason_code") or "").strip().upper()
-            commit_detail = str(event_payload.get("detail") or "").strip()
+            commit_result.decision = str(event_payload.get("decision") or "").strip().upper()
+            commit_result.reason_code = str(event_payload.get("reason_code") or "").strip().upper()
+            commit_result.detail = str(event_payload.get("detail") or "").strip()
             candidate_narrative = str(event_payload.get("narrative") or "").strip()
             if candidate_narrative:
-                reply_narrative = candidate_narrative
+                commit_result.reply_narrative = candidate_narrative
     except Exception as exc:
         logger.error(
             "run_main_chain_from_input: 处理异常 request_id=%s: %s",
@@ -3221,80 +3224,8 @@ async def run_main_chain_from_input(
         )
         return
 
-    if source_upper != "WECHAT" or not auto_reply_wechat:
-        return
-    if not reply_target:
-        logger.warning(
-            "run_main_chain_from_input: wechat auto reply skipped (missing target) request_id=%s",
-            request_id,
-        )
-        return
-    fallback_on_reject = _parse_bool_env("HOST_INPUT_WECHAT_FALLBACK_ON_REJECT", True)
-    fallback_text_default = "刚刚处理超时了，请再发一次，我这边立即重试。"
-    fallback_text = str(
-        _os.environ.get("HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT") or fallback_text_default
-    ).strip() or fallback_text_default
-    if commit_decision != "APPROVE":
-        if not fallback_on_reject:
-            logger.info(
-                "run_main_chain_from_input: wechat auto reply skipped (decision=%s fallback_disabled) request_id=%s",
-                (commit_decision or "UNKNOWN"),
-                request_id,
-            )
-            return
-        if not reply_narrative:
-            reply_narrative = fallback_text
-        logger.warning(
-            "run_main_chain_from_input: wechat auto reply fallback enabled request_id=%s decision=%s reason=%s detail=%s",
-            request_id,
-            (commit_decision or "UNKNOWN"),
-            (commit_reason_code or ""),
-            commit_detail,
-        )
-    if not reply_narrative:
-        logger.info(
-            "run_main_chain_from_input: wechat auto reply skipped (empty narrative) request_id=%s",
-            request_id,
-        )
-        return
-
-    try:
-        from host_brain.channels.edge_rpc_client import post_wechat_command  # noqa: PLC0415
-
-        wait_result = _parse_bool_env("HOST_INPUT_WECHAT_REPLY_WAIT_RESULT", True)
-        timeout_ms = _parse_int_env(
-            "HOST_INPUT_WECHAT_REPLY_TIMEOUT_MS",
-            default=12000,
-            min_value=300,
-            max_value=120000,
-        )
-        send_result = await post_wechat_command(
-            action="send_text",
-            target=reply_target,
-            content=reply_narrative,
-            request_id=request_id,
-            wait_result=wait_result,
-            timeout_ms=timeout_ms,
-        )
-        if send_result.success:
-            logger.info(
-                "run_main_chain_from_input: wechat auto reply sent request_id=%s target=%s status=%s",
-                request_id,
-                reply_target,
-                send_result.status,
-            )
-        else:
-            logger.warning(
-                "run_main_chain_from_input: wechat auto reply failed request_id=%s target=%s reason=%s detail=%s",
-                request_id,
-                reply_target,
-                (send_result.reason_code or ""),
-                send_result.detail,
-            )
-    except Exception as exc:
-        logger.error(
-            "run_main_chain_from_input: wechat auto reply exception request_id=%s target=%s error=%s",
-            request_id,
-            (reply_target or ""),
-            exc,
-        )
+    await source_strategy.post_chain(
+        context=runtime_context,
+        policy=source_policy,
+        commit_result=commit_result,
+    )

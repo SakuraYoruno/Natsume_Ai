@@ -261,6 +261,20 @@ def _resolve_edge_base_urls() -> list[str]:
     return result
 
 
+def _is_loopback_base_url(base_url: str) -> bool:
+    normalized = _normalize_base_url(base_url)
+    if not normalized:
+        return False
+    parsed = urllib.parse.urlparse(normalized)
+    host = str(parsed.hostname or "").strip().lower()
+    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _resolve_block_loopback_wechat() -> bool:
+    raw = str(os.environ.get("HOST_EDGE_RPC_BLOCK_LOOPBACK_WECHAT") or "true").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _resolve_hmac_key() -> str | None:
     # Host only reads HOST_EDGE_RPC_SHARED_KEY for signing.
     key = str(os.environ.get("HOST_EDGE_RPC_SHARED_KEY") or "").strip()
@@ -300,6 +314,8 @@ async def _post_to_edge(
     path: str,
     payload: dict[str, Any],
     request_id: str | None = None,
+    request_timeout_ms: int | None = None,
+    block_loopback: bool = False,
 ) -> EdgeRpcCallResult:
     """Build envelope and asynchronously POST to Edge endpoint."""
     import time
@@ -318,9 +334,29 @@ async def _post_to_edge(
 
     req_id = request_id or new_request_id()
     base_urls = _resolve_edge_base_urls()
+    if block_loopback:
+        filtered_urls = [item for item in base_urls if not _is_loopback_base_url(item)]
+        if not filtered_urls:
+            return EdgeRpcCallResult(
+                success=False,
+                status="REJECTED",
+                reason_code="EDGE_RPC_LOCAL_BLOCKED",
+                detail=(
+                    "loopback edge endpoint blocked for this command; "
+                    "set HOST_EDGE_RPC_BASE_URL to remote edge or disable "
+                    "HOST_EDGE_RPC_BLOCK_LOOPBACK_WECHAT"
+                ),
+                event={},
+                latency_ms=0,
+            )
+        base_urls = filtered_urls
     shared_key = _resolve_hmac_key()
     allow_insecure = _resolve_allow_insecure()
-    timeout_ms = _resolve_timeout_ms()
+    timeout_ms = (
+        max(1000, int(request_timeout_ms))
+        if request_timeout_ms is not None
+        else _resolve_timeout_ms()
+    )
     retries = _resolve_retries()
 
     t0 = int(time.time() * 1000)
@@ -501,6 +537,7 @@ async def post_wechat_command(
     *,
     action: str,
     target: str,
+    target_candidates: list[str] | None = None,
     content: str | None = None,
     request_id: str | None = None,
     wait_result: bool = True,
@@ -513,12 +550,30 @@ async def post_wechat_command(
         "wait_result": bool(wait_result),
         "timeout_ms": int(timeout_ms),
     }
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for item in list(target_candidates or []):
+        value = str(item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(value)
+    if candidates:
+        payload["target_candidates"] = candidates
     if content is not None:
         payload["content"] = str(content)
+    rpc_timeout_ms = _resolve_timeout_ms()
+    if bool(wait_result):
+        rpc_timeout_ms = max(int(rpc_timeout_ms), int(timeout_ms) + 3_000)
     result = await _post_to_edge(
         path="/v1/edge/wechat/command",
         payload=payload,
         request_id=request_id,
+        request_timeout_ms=rpc_timeout_ms,
+        block_loopback=_resolve_block_loopback_wechat(),
     )
     _logger.debug(
         "post_wechat_command action=%s target=%s wait=%s -> %s latency=%dms",
