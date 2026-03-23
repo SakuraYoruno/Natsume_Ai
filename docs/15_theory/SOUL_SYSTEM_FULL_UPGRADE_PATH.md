@@ -5,7 +5,7 @@
 
 **文档编号：** SOUL-UPGRADE-2026-03-23
 **创建日期：** 2026-03-23
-**状态：** 待实施（设计留痕）
+**状态：** ✅ 全部实施完成（2026-03-23）
 **作者：** Claude-4.6 Opus
 **前置文档：**
 - `docs/15_theory/soul_emotion_optimization.md`（五大优化方向，已实施）
@@ -656,18 +656,18 @@ sequenceDiagram
 
 ## 六、实施路线图
 
-| 阶段 | 核心交付 | 预计工作量 | 优先级 |
-|------|---------|-----------|--------|
-| **Phase I** | PersonaEngine + 7 维特质向量 | 1-2 天 | 🔴 高（基座，其他阶段依赖） |
-| **Phase II** | 情感-人格耦合 + 表达策略 | 1-2 天 | 🔴 高（感知提升最大） |
-| **Phase III** | SelfModel + 自省日记 | 1 天 | 🟡 中 |
-| **Phase IV** | PersonaGrowth + 安全机制 | 1-2 天 | 🟡 中 |
-| **Phase V** | 共同记忆 + 里程碑 + 叙事 | 1-2 天 | 🟡 中 |
-| **Phase VI** | 漂移检测 + 告警校正 | 1 天 | 🟢 低（守护性，非功能性） |
-| **Phase VII** | 情感持久化 + 衰减恢复 | 1 天 | 🟡 中 |
-| **Phase VIII** | 场景化主动表达 | 1 天 | 🟢 低（锦上添花） |
+| 阶段 | 核心交付 | 状态 | 验收测试 |
+|------|---------|------|----------|
+| **Phase I** | PersonaEngine + 7 维特质向量 | ✅ 已实施 | 23 passed |
+| **Phase II** | 情感-人格耦合 + 表达策略 | ✅ 已实施 | 32 passed |
+| **Phase III** | SelfModel + 自省日记 | ✅ 已实施 | 34 passed |
+| **Phase IV** | PersonaGrowth + 安全机制 | ✅ 已实施 | 34 passed |
+| **Phase V** | 共同记忆 + 里程碑 + 叙事 | ✅ 已实施 | 33 passed |
+| **Phase VI** | 漂移检测 + 告警校正 | ✅ 已实施 | 18 passed |
+| **Phase VII** | 情感持久化 + 衰减恢复 | ✅ 已实施 | 17 passed |
+| **Phase VIII** | 场景化主动表达 | ✅ 已实施 | 19 passed |
 
-**总计：约 8-12 天**
+**总计：8 阶段全部完成，210 项验收测试全部通过 (0.86s)**
 
 ---
 
@@ -709,6 +709,57 @@ sequenceDiagram
 
 ---
 
+---
+
+## 九、实施记录
+
+### 实施时间线
+
+| 阶段 | 实施日期 | 新增文件 | 改动文件 |
+|------|---------|---------|----------|
+| Phase I | 2026-03-23 | `persona/persona_engine.py`, `persona/personality_traits.py`, `persona/__init__.py` | `wc-003-persona-core.json` |
+| Phase II | 2026-03-23 | `persona/emotion_reactivity.py`, `persona/expression_adapter.py` | `metabolism.py`, `prompt_context.py`, `prompt_builder.py` |
+| Phase III | 2026-03-23 | `persona/self_model.py`, `persona/self_reflection.py` | `prompt_context.py`, `prompt_builder.py` |
+| Phase IV | 2026-03-23 | `persona/persona_growth.py`, `persona/trait_drift_guard.py` | `bond_stage_engine.py` |
+| Phase V | 2026-03-23 | `bond/shared_memory_index.py`, `bond/milestone_tracker.py`, `bond/bond_narrative.py` | `bond_stage_engine.py`, `prompt_builder.py`, `prompt_context.py` |
+| Phase VI | 2026-03-23 | `persona/drift_detector.py` | `persona/__init__.py` |
+| Phase VII | 2026-03-23 | `persona/emotion_persistence.py` | `persona/__init__.py` |
+| Phase VIII | 2026-03-23 | `persona/proactive_voice.py` | `persona/__init__.py` |
+
+### 验收测试汇总
+
+```
+tests/unit/test_persona_engine_phase1.py  — 23 passed
+tests/unit/test_persona_phase2.py         — 32 passed
+tests/unit/test_persona_phase3.py         — 34 passed
+tests/unit/test_persona_phase4.py         — 34 passed
+tests/unit/test_bond_phase5.py            — 33 passed
+tests/unit/test_persona_phase6.py         — 18 passed
+tests/unit/test_persona_phase7.py         — 17 passed
+tests/unit/test_persona_phase8.py         — 19 passed
+────────────────────────────────────────────────
+合计: 210 passed in 0.86s
+```
+
+### 新增模块总览
+
+| 模块 | 文件 | 核心能力 |
+|------|------|----------|
+| PersonaEngine | `persona/persona_engine.py` | 人格引擎单例，7维特质管理 |
+| PersonalityTraits | `persona/personality_traits.py` | 7维特质向量，向量运算 |
+| EmotionReactivityProfile | `persona/emotion_reactivity.py` | 人格→情感反应调制 |
+| PersonaExpressionAdapter | `persona/expression_adapter.py` | 人格化表达策略 |
+| SelfModel | `persona/self_model.py` | 自我意识快照 |
+| SelfReflection | `persona/self_reflection.py` | 自省脉冲生成 |
+| TraitDriftGuard | `persona/trait_drift_guard.py` | 幅度锁+趋势锁 |
+| PersonaGrowthTracker | `persona/persona_growth.py` | Bond阶段触发特质微调 |
+| PersonaDriftDetector | `persona/drift_detector.py` | 跨会话人格漂移检测 |
+| EmotionPersistence | `persona/emotion_persistence.py` | 跨会话情感持久化 |
+| PersonaProactiveVoice | `persona/proactive_voice.py` | 场景化人格驱动主动表达 |
+| SharedMemoryIndex | `bond/shared_memory_index.py` | 共同记忆索引 |
+| MilestoneTracker | `bond/milestone_tracker.py` | 关系里程碑检测 |
+| BondNarrativeLayer | `bond/bond_narrative.py` | 关系叙事层 |
+
 **文档结束。**
 
-> 本文档为设计留痕文档，不作为直接任务来源。实施时应由 MASTER 在任务卡中指定阶段和范围。
+> 本文档原为设计留痕文档，现已全部实施完成。8 大阶段 210 项验收测试全部通过。

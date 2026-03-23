@@ -44,6 +44,21 @@ from host_brain.persona.persona_growth import (
     GrowthApplyResult,
     GrowthRule,
 )
+from host_brain.persona.drift_detector import (
+    PersonaDriftDetector,
+    DriftCheckResult,
+    StyleFingerprint,
+    extract_style_fingerprint,
+)
+from host_brain.persona.emotion_persistence import (
+    EmotionPersistence,
+    PersistedEmotionState,
+    RestoredEmotionState,
+)
+from host_brain.persona.proactive_voice import (
+    PersonaProactiveVoice,
+    ProactiveExpression,
+)
 
 __all__ = [
     # personality_traits.py
@@ -73,4 +88,16 @@ __all__ = [
     "PersonaGrowthTracker",
     "GrowthApplyResult",
     "GrowthRule",
+    # drift_detector.py (Phase VI)
+    "PersonaDriftDetector",
+    "DriftCheckResult",
+    "StyleFingerprint",
+    "extract_style_fingerprint",
+    # emotion_persistence.py (Phase VII)
+    "EmotionPersistence",
+    "PersistedEmotionState",
+    "RestoredEmotionState",
+    # proactive_voice.py (Phase VIII)
+    "PersonaProactiveVoice",
+    "ProactiveExpression",
 ]
