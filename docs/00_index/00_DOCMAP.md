@@ -305,6 +305,10 @@
   用途：host_brain 核心应用层契约（2026-03-19）。覆盖 app 层场景分类（CHAT/EXEC_INTENT/WORK_CODE/WORK_TRANSLATE/VISION_UI）、聊天处理链路（Governor→场景分类→SceneRouter）、Prompt 构建与注入检测；audit/SQLiteLedger 全系统唯一审计账本（26 张表、WAL 模式、append-only 约束）；skills/SkillRegistry 技能元数据契约（clearance/risk_level/scope/reversible）与 17 个技能实现；observability 指标采集（ObsMode PROD/DEV、debug_trace 安全约束）。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
+- docs/15_theory/SOUL_SYSTEM_FULL_UPGRADE_PATH.md
+  用途：灵魂系统全面升级路径（2026-03-23）。覆盖 8 大升级阶段：Phase I 人格引擎基座（PersonaEngine + 7 维特质向量）、Phase II 情感-人格耦合（EmotionReactivity + ExpressionAdapter）、Phase III 自我意识模型（SelfModel + 自省日记）、Phase IV 人格成长系统（PersonaGrowth + TraitDriftGuard 安全机制）、Phase V Bond 深化（SharedMemoryIndex + MilestoneTracker + BondNarrative）、Phase VI 人格漂移检测（PersonaDriftDetector + 告警校正）、Phase VII 跨会话情感连续性（EmotionPersistence + 衰减恢复模型）、Phase VIII 场景化主动表达（SceneAwareTrigger + PersonaProactiveVoice）。含系统级全景诊断、新增/改动文件清单、风险缓解与实施路线图。待实施，不作为当前任务来源。
+  读者：MASTER、Project（文档代理）。
+
 9）性能与稳定性监控（Metrics & Stability）
 - docs/55_testing/metrics/baseline_stream_metrics_2026-03-09.md
   用途：流式响应基线性能指标（2026-03-09）。记录 SSE 流式输出的延迟、吞吐量与稳定性基线数据。
