@@ -79,6 +79,70 @@ class EmotionTimeline:
             result = [e for e in result if e.ts_ms <= until_ms]
         return result[-limit:]
 
+    @property
+    def entries(self) -> list[EmotionTimelineEntry]:
+        """只读访问所有条目（供外部读取）。"""
+        return list(self._entries)
+
+    @property
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    def build_daily_diary(self, *, window_ms: int = 86_400_000) -> dict[str, Any]:
+        """方向 D：构建情感日记摘要——将时间窗口内的情感时间线生成可读的日记。
+
+        默认时间窗口 24 小时。返回包含以下信息的字典：
+        - diary_text: 第一人称的情感日记（自然语言）
+        - dominant_emotion: 主导情感
+        - emotion_arc: 情感弧线（开始→中间→结束）
+        - avg_valence: 平均效价
+        - total_entries: 条目数
+        - time_range_ms: (start_ts, end_ts)
+
+        如果窗口内无记录，返回空日记。
+        """
+        from host_brain.core.ids import now_ms as _now_ms
+        now_value = _now_ms()
+        entries = self.query(since_ms=now_value - window_ms, limit=200)
+        if not entries:
+            return {
+                "diary_text": "",
+                "dominant_emotion": "NEUTRAL",
+                "emotion_arc": {"start": "NEUTRAL", "middle": "NEUTRAL", "end": "NEUTRAL"},
+                "avg_valence": 0.0,
+                "total_entries": 0,
+                "time_range_ms": (0, 0),
+            }
+
+        # 统计主导情感
+        tag_counts: dict[str, int] = {}
+        for e in entries:
+            tag_counts[e.emotion_tag] = tag_counts.get(e.emotion_tag, 0) + 1
+        dominant = max(tag_counts, key=lambda k: tag_counts[k])
+
+        # 情感弧线（三段式）
+        n = len(entries)
+        arc = {
+            "start": entries[0].emotion_tag,
+            "middle": entries[n // 2].emotion_tag if n > 1 else entries[0].emotion_tag,
+            "end": entries[-1].emotion_tag,
+        }
+
+        # 平均效价
+        avg_valence = sum(e.valence for e in entries) / n
+
+        # 生成自然语言日记
+        diary_text = _arc_to_diary_text(arc, dominant, avg_valence, n, tag_counts)
+
+        return {
+            "diary_text": diary_text,
+            "dominant_emotion": dominant,
+            "emotion_arc": arc,
+            "avg_valence": round(avg_valence, 3),
+            "total_entries": n,
+            "time_range_ms": (entries[0].ts_ms, entries[-1].ts_ms),
+        }
+
     def rebuild_summary(self, *, window_ms: int = 300_000) -> dict[str, Any]:
         """重建情感轨迹摘要（用于 LLM 上下文注入）（M29-E OPT-9）。
 
@@ -232,3 +296,64 @@ def compute_emotion_echo(
         "echo_intensity": round(echo_intensity, 4),
         "bond_depth": depth,
     }
+
+
+# ---------------------------------------------------------------------------
+# 方向 D：情感日记辅助函数
+# ---------------------------------------------------------------------------
+
+_EMOTION_ZH: dict[str, str] = {
+    "HAPPY": "开心", "EXCITED": "兴奋", "SAD": "难过", "ANGRY": "生气",
+    "CALM": "平静", "NEUTRAL": "平淡", "THINKING": "沉思", "LOVING": "充满爱意",
+    "EMBARRASSED": "有些害羞", "CONFUSED": "困惑", "BORED": "无聊",
+    "PROUD": "自豪", "GRATEFUL": "感激", "ANXIOUS": "焦虑",
+    "FRUSTRATED": "沮丧", "SURPRISED": "惊喜",
+}
+
+
+def _arc_to_diary_text(
+    arc: dict[str, str],
+    dominant: str,
+    avg_valence: float,
+    entry_count: int,
+    tag_counts: dict[str, int],
+) -> str:
+    """将情感弧线转为第一人称情感日记文本（方向 D）。"""
+    start_zh = _EMOTION_ZH.get(arc.get("start", "NEUTRAL"), "平淡")
+    mid_zh = _EMOTION_ZH.get(arc.get("middle", "NEUTRAL"), "平淡")
+    end_zh = _EMOTION_ZH.get(arc.get("end", "NEUTRAL"), "平淡")
+    dominant_zh = _EMOTION_ZH.get(dominant, "平淡")
+
+    # 整体氛围
+    if avg_valence > 0.3:
+        mood_desc = "整体来说，今天的心情不错"
+    elif avg_valence < -0.3:
+        mood_desc = "今天的心情有些低落"
+    else:
+        mood_desc = "今天的心情比较平稳"
+
+    # 情感丰富度
+    unique_emotions = len(tag_counts)
+    if unique_emotions >= 5:
+        variety_desc = "情感变化很丰富，经历了好多种心情"
+    elif unique_emotions >= 3:
+        variety_desc = "心情有一些波动"
+    else:
+        variety_desc = "心情比较稳定"
+
+    # 弧线描述
+    if arc["start"] == arc["end"]:
+        arc_desc = f"从头到尾都是{start_zh}的感觉"
+    elif start_zh != end_zh:
+        arc_desc = f"从{start_zh}慢慢变成了{end_zh}的状态"
+    else:
+        arc_desc = f"最终还是回到了{end_zh}的状态"
+
+    parts = [mood_desc]
+    if entry_count > 3:
+        parts.append(variety_desc)
+    parts.append(arc_desc)
+    if dominant != arc.get("end"):
+        parts.append(f"大部分时间都是{dominant_zh}的")
+
+    return "。".join(parts) + "。"

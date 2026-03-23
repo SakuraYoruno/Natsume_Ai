@@ -747,6 +747,15 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         pass
     _ie_active = _ie_mode == "ACTIVE" and _ie_confidence >= 0.4
 
+    # 方向 F: 读取用户情感画像
+    _user_profile_raw = runtime_payload.get("user_emotion_profile")
+    if not isinstance(_user_profile_raw, dict):
+        _user_profile_raw = merged_emotion_context.get("user_emotion_profile")
+    _user_profile = dict(_user_profile_raw) if isinstance(_user_profile_raw, Mapping) else {}
+    _up_status = str(_user_profile.get("status") or "").strip()
+    _up_hint = _truncate_for_prompt(_user_profile.get("profile_hint"), limit=200) or ""
+    _up_active = _up_status == "ACTIVE" and bool(_up_hint)
+
     emotion_binding_block = (
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
@@ -802,6 +811,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- inferred_emotion_reason: {_ie_reason}\n"
             f"- inferred_emotion_confidence: {_ie_confidence:.2f}\n"
             if _ie_active else
+            ""
+        )
+        # ── 方向 F：用户情感画像（长期蒸馏的情感规律）────────────────────
+        + (
+            f"- user_emotion_profile: {_up_hint}\n"
+            if _up_active else
             ""
         )
         + "\n"

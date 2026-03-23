@@ -172,6 +172,15 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "mood_state": str(hard_snapshot.mood_state),
     })
 
+    # 方向 F：更新用户情感画像（每次对话时蒸馏）
+    import datetime as _dt
+    _hour_now = _dt.datetime.now().hour
+    update_user_emotion_profile(
+        emotion_tag=emotion_tag,
+        valence=current_vector.valence,
+        hour_of_day=_hour_now,
+    )
+
     return {
         "mood_state": str(hard_snapshot.mood_state),
         "emotion_tag": str(emotion_tag),
@@ -185,6 +194,8 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "triggered_emotions": triggered_emotions,
         # Phase 1：内心独白（供 emotion_pulse 槽位使用）
         "inner_monologue": _vector_to_inner_monologue(current_vector),
+        # 方向 F：用户情感画像摘要
+        "user_emotion_profile": get_user_emotion_profile().to_summary(),
     }
 
 
@@ -371,3 +382,226 @@ def _coerce_emotion_intensity(value: Any, *, default: float) -> float:
     if parsed > 1.0:
         return 1.0
     return float(parsed)
+
+
+# ---------------------------------------------------------------------------
+# 方向 D：情感日记——将 EmotionTimeline 每日摘要写入 EpisodicStore
+# ---------------------------------------------------------------------------
+
+_last_diary_flush_ts: int = 0  # 上次日记写入时间戳（ms），防止频繁写入
+
+
+def flush_emotion_diary(
+    *,
+    episodic_store: Any = None,
+    force: bool = False,
+    window_ms: int = 86_400_000,
+) -> dict[str, Any] | None:
+    """方向 D：将当天的情感时间线摘要写入 EpisodicStore 作为"情感日记"。
+
+    条件（满足任一即写入）：
+    - force=True（手动触发/调度器触发）
+    - 距离上次写入 ≥ 12 小时 且 当前时间线有 ≥ 5 条记录
+
+    Returns:
+        写入结果字典，或 None（跳过）
+    """
+    global _last_diary_flush_ts
+    now_ms_val = int(time.time() * 1000)
+
+    # 获取时间线
+    timeline = _global_emotion_timeline
+    if timeline.entry_count < 3 and not force:
+        return None
+
+    # 频率限制：12 小时内不重复写入
+    elapsed_since_last = now_ms_val - _last_diary_flush_ts
+    if not force and elapsed_since_last < 12 * 3600 * 1000:
+        return None
+    if not force and timeline.entry_count < 5:
+        return None
+
+    # 构建日记
+    diary = timeline.build_daily_diary(window_ms=window_ms)
+    diary_text = str(diary.get("diary_text") or "").strip()
+    if not diary_text:
+        return None
+
+    # 写入 EpisodicStore（如果可用）
+    result: dict[str, Any] = {"status": "NO_STORE", "diary": diary}
+    if episodic_store is not None:
+        try:
+            from host_brain.memory.episodic import EpisodicStore  # noqa: PLC0415
+            if isinstance(episodic_store, EpisodicStore):
+                dominant = str(diary.get("dominant_emotion") or "NEUTRAL")
+                avg_val = float(diary.get("avg_valence") or 0.0)
+                op_result = episodic_store.write_memory(
+                    text=f"[情感日记] {diary_text}",
+                    evidence_refs=["emotion_diary_auto"],
+                    decay_profile_id="SLOW",  # 日记用慢衰减
+                    visibility="internal",
+                    emotion_tag=dominant,
+                    emotion_valence=max(-1.0, min(1.0, avg_val)),
+                    emotion_arousal=0.3,
+                )
+                result = {
+                    "status": "OK" if op_result.success else "FAILED",
+                    "memory_id": op_result.memory_id,
+                    "diary": diary,
+                }
+                logger.info(
+                    "方向D: 情感日记写入 status=%s entries=%d dominant=%s avg_valence=%.3f",
+                    result["status"], diary.get("total_entries", 0), dominant, avg_val,
+                )
+        except Exception as exc:
+            result = {"status": "ERROR", "error": str(exc)[:100], "diary": diary}
+            logger.warning("方向D: 情感日记写入异常: %s", exc)
+
+    _last_diary_flush_ts = now_ms_val
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 方向 F：用户情感画像——从 EmotionTimeline 蒸馏用户情感规律
+# ---------------------------------------------------------------------------
+
+class UserEmotionProfile:
+    """方向 F：用户情感画像（进程级单例）。
+
+    从每次对话的情感推理结果中逐步蒸馏：
+    - 常见情感分布（哪种情感出现最多）
+    - 平均效价趋势（整体偏积极还是消极）
+    - 情感波动性（变化大还是稳定）
+    - 高频情感时段（深夜聊天时是否更容易消极）
+    """
+
+    def __init__(self) -> None:
+        # 情感标签计数（累计）
+        self._tag_counts: dict[str, int] = {}
+        # 累计效价值（用于计算平均）
+        self._total_valence: float = 0.0
+        self._total_entries: int = 0
+        # 上次效价（用于计算波动性）
+        self._last_valence: float = 0.0
+        self._valence_changes: float = 0.0  # 效价变化绝对值累计
+        # 时段分布（0~23 小时）
+        self._hour_tag_counts: dict[int, dict[str, int]] = {}
+
+    def update(
+        self,
+        *,
+        emotion_tag: str,
+        valence: float,
+        hour_of_day: int | None = None,
+    ) -> None:
+        """更新用户情感画像（每次对话时调用）。"""
+        tag = str(emotion_tag or "NEUTRAL").strip().upper()
+        self._tag_counts[tag] = self._tag_counts.get(tag, 0) + 1
+        self._total_valence += valence
+        self._total_entries += 1
+        # 波动性
+        if self._total_entries > 1:
+            self._valence_changes += abs(valence - self._last_valence)
+        self._last_valence = valence
+        # 时段分布
+        if hour_of_day is not None:
+            h = int(hour_of_day) % 24
+            if h not in self._hour_tag_counts:
+                self._hour_tag_counts[h] = {}
+            self._hour_tag_counts[h][tag] = self._hour_tag_counts[h].get(tag, 0) + 1
+
+    def to_summary(self) -> dict[str, Any]:
+        """生成用户情感画像摘要（供 prompt 注入）。"""
+        if self._total_entries == 0:
+            return {"status": "NO_DATA", "total_interactions": 0}
+
+        # Top 3 常见情感
+        sorted_tags = sorted(self._tag_counts.items(), key=lambda x: x[1], reverse=True)
+        top_emotions = [
+            {"tag": tag, "count": count, "ratio": round(count / self._total_entries, 3)}
+            for tag, count in sorted_tags[:3]
+        ]
+
+        # 平均效价
+        avg_valence = self._total_valence / self._total_entries
+
+        # 波动性（0.0 = 完全稳定，1.0 = 每次都剧烈变化）
+        volatility = 0.0
+        if self._total_entries > 1:
+            volatility = min(1.0, self._valence_changes / (self._total_entries - 1))
+
+        # 生成自然语言画像
+        profile_hint = self._build_profile_hint(top_emotions, avg_valence, volatility)
+
+        return {
+            "status": "ACTIVE",
+            "total_interactions": self._total_entries,
+            "top_emotions": top_emotions,
+            "avg_valence": round(avg_valence, 3),
+            "volatility": round(volatility, 3),
+            "profile_hint": profile_hint,
+        }
+
+    def _build_profile_hint(
+        self,
+        top_emotions: list[dict[str, Any]],
+        avg_valence: float,
+        volatility: float,
+    ) -> str:
+        """将用户情感画像转为自然语言提示。"""
+        from host_brain.core.emotion_timeline import _EMOTION_ZH  # noqa: PLC0415
+
+        parts: list[str] = []
+
+        # 整体基调
+        if avg_valence > 0.3:
+            parts.append("这位用户总体上是一个比较积极乐观的人")
+        elif avg_valence < -0.3:
+            parts.append("这位用户似乎最近心情不太好，需要更多温暖和关心")
+        else:
+            parts.append("这位用户的情绪比较平稳")
+
+        # 常见情感
+        if top_emotions:
+            top_tag = top_emotions[0]["tag"]
+            top_zh = _EMOTION_ZH.get(top_tag, top_tag)
+            ratio = top_emotions[0].get("ratio", 0)
+            if ratio > 0.5:
+                parts.append(f"大部分时候处于{top_zh}的状态")
+            elif ratio > 0.3:
+                parts.append(f"经常处于{top_zh}的状态")
+
+        # 波动性
+        if volatility > 0.5:
+            parts.append("情绪变化比较大，对情感话题可能比较敏感")
+        elif volatility < 0.2:
+            parts.append("情绪很稳定")
+
+        return "，".join(parts) + "。" if parts else ""
+
+
+# 全局用户情感画像单例
+_user_emotion_profile: UserEmotionProfile | None = None
+
+
+def get_user_emotion_profile() -> UserEmotionProfile:
+    """获取全局用户情感画像单例（方向 F）。"""
+    global _user_emotion_profile
+    if _user_emotion_profile is None:
+        _user_emotion_profile = UserEmotionProfile()
+    return _user_emotion_profile
+
+
+def update_user_emotion_profile(
+    *,
+    emotion_tag: str,
+    valence: float,
+    hour_of_day: int | None = None,
+) -> None:
+    """更新用户情感画像（方向 F，在每次对话时调用）。"""
+    profile = get_user_emotion_profile()
+    profile.update(
+        emotion_tag=emotion_tag,
+        valence=valence,
+        hour_of_day=hour_of_day,
+    )

@@ -544,6 +544,49 @@ class EmotionTimeline:
             result = [e for e in result if e.ts_ms <= until_ms]
         return result[-limit:]
 
+    @property
+    def entries(self) -> list[EmotionTimelineEntry]:
+        """只读访问所有条目（供外部读取）。"""
+        return list(self._entries)
+
+    @property
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    def build_daily_diary(self, *, window_ms: int = 86_400_000) -> dict[str, Any]:
+        """方向 D：构建情感日记摘要。详见 emotion_timeline.py 中的同名方法。"""
+        from host_brain.core.ids import now_ms as _now_ms
+        now_value = _now_ms()
+        _entries = self.query(since_ms=now_value - window_ms, limit=200)
+        if not _entries:
+            return {
+                "diary_text": "", "dominant_emotion": "NEUTRAL",
+                "emotion_arc": {"start": "NEUTRAL", "middle": "NEUTRAL", "end": "NEUTRAL"},
+                "avg_valence": 0.0, "total_entries": 0, "time_range_ms": (0, 0),
+            }
+        tag_counts: dict[str, int] = {}
+        for e in _entries:
+            tag_counts[e.emotion_tag] = tag_counts.get(e.emotion_tag, 0) + 1
+        dominant = max(tag_counts, key=lambda k: tag_counts[k])
+        n = len(_entries)
+        arc = {
+            "start": _entries[0].emotion_tag,
+            "middle": _entries[n // 2].emotion_tag if n > 1 else _entries[0].emotion_tag,
+            "end": _entries[-1].emotion_tag,
+        }
+        avg_valence = sum(e.valence for e in _entries) / n
+        # 导入日记文本生成函数
+        try:
+            from host_brain.core.emotion_timeline import _arc_to_diary_text  # noqa: PLC0415
+            diary_text = _arc_to_diary_text(arc, dominant, avg_valence, n, tag_counts)
+        except ImportError:
+            diary_text = f"主导情感：{dominant}，平均效价：{avg_valence:.2f}"
+        return {
+            "diary_text": diary_text, "dominant_emotion": dominant,
+            "emotion_arc": arc, "avg_valence": round(avg_valence, 3),
+            "total_entries": n, "time_range_ms": (_entries[0].ts_ms, _entries[-1].ts_ms),
+        }
+
     def rebuild_summary(self, *, window_ms: int = 300_000) -> dict[str, Any]:
         """重建情感轨迹摘要（用于 LLM 上下文注入）（M29-E OPT-9）。
 

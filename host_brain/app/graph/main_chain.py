@@ -1819,6 +1819,19 @@ class EpisodicStoreNode(ChainNode):
             }
             if _result.get("status") == "OK":
                 ctx.audit_tags.append("EPISODIC_WRITTEN")
+                # ── 方向 D：记忆写入成功后尝试刷新情感日记 ──────────────
+                try:
+                    from host_brain.app.emotion_context import flush_emotion_diary  # noqa: PLC0415
+                    _diary_result = flush_emotion_diary(episodic_store=_episodic_store)
+                    if _diary_result and _diary_result.get("status") == "OK":
+                        ctx.audit_tags.append("EMOTION_DIARY_WRITTEN")
+                        ctx.metadata["emotion_diary"] = {
+                            "status": "OK",
+                            "memory_id": _diary_result.get("memory_id"),
+                            "dominant": (_diary_result.get("diary") or {}).get("dominant_emotion"),
+                        }
+                except Exception as _diary_exc:
+                    logger.debug("[%s] 方向D: 情感日记触发异常（忽略）: %s", ctx.request_id, _diary_exc)
             elif _result.get("status") == "SKIPPED":
                 ctx.audit_tags.append(f"EPISODIC_SKIPPED:{_result.get('reason_code', 'UNKNOWN')}")
             else:
