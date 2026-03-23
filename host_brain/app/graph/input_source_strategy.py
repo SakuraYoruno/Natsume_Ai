@@ -237,15 +237,27 @@ class WechatInputSourceStrategy(InputSourceStrategy):
         policy.direct_reply_text = context.parse_text_env("HOST_INPUT_WECHAT_DIRECT_REPLY_TEXT", "收到")
         policy.reply_target_candidates = _collect_wechat_reply_targets(context.payload)
         policy.reply_target = _pick_wechat_reply_target(policy.reply_target_candidates)
+        force_active_chat_target = context.parse_bool_env(
+            "HOST_INPUT_WECHAT_FORCE_ACTIVE_CHAT_TARGET",
+            False,
+        )
+        if force_active_chat_target:
+            active_candidates = [
+                item for item in policy.reply_target_candidates if _is_active_chat_target(item)
+            ]
+            if active_candidates:
+                policy.reply_target = active_candidates[0]
+                policy.reply_target_candidates = [active_candidates[0]]
         if policy.auto_reply_wechat and policy.reply_target:
             policy.reply_channel = "WECHAT"
         logger.info(
-            "run_main_chain_from_input: wechat policy source=%s suppress_tts=%s suppress_vts=%s auto_reply=%s direct_reply_only=%s target=%s candidates=%s",
+            "run_main_chain_from_input: wechat policy source=%s suppress_tts=%s suppress_vts=%s auto_reply=%s direct_reply_only=%s force_active=%s target=%s candidates=%s",
             context.source_upper,
             policy.suppress_edge_tts,
             policy.suppress_edge_vts,
             policy.auto_reply_wechat,
             policy.direct_reply_only,
+            force_active_chat_target,
             (policy.reply_target or ""),
             ",".join(policy.reply_target_candidates[:8]),
         )

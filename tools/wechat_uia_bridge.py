@@ -48,7 +48,7 @@ DEFAULT_VISION_MIN_CONFIDENCE = 0.50
 DEFAULT_VISION_MIN_INTERVAL_S = 1.8
 DEFAULT_OUTBOUND_ECHO_TTL_S = 180.0
 DEFAULT_TRAY_WAKE_ENABLED = True
-DEFAULT_TRAY_WAKE_ON_INBOUND = True
+DEFAULT_TRAY_WAKE_ON_INBOUND = False
 DEFAULT_TRAY_WAKE_COOLDOWN_S = 2.2
 DEFAULT_TRAY_SCAN_FRAMES = 4
 DEFAULT_TRAY_SCAN_FRAME_INTERVAL_S = 0.10
@@ -259,7 +259,7 @@ def _is_blocked_chat_target(target: str) -> bool:
     for active_hint in ACTIVE_CHAT_TARGET_HINTS:
         active_key = _normalize_target_hint(active_hint)
         if active_key and normalized == active_key:
-            return True
+            return False
     for blocked in WECHAT_BLOCKED_CHAT_HINTS:
         blocked_key = _normalize_target_hint(blocked)
         if blocked_key and blocked_key in normalized:
@@ -1071,11 +1071,19 @@ class WeChatUiInboundBridge:
                     focus_detail,
                 )
                 return
-            anchor_ok, anchor_detail = _focus_chat_record_list(hwnd=hwnd)
+            anchor_click_enabled = _parse_bool(
+                os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER_ANCHOR_CLICK"),
+                default=False,
+            )
+            if anchor_click_enabled:
+                anchor_ok, anchor_detail = _focus_chat_record_list(hwnd=hwnd)
+            else:
+                anchor_ok, anchor_detail = True, "anchor_click_skipped"
             logger.info(
-                "inbound auto recover: focus_ok=%s anchor_ok=%s detail=%s",
+                "inbound auto recover: focus_ok=%s anchor_ok=%s anchor_click=%s detail=%s",
                 focus_ok,
                 anchor_ok,
+                anchor_click_enabled,
                 f"{focus_detail}; {anchor_detail}",
             )
         except Exception as exc:
@@ -2353,9 +2361,12 @@ class WeChatVisionNotifyInboundBridge:
         self._next_focus_allowed_at = 0.0
         self._focus_cooldown_s = 1.2
         self._last_escalation_log_at = 0.0
+        focus_escalation_raw = os.environ.get("EDGE_WECHAT_VISION_NOTIFY_FOCUS_ESCALATION")
+        if not str(focus_escalation_raw or "").strip():
+            focus_escalation_raw = os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER")
         self._focus_escalation_enabled = _parse_bool(
-            os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER"),
-            default=DEFAULT_UIA_AUTO_RECOVER,
+            focus_escalation_raw,
+            default=True,
         )
         self._next_tray_probe_at = 0.0
         self._tray_wake_enabled = _parse_bool(
@@ -5283,6 +5294,14 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
         "target": target,
         "finished_ts_ms": now_ms,
     }
+    logger.info(
+        "wechat_tool.execute.start action=%s command_id=%s request_id=%s target=%s candidates=%s",
+        action,
+        command_id,
+        request_id,
+        target,
+        ",".join(target_candidates[:6]),
+    )
     if action not in {"open_chat", "send_text", "voice_call", "video_call"}:
         return {
             **base_row,
@@ -5308,19 +5327,18 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             "detail": "send_text requires non-empty content",
         }
 
+    active_fast_mode = ""
     if action == "send_text":
         active_only = bool(target_candidates) and all(_is_active_chat_target(item) for item in target_candidates)
+        active_present = any(_is_active_chat_target(item) for item in target_candidates)
+        prefer_active_present = _parse_bool(
+            os.environ.get("EDGE_WECHAT_SEND_TEXT_PREFER_ACTIVE_CHAT"),
+            default=True,
+        )
         if active_only:
-            send_ok, send_detail = _send_text_active_chat_fast(content=content)
-            return {
-                **base_row,
-                "status": ("ok" if send_ok else "error"),
-                "success": bool(send_ok),
-                "reason_code": (None if send_ok else "WECHAT_COMMAND_EXEC_FAILED"),
-                "detail": send_detail,
-                "resolved_target": "active_chat",
-                "target_candidates": target_candidates,
-            }
+            active_fast_mode = "active_only"
+        elif prefer_active_present and active_present:
+            active_fast_mode = "active_present_preferred"
 
     focus_ok, focus_detail = _focus_wechat_main_window(wechat_path)
     if not focus_ok:
@@ -5340,6 +5358,18 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             "success": False,
             "reason_code": "WECHAT_NOT_LOGGED_IN",
             "detail": login_detail,
+        }
+
+    if action == "send_text" and active_fast_mode:
+        send_ok, send_detail = _send_text_active_chat_fast(content=content)
+        return {
+            **base_row,
+            "status": ("ok" if send_ok else "error"),
+            "success": bool(send_ok),
+            "reason_code": (None if send_ok else "WECHAT_COMMAND_EXEC_FAILED"),
+            "detail": f"{send_detail}; mode={active_fast_mode}",
+            "resolved_target": "active_chat",
+            "target_candidates": target_candidates,
         }
 
     open_failures: list[str] = []
@@ -5373,7 +5403,16 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             if not open_ok:
                 open_failures.append(f"{candidate}:{open_detail}")
                 continue
-            send_ok, send_detail = _send_text(content=content, wechat_path=wechat_path, target=candidate)
+            try:
+                send_ok, send_detail = _send_text(
+                    content=content,
+                    wechat_path=wechat_path,
+                    target=candidate,
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument 'target'" not in str(exc):
+                    raise
+                send_ok, send_detail = _send_text(content=content, wechat_path=wechat_path)
             if send_ok:
                 _remember_outbound_text(content)
                 resolved_target = candidate
@@ -5484,9 +5523,26 @@ def _process_command_queue(
 
     success_count = 0
     for command in rows:
+        action = str(command.get("action") or "").strip().lower()
+        request_id = str(command.get("request_id") or "").strip()
+        command_id = str(command.get("command_id") or "").strip()
+        logger.info(
+            "queue.lane.dequeue action=%s command_id=%s request_id=%s",
+            action,
+            command_id,
+            request_id,
+        )
         result = _execute_command(command, wechat_path=wechat_path)
         if bool(result.get("success")):
             success_count += 1
+        logger.info(
+            "queue.lane.complete action=%s command_id=%s request_id=%s success=%s reason=%s",
+            action,
+            command_id,
+            request_id,
+            bool(result.get("success")),
+            str(result.get("reason_code") or ""),
+        )
         try:
             _append_jsonl_row(result_file, result)
         except Exception as exc:
