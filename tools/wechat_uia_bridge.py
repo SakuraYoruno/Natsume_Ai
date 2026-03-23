@@ -4175,15 +4175,7 @@ def _focus_message_input_area(wechat_path: str) -> tuple[bool, str]:
                 editor_candidates.append((cy, node))
         if editor_candidates:
             editor_candidates.sort(key=lambda row: row[0], reverse=True)
-            editor = editor_candidates[0][1]
-            try:
-                editor.set_focus()
-                time.sleep(0.08)
-                return True, "message_input_uia_set_focus"
-            except Exception:
-                editor.click_input()
-                time.sleep(0.10)
-                return True, "message_input_uia_click"
+            return True, "message_input_uia_detected_no_click"
     except Exception:
         pass
 
