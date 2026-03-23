@@ -79,6 +79,11 @@ def _is_wxid_like(value: str) -> bool:
     return False
 
 
+def _is_active_chat_target(value: str) -> bool:
+    key = _normalize_target_key(value)
+    return key in {"activechat"}
+
+
 def _append_target_candidate(container: list[str], value: Any) -> None:
     text_value = str(value or "").strip()
     if not text_value:
@@ -266,6 +271,13 @@ class WechatInputSourceStrategy(InputSourceStrategy):
                 context.request_id,
             )
             return True
+        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", False)
+        if _is_active_chat_target(policy.reply_target) and (not allow_active_target_reply):
+            logger.info(
+                "run_main_chain_from_input: wechat direct reply skipped (active_chat target) request_id=%s",
+                context.request_id,
+            )
+            return True
         block_filehelper = context.parse_bool_env("HOST_INPUT_WECHAT_BLOCK_FILEHELPER", True)
         if block_filehelper and _is_file_helper_target(policy.reply_target):
             logger.warning(
@@ -302,6 +314,13 @@ class WechatInputSourceStrategy(InputSourceStrategy):
         if not policy.reply_target:
             logger.warning(
                 "run_main_chain_from_input: wechat auto reply skipped (missing target) request_id=%s",
+                context.request_id,
+            )
+            return
+        allow_active_target_reply = context.parse_bool_env("HOST_INPUT_WECHAT_ALLOW_ACTIVE_CHAT_REPLY", False)
+        if _is_active_chat_target(policy.reply_target) and (not allow_active_target_reply):
+            logger.info(
+                "run_main_chain_from_input: wechat auto reply skipped (active_chat target) request_id=%s",
                 context.request_id,
             )
             return
