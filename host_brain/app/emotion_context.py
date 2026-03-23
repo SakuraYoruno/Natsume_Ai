@@ -36,6 +36,9 @@ _global_emotion_timeline = EmotionTimeline(max_entries=100)
 _global_emotion_vector: EmotionVector | None = None
 _global_emotion_vector_last_ts: int = 0  # 上次更新时间戳（毫秒）
 
+# 方向 C：上一次的 emotion_tag（用于 VTS 过渡帧计算）
+_global_prev_emotion_tag: str | None = None
+
 
 def get_emotion_timeline() -> EmotionTimeline:
     """获取全局情感时间线实例（供外部模块访问）。"""
@@ -181,6 +184,11 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         hour_of_day=_hour_now,
     )
 
+    # 方向 C：跟踪上一次 emotion_tag（供 VTS 过渡帧计算）
+    global _global_prev_emotion_tag
+    prev_tag = _global_prev_emotion_tag
+    _global_prev_emotion_tag = emotion_tag
+
     return {
         "mood_state": str(hard_snapshot.mood_state),
         "emotion_tag": str(emotion_tag),
@@ -196,6 +204,8 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "inner_monologue": _vector_to_inner_monologue(current_vector),
         # 方向 F：用户情感画像摘要
         "user_emotion_profile": get_user_emotion_profile().to_summary(),
+        # 方向 C：上一次 emotion_tag（供 VTS 渐变过渡帧计算）
+        "_prev_emotion_tag": prev_tag,
     }
 
 

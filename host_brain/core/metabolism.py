@@ -94,6 +94,40 @@ class EmotionVector:
             return "THINKING"
         return "NEUTRAL"
 
+    # 方向 C：情绪渐变插值——用于 VTS 表情过渡帧
+    @staticmethod
+    def interpolate(
+        start: "EmotionVector",
+        end: "EmotionVector",
+        t: float,
+    ) -> "EmotionVector":
+        """两个情绪向量之间的线性插值（方向 C：VTS 渐变过渡）。
+
+        Args:
+            start: 起始情绪向量
+            end: 目标情绪向量
+            t: 插值系数 [0.0, 1.0]，0.0=start, 1.0=end
+
+        Returns:
+            插值后的 EmotionVector（emotion_tag 由 VAD 值决定）
+        """
+        t = max(0.0, min(1.0, float(t)))
+        return EmotionVector(
+            valence=start.valence * (1.0 - t) + end.valence * t,
+            arousal=start.arousal * (1.0 - t) + end.arousal * t,
+            dominance=start.dominance * (1.0 - t) + end.dominance * t,
+            ts_ms=end.ts_ms,
+        )
+
+    def distance(self, other: "EmotionVector") -> float:
+        """方向 C：计算两个情绪向量的欧氏距离（用于判断是否需要过渡帧）。"""
+        import math
+        return math.sqrt(
+            (self.valence - other.valence) ** 2
+            + (self.arousal - other.arousal) ** 2
+            + (self.dominance - other.dominance) ** 2
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "valence": round(self.valence, 4),

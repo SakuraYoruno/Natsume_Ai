@@ -84,6 +84,143 @@ EMOTION_FALLBACK_MAP: dict[str, str] = {
 DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"
 DEGRADED_FALLBACK_EXPRESSION_ID = EMOTION_TO_EXPRESSION_ID[DEGRADED_FALLBACK_EXPRESSION_TAG]
 
+# ---------------------------------------------------------------------------
+# 方向 C：VTS 情绪渐变动画——表情过渡帧计算
+# ---------------------------------------------------------------------------
+
+# emotion_tag → 近似 VAD 向量（用于过渡帧插值计算）
+EMOTION_TAG_TO_VAD: dict[str, tuple[float, float, float]] = {
+    "NEUTRAL":     (0.0,  0.0,  0.0),
+    "HAPPY":       (0.6,  0.3,  0.3),
+    "SAD":         (-0.5, -0.3, -0.3),
+    "ANGRY":       (-0.6,  0.6,  0.5),
+    "SURPRISED":   (0.2,  0.7,  0.0),
+    "THINKING":    (0.0,  0.1,  0.4),
+    "EXCITED":     (0.7,  0.7,  0.4),
+    "CALM":        (0.2, -0.4,  0.1),
+    "FRUSTRATED":  (-0.4,  0.3, -0.2),
+    "ANXIOUS":     (-0.3,  0.5, -0.3),
+    "LOVING":      (0.8,  0.4,  0.2),
+    "EMBARRASSED": (-0.2,  0.3, -0.4),
+    "CONFUSED":    (-0.1,  0.2, -0.2),
+    "BORED":       (-0.2, -0.5, -0.1),
+    "PROUD":       (0.5,  0.3,  0.6),
+    "GRATEFUL":    (0.6,  0.2,  0.1),
+}
+
+# 过渡帧距离阈值：欧氏距离 > 此值才生成过渡帧（避免微小变化抖动）
+_TRANSITION_DISTANCE_THRESHOLD = 0.3
+
+# 最大过渡帧数（过多会让表情切换变慢）
+_MAX_TRANSITION_FRAMES = 3
+
+# 默认每帧间隔（毫秒）
+_DEFAULT_FRAME_INTERVAL_MS = 150
+
+
+@dataclass(frozen=True)
+class EmotionTransitionFrame:
+    """方向 C：表情过渡帧描述。"""
+    frame_index: int          # 帧序号（0=首帧，N-1=末帧即目标帧）
+    emotion_tag: str          # 该帧的 emotion_tag
+    expression_id: str        # 该帧的 expression_id
+    interpolation_t: float    # 插值系数 [0, 1]
+    delay_ms: int             # 距离首帧的延迟（毫秒）
+    vad: tuple[float, float, float]  # 该帧的 VAD 值
+
+
+def build_emotion_transition_frames(
+    *,
+    from_tag: str | None,
+    to_tag: str,
+    frame_interval_ms: int = _DEFAULT_FRAME_INTERVAL_MS,
+    max_frames: int = _MAX_TRANSITION_FRAMES,
+) -> list[EmotionTransitionFrame]:
+    """方向 C：构建从 from_tag 到 to_tag 的表情过渡帧序列。
+
+    若两个标签距离小于阈值，或 from_tag 为空/相同，则直接返回仅含目标帧的列表。
+
+    Args:
+        from_tag: 当前表情标签（None 或空表示无历史表情）
+        to_tag: 目标表情标签
+        frame_interval_ms: 每帧间隔（毫秒），默认 150ms
+        max_frames: 最大过渡帧数（不含目标帧），默认 3
+
+    Returns:
+        过渡帧列表（最后一帧始终是目标帧），最少 1 帧
+    """
+    from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+
+    to_tag_norm = str(to_tag or "").strip().upper() or "NEUTRAL"
+    from_tag_norm = str(from_tag or "").strip().upper()
+
+    to_vad = EMOTION_TAG_TO_VAD.get(to_tag_norm, (0.0, 0.0, 0.0))
+    to_expr = EMOTION_TO_EXPRESSION_ID.get(to_tag_norm, DEGRADED_FALLBACK_EXPRESSION_ID)
+
+    # 仅含目标帧的快速路径
+    target_frame = EmotionTransitionFrame(
+        frame_index=0,
+        emotion_tag=to_tag_norm,
+        expression_id=to_expr,
+        interpolation_t=1.0,
+        delay_ms=0,
+        vad=to_vad,
+    )
+
+    # 无起始标签 / 起止相同 → 直接目标帧
+    if not from_tag_norm or from_tag_norm == to_tag_norm:
+        return [target_frame]
+
+    from_vad = EMOTION_TAG_TO_VAD.get(from_tag_norm, (0.0, 0.0, 0.0))
+
+    # 计算 VAD 欧氏距离
+    start_vec = EmotionVector(valence=from_vad[0], arousal=from_vad[1], dominance=from_vad[2])
+    end_vec = EmotionVector(valence=to_vad[0], arousal=to_vad[1], dominance=to_vad[2])
+    dist = start_vec.distance(end_vec)
+
+    # 距离小 → 跳过过渡
+    if dist < _TRANSITION_DISTANCE_THRESHOLD:
+        return [target_frame]
+
+    # 根据距离动态计算过渡帧数：距离越大帧越多（上限 max_frames）
+    num_transition = min(max_frames, max(1, int(dist / 0.4)))
+
+    frames: list[EmotionTransitionFrame] = []
+    total_steps = num_transition + 1  # 含目标帧
+
+    for i in range(total_steps):
+        t = (i + 1) / total_steps
+        interp_vec = EmotionVector.interpolate(start_vec, end_vec, t)
+        interp_tag = interp_vec.to_emotion_tag()
+        interp_expr = EMOTION_TO_EXPRESSION_ID.get(interp_tag, DEGRADED_FALLBACK_EXPRESSION_ID)
+        interp_vad = (
+            round(interp_vec.valence, 3),
+            round(interp_vec.arousal, 3),
+            round(interp_vec.dominance, 3),
+        )
+
+        frames.append(EmotionTransitionFrame(
+            frame_index=i,
+            emotion_tag=interp_tag,
+            expression_id=interp_expr,
+            interpolation_t=round(t, 3),
+            delay_ms=i * frame_interval_ms,
+            vad=interp_vad,
+        ))
+
+    # 确保最后一帧一定是目标 tag（消除插值舍入误差）
+    if frames and frames[-1].emotion_tag != to_tag_norm:
+        frames[-1] = EmotionTransitionFrame(
+            frame_index=frames[-1].frame_index,
+            emotion_tag=to_tag_norm,
+            expression_id=to_expr,
+            interpolation_t=1.0,
+            delay_ms=frames[-1].delay_ms,
+            vad=to_vad,
+        )
+
+    return frames
+
 
 @dataclass(frozen=True)
 class VTSActionResult:

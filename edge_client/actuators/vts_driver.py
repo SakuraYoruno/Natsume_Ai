@@ -131,7 +131,7 @@ EXPRESSION_HOTKEY_BLOCKED_TOKENS: tuple[str, ...] = (
 )
 
 
-#   
+#
 DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
 DEFAULT_RECONNECT_BASE_DELAY_S = 1.0
 DEFAULT_RECONNECT_MAX_DELAY_S = 16.0
@@ -251,6 +251,8 @@ class VTubeStudioDriver:
         self._shutdown_event = threading.Event()
         self._expression_hotkey_overrides: dict[str, str] = {}
         self._hotkey_catalog: list[dict[str, str]] = []
+        # 方向 C：记录上一次设置的 emotion_tag，用于过渡帧计算
+        self._last_emotion_tag: str | None = None
         initial_mouth = [str(item).strip() for item in self._config.mouth_param_candidates if str(item).strip()]
         if not initial_mouth:
             initial_mouth = list(DEFAULT_MOUTH_PARAM_CANDIDATES)
@@ -312,7 +314,7 @@ class VTubeStudioDriver:
                 self._vts = vts_instance
                 self._state = VtsState.CONNECTED
 
-                # 
+                #
                 _authenticate_vts(
                     vts=vts_instance,
                     plugin_name=self._config.plugin_name,
@@ -589,6 +591,8 @@ class VTubeStudioDriver:
                 timeout_s=self._config.api_timeout_s,
             )
             self._current_expression = hotkey_id
+            # 方向 C：记录成功设置的 emotion_tag
+            self._last_emotion_tag = normalized
             return VtsDriverResult(
                 success=True,
                 reason_code=None,
@@ -642,12 +646,65 @@ class VTubeStudioDriver:
                 emotion_tag=normalized,
             )
 
+    @property
+    def last_emotion_tag(self) -> str | None:
+        """方向 C：返回最后成功设置的 emotion_tag（用于过渡帧起始状态）。"""
+        return self._last_emotion_tag
+
+    def transition_expression(
+        self,
+        target_tag: str,
+        *,
+        transition_frames: list[dict[str, Any]] | None = None,
+        frame_interval_s: float = 0.15,
+    ) -> VtsDriverResult:
+        """方向 C：带过渡帧的表情切换。
+
+        逐帧调用 set_expression，每帧之间间隔 frame_interval_s 秒。
+        如果 transition_frames 为空或 None，则退化为普通 set_expression。
+
+        Args:
+            target_tag: 目标 emotion_tag
+            transition_frames: 过渡帧列表（每个 dict 含 emotion_tag/delay_ms）
+            frame_interval_s: 帧间等待秒数（仅当 delay_ms 不可用时使用）
+
+        Returns:
+            最后一帧（目标帧）的 set_expression 结果
+        """
+        if not transition_frames or len(transition_frames) <= 1:
+            return self.set_expression(target_tag)
+
+        last_result: VtsDriverResult | None = None
+        prev_tag: str | None = None
+
+        for frame in transition_frames:
+            frame_tag = str(frame.get("emotion_tag") or target_tag).strip().upper()
+            # 跳过连续相同标签（避免冗余 VTS 调用）
+            if frame_tag == prev_tag:
+                continue
+            prev_tag = frame_tag
+
+            delay_ms = frame.get("delay_ms", 0)
+            if delay_ms and last_result is not None:
+                time.sleep(min(float(delay_ms) / 1000.0, frame_interval_s))
+
+            last_result = self.set_expression(frame_tag)
+            if not last_result.success and last_result.reason_code == AVATAR_TAG_INVALID:
+                # 过渡帧中出现未知标签，跳过继续
+                continue
+
+        # 确保最终设置到目标标签
+        if last_result is None or last_result.emotion_tag != target_tag.strip().upper():
+            last_result = self.set_expression(target_tag)
+
+        return last_result or self.set_expression(target_tag)
+
     def reset_to_neutral(self) -> VtsDriverResult:
         """Reset expression to NEUTRAL (used after barge-in or end of talk)."""
         self._talking = False
         result = self.set_expression("NEUTRAL")
 
-        # 
+        #
         if self._state == VtsState.AUTHENTICATED:
             try:
                 self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
@@ -976,7 +1033,7 @@ class VTubeStudioDriver:
                 return
             delay = min(delay * 2, rc.max_delay_s)
 
-        # 
+        #
         self._total_reconnect_failures += 1
         with self._lock:
             self._state = VtsState.DISCONNECTED

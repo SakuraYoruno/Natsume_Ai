@@ -394,7 +394,15 @@ class EdgeVoicePipeline:
         if emotion_tag == "NEUTRAL":
             expression_result = self.vts_driver.reset_to_neutral()
         else:
-            expression_result = self.vts_driver.set_expression(emotion_tag, intensity=intensity)
+            # 方向 C：优先使用过渡帧（payload 中含 transition_frames 时）
+            transition_frames = payload.get("transition_frames")
+            if transition_frames and isinstance(transition_frames, list) and len(transition_frames) > 1:
+                expression_result = self.vts_driver.transition_expression(
+                    emotion_tag,
+                    transition_frames=transition_frames,
+                )
+            else:
+                expression_result = self.vts_driver.set_expression(emotion_tag, intensity=intensity)
         sub_emotion = payload.get("sub_emotion")
         if sub_emotion:
             from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey

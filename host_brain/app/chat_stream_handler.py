@@ -944,6 +944,31 @@ async def _drive_stream_vts_emotion(
             ),
             timeout=float(timeout_ms) / 1000.0,
         )
+
+        # 方向 C：计算过渡帧（VTS 渐变动画）
+        transition_frames: list[dict[str, Any]] = []
+        try:
+            from host_brain.channels.vts import build_emotion_transition_frames  # noqa: PLC0415
+            _prev_tag = str((emotion_context or {}).get("_prev_emotion_tag") or "").strip().upper()
+            if result.status == "APPLIED" and result.emotion_tag:
+                frames = build_emotion_transition_frames(
+                    from_tag=_prev_tag or None,
+                    to_tag=result.emotion_tag,
+                )
+                if len(frames) > 1:
+                    transition_frames = [
+                        {
+                            "frame_index": f.frame_index,
+                            "emotion_tag": f.emotion_tag,
+                            "expression_id": f.expression_id,
+                            "delay_ms": f.delay_ms,
+                            "interpolation_t": f.interpolation_t,
+                        }
+                        for f in frames
+                    ]
+        except Exception:
+            pass  # 过渡帧计算失败时静默降级
+
         return {
             "status": str(result.status),
             "reason_code": result.reason_code,
@@ -951,6 +976,8 @@ async def _drive_stream_vts_emotion(
             "expression_id": result.expression_id,
             "trigger": result.trigger,
             "detail": result.detail,
+            # 方向 C：过渡帧数据（供 Edge 端执行渐变动画）
+            "transition_frames": transition_frames,
         }
     except asyncio.TimeoutError:
         _logger.warning(
