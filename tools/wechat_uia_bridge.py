@@ -2121,6 +2121,13 @@ class WeChatVisionInboundBridge(WeChatUiOcrInboundBridge):
             if (now_mono - self._last_vision_diag_at) >= 10.0:
                 self._last_vision_diag_at = now_mono
                 logger.info("vision inbound skipped: wechat window is not foreground")
+            fallback_rows = super()._collect_chat_previews()
+            if fallback_rows:
+                logger.info(
+                    "vision inbound background fallback to ocr: previews=%d",
+                    len(fallback_rows),
+                )
+                return fallback_rows
             return []
 
         now_mono = time.monotonic()
