@@ -373,9 +373,23 @@ if ($chromaPort -eq 8000 -or $chromaPort -eq 8100) {
 }
 Write-Host "Chroma host port: $env:NATSUME_CHROMA_PORT (container stays 8000)"
 
-& $dockerExe compose -f $ComposeFile -p $ProjectName up -d
-if ($LASTEXITCODE -ne 0) {
-  throw "docker compose up failed (exit=$LASTEXITCODE)"
+$prevPreference = $ErrorActionPreference
+$nativePrefOriginal = $PSNativeCommandUseErrorActionPreference
+$composeExitCode = 0
+try {
+  $ErrorActionPreference = "Continue"
+  $PSNativeCommandUseErrorActionPreference = $false
+  $composeOutput = & $dockerExe compose -f $ComposeFile -p $ProjectName up -d 2>&1
+  if ($composeOutput) {
+    $composeOutput | ForEach-Object { Write-Host $_ }
+  }
+  $composeExitCode = [int]$LASTEXITCODE
+} finally {
+  $ErrorActionPreference = $prevPreference
+  $PSNativeCommandUseErrorActionPreference = $nativePrefOriginal
+}
+if ($composeExitCode -ne 0) {
+  throw "docker compose up failed (exit=$composeExitCode)"
 }
 
 if (-not (Wait-TcpPort -Port $neo4jPort -TimeoutSeconds $Neo4jWaitSeconds)) {
