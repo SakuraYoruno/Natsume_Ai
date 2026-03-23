@@ -886,6 +886,8 @@ class WeChatUiInboundBridge:
         self._auto_recover_interval_s = 8.0
         self._last_preview_by_chat: dict[str, str] = {}
         self._recent_forwarded: dict[str, float] = {}
+        self._last_sender_hint = ""
+        self._last_sender_fallback_log_at = 0.0
         self._stats = {
             "events": 0,
             "messages_forwarded": 0,
@@ -973,19 +975,30 @@ class WeChatUiInboundBridge:
 
             ts_ms = int(time.time() * 1000)
             for sender, preview in previews:
-                sender_value = str(sender or "").strip()
+                raw_sender_value = str(sender or "").strip()
                 preview_value = _normalize_message_text(preview)
-                if not sender_value or not preview_value:
+                if not preview_value:
+                    continue
+                sender_value = self._resolve_sender_for_forward(
+                    sender=raw_sender_value,
+                    preview=preview_value,
+                )
+                if not sender_value:
                     continue
                 if _is_blocked_chat_target(sender_value):
                     continue
                 if not _is_allowed_contact_target(sender_value):
                     continue
+                self._last_sender_hint = sender_value
 
                 last_value = self._last_preview_by_chat.get(sender_value)
+                if last_value is None and raw_sender_value and raw_sender_value != sender_value:
+                    last_value = self._last_preview_by_chat.get(raw_sender_value)
                 if last_value == preview_value:
                     continue
                 self._last_preview_by_chat[sender_value] = preview_value
+                if raw_sender_value and raw_sender_value != sender_value:
+                    self._last_preview_by_chat[raw_sender_value] = preview_value
 
                 if _is_recent_outbound_echo(preview_value):
                     continue
@@ -1061,6 +1074,41 @@ class WeChatUiInboundBridge:
             return True
         self._recent_forwarded[signature] = now_mono
         return False
+
+    def _resolve_sender_for_forward(self, *, sender: str, preview: str) -> str:
+        sender_value = _normalize_message_text(sender)
+        if sender_value and (not _is_blocked_chat_target(sender_value)):
+            return sender_value
+        if sender_value and (not _is_active_chat_target(sender_value)):
+            return ""
+
+        allowed_names = [str(item or "").strip() for item in _resolve_allowed_contact_names() if str(item or "").strip()]
+        fallback_candidates: list[str] = []
+        if len(allowed_names) == 1:
+            fallback_candidates.append(allowed_names[0])
+        if self._last_sender_hint:
+            fallback_candidates.append(self._last_sender_hint)
+        fallback_candidates.append("wechat_inbound")
+
+        for candidate in fallback_candidates:
+            candidate_value = _normalize_message_text(candidate)
+            if not candidate_value:
+                continue
+            if _is_blocked_chat_target(candidate_value):
+                continue
+            if allowed_names and (not _is_allowed_contact_target(candidate_value)):
+                continue
+            now_mono = time.monotonic()
+            if (now_mono - self._last_sender_fallback_log_at) >= 8.0:
+                self._last_sender_fallback_log_at = now_mono
+                logger.info(
+                    "inbound sender fallback applied: raw_sender=%s resolved_sender=%s preview=%.80s",
+                    sender_value or "(empty)",
+                    candidate_value,
+                    preview,
+                )
+            return candidate_value
+        return ""
 
     def _hook_loop(self) -> None:
         user32 = ctypes.windll.user32
