@@ -1502,6 +1502,99 @@ class QAContractNode(ChainNode):
                 ctx.audit_tags.append("QA_NULL_BYTE_REMOVED")
             checks_passed.append("NULL_BYTE_CHECK")
 
+            # ── 检查5：方向 E 情感一致性校验 ────────────────────────────
+            # 对比 LLM 输出中的 emotion_tag 与 Phase 6 推理出的 natsume_emotion，
+            # 如果差异显著（效价方向完全相反），则记录审计警告。
+            # 不做硬纠正（避免破坏 LLM 的创意），仅做 soft audit。
+            _emotion_consistency_result: dict[str, Any] = {"status": "SKIPPED"}
+            try:
+                # 提取 LLM 输出中的 emotion_tag
+                _llm_gw_meta = ctx.metadata.get("llm_gateway") or {}
+                _llm_emotion_tag = ""
+                if isinstance(_llm_gw_meta, dict):
+                    _narrative_meta = _llm_gw_meta.get("narrative") or {}
+                    if isinstance(_narrative_meta, dict):
+                        _llm_emotion_tag = str(_narrative_meta.get("emotion_tag") or "").strip().upper()
+                # 如果没从 narrative 里拿到，尝试从 emotion_context 获取
+                if not _llm_emotion_tag:
+                    _ec_meta = _llm_gw_meta.get("emotion_context") or {} if isinstance(_llm_gw_meta, dict) else {}
+                    _llm_emotion_tag = str(_ec_meta.get("emotion_tag") or "").strip().upper() if isinstance(_ec_meta, dict) else ""
+
+                # 获取 Phase 6 推理结果
+                _inferred_meta_qa = ctx.metadata.get("inferred_emotion") or {}
+                _ie_qa_mode = str(_inferred_meta_qa.get("mode") or "").strip() if isinstance(_inferred_meta_qa, dict) else ""
+                _ie_qa_natsume = str(_inferred_meta_qa.get("natsume_emotion") or "").strip().upper() if isinstance(_inferred_meta_qa, dict) else ""
+                _ie_qa_conf = 0.0
+                try:
+                    _ie_qa_conf = float(_inferred_meta_qa.get("confidence") or 0.0) if isinstance(_inferred_meta_qa, dict) else 0.0
+                except (TypeError, ValueError):
+                    pass
+
+                if _llm_emotion_tag and _ie_qa_mode == "ACTIVE" and _ie_qa_natsume and _ie_qa_conf >= 0.5:
+                    # 情感效价方向映射（简化版）
+                    _VALENCE_DIR = {
+                        "HAPPY": "positive", "EXCITED": "positive", "LOVING": "positive",
+                        "PROUD": "positive", "GRATEFUL": "positive", "SURPRISED": "positive",
+                        "SAD": "negative", "ANGRY": "negative", "ANXIOUS": "negative",
+                        "FRUSTRATED": "negative", "EMBARRASSED": "negative",
+                        "CALM": "neutral", "NEUTRAL": "neutral", "THINKING": "neutral",
+                        "CONFUSED": "neutral", "BORED": "negative",
+                    }
+                    _llm_dir = _VALENCE_DIR.get(_llm_emotion_tag, "neutral")
+                    _inferred_dir = _VALENCE_DIR.get(_ie_qa_natsume, "neutral")
+
+                    _is_consistent = True
+                    _inconsistency_level = "NONE"
+
+                    # 严重不一致：效价方向完全相反
+                    if (_llm_dir == "positive" and _inferred_dir == "negative") or \
+                       (_llm_dir == "negative" and _inferred_dir == "positive"):
+                        _is_consistent = False
+                        _inconsistency_level = "SEVERE"
+                    # 轻微不一致：中性 vs 强情绪
+                    elif _llm_emotion_tag != _ie_qa_natsume and _llm_dir != _inferred_dir:
+                        _is_consistent = False
+                        _inconsistency_level = "MILD"
+
+                    _emotion_consistency_result = {
+                        "status": "CHECKED",
+                        "llm_emotion": _llm_emotion_tag,
+                        "inferred_emotion": _ie_qa_natsume,
+                        "inferred_confidence": round(_ie_qa_conf, 3),
+                        "llm_valence_dir": _llm_dir,
+                        "inferred_valence_dir": _inferred_dir,
+                        "consistent": _is_consistent,
+                        "inconsistency_level": _inconsistency_level,
+                    }
+
+                    if not _is_consistent:
+                        ctx.audit_tags.append(
+                            f"EMOTION_INCONSISTENCY:{_inconsistency_level}:"
+                            f"{_llm_emotion_tag}vs{_ie_qa_natsume}"
+                        )
+                        if _inconsistency_level == "SEVERE":
+                            checks_failed.append(
+                                f"EMOTION_CONSISTENCY:SEVERE({_llm_emotion_tag}≠{_ie_qa_natsume})"
+                            )
+                            logger.warning(
+                                "[%s] 方向E: 情感一致性严重不一致 LLM=%s(%s) vs 推理=%s(%s) conf=%.2f",
+                                ctx.request_id, _llm_emotion_tag, _llm_dir,
+                                _ie_qa_natsume, _inferred_dir, _ie_qa_conf,
+                            )
+                        else:
+                            checks_passed.append(
+                                f"EMOTION_CONSISTENCY:MILD({_llm_emotion_tag}≈{_ie_qa_natsume})"
+                            )
+                    else:
+                        checks_passed.append("EMOTION_CONSISTENCY:OK")
+                else:
+                    _emotion_consistency_result = {"status": "SKIPPED_NO_DATA"}
+                    checks_passed.append("EMOTION_CONSISTENCY:SKIPPED")
+            except Exception as _ec_exc:
+                _emotion_consistency_result = {"status": "DEGRADED", "error": str(_ec_exc)[:80]}
+                checks_passed.append("EMOTION_CONSISTENCY:DEGRADED")
+                logger.debug("[%s] 方向E: 情感一致性校验异常（降级）: %s", ctx.request_id, _ec_exc)
+
         except Exception as exc:
             ctx.audit_tags.append("QA_CHECK_DEGRADED")
             checks_failed.append(f"QA_CHECK_EXCEPTION:{type(exc).__name__}")
@@ -1523,6 +1616,8 @@ class QAContractNode(ChainNode):
             "input_chars": len(raw_output),
             "checks_passed": checks_passed,
             "checks_failed": checks_failed,
+            # 方向 E：情感一致性校验结果
+            "emotion_consistency": _emotion_consistency_result,
         }
         if rewritten:
             ctx.audit_tags.append(f"QA_REWRITE:{','.join(rewrite_reasons)}")
@@ -1668,6 +1763,40 @@ class EpisodicStoreNode(ChainNode):
                 _emotion_context["turn_count"] = 2
             if not str(_emotion_context.get("emotion_tag") or "").strip():
                 _emotion_context["emotion_tag"] = "NEUTRAL"
+
+            # ── 方向 A：情感记忆闭环——让 Phase 6 推理结果流入记忆标注 ──────
+            # 如果 emotion_tag 仍为 NEUTRAL 且 Phase 6 推理出了有意义的情感，
+            # 则用推理结果覆盖，使记忆标注更准确。
+            _inferred_meta = ctx.metadata.get("inferred_emotion") or {}
+            if isinstance(_inferred_meta, dict):
+                _ie_mode = str(_inferred_meta.get("mode") or "").strip()
+                _ie_conf = 0.0
+                try:
+                    _ie_conf = float(_inferred_meta.get("confidence") or 0.0)
+                except (TypeError, ValueError):
+                    pass
+                _ie_natsume_tag = str(_inferred_meta.get("natsume_emotion") or "").strip().upper()
+                _ie_user_tag = str(_inferred_meta.get("user_emotion") or "").strip().upper()
+                _current_tag = str(_emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
+                # 条件：推理模式为 ACTIVE、置信度 ≥ 0.5、当前标签为 NEUTRAL 或推理标签更具体
+                if (
+                    _ie_mode == "ACTIVE"
+                    and _ie_conf >= 0.5
+                    and _ie_natsume_tag
+                    and _ie_natsume_tag != "NEUTRAL"
+                    and _current_tag == "NEUTRAL"
+                ):
+                    _emotion_context["emotion_tag"] = _ie_natsume_tag
+                    _emotion_context["emotion_source"] = "INFERRED_PHASE6"
+                    _emotion_context["inferred_confidence"] = round(_ie_conf, 3)
+                    ctx.audit_tags.append(f"EPISODIC_EMOTION_INFERRED:{_ie_natsume_tag}")
+                    logger.debug(
+                        "[%s] 方向A: 情感记忆闭环——推理覆盖 NEUTRAL→%s (conf=%.2f)",
+                        ctx.request_id, _ie_natsume_tag, _ie_conf,
+                    )
+                # 始终将推理的用户情感也写入 emotion_context（供记忆检索时的情感上下文使用）
+                if _ie_mode == "ACTIVE" and _ie_user_tag:
+                    _emotion_context["inferred_user_emotion"] = _ie_user_tag
 
             _result = await asyncio.to_thread(
                 persist_chat_episodic_memory,

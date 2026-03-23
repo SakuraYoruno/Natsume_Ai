@@ -167,6 +167,15 @@ def persist_chat_episodic_memory(
     tag = str(raw_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     valence, arousal, _dominance = map_emotion_tag_to_vad(tag)
 
+    # 方向 A：记录情感来源（前端传入 vs Phase 6 推理），用于审计
+    _emotion_source = str((emotion_context or {}).get("emotion_source") or "FRONTEND").strip()
+    _inferred_user_emotion = str((emotion_context or {}).get("inferred_user_emotion") or "").strip()
+    _inferred_confidence = 0.0
+    try:
+        _inferred_confidence = float((emotion_context or {}).get("inferred_confidence") or 0.0)
+    except (TypeError, ValueError):
+        pass
+
     # [选项二] 接入 MemoryGuard：在写入 EpisodicStore 前进行宪法校验
     # 校验条件：对话轮次 ≥ 2 且包含情感/事实/偏好标签
     # 降级策略：校验失败时跳过写入（不抛出异常），记录 reason_code
@@ -228,4 +237,8 @@ def persist_chat_episodic_memory(
         "memory_id": result.memory_id,
         "detail": result.detail,
         "emotion_tag": tag,
+        # 方向 A：情感记忆闭环审计字段
+        "emotion_source": _emotion_source,
+        "inferred_user_emotion": _inferred_user_emotion or None,
+        "inferred_confidence": round(_inferred_confidence, 3) if _inferred_confidence > 0 else None,
     }
