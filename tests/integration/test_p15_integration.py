@@ -90,9 +90,9 @@ class TestP15DispatchToAgentIntegration(unittest.TestCase):
         result = self.executor._dispatch_to_agent(state)
         self.assertEqual(result, "")
 
-    def test_agent_handler_map_has_six_entries(self):
-        """_AGENT_HANDLER_MAP 应包含 6 个 agent"""
-        self.assertEqual(len(_AGENT_HANDLER_MAP), 6)
+    def test_agent_handler_map_has_seven_entries(self):
+        """_AGENT_HANDLER_MAP 应包含 7 个 agent（含 emotion_agent）"""
+        self.assertEqual(len(_AGENT_HANDLER_MAP), 7)
 
 
 # ---------------------------------------------------------------------------

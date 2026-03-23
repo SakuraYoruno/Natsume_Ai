@@ -28,6 +28,7 @@ from host_brain.app.agents.agent_contract import (
 from host_brain.app.agents.agent_registry import (
     AGENT_ID_CHAT,
     AGENT_ID_CODE,
+    AGENT_ID_EMOTION,
     AGENT_ID_INTENT,
     AGENT_ID_JUDGE,
     AGENT_ID_RETRIEVAL,
@@ -135,6 +136,15 @@ def supervisor_dispatch_handler(
     rule_risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
     rule_need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
 
+    # 方向 G Phase 3：当 Phase 6 标记需要深度情感分析时，优先分派 emotion_agent
+    _needs_deep = False
+    _inferred_emotion = payload.get("inferred_emotion") or {}
+    if isinstance(_inferred_emotion, dict):
+        _needs_deep = bool(payload.get("needs_deep_emotion_analysis"))
+    if _needs_deep and rule_agent == AGENT_ID_CHAT:
+        rule_agent = AGENT_ID_EMOTION
+        rule_need_judge = False  # 情感 Agent 产出工件即可，不需要 Judge 裁判
+
     selected_agent = rule_agent
     risk_mode = rule_risk_mode
     need_judge = rule_need_judge
@@ -228,6 +238,7 @@ _SUPERVISOR_SYSTEM_PROMPT = """你是一个任务分派专家，负责根据用�
 - translate_agent：处理文本翻译（低风险）
 - intent_agent：处理执行意图、工具调用、复杂任务规划（高风险）
 - retrieval_agent：处理知识库检索、信息查找（低风险，只读）
+- emotion_agent：深度情感分析，当用户情感状态复杂或难以判断时使用（低风险，只读）
 
 你必须返回合法的 JSON 格式：
 {
@@ -244,6 +255,7 @@ _SUPERVISOR_SYSTEM_PROMPT = """你是一个任务分派专家，负责根据用�
 - 翻译相关 → translate_agent，risk_mode=safe，need_judge=true
 - 执行/工具/复杂任务 → intent_agent，risk_mode=strict，need_judge=true
 - 检索/查找知识库 → retrieval_agent，risk_mode=safe，need_judge=true
+- 情感分析复杂/难以判断 → emotion_agent，risk_mode=safe，need_judge=false
 - 不确定时 → chat_agent（保守选择）
 """
 

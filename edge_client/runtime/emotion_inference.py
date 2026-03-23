@@ -113,5 +113,6 @@ def infer_asr_emotion(
         "emotion_intensity": intensity,
         "mood_state": mood_state,
         "emotion_source": "text_heuristic",
+        "inference_level": 1,  # 方向 G：标记为 Level 1（关键词引擎）
         "matched_terms": matched_terms[:6],
     }

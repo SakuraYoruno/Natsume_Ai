@@ -1287,7 +1287,8 @@ class LlmGatewayNode(ChainNode):
                 _infer_reason = "无明显情感信号，保持中性"
                 _infer_confidence = 0.3
 
-            inferred_emotion_meta = {
+            # Level 1 关键词结果（作为级联管线的输入基座）
+            _keyword_result = {
                 "mode": "ACTIVE",
                 "user_emotion": _inferred_user_emotion,
                 "natsume_emotion": _inferred_natsume_emotion,
@@ -1301,6 +1302,66 @@ class LlmGatewayNode(ChainNode):
                     "question": _question_hits,
                 },
             }
+
+            # ── 方向 G：EmotionInferenceCascade 级联管线 ──────────────
+            # Level 1 置信度不足时，调用 LLM Flash 进行深度推理（Level 2）。
+            # 环境变量 HOST_EMOTION_LLM_INFERENCE_ENABLED=true 时启用。
+            try:
+                from host_brain.app.emotion_llm_inference import (  # noqa: PLC0415
+                    EmotionInferenceCascade,
+                    is_emotion_llm_inference_enabled,
+                )
+                if is_emotion_llm_inference_enabled():
+                    _cascade = EmotionInferenceCascade()
+                    # 提取最近对话历史（最多 3 轮 = 6 条消息）
+                    _conv_history: list[str] = []
+                    _recent_turns = ctx.metadata.get("recent_turns") or []
+                    if isinstance(_recent_turns, list):
+                        for _turn in _recent_turns[-6:]:
+                            if isinstance(_turn, dict):
+                                _role = str(_turn.get("role") or "").strip()
+                                _content = str(_turn.get("content") or "").strip()
+                                if _content:
+                                    _conv_history.append(f"{_role}: {_content}")
+                            elif isinstance(_turn, str):
+                                _conv_history.append(str(_turn).strip())
+                    # 如果 recent_turns 为空，至少提供当前用户消息
+                    if not _conv_history and _user_msg:
+                        _conv_history.append(f"user: {_user_msg}")
+                    if _llm_output_text:
+                        _conv_history.append(f"assistant: {_llm_output_text[:200]}")
+
+                    inferred_emotion_meta = await _cascade.infer(
+                        user_message=_user_msg,
+                        keyword_result=_keyword_result,
+                        conversation_history=_conv_history if _conv_history else None,
+                        current_emotion_tag=_emotion_tag,
+                        mood_state=str(ctx.metadata.get("emotion_context", {}).get("mood_state") or "steady"),
+                    )
+                    _inferred_user_emotion = str(inferred_emotion_meta.get("user_emotion") or _inferred_user_emotion)
+                    _inferred_natsume_emotion = str(inferred_emotion_meta.get("natsume_emotion") or _inferred_natsume_emotion)
+                    _infer_confidence = float(inferred_emotion_meta.get("confidence") or _infer_confidence)
+                    _infer_reason = str(inferred_emotion_meta.get("reason") or _infer_reason)
+
+                    _cascade_level = int(inferred_emotion_meta.get("inference_level") or 1)
+                    if _cascade_level == 2:
+                        ctx.audit_tags.append("EMOTION_LLM_INFERRED")
+                    elif _cascade_level == 3:
+                        ctx.audit_tags.append("EMOTION_LLM_FALLBACK")
+                    logger.debug(
+                        "[%s] Phase 6 级联推理 level=%d source=%s confidence=%.2f latency=%dms",
+                        ctx.request_id, _cascade_level,
+                        str(inferred_emotion_meta.get("inference_source") or ""),
+                        _infer_confidence,
+                        int(inferred_emotion_meta.get("latency_ms") or 0),
+                    )
+                else:
+                    inferred_emotion_meta = _keyword_result
+            except Exception as _cascade_exc:
+                # 级联管线异常 → 静默降级为纯关键词结果
+                inferred_emotion_meta = _keyword_result
+                inferred_emotion_meta["cascade_error"] = str(_cascade_exc)[:80]
+                logger.debug("[%s] Phase 6 级联管线异常（降级为关键词）: %s", ctx.request_id, _cascade_exc)
 
             # 高置信度时覆盖 emotion_tag（让推理结果影响实际情感状态）
             if _infer_confidence >= 0.6 and _inferred_natsume_emotion != _emotion_tag:
@@ -1317,6 +1378,17 @@ class LlmGatewayNode(ChainNode):
                 "[%s] Phase 6 情感推理完成 user=%s natsume=%s confidence=%.2f",
                 ctx.request_id, _inferred_user_emotion, _inferred_natsume_emotion, _infer_confidence,
             )
+
+            # ── 方向 G Phase 3：联动标记 ─────────────────────────────
+            # 当 Phase 6 级联置信度仍然不高时，标记需要深度情感分析，
+            # 供 Supervisor 在 WORKFLOW_SUPERVISED 图中分派 emotion_agent。
+            _cascade_level = int(inferred_emotion_meta.get("inference_level") or 1)
+            if _infer_confidence < 0.5 or _cascade_level == 3:
+                ctx.metadata["needs_deep_emotion_analysis"] = True
+                ctx.audit_tags.append("EMOTION_NEEDS_DEEP_ANALYSIS")
+            else:
+                ctx.metadata["needs_deep_emotion_analysis"] = False
+
         except Exception as _ie_exc:
             inferred_emotion_meta = {"mode": "DEGRADED", "error": str(_ie_exc)[:100]}
             ctx.metadata["inferred_emotion"] = inferred_emotion_meta

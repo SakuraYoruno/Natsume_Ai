@@ -556,6 +556,112 @@ def _tool_translate_text(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 方向 G Phase 2：情感 Agent 专用工具
+# ---------------------------------------------------------------------------
+
+def _tool_emotion_history_search(args: dict[str, Any]) -> dict[str, Any]:
+    """情感记忆检索工具（只读）。检索 EpisodicStore 中的情感相关记忆。"""
+    query = str(args.get("query") or "").strip()
+    emotion_tag = str(args.get("emotion_tag") or "").strip().upper()
+    if not query:
+        return {"error": "MISSING_QUERY", "result": None}
+
+    t0 = int(time.time() * 1000)
+    try:
+        recaller = _get_semantic_recaller()
+        enriched_query = f"情感 {query}"
+        if emotion_tag:
+            enriched_query = f"情感 {emotion_tag} {query}"
+
+        recall_result = _run_async(recaller.recall(query=enriched_query, top_k=5, threshold=0.3))
+
+        latency_ms = int(time.time() * 1000) - t0
+        hits = getattr(recall_result, "hits", [])
+        filtered_count = int(getattr(recall_result, "filtered_count", 0))
+
+        if filtered_count == 0:
+            return {
+                "result": f"未找到与 '{query}' 相关的情感记忆",
+                "source": "emotion_episodic",
+                "items": [],
+                "latency_ms": latency_ms,
+            }
+
+        items = []
+        lines = []
+        for i, hit in enumerate(hits, 1):
+            content = str(getattr(hit, "content", "") or "")
+            score = float(getattr(hit, "score", 0.0))
+            items.append({"content": content, "score": score})
+            lines.append(f"[{i}] (相关度={score:.2f}) {content}")
+
+        return {
+            "result": "\n".join(lines),
+            "source": "emotion_episodic",
+            "items": items,
+            "latency_ms": latency_ms,
+        }
+    except Exception as exc:
+        logger.warning("_tool_emotion_history_search 执行失败: %s", exc)
+        return {
+            "result": f"情感记忆检索失败: {exc}",
+            "source": "emotion_episodic",
+            "items": [],
+            "error": str(exc),
+        }
+
+
+def _tool_emotion_timeline_query(args: dict[str, Any]) -> dict[str, Any]:
+    """情感时间线查询工具（只读）。查询最近的情感变化轨迹。"""
+    window_minutes = int(args.get("window_minutes") or 60)
+    window_minutes = max(5, min(1440, window_minutes))
+
+    try:
+        from host_brain.app.emotion_context import get_emotion_timeline  # noqa: PLC0415
+
+        timeline = get_emotion_timeline()
+        window_ms = window_minutes * 60 * 1000
+
+        diary = timeline.build_daily_diary(window_ms=window_ms)
+        diary_text = str(diary.get("diary_text") or "").strip()
+        total_entries = int(diary.get("total_entries") or 0)
+        dominant = str(diary.get("dominant_emotion") or "NEUTRAL")
+        avg_valence = float(diary.get("avg_valence") or 0.0)
+
+        if total_entries == 0:
+            return {
+                "result": f"最近 {window_minutes} 分钟内没有情感记录",
+                "source": "emotion_timeline",
+                "total_entries": 0,
+            }
+
+        result_text = (
+            f"最近 {window_minutes} 分钟的情感轨迹（{total_entries} 条记录）：\n"
+            f"主导情感: {dominant}\n"
+            f"平均效价: {avg_valence:.3f}\n"
+        )
+        if diary_text:
+            result_text += f"日记摘要: {diary_text}"
+
+        return {
+            "result": result_text,
+            "source": "emotion_timeline",
+            "total_entries": total_entries,
+            "dominant_emotion": dominant,
+            "avg_valence": round(avg_valence, 3),
+            "diary_text": diary_text,
+        }
+    except Exception as exc:
+        logger.warning("_tool_emotion_timeline_query 执行失败: %s", exc)
+        return {
+            "result": f"情感时间线查询失败: {exc}",
+            "source": "emotion_timeline",
+            "total_entries": 0,
+            "error": str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
 # 工具注册表
 # ---------------------------------------------------------------------------
 
@@ -679,6 +785,36 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
         has_side_effects=False,
         executor=_tool_compare_artifacts,
     ),
+    # 方向 G Phase 2：情感 Agent 专用工具
+    "emotion_history_search": ToolSpec(
+        tool_id="emotion_history_search",
+        display_name="情感记忆检索",
+        description="检索用户的历史情感记忆，了解用户过去的情感状态变化",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "情感相关的检索查询词"},
+                "emotion_tag": {"type": "string", "description": "过滤指定情感标签（可选）"},
+            },
+            "required": ["query"],
+        },
+        has_side_effects=False,
+        executor=_tool_emotion_history_search,
+    ),
+    "emotion_timeline_query": ToolSpec(
+        tool_id="emotion_timeline_query",
+        display_name="情感时间线查询",
+        description="查询最近的情感变化轨迹，了解情感走势",
+        parameters={
+            "type": "object",
+            "properties": {
+                "window_minutes": {"type": "integer", "description": "时间窗口（分钟），默认 60"},
+            },
+            "required": [],
+        },
+        has_side_effects=False,
+        executor=_tool_emotion_timeline_query,
+    ),
 }
 
 # 各 agent 可用的工具集合（只读工具）
@@ -689,6 +825,7 @@ _AGENT_TOOLS: dict[str, list[str]] = {
     "retrieval_agent": ["search_knowledge", "search_by_keyword", "search_by_vector", "get_context"],
     "intent_agent":    ["search_knowledge", "get_context", "analyze_code"],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
+    "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
 }
 
 

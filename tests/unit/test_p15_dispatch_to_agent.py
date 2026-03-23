@@ -68,6 +68,7 @@ class TestAgentHandlerMap(unittest.TestCase):
         expected = {
             "chat_agent", "code_agent", "translate_agent",
             "intent_agent", "judge_agent", "retrieval_agent",
+            "emotion_agent",  # 方向 G Phase 2 新增
         }
         self.assertEqual(set(_AGENT_HANDLER_MAP.keys()), expected)
 
