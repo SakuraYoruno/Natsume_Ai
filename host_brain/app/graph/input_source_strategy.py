@@ -86,7 +86,7 @@ def _append_target_candidate(container: list[str], value: Any) -> None:
     key = _normalize_target_key(text_value)
     if not key:
         return
-    if key in {"activechat", "active_chat", "localwechat", "local_wechat"}:
+    if key in {"localwechat", "local_wechat"}:
         return
     if any(_normalize_target_key(item) == key for item in container):
         return
