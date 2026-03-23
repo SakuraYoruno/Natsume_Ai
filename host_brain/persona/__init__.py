@@ -28,6 +28,13 @@ from host_brain.persona.emotion_reactivity import (
 from host_brain.persona.expression_adapter import (
     PersonaExpressionAdapter,
 )
+from host_brain.persona.self_model import (
+    SelfModel,
+)
+from host_brain.persona.self_reflection import (
+    SelfReflection,
+    build_self_reflection_pulse,
+)
 
 __all__ = [
     # personality_traits.py
@@ -45,4 +52,9 @@ __all__ = [
     "ReactivityModifiers",
     # expression_adapter.py (Phase II)
     "PersonaExpressionAdapter",
+    # self_model.py (Phase III)
+    "SelfModel",
+    # self_reflection.py (Phase III)
+    "SelfReflection",
+    "build_self_reflection_pulse",
 ]

@@ -327,18 +327,59 @@ class PersonaEngine:
             )
             return PersonalityTraits.from_dict(restored.as_dict())
 
-    def get_self_model_snapshot(self, user_id: str) -> SelfModelSnapshot:
-        """获取自我意识快照（Phase III 骨架）。
+    def get_self_model_snapshot(
+        self,
+        user_id: str,
+        *,
+        timeline_summary: dict[str, Any] | None = None,
+        timeline_diary: dict[str, Any] | None = None,
+        bond_state: Any | None = None,
+        bond_summary: dict[str, Any] | None = None,
+        last_deep_talk_ts_ms: int = 0,
+        current_ts_ms: int = 0,
+    ) -> SelfModelSnapshot:
+        """获取自我意识快照（Phase III 完整实现）。
 
-        Phase I 提供基础实现（仅含特质变化感知），
-        Phase III 将引入 SelfModel 完整填充。
+        委托给 SelfModel 进行完整的自省快照构建。
+        当 SelfModel 不可用时，降级到 Phase I 基础实现。
+
+        Args:
+            user_id: 用户 ID
+            timeline_summary: EmotionTimeline.rebuild_summary() 输出
+            timeline_diary: EmotionTimeline.build_daily_diary() 输出
+            bond_state: BondScoreState（可为 None）
+            bond_summary: BondScoreState.to_summary() 输出
+            last_deep_talk_ts_ms: 上次深度对话时间戳
+            current_ts_ms: 当前时间戳
+
+        Returns:
+            SelfModelSnapshot
         """
         uid = str(user_id).strip()
         changes = self.get_change_log(uid, limit=5)
 
+        try:
+            from host_brain.persona.self_model import SelfModel  # noqa: PLC0415
+            model = SelfModel()
+            snapshot_dict = model.build_snapshot(
+                timeline_summary=timeline_summary,
+                timeline_diary=timeline_diary,
+                bond_state=bond_state,
+                bond_summary=bond_summary,
+                persona_changes=changes,
+                last_deep_talk_ts_ms=last_deep_talk_ts_ms,
+                current_ts_ms=current_ts_ms,
+            )
+            return SelfModelSnapshot(**{
+                k: v for k, v in snapshot_dict.items()
+                if k in SelfModelSnapshot.__dataclass_fields__
+            })
+        except Exception as exc:
+            _logger.debug("SelfModel 不可用，降级到基础实现: %s", exc)
+
+        # Phase I 降级实现
         personality_changes: list[str] = []
         if changes:
-            # 简单的变化感知：找出最近变化的维度
             latest = changes[-1]
             for name in TRAIT_NAMES:
                 d = latest.delta.get(name, 0.0)

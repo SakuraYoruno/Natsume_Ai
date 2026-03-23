@@ -756,6 +756,27 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _up_hint = _truncate_for_prompt(_user_profile.get("profile_hint"), limit=200) or ""
     _up_active = _up_status == "ACTIVE" and bool(_up_hint)
 
+    # ── Phase III：自省脉冲（self_reflection_pulse）──────────────────
+    _self_reflection_block = ""
+    try:
+        _srp_raw = runtime_payload.get("self_reflection_pulse")
+        _srp = dict(_srp_raw) if isinstance(_srp_raw, Mapping) else {}
+        if _srp:
+            _sr_self = _truncate_for_prompt(_srp.get("self_awareness"), limit=200) or ""
+            _sr_mood = _truncate_for_prompt(_srp.get("mood_awareness"), limit=200) or ""
+            _sr_growth = _truncate_for_prompt(_srp.get("growth_note"), limit=200) or ""
+            _sr_parts: list[str] = ["SELF_REFLECTION_PULSE:"]
+            if _sr_self:
+                _sr_parts.append(f"- self_awareness: {_sr_self}")
+            if _sr_mood:
+                _sr_parts.append(f"- mood_awareness: {_sr_mood}")
+            if _sr_growth:
+                _sr_parts.append(f"- growth_note: {_sr_growth}")
+            if len(_sr_parts) > 1:  # 至少有一个子字段
+                _self_reflection_block = "\n".join(_sr_parts) + "\n\n"
+    except Exception:
+        pass  # 降级：不注入自省脉冲
+
     # ── Phase II：人格化表达策略提示（PersonaExpressionAdapter）────────
     _persona_expression_hint_block = ""
     try:
@@ -1012,6 +1033,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{style_block}"
         f"{cn_style_boost_block}"
         f"{_persona_expression_hint_block}"
+        f"{_self_reflection_block}"
         f"{emotion_binding_block}"
         "PROMPT_CONTEXT_VALIDATION:\n"
         f"- valid: {prompt_context_valid}\n"
