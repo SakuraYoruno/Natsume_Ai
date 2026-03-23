@@ -35,6 +35,7 @@ OPTIONAL_SLOTS: dict[str, type] = {
     "bond_texture": dict,
     "memory_emotion_hint": dict,
     "self_reflection_pulse": dict,  # Phase III：自省脉冲
+    "bond_narrative": dict,         # Phase V：关系叙事
 }
 
 # M28-G：动态槽位注册表（OPT-16）

@@ -239,6 +239,8 @@ class BondScoreState:
             "stage": stage_cn,
             "trend": self.trend(),
             "capability_hint": self.capability_hint(),
+            "shared_memory_count": 0,  # Phase V：由 BondNarrativeLayer 填充
+            "milestone_hint": "",      # Phase V：由 MilestoneTracker 填充
         }
         # M29-A：texture 风格提示
         if self.texture.intimacy_temperature >= 0.7:
@@ -246,7 +248,18 @@ class BondScoreState:
         # M29-G：裂痕修复提示
         if self.rift is not None and self.rift.is_active():
             summary["repair_hint"] = self.rift.repair_hint()
+        # Phase V：里程碑和共同记忆由外部调用者注入
         return summary
+
+    def inject_narrative(
+        self,
+        *,
+        milestone_hint: str = "",
+        shared_memory_count: int = 0,
+    ) -> None:
+        """Phase V：注入叙事层数据到 BondScoreState（便于 to_summary 输出）。"""
+        self._milestone_hint = milestone_hint
+        self._shared_memory_count = shared_memory_count
 
 
 @dataclass(frozen=True)

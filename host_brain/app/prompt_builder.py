@@ -756,6 +756,30 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _up_hint = _truncate_for_prompt(_user_profile.get("profile_hint"), limit=200) or ""
     _up_active = _up_status == "ACTIVE" and bool(_up_hint)
 
+    # ── Phase V：Bond 叙事层（bond_narrative）───────────────────
+    _bond_narrative_block = ""
+    try:
+        _bn_raw = runtime_payload.get("bond_narrative")
+        _bn = dict(_bn_raw) if isinstance(_bn_raw, Mapping) else {}
+        if not _bn:
+            _bn_raw2 = prompt_context.get("bond_narrative")
+            _bn = dict(_bn_raw2) if isinstance(_bn_raw2, Mapping) else {}
+        if _bn:
+            _bn_memories = _bn.get("shared_memories") or []
+            _bn_style = _truncate_for_prompt(_bn.get("narrative_style"), limit=100) or ""
+            _bn_ms_count = int(_bn.get("milestone_count") or 0)
+            _bn_parts: list[str] = ["BOND_NARRATIVE:"]
+            if _bn_style:
+                _bn_parts.append(f"- narrative_style: {_bn_style}")
+            if _bn_ms_count > 0:
+                _bn_parts.append(f"- milestone_count: {_bn_ms_count}")
+            for idx, mem_text in enumerate(_bn_memories[:3]):
+                _bn_parts.append(f"- shared_memory_{idx+1}: {_truncate_for_prompt(mem_text, limit=120) or ''}")
+            if len(_bn_parts) > 1:
+                _bond_narrative_block = "\n".join(_bn_parts) + "\n\n"
+    except Exception:
+        pass  # 降级：不注入叙事层
+
     # ── Phase III：自省脉冲（self_reflection_pulse）──────────────────
     _self_reflection_block = ""
     try:
@@ -1034,6 +1058,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{cn_style_boost_block}"
         f"{_persona_expression_hint_block}"
         f"{_self_reflection_block}"
+        f"{_bond_narrative_block}"
         f"{emotion_binding_block}"
         "PROMPT_CONTEXT_VALIDATION:\n"
         f"- valid: {prompt_context_valid}\n"

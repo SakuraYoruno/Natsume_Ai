@@ -37,6 +37,20 @@ from host_brain.bond.summarizer import (
     normalize_bond_summary,
     summary_has_numeric_value,
 )
+from host_brain.bond.shared_memory_index import (
+    SharedMemoryIndex,
+    SharedMemoryEntry,
+    SharedMemoryResult,
+)
+from host_brain.bond.milestone_tracker import (
+    MilestoneTracker,
+    MilestoneRecord,
+)
+from host_brain.bond.bond_narrative import (
+    BondNarrativeLayer,
+    BondNarrativeResult,
+    NarrativeItem,
+)
 
 __all__ = [
     "BOND_WRITER_ID",
@@ -68,4 +82,13 @@ __all__ = [
     "derive_bond_summary",
     "normalize_bond_summary",
     "summary_has_numeric_value",
+    # Phase V: Bond 深化
+    "SharedMemoryIndex",
+    "SharedMemoryEntry",
+    "SharedMemoryResult",
+    "MilestoneTracker",
+    "MilestoneRecord",
+    "BondNarrativeLayer",
+    "BondNarrativeResult",
+    "NarrativeItem",
 ]
