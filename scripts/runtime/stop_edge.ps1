@@ -15,6 +15,25 @@ function Get-ListeningPid {
   return [int]$conn.OwningProcess
 }
 
+function Read-TrimmedFileText {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [string]$Encoding = "ascii"
+  )
+
+  if (-not (Test-Path -Path $Path)) {
+    return ""
+  }
+
+  $raw = Get-Content -Path $Path -Raw -Encoding $Encoding -ErrorAction SilentlyContinue
+  if ($null -eq $raw) {
+    return ""
+  }
+
+  return "$raw".Trim()
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runtimeEdge = Join-Path $repoRoot "runtime\edge"
 if (-not $PidFile) {
@@ -28,16 +47,21 @@ $edgePid = $null
 $detail = ""
 
 if (Test-Path -Path $PidFile) {
-  $pidText = (Get-Content -Path $PidFile -Raw -Encoding ascii).Trim()
+  $pidText = Read-TrimmedFileText -Path $PidFile -Encoding ascii
   if ($pidText) {
-    $edgePid = [int]$pidText
-    $proc = Get-Process -Id $edgePid -ErrorAction SilentlyContinue
-    if ($null -ne $proc) {
-      Stop-Process -Id $edgePid -Force -ErrorAction SilentlyContinue
-      $stopped = $true
-      $detail = "edge process stopped"
+    $parsedEdgePid = 0
+    if ([int]::TryParse($pidText, [ref]$parsedEdgePid)) {
+      $edgePid = $parsedEdgePid
+      $proc = Get-Process -Id $edgePid -ErrorAction SilentlyContinue
+      if ($null -ne $proc) {
+        Stop-Process -Id $edgePid -Force -ErrorAction SilentlyContinue
+        $stopped = $true
+        $detail = "edge process stopped"
+      } else {
+        $detail = "edge process already exited"
+      }
     } else {
-      $detail = "edge process already exited"
+      $detail = "pid file is invalid: $pidText"
     }
   } else {
     $detail = "pid file is empty"
@@ -60,13 +84,16 @@ if (-not $stopped) {
 # 若存在微信桥接 PID 文件，一并停止桥接进程
 $wechatBridgeStopped = $false
 if (Test-Path -Path $wechatBridgePidFile) {
-  $bridgePidText = (Get-Content -Path $wechatBridgePidFile -Raw -Encoding ascii).Trim()
+  $bridgePidText = Read-TrimmedFileText -Path $wechatBridgePidFile -Encoding ascii
   if ($bridgePidText) {
-    $bridgePid = [int]$bridgePidText
-    $bridgeProc = Get-Process -Id $bridgePid -ErrorAction SilentlyContinue
-    if ($null -ne $bridgeProc) {
-      Stop-Process -Id $bridgePid -Force -ErrorAction SilentlyContinue
-      $wechatBridgeStopped = $true
+    $parsedBridgePid = 0
+    if ([int]::TryParse($bridgePidText, [ref]$parsedBridgePid)) {
+      $bridgePid = $parsedBridgePid
+      $bridgeProc = Get-Process -Id $bridgePid -ErrorAction SilentlyContinue
+      if ($null -ne $bridgeProc) {
+        Stop-Process -Id $bridgePid -Force -ErrorAction SilentlyContinue
+        $wechatBridgeStopped = $true
+      }
     }
   }
   Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
