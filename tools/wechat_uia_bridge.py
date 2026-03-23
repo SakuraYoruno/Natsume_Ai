@@ -281,6 +281,21 @@ def _is_allowed_contact_target(target: str) -> bool:
     return False
 
 
+def _is_placeholder_sender_name(target: str) -> bool:
+    value = _normalize_message_text(target)
+    if not value:
+        return True
+    if "�" in value:
+        return True
+    compact = re.sub(r"[?？\s\.\-_:：·]+", "", value)
+    if not compact:
+        return True
+    lower = compact.lower()
+    if lower in {"unknown", "unk", "none", "null", "na", "n/a"}:
+        return True
+    return False
+
+
 def _is_active_chat_target(target: str) -> bool:
     raw = str(target or "").strip()
     if not raw:
@@ -985,11 +1000,13 @@ class WeChatUiInboundBridge:
                 )
                 if not sender_value:
                     continue
-                if _is_blocked_chat_target(sender_value):
+                sender_is_active_target = _is_active_chat_target(sender_value)
+                if _is_blocked_chat_target(sender_value) and (not sender_is_active_target):
                     continue
-                if not _is_allowed_contact_target(sender_value):
+                if (not sender_is_active_target) and (not _is_allowed_contact_target(sender_value)):
                     continue
-                self._last_sender_hint = sender_value
+                if not _is_active_chat_target(sender_value):
+                    self._last_sender_hint = sender_value
 
                 last_value = self._last_preview_by_chat.get(sender_value)
                 if last_value is None and raw_sender_value and raw_sender_value != sender_value:
@@ -1077,9 +1094,9 @@ class WeChatUiInboundBridge:
 
     def _resolve_sender_for_forward(self, *, sender: str, preview: str) -> str:
         sender_value = _normalize_message_text(sender)
-        if sender_value and (not _is_blocked_chat_target(sender_value)):
+        if sender_value and (not _is_blocked_chat_target(sender_value)) and (not _is_placeholder_sender_name(sender_value)):
             return sender_value
-        if sender_value and (not _is_active_chat_target(sender_value)):
+        if sender_value and (not _is_active_chat_target(sender_value)) and (not _is_placeholder_sender_name(sender_value)):
             return ""
 
         allowed_names = [str(item or "").strip() for item in _resolve_allowed_contact_names() if str(item or "").strip()]
@@ -1088,15 +1105,19 @@ class WeChatUiInboundBridge:
             fallback_candidates.append(allowed_names[0])
         if self._last_sender_hint:
             fallback_candidates.append(self._last_sender_hint)
+        fallback_candidates.append("active_chat")
         fallback_candidates.append("wechat_inbound")
 
         for candidate in fallback_candidates:
             candidate_value = _normalize_message_text(candidate)
             if not candidate_value:
                 continue
-            if _is_blocked_chat_target(candidate_value):
+            if _is_placeholder_sender_name(candidate_value):
                 continue
-            if allowed_names and (not _is_allowed_contact_target(candidate_value)):
+            if _is_blocked_chat_target(candidate_value):
+                if not _is_active_chat_target(candidate_value):
+                    continue
+            if allowed_names and (not _is_allowed_contact_target(candidate_value)) and (not _is_active_chat_target(candidate_value)):
                 continue
             now_mono = time.monotonic()
             if (now_mono - self._last_sender_fallback_log_at) >= 8.0:
