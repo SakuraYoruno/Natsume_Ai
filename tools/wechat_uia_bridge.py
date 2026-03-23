@@ -40,6 +40,7 @@ DEFAULT_INBOUND_BACKEND = "uia_hook"
 DEFAULT_UIA_SCAN_CHAT_LIST = False
 DEFAULT_FORCE_ACTIVE_CHAT_TARGET = True
 DEFAULT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = 0.70
+DEFAULT_UIA_AUTO_RECOVER = False
 DEFAULT_VISION_MODEL = "gemma3:4b"
 DEFAULT_VISION_API_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_VISION_TIMEOUT_S = 30.0
@@ -877,6 +878,10 @@ class WeChatUiInboundBridge:
         self._last_diag_log_at = 0.0
         self._last_tree_diag_at = 0.0
         self._empty_preview_cycles = 0
+        self._auto_recover_enabled = _parse_bool(
+            os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER"),
+            default=DEFAULT_UIA_AUTO_RECOVER,
+        )
         self._last_auto_recover_at = 0.0
         self._auto_recover_interval_s = 8.0
         self._last_preview_by_chat: dict[str, str] = {}
@@ -949,7 +954,11 @@ class WeChatUiInboundBridge:
                     len(previews),
                     self._baseline_ready,
                 )
-            if (not previews) and ((now_mono - self._last_auto_recover_at) >= self._auto_recover_interval_s):
+            if (
+                self._auto_recover_enabled
+                and (not previews)
+                and ((now_mono - self._last_auto_recover_at) >= self._auto_recover_interval_s)
+            ):
                 self._last_auto_recover_at = now_mono
                 self._try_recover_chat_surface()
             if not self._baseline_ready:
@@ -1020,6 +1029,8 @@ class WeChatUiInboundBridge:
         return forwarded
 
     def _try_recover_chat_surface(self) -> None:
+        if not self._auto_recover_enabled:
+            return
         try:
             focus_ok, focus_detail = _focus_wechat_main_window(wechat_path="")
             hwnd = _find_wechat_main_window()
@@ -1366,7 +1377,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
         hwnd = _find_wechat_main_window()
         if not hwnd:
             now_mono = time.monotonic()
-            if (now_mono - self._last_focus_retry_at) >= 20.0:
+            if self._auto_recover_enabled and ((now_mono - self._last_focus_retry_at) >= 20.0):
                 self._last_focus_retry_at = now_mono
                 focused, focus_detail = _focus_wechat_main_window(wechat_path="")
                 if focused:
@@ -1387,7 +1398,12 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             return list_previews
 
         now_mono = time.monotonic()
-        if (not right_ocr_rows) and (not list_ocr_rows) and ((now_mono - self._last_focus_retry_at) >= 20.0):
+        if (
+            self._auto_recover_enabled
+            and (not right_ocr_rows)
+            and (not list_ocr_rows)
+            and ((now_mono - self._last_focus_retry_at) >= 20.0)
+        ):
             self._last_focus_retry_at = now_mono
             focused, focus_detail = _focus_wechat_main_window(wechat_path="")
             if focused:
@@ -2238,6 +2254,10 @@ class WeChatVisionNotifyInboundBridge:
         self._next_focus_allowed_at = 0.0
         self._focus_cooldown_s = 1.2
         self._last_escalation_log_at = 0.0
+        self._focus_escalation_enabled = _parse_bool(
+            os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER"),
+            default=DEFAULT_UIA_AUTO_RECOVER,
+        )
         self._next_tray_probe_at = 0.0
         self._tray_wake_enabled = _parse_bool(
             os.environ.get("EDGE_WECHAT_TRAY_WAKE_ON_INBOUND"),
@@ -2339,6 +2359,15 @@ class WeChatVisionNotifyInboundBridge:
             allowed_names = _resolve_allowed_contact_names()
             if allowed_names:
                 sender = str(allowed_names[0] or "").strip()
+
+        if not self._focus_escalation_enabled:
+            return int(
+                self._notify_bridge.forward_events(
+                    notify_events,
+                    bridge_backend="win_notify_no_focus",
+                )
+                or 0
+            )
 
         if now_mono < self._next_focus_allowed_at:
             return int(
@@ -5464,6 +5493,10 @@ def main() -> int:
     vision_timeout_s = max(1.0, float(args.vision_timeout))
     vision_min_confidence = max(0.05, min(0.99, float(args.vision_min_confidence)))
     vision_min_interval_s = max(0.6, float(args.vision_min_interval))
+    uia_auto_recover = _parse_bool(
+        os.environ.get("EDGE_WECHAT_UIA_AUTO_RECOVER"),
+        default=DEFAULT_UIA_AUTO_RECOVER,
+    )
     notify_keywords = [
         part.strip().lower()
         for part in str(args.notify_handler_keywords or "").split(",")
@@ -5492,7 +5525,7 @@ def main() -> int:
         (
             "uia bridge started edge_url=%s queue=%s result=%s wechat_path=%s "
             "listener_enabled=%s inbound_backend=%s scan_chat_list=%s "
-            "force_active_chat_target=%s active_x_max=%.2f vision_model=%s"
+            "force_active_chat_target=%s auto_recover=%s active_x_max=%.2f vision_model=%s"
         ),
         args.edge_url,
         queue_file,
@@ -5502,6 +5535,7 @@ def main() -> int:
         inbound_backend,
         uia_scan_chat_list,
         force_active_chat_target,
+        uia_auto_recover,
         uia_active_inbound_x_ratio_max,
         vision_model,
     )
