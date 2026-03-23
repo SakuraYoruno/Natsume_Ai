@@ -756,6 +756,37 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _up_hint = _truncate_for_prompt(_user_profile.get("profile_hint"), limit=200) or ""
     _up_active = _up_status == "ACTIVE" and bool(_up_hint)
 
+    # ── Phase II：人格化表达策略提示（PersonaExpressionAdapter）────────
+    _persona_expression_hint_block = ""
+    try:
+        _peh_raw = (
+            runtime_payload.get("persona_expression_hint")
+            or prompt_context_emotion.get("persona_expression_hint")
+        )
+        _peh = dict(_peh_raw) if isinstance(_peh_raw, Mapping) else {}
+        if _peh:
+            _peh_style = _truncate_for_prompt(_peh.get("style_hint"), limit=200) or "NONE"
+            _peh_tone = str(_peh.get("tone") or "gentle").strip()
+            _peh_echo_mod = float(_peh.get("echo_weight_modifier") or 0.0)
+            _peh_follow_up = float(_peh.get("follow_up_tendency") or 0.0)
+            _TONE_GUIDANCE = {
+                "caring": "优先表达关心和陪伴，语气温柔体贴",
+                "playful": "可以活泼一些，适当加入轻松的语气，但不要过度",
+                "serious": "保持认真和专注，用心回应对方的需求",
+                "gentle": "保持自然温和的语气，不需要刻意表演情绪",
+            }
+            _peh_guidance = _TONE_GUIDANCE.get(_peh_tone, "保持真诚自然")
+            _persona_expression_hint_block = (
+                "PERSONA_EXPRESSION_HINT:\n"
+                f"- style_hint: {_peh_style}\n"
+                f"- tone: {_peh_tone}\n"
+                f"- echo_weight_modifier: {_peh_echo_mod:+.3f}\n"
+                f"- follow_up_tendency: {_peh_follow_up:.3f}\n"
+                f"- guidance: {_peh_guidance}\n\n"
+            )
+    except Exception:
+        pass  # 降级：不注入人格表达提示
+
     emotion_binding_block = (
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
@@ -980,6 +1011,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{direct_response_block}"
         f"{style_block}"
         f"{cn_style_boost_block}"
+        f"{_persona_expression_hint_block}"
         f"{emotion_binding_block}"
         "PROMPT_CONTEXT_VALIDATION:\n"
         f"- valid: {prompt_context_valid}\n"

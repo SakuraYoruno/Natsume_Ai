@@ -21,6 +21,13 @@ from host_brain.persona.persona_engine import (
     SelfModelSnapshot,
     TraitChangeRecord,
 )
+from host_brain.persona.emotion_reactivity import (
+    EmotionReactivityProfile,
+    ReactivityModifiers,
+)
+from host_brain.persona.expression_adapter import (
+    PersonaExpressionAdapter,
+)
 
 __all__ = [
     # personality_traits.py
@@ -33,4 +40,9 @@ __all__ = [
     "PersonaEngine",
     "SelfModelSnapshot",
     "TraitChangeRecord",
+    # emotion_reactivity.py (Phase II)
+    "EmotionReactivityProfile",
+    "ReactivityModifiers",
+    # expression_adapter.py (Phase II)
+    "PersonaExpressionAdapter",
 ]

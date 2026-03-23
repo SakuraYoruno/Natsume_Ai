@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 def _clamp_float(value: float, low: float = -1.0, high: float = 1.0) -> float:
     try:
@@ -195,24 +195,45 @@ def compute_emotion_echo(
     current_vector: "EmotionVector",
     echo_weight: float = 0.4,
     bond_stage: str = "",
+    personality_traits: Any = None,
 ) -> dict[str, Any]:
-    """计算情感回声——Natsume 对用户情感的共鸣响应（M29-H OPT-12 / Phase 5 升级）。
+    """计算情感回声——Natsume 对用户情感的共鸣响应（M29-H OPT-12 / Phase 5 升级 / Phase II 人格耦合）。
 
     Phase 5 升级：
     - 用户情感映射扩展到 16 种标签（含 LOVING/PROUD/GRATEFUL 等）
     - response_hint 根据关系深度（bond_stage）差异化
     - 新增 echo_intensity 字段（回声强度，0.0~1.0）
 
+    Phase II（灵魂系统）升级：
+    - 新增 personality_traits 参数，人格特质影响 echo_weight 调制
+
     Args:
         user_emotion_tag: 用户当前情感标签
         current_vector: Natsume 当前情绪向量
         echo_weight: 回声权重（0.0~1.0），默认 0.4
         bond_stage: 当前关系阶段（STRANGER~SOULMATE），为空时按 FRIEND 处理
+        personality_traits: PersonalityTraits 人格特质（可选，Phase II 新增）
 
     Returns:
         包含 echo_emotion_tag、echo_vector、response_hint、echo_intensity 的字典
     """
     from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+
+    # Phase II：人格特质调制 echo_weight
+    _effective_echo_weight = echo_weight
+    _persona_modifiers: dict[str, Any] = {}
+    if personality_traits is not None:
+        try:
+            from host_brain.persona.emotion_reactivity import EmotionReactivityProfile  # noqa: PLC0415
+            modifiers = EmotionReactivityProfile.compute_modifiers(
+                personality_traits, user_emotion_tag, bond_stage,
+            )
+            _effective_echo_weight = EmotionReactivityProfile.apply_to_echo_weight(
+                echo_weight, modifiers,
+            )
+            _persona_modifiers = modifiers.as_dict()
+        except (ImportError, Exception):
+            pass  # 降级：不使用人格调制
 
     # Phase 5: 扩展到 16 种用户情感标签的 VAD 映射
     _USER_EMOTION_MAP: dict[str, dict[str, float]] = {
@@ -243,8 +264,8 @@ def compute_emotion_echo(
         dominance=user_vad.get("dominance", 0.0),
         ts_ms=current_vector.ts_ms,
     )
-    # 情感回声：当前向量向用户情感靠近
-    echo_vec = current_vector.blend(user_vec, weight=echo_weight)
+    # 情感回声：当前向量向用户情感靠近（使用人格调制后的权重）
+    echo_vec = current_vector.blend(user_vec, weight=_effective_echo_weight)
     echo_tag = echo_vec.to_emotion_tag()
 
     # Phase 5: 关系深度判定（shallow / medium / deep）
@@ -288,7 +309,7 @@ def compute_emotion_echo(
         abs(echo_vec.arousal - current_vector.arousal)
     ) / 2.0)
 
-    return {
+    result = {
         "echo_emotion_tag": echo_tag,
         "echo_valence": round(echo_vec.valence, 4),
         "echo_arousal": round(echo_vec.arousal, 4),
@@ -296,6 +317,11 @@ def compute_emotion_echo(
         "echo_intensity": round(echo_intensity, 4),
         "bond_depth": depth,
     }
+    # Phase II：附加人格调制信息
+    if _persona_modifiers:
+        result["persona_modifiers"] = _persona_modifiers
+        result["effective_echo_weight"] = round(_effective_echo_weight, 4)
+    return result
 
 
 # ---------------------------------------------------------------------------

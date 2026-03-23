@@ -71,13 +71,15 @@ def build_emotion_pulse_slot(
     inner_monologue: str = "",
     timeline_summary: "dict[str, Any] | None" = None,
     echo_result: "dict[str, Any] | None" = None,
+    expression_hint: "dict[str, Any] | None" = None,
 ) -> dict[str, Any]:
-    """将当前情感状态转为 emotion_pulse 槽位（Phase 3 升级版）。
+    """将当前情感状态转为 emotion_pulse 槽位（Phase 3 升级版 + Phase II 人格表达）。
 
     相比原版增加：
     - inner_monologue: 基于 VAD 向量的第一人称内心独白（替代机械 style_hint）
     - 情感时间线趋势的情绪流动描述
     - 情感回声的共情描述
+    - expression_hint: Phase II 人格化表达策略提示（ExpressionHint.as_dict()）
     """
     valence = 0.0
     arousal = 0.3
@@ -131,7 +133,7 @@ def build_emotion_pulse_slot(
     monologue_parts = [p for p in [inner_monologue, flow_hint, empathy_hint] if p]
     full_monologue = "。".join(monologue_parts) if monologue_parts else ""
 
-    return {
+    result = {
         "emotion_tag": str(emotion_tag).strip().upper() or "NEUTRAL",
         "mood_state": str(mood_state).strip() or "steady",
         "valence": round(valence, 4),
@@ -141,6 +143,10 @@ def build_emotion_pulse_slot(
         "style_hint": style_hint,
         "inner_monologue": full_monologue,
     }
+    # Phase II：注入人格化表达策略提示
+    if expression_hint and isinstance(expression_hint, dict):
+        result["persona_expression_hint"] = expression_hint
+    return result
 
 
 @dataclass(frozen=True)
