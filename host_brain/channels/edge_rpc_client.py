@@ -635,6 +635,50 @@ async def post_automate(
     return result
 
 
+async def post_visual_locate(
+    *,
+    instruction: str,
+    monitor_index: int = 1,
+    auto_click: bool = False,
+    request_id: str | None = None,
+    timeout_ms: int | None = None,
+) -> EdgeRpcCallResult:
+    """让 Edge 端使用本地 VLM 对屏幕截图进行视觉定位。
+
+    Edge 端会自动截图并调用本地 Ollama（qwen2.5vl:7b）推理，
+    返回目标元素的屏幕坐标，无需将截图传输到 Host。
+
+    Args:
+        instruction: 自然语言定位指令，例如 "点击确认按钮"
+        monitor_index: 截图目标显示器索引（默认 1=主显示器）
+        auto_click: 定位成功后是否自动点击（默认 False）
+        request_id: 请求 ID（可选，不传则自动生成）
+        timeout_ms: 请求超时（ms），VLM 推理较慢建议设置 30000+
+
+    Returns:
+        EdgeRpcCallResult，event 字段包含：
+          x / y / confidence / label / latency_ms / clicked
+    """
+    payload: dict[str, Any] = {
+        "instruction": str(instruction).strip(),
+        "monitor_index": int(monitor_index),
+        "auto_click": bool(auto_click),
+    }
+    # VLM 推理耗时较长，默认超时设为 30s
+    rpc_timeout_ms = timeout_ms if timeout_ms is not None else max(_resolve_timeout_ms(), 30_000)
+    result = await _post_to_edge(
+        path="/v1/edge/visual_locate",
+        payload=payload,
+        request_id=request_id,
+        request_timeout_ms=rpc_timeout_ms,
+    )
+    _logger.debug(
+        "post_visual_locate instruction=%r auto_click=%s → %s latency=%dms",
+        instruction, auto_click, result.status, result.latency_ms,
+    )
+    return result
+
+
 async def post_fallback_presence(
     *,
     request_id: str | None = None,
