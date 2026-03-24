@@ -1,6 +1,6 @@
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
-> 文档版本：v0.2
+> 文档版本：v0.3
 > 创建日期：2026-03-24
 > 更新日期：2026-03-24
 > 状态：设计草稿
@@ -401,7 +401,146 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 
 ---
 
-## 九、实施路线图
+## 九、微信能力边界与限制解决方案
+
+### 9.1 能力全景
+
+| 能力 | 状态 | 实现方式 |
+|------|------|--------|
+| 接收消息（文本/图片/语音/视频/文件/链接） | ✅ 支持 | `WxDbService.poll_new_messages()` 轮询 `message_*.db` |
+| 回复消息（文本/图片） | ✅ 支持 | 剪贴板 + `Ctrl+V → Enter`，`pywinauto` 精确定位输入框 |
+| 查询历史聊天记录 | ✅ 支持 | 解密后 SQLite 全量历史，按联系人/时间/关键词搜索 |
+| 获取联系人列表及详情 | ✅ 支持 | `contact.db` 解密后按前缀分类 |
+| 获取群聊信息及成员 | ✅ 支持 | `contact.db` + `message_*.db` |
+| 读取朋友圈 | ✅ 支持 | 解密 `Sns.db` → `SnsInfo` 表（与 `message_*.db` 同解密方式） |
+| 主动发起新对话 | ✅ 支持 | `pywinauto` 精确控件定位，见 9.3 节 |
+| 撤回消息（2分钟内） | ✅ 支持 | `pywinauto` 右键菜单，见 9.4 节 |
+| 实时消息监听（<100ms） | ✅ 支持 | `watchdog` 文件系统变更监听，见 9.2 节 |
+| 发送语音消息 | ⚠️ 降级 | TTS 生成文本替代，语音发送 Phase 2 评估 |
+| 朋友圈发布 | ⚠️ 待评估 | `pywinauto` 控件操作，复杂度高，Phase 3 评估 |
+| 转账/红包 | ❌ 不做 | 涉及支付，安全风险，不纳入范围 |
+
+---
+
+### 9.2 实时性问题（5s 轮询 → <100ms）
+
+**方案：`watchdog` 文件系统变更监听**
+
+不用定时轮询，改为监听 SQLite 数据库文件的写入事件。微信写入消息时，`watchdog` 毫秒级触发，立即执行增量读取。
+
+```python
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class WxDbChangeHandler(FileSystemEventHandler):
+    """监听 db_storage/ 目录下 message_*.db 文件变更，触发增量消息读取。"""
+
+    def __init__(self, wx_db_service: WxDbService):
+        self._svc = wx_db_service
+
+    def on_modified(self, event):
+        if "message_" in event.src_path and event.src_path.endswith(".db"):
+            new_msgs = self._svc.poll_new_messages()
+            for msg in new_msgs:
+                gateway_webhook_push(msg)   # 推送到 Gateway 处理链路
+
+# 启动监听
+observer = Observer()
+observer.schedule(WxDbChangeHandler(wx_db_svc), path=DECRYPT_OUTPUT_DIR, recursive=False)
+observer.start()
+```
+
+**效果**：延迟从 5s 降至 <100ms，且无 CPU 空转开销。
+
+`WECHAT_POLL_INTERVAL_S` 配置项保留作为 `watchdog` 不可用时的降级兜底。
+
+---
+
+### 9.3 主动发起新对话
+
+**方案：`pywinauto` 精确控件定位**
+
+不使用视觉模型猜坐标，通过 `auto_id` / `control_type` 精确定位 UI 控件，不受分辨率和窗口位置影响。
+
+```python
+from pywinauto import Application
+
+def open_chat_with(wxid_or_name: str) -> bool:
+    """主动打开与指定联系人的聊天窗口。"""
+    app = Application(backend="uia").connect(title_re="微信")
+    main_wnd = app.window(title_re="微信")
+
+    # 精确找到搜索框控件（不是截图猜坐标）
+    search_box = main_wnd.child_window(auto_id="Search", control_type="Edit")
+    search_box.set_focus()
+    search_box.type_keys(wxid_or_name, with_spaces=True)
+
+    # 等待搜索结果，点击第一条
+    result = main_wnd.child_window(control_type="ListItem").wait("visible", timeout=3)
+    result.click_input()
+    return True
+```
+
+**关键点**：`pywinauto` 走 Windows UIA Accessibility API，控件定位稳定，与当前废弃的 `wechat_uia_bridge.py`（视觉模型+截图）有本质区别。
+
+---
+
+### 9.4 撤回消息
+
+**方案：`pywinauto` 右键菜单**
+
+```python
+def recall_message(msg_text: str) -> bool:
+    """撤回指定内容的消息（仅限发出后 2 分钟内）。"""
+    app = Application(backend="uia").connect(title_re="微信")
+    chat_wnd = app.top_window()
+
+    # 找到消息气泡控件，右键点击
+    msg_item = chat_wnd.child_window(name=msg_text, control_type="Text")
+    msg_item.right_click_input()
+
+    # 点击「撤回」菜单项
+    recall_item = app.window(control_type="MenuItem", title="撤回")
+    recall_item.click_input()
+    return True
+```
+
+**限制**：2 分钟时间窗口是微信本身的限制，无法绕过。
+
+---
+
+### 9.5 朋友圈读取
+
+**方案：解密 `Sns.db`**
+
+朋友圈数据存储在独立数据库文件中，解密方式与 `message_*.db` 完全相同：
+
+```
+db_storage/
+├── MicroMsg.db          # 联系人
+├── message_0.db         # 消息（分片）
+├── message_1.db
+├── Sns.db               # 朋友圈 ← 新增解密目标
+└── ...
+```
+
+`Sns.db` 中的 `SnsInfo` 表包含朋友圈内容（文本、图片路径、点赞、评论等）。`WxDbService` 扩展 `get_moments()` 接口即可，无需额外解密逻辑。
+
+---
+
+### 9.6 各方案实施优先级
+
+| 方案 | 优先级 | 难度 | 纳入 Phase |
+|------|--------|------|----------|
+| `watchdog` 实时监听 | 🔴 最高 | ⭐ 简单 | Phase 2 |
+| `pywinauto` 主动发起对话 | 🟠 高 | ⭐⭐ 中等 | Phase 2 |
+| 朋友圈读取（`Sns.db`） | 🟡 中 | ⭐ 简单 | Phase 2 |
+| 撤回消息 | 🟡 中 | ⭐⭐ 中等 | Phase 3 |
+| 语音消息发送 | 🟢 低 | ⭐⭐⭐ 复杂 | Phase 3 评估 |
+
+---
+
+## 十、实施路线图
 
 ### Phase 1：核心框架（约 3 天）
 
@@ -411,13 +550,15 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 - [ ] `gateway/router.py` — 路由到 Host Brain（复用 `EdgeInputReporter`）
 - [ ] `gateway/server.py` — FastAPI Webhook Server
 
-### Phase 2：微信适配器（约 4 天）
+### Phase 2：微信适配器（约 5 天）
 
 - [ ] `tools/wx4_decrypt.py` 重构为可导入模块（分离 CLI 与库函数，增加密钥缓存）
-- [ ] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询）
+- [ ] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询/朋友圈）
+- [ ] `edge_client/services/wx_db_service.py` — `watchdog` 文件系统监听替代定时轮询（延迟 <100ms）
 - [ ] `gateway/adapters/wechat_adapter.py` — 基于 `WxDbService` 的微信适配器
-- [ ] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats）
+- [ ] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats/moments）
 - [ ] `gateway/outbound.py` — 回复分发器（微信回复通过剪贴板+快捷键发送，不依赖 Hook API）
+- [ ] `gateway/outbound.py` — `pywinauto` 主动发起新对话支持
 - [ ] `edge_client/config.py` 扩展 + `bootstrap.py` 集成
 - [ ] `channels/input_reporter.py` 新增 `GATEWAY` 来源
 
@@ -434,12 +575,14 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 ### Phase 5：多媒体 + 清理（约 3 天）
 
 - [ ] `gateway/media/` — 图片/语音/文件收发
+- [ ] `gateway/outbound.py` — 撤回消息支持（`pywinauto` 右键菜单，2分钟内有效）
+- [ ] 语音消息发送评估（TTS + pysilk，视需求决定是否实现）
 - [ ] 废弃 `tools/wechat_uia_bridge.py`
 - [ ] Host 侧 reply 回调集成
 
 ---
 
-## 十、关键设计决策
+## 十一、关键设计决策
 
 ### 决策 1：为什么不用 ntchat / ComWeChatBot / WeChatFerryX？
 
@@ -463,7 +606,7 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 
 ---
 
-## 十一、废弃计划
+## 十二、废弃计划
 
 | 文件 | 废弃时间 | 替代方案 |
 |------|---------|------|
