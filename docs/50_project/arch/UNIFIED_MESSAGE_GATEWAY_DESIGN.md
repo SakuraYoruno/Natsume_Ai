@@ -683,3 +683,143 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 |------|---------|------|
 | `tools/wechat_uia_bridge.py` | Phase 2 完成后 | `gateway/adapters/wechat_adapter.py` + `edge_client/services/wx_db_service.py` |
 | `edge_client/channels/wechat_listener.py` | Phase 2 完成后（部分逻辑上移） | `gateway/adapters/wechat_adapter.py` + `gateway/normalizer.py` |
+
+---
+
+## 十三、Gateway Orchestrator Agent 设计
+
+> 日期：2026-03-24
+> 状态：**实施中**
+> 关联模块：`host_brain/app/handlers/gateway_orchestrator_handler.py`
+
+### 13.1 问题背景
+
+Gateway 输入的行为需求与 ASR 链路存在本质差异：
+
+| 维度 | ASR 链路 | Gateway 链路 |
+|------|---------|-------------|
+| 文字语言 | 日语（style=natsume_ai_ja） | 中文（style=natsume_ai_cn） |
+| TTS 语音播放 | ✅ 本地播放 | ❌ 不本地播放（可选生成） |
+| VTS 表情驱动 | ✅ 驱动 | ❌ 不驱动 |
+| 回复目标 | 本地扬声器 | 聊天平台（微信/QQ/飞书/企微） |
+| 可选语音回复 | — | ✅ TTS 生成日语音频推送到平台（不本地播放、不驱动 VTS） |
+
+如果将这些差异作为条件分支塞进现有 `chat_stream_handler` 和 `SceneRouter`，会导致 if-else 地狱（"屎山"风险）。
+
+### 13.2 方案选型：SCENE_GATEWAY 场景路由（方案一）
+
+**核心原则：Gateway Orchestrator 注册为 SceneRouter 的新场景 `SCENE_GATEWAY`，仍然走 `run_as_sse_adapter` 全链路，不绕过任何安全审计节点。**
+
+#### 为什么选择方案一
+
+| 考量 | 方案一（SceneRouter 场景） | 方案二（独立 async） |
+|------|--------------------------|-------------------|
+| 安全审计覆盖 | ✅ 自动覆盖（Airlock → Governor → QA → Audit） | ❌ 需手动调用安全原语 |
+| 代码侵入性 | 低（只加一个场景分支） | 中（需绕过 SSE 适配层） |
+| 后续安全规则升级 | 自动跟随 | 每次升级都需同步改 |
+| 宪法级约束合规 | ✅ "输入→语义内核→Governor裁决→Skills→Audit" | ⚠️ 有违反风险 |
+
+#### 安全审计链路保证
+
+```
+Gateway 消息 → input_routes.py → run_main_chain_from_input()
+                                        │
+                          ┌──────────────▼────────────────────────┐
+                          │   MainChain.run_as_sse_adapter()      │
+                          │                                        │
+                          │   前置节点：                            │
+                          │     AirlockQuarantineNode（入站检疫）   │
+                          │     GovernorNode（R1-R7 门控 + R8 情感）│
+                          │     GraphExecutorNode                  │
+                          │     RecallFusionNode                   │
+                          │     LlmGatewayNode                     │
+                          │                                        │
+                          │   _unified_chat_sse_generator()        │
+                          │     → SceneRouter.route_sse()          │
+                          │       → SCENE_GATEWAY 分支             │
+                          │         → gateway_orchestrator_sse()   │
+                          │                                        │
+                          │   后置节点：                            │
+                          │     QAContractNode（出站质量检查）       │
+                          │     EpisodicStoreNode                  │
+                          │     AuditNode（审计日志写入）            │
+                          │     AirlockSanitizerNode（出站净化）     │
+                          └────────────────────────────────────────┘
+```
+
+### 13.3 架构流程
+
+```mermaid
+flowchart TD
+    GW["Gateway 消息进入"] --> IR["input_routes.py /v1/host/input"]
+    IR --> RMC["run_main_chain_from_input()"]
+    RMC --> POLICY["GatewayInputSourceStrategy.build_policy()"]
+    POLICY --> SSE["MainChain.run_as_sse_adapter()<br>（Airlock→Governor→Recall→…）"]
+
+    SSE --> UCSG["_unified_chat_sse_generator()"]
+    UCSG --> SR["SceneRouter.route_sse()"]
+    SR --> |"SCENE_GATEWAY"| GOA["gateway_orchestrator_sse_generator()"]
+
+    GOA --> INTENT["意图识别<br>（复用 pre_intent_classifier）"]
+    INTENT --> DECIDE{"场景决策"}
+
+    DECIDE -->|CHAT| CN_RENDER["中文回复生成<br>style=natsume_ai_cn"]
+    DECIDE -->|TRANSLATE/CODE/...| DELEGATE["委托给对应复杂场景处理器"]
+
+    CN_RENDER --> VOICE{"需要语音?"}
+    VOICE -->|Yes| TTS_NODE["TTS 生成节点<br>style=natsume_ai_ja<br>suppress_local_play=True<br>suppress_vts=True"]
+    VOICE -->|No| COMMIT["COMMIT SSE 事件<br>（中文 narrative）"]
+    TTS_NODE --> COMMIT
+
+    DELEGATE --> COMMIT
+
+    COMMIT --> POST["后置节点<br>QA→Episodic→Audit→Sanitizer"]
+    POST --> REPLY["GatewayInputSourceStrategy.post_chain()<br>回复聊天平台"]
+```
+
+### 13.4 Style 选择策略
+
+| 场景 | 文字 style canon | TTS style canon | 说明 |
+|------|-----------------|----------------|------|
+| Gateway 纯文字回复 | `natsume_ai_cn` | — | LLM 直接输出中文 |
+| Gateway 带语音回复 | `natsume_ai_cn` | `natsume_ai_ja` | 文字中文，语音日语 |
+| ASR 纯语音对话 | `natsume_ai_ja` | `natsume_ai_ja` | 全日语（不经过本场景） |
+
+Style 选择**完全由 Orchestrator 内部控制**，不依赖外部参数传递。
+
+### 13.5 TTS 行为控制
+
+Gateway 链路的 TTS 行为与 ASR 链路完全隔离：
+
+| 控制项 | Gateway 链路值 | 说明 |
+|--------|--------------|------|
+| `suppress_local_play` | `True` | 不通过本地扬声器播放 |
+| `suppress_vts` | `True` | 不驱动 VTS 表情口型 |
+| TTS 音频输出 | 推送到 Gateway 平台 | 作为语音消息发送到聊天窗口 |
+
+### 13.6 实现位置
+
+```
+host_brain/
+├── app/
+│   ├── handlers/
+│   │   └── gateway_orchestrator_handler.py  # 新增：Gateway 编排 SSE 生成器
+│   ├── graph/
+│   │   ├── main_chain.py                   # 微调：SceneRouter 注册 SCENE_GATEWAY
+│   │   └── input_source_strategy.py        # 微调：强制 scene_type=SCENE_GATEWAY
+│   └── prompt_builder.py                   # 新增 SCENE_GATEWAY 常量
+```
+
+### 13.7 不侵入原则
+
+| 保证 | 说明 |
+|------|------|
+| 不修改 `chat_stream_handler.py` | ASR 链路的 SCENE_CHAT 完全不受影响 |
+| 不修改 `chat_handler_complex.py` | 复杂场景处理器不变 |
+| 不修改 `chat_handler_vision.py` | 视觉链路不变 |
+| 不修改 `chat_handler_edge.py` | Gaming Edge 链路不变 |
+| 安全链路自动覆盖 | Airlock/Governor/QA/Audit 全部生效 |
+
+### 决策 5：为什么不直接用独立 async 函数？
+
+独立 async 函数会绕过 `run_as_sse_adapter` 的全部 9 个安全节点（AirlockQuarantine、Governor、QAContract、Audit、AirlockSanitizer 等），违反宪法级约束"输入→语义内核→Governor裁决→Skills→Audit"。每次安全链路升级（如新增 R9 规则）都必须记得同步改 Orchestrator，维护成本高且容易遗漏。

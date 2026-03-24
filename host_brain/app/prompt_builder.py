@@ -34,6 +34,7 @@ SCENE_EXEC_INTENT = "EXEC_INTENT"
 SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
 SCENE_WORK_CODE = "WORK_CODE"
 SCENE_VISION_UI = "VISION_UI"
+SCENE_GATEWAY = "GATEWAY"
 
 # ---------------------------------------------------------------------------
 # TODO-70: 线程局部变量 — 存储最近一次注入检测结果，供调用方读取并写入 audit_tags

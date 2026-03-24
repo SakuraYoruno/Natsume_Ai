@@ -2467,6 +2467,7 @@ class SceneRouter:
             SCENE_CHAT,
             SCENE_VISION_UI,
         )
+        from host_brain.app.prompt_builder import SCENE_GATEWAY  # noqa: PLC0415
 
         normalized_scene = str(scene_type or "").strip().upper()
         _input_source = str(getattr(request_body, "input_source", "") or "").strip().upper()
@@ -2521,6 +2522,31 @@ class SceneRouter:
                 intent_id=intent_id,
                 reason_code=reason_code,
                 metrics=metrics,
+            ):
+                yield event
+            return
+
+        # ── 1.5. SCENE_GATEWAY：Gateway 编排链路（中文回复）─────────────
+        if normalized_scene == SCENE_GATEWAY:
+            logger.info("[%s] SceneRouter → SCENE_GATEWAY", request_id)
+            from host_brain.app.handlers.gateway_orchestrator_handler import (  # noqa: PLC0415
+                gateway_orchestrator_sse_generator,
+            )
+            async for event in gateway_orchestrator_sse_generator(
+                request_body=request_body,
+                request_id=request_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                intent_draft=intent_draft,
+                scene_type=normalized_scene,
+                scene_type_source=scene_type_source,
+                governor_result=governor_result,
+                emotion_context=emotion_context,
+                emotion_snapshot=emotion_snapshot,
+                intent_id=intent_id,
+                reason_code=reason_code,
+                metrics=metrics,
+                _pre_recall_evidence=_pre_recall_evidence,
             ):
                 yield event
             return
@@ -3161,7 +3187,18 @@ async def run_main_chain_from_input(
         return
 
     from host_brain.app.graph_config_builder import pre_intent_classifier  # noqa: PLC0415
-    pre_scene = pre_intent_classifier(text)
+    from host_brain.app.prompt_builder import SCENE_GATEWAY as _SCENE_GATEWAY  # noqa: PLC0415
+
+    # Gateway 输入强制走 SCENE_GATEWAY，不使用 pre_intent_classifier 的结果
+    # SCENE_GATEWAY 内部会自行执行意图识别和子场景路由
+    if source_upper == "GATEWAY":
+        pre_scene = _SCENE_GATEWAY
+        logger.info(
+            "run_main_chain_from_input: gateway input forced scene=%s request_id=%s",
+            pre_scene, request_id,
+        )
+    else:
+        pre_scene = pre_intent_classifier(text)
     _action_map = {
         "SCENE_EXEC_INTENT": "exec_intent",
         "SCENE_WORK_CODE": "work_code",

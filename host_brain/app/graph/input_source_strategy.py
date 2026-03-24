@@ -50,6 +50,7 @@ class InputSourcePolicy:
     reply_channel: str | None = None        # "GATEWAY"
     reply_platform: str | None = None       # "wechat" / "qq" / "feishu" / "wecom"
     reply_conversation_id: str | None = None
+    reply_target: str | None = None         # 回复目标标识（conversation_id 别名）
 
 
 @dataclass
@@ -173,6 +174,7 @@ class GatewayInputSourceStrategy(InputSourceStrategy):
         policy.direct_reply_text = context.parse_text_env("HOST_INPUT_GATEWAY_DIRECT_REPLY_TEXT", "收到")
         policy.reply_platform = str(context.payload.get("platform") or "").strip().lower() or None
         policy.reply_conversation_id = str(context.payload.get("conversation_id") or "").strip() or None
+        policy.reply_target = policy.reply_conversation_id  # reply_target 作为 conversation_id 的别名
         if policy.auto_reply_gateway and policy.reply_platform and policy.reply_conversation_id:
             policy.reply_channel = "GATEWAY"
         logger.info(

@@ -31,6 +31,7 @@ from host_brain.app.prompt_builder import (
     CHAT_RENDER_NODE_ID,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
+    SCENE_GATEWAY,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,

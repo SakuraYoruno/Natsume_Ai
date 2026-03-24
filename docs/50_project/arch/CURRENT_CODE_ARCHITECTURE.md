@@ -169,6 +169,7 @@ Natsume_Ai/
 
 - 场景级分流：`SceneRouter.route_sse`
   - `SCENE_CHAT` → token stream
+  - `SCENE_GATEWAY` → Gateway 编排链路（中文回复 + 可选 TTS）
   - `SCENE_VISION_UI` → vision 链路
   - 其他复杂场景 → graph 链路
 - 图构建层：`graph_config_builder.py`
@@ -195,8 +196,9 @@ Natsume_Ai/
 | Chat 入口 | `host_brain/app/chat_handler.py` | Governor 鉴权 + 场景分类 + SceneRouter 分发 |
 | Chat 流式 | `host_brain/app/chat_stream_handler.py` | `SCENE_CHAT` token SSE、检索、后处理、COMMIT |
 | 复杂场景 | `host_brain/app/chat_handler_complex.py` | 构图、跑图、节点级进度 SSE、最终 COMMIT |
-| Scene Router | `host_brain/app/graph/main_chain.py` | 按 scene_type 路由到 vision/chat/complex |
-| 多 Agent handlers | `host_brain/app/handlers/*.py` | supervisor/chat/code/translate/intent/retrieval/judge |
+| Scene Router | `host_brain/app/graph/main_chain.py` | 按 scene_type 路由到 gateway/vision/chat/complex |
+| Gateway 编排 | `host_brain/app/handlers/gateway_orchestrator_handler.py` | `SCENE_GATEWAY` 中文回复生成 + 可选 TTS + 意图子路由 |
+| 多 Agent handlers | `host_brain/app/handlers/*.py` | supervisor/chat/code/translate/intent/retrieval/judge/gateway |
 | 图运行时 | `host_brain/integrations/graph_runtime.py` | 校验配置、解析模型、执行图、返回统一结果 |
 | 图执行器 | `host_brain/integrations/graph_executor.py` | 单步执行、动态分派、降级、trace 记录 |
 | 状态源仲裁器 | `host_brain/app/memory/state_arbiter.py` | 六路状态源优先级仲裁（WorldCanon > StyleCanon > Episodic > Bond > Chroma > Edge）|
