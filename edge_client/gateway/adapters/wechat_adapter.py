@@ -66,6 +66,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "outbound_sent": 0,
             "outbound_failed": 0,
         }
+        self._last_outbound: dict[str, Any] = {
+            "success": None,
+            "detail": "",
+            "elapsed_ms": 0,
+            "ts_ms": 0,
+        }
 
     @property
     def platform_id(self) -> Platform:
@@ -158,7 +164,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
     # Outbound：通过 pywinauto 发送回复
     # ------------------------------------------------------------------
 
-    def send_reply(self, reply: UnifiedReply) -> bool:
+    def _send_reply_legacy(self, reply: UnifiedReply) -> bool:
         """将回复发送到微信。
 
         发送策略：
@@ -189,6 +195,45 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.error("WeChatAdapter: 发送失败 conversation=%s: %s", reply.conversation_id, exc)
             self._stats["outbound_failed"] += 1
             return False
+
+    def send_reply(self, reply: UnifiedReply) -> bool:
+        start_ms = int(time.time() * 1000)
+        if reply.msg_type not in (MsgType.TEXT, MsgType.IMAGE):
+            logger.warning("WeChatAdapter: unsupported msg_type=%s", reply.msg_type.value)
+            self._last_outbound = {
+                "success": False,
+                "detail": f"unsupported msg_type={reply.msg_type.value}",
+                "elapsed_ms": max(0, int(time.time() * 1000) - start_ms),
+                "ts_ms": int(time.time() * 1000),
+            }
+            return False
+
+        try:
+            success = bool(self._send_via_pywinauto(reply))
+        except Exception as exc:
+            logger.error("WeChatAdapter: send failed conversation=%s err=%s", reply.conversation_id, exc)
+            self._stats["outbound_failed"] += 1
+            self._last_outbound = {
+                "success": False,
+                "detail": str(exc),
+                "elapsed_ms": max(0, int(time.time() * 1000) - start_ms),
+                "ts_ms": int(time.time() * 1000),
+            }
+            return False
+
+        if success:
+            self._stats["outbound_sent"] += 1
+            detail = "sent"
+        else:
+            self._stats["outbound_failed"] += 1
+            detail = "send pipeline returned false"
+        self._last_outbound = {
+            "success": success,
+            "detail": detail,
+            "elapsed_ms": max(0, int(time.time() * 1000) - start_ms),
+            "ts_ms": int(time.time() * 1000),
+        }
+        return success
 
     def _send_via_pywinauto(self, reply: UnifiedReply) -> bool:
         """通过 pywinauto 精确定位输入框并发送消息。"""
@@ -287,19 +332,25 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 width = 0
                 height = 0
             area = width * height
-            richness = self._window_richness(wnd)
-            if area <= 0 and richness <= 0:
+            if area <= 0:
                 continue
             title = self._normalize_match_text(self._safe_item_name(wnd))
-            score = area + (richness * 5_000_000)
+            score = area
             if title and any(token in title for token in ("微信", "weixin", "wechat")):
-                score += 2_000_000
+                score += 2_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
 
         if best_wnd is not None:
             return best_wnd
+
+        try:
+            fallback = app.window(title_re=".*(Weixin|WeChat|WX).*")
+            if fallback.exists(timeout=0.3):
+                return fallback
+        except Exception:
+            pass
 
         try:
             return app.top_window()
@@ -319,12 +370,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
-            richness = self._window_richness(wnd)
             if (
                 not any(token in title for token in ("微信", "weixin", "wechat"))
                 and "qt" not in class_norm
                 and "weixin" not in class_norm
-                and richness <= 0
             ):
                 continue
             try:
@@ -334,9 +383,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 width = 0
                 height = 0
-            score = (width * height) + (richness * 5_000_000)
+            score = (width * height)
             if title and any(token in title for token in ("微信", "weixin", "wechat")):
-                score += 2_000_000
+                score += 2_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
@@ -344,13 +393,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     @staticmethod
     def _window_richness(wnd: Any) -> int:
-        total = 0
-        for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Text"):
-            try:
-                total += min(200, len(list(wnd.descendants(control_type=control_type))))
-            except Exception:
-                continue
-        return total
+        try:
+            return min(200, len(list(wnd.children())))
+        except Exception:
+            return 0
 
     def _ensure_chat_open(self, main_wnd: Any, conversation_id: str) -> bool:
         """确保指定会话的聊天窗口已打开。"""
@@ -902,4 +948,5 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "self_wxid": self._self_wxid,
             "db_stats": db_stats,
             "stats": dict(self._stats),
+            "last_outbound": dict(self._last_outbound),
         }

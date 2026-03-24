@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -139,7 +140,55 @@ def create_gateway_app(
             reply_to_msg_id=payload.get("reply_to_msg_id"),
         )
 
-        success = _outbound.dispatch(reply)
+        wait_result = bool(payload.get("wait_result", True))
+        timeout_ms_raw = payload.get("timeout_ms", 12000)
+        try:
+            timeout_ms = max(1000, int(timeout_ms_raw))
+        except (TypeError, ValueError):
+            timeout_ms = 12000
+
+        async def _dispatch_reply() -> bool:
+            return await asyncio.to_thread(_outbound.dispatch, reply)
+
+        if not wait_result:
+            asyncio.create_task(_dispatch_reply())
+            return JSONResponse({
+                "status": "queued",
+                "conversation_id": reply.conversation_id,
+                "platform": platform.value,
+            })
+
+        try:
+            success = await asyncio.wait_for(
+                _dispatch_reply(),
+                timeout=float(timeout_ms) / 1000.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Gateway reply timeout platform=%s conversation=%s timeout_ms=%d",
+                platform.value,
+                reply.conversation_id,
+                timeout_ms,
+            )
+            return JSONResponse({
+                "status": "failed",
+                "conversation_id": reply.conversation_id,
+                "platform": platform.value,
+                "detail": f"send timeout after {timeout_ms}ms",
+            })
+        except Exception as exc:
+            logger.error(
+                "Gateway reply dispatch error platform=%s conversation=%s err=%s",
+                platform.value,
+                reply.conversation_id,
+                exc,
+            )
+            return JSONResponse({
+                "status": "failed",
+                "conversation_id": reply.conversation_id,
+                "platform": platform.value,
+                "detail": str(exc),
+            })
         return JSONResponse({
             "status": "sent" if success else "failed",
             "conversation_id": reply.conversation_id,
