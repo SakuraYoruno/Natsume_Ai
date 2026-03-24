@@ -1,9 +1,10 @@
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
-> 文档版本：v0.1
+> 文档版本：v0.2
 > 创建日期：2026-03-24
+> 更新日期：2026-03-24
 > 状态：设计草稿
-> 关联模块：`edge_client/gateway/`
+> 关联模块：`edge_client/gateway/`、`tools/wx4_decrypt.py`、`edge_client/services/wx_db_service.py`
 
 ---
 
@@ -44,10 +45,10 @@
 
 ```
 外部消息源
-  微信 (ntchat/ComWeChatBot)  ──HTTP Callback──┐
-  QQ (NapCat/OneBot v11)      ──OneBot WS/HTTP─┤
-  飞书 (官方 Open API)         ──Event Sub──────┤
-  企微 (企业微信 API)           ──Callback URL───┘
+  微信 (wx4_decrypt 解密方案)  ──WxDbService──┐
+  QQ (NapCat/OneBot v11)       ──OneBot WS/HTTP┤
+  飞书 (官方 Open API)          ──Event Sub─────┤
+  企微 (企业微信 API)            ──Callback URL──┘
                                                 │
                           ┌─────────────────────▼──────────────────────┐
                           │   edge_client/gateway/  :19000              │
@@ -69,6 +70,16 @@
                           │   Host Brain  :8000                         │
                           │   /v1/host/input → Main Chain → Reply Egress│
                           └─────────────────────────────────────────────┘
+
+微信专属数据通道（补充）
+  Weixin.exe ──pymem 附加提取密钥──► wx4_decrypt.py ──解密 db_storage/*.db──► WxDbService
+                                                                                    │
+                                                              Edge RPC Gateway :17800
+                                                              POST /v1/edge/wx/contacts
+                                                              POST /v1/edge/wx/messages
+                                                              POST /v1/edge/wx/search
+                                                                    │
+                                                              Host Brain (MCP 工具 / Bond 关系层 / 七路召回)
 ```
 
 ---
@@ -194,10 +205,48 @@ class AbstractPlatformAdapter(ABC):
 
 ### 5.2 微信适配器 `WeChatAdapter`
 
-- **接入方式**：ntchat / ComWeChatBotClient / WeChatFerryX（HTTP 回调）
-- **字段兼容**：兼容 ntchat / wcferry / ComWeChatBot 多种字段命名
-- **过滤逻辑**：自动过滤系统消息、自己发出的消息
-- **消息类型映射**：复用现有 `wechat_listener.py` 的 `_TYPE_MAP`
+微信接入采用 **`wx4_decrypt.py` 解密脚本方案**，通过 `pymem` 附加 `Weixin.exe` 进程提取密钥，解密本地 `db_storage/*.db` 数据库，再由 `WxDbService` 提供结构化查询接口。
+
+**两条数据通道**：
+
+| 通道 | 用途 | 实现 |
+|------|------|------|
+| **实时消息流** | 接收新消息 | `WxDbService` 轮询 `message_*.db` 增量记录 → `UnifiedMessage` |
+| **历史数据查询** | 联系人/聊天记录/全文搜索 | Edge RPC Gateway `/v1/edge/wx/*` 端点 → Host MCP 工具 |
+
+**`WxDbService` 核心接口**：
+
+```python
+class WxDbService:
+    """微信解密数据库查询服务（Edge 侧）。
+
+    职责：
+    1. 启动时/定时调用 wx4_decrypt 解密数据库（密钥缓存，微信不重新登录不重复扫描）
+    2. 缓存解密后的 SQLite 连接
+    3. 提供结构化查询接口（联系人/消息/群聊）
+    4. 轮询增量消息推送到 Gateway Webhook
+    """
+
+    def get_contacts(self, *, contact_type: str | None = None) -> list[dict]:
+        """查询联系人列表，按 wxid_ / gh_ / @chatroom / @openim 前缀自动分类"""
+
+    def get_messages(self, *, wxid: str, limit: int = 50, before_ts: int | None = None) -> list[dict]:
+        """查询与指定联系人的聊天记录"""
+
+    def search_messages(self, *, keyword: str, limit: int = 20) -> list[dict]:
+        """全文搜索聊天记录"""
+
+    def get_contact_detail(self, wxid: str) -> dict | None:
+        """获取单个联系人详情"""
+
+    def refresh(self) -> dict:
+        """重新执行解密（微信重新登录后密钥变化时调用）"""
+
+    def poll_new_messages(self) -> list[UnifiedMessage]:
+        """轮询增量消息，供 Gateway 实时推送"""
+```
+
+**消息类型映射**（复用现有 `wechat_listener.py` 的 `_TYPE_MAP`）：
 
 ```python
 _WX_TYPE_MAP = {
@@ -206,6 +255,16 @@ _WX_TYPE_MAP = {
     "49": MsgType.LINK,  "10000": MsgType.SYSTEM,
 }
 ```
+
+**联系人分类规则**（解决解密数量对不上的问题）：
+
+| `UserName` 前缀/条件 | 分类 |
+|---------------------|------|
+| `wxid_xxx` | 好友联系人 |
+| `gh_xxx` | 公众号/服务号 |
+| `xxx@chatroom` | 群聊 |
+| `@openim` / `wo_xxx` | 企业微信联系人 |
+| `filehelper`, `weixin`, `newsapp` 等 | 系统账号（过滤） |
 
 ### 5.3 QQ 适配器 `QQAdapter`
 
@@ -290,8 +349,12 @@ def report_gateway(self, *, payload: dict[str, Any]) -> InputReportResult:
 EDGE_GATEWAY_ENABLED=true          # 是否启用统一消息网关（默认 true）
 EDGE_GATEWAY_PORT=19000            # 网关监听端口（默认 19000）
 EDGE_GATEWAY_PLATFORMS=wechat,qq   # 启用的平台（逗号分隔）
-WECHAT_HOOK_API_BASE=              # ntchat/ComWeChatBot API 地址
 WECHAT_SELF_WXID=                  # 微信小号 wxid（用于过滤自发消息）
+WECHAT_DB_STORAGE_DIR=             # 微信 db_storage 目录路径（解密源）
+WECHAT_DECRYPT_OUTPUT_DIR=         # 解密输出目录（de_*.db 存放位置）
+WECHAT_KEY_CACHE_PATH=             # 密钥缓存文件路径（加密存储，避免重复扫描进程）
+WECHAT_POLL_INTERVAL_S=5           # 增量消息轮询间隔（秒，默认 5）
+WECHAT_DECRYPT_REFRESH_INTERVAL_S=3600  # 定时重解密间隔（秒，默认 1h）
 QQ_ONEBOT_API_BASE=                # OneBot HTTP API 地址
 QQ_SELF_ID=                        # QQ 号（用于过滤自发消息）
 ```
@@ -308,15 +371,33 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 
 ## 八、微信接入技术选型
 
-| 方案 | 维护状态 | 适用微信版本 | 稳定性 | 接入方式 |
-|------|---------|------------|--------|---------|
-| **ntchat** ⭐推荐 | 活跃 | 3.9.x | ⭐⭐⭐⭐ | HTTP 回调 |
-| **ComWeChatBotClient** | 活跃 | 3.9.x / 4.x | ⭐⭐⭐ | COM Hook |
-| **WeChatFerryX** | 分支维护 | 3.9.x | ⭐⭐⭐ | DLL 注入 |
-| ~~WeChatFerry (原版)~~ | ❌ 停更 | 3.9.x 旧版 | ⭐ | DLL 注入 |
-| ~~UIA 桌面自动化~~ | ❌ 废弃 | 任意 | ⭐ | 截图+OCR |
+所有第三方 Hook 方案（ntchat / ComWeChatBotClient / WeChatFerryX / wcferry）均已过时或停更，对微信 4.x 兼容性差。**本项目采用自研 `wx4_decrypt.py` 解密脚本方案**，无需依赖任何第三方 Hook 库。
 
-**建议首选 ntchat**：HTTP 回调模式与 Gateway Webhook 天然契合，无需额外桥接。
+| 方案 | 状态 | 说明 |
+|------|------|------|
+| **`wx4_decrypt.py` 解密脚本** ✅ **当前采用** | 自研，持续维护 | `pymem` 附加 `Weixin.exe` 提取密钥 → 解密 `db_storage/*.db` → `WxDbService` 查询封装 |
+| ~~ntchat~~ | ❌ 过时 | 仅支持微信 3.9.x，4.x 不兼容 |
+| ~~ComWeChatBotClient~~ | ❌ 过时 | COM Hook，4.x 兼容性差 |
+| ~~WeChatFerryX~~ | ❌ 过时 | DLL 注入，分支维护，不稳定 |
+| ~~WeChatFerry (原版)~~ | ❌ 停更 | 原仓库已停更 |
+| ~~UIA 桌面自动化~~ | ❌ 废弃 | 截图+OCR，极不可靠 |
+
+### 解密脚本方案核心原理
+
+```
+1. pymem 附加 Weixin.exe 进程
+2. 扫描内存特征，提取 AES 密钥（32字节）
+3. 对 db_storage/ 下所有 .db 文件执行 AES-256-CBC 解密
+4. 输出标准 SQLite 文件（de_*.db）
+5. WxDbService 打开 SQLite，提供结构化查询
+```
+
+### 关键优势
+
+- **无需第三方 Hook**：不注入 DLL，不依赖任何外部库的微信版本适配
+- **版本无关**：只要微信使用 SQLite 存储（4.x 确认），解密方案长期有效
+- **数据完整**：可访问全量历史数据（联系人/聊天记录/群信息），而非仅实时消息
+- **密钥缓存**：微信不重新登录密钥不变，首次提取后缓存，避免重复扫描进程内存
 
 ---
 
@@ -330,10 +411,13 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 - [ ] `gateway/router.py` — 路由到 Host Brain（复用 `EdgeInputReporter`）
 - [ ] `gateway/server.py` — FastAPI Webhook Server
 
-### Phase 2：微信适配器（约 3 天）
+### Phase 2：微信适配器（约 4 天）
 
-- [ ] `gateway/adapters/wechat_adapter.py` — ntchat / ComWeChatBot 接入
-- [ ] `gateway/outbound.py` — 回复分发器
+- [ ] `tools/wx4_decrypt.py` 重构为可导入模块（分离 CLI 与库函数，增加密钥缓存）
+- [ ] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询）
+- [ ] `gateway/adapters/wechat_adapter.py` — 基于 `WxDbService` 的微信适配器
+- [ ] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats）
+- [ ] `gateway/outbound.py` — 回复分发器（微信回复通过剪贴板+快捷键发送，不依赖 Hook API）
 - [ ] `edge_client/config.py` 扩展 + `bootstrap.py` 集成
 - [ ] `channels/input_reporter.py` 新增 `GATEWAY` 来源
 
@@ -357,7 +441,11 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 
 ## 十、关键设计决策
 
-### 决策 1：为什么不复用现有 `wechat_listener.py`？
+### 决策 1：为什么不用 ntchat / ComWeChatBot / WeChatFerryX？
+
+所有第三方 Hook 方案均依赖特定微信版本的内存布局或 COM 接口，微信 4.x 升级后全部失效。本项目已有自研的 `wx4_decrypt.py` 解密脚本，通过 `pymem` 提取密钥、解密 SQLite 数据库，**版本无关、无需第三方依赖**，是当前唯一可用的微信数据接入方案。
+
+### 决策 1b：为什么不复用现有 `wechat_listener.py`？
 
 `wechat_listener.py` 是为 wcferry 单一平台设计的，数据结构（`WeChatMessage`）和路由逻辑都是微信专用的。Gateway 需要跨平台统一抽象，因此选择**提炼其中的通用逻辑**（去重、脱敏、类型映射）而非直接复用整个文件。
 
@@ -378,6 +466,6 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 ## 十一、废弃计划
 
 | 文件 | 废弃时间 | 替代方案 |
-|------|---------|---------|
-| `tools/wechat_uia_bridge.py` | Phase 5 完成后 | `gateway/adapters/wechat_adapter.py` |
+|------|---------|------|
+| `tools/wechat_uia_bridge.py` | Phase 2 完成后 | `gateway/adapters/wechat_adapter.py` + `edge_client/services/wx_db_service.py` |
 | `edge_client/channels/wechat_listener.py` | Phase 2 完成后（部分逻辑上移） | `gateway/adapters/wechat_adapter.py` + `gateway/normalizer.py` |
