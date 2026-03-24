@@ -908,6 +908,8 @@ class WeChatUiInboundBridge:
         self._last_auto_recover_at = 0.0
         self._auto_recover_interval_s = 8.0
         self._last_preview_by_chat: dict[str, str] = {}
+        self._last_signature_by_chat: dict[str, str] = {}
+        self._preview_signature_by_chat: dict[str, str] = {}
         self._recent_forwarded: dict[str, float] = {}
         self._last_sender_hint = ""
         self._last_sender_fallback_log_at = 0.0
@@ -967,6 +969,20 @@ class WeChatUiInboundBridge:
         forwarded = 0
         try:
             previews = self._collect_chat_previews()
+            preview_signatures: dict[str, str] = {}
+            raw_signatures = getattr(self, "_preview_signature_by_chat", {}) or {}
+            if isinstance(raw_signatures, dict):
+                for sender_key, signature_value in raw_signatures.items():
+                    sender_text = _normalize_message_text(sender_key)
+                    signature_text = _normalize_message_text(signature_value)
+                    if sender_text and signature_text:
+                        preview_signatures[sender_text] = signature_text
+            if not preview_signatures and previews:
+                for sender_value, preview_value in previews:
+                    sender_text = _normalize_message_text(sender_value)
+                    preview_text = _normalize_message_text(preview_value)
+                    if sender_text and preview_text:
+                        preview_signatures[sender_text] = preview_text
             if previews:
                 self._empty_preview_cycles = 0
             else:
@@ -991,7 +1007,9 @@ class WeChatUiInboundBridge:
                     sender_value = str(sender or "").strip()
                     preview_value = _normalize_message_text(preview)
                     if sender_value and preview_value:
+                        signature_value = preview_signatures.get(sender_value) or preview_value
                         self._last_preview_by_chat[sender_value] = preview_value
+                        self._last_signature_by_chat[sender_value] = signature_value
                 self._baseline_ready = True
                 logger.info("inbound listener baseline initialized: chats=%d", len(self._last_preview_by_chat))
                 return 0
@@ -1019,11 +1037,21 @@ class WeChatUiInboundBridge:
                 last_value = self._last_preview_by_chat.get(sender_value)
                 if last_value is None and raw_sender_value and raw_sender_value != sender_value:
                     last_value = self._last_preview_by_chat.get(raw_sender_value)
-                if last_value == preview_value:
+                signature_value = preview_signatures.get(sender_value)
+                if signature_value is None and raw_sender_value and raw_sender_value != sender_value:
+                    signature_value = preview_signatures.get(raw_sender_value)
+                signature_value = _normalize_message_text(signature_value) or preview_value
+
+                last_signature = self._last_signature_by_chat.get(sender_value)
+                if last_signature is None and raw_sender_value and raw_sender_value != sender_value:
+                    last_signature = self._last_signature_by_chat.get(raw_sender_value)
+                if (last_value == preview_value) and (last_signature == signature_value):
                     continue
                 self._last_preview_by_chat[sender_value] = preview_value
+                self._last_signature_by_chat[sender_value] = signature_value
                 if raw_sender_value and raw_sender_value != sender_value:
                     self._last_preview_by_chat[raw_sender_value] = preview_value
+                    self._last_signature_by_chat[raw_sender_value] = signature_value
 
                 if _is_recent_outbound_echo(preview_value):
                     continue
@@ -1237,6 +1265,8 @@ class WeChatUiInboundBridge:
             return []
 
         rows: list[tuple[str, str]] = []
+        signature_candidates: dict[str, str] = {}
+        self._preview_signature_by_chat = {}
 
         if self._scan_chat_list:
             try:
@@ -1283,11 +1313,16 @@ class WeChatUiInboundBridge:
                 if not preview:
                     continue
                 rows.append((sender, preview))
+                signature_value = _normalize_message_text("|".join(clean[:8])) or preview
+                if sender and signature_value and sender not in signature_candidates:
+                    signature_candidates[sender] = signature_value
 
         dedup_map: dict[str, str] = {}
+        dedup_signature_map: dict[str, str] = {}
         for sender, preview in rows:
             if sender and preview and sender not in dedup_map:
                 dedup_map[sender] = preview
+                dedup_signature_map[sender] = _normalize_message_text(signature_candidates.get(sender) or preview) or preview
 
         # Always inspect active chat pane and prefer inbound-side text.
         try:
@@ -1343,10 +1378,15 @@ class WeChatUiInboundBridge:
                         chat_title = "active_chat"
                     if chat_title and latest_text:
                         dedup_map[chat_title] = latest_text
+                        latest_cy = int(message_candidates[-1][0])
+                        latest_cx = int(message_candidates[-1][1])
+                        active_signature = f"{latest_text}|nodes={len(message_candidates)}|y={latest_cy}|x={latest_cx}"
+                        dedup_signature_map[chat_title] = _normalize_message_text(active_signature) or latest_text
         except Exception:
             pass
 
         dedup_rows = list(dedup_map.items())
+        self._preview_signature_by_chat = dict(dedup_signature_map)
         if (not dedup_rows) and ((time.monotonic() - self._last_tree_diag_at) >= 45.0):
             self._last_tree_diag_at = time.monotonic()
             self._log_tree_diagnostics(window)
@@ -1436,11 +1476,22 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
             os.environ.get("EDGE_WECHAT_OCR_ALLOW_UIA_FALLBACK"),
             default=False,
         )
+        self._ocr_signature_by_chat: dict[str, str] = {}
 
     def _collect_chat_previews(self) -> list[tuple[str, str]]:
+        self._preview_signature_by_chat = {}
+        self._ocr_signature_by_chat = {}
         # OCR mode must prioritize OCR extraction to avoid UIA text noise loops.
         previews = self._collect_chat_previews_via_ocr()
         if previews:
+            if self._ocr_signature_by_chat:
+                self._preview_signature_by_chat = dict(self._ocr_signature_by_chat)
+            else:
+                self._preview_signature_by_chat = {
+                    _normalize_message_text(sender): _normalize_message_text(preview)
+                    for sender, preview in previews
+                    if _normalize_message_text(sender) and _normalize_message_text(preview)
+                }
             self._ocr_empty_cycles = 0
             return previews
         self._ocr_empty_cycles += 1
@@ -1474,12 +1525,37 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                 return []
 
         if not hwnd:
+            self._ocr_signature_by_chat = {}
             return []
 
         right_ocr_rows, list_ocr_rows, right_previews, list_previews = self._collect_ocr_from_rois(hwnd=hwnd)
         if right_previews:
+            right_tail = ""
+            right_tail_y = -1
+            if right_ocr_rows:
+                right_tail = _normalize_message_text(right_ocr_rows[-1][2])
+                right_tail_y = int(right_ocr_rows[-1][1])
+            self._ocr_signature_by_chat = {
+                _normalize_message_text(sender): _normalize_message_text(
+                    f"{preview}|right_rows={len(right_ocr_rows)}|tail={right_tail}|y={right_tail_y}"
+                )
+                for sender, preview in right_previews
+                if _normalize_message_text(sender) and _normalize_message_text(preview)
+            }
             return right_previews
         if list_previews:
+            list_tail = ""
+            list_tail_y = -1
+            if list_ocr_rows:
+                list_tail = _normalize_message_text(list_ocr_rows[-1][2])
+                list_tail_y = int(list_ocr_rows[-1][1])
+            self._ocr_signature_by_chat = {
+                _normalize_message_text(sender): _normalize_message_text(
+                    f"{preview}|list_rows={len(list_ocr_rows)}|tail={list_tail}|y={list_tail_y}"
+                )
+                for sender, preview in list_previews
+                if _normalize_message_text(sender) and _normalize_message_text(preview)
+            }
             return list_previews
 
         now_mono = time.monotonic()
@@ -1498,8 +1574,32 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                     hwnd=retry_hwnd
                 )
                 if retry_right_previews:
+                    retry_tail = ""
+                    retry_tail_y = -1
+                    if retry_right_rows:
+                        retry_tail = _normalize_message_text(retry_right_rows[-1][2])
+                        retry_tail_y = int(retry_right_rows[-1][1])
+                    self._ocr_signature_by_chat = {
+                        _normalize_message_text(sender): _normalize_message_text(
+                            f"{preview}|right_rows={len(retry_right_rows)}|tail={retry_tail}|y={retry_tail_y}"
+                        )
+                        for sender, preview in retry_right_previews
+                        if _normalize_message_text(sender) and _normalize_message_text(preview)
+                    }
                     return retry_right_previews
                 if retry_list_previews:
+                    retry_list_tail = ""
+                    retry_list_tail_y = -1
+                    if retry_list_rows:
+                        retry_list_tail = _normalize_message_text(retry_list_rows[-1][2])
+                        retry_list_tail_y = int(retry_list_rows[-1][1])
+                    self._ocr_signature_by_chat = {
+                        _normalize_message_text(sender): _normalize_message_text(
+                            f"{preview}|list_rows={len(retry_list_rows)}|tail={retry_list_tail}|y={retry_list_tail_y}"
+                        )
+                        for sender, preview in retry_list_previews
+                        if _normalize_message_text(sender) and _normalize_message_text(preview)
+                    }
                     return retry_list_previews
                 if retry_right_rows:
                     right_ocr_rows = retry_right_rows
@@ -1520,6 +1620,7 @@ class WeChatUiOcrInboundBridge(WeChatUiInboundBridge):
                 self._format_ocr_samples(right_ocr_rows),
                 self._format_ocr_samples(list_ocr_rows),
             )
+        self._ocr_signature_by_chat = {}
         return []
 
     def _collect_ocr_from_rois(
@@ -4061,6 +4162,8 @@ def _detect_contact_profile_via_ocr(*, hwnd: int) -> tuple[bool, str]:
 
 
 def _detect_wechat_login_gate(*, hwnd: int | None = None) -> tuple[bool, str]:
+    if _parse_bool(os.environ.get("EDGE_WECHAT_SKIP_LOGIN_GATE_CHECK"), default=False):
+        return False, "login_gate_check_skipped"
     target_hwnd = int(hwnd or 0)
     if target_hwnd <= 0:
         target_hwnd = _find_wechat_main_window()
@@ -5204,6 +5307,17 @@ def _send_text_active_chat_fast(content: str) -> tuple[bool, str]:
         pass
 
     try:
+        time.sleep(0.12)
+        if not _is_window_foreground_or_child(int(hwnd)):
+            return False, "active_chat_fast_focus_failed"
+    except Exception as exc:
+        return False, f"active_chat_fast_focus_check_failed: {exc.__class__.__name__}"
+
+    input_ok, input_detail = _verify_message_input_ready(target="active_chat")
+    if not input_ok:
+        return False, f"active_chat_fast_input_not_ready: {input_detail}"
+
+    try:
         pyautogui.FAILSAFE = False
         time.sleep(0.08)
         pyautogui.hotkey("ctrl", "v")
@@ -5348,6 +5462,25 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
         elif prefer_active_present and active_present:
             active_fast_mode = "active_present_preferred"
 
+    if action == "send_text" and active_fast_mode:
+        send_ok, send_detail = _send_text_active_chat_fast(content=content)
+        if send_ok:
+            return {
+                **base_row,
+                "status": "ok",
+                "success": True,
+                "reason_code": None,
+                "detail": f"{send_detail}; mode={active_fast_mode}",
+                "resolved_target": "active_chat",
+                "target_candidates": target_candidates,
+            }
+        logger.warning(
+            "wechat_tool.execute.active_fast_failed command_id=%s request_id=%s detail=%s",
+            command_id,
+            request_id,
+            send_detail,
+        )
+
     focus_ok, focus_detail = _focus_wechat_main_window(wechat_path)
     if not focus_ok:
         return {
@@ -5366,18 +5499,6 @@ def _execute_command(command: dict[str, Any], *, wechat_path: str) -> dict[str, 
             "success": False,
             "reason_code": "WECHAT_NOT_LOGGED_IN",
             "detail": login_detail,
-        }
-
-    if action == "send_text" and active_fast_mode:
-        send_ok, send_detail = _send_text_active_chat_fast(content=content)
-        return {
-            **base_row,
-            "status": ("ok" if send_ok else "error"),
-            "success": bool(send_ok),
-            "reason_code": (None if send_ok else "WECHAT_COMMAND_EXEC_FAILED"),
-            "detail": f"{send_detail}; mode={active_fast_mode}",
-            "resolved_target": "active_chat",
-            "target_candidates": target_candidates,
         }
 
     open_failures: list[str] = []
@@ -5558,6 +5679,61 @@ def _process_command_queue(
     return next_offset, len(rows), success_count
 
 
+_INBOUND_CYCLE_STATE: dict[str, Any] = {
+    "thread": None,
+    "started_at": 0.0,
+    "timed_out_logged": False,
+    "result": 0,
+    "error": None,
+}
+
+
+def _process_inbound_cycle_with_timeout(*, inbound_bridge: Any, timeout_s: float) -> int:
+    timeout_value = max(0.0, float(timeout_s))
+    if timeout_value <= 0.0:
+        return int(inbound_bridge.process_cycle() or 0)
+
+    worker = _INBOUND_CYCLE_STATE.get("thread")
+    if isinstance(worker, threading.Thread):
+        if worker.is_alive():
+            elapsed = max(0.0, time.monotonic() - float(_INBOUND_CYCLE_STATE.get("started_at") or 0.0))
+            if (elapsed >= timeout_value) and (not bool(_INBOUND_CYCLE_STATE.get("timed_out_logged"))):
+                logger.warning("inbound process cycle timeout after %.2fs", timeout_value)
+                _INBOUND_CYCLE_STATE["timed_out_logged"] = True
+            return 0
+
+        worker.join(timeout=0.0)
+        _INBOUND_CYCLE_STATE["thread"] = None
+        _INBOUND_CYCLE_STATE["started_at"] = 0.0
+        _INBOUND_CYCLE_STATE["timed_out_logged"] = False
+        error = _INBOUND_CYCLE_STATE.get("error")
+        result_value = int(_INBOUND_CYCLE_STATE.get("result") or 0)
+        _INBOUND_CYCLE_STATE["error"] = None
+        _INBOUND_CYCLE_STATE["result"] = 0
+        if isinstance(error, Exception):
+            raise error
+        return result_value
+
+    def _runner() -> None:
+        try:
+            _INBOUND_CYCLE_STATE["result"] = int(inbound_bridge.process_cycle() or 0)
+        except Exception as exc:
+            _INBOUND_CYCLE_STATE["error"] = exc
+
+    worker = threading.Thread(
+        target=_runner,
+        name="wechat_inbound_cycle",
+        daemon=True,
+    )
+    _INBOUND_CYCLE_STATE["thread"] = worker
+    _INBOUND_CYCLE_STATE["started_at"] = time.monotonic()
+    _INBOUND_CYCLE_STATE["timed_out_logged"] = False
+    _INBOUND_CYCLE_STATE["result"] = 0
+    _INBOUND_CYCLE_STATE["error"] = None
+    worker.start()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Consume WeChat command queue with pure desktop UI automation."
@@ -5688,6 +5864,13 @@ def main() -> int:
     result_file = _normalize_optional_path(args.command_result_file)
     wechat_path = str(args.wechat_path or "").strip()
     poll_interval = max(0.1, float(args.command_poll_interval))
+    inbound_cycle_timeout_s = max(
+        0.2,
+        min(
+            10.0,
+            float(os.environ.get("EDGE_WECHAT_INBOUND_PROCESS_TIMEOUT_S") or "1.5"),
+        ),
+    )
     listener_enabled = _parse_bool(args.listener_enabled, default=True)
     inbound_backend = str(args.inbound_backend or DEFAULT_INBOUND_BACKEND).strip().lower()
     if inbound_backend in {"none", "off", "disabled"}:
@@ -5848,7 +6031,10 @@ def main() -> int:
                     offset=offset,
                     wechat_path=wechat_path,
                 )
-                inbound_forwarded = inbound_bridge.process_cycle()
+                inbound_forwarded = _process_inbound_cycle_with_timeout(
+                    inbound_bridge=inbound_bridge,
+                    timeout_s=inbound_cycle_timeout_s,
+                )
                 if inbound_forwarded > 0:
                     inbound_total += inbound_forwarded
                     logger.info(

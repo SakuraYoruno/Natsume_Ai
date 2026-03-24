@@ -17,6 +17,24 @@ _logger = logging.getLogger("Natsume.input_routes")
 
 router = APIRouter(prefix="/v1/host", tags=["input"])
 
+_PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
+    "active_chat",
+    "active chat",
+    "current_chat",
+    "current chat",
+    "current_session",
+    "default",
+    "unknown",
+    "none",
+    "null",
+    "-",
+    "_",
+    "na",
+    "n/a",
+    "当前聊天",
+    "当前会话",
+}
+
 
 class InputPayload(BaseModel):
     """Ingress payload reported by Edge."""
@@ -71,6 +89,13 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return bool(default)
 
 
+def _is_invalid_gateway_conversation_id(value: str | None) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return True
+    return normalized in _PLACEHOLDER_GATEWAY_CONVERSATIONS
+
+
 @router.post("/input", response_model=InputResponse)
 async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     _ = request
@@ -100,6 +125,15 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 source=source,
                 status="REJECTED",
                 detail="GATEWAY input missing required fields: content, conversation_id, platform",
+                ts_ms=ts_ms,
+            )
+        if _is_invalid_gateway_conversation_id(body.conversation_id):
+            return InputResponse(
+                success=False,
+                request_id=request_id,
+                source=source,
+                status="REJECTED",
+                detail=f"invalid gateway conversation_id: {body.conversation_id}",
                 ts_ms=ts_ms,
             )
         text = str(body.content).strip()

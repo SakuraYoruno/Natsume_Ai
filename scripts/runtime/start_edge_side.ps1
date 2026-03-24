@@ -24,38 +24,20 @@ if (-not (Test-Path -Path $startEdgeScript)) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($WeChatInboundBackend)) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", $WeChatInboundBackend, "Process")
+  Write-Warning "WeChatInboundBackend is deprecated and ignored (Unified Message Gateway mode only)."
 }
-$resolvedVisionModel = $WeChatVisionModel
-$resolvedVisionTimeoutS = $WeChatVisionTimeoutS
-$resolvedVisionMinIntervalS = $WeChatVisionMinIntervalS
-if ($WeChatInboundBackend -in @("vision", "vision_notify")) {
-  if ([string]::IsNullOrWhiteSpace($resolvedVisionModel)) {
-    # qwen2.5vl:3b is often CPU-only on edge; gemma3:4b is faster and uses GPU on common setups.
-    $resolvedVisionModel = "gemma3:4b"
-  }
-  if ($resolvedVisionTimeoutS -le 0) {
-    $resolvedVisionTimeoutS = 60
-  }
-  if ($resolvedVisionMinIntervalS -le 0) {
-    $resolvedVisionMinIntervalS = 2.5
-  }
+if (-not [string]::IsNullOrWhiteSpace($WeChatVisionModel) -or
+    -not [string]::IsNullOrWhiteSpace($WeChatVisionApiUrl) -or
+    $WeChatVisionTimeoutS -gt 0 -or
+    $WeChatVisionMinConfidence -ge 0 -or
+    $WeChatVisionMinIntervalS -gt 0) {
+  Write-Warning "Legacy WeChat vision/OCR parameters are ignored in Gateway DB-listen mode."
 }
-if (-not [string]::IsNullOrWhiteSpace($resolvedVisionModel)) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MODEL", $resolvedVisionModel, "Process")
-}
-if (-not [string]::IsNullOrWhiteSpace($WeChatVisionApiUrl)) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_API_URL", $WeChatVisionApiUrl, "Process")
-}
-if ($resolvedVisionTimeoutS -gt 0) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_TIMEOUT_S", ([string]$resolvedVisionTimeoutS), "Process")
-}
-if ($WeChatVisionMinConfidence -ge 0) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MIN_CONFIDENCE", ([string]$WeChatVisionMinConfidence), "Process")
-}
-if ($resolvedVisionMinIntervalS -gt 0) {
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_VISION_MIN_INTERVAL_S", ([string]$resolvedVisionMinIntervalS), "Process")
-}
+
+# Strict doc mode: force-disable legacy UIA bridge and listener chain.
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_ENABLED", "false", "Process")
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_LISTENER_ENABLED", "false", "Process")
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", "", "Process")
 
 $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `

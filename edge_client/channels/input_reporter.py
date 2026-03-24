@@ -160,6 +160,54 @@ class EdgeInputReporter:
             payload["raw_extra"] = raw_extra
         return self._send(payload, InputSourceType.WECHAT)
 
+    def report_gateway(
+        self,
+        *,
+        platform: str,
+        conversation_id: str,
+        content: str,
+        from_id: str = "",
+        to_id: str = "",
+        msg_type: str = "text",
+        msg_id: str | None = None,
+        is_group: bool | None = None,
+        sender_name: str | None = None,
+        media_url: str | None = None,
+        reply_to_msg_id: str | None = None,
+        ts_ms: int | None = None,
+        raw_extra: dict[str, Any] | None = None,
+    ) -> InputReportResult:
+        payload: dict[str, Any] = {
+            "source": InputSourceType.GATEWAY.value,
+            "platform": str(platform or "").strip().lower(),
+            "conversation_id": str(conversation_id or "").strip(),
+            "content": str(content or ""),
+            "msg_type": str(msg_type or "text").strip().lower(),
+            "ts_ms": int(ts_ms or (time.time() * 1000)),
+        }
+        from_id_value = str(from_id or "").strip()
+        to_id_value = str(to_id or "").strip()
+        if from_id_value:
+            payload["from_id"] = from_id_value
+        if to_id_value:
+            payload["to_id"] = to_id_value
+        if msg_id:
+            payload["msg_id"] = str(msg_id).strip()
+        if is_group is not None:
+            payload["is_group"] = bool(is_group)
+        sender_name_value = str(sender_name or "").strip()
+        if sender_name_value:
+            payload["sender_name"] = sender_name_value
+        media_url_value = str(media_url or "").strip()
+        if media_url_value:
+            payload["media_url"] = media_url_value
+        reply_to_msg_id_value = str(reply_to_msg_id or "").strip()
+        if reply_to_msg_id_value:
+            payload["reply_to_msg_id"] = reply_to_msg_id_value
+        if raw_extra:
+            payload["raw_extra"] = raw_extra
+        return self._send(payload, InputSourceType.GATEWAY)
+
     def start_retry_loop(self) -> None:
         """启动后台重试线程（可选，用于缓存重试）。"""
         if self._retry_thread is not None and self._retry_thread.is_alive():
@@ -235,6 +283,22 @@ class EdgeInputReporter:
         with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
             if resp.status not in (200, 201, 202):
                 raise RuntimeError(f"Host 返回非 2xx 状态码: {resp.status}")
+            resp_body = resp.read()
+            if not resp_body:
+                return
+            try:
+                data = json.loads(resp_body.decode("utf-8", errors="ignore"))
+            except Exception:
+                return
+            if not isinstance(data, dict):
+                return
+            status_value = str(data.get("status") or "").strip().upper()
+            success_value = data.get("success")
+            if (success_value is False) or (status_value in {"REJECTED", "ERROR"}):
+                detail = str(data.get("detail") or "").strip()
+                if detail:
+                    raise RuntimeError(f"Host rejected input: {detail}")
+                raise RuntimeError("Host rejected input")
 
     def _cache_report(self, payload: dict[str, Any], source: InputSourceType) -> None:
         """写入本地缓存，超出上限时丢弃最旧的。"""

@@ -1,27 +1,10 @@
-"""Unified Message Gateway — 启动入口。
-
-将 Gateway 各组件组装并启动：
-  1. WxDbService（解密数据库查询层）
-  2. WxDbWatcher（文件监听 / 定时轮询）
-  3. WeChatAdapter（微信适配器）
-  4. MessageNormalizer（去重 + 脱敏）
-  5. GatewayRouter（路由到 Host Brain）
-  6. OutboundDispatcher（回复分发）
-  7. FastAPI Gateway Server（:19000）
-
-使用方式：
-  from edge_client.gateway.bootstrap import start_gateway
-  gateway = start_gateway(config)
-  # ... 运行中 ...
-  gateway.stop()
-"""
+"""Unified Message Gateway 启动入口。"""
 
 from __future__ import annotations
 
 import logging
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
@@ -30,52 +13,79 @@ logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
 @dataclass
 class GatewayConfig:
     """Gateway 启动配置。"""
-    # Host Brain 地址（用于路由消息）
+
     host_url: str = "http://127.0.0.1:8000"
-    # HMAC 签名密钥（复用 EdgeConfig.hmac_shared_key）
     hmac_key: str | None = None
-    # 微信解密输出目录
-    wx_decrypt_output_dir: str = ""
-    # 本机微信 wxid（用于过滤自己发出的消息）
-    wx_self_wxid: str | None = None
-    # 水位线持久化文件路径
-    wx_watermark_file: str | None = None
-    # watchdog 不可用时的降级轮询间隔（秒）
-    wx_poll_interval_s: float = 5.0
-    # Gateway 监听端口
     gateway_port: int = 19000
-    # 是否启用微信适配器
-    wx_enabled: bool = True
+    enabled_platforms: tuple[str, ...] = ("wechat", "qq")
+
+    wx_db_storage_dir: str = ""
+    wx_decrypt_output_dir: str = ""
+    wx_key_cache_path: str | None = None
+    wx_decrypt_refresh_interval_s: int = 3600
+    wx_self_wxid: str | None = None
+    wx_watermark_file: str | None = None
+    wx_poll_interval_s: float = 5.0
+
+    qq_onebot_api_base: str | None = None
+    qq_self_id: str | None = None
+
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_encrypt_key: str | None = None
+    feishu_verification_token: str | None = None
+
+    wecom_corp_id: str | None = None
+    wecom_corp_secret: str | None = None
+    wecom_agent_id: str | None = None
+    wecom_token: str | None = None
+    wecom_encoding_aes_key: str | None = None
 
 
 class GatewayInstance:
-    """Gateway 运行实例，持有所有组件引用，支持优雅停止。"""
+    """Gateway 运行实例，持有可停止的组件。"""
 
     def __init__(self) -> None:
         self.watcher = None
+        self.refresher = None
+        self.reporter = None
         self.server_thread: threading.Thread | None = None
         self._shutdown = threading.Event()
 
     def stop(self) -> None:
-        """停止 Gateway 所有组件。"""
         self._shutdown.set()
         if self.watcher is not None:
             try:
                 self.watcher.stop()
             except Exception as exc:
                 logger.warning("Gateway: 停止 watcher 异常: %s", exc)
+        if self.refresher is not None:
+            try:
+                self.refresher.stop()
+            except Exception as exc:
+                logger.warning("Gateway: 停止 decrypt refresher 异常: %s", exc)
+        if self.reporter is not None:
+            try:
+                self.reporter.stop_retry_loop()
+            except Exception as exc:
+                logger.warning("Gateway: 停止 reporter retry loop 异常: %s", exc)
         logger.info("Gateway: 已停止")
 
 
+def _normalize_platforms(raw: tuple[str, ...]) -> set[str]:
+    normalized: set[str] = set()
+    for item in raw:
+        value = str(item or "").strip().lower()
+        if value in {"wechat", "qq", "feishu", "wecom"}:
+            normalized.add(value)
+    if not normalized:
+        normalized.add("wechat")
+    return normalized
+
+
 def start_gateway(config: GatewayConfig) -> GatewayInstance:
-    """组装并启动 Unified Message Gateway。
+    """组装并启动 Unified Message Gateway。"""
 
-    Args:
-        config: GatewayConfig 配置
-
-    Returns:
-        GatewayInstance（可调用 .stop() 优雅停止）
-    """
     from edge_client.channels.input_reporter import EdgeInputReporter
     from edge_client.gateway.models import Platform
     from edge_client.gateway.normalizer import MessageNormalizer
@@ -84,57 +94,115 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     from edge_client.gateway.server import create_gateway_app
 
     instance = GatewayInstance()
+    enabled_platforms = _normalize_platforms(config.enabled_platforms)
 
-    # 1. EdgeInputReporter（复用现有通道）
     reporter = EdgeInputReporter(
         host_url=config.host_url,
         hmac_key=config.hmac_key,
     )
     reporter.start_retry_loop()
+    instance.reporter = reporter
 
-    # 2. 核心组件
     normalizer = MessageNormalizer()
     router = GatewayRouter(reporter)
     outbound = OutboundDispatcher()
     adapters: dict[str, Any] = {}
 
-    # 3. 微信适配器
-    if config.wx_enabled and config.wx_decrypt_output_dir:
-        from edge_client.services.wx_db_service import WxDbService
-        from edge_client.services.wx_watcher import WxDbWatcher
-        from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
+    if "wechat" in enabled_platforms:
+        if not config.wx_decrypt_output_dir:
+            logger.warning("Gateway: wechat 已启用但缺少 WECHAT_DECRYPT_OUTPUT_DIR，跳过注册")
+        else:
+            from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
+            from edge_client.services.wx_db_service import WxDbService
 
-        wx_svc = WxDbService(
-            config.wx_decrypt_output_dir,
-            poll_watermark_file=config.wx_watermark_file,
-        )
-        wx_adapter = WeChatAdapter(wx_svc, self_wxid=config.wx_self_wxid)
-        outbound.register(wx_adapter)
-        adapters[Platform.WECHAT.value] = wx_adapter
+            wx_svc = WxDbService(
+                config.wx_decrypt_output_dir,
+                poll_watermark_file=config.wx_watermark_file,
+            )
+            wx_adapter = WeChatAdapter(wx_svc, self_wxid=config.wx_self_wxid)
+            outbound.register(wx_adapter)
+            adapters[Platform.WECHAT.value] = wx_adapter
 
-        # 4. 文件监听器（新消息 → 标准化 → 路由）
-        def _on_new_messages(msgs):
-            for wx_msg in msgs:
-                unified = wx_adapter.convert_wx_message(wx_msg)
-                if unified is None:
-                    continue
-                normalized = normalizer.normalize(unified)
-                if normalized is None:
-                    continue
-                router.route(normalized)
+            if config.wx_db_storage_dir:
+                from edge_client.services.wx_decrypt_refresher import WxDecryptRefresher
 
-        watcher = WxDbWatcher(
-            wx_svc,
-            _on_new_messages,
-            poll_interval_s=config.wx_poll_interval_s,
-        )
-        mode = watcher.start()
-        instance.watcher = watcher
-        logger.info("Gateway: 微信监听已启动（模式: %s）", mode)
-    else:
-        logger.info("Gateway: 微信适配器未启用（wx_enabled=False 或未配置解密目录）")
+                refresher = WxDecryptRefresher(
+                    db_storage_dir=config.wx_db_storage_dir,
+                    decrypt_output_dir=config.wx_decrypt_output_dir,
+                    key_cache_path=config.wx_key_cache_path,
+                    refresh_interval_s=config.wx_decrypt_refresh_interval_s,
+                )
+                mode = refresher.start()
+                instance.refresher = refresher
+                logger.info("Gateway: 微信解密刷新已启动 mode=%s", mode)
+            else:
+                logger.warning("Gateway: 未配置 WECHAT_DB_STORAGE_DIR，跳过自动 refresh")
 
-    # 5. FastAPI Gateway Server
+            from edge_client.services.wx_watcher import WxDbWatcher
+
+            def _on_new_messages(msgs: list[Any]) -> None:
+                for wx_msg in msgs:
+                    unified = wx_adapter.convert_wx_message(wx_msg)
+                    if unified is None:
+                        continue
+                    normalized = normalizer.normalize(unified)
+                    if normalized is None:
+                        continue
+                    router.route(normalized)
+
+            watcher = WxDbWatcher(
+                wx_svc,
+                _on_new_messages,
+                poll_interval_s=config.wx_poll_interval_s,
+            )
+            watch_mode = watcher.start()
+            instance.watcher = watcher
+            logger.info("Gateway: 微信监听已启动 mode=%s", watch_mode)
+
+    if "qq" in enabled_platforms:
+        if config.qq_onebot_api_base:
+            from edge_client.gateway.adapters.qq_adapter import QQAdapter
+
+            qq_adapter = QQAdapter(
+                config.qq_onebot_api_base,
+                self_id=config.qq_self_id,
+            )
+            outbound.register(qq_adapter)
+            adapters[Platform.QQ.value] = qq_adapter
+        else:
+            logger.warning("Gateway: qq 已启用但缺少 QQ_ONEBOT_API_BASE，跳过注册")
+
+    if "feishu" in enabled_platforms:
+        if config.feishu_app_id and config.feishu_app_secret:
+            from edge_client.gateway.adapters.feishu_adapter import FeishuAdapter
+
+            feishu_adapter = FeishuAdapter(
+                app_id=config.feishu_app_id,
+                app_secret=config.feishu_app_secret,
+                encrypt_key=config.feishu_encrypt_key,
+                verification_token=config.feishu_verification_token,
+            )
+            outbound.register(feishu_adapter)
+            adapters[Platform.FEISHU.value] = feishu_adapter
+        else:
+            logger.warning("Gateway: feishu 已启用但缺少 FEISHU_APP_ID/FEISHU_APP_SECRET，跳过注册")
+
+    if "wecom" in enabled_platforms:
+        if config.wecom_corp_id and config.wecom_corp_secret and config.wecom_agent_id:
+            from edge_client.gateway.adapters.wecom_adapter import WeComAdapter
+
+            wecom_adapter = WeComAdapter(
+                corp_id=config.wecom_corp_id,
+                corp_secret=config.wecom_corp_secret,
+                agent_id=config.wecom_agent_id,
+                token=config.wecom_token,
+                encoding_aes_key=config.wecom_encoding_aes_key,
+            )
+            outbound.register(wecom_adapter)
+            adapters[Platform.WECOM.value] = wecom_adapter
+        else:
+            logger.warning("Gateway: wecom 已启用但缺少 corp 配置，跳过注册")
+
     app = create_gateway_app(
         router=router,
         normalizer=normalizer,
@@ -142,12 +210,13 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
         outbound=outbound,
     )
 
-    def _run_server():
+    def _run_server() -> None:
         try:
             import uvicorn
+
             uvicorn.run(app, host="0.0.0.0", port=config.gateway_port, log_level="info")
         except Exception as exc:
-            logger.error("Gateway: Server 启动失败: %s", exc)
+            logger.error("Gateway: server 启动失败: %s", exc)
 
     server_thread = threading.Thread(
         target=_run_server,
@@ -156,6 +225,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     )
     server_thread.start()
     instance.server_thread = server_thread
-
-    logger.info("Gateway: 已启动，监听端口 %d", config.gateway_port)
+    logger.info(
+        "Gateway: 已启动 port=%d platforms=%s",
+        config.gateway_port,
+        ",".join(sorted(enabled_platforms)),
+    )
     return instance
+

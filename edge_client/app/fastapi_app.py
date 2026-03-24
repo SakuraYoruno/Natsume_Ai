@@ -5,7 +5,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import inspect
+import json
 from typing import Any, Callable
+import urllib.error
+import urllib.request
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -235,48 +238,28 @@ def create_edge_fastapi_app(
         此接口不需要 HMAC 鉴权（本地 Hook 工具调用），但只监听 127.0.0.1。
         """
         ts = int(clock())
-        payload_or_error = await _load_json_body(request)
-        if isinstance(payload_or_error, JSONResponse):
-            return payload_or_error
-
-        raw_msg = payload_or_error
-        try:
-            from edge_client.channels.wechat_listener import WeChatListener
-            listener: WeChatListener | None = getattr(runtime_value, "wechat_listener", None)
-            if listener is not None:
-                dispatched = listener.on_raw_message(raw_msg)
-            else:
-                dispatched = False
-            return JSONResponse(_response(
-                success=True,
-                status=STATUS_ACCEPTED,
-                reason_code=None,
-                detail="wechat message received" + ("" if dispatched else " (listener not active)"),
-                event={"dispatched": dispatched, "stage": "S_EDGE_WECHAT_CALLBACK"},
-                ts_ms=ts,
-            ))
-        except Exception as exc:
-            return JSONResponse(_response(
-                success=False,
-                status=STATUS_REJECTED,
-                reason_code="WECHAT_CALLBACK_ERROR",
-                detail=f"wechat callback handler failed: {exc}",
-                event={"stage": "S_EDGE_WECHAT_CALLBACK"},
-                ts_ms=ts,
-            ))
+        _ = request
+        return JSONResponse(_response(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=CONFIG_VALUE_INVALID,
+            detail="legacy /v1/edge/wechat/callback disabled; use /v1/gateway/{platform}/webhook",
+            event={"stage": "S_EDGE_WECHAT_CALLBACK", "deprecated": True},
+            ts_ms=ts,
+        ))
 
     @app.post("/v1/edge/wechat/command")
     async def edge_wechat_command(request: Request) -> JSONResponse:
-        return await _handle_envelope_request(
-            request=request,
-            config=runtime_config,
-            runtime=runtime_value,
-            replay=replay_value,
-            clock=clock,
-            enabled=runtime_config.rpc_gateway_enabled,
-            disabled_detail="edge rpc gateway disabled by config",
-            handler=_handle_wechat_command,
-        )
+        ts = int(clock())
+        _ = request
+        return JSONResponse(_response(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=CONFIG_VALUE_INVALID,
+            detail="legacy /v1/edge/wechat/command disabled; use /v1/gateway/reply on EDGE_GATEWAY_PORT",
+            event={"stage": "S_EDGE_WECHAT_COMMAND", "deprecated": True},
+            ts_ms=ts,
+        ))
 
     @app.post("/v1/edge/screenshot")
     async def edge_screenshot(request: Request) -> JSONResponse:
@@ -822,6 +805,183 @@ def _handle_fallback_context_compress(runtime: EdgeRuntime, envelope: EdgeRpcEnv
         detail=result.detail,
         event=dict(result.event),
     )
+
+
+def _handle_gateway_reply(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    payload = dict(envelope.payload or {})
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    content = _normalize_gateway_reply_content(payload.get("content"))
+    msg_type = str(payload.get("msg_type") or "text").strip().lower()
+    timeout_ms = _parse_int_clamped(
+        payload.get("timeout_ms"),
+        default=12000,
+        min_value=300,
+        max_value=120000,
+    )
+
+    if not platform:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_GATEWAY_REPLY",
+            detail="gateway reply requires non-empty platform",
+            event={},
+        )
+    if not conversation_id:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_GATEWAY_REPLY",
+            detail="gateway reply requires non-empty conversation_id",
+            event={},
+        )
+    if msg_type == "text" and not content.strip():
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EDGE_RPC_SCHEMA_INVALID,
+            stage="S_EDGE_GATEWAY_REPLY",
+            detail="text gateway reply requires non-empty content",
+            event={},
+        )
+
+    gateway_port = int(getattr(getattr(_runtime, "config", None), "gateway_port", 19000) or 19000)
+    gateway_url = f"http://127.0.0.1:{gateway_port}/v1/gateway/reply"
+    request_payload = dict(payload)
+    request_payload["platform"] = platform
+    request_payload["conversation_id"] = conversation_id
+    request_payload["msg_type"] = msg_type or "text"
+    if content:
+        request_payload["content"] = content
+
+    body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        gateway_url,
+        data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+
+    response_body = ""
+    http_status = 0
+    try:
+        with urllib.request.urlopen(req, timeout=max(1.0, timeout_ms / 1000.0)) as resp:
+            http_status = int(resp.getcode() or 0)
+            response_body = resp.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        err_body = ""
+        try:
+            err_body = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            err_body = ""
+        detail = f"gateway reply http error: {exc.code}"
+        if err_body:
+            detail = f"{detail}; {err_body[:300]}"
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+            stage="S_EDGE_GATEWAY_REPLY",
+            detail=detail,
+            event={
+                "gateway_url": gateway_url,
+                "http_status": int(getattr(exc, "code", 0) or 0),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+            stage="S_EDGE_GATEWAY_REPLY",
+            detail=f"gateway reply transport failed: {exc}",
+            event={
+                "gateway_url": gateway_url,
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+        )
+
+    parsed_response: dict[str, Any] = {}
+    if response_body.strip():
+        try:
+            loaded = json.loads(response_body)
+            if isinstance(loaded, dict):
+                parsed_response = loaded
+        except Exception:
+            parsed_response = {}
+
+    gateway_status = str(parsed_response.get("status") or "").strip().lower()
+    success = (http_status >= 200 and http_status < 300) and gateway_status in {
+        "sent",
+        "accepted",
+        "ok",
+        "queued",
+    }
+    detail = "gateway reply dispatched"
+    if not success:
+        detail = (
+            str(parsed_response.get("detail") or "").strip()
+            or f"gateway reply failed: status={gateway_status or 'unknown'}"
+        )
+    return EdgeGatewayResult(
+        success=bool(success),
+        status=STATUS_ACCEPTED if success else STATUS_REJECTED,
+        reason_code=None if success else str(parsed_response.get("reason_code") or "GATEWAY_REPLY_FAILED"),
+        stage="S_EDGE_GATEWAY_REPLY",
+        detail=detail,
+        event={
+            "gateway_url": gateway_url,
+            "http_status": http_status,
+            "gateway_status": gateway_status,
+            "platform": platform,
+            "conversation_id": conversation_id,
+            "msg_type": msg_type,
+            "forwarded": True,
+        },
+    )
+
+
+def _normalize_gateway_reply_content(raw: Any) -> str:
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return ""
+        if text[0] not in {"{", "["}:
+            return raw
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return raw
+        extracted = _extract_gateway_reply_text(parsed)
+        return extracted or raw
+    extracted = _extract_gateway_reply_text(raw)
+    if extracted:
+        return extracted
+    return str(raw or "")
+
+
+def _extract_gateway_reply_text(raw: Any) -> str:
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        for key in ("narrative", "reply", "text", "content", "message", "value"):
+            candidate = raw.get(key)
+            extracted = _extract_gateway_reply_text(candidate)
+            if extracted:
+                return extracted
+        return ""
+    if isinstance(raw, list):
+        for item in raw:
+            extracted = _extract_gateway_reply_text(item)
+            if extracted:
+                return extracted
+    return ""
 
 
 def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:

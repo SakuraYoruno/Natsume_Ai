@@ -261,6 +261,48 @@ def _resolve_edge_base_urls() -> list[str]:
     return result
 
 
+def _resolve_gateway_base_urls() -> list[str]:
+    override = str(
+        os.environ.get("HOST_EDGE_GATEWAY_BASE_URL")
+        or os.environ.get("HOST_GATEWAY_BASE_URL")
+        or ""
+    ).strip()
+    primary = _normalize_base_url(override) if override else ""
+    host = (
+        str(
+            os.environ.get("EDGE_GATEWAY_HOST")
+            or os.environ.get("EDGE_RPC_HOST")
+            or "127.0.0.1"
+        ).strip()
+        or "127.0.0.1"
+    )
+    port_raw = str(os.environ.get("EDGE_GATEWAY_PORT") or "19000").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 19000
+
+    candidates: list[str] = []
+    if primary:
+        candidates.append(primary)
+    candidates.append(f"http://{host}:{port}")
+    allow_local_fallback = str(os.environ.get("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if allow_local_fallback and host not in {"127.0.0.1", "localhost"}:
+        candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in candidates:
+        url = _normalize_base_url(item)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append(url)
+    return result
+
+
 def _is_loopback_base_url(base_url: str) -> bool:
     normalized = _normalize_base_url(base_url)
     if not normalized:
@@ -445,6 +487,88 @@ async def _post_to_edge(
         success=False,
         status="DEGRADED",
         reason_code="EDGE_RPC_CALL_FAILED",
+        detail=f"{last_exc or 'unknown error'}; attempted={attempted_detail}",
+        event={},
+        latency_ms=latency_ms,
+    )
+
+
+async def _post_to_gateway(
+    *,
+    path: str,
+    payload: dict[str, Any],
+    request_timeout_ms: int | None = None,
+) -> EdgeRpcCallResult:
+    import time
+
+    try:
+        import httpx
+    except ImportError:
+        return EdgeRpcCallResult(
+            success=False,
+            status="DEGRADED",
+            reason_code="HTTPX_NOT_INSTALLED",
+            detail="httpx not installed",
+            event={},
+            latency_ms=0,
+        )
+
+    base_urls = _resolve_gateway_base_urls()
+    timeout_ms = (
+        max(1000, int(request_timeout_ms))
+        if request_timeout_ms is not None
+        else max(_resolve_timeout_ms(), 12000)
+    )
+    retries = _resolve_retries()
+
+    t0 = int(time.time() * 1000)
+    last_exc: Exception | None = None
+    attempts: list[str] = []
+
+    for base_url in base_urls:
+        url = f"{base_url}{path}"
+        for attempt in range(retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=float(timeout_ms) / 1000.0, trust_env=False) as client:
+                    resp = await client.post(url, json=payload)
+                latency_ms = max(0, int(time.time() * 1000) - t0)
+                if resp.status_code == 200:
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        body = {}
+                    status_text = str(body.get("status") or "unknown").strip().lower()
+                    success = status_text == "sent" or bool(body.get("success"))
+                    reason_code = None if success else "GATEWAY_REPLY_FAILED"
+                    detail = str(body.get("detail") or f"gateway reply status={status_text or 'unknown'}")
+                    return EdgeRpcCallResult(
+                        success=success,
+                        status=str(body.get("status") or ("sent" if success else "failed")),
+                        reason_code=reason_code,
+                        detail=detail,
+                        event=dict(body if isinstance(body, Mapping) else {}),
+                        latency_ms=latency_ms,
+                    )
+                last_exc = RuntimeError(f"HTTP {resp.status_code}")
+                attempts.append(f"{base_url}#{attempt}:HTTP{resp.status_code}")
+            except Exception as exc:
+                last_exc = exc
+                attempts.append(f"{base_url}#{attempt}:{exc.__class__.__name__}")
+                if attempt < retries:
+                    _logger.debug(
+                        "Gateway RPC %s attempt failed and will retry (base=%s attempt=%d): %s",
+                        path,
+                        base_url,
+                        attempt + 1,
+                        exc,
+                    )
+
+    latency_ms = max(0, int(time.time() * 1000) - t0)
+    attempted_detail = ", ".join(attempts[-8:]) if attempts else "no_endpoint_attempted"
+    return EdgeRpcCallResult(
+        success=False,
+        status="DEGRADED",
+        reason_code="GATEWAY_REPLY_CALL_FAILED",
         detail=f"{last_exc or 'unknown error'}; attempted={attempted_detail}",
         event={},
         latency_ms=latency_ms,
@@ -720,7 +844,9 @@ async def post_gateway_reply(
     Returns:
         EdgeRpcCallResult
     """
+    req_id = request_id or new_request_id()
     payload: dict[str, Any] = {
+        "request_id": req_id,
         "platform": str(platform or "").strip().lower(),
         "conversation_id": str(conversation_id or "").strip(),
         "content": str(content),
@@ -728,14 +854,13 @@ async def post_gateway_reply(
         "wait_result": bool(wait_result),
         "timeout_ms": int(timeout_ms),
     }
-    rpc_timeout_ms = _resolve_timeout_ms()
+    gateway_timeout_ms = max(_resolve_timeout_ms(), 12_000)
     if bool(wait_result):
-        rpc_timeout_ms = max(int(rpc_timeout_ms), int(timeout_ms) + 3_000)
-    result = await _post_to_edge(
+        gateway_timeout_ms = max(int(gateway_timeout_ms), int(timeout_ms) + 3_000)
+    result = await _post_to_gateway(
         path="/v1/gateway/reply",
         payload=payload,
-        request_id=request_id,
-        request_timeout_ms=rpc_timeout_ms,
+        request_timeout_ms=gateway_timeout_ms,
     )
     _logger.debug(
         "post_gateway_reply platform=%s conversation_id=%s wait=%s -> %s latency=%dms",

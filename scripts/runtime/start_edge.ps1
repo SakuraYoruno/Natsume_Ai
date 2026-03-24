@@ -320,7 +320,7 @@ function Start-EdgeProcess {
 
     $taskName = "NatsumeEdgeLaunch_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
     $taskCommand = "`"$LauncherScriptPath`""
-    Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext "edge launch"
+    Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand -FailureContext "edge launch" -InteractiveTask $true
 
     if ($Port -gt 0) {
       $deadline = (Get-Date).AddSeconds(2)
@@ -1108,6 +1108,22 @@ if ($wechatBridgeEnabled -and $wechatBridgeBackend -eq "external" -and -not $wec
   }
 }
 
+$wechatBridgeRequested = $wechatBridgeEnabled
+if ($wechatBridgeRequested) {
+  if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_FORCE_DISABLED_BY_GATEWAY")) {
+    $startupPreWarnings += "WECHAT_BRIDGE_FORCE_DISABLED_BY_GATEWAY"
+  }
+}
+$wechatBridgeEnabled = $false
+$wechatBridgeBackend = "external"
+$wechatBridgeBackendRaw = "forced_external_by_gateway_mode"
+$envValues["EDGE_WECHAT_BRIDGE_ENABLED"] = "false"
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_ENABLED", "false", "Process")
+$envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = "external"
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", "external", "Process")
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_LISTENER_ENABLED", "false", "Process")
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", "", "Process")
+
 $wechatClientNames = @("WeChat", "Weixin")
 $wechatAutoStart = ($wechatBridgeEnabled -and $wechatBridgeBackend -ne "external")
 $wechatAutoStartRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_AUTOSTART"
@@ -1467,6 +1483,32 @@ if ($null -eq $vtsConn) {
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
 $wechatBridgeError = $null
+
+# Always clean legacy bridge remnants in gateway mode.
+if (Test-Path -Path $wechatBridgePidFile) {
+  $staleBridgePidText = (Get-Content -Path $wechatBridgePidFile -Raw -Encoding ascii -ErrorAction SilentlyContinue).Trim()
+  if ($staleBridgePidText) {
+    $staleBridgePid = [int]$staleBridgePidText
+    $staleBridgeProc = Get-Process -Id $staleBridgePid -ErrorAction SilentlyContinue
+    if ($null -ne $staleBridgeProc) {
+      Stop-Process -Id $staleBridgePid -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
+}
+$bridgeScriptNeedles = @("wechat_uia_bridge.py")
+$existingBridgePids = @()
+foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
+  $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
+}
+$existingBridgePids = @($existingBridgePids | Select-Object -Unique)
+if ($existingBridgePids.Count -gt 0) {
+  $stoppedBridgePids = Stop-ProcessesByIdList -Ids $existingBridgePids
+  if ($stoppedBridgePids.Count -gt 0) {
+    Start-Sleep -Milliseconds 300
+  }
+}
+
 if ($wechatBridgeEnabled) {
   $wechatClientStatus = "checking"
   $wechatClientDetail = "checking running WeChat process"

@@ -6,6 +6,7 @@ import inspect
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from edge_client.actuators.speech import SpeechPlaybackQueue
@@ -17,8 +18,6 @@ from edge_client.actuators.tts_engine import (
     make_sovits_synthesizer,
 )
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
-from edge_client.channels.input_reporter import EdgeInputReporter
-from edge_client.channels.wechat_listener import WeChatListener, WeChatListenerConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
@@ -46,7 +45,7 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
-    wechat_listener: WeChatListener | None = None
+    wechat_listener: Any | None = None
     vision_locator: Any | None = None  # VisionLocator（按需加载）
 
     @property
@@ -92,6 +91,7 @@ class EdgeRuntime:
             "tts_unloaded": True,
             "vts_disconnected": True,
             "wechat_listener_stopped": True,
+            "gateway_stopped": True,
             "errors": [],
         }
 
@@ -126,12 +126,13 @@ class EdgeRuntime:
                 outcome["vts_disconnected"] = False
                 outcome["errors"].append(f"vts disconnect failed: {exc}")
 
-        if self.wechat_listener is not None:
+        gateway_instance = getattr(self, "_gateway_instance", None)
+        if gateway_instance is not None:
             try:
-                self.wechat_listener.stop()
+                gateway_instance.stop()
             except Exception as exc:  # pragma: no cover
-                outcome["wechat_listener_stopped"] = False
-                outcome["errors"].append(f"wechat listener stop failed: {exc}")
+                outcome["gateway_stopped"] = False
+                outcome["errors"].append(f"gateway stop failed: {exc}")
 
         outcome["vlm_released"] = True
         # VisionLocator 无需显式释放（无常驻资源）
@@ -452,53 +453,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     if asr_service is not None:
         asr_service.set_rpc_event_callback(voice_pipeline.on_asr_rpc_result)
 
-    wechat_listener: WeChatListener | None = None
-    wechat_enabled = _parse_bool(
-        _env_get(env_lookup, "EDGE_WECHAT_LISTENER_ENABLED"),
-        default=False,
-    )
-    if wechat_enabled and event_report_host_url:
-        try:
-            input_reporter = EdgeInputReporter(
-                host_url=event_report_host_url,
-                hmac_key=config.hmac_shared_key,
-                timeout_s=5.0,
-            )
-            input_reporter.start_retry_loop()
-
-            def _on_wechat_msg(msg: Any) -> None:
-                input_reporter.report_wechat(
-                    from_wxid=msg.from_wxid,
-                    to_wxid=msg.to_wxid,
-                    content=msg.content,
-                    msg_type=msg.msg_type,
-                    msg_id=msg.msg_id,
-                    room_wxid=msg.room_wxid,
-                    ts_ms=msg.ts_ms,
-                    raw_extra=msg.raw_extra or None,
-                )
-
-            wechat_listener = WeChatListener(
-                config=WeChatListenerConfig(
-                    self_wxid=_as_optional_text(_env_get(env_lookup, "EDGE_WECHAT_SELF_WXID")),
-                    private_only=_parse_bool(
-                        _env_get(env_lookup, "EDGE_WECHAT_PRIVATE_ONLY"),
-                        default=False,
-                    ),
-                    text_only=_parse_bool(
-                        _env_get(env_lookup, "EDGE_WECHAT_TEXT_ONLY"),
-                        default=True,
-                    ),
-                ),
-                on_message=_on_wechat_msg,
-            )
-            wechat_listener.start()
-            LOGGER.info(
-                "WeChatListener started (host_url=%s); POST to /v1/edge/wechat/callback to push messages",
-                event_report_host_url,
-            )
-        except Exception as exc:  # pragma: no cover
-            LOGGER.warning("WeChatListener not started: %s", exc)
+    wechat_listener = None
 
     # VisionLocator（按需初始化，仅在 vlm_enabled=True 时加载）
     vision_locator = None
@@ -560,18 +515,44 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
             LOGGER.warning("WxDbService 初始化失败（非致命）: %s", exc)
 
     # 启动 Unified Message Gateway（若已启用）
-    if config.gateway_enabled and config.wx_decrypt_output_dir:
+    if config.gateway_enabled:
         try:
             from edge_client.gateway.bootstrap import GatewayConfig, start_gateway
+
+            gateway_host_url = _as_optional_text(_env_get(dict(os.environ), "EDGE_EVENT_REPORT_HOST_URL"))
+            if not gateway_host_url:
+                gateway_host_url = f"http://{config.rpc_host}:18080"
+                LOGGER.warning(
+                    "Unified Message Gateway host_url not set by EDGE_EVENT_REPORT_HOST_URL; fallback=%s",
+                    gateway_host_url,
+                )
+            watermark_file = str(
+                (Path.cwd() / "runtime" / "edge" / "wx_gateway_watermarks.json").resolve()
+            )
+
             gw_config = GatewayConfig(
-                host_url=f"http://{config.rpc_host}:8000",
+                host_url=gateway_host_url,
                 hmac_key=config.hmac_shared_key,
-                wx_decrypt_output_dir=config.wx_decrypt_output_dir,
+                enabled_platforms=config.gateway_platforms,
+                wx_db_storage_dir=config.wx_db_storage_dir or "",
+                wx_decrypt_output_dir=config.wx_decrypt_output_dir or "",
+                wx_key_cache_path=config.wx_key_cache_path,
+                wx_decrypt_refresh_interval_s=config.wx_decrypt_refresh_interval_s,
                 wx_self_wxid=config.wx_self_wxid,
-                wx_watermark_file=None,
+                wx_watermark_file=watermark_file,
                 wx_poll_interval_s=config.wx_poll_interval_s,
                 gateway_port=config.gateway_port,
-                wx_enabled=True,
+                qq_onebot_api_base=config.qq_onebot_api_base,
+                qq_self_id=config.qq_self_id,
+                feishu_app_id=config.feishu_app_id,
+                feishu_app_secret=config.feishu_app_secret,
+                feishu_encrypt_key=config.feishu_encrypt_key,
+                feishu_verification_token=config.feishu_verification_token,
+                wecom_corp_id=config.wecom_corp_id,
+                wecom_corp_secret=config.wecom_corp_secret,
+                wecom_agent_id=config.wecom_agent_id,
+                wecom_token=config.wecom_token,
+                wecom_encoding_aes_key=config.wecom_encoding_aes_key,
             )
             gw_instance = start_gateway(gw_config)
             runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]

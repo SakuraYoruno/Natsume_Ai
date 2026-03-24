@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -87,9 +89,11 @@ class WxDbService:
     """
 
     # 解密后的数据库文件名前缀
-    _CONTACT_DB = "de_MicroMsg.db"
-    _SNS_DB = "de_Sns.db"
+    _CONTACT_DB_CANDIDATES = ("de_MicroMsg.db", "de_contact.db")
+    _SNS_DB_CANDIDATES = ("de_Sns.db", "de_sns.db")
+    _SESSION_DB_CANDIDATES = ("de_session.db",)
     _MSG_DB_PATTERN = "de_message_"
+    _MSG_DB_REGEX = re.compile(r"^de_message_\d+\.db$", re.IGNORECASE)
 
     def __init__(
         self,
@@ -117,22 +121,43 @@ class WxDbService:
         Returns:
             WxContact 列表
         """
-        db_path = self._dir / self._CONTACT_DB
-        if not db_path.exists():
+        db_path = self._resolve_existing_db(self._CONTACT_DB_CANDIDATES)
+        if db_path is None:
             logger.warning("WxDbService: 联系人数据库不存在: %s", db_path)
             return []
 
         contacts: list[WxContact] = []
         try:
             conn = self._open_db(db_path)
-            # MicroMsg.db 中联系人表为 Contact
-            rows = conn.execute(
-                "SELECT UserName, NickName, Remark, Alias FROM Contact"
-            ).fetchall()
+            table_name = self._resolve_contact_table(conn)
+            if not table_name:
+                logger.warning("WxDbService: 联系人表不存在（Contact/contact）")
+                conn.close()
+                return []
+            columns = self._load_table_columns(conn, table_name)
+            username_col = self._pick_first_column(columns, "UserName", "username", "user_name")
+            nickname_col = self._pick_first_column(columns, "NickName", "nick_name", "nickname")
+            remark_col = self._pick_first_column(columns, "Remark", "remark")
+            alias_col = self._pick_first_column(columns, "Alias", "alias")
+            if not username_col:
+                logger.warning("WxDbService: 联系人表缺少 username 列 table=%s", table_name)
+                conn.close()
+                return []
+            select_sql = (
+                f"SELECT {self._quote_ident(username_col)} AS username, "
+                f"{self._column_or_empty_expr(nickname_col)} AS nickname, "
+                f"{self._column_or_empty_expr(remark_col)} AS remark, "
+                f"{self._column_or_empty_expr(alias_col)} AS alias "
+                f"FROM {self._quote_ident(table_name)}"
+            )
+            rows = conn.execute(select_sql).fetchall()
             conn.close()
 
             for row in rows:
-                wxid, nickname, remark, alias = row
+                wxid = row[0]
+                nickname = row[1]
+                remark = row[2]
+                alias = row[3]
                 is_group = wxid.endswith("@chatroom")
                 if not include_groups and is_group:
                     continue
@@ -150,15 +175,32 @@ class WxDbService:
 
     def get_contact(self, wxid: str) -> WxContact | None:
         """获取单个联系人详情。"""
-        db_path = self._dir / self._CONTACT_DB
-        if not db_path.exists():
+        db_path = self._resolve_existing_db(self._CONTACT_DB_CANDIDATES)
+        if db_path is None:
             return None
         try:
             conn = self._open_db(db_path)
-            row = conn.execute(
-                "SELECT UserName, NickName, Remark, Alias FROM Contact WHERE UserName=?",
-                (wxid,),
-            ).fetchone()
+            table_name = self._resolve_contact_table(conn)
+            if not table_name:
+                conn.close()
+                return None
+            columns = self._load_table_columns(conn, table_name)
+            username_col = self._pick_first_column(columns, "UserName", "username", "user_name")
+            nickname_col = self._pick_first_column(columns, "NickName", "nick_name", "nickname")
+            remark_col = self._pick_first_column(columns, "Remark", "remark")
+            alias_col = self._pick_first_column(columns, "Alias", "alias")
+            if not username_col:
+                conn.close()
+                return None
+            select_sql = (
+                f"SELECT {self._quote_ident(username_col)} AS username, "
+                f"{self._column_or_empty_expr(nickname_col)} AS nickname, "
+                f"{self._column_or_empty_expr(remark_col)} AS remark, "
+                f"{self._column_or_empty_expr(alias_col)} AS alias "
+                f"FROM {self._quote_ident(table_name)} "
+                f"WHERE {self._quote_ident(username_col)}=?"
+            )
+            row = conn.execute(select_sql, (wxid,)).fetchone()
             conn.close()
             if row:
                 wxid_, nickname, remark, alias = row
@@ -176,6 +218,20 @@ class WxDbService:
     # ------------------------------------------------------------------
     # 消息查询
     # ------------------------------------------------------------------
+
+    def get_contact_detail(self, wxid: str) -> dict[str, Any] | None:
+        """兼容接口：返回联系人详情字典。"""
+        contact = self.get_contact(wxid)
+        if contact is None:
+            return None
+        return {
+            "wxid": contact.wxid,
+            "nickname": contact.nickname,
+            "remark": contact.remark,
+            "alias": contact.alias,
+            "avatar_url": contact.avatar_url,
+            "is_group": contact.is_group,
+        }
 
     def get_messages(
         self,
@@ -202,6 +258,8 @@ class WxDbService:
         """
         messages: list[WxMessage] = []
         msg_dbs = self._find_message_dbs()
+        table_conv_map = self._load_msg_table_conversation_map()
+        sender_name_map = self._load_name2id_map()
 
         for db_path in msg_dbs:
             try:
@@ -213,6 +271,8 @@ class WxDbService:
                     after_ts_ms=after_ts_ms,
                     keyword=keyword,
                     msg_types=msg_types,
+                    table_conv_map=table_conv_map,
+                    sender_name_map=sender_name_map,
                 )
                 messages.extend(msgs)
             except Exception as exc:
@@ -221,6 +281,19 @@ class WxDbService:
         # 按时间升序排序，截取 limit 条
         messages.sort(key=lambda m: m.ts_ms)
         return messages[-limit:] if len(messages) > limit else messages
+
+    def search_messages(self, *, keyword: str, limit: int = 20) -> list[dict[str, Any]]:
+        """兼容接口：按关键词搜索消息。"""
+        rows = self.get_messages(keyword=keyword, limit=limit)
+        return [self._wx_message_to_dict(row) for row in rows]
+
+    def refresh(self) -> dict[str, Any]:
+        """兼容接口：refresh 由外层调度器触发。"""
+        return {
+            "success": False,
+            "reason": "NOT_CONFIGURED",
+            "detail": "refresh is managed by WxDecryptRefresher or /v1/edge/wx/refresh",
+        }
 
     def poll_new_messages(self) -> list[WxMessage]:
         """增量轮询新消息（基于 rowid 水位线）。
@@ -233,48 +306,101 @@ class WxDbService:
         """
         new_messages: list[WxMessage] = []
         msg_dbs = self._find_message_dbs()
+        table_conv_map = self._load_msg_table_conversation_map()
+        sender_name_map = self._load_name2id_map()
+        self_wxid = self._infer_self_wxid()
 
         for db_path in msg_dbs:
-            db_key = db_path.name
-            with self._lock:
-                last_rowid = self._watermarks.get(db_key, 0)
-
             try:
                 conn = self._open_db(db_path)
-                # 查询 rowid > 水位线的新消息
-                rows = conn.execute(
-                    "SELECT rowid, MsgSvrID, StrTalker, IsSender, Type, "
-                    "StrContent, CreateTime FROM MSG "
-                    "WHERE rowid > ? ORDER BY rowid ASC",
-                    (last_rowid,),
-                ).fetchall()
-                conn.close()
+                table_names = self._list_message_tables(conn)
+                is_legacy = "MSG" in table_names
 
-                if rows:
-                    max_rowid = last_rowid
-                    for row in rows:
-                        rowid, msg_svr_id, str_talker, is_sender, msg_type, content, create_time = row
-                        max_rowid = max(max_rowid, rowid)
-
-                        # create_time 是秒级时间戳
-                        ts_ms = int(create_time) * 1000 if create_time else int(time.time() * 1000)
-
-                        new_messages.append(WxMessage(
-                            msg_id=str(msg_svr_id or rowid),
-                            from_wxid="" if is_sender else str_talker,
-                            to_wxid=str_talker if is_sender else "",
-                            conversation_id=str_talker or "",
-                            content=str(content or ""),
-                            msg_type=int(msg_type or 1),
-                            ts_ms=ts_ms,
-                            is_sender=bool(is_sender),
-                        ))
-
-                    # 更新水位线
+                if is_legacy:
+                    db_key = db_path.name
                     with self._lock:
-                        self._watermarks[db_key] = max_rowid
-                    self._save_watermarks()
+                        last_rowid = self._watermarks.get(db_key, 0)
+                    bootstrap_mode = int(last_rowid or 0) <= 0
+                    rows = conn.execute(
+                        "SELECT rowid, MsgSvrID, StrTalker, IsSender, Type, "
+                        "StrContent, CreateTime FROM MSG "
+                        "WHERE rowid > ? ORDER BY rowid ASC",
+                        (last_rowid,),
+                    ).fetchall()
+                    if rows:
+                        max_rowid = last_rowid
+                        for row in rows:
+                            rowid, msg_svr_id, str_talker, is_sender, msg_type, content, create_time = row
+                            max_rowid = max(max_rowid, int(rowid or 0))
+                            if not bootstrap_mode:
+                                ts_ms = int(create_time) * 1000 if create_time else int(time.time() * 1000)
+                                new_messages.append(WxMessage(
+                                    msg_id=str(msg_svr_id or rowid),
+                                    from_wxid="" if is_sender else str(str_talker or ""),
+                                    to_wxid=str(str_talker or "") if is_sender else "",
+                                    conversation_id=str(str_talker or ""),
+                                    content=str(content or ""),
+                                    msg_type=int(msg_type or 1),
+                                    ts_ms=ts_ms,
+                                    is_sender=bool(is_sender),
+                                ))
+                        with self._lock:
+                            self._watermarks[db_key] = max_rowid
+                        self._save_watermarks()
+                else:
+                    shard_tables = [name for name in table_names if name.startswith("Msg_")]
+                    for table_name in shard_tables:
+                        watermark_key = f"{db_path.name}::{table_name}"
+                        with self._lock:
+                            last_local_id = int(self._watermarks.get(watermark_key, 0) or 0)
+                        bootstrap_mode = last_local_id <= 0
+                        rows = conn.execute(
+                            f"SELECT local_id, server_id, local_type, create_time, message_content, real_sender_id "
+                            f"FROM '{table_name}' WHERE local_id > ? ORDER BY local_id ASC",
+                            (last_local_id,),
+                        ).fetchall()
+                        if not rows:
+                            continue
 
+                        conversation_id = table_conv_map.get(table_name, "")
+                        if not conversation_id:
+                            logger.debug(
+                                "WxDbService: skip table without conversation mapping db=%s table=%s rows=%d",
+                                db_path.name,
+                                table_name,
+                                len(rows),
+                            )
+                            max_local_id = max(int(last_local_id), max(int(row[0] or 0) for row in rows))
+                            with self._lock:
+                                self._watermarks[watermark_key] = max_local_id
+                            self._save_watermarks()
+                            continue
+
+                        max_local_id = last_local_id
+                        for row in rows:
+                            local_id, server_id, local_type, create_time, message_content, real_sender_id = row
+                            local_id_int = int(local_id or 0)
+                            max_local_id = max(max_local_id, local_id_int)
+                            sender_name = sender_name_map.get(int(real_sender_id or 0), "")
+                            if not bootstrap_mode:
+                                ts_ms = int(create_time) * 1000 if create_time else int(time.time() * 1000)
+                                text = self._normalize_message_content(message_content)
+                                is_sender = bool(self_wxid and sender_name and sender_name == self_wxid)
+                                new_messages.append(WxMessage(
+                                    msg_id=str(server_id or f"{table_name}:{local_id_int}"),
+                                    from_wxid=sender_name,
+                                    to_wxid=conversation_id if is_sender else "",
+                                    conversation_id=conversation_id,
+                                    content=text,
+                                    msg_type=int(local_type or 1),
+                                    ts_ms=ts_ms,
+                                    is_sender=is_sender,
+                                ))
+
+                        with self._lock:
+                            self._watermarks[watermark_key] = max_local_id
+                        self._save_watermarks()
+                conn.close()
             except Exception as exc:
                 logger.warning("WxDbService: 增量轮询 %s 失败: %s", db_path.name, exc)
 
@@ -294,8 +420,8 @@ class WxDbService:
         Returns:
             WxMoment 列表（按时间降序）
         """
-        db_path = self._dir / self._SNS_DB
-        if not db_path.exists():
+        db_path = self._resolve_existing_db(self._SNS_DB_CANDIDATES)
+        if db_path is None:
             logger.warning("WxDbService: 朋友圈数据库不存在: %s", db_path)
             return []
 
@@ -330,16 +456,31 @@ class WxDbService:
     def stats(self) -> dict[str, Any]:
         """返回数据库统计信息。"""
         msg_dbs = self._find_message_dbs()
-        contact_db = self._dir / self._CONTACT_DB
-        sns_db = self._dir / self._SNS_DB
+        contact_db = self._resolve_existing_db(self._CONTACT_DB_CANDIDATES)
+        sns_db = self._resolve_existing_db(self._SNS_DB_CANDIDATES)
 
         return {
             "decrypt_output_dir": str(self._dir),
-            "contact_db_exists": contact_db.exists(),
-            "sns_db_exists": sns_db.exists(),
+            "contact_db_exists": contact_db is not None,
+            "sns_db_exists": sns_db is not None,
             "message_db_count": len(msg_dbs),
             "message_dbs": [db.name for db in msg_dbs],
             "watermarks": dict(self._watermarks),
+        }
+
+    @staticmethod
+    def _wx_message_to_dict(msg: WxMessage) -> dict[str, Any]:
+        return {
+            "msg_id": msg.msg_id,
+            "from_wxid": msg.from_wxid,
+            "to_wxid": msg.to_wxid,
+            "conversation_id": msg.conversation_id,
+            "content": msg.content,
+            "msg_type": msg.msg_type,
+            "ts_ms": msg.ts_ms,
+            "is_sender": msg.is_sender,
+            "media_url": msg.media_url,
+            "raw": msg.raw,
         }
 
     # ------------------------------------------------------------------
@@ -352,8 +493,15 @@ class WxDbService:
             return []
         return sorted(
             p for p in self._dir.iterdir()
-            if p.name.startswith(self._MSG_DB_PATTERN) and p.suffix == ".db"
+            if p.suffix == ".db" and bool(self._MSG_DB_REGEX.match(p.name))
         )
+
+    def _resolve_existing_db(self, candidates: tuple[str, ...]) -> Path | None:
+        for name in candidates:
+            path = self._dir / name
+            if path.exists():
+                return path
+        return None
 
     @staticmethod
     def _open_db(db_path: Path) -> sqlite3.Connection:
@@ -361,6 +509,116 @@ class WxDbService:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _list_message_tables(conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+
+    @staticmethod
+    def _quote_ident(name: str) -> str:
+        return '"' + str(name or "").replace('"', '""') + '"'
+
+    @staticmethod
+    def _pick_first_column(columns: set[str], *candidates: str) -> str | None:
+        lowered = {c.lower() for c in columns}
+        for candidate in candidates:
+            if candidate.lower() in lowered:
+                for raw in columns:
+                    if raw.lower() == candidate.lower():
+                        return raw
+        return None
+
+    @staticmethod
+    def _column_or_empty_expr(column: str | None) -> str:
+        if not column:
+            return "''"
+        return WxDbService._quote_ident(column)
+
+    @staticmethod
+    def _load_table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(
+            f"PRAGMA table_info({WxDbService._quote_ident(table_name)})"
+        ).fetchall()
+        result: set[str] = set()
+        for row in rows:
+            if len(row) > 1:
+                result.add(str(row[1]))
+        return result
+
+    @staticmethod
+    def _resolve_contact_table(conn: sqlite3.Connection) -> str | None:
+        tables = WxDbService._list_message_tables(conn)
+        if "Contact" in tables:
+            return "Contact"
+        if "contact" in tables:
+            return "contact"
+        return None
+
+    def _load_msg_table_conversation_map(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        session_db = self._resolve_existing_db(self._SESSION_DB_CANDIDATES)
+        if session_db is None:
+            return mapping
+        try:
+            conn = self._open_db(session_db)
+            rows = conn.execute(
+                "SELECT username FROM SessionTable WHERE username IS NOT NULL AND username != ''"
+            ).fetchall()
+            conn.close()
+        except Exception:
+            return mapping
+        for row in rows:
+            username = str(row[0] or "").strip()
+            if not username:
+                continue
+            digest = hashlib.md5(username.encode("utf-8")).hexdigest()
+            mapping[f"Msg_{digest}"] = username
+        return mapping
+
+    def _load_name2id_map(self) -> dict[int, str]:
+        mapping: dict[int, str] = {}
+        session_db = self._resolve_existing_db(self._SESSION_DB_CANDIDATES)
+        if session_db is None:
+            return mapping
+        try:
+            conn = self._open_db(session_db)
+            rows = conn.execute(
+                "SELECT rowid, user_name FROM Name2Id"
+            ).fetchall()
+            conn.close()
+        except Exception:
+            return mapping
+        for row in rows:
+            try:
+                key = int(row[0])
+            except Exception:
+                continue
+            mapping[key] = str(row[1] or "")
+        return mapping
+
+    @staticmethod
+    def _normalize_message_content(raw: Any) -> str:
+        if raw is None:
+            return ""
+        if isinstance(raw, bytes):
+            for enc in ("utf-8", "utf-16-le", "gb18030", "latin1"):
+                try:
+                    text = raw.decode(enc, errors="ignore").strip()
+                    if text:
+                        return text
+                except Exception:
+                    continue
+            return ""
+        return str(raw).strip()
+
+    def _infer_self_wxid(self) -> str | None:
+        folder_name = self._dir.parent.name
+        if folder_name.startswith("wxid_"):
+            return folder_name.split("_e", 1)[0]
+        return None
 
     def _query_messages_from_db(
         self,
@@ -372,55 +630,106 @@ class WxDbService:
         after_ts_ms: int | None,
         keyword: str | None,
         msg_types: list[int] | None,
+        table_conv_map: dict[str, str],
+        sender_name_map: dict[int, str],
     ) -> list[WxMessage]:
         """从单个消息数据库查询消息。"""
         conn = self._open_db(db_path)
         try:
-            conditions: list[str] = []
-            params: list[Any] = []
+            table_names = self._list_message_tables(conn)
+            self_wxid = self._infer_self_wxid()
 
-            if conversation_id:
-                conditions.append("StrTalker = ?")
-                params.append(conversation_id)
-            if before_ts_ms:
-                conditions.append("CreateTime < ?")
-                params.append(before_ts_ms // 1000)
-            if after_ts_ms:
-                conditions.append("CreateTime > ?")
-                params.append(after_ts_ms // 1000)
-            if keyword:
-                conditions.append("StrContent LIKE ?")
-                params.append(f"%{keyword}%")
-            if msg_types:
-                placeholders = ",".join("?" * len(msg_types))
-                conditions.append(f"Type IN ({placeholders})")
-                params.extend(msg_types)
+            if "MSG" in table_names:
+                conditions: list[str] = []
+                params: list[Any] = []
 
-            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            params.append(limit)
+                if conversation_id:
+                    conditions.append("StrTalker = ?")
+                    params.append(conversation_id)
+                if before_ts_ms:
+                    conditions.append("CreateTime < ?")
+                    params.append(before_ts_ms // 1000)
+                if after_ts_ms:
+                    conditions.append("CreateTime > ?")
+                    params.append(after_ts_ms // 1000)
+                if keyword:
+                    conditions.append("StrContent LIKE ?")
+                    params.append(f"%{keyword}%")
+                if msg_types:
+                    placeholders = ",".join("?" * len(msg_types))
+                    conditions.append(f"Type IN ({placeholders})")
+                    params.extend(msg_types)
 
-            rows = conn.execute(
-                f"SELECT MsgSvrID, StrTalker, IsSender, Type, StrContent, CreateTime "
-                f"FROM MSG {where} ORDER BY CreateTime DESC LIMIT ?",
-                params,
-            ).fetchall()
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                params.append(limit)
+                rows = conn.execute(
+                    f"SELECT MsgSvrID, StrTalker, IsSender, Type, StrContent, CreateTime "
+                    f"FROM MSG {where} ORDER BY CreateTime DESC LIMIT ?",
+                    params,
+                ).fetchall()
+                messages: list[WxMessage] = []
+                for row in rows:
+                    msg_svr_id, str_talker, is_sender, msg_type, content, create_time = (
+                        row[0], row[1], row[2], row[3], row[4], row[5]
+                    )
+                    ts_ms = int(create_time) * 1000 if create_time else 0
+                    messages.append(WxMessage(
+                        msg_id=str(msg_svr_id or ""),
+                        from_wxid="" if is_sender else str(str_talker or ""),
+                        to_wxid=str(str_talker or "") if is_sender else "",
+                        conversation_id=str(str_talker or ""),
+                        content=str(content or ""),
+                        msg_type=int(msg_type or 1),
+                        ts_ms=ts_ms,
+                        is_sender=bool(is_sender),
+                    ))
+                return messages
 
             messages: list[WxMessage] = []
-            for row in rows:
-                msg_svr_id, str_talker, is_sender, msg_type, content, create_time = (
-                    row[0], row[1], row[2], row[3], row[4], row[5]
-                )
-                ts_ms = int(create_time) * 1000 if create_time else 0
-                messages.append(WxMessage(
-                    msg_id=str(msg_svr_id or ""),
-                    from_wxid="" if is_sender else str_talker,
-                    to_wxid=str_talker if is_sender else "",
-                    conversation_id=str_talker or "",
-                    content=str(content or ""),
-                    msg_type=int(msg_type or 1),
-                    ts_ms=ts_ms,
-                    is_sender=bool(is_sender),
-                ))
+            shard_tables = [name for name in table_names if name.startswith("Msg_")]
+            for table_name in shard_tables:
+                conv_id = table_conv_map.get(table_name, "")
+                if conversation_id and conv_id != conversation_id:
+                    continue
+
+                conditions: list[str] = []
+                params: list[Any] = []
+                if before_ts_ms:
+                    conditions.append("create_time < ?")
+                    params.append(before_ts_ms // 1000)
+                if after_ts_ms:
+                    conditions.append("create_time > ?")
+                    params.append(after_ts_ms // 1000)
+                if keyword:
+                    conditions.append("message_content LIKE ?")
+                    params.append(f"%{keyword}%")
+                if msg_types:
+                    placeholders = ",".join("?" * len(msg_types))
+                    conditions.append(f"local_type IN ({placeholders})")
+                    params.extend(msg_types)
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                params.append(limit)
+
+                rows = conn.execute(
+                    f"SELECT local_id, server_id, local_type, create_time, message_content, real_sender_id "
+                    f"FROM '{table_name}' {where} ORDER BY create_time DESC LIMIT ?",
+                    params,
+                ).fetchall()
+                for row in rows:
+                    local_id, server_id, local_type, create_time, message_content, real_sender_id = row
+                    sender = sender_name_map.get(int(real_sender_id or 0), "")
+                    is_sender = bool(self_wxid and sender and sender == self_wxid)
+                    ts_ms = int(create_time) * 1000 if create_time else 0
+                    messages.append(WxMessage(
+                        msg_id=str(server_id or f"{table_name}:{int(local_id or 0)}"),
+                        from_wxid=sender,
+                        to_wxid=conv_id if is_sender else "",
+                        conversation_id=conv_id,
+                        content=self._normalize_message_content(message_content),
+                        msg_type=int(local_type or 1),
+                        ts_ms=ts_ms,
+                        is_sender=is_sender,
+                    ))
             return messages
         finally:
             conn.close()

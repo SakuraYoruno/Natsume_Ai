@@ -14,6 +14,8 @@ Outbound（发送）：
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from typing import Any
 
@@ -22,6 +24,24 @@ from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, Unifie
 from edge_client.services.wx_db_service import WxDbService, WxMessage
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wechat")
+
+_PLACEHOLDER_CONVERSATION_IDS: set[str] = {
+    "active_chat",
+    "active chat",
+    "current_chat",
+    "current chat",
+    "current_session",
+    "default",
+    "unknown",
+    "none",
+    "null",
+    "-",
+    "_",
+    "na",
+    "n/a",
+    "当前聊天",
+    "当前会话",
+}
 
 
 class WeChatAdapter(AbstractPlatformAdapter):
@@ -89,8 +109,20 @@ class WeChatAdapter(AbstractPlatformAdapter):
         Returns:
             UnifiedMessage，或 None（自己发的消息/系统消息等跳过）
         """
+        conversation_id = str(wx_msg.conversation_id or "").strip()
+        if self._is_placeholder_conversation_id(conversation_id):
+            self._stats["inbound_skipped"] += 1
+            logger.warning(
+                "WeChatAdapter: skip placeholder conversation msg_id=%s conversation=%s",
+                wx_msg.msg_id,
+                conversation_id,
+            )
+            return None
+
         # 跳过自己发出的消息
-        if wx_msg.is_sender:
+        if wx_msg.is_sender or (
+            bool(self._self_wxid) and str(wx_msg.from_wxid or "").strip() == str(self._self_wxid)
+        ):
             self._stats["inbound_skipped"] += 1
             return None
 
@@ -105,15 +137,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
             self._stats["inbound_skipped"] += 1
             return None
 
-        is_group = wx_msg.conversation_id.endswith("@chatroom")
+        is_group = conversation_id.endswith("@chatroom")
 
         self._stats["inbound_parsed"] += 1
         return UnifiedMessage(
             msg_id=wx_msg.msg_id,
             platform=Platform.WECHAT,
-            from_id=wx_msg.from_wxid or wx_msg.conversation_id,
+            from_id=wx_msg.from_wxid or conversation_id,
             to_id=wx_msg.to_wxid,
-            conversation_id=wx_msg.conversation_id,
+            conversation_id=conversation_id,
             msg_type=msg_type,
             content=wx_msg.content,
             ts_ms=wx_msg.ts_ms,
@@ -168,62 +200,608 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return False
 
         try:
-            app = Application(backend="uia").connect(title_re="微信")
-            main_wnd = app.window(title_re="微信")
+            app = Application(backend="uia")
+            try:
+                app.connect(path="Weixin.exe")
+            except Exception:
+                app.connect(title_re="微信")
+
+            main_wnd = self._resolve_main_window(app)
+            if main_wnd is None:
+                try:
+                    alt_app = Application(backend="uia").connect(title_re="微信")
+                    main_wnd = self._resolve_main_window(alt_app)
+                except Exception:
+                    main_wnd = None
+            if main_wnd is None:
+                main_wnd = self._resolve_desktop_wechat_window()
+            if main_wnd is None:
+                logger.error("WeChatAdapter: main window not found")
+                return False
+            try:
+                main_wnd.restore()
+            except Exception:
+                pass
+            try:
+                main_wnd.set_focus()
+            except Exception:
+                pass
+            time.sleep(0.15)
 
             # 确保聊天窗口已打开（通过搜索框定位联系人）
             if not self._ensure_chat_open(main_wnd, reply.conversation_id):
+                if not self._allow_active_chat_fallback():
+                    return False
+                logger.warning(
+                    "WeChatAdapter: _ensure_chat_open failed, fallback to active chat send conversation=%s",
+                    reply.conversation_id,
+                )
+            self._switch_to_chat_tab(main_wnd)
+
+            input_box = self._resolve_input_box(main_wnd)
+            if input_box is None:
+                self._log_window_snapshot(
+                    main_wnd,
+                    reason="input_not_found",
+                    conversation_id=reply.conversation_id,
+                )
+                logger.error(
+                    "WeChatAdapter: input box not found conversation=%s",
+                    reply.conversation_id,
+                )
                 return False
 
-            # 定位输入框（精确控件定位，不用截图猜坐标）
-            input_box = main_wnd.child_window(
-                control_type="Edit",
-                found_index=0,
-            )
-            input_box.set_focus()
-
             if reply.msg_type == MsgType.TEXT:
-                # 通过剪贴板粘贴（支持中文，避免 type_keys 编码问题）
                 self._set_clipboard_text(reply.content)
-                input_box.type_keys("^v")   # Ctrl+V
-                input_box.type_keys("{ENTER}")
-                return True
+                return self._paste_and_send(input_box, main_wnd)
 
             elif reply.msg_type == MsgType.IMAGE and reply.media_path:
-                # 图片通过剪贴板粘贴文件
                 self._set_clipboard_file(reply.media_path)
-                input_box.type_keys("^v")
-                input_box.type_keys("{ENTER}")
-                return True
+                return self._paste_and_send(input_box, main_wnd)
 
         except Exception as exc:
             logger.error("WeChatAdapter: pywinauto 操作失败: %s", exc)
 
         return False
 
+    def _resolve_main_window(self, app: Any) -> Any | None:
+        windows: list[Any] = []
+        try:
+            windows = list(app.windows())
+        except Exception:
+            windows = []
+
+        best_wnd = None
+        best_score = -1
+        for wnd in windows:
+            try:
+                if not wnd.is_visible():
+                    continue
+            except Exception:
+                pass
+            try:
+                rect = wnd.rectangle()
+                width = max(0, int(getattr(rect, "right", 0)) - int(getattr(rect, "left", 0)))
+                height = max(0, int(getattr(rect, "bottom", 0)) - int(getattr(rect, "top", 0)))
+            except Exception:
+                width = 0
+                height = 0
+            area = width * height
+            richness = self._window_richness(wnd)
+            if area <= 0 and richness <= 0:
+                continue
+            title = self._normalize_match_text(self._safe_item_name(wnd))
+            score = area + (richness * 5_000_000)
+            if title and any(token in title for token in ("微信", "weixin", "wechat")):
+                score += 2_000_000
+            if score > best_score:
+                best_score = score
+                best_wnd = wnd
+
+        if best_wnd is not None:
+            return best_wnd
+
+        try:
+            return app.top_window()
+        except Exception:
+            return None
+
+    def _resolve_desktop_wechat_window(self) -> Any | None:
+        try:
+            from pywinauto import Desktop
+            windows = list(Desktop(backend="uia").windows())
+        except Exception:
+            return None
+
+        best_wnd = None
+        best_score = -1
+        for wnd in windows:
+            title = self._normalize_match_text(self._safe_item_name(wnd))
+            class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
+            class_norm = self._normalize_match_text(class_name)
+            richness = self._window_richness(wnd)
+            if (
+                not any(token in title for token in ("微信", "weixin", "wechat"))
+                and "qt" not in class_norm
+                and "weixin" not in class_norm
+                and richness <= 0
+            ):
+                continue
+            try:
+                rect = wnd.rectangle()
+                width = max(0, int(getattr(rect, "right", 0)) - int(getattr(rect, "left", 0)))
+                height = max(0, int(getattr(rect, "bottom", 0)) - int(getattr(rect, "top", 0)))
+            except Exception:
+                width = 0
+                height = 0
+            score = (width * height) + (richness * 5_000_000)
+            if title and any(token in title for token in ("微信", "weixin", "wechat")):
+                score += 2_000_000
+            if score > best_score:
+                best_score = score
+                best_wnd = wnd
+        return best_wnd
+
+    @staticmethod
+    def _window_richness(wnd: Any) -> int:
+        total = 0
+        for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Text"):
+            try:
+                total += min(200, len(list(wnd.descendants(control_type=control_type))))
+            except Exception:
+                continue
+        return total
+
     def _ensure_chat_open(self, main_wnd: Any, conversation_id: str) -> bool:
         """确保指定会话的聊天窗口已打开。"""
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            logger.warning("WeChatAdapter: empty conversation_id, abort send")
+            return False
+
+        candidates = self._build_search_candidates(conversation_id)
+        if not candidates:
+            logger.warning("WeChatAdapter: no search candidates for conversation=%s", conversation_id)
+            return False
+
         try:
-            search_box = main_wnd.child_window(
-                auto_id="Search",
-                control_type="Edit",
+            self._switch_to_chat_tab(main_wnd)
+            search_box = self._resolve_search_box(main_wnd)
+            if search_box is None:
+                logger.warning(
+                    "WeChatAdapter: search box not found, fallback to chat-list scan, conversation=%s",
+                    conversation_id,
+                )
+                return self._select_chat_from_chat_list(main_wnd, candidates, conversation_id)
+            for keyword in candidates:
+                self._clear_and_fill_search(search_box, keyword)
+                time.sleep(0.45)
+                matched = self._find_matched_result_item(main_wnd, candidates)
+                if matched is None:
+                    continue
+                result_item, matched_name = matched
+                result_item.click_input()
+                time.sleep(0.25)
+                logger.info(
+                    "WeChatAdapter: chat selected conversation=%s keyword=%s matched=%s",
+                    conversation_id,
+                    keyword,
+                    matched_name,
+                )
+                return True
+            logger.warning(
+                "WeChatAdapter: chat open aborted, no matched search result conversation=%s candidates=%s",
+                conversation_id,
+                candidates,
             )
-            search_box.set_focus()
-            search_box.set_text("")
-            search_box.type_keys(conversation_id, with_spaces=True)
-
-            # 等待搜索结果
-            import time as _time
-            _time.sleep(0.5)
-
-            result = main_wnd.child_window(control_type="ListItem")
-            result.wait("visible", timeout=3)
-            result.click_input()
-            _time.sleep(0.3)
-            return True
+            return False
         except Exception as exc:
             logger.warning("WeChatAdapter: 打开聊天窗口失败 %s: %s", conversation_id, exc)
             return False
+
+    def _resolve_search_box(self, main_wnd: Any) -> Any | None:
+        probes: list[dict[str, Any]] = [
+            {"auto_id": "Search", "control_type": "Edit"},
+            {"title_re": ".*(搜索|Search).*", "control_type": "Edit"},
+            {"name_re": ".*(搜索|Search).*", "control_type": "Edit"},
+        ]
+        for probe in probes:
+            try:
+                ctrl = main_wnd.child_window(**probe)
+                if ctrl.exists(timeout=0.4):
+                    return ctrl
+            except Exception:
+                continue
+
+        try:
+            main_wnd.set_focus()
+            main_wnd.type_keys("^f")
+            time.sleep(0.2)
+            for probe in probes:
+                try:
+                    ctrl = main_wnd.child_window(**probe)
+                    if ctrl.exists(timeout=0.3):
+                        return ctrl
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        try:
+            edits = list(main_wnd.descendants(control_type="Edit"))
+        except Exception:
+            edits = []
+        for edit in edits[:12]:
+            name = self._safe_item_name(edit)
+            if re.search(r"(搜索|search)", name, re.IGNORECASE):
+                return edit
+        return None
+
+    def _switch_to_chat_tab(self, main_wnd: Any) -> bool:
+        names = ("聊天", "会话", "Chats", "Chat")
+        controls = ("TabItem", "Button", "ListItem")
+        for control_type in controls:
+            for name in names:
+                try:
+                    ctrl = main_wnd.child_window(title=name, control_type=control_type)
+                    if ctrl.exists(timeout=0.2):
+                        ctrl.click_input()
+                        time.sleep(0.15)
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    def _select_chat_from_chat_list(
+        self,
+        main_wnd: Any,
+        candidates: list[str],
+        conversation_id: str,
+    ) -> bool:
+        normalized_candidates = []
+        for item in candidates:
+            text = self._normalize_match_text(item)
+            if text:
+                normalized_candidates.append(text)
+        if not normalized_candidates:
+            return False
+
+        try:
+            wnd_rect = main_wnd.rectangle()
+            left_bound = int(getattr(wnd_rect, "left", 0))
+            right_bound = int(getattr(wnd_rect, "right", 0))
+            left_panel_max_x = left_bound + int((right_bound - left_bound) * 0.46)
+        except Exception:
+            left_panel_max_x = 999999
+
+        best_item = None
+        best_name = ""
+        best_score = -1
+        try:
+            list_items = list(main_wnd.descendants(control_type="ListItem"))
+        except Exception:
+            list_items = []
+        for item in list_items[:160]:
+            try:
+                rect = item.rectangle()
+                if int(getattr(rect, "left", 0)) > left_panel_max_x:
+                    continue
+            except Exception:
+                pass
+            name = self._safe_item_name(item)
+            normalized_name = self._normalize_match_text(name)
+            if not normalized_name:
+                continue
+            score = -1
+            for candidate in normalized_candidates:
+                if normalized_name == candidate:
+                    score = max(score, 3)
+                elif len(candidate) >= 2 and (
+                    candidate in normalized_name or normalized_name in candidate
+                ):
+                    score = max(score, 2)
+            if score > best_score:
+                best_score = score
+                best_item = item
+                best_name = name
+                if best_score >= 3:
+                    break
+
+        if best_item is None or best_score < 2:
+            logger.warning(
+                "WeChatAdapter: chat-list fallback not matched conversation=%s candidates=%s",
+                conversation_id,
+                candidates,
+            )
+            return False
+        try:
+            best_item.click_input()
+            time.sleep(0.25)
+            logger.info(
+                "WeChatAdapter: chat selected via list fallback conversation=%s matched=%s score=%d",
+                conversation_id,
+                best_name,
+                best_score,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "WeChatAdapter: chat-list fallback click failed conversation=%s matched=%s err=%s",
+                conversation_id,
+                best_name,
+                exc,
+            )
+            return False
+
+    def _build_search_candidates(self, conversation_id: str) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+
+        def _add(raw: str | None) -> None:
+            text = str(raw or "").strip()
+            if not text:
+                return
+            key = text.casefold()
+            if key in seen:
+                return
+            seen.add(key)
+            values.append(text)
+
+        _add(conversation_id)
+        try:
+            contact = self._svc.get_contact(conversation_id)
+        except Exception:
+            contact = None
+        if contact is None and not self._is_safe_conversation_ref(conversation_id):
+            logger.warning(
+                "WeChatAdapter: unsafe conversation_id without contact mapping, skip send conversation=%s",
+                conversation_id,
+            )
+            return []
+        if contact is not None:
+            _add(contact.remark)
+            _add(contact.nickname)
+            _add(contact.alias)
+            _add(contact.wxid)
+        return values
+
+    @staticmethod
+    def _is_safe_conversation_ref(conversation_id: str) -> bool:
+        value = str(conversation_id or "").strip()
+        if not value:
+            return False
+        if WeChatAdapter._is_placeholder_conversation_id(value):
+            return False
+        if value in {
+            "filehelper",
+            "weixin",
+            "newsapp",
+            "notification_messages",
+            "opencustomerservicemsg",
+            "@opencustomerservicemsg",
+        }:
+            return True
+        if value.startswith(("wxid_", "gh_")):
+            return True
+        if value.endswith(("@chatroom", "@openim", "@kefu.openim")):
+            return True
+        return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,63}", value))
+
+    @staticmethod
+    def _is_placeholder_conversation_id(value: str) -> bool:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return True
+        return normalized in _PLACEHOLDER_CONVERSATION_IDS
+
+    @staticmethod
+    def _clear_and_fill_search(search_box: Any, keyword: str) -> None:
+        search_box.set_focus()
+        search_box.type_keys("^a{BACKSPACE}")
+        if keyword:
+            WeChatAdapter._set_clipboard_text(keyword)
+            search_box.type_keys("^v")
+
+    def _find_matched_result_item(
+        self,
+        main_wnd: Any,
+        candidates: list[str],
+    ) -> tuple[Any, str] | None:
+        normalized_candidates = []
+        for item in candidates:
+            normalized = self._normalize_match_text(item)
+            if normalized:
+                normalized_candidates.append(normalized)
+        if not normalized_candidates:
+            return None
+
+        try:
+            result_items = list(main_wnd.descendants(control_type="ListItem"))
+        except Exception:
+            result_items = []
+        for item in result_items[:30]:
+            name = self._safe_item_name(item)
+            normalized_name = self._normalize_match_text(name)
+            if not normalized_name:
+                continue
+            for candidate in normalized_candidates:
+                if len(candidate) < 2:
+                    if normalized_name == candidate:
+                        return item, name
+                    continue
+                if (
+                    normalized_name == candidate
+                    or candidate in normalized_name
+                    or normalized_name in candidate
+                ):
+                    return item, name
+        return None
+
+    @staticmethod
+    def _safe_item_name(item: Any) -> str:
+        try:
+            name = str(item.window_text() or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        try:
+            name = str(getattr(getattr(item, "element_info", None), "name", "") or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _normalize_match_text(text: str) -> str:
+        return str(text or "").strip().replace(" ", "").replace("\u3000", "").casefold()
+
+    def _resolve_input_box(self, main_wnd: Any) -> Any | None:
+        probes: list[dict[str, Any]] = [
+            {"auto_id": "ChatInput", "control_type": "Edit"},
+            {"title_re": ".*(输入|消息|Message|message|Input|input).*", "control_type": "Edit"},
+            {"name_re": ".*(输入|消息|Message|message|Input|input).*", "control_type": "Edit"},
+        ]
+        for probe in probes:
+            try:
+                ctrl = main_wnd.child_window(**probe)
+                if ctrl.exists(timeout=0.25):
+                    return ctrl
+            except Exception:
+                continue
+
+        for control_type in ("Edit", "Document"):
+            try:
+                controls = list(main_wnd.descendants(control_type=control_type))
+            except Exception:
+                controls = []
+            picked = self._pick_input_control(main_wnd, controls)
+            if picked is not None:
+                return picked
+        return None
+
+    def _pick_input_control(self, main_wnd: Any, controls: list[Any]) -> Any | None:
+        try:
+            wnd_rect = main_wnd.rectangle()
+            wnd_left = int(getattr(wnd_rect, "left", 0))
+            wnd_top = int(getattr(wnd_rect, "top", 0))
+            wnd_width = int(getattr(wnd_rect, "right", 0)) - wnd_left
+            wnd_height = int(getattr(wnd_rect, "bottom", 0)) - wnd_top
+        except Exception:
+            wnd_left = 0
+            wnd_top = 0
+            wnd_width = 0
+            wnd_height = 0
+
+        best_ctrl = None
+        best_score = -999
+        for ctrl in controls[:160]:
+            try:
+                rect = ctrl.rectangle()
+                left = int(getattr(rect, "left", 0))
+                top = int(getattr(rect, "top", 0))
+                right = int(getattr(rect, "right", 0))
+                bottom = int(getattr(rect, "bottom", 0))
+            except Exception:
+                continue
+            width = max(0, right - left)
+            height = max(0, bottom - top)
+            if width < 120 or height < 16:
+                continue
+
+            score = 0
+            if wnd_width > 0 and left >= wnd_left + int(wnd_width * 0.18):
+                score += 1
+            if wnd_height > 0 and top >= wnd_top + int(wnd_height * 0.40):
+                score += 2
+            if width >= 260:
+                score += 1
+
+            name = self._normalize_match_text(self._safe_item_name(ctrl))
+            if name:
+                if "search" in name:
+                    score -= 4
+                if any(token in name for token in ("input", "message", "chat", "send")):
+                    score += 1
+
+            if score > best_score:
+                best_score = score
+                best_ctrl = ctrl
+
+        if best_ctrl is None or best_score < 2:
+            return None
+        return best_ctrl
+
+    def _paste_and_send(self, input_box: Any, main_wnd: Any) -> bool:
+        targets = [("input", input_box), ("window", main_wnd)]
+        last_exc: Exception | None = None
+        for label, target in targets:
+            try:
+                try:
+                    target.set_focus()
+                except Exception:
+                    pass
+                target.type_keys("^v")
+                time.sleep(0.05)
+                target.type_keys("{ENTER}")
+                return True
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("WeChatAdapter: paste/send failed target=%s err=%s", label, exc)
+                continue
+        if last_exc is not None:
+            logger.error("WeChatAdapter: paste/send failed all targets err=%s", last_exc)
+        return False
+
+    def _log_window_snapshot(self, main_wnd: Any, *, reason: str, conversation_id: str) -> None:
+        try:
+            title = self._safe_item_name(main_wnd)
+            class_name = str(getattr(getattr(main_wnd, "element_info", None), "class_name", "") or "")
+            try:
+                rect = main_wnd.rectangle()
+                rect_text = (
+                    int(getattr(rect, "left", 0)),
+                    int(getattr(rect, "top", 0)),
+                    int(getattr(rect, "right", 0)),
+                    int(getattr(rect, "bottom", 0)),
+                )
+            except Exception:
+                rect_text = ()
+            counts: dict[str, int] = {}
+            for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Pane", "Text"):
+                try:
+                    counts[control_type] = len(list(main_wnd.descendants(control_type=control_type)))
+                except Exception:
+                    counts[control_type] = -1
+
+            sample: list[str] = []
+            try:
+                descendants = list(main_wnd.descendants())
+            except Exception:
+                descendants = []
+            for item in descendants[:28]:
+                name = self._safe_item_name(item)
+                control_type = str(
+                    getattr(getattr(item, "element_info", None), "control_type", "") or ""
+                ).strip()
+                if not name and not control_type:
+                    continue
+                piece = f"{control_type}:{name}"[:96]
+                sample.append(piece)
+
+            logger.warning(
+                "WeChatAdapter: window snapshot reason=%s conversation=%s title=%s class=%s rect=%s counts=%s sample=%s",
+                reason,
+                conversation_id,
+                title,
+                class_name,
+                rect_text,
+                counts,
+                sample,
+            )
+        except Exception as exc:
+            logger.warning("WeChatAdapter: window snapshot failed reason=%s err=%s", reason, exc)
 
     @staticmethod
     def _set_clipboard_text(text: str) -> None:
@@ -307,6 +885,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
     # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _allow_active_chat_fallback() -> bool:
+        raw = str(os.environ.get("EDGE_WECHAT_SEND_FALLBACK_ACTIVE_CHAT", "") or "").strip().lower()
+        if not raw:
+            return False
+        return raw in {"1", "true", "yes", "on"}
 
     def health(self) -> dict[str, Any]:
         """返回适配器健康状态。"""

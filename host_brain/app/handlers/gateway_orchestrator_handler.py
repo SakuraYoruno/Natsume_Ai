@@ -62,6 +62,46 @@ def _parse_bool(val: Any, *, default: bool = False) -> bool:
     return default
 
 
+_BRIEF_REPLY_TOKENS: tuple[str, ...] = (
+    "简短",
+    "简洁",
+    "短一点",
+    "一句",
+    "一两句",
+    "简要",
+    "brief",
+    "short",
+    "one sentence",
+)
+
+
+def _user_requested_brief_reply(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    return any(token in normalized for token in _BRIEF_REPLY_TOKENS)
+
+
+def _augment_gateway_prompt_for_reply_depth(*, prompt_text: str, user_message: str) -> str:
+    if not _parse_bool_env("HOST_GATEWAY_DETAIL_REPLY_ENABLED", default=True):
+        return prompt_text
+    if _user_requested_brief_reply(user_message):
+        depth_policy = (
+            "GATEWAY_REPLY_DEPTH_POLICY:\n"
+            "- The user requested a brief answer.\n"
+            "- Keep the visible reply concise (1-2 short sentences), but still answer directly.\n"
+        )
+    else:
+        depth_policy = (
+            "GATEWAY_REPLY_DEPTH_POLICY:\n"
+            "- Answer directly first, then provide concise supporting detail.\n"
+            "- Default to 2-4 short sentences for normal chat; avoid one-line shallow replies.\n"
+            "- If evidence is insufficient, state uncertainty and give one clear next step.\n"
+            "- Avoid generic filler and repetitive greetings.\n"
+        )
+    return f"{prompt_text}\n\n{depth_policy}\n"
+
+
 # ---------------------------------------------------------------------------
 # 回复内容简单情感推断（与 chat_stream_handler 保持一致）
 # ---------------------------------------------------------------------------
@@ -699,6 +739,11 @@ async def gateway_orchestrator_sse_generator(
             prompt_context_observability = dict(prompt_meta.get("prompt_context_observability") or {})
     else:
         prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
+
+    prompt_text = _augment_gateway_prompt_for_reply_depth(
+        prompt_text=prompt_text,
+        user_message=resolved_message,
+    )
 
     # ── 3e-2. 情感参数注入（adjust_gen_params_for_emotion）──
     # 根据情感状态动态调整 temperature/top_p 等 LLM 生成参数

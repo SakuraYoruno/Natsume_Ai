@@ -51,6 +51,7 @@ EDGE_FIELD_TO_ENV_KEY = {
     # Unified Message Gateway
     "gateway_enabled": "EDGE_GATEWAY_ENABLED",
     "gateway_port": "EDGE_GATEWAY_PORT",
+    "gateway_platforms": "EDGE_GATEWAY_PLATFORMS",
     "wx_self_wxid": "WECHAT_SELF_WXID",
     "wx_db_storage_dir": "WECHAT_DB_STORAGE_DIR",
     "wx_decrypt_output_dir": "WECHAT_DECRYPT_OUTPUT_DIR",
@@ -59,6 +60,15 @@ EDGE_FIELD_TO_ENV_KEY = {
     "wx_decrypt_refresh_interval_s": "WECHAT_DECRYPT_REFRESH_INTERVAL_S",
     "qq_onebot_api_base": "QQ_ONEBOT_API_BASE",
     "qq_self_id": "QQ_SELF_ID",
+    "feishu_app_id": "FEISHU_APP_ID",
+    "feishu_app_secret": "FEISHU_APP_SECRET",
+    "feishu_encrypt_key": "FEISHU_ENCRYPT_KEY",
+    "feishu_verification_token": "FEISHU_VERIFICATION_TOKEN",
+    "wecom_corp_id": "WECOM_CORP_ID",
+    "wecom_corp_secret": "WECOM_CORP_SECRET",
+    "wecom_agent_id": "WECOM_AGENT_ID",
+    "wecom_token": "WECOM_TOKEN",
+    "wecom_encoding_aes_key": "WECOM_ENCODING_AES_KEY",
     # VLM 视觉定位
     "vlm_enabled": "EDGE_VLM_ENABLED",
     "vlm_model": "EDGE_VLM_MODEL",
@@ -99,6 +109,7 @@ class EdgeConfig:
     # Unified Message Gateway
     gateway_enabled: bool = True
     gateway_port: int = 19000
+    gateway_platforms: tuple[str, ...] = ("wechat", "qq")
     wx_self_wxid: str | None = None
     wx_db_storage_dir: str | None = None
     wx_decrypt_output_dir: str | None = None
@@ -107,6 +118,15 @@ class EdgeConfig:
     wx_decrypt_refresh_interval_s: int = 3600
     qq_onebot_api_base: str | None = None
     qq_self_id: str | None = None
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_encrypt_key: str | None = None
+    feishu_verification_token: str | None = None
+    wecom_corp_id: str | None = None
+    wecom_corp_secret: str | None = None
+    wecom_agent_id: str | None = None
+    wecom_token: str | None = None
+    wecom_encoding_aes_key: str | None = None
     # VLM 视觉定位
     vlm_enabled: bool = False
     vlm_model: str = "qwen2.5vl:7b"
@@ -137,6 +157,7 @@ class EdgeConfig:
             # Unified Message Gateway
             "gateway_enabled": self.gateway_enabled,
             "gateway_port": self.gateway_port,
+            "gateway_platforms": list(self.gateway_platforms),
             "wx_self_wxid": self.wx_self_wxid,
             "wx_db_storage_dir": self.wx_db_storage_dir,
             "wx_decrypt_output_dir": self.wx_decrypt_output_dir,
@@ -145,6 +166,15 @@ class EdgeConfig:
             "wx_decrypt_refresh_interval_s": self.wx_decrypt_refresh_interval_s,
             "qq_onebot_api_base": self.qq_onebot_api_base,
             "qq_self_id": self.qq_self_id,
+            "feishu_app_id": self.feishu_app_id,
+            "feishu_app_secret": bool(self.feishu_app_secret),
+            "feishu_encrypt_key": bool(self.feishu_encrypt_key),
+            "feishu_verification_token": bool(self.feishu_verification_token),
+            "wecom_corp_id": self.wecom_corp_id,
+            "wecom_corp_secret": bool(self.wecom_corp_secret),
+            "wecom_agent_id": self.wecom_agent_id,
+            "wecom_token": bool(self.wecom_token),
+            "wecom_encoding_aes_key": bool(self.wecom_encoding_aes_key),
             # VLM 视觉定位
             "vlm_enabled": self.vlm_enabled,
             "vlm_model": self.vlm_model,
@@ -339,6 +369,19 @@ def load_edge_config(
         max_value=65535,
         issues=issues,
     )
+    gateway_platforms_raw = _as_text(
+        _env_get(env_lookup, "EDGE_GATEWAY_PLATFORMS"),
+        "wechat,qq",
+    )
+    parsed_gateway_platforms: list[str] = []
+    for piece in gateway_platforms_raw.split(","):
+        platform_val = str(piece or "").strip().lower()
+        if not platform_val:
+            continue
+        if platform_val in {"wechat", "qq", "feishu", "wecom"} and platform_val not in parsed_gateway_platforms:
+            parsed_gateway_platforms.append(platform_val)
+    if not parsed_gateway_platforms:
+        parsed_gateway_platforms = ["wechat", "qq"]
     wx_self_wxid = _as_optional_text(_env_get(env_lookup, "WECHAT_SELF_WXID"))
     wx_db_storage_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DB_STORAGE_DIR"))
     wx_decrypt_output_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DECRYPT_OUTPUT_DIR"))
@@ -358,6 +401,15 @@ def load_edge_config(
     )
     qq_onebot_api_base = _as_optional_text(_env_get(env_lookup, "QQ_ONEBOT_API_BASE"))
     qq_self_id = _as_optional_text(_env_get(env_lookup, "QQ_SELF_ID"))
+    feishu_app_id = _as_optional_text(_env_get(env_lookup, "FEISHU_APP_ID"))
+    feishu_app_secret = _as_optional_text(_env_get(env_lookup, "FEISHU_APP_SECRET"))
+    feishu_encrypt_key = _as_optional_text(_env_get(env_lookup, "FEISHU_ENCRYPT_KEY"))
+    feishu_verification_token = _as_optional_text(_env_get(env_lookup, "FEISHU_VERIFICATION_TOKEN"))
+    wecom_corp_id = _as_optional_text(_env_get(env_lookup, "WECOM_CORP_ID"))
+    wecom_corp_secret = _as_optional_text(_env_get(env_lookup, "WECOM_CORP_SECRET"))
+    wecom_agent_id = _as_optional_text(_env_get(env_lookup, "WECOM_AGENT_ID"))
+    wecom_token = _as_optional_text(_env_get(env_lookup, "WECOM_TOKEN"))
+    wecom_encoding_aes_key = _as_optional_text(_env_get(env_lookup, "WECOM_ENCODING_AES_KEY"))
 
     # VLM 视觉定位
     vlm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_VLM_ENABLED"), default=False)
@@ -408,6 +460,7 @@ def load_edge_config(
         # Unified Message Gateway
         gateway_enabled=bool(gateway_enabled),
         gateway_port=int(gateway_port),
+        gateway_platforms=tuple(parsed_gateway_platforms),
         wx_self_wxid=wx_self_wxid,
         wx_db_storage_dir=wx_db_storage_dir,
         wx_decrypt_output_dir=wx_decrypt_output_dir,
@@ -416,6 +469,15 @@ def load_edge_config(
         wx_decrypt_refresh_interval_s=int(wx_decrypt_refresh_interval_s),
         qq_onebot_api_base=qq_onebot_api_base,
         qq_self_id=qq_self_id,
+        feishu_app_id=feishu_app_id,
+        feishu_app_secret=feishu_app_secret,
+        feishu_encrypt_key=feishu_encrypt_key,
+        feishu_verification_token=feishu_verification_token,
+        wecom_corp_id=wecom_corp_id,
+        wecom_corp_secret=wecom_corp_secret,
+        wecom_agent_id=wecom_agent_id,
+        wecom_token=wecom_token,
+        wecom_encoding_aes_key=wecom_encoding_aes_key,
         # VLM 视觉定位
         vlm_enabled=bool(vlm_enabled),
         vlm_model=vlm_model,

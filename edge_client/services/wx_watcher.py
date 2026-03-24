@@ -1,18 +1,13 @@
-"""微信数据库变更监听器（watchdog 实现）。
+"""WeChat decrypted DB watcher.
 
-使用 watchdog 监听 db_storage 解密输出目录下 de_message_*.db 文件的写入事件，
-毫秒级触发增量消息读取，替代 5s 定时轮询。
-
-延迟：从 5s 降至 <100ms，且无 CPU 空转开销。
-
-依赖：pip install watchdog
+Uses watchdog when available; falls back to interval polling otherwise.
+This module must never fail Gateway startup when watcher bootstrap fails.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-import time
 from pathlib import Path
 from typing import Callable
 
@@ -20,18 +15,11 @@ from edge_client.services.wx_db_service import WxDbService, WxMessage
 
 logger = logging.getLogger("Natsume.edge.services.wx_watcher")
 
-# 新消息回调类型：接收 WxMessage 列表
 NewMessageCallback = Callable[[list[WxMessage]], None]
 
 
 class WxDbWatcher:
-    """监听微信数据库文件变更，触发增量消息读取。
-
-    Args:
-        wx_db_service: WxDbService 实例
-        on_new_messages: 新消息回调，接收 list[WxMessage]
-        poll_interval_s: watchdog 不可用时的降级轮询间隔（秒）
-    """
+    """Watch decrypted WeChat DB files and trigger incremental reads."""
 
     def __init__(
         self,
@@ -46,39 +34,46 @@ class WxDbWatcher:
         self._observer = None
         self._poll_thread: threading.Thread | None = None
         self._shutdown = threading.Event()
-        self._mode = "none"  # "watchdog" | "poll" | "none"
+        self._mode = "none"  # watchdog | poll | none
 
     def start(self) -> str:
-        """启动监听。优先使用 watchdog，降级到定时轮询。
-
-        Returns:
-            实际使用的模式："watchdog" 或 "poll"
-        """
-        decrypt_dir = self._svc._dir
+        """Start watching. Prefer watchdog, fallback to polling."""
+        decrypt_dir = Path(self._svc._dir)
         if not decrypt_dir.exists():
-            logger.warning("WxDbWatcher: 解密输出目录不存在: %s，延迟启动", decrypt_dir)
+            logger.warning(
+                "WxDbWatcher: decrypt output dir not found yet, fallback handling enabled: %s",
+                decrypt_dir,
+            )
 
-        # 尝试启动 watchdog
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
 
             svc = self._svc
             callback = self._on_new_messages
 
             class _Handler(FileSystemEventHandler):
-                def on_modified(self, event):
-                    if (
-                        not event.is_directory
-                        and "de_message_" in event.src_path
-                        and event.src_path.endswith(".db")
-                    ):
-                        try:
-                            new_msgs = svc.poll_new_messages()
-                            if new_msgs:
-                                callback(new_msgs)
-                        except Exception as exc:
-                            logger.warning("WxDbWatcher: 增量读取异常: %s", exc)
+                def on_modified(self, event):  # type: ignore[override]
+                    _on_event(event)
+
+                def on_created(self, event):  # type: ignore[override]
+                    _on_event(event)
+
+                def on_moved(self, event):  # type: ignore[override]
+                    _on_event(event)
+
+            def _on_event(event) -> None:
+                try:
+                    if getattr(event, "is_directory", False):
+                        return
+                    src_path = str(getattr(event, "src_path", "") or "")
+                    if "de_message_" not in src_path or not src_path.endswith(".db"):
+                        return
+                    new_msgs = svc.poll_new_messages()
+                    if new_msgs:
+                        callback(new_msgs)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("WxDbWatcher: incremental read failed: %s", exc)
 
             self._observer = Observer()
             self._observer.schedule(
@@ -88,17 +83,27 @@ class WxDbWatcher:
             )
             self._observer.start()
             self._mode = "watchdog"
-            logger.info("WxDbWatcher: watchdog 模式已启动，监听目录: %s", decrypt_dir)
-
+            logger.info("WxDbWatcher: started in watchdog mode, path=%s", decrypt_dir)
         except ImportError:
-            logger.warning("WxDbWatcher: watchdog 未安装，降级为 %.1fs 定时轮询", self._poll_interval_s)
+            logger.warning(
+                "WxDbWatcher: watchdog not installed, fallback to %.1fs polling",
+                self._poll_interval_s,
+            )
+            self._start_poll_fallback()
+            self._mode = "poll"
+        except Exception as exc:
+            logger.warning(
+                "WxDbWatcher: watchdog start failed, fallback to %.1fs polling: %s",
+                self._poll_interval_s,
+                exc,
+            )
             self._start_poll_fallback()
             self._mode = "poll"
 
         return self._mode
 
     def stop(self) -> None:
-        """停止监听。"""
+        """Stop watcher."""
         self._shutdown.set()
         if self._observer is not None:
             try:
@@ -109,11 +114,11 @@ class WxDbWatcher:
             self._observer = None
         if self._poll_thread is not None:
             self._poll_thread.join(timeout=5.0)
+            self._poll_thread = None
         self._mode = "none"
-        logger.info("WxDbWatcher: 已停止")
+        logger.info("WxDbWatcher: stopped")
 
     def _start_poll_fallback(self) -> None:
-        """启动降级定时轮询线程。"""
         self._shutdown.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop,
@@ -123,16 +128,14 @@ class WxDbWatcher:
         self._poll_thread.start()
 
     def _poll_loop(self) -> None:
-        """定时轮询循环（watchdog 不可用时的降级方案）。"""
         while not self._shutdown.wait(timeout=self._poll_interval_s):
             try:
                 new_msgs = self._svc.poll_new_messages()
                 if new_msgs:
                     self._on_new_messages(new_msgs)
             except Exception as exc:
-                logger.warning("WxDbWatcher: 轮询异常: %s", exc)
+                logger.warning("WxDbWatcher: polling failed: %s", exc)
 
     @property
     def mode(self) -> str:
-        """当前监听模式：'watchdog' | 'poll' | 'none'。"""
         return self._mode

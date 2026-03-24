@@ -32,6 +32,24 @@ _SENSITIVE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b\d{6}\b"),  # 6 位数字验证码（谨慎：可能误杀普通数字）
 ]
 
+_PLACEHOLDER_CONVERSATION_IDS: set[str] = {
+    "active_chat",
+    "active chat",
+    "current_chat",
+    "current chat",
+    "current_session",
+    "default",
+    "unknown",
+    "none",
+    "null",
+    "-",
+    "_",
+    "na",
+    "n/a",
+    "当前聊天",
+    "当前会话",
+}
+
 
 # ---------------------------------------------------------------------------
 # 消息去重器（跨平台，基于 platform:msg_id 组合键）
@@ -119,6 +137,7 @@ class MessageNormalizer:
         self._stats: dict[str, int] = {
             "received": 0,
             "invalid": 0,
+            "invalid_conversation": 0,
             "system_skipped": 0,
             "deduplicated": 0,
             "desensitized": 0,
@@ -139,6 +158,15 @@ class MessageNormalizer:
             logger.debug(
                 "Normalizer: 丢弃无效消息 platform=%s msg_id=%s（from_id 或 conversation_id 为空）",
                 msg.platform.value, msg.msg_id,
+            )
+            return None
+        if self._is_placeholder_conversation_id(msg.conversation_id):
+            self._stats["invalid_conversation"] += 1
+            logger.warning(
+                "Normalizer: 丢弃占位会话消息 platform=%s msg_id=%s conversation_id=%s",
+                msg.platform.value,
+                msg.msg_id,
+                msg.conversation_id,
             )
             return None
 
@@ -172,3 +200,10 @@ class MessageNormalizer:
             **self._stats,
             "dedup_cache_size": self._dedup.size(),
         }
+
+    @staticmethod
+    def _is_placeholder_conversation_id(value: str) -> bool:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return True
+        return normalized in _PLACEHOLDER_CONVERSATION_IDS
