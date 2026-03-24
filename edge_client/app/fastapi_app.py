@@ -351,6 +351,129 @@ def create_edge_fastapi_app(
             ts_ms=ts,
         ))
 
+    # ------------------------------------------------------------------
+    # /v1/edge/wx/* — 微信数据查询端点（基于 WxDbService 解密方案）
+    # 这些端点供 Host Brain MCP 工具调用，走 HMAC 鉴权
+    # ------------------------------------------------------------------
+
+    @app.post("/v1/edge/wx/contacts")
+    async def edge_wx_contacts(request: Request) -> JSONResponse:
+        """查询微信联系人列表。
+
+        payload: {"include_groups": true}
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wx_contacts,
+        )
+
+    @app.post("/v1/edge/wx/messages")
+    async def edge_wx_messages(request: Request) -> JSONResponse:
+        """查询微信聊天记录。
+
+        payload: {"conversation_id": "wxid_xxx", "limit": 50, "after_ts_ms": 0}
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wx_messages,
+        )
+
+    @app.post("/v1/edge/wx/search")
+    async def edge_wx_search(request: Request) -> JSONResponse:
+        """全文搜索微信聊天记录。
+
+        payload: {"keyword": "关键词", "limit": 20}
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wx_search,
+        )
+
+    @app.post("/v1/edge/wx/refresh")
+    async def edge_wx_refresh(request: Request) -> JSONResponse:
+        """重新执行微信数据库解密（微信重新登录后密钥变化时调用）。
+
+        payload: {}
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wx_refresh,
+        )
+
+    @app.get("/v1/edge/wx/stats")
+    async def edge_wx_stats() -> JSONResponse:
+        """返回微信数据库统计信息（无需鉴权，仅供调试）。"""
+        ts = int(clock())
+        try:
+            wx_svc = _get_wx_db_service(runtime_value)
+            if wx_svc is None:
+                return JSONResponse(_response(
+                    success=False,
+                    status=STATUS_REJECTED,
+                    reason_code="WX_SERVICE_UNAVAILABLE",
+                    detail="WxDbService not initialized (check WECHAT_DECRYPT_OUTPUT_DIR config)",
+                    event={},
+                    ts_ms=ts,
+                ))
+            return JSONResponse(_response(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                detail="wx db stats",
+                event=wx_svc.stats(),
+                ts_ms=ts,
+            ))
+        except Exception as exc:
+            return JSONResponse(_response(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code="WX_STATS_ERROR",
+                detail=f"wx stats failed: {exc}",
+                event={},
+                ts_ms=ts,
+            ))
+
+    @app.post("/v1/edge/wx/moments")
+    async def edge_wx_moments(request: Request) -> JSONResponse:
+        """读取朋友圈（Sns.db）。
+
+        payload: {"limit": 20}
+        """
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_wx_moments,
+        )
+
     return app
 
 
@@ -1026,3 +1149,264 @@ def build_edge_app_from_env() -> FastAPI:
         raise RuntimeError(f"edge config invalid [{reason}]: {loaded.as_dict()}")
     runtime = bootstrap(loaded.config)
     return create_edge_fastapi_app(config=loaded.config, runtime=runtime)
+
+
+# ---------------------------------------------------------------------------
+# 微信数据查询端点 Handler（/v1/edge/wx/*）
+# ---------------------------------------------------------------------------
+
+def _get_wx_db_service(runtime: EdgeRuntime) -> Any | None:
+    """从 EdgeRuntime 获取 WxDbService 实例（懒初始化）。"""
+    return getattr(runtime, "_wx_db_service", None)
+
+
+def _handle_wx_contacts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """查询微信联系人列表。"""
+    wx_svc = _get_wx_db_service(runtime)
+    if wx_svc is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_SERVICE_UNAVAILABLE",
+            stage="S_EDGE_WX_CONTACTS",
+            detail="WxDbService not initialized (check WECHAT_DECRYPT_OUTPUT_DIR config)",
+            event={},
+        )
+    try:
+        include_groups = bool(envelope.payload.get("include_groups", True))
+        contacts = wx_svc.get_contacts(include_groups=include_groups)
+        contact_list = [
+            {
+                "wxid": c.wxid,
+                "nickname": c.nickname,
+                "remark": c.remark,
+                "alias": c.alias,
+                "is_group": c.is_group,
+                "display_name": c.display_name(),
+            }
+            for c in contacts
+        ]
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WX_CONTACTS",
+            detail=f"found {len(contact_list)} contacts",
+            event={"contacts": contact_list, "count": len(contact_list)},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_CONTACTS_ERROR",
+            stage="S_EDGE_WX_CONTACTS",
+            detail=f"wx contacts query failed: {exc}",
+            event={},
+        )
+
+
+def _handle_wx_messages(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """查询微信聊天记录。"""
+    wx_svc = _get_wx_db_service(runtime)
+    if wx_svc is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_SERVICE_UNAVAILABLE",
+            stage="S_EDGE_WX_MESSAGES",
+            detail="WxDbService not initialized",
+            event={},
+        )
+    try:
+        conversation_id = str(envelope.payload.get("conversation_id") or "").strip() or None
+        limit = _parse_int_clamped(envelope.payload.get("limit"), default=50, min_value=1, max_value=200)
+        after_ts_ms = envelope.payload.get("after_ts_ms")
+        before_ts_ms = envelope.payload.get("before_ts_ms")
+        keyword = str(envelope.payload.get("keyword") or "").strip() or None
+        msg_types_raw = envelope.payload.get("msg_types")
+        msg_types = [int(t) for t in msg_types_raw] if isinstance(msg_types_raw, list) else None
+
+        messages = wx_svc.get_messages(
+            conversation_id=conversation_id,
+            limit=limit,
+            after_ts_ms=int(after_ts_ms) if after_ts_ms else None,
+            before_ts_ms=int(before_ts_ms) if before_ts_ms else None,
+            keyword=keyword,
+            msg_types=msg_types,
+        )
+        msg_list = [
+            {
+                "msg_id": m.msg_id,
+                "from_wxid": m.from_wxid,
+                "to_wxid": m.to_wxid,
+                "conversation_id": m.conversation_id,
+                "content": m.content,
+                "msg_type": m.msg_type,
+                "ts_ms": m.ts_ms,
+                "is_sender": m.is_sender,
+                "media_url": m.media_url,
+            }
+            for m in messages
+        ]
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WX_MESSAGES",
+            detail=f"found {len(msg_list)} messages",
+            event={"messages": msg_list, "count": len(msg_list)},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_MESSAGES_ERROR",
+            stage="S_EDGE_WX_MESSAGES",
+            detail=f"wx messages query failed: {exc}",
+            event={},
+        )
+
+
+def _handle_wx_search(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """全文搜索微信聊天记录。"""
+    wx_svc = _get_wx_db_service(runtime)
+    if wx_svc is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_SERVICE_UNAVAILABLE",
+            stage="S_EDGE_WX_SEARCH",
+            detail="WxDbService not initialized",
+            event={},
+        )
+    try:
+        keyword = str(envelope.payload.get("keyword") or "").strip()
+        if not keyword:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=EDGE_RPC_SCHEMA_INVALID,
+                stage="S_EDGE_WX_SEARCH",
+                detail="wx search requires non-empty keyword",
+                event={},
+            )
+        limit = _parse_int_clamped(envelope.payload.get("limit"), default=20, min_value=1, max_value=100)
+        messages = wx_svc.get_messages(keyword=keyword, limit=limit)
+        msg_list = [
+            {
+                "msg_id": m.msg_id,
+                "from_wxid": m.from_wxid,
+                "conversation_id": m.conversation_id,
+                "content": m.content,
+                "msg_type": m.msg_type,
+                "ts_ms": m.ts_ms,
+                "is_sender": m.is_sender,
+            }
+            for m in messages
+        ]
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WX_SEARCH",
+            detail=f"found {len(msg_list)} messages for keyword '{keyword}'",
+            event={"messages": msg_list, "count": len(msg_list), "keyword": keyword},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_SEARCH_ERROR",
+            stage="S_EDGE_WX_SEARCH",
+            detail=f"wx search failed: {exc}",
+            event={},
+        )
+
+
+def _handle_wx_refresh(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """重新执行微信数据库解密（微信重新登录后密钥变化时调用）。"""
+    config: EdgeConfig = getattr(runtime, "_edge_config", None) or EdgeConfig.__new__(EdgeConfig)
+    wx_decrypt_output_dir = getattr(config, "wx_decrypt_output_dir", None)
+    wx_db_storage_dir = getattr(config, "wx_db_storage_dir", None)
+    wx_key_cache_path = getattr(config, "wx_key_cache_path", None)
+
+    if not wx_db_storage_dir or not wx_decrypt_output_dir:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_CONFIG_MISSING",
+            stage="S_EDGE_WX_REFRESH",
+            detail="WECHAT_DB_STORAGE_DIR and WECHAT_DECRYPT_OUTPUT_DIR must be configured",
+            event={},
+        )
+    try:
+        from tools.wx4_decrypt import decrypt_all_databases
+        results = decrypt_all_databases(
+            wx_db_storage_dir,
+            wx_decrypt_output_dir,
+            key_cache_path=wx_key_cache_path,
+        )
+        ok = sum(1 for r in results.values() if r["status"] in ("ok", "ok_partial"))
+        fail = sum(1 for r in results.values() if r["status"] == "fail")
+        no_key = sum(1 for r in results.values() if r["status"] == "no_key")
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WX_REFRESH",
+            detail=f"decrypt complete: ok={ok}, fail={fail}, no_key={no_key}",
+            event={"ok": ok, "fail": fail, "no_key": no_key, "total": len(results)},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_REFRESH_ERROR",
+            stage="S_EDGE_WX_REFRESH",
+            detail=f"wx refresh failed: {exc}",
+            event={},
+        )
+
+
+def _handle_wx_moments(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    """读取朋友圈（Sns.db）。"""
+    wx_svc = _get_wx_db_service(runtime)
+    if wx_svc is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_SERVICE_UNAVAILABLE",
+            stage="S_EDGE_WX_MOMENTS",
+            detail="WxDbService not initialized",
+            event={},
+        )
+    try:
+        limit = _parse_int_clamped(envelope.payload.get("limit"), default=20, min_value=1, max_value=100)
+        moments = wx_svc.get_moments(limit=limit)
+        moment_list = [
+            {
+                "moment_id": m.moment_id,
+                "wxid": m.wxid,
+                "content": m.content,
+                "ts_ms": m.ts_ms,
+                "media_urls": m.media_urls,
+            }
+            for m in moments
+        ]
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_WX_MOMENTS",
+            detail=f"found {len(moment_list)} moments",
+            event={"moments": moment_list, "count": len(moment_list)},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="WX_MOMENTS_ERROR",
+            stage="S_EDGE_WX_MOMENTS",
+            detail=f"wx moments query failed: {exc}",
+            event={},
+        )

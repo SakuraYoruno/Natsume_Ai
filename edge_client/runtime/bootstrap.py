@@ -510,7 +510,45 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
 def bootstrap(config: EdgeConfig) -> EdgeRuntime:
     """M45 entrypoint alias for runtime assembly."""
 
-    return build_edge_runtime(config)
+    runtime = build_edge_runtime(config)
+
+    # 将 EdgeConfig 存入 runtime，供 fastapi_app.py 的 wx handler 读取
+    runtime._edge_config = config  # type: ignore[attr-defined]
+
+    # 初始化 WxDbService（若配置了解密输出目录）
+    if config.wx_decrypt_output_dir:
+        try:
+            from edge_client.services.wx_db_service import WxDbService
+            wx_svc = WxDbService(
+                config.wx_decrypt_output_dir,
+                poll_watermark_file=None,  # 水位线由 Gateway 的 WxDbWatcher 管理
+            )
+            runtime._wx_db_service = wx_svc  # type: ignore[attr-defined]
+            LOGGER.info("WxDbService 已初始化: %s", config.wx_decrypt_output_dir)
+        except Exception as exc:
+            LOGGER.warning("WxDbService 初始化失败（非致命）: %s", exc)
+
+    # 启动 Unified Message Gateway（若已启用）
+    if config.gateway_enabled and config.wx_decrypt_output_dir:
+        try:
+            from edge_client.gateway.bootstrap import GatewayConfig, start_gateway
+            gw_config = GatewayConfig(
+                host_url=f"http://{config.rpc_host}:8000",
+                hmac_key=config.hmac_shared_key,
+                wx_decrypt_output_dir=config.wx_decrypt_output_dir,
+                wx_self_wxid=config.wx_self_wxid,
+                wx_watermark_file=None,
+                wx_poll_interval_s=config.wx_poll_interval_s,
+                gateway_port=config.gateway_port,
+                wx_enabled=True,
+            )
+            gw_instance = start_gateway(gw_config)
+            runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]
+            LOGGER.info("Unified Message Gateway 已启动，端口: %d", config.gateway_port)
+        except Exception as exc:
+            LOGGER.warning("Unified Message Gateway 启动失败（非致命）: %s", exc)
+
+    return runtime
 
 
 async def startup(runtime: EdgeRuntime) -> None:

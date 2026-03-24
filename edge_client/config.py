@@ -48,6 +48,17 @@ EDGE_FIELD_TO_ENV_KEY = {
     "resource_gate_enabled": "EDGE_RESOURCE_GATE_ENABLED",
     "max_vram_mb": "EDGE_MAX_VRAM_MB",
     "max_queue_length": "EDGE_MAX_QUEUE_LENGTH",
+    # Unified Message Gateway
+    "gateway_enabled": "EDGE_GATEWAY_ENABLED",
+    "gateway_port": "EDGE_GATEWAY_PORT",
+    "wx_self_wxid": "WECHAT_SELF_WXID",
+    "wx_db_storage_dir": "WECHAT_DB_STORAGE_DIR",
+    "wx_decrypt_output_dir": "WECHAT_DECRYPT_OUTPUT_DIR",
+    "wx_key_cache_path": "WECHAT_KEY_CACHE_PATH",
+    "wx_poll_interval_s": "WECHAT_POLL_INTERVAL_S",
+    "wx_decrypt_refresh_interval_s": "WECHAT_DECRYPT_REFRESH_INTERVAL_S",
+    "qq_onebot_api_base": "QQ_ONEBOT_API_BASE",
+    "qq_self_id": "QQ_SELF_ID",
 }
 EDGE_SECRET_ENV_KEYS = {"EDGE_HMAC_SHARED_KEY"}
 
@@ -78,6 +89,17 @@ class EdgeConfig:
     resource_gate_enabled: bool
     max_vram_mb: int
     max_queue_length: int
+    # Unified Message Gateway
+    gateway_enabled: bool = True
+    gateway_port: int = 19000
+    wx_self_wxid: str | None = None
+    wx_db_storage_dir: str | None = None
+    wx_decrypt_output_dir: str | None = None
+    wx_key_cache_path: str | None = None
+    wx_poll_interval_s: float = 5.0
+    wx_decrypt_refresh_interval_s: int = 3600
+    qq_onebot_api_base: str | None = None
+    qq_self_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +120,17 @@ class EdgeConfig:
             "resource_gate_enabled": self.resource_gate_enabled,
             "max_vram_mb": self.max_vram_mb,
             "max_queue_length": self.max_queue_length,
+            # Unified Message Gateway
+            "gateway_enabled": self.gateway_enabled,
+            "gateway_port": self.gateway_port,
+            "wx_self_wxid": self.wx_self_wxid,
+            "wx_db_storage_dir": self.wx_db_storage_dir,
+            "wx_decrypt_output_dir": self.wx_decrypt_output_dir,
+            "wx_key_cache_path": self.wx_key_cache_path,
+            "wx_poll_interval_s": self.wx_poll_interval_s,
+            "wx_decrypt_refresh_interval_s": self.wx_decrypt_refresh_interval_s,
+            "qq_onebot_api_base": self.qq_onebot_api_base,
+            "qq_self_id": self.qq_self_id,
         }
 
 
@@ -275,6 +308,36 @@ def load_edge_config(
     fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=True)
     resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
 
+    # Unified Message Gateway
+    gateway_enabled = _parse_bool(_env_get(env_lookup, "EDGE_GATEWAY_ENABLED"), default=True)
+    gateway_port = _parse_int(
+        _env_get(env_lookup, "EDGE_GATEWAY_PORT"),
+        default=19000,
+        field_name="EDGE_GATEWAY_PORT",
+        min_value=1,
+        max_value=65535,
+        issues=issues,
+    )
+    wx_self_wxid = _as_optional_text(_env_get(env_lookup, "WECHAT_SELF_WXID"))
+    wx_db_storage_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DB_STORAGE_DIR"))
+    wx_decrypt_output_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DECRYPT_OUTPUT_DIR"))
+    wx_key_cache_path = _as_optional_text(_env_get(env_lookup, "WECHAT_KEY_CACHE_PATH"))
+    wx_poll_interval_s_raw = _env_get(env_lookup, "WECHAT_POLL_INTERVAL_S")
+    try:
+        wx_poll_interval_s = float(wx_poll_interval_s_raw) if wx_poll_interval_s_raw else 5.0
+    except (TypeError, ValueError):
+        wx_poll_interval_s = 5.0
+    wx_decrypt_refresh_interval_s = _parse_int(
+        _env_get(env_lookup, "WECHAT_DECRYPT_REFRESH_INTERVAL_S"),
+        default=3600,
+        field_name="WECHAT_DECRYPT_REFRESH_INTERVAL_S",
+        min_value=60,
+        max_value=86400,
+        issues=issues,
+    )
+    qq_onebot_api_base = _as_optional_text(_env_get(env_lookup, "QQ_ONEBOT_API_BASE"))
+    qq_self_id = _as_optional_text(_env_get(env_lookup, "QQ_SELF_ID"))
+
     if issues:
         return _failure(issues)
 
@@ -296,6 +359,17 @@ def load_edge_config(
         resource_gate_enabled=bool(resource_gate_enabled),
         max_vram_mb=max_vram_mb,
         max_queue_length=max_queue_length,
+        # Unified Message Gateway
+        gateway_enabled=bool(gateway_enabled),
+        gateway_port=int(gateway_port),
+        wx_self_wxid=wx_self_wxid,
+        wx_db_storage_dir=wx_db_storage_dir,
+        wx_decrypt_output_dir=wx_decrypt_output_dir,
+        wx_key_cache_path=wx_key_cache_path,
+        wx_poll_interval_s=float(wx_poll_interval_s),
+        wx_decrypt_refresh_interval_s=int(wx_decrypt_refresh_interval_s),
+        qq_onebot_api_base=qq_onebot_api_base,
+        qq_self_id=qq_self_id,
     )
     return EdgeConfigLoadResult(
         success=True,
