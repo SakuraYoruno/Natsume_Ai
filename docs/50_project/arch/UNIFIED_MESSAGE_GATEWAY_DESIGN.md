@@ -416,7 +416,8 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 | 主动发起新对话 | ✅ 支持 | `pywinauto` 精确控件定位，见 9.3 节 |
 | 撤回消息（2分钟内） | ✅ 支持 | `pywinauto` 右键菜单，见 9.4 节 |
 | 实时消息监听（<100ms） | ✅ 支持 | `watchdog` 文件系统变更监听，见 9.2 节 |
-| 发送语音消息 | ⚠️ 降级 | TTS 生成文本替代，语音发送 Phase 2 评估 |
+| 接收语音消息（.silk 解码播放） | ✅ 支持 | `message_*.db` type=34，`pysilk` 解码 → PCM 播放，见 9.6 节 |
+| 发送语音消息（.silk 编码发送） | ⚠️ Phase 3 | TTS → PCM → `pysilk` 编码 → 剪贴板发送，见 9.6 节 |
 | 朋友圈发布 | ⚠️ 待评估 | `pywinauto` 控件操作，复杂度高，Phase 3 评估 |
 | 转账/红包 | ❌ 不做 | 涉及支付，安全风险，不纳入范围 |
 
@@ -528,7 +529,73 @@ db_storage/
 
 ---
 
-### 9.6 各方案实施优先级
+### 9.6 语音消息收发（.silk 格式）
+
+微信语音消息使用腾讯私有 **silk** 编码格式（`.silk` / `.amr`），与微信语音/视频**通话**（TRTC 私有 P2P 协议）完全不同。
+
+> ⚠️ **微信语音通话 / 视频通话**：走腾讯 TRTC 私有 P2P 协议，无任何公开 API，**不纳入范围**。
+
+#### 接收语音消息（✅ 可做）
+
+```python
+import pysilk
+import pyaudio
+
+def play_voice_message(silk_path: str) -> None:
+    """解码微信语音消息并通过扬声器播放。"""
+    # 1. pysilk 解码 .silk → PCM（16kHz, 16bit, mono）
+    with open(silk_path, "rb") as f:
+        silk_data = f.read()
+    pcm_data = pysilk.decode(silk_data, to_wav=False)  # 返回原始 PCM bytes
+
+    # 2. 通过 pyaudio 播放
+    pa = pyaudio.PyAudio()
+    stream = pa.open(format=pyaudio.paInt16, channels=1, rate=16000, output=True)
+    stream.write(pcm_data)
+    stream.stop_stream()
+    stream.close()
+    pa.terminate()
+```
+
+**数据来源**：`WxDbService.get_messages()` 返回的消息记录中，`type=34` 的条目包含 `.silk` 文件的本地路径（`media_url` 字段），直接读取即可。
+
+#### 发送语音消息（⚠️ Phase 3 评估）
+
+```python
+import pysilk
+from pathlib import Path
+
+def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
+    """将 PCM 音频编码为 silk 并通过微信发送（Phase 3 实现）。"""
+    # 1. PCM → silk 编码
+    silk_data = pysilk.encode(pcm_bytes, sample_rate=16000)
+    silk_path = Path("temp_voice.silk")
+    silk_path.write_bytes(silk_data)
+
+    # 2. 打开目标聊天窗口
+    open_chat_with(target_wxid)  # 见 9.3 节
+
+    # 3. 通过剪贴板发送文件（微信支持拖拽/粘贴文件发送语音）
+    # 注：此步骤依赖微信版本对文件粘贴的支持，需实测验证
+    import win32clipboard
+    # ... 文件粘贴逻辑 ...
+    return True
+```
+
+**依赖**：`pip install pysilk-mod pyaudio`
+
+**与本地语音链路的关系**：
+
+| 场景 | 链路 |
+|------|------|
+| 本地麦克风对话 | ASR → Host Brain → TTS (GPT-SoVITS) → 扬声器（**已完整实现**） |
+| 微信语音消息接收 | `message_*.db` type=34 → `pysilk` 解码 → 扬声器播放 |
+| 微信语音消息发送 | TTS 生成 PCM → `pysilk` 编码 → 微信发送（Phase 3） |
+| 微信语音/视频通话 | ❌ TRTC 私有协议，不纳入范围 |
+
+---
+
+### 9.7 各方案实施优先级
 
 | 方案 | 优先级 | 难度 | 纳入 Phase |
 |------|--------|------|----------|
@@ -536,7 +603,8 @@ db_storage/
 | `pywinauto` 主动发起对话 | 🟠 高 | ⭐⭐ 中等 | Phase 2 |
 | 朋友圈读取（`Sns.db`） | 🟡 中 | ⭐ 简单 | Phase 2 |
 | 撤回消息 | 🟡 中 | ⭐⭐ 中等 | Phase 3 |
-| 语音消息发送 | 🟢 低 | ⭐⭐⭐ 复杂 | Phase 3 评估 |
+| 语音消息接收（silk 解码播放） | 🟠 高 | ⭐ 简单 | Phase 2 |
+| 语音消息发送（silk 编码发送） | 🟢 低 | ⭐⭐⭐ 复杂 | Phase 3 评估 |
 
 ---
 
@@ -554,6 +622,7 @@ db_storage/
 
 - [ ] `tools/wx4_decrypt.py` 重构为可导入模块（分离 CLI 与库函数，增加密钥缓存）
 - [ ] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询/朋友圈）
+- [ ] `gateway/media/voice_handler.py` — 语音消息接收（`pysilk` 解码 `.silk` → PCM 播放，type=34）
 - [ ] `edge_client/services/wx_db_service.py` — `watchdog` 文件系统监听替代定时轮询（延迟 <100ms）
 - [ ] `gateway/adapters/wechat_adapter.py` — 基于 `WxDbService` 的微信适配器
 - [ ] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats/moments）
