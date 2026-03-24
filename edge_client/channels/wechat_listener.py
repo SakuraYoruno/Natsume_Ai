@@ -1,5 +1,13 @@
 """微信小号消息监听器。
 
+.. deprecated::
+    此文件已废弃（Phase 2 完成后不再使用）。
+    替代方案：
+      - 消息接收：edge_client/services/wx_db_service.py + wx_watcher.py（watchdog <100ms）
+      - 消息路由：edge_client/gateway/（Unified Message Gateway）
+      - 去重/脱敏：edge_client/gateway/normalizer.py（已上移到 Gateway 公共层）
+    保留此文件仅供历史参考，请勿在新代码中引用。
+
 监听微信小号（Edge 端本地运行的微信）接收到的消息，
 将消息上报给 Host Brain 处理。
 

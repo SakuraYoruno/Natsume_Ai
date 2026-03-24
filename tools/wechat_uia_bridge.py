@@ -1,6 +1,14 @@
 """
 WeChat desktop UI automation bridge.
 
+.. deprecated::
+    此文件已废弃（Phase 2 完成后不再使用）。
+    替代方案：
+      - 消息接收：edge_client/services/wx_db_service.py + wx_watcher.py
+      - 消息发送：edge_client/gateway/adapters/wechat_adapter.py（pywinauto 精确控件定位）
+      - 消息路由：edge_client/gateway/（Unified Message Gateway）
+    保留此文件仅供历史参考，请勿在新代码中引用。
+
 This bridge consumes outbound command queue records and executes them on the
 interactive WeChat/Weixin desktop client.
 """

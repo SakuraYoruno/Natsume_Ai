@@ -267,6 +267,44 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.warning("WeChatAdapter: 设置文件剪贴板失败: %s", exc)
 
     # ------------------------------------------------------------------
+    # 撤回消息（2分钟内有效）
+    # ------------------------------------------------------------------
+
+    def recall_message(self, msg_content: str) -> bool:
+        """撤回指定内容的消息（仅限发出后 2 分钟内）。
+
+        通过 pywinauto 右键菜单实现，不依赖任何 Hook API。
+
+        Args:
+            msg_content: 要撤回的消息文本内容（用于定位消息气泡）
+
+        Returns:
+            True 表示撤回成功
+        """
+        try:
+            import pywinauto
+            from pywinauto import Application
+
+            app = Application(backend="uia").connect(title_re="微信")
+            chat_wnd = app.top_window()
+
+            # 找到消息气泡控件，右键点击
+            msg_item = chat_wnd.child_window(name=msg_content, control_type="Text")
+            msg_item.right_click_input()
+
+            # 等待右键菜单出现，点击「撤回」
+            import time as _time
+            _time.sleep(0.3)
+            recall_item = app.window(control_type="MenuItem", title="撤回")
+            recall_item.wait("visible", timeout=2)
+            recall_item.click_input()
+            logger.info("WeChatAdapter: 消息已撤回")
+            return True
+        except Exception as exc:
+            logger.warning("WeChatAdapter: 撤回消息失败: %s", exc)
+            return False
+
+    # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
 
