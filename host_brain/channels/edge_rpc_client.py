@@ -691,3 +691,58 @@ async def post_fallback_presence(
         request_id=request_id,
     )
     return result
+
+
+async def post_gateway_reply(
+    *,
+    platform: str | None,
+    conversation_id: str | None,
+    content: str,
+    msg_type: str = "text",
+    request_id: str | None = None,
+    wait_result: bool = True,
+    timeout_ms: int = 12000,
+) -> EdgeRpcCallResult:
+    """通过 Gateway Server 向对应平台发送回复。
+
+    调用 Edge Gateway Server 的 /v1/gateway/reply 端点，
+    由 OutboundDispatcher 路由到对应平台适配器（微信/QQ/飞书/企微）。
+
+    Args:
+        platform: 目标平台（wechat/qq/feishu/wecom）
+        conversation_id: 会话 ID（群 ID 或私聊 ID）
+        content: 回复文本内容
+        msg_type: 消息类型（默认 text）
+        request_id: 请求 ID（可选）
+        wait_result: 是否等待发送结果（默认 True）
+        timeout_ms: 超时时间（ms，默认 12000）
+
+    Returns:
+        EdgeRpcCallResult
+    """
+    payload: dict[str, Any] = {
+        "platform": str(platform or "").strip().lower(),
+        "conversation_id": str(conversation_id or "").strip(),
+        "content": str(content),
+        "msg_type": str(msg_type or "text").strip().lower(),
+        "wait_result": bool(wait_result),
+        "timeout_ms": int(timeout_ms),
+    }
+    rpc_timeout_ms = _resolve_timeout_ms()
+    if bool(wait_result):
+        rpc_timeout_ms = max(int(rpc_timeout_ms), int(timeout_ms) + 3_000)
+    result = await _post_to_edge(
+        path="/v1/gateway/reply",
+        payload=payload,
+        request_id=request_id,
+        request_timeout_ms=rpc_timeout_ms,
+    )
+    _logger.debug(
+        "post_gateway_reply platform=%s conversation_id=%s wait=%s -> %s latency=%dms",
+        payload["platform"],
+        payload["conversation_id"],
+        payload["wait_result"],
+        result.status,
+        result.latency_ms,
+    )
+    return result
