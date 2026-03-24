@@ -47,6 +47,12 @@ class EdgeRuntime:
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
     wechat_listener: WeChatListener | None = None
+    vision_locator: Any | None = None  # VisionLocator（按需加载）
+
+    @property
+    def vlm(self) -> Any | None:
+        """VisionLocator 实例（若 VLM 已启用）。"""
+        return self.vision_locator
 
     @property
     def asr(self) -> AsrService | None:
@@ -126,6 +132,9 @@ class EdgeRuntime:
             except Exception as exc:  # pragma: no cover
                 outcome["wechat_listener_stopped"] = False
                 outcome["errors"].append(f"wechat listener stop failed: {exc}")
+
+        outcome["vlm_released"] = True
+        # VisionLocator 无需显式释放（无常驻资源）
 
         return outcome
 
@@ -491,6 +500,27 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         except Exception as exc:  # pragma: no cover
             LOGGER.warning("WeChatListener not started: %s", exc)
 
+    # VisionLocator（按需初始化，仅在 vlm_enabled=True 时加载）
+    vision_locator = None
+    if config.vlm_enabled:
+        try:
+            from edge_client.actuators.vision_locator import VisionLocator, VisionLocatorConfig
+            vision_locator = VisionLocator(
+                VisionLocatorConfig(
+                    ollama_base_url=config.vlm_base_url,
+                    model=config.vlm_model,
+                    timeout_s=config.vlm_timeout_s,
+                    confidence_threshold=config.vlm_confidence_threshold,
+                    max_image_width=config.vlm_max_image_width,
+                )
+            )
+            LOGGER.info(
+                "VisionLocator 已初始化: model=%s base_url=%s",
+                config.vlm_model, config.vlm_base_url,
+            )
+        except Exception as exc:
+            LOGGER.warning("VisionLocator 初始化失败（非致命）: %s", exc)
+
     return EdgeRuntime(
         config=config,
         voice_rpc=voice_rpc,
@@ -504,6 +534,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
         wechat_listener=wechat_listener,
+        vision_locator=vision_locator,
     )
 
 

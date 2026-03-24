@@ -59,6 +59,13 @@ EDGE_FIELD_TO_ENV_KEY = {
     "wx_decrypt_refresh_interval_s": "WECHAT_DECRYPT_REFRESH_INTERVAL_S",
     "qq_onebot_api_base": "QQ_ONEBOT_API_BASE",
     "qq_self_id": "QQ_SELF_ID",
+    # VLM 视觉定位
+    "vlm_enabled": "EDGE_VLM_ENABLED",
+    "vlm_model": "EDGE_VLM_MODEL",
+    "vlm_base_url": "EDGE_VLM_BASE_URL",
+    "vlm_timeout_s": "EDGE_VLM_TIMEOUT_S",
+    "vlm_confidence_threshold": "EDGE_VLM_CONFIDENCE_THRESHOLD",
+    "vlm_max_image_width": "EDGE_VLM_MAX_IMAGE_WIDTH",
 }
 EDGE_SECRET_ENV_KEYS = {"EDGE_HMAC_SHARED_KEY"}
 
@@ -100,6 +107,13 @@ class EdgeConfig:
     wx_decrypt_refresh_interval_s: int = 3600
     qq_onebot_api_base: str | None = None
     qq_self_id: str | None = None
+    # VLM 视觉定位
+    vlm_enabled: bool = False
+    vlm_model: str = "qwen2.5vl:7b"
+    vlm_base_url: str = "http://localhost:11434"
+    vlm_timeout_s: float = 30.0
+    vlm_confidence_threshold: float = 0.3
+    vlm_max_image_width: int = 1280
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +145,13 @@ class EdgeConfig:
             "wx_decrypt_refresh_interval_s": self.wx_decrypt_refresh_interval_s,
             "qq_onebot_api_base": self.qq_onebot_api_base,
             "qq_self_id": self.qq_self_id,
+            # VLM 视觉定位
+            "vlm_enabled": self.vlm_enabled,
+            "vlm_model": self.vlm_model,
+            "vlm_base_url": self.vlm_base_url,
+            "vlm_timeout_s": self.vlm_timeout_s,
+            "vlm_confidence_threshold": self.vlm_confidence_threshold,
+            "vlm_max_image_width": self.vlm_max_image_width,
         }
 
 
@@ -338,6 +359,31 @@ def load_edge_config(
     qq_onebot_api_base = _as_optional_text(_env_get(env_lookup, "QQ_ONEBOT_API_BASE"))
     qq_self_id = _as_optional_text(_env_get(env_lookup, "QQ_SELF_ID"))
 
+    # VLM 视觉定位
+    vlm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_VLM_ENABLED"), default=False)
+    vlm_model = _as_text(_env_get(env_lookup, "EDGE_VLM_MODEL"), "qwen2.5vl:7b")
+    vlm_base_url = _as_text(_env_get(env_lookup, "EDGE_VLM_BASE_URL"), "http://localhost:11434")
+    vlm_timeout_s_raw = _env_get(env_lookup, "EDGE_VLM_TIMEOUT_S")
+    try:
+        vlm_timeout_s = float(vlm_timeout_s_raw) if vlm_timeout_s_raw else 30.0
+        vlm_timeout_s = max(1.0, min(vlm_timeout_s, 300.0))
+    except (TypeError, ValueError):
+        vlm_timeout_s = 30.0
+    vlm_confidence_threshold_raw = _env_get(env_lookup, "EDGE_VLM_CONFIDENCE_THRESHOLD")
+    try:
+        vlm_confidence_threshold = float(vlm_confidence_threshold_raw) if vlm_confidence_threshold_raw else 0.3
+        vlm_confidence_threshold = max(0.0, min(vlm_confidence_threshold, 1.0))
+    except (TypeError, ValueError):
+        vlm_confidence_threshold = 0.3
+    vlm_max_image_width = _parse_int(
+        _env_get(env_lookup, "EDGE_VLM_MAX_IMAGE_WIDTH"),
+        default=1280,
+        field_name="EDGE_VLM_MAX_IMAGE_WIDTH",
+        min_value=320,
+        max_value=3840,
+        issues=issues,
+    )
+
     if issues:
         return _failure(issues)
 
@@ -370,6 +416,13 @@ def load_edge_config(
         wx_decrypt_refresh_interval_s=int(wx_decrypt_refresh_interval_s),
         qq_onebot_api_base=qq_onebot_api_base,
         qq_self_id=qq_self_id,
+        # VLM 视觉定位
+        vlm_enabled=bool(vlm_enabled),
+        vlm_model=vlm_model,
+        vlm_base_url=vlm_base_url,
+        vlm_timeout_s=float(vlm_timeout_s),
+        vlm_confidence_threshold=float(vlm_confidence_threshold),
+        vlm_max_image_width=int(vlm_max_image_width),
     )
     return EdgeConfigLoadResult(
         success=True,
@@ -492,6 +545,11 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         enabled=config.resource_gate_enabled,
         detail="edge resource gate enabled",
         disabled_detail="edge resource gate disabled by config",
+    )
+    statuses["edge.vlm"] = _service_status(
+        enabled=config.vlm_enabled,
+        detail=f"edge vlm enabled (model={config.vlm_model})",
+        disabled_detail="edge vlm disabled by config (EDGE_VLM_ENABLED=false)",
     )
     return statuses
 
