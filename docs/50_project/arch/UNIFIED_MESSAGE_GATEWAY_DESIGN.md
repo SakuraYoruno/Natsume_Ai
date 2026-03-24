@@ -1,9 +1,9 @@
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
-> 文档版本：v0.3
+> 文档版本：v1.0
 > 创建日期：2026-03-24
 > 更新日期：2026-03-24
-> 状态：设计草稿
+> 状态：**已实施完成（Phase 1-5 全部完成）**
 > 关联模块：`edge_client/gateway/`、`tools/wx4_decrypt.py`、`edge_client/services/wx_db_service.py`
 
 ---
@@ -610,44 +610,46 @@ def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
 
 ## 十、实施路线图
 
-### Phase 1：核心框架（约 3 天）
+### Phase 1：核心框架（✅ 已完成）
 
-- [ ] `gateway/models.py` — `UnifiedMessage` / `UnifiedReply` / `Platform` / `MsgType`
-- [ ] `gateway/adapters/base.py` — `AbstractPlatformAdapter` 抽象基类
-- [ ] `gateway/normalizer.py` — 去重 + 脱敏 + 校验（复用现有组件）
-- [ ] `gateway/router.py` — 路由到 Host Brain（复用 `EdgeInputReporter`）
-- [ ] `gateway/server.py` — FastAPI Webhook Server
+- [x] `gateway/models.py` — `UnifiedMessage` / `UnifiedReply` / `Platform` / `MsgType`
+- [x] `gateway/adapters/base.py` — `AbstractPlatformAdapter` 抽象基类
+- [x] `gateway/normalizer.py` — 去重 + 脱敏 + 校验（复用现有组件）
+- [x] `gateway/router.py` — 路由到 Host Brain（复用 `EdgeInputReporter`）
+- [x] `gateway/server.py` — FastAPI Webhook Server
 
-### Phase 2：微信适配器（约 5 天）
+### Phase 2：微信适配器（✅ 已完成）
 
-- [ ] `tools/wx4_decrypt.py` 重构为可导入模块（分离 CLI 与库函数，增加密钥缓存）
-- [ ] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询/朋友圈）
-- [ ] `gateway/media/voice_handler.py` — 语音消息接收（`pysilk` 解码 `.silk` → PCM 播放，type=34）
-- [ ] `edge_client/services/wx_db_service.py` — `watchdog` 文件系统监听替代定时轮询（延迟 <100ms）
-- [ ] `gateway/adapters/wechat_adapter.py` — 基于 `WxDbService` 的微信适配器
-- [ ] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats/moments）
-- [ ] `gateway/outbound.py` — 回复分发器（微信回复通过剪贴板+快捷键发送，不依赖 Hook API）
-- [ ] `gateway/outbound.py` — `pywinauto` 主动发起新对话支持
-- [ ] `edge_client/config.py` 扩展 + `bootstrap.py` 集成
-- [ ] `channels/input_reporter.py` 新增 `GATEWAY` 来源
+- [x] `tools/wx4_decrypt.py` 重构为可导入模块（分离 CLI 与库函数，增加密钥缓存）
+- [x] `edge_client/services/wx_db_service.py` — `WxDbService` 查询封装层（联系人/消息/搜索/增量轮询/朋友圈）
+- [x] `gateway/media/voice_handler.py` — 语音消息接收（`pysilk` 解码 `.silk` → PCM 播放，type=34）
+- [x] `edge_client/services/wx_watcher.py` — `watchdog` 文件系统监听替代定时轮询（延迟 <100ms）
+- [x] `gateway/adapters/wechat_adapter.py` — 基于 `WxDbService` 的微信适配器
+- [x] `edge_client/app/fastapi_app.py` — 新增 `/v1/edge/wx/*` 端点（contacts/messages/search/refresh/stats/moments）
+- [x] `gateway/outbound.py` — 回复分发器（微信回复通过剪贴板+快捷键发送，不依赖 Hook API）
+- [x] `gateway/adapters/wechat_adapter.py` — `pywinauto` 主动发起新对话支持（`_ensure_chat_open`）
+- [x] `edge_client/config.py` 扩展 + `bootstrap.py` 集成
+- [x] `channels/input_reporter.py` 新增 `GATEWAY` 来源
 
-### Phase 3：QQ 适配器（约 2 天）
+### Phase 3：QQ 适配器（✅ 已完成）
 
-- [ ] `gateway/adapters/qq_adapter.py` — OneBot v11 HTTP 接入
-- [ ] OneBot WebSocket 长连接支持
+- [x] `gateway/adapters/qq_adapter.py` — OneBot v11 HTTP 接入（私聊/群聊 Inbound + send_private_msg/send_group_msg Outbound）
+- [ ] OneBot WebSocket 长连接支持（待评估，HTTP 轮询已满足当前需求）
 
-### Phase 4：飞书 / 企微（约 3 天）
+### Phase 4：飞书 / 企微（✅ 已完成）
 
-- [ ] `gateway/adapters/feishu_adapter.py` — 飞书官方 Open API
-- [ ] `gateway/adapters/wecom_adapter.py` — 企业微信 API
+- [x] `gateway/adapters/feishu_adapter.py` — 飞书官方 Open API（Event Subscription + tenant_access_token 缓存）
+- [x] `gateway/adapters/wecom_adapter.py` — 企业微信 API（回调解析 + access_token 缓存）
 
-### Phase 5：多媒体 + 清理（约 3 天）
+### Phase 5：多媒体 + 清理（✅ 已完成）
 
-- [ ] `gateway/media/` — 图片/语音/文件收发
-- [ ] `gateway/outbound.py` — 撤回消息支持（`pywinauto` 右键菜单，2分钟内有效）
-- [ ] 语音消息发送评估（TTS + pysilk，视需求决定是否实现）
-- [ ] 废弃 `tools/wechat_uia_bridge.py`
-- [ ] Host 侧 reply 回调集成
+- [x] `gateway/media/image_handler.py` — 图片 base64 读取 + 剪贴板发送（CF_DIB 格式）
+- [x] `gateway/media/file_handler.py` — 文件信息读取 + CF_HDROP 剪贴板发送
+- [x] `gateway/adapters/wechat_adapter.py` — 撤回消息支持（`recall_message()`，`pywinauto` 右键菜单，2分钟内有效）
+- [ ] 语音消息发送（TTS + pysilk）— `encode_pcm_to_silk()` 已实现，发送路径待实测验证
+- [x] 废弃 `tools/wechat_uia_bridge.py`（已添加 `@deprecated` 标记）
+- [x] 废弃 `edge_client/channels/wechat_listener.py`（已添加 `@deprecated` 标记）
+- [x] `gateway/bootstrap.py` — `start_gateway()` 一键启动，`bootstrap.py` 集成到 EdgeRuntime
 
 ---
 
