@@ -700,6 +700,20 @@ async def gateway_orchestrator_sse_generator(
     else:
         prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
 
+    # ── 3e-2. 情感参数注入（adjust_gen_params_for_emotion）──
+    # 根据情感状态动态调整 temperature/top_p 等 LLM 生成参数
+    try:
+        _adjusted = adjust_gen_params_for_emotion(
+            {"gen_params": gen_params},
+            resolved_emotion_context,
+        )
+        gen_params = _adjusted.get("gen_params") or gen_params
+    except Exception as _adj_exc:
+        logger.debug(
+            "[%s] Gateway adjust_gen_params_for_emotion 失败（降级）: %s",
+            request_id, _adj_exc,
+        )
+
     # ── 3f. LLM 运行时解析 ──
     llm_runtime = await resolve_host_llm_runtime_async(scene_type="CHAT")
     provider_name = str(llm_runtime.get("provider_name") or "gemini").strip().lower()
