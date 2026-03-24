@@ -1,10 +1,10 @@
 受众：MASTER
-标题：当前代码架构总览（2026-03-18）
+标题：当前代码架构总览（2026-03-24）
 
-版本：v1.2
-日期：2026-03-19
+版本：v1.3
+日期：2026-03-24
 
-# 🏗️ 当前代码架构总览（2026-03-18）
+# 🏗️ 当前代码架构总览（2026-03-24）
 
 > 本文档是“当前代码事实对齐稿”，用于快速回答：目录怎么分层、请求怎么流转、多 Agent 在哪里生效、图编排如何落地。
 
@@ -67,6 +67,9 @@ Natsume_Ai/
 │  ├─ airlock/         # 气闸隔离层（脱敏/隔离 + subprocess/Docker 双后端沙箱）
 │  ├─ audit/           # SQLite 审计账本（WAL + 迁移 + 保留策略）
 │  ├─ bond/            # 关系动力学与阶段引擎（Neo4j SSOT + 异步写入队列）
+│  │  ├─ shared_memory_index.py  # 共同记忆索引（Phase V）
+│  │  ├─ milestone_tracker.py    # 里程碑感知（Phase V）
+│  │  └─ bond_narrative.py       # 关系叙事生成（Phase V）
 │  ├─ canon/           # 正典资产（style/ + world/ 条目文件）
 │  ├─ channels/        # Edge RPC / VTS 渠道适配
 │  ├─ core/            # 核心模块（配置快照、错误码、ID、QA、Key Profile、情感时间线）
@@ -81,13 +84,37 @@ Natsume_Ai/
 │  ├─ release/         # 发布清单管理（model_plane digest 门禁）
 │  ├─ retrieval/       # 检索管线（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
 │  ├─ scheduler/       # 调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
+│  ├─ persona/         # 灵魂系统（Phase I-VIII 全部完成，2026-03-23）
+│  │  ├─ persona_engine.py      # PersonaEngine + 7 维特质向量（Phase I）
+│  │  ├─ personality_traits.py  # PersonalityTraits 数据结构
+│  │  ├─ emotion_reactivity.py  # 情感-人格耦合（Phase II）
+│  │  ├─ expression_adapter.py  # 表达策略适配器（Phase II）
+│  │  ├─ self_model.py          # 自我意识模型（Phase III）
+│  │  ├─ self_reflection.py     # 自省日记（Phase III）
+│  │  ├─ persona_growth.py      # 人格成长系统（Phase IV）
+│  │  ├─ trait_drift_guard.py   # 安全机制（Phase IV）
+│  │  ├─ drift_detector.py      # 人格漂移检测（Phase VI）
+│  │  ├─ emotion_persistence.py # 跨会话情感连续性（Phase VII）
+│  │  └─ proactive_voice.py     # 场景化主动表达（Phase VIII）
 │  ├─ skills/          # 技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
 │  ├─ tools/           # 工具系统（Broker / Catalog / MCP 适配 / Selector）
 │  └─ vision/          # 视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
 ├─ edge_client/
 │  ├─ app/             # Edge FastAPI RPC 网关（/v1/edge/*）
 │  ├─ actuators/       # TTS/VTS 执行（语音合成 + VTS WebSocket 驱动）
-│  ├─ channels/        # 本地渠道适配（如微信监听）
+│  ├─ channels/        # 本地渠道适配（已废弃 wechat_listener，保留 input_reporter）
+│  ├─ gateway/         # 统一消息网关（:19000，Phase 1-5 全部完成）
+│  │  ├─ adapters/     # 平台适配器（wechat/qq/feishu/wecom）
+│  │  ├─ media/        # 多媒体处理（image/voice/file handler）
+│  │  ├─ models.py     # UnifiedMessage / UnifiedReply / Platform / MsgType
+│  │  ├─ normalizer.py # 去重 + 脱敏 + 校验（MessageNormalizer）
+│  │  ├─ router.py     # 路由到 Host Brain（复用 EdgeInputReporter）
+│  │  ├─ outbound.py   # 回复分发器（OutboundDispatcher）
+│  │  ├─ server.py     # FastAPI Webhook Server
+│  │  └─ bootstrap.py  # start_gateway() 一键启动
+│  ├─ services/        # Edge 侧服务层
+│  │  ├─ wx_db_service.py  # 微信解密数据库查询（联系人/消息/搜索/朋友圈）
+│  │  └─ wx_watcher.py    # watchdog 文件系统监听（延迟 <100ms）
 │  ├─ proofs/          # 资源证明与门控（before/after 证据采集）
 │  ├─ rpc/             # 事件上报、认证、协议（含 fallback_llm / resource_gate）
 │  ├─ runtime/         # 运行时引导与健康快照
@@ -112,7 +139,8 @@ Natsume_Ai/
    ├─ bench/           # 性能基准测试
    ├─ doc_lint/        # 文档检查与交付门禁
    ├─ replay/          # 审计回放工具
-   └─ static_scan/     # 静态扫描工具（Bond SSOT 单写者检查）
+   ├─ static_scan/     # 静态扫描工具（Bond SSOT 单写者检查）
+   └─ wx4_decrypt.py   # 微信数据库解密脚本（pymem 提取密钥 + AES-256-CBC 解密）
 ```
 
 ## 4. 分层架构
@@ -189,12 +217,15 @@ Natsume_Ai/
 | 模块 | 代码位置 | 职责 |
 |---|---|---|
 | RPC 网关 | `edge_client/app/fastapi_app.py` | 对外提供 `/v1/edge/*`，含鉴权与能力开关 |
-| 运行时引导 | `edge_client/runtime/bootstrap.py` | 组装 ASR/TTS/VTS/Reporter 等运行组件 |
+| 运行时引导 | `edge_client/runtime/bootstrap.py` | 组装 ASR/TTS/VTS/Reporter/Gateway 等运行组件 |
 | 语音感知 | `edge_client/senses/asr.py` | ASR 采集与状态控制 |
 | 执行动作 | `edge_client/actuators/vts_driver.py` | `talk_start/talk_end/set_expression/trigger_hotkey` |
 | 事件上报 | `edge_client/rpc/event_reporter.py` | 批量上报到 Host `/v1/edge/events` |
 | 资源证明 | `edge_client/proofs/resource_gate.py` | before/after 证据采集（写入 Vault 的原始材料来源）|
 | 兜底模型门控 | `edge_client/fallback_model.py` | FallbackModelGate（draft_only 标记，默认卸载）|
+| **统一消息网关** | `edge_client/gateway/` | 跨平台消息接入（微信/QQ/飞书/企微），监听 :19000 |
+| 微信数据库服务 | `edge_client/services/wx_db_service.py` | 解密 SQLite 查询（联系人/消息/搜索/朋友圈）|
+| 微信文件监听 | `edge_client/services/wx_watcher.py` | watchdog 实时监听，消息延迟 <100ms |
 
 ## 6. 服务请求链路
 
@@ -361,6 +392,19 @@ flowchart LR
 - `POST /v1/edge/automate`
 - `POST /v1/edge/proactive_push`
 - `GET /v1/edge/proactive_messages`
+- `GET /v1/edge/wx/contacts` — 微信联系人列表（WxDbService）
+- `GET /v1/edge/wx/messages` — 微信聊天记录查询
+- `POST /v1/edge/wx/search` — 微信全文搜索
+- `POST /v1/edge/wx/refresh` — 重新执行解密（密钥变化时）
+- `GET /v1/edge/wx/stats` — 解密数据库统计
+- `GET /v1/edge/wx/moments` — 朋友圈读取（Sns.db）
+
+### 9.3 统一消息网关（`edge_client/gateway/server.py`，:19000）
+
+- `POST /v1/gateway/{platform}/webhook` — 接收平台消息推送（wechat/qq/feishu/wecom）
+- `POST /v1/gateway/reply` — Host Brain 回复指令分发
+- `GET /v1/gateway/health` — 各平台适配器健康检查
+- `GET /v1/gateway/stats` — 标准化 + 路由统计
 
 ## 10. 维护约定
 
@@ -374,5 +418,7 @@ flowchart LR
 ## 11. 关联文档
 
 - 架构总览入口：`README.md`
-- 数据流文档：`docs/50_project/dataflow_report_20260311.md`
-- 多 Agent 历史演进：`docs/50_project/AGENT_ORCHESTRATION_DETAIL_2026-03-09.md`
+- 数据流文档：`docs/50_project/arch/dataflow_report.md`
+- 多 Agent 历史演进：`docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md`
+- 统一消息网关设计：`docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md`
+- 灵魂系统升级路径：`docs/15_theory/SOUL_SYSTEM_FULL_UPGRADE_PATH.md`
