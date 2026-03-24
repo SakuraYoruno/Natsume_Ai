@@ -689,7 +689,7 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 ## 十三、Gateway Orchestrator Agent 设计
 
 > 日期：2026-03-24
-> 状态：**实施中**
+> 状态：**已实施完成**
 > 关联模块：`host_brain/app/handlers/gateway_orchestrator_handler.py`
 
 ### 13.1 问题背景
@@ -703,6 +703,7 @@ Gateway 输入的行为需求与 ASR 链路存在本质差异：
 | VTS 表情驱动 | ✅ 驱动 | ❌ 不驱动 |
 | 回复目标 | 本地扬声器 | 聊天平台（微信/QQ/飞书/企微） |
 | 可选语音回复 | — | ✅ TTS 生成日语音频推送到平台（不本地播放、不驱动 VTS） |
+| 时效性要求 | 🔴 高（首字 token 极速） | 🟢 低（对延迟容忍度高） |
 
 如果将这些差异作为条件分支塞进现有 `chat_stream_handler` 和 `SceneRouter`，会导致 if-else 地狱（"屎山"风险）。
 
@@ -810,7 +811,61 @@ host_brain/
 │   └── prompt_builder.py                   # 新增 SCENE_GATEWAY 常量
 ```
 
-### 13.7 不侵入原则
+### 13.7 完整链路对齐（与 SCENE_CHAT 100% 对齐）
+
+Gateway Orchestrator 的 CHAT 场景复用 SCENE_CHAT 的**完整 prompt 构建管线**，确保七路召回和情感层完整接入。
+
+#### 七路召回接入
+
+| 环节 | 实现方式 | 状态 |
+|------|---------|------|
+| RecallFusionNode 预召回 | 上游 `run_as_sse_adapter` 前置节点已执行，结果通过 `_pre_recall_evidence` 参数注入 | ✅ |
+| StateArbiter world_canon | `_resolve_state_arbiter_all()` 并行查询 | ✅ |
+| StateArbiter style_canon | 同上 | ✅ |
+| StateArbiter episodic_latest | 同上 | ✅ |
+| StateArbiter bond_graph | 同上 | ✅ |
+| RecallPackBuilder slot 分配 | `_build_recall_pack()` 复用 `_build_recall_pack_inputs` + `_recall_pack_to_retrieval_evidence_items` | ✅ |
+| recall_slot_text 注入 | 提取 RecallPack 各 slot 文本，传入 `build_chat_runtime_input()` | ✅ |
+
+#### 情感层接入
+
+| 环节 | 实现方式 | 状态 |
+|------|---------|------|
+| `normalize_chat_emotion_context()` | 完整 VAD 映射 + 时间衰减 + 情绪混合 + 情感回声 | ✅ |
+| `build_chat_emotion_snapshot()` | 快照构建（source="gateway_pre_llm"） | ✅ |
+| `adjust_gen_params_for_emotion()` | 在 `_build_stream_chat_prompt` 内自动调用，动态调整 temperature/top_p | ✅ |
+| EMOTION_BINDING prompt block | 通过 `render_node_generation_prompt()` 自动注入 system prompt | ✅ |
+| Bond 动态写入 | `_run_post_generation_tasks()` 内 `BondDynamicsWriter` 并行执行 | ✅ |
+
+#### Prompt 构建链路
+
+| 环节 | 实现方式 | 状态 |
+|------|---------|------|
+| `build_chat_runtime_input()` | 统一运行时输入（含 retrieval/emotion/recall_slot/bond 所有上下文） | ✅ |
+| `_build_stream_chat_prompt()` | 完整 prompt 组装（7 个上下文槽位 + 角色指令 + 情感绑定） | ✅ |
+| `render_target_lang="zh"` | Gateway 强制中文输出 | ✅ |
+
+#### 后置安全任务
+
+| 环节 | 实现方式 | 状态 |
+|------|---------|------|
+| Airlock Ingress 检疫 | `quarantine_ingress()` 对 LLM 输出做内容安全检疫 | ✅ |
+| 情节记忆写入 | `persist_chat_episodic_memory()` 写入 EpisodicStore | ✅ |
+| Bond 动态写入 | `BondDynamicsWriter` 更新关系指标 | ✅ |
+| 可观测性持久化 | `persist_chat_observability_rows()` 写入 Ledger | ✅ |
+| 所有后置任务并行执行 | `asyncio.gather()` | ✅ |
+
+#### 与 SCENE_CHAT 的唯一差异
+
+| 差异点 | SCENE_CHAT | SCENE_GATEWAY |
+|--------|-----------|---------------|
+| `render_target_lang` | `infer_render_target_lang()` 自动推断 | 强制 `"zh"`（中文） |
+| TTS 触发条件 | 始终触发 | 仅 `need_voice=True` 时触发 |
+| TTS 行为 | 本地播放 + VTS 驱动 | `suppress_local_play=True, suppress_vts=True` |
+| LLM 超时 | 15s | 30s（时效性要求低） |
+| VTS 表情驱动 | ✅ | ❌ 跳过 |
+
+### 13.8 不侵入原则
 
 | 保证 | 说明 |
 |------|------|
@@ -823,3 +878,7 @@ host_brain/
 ### 决策 5：为什么不直接用独立 async 函数？
 
 独立 async 函数会绕过 `run_as_sse_adapter` 的全部 9 个安全节点（AirlockQuarantine、Governor、QAContract、Audit、AirlockSanitizer 等），违反宪法级约束"输入→语义内核→Governor裁决→Skills→Audit"。每次安全链路升级（如新增 R9 规则）都必须记得同步改 Orchestrator，维护成本高且容易遗漏。
+
+### 决策 6：为什么 Gateway Orchestrator 要完整复用 SCENE_CHAT 的 prompt 构建管线？
+
+Gateway 链路对时效性要求较低（不像 ASR 日常对话的首字 token 必须快），因此可以承受完整的七路召回 + StateArbiter + RecallPackBuilder + 情感层的全部开销。完整复用确保 Gateway 回复的质量与 ASR 链路完全一致（同样的世界观约束、同样的情感感知、同样的关系上下文），仅在输出语言（zh vs ja）和 TTS 行为上做差异化。
