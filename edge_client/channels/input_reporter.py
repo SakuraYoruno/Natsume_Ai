@@ -31,6 +31,7 @@ class InputSourceType(str, Enum):
     """输入来源类型。"""
     ASR = "ASR"           # 语音识别
     WECHAT = "WECHAT"     # 微信小号消息
+    GATEWAY = "GATEWAY"   # 统一消息网关（微信/QQ/飞书/企微等外部平台）
 
 
 @dataclass(frozen=True)
