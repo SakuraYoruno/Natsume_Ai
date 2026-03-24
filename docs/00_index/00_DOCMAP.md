@@ -70,7 +70,11 @@
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/arch/dataflow_report.md
-  用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
+  用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md
+  用途：外部消息统一网关（Unified Message Gateway）完整设计方案（2026-03-24）。包含当前 UIA 桌面自动化方案的问题诊断、协议级网关架构设计、UnifiedMessage/UnifiedReply 数据模型、各平台适配器设计（微信/QQ/飞书/企微）、与现有 EdgeInputReporter 的集成方案、EdgeConfig 扩展配置、以及分阶段实施路线图。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/phases/MULTI_AGENT_UPGRADE_PLAN.md
