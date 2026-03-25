@@ -365,6 +365,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if reply.msg_type == MsgType.TEXT and is_top_target and not self._allow_keyboard_search_fallback():
                 if self._send_to_top_session_global_wake(reply):
                     return True
+                if self._send_via_global_keyboard_flow(reply):
+                    logger.info(
+                        "WeChatAdapter: top-session fallback switched to global keyboard flow conversation=%s",
+                        reply.conversation_id,
+                    )
+                    return True
                 self._log_window_snapshot(
                     main_wnd,
                     reason="direct_top_session_input_unavailable",
