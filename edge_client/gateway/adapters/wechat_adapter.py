@@ -641,6 +641,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             normalized_name = self._normalize_match_text(name)
             if not normalized_name:
                 continue
+            if self._is_noise_click_target(normalized_name):
+                continue
             score = -1
             for candidate in normalized_candidates:
                 if normalized_name == candidate:
@@ -778,10 +780,25 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 result_items.extend(list(main_wnd.descendants(control_type=control_type)))
             except Exception:
                 continue
+        try:
+            wnd_rect = main_wnd.rectangle()
+            left_bound = int(getattr(wnd_rect, "left", 0))
+            right_bound = int(getattr(wnd_rect, "right", 0))
+            left_panel_max_x = left_bound + int((right_bound - left_bound) * 0.40)
+        except Exception:
+            left_panel_max_x = 999999
         for item in result_items[:240]:
+            try:
+                rect = item.rectangle()
+                if int(getattr(rect, "left", 0)) > left_panel_max_x:
+                    continue
+            except Exception:
+                pass
             name = self._extract_control_text(item)
             normalized_name = self._normalize_match_text(name)
             if not normalized_name:
+                continue
+            if self._is_noise_click_target(normalized_name):
                 continue
             for candidate in normalized_candidates:
                 if len(candidate) < 2:
@@ -834,6 +851,38 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _normalize_match_text(text: str) -> str:
         return str(text or "").strip().replace(" ", "").replace("\u3000", "").casefold()
+
+    def _is_noise_click_target(self, normalized_text: str) -> bool:
+        text = str(normalized_text or "")
+        if not text:
+            return True
+        blocked_tokens = [
+            "\u641c\u7d22",
+            "\u76f8\u5173\u641c\u7d22",
+            "\u5386\u53f2\u8bb0\u5f55",
+            "\u5220\u9664",
+            "\u6e05\u7a7a",
+            "\u91cd\u65b0\u52a0\u8f7d",
+            "\u540e\u9000",
+            "\u524d\u8fdb",
+            "\u6700\u5c0f\u5316",
+            "\u6700\u5927\u5316",
+            "\u5173\u95ed",
+            "search",
+            "history",
+            "reload",
+            "delete",
+            "clear",
+            "back",
+            "forward",
+            "close",
+            "minimize",
+            "maximize",
+        ]
+        for token in blocked_tokens:
+            if token in text:
+                return True
+        return False
 
     def _is_chat_context_ready(self, main_wnd: Any) -> bool:
         if self._is_search_overlay_active(main_wnd):
