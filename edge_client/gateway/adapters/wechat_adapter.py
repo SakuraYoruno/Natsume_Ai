@@ -283,13 +283,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
                 if self._send_via_keyboard_flow(main_wnd, reply):
-                    if reply.msg_type != MsgType.TEXT:
-                        return True
-                    return self._verify_send_outcome(
-                        conversation_id=reply.conversation_id,
-                        expected_text=reply.content,
-                        since_ts_ms=send_started_ts,
-                    )
+                    return True
                 if not self._allow_active_chat_fallback():
                     return False
                 logger.warning(
@@ -311,11 +305,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 )
                 if reply.msg_type == MsgType.TEXT:
                     if self._send_via_keyboard_flow(main_wnd, reply):
-                        return self._verify_send_outcome(
-                            conversation_id=reply.conversation_id,
-                            expected_text=reply.content,
-                            since_ts_ms=send_started_ts,
-                        )
+                        return True
                     self._set_clipboard_text(reply.content)
                     sent = self._paste_and_send(main_wnd, main_wnd)
                     if not sent:
@@ -895,9 +885,22 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 else:
                     main_wnd.type_keys("{ENTER}")
                 time.sleep(0.35)
+                attempt_ts_ms = int(time.time() * 1000)
                 self._set_clipboard_text(reply.content)
-                if self._paste_and_send(main_wnd, main_wnd):
+                if not self._paste_and_send(main_wnd, main_wnd):
+                    continue
+                if self._verify_send_outcome(
+                    conversation_id=reply.conversation_id,
+                    expected_text=reply.content,
+                    since_ts_ms=attempt_ts_ms,
+                    timeout_s=2.5,
+                ):
                     return True
+                logger.warning(
+                    "WeChatAdapter: keyboard flow verify failed conversation=%s keyword=%s",
+                    reply.conversation_id,
+                    keyword,
+                )
             except Exception as exc:
                 logger.warning(
                     "WeChatAdapter: keyboard flow failed conversation=%s keyword=%s err=%s",
