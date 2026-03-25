@@ -973,7 +973,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 try:
                     import psutil
                     proc_name = str(psutil.Process(int(pid)).name() or "").lower()
-                    if proc_name in {"weixin.exe", "wechat.exe", "wechatappex.exe", "wechatapp.exe"}:
+                    if proc_name in {
+                        "weixin.exe",
+                        "weixinappex.exe",
+                        "weixinapp.exe",
+                        "wechat.exe",
+                        "wechatappex.exe",
+                        "wechatapp.exe",
+                    }:
                         is_weixin_process = True
                 except Exception:
                     is_weixin_process = False
@@ -1151,7 +1158,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     process_name = str(psutil.Process(proc_id).name() or "").lower()
             except Exception:
                 process_name = ""
-            is_weixin_process = process_name in {"weixin.exe", "wechat.exe", "wechatappex.exe", "wechatapp.exe"}
+            is_weixin_process = process_name in {
+                "weixin.exe",
+                "weixinappex.exe",
+                "weixinapp.exe",
+                "wechat.exe",
+                "wechatappex.exe",
+                "wechatapp.exe",
+            }
             if self._is_blocked_wechat_window_class(class_norm):
                 continue
             if (
