@@ -238,28 +238,30 @@ class WeChatAdapter(AbstractPlatformAdapter):
     def _send_via_pywinauto(self, reply: UnifiedReply) -> bool:
         """通过 pywinauto 精确定位输入框并发送消息。"""
         try:
-            import pywinauto
             from pywinauto import Application
         except ImportError:
             logger.error("WeChatAdapter: pywinauto 未安装，无法发送消息")
             return False
 
         try:
-            app = Application(backend="uia")
-            try:
-                app.connect(path="Weixin.exe")
-            except Exception:
-                app.connect(title_re="微信")
+            main_wnd = self._resolve_desktop_wechat_window()
+            app = None
+            if main_wnd is None:
+                app = Application(backend="uia")
+                try:
+                    app.connect(title_re=".*(Weixin|WeChat|WX|微信).*", timeout=1.5)
+                except Exception:
+                    app = None
 
-            main_wnd = self._resolve_main_window(app)
+            if main_wnd is None and app is not None:
+                main_wnd = self._resolve_main_window(app)
             if main_wnd is None:
                 try:
-                    alt_app = Application(backend="uia").connect(title_re="微信")
+                    alt_app = Application(backend="uia")
+                    alt_app.connect(title_re=".*(Weixin|WeChat|WX|微信).*", timeout=1.5)
                     main_wnd = self._resolve_main_window(alt_app)
                 except Exception:
                     main_wnd = None
-            if main_wnd is None:
-                main_wnd = self._resolve_desktop_wechat_window()
             if main_wnd is None:
                 logger.error("WeChatAdapter: main window not found")
                 return False
