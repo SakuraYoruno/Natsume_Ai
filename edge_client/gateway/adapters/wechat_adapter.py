@@ -579,55 +579,60 @@ class WeChatAdapter(AbstractPlatformAdapter):
         time.sleep(0.2)
 
         for keyword in candidates[:3]:
-            try:
-                logger.info(
-                    "WeChatAdapter: global keyboard flow try conversation=%s keyword=%s foreground=%s",
-                    reply.conversation_id,
-                    keyword,
-                    self._foreground_window_debug(),
-                )
-                send_keys("^1")
-                time.sleep(0.12)
-                send_keys("{ESC}")
-                time.sleep(0.08)
-                send_keys("^n")
-                time.sleep(0.15)
-                send_keys("^a{BACKSPACE}")
-                self._set_clipboard_text(keyword)
-                send_keys("^v")
-                time.sleep(0.28)
-                send_keys("{ENTER}")
-                time.sleep(0.32)
-                attempt_ts_ms = int(time.time() * 1000)
-                self._set_clipboard_text(reply.content)
-                send_keys("^v")
-                time.sleep(0.05)
-                send_keys("{ENTER}")
-                if self._verify_send_outcome(
-                    conversation_id=reply.conversation_id,
-                    expected_text=reply.content,
-                    since_ts_ms=attempt_ts_ms,
-                    timeout_s=2.8,
-                ):
+            for search_shortcut in ("^n", "^f"):
+                try:
                     logger.info(
-                        "WeChatAdapter: global keyboard flow success conversation=%s keyword=%s",
+                        "WeChatAdapter: global keyboard flow try conversation=%s keyword=%s shortcut=%s foreground=%s",
                         reply.conversation_id,
                         keyword,
+                        search_shortcut,
+                        self._foreground_window_debug(),
                     )
-                    return True
-                logger.warning(
-                    "WeChatAdapter: global keyboard flow verify failed conversation=%s keyword=%s",
-                    reply.conversation_id,
-                    keyword,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "WeChatAdapter: global keyboard flow failed conversation=%s keyword=%s err=%s",
-                    reply.conversation_id,
-                    keyword,
-                    exc,
-                )
-                continue
+                    send_keys("^1")
+                    time.sleep(0.12)
+                    send_keys("{ESC}")
+                    time.sleep(0.08)
+                    send_keys(search_shortcut)
+                    time.sleep(0.15)
+                    send_keys("^a{BACKSPACE}")
+                    self._set_clipboard_text(keyword)
+                    send_keys("^v")
+                    time.sleep(0.28)
+                    send_keys("{ENTER}")
+                    time.sleep(0.32)
+                    attempt_ts_ms = int(time.time() * 1000)
+                    self._set_clipboard_text(reply.content)
+                    send_keys("^v")
+                    time.sleep(0.05)
+                    send_keys("{ENTER}")
+                    if self._verify_send_outcome(
+                        conversation_id=reply.conversation_id,
+                        expected_text=reply.content,
+                        since_ts_ms=attempt_ts_ms,
+                        timeout_s=2.8,
+                    ):
+                        logger.info(
+                            "WeChatAdapter: global keyboard flow success conversation=%s keyword=%s shortcut=%s",
+                            reply.conversation_id,
+                            keyword,
+                            search_shortcut,
+                        )
+                        return True
+                    logger.warning(
+                        "WeChatAdapter: global keyboard flow verify failed conversation=%s keyword=%s shortcut=%s",
+                        reply.conversation_id,
+                        keyword,
+                        search_shortcut,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "WeChatAdapter: global keyboard flow failed conversation=%s keyword=%s shortcut=%s err=%s",
+                        reply.conversation_id,
+                        keyword,
+                        search_shortcut,
+                        exc,
+                    )
+                    continue
         return False
 
     def _send_to_top_session_global_wake(self, reply: UnifiedReply) -> bool:
@@ -1891,65 +1896,69 @@ class WeChatAdapter(AbstractPlatformAdapter):
         except Exception:
             send_keys = None
         for keyword in candidates[:3]:
-            try:
+            for search_shortcut in ("^n", "^f"):
                 try:
-                    main_wnd.set_focus()
-                except Exception:
-                    pass
-                logger.info(
-                    "WeChatAdapter: keyboard flow try conversation=%s keyword=%s",
-                    reply.conversation_id,
-                    keyword,
-                )
-                if send_keys is not None:
-                    send_keys("{ESC}")
-                else:
-                    main_wnd.type_keys("{ESC}")
-                time.sleep(0.08)
-                if send_keys is not None:
-                    send_keys("^n")
-                else:
-                    main_wnd.type_keys("^n")
-                time.sleep(0.22)
-                if send_keys is not None:
-                    send_keys("^a{BACKSPACE}")
-                else:
-                    main_wnd.type_keys("^a{BACKSPACE}")
-                self._set_clipboard_text(keyword)
-                if send_keys is not None:
-                    send_keys("^v")
-                else:
-                    main_wnd.type_keys("^v")
-                time.sleep(0.28)
-                if send_keys is not None:
-                    send_keys("{ENTER}")
-                else:
-                    main_wnd.type_keys("{ENTER}")
-                time.sleep(0.35)
-                attempt_ts_ms = int(time.time() * 1000)
-                self._set_clipboard_text(reply.content)
-                if not self._paste_and_send(main_wnd, main_wnd):
+                    try:
+                        main_wnd.set_focus()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "WeChatAdapter: keyboard flow try conversation=%s keyword=%s shortcut=%s",
+                        reply.conversation_id,
+                        keyword,
+                        search_shortcut,
+                    )
+                    if send_keys is not None:
+                        send_keys("{ESC}")
+                    else:
+                        main_wnd.type_keys("{ESC}")
+                    time.sleep(0.08)
+                    if send_keys is not None:
+                        send_keys(search_shortcut)
+                    else:
+                        main_wnd.type_keys(search_shortcut)
+                    time.sleep(0.22)
+                    if send_keys is not None:
+                        send_keys("^a{BACKSPACE}")
+                    else:
+                        main_wnd.type_keys("^a{BACKSPACE}")
+                    self._set_clipboard_text(keyword)
+                    if send_keys is not None:
+                        send_keys("^v")
+                    else:
+                        main_wnd.type_keys("^v")
+                    time.sleep(0.28)
+                    if send_keys is not None:
+                        send_keys("{ENTER}")
+                    else:
+                        main_wnd.type_keys("{ENTER}")
+                    time.sleep(0.35)
+                    attempt_ts_ms = int(time.time() * 1000)
+                    self._set_clipboard_text(reply.content)
+                    if not self._paste_and_send(main_wnd, main_wnd):
+                        continue
+                    if self._verify_send_outcome(
+                        conversation_id=reply.conversation_id,
+                        expected_text=reply.content,
+                        since_ts_ms=attempt_ts_ms,
+                        timeout_s=2.5,
+                    ):
+                        return True
+                    logger.warning(
+                        "WeChatAdapter: keyboard flow verify failed conversation=%s keyword=%s shortcut=%s",
+                        reply.conversation_id,
+                        keyword,
+                        search_shortcut,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "WeChatAdapter: keyboard flow failed conversation=%s keyword=%s shortcut=%s err=%s",
+                        reply.conversation_id,
+                        keyword,
+                        search_shortcut,
+                        exc,
+                    )
                     continue
-                if self._verify_send_outcome(
-                    conversation_id=reply.conversation_id,
-                    expected_text=reply.content,
-                    since_ts_ms=attempt_ts_ms,
-                    timeout_s=2.5,
-                ):
-                    return True
-                logger.warning(
-                    "WeChatAdapter: keyboard flow verify failed conversation=%s keyword=%s",
-                    reply.conversation_id,
-                    keyword,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "WeChatAdapter: keyboard flow failed conversation=%s keyword=%s err=%s",
-                    reply.conversation_id,
-                    keyword,
-                    exc,
-                )
-                continue
         return False
 
     def _verify_send_outcome(
