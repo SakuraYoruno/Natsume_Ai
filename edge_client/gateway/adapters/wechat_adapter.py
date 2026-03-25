@@ -332,14 +332,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if self._window_interaction_score(main_wnd) <= 0:
                 class_name = str(getattr(getattr(main_wnd, "element_info", None), "class_name", "") or "")
                 class_norm = self._normalize_match_text(class_name)
-                if "qwindowicon" in class_norm:
-                    logger.warning("WeChatAdapter: main window is qwindow shell, abort send")
-                    self._log_window_snapshot(
-                        main_wnd,
-                        reason="main_window_qwindow_shell",
-                        conversation_id=reply.conversation_id,
-                    )
-                    return False
+                logger.warning(
+                    "WeChatAdapter: main window interaction score is low, continue with keyboard fallback class=%s",
+                    class_norm,
+                )
+                self._log_window_snapshot(
+                    main_wnd,
+                    reason="main_window_low_interaction",
+                    conversation_id=reply.conversation_id,
+                )
             try:
                 main_wnd.restore()
             except Exception:
