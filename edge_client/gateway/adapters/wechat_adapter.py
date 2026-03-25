@@ -842,6 +842,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 last_exc = exc
                 logger.warning("WeChatAdapter: paste/send failed target=%s err=%s", label, exc)
                 continue
+        try:
+            from pywinauto.keyboard import send_keys
+            send_keys("^v")
+            time.sleep(0.08)
+            send_keys("{ENTER}")
+            return True
+        except Exception as exc:
+            last_exc = exc
         if last_exc is not None:
             logger.error("WeChatAdapter: paste/send failed all targets err=%s", last_exc)
         return False
@@ -852,20 +860,41 @@ class WeChatAdapter(AbstractPlatformAdapter):
         candidates = self._build_search_candidates(reply.conversation_id)
         if not candidates:
             return False
+        try:
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            send_keys = None
         for keyword in candidates[:3]:
             try:
                 try:
                     main_wnd.set_focus()
                 except Exception:
                     pass
-                main_wnd.type_keys("^f")
-                time.sleep(0.12)
-                main_wnd.type_keys("^a{BACKSPACE}")
-                self._set_clipboard_text(keyword)
-                main_wnd.type_keys("^v")
-                time.sleep(0.18)
-                main_wnd.type_keys("{ENTER}")
+                logger.info(
+                    "WeChatAdapter: keyboard flow try conversation=%s keyword=%s",
+                    reply.conversation_id,
+                    keyword,
+                )
+                if send_keys is not None:
+                    send_keys("^f")
+                else:
+                    main_wnd.type_keys("^f")
                 time.sleep(0.22)
+                if send_keys is not None:
+                    send_keys("^a{BACKSPACE}")
+                else:
+                    main_wnd.type_keys("^a{BACKSPACE}")
+                self._set_clipboard_text(keyword)
+                if send_keys is not None:
+                    send_keys("^v")
+                else:
+                    main_wnd.type_keys("^v")
+                time.sleep(0.28)
+                if send_keys is not None:
+                    send_keys("{ENTER}")
+                else:
+                    main_wnd.type_keys("{ENTER}")
+                time.sleep(0.35)
                 self._set_clipboard_text(reply.content)
                 if self._paste_and_send(main_wnd, main_wnd):
                     return True
@@ -885,7 +914,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         conversation_id: str,
         expected_text: str,
         since_ts_ms: int,
-        timeout_s: float = 4.0,
+        timeout_s: float = 8.0,
     ) -> bool:
         expected = str(expected_text or "").strip()
         if not expected:
