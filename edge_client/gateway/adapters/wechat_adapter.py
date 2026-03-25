@@ -17,6 +17,7 @@ import logging
 import json
 import os
 import re
+import subprocess
 import time
 from typing import Any
 
@@ -311,6 +312,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     main_wnd = None
             if main_wnd is None:
+                self._wake_wechat_client()
                 if self._send_to_top_session_global_wake(reply):
                     return True
                 if self._allow_keyboard_search_fallback() and self._send_via_global_keyboard_flow(reply):
@@ -600,6 +602,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         hwnd = self._find_wechat_hwnd()
         if not hwnd:
+            self._wake_wechat_client()
+            hwnd = self._find_wechat_hwnd()
+        if not hwnd:
             return False
         try:
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -639,6 +644,34 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 exc,
             )
             return False
+
+    def _wake_wechat_client(self) -> bool:
+        candidates: list[str] = []
+        env_keys = (
+            "WECHAT_EXE_PATH",
+            "WECHAT_EXECUTABLE_PATH",
+            "EDGE_WECHAT_EXECUTABLE_PATH",
+        )
+        for key in env_keys:
+            value = str(os.environ.get(key, "") or "").strip()
+            if value:
+                candidates.append(value)
+        candidates.append(r"C:\Program Files\Tencent\Weixin\Weixin.exe")
+
+        for exe_path in candidates:
+            path = str(exe_path or "").strip()
+            if not path:
+                continue
+            if not os.path.exists(path):
+                continue
+            try:
+                subprocess.Popen([path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(0.8)
+                logger.info("WeChatAdapter: wake wechat client via executable=%s", path)
+                return True
+            except Exception:
+                continue
+        return False
 
     def _find_wechat_hwnd(self) -> int:
         try:
