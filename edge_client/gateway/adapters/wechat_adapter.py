@@ -311,6 +311,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     main_wnd = None
             if main_wnd is None:
+                if self._send_to_top_session_global_wake(reply):
+                    return True
                 if self._allow_keyboard_search_fallback() and self._send_via_global_keyboard_flow(reply):
                     return True
                 logger.error("WeChatAdapter: main window not found")
@@ -348,6 +350,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             ):
                 return True
             if reply.msg_type == MsgType.TEXT and is_top_target and not self._allow_keyboard_search_fallback():
+                if self._send_to_top_session_global_wake(reply):
+                    return True
                 self._log_window_snapshot(
                     main_wnd,
                     reason="direct_top_session_input_unavailable",
@@ -581,6 +585,60 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 )
                 continue
         return False
+
+    def _send_to_top_session_global_wake(self, reply: UnifiedReply) -> bool:
+        if reply.msg_type != MsgType.TEXT:
+            return False
+        if not self._is_top_session_target(reply.conversation_id):
+            return False
+        try:
+            import win32gui
+            import win32con
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            return False
+
+        hwnd = self._find_wechat_hwnd()
+        if not hwnd:
+            return False
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        except Exception:
+            pass
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        time.sleep(0.18)
+        try:
+            send_keys("^1")
+            time.sleep(0.10)
+            send_keys("{ESC}")
+            time.sleep(0.08)
+            attempt_ts_ms = int(time.time() * 1000)
+            self._set_clipboard_text(reply.content)
+            send_keys("^v")
+            time.sleep(0.05)
+            send_keys("{ENTER}")
+            ok = self._verify_send_outcome(
+                conversation_id=reply.conversation_id,
+                expected_text=reply.content,
+                since_ts_ms=attempt_ts_ms,
+                timeout_s=2.8,
+            )
+            if ok:
+                logger.info(
+                    "WeChatAdapter: top-session global-wake send success conversation=%s",
+                    reply.conversation_id,
+                )
+            return ok
+        except Exception as exc:
+            logger.warning(
+                "WeChatAdapter: top-session global-wake send failed conversation=%s err=%s",
+                reply.conversation_id,
+                exc,
+            )
+            return False
 
     def _find_wechat_hwnd(self) -> int:
         try:
