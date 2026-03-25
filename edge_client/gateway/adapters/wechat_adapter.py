@@ -14,6 +14,7 @@ Outbound（发送）：
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import time
@@ -208,6 +209,21 @@ class WeChatAdapter(AbstractPlatformAdapter):
             }
             return False
 
+        if reply.msg_type == MsgType.TEXT:
+            normalized_text = self._normalize_outbound_text(reply.content)
+            if normalized_text != str(reply.content or ""):
+                logger.info("WeChatAdapter: normalized outbound text payload conversation=%s", reply.conversation_id)
+            reply.content = normalized_text
+            if not reply.content.strip():
+                logger.warning("WeChatAdapter: empty outbound text after normalize conversation=%s", reply.conversation_id)
+                self._last_outbound = {
+                    "success": False,
+                    "detail": "empty outbound text",
+                    "elapsed_ms": max(0, int(time.time() * 1000) - start_ms),
+                    "ts_ms": int(time.time() * 1000),
+                }
+                return False
+
         try:
             success = bool(self._send_via_pywinauto(reply))
         except Exception as exc:
@@ -234,6 +250,38 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "ts_ms": int(time.time() * 1000),
         }
         return success
+
+    def _normalize_outbound_text(self, raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        if not (text.startswith("{") and text.endswith("}")):
+            return text
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return text
+        extracted = self._extract_text_from_payload(payload).strip()
+        return extracted if extracted else text
+
+    def _extract_text_from_payload(self, payload: Any) -> str:
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, dict):
+            narrative = payload.get("narrative")
+            if isinstance(narrative, dict):
+                narrative_text = narrative.get("text")
+                if isinstance(narrative_text, str) and narrative_text.strip():
+                    return narrative_text
+            for key in ("content", "text", "reply", "message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+                if isinstance(value, dict):
+                    nested = self._extract_text_from_payload(value)
+                    if nested.strip():
+                        return nested
+        return ""
 
     def _send_via_pywinauto(self, reply: UnifiedReply) -> bool:
         """通过 pywinauto 精确定位输入框并发送消息。"""
