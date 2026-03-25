@@ -454,6 +454,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 return False
             for keyword in candidates:
                 self._clear_and_fill_search(search_box, keyword)
+                try:
+                    search_box.type_keys("{ENTER}")
+                except Exception:
+                    pass
                 time.sleep(0.45)
                 matched = self._find_matched_result_item(main_wnd, candidates)
                 if matched is None:
@@ -554,6 +558,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if text:
                 if "search" in text or "\u641c\u7d22" in text:
                     score += 2
+                if "clear" in text or "\u6e05\u7a7a" in text:
+                    score -= 4
                 if "input" in text or "message" in text or "chat" in text:
                     score -= 2
             if score > best_score:
@@ -604,11 +610,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
         best_item = None
         best_name = ""
         best_score = -1
-        try:
-            list_items = list(main_wnd.descendants(control_type="ListItem"))
-        except Exception:
-            list_items = []
-        for item in list_items[:160]:
+        scan_targets: list[Any] = []
+        for control_type in ("ListItem", "Button"):
+            try:
+                scan_targets.extend(list(main_wnd.descendants(control_type=control_type)))
+            except Exception:
+                continue
+        for item in scan_targets[:240]:
             try:
                 rect = item.rectangle()
                 if int(getattr(rect, "left", 0)) > left_panel_max_x:
@@ -750,11 +758,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if not normalized_candidates:
             return None
 
-        try:
-            result_items = list(main_wnd.descendants(control_type="ListItem"))
-        except Exception:
-            result_items = []
-        for item in result_items[:120]:
+        result_items: list[Any] = []
+        for control_type in ("ListItem", "Button"):
+            try:
+                result_items.extend(list(main_wnd.descendants(control_type=control_type)))
+            except Exception:
+                continue
+        for item in result_items[:240]:
             name = self._extract_control_text(item)
             normalized_name = self._normalize_match_text(name)
             if not normalized_name:
@@ -1216,6 +1226,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     @staticmethod
     def _allow_active_chat_fallback() -> bool:
+        if not WeChatAdapter._allow_keyboard_fallback():
+            return False
         raw = str(os.environ.get("EDGE_WECHAT_SEND_FALLBACK_ACTIVE_CHAT", "") or "").strip().lower()
         if not raw:
             return False
