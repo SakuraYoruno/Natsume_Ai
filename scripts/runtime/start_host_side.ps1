@@ -401,7 +401,18 @@ if (-not $ShowConsoleWindow.IsPresent) {
 $proc = Start-Process @startProcessArgs
 
 $healthUrl = "http://$probeHost`:$Port/health"
-if (-not (Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds)) {
+$healthOk = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds
+if (-not $healthOk) {
+  $readyUrl = "http://$probeHost`:$Port/ready"
+  $healthOk = Wait-Http -Url $readyUrl -TimeoutSeconds 8
+}
+if (-not $healthOk) {
+  $listeningPid = Get-ListeningPid -ProbePort $Port
+  if ($null -ne $listeningPid -and [int]$listeningPid -eq [int]$proc.Id) {
+    $healthOk = $true
+  }
+}
+if (-not $healthOk) {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
   $stderrTail = ""
   if (Test-Path -Path $stderrLog) {

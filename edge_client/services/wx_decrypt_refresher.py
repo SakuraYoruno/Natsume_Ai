@@ -28,14 +28,14 @@ class WxDecryptRefresher:
         key_cache_path: str | Path | None = None,
         refresh_interval_s: int = 3600,
         min_trigger_interval_s: float = 1.5,
-        fs_trigger_interval_s: float = 600.0,
+        fs_trigger_interval_s: float = 3.0,
     ) -> None:
         self._db_storage_dir = Path(db_storage_dir)
         self._decrypt_output_dir = Path(decrypt_output_dir)
         self._key_cache_path = Path(key_cache_path) if key_cache_path else None
         self._refresh_interval_s = max(30, int(refresh_interval_s))
         self._min_trigger_interval_s = max(0.5, float(min_trigger_interval_s))
-        self._fs_trigger_interval_s = max(10.0, float(fs_trigger_interval_s))
+        self._fs_trigger_interval_s = max(1.0, float(fs_trigger_interval_s))
         self._shutdown = threading.Event()
         self._trigger = threading.Event()
         self._worker: threading.Thread | None = None
@@ -127,9 +127,7 @@ class WxDecryptRefresher:
         if is_dir or not src_path:
             return
         file_name = Path(src_path).name
-        if not file_name.endswith(".db"):
-            return
-        if file_name.endswith((".db-wal", ".db-shm", ".db-journal", ".tmp")):
+        if not file_name.endswith((".db", ".db-wal", ".db-shm", ".db-journal")):
             return
         now_mono = time.monotonic()
         if (now_mono - self._last_fs_trigger_monotonic) < self._fs_trigger_interval_s:
