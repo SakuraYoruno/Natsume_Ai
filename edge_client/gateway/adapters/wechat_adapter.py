@@ -294,6 +294,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.error("WeChatAdapter: pywinauto 未安装，无法发送消息")
             return False
 
+        if reply.msg_type == MsgType.TEXT:
+            if self._send_to_top_session_global_wake(reply):
+                return True
+            if self._send_via_global_keyboard_flow(reply):
+                return True
+
         try:
             main_wnd = self._resolve_desktop_wechat_window()
             app = None
