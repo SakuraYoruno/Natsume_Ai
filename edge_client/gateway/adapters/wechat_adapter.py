@@ -1237,8 +1237,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
         pane_controls = counts.get("Pane", 0)
         if strong_controls <= 0 and structural_controls <= 0 and pane_controls <= 0:
             return 0
-        if strong_controls <= 0 and list_controls <= 0 and text_controls <= 2:
-            return 0
         score = (
             strong_controls * 6
             + counts.get("List", 0) * 3
@@ -1250,13 +1248,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if strong_controls <= 0:
             if list_controls >= 2:
                 score += 18
-            elif list_controls >= 1 and text_controls >= 3:
+            elif list_controls >= 1:
                 score += 12
-            elif structural_controls >= 8 and text_controls >= 6:
+            elif structural_controls >= 8:
                 score += 20
-            elif structural_controls >= 4 and pane_controls >= 4 and text_controls >= 4:
+            elif structural_controls >= 4 and pane_controls >= 4:
                 score += 12
-            elif counts.get("Button", 0) >= 6 and pane_controls >= 6 and text_controls >= 5:
+            elif counts.get("Button", 0) >= 6 and pane_controls >= 6:
                 score += 10
             else:
                 return 0
