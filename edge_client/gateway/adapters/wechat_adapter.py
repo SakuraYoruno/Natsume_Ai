@@ -371,6 +371,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
             input_box = self._resolve_input_box(main_wnd)
             if input_box is None:
+                if self._allow_active_chat_fallback():
+                    self._recover_to_chat_home(main_wnd)
+                    self._switch_to_chat_tab(main_wnd)
+                    self._dismiss_search_overlay(main_wnd)
+                    input_box = self._resolve_input_box(main_wnd)
+            if input_box is None:
                 self._log_window_snapshot(
                     main_wnd,
                     reason="input_not_found",
@@ -760,7 +766,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             self._recover_to_chat_home(main_wnd)
             if self._select_chat_from_chat_list(main_wnd, candidates, conversation_id):
                 return True
-            if self._allow_keyboard_fallback():
+            if self._allow_keyboard_search_fallback():
                 return False
 
             search_box = self._resolve_search_box(main_wnd)
@@ -908,6 +914,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         return True
                 except Exception:
                     continue
+        try:
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            send_keys = None
+        try:
+            if send_keys is not None:
+                send_keys("^1")
+                time.sleep(0.15)
+                return True
+        except Exception:
+            pass
         try:
             main_wnd.set_focus()
         except Exception:
@@ -1319,11 +1336,28 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return False
 
     def _recover_to_chat_home(self, main_wnd: Any) -> bool:
+        try:
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            send_keys = None
         for _ in range(3):
             self._dismiss_search_overlay(main_wnd)
             self._switch_to_chat_tab(main_wnd)
             if self._is_chat_context_ready(main_wnd):
                 return True
+            if send_keys is not None:
+                try:
+                    send_keys("^1")
+                except Exception:
+                    pass
+                time.sleep(0.12)
+                try:
+                    send_keys("{ESC}")
+                except Exception:
+                    pass
+                time.sleep(0.12)
+                if self._is_chat_context_ready(main_wnd):
+                    return True
             if self._click_button_by_token(main_wnd, tokens=["\u540e\u9000", "back"]):
                 time.sleep(0.22)
                 continue
