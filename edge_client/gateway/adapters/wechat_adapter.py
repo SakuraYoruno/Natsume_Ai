@@ -385,6 +385,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
                 if not self._allow_keyboard_search_fallback() and not is_top_target:
+                    if self._send_via_global_keyboard_flow(reply):
+                        logger.info(
+                            "WeChatAdapter: ensure-chat-open fallback switched to global keyboard flow conversation=%s",
+                            reply.conversation_id,
+                        )
+                        return True
                     self._log_window_snapshot(
                         main_wnd,
                         reason="ensure_chat_open_failed_search_disabled",
@@ -428,6 +434,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 )
                 if reply.msg_type == MsgType.TEXT:
                     if self._allow_keyboard_search_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
+                        return True
+                    if self._send_via_global_keyboard_flow(reply):
+                        logger.info(
+                            "WeChatAdapter: input-missing fallback switched to global keyboard flow conversation=%s",
+                            reply.conversation_id,
+                        )
                         return True
                     return False
                 if reply.msg_type == MsgType.IMAGE and reply.media_path:
