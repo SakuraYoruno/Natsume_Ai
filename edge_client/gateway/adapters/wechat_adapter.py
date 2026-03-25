@@ -709,7 +709,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         except Exception:
             return 0
 
-        windows: list[tuple[int, int]] = []
+        windows: list[tuple[int, int, str, str, int]] = []
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
@@ -739,7 +739,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
                 if area <= 0:
                     area = 1
-                windows.append((area, hwnd))
+                windows.append((area, hwnd, title, class_name, int(pid)))
             except Exception:
                 return
 
@@ -748,9 +748,19 @@ class WeChatAdapter(AbstractPlatformAdapter):
         except Exception:
             return 0
         if not windows:
+            logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
             return 0
-        windows.sort(reverse=True)
-        return int(windows[0][1])
+        windows.sort(key=lambda item: item[0], reverse=True)
+        best = windows[0]
+        logger.info(
+            "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s",
+            best[1],
+            best[4],
+            best[3],
+            best[2][:80],
+            best[0],
+        )
+        return int(best[1])
 
     def _resolve_main_window(self, app: Any) -> Any | None:
         windows: list[Any] = []
