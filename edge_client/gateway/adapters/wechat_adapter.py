@@ -822,7 +822,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         except Exception:
             return 0
 
-        windows: list[tuple[int, int, str, str, int]] = []
+        windows: list[tuple[int, int, str, str, int, int]] = []
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
@@ -840,7 +840,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 try:
                     import psutil
                     proc_name = str(psutil.Process(int(pid)).name() or "").lower()
-                    if proc_name in {"weixin.exe", "wechat.exe"}:
+                    if proc_name in {"weixin.exe", "wechat.exe", "wechatappex.exe", "wechatapp.exe"}:
                         is_weixin_process = True
                 except Exception:
                     is_weixin_process = False
@@ -855,7 +855,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         return
                 if is_weixin_process and not has_title_match and area < 40_000:
                     return
-                windows.append((area, hwnd, title, class_name, int(pid)))
+                interaction = self._interaction_score_for_hwnd(int(hwnd))
+                windows.append((area, hwnd, title, class_name, int(pid), interaction))
             except Exception:
                 return
 
@@ -866,11 +867,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if not windows:
             logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
             return 0
-        def _pick_score(item: tuple[int, int, str, str, int]) -> int:
-            area, _hwnd, title, class_name, _pid = item
+        def _pick_score(item: tuple[int, int, str, str, int, int]) -> int:
+            area, _hwnd, title, class_name, _pid, interaction = item
             class_norm = self._normalize_match_text(class_name)
             title_norm = self._normalize_match_text(title)
             score = int(area) + int(self._wechat_window_class_bias(class_norm))
+            score += int(interaction) * 1_000_000
+            if interaction <= 0 and "qwindowicon" in class_norm:
+                score -= 800_000
             if any(token in title_norm for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 score += 500_000
             return score
@@ -883,6 +887,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 "class": str(item[3])[:64],
                 "title": str(item[2])[:64],
                 "area": int(item[0]),
+                "interaction": int(item[5]),
                 "score": int(_pick_score(item)),
             }
             for item in windows[:3]
@@ -890,15 +895,31 @@ class WeChatAdapter(AbstractPlatformAdapter):
         logger.info("WeChatAdapter: _find_wechat_hwnd candidates=%s", preview)
         best = windows[0]
         logger.info(
-            "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s score=%s",
+            "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s interaction=%s score=%s",
             best[1],
             best[4],
             best[3],
             best[2][:80],
             best[0],
+            best[5],
             _pick_score(best),
         )
         return int(best[1])
+
+    def _interaction_score_for_hwnd(self, hwnd: int) -> int:
+        if int(hwnd or 0) <= 0:
+            return 0
+        try:
+            from pywinauto import Desktop
+        except Exception:
+            return 0
+        try:
+            wnd = Desktop(backend="uia").window(handle=int(hwnd))
+            if not wnd.exists(timeout=0.08):
+                return 0
+            return int(self._window_interaction_score(wnd))
+        except Exception:
+            return 0
 
     def _resolve_main_window(self, app: Any) -> Any | None:
         windows: list[Any] = []
@@ -995,7 +1016,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     process_name = str(psutil.Process(proc_id).name() or "").lower()
             except Exception:
                 process_name = ""
-            is_weixin_process = process_name in {"weixin.exe", "wechat.exe"}
+            is_weixin_process = process_name in {"weixin.exe", "wechat.exe", "wechatappex.exe", "wechatapp.exe"}
             if self._is_blocked_wechat_window_class(class_norm):
                 continue
             if (
@@ -1047,24 +1068,38 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     def _window_interaction_score(self, wnd: Any) -> int:
         counts: dict[str, int] = {}
-        for control_type in ("Edit", "Document", "List", "ListItem", "Button"):
+        for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Pane"):
             try:
                 counts[control_type] = len(list(wnd.descendants(control_type=control_type)))
             except Exception:
                 counts[control_type] = 0
 
-        total = (
-            counts.get("Edit", 0)
-            + counts.get("Document", 0)
-            + counts.get("List", 0)
+        strong_controls = counts.get("Edit", 0) + counts.get("Document", 0)
+        structural_controls = (
+            counts.get("List", 0)
             + counts.get("ListItem", 0)
             + counts.get("Button", 0)
         )
-        if total <= 0:
+        pane_controls = counts.get("Pane", 0)
+        if strong_controls <= 0 and structural_controls <= 0 and pane_controls <= 0:
             return 0
-        if counts.get("Document", 0) <= 0 and counts.get("Edit", 0) <= 0:
-            return 0
-        return min(200, total)
+        score = (
+            strong_controls * 6
+            + counts.get("List", 0) * 3
+            + counts.get("ListItem", 0) * 2
+            + counts.get("Button", 0) * 2
+            + min(20, pane_controls)
+        )
+        if strong_controls <= 0:
+            if structural_controls >= 8:
+                score += 20
+            elif structural_controls >= 4 and pane_controls >= 4:
+                score += 12
+            elif counts.get("Button", 0) >= 6 and pane_controls >= 6:
+                score += 10
+            else:
+                return 0
+        return min(200, score)
 
     def _ensure_chat_open(self, main_wnd: Any, conversation_id: str) -> bool:
         """确保指定会话的聊天窗口已打开。"""
@@ -1602,8 +1637,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
         bias = 0
         if "trayiconmessagewindow" in normalized or "wxtrayicon" in normalized:
             bias -= 1_500_000
+        if "chrome_widgetwin" in normalized:
+            bias += 1_400_000
         if "qwindowicon" in normalized:
-            bias += 300_000
+            bias -= 500_000
+        if "qt51514qwindowicon" in normalized:
+            bias -= 800_000
         return bias
 
     def _is_noise_click_target(self, normalized_text: str) -> bool:
