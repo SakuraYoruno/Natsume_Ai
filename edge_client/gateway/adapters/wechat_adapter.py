@@ -488,20 +488,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
         logger.info("WeChatAdapter: direct top-session send start conversation=%s", reply.conversation_id)
         try:
             self._switch_to_chat_tab(main_wnd)
-            self._dismiss_search_overlay(main_wnd)
-            input_box = self._resolve_input_box(main_wnd)
-            if input_box is None:
-                self._recover_to_chat_home(main_wnd)
+            input_box = None
+            for _ in range(2):
                 self._dismiss_search_overlay(main_wnd)
                 input_box = self._resolve_input_box(main_wnd)
-            if input_box is None and self._try_enter_chat_from_detail_view(main_wnd):
-                input_box = self._resolve_input_box(main_wnd)
-            if input_box is None and self._select_top_chat_entry(main_wnd):
-                self._dismiss_search_overlay(main_wnd)
-                input_box = self._resolve_input_box(main_wnd)
+                if input_box is not None:
+                    break
+                time.sleep(0.12)
             if input_box is None:
                 logger.warning(
-                    "WeChatAdapter: direct top-session send aborted, input box unavailable conversation=%s",
+                    "WeChatAdapter: direct top-session send aborted quickly, input box unavailable conversation=%s",
                     reply.conversation_id,
                 )
                 return False

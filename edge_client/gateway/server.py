@@ -141,11 +141,11 @@ def create_gateway_app(
         )
 
         wait_result = bool(payload.get("wait_result", True))
-        timeout_ms_raw = payload.get("timeout_ms", 12000)
+        timeout_ms_raw = payload.get("timeout_ms", 22000)
         try:
             timeout_ms = max(1000, int(timeout_ms_raw))
         except (TypeError, ValueError):
-            timeout_ms = 12000
+            timeout_ms = 22000
 
         async def _dispatch_reply() -> bool:
             return await asyncio.to_thread(_outbound.dispatch, reply)
