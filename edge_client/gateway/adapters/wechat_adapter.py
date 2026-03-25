@@ -388,7 +388,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             try:
                 send_keys("^1")
                 time.sleep(0.12)
-                send_keys("^f")
+                send_keys("{ESC}")
+                time.sleep(0.08)
+                send_keys("^n")
                 time.sleep(0.15)
                 send_keys("^a{BACKSPACE}")
                 self._set_clipboard_text(keyword)
@@ -629,6 +631,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             self._recover_to_chat_home(main_wnd)
             if self._select_chat_from_chat_list(main_wnd, candidates, conversation_id):
                 return True
+            if self._allow_keyboard_fallback():
+                return False
 
             search_box = self._resolve_search_box(main_wnd)
             if search_box is None:
@@ -1374,9 +1378,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     keyword,
                 )
                 if send_keys is not None:
-                    send_keys("^f")
+                    send_keys("{ESC}")
                 else:
-                    main_wnd.type_keys("^f")
+                    main_wnd.type_keys("{ESC}")
+                time.sleep(0.08)
+                if send_keys is not None:
+                    send_keys("^n")
+                else:
+                    main_wnd.type_keys("^n")
                 time.sleep(0.22)
                 if send_keys is not None:
                     send_keys("^a{BACKSPACE}")
