@@ -621,8 +621,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             send_keys("{ESC}")
             time.sleep(0.08)
             attempt_ts_ms = int(time.time() * 1000)
-            self._set_clipboard_text(reply.content)
-            send_keys("^v")
+            try:
+                self._set_clipboard_text(reply.content)
+                send_keys("^v")
+            except Exception as clip_exc:
+                logger.warning(
+                    "WeChatAdapter: global-wake clipboard unavailable, fallback type conversation=%s err=%s",
+                    reply.conversation_id,
+                    clip_exc,
+                )
+                if not self._type_text_direct(reply.content):
+                    return False
             time.sleep(0.05)
             send_keys("{ENTER}")
             ok = self._verify_send_outcome(
@@ -643,6 +652,18 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 reply.conversation_id,
                 exc,
             )
+            return False
+
+    @staticmethod
+    def _type_text_direct(text: str) -> bool:
+        try:
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            return False
+        try:
+            send_keys(str(text or ""), with_spaces=True, with_tabs=True, with_newlines=True)
+            return True
+        except Exception:
             return False
 
     def _wake_wechat_client(self) -> bool:
@@ -1846,21 +1867,43 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _set_clipboard_text(text: str) -> None:
         """将文本写入剪贴板。"""
+        last_exc: Exception | None = None
         try:
             import win32clipboard
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
+            for _ in range(12):
+                opened = False
+                try:
+                    win32clipboard.OpenClipboard()
+                    opened = True
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardText(str(text or ""), win32clipboard.CF_UNICODETEXT)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    time.sleep(0.05)
+                finally:
+                    if opened:
+                        try:
+                            win32clipboard.CloseClipboard()
+                        except Exception:
+                            pass
         except ImportError:
-            # 降级：使用 tkinter
+            pass
+
+        # 降级：使用 tkinter
+        try:
             import tkinter as tk
             root = tk.Tk()
             root.withdraw()
             root.clipboard_clear()
-            root.clipboard_append(text)
+            root.clipboard_append(str(text or ""))
             root.update()
             root.destroy()
+            return
+        except Exception as tk_exc:
+            if last_exc is not None:
+                raise RuntimeError(f"clipboard unavailable: {last_exc}; tkinter fallback failed: {tk_exc}") from tk_exc
+            raise
 
     @staticmethod
     def _set_clipboard_file(file_path: str) -> None:
