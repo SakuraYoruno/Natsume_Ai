@@ -601,8 +601,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 self._switch_to_chat_tab(target_wnd)
                 self._dismiss_search_overlay(target_wnd)
                 selected = self._select_chat_from_chat_list(target_wnd, candidates, reply.conversation_id)
-                if not selected and self._is_top_session_target(reply.conversation_id):
+                if not selected:
                     selected = self._select_top_chat_entry(target_wnd)
+                    if selected:
+                        logger.info(
+                            "WeChatAdapter: global keyboard flow selected top chat entry conversation=%s",
+                            reply.conversation_id,
+                        )
                 if selected:
                     attempt_ts_ms = int(time.time() * 1000)
                     self._set_clipboard_text(reply.content)
