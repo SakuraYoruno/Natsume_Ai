@@ -1204,13 +1204,20 @@ def _handle_automate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGat
         controller = DesktopController()
         report = controller.execute_actions(actions, stop_on_error=stop_on_error)
 
+        report_event = report.as_dict()
+        try:
+            screen_w, screen_h = DesktopController.get_screen_size()
+            report_event["screen_size"] = {"width": int(screen_w), "height": int(screen_h)}
+        except Exception:
+            pass
+
         return EdgeGatewayResult(
             success=report.all_success,
             status=STATUS_ACCEPTED if report.all_success else STATUS_REJECTED,
             reason_code=None if report.all_success else "DESKTOP_ACTION_PARTIAL_FAILURE",
             stage="S_EDGE_AUTOMATE",
             detail=f"executed {report.success_count}/{report.total_actions} actions",
-            event=report.as_dict(),
+            event=report_event,
         )
     except Exception as exc:
         return EdgeGatewayResult(
