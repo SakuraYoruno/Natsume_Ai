@@ -337,6 +337,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
             time.sleep(0.15)
             send_started_ts = int(time.time() * 1000)
             self._dismiss_search_overlay(main_wnd)
+            if (
+                reply.msg_type == MsgType.TEXT
+                and self._send_to_top_session_directly(
+                    main_wnd,
+                    reply,
+                    send_started_ts=send_started_ts,
+                )
+            ):
+                return True
 
             # 确保聊天窗口已打开（通过搜索框定位联系人）
             if not self._ensure_chat_open(main_wnd, reply.conversation_id):
@@ -403,6 +412,46 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.error("WeChatAdapter: pywinauto 操作失败: %s", exc)
 
         return False
+
+    def _send_to_top_session_directly(
+        self,
+        main_wnd: Any,
+        reply: UnifiedReply,
+        *,
+        send_started_ts: int,
+    ) -> bool:
+        try:
+            if not self._svc.is_top_session(reply.conversation_id):
+                return False
+        except Exception:
+            return False
+
+        try:
+            self._switch_to_chat_tab(main_wnd)
+            self._dismiss_search_overlay(main_wnd)
+            self._recover_to_chat_home(main_wnd)
+            if not self._select_top_chat_entry(main_wnd):
+                return False
+            input_box = self._resolve_input_box(main_wnd)
+            if input_box is None:
+                return False
+            self._set_clipboard_text(reply.content)
+            if not self._paste_and_send(input_box, main_wnd):
+                return False
+            ok = self._verify_send_outcome(
+                conversation_id=reply.conversation_id,
+                expected_text=reply.content,
+                since_ts_ms=send_started_ts,
+                timeout_s=2.8,
+            )
+            if ok:
+                logger.info(
+                    "WeChatAdapter: direct top-session send success conversation=%s",
+                    reply.conversation_id,
+                )
+            return ok
+        except Exception:
+            return False
 
     def _send_via_global_keyboard_flow(self, reply: UnifiedReply) -> bool:
         if reply.msg_type != MsgType.TEXT:
