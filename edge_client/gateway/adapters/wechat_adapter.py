@@ -265,6 +265,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if main_wnd is None:
                 logger.error("WeChatAdapter: main window not found")
                 return False
+            if self._window_interaction_score(main_wnd) <= 0:
+                logger.warning("WeChatAdapter: main window not interactive, abort send")
+                self._log_window_snapshot(
+                    main_wnd,
+                    reason="main_window_not_interactive",
+                    conversation_id=reply.conversation_id,
+                )
+                return False
             try:
                 main_wnd.restore()
             except Exception:
@@ -390,12 +398,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             fallback = app.window(title_re=".*(Weixin|WeChat|WX).*")
             if fallback.exists(timeout=0.3):
-                return fallback
+                if self._window_interaction_score(fallback) > 0:
+                    return fallback
         except Exception:
             pass
 
         try:
-            return app.top_window()
+            top = app.top_window()
+            if self._window_interaction_score(top) > 0:
+                return top
+            return None
         except Exception:
             return None
 
