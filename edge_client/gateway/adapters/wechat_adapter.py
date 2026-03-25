@@ -858,8 +858,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
-                if not win32gui.IsWindowVisible(hwnd):
-                    return
                 title = str(win32gui.GetWindowText(hwnd) or "")
                 class_name = str(win32gui.GetClassName(hwnd) or "")
                 class_norm = self._normalize_match_text(class_name)
