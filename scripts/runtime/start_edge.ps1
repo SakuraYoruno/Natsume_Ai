@@ -309,12 +309,8 @@ function Start-EdgeProcess {
       $safeValue = $envValue -replace '%', '%%'
       $launcherLines += ("set `"{0}={1}`"" -f $envName, $safeValue)
     }
-    $pythonEscaped = ([string]$PythonPath).Replace("'", "''")
-    $repoEscaped = ([string]$RepoRoot).Replace("'", "''")
-    $stdoutEscaped = ([string]$StdoutLog).Replace("'", "''")
-    $stderrEscaped = ([string]$StderrLog).Replace("'", "''")
-    $psStartCommand = "Start-Process -FilePath '$pythonEscaped' -ArgumentList @('-m','edge_client') -WorkingDirectory '$repoEscaped' -WindowStyle Hidden -RedirectStandardOutput '$stdoutEscaped' -RedirectStandardError '$stderrEscaped'"
-    $launcherLines += "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$psStartCommand`""
+    $pythonCmd = "`"$PythonPath`" -m edge_client 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $launcherLines += $pythonCmd
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
 
