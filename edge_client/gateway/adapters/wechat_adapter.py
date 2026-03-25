@@ -572,14 +572,19 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 hwnd,
                 self._foreground_window_debug(),
             )
+        logger.info(
+            "WeChatAdapter: global keyboard flow foreground after activate=%s",
+            self._foreground_window_debug(),
+        )
         time.sleep(0.2)
 
         for keyword in candidates[:3]:
             try:
                 logger.info(
-                    "WeChatAdapter: global keyboard flow try conversation=%s keyword=%s",
+                    "WeChatAdapter: global keyboard flow try conversation=%s keyword=%s foreground=%s",
                     reply.conversation_id,
                     keyword,
+                    self._foreground_window_debug(),
                 )
                 send_keys("^1")
                 time.sleep(0.12)
@@ -649,6 +654,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 hwnd,
                 self._foreground_window_debug(),
             )
+        logger.info(
+            "WeChatAdapter: top-session global-wake foreground after activate=%s",
+            self._foreground_window_debug(),
+        )
         time.sleep(0.18)
         try:
             send_keys("^1")
