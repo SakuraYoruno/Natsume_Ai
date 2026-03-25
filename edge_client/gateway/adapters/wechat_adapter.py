@@ -826,9 +826,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
-                title = str(win32gui.GetWindowText(hwnd) or "")
-                if not title:
+                if not win32gui.IsWindowVisible(hwnd):
                     return
+                title = str(win32gui.GetWindowText(hwnd) or "")
                 class_name = str(win32gui.GetClassName(hwnd) or "")
                 class_norm = self._normalize_match_text(class_name)
                 if self._is_blocked_wechat_window_class(class_norm):
@@ -1628,6 +1628,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "windows.uicore.corewindow",
             "desktopwindowxamlsource",
             "applicationframewindow",
+            "wxtrayiconmessagewindowclass",
+            "trayiconmessagewindow",
         )
         return any(token in normalized for token in blocked_tokens)
 
