@@ -1468,9 +1468,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if not normalized:
             return False
         blocked_tokens = (
-            "qwindowicon",
-            "trayiconmessagewindow",
-            "wxtrayicon",
             "tooltips_class32",
             "windows.ui.core.corewindow",
             "windows.uicore.corewindow",
