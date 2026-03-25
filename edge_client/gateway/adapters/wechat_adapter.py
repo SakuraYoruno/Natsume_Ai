@@ -596,6 +596,35 @@ class WeChatAdapter(AbstractPlatformAdapter):
         )
         time.sleep(0.2)
 
+        if target_wnd is not None:
+            try:
+                self._switch_to_chat_tab(target_wnd)
+                self._dismiss_search_overlay(target_wnd)
+                if self._select_chat_from_chat_list(target_wnd, candidates, reply.conversation_id):
+                    attempt_ts_ms = int(time.time() * 1000)
+                    self._set_clipboard_text(reply.content)
+                    if self._paste_and_send(target_wnd, target_wnd) and self._verify_send_outcome(
+                        conversation_id=reply.conversation_id,
+                        expected_text=reply.content,
+                        since_ts_ms=attempt_ts_ms,
+                        timeout_s=2.8,
+                    ):
+                        logger.info(
+                            "WeChatAdapter: global keyboard flow success via chat-list click conversation=%s",
+                            reply.conversation_id,
+                        )
+                        return True
+                    logger.warning(
+                        "WeChatAdapter: global keyboard flow chat-list click verify failed conversation=%s",
+                        reply.conversation_id,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "WeChatAdapter: global keyboard flow chat-list preflight failed conversation=%s err=%s",
+                    reply.conversation_id,
+                    exc,
+                )
+
         for keyword in candidates[:3]:
             for search_shortcut in ("^n", "^f"):
                 try:
