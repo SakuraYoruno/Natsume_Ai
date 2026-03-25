@@ -598,6 +598,29 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         if target_wnd is not None:
             try:
+                self._focus_chat_input_fallback(target_wnd)
+                attempt_ts_ms = int(time.time() * 1000)
+                self._set_clipboard_text(reply.content)
+                if self._paste_and_send(target_wnd, target_wnd) and self._verify_send_outcome(
+                    conversation_id=reply.conversation_id,
+                    expected_text=reply.content,
+                    since_ts_ms=attempt_ts_ms,
+                    timeout_s=2.4,
+                ):
+                    logger.info(
+                        "WeChatAdapter: global keyboard flow success via active-chat direct send conversation=%s",
+                        reply.conversation_id,
+                    )
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "WeChatAdapter: global keyboard flow active-chat direct send failed conversation=%s err=%s",
+                    reply.conversation_id,
+                    exc,
+                )
+
+        if target_wnd is not None:
+            try:
                 self._switch_to_chat_tab(target_wnd)
                 self._dismiss_search_overlay(target_wnd)
                 selected = self._select_chat_from_chat_list(target_wnd, candidates, reply.conversation_id)
@@ -1248,7 +1271,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return True
         if "qwindowtoolsavebits" in normalized_class:
             return True
-        if "chrome_widgetwin" in normalized_class:
+        if "chrome_widgetwin" in normalized_class and not normalized_title:
             return True
         return False
 
