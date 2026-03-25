@@ -300,7 +300,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 try:
                     app.connect(title_re=".*(Weixin|WeChat|WX|微信).*", timeout=1.5)
                 except Exception:
-                    app = None
+                    try:
+                        app.connect(path="Weixin.exe", timeout=1.5)
+                    except Exception:
+                        app = None
 
             if main_wnd is None and app is not None:
                 main_wnd = self._resolve_main_window(app)
@@ -310,7 +313,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     alt_app.connect(title_re=".*(Weixin|WeChat|WX|微信).*", timeout=1.5)
                     main_wnd = self._resolve_main_window(alt_app)
                 except Exception:
-                    main_wnd = None
+                    try:
+                        alt_app = Application(backend="uia")
+                        alt_app.connect(path="Weixin.exe", timeout=1.5)
+                        main_wnd = self._resolve_main_window(alt_app)
+                    except Exception:
+                        main_wnd = None
             if main_wnd is None:
                 self._wake_wechat_client()
                 if self._send_to_top_session_global_wake(reply):
@@ -697,6 +705,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
     def _find_wechat_hwnd(self) -> int:
         try:
             import win32gui
+            import win32process
         except Exception:
             return 0
 
@@ -715,7 +724,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 ):
                     return
                 normalized = self._normalize_match_text(title)
-                if not any(token in normalized for token in ("微信", "weixin", "wechat", "wx")):
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                is_weixin_process = False
+                try:
+                    import psutil
+                    proc_name = str(psutil.Process(int(pid)).name() or "").lower()
+                    if proc_name in {"weixin.exe", "wechat.exe"}:
+                        is_weixin_process = True
+                except Exception:
+                    is_weixin_process = False
+                if not is_weixin_process and not any(token in normalized for token in ("微信", "weixin", "wechat", "wx")):
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
@@ -826,6 +844,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
+            process_name = ""
+            try:
+                proc_id = int(getattr(getattr(wnd, "element_info", None), "process_id", 0) or 0)
+                if proc_id > 0:
+                    import psutil
+                    process_name = str(psutil.Process(proc_id).name() or "").lower()
+            except Exception:
+                process_name = ""
+            is_weixin_process = process_name in {"weixin.exe", "wechat.exe"}
             is_tray_shell = any(
                 token in class_norm
                 for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
@@ -833,7 +860,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if is_tray_shell:
                 continue
             if (
-                not any(token in title for token in ("微信", "weixin", "wechat", "wx"))
+                not is_weixin_process
+                and not any(token in title for token in ("微信", "weixin", "wechat", "wx"))
                 and "qt" not in class_norm
                 and "weixin" not in class_norm
                 and "wechat" not in class_norm
