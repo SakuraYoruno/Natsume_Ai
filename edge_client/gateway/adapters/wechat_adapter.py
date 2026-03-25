@@ -650,18 +650,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
-                if not win32gui.IsWindowVisible(hwnd):
-                    return
                 title = str(win32gui.GetWindowText(hwnd) or "")
                 if not title:
                     return
                 normalized = self._normalize_match_text(title)
-                if not any(token in normalized for token in ("微信", "weixin", "wechat")):
+                if not any(token in normalized for token in ("微信", "weixin", "wechat", "wx")):
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
                 if area <= 0:
-                    return
+                    area = 1
                 windows.append((area, hwnd))
             except Exception:
                 return
@@ -706,7 +704,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
             backup = area
-            if title and any(token in title for token in ("寰俊", "weixin", "wechat")):
+            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
                 backup += 2_000_000_000
             if "qwindowicon" not in class_norm and backup > backup_score:
                 backup_score = backup
@@ -717,7 +715,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
 
             score = area + interactive_score * 1_000_000
-            if title and any(token in title for token in ("微信", "weixin", "wechat")):
+            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
                 score += 2_000_000_000
             if "qwindowicon" in class_norm:
                 score -= 1_000_000_000
@@ -731,7 +729,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return backup_wnd
 
         try:
-            fallback = app.window(title_re=".*(Weixin|WeChat|WX).*")
+            fallback = app.window(title_re=".*(微信|Weixin|WeChat|WX).*")
             if fallback.exists(timeout=0.3):
                 if self._window_interaction_score(fallback) > 0:
                     return fallback
@@ -762,9 +760,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
             if (
-                not any(token in title for token in ("微信", "weixin", "wechat"))
+                not any(token in title for token in ("微信", "weixin", "wechat", "wx"))
                 and "qt" not in class_norm
                 and "weixin" not in class_norm
+                and "wechat" not in class_norm
             ):
                 continue
             try:
@@ -778,7 +777,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if area <= 0:
                 continue
             backup = area
-            if title and any(token in title for token in ("寰俊", "weixin", "wechat")):
+            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
                 backup += 2_000_000_000
             if "qwindowicon" not in class_norm and backup > backup_score:
                 backup_score = backup
@@ -789,7 +788,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
 
             score = area + interactive_score * 1_000_000
-            if title and any(token in title for token in ("微信", "weixin", "wechat")):
+            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
                 score += 2_000_000_000
             if "qwindowicon" in class_norm:
                 score -= 1_000_000_000
