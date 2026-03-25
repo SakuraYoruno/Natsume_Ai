@@ -554,14 +554,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if not hwnd:
             logger.warning("WeChatAdapter: global keyboard flow no wechat hwnd")
             return False
-        try:
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        except Exception:
-            pass
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
+        if not self._activate_hwnd(hwnd):
+            logger.warning(
+                "WeChatAdapter: global keyboard flow activate hwnd failed target=%s foreground=%s",
+                hwnd,
+                self._foreground_window_debug(),
+            )
         time.sleep(0.2)
 
         for keyword in candidates[:3]:
@@ -623,14 +621,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             hwnd = self._find_wechat_hwnd()
         if not hwnd:
             return False
-        try:
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        except Exception:
-            pass
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
+        if not self._activate_hwnd(hwnd):
+            logger.warning(
+                "WeChatAdapter: top-session global-wake activate hwnd failed target=%s foreground=%s",
+                hwnd,
+                self._foreground_window_debug(),
+            )
         time.sleep(0.18)
         try:
             send_keys("^1")
@@ -682,6 +678,73 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _activate_hwnd(hwnd: int) -> bool:
+        if int(hwnd or 0) <= 0:
+            return False
+        try:
+            import win32gui
+            import win32con
+        except Exception:
+            return False
+        try:
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            send_keys = None
+
+        target = int(hwnd)
+        for _ in range(3):
+            try:
+                win32gui.ShowWindow(target, win32con.SW_RESTORE)
+            except Exception:
+                pass
+            try:
+                win32gui.BringWindowToTop(target)
+            except Exception:
+                pass
+            try:
+                win32gui.SetForegroundWindow(target)
+            except Exception:
+                if send_keys is not None:
+                    try:
+                        send_keys("%")
+                    except Exception:
+                        pass
+                    try:
+                        win32gui.SetForegroundWindow(target)
+                    except Exception:
+                        pass
+            time.sleep(0.10)
+            try:
+                if int(win32gui.GetForegroundWindow() or 0) == target:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    @staticmethod
+    def _foreground_window_debug() -> dict[str, Any]:
+        try:
+            import win32gui
+            import win32process
+        except Exception:
+            return {}
+        try:
+            hwnd = int(win32gui.GetForegroundWindow() or 0)
+            if hwnd <= 0:
+                return {}
+            title = str(win32gui.GetWindowText(hwnd) or "")
+            class_name = str(win32gui.GetClassName(hwnd) or "")
+            _thread, pid = win32process.GetWindowThreadProcessId(hwnd)
+            return {
+                "hwnd": hwnd,
+                "pid": int(pid),
+                "class": class_name,
+                "title": title[:80],
+            }
+        except Exception:
+            return {}
 
     def _wake_wechat_client(self) -> bool:
         candidates: list[str] = []
