@@ -958,6 +958,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return 0
 
         windows: list[tuple[int, int, str, str, int, int]] = []
+        inspected: list[dict[str, Any]] = []
 
         def _enum_handler(hwnd: int, _: Any) -> None:
             try:
@@ -988,16 +989,35 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
+                row = {
+                    "hwnd": int(hwnd),
+                    "pid": int(pid),
+                    "class": class_name[:64],
+                    "title": title[:64],
+                    "area": int(area),
+                    "is_weixin_process": bool(is_weixin_process),
+                    "has_title_match": bool(has_title_match),
+                }
                 if area <= 0:
                     if has_title_match:
                         area = 1
+                        row["area"] = 1
                     else:
+                        row["skip"] = "zero_area"
+                        inspected.append(row)
                         return
                 if is_weixin_process and not has_title_match and area < 40_000:
+                    row["skip"] = "small_area_without_title"
+                    inspected.append(row)
                     return
                 interaction = self._interaction_score_for_hwnd(int(hwnd))
+                row["interaction"] = int(interaction)
                 if self._is_forced_shell_window(class_norm, normalized, interaction):
+                    row["skip"] = "forced_shell"
+                    inspected.append(row)
                     return
+                row["accepted"] = True
+                inspected.append(row)
                 windows.append((area, hwnd, title, class_name, int(pid), interaction))
             except Exception:
                 return
@@ -1007,7 +1027,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
         except Exception:
             return 0
         if not windows:
-            logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
+            if inspected:
+                logger.warning(
+                    "WeChatAdapter: _find_wechat_hwnd no matched window inspected=%s",
+                    inspected[:8],
+                )
+            else:
+                logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
             return 0
         def _pick_score(item: tuple[int, int, str, str, int, int]) -> int:
             area, _hwnd, title, class_name, _pid, interaction = item
