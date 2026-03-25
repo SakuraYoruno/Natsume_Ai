@@ -286,6 +286,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 if self._allow_keyboard_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                     return True
                 if not self._allow_active_chat_fallback():
+                    self._log_window_snapshot(
+                        main_wnd,
+                        reason="ensure_chat_open_failed",
+                        conversation_id=reply.conversation_id,
+                    )
                     return False
                 logger.warning(
                     "WeChatAdapter: _ensure_chat_open failed, fallback to active chat send conversation=%s",
@@ -583,7 +588,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         return True
                 except Exception:
                     continue
-        return False
+        try:
+            main_wnd.set_focus()
+        except Exception:
+            pass
+        try:
+            main_wnd.type_keys("^1")
+            time.sleep(0.15)
+            return True
+        except Exception:
+            return False
 
     def _select_chat_from_chat_list(
         self,
@@ -847,6 +861,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         markers = [
             "\u76f8\u5173\u641c\u7d22",
             "\u641c\u7d22\u7ed3\u679c",
+            "\u5386\u53f2\u8bb0\u5f55",
             "Search Results",
             "Related Searches",
         ]
