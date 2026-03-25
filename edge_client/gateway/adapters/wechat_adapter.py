@@ -311,7 +311,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     main_wnd = None
             if main_wnd is None:
-                if self._send_via_global_keyboard_flow(reply):
+                if self._allow_keyboard_search_fallback() and self._send_via_global_keyboard_flow(reply):
                     return True
                 logger.error("WeChatAdapter: main window not found")
                 return False
@@ -353,7 +353,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     "WeChatAdapter: _ensure_chat_open failed conversation=%s",
                     reply.conversation_id,
                 )
-                if self._allow_keyboard_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
+                if self._allow_keyboard_search_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                     return True
                 if not self._allow_active_chat_fallback():
                     self._log_window_snapshot(
@@ -381,7 +381,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
                 if reply.msg_type == MsgType.TEXT:
-                    if self._allow_keyboard_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
+                    if self._allow_keyboard_search_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                         return True
                     return False
                 if reply.msg_type == MsgType.IMAGE and reply.media_path:
@@ -420,23 +420,45 @@ class WeChatAdapter(AbstractPlatformAdapter):
         *,
         send_started_ts: int,
     ) -> bool:
+        is_top_session = False
         try:
-            if not self._svc.is_top_session(reply.conversation_id):
-                return False
-        except Exception:
+            is_top_session = bool(self._svc.is_top_session(reply.conversation_id))
+        except Exception as exc:
+            logger.debug(
+                "WeChatAdapter: is_top_session query failed in direct path conversation=%s err=%s",
+                reply.conversation_id,
+                exc,
+            )
             return False
 
+        if not is_top_session:
+            logger.debug(
+                "WeChatAdapter: skip direct top-session send (not top) conversation=%s",
+                reply.conversation_id,
+            )
+            return False
+
+        logger.info("WeChatAdapter: direct top-session send start conversation=%s", reply.conversation_id)
         try:
             self._switch_to_chat_tab(main_wnd)
             self._dismiss_search_overlay(main_wnd)
-            self._recover_to_chat_home(main_wnd)
-            if not self._select_top_chat_entry(main_wnd):
-                return False
             input_box = self._resolve_input_box(main_wnd)
             if input_box is None:
+                self._recover_to_chat_home(main_wnd)
+                self._dismiss_search_overlay(main_wnd)
+                input_box = self._resolve_input_box(main_wnd)
+            if input_box is None:
+                logger.warning(
+                    "WeChatAdapter: direct top-session send aborted, input box unavailable conversation=%s",
+                    reply.conversation_id,
+                )
                 return False
             self._set_clipboard_text(reply.content)
             if not self._paste_and_send(input_box, main_wnd):
+                logger.warning(
+                    "WeChatAdapter: direct top-session paste/send failed conversation=%s",
+                    reply.conversation_id,
+                )
                 return False
             ok = self._verify_send_outcome(
                 conversation_id=reply.conversation_id,
@@ -449,8 +471,18 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     "WeChatAdapter: direct top-session send success conversation=%s",
                     reply.conversation_id,
                 )
+            else:
+                logger.warning(
+                    "WeChatAdapter: direct top-session send verify failed conversation=%s",
+                    reply.conversation_id,
+                )
             return ok
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "WeChatAdapter: direct top-session send failed conversation=%s err=%s",
+                reply.conversation_id,
+                exc,
+            )
             return False
 
     def _send_via_global_keyboard_flow(self, reply: UnifiedReply) -> bool:
@@ -1708,6 +1740,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _allow_keyboard_fallback() -> bool:
         raw = str(os.environ.get("EDGE_WECHAT_SEND_KEYBOARD_FALLBACK", "") or "").strip().lower()
+        if not raw:
+            return False
+        return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _allow_keyboard_search_fallback() -> bool:
+        if not WeChatAdapter._allow_keyboard_fallback():
+            return False
+        raw = str(os.environ.get("EDGE_WECHAT_SEND_KEYBOARD_SEARCH_FALLBACK", "") or "").strip().lower()
         if not raw:
             return False
         return raw in {"1", "true", "yes", "on"}
