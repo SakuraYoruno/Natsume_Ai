@@ -48,6 +48,19 @@ _PLACEHOLDER_CONVERSATION_IDS: set[str] = {
 _WECHAT_WINDOW_TITLE_TOKENS: tuple[str, ...] = ("wechat", "weixin", "微信")
 
 
+_WECHAT_PRIMARY_PROCESS_NAMES: set[str] = {
+    "weixin.exe",
+    "wechat.exe",
+}
+_WECHAT_AUX_PROCESS_NAMES: set[str] = {
+    "weixinappex.exe",
+    "weixinapp.exe",
+    "wechatappex.exe",
+    "wechatapp.exe",
+}
+_WECHAT_PROCESS_NAMES: set[str] = _WECHAT_PRIMARY_PROCESS_NAMES | _WECHAT_AUX_PROCESS_NAMES
+
+
 class WeChatAdapter(AbstractPlatformAdapter):
     """微信平台适配器（基于 wx4_decrypt 解密方案）。
 
@@ -1069,21 +1082,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 normalized = self._normalize_match_text(title)
                 has_title_match = any(token in normalized for token in _WECHAT_WINDOW_TITLE_TOKENS)
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                proc_name = ""
                 is_weixin_process = False
+                is_aux_process = False
                 try:
                     import psutil
                     proc_name = str(psutil.Process(int(pid)).name() or "").lower()
-                    if proc_name in {
-                        "weixin.exe",
-                        "weixinappex.exe",
-                        "weixinapp.exe",
-                        "wechat.exe",
-                        "wechatappex.exe",
-                        "wechatapp.exe",
-                    }:
-                        is_weixin_process = True
+                    is_weixin_process = proc_name in _WECHAT_PROCESS_NAMES
+                    is_aux_process = proc_name in _WECHAT_AUX_PROCESS_NAMES
                 except Exception:
                     is_weixin_process = False
+                    is_aux_process = False
                 if not is_weixin_process and not has_title_match:
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
@@ -1094,6 +1103,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     "class": class_name[:64],
                     "title": title[:64],
                     "area": int(area),
+                    "process": proc_name,
                     "is_weixin_process": bool(is_weixin_process),
                     "has_title_match": bool(has_title_match),
                 }
@@ -1111,6 +1121,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return
                 interaction = self._interaction_score_for_hwnd(int(hwnd))
                 row["interaction"] = int(interaction)
+                if is_aux_process and "chrome_widgetwin" in class_norm and interaction <= 0:
+                    row["skip"] = "aux_chrome_noninteractive"
+                    inspected.append(row)
+                    return
                 if self._is_forced_shell_window(class_norm, normalized, interaction):
                     row["skip"] = "forced_shell"
                     inspected.append(row)
@@ -1283,14 +1297,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     process_name = str(psutil.Process(proc_id).name() or "").lower()
             except Exception:
                 process_name = ""
-            is_weixin_process = process_name in {
-                "weixin.exe",
-                "weixinappex.exe",
-                "weixinapp.exe",
-                "wechat.exe",
-                "wechatappex.exe",
-                "wechatapp.exe",
-            }
+            is_weixin_process = process_name in _WECHAT_PROCESS_NAMES
             if self._is_blocked_wechat_window_class(class_norm):
                 continue
             if (
@@ -1312,6 +1319,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if area <= 0:
                 continue
             interactive_score = self._window_interaction_score(wnd)
+            if (
+                process_name in _WECHAT_AUX_PROCESS_NAMES
+                and "chrome_widgetwin" in class_norm
+                and interactive_score <= 0
+            ):
+                continue
             if self._is_forced_shell_window(class_norm, title, interactive_score):
                 continue
             class_bias = self._wechat_window_class_bias(class_norm)
@@ -1340,14 +1353,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if int(interaction) > 0:
             return False
         normalized_class = str(class_norm or "")
-        normalized_title = str(title_norm or "")
         if "qt51514qwindowicon" in normalized_class:
             return True
         if "qwindowicon" in normalized_class:
             return True
         if "qwindowtoolsavebits" in normalized_class:
             return True
-        if "chrome_widgetwin" in normalized_class and not normalized_title:
+        if "chrome_widgetwin" in normalized_class:
             return True
         return False
 
@@ -1972,7 +1984,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if "trayiconmessagewindow" in normalized or "wxtrayicon" in normalized:
             bias -= 1_500_000
         if "chrome_widgetwin" in normalized:
-            bias += 1_400_000
+            bias += 150_000
         if "qwindowicon" in normalized:
             bias -= 500_000
         if "qt51514qwindowicon" in normalized:
