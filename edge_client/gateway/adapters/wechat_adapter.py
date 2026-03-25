@@ -724,6 +724,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 ):
                     return
                 normalized = self._normalize_match_text(title)
+                has_title_match = any(token in normalized for token in ("微信", "weixin", "wechat", "wx"))
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 is_weixin_process = False
                 try:
@@ -733,12 +734,22 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         is_weixin_process = True
                 except Exception:
                     is_weixin_process = False
-                if not is_weixin_process and not any(token in normalized for token in ("微信", "weixin", "wechat", "wx")):
+                if not is_weixin_process and not has_title_match:
+                    return
+                if any(
+                    token in class_norm
+                    for token in ("windows.uicore.corewindow", "desktopwindowxamlsource", "applicationframewindow")
+                ):
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
                 if area <= 0:
-                    area = 1
+                    if has_title_match:
+                        area = 1
+                    else:
+                        return
+                if is_weixin_process and not has_title_match and area < 40_000:
+                    return
                 windows.append((area, hwnd, title, class_name, int(pid)))
             except Exception:
                 return
