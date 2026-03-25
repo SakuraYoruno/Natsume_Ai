@@ -266,13 +266,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 logger.error("WeChatAdapter: main window not found")
                 return False
             if self._window_interaction_score(main_wnd) <= 0:
-                logger.warning("WeChatAdapter: main window not interactive, abort send")
-                self._log_window_snapshot(
-                    main_wnd,
-                    reason="main_window_not_interactive",
-                    conversation_id=reply.conversation_id,
-                )
-                return False
+                class_name = str(getattr(getattr(main_wnd, "element_info", None), "class_name", "") or "")
+                class_norm = self._normalize_match_text(class_name)
+                if "qwindowicon" in class_norm:
+                    logger.warning("WeChatAdapter: main window is qwindow shell, abort send")
+                    self._log_window_snapshot(
+                        main_wnd,
+                        reason="main_window_qwindow_shell",
+                        conversation_id=reply.conversation_id,
+                    )
+                    return False
             try:
                 main_wnd.restore()
             except Exception:
@@ -360,6 +363,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         best_wnd = None
         best_score = -1
+        backup_wnd = None
+        backup_score = -1
         for wnd in windows:
             try:
                 if not wnd.is_visible():
@@ -379,6 +384,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
+            backup = area
+            if title and any(token in title for token in ("寰俊", "weixin", "wechat")):
+                backup += 2_000_000_000
+            if "qwindowicon" not in class_norm and backup > backup_score:
+                backup_score = backup
+                backup_wnd = wnd
+
             interactive_score = self._window_interaction_score(wnd)
             if interactive_score <= 0:
                 continue
@@ -394,6 +406,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         if best_wnd is not None:
             return best_wnd
+        if backup_wnd is not None:
+            return backup_wnd
 
         try:
             fallback = app.window(title_re=".*(Weixin|WeChat|WX).*")
@@ -420,6 +434,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         best_wnd = None
         best_score = -1
+        backup_wnd = None
+        backup_score = -1
         for wnd in windows:
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
@@ -440,6 +456,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
             area = width * height
             if area <= 0:
                 continue
+            backup = area
+            if title and any(token in title for token in ("寰俊", "weixin", "wechat")):
+                backup += 2_000_000_000
+            if "qwindowicon" not in class_norm and backup > backup_score:
+                backup_score = backup
+                backup_wnd = wnd
+
             interactive_score = self._window_interaction_score(wnd)
             if interactive_score <= 0:
                 continue
@@ -452,7 +475,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
-        return best_wnd
+        if best_wnd is not None:
+            return best_wnd
+        return backup_wnd
 
     @staticmethod
     def _window_richness(wnd: Any) -> int:
