@@ -633,6 +633,44 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     exc,
                 )
 
+        try:
+            _emit_keys("^1")
+            time.sleep(0.10)
+            _emit_keys("{ESC}")
+            time.sleep(0.08)
+            _emit_keys("{HOME}")
+            time.sleep(0.08)
+            _emit_keys("{DOWN}")
+            time.sleep(0.08)
+            _emit_keys("{ENTER}")
+            time.sleep(0.20)
+            attempt_ts_ms = int(time.time() * 1000)
+            self._set_clipboard_text(reply.content)
+            _emit_keys("^v")
+            time.sleep(0.05)
+            _emit_keys("{ENTER}")
+            if self._verify_send_outcome(
+                conversation_id=reply.conversation_id,
+                expected_text=reply.content,
+                since_ts_ms=attempt_ts_ms,
+                timeout_s=2.8,
+            ):
+                logger.info(
+                    "WeChatAdapter: global keyboard flow success via first-chat fallback conversation=%s",
+                    reply.conversation_id,
+                )
+                return True
+            logger.warning(
+                "WeChatAdapter: global keyboard flow first-chat fallback verify failed conversation=%s",
+                reply.conversation_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "WeChatAdapter: global keyboard flow first-chat fallback failed conversation=%s err=%s",
+                reply.conversation_id,
+                exc,
+            )
+
         for keyword in candidates[:3]:
             for search_shortcut in ("^n", "^f"):
                 try:
