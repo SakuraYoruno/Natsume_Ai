@@ -1208,7 +1208,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return True
         if "qwindowtoolsavebits" in normalized_class:
             return True
-        if "chrome_widgetwin" in normalized_class and not normalized_title:
+        if "chrome_widgetwin" in normalized_class:
             return True
         return False
 
@@ -1221,38 +1221,79 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     def _window_interaction_score(self, wnd: Any) -> int:
         counts: dict[str, int] = {}
-        for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Pane"):
+        for control_type in ("Edit", "Document", "List", "ListItem", "Button", "Pane", "Text"):
             try:
                 counts[control_type] = len(list(wnd.descendants(control_type=control_type)))
             except Exception:
                 counts[control_type] = 0
 
+        if self._window_has_browser_shell_markers(wnd):
+            return 0
+
         strong_controls = counts.get("Edit", 0) + counts.get("Document", 0)
-        structural_controls = (
-            counts.get("List", 0)
-            + counts.get("ListItem", 0)
-            + counts.get("Button", 0)
-        )
+        list_controls = counts.get("List", 0) + counts.get("ListItem", 0)
+        text_controls = counts.get("Text", 0)
+        structural_controls = list_controls + counts.get("Button", 0)
         pane_controls = counts.get("Pane", 0)
         if strong_controls <= 0 and structural_controls <= 0 and pane_controls <= 0:
+            return 0
+        if strong_controls <= 0 and list_controls <= 0 and text_controls <= 2:
             return 0
         score = (
             strong_controls * 6
             + counts.get("List", 0) * 3
             + counts.get("ListItem", 0) * 2
             + counts.get("Button", 0) * 2
+            + min(12, text_controls)
             + min(20, pane_controls)
         )
         if strong_controls <= 0:
-            if structural_controls >= 8:
-                score += 20
-            elif structural_controls >= 4 and pane_controls >= 4:
+            if list_controls >= 2:
+                score += 18
+            elif list_controls >= 1 and text_controls >= 3:
                 score += 12
-            elif counts.get("Button", 0) >= 6 and pane_controls >= 6:
+            elif structural_controls >= 8 and text_controls >= 6:
+                score += 20
+            elif structural_controls >= 4 and pane_controls >= 4 and text_controls >= 4:
+                score += 12
+            elif counts.get("Button", 0) >= 6 and pane_controls >= 6 and text_controls >= 5:
                 score += 10
             else:
                 return 0
         return min(200, score)
+
+    def _window_has_browser_shell_markers(self, wnd: Any) -> bool:
+        markers = (
+            "后退",
+            "前进",
+            "重新加载",
+            "历史记录",
+            "back",
+            "forward",
+            "reload",
+            "history",
+        )
+        marker_hits: set[str] = set()
+        controls: list[Any] = []
+        try:
+            controls.extend(list(wnd.descendants(control_type="Button")))
+        except Exception:
+            pass
+        try:
+            controls.extend(list(wnd.descendants(control_type="MenuItem")))
+        except Exception:
+            pass
+        for ctrl in controls[:120]:
+            name = self._normalize_match_text(self._safe_item_name(ctrl))
+            if not name:
+                continue
+            for marker in markers:
+                marker_norm = self._normalize_match_text(marker)
+                if marker_norm and marker_norm in name:
+                    marker_hits.add(marker_norm)
+            if len(marker_hits) >= 2:
+                return True
+        return False
 
     def _ensure_chat_open(self, main_wnd: Any, conversation_id: str) -> bool:
         """确保指定会话的聊天窗口已打开。"""
