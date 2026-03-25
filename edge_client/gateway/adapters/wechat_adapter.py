@@ -686,6 +686,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 title = str(win32gui.GetWindowText(hwnd) or "")
                 if not title:
                     return
+                class_name = str(win32gui.GetClassName(hwnd) or "")
+                class_norm = self._normalize_match_text(class_name)
+                if any(
+                    token in class_norm
+                    for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
+                ):
+                    return
                 normalized = self._normalize_match_text(title)
                 if not any(token in normalized for token in ("微信", "weixin", "wechat", "wx")):
                     return
