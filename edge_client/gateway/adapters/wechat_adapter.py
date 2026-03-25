@@ -568,6 +568,22 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 hwnd,
                 self._foreground_window_debug(),
             )
+        target_wnd = None
+        try:
+            from pywinauto import Desktop
+            target_wnd = Desktop(backend="uia").window(handle=int(hwnd))
+        except Exception:
+            target_wnd = None
+
+        def _emit_keys(keys: str) -> None:
+            if target_wnd is not None:
+                try:
+                    target_wnd.type_keys(keys)
+                    return
+                except Exception:
+                    pass
+            send_keys(keys)
+
         logger.info(
             "WeChatAdapter: global keyboard flow foreground after activate=%s",
             self._foreground_window_debug(),
@@ -584,27 +600,27 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         search_shortcut,
                         self._foreground_window_debug(),
                     )
-                    send_keys("^1")
+                    _emit_keys("^1")
                     time.sleep(0.12)
-                    send_keys("{ESC}")
+                    _emit_keys("{ESC}")
                     time.sleep(0.08)
-                    send_keys(search_shortcut)
+                    _emit_keys(search_shortcut)
                     time.sleep(0.15)
-                    send_keys("^a{BACKSPACE}")
+                    _emit_keys("^a{BACKSPACE}")
                     self._set_clipboard_text(keyword)
-                    send_keys("^v")
+                    _emit_keys("^v")
                     time.sleep(0.28)
-                    send_keys("{DOWN}")
+                    _emit_keys("{DOWN}")
                     time.sleep(0.08)
-                    send_keys("{ENTER}")
+                    _emit_keys("{ENTER}")
                     time.sleep(0.32)
-                    send_keys("{ESC}")
+                    _emit_keys("{ESC}")
                     time.sleep(0.08)
                     attempt_ts_ms = int(time.time() * 1000)
                     self._set_clipboard_text(reply.content)
-                    send_keys("^v")
+                    _emit_keys("^v")
                     time.sleep(0.05)
-                    send_keys("{ENTER}")
+                    _emit_keys("{ENTER}")
                     if self._verify_send_outcome(
                         conversation_id=reply.conversation_id,
                         expected_text=reply.content,
@@ -659,20 +675,36 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 hwnd,
                 self._foreground_window_debug(),
             )
+        target_wnd = None
+        try:
+            from pywinauto import Desktop
+            target_wnd = Desktop(backend="uia").window(handle=int(hwnd))
+        except Exception:
+            target_wnd = None
+
+        def _emit_keys(keys: str) -> None:
+            if target_wnd is not None:
+                try:
+                    target_wnd.type_keys(keys)
+                    return
+                except Exception:
+                    pass
+            send_keys(keys)
+
         logger.info(
             "WeChatAdapter: top-session global-wake foreground after activate=%s",
             self._foreground_window_debug(),
         )
         time.sleep(0.18)
         try:
-            send_keys("^1")
+            _emit_keys("^1")
             time.sleep(0.10)
-            send_keys("{ESC}")
+            _emit_keys("{ESC}")
             time.sleep(0.08)
             attempt_ts_ms = int(time.time() * 1000)
             try:
                 self._set_clipboard_text(reply.content)
-                send_keys("^v")
+                _emit_keys("^v")
             except Exception as clip_exc:
                 logger.warning(
                     "WeChatAdapter: global-wake clipboard unavailable, fallback type conversation=%s err=%s",
@@ -682,7 +714,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 if not self._type_text_direct(reply.content):
                     return False
             time.sleep(0.05)
-            send_keys("{ENTER}")
+            _emit_keys("{ENTER}")
             ok = self._verify_send_outcome(
                 conversation_id=reply.conversation_id,
                 expected_text=reply.content,
