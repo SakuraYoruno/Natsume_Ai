@@ -644,6 +644,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             time.sleep(0.08)
             _emit_keys("{ENTER}")
             time.sleep(0.20)
+            self._focus_chat_input_fallback(target_wnd)
             attempt_ts_ms = int(time.time() * 1000)
             self._set_clipboard_text(reply.content)
             _emit_keys("^v")
@@ -782,6 +783,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             time.sleep(0.10)
             _emit_keys("{ESC}")
             time.sleep(0.08)
+            self._focus_chat_input_fallback(target_wnd)
             attempt_ts_ms = int(time.time() * 1000)
             try:
                 self._set_clipboard_text(reply.content)
@@ -829,6 +831,26 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return False
         try:
             send_keys(str(text or ""), with_spaces=True, with_tabs=True, with_newlines=True)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _focus_chat_input_fallback(main_wnd: Any) -> bool:
+        try:
+            main_wnd.set_focus()
+        except Exception:
+            pass
+        try:
+            rect = main_wnd.rectangle()
+            width = max(0, int(getattr(rect, "right", 0)) - int(getattr(rect, "left", 0)))
+            height = max(0, int(getattr(rect, "bottom", 0)) - int(getattr(rect, "top", 0)))
+            if width <= 0 or height <= 0:
+                return False
+            x = max(8, int(width * 0.72))
+            y = max(8, int(height * 0.90))
+            main_wnd.click_input(coords=(x, y))
+            time.sleep(0.06)
             return True
         except Exception:
             return False
@@ -967,6 +989,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 if is_weixin_process and not has_title_match and area < 40_000:
                     return
                 interaction = self._interaction_score_for_hwnd(int(hwnd))
+                if self._is_forced_shell_window(class_norm, normalized, interaction):
+                    return
                 windows.append((area, hwnd, title, class_name, int(pid), interaction))
             except Exception:
                 return
@@ -1064,6 +1088,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             class_norm = self._normalize_match_text(class_name)
             if self._is_blocked_wechat_window_class(class_norm):
                 continue
+            interactive_score = self._window_interaction_score(wnd)
+            if self._is_forced_shell_window(class_norm, title, interactive_score):
+                continue
             class_bias = self._wechat_window_class_bias(class_norm)
             backup = area + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
@@ -1072,7 +1099,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 backup_score = backup
                 backup_wnd = wnd
 
-            interactive_score = self._window_interaction_score(wnd)
             if interactive_score <= 0:
                 continue
 
@@ -1085,8 +1111,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         if best_wnd is not None:
             return best_wnd
-        if backup_wnd is not None:
-            return backup_wnd
 
         try:
             fallback = app.window(title_re=".*(微信|Weixin|WeChat|WX).*")
@@ -1148,6 +1172,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             area = width * height
             if area <= 0:
                 continue
+            interactive_score = self._window_interaction_score(wnd)
+            if self._is_forced_shell_window(class_norm, title, interactive_score):
+                continue
             class_bias = self._wechat_window_class_bias(class_norm)
             backup = area + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
@@ -1156,7 +1183,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 backup_score = backup
                 backup_wnd = wnd
 
-            interactive_score = self._window_interaction_score(wnd)
             if interactive_score <= 0:
                 continue
 
@@ -1168,7 +1194,23 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 best_wnd = wnd
         if best_wnd is not None:
             return best_wnd
-        return backup_wnd
+        return None
+
+    @staticmethod
+    def _is_forced_shell_window(class_norm: str, title_norm: str, interaction: int) -> bool:
+        if int(interaction) > 0:
+            return False
+        normalized_class = str(class_norm or "")
+        normalized_title = str(title_norm or "")
+        if "qt51514qwindowicon" in normalized_class:
+            return True
+        if "qwindowicon" in normalized_class:
+            return True
+        if "qwindowtoolsavebits" in normalized_class:
+            return True
+        if "chrome_widgetwin" in normalized_class and not normalized_title:
+            return True
+        return False
 
     @staticmethod
     def _window_richness(wnd: Any) -> int:
@@ -1741,6 +1783,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "applicationframewindow",
             "wxtrayiconmessagewindowclass",
             "trayiconmessagewindow",
+            "qwindowtoolsavebits",
         )
         return any(token in normalized for token in blocked_tokens)
 
