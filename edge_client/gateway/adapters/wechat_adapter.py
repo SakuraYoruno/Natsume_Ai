@@ -460,10 +460,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 return False
             for keyword in candidates:
                 self._clear_and_fill_search(search_box, keyword)
-                try:
-                    search_box.type_keys("{ENTER}")
-                except Exception:
-                    pass
                 time.sleep(0.45)
                 matched = self._find_matched_result_item(main_wnd, candidates)
                 if matched is None:
