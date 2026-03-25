@@ -361,6 +361,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     "WeChatAdapter: _ensure_chat_open failed conversation=%s",
                     reply.conversation_id,
                 )
+                if not self._allow_keyboard_search_fallback() and not is_top_target:
+                    self._log_window_snapshot(
+                        main_wnd,
+                        reason="ensure_chat_open_failed_search_disabled",
+                        conversation_id=reply.conversation_id,
+                    )
+                    return False
                 if self._allow_keyboard_search_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                     return True
                 if not self._allow_active_chat_fallback():
@@ -381,6 +388,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if input_box is None:
                 if self._allow_active_chat_fallback():
                     self._recover_to_chat_home(main_wnd)
+                    if input_box is None and self._try_enter_chat_from_detail_view(main_wnd):
+                        input_box = self._resolve_input_box(main_wnd)
                     self._switch_to_chat_tab(main_wnd)
                     self._dismiss_search_overlay(main_wnd)
                     input_box = self._resolve_input_box(main_wnd)
@@ -448,6 +457,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             input_box = self._resolve_input_box(main_wnd)
             if input_box is None:
                 self._recover_to_chat_home(main_wnd)
+                self._dismiss_search_overlay(main_wnd)
+                input_box = self._resolve_input_box(main_wnd)
+            if input_box is None and self._try_enter_chat_from_detail_view(main_wnd):
+                input_box = self._resolve_input_box(main_wnd)
+            if input_box is None and self._select_top_chat_entry(main_wnd):
                 self._dismiss_search_overlay(main_wnd)
                 input_box = self._resolve_input_box(main_wnd)
             if input_box is None:
@@ -774,7 +788,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             self._recover_to_chat_home(main_wnd)
             if self._select_chat_from_chat_list(main_wnd, candidates, conversation_id):
                 return True
-            if self._allow_keyboard_search_fallback():
+            if not self._allow_keyboard_search_fallback():
+                logger.info(
+                    "WeChatAdapter: search fallback disabled, skip search flow conversation=%s",
+                    conversation_id,
+                )
                 return False
 
             search_box = self._resolve_search_box(main_wnd)
@@ -1380,6 +1398,24 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 pass
             time.sleep(0.12)
+        return self._is_chat_context_ready(main_wnd)
+
+    def _try_enter_chat_from_detail_view(self, main_wnd: Any) -> bool:
+        if self._is_chat_context_ready(main_wnd):
+            return True
+        self._dismiss_search_overlay(main_wnd)
+        if self._click_button_by_token(main_wnd, tokens=["\u53d1\u6d88\u606f", "\u7ee7\u7eed\u804a\u5929", "sendmessage"]):
+            time.sleep(0.18)
+            self._dismiss_search_overlay(main_wnd)
+            if self._is_chat_context_ready(main_wnd):
+                logger.info("WeChatAdapter: recovered chat context via detail-view message button")
+                return True
+        if self._click_button_by_token(main_wnd, tokens=["\u8fd4\u56de\u804a\u5929", "\u8fd4\u56de", "\u540e\u9000", "back"]):
+            time.sleep(0.12)
+            self._dismiss_search_overlay(main_wnd)
+            if self._is_chat_context_ready(main_wnd):
+                logger.info("WeChatAdapter: recovered chat context via detail-view back button")
+                return True
         return self._is_chat_context_ready(main_wnd)
 
     def _is_embedded_browser_view(self, main_wnd: Any) -> bool:
