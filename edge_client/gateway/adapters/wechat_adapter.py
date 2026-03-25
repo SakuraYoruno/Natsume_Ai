@@ -776,6 +776,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     conversation_id,
                 )
                 return False
+            chat_not_ready_hits = 0
             for keyword in candidates:
                 if self._is_embedded_browser_view(main_wnd):
                     self._recover_to_chat_home(main_wnd)
@@ -792,6 +793,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 time.sleep(0.25)
                 self._dismiss_search_overlay(main_wnd)
                 if not self._is_chat_context_ready(main_wnd):
+                    chat_not_ready_hits += 1
                     logger.warning(
                         "WeChatAdapter: search matched but chat context not ready conversation=%s keyword=%s",
                         conversation_id,
@@ -799,7 +801,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     )
                     self._recover_to_chat_home(main_wnd)
                     search_box = self._resolve_search_box(main_wnd)
-                    if search_box is None:
+                    if search_box is None or chat_not_ready_hits >= 1:
                         break
                     continue
                 logger.info(
@@ -1340,7 +1342,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             from pywinauto.keyboard import send_keys
         except Exception:
             send_keys = None
-        for _ in range(3):
+        for _ in range(2):
             self._dismiss_search_overlay(main_wnd)
             self._switch_to_chat_tab(main_wnd)
             if self._is_chat_context_ready(main_wnd):
@@ -1358,8 +1360,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 time.sleep(0.12)
                 if self._is_chat_context_ready(main_wnd):
                     return True
-            if self._click_button_by_token(main_wnd, tokens=["\u540e\u9000", "back"]):
-                time.sleep(0.22)
+            if self._click_button_by_token(main_wnd, tokens=["\u8fd4\u56de\u804a\u5929", "\u8fd4\u56de", "\u540e\u9000", "back"]):
+                time.sleep(0.12)
                 continue
             try:
                 main_wnd.set_focus()
@@ -1369,7 +1371,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 main_wnd.type_keys("%{LEFT}")
             except Exception:
                 pass
-            time.sleep(0.22)
+            time.sleep(0.12)
         return self._is_chat_context_ready(main_wnd)
 
     def _is_embedded_browser_view(self, main_wnd: Any) -> bool:
