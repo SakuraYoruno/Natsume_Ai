@@ -755,7 +755,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if not windows:
             logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
             return 0
-        windows.sort(key=lambda item: item[0], reverse=True)
+        def _pick_score(item: tuple[int, int, str, str, int]) -> int:
+            area, _hwnd, title, class_name, _pid = item
+            class_norm = self._normalize_match_text(class_name)
+            title_norm = self._normalize_match_text(title)
+            score = int(area) + int(self._wechat_window_class_bias(class_norm))
+            if any(token in title_norm for token in _WECHAT_WINDOW_TITLE_TOKENS):
+                score += 500_000
+            return score
+
+        windows.sort(key=lambda item: (_pick_score(item), item[0]), reverse=True)
         preview = [
             {
                 "hwnd": int(item[1]),
@@ -763,18 +772,20 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 "class": str(item[3])[:64],
                 "title": str(item[2])[:64],
                 "area": int(item[0]),
+                "score": int(_pick_score(item)),
             }
             for item in windows[:3]
         ]
         logger.info("WeChatAdapter: _find_wechat_hwnd candidates=%s", preview)
         best = windows[0]
         logger.info(
-            "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s",
+            "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s score=%s",
             best[1],
             best[4],
             best[3],
             best[2][:80],
             best[0],
+            _pick_score(best),
         )
         return int(best[1])
 
@@ -810,10 +821,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             class_norm = self._normalize_match_text(class_name)
             if self._is_blocked_wechat_window_class(class_norm):
                 continue
-            backup = area
+            class_bias = self._wechat_window_class_bias(class_norm)
+            backup = area + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 backup += 2_000_000_000
-            if "qwindowicon" not in class_norm and backup > backup_score:
+            if backup > backup_score:
                 backup_score = backup
                 backup_wnd = wnd
 
@@ -821,11 +833,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if interactive_score <= 0:
                 continue
 
-            score = area + interactive_score * 1_000_000
+            score = area + interactive_score * 1_000_000 + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 score += 2_000_000_000
-            if "qwindowicon" in class_norm:
-                score -= 1_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
@@ -895,10 +905,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             area = width * height
             if area <= 0:
                 continue
-            backup = area
+            class_bias = self._wechat_window_class_bias(class_norm)
+            backup = area + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 backup += 2_000_000_000
-            if "qwindowicon" not in class_norm and backup > backup_score:
+            if backup > backup_score:
                 backup_score = backup
                 backup_wnd = wnd
 
@@ -906,11 +917,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if interactive_score <= 0:
                 continue
 
-            score = area + interactive_score * 1_000_000
+            score = area + interactive_score * 1_000_000 + class_bias
             if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 score += 2_000_000_000
-            if "qwindowicon" in class_norm:
-                score -= 1_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
@@ -1475,6 +1484,16 @@ class WeChatAdapter(AbstractPlatformAdapter):
             "applicationframewindow",
         )
         return any(token in normalized for token in blocked_tokens)
+
+    @staticmethod
+    def _wechat_window_class_bias(class_norm: str) -> int:
+        normalized = str(class_norm or "")
+        bias = 0
+        if "trayiconmessagewindow" in normalized or "wxtrayicon" in normalized:
+            bias -= 1_500_000
+        if "qwindowicon" in normalized:
+            bias += 300_000
+        return bias
 
     def _is_noise_click_target(self, normalized_text: str) -> bool:
         text = str(normalized_text or "")
