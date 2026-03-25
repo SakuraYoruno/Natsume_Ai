@@ -604,10 +604,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             try:
                 self._focus_chat_input_fallback(target_wnd)
                 attempt_ts_ms = int(time.time() * 1000)
-                self._set_clipboard_text(reply.content)
-                _emit_keys("^v")
-                time.sleep(0.06)
-                _emit_keys("{ENTER}")
+                sent = self._send_via_physical_active_chat(target_wnd, reply.content)
+                if not sent:
+                    self._set_clipboard_text(reply.content)
+                    _emit_keys("^v")
+                    time.sleep(0.06)
+                    _emit_keys("{ENTER}")
                 if self._verify_send_outcome(
                     conversation_id=reply.conversation_id,
                     expected_text=reply.content,
@@ -896,6 +898,44 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     continue
             return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _send_via_physical_active_chat(main_wnd: Any, text: str) -> bool:
+        try:
+            import pyautogui
+        except Exception:
+            return False
+        if not str(text or "").strip():
+            return False
+        try:
+            rect = main_wnd.rectangle()
+            left = int(getattr(rect, "left", 0))
+            top = int(getattr(rect, "top", 0))
+            right = int(getattr(rect, "right", 0))
+            bottom = int(getattr(rect, "bottom", 0))
+            width = max(0, right - left)
+            height = max(0, bottom - top)
+            if width <= 0 or height <= 0:
+                return False
+            x = int(left + width * 0.78)
+            y = int(top + height * 0.84)
+            pyautogui.click(x=x, y=y)
+            time.sleep(0.06)
+            pasted = False
+            try:
+                import pyperclip
+                pyperclip.copy(str(text))
+                pyautogui.hotkey("ctrl", "v")
+                pasted = True
+            except Exception:
+                pasted = False
+            if not pasted:
+                pyautogui.typewrite(str(text), interval=0.01)
+            time.sleep(0.05)
+            pyautogui.press("enter")
+            return True
         except Exception:
             return False
 
