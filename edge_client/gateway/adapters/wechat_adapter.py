@@ -45,6 +45,8 @@ _PLACEHOLDER_CONVERSATION_IDS: set[str] = {
     "当前会话",
 }
 
+_WECHAT_WINDOW_TITLE_TOKENS: tuple[str, ...] = ("wechat", "weixin", "微信")
+
 
 class WeChatAdapter(AbstractPlatformAdapter):
     """微信平台适配器（基于 wx4_decrypt 解密方案）。
@@ -718,13 +720,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return
                 class_name = str(win32gui.GetClassName(hwnd) or "")
                 class_norm = self._normalize_match_text(class_name)
-                if any(
-                    token in class_norm
-                    for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
-                ):
+                if self._is_blocked_wechat_window_class(class_norm):
                     return
                 normalized = self._normalize_match_text(title)
-                has_title_match = any(token in normalized for token in ("微信", "weixin", "wechat", "wx"))
+                has_title_match = any(token in normalized for token in _WECHAT_WINDOW_TITLE_TOKENS)
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 is_weixin_process = False
                 try:
@@ -735,11 +734,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     is_weixin_process = False
                 if not is_weixin_process and not has_title_match:
-                    return
-                if any(
-                    token in class_norm
-                    for token in ("windows.uicore.corewindow", "desktopwindowxamlsource", "applicationframewindow")
-                ):
                     return
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
@@ -762,6 +756,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.warning("WeChatAdapter: _find_wechat_hwnd no matched window")
             return 0
         windows.sort(key=lambda item: item[0], reverse=True)
+        preview = [
+            {
+                "hwnd": int(item[1]),
+                "pid": int(item[4]),
+                "class": str(item[3])[:64],
+                "title": str(item[2])[:64],
+                "area": int(item[0]),
+            }
+            for item in windows[:3]
+        ]
+        logger.info("WeChatAdapter: _find_wechat_hwnd candidates=%s", preview)
         best = windows[0]
         logger.info(
             "WeChatAdapter: _find_wechat_hwnd picked hwnd=%s pid=%s class=%s title=%s area=%s",
@@ -803,14 +808,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
-            is_tray_shell = any(
-                token in class_norm
-                for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
-            )
-            if is_tray_shell:
+            if self._is_blocked_wechat_window_class(class_norm):
                 continue
             backup = area
-            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
+            if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 backup += 2_000_000_000
             if "qwindowicon" not in class_norm and backup > backup_score:
                 backup_score = backup
@@ -821,7 +822,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
 
             score = area + interactive_score * 1_000_000
-            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
+            if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 score += 2_000_000_000
             if "qwindowicon" in class_norm:
                 score -= 1_000_000_000
@@ -874,15 +875,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 process_name = ""
             is_weixin_process = process_name in {"weixin.exe", "wechat.exe"}
-            is_tray_shell = any(
-                token in class_norm
-                for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
-            )
-            if is_tray_shell:
+            if self._is_blocked_wechat_window_class(class_norm):
                 continue
             if (
                 not is_weixin_process
-                and not any(token in title for token in ("微信", "weixin", "wechat", "wx"))
+                and not any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS)
                 and "qt" not in class_norm
                 and "weixin" not in class_norm
                 and "wechat" not in class_norm
@@ -899,7 +896,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if area <= 0:
                 continue
             backup = area
-            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
+            if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 backup += 2_000_000_000
             if "qwindowicon" not in class_norm and backup > backup_score:
                 backup_score = backup
@@ -910,7 +907,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
 
             score = area + interactive_score * 1_000_000
-            if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
+            if title and any(token in title for token in _WECHAT_WINDOW_TITLE_TOKENS):
                 score += 2_000_000_000
             if "qwindowicon" in class_norm:
                 score -= 1_000_000_000
@@ -1464,6 +1461,23 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _normalize_match_text(text: str) -> str:
         return str(text or "").strip().replace(" ", "").replace("\u3000", "").casefold()
+
+    @staticmethod
+    def _is_blocked_wechat_window_class(class_norm: str) -> bool:
+        normalized = str(class_norm or "")
+        if not normalized:
+            return False
+        blocked_tokens = (
+            "qwindowicon",
+            "trayiconmessagewindow",
+            "wxtrayicon",
+            "tooltips_class32",
+            "windows.ui.core.corewindow",
+            "windows.uicore.corewindow",
+            "desktopwindowxamlsource",
+            "applicationframewindow",
+        )
+        return any(token in normalized for token in blocked_tokens)
 
     def _is_noise_click_target(self, normalized_text: str) -> bool:
         text = str(normalized_text or "")
