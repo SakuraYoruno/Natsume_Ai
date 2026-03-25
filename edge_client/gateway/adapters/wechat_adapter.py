@@ -274,9 +274,22 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 pass
             time.sleep(0.15)
+            send_started_ts = int(time.time() * 1000)
 
             # 确保聊天窗口已打开（通过搜索框定位联系人）
             if not self._ensure_chat_open(main_wnd, reply.conversation_id):
+                logger.warning(
+                    "WeChatAdapter: _ensure_chat_open failed conversation=%s",
+                    reply.conversation_id,
+                )
+                if self._send_via_keyboard_flow(main_wnd, reply):
+                    if reply.msg_type != MsgType.TEXT:
+                        return True
+                    return self._verify_send_outcome(
+                        conversation_id=reply.conversation_id,
+                        expected_text=reply.content,
+                        since_ts_ms=send_started_ts,
+                    )
                 if not self._allow_active_chat_fallback():
                     return False
                 logger.warning(
@@ -297,8 +310,21 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
                 if reply.msg_type == MsgType.TEXT:
+                    if self._send_via_keyboard_flow(main_wnd, reply):
+                        return self._verify_send_outcome(
+                            conversation_id=reply.conversation_id,
+                            expected_text=reply.content,
+                            since_ts_ms=send_started_ts,
+                        )
                     self._set_clipboard_text(reply.content)
-                    return self._paste_and_send(main_wnd, main_wnd)
+                    sent = self._paste_and_send(main_wnd, main_wnd)
+                    if not sent:
+                        return False
+                    return self._verify_send_outcome(
+                        conversation_id=reply.conversation_id,
+                        expected_text=reply.content,
+                        since_ts_ms=send_started_ts,
+                    )
                 if reply.msg_type == MsgType.IMAGE and reply.media_path:
                     self._set_clipboard_file(reply.media_path)
                     return self._paste_and_send(main_wnd, main_wnd)
@@ -311,7 +337,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
             if reply.msg_type == MsgType.TEXT:
                 self._set_clipboard_text(reply.content)
-                return self._paste_and_send(input_box, main_wnd)
+                sent = self._paste_and_send(input_box, main_wnd)
+                if not sent:
+                    return False
+                return self._verify_send_outcome(
+                    conversation_id=reply.conversation_id,
+                    expected_text=reply.content,
+                    since_ts_ms=send_started_ts,
+                )
 
             elif reply.msg_type == MsgType.IMAGE and reply.media_path:
                 self._set_clipboard_file(reply.media_path)
@@ -811,6 +844,87 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
         if last_exc is not None:
             logger.error("WeChatAdapter: paste/send failed all targets err=%s", last_exc)
+        return False
+
+    def _send_via_keyboard_flow(self, main_wnd: Any, reply: UnifiedReply) -> bool:
+        if reply.msg_type != MsgType.TEXT:
+            return False
+        candidates = self._build_search_candidates(reply.conversation_id)
+        if not candidates:
+            return False
+        for keyword in candidates[:3]:
+            try:
+                try:
+                    main_wnd.set_focus()
+                except Exception:
+                    pass
+                main_wnd.type_keys("^f")
+                time.sleep(0.12)
+                main_wnd.type_keys("^a{BACKSPACE}")
+                self._set_clipboard_text(keyword)
+                main_wnd.type_keys("^v")
+                time.sleep(0.18)
+                main_wnd.type_keys("{ENTER}")
+                time.sleep(0.22)
+                self._set_clipboard_text(reply.content)
+                if self._paste_and_send(main_wnd, main_wnd):
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "WeChatAdapter: keyboard flow failed conversation=%s keyword=%s err=%s",
+                    reply.conversation_id,
+                    keyword,
+                    exc,
+                )
+                continue
+        return False
+
+    def _verify_send_outcome(
+        self,
+        *,
+        conversation_id: str,
+        expected_text: str,
+        since_ts_ms: int,
+        timeout_s: float = 4.0,
+    ) -> bool:
+        expected = str(expected_text or "").strip()
+        if not expected:
+            return True
+        deadline = time.time() + max(0.5, float(timeout_s))
+        while time.time() < deadline:
+            try:
+                recent = self._svc.get_messages(
+                    conversation_id=conversation_id,
+                    limit=20,
+                    after_ts_ms=max(0, int(since_ts_ms) - 3000),
+                )
+            except Exception as exc:
+                logger.debug(
+                    "WeChatAdapter: verify send read failed conversation=%s err=%s",
+                    conversation_id,
+                    exc,
+                )
+                time.sleep(0.2)
+                continue
+
+            for msg in reversed(recent):
+                content = str(msg.content or "").strip()
+                if not content:
+                    continue
+                if msg.ts_ms and msg.ts_ms < int(since_ts_ms) - 3000:
+                    continue
+                if msg.is_sender and (content == expected or expected in content):
+                    return True
+                if content == expected and msg.ts_ms >= int(since_ts_ms) - 1000:
+                    return True
+            time.sleep(0.2)
+
+        logger.warning(
+            "WeChatAdapter: send verify failed conversation=%s expected=%s since_ts_ms=%s",
+            conversation_id,
+            expected[:80],
+            since_ts_ms,
+        )
         return False
 
     def _log_window_snapshot(self, main_wnd: Any, *, reason: str, conversation_id: str) -> None:
