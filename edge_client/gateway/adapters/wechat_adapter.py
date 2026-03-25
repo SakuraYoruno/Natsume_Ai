@@ -605,6 +605,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 self._focus_chat_input_fallback(target_wnd)
                 attempt_ts_ms = int(time.time() * 1000)
                 sent = self._send_via_physical_active_chat(target_wnd, reply.content)
+                logger.info(
+                    "WeChatAdapter: global keyboard flow physical active-chat send attempted conversation=%s sent=%s",
+                    reply.conversation_id,
+                    sent,
+                )
                 if not sent:
                     self._set_clipboard_text(reply.content)
                     _emit_keys("^v")
@@ -921,6 +926,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 return False
             x = int(left + width * 0.78)
             y = int(top + height * 0.84)
+            logger.info(
+                "WeChatAdapter: physical send click point=(%s,%s) rect=(%s,%s,%s,%s)",
+                x,
+                y,
+                left,
+                top,
+                right,
+                bottom,
+            )
             pyautogui.click(x=x, y=y)
             time.sleep(0.06)
             pasted = False
@@ -936,7 +950,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             time.sleep(0.05)
             pyautogui.press("enter")
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("WeChatAdapter: physical active-chat send failed err=%s", exc)
             return False
 
     @staticmethod
