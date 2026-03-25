@@ -459,6 +459,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 )
                 return False
             for keyword in candidates:
+                if self._is_embedded_browser_view(main_wnd):
+                    self._recover_to_chat_home(main_wnd)
+                    search_box = self._resolve_search_box(main_wnd)
+                    if search_box is None:
+                        break
                 self._clear_and_fill_search(search_box, keyword)
                 time.sleep(0.45)
                 matched = self._find_matched_result_item(main_wnd, candidates)
@@ -474,6 +479,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         conversation_id,
                         keyword,
                     )
+                    self._recover_to_chat_home(main_wnd)
+                    search_box = self._resolve_search_box(main_wnd)
+                    if search_box is None:
+                        break
                     continue
                 logger.info(
                     "WeChatAdapter: chat selected conversation=%s keyword=%s matched=%s",
