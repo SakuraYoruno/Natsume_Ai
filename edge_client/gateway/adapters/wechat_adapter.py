@@ -582,13 +582,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             target_wnd = None
 
         def _emit_keys(keys: str) -> None:
+            try:
+                send_keys(keys)
+                return
+            except Exception:
+                pass
             if target_wnd is not None:
                 try:
                     target_wnd.type_keys(keys)
                     return
                 except Exception:
                     pass
-            send_keys(keys)
 
         logger.info(
             "WeChatAdapter: global keyboard flow foreground after activate=%s",
@@ -601,7 +605,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 self._focus_chat_input_fallback(target_wnd)
                 attempt_ts_ms = int(time.time() * 1000)
                 self._set_clipboard_text(reply.content)
-                if self._paste_and_send(target_wnd, target_wnd) and self._verify_send_outcome(
+                _emit_keys("^v")
+                time.sleep(0.06)
+                _emit_keys("{ENTER}")
+                if self._verify_send_outcome(
                     conversation_id=reply.conversation_id,
                     expected_text=reply.content,
                     since_ts_ms=attempt_ts_ms,
@@ -788,13 +795,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             target_wnd = None
 
         def _emit_keys(keys: str) -> None:
+            try:
+                send_keys(keys)
+                return
+            except Exception:
+                pass
             if target_wnd is not None:
                 try:
                     target_wnd.type_keys(keys)
                     return
                 except Exception:
                     pass
-            send_keys(keys)
 
         logger.info(
             "WeChatAdapter: top-session global-wake foreground after activate=%s",
