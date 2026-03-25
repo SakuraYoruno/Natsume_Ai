@@ -564,6 +564,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         for keyword in candidates[:3]:
             try:
+                logger.info(
+                    "WeChatAdapter: global keyboard flow try conversation=%s keyword=%s",
+                    reply.conversation_id,
+                    keyword,
+                )
                 send_keys("^1")
                 time.sleep(0.12)
                 send_keys("{ESC}")
@@ -593,6 +598,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
                         keyword,
                     )
                     return True
+                logger.warning(
+                    "WeChatAdapter: global keyboard flow verify failed conversation=%s keyword=%s",
+                    reply.conversation_id,
+                    keyword,
+                )
             except Exception as exc:
                 logger.warning(
                     "WeChatAdapter: global keyboard flow failed conversation=%s keyword=%s err=%s",
@@ -656,6 +666,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if ok:
                 logger.info(
                     "WeChatAdapter: top-session global-wake send success conversation=%s",
+                    reply.conversation_id,
+                )
+            else:
+                logger.warning(
+                    "WeChatAdapter: top-session global-wake verify failed conversation=%s",
                     reply.conversation_id,
                 )
             return ok
