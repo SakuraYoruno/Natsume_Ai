@@ -369,9 +369,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if area <= 0:
                 continue
             title = self._normalize_match_text(self._safe_item_name(wnd))
-            score = area
+            class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
+            class_norm = self._normalize_match_text(class_name)
+            interactive_score = self._window_interaction_score(wnd)
+            if interactive_score <= 0:
+                continue
+
+            score = area + interactive_score * 1_000_000
             if title and any(token in title for token in ("微信", "weixin", "wechat")):
                 score += 2_000_000_000
+            if "qwindowicon" in class_norm:
+                score -= 1_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
@@ -417,9 +425,18 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 width = 0
                 height = 0
-            score = (width * height)
+            area = width * height
+            if area <= 0:
+                continue
+            interactive_score = self._window_interaction_score(wnd)
+            if interactive_score <= 0:
+                continue
+
+            score = area + interactive_score * 1_000_000
             if title and any(token in title for token in ("微信", "weixin", "wechat")):
                 score += 2_000_000_000
+            if "qwindowicon" in class_norm:
+                score -= 1_000_000_000
             if score > best_score:
                 best_score = score
                 best_wnd = wnd
@@ -431,6 +448,27 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return min(200, len(list(wnd.children())))
         except Exception:
             return 0
+
+    def _window_interaction_score(self, wnd: Any) -> int:
+        counts: dict[str, int] = {}
+        for control_type in ("Edit", "Document", "List", "ListItem", "Button"):
+            try:
+                counts[control_type] = len(list(wnd.descendants(control_type=control_type)))
+            except Exception:
+                counts[control_type] = 0
+
+        total = (
+            counts.get("Edit", 0)
+            + counts.get("Document", 0)
+            + counts.get("List", 0)
+            + counts.get("ListItem", 0)
+            + counts.get("Button", 0)
+        )
+        if total <= 0:
+            return 0
+        if counts.get("Document", 0) <= 0 and counts.get("Edit", 0) <= 0:
+            return 0
+        return min(200, total)
 
     def _ensure_chat_open(self, main_wnd: Any, conversation_id: str) -> bool:
         """确保指定会话的聊天窗口已打开。"""
