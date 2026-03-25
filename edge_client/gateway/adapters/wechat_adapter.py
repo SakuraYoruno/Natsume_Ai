@@ -600,7 +600,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
             try:
                 self._switch_to_chat_tab(target_wnd)
                 self._dismiss_search_overlay(target_wnd)
-                if self._select_chat_from_chat_list(target_wnd, candidates, reply.conversation_id):
+                selected = self._select_chat_from_chat_list(target_wnd, candidates, reply.conversation_id)
+                if not selected and self._is_top_session_target(reply.conversation_id):
+                    selected = self._select_top_chat_entry(target_wnd)
+                if selected:
                     attempt_ts_ms = int(time.time() * 1000)
                     self._set_clipboard_text(reply.content)
                     if self._paste_and_send(target_wnd, target_wnd) and self._verify_send_outcome(
