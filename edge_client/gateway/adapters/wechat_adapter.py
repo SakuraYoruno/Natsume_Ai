@@ -881,11 +881,21 @@ class WeChatAdapter(AbstractPlatformAdapter):
             height = max(0, int(getattr(rect, "bottom", 0)) - int(getattr(rect, "top", 0)))
             if width <= 0 or height <= 0:
                 return False
-            x = max(8, int(width * 0.72))
-            y = max(8, int(height * 0.90))
-            main_wnd.click_input(coords=(x, y))
-            time.sleep(0.06)
-            return True
+            click_points = (
+                (0.78, 0.84),
+                (0.74, 0.82),
+                (0.84, 0.84),
+            )
+            for x_ratio, y_ratio in click_points:
+                x = max(8, int(width * float(x_ratio)))
+                y = max(8, int(height * float(y_ratio)))
+                try:
+                    main_wnd.click_input(coords=(x, y))
+                    time.sleep(0.05)
+                    return True
+                except Exception:
+                    continue
+            return False
         except Exception:
             return False
 
