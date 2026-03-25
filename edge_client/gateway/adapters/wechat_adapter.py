@@ -491,6 +491,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     matched_name,
                 )
                 return True
+            if self._select_top_chat_entry_for_target(main_wnd, conversation_id):
+                return True
             logger.warning(
                 "WeChatAdapter: chat open aborted, no matched search result conversation=%s candidates=%s",
                 conversation_id,
@@ -697,6 +699,75 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 exc,
             )
             return False
+
+    def _select_top_chat_entry_for_target(self, main_wnd: Any, conversation_id: str) -> bool:
+        try:
+            is_top_session = bool(self._svc.is_top_session(conversation_id))
+        except Exception as exc:
+            logger.debug(
+                "WeChatAdapter: is_top_session query failed conversation=%s err=%s",
+                conversation_id,
+                exc,
+            )
+            return False
+        if not is_top_session:
+            return False
+        if not self._select_top_chat_entry(main_wnd):
+            return False
+        logger.info(
+            "WeChatAdapter: selected top chat entry for target conversation=%s",
+            conversation_id,
+        )
+        return True
+
+    def _select_top_chat_entry(self, main_wnd: Any) -> bool:
+        try:
+            wnd_rect = main_wnd.rectangle()
+            left_bound = int(getattr(wnd_rect, "left", 0))
+            right_bound = int(getattr(wnd_rect, "right", 0))
+            left_panel_max_x = left_bound + int((right_bound - left_bound) * 0.40)
+        except Exception:
+            left_panel_max_x = 999999
+
+        controls: list[Any] = []
+        for control_type in ("ListItem", "Button"):
+            try:
+                controls.extend(list(main_wnd.descendants(control_type=control_type)))
+            except Exception:
+                continue
+
+        top_item = None
+        top_anchor: tuple[int, int] | None = None
+        for item in controls[:240]:
+            try:
+                rect = item.rectangle()
+                left = int(getattr(rect, "left", 0))
+                top = int(getattr(rect, "top", 0))
+                right = int(getattr(rect, "right", 0))
+                bottom = int(getattr(rect, "bottom", 0))
+            except Exception:
+                continue
+            if left > left_panel_max_x:
+                continue
+            if max(0, right - left) < 40 or max(0, bottom - top) < 16:
+                continue
+            text = self._normalize_match_text(self._extract_control_text(item))
+            if self._is_noise_click_target(text):
+                continue
+            anchor = (top, left)
+            if top_item is None or anchor < (top_anchor or anchor):
+                top_item = item
+                top_anchor = anchor
+
+        if top_item is None:
+            return False
+        try:
+            top_item.click_input()
+            time.sleep(0.25)
+        except Exception:
+            return False
+        self._dismiss_search_overlay(main_wnd)
+        return self._is_chat_context_ready(main_wnd)
 
     def _build_search_candidates(self, conversation_id: str) -> list[str]:
         values: list[str] = []

@@ -287,6 +287,28 @@ class WxDbService:
         rows = self.get_messages(keyword=keyword, limit=limit)
         return [self._wx_message_to_dict(row) for row in rows]
 
+    def is_top_session(self, conversation_id: str) -> bool:
+        """判断目标会话是否位于最近会话首位。"""
+        target = str(conversation_id or "").strip()
+        if not target:
+            return False
+        session_db = self._resolve_existing_db(self._SESSION_DB_CANDIDATES)
+        if session_db is None:
+            return False
+        try:
+            conn = self._open_db(session_db)
+            row = conn.execute(
+                "SELECT username FROM SessionTable WHERE is_hidden=0 "
+                "ORDER BY sort_timestamp DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+        except Exception as exc:
+            logger.debug("WxDbService: is_top_session failed conversation=%s err=%s", target, exc)
+            return False
+        if not row:
+            return False
+        return str(row[0] or "").strip() == target
+
     def refresh(self) -> dict[str, Any]:
         """兼容接口：refresh 由外层调度器触发。"""
         return {
