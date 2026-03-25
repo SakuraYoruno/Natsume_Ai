@@ -275,6 +275,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 pass
             time.sleep(0.15)
             send_started_ts = int(time.time() * 1000)
+            self._dismiss_search_overlay(main_wnd)
 
             # 确保聊天窗口已打开（通过搜索框定位联系人）
             if not self._ensure_chat_open(main_wnd, reply.conversation_id):
@@ -282,7 +283,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     "WeChatAdapter: _ensure_chat_open failed conversation=%s",
                     reply.conversation_id,
                 )
-                if self._send_via_keyboard_flow(main_wnd, reply):
+                if self._allow_keyboard_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                     return True
                 if not self._allow_active_chat_fallback():
                     return False
@@ -291,6 +292,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
             self._switch_to_chat_tab(main_wnd)
+            self._dismiss_search_overlay(main_wnd)
 
             input_box = self._resolve_input_box(main_wnd)
             if input_box is None:
@@ -304,20 +306,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reply.conversation_id,
                 )
                 if reply.msg_type == MsgType.TEXT:
-                    if self._send_via_keyboard_flow(main_wnd, reply):
+                    if self._allow_keyboard_fallback() and self._send_via_keyboard_flow(main_wnd, reply):
                         return True
-                    self._set_clipboard_text(reply.content)
-                    sent = self._paste_and_send(main_wnd, main_wnd)
-                    if not sent:
-                        return False
-                    return self._verify_send_outcome(
-                        conversation_id=reply.conversation_id,
-                        expected_text=reply.content,
-                        since_ts_ms=send_started_ts,
-                    )
+                    return False
                 if reply.msg_type == MsgType.IMAGE and reply.media_path:
-                    self._set_clipboard_file(reply.media_path)
-                    return self._paste_and_send(main_wnd, main_wnd)
+                    return False
                 logger.error(
                     "WeChatAdapter: fallback send unsupported conversation=%s msg_type=%s",
                     reply.conversation_id,
@@ -448,13 +441,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
         try:
             self._switch_to_chat_tab(main_wnd)
+            self._dismiss_search_overlay(main_wnd)
+            if self._select_chat_from_chat_list(main_wnd, candidates, conversation_id):
+                return True
+
             search_box = self._resolve_search_box(main_wnd)
             if search_box is None:
                 logger.warning(
-                    "WeChatAdapter: search box not found, fallback to chat-list scan, conversation=%s",
+                    "WeChatAdapter: search box not found after list-scan fallback, conversation=%s",
                     conversation_id,
                 )
-                return self._select_chat_from_chat_list(main_wnd, candidates, conversation_id)
+                return False
             for keyword in candidates:
                 self._clear_and_fill_search(search_box, keyword)
                 time.sleep(0.45)
@@ -464,6 +461,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 result_item, matched_name = matched
                 result_item.click_input()
                 time.sleep(0.25)
+                self._dismiss_search_overlay(main_wnd)
+                if not self._is_chat_context_ready(main_wnd):
+                    logger.warning(
+                        "WeChatAdapter: search matched but chat context not ready conversation=%s keyword=%s",
+                        conversation_id,
+                        keyword,
+                    )
+                    continue
                 logger.info(
                     "WeChatAdapter: chat selected conversation=%s keyword=%s matched=%s",
                     conversation_id,
@@ -496,28 +501,68 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 continue
 
         try:
-            main_wnd.set_focus()
-            main_wnd.type_keys("^f")
-            time.sleep(0.2)
-            for probe in probes:
-                try:
-                    ctrl = main_wnd.child_window(**probe)
-                    if ctrl.exists(timeout=0.3):
-                        return ctrl
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-        try:
             edits = list(main_wnd.descendants(control_type="Edit"))
         except Exception:
             edits = []
+        picked = self._pick_search_control(main_wnd, edits)
+        if picked is not None:
+            return picked
         for edit in edits[:12]:
-            name = self._safe_item_name(edit)
+            name = self._extract_control_text(edit)
             if re.search(r"(搜索|search)", name, re.IGNORECASE):
                 return edit
         return None
+
+    def _pick_search_control(self, main_wnd: Any, edits: list[Any]) -> Any | None:
+        try:
+            wnd_rect = main_wnd.rectangle()
+            wnd_left = int(getattr(wnd_rect, "left", 0))
+            wnd_top = int(getattr(wnd_rect, "top", 0))
+            wnd_width = int(getattr(wnd_rect, "right", 0)) - wnd_left
+            wnd_height = int(getattr(wnd_rect, "bottom", 0)) - wnd_top
+        except Exception:
+            wnd_left = 0
+            wnd_top = 0
+            wnd_width = 0
+            wnd_height = 0
+
+        best_ctrl = None
+        best_score = -999
+        for ctrl in edits[:40]:
+            try:
+                rect = ctrl.rectangle()
+                left = int(getattr(rect, "left", 0))
+                top = int(getattr(rect, "top", 0))
+                right = int(getattr(rect, "right", 0))
+                bottom = int(getattr(rect, "bottom", 0))
+            except Exception:
+                continue
+            width = max(0, right - left)
+            height = max(0, bottom - top)
+            if width < 80 or height < 18:
+                continue
+
+            score = 0
+            if wnd_width > 0 and left <= wnd_left + int(wnd_width * 0.50):
+                score += 2
+            if wnd_height > 0 and top <= wnd_top + int(wnd_height * 0.30):
+                score += 2
+            if wnd_width > 0 and width <= int(wnd_width * 0.50):
+                score += 1
+
+            text = self._normalize_match_text(self._extract_control_text(ctrl))
+            if text:
+                if "search" in text or "\u641c\u7d22" in text:
+                    score += 2
+                if "input" in text or "message" in text or "chat" in text:
+                    score -= 2
+            if score > best_score:
+                best_score = score
+                best_ctrl = ctrl
+
+        if best_ctrl is None or best_score < 3:
+            return None
+        return best_ctrl
 
     def _switch_to_chat_tab(self, main_wnd: Any) -> bool:
         names = ("聊天", "会话", "Chats", "Chat")
@@ -570,7 +615,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     continue
             except Exception:
                 pass
-            name = self._safe_item_name(item)
+            name = self._extract_control_text(item)
             normalized_name = self._normalize_match_text(name)
             if not normalized_name:
                 continue
@@ -599,6 +644,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             best_item.click_input()
             time.sleep(0.25)
+            self._dismiss_search_overlay(main_wnd)
+            if not self._is_chat_context_ready(main_wnd):
+                logger.warning(
+                    "WeChatAdapter: chat-list fallback clicked but chat context not ready conversation=%s matched=%s",
+                    conversation_id,
+                    best_name,
+                )
+                return False
             logger.info(
                 "WeChatAdapter: chat selected via list fallback conversation=%s matched=%s score=%d",
                 conversation_id,
@@ -701,8 +754,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
             result_items = list(main_wnd.descendants(control_type="ListItem"))
         except Exception:
             result_items = []
-        for item in result_items[:30]:
-            name = self._safe_item_name(item)
+        for item in result_items[:120]:
+            name = self._extract_control_text(item)
             normalized_name = self._normalize_match_text(name)
             if not normalized_name:
                 continue
@@ -718,6 +771,25 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 ):
                     return item, name
         return None
+
+    def _extract_control_text(self, item: Any) -> str:
+        name = self._safe_item_name(item)
+        if name:
+            return name
+
+        parts: list[str] = []
+        try:
+            texts = list(item.descendants(control_type="Text"))
+        except Exception:
+            texts = []
+        for ctrl in texts[:12]:
+            text = self._safe_item_name(ctrl)
+            if not text:
+                continue
+            if text in parts:
+                continue
+            parts.append(text)
+        return " ".join(parts)
 
     @staticmethod
     def _safe_item_name(item: Any) -> str:
@@ -738,6 +810,50 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _normalize_match_text(text: str) -> str:
         return str(text or "").strip().replace(" ", "").replace("\u3000", "").casefold()
+
+    def _is_chat_context_ready(self, main_wnd: Any) -> bool:
+        if self._is_search_overlay_active(main_wnd):
+            return False
+        return self._resolve_input_box(main_wnd) is not None
+
+    def _dismiss_search_overlay(self, main_wnd: Any) -> bool:
+        if not self._is_search_overlay_active(main_wnd):
+            return False
+        for _ in range(2):
+            try:
+                main_wnd.set_focus()
+            except Exception:
+                pass
+            try:
+                main_wnd.type_keys("{ESC}")
+            except Exception:
+                pass
+            time.sleep(0.12)
+            if not self._is_search_overlay_active(main_wnd):
+                return True
+        return False
+
+    def _is_search_overlay_active(self, main_wnd: Any) -> bool:
+        markers = [
+            "\u76f8\u5173\u641c\u7d22",
+            "\u641c\u7d22\u7ed3\u679c",
+            "Search Results",
+            "Related Searches",
+        ]
+        normalized_markers = [self._normalize_match_text(item) for item in markers]
+        try:
+            texts = list(main_wnd.descendants(control_type="Text"))
+        except Exception:
+            texts = []
+        for item in texts[:120]:
+            text = self._safe_item_name(item)
+            if not text:
+                continue
+            normalized = self._normalize_match_text(text)
+            for marker in normalized_markers:
+                if marker and marker in normalized:
+                    return True
+        return False
 
     def _resolve_input_box(self, main_wnd: Any) -> Any | None:
         probes: list[dict[str, Any]] = [
@@ -1090,6 +1206,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
     # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _allow_keyboard_fallback() -> bool:
+        raw = str(os.environ.get("EDGE_WECHAT_SEND_KEYBOARD_FALLBACK", "") or "").strip().lower()
+        if not raw:
+            return False
+        return raw in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _allow_active_chat_fallback() -> bool:
