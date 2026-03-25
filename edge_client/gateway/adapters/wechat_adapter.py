@@ -263,6 +263,8 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 except Exception:
                     main_wnd = None
             if main_wnd is None:
+                if self._send_via_global_keyboard_flow(reply):
+                    return True
                 logger.error("WeChatAdapter: main window not found")
                 return False
             if self._window_interaction_score(main_wnd) <= 0:
@@ -353,6 +355,108 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.error("WeChatAdapter: pywinauto 操作失败: %s", exc)
 
         return False
+
+    def _send_via_global_keyboard_flow(self, reply: UnifiedReply) -> bool:
+        if reply.msg_type != MsgType.TEXT:
+            return False
+        try:
+            import win32gui
+            import win32con
+            from pywinauto.keyboard import send_keys
+        except Exception:
+            return False
+
+        candidates = self._build_search_candidates(reply.conversation_id)
+        if not candidates:
+            return False
+
+        hwnd = self._find_wechat_hwnd()
+        if not hwnd:
+            logger.warning("WeChatAdapter: global keyboard flow no wechat hwnd")
+            return False
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        except Exception:
+            pass
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        time.sleep(0.2)
+
+        for keyword in candidates[:3]:
+            try:
+                send_keys("^1")
+                time.sleep(0.12)
+                send_keys("^f")
+                time.sleep(0.15)
+                send_keys("^a{BACKSPACE}")
+                self._set_clipboard_text(keyword)
+                send_keys("^v")
+                time.sleep(0.28)
+                send_keys("{ENTER}")
+                time.sleep(0.32)
+                attempt_ts_ms = int(time.time() * 1000)
+                self._set_clipboard_text(reply.content)
+                send_keys("^v")
+                time.sleep(0.05)
+                send_keys("{ENTER}")
+                if self._verify_send_outcome(
+                    conversation_id=reply.conversation_id,
+                    expected_text=reply.content,
+                    since_ts_ms=attempt_ts_ms,
+                    timeout_s=2.8,
+                ):
+                    logger.info(
+                        "WeChatAdapter: global keyboard flow success conversation=%s keyword=%s",
+                        reply.conversation_id,
+                        keyword,
+                    )
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "WeChatAdapter: global keyboard flow failed conversation=%s keyword=%s err=%s",
+                    reply.conversation_id,
+                    keyword,
+                    exc,
+                )
+                continue
+        return False
+
+    def _find_wechat_hwnd(self) -> int:
+        try:
+            import win32gui
+        except Exception:
+            return 0
+
+        windows: list[tuple[int, int]] = []
+
+        def _enum_handler(hwnd: int, _: Any) -> None:
+            try:
+                if not win32gui.IsWindowVisible(hwnd):
+                    return
+                title = str(win32gui.GetWindowText(hwnd) or "")
+                if not title:
+                    return
+                normalized = self._normalize_match_text(title)
+                if not any(token in normalized for token in ("微信", "weixin", "wechat")):
+                    return
+                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                area = max(0, int(right) - int(left)) * max(0, int(bottom) - int(top))
+                if area <= 0:
+                    return
+                windows.append((area, hwnd))
+            except Exception:
+                return
+
+        try:
+            win32gui.EnumWindows(_enum_handler, None)
+        except Exception:
+            return 0
+        if not windows:
+            return 0
+        windows.sort(reverse=True)
+        return int(windows[0][1])
 
     def _resolve_main_window(self, app: Any) -> Any | None:
         windows: list[Any] = []
