@@ -309,7 +309,7 @@ function Start-EdgeProcess {
       $safeValue = $envValue -replace '%', '%%'
       $launcherLines += ("set `"{0}={1}`"" -f $envName, $safeValue)
     }
-    $pythonCmd = "`"$PythonPath`" -m edge_client 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
+    $pythonCmd = "start `"`" /B `"$PythonPath`" -m edge_client 1>>`"$StdoutLog`" 2>>`"$StderrLog`""
     $launcherLines += $pythonCmd
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
