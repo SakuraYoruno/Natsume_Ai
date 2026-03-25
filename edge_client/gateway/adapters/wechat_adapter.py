@@ -447,6 +447,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             self._switch_to_chat_tab(main_wnd)
             self._dismiss_search_overlay(main_wnd)
+            self._recover_to_chat_home(main_wnd)
             if self._select_chat_from_chat_list(main_wnd, candidates, conversation_id):
                 return True
 
@@ -927,6 +928,68 @@ class WeChatAdapter(AbstractPlatformAdapter):
             for marker in normalized_markers:
                 if marker and marker in normalized:
                     return True
+        return False
+
+    def _recover_to_chat_home(self, main_wnd: Any) -> bool:
+        for _ in range(3):
+            self._dismiss_search_overlay(main_wnd)
+            self._switch_to_chat_tab(main_wnd)
+            if not self._is_embedded_browser_view(main_wnd):
+                return True
+            if self._click_button_by_token(main_wnd, tokens=["\u540e\u9000", "back"]):
+                time.sleep(0.22)
+                continue
+            try:
+                main_wnd.set_focus()
+            except Exception:
+                pass
+            try:
+                main_wnd.type_keys("%{LEFT}")
+            except Exception:
+                pass
+            time.sleep(0.22)
+        return not self._is_embedded_browser_view(main_wnd)
+
+    def _is_embedded_browser_view(self, main_wnd: Any) -> bool:
+        markers = [
+            "\u540e\u9000",
+            "\u524d\u8fdb",
+            "\u91cd\u65b0\u52a0\u8f7d",
+            "back",
+            "forward",
+            "reload",
+        ]
+        normalized_markers = [self._normalize_match_text(item) for item in markers]
+        try:
+            buttons = list(main_wnd.descendants(control_type="Button"))
+        except Exception:
+            buttons = []
+        for button in buttons[:50]:
+            text = self._normalize_match_text(self._extract_control_text(button))
+            if not text:
+                continue
+            for marker in normalized_markers:
+                if marker and marker in text:
+                    return True
+        return False
+
+    def _click_button_by_token(self, main_wnd: Any, *, tokens: list[str]) -> bool:
+        normalized_tokens = [self._normalize_match_text(item) for item in tokens]
+        try:
+            buttons = list(main_wnd.descendants(control_type="Button"))
+        except Exception:
+            buttons = []
+        for button in buttons[:50]:
+            text = self._normalize_match_text(self._extract_control_text(button))
+            if not text:
+                continue
+            for token in normalized_tokens:
+                if token and token in text:
+                    try:
+                        button.click_input()
+                        return True
+                    except Exception:
+                        continue
         return False
 
     def _resolve_input_box(self, main_wnd: Any) -> Any | None:
