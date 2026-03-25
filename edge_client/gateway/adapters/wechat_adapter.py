@@ -292,9 +292,20 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     reason="input_not_found",
                     conversation_id=reply.conversation_id,
                 )
-                logger.error(
-                    "WeChatAdapter: input box not found conversation=%s",
+                logger.warning(
+                    "WeChatAdapter: input box not found, fallback to window keyboard send conversation=%s",
                     reply.conversation_id,
+                )
+                if reply.msg_type == MsgType.TEXT:
+                    self._set_clipboard_text(reply.content)
+                    return self._paste_and_send(main_wnd, main_wnd)
+                if reply.msg_type == MsgType.IMAGE and reply.media_path:
+                    self._set_clipboard_file(reply.media_path)
+                    return self._paste_and_send(main_wnd, main_wnd)
+                logger.error(
+                    "WeChatAdapter: fallback send unsupported conversation=%s msg_type=%s",
+                    reply.conversation_id,
+                    reply.msg_type.value,
                 )
                 return False
 
