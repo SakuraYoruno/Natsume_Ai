@@ -337,6 +337,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             time.sleep(0.15)
             send_started_ts = int(time.time() * 1000)
             self._dismiss_search_overlay(main_wnd)
+            is_top_target = self._is_top_session_target(reply.conversation_id)
             if (
                 reply.msg_type == MsgType.TEXT
                 and self._send_to_top_session_directly(
@@ -346,6 +347,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 )
             ):
                 return True
+            if reply.msg_type == MsgType.TEXT and is_top_target and not self._allow_keyboard_search_fallback():
+                self._log_window_snapshot(
+                    main_wnd,
+                    reason="direct_top_session_input_unavailable",
+                    conversation_id=reply.conversation_id,
+                )
+                return False
 
             # 确保聊天窗口已打开（通过搜索框定位联系人）
             if not self._ensure_chat_open(main_wnd, reply.conversation_id):
@@ -426,18 +434,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         *,
         send_started_ts: int,
     ) -> bool:
-        is_top_session = False
-        try:
-            is_top_session = bool(self._svc.is_top_session(reply.conversation_id))
-        except Exception as exc:
-            logger.debug(
-                "WeChatAdapter: is_top_session query failed in direct path conversation=%s err=%s",
-                reply.conversation_id,
-                exc,
-            )
-            return False
-
-        if not is_top_session:
+        if not self._is_top_session_target(reply.conversation_id):
             logger.debug(
                 "WeChatAdapter: skip direct top-session send (not top) conversation=%s",
                 reply.conversation_id,
@@ -487,6 +484,17 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.warning(
                 "WeChatAdapter: direct top-session send failed conversation=%s err=%s",
                 reply.conversation_id,
+                exc,
+            )
+            return False
+
+    def _is_top_session_target(self, conversation_id: str) -> bool:
+        try:
+            return bool(self._svc.is_top_session(conversation_id))
+        except Exception as exc:
+            logger.debug(
+                "WeChatAdapter: is_top_session query failed conversation=%s err=%s",
+                conversation_id,
                 exc,
             )
             return False
