@@ -736,6 +736,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
+            is_tray_shell = any(
+                token in class_norm
+                for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
+            )
+            if is_tray_shell:
+                continue
             backup = area
             if title and any(token in title for token in ("微信", "weixin", "wechat", "wx")):
                 backup += 2_000_000_000
@@ -792,6 +798,12 @@ class WeChatAdapter(AbstractPlatformAdapter):
             title = self._normalize_match_text(self._safe_item_name(wnd))
             class_name = str(getattr(getattr(wnd, "element_info", None), "class_name", "") or "")
             class_norm = self._normalize_match_text(class_name)
+            is_tray_shell = any(
+                token in class_norm
+                for token in ("qwindowicon", "trayiconmessagewindow", "wxtrayicon", "tooltips_class32")
+            )
+            if is_tray_shell:
+                continue
             if (
                 not any(token in title for token in ("微信", "weixin", "wechat", "wx"))
                 and "qt" not in class_norm
