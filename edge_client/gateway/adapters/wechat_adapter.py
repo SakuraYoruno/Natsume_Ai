@@ -934,7 +934,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         for _ in range(3):
             self._dismiss_search_overlay(main_wnd)
             self._switch_to_chat_tab(main_wnd)
-            if not self._is_embedded_browser_view(main_wnd):
+            if self._is_chat_context_ready(main_wnd):
                 return True
             if self._click_button_by_token(main_wnd, tokens=["\u540e\u9000", "back"]):
                 time.sleep(0.22)
@@ -948,7 +948,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except Exception:
                 pass
             time.sleep(0.22)
-        return not self._is_embedded_browser_view(main_wnd)
+        return self._is_chat_context_ready(main_wnd)
 
     def _is_embedded_browser_view(self, main_wnd: Any) -> bool:
         markers = [
