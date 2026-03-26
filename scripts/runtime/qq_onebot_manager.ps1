@@ -253,6 +253,21 @@ function Resolve-QQOneBotStartSpec {
   }
 }
 
+function Stop-QQDesktopProcesses {
+  $processes = @(Get-Process -Name 'QQ' -ErrorAction SilentlyContinue)
+  if ($processes.Count -le 0) {
+    return 0
+  }
+  foreach ($process in $processes) {
+    try {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    } catch {
+    }
+  }
+  Start-Sleep -Seconds 2
+  return $processes.Count
+}
+
 function Ensure-QQOneBotRunning {
   param(
     [hashtable]$EnvValues,
@@ -261,6 +276,7 @@ function Ensure-QQOneBotRunning {
   $apiBase = [string]$EnvValues['QQ_ONEBOT_API_BASE']
   $selfId = [string]$EnvValues['QQ_SELF_ID']
   $autostart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_AUTOSTART']) -Default $false
+  $killQQBeforeStart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START']) -Default $false
   $launcherPath = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH']
   $launcherArgs = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS']
   $workDir = [string]$EnvValues['EDGE_QQ_ONEBOT_WORKDIR']
@@ -281,6 +297,7 @@ function Ensure-QQOneBotRunning {
     api_base = $apiBase
     health_url = $healthUrl
     autostart_enabled = $autostart
+    kill_qq_before_start = $killQQBeforeStart
     launcher_path = $launcherPath
     launcher_args = $launcherArgs
     working_directory = $workDir
@@ -320,6 +337,12 @@ function Ensure-QQOneBotRunning {
   }
 
   try {
+    if ($killQQBeforeStart) {
+      $stoppedQQCount = Stop-QQDesktopProcesses
+      if ($stoppedQQCount -gt 0) {
+        $result.detail = "stopped $stoppedQQCount existing QQ process(es) before onebot autostart"
+      }
+    }
     $startSpec = Resolve-QQOneBotStartSpec -LauncherPath $launcherPath -LauncherArgs $launcherArgs -WorkDir $workDir -SelfId $selfId -ApiBase $apiBase
     $startArgs = @{
       FilePath = [string]$startSpec.file_path
