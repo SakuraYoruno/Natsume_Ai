@@ -41,6 +41,7 @@ if (-not (Test-Path -Path $startEdgeScript)) {
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_INBOUND_BACKEND" -Value $WeChatInboundBackend
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MODEL" -Value $WeChatVisionModel
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_API_URL" -Value $WeChatVisionApiUrl
+Set-OptionalProcessEnv -Key "EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START" -Value "true"
 if ($WeChatVisionTimeoutS -gt 0) {
   Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_TIMEOUT_S" -Value $WeChatVisionTimeoutS
 }

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
@@ -838,7 +838,8 @@ $wechatEnvOverrideKeys = @(
   "EDGE_WECHAT_VISION_MIN_INTERVAL_S",
   "EDGE_WECHAT_ALLOW_EXTERNAL_CALLBACK_ONLY",
   "EDGE_WECHAT_AUTOSTART",
-  "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS"
+  "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS",
+  "EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START"
 )
 $processWechatOverrides = Read-ProcessEnvOverrides -Keys $wechatEnvOverrideKeys
 
