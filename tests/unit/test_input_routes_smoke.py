@@ -6,16 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from host_brain.app.input_routes import InputPayload, receive_input
 
 
-def test_receive_input_smoke_wechat_dispatches_to_graph():
+def test_receive_input_smoke_gateway_dispatches_to_graph():
     dispatch_mock = AsyncMock(return_value=None)
 
     with patch("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock):
         response = asyncio.run(
             receive_input(
                 body=InputPayload(
-                    source="WECHAT",
-                    from_wxid="wxid_user_a",
-                    to_wxid="wxid_bot",
+                    source="GATEWAY",
+                    platform="wechat",
+                    conversation_id="wxid_user_a",
                     content="hello",
                     msg_type="text",
                 ),
@@ -25,10 +25,10 @@ def test_receive_input_smoke_wechat_dispatches_to_graph():
 
     assert response.success is True
     assert response.status == "ACCEPTED"
-    assert response.source == "WECHAT"
+    assert response.source == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
-    assert kwargs["source"] == "WECHAT"
+    assert kwargs["source"] == "GATEWAY"
     assert kwargs["session_id"] == "wxid_user_a"
     assert kwargs["text"] == "hello"
 

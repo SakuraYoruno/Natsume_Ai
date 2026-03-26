@@ -415,6 +415,25 @@ class TestQQAdapterHealth(unittest.TestCase):
         self.assertEqual(status["self_id"], "123456")
 
     @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
+    def test_health_ok_nested_data_good(self, mock_get: MagicMock) -> None:
+        """T-QQ-HEALTH-01b: OneBot v11 get_status(data.good=true) 判定为 ok。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "status": "ok",
+            "retcode": 0,
+            "data": {"online": True, "good": True, "stat": {}},
+        }
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        adapter = _adapter()
+        status = adapter.health()
+
+        self.assertEqual(status["platform"], "qq")
+        self.assertEqual(status["status"], "ok")
+        self.assertEqual(status["self_id"], "123456")
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
     def test_health_error(self, mock_get: MagicMock) -> None:
         """T-QQ-HEALTH-02: OneBot 连接失败。"""
         mock_get.side_effect = Exception("Connection refused")

@@ -234,6 +234,8 @@ async def _dispatch_to_graph(
     ts_ms: int,
 ) -> None:
     ledger = _get_ledger_safe()
+    run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
+    dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
 
     _log_input_event(
         ledger=ledger,
@@ -255,9 +257,49 @@ async def _dispatch_to_graph(
             payload=payload,
             ts_ms=ts_ms,
             ledger=ledger,
-            dispatch_mode="fire_and_forget",
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
         )
     )
+
+
+async def _run_main_chain_dispatch(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    run_in_thread: bool,
+) -> None:
+    from host_brain.app.graph.main_chain import run_main_chain_from_input
+
+    if not run_in_thread:
+        await run_main_chain_from_input(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+        )
+        return
+
+    # Isolate heavy/possibly blocking chain work from FastAPI main event loop.
+    def _thread_entry() -> None:
+        asyncio.run(
+            run_main_chain_from_input(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+            )
+        )
+
+    await asyncio.to_thread(_thread_entry)
 
 
 async def _dispatch_to_graph_worker(
@@ -270,6 +312,7 @@ async def _dispatch_to_graph_worker(
     ts_ms: int,
     ledger: Any,
     dispatch_mode: str,
+    run_in_thread: bool,
 ) -> None:
     dispatch_ts = int(time.time() * 1000)
     _log_input_event(
@@ -283,15 +326,14 @@ async def _dispatch_to_graph_worker(
         ts_ms=dispatch_ts,
     )
     try:
-        from host_brain.app.graph.main_chain import run_main_chain_from_input
-
-        await run_main_chain_from_input(
+        await _run_main_chain_dispatch(
             request_id=request_id,
             session_id=session_id,
             source=source,
             text=text,
             payload=payload,
             ts_ms=ts_ms,
+            run_in_thread=run_in_thread,
         )
         complete_ts = int(time.time() * 1000)
         latency_ms = complete_ts - dispatch_ts

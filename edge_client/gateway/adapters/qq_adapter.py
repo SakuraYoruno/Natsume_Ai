@@ -292,9 +292,23 @@ class QQAdapter(AbstractPlatformAdapter):
             resp = httpx.get(f"{self._api_base}/get_status", timeout=3.0)
             resp.raise_for_status()
             ob_status = resp.json()
+            onebot_data = ob_status.get("data")
+            if not isinstance(onebot_data, dict):
+                onebot_data = {}
+            good_raw = onebot_data.get("good")
+            if good_raw is None:
+                good_raw = ob_status.get("good")
+            if isinstance(good_raw, bool):
+                is_good = good_raw
+            elif isinstance(good_raw, (int, float)):
+                is_good = (good_raw != 0)
+            elif isinstance(good_raw, str):
+                is_good = good_raw.strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                is_good = False
             return {
                 "platform": self.platform_id.value,
-                "status": "ok" if ob_status.get("good") else "degraded",
+                "status": "ok" if is_good else "degraded",
                 "self_id": self._self_id,
                 "onebot_api_base": self._api_base,
                 "onebot_status": ob_status,
