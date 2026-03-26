@@ -9,7 +9,7 @@
 | **开发节点** | DEV (v_wenloliu workstation) |
 | **报告日期** | 2026-03-26 |
 | **报告版本** | v1 |
-| **关联 Commit** | 待提交后填写 |
+| **关联 Commit** | cb9affb |
 | **关联分支** | codex |
 | **状态** | 🔵 OPEN（待真机验证） |
 
