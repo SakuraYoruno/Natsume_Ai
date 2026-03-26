@@ -17,27 +17,10 @@ from typing import Any
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.normalizer import _PLACEHOLDER_CONVERSATION_IDS
 from edge_client.services.wx_db_service import WxDbService, WxMessage
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wechat")
-
-_PLACEHOLDER_CONVERSATION_IDS: set[str] = {
-    "active_chat",
-    "active chat",
-    "current_chat",
-    "current chat",
-    "current_session",
-    "default",
-    "unknown",
-    "none",
-    "null",
-    "-",
-    "_",
-    "na",
-    "n/a",
-    "当前聊天",
-    "当前会话",
-}
 
 
 class WeChatAdapter(AbstractPlatformAdapter):
@@ -92,6 +75,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 return None
             ts_ms = self._resolve_inbound_ts_ms(raw_payload)
             sender_name = str(raw_payload.get("sender_name") or raw_payload.get("sender") or from_wxid or "").strip() or None
+            is_group = (
+                conversation_id.endswith("@chatroom")
+                or bool(raw_payload.get("is_group_hint"))
+            )
             self._stats["inbound_parsed"] += 1
             return UnifiedMessage(
                 msg_id=str(raw_payload.get("msg_id") or raw_payload.get("id") or f"wechat-{ts_ms}"),
@@ -102,7 +89,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 msg_type=msg_type,
                 content=content,
                 ts_ms=ts_ms,
-                is_group=conversation_id.endswith("@chatroom"),
+                is_group=is_group,
                 media_url=str(raw_payload.get("media_url") or "").strip() or None,
                 sender_name=sender_name,
                 raw_extra=dict(raw_payload),
@@ -148,16 +135,25 @@ class WeChatAdapter(AbstractPlatformAdapter):
         success = False
         detail = ""
         try:
-            if reply.msg_type != MsgType.TEXT:
-                detail = f"unsupported msg_type={reply.msg_type.value}"
+            if reply.msg_type == MsgType.TEXT:
+                if self._bridge_queue_enabled():
+                    success = self._send_via_bridge_queue(reply)
+                    detail = "bridge_queue"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                logger.warning(
+                    "WeChatAdapter: bridge queue not enabled — set EDGE_WECHAT_BRIDGE_ENABLED=true and EDGE_WECHAT_BRIDGE_BACKEND=uia"
+                )
                 return False
-            if self._bridge_queue_enabled():
-                success = self._send_via_bridge_queue(reply)
-                detail = "bridge_queue"
-                return success
-            success = self._send_via_pywinauto(reply)
-            detail = "legacy_fallback"
-            return success
+            if reply.msg_type == MsgType.IMAGE:
+                if self._bridge_queue_enabled():
+                    success = self._send_image_via_bridge_queue(reply)
+                    detail = "bridge_queue_image"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                return False
+            detail = f"unsupported msg_type={reply.msg_type.value}"
+            return False
         except Exception as exc:
             detail = str(exc)
             logger.error("WeChatAdapter: send failed conversation=%s err=%s", reply.conversation_id, exc)
@@ -266,9 +262,45 @@ class WeChatAdapter(AbstractPlatformAdapter):
         )
         return bool((result or {}).get("success"))
 
-    def _send_via_pywinauto(self, _reply: UnifiedReply) -> bool:
-        logger.warning("WeChatAdapter: legacy pywinauto path has been retired; use bridge mode")
-        return False
+    def _send_image_via_bridge_queue(self, reply: UnifiedReply) -> bool:
+        """Send an image via the UIA bridge command queue.
+
+        The image file path is expected in ``reply.media_path``.
+        Falls back to ``reply.content`` if ``media_path`` is not set.
+        """
+        from edge_client.channels.wechat_command_queue import (
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+
+        media_path = str(reply.media_path or reply.content or "").strip()
+        if not media_path:
+            logger.warning("WeChatAdapter: send_image called but no media_path provided")
+            return False
+
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        request_id = str(reply.raw_extra.get("request_id") or f"gateway-image-{now_ms}-{uuid.uuid4().hex[:8]}")
+        target_candidates = self._build_search_candidates(reply.conversation_id)
+        row = enqueue_wechat_command(
+            action="send_image",
+            target=reply.conversation_id,
+            target_candidates=target_candidates,
+            content=media_path,
+            request_id=request_id,
+            queue_file=queue_file,
+            ts_ms=now_ms,
+        )
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=self._resolve_command_timeout_ms(),
+            result_file=result_file,
+        )
+        return bool((result or {}).get("success"))
+
+    # NOTE: Legacy _send_via_pywinauto has been removed.
+    # All outbound messages go through the UIA Bridge command queue.
 
     @staticmethod
     def _is_placeholder_conversation_id(conversation_id: str) -> bool:

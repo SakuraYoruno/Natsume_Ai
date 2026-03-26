@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
 import threading
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
@@ -51,10 +55,23 @@ class GatewayInstance:
         self.refresher = None
         self.reporter = None
         self.server_thread: threading.Thread | None = None
+        self.uia_bridge_process: subprocess.Popen | None = None
+        self.uia_bridge_watchdog: threading.Thread | None = None
         self._shutdown = threading.Event()
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self.uia_bridge_process is not None:
+            try:
+                self.uia_bridge_process.terminate()
+                self.uia_bridge_process.wait(timeout=5)
+                logger.info("Gateway: UIA Bridge 进程已停止")
+            except Exception as exc:
+                logger.warning("Gateway: 停止 UIA Bridge 进程异常: %s", exc)
+                try:
+                    self.uia_bridge_process.kill()
+                except Exception:
+                    pass
         if self.watcher is not None:
             try:
                 self.watcher.stop()
@@ -98,6 +115,89 @@ def _wechat_uia_bridge_enabled() -> bool:
         return False
     backend = str(env.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia").strip().lower() or "uia"
     return backend == "uia"
+
+
+def _should_auto_start_uia_bridge() -> bool:
+    """Check whether bootstrap should auto-launch the UIA bridge subprocess."""
+    raw = os.environ.get("EDGE_WECHAT_UIA_BRIDGE_AUTO_START", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    # Default to True when bridge mode is enabled
+    return _wechat_uia_bridge_enabled()
+
+
+def _start_uia_bridge_process(instance: GatewayInstance) -> None:
+    """Launch ``tools/wechat_uia_bridge.py`` as a subprocess and start a watchdog."""
+    repo_root = Path(__file__).resolve().parents[2]
+    bridge_script = repo_root / "tools" / "wechat_uia_bridge.py"
+    if not bridge_script.exists():
+        logger.warning("Gateway: UIA Bridge 脚本不存在: %s，跳过自动启动", bridge_script)
+        return
+
+    # Resolve command queue paths so the bridge and adapter share the same files
+    runtime_edge = repo_root / "runtime" / "edge"
+    runtime_edge.mkdir(parents=True, exist_ok=True)
+    queue_file = os.environ.get("EDGE_WECHAT_COMMAND_QUEUE_FILE") or str(runtime_edge / "wechat_command_queue.jsonl")
+    result_file = os.environ.get("EDGE_WECHAT_COMMAND_RESULT_FILE") or str(runtime_edge / "wechat_command_result.jsonl")
+
+    python_exe = sys.executable or "python"
+    cmd = [
+        python_exe, str(bridge_script),
+        "--command-queue-file", queue_file,
+        "--command-result-file", result_file,
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(repo_root),
+        )
+        instance.uia_bridge_process = proc
+        logger.info("Gateway: UIA Bridge 子进程已启动 pid=%d cmd=%s", proc.pid, " ".join(cmd))
+    except Exception as exc:
+        logger.error("Gateway: UIA Bridge 子进程启动失败: %s", exc)
+        return
+
+    # Watchdog thread — restart the bridge if it dies unexpectedly
+    def _watchdog() -> None:
+        restart_count = 0
+        max_restarts = 10
+        while not instance._shutdown.is_set():
+            retcode = instance.uia_bridge_process.poll()
+            if retcode is not None:
+                if instance._shutdown.is_set():
+                    break
+                restart_count += 1
+                if restart_count > max_restarts:
+                    logger.error(
+                        "Gateway: UIA Bridge 已重启 %d 次，超过上限 %d，不再尝试",
+                        restart_count, max_restarts,
+                    )
+                    break
+                logger.warning(
+                    "Gateway: UIA Bridge 进程退出 code=%d，尝试第 %d 次重启",
+                    retcode, restart_count,
+                )
+                time.sleep(2.0)
+                try:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=str(repo_root),
+                    )
+                    instance.uia_bridge_process = proc
+                    logger.info("Gateway: UIA Bridge 子进程已重启 pid=%d", proc.pid)
+                except Exception as exc:
+                    logger.error("Gateway: UIA Bridge 重启失败: %s", exc)
+                    break
+            instance._shutdown.wait(timeout=5.0)
+
+    watchdog_thread = threading.Thread(target=_watchdog, name="uia-bridge-watchdog", daemon=True)
+    watchdog_thread.start()
+    instance.uia_bridge_watchdog = watchdog_thread
 
 
 def start_gateway(config: GatewayConfig) -> GatewayInstance:
@@ -157,6 +257,8 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
                 logger.info(
                     "Gateway: 微信 UIAutomation bridge mode enabled，使用 webhook + command queue，跳过 DB watcher"
                 )
+                if _should_auto_start_uia_bridge():
+                    _start_uia_bridge_process(instance)
             elif wx_svc is not None:
                 if config.wx_db_storage_dir:
                     from edge_client.services.wx_decrypt_refresher import WxDecryptRefresher

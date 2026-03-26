@@ -48,11 +48,6 @@ def test_wechat_adapter_uses_bridge_queue_for_text(monkeypatch) -> None:
         "edge_client.channels.wechat_command_queue.wait_wechat_command_result",
         _fake_wait_wechat_command_result,
     )
-    monkeypatch.setattr(
-        adapter,
-        "_send_via_pywinauto",
-        lambda _reply: (_ for _ in ()).throw(AssertionError("pywinauto should not be used in bridge mode")),
-    )
 
     reply = UnifiedReply(
         conversation_id="wxid_alice",

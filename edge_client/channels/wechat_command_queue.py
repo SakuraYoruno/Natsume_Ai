@@ -12,7 +12,16 @@ from typing import Any
 
 DEFAULT_QUEUE_FILENAME = "wechat_command_queue.jsonl"
 DEFAULT_RESULT_FILENAME = "wechat_command_result.jsonl"
-ALLOWED_WECHAT_COMMAND_ACTIONS = {"send_text", "voice_call", "video_call"}
+ALLOWED_WECHAT_COMMAND_ACTIONS = {"send_text", "send_image", "send_file", "voice_call", "video_call"}
+
+# --- Incremental read state for result file ---
+# Tracks (file_path_str -> byte_offset) so repeated lookups skip already-scanned lines.
+_RESULT_FILE_OFFSET: dict[str, int] = {}
+# In-memory index: command_id -> result row (populated by incremental reads).
+_RESULT_INDEX: dict[str, dict[str, Any]] = {}
+# Maximum number of bytes to tail-read from the result file on first access
+# (avoids reading a huge history when the process first starts).
+_RESULT_TAIL_BYTES = 512 * 1024  # 512 KB
 
 
 def resolve_command_file_paths() -> tuple[Path, Path]:
@@ -77,6 +86,13 @@ def find_wechat_command_result(
     command_id: str,
     result_file: Path | None = None,
 ) -> dict[str, Any] | None:
+    """Look up a command result using an incremental read + in-memory index.
+
+    On first call for a given *result_file*, only the tail portion of the file
+    is read (up to ``_RESULT_TAIL_BYTES``).  Subsequent calls only scan bytes
+    appended since the last read.  This avoids the O(file_size) penalty that
+    plagued the original implementation during long-running sessions.
+    """
     command_id_value = str(command_id or "").strip()
     if not command_id_value:
         return None
@@ -85,11 +101,9 @@ def find_wechat_command_result(
     if not result_path.exists():
         return None
 
-    found: dict[str, Any] | None = None
-    for row in _iter_jsonl_rows(result_path):
-        if str(row.get("command_id") or "").strip() == command_id_value:
-            found = row
-    return found
+    _ingest_new_result_rows(result_path)
+
+    return _RESULT_INDEX.get(command_id_value)
 
 
 def wait_wechat_command_result(
@@ -149,3 +163,68 @@ def _iter_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     except Exception:
         return []
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Incremental result file reader
+# ---------------------------------------------------------------------------
+
+def _ingest_new_result_rows(result_path: Path) -> None:
+    """Read only the bytes appended since the last call and update ``_RESULT_INDEX``.
+
+    On first invocation for a given file the reader starts from
+    ``max(0, file_size - _RESULT_TAIL_BYTES)`` so that a very large historical
+    file does not cause an O(N) startup penalty.  Subsequent calls seek to the
+    stored offset and read only the delta.
+
+    If the file was truncated (e.g. by log rotation), the reader detects the
+    shorter size and resets to read from the beginning.
+    """
+    key = str(result_path)
+    try:
+        file_size = result_path.stat().st_size
+    except OSError:
+        return
+
+    prev_offset = _RESULT_FILE_OFFSET.get(key)
+
+    if prev_offset is None:
+        # First access — tail-read only the last _RESULT_TAIL_BYTES.
+        start = max(0, file_size - _RESULT_TAIL_BYTES)
+    elif prev_offset > file_size:
+        # File was truncated / rotated — reset.
+        start = 0
+    else:
+        start = prev_offset
+
+    if start >= file_size:
+        _RESULT_FILE_OFFSET[key] = file_size
+        return
+
+    try:
+        with result_path.open("r", encoding="utf-8") as handle:
+            handle.seek(start)
+            # If we seeked into the middle of a line, skip the partial line.
+            if start > 0:
+                handle.readline()
+            for raw in handle:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    cid = str(payload.get("command_id") or "").strip()
+                    if cid:
+                        _RESULT_INDEX[cid] = payload
+            _RESULT_FILE_OFFSET[key] = handle.tell()
+    except OSError:
+        return
+
+
+def reset_result_cache() -> None:
+    """Clear the incremental read cache.  Useful for testing."""
+    _RESULT_FILE_OFFSET.clear()
+    _RESULT_INDEX.clear()
