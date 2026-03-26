@@ -1,0 +1,448 @@
+#!/usr/bin/env python3
+"""
+受众：CODEX
+标题：微信 4.x UIA 树恢复验证脚本
+
+验证 P0 方案（UIA 客户端冒充）是否能让微信暴露完整的控件树。
+包含三种 Python 实现，任一成功即说明方案可行。
+
+用法：
+  pip install comtypes pywinauto uiautomation
+  python verify_uia_recovery.py
+
+输出：
+  - 每种方案的子元素数量
+  - 是否找到 mmui::ChatSingleWindow / mmui::ChatTextItemView
+  - 最终汇总结论
+
+前置条件：
+  - 微信已启动（PC 端 4.x 版本）
+  - 有至少一个打开的聊天窗口（用于验证 ChatSingleWindow）
+
+关联文档：微信4.x_UIA树恢复方案_可操作指南.md
+"""
+import sys
+import time
+import json
+import platform
+from datetime import datetime
+from ctypes import windll
+
+# ──────────────────────────────────────────────
+# 常量
+# ──────────────────────────────────────────────
+WECHAT_CLASS_NAME = "WeChatMainWndForPC"
+WAIT_AFTER_ATTACH = 3  # 附着后等待秒数
+MAX_DISPLAY_CHILDREN = 30  # 最多显示的子元素数
+TARGET_CLASSES = [
+    "mmui::ChatSingleWindow",
+    "mmui::ChatTextItemView",
+    "mmui::ChatMsgListView",
+    "mmui::SessionListView",
+    "mmui::SearchBar",
+]
+
+
+def find_wechat_hwnd():
+    """查找微信主窗口句柄"""
+    hwnd = windll.user32.FindWindowW(WECHAT_CLASS_NAME, None)
+    if not hwnd:
+        print("❌ 未找到微信窗口（class_name='WeChatMainWndForPC'），请确保微信已启动")
+        print("   提示：微信 4.x 窗口类名为 WeChatMainWndForPC")
+        sys.exit(1)
+    print(f"✅ 找到微信窗口: hwnd=0x{hwnd:08X} ({hwnd})")
+    return hwnd
+
+
+def collect_class_names(children_iter, max_count=500):
+    """收集子元素的 ClassName 列表"""
+    classes = []
+    try:
+        for i, child in enumerate(children_iter):
+            if i >= max_count:
+                break
+            try:
+                cn = getattr(child, 'CurrentClassName', None) or getattr(child, 'ClassName', None)
+                name = getattr(child, 'CurrentName', None) or getattr(child, 'Name', None)
+                classes.append({"index": i, "class_name": cn or "", "name": (name or "")[:60]})
+            except Exception:
+                classes.append({"index": i, "class_name": "<error>", "name": ""})
+    except Exception as e:
+        classes.append({"index": -1, "class_name": f"<iter_error: {e}>", "name": ""})
+    return classes
+
+
+def deep_search_targets(root_func, label=""):
+    """深度搜索目标控件类名"""
+    found = {}
+    try:
+        descendants = root_func()
+        total = 0
+        for elem in descendants:
+            total += 1
+            cn = getattr(elem, 'CurrentClassName', None) or getattr(elem, 'ClassName', None) or ""
+            if cn in TARGET_CLASSES and cn not in found:
+                name = getattr(elem, 'CurrentName', None) or getattr(elem, 'Name', None) or ""
+                found[cn] = name[:80]
+                print(f"    ✅ 找到 {cn}: {name[:60]}")
+            if total >= 5000:  # 安全上限
+                break
+        print(f"    深度遍历共 {total} 个后代元素")
+    except Exception as e:
+        print(f"    ⚠️ 深度搜索异常: {e}")
+    return found
+
+
+# ──────────────────────────────────────────────
+# 方案 A: comtypes 直接调用 COM
+# ──────────────────────────────────────────────
+def test_comtypes(hwnd):
+    """P0-A: comtypes 直接调用 IUIAutomation COM 接口"""
+    print("\n" + "=" * 50)
+    print("▶ 方案 A: comtypes (COM 直调)")
+    print("=" * 50)
+
+    try:
+        import comtypes
+        import comtypes.client
+    except ImportError:
+        print("  ⚠️ comtypes 未安装: pip install comtypes")
+        return {"method": "comtypes", "status": "not_installed", "child_count": 0}
+
+    try:
+        # 创建 CUIAutomation 实例
+        UIA = comtypes.client.CreateObject(
+            "{ff48dba4-60ef-4201-aa87-54103eef594e}",
+            interface=comtypes.gen.UIAutomationClient.IUIAutomation
+        )
+
+        # 通过句柄附着 —— 关键步骤！触发 UIA Provider 加载
+        print(f"  附着窗口 hwnd=0x{hwnd:08X} ...")
+        root = UIA.ElementFromHandle(hwnd)
+
+        print(f"  等待 {WAIT_AFTER_ATTACH}s 让 UI 树加载...")
+        time.sleep(WAIT_AFTER_ATTACH)
+
+        # 获取直接子元素
+        condition = UIA.CreateTrueCondition()
+        children = root.FindAll(1, condition)  # TreeScope_Children = 1
+        count = children.Length
+
+        print(f"  直接子元素数量: {count}")
+
+        # 显示子元素
+        for i in range(min(count, MAX_DISPLAY_CHILDREN)):
+            elem = children.GetElement(i)
+            cn = elem.CurrentClassName or ""
+            name = (elem.CurrentName or "")[:60]
+            print(f"    [{i:02d}] ClassName: {cn}, Name: {name}")
+
+        result = {
+            "method": "comtypes",
+            "child_count": count,
+            "status": "success" if count > 2 else "failed",
+            "found_targets": {},
+        }
+
+        if count > 2:
+            print(f"\n  ✅ UI 树已恢复！（{count} 个直接子元素）")
+
+            # 深度搜索目标控件
+            print("  开始深度搜索目标控件...")
+
+            def get_descendants():
+                all_elems = root.FindAll(4, condition)  # TreeScope_Descendants = 4
+                for i in range(all_elems.Length):
+                    yield all_elems.GetElement(i)
+
+            found = deep_search_targets(get_descendants, "comtypes")
+            result["found_targets"] = found
+
+            for tc in TARGET_CLASSES:
+                if tc not in found:
+                    print(f"    ⚠️ 未找到 {tc}（可能需要打开相应面板）")
+        else:
+            print(f"\n  ❌ UI 树未恢复（仅 {count} 个元素）")
+
+        # 保持引用存活（不释放 root 和 UIA）
+        result["_refs"] = (UIA, root)
+        return result
+
+    except Exception as e:
+        print(f"  ❌ 异常: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"method": "comtypes", "status": "error", "child_count": 0, "error": str(e)}
+
+
+# ──────────────────────────────────────────────
+# 方案 B: pywinauto
+# ──────────────────────────────────────────────
+def test_pywinauto(hwnd):
+    """P0-B: pywinauto UIA backend"""
+    print("\n" + "=" * 50)
+    print("▶ 方案 B: pywinauto (UIA backend)")
+    print("=" * 50)
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        print("  ⚠️ pywinauto 未安装: pip install pywinauto")
+        return {"method": "pywinauto", "status": "not_installed", "child_count": 0}
+
+    try:
+        desktop = Desktop(backend="uia")
+
+        # 连接微信窗口 —— pywinauto 会自动触发 UIA 客户端注册
+        print(f"  连接微信窗口...")
+        wechat = desktop.window(class_name=WECHAT_CLASS_NAME)
+
+        print(f"  等待 {WAIT_AFTER_ATTACH}s ...")
+        time.sleep(WAIT_AFTER_ATTACH)
+
+        children = wechat.children()
+        count = len(children)
+
+        print(f"  直接子元素数量: {count}")
+
+        for i, child in enumerate(children[:MAX_DISPLAY_CHILDREN]):
+            info = child.element_info
+            cn = info.class_name or ""
+            name = (info.name or "")[:60]
+            print(f"    [{i:02d}] ClassName: {cn}, Name: {name}")
+
+        result = {
+            "method": "pywinauto",
+            "child_count": count,
+            "status": "success" if count > 2 else "failed",
+            "found_targets": {},
+        }
+
+        if count > 2:
+            print(f"\n  ✅ UI 树已恢复！（{count} 个直接子元素）")
+
+            # 搜索目标控件
+            print("  搜索目标控件...")
+            for tc in TARGET_CLASSES:
+                try:
+                    ctrl = wechat.child_window(class_name=tc)
+                    ctrl_info = ctrl.element_info
+                    result["found_targets"][tc] = (ctrl_info.name or "")[:80]
+                    print(f"    ✅ 找到 {tc}: {ctrl_info.name[:60] if ctrl_info.name else ''}")
+                except Exception:
+                    print(f"    ⚠️ 未找到 {tc}")
+        else:
+            print(f"\n  ❌ UI 树未恢复（仅 {count} 个元素）")
+
+        result["_refs"] = (desktop, wechat)
+        return result
+
+    except Exception as e:
+        print(f"  ❌ 异常: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"method": "pywinauto", "status": "error", "child_count": 0, "error": str(e)}
+
+
+# ──────────────────────────────────────────────
+# 方案 C: uiautomation 库
+# ──────────────────────────────────────────────
+def test_uiautomation(hwnd):
+    """P0-C: uiautomation 库"""
+    print("\n" + "=" * 50)
+    print("▶ 方案 C: uiautomation 库")
+    print("=" * 50)
+
+    try:
+        import uiautomation as auto
+    except ImportError:
+        print("  ⚠️ uiautomation 未安装: pip install uiautomation")
+        return {"method": "uiautomation", "status": "not_installed", "child_count": 0}
+
+    try:
+        print(f"  通过句柄获取控件...")
+        wechat = auto.ControlFromHandle(hwnd)
+
+        print(f"  等待 {WAIT_AFTER_ATTACH}s ...")
+        time.sleep(WAIT_AFTER_ATTACH)
+
+        children = wechat.GetChildren()
+        count = len(children)
+
+        print(f"  直接子元素数量: {count}")
+
+        for i, child in enumerate(children[:MAX_DISPLAY_CHILDREN]):
+            cn = child.ClassName or ""
+            name = (child.Name or "")[:60]
+            print(f"    [{i:02d}] ClassName: {cn}, Name: {name}")
+
+        result = {
+            "method": "uiautomation",
+            "child_count": count,
+            "status": "success" if count > 2 else "failed",
+            "found_targets": {},
+        }
+
+        if count > 2:
+            print(f"\n  ✅ UI 树已恢复！（{count} 个直接子元素）")
+
+            # 深度搜索
+            print("  深度搜索目标控件...")
+            for tc in TARGET_CLASSES:
+                try:
+                    found_ctrl = wechat.Control(ClassName=tc, searchDepth=10)
+                    if found_ctrl.Exists(maxSearchSeconds=3):
+                        result["found_targets"][tc] = (found_ctrl.Name or "")[:80]
+                        print(f"    ✅ 找到 {tc}: {found_ctrl.Name[:60] if found_ctrl.Name else ''}")
+                    else:
+                        print(f"    ⚠️ 未找到 {tc}")
+                except Exception:
+                    print(f"    ⚠️ 未找到 {tc}")
+        else:
+            print(f"\n  ❌ UI 树未恢复（仅 {count} 个元素）")
+
+        result["_refs"] = (wechat,)
+        return result
+
+    except Exception as e:
+        print(f"  ❌ 异常: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"method": "uiautomation", "status": "error", "child_count": 0, "error": str(e)}
+
+
+# ──────────────────────────────────────────────
+# 主入口
+# ──────────────────────────────────────────────
+def main():
+    print("=" * 60)
+    print("  微信 4.x UIA 树恢复验证 — P0 方案")
+    print(f"  时间: {datetime.now().isoformat()}")
+    print(f"  系统: {platform.platform()}")
+    print(f"  Python: {platform.python_version()}")
+    print("=" * 60)
+
+    hwnd = find_wechat_hwnd()
+
+    # ── 基线检查（附着前） ──
+    print("\n--- 基线检查（附着前）---")
+    try:
+        import uiautomation as auto
+        baseline_ctrl = auto.ControlFromHandle(hwnd)
+        baseline_children = baseline_ctrl.GetChildren()
+        baseline_count = len(baseline_children)
+        print(f"  基线子元素数: {baseline_count}")
+        # 释放基线引用
+        del baseline_ctrl, baseline_children
+        time.sleep(1)
+    except ImportError:
+        print("  ⚠️ uiautomation 未安装，跳过基线检查")
+        baseline_count = -1
+    except Exception as e:
+        print(f"  ⚠️ 基线检查异常: {e}")
+        baseline_count = -1
+
+    # ── 逐个测试三种方案 ──
+    results = []
+
+    r1 = test_comtypes(hwnd)
+    results.append(r1)
+
+    r2 = test_pywinauto(hwnd)
+    results.append(r2)
+
+    r3 = test_uiautomation(hwnd)
+    results.append(r3)
+
+    # ── 汇总 ──
+    print("\n" + "=" * 60)
+    print("  验证结果汇总")
+    print("=" * 60)
+    print(f"\n  基线子元素数（附着前）: {baseline_count}")
+    print()
+
+    any_success = False
+    for r in results:
+        method = r["method"]
+        status = r["status"]
+        count = r["child_count"]
+        targets = r.get("found_targets", {})
+
+        if status == "success":
+            icon = "✅"
+            any_success = True
+        elif status == "not_installed":
+            icon = "⏭️"
+        elif status == "error":
+            icon = "💥"
+        else:
+            icon = "❌"
+
+        print(f"  {icon} {method:15s} — 子元素数: {count:3d}  状态: {status}")
+        if targets:
+            for tc, tn in targets.items():
+                print(f"      找到: {tc}")
+
+    print()
+
+    if any_success:
+        print("🎉 ═══════════════════════════════════════════════")
+        print("🎉  P0 方案验证成功！至少一种方法恢复了 UI 树！")
+        print("🎉  下一步：修改 wechat_uia_bridge.py 集成持久化 UIA 客户端")
+        print("🎉 ═══════════════════════════════════════════════")
+    else:
+        all_not_installed = all(r["status"] == "not_installed" for r in results)
+        if all_not_installed:
+            print("⚠️ ═══════════════════════════════════════════════")
+            print("⚠️  所有库均未安装！请先安装：")
+            print("⚠️    pip install comtypes pywinauto uiautomation")
+            print("⚠️ ═══════════════════════════════════════════════")
+        else:
+            print("❌ ═══════════════════════════════════════════════")
+            print("❌  P0 方案验证失败。所有方法均未能恢复 UI 树。")
+            print("❌  下一步：尝试 P1 方案（持久化无障碍服务）")
+            print("❌   1. 运行 minimal_uia_listener.py 在后台保持连接")
+            print("❌   2. 或安装 NVDA 屏幕阅读器并保持运行")
+            print("❌   3. 然后重新运行本脚本")
+            print("❌ ═══════════════════════════════════════════════")
+
+    # ── 输出 JSON 结果（供自动化使用）──
+    json_results = []
+    for r in results:
+        jr = {k: v for k, v in r.items() if not k.startswith("_")}
+        json_results.append(jr)
+
+    report = {
+        "timestamp": datetime.now().isoformat(),
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "wechat_hwnd": f"0x{hwnd:08X}",
+        "baseline_child_count": baseline_count,
+        "results": json_results,
+        "any_success": any_success,
+    }
+
+    report_path = "uia_recovery_result.json"
+    try:
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"\n📄 JSON 结果已保存: {report_path}")
+    except Exception as e:
+        print(f"\n⚠️ JSON 保存失败: {e}")
+
+    # 保持所有引用存活（不退出脚本），让用户手动验证
+    if any_success:
+        print("\n💡 保持脚本运行中（维持 UIA 客户端连接）...")
+        print("   现在可以用 Inspect.exe 或 Accessibility Insights 查看微信控件树")
+        print("   按 Ctrl+C 退出")
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print("\n🔚 验证脚本已退出")
+    else:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
