@@ -193,6 +193,10 @@
   用途：微信 4.x UIA 树恢复验证开发实测报告（2026-03-26）。含 P0 方案（UIA 客户端冒充）的验证脚本和 7 项真机测试清单（T-01 ~ T-07），需在 RUN 节点执行验证。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wechat_uia_verify_fix_v2_20260326.md
+  用途：微信 4.x UIA 树恢复验证脚本修正版（v2）实测报告。基于 RUN 节点运行反馈的 4 项修正：窗口多类名兼容、UTF-8 编码兼容、去 emoji、双条件成功判定。含 7 项真机测试清单。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
