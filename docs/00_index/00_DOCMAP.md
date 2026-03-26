@@ -185,6 +185,10 @@
   用途：双节点微信 UIAutomation 探测运行反馈报告（2026-03-26）。记录 DEV/RUN 两端主窗体均仅暴露 2~3 个顶层 UIA 元素、缺失 `mmui::ChatSingleWindow` / `mmui::ChatTextItemView` 的真机证据，用于推动 UIA 树恢复方案修复。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_wechat_uia_tree_recovery_20260326.md
+  用途：微信 4.x UIA 树恢复验证脚本运行反馈报告（2026-03-26）。记录 `verify_uia_recovery.py` 在 RUN 节点的真实执行结果、窗口类名不匹配与编码问题，以及 P0 验证未能进入三路方案分支的原因。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wechat_uia_tree_recovery_20260326.md
   用途：微信 4.x UIA 树恢复验证开发实测报告（2026-03-26）。含 P0 方案（UIA 客户端冒充）的验证脚本和 7 项真机测试清单（T-01 ~ T-07），需在 RUN 节点执行验证。
   读者：MASTER、实现层、Project（文档代理）。
