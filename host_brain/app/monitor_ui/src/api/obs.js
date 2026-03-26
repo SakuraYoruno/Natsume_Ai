@@ -344,6 +344,21 @@ export function executeTool(body) {
   })
 }
 
+export function fetchCustomSkillProviders() {
+  return request('/tools/skills/custom-providers')
+}
+
+export function fetchCustomSkillProviderTemplate() {
+  return request('/tools/skills/custom-providers/template')
+}
+
+export function installCustomSkillProvider(body) {
+  return request('/tools/skills/custom-providers/install', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 // ===== TODO-26: Memory 子系统统计 =====
 
 /**

@@ -190,6 +190,16 @@ class SkillRegistry:
 
     def register_decorated(self, provider: Any) -> int:
         """Scan provider object and register all `@skill` handlers."""
+        declarative_entries = getattr(provider, "__skill_meta_entries__", None)
+        if callable(declarative_entries):
+            count = 0
+            for entry in declarative_entries():
+                if not isinstance(entry, SkillMeta):
+                    raise TypeError("declarative skill entries must be SkillMeta instances")
+                self.register(entry)
+                count += 1
+            return count
+
         count = 0
         for attr_name in sorted(dir(provider)):
             candidate = getattr(provider, attr_name)

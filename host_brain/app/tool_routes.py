@@ -31,6 +31,13 @@ from host_brain.tools.broker import (
 )
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
+from host_brain.skills.custom_provider_installer import (
+    build_provider_module_name,
+    invalidate_provider_module,
+    list_custom_provider_infos,
+    load_provider_template,
+    write_provider_source,
+)
 
 _logger = logging.getLogger("Natsume.tool_routes")
 
@@ -136,6 +143,52 @@ class ToolHealthResponse(BaseModel):
     catalog_size: int = Field(..., description="已注册工具数量")
     write_tools: int = Field(..., description="WRITE 工具数量")
     read_tools: int = Field(..., description="READ 工具数量")
+    request_id: str = Field(..., description="请求 ID")
+    timestamp: int = Field(..., description="响应时间戳（毫秒）")
+
+
+class CustomSkillProviderInfoResponse(BaseModel):
+    filename: str = Field(..., description="provider 文件名")
+    module_name: str = Field(..., description="provider 模块名")
+    class_name: str | None = Field(default=None, description="provider 类名")
+    path: str = Field(..., description="provider 文件路径")
+    size_bytes: int = Field(..., description="文件大小")
+    updated_at_ms: int = Field(..., description="更新时间戳（毫秒）")
+    declared_skill_names: List[str] = Field(default_factory=list, description="provider 声明的 skill 名")
+    active_skill_names: List[str] = Field(default_factory=list, description="当前注册表中已激活的 skill 名")
+    status: str = Field(..., description="状态：ACTIVE/STAGED/ERROR")
+    error: str | None = Field(default=None, description="错误详情")
+
+
+class CustomSkillProviderListResponse(BaseModel):
+    items: List[CustomSkillProviderInfoResponse] = Field(default_factory=list, description="provider 列表")
+    total: int = Field(..., description="provider 数量")
+    request_id: str = Field(..., description="请求 ID")
+    timestamp: int = Field(..., description="响应时间戳（毫秒）")
+
+
+class CustomSkillProviderTemplateResponse(BaseModel):
+    filename_hint: str = Field(..., description="建议文件名")
+    source_code: str = Field(..., description="provider 模板源码")
+    request_id: str = Field(..., description="请求 ID")
+    timestamp: int = Field(..., description="响应时间戳（毫秒）")
+
+
+class CustomSkillProviderInstallRequest(BaseModel):
+    filename: str = Field(..., description="provider 文件名")
+    source_code: str = Field(..., description="provider 源码")
+    activate_now: bool = Field(default=True, description="是否立即刷新 SkillRegistry")
+
+
+class CustomSkillProviderInstallResponse(BaseModel):
+    status: str = Field(..., description="安装状态：INSTALLED/ERROR")
+    filename: str = Field(..., description="provider 文件名")
+    module_name: str = Field(..., description="provider 模块名")
+    path: str = Field(..., description="provider 文件路径")
+    activated: bool = Field(..., description="是否已刷新到当前注册表")
+    declared_skill_names: List[str] = Field(default_factory=list, description="provider 声明的 skill")
+    active_skill_names: List[str] = Field(default_factory=list, description="当前已激活的 skill")
+    message: str = Field(..., description="结果说明")
     request_id: str = Field(..., description="请求 ID")
     timestamp: int = Field(..., description="响应时间戳（毫秒）")
 
@@ -379,4 +432,113 @@ async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
             exc,
             extra={"request_id": request_id, "tool_id": body.tool_id},
         )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _get_active_skill_names() -> set[str]:
+    from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+
+    try:
+        registry = get_skill_registry()
+        return set(registry.list_skill_names())
+    except Exception:
+        return set()
+
+
+@router.get("/skills/custom-providers", response_model=CustomSkillProviderListResponse)
+async def list_custom_skill_providers() -> CustomSkillProviderListResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+
+    try:
+        items = [
+            CustomSkillProviderInfoResponse(
+                filename=item.filename,
+                module_name=item.module_name,
+                class_name=item.class_name,
+                path=item.path,
+                size_bytes=item.size_bytes,
+                updated_at_ms=item.updated_at_ms,
+                declared_skill_names=list(item.declared_skill_names),
+                active_skill_names=list(item.active_skill_names),
+                status=item.status,
+                error=item.error,
+            )
+            for item in list_custom_provider_infos(active_skill_names=_get_active_skill_names())
+        ]
+        return CustomSkillProviderListResponse(
+            items=items,
+            total=len(items),
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("list_custom_skill_providers failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/skills/custom-providers/template", response_model=CustomSkillProviderTemplateResponse)
+async def get_custom_skill_provider_template() -> CustomSkillProviderTemplateResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+
+    try:
+        return CustomSkillProviderTemplateResponse(
+            filename_hint="my_skill_provider.py",
+            source_code=load_provider_template(),
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("get_custom_skill_provider_template failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/skills/custom-providers/install", response_model=CustomSkillProviderInstallResponse, status_code=200)
+async def install_custom_skill_provider(body: CustomSkillProviderInstallRequest) -> CustomSkillProviderInstallResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+
+    try:
+        path = write_provider_source(body.filename, body.source_code)
+        module_name = invalidate_provider_module(path.name)
+        active_skill_names: set[str] = set()
+        activated = False
+        if body.activate_now:
+            from host_brain.app.dependencies import refresh_skill_registry  # noqa: PLC0415
+
+            registry = refresh_skill_registry()
+            active_skill_names = set(registry.list_skill_names())
+            activated = True
+        else:
+            active_skill_names = _get_active_skill_names()
+
+        info = next(
+            (item for item in list_custom_provider_infos(active_skill_names=active_skill_names) if item.filename == path.name),
+            None,
+        )
+        declared = list(info.declared_skill_names) if info else []
+        active = list(info.active_skill_names) if info else []
+        status_text = "INSTALLED" if not info or info.status != "ERROR" else "ERROR"
+        activated = bool(info and info.status == "ACTIVE")
+        message = "provider saved and registry refreshed" if activated else "provider saved; restart or refresh SkillRegistry to activate"
+        if info and info.status == "ERROR":
+            message = f"provider saved but failed to load: {info.error}"
+
+        return CustomSkillProviderInstallResponse(
+            status=status_text,
+            filename=path.name,
+            module_name=module_name,
+            path=str(path),
+            activated=activated,
+            declared_skill_names=declared,
+            active_skill_names=active,
+            message=message,
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _logger.error("install_custom_skill_provider failed: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))

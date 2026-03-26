@@ -102,7 +102,7 @@ Natsume_Ai/
 ├─ edge_client/
 │  ├─ app/             # Edge FastAPI RPC 网关（/v1/edge/*）
 │  ├─ actuators/       # TTS/VTS 执行（语音合成 + VTS WebSocket 驱动）
-│  ├─ channels/        # 本地渠道适配（已废弃 wechat_listener，保留 input_reporter）
+│  ├─ channels/        # 本地渠道适配（wechat_listener 为 legacy；保留 input_reporter / command queue）
 │  ├─ gateway/         # 统一消息网关（:19000，Phase 1-5 全部完成）
 │  │  ├─ adapters/     # 平台适配器（wechat/qq/feishu/wecom）
 │  │  ├─ media/        # 多媒体处理（image/voice/file handler）

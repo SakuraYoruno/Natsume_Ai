@@ -44,6 +44,8 @@ DEFAULT_VAD_THRESHOLD = 0.5
 DEFAULT_SILENCE_DURATION_S = 0.8
 DEFAULT_MIN_SPEECH_DURATION_S = 0.3
 DEFAULT_MAX_SPEECH_DURATION_S = 30.0
+DEFAULT_PRECHECK_MIN_PEAK = 0.01
+DEFAULT_PRECHECK_MIN_RMS = 0.002
 
 # ── 设备恢复常量 ──
 DEFAULT_RECOVERY_MAX_ATTEMPTS = 5
@@ -95,6 +97,9 @@ class AsrConfig:
     silence_duration_s: float = DEFAULT_SILENCE_DURATION_S
     min_speech_duration_s: float = DEFAULT_MIN_SPEECH_DURATION_S
     max_speech_duration_s: float = DEFAULT_MAX_SPEECH_DURATION_S
+    precheck_min_peak: float = DEFAULT_PRECHECK_MIN_PEAK
+    precheck_min_rms: float = DEFAULT_PRECHECK_MIN_RMS
+    use_vad_filter: bool = True
     vad_retry_without_filter_on_empty: bool = True
     vad_retry_min_peak: float = 0.015
     language: str = "ja"
@@ -114,6 +119,9 @@ class AsrConfig:
             "silence_duration_s": self.silence_duration_s,
             "min_speech_duration_s": self.min_speech_duration_s,
             "max_speech_duration_s": self.max_speech_duration_s,
+            "precheck_min_peak": self.precheck_min_peak,
+            "precheck_min_rms": self.precheck_min_rms,
+            "use_vad_filter": self.use_vad_filter,
             "vad_retry_without_filter_on_empty": self.vad_retry_without_filter_on_empty,
             "vad_retry_min_peak": self.vad_retry_min_peak,
             "language": self.language,
@@ -297,6 +305,77 @@ class WhisperModelManager:
     def actual_device(self) -> str:
         return self._actual_device
 
+    @staticmethod
+    def _is_gpu_related_error(error: Exception | str) -> bool:
+        error_str = str(error).lower()
+        gpu_markers = (
+            "cuda",
+            "cublas",
+            "cudnn",
+            "cufft",
+            "curand",
+            "cusolver",
+            "cudart",
+            "nvcuda",
+            "nvrtc",
+            "gpu",
+        )
+        return "oom" in error_str or any(marker in error_str for marker in gpu_markers)
+
+    def _reload_on_cpu_after_gpu_failure(self, cause: Exception) -> AsrResult:
+        with self._lock:
+            try:
+                from faster_whisper import WhisperModel
+            except ImportError as e:
+                self._state = AsrState.ERROR
+                self._load_error = str(e)
+                logger.error(
+                    "CPU fallback import failed after GPU runtime error: %s",
+                    e,
+                )
+                return AsrResult(
+                    success=False,
+                    reason_code=ASR_MODEL_UNAVAILABLE,
+                    detail=f"cpu fallback import failed: {e}",
+                )
+
+            self._state = AsrState.LOADING
+            self._model = None
+            try:
+                self._model = WhisperModel(
+                    self._config.model_size,
+                    device="cpu",
+                    compute_type="int8",
+                )
+            except Exception as e:
+                self._state = AsrState.ERROR
+                self._load_error = str(e)
+                logger.error(
+                    "CPU fallback load failed after GPU runtime error (%s): %s",
+                    cause,
+                    e,
+                )
+                return AsrResult(
+                    success=False,
+                    reason_code=ASR_MODEL_UNAVAILABLE,
+                    detail=f"cpu fallback load failed: {e}",
+                )
+
+            self._actual_device = "cpu"
+            self._state = AsrState.READY
+            self._load_error = None
+            self._recovery_count += 1
+
+        logger.warning(
+            "ASR runtime GPU failure detected on cuda (%s); reloaded model on cpu",
+            cause,
+        )
+        return AsrResult(
+            success=True,
+            reason_code=None,
+            detail="reloaded model on cpu after gpu runtime failure",
+        )
+
     def load(self) -> AsrResult:
         """Load the faster-whisper model. Thread-safe, idempotent."""
         with self._lock:
@@ -345,8 +424,7 @@ class WhisperModelManager:
                         detail=f"model loaded on {device}",
                     )
                 except Exception as e:
-                    error_str = str(e).lower()
-                    if "cuda" in error_str or "oom" in error_str or "gpu" in error_str:
+                    if device == "cuda" and self._is_gpu_related_error(e):
                         logger.warning(
                             "GPU load failed (%s), trying next device: %s",
                             device,
@@ -404,24 +482,59 @@ class WhisperModelManager:
 
         t0 = time.monotonic()
         try:
+            measured_peak = self._estimate_audio_peak(audio_data)
+            measured_rms = self._estimate_audio_rms(audio_data)
+            if (
+                measured_peak < self._config.precheck_min_peak
+                and measured_rms < self._config.precheck_min_rms
+            ):
+                logger.info(
+                    "ASR skipped low-energy audio (peak=%.5f, rms=%.5f, min_peak=%.5f, min_rms=%.5f)",
+                    measured_peak,
+                    measured_rms,
+                    self._config.precheck_min_peak,
+                    self._config.precheck_min_rms,
+                )
+                return AsrResult(
+                    success=True,
+                    reason_code=ASR_VAD_NO_SPEECH,
+                    detail=(
+                        "audio below energy gate "
+                        f"(peak={measured_peak:.5f}, rms={measured_rms:.5f})"
+                    ),
+                    segments=[],
+                    language=language or self._config.language,
+                    language_probability=0.0,
+                    duration_s=0.0,
+                    processing_time_s=round(time.monotonic() - t0, 4),
+                )
+
             def _collect_segments(segments_gen: Any) -> list[TranscriptionSegment]:
                 rows: list[TranscriptionSegment] = []
                 for seg in segments_gen:
                     words = []
+                    word_confidences: list[float] = []
                     if hasattr(seg, "words") and seg.words:
-                        words = [
-                            {
-                                "word": w.word,
-                                "start": w.start,
-                                "end": w.end,
-                                "probability": w.probability,
-                            }
-                            for w in seg.words
-                        ]
+                        for w in seg.words:
+                            probability = max(0.0, min(float(w.probability), 1.0))
+                            word_confidences.append(probability)
+                            words.append(
+                                {
+                                    "word": w.word,
+                                    "start": w.start,
+                                    "end": w.end,
+                                    "probability": probability,
+                                }
+                            )
                     avg_prob = seg.avg_log_prob if hasattr(seg, "avg_log_prob") else 0.0
                     # Convert log probability to confidence (0~1)
                     import math
-                    confidence = math.exp(avg_prob) if avg_prob < 0 else min(avg_prob, 1.0)
+                    confidence_from_log = math.exp(avg_prob) if avg_prob < 0 else min(avg_prob, 1.0)
+                    if word_confidences:
+                        confidence = sum(word_confidences) / len(word_confidences)
+                        confidence = max(confidence, confidence_from_log)
+                    else:
+                        confidence = confidence_from_log
                     rows.append(
                         TranscriptionSegment(
                             text=seg.text.strip(),
@@ -446,7 +559,6 @@ class WhisperModelManager:
                 return _collect_segments(seg_gen), info_obj
 
             attempted_vad_retry = False
-            measured_peak = 0.0
             segments, info = _run_once(use_vad_filter=vad_filter)
 
             # Some microphones produce valid speech frames that faster-whisper VAD discards.
@@ -490,6 +602,12 @@ class WhisperModelManager:
                     duration_s=getattr(info, "duration", 0.0),
                     processing_time_s=round(processing_time, 4),
                 )
+                logger.info(
+                    "ASR no speech detected (vad=%s, attempted_retry=%s, peak=%.5f)",
+                    vad_filter,
+                    attempted_vad_retry,
+                    measured_peak,
+                )
 
             detail = f"transcribed {len(segments)} segment(s)"
             if attempted_vad_retry:
@@ -507,12 +625,27 @@ class WhisperModelManager:
 
         except Exception as e:
             processing_time = time.monotonic() - t0
-            error_str = str(e).lower()
-            if "oom" in error_str or "cuda" in error_str:
+            if self._is_gpu_related_error(e):
                 reason = ASR_GPU_OOM
+                if self._actual_device == "cuda":
+                    fallback_result = self._reload_on_cpu_after_gpu_failure(e)
+                    if fallback_result.success:
+                        return self.transcribe(
+                            audio_data,
+                            language=language,
+                            beam_size=beam_size,
+                            initial_prompt=initial_prompt,
+                            vad_filter=vad_filter,
+                            vad_parameters=vad_parameters,
+                        )
             else:
                 reason = ASR_MODEL_UNAVAILABLE
-            logger.error("Transcription failed: %s", e)
+            logger.error(
+                "Transcription failed on %s (peak=%.5f): %s",
+                self._actual_device,
+                self._estimate_audio_peak(audio_data),
+                e,
+            )
             return AsrResult(
                 success=False,
                 reason_code=reason,
@@ -563,6 +696,31 @@ class WhisperModelManager:
                 if not audio_data:
                     return 0.0
                 return max(abs(float(v)) for v in audio_data if isinstance(v, (int, float)))
+            if isinstance(audio_data, (int, float)):
+                return abs(float(audio_data))
+        except Exception:
+            return 0.0
+        return 0.0
+
+    @staticmethod
+    def _estimate_audio_rms(audio_data: Any) -> float:
+        try:
+            import numpy as np
+
+            arr = np.asarray(audio_data, dtype=float)
+            if arr.size == 0:
+                return 0.0
+            if arr.ndim > 1:
+                arr = np.mean(arr, axis=1)
+            return float(np.sqrt(np.mean(np.square(arr))))
+        except Exception:
+            pass
+        try:
+            if isinstance(audio_data, (list, tuple)) and audio_data:
+                values = [float(v) for v in audio_data if isinstance(v, (int, float))]
+                if not values:
+                    return 0.0
+                return (sum(v * v for v in values) / len(values)) ** 0.5
             if isinstance(audio_data, (int, float)):
                 return abs(float(audio_data))
         except Exception:
@@ -862,7 +1020,10 @@ class AsrService:
         req_id = request_id or new_request_id()
         timestamp = ts_ms or int(now_ms())
 
-        asr_result = self._model.transcribe(audio_data)
+        asr_result = self._model.transcribe(
+            audio_data,
+            vad_filter=self._config.use_vad_filter,
+        )
         if not asr_result.success:
             # Emit a failed event through RPC
             return [
@@ -890,6 +1051,7 @@ class AsrService:
                         "confidence": round(w.get("probability", 0.0), 4),
                     })
 
+            segment_ts = timestamp + max(0, int(seg.start * 1000))
             rpc_result = self._emit_rpc_event(
                 request_id=req_id,
                 text=seg.text,
@@ -898,7 +1060,7 @@ class AsrService:
                 end_ms=int(seg.end * 1000),
                 alternates=alternates,
                 final=(seg == asr_result.segments[-1] and final),
-                ts_ms=timestamp,
+                ts_ms=segment_ts,
             )
             results.append(rpc_result)
 

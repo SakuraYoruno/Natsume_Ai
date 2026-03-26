@@ -390,6 +390,22 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
             min_value=1.0,
             max_value=600.0,
         ),
+        precheck_min_peak=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_PRECHECK_MIN_PEAK"),
+            default=0.01,
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        precheck_min_rms=_parse_float(
+            _env_get(env_lookup, "EDGE_ASR_PRECHECK_MIN_RMS"),
+            default=0.002,
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        use_vad_filter=_parse_bool(
+            _env_get(env_lookup, "EDGE_ASR_USE_VAD_FILTER"),
+            default=True,
+        ),
         vad_retry_without_filter_on_empty=_parse_bool(
             _env_get(env_lookup, "EDGE_ASR_VAD_RETRY_WITHOUT_FILTER_ON_EMPTY"),
             default=True,

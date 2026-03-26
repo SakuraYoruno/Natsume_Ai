@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -83,6 +84,22 @@ def _normalize_platforms(raw: tuple[str, ...]) -> set[str]:
     return normalized
 
 
+def _parse_bool_env(raw: str | None, *, default: bool = False) -> bool:
+    value = str(raw or "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
+def _wechat_uia_bridge_enabled() -> bool:
+    env = os.environ
+    enabled = _parse_bool_env(env.get("EDGE_WECHAT_BRIDGE_ENABLED"), default=False)
+    if not enabled:
+        return False
+    backend = str(env.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia").strip().lower() or "uia"
+    return backend == "uia"
+
+
 def start_gateway(config: GatewayConfig) -> GatewayInstance:
     """组装并启动 Unified Message Gateway。"""
 
@@ -109,55 +126,73 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     adapters: dict[str, Any] = {}
 
     if "wechat" in enabled_platforms:
-        if not config.wx_decrypt_output_dir:
-            logger.warning("Gateway: wechat 已启用但缺少 WECHAT_DECRYPT_OUTPUT_DIR，跳过注册")
-        else:
-            from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
+        from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
+
+        bridge_mode = _wechat_uia_bridge_enabled()
+        wx_svc = None
+        if config.wx_decrypt_output_dir:
             from edge_client.services.wx_db_service import WxDbService
 
             wx_svc = WxDbService(
                 config.wx_decrypt_output_dir,
                 poll_watermark_file=config.wx_watermark_file,
             )
-            wx_adapter = WeChatAdapter(wx_svc, self_wxid=config.wx_self_wxid)
+
+        if wx_svc is None and not bridge_mode:
+            logger.warning(
+                "Gateway: wechat 已启用但既未配置 WECHAT_DECRYPT_OUTPUT_DIR，也未启用 EDGE_WECHAT_BRIDGE_ENABLED，跳过注册"
+            )
+        else:
+            wx_adapter = WeChatAdapter(
+                wx_svc,
+                self_wxid=config.wx_self_wxid,
+                bridge_mode=bridge_mode,
+                db_watch_enabled=(wx_svc is not None and not bridge_mode),
+                bridge_inbound_backend=str(os.environ.get("EDGE_WECHAT_INBOUND_BACKEND") or "").strip().lower() or None,
+            )
             outbound.register(wx_adapter)
             adapters[Platform.WECHAT.value] = wx_adapter
 
-            if config.wx_db_storage_dir:
-                from edge_client.services.wx_decrypt_refresher import WxDecryptRefresher
-
-                refresher = WxDecryptRefresher(
-                    db_storage_dir=config.wx_db_storage_dir,
-                    decrypt_output_dir=config.wx_decrypt_output_dir,
-                    key_cache_path=config.wx_key_cache_path,
-                    refresh_interval_s=config.wx_decrypt_refresh_interval_s,
+            if bridge_mode:
+                logger.info(
+                    "Gateway: 微信 UIAutomation bridge mode enabled，使用 webhook + command queue，跳过 DB watcher"
                 )
-                mode = refresher.start()
-                instance.refresher = refresher
-                logger.info("Gateway: 微信解密刷新已启动 mode=%s", mode)
-            else:
-                logger.warning("Gateway: 未配置 WECHAT_DB_STORAGE_DIR，跳过自动 refresh")
+            elif wx_svc is not None:
+                if config.wx_db_storage_dir:
+                    from edge_client.services.wx_decrypt_refresher import WxDecryptRefresher
 
-            from edge_client.services.wx_watcher import WxDbWatcher
+                    refresher = WxDecryptRefresher(
+                        db_storage_dir=config.wx_db_storage_dir,
+                        decrypt_output_dir=config.wx_decrypt_output_dir,
+                        key_cache_path=config.wx_key_cache_path,
+                        refresh_interval_s=config.wx_decrypt_refresh_interval_s,
+                    )
+                    mode = refresher.start()
+                    instance.refresher = refresher
+                    logger.info("Gateway: 微信解密刷新已启动 mode=%s", mode)
+                else:
+                    logger.warning("Gateway: 未配置 WECHAT_DB_STORAGE_DIR，跳过自动 refresh")
 
-            def _on_new_messages(msgs: list[Any]) -> None:
-                for wx_msg in msgs:
-                    unified = wx_adapter.convert_wx_message(wx_msg)
-                    if unified is None:
-                        continue
-                    normalized = normalizer.normalize(unified)
-                    if normalized is None:
-                        continue
-                    router.route(normalized)
+                from edge_client.services.wx_watcher import WxDbWatcher
 
-            watcher = WxDbWatcher(
-                wx_svc,
-                _on_new_messages,
-                poll_interval_s=config.wx_poll_interval_s,
-            )
-            watch_mode = watcher.start()
-            instance.watcher = watcher
-            logger.info("Gateway: 微信监听已启动 mode=%s", watch_mode)
+                def _on_new_messages(msgs: list[Any]) -> None:
+                    for wx_msg in msgs:
+                        unified = wx_adapter.convert_wx_message(wx_msg)
+                        if unified is None:
+                            continue
+                        normalized = normalizer.normalize(unified)
+                        if normalized is None:
+                            continue
+                        router.route(normalized)
+
+                watcher = WxDbWatcher(
+                    wx_svc,
+                    _on_new_messages,
+                    poll_interval_s=config.wx_poll_interval_s,
+                )
+                watch_mode = watcher.start()
+                instance.watcher = watcher
+                logger.info("Gateway: 微信监听已启动 mode=%s", watch_mode)
 
     if "qq" in enabled_platforms:
         if config.qq_onebot_api_base:
@@ -231,4 +266,3 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
         ",".join(sorted(enabled_platforms)),
     )
     return instance
-

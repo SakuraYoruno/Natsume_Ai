@@ -579,7 +579,11 @@ function Get-EnvValueCaseInsensitive {
 
 function Start-VtsViaSteam {
   param(
-    [string]$SteamAppId
+    [string]$SteamAppId,
+    [string]$RepoRoot = "",
+    [string]$LauncherScriptPath = "",
+    [bool]$UseBreakawayLaunch = $false,
+    [hashtable]$EnvVars = @{}
   )
   if (-not $SteamAppId) {
     return [ordered]@{
@@ -590,6 +594,38 @@ function Start-VtsViaSteam {
   }
 
   $steamUri = "steam://rungameid/$SteamAppId"
+
+  if ($UseBreakawayLaunch) {
+    if (-not $LauncherScriptPath) {
+      return [ordered]@{
+        status = "launch_failed"
+        detail = "launcher script path is required for VTS breakaway launch"
+        steam_uri = $steamUri
+      }
+    }
+    try {
+      $steamEscaped = $steamUri.Replace("'", "''")
+      $commandLine = "start `"`" /B cmd /c start `"`" '$steamEscaped'"
+      Invoke-BreakawayCommand `
+        -RepoRoot $RepoRoot `
+        -LauncherScriptPath $LauncherScriptPath `
+        -CommandLine $commandLine `
+        -EnvVars $EnvVars `
+        -TaskPrefix "NatsumeVtsSteam" `
+        -InteractiveTask $true
+      return [ordered]@{
+        status = "launched"
+        detail = "launched via steam protocol handler (breakaway)"
+        steam_uri = $steamUri
+      }
+    } catch {
+      return [ordered]@{
+        status = "launch_failed"
+        detail = "steam breakaway launch failed: $($_.Exception.Message)"
+        steam_uri = $steamUri
+      }
+    }
+  }
 
   try {
     Start-Process -FilePath $steamUri -ErrorAction Stop | Out-Null
@@ -676,7 +712,13 @@ function Resolve-VtsExecutablePath {
 }
 
 function Start-VtsViaExecutable {
-  param([string]$ExecutablePath)
+  param(
+    [string]$ExecutablePath,
+    [string]$RepoRoot = "",
+    [string]$LauncherScriptPath = "",
+    [bool]$UseBreakawayLaunch = $false,
+    [hashtable]$EnvVars = @{}
+  )
 
   if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
     return [ordered]@{
@@ -691,6 +733,38 @@ function Start-VtsViaExecutable {
       status = "launch_failed"
       detail = "vts executable not found: $ExecutablePath"
       executable_path = $ExecutablePath
+    }
+  }
+
+  if ($UseBreakawayLaunch) {
+    if (-not $LauncherScriptPath) {
+      return [ordered]@{
+        status = "launch_failed"
+        detail = "launcher script path is required for VTS breakaway launch"
+        executable_path = $ExecutablePath
+      }
+    }
+    try {
+      $exeEscaped = ([string]$ExecutablePath).Replace("'", "''")
+      $commandLine = "start `"`" /B powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"Start-Process -FilePath '$exeEscaped'`""
+      Invoke-BreakawayCommand `
+        -RepoRoot $RepoRoot `
+        -LauncherScriptPath $LauncherScriptPath `
+        -CommandLine $commandLine `
+        -EnvVars $EnvVars `
+        -TaskPrefix "NatsumeVtsExe" `
+        -InteractiveTask $true
+      return [ordered]@{
+        status = "launched"
+        detail = "launched via direct executable path (breakaway)"
+        executable_path = $ExecutablePath
+      }
+    } catch {
+      return [ordered]@{
+        status = "launch_failed"
+        detail = "direct executable breakaway launch failed: $($_.Exception.Message)"
+        executable_path = $ExecutablePath
+      }
     }
   }
 
@@ -804,6 +878,25 @@ if ($EnforceCnAsrJaTtsMode) {
   if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
     $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
     $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
+  }
+  $resolvedAsrDeviceIndex = [string]([Environment]::GetEnvironmentVariable("EDGE_ASR_DEVICE_INDEX", "Process"))
+  if (-not [string]::IsNullOrWhiteSpace($resolvedAsrDeviceIndex)) {
+    $realCaptureDefaults = [ordered]@{
+      EDGE_ASR_USE_VAD_FILTER = "false"
+      EDGE_ASR_SILENCE_DURATION_S = "4.0"
+      EDGE_ASR_MIN_SPEECH_DURATION_S = "0.10"
+      EDGE_ASR_VAD_THRESHOLD = "0.35"
+      EDGE_ASR_VAD_RETRY_MIN_PEAK = "0.01"
+      EDGE_ASR_PRECHECK_MIN_PEAK = "0.01"
+      EDGE_ASR_PRECHECK_MIN_RMS = "0.002"
+    }
+    foreach ($defaultKey in $realCaptureDefaults.Keys) {
+      $defaultValue = [string]$realCaptureDefaults[$defaultKey]
+      if (Ensure-ProcessEnvDefault -Key $defaultKey -DefaultValue $defaultValue) {
+        $envValues[$defaultKey] = $defaultValue
+        $startupEnvDefaultsApplied += "$defaultKey=$defaultValue"
+      }
+    }
   }
 }
 
@@ -1059,13 +1152,13 @@ if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
 
 $vtsExecutablePath = Resolve-VtsExecutablePath -EnvValues $envValues
 
-$wechatBridgeEnabled = $false
+$wechatBridgeEnabled = $true
 $wechatBridgeEnvRaw = $null
 $wechatBridgeEnvRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_BRIDGE_ENABLED"
 if ($null -ne $wechatBridgeEnvRaw) {
-  $wechatBridgeEnabled = Parse-Bool -Value $wechatBridgeEnvRaw -Default $false
+  $wechatBridgeEnabled = Parse-Bool -Value $wechatBridgeEnvRaw -Default $true
 } elseif ($null -ne $env:EDGE_WECHAT_BRIDGE_ENABLED -and -not [string]::IsNullOrWhiteSpace([string]$env:EDGE_WECHAT_BRIDGE_ENABLED)) {
-  $wechatBridgeEnabled = Parse-Bool -Value $env:EDGE_WECHAT_BRIDGE_ENABLED -Default $false
+  $wechatBridgeEnabled = Parse-Bool -Value $env:EDGE_WECHAT_BRIDGE_ENABLED -Default $true
   $wechatBridgeEnvRaw = $env:EDGE_WECHAT_BRIDGE_ENABLED
 }
 
@@ -1106,22 +1199,11 @@ if ($wechatBridgeEnabled -and $wechatBridgeBackend -eq "external" -and -not $wec
     $startupPreWarnings += "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_UIA"
   }
 }
-
-$wechatBridgeRequested = $wechatBridgeEnabled
-if ($wechatBridgeRequested) {
-  if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_FORCE_DISABLED_BY_GATEWAY")) {
-    $startupPreWarnings += "WECHAT_BRIDGE_FORCE_DISABLED_BY_GATEWAY"
-  }
-}
-$wechatBridgeEnabled = $false
-$wechatBridgeBackend = "external"
-$wechatBridgeBackendRaw = "forced_external_by_gateway_mode"
-$envValues["EDGE_WECHAT_BRIDGE_ENABLED"] = "false"
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_ENABLED", "false", "Process")
-$envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = "external"
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", "external", "Process")
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_LISTENER_ENABLED", "false", "Process")
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", "", "Process")
+$wechatBridgeEnabledText = if ($wechatBridgeEnabled) { "true" } else { "false" }
+$envValues["EDGE_WECHAT_BRIDGE_ENABLED"] = $wechatBridgeEnabledText
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_ENABLED", $wechatBridgeEnabledText, "Process")
+$envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = $wechatBridgeBackend
+[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", $wechatBridgeBackend, "Process")
 
 $wechatClientNames = @("WeChat", "Weixin")
 $wechatAutoStart = ($wechatBridgeEnabled -and $wechatBridgeBackend -ne "external")
@@ -1193,18 +1275,14 @@ if ($wechatBridgeBackend -eq "uia") {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
 
   $uiaDefaultEnv = [ordered]@{
-    EDGE_WECHAT_INBOUND_BACKEND = "uia_ocr"
-    EDGE_WECHAT_UIA_SCAN_CHAT_LIST = "0"
-    EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET = "1"
-    EDGE_WECHAT_UIA_AUTO_RECOVER = "0"
-    EDGE_WECHAT_UIA_AUTO_RECOVER_ANCHOR_CLICK = "0"
-    EDGE_WECHAT_SEND_TEXT_PREFER_ACTIVE_CHAT = "1"
-    EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX = "0.70"
-    EDGE_WECHAT_VISION_MODEL = "qwen2.5vl:3b"
-    EDGE_WECHAT_VISION_API_URL = "http://127.0.0.1:11434/api/chat"
-    EDGE_WECHAT_VISION_TIMEOUT_S = "30"
-    EDGE_WECHAT_VISION_MIN_CONFIDENCE = "0.50"
-    EDGE_WECHAT_VISION_MIN_INTERVAL_S = "1.8"
+    EDGE_WECHAT_INBOUND_BACKEND = "uia_hook"
+    EDGE_WECHAT_UIA_MAIN_WINDOW_CLASSES = "mmui::ChatSingleWindow,WeixinMainWndForPC,WeChatMainWndForPC,Qt51514QWindowIcon"
+    EDGE_WECHAT_UIA_CHAT_WINDOW_CLASSES = "mmui::ChatSingleWindow"
+    EDGE_WECHAT_UIA_MESSAGE_LIST_CLASSES = "mmui::ChatRecordListView,mmui::ChatRecordList"
+    EDGE_WECHAT_UIA_MESSAGE_ITEM_CLASSES = "mmui::ChatTextItemView"
+    EDGE_WECHAT_UIA_EDITOR_CLASSES = "mmui::ChatInputTextEdit,mmui::InputTextEdit,Edit"
+    EDGE_WECHAT_UIA_TITLE_CLASSES = "mmui::ChatHeaderTitle,Text"
+    EDGE_WECHAT_UIA_SEARCH_CLASSES = "Search,搜索,Edit"
   }
   foreach ($uiaKey in $uiaDefaultEnv.Keys) {
     $currentUiaValue = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key $uiaKey)
@@ -1427,7 +1505,14 @@ if ($vtsAutoStart) {
     $vtsAutoStartStatus = "already_running"
     $vtsAutoStartDetail = "vts already listening on port $vtsPort (pid=$existingVtsPid)"
   } else {
-    $launch = Start-VtsViaSteam -SteamAppId $vtsSteamAppId
+    $vtsSteamLauncherScriptPath = Join-Path $runtimeRoot "launch_vts_steam.cmd"
+    $vtsExeLauncherScriptPath = Join-Path $runtimeRoot "launch_vts_exe.cmd"
+    $launch = Start-VtsViaSteam `
+      -SteamAppId $vtsSteamAppId `
+      -RepoRoot $repoRoot `
+      -LauncherScriptPath $vtsSteamLauncherScriptPath `
+      -UseBreakawayLaunch $useBreakawayLauncher `
+      -EnvVars $envValues
     $vtsAutoStartStatus = [string]$launch.status
     $vtsAutoStartDetail = [string]$launch.detail
     $portReady = $false
@@ -1443,7 +1528,12 @@ if ($vtsAutoStart) {
     }
 
     if (-not $portReady -and $vtsExecutablePath) {
-      $directLaunch = Start-VtsViaExecutable -ExecutablePath $vtsExecutablePath
+      $directLaunch = Start-VtsViaExecutable `
+        -ExecutablePath $vtsExecutablePath `
+        -RepoRoot $repoRoot `
+        -LauncherScriptPath $vtsExeLauncherScriptPath `
+        -UseBreakawayLaunch $useBreakawayLauncher `
+        -EnvVars $envValues
       if ([string]$directLaunch.status -eq "launched") {
         if (Wait-Port -Port $vtsPort -TimeoutSeconds $vtsAutoStartWaitSeconds) {
           $vtsAutoStartStatus = "ready"
@@ -1478,7 +1568,7 @@ if ($null -eq $vtsConn) {
 
 # 微信桥接（可选）：
 #   EDGE_WECHAT_BRIDGE_BACKEND=uia|external
-#   external: 不拉起本地桥接，仅保留 /v1/edge/wechat/callback 供外部插件直推
+#   external: 不拉起本地桥接，外部插件可直接推送到 /v1/gateway/wechat/webhook
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
 $wechatBridgeError = $null
@@ -1618,8 +1708,8 @@ if ($wechatBridgeEnabled) {
     }
   } else {
     $bridgeScript = $null
-    $bridgeDependencyModule = "pyautogui"
-    $bridgeDependencyHint = "pip install pyautogui pywinauto"
+    $bridgeDependencyModule = "comtypes"
+    $bridgeDependencyHint = "pip install comtypes pywin32"
     $bridgeExtraArgs = @()
     $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
@@ -1639,7 +1729,21 @@ if ($wechatBridgeEnabled) {
         $startupWarnings += "WECHAT_BRIDGE_DEPENDENCY_MISSING"
       }
     } else {
-      $edgeUrl = "http://127.0.0.1:$port"
+      $wechatBridgeCallbackPort = 19000
+      $wechatBridgeCallbackPortRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_GATEWAY_PORT"
+      if ($null -eq $wechatBridgeCallbackPortRaw -and $env:EDGE_GATEWAY_PORT) {
+        $wechatBridgeCallbackPortRaw = $env:EDGE_GATEWAY_PORT
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$wechatBridgeCallbackPortRaw)) {
+        try {
+          $candidateWechatBridgeCallbackPort = [int]$wechatBridgeCallbackPortRaw
+          if ($candidateWechatBridgeCallbackPort -gt 0) {
+            $wechatBridgeCallbackPort = $candidateWechatBridgeCallbackPort
+          }
+        } catch {
+        }
+      }
+      $edgeUrl = "http://127.0.0.1:$wechatBridgeCallbackPort"
       if (Test-Path -Path $bridgeScript) {
         try {
           # Truncate bridge logs on every launch to avoid stale diagnostics.
@@ -1777,7 +1881,13 @@ $result = [ordered]@{
   wechat_bridge_backend_raw = $wechatBridgeBackendRaw
   wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
   wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
-  wechat_bridge_callback_url_local = "http://127.0.0.1:$port/v1/edge/wechat/callback"
+  wechat_bridge_callback_url_local = $(
+    $wechatGatewayPortText = "19000"
+    if ($envValues.ContainsKey("EDGE_GATEWAY_PORT") -and -not [string]::IsNullOrWhiteSpace([string]$envValues["EDGE_GATEWAY_PORT"])) {
+      $wechatGatewayPortText = [string]$envValues["EDGE_GATEWAY_PORT"]
+    }
+    "http://127.0.0.1:$wechatGatewayPortText/v1/gateway/wechat/webhook"
+  )
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
   tts_language = $resolvedTtsLanguage

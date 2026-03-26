@@ -27,6 +27,7 @@ def test_ide_skill_handlers_return_normalized_payload() -> None:
     open_cursor = registry.require("open_cursor").handler({"path": "D:/repo"}, {"request_id": "req-1"})
     run_action = registry.require("run_pycharm_action").handler({"action_id": "ReformatCode"}, {"request_id": "req-2"})
     codex_task = registry.require("codex_task").handler({"task": "fix tests"}, {"session_id": "sess-1"})
+    open_file = registry.require("open_file_in_editor").handler({"path": "D:/repo/a.py"}, {"request_id": "req-3"})
 
     assert open_cursor["tool"] == "cursor"
     assert open_cursor["path"] == "D:/repo"
@@ -34,3 +35,7 @@ def test_ide_skill_handlers_return_normalized_payload() -> None:
     assert run_action["action"] == "ReformatCode"
     assert codex_task["tool"] == "codex"
     assert codex_task["task"] == "fix tests"
+    assert "action" not in codex_task
+    assert open_file["tool"] == "open_file_in_editor"
+    assert open_file["path"] == "D:/repo/a.py"
+    assert "action" not in open_file

@@ -42,6 +42,9 @@ DEFAULT_VTS_PLUGIN_NAME = "NatsumeAi"
 DEFAULT_VTS_PLUGIN_DEVELOPER = "Natsume"
 DEFAULT_VTS_TOKEN_PATH = ".vts_token"
 DEFAULT_API_TIMEOUT_S = 5.0
+VTS_PLUGIN_NAME_ALIASES: dict[str, str] = {
+    "NastumeAi": DEFAULT_VTS_PLUGIN_NAME,
+}
 
 TALK_START = "TALK_START"
 TALK_END = "TALK_END"
@@ -137,6 +140,19 @@ DEFAULT_RECONNECT_BASE_DELAY_S = 1.0
 DEFAULT_RECONNECT_MAX_DELAY_S = 16.0
 
 
+def normalize_vts_plugin_name(plugin_name: str | None) -> str:
+    normalized = str(plugin_name or "").strip() or DEFAULT_VTS_PLUGIN_NAME
+    alias = VTS_PLUGIN_NAME_ALIASES.get(normalized)
+    if alias is not None:
+        logger.warning(
+            "VTS plugin_name normalized from %s to %s",
+            normalized,
+            alias,
+        )
+        return alias
+    return normalized
+
+
 class VtsState(str, Enum):
     """VTS driver lifecycle states."""
     DISCONNECTED = "DISCONNECTED"
@@ -182,6 +198,9 @@ class VtsConfig:
         default_factory=lambda: DEFAULT_VOICE_SILENCE_PARAM_CANDIDATES
     )
     reconnect: ReconnectConfig = field(default_factory=ReconnectConfig)
+
+    def __post_init__(self) -> None:
+        self.plugin_name = normalize_vts_plugin_name(self.plugin_name)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1175,32 +1194,50 @@ def _authenticate_vts(
     token_path: str,
 ) -> None:
     """Authenticate with VTube Studio API."""
+
+    def _auth_error(response: dict[str, Any], *, default: str) -> str:
+        data = dict(response.get("data") or {})
+        reason = str(data.get("reason") or "").strip()
+        if reason:
+            return reason
+        return _extract_vts_api_error(response, default=default)
+
     async def _auth() -> None:
         await vts.connect()
-        token = await vts.read_token()
-        if not token:
+
+        async def _request_and_store_token(*, detail_default: str) -> str:
             token_request = vts.vts_request.authentication_token()
             token_response = await vts.request(token_request)
             token_data = dict(token_response.get("data") or {})
-            token = str(token_data.get("authenticationToken") or "").strip()
-            if not token:
-                raise RuntimeError(_extract_vts_api_error(
-                    token_response,
-                    default="failed to get authentication token",
-                ))
-            vts.authentic_token = token
+            token_value = str(token_data.get("authenticationToken") or "").strip()
+            if not token_value:
+                raise RuntimeError(_auth_error(token_response, default=detail_default))
+            vts.authentic_token = token_value
             await vts.write_token()
-        else:
-            vts.authentic_token = token
+            return token_value
 
-        auth_request = vts.vts_request.authentication(vts.authentic_token)
-        auth_response = await vts.request(auth_request)
+        async def _request_auth_response(token_value: str) -> dict[str, Any]:
+            vts.authentic_token = token_value
+            auth_request = vts.vts_request.authentication(vts.authentic_token)
+            return await vts.request(auth_request)
+
+        token = await vts.read_token()
+        if not token:
+            token = await _request_and_store_token(detail_default="failed to get authentication token")
+
+        auth_response = await _request_auth_response(token)
         auth_ok = bool((auth_response.get("data") or {}).get("authenticated"))
+        if not auth_ok and token:
+            logger.warning(
+                "VTS authentication rejected for plugin=%s developer=%s; refreshing token and retrying once",
+                plugin_name,
+                plugin_developer,
+            )
+            token = await _request_and_store_token(detail_default="failed to refresh authentication token")
+            auth_response = await _request_auth_response(token)
+            auth_ok = bool((auth_response.get("data") or {}).get("authenticated"))
         if not auth_ok:
-            raise RuntimeError(_extract_vts_api_error(
-                auth_response,
-                default="authentication rejected by VTube Studio",
-            ))
+            raise RuntimeError(_auth_error(auth_response, default="authentication rejected by VTube Studio"))
 
     _run_in_vts_loop(_auth(), timeout_s=30.0)
 
@@ -1392,4 +1429,3 @@ def _extract_vts_api_error(response: Any, *, default: str) -> str:
     if str(response.get("messageType") or "").strip().lower() == "apierror":
         return f"VTS API error: {message or default}"
     return str(default)
-

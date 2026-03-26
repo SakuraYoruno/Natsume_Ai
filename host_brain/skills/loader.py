@@ -10,23 +10,8 @@ from host_brain.core.errors import SKILL_TOKEN_MISSING, TOKEN_INVALID, UNDO_REQU
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.governor.tier_policy import AuditTier
 from host_brain.governor.tokens import TokenService
+from host_brain.skills.executor_registry import dispatch_executor_payload
 from host_brain.skills.registry import SkillRegistry
-from host_brain.skills.impl.browser_executor import execute_browser_skill
-from host_brain.skills.impl.desktop_executor import execute_desktop_skill
-from host_brain.skills.impl.desktop_note import execute_desktop_note
-from host_brain.skills.impl.diary_writer import execute_diary_writer
-from host_brain.skills.impl.dream_generator import execute_dream_generator
-from host_brain.skills.impl.emotion_executor import execute_emotion_skill
-from host_brain.skills.impl.file_executor import execute_file_skill
-from host_brain.skills.impl.focus_mode import execute_focus_mode
-from host_brain.skills.impl.ide_executor import execute_ide_skill
-from host_brain.skills.impl.memory_executor import execute_memory_skill
-from host_brain.skills.impl.notification_executor import execute_notification_skill
-from host_brain.skills.impl.proactive_talk import execute_proactive_talk
-from host_brain.skills.impl.scheduler_executor import execute_scheduler_skill
-from host_brain.skills.impl.shell_executor import execute_shell_skill
-from host_brain.skills.impl.system_executor import execute_system_skill
-from host_brain.skills.impl.web_executor import execute_web_skill
 
 
 @dataclass(frozen=True)
@@ -310,58 +295,12 @@ class SkillLoader:
 
 
 # ---------------------------------------------------------------------------
-# Executor 分发层：根据 payload["tool"] 路由到对应的 impl executor
-# ---------------------------------------------------------------------------
-
-# tool 名称 → executor 函数映射表
-_EXECUTOR_MAP = {
-    # 文件系统
-    "file": execute_file_skill,
-    # 通知/TTS
-    "notification": execute_notification_skill,
-    # Shell
-    "shell": execute_shell_skill,
-    # 浏览器
-    "browser": execute_browser_skill,
-    # IDE
-    "cursor": execute_ide_skill,
-    "pycharm": execute_ide_skill,
-    "codex": execute_ide_skill,
-    "open_file_in_editor": execute_ide_skill,
-    # 人格/调度（签名为 execute_xxx(args, context)，需从 payload 中拆分 _context）
-    "diary_writer": lambda p: execute_diary_writer(p, p.get("_context")),
-    "dream_generator": lambda p: execute_dream_generator(p, p.get("_context")),
-    "desktop_note": lambda p: execute_desktop_note(p, p.get("_context")),
-    "focus_mode": lambda p: execute_focus_mode(p, p.get("_context")),
-    "proactive_talk": lambda p: execute_proactive_talk(p, p.get("_context")),
-    # 桌面控制
-    "desktop": lambda p: execute_desktop_skill(p, p.get("_context")),
-    # 记忆操作
-    "memory": lambda p: execute_memory_skill(p, p.get("_context")),
-    # 情绪/Bond
-    "emotion": lambda p: execute_emotion_skill(p, p.get("_context")),
-    # 调度器
-    "scheduler": lambda p: execute_scheduler_skill(p, p.get("_context")),
-    # 系统感知
-    "system": lambda p: execute_system_skill(p, p.get("_context")),
-    # 网络/搜索
-    "web": lambda p: execute_web_skill(p, p.get("_context")),
-}
-
-
 def _dispatch_executor(payload: Any) -> Any:
     """将 handler 返回的归一化 payload 路由到对应的 impl executor。
 
     若 payload 不是 dict 或 tool 字段未注册，则原样透传（向后兼容）。
     """
-    if not isinstance(payload, dict):
-        return payload
-    tool = str(payload.get("tool") or "").strip().lower()
-    executor = _EXECUTOR_MAP.get(tool)
-    if executor is None:
-        # 未注册 executor 的 tool，原样返回 payload（归一化层结果即最终结果）
-        return payload
-    return executor(payload)
+    return dispatch_executor_payload(payload)
 
 
 def _extract_audit_tier(governor_output: dict[str, Any] | None) -> AuditTier:

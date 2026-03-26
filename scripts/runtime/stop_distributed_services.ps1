@@ -15,6 +15,8 @@ param(
 
   [ValidateSet("local", "ssh")]
   [string]$EdgeMode = "local",
+  [ValidateSet("side", "main_service")]
+  [string]$EdgeStartupProfile = "",
   [string]$EdgePidFile = "",
   [int]$EdgePort = 0,
 
@@ -26,6 +28,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$resolvedEdgeStartupProfile = if ($PSBoundParameters.ContainsKey('EdgeStartupProfile')) {
+  $EdgeStartupProfile
+} elseif ($EdgeMode -eq 'ssh') {
+  'main_service'
+} else {
+  'side'
+}
 
 function Invoke-JsonScript {
   param(
@@ -77,6 +87,7 @@ function Invoke-RemoteEdgeStopViaSsh {
     [int]$SshPort,
     [string]$RepoPath,
     [string]$RemoteShell,
+    [string]$StartupProfile,
     [string]$PidFile,
     [int]$Port
   )
@@ -92,7 +103,8 @@ function Invoke-RemoteEdgeStopViaSsh {
     throw "ssh executable not found in PATH"
   }
 
-  $remoteScript = "$RepoPath/scripts/runtime/stop_edge_side.ps1"
+  $remoteScriptName = if ($StartupProfile -eq "main_service") { "stop_edge_main_service.ps1" } else { "stop_edge_side.ps1" }
+  $remoteScript = "$RepoPath/scripts/runtime/$remoteScriptName"
   $remoteParts = @(
     $RemoteShell,
     "-NoProfile",
@@ -136,7 +148,7 @@ function Invoke-RemoteEdgeStopViaSsh {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $hostStopScript = Join-Path $PSScriptRoot "stop_host_side.ps1"
-$edgeStopScript = Join-Path $PSScriptRoot "stop_edge_side.ps1"
+$edgeStopScript = Join-Path $PSScriptRoot $(if ($resolvedEdgeStartupProfile -eq "main_service") { "stop_edge_main_service.ps1" } else { "stop_edge_side.ps1" })
 $dockerServicesStopScript = Join-Path $PSScriptRoot "stop_docker_services.ps1"
 
 $hostResult = $null
@@ -172,6 +184,7 @@ if (-not $SkipEdge.IsPresent) {
         -SshPort $EdgeSshPort `
         -RepoPath $EdgeRepoPath `
         -RemoteShell $EdgeRemoteShell `
+        -StartupProfile $resolvedEdgeStartupProfile `
         -PidFile $EdgePidFile `
         -Port $EdgePort
     }
@@ -201,6 +214,7 @@ $result = [ordered]@{
   stopped_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   mode = [ordered]@{
     edge_mode = $EdgeMode
+    edge_startup_profile = $resolvedEdgeStartupProfile
     local_services_backend = $LocalServicesBackend
   }
   host = $hostResult

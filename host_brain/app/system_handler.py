@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -72,6 +74,239 @@ ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
 )
 
 ALLOWED_EDGE_EVENT_SOURCES: frozenset[str] = frozenset({"edge", "edge_client", "host_edge_bridge"})
+
+_EDGE_ASR_BRIDGE_EVENT_TYPES: frozenset[str] = frozenset(
+    {"ASR_CHUNK", "ASR_FINAL", "ASR_RESULT", "USER_INPUT_FINAL"}
+)
+_EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES: frozenset[str] = frozenset(
+    {"ASR_FINAL", "ASR_RESULT", "USER_INPUT_FINAL"}
+)
+_EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS: frozenset[str] = frozenset({"[ASR_VAD_NO_SPEECH]"})
+_EDGE_ASR_BRIDGE_RECENT: dict[str, int] = {}
+_EDGE_ASR_BRIDGE_RECENT_LOCK = threading.Lock()
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_float_env(name: str, *, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _parse_int_env(name: str, *, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _log_if_available(logger: Any, level: str, message: str, *args: Any) -> None:
+    log_fn = getattr(logger, level, None)
+    if callable(log_fn):
+        log_fn(message, *args)
+
+
+def _extract_edge_asr_bridge_candidate(
+    *,
+    raw: Mapping[str, Any],
+    normalized_event_type: str,
+) -> dict[str, Any] | None:
+    if not _parse_bool_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", default=True):
+        return None
+    if normalized_event_type not in _EDGE_ASR_BRIDGE_EVENT_TYPES:
+        return None
+
+    payload_raw = raw.get("payload")
+    payload = dict(payload_raw) if isinstance(payload_raw, Mapping) else {}
+    text = str(
+        payload.get("text")
+        or raw.get("text")
+        or payload.get("content")
+        or raw.get("content")
+        or ""
+    ).strip()
+    if not text:
+        return None
+    normalized_text = text.strip().upper()
+    if normalized_text in _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS:
+        return None
+
+    reason_code = str(payload.get("reason_code") or raw.get("reason_code") or "").strip().upper()
+    if reason_code == "ASR_VAD_NO_SPEECH":
+        return None
+
+    confidence = _coerce_float(payload.get("confidence"))
+    if confidence is None:
+        confidence = _coerce_float(raw.get("confidence"))
+
+    is_final = _coerce_bool(
+        payload.get("is_final", payload.get("final", raw.get("is_final", raw.get("final")))),
+        default=(normalized_event_type in _EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES),
+    )
+    allow_chunk = _parse_bool_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", default=True)
+    min_confidence = _parse_float_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", default=0.60)
+    if normalized_event_type == "ASR_CHUNK" and not is_final and not allow_chunk:
+        return None
+    if not is_final:
+        if confidence is None or confidence < min_confidence:
+            return None
+
+    request_id = str(raw.get("request_id") or "").strip()
+    session_id = str(raw.get("session_id") or "").strip()
+    if not request_id or not session_id:
+        return None
+
+    seq_raw = payload.get("seq", raw.get("seq"))
+    try:
+        seq_value = int(seq_raw) if seq_raw is not None else None
+    except (TypeError, ValueError):
+        seq_value = None
+
+    ts_raw = raw.get("ts_ms")
+    try:
+        ts_ms = int(ts_raw) if ts_raw is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        ts_ms = int(time.time() * 1000)
+
+    bridge_payload = dict(payload)
+    bridge_payload["session_id"] = session_id
+    bridge_payload["text"] = text
+    bridge_payload["is_final"] = is_final
+    bridge_payload["final"] = is_final
+    bridge_payload["edge_event_type"] = normalized_event_type
+    bridge_payload["edge_source"] = str(raw.get("source") or "edge").strip().lower() or "edge"
+    bridge_payload["edge_request_id"] = request_id
+    bridge_payload["edge_ts_ms"] = ts_ms
+    if confidence is not None:
+        bridge_payload["confidence"] = confidence
+    if seq_value is not None:
+        bridge_payload["seq"] = seq_value
+    if "emotion_tag" not in bridge_payload and raw.get("emotion_tag") is not None:
+        bridge_payload["emotion_tag"] = raw.get("emotion_tag")
+    if "emotion_intensity" not in bridge_payload and raw.get("emotion_intensity") is not None:
+        bridge_payload["emotion_intensity"] = raw.get("emotion_intensity")
+
+    return {
+        "request_id": request_id,
+        "session_id": session_id,
+        "text": text,
+        "ts_ms": ts_ms,
+        "event_type": normalized_event_type,
+        "payload": bridge_payload,
+    }
+
+
+def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _log_if_available(
+            logger,
+            "debug",
+            "edge event ASR bridge skipped: no running loop request_id=%s",
+            candidate.get("request_id"),
+        )
+        return
+
+    request_id = str(candidate.get("request_id") or "").strip()
+    session_id = str(candidate.get("session_id") or "").strip()
+    text = str(candidate.get("text") or "").strip()
+    payload = candidate.get("payload")
+    ts_ms_raw = candidate.get("ts_ms")
+    if not request_id or not session_id or not text or not isinstance(payload, Mapping):
+        return
+    try:
+        ts_ms = int(ts_ms_raw) if ts_ms_raw is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        ts_ms = int(time.time() * 1000)
+
+    dedup_window_ms = max(
+        0,
+        _parse_int_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", default=6000),
+    )
+    if dedup_window_ms > 0:
+        dedup_key = f"{session_id}::{text.casefold()}"
+        with _EDGE_ASR_BRIDGE_RECENT_LOCK:
+            cutoff = ts_ms - dedup_window_ms
+            stale_keys = [key for key, seen_at in _EDGE_ASR_BRIDGE_RECENT.items() if seen_at < cutoff]
+            for stale_key in stale_keys:
+                _EDGE_ASR_BRIDGE_RECENT.pop(stale_key, None)
+            last_seen = _EDGE_ASR_BRIDGE_RECENT.get(dedup_key)
+            if last_seen is not None and (ts_ms - last_seen) <= dedup_window_ms:
+                _log_if_available(
+                    logger,
+                    "debug",
+                    "edge event ASR bridge deduped request_id=%s session_id=%s event_type=%s",
+                    request_id,
+                    session_id,
+                    candidate.get("event_type"),
+                )
+                return
+            _EDGE_ASR_BRIDGE_RECENT[dedup_key] = ts_ms
+
+    async def _dispatch() -> None:
+        try:
+            from host_brain.app.input_routes import _dispatch_to_graph
+
+            await _dispatch_to_graph(
+                request_id=request_id,
+                session_id=session_id,
+                source="ASR",
+                text=text,
+                payload=dict(payload),
+                ts_ms=ts_ms,
+            )
+        except Exception as exc:
+            _log_if_available(
+                logger,
+                "warning",
+                "edge event ASR bridge failed request_id=%s: %s",
+                request_id,
+                exc,
+            )
+
+    loop.create_task(_dispatch())
 
 
 def _load_json_file(path: Path) -> dict[str, Any] | None:
@@ -361,6 +596,7 @@ def receive_edge_events_response(
     # 收集情感相关事件，用于后续 Bond 更新和 VTS 驱动
     # 修复问题B：Edge 事件上报链路打通——情感事件触发 Bond 更新和 VTS 驱动
     _emotion_events: list[dict[str, Any]] = []
+    bridge_candidates: list[dict[str, Any]] = []
 
     for idx, raw in enumerate(raw_events):
         if not isinstance(raw, dict):
@@ -401,6 +637,13 @@ def receive_edge_events_response(
                 "ts_ms": int(ts_val),
             })
             accepted_count += 1
+
+            bridge_candidate = _extract_edge_asr_bridge_candidate(
+                raw=raw,
+                normalized_event_type=normalized_event_type,
+            )
+            if bridge_candidate is not None:
+                bridge_candidates.append(bridge_candidate)
 
             # 收集情感相关事件（ASR_FINAL / EMOTION_DETECTED / USER_REACTION）
             if normalized_event_type in {
@@ -531,6 +774,9 @@ def receive_edge_events_response(
                         pass
         except Exception as post_exc:
             logger.warning("edge event post-processing failed: %s", post_exc)
+
+    for candidate in bridge_candidates:
+        _schedule_edge_asr_bridge(candidate=candidate, logger=logger)
 
     rejected_count = len(rejected_indices)
     total = len(raw_events)

@@ -809,7 +809,7 @@ flowchart TD
 | `/v1/edge/fallback/*` Fallback | Host→Edge | HTTP POST | HMAC | ✅ 完整实现 | ✅ **已打通** |
 | `/v1/host/input` 输入上报 | Edge→Host | HTTP POST | HMAC | ✅ 完整实现 | ✅ **已打通**（`run_main_chain_from_input` 已实现，触发完整 chat 流程） |
 | `/v1/edge/events` 事件上报 | Edge→Host | HTTP POST | 无 | ✅ 完整实现 | ✅ **已打通**（情感事件触发 Bond 更新 + VTS 驱动，本次修复） |
-| `/v1/edge/wechat/callback` 微信 | 本地Hook→Edge | HTTP POST | 无（本地） | ✅ 完整实现 | ✅ **已打通** |
+| `/v1/gateway/wechat/webhook` 微信 | UIAutomation bridge → Gateway | HTTP POST | 无（本地） | ✅ 完整实现 | ✅ **已打通** |
 
 ### 12.2 未完全打通的关键问题
 
@@ -1038,4 +1038,3 @@ flowchart TD
 *基于代码库深度分析，覆盖 host_brain 和 edge_client 全部核心模块，含 P16 多智能体技术债清理*
 *P15 重构后数据流图已全量更新：图4/图6/图7.4 对齐 PROFILE_WORKFLOW_SUPERVISED 新链路*
 *代码重构后同步更新：新增第十四节 StateArbiter/MemoryGuard/RecallPackBuilder/Vault 数据流；主聊天链路图补充 RecallPackBuilder/MemoryGuard 节点；系统架构概览图补充新模块*
-

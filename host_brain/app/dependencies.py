@@ -44,22 +44,9 @@ from host_brain.retrieval.pipeline import (
 )
 from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
-
-from host_brain.skills.browser_registry import BrowserSkillProvider
-from host_brain.skills.desktop_registry import DesktopSkillProvider
-from host_brain.skills.emotion_registry import EmotionSkillProvider
-from host_brain.skills.file_registry import FileSkillProvider
-from host_brain.skills.ide_registry import IDESkillProvider
-from host_brain.skills.memory_registry import MemorySkillProvider
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
-from host_brain.skills.notification_registry import NotificationSkillProvider
-from host_brain.skills.personality_registry import PersonalitySkillProvider
+from host_brain.skills.provider_catalog import register_configured_skill_providers
 from host_brain.skills.registry import SkillRegistry
-from host_brain.skills.scheduler_registry import SchedulerSkillProvider
-from host_brain.skills.shell_registry import ShellSkillProvider
-from host_brain.skills.system_registry import SystemSkillProvider
-
-from host_brain.skills.web_registry import WebSkillProvider
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
@@ -423,106 +410,21 @@ def get_skill_registry() -> SkillRegistry:
     global _skill_registry
     if _skill_registry is None:
         _skill_registry = build_builtin_skill_registry()
-        # 注册文件系统 Skills（file_read / file_write / file_append / file_delete / file_list）
-        if _parse_bool_env("HOST_SKILL_FILE_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(FileSkillProvider())
-                _logger.info("File Skills 已注册（file_read / file_write / file_append / file_delete / file_list）")
-            except Exception as exc:
-                _logger.warning("File Skills 注册失败，跳过: %s", exc)
-        # 注册 Shell 命令执行 Skills（shell_run / shell_read_log / shell_run_test）
-        if _parse_bool_env("HOST_SKILL_SHELL_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(ShellSkillProvider())
-                _logger.info("Shell Skills 已注册（shell_run / shell_read_log / shell_run_test）")
-            except Exception as exc:
-                _logger.warning("Shell Skills 注册失败，跳过: %s", exc)
-        # 注册通知/提醒 Skills（notify_desktop / notify_tts_speak / notify_schedule_reminder）
-        if _parse_bool_env("HOST_SKILL_NOTIFICATION_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(NotificationSkillProvider())
-                _logger.info("Notification Skills 已注册（notify_desktop / notify_tts_speak / notify_schedule_reminder）")
-            except Exception as exc:
-                _logger.warning("Notification Skills 注册失败，跳过: %s", exc)
-        # 注册 IDE Skills（Cursor / PyCharm / Codex）
-        if _parse_bool_env("HOST_SKILL_IDE_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(IDESkillProvider())
-                _logger.info("IDE Skills 已注册（open_cursor / run_pycharm_action / codex_task / open_file_in_editor）")
-            except Exception as exc:
-                _logger.warning("IDE Skills 注册失败，跳过: %s", exc)
-        # 注册浏览器自动化 Skills（agent-browser / Playwright / Puppeteer）
-        if _parse_bool_env("HOST_SKILL_BROWSER_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(BrowserSkillProvider())
-                _logger.info(
-                    "Browser Skills 已注册（navigate / click / type / screenshot / "
-                    "execute_script / wait_for / scrape / close）"
-                )
-            except Exception as exc:
-                _logger.warning("Browser Skills 注册失败，跳过: %s", exc)
-        # 注册人格/调度 Skills（diary_writer / dream_generator / desktop_note / focus_mode / proactive_talk）
-        if _parse_bool_env("HOST_SKILL_PERSONALITY_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(PersonalitySkillProvider())
-                _logger.info(
-                    "Personality Skills 已注册（diary_writer / dream_generator / "
-                    "desktop_note / focus_mode / proactive_talk）"
-                )
-            except Exception as exc:
-                _logger.warning("Personality Skills 注册失败，跳过: %s", exc)
-        # 注册桌面控制 Skills（desktop_screenshot / desktop_click / desktop_type / desktop_hotkey / clipboard_read / clipboard_write）
-        if _parse_bool_env("HOST_SKILL_DESKTOP_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(DesktopSkillProvider())
-                _logger.info(
-                    "Desktop Skills 已注册（desktop_screenshot / desktop_click / desktop_type / "
-                    "desktop_hotkey / clipboard_read / clipboard_write）"
-                )
-            except Exception as exc:
-                _logger.warning("Desktop Skills 注册失败，跳过: %s", exc)
-        # 注册记忆操作 Skills（memory_search / memory_store / memory_forget）
-        if _parse_bool_env("HOST_SKILL_MEMORY_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(MemorySkillProvider())
-                _logger.info("Memory Skills 已注册（memory_search / memory_store / memory_forget）")
-            except Exception as exc:
-                _logger.warning("Memory Skills 注册失败，跳过: %s", exc)
-        # 注册情绪/Bond 关系 Skills（emotion_update / bond_score_update / emotion_get / bond_score_get）
-        if _parse_bool_env("HOST_SKILL_EMOTION_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(EmotionSkillProvider())
-                _logger.info(
-                    "Emotion Skills 已注册（emotion_update / bond_score_update / "
-                    "emotion_get / bond_score_get）"
-                )
-            except Exception as exc:
-                _logger.warning("Emotion Skills 注册失败，跳过: %s", exc)
-        # 注册调度器 Skills（scheduler_add / scheduler_cancel / scheduler_list）
-        if _parse_bool_env("HOST_SKILL_SCHEDULER_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(SchedulerSkillProvider())
-                _logger.info("Scheduler Skills 已注册（scheduler_add / scheduler_cancel / scheduler_list）")
-            except Exception as exc:
-                _logger.warning("Scheduler Skills 注册失败，跳过: %s", exc)
-        # 注册系统感知 Skills（system_info / process_list / process_kill / network_status）
-        if _parse_bool_env("HOST_SKILL_SYSTEM_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(SystemSkillProvider())
-                _logger.info(
-                    "System Skills 已注册（system_info / process_list / process_kill / network_status）"
-                )
-            except Exception as exc:
-                _logger.warning("System Skills 注册失败，跳过: %s", exc)
-        # 注册网络/搜索 Skills（web_search / http_request）
-        if _parse_bool_env("HOST_SKILL_WEB_ENABLED", default=True):
-            try:
-                _skill_registry.register_decorated(WebSkillProvider())
-                _logger.info("Web Skills 已注册（web_search / http_request）")
-            except Exception as exc:
-                _logger.warning("Web Skills 注册失败，跳过: %s", exc)
+        register_configured_skill_providers(
+            _skill_registry,
+            parse_bool_env=_parse_bool_env,
+            logger=_logger,
+        )
     _sync_mcp_skills_into_registry(_skill_registry)
     return _skill_registry
+
+
+def refresh_skill_registry() -> SkillRegistry:
+    """Clear cached registry-dependent singletons and rebuild skills."""
+    global _skill_registry, _intent_engine
+    _skill_registry = None
+    _intent_engine = None
+    return get_skill_registry()
 
 
 def get_policy_cache() -> GovernorPolicyCache:

@@ -7,7 +7,7 @@ param(
   [switch]$ForceRestart,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
-  [ValidateSet("", "uia", "uia_ocr", "vision", "win_notify", "vision_notify")]
+  [ValidateSet("", "uia_hook", "off")]
   [string]$WeChatInboundBackend = "",
   [string]$WeChatVisionModel = "",
   [string]$WeChatVisionApiUrl = "",
@@ -18,26 +18,38 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Set-OptionalProcessEnv {
+  param(
+    [string]$Key,
+    [object]$Value
+  )
+  if ($null -eq $Value) {
+    return
+  }
+  $text = [string]$Value
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return
+  }
+  [Environment]::SetEnvironmentVariable($Key, $text, "Process")
+}
+
 $startEdgeScript = Join-Path $PSScriptRoot "start_edge.ps1"
 if (-not (Test-Path -Path $startEdgeScript)) {
   throw "start_edge.ps1 not found: $startEdgeScript"
 }
 
-if (-not [string]::IsNullOrWhiteSpace($WeChatInboundBackend)) {
-  Write-Warning "WeChatInboundBackend is deprecated and ignored (Unified Message Gateway mode only)."
+Set-OptionalProcessEnv -Key "EDGE_WECHAT_INBOUND_BACKEND" -Value $WeChatInboundBackend
+Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MODEL" -Value $WeChatVisionModel
+Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_API_URL" -Value $WeChatVisionApiUrl
+if ($WeChatVisionTimeoutS -gt 0) {
+  Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_TIMEOUT_S" -Value $WeChatVisionTimeoutS
 }
-if (-not [string]::IsNullOrWhiteSpace($WeChatVisionModel) -or
-    -not [string]::IsNullOrWhiteSpace($WeChatVisionApiUrl) -or
-    $WeChatVisionTimeoutS -gt 0 -or
-    $WeChatVisionMinConfidence -ge 0 -or
-    $WeChatVisionMinIntervalS -gt 0) {
-  Write-Warning "Legacy WeChat vision/OCR parameters are ignored in Gateway DB-listen mode."
+if ($WeChatVisionMinConfidence -ge 0) {
+  Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MIN_CONFIDENCE" -Value $WeChatVisionMinConfidence
 }
-
-# Strict doc mode: force-disable legacy UIA bridge and listener chain.
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_ENABLED", "false", "Process")
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_LISTENER_ENABLED", "false", "Process")
-[Environment]::SetEnvironmentVariable("EDGE_WECHAT_INBOUND_BACKEND", "", "Process")
+if ($WeChatVisionMinIntervalS -gt 0) {
+  Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MIN_INTERVAL_S" -Value $WeChatVisionMinIntervalS
+}
 
 $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `

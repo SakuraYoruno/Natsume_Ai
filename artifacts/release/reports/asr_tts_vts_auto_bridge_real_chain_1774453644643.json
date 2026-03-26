@@ -1,0 +1,277 @@
+{
+  "generated_at_ms": 1774453644692,
+  "baseline_ts_ms": 1774453460505,
+  "mode": "auto_bridge_real_chain",
+  "playback": {
+    "remote_host": "edge-lan",
+    "command": [
+      "python",
+      "C:\\Users\\rog\\AppData\\Local\\Temp\\play_wav_device.py",
+      "D:\\Natsume_Ai\\runtime\\edge\\asr_real_capture_test.wav",
+      "6"
+    ],
+    "stdout": "PLAYED:D:\\Natsume_Ai\\runtime\\edge\\asr_real_capture_test.wav:device=6:samplerate=22050:channels=1",
+    "exit_code": 0
+  },
+  "bridge_request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+  "accepted_asr": {
+    "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+    "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+    "event_type": "ASR_CHUNK",
+    "status": "ACCEPTED",
+    "reason_code": null,
+    "detail": "asr_chunk accepted",
+    "payload": {
+      "alternates": [
+        {
+          "confidence": 0.9457,
+          "text": "哥"
+        },
+        {
+          "confidence": 0.9991,
+          "text": "哥"
+        },
+        {
+          "confidence": 0.6578,
+          "text": "现在"
+        }
+      ],
+      "confidence": 0.9372,
+      "direction": "EDGE_TO_HOST",
+      "emotion_intensity": 0.0,
+      "emotion_source": "text_heuristic",
+      "emotion_tag": "NEUTRAL",
+      "event_type": "ASR_CHUNK",
+      "final": false,
+      "low_confidence": false,
+      "mood_state": "calm",
+      "queue_depth": 0,
+      "seq": 518,
+      "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+      "text": "哥哥 现在测试真实",
+      "ts_ms": 1774453466881,
+      "vram_total_mb": 0,
+      "vram_used_mb": 0
+    },
+    "ts_ms": 1774453466881
+  },
+  "input_events": [
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+      "event_type": "INPUT_ACCEPTED",
+      "status": "ACCEPTED",
+      "reason_code": null,
+      "detail": "source=ASR text_len=9",
+      "payload": {
+        "latency_ms": null,
+        "phase": "ACCEPTED",
+        "source": "ASR"
+      },
+      "ts_ms": 1774453466881
+    },
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+      "event_type": "INPUT_DISPATCHED",
+      "status": "DISPATCHED",
+      "reason_code": null,
+      "detail": "dispatch_mode=fire_and_forget source=ASR",
+      "payload": {
+        "latency_ms": null,
+        "phase": "DISPATCHED",
+        "source": "ASR"
+      },
+      "ts_ms": 1774453484493
+    },
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+      "event_type": "INPUT_COMPLETED",
+      "status": "OK",
+      "reason_code": null,
+      "detail": "main_chain completed source=ASR latency_ms=29682",
+      "payload": {
+        "latency_ms": 29682,
+        "phase": "COMPLETED",
+        "source": "ASR"
+      },
+      "ts_ms": 1774453514175
+    }
+  ],
+  "host_stream_tts": {
+    "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+    "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+    "event_type": "HOST_STREAM_TTS",
+    "status": "ACCEPTED",
+    "reason_code": null,
+    "detail": "tts queued; tts playback started",
+    "payload": {
+      "detail": "tts queued; tts playback started",
+      "event": {
+        "audio_ref": "memory://tts_req_073a483a462f4e559aa1b95079e65cb1",
+        "event_type": "TTS_PLAYBACK_STARTED",
+        "insecure_auth": false,
+        "queue_event": {
+          "event_type": "TTS_QUEUED",
+          "queue_depth": 1,
+          "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+          "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+          "ts_ms": 1774453504908,
+          "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d"
+        },
+        "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+        "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+        "stage": "S_VOICE_TTS_PLAYBACK",
+        "start_detail": "tts playback started",
+        "start_event": {
+          "audio_ref": "memory://tts_req_073a483a462f4e559aa1b95079e65cb1",
+          "event_type": "TTS_PLAYBACK_STARTED",
+          "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+          "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+          "ts_ms": 1774453504908,
+          "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d"
+        },
+        "start_reason_code": null,
+        "start_stage": "S_VOICE_TTS_PLAYBACK",
+        "start_status": "ACCEPTED",
+        "ts_ms": 1774453504908,
+        "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d",
+        "vts_expression_result": {
+          "action": "set_expression",
+          "detail": "expression set: NEUTRAL -> exp_neutral_01",
+          "emotion_tag": "NEUTRAL",
+          "expression_id": "exp_neutral_01",
+          "reason_code": null,
+          "success": true
+        },
+        "vts_mouth_sync": {
+          "audio_type": "ndarray",
+          "envelope_avg": 0.3436,
+          "envelope_max": 0.9189,
+          "envelope_min": 0.0,
+          "envelope_points": 111,
+          "frame_interval_s": 0.0417,
+          "frames_sent": 0,
+          "last_value": 0.0,
+          "probe_value": 0.18,
+          "sample_rate": 32000,
+          "source": "synth_event.audio_data",
+          "started": true,
+          "state": "running"
+        },
+        "vts_talk_result": {
+          "action": "TALK_START",
+          "detail": "talk gate started (mouth open)",
+          "emotion_tag": null,
+          "expression_id": null,
+          "reason_code": null,
+          "success": true
+        }
+      },
+      "latency_ms": 8798,
+      "reason_code": null,
+      "status": "ACCEPTED",
+      "success": true
+    },
+    "ts_ms": 1774453514172
+  },
+  "host_stream_vts": {
+    "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+    "session_id": "asr_req_a2e2770be7fe49c6aaca95f5fd6873b3",
+    "event_type": "HOST_STREAM_VTS",
+    "status": "APPLIED",
+    "reason_code": null,
+    "detail": "expression resolved via fixed mapping",
+    "payload": {
+      "detail": "expression resolved via fixed mapping",
+      "emotion_tag": "NEUTRAL",
+      "expression_id": "exp_neutral_01",
+      "reason_code": null,
+      "status": "APPLIED",
+      "transition_frames": [],
+      "trigger": "HOST"
+    },
+    "ts_ms": 1774453514171
+  },
+  "tts_events": [
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+      "event_type": "TTS_QUEUED",
+      "status": "ACCEPTED",
+      "reason_code": null,
+      "detail": "tts queued",
+      "payload": {
+        "event_type": "TTS_QUEUED",
+        "queue_depth": 1,
+        "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+        "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+        "ts_ms": 1774453504908,
+        "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d",
+        "vram_total_mb": 0,
+        "vram_used_mb": 0
+      },
+      "ts_ms": 1774453504908
+    },
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+      "event_type": "TTS_PLAYBACK_STARTED",
+      "status": "ACCEPTED",
+      "reason_code": null,
+      "detail": "tts playback started",
+      "payload": {
+        "audio_ref": "memory://tts_req_073a483a462f4e559aa1b95079e65cb1",
+        "event_type": "TTS_PLAYBACK_STARTED",
+        "queue_depth": 0,
+        "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+        "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+        "ts_ms": 1774453504908,
+        "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d",
+        "vram_total_mb": 0,
+        "vram_used_mb": 0
+      },
+      "ts_ms": 1774453504908
+    },
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+      "event_type": "TTS_PLAYBACK_FINISHED",
+      "status": "ACCEPTED",
+      "reason_code": null,
+      "detail": "tts playback finished",
+      "payload": {
+        "event_type": "TTS_PLAYBACK_FINISHED",
+        "queue_depth": 0,
+        "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+        "session_id": "sess::req_9223f38ba94c4a63853886d6da19cd2d",
+        "ts_ms": 1774453518252,
+        "utterance_id": "utt::req_9223f38ba94c4a63853886d6da19cd2d",
+        "vram_total_mb": 0,
+        "vram_used_mb": 0
+      },
+      "ts_ms": 1774453518252
+    }
+  ],
+  "avatar_action_log": [
+    {
+      "request_id": "req_9223f38ba94c4a63853886d6da19cd2d",
+      "trigger": "HOST",
+      "emotion_tag": "NEUTRAL",
+      "expression_id": "exp_neutral_01",
+      "status": "APPLIED",
+      "reason_code": null,
+      "detail": "expression resolved via fixed mapping",
+      "ts_ms": 1774453466881
+    }
+  ],
+  "success": {
+    "input_accepted": true,
+    "input_dispatched": true,
+    "input_completed": true,
+    "tts_streamed": true,
+    "vts_streamed": true,
+    "avatar_applied": true
+  }
+}

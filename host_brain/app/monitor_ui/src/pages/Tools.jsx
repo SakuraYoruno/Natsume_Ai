@@ -5,6 +5,9 @@ import {
   executeTool,
   fetchPermissionStats,
   fetchActionPlanStats,
+  fetchCustomSkillProviders,
+  fetchCustomSkillProviderTemplate,
+  installCustomSkillProvider,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -159,6 +162,241 @@ function ExecutePanel({ tool, onClose }) {
           }
         </div>
       )}
+    </div>
+  )
+}
+
+function ProviderStatusBadge({ status }) {
+  const styles = {
+    ACTIVE: 'bg-green-100 text-green-700',
+    STAGED: 'bg-yellow-100 text-yellow-700',
+    ERROR: 'bg-red-100 text-red-700',
+  }
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+      {status || 'UNKNOWN'}
+    </span>
+  )
+}
+
+function CustomSkillInstaller() {
+  const [providers, setProviders] = useState([])
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [templateLoading, setTemplateLoading] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const [error, setError] = useState(null)
+  const [result, setResult] = useState(null)
+  const [form, setForm] = useState({
+    filename: 'my_skill_provider.py',
+    source_code: '',
+    activate_now: true,
+  })
+
+  const loadProviders = useCallback(async () => {
+    setProvidersLoading(true)
+    try {
+      const res = await fetchCustomSkillProviders()
+      setProviders(res.items || [])
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setProvidersLoading(false)
+    }
+  }, [])
+
+  const loadTemplate = useCallback(async (force = false) => {
+    setTemplateLoading(true)
+    try {
+      const res = await fetchCustomSkillProviderTemplate()
+      setForm(prev => ({
+        ...prev,
+        filename: prev.filename || res.filename_hint || 'my_skill_provider.py',
+        source_code: force || !prev.source_code ? (res.source_code || '') : prev.source_code,
+      }))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTemplateLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadProviders()
+    loadTemplate(false)
+  }, [loadProviders, loadTemplate])
+
+  const handleInstall = async () => {
+    setInstalling(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await installCustomSkillProvider({
+        filename: form.filename,
+        source_code: form.source_code,
+        activate_now: form.activate_now,
+      })
+      setResult({ ok: true, data: res })
+      await loadProviders()
+    } catch (e) {
+      setResult({ ok: false, error: e.message })
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-800">自定义 Skill 安装</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            直接写入 <code className="font-mono">host_brain/skills/custom_providers</code>，可选立即刷新 SkillRegistry。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadTemplate(true)}
+            disabled={templateLoading}
+            className="text-xs border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {templateLoading ? '载入中...' : '载入模板'}
+          </button>
+          <button
+            onClick={loadProviders}
+            disabled={providersLoading}
+            className="text-xs border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {providersLoading ? '刷新中...' : '刷新列表'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Provider 文件名</label>
+            <input
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300"
+              value={form.filename}
+              onChange={e => setForm(prev => ({ ...prev, filename: e.target.value }))}
+              placeholder="my_skill_provider.py"
+            />
+            <div className="text-xs text-gray-400 mt-1">会自动规范为 <code className="font-mono">*_provider.py</code></div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Provider 源码</label>
+            <textarea
+              className="w-full min-h-[420px] border border-gray-300 rounded px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-300"
+              value={form.source_code}
+              onChange={e => setForm(prev => ({ ...prev, source_code: e.target.value }))}
+              spellCheck={false}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={form.activate_now}
+              onChange={e => setForm(prev => ({ ...prev, activate_now: e.target.checked }))}
+            />
+            安装后立即刷新 SkillRegistry
+          </label>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleInstall}
+              disabled={installing}
+              className="bg-blue-600 text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {installing ? '安装中...' : '安装 Skill Provider'}
+            </button>
+            <div className="text-xs text-gray-400">
+              Natsume 也可通过 <code className="font-mono">file_write</code> + <code className="font-mono">shell_run</code> 自助安装。
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">{error}</div>
+          )}
+
+          {result && (
+            <div className={`rounded border p-3 text-xs ${result.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+              {result.ok ? (
+                <div className="space-y-1">
+                  <div className="font-semibold">安装完成</div>
+                  <div>{result.data.message}</div>
+                  <div>文件：<code className="font-mono">{result.data.path}</code></div>
+                  {(result.data.declared_skill_names || []).length > 0 && (
+                    <div>声明技能：{result.data.declared_skill_names.join(', ')}</div>
+                  )}
+                  {(result.data.active_skill_names || []).length > 0 && (
+                    <div>当前激活：{result.data.active_skill_names.join(', ')}</div>
+                  )}
+                </div>
+              ) : (
+                <div>✗ {result.error}</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <div className="text-sm font-semibold text-gray-700">已安装 Custom Providers</div>
+          {providers.length === 0 ? (
+            <div className="text-sm text-gray-400 bg-gray-50 rounded border border-dashed border-gray-200 p-6 text-center">
+              暂无自定义 provider
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
+              {providers.map((provider) => (
+                <div key={provider.filename} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium text-sm text-gray-800">{provider.filename}</div>
+                      <div className="text-xs text-gray-500 font-mono mt-0.5">{provider.module_name}</div>
+                    </div>
+                    <ProviderStatusBadge status={provider.status} />
+                  </div>
+
+                  <div className="text-xs text-gray-500">
+                    <div>路径：<code className="font-mono">{provider.path}</code></div>
+                    <div>更新时间：{provider.updated_at_ms ? new Date(provider.updated_at_ms).toLocaleString('zh-CN') : '—'}</div>
+                  </div>
+
+                  {(provider.declared_skill_names || []).length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-1">声明技能</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {provider.declared_skill_names.map((name) => (
+                          <span key={name} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(provider.active_skill_names || []).length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 mb-1">当前激活</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {provider.active_skill_names.map((name) => (
+                          <span key={name} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">{name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {provider.error && (
+                    <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
+                      {provider.error}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -352,6 +590,8 @@ export default function Tools() {
           )}
         </div>
       </div>
+
+      <CustomSkillInstaller />
 
       {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
       <PermissionGuardStats />

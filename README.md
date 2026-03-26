@@ -471,11 +471,21 @@ python -m edge_client
 # 统一入口（推荐）
 .\scripts\runtime\start_edge_side.ps1
 
+# 仅重启 Edge 主进程（SSH 远控 / 双节点联调推荐）
+.\scripts\runtime\start_edge_main_service.ps1 -ForceRestart
+
+# 微信 4.x 默认走 UIAutomation bridge（`EDGE_WECHAT_BRIDGE_ENABLED=true`），
+# inbound 回调目标为 `http://127.0.0.1:19000/v1/gateway/wechat/webhook`，
+# outbound 文本优先走 command queue → UIA 执行。
+
 # 后台启动（带 pid/log）
 .\scripts\runtime\start_edge.ps1
 
 # 停止
 .\scripts\runtime\stop_edge.ps1
+
+# 仅停止 Edge 主进程（不管理微信 bridge / VTS / 其它辅助进程）
+.\scripts\runtime\stop_edge_main_service.ps1
 ```
 
 #### 📌 Edge 最小可运行门槛
@@ -505,8 +515,14 @@ python -m edge_client
 # 本地模式（Host + Edge）统一启动
 .\scripts\runtime\start_distributed_services.ps1 -EdgeMode local
 
+# SSH 模式（默认自动走 Edge 主进程专用 profile，无需额外传 `-EdgeStartupProfile main_service`）
+.\scripts\runtime\start_distributed_services.ps1 -EdgeMode ssh -EdgeSshHost edge-lan -EdgeRepoPath D:\Natsume_Ai
+
 # 统一停止（可选同时停 Docker 外置依赖）
 .\scripts\runtime\stop_distributed_services.ps1 -StopLocalServices
+
+# SSH 模式停止也会默认跟随 `main_service` profile
+.\scripts\runtime\stop_distributed_services.ps1 -EdgeMode ssh -EdgeSshHost edge-lan -EdgeRepoPath D:\Natsume_Ai
 ```
 
 ### 🔍 10. 本地烟雾检查（推荐）
@@ -996,24 +1012,30 @@ Render Stream（渲染流）
 
 ### 🧰 技能系统（Skills）
 
-技能系统采用三层架构，将 Host 的执行能力模块化，统一纳入权限治理：
+技能系统已演进为“声明式 provider + 统一注册表 + executor 分发”的三层结构：
 
 ```
-@skill 装饰器（registry.py）
+DeclarativeSkillSpec / @skill
     ↓ register_decorated() 扫描
 SkillRegistry（单一注册表）
+    ↓ loader / executor_registry 分发
+具体 executor（file / shell / browser / ...）
     ↑ register_mcp_tools_into_skill_registry()
 MCPToolRegistry（MCP 工具元数据）
 ```
 
 | 组件 | 说明 |
 |------|------|
-| **SkillRegistry** | 装饰器注册表，`@skill` 标注元数据，`register_decorated()` 自动扫描 |
+| **SkillRegistry** | 统一技能注册表，同时支持旧式 `@skill` 和新式声明式 provider |
 | **SkillMeta** | 技能元数据：`clearance`（LOW/MEDIUM/HIGH）/ `risk_level`（1-5）/ `scope` / `reversible` / `require_confirm` |
 | **安全约束** | `risk_level >= 4` 必须设置 `require_confirm=True`，否则注册时抛出异常 |
+| **DeclarativeSkillSpec** | 新增技能时只需声明 `tool/action`、风险级别和参数归一化函数 |
+| **Provider Catalog** | `provider_catalog.py` 统一注册内置 provider、`custom_providers/` 和外部 provider |
 | **MCP 桥接** | `mcp_skill_bridge.py` 将 MCP 工具统一映射为 Skill，纳入权限治理 |
 | **IDE 技能包** | `ide_registry.py`：`open_cursor`（LOW/2）/ `run_pycharm_action`（MEDIUM/3）/ `codex_task`（MEDIUM/3）|
 | **ClawdBot UI** | 监控面板技能实现（系统状态查询 / 日志检索）|
+
+新增/后装技能说明见：`docs/50_project/CUSTOM_SKILL_INSTALL.md`
 
 ### 📈 可观测性（Observability）
 

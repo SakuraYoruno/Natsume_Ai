@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -101,12 +101,32 @@ class TestVtsTalkGate:
             result = driver.talk_start()
         assert result.success
         assert driver.talking
-        mocked_set.assert_called_once_with(
-            vts=driver._vts,
-            param_name=VTS_MOUTH_PARAM,
-            value=VTS_MOUTH_OPEN_VALUE,
-            timeout_s=driver._config.api_timeout_s,
-        )
+        assert mocked_set.call_args_list == [
+            call(
+                vts=driver._vts,
+                param_name=VTS_MOUTH_PARAM,
+                value=VTS_MOUTH_OPEN_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolumePlusMouthOpen",
+                value=VTS_MOUTH_OPEN_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolume",
+                value=VTS_MOUTH_OPEN_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceSilence",
+                value=0.0,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+        ]
 
     def test_talk_end_clears_talking_flag(self) -> None:
         driver = VTubeStudioDriver(VtsConfig())
@@ -117,12 +137,32 @@ class TestVtsTalkGate:
             result = driver.talk_end()
         assert result.success
         assert not driver.talking
-        mocked_set.assert_called_once_with(
-            vts=driver._vts,
-            param_name=VTS_MOUTH_PARAM,
-            value=VTS_MOUTH_CLOSE_VALUE,
-            timeout_s=driver._config.api_timeout_s,
-        )
+        assert mocked_set.call_args_list == [
+            call(
+                vts=driver._vts,
+                param_name=VTS_MOUTH_PARAM,
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolumePlusMouthOpen",
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolume",
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceSilence",
+                value=1.0,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+        ]
 
 
 class TestVtsExpressionMapping:
@@ -194,12 +234,32 @@ class TestVtsBargeInRecovery:
         assert not driver.talking
         assert result.expression_id == EMOTION_TO_EXPRESSION_ID["NEUTRAL"]
         mocked_hotkey.assert_called_once()
-        mocked_param.assert_called_once_with(
-            vts=driver._vts,
-            param_name=VTS_MOUTH_PARAM,
-            value=VTS_MOUTH_CLOSE_VALUE,
-            timeout_s=driver._config.api_timeout_s,
-        )
+        assert mocked_param.call_args_list == [
+            call(
+                vts=driver._vts,
+                param_name=VTS_MOUTH_PARAM,
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolumePlusMouthOpen",
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceVolume",
+                value=VTS_MOUTH_CLOSE_VALUE,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+            call(
+                vts=driver._vts,
+                param_name="VoiceSilence",
+                value=1.0,
+                timeout_s=driver._config.api_timeout_s,
+            ),
+        ]
 
     def test_reset_when_disconnected_queues_neutral(self) -> None:
         driver = VTubeStudioDriver(VtsConfig())
