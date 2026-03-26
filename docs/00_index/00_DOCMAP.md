@@ -201,6 +201,10 @@
   用途：微信 4.x UIA 树恢复验证脚本修正版（v2）实测报告。基于 RUN 节点运行反馈的 4 项修正：窗口多类名兼容、UTF-8 编码兼容、去 emoji、双条件成功判定。含 7 项真机测试清单。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_p1_uia_strategies_20260326.md
+  用途：P1 三方案 UIA 恢复策略开发实测报告（2026-03-26）。在 P0 方案验证均失败后，实现三种更强的恢复策略：S1 持久化 UIA 事件监听器、S2 NVDA/Narrator 屏幕阅读器辅助、S3 Minimal Accessibility Client。含整合对比测试脚本和 8 项真机测试清单。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
