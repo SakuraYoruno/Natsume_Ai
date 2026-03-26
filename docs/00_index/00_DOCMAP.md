@@ -209,6 +209,10 @@
   用途：P1 脚本自举修复报告（2026-03-26）。修复 comtypes.gen.UIAutomationClient 类型库缺失导致三个 P1 策略全部无法启动的问题（显式 GetModule），统一对比器 S2 的 Narrator PowerShell fallback 启动逻辑。7 项测试（P0×5 / P1×2）。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_p1_comtypes_fix_20260326.md
+  用途：P1 脚本自举修复运行反馈报告（2026-03-26）。确认 `GetModule("UIAutomationCore.dll")` 已修复 `comtypes.gen.UIAutomationClient` 导入失败，S2 对比器已统一 Narrator PowerShell fallback；同时记录三种策略虽能启动但仍未拉起微信 4.x 聊天 UIA 树，以及 S1/S3 长跑脚本独立留证仍需改进。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
