@@ -169,6 +169,202 @@ function Remove-QQOneBotState {
   }
 }
 
+function ConvertTo-QQOneBotPsLiteral {
+  param([string]$Value)
+  if ($null -eq $Value) {
+    return "''"
+  }
+  return "'" + ($Value.Replace("'", "''")) + "'"
+}
+
+function Invoke-QQOneBotBreakawayTask {
+  param(
+    [string]$TaskName,
+    [string]$TaskCommand,
+    [string]$FailureContext = 'qq onebot breakaway launch',
+    [bool]$InteractiveTask = $true
+  )
+
+  $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
+  if ($null -eq $schtasksCmd) {
+    throw 'schtasks.exe not found; cannot launch qq onebot breakaway process'
+  }
+
+  $targetTime = (Get-Date).AddMinutes(3)
+  $taskTime = $targetTime.ToString('HH:mm')
+  $taskDateCandidates = @(
+    $targetTime.ToString('yyyy/MM/dd', [System.Globalization.CultureInfo]::InvariantCulture),
+    $targetTime.ToString('MM/dd/yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+  )
+
+  $created = $false
+  $createErrors = New-Object System.Collections.Generic.List[string]
+  foreach ($taskDate in $taskDateCandidates) {
+    $createOutput = @()
+    $createExitCode = 1
+    $createArgs = @(
+      '/Create', '/TN', $TaskName, '/SC', 'ONCE', '/SD', $taskDate, '/ST', $taskTime, '/TR', $TaskCommand, '/F'
+    )
+    if ($InteractiveTask) {
+      $createArgs += '/IT'
+    }
+    try {
+      $createOutput = & $schtasksCmd.Source @createArgs 2>&1
+      $createExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $createExitCode = [int]$LASTEXITCODE
+      }
+      $createOutput = @($_.Exception.Message)
+    }
+    if ($createExitCode -eq 0) {
+      $created = $true
+      break
+    }
+    $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+    if (-not [string]::IsNullOrWhiteSpace($detail)) {
+      $createErrors.Add("[/SD $taskDate] (exit=$createExitCode) $detail") | Out-Null
+    }
+  }
+
+  if (-not $created) {
+    $createOutput = @()
+    $createExitCode = 1
+    $createArgs = @(
+      '/Create', '/TN', $TaskName, '/SC', 'ONCE', '/ST', $taskTime, '/TR', $TaskCommand, '/F'
+    )
+    if ($InteractiveTask) {
+      $createArgs += '/IT'
+    }
+    try {
+      $createOutput = & $schtasksCmd.Source @createArgs 2>&1
+      $createExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $createExitCode = [int]$LASTEXITCODE
+      }
+      $createOutput = @($_.Exception.Message)
+    }
+    if ($createExitCode -eq 0) {
+      $created = $true
+    } else {
+      $detail = (($createOutput | ForEach-Object { [string]$_ }) -join "`n")
+      if (-not [string]::IsNullOrWhiteSpace($detail)) {
+        $createErrors.Add("[no /SD] (exit=$createExitCode) $detail") | Out-Null
+      }
+    }
+  }
+
+  if (-not $created) {
+    $detail = ($createErrors -join "`n---`n")
+    if (-not $detail) {
+      $detail = 'unknown create failure'
+    }
+    throw "failed to create breakaway task $TaskName ($FailureContext).`n$detail"
+  }
+
+  try {
+    $runOutput = @()
+    $runExitCode = 1
+    try {
+      $runOutput = & $schtasksCmd.Source /Run /TN $TaskName 2>&1
+      $runExitCode = [int]$LASTEXITCODE
+    } catch {
+      if ($LASTEXITCODE -ne 0) {
+        $runExitCode = [int]$LASTEXITCODE
+      }
+      $runOutput = @($_.Exception.Message)
+    }
+    if ($runExitCode -ne 0) {
+      $detail = (($runOutput | ForEach-Object { [string]$_ }) -join "`n")
+      throw "failed to run breakaway task $TaskName ($FailureContext).`n(exit=$runExitCode) $detail"
+    }
+  } finally {
+    try {
+      & $schtasksCmd.Source /Delete /TN $TaskName /F 2>&1 | Out-Null
+    } catch {
+    }
+  }
+}
+
+function Start-QQOneBotProcess {
+  param(
+    [pscustomobject]$StartSpec,
+    [string]$RuntimeRoot,
+    [bool]$UseBreakawayLaunch = $false
+  )
+
+  $argumentList = @($StartSpec.argument_list)
+  if (-not $UseBreakawayLaunch) {
+    $startArgs = @{
+      FilePath = [string]$StartSpec.file_path
+      WorkingDirectory = [string]$StartSpec.working_directory
+      PassThru = $true
+      WindowStyle = 'Hidden'
+    }
+    if ($argumentList.Count -gt 0) {
+      $startArgs['ArgumentList'] = $argumentList
+    }
+    return (Start-Process @startArgs)
+  }
+
+  if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
+    throw 'runtime root is required for qq onebot breakaway launch'
+  }
+  if (-not (Test-Path -Path $RuntimeRoot)) {
+    New-Item -ItemType Directory -Path $RuntimeRoot -Force | Out-Null
+  }
+  $logDir = Join-Path $RuntimeRoot 'logs'
+  if (-not (Test-Path -Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+  }
+
+  $launcherScript = Join-Path $RuntimeRoot 'launch_qq_onebot.ps1'
+  $stdoutLog = Join-Path $logDir 'qq_onebot.stdout.log'
+  $stderrLog = Join-Path $logDir 'qq_onebot.stderr.log'
+  $launchPidFile = Join-Path $RuntimeRoot 'qq_onebot.launch.pid'
+
+  $launcherLines = @(
+    '$ErrorActionPreference = ''Stop''', 
+    '$argumentList = @('
+  )
+  foreach ($arg in $argumentList) {
+    $launcherLines += ('  ' + (ConvertTo-QQOneBotPsLiteral -Value ([string]$arg)))
+  }
+  $launcherLines += @(
+    ')',
+    '$startArgs = @{',
+    ('  FilePath = ' + (ConvertTo-QQOneBotPsLiteral -Value ([string]$StartSpec.file_path))),
+    ('  WorkingDirectory = ' + (ConvertTo-QQOneBotPsLiteral -Value ([string]$StartSpec.working_directory))),
+    '  PassThru = $true',
+    '  WindowStyle = ''Hidden''',
+    ('  RedirectStandardOutput = ' + (ConvertTo-QQOneBotPsLiteral -Value $stdoutLog)),
+    ('  RedirectStandardError = ' + (ConvertTo-QQOneBotPsLiteral -Value $stderrLog)),
+    '}',
+    'if ($argumentList.Count -gt 0) {',
+    '  $startArgs[''ArgumentList''] = $argumentList',
+    '}',
+    '$proc = Start-Process @startArgs',
+    'if ($null -ne $proc) {',
+    ('  Set-Content -Path ' + (ConvertTo-QQOneBotPsLiteral -Value $launchPidFile) + ' -Value ([string]$proc.Id) -Encoding ascii'),
+    '}'
+  )
+  Set-Content -Path $launcherScript -Value $launcherLines -Encoding UTF8
+
+  $launcherEscaped = ([string]$launcherScript).Replace('"', '""')
+  $taskName = "NatsumeQQOneBot_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
+  $taskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcherEscaped`""
+  Invoke-QQOneBotBreakawayTask -TaskName $taskName -TaskCommand $taskCommand -FailureContext 'qq onebot launch' -InteractiveTask $true
+
+  return [pscustomobject]@{
+    Id = 0
+    launch_mode = 'breakaway'
+    launcher_script = $launcherScript
+    stdout_log = $stdoutLog
+    stderr_log = $stderrLog
+  }
+}
+
 function Resolve-QQOneBotStartSpec {
   param(
     [string]$LauncherPath,
@@ -277,6 +473,7 @@ function Ensure-QQOneBotRunning {
   $selfId = [string]$EnvValues['QQ_SELF_ID']
   $autostart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_AUTOSTART']) -Default $false
   $killQQBeforeStart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START']) -Default $false
+  $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
   $launcherPath = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH']
   $launcherArgs = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS']
   $workDir = [string]$EnvValues['EDGE_QQ_ONEBOT_WORKDIR']
@@ -298,6 +495,8 @@ function Ensure-QQOneBotRunning {
     health_url = $healthUrl
     autostart_enabled = $autostart
     kill_qq_before_start = $killQQBeforeStart
+    ssh_session_detected = $sshSessionDetected
+    breakaway_launch = $sshSessionDetected
     launcher_path = $launcherPath
     launcher_args = $launcherArgs
     working_directory = $workDir
@@ -344,17 +543,7 @@ function Ensure-QQOneBotRunning {
       }
     }
     $startSpec = Resolve-QQOneBotStartSpec -LauncherPath $launcherPath -LauncherArgs $launcherArgs -WorkDir $workDir -SelfId $selfId -ApiBase $apiBase
-    $startArgs = @{
-      FilePath = [string]$startSpec.file_path
-      WorkingDirectory = [string]$startSpec.working_directory
-      PassThru = $true
-      WindowStyle = 'Hidden'
-    }
-    $argumentList = @($startSpec.argument_list)
-    if ($argumentList.Count -gt 0) {
-      $startArgs['ArgumentList'] = $argumentList
-    }
-    $proc = Start-Process @startArgs
+    $proc = Start-QQOneBotProcess -StartSpec $startSpec -RuntimeRoot $RuntimeRoot -UseBreakawayLaunch $sshSessionDetected
     $deadline = (Get-Date).AddSeconds($waitSeconds)
     $healthy = $false
     while ((Get-Date) -lt $deadline) {
@@ -470,3 +659,4 @@ function Stop-QQOneBotIfOwned {
     state_file = $stateFile
   }
 }
+
