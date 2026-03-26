@@ -10,12 +10,7 @@ from typing import Any
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
 from host_brain.skills.registry import SkillRegistry
-
-_VALID_EMOTION_TAGS = frozenset({
-    "HAPPY", "SAD", "ANGRY", "SURPRISED", "CALM", "NEUTRAL",
-    "EXCITED", "EMBARRASSED", "SLEEPY", "THINKING", "ANXIOUS",
-    "GRATEFUL", "LONELY", "PROUD", "CONFUSED",
-})
+from host_brain.core.emotion_constants import VALID_EMOTION_TAGS as _VALID_EMOTION_TAGS
 
 _VALID_MOOD_STATES = frozenset({"steady", "rising", "falling", "volatile", "flat"})
 

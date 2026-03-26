@@ -235,29 +235,14 @@ def compute_emotion_echo(
         except (ImportError, Exception):
             pass  # 降级：不使用人格调制
 
-    # Phase 5: 扩展到 16 种用户情感标签的 VAD 映射
-    _USER_EMOTION_MAP: dict[str, dict[str, float]] = {
-        "HAPPY":        {"valence":  0.6, "arousal":  0.4, "dominance":  0.2},
-        "EXCITED":      {"valence":  0.7, "arousal":  0.7, "dominance":  0.3},
-        "SAD":          {"valence": -0.5, "arousal": -0.3, "dominance": -0.3},
-        "ANGRY":        {"valence": -0.6, "arousal":  0.5, "dominance":  0.5},
-        "ANXIOUS":      {"valence": -0.3, "arousal":  0.4, "dominance": -0.3},
-        "FRUSTRATED":   {"valence": -0.4, "arousal":  0.3, "dominance":  0.2},
-        "CALM":         {"valence":  0.2, "arousal": -0.3, "dominance":  0.0},
-        "NEUTRAL":      {"valence":  0.0, "arousal":  0.0, "dominance":  0.0},
-        "THINKING":     {"valence":  0.0, "arousal":  0.1, "dominance":  0.3},
-        "LOVING":       {"valence":  0.7, "arousal":  0.3, "dominance":  0.1},
-        "EMBARRASSED":  {"valence": -0.2, "arousal":  0.4, "dominance": -0.4},
-        "CONFUSED":     {"valence": -0.1, "arousal":  0.2, "dominance": -0.2},
-        "BORED":        {"valence": -0.3, "arousal": -0.4, "dominance":  0.0},
-        "PROUD":        {"valence":  0.6, "arousal":  0.4, "dominance":  0.5},
-        "GRATEFUL":     {"valence":  0.6, "arousal":  0.2, "dominance": -0.2},
-        "SURPRISED":    {"valence":  0.3, "arousal":  0.6, "dominance":  0.0},
+    # Phase 5: 扩展到 16 种用户情感标签的 VAD 映射（使用共享常量）
+    _tag = str(user_emotion_tag or "").upper()
+    _shared_vad = _SHARED_VAD_MAP.get(_tag, (0.0, 0.0, 0.0))
+    user_vad = {
+        "valence": _shared_vad[0],
+        "arousal": _shared_vad[1],
+        "dominance": _shared_vad[2],
     }
-    user_vad = _USER_EMOTION_MAP.get(
-        str(user_emotion_tag or "").upper(),
-        {"valence": 0.0, "arousal": 0.0, "dominance": 0.0},
-    )
     user_vec = EmotionVector(
         valence=user_vad["valence"],
         arousal=user_vad["arousal"],
@@ -325,16 +310,13 @@ def compute_emotion_echo(
 
 
 # ---------------------------------------------------------------------------
-# 方向 D：情感日记辅助函数
+# 方向 D：情感日记辅助函数——使用共享常量模块
 # ---------------------------------------------------------------------------
 
-_EMOTION_ZH: dict[str, str] = {
-    "HAPPY": "开心", "EXCITED": "兴奋", "SAD": "难过", "ANGRY": "生气",
-    "CALM": "平静", "NEUTRAL": "平淡", "THINKING": "沉思", "LOVING": "充满爱意",
-    "EMBARRASSED": "有些害羞", "CONFUSED": "困惑", "BORED": "无聊",
-    "PROUD": "自豪", "GRATEFUL": "感激", "ANXIOUS": "焦虑",
-    "FRUSTRATED": "沮丧", "SURPRISED": "惊喜",
-}
+from host_brain.core.emotion_constants import (  # noqa: E402
+    EMOTION_TAG_ZH as _EMOTION_ZH,
+    EMOTION_TAG_TO_VAD as _SHARED_VAD_MAP,
+)
 
 
 def _arc_to_diary_text(

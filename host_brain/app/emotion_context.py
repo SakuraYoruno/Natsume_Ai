@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Mapping
 
@@ -29,6 +30,11 @@ from host_brain.core.metabolism import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 线程安全锁——保护所有全局可变状态（Fix: 全局单例在 FastAPI 异步环境中的竞态条件）
+# ---------------------------------------------------------------------------
+_emotion_lock = threading.Lock()
+
 # 修复审计问题 #6：全局 EmotionTimeline 实例，记录情感状态变化历史
 _global_emotion_timeline = EmotionTimeline(max_entries=100)
 
@@ -38,6 +44,9 @@ _global_emotion_vector_last_ts: int = 0  # 上次更新时间戳（毫秒）
 
 # 方向 C：上一次的 emotion_tag（用于 VTS 过渡帧计算）
 _global_prev_emotion_tag: str | None = None
+
+# 方向 D：上次日记写入时间戳（ms），防止频繁写入
+_last_diary_flush_ts: int = 0
 
 
 def get_emotion_timeline() -> EmotionTimeline:
@@ -49,15 +58,17 @@ def get_persistent_emotion_vector() -> EmotionVector:
     """获取全局持久化情绪向量（Phase 1）。
 
     首次调用时初始化为中性偏微正的默认值（模拟"刚醒来，状态还不错"）。
+    线程安全：通过 _emotion_lock 保护初始化和读取。
     """
     global _global_emotion_vector, _global_emotion_vector_last_ts
-    if _global_emotion_vector is None:
-        _global_emotion_vector = EmotionVector(
-            valence=0.1, arousal=0.2, dominance=0.0,
-            ts_ms=int(time.time() * 1000),
-        )
-        _global_emotion_vector_last_ts = _global_emotion_vector.ts_ms
-    return _global_emotion_vector
+    with _emotion_lock:
+        if _global_emotion_vector is None:
+            _global_emotion_vector = EmotionVector(
+                valence=0.1, arousal=0.2, dominance=0.0,
+                ts_ms=int(time.time() * 1000),
+            )
+            _global_emotion_vector_last_ts = _global_emotion_vector.ts_ms
+        return _global_emotion_vector
 
 
 def _apply_time_aware_decay(vector: EmotionVector, now_ms: int) -> EmotionVector:
@@ -68,14 +79,22 @@ def _apply_time_aware_decay(vector: EmotionVector, now_ms: int) -> EmotionVector
     - 5 分钟：衰减约 15%
     - 30 分钟：衰减约 50%
     - 2 小时+：衰减约 85%，接近中性
+
+    可通过环境变量配置：
+    - HOST_EMOTION_DECAY_GRACE_MS: 不衰减的宽限期（默认 30000 ms）
+    - HOST_EMOTION_DECAY_MAX_RATE: 最大衰减率（默认 0.85）
+    - HOST_EMOTION_DECAY_WINDOW_MIN: 达到最大衰减率的时间窗口分钟数（默认 120）
     """
     global _global_emotion_vector_last_ts
     elapsed_ms = max(0, now_ms - _global_emotion_vector_last_ts)
-    if elapsed_ms < 30_000:  # 30 秒内不衰减
+    grace_ms = int(os.environ.get("HOST_EMOTION_DECAY_GRACE_MS", "30000"))
+    if elapsed_ms < grace_ms:
         return vector
-    # 衰减率随时间非线性增长：rate = min(0.85, elapsed_minutes / 120)
+    # 衰减率随时间非线性增长
+    max_rate = float(os.environ.get("HOST_EMOTION_DECAY_MAX_RATE", "0.85"))
+    window_min = float(os.environ.get("HOST_EMOTION_DECAY_WINDOW_MIN", "120"))
     elapsed_minutes = elapsed_ms / 60_000.0
-    rate = min(0.85, elapsed_minutes / 120.0)
+    rate = min(max_rate, elapsed_minutes / window_min)
     decayed = vector.decay(rate=rate)
     logger.debug(
         "情绪时间衰减 elapsed=%.1f分钟 rate=%.3f valence=%.3f→%.3f arousal=%.3f→%.3f",
@@ -93,22 +112,25 @@ def _update_persistent_emotion(new_vector: EmotionVector, now_ms: int) -> Emotio
     这确保了：
     1. 长时间不聊天后情绪自然归于平静
     2. 新输入能显著影响当前情绪，但不会完全覆盖（保持连续性）
+
+    线程安全：通过 _emotion_lock 保护读-改-写序列。
     """
     global _global_emotion_vector, _global_emotion_vector_last_ts
-    current = get_persistent_emotion_vector()
-    # 先衰减
-    decayed = _apply_time_aware_decay(current, now_ms)
-    # 再混合新输入（weight=0.4，新输入占 40%）
-    blended = decayed.blend(new_vector, weight=0.4)
-    # 更新时间戳
-    blended = EmotionVector(
-        valence=blended.valence,
-        arousal=blended.arousal,
-        dominance=blended.dominance,
-        ts_ms=now_ms,
-    )
-    _global_emotion_vector = blended
-    _global_emotion_vector_last_ts = now_ms
+    with _emotion_lock:
+        current = get_persistent_emotion_vector()
+        # 先衰减
+        decayed = _apply_time_aware_decay(current, now_ms)
+        # 再混合新输入（weight=0.4，新输入占 40%）
+        blended = decayed.blend(new_vector, weight=0.4)
+        # 更新时间戳
+        blended = EmotionVector(
+            valence=blended.valence,
+            arousal=blended.arousal,
+            dominance=blended.dominance,
+            ts_ms=now_ms,
+        )
+        _global_emotion_vector = blended
+        _global_emotion_vector_last_ts = now_ms
     logger.debug(
         "持久化情绪更新 new_input=(%.3f,%.3f) decayed=(%.3f,%.3f) blended=(%.3f,%.3f)",
         new_vector.valence, new_vector.arousal,
@@ -186,8 +208,9 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
 
     # 方向 C：跟踪上一次 emotion_tag（供 VTS 过渡帧计算）
     global _global_prev_emotion_tag
-    prev_tag = _global_prev_emotion_tag
-    _global_prev_emotion_tag = emotion_tag
+    with _emotion_lock:
+        prev_tag = _global_prev_emotion_tag
+        _global_prev_emotion_tag = emotion_tag
 
     return {
         "mood_state": str(hard_snapshot.mood_state),
@@ -292,37 +315,24 @@ def build_chat_governance_snapshot(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: 精细化 VAD 映射（16 种标签全覆盖 + dominance 维度）
+# Phase 2: 精细化 VAD 映射——使用共享常量模块（唯一权威来源）
 # ---------------------------------------------------------------------------
-# (valence, arousal, dominance) — 三维情感空间
-_EMOTION_TAG_TO_VAD: dict[str, tuple[float, float, float]] = {
-    "HAPPY":        ( 0.60,  0.40,  0.30),  # 开心：积极但不太激动
-    "EXCITED":      ( 0.80,  0.80,  0.50),  # 兴奋：高积极 + 高唤醒
-    "SAD":          (-0.60, -0.20, -0.30),   # 悲伤：消极 + 低唤醒 + 被动
-    "ANGRY":        (-0.70,  0.80,  0.60),   # 愤怒：消极 + 高唤醒 + 主导
-    "CALM":         ( 0.20, -0.40,  0.10),   # 平静：微积极 + 低唤醒
-    "THINKING":     ( 0.00,  0.20,  0.40),   # 思考：中性 + 微唤醒 + 主导
-    "NEUTRAL":      ( 0.00,  0.00,  0.00),   # 中性
-    "SURPRISED":    ( 0.30,  0.70,  0.00),   # 惊讶：微积极 + 高唤醒
-    "LOVING":       ( 0.80,  0.30,  0.20),   # 爱意：高积极 + 温和唤醒
-    "EMBARRASSED":  (-0.20,  0.50, -0.50),   # 尴尬：微消极 + 中唤醒 + 被动
-    "CONFUSED":     (-0.10,  0.30, -0.30),   # 困惑：微消极 + 微唤醒 + 被动
-    "BORED":        (-0.30, -0.50,  0.00),   # 无聊：消极 + 低唤醒
-    "PROUD":        ( 0.70,  0.50,  0.70),   # 骄傲：积极 + 高主导
-    "GRATEFUL":     ( 0.70,  0.20, -0.20),   # 感激：积极 + 温和 + 谦逊
-    "ANXIOUS":      (-0.40,  0.70, -0.40),   # 焦虑：消极 + 高唤醒 + 被动
-    "FRUSTRATED":   (-0.50,  0.60,  0.30),   # 沮丧：消极 + 高唤醒
-}
+
+from host_brain.core.emotion_constants import (  # noqa: E402
+    EMOTION_TAG_TO_VAD as _EMOTION_TAG_TO_VAD,
+    get_vad as _get_vad,
+)
 
 
 def map_emotion_tag_to_vad(emotion_tag: str) -> tuple[float, float, float]:
     """将情感标签映射为 VAD 三维向量（Phase 2 精细化）。
 
+    使用 emotion_constants.py 中的权威映射。
+
     Returns:
         (valence, arousal, dominance) 三元组
     """
-    tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-    return _EMOTION_TAG_TO_VAD.get(tag, (0.0, 0.0, 0.0))
+    return _get_vad(emotion_tag)
 
 
 # ---------------------------------------------------------------------------
@@ -398,8 +408,6 @@ def _coerce_emotion_intensity(value: Any, *, default: float) -> float:
 # 方向 D：情感日记——将 EmotionTimeline 每日摘要写入 EpisodicStore
 # ---------------------------------------------------------------------------
 
-_last_diary_flush_ts: int = 0  # 上次日记写入时间戳（ms），防止频繁写入
-
 
 def flush_emotion_diary(
     *,
@@ -413,6 +421,8 @@ def flush_emotion_diary(
     - force=True（手动触发/调度器触发）
     - 距离上次写入 ≥ 12 小时 且 当前时间线有 ≥ 5 条记录
 
+    线程安全：通过 _emotion_lock 保护 _last_diary_flush_ts 读写。
+
     Returns:
         写入结果字典，或 None（跳过）
     """
@@ -424,12 +434,13 @@ def flush_emotion_diary(
     if timeline.entry_count < 3 and not force:
         return None
 
-    # 频率限制：12 小时内不重复写入
-    elapsed_since_last = now_ms_val - _last_diary_flush_ts
-    if not force and elapsed_since_last < 12 * 3600 * 1000:
-        return None
-    if not force and timeline.entry_count < 5:
-        return None
+    with _emotion_lock:
+        # 频率限制：12 小时内不重复写入
+        elapsed_since_last = now_ms_val - _last_diary_flush_ts
+        if not force and elapsed_since_last < 12 * 3600 * 1000:
+            return None
+        if not force and timeline.entry_count < 5:
+            return None
 
     # 构建日记
     diary = timeline.build_daily_diary(window_ms=window_ms)
@@ -467,7 +478,8 @@ def flush_emotion_diary(
             result = {"status": "ERROR", "error": str(exc)[:100], "diary": diary}
             logger.warning("方向D: 情感日记写入异常: %s", exc)
 
-    _last_diary_flush_ts = now_ms_val
+    with _emotion_lock:
+        _last_diary_flush_ts = now_ms_val
     return result
 
 
@@ -559,7 +571,7 @@ class UserEmotionProfile:
         volatility: float,
     ) -> str:
         """将用户情感画像转为自然语言提示。"""
-        from host_brain.core.emotion_timeline import _EMOTION_ZH  # noqa: PLC0415
+        from host_brain.core.emotion_constants import EMOTION_TAG_ZH as _EMOTION_ZH  # noqa: PLC0415
 
         parts: list[str] = []
 
@@ -595,11 +607,12 @@ _user_emotion_profile: UserEmotionProfile | None = None
 
 
 def get_user_emotion_profile() -> UserEmotionProfile:
-    """获取全局用户情感画像单例（方向 F）。"""
+    """获取全局用户情感画像单例（方向 F）。线程安全。"""
     global _user_emotion_profile
-    if _user_emotion_profile is None:
-        _user_emotion_profile = UserEmotionProfile()
-    return _user_emotion_profile
+    with _emotion_lock:
+        if _user_emotion_profile is None:
+            _user_emotion_profile = UserEmotionProfile()
+        return _user_emotion_profile
 
 
 def update_user_emotion_profile(

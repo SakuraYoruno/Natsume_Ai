@@ -225,6 +225,10 @@
   用途：LINE Messaging API 适配器开发实测报告（2026-03-26）。基于飞书 Webhook+REST 架构模式实现 LINE 官方 Messaging API 接入，含 HMAC-SHA256 签名验证、7 种消息类型解析、Reply/Push 双通道发送、EdgeConfig/GatewayConfig/bootstrap 全链路集成。11 项真机测试清单（Webhook 接收、消息解析、回复发送、签名验证等）。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_emotion_system_fixes_2026-03-26.md
+  用途：情感系统 6 项 Bug 修复开发实测报告（2026-03-26）。覆盖线程安全（threading.Lock）、JSON 文件持久化、标签集统一（16 种）、VAD 映射唯一权威来源（emotion_constants.py）、EmotionTimeline/compute_emotion_echo 代码去重（~250 行）、衰减参数环境变量可配置化（9 个环境变量）。7 个文件修改，含 6 项待 RUN 节点验证测试。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
