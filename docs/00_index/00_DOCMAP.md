@@ -77,6 +77,10 @@
   用途：外部消息统一网关（Unified Message Gateway）完整设计方案（2026-03-24）。包含当前 UIA 桌面自动化方案的问题诊断、协议级网关架构设计、UnifiedMessage/UnifiedReply 数据模型、各平台适配器设计（微信/QQ/飞书/企微）、与现有 EdgeInputReporter 的集成方案、EdgeConfig 扩展配置、以及分阶段实施路线图。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
+- docs/50_project/arch/WECHAT_UIA_HIGH_PRIORITY_SOLUTIONS.md
+  用途：微信适配器高优先级问题解决方案（2026-03-26）。H1 多聊天轮询（未读嗅探+按需切换）、H2 群聊发送者识别（位置启发式昵称提取）、H3 多媒体消息支持（类型感知+占位通知+缓存目录监控+send_image 发图），含方案细节、代码、改动范围与风险缓解。已实施 commit 48c2e02。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/phases/MULTI_AGENT_UPGRADE_PLAN.md
   用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
   读者：MASTER、Project（文档代理）。
@@ -229,6 +233,10 @@
 - docs/60_trace/VTS_VOICE_TROUBLESHOOTING.md
   用途：VTS 语音故障排查手册。记录语音链路常见问题、排查步骤与已知解决方案。
   读者：MASTER、Project（文档代理）。
+
+- docs/60_trace/WECHAT_4X_UIA_FEASIBILITY_ANALYSIS.md
+  用途：微信 4.x PC 版 UIAutomation 方案可行性分析报告（2026-03-25）。三种技术路线对比（纯 UIAutomation / 视觉方案 / Hook 注入），4.1.5+ "UI 树消失"问题与恢复方案，已验证开源项目汇总，与 Natsume_Ai Edge Client 架构的适配分析，风险清单与实施路径。
+  读者：MASTER、实现层（查阅对齐）。
 
 
 - artifacts/trace/HOST_CHAT_*_req_*.json
