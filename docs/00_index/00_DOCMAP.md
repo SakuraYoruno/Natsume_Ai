@@ -181,6 +181,10 @@
   用途：情感闭环测试报告（2026-03-09）。验证情感状态写入、读取与回流的完整闭环链路。
   读者：MASTER、Project（文档代理）。
 
+- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_wechat_dual_node_uia_probe_20260326.md
+  用途：双节点微信 UIAutomation 探测运行反馈报告（2026-03-26）。记录 DEV/RUN 两端主窗体均仅暴露 2~3 个顶层 UIA 元素、缺失 `mmui::ChatSingleWindow` / `mmui::ChatTextItemView` 的真机证据，用于推动 UIA 树恢复方案修复。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
