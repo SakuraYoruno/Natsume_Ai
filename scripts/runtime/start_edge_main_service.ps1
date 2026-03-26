@@ -188,6 +188,11 @@ function Invoke-SchtasksBreakaway {
 }
 
 $RepoRoot = Resolve-RepoRoot -Preferred $RepoRoot
+$qqOneBotManagerScript = Join-Path $PSScriptRoot 'qq_onebot_manager.ps1'
+if (-not (Test-Path -Path $qqOneBotManagerScript)) {
+  throw "qq_onebot_manager.ps1 not found: $qqOneBotManagerScript"
+}
+. $qqOneBotManagerScript
 $runtimeRoot = Join-Path $RepoRoot 'runtime\edge'
 Ensure-Directory -Path $runtimeRoot
 
@@ -226,10 +231,17 @@ $stdoutLog = Join-Path $LogDir 'edge.stdout.log'
 $stderrLog = Join-Path $LogDir 'edge.stderr.log'
 $runnerScript = Join-Path $runtimeRoot 'run_edge_task.ps1'
 $launcherScript = Join-Path $runtimeRoot 'launch_edge_main.cmd'
+$ensureOneBotScript = Join-Path $PSScriptRoot 'ensure_qq_onebot.ps1'
 $healthUrl = "http://127.0.0.1:$Port/v1/edge/health"
+$qqOneBotStateFile = Join-Path $runtimeRoot 'qq_onebot.state.json'
+$qqOneBotApiBase = [string]$envValues['QQ_ONEBOT_API_BASE']
+$qqOneBotHealthUrl = Get-QQOneBotHealthUrl -ApiBase $qqOneBotApiBase -Override ([string]$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'])
 
 if (-not (Test-Path -Path $runnerScript)) {
   throw "run_edge_task.ps1 not found: $runnerScript"
+}
+if (-not (Test-Path -Path $ensureOneBotScript)) {
+  throw "ensure_qq_onebot.ps1 not found: $ensureOneBotScript"
 }
 
 $existingPid = if ($Port -gt 0) { Get-ListeningPid -ProbePort $Port } else { $null }
@@ -250,7 +262,9 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
       stderr_log = $stderrLog
       startup_mode = 'main_service_breakaway'
       breakaway_launcher_used = $true
-      auxiliary_management = 'not_managed'
+      auxiliary_management = 'qq_onebot_delegated'
+      qq_onebot_status = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } else { 'unknown' }
+      qq_onebot_state_file = $qqOneBotStateFile
       detail = "edge main service already listening on port $Port (pid=$existingPid)"
     }
   }
@@ -270,10 +284,13 @@ $envEscaped = ([string]$EnvFile).Replace('"', '""')
 $pythonEscaped = ([string]$PythonPath).Replace('"', '""')
 $bindEscaped = ([string]$BindHost).Replace('"', '""')
 $runnerEscaped = ([string]$runnerScript).Replace('"', '""')
+$ensureOneBotEscaped = ([string]$ensureOneBotScript).Replace('"', '""')
 
 $launcherLines = @(
   '@echo off',
   "cd /d `"$repoEscaped`"",
+  "powershell -NoProfile -ExecutionPolicy Bypass -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
+  'if errorlevel 1 exit /b %errorlevel%',
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
 )
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii
@@ -292,6 +309,10 @@ $edgePid = if ($Port -gt 0) { Get-ListeningPid -ProbePort $Port } else { $null }
 if ($null -ne $edgePid) {
   Set-Content -Path $pidFile -Value ([string]$edgePid) -Encoding ascii
 }
+$qqOneBotHealth = Test-QQOneBotHealth -ApiBase $qqOneBotApiBase -HealthUrl $qqOneBotHealthUrl -TimeoutSeconds 5
+$qqOneBotState = Read-QQOneBotState -StateFile $qqOneBotStateFile
+$qqOneBotStatus = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } elseif ($qqOneBotHealth.success) { 'healthy' } else { 'degraded' }
+$qqOneBotDetail = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'qq onebot disabled because QQ_ONEBOT_API_BASE is empty' } else { [string]$qqOneBotHealth.detail }
 
 $result = [ordered]@{
   side = 'edge'
@@ -305,7 +326,11 @@ $result = [ordered]@{
     stderr_log = $stderrLog
     startup_mode = 'main_service_breakaway'
     breakaway_launcher_used = $true
-    auxiliary_management = 'not_managed'
+    auxiliary_management = 'qq_onebot_delegated'
+    qq_onebot_status = $qqOneBotStatus
+    qq_onebot_detail = $qqOneBotDetail
+    qq_onebot_state_file = $qqOneBotStateFile
+    qq_onebot_owned = if ($null -ne $qqOneBotState) { [bool]$qqOneBotState.owned } else { $false }
     force_restart = [bool]$ForceRestart.IsPresent
     restart_previous_pid = $restartInfo.pid
     restart_previous_detail = $restartInfo.detail

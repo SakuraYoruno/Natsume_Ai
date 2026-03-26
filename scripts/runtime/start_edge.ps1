@@ -785,6 +785,11 @@ function Start-VtsViaExecutable {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$qqOneBotManagerScript = Join-Path $PSScriptRoot "qq_onebot_manager.ps1"
+if (-not (Test-Path -Path $qqOneBotManagerScript)) {
+  throw "qq_onebot_manager.ps1 not found: $qqOneBotManagerScript"
+}
+. $qqOneBotManagerScript
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -845,6 +850,15 @@ Set-ProcessEnv -Values $envValues
 $startupPreWarnings = @()
 $startupEnvDefaultsApplied = @()
 $startupEnvEnforcedApplied = @()
+$qqOneBotResult = Ensure-QQOneBotRunning -EnvValues $envValues -RuntimeRoot $runtimeRoot
+$qqOneBotStatus = [string]$qqOneBotResult.status
+if ([bool]$qqOneBotResult.enabled) {
+  switch ($qqOneBotStatus) {
+    'not_running' { $startupPreWarnings += 'QQ_ONEBOT_NOT_RUNNING' }
+    'autostart_failed' { $startupPreWarnings += 'QQ_ONEBOT_AUTOSTART_FAILED' }
+    'autostart_timeout' { $startupPreWarnings += 'QQ_ONEBOT_AUTOSTART_TIMEOUT' }
+  }
+}
 
 if ($EnforceCnAsrJaTtsMode) {
   $enforcedVoiceEnv = [ordered]@{
@@ -1888,6 +1902,15 @@ $result = [ordered]@{
     }
     "http://127.0.0.1:$wechatGatewayPortText/v1/gateway/wechat/webhook"
   )
+  qq_onebot_status = $qqOneBotStatus
+  qq_onebot_detail = [string]$qqOneBotResult.detail
+  qq_onebot_api_base = [string]$qqOneBotResult.api_base
+  qq_onebot_health_url = [string]$qqOneBotResult.health_url
+  qq_onebot_autostart_enabled = [bool]$qqOneBotResult.autostart_enabled
+  qq_onebot_owned = [bool]$qqOneBotResult.owned
+  qq_onebot_pid = $qqOneBotResult.pid
+  qq_onebot_state_file = [string]$qqOneBotResult.state_file
+  qq_onebot_launcher_path = [string]$qqOneBotResult.launcher_path
   enforce_cn_asr_ja_tts_mode = $EnforceCnAsrJaTtsMode
   asr_language = $resolvedAsrLanguage
   tts_language = $resolvedTtsLanguage

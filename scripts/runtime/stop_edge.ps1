@@ -35,6 +35,11 @@ function Read-TrimmedFileText {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$qqOneBotManagerScript = Join-Path $PSScriptRoot "qq_onebot_manager.ps1"
+if (-not (Test-Path -Path $qqOneBotManagerScript)) {
+  throw "qq_onebot_manager.ps1 not found: $qqOneBotManagerScript"
+}
+. $qqOneBotManagerScript
 $runtimeEdge = Join-Path $repoRoot "runtime\edge"
 if (-not $PidFile) {
   $PidFile = Join-Path $runtimeEdge "edge.pid"
@@ -99,6 +104,8 @@ if (Test-Path -Path $wechatBridgePidFile) {
   Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
 }
 
+$qqOneBotStopResult = Stop-QQOneBotIfOwned -RuntimeRoot $runtimeEdge
+
 $result = [ordered]@{
   status = if ($stopped) { "stopped" } else { "not_running" }
   pid = $edgePid
@@ -106,5 +113,6 @@ $result = [ordered]@{
   port = $Port
   detail = $detail
   wechat_bridge_stopped = $wechatBridgeStopped
+  qq_onebot = $qqOneBotStopResult
 }
 $result | ConvertTo-Json -Depth 4
