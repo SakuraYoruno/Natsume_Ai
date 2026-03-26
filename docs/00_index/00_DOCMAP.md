@@ -213,6 +213,14 @@
   用途：P1 脚本自举修复运行反馈报告（2026-03-26）。确认 `GetModule("UIAutomationCore.dll")` 已修复 `comtypes.gen.UIAutomationClient` 导入失败，S2 对比器已统一 Narrator PowerShell fallback；同时记录三种策略虽能启动但仍未拉起微信 4.x 聊天 UIA 树，以及 S1/S3 长跑脚本独立留证仍需改进。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_telegram_adapter_20260326.md
+  用途：Telegram Userbot 适配器（Phase 6）开发实测报告（2026-03-26）。Telethon MTProto 协议实现"人感"消息收发，含 GatewayConfig 集成、EdgeConfig 环境变量、bootstrap 注册、架构文档更新。10 项真机测试（P0×5 / P1×3 / P2×2），涵盖依赖安装、首次登录、消息收发、打字模拟、延迟抖动、长文分段、代理、断线重连、多用户、群聊。
+  读者：MASTER、实现层、Project（文档代理）。
+
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_qq_adapter_enhancement_20260326.md
+  用途：QQ 适配器增强版开发实测报告（2026-03-26）。含默认平台配置调整（wechat,qq→qq）、QQ 适配器 6 项功能增强（VOICE 发送、@提醒检测、URL/base64 图片、notice/request 事件日志、消息段构造重构）、新建单元测试 test_qq_adapter.py（27 个测试用例）。9 项真机测试（P0×5 / P1×3 / P2×1）。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。

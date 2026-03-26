@@ -69,6 +69,18 @@ EDGE_FIELD_TO_ENV_KEY = {
     "wecom_agent_id": "WECOM_AGENT_ID",
     "wecom_token": "WECOM_TOKEN",
     "wecom_encoding_aes_key": "WECOM_ENCODING_AES_KEY",
+    # Telegram Userbot
+    "telegram_api_id": "TELEGRAM_API_ID",
+    "telegram_api_hash": "TELEGRAM_API_HASH",
+    "telegram_phone": "TELEGRAM_PHONE",
+    "telegram_session_name": "TELEGRAM_SESSION_NAME",
+    "telegram_self_id": "TELEGRAM_SELF_ID",
+    "telegram_typing_speed": "TELEGRAM_TYPING_SPEED",
+    "telegram_min_delay_s": "TELEGRAM_MIN_DELAY_S",
+    "telegram_max_delay_s": "TELEGRAM_MAX_DELAY_S",
+    "telegram_proxy_type": "TELEGRAM_PROXY_TYPE",
+    "telegram_proxy_addr": "TELEGRAM_PROXY_ADDR",
+    "telegram_proxy_port": "TELEGRAM_PROXY_PORT",
     # VLM 视觉定位
     "vlm_enabled": "EDGE_VLM_ENABLED",
     "vlm_model": "EDGE_VLM_MODEL",
@@ -109,7 +121,7 @@ class EdgeConfig:
     # Unified Message Gateway
     gateway_enabled: bool = True
     gateway_port: int = 19000
-    gateway_platforms: tuple[str, ...] = ("wechat", "qq")
+    gateway_platforms: tuple[str, ...] = ("qq",)
     wx_self_wxid: str | None = None
     wx_db_storage_dir: str | None = None
     wx_decrypt_output_dir: str | None = None
@@ -127,6 +139,18 @@ class EdgeConfig:
     wecom_agent_id: str | None = None
     wecom_token: str | None = None
     wecom_encoding_aes_key: str | None = None
+    # Telegram Userbot
+    telegram_api_id: int | None = None
+    telegram_api_hash: str | None = None
+    telegram_phone: str | None = None
+    telegram_session_name: str = "nanami"
+    telegram_self_id: str | None = None
+    telegram_typing_speed: float = 15.0
+    telegram_min_delay_s: float = 1.0
+    telegram_max_delay_s: float = 3.0
+    telegram_proxy_type: str | None = None
+    telegram_proxy_addr: str | None = None
+    telegram_proxy_port: int | None = None
     # VLM 视觉定位
     vlm_enabled: bool = False
     vlm_model: str = "qwen2.5vl:7b"
@@ -175,6 +199,18 @@ class EdgeConfig:
             "wecom_agent_id": self.wecom_agent_id,
             "wecom_token": bool(self.wecom_token),
             "wecom_encoding_aes_key": bool(self.wecom_encoding_aes_key),
+            # Telegram Userbot
+            "telegram_api_id": self.telegram_api_id,
+            "telegram_api_hash": bool(self.telegram_api_hash),
+            "telegram_phone": self.telegram_phone,
+            "telegram_session_name": self.telegram_session_name,
+            "telegram_self_id": self.telegram_self_id,
+            "telegram_typing_speed": self.telegram_typing_speed,
+            "telegram_min_delay_s": self.telegram_min_delay_s,
+            "telegram_max_delay_s": self.telegram_max_delay_s,
+            "telegram_proxy_type": self.telegram_proxy_type,
+            "telegram_proxy_addr": self.telegram_proxy_addr,
+            "telegram_proxy_port": self.telegram_proxy_port,
             # VLM 视觉定位
             "vlm_enabled": self.vlm_enabled,
             "vlm_model": self.vlm_model,
@@ -371,17 +407,17 @@ def load_edge_config(
     )
     gateway_platforms_raw = _as_text(
         _env_get(env_lookup, "EDGE_GATEWAY_PLATFORMS"),
-        "wechat,qq",
+        "qq",
     )
     parsed_gateway_platforms: list[str] = []
     for piece in gateway_platforms_raw.split(","):
         platform_val = str(piece or "").strip().lower()
         if not platform_val:
             continue
-        if platform_val in {"wechat", "qq", "feishu", "wecom"} and platform_val not in parsed_gateway_platforms:
+        if platform_val in {"wechat", "qq", "feishu", "wecom", "telegram"} and platform_val not in parsed_gateway_platforms:
             parsed_gateway_platforms.append(platform_val)
     if not parsed_gateway_platforms:
-        parsed_gateway_platforms = ["wechat", "qq"]
+        parsed_gateway_platforms = ["qq"]
     wx_self_wxid = _as_optional_text(_env_get(env_lookup, "WECHAT_SELF_WXID"))
     wx_db_storage_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DB_STORAGE_DIR"))
     wx_decrypt_output_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DECRYPT_OUTPUT_DIR"))
@@ -410,6 +446,39 @@ def load_edge_config(
     wecom_agent_id = _as_optional_text(_env_get(env_lookup, "WECOM_AGENT_ID"))
     wecom_token = _as_optional_text(_env_get(env_lookup, "WECOM_TOKEN"))
     wecom_encoding_aes_key = _as_optional_text(_env_get(env_lookup, "WECOM_ENCODING_AES_KEY"))
+
+    # Telegram Userbot
+    telegram_api_id_raw = _env_get(env_lookup, "TELEGRAM_API_ID")
+    try:
+        telegram_api_id: int | None = int(str(telegram_api_id_raw).strip()) if telegram_api_id_raw else None
+    except (TypeError, ValueError):
+        telegram_api_id = None
+    telegram_api_hash = _as_optional_text(_env_get(env_lookup, "TELEGRAM_API_HASH"))
+    telegram_phone = _as_optional_text(_env_get(env_lookup, "TELEGRAM_PHONE"))
+    telegram_session_name = _as_text(_env_get(env_lookup, "TELEGRAM_SESSION_NAME"), "nanami")
+    telegram_self_id = _as_optional_text(_env_get(env_lookup, "TELEGRAM_SELF_ID"))
+    telegram_typing_speed_raw = _env_get(env_lookup, "TELEGRAM_TYPING_SPEED")
+    try:
+        telegram_typing_speed = float(telegram_typing_speed_raw) if telegram_typing_speed_raw else 15.0
+    except (TypeError, ValueError):
+        telegram_typing_speed = 15.0
+    telegram_min_delay_s_raw = _env_get(env_lookup, "TELEGRAM_MIN_DELAY_S")
+    try:
+        telegram_min_delay_s = float(telegram_min_delay_s_raw) if telegram_min_delay_s_raw else 1.0
+    except (TypeError, ValueError):
+        telegram_min_delay_s = 1.0
+    telegram_max_delay_s_raw = _env_get(env_lookup, "TELEGRAM_MAX_DELAY_S")
+    try:
+        telegram_max_delay_s = float(telegram_max_delay_s_raw) if telegram_max_delay_s_raw else 3.0
+    except (TypeError, ValueError):
+        telegram_max_delay_s = 3.0
+    telegram_proxy_type = _as_optional_text(_env_get(env_lookup, "TELEGRAM_PROXY_TYPE"))
+    telegram_proxy_addr = _as_optional_text(_env_get(env_lookup, "TELEGRAM_PROXY_ADDR"))
+    telegram_proxy_port_raw = _env_get(env_lookup, "TELEGRAM_PROXY_PORT")
+    try:
+        telegram_proxy_port: int | None = int(str(telegram_proxy_port_raw).strip()) if telegram_proxy_port_raw else None
+    except (TypeError, ValueError):
+        telegram_proxy_port = None
 
     # VLM 视觉定位
     vlm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_VLM_ENABLED"), default=False)
@@ -478,6 +547,18 @@ def load_edge_config(
         wecom_agent_id=wecom_agent_id,
         wecom_token=wecom_token,
         wecom_encoding_aes_key=wecom_encoding_aes_key,
+        # Telegram Userbot
+        telegram_api_id=telegram_api_id,
+        telegram_api_hash=telegram_api_hash,
+        telegram_phone=telegram_phone,
+        telegram_session_name=telegram_session_name,
+        telegram_self_id=telegram_self_id,
+        telegram_typing_speed=float(telegram_typing_speed),
+        telegram_min_delay_s=float(telegram_min_delay_s),
+        telegram_max_delay_s=float(telegram_max_delay_s),
+        telegram_proxy_type=telegram_proxy_type,
+        telegram_proxy_addr=telegram_proxy_addr,
+        telegram_proxy_port=telegram_proxy_port,
         # VLM 视觉定位
         vlm_enabled=bool(vlm_enabled),
         vlm_model=vlm_model,

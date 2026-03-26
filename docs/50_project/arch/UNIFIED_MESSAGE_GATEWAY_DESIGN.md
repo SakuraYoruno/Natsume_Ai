@@ -1,9 +1,9 @@
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
-> 文档版本：v1.0
+> 文档版本：v1.1
 > 创建日期：2026-03-24
-> 更新日期：2026-03-24
-> 状态：**已实施完成（Phase 1-5 全部完成）**
+> 更新日期：2026-03-26
+> 状态：**已实施完成（Phase 1-6 全部完成）**
 > 关联模块：`edge_client/gateway/`、`tools/wx4_decrypt.py`、`edge_client/services/wx_db_service.py`
 
 ---
@@ -48,14 +48,15 @@
   微信 (wx4_decrypt 解密方案)  ──WxDbService──┐
   QQ (NapCat/OneBot v11)       ──OneBot WS/HTTP┤
   飞书 (官方 Open API)          ──Event Sub─────┤
-  企微 (企业微信 API)            ──Callback URL──┘
+  企微 (企业微信 API)            ──Callback URL──┤
+  Telegram (Telethon Userbot)  ──MTProto────────┘
                                                 │
                           ┌─────────────────────▼──────────────────────┐
                           │   edge_client/gateway/  :19000              │
                           │                                             │
                           │  WebhookServer (FastAPI)                    │
                           │       │                                     │
-                          │  PlatformAdapters (wechat/qq/feishu/wecom)  │
+                          │  PlatformAdapters (wechat/qq/feishu/wecom/telegram)  │
                           │       │                                     │
                           │  MessageNormalizer (去重 + 脱敏 + 校验)      │
                           │       │                                     │
@@ -100,7 +101,8 @@ edge_client/gateway/                     # 新增统一消息网关
 │   ├── wechat_adapter.py               # 微信适配器（ntchat / ComWeChatBot）
 │   ├── qq_adapter.py                    # QQ 适配器（OneBot v11 协议）
 │   ├── feishu_adapter.py               # 飞书适配器（Open API）
-│   └── wecom_adapter.py                # 企微适配器
+│   ├── wecom_adapter.py                # 企微适配器
+│   └── telegram_adapter.py            # Telegram Userbot 适配器（Telethon MTProto）
 └── media/                               # 多媒体处理（Phase 2）
     ├── __init__.py
     ├── image_handler.py
@@ -156,6 +158,7 @@ class Platform(str, Enum):
     QQ = "qq"
     FEISHU = "feishu"
     WECOM = "wecom"
+    TELEGRAM = "telegram"
 ```
 
 ### 4.4 `MsgType` 枚举
@@ -286,6 +289,16 @@ _WX_TYPE_MAP = {
 - **接入方式**：企业微信开放 API Callback URL
 - **签名验证**：企微 Token + EncodingAESKey
 
+### 5.6 Telegram Userbot 适配器 `TelegramAdapter`（Phase 6）
+
+- **接入方式**：Telethon（MTProto 协议），以 **普通用户身份** 登录，非 Bot API
+- **核心优势**：对方看到的是正常联系人，没有 bot 标签，"人感"自然
+- **人感增强**：模拟打字延迟（"正在输入..." 提示）、随机延迟抖动（±20%）、长文分段发送（≤5 段）
+- **会话 ID**：私聊 `tg_dm_{user_id}`，群聊 `tg_group_{chat_id}`
+- **代理支持**：可配置 socks5/http 代理（国内网络环境）
+- **事件监听**：Telethon `events.NewMessage` 异步监听，无需 webhook
+- **配置项**：`TELEGRAM_API_ID`、`TELEGRAM_API_HASH`、`TELEGRAM_PHONE`、`TELEGRAM_SESSION_NAME`、`TELEGRAM_TYPING_SPEED` 等
+
 ---
 
 ## 六、Gateway Server 设计
@@ -294,7 +307,7 @@ _WX_TYPE_MAP = {
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/webhook/{platform}` | POST | 统一 Webhook 入口（wechat/qq/feishu/wecom） |
+| `/webhook/{platform}` | POST | 统一 Webhook 入口（wechat/qq/feishu/wecom/telegram） |
 | `/reply` | POST | Host Brain 回调，将回复发送到对应平台 |
 | `/health` | GET | 各平台适配器健康检查 |
 
@@ -654,6 +667,21 @@ def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
 - [x] 保留 `tools/wechat_uia_bridge.py`，并切换到 Gateway webhook + command queue 主链路
 - [x] 废弃 `edge_client/channels/wechat_listener.py`（已添加 `@deprecated` 标记）
 - [x] `gateway/bootstrap.py` — `start_gateway()` 一键启动，`bootstrap.py` 集成到 EdgeRuntime
+
+### Phase 6：Telegram Userbot 适配器（✅ 已完成）
+
+> 背景：微信 4.x UIAutomation 方案经 P0/P1 验证均无法恢复聊天 UIA 树，决定引入 Telegram Userbot 作为替代通讯通道。
+
+- [x] `gateway/models.py` — `Platform` 枚举新增 `TELEGRAM = "telegram"`
+- [x] `gateway/adapters/telegram_adapter.py` — Telegram Userbot 适配器（Telethon MTProto）
+  - Inbound：`events.NewMessage` 异步监听（私聊 + 群聊），自动过滤自发消息
+  - Outbound：`_send_text_with_typing()` 模拟打字延迟 + 分段发送 + 随机抖动
+  - 人感增强：可配置打字速度（15 字/秒）、延迟区间（1-3s）、±20% 抖动、长文 ≤5 段切分
+  - 代理支持：socks5/http 代理（`TELEGRAM_PROXY_*`）
+  - 健康检查：连接状态 + 当前登录用户信息 + 收发统计
+- [x] `gateway/bootstrap.py` — 新增 Telegram 适配器注册块 + `GatewayConfig` 扩展 + `_normalize_platforms()` 支持 `"telegram"`
+- [x] `edge_client/config.py` — `EdgeConfig` 新增 12 个 Telegram 字段 + `EDGE_FIELD_TO_ENV_KEY` 映射 + `load_edge_config()` 读取逻辑
+- [x] `.env.example` — 新增 Telegram 配置段（含详细中文注释）
 
 ---
 

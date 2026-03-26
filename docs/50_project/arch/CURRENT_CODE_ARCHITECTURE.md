@@ -1,10 +1,10 @@
 受众：MASTER
 标题：当前代码架构总览（2026-03-24）
 
-版本：v1.3
-日期：2026-03-24
+版本：v1.4
+日期：2026-03-26
 
-# 🏗️ 当前代码架构总览（2026-03-24）
+# 🏗️ 当前代码架构总览（2026-03-26）
 
 > 本文档是“当前代码事实对齐稿”，用于快速回答：目录怎么分层、请求怎么流转、多 Agent 在哪里生效、图编排如何落地。
 
@@ -104,7 +104,7 @@ Natsume_Ai/
 │  ├─ actuators/       # TTS/VTS 执行（语音合成 + VTS WebSocket 驱动）
 │  ├─ channels/        # 本地渠道适配（wechat_listener 为 legacy；保留 input_reporter / command queue）
 │  ├─ gateway/         # 统一消息网关（:19000，Phase 1-5 全部完成）
-│  │  ├─ adapters/     # 平台适配器（wechat/qq/feishu/wecom）
+│  │  ├─ adapters/     # 平台适配器（wechat/qq/feishu/wecom/telegram）
 │  │  ├─ media/        # 多媒体处理（image/voice/file handler）
 │  │  ├─ models.py     # UnifiedMessage / UnifiedReply / Platform / MsgType
 │  │  ├─ normalizer.py # 去重 + 脱敏 + 校验（MessageNormalizer）
@@ -225,7 +225,7 @@ Natsume_Ai/
 | 事件上报 | `edge_client/rpc/event_reporter.py` | 批量上报到 Host `/v1/edge/events` |
 | 资源证明 | `edge_client/proofs/resource_gate.py` | before/after 证据采集（写入 Vault 的原始材料来源）|
 | 兜底模型门控 | `edge_client/fallback_model.py` | FallbackModelGate（draft_only 标记，默认卸载）|
-| **统一消息网关** | `edge_client/gateway/` | 跨平台消息接入（微信/QQ/飞书/企微），监听 :19000 |
+| **统一消息网关** | `edge_client/gateway/` | 跨平台消息接入（微信/QQ/飞书/企微/Telegram），监听 :19000 |
 | 微信数据库服务 | `edge_client/services/wx_db_service.py` | 解密 SQLite 查询（联系人/消息/搜索/朋友圈）|
 | 微信文件监听 | `edge_client/services/wx_watcher.py` | watchdog 实时监听，消息延迟 <100ms |
 
@@ -403,7 +403,7 @@ flowchart LR
 
 ### 9.3 统一消息网关（`edge_client/gateway/server.py`，:19000）
 
-- `POST /v1/gateway/{platform}/webhook` — 接收平台消息推送（wechat/qq/feishu/wecom）
+- `POST /v1/gateway/{platform}/webhook` — 接收平台消息推送（wechat/qq/feishu/wecom/telegram）
 - `POST /v1/gateway/reply` — Host Brain 回复指令分发
 - `GET /v1/gateway/health` — 各平台适配器健康检查
 - `GET /v1/gateway/stats` — 标准化 + 路由统计

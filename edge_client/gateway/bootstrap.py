@@ -22,7 +22,7 @@ class GatewayConfig:
     host_url: str = "http://127.0.0.1:8000"
     hmac_key: str | None = None
     gateway_port: int = 19000
-    enabled_platforms: tuple[str, ...] = ("wechat", "qq")
+    enabled_platforms: tuple[str, ...] = ("qq",)
 
     wx_db_storage_dir: str = ""
     wx_decrypt_output_dir: str = ""
@@ -45,6 +45,19 @@ class GatewayConfig:
     wecom_agent_id: str | None = None
     wecom_token: str | None = None
     wecom_encoding_aes_key: str | None = None
+
+    # Telegram Userbot (Telethon)
+    telegram_api_id: int | None = None
+    telegram_api_hash: str | None = None
+    telegram_phone: str | None = None
+    telegram_session_name: str = "nanami"
+    telegram_self_id: str | None = None
+    telegram_typing_speed: float = 15.0
+    telegram_min_delay_s: float = 1.0
+    telegram_max_delay_s: float = 3.0
+    telegram_proxy_type: str | None = None
+    telegram_proxy_addr: str | None = None
+    telegram_proxy_port: int | None = None
 
 
 class GatewayInstance:
@@ -94,10 +107,10 @@ def _normalize_platforms(raw: tuple[str, ...]) -> set[str]:
     normalized: set[str] = set()
     for item in raw:
         value = str(item or "").strip().lower()
-        if value in {"wechat", "qq", "feishu", "wecom"}:
+        if value in {"wechat", "qq", "feishu", "wecom", "telegram"}:
             normalized.add(value)
     if not normalized:
-        normalized.add("wechat")
+        normalized.add("qq")
     return normalized
 
 
@@ -339,6 +352,54 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             adapters[Platform.WECOM.value] = wecom_adapter
         else:
             logger.warning("Gateway: wecom 已启用但缺少 corp 配置，跳过注册")
+
+    if "telegram" in enabled_platforms:
+        if config.telegram_api_id and config.telegram_api_hash:
+            from edge_client.gateway.adapters.telegram_adapter import TelegramAdapter
+
+            tg_proxy: dict[str, Any] | None = None
+            if config.telegram_proxy_type and config.telegram_proxy_addr and config.telegram_proxy_port:
+                tg_proxy = {
+                    "proxy_type": config.telegram_proxy_type,
+                    "addr": config.telegram_proxy_addr,
+                    "port": config.telegram_proxy_port,
+                }
+
+            tg_adapter = TelegramAdapter(
+                api_id=config.telegram_api_id,
+                api_hash=config.telegram_api_hash,
+                phone=config.telegram_phone or "",
+                session_name=config.telegram_session_name,
+                self_id=config.telegram_self_id,
+                typing_speed=config.telegram_typing_speed,
+                min_delay_s=config.telegram_min_delay_s,
+                max_delay_s=config.telegram_max_delay_s,
+                proxy=tg_proxy,
+            )
+            outbound.register(tg_adapter)
+            adapters[Platform.TELEGRAM.value] = tg_adapter
+
+            # 异步连接 + 注册消息监听
+            import asyncio as _aio
+
+            def _tg_on_message(msg: Any) -> None:
+                normalized = normalizer.normalize(msg)
+                if normalized is not None:
+                    router.route(normalized)
+
+            async def _tg_boot() -> None:
+                await tg_adapter.connect()
+                await tg_adapter.start_listening(_tg_on_message)
+
+            try:
+                loop = _aio.get_running_loop()
+                loop.create_task(_tg_boot())
+            except RuntimeError:
+                _aio.run(_tg_boot())
+
+            logger.info("Gateway: Telegram Userbot 适配器已注册 session=%s", config.telegram_session_name)
+        else:
+            logger.warning("Gateway: telegram 已启用但缺少 TELEGRAM_API_ID/TELEGRAM_API_HASH，跳过注册")
 
     app = create_gateway_app(
         router=router,
