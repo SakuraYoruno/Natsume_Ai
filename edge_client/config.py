@@ -154,6 +154,9 @@ class EdgeConfig:
     telegram_proxy_type: str | None = None
     telegram_proxy_addr: str | None = None
     telegram_proxy_port: int | None = None
+    # LINE Messaging API
+    line_channel_access_token: str | None = None
+    line_channel_secret: str | None = None
     # VLM 视觉定位
     vlm_enabled: bool = False
     vlm_model: str = "qwen2.5vl:7b"
