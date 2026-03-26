@@ -31,6 +31,7 @@
 
 - 当前 QQ 账号无群聊（`get_group_list` 返回 0），因此群聊收发用例无法在本轮完成。
 - 当前环境可确认 OneBot、Gateway、Edge 主服务均已启动，但 Host Brain 未参与自动生成回复，本轮 outbound 用例通过 `POST /v1/gateway/reply` 验证发送链路。
+- 在 2026-03-26 18:18（Asia/Shanghai）收到一次真实外部私聊入站；Gateway 已解析消息，但上报 Host Brain 时超时并写入缓存，同时 `http://127.0.0.1:18080/health` 无法连接。
 
 ---
 
@@ -41,7 +42,7 @@
 | 字段 | 值 |
 |------|-----|
 | **结果** | ⚠️ PARTIAL |
-| **实际行为** | OneBot `/get_status` 与 Gateway `/v1/gateway/health` 均可访问，但截至本轮结束未捕获到外部私聊入站事件，`inbound_parsed=0`。 |
+| **实际行为** | 已收到一次来自外部好友账号的真实私聊入站；Gateway `inbound_parsed` 从 0 增至 1，说明 QQ → OneBot → Gateway 解析链路正常。但 `EdgeInputReporter` 在 `source=GATEWAY` 上报 Host Brain 时超时并写入缓存，Host Brain 收到消息未确认。 |
 
 **证据**（日志/接口）：
 ```json
@@ -50,17 +51,23 @@
   "onebot_good": true,
   "gateway_outbound_ready": true,
   "qq_stats": {
-    "inbound_parsed": 0,
+    "inbound_parsed": 1,
     "inbound_skipped": 0,
-    "inbound_notice": 0,
+    "inbound_notice": 6,
     "inbound_request": 0
-  }
+  },
+  "host_health": "unreachable"
 }
 ```
 
+```text
+2026-03-26 18:18:01 WARNING EdgeInputReporter source=GATEWAY timed out and cached the message
+2026-03-26 18:19:10 WARNING EdgeInputReporter retrying cached GATEWAY message
+```
+
 **偏差说明**：
-- 本轮未获得来自外部好友账号的真实私聊触发。
-- 需要后续由另一 QQ 账号向 Bot 发一条私聊文本，补齐端到端入站验证。
+- 已确认外部私聊能到达 QQ adapter 并被 Gateway 解析。
+- 失败点位于 Gateway → Host Brain 上报阶段；当前 `127.0.0.1:18080` 不可达，因此“Host Brain 收到消息”这一验收条件未满足。
 
 ---
 
@@ -219,6 +226,7 @@ collecting ... collected 25 items
 | 1 | QQ adapter 健康检查误报 `degraded`：OneBot `data.good=true`，但 Gateway 健康仍非 `ok` | P1 | 启动 NapCat + Gateway 后访问 `/v1/gateway/health` | 修正 `qq_adapter.py` 中健康状态对 OneBot 返回字段的解析路径 |
 | 2 | QQ 图片发送的本地文件路径分支在真机上失败，OneBot 返回 `rich media transfer failed` | P1 | 通过 `POST /v1/gateway/reply` 发送 `msg_type=image` 且仅传 `media_path` | 对 `file:///` 本地图片路径在 NapCat/QQNT 上做兼容性排查；必要时降级为 URL/上传策略 |
 | 3 | 当前 Bot 账号无群聊，导致群收发回归用例无法执行 | P2 | `get_group_list` 返回 0 | 准备专用测试群后重测 T-02 / T-04 |
+| 4 | Host HTTP 服务在 `127.0.0.1:18080` 不可达，导致真实 QQ 私聊入站在 Gateway 层超时并缓存，无法完成 Host Brain 接收闭环 | P0 | 发送外部 QQ 私聊后观察到 `inbound_parsed=1`，同时 `EdgeInputReporter` 记录 `source=GATEWAY` timeout；访问 `/health` 连接失败 | 先恢复 Host 服务，再复测 T-01，并检查缓存消息是否自动补投 |
 
 ---
 
@@ -234,8 +242,9 @@ collecting ... collected 25 items
 
 ## 6. 建议与补充
 
+- 先恢复 Host `127.0.0.1:18080` 服务，再观察缓存中的 GATEWAY 消息是否自动补投。
 - 优先修复 QQ adapter 的健康状态解析错误，否则 `/v1/gateway/health` 会持续误报。
-- 建议为 QQ 回归准备一个固定测试群和一个外部测试好友账号，补齐 T-01 / T-02 / T-04 的真机闭环。
+- 建议为 QQ 回归准备一个固定测试群和一个外部测试好友账号，补齐 T-02 / T-04 的真机闭环。
 - 图片发送能力在开发报告中宣称支持 `file/url/base64`，但本轮真机仅验证 URL 成功，本地文件路径失败，建议开发节点补充 NapCat 实机兼容性测试。
 
 ---
