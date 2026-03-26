@@ -12,7 +12,7 @@ from typing import Any
 
 DEFAULT_QUEUE_FILENAME = "wechat_command_queue.jsonl"
 DEFAULT_RESULT_FILENAME = "wechat_command_result.jsonl"
-ALLOWED_WECHAT_COMMAND_ACTIONS = {"send_text", "send_image", "send_file", "voice_call", "video_call"}
+ALLOWED_WECHAT_COMMAND_ACTIONS = {"send_text", "send_image", "send_file", "send_voice", "voice_call", "video_call"}
 
 # --- Incremental read state for result file ---
 # Tracks (file_path_str -> byte_offset) so repeated lookups skip already-scanned lines.

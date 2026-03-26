@@ -3,10 +3,11 @@
 微信语音消息使用腾讯私有 silk 编码格式（.silk / .amr）。
 本模块提供：
   - 接收：.silk 解码 → PCM → 扬声器播放（✅ 可用）
-  - 发送：TTS PCM → .silk 编码 → 微信发送（⚠️ Phase 3 评估）
+  - 发送：TTS PCM → .silk 编码 → 微信发送（✅ 已实现）
+  - 剪贴板：set_clipboard_file() — CF_HDROP 格式（✅ 已实现）
 
 依赖：
-  pip install pysilk-mod pyaudio
+  pip install pysilk-mod pyaudio pywin32
 
 注意：
   微信语音/视频通话走 TRTC 私有 P2P 协议，与本模块无关，不纳入范围。
@@ -107,13 +108,11 @@ def decode_silk_to_pcm(silk_path: str | Path) -> bytes | None:
 
 
 # ---------------------------------------------------------------------------
-# 发送：PCM → .silk 编码（Phase 3 评估）
+# 发送：PCM → .silk 编码 + 剪贴板文件写入
 # ---------------------------------------------------------------------------
 
 def encode_pcm_to_silk(pcm_bytes: bytes, *, sample_rate: int = 16000) -> bytes | None:
     """将 PCM 音频编码为 .silk 格式（用于微信语音消息发送）。
-
-    ⚠️ Phase 3 功能：发送路径依赖微信版本对文件粘贴的支持，需实测验证。
 
     Args:
         pcm_bytes: PCM 音频数据（16bit, mono）
@@ -134,6 +133,49 @@ def encode_pcm_to_silk(pcm_bytes: bytes, *, sample_rate: int = 16000) -> bytes |
     except Exception as exc:
         logger.error("VoiceHandler: silk 编码失败: %s", exc)
         return None
+
+
+def set_clipboard_file(file_path: str | Path) -> bool:
+    """将文件路径以 CF_HDROP 格式写入剪贴板（用于微信发送文件/语音）。
+
+    微信桌面版支持通过 Ctrl+V 粘贴文件（以 CF_HDROP 剪贴板格式）。
+    本函数将指定文件路径写入剪贴板，供后续 Ctrl+V 模拟使用。
+
+    Args:
+        file_path: 要写入剪贴板的文件绝对路径
+
+    Returns:
+        True 表示成功写入剪贴板
+    """
+    try:
+        import struct
+        import win32clipboard
+        import win32con
+    except ImportError:
+        logger.error("VoiceHandler: 需要安装 pywin32: pip install pywin32")
+        return False
+
+    try:
+        file_path = str(Path(file_path).resolve())
+        # DROPFILES 结构：20 字节头 + null-terminated UTF-16LE 路径 + 双 null 终止
+        offset = 20  # sizeof(DROPFILES)
+        # fWide = 1 表示路径是 Unicode (UTF-16LE)
+        header = struct.pack("IiiII", offset, 0, 0, 0, 1)
+        wide_path = file_path.encode("utf-16-le") + b"\x00\x00"  # null-terminated
+        data = header + wide_path + b"\x00\x00"  # 额外的双 null 终止符
+
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
+        finally:
+            win32clipboard.CloseClipboard()
+
+        logger.debug("VoiceHandler: 文件已写入剪贴板 CF_HDROP: %s", file_path)
+        return True
+    except Exception as exc:
+        logger.error("VoiceHandler: 设置文件剪贴板失败: %s", exc)
+        return False
 
 
 def save_silk_file(silk_data: bytes, output_path: str | Path | None = None) -> Path | None:

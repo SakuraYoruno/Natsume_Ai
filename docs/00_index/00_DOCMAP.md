@@ -61,6 +61,18 @@
   用途：给 Project（文档代理）的产出约束、任务拆解、以及 Project×实现层×版本库 的协作工作表；配置指南与外部服务清单；不包含终端指令片段。
   读者：Project（主要）、MASTER。实现层不应把它当任务来源。
 
+- docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md
+  用途：双节点开发协作工作流规范（2026-03-26）。定义"开发节点 ⇄ 运行节点"闭环机制：开发实测报告→真机验证→运行反馈报告→修复闭环。含报告类型定义、命名规范、流程步骤、闭环判定条件。填补已删除的 WORKSHEET_Project_Codex_Git_Flow.md 空缺。
+  读者：MASTER、实现层（查阅遵守）。
+
+- docs/50_project/guides/DEV_TEST_REPORT_TEMPLATE.md
+  用途：开发实测报告模板（DEV→RUN）。开发节点完成功能后按此模板产出实测报告，列出本机已验证项与真机实测清单，供运行节点执行。
+  读者：实现层（模板使用）。
+
+- docs/50_project/guides/RUNTIME_FEEDBACK_REPORT_TEMPLATE.md
+  用途：运行反馈报告模板（RUN→DEV）。运行节点完成真机测试后按此模板产出反馈报告，逐条记录测试结果与新发现问题，供开发节点修复闭环。
+  读者：实现层（模板使用）。
+
 - docs/50_project/index.md
   用途：Flow 资产追溯索引（按环境），记录 flows/active.pointer 指向的当前生效 Flow 导出物；支撑 T-Flow-02 回归口径。
   读者：MASTER、Project（文档代理）。
@@ -336,7 +348,7 @@
 
 10）协作与运行手册（Worksheet：分工/流程/落地节奏）
 
-（注：协作工作表 WORKSHEET_Project_Codex_Git_Flow.md 已删除，暂无替代文件。docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
+（注：协作工作表 WORKSHEET_Project_Codex_Git_Flow.md 已删除，由 docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md（双节点开发协作工作流）替代，已在第 5 节登记。docs/50_project/ 下的 PROJECT_BRIEF.md、PROJECT_TASKS.md、arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md、arch/ExternalServices_Config.md、guides/vts_hotkey_config_guide.md、index.md、arch/CURRENT_CODE_ARCHITECTURE.md、arch/dataflow_report.md、phases/MULTI_AGENT_UPGRADE_PLAN.md 已在第 5 节登记。）
 
 11）配置资产入口（非文档，但属于“可部署/可回放”真相源的一部分）
 - flows/

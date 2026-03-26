@@ -152,6 +152,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 return False
+            if reply.msg_type == MsgType.VOICE:
+                if self._bridge_queue_enabled():
+                    success = self._send_voice_via_bridge_queue(reply)
+                    detail = "bridge_queue_voice"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                return False
             detail = f"unsupported msg_type={reply.msg_type.value}"
             return False
         except Exception as exc:
@@ -285,6 +292,66 @@ class WeChatAdapter(AbstractPlatformAdapter):
         target_candidates = self._build_search_candidates(reply.conversation_id)
         row = enqueue_wechat_command(
             action="send_image",
+            target=reply.conversation_id,
+            target_candidates=target_candidates,
+            content=media_path,
+            request_id=request_id,
+            queue_file=queue_file,
+            ts_ms=now_ms,
+        )
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=self._resolve_command_timeout_ms(),
+            result_file=result_file,
+        )
+        return bool((result or {}).get("success"))
+
+    def _send_voice_via_bridge_queue(self, reply: UnifiedReply) -> bool:
+        """Send a voice message (.silk file) via the UIA bridge command queue.
+
+        The voice file path is expected in ``reply.media_path``.
+        Falls back to ``reply.content`` if ``media_path`` is not set.
+
+        If ``reply.media_data`` contains raw PCM bytes (from TTS synthesis),
+        the method will encode them to .silk format, save to a temp file,
+        and dispatch via the bridge queue.
+        """
+        from edge_client.channels.wechat_command_queue import (
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+
+        media_path = str(reply.media_path or "").strip()
+
+        # Fallback: if no file path but we have raw PCM audio data, encode to .silk
+        if not media_path and reply.media_data:
+            from edge_client.gateway.media.voice_handler import encode_pcm_to_silk, save_silk_file
+            sample_rate = int(reply.raw_extra.get("sample_rate", 16000))
+            silk_data = encode_pcm_to_silk(reply.media_data, sample_rate=sample_rate)
+            if silk_data is None:
+                logger.warning("WeChatAdapter: silk encoding failed for voice reply")
+                return False
+            silk_path = save_silk_file(silk_data)
+            if silk_path is None:
+                logger.warning("WeChatAdapter: failed to save .silk temp file")
+                return False
+            media_path = str(silk_path)
+
+        if not media_path:
+            # Last resort: treat content as file path
+            media_path = str(reply.content or "").strip()
+
+        if not media_path:
+            logger.warning("WeChatAdapter: send_voice called but no media_path or media_data provided")
+            return False
+
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        request_id = str(reply.raw_extra.get("request_id") or f"gateway-voice-{now_ms}-{uuid.uuid4().hex[:8]}")
+        target_candidates = self._build_search_candidates(reply.conversation_id)
+        row = enqueue_wechat_command(
+            action="send_voice",
             target=reply.conversation_id,
             target_candidates=target_candidates,
             content=media_path,

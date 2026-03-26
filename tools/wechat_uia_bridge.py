@@ -1480,8 +1480,8 @@ def _execute_command(command: dict[str, Any], *, controller: WeChatUiAutomationC
             result["resolved_target"] = resolved_target
         return result
 
-    if action in {"send_image", "send_file"}:
-        # content should contain the file path for send_image/send_file
+    if action in {"send_image", "send_file", "send_voice"}:
+        # content should contain the file path for send_image/send_file/send_voice
         media_path = str(command.get("media_path") or content or "").strip()
         if not media_path or not os.path.isfile(media_path):
             result["reason_code"] = "WECHAT_MEDIA_FILE_NOT_FOUND"
@@ -1498,11 +1498,18 @@ def _execute_command(command: dict[str, Any], *, controller: WeChatUiAutomationC
             return result
 
         # Step 2: copy media to clipboard and paste
-        from edge_client.gateway.media.image_handler import set_clipboard_image
         if action == "send_image":
+            from edge_client.gateway.media.image_handler import set_clipboard_image
             if not set_clipboard_image(media_path):
                 result["reason_code"] = "WECHAT_CLIPBOARD_FAILED"
                 result["detail"] = f"failed to copy image to clipboard: {media_path}"
+                return result
+        elif action == "send_voice":
+            # 语音消息：将 .silk 文件以 CF_HDROP 格式写入剪贴板
+            from edge_client.gateway.media.voice_handler import set_clipboard_file
+            if not set_clipboard_file(media_path):
+                result["reason_code"] = "WECHAT_CLIPBOARD_FAILED"
+                result["detail"] = f"failed to copy voice file to clipboard: {media_path}"
                 return result
         else:
             # For files, we still attempt clipboard — on failure, log and return
@@ -1558,7 +1565,7 @@ def _execute_command(command: dict[str, Any], *, controller: WeChatUiAutomationC
 
         result["success"] = True
         result["status"] = "ok"
-        result["detail"] = f"uia_send_image_ok target={resolved_target or target}"
+        result["detail"] = f"uia_send_{action.replace('send_', '')}_ok target={resolved_target or target}"
         if resolved_target:
             result["resolved_target"] = resolved_target
         return result
