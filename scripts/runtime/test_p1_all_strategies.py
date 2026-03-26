@@ -76,6 +76,39 @@ CRITICAL_TARGET_CLASSES = [
     "mmui::ChatTextItemView",
 ]
 
+# ── comtypes UIAutomation 初始化状态 ──
+_uia_typelib_loaded = False
+
+
+def _ensure_uia_typelib():
+    """确保 comtypes.gen.UIAutomationClient 类型库已加载（幂等操作）"""
+    global _uia_typelib_loaded
+    if _uia_typelib_loaded:
+        return
+    import comtypes.client
+    try:
+        comtypes.client.GetModule("UIAutomationCore.dll")
+    except OSError:
+        import os as _os
+        dll_path = _os.path.join(
+            _os.environ.get("SystemRoot", r"C:\Windows"),
+            "System32", "UIAutomationCore.dll"
+        )
+        comtypes.client.GetModule(dll_path)
+    _uia_typelib_loaded = True
+
+
+def _create_uia():
+    """创建并返回 IUIAutomation COM 实例"""
+    import comtypes
+    import comtypes.client
+    _ensure_uia_typelib()
+    from comtypes.gen.UIAutomationClient import IUIAutomation
+    return comtypes.client.CreateObject(
+        "{ff48dba4-60ef-4201-aa87-54103eef594e}",
+        interface=IUIAutomation
+    )
+
 
 def find_wechat_hwnd():
     """查找微信主窗口句柄"""
@@ -97,13 +130,7 @@ def check_uia_tree(hwnd):
     返回 (child_count, found_targets_dict, descendant_count)
     """
     try:
-        import comtypes
-        import comtypes.client
-
-        UIA = comtypes.client.CreateObject(
-            "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
-        )
+        UIA = _create_uia()
 
         root = UIA.ElementFromHandle(hwnd)
         condition = UIA.CreateTrueCondition()
@@ -169,13 +196,11 @@ def run_strategy_s1(hwnd, duration=20, quick=False):
         import comtypes
         import comtypes.client
 
-        UIA = comtypes.client.CreateObject(
-            "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
-        )
+        UIA = _create_uia()
         root = UIA.ElementFromHandle(hwnd)
 
         # 注册事件
+        _ensure_uia_typelib()
         from comtypes.gen.UIAutomationClient import (
             IUIAutomationStructureChangedEventHandler,
             TreeScope_Subtree,
@@ -299,15 +324,59 @@ def run_strategy_s2(hwnd, duration=25, quick=False):
                 was_running = True
                 print(f"  [INFO] Narrator 已在运行中")
             elif os.path.isfile(narrator_path):
-                reader_proc = subprocess.Popen(
-                    [narrator_path],
+                try:
+                    reader_proc = subprocess.Popen(
+                        [narrator_path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    reader_name = "Narrator"
+                    print(f"  [OK] Narrator 已启动")
+                except OSError as oe:
+                    # WinError 740: 请求的操作需要提升
+                    print(f"  [WARN] Narrator 直接启动失败: {oe}")
+                    # PowerShell fallback（与 p1_nvda_assisted_uia.py 统一）
+                    print(f"  [INFO] 尝试通过 PowerShell 启动 Narrator ...")
+                    try:
+                        subprocess.Popen(
+                            ["powershell", "-Command", "Start-Process", "Narrator.exe"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(3)
+                        recheck = subprocess.run(
+                            ["tasklist", "/FI", "IMAGENAME eq Narrator.exe", "/NH"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if "narrator.exe" in recheck.stdout.lower():
+                            reader_name = "Narrator"
+                            reader_proc = None  # PowerShell 进程，不是 Narrator 本身
+                            print(f"  [OK] Narrator 已通过 PowerShell 启动")
+                        else:
+                            print(f"  [WARN] PowerShell 启动后未检测到 Narrator 进程")
+                    except Exception as ps_err:
+                        print(f"  [WARN] PowerShell 启动 Narrator 也失败: {ps_err}")
+        except Exception as e:
+            print(f"  [WARN] Narrator 启动失败: {e}")
+            # 最后尝试 PowerShell
+            print(f"  [INFO] 尝试通过 PowerShell 启动 Narrator ...")
+            try:
+                subprocess.Popen(
+                    ["powershell", "-Command", "Start-Process", "Narrator.exe"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                reader_name = "Narrator"
-                print(f"  [OK] Narrator 已启动")
-        except Exception as e:
-            print(f"  [WARN] Narrator 启动失败: {e}")
+                time.sleep(3)
+                recheck = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq Narrator.exe", "/NH"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if "narrator.exe" in recheck.stdout.lower():
+                    reader_name = "Narrator"
+                    was_running = False
+                    print(f"  [OK] Narrator 已通过 PowerShell 启动")
+            except Exception:
+                pass
 
     if not reader_name:
         print("  [FAIL] 无法启动任何屏幕阅读器")
@@ -337,7 +406,7 @@ def run_strategy_s2(hwnd, duration=25, quick=False):
     result["found_targets"] = list(found_targets.keys())
 
     # 清理
-    if reader_proc and not was_running:
+    if reader_name and not was_running:
         try:
             exe_name = f"{reader_name.lower()}.exe"
             subprocess.run(
@@ -372,13 +441,11 @@ def run_strategy_s3(hwnd, duration=25, quick=False):
         import comtypes
         import comtypes.client
 
-        UIA = comtypes.client.CreateObject(
-            "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
-        )
+        UIA = _create_uia()
         root = UIA.ElementFromHandle(hwnd)
 
         # 注册 UIA 事件
+        _ensure_uia_typelib()
         from comtypes.gen.UIAutomationClient import (
             IUIAutomationStructureChangedEventHandler,
             TreeScope_Subtree,
@@ -559,6 +626,10 @@ def main():
     print(f"  子元素数: {baseline_count}")
     print(f"  后代总数: {baseline_desc}")
     print(f"  目标控件: {list(baseline_targets.keys()) or '无'}")
+
+    if baseline_count == -1:
+        print("\n  [WARN] 基线检查返回 -1，UIA COM 初始化可能有问题")
+        print("         但仍继续测试各策略（策略内部有独立初始化逻辑）")
 
     # ── 运行方案 ──
     strategies_to_run = []

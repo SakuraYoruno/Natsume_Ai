@@ -137,9 +137,22 @@ class UIAKeepaliveClient:
         import comtypes
         import comtypes.client
 
+        # 关键修复：显式加载 UIAutomationCore 类型库到 comtypes.gen
+        try:
+            comtypes.client.GetModule("UIAutomationCore.dll")
+        except OSError:
+            import os as _os
+            dll_path = _os.path.join(
+                _os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32", "UIAutomationCore.dll"
+            )
+            comtypes.client.GetModule(dll_path)
+
+        from comtypes.gen.UIAutomationClient import IUIAutomation
+
         self.uia = comtypes.client.CreateObject(
             "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
+            interface=IUIAutomation
         )
         print("[OK] IUIAutomation 创建成功")
 

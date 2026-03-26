@@ -106,9 +106,22 @@ def check_uia_tree(hwnd):
         import comtypes
         import comtypes.client
 
+        # 确保类型库已生成
+        try:
+            comtypes.client.GetModule("UIAutomationCore.dll")
+        except OSError:
+            import os as _os
+            dll_path = _os.path.join(
+                _os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32", "UIAutomationCore.dll"
+            )
+            comtypes.client.GetModule(dll_path)
+
+        from comtypes.gen.UIAutomationClient import IUIAutomation
+
         UIA = comtypes.client.CreateObject(
             "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
+            interface=IUIAutomation
         )
 
         root = UIA.ElementFromHandle(hwnd)

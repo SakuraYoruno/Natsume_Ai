@@ -205,6 +205,10 @@
   用途：P1 三方案 UIA 恢复策略开发实测报告（2026-03-26）。在 P0 方案验证均失败后，实现三种更强的恢复策略：S1 持久化 UIA 事件监听器、S2 NVDA/Narrator 屏幕阅读器辅助、S3 Minimal Accessibility Client。含整合对比测试脚本和 8 项真机测试清单。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_p1_comtypes_fix_20260326.md
+  用途：P1 脚本自举修复报告（2026-03-26）。修复 comtypes.gen.UIAutomationClient 类型库缺失导致三个 P1 策略全部无法启动的问题（显式 GetModule），统一对比器 S2 的 Narrator PowerShell fallback 启动逻辑。7 项测试（P0×5 / P1×2）。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。

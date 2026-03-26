@@ -173,10 +173,23 @@ def test_comtypes(hwnd):
         return {"method": "comtypes", "status": "not_installed", "child_count": 0}
 
     try:
+        # 确保 UIAutomationClient 类型库已加载到 comtypes.gen
+        try:
+            comtypes.client.GetModule("UIAutomationCore.dll")
+        except OSError:
+            import os as _os
+            dll_path = _os.path.join(
+                _os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32", "UIAutomationCore.dll"
+            )
+            comtypes.client.GetModule(dll_path)
+
+        from comtypes.gen.UIAutomationClient import IUIAutomation
+
         # 创建 CUIAutomation 实例
         UIA = comtypes.client.CreateObject(
             "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
+            interface=IUIAutomation
         )
 
         # 通过句柄附着 —— 关键步骤！触发 UIA Provider 加载

@@ -106,13 +106,26 @@ def main():
         import comtypes.client
         from comtypes import COMError
 
-        # 确保 COM 初始化为 MTA（多线程模式，适合事件处理）
-        # comtypes 默认会初始化 COM，但我们需要确保在正确的线程模式
         print("\n[INFO] 初始化 COM / IUIAutomation ...")
+
+        # 关键修复：显式加载 UIAutomationCore 类型库到 comtypes.gen
+        # 在全新环境中 comtypes.gen 没有预生成的缓存，必须先 GetModule
+        try:
+            comtypes.client.GetModule("UIAutomationCore.dll")
+        except OSError:
+            # 某些环境下 DLL 名不够，尝试完整路径
+            import os
+            dll_path = os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32", "UIAutomationCore.dll"
+            )
+            comtypes.client.GetModule(dll_path)
+
+        from comtypes.gen.UIAutomationClient import IUIAutomation
 
         UIA = comtypes.client.CreateObject(
             "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-            interface=comtypes.gen.UIAutomationClient.IUIAutomation
+            interface=IUIAutomation
         )
         print("[OK] IUIAutomation 实例创建成功")
 
@@ -121,6 +134,8 @@ def main():
         sys.exit(1)
     except Exception as e:
         print(f"[FAIL] COM 初始化失败: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     # ── 获取微信根元素 ──
