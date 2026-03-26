@@ -81,6 +81,9 @@ EDGE_FIELD_TO_ENV_KEY = {
     "telegram_proxy_type": "TELEGRAM_PROXY_TYPE",
     "telegram_proxy_addr": "TELEGRAM_PROXY_ADDR",
     "telegram_proxy_port": "TELEGRAM_PROXY_PORT",
+    # LINE Messaging API
+    "line_channel_access_token": "LINE_CHANNEL_ACCESS_TOKEN",
+    "line_channel_secret": "LINE_CHANNEL_SECRET",
     # VLM 视觉定位
     "vlm_enabled": "EDGE_VLM_ENABLED",
     "vlm_model": "EDGE_VLM_MODEL",
@@ -211,6 +214,9 @@ class EdgeConfig:
             "telegram_proxy_type": self.telegram_proxy_type,
             "telegram_proxy_addr": self.telegram_proxy_addr,
             "telegram_proxy_port": self.telegram_proxy_port,
+            # LINE Messaging API
+            "line_channel_access_token": bool(self.line_channel_access_token),
+            "line_channel_secret": bool(self.line_channel_secret),
             # VLM 视觉定位
             "vlm_enabled": self.vlm_enabled,
             "vlm_model": self.vlm_model,
@@ -414,7 +420,7 @@ def load_edge_config(
         platform_val = str(piece or "").strip().lower()
         if not platform_val:
             continue
-        if platform_val in {"wechat", "qq", "feishu", "wecom", "telegram"} and platform_val not in parsed_gateway_platforms:
+        if platform_val in {"wechat", "qq", "feishu", "wecom", "telegram", "line"} and platform_val not in parsed_gateway_platforms:
             parsed_gateway_platforms.append(platform_val)
     if not parsed_gateway_platforms:
         parsed_gateway_platforms = ["qq"]
@@ -479,6 +485,10 @@ def load_edge_config(
         telegram_proxy_port: int | None = int(str(telegram_proxy_port_raw).strip()) if telegram_proxy_port_raw else None
     except (TypeError, ValueError):
         telegram_proxy_port = None
+
+    # LINE Messaging API
+    line_channel_access_token = _as_optional_text(_env_get(env_lookup, "LINE_CHANNEL_ACCESS_TOKEN"))
+    line_channel_secret = _as_optional_text(_env_get(env_lookup, "LINE_CHANNEL_SECRET"))
 
     # VLM 视觉定位
     vlm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_VLM_ENABLED"), default=False)
@@ -559,6 +569,9 @@ def load_edge_config(
         telegram_proxy_type=telegram_proxy_type,
         telegram_proxy_addr=telegram_proxy_addr,
         telegram_proxy_port=telegram_proxy_port,
+        # LINE Messaging API
+        line_channel_access_token=line_channel_access_token,
+        line_channel_secret=line_channel_secret,
         # VLM 视觉定位
         vlm_enabled=bool(vlm_enabled),
         vlm_model=vlm_model,

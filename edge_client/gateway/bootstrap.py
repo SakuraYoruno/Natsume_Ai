@@ -59,6 +59,10 @@ class GatewayConfig:
     telegram_proxy_addr: str | None = None
     telegram_proxy_port: int | None = None
 
+    # LINE Messaging API
+    line_channel_access_token: str | None = None
+    line_channel_secret: str | None = None
+
 
 class GatewayInstance:
     """Gateway 运行实例，持有可停止的组件。"""
@@ -107,7 +111,7 @@ def _normalize_platforms(raw: tuple[str, ...]) -> set[str]:
     normalized: set[str] = set()
     for item in raw:
         value = str(item or "").strip().lower()
-        if value in {"wechat", "qq", "feishu", "wecom", "telegram"}:
+        if value in {"wechat", "qq", "feishu", "wecom", "telegram", "line"}:
             normalized.add(value)
     if not normalized:
         normalized.add("qq")
@@ -400,6 +404,20 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             logger.info("Gateway: Telegram Userbot 适配器已注册 session=%s", config.telegram_session_name)
         else:
             logger.warning("Gateway: telegram 已启用但缺少 TELEGRAM_API_ID/TELEGRAM_API_HASH，跳过注册")
+
+    if "line" in enabled_platforms:
+        if config.line_channel_access_token and config.line_channel_secret:
+            from edge_client.gateway.adapters.line_adapter import LineAdapter
+
+            line_adapter = LineAdapter(
+                channel_access_token=config.line_channel_access_token,
+                channel_secret=config.line_channel_secret,
+            )
+            outbound.register(line_adapter)
+            adapters[Platform.LINE.value] = line_adapter
+            logger.info("Gateway: LINE Messaging API 适配器已注册")
+        else:
+            logger.warning("Gateway: line 已启用但缺少 LINE_CHANNEL_ACCESS_TOKEN/LINE_CHANNEL_SECRET，跳过注册")
 
     app = create_gateway_app(
         router=router,

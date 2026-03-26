@@ -18,6 +18,7 @@ class Platform(str, Enum):
     FEISHU = "feishu"
     WECOM = "wecom"
     TELEGRAM = "telegram"
+    LINE = "line"
 
 
 class MsgType(str, Enum):

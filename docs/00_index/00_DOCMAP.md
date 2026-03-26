@@ -221,6 +221,10 @@
   用途：QQ 适配器增强版开发实测报告（2026-03-26）。含默认平台配置调整（wechat,qq→qq）、QQ 适配器 6 项功能增强（VOICE 发送、@提醒检测、URL/base64 图片、notice/request 事件日志、消息段构造重构）、新建单元测试 test_qq_adapter.py（27 个测试用例）。9 项真机测试（P0×5 / P1×3 / P2×1）。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_line_adapter_20260326.md
+  用途：LINE Messaging API 适配器开发实测报告（2026-03-26）。基于飞书 Webhook+REST 架构模式实现 LINE 官方 Messaging API 接入，含 HMAC-SHA256 签名验证、7 种消息类型解析、Reply/Push 双通道发送、EdgeConfig/GatewayConfig/bootstrap 全链路集成。11 项真机测试清单（Webhook 接收、消息解析、回复发送、签名验证等）。
+  读者：MASTER、实现层、Project（文档代理）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。

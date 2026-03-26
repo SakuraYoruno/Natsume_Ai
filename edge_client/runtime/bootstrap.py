@@ -569,6 +569,9 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
                 wecom_agent_id=config.wecom_agent_id,
                 wecom_token=config.wecom_token,
                 wecom_encoding_aes_key=config.wecom_encoding_aes_key,
+                # LINE Messaging API
+                line_channel_access_token=config.line_channel_access_token,
+                line_channel_secret=config.line_channel_secret,
             )
             gw_instance = start_gateway(gw_config)
             runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]
