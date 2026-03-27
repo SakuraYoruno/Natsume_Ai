@@ -73,6 +73,10 @@
   用途：wxautox4 三期更新完整总结报告（2026-03-27）。记录三期计划全部完成情况：ALLOWED_ACTIONS 从 6 扩展到 37，新增消息对象缓存、HTTP 查询端点、朋友圈/群管理/高级消息操作等全量功能。含架构示意图、环境变量清单、40条测试用例汇总和真机验证建议。
   读者：MASTER、运行节点（按指引验证）。
 
+- docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md
+  用途：Gateway 中文文字链路完整节点分析（2026-03-27）。追踪从 HTTP 入口到最终 COMMIT 的全部节点，涵盖两条入口路径、19 步 Gateway Orchestrator 核心、10 个 MainChain 节点、七路召回管线（含语种分离路由）、10 个情感子系统数据流、7 个 Agent 注册表、Graph 编排层时序、Supervisor 分派逻辑、render_target_lang="zh" 三重保障、完整降级机制汇总。
+  读者：MASTER、架构参考。
+
 - docs/50_project/guides/DEV_TEST_REPORT_TEMPLATE.md
   用途：开发实测报告模板（DEV→RUN）。开发节点完成功能后按此模板产出实测报告，列出本机已验证项与真机实测清单，供运行节点执行。
   读者：实现层（模板使用）。
