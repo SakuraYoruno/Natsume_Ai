@@ -63,6 +63,22 @@ def _with_context(handler: Callable[[dict[str, Any], dict[str, Any] | None], Any
     return lambda payload: handler(payload, payload.get("_context"))
 
 
+def _focus_mode_with_mode_changer(payload: dict[str, Any]) -> Any:
+    """focus_mode 的特殊包装器——自动注入 mode_changer 回调。
+
+    focus_mode skill 期望 context 中有 mode_changer 回调来实际切换 sys_mode。
+    如果调用方未提供 mode_changer，则自动注入 dependencies.set_sys_mode。
+    """
+    ctx = dict(payload.get("_context") or {})
+    if ctx.get("mode_changer") is None:
+        try:
+            from host_brain.app.dependencies import set_sys_mode  # noqa: PLC0415
+            ctx["mode_changer"] = set_sys_mode
+        except ImportError:
+            pass  # 降级：不注入，focus_mode 仍返回 EXECUTED 但不切换模式
+    return execute_focus_mode(payload, ctx)
+
+
 def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
     registry = ToolExecutorRegistry()
     specs = (
@@ -77,7 +93,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("diary_writer", _with_context(execute_diary_writer)),
         ToolExecutorSpec("dream_generator", _with_context(execute_dream_generator)),
         ToolExecutorSpec("desktop_note", _with_context(execute_desktop_note)),
-        ToolExecutorSpec("focus_mode", _with_context(execute_focus_mode)),
+        ToolExecutorSpec("focus_mode", _focus_mode_with_mode_changer),
         ToolExecutorSpec("proactive_talk", _with_context(execute_proactive_talk)),
         ToolExecutorSpec("desktop", _with_context(execute_desktop_skill)),
         ToolExecutorSpec("memory", _with_context(execute_memory_skill)),

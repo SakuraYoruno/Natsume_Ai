@@ -4760,6 +4760,8 @@ def _get_ledger_instance():
 # 系统运行模式管理 — GET/POST /obs/sys-mode
 # ─────────────────────────────────────────────────────────────────────────────
 
+import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
+
 # 全局 ModeTransitionService 实例（延迟初始化）
 _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
@@ -4826,6 +4828,22 @@ class _FallbackModeService:
         target = str(target_mode).strip().lower()
         if target not in ALLOWED_SYS_MODES:
             return {"success": False, "error": f"invalid mode: {target}"}
+        # 优先通过 set_sys_mode 切换（保持 _hard_state 一致性）
+        try:
+            from host_brain.app.dependencies import set_sys_mode as _dep_set  # noqa: PLC0415
+            result = _dep_set(target)
+            return {
+                "success": True,
+                "from_mode": result.get("from_mode", "unknown"),
+                "to_mode": result.get("to_mode", target),
+                "source": "manual",
+                "reason": reason,
+                "ts_ms": _now_ms(),
+                "degraded": True,
+            }
+        except Exception:
+            pass
+        # 降级：直接写环境变量（_hard_state 可能不一致）
         os.environ["HOST_SYS_MODE"] = target
         return {
             "success": True,
@@ -4995,6 +5013,3 @@ async def post_sys_mode_event(
         "result": result,
         "timestamp": _now_ms(),
     }
-
-
-import threading  # noqa: E402 — 已在文件顶部导入，此处保险起见
