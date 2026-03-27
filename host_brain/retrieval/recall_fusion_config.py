@@ -107,16 +107,37 @@ def resolve_recall_routes(
     node_id: str | None,
     render_target_lang: str | None = None,
 ) -> list[RecallRouteConfig]:
+    """Resolve active routes by node_id and render_target_lang.
+
+    Filtering logic (updated 2026-03-27):
+      1. If node_id is given, filter by _node_selector_match first.
+         Otherwise, use all routes as candidates.
+      2. Then apply _render_target_lang_selector_match to filter by language.
+      3. If no routes remain after language filtering, fall back to the default route.
+    """
+    # Step 1: filter by node_id (or take all if no node_id)
     if node_id is not None and str(node_id).strip():
         node = str(node_id).strip()
-        matched = [
+        node_matched = [
             route
             for route_id, route in sorted(config.routes.items())
             if _node_selector_match(route.node_selector, node)
-            and _render_target_lang_selector_match(route.render_target_lang_selector, render_target_lang)
         ]
-        if matched:
-            return matched
+    else:
+        node_matched = [route for _, route in sorted(config.routes.items())]
+
+    # Step 2: filter by render_target_lang
+    lang_matched = [
+        route
+        for route in node_matched
+        if _render_target_lang_selector_match(route.render_target_lang_selector, render_target_lang)
+    ]
+
+    if lang_matched:
+        return lang_matched
+    # Step 3: fallback to default route if language filtering removed everything
+    if node_matched:
+        return node_matched
     return [config.routes[config.default_route]]
 
 
