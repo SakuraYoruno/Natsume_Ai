@@ -167,6 +167,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 return False
+            # Phase 4: 通话动作
+            if reply.msg_type in (MsgType.VOICE_CALL, MsgType.VIDEO_CALL, MsgType.CANCEL_CALL):
+                if self._bridge_queue_enabled():
+                    success = self._send_call_via_bridge_queue(reply)
+                    detail = f"bridge_queue_{reply.msg_type.value}"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                return False
             detail = f"unsupported msg_type={reply.msg_type.value}"
             return False
         except Exception as exc:
@@ -532,6 +540,46 @@ class WeChatAdapter(AbstractPlatformAdapter):
             result_file=result_file,
         )
         return bool((result or {}).get("success"))
+
+    def _send_call_via_bridge_queue(self, reply: UnifiedReply) -> bool:
+        """Phase 4: 通过 bridge 命令队列发送语音/视频通话指令。
+
+        action 从 reply.msg_type.value 映射：
+          MsgType.VOICE_CALL  → action="voice_call"
+          MsgType.VIDEO_CALL  → action="video_call"
+          MsgType.CANCEL_CALL → action="cancel_call"
+        """
+        from edge_client.channels.wechat_command_queue import (
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+
+        action = reply.msg_type.value  # "voice_call" / "video_call" / "cancel_call"
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        request_id = str(reply.raw_extra.get("request_id") or f"gateway-{action}-{now_ms}-{uuid.uuid4().hex[:8]}")
+        target = reply.conversation_id or reply.content or ""
+        target_candidates = self._build_search_candidates(target) if target else []
+        row = enqueue_wechat_command(
+            action=action,
+            target=target,
+            target_candidates=target_candidates,
+            request_id=request_id,
+            queue_file=queue_file,
+            ts_ms=now_ms,
+        )
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=self._resolve_command_timeout_ms(),
+            result_file=result_file,
+        )
+        ok = bool((result or {}).get("success"))
+        if ok:
+            logger.info("WeChatAdapter: %s to '%s' OK", action, target)
+        else:
+            logger.warning("WeChatAdapter: %s to '%s' failed: %s", action, target, (result or {}).get("detail", ""))
+        return ok
 
     # NOTE: Legacy _send_via_pywinauto has been removed.
     # All outbound messages go through the UIA Bridge command queue.

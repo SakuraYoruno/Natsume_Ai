@@ -871,3 +871,92 @@ async def post_gateway_reply(
         result.latency_ms,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: 微信语音/视频通话便捷方法
+# ---------------------------------------------------------------------------
+
+
+async def post_voice_call(
+    *,
+    target: str,
+    conversation_id: str | None = None,
+    platform: str = "wechat",
+    request_id: str | None = None,
+    wait_result: bool = True,
+    timeout_ms: int = 15000,
+) -> EdgeRpcCallResult:
+    """通过 Gateway 向微信联系人发起语音通话。
+
+    Args:
+        target: 联系人昵称或 wxid
+        conversation_id: 会话 ID（默认使用 target）
+        platform: 平台（默认 wechat）
+        request_id: 请求 ID（可选）
+        wait_result: 是否等待结果（默认 True）
+        timeout_ms: 超时时间 ms（默认 15000，通话操作需要更长时间）
+    """
+    return await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id or target,
+        content=target,
+        msg_type="voice_call",
+        request_id=request_id,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
+    )
+
+
+async def post_video_call(
+    *,
+    target: str,
+    conversation_id: str | None = None,
+    platform: str = "wechat",
+    request_id: str | None = None,
+    wait_result: bool = True,
+    timeout_ms: int = 15000,
+) -> EdgeRpcCallResult:
+    """通过 Gateway 向微信联系人发起视频通话。
+
+    Args:
+        target: 联系人昵称或 wxid
+        conversation_id: 会话 ID（默认使用 target）
+        platform: 平台（默认 wechat）
+        request_id: 请求 ID（可选）
+        wait_result: 是否等待结果（默认 True）
+        timeout_ms: 超时时间 ms（默认 15000）
+    """
+    return await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id or target,
+        content=target,
+        msg_type="video_call",
+        request_id=request_id,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
+    )
+
+
+async def post_cancel_call(
+    *,
+    platform: str = "wechat",
+    request_id: str | None = None,
+    timeout_ms: int = 10000,
+) -> EdgeRpcCallResult:
+    """取消当前正在进行的微信通话。
+
+    Args:
+        platform: 平台（默认 wechat）
+        request_id: 请求 ID（可选）
+        timeout_ms: 超时时间 ms（默认 10000）
+    """
+    return await post_gateway_reply(
+        platform=platform,
+        conversation_id="_cancel_call",
+        content="",
+        msg_type="cancel_call",
+        request_id=request_id,
+        wait_result=True,
+        timeout_ms=timeout_ms,
+    )

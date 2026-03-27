@@ -32,6 +32,10 @@ class MsgType(str, Enum):
     EMOJI = "emoji"
     SYSTEM = "system"
     UNKNOWN = "unknown"
+    # Phase 4: 通话动作（不是消息类型，而是通过 Gateway reply 触发的操作）
+    VOICE_CALL = "voice_call"
+    VIDEO_CALL = "video_call"
+    CANCEL_CALL = "cancel_call"
 
     @classmethod
     def from_wx_type(cls, wx_type: int | str) -> "MsgType":
