@@ -241,6 +241,9 @@
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_phase1_20260327.md
   用途：wxautox4 Bridge Phase 1 开发实测报告（2026-03-27）。记录 Phase 1 新增 9 个 actions（IsOnline/GetMyInfo/好友群列表/历史消息/媒体下载/监听管理/ChatWith）的实现，含 10 条待真机验证测试用例（T-P1-01~T-P1-10）。
   读者：MASTER、运行节点（按用例验证）。
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_phase2_20260327.md
+  用途：wxautox4 Bridge Phase 2 开发实测报告（2026-03-27）。记录 Phase 2 新增 8 个 actions（GetSubWindow/ChatInfo/GetDialog/SendUrlCard/GetAllMessage/GetNewFriends/GetFriendDetails）+ LinkMessage.get_url() 解析 + Gateway HTTP 查询端点（POST /v1/gateway/wechat/query），含 11 条待真机验证测试用例（T-P2-01~T-P2-11）。
+  读者：MASTER、运行节点（按用例验证）。
   用途：wxautox4 Bridge 集成开发实测报告（2026-03-27）。新增 wxautox4 作为微信自动化 bridge 后端（替代自研 UIA Bridge），外部协议完全兼容（JSONL 命令队列 + webhook POST）。改动 5 个文件，含 8 项真机测试清单（P0×4 / P1×2 / P2×2），涵盖环境安装、独立启动、inbound 消息转发、outbound 命令执行、热切换回退、图片发送、消息去重、群聊识别。
   读者：MASTER、实现层、Project（文档代理）。
 

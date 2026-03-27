@@ -344,6 +344,25 @@ class InboundProcessor:
             logger.debug("media download failed: %s", exc)
         return ""
 
+    def _extract_link_url(self, msg: Any) -> str:
+        """Phase 2: Extract URL from a LinkMessage object.
+
+        Returns the URL string, or empty string if not a link message.
+        """
+        msg_type_code = _resolve_msg_type_code(msg)
+        # Link messages have type code 49
+        if msg_type_code != 49:
+            return ""
+        try:
+            url = msg.get_url()
+            if url:
+                return str(url).strip()
+        except AttributeError:
+            pass  # not a LinkMessage
+        except Exception as exc:
+            logger.debug("LinkMessage.get_url() failed: %s", exc)
+        return ""
+
     def _forward_one_message(self, msg: Any, *, chat_name: str, ts_ms: int) -> None:
         """Forward a single wxautox4 message to the edge callback."""
         sender = str(
@@ -372,6 +391,9 @@ class InboundProcessor:
         if not media_path:
             media_path = self._try_download_media(msg)
 
+        # Phase 2: try to extract link URL from LinkMessage
+        link_url = self._extract_link_url(msg)
+
         # Build webhook body — format identical to wechat_uia_bridge.py
         body: dict[str, Any] = {
             "id": msg_id,
@@ -393,6 +415,9 @@ class InboundProcessor:
 
         if media_path:
             body["media_url"] = media_path
+
+        if link_url:  # Phase 2: link message URL
+            body["link_url"] = link_url
 
         if _post_to_edge_callback(self._edge_url, body, timeout_s=self._callback_timeout_s):
             self._stats["forwarded"] += 1
@@ -431,7 +456,7 @@ class OutboundProcessor:
       - chat_with          → wx.ChatWith(who)
     """
 
-    # All supported actions (Phase 1 additions marked with # P1)
+    # All supported actions (Phase 1 additions marked with # P1, Phase 2 with # P2)
     SUPPORTED_ACTIONS = {
         # Original
         "send_text",
@@ -450,6 +475,17 @@ class OutboundProcessor:
         "listen_stop",           # P1
         # Phase 1 — navigation
         "chat_with",             # P1
+        # Phase 2 — window & session
+        "get_sub_window",        # P2
+        "get_all_sub_windows",   # P2
+        "get_chat_info",         # P2
+        "get_dialog",            # P2
+        # Phase 2 — messaging
+        "send_url_card",         # P2
+        "get_all_messages",      # P2
+        # Phase 2 — contacts
+        "get_new_friends",       # P2
+        "get_friend_details",    # P2
     }
 
     def __init__(
@@ -685,6 +721,112 @@ class OutboundProcessor:
                 result["resolved_target"] = chat_target
                 self._stats["executed"] += 1
                 logger.info("command %s: chat_with '%s' OK", command_id, chat_target)
+
+            # ── Phase 2: Window & Session ───────────────────────────────────
+
+            elif action == "get_sub_window":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "get_sub_window requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                window = self._wx.GetSubWindow(chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(window)
+                self._stats["executed"] += 1
+                logger.info("command %s: get_sub_window '%s' OK", command_id, chat_target)
+
+            elif action == "get_all_sub_windows":
+                windows = self._wx.GetAllSubWindow()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(windows)
+                result["count"] = len(windows) if isinstance(windows, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_all_sub_windows OK count=%s", command_id, result["count"])
+
+            elif action == "get_chat_info":
+                # ChatInfo() returns info about the currently focused chat
+                info = self._wx.ChatInfo()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(info)
+                self._stats["executed"] += 1
+                logger.info("command %s: get_chat_info OK", command_id)
+
+            elif action == "get_dialog":
+                # GetDialog() detects and returns any open dialog/popup
+                dialog = self._wx.GetDialog()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(dialog)
+                result["has_dialog"] = dialog is not None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_dialog OK has_dialog=%s", command_id, result["has_dialog"])
+
+            # ── Phase 2: Messaging ──────────────────────────────────────────
+
+            elif action == "send_url_card":
+                # Required fields: url, who (target); optional: title, desc
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "send_url_card requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                url = str(command.get("url") or content or "").strip()
+                if not url:
+                    result["reason_code"] = "WECHAT_MISSING_PARAMS"
+                    result["detail"] = "send_url_card requires 'url' parameter"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                title = str(command.get("title") or "").strip()
+                desc = str(command.get("desc") or command.get("description") or "").strip()
+                self._wx.SendUrlCard(url, title, desc, who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: send_url_card to '%s' url=%s OK", command_id, chat_target, url[:60])
+
+            elif action == "get_all_messages":
+                # GetAllMessage() returns all messages in the current chat view
+                all_msgs = self._wx.GetAllMessage()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(all_msgs)
+                result["count"] = len(all_msgs) if isinstance(all_msgs, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_all_messages OK count=%s", command_id, result["count"])
+
+            # ── Phase 2: Contacts ───────────────────────────────────────────
+
+            elif action == "get_new_friends":
+                # GetNewFriends() returns pending friend requests
+                new_friends = self._wx.GetNewFriends()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(new_friends)
+                result["count"] = len(new_friends) if isinstance(new_friends, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_new_friends OK count=%s", command_id, result["count"])
+
+            elif action == "get_friend_details":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "get_friend_details requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                details = self._wx.GetFriendDetails(chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(details)
+                self._stats["executed"] += 1
+                logger.info("command %s: get_friend_details '%s' OK", command_id, chat_target)
 
             else:
                 result["reason_code"] = "WECHAT_UNKNOWN_ACTION"

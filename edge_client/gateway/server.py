@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from edge_client.gateway.models import Platform, UnifiedReply
 from edge_client.gateway.normalizer import MessageNormalizer
 from edge_client.gateway.router import GatewayRouter
+from edge_client.gateway.wechat_query_routes import router as _wechat_query_router
 
 logger = logging.getLogger("Natsume.edge.gateway.server")
 
@@ -56,6 +57,9 @@ def create_gateway_app(
         description="外部消息统一网关 — 将微信/QQ/飞书/企微消息路由到 Host Brain",
         version="0.1.0",
     )
+
+    # Phase 2: WeChat query routes (GET/POST /v1/gateway/wechat/query)
+    app.include_router(_wechat_query_router)
 
     # ------------------------------------------------------------------
     # POST /v1/gateway/{platform}/webhook — 接收平台消息推送

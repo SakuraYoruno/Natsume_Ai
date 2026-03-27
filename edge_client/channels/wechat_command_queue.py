@@ -32,6 +32,17 @@ ALLOWED_WECHAT_COMMAND_ACTIONS = {
     "listen_stop",           # wx.StopListening()
     # ── Phase 1: Navigation ───────────────────────────────────────────────
     "chat_with",             # wx.ChatWith(who)
+    # ── Phase 2: Window & Session ─────────────────────────────────────────
+    "get_sub_window",        # wx.GetSubWindow(who)
+    "get_all_sub_windows",   # wx.GetAllSubWindow()
+    "get_chat_info",         # wx.ChatInfo()
+    "get_dialog",            # wx.GetDialog()
+    # ── Phase 2: Messaging ────────────────────────────────────────────────
+    "send_url_card",         # wx.SendUrlCard(url, title, desc, who)
+    "get_all_messages",      # wx.GetAllMessage()
+    # ── Phase 2: Contacts ─────────────────────────────────────────────────
+    "get_new_friends",       # wx.GetNewFriends()
+    "get_friend_details",    # wx.GetFriendDetails(who)
 }
 
 # --- Incremental read state for result file ---
