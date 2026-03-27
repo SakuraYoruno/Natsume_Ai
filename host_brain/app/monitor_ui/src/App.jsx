@@ -11,7 +11,8 @@ import Bond from './pages/Bond.jsx'
 import Tools from './pages/Tools.jsx'
 import Automation from './pages/Automation.jsx'
 import AgentLoop from './pages/AgentLoop.jsx'
-import WeChat from './pages/WeChat.jsx'
+import Gateway from './pages/Gateway.jsx'
+import SkillsHub from './pages/SkillsHub.jsx'
 
 export default function App() {
   return (
@@ -29,7 +30,10 @@ export default function App() {
           <Route path="tools" element={<Tools />} />
           <Route path="automation" element={<Automation />} />
           <Route path="agent" element={<AgentLoop />} />
-          <Route path="wechat" element={<WeChat />} />
+          <Route path="gateway" element={<Gateway />} />
+          <Route path="skills" element={<SkillsHub />} />
+          {/* 向后兼容：旧 /wechat 路由重定向到 /gateway */}
+          <Route path="wechat" element={<Navigate to="/gateway" replace />} />
         </Route>
       </Routes>
     </HashRouter>

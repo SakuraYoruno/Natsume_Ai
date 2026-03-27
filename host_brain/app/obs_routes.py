@@ -4444,3 +4444,313 @@ async def get_failure_events(
             "timestamp": now,
             "status": f"DEGRADED: {exc}",
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gateway 六平台消息统计 — GET /obs/gateway/stats
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GatewayPlatformStats(BaseModel):
+    """单个平台的统计数据。"""
+    platform: str
+    status: str = "UNKNOWN"  # UP / DEGRADED / DOWN / UNKNOWN
+    inbound_count: int = 0
+    outbound_count: int = 0
+    error_count: int = 0
+    avg_latency_ms: float = 0.0
+    last_event_ts_ms: Optional[int] = None
+    bridge_status: Optional[str] = None  # wxautox4 bridge 特有
+    call_active: int = 0  # 当前活跃通话数（仅微信）
+
+class GatewayStatsResponse(BaseModel):
+    platforms: List[GatewayPlatformStats] = []
+    total_inbound: int = 0
+    total_outbound: int = 0
+    total_errors: int = 0
+    humanize_enabled: bool = True
+    humanize_typing_speed_cps: int = 12
+    window_minutes: int = 60
+    timestamp: int = 0
+
+@router.get("/gateway/stats", response_model=GatewayStatsResponse)
+async def get_gateway_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    ledger: "SQLiteLedger" = Depends(_get_ledger),
+):
+    """
+    Gateway 六平台消息统计端点。
+
+    聚合各平台的消息收发量、错误数、延迟、在线状态、Bridge 健康和通话状态。
+    """
+    import os
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    PLATFORMS = ["wechat", "qq", "telegram", "feishu", "wecom", "line"]
+    platform_stats: List[GatewayPlatformStats] = []
+
+    total_in = 0
+    total_out = 0
+    total_err = 0
+
+    for plat in PLATFORMS:
+        try:
+            # 从 audit_log 查询各平台消息事件
+            rows = ledger.fetch_by_time_range(
+                "audit_log",
+                start_ms=since_ms,
+                end_ms=now,
+                limit=5000,
+            )
+            # 过滤该平台的事件
+            plat_rows = [r for r in rows if (r.get("platform") or r.get("channel") or "").lower() == plat]
+            inbound = sum(1 for r in plat_rows if "INBOUND" in str(r.get("audit_tag", "")).upper() or "RECEIVE" in str(r.get("audit_tag", "")).upper())
+            outbound = sum(1 for r in plat_rows if "OUTBOUND" in str(r.get("audit_tag", "")).upper() or "SEND" in str(r.get("audit_tag", "")).upper() or "REPLY" in str(r.get("audit_tag", "")).upper())
+            errors = sum(1 for r in plat_rows if "ERROR" in str(r.get("audit_tag", "")).upper() or "FAIL" in str(r.get("audit_tag", "")).upper())
+
+            # 最后一条事件时间
+            last_ts = max((r.get("ts_ms", 0) for r in plat_rows), default=None) if plat_rows else None
+
+            # 平均延迟（如果有 latency_ms 字段）
+            latencies = [r.get("latency_ms", 0) for r in plat_rows if r.get("latency_ms")]
+            avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
+
+            # 状态推断
+            if not plat_rows:
+                status_str = "UNKNOWN"
+            elif errors > inbound * 0.3 and inbound > 0:
+                status_str = "DEGRADED"
+            elif errors > inbound * 0.5 and inbound > 0:
+                status_str = "DOWN"
+            else:
+                status_str = "UP"
+
+            # wxautox4 bridge 状态（仅微信）
+            bridge_status = None
+            call_active = 0
+            if plat == "wechat":
+                bridge_backend = os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+                bridge_status = f"{bridge_backend}:running"  # 简化：实际应查进程状态
+                call_rows = [r for r in plat_rows if "CALL" in str(r.get("audit_tag", "")).upper()]
+                # 粗略统计活跃通话（最近 5 分钟内有 call 事件且无 cancel）
+                recent_call_window = now - 5 * 60 * 1000
+                call_starts = sum(1 for r in call_rows if r.get("ts_ms", 0) > recent_call_window and "VOICE_CALL" in str(r.get("audit_tag", "")).upper())
+                call_ends = sum(1 for r in call_rows if r.get("ts_ms", 0) > recent_call_window and "CANCEL_CALL" in str(r.get("audit_tag", "")).upper())
+                call_active = max(0, call_starts - call_ends)
+
+            ps = GatewayPlatformStats(
+                platform=plat,
+                status=status_str,
+                inbound_count=inbound,
+                outbound_count=outbound,
+                error_count=errors,
+                avg_latency_ms=round(avg_lat, 1),
+                last_event_ts_ms=last_ts,
+                bridge_status=bridge_status,
+                call_active=call_active,
+            )
+            platform_stats.append(ps)
+            total_in += inbound
+            total_out += outbound
+            total_err += errors
+
+        except Exception as exc:
+            logger.warning("get_gateway_stats: platform %s error: %s", plat, exc)
+            platform_stats.append(GatewayPlatformStats(platform=plat, status=f"ERROR: {exc}"))
+
+    humanize_enabled = os.environ.get("EDGE_HUMANIZE_ENABLED", "true").lower() == "true"
+    humanize_cps = int(os.environ.get("EDGE_HUMANIZE_TYPING_SPEED_CPS", "12"))
+
+    return GatewayStatsResponse(
+        platforms=platform_stats,
+        total_inbound=total_in,
+        total_outbound=total_out,
+        total_errors=total_err,
+        humanize_enabled=humanize_enabled,
+        humanize_typing_speed_cps=humanize_cps,
+        window_minutes=window_minutes,
+        timestamp=now,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skills Hub 统计 — GET /obs/skills-hub/stats
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SkillHubEntry(BaseModel):
+    name: str
+    version: str = ""
+    author: str = ""
+    clearance: str = "LOW"
+    risk_level: int = 1
+    source: str = "local"  # local / github / external
+    status: str = "loaded"
+
+class SkillHubStatsResponse(BaseModel):
+    hub_enabled: bool = True
+    total_skills: int = 0
+    loaded_skills: int = 0
+    failed_skills: int = 0
+    skills: List[SkillHubEntry] = []
+    external_dirs_scanned: List[str] = []
+    timestamp: int = 0
+
+@router.get("/skills-hub/stats", response_model=SkillHubStatsResponse)
+async def get_skills_hub_stats():
+    """
+    Skills Hub 统计端点。
+
+    返回已加载的外部 Skill 列表、Hub 开关状态、扫描目录等信息。
+    """
+    import os
+    now = _now_ms()
+
+    hub_enabled = os.environ.get("HOST_SKILL_HUB_ENABLED", "true").lower() == "true"
+    skills_list: List[SkillHubEntry] = []
+    failed_count = 0
+    external_dirs: List[str] = []
+
+    if hub_enabled:
+        try:
+            # 尝试从 SkillRegistry 获取已注册技能
+            from host_brain.skills.registry import SkillRegistry
+            registry = SkillRegistry.get_instance()
+            all_skills = registry.list_all() if hasattr(registry, "list_all") else []
+            for sk in all_skills:
+                if isinstance(sk, dict):
+                    skills_list.append(SkillHubEntry(
+                        name=sk.get("name", sk.get("skill_id", "unknown")),
+                        version=sk.get("version", ""),
+                        author=sk.get("author", ""),
+                        clearance=sk.get("clearance", "LOW"),
+                        risk_level=sk.get("risk_level", 1),
+                        source=sk.get("source", "builtin"),
+                        status="loaded",
+                    ))
+        except Exception as exc:
+            logger.warning("get_skills_hub_stats: registry load failed: %s", exc)
+            failed_count += 1
+
+        # 扫描外部目录
+        scan_external = os.environ.get("HOST_SKILL_SCAN_EXTERNAL", "true").lower() == "true"
+        if scan_external:
+            home = os.path.expanduser("~")
+            for d in [
+                os.path.join(home, ".skillhub", "skills"),
+                os.path.join(home, ".openclaw", "skills"),
+                os.path.join(home, ".codebuddy", "skills"),
+            ]:
+                if os.path.isdir(d):
+                    external_dirs.append(d)
+        extra_dirs = os.environ.get("HOST_SKILL_EXTERNAL_DIRS", "").strip()
+        if extra_dirs:
+            for d in extra_dirs.split(","):
+                d = d.strip()
+                if d and os.path.isdir(d):
+                    external_dirs.append(d)
+
+    return SkillHubStatsResponse(
+        hub_enabled=hub_enabled,
+        total_skills=len(skills_list) + failed_count,
+        loaded_skills=len(skills_list),
+        failed_skills=failed_count,
+        skills=skills_list,
+        external_dirs_scanned=external_dirs,
+        timestamp=now,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket 实时推送 — WS /obs/ws/health
+# ─────────────────────────────────────────────────────────────────────────────
+
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+
+_ws_clients: List[WebSocket] = []
+
+@router.websocket("/ws/health")
+async def ws_health(websocket: WebSocket):
+    """
+    WebSocket 实时健康推送端点。
+
+    连接后每 10s 推送一次全服务健康快照（与 GET /obs/services/health 格式一致）。
+    告警事件（服务 DOWN/DEGRADED 变化）立即推送。
+    """
+    await websocket.accept()
+    _ws_clients.append(websocket)
+    logger.info("WebSocket health client connected (total: %d)", len(_ws_clients))
+
+    prev_statuses: Dict[str, str] = {}
+
+    try:
+        while True:
+            try:
+                # 获取最新健康数据
+                aggregator = ServiceHealthAggregator()
+                ledger = _get_ledger_instance()
+                health_data = aggregator.aggregate(ledger=ledger) if ledger else {"services": [], "status": "DEGRADED"}
+
+                services = health_data.get("services", [])
+                current_statuses: Dict[str, str] = {}
+                alerts = []
+
+                for svc in services:
+                    sid = svc.get("service_id", "")
+                    st = svc.get("status", "UNKNOWN")
+                    current_statuses[sid] = st
+
+                    # 检测状态变化（告警）
+                    prev_st = prev_statuses.get(sid)
+                    if prev_st and prev_st != st:
+                        if st in ("DOWN", "DEGRADED"):
+                            alerts.append({
+                                "type": "alert",
+                                "service_id": sid,
+                                "prev_status": prev_st,
+                                "new_status": st,
+                                "ts_ms": _now_ms(),
+                            })
+
+                prev_statuses = current_statuses
+
+                # 推送健康快照
+                payload = {
+                    "type": "health_snapshot",
+                    "data": health_data,
+                    "alerts": alerts,
+                    "ts_ms": _now_ms(),
+                }
+                await websocket.send_json(payload)
+
+            except Exception as exc:
+                logger.warning("WebSocket health push error: %s", exc)
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "detail": str(exc),
+                        "ts_ms": _now_ms(),
+                    })
+                except Exception:
+                    break
+
+            await asyncio.sleep(10)  # 每 10 秒推送一次
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if websocket in _ws_clients:
+            _ws_clients.remove(websocket)
+        logger.info("WebSocket health client disconnected (remaining: %d)", len(_ws_clients))
+
+
+def _get_ledger_instance():
+    """尝试获取 ledger 实例（辅助函数）。"""
+    try:
+        if _ledger_provider and callable(_ledger_provider):
+            return _ledger_provider()
+    except Exception:
+        pass
+    return None

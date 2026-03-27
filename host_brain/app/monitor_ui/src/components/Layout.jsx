@@ -13,6 +13,8 @@ import {
   Bot,
   RefreshCw,
   PauseCircle,
+  Radio,
+  Package,
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
 
@@ -27,7 +29,8 @@ const NAV_ITEMS = [
   { to: '/tools',     icon: Wrench,         label: 'Tools'     },
   { to: '/automation',icon: Clock,          label: 'Automation'},
   { to: '/agent',      icon: Bot,            label: 'Agent'     },
-  { to: '/wechat',     icon: MessageSquare,  label: 'WeChat'    },
+  { to: '/gateway',    icon: Radio,          label: 'Gateway'   },
+  { to: '/skills',     icon: Package,        label: 'Skills'    },
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]

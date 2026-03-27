@@ -30,6 +30,7 @@ export default defineConfig({
       '/obs': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        ws: true,
       },
       '/metrics': {
         target: 'http://localhost:8000',

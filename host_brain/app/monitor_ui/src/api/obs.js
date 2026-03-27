@@ -774,3 +774,70 @@ export function fetchErrorHeatmap(params = {}) {
 export function fetchSemanticRecallStats() {
   return request('/obs/semantic-recall/stats')
 }
+
+// ===== Gateway 六平台消息统计 =====
+
+/**
+ * Gateway 六平台消息统计
+ * @param {object} params - { window_minutes }
+ */
+export function fetchGatewayStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/gateway/stats${qs ? '?' + qs : ''}`)
+}
+
+// ===== Skills Hub 统计 =====
+
+/**
+ * Skills Hub 技能列表与统计
+ */
+export function fetchSkillsHubStats() {
+  return request('/obs/skills-hub/stats')
+}
+
+// ===== WebSocket 实时健康推送 =====
+
+/**
+ * 创建 WebSocket 连接到 /obs/ws/health
+ * @param {function} onMessage - 收到消息的回调 (data: object)
+ * @param {function} onError - 错误回调 (error: Event)
+ * @param {function} onClose - 关闭回调
+ * @returns {{ close: function }} - 返回关闭句柄
+ */
+export function connectHealthWebSocket(onMessage, onError, onClose) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  const url = `${protocol}//${host}/obs/ws/health`
+
+  const ws = new WebSocket(url)
+
+  ws.onopen = () => {
+    console.log('[WS] Health WebSocket connected')
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      onMessage?.(data)
+    } catch (e) {
+      console.warn('[WS] Failed to parse message:', e)
+    }
+  }
+
+  ws.onerror = (error) => {
+    console.warn('[WS] Health WebSocket error:', error)
+    onError?.(error)
+  }
+
+  ws.onclose = () => {
+    console.log('[WS] Health WebSocket closed')
+    onClose?.()
+  }
+
+  return {
+    close: () => ws.close(),
+    ws,
+  }
+}

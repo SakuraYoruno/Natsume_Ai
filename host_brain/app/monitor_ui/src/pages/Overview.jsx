@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse, Cpu, Users } from 'lucide-react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
+import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse, Cpu, Users, AlertTriangle, WifiOff } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
-import { fetchServicesHealth, fetchSubsystemsStats, fetchAgentLoopStats, fetchObsMetrics, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats } from '../api/obs.js'
+import { fetchServicesHealth, fetchSubsystemsStats, fetchAgentLoopStats, fetchObsMetrics, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats, connectHealthWebSocket } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -26,6 +26,35 @@ export default function Overview() {
   const [windowMinutes, setWindowMinutes] = useState(60)
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+
+  // WebSocket 实时推送
+  const [wsConnected, setWsConnected] = useState(false)
+  const [wsAlerts, setWsAlerts] = useState([])
+  const wsRef = useRef(null)
+
+  useEffect(() => {
+    // 尝试建立 WebSocket 连接（优雅降级：失败时完全依赖轮询）
+    try {
+      const conn = connectHealthWebSocket(
+        (msg) => {
+          if (msg.type === 'health_snapshot' && msg.data) {
+            setData(msg.data)
+          }
+          if (msg.alerts && msg.alerts.length > 0) {
+            setWsAlerts(prev => [...msg.alerts, ...prev].slice(0, 20))
+          }
+        },
+        () => setWsConnected(false),
+        () => setWsConnected(false),
+      )
+      wsRef.current = conn
+      setWsConnected(true)
+    } catch (e) {
+      // WebSocket 不可用，降级到纯轮询
+      console.warn('[Overview] WebSocket not available, falling back to polling')
+    }
+    return () => { wsRef.current?.close() }
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -78,9 +107,20 @@ export default function Overview() {
     <div className="space-y-6">
       {/* 页头 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">全服务健康总览</h1>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">全服务健康总览</h1>
           <p className="text-sm text-gray-500 mt-0.5 whitespace-nowrap sm:whitespace-normal">双端所有服务实时状态，每 {pollingInterval}s 自动刷新</p>
+        </div>
+          {wsConnected ? (
+            <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+              <Wifi size={10} /> 实时推送
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+              <WifiOff size={10} /> 轮询模式
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* 统计窗口选择 */}
