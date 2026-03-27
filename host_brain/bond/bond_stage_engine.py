@@ -306,12 +306,17 @@ class BondStageEngine:
         ledger: SQLiteLedger | None = None,
         stage_thresholds: dict[str, int] | None = None,
         score_map: dict[str, int] | None = None,
+        milestone_tracker: Any | None = None,
     ) -> None:
         self._ledger = ledger
         self._thresholds = dict(stage_thresholds or DEFAULT_STAGE_THRESHOLDS)
         self._score_map = dict(score_map or DEFAULT_SCORE_MAP)
         # user_id → BondScoreState
         self._states: dict[str, BondScoreState] = {}
+        # Phase IX：可选注入 MilestoneTracker（接通里程碑→人格成长断路）
+        self._milestone_tracker = milestone_tracker
+        # Phase IX：缓存 PersonaGrowthTracker 实例（修复每次 new 导致 one_time 状态丢失）
+        self._persona_growth_tracker: Any | None = None
 
     # ── 公开接口 ──────────────────────────────────────────────────────────────
 
@@ -412,6 +417,26 @@ class BondStageEngine:
                 ts_ms=ts,
             )
 
+        # Phase IX：里程碑检测 + 里程碑人格成长（接通 MilestoneTracker→PersonaGrowthTracker 断路）
+        if self._milestone_tracker is not None:
+            try:
+                new_milestones = self._milestone_tracker.on_event(
+                    user_id=uid,
+                    event_type=str(update_kind).strip().upper(),
+                    ts_ms=ts,
+                    metadata={
+                        "from_stage": from_stage,
+                        "to_stage": new_stage,
+                        "transition_status": transition_status,
+                    },
+                )
+                for ms in new_milestones:
+                    self._trigger_milestone_growth(uid, ms.milestone_type, ts)
+            except Exception as _ms_exc:
+                _logger.warning(
+                    "里程碑检测失败（降级跳过）: user=%s error=%s", uid, _ms_exc,
+                )
+
         return result
 
     # ── Phase IV：人格成长触发 ────────────────────────────────────────────
@@ -426,11 +451,14 @@ class BondStageEngine:
     ) -> None:
         """阶段晋级时触发 PersonaGrowthTracker。
 
+        Phase IX 改进：缓存 PersonaGrowthTracker 实例，修复每次 new 导致
+        _triggered_rules 内存状态丢失的问题。
         降级处理：如果 PersonaGrowthTracker 不可用，仅记录日志。
         """
         try:
-            from host_brain.persona.persona_growth import PersonaGrowthTracker
-            tracker = PersonaGrowthTracker()
+            tracker = self._get_persona_growth_tracker()
+            if tracker is None:
+                return
             result = tracker.on_stage_promoted(
                 user_id=user_id,
                 from_stage=from_stage,
@@ -446,6 +474,48 @@ class BondStageEngine:
                 "人格成长触发失败（降级跳过）: user=%s %s→%s error=%s",
                 user_id, from_stage, to_stage, exc,
             )
+
+    def _trigger_milestone_growth(
+        self,
+        user_id: str,
+        milestone_type: str,
+        ts_ms: int,
+    ) -> None:
+        """Phase IX：里程碑事件触发人格成长——接通 MilestoneTracker→PersonaGrowthTracker。"""
+        try:
+            tracker = self._get_persona_growth_tracker()
+            if tracker is None:
+                return
+            # milestone_type 可能包含阶段后缀（如 "STAGE_PROMOTED:FRIEND→CLOSE_FRIEND"）
+            # 提取基础类型作为里程碑键
+            base_type = milestone_type.split(":")[0].lower()
+            result = tracker.on_milestone(
+                user_id=user_id,
+                milestone_key=base_type,
+                ts_ms=ts_ms,
+            )
+            if result.applied:
+                _logger.info(
+                    "里程碑人格成长触发: user=%s milestone=%s applied=%s",
+                    user_id, milestone_type, result.applied,
+                )
+        except Exception as exc:
+            _logger.warning(
+                "里程碑人格成长失败（降级跳过）: user=%s milestone=%s error=%s",
+                user_id, milestone_type, exc,
+            )
+
+    def _get_persona_growth_tracker(self) -> Any:
+        """获取缓存的 PersonaGrowthTracker 实例（延迟创建+复用）。"""
+        if self._persona_growth_tracker is not None:
+            return self._persona_growth_tracker
+        try:
+            from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
+            self._persona_growth_tracker = PersonaGrowthTracker()
+            return self._persona_growth_tracker
+        except Exception as exc:
+            _logger.warning("PersonaGrowthTracker 不可用: %s", exc)
+            return None
 
     def get_state(self, user_id: str) -> BondScoreState:
         """获取用户当前 Bond 积分状态。"""

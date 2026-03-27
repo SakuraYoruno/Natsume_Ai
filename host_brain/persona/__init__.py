@@ -59,6 +59,11 @@ from host_brain.persona.proactive_voice import (
     PersonaProactiveVoice,
     ProactiveExpression,
 )
+from host_brain.persona.interaction_growth_analyzer import (
+    InteractionGrowthAnalyzer,
+    InteractionGrowthResult,
+    make_interaction_growth_task_config,
+)
 
 __all__ = [
     # personality_traits.py
@@ -100,4 +105,8 @@ __all__ = [
     # proactive_voice.py (Phase VIII)
     "PersonaProactiveVoice",
     "ProactiveExpression",
+    # interaction_growth_analyzer.py (Phase IX)
+    "InteractionGrowthAnalyzer",
+    "InteractionGrowthResult",
+    "make_interaction_growth_task_config",
 ]

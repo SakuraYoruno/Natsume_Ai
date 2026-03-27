@@ -337,6 +337,122 @@ class PersonaGrowthTracker:
             reason=rule.description,
         )
 
+    # ── 交互驱动成长（Phase IX）─────────────────────────────────────────
+
+    def on_interaction_cycle(
+        self,
+        user_id: str,
+        *,
+        interaction_stats: dict[str, int],
+        lookback_days: int = 7,
+        ts_ms: int = 0,
+    ) -> GrowthApplyResult:
+        """交互驱动的人格成长——根据实际交互频谱动态计算成长方向。
+
+        由 NatsumeScheduler 每周调度，也可手动触发。
+
+        Args:
+            user_id: 用户 ID
+            interaction_stats: 交互类型→次数统计
+            lookback_days: 分析周期天数
+            ts_ms: 时间戳
+
+        Returns:
+            GrowthApplyResult
+        """
+        uid = str(user_id).strip()
+        trigger = f"interaction_cycle:lookback={lookback_days}d"
+
+        if not interaction_stats or sum(interaction_stats.values()) < 5:
+            return GrowthApplyResult(
+                applied=False,
+                rule_trigger=trigger,
+                reason="交互数据不足（< 5 次），跳过本周期成长",
+            )
+
+        engine = self._get_engine()
+        current_traits = engine.get_traits(uid)
+
+        # 调用 InteractionGrowthAnalyzer 计算 delta
+        from host_brain.persona.interaction_growth_analyzer import (  # noqa: PLC0415
+            InteractionGrowthAnalyzer,
+        )
+        analyzer = InteractionGrowthAnalyzer()
+        analysis = analyzer.analyze(
+            interaction_stats=interaction_stats,
+            current_traits=current_traits,
+            analysis_period_days=lookback_days,
+            ts_ms=ts_ms or _now_ms(),
+        )
+
+        delta = analysis.delta
+        # 如果所有维度 delta 都是 0，跳过
+        if all(abs(v) < 0.0001 for v in delta.as_dict().values()):
+            return GrowthApplyResult(
+                applied=False,
+                rule_trigger=trigger,
+                reason=f"交互频谱无显著倾向（total={analysis.total_interactions}，dominant={analysis.dominant_interaction}）",
+            )
+
+        # 安全校验（复用 TraitDriftGuard）
+        guard_result = self._guard.check(
+            delta=delta,
+            current_traits=current_traits,
+            change_history=self._change_history.get(uid, []),
+            weekly_cumulative=self._weekly_cumulative.get(uid, {}),
+        )
+
+        if not guard_result.allowed:
+            _logger.warning(
+                "交互驱动成长被拒绝: user=%s violations=%s",
+                uid, guard_result.violations,
+            )
+            return GrowthApplyResult(
+                applied=False,
+                rule_trigger=trigger,
+                guard_result=guard_result.as_dict(),
+                reason=f"安全校验失败: {'; '.join(guard_result.violations)}",
+            )
+
+        # 应用变化
+        engine.apply_growth_delta(
+            uid,
+            delta,
+            reason=trigger,
+            ts_ms=ts_ms or _now_ms(),
+        )
+
+        # 更新追踪状态
+        if uid not in self._change_history:
+            self._change_history[uid] = []
+        self._change_history[uid].append(delta.as_dict())
+
+        if uid not in self._weekly_cumulative:
+            self._weekly_cumulative[uid] = {n: 0.0 for n in TRAIT_NAMES}
+        for name in TRAIT_NAMES:
+            self._weekly_cumulative[uid][name] = (
+                self._weekly_cumulative[uid].get(name, 0.0)
+                + abs(delta.as_dict().get(name, 0.0))
+            )
+
+        _logger.info(
+            "交互驱动成长应用: user=%s total=%d dominant=%s delta=%s",
+            uid, analysis.total_interactions,
+            analysis.dominant_interaction, delta.as_dict(),
+        )
+
+        return GrowthApplyResult(
+            applied=True,
+            rule_trigger=trigger,
+            delta_applied=delta.as_dict(),
+            guard_result=guard_result.as_dict(),
+            reason=(
+                f"交互驱动成长: {analysis.total_interactions}次交互, "
+                f"主导={analysis.dominant_interaction}, "
+                f"周期={lookback_days}天"
+            ),
+        )
+
     # ── 查询接口 ──────────────────────────────────────────────────────────
 
     def get_triggered_rules(self, user_id: str) -> set[str]:
