@@ -18,8 +18,9 @@ ALLOWED_WECHAT_COMMAND_ACTIONS = {
     "send_image",
     "send_file",
     "send_voice",
-    "voice_call",       # not supported by wxautox4; returns error
-    "video_call",       # not supported by wxautox4; returns error
+    "voice_call",       # Phase 4: wx.VoiceCall(who)
+    "video_call",       # Phase 4: wx.VideoCall(who)
+    "cancel_call",      # Phase 4: wx.CancelCall() — cancel ongoing call
     # ── Phase 1: Query actions ────────────────────────────────────────────
     "get_my_info",           # wx.GetMyInfo()
     "get_friends",           # wx.GetFriends()

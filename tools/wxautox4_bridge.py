@@ -537,6 +537,10 @@ class OutboundProcessor:
         "delete_message",        # P3  (HumanMessage.delete — requires msg cache)
         "capture_emotion",       # P3  (EmotionMessage.capture)
         "download_quote_image",  # P3  (QuoteMessage.download_quote_image)
+        # Phase 4 — call actions
+        "voice_call",            # P4  wx.VoiceCall(who)
+        "video_call",            # P4  wx.VideoCall(who)
+        "cancel_call",           # P4  wx.CancelCall()
     }
 
     def __init__(
@@ -650,11 +654,41 @@ class OutboundProcessor:
                     self._stats["executed"] += 1
                     logger.info("command %s: %s to '%s' OK", command_id, action, chat_target)
 
-            elif action in {"voice_call", "video_call"}:
-                result["reason_code"] = "WECHAT_CALL_NOT_SUPPORTED"
-                result["detail"] = f"wxautox4 does not support {action}"
-                self._stats["unsupported"] += 1
-                logger.warning("command %s: unsupported action '%s'", command_id, action)
+            # ── Phase 4: Call actions (VoiceCall / VideoCall / CancelCall) ──
+            elif action == "voice_call":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "voice_call requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.VoiceCall(who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: voice_call to '%s' OK", command_id, chat_target)
+
+            elif action == "video_call":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "video_call requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.VideoCall(who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: video_call to '%s' OK", command_id, chat_target)
+
+            elif action == "cancel_call":
+                self._wx.CancelCall()
+                result["success"] = True
+                result["status"] = "ok"
+                self._stats["executed"] += 1
+                logger.info("command %s: cancel_call OK", command_id)
 
             # ── Phase 1: Query actions ──────────────────────────────────────
 

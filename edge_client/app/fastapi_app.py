@@ -1021,7 +1021,7 @@ def _handle_wechat_command(_runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> 
             detail=f"wechat action must be one of {sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)}",
             event={"allowed_actions": sorted(ALLOWED_WECHAT_COMMAND_ACTIONS)},
         )
-    if not target:
+    if not target and action != "cancel_call":
         return EdgeGatewayResult(
             success=False,
             status=STATUS_REJECTED,
