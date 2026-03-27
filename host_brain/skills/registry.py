@@ -146,6 +146,17 @@ class SkillRegistry:
     def get(self, skill_name: str) -> SkillMeta | None:
         return self._skills.get(skill_name)
 
+    def unregister(self, skill_name: str) -> bool:
+        """移除已注册的 Skill。
+
+        Args:
+            skill_name: 要移除的 Skill 名称
+
+        Returns:
+            True 如果成功移除，False 如果不存在
+        """
+        return self._skills.pop(skill_name, None) is not None
+
     def require(self, skill_name: str) -> SkillMeta:
         meta = self.get(skill_name)
         if meta is None:
