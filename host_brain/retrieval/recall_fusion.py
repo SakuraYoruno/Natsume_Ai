@@ -332,7 +332,11 @@ class RecallFusionServiceContract:
                 candidate = _normalize_candidate(raw=raw, route=route, rank=rank)
                 if not candidate:
                     continue
-                key = str(candidate["source_ref"] or candidate["doc_id"])
+                # FIX: 使用 store_id::doc_id 作为 key，防止不同 store 产生相同
+                # source_ref/doc_id 时发生跨路由错误合并（原实现仅用 source_ref 或 doc_id）。
+                store_id_for_key = str(candidate["metadata"].get("store_id") or route.store_id or "")
+                doc_id_for_key = str(candidate["source_ref"] or candidate["doc_id"])
+                key = f"{store_id_for_key}::{doc_id_for_key}" if store_id_for_key else doc_id_for_key
                 existing = fused_candidates.get(key)
                 if existing is None:
                     fused_candidates[key] = candidate
@@ -359,9 +363,21 @@ class RecallFusionServiceContract:
             )
 
         # M27-G：情感维度路由（OPT-31）
+        # FIX: 原实现仅做列表拼接，两个分组内部排序丢失。
+        # 修复后：matched/unmatched 各自按原始分数降序保持稳定，再拼接。
         if emotion_filter is not None and candidates:
-            matched = [c for c in candidates if c.get("metadata", {}).get("emotion_tag") == emotion_filter]
-            unmatched = [c for c in candidates if c.get("metadata", {}).get("emotion_tag") != emotion_filter]
+            ef = str(emotion_filter or "").strip().lower()
+            def _has_emotion_tag(c: dict) -> bool:
+                tag = str(c.get("metadata", {}).get("emotion_tag") or "").strip().lower()
+                return bool(tag and (tag == ef or tag.startswith(ef)))
+            matched = sorted(
+                [c for c in candidates if _has_emotion_tag(c)],
+                key=_candidate_sort_key,
+            )
+            unmatched = sorted(
+                [c for c in candidates if not _has_emotion_tag(c)],
+                key=_candidate_sort_key,
+            )
             candidates = matched + unmatched
 
         if not candidates:

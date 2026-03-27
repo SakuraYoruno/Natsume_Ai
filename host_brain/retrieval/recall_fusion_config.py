@@ -284,8 +284,10 @@ def _render_target_lang_selector_match(selector: str, render_target_lang: str | 
         if token in {"*", "all", "any"}:
             return True
     lang = str(render_target_lang or "").strip().lower()
+    # FIX: 当调用方未指定 render_target_lang 时，不过滤语言限定路由（返回 True）。
+    # 原实现在 lang 为空时返回 False，导致带语言 selector 的路由被全量裁掉。
     if not lang:
-        return False
+        return True
     return lang in tokens
 
 

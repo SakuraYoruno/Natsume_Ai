@@ -244,9 +244,35 @@ def search_sqlite_ledger(
         )
         row_session_id = _extract_session_id_from_refs(evidence_refs)
         row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
+
+        # FIX: 补充语义更丰富的字段，改善文本相似度搜索质量。
+        # 原实现只拼接 detail+memory_id+evidence_refs，三者均无实质语义。
+        # 现在额外加入：intent_id（意图标识）、target_memory_id（目标记忆）、
+        # source_memory_ids（来源记忆集合）、decay_profile_id（衰减策略）、
+        # visibility（可见性标签）。
+        target_memory_id = str(row.get("target_memory_id") or "").strip()
+        source_memory_ids_raw = row.get("source_memory_ids")
+        if isinstance(source_memory_ids_raw, (list, tuple)):
+            source_ids_text = " ".join(str(s) for s in source_memory_ids_raw if s)
+        else:
+            source_ids_text = str(source_memory_ids_raw or "").strip()
+        decay_profile_id = str(row.get("decay_profile_id") or "").strip()
+        visibility = str(row.get("visibility") or "").strip()
+
         text = " ".join(
-            part for part in (detail, memory_id, " ".join(evidence_refs)) if part
+            part for part in (
+                intent_id,
+                detail,
+                memory_id,
+                target_memory_id,
+                source_ids_text,
+                decay_profile_id,
+                visibility,
+                " ".join(evidence_refs),
+            )
+            if part
         ).strip()
+
         score = _text_similarity_score(query, text)
         if score <= 0.0:
             continue
@@ -270,6 +296,9 @@ def search_sqlite_ledger(
                     "session_id": row_session_id,
                     "op_kind": op_kind,
                     "status": status or None,
+                    "target_memory_id": target_memory_id or None,
+                    "decay_profile_id": decay_profile_id or None,
+                    "visibility": visibility or None,
                     "base_score": score,
                     "score_boost": boost_meta,
                     "evidence_refs": evidence_refs,
