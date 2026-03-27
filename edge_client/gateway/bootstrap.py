@@ -125,13 +125,17 @@ def _parse_bool_env(raw: str | None, *, default: bool = False) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _wechat_bridge_backend() -> str:
+    """Return the configured WeChat bridge backend name (normalized)."""
+    return str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia").strip().lower() or "uia"
+
+
 def _wechat_uia_bridge_enabled() -> bool:
     env = os.environ
     enabled = _parse_bool_env(env.get("EDGE_WECHAT_BRIDGE_ENABLED"), default=False)
     if not enabled:
         return False
-    backend = str(env.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia").strip().lower() or "uia"
-    return backend == "uia"
+    return _wechat_bridge_backend() in {"uia", "wxautox4"}
 
 
 def _should_auto_start_uia_bridge() -> bool:
@@ -144,11 +148,21 @@ def _should_auto_start_uia_bridge() -> bool:
 
 
 def _start_uia_bridge_process(instance: GatewayInstance) -> None:
-    """Launch ``tools/wechat_uia_bridge.py`` as a subprocess and start a watchdog."""
+    """Launch the appropriate bridge subprocess and start a watchdog.
+
+    When ``EDGE_WECHAT_BRIDGE_BACKEND=wxautox4``, launches ``tools/wxautox4_bridge.py``.
+    Otherwise defaults to ``tools/wechat_uia_bridge.py``.
+    """
     repo_root = Path(__file__).resolve().parents[2]
-    bridge_script = repo_root / "tools" / "wechat_uia_bridge.py"
+    backend = _wechat_bridge_backend()
+    if backend == "wxautox4":
+        bridge_script = repo_root / "tools" / "wxautox4_bridge.py"
+        bridge_label = "wxautox4 Bridge"
+    else:
+        bridge_script = repo_root / "tools" / "wechat_uia_bridge.py"
+        bridge_label = "UIA Bridge"
     if not bridge_script.exists():
-        logger.warning("Gateway: UIA Bridge 脚本不存在: %s，跳过自动启动", bridge_script)
+        logger.warning("Gateway: %s 脚本不存在: %s，跳过自动启动", bridge_label, bridge_script)
         return
 
     # Resolve command queue paths so the bridge and adapter share the same files
@@ -172,9 +186,9 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
             cwd=str(repo_root),
         )
         instance.uia_bridge_process = proc
-        logger.info("Gateway: UIA Bridge 子进程已启动 pid=%d cmd=%s", proc.pid, " ".join(cmd))
+        logger.info("Gateway: %s 子进程已启动 pid=%d cmd=%s", bridge_label, proc.pid, " ".join(cmd))
     except Exception as exc:
-        logger.error("Gateway: UIA Bridge 子进程启动失败: %s", exc)
+        logger.error("Gateway: %s 子进程启动失败: %s", bridge_label, exc)
         return
 
     # Watchdog thread — restart the bridge if it dies unexpectedly
@@ -189,13 +203,13 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
                 restart_count += 1
                 if restart_count > max_restarts:
                     logger.error(
-                        "Gateway: UIA Bridge 已重启 %d 次，超过上限 %d，不再尝试",
-                        restart_count, max_restarts,
+                        "Gateway: %s 已重启 %d 次，超过上限 %d，不再尝试",
+                        bridge_label, restart_count, max_restarts,
                     )
                     break
                 logger.warning(
-                    "Gateway: UIA Bridge 进程退出 code=%d，尝试第 %d 次重启",
-                    retcode, restart_count,
+                    "Gateway: %s 进程退出 code=%d，尝试第 %d 次重启",
+                    bridge_label, retcode, restart_count,
                 )
                 time.sleep(2.0)
                 try:
@@ -206,9 +220,9 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
                         cwd=str(repo_root),
                     )
                     instance.uia_bridge_process = proc
-                    logger.info("Gateway: UIA Bridge 子进程已重启 pid=%d", proc.pid)
+                    logger.info("Gateway: %s 子进程已重启 pid=%d", bridge_label, proc.pid)
                 except Exception as exc:
-                    logger.error("Gateway: UIA Bridge 重启失败: %s", exc)
+                    logger.error("Gateway: %s 重启失败: %s", bridge_label, exc)
                     break
             instance._shutdown.wait(timeout=5.0)
 

@@ -13,3 +13,7 @@ pyvts>=0.3.0,<1
 # ── 可选依赖（Optional Dependencies） ──
 # redis：Rate Limit 存储后端（R4 Gate Backend），仅在启用 Redis 后端时需要
 # redis>=5.0.0,<6
+
+# wxautox4：微信自动化 bridge 后端（EDGE_WECHAT_BRIDGE_BACKEND=wxautox4 时需要）
+# 需要购买激活码：https://wxauto.org/purchase
+# wxautox4
