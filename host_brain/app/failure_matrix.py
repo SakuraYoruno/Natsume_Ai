@@ -42,7 +42,7 @@ class FailureEvent(str, Enum):
     MODULE_TIMEOUT = "MODULE_TIMEOUT"
     """任意模块超时"""
 
-    # ── TODO-110: 提示词注入检测 ──────────────────────────────────────────
+    # ── 提示词注入检测 ──────────────────────────────────────────
     PROMPT_INJECTION = "PROMPT_INJECTION"
     """检测到提示词注入攻击（CRITICAL/HIGH/MEDIUM 三级）"""
 
@@ -97,7 +97,6 @@ USER_RESPONSES: Dict[FailureEvent, str] = {
     FailureEvent.MODULE_TIMEOUT: (
         "处理超时，请稍后重试。"
     ),
-    # TODO-110
     FailureEvent.PROMPT_INJECTION: (
         "抱歉，我无法处理这个请求。"
     ),
@@ -112,7 +111,6 @@ AUDIT_TAGS: Dict[FailureEvent, str] = {
     FailureEvent.EDGE_UNREACHABLE: "EDGE_UNREACHABLE",
     FailureEvent.VISION_LOW_CONFIDENCE: "VISION_LOW_CONFIDENCE",
     FailureEvent.MODULE_TIMEOUT: "MODULE_TIMEOUT",
-    # TODO-110
     FailureEvent.PROMPT_INJECTION: "PROMPT_INJECTION",
 }
 
@@ -125,7 +123,7 @@ ABORT_FLAGS: Dict[FailureEvent, bool] = {
     FailureEvent.EDGE_UNREACHABLE: False, # 可以继续，降级为纯文本模式
     FailureEvent.VISION_LOW_CONFIDENCE: True,
     FailureEvent.MODULE_TIMEOUT: True,
-    # TODO-110: 提示词注入直接中止链路
+    # 提示词注入直接中止链路
     FailureEvent.PROMPT_INJECTION: True,
 }
 
@@ -138,7 +136,6 @@ DEGRADED_MODES: Dict[FailureEvent, Optional[str]] = {
     FailureEvent.EDGE_UNREACHABLE: "text_only",
     FailureEvent.VISION_LOW_CONFIDENCE: None,
     FailureEvent.MODULE_TIMEOUT: None,
-    # TODO-110
     FailureEvent.PROMPT_INJECTION: None,
 }
 
@@ -282,7 +279,7 @@ class FailureHandler:
             meta["timeout_seconds"] = detail.get("timeout", 0)
 
         elif event == FailureEvent.PROMPT_INJECTION:
-            # TODO-110: 记录注入检测详情
+            # 记录注入检测详情
             meta["injection_level"] = detail.get("level", "UNKNOWN")
             meta["matched_pattern"] = detail.get("matched_pattern", "")
             meta["raw_input_preview"] = detail.get("raw_input", "")[:120]

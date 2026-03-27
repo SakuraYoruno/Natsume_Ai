@@ -56,7 +56,6 @@ from host_brain.app.llm.routing_matrix import RoutingMatrix
 from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
-# TODO-99: 蒸馏引擎 + 语义召回器
 from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 
@@ -92,7 +91,6 @@ _routing_matrix: Optional[RoutingMatrix] = None
 _recall_pack_builder: Optional[RecallPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
-# TODO-99: 蒸馏引擎 + 语义召回器单例
 _distillation_engine: Optional[DistillationEngine] = None
 _semantic_recaller: Optional[SemanticRecaller] = None
 _context_compressor: Optional[Any] = None
@@ -636,7 +634,7 @@ def get_state_arbiter() -> StateArbiter:
 
 
 # ---------------------------------------------------------------------------
-# TODO-99: 蒸馏引擎 + 语义召回器工厂
+# 蒸馏引擎 + 语义召回器工厂
 # ---------------------------------------------------------------------------
 
 
