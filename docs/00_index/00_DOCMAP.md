@@ -1,8 +1,8 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v2.1
-日期：2026-03-19
+版本：v3.0
+日期：2026-03-27
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -65,13 +65,13 @@
   用途：双节点开发协作工作流规范（2026-03-26）。定义"开发节点 ⇄ 运行节点"闭环机制：开发实测报告→真机验证→运行反馈报告→修复闭环。含报告类型定义、命名规范、流程步骤、闭环判定条件。填补已删除的 WORKSHEET_Project_Codex_Git_Flow.md 空缺。
   读者：MASTER、实现层（查阅遵守）。
 
-- docs/50_project/guides/WXAUTOX4_FULL_API_INTEGRATION_PLAN.md
-  用途：wxautox4 完整 API 对接更新方案（2026-03-27）。对比 wxautox4 v40.1.11 全量 API（~30+ 方法）与 Natsume_Ai 已对接的 5 个方法的差距，制定 P1/P2/P3 三期更新计划。涵盖核心 Bridge 扩展、命令队列 Actions 扩展、Gateway 适配器与路由扩展、新增配置项、测试用例与风险注意事项。含详细代码示例和文件修改清单。
-  读者：MASTER、实现层（按计划实施）。
-
 - docs/50_project/guides/WXAUTOX4_THREE_PHASE_COMPLETION_REPORT.md
   用途：wxautox4 三期更新完整总结报告（2026-03-27）。记录三期计划全部完成情况：ALLOWED_ACTIONS 从 6 扩展到 37，新增消息对象缓存、HTTP 查询端点、朋友圈/群管理/高级消息操作等全量功能。含架构示意图、环境变量清单、40条测试用例汇总和真机验证建议。
   读者：MASTER、运行节点（按指引验证）。
+
+- docs/50_project/guides/CUSTOM_SKILL_INSTALL.md
+  用途：Natsume 自定义技能安装指南（2026-03-26）。说明如何创建 custom_providers/ 下的自定义技能 Provider，含目录约定、模板文件、注册流程与验证方式。
+  读者：CODEX、实现层。
 
 - docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md
   用途：Gateway 中文文字链路完整节点分析（2026-03-27）。追踪从 HTTP 入口到最终 COMMIT 的全部节点，涵盖两条入口路径、19 步 Gateway Orchestrator 核心、10 个 MainChain 节点、七路召回管线（含语种分离路由）、10 个情感子系统数据流、7 个 Agent 注册表、Graph 编排层时序、Supervisor 分派逻辑、render_target_lang="zh" 三重保障、完整降级机制汇总。
@@ -100,10 +100,6 @@
 - docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md
   用途：外部消息统一网关（Unified Message Gateway）完整设计方案（2026-03-24）。包含当前 UIA 桌面自动化方案的问题诊断、协议级网关架构设计、UnifiedMessage/UnifiedReply 数据模型、各平台适配器设计（微信/QQ/飞书/企微）、与现有 EdgeInputReporter 的集成方案、EdgeConfig 扩展配置、以及分阶段实施路线图。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
-
-- docs/50_project/arch/WECHAT_UIA_HIGH_PRIORITY_SOLUTIONS.md
-  用途：微信适配器高优先级问题解决方案（2026-03-26）。H1 多聊天轮询（未读嗅探+按需切换）、H2 群聊发送者识别（位置启发式昵称提取）、H3 多媒体消息支持（类型感知+占位通知+缓存目录监控+send_image 发图），含方案细节、代码、改动范围与风险缓解。已实施 commit 48c2e02。
-  读者：MASTER、实现层（查阅对齐）。
 
 - docs/50_project/phases/MULTI_AGENT_UPGRADE_PLAN.md
   用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
@@ -193,45 +189,21 @@
   用途：情感闭环测试报告（2026-03-09）。验证情感状态写入、读取与回流的完整闭环链路。
   读者：MASTER、Project（文档代理）。
 
-- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_wechat_dual_node_uia_probe_20260326.md
-  用途：双节点微信 UIAutomation 探测运行反馈报告（2026-03-26）。记录 DEV/RUN 两端主窗体均仅暴露 2~3 个顶层 UIA 元素、缺失 `mmui::ChatSingleWindow` / `mmui::ChatTextItemView` 的真机证据，用于推动 UIA 树恢复方案修复。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_wechat_uia_tree_recovery_20260326.md
-  用途：微信 4.x UIA 树恢复验证脚本运行反馈报告（2026-03-26）。记录 `verify_uia_recovery.py` 在 RUN 节点的真实执行结果、窗口类名不匹配与编码问题，以及 P0 验证未能进入三路方案分支的原因。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_wechat_uia_verify_fix_v2_20260326.md
-  用途：微信 4.x UIA 树恢复验证脚本修正（v2）运行反馈报告（2026-03-26）。记录修正版脚本在 RUN 节点已修复窗口发现、编码与 JSON 汇总问题，但三种 P0 方案仍未恢复出聊天 UIA 控件树的真机结果。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wechat_uia_tree_recovery_20260326.md
-  用途：微信 4.x UIA 树恢复验证开发实测报告（2026-03-26）。含 P0 方案（UIA 客户端冒充）的验证脚本和 7 项真机测试清单（T-01 ~ T-07），需在 RUN 节点执行验证。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wechat_uia_verify_fix_v2_20260326.md
-  用途：微信 4.x UIA 树恢复验证脚本修正版（v2）实测报告。基于 RUN 节点运行反馈的 4 项修正：窗口多类名兼容、UTF-8 编码兼容、去 emoji、双条件成功判定。含 7 项真机测试清单。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_p1_uia_strategies_20260326.md
-  用途：P1 三方案 UIA 恢复策略开发实测报告（2026-03-26）。在 P0 方案验证均失败后，实现三种更强的恢复策略：S1 持久化 UIA 事件监听器、S2 NVDA/Narrator 屏幕阅读器辅助、S3 Minimal Accessibility Client。含整合对比测试脚本和 8 项真机测试清单。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_p1_comtypes_fix_20260326.md
-  用途：P1 脚本自举修复报告（2026-03-26）。修复 comtypes.gen.UIAutomationClient 类型库缺失导致三个 P1 策略全部无法启动的问题（显式 GetModule），统一对比器 S2 的 Narrator PowerShell fallback 启动逻辑。7 项测试（P0×5 / P1×2）。
-  读者：MASTER、实现层、Project（文档代理）。
-
-- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_p1_comtypes_fix_20260326.md
-  用途：P1 脚本自举修复运行反馈报告（2026-03-26）。确认 `GetModule("UIAutomationCore.dll")` 已修复 `comtypes.gen.UIAutomationClient` 导入失败，S2 对比器已统一 Narrator PowerShell fallback；同时记录三种策略虽能启动但仍未拉起微信 4.x 聊天 UIA 树，以及 S1/S3 长跑脚本独立留证仍需改进。
-  读者：MASTER、实现层、Project（文档代理）。
-
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_telegram_adapter_20260326.md
-  用途：Telegram Userbot 适配器（Phase 6）开发实测报告（2026-03-26）。Telethon MTProto 协议实现"人感"消息收发，含 GatewayConfig 集成、EdgeConfig 环境变量、bootstrap 注册、架构文档更新。10 项真机测试（P0×5 / P1×3 / P2×2），涵盖依赖安装、首次登录、消息收发、打字模拟、延迟抖动、长文分段、代理、断线重连、多用户、群聊。
+  用途：Telegram Userbot 适配器（Phase 6）开发实测报告（2026-03-26）。Telethon MTProto 协议实现"人感"消息收发，含 GatewayConfig 集成、EdgeConfig 环境变量、bootstrap 注册、架构文档更新。10 项真机测试（P0×5 / P1×3 / P2×2）。
   读者：MASTER、实现层、Project（文档代理）。
 
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_qq_adapter_enhancement_20260326.md
-  用途：QQ 适配器增强版开发实测报告（2026-03-26）。含默认平台配置调整（wechat,qq→qq）、QQ 适配器 6 项功能增强（VOICE 发送、@提醒检测、URL/base64 图片、notice/request 事件日志、消息段构造重构）、新建单元测试 test_qq_adapter.py（27 个测试用例）。9 项真机测试（P0×5 / P1×3 / P2×1）。
+  用途：QQ 适配器增强版开发实测报告（2026-03-26）。含默认平台配置调整、QQ 适配器 6 项功能增强、新建单元测试 test_qq_adapter.py（27 个测试用例）。9 项真机测试。
   读者：MASTER、实现层、Project（文档代理）。
+
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wechat_voice_send_20260326.md
+  用途：微信语音消息发送功能实测报告（2026-03-26）。实现 PCM→silk 编码→bridge 队列发送链路，含 pysilk-mod 依赖、VoiceHandler 模块、WeChatAdapter 语音分支。
+  读者：MASTER、实现层。
+
+- docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_qq_adapter_enhancement_20260326.md
+  用途：QQ 适配器增强版运行反馈报告（2026-03-26）。真机验证 QQ 适配器增强功能的实际执行结果。
+  读者：MASTER、实现层。
 
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_line_adapter_20260326.md
   用途：LINE Messaging API 适配器开发实测报告（2026-03-26）。基于飞书 Webhook+REST 架构模式实现 LINE 官方 Messaging API 接入，含 HMAC-SHA256 签名验证、7 种消息类型解析、Reply/Push 双通道发送、EdgeConfig/GatewayConfig/bootstrap 全链路集成。11 项真机测试清单（Webhook 接收、消息解析、回复发送、签名验证等）。
@@ -241,8 +213,8 @@
   用途：情感系统 6 项 Bug 修复开发实测报告（2026-03-26）。覆盖线程安全（threading.Lock）、JSON 文件持久化、标签集统一（16 种）、VAD 映射唯一权威来源（emotion_constants.py）、EmotionTimeline/compute_emotion_echo 代码去重（~250 行）、衰减参数环境变量可配置化（9 个环境变量）。7 个文件修改，含 6 项待 RUN 节点验证测试。
   读者：MASTER、实现层、Project（文档代理）。
 
-- docs/45_testing/dev_test_reports/SOUL_SYSTEM_COMPLETENESS_AUDIT_20260326.md
-  用途：灵魂系统完整性审计报告（2026-03-26）。对 Phase I-VIII 全部 8 阶段的代码实体、测试覆盖、设计文档对齐、里程碑追溯、模块导出 6 个维度进行交叉验证。结论：灵魂系统 8 阶段全部实现完毕，12 个 persona 文件（~130KB）+ 14 个 bond 文件（~165KB），14 个测试文件覆盖全阶段，M27/M28/M29/M32 里程碑均 DONE。
+- docs/35_quality/audits/SOUL_SYSTEM_COMPLETENESS_AUDIT_20260326.md
+  用途：灵魂系统完整性审计报告（2026-03-26）。对 Phase I-VIII 全部 8 阶段的代码实体、测试覆盖、设计文档对齐、里程碑追溯、模块导出 6 个维度进行交叉验证。
   读者：MASTER、实现层、Project（文档代理）。
 
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_bridge_20260327.md
@@ -332,9 +304,9 @@
   用途：VTS 语音故障排查手册。记录语音链路常见问题、排查步骤与已知解决方案。
   读者：MASTER、Project（文档代理）。
 
-- docs/60_trace/WECHAT_4X_UIA_FEASIBILITY_ANALYSIS.md
-  用途：微信 4.x PC 版 UIAutomation 方案可行性分析报告（2026-03-25）。三种技术路线对比（纯 UIAutomation / 视觉方案 / Hook 注入），4.1.5+ "UI 树消失"问题与恢复方案，已验证开源项目汇总，与 Natsume_Ai Edge Client 架构的适配分析，风险清单与实施路径。
-  读者：MASTER、实现层（查阅对齐）。
+- docs/60_trace/BUG_FIX_LOG.md
+  用途：Bug 修复日志。记录项目代码全量排查过程中发现并修复的所有 Bug，含修复日期、影响范围与修改文件。
+  读者：MASTER、实现层。
 
 
 - artifacts/trace/HOST_CHAT_*_req_*.json

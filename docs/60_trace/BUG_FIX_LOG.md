@@ -1,3 +1,6 @@
+受众：MASTER
+标题：Bug 修复日志
+
 # Bug 修复日志 (BUG_FIX_LOG)
 
 > 本文档记录 Natsume_Ai 项目代码全量排查过程中发现并修复的所有 Bug。
