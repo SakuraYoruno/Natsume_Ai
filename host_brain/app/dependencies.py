@@ -98,6 +98,10 @@ _semantic_recaller: Optional[SemanticRecaller] = None
 _context_compressor: Optional[Any] = None
 _emotion_timeline: Optional[Any] = None
 
+# ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
+_hard_state_lock = __import__("threading").Lock()
+_hard_state: Optional[Any] = None  # 实际类型: HardState
+
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()
@@ -697,6 +701,88 @@ def get_semantic_recaller() -> SemanticRecaller:
 # ---------------------------------------------------------------------------
 # EdgeRpcClient 工厂（Host → Edge HTTP 推送）
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# 进程级 HardState 读写（ModeTransitionService + ActivityMonitor 依赖）
+# ---------------------------------------------------------------------------
+
+
+def get_hard_state():
+    """获取当前进程级 HardState 单例（延迟初始化）。
+
+    初始化时从环境变量 HOST_SYS_MODE 读取初始 sys_mode。
+    后续通过 set_sys_mode() 更新 sys_mode 字段。
+
+    Returns:
+        HardState 实例（frozen dataclass）
+    """
+    global _hard_state
+    if _hard_state is not None:
+        return _hard_state
+
+    with _hard_state_lock:
+        if _hard_state is not None:
+            return _hard_state
+
+        from host_brain.core.metabolism import normalize_hard_state  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+
+        initial_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
+        _hard_state = normalize_hard_state({
+            "energy_level": 60,
+            "mood_state": "steady",
+            "sys_mode": initial_mode,
+            "safety_flag": False,
+            "ts_ms": int(_time.time() * 1000),
+        })
+        _logger.info("HardState 已初始化 (sys_mode=%s)", _hard_state.sys_mode)
+
+    return _hard_state
+
+
+def set_sys_mode(target_mode: str) -> dict:
+    """更新进程级 HardState 的 sys_mode 字段。
+
+    通过 evolve_hard_state 产生新的 immutable HardState，
+    同时同步环境变量 HOST_SYS_MODE（供其他模块直接读取）。
+
+    Args:
+        target_mode: 目标模式（normal/focus/gaming/sleep/maintenance/locked）
+
+    Returns:
+        {"from_mode": str, "to_mode": str, "ts_ms": int}
+    """
+    global _hard_state
+    import time as _time  # noqa: PLC0415
+    from host_brain.core.metabolism import evolve_hard_state  # noqa: PLC0415
+
+    with _hard_state_lock:
+        current = get_hard_state()
+        from_mode = current.sys_mode
+        ts = int(_time.time() * 1000)
+
+        _hard_state = evolve_hard_state(
+            current,
+            sys_mode=target_mode,
+            event_kind="mode_switch",
+            ts_ms=ts,
+        )
+
+        # 同步环境变量，确保其他通过 os.environ 读取的模块也能感知切换
+        os.environ["HOST_SYS_MODE"] = _hard_state.sys_mode
+
+        _logger.info(
+            "sys_mode 已切换: %s → %s",
+            from_mode,
+            _hard_state.sys_mode,
+        )
+
+    return {
+        "from_mode": from_mode,
+        "to_mode": _hard_state.sys_mode,
+        "ts_ms": ts,
+    }
 
 
 def get_context_compressor():

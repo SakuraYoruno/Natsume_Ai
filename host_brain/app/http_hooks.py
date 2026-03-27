@@ -762,6 +762,36 @@ async def runtime_lifespan(
         except Exception as _vts_loop_exc:
             logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
 
+        # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
+        _activity_monitor = None
+        try:
+            from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
+            from host_brain.app.dependencies import get_hard_state, set_sys_mode  # noqa: PLC0415
+
+            # 初始化 ModeTransitionService（obs_routes 也会延迟初始化，此处确保提前可用）
+            from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
+            _mode_service = ModeTransitionService(
+                get_hard_state=get_hard_state,
+                set_sys_mode=set_sys_mode,
+                ledger=ledger,
+            )
+
+            _activity_monitor = ActivityMonitor(mode_service=_mode_service)
+            _activity_monitor.start()
+
+            new_module_statuses["activity_monitor"] = (
+                f"OK (gaming_check={_activity_monitor._gaming_check_interval_s}s, "
+                f"idle_check={_activity_monitor._idle_check_interval_s}s)"
+            )
+            logger.info(
+                "ActivityMonitor 已启动 (gaming_interval=%ds, idle_interval=%ds)",
+                _activity_monitor._gaming_check_interval_s,
+                _activity_monitor._idle_check_interval_s,
+            )
+        except Exception as _am_exc:
+            new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"
+            logger.warning("ActivityMonitor 启动失败（降级）: %s", _am_exc)
+
         # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
         try:
             from host_brain.observability.service_health_heartbeat import start_heartbeat
@@ -771,6 +801,14 @@ async def runtime_lifespan(
     except Exception as exc:
         logger.warning("Startup probe degraded", extra={"error": str(exc)})
     yield
+    # ── Shutdown 阶段 ──
+    # 停止 ActivityMonitor
+    try:
+        if _activity_monitor is not None:
+            _activity_monitor.stop()
+            logger.info("ActivityMonitor 已停止")
+    except Exception as _am_stop_exc:
+        logger.warning("ActivityMonitor 停止失败: %s", _am_stop_exc)
     try:
         from host_brain.observability.service_health_heartbeat import stop_heartbeat
         await stop_heartbeat()
