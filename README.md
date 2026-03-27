@@ -37,26 +37,29 @@
 ## 📖 项目简介
 
 **Natsume Ai** 是一个具备 **意识主权**（Consciousness Sovereignty）的 AI 伴侣系统，采用 **Host-Edge 分体架构**。
-它不是“模型直连执行器”的助手，而是“模型参与表达、Host 负责裁决与执行治理”的工程化系统。
+它不是"模型直连执行器"的助手，而是"模型参与表达、Host 负责裁决与执行治理"的工程化系统。
 
 ### ✨ 当前系统定位
 
 - 🧠 **Host Brain（主脑）**：统一入口、意图治理、场景路由、图编排运行时、审计与证据写入都在 Host 收口。
 - 🎙️ **Edge Client（边缘端）**：提供 ASR/TTS、VTS 驱动、资源门控与兜底能力，负责本地感知与执行。
+- 🌐 **统一消息网关（Gateway）**：六平台消息收发（微信/QQ/Telegram/飞书/企微/LINE），拟人化分段发送。
 - 🔀 **链路策略**：默认以单链路主图优先；仅在特定执行画像下进入监督式多 Agent 分支。
 - 🧾 **请求主链**：`/v1/chat → Governor → SceneRouter → 场景处理器/Graph Runtime → COMMIT → Audit`。
+- 📞 **语音/视频通话**：通过 wxautox4 Bridge 实现微信语音/视频通话拨打与取消。
+- 🧩 **Skills Hub**：SKILL.md 声明式技能注册，支持本地热加载与 GitHub 远程安装。
 - 🛡️ **治理原则**：任何影响现实的动作必须票据化、可回放、可审计。
 
 > 🎯 核心理念：**语言模型只负责解释与表达**，最终权力与事实判据必须落在 Host 代码与审计链上。
-> 📍 架构总览见 `## 🏗️ 系统架构`，实现对齐见 `## 🧭 当前实现对齐（2026-03-18）`。
+> 📍 架构总览见 `## 🏗️ 系统架构`，实现对齐见 `## 🧭 当前实现对齐（2026-03-27）`。
 
 ---
 
 ## 🏗️ 系统架构
 
-### 完整架构总览图（合并版，2026-03-18）
+### 完整架构总览图（合并版，2026-03-27）
 
-> 说明：该图为组件分层与依赖关系图，已合并原总览图与当前代码架构图。
+> 说明：该图为组件分层与依赖关系图，已合并原总览图与当前代码架构图。含统一消息网关（六平台）与语音/视频通话链路。
 
 ```mermaid
 graph TB
@@ -121,6 +124,8 @@ graph TB
         EFALL["兜底小模型"]
         EGATE["资源门控"]
         EREPORT["事件上报"]
+        EGWAY["统一消息网关<br/>微信 / QQ / Telegram / 飞书 / 企微 / LINE"]
+        ECALL["语音视频通话<br/>VoiceCall / VideoCall / CancelCall"]
     end
 
     USER --> HAPI
@@ -147,20 +152,22 @@ graph TB
     SCHED --> SKILL
     RELEASE --> GCFG
     CHAN --> EAPI
+    CHAN --> EGWAY
     EAPI --> ERUN
     ERUN --> ESENSE
     ERUN --> EACT
     ERUN --> EFALL
     ERUN --> EGATE
     ERUN --> EREPORT
+    EGWAY --> ECALL
     EREPORT --> HAPI
 ```
 
 > 数据流图请见：`docs/50_project/dataflow_report.md`
 
-## 🧭 当前实现对齐（2026-03-18）
+## 🧭 当前实现对齐（2026-03-27）
 
-> 本节补充“当前代码已实现事实”，用于快速理解入口、治理、路由、多 Agent 与图编排的真实落点。
+> 本节补充"当前代码已实现事实"，用于快速理解入口、治理、路由、多 Agent、网关与图编排的真实落点。
 
 ### 🚪 统一入口与意图治理（发生时机）
 
@@ -204,7 +211,7 @@ graph TB
 
 ### 🤖 多 Agent 治理（当前定位）
 
-当前实现是“主链路优先，按执行画像进入多 Agent 分支”：
+当前实现是"主链路优先，按执行画像进入多 Agent 分支"：
 - `resolve_execution_profile()` 解析执行画像：`CHAT_FAST / WORKFLOW_SUPERVISED / INTENT_EXEC`
 - `WORKFLOW_SUPERVISED` 下使用监督图：`supervisor_dispatch → agent_dispatch_node → judge_agent_node → chat_render_node`
 - `GraphExecutor` 在 `agent_dispatch_node` 按 `active_agent_id` 动态分派，并执行 allowlist 校验
@@ -252,10 +259,12 @@ Natsume_Ai/
 │   ├── audit/               #    审计链（SQLite Ledger WAL + 日志迁移 + 保留策略）
 │   ├── bond/                #    关系图谱（Neo4j 客户端 + Bond 动力学 + 异步写入队列 + 迁移）
 │   ├── canon/               #    正典系统（Style Canon / World Canon，治理 API 事务化）
-│   ├── channels/            #    渠道适配（VTS DEGRADED 降级 / 微信 I/O）
-│   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile）
+│   ├── channels/            #    渠道适配（VTS DEGRADED 降级 / 微信 I/O / Edge RPC Client）
+│   │   └── edge_rpc_client.py # Host → Edge RPC 调用（含 post_voice_call/post_video_call/post_cancel_call）
+│   ├── core/                #    核心模块（配置快照、上下文包、错误码、ID、QA、Key Profile、情感常量/时间线）
 │   ├── governor/            #    治理引擎（决策、规则、Schema、Token、Rate Limit 持久化）
 │   ├── integrations/        #    集成层（LangGraph 图编排四层架构 / LLM 网关 / Evidence Plane）
+│   ├── persona/             #    人格系统（情绪反应 / 人格成长 / 自我模型 / 特质漂移 / 主动语音 / 自我反思）
 │   ├── data/                #    Host 本地数据目录
 │   ├── lsp/                 #    Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
 │   ├── mcp/                 #    MCP 注册与桥接
@@ -266,6 +275,9 @@ Natsume_Ai/
 │   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
 │   ├── scheduler/           #    调度器（CRON 任务 SQLite 持久化 / 重启自动恢复）
 │   ├── skills/              #    技能系统（SkillRegistry 装饰器注册 / MCP-to-Skill 桥接 / IDE 技能包）
+│   │   ├── hub/             #    Skills Hub（SKILL.md 解析 / 本地扫描注册 / GitHub 远程安装）
+│   │   ├── impl/            #    技能执行器（17 个 executor：browser/desktop/emotion/file/ide/memory/...）
+│   │   └── custom_providers/ #   自定义技能 Provider 目录
 │   ├── tools/               #    工具系统（Broker / Catalog / MCP 适配 / Selector）
 │   ├── app/emotion_context.py #  情感上下文模块（归一化 / 快照 / 治理快照 / VAD 映射）
 │   └── vision/              #    视觉链（多检测器注册表 / 摄像头事件 / 屏幕 OCR）
@@ -274,8 +286,15 @@ Natsume_Ai/
 │   ├── app/                 #    Edge FastAPI RPC 网关入口（/v1/edge/*）
 │   ├── actuators/           #    执行器（TTS 语音合成 + VTS WebSocket 驱动 + 自动重连，VTS 驱动提前到音频播放前执行）
 │   ├── channels/            #    Edge 渠道接入（本地消息监听/回调）
+│   ├── gateway/             #    统一消息网关（六平台消息路由 + 拟人化发送 + 通话链路）
+│   │   ├── adapters/        #    平台适配器（WeChat / QQ / Telegram / LINE / 飞书 / 企微）
+│   │   ├── humanize_sender.py #  拟人化分段发送（模拟打字速度 + 段间停顿 + 随机抖动）
+│   │   ├── models.py        #    MsgType 枚举（含 VOICE_CALL/VIDEO_CALL/CANCEL_CALL）
+│   │   ├── server.py        #    Gateway HTTP 端点（/v1/gateway/*）
+│   │   └── normalizer.py    #    消息归一化（UnifiedInboundMessage）
 │   ├── runtime/             #    运行时装配与启动流程
 │   ├── senses/              #    感知层（ASR 语音识别 + 设备自动恢复 + VAD，startup() 自动开始监听）
+│   ├── services/            #    服务层（WxDbService 微信数据库解密与联系人映射）
 │   ├── rpc/                 #    RPC 通信（健康检查 / 语音 / 兜底 LLM / 资源门控 / 事件上报）
 │   ├── proofs/              #    资源证明与门控
 │   ├── fallback_model.py    #    兜底小模型门控（FallbackModelGate，draft_only 标记）
@@ -317,6 +336,10 @@ Natsume_Ai/
 │   └── runtime/             #    本地服务启停 / 环境检查 / 报告生成
 │       └── sync_persona_utterance_vector_index.py  # Persona 语料向量索引同步脚本
 │
+├── skills/                  # 🧩 外部 Skill 安装目录（Skills Hub）
+│   └── example-echo/        #    示例 Skill（回显，验证 Hub 加载机制）
+│       └── SKILL.md         #    技能声明文件
+│
 ├── tests/                   # 🧪 测试
 │   ├── unit/                #    单元测试
 │   ├── integration/         #    集成测试
@@ -329,6 +352,8 @@ Natsume_Ai/
 │   ├── doc_lint/            #    文档检查与交付门禁
 │   ├── replay/              #    审计回放工具（请求回放 + 生产演练）
 │   ├── static_scan/         #    静态扫描工具（Bond SSOT 单写者检查）
+│   ├── wxautox4_bridge.py   #    wxautox4 微信自动化桥接（消息收发 + 语音/视频通话 + 37 种 action）
+│   ├── wechat_uia_bridge.py #    UIAutomation 微信桥接（legacy，已被 wxautox4 取代）
 │   ├── diag.py              #    统一诊断入口
 │   ├── diag_chat_ab.py      #    A/B 对比测试
 │   ├── diag_emotion_closed_loop.py  # 情感闭环验证（12 case corpus）
@@ -359,6 +384,12 @@ Natsume_Ai/
 | **语音合成** | GPT-SoVITS | Edge 端 TTS（全 GPU 常驻） |
 | **虚拟形象** | VTube Studio (Live2D) | 表情驱动与口型同步 |
 | **HTTP 框架** | FastAPI | Host 服务入口 + 监控面板 API + REST API |
+| **消息网关** | Unified Message Gateway | 六平台统一消息路由（微信/QQ/Telegram/飞书/企微/LINE）|
+| **微信自动化** | wxautox4 (UIAutomation) | 消息收发 + 语音/视频通话 + 37 种 action |
+| **QQ 对接** | OneBot v11 (NapCat) | QQ 消息收发、语音、@提醒检测 |
+| **Telegram** | Telethon (MTProto Userbot) | 以普通用户身份收发消息，非 Bot |
+| **拟人化发送** | HumanizeSender | 模拟打字速度 + 段间停顿 + 随机抖动（全平台通用）|
+| **Skills Hub** | SKILL.md + Hub Loader | 声明式技能注册 + 本地扫描 + GitHub 远程安装 |
 | **前端框架** | React 18 + Vite | 监控面板 SPA（Overview / Sessions / Trace / Metrics / Insights）|
 | **链路可视化** | React Flow | 监控面板链路拓扑可视化（含 Host/Edge 关键节点与动态高亮） |
 | **沙箱隔离** | Docker / subprocess | 代码执行隔离（双后端自动降级，错误信息标准化英文） |
@@ -417,6 +448,10 @@ cp .env.example .env
 | `BOND_NEO4J_URI` | Neo4j 连接地址 |
 | `CHROMA_ENDPOINT` | ChromaDB 服务地址 |
 | `EDGE_RPC_HOST/PORT` | Edge RPC 通信地址 |
+| `EDGE_GATEWAY_ENABLED` | 统一消息网关开关 |
+| `EDGE_GATEWAY_PLATFORMS` | 启用平台列表（wechat,qq,telegram,...） |
+| `EDGE_WECHAT_BRIDGE_BACKEND` | 微信桥接后端（uia/wxautox4/external） |
+| `HOST_SKILL_HUB_ENABLED` | Skills Hub 开关 |
 | `SANDBOX_ISOLATION_BACKEND` | 沙箱后端（subprocess/docker） |
 | `HOST_RATE_LIMIT_BACKEND` | 限流后端（memory/sqlite/redis） |
 
@@ -474,9 +509,10 @@ python -m edge_client
 # 仅重启 Edge 主进程（SSH 远控 / 双节点联调推荐）
 .\scripts\runtime\start_edge_main_service.ps1 -ForceRestart
 
-# 微信 4.x 默认走 UIAutomation bridge（`EDGE_WECHAT_BRIDGE_ENABLED=true`），
+# 微信 4.x 默认走 wxautox4 bridge（`EDGE_WECHAT_BRIDGE_BACKEND=wxautox4`），
+# 支持消息收发、语音/视频通话、朋友圈、群管理等 37 种 action。
 # inbound 回调目标为 `http://127.0.0.1:19000/v1/gateway/wechat/webhook`，
-# outbound 文本优先走 command queue → UIA 执行。
+# outbound 文本走 command queue → wxautox4 执行。
 
 # 后台启动（带 pid/log）
 .\scripts\runtime\start_edge.ps1
@@ -1012,7 +1048,7 @@ Render Stream（渲染流）
 
 ### 🧰 技能系统（Skills）
 
-技能系统已演进为“声明式 provider + 统一注册表 + executor 分发”的三层结构：
+技能系统已演进为"声明式 provider + 统一注册表 + executor 分发"的三层结构：
 
 ```
 DeclarativeSkillSpec / @skill
@@ -1035,7 +1071,7 @@ MCPToolRegistry（MCP 工具元数据）
 | **IDE 技能包** | `ide_registry.py`：`open_cursor`（LOW/2）/ `run_pycharm_action`（MEDIUM/3）/ `codex_task`（MEDIUM/3）|
 | **ClawdBot UI** | 监控面板技能实现（系统状态查询 / 日志检索）|
 
-新增/后装技能说明见：`docs/50_project/CUSTOM_SKILL_INSTALL.md`
+新增/后装技能说明见：`docs/50_project/guides/CUSTOM_SKILL_INSTALL.md`
 
 ### 📈 可观测性（Observability）
 
@@ -1063,6 +1099,82 @@ MCPToolRegistry（MCP 工具元数据）
 | `diag_emotion_closed_loop.py` | 情感闭环验证（12 case corpus，验证情感链路端到端正确性）|
 | `diag_stability_weekly.py` | 周稳定性报告（自动汇总 7 天内的错误率 / 降级率 / P99 延迟）|
 | `diag_longterm_dashboard.py` | 长期 KPI 仪表盘（跨周期趋势可视化）|
+
+---
+
+## 🌐 统一消息网关（Unified Message Gateway）
+
+统一消息网关负责将六个 IM 平台的消息归一化为 `UnifiedInboundMessage`，统一路由到 Host Brain 处理，并将 Host 回复分发到目标平台。
+
+### 📱 支持平台
+
+| 平台 | 适配器 | 协议 | 特色能力 |
+|------|--------|------|---------|
+| **微信** | `WeChatAdapter` | UIAutomation / wxautox4 | 语音/视频通话、朋友圈、群管理、文件发送 |
+| **QQ** | `QQAdapter` | OneBot v11 (HTTP) | 语音发送、@提醒检测、notice/request 事件 |
+| **Telegram** | `TelegramAdapter` | Telethon MTProto Userbot | 以普通用户身份通讯、打字模拟、代理支持 |
+| **LINE** | `LineAdapter` | Messaging API (Webhook) | 图片/贴纸/位置消息 |
+| **飞书** | `FeishuAdapter` | Open API | 事件订阅 + 消息卡片 |
+| **企业微信** | `WeComAdapter` | 企业微信 API | 应用消息推送 |
+
+### 🤖 拟人化发送（HumanizeSender）
+
+所有平台共享拟人化发送引擎，模拟真人打字节奏：
+
+- **打字速度模拟**：按字符数计算等待时间（默认 12 CPS）
+- **智能分段**：长文本自动拆分为多段，段间添加自然停顿
+- **随机抖动**：延迟添加 ±20% 随机变化，防止机械感
+- **首段延迟**：模拟「看到消息 → 开始打字」的反应时间
+
+### 📞 语音/视频通话
+
+通过 wxautox4 Bridge 实现微信语音/视频通话的全链路控制：
+
+```python
+from host_brain.channels.edge_rpc_client import post_voice_call, post_video_call, post_cancel_call
+
+# 发起语音通话
+result = await post_voice_call(target="好友昵称")
+
+# 发起视频通话
+result = await post_video_call(target="好友昵称")
+
+# 取消通话
+result = await post_cancel_call()
+```
+
+完整链路：`Host Brain → Gateway /v1/gateway/reply → WeChatAdapter → command_queue → wxautox4_bridge → wx.VoiceCall(who)`
+
+---
+
+## 🧩 Skills Hub
+
+Skills Hub 是外部技能的发现、安装与注册系统，采用 SKILL.md 声明式架构：
+
+### 技能安装方式
+
+| 方式 | 说明 |
+|------|------|
+| **本地安装** | 将包含 `SKILL.md` 的目录放入 `skills/` 目录，重启自动发现 |
+| **GitHub 安装** | `install_skill("github:owner/repo/slug")` 远程下载并注册 |
+| **外部目录扫描** | 自动扫描 `~/.skillhub/skills/`、`~/.openclaw/skills/`、`~/.codebuddy/skills/` |
+
+### SKILL.md 格式示例
+
+```yaml
+---
+name: "example-echo"
+version: "1.0.0"
+description: "示例 Skill：回显传入的文本。"
+clearance: LOW
+risk_level: 1
+scope: host
+tool: example_echo
+action: run
+---
+```
+
+> 详细安装指南见 `docs/50_project/guides/CUSTOM_SKILL_INSTALL.md`
 
 ---
 
@@ -1196,7 +1308,7 @@ MetricsCollector emotion_metrics 情感维度指标
 
 ## 📚 文档导航
 
-项目采用严格的文档分层与受众门禁体系，详见 [文档地图](docs/00_index/00_DOCMAP.md)。
+项目采用严格的文档分层与受众门禁体系，详见 [文档地图](docs/00_index/00_DOCMAP.md)（v3.0，114 个文档，合规率 97%）。
 
 | 文档 | 路径 | 说明 |
 |------|------|------|
@@ -1215,6 +1327,8 @@ MetricsCollector emotion_metrics 情感维度指标
 | 🤖 AGENTS | `docs/40_agents/` | 实现层代理行为规范 |
 | 📊 项目管理 | `docs/50_project/` | 工作表 / 发布 / 环境检查 |
 | 🏗️ 当前代码架构 | `docs/50_project/CURRENT_CODE_ARCHITECTURE_2026-03-18.md` | 当前代码目录、架构、链路与多 Agent 治理对齐文档 |
+| 🌐 统一消息网关 | `docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md` | 六平台网关设计方案（v1.1）|
+| 📞 Gateway 链路分析 | `docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md` | Gateway 中文文字链路完整节点分析 |
 | 🔄 数据流图 | `docs/50_project/dataflow_report_20260311.md` | 请求/事件数据流与回流链路（独立于架构图） |
 | 🧩 外置服务配置 | `docs/50_project/ExternalServices_Config.md` | 全部外置服务清单与配置方式 |
 | 📦 发布清单 | `docs/50_release/` | 各里程碑 release.json 归档 |
