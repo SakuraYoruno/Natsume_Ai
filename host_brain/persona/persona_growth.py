@@ -138,25 +138,128 @@ class PersonaGrowthTracker:
         guard: TraitDriftGuard | None = None,
         stage_rules: dict[str, GrowthRule] | None = None,
         milestone_rules: dict[str, GrowthRule] | None = None,
+        canon_store: Any | None = None,
     ) -> None:
         """初始化成长追踪器。
 
         Args:
             engine: PersonaEngine 实例（延迟导入以避免循环依赖）
             guard: TraitDriftGuard 实例（默认创建新实例）
-            stage_rules: 阶段晋级规则（默认使用内置配置）
-            milestone_rules: 里程碑规则（默认使用内置配置）
+            stage_rules: 阶段晋级规则（显式传入时覆盖 Canon 和内置默认值）
+            milestone_rules: 里程碑规则（显式传入时覆盖 Canon 和内置默认值）
+            canon_store: WorldCanonStore 实例（可选，用于从 Canon 热加载规则）
         """
         self._engine = engine
         self._guard = guard or TraitDriftGuard()
-        self._stage_rules = dict(stage_rules or STAGE_PROMOTION_RULES)
-        self._milestone_rules = dict(milestone_rules or MILESTONE_RULES)
+        self._canon_store = canon_store
+        # 规则加载优先级：显式参数 > Canon 文档 > 硬编码默认值
+        canon_stage, canon_milestone = self._load_rules_from_canon()
+        self._stage_rules = dict(stage_rules or canon_stage or STAGE_PROMOTION_RULES)
+        self._milestone_rules = dict(milestone_rules or canon_milestone or MILESTONE_RULES)
         # user_id → 已触发的 one_time 规则集合
         self._triggered_rules: dict[str, set[str]] = {}
         # user_id → 本周累计变化量
         self._weekly_cumulative: dict[str, dict[str, float]] = {}
         # user_id → 变化历史（delta.as_dict() 列表）
         self._change_history: dict[str, list[dict[str, float]]] = {}
+
+    def _load_rules_from_canon(
+        self,
+    ) -> tuple[dict[str, GrowthRule] | None, dict[str, GrowthRule] | None]:
+        """从 Canon wc-004-persona-growth-rules.json 热加载规则。
+
+        Returns:
+            (stage_rules, milestone_rules)，任一为 None 表示 Canon 不可用/无数据。
+        """
+        if self._canon_store is None:
+            return None, None
+        try:
+            doc = self._canon_store.get("wc-004-persona-growth-rules")
+            if doc is None:
+                _logger.debug("Canon wc-004 不存在，降级到硬编码规则")
+                return None, None
+
+            # Canon 文档可能是 WorldCanonDocument 对象或 dict
+            raw: dict[str, Any] = {}
+            if hasattr(doc, "raw_json"):
+                raw = doc.raw_json or {}
+            elif hasattr(doc, "body"):
+                # body 可能是 JSON 字符串，需要解析
+                import json as _json
+                body = getattr(doc, "body", "")
+                if isinstance(body, str):
+                    try:
+                        raw = _json.loads(body)
+                    except (ValueError, TypeError):
+                        raw = {}
+                elif isinstance(body, dict):
+                    raw = body
+            # 有些实现直接在 doc 上有这些字段
+            if not raw and hasattr(doc, "doc_id"):
+                raw = {
+                    k: getattr(doc, k)
+                    for k in ("stage_promotion_rules", "milestone_rules",
+                              "interaction_trait_map", "growth_params")
+                    if hasattr(doc, k)
+                }
+
+            # 尝试直接从文件读取（最可靠的方式）
+            if not raw.get("stage_promotion_rules"):
+                try:
+                    from pathlib import Path
+                    import json as _json
+                    canon_path = (
+                        Path(__file__).resolve().parent.parent
+                        / "canon" / "world" / "wc-004-persona-growth-rules.json"
+                    )
+                    if canon_path.exists():
+                        raw = _json.loads(canon_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            stage_rules = self._parse_rules_section(
+                raw.get("stage_promotion_rules", {}),
+                trigger_prefix="bond_stage_promoted",
+            )
+            milestone_rules = self._parse_rules_section(
+                raw.get("milestone_rules", {}),
+                trigger_prefix="milestone",
+            )
+
+            if stage_rules:
+                _logger.info(
+                    "Canon 热加载成长规则: stage=%d, milestone=%d",
+                    len(stage_rules), len(milestone_rules or {}),
+                )
+
+            return stage_rules or None, milestone_rules or None
+
+        except Exception as exc:
+            _logger.warning("Canon 规则加载失败（降级到硬编码）: %s", exc)
+            return None, None
+
+    @staticmethod
+    def _parse_rules_section(
+        section: dict[str, Any],
+        trigger_prefix: str,
+    ) -> dict[str, GrowthRule] | None:
+        """将 Canon JSON section 解析为 GrowthRule 字典。"""
+        if not section or not isinstance(section, dict):
+            return None
+        rules: dict[str, GrowthRule] = {}
+        for key, val in section.items():
+            if not isinstance(val, dict):
+                continue
+            delta = val.get("delta", {})
+            if not delta or not isinstance(delta, dict):
+                continue
+            rules[key] = GrowthRule(
+                trigger=f"{trigger_prefix}:{key}",
+                delta={k: float(v) for k, v in delta.items() if isinstance(v, (int, float))},
+                description=str(val.get("description", key)),
+                one_time=bool(val.get("one_time", True)),
+            )
+        return rules if rules else None
 
     def _get_engine(self) -> Any:
         """延迟获取 PersonaEngine。"""
@@ -346,8 +449,11 @@ class PersonaGrowthTracker:
         interaction_stats: dict[str, int],
         lookback_days: int = 7,
         ts_ms: int = 0,
+        feedback_collector: Any | None = None,
     ) -> GrowthApplyResult:
         """交互驱动的人格成长——根据实际交互频谱动态计算成长方向。
+
+        Phase IX-C 升级：支持叠加用户反馈修正（feedback_collector）。
 
         由 NatsumeScheduler 每周调度，也可手动触发。
 
@@ -386,6 +492,32 @@ class PersonaGrowthTracker:
         )
 
         delta = analysis.delta
+
+        # Phase IX-C：叠加用户反馈修正
+        feedback_detail = ""
+        if feedback_collector is not None:
+            try:
+                fb_result = feedback_collector.compute_adjustment(
+                    uid, ts_ms=ts_ms or _now_ms(),
+                )
+                if fb_result.total_signals > 0:
+                    # 合并两个 delta：交互驱动 + 反馈修正
+                    merged = {}
+                    interaction_d = delta.as_dict()
+                    feedback_d = fb_result.delta.as_dict()
+                    for name in TRAIT_NAMES:
+                        merged[name] = interaction_d.get(name, 0.0) + feedback_d.get(name, 0.0)
+                    delta = TraitsDelta(**merged)
+                    feedback_detail = f", 反馈信号={fb_result.total_signals}"
+                    _logger.info(
+                        "反馈修正叠加: user=%s feedback_signals=%d merged_delta=%s",
+                        uid, fb_result.total_signals, delta.as_dict(),
+                    )
+                    # 消费后清空反馈缓冲区
+                    feedback_collector.clear_buffer(uid)
+            except Exception as fb_exc:
+                _logger.warning("反馈修正失败（降级跳过）: %s", fb_exc)
+
         # 如果所有维度 delta 都是 0，跳过
         if all(abs(v) < 0.0001 for v in delta.as_dict().values()):
             return GrowthApplyResult(
@@ -449,7 +581,7 @@ class PersonaGrowthTracker:
             reason=(
                 f"交互驱动成长: {analysis.total_interactions}次交互, "
                 f"主导={analysis.dominant_interaction}, "
-                f"周期={lookback_days}天"
+                f"周期={lookback_days}天{feedback_detail}"
             ),
         )
 

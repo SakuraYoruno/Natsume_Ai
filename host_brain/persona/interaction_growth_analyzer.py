@@ -154,6 +154,40 @@ class InteractionGrowthAnalyzer:
         self._min_ratio = float(min_ratio)
         self._diminishing_threshold = float(diminishing_threshold)
 
+    @classmethod
+    def from_canon(cls, canon_store: Any = None) -> "InteractionGrowthAnalyzer":
+        """从 Canon wc-004-persona-growth-rules.json 创建分析器（参数热加载）。
+
+        优先级：Canon 文档 > 硬编码默认值。Canon 不可用时静默降级。
+        """
+        trait_map: dict[str, dict[str, float]] | None = None
+        params: dict[str, Any] = {}
+
+        try:
+            raw = _load_canon_growth_raw()
+            if raw:
+                # 加载 interaction_trait_map
+                canon_map = raw.get("interaction_trait_map", {})
+                if canon_map and isinstance(canon_map, dict):
+                    trait_map = {
+                        k.upper(): {tk: float(tv) for tk, tv in v.items()}
+                        for k, v in canon_map.items()
+                        if isinstance(v, dict)
+                    }
+                # 加载 growth_params
+                canon_params = raw.get("growth_params", {})
+                if isinstance(canon_params, dict):
+                    params = canon_params
+        except Exception as exc:
+            _logger.warning("Canon 参数加载失败（降级到默认值）: %s", exc)
+
+        return cls(
+            interaction_trait_map=trait_map,
+            base_delta=float(params.get("base_delta", BASE_DELTA)),
+            min_ratio=float(params.get("min_interaction_ratio", MIN_INTERACTION_RATIO)),
+            diminishing_threshold=float(params.get("diminishing_threshold", DIMINISHING_THRESHOLD)),
+        )
+
     def analyze(
         self,
         *,
@@ -295,6 +329,30 @@ class InteractionGrowthAnalyzer:
             _logger.warning("交互统计收集失败: %s", exc)
 
         return stats
+
+
+# ---------------------------------------------------------------------------
+# Canon 规则文件读取辅助
+# ---------------------------------------------------------------------------
+
+def _load_canon_growth_raw() -> dict[str, Any] | None:
+    """从 Canon 目录直接读取 wc-004-persona-growth-rules.json。
+
+    这是一个轻量级的文件读取方式，不依赖 WorldCanonStore 实例。
+    适用于初始化阶段需要加载配置但 WorldCanonStore 尚未可用的场景。
+    """
+    try:
+        from pathlib import Path
+        import json as _json
+        canon_path = (
+            Path(__file__).resolve().parent.parent
+            / "canon" / "world" / "wc-004-persona-growth-rules.json"
+        )
+        if canon_path.exists():
+            return _json.loads(canon_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _logger.debug("Canon 规则文件读取失败: %s", exc)
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -64,6 +64,11 @@ from host_brain.persona.interaction_growth_analyzer import (
     InteractionGrowthResult,
     make_interaction_growth_task_config,
 )
+from host_brain.persona.growth_feedback_collector import (
+    GrowthFeedbackCollector,
+    GrowthFeedback,
+    FeedbackAdjustmentResult,
+)
 
 __all__ = [
     # personality_traits.py
@@ -109,4 +114,8 @@ __all__ = [
     "InteractionGrowthAnalyzer",
     "InteractionGrowthResult",
     "make_interaction_growth_task_config",
+    # growth_feedback_collector.py (Phase IX-C)
+    "GrowthFeedbackCollector",
+    "GrowthFeedback",
+    "FeedbackAdjustmentResult",
 ]
