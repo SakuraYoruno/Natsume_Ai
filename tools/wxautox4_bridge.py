@@ -69,7 +69,9 @@ DEFAULT_INBOUND_POLL_INTERVAL_S = 1.0
 DEFAULT_DEDUP_WINDOW_S = 12.0
 DEFAULT_HEALTH_CHECK_INTERVAL_S = 30.0   # Phase 1: IsOnline keepalive interval
 DEFAULT_MEDIA_DOWNLOAD_DIR = ""          # Phase 1: empty = no auto-download
-PHASE3_MSG_CACHE_TTL_S = 300.0          # Phase 3: message object cache TTL (5 min)
+PHASE3_MSG_CACHE_TTL_S = float(         # Phase 3: message object cache TTL (default 5 min)
+    os.environ.get("EDGE_WECHAT_WXAUTOX4_MSG_CACHE_TTL_S") or 300
+)
 
 # Media type codes matching the UIA bridge convention
 MEDIA_TYPE_CODE_MAP: dict[str, int] = {
