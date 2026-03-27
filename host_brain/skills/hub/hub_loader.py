@@ -206,23 +206,70 @@ def _load_custom_executor(
         return None
 
 
+def _resolve_external_skill_dirs() -> list[Path]:
+    """解析外部 Skills 目录列表（SkillHub / ClawHub / OpenClaw）。
+
+    自动扫描以下目录（如存在）：
+    1. ~/.skillhub/skills/       — SkillHub CLI 安装目录
+    2. ~/.openclaw/skills/       — OpenClaw workspace skills
+    3. ~/.codebuddy/skills/      — CodeBuddy/WorkBuddy skills
+    4. HOST_SKILL_EXTERNAL_DIRS 环境变量指定的额外目录（逗号分隔）
+    """
+    home = Path.home()
+    candidates = [
+        home / ".skillhub" / "skills",
+        home / ".openclaw" / "skills",
+        home / ".codebuddy" / "skills",
+    ]
+
+    # 环境变量指定的额外目录
+    extra_raw = os.environ.get("HOST_SKILL_EXTERNAL_DIRS", "").strip()
+    if extra_raw:
+        for part in extra_raw.replace(";", ",").split(","):
+            p = part.strip()
+            if p:
+                candidates.append(Path(p).resolve())
+
+    return [d for d in candidates if d.exists() and d.is_dir()]
+
+
 def load_hub_skills(
     registry: SkillRegistry,
     *,
     executor_registry: Any | None = None,
     skills_dir: Path | None = None,
 ) -> HubLoadResult:
-    """扫描 Hub Skills 目录，注册所有发现的 Skill。
+    """扫描 Hub Skills 目录 + 外部 Skills 目录，注册所有发现的 Skill。
+
+    扫描顺序：
+    1. hub/ 目录（Natsume 本地 Skills Hub）
+    2. ~/.skillhub/skills/（SkillHub CLI 安装的技能）
+    3. ~/.openclaw/skills/（OpenClaw workspace 技能）
+    4. ~/.codebuddy/skills/（CodeBuddy/WorkBuddy 技能）
+    5. HOST_SKILL_EXTERNAL_DIRS 环境变量指定的额外目录
+
+    优先级：hub/ 目录优先，同名 skill 不会被外部目录覆盖。
 
     Args:
         registry: SkillRegistry 实例
-        executor_registry: ToolExecutorRegistry 实例（可选，用于注册自定义 executor）
-        skills_dir: skills 目录路径（可选，默认从环境变量/默认路径解析）
+        executor_registry: ToolExecutorRegistry 实例（可选）
+        skills_dir: hub skills 目录路径（可选）
 
     Returns:
         HubLoadResult 加载结果汇总
     """
     hub_dir = skills_dir or _resolve_hub_skills_dir()
+    all_dirs: list[Path] = []
+
+    # 主目录
+    if hub_dir.exists() and hub_dir.is_dir():
+        all_dirs.append(hub_dir)
+
+    # 外部目录（SkillHub / ClawHub / OpenClaw）
+    scan_external = os.environ.get("HOST_SKILL_SCAN_EXTERNAL", "true").strip().lower()
+    if scan_external in {"1", "true", "yes", "on"}:
+        all_dirs.extend(_resolve_external_skill_dirs())
+
     result = HubLoadResult(
         skills_dir=str(hub_dir),
         total_dirs_scanned=0,
@@ -232,12 +279,40 @@ def load_hub_skills(
         ts_ms=int(time.time() * 1000),
     )
 
-    if not hub_dir.exists() or not hub_dir.is_dir():
-        logger.info("Hub: skills 目录不存在，跳过: %s", hub_dir)
+    if not all_dirs:
+        logger.info("Hub: 无可扫描的 skills 目录")
         return result
 
-    # 遍历子目录
-    for item in sorted(hub_dir.iterdir()):
+    for scan_dir in all_dirs:
+        _scan_single_dir(
+            scan_dir=scan_dir,
+            registry=registry,
+            executor_registry=executor_registry,
+            result=result,
+        )
+
+    if result.registered_count > 0:
+        logger.info(
+            "Hub: 加载完成 dirs=%d scanned=%d registered=%d skipped=%d errors=%d",
+            len(all_dirs),
+            result.total_dirs_scanned,
+            result.registered_count,
+            result.skipped_count,
+            result.error_count,
+        )
+
+    return result
+
+
+def _scan_single_dir(
+    *,
+    scan_dir: Path,
+    registry: SkillRegistry,
+    executor_registry: Any | None,
+    result: HubLoadResult,
+) -> None:
+    """扫描单个目录中的 skills。"""
+    for item in sorted(scan_dir.iterdir()):
         if not item.is_dir():
             continue
         if item.name.startswith(("_", ".")):
@@ -262,18 +337,6 @@ def load_hub_skills(
             result.error_count += 1
         else:
             result.skipped_count += 1
-
-    if result.registered_count > 0:
-        logger.info(
-            "Hub: 加载完成 dir=%s scanned=%d registered=%d skipped=%d errors=%d",
-            hub_dir,
-            result.total_dirs_scanned,
-            result.registered_count,
-            result.skipped_count,
-            result.error_count,
-        )
-
-    return result
 
 
 def _load_single_skill(
