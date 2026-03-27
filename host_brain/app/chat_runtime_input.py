@@ -25,6 +25,37 @@ def normalize_recall_slot_text(
     return normalized
 
 
+def build_emotion_recall_text(
+    emotion_state: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str | None = None,
+) -> str:
+    normalized = normalize_chat_emotion_context(emotion_state)
+    mood_state = str(normalized.get("mood_state") or "steady").strip() or "steady"
+    emotion_tag = str(normalized.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    emotion_range_hint = str(normalized.get("emotion_range_hint") or "").strip()
+    inner_monologue = str(normalized.get("inner_monologue") or "").strip()
+    preferred_lang = str(render_target_lang or "").strip().lower()
+
+    parts = [
+        f"Current affective layer: mood_state={mood_state}; emotion_tag={emotion_tag}.",
+    ]
+    intensity = normalized.get("emotion_intensity")
+    try:
+        if intensity is not None:
+            parts.append(f"emotion_intensity={float(intensity):.2f}.")
+    except (TypeError, ValueError):
+        pass
+    if emotion_range_hint:
+        parts.append(f"emotion_range_hint={emotion_range_hint}.")
+    if inner_monologue:
+        parts.append(f"inner_monologue={inner_monologue}.")
+    if preferred_lang in {"zh", "ja"}:
+        parts.append(f"preferred_reply_language={preferred_lang}.")
+    parts.append("Use this as affective guidance only, not as factual evidence.")
+    return " ".join(parts).strip()
+
+
 def _resolve_render_target_lang(render_target_lang: str | None) -> str:
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
     if override in {"zh", "ja"}:

@@ -58,6 +58,7 @@ def _make_runtime_payload(
     retrieval_evidence_items: list[dict],
     recall_slot_text: dict[str, str] | None = None,
     emotion_state: dict | None = None,
+    render_target_lang: str = "ja",
 ):
     from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
     from host_brain.app.chat_runtime_input import build_chat_runtime_input
@@ -71,7 +72,7 @@ def _make_runtime_payload(
         retrieval_evidence_items=retrieval_evidence_items,
         recall_slot_text=recall_slot_text or {},
         emotion_state=emotion_state or {},
-        render_target_lang="ja",
+        render_target_lang=render_target_lang,
     )
     payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     payload.update(
@@ -183,6 +184,7 @@ def test_build_chat_prompt_runtime_payload_includes_valid_prompt_context() -> No
     assert emotion_state.get("emotion_tag") == "HAPPY"
     assert emotion_snapshot.get("version") == "chat_emotion_snapshot.v1"
     assert dict(prompt_context.get("emotion_pulse") or {}).get("emotion_tag") == "HAPPY"
+    assert "Current affective layer:" in str(prompt_context.get("emotion_recall") or "")
     assert dict(prompt_context.get("memory_emotion_hint") or {}).get("mood_state") == "engaged"
     assert dict(prompt_context.get("bond_texture") or {}).get("emotion_tag") == "HAPPY"
 
@@ -351,6 +353,7 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
                     "style_hint": "energetic but gentle",
                     "emotion_range_hint": "positive expression is allowed",
                 },
+                "emotion_recall": "Current affective layer: mood_state=engaged; emotion_tag=HAPPY.",
                 "memory_emotion_hint": {
                     "emotion_tag": "HAPPY",
                     "mood_state": "engaged",
@@ -391,10 +394,18 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
     assert "JA_STYLE_HINT_FROM_PROMPT_CONTEXT" in prompt
     assert "user prefers concise replies" in prompt
     assert "EMOTION_BINDING" in prompt
+    assert "EMOTION_RECALL_BINDING" in prompt
     assert "emotion_tag: HAPPY" in prompt
     assert "mood_state: engaged" in prompt
     assert "emotion_intensity: 0.76" in prompt
     assert "snapshot_source: test_case" in prompt
+
+
+def test_infer_render_target_lang_detects_chinese_and_japanese_content() -> None:
+    from host_brain.app.prompt_builder import infer_render_target_lang
+
+    assert infer_render_target_lang(user_message="今天有点难受，想聊聊") == "zh"
+    assert infer_render_target_lang(user_message="今日は少しつらいよ") == "ja"
 
 
 def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> None:

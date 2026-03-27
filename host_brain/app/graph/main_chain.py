@@ -525,8 +525,10 @@ class RecallFusionNode(ChainNode):
             from host_brain.retrieval.orchestrator import RetrievalOrchestratorRequest  # noqa: PLC0415
             import os as _os  # noqa: PLC0415
 
-            _retr_top_k = int(str(_os.environ.get("HOST_RETR_TOP_K") or "5").strip())
+            _retr_top_k = int(str(_os.environ.get("HOST_RETR_TOP_K") or "8").strip())
+            _retrieval_timeout_ms = max(100, int(NODE_TIMEOUT["recall_fusion"] * 1000) - 1000)
             _emotion_tag = str(ctx.metadata.get("emotion_tag") or "").strip() or None
+            _render_target_lang = str(ctx.metadata.get("render_target_lang") or "").strip().lower() or None
             _ts_ms = int(ctx.metadata.get("ts_ms") or 0) or None
 
             orchestrator = get_retrieval_orchestrator()
@@ -543,8 +545,9 @@ class RecallFusionNode(ChainNode):
                     top_k=_retr_top_k,
                     ts_ms=_ts_ms,
                     emotion_context=_emotion_tag,
+                    render_target_lang=_render_target_lang,
                 ),
-                timeout_ms=int(NODE_TIMEOUT["recall_fusion"] * 1000),
+                timeout_ms=_retrieval_timeout_ms,
             )
 
             # 召回成功：重置熔断器失败计数
@@ -2859,6 +2862,8 @@ class MainChain:
             if node is None:
                 logger.warning("[%s] MainChain 适配层缺少节点: %s", ctx.request_id, node_name)
                 continue
+            node_started = time.monotonic()
+            logger.info("[%s] MainChain adapter node start: %s", ctx.request_id, node_name)
             try:
                 should_continue = await node.execute_with_timeout(ctx)
             except Exception as exc:
@@ -2866,6 +2871,14 @@ class MainChain:
                 ctx.failure_detail = f"适配层节点 {node_name} 异常: {exc}"
                 logger.exception("MainChain 适配层节点异常: %s", node_name)
                 return False
+            elapsed_ms = max(0, int((time.monotonic() - node_started) * 1000))
+            logger.info(
+                "[%s] MainChain adapter node done: %s continue=%s elapsed_ms=%d",
+                ctx.request_id,
+                node_name,
+                should_continue,
+                elapsed_ms,
+            )
             if not should_continue:
                 if not ctx.failure_event:
                     ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
@@ -2979,6 +2992,20 @@ class MainChain:
             ctx.metadata["scene_source"] = "pre_classifier"
         else:
             ctx.metadata["scene_source"] = "unknown"
+        try:
+            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+            resolved_scene = str(ctx.metadata.get("pre_classified_scene") or "").strip().upper()
+            if resolved_scene == "GATEWAY":
+                ctx.metadata["render_target_lang"] = "zh"
+            else:
+                ctx.metadata["render_target_lang"] = infer_render_target_lang(user_message=ctx.user_message)
+        except Exception:
+            ctx.metadata["render_target_lang"] = (
+                "zh"
+                if str(ctx.metadata.get("pre_classified_scene") or "").strip().upper() == "GATEWAY"
+                else "ja"
+            )
         ctx.metadata["commit_observed"] = False
 
         pre_node_order = (
@@ -3232,6 +3259,12 @@ async def run_main_chain_from_input(
 
     commit_result = CommitResult()
     try:
+        logger.info(
+            "run_main_chain_from_input: entering main chain adapter request_id=%s source=%s session_id=%s",
+            request_id,
+            source_upper,
+            session_id,
+        )
         async for _event in chain.run_as_sse_adapter(
             request_body=request_body,
             request_id=request_id,
@@ -3260,9 +3293,21 @@ async def run_main_chain_from_input(
             request_id, exc,
         )
         return
+    logger.info(
+        "run_main_chain_from_input: adapter stream completed request_id=%s decision=%s narrative_len=%d",
+        request_id,
+        commit_result.decision or "",
+        len(commit_result.reply_narrative or ""),
+    )
 
     await source_strategy.post_chain(
         context=runtime_context,
         policy=source_policy,
         commit_result=commit_result,
+    )
+    logger.info(
+        "run_main_chain_from_input: post_chain completed request_id=%s source=%s decision=%s",
+        request_id,
+        source_upper,
+        commit_result.decision or "",
     )

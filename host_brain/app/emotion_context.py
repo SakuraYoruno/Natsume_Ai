@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 线程安全锁——保护所有全局可变状态（Fix: 全局单例在 FastAPI 异步环境中的竞态条件）
 # ---------------------------------------------------------------------------
-_emotion_lock = threading.Lock()
+# normalize/update helpers can re-enter accessors that also touch global emotion state.
+_emotion_lock = threading.RLock()
 
 # 修复审计问题 #6：全局 EmotionTimeline 实例，记录情感状态变化历史
 _global_emotion_timeline = EmotionTimeline(max_entries=100)

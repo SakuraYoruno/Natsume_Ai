@@ -377,9 +377,29 @@ if ($null -ne $listeningPid) {
   Start-Sleep -Milliseconds 500
 }
 
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if ($null -eq $pythonCmd) {
-  throw "python executable not found in PATH"
+function Test-PythonRuntime {
+  param([string]$PythonPath)
+  if ([string]::IsNullOrWhiteSpace($PythonPath) -or -not (Test-Path $PythonPath)) {
+    return $false
+  }
+  try {
+    $null = & $PythonPath -c "import fastapi, uvicorn, chromadb, pydantic, httpx" 2>$null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+$pythonExe = $null
+$venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
+if ((Test-Path $venvPython) -and (Test-PythonRuntime -PythonPath $venvPython)) {
+  $pythonExe = $venvPython
+} else {
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($null -eq $pythonCmd) {
+    throw "python executable not found in PATH"
+  }
+  $pythonExe = $pythonCmd.Source
 }
 
 $hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
@@ -388,7 +408,7 @@ if ($StartupCheck.IsPresent) {
 }
 
 $startProcessArgs = @{
-  FilePath = $pythonCmd.Source
+  FilePath = $pythonExe
   ArgumentList = $hostArgs
   WorkingDirectory = $repoRoot
   PassThru = $true

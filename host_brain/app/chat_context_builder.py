@@ -12,6 +12,7 @@ from typing import Any, Mapping
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
+from host_brain.app.chat_runtime_input import build_emotion_recall_text
 from host_brain.core.prompt_context import (
     build_emotion_pulse_slot,
     build_world_canon_slot,
@@ -103,6 +104,7 @@ def build_chat_context_pack(
     retrieval_evidence_items: list[dict[str, Any]],
     style_bindings: Mapping[str, Mapping[str, Any]] | None,
     emotion_context: Mapping[str, Any] | None = None,
+    render_target_lang: str | None = None,
     cpb_slots: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """构建 context_pack。
@@ -240,6 +242,13 @@ def build_chat_context_pack(
         "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
+    emotion_recall_text = (
+        str(dict(cpb_slots or {}).get("emotion_recall") or "").strip()
+        or build_emotion_recall_text(
+            normalized_emotion_context,
+            render_target_lang=render_target_lang,
+        )
+    )
     bond_texture = {
         "mood_state": mood_state,
         "emotion_tag": emotion_tag,
@@ -316,6 +325,7 @@ def build_chat_context_pack(
         },
         "tool_meta_pack": [],
         "emotion_pulse": emotion_pulse,
+        "emotion_recall": emotion_recall_text,
         "memory_emotion_hint": memory_emotion_hint,
         "bond_texture": bond_texture,
     }
@@ -466,6 +476,7 @@ def build_prompt_context_observability(
     style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
     node_bindings_raw = style_pack.get("node_bindings")
     node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
+    emotion_recall_text = str(prompt_context.get("emotion_recall") or "").strip()
 
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
@@ -473,6 +484,7 @@ def build_prompt_context_observability(
         "style_canon": len(style_rows),
         "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
+        "emotion_recall": (1 if emotion_recall_text else 0),
     }
 
     selected_tier, selected_reason = _select_context_degrade_tier(
@@ -495,6 +507,7 @@ def build_prompt_context_observability(
                 "style_pack": style_pack,
                 "constraints": dict(prompt_context.get("constraints") or {}),
                 "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
+                "emotion_recall": emotion_recall_text,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -538,6 +551,7 @@ def build_prompt_context_observability(
             "world_authoritative_items": len(authoritative_rows),
             "style_prompt_rows": len(style_rows),
             "style_binding_nodes": len(node_bindings),
+            "emotion_recall_present": bool(emotion_recall_text),
         },
         "context_size_chars": context_chars,
     }
@@ -582,6 +596,7 @@ def build_chat_generation_prompt_payload(
         retrieval_evidence_items=retrieval_evidence_items,
         style_bindings=normalized_style_bindings,
         emotion_context=normalized_emotion_context,
+        render_target_lang=resolved_render_lang,
         cpb_slots=cpb_slots,
     )
     prompt_context_observability = build_prompt_context_observability(
@@ -639,7 +654,7 @@ def build_chat_prompt_runtime_payload(
 
     recall_slot_text = dict(runtime_input.recall_slot_text or {})
     merged_slots = dict(cpb_slots or {})
-    for slot_name in ("style_canon", "world_canon"):
+    for slot_name in ("style_canon", "world_canon", "emotion_recall"):
         slot_text = str(recall_slot_text.get(slot_name) or "").strip()
         if slot_text and not str(merged_slots.get(slot_name) or "").strip():
             merged_slots[slot_name] = slot_text

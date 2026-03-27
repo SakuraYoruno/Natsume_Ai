@@ -32,6 +32,7 @@ EXPECTED_SLOTS: dict[str, type] = {
 OPTIONAL_SLOTS: dict[str, type] = {
     "semantic_slot": list,
     "emotion_pulse": dict,
+    "emotion_recall": str,
     "bond_texture": dict,
     "memory_emotion_hint": dict,
     "self_reflection_pulse": dict,  # Phase III：自省脉冲

@@ -352,12 +352,13 @@ async def _run_retrieval(
     session_id: str,
     ts_ms: int,
     emotion_tag: Optional[str],
+    render_target_lang: str,
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
     """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
     try:
-        _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
+        _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "8").strip())
     except ValueError:
-        _retr_top_k = 5
+        _retr_top_k = 8
     orchestrator = get_retrieval_orchestrator()
     orchestrator_result = await orchestrator.arun(
         request=RetrievalOrchestratorRequest(
@@ -372,6 +373,7 @@ async def _run_retrieval(
             top_k=_retr_top_k,
             ts_ms=ts_ms,
             emotion_context=emotion_tag,
+            render_target_lang=render_target_lang,
         )
     )
     return (
@@ -1112,6 +1114,7 @@ async def _sse_event_generator(
 
         request_body_obj = _StreamReq()
         emotion_context = resolve_chat_emotion_context(request_body=request_body_obj)
+        render_target_lang = infer_render_target_lang(user_message=resolved_message)
         governance_snapshot = build_chat_governance_snapshot(
             emotion_context=emotion_context,
             ts_ms=ts_ms,
@@ -1169,6 +1172,7 @@ async def _sse_event_generator(
                     session_id=session_id,
                     ts_ms=ts_ms,
                     emotion_tag=_retr_emotion,
+                    render_target_lang=render_target_lang,
                 )
             )
 
@@ -1360,7 +1364,6 @@ async def _sse_event_generator(
                 extra={"request_id": request_id},
             )
 
-        render_target_lang = infer_render_target_lang(user_message=resolved_message)
         # 从 _bond_summary 提取关系阶段信息传入 runtime_input
         _bond_stage_for_ctx = str(_bond_summary.get("bond_stage") or "").strip()
         _bond_summary_for_ctx: dict[str, Any] = {}

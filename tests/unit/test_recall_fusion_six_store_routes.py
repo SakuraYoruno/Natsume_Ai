@@ -16,6 +16,7 @@ from host_brain.retrieval.recall_fusion import (
     STORE_WORLD_CANON,
     RecallFusionServiceContract,
     load_recall_runtime_config,
+    resolve_recall_routes,
 )
 
 
@@ -189,6 +190,99 @@ def test_recall_routes_align_with_devspec_8_store_domains(tmp_path) -> None:
         ledger.close()
 
 
+def test_resolve_recall_routes_filters_by_render_target_lang_selector() -> None:
+    env = {
+        "RETR_RECALL_ENABLED": "true",
+        "RETR_RECALL_DEFAULT_ROUTE": "route_episodic",
+        "RETR_RECALL_ROUTES_JSON": json.dumps(
+            {
+                "route_sqlite_ledger": {
+                    "store_id": STORE_SQLITE_LEDGER,
+                    "top_k": 3,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                },
+                "route_episodic": {
+                    "store_id": STORE_EPISODIC_VECTOR,
+                    "collection": "episodic",
+                    "top_k": 3,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                },
+                "route_style_cn": {
+                    "store_id": STORE_STYLE_CANON,
+                    "collection": "canon",
+                    "top_k": 2,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                    "render_target_lang_selector": "zh",
+                },
+                "route_style_ja": {
+                    "store_id": STORE_STYLE_CANON,
+                    "collection": "canon",
+                    "top_k": 2,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                    "render_target_lang_selector": "ja",
+                },
+                "route_persona_cn": {
+                    "store_id": STORE_PERSONA_UTTERANCE,
+                    "collection": "persona_utterance",
+                    "top_k": 2,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                    "render_target_lang_selector": "zh",
+                },
+                "route_persona_ja": {
+                    "store_id": STORE_PERSONA_UTTERANCE,
+                    "collection": "persona_utterance",
+                    "top_k": 2,
+                    "score_weight": 1.0,
+                    "node_selector": "*",
+                    "render_target_lang_selector": "ja",
+                },
+            },
+            ensure_ascii=False,
+        ),
+    }
+    cfg_result = load_recall_runtime_config(env=env)
+    assert cfg_result.success, cfg_result.as_dict()
+    assert cfg_result.config is not None
+
+    zh_routes = resolve_recall_routes(
+        cfg_result.config,
+        node_id="host-01",
+        render_target_lang="zh",
+    )
+    ja_routes = resolve_recall_routes(
+        cfg_result.config,
+        node_id="host-01",
+        render_target_lang="ja",
+    )
+    unknown_routes = resolve_recall_routes(
+        cfg_result.config,
+        node_id="host-01",
+        render_target_lang=None,
+    )
+
+    assert {route.route_id for route in zh_routes} == {
+        "route_sqlite_ledger",
+        "route_episodic",
+        "route_style_cn",
+        "route_persona_cn",
+    }
+    assert {route.route_id for route in ja_routes} == {
+        "route_sqlite_ledger",
+        "route_episodic",
+        "route_style_ja",
+        "route_persona_ja",
+    }
+    assert {route.route_id for route in unknown_routes} == {
+        "route_sqlite_ledger",
+        "route_episodic",
+    }
+
+
 def test_style_canon_prefers_vector_projection_when_available(tmp_path) -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -329,6 +423,76 @@ def test_style_canon_falls_back_to_file_when_vector_unavailable(tmp_path) -> Non
         ledger.close()
 
 
+def test_style_canon_filters_by_render_target_lang(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        style_store = StyleCanonStore(style_root=tmp_path / "style", ledger=ledger)
+        style_store.upsert(
+            canon_id="natsume_ai_cn",
+            content="gentle companion tone shared query marker cn",
+            tags=["style", "cn"],
+            proposal_id="prop_style_lang_cn",
+        )
+        style_store.upsert(
+            canon_id="natsume_ai_ja",
+            content="gentle companion tone shared query marker ja",
+            tags=["style", "ja"],
+            proposal_id="prop_style_lang_ja",
+        )
+
+        env = {
+            "RETR_RECALL_ENABLED": "true",
+            "RETR_RECALL_DEFAULT_ROUTE": "route_style_canon",
+            "RETR_RECALL_ROUTES_JSON": json.dumps(
+                {
+                    "route_style_canon": {
+                        "store_id": STORE_STYLE_CANON,
+                        "top_k": 4,
+                        "score_weight": 1.0,
+                        "node_selector": "*",
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        }
+        cfg_result = load_recall_runtime_config(env=env)
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+
+        service = RecallFusionServiceContract(
+            ledger=ledger,
+            style_store=style_store,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+        query = "gentle companion tone shared query marker"
+        query_embedding, _ = embed_text(query)
+
+        zh_result = service.recall(
+            request_id="req_style_lang_zh",
+            query=query,
+            query_embedding=query_embedding,
+            ts_ms=1_800_310_000_010,
+            render_target_lang="zh",
+        )
+        ja_result = service.recall(
+            request_id="req_style_lang_ja",
+            query=query,
+            query_embedding=query_embedding,
+            ts_ms=1_800_310_000_011,
+            render_target_lang="ja",
+        )
+
+        assert zh_result.success
+        assert ja_result.success
+        assert zh_result.output["candidates"][0]["metadata"]["canon_id"] == "natsume_ai_cn"
+        assert ja_result.output["candidates"][0]["metadata"]["canon_id"] == "natsume_ai_ja"
+    finally:
+        ledger.close()
+
+
 def test_persona_utterance_vector_route_returns_dialogue_candidates() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -396,6 +560,94 @@ def test_persona_utterance_vector_route_returns_dialogue_candidates() -> None:
         assert top["metadata"]["store_id"] == STORE_PERSONA_UTTERANCE
         assert top["metadata"]["lang"] == "ja"
         assert "persona_utterance://" in str(top["source_ref"])
+    finally:
+        ledger.close()
+
+
+def test_persona_utterance_filters_by_render_target_lang() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        chroma = InMemoryChromaClient(
+            collection_profiles={"episodic": 16, "persona_utterance": 16},
+            default_collection="episodic",
+        )
+        query = "comfort me gently"
+        query_embedding, _ = embed_text(query)
+        chroma.upsert(
+            memory_id="persona_utterance::natsume_ai_zh::zh::001",
+            text="我在这里，先慢慢说吧。",
+            embedding=query_embedding,
+            collection="persona_utterance",
+            metadata={
+                "canon_id": "natsume_ai_cn",
+                "lang": "zh",
+                "speaker": "Natsume",
+                "source_ref": "persona_utterance://natsume_ai_cn/zh/001",
+                "evidence_ref": "evd://persona_utterance/natsume_ai_cn/zh/001",
+            },
+        )
+        chroma.upsert(
+            memory_id="persona_utterance::natsume_ai_ja::ja::001",
+            text="大丈夫だよ、ゆっくり話して。",
+            embedding=query_embedding,
+            collection="persona_utterance",
+            metadata={
+                "canon_id": "natsume_ai_ja",
+                "lang": "ja",
+                "speaker": "Natsume",
+                "source_ref": "persona_utterance://natsume_ai_ja/ja/001",
+                "evidence_ref": "evd://persona_utterance/natsume_ai_ja/ja/001",
+            },
+        )
+
+        env = {
+            "RETR_RECALL_ENABLED": "true",
+            "RETR_RECALL_DEFAULT_ROUTE": "route_persona_utterance",
+            "RETR_RECALL_ROUTES_JSON": json.dumps(
+                {
+                    "route_persona_utterance": {
+                        "store_id": STORE_PERSONA_UTTERANCE,
+                        "collection": "persona_utterance",
+                        "top_k": 4,
+                        "score_weight": 1.0,
+                        "node_selector": "*",
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        }
+        cfg_result = load_recall_runtime_config(env=env)
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+
+        service = RecallFusionServiceContract(
+            ledger=ledger,
+            chroma_client=chroma,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+
+        zh_result = service.recall(
+            request_id="req_persona_lang_zh",
+            query=query,
+            query_embedding=query_embedding,
+            ts_ms=1_800_310_000_210,
+            render_target_lang="zh",
+        )
+        ja_result = service.recall(
+            request_id="req_persona_lang_ja",
+            query=query,
+            query_embedding=query_embedding,
+            ts_ms=1_800_310_000_211,
+            render_target_lang="ja",
+        )
+
+        assert zh_result.success
+        assert ja_result.success
+        assert zh_result.output["candidates"][0]["metadata"]["lang"] == "zh"
+        assert ja_result.output["candidates"][0]["metadata"]["lang"] == "ja"
     finally:
         ledger.close()
 

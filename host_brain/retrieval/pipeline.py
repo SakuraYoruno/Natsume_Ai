@@ -72,7 +72,7 @@ class ChromaHttpSearchClient:
         self,
         *,
         query_embedding: list[float],
-        top_k: int = 5,
+        top_k: int = 8,
         collection: str | None = None,
     ) -> list[dict[str, Any]]:
         collection_name = str(collection or self._default_collection)
@@ -140,6 +140,7 @@ class RetrievalPipelineContract:
         ts_ms: int | None = None,
         # M28-P（OPT-41）：情感上下文透传参数
         emotion_context: str | None = None,
+        render_target_lang: str | None = None,
     ) -> RetrievalPipelineResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
@@ -161,6 +162,7 @@ class RetrievalPipelineContract:
             session_id=session_id,
             ts_ms=now_value,
             emotion_filter=emotion_context,
+            render_target_lang=render_target_lang,
         )
 
         recall_candidates = list(recall_result.output.get("candidates") or [])

@@ -62,6 +62,14 @@ def _truncate_for_prompt(value: Any, *, limit: int = 240) -> str:
     return f"{text[: max(0, limit - 3)]}..."
 
 
+def _get_prompt_evidence_limit(*, default: int = 8) -> int:
+    try:
+        value = int(str(os.environ.get("HOST_RETR_EVIDENCE_ITEMS_MAX") or str(default)).strip())
+    except ValueError:
+        value = int(default)
+    return max(1, min(value, 12))
+
+
 def _contains_kana(text: str) -> bool:
     for ch in str(text or ""):
         cp = ord(ch)
@@ -102,6 +110,15 @@ def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> 
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
     if override in {"zh", "ja"}:
         return override
+    combined = f"{str(user_message or '')}\n{str(core_narrative or '')}".strip().lower()
+    if any(token in combined for token in ("中文", "汉语", "简体", "chinese", "mandarin")):
+        return "zh"
+    if any(token in combined for token in ("日文", "日语", "日本語", "japanese")):
+        return "ja"
+    if _contains_kana(combined):
+        return "ja"
+    if _contains_cjk_ideograph(combined):
+        return "zh"
     return "ja"
 
 
@@ -174,7 +191,10 @@ def _build_direct_response_priority(
             "Aim for 1-3 sentences; longer only when the topic genuinely warrants it."
         )
     else:
-        rules.append("Write concise spoken Simplified Chinese and avoid decorative filler.")
+        rules.append(
+            "Write natural spoken Simplified Chinese in 2-4 short sentences for ordinary chat, "
+            "and avoid ultra-short acknowledgements unless the user explicitly asked for brevity."
+        )
 
     return "DIRECT_RESPONSE_PRIORITY:\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
 
@@ -457,7 +477,7 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
     evidence_items = retrieval.get("evidence_items")
     rows = evidence_items if isinstance(evidence_items, list) else []
     evidence_lines: list[str] = []
-    for row in rows[:5]:
+    for row in rows[: _get_prompt_evidence_limit()]:
         if not isinstance(row, dict):
             continue
         evidence_ref = _truncate_for_prompt(row.get("evidence_ref") or row.get("source_ref") or "unknown", limit=80)
@@ -635,6 +655,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     )
     prompt_context_emotion_raw = prompt_context.get("emotion_pulse")
     prompt_context_emotion = dict(prompt_context_emotion_raw) if isinstance(prompt_context_emotion_raw, Mapping) else {}
+    emotion_recall_text = _truncate_for_prompt(prompt_context.get("emotion_recall"), limit=320)
     merged_emotion_context = normalize_chat_emotion_context(
         {
             "mood_state": snapshot_emotion_context.get("mood_state") or emotion_context.get("mood_state"),
@@ -898,6 +919,13 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         )
         + "\n"
     )
+    emotion_recall_block = ""
+    if emotion_recall_text:
+        emotion_recall_block = (
+            "EMOTION_RECALL_BINDING:\n"
+            "- Treat this as affective recall only; it must shape tone and pacing, not facts.\n"
+            f"- {emotion_recall_text}\n\n"
+        )
 
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
 
@@ -910,7 +938,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     elif isinstance(_episodic_vector_raw, list):
         # 列表格式：每项为 {"text": "...", "score": 0.9} 或纯字符串
         _ev_lines: list[str] = []
-        for _ev_item in _episodic_vector_raw[:5]:
+        for _ev_item in _episodic_vector_raw[: _get_prompt_evidence_limit()]:
             if isinstance(_ev_item, str):
                 _ev_lines.append(f"- {_truncate_for_prompt(_ev_item, limit=200)}")
             elif isinstance(_ev_item, dict):
@@ -1057,6 +1085,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{direct_response_block}"
         f"{style_block}"
         f"{cn_style_boost_block}"
+        f"{emotion_recall_block}"
         f"{_persona_expression_hint_block}"
         f"{_self_reflection_block}"
         f"{_bond_narrative_block}"

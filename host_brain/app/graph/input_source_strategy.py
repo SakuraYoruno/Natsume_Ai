@@ -8,6 +8,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_gateway_reply_content(raw_content: str) -> str:
+    from host_brain.app.prompt_builder import (  # noqa: PLC0415
+        extract_gateway_narrative,
+        extract_json_object_from_text,
+        repair_utf8_latin1_mojibake,
+    )
+
+    normalized = repair_utf8_latin1_mojibake(str(raw_content or "").strip())
+    if not normalized:
+        return ""
+    try:
+        payload = extract_json_object_from_text(normalized)
+    except Exception:
+        return normalized
+    extracted = extract_gateway_narrative(payload)
+    return extracted or normalized
+
+
 @dataclass
 class InputSourceRuntimeContext:
     request_id: str
@@ -241,7 +259,7 @@ class GatewayInputSourceStrategy(InputSourceStrategy):
                 context.request_id,
             )
             return
-        reply_narrative = commit_result.reply_narrative
+        reply_narrative = _normalize_gateway_reply_content(commit_result.reply_narrative)
         fallback_on_reject = context.parse_bool_env("HOST_INPUT_GATEWAY_FALLBACK_ON_REJECT", True)
         fallback_text = context.parse_text_env(
             "HOST_INPUT_GATEWAY_REJECT_FALLBACK_TEXT",

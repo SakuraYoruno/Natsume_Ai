@@ -188,15 +188,16 @@ async def _complex_scene_sse_generator(
 
         graph_scene_type = scene_type
         graph_scene_type_source = scene_type_source
+        render_target_lang = infer_render_target_lang(user_message=request_body.message)
 
         _retrieval_task = None
         _retrieval_started_ms: int | None = None
         retrieval_init_failed_reason: str | None = None
         if retrieval_enabled:
             try:
-                _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "5").strip())
+                _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "8").strip())
             except ValueError:
-                _retr_top_k = 5
+                _retr_top_k = 8
             _retr_top_k = max(1, min(_retr_top_k, 20))
             _retr_emotion = str(emotion_context.get("emotion_tag") or "") or None
             _retrieval_started_ms = int(time.time() * 1000)
@@ -232,6 +233,7 @@ async def _complex_scene_sse_generator(
                             top_k=_retr_top_k,
                             ts_ms=ts_ms,
                             emotion_context=_retr_emotion,
+                            render_target_lang=render_target_lang,
                         )
                     )
                 )
@@ -289,7 +291,6 @@ async def _complex_scene_sse_generator(
         if retrieval_latency_ms is not None:
             retrieval_summary["latency_ms"] = int(retrieval_latency_ms)
 
-        render_target_lang = infer_render_target_lang(user_message=request_body.message)
         emotion_snapshot = build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="chat_pre_llm",

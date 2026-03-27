@@ -46,6 +46,7 @@ def search_route(
     route: RecallRouteConfig,
     query: str,
     query_embedding: list[float],
+    render_target_lang: str | None = None,
     session_id: str | None = None,
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -75,6 +76,7 @@ def search_route(
             query_embedding=query_embedding,
             top_k=int(route.top_k),
             collection=route.collection,
+            render_target_lang=render_target_lang,
         )
     if store_id == STORE_WORLD_CANON:
         return search_world_canon(
@@ -92,8 +94,58 @@ def search_route(
             query_embedding=query_embedding,
             top_k=int(route.top_k),
             collection=route.collection,
+            render_target_lang=render_target_lang,
         )
     raise RuntimeError(f"unsupported recall store_id: {store_id}")
+
+
+def _normalize_render_target_lang(render_target_lang: str | None) -> str | None:
+    normalized = str(render_target_lang or "").strip().lower()
+    if normalized in {"zh", "cn", "chinese", "zh-cn", "zh-hans"}:
+        return "zh"
+    if normalized in {"ja", "jp", "japanese"}:
+        return "ja"
+    return None
+
+
+def _matches_render_target_lang(
+    *,
+    render_target_lang: str | None,
+    lang_value: str | None = None,
+    canon_id: str | None = None,
+    tags: list[str] | None = None,
+) -> bool:
+    preferred = _normalize_render_target_lang(render_target_lang)
+    if preferred is None:
+        return True
+
+    normalized_lang = str(lang_value or "").strip().lower()
+    if preferred == "zh" and normalized_lang in {"zh", "cn", "chinese", "zh-cn", "zh-hans"}:
+        return True
+    if preferred == "ja" and normalized_lang in {"ja", "jp", "japanese"}:
+        return True
+
+    normalized_canon_id = str(canon_id or "").strip().lower()
+    if preferred == "zh" and (
+        normalized_canon_id.endswith("_cn")
+        or normalized_canon_id.endswith("_zh")
+        or "::zh::" in normalized_canon_id
+    ):
+        return True
+    if preferred == "ja" and (
+        normalized_canon_id.endswith("_ja")
+        or normalized_canon_id.endswith("_jp")
+        or "::ja::" in normalized_canon_id
+    ):
+        return True
+
+    normalized_tags = [str(tag or "").strip().lower() for tag in list(tags or []) if str(tag or "").strip()]
+    if preferred == "zh" and any(tag in {"zh", "cn", "chinese", "lang:zh", "lang:cn"} for tag in normalized_tags):
+        return True
+    if preferred == "ja" and any(tag in {"ja", "jp", "japanese", "lang:ja", "lang:jp"} for tag in normalized_tags):
+        return True
+
+    return False
 
 
 def search_sqlite_ledger(
@@ -308,6 +360,7 @@ def search_style_canon(
     query_embedding: list[float],
     top_k: int,
     collection: str | None,
+    render_target_lang: str | None = None,
 ) -> list[dict[str, Any]]:
     """Route 4：风格典籍检索（向量投影优先，文件降级）。"""
     try:
@@ -318,15 +371,27 @@ def search_style_canon(
             collection=collection,
             canon_kind="style",
             store_id=STORE_STYLE_CANON,
+            render_target_lang=render_target_lang,
         )
         if vector_rows:
             return vector_rows
     except Exception:
         pass
-    return search_style_canon_file(self, query=query, top_k=top_k)
+    return search_style_canon_file(
+        self,
+        query=query,
+        top_k=top_k,
+        render_target_lang=render_target_lang,
+    )
 
 
-def search_style_canon_file(self: Any, *, query: str, top_k: int) -> list[dict[str, Any]]:
+def search_style_canon_file(
+    self: Any,
+    *,
+    query: str,
+    top_k: int,
+    render_target_lang: str | None = None,
+) -> list[dict[str, Any]]:
     """风格典籍文件降级检索。"""
     from host_brain.retrieval.recall_fusion_utils import (
         _text_similarity_score,
@@ -341,6 +406,12 @@ def search_style_canon_file(self: Any, *, query: str, top_k: int) -> list[dict[s
         canon_id = str(getattr(entry, "canon_id", "") or "").strip()
         content = str(getattr(entry, "content", "") or "").strip()
         tags = list(getattr(entry, "tags", []) or [])
+        if not _matches_render_target_lang(
+            render_target_lang=render_target_lang,
+            canon_id=canon_id,
+            tags=tags,
+        ):
+            continue
         text = " ".join([content] + [str(tag) for tag in tags if str(tag).strip()])
         score = _text_similarity_score(query, text)
         if score <= 0.0:
@@ -444,6 +515,7 @@ def search_canon_projection_vector(
     collection: str | None,
     canon_kind: str,
     store_id: str,
+    render_target_lang: str | None = None,
 ) -> list[dict[str, Any]]:
     """向量投影检索（style_canon / world_canon 共用）。"""
     from host_brain.retrieval.recall_fusion_utils import (
@@ -486,6 +558,13 @@ def search_canon_projection_vector(
             canon_id = str(normalized_metadata.get("canon_id") or "").strip()
             if not canon_id:
                 canon_id = _extract_canon_entity_id(memory_id, "canon_style") or memory_id
+            if not _matches_render_target_lang(
+                render_target_lang=render_target_lang,
+                lang_value=str(normalized_metadata.get("lang") or "").strip(),
+                canon_id=canon_id,
+                tags=list(normalized_metadata.get("tags") or []),
+            ):
+                continue
             source_ref = str(normalized_metadata.get("source_ref") or f"style_canon://{canon_id}@v{version}")
             evidence_primary = str(
                 normalized_metadata.get("evidence_ref")
@@ -603,6 +682,7 @@ def search_persona_utterance(
     query_embedding: list[float],
     top_k: int,
     collection: str | None,
+    render_target_lang: str | None = None,
 ) -> list[dict[str, Any]]:
     """Route 7：人格话语向量投影检索。"""
     from host_brain.retrieval.recall_fusion_utils import (
@@ -635,6 +715,12 @@ def search_persona_utterance(
             continue
         canon_id = str(metadata.get("canon_id") or "").strip() or "unknown"
         lang = str(metadata.get("lang") or "").strip().lower() or "unknown"
+        if not _matches_render_target_lang(
+            render_target_lang=render_target_lang,
+            lang_value=lang,
+            canon_id=canon_id,
+        ):
+            continue
         source_ref = str(
             metadata.get("source_ref") or f"persona_utterance://{canon_id}/{memory_id}"
         ).strip()

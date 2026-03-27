@@ -32,6 +32,7 @@ DEFAULT_RECALL_STORE_ID = "episodic_vector"
 DEFAULT_RECALL_TOP_K = 8
 DEFAULT_RECALL_SCORE_WEIGHT = 1.0
 DEFAULT_NODE_SELECTOR = "default"
+DEFAULT_RENDER_TARGET_LANG_SELECTOR = "*"
 
 SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
@@ -100,13 +101,19 @@ def load_recall_runtime_config(
     )
 
 
-def resolve_recall_routes(config: RecallRuntimeConfig, *, node_id: str | None) -> list[RecallRouteConfig]:
+def resolve_recall_routes(
+    config: RecallRuntimeConfig,
+    *,
+    node_id: str | None,
+    render_target_lang: str | None = None,
+) -> list[RecallRouteConfig]:
     if node_id is not None and str(node_id).strip():
         node = str(node_id).strip()
         matched = [
             route
             for route_id, route in sorted(config.routes.items())
             if _node_selector_match(route.node_selector, node)
+            and _render_target_lang_selector_match(route.render_target_lang_selector, render_target_lang)
         ]
         if matched:
             return matched
@@ -194,6 +201,9 @@ def _coerce_route(
     collection_raw = raw_route.get("collection")
     collection = str(collection_raw).strip() if collection_raw is not None else ""
     node_selector = str(raw_route.get("node_selector") or "").strip()
+    render_target_lang_selector = str(
+        raw_route.get("render_target_lang_selector") or DEFAULT_RENDER_TARGET_LANG_SELECTOR
+    ).strip()
     top_k = _coerce_positive_int(
         raw_value=raw_route.get("top_k"),
         field=f"{field_name}.{route_id}.top_k",
@@ -249,6 +259,7 @@ def _coerce_route(
         top_k=top_k,
         score_weight=score_weight,
         node_selector=node_selector,
+        render_target_lang_selector=render_target_lang_selector,
     )
 
 
@@ -263,6 +274,19 @@ def _node_selector_match(selector: str, node_id: str) -> bool:
         if token == node:
             return True
     return False
+
+
+def _render_target_lang_selector_match(selector: str, render_target_lang: str | None) -> bool:
+    tokens = [item.strip().lower() for item in str(selector or "").split(",") if item.strip()]
+    if not tokens:
+        return True
+    for token in tokens:
+        if token in {"*", "all", "any"}:
+            return True
+    lang = str(render_target_lang or "").strip().lower()
+    if not lang:
+        return False
+    return lang in tokens
 
 
 def _coerce_positive_int(

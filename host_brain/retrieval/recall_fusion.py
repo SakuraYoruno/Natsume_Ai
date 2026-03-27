@@ -136,6 +136,7 @@ class RecallFusionServiceContract:
         route: RecallRouteConfig,
         query: str,
         query_embedding: list[float],
+        render_target_lang: str | None = None,
         session_id: str | None = None,
         now_ts_ms: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -144,6 +145,7 @@ class RecallFusionServiceContract:
             route=route,
             query=query,
             query_embedding=query_embedding,
+            render_target_lang=render_target_lang,
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
@@ -157,9 +159,24 @@ class RecallFusionServiceContract:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
         return search_neo4j_bond(self, query=query, top_k=top_k)
 
-    def _search_style_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
+    def _search_style_canon(
+        self,
+        *,
+        query: str,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+        render_target_lang: str | None = None,
+    ) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_style_canon
-        return search_style_canon(self, query=query, query_embedding=query_embedding, top_k=top_k, collection=collection)
+        return search_style_canon(
+            self,
+            query=query,
+            query_embedding=query_embedding,
+            top_k=top_k,
+            collection=collection,
+            render_target_lang=render_target_lang,
+        )
 
     def _search_world_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_world_canon
@@ -169,9 +186,22 @@ class RecallFusionServiceContract:
         from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
         return search_artifact_vault(self, query=query, top_k=top_k)
 
-    def _search_persona_utterance(self, *, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
+    def _search_persona_utterance(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int,
+        collection: str | None,
+        render_target_lang: str | None = None,
+    ) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_persona_utterance
-        return search_persona_utterance(self, query_embedding=query_embedding, top_k=top_k, collection=collection)
+        return search_persona_utterance(
+            self,
+            query_embedding=query_embedding,
+            top_k=top_k,
+            collection=collection,
+            render_target_lang=render_target_lang,
+        )
 
     def _search_canon_projection_vector(self, *, query_embedding: list[float], top_k: int, collection: str | None, canon_kind: str, store_id: str) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_canon_projection_vector
@@ -213,12 +243,17 @@ class RecallFusionServiceContract:
         session_id: str | None = None,
         ts_ms: int | None = None,
         emotion_filter: str | None = None,
+        render_target_lang: str | None = None,
     ) -> RecallFusionResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
         normalized_vector = _normalize_vector(query_embedding)
 
-        routes = resolve_recall_routes(self.runtime_config, node_id=self.node_id)
+        routes = resolve_recall_routes(
+            self.runtime_config,
+            node_id=self.node_id,
+            render_target_lang=render_target_lang,
+        )
         route_rows: list[dict[str, Any]] = []
         route_errors: list[dict[str, Any]] = []
 
@@ -256,6 +291,7 @@ class RecallFusionServiceContract:
                     route=route,
                     query=normalized_query,
                     query_embedding=normalized_vector,
+                    render_target_lang=render_target_lang,
                     session_id=session_id,
                     now_ts_ms=now_value,
                 )
@@ -265,6 +301,7 @@ class RecallFusionServiceContract:
                     "route_id": route.route_id,
                     "store_id": route.store_id,
                     "collection": route.collection,
+                    "render_target_lang_selector": route.render_target_lang_selector,
                     "reason_code": reason_code,
                     "detail": str(exc),
                 })
@@ -272,6 +309,7 @@ class RecallFusionServiceContract:
                     "route_id": route.route_id,
                     "store_id": route.store_id,
                     "collection": route.collection,
+                    "render_target_lang_selector": route.render_target_lang_selector,
                     "status": STATUS_DEGRADED,
                     "reason_code": reason_code,
                     "detail": str(exc),
@@ -283,6 +321,7 @@ class RecallFusionServiceContract:
                 "route_id": route.route_id,
                 "store_id": route.store_id,
                 "collection": route.collection,
+                "render_target_lang_selector": route.render_target_lang_selector,
                 "status": STATUS_OK,
                 "reason_code": None,
                 "detail": "recall route completed",

@@ -17,6 +17,7 @@ class RecallRouteConfig:
     top_k: int
     score_weight: float
     node_selector: str
+    render_target_lang_selector: str = "*"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -26,6 +27,7 @@ class RecallRouteConfig:
             "top_k": int(self.top_k),
             "score_weight": float(self.score_weight),
             "node_selector": self.node_selector,
+            "render_target_lang_selector": self.render_target_lang_selector,
         }
 
 

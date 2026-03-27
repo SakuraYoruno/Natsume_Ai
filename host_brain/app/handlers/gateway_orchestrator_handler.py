@@ -96,6 +96,8 @@ def _augment_gateway_prompt_for_reply_depth(*, prompt_text: str, user_message: s
             "GATEWAY_REPLY_DEPTH_POLICY:\n"
             "- Answer directly first, then provide concise supporting detail.\n"
             "- Default to 2-4 short sentences for normal chat; avoid one-line shallow replies.\n"
+            "- For ordinary QQ chat, do not stop at a bare acknowledgement; include at least one supporting clause.\n"
+            "- Unless the user requested brevity, avoid replies shorter than about 12 Chinese characters.\n"
             "- If evidence is insufficient, state uncertainty and give one clear next step.\n"
             "- Avoid generic filler and repetitive greetings.\n"
         )
@@ -124,6 +126,26 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
         if re.search(pattern, text, re.IGNORECASE):
             return tag
     return "NEUTRAL"
+
+
+def _normalize_gateway_commit_narrative(*, raw_text: str, rendered_text: str = "") -> str:
+    from host_brain.app.prompt_builder import (  # noqa: PLC0415
+        extract_gateway_narrative,
+        extract_json_object_from_text,
+        repair_utf8_latin1_mojibake,
+    )
+
+    raw_narrative = repair_utf8_latin1_mojibake(str(raw_text or "").strip())
+    rendered_narrative = repair_utf8_latin1_mojibake(str(rendered_text or "").strip())
+    if raw_narrative:
+        try:
+            payload = extract_json_object_from_text(raw_narrative)
+        except Exception:
+            payload = None
+        extracted = extract_gateway_narrative(payload)
+        if extracted:
+            return extracted
+    return rendered_narrative or raw_narrative
 
 
 # ---------------------------------------------------------------------------
@@ -835,7 +857,10 @@ async def gateway_orchestrator_sse_generator(
             full_text = "抱歉，处理出了点问题，请稍后再试。"
             yield _sse_sentence(request_id, full_text, 0)
 
-    narrative = full_text.strip()
+    narrative = _normalize_gateway_commit_narrative(
+        raw_text=full_text,
+        rendered_text=rendered_text,
+    )
 
     # ── 4. 后置任务：Airlock 检疫 + 情节记忆 + Bond 动态（并行）──
     post_task_refs = await _run_post_generation_tasks(

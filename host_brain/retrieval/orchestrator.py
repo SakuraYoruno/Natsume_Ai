@@ -8,11 +8,15 @@ Provides a typed orchestrator layer on top of RetrievalPipelineContract:
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 from collections import OrderedDict
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Any, Mapping
@@ -24,6 +28,12 @@ from host_brain.retrieval.pipeline import RetrievalPipelineContract, RetrievalPi
 RETRIEVAL_PATH_SUCCESS = "success"
 RETRIEVAL_PATH_PARTIAL_FAILURE = "partial_failure"
 RETRIEVAL_PATH_ALL_FAILURE = "all_failure"
+
+_ORCHESTRATOR_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="retrieval-orchestrator",
+)
+atexit.register(_ORCHESTRATOR_EXECUTOR.shutdown, wait=False, cancel_futures=True)
 
 
 def build_skipped_retrieval_summary(reason_code: str) -> dict[str, Any]:
@@ -60,16 +70,41 @@ def build_degraded_retrieval_summary(reason_code: str) -> dict[str, Any]:
 
 def _normalize_top_k(value: int | None) -> int:
     try:
-        parsed = int(value if value is not None else 5)
+        parsed = int(value if value is not None else 8)
     except (TypeError, ValueError):
-        parsed = 5
+        parsed = 8
     return max(1, min(parsed, 20))
 
 
+async def _await_executor_future(
+    future: Future[Any],
+    *,
+    timeout_ms: int | None,
+) -> Any:
+    if timeout_ms is None:
+        while not future.done():
+            await asyncio.sleep(0.01)
+        return future.result()
+
+    deadline = time.monotonic() + max(0.1, float(max(100, int(timeout_ms))) / 1000.0)
+    while True:
+        if future.done():
+            return future.result()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise asyncio.TimeoutError
+        await asyncio.sleep(min(0.05, remaining))
+
+
 def _extract_evidence_items(*, rerank_output: Mapping[str, Any]) -> list[dict[str, Any]]:
+    try:
+        evidence_cap = int(str(os.environ.get("HOST_RETR_EVIDENCE_ITEMS_MAX") or "8").strip())
+    except ValueError:
+        evidence_cap = 8
+    evidence_cap = max(1, min(evidence_cap, 20))
     rerank_topk_items = list(rerank_output.get("topk") or [])
     evidence_items: list[dict[str, Any]] = []
-    for item in rerank_topk_items[:5]:
+    for item in rerank_topk_items[:evidence_cap]:
         if not isinstance(item, dict):
             continue
         snippet = _truncate_for_prompt(item.get("snippet"), limit=240)
@@ -135,9 +170,10 @@ class RetrievalOrchestratorRequest:
     request_id: str
     session_id: str | None = None
     intent_id: str | None = None
-    top_k: int = 5
+    top_k: int = 8
     ts_ms: int | None = None
     emotion_context: str | None = None
+    render_target_lang: str | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +239,7 @@ class RetrievalOrchestrator:
             "top_k": int(normalized_top_k),
             "intent_id": str(request.intent_id or "").strip(),
             "emotion_context": str(request.emotion_context or "").strip(),
+            "render_target_lang": str(request.render_target_lang or "").strip().lower(),
             "session_state": session_state,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -264,7 +301,7 @@ class RetrievalOrchestrator:
         summary["cache_hit"] = bool(cache_hit and self._cache_enabled)
         summary["cache_ttl_ms"] = int(self._cache_ttl_ms if self._cache_enabled else 0)
         summary["cache_age_ms"] = max(0, int(cache_age_ms))
-        summary["cache_key_scope"] = "session_id+query+top_k+intent_id+emotion_context"
+        summary["cache_key_scope"] = "session_id+query+top_k+intent_id+emotion_context+render_target_lang"
         evidence_items = [
             dict(item) if isinstance(item, Mapping) else item
             for item in list(result.retrieval_evidence_items or [])
@@ -279,7 +316,7 @@ class RetrievalOrchestrator:
             "ttl_ms": int(self._cache_ttl_ms if self._cache_enabled else 0),
             "age_ms": max(0, int(cache_age_ms)),
             "max_entries": int(self._cache_max_entries),
-            "key_scope": "session_id+query+top_k+intent_id+emotion_context",
+            "key_scope": "session_id+query+top_k+intent_id+emotion_context+render_target_lang",
         }
         return RetrievalOrchestratorResult(
             success=bool(result.success),
@@ -313,24 +350,21 @@ class RetrievalOrchestrator:
                     cache_hit=True,
                     cache_age_ms=cache_age_ms,
                 )
-        run_coro = asyncio.to_thread(
-            self.pipeline.run,
-            request_id=request.request_id,
-            query=request.query,
-            intent_id=request.intent_id,
-            session_id=request.session_id,
-            top_k=normalized_top_k,
-            ts_ms=request.ts_ms,
-            emotion_context=request.emotion_context,
+        run_future = _ORCHESTRATOR_EXECUTOR.submit(
+            partial(
+                self.pipeline.run,
+                request_id=request.request_id,
+                query=request.query,
+                intent_id=request.intent_id,
+                session_id=request.session_id,
+                top_k=normalized_top_k,
+                ts_ms=request.ts_ms,
+                emotion_context=request.emotion_context,
+                render_target_lang=request.render_target_lang,
+            ),
         )
         try:
-            if timeout_ms is not None:
-                run_result = await asyncio.wait_for(
-                    run_coro,
-                    timeout=max(0.1, float(max(100, int(timeout_ms))) / 1000.0),
-                )
-            else:
-                run_result = await run_coro
+            run_result = await _await_executor_future(run_future, timeout_ms=timeout_ms)
             summary, evidence_items, path = build_summary_from_pipeline_result(run_result)
             detail = str(run_result.detail or "retrieval orchestrator completed")
             success = str(summary.get("status") or "").upper() == "OK" and not bool(summary.get("degraded", False))

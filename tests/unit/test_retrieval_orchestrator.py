@@ -186,6 +186,7 @@ def test_retrieval_orchestrator_all_failure_path() -> None:
 
 def test_retrieval_orchestrator_timeout_maps_to_degraded() -> None:
     orchestrator = RetrievalOrchestrator(pipeline=_SlowPipeline())  # type: ignore[arg-type]
+    started = time.perf_counter()
     out = _run(
         orchestrator,
         RetrievalOrchestratorRequest(
@@ -196,11 +197,13 @@ def test_retrieval_orchestrator_timeout_maps_to_degraded() -> None:
         ),
         timeout_ms=50,
     )
+    elapsed = time.perf_counter() - started
 
     assert out.success is False
     assert out.path == RETRIEVAL_PATH_ALL_FAILURE
     assert out.retrieval_summary["cache_hit"] is False
     assert out.retrieval_summary["reason_code"] == "RETRIEVAL_TIMEOUT"
+    assert elapsed < 0.15
 
 
 def test_retrieval_orchestrator_cache_hit_reuses_pipeline() -> None:
@@ -301,3 +304,54 @@ def test_retrieval_orchestrator_cache_expire_triggers_new_run() -> None:
     assert pipeline.calls == 2
     assert out1.retrieval_summary["cache_hit"] is False
     assert out2.retrieval_summary["cache_hit"] is False
+
+
+def test_retrieval_orchestrator_cache_key_separates_render_target_lang() -> None:
+    result = RetrievalPipelineResult(
+        success=True,
+        status="OK",
+        reason_code=None,
+        stage="S_RET_PIPELINE",
+        detail="ok",
+        output={
+            "recall": {"routes": ["persona"], "route_rows": [], "route_errors": [], "candidate_count": 1},
+            "rerank": {"topk": [{"evidence_ref": "e1", "snippet": "hello"}]},
+            "evidence_pack": {"evidence_refs": ["e1"]},
+            "reason_chain": [],
+            "degraded": False,
+        },
+    )
+    pipeline = _CountingPipeline(result=result)
+    orchestrator = RetrievalOrchestrator(
+        pipeline=pipeline,  # type: ignore[arg-type]
+        cache_enabled=True,
+        cache_ttl_ms=5000,
+        cache_max_entries=128,
+    )
+
+    zh_out = _run(
+        orchestrator,
+        RetrievalOrchestratorRequest(
+            trace_id="trace::lang-zh",
+            query="same-query",
+            session_state={"session_id": "lang-cache"},
+            request_id="req::lang-zh",
+            session_id="lang-cache",
+            render_target_lang="zh",
+        ),
+    )
+    ja_out = _run(
+        orchestrator,
+        RetrievalOrchestratorRequest(
+            trace_id="trace::lang-ja",
+            query="same-query",
+            session_state={"session_id": "lang-cache"},
+            request_id="req::lang-ja",
+            session_id="lang-cache",
+            render_target_lang="ja",
+        ),
+    )
+
+    assert pipeline.calls == 2
+    assert zh_out.retrieval_summary["cache_hit"] is False
+    assert ja_out.retrieval_summary["cache_hit"] is False
