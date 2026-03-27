@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Mapping
+
+logger = logging.getLogger(__name__)
 
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
@@ -617,6 +620,14 @@ def build_chat_generation_prompt_payload(
             "emotion_tag": normalized_emotion_context.get("emotion_tag"),
             "emotion_range_hint": normalized_emotion_context.get("emotion_range_hint"),
             "emotion_intensity": normalized_emotion_context.get("emotion_intensity"),
+            # FIX P0-瓶颈1：传递完整情感上下文（原实现只传 4 个字段，导致 VAD/回声/独白等管线断裂）
+            "vad_vector": normalized_emotion_context.get("vad_vector"),
+            "emotion_echo": normalized_emotion_context.get("emotion_echo"),
+            "inner_monologue": normalized_emotion_context.get("inner_monologue"),
+            "triggered_emotions": normalized_emotion_context.get("triggered_emotions"),
+            "user_emotion_profile": normalized_emotion_context.get("user_emotion_profile"),
+            "emotion_ts_ms": normalized_emotion_context.get("emotion_ts_ms"),
+            "_prev_emotion_tag": normalized_emotion_context.get("_prev_emotion_tag"),
         },
         "emotion_snapshot": normalized_emotion_snapshot,
         "prompt_context": prompt_context,
@@ -683,6 +694,133 @@ def build_chat_prompt_runtime_payload(
         prompt_context_observability=prompt_context_observability,
     )
     runtime_payload["style_bindings"] = resolved_style_bindings
+
+    # ── FIX P0-瓶颈2：将情感子系统数据桥接到 runtime_payload 顶层 ──────────
+    # prompt_builder.render_node_generation_prompt() 直接从 runtime_payload 顶层
+    # 读取 emotion_vector/emotion_timeline/emotion_echo/inferred_emotion/
+    # inner_monologue/user_emotion_profile 等字段。原实现中这些字段从未被写入
+    # runtime_payload 顶层，导致 prompt 里对应区块永远为空。
+    # 现在从 generation_payload["emotion_context"]（已在 P0-瓶颈1 中修复为完整字段）
+    # 和全局单例中提取数据，注入 runtime_payload 顶层。
+    _full_emotion_ctx = dict(generation_payload.get("emotion_context") or {})
+    if _full_emotion_ctx.get("vad_vector"):
+        runtime_payload["emotion_vector"] = _full_emotion_ctx["vad_vector"]
+    if _full_emotion_ctx.get("emotion_echo"):
+        runtime_payload["emotion_echo"] = _full_emotion_ctx["emotion_echo"]
+    if _full_emotion_ctx.get("inner_monologue"):
+        runtime_payload["inner_monologue"] = _full_emotion_ctx["inner_monologue"]
+    if _full_emotion_ctx.get("user_emotion_profile"):
+        runtime_payload["user_emotion_profile"] = _full_emotion_ctx["user_emotion_profile"]
+    if _full_emotion_ctx.get("triggered_emotions"):
+        runtime_payload["triggered_emotions"] = _full_emotion_ctx["triggered_emotions"]
+
+    # emotion_timeline: 从全局单例获取最新摘要（因为 timeline 是 append-only，
+    # 每次 normalize 都会追加，此时已经是最新状态）
+    try:
+        from host_brain.app.emotion_context import get_emotion_timeline  # noqa: PLC0415
+        _tl = get_emotion_timeline()
+        _tl_summary = _tl.rebuild_summary(window_ms=300_000)
+        if _tl_summary and _tl_summary.get("entry_count", 0) > 0:
+            runtime_payload["emotion_timeline"] = _tl_summary
+    except Exception:
+        pass  # 降级：不注入 timeline
+
+    # ── P1-FIX：接入 PersonaExpressionAdapter ────────────────────────────
+    # prompt_builder 通过 runtime_payload.get("persona_expression_hint") 读取
+    try:
+        from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
+        from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
+        from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+        _adapter = PersonaExpressionAdapter()
+        _traits = PersonalityTraits.default()
+        # 获取当前 EmotionVector
+        _vad = _full_emotion_ctx.get("vad_vector") or {}
+        _emo_vec = EmotionVector(
+            valence=float(_vad.get("valence") or 0.0),
+            arousal=float(_vad.get("arousal") or 0.0),
+            dominance=float(_vad.get("dominance") or 0.0),
+            ts_ms=int(_vad.get("ts_ms") or 0),
+        ) if _vad else None
+        # 获取 bond_stage
+        _bond_stage = "STRANGER"
+        try:
+            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+            _bse = get_bond_stage_engine()
+            if _bse is not None:
+                _user_id = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+                _bond_state = _bse.get_state(_user_id)
+                _bond_stage = _bond_state.current_stage
+        except Exception:
+            pass
+        _user_tag = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
+        _hint = _adapter.adapt(_traits, _emo_vec, _bond_stage, user_emotion_tag=_user_tag)
+        runtime_payload["persona_expression_hint"] = {
+            "style_hint": _hint.style_hint,
+            "tone": _hint.tone,
+            "echo_weight_modifier": _hint.echo_weight_modifier,
+            "follow_up_tendency": _hint.追问倾向,
+        }
+    except (ImportError, AttributeError, Exception) as _pe_exc:
+        logger.debug("PersonaExpressionAdapter 接入降级: %s", _pe_exc)
+
+    # ── P1-FIX：接入 SelfReflection ──────────────────────────────────────
+    # prompt_builder 通过 runtime_payload.get("self_reflection_pulse") 读取
+    try:
+        from host_brain.persona.self_reflection import SelfReflection as _SelfReflection  # noqa: PLC0415
+        if not hasattr(build_chat_prompt_runtime_payload, "_self_reflection"):
+            build_chat_prompt_runtime_payload._self_reflection = _SelfReflection()
+        _sr: _SelfReflection = build_chat_prompt_runtime_payload._self_reflection
+        # 获取当前轮次（从 session 状态推断，或使用递增计数器）
+        if not hasattr(build_chat_prompt_runtime_payload, "_turn_counter"):
+            build_chat_prompt_runtime_payload._turn_counter = 0
+        build_chat_prompt_runtime_payload._turn_counter += 1
+        _turn = build_chat_prompt_runtime_payload._turn_counter
+        _tl_summary_for_sr = runtime_payload.get("emotion_timeline") or {}
+        _pulse = _sr.maybe_generate(
+            turn_count=_turn,
+            timeline_summary=_tl_summary_for_sr,
+        )
+        if _pulse:
+            runtime_payload["self_reflection_pulse"] = _pulse
+    except (ImportError, AttributeError, Exception) as _sr_exc:
+        logger.debug("SelfReflection 接入降级: %s", _sr_exc)
+
+    # ── P1-FIX：接入 BondNarrativeLayer ──────────────────────────────────
+    # prompt_builder 通过 runtime_payload.get("bond_narrative") 读取
+    try:
+        from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
+        from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
+        from host_brain.bond.milestone_tracker import MilestoneTracker  # noqa: PLC0415
+        _user_id_bn = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+        # 获取 bond_stage（复用上面已计算的值如果可用）
+        _bn_stage = runtime_payload.get("persona_expression_hint", {})
+        _bn_bond_stage = "STRANGER"
+        try:
+            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+            _bse_bn = get_bond_stage_engine()
+            if _bse_bn is not None:
+                _bn_bond_state = _bse_bn.get_state(_user_id_bn)
+                _bn_bond_stage = _bn_bond_state.current_stage
+        except Exception:
+            pass
+        # 尝试获取 SharedMemoryIndex 和 MilestoneTracker
+        _smi = None
+        _mt = None
+        try:
+            from host_brain.app.dependencies import get_shared_memory_index, get_milestone_tracker  # noqa: PLC0415
+            _smi = get_shared_memory_index()
+            _mt = get_milestone_tracker()
+        except (ImportError, AttributeError):
+            pass
+        if _smi is not None or _mt is not None:
+            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt)
+            _bn_result = _bnl.build_narrative(user_id=_user_id_bn, bond_stage=_bn_bond_stage)
+            _bn_slot = _bn_result.to_prompt_slot()
+            if _bn_slot:
+                runtime_payload["bond_narrative"] = _bn_slot
+    except (ImportError, AttributeError, Exception) as _bn_exc:
+        logger.debug("BondNarrativeLayer 接入降级: %s", _bn_exc)
+
     return runtime_payload
 
 

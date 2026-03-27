@@ -254,6 +254,9 @@
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_recall_fusion_bugfix_20260327.md
   用途：灵魂层召回逻辑 4 项 Bug 修复报告（2026-03-27）。修复：①_render_target_lang_selector_match 空值返回 False 导致多语言路由失效（高优）；②fusion key 跨路由碰撞；③emotion_filter 分组内排序丢失；④memory_ops_log 搜索文本质量差。含 5 条待真机验证测试用例（T-RF-FIX-01~05）。
   读者：MASTER、运行节点（按用例验证）。
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_emotion_pipeline_fix_20260327.md
+  用途：情感层管线修复报告（2026-03-27）。修复 8 个情感子系统的管线断裂/未接入问题：P0（emotion_context 传递不完整 + runtime_payload 顶层字段缺失）、P1（PersonaExpression/SelfReflection/BondNarrative 三个子系统首次接入）、P2（UserEmotionProfile 显式传递）。含 11 条待真机验证测试用例（T-EMO-01~11）。
+  读者：MASTER、运行节点（按用例验证）。
   用途：wxautox4 Bridge 集成开发实测报告（2026-03-27）。新增 wxautox4 作为微信自动化 bridge 后端（替代自研 UIA Bridge），外部协议完全兼容（JSONL 命令队列 + webhook POST）。改动 5 个文件，含 8 项真机测试清单（P0×4 / P1×2 / P2×2），涵盖环境安装、独立启动、inbound 消息转发、outbound 命令执行、热切换回退、图片发送、消息去重、群聊识别。
   读者：MASTER、实现层、Project（文档代理）。
 
