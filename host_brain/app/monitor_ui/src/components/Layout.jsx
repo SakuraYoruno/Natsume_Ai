@@ -15,22 +15,37 @@ import {
   PauseCircle,
   Radio,
   Package,
+  SendHorizontal,
+  Bell,
+  ScrollText,
+  Smile,
+  Database,
+  Settings,
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
 
 const NAV_ITEMS = [
-  { to: '/overview', icon: LayoutDashboard, label: 'Overview' },
-  { to: '/sessions',  icon: MessageSquare,  label: 'Sessions'  },
-  { to: '/trace',     icon: GitBranch,      label: 'Trace'     },
-  { to: '/metrics',   icon: BarChart2,      label: 'Metrics'   },
-  { to: '/insights',  icon: Lightbulb,      label: 'Insights'  },
-  { to: '/canon',     icon: BookOpen,       label: 'Canon'     },
-  { to: '/bond',      icon: Heart,          label: 'Bond'      },
-  { to: '/tools',     icon: Wrench,         label: 'Tools'     },
-  { to: '/automation',icon: Clock,          label: 'Automation'},
-  { to: '/agent',      icon: Bot,            label: 'Agent'     },
-  { to: '/gateway',    icon: Radio,          label: 'Gateway'   },
-  { to: '/skills',     icon: Package,        label: 'Skills'    },
+  // 核心监控
+  { to: '/overview',    icon: LayoutDashboard, label: 'Overview' },
+  { to: '/sessions',    icon: MessageSquare,   label: 'Sessions' },
+  { to: '/trace',       icon: GitBranch,       label: 'Trace' },
+  { to: '/metrics',     icon: BarChart2,       label: 'Metrics' },
+  { to: '/insights',    icon: Lightbulb,       label: 'Insights' },
+  // 调试与运维
+  { to: '/chat-debug',  icon: SendHorizontal,  label: 'Chat' },
+  { to: '/alerts',      icon: Bell,            label: 'Alerts' },
+  { to: '/logs',        icon: ScrollText,      label: 'Logs' },
+  { to: '/emotion',     icon: Smile,           label: 'Emotion' },
+  { to: '/memory',      icon: Database,        label: 'Memory' },
+  { to: '/system',      icon: Settings,        label: 'System' },
+  // 业务管理
+  { to: '/gateway',     icon: Radio,           label: 'Gateway' },
+  { to: '/skills',      icon: Package,         label: 'Skills' },
+  { to: '/canon',       icon: BookOpen,        label: 'Canon' },
+  { to: '/bond',        icon: Heart,           label: 'Bond' },
+  { to: '/tools',       icon: Wrench,          label: 'Tools' },
+  { to: '/automation',  icon: Clock,           label: 'Auto' },
+  { to: '/agent',       icon: Bot,             label: 'Agent' },
 ]
 
 const INTERVAL_OPTIONS = [15, 30, 60]
@@ -52,8 +67,8 @@ export default function Layout() {
             <span className="text-gray-400 text-sm">监控面板</span>
           </div>
 
-          {/* 导航 */}
-          <nav className="flex items-center gap-1">
+          {/* 导航 — 水平滚动适配多页面 */}
+          <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide max-w-[70vw]">
             {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}

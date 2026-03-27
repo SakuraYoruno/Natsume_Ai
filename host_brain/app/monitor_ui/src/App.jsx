@@ -13,6 +13,12 @@ import Automation from './pages/Automation.jsx'
 import AgentLoop from './pages/AgentLoop.jsx'
 import Gateway from './pages/Gateway.jsx'
 import SkillsHub from './pages/SkillsHub.jsx'
+import ChatDebug from './pages/ChatDebug.jsx'
+import Alerts from './pages/Alerts.jsx'
+import LogStream from './pages/LogStream.jsx'
+import EmotionDashboard from './pages/EmotionDashboard.jsx'
+import MemoryBrowser from './pages/MemoryBrowser.jsx'
+import SystemConfig from './pages/SystemConfig.jsx'
 
 export default function App() {
   return (
@@ -25,6 +31,12 @@ export default function App() {
           <Route path="trace/*" element={<Trace />} />
           <Route path="metrics" element={<Metrics />} />
           <Route path="insights/*" element={<Insights />} />
+          <Route path="chat-debug" element={<ChatDebug />} />
+          <Route path="alerts" element={<Alerts />} />
+          <Route path="logs" element={<LogStream />} />
+          <Route path="emotion" element={<EmotionDashboard />} />
+          <Route path="memory" element={<MemoryBrowser />} />
+          <Route path="system" element={<SystemConfig />} />
           <Route path="canon" element={<Canon />} />
           <Route path="bond" element={<Bond />} />
           <Route path="tools" element={<Tools />} />
@@ -32,7 +44,7 @@ export default function App() {
           <Route path="agent" element={<AgentLoop />} />
           <Route path="gateway" element={<Gateway />} />
           <Route path="skills" element={<SkillsHub />} />
-          {/* 向后兼容：旧 /wechat 路由重定向到 /gateway */}
+          {/* 向后兼容 */}
           <Route path="wechat" element={<Navigate to="/gateway" replace />} />
         </Route>
       </Routes>
