@@ -63,13 +63,36 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     """POST /v1/chat 统一入口。
 
     Governor 鉴权后由 pre_intent_classifier 分类场景：
-    - SCENE_CHAT（日常对话）→ 本地 qwen8B 单节点，token 级流式 SSE
-    - 复杂场景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT）→ 云端 Gemini 多节点，节点级进度 SSE
+    - SCENE_CHAT（日常対話）→ 本地 qwen8B 单节点，token 级流式 SSE
+    - 複雑場景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT）→ 云端 Gemini 多节点，节点级进度 SSE
+
+    模式门控：
+    - locked 模式下拒绝所有 chat 请求（返回 403 提示）
+    - maintenance 模式下返回维护提示（SSE 快速完成）
     """
     metrics.inc_chat()
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     ts_ms = int(time.time() * 1000)
     session_id = request_body.session_id or f"session::{request_id}"
+
+    # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
+    _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
+    if _current_sys_mode == "locked":
+        async def _locked_sse():
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': '系统当前处于锁定模式，暂时无法响应。请联系管理员解锁后再试。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(
+            _locked_sse(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    if _current_sys_mode == "maintenance":
+        async def _maintenance_sse():
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': '系统正在维护中，请稍后再试。维护完成后会自动恢复。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(
+            _maintenance_sse(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     intent_draft = request_body.intent_draft
     _pre_scene: str | None = None

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -4879,7 +4879,9 @@ class SysModeStatusResponse(BaseModel):
 
 
 class SysModeSwitchRequest(BaseModel):
-    target_mode: str = Field(..., description="目标模式: normal/focus/gaming/sleep/maintenance/locked")
+    target_mode: Literal["normal", "focus", "gaming", "sleep", "maintenance", "locked"] = Field(
+        ..., description="目标模式: normal/focus/gaming/sleep/maintenance/locked"
+    )
     reason: str = Field("", description="切换原因说明")
     source: str = Field("manual", description="切换来源: manual/auto_gaming/auto_idle/auto_wakeup/skill")
 
