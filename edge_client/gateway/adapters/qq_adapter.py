@@ -166,6 +166,7 @@ class QQAdapter(AbstractPlatformAdapter):
         """通过 OneBot v11 HTTP API 发送回复。
 
         支持的消息类型：TEXT / IMAGE / VOICE。
+        TEXT 类型自动接入拟人化分段发送（模拟打字延迟 + 分段），
         IMAGE 支持三种来源：本地文件（media_path）、URL（content 中的 http 链接）、
         二进制数据（media_data → base64 编码）。
 
@@ -180,7 +181,11 @@ class QQAdapter(AbstractPlatformAdapter):
             return False
 
         try:
-            success = self._send_via_onebot(reply)
+            # TEXT 消息使用拟人化分段发送
+            if reply.msg_type == MsgType.TEXT:
+                success = self._send_text_humanized(reply)
+            else:
+                success = self._send_via_onebot(reply)
             if success:
                 self._stats["outbound_sent"] += 1
             else:
@@ -190,6 +195,64 @@ class QQAdapter(AbstractPlatformAdapter):
             logger.error("QQAdapter: 发送失败 conversation=%s: %s", reply.conversation_id, exc)
             self._stats["outbound_failed"] += 1
             return False
+
+    def _send_text_humanized(self, reply: UnifiedReply) -> bool:
+        """使用公共拟人化模块分段发送文字消息。
+
+        将完整回复拆分为多段，逐段通过 OneBot API 发送，
+        段间模拟打字延迟，让对话更自然。
+        """
+        from edge_client.gateway.humanize_sender import (
+            humanize_send_sync,
+            HumanizeSendConfig,
+        )
+
+        def _send_one_segment(segment: str) -> bool:
+            """发送单段文字到 QQ。"""
+            conversation_id = reply.conversation_id
+            message = [{"type": "text", "data": {"text": segment}}]
+
+            if conversation_id.startswith("qq_group_"):
+                group_id = conversation_id.removeprefix("qq_group_")
+                endpoint = f"{self._api_base}/send_group_msg"
+                payload: dict[str, Any] = {"group_id": int(group_id), "message": message}
+            elif conversation_id.startswith("qq_dm_"):
+                user_id = conversation_id.removeprefix("qq_dm_")
+                endpoint = f"{self._api_base}/send_private_msg"
+                payload = {"user_id": int(user_id), "message": message}
+            else:
+                logger.warning("QQAdapter: 无法识别会话 ID 格式: %s", conversation_id)
+                return False
+
+            try:
+                resp = httpx.post(endpoint, json=payload, timeout=self._timeout)
+                resp.raise_for_status()
+                result = resp.json()
+                return bool(result.get("status") == "ok" or result.get("retcode") == 0)
+            except httpx.HTTPError as exc:
+                logger.error("QQAdapter: HTTP 请求失败: %s", exc)
+                return False
+
+        config = HumanizeSendConfig.from_env()
+        send_result = humanize_send_sync(
+            text=reply.content,
+            send_fn=_send_one_segment,
+            config=config,
+        )
+
+        if send_result.success:
+            logger.info(
+                "QQAdapter: humanized send OK segments=%d delay=%dms",
+                send_result.sent_segments, send_result.total_delay_ms,
+            )
+        else:
+            logger.warning(
+                "QQAdapter: humanized send failed at segment %d/%d: %s",
+                send_result.failed_segment_index + 1,
+                send_result.total_segments,
+                send_result.error[:100],
+            )
+        return send_result.success
 
     def _send_via_onebot(self, reply: UnifiedReply) -> bool:
         """调用 OneBot v11 API 发送消息。"""
