@@ -2,18 +2,18 @@
 标题：模型平面（Model Plane）规格说明（9 云节点配置、路由、审计与降级）
 
 # 模型平面（Model Plane）规格说明
-版本：v1.2
-日期：2026-03-03
+版本：v1.3
+日期：2026-03-27
 
-定位：本文件属于 DevSpec 子规格，只写“怎么做 + 如何验证（测试点/日志点/契约点）”。
-目标：把“9 云节点怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放”写成稳定契约，允许你以后换模型但不换治理。
+定位：本文件属于 DevSpec 子规格，只写"怎么做 + 如何验证（测试点/日志点/契约点）"。
+目标：把"9 云节点 + Host 本地 8B 怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放"写成稳定契约，允许你以后换模型但不换治理。
 
 ---
 
 ## 0. 硬约束（不可违反）
 
 0.1 主权与事实
-- 所有 LLM 节点永远不裁决、不执行、不宣告执行事实；任何“已执行/已保存/已确认/已完成”只能由 Host 审计链摘要支撑。
+- 所有 LLM 节点永远不裁决、不执行、不宣告执行事实；任何"已执行/已保存/已确认/已完成"只能由 Host 审计链摘要支撑。
 - 云端输出一律降权为草案：不得直通主权写入、不得直通执行。
 
 0.2 出网最小化（AIRLOCK）
@@ -23,7 +23,7 @@
 0.3 工具可见性（渐进式加载）
 - LLM 每轮只可见 tool_meta_pack 的 Top-K 工具元数据子集。
 - WRITE 类工具默认不可见；即使可见也必须经 Host Governor+Token 才能执行。
-- tool_visibility_hash 必须随 intent_log 一并记录，用于追责“当时模型看见了什么”。
+- tool_visibility_hash 必须随 intent_log 一并记录，用于追责"当时模型看见了什么"。
 
 0.4 二段式输出（强制）
 - 第一段：中文语义内核（产 narrative_zh + intent_draft，边界锁死）
@@ -81,7 +81,7 @@
 
 说明：
 - node_id/role 固定；provider/model_id 可替换，但必须保持契约版本兼容；若不兼容必须 bump model_profile_id。
-- 为可回放与抗漂移：优先使用“可 pin 的具体模型字符串/快照”；仅在明确允许时使用 latest 别名。
+- 为可回放与抗漂移：优先使用"可 pin 的具体模型字符串/快照"；仅在明确允许时使用 latest 别名。
 
 3.1 节点清单（v1.1 具体配置）
 1）core_reasoner_primary（role=core）
@@ -130,7 +130,16 @@
 - provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1
 
-3.2 Host 常驻兜底（不计入云节点，但属于模型平面）
+3.2 Host 本地 8B 模型（chat_direct 优先路由）
+- host_8b（role=chat_direct）
+- 用途：聊天直回场景默认优先走本地 8B（延迟低、零出网、省成本）
+- provider/model_id：openai / qwen3:8b（Ollama 本地推理）
+- base_url：http://127.0.0.1:11434/v1
+- 路由条件：chat 场景 + 非 gaming 模式 + 健康检查通过
+- 降级链：host_8b → cloud（Gemini）→ edge_3b
+- 约束：延迟预算 < 2s；高 risk_level 请求禁止路由到本地
+
+3.3 Host 常驻兜底（不计入云节点，但属于模型平面）
 - host_fallback_policy（role=rule_engine_or_tiny_model）
 - 目标：3–5 秒开口、云超时退化、最低合规模板
 - 约束：不得依赖 GPU；不得产生执行宣告；不得自动触发执行
@@ -160,12 +169,13 @@
 - `graph_meta.scene_type_source` 字段记录来源，供审计追踪
 
 4.1 场景枚举（最小）
-- CHAT：闲聊/陪伴
+- CHAT：闲聊/陪伴（Host 8B 优先 → Cloud 降级）
 - EXEC_INTENT：执行意图（需要 Governor）
 - WORK_TRANSLATE：翻译流水线
 - WORK_CODE：代码协作
 - VISION_UI：ClawdBot/UI（高门槛）
-- CHANNEL_IO：微信/通道（确定性外显，模型只写草案文本）
+- CHANNEL_IO：统一消息网关入站消息处理（微信/QQ/Telegram/飞书/企微/LINE），模型只写草案文本
+  - 子类型：text（文本）/ voice（语音 ASR 转文字）/ image（图片描述）/ voice_call（语音通话触发）
 
 4.2 两段式输出链路（强制）
 - CHAT（最小链路）：core_reasoner_primary → consistency_verifier → renderer_ja_c_style
@@ -178,7 +188,7 @@
 - consistency_verifier 作为对外输出前的一致性闸门，默认不得跳过（故障降级链路除外）。
 
 4.3 3–5 秒开口（在场回应 + 超时退化）
-- t0：Host 立即输出“在场回应模板”（不承诺执行），并启动云调用
+- t0：Host 立即输出"在场回应模板"（不承诺执行），并启动云调用
 - t1：core_reasoner_primary 超时 → core_reasoner_secondary
 - t2：仍失败或格式漂移 → host_fallback_policy（模板/极小模型）
 - 任何降级必须写入 error_log/quality.stage，并带可统计 reason_code（DEPENDENCY_UNAVAILABLE/LLM_FORMAT_DRIFT 等）
@@ -186,7 +196,7 @@
 4.4 Gaming 模式（显存被游戏占用）
 - Host 强制 NO_LOCAL_GPU：仅允许模板/规则引擎/CPU 兜底
 - 云端仍可用（受 AIRLOCK、预算与网络波动影响）
-- 渲染默认走云端 renderer_ja_c_style；云不可用则退化为 Host 简短日文模板（由 Style Canon 提供），不得“补剧情”。
+- 渲染默认走云端 renderer_ja_c_style；云不可用则退化为 Host 简短日文模板（由 Style Canon 提供），不得"补剧情"。
 
 ---
 
@@ -194,7 +204,7 @@
 
 5.1 默认限额（建议基线）
 - CHAT：Core 输出 max_output_tokens_cap（短），Renderer 输出 max_output_tokens_cap（中短）
-- WORK_*：允许更长，但必须启用“结构化输出+分段”策略（由 Flow/编排控制）
+- WORK_*：允许更长，但必须启用"结构化输出+分段"策略（由 Flow/编排控制）
 - EXEC_INTENT：叙事短、intent_draft 结构完整优先
 
 5.2 触发降本策略的条件（建议）
@@ -236,6 +246,10 @@
 - T-Intent-02：proposal/decision/exec 分离（intent_log 不得支撑完成性表述）
 - T-Perf-01：超时退化链路（在场回应→主→备→兜底）输出结构稳定
 - T-Gaming-01：Gaming 模式下 Host 不依赖本地 GPU（仅兜底策略可用）
+- T-Host8B-01：CHAT 场景默认路由到 Host 8B（qwen3:8b），健康检查失败时降级到 Cloud
+- T-Host8B-02：high risk_level 请求禁止路由到 Host 8B 和 Edge 3B
+- T-Gateway-01：CHANNEL_IO 场景 Gateway 入站消息正确路由到 Host Brain 处理链路
+- T-Call-01：voice_call/video_call/cancel_call 通过 Gateway reply → WeChatAdapter → wxautox4 bridge 完整链路可达
 
 ---
 
@@ -247,7 +261,7 @@
 ---
 
 ## 9. Edge 端兜底模型（不纳入 Agent 图，仅作为远程能力）
-- Edge 3B 量化模型（Ollama）不作为 LangGraph 节点参与编排树；Host 仅以“远程工具/能力端点”的方式调用。
+- Edge 3B 量化模型（Ollama）不作为 LangGraph 节点参与编排树；Host 仅以"远程工具/能力端点"的方式调用。
 - 调用目的仅限：在场回应、输入清洗、摘要压缩、检索提示（draft-only）。
 - 约束：不得产生裁决语义、不得产生执行事实宣告；失败必须可观测并快速回退到 Host 兜底口径。
 
@@ -449,17 +463,21 @@ agent 内部路由状态维护在：
 - 子图结束时输出 `subgraph_commit_summary`
 - 子图不允许写入 `committed_*` 字段
 
-### 11.7 执行模式与开关（P2 收敛后）
+### 11.7 执行模式与开关（P2 收敛后，P15 封板）
 
-路由由 **execution_profile** 决定（入口层写入），不再使用 `MULTI_AGENT_ENABLED` / `HOST_GRAPH_SCENE_ROUTER_ENABLED`。见 `docs/50_project/MULTI_AGENT_ARCH_REFACTOR_2026-03.md` §4。
+路由由 **execution_profile** 决定（入口层写入），早期的 `MULTI_AGENT_ENABLED` 和 `HOST_GRAPH_SCENE_ROUTER_ENABLED` 开关已在 P2 重构中**废弃并删除**。
+
+当前有效开关：
 
 | 开关 | 默认值 | 说明 |
 |------|--------|------|
-| `SUPERVISOR_MODE` | `rule` | Supervisor 分派：`rule` = 规则路由，`llm` = LLM 提案分派（原 SUPERVISOR_AUTO_ENABLED 收敛为此） |
-| `INTENT_EXEC_MODE` | （可选） | 执行意图模式：`chain` / `subgraph`（原 INTENT_SUBGRAPH_ENABLED 收敛为此） |
+| `SUPERVISOR_MODE` | `rule` | Supervisor 分派：`rule` = 规则路由，`llm` = LLM 提案分派 |
+| `INTENT_EXEC_MODE` | （可选） | 执行意图模式：`chain` / `subgraph` |
 | `READONLY_PARALLEL_ENABLED` | `false` | 只读并行 agent 启用 |
 
-灰度上线顺序：以 REFACTOR P0～P6 为准（下一轮正式基线仅 P5，P6 再下一轮单独规划）；选图由 execution_profile 决定，不再按布尔开关切换路径。
+选图由 `resolve_execution_profile()` 决定（`CHAT_FAST` / `WORKFLOW_SUPERVISED` / `INTENT_EXEC`），不再按布尔开关切换路径。
+
+多 Agent 升级已于 P15 终点封板（152 用例全通过），详见 `docs/50_project/phases/MULTI_AGENT_P15_SEAL_RESULT.md`。
 
 ### 11.8 严禁设计
 

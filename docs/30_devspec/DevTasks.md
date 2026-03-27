@@ -1,10 +1,25 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.8
-日期：2026-03-04
+版本：v1.9
+日期：2026-03-27
 
-本文件只包含“Codex 可执行任务条目”。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+
+### 最近完成的重大任务（2026-03-24 ~ 2026-03-27）
+
+以下任务在 v1.8 → v1.9 期间完成，不再需要单独的任务卡追踪：
+
+| 完成日期 | 功能 | 状态 |
+|---------|------|------|
+| 2026-03-26 | 统一消息网关 Phase 1-6（六平台适配器 + 消息归一化 + 拟人化发送） | ✅ DONE |
+| 2026-03-26 | QQ 适配器增强（语音发送 / @提醒 / URL图片 / notice事件） | ✅ DONE |
+| 2026-03-26 | Telegram Userbot 适配器（Telethon MTProto 协议） | ✅ DONE |
+| 2026-03-27 | wxautox4 三期 API 全量对接（37 种 action） | ✅ DONE |
+| 2026-03-27 | Skills Hub P1-P5（SKILL.md 解析 / Hub Loader / 远程安装） | ✅ DONE |
+| 2026-03-27 | 语音/视频通话全链路打通（Host Brain → wxautox4 VoiceCall/VideoCall） | ✅ DONE |
+| 2026-03-27 | ASR 复杂场景 TTS 缺失修复 | ✅ 待真机验证 |
+| 2026-03-27 | 文档大清理（141→114 个文件，合规率 87%→97%，DOCMAP v3.0） | ✅ DONE |
 
 ## 0. 任务列表与其它文档的关系（强制）
 
@@ -35,19 +50,19 @@ TASK-XXXX 标题
 ## 3. 任务清单（从空目录开始）
 
 ### TASK-0000 仓库骨架落地（从空目录开始：目录树+占位文件+索引入口）
-- 任务描述：把 DevSpec 目录骨架与关键入口文件落到仓库中，确保后续任务有稳定落点；并保证“无 secrets 也可进入冷启动（M0）开发态”的配置占位存在。
+- 任务描述：把 DevSpec 目录骨架与关键入口文件落到仓库中，确保后续任务有稳定落点；并保证"无 secrets 也可进入冷启动（M0）开发态"的配置占位存在。
 - 输入：DevSpec 1.1（目录树）、DevSpec 1.4（目录职责红线）、DevSpec 1.2.1（冷启动策略）。
 - 输出：
   - 缺失目录与关键占位文件；
   - Flow 指针文件（flows/active.pointer）；
   - Flow Trace 索引（docs/60_trace/flows/index.md）；
   - TESTPLAN 占位（tests/TESTPLAN.md）；
-  - secret 模板文件（例如 .env.example 或等价模板文件：只包含变量名与示例，不含真实密钥），用于支撑“未配置 API Key 的冷启动形态”。
+  - secret 模板文件（例如 .env.example 或等价模板文件：只包含变量名与示例，不含真实密钥），用于支撑"未配置 API Key 的冷启动形态"。
 - 验收标准：
   - 目录与文件存在性可审阅；
   - active.pointer 为单个合法 JSON，包含 dev/staging/prod 三键；
   - flows/index.md 含按环境行；
-  - secret 模板文件不包含真实密钥，且能表达“未配置 key 时系统进入降级/替代路径”的配置口径（不要求可用性结论，但要求口径明确）。
+  - secret 模板文件不包含真实密钥，且能表达"未配置 key 时系统进入降级/替代路径"的配置口径（不要求可用性结论，但要求口径明确）。
 - 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/TESTPLAN.md；prompts/llm_contract/；host_brain/；edge_client/；tools/**；（可选）.env.example。
 - 关联需求/测试：FR-FLOW-001；FR-CORE-004；T-Flow-01、T-Flow-02。
 
@@ -59,7 +74,7 @@ TASK-XXXX 标题
   - contract 测试占位（按 Schema/枚举/指针一致性分组）；
   - e2e 最小链路测试占位；
   - fixtures（good/bad intent、bad llm output、replay logs）目录结构；
-  - 冷启动 fixtures：至少包含 “无 API Key/外部依赖不可用” 的样例输入与期望输出结构（重点是 stage 与 reason_code 口径，而不是执行成功）。
+  - 冷启动 fixtures：至少包含 "无 API Key/外部依赖不可用" 的样例输入与期望输出结构（重点是 stage 与 reason_code 口径，而不是执行成功）。
 - 验收标准：
   - TESTPLAN 中存在编号段落（T-Flow/T-Intent/T-LLM/T-Audit/T-QA 等至少列出占位条目）；
   - fixtures 目录具备最小样例文件（可为空内容但命名与字段结构明确）；
@@ -68,15 +83,15 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CORE-002；FR-CORE-004；T-Flow-01~02（至少落占位）；T-14、T-15（至少落占位）；T-LLM-01（至少落占位）。
 
 #### TASK-0002 Flow 资产：exports 归档 + active.pointer + Trace 索引一致性
-- 任务描述：把 Flow 资产作为可部署配置资产纳入版本化与可追溯闭环，并固化“指针—索引一致性”的回归断言。
+- 任务描述：把 Flow 资产作为可部署配置资产纳入版本化与可追溯闭环，并固化"指针—索引一致性"的回归断言。
 - 输入：DevSpec 1.5；PRD FR-FLOW-001。
 - 输出：flows/exports 归档约定（目录命名/版本标签）；active.pointer JSON 契约；docs/60_trace/flows/index.md 的一致性规则；fixtures（示例指针与索引配对）。
-- 验收标准：T-Flow-01（指针合法性/存在性）、T-Flow-02（索引一致性）可被断言；任意环境可从 active.pointer 与 index.md 唯一确定“当前生效 Flow 资产”。
+- 验收标准：T-Flow-01（指针合法性/存在性）、T-Flow-02（索引一致性）可被断言；任意环境可从 active.pointer 与 index.md 唯一确定"当前生效 Flow 资产"。
 - 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-FLOW-001；T-Flow-01~02。
 
 #### TASK-0003 LLM 输出契约：Strict JSON + 输出字段约束 + lint + fixtures
-- 任务描述：固化“LLM→Host”的 Strict JSON 输出契约，并提供 lint 与 good/bad fixtures，作为 QA 与回归的共同输入源。
+- 任务描述：固化"LLM→Host"的 Strict JSON 输出契约，并提供 lint 与 good/bad fixtures，作为 QA 与回归的共同输入源。
 - 输入：DevSpec 0.4、DevSpec 9（QA）、PRD FR-CORE-002~003。
 - 输出：核心输出契约（narrative、intent_draft、meta）；lint 规则（单 JSON、字段存在性、禁止前后缀）；fixtures（good/bad：多段 JSON/夹杂文本/缺字段/伪执行句）。
 - 验收标准：T-LLM-01（输出可解析性与 lint 规则）通过；bad fixtures 均被判定为不合规并产生可统计 violation。
@@ -92,7 +107,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CANON-001；FR-WCANON-001~003；FR-BOND-003；T-CP-01。
 
 #### TASK-0005 Intent 契约：宽松解析 + 严格校验（含重放/顺序/过期）
-- 任务描述：形成可复用的 Intent 解析与校验契约，确保“只修语法不补语义”，并把校验失败稳定映射为 reason_code，可审计回放。
+- 任务描述：形成可复用的 Intent 解析与校验契约，确保"只修语法不补语义"，并把校验失败稳定映射为 reason_code，可审计回放。
 - 输入：DevSpec 3；PRD FR-INTENT-001~003。
 - 输出：Intent Schema/校验接口落点；失败→reason_code 映射口径；审计字段（session_id/seq/nonce/ts_ms）记录口径；fixtures（good/bad）。
 - 验收标准：T-18~T-22 通过；同一规则版本下同类失败 reason_code 稳定；governor_log 可定位失败类型（REPLAY/SEQ/EXPIRED）。
@@ -100,10 +115,10 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-INTENT-001~003；T-18~T-22；I7。
 
 #### TASK-0006 Intent responsibility：intent_log（proposal）字段补齐（proposer 元信息 + tool_visibility_hash）
-- 任务描述：把“谁提议了什么”固化为 intent_log 最小字段集，并保证与 governor_log/skill_exec_log 分离。
+- 任务描述：把"谁提议了什么"固化为 intent_log 最小字段集，并保证与 governor_log/skill_exec_log 分离。
 - 输入：DevSpec（intent_log 契约）、PRD FR-AUDIT-001（Triptych）、PRD（Intent responsibility 需求条目若已加入）。
 - 输出：intent_log 字段口径（proposer_node_id/model_snapshot/prompt_profile_id/tool_visibility_hash/proposed_intent_draft/lint_result）；fixtures（多 proposer 并行 A/B）；回放串联键（request_id/thread_id/turn_id）。
-- 验收标准：T-Intent-01（字段最小集）与 T-Intent-02（proposal/decision/exec 分离）通过；intent_log 不能支撑“已执行”叙事。
+- 验收标准：T-Intent-01（字段最小集）与 T-Intent-02（proposal/decision/exec 分离）通过；intent_log 不能支撑"已执行"叙事。
 - 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/core/ids.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-AUDIT-001；T-Intent-01~02。
 
@@ -111,7 +126,7 @@ TASK-XXXX 标题
 - 任务描述：固化对外裁决输出契约（decision/reason_code/rule_trace/tokens/snapshot_refs），并定义缺字段输出的合规拦截口径。
 - 输入：DevSpec 4；PRD FR-GOV-001~003、FR-CORE-002；白皮书拒绝码约束。
 - 输出：GovernorOutput Schema 落点；REJECT/APPROVE 必备字段断言口径；GOVERNOR_OUTPUT_INVALID/ SKILL_TOKEN_MISSING 的触发与记录口径；contract fixtures。
-- 验收标准：T-14、T-15、T-16、T-17 通过；对外不出现“缺 reason_code 的 REJECT”；同类拒绝在同版本下 reason_code 稳定可统计。
+- 验收标准：T-14、T-15、T-16、T-17 通过；对外不出现"缺 reason_code 的 REJECT"；同类拒绝在同版本下 reason_code 稳定可统计。
 - 涉及文件路径：host_brain/governor/schemas.py；host_brain/governor/decision.py；host_brain/core/errors.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-GOV-001~003；FR-CORE-002；T-14~T-17。
 
@@ -124,7 +139,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-GOV-001；T-Gov-01。
 
 #### TASK-0009 Token 体系：approval/confirm/undo 的绑定与失效口径
-- 任务描述：定义并固化票据字段绑定、TTL/过期、签名/校验失败的稳定拒绝码口径，确保“语言确认”不构成授权。
+- 任务描述：定义并固化票据字段绑定、TTL/过期、签名/校验失败的稳定拒绝码口径，确保"语言确认"不构成授权。
 - 输入：DevSpec 5；PRD FR-TOKEN-001~003。
 - 输出：Token/Manifest Schema；绑定字段口径（intent_id/skill_name/session_id/seq）；confirm_token/undo_token 的触发条件与拒绝码口径；fixtures（串用/过期/伪造）。
 - 验收标准：T-34~T-38 通过；缺 confirm_token 的高风险请求稳定得到 CONFIRM_REQUIRED；不合法/过期/串用 token 稳定得到 TOKEN_INVALID（或更精确子类）。
@@ -132,7 +147,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-TOKEN-001~003；T-34~T-38；I6/I11。
 
 #### TASK-0010 Skills 单入口：Registry+Loader 强制 token 校验 + 幂等 + evidence_ref
-- 任务描述：固化“唯一合法执行入口”为 loader，并定义幂等与审计写入最小契约，保证执行事实可串联回放。
+- 任务描述：固化"唯一合法执行入口"为 loader，并定义幂等与审计写入最小契约，保证执行事实可串联回放。
 - 输入：DevSpec 6/8.1；PRD FR-SKILL-001~003、FR-AUDIT-001。
 - 输出：SkillMeta 强制字段口径；loader 执行输入输出契约；幂等策略（同 intent_id 不重复副作用）的证明口径；skill_exec_log 字段最小集（含 evidence_ref/manifest_ref）。
 - 验收标准：T-Skill-01、T-15、T-34~T-38 通过；任意 skill_exec 均可关联 governor_log + approval_token_ref；重复 intent_id 不产生第二次真实副作用且可由日志证明。
@@ -140,7 +155,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-SKILL-001~003；FR-AUDIT-001；T-Skill-01；T-15；I1/I8。
 
 #### TASK-0011 SQLite Ledger：Triptych 三联画最小表 + 索引串联口径
-- 任务描述：固化“审计即事实”的最小可回放数据面：intent_log/governor_log/skill_exec_log 的字段口径与串联键。
+- 任务描述：固化"审计即事实"的最小可回放数据面：intent_log/governor_log/skill_exec_log 的字段口径与串联键。
 - 输入：DevSpec 8.1；PRD FR-AUDIT-001。
 - 输出：三表字段最小集与串联键口径（request_id/intent_id/token_ref）；error_log/qa_violation_log 口径；回放索引键（event_id/evidence_refs）。
 - 验收标准：T-Audit-01、T-14、T-15 通过；任意 request_id 能串联到 intent→governor→(可选)skill_exec；缺链路时可定位到 stage 与 reason_code。
@@ -148,7 +163,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-AUDIT-001；T-Audit-01；T-14、T-15。
 
 #### TASK-0012 QA 合规模块：Strict JSON + 伪执行宣告 + Canon-as-fact + 格式漂移（一次重写/降级）
-- 任务描述：定义 Host 侧 QA 的合规检查与“一次重写/降级”契约，确保对外输出始终可解析且不伪造执行事实。
+- 任务描述：定义 Host 侧 QA 的合规检查与"一次重写/降级"契约，确保对外输出始终可解析且不伪造执行事实。
 - 输入：DevSpec 9/7；PRD FR-CORE-002~003、FR-AUDIT-003、FR-CANON-001、FR-WCANON-001~003。
 - 输出：违规类型枚举与记录口径（FALSE_EXECUTION_CLAIM、CANON_AS_FACT_VIOLATION、LLM_FORMAT_DRIFT 等）；最小模板降级触发条件与输出结构口径；fixtures（good/bad）。
 - 验收标准：T-67~T-71、T-Canon-01~02、T-WCanon-01~03 通过；故障/超时/漂移下仍为单个合法 JSON；完成性表述无证据必拦截。
@@ -199,7 +214,7 @@ TASK-XXXX 标题
 - 任务描述：固化所有副作用工具执行的唯一入口与证据锚点（evidence_ref），并把 WRITE 工具纳入 capability/approval 票据约束。
 - 输入：DevSpec 8.9（ToolBroker）；PRD FR-TOOL-003；FR-TOKEN-001。
 - 输出：ToolExec 输入输出契约；WRITE 拒绝码口径（TOKEN_INVALID/CONFIRM_REQUIRED/…）；skill_exec_log/evidence_ref 串联规则；fixtures（无 token 调用 WRITE）。
-- 验收标准：T-Tool-03 通过；无 token 的 WRITE 必拒绝且可统计；任何“已执行”叙事可指向 evidence_ref。
+- 验收标准：T-Tool-03 通过；无 token 的 WRITE 必拒绝且可统计；任何"已执行"叙事可指向 evidence_ref。
 - 涉及文件路径：host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；host_brain/core/errors.py；tests/contract/；tests/fixtures/；tests/e2e/。
 - 关联需求/测试：FR-TOOL-003；T-Tool-03；I14。
 
@@ -212,7 +227,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-MCP-001；T-MCP-01；I14。
 
 #### TASK-0020 通道：微信 I/O 事件化 + channel_io_log 串联
-- 任务描述：把微信收发作为确定性通道能力事件化，并写入审计链，禁止由 LLM 自由决定“是否发送/发给谁”。
+- 任务描述：把微信收发作为确定性通道能力事件化，并写入审计链，禁止由 LLM 自由决定"是否发送/发给谁"。
 - 输入：DevSpec 8.11.1（微信通道）；PRD FR-CHANNEL-001。
 - 输出：wechat 入站/出站事件结构；channel_io_log 字段最小集（thread_key/message_id/request_id/ts/status）；fixtures（重复消息/失败回执）。
 - 验收标准：T-Channel-01 通过；任意入站/出站可追溯到 thread_key 与 request_id；发送失败可解释（reason_code/stage）。
@@ -220,7 +235,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CHANNEL-001；T-Channel-01。
 
 #### TASK-0021 外显：VTube Studio talk gate + emotion_tag→expression_id 固定映射
-- 任务描述：固化“说话开始/结束”与“表情枚举映射”的确定性行为，拒绝模型自由动作参数。
+- 任务描述：固化"说话开始/结束"与"表情枚举映射"的确定性行为，拒绝模型自由动作参数。
 - 输入：DevSpec 8.11.2（VTS 外显）；PRD FR-AVATAR-001。
 - 输出：emotion_tag 枚举与 expression_id 映射表；审计字段口径（emotion_tag/expression_id/trigger）；fixtures（非法 tag、自由动作尝试）。
 - 验收标准：T-Avatar-01 通过；任何表情触发可回放到固定映射；自由动作参数输入被拒绝并留痕。
@@ -236,7 +251,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-VISION-001~002；FR-AUDIT-002；T-41~T-43。
 
 ### TASK-0023 服务项清单落地：服务注册表 + health 口径 + 降级可观测
-- 任务描述：为所有“必须实现”的服务项建立统一注册表与 health 契约，保证服务即使暂不可用也能被识别、被降级、被审计。
+- 任务描述：为所有"必须实现"的服务项建立统一注册表与 health 契约，保证服务即使暂不可用也能被识别、被降级、被审计。
 - 输入：PRD（服务必须实现口径）；DevSpec 1.2.1/2（进程拓扑）/QA（降级结构）。
 - 输出：服务注册表字段口径（service_id/owner(host|edge)/required=true/status）；health 输出结构；不可用→reason_code/stage 映射口径；fixtures（服务不可用矩阵）。
 - 验收标准：同版本下同类不可用 reason_code 稳定；输出结构可解析；审计链可回放到 request_id。
@@ -268,7 +283,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-VOICE-002；T-Voice-02。
 
 ### TASK-0027 Barge-in（强交互可打断）：打断策略与审计事件
-- 任务描述：落实“用户开口→打断播报→优先 ASR”的策略与事件化审计，且打断不构成执行事实。
+- 任务描述：落实"用户开口→打断播报→优先 ASR"的策略与事件化审计，且打断不构成执行事实。
 - 输入：DevSpec 8.11.3；PRD FR-VOICE-003。
 - 输出：barge_in 触发条件口径；打断事件字段；Host 审计记录点。
 - 验收标准：T-Voice-03 通过；打断立即生效；ASR 不被阻塞；审计可回放。
@@ -292,7 +307,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-VOICE-005；T-Voice-05。
 
 ### TASK-0030 Host 检索链：Embedding 服务接口与降级口径
-- 任务描述：补齐 embedding 服务接口、健康状态与不可用降级口径（不得伪装为“记忆为空”）。
+- 任务描述：补齐 embedding 服务接口、健康状态与不可用降级口径（不得伪装为"记忆为空"）。
 - 输入：DevSpec 8.3.1；PRD FR-MEM-003。
 - 输出：embedding 输出结构；不可用/超时→reason_code/stage 映射；审计串联点。
 - 验收标准：T-Ret-01 通过；结构稳定；reason_code 可统计。
@@ -332,16 +347,16 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-VISION-004；（新增）T-Vision-02。
 
 ### TASK-0035 Host Bond SSOT（Neo4j）：单写者写入边界 + bond_update_log + 约束/索引
-- 任务描述：补齐 Neo4j Bond SSOT 的“单写者”写入边界与最小图模型落点（含约束/索引），并把写入事实以 bond_update_log（或等价）方式串联到审计链，确保可回放与可静态扫描验证。
+- 任务描述：补齐 Neo4j Bond SSOT 的"单写者"写入边界与最小图模型落点（含约束/索引），并把写入事实以 bond_update_log（或等价）方式串联到审计链，确保可回放与可静态扫描验证。
 - 输入：DevSpec 8.2（Bond SSOT）、DevSpec 8.8（单写者静态扫描断言）；PRD FR-BOND-001~003。
 - 输出：
   - Bond 写入唯一入口与字段口径（event_id/evidence_refs 最小集）；
   - Neo4j 约束/索引的声明性资产（migrations 或等价目录）；
   - bond_update_log（或等价日志）与 SQLite Ledger 串联键口径；
-  - fixtures：包含“非单写者尝试写入”的反例样本。
+  - fixtures：包含"非单写者尝试写入"的反例样本。
 - 验收标准：
   - T-50~T-54 通过（Bond SSOT 写入边界、事件化、可回放口径）；
-  - T-SSOT-01 覆盖到“非 bond_dynamics 写入 Neo4j 必被阻断/被扫描命中”。
+  - T-SSOT-01 覆盖到"非 bond_dynamics 写入 Neo4j 必被阻断/被扫描命中"。
 - 涉及文件路径：host_brain/bond/neo4j_client.py；host_brain/bond/bond_dynamics.py；host_brain/bond/migrations/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-BOND-001~003；T-50~T-54；T-SSOT-01。
 
@@ -562,7 +577,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CORE-004；FR-OBS-001；（新增）T-Infra-01。
 
 ### TASK-0050 密钥装配收口：多节点 LLM/API Key Profile 与引用化加载
-- 任务描述：建立跨节点密钥配置 Profile 与引用化加载机制，保证“有 key 可用、无 key 降级、全程不落盘明文”。
+- 任务描述：建立跨节点密钥配置 Profile 与引用化加载机制，保证"有 key 可用、无 key 降级、全程不落盘明文"。
 - 输入：DevSpec 13.1~13.4；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
 - 输出：
   - 密钥配置结构（provider/node_id/scope/secret_ref/rotation_epoch/status）；
@@ -652,7 +667,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-MEM-004；FR-OBS-001；T-Ret-02；（新增）T-Rerank-01。
 
 ### TASK-0056 联调验收收口：外部依赖就绪报告与可用性基线
-- 任务描述：形成外部依赖联调验收包，统一输出“节点/密钥/编排框架/Neo4j/Chroma/Embedding/Reranker”就绪基线与故障口径。
+- 任务描述：形成外部依赖联调验收包，统一输出"节点/密钥/编排框架/Neo4j/Chroma/Embedding/Reranker"就绪基线与故障口径。
 - 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-OBS-001、NFR-MAINT-001。
 - 输出：
   - 联调就绪报告结构（env/node_count/key_profiles/services/graph_runtime/readiness_status）；
@@ -667,7 +682,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CORE-004；FR-OBS-001；NFR-MAINT-001；T-Svc-01；T-Boot-01；T-Drill-01；（新增）T-EnvReady-01。
 
 ### TASK-0057 主控闭环收口：LangGraph 读取 model_plane 并统一下发 LLM 参数
-- 任务描述：将 `configs/model_plane/{model_profiles,node_registry}` 作为编排主控配置源，落实“由 LangGraph 选择节点并由 LangChain/Gateway 执行”的单入口闭环，消除模型参数散落在测试/调用方注入的状态。
+- 任务描述：将 `configs/model_plane/{model_profiles,node_registry}` 作为编排主控配置源，落实"由 LangGraph 选择节点并由 LangChain/Gateway 执行"的单入口闭环，消除模型参数散落在测试/调用方注入的状态。
 - 输入：DevSpec 6/8.9/10/13；PRD FR-CORE-001、FR-CORE-004、FR-AUDIT-001。
 - 输出：
   - model_plane 解析器与运行时快照结构（profile_id/node_id/provider/model_id/temperature/max_output_tokens/timeout_ms）；
@@ -713,7 +728,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CORE-001；FR-OBS-001；（新增）T-Orch-04；（新增）T-EnvReady-02。
 
 ### TASK-0060 票据联动收口：模型调用与 Governor/Token 审批锚点串联
-- 任务描述：将模型调用（尤其可能触发高风险意图草案的节点）与 Governor/Token 审批锚点串联，形成“模型建议→治理决策→执行入口”的可回放闭环。
+- 任务描述：将模型调用（尤其可能触发高风险意图草案的节点）与 Governor/Token 审批锚点串联，形成"模型建议→治理决策→执行入口"的可回放闭环。
 - 输入：DevSpec 8.9/10；PRD FR-TOOL-003、FR-AUDIT-001、FR-CORE-001。
 - 输出：
   - 模型调用到治理链路的串联键（request_id/intent_id/approval_token_ref/evidence_ref）；
@@ -722,13 +737,13 @@ TASK-XXXX 标题
   - fixtures：model suggests write/no token、token expired、governor reject 样例。
 - 验收标准：
   - 高风险路径不得因模型节点成功而绕过 Governor/Token；
-  - 外部“已执行”叙事必须可指向 evidence_ref；
+  - 外部"已执行"叙事必须可指向 evidence_ref；
   - 回归覆盖（新增）`T-Orch-05` 与 `T-Tool-04`。
 - 涉及文件路径：host_brain/integrations/graph_runtime.py；host_brain/governor/decision.py；host_brain/governor/tokens.py；host_brain/tools/broker.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-CORE-001；FR-TOOL-003；FR-AUDIT-001；（新增）T-Orch-05；（新增）T-Tool-04；I1/I8/I9。
 
 ### TASK-0061 审计归档收口：model_control 入库与 request 级回放透出
-- 任务描述：把编排输出中的 `model_control` 与治理锚点写入审计存储并接入 request 级回放，形成“参数签名—票据—执行状态”的可检索闭环。
+- 任务描述：把编排输出中的 `model_control` 与治理锚点写入审计存储并接入 request 级回放，形成"参数签名—票据—执行状态"的可检索闭环。
 - 输入：DevSpec 10/11；PRD FR-AUDIT-001、FR-CORE-001。
 - 输出：
   - 审计表字段扩展（request_id/node_id/model_profile_id/provider/model_id/expected_param_hash/actual_param_hash/drift_detected/approval_token_ref/evidence_ref）；
@@ -742,7 +757,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-AUDIT-001；FR-CORE-001；（新增）T-Audit-06；（新增）T-Replay-02。
 
 ### TASK-0062 配置治理收口：model_plane 版本签名与发布门禁联动
-- 任务描述：将 model_plane 资产纳入发布门禁，固化“配置版本→参数签名→生效环境”的一致性校验，避免灰度期间配置漂移不可控。
+- 任务描述：将 model_plane 资产纳入发布门禁，固化"配置版本→参数签名→生效环境"的一致性校验，避免灰度期间配置漂移不可控。
 - 输入：DevSpec 1.5/14.5；PRD FR-FLOW-001、FR-OBS-001、NFR-MAINT-001。
 - 输出：
   - model_plane 版本清单（profile_version/node_registry_version/asset_digest）；
@@ -757,7 +772,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-FLOW-001；FR-OBS-001；NFR-MAINT-001；（新增）T-Flow-03；（新增）T-Release-01。
 
 ### TASK-0063 联调验收补齐：编排主控全链路演练与故障注入矩阵
-- 任务描述：补齐“编排主控 + model_plane + Governor/Token + Audit”联调演练矩阵，形成可复现实战故障包与验收报告模板。
+- 任务描述：补齐"编排主控 + model_plane + Governor/Token + Audit"联调演练矩阵，形成可复现实战故障包与验收报告模板。
 - 输入：DevSpec 10/11/14.5；PRD FR-CORE-004、FR-AUDIT-001、FR-TOOL-003。
 - 输出：
   - 演练场景矩阵（profile 缺失、selector 无候选、param drift、approval token missing、provider down）；
@@ -772,7 +787,7 @@ TASK-XXXX 标题
 - 关联需求/测试：FR-CORE-004；FR-AUDIT-001；FR-TOOL-003；（新增）T-Drill-02；（新增）T-EnvReady-03；（新增）T-Orch-06。
 
 ### TASK-0064 运行链路可视化补齐（只读观测 API + request 时间线聚合）
-- 任务描述：补齐“无可视化界面难以监控链路细节”的缺口，先落地只读观测接口，输出 request 级链路时间线与来源汇总，作为后续 UI 面板的数据底座；并将 Agent 监测方向切到 LangSmith，同时在系统启动时输出详细数据流日志并支持本地监控控制台窗口（best-effort）。
+- 任务描述：补齐"无可视化界面难以监控链路细节"的缺口，先落地只读观测接口，输出 request 级链路时间线与来源汇总，作为后续 UI 面板的数据底座；并将 Agent 监测方向切到 LangSmith，同时在系统启动时输出详细数据流日志并支持本地监控控制台窗口（best-effort）。
 - 输入：DevSpec 10/11；现有审计链（intent/governor/skill_exec/channel/avatar/clawd/voice/retrieval/vision/service_health）。
 - 输出：
   - request 级观测报告契约（request_id/trace_status/trace_stage/trace_reason_code/timeline_total/sources/timeline）；
@@ -1149,7 +1164,7 @@ TASK-XXXX 标题
 ---
 
 ### TASK-0084 Edge RPC Gateway 最小运行进程（P1 Edge 运行时）
-- 任务描述：实现 Edge 侧最小可运行 RPC 网关进程，对 Host 暴露能力端点并完成签名/重放校验与契约化响应，确保“只执行、不裁决”。
+- 任务描述：实现 Edge 侧最小可运行 RPC 网关进程，对 Host 暴露能力端点并完成签名/重放校验与契约化响应，确保"只执行、不裁决"。
 - 输入：DevSpec 2.2（Edge RPC 能力端点）；DevSpec 2.4（Host→Edge HMAC + nonce + ts_ms）；DevSpec 14.2（Edge 边界）；TASK-0087 输出的鉴权与 schema；edge_client/config.py；edge_client/rpc/*。
 - 前置依赖：TASK-0087（鉴权中间件）；TASK-0085（runtime 装配接口）。
 - 输出：
@@ -1255,7 +1270,7 @@ TASK-XXXX 标题
 - 输出：
   - 交付批次定义（建议）：`Batch-A`=0087+0085、`Batch-B`=0084+0086、`Batch-C`=0088+0089；
   - 每批回滚口径：回滚触发条件、保留资产（fixtures/audit）、回滚后可用能力矩阵；
-  - README 增加“Edge 最小可运行门槛”与“故障回退模式（仅 health / 禁用 speak / 禁用 asr 上行）”说明。
+  - README 增加"Edge 最小可运行门槛"与"故障回退模式（仅 health / 禁用 speak / 禁用 asr 上行）"说明。
 - 验收标准：
   - 任一批次失败时有明确回滚目标与可验证健康状态；
   - 回滚不破坏审计回放链和 `T-RPC-Event-01` 既有能力；
@@ -1985,7 +2000,7 @@ TASK-XXXX 标题
 - 输入：risk_registry.md（R-MC-02）；host_brain/memory/distillation.py；tests/unit/test_memory_distillation.py。
 - 输出：
   - `host_brain/memory/distillation.py` 扩展：`MemoryDistillationEngine` 增加蒸馏级别互斥锁（threading.Lock）；
-  - `distill_top_k()` 关键区增加“锁内二次幂等检查 + 写入后回读确认”；
+  - `distill_top_k()` 关键区增加"锁内二次幂等检查 + 写入后回读确认"；
   - `tests/unit/test_memory_distillation.py` 扩展：新增并发回归测试（多线程同源蒸馏）。
 - 验收标准：
   - 并发场景下同一 source_hash 最终仅落库一次；
@@ -2014,7 +2029,7 @@ TASK-XXXX 标题
 - 任务描述：收口 `canon_routes.py` 中 approve/reject 的非原子风险，减少非事务窗口并将审计写入失败升级为错误返回。
 - 输入：risk_registry.md（R119-1/R119-2）；host_brain/app/canon_routes.py。
 - 输出：
-  - `approve_proposal` 去除“二次 DB 读取依赖”，以前置读取结果构造响应；
+  - `approve_proposal` 去除"二次 DB 读取依赖"，以前置读取结果构造响应；
   - `reject_proposal` 中 `log_system_event` 失败从 warning 升级为 error + HTTP 500；
   - 响应头补充 `X-Reason-Code: CANON_SYNC_FAILED`（审计失败可观测）。
 - 验收标准：
@@ -2060,7 +2075,7 @@ TASK-XXXX 标题
 - 输入：risk_registry.md（R121-1）；requirements.txt；tests/contract/test_quality_contract.py。
 - 输出：
   - `requirements.txt` 增加 Optional Dependencies 注释块（redis 可选说明）；
-  - 质量契约补充断言（要求存在“redis + 可选”说明）。
+  - 质量契约补充断言（要求存在"redis + 可选"说明）。
 - 验收标准：
   - requirements 文本含 redis 与 optional/可选标识；
   - 不强制默认安装 redis；
@@ -2086,7 +2101,7 @@ TASK-XXXX 标题
 
 ### TASK-0137 F-04 跟进：Redis 后端真实集成测试落地
 - 状态：BLOCKED_ENV（2026-03-04，暂缓——单机 SQLite 部署无需 Redis；多实例部署前执行）
-- 任务描述：为 `RedisRateLimitStore` 增加真实 Redis 环境集成测试，验证共享计数与 checker 行为，消除“仅降级路径覆盖”的验证缺口。
+- 任务描述：为 `RedisRateLimitStore` 增加真实 Redis 环境集成测试，验证共享计数与 checker 行为，消除"仅降级路径覆盖"的验证缺口。
 - 输入：risk_registry.md（R39-1）；host_brain/governor/rate_limit_store.py；tests/contract/test_governor_rate_limit_contract.py。
 - 输出：
   - `tests/integration/test_rate_limit_redis_integration.py`（新增）：
@@ -2108,7 +2123,7 @@ TASK-XXXX 标题
   - `ExternalServices_Config.md` 新增 SQLite WAL 存储介质要求（本地磁盘优先，NFS/SMB 禁用建议）；
   - `ENV_EXTERNAL_SERVICES_CHECKLIST.md` 新增部署前强校验条目（journal_mode/WAL 与 `AUDIT_WAL_FAILED` 告警口径）。
 - 验收标准：
-  - 部署文档明确“Ledger 主库禁止 NFS/网络文件系统”；
+  - 部署文档明确"Ledger 主库禁止 NFS/网络文件系统"；
   - 明确 WAL 失败降级语义与运维检查方法；
   - 与 risk_registry 的 R36-1 对齐。
 - 涉及文件路径：docs/50_project/ExternalServices_Config.md；docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md。
