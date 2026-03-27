@@ -822,6 +822,15 @@ async def runtime_lifespan(
             logger.info("ActivityMonitor 已停止")
     except Exception as _am_stop_exc:
         logger.warning("ActivityMonitor 停止失败: %s", _am_stop_exc)
+    # 优雅关闭 BondUpdateQueue（drain 等待队列排空 + shutdown 停止 worker）
+    try:
+        from host_brain.app.dependencies import get_bond_update_queue  # noqa: PLC0415
+        _bond_queue = get_bond_update_queue()
+        _drained = _bond_queue.drain(timeout_s=3.0)
+        _bond_queue.shutdown()
+        logger.info("BondUpdateQueue 已优雅关闭 (drained=%s)", _drained)
+    except Exception as _bq_exc:
+        logger.warning("BondUpdateQueue 关闭失败: %s", _bq_exc)
     try:
         from host_brain.observability.service_health_heartbeat import stop_heartbeat
         await stop_heartbeat()

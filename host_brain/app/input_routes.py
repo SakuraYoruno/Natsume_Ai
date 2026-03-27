@@ -231,6 +231,20 @@ def _log_input_event(
         _logger.debug("input_routes: ledger log failed (non-blocking): %s", log_exc)
 
 
+def _log_dispatch_task_exception(task: asyncio.Task) -> None:
+    """fire-and-forget task 异常日志回调——防止 asyncio 静默吞掉异常。"""
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        _logger.error(
+            "input_routes: dispatch task failed silently: %s",
+            exc,
+            exc_info=exc,
+        )
+
+
 async def _dispatch_to_graph(
     *,
     request_id: str,
@@ -267,7 +281,7 @@ async def _dispatch_to_graph(
             dispatch_mode=dispatch_mode,
             run_in_thread=run_in_thread,
         )
-    )
+    ).add_done_callback(_log_dispatch_task_exception)
 
 
 async def _run_main_chain_dispatch(

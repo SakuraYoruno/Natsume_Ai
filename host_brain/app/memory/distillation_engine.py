@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -110,6 +111,8 @@ class DistillationEngine:
         self._audit_writer = audit_writer
         self._min_occurrence = min_occurrence
         self._max_batch_size = max_batch_size
+        # 并发安全：防止定时任务和手动触发同时执行蒸馏
+        self._batch_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # 批量蒸馏
@@ -131,55 +134,62 @@ class DistillationEngine:
         t0 = int(time.time() * 1000)
         report = BatchDistillationReport()
 
-        # 获取蒸馏候选
-        candidates = self._store.query_distill_candidates(
-            min_occurrence=self._min_occurrence,
-            limit=self._max_batch_size,
-        )
-        report.total_candidates = len(candidates)
+        # 互斥：防止定时任务和手动触发并发执行
+        if self._batch_lock.locked():
+            logger.info("DistillationEngine: run_batch 跳过（另一蒸馏任务正在执行）")
+            report.duration_ms = int(time.time() * 1000) - t0
+            return report
 
-        self._write_audit_sync("DISTILL_STARTED", {
-            "total_candidates": len(candidates),
-            "min_occurrence": self._min_occurrence,
-        })
+        async with self._batch_lock:
+            # 获取蒸馏候选
+            candidates = self._store.query_distill_candidates(
+                min_occurrence=self._min_occurrence,
+                limit=self._max_batch_size,
+            )
+            report.total_candidates = len(candidates)
 
-        for record in candidates:
-            result = self._distill_one(record)
-            report.results.append(result)
+            self._write_audit_sync("DISTILL_STARTED", {
+                "total_candidates": len(candidates),
+                "min_occurrence": self._min_occurrence,
+            })
 
-            if result.success and result.proposal:
-                report.distilled_count += 1
-                report.proposals.append(result.proposal)
-            elif result.skipped:
-                report.skipped_count += 1
-            else:
-                report.failed_count += 1
+            for record in candidates:
+                result = self._distill_one(record)
+                report.results.append(result)
 
-        # 清理 SESSION_OVERRIDE
-        if self._arbiter and session_ids_to_clear:
-            for sid in session_ids_to_clear:
-                try:
-                    self._arbiter.clear_session_override(sid)
-                    logger.debug("DistillationEngine: 已清理 SESSION_OVERRIDE（session=%s）", sid)
-                except Exception as exc:
-                    logger.warning("DistillationEngine: 清理 SESSION_OVERRIDE 失败（session=%s）: %s", sid, exc)
+                if result.success and result.proposal:
+                    report.distilled_count += 1
+                    report.proposals.append(result.proposal)
+                elif result.skipped:
+                    report.skipped_count += 1
+                else:
+                    report.failed_count += 1
 
-        report.duration_ms = int(time.time() * 1000) - t0
+            # 清理 SESSION_OVERRIDE
+            if self._arbiter and session_ids_to_clear:
+                for sid in session_ids_to_clear:
+                    try:
+                        self._arbiter.clear_session_override(sid)
+                        logger.debug("DistillationEngine: 已清理 SESSION_OVERRIDE（session=%s）", sid)
+                    except Exception as exc:
+                        logger.warning("DistillationEngine: 清理 SESSION_OVERRIDE 失败（session=%s）: %s", sid, exc)
 
-        self._write_audit_sync("DISTILL_DONE", {
-            "total_candidates": report.total_candidates,
-            "distilled_count": report.distilled_count,
-            "skipped_count": report.skipped_count,
-            "failed_count": report.failed_count,
-            "duration_ms": report.duration_ms,
-        })
+            report.duration_ms = int(time.time() * 1000) - t0
 
-        logger.info(
+            self._write_audit_sync("DISTILL_DONE", {
+                "total_candidates": report.total_candidates,
+                "distilled_count": report.distilled_count,
+                "skipped_count": report.skipped_count,
+                "failed_count": report.failed_count,
+                "duration_ms": report.duration_ms,
+            })
+
+            logger.info(
             "DistillationEngine: 批量蒸馏完成（候选=%d, 成功=%d, 跳过=%d, 失败=%d, 耗时=%dms）",
-            report.total_candidates, report.distilled_count,
-            report.skipped_count, report.failed_count, report.duration_ms,
-        )
-        return report
+                report.total_candidates, report.distilled_count,
+                report.skipped_count, report.failed_count, report.duration_ms,
+            )
+            return report
 
     # ------------------------------------------------------------------
     # 单条蒸馏
