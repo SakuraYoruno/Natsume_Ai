@@ -2,6 +2,10 @@
 .DS_Store
 Thumbs.db
 
+# --- Skills Hub（外部安装的 skill，用户数据，不纳入版本管理）---
+skills/
+!skills/example-echo/
+
 # --- Editors ---
 .idea/
 .vscode/

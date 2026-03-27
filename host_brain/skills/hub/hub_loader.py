@@ -40,8 +40,9 @@ from host_brain.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
-# 默认 Hub Skills 目录（可通过环境变量覆盖）
-_DEFAULT_HUB_DIR = Path(__file__).resolve().parent  # host_brain/skills/hub/
+# 默认 Hub Skills 目录：项目根目录的 skills/（不是 host_brain/skills/hub/，
+# 因为外部安装的 skill 是用户数据，不应混在核心代码目录中）
+_DEFAULT_HUB_DIR = Path(__file__).resolve().parent.parent.parent.parent / "skills"
 SKILL_MD_FILENAME = "SKILL.md"
 PROVIDER_FILENAME = "provider.py"
 EXECUTOR_FILENAME = "executor.py"
