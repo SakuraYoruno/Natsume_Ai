@@ -12,7 +12,27 @@ from typing import Any
 
 DEFAULT_QUEUE_FILENAME = "wechat_command_queue.jsonl"
 DEFAULT_RESULT_FILENAME = "wechat_command_result.jsonl"
-ALLOWED_WECHAT_COMMAND_ACTIONS = {"send_text", "send_image", "send_file", "send_voice", "voice_call", "video_call"}
+ALLOWED_WECHAT_COMMAND_ACTIONS = {
+    # ── Send actions ──────────────────────────────────────────────────────
+    "send_text",
+    "send_image",
+    "send_file",
+    "send_voice",
+    "voice_call",       # not supported by wxautox4; returns error
+    "video_call",       # not supported by wxautox4; returns error
+    # ── Phase 1: Query actions ────────────────────────────────────────────
+    "get_my_info",           # wx.GetMyInfo()
+    "get_friends",           # wx.GetFriends()
+    "get_groups",            # wx.GetRecentGroups()
+    "get_recent_chats",      # wx.GetSession()
+    "get_history_messages",  # wx.GetHistoryMessage(who, savepath?)
+    # ── Phase 1: Listen management ────────────────────────────────────────
+    "listen_add",            # wx.AddListenChat(who)
+    "listen_remove",         # wx.RemoveListenChat(who)
+    "listen_stop",           # wx.StopListening()
+    # ── Phase 1: Navigation ───────────────────────────────────────────────
+    "chat_with",             # wx.ChatWith(who)
+}
 
 # --- Incremental read state for result file ---
 # Tracks (file_path_str -> byte_offset) so repeated lookups skip already-scanned lines.
@@ -45,6 +65,7 @@ def enqueue_wechat_command(
     request_id: str = "",
     queue_file: Path | None = None,
     ts_ms: int | None = None,
+    extra_fields: dict[str, Any] | None = None,  # Phase 1: arbitrary extra JSONL fields
 ) -> dict[str, Any]:
     queue_path = queue_file or resolve_command_file_paths()[0]
     queue_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +98,11 @@ def enqueue_wechat_command(
         candidates.append(value)
     if candidates:
         row["target_candidates"] = candidates
+    # Merge any extra fields (e.g. savepath for get_history_messages)
+    if extra_fields:
+        for k, v in extra_fields.items():
+            if k not in row:
+                row[k] = v
     _append_jsonl_row(queue_path, row)
     return row
 

@@ -159,6 +159,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 return False
+            if reply.msg_type == MsgType.FILE:  # Phase 1
+                if self._bridge_queue_enabled():
+                    success = self._send_file_via_bridge_queue(reply)
+                    detail = "bridge_queue_file"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                return False
             detail = f"unsupported msg_type={reply.msg_type.value}"
             return False
         except Exception as exc:
@@ -177,6 +184,66 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 "elapsed_ms": elapsed,
                 "ts_ms": int(time.time() * 1000),
             }
+
+    # ── Phase 1: query helpers ────────────────────────────────────────────────
+
+    def query_bridge(self, action: str, target: str = "", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Dispatch a query-type command to the bridge and wait for result.
+
+        Phase 1 supported actions: get_my_info, get_friends, get_groups,
+        get_recent_chats, get_history_messages, listen_add, listen_remove,
+        listen_stop, chat_with.
+
+        Returns the result dict from the JSONL result file, or an error dict.
+        """
+        from edge_client.channels.wechat_command_queue import (
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+        if not self._bridge_queue_enabled():
+            return {"success": False, "reason_code": "BRIDGE_NOT_ENABLED", "detail": "bridge queue not enabled"}
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        row = enqueue_wechat_command(
+            action=action,
+            target=target,
+            content=str((extra or {}).get("content") or ""),
+            request_id=f"gateway-query-{now_ms}-{uuid.uuid4().hex[:8]}",
+            queue_file=queue_file,
+            ts_ms=now_ms,
+            extra_fields={k: v for k, v in (extra or {}).items() if k != "content"} or None,
+        )
+        timeout_ms = self._resolve_command_timeout_ms() * 3  # queries may take longer
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=timeout_ms,
+            result_file=result_file,
+        )
+        return dict(result or {"success": False, "reason_code": "TIMEOUT", "detail": "no result within timeout"})
+
+    def get_my_info(self) -> dict[str, Any]:
+        """Return WeChat self account info via bridge. Phase 1."""
+        return self.query_bridge("get_my_info")
+
+    def get_friends(self) -> dict[str, Any]:
+        """Return friend list via bridge. Phase 1."""
+        return self.query_bridge("get_friends")
+
+    def get_groups(self) -> dict[str, Any]:
+        """Return recent group list via bridge. Phase 1."""
+        return self.query_bridge("get_groups")
+
+    def get_recent_chats(self) -> dict[str, Any]:
+        """Return recent chat sessions via bridge. Phase 1."""
+        return self.query_bridge("get_recent_chats")
+
+    def get_history_messages(self, target: str, savepath: str = "") -> dict[str, Any]:
+        """Return history messages for a chat target via bridge. Phase 1."""
+        extra: dict[str, Any] = {}
+        if savepath:
+            extra["savepath"] = savepath
+        return self.query_bridge("get_history_messages", target=target, extra=extra or None)
 
     def health(self) -> dict[str, Any]:
         bridge_queue_enabled = self._bridge_queue_enabled()
@@ -352,6 +419,43 @@ class WeChatAdapter(AbstractPlatformAdapter):
         target_candidates = self._build_search_candidates(reply.conversation_id)
         row = enqueue_wechat_command(
             action="send_voice",
+            target=reply.conversation_id,
+            target_candidates=target_candidates,
+            content=media_path,
+            request_id=request_id,
+            queue_file=queue_file,
+            ts_ms=now_ms,
+        )
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=self._resolve_command_timeout_ms(),
+            result_file=result_file,
+        )
+        return bool((result or {}).get("success"))
+
+    def _send_file_via_bridge_queue(self, reply: UnifiedReply) -> bool:  # Phase 1
+        """Send a generic file via the bridge command queue.
+
+        The file path is expected in ``reply.media_path``.
+        Falls back to ``reply.content`` if ``media_path`` is not set.
+        """
+        from edge_client.channels.wechat_command_queue import (
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+
+        media_path = str(reply.media_path or reply.content or "").strip()
+        if not media_path:
+            logger.warning("WeChatAdapter: send_file called but no media_path provided")
+            return False
+
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        request_id = str(reply.raw_extra.get("request_id") or f"gateway-file-{now_ms}-{uuid.uuid4().hex[:8]}")
+        target_candidates = self._build_search_candidates(reply.conversation_id)
+        row = enqueue_wechat_command(
+            action="send_file",
             target=reply.conversation_id,
             target_candidates=target_candidates,
             content=media_path,

@@ -14,7 +14,16 @@ Switch between backends via a single env-var:
 
 Requires:
   - wxautox4 activated (``wxautox4 -a <activation_code>``)
-  - WeChat 4.0.5+ running and logged-in on the same desktop
+  - WeChat 4.1+ running and logged-in on the same desktop
+
+Phase 1 additions (2026-03-27):
+  - IsOnline() health check with periodic keepalive
+  - GetMyInfo() self-info at startup
+  - get_friends / get_groups / get_recent_chats query actions
+  - get_history_messages query action
+  - media download on inbound messages (image/video/voice)
+  - RemoveListenChat / StopListening management actions
+  - ChatWith navigation action
 """
 
 from __future__ import annotations
@@ -43,6 +52,8 @@ DEFAULT_COMMAND_POLL_INTERVAL_S = 0.5
 DEFAULT_CALLBACK_TIMEOUT_S = 6.0
 DEFAULT_INBOUND_POLL_INTERVAL_S = 1.0
 DEFAULT_DEDUP_WINDOW_S = 12.0
+DEFAULT_HEALTH_CHECK_INTERVAL_S = 30.0   # Phase 1: IsOnline keepalive interval
+DEFAULT_MEDIA_DOWNLOAD_DIR = ""          # Phase 1: empty = no auto-download
 
 # Media type codes matching the UIA bridge convention
 MEDIA_TYPE_CODE_MAP: dict[str, int] = {
@@ -166,6 +177,66 @@ def _resolve_msg_type_code(msg: Any) -> int:
     return 1  # default: text
 
 
+def _safe_serialize(obj: Any) -> Any:
+    """Recursively convert wxautox4 objects to JSON-serializable types."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, (list, tuple)):
+        return [_safe_serialize(item) for item in obj]
+    if isinstance(obj, dict):
+        return {str(k): _safe_serialize(v) for k, v in obj.items()}
+    # wxautox4 objects: try __dict__ first, then str
+    d = getattr(obj, "__dict__", None)
+    if d and isinstance(d, dict):
+        return {str(k): _safe_serialize(v) for k, v in d.items() if not k.startswith("_")}
+    return str(obj)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: HealthMonitor — periodic IsOnline keepalive
+# ---------------------------------------------------------------------------
+
+class HealthMonitor:
+    """Runs periodic wx.IsOnline() checks and logs online/offline transitions.
+
+    Can be extended later to push health events to the Gateway webhook.
+    """
+
+    def __init__(
+        self,
+        wx: Any,
+        *,
+        check_interval_s: float = DEFAULT_HEALTH_CHECK_INTERVAL_S,
+    ) -> None:
+        self._wx = wx
+        self._interval = max(5.0, check_interval_s)
+        self._shutdown = threading.Event()
+        self._last_online: bool | None = None
+
+    def run(self) -> None:
+        logger.info("HealthMonitor started (interval=%.0fs)", self._interval)
+        while not self._shutdown.is_set():
+            self._check()
+            self._shutdown.wait(timeout=self._interval)
+        logger.info("HealthMonitor stopped.")
+
+    def stop(self) -> None:
+        self._shutdown.set()
+
+    def _check(self) -> None:
+        try:
+            online = bool(self._wx.IsOnline())
+        except Exception as exc:
+            logger.warning("HealthMonitor: IsOnline() error: %s", exc)
+            return
+        if online != self._last_online:
+            if online:
+                logger.info("WeChat online status: ONLINE ✓")
+            else:
+                logger.warning("WeChat online status: OFFLINE — WeChat may have been closed or logged out!")
+            self._last_online = online
+
+
 # ---------------------------------------------------------------------------
 # Inbound processor — receives messages from wxautox4 and posts to Gateway
 # ---------------------------------------------------------------------------
@@ -182,6 +253,7 @@ class InboundProcessor:
         dedup_window_s: float = DEFAULT_DEDUP_WINDOW_S,
         callback_timeout_s: float = DEFAULT_CALLBACK_TIMEOUT_S,
         listen_targets: list[str] | None = None,
+        media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
     ) -> None:
         self._wx = wx
         self._edge_url = edge_url
@@ -189,6 +261,7 @@ class InboundProcessor:
         self._dedup_window_s = max(1.0, dedup_window_s)
         self._callback_timeout_s = callback_timeout_s
         self._listen_targets = list(listen_targets or [])
+        self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._shutdown = threading.Event()
         self._recent_signatures: dict[str, float] = {}  # signature -> mono timestamp
         self._stats = {"forwarded": 0, "deduped": 0, "errors": 0}
@@ -247,6 +320,30 @@ class InboundProcessor:
                 chat_name = str(getattr(msg, "roomid", None) or getattr(msg, "sender", "") or "")
                 self._forward_one_message(msg, chat_name=chat_name, ts_ms=ts_ms)
 
+    def _try_download_media(self, msg: Any) -> str:
+        """Phase 1: Attempt to download media file from message object.
+
+        Returns local file path on success, or empty string on failure/skip.
+        """
+        if not self._media_download_dir:
+            return ""
+        msg_type_code = _resolve_msg_type_code(msg)
+        # Only attempt download for image(3), voice(34), video(43)
+        if msg_type_code not in (3, 34, 43):
+            return ""
+        save_dir = Path(self._media_download_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            local_path = msg.download(savepath=str(save_dir))
+            if local_path and os.path.isfile(str(local_path)):
+                logger.info("media downloaded: %s", local_path)
+                return str(local_path)
+        except AttributeError:
+            pass  # message type has no download() method
+        except Exception as exc:
+            logger.debug("media download failed: %s", exc)
+        return ""
+
     def _forward_one_message(self, msg: Any, *, chat_name: str, ts_ms: int) -> None:
         """Forward a single wxautox4 message to the edge callback."""
         sender = str(
@@ -270,6 +367,11 @@ class InboundProcessor:
         is_group_hint = bool(room_id) or (sender != chat_name and bool(chat_name))
         msg_type_code = _resolve_msg_type_code(msg)
 
+        # Phase 1: try to download media and attach local path
+        media_path = str(getattr(msg, "media_path", None) or getattr(msg, "file_path", None) or "").strip()
+        if not media_path:
+            media_path = self._try_download_media(msg)
+
         # Build webhook body — format identical to wechat_uia_bridge.py
         body: dict[str, Any] = {
             "id": msg_id,
@@ -289,8 +391,6 @@ class InboundProcessor:
             "is_group_hint": is_group_hint,
         }
 
-        # Attach media path if available
-        media_path = str(getattr(msg, "media_path", None) or getattr(msg, "file_path", None) or "").strip()
         if media_path:
             body["media_url"] = media_path
 
@@ -317,9 +417,40 @@ class InboundProcessor:
 # ---------------------------------------------------------------------------
 
 class OutboundProcessor:
-    """Polls the JSONL command queue and dispatches commands via wxautox4."""
+    """Polls the JSONL command queue and dispatches commands via wxautox4.
 
-    SUPPORTED_ACTIONS = {"send_text", "send_image", "send_file", "send_voice"}
+    Phase 1 additions:
+      - get_friends        → wx.GetFriends()
+      - get_groups         → wx.GetRecentGroups()  (or GetAllSubWindow groups)
+      - get_recent_chats   → wx.GetSession() (recent session list)
+      - get_history_messages → wx.GetHistoryMessage(who, savepath)
+      - get_my_info        → wx.GetMyInfo()
+      - listen_add         → wx.AddListenChat(who)
+      - listen_remove      → wx.RemoveListenChat(who)
+      - listen_stop        → wx.StopListening()
+      - chat_with          → wx.ChatWith(who)
+    """
+
+    # All supported actions (Phase 1 additions marked with # P1)
+    SUPPORTED_ACTIONS = {
+        # Original
+        "send_text",
+        "send_image",
+        "send_file",
+        "send_voice",
+        # Phase 1 — query
+        "get_friends",           # P1
+        "get_groups",            # P1
+        "get_recent_chats",      # P1
+        "get_history_messages",  # P1
+        "get_my_info",           # P1
+        # Phase 1 — listen management
+        "listen_add",            # P1
+        "listen_remove",         # P1
+        "listen_stop",           # P1
+        # Phase 1 — navigation
+        "chat_with",             # P1
+    }
 
     def __init__(
         self,
@@ -328,11 +459,13 @@ class OutboundProcessor:
         command_queue_file: str,
         command_result_file: str,
         poll_interval_s: float = DEFAULT_COMMAND_POLL_INTERVAL_S,
+        media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
     ) -> None:
         self._wx = wx
         self._queue_file = command_queue_file
         self._result_file = command_result_file
         self._poll_interval_s = max(0.1, poll_interval_s)
+        self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._shutdown = threading.Event()
         self._read_offset: int = 0
         self._processed_ids: set[str] = set()
@@ -392,16 +525,15 @@ class OutboundProcessor:
             "detail": "",
         }
 
-        if not chat_target:
-            result["reason_code"] = "WECHAT_NO_TARGET"
-            result["detail"] = "no chat target specified"
-            _append_jsonl_row(self._result_file, result)
-            self._stats["failed"] += 1
-            logger.warning("command %s: no target", command_id)
-            return
-
         try:
             if action == "send_text":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "no chat target specified"
+                    self._stats["failed"] += 1
+                    logger.warning("command %s: no target", command_id)
+                    _append_jsonl_row(self._result_file, result)
+                    return
                 self._wx.SendMsg(content, who=chat_target)
                 result["success"] = True
                 result["status"] = "ok"
@@ -409,11 +541,17 @@ class OutboundProcessor:
                 self._stats["executed"] += 1
                 logger.info("command %s: send_text to '%s' OK", command_id, chat_target)
 
-            elif action == "send_image":
+            elif action in ("send_image", "send_file", "send_voice"):
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "no chat target specified"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
                 media_path = str(command.get("media_path") or content or "").strip()
                 if not media_path or not os.path.isfile(media_path):
                     result["reason_code"] = "WECHAT_MEDIA_FILE_NOT_FOUND"
-                    result["detail"] = f"image file not found: {media_path}"
+                    result["detail"] = f"media file not found: {media_path}"
                     self._stats["failed"] += 1
                 else:
                     self._wx.SendFiles(media_path, who=chat_target)
@@ -421,42 +559,132 @@ class OutboundProcessor:
                     result["status"] = "ok"
                     result["resolved_target"] = chat_target
                     self._stats["executed"] += 1
-                    logger.info("command %s: send_image to '%s' OK", command_id, chat_target)
-
-            elif action == "send_file":
-                media_path = str(command.get("media_path") or content or "").strip()
-                if not media_path or not os.path.isfile(media_path):
-                    result["reason_code"] = "WECHAT_MEDIA_FILE_NOT_FOUND"
-                    result["detail"] = f"file not found: {media_path}"
-                    self._stats["failed"] += 1
-                else:
-                    self._wx.SendFiles(media_path, who=chat_target)
-                    result["success"] = True
-                    result["status"] = "ok"
-                    result["resolved_target"] = chat_target
-                    self._stats["executed"] += 1
-                    logger.info("command %s: send_file to '%s' OK", command_id, chat_target)
-
-            elif action == "send_voice":
-                media_path = str(command.get("media_path") or content or "").strip()
-                if not media_path or not os.path.isfile(media_path):
-                    result["reason_code"] = "WECHAT_MEDIA_FILE_NOT_FOUND"
-                    result["detail"] = f"voice file not found: {media_path}"
-                    self._stats["failed"] += 1
-                else:
-                    # wxautox4 sends voice as file attachment
-                    self._wx.SendFiles(media_path, who=chat_target)
-                    result["success"] = True
-                    result["status"] = "ok"
-                    result["resolved_target"] = chat_target
-                    self._stats["executed"] += 1
-                    logger.info("command %s: send_voice to '%s' OK", command_id, chat_target)
+                    logger.info("command %s: %s to '%s' OK", command_id, action, chat_target)
 
             elif action in {"voice_call", "video_call"}:
                 result["reason_code"] = "WECHAT_CALL_NOT_SUPPORTED"
                 result["detail"] = f"wxautox4 does not support {action}"
                 self._stats["unsupported"] += 1
                 logger.warning("command %s: unsupported action '%s'", command_id, action)
+
+            # ── Phase 1: Query actions ──────────────────────────────────────
+
+            elif action == "get_my_info":
+                info = self._wx.GetMyInfo()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(info)
+                self._stats["executed"] += 1
+                logger.info("command %s: get_my_info OK", command_id)
+
+            elif action == "get_friends":
+                friends = self._wx.GetFriends()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(friends)
+                result["count"] = len(friends) if isinstance(friends, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_friends OK count=%s", command_id, result["count"])
+
+            elif action == "get_groups":
+                # wxautox4 v40.1.x: GetRecentGroups() returns recently active groups
+                try:
+                    groups = self._wx.GetRecentGroups()
+                except AttributeError:
+                    # Fallback: some versions use a different method name
+                    groups = self._wx.GetAllSubWindow()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(groups)
+                result["count"] = len(groups) if isinstance(groups, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_groups OK count=%s", command_id, result["count"])
+
+            elif action == "get_recent_chats":
+                # GetSession() returns the recent chat sessions list
+                sessions = self._wx.GetSession()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(sessions)
+                result["count"] = len(sessions) if isinstance(sessions, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_recent_chats OK count=%s", command_id, result["count"])
+
+            elif action == "get_history_messages":
+                # Required: target (who to get history from)
+                # Optional: command["savepath"] or use media_download_dir
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "get_history_messages requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                savepath = str(command.get("savepath") or self._media_download_dir or "").strip()
+                if not savepath:
+                    # Return messages as data without saving to file
+                    history = self._wx.GetHistoryMessage(who=chat_target)
+                else:
+                    Path(savepath).mkdir(parents=True, exist_ok=True)
+                    history = self._wx.GetHistoryMessage(who=chat_target, savepath=savepath)
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(history)
+                result["count"] = len(history) if isinstance(history, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_history_messages for '%s' OK count=%s", command_id, chat_target, result["count"])
+
+            # ── Phase 1: Listen management ──────────────────────────────────
+
+            elif action == "listen_add":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "listen_add requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.AddListenChat(who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: listen_add '%s' OK", command_id, chat_target)
+
+            elif action == "listen_remove":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "listen_remove requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.RemoveListenChat(who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: listen_remove '%s' OK", command_id, chat_target)
+
+            elif action == "listen_stop":
+                self._wx.StopListening()
+                result["success"] = True
+                result["status"] = "ok"
+                self._stats["executed"] += 1
+                logger.info("command %s: listen_stop OK", command_id)
+
+            # ── Phase 1: Navigation ─────────────────────────────────────────
+
+            elif action == "chat_with":
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "chat_with requires a target"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.ChatWith(who=chat_target)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                self._stats["executed"] += 1
+                logger.info("command %s: chat_with '%s' OK", command_id, chat_target)
 
             else:
                 result["reason_code"] = "WECHAT_UNKNOWN_ACTION"
@@ -483,6 +711,12 @@ class WxAutoX4Bridge:
     Lifecycle:
         bridge = WxAutoX4Bridge(...)
         bridge.start()   # blocks until shutdown
+
+    Phase 1 additions:
+        - HealthMonitor thread (IsOnline keepalive)
+        - GetMyInfo() log at startup
+        - media_download_dir support
+        - health_check_interval_s config
     """
 
     def __init__(
@@ -496,6 +730,8 @@ class WxAutoX4Bridge:
         callback_timeout_s: float = DEFAULT_CALLBACK_TIMEOUT_S,
         dedup_window_s: float = DEFAULT_DEDUP_WINDOW_S,
         listen_targets: list[str] | None = None,
+        health_check_interval_s: float = DEFAULT_HEALTH_CHECK_INTERVAL_S,  # Phase 1
+        media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,              # Phase 1
     ) -> None:
         self._edge_url = edge_url
         self._queue_file = command_queue_file
@@ -505,6 +741,8 @@ class WxAutoX4Bridge:
         self._callback_timeout_s = callback_timeout_s
         self._dedup_window_s = dedup_window_s
         self._listen_targets = list(listen_targets or [])
+        self._health_check_interval_s = health_check_interval_s
+        self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._shutdown = threading.Event()
 
     def start(self) -> int:
@@ -513,7 +751,7 @@ class WxAutoX4Bridge:
         Returns exit code (0 = clean, 1 = error).
         """
         logger.info("=" * 60)
-        logger.info("wxautox4 Bridge for Natsume_Ai")
+        logger.info("wxautox4 Bridge for Natsume_Ai  [Phase 1]")
         logger.info("=" * 60)
 
         # ── Step 1: import and initialize wxautox4 ──
@@ -530,11 +768,27 @@ class WxAutoX4Bridge:
             wx = WeChat()
         except Exception as exc:
             logger.error("Failed to initialize wxautox4.WeChat(): %s", exc)
-            logger.error("Make sure WeChat 4.0.5+ is running and wxautox4 is activated.")
+            logger.error("Make sure WeChat 4.1+ is running and wxautox4 is activated.")
             return 1
         logger.info("wxautox4 bound to WeChat window successfully!")
 
-        # ── Step 2: start inbound processor ──
+        # ── Step 2: Phase 1 — log self info at startup ──
+        try:
+            my_info = wx.GetMyInfo()
+            logger.info("WeChat self info: %s", _safe_serialize(my_info))
+        except Exception as exc:
+            logger.warning("GetMyInfo() failed (non-fatal): %s", exc)
+
+        # ── Step 3: start HealthMonitor ──
+        health = HealthMonitor(wx, check_interval_s=self._health_check_interval_s)
+        health_thread = threading.Thread(
+            target=health.run,
+            name="wxautox4-health",
+            daemon=True,
+        )
+        health_thread.start()
+
+        # ── Step 4: start inbound processor ──
         inbound = InboundProcessor(
             wx,
             edge_url=self._edge_url,
@@ -542,6 +796,7 @@ class WxAutoX4Bridge:
             dedup_window_s=self._dedup_window_s,
             callback_timeout_s=self._callback_timeout_s,
             listen_targets=self._listen_targets,
+            media_download_dir=self._media_download_dir,
         )
         inbound.setup_listeners()
 
@@ -552,12 +807,13 @@ class WxAutoX4Bridge:
         )
         inbound_thread.start()
 
-        # ── Step 3: start outbound processor ──
+        # ── Step 5: start outbound processor ──
         outbound = OutboundProcessor(
             wx,
             command_queue_file=self._queue_file,
             command_result_file=self._result_file,
             poll_interval_s=self._command_poll_interval_s,
+            media_download_dir=self._media_download_dir,
         )
 
         outbound_thread = threading.Thread(
@@ -567,14 +823,15 @@ class WxAutoX4Bridge:
         )
         outbound_thread.start()
 
-        # ── Step 4: keep alive ──
-        logger.info("wxautox4 Bridge is running. Press Ctrl+C to stop.")
+        # ── Step 6: keep alive ──
+        logger.info("wxautox4 Bridge [Phase 1] is running. Press Ctrl+C to stop.")
         try:
             while not self._shutdown.is_set():
                 self._shutdown.wait(timeout=1.0)
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, shutting down...")
 
+        health.stop()
         inbound.stop()
         outbound.stop()
         logger.info("wxautox4 Bridge stopped.")
@@ -587,7 +844,7 @@ class WxAutoX4Bridge:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="wxautox4 Bridge for Natsume_Ai (drop-in replacement for UIA bridge)",
+        description="wxautox4 Bridge for Natsume_Ai (drop-in replacement for UIA bridge) [Phase 1]",
     )
     parser.add_argument(
         "--edge-url",
@@ -646,6 +903,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ],
         help="Chat targets to listen to (space-separated); empty = rely on GetNewMessage()",
     )
+    # Phase 1 new args
+    parser.add_argument(
+        "--health-check-interval",
+        type=float,
+        default=float(
+            os.environ.get("EDGE_WECHAT_WXAUTOX4_HEALTH_INTERVAL_S") or DEFAULT_HEALTH_CHECK_INTERVAL_S,
+        ),
+        help="IsOnline health check interval in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--media-download-dir",
+        default=_normalize_optional_path(os.environ.get("EDGE_WECHAT_WXAUTOX4_MEDIA_DOWNLOAD_DIR") or ""),
+        help="Directory to auto-download inbound media files (empty = disabled)",
+    )
     return parser
 
 
@@ -676,6 +947,8 @@ def main() -> int:
         callback_timeout_s=args.callback_timeout,
         dedup_window_s=args.dedup_window,
         listen_targets=args.listen_targets,
+        health_check_interval_s=args.health_check_interval,
+        media_download_dir=args.media_download_dir,
     )
     return bridge.start()
 

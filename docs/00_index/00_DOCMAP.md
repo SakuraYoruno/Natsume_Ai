@@ -65,6 +65,10 @@
   用途：双节点开发协作工作流规范（2026-03-26）。定义"开发节点 ⇄ 运行节点"闭环机制：开发实测报告→真机验证→运行反馈报告→修复闭环。含报告类型定义、命名规范、流程步骤、闭环判定条件。填补已删除的 WORKSHEET_Project_Codex_Git_Flow.md 空缺。
   读者：MASTER、实现层（查阅遵守）。
 
+- docs/50_project/guides/WXAUTOX4_FULL_API_INTEGRATION_PLAN.md
+  用途：wxautox4 完整 API 对接更新方案（2026-03-27）。对比 wxautox4 v40.1.11 全量 API（~30+ 方法）与 Natsume_Ai 已对接的 5 个方法的差距，制定 P1/P2/P3 三期更新计划。涵盖核心 Bridge 扩展、命令队列 Actions 扩展、Gateway 适配器与路由扩展、新增配置项、测试用例与风险注意事项。含详细代码示例和文件修改清单。
+  读者：MASTER、实现层（按计划实施）。
+
 - docs/50_project/guides/DEV_TEST_REPORT_TEMPLATE.md
   用途：开发实测报告模板（DEV→RUN）。开发节点完成功能后按此模板产出实测报告，列出本机已验证项与真机实测清单，供运行节点执行。
   读者：实现层（模板使用）。
@@ -234,6 +238,9 @@
   读者：MASTER、实现层、Project（文档代理）。
 
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_bridge_20260327.md
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_phase1_20260327.md
+  用途：wxautox4 Bridge Phase 1 开发实测报告（2026-03-27）。记录 Phase 1 新增 9 个 actions（IsOnline/GetMyInfo/好友群列表/历史消息/媒体下载/监听管理/ChatWith）的实现，含 10 条待真机验证测试用例（T-P1-01~T-P1-10）。
+  读者：MASTER、运行节点（按用例验证）。
   用途：wxautox4 Bridge 集成开发实测报告（2026-03-27）。新增 wxautox4 作为微信自动化 bridge 后端（替代自研 UIA Bridge），外部协议完全兼容（JSONL 命令队列 + webhook POST）。改动 5 个文件，含 8 项真机测试清单（P0×4 / P1×2 / P2×2），涵盖环境安装、独立启动、inbound 消息转发、outbound 命令执行、热切换回退、图片发送、消息去重、群聊识别。
   读者：MASTER、实现层、Project（文档代理）。
 
