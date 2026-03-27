@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from host_brain.core.ids import now_ms
 
 
-ALLOWED_SYS_MODES = {"normal", "focus", "gaming", "maintenance", "locked"}
+ALLOWED_SYS_MODES = {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}
 ALLOWED_MOOD_STATES = {"calm", "steady", "engaged", "tired", "critical"}
 
 

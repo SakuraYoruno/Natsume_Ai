@@ -93,6 +93,10 @@
   用途：当前代码目录、系统分层、服务请求链路、多 Agent 治理与 Graph 编排落点对齐文档（以代码事实为准）。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
+- docs/50_project/arch/MODE_TRANSITION_SYSTEM.md
+  用途：智能模式切换系统技术文档（2026-03-27）。定义 ModeTransitionService（手动+自动统一切换）、ActivityMonitor（Host 端前台进程检测/空闲检测/早间唤醒）、REST API（GET/POST /obs/sys-mode 等 5 个端点）、WebUI RuntimeMode 面板。含模式定义矩阵（6 种模式）、合法切换路径、5 条自动触发规则、30+ 游戏进程内置列表、审计追踪。修复 ALLOWED_SYS_MODES 缺少 sleep 的 Bug。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
@@ -226,6 +230,9 @@
   读者：MASTER、运行节点（按用例验证）。
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_phase3_20260327.md
   用途：wxautox4 Bridge Phase 3 开发实测报告（2026-03-27）。记录 Phase 3 新增 7 个 actions（朋友圈4个/群管理1个/高级消息操作3个）+ 消息对象缓存机制（TTL 5min），含 11 条待真机验证测试用例（T-P3-01~T-P3-11）。至此三期计划全部完成，ALLOWED_ACTIONS 从 6 扩展到 37。
+  读者：MASTER、运行节点（按用例验证）。
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_mode_transition_20260327.md
+  用途：智能模式切换系统开发实测报告（2026-03-27）。ModeTransitionService（手动+自动统一切换）、ActivityMonitor（Host 端游戏进程检测/空闲检测）、REST API 5 个端点、WebUI RuntimeMode 面板。修复 ALLOWED_SYS_MODES 缺少 sleep Bug。4 个新增文件 + 6 个修改文件，含 13 条真机测试用例（P0×5 / P1×5 / P2×3）。
   读者：MASTER、运行节点（按用例验证）。
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_recall_fusion_bugfix_20260327.md
   用途：灵魂层召回逻辑 4 项 Bug 修复报告（2026-03-27）。修复：①_render_target_lang_selector_match 空值返回 False 导致多语言路由失效（高优）；②fusion key 跨路由碰撞；③emotion_filter 分组内排序丢失；④memory_ops_log 搜索文本质量差。含 5 条待真机验证测试用例（T-RF-FIX-01~05）。

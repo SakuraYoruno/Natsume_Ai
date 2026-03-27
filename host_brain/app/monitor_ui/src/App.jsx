@@ -19,6 +19,7 @@ import LogStream from './pages/LogStream.jsx'
 import EmotionDashboard from './pages/EmotionDashboard.jsx'
 import MemoryBrowser from './pages/MemoryBrowser.jsx'
 import SystemConfig from './pages/SystemConfig.jsx'
+import RuntimeMode from './pages/RuntimeMode.jsx'
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="emotion" element={<EmotionDashboard />} />
           <Route path="memory" element={<MemoryBrowser />} />
           <Route path="system" element={<SystemConfig />} />
+          <Route path="runtime-mode" element={<RuntimeMode />} />
           <Route path="canon" element={<Canon />} />
           <Route path="bond" element={<Bond />} />
           <Route path="tools" element={<Tools />} />

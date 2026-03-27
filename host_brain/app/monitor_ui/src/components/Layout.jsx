@@ -21,6 +21,7 @@ import {
   Smile,
   Database,
   Settings,
+  Zap,
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
 
@@ -38,6 +39,7 @@ const NAV_ITEMS = [
   { to: '/emotion',     icon: Smile,           label: 'Emotion' },
   { to: '/memory',      icon: Database,        label: 'Memory' },
   { to: '/system',      icon: Settings,        label: 'System' },
+  { to: '/runtime-mode', icon: Zap,             label: 'Mode' },
   // 业务管理
   { to: '/gateway',     icon: Radio,           label: 'Gateway' },
   { to: '/skills',      icon: Package,         label: 'Skills' },

@@ -797,6 +797,44 @@ export function fetchSkillsHubStats() {
   return request('/obs/skills-hub/stats')
 }
 
+// ===== 系统运行模式管理 =====
+
+/** 获取当前系统运行模式状态 */
+export function fetchSysModeStatus() {
+  return request('/obs/sys-mode')
+}
+
+/** 切换系统运行模式 */
+export function switchSysMode(body) {
+  return request('/obs/sys-mode', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 获取模式切换历史 */
+export function fetchSysModeHistory(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/sys-mode/history${qs ? '?' + qs : ''}`)
+}
+
+/** 更新自动切换规则 */
+export function updateAutoRules(body) {
+  return request('/obs/sys-mode/auto-rules', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+/** 发送模式切换事件 */
+export function postSysModeEvent(eventType) {
+  return request(`/obs/sys-mode/event?event_type=${encodeURIComponent(eventType)}`, {
+    method: 'POST',
+  })
+}
+
 // ===== WebSocket 实时健康推送 =====
 
 /**
