@@ -502,64 +502,49 @@ class TelegramAdapter(AbstractPlatformAdapter):
         text: str,
         reply_to_msg_id: str | None = None,
     ) -> bool:
-        """发送文本消息，模拟"正在输入..."延迟。
+        """发送文本消息，使用公共拟人化模块分段发送 + Telegram 特有"正在输入..."状态。
 
         人感增强：
-        1. 先显示"正在输入..."状态
-        2. 根据文本长度 + 打字速度计算延迟
-        3. 加入随机抖动，避免机械感
-        4. 长文本分段发送
+        1. 先显示"正在输入..."状态（Telegram 平台特有）
+        2. 公共模块：智能分段 + 打字延迟 + 段间停顿
+        3. 每段发送前重新触发"正在输入..."
         """
         try:
             from telethon.tl.functions.messages import SetTypingRequest
             from telethon.tl.types import SendMessageTypingAction
-
-            # 显示"正在输入..."
-            try:
-                await self._client(SetTypingRequest(
-                    peer=entity,
-                    action=SendMessageTypingAction(),
-                ))
-            except Exception:
-                pass  # 输入状态失败不影响发送
-
-            # 计算延迟 = 基础延迟 + 打字时间
-            base_delay = random.uniform(self._min_delay_s, self._max_delay_s)
-            typing_time = len(text) / self._typing_speed
-            total_delay = base_delay + typing_time
-            # 加上 ±20% 随机抖动
-            total_delay *= random.uniform(0.8, 1.2)
-            # 上限 30 秒
-            total_delay = min(total_delay, 30.0)
-
-            await asyncio.sleep(total_delay)
-
-            # 分段发送（长消息拆成多条）
-            segments = self._split_message(text)
+            from edge_client.gateway.humanize_sender import (
+                humanize_send_async,
+                HumanizeSendConfig,
+            )
 
             reply_to = int(reply_to_msg_id) if reply_to_msg_id else None
+            _segment_idx = 0
 
-            for i, segment in enumerate(segments):
-                if i > 0:
-                    # 段间延迟（模拟分次发送的感觉）
-                    await asyncio.sleep(random.uniform(0.5, 2.0))
-                    # 每段前再显示一次"正在输入..."
-                    try:
-                        await self._client(SetTypingRequest(
-                            peer=entity,
-                            action=SendMessageTypingAction(),
-                        ))
-                        await asyncio.sleep(random.uniform(0.3, 1.0))
-                    except Exception:
-                        pass
-
+            async def _send_one_segment(segment: str) -> bool:
+                nonlocal _segment_idx
+                # 每段发送前显示"正在输入..."
+                try:
+                    await self._client(SetTypingRequest(
+                        peer=entity,
+                        action=SendMessageTypingAction(),
+                    ))
+                except Exception:
+                    pass  # 输入状态失败不影响发送
                 await self._client.send_message(
                     entity,
                     segment,
-                    reply_to=reply_to if i == 0 else None,  # 只有第一段引用原消息
+                    reply_to=reply_to if _segment_idx == 0 else None,
                 )
+                _segment_idx += 1
+                return True
 
-            return True
+            config = HumanizeSendConfig.from_env()
+            result = await humanize_send_async(
+                text=text,
+                send_fn=_send_one_segment,
+                config=config,
+            )
+            return result.success
 
         except Exception as exc:
             logger.error("TelegramAdapter: 文本发送失败: %s", exc)

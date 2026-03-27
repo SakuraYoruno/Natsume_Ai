@@ -137,8 +137,9 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             if reply.msg_type == MsgType.TEXT:
                 if self._bridge_queue_enabled():
-                    success = self._send_via_bridge_queue(reply)
-                    detail = "bridge_queue"
+                    # 拟人化分段发送（公共模块）
+                    success = self._send_text_humanized(reply)
+                    detail = "bridge_queue_humanized"
                     return success
                 detail = "bridge_queue_not_enabled"
                 logger.warning(
@@ -432,6 +433,68 @@ class WeChatAdapter(AbstractPlatformAdapter):
             result_file=result_file,
         )
         return bool((result or {}).get("success"))
+
+    def _send_text_humanized(self, reply: UnifiedReply) -> bool:
+        """使用公共拟人化模块分段发送文字消息。
+
+        将完整回复拆分为多段，逐段通过 bridge 队列发送，
+        段间模拟打字延迟，让对话更自然。
+        """
+        from edge_client.gateway.humanize_sender import (
+            humanize_send_sync,
+            HumanizeSendConfig,
+        )
+
+        def _send_one_segment(segment: str) -> bool:
+            """发送单段文字到 bridge 队列。"""
+            from edge_client.channels.wechat_command_queue import (
+                enqueue_wechat_command,
+                resolve_command_file_paths,
+                wait_wechat_command_result,
+            )
+            queue_file, result_file = resolve_command_file_paths()
+            now_ms = int(time.time() * 1000)
+            request_id = str(
+                reply.raw_extra.get("request_id")
+                or f"gateway-reply-{now_ms}-{uuid.uuid4().hex[:8]}"
+            )
+            target_candidates = self._build_search_candidates(reply.conversation_id)
+            row = enqueue_wechat_command(
+                action="send_text",
+                target=reply.conversation_id,
+                target_candidates=target_candidates,
+                content=segment,
+                request_id=request_id,
+                queue_file=queue_file,
+                ts_ms=now_ms,
+            )
+            result = wait_wechat_command_result(
+                command_id=str(row.get("command_id") or ""),
+                timeout_ms=self._resolve_command_timeout_ms(),
+                result_file=result_file,
+            )
+            return bool((result or {}).get("success"))
+
+        config = HumanizeSendConfig.from_env()
+        send_result = humanize_send_sync(
+            text=reply.content,
+            send_fn=_send_one_segment,
+            config=config,
+        )
+
+        if send_result.success:
+            logger.info(
+                "WeChatAdapter: humanized send OK segments=%d delay=%dms",
+                send_result.sent_segments, send_result.total_delay_ms,
+            )
+        else:
+            logger.warning(
+                "WeChatAdapter: humanized send failed at segment %d/%d: %s",
+                send_result.failed_segment_index + 1,
+                send_result.total_segments,
+                send_result.error[:100],
+            )
+        return send_result.success
 
     def _send_file_via_bridge_queue(self, reply: UnifiedReply) -> bool:  # Phase 1
         """Send a generic file via the bridge command queue.
