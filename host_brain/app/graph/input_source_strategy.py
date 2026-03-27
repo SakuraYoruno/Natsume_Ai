@@ -77,6 +77,7 @@ class CommitResult:
     reason_code: str = ""
     detail: str = ""
     reply_narrative: str = ""
+    tts_already_fired: bool = False  # SSE 生成器内部是否已执行 TTS（用于 ASR 兜底判断）
 
 
 async def _send_gateway_reply(
@@ -156,6 +157,7 @@ class AsrInputSourceStrategy(InputSourceStrategy):
     - 允许 TTS 语音播放（suppress_edge_tts=False）
     - 允许 VTS 表情口型驱动（suppress_edge_vts=False）
     - 禁止任何聊天软件回复行为
+    - post_chain 兜底：当 SSE 生成器内部未执行 TTS 时，补充 TTS 播报（安全网）
     """
 
     def build_policy(self, *, context: InputSourceRuntimeContext) -> InputSourcePolicy:
@@ -171,6 +173,73 @@ class AsrInputSourceStrategy(InputSourceStrategy):
             policy.suppress_edge_vts,
         )
         return policy
+
+    async def post_chain(
+        self,
+        *,
+        context: InputSourceRuntimeContext,
+        policy: InputSourcePolicy,
+        commit_result: CommitResult,
+    ) -> None:
+        """ASR 兜底 TTS 安全网。
+
+        当 SSE 生成器内部未执行 TTS（如复杂场景遗漏）时，
+        在 post_chain 中补充 TTS 播报，确保用户语音输入一定能听到回复。
+
+        检测逻辑：
+        - commit_result.tts_already_fired == True → 已播报，跳过
+        - policy.suppress_edge_tts == True → 抑制，跳过
+        - narrative 为空 → 无内容可播，跳过
+        - 环境变量 HOST_ASR_POST_CHAIN_TTS_FALLBACK=false → 手动禁用，跳过
+        """
+        narrative = (commit_result.reply_narrative or "").strip()
+        if not narrative:
+            return
+        if commit_result.tts_already_fired:
+            logger.debug(
+                "run_main_chain_from_input: asr post_chain TTS skip (already fired) request_id=%s",
+                context.request_id,
+            )
+            return
+        if policy.suppress_edge_tts:
+            return
+
+        # 环境变量控制：默认开启兜底 TTS
+        fallback_enabled = context.parse_bool_env("HOST_ASR_POST_CHAIN_TTS_FALLBACK", True)
+        if not fallback_enabled:
+            logger.debug(
+                "run_main_chain_from_input: asr post_chain TTS fallback disabled request_id=%s",
+                context.request_id,
+            )
+            return
+
+        tts_enabled = context.parse_bool_env("HOST_STREAM_TTS_ENABLED", True)
+        if not tts_enabled:
+            return
+
+        logger.info(
+            "run_main_chain_from_input: asr post_chain TTS fallback firing request_id=%s narrative_len=%d",
+            context.request_id,
+            len(narrative),
+        )
+        try:
+            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+
+            await post_speak(
+                text=narrative,
+                request_id=context.request_id,
+                emotion_tag="NEUTRAL",
+            )
+            logger.info(
+                "run_main_chain_from_input: asr post_chain TTS fallback OK request_id=%s",
+                context.request_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "run_main_chain_from_input: asr post_chain TTS fallback failed request_id=%s error=%s",
+                context.request_id,
+                exc,
+            )
 
 
 class GatewayInputSourceStrategy(InputSourceStrategy):

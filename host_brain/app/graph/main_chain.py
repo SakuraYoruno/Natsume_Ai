@@ -3287,6 +3287,14 @@ async def run_main_chain_from_input(
             candidate_narrative = str(event_payload.get("narrative") or "").strip()
             if candidate_narrative:
                 commit_result.reply_narrative = candidate_narrative
+            # 提取 TTS 执行状态（供 ASR post_chain 兜底判断）
+            _audit_refs = event_payload.get("audit_refs")
+            if isinstance(_audit_refs, dict):
+                _tts_info = _audit_refs.get("tts")
+                if isinstance(_tts_info, dict):
+                    _tts_status = str(_tts_info.get("status") or "").strip().upper()
+                    if _tts_status not in {"", "SKIPPED", "NOT_ATTEMPTED"}:
+                        commit_result.tts_already_fired = True
     except Exception as exc:
         logger.error(
             "run_main_chain_from_input: 处理异常 request_id=%s: %s",

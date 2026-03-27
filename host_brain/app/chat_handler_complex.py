@@ -758,12 +758,62 @@ async def _complex_scene_sse_generator(
                 _logger.debug("complex scene VTS drive skipped", extra={"request_id": request_id, "error": str(exc)})
         vts_latency_ms = max(0, int(time.time() * 1000) - _vts_started_ms)
 
+        # ── FIX: 复杂场景补充 TTS 语音播报（ASR 链路关键修复）──────────────
+        # 原实现中 _complex_scene_sse_generator 完全缺失 TTS 调用。
+        # 当 ASR 语音输入被 pre_intent_classifier 分类为非 CHAT 场景时
+        # （如 WORK_CODE/EXEC_INTENT），narrative 生成后没有 TTS 播报，
+        # 导致用户通过语音输入却听不到语音回复。
+        # 现在仿照 _sse_event_generator 中的 _run_tts() 逻辑补上。
+        _tts_started_ms = int(time.time() * 1000)
+        tts_summary: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+        suppress_edge_tts = _coerce_request_bool(
+            getattr(request_body, "suppress_edge_tts", None),
+            default=False,
+        )
+        if suppress_edge_tts:
+            tts_summary = {"status": "SKIPPED", "reason_code": "SUPPRESSED_BY_INPUT_POLICY"}
+        else:
+            _tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
+            if _tts_enabled not in {"1", "true", "yes", "on"}:
+                tts_summary = {"status": "SKIPPED", "reason_code": "HOST_STREAM_TTS_DISABLED"}
+            elif not narrative or not narrative.strip():
+                tts_summary = {"status": "SKIPPED", "reason_code": "NARRATIVE_EMPTY"}
+            else:
+                try:
+                    from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
+                    from host_brain.app.chat_stream_handler import _infer_emotion_tag_for_tts  # noqa: PLC0415
+                    _base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+                    _etag = _infer_emotion_tag_for_tts(narrative, _base_etag)
+                    _intensity_raw = emotion_context.get("emotion_intensity")
+                    _intensity = None
+                    if _intensity_raw is not None:
+                        try:
+                            _intensity = max(0.0, min(1.0, float(_intensity_raw)))
+                        except (TypeError, ValueError):
+                            pass
+                    _tts_result = await _post_speak(
+                        text=narrative,
+                        request_id=request_id,
+                        emotion_tag=_etag,
+                        emotion_intensity=_intensity,
+                    )
+                    tts_summary = _tts_result.as_dict()
+                except Exception as exc:
+                    tts_summary = {"status": "DEGRADED", "reason_code": "TTS_CALL_FAILED", "detail": str(exc)}
+                    _logger.debug(
+                        "complex scene TTS drive failed (degraded): %s",
+                        exc,
+                        extra={"request_id": request_id},
+                    )
+        tts_latency_ms = max(0, int(time.time() * 1000) - _tts_started_ms)
+
         background_tasks_latency_ms = {
             "observability_persist_ms": obs_persist_latency_ms,
             "bond_update_ms": bond_latency_ms,
             "episodic_memory_ms": episodic_latency_ms,
             "vts_emotion_ms": vts_latency_ms,
-            "total_ms": obs_persist_latency_ms + bond_latency_ms + episodic_latency_ms + vts_latency_ms,
+            "tts_speak_ms": tts_latency_ms,
+            "total_ms": obs_persist_latency_ms + bond_latency_ms + episodic_latency_ms + vts_latency_ms + tts_latency_ms,
         }
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
@@ -794,6 +844,7 @@ async def _complex_scene_sse_generator(
                 "emotion_context": dict(emotion_context),
                 "emotion_snapshot": dict(emotion_snapshot),
                 "vts": vts_summary,
+                "tts": tts_summary,
                 "episodic_memory": dict(episodic_summary),
                 "trace_metrics": trace_metrics,
             },
