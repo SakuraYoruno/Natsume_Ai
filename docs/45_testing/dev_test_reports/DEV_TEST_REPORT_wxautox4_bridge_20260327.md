@@ -9,7 +9,7 @@
 | **开发节点** | v_wenloliu workstation |
 | **报告日期** | 2026-03-27 |
 | **报告版本** | v1 |
-| **关联 Commit** | （push 后填写） |
+| **关联 Commit** | fae0c34 |
 | **关联分支** | codex |
 | **状态** | 🔵 OPEN（待真机验证） |
 
