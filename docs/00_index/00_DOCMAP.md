@@ -234,6 +234,9 @@
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_mode_transition_20260327.md
   用途：智能模式切换系统开发实测报告（2026-03-27）。ModeTransitionService（手动+自动统一切换）、ActivityMonitor（Host 端游戏进程检测/空闲检测）、REST API 5 个端点、WebUI RuntimeMode 面板。修复 ALLOWED_SYS_MODES 缺少 sleep Bug。4 个新增文件 + 6 个修改文件，含 13 条真机测试用例（P0×5 / P1×5 / P2×3）。
   读者：MASTER、运行节点（按用例验证）。
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_p0_p1_fixes_20260327.md
+  用途：P0/P1 修复实测报告（2026-03-27）。P0-1: dependencies.py 新增 get_hard_state()/set_sys_mode()（ModeTransitionService 不再降级）；P0-2: ActivityMonitor 集成到 http_hooks.py 启动/关闭流程；P1-4: .env.example 补齐 90+ 缺失环境变量（LLM/Edge RPC/情绪系统/Bond/语义召回等）。7 条真机验证用例。
+  读者：MASTER、运行节点（按用例验证）。
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_recall_fusion_bugfix_20260327.md
   用途：灵魂层召回逻辑 4 项 Bug 修复报告（2026-03-27）。修复：①_render_target_lang_selector_match 空值返回 False 导致多语言路由失效（高优）；②fusion key 跨路由碰撞；③emotion_filter 分组内排序丢失；④memory_ops_log 搜索文本质量差。含 5 条待真机验证测试用例（T-RF-FIX-01~05）。
   读者：MASTER、运行节点（按用例验证）。
