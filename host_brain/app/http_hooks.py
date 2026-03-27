@@ -767,6 +767,7 @@ async def runtime_lifespan(
         try:
             from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
             from host_brain.app.dependencies import get_hard_state, set_sys_mode  # noqa: PLC0415
+            from host_brain.app.dependencies import set_activity_monitor  # noqa: PLC0415
 
             # 初始化 ModeTransitionService（obs_routes 也会延迟初始化，此处确保提前可用）
             from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
@@ -776,17 +777,29 @@ async def runtime_lifespan(
                 ledger=ledger,
             )
 
-            _activity_monitor = ActivityMonitor(mode_service=_mode_service)
+            _activity_monitor = ActivityMonitor(mode_transition_service=_mode_service)
             _activity_monitor.start()
+            set_activity_monitor(_activity_monitor)  # 注册到 dependencies 供消息链路调用
+
+            # 将 ModeTransitionService 实例注入到 obs_routes 模块，
+            # 确保 /obs/sys-mode API 端点和 ActivityMonitor 共享同一实例
+            # （避免历史记录/规则开关各自独立的问题）
+            try:
+                import host_brain.app.obs_routes as _obs_mod  # noqa: PLC0415
+                with _obs_mod._mode_transition_lock:
+                    _obs_mod._mode_transition_service = _mode_service
+                logger.info("ModeTransitionService 已注入 obs_routes（单例共享）")
+            except Exception as _inject_exc:
+                logger.warning("ModeTransitionService 注入 obs_routes 失败（降级）: %s", _inject_exc)
 
             new_module_statuses["activity_monitor"] = (
-                f"OK (gaming_check={_activity_monitor._gaming_check_interval_s}s, "
-                f"idle_check={_activity_monitor._idle_check_interval_s}s)"
+                f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
+                f"idle_check={_activity_monitor._idle_interval}s)"
             )
             logger.info(
                 "ActivityMonitor 已启动 (gaming_interval=%ds, idle_interval=%ds)",
-                _activity_monitor._gaming_check_interval_s,
-                _activity_monitor._idle_check_interval_s,
+                _activity_monitor._gaming_interval,
+                _activity_monitor._idle_interval,
             )
         except Exception as _am_exc:
             new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"

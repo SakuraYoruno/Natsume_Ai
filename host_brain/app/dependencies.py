@@ -100,6 +100,30 @@ _emotion_timeline: Optional[Any] = None
 _hard_state_lock = __import__("threading").Lock()
 _hard_state: Optional[Any] = None  # 实际类型: HardState
 
+# ── 进程级 ActivityMonitor 引用（用于消息链路通知 user_interaction） ──
+_activity_monitor_ref: Optional[Any] = None
+
+
+def set_activity_monitor(monitor) -> None:
+    """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
+    global _activity_monitor_ref
+    _activity_monitor_ref = monitor
+
+
+def notify_user_interaction() -> None:
+    """通知 ActivityMonitor 有用户互动（消息输入、语音输入等）。
+
+    由 input_routes / fastapi_app 在收到用户消息时调用，
+    触发 sleep→normal 唤醒 和 空闲计时器重置。
+    安全降级：如果 ActivityMonitor 未初始化则静默跳过。
+    """
+    monitor = _activity_monitor_ref
+    if monitor is not None:
+        try:
+            monitor.notify_user_interaction()
+        except Exception:
+            pass  # 降级：通知失败不影响消息处理
+
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()

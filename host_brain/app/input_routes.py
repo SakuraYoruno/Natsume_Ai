@@ -149,6 +149,13 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
     try:
+        # 通知 ActivityMonitor 有用户互动（触发 sleep→normal 唤醒 + 空闲计时器重置）
+        from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415
+        notify_user_interaction()
+    except Exception:
+        pass  # 降级：通知失败不影响消息处理
+
+    try:
         await _dispatch_to_graph(
             request_id=request_id,
             session_id=session_id,

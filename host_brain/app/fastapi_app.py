@@ -259,6 +259,12 @@ app.include_router(health_router)
 @app.post("/v1/chat")
 async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse:
     """POST /v1/chat — 统一入口，根据场景自动路由到本地单节点或云端多节点，统一返回 SSE 流式响应。"""
+    # 通知 ActivityMonitor 有用户互动（触发 sleep→normal 唤醒 + 空闲计时器重置）
+    try:
+        from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415
+        notify_user_interaction()
+    except Exception:
+        pass
     return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
 
 
