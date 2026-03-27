@@ -142,7 +142,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 logger.warning(
-                    "WeChatAdapter: bridge queue not enabled — set EDGE_WECHAT_BRIDGE_ENABLED=true and EDGE_WECHAT_BRIDGE_BACKEND=uia"
+                    "WeChatAdapter: bridge queue not enabled — set EDGE_WECHAT_BRIDGE_ENABLED=true and EDGE_WECHAT_BRIDGE_BACKEND=uia|wxautox4"
                 )
                 return False
             if reply.msg_type == MsgType.IMAGE:
@@ -218,7 +218,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
     def _bridge_queue_enabled() -> bool:
         enabled = str(os.environ.get("EDGE_WECHAT_BRIDGE_ENABLED") or "true").strip().lower()
         backend = WeChatAdapter._bridge_backend()
-        return enabled not in {"0", "false", "no", "off"} and backend == "uia"
+        return enabled not in {"0", "false", "no", "off"} and backend in {"uia", "wxautox4"}
 
     @staticmethod
     def _resolve_command_timeout_ms() -> int:
