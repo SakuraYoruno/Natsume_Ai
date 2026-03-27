@@ -24,6 +24,21 @@ Phase 1 additions (2026-03-27):
   - media download on inbound messages (image/video/voice)
   - RemoveListenChat / StopListening management actions
   - ChatWith navigation action
+
+Phase 2 additions (2026-03-27):
+  - GetSubWindow / GetAllSubWindow window management
+  - ChatInfo / GetDialog session & popup detection
+  - SendUrlCard link card sending
+  - GetAllMessage / GetNewFriends / GetFriendDetails
+  - LinkMessage.get_url() inbound link URL extraction
+
+Phase 3 additions (2026-03-27):
+  - PublishMoment / GetMoments / Like / Comment — moments (朋友圈)
+  - AddGroupMembers — group management
+  - Shared message-object cache (InboundProcessor → OutboundProcessor, TTL 5min)
+  - capture_emotion (EmotionMessage.capture)
+  - download_quote_image (QuoteMessage.download_quote_image)
+  - delete_message (HumanMessage.delete)
 """
 
 from __future__ import annotations
@@ -54,6 +69,7 @@ DEFAULT_INBOUND_POLL_INTERVAL_S = 1.0
 DEFAULT_DEDUP_WINDOW_S = 12.0
 DEFAULT_HEALTH_CHECK_INTERVAL_S = 30.0   # Phase 1: IsOnline keepalive interval
 DEFAULT_MEDIA_DOWNLOAD_DIR = ""          # Phase 1: empty = no auto-download
+PHASE3_MSG_CACHE_TTL_S = 300.0          # Phase 3: message object cache TTL (5 min)
 
 # Media type codes matching the UIA bridge convention
 MEDIA_TYPE_CODE_MAP: dict[str, int] = {
@@ -254,6 +270,7 @@ class InboundProcessor:
         callback_timeout_s: float = DEFAULT_CALLBACK_TIMEOUT_S,
         listen_targets: list[str] | None = None,
         media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
+        msg_cache: dict[str, Any] | None = None,              # Phase 3: shared msg object cache
     ) -> None:
         self._wx = wx
         self._edge_url = edge_url
@@ -262,6 +279,8 @@ class InboundProcessor:
         self._callback_timeout_s = callback_timeout_s
         self._listen_targets = list(listen_targets or [])
         self._media_download_dir = _normalize_optional_path(media_download_dir)
+        self._msg_cache: dict[str, Any] = msg_cache if msg_cache is not None else {}
+        self._msg_cache_ts: dict[str, float] = {}   # Phase 3: msg_id -> insert monotonic time
         self._shutdown = threading.Event()
         self._recent_signatures: dict[str, float] = {}  # signature -> mono timestamp
         self._stats = {"forwarded": 0, "deduped": 0, "errors": 0}
@@ -319,6 +338,9 @@ class InboundProcessor:
             for msg in msgs:
                 chat_name = str(getattr(msg, "roomid", None) or getattr(msg, "sender", "") or "")
                 self._forward_one_message(msg, chat_name=chat_name, ts_ms=ts_ms)
+
+        # Phase 3: periodic cache eviction (runs every poll cycle)
+        self._evict_expired_msg_cache()
 
     def _try_download_media(self, msg: Any) -> str:
         """Phase 1: Attempt to download media file from message object.
@@ -422,8 +444,24 @@ class InboundProcessor:
         if _post_to_edge_callback(self._edge_url, body, timeout_s=self._callback_timeout_s):
             self._stats["forwarded"] += 1
             logger.info("forwarded inbound: sender=%s content=%.80s", sender, content)
+            # Phase 3: cache the raw message object for advanced ops (delete/capture/etc.)
+            self._msg_cache[msg_id] = msg
+            self._msg_cache_ts[msg_id] = time.monotonic()
         else:
             self._stats["errors"] += 1
+
+    def _evict_expired_msg_cache(self) -> None:
+        """Phase 3: Remove message objects older than PHASE3_MSG_CACHE_TTL_S."""
+        now = time.monotonic()
+        expired = [
+            k for k, ts in self._msg_cache_ts.items()
+            if (now - ts) > PHASE3_MSG_CACHE_TTL_S
+        ]
+        for k in expired:
+            self._msg_cache.pop(k, None)
+            self._msg_cache_ts.pop(k, None)
+        if expired:
+            logger.debug("msg_cache: evicted %d expired entries", len(expired))
 
     def _is_recent_duplicate(self, signature: str) -> bool:
         now_mono = time.monotonic()
@@ -486,6 +524,17 @@ class OutboundProcessor:
         # Phase 2 — contacts
         "get_new_friends",       # P2
         "get_friend_details",    # P2
+        # Phase 3 — moments (朋友圈)
+        "publish_moment",        # P3
+        "get_moments",           # P3
+        "like_moment",           # P3
+        "comment_moment",        # P3
+        # Phase 3 — group management
+        "add_group_members",     # P3
+        # Phase 3 — advanced message ops
+        "delete_message",        # P3  (HumanMessage.delete — requires msg cache)
+        "capture_emotion",       # P3  (EmotionMessage.capture)
+        "download_quote_image",  # P3  (QuoteMessage.download_quote_image)
     }
 
     def __init__(
@@ -496,12 +545,14 @@ class OutboundProcessor:
         command_result_file: str,
         poll_interval_s: float = DEFAULT_COMMAND_POLL_INTERVAL_S,
         media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
+        msg_cache: dict[str, Any] | None = None,              # Phase 3: shared msg object cache
     ) -> None:
         self._wx = wx
         self._queue_file = command_queue_file
         self._result_file = command_result_file
         self._poll_interval_s = max(0.1, poll_interval_s)
         self._media_download_dir = _normalize_optional_path(media_download_dir)
+        self._msg_cache: dict[str, Any] = msg_cache if msg_cache is not None else {}
         self._shutdown = threading.Event()
         self._read_offset: int = 0
         self._processed_ids: set[str] = set()
@@ -828,6 +879,165 @@ class OutboundProcessor:
                 self._stats["executed"] += 1
                 logger.info("command %s: get_friend_details '%s' OK", command_id, chat_target)
 
+            # ── Phase 3: Moments (朋友圈) ────────────────────────────────────
+
+            elif action == "publish_moment":
+                # content = moment text; command["images"] = list of file paths (optional)
+                moment_text = content
+                images = list(command.get("images") or [])
+                # Filter to existing files
+                valid_images = [p for p in images if p and os.path.isfile(str(p))]
+                if images and not valid_images:
+                    result["reason_code"] = "WECHAT_MEDIA_FILE_NOT_FOUND"
+                    result["detail"] = f"None of the provided image paths exist: {images}"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                if valid_images:
+                    self._wx.PublishMoment(moment_text, images=valid_images)
+                else:
+                    self._wx.PublishMoment(moment_text)
+                result["success"] = True
+                result["status"] = "ok"
+                self._stats["executed"] += 1
+                logger.info("command %s: publish_moment OK text=%.60s images=%d", command_id, moment_text, len(valid_images))
+
+            elif action == "get_moments":
+                # target = whose moments to fetch (empty = self timeline)
+                who = chat_target or ""
+                if who:
+                    moments = self._wx.GetMoments(who)
+                else:
+                    moments = self._wx.GetMoments()
+                result["success"] = True
+                result["status"] = "ok"
+                result["data"] = _safe_serialize(moments)
+                result["count"] = len(moments) if isinstance(moments, (list, tuple)) else None
+                self._stats["executed"] += 1
+                logger.info("command %s: get_moments who='%s' OK count=%s", command_id, who, result["count"])
+
+            elif action == "like_moment":
+                moment_id = str(command.get("moment_id") or content or "").strip()
+                if not moment_id:
+                    result["reason_code"] = "WECHAT_MISSING_PARAMS"
+                    result["detail"] = "like_moment requires 'moment_id'"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.Like(moment_id)
+                result["success"] = True
+                result["status"] = "ok"
+                result["moment_id"] = moment_id
+                self._stats["executed"] += 1
+                logger.info("command %s: like_moment moment_id=%s OK", command_id, moment_id)
+
+            elif action == "comment_moment":
+                moment_id = str(command.get("moment_id") or "").strip()
+                comment_text = str(command.get("comment_text") or content or "").strip()
+                if not moment_id:
+                    result["reason_code"] = "WECHAT_MISSING_PARAMS"
+                    result["detail"] = "comment_moment requires 'moment_id'"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                if not comment_text:
+                    result["reason_code"] = "WECHAT_MISSING_PARAMS"
+                    result["detail"] = "comment_moment requires 'comment_text' or 'content'"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.Comment(moment_id, comment_text)
+                result["success"] = True
+                result["status"] = "ok"
+                result["moment_id"] = moment_id
+                self._stats["executed"] += 1
+                logger.info("command %s: comment_moment moment_id=%s OK", command_id, moment_id)
+
+            # ── Phase 3: Group management ────────────────────────────────────
+
+            elif action == "add_group_members":
+                # target = group name/wxid; command["members"] = list of wxids/names
+                if not chat_target:
+                    result["reason_code"] = "WECHAT_NO_TARGET"
+                    result["detail"] = "add_group_members requires target (group name)"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                members = list(command.get("members") or [])
+                if not members:
+                    result["reason_code"] = "WECHAT_MISSING_PARAMS"
+                    result["detail"] = "add_group_members requires 'members' list"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                self._wx.AddGroupMembers(chat_target, members)
+                result["success"] = True
+                result["status"] = "ok"
+                result["resolved_target"] = chat_target
+                result["members_added"] = len(members)
+                self._stats["executed"] += 1
+                logger.info("command %s: add_group_members group='%s' count=%d OK", command_id, chat_target, len(members))
+
+            # ── Phase 3: Advanced message operations ─────────────────────────
+            # NOTE: capture_emotion and download_quote_image operate on cached
+            # message objects. The bridge maintains a _msg_cache keyed by
+            # msg_id. Callers must provide the msg_id of a recently received
+            # message. Cache TTL = PHASE3_MSG_CACHE_TTL_S seconds.
+
+            elif action == "capture_emotion":
+                msg_id_ref = str(command.get("msg_id_ref") or "").strip()
+                cached_msg = self._msg_cache.get(msg_id_ref)
+                if not cached_msg:
+                    result["reason_code"] = "WECHAT_MSG_NOT_IN_CACHE"
+                    result["detail"] = f"msg_id_ref '{msg_id_ref}' not found in message cache (may have expired)"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                save_dir = Path(self._media_download_dir or "runtime/edge/media")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                save_path = str(save_dir / f"emotion_{int(time.time()*1000)}.png")
+                local_path = cached_msg.capture(savepath=save_path)
+                result["success"] = True
+                result["status"] = "ok"
+                result["local_path"] = str(local_path or save_path)
+                self._stats["executed"] += 1
+                logger.info("command %s: capture_emotion OK path=%s", command_id, result["local_path"])
+
+            elif action == "download_quote_image":
+                msg_id_ref = str(command.get("msg_id_ref") or "").strip()
+                cached_msg = self._msg_cache.get(msg_id_ref)
+                if not cached_msg:
+                    result["reason_code"] = "WECHAT_MSG_NOT_IN_CACHE"
+                    result["detail"] = f"msg_id_ref '{msg_id_ref}' not found in message cache"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                save_dir = Path(self._media_download_dir or "runtime/edge/media")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                local_path = cached_msg.download_quote_image(savepath=str(save_dir))
+                result["success"] = True
+                result["status"] = "ok"
+                result["local_path"] = str(local_path or "")
+                self._stats["executed"] += 1
+                logger.info("command %s: download_quote_image OK path=%s", command_id, result["local_path"])
+
+            elif action == "delete_message":
+                msg_id_ref = str(command.get("msg_id_ref") or "").strip()
+                cached_msg = self._msg_cache.get(msg_id_ref)
+                if not cached_msg:
+                    result["reason_code"] = "WECHAT_MSG_NOT_IN_CACHE"
+                    result["detail"] = f"msg_id_ref '{msg_id_ref}' not found in message cache"
+                    self._stats["failed"] += 1
+                    _append_jsonl_row(self._result_file, result)
+                    return
+                cached_msg.delete()
+                # Remove from cache after deletion
+                self._msg_cache.pop(msg_id_ref, None)
+                result["success"] = True
+                result["status"] = "ok"
+                self._stats["executed"] += 1
+                logger.info("command %s: delete_message msg_id_ref=%s OK", command_id, msg_id_ref)
+
             else:
                 result["reason_code"] = "WECHAT_UNKNOWN_ACTION"
                 result["detail"] = f"unknown action: {action}"
@@ -931,6 +1141,9 @@ class WxAutoX4Bridge:
         health_thread.start()
 
         # ── Step 4: start inbound processor ──
+        # Phase 3: create a shared message-object cache between inbound & outbound
+        shared_msg_cache: dict[str, Any] = {}
+
         inbound = InboundProcessor(
             wx,
             edge_url=self._edge_url,
@@ -939,6 +1152,7 @@ class WxAutoX4Bridge:
             callback_timeout_s=self._callback_timeout_s,
             listen_targets=self._listen_targets,
             media_download_dir=self._media_download_dir,
+            msg_cache=shared_msg_cache,
         )
         inbound.setup_listeners()
 
@@ -956,6 +1170,7 @@ class WxAutoX4Bridge:
             command_result_file=self._result_file,
             poll_interval_s=self._command_poll_interval_s,
             media_download_dir=self._media_download_dir,
+            msg_cache=shared_msg_cache,
         )
 
         outbound_thread = threading.Thread(

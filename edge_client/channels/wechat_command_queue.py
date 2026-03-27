@@ -43,6 +43,17 @@ ALLOWED_WECHAT_COMMAND_ACTIONS = {
     # ── Phase 2: Contacts ─────────────────────────────────────────────────
     "get_new_friends",       # wx.GetNewFriends()
     "get_friend_details",    # wx.GetFriendDetails(who)
+    # ── Phase 3: Moments (朋友圈) ─────────────────────────────────────────
+    "publish_moment",        # wx.PublishMoment(text, images?)
+    "get_moments",           # wx.GetMoments(who?)
+    "like_moment",           # wx.Like(moment_id)
+    "comment_moment",        # wx.Comment(moment_id, text)
+    # ── Phase 3: Group management ─────────────────────────────────────────
+    "add_group_members",     # wx.AddGroupMembers(group, members)
+    # ── Phase 3: Advanced message ops (require msg_id_ref in cache) ───────
+    "capture_emotion",       # EmotionMessage.capture(savepath)
+    "download_quote_image",  # QuoteMessage.download_quote_image(savepath)
+    "delete_message",        # HumanMessage.delete()
 }
 
 # --- Incremental read state for result file ---
