@@ -206,6 +206,13 @@ if (-not $EnvFile) {
 }
 
 $envValues = Read-EnvFile -Path $EnvFile
+$cleanNapCatLauncher = Join-Path $RepoRoot 'scripts\runtime\launch_napcat_clean.ps1'
+$envValues['QQ_ONEBOT_API_BASE'] = 'http://127.0.0.1:3000'
+$envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'true'
+$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
+$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
+$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'true'
 if ($Port -le 0) {
   $portRaw = [string]$envValues['EDGE_RPC_PORT']
   if ($portRaw) {

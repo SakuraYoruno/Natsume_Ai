@@ -38,6 +38,25 @@ if (-not (Test-Path -Path $startEdgeScript)) {
   throw "start_edge.ps1 not found: $startEdgeScript"
 }
 
+function Set-ProcessEnvValue {
+  param(
+    [string]$Key,
+    [string]$Value
+  )
+  if ([string]::IsNullOrWhiteSpace($Key) -or [string]::IsNullOrWhiteSpace($Value)) {
+    return
+  }
+  [Environment]::SetEnvironmentVariable($Key, $Value, "Process")
+}
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$napCatCleanLauncher = Join-Path $repoRoot "scripts\runtime\launch_napcat_clean.ps1"
+
+Set-ProcessEnvValue -Key "QQ_ONEBOT_API_BASE" -Value "http://127.0.0.1:3000"
+Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_AUTOSTART" -Value "true"
+Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_LAUNCHER_PATH" -Value $napCatCleanLauncher
+Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_LAUNCHER_ARGS" -Value "{QQ_SELF_ID}"
+Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_HEALTH_URL" -Value "http://127.0.0.1:3000/get_status"
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_INBOUND_BACKEND" -Value $WeChatInboundBackend
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MODEL" -Value $WeChatVisionModel
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_API_URL" -Value $WeChatVisionApiUrl
