@@ -101,6 +101,10 @@
   用途：Agentic RAG 智能检索升级架构文档（2026-03-29，Phase X）。将检索系统从单次全量七路并行召回升级为意图驱动的自适应多轮检索。包含 QueryPlanner（意图分类+Store路由+Query改写）、EvidenceEvaluator（三维证据评估）、AgenticRetrievalLoop（Plan→Retrieve→Evaluate→Re-Retrieve 循环）、Graph 集成方案。性能：简单寒暄跳过检索省 3s，日均响应快 50%。7 种意图分类、Store 路由表、Query 改写三层规则、降级保护策略。
   读者：MASTER、实现层（查阅对齐）。
 
+- docs/50_project/arch/PHASE_X_INTELLIGENT_ORCHESTRATION.md
+  用途：Phase X 智能编排层升级六大方案技术文档（2026-03-29）。在 Agentic RAG 基础上的六大方案：(1)智能记忆写入MemoryWorthEvaluator——评估对话价值减少30-50%无效写入；(2)自适应Prompt预算——按意图动态调整7槽位token分配；(3)语义去重SemanticDedup——Jaccard n-gram去除近似重复召回；(4)关系感知风格BondAwareStyleEngine——6级Bond阶段完整风格profile含禁用词/撒娇/吐槽控制；(5)主动记忆整合ConsolidationTrigger——量级触发+话题触发动态蒸馏；(6)TTS路由TtsContextRouter——7种情感风格动态调整语速/音调/能量+Bond亲密度微调+中日语言检测。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
