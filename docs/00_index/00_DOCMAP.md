@@ -97,6 +97,10 @@
   用途：智能模式切换系统技术文档（2026-03-27）。定义 ModeTransitionService（手动+自动统一切换）、ActivityMonitor（Host 端前台进程检测/空闲检测/早间唤醒）、REST API（GET/POST /obs/sys-mode 等 5 个端点）、WebUI RuntimeMode 面板。含模式定义矩阵（6 种模式）、合法切换路径、5 条自动触发规则、30+ 游戏进程内置列表、审计追踪。修复 ALLOWED_SYS_MODES 缺少 sleep 的 Bug。
   读者：MASTER、实现层（查阅对齐）。
 
+- docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md
+  用途：Agentic RAG 智能检索升级架构文档（2026-03-29，Phase X）。将检索系统从单次全量七路并行召回升级为意图驱动的自适应多轮检索。包含 QueryPlanner（意图分类+Store路由+Query改写）、EvidenceEvaluator（三维证据评估）、AgenticRetrievalLoop（Plan→Retrieve→Evaluate→Re-Retrieve 循环）、Graph 集成方案。性能：简单寒暄跳过检索省 3s，日均响应快 50%。7 种意图分类、Store 路由表、Query 改写三层规则、降级保护策略。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
