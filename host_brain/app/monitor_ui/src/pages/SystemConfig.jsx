@@ -57,6 +57,7 @@ export default function SystemConfig() {
   const routeStats = routeData?.model_routes || []
   const callStats = callData?.models || []
   const rateKeys = rateData?.top_keys || []
+  const hasLlmSamples = (routeData?.total_decisions ?? 0) > 0 || (callData?.total_calls ?? 0) > 0
 
   // 延迟时序（如果有）
   const latencyPoints = tsData?.points || []
@@ -81,6 +82,11 @@ export default function SystemConfig() {
       </div>
 
       {/* 概览统计 */}
+      {!loading && !hasLlmSamples && (
+        <div className="card p-4 text-sm text-gray-500">
+          服务在线，但最近窗口还没有 LLM 路由和调用样本，所以这页大部分图表会是空白初始态。
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="RateLimit 后端" value={rateData?.backend_type || '—'} icon={Shield}
           color={rateData?.is_degraded ? 'text-orange-500' : 'text-green-600'}

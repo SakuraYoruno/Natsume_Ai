@@ -644,6 +644,122 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- instruction:\n{style_instruction}\n\n"
         )
 
+    bond_aware_style_block = ""
+    predictive_state_block = ""
+    planning_block = ""
+    planning_execution_block = ""
+    skill_dag_block = ""
+    skill_execution_block = ""
+    multimodal_input_block = ""
+    try:
+        bond_aware_raw = runtime_payload.get("bond_aware_style")
+        bond_aware = dict(bond_aware_raw) if isinstance(bond_aware_raw, Mapping) else {}
+        if bond_aware:
+            bond_aware_style_block = (
+                "BOND_AWARE_STYLE:\n"
+                f"- bond_stage: {_truncate_for_prompt(bond_aware.get('bond_stage'), limit=32) or 'STRANGER'}\n"
+                f"- intimacy_level: {float(bond_aware.get('intimacy_level') or 0.0):.2f}\n"
+                f"- prompt: {_truncate_for_prompt(bond_aware.get('prompt_injection'), limit=600) or 'NONE'}\n"
+                f"- forbidden_patterns: {', '.join(list(bond_aware.get('forbidden_patterns') or [])[:5]) or 'NONE'}\n\n"
+            )
+    except Exception:
+        pass
+    try:
+        predictive_raw = runtime_payload.get("predictive_state")
+        predictive = dict(predictive_raw) if isinstance(predictive_raw, Mapping) else {}
+        if predictive:
+            predictive_state_block = (
+                "PREDICTIVE_STATE_HINT:\n"
+                f"- period: {_truncate_for_prompt(predictive.get('period_label'), limit=48) or 'UNKNOWN'}\n"
+                f"- dominant_emotion: {_truncate_for_prompt(predictive.get('dominant_emotion'), limit=32) or 'NONE'}\n"
+                f"- confidence: {float(predictive.get('confidence') or 0.0):.2f}\n"
+                f"- proactive_hint: {_truncate_for_prompt(predictive.get('proactive_hint'), limit=220) or 'NONE'}\n\n"
+            )
+    except Exception:
+        pass
+    try:
+        planning_raw = runtime_payload.get("planning_outline")
+        planning = dict(planning_raw) if isinstance(planning_raw, Mapping) else {}
+        if planning:
+            planning_lines = [
+                _truncate_for_prompt(step, limit=160)
+                for step in list(planning.get("step_descriptions") or [])[:5]
+                if str(step or "").strip()
+            ]
+            if planning_lines:
+                planning_block = (
+                    "PLANNING_OUTLINE:\n"
+                    f"- total_steps: {int(planning.get('total_steps') or len(planning_lines))}\n"
+                    + "\n".join(f"- step_{idx + 1}: {line}" for idx, line in enumerate(planning_lines))
+                    + "\n\n"
+                )
+    except Exception:
+        pass
+    try:
+        planning_execution_raw = runtime_payload.get("planning_execution")
+        planning_execution = dict(planning_execution_raw) if isinstance(planning_execution_raw, Mapping) else {}
+        if planning_execution:
+            execution_lines = [
+                _truncate_for_prompt(
+                    f"{item.get('description')} => {item.get('status')}",
+                    limit=180,
+                )
+                for item in list(planning_execution.get("step_results") or [])[:4]
+                if isinstance(item, Mapping)
+            ]
+            planning_execution_block = (
+                "PLANNING_EXECUTION:\n"
+                f"- success: {bool(planning_execution.get('success'))}\n"
+                f"- executed_skills: {', '.join(list(planning_execution.get('executed_skills') or [])[:6]) or 'NONE'}\n"
+                + ("\n".join(f"- step_{idx + 1}: {line}" for idx, line in enumerate(execution_lines)) + "\n\n" if execution_lines else "\n")
+            )
+    except Exception:
+        pass
+    try:
+        skill_dag_raw = runtime_payload.get("skill_dag")
+        skill_dag = dict(skill_dag_raw) if isinstance(skill_dag_raw, Mapping) else {}
+        if skill_dag:
+            execution_layers = list(skill_dag.get("execution_order") or [])
+            skill_dag_block = (
+                "SKILL_COMPOSITION_HINT:\n"
+                f"- total_nodes: {int(skill_dag.get('total_nodes') or 0)}\n"
+                f"- execution_layers: {len(execution_layers)}\n"
+                f"- node_ids: {', '.join(list(skill_dag.get('node_ids') or [])[:8]) or 'NONE'}\n\n"
+            )
+    except Exception:
+        pass
+    try:
+        skill_execution_raw = runtime_payload.get("skill_execution")
+        skill_execution = dict(skill_execution_raw) if isinstance(skill_execution_raw, Mapping) else {}
+        if skill_execution:
+            output_preview = dict(skill_execution.get("output_preview") or {})
+            preview_lines = [
+                f"- {key}: {_truncate_for_prompt(value, limit=180)}"
+                for key, value in list(output_preview.items())[:4]
+            ]
+            skill_execution_block = (
+                "SKILL_EXECUTION_RESULTS:\n"
+                f"- success: {bool(skill_execution.get('success'))}\n"
+                f"- completed_nodes: {int(skill_execution.get('completed_nodes') or 0)}/{int(skill_execution.get('total_nodes') or 0)}\n"
+                + ("\n".join(preview_lines) + "\n\n" if preview_lines else "\n")
+            )
+    except Exception:
+        pass
+    try:
+        multimodal_raw = runtime_payload.get("multimodal_input")
+        multimodal = dict(multimodal_raw) if isinstance(multimodal_raw, Mapping) else {}
+        if multimodal:
+            modality_list = ", ".join(list(multimodal.get("modalities") or [])[:5]) or "text"
+            emotion_signals = ", ".join(list(multimodal.get("emotion_signals") or [])[:5]) or "NONE"
+            multimodal_input_block = (
+                "MULTIMODAL_INPUT:\n"
+                f"- primary_modality: {_truncate_for_prompt(multimodal.get('primary_modality'), limit=24) or 'text'}\n"
+                f"- modalities: {modality_list}\n"
+                f"- emotion_signals: {emotion_signals}\n\n"
+            )
+    except Exception:
+        pass
+
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
     emotion_context = get_chat_runtime_emotion_state(runtime_payload)
     emotion_snapshot = get_chat_runtime_emotion_snapshot(runtime_payload)
@@ -1084,6 +1200,13 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{role_instruction}\n\n"
         f"{direct_response_block}"
         f"{style_block}"
+        f"{bond_aware_style_block}"
+        f"{predictive_state_block}"
+        f"{planning_block}"
+        f"{planning_execution_block}"
+        f"{skill_dag_block}"
+        f"{skill_execution_block}"
+        f"{multimodal_input_block}"
         f"{cn_style_boost_block}"
         f"{emotion_recall_block}"
         f"{_persona_expression_hint_block}"

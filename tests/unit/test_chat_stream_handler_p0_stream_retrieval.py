@@ -75,6 +75,29 @@ class _FakeIngress:
     quarantine_digest = None
 
 
+class _DummyMetaLearning:
+    def record(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+class _DummyMultimodalProcessor:
+    def enhance_output(self, *, text: str, emotion_tag: str, bond_stage: str, render_lang: str):
+        class _Result:
+            suggested_emoji = ""
+            items: list[Any] = []
+
+            @staticmethod
+            def as_dict() -> dict[str, Any]:
+                return {
+                    "text": text,
+                    "items_count": 0,
+                    "suggested_sticker": None,
+                    "suggested_emoji": None,
+                }
+
+        return _Result()
+
+
 def test_stream_build_prompt_uses_node_prompt_and_japanese_style_binding(monkeypatch: Any, tmp_path: Path) -> None:
     style_root = tmp_path / "style"
     world_root = tmp_path / "world"
@@ -298,6 +321,81 @@ def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any)
     assert any(e.get("phase") == "RENDER" for e in events)
 
 
+def test_stream_high_risk_turn_buffers_until_reflection_revision(monkeypatch: Any) -> None:
+    import host_brain.app.dependencies as deps
+    from host_brain.reasoning.reflection_chain import ReflectionChain
+
+    async def _fake_run_retrieval(**kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        return ({"status": "OK", "reason_code": "OK", "degraded": False}, [])
+
+    async def _fake_build_prompt(*, runtime_input: Any) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
+        return "prompt", "system", {}, {"emotion_tag": "SADNESS", "turn_count": 1}
+
+    async def _fake_stream_chunks(**kwargs: Any):
+        yield "您好，"
+        yield "作为一个AI，"
+        yield "我建议您冷静一下。"
+
+    async def _fake_drive_vts(**kwargs: Any) -> dict[str, Any]:
+        return {"status": "SKIPPED", "reason_code": "TEST"}
+
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "true")
+    monkeypatch.setattr(stream_mod, "get_intent_engine", lambda: _FakeIntentEngine())
+    monkeypatch.setattr(
+        stream_mod,
+        "resolve_chat_emotion_context",
+        lambda request_body: {"emotion_tag": "sadness", "turn_count": 1},
+    )
+    monkeypatch.setattr(stream_mod, "resolve_chat_retrieval_gate", lambda scene_type: (True, None))
+    monkeypatch.setattr(stream_mod, "_run_retrieval", _fake_run_retrieval)
+    monkeypatch.setattr(stream_mod, "_build_stream_chat_prompt", _fake_build_prompt)
+    monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", lambda **kwargs: {
+        "provider_name": "mock",
+        "model_id": "mock-model",
+        "timeout_ms": 1000,
+        "llm_api_key": "k",
+        "available": True,
+    })
+    monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
+    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
+    monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
+    monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
+    monkeypatch.setattr(stream_mod, "get_episodic_store", lambda: object())
+    monkeypatch.setattr(deps, "get_meta_learning_loop", lambda: _DummyMetaLearning())
+    monkeypatch.setattr(deps, "get_multimodal_processor", lambda: _DummyMultimodalProcessor())
+    monkeypatch.setattr(deps, "get_reflection_chain", lambda: ReflectionChain())
+
+    events = _collect_sse_events(
+        stream_mod._sse_event_generator(
+            message="我今天很难过",
+            session_id="s-buffer",
+            thread_id=None,
+            mood_state=None,
+            emotion_tag=None,
+            request_id="r-buffer",
+            ts_ms=1,
+            intent_draft=None,
+        )
+    )
+
+    render_events = [e for e in events if e.get("phase") == "RENDER"]
+    assert len(render_events) == 1
+    assert "AI" not in str(render_events[0].get("chunk") or "")
+    assert "您好" not in str(render_events[0].get("chunk") or "")
+    assert "我在" in str(render_events[0].get("chunk") or "")
+
+    commit = next(e for e in events if e.get("phase") == "COMMIT")
+    response_intelligence = dict(commit["audit_refs"].get("response_intelligence") or {})
+    reflection = dict(response_intelligence.get("reflection") or {})
+    trace_metrics = dict(commit["audit_refs"].get("trace_metrics") or {})
+    assert response_intelligence.get("stream_buffered") is True
+    assert reflection.get("revised") is True
+    assert reflection.get("revision_mode") == "reflection_revise"
+    assert trace_metrics.get("stream_buffered_rewrite") is True
+    assert "AI" not in str(commit.get("narrative") or "")
+
+
 def test_stream_commit_exposes_prompt_context_observability_and_logs_degrade_order(
     monkeypatch: Any,
     caplog,
@@ -489,9 +587,16 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
             return self.slots.get(slot_name)
 
     class _FakeContextPackBuilder:
-        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _FakeContextPack:
+        def build(
+            self,
+            *,
+            recall_results: dict[str, Any],
+            task_type: str,
+            slot_budget_overrides: dict[str, int] | None = None,
+        ) -> _FakeContextPack:
             assert "episodic_vector" in recall_results
             assert task_type == "chat"
+            assert isinstance(slot_budget_overrides or {}, dict)
             return _FakeContextPack()
 
     async def _fake_run_retrieval(**kwargs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -555,9 +660,9 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
     )
 
     rewritten = list(captured["retrieval_evidence_items"])
-    assert len(rewritten) == 1
-    assert rewritten[0]["slot_name"] == "episodic_vector"
-    assert rewritten[0]["snippet"] == "trimmed by context pack"
+    episodic_vector_items = [item for item in rewritten if item.get("slot_name") == "episodic_vector"]
+    assert len(episodic_vector_items) == 1
+    assert episodic_vector_items[0]["snippet"] == "trimmed by context pack"
     commit = next(e for e in events if e.get("phase") == "COMMIT")
     summary = dict(commit["audit_refs"].get("recall_pack_builder") or {})
     assert summary.get("mode") == "ACTIVE"
@@ -578,8 +683,15 @@ def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatc
             return None
 
     class _NoopContextPackBuilder:
-        def build(self, *, recall_results: dict[str, Any], task_type: str) -> _EmptyContextPack:
+        def build(
+            self,
+            *,
+            recall_results: dict[str, Any],
+            task_type: str,
+            slot_budget_overrides: dict[str, int] | None = None,
+        ) -> _EmptyContextPack:
             _ = (recall_results, task_type)
+            assert isinstance(slot_budget_overrides or {}, dict)
             return _EmptyContextPack()
 
     class _FakeSource:

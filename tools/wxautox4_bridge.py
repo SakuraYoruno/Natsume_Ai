@@ -1,6 +1,6 @@
 """wxautox4 Bridge — drop-in replacement for wechat_uia_bridge.py.
 
-Uses the ``wxautox4`` Python package (pip install wxautox4) instead of raw
+Uses the ``wxautox4`` Python package variant instead of raw
 comtypes UIAutomation COM calls.  The **external protocol is identical**
 to the legacy UIA bridge:
 
@@ -13,7 +13,7 @@ Switch between backends via a single env-var:
     EDGE_WECHAT_BRIDGE_BACKEND=uia        # use legacy UIA bridge
 
 Requires:
-  - wxautox4 activated (``wxautox4 -a <activation_code>``)
+  - wxautox4 activated (``wxautox4 -a <activation_code>`` or vendor wheel equivalent)
   - WeChat 4.1+ running and logged-in on the same desktop
 
 Phase 1 additions (2026-03-27):
@@ -1143,11 +1143,17 @@ class WxAutoX4Bridge:
         logger.info("=" * 60)
 
         # ── Step 1: import and initialize wxautox4 ──
+        WeChat = None
         try:
             from wxautox4 import WeChat  # type: ignore[import-untyped]
         except ImportError:
+            try:
+                from wxautox4_wechatbot import WeChat  # type: ignore[import-untyped]
+            except ImportError:
+                WeChat = None
+        if WeChat is None:
             logger.error(
-                "wxautox4 not installed! Run: pip install wxautox4 && wxautox4 -a <activation_code>"
+                "wxautox4 not installed! Install the official package or vendor wheel, then activate it"
             )
             return 1
 

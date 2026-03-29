@@ -65,6 +65,8 @@ class TestRetrievalRerankerContract(unittest.TestCase):
         self.assertEqual(S_RET_RERANK, row["stage"])
         self.assertIsInstance(row["payload"], dict)
         self.assertEqual(fixture["payload"]["top_k"], row["payload"]["topk_count"])
+        self.assertEqual(fixture["payload"]["top_k"], len(row["payload"]["topk"]))
+        self.assertIn("snippet", row["payload"]["topk"][0])
 
     def test_t_ret_02_unavailable_timeout_and_invalid_keep_topk_shape(self) -> None:
         unavailable = _load_json(FIXTURES / "bad" / "rerank_unavailable_request.json")

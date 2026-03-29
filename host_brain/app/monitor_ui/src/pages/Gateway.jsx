@@ -74,6 +74,10 @@ function PlatformCard({ data }) {
         <StatusBadge status={data.status} />
       </div>
 
+      {data.status_detail && (
+        <div className="text-xs text-gray-400">{data.status_detail}</div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 text-center text-xs">
         <div>
           <div className="text-lg font-bold text-blue-600">{data.inbound_count}</div>
@@ -164,6 +168,7 @@ export default function Gateway() {
 
   const platforms = data?.platforms ?? []
   const activePlatforms = platforms.filter(p => p.status === 'UP' || p.inbound_count > 0 || p.outbound_count > 0)
+  const isInitialState = !!data && (data.total_inbound ?? 0) === 0 && (data.total_outbound ?? 0) === 0 && (data.total_errors ?? 0) === 0
 
   return (
     <div className="space-y-6">
@@ -185,6 +190,14 @@ export default function Gateway() {
       </div>
 
       {error && <div className="card p-4 text-red-500 text-sm">{error}</div>}
+      {!error && isInitialState && (
+        <div className="card p-4 text-sm text-gray-500">
+          <div className="mb-1 text-xs text-gray-400">
+            Status falls back to remote Gateway adapter health when the local window has no samples.
+          </div>
+          当前是初始态，最近窗口还没有网关消息样本。平台卡片显示的是空流量状态，不是接口故障。
+        </div>
+      )}
 
       {/* 汇总统计 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

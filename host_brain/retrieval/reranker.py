@@ -28,6 +28,7 @@ from host_brain.retrieval.reranker_schemas import (
     RerankRuntimeConfig,
     RerankerResult,
 )
+from host_brain.retrieval.audit_preview import build_retrieval_items_preview
 
 
 
@@ -380,6 +381,7 @@ class RerankerServiceContract:
                 "route_id": route.route_id,
                 "node_selector": route.node_selector,
                 "latency_ms": latency_ms,
+                "topk": build_retrieval_items_preview(topk),
                 "output_status": STATUS_OK,
                 "fallback_used": fallback_used,
                 "fallback_reason_code": fallback_reason_code,
@@ -444,6 +446,7 @@ class RerankerServiceContract:
                 "route_id": str(route_id),
                 "node_selector": str(node_selector),
                 "latency_ms": int(latency_ms),
+                "topk": build_retrieval_items_preview(topk),
                 "output_status": STATUS_DEGRADED,
             },
             ts_ms=ts_ms,

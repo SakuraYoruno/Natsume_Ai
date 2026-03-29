@@ -38,18 +38,41 @@ function formatTime(tsMs) {
   })
 }
 
-function statusColor(rate) {
-  if (rate == null) return 'text-gray-400'
-  if (rate >= 90) return 'text-green-600'
-  if (rate >= 70) return 'text-orange-500'
-  return 'text-red-500'
+function normalizeCardStatus(rate, status) {
+  const raw = String(status || '').toUpperCase()
+  if (raw === 'UP' || raw === 'OK' || raw === 'HEALTHY') return 'up'
+  if (raw === 'DEGRADED' || raw === 'WARN') return 'degraded'
+  if (raw === 'DOWN' || raw === 'FAIL' || raw === 'FAILED' || raw === 'ERROR') return 'down'
+  if (rate == null) return 'unknown'
+  if (rate >= 90) return 'up'
+  if (rate >= 70) return 'degraded'
+  return 'down'
 }
 
-function statusBg(rate) {
-  if (rate == null) return 'bg-gray-100'
-  if (rate >= 90) return 'bg-green-50 border-green-200'
-  if (rate >= 70) return 'bg-orange-50 border-orange-200'
-  return 'bg-red-50 border-red-200'
+function statusColor(rate, status) {
+  const normalized = normalizeCardStatus(rate, status)
+  if (normalized === 'up') return 'text-green-600'
+  if (normalized === 'degraded') return 'text-orange-500'
+  if (normalized === 'down') return 'text-red-500'
+  return 'text-gray-400'
+}
+
+function statusBg(rate, status) {
+  const normalized = normalizeCardStatus(rate, status)
+  if (normalized === 'up') return 'bg-green-50 border-green-200'
+  if (normalized === 'degraded') return 'bg-orange-50 border-orange-200'
+  if (normalized === 'down') return 'bg-red-50 border-red-200'
+  return 'bg-gray-100'
+}
+
+function subsystemSummary(item) {
+  if ((item?.total ?? 0) <= 0) return '近窗口无调用'
+  if (item?.detail) return item.detail
+  const parts = [`${item?.success ?? 0}/${item?.total ?? 0} 正常`]
+  if ((item?.degraded ?? 0) > 0) parts.push(`${item.degraded} 降级`)
+  if ((item?.failed ?? 0) > 0) parts.push(`${item.failed} 故障`)
+  if ((item?.blocked ?? 0) > 0) parts.push(`拦截 ${item.blocked}`)
+  return parts.join(' · ')
 }
 
 const WINDOW_OPTIONS = [
@@ -335,16 +358,16 @@ export default function Insights() {
           {(subsysData?.subsystems ?? []).map((s) => (
             <div
               key={s.subsystem}
-              className={`card p-3 border ${statusBg(s.success_rate)}`}
+              className={`card p-3 border ${statusBg(s.success_rate, s.status)}`}
             >
               <div className="text-xs font-medium text-gray-700 mb-2 truncate" title={s.display_name}>
                 {s.display_name}
               </div>
-              <div className={`text-xl font-bold ${statusColor(s.success_rate)}`}>
+              <div className={`text-xl font-bold ${statusColor(s.success_rate, s.status)}`}>
                 {s.success_rate != null ? `${s.success_rate}%` : '—'}
               </div>
               <div className="text-xs text-gray-400 mt-1">
-                {s.total > 0 ? `${s.success}/${s.total} 成功` : '无数据'}
+                {subsystemSummary(s)}
               </div>
               {s.p95_ms != null && (
                 <div className="text-xs text-gray-400">P95 {s.p95_ms}ms</div>

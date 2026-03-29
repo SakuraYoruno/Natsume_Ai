@@ -59,6 +59,8 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         self.assertIn("RECALL", op_kinds)
         self.assertIn("RERANK", op_kinds)
         self.assertIn("EVIDENCE_PACK", op_kinds)
+        pipeline_row = next(row for row in self.ledger.retrieval_event_log if row["op_kind"] == RET_OP_PIPELINE)
+        self.assertEqual(2, len(pipeline_row["payload"]["selected_refs"]))
 
     def test_pipeline_gpu_routes_apply_embedding_and_reranker_profiles(self) -> None:
         pipeline = self._build_pipeline(node_id="node-gpu-01", reranker_available=True)

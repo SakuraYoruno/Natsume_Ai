@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac as _hmac
+import inspect
 import json
 import logging
 import os
@@ -175,8 +176,12 @@ async def _resolve_edge_clock_offset_ms(
             local_before_ms = int(time.time() * 1000)
             response = await client.get(f"{base_url}/v1/edge/health")
             local_after_ms = int(time.time() * 1000)
-        response.raise_for_status()
+        raise_result = response.raise_for_status()
+        if inspect.isawaitable(raise_result):
+            await raise_result
         body = response.json()
+        if inspect.isawaitable(body):
+            body = await body
         if not isinstance(body, Mapping):
             return 0
         edge_ts_ms = _extract_edge_ts_ms(body)
@@ -235,6 +240,7 @@ def _normalize_base_url(value: str) -> str:
 
 
 def _resolve_edge_base_urls() -> list[str]:
+    base_url_override = str(os.environ.get("HOST_EDGE_RPC_BASE_URL") or "").strip()
     primary = _resolve_edge_base_url()
     host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
@@ -243,11 +249,13 @@ def _resolve_edge_base_urls() -> list[str]:
     except ValueError:
         port = 17800
 
-    candidates = [primary, f"http://{host}:{port}"]
+    candidates = [primary]
+    if not base_url_override:
+        candidates.append(f"http://{host}:{port}")
     allow_local_fallback = str(os.environ.get("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") or "").strip().lower() in {
         "1", "true", "yes", "on"
     }
-    if allow_local_fallback and host not in {"127.0.0.1", "localhost"}:
+    if allow_local_fallback and not base_url_override and host not in {"127.0.0.1", "localhost"}:
         candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
 
     seen: set[str] = set()
@@ -611,6 +619,8 @@ async def post_speak(
     pitch: float = 0.0,
     emotion_tag: str | None = None,
     emotion_intensity: float | None = None,
+    style_note: str | None = None,
+    lang_hint: str | None = None,
 ) -> EdgeRpcCallResult:
     """驱动 Edge TTS 语音合成。
 
@@ -645,6 +655,10 @@ async def post_speak(
         payload["emotion_tag"] = str(emotion_tag).strip().upper()
     if emotion_intensity is not None:
         payload["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
+    if style_note:
+        payload["style_note"] = str(style_note).strip()
+    if lang_hint:
+        payload["lang_hint"] = str(lang_hint).strip().lower()
     result = await _post_to_edge(
         path="/v1/edge/speak",
         payload=payload,

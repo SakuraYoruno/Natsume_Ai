@@ -20,7 +20,11 @@ from host_brain.retrieval.embedding import (
     build_embedding_provider_registry,
     load_embedding_runtime_config,
 )
+from host_brain.retrieval.audit_preview import build_retrieval_refs_preview
+from host_brain.retrieval.adaptive_prompt_budget import AdaptivePromptBudget
+from host_brain.retrieval.agentic_retrieval_loop import AgenticRetrievalLoop
 from host_brain.retrieval.evidence_pack import EvidencePackServiceContract
+from host_brain.retrieval.query_planner import QueryPlan, QueryPlanner
 from host_brain.retrieval.recall_fusion import (
     RecallFusionServiceContract,
     load_recall_runtime_config,
@@ -30,6 +34,7 @@ from host_brain.retrieval.reranker import (
     build_reranker_provider_registry,
     load_reranker_runtime_config,
 )
+from host_brain.retrieval.semantic_dedup import SemanticDedup
 
 
 S_RET_PIPELINE = "S_RET_PIPELINE"
@@ -122,12 +127,18 @@ class RetrievalPipelineContract:
         reranker_service: RerankerServiceContract,
         evidence_pack_service: EvidencePackServiceContract,
         ledger: SQLiteLedger | None = None,
+        query_planner: QueryPlanner | None = None,
+        adaptive_budget: AdaptivePromptBudget | None = None,
+        semantic_dedup: SemanticDedup | None = None,
     ) -> None:
         self.embedding_service = embedding_service
         self.recall_service = recall_service
         self.reranker_service = reranker_service
         self.evidence_pack_service = evidence_pack_service
         self.ledger = ledger
+        self.query_planner = query_planner or QueryPlanner()
+        self.adaptive_budget = adaptive_budget or AdaptivePromptBudget()
+        self.semantic_dedup = semantic_dedup or SemanticDedup()
 
     def run(
         self,
@@ -141,9 +152,17 @@ class RetrievalPipelineContract:
         # M28-P（OPT-41）：情感上下文透传参数
         emotion_context: str | None = None,
         render_target_lang: str | None = None,
+        turn_index: int = 0,
+        query_plan: QueryPlan | Mapping[str, Any] | None = None,
     ) -> RetrievalPipelineResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
+        resolved_query_plan = _normalize_query_plan(
+            query_plan=query_plan,
+            query=normalized_query,
+            turn_index=turn_index,
+            planner=self.query_planner,
+        )
 
         embedding_result = self.embedding_service.embed(
             request_id=request_id,
@@ -153,35 +172,44 @@ class RetrievalPipelineContract:
         )
 
         embedding_vector = list(embedding_result.output.get("embedding_vector") or [])
-
-        recall_result = self.recall_service.recall(
-            request_id=request_id,
+        agentic_loop = AgenticRetrievalLoop(
+            recall_fusion=self.recall_service,
+            planner=self.query_planner,
+            embedding_service=self.embedding_service,
+        )
+        agentic_result = agentic_loop.retrieve(
             query=normalized_query,
             query_embedding=embedding_vector,
-            intent_id=intent_id,
+            request_id=request_id,
             session_id=session_id,
-            ts_ms=now_value,
+            turn_index=turn_index,
+            intent_id=intent_id,
             emotion_filter=emotion_context,
             render_target_lang=render_target_lang,
+            ts_ms=now_value,
+            plan=resolved_query_plan,
         )
-
-        recall_candidates = list(recall_result.output.get("candidates") or [])
+        recall_output = dict(agentic_result.recall_summary or {})
+        recall_candidates = list(recall_output.get("candidates") or agentic_result.evidence_items or [])
+        dedup_result = self.semantic_dedup.dedup(recall_candidates)
+        dedup_candidates = list(dedup_result.candidates)
         rerank_result = self.reranker_service.rerank(
             request_id=request_id,
             query=normalized_query,
-            candidates=recall_candidates,
+            candidates=dedup_candidates,
             intent_id=intent_id,
             top_k=top_k,
             ts_ms=now_value,
             # M28-P（OPT-41）：透传情感上下文给 reranker
             emotion_context=emotion_context,
         )
+        adaptive_budget = self.adaptive_budget.compute(resolved_query_plan.intent)
 
         stage_reasons = [
             reason
             for reason in (
                 embedding_result.reason_code,
-                recall_result.reason_code,
+                recall_output.get("reason_code"),
                 rerank_result.reason_code,
             )
             if reason is not None
@@ -203,6 +231,42 @@ class RetrievalPipelineContract:
         if evidence_pack_result.reason_code and evidence_pack_result.reason_code not in reason_chain:
             reason_chain.append(evidence_pack_result.reason_code)
 
+        try:
+            from host_brain.app.dependencies import get_meta_learning_loop  # noqa: PLC0415
+
+            meta_learning = get_meta_learning_loop()
+            meta_learning.record(
+                "query_planner",
+                success=not resolved_query_plan.skip_retrieval,
+                skipped=resolved_query_plan.skip_retrieval,
+                latency_ms=0.0,
+                custom={"skip_rate": 1.0 if resolved_query_plan.skip_retrieval else 0.0},
+            )
+            meta_learning.record(
+                "agentic_retrieval_loop",
+                success=not bool(recall_output.get("reason_code")),
+                latency_ms=float(agentic_result.elapsed_ms),
+                custom={"rounds": float(agentic_result.rounds)},
+            )
+            meta_learning.record(
+                "semantic_dedup",
+                success=True,
+                latency_ms=0.0,
+                custom={
+                    "dedup_rate": (
+                        float(dedup_result.removed_count) / float(max(1, dedup_result.original_count))
+                    ),
+                },
+            )
+            meta_learning.record(
+                "adaptive_prompt_budget",
+                success=True,
+                latency_ms=0.0,
+                custom={"adjusted_slots": float(len(adaptive_budget.adjustments_applied))},
+            )
+        except Exception:
+            pass
+
         status = STATUS_OK if (not degraded and evidence_pack_result.success) else STATUS_DEGRADED
         reason_code = evidence_pack_result.reason_code or root_reason
         output = {
@@ -217,7 +281,20 @@ class RetrievalPipelineContract:
             "fallback_embedding_used": False,
             "fallback_embedding_model_id": None,
             "embedding": embedding_result.output,
-            "recall": recall_result.output,
+            "query_plan": resolved_query_plan.as_dict(),
+            "agentic_meta": {
+                **agentic_result.as_dict(),
+                "turn_index": int(turn_index),
+                "dedup": dedup_result.as_dict(),
+            },
+            "adaptive_budget": adaptive_budget.as_dict(),
+            "recall": {
+                **recall_output,
+                "candidate_count": len(dedup_candidates),
+                "candidates": dedup_candidates,
+                "dedup_removed_count": int(dedup_result.removed_count),
+                "dedup_merge_log_count": len(dedup_result.merge_log),
+            },
             "rerank": rerank_result.output,
             "evidence_pack": evidence_pack_result.output,
             "ts_ms": now_value,
@@ -237,8 +314,17 @@ class RetrievalPipelineContract:
                 "query_length": len(normalized_query),
                 "fallback_embedding_used": False,
                 "recall_candidates": len(recall_candidates),
+                "recall_candidates_deduped": len(dedup_candidates),
                 "rerank_topk": len(rerank_result.output.get("topk") or []),
                 "evidence_refs": len(evidence_pack_result.output.get("evidence_refs") or []),
+                "selected_refs": build_retrieval_refs_preview(evidence_pack_result.output.get("evidence_refs") or []),
+                "query_plan": resolved_query_plan.as_dict(),
+                "agentic_meta": {
+                    **agentic_result.as_dict(),
+                    "turn_index": int(turn_index),
+                    "dedup": dedup_result.as_dict(),
+                },
+                "adaptive_budget": adaptive_budget.as_dict(),
                 "output_status": status,
             },
             ts_ms=now_value,
@@ -286,6 +372,41 @@ class RetrievalPipelineContract:
                 reason_code=reason_code,
                 detail=detail,
             )
+
+
+def _normalize_query_plan(
+    *,
+    query_plan: QueryPlan | Mapping[str, Any] | None,
+    query: str,
+    turn_index: int,
+    planner: QueryPlanner,
+) -> QueryPlan:
+    if isinstance(query_plan, QueryPlan):
+        return query_plan
+    if isinstance(query_plan, Mapping):
+        data = dict(query_plan)
+        return QueryPlan(
+            original_query=str(data.get("original_query") or query),
+            rewritten_queries=[
+                str(item).strip()
+                for item in list(data.get("rewritten_queries") or [])
+                if str(item).strip()
+            ],
+            intent=str(data.get("intent") or planner.plan(query, turn_index=turn_index).intent),
+            target_stores=[
+                str(item).strip()
+                for item in list(data.get("target_stores") or [])
+                if str(item).strip()
+            ],
+            skip_retrieval=bool(data.get("skip_retrieval")),
+            max_rounds=max(0, int(data.get("max_rounds") or 1)),
+            time_lookback_days=(
+                int(data["time_lookback_days"])
+                if data.get("time_lookback_days") not in (None, "")
+                else None
+            ),
+        )
+    return planner.plan(query, turn_index=turn_index)
 
 
 def build_retrieval_pipeline_from_env(
@@ -393,6 +514,9 @@ def build_retrieval_pipeline_from_env(
         reranker_service=reranker_service,
         evidence_pack_service=evidence_pack_service,
         ledger=ledger,
+        query_planner=QueryPlanner(),
+        adaptive_budget=AdaptivePromptBudget(),
+        semantic_dedup=SemanticDedup(),
     )
 
 

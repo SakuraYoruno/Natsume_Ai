@@ -96,6 +96,10 @@ class CompositionResult:
             "completed_nodes": self.completed_nodes,
             "total_nodes": self.total_nodes,
             "output_keys": list(self.outputs.keys()),
+            "output_preview": {
+                key: str(value)[:160]
+                for key, value in list(self.outputs.items())[:4]
+            },
             "elapsed_ms": round(self.elapsed_ms, 1),
         }
 
@@ -110,6 +114,18 @@ TASK_CAPABILITY_MAP: dict[str, list[str]] = {
     "搜索": ["web_search"],
     "分析": ["reasoning"],
     "总结": ["summarization"],
+    "摘要": ["session_summary"],
+    "回顾": ["session_summary"],
+    "情绪": ["emotion_status"],
+    "心情": ["emotion_status"],
+    "感受": ["emotion_status"],
+    "关系": ["bond_status"],
+    "亲密": ["bond_status"],
+    "阶段": ["bond_status"],
+    "状态": ["status"],
+    "运行": ["status"],
+    "记忆": ["memory"],
+    "回忆": ["memory"],
     "画": ["image_generation"],
     "计算": ["calculation"],
     "日语": ["translation", "ja_style"],

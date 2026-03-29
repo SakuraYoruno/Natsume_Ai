@@ -42,6 +42,7 @@ from host_brain.app.execution_profile import (
     PROFILE_WORKFLOW_SUPERVISED,
     resolve_execution_profile,
 )
+from host_brain.bond.user_identity import resolve_bond_user_id
 from host_brain.app.entry_routing import is_narrative_only_fast_pass
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
@@ -533,6 +534,23 @@ async def _complex_scene_sse_generator(
         narrative = repair_utf8_latin1_mojibake(narrative)
         if not narrative:
             narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+        try:
+            from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
+
+            narrative, response_intelligence_meta = apply_response_intelligence(
+                request_id=request_id,
+                user_message=request_body.message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary=None,
+                render_lang=render_target_lang,
+                allow_rewrite=True,
+            )
+        except Exception as exc:
+            response_intelligence_meta = {
+                "reflection": {"status": "DEGRADED", "reason_code": "POSTPROCESS_FAILED", "detail": str(exc)},
+                "multimodal_output": {"status": "SKIPPED", "reason_code": "POSTPROCESS_FAILED"},
+            }
 
         core_intent_draft = core_payload.get("intent_draft")
         if primary_degraded and secondary_gateway_status == "OK":
@@ -640,6 +658,7 @@ async def _complex_scene_sse_generator(
             "model_control": list(graph_output.get("model_control") or []),
             "prompt_context_validation": prompt_context_validation,
             "prompt_context_observability": prompt_context_observability,
+            "response_intelligence": response_intelligence_meta,
         }
 
         retrieval_reason_code = str(retrieval_summary.get("reason_code") or "")
@@ -685,7 +704,7 @@ async def _complex_scene_sse_generator(
                 "intent_id": str(intent_id or request_id),
                 "session_id": session_id,
                 "seq": 1,
-                "user_id": session_id,
+                "user_id": resolve_bond_user_id(session_id=session_id),
                 "topic_id": str(intent_draft.get("args", {}).get("text", request_body.message))[:64],
                 "capability_hint": "bond_memory",
                 "update_kind": _update_kind,
@@ -782,8 +801,14 @@ async def _complex_scene_sse_generator(
                 try:
                     from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
                     from host_brain.app.chat_stream_handler import _infer_emotion_tag_for_tts  # noqa: PLC0415
+                    from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
                     _base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-                    _etag = _infer_emotion_tag_for_tts(narrative, _base_etag)
+                    _tts_route = resolve_tts_route(
+                        text=narrative,
+                        emotion_context={**dict(emotion_context), "emotion_tag": _base_etag},
+                        bond_summary=None,
+                    )
+                    _etag = str(_tts_route.get("emotion_tag") or _infer_emotion_tag_for_tts(narrative, _base_etag)).strip()
                     _intensity_raw = emotion_context.get("emotion_intensity")
                     _intensity = None
                     if _intensity_raw is not None:
@@ -794,10 +819,16 @@ async def _complex_scene_sse_generator(
                     _tts_result = await _post_speak(
                         text=narrative,
                         request_id=request_id,
+                        session_id=session_id,
+                        speed=float(_tts_route.get("speed") or 1.0),
+                        pitch=float(_tts_route.get("pitch") or 0.0),
                         emotion_tag=_etag,
                         emotion_intensity=_intensity,
+                        style_note=str(_tts_route.get("style_note") or ""),
+                        lang_hint=str(_tts_route.get("lang_hint") or render_target_lang),
                     )
                     tts_summary = _tts_result.as_dict()
+                    tts_summary["route"] = dict(_tts_route.get("route") or {})
                 except Exception as exc:
                     tts_summary = {"status": "DEGRADED", "reason_code": "TTS_CALL_FAILED", "detail": str(exc)}
                     _logger.debug(
@@ -846,6 +877,7 @@ async def _complex_scene_sse_generator(
                 "vts": vts_summary,
                 "tts": tts_summary,
                 "episodic_memory": dict(episodic_summary),
+                "response_intelligence": response_intelligence_meta,
                 "trace_metrics": trace_metrics,
             },
         })

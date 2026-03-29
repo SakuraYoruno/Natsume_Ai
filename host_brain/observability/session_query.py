@@ -65,12 +65,33 @@ class SessionQueryService:
             logger.warning("SessionQuery: 读取 governor_log 失败 - %s", exc)
             rows = []
 
+        try:
+            intent_rows = self._fetch_intent_rows(start_ms=start_time or 0, end_ms=end_time)
+        except Exception as exc:
+            logger.warning("SessionQuery: 读取 intent_log 失败 - %s", exc)
+            intent_rows = []
+
+        latest_intent_by_request: Dict[str, Dict[str, Any]] = {}
+        for row in intent_rows:
+            request_id = str(row.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            if request_id not in latest_intent_by_request or int(row.get("ts_ms") or 0) > int(latest_intent_by_request[request_id].get("ts_ms") or 0):
+                latest_intent_by_request[request_id] = row
+
         # 去重（同一 request_id 取最新记录）
         seen: Dict[str, Dict] = {}
         for r in rows:
             rid = r.get("request_id", "")
             if not rid:
                 continue
+            intent_row = latest_intent_by_request.get(str(rid))
+            if intent_row is not None:
+                if not r.get("session_id") and intent_row.get("session_id"):
+                    r = {**r, "session_id": intent_row.get("session_id")}
+                input_preview = self._extract_intent_preview(intent_row)
+                if input_preview:
+                    r = {**r, "input_preview": input_preview}
             if rid not in seen or r.get("ts_ms", 0) > seen[rid].get("ts_ms", 0):
                 seen[rid] = r
 
@@ -143,7 +164,12 @@ class SessionQueryService:
 
         if keyword:
             kw = keyword.lower()
-            items = [r for r in items if kw in r.get("request_id", "").lower()]
+            items = [
+                r for r in items
+                if kw in r.get("request_id", "").lower()
+                or kw in str(r.get("session_id", "")).lower()
+                or kw in str(r.get("input_preview", "")).lower()
+            ]
 
         return items
 
@@ -167,7 +193,44 @@ class SessionQueryService:
             "reason_code":  r.get("reason_code"),
             "channel":      r.get("channel"),
             "duration_ms":  r.get("duration_ms") or r.get("total_latency_ms"),
+            "input_preview": r.get("input_preview"),
         }
+
+    def _fetch_intent_rows(self, start_ms: int, end_ms: int) -> List[Dict]:
+        page_size = 10_000
+        offset = 0
+        rows: List[Dict] = []
+        while True:
+            chunk = self._ledger.fetch_by_time_range(
+                "intent_log",
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+                limit=page_size,
+                offset=offset,
+            )
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            offset += page_size
+        return rows
+
+    @staticmethod
+    def _extract_intent_preview(row: Dict[str, Any]) -> Optional[str]:
+        normalized = row.get("normalized_json")
+        raw_text = row.get("raw_text")
+        if isinstance(raw_text, str) and raw_text.strip():
+            return raw_text.strip()[:120]
+
+        if isinstance(normalized, dict):
+            args = normalized.get("args")
+            if isinstance(args, dict):
+                for key in ("text", "query", "message", "content"):
+                    value = args.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()[:120]
+        return None
 
 
 def _fmt_ts(ts_ms: Optional[int]) -> Optional[str]:

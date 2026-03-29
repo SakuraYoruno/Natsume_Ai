@@ -50,6 +50,7 @@ from host_brain.app.graph_config_builder import (
     resolve_host_llm_runtime,  # 同步版本，供测试 mock 使用
     resolve_host_llm_runtime_async,  # 修复审计问题 #1：异步版本，供实际调用
 )
+from host_brain.bond.user_identity import resolve_bond_user_id
 
 # 修复审计问题 #1：模块级别名，供 _sse_event_generator 调用（可被测试 mock）
 # 测试通过 monkeypatch.setattr(stream_mod, "resolve_host_llm_runtime", ...) 替换此引用
@@ -106,6 +107,30 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
         if re.search(pattern, text, re.IGNORECASE):
             return tag
     return "NEUTRAL"
+
+
+def _should_buffer_stream_output(
+    *,
+    emotion_context: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+) -> bool:
+    """Buffer high-risk turns so reflection can revise before the first visible chunk."""
+    if not _parse_bool_env("HOST_STREAM_REFLECTION_BUFFER_ENABLED", default=True):
+        return False
+    try:
+        from host_brain.app.dependencies import get_reflection_chain  # noqa: PLC0415
+
+        reflection = get_reflection_chain()
+        return bool(
+            reflection.should_reflect(
+                emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""),
+                intent=str((bond_summary or {}).get("intent") or ""),
+                bond_stage=str((bond_summary or {}).get("stage") or "STRANGER"),
+                turn_count=int((emotion_context or {}).get("turn_count") or 1),
+            )
+        )
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1314,8 +1339,13 @@ async def _sse_event_generator(
             _evidence_items = list(retrieval_evidence_items or [])
             _recall_results = _build_recall_pack_inputs(_evidence_items)
             _recall_pack_active = _parse_bool_env("HOST_RECALL_PACK_ACTIVE", default=True)
+            _slot_budget_overrides = dict(retrieval_summary.get("slot_budget_overrides") or {})
             if _recall_results:
-                _cp = _cpb.build(recall_results=_recall_results, task_type="chat")
+                _cp = _cpb.build(
+                    recall_results=_recall_results,
+                    task_type="chat",
+                    slot_budget_overrides=_slot_budget_overrides,
+                )
                 _rewritten_items = _recall_pack_to_retrieval_evidence_items(_cp)
                 _applied_to_prompt = False
                 if _recall_pack_active and _rewritten_items:
@@ -1347,6 +1377,7 @@ async def _sse_event_generator(
                     "conflict_events": len(_cp.conflict_events),
                     "subgraph_trace_count": len(_cp.subgraph_trace),
                     "recall_slot_text_injected": list(_recall_slot_text.keys()),
+                    "slot_budget_overrides": _slot_budget_overrides,
                 }
             else:
                 recall_pack_builder_summary = {
@@ -1437,6 +1468,10 @@ async def _sse_event_generator(
         sentence_index = 0
         llm_stream_started_ms = int(time.time() * 1000)
         _llm_timed_out = False
+        buffer_stream_output = _should_buffer_stream_output(
+            emotion_context=emotion_context,
+            bond_summary=_bond_summary_for_ctx or None,
+        )
 
         try:
             async for chunk in astream_llm_chunks(
@@ -1462,6 +1497,8 @@ async def _sse_event_generator(
                 if not render_chunk:
                     continue
                 rendered_text = visible_text
+                if buffer_stream_output:
+                    continue
                 yield _sse({"phase": "RENDER", "chunk": render_chunk})
 
                 # 句子边界检测
@@ -1488,14 +1525,15 @@ async def _sse_event_generator(
                 _placeholder = "ちょっと待ってね…"
                 full_text = _placeholder
                 rendered_text = _placeholder
-                yield _sse({"phase": "RENDER", "chunk": _placeholder})
-                for sentence in splitter.feed(_placeholder):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
+                if not buffer_stream_output:
+                    yield _sse({"phase": "RENDER", "chunk": _placeholder})
+                    for sentence in splitter.feed(_placeholder):
+                        yield _sse({
+                            "phase": "SENTENCE",
+                            "sentence": sentence,
+                            "sentence_index": sentence_index,
+                        })
+                        sentence_index += 1
             _llm_timed_out = True
             # 记录超时到 error_log
             try:
@@ -1543,20 +1581,70 @@ async def _sse_event_generator(
                 llm_contract_payload = {}
         if narrative:
             final_visible_text = repair_utf8_latin1_mojibake(narrative)
-            if final_visible_text.startswith(rendered_text):
-                trailing_render_chunk = final_visible_text[len(rendered_text):]
-            else:
-                trailing_render_chunk = final_visible_text
-            if trailing_render_chunk:
-                rendered_text = final_visible_text
-                yield _sse({"phase": "RENDER", "chunk": trailing_render_chunk})
-                for sentence in splitter.feed(trailing_render_chunk):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
+            if not buffer_stream_output:
+                if final_visible_text.startswith(rendered_text):
+                    trailing_render_chunk = final_visible_text[len(rendered_text):]
+                else:
+                    trailing_render_chunk = final_visible_text
+                if trailing_render_chunk:
+                    rendered_text = final_visible_text
+                    yield _sse({"phase": "RENDER", "chunk": trailing_render_chunk})
+                    for sentence in splitter.feed(trailing_render_chunk):
+                        yield _sse({
+                            "phase": "SENTENCE",
+                            "sentence": sentence,
+                            "sentence_index": sentence_index,
+                        })
+                        sentence_index += 1
+            try:
+                from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
+
+                narrative, response_intelligence_meta = apply_response_intelligence(
+                    request_id=request_id,
+                    user_message=resolved_message,
+                    narrative=final_visible_text,
+                    emotion_context=emotion_context,
+                    bond_summary=_bond_summary_for_ctx or None,
+                    render_lang=render_target_lang,
+                    allow_rewrite=buffer_stream_output,
+                )
+                if buffer_stream_output:
+                    if narrative:
+                        rendered_text = narrative
+                        yield _sse({"phase": "RENDER", "chunk": narrative})
+                        for sentence in splitter.feed(narrative):
+                            yield _sse({
+                                "phase": "SENTENCE",
+                                "sentence": sentence,
+                                "sentence_index": sentence_index,
+                            })
+                            sentence_index += 1
+                elif narrative.startswith(rendered_text):
+                    postprocess_chunk = narrative[len(rendered_text):]
+                    if postprocess_chunk:
+                        rendered_text = narrative
+                        yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
+                        for sentence in splitter.feed(postprocess_chunk):
+                            yield _sse({
+                                "phase": "SENTENCE",
+                                "sentence": sentence,
+                                "sentence_index": sentence_index,
+                            })
+                            sentence_index += 1
+                if isinstance(response_intelligence_meta, Mapping):
+                    response_intelligence_meta = dict(response_intelligence_meta)
+                    response_intelligence_meta["stream_buffered"] = bool(buffer_stream_output)
+            except Exception as exc:
+                response_intelligence_meta = {
+                    "reflection": {"status": "DEGRADED", "reason_code": "POSTPROCESS_FAILED", "detail": str(exc)},
+                    "stream_buffered": bool(buffer_stream_output),
+                }
+        else:
+            response_intelligence_meta = {
+                "reflection": {"status": "SKIPPED", "reason_code": "EMPTY_NARRATIVE"},
+                "multimodal_output": {"status": "SKIPPED", "reason_code": "EMPTY_NARRATIVE"},
+                "stream_buffered": bool(buffer_stream_output),
+            }
 
         # flush 剩余未成句文本
         remainder = splitter.flush()
@@ -1601,6 +1689,7 @@ async def _sse_event_generator(
                         "narrative": narrative,
                         "contract_payload": llm_contract_payload,
                         "emotion_snapshot": emotion_snapshot_for_audit,
+                        "response_intelligence": response_intelligence_meta,
                     },
                 }
             ],
@@ -1672,7 +1761,7 @@ async def _sse_event_generator(
                     "intent_id": str(intent_id or request_id),
                     "session_id": session_id,
                     "seq": 1,
-                    "user_id": session_id,
+                    "user_id": resolve_bond_user_id(session_id=session_id),
                     "topic_id": resolved_message[:64],
                     "capability_hint": "bond_memory",
                     "update_kind": _update_kind,
@@ -1713,8 +1802,15 @@ async def _sse_event_generator(
                 return {"status": "SKIPPED", "reason_code": "NARRATIVE_EMPTY"}, 0
             try:
                 from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
+                from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
+
                 _base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-                _etag = _infer_emotion_tag_for_tts(narrative, _base_etag)
+                _tts_route = resolve_tts_route(
+                    text=narrative,
+                    emotion_context={**dict(emotion_context), "emotion_tag": _base_etag},
+                    bond_summary=_bond_summary_for_ctx or None,
+                )
+                _etag = str(_tts_route.get("emotion_tag") or _infer_emotion_tag_for_tts(narrative, _base_etag)).strip()
                 _intensity_raw = emotion_context.get("emotion_intensity")
                 _intensity = None
                 if _intensity_raw is not None:
@@ -1725,10 +1821,17 @@ async def _sse_event_generator(
                 _tts_result = await _post_speak(
                     text=narrative,
                     request_id=request_id,
+                    session_id=session_id,
+                    speed=float(_tts_route.get("speed") or 1.0),
+                    pitch=float(_tts_route.get("pitch") or 0.0),
                     emotion_tag=_etag,
                     emotion_intensity=_intensity,
+                    style_note=str(_tts_route.get("style_note") or ""),
+                    lang_hint=str(_tts_route.get("lang_hint") or render_target_lang),
                 )
-                return _tts_result.as_dict(), max(0, int(time.time() * 1000) - _t0)
+                _tts_payload = _tts_result.as_dict()
+                _tts_payload["route"] = dict(_tts_route.get("route") or {})
+                return _tts_payload, max(0, int(time.time() * 1000) - _t0)
             except Exception as exc:
                 _logger.debug(
                     "流式路径 TTS 驱动失败（降级）: %s",
@@ -1800,6 +1903,7 @@ async def _sse_event_generator(
         trace_metrics = {
             "retrieval_latency_ms": retrieval_latency_ms,
             "first_token_latency_ms": first_token_latency_ms,
+            "stream_buffered_rewrite": bool(buffer_stream_output),
             "background_tasks_latency_ms": {
                 "observability_persist_ms": obs_persist_latency_ms,
                 "airlock_ingress_ms": airlock_latency_ms,
@@ -1847,6 +1951,7 @@ async def _sse_event_generator(
                 "recall_pack_builder": recall_pack_builder_summary,
                 "routing_matrix_decision": dict(llm_runtime.get("routing_matrix_decision") or {}),
                 "state_arbiter": state_arbiter_summary,
+                "response_intelligence": response_intelligence_meta,
             },
         })
 

@@ -74,6 +74,9 @@ class TestRetrievalEvidencePackContract(unittest.TestCase):
         self.assertEqual(S_RET_EVIDENCE_PACK, first["stage"])
         self.assertIsInstance(first["payload"], dict)
         self.assertEqual(2, first["payload"]["evidence_refs_count"])
+        self.assertEqual(2, len(first["payload"]["topk"]))
+        self.assertEqual(2, len(first["payload"]["evidence_refs"]))
+        self.assertIn("snippet", first["payload"]["topk"][0])
 
     def test_t_ret_03_degraded_rerank_and_invalid_input_are_stable(self) -> None:
         rerank_fixture = _load_json(FIXTURES / "bad" / "rerank_unavailable_request.json")

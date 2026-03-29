@@ -16,6 +16,7 @@ from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
 from host_brain.app.chat_runtime_input import build_emotion_recall_text
+from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.prompt_context import (
     build_emotion_pulse_slot,
     build_world_canon_slot,
@@ -262,7 +263,7 @@ def build_chat_context_pack(
         from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         _bse = get_bond_stage_engine()
         if _bse is not None:
-            _user_id = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+            _user_id = get_canonical_bond_user_id()
             _bond_state = _bse.get_state(_user_id)
             bond_texture["bond_stage"] = _bond_state.current_stage
             bond_texture["bond_trend"] = _bond_state.trend()
@@ -694,6 +695,17 @@ def build_chat_prompt_runtime_payload(
         prompt_context_observability=prompt_context_observability,
     )
     runtime_payload["style_bindings"] = resolved_style_bindings
+    try:
+        from host_brain.app.intelligent_runtime import build_prompt_intelligence  # noqa: PLC0415
+
+        runtime_payload.update(
+            build_prompt_intelligence(
+                request_id=str(runtime_input.request_id or "").strip(),
+                runtime_input=runtime_input,
+            )
+        )
+    except Exception as exc:
+        logger.debug("prompt intelligence degraded: %s", exc)
 
     # ── FIX P0-瓶颈2：将情感子系统数据桥接到 runtime_payload 顶层 ──────────
     # prompt_builder.render_node_generation_prompt() 直接从 runtime_payload 顶层
@@ -747,7 +759,7 @@ def build_chat_prompt_runtime_payload(
             from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
             _bse = get_bond_stage_engine()
             if _bse is not None:
-                _user_id = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+                _user_id = get_canonical_bond_user_id()
                 _bond_state = _bse.get_state(_user_id)
                 _bond_stage = _bond_state.current_stage
         except Exception:
@@ -791,7 +803,7 @@ def build_chat_prompt_runtime_payload(
         from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
         from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
         from host_brain.bond.milestone_tracker import MilestoneTracker  # noqa: PLC0415
-        _user_id_bn = str(os.environ.get("HOST_DEFAULT_USER_ID") or "default_user").strip()
+        _user_id_bn = get_canonical_bond_user_id()
         # 获取 bond_stage（复用上面已计算的值如果可用）
         _bn_stage = runtime_payload.get("persona_expression_hint", {})
         _bn_bond_stage = "STRANGER"

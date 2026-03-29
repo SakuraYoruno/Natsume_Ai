@@ -124,7 +124,7 @@ class EdgeConfig:
     # Unified Message Gateway
     gateway_enabled: bool = True
     gateway_port: int = 19000
-    gateway_platforms: tuple[str, ...] = ("qq",)
+    gateway_platforms: tuple[str, ...] = ("wechat", "qq", "feishu", "wecom", "telegram", "line")
     wx_self_wxid: str | None = None
     wx_db_storage_dir: str | None = None
     wx_decrypt_output_dir: str | None = None
@@ -416,7 +416,7 @@ def load_edge_config(
     )
     gateway_platforms_raw = _as_text(
         _env_get(env_lookup, "EDGE_GATEWAY_PLATFORMS"),
-        "qq",
+        "wechat,qq,feishu,wecom,telegram,line",
     )
     parsed_gateway_platforms: list[str] = []
     for piece in gateway_platforms_raw.split(","):
@@ -426,7 +426,7 @@ def load_edge_config(
         if platform_val in {"wechat", "qq", "feishu", "wecom", "telegram", "line"} and platform_val not in parsed_gateway_platforms:
             parsed_gateway_platforms.append(platform_val)
     if not parsed_gateway_platforms:
-        parsed_gateway_platforms = ["qq"]
+        parsed_gateway_platforms = ["wechat", "qq", "feishu", "wecom", "telegram", "line"]
     wx_self_wxid = _as_optional_text(_env_get(env_lookup, "WECHAT_SELF_WXID"))
     wx_db_storage_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DB_STORAGE_DIR"))
     wx_decrypt_output_dir = _as_optional_text(_env_get(env_lookup, "WECHAT_DECRYPT_OUTPUT_DIR"))

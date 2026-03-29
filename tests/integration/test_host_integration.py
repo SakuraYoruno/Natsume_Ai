@@ -729,7 +729,7 @@ class TestBondAPIIntegration:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["user_id"] == "integration_test_user_003"
+        assert data["user_id"] == "default"
         assert data["transition_status"] in {"STABLE", "PROMOTED", "DEMOTED"}
         assert data["score_delta"] > 0
 
@@ -781,9 +781,8 @@ class TestBondAPIIntegration:
         resp = test_client.get("/bond/users")
         assert resp.status_code == 200
         data = resp.json()
-        assert "total" in data
-        assert "users" in data
-        assert isinstance(data["total"], int)
+        assert data["total"] == 1
+        assert data["users"] == ["default"]
 
     def test_bond_event_with_emotion_fields(self, test_client):
         """T-INT-BOND-09: POST /bond/event 支持 emotion_tag 和 emotion_intensity 字段（审计修复 #5）。"""
@@ -987,7 +986,7 @@ class TestEndToEndPipeline:
         bond_resp = test_client.get(f"/bond/stage/{user_id}")
         assert bond_resp.status_code == 200
         bond_data = bond_resp.json()
-        assert bond_data["user_id"] == user_id
+        assert bond_data["user_id"] == "default"
 
     def test_e2e_health_to_metrics_consistency(self, test_client):
         """T-INT-E2E-02: /health 和 /metrics 数据一致性（时间戳递增）。"""

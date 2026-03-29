@@ -465,3 +465,77 @@ def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> 
         )
         assert "NODE_ROLE_BINDING" in prompt
         assert marker in prompt
+
+
+def test_render_node_prompt_includes_planning_and_skill_execution_blocks() -> None:
+    from host_brain.app.prompt_builder import render_node_generation_prompt
+
+    runtime_payload = {
+        "request": {
+            "request_id": "req-exec-blocks",
+            "session_id": "session-exec-blocks",
+            "thread_id": None,
+            "user_message": "总结一下并看看情绪状态",
+        },
+        "render": {"target_lang": "zh"},
+        "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+        "emotion": {
+            "state": {"emotion_tag": "HAPPY", "mood_state": "engaged"},
+            "snapshot": {"emotion_context": {"emotion_tag": "HAPPY", "mood_state": "engaged"}},
+        },
+        "prompt_context": {
+            "payload": {
+                "hard_snapshot": {"session_id": "session-exec-blocks"},
+                "bond_summary": {},
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {"node_bindings": {}},
+                "constraints": {},
+                "tool_meta_pack": [],
+                "emotion_pulse": {"emotion_tag": "HAPPY", "mood_state": "engaged"},
+                "memory_emotion_hint": {},
+                "bond_texture": {},
+            },
+            "validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "observability": {},
+        },
+        "planning_outline": {
+            "total_steps": 4,
+            "step_descriptions": ["总结刚才对话", "查询当前情绪"],
+        },
+        "planning_execution": {
+            "success": True,
+            "executed_skills": ["session_summary", "emotion_query"],
+            "step_results": [
+                {"description": "总结刚才对话", "status": "completed"},
+                {"description": "查询当前情绪", "status": "completed"},
+            ],
+        },
+        "skill_dag": {
+            "total_nodes": 2,
+            "execution_order": [["n1_session_summary"], ["n2_emotion_query"]],
+            "node_ids": ["n1_session_summary", "n2_emotion_query"],
+        },
+        "skill_execution": {
+            "success": True,
+            "completed_nodes": 2,
+            "total_nodes": 2,
+            "output_preview": {
+                "n1_session_summary": "summary ok",
+                "n2_emotion_query": "emotion ok",
+            },
+        },
+        "core_reasoner_primary": {"payload": {"narrative": {"text": "core"}, "intent_draft": {}}},
+        "planner_constraints": {"payload": {"narrative": {"text": "constraints"}}},
+        "safety_verifier": {"payload": {"narrative": {"text": "safety"}}},
+    }
+
+    prompt = render_node_generation_prompt(
+        node_id="chat_direct_ja",
+        runtime_payload=runtime_payload,
+    )
+
+    assert "PLANNING_EXECUTION" in prompt
+    assert "executed_skills: session_summary, emotion_query" in prompt
+    assert "SKILL_EXECUTION_RESULTS" in prompt
+    assert "n1_session_summary: summary ok" in prompt

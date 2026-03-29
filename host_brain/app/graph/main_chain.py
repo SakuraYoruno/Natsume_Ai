@@ -583,6 +583,7 @@ class RecallFusionNode(ChainNode):
                     ts_ms=_ts_ms,
                     emotion_context=_emotion_tag,
                     render_target_lang=_render_target_lang,
+                    query_plan=_agentic_plan,
                 ),
                 timeout_ms=_retrieval_timeout_ms,
             )
@@ -820,7 +821,13 @@ class RecallFusionNode(ChainNode):
                         _recall_results[_slot] = (_recall_results.get(_slot, "") + "\n" + _content).strip()
 
                 if _recall_results:
-                    _pack = _builder.build(_recall_results, task_type=ctx.task_type.value)
+                    _pack = _builder.build(
+                        _recall_results,
+                        task_type=ctx.task_type.value,
+                        slot_budget_overrides=dict(
+                            (dict(orchestrator_result.retrieval_summary or {}).get("slot_budget_overrides") or {})
+                        ) if "orchestrator_result" in locals() else None,
+                    )
                     _trace = list(_pack.subgraph_trace)
                     _conflict_events = list(_pack.conflict_events)
                     recall_pack_trace_meta = {

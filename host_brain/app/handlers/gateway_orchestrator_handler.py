@@ -36,6 +36,8 @@ import re
 import time
 from typing import Any, AsyncGenerator, Dict, Mapping
 
+from host_brain.bond.user_identity import resolve_bond_user_id
+
 logger = logging.getLogger("Natsume.gateway_orchestrator")
 
 # ---------------------------------------------------------------------------
@@ -280,6 +282,7 @@ async def _resolve_state_arbiter_all(
 def _build_recall_pack(
     retrieval_evidence_items: list[dict[str, Any]],
     request_id: str,
+    retrieval_summary: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Any]]:
     """构建 RecallPack，返回 (rewritten_items, recall_slot_text, summary)。"""
     from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
@@ -297,9 +300,14 @@ def _build_recall_pack(
         evidence_items = list(retrieval_evidence_items or [])
         recall_results = _build_recall_pack_inputs(evidence_items)
         recall_pack_active = _parse_bool_env("HOST_RECALL_PACK_ACTIVE", default=True)
+        slot_budget_overrides = dict(retrieval_summary or {}).get("slot_budget_overrides") or {}
 
         if recall_results:
-            cp = cpb.build(recall_results=recall_results, task_type="chat")
+            cp = cpb.build(
+                recall_results=recall_results,
+                task_type="chat",
+                slot_budget_overrides=dict(slot_budget_overrides),
+            )
             rw_items = _recall_pack_to_retrieval_evidence_items(cp)
             applied_to_prompt = False
             if recall_pack_active and rw_items:
@@ -321,6 +329,7 @@ def _build_recall_pack(
                 "input_item_count": len(evidence_items),
                 "total_tokens": cp.total_token_count,
                 "recall_slot_text_injected": list(recall_slot_text.keys()),
+                "slot_budget_overrides": dict(slot_budget_overrides),
             }
         else:
             summary = {
@@ -433,7 +442,7 @@ async def _run_post_generation_tasks(
                 "intent_id": str(intent_id or request_id),
                 "session_id": session_id,
                 "seq": 1,
-                "user_id": session_id,
+                "user_id": resolve_bond_user_id(session_id=session_id),
                 "topic_id": user_message[:64],
                 "capability_hint": "bond_memory",
                 "update_kind": update_kind,
@@ -494,6 +503,7 @@ async def _generate_tts_async(
     request_id: str,
     session_id: str,
     emotion_context: dict[str, Any],
+    bond_summary: dict[str, Any] | None = None,
 ) -> tuple[str | None, dict[str, Any]]:
     """异步生成 TTS 音频（suppress_local_play=True, suppress_vts=True）。
 
@@ -509,9 +519,15 @@ async def _generate_tts_async(
 
     try:
         from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+        from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
 
         base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-        etag = _infer_emotion_tag_for_tts(narrative, base_etag)
+        tts_route = resolve_tts_route(
+            text=narrative,
+            emotion_context={**dict(emotion_context), "emotion_tag": base_etag},
+            bond_summary=bond_summary or {},
+        )
+        etag = str(tts_route.get("emotion_tag") or _infer_emotion_tag_for_tts(narrative, base_etag)).strip()
         intensity_raw = emotion_context.get("emotion_intensity")
         intensity = None
         if intensity_raw is not None:
@@ -524,8 +540,12 @@ async def _generate_tts_async(
             text=narrative,
             request_id=request_id,
             session_id=session_id,
+            speed=float(tts_route.get("speed") or 1.0),
+            pitch=float(tts_route.get("pitch") or 0.0),
             emotion_tag=etag,
             emotion_intensity=intensity,
+            style_note=str(tts_route.get("style_note") or ""),
+            lang_hint=str(tts_route.get("lang_hint") or "zh"),
         )
         if result and result.success:
             audio_ref = result.event.get("audio_ref")
@@ -533,7 +553,9 @@ async def _generate_tts_async(
                 "[%s] Gateway TTS 生成成功 audio_ref=%s",
                 request_id, audio_ref,
             )
-            return (str(audio_ref) if audio_ref else "tts_generated"), result.as_dict()
+            result_payload = result.as_dict()
+            result_payload["route"] = dict(tts_route.get("route") or {})
+            return (str(audio_ref) if audio_ref else "tts_generated"), result_payload
         logger.warning(
             "[%s] Gateway TTS 生成失败（降级）: %s",
             request_id, result.detail if result else "no_result",
@@ -720,6 +742,7 @@ async def gateway_orchestrator_sse_generator(
     retrieval_evidence_items, recall_slot_text, recall_pack_summary = _build_recall_pack(
         retrieval_evidence_items=retrieval_evidence_items,
         request_id=request_id,
+        retrieval_summary=retrieval_summary,
     )
 
     # ── 3d. Bond 上下文提取 ──
@@ -861,6 +884,23 @@ async def gateway_orchestrator_sse_generator(
         raw_text=full_text,
         rendered_text=rendered_text,
     )
+    try:
+        from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
+
+        narrative, response_intelligence_meta = apply_response_intelligence(
+            request_id=request_id,
+            user_message=resolved_message,
+            narrative=narrative,
+            emotion_context=resolved_emotion_context,
+            bond_summary=bond_summary_for_ctx or None,
+            render_lang="zh",
+            allow_rewrite=True,
+        )
+    except Exception as exc:
+        response_intelligence_meta = {
+            "reflection": {"status": "DEGRADED", "reason_code": "POSTPROCESS_FAILED", "detail": str(exc)},
+            "multimodal_output": {"status": "SKIPPED", "reason_code": "POSTPROCESS_FAILED"},
+        }
 
     # ── 4. 后置任务：Airlock 检疫 + 情节记忆 + Bond 动态（并行）──
     post_task_refs = await _run_post_generation_tasks(
@@ -886,6 +926,7 @@ async def gateway_orchestrator_sse_generator(
             request_id=request_id,
             session_id=session_id,
             emotion_context=resolved_emotion_context,
+            bond_summary=bond_summary_for_ctx or None,
         )
 
     # ── 6. 可观测性持久化（降级不阻断）──
@@ -932,6 +973,7 @@ async def gateway_orchestrator_sse_generator(
             "emotion_snapshot": emotion_snapshot_resolved,
             "tts": tts_summary,
             "post_tasks": post_task_refs,
+            "response_intelligence": response_intelligence_meta,
             "trace_metrics": {
                 "elapsed_ms": elapsed_ms,
                 "render_target_lang": "zh",

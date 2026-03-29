@@ -90,7 +90,7 @@ def test_retrieval_orchestrator_success_path() -> None:
     orchestrator = RetrievalOrchestrator(pipeline=_FakePipeline(result=result))  # type: ignore[arg-type]
     req = RetrievalOrchestratorRequest(
         trace_id="trace::1",
-        query="hello",
+        query="Natsume retrieval pipeline",
         session_state={"session_id": "s1"},
         request_id="req::1",
         session_id="s1",
@@ -102,7 +102,7 @@ def test_retrieval_orchestrator_success_path() -> None:
     assert out.path == RETRIEVAL_PATH_SUCCESS
     assert out.retrieval_summary["cache_hit"] is False
     assert out.retrieval_bundle["trace_id"] == "trace::1"
-    assert out.retrieval_bundle["query"] == "hello"
+    assert out.retrieval_bundle["query"] == "Natsume retrieval pipeline"
     assert out.retrieval_bundle["session_state"]["session_id"] == "s1"
     assert out.retrieval_summary["route_count"] == 2
     assert len(out.retrieval_evidence_items) == 1
@@ -131,12 +131,12 @@ def test_retrieval_orchestrator_partial_failure_path() -> None:
     orchestrator = RetrievalOrchestrator(pipeline=_FakePipeline(result=result))  # type: ignore[arg-type]
     out = _run(
         orchestrator,
-        RetrievalOrchestratorRequest(
-            trace_id="trace::2",
-            query="hello",
-            session_state={"session_id": "s2"},
-            request_id="req::2",
-        ),
+            RetrievalOrchestratorRequest(
+                trace_id="trace::2",
+                query="Natsume retrieval pipeline",
+                session_state={"session_id": "s2"},
+                request_id="req::2",
+            ),
     )
 
     assert out.success is False
@@ -169,12 +169,12 @@ def test_retrieval_orchestrator_all_failure_path() -> None:
     orchestrator = RetrievalOrchestrator(pipeline=_FakePipeline(result=result))  # type: ignore[arg-type]
     out = _run(
         orchestrator,
-        RetrievalOrchestratorRequest(
-            trace_id="trace::3",
-            query="hello",
-            session_state={"session_id": "s3"},
-            request_id="req::3",
-        ),
+            RetrievalOrchestratorRequest(
+                trace_id="trace::3",
+                query="Natsume retrieval pipeline",
+                session_state={"session_id": "s3"},
+                request_id="req::3",
+            ),
     )
 
     assert out.success is False
@@ -191,7 +191,7 @@ def test_retrieval_orchestrator_timeout_maps_to_degraded() -> None:
         orchestrator,
         RetrievalOrchestratorRequest(
             trace_id="trace::4",
-            query="hello",
+            query="Natsume retrieval pipeline",
             session_state={"session_id": "s4"},
             request_id="req::4",
         ),

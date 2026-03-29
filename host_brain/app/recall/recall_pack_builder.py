@@ -82,15 +82,24 @@ class RecallPackBuilder:
         self,
         recall_results: dict[str, Optional[str]],
         task_type: Optional[str] = None,
+        slot_budget_overrides: dict[str, int] | None = None,
     ) -> RecallPack:
         pack = RecallPack()
+        resolved_slot_budget = {
+            **RECALL_SLOT_TOKEN_BUDGET,
+            **{
+                str(slot_name): max(50, int(token_budget))
+                for slot_name, token_budget in dict(slot_budget_overrides or {}).items()
+                if str(slot_name) in RECALL_SLOT_TOKEN_BUDGET
+            },
+        }
 
         for slot_name in RECALL_SLOT_PRIORITY:
             raw_text = str(recall_results.get(slot_name) or "").strip()
             if not raw_text:
                 continue
 
-            max_tokens = RECALL_SLOT_TOKEN_BUDGET[slot_name]
+            max_tokens = resolved_slot_budget[slot_name]
             truncated_text, actual_tokens, was_truncated = truncate_to_token_limit(raw_text, max_tokens)
             pack.set_slot(
                 slot_name,

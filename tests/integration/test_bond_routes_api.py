@@ -12,6 +12,7 @@ from host_brain.bond.bond_stage_engine import (
     BondStageEngine,
 )
 from host_brain.app.bond_routes import router, set_bond_engine_provider
+from host_brain.bond.user_identity import get_canonical_bond_user_id
 
 
 # ── 夹具 ─────────────────────────────────────────────────────────────────────
@@ -54,6 +55,7 @@ class TestGetBondStage:
         resp = client.get("/bond/stage/alice")
         assert resp.status_code == 200
         data = resp.json()
+        assert data["user_id"] == get_canonical_bond_user_id()
         assert data["current_stage"] == STAGE_STRANGER
         assert data["total_score"] == 0
         assert data["stage_index"] == 0
@@ -106,7 +108,7 @@ class TestSubmitBondEvent:
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert data["user_id"] == "user_001"
+        assert data["user_id"] == get_canonical_bond_user_id()
         assert data["transition_status"] in ("STABLE", "PROMOTED", "DEMOTED")
         assert data["score_delta"] > 0
 
@@ -190,9 +192,8 @@ class TestListBondUsers:
         })
         resp = client.get("/bond/users")
         data = resp.json()
-        assert data["total"] == 2
-        assert "alice" in data["users"]
-        assert "bob" in data["users"]
+        assert data["total"] == 1
+        assert data["users"] == [get_canonical_bond_user_id()]
 
 
 # ── T-BOND-API-07: 晋级后 Summary 阶段更新 ───────────────────────────────────

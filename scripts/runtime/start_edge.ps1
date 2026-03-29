@@ -1104,8 +1104,24 @@ function Test-PythonImport {
   if ([string]::IsNullOrWhiteSpace($PythonPath) -or [string]::IsNullOrWhiteSpace($ModuleName)) {
     return $false
   }
-  & $PythonPath -c "import $ModuleName" *> $null
+  & $PythonPath -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$ModuleName') else 1)" *> $null
   return ($LASTEXITCODE -eq 0)
+}
+
+function Test-PythonImportAny {
+  param(
+    [string]$PythonPath,
+    [string[]]$ModuleNames
+  )
+  if ([string]::IsNullOrWhiteSpace($PythonPath) -or $null -eq $ModuleNames -or $ModuleNames.Count -eq 0) {
+    return $false
+  }
+  foreach ($moduleName in $ModuleNames) {
+    if (Test-PythonImport -PythonPath $PythonPath -ModuleName $moduleName) {
+      return $true
+    }
+  }
+  return $false
 }
 
 $resolvedAsrLanguage = [string]([Environment]::GetEnvironmentVariable("EDGE_ASR_LANGUAGE", "Process"))
@@ -1184,7 +1200,7 @@ if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("uia", "external")) {
+  if ($candidateBackend -in @("uia", "wxautox4", "external")) {
     $wechatBridgeBackend = $candidateBackend
   } else {
     $wechatBridgeBackend = "uia"
@@ -1256,8 +1272,9 @@ $wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
 $wechatBridgeErrLog = Join-Path $LogDir "wechat_bridge.stderr.log"
 $wechatCommandQueueFile = Join-Path $runtimeRoot "wechat_command_queue.jsonl"
 $wechatCommandResultFile = Join-Path $runtimeRoot "wechat_command_result.jsonl"
+$wechatBridgeUsesCommandQueue = $wechatBridgeBackend -in @("uia", "wxautox4")
 
-if ($wechatBridgeBackend -eq "uia") {
+if ($wechatBridgeUsesCommandQueue) {
   $queuePathRaw = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_COMMAND_QUEUE_FILE")
   if (-not [string]::IsNullOrWhiteSpace($queuePathRaw)) {
     if ([System.IO.Path]::IsPathRooted($queuePathRaw)) {
@@ -1288,7 +1305,9 @@ if ($wechatBridgeBackend -eq "uia") {
   $envValues["EDGE_WECHAT_COMMAND_RESULT_FILE"] = [string]$wechatCommandResultFile
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_QUEUE_FILE", [string]$wechatCommandQueueFile, "Process")
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
+}
 
+if ($wechatBridgeBackend -eq "uia") {
   $uiaDefaultEnv = [ordered]@{
     EDGE_WECHAT_INBOUND_BACKEND = "uia_hook"
     EDGE_WECHAT_UIA_MAIN_WINDOW_CLASSES = "mmui::ChatSingleWindow,WeixinMainWndForPC,WeChatMainWndForPC,Qt51514QWindowIcon"
@@ -1328,8 +1347,8 @@ if (Test-Path -Path $pidFile) {
         wechat_bridge_enabled = $wechatBridgeEnabled
         wechat_bridge_backend = $wechatBridgeBackend
         wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-        wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
-        wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
+        wechat_bridge_command_queue_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandQueueFile } else { $null }
+        wechat_bridge_command_result_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandResultFile } else { $null }
       }
       $result | ConvertTo-Json -Depth 4
       exit 0
@@ -1359,8 +1378,8 @@ if ($null -ne $listeningPid) {
       wechat_bridge_enabled = $wechatBridgeEnabled
       wechat_bridge_backend = $wechatBridgeBackend
       wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-      wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
-      wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
+      wechat_bridge_command_queue_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandQueueFile } else { $null }
+      wechat_bridge_command_result_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandResultFile } else { $null }
     }
     $result | ConvertTo-Json -Depth 4
     exit 0
@@ -1582,7 +1601,7 @@ if ($null -eq $vtsConn) {
 # ────────────────────────────────────────────────────────────────────────────
 
 # 微信桥接（可选）：
-#   EDGE_WECHAT_BRIDGE_BACKEND=uia|external
+#   EDGE_WECHAT_BRIDGE_BACKEND=uia|wxautox4|external
 #   external: 不拉起本地桥接，外部插件可直接推送到 /v1/gateway/wechat/webhook
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
@@ -1600,7 +1619,7 @@ if (Test-Path -Path $wechatBridgePidFile) {
   }
   Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
 }
-$bridgeScriptNeedles = @("wechat_uia_bridge.py")
+$bridgeScriptNeedles = @("wechat_uia_bridge.py", "wxautox4_bridge.py")
 $existingBridgePids = @()
 foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
   $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1629,7 +1648,7 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedles = @("wechat_uia_bridge.py")
+  $bridgeScriptNeedles = @("wechat_uia_bridge.py", "wxautox4_bridge.py")
   $existingBridgePids = @()
   foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
     $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1723,10 +1742,16 @@ if ($wechatBridgeEnabled) {
     }
   } else {
     $bridgeScript = $null
-    $bridgeDependencyModule = "comtypes"
+    $bridgeDependencyModules = @("comtypes")
     $bridgeDependencyHint = "pip install comtypes pywin32"
     $bridgeExtraArgs = @()
-    $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
+    if ($wechatBridgeBackend -eq "wxautox4") {
+      $bridgeDependencyModules = @("wxautox4", "wxautox4_wechatbot")
+      $bridgeDependencyHint = "pip install wxautox4 or install the vendor wheel, then activate it"
+      $bridgeScript = Join-Path $repoRoot "tools\wxautox4_bridge.py"
+    } else {
+      $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
+    }
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
     [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)
@@ -1737,9 +1762,10 @@ if ($wechatBridgeEnabled) {
       $wechatCommandResultFile
     )
 
-    if (-not (Test-PythonImport -PythonPath $pythonCmd.Source -ModuleName $bridgeDependencyModule)) {
+    if (-not (Test-PythonImportAny -PythonPath $pythonCmd.Source -ModuleNames $bridgeDependencyModules)) {
+      $bridgeDependencyLabel = ($bridgeDependencyModules -join " | ")
       $wechatBridgeStatus = "dependency_missing"
-      $wechatBridgeError = "python dependency missing: $bridgeDependencyModule (install with: $bridgeDependencyHint)"
+      $wechatBridgeError = "python dependency missing: $bridgeDependencyLabel (install with: $bridgeDependencyHint)"
       if (-not ($startupWarnings -contains "WECHAT_BRIDGE_DEPENDENCY_MISSING")) {
         $startupWarnings += "WECHAT_BRIDGE_DEPENDENCY_MISSING"
       }
@@ -1894,8 +1920,8 @@ $result = [ordered]@{
   wechat_bridge_env_raw = $wechatBridgeEnvRaw
   wechat_bridge_backend = $wechatBridgeBackend
   wechat_bridge_backend_raw = $wechatBridgeBackendRaw
-  wechat_bridge_command_queue_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandQueueFile } else { $null }
-  wechat_bridge_command_result_file = if ($wechatBridgeBackend -eq "uia") { $wechatCommandResultFile } else { $null }
+  wechat_bridge_command_queue_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandQueueFile } else { $null }
+  wechat_bridge_command_result_file = if ($wechatBridgeUsesCommandQueue) { $wechatCommandResultFile } else { $null }
   wechat_bridge_callback_url_local = $(
     $wechatGatewayPortText = "19000"
     if ($envValues.ContainsKey("EDGE_GATEWAY_PORT") -and -not [string]::IsNullOrWhiteSpace([string]$envValues["EDGE_GATEWAY_PORT"])) {

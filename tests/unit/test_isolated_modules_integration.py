@@ -226,7 +226,7 @@ class TestMemoryGuardIntegration:
         assert result["status"] in ("SKIPPED", "OK")  # 降级或正常均可接受
         # 若被拒绝，reason_code 应包含 MEMORY_GUARD_REJECTED
         if result["status"] == "SKIPPED":
-            assert "MEMORY_GUARD" in result.get("reason_code", "")
+            assert result.get("reason_code", "").startswith(("MEMORY_GUARD", "MEMORY_WORTH"))
 
 
 # ---------------------------------------------------------------------------

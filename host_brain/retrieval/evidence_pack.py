@@ -10,6 +10,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import RETR_EPACK_INPUT_INVALID
 from host_brain.core.ids import now_ms
+from host_brain.retrieval.audit_preview import build_retrieval_items_preview, build_retrieval_refs_preview
 
 
 S_RET_EVIDENCE_PACK = "S_RET_EVIDENCE_PACK"
@@ -124,6 +125,8 @@ class EvidencePackServiceContract:
                 "evidence_refs_count": len(evidence_refs),
                 "pack_id": output["pack_id"],
                 "serialization_version": SERIALIZATION_VERSION,
+                "topk": build_retrieval_items_preview(normalized_topk),
+                "evidence_refs": build_retrieval_refs_preview(evidence_refs),
                 "output_status": output["status"],
             },
             ts_ms=now_value,
@@ -183,6 +186,8 @@ class EvidencePackServiceContract:
                 "evidence_refs_count": len(evidence_refs),
                 "pack_id": output["pack_id"],
                 "serialization_version": SERIALIZATION_VERSION,
+                "topk": build_retrieval_items_preview(topk),
+                "evidence_refs": build_retrieval_refs_preview(evidence_refs),
                 "output_status": STATUS_DEGRADED,
             },
             ts_ms=ts_ms,

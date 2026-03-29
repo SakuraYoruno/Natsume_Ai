@@ -77,6 +77,75 @@ export function fetchTraceStreamEvents(requestId) {
   return request(`/obs/trace/${encodeURIComponent(requestId)}/stream_events`)
 }
 
+export function connectTraceLiveFeed(params = {}, handlers = {}) {
+  if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+    throw new Error('EventSource not available')
+  }
+
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  const source = new EventSource(`/obs/trace-feed/live${qs ? '?' + qs : ''}`)
+
+  const parseEvent = (event) => {
+    try {
+      return JSON.parse(event.data)
+    } catch (error) {
+      console.warn('[SSE] Failed to parse trace live feed payload:', error)
+      return null
+    }
+  }
+
+  source.onopen = () => {
+    handlers.onOpen?.()
+  }
+
+  source.addEventListener('snapshot', (event) => {
+    const data = parseEvent(event)
+    if (data) handlers.onSnapshot?.(data)
+  })
+
+  source.addEventListener('delta', (event) => {
+    const data = parseEvent(event)
+    if (data) handlers.onDelta?.(data)
+  })
+
+  source.addEventListener('heartbeat', (event) => {
+    const data = parseEvent(event)
+    if (data) handlers.onHeartbeat?.(data)
+  })
+
+  source.addEventListener('trace_error', (event) => {
+    const data = parseEvent(event)
+    handlers.onError?.(data ?? { type: 'error', detail: 'trace live feed payload parse failed' })
+  })
+
+  source.onerror = (error) => {
+    handlers.onConnectionError?.(error)
+  }
+
+  return {
+    close: () => source.close(),
+    source,
+  }
+}
+
+export function connectTraceRequestLive(requestId, handlers = {}, params = {}) {
+  if (!requestId) {
+    throw new Error('requestId is required')
+  }
+  return connectTraceLiveFeed(
+    {
+      keyword: requestId,
+      limit: 1,
+      window_minutes: 10080,
+      interval_ms: 1000,
+      ...params,
+    },
+    handlers
+  )
+}
+
 /**
  * 获取当前 Host 图编排定义（节点、边），供展示图拓扑
  */

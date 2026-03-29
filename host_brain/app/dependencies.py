@@ -38,11 +38,22 @@ from host_brain.memory.episodic import EpisodicStore
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
+from host_brain.persona.bond_aware_style import BondAwareStyleEngine
 from host_brain.retrieval.pipeline import (
     RetrievalPipelineContract,
     build_retrieval_pipeline_from_env,
 )
 from host_brain.retrieval.orchestrator import RetrievalOrchestrator
+from host_brain.reasoning.reflection_chain import ReflectionChain
+from host_brain.channels.multimodal_processor import MultimodalProcessor
+from host_brain.channels.tts_context_router import TtsContextRouter
+from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
+from host_brain.memory.episodic_memory_graph import EpisodicMemoryGraph
+from host_brain.memory.consolidation_trigger import ConsolidationTrigger
+from host_brain.core.predictive_state import PredictiveStateEngine
+from host_brain.core.meta_learning_loop import MetaLearningLoop
+from host_brain.agents.planning_agent import PlanningAgent
+from host_brain.skills.skill_composer import SkillComposer
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
@@ -95,6 +106,17 @@ _distillation_engine: Optional[DistillationEngine] = None
 _semantic_recaller: Optional[SemanticRecaller] = None
 _context_compressor: Optional[Any] = None
 _emotion_timeline: Optional[Any] = None
+_bond_aware_style_engine: Optional[BondAwareStyleEngine] = None
+_reflection_chain: Optional[ReflectionChain] = None
+_tts_context_router: Optional[TtsContextRouter] = None
+_multimodal_processor: Optional[MultimodalProcessor] = None
+_memory_worth_evaluator: Optional[MemoryWorthEvaluator] = None
+_episodic_memory_graph: Optional[EpisodicMemoryGraph] = None
+_consolidation_trigger: Optional[ConsolidationTrigger] = None
+_predictive_state_engine: Optional[PredictiveStateEngine] = None
+_meta_learning_loop: Optional[MetaLearningLoop] = None
+_planning_agent: Optional[PlanningAgent] = None
+_skill_composer: Optional[SkillComposer] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -720,6 +742,83 @@ def get_semantic_recaller() -> SemanticRecaller:
     return _semantic_recaller
 
 
+def get_bond_aware_style_engine() -> BondAwareStyleEngine:
+    global _bond_aware_style_engine
+    if _bond_aware_style_engine is None:
+        _bond_aware_style_engine = BondAwareStyleEngine()
+    return _bond_aware_style_engine
+
+
+def get_reflection_chain() -> ReflectionChain:
+    global _reflection_chain
+    if _reflection_chain is None:
+        _reflection_chain = ReflectionChain()
+    return _reflection_chain
+
+
+def get_tts_context_router() -> TtsContextRouter:
+    global _tts_context_router
+    if _tts_context_router is None:
+        _tts_context_router = TtsContextRouter()
+    return _tts_context_router
+
+
+def get_multimodal_processor() -> MultimodalProcessor:
+    global _multimodal_processor
+    if _multimodal_processor is None:
+        _multimodal_processor = MultimodalProcessor()
+    return _multimodal_processor
+
+
+def get_memory_worth_evaluator() -> MemoryWorthEvaluator:
+    global _memory_worth_evaluator
+    if _memory_worth_evaluator is None:
+        _memory_worth_evaluator = MemoryWorthEvaluator()
+    return _memory_worth_evaluator
+
+
+def get_episodic_memory_graph() -> EpisodicMemoryGraph:
+    global _episodic_memory_graph
+    if _episodic_memory_graph is None:
+        _episodic_memory_graph = EpisodicMemoryGraph()
+    return _episodic_memory_graph
+
+
+def get_consolidation_trigger() -> ConsolidationTrigger:
+    global _consolidation_trigger
+    if _consolidation_trigger is None:
+        _consolidation_trigger = ConsolidationTrigger()
+    return _consolidation_trigger
+
+
+def get_predictive_state_engine() -> PredictiveStateEngine:
+    global _predictive_state_engine
+    if _predictive_state_engine is None:
+        _predictive_state_engine = PredictiveStateEngine()
+    return _predictive_state_engine
+
+
+def get_meta_learning_loop() -> MetaLearningLoop:
+    global _meta_learning_loop
+    if _meta_learning_loop is None:
+        _meta_learning_loop = MetaLearningLoop()
+    return _meta_learning_loop
+
+
+def get_planning_agent() -> PlanningAgent:
+    global _planning_agent
+    if _planning_agent is None:
+        _planning_agent = PlanningAgent()
+    return _planning_agent
+
+
+def get_skill_composer() -> SkillComposer:
+    global _skill_composer
+    if _skill_composer is None:
+        _skill_composer = SkillComposer()
+    return _skill_composer
+
+
 # ---------------------------------------------------------------------------
 # EdgeRpcClient 工厂（Host → Edge HTTP 推送）
 # ---------------------------------------------------------------------------
@@ -927,6 +1026,7 @@ def _normalize_base_url(value: str) -> str:
 
 
 def get_edge_base_urls() -> list[str]:
+    override = str(os.environ.get("HOST_EDGE_RPC_BASE_URL") or "").strip()
     primary = get_edge_base_url()
     host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
@@ -935,11 +1035,13 @@ def get_edge_base_urls() -> list[str]:
     except ValueError:
         port = 17800
 
-    candidates = [primary, f"http://{host}:{port}"]
+    candidates = [primary]
+    if not override:
+        candidates.append(f"http://{host}:{port}")
     allow_local_fallback = str(os.environ.get("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") or "").strip().lower() in {
         "1", "true", "yes", "on"
     }
-    if allow_local_fallback and host not in {"127.0.0.1", "localhost"}:
+    if allow_local_fallback and not override and host not in {"127.0.0.1", "localhost"}:
         candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
 
     seen: set[str] = set()

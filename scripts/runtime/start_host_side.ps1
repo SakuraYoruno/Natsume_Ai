@@ -137,6 +137,230 @@ function Parse-IntFromText {
   return $value
 }
 
+function Read-TrimmedFileText {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [string]$Encoding = "ascii"
+  )
+  if (-not (Test-Path -Path $Path)) {
+    return ""
+  }
+  $raw = Get-Content -Path $Path -Raw -Encoding $Encoding -ErrorAction SilentlyContinue
+  if ($null -eq $raw) {
+    return ""
+  }
+  return "$raw".Trim()
+}
+
+function Test-LoopbackHost {
+  param([string]$HostName)
+  if ([string]::IsNullOrWhiteSpace($HostName)) {
+    return $false
+  }
+  $normalized = $HostName.Trim().ToLowerInvariant()
+  return @("127.0.0.1", "localhost", "::1", "0.0.0.0") -contains $normalized
+}
+
+function Get-UrlHost {
+  param([string]$Url)
+  if ([string]::IsNullOrWhiteSpace($Url)) {
+    return ""
+  }
+  try {
+    return ([Uri]$Url).Host
+  } catch {
+    return ""
+  }
+}
+
+function Resolve-HostEdgeBaseUrl {
+  param([hashtable]$EnvValues)
+
+  $baseUrl = ""
+  if ($EnvValues.ContainsKey("HOST_EDGE_RPC_BASE_URL")) {
+    $baseUrl = [string]$EnvValues["HOST_EDGE_RPC_BASE_URL"]
+  } elseif ($env:HOST_EDGE_RPC_BASE_URL) {
+    $baseUrl = [string]$env:HOST_EDGE_RPC_BASE_URL
+  }
+  if (-not [string]::IsNullOrWhiteSpace($baseUrl)) {
+    return $baseUrl.Trim()
+  }
+
+  $edgeHost = ""
+  if ($EnvValues.ContainsKey("EDGE_RPC_HOST")) {
+    $edgeHost = [string]$EnvValues["EDGE_RPC_HOST"]
+  } elseif ($env:EDGE_RPC_HOST) {
+    $edgeHost = [string]$env:EDGE_RPC_HOST
+  }
+  if ([string]::IsNullOrWhiteSpace($edgeHost)) {
+    return ""
+  }
+
+  $edgePort = ""
+  if ($EnvValues.ContainsKey("EDGE_RPC_PORT")) {
+    $edgePort = [string]$EnvValues["EDGE_RPC_PORT"]
+  } elseif ($env:EDGE_RPC_PORT) {
+    $edgePort = [string]$env:EDGE_RPC_PORT
+  }
+  if ([string]::IsNullOrWhiteSpace($edgePort)) {
+    $edgePort = "17800"
+  }
+  return "http://$($edgeHost.Trim()):$($edgePort.Trim())"
+}
+
+function Stop-ManagedProcessByPidFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PidFile,
+    [string[]]$CommandNeedles = @(),
+    [string]$Label = "managed process"
+  )
+
+  $result = [ordered]@{
+    label = $Label
+    pid_file = $PidFile
+    pid = $null
+    status = "not_found"
+    detail = "pid file not found"
+  }
+
+  if (-not (Test-Path -Path $PidFile)) {
+    return $result
+  }
+
+  $pidText = Read-TrimmedFileText -Path $PidFile -Encoding ascii
+  if ([string]::IsNullOrWhiteSpace($pidText)) {
+    Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+    $result.status = "invalid_pid"
+    $result.detail = "pid file is empty"
+    return $result
+  }
+
+  $parsedPid = 0
+  if (-not [int]::TryParse($pidText, [ref]$parsedPid)) {
+    Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+    $result.status = "invalid_pid"
+    $result.detail = "pid file is invalid: $pidText"
+    return $result
+  }
+
+  $result.pid = $parsedPid
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $parsedPid" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+    $result.status = "already_exited"
+    $result.detail = "$Label already exited"
+    return $result
+  }
+
+  $commandLine = [string]$procInfo.CommandLine
+  $matches = $true
+  if ($CommandNeedles.Count -gt 0) {
+    $matches = $false
+    foreach ($needle in $CommandNeedles) {
+      if (-not [string]::IsNullOrWhiteSpace($needle) -and $commandLine -like "*$needle*") {
+        $matches = $true
+        break
+      }
+    }
+  }
+  if (-not $matches) {
+    $result.status = "mismatch"
+    $result.detail = "$Label command line mismatch: $commandLine"
+    return $result
+  }
+
+  Stop-Process -Id $parsedPid -Force -ErrorAction SilentlyContinue
+  Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+  $result.status = "stopped"
+  $result.detail = "$Label stopped"
+  return $result
+}
+
+function Stop-LocalEdgeWechatIngress {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$EnvValues
+  )
+
+  $edgeBaseUrl = Resolve-HostEdgeBaseUrl -EnvValues $EnvValues
+  $edgeHost = Get-UrlHost -Url $edgeBaseUrl
+  if ([string]::IsNullOrWhiteSpace($edgeHost) -or (Test-LoopbackHost -HostName $edgeHost)) {
+    return [ordered]@{
+      status = "skipped"
+      detail = "host edge base url is local or empty"
+      host_edge_rpc_base_url = $edgeBaseUrl
+    }
+  }
+
+  $runtimeEdge = Join-Path $RepoRoot "runtime\edge"
+  $localEdgeEnvFile = Join-Path $runtimeEdge ".env.edge.local"
+  $localEdgeEnv = Read-EnvFile -Path $localEdgeEnvFile
+  $platformsRaw = if ($localEdgeEnv.ContainsKey("EDGE_GATEWAY_PLATFORMS")) {
+    [string]$localEdgeEnv["EDGE_GATEWAY_PLATFORMS"]
+  } else {
+    ""
+  }
+  $gatewayPlatforms = @()
+  if (-not [string]::IsNullOrWhiteSpace($platformsRaw)) {
+    $gatewayPlatforms = @(
+      $platformsRaw.Split(",") |
+      ForEach-Object { $_.Trim().ToLowerInvariant() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+  }
+  $wechatPlatformEnabled = $gatewayPlatforms -contains "wechat"
+  $bridgeEnabledRaw = if ($localEdgeEnv.ContainsKey("EDGE_WECHAT_BRIDGE_ENABLED")) {
+    [string]$localEdgeEnv["EDGE_WECHAT_BRIDGE_ENABLED"]
+  } else {
+    ""
+  }
+  $bridgeEnabled = Parse-BoolFromText -Raw $bridgeEnabledRaw -Default $false
+
+  $bridgeResult = Stop-ManagedProcessByPidFile `
+    -PidFile (Join-Path $runtimeEdge "wechat_bridge.pid") `
+    -CommandNeedles @("wechat_uia_bridge.py", "wxautox4_bridge.py") `
+    -Label "local wechat bridge"
+
+  $shouldStopEdgeRuntime = $wechatPlatformEnabled -or $bridgeEnabled -or ($bridgeResult.status -in @("stopped", "already_exited", "mismatch"))
+  $edgeResult = if ($shouldStopEdgeRuntime) {
+    Stop-ManagedProcessByPidFile `
+      -PidFile (Join-Path $runtimeEdge "edge.pid") `
+      -CommandNeedles @("-m edge_client") `
+      -Label "local edge runtime"
+  } else {
+    [ordered]@{
+      label = "local edge runtime"
+      pid_file = (Join-Path $runtimeEdge "edge.pid")
+      pid = $null
+      status = "skipped"
+      detail = "local edge runtime left untouched"
+    }
+  }
+
+  $overallStatus = if (($bridgeResult.status -eq "stopped") -or ($edgeResult.status -eq "stopped")) {
+    "stopped"
+  } elseif (($bridgeResult.status -eq "not_found") -and ($edgeResult.status -in @("not_found", "skipped"))) {
+    "clean"
+  } else {
+    "checked"
+  }
+
+  return [ordered]@{
+    status = $overallStatus
+    detail = "remote edge configured; local wechat ingress cleanup checked"
+    host_edge_rpc_base_url = $edgeBaseUrl
+    local_edge_env_file = $localEdgeEnvFile
+    wechat_platform_enabled = $wechatPlatformEnabled
+    wechat_bridge_enabled = $bridgeEnabled
+    bridge = $bridgeResult
+    edge = $edgeResult
+  }
+}
+
 function Invoke-EdgeWarmup {
   param(
     [string]$PythonExe,
@@ -277,6 +501,8 @@ if (-not $envValues.ContainsKey("HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT") -and -
   $env:HOST_INPUT_WECHAT_REJECT_FALLBACK_TEXT = "System busy, please retry."
 }
 
+$localEdgeWechatCleanup = Stop-LocalEdgeWechatIngress -RepoRoot $repoRoot -EnvValues $envValues
+
 if (-not $BindHost) {
   if ($envValues.ContainsKey("HOST_APP_HOST")) {
     $BindHost = [string]$envValues["HOST_APP_HOST"]
@@ -338,6 +564,7 @@ if (Test-Path -Path $pidFile) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        local_edge_wechat_cleanup = $localEdgeWechatCleanup
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -367,6 +594,7 @@ if ($null -ne $listeningPid) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        local_edge_wechat_cleanup = $localEdgeWechatCleanup
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -592,6 +820,7 @@ $result = [ordered]@{
   edge_warmup_status = $edgeWarmupStatus
   edge_warmup_detail = $edgeWarmupDetail
   edge_warmup_output = $edgeWarmupOutput
+  local_edge_wechat_cleanup = $localEdgeWechatCleanup
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10

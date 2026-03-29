@@ -199,6 +199,7 @@ def _log_input_event(
     request_id: str,
     session_id: str,
     source: str,
+    input_payload: dict[str, Any] | None = None,
     phase: str,
     status: str,
     detail: str = "",
@@ -209,6 +210,28 @@ def _log_input_event(
     if ledger is None:
         return
     try:
+        payload: dict[str, Any] = {
+            "source": source,
+            "phase": phase,
+            "latency_ms": latency_ms,
+        }
+        if source == "GATEWAY":
+            gateway_fields = (
+                "platform",
+                "conversation_id",
+                "msg_id",
+                "msg_type",
+                "from_id",
+                "to_id",
+                "sender_name",
+                "media_url",
+                "reply_to_msg_id",
+                "is_group",
+            )
+            for field in gateway_fields:
+                value = (input_payload or {}).get(field)
+                if value is not None:
+                    payload[field] = value
         ledger.log_voice_event(
             {
                 "request_id": request_id,
@@ -219,11 +242,7 @@ def _log_input_event(
                 "reason_code": reason_code,
                 "stage": f"input_dispatch.{phase.lower()}",
                 "detail": detail[:400] if detail else None,
-                "payload": {
-                    "source": source,
-                    "phase": phase,
-                    "latency_ms": latency_ms,
-                },
+                "payload": payload,
                 "ts_ms": ts_ms,
             }
         )
@@ -263,6 +282,7 @@ async def _dispatch_to_graph(
         request_id=request_id,
         session_id=session_id,
         source=source,
+        input_payload=payload,
         phase="ACCEPTED",
         status="ACCEPTED",
         detail=f"source={source} text_len={len(text)}",
@@ -341,6 +361,7 @@ async def _dispatch_to_graph_worker(
         request_id=request_id,
         session_id=session_id,
         source=source,
+        input_payload=payload,
         phase="DISPATCHED",
         status="DISPATCHED",
         detail=f"dispatch_mode={dispatch_mode} source={source}",
@@ -363,6 +384,7 @@ async def _dispatch_to_graph_worker(
             request_id=request_id,
             session_id=session_id,
             source=source,
+            input_payload=payload,
             phase="COMPLETED",
             status="OK",
             detail=f"main_chain completed source={source} latency_ms={latency_ms}",
@@ -382,6 +404,7 @@ async def _dispatch_to_graph_worker(
             request_id=request_id,
             session_id=session_id,
             source=source,
+            input_payload=payload,
             phase="NOT_WIRED",
             status="DEGRADED",
             reason_code="INPUT_MAIN_CHAIN_NOT_WIRED",
@@ -402,6 +425,7 @@ async def _dispatch_to_graph_worker(
             request_id=request_id,
             session_id=session_id,
             source=source,
+            input_payload=payload,
             phase="FAILED",
             status="FAILED",
             reason_code="INPUT_GRAPH_ERROR",

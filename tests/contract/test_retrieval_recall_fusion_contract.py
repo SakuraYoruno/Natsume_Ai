@@ -98,6 +98,10 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
         self.assertEqual(RET_OP_RECALL, row["op_kind"])
         self.assertEqual(STATUS_OK, row["status"])
         self.assertEqual(S_RET_RECALL, row["stage"])
+        self.assertIsInstance(row["payload"]["items"], list)
+        self.assertGreater(len(row["payload"]["items"]), 0)
+        self.assertIn("snippet", row["payload"]["items"][0])
+        self.assertIn("source_ref", row["payload"]["items"][0])
 
     def test_partial_route_failure_keeps_candidates_with_stable_reason(self) -> None:
         env = {

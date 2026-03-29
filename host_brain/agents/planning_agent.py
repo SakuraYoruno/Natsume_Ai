@@ -88,6 +88,8 @@ class PlanExecutionResult:
     needs_user_input: bool = False
     pending_question: str = ""
     elapsed_ms: float = 0.0
+    step_results: list[dict[str, Any]] = field(default_factory=list)
+    executed_skills: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +100,8 @@ class PlanExecutionResult:
             "needs_user_input": self.needs_user_input,
             "pending_question": self.pending_question[:200] if self.pending_question else "",
             "elapsed_ms": round(self.elapsed_ms, 1),
+            "step_results": list(self.step_results[:6]),
+            "executed_skills": list(self.executed_skills[:8]),
         }
 
 
@@ -202,6 +206,10 @@ class PlanningAgent:
         # 3. 为每个子任务生成步骤
         for i, sub_task in enumerate(sub_tasks[:self._max_steps - 2]):
             step_id = i + 2
+            selected_skill = self._select_skill_name(
+                sub_task["description"],
+                available_skills=available_skills,
+            )
             # 判断是否需要追问
             if sub_task.get("needs_info"):
                 steps.append(PlanStep(
@@ -215,7 +223,7 @@ class PlanningAgent:
                     step_id=step_id,
                     description=sub_task["description"],
                     action_type="act",
-                    skill_name=sub_task.get("skill"),
+                    skill_name=selected_skill or sub_task.get("skill"),
                     depends_on=[step_id - 1] if step_id > 2 else [1],
                 ))
 
@@ -273,6 +281,115 @@ class PlanningAgent:
         plan.status = "completed"
         return None
 
+    def execute_plan(
+        self,
+        plan: TaskPlan,
+        *,
+        skill_runners: dict[str, Callable[..., Any]] | None = None,
+        base_context: dict[str, Any] | None = None,
+    ) -> PlanExecutionResult:
+        """Execute a plan with safe skill runners."""
+        t0 = time.monotonic()
+        runners = dict(skill_runners or {})
+        ctx = dict(base_context or {})
+        step_results: list[dict[str, Any]] = []
+        executed_skills: list[str] = []
+        completed = 0
+
+        for step in plan.steps:
+            unmet = [
+                dep for dep in step.depends_on
+                if 0 < dep <= len(plan.steps) and plan.steps[dep - 1].status not in {StepStatus.COMPLETED, StepStatus.SKIPPED}
+            ]
+            if unmet:
+                step.status = StepStatus.SKIPPED
+                step.result = f"blocked_by_dependencies:{','.join(str(dep) for dep in unmet)}"
+                step_results.append(step.as_dict())
+                continue
+
+            if step.action_type == "reason":
+                step.status = StepStatus.COMPLETED
+                step.result = "parsed_request"
+                completed += 1
+            elif step.action_type == "ask":
+                step.status = StepStatus.NEEDS_INPUT
+                step.result = step.description
+                step_results.append(step.as_dict())
+                return PlanExecutionResult(
+                    task_id=plan.task_id,
+                    success=False,
+                    steps_completed=completed,
+                    steps_total=len(plan.steps),
+                    final_response="",
+                    needs_user_input=True,
+                    pending_question=step.description,
+                    elapsed_ms=(time.monotonic() - t0) * 1000,
+                    step_results=step_results,
+                    executed_skills=executed_skills,
+                )
+            elif step.action_type == "act":
+                runner = runners.get(str(step.skill_name or "").strip())
+                payload = {
+                    "request": plan.original_request,
+                    "task_id": plan.task_id,
+                    "step_id": step.step_id,
+                    "description": step.description,
+                    "context": ctx,
+                }
+                if runner is None:
+                    step.status = StepStatus.SKIPPED
+                    step.result = "no_safe_skill_runner"
+                else:
+                    try:
+                        step.status = StepStatus.IN_PROGRESS
+                        result = runner(payload)
+                        step.status = StepStatus.COMPLETED
+                        step.result = str(result)
+                        if step.skill_name:
+                            executed_skills.append(str(step.skill_name))
+                        completed += 1
+                    except Exception as exc:  # pragma: no cover - defensive
+                        step.status = StepStatus.FAILED
+                        step.result = f"runner_failed:{exc}"
+                step_results.append(step.as_dict())
+            else:
+                act_steps = [
+                    item for item in plan.steps
+                    if item.action_type == "act" and item.status == StepStatus.COMPLETED and str(item.result or "").strip()
+                ]
+                step.status = StepStatus.COMPLETED
+                if act_steps:
+                    step.result = " | ".join(
+                        f"{item.skill_name or 'step'}={str(item.result)[:120]}"
+                        for item in act_steps[:4]
+                    )
+                else:
+                    step.result = "synthesized_without_skill_results"
+                completed += 1
+            step_results.append(step.as_dict())
+
+        plan.status = "completed"
+        final_response = ""
+        for step in reversed(plan.steps):
+            if step.action_type == "synthesize" and str(step.result or "").strip():
+                final_response = step.result
+                break
+        if not final_response:
+            final_response = "plan_completed"
+        return PlanExecutionResult(
+            task_id=plan.task_id,
+            success=all(step.status not in {StepStatus.FAILED, StepStatus.NEEDS_INPUT} for step in plan.steps),
+            steps_completed=sum(
+                1 for step in plan.steps
+                if step.status in {StepStatus.COMPLETED, StepStatus.SKIPPED}
+            ),
+            steps_total=len(plan.steps),
+            final_response=final_response,
+            elapsed_ms=(time.monotonic() - t0) * 1000,
+            step_results=step_results,
+            executed_skills=executed_skills,
+        )
+
     def _decompose_request(self, text: str) -> list[dict[str, Any]]:
         """将请求分解为子任务。"""
         sub_tasks: list[dict[str, Any]] = []
@@ -302,3 +419,32 @@ class PlanningAgent:
             })
 
         return sub_tasks if sub_tasks else [{"description": text[:100], "needs_info": False}]
+
+    @staticmethod
+    def _select_skill_name(
+        description: str,
+        *,
+        available_skills: list[str] | None = None,
+    ) -> str | None:
+        available = {
+            str(name or "").strip().lower(): str(name or "").strip()
+            for name in list(available_skills or [])
+            if str(name or "").strip()
+        }
+        if not available:
+            return None
+
+        text = str(description or "").strip().lower()
+        keyword_map = (
+            (("情绪", "心情", "感受", "emotion", "mood"), "emotion_query"),
+            (("关系", "亲密", "bond", "阶段"), "bond_query"),
+            (("总结", "摘要", "概括", "回顾", "session"), "session_summary"),
+            (("状态", "运行", "health", "status"), "read_only_status"),
+            (("记忆", "回忆", "回想", "memory"), "memory_recall"),
+        )
+        for keywords, skill_name in keyword_map:
+            if any(keyword in text for keyword in keywords):
+                resolved = available.get(skill_name)
+                if resolved:
+                    return resolved
+        return None

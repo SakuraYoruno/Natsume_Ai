@@ -12,26 +12,69 @@ const WINDOW_OPTIONS = [
   { label: '24h', value: 1440 },
 ]
 
+const SUBSYSTEM_STATUS_ORDER = {
+  down: 0,
+  degraded: 1,
+  up: 2,
+  unknown: 3,
+}
+
+function normalizeSubsystemStatus(subsystem) {
+  const raw = String(subsystem?.status || '').toUpperCase()
+  if (raw === 'UP' || raw === 'OK' || raw === 'HEALTHY') return 'up'
+  if (raw === 'DEGRADED' || raw === 'WARN') return 'degraded'
+  if (raw === 'DOWN' || raw === 'FAIL' || raw === 'FAILED' || raw === 'ERROR') return 'down'
+
+  const rate = subsystem?.success_rate
+  if (rate == null) return 'unknown'
+  if (rate >= 80) return 'up'
+  if (rate >= 50) return 'degraded'
+  return 'down'
+}
+
+function getSubsystemBorderClass(subsystem) {
+  const status = normalizeSubsystemStatus(subsystem)
+  if (status === 'up') return 'border-l-green-500'
+  if (status === 'degraded') return 'border-l-orange-400'
+  if (status === 'down') return 'border-l-red-500'
+  return 'border-l-gray-300'
+}
+
+function getSubsystemHeadline(subsystem) {
+  if ((subsystem?.total ?? 0) <= 0) return 'No recent calls'
+  if (subsystem?.detail) return subsystem.detail
+  if (subsystem?.success_rate != null) return `Success ${subsystem.success_rate}%`
+  return `Recent ${subsystem?.total ?? 0} calls`
+}
+
+function getSubsystemFootnote(subsystem) {
+  if ((subsystem?.total ?? 0) <= 0) return 'idle'
+  const parts = [`${subsystem?.success ?? 0}/${subsystem?.total ?? 0} ok`]
+  if ((subsystem?.degraded ?? 0) > 0) parts.push(`${subsystem.degraded} degraded`)
+  if ((subsystem?.failed ?? 0) > 0) parts.push(`${subsystem.failed} failed`)
+  if ((subsystem?.blocked ?? 0) > 0) parts.push(`${subsystem.blocked} blocked`)
+  return parts.join(' · ')
+}
+
 export default function Overview() {
   const [data, setData] = useState(null)
   const [dispatchData, setDispatchData] = useState(null)
-  const [pbData, setPbData] = useState(null)  // TODO-73: PromptBuilder 注入检测摘要
-  const [canonData, setCanonData] = useState(null)  // TODO-79: Canon 提案待审核警告
-  const [chainData, setChainData] = useState(null)  // TODO-90: 主链路健康评分
-  const [subsysData, setSubsysData] = useState(null)  // 子系统健康（Memory/Retrieval/Skill 等）
-  const [agentLoopData, setAgentLoopData] = useState(null)  // Agent Loop 达成率、轮次
-  const [obsMetricsData, setObsMetricsData] = useState(null)  // /obs/metrics（含 agent_metrics 多 Agent 专项）
+  const [pbData, setPbData] = useState(null)
+  const [canonData, setCanonData] = useState(null)
+  const [chainData, setChainData] = useState(null)
+  const [subsysData, setSubsysData] = useState(null)
+  const [agentLoopData, setAgentLoopData] = useState(null)
+  const [obsMetricsData, setObsMetricsData] = useState(null)
+  const [idleSubsystemsExpanded, setIdleSubsystemsExpanded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [windowMinutes, setWindowMinutes] = useState(60)
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
 
-  // WebSocket 实时推送
   const [wsConnected, setWsConnected] = useState(false)
   const [wsAlerts, setWsAlerts] = useState([])
   const wsRef = useRef(null)
-
   useEffect(() => {
     // 尝试建立 WebSocket 连接（优雅降级：失败时完全依赖轮询）
     try {
@@ -102,6 +145,16 @@ export default function Overview() {
   // 分组：边缘服务 vs LLM 节点
   const edgeServices = services.filter((s) => s.service_type === 'edge')
   const llmNodes     = services.filter((s) => s.service_type !== 'edge')
+  const subsystemItems = subsysData?.subsystems ?? []
+  const activeSubsystems = [...subsystemItems]
+    .filter((item) => (item?.total ?? 0) > 0)
+    .sort((a, b) => {
+      const statusDelta = (SUBSYSTEM_STATUS_ORDER[normalizeSubsystemStatus(a)] ?? 99)
+        - (SUBSYSTEM_STATUS_ORDER[normalizeSubsystemStatus(b)] ?? 99)
+      if (statusDelta !== 0) return statusDelta
+      return (b?.last_ts ?? 0) - (a?.last_ts ?? 0)
+    })
+  const idleSubsystems = subsystemItems.filter((item) => (item?.total ?? 0) <= 0)
 
   return (
     <div className="space-y-6">
@@ -239,28 +292,56 @@ export default function Overview() {
               <span className="text-xs text-gray-400">（近 {windowMinutes} 分钟{subsysData?.subsystems?.length != null ? `，共 ${subsysData.subsystems.length} 项` : ''}）</span>
             </div>
             {subsysData?.subsystems?.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-                {(subsysData.subsystems || []).map((s) => {
-                  const rate = s.success_rate
-                  const status = rate == null ? 'unknown' : rate >= 80 ? 'up' : rate >= 50 ? 'degraded' : 'down'
-                  const borderCls = status === 'up' ? 'border-l-green-500' : status === 'degraded' ? 'border-l-orange-400' : status === 'down' ? 'border-l-red-500' : 'border-l-gray-300'
-                  return (
-                    <div key={s.subsystem} className={`card-hover p-4 border-l-4 ${borderCls}`}>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+                  {activeSubsystems.map((s) => (
+                    <div key={s.subsystem} className={`card-hover p-4 border-l-4 ${getSubsystemBorderClass(s)}`}>
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-medium text-gray-800 truncate text-sm">{s.display_name || s.subsystem}</span>
-                        <StatusBadge status={status} />
+                        <StatusBadge status={normalizeSubsystemStatus(s)} />
                       </div>
-                      <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                        {rate != null ? (
-                          <span>成功率 {rate}%</span>
-                        ) : (
-                          <span>无近期数据</span>
-                        )}
-                        {s.total != null && <span>· {s.total} 次</span>}
-                      </div>
+                      <div className="mt-2 text-xs text-gray-600 break-all">{getSubsystemHeadline(s)}</div>
+                      <div className="mt-1 text-xs text-gray-400">{getSubsystemFootnote(s)}</div>
                     </div>
-                  )
-                })}
+                  ))}
+                  {activeSubsystems.length === 0 && (
+                    <div className="col-span-full card p-4 text-center text-sm text-gray-500">
+                      近 {windowMinutes} 分钟没有活跃子系统调用。
+                    </div>
+                  )}
+                </div>
+
+                {idleSubsystems.length > 0 && (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/80 px-4 py-3">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-gray-700">未活跃子系统</div>
+                        <div className="text-xs text-gray-500">
+                          {idleSubsystems.length} 项近窗口无调用，默认收起，避免和活跃项混在一起。
+                        </div>
+                      </div>
+                      <button
+                        className="btn-secondary text-xs"
+                        onClick={() => setIdleSubsystemsExpanded((value) => !value)}
+                      >
+                        {idleSubsystemsExpanded ? '收起' : '展开'}
+                      </button>
+                    </div>
+                    {idleSubsystemsExpanded && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {idleSubsystems.map((s) => (
+                          <span
+                            key={s.subsystem}
+                            className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-500"
+                          >
+                            <StatusBadge status="unknown" />
+                            {s.display_name || s.subsystem}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="card p-4 text-center text-sm text-gray-500">近 {windowMinutes} 分钟暂无子系统调用记录</div>

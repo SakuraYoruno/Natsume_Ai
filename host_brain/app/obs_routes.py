@@ -10,13 +10,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -142,7 +145,9 @@ def _build_voice_trace_nodes(rows: List[Dict[str, Any]]) -> List[TraceNode]:
                 node_id=f"voice_{node_type}_{int(row.get('seq') or idx)}",
                 node_type=node_type,
                 display_name=display_name,
+                side="edge",
                 status=status,
+                reason_code=reason_code,
                 latency_ms=latency_ms,
                 input_data=input_data,
                 output_data=output_data,
@@ -206,6 +211,585 @@ def _coalesce_trace_status(base_status: str, nodes: List[TraceNode]) -> str:
         return "DEGRADED"
     return normalized_base
 
+
+def _fetch_request_rows(ledger: SQLiteLedger, table: str, request_id: str) -> List[Dict[str, Any]]:
+    try:
+        return ledger.fetch_by_request_id(table, request_id)
+    except Exception:
+        return []
+
+
+def _normalize_trace_status(raw_status: Any, *, default: str = "UNKNOWN") -> str:
+    normalized = str(raw_status or "").strip().upper()
+    if not normalized:
+        return default
+    return {
+        "SUCCESS": "OK",
+        "HEALTHY": "OK",
+        "ERROR": "FAIL",
+        "FAILED": "FAIL",
+        "REJECTED": "FAIL",
+    }.get(normalized, normalized)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _extract_input_text(intent_row: Dict[str, Any]) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    normalized = _safe_json(
+        _first_present(
+            intent_row.get("normalized_json"),
+            intent_row.get("proposed_intent_draft_json"),
+        )
+    )
+    normalized_dict = dict(normalized) if isinstance(normalized, dict) else None
+    args = normalized_dict.get("args") if isinstance(normalized_dict, dict) else None
+    text = None
+    if isinstance(args, dict):
+        text = _first_present(
+            args.get("text"),
+            args.get("query"),
+            args.get("message"),
+            args.get("content"),
+        )
+    text = _first_present(text, intent_row.get("raw_text"))
+    return (str(text).strip() if isinstance(text, str) and text.strip() else None, normalized_dict)
+
+
+def _extract_dialogue_pair(memory_rows: List[Dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
+    for row in reversed(memory_rows):
+        detail = str(row.get("detail") or "").strip()
+        if "User:" not in detail or "Natsume:" not in detail:
+            continue
+        user_part = detail.split("User:", 1)[1]
+        user_text, _, reply_text = user_part.partition("Natsume:")
+        user_text = user_text.strip() or None
+        reply_text = reply_text.strip() or None
+        return user_text, reply_text
+    return None, None
+
+
+def _extract_latest_audit_snapshot(error_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for row in reversed(error_rows):
+        if str(row.get("stage") or "").strip().upper() != "AUDIT_SNAPSHOT":
+            continue
+        detail = _safe_json(row.get("detail"))
+        if isinstance(detail, dict):
+            merged = dict(detail)
+            merged.setdefault("stage", row.get("stage"))
+            merged.setdefault("reason_code", row.get("reason_code"))
+            merged.setdefault("ts_ms", row.get("ts_ms"))
+            return merged
+    return None
+
+
+def _summarize_recall(retrieval_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not retrieval_rows:
+        return None
+
+    summary: Dict[str, Any] = {
+        "content_available": False,
+        "message": "Raw recall documents are not persisted for this request; showing stage payloads instead.",
+        "stages": [],
+    }
+
+    for row in retrieval_rows:
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        summary["stages"].append(
+            {
+                "op_kind": row.get("op_kind"),
+                "status": _normalize_trace_status(row.get("status"), default="OK"),
+                "reason_code": row.get("reason_code"),
+                "detail": row.get("detail"),
+                "payload": payload_dict if payload_dict else payload,
+                "ts_ms": row.get("ts_ms"),
+            }
+        )
+        if _payload_contains_recall_content(payload_dict):
+            summary["content_available"] = True
+
+        op_kind = str(row.get("op_kind") or "").strip().upper()
+        if op_kind == "RECALL":
+            summary["candidate_count"] = payload_dict.get("candidate_count")
+            summary["route_count"] = payload_dict.get("route_count")
+            summary["route_error_count"] = payload_dict.get("route_error_count")
+            if payload_dict.get("items"):
+                summary["items"] = payload_dict.get("items")
+        elif op_kind == "RERANK":
+            summary["topk_count"] = payload_dict.get("topk_count")
+            summary["rerank_provider"] = payload_dict.get("provider") or payload_dict.get("effective_provider")
+            if payload_dict.get("topk"):
+                summary["topk"] = payload_dict.get("topk")
+        elif op_kind == "EVIDENCE_PACK":
+            summary["evidence_refs_count"] = payload_dict.get("evidence_refs_count")
+            summary["pack_id"] = payload_dict.get("pack_id")
+            if payload_dict.get("evidence_refs"):
+                summary["evidence_refs"] = payload_dict.get("evidence_refs")
+                summary["content_available"] = True
+            if payload_dict.get("topk"):
+                summary["evidence_topk"] = payload_dict.get("topk")
+        elif op_kind == "PIPELINE":
+            summary["fallback_embedding_used"] = payload_dict.get("fallback_embedding_used")
+            if payload_dict.get("selected_refs"):
+                summary["selected_refs"] = payload_dict.get("selected_refs")
+
+    if summary["content_available"]:
+        summary["message"] = "Persisted recall snippets are available for this request."
+
+    return summary
+
+
+def _payload_contains_recall_content(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for key in ("items", "topk", "selected_refs", "slots"):
+        value = payload.get(key)
+        if isinstance(value, (list, tuple)) and len(value) > 0:
+            return True
+        if isinstance(value, dict) and bool(value):
+            return True
+        if isinstance(value, str) and value.strip():
+            return True
+    evidence_refs = payload.get("evidence_refs")
+    if isinstance(evidence_refs, (list, tuple)) and len(evidence_refs) > 0:
+        return True
+    if isinstance(evidence_refs, str) and evidence_refs.strip():
+        return True
+    return False
+
+
+def _build_trace_summary(
+    request_id: str,
+    intent_rows: List[Dict[str, Any]],
+    governor_rows: List[Dict[str, Any]],
+    retrieval_rows: List[Dict[str, Any]],
+    llm_rows: List[Dict[str, Any]],
+    airlock_rows: List[Dict[str, Any]],
+    bond_rows: List[Dict[str, Any]],
+    memory_rows: List[Dict[str, Any]],
+    error_rows: List[Dict[str, Any]],
+    voice_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    intent_row = intent_rows[-1] if intent_rows else {}
+    governor_row = governor_rows[-1] if governor_rows else {}
+    input_text, normalized_intent = _extract_input_text(intent_row)
+    memory_input_text, output_text = _extract_dialogue_pair(memory_rows)
+    audit_snapshot = _extract_latest_audit_snapshot(error_rows) or {}
+    recall_summary = _summarize_recall(retrieval_rows)
+
+    audit_tags = list(audit_snapshot.get("audit_tags") or [])
+    metadata_keys = list(audit_snapshot.get("metadata_keys") or [])
+    node_timings_ms = dict(audit_snapshot.get("node_timings_ms") or {})
+
+    routing_selected = next(
+        (tag.split(":", 1)[1] for tag in audit_tags if str(tag).startswith("ROUTING_SELECTED:")),
+        None,
+    )
+    emotion_tags = [
+        tag for tag in audit_tags
+        if str(tag).startswith("EMOTION_TIMELINE:")
+        or str(tag).startswith("EMOTION_INFERRED:")
+        or str(tag).startswith("EPISODIC_EMOTION_")
+    ]
+    latest_bond_payload: Dict[str, Any] = {}
+    for row in reversed(bond_rows):
+        payload = _safe_json(row.get("payload"))
+        if not isinstance(payload, dict):
+            continue
+        payload_dict = dict(payload)
+        if payload_dict.get("to_stage") or payload_dict.get("total_score") is not None:
+            latest_bond_payload = payload_dict
+            break
+        if not latest_bond_payload:
+            latest_bond_payload = payload_dict
+
+    total_latency_ms = None
+    for row in reversed(voice_rows):
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        total_latency_ms = _extract_input_dispatch_latency_ms(row, payload_dict)
+        if total_latency_ms is not None:
+            break
+    if total_latency_ms is None and node_timings_ms:
+        try:
+            total_latency_ms = int(sum(int(v or 0) for v in node_timings_ms.values()))
+        except Exception:
+            total_latency_ms = None
+
+    return {
+        "request_id": request_id,
+        "session_id": _first_present(
+            intent_row.get("session_id"),
+            audit_snapshot.get("session_id"),
+            (bond_rows[-1] if bond_rows else {}).get("session_id"),
+        ),
+        "input_text": _first_present(input_text, memory_input_text),
+        "output_text": output_text,
+        "intent": normalized_intent,
+        "task_type": audit_snapshot.get("task_type"),
+        "decision": governor_row.get("decision"),
+        "reason_code": governor_row.get("reason_code"),
+        "audit_tags": audit_tags,
+        "metadata_keys": metadata_keys,
+        "routing_selected": routing_selected,
+        "emotion_tags": emotion_tags,
+        "bond_stage": latest_bond_payload.get("to_stage") or latest_bond_payload.get("from_stage"),
+        "bond_score": latest_bond_payload.get("total_score"),
+        "recall": recall_summary,
+        "node_timings_ms": node_timings_ms,
+        "failure_event": audit_snapshot.get("failure_event"),
+        "governor_passed": audit_snapshot.get("governor_passed"),
+        "final_response_chars": audit_snapshot.get("final_response_chars"),
+        "airlock_blocked": any(bool(row.get("blocked")) for row in airlock_rows),
+        "llm_calls": len(llm_rows),
+        "total_latency_ms": total_latency_ms,
+        "audit_snapshot": audit_snapshot or None,
+    }
+
+
+def _build_intent_trace_node(intent_row: Dict[str, Any]) -> Optional[TraceNode]:
+    if not intent_row:
+        return None
+    input_text, normalized_intent = _extract_input_text(intent_row)
+    lint_result = _safe_json(intent_row.get("lint_result"))
+    return TraceNode(
+        node_id="host_input",
+        node_type="intent",
+        display_name="Host Input",
+        side="host",
+        status="OK",
+        input_data={"raw_text": input_text},
+        output_data={
+            "parse_stage": intent_row.get("parse_stage"),
+            "normalized_intent": normalized_intent,
+            "lint_result": lint_result,
+        },
+        ts_ms=intent_row.get("ts_ms"),
+    )
+
+
+def _build_governor_trace_node(
+    governor_row: Dict[str, Any],
+    summary: Dict[str, Any],
+) -> Optional[TraceNode]:
+    if not governor_row:
+        return None
+    rule_trace = _safe_json(governor_row.get("rule_trace"))
+    snapshot_refs = _safe_json(governor_row.get("snapshot_refs"))
+    tokens = _safe_json(governor_row.get("tokens"))
+    node_timings_ms = dict(summary.get("node_timings_ms") or {})
+    decision = str(governor_row.get("decision") or "").strip().upper()
+    status = "OK" if decision == "APPROVE" else "FAIL"
+    return TraceNode(
+        node_id="governor",
+        node_type="system",
+        display_name="Governor",
+        side="host",
+        status=status,
+        reason_code=governor_row.get("reason_code"),
+        latency_ms=node_timings_ms.get("governor"),
+        input_data={
+            "stage": governor_row.get("stage"),
+            "rule_trace": rule_trace,
+        },
+        output_data={
+            "decision": decision or None,
+            "snapshot_refs": snapshot_refs,
+            "tokens": tokens,
+        },
+        ts_ms=governor_row.get("ts_ms"),
+        error=governor_row.get("reason_code"),
+    )
+
+
+def _build_retrieval_trace_nodes(
+    retrieval_rows: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> List[TraceNode]:
+    if not retrieval_rows:
+        return []
+
+    node_timings_ms = dict(summary.get("node_timings_ms") or {})
+    display_names = {
+        "EMBEDDING": "Recall Embedding",
+        "RECALL": "Recall Fusion",
+        "RERANK": "Recall Rerank",
+        "EVIDENCE_PACK": "Evidence Pack",
+        "PIPELINE": "Retrieval Pipeline",
+    }
+    node_ids = {
+        "EMBEDDING": "retrieval_embedding",
+        "RECALL": "recall_fusion",
+        "RERANK": "retrieval_rerank",
+        "EVIDENCE_PACK": "retrieval_evidence_pack",
+        "PIPELINE": "retrieval_pipeline",
+    }
+
+    nodes: List[TraceNode] = []
+    for row in retrieval_rows:
+        op_kind = str(row.get("op_kind") or "").strip().upper() or "UNKNOWN"
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        latency_ms = payload_dict.get("latency_ms")
+        if latency_ms is None and op_kind in ("RECALL", "PIPELINE"):
+            latency_ms = node_timings_ms.get("recall_fusion")
+        nodes.append(
+            TraceNode(
+                node_id=node_ids.get(op_kind, f"retrieval_{op_kind.lower()}"),
+                node_type="recall" if op_kind == "RECALL" else "retrieval",
+                display_name=display_names.get(op_kind, op_kind.title()),
+                side="host",
+                status=_normalize_trace_status(row.get("status"), default="OK"),
+                reason_code=row.get("reason_code"),
+                latency_ms=latency_ms,
+                input_data={
+                    "stage": row.get("stage"),
+                    "op_kind": op_kind,
+                },
+                output_data={
+                    "payload": payload_dict if payload_dict else payload,
+                    "detail": row.get("detail"),
+                    "content_available": _payload_contains_recall_content(payload_dict),
+                },
+                ts_ms=row.get("ts_ms"),
+                error=row.get("reason_code"),
+            )
+        )
+    return nodes
+
+
+def _build_llm_trace_nodes(
+    llm_rows: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> List[TraceNode]:
+    nodes: List[TraceNode] = []
+    for row in llm_rows:
+        registry_meta = _LLM_NODE_REGISTRY.get(str(row.get("node_id") or ""))
+        nodes.append(
+            TraceNode(
+                node_id=str(row.get("node_id") or "llm_node"),
+                node_type="llm",
+                display_name=(registry_meta or {}).get("role") or str(row.get("node_id") or "LLM"),
+                side="host",
+                provider=row.get("provider"),
+                model_id=row.get("model_id"),
+                status=_normalize_trace_status(row.get("status"), default="OK"),
+                reason_code=row.get("reason_code"),
+                latency_ms=row.get("latency_ms"),
+                input_data={"input_digest": row.get("input_digest")},
+                output_data={"output_digest": row.get("output_digest")},
+                ts_ms=row.get("ts_ms"),
+                error=row.get("reason_code"),
+            )
+        )
+
+    audit_tags = list(summary.get("audit_tags") or [])
+    if summary.get("routing_selected") or summary.get("output_text") or summary.get("failure_event"):
+        nodes.append(
+            TraceNode(
+                node_id="llm_gateway",
+                node_type="llm",
+                display_name="LLM Gateway",
+                side="host",
+                provider="delegated" if not llm_rows else None,
+                model_id=summary.get("routing_selected"),
+                status="FAIL" if summary.get("failure_event") else "OK",
+                reason_code=summary.get("failure_event"),
+                latency_ms=(summary.get("node_timings_ms") or {}).get("llm_gateway"),
+                input_data={
+                    "routing_selected": summary.get("routing_selected"),
+                    "emotion_tags": summary.get("emotion_tags"),
+                },
+                output_data={
+                    "final_response": summary.get("output_text"),
+                    "audit_tags": audit_tags,
+                    "final_response_chars": summary.get("final_response_chars"),
+                },
+                ts_ms=((summary.get("audit_snapshot") or {}).get("ts_ms")),
+                error=summary.get("failure_event"),
+            )
+        )
+    return nodes
+
+
+def _build_airlock_trace_nodes(
+    airlock_rows: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> List[TraceNode]:
+    nodes: List[TraceNode] = []
+    for idx, row in enumerate(airlock_rows, start=1):
+        blocked = bool(row.get("blocked"))
+        direction = str(row.get("direction") or "").strip().upper() or "UNKNOWN"
+        nodes.append(
+            TraceNode(
+                node_id="airlock" if idx == 1 else f"airlock_{idx}",
+                node_type="governor",
+                display_name=f"Airlock {direction.title()}",
+                side="host",
+                status="FAIL" if blocked else "OK",
+                reason_code=row.get("reason_code"),
+                latency_ms=(summary.get("node_timings_ms") or {}).get("airlock_quarantine") if idx == 1 else None,
+                input_data={"direction": direction},
+                output_data={
+                    "blocked": blocked,
+                    "detail": row.get("detail"),
+                    "ingress_classification": row.get("ingress_classification"),
+                },
+                ts_ms=row.get("ts_ms"),
+                error=row.get("reason_code") if blocked else None,
+            )
+        )
+    return nodes
+
+
+def _build_bond_trace_nodes(bond_rows: List[Dict[str, Any]]) -> List[TraceNode]:
+    nodes: List[TraceNode] = []
+    for idx, row in enumerate(bond_rows, start=1):
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        update_kind = str(row.get("update_kind") or "").strip().upper() or "BOND"
+        nodes.append(
+            TraceNode(
+                node_id=f"bond_update_{idx}",
+                node_type="bond",
+                display_name="Bond Update" if update_kind != "STAGE_TRANSITION" else "Bond Stage",
+                side="host",
+                status=_normalize_trace_status(row.get("status"), default="OK"),
+                reason_code=row.get("reason_code"),
+                input_data={
+                    "update_kind": update_kind,
+                    "stage": row.get("stage"),
+                    "evidence_refs": row.get("evidence_refs"),
+                },
+                output_data={
+                    "payload": payload_dict if payload_dict else payload,
+                    "detail": row.get("detail"),
+                },
+                ts_ms=row.get("ts_ms"),
+                error=row.get("reason_code"),
+            )
+        )
+    return nodes
+
+
+def _build_memory_trace_nodes(
+    memory_rows: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> List[TraceNode]:
+    nodes: List[TraceNode] = []
+    for idx, row in enumerate(memory_rows, start=1):
+        nodes.append(
+            TraceNode(
+                node_id="episodic_store" if idx == len(memory_rows) else f"episodic_store_{idx}",
+                node_type="memory",
+                display_name="Episodic Store",
+                side="host",
+                status=_normalize_trace_status(row.get("status"), default="OK"),
+                reason_code=row.get("reason_code"),
+                latency_ms=(summary.get("node_timings_ms") or {}).get("episodic_store") if idx == len(memory_rows) else None,
+                input_data={
+                    "op_kind": row.get("op_kind"),
+                    "evidence_refs": row.get("evidence_refs"),
+                    "source_memory_ids": row.get("source_memory_ids"),
+                },
+                output_data={
+                    "detail": row.get("detail"),
+                    "output_text": summary.get("output_text"),
+                },
+                ts_ms=row.get("ts_ms"),
+                error=row.get("reason_code"),
+            )
+        )
+    return nodes
+
+
+def _build_audit_snapshot_node(summary: Dict[str, Any]) -> Optional[TraceNode]:
+    audit_snapshot = summary.get("audit_snapshot")
+    if not isinstance(audit_snapshot, dict) or not audit_snapshot:
+        return None
+    return TraceNode(
+        node_id="audit_snapshot",
+        node_type="system",
+        display_name="Audit Snapshot",
+        side="host",
+        status="FAIL" if summary.get("failure_event") else "OK",
+        reason_code=summary.get("failure_event"),
+        input_data={
+            "task_type": summary.get("task_type"),
+            "governor_passed": summary.get("governor_passed"),
+        },
+        output_data=audit_snapshot,
+        ts_ms=audit_snapshot.get("ts_ms"),
+        error=summary.get("failure_event"),
+    )
+
+
+def _sort_trace_nodes(nodes: List[TraceNode]) -> List[TraceNode]:
+    sorted_items = sorted(
+        enumerate(nodes),
+        key=lambda item: (
+            _trace_node_order_rank(item[1]),
+            item[1].ts_ms is None,
+            int(item[1].ts_ms or 0),
+            item[0],
+        ),
+    )
+    return [node for _, node in sorted_items]
+
+
+def _trace_node_order_rank(node: TraceNode) -> int:
+    node_id = str(node.node_id or "")
+    if node_id.startswith("voice_"):
+        event_type = str((node.input_data or {}).get("event_type") or "").upper()
+        if "ACCEPTED" in event_type:
+            return 0
+        if "DISPATCHED" in event_type:
+            return 5
+        if "COMPLETED" in event_type:
+            return 90
+        return 1
+    if node_id == "host_input":
+        return 10
+    if node_id.startswith("airlock"):
+        return 15
+    if node_id == "governor":
+        return 20
+    if node_id.startswith("retrieval_embedding"):
+        return 30
+    if node_id.startswith("recall_fusion"):
+        return 31
+    if node_id.startswith("retrieval_rerank"):
+        return 32
+    if node_id.startswith("retrieval_evidence_pack"):
+        return 33
+    if node_id.startswith("retrieval_pipeline"):
+        return 34
+    if node_id.startswith("llm_"):
+        return 50
+    if node_id.startswith("episodic_store"):
+        return 60
+    if node_id.startswith("bond_update"):
+        return 70
+    if node_id == "audit_snapshot":
+        return 80
+    return 40
+
+
+def _build_linear_trace_edges(nodes: List[TraceNode]) -> List[TraceEdge]:
+    filtered = [node for node in nodes if str(node.node_id or "").strip()]
+    return [
+        TraceEdge(source=str(prev.node_id), target=str(curr.node_id))
+        for prev, curr in zip(filtered, filtered[1:])
+    ]
+
 def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
     """根据最近 window 条调用记录计算节点健康状态。"""
     if not rows:
@@ -260,6 +844,55 @@ class ServicesHealthResponse(BaseModel):
     services: List[ServiceHealthItem]
     timestamp: int
 
+
+_LEGACY_INPUT_DISPATCH_EVENTS: frozenset[str] = frozenset(
+    {
+        "ACCEPTED",
+        "DISPATCHED",
+        "COMPLETED",
+        "FAILED",
+        "NOT_WIRED",
+        "ASR_ACCEPTED",
+        "ASR_COMPLETED",
+        "ASR_FAILED",
+        "WECHAT_ACCEPTED",
+        "WECHAT_COMPLETED",
+        "WECHAT_FAILED",
+    }
+)
+
+
+def _is_input_dispatch_event(row: dict[str, Any]) -> bool:
+    event_type = str(row.get("event_type") or row.get("status") or "").strip().upper()
+    return bool(event_type) and (
+        event_type.startswith("INPUT_") or event_type in _LEGACY_INPUT_DISPATCH_EVENTS
+    )
+
+
+def _normalize_input_dispatch_source(raw_source: Any, event_type: str) -> str:
+    src = str(raw_source or "").strip().upper()
+    evt = str(event_type or "").strip().upper()
+    if "ASR" in src or "ASR" in evt:
+        return "ASR"
+    if "GATEWAY" in src or "GATEWAY" in evt:
+        return "GATEWAY"
+    if "WECHAT" in src or "WECHAT" in evt or "WX" in src:
+        return "WECHAT"
+    if "QQ" in src or "QQ" in evt:
+        return "QQ"
+    return src or "UNKNOWN"
+
+
+def _extract_input_dispatch_latency_ms(row: dict[str, Any], payload: dict[str, Any]) -> Optional[int]:
+    for candidate in (payload.get("latency_ms"), row.get("latency_ms")):
+        if candidate is None or candidate == "":
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
 class SessionItem(BaseModel):
     request_id: str
     session_id: Optional[str] = None
@@ -269,6 +902,7 @@ class SessionItem(BaseModel):
     reason_code: Optional[str] = None
     node_count: Optional[int] = None
     total_latency_ms: Optional[int] = None
+    input_preview: Optional[str] = None
 
 class SessionsResponse(BaseModel):
     total: int
@@ -281,9 +915,11 @@ class TraceNode(BaseModel):
     node_id: str
     node_type: str  # "edge" | "llm_node" | "system"
     display_name: str
+    side: Optional[str] = None
     provider: Optional[str] = None
     model_id: Optional[str] = None
     status: str
+    reason_code: Optional[str] = None
     latency_ms: Optional[int] = None
     input_data: Optional[Any] = None
     output_data: Optional[Any] = None
@@ -302,7 +938,45 @@ class TraceResponse(BaseModel):
     node_count: int
     nodes: List[TraceNode]
     edges: List[TraceEdge]
+    summary: Optional[Dict[str, Any]] = None
     ts_ms: int
+    timestamp: int
+
+
+class LiveTraceFeedItem(BaseModel):
+    session: SessionItem
+    trace: Optional[TraceResponse] = None
+    error: Optional[str] = None
+
+
+class TraceLiveFeedSnapshot(BaseModel):
+    type: Literal["snapshot"] = "snapshot"
+    items: List[LiveTraceFeedItem] = Field(default_factory=list)
+    count: int
+    timestamp: int
+
+
+class TraceLiveFeedNodeDelta(BaseModel):
+    change_type: Literal["added", "updated"]
+    node: TraceNode
+    previous_status: Optional[str] = None
+
+
+class TraceLiveFeedDeltaItem(BaseModel):
+    request_id: str
+    session_id: Optional[str] = None
+    session: Optional[SessionItem] = None
+    trace_status: Optional[str] = None
+    total_latency_ms: Optional[int] = None
+    latest_node: Optional[TraceNode] = None
+    changes: List[TraceLiveFeedNodeDelta] = Field(default_factory=list)
+    change_count: int = 0
+
+
+class TraceLiveFeedDelta(BaseModel):
+    type: Literal["delta"] = "delta"
+    items: List[TraceLiveFeedDeltaItem] = Field(default_factory=list)
+    count: int
     timestamp: int
 
 class TimeseriesPoint(BaseModel):
@@ -335,6 +1009,350 @@ class LlmNodeItem(BaseModel):
 class LlmNodesResponse(BaseModel):
     nodes: List[LlmNodeItem]
     timestamp: int
+
+
+def _model_dump_compat(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    return value
+
+
+def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional[int] = None) -> str:
+    lines: List[str] = []
+    if retry_ms is not None:
+        lines.append(f"retry: {int(retry_ms)}")
+    lines.append(f"event: {event}")
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    for line in data.splitlines() or ["{}"]:
+        lines.append(f"data: {line}")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _build_sessions_response(
+    ledger: SQLiteLedger,
+    *,
+    page: int,
+    page_size: int,
+    status: Optional[str],
+    window_minutes: int,
+    keyword: Optional[str],
+) -> SessionsResponse:
+    svc = SessionQueryService(ledger)
+    since_ms = _now_ms() - window_minutes * 60 * 1000
+    result = svc.query(
+        page=page,
+        page_size=page_size,
+        status=status,
+        keyword=keyword,
+        start_time=since_ms,
+        end_time=_now_ms(),
+    )
+
+    items = [
+        SessionItem(
+            request_id=r["request_id"],
+            session_id=r.get("session_id"),
+            ts_ms=r.get("ts_ms", 0),
+            status=r.get("status", "error").upper(),
+            decision=r.get("decision"),
+            reason_code=r.get("reason_code"),
+            total_latency_ms=r.get("duration_ms"),
+            input_preview=r.get("input_preview"),
+        )
+        for r in result.get("items", [])
+    ]
+
+    return SessionsResponse(
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+        items=items,
+        timestamp=_now_ms(),
+    )
+
+
+def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceResponse:
+    trace_rows = _fetch_request_rows(ledger, "graph_run_trace", request_id)
+    intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
+    governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
+    retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
+    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
+    bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
+    memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
+    error_rows = _fetch_request_rows(ledger, "error_log", request_id)
+    voice_rows = _fetch_request_rows(ledger, "voice_event_log", request_id)
+
+    if not trace_rows and not governor_rows and not intent_rows and not voice_rows:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "request_id": request_id},
+        )
+
+    summary = _build_trace_summary(
+        request_id=request_id,
+        intent_rows=intent_rows,
+        governor_rows=governor_rows,
+        retrieval_rows=retrieval_rows,
+        llm_rows=llm_rows,
+        airlock_rows=airlock_rows,
+        bond_rows=bond_rows,
+        memory_rows=memory_rows,
+        error_rows=error_rows,
+        voice_rows=voice_rows,
+    )
+
+    if trace_rows:
+        row_dict = trace_rows[-1]
+        nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
+        edges_raw = _safe_json(row_dict.get("edges_json")) or []
+
+        nodes = []
+        for node_row in nodes_raw:
+            nodes.append(TraceNode(
+                node_id=node_row.get("node_id", ""),
+                node_type=node_row.get("node_type", "system"),
+                display_name=node_row.get("display_name", node_row.get("node_id", "")),
+                side=node_row.get("side"),
+                provider=node_row.get("provider"),
+                model_id=node_row.get("model_id"),
+                status=node_row.get("status", "OK"),
+                reason_code=node_row.get("reason_code"),
+                latency_ms=node_row.get("latency_ms"),
+                input_data=node_row.get("input_data"),
+                output_data=node_row.get("output_data"),
+                ts_ms=node_row.get("ts_ms"),
+                error=node_row.get("error"),
+            ))
+
+        edges = [TraceEdge(source=edge.get("source", ""), target=edge.get("target", "")) for edge in edges_raw]
+        voice_nodes = _build_voice_trace_nodes(voice_rows)
+        edges = _build_trace_edges(nodes, edges, voice_nodes)
+        nodes.extend(voice_nodes)
+        trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+
+        return TraceResponse(
+            request_id=request_id,
+            session_id=_first_present(row_dict.get("session_id"), summary.get("session_id")),
+            status=trace_status,
+            total_latency_ms=_first_present(row_dict.get("total_latency_ms"), summary.get("total_latency_ms")),
+            node_count=len(nodes),
+            nodes=nodes,
+            edges=edges,
+            summary=summary,
+            ts_ms=row_dict.get("ts_ms", _now_ms()),
+            timestamp=_now_ms(),
+        )
+
+    synthesized_nodes = _build_voice_trace_nodes(voice_rows)
+    intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
+    if intent_node is not None:
+        synthesized_nodes.append(intent_node)
+    governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
+    if governor_node is not None:
+        synthesized_nodes.append(governor_node)
+    synthesized_nodes.extend(_build_airlock_trace_nodes(airlock_rows, summary))
+    synthesized_nodes.extend(_build_retrieval_trace_nodes(retrieval_rows, summary))
+    synthesized_nodes.extend(_build_llm_trace_nodes(llm_rows, summary))
+    synthesized_nodes.extend(_build_bond_trace_nodes(bond_rows))
+    synthesized_nodes.extend(_build_memory_trace_nodes(memory_rows, summary))
+    audit_snapshot_node = _build_audit_snapshot_node(summary)
+    if audit_snapshot_node is not None:
+        synthesized_nodes.append(audit_snapshot_node)
+
+    nodes = _sort_trace_nodes(synthesized_nodes)
+    edges = _build_linear_trace_edges(nodes)
+    decision = str(summary.get("decision") or "").strip().upper()
+    base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
+    trace_status = _coalesce_trace_status(base_status, nodes)
+    trace_ts = next((node.ts_ms for node in nodes if node.ts_ms is not None), _now_ms())
+
+    return TraceResponse(
+        request_id=request_id,
+        session_id=summary.get("session_id"),
+        status=trace_status,
+        total_latency_ms=summary.get("total_latency_ms"),
+        node_count=len(nodes),
+        nodes=nodes,
+        edges=edges,
+        summary=summary,
+        ts_ms=trace_ts,
+        timestamp=_now_ms(),
+    )
+
+
+def _build_trace_live_feed_snapshot(
+    ledger: SQLiteLedger,
+    *,
+    limit: int,
+    window_minutes: int,
+    keyword: Optional[str],
+) -> TraceLiveFeedSnapshot:
+    sessions_response = _build_sessions_response(
+        ledger,
+        page=1,
+        page_size=limit,
+        status=None,
+        window_minutes=window_minutes,
+        keyword=keyword,
+    )
+
+    items: List[LiveTraceFeedItem] = []
+    for session in sessions_response.items:
+        try:
+            trace = _build_trace_response(ledger, session.request_id)
+            items.append(LiveTraceFeedItem(session=session, trace=trace))
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                items.append(LiveTraceFeedItem(session=session, trace=None, error="not_found"))
+                continue
+            raise
+
+    return TraceLiveFeedSnapshot(
+        items=items,
+        count=len(items),
+        timestamp=_now_ms(),
+    )
+
+
+def _trace_live_feed_signature(snapshot: TraceLiveFeedSnapshot) -> str:
+    signature_rows: List[Dict[str, Any]] = []
+    for item in snapshot.items:
+        trace = item.trace
+        latest_node = None
+        if trace and trace.nodes:
+            latest = max(
+                trace.nodes,
+                key=lambda node: (
+                    int(node.ts_ms or 0),
+                    str(node.node_id or ""),
+                    str(node.status or ""),
+                ),
+            )
+            latest_node = {
+                "node_id": latest.node_id,
+                "status": latest.status,
+                "ts_ms": latest.ts_ms,
+                "reason_code": latest.reason_code,
+            }
+        summary = trace.summary if trace and isinstance(trace.summary, dict) else {}
+        signature_rows.append({
+            "request_id": item.session.request_id,
+            "session_ts_ms": item.session.ts_ms,
+            "session_status": item.session.status,
+            "trace_status": trace.status if trace else None,
+            "trace_ts_ms": trace.ts_ms if trace else None,
+            "trace_node_count": trace.node_count if trace else None,
+            "trace_total_latency_ms": trace.total_latency_ms if trace else None,
+            "trace_nodes": [_trace_node_signature(node) for node in trace.nodes] if trace else [],
+            "output_text": summary.get("output_text"),
+            "failure_event": summary.get("failure_event"),
+            "latest_node": latest_node,
+            "error": item.error,
+        })
+    return json.dumps(signature_rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _trace_node_signature(node: TraceNode) -> str:
+    payload = _model_dump_compat(node)
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _build_trace_live_feed_delta(
+    previous: Optional[TraceLiveFeedSnapshot],
+    current: TraceLiveFeedSnapshot,
+) -> Optional[TraceLiveFeedDelta]:
+    if previous is None:
+        return None
+
+    previous_items = {
+        item.session.request_id: item
+        for item in previous.items
+        if item.session and item.session.request_id
+    }
+    delta_items: List[TraceLiveFeedDeltaItem] = []
+
+    for item in current.items:
+        request_id = item.session.request_id if item.session else None
+        if not request_id or not item.trace:
+            continue
+
+        previous_item = previous_items.get(request_id)
+        previous_trace = previous_item.trace if previous_item else None
+        previous_nodes = {
+            node.node_id: node
+            for node in (previous_trace.nodes if previous_trace else [])
+            if node.node_id
+        }
+        previous_signatures = {
+            node_id: _trace_node_signature(node)
+            for node_id, node in previous_nodes.items()
+        }
+
+        node_changes: List[TraceLiveFeedNodeDelta] = []
+        for node in item.trace.nodes:
+            node_id = str(node.node_id or "").strip()
+            if not node_id:
+                continue
+            previous_node = previous_nodes.get(node_id)
+            if previous_node is None:
+                node_changes.append(
+                    TraceLiveFeedNodeDelta(
+                        change_type="added",
+                        node=node,
+                    )
+                )
+                continue
+            if previous_signatures.get(node_id) != _trace_node_signature(node):
+                node_changes.append(
+                    TraceLiveFeedNodeDelta(
+                        change_type="updated",
+                        node=node,
+                        previous_status=previous_node.status,
+                    )
+                )
+
+        if not node_changes:
+            continue
+
+        latest_change = max(
+            node_changes,
+            key=lambda change: (
+                int(change.node.ts_ms or 0),
+                str(change.node.node_id or ""),
+            ),
+        )
+        delta_items.append(
+            TraceLiveFeedDeltaItem(
+                request_id=request_id,
+                session_id=_first_present(item.trace.session_id, item.session.session_id),
+                session=item.session,
+                trace_status=item.trace.status,
+                total_latency_ms=item.trace.total_latency_ms,
+                latest_node=latest_change.node,
+                changes=node_changes,
+                change_count=len(node_changes),
+            )
+        )
+
+    if not delta_items:
+        return None
+
+    delta_items.sort(
+        key=lambda item: (
+            int(item.latest_node.ts_ms if item.latest_node else 0),
+            str(item.request_id or ""),
+        ),
+        reverse=True,
+    )
+    return TraceLiveFeedDelta(
+        items=delta_items,
+        count=len(delta_items),
+        timestamp=_now_ms(),
+    )
 
 # ---------------------------------------------------------------------------
 # GET /obs/services/health
@@ -563,37 +1581,13 @@ async def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
-    ledger = _get_ledger()
-    svc = SessionQueryService(ledger)
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-    result = svc.query(
+    return _build_sessions_response(
+        _get_ledger(),
         page=page,
         page_size=page_size,
         status=status,
+        window_minutes=window_minutes,
         keyword=keyword,
-        start_time=since_ms,
-        end_time=_now_ms(),
-    )
-
-    items = [
-        SessionItem(
-            request_id=r["request_id"],
-            session_id=r.get("session_id"),
-            ts_ms=r.get("ts_ms", 0),
-            status=r.get("status", "error").upper(),
-            decision=r.get("decision"),
-            reason_code=r.get("reason_code"),
-            total_latency_ms=r.get("duration_ms"),
-        )
-        for r in result.get("items", [])
-    ]
-
-    return SessionsResponse(
-        total=result["total"],
-        page=result["page"],
-        page_size=result["page_size"],
-        items=items,
-        timestamp=_now_ms(),
     )
 
 # ---------------------------------------------------------------------------
@@ -668,90 +1662,116 @@ async def export_sessions_csv(
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)
 async def get_trace(request_id: str):
+    return _build_trace_response(_get_ledger(), request_id)
     """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
     ledger = _get_ledger()
 
-    # 1) 从 graph_run_trace 获取链路骨架
-    # 修复：使用公共方法 fetch_by_request_id 替代直接访问私有属性 _conn，
-    # 同时利用 _decode_row 自动反序列化 nodes_json/edges_json 等 JSON 字段
-    try:
-        trace_rows = ledger.fetch_by_request_id("graph_run_trace", request_id)
-    except Exception:
-        trace_rows = []
+    trace_rows = _fetch_request_rows(ledger, "graph_run_trace", request_id)
+    intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
+    governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
+    retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
+    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
+    bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
+    memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
+    error_rows = _fetch_request_rows(ledger, "error_log", request_id)
+    voice_rows = _fetch_request_rows(ledger, "voice_event_log", request_id)
 
-    if not trace_rows:
-        # 降级：从 governor_log 构造最小链路
-        try:
-            gov_rows = ledger.fetch_by_request_id("governor_log", request_id)
-        except Exception:
-            gov_rows = []
-        if not gov_rows:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "not_found", "request_id": request_id},
-            )
+    if not trace_rows and not governor_rows and not intent_rows and not voice_rows:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "request_id": request_id},
+        )
 
-        gov = gov_rows[-1]
-        nodes = [
-            TraceNode(
-                node_id="governor",
-                node_type="system",
-                display_name="Governor",
-                status="OK" if gov.get("decision") == "APPROVE" else "FAIL",
-                ts_ms=gov.get("ts_ms"),
-            )
-        ]
+    summary = _build_trace_summary(
+        request_id=request_id,
+        intent_rows=intent_rows,
+        governor_rows=governor_rows,
+        retrieval_rows=retrieval_rows,
+        llm_rows=llm_rows,
+        airlock_rows=airlock_rows,
+        bond_rows=bond_rows,
+        memory_rows=memory_rows,
+        error_rows=error_rows,
+        voice_rows=voice_rows,
+    )
+
+    # 2) 解析完整链路（fetch_by_request_id 已通过 _decode_row 自动反序列化 JSON 字段）
+    if trace_rows:
+        row_dict = trace_rows[-1]
+        nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
+        edges_raw = _safe_json(row_dict.get("edges_json")) or []
+
+        nodes = []
+        for n in nodes_raw:
+            nodes.append(TraceNode(
+                node_id=n.get("node_id", ""),
+                node_type=n.get("node_type", "system"),
+                display_name=n.get("display_name", n.get("node_id", "")),
+                side=n.get("side"),
+                provider=n.get("provider"),
+                model_id=n.get("model_id"),
+                status=n.get("status", "OK"),
+                reason_code=n.get("reason_code"),
+                latency_ms=n.get("latency_ms"),
+                input_data=n.get("input_data"),
+                output_data=n.get("output_data"),
+                ts_ms=n.get("ts_ms"),
+                error=n.get("error"),
+            ))
+
+        edges = [TraceEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw]
+        voice_nodes = _build_voice_trace_nodes(voice_rows)
+        edges = _build_trace_edges(nodes, edges, voice_nodes)
+        nodes.extend(voice_nodes)
+        trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+
         return TraceResponse(
             request_id=request_id,
-            status="OK" if gov.get("decision") == "APPROVE" else "FAIL",
+            session_id=_first_present(row_dict.get("session_id"), summary.get("session_id")),
+            status=trace_status,
+            total_latency_ms=_first_present(row_dict.get("total_latency_ms"), summary.get("total_latency_ms")),
             node_count=len(nodes),
             nodes=nodes,
-            edges=[],
-            ts_ms=gov.get("ts_ms", _now_ms()),
+            edges=edges,
+            summary=summary,
+            ts_ms=row_dict.get("ts_ms", _now_ms()),
             timestamp=_now_ms(),
         )
 
-    # 2) 解析完整链路（fetch_by_request_id 已通过 _decode_row 自动反序列化 JSON 字段）
-    row_dict = trace_rows[-1]
-    nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
-    edges_raw = _safe_json(row_dict.get("edges_json")) or []
+    synthesized_nodes = _build_voice_trace_nodes(voice_rows)
+    intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
+    if intent_node is not None:
+        synthesized_nodes.append(intent_node)
+    governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
+    if governor_node is not None:
+        synthesized_nodes.append(governor_node)
+    synthesized_nodes.extend(_build_airlock_trace_nodes(airlock_rows, summary))
+    synthesized_nodes.extend(_build_retrieval_trace_nodes(retrieval_rows, summary))
+    synthesized_nodes.extend(_build_llm_trace_nodes(llm_rows, summary))
+    synthesized_nodes.extend(_build_bond_trace_nodes(bond_rows))
+    synthesized_nodes.extend(_build_memory_trace_nodes(memory_rows, summary))
+    audit_snapshot_node = _build_audit_snapshot_node(summary)
+    if audit_snapshot_node is not None:
+        synthesized_nodes.append(audit_snapshot_node)
 
-    nodes = []
-    for n in nodes_raw:
-        nodes.append(TraceNode(
-            node_id=n.get("node_id", ""),
-            node_type=n.get("node_type", "system"),
-            display_name=n.get("display_name", n.get("node_id", "")),
-            provider=n.get("provider"),
-            model_id=n.get("model_id"),
-            status=n.get("status", "OK"),
-            latency_ms=n.get("latency_ms"),
-            input_data=n.get("input_data"),
-            output_data=n.get("output_data"),
-            ts_ms=n.get("ts_ms"),
-            error=n.get("error"),
-        ))
-
-    edges = [TraceEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw]
-
-    try:
-        voice_rows = ledger.fetch_by_request_id("voice_event_log", request_id)
-    except Exception:
-        voice_rows = []
-    voice_nodes = _build_voice_trace_nodes(voice_rows)
-    edges = _build_trace_edges(nodes, edges, voice_nodes)
-    nodes.extend(voice_nodes)
-    trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+    nodes = _sort_trace_nodes(synthesized_nodes)
+    edges = _build_linear_trace_edges(nodes)
+    decision = str(summary.get("decision") or "").strip().upper()
+    base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
+    trace_status = _coalesce_trace_status(base_status, nodes)
+    trace_ts = next((node.ts_ms for node in nodes if node.ts_ms is not None), _now_ms())
 
     return TraceResponse(
         request_id=request_id,
-        session_id=row_dict.get("session_id"),
+        session_id=summary.get("session_id"),
         status=trace_status,
-        total_latency_ms=row_dict.get("total_latency_ms"),
+        total_latency_ms=summary.get("total_latency_ms"),
         node_count=len(nodes),
         nodes=nodes,
         edges=edges,
-        ts_ms=row_dict.get("ts_ms", _now_ms()),
+        summary=summary,
+        ts_ms=trace_ts,
         timestamp=_now_ms(),
     )
 
@@ -759,6 +1779,83 @@ async def get_trace(request_id: str):
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
 # ---------------------------------------------------------------------------
+@router.get("/trace-feed/live")
+async def stream_trace_live_feed(
+    request: Request,
+    limit: int = Query(6, ge=1, le=12),
+    window_minutes: int = Query(1440, ge=1, le=10080),
+    interval_ms: int = Query(1000, ge=250, le=10000),
+    keyword: Optional[str] = Query(None),
+    once: bool = Query(False),
+):
+    """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
+
+    async def _event_stream():
+        last_signature: Optional[str] = None
+        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
+        first_event = True
+        while True:
+            if await request.is_disconnected():
+                break
+
+            try:
+                snapshot = _build_trace_live_feed_snapshot(
+                    _get_ledger(),
+                    limit=limit,
+                    window_minutes=window_minutes,
+                    keyword=keyword,
+                )
+                signature = _trace_live_feed_signature(snapshot)
+                if signature != last_signature:
+                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
+                    yield _format_sse_event(
+                        "snapshot",
+                        _model_dump_compat(snapshot),
+                        retry_ms=interval_ms if first_event else None,
+                    )
+                    if delta is not None:
+                        yield _format_sse_event(
+                            "delta",
+                            _model_dump_compat(delta),
+                        )
+                    last_signature = signature
+                    last_snapshot = snapshot
+                    first_event = False
+                else:
+                    yield _format_sse_event(
+                        "heartbeat",
+                        {
+                            "type": "heartbeat",
+                            "count": snapshot.count,
+                            "timestamp": _now_ms(),
+                        },
+                    )
+            except Exception as exc:
+                logger.warning("trace live feed push error: %s", exc)
+                yield _format_sse_event(
+                    "trace_error",
+                    {
+                        "type": "error",
+                        "detail": str(exc),
+                        "timestamp": _now_ms(),
+                    },
+                )
+
+            if once:
+                break
+            await asyncio.sleep(interval_ms / 1000)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 class StreamEventItem(BaseModel):
     request_id: str
     graph_id: str
@@ -1174,25 +2271,112 @@ class SubsystemStatItem(BaseModel):
     display_name: str
     total: int
     success: int
+    degraded: int = 0
     failed: int
     success_rate: Optional[float]
     p95_ms: Optional[int]
     last_ts: Optional[int]
+    status: str = "UNKNOWN"
+    detail: Optional[str] = None
+    blocked: Optional[int] = None
 
 class SubsystemsStatsResponse(BaseModel):
     window_minutes: int
     subsystems: List[SubsystemStatItem]
     timestamp: int
 
+def _classify_subsystem_row_status(value: Any) -> str:
+    if value is None:
+        return "neutral"
+    if isinstance(value, bool):
+        return "success" if value else "failed"
+    raw = str(value).strip().upper()
+    if raw in ("", "NONE", "NULL"):
+        return "neutral"
+    if raw in ("OK", "SUCCESS", "DONE", "APPROVED", "PASS", "PASSED", "LENIENT_OK", "STRICT_OK", "COMPLETED"):
+        return "success"
+    if raw in ("DEGRADED", "WARN", "WARNING", "PARTIAL", "FALLBACK", "SKIPPED"):
+        return "degraded"
+    if raw in ("FAIL", "FAILED", "ERROR", "DOWN", "REJECTED", "BLOCKED", "TIMEOUT", "DENIED"):
+        return "failed"
+    return "neutral"
+
+
+def _derive_subsystem_status(total: int, success: int, degraded: int, failed: int) -> str:
+    if total <= 0:
+        return "UNKNOWN"
+    if success == 0 and degraded == 0 and failed == 0:
+        return "UNKNOWN"
+    if failed > 0 and success == 0 and degraded == 0:
+        return "DOWN"
+    if failed > 0 or degraded > 0:
+        return "DEGRADED"
+    return "UP"
+
+
+def _intent_lint_is_clean(value: Any) -> bool:
+    if value is None:
+        return True
+    parsed = _safe_json(value)
+    if isinstance(parsed, str):
+        raw = parsed.strip()
+        return raw == "" or raw.upper() in ("OK", "PASS", "SUCCESS", "CLEAN")
+    if isinstance(parsed, list):
+        return len(parsed) == 0
+    if isinstance(parsed, dict):
+        for item in parsed.values():
+            normalized = _safe_json(item)
+            if isinstance(normalized, list) and normalized:
+                return False
+            if isinstance(normalized, dict) and any(bool(v) for v in normalized.values()):
+                return False
+            if isinstance(normalized, str) and normalized.strip():
+                return False
+            if isinstance(normalized, (int, float)) and normalized != 0:
+                return False
+            if isinstance(normalized, bool) and normalized:
+                return False
+        return True
+    return not bool(parsed)
+
+
+def _intent_row_passed(row: Dict[str, Any]) -> bool:
+    parse_stage = str(row.get("parse_stage") or "").strip().upper()
+    parse_ok = not parse_stage or parse_stage in ("OK", "PASS", "SUCCESS") or parse_stage.endswith("_OK")
+    return parse_ok and _intent_lint_is_clean(row.get("lint_result"))
+
+
 def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", latency_field: Optional[str] = None) -> Dict[str, Any]:
     """通用子系统健康计算：成功率、P95延迟、最后活跃时间。"""
     total = len(rows)
     if total == 0:
-        return {"total": 0, "success": 0, "failed": 0, "success_rate": None, "p95_ms": None, "last_ts": None}
+        return {
+            "total": 0,
+            "success": 0,
+            "degraded": 0,
+            "failed": 0,
+            "success_rate": None,
+            "p95_ms": None,
+            "last_ts": None,
+            "status": "UNKNOWN",
+            "detail": "近窗口无调用",
+            "blocked": None,
+        }
 
-    success = sum(1 for r in rows if str(r.get(status_field, "")).upper() in ("OK", "SUCCESS", "DONE", "APPROVED"))
-    failed = total - success
-    success_rate = round(success / total * 100, 1)
+    success = 0
+    degraded = 0
+    failed = 0
+    for row in rows:
+        bucket = _classify_subsystem_row_status(row.get(status_field))
+        if bucket == "success":
+            success += 1
+        elif bucket == "degraded":
+            degraded += 1
+        elif bucket == "failed":
+            failed += 1
+
+    measured_total = success + degraded + failed
+    success_rate = round(success / measured_total * 100, 1) if measured_total > 0 else None
 
     p95_ms = None
     if latency_field:
@@ -1203,7 +2387,18 @@ def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", la
             p95_ms = latencies[idx]
 
     last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
-    return {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": p95_ms, "last_ts": last_ts}
+    return {
+        "total": total,
+        "success": success,
+        "degraded": degraded,
+        "failed": failed,
+        "success_rate": success_rate,
+        "p95_ms": p95_ms,
+        "last_ts": last_ts,
+        "status": _derive_subsystem_status(total, success, degraded, failed),
+        "detail": None,
+        "blocked": None,
+    }
 
 @router.get("/subsystems/stats", response_model=SubsystemsStatsResponse)
 async def get_subsystems_stats(
@@ -1237,38 +2432,76 @@ async def get_subsystems_stats(
             rows = []
 
         if sid == "airlock":
-            # airlock: blocked=0 表示通过，blocked=1 表示拦截
+            # airlock: blocked=1 表示策略命中，但不代表子系统故障
             total = len(rows)
             blocked = sum(1 for r in rows if r.get("blocked") in (1, True, "1"))
-            success = total - blocked
-            failed = blocked
-            success_rate = round(success / total * 100, 1) if total > 0 else None
             last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
-            h = {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": None, "last_ts": last_ts}
+            h = {
+                "total": total,
+                "success": total,
+                "degraded": 0,
+                "failed": 0,
+                "success_rate": 100.0 if total > 0 else None,
+                "p95_ms": None,
+                "last_ts": last_ts,
+                "status": "UP" if total > 0 else "UNKNOWN",
+                "detail": (
+                    f"策略拦截 {blocked} 次"
+                    if blocked > 0 else ("最近无策略拦截" if total > 0 else "近窗口无调用")
+                ),
+                "blocked": blocked,
+            }
         elif sid == "qa":
-            # qa_violation_log: 每行都是一次违规，total=违规次数，success=0
+            # qa_violation_log: 每行都是一次违规，代表内容质量告警，不代表 QA 子系统自身故障
             total = len(rows)
-            h = {"total": total, "success": 0, "failed": total, "success_rate": 0.0 if total > 0 else None, "p95_ms": None, "last_ts": max((r.get("ts_ms") or 0 for r in rows), default=None)}
+            h = {
+                "total": total,
+                "success": 0,
+                "degraded": total,
+                "failed": 0,
+                "success_rate": 0.0 if total > 0 else None,
+                "p95_ms": None,
+                "last_ts": max((r.get("ts_ms") or 0 for r in rows), default=None),
+                "status": "DEGRADED" if total > 0 else "UNKNOWN",
+                "detail": f"检测到 {total} 条 QA 违规" if total > 0 else "近窗口无调用",
+                "blocked": None,
+            }
         elif sid == "intent":
-            # intent_log: lint_result 为空或 "OK" 表示通过
+            # intent_log: lint_result 可能是 {"args": [], "schema": []} 这类 JSON，空数组视为 lint 通过
             total = len(rows)
-            success = sum(1 for r in rows if not r.get("lint_result") or str(r.get("lint_result", "")).upper() in ("OK", "PASS", ""))
+            success = sum(1 for r in rows if _intent_row_passed(r))
             failed = total - success
-            success_rate = round(success / total * 100, 1) if total > 0 else None
             last_ts = max((r.get("ts_ms") or 0 for r in rows), default=None)
-            h = {"total": total, "success": success, "failed": failed, "success_rate": success_rate, "p95_ms": None, "last_ts": last_ts}
+            h = {
+                "total": total,
+                "success": success,
+                "degraded": 0,
+                "failed": failed,
+                "success_rate": round(success / total * 100, 1) if total > 0 else None,
+                "p95_ms": None,
+                "last_ts": last_ts,
+                "status": _derive_subsystem_status(total, success, 0, failed),
+                "detail": f"{failed} 条 intent lint 未通过" if failed > 0 else None,
+                "blocked": None,
+            }
         else:
             h = _compute_subsystem_health(rows, status_field=status_field or "status", latency_field=latency_field)
+            if sid == "retrieval" and h["degraded"] > 0 and h["failed"] == 0:
+                h["detail"] = f"{h['degraded']} 次降级，最近多为检索链慢路径"
 
         subsystems.append(SubsystemStatItem(
             subsystem=sid,
             display_name=dname,
             total=h["total"],
             success=h["success"],
+            degraded=h.get("degraded", 0),
             failed=h["failed"],
             success_rate=h["success_rate"],
             p95_ms=h.get("p95_ms"),
             last_ts=h.get("last_ts"),
+            status=h.get("status", "UNKNOWN"),
+            detail=h.get("detail"),
+            blocked=h.get("blocked"),
         ))
 
     return SubsystemsStatsResponse(
@@ -2667,26 +3900,17 @@ async def get_input_dispatch_stats(
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # 从 voice_event_log 中查询输入分发事件
+    # InputDispatch 事件实际落在 voice_event_log，并且 source/latency_ms 写在 payload 内。
     try:
-        rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now)
-        dispatch_rows = [
-            r for r in rows
-            if str(r.get("event_type") or "").upper() in (
-                "ACCEPTED", "DISPATCHED", "COMPLETED", "FAILED", "NOT_WIRED",
-                "ASR_ACCEPTED", "ASR_COMPLETED", "ASR_FAILED",
-                "WECHAT_ACCEPTED", "WECHAT_COMPLETED", "WECHAT_FAILED",
-            )
-        ]
+        rows = ledger.fetch_by_time_range(
+            "voice_event_log",
+            start_ms=since_ms,
+            end_ms=now,
+            limit=10_000,
+        )
+        dispatch_rows = [r for r in rows if _is_input_dispatch_event(r)]
     except Exception:
         dispatch_rows = []
-
-    # 兼容 input_dispatch_log 表名
-    if not dispatch_rows:
-        try:
-            dispatch_rows = ledger.fetch_by_time_range("input_dispatch_log", start_ms=since_ms, end_ms=now)
-        except Exception:
-            dispatch_rows = []
 
     # 按 source 分组统计
     from collections import defaultdict
@@ -2694,19 +3918,20 @@ async def get_input_dispatch_stats(
 
     for r in dispatch_rows:
         evt = str(r.get("event_type") or r.get("status") or "").upper()
-        src = str(r.get("source") or r.get("channel") or "UNKNOWN").upper()
-        # 规范化 source
-        if "ASR" in src or "ASR" in evt:
-            src = "ASR"
-        elif "WECHAT" in src or "WECHAT" in evt or "WX" in src:
-            src = "WECHAT"
+        payload = _safe_json(r.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        src = _normalize_input_dispatch_source(
+            payload_dict.get("source") or r.get("source") or r.get("channel"),
+            evt,
+        )
 
         if "ACCEPTED" in evt:
             source_stats[src]["accepted"] += 1
         elif "COMPLETED" in evt or "DONE" in evt:
             source_stats[src]["completed"] += 1
-            if r.get("latency_ms"):
-                source_stats[src]["latencies"].append(int(r["latency_ms"]))
+            latency_ms = _extract_input_dispatch_latency_ms(r, payload_dict)
+            if latency_ms is not None:
+                source_stats[src]["latencies"].append(latency_ms)
         elif "FAILED" in evt or "ERROR" in evt:
             source_stats[src]["failed"] += 1
         elif "NOT_WIRED" in evt:
@@ -4454,6 +5679,7 @@ class GatewayPlatformStats(BaseModel):
     """单个平台的统计数据。"""
     platform: str
     status: str = "UNKNOWN"  # UP / DEGRADED / DOWN / UNKNOWN
+    status_detail: Optional[str] = None
     inbound_count: int = 0
     outbound_count: int = 0
     error_count: int = 0
@@ -4471,6 +5697,111 @@ class GatewayStatsResponse(BaseModel):
     humanize_typing_speed_cps: int = 12
     window_minutes: int = 60
     timestamp: int = 0
+
+
+_GATEWAY_REMOTE_HEALTH_CACHE: Dict[str, Any] = {
+    "expires_at_ms": 0,
+    "value": {},
+}
+
+
+def _normalize_gateway_platform_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"ok", "up", "healthy", "ready", "online", "active"}:
+        return "UP"
+    if normalized in {"degraded", "warn", "warning", "partial"}:
+        return "DEGRADED"
+    if normalized in {"error", "down", "failed", "fail", "offline"}:
+        return "DOWN"
+    return "UNKNOWN"
+
+
+def _merge_gateway_platform_status(local_status: str, remote_status: str) -> str:
+    priority = {
+        "UNKNOWN": 0,
+        "UP": 1,
+        "DEGRADED": 2,
+        "DOWN": 3,
+    }
+    left = str(local_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    right = str(remote_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    return left if priority.get(left, 0) >= priority.get(right, 0) else right
+
+
+def _coerce_dict_payload(value: Any) -> Dict[str, Any]:
+    payload = _safe_json(value)
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _infer_gateway_platform_from_row(*, session_id: Any, payload: Any, detail: Any) -> str | None:
+    payload_dict = _coerce_dict_payload(payload)
+    platform = str(payload_dict.get("platform") or "").strip().lower()
+    if platform in {"wechat", "qq", "telegram", "feishu", "wecom", "line"}:
+        return platform
+
+    normalized_session = str(session_id or "").strip().lower()
+    if normalized_session.startswith("qq_"):
+        return "qq"
+    if normalized_session.startswith("wechat_") or normalized_session.startswith("wx_"):
+        return "wechat"
+    if normalized_session.startswith("telegram_") or normalized_session.startswith("tg_"):
+        return "telegram"
+    if normalized_session.startswith("feishu_"):
+        return "feishu"
+    if normalized_session.startswith("wecom_"):
+        return "wecom"
+    if normalized_session.startswith("line_"):
+        return "line"
+
+    detail_text = str(detail or "").strip().lower()
+    for candidate in ("wechat", "qq", "telegram", "feishu", "wecom", "line"):
+        if f"platform={candidate}" in detail_text:
+            return candidate
+    return None
+
+
+async def _fetch_remote_gateway_health() -> Dict[str, Any]:
+    cached = _GATEWAY_REMOTE_HEALTH_CACHE.get("value")
+    expires_at_ms = int(_GATEWAY_REMOTE_HEALTH_CACHE.get("expires_at_ms") or 0)
+    now = _now_ms()
+    if expires_at_ms > now and isinstance(cached, dict) and cached:
+        return dict(cached)
+
+    stale = dict(cached) if isinstance(cached, dict) else {}
+    try:
+        import httpx
+        from host_brain.channels.edge_rpc_client import _resolve_gateway_base_urls
+    except Exception:
+        return stale
+
+    timeout_ms_raw = str(os.environ.get("HOST_EDGE_RPC_TIMEOUT_MS") or "3000").strip()
+    try:
+        timeout_ms = int(timeout_ms_raw)
+    except ValueError:
+        timeout_ms = 3000
+    timeout_s = max(0.5, min(float(timeout_ms) / 1000.0, 5.0))
+
+    for base_url in _resolve_gateway_base_urls():
+        url = f"{base_url}/v1/gateway/health"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+            if not isinstance(body, dict):
+                continue
+            snapshot = {
+                "base_url": base_url,
+                "body": body,
+            }
+            _GATEWAY_REMOTE_HEALTH_CACHE["value"] = dict(snapshot)
+            _GATEWAY_REMOTE_HEALTH_CACHE["expires_at_ms"] = now + 3_000
+            return snapshot
+        except Exception as exc:
+            logger.debug("get_gateway_stats: gateway health probe failed url=%s error=%s", url, exc)
+
+    return stale
 
 @router.get("/gateway/stats", response_model=GatewayStatsResponse)
 async def get_gateway_stats(
@@ -4492,55 +5823,166 @@ async def get_gateway_stats(
     total_in = 0
     total_out = 0
     total_err = 0
+    remote_gateway_health = await _fetch_remote_gateway_health()
+    remote_gateway_body = (
+        remote_gateway_health.get("body")
+        if isinstance(remote_gateway_health, dict)
+        else {}
+    )
+    remote_adapters = (
+        remote_gateway_body.get("adapters")
+        if isinstance(remote_gateway_body, dict) and isinstance(remote_gateway_body.get("adapters"), dict)
+        else {}
+    )
+    remote_health_source = str(remote_gateway_health.get("base_url") or "").strip()
+    try:
+        channel_rows = ledger.fetch_by_time_range(
+            "channel_io_log",
+            start_ms=since_ms,
+            end_ms=now,
+            limit=5000,
+        )
+    except Exception:
+        channel_rows = []
+    try:
+        voice_rows = ledger.fetch_by_time_range(
+            "voice_event_log",
+            start_ms=since_ms,
+            end_ms=now,
+            limit=5000,
+        )
+    except Exception:
+        voice_rows = []
 
     for plat in PLATFORMS:
         try:
-            # 从 audit_log 查询各平台消息事件
-            rows = ledger.fetch_by_time_range(
-                "audit_log",
-                start_ms=since_ms,
-                end_ms=now,
-                limit=5000,
+            plat_rows = [
+                row for row in channel_rows
+                if str(row.get("channel") or "").strip().lower() == plat
+            ]
+            gateway_input_rows = []
+            plat_voice_rows = []
+            for row in voice_rows:
+                payload_dict = _coerce_dict_payload(row.get("payload"))
+                inferred_platform = _infer_gateway_platform_from_row(
+                    session_id=row.get("session_id"),
+                    payload=payload_dict,
+                    detail=row.get("detail"),
+                )
+                if inferred_platform == plat:
+                    plat_voice_rows.append(row)
+                if inferred_platform != plat:
+                    continue
+                source_upper = str(payload_dict.get("source") or "").strip().upper()
+                if source_upper == "GATEWAY":
+                    gateway_input_rows.append((row, payload_dict))
+
+            combined_rows = list(plat_rows) + list(plat_voice_rows)
+            channel_inbound = sum(
+                1
+                for row in plat_rows
+                if str(row.get("direction") or "").upper() in ("INBOUND", "INGRESS", "RECEIVE", "RECV")
             )
-            # 过滤该平台的事件
-            plat_rows = [r for r in rows if (r.get("platform") or r.get("channel") or "").lower() == plat]
-            inbound = sum(1 for r in plat_rows if "INBOUND" in str(r.get("audit_tag", "")).upper() or "RECEIVE" in str(r.get("audit_tag", "")).upper())
-            outbound = sum(1 for r in plat_rows if "OUTBOUND" in str(r.get("audit_tag", "")).upper() or "SEND" in str(r.get("audit_tag", "")).upper() or "REPLY" in str(r.get("audit_tag", "")).upper())
-            errors = sum(1 for r in plat_rows if "ERROR" in str(r.get("audit_tag", "")).upper() or "FAIL" in str(r.get("audit_tag", "")).upper())
+            channel_outbound = sum(
+                1
+                for row in plat_rows
+                if str(row.get("direction") or "").upper() in ("OUTBOUND", "EGRESS", "SEND", "REPLY")
+            )
+            channel_errors = sum(
+                1
+                for row in plat_rows
+                if str(row.get("status") or "").upper() in ("ERROR", "FAILED", "REJECTED")
+                or "FAIL" in str(row.get("reason_code") or "").upper()
+                or "ERROR" in str(row.get("reason_code") or "").upper()
+            )
+            gateway_inbound_ids = {
+                str(row.get("request_id") or "").strip()
+                for row, _payload in gateway_input_rows
+                if str(row.get("event_type") or "").strip().upper() == "INPUT_ACCEPTED"
+                and str(row.get("request_id") or "").strip()
+            }
+            gateway_completed_ids = {
+                str(row.get("request_id") or "").strip()
+                for row, _payload in gateway_input_rows
+                if str(row.get("event_type") or "").strip().upper() == "INPUT_COMPLETED"
+                and str(row.get("status") or "").strip().upper() in {"OK", "COMPLETED", "SENT"}
+                and str(row.get("request_id") or "").strip()
+            }
+            gateway_error_ids = {
+                str(row.get("request_id") or "").strip()
+                for row, _payload in gateway_input_rows
+                if (
+                    str(row.get("event_type") or "").strip().upper() == "INPUT_FAILED"
+                    or str(row.get("status") or "").strip().upper() in {"ERROR", "FAILED", "REJECTED"}
+                    or "FAIL" in str(row.get("reason_code") or "").upper()
+                    or "ERROR" in str(row.get("reason_code") or "").upper()
+                )
+                and str(row.get("request_id") or "").strip()
+            }
 
-            # 最后一条事件时间
-            last_ts = max((r.get("ts_ms", 0) for r in plat_rows), default=None) if plat_rows else None
+            inbound = channel_inbound if channel_inbound > 0 else len(gateway_inbound_ids)
+            outbound = channel_outbound if channel_outbound > 0 else len(gateway_completed_ids)
+            errors = channel_errors if channel_errors > 0 else len(gateway_error_ids)
 
-            # 平均延迟（如果有 latency_ms 字段）
-            latencies = [r.get("latency_ms", 0) for r in plat_rows if r.get("latency_ms")]
+            last_ts = max((row.get("ts_ms", 0) for row in combined_rows), default=None) if combined_rows else None
+
+            latencies = []
+            for row in combined_rows:
+                payload = _coerce_dict_payload(row.get("payload"))
+                if payload.get("latency_ms") is not None:
+                    latencies.append(payload.get("latency_ms"))
             avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
 
-            # 状态推断
-            if not plat_rows:
+            if not combined_rows:
                 status_str = "UNKNOWN"
-            elif errors > inbound * 0.3 and inbound > 0:
-                status_str = "DEGRADED"
             elif errors > inbound * 0.5 and inbound > 0:
                 status_str = "DOWN"
+            elif errors > 0:
+                status_str = "DEGRADED"
             else:
                 status_str = "UP"
 
-            # wxautox4 bridge 状态（仅微信）
             bridge_status = None
             call_active = 0
+            status_detail = None
             if plat == "wechat":
                 bridge_backend = os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
-                bridge_status = f"{bridge_backend}:running"  # 简化：实际应查进程状态
-                call_rows = [r for r in plat_rows if "CALL" in str(r.get("audit_tag", "")).upper()]
-                # 粗略统计活跃通话（最近 5 分钟内有 call 事件且无 cancel）
+                if combined_rows:
+                    bridge_status = f"{bridge_backend}:active"
                 recent_call_window = now - 5 * 60 * 1000
-                call_starts = sum(1 for r in call_rows if r.get("ts_ms", 0) > recent_call_window and "VOICE_CALL" in str(r.get("audit_tag", "")).upper())
-                call_ends = sum(1 for r in call_rows if r.get("ts_ms", 0) > recent_call_window and "CANCEL_CALL" in str(r.get("audit_tag", "")).upper())
+                call_rows = [
+                    row for row in plat_voice_rows
+                    if row.get("ts_ms", 0) > recent_call_window and "CALL" in str(row.get("event_type") or "").upper()
+                ]
+                call_starts = sum(1 for row in call_rows if "VOICE_CALL" in str(row.get("event_type") or "").upper())
+                call_ends = sum(1 for row in call_rows if "CANCEL_CALL" in str(row.get("event_type") or "").upper())
                 call_active = max(0, call_starts - call_ends)
-
+            remote_adapter = remote_adapters.get(plat) if isinstance(remote_adapters, dict) else None
+            if isinstance(remote_adapter, dict):
+                remote_status = _normalize_gateway_platform_status(remote_adapter.get("status"))
+                status_str = _merge_gateway_platform_status(status_str, remote_status)
+                if not combined_rows and remote_status != "UNKNOWN":
+                    if remote_health_source:
+                        status_detail = f"adapter health via {remote_health_source}"
+                    else:
+                        status_detail = "adapter health via remote gateway"
+                if plat == "wechat" and not bridge_status:
+                    remote_bridge_backend = (
+                        str(remote_adapter.get("bridge_backend") or os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia")).strip()
+                        or "uia"
+                    )
+                    remote_bridge_status = str(remote_adapter.get("status") or "unknown").strip().lower() or "unknown"
+                    bridge_status = f"{remote_bridge_backend}:{remote_bridge_status}"
+                remote_last_outbound = remote_adapter.get("last_outbound")
+                if last_ts is None and isinstance(remote_last_outbound, dict):
+                    try:
+                        last_ts = int(remote_last_outbound.get("ts_ms")) if remote_last_outbound.get("ts_ms") is not None else None
+                    except (TypeError, ValueError):
+                        last_ts = None
             ps = GatewayPlatformStats(
                 platform=plat,
                 status=status_str,
+                status_detail=status_detail,
                 inbound_count=inbound,
                 outbound_count=outbound,
                 error_count=errors,

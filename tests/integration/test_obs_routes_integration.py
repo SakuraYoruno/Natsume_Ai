@@ -5,12 +5,14 @@ TASK-0198 / WARN-TEST-002
 """
 from __future__ import annotations
 
+import json
 import time
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app import obs_routes
 from host_brain.app.obs_routes import router, set_ledger_provider
 
 
@@ -39,6 +41,222 @@ def ledger():
         "rule_trace": None, "tokens": None, "snapshot_refs": None,
         "stage": "S_GOVERNOR", "ts_ms": now - 3000,
     })
+
+    db.log_intent({
+        "request_id": "req-int-002",
+        "thread_id": "t2",
+        "turn_id": "u2",
+        "intent_id": "i2",
+        "session_id": "sess-002",
+        "seq": 2,
+        "ts_ms": now - 3100,
+        "nonce": "nonce-002",
+        "parse_stage": "LENIENT_OK",
+        "raw_text": "fallback hello",
+        "normalized_json": {
+            "action": "narrative_only",
+            "args": {"text": "fallback hello"},
+            "session_id": "sess-002",
+        },
+        "proposer_node_id": "core_reasoner_primary",
+        "model_snapshot": "test-model",
+        "prompt_profile_id": "default",
+        "tool_visibility_hash": "",
+        "proposed_intent_draft_json": {
+            "action": "narrative_only",
+            "args": {"text": "fallback hello"},
+        },
+        "lint_result": {"args": [], "schema": []},
+    })
+    db.log_voice_event({
+        "request_id": "req-int-002",
+        "session_id": "sess-002",
+        "event_type": "INPUT_ACCEPTED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 1,
+        "status": "ACCEPTED",
+        "reason_code": None,
+        "stage": "INPUT",
+        "payload": {"phase": "ACCEPTED", "source": "GATEWAY"},
+        "detail": "source=GATEWAY",
+        "ts_ms": now - 3200,
+    })
+    db.log_voice_event({
+        "request_id": "req-int-002",
+        "session_id": "sess-002",
+        "event_type": "INPUT_COMPLETED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 2,
+        "status": "OK",
+        "reason_code": None,
+        "stage": "INPUT",
+        "payload": {"phase": "COMPLETED", "source": "GATEWAY", "latency_ms": 2600},
+        "detail": "main_chain completed",
+        "ts_ms": now - 200,
+    })
+    db.log_airlock({
+        "request_id": "req-int-002",
+        "direction": "INGRESS",
+        "reason_code": None,
+        "removed_fields": None,
+        "redactions": None,
+        "payload_digest": None,
+        "quarantine_digest": None,
+        "ingress_classification": "normal",
+        "blocked": 0,
+        "detail": "passed",
+        "ts_ms": now - 2800,
+    })
+    db.log_retrieval_event({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "op_kind": "RECALL",
+        "status": "OK",
+        "reason_code": None,
+        "stage": "S_RET_RECALL",
+        "payload": {
+            "candidate_count": 7,
+            "route_count": 3,
+            "route_error_count": 0,
+            "items": [
+                {
+                    "doc_id": "mem-001",
+                    "source_ref": "memo://episodic/001",
+                    "evidence_ref": "evd://episodic/001",
+                    "snippet": "fallback hello recall snippet",
+                    "score": 0.92,
+                    "confidence": 0.92,
+                    "metadata": {
+                        "store_id": "episodic_vector",
+                        "collection": "episodic",
+                        "route_id": "episodic_route",
+                    },
+                }
+            ],
+        },
+        "detail": "recall fused",
+        "ts_ms": now - 2500,
+    })
+    db.log_retrieval_event({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "op_kind": "RERANK",
+        "status": "OK",
+        "reason_code": None,
+        "stage": "S_RET_RERANK",
+        "payload": {
+            "topk_count": 1,
+            "provider": "heuristic",
+            "topk": [
+                {
+                    "doc_id": "mem-001",
+                    "source_ref": "memo://episodic/001",
+                    "evidence_ref": "evd://episodic/001",
+                    "snippet": "fallback hello rerank snippet",
+                    "score": 0.96,
+                    "confidence": 0.96,
+                    "metadata": {
+                        "store_id": "episodic_vector",
+                        "collection": "episodic",
+                        "route_id": "episodic_route",
+                    },
+                }
+            ],
+        },
+        "detail": "rerank completed",
+        "ts_ms": now - 2450,
+    })
+    db.log_retrieval_event({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "op_kind": "EVIDENCE_PACK",
+        "status": "OK",
+        "reason_code": None,
+        "stage": "S_RET_EVIDENCE_PACK",
+        "payload": {
+            "evidence_refs_count": 3,
+            "pack_id": "epk_test_002",
+            "evidence_refs": ["evd://episodic/001"],
+            "topk": [
+                {
+                    "doc_id": "mem-001",
+                    "source_ref": "memo://episodic/001",
+                    "evidence_ref": "evd://episodic/001",
+                    "snippet": "fallback hello evidence snippet",
+                    "score": 0.96,
+                    "confidence": 0.96,
+                    "metadata": {
+                        "store_id": "episodic_vector",
+                        "collection": "episodic",
+                        "route_id": "episodic_route",
+                    },
+                }
+            ],
+        },
+        "detail": "evidence pack built",
+        "ts_ms": now - 2400,
+    })
+    db.log_bond_update({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "session_id": "sess-002",
+        "seq": 1,
+        "event_id": "bond-002",
+        "user_id": "user-002",
+        "topic_id": "topic-002",
+        "capability_hint": None,
+        "update_kind": "STAGE_TRANSITION",
+        "status": "SUCCESS",
+        "reason_code": None,
+        "stage": "S_BOND_STAGE",
+        "evidence_refs": ["chat://request/req-int-002"],
+        "payload": {"from_stage": "STRANGER", "to_stage": "STRANGER", "total_score": 1},
+        "detail": "stable",
+        "ts_ms": now - 160,
+    })
+    db.log_memory_op({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "op_kind": "WRITE",
+        "memory_id": "mem-002",
+        "target_memory_id": None,
+        "source_memory_ids": [],
+        "evidence_refs": ["chat://request/req-int-002"],
+        "status": "SUCCESS",
+        "reason_code": None,
+        "detail": "memory written: [session=sess-002] User: fallback hello Natsume: fallback reply",
+        "decay_profile_id": None,
+        "visibility": "private",
+        "ts_ms": now - 120,
+    })
+    db.log_error(
+        request_id="req-int-002",
+        stage="AUDIT_SNAPSHOT",
+        reason_code="AUDIT_SNAPSHOT_WRITTEN",
+        detail=json.dumps(
+            {
+                "request_id": "req-int-002",
+                "session_id": "sess-002",
+                "task_type": "chat",
+                "audit_tags": [
+                    "RECALL_EVIDENCE_EMPTY",
+                    "ROUTING_SELECTED:ModelTarget.HOST_8B",
+                    "EMOTION_INFERRED:NEUTRAL",
+                ],
+                "node_timings_ms": {
+                    "governor": 12,
+                    "recall_fusion": 320,
+                    "llm_gateway": 18,
+                    "episodic_store": 4,
+                },
+                "metadata_keys": ["recall_fusion", "llm_gateway"],
+                "governor_passed": False,
+                "final_response_chars": 14,
+                "failure_event": "RATE_LIMIT_EXCEEDED",
+            },
+            ensure_ascii=False,
+        ),
+    )
 
     # 预置 llm_node_call_log 数据
     db.log_llm_node_call({
@@ -186,6 +404,299 @@ def test_sessions_can_find_rows_beyond_default_fetch_limit(client, ledger):
     assert data["items"][0]["request_id"] == "req-many-119"
 
 
+def test_sessions_include_input_preview(client):
+    """Sessions should expose input preview for request mapping."""
+    resp = client.get("/obs/sessions?window_minutes=10080")
+    assert resp.status_code == 200
+    data = resp.json()
+    item = next(row for row in data["items"] if row["request_id"] == "req-int-002")
+    assert item["input_preview"] == "fallback hello"
+
+
+def test_sessions_keyword_matches_input_preview(client):
+    """Keyword filter should support matching by message preview."""
+    resp = client.get("/obs/sessions?window_minutes=10080&keyword=fallback%20hello")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["request_id"] == "req-int-002"
+
+
+def test_gateway_stats_reads_channel_io_log(client, ledger):
+    """Gateway stats should work against current ledger schema without audit_log."""
+    now = int(time.time() * 1000)
+    ledger.log_channel_io({
+        "request_id": "gw-wechat-in-001",
+        "channel": "wechat",
+        "direction": "INGRESS",
+        "thread_key": "wx-thread-001",
+        "message_id": "wx-msg-001",
+        "user_id": "wx-user-001",
+        "status": "RECEIVED",
+        "reason_code": None,
+        "stage": "S_CHANNEL_INGRESS",
+        "detail": "wechat inbound",
+        "payload_digest": "digest-wechat-in",
+        "ts_ms": now - 2000,
+    })
+    ledger.log_channel_io({
+        "request_id": "gw-wechat-out-001",
+        "channel": "wechat",
+        "direction": "EGRESS",
+        "thread_key": "wx-thread-001",
+        "message_id": "wx-msg-002",
+        "user_id": "wx-user-001",
+        "status": "SENT",
+        "reason_code": None,
+        "stage": "S_CHANNEL_EGRESS",
+        "detail": "wechat outbound",
+        "payload_digest": "digest-wechat-out",
+        "ts_ms": now - 1500,
+    })
+    ledger.log_channel_io({
+        "request_id": "gw-qq-in-001",
+        "channel": "qq",
+        "direction": "INGRESS",
+        "thread_key": "qq-thread-001",
+        "message_id": "qq-msg-001",
+        "user_id": "qq-user-001",
+        "status": "FAILED",
+        "reason_code": "SEND_FAIL",
+        "stage": "S_CHANNEL_INGRESS",
+        "detail": "qq inbound failed",
+        "payload_digest": "digest-qq-in",
+        "ts_ms": now - 1000,
+    })
+
+    resp = client.get("/obs/gateway/stats?window_minutes=10080")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_inbound"] >= 2
+    assert data["total_outbound"] >= 1
+    wechat = next(row for row in data["platforms"] if row["platform"] == "wechat")
+    qq = next(row for row in data["platforms"] if row["platform"] == "qq")
+    assert wechat["inbound_count"] == 1
+    assert wechat["outbound_count"] == 1
+    assert wechat["status"] == "UP"
+    assert qq["error_count"] == 1
+    assert qq["status"] == "DOWN"
+
+
+def test_gateway_stats_falls_back_to_remote_adapter_health(client, monkeypatch):
+    """Gateway stats should surface remote adapter health even with no local samples."""
+
+    async def _fake_remote_gateway_health():
+        return {
+            "base_url": "http://192.168.1.101:19000",
+            "body": {
+                "status": "ok",
+                "adapters": {
+                    "wechat": {
+                        "platform": "wechat",
+                        "status": "ok",
+                        "bridge_backend": "wxautox4",
+                        "last_outbound": {"ts_ms": 1774776709768},
+                    },
+                    "qq": {
+                        "platform": "qq",
+                        "status": "error",
+                    },
+                },
+            },
+        }
+
+    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+
+    resp = client.get("/obs/gateway/stats?window_minutes=60")
+    assert resp.status_code == 200
+    data = resp.json()
+    wechat = next(row for row in data["platforms"] if row["platform"] == "wechat")
+    qq = next(row for row in data["platforms"] if row["platform"] == "qq")
+    assert wechat["status"] == "UP"
+    assert wechat["status_detail"] == "adapter health via http://192.168.1.101:19000"
+    assert wechat["bridge_status"] == "wxautox4:ok"
+    assert wechat["last_event_ts_ms"] == 1774776709768
+    assert qq["status"] == "DOWN"
+    assert qq["status_detail"] == "adapter health via http://192.168.1.101:19000"
+
+
+def test_gateway_stats_counts_gateway_input_lifecycle_rows(client, ledger, monkeypatch):
+    """Gateway stats should count source=GATEWAY INPUT_* rows as live window traffic."""
+    now = int(time.time() * 1000)
+    ledger.log_voice_event({
+        "request_id": "req-gw-qq-001",
+        "session_id": "qq_dm_3414578517",
+        "event_type": "INPUT_ACCEPTED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 1,
+        "status": "ACCEPTED",
+        "reason_code": None,
+        "stage": "input_dispatch.accepted",
+        "payload": {"source": "GATEWAY", "phase": "ACCEPTED", "latency_ms": None},
+        "detail": "source=GATEWAY text_len=5",
+        "ts_ms": now - 2000,
+    })
+    ledger.log_voice_event({
+        "request_id": "req-gw-qq-001",
+        "session_id": "qq_dm_3414578517",
+        "event_type": "INPUT_COMPLETED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 2,
+        "status": "OK",
+        "reason_code": None,
+        "stage": "input_dispatch.completed",
+        "payload": {"source": "GATEWAY", "phase": "COMPLETED", "latency_ms": 1234},
+        "detail": "main_chain completed source=GATEWAY latency_ms=1234",
+        "ts_ms": now - 1000,
+    })
+
+    async def _fake_remote_gateway_health():
+        return {}
+
+    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+
+    resp = client.get("/obs/gateway/stats?window_minutes=10080")
+    assert resp.status_code == 200
+    data = resp.json()
+    qq = next(row for row in data["platforms"] if row["platform"] == "qq")
+    assert qq["inbound_count"] == 1
+    assert qq["outbound_count"] == 1
+    assert qq["error_count"] == 0
+    assert qq["avg_latency_ms"] == 1234
+    assert qq["status"] == "UP"
+
+
+def test_gateway_stats_counts_platform_from_gateway_payload(client, ledger, monkeypatch):
+    """Gateway stats should honor payload.platform even when session_id has no platform prefix."""
+    now = int(time.time() * 1000)
+    ledger.log_voice_event({
+        "request_id": "req-gw-tg-001",
+        "session_id": "chat_918273",
+        "event_type": "INPUT_ACCEPTED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 1,
+        "status": "ACCEPTED",
+        "reason_code": None,
+        "stage": "input_dispatch.accepted",
+        "payload": {
+            "source": "GATEWAY",
+            "phase": "ACCEPTED",
+            "latency_ms": None,
+            "platform": "telegram",
+            "conversation_id": "chat_918273",
+            "msg_id": "tg-msg-001",
+            "msg_type": "text",
+        },
+        "detail": "source=GATEWAY platform=telegram text_len=5",
+        "ts_ms": now - 2000,
+    })
+    ledger.log_voice_event({
+        "request_id": "req-gw-tg-001",
+        "session_id": "chat_918273",
+        "event_type": "INPUT_COMPLETED",
+        "direction": "EDGE_TO_HOST",
+        "seq": 2,
+        "status": "OK",
+        "reason_code": None,
+        "stage": "input_dispatch.completed",
+        "payload": {
+            "source": "GATEWAY",
+            "phase": "COMPLETED",
+            "latency_ms": 888,
+            "platform": "telegram",
+            "conversation_id": "chat_918273",
+            "msg_id": "tg-msg-001",
+            "msg_type": "text",
+        },
+        "detail": "main_chain completed source=GATEWAY platform=telegram latency_ms=888",
+        "ts_ms": now - 1000,
+    })
+
+    async def _fake_remote_gateway_health():
+        return {}
+
+    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+
+    resp = client.get("/obs/gateway/stats?window_minutes=10080")
+    assert resp.status_code == 200
+    data = resp.json()
+    telegram = next(row for row in data["platforms"] if row["platform"] == "telegram")
+    assert telegram["inbound_count"] == 1
+    assert telegram["outbound_count"] == 1
+    assert telegram["avg_latency_ms"] == 888
+    assert telegram["status"] == "UP"
+
+
+def test_trace_live_feed_streams_snapshot(client):
+    """Trace live feed should emit an initial snapshot event."""
+    resp = client.get("/obs/trace-feed/live?limit=2&interval_ms=250&once=true")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    raw = resp.text
+    first_event = raw.split("\n\n", 1)[0]
+    assert "event: snapshot" in first_event
+    data_line = next(line for line in first_event.splitlines() if line.startswith("data:"))
+    payload = json.loads(data_line[5:].strip())
+    assert payload["type"] == "snapshot"
+    assert payload["count"] >= 1
+    assert payload["items"][0]["session"]["request_id"].startswith("req-int-")
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/subsystems/stats
+# ---------------------------------------------------------------------------
+
+def test_subsystems_stats_classifies_intent_airlock_and_retrieval(client, ledger):
+    """Subsystem health should not treat intent lint JSON or airlock policy hits as hard failures."""
+    now = int(time.time() * 1000)
+
+    ledger.log_airlock({
+        "request_id": "req-airlock-blocked-001",
+        "direction": "INGRESS",
+        "reason_code": "AIRLOCK_BLOCKED_INGRESS",
+        "removed_fields": None,
+        "redactions": None,
+        "payload_digest": None,
+        "quarantine_digest": None,
+        "ingress_classification": "draft_only",
+        "blocked": 1,
+        "detail": "blocked by policy",
+        "ts_ms": now - 80,
+    })
+    ledger.log_retrieval_event({
+        "request_id": "req-retrieval-degraded-001",
+        "intent_id": "intent-retrieval-degraded-001",
+        "op_kind": "RERANK",
+        "status": "DEGRADED",
+        "reason_code": "RETR_RERANK_TIMEOUT",
+        "stage": "S_RET_RERANK",
+        "payload": {"elapsed_ms": 40866},
+        "detail": "reranker slow: 40866ms>30000ms",
+        "ts_ms": now - 60,
+    })
+
+    resp = client.get("/obs/subsystems/stats?window_minutes=10080")
+    assert resp.status_code == 200
+    data = resp.json()
+    subsystems = {row["subsystem"]: row for row in data["subsystems"]}
+
+    intent = subsystems["intent"]
+    assert intent["status"] == "UP"
+    assert intent["success"] >= 1
+    assert intent["failed"] == 0
+
+    airlock = subsystems["airlock"]
+    assert airlock["status"] == "UP"
+    assert airlock["success_rate"] == 100.0
+    assert airlock["failed"] == 0
+    assert airlock["blocked"] == 1
+
+    retrieval = subsystems["retrieval"]
+    assert retrieval["status"] == "DEGRADED"
+    assert retrieval["degraded"] >= 1
+    assert "降级" in (retrieval["detail"] or "")
+
+
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
@@ -208,12 +719,31 @@ def test_trace_not_found(client):
 
 def test_trace_fallback_path(client, ledger):
     """T-OBS-ROUTE-INT-11: graph_run_trace 无数据时降级路径正常返回。"""
-    # req-int-002 只有 governor_log，无 graph_run_trace
+    # req-int-002 无 graph_run_trace，走审计表合成链路
     resp = client.get("/obs/trace/req-int-002")
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-int-002"
     assert data["node_count"] >= 1
+
+
+def test_trace_fallback_contains_summary_and_recall(client):
+    """Fallback trace should expose summary, recall stages, and node payloads."""
+    resp = client.get("/obs/trace/req-int-002")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["input_text"] == "fallback hello"
+    assert data["summary"]["output_text"] == "fallback reply"
+    assert data["summary"]["recall"]["candidate_count"] == 7
+    assert data["summary"]["recall"]["pack_id"] == "epk_test_002"
+    assert data["summary"]["recall"]["content_available"] is True
+    assert data["summary"]["recall"]["items"][0]["snippet"] == "fallback hello recall snippet"
+    assert data["summary"]["recall"]["topk"][0]["snippet"] == "fallback hello rerank snippet"
+    assert data["summary"]["recall"]["evidence_topk"][0]["snippet"] == "fallback hello evidence snippet"
+    node_ids = {node["node_id"] for node in data["nodes"]}
+    assert "host_input" in node_ids
+    assert "recall_fusion" in node_ids
+    assert "llm_gateway" in node_ids
 
 
 def test_trace_response_structure(client):

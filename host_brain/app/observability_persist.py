@@ -176,6 +176,50 @@ def persist_chat_episodic_memory(
     except (TypeError, ValueError):
         pass
 
+    from host_brain.app.dependencies import (  # noqa: PLC0415
+        get_consolidation_trigger,
+        get_distillation_engine,
+        get_episodic_memory_graph,
+        get_memory_worth_evaluator,
+        get_meta_learning_loop,
+        get_predictive_state_engine,
+    )
+
+    _turn_count = max(1, int((emotion_context or {}).get("turn_count") or 1))
+    _predictive_state = get_predictive_state_engine()
+    _predictive_state.record_emotion(tag.lower(), ts_ms=ts_ms)
+    _memory_worth = get_memory_worth_evaluator().evaluate(
+        user_message,
+        assistant_reply,
+        emotion_tag=tag,
+        turn_count=_turn_count,
+    )
+    get_meta_learning_loop().record(
+        "memory_worth",
+        success=(_memory_worth.decision != "skip"),
+        skipped=(_memory_worth.decision == "skip"),
+        latency_ms=0.0,
+        custom={"worth_score": float(_memory_worth.worth_score)},
+    )
+    if _memory_worth.decision == "skip":
+        return {
+            "status": "SKIPPED",
+            "reason_code": "MEMORY_WORTH_SKIP",
+            "memory_id": None,
+            "detail": _memory_worth.reason,
+            "emotion_tag": tag,
+            "memory_worth": _memory_worth.as_dict(),
+        }
+    if _memory_worth.decision == "write_light":
+        return {
+            "status": "SKIPPED",
+            "reason_code": "MEMORY_WORTH_LIGHT_ONLY",
+            "memory_id": None,
+            "detail": _memory_worth.reason,
+            "emotion_tag": tag,
+            "memory_worth": _memory_worth.as_dict(),
+        }
+
     # [选项二] 接入 MemoryGuard：在写入 EpisodicStore 前进行宪法校验
     # 校验条件：对话轮次 ≥ 2 且包含情感/事实/偏好标签
     # 降级策略：校验失败时跳过写入（不抛出异常），记录 reason_code
@@ -188,7 +232,7 @@ def persist_chat_episodic_memory(
         _turn_count = max(2, int((emotion_context or {}).get("turn_count") or 2))
         # 保证至少有一个 qualifying tag（含 NEUTRAL），避免 EPISODIC_NO_QUALIFYING_TAGS 阻断封测
         _emotion_tags = [tag] if tag else ["NEUTRAL"]
-        _fact_tags = list((emotion_context or {}).get("fact_tags") or [])
+        _fact_tags = list((emotion_context or {}).get("fact_tags") or []) + list(_memory_worth.tags)
         _pref_tags = list((emotion_context or {}).get("preference_tags") or [])
         _record = EpisodicRecord(
             session_id=session_id,
@@ -231,12 +275,66 @@ def persist_chat_episodic_memory(
         emotion_valence=valence,
         emotion_arousal=arousal,
     )
+    memory_graph_summary: dict[str, Any] = {"status": "SKIPPED", "reason_code": "WRITE_FAILED"}
+    consolidation_summary: dict[str, Any] = {"status": "SKIPPED", "reason_code": "WRITE_FAILED"}
+    if result.success and result.memory_id:
+        graph = get_episodic_memory_graph()
+        memory_node = graph.add_memory(
+            memory_id=str(result.memory_id),
+            text=text,
+            ts_ms=ts_ms,
+        )
+        memory_walk = graph.walk(str(result.memory_id), max_steps=3)
+        memory_graph_summary = {
+            "status": "OK",
+            "node": memory_node.as_dict(),
+            "walk": memory_walk.as_dict(),
+        }
+        get_meta_learning_loop().record(
+            "episodic_memory_graph",
+            success=True,
+            latency_ms=0.0,
+            custom={"chain_length": float(len(memory_walk.chain))},
+        )
+
+        consolidation_trigger = get_consolidation_trigger()
+        consolidation_trigger.on_memory_written(
+            tags=list(_memory_worth.tags),
+            emotion_tag=tag,
+            text_preview=user_message,
+        )
+        consolidation_decision = consolidation_trigger.check()
+        consolidation_summary = {
+            "status": "TRIGGERED" if consolidation_decision.should_trigger else "SKIPPED",
+            **consolidation_decision.as_dict(),
+        }
+        if consolidation_decision.should_trigger:
+            try:
+                report = get_distillation_engine().run_batch()
+                consolidation_summary["distillation"] = {
+                    "status": getattr(report, "status", "OK"),
+                    "processed": getattr(report, "processed_count", None),
+                }
+            except Exception as exc:
+                consolidation_summary["status"] = "DEGRADED"
+                consolidation_summary["reason_code"] = "DISTILLATION_TRIGGER_FAILED"
+                consolidation_summary["detail"] = str(exc)
+        get_meta_learning_loop().record(
+            "consolidation_trigger",
+            success=not consolidation_decision.should_trigger or consolidation_summary.get("status") == "TRIGGERED",
+            skipped=not consolidation_decision.should_trigger,
+            latency_ms=0.0,
+            custom={"memory_count_24h": float(consolidation_decision.memory_count_24h)},
+        )
     return {
         "status": ("OK" if result.success else "DEGRADED"),
         "reason_code": result.reason_code,
         "memory_id": result.memory_id,
         "detail": result.detail,
         "emotion_tag": tag,
+        "memory_worth": _memory_worth.as_dict(),
+        "memory_graph": memory_graph_summary,
+        "consolidation": consolidation_summary,
         # 方向 A：情感记忆闭环审计字段
         "emotion_source": _emotion_source,
         "inferred_user_emotion": _inferred_user_emotion or None,

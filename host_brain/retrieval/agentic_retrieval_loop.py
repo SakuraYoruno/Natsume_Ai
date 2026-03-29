@@ -40,6 +40,8 @@ class AgenticRetrievalResult:
     final_evaluation: EvidenceEvaluation | None = None
     elapsed_ms: float = 0.0
     skipped: bool = False
+    queries_used: list[str] = field(default_factory=list)
+    recall_summary: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +51,9 @@ class AgenticRetrievalResult:
             "final_evaluation": self.final_evaluation.as_dict() if self.final_evaluation else None,
             "elapsed_ms": round(self.elapsed_ms, 2),
             "skipped": self.skipped,
+            "queries_used": list(self.queries_used),
+            "recall_candidate_count": int(self.recall_summary.get("candidate_count") or 0),
+            "route_error_count": len(self.recall_summary.get("route_errors") or []),
         }
 
 
@@ -100,8 +105,10 @@ class AgenticRetrievalLoop:
         session_id: str | None = None,
         turn_index: int = 0,
         intent_id: str | None = None,
+        emotion_filter: str | None = None,
         render_target_lang: str | None = None,
         ts_ms: int | None = None,
+        plan: QueryPlan | None = None,
     ) -> AgenticRetrievalResult:
         """Agentic 检索入口（同步）。
 
@@ -121,7 +128,7 @@ class AgenticRetrievalLoop:
         t0 = time.monotonic()
 
         # 1. 规划
-        plan = self._planner.plan(query, turn_index=turn_index)
+        plan = plan or self._planner.plan(query, turn_index=turn_index)
 
         if plan.skip_retrieval:
             elapsed = (time.monotonic() - t0) * 1000
@@ -136,12 +143,22 @@ class AgenticRetrievalLoop:
                 final_evaluation=None,
                 elapsed_ms=elapsed,
                 skipped=True,
+                queries_used=[],
+                recall_summary={},
             )
 
         # 2. 检索循环
         all_evidence: list[dict[str, Any]] = []
         evaluation: EvidenceEvaluation | None = None
         rounds_used = 0
+        queries_used: list[str] = []
+        aggregated_routes: list[dict[str, Any]] = []
+        aggregated_route_rows: list[dict[str, Any]] = []
+        aggregated_route_errors: list[dict[str, Any]] = []
+        recall_status: str | None = None
+        recall_reason_code: str | None = None
+        recall_detail: str | None = None
+        recall_degraded = False
 
         # 准备所有 query（原始 + 改写）
         queries = [query] + list(plan.rewritten_queries)
@@ -155,6 +172,7 @@ class AgenticRetrievalLoop:
                 if round_idx < len(queries)
                 else query
             )
+            queries_used.append(current_query)
 
             # 计算 embedding
             current_embedding = self._get_embedding(
@@ -173,11 +191,67 @@ class AgenticRetrievalLoop:
                     intent_id=intent_id,
                     session_id=session_id,
                     ts_ms=ts_ms,
+                    emotion_filter=emotion_filter,
                     render_target_lang=render_target_lang,
+                    target_store_ids=list(plan.target_stores or []),
+                    time_lookback_days=plan.time_lookback_days,
                 )
             except Exception as exc:
                 _logger.warning("Agentic recall 失败 (round %d): %s", round_idx, exc)
                 break
+
+            fusion_output = getattr(fusion_result, "output", None)
+            if isinstance(fusion_output, dict):
+                current_status = str(
+                    fusion_output.get("status")
+                    or getattr(fusion_result, "status", "")
+                    or "",
+                ).strip()
+                current_reason_code = (
+                    fusion_output.get("reason_code")
+                    or getattr(fusion_result, "reason_code", None)
+                )
+                current_detail = str(
+                    fusion_output.get("detail")
+                    or getattr(fusion_result, "detail", "")
+                    or "",
+                ).strip()
+                current_degraded = bool(
+                    fusion_output.get("degraded")
+                    or getattr(fusion_result, "status", None) == "DEGRADED"
+                    or current_reason_code
+                )
+                if current_status:
+                    recall_status = current_status
+                if current_reason_code and recall_reason_code is None:
+                    recall_reason_code = str(current_reason_code)
+                if current_detail:
+                    recall_detail = current_detail
+                recall_degraded = recall_degraded or current_degraded
+                aggregated_routes.extend(
+                    {
+                        **dict(route),
+                        "round_index": round_idx,
+                    }
+                    for route in list(fusion_output.get("routes") or [])
+                    if isinstance(route, dict)
+                )
+                aggregated_route_rows.extend(
+                    {
+                        **dict(row),
+                        "round_index": round_idx,
+                    }
+                    for row in list(fusion_output.get("route_rows") or [])
+                    if isinstance(row, dict)
+                )
+                aggregated_route_errors.extend(
+                    {
+                        **dict(err),
+                        "round_index": round_idx,
+                    }
+                    for err in list(fusion_output.get("route_errors") or [])
+                    if isinstance(err, dict)
+                )
 
             # 提取 candidates
             new_candidates = self._extract_candidates(fusion_result)
@@ -227,6 +301,18 @@ class AgenticRetrievalLoop:
             final_evaluation=evaluation,
             elapsed_ms=elapsed,
             skipped=False,
+            queries_used=queries_used,
+            recall_summary={
+                "status": recall_status or ("DEGRADED" if recall_degraded else "OK"),
+                "reason_code": recall_reason_code,
+                "detail": recall_detail or "",
+                "degraded": recall_degraded or bool(recall_reason_code),
+                "routes": aggregated_routes,
+                "route_rows": aggregated_route_rows,
+                "route_errors": aggregated_route_errors,
+                "candidate_count": len(all_evidence),
+                "candidates": list(all_evidence),
+            },
         )
 
     # ── 内部方法 ──────────────────────────────────────────────────────────

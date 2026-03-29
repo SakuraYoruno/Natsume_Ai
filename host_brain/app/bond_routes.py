@@ -26,6 +26,7 @@ from host_brain.bond.bond_stage_engine import (
     TRANSITION_STATUS_DEMOTED,
     TRANSITION_STATUS_STABLE,
 )
+from host_brain.bond.user_identity import collapse_bond_user_ids, resolve_bond_user_id
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.bond_routes")
@@ -126,9 +127,10 @@ async def bond_health() -> BondHealthResponse:
     ts_ms = int(time.time() * 1000)
     try:
         engine = _get_engine()
+        users = collapse_bond_user_ids(engine.list_users())
         return BondHealthResponse(
             status="OK",
-            user_count=len(engine.list_users()),
+            user_count=len(users),
             stage_order=STAGE_ORDER,
             request_id=request_id,
             timestamp=ts_ms,
@@ -157,7 +159,7 @@ async def list_bond_users() -> Dict[str, Any]:
     ts_ms = int(time.time() * 1000)
     try:
         engine = _get_engine()
-        users = engine.list_users()
+        users = collapse_bond_user_ids(engine.list_users())
         return {
             "users": users,
             "total": len(users),
@@ -181,9 +183,10 @@ async def get_bond_summary(user_id: str) -> BondSummaryResponse:
     ts_ms = int(time.time() * 1000)
     try:
         engine = _get_engine()
-        summary = engine.get_summary(user_id)
+        canonical_user_id = resolve_bond_user_id(user_id)
+        summary = engine.get_summary(canonical_user_id)
         return BondSummaryResponse(
-            user_id=user_id,
+            user_id=canonical_user_id,
             stage=summary["stage"],
             trend=summary["trend"],
             capability_hint=summary["capability_hint"],
@@ -208,10 +211,11 @@ async def get_bond_stage(user_id: str) -> BondStageResponse:
     ts_ms = int(time.time() * 1000)
     try:
         engine = _get_engine()
-        state = engine.get_state(user_id)
+        canonical_user_id = resolve_bond_user_id(user_id)
+        state = engine.get_state(canonical_user_id)
         stage_index = STAGE_ORDER.index(state.current_stage) if state.current_stage in STAGE_ORDER else 0
         return BondStageResponse(
-            user_id=user_id,
+            user_id=canonical_user_id,
             current_stage=state.current_stage,
             stage_index=stage_index,
             total_score=state.total_score,
@@ -260,7 +264,7 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
 
     try:
         result: StageTransitionResult = engine.apply_event(
-            user_id=body.user_id,
+            user_id=resolve_bond_user_id(body.user_id),
             update_kind=body.update_kind,
             evidence_refs=refs,
             request_id=request_id,

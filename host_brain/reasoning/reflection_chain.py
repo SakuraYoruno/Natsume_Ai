@@ -51,7 +51,7 @@ _SYSTEM_STATUS_PATTERN = re.compile(
 # 触发条件
 # ---------------------------------------------------------------------------
 HIGH_RISK_EMOTION_TAGS = frozenset({
-    "sadness", "anger", "fear", "disgust", "anxiety",
+    "sadness", "sad", "anger", "angry", "fear", "afraid", "disgust", "anxiety",
     "loneliness", "frustration", "grief", "despair",
 })
 HIGH_RISK_INTENTS = frozenset({
@@ -91,6 +91,25 @@ class ReflectionResult:
             },
             "issues_count": len(self.issues),
             "revision_hints": list(self.revision_hints[:3]),
+        }
+
+
+@dataclass
+class RevisionResult:
+    """Deterministic revision result produced after reflection."""
+
+    revised_text: str
+    changed: bool
+    operations: list[str] = field(default_factory=list)
+    reflection_before: ReflectionResult | None = None
+    reflection_after: ReflectionResult | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "changed": self.changed,
+            "operations": list(self.operations[:6]),
+            "before": self.reflection_before.as_dict() if self.reflection_before else None,
+            "after": self.reflection_after.as_dict() if self.reflection_after else None,
         }
 
 
@@ -226,6 +245,103 @@ class ReflectionChain:
             issues=all_issues,
             revision_hints=revision_hints[:3],
             should_revise=should_revise,
+        )
+
+    def revise(
+        self,
+        *,
+        user_message: str,
+        ai_response: str,
+        emotion_tag: str = "",
+        bond_stage: str = "",
+        canon_rules: list[str] | None = None,
+    ) -> RevisionResult:
+        """Apply a deterministic post-process revision and re-score it."""
+        before = self.reflect(
+            user_message=user_message,
+            ai_response=ai_response,
+            emotion_tag=emotion_tag,
+            bond_stage=bond_stage,
+            canon_rules=canon_rules,
+        )
+        original = str(ai_response or "").strip()
+        revised = original
+        operations: list[str] = []
+
+        if not original:
+            revised = "我在。"
+            operations.append("fallback_empty")
+        else:
+            if _AI_SELF_REF_PATTERN.search(revised):
+                revised = _AI_SELF_REF_PATTERN.sub("", revised)
+                operations.append("strip_ai_self_reference")
+            if _CUSTOMER_SERVICE_PATTERN.search(revised):
+                revised = _CUSTOMER_SERVICE_PATTERN.sub("", revised)
+                operations.append("strip_customer_service_tone")
+            if _SYSTEM_STATUS_PATTERN.search(revised):
+                revised = _SYSTEM_STATUS_PATTERN.sub("", revised)
+                operations.append("strip_system_status_language")
+
+            revised = re.sub(r"\s+", " ", revised).strip(" ，,。.!！？")
+
+            etag = str(emotion_tag or "").strip().lower()
+            if etag in {"sadness", "grief", "despair", "loneliness", "anxiety", "fear"}:
+                empathy_markers = ("我在", "陪你", "抱抱", "辛苦", "心疼", "理解", "别一个人扛")
+                if not any(marker in revised for marker in empathy_markers):
+                    prefix = "我在，先别一个人扛着。"
+                    revised = f"{prefix}{revised}" if revised else prefix
+                    operations.append("prepend_empathy")
+
+            stage = str(bond_stage or "").strip().upper()
+            if stage in {"STRANGER", "ACQUAINTANCE"}:
+                replacements = {
+                    "人家": "我",
+                    "亲爱的": "你",
+                    "笨蛋": "你呀",
+                    "宝贝": "你",
+                }
+                for old, new in replacements.items():
+                    if old in revised:
+                        revised = revised.replace(old, new)
+                        operations.append(f"soften_{old}")
+            elif stage in {"CONFIDANT", "SOULMATE"}:
+                for old in ("您好", "请问", "非常感谢", "期待"):
+                    if old in revised:
+                        revised = revised.replace(old, "")
+                        operations.append(f"relax_{old}")
+
+            if len(revised) < 6 and str(user_message or "").strip():
+                revised = f"{revised}我会认真陪你说。".strip()
+                operations.append("extend_too_short_reply")
+
+            user_len = len(str(user_message or "").strip())
+            if user_len < 16 and len(revised) > 120:
+                sentence_break = max(revised.find("。"), revised.find("！"), revised.find("？"))
+                if 0 < sentence_break < 118:
+                    revised = revised[: sentence_break + 1]
+                else:
+                    revised = revised[:117].rstrip() + "。"
+                operations.append("trim_overlong_reply")
+
+            revised = re.sub(r"\s+", " ", revised).strip()
+            if not revised:
+                revised = "我在。"
+                operations.append("fallback_after_cleanup")
+
+        after = self.reflect(
+            user_message=user_message,
+            ai_response=revised,
+            emotion_tag=emotion_tag,
+            bond_stage=bond_stage,
+            canon_rules=canon_rules,
+        )
+        changed = revised != original
+        return RevisionResult(
+            revised_text=revised,
+            changed=changed,
+            operations=operations,
+            reflection_before=before,
+            reflection_after=after,
         )
 
     # ── 各维度评估 ────────────────────────────────────────────────────────

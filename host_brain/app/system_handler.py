@@ -38,6 +38,7 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
+from host_brain.bond.user_identity import resolve_bond_user_id
 from host_brain.observability.routes import build_obs_metrics_response
 
 ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
@@ -712,7 +713,7 @@ def receive_edge_events_response(
                         "intent_id": _ev_request_id,
                         "session_id": _ev_session_id,
                         "seq": 1,
-                        "user_id": _ev_session_id,
+                        "user_id": resolve_bond_user_id(session_id=_ev_session_id),
                         "topic_id": _ev_text[:64],
                         "capability_hint": "edge_event_bond",
                         "update_kind": _update_kind,

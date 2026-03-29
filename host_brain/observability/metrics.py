@@ -77,6 +77,21 @@ class MetricsCollector:
 
     def __init__(self, *, ledger: SQLiteLedger) -> None:
         self.ledger = ledger
+        self._runtime_chat_requests = 0
+        self._runtime_rejections = 0
+        self._runtime_errors = 0
+        self._runtime_reason_code_counts: dict[str, int] = {}
+
+    def inc_chat(self) -> None:
+        self._runtime_chat_requests += 1
+
+    def inc_rejection(self, reason_code: str) -> None:
+        self._runtime_rejections += 1
+        normalized = str(reason_code or "UNKNOWN").strip() or "UNKNOWN"
+        self._runtime_reason_code_counts[normalized] = self._runtime_reason_code_counts.get(normalized, 0) + 1
+
+    def inc_error(self) -> None:
+        self._runtime_errors += 1
 
     # ------------------------------------------------------------------
     # Public API

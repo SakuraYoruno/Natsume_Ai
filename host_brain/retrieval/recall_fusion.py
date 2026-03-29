@@ -67,6 +67,7 @@ from host_brain.retrieval.recall_fusion_stores import (
     search_route as _search_route_impl,
 )
 from host_brain.retrieval.hybrid_fusion import HybridFusionStrategy  # noqa: F401
+from host_brain.retrieval.audit_preview import build_retrieval_items_preview
 
 logger = logging.getLogger("Natsume.retrieval.recall_fusion")
 
@@ -244,6 +245,8 @@ class RecallFusionServiceContract:
         ts_ms: int | None = None,
         emotion_filter: str | None = None,
         render_target_lang: str | None = None,
+        target_store_ids: list[str] | None = None,
+        time_lookback_days: int | None = None,
     ) -> RecallFusionResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
@@ -254,6 +257,7 @@ class RecallFusionServiceContract:
             node_id=self.node_id,
             render_target_lang=render_target_lang,
         )
+        routes = _filter_recall_routes(routes=routes, target_store_ids=target_store_ids)
         route_rows: list[dict[str, Any]] = []
         route_errors: list[dict[str, Any]] = []
 
@@ -362,6 +366,13 @@ class RecallFusionServiceContract:
                 query=normalized_query,
             )
 
+        if time_lookback_days is not None:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if _candidate_within_lookback(candidate, now_ts_ms=now_value, lookback_days=time_lookback_days)
+            ]
+
         # M27-G：情感维度路由（OPT-31）
         # FIX: 原实现仅做列表拼接，两个分组内部排序丢失。
         # 修复后：matched/unmatched 各自按原始分数降序保持稳定，再拼接。
@@ -420,6 +431,7 @@ class RecallFusionServiceContract:
                 "route_count": len(routes),
                 "route_error_count": len(route_errors),
                 "candidate_count": len(candidates),
+                "items": build_retrieval_items_preview(candidates),
                 "output_status": status,
             },
             ts_ms=now_value,
@@ -471,6 +483,7 @@ class RecallFusionServiceContract:
                 "route_count": len(routes),
                 "route_error_count": len(route_errors),
                 "candidate_count": len(candidates),
+                "items": build_retrieval_items_preview(candidates),
                 "output_status": STATUS_DEGRADED,
             },
             ts_ms=ts_ms,
@@ -556,6 +569,61 @@ def _normalize_candidate(
         "metadata": merged_metadata,
         "evidence_refs": evidence_refs_primary,
     }
+
+
+def _filter_recall_routes(
+    *,
+    routes: list[RecallRouteConfig],
+    target_store_ids: list[str] | None,
+) -> list[RecallRouteConfig]:
+    normalized_target_ids = {
+        str(store_id or "").strip().lower()
+        for store_id in list(target_store_ids or [])
+        if str(store_id or "").strip()
+    }
+    if not normalized_target_ids:
+        return list(routes)
+    return [
+        route
+        for route in routes
+        if str(route.store_id or "").strip().lower() in normalized_target_ids
+    ]
+
+
+def _extract_candidate_ts_ms(candidate: Mapping[str, Any]) -> int | None:
+    candidate_ts_keys = (
+        "ts_ms",
+        "created_ts_ms",
+        "updated_ts_ms",
+        "memory_ts_ms",
+        "event_ts_ms",
+    )
+    for scope in (candidate, candidate.get("metadata") or {}):
+        if not isinstance(scope, Mapping):
+            continue
+        for key in candidate_ts_keys:
+            value = scope.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _candidate_within_lookback(
+    candidate: Mapping[str, Any],
+    *,
+    now_ts_ms: int,
+    lookback_days: int,
+) -> bool:
+    if lookback_days <= 0:
+        return True
+    candidate_ts_ms = _extract_candidate_ts_ms(candidate)
+    if candidate_ts_ms is None:
+        return True
+    return candidate_ts_ms >= (int(now_ts_ms) - int(lookback_days) * 86_400_000)
 
 
 def _default_runtime_config() -> RecallRuntimeConfig:

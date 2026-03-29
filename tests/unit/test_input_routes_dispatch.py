@@ -5,6 +5,7 @@ import threading
 from unittest.mock import AsyncMock, patch
 
 from host_brain.app import input_routes
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 def _run(coro):
@@ -72,3 +73,39 @@ def test_run_main_chain_dispatch_inline_mode_skips_to_thread() -> None:
             )
 
     assert main_chain_mock.await_count == 1
+
+
+def test_log_input_event_persists_gateway_platform_metadata() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        input_routes._log_input_event(
+            ledger=ledger,
+            request_id="req_gateway_platform",
+            session_id="conv_generic_001",
+            source="GATEWAY",
+            input_payload={
+                "platform": "telegram",
+                "conversation_id": "conv_generic_001",
+                "msg_id": "tg-msg-001",
+                "msg_type": "text",
+                "from_id": "user-a",
+                "to_id": "bot-b",
+                "is_group": False,
+            },
+            phase="ACCEPTED",
+            status="ACCEPTED",
+            detail="source=GATEWAY platform=telegram",
+            ts_ms=123456,
+        )
+        rows = ledger.voice_event_log
+        assert len(rows) == 1
+        payload = rows[0]["payload"]
+        assert payload["platform"] == "telegram"
+        assert payload["conversation_id"] == "conv_generic_001"
+        assert payload["msg_id"] == "tg-msg-001"
+        assert payload["msg_type"] == "text"
+        assert payload["from_id"] == "user-a"
+        assert payload["to_id"] == "bot-b"
+        assert payload["is_group"] is False
+    finally:
+        ledger.close()

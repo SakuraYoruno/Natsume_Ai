@@ -133,6 +133,7 @@ export default function Metrics() {
   const latP50   = (data?.latency ?? []).map((l) => l.p50)
   const latP95   = (data?.latency ?? []).map((l) => l.p95)
   const summary  = data?.summary ?? {}
+  const isInitialState = !loading && !error && (summary.total_requests ?? 0) === 0
 
   return (
     <div className="space-y-6">
@@ -187,6 +188,11 @@ export default function Metrics() {
       {error && <div className="card p-4 text-red-500 text-sm">加载失败：{error}</div>}
 
       {/* 图表网格 */}
+      {isInitialState && (
+        <div className="card p-4 text-sm text-gray-500">
+          当前观测数据已经清到初始态，最近窗口没有请求样本，所以这里显示 0 和空图是预期表现。
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 请求量趋势 */}
         <div className="card p-4">

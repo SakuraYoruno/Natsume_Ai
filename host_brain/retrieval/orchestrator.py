@@ -23,6 +23,7 @@ from typing import Any, Mapping
 
 from host_brain.app.prompt_builder import _truncate_for_prompt
 from host_brain.retrieval.pipeline import RetrievalPipelineContract, RetrievalPipelineResult
+from host_brain.retrieval.query_planner import QueryPlan, QueryPlanner
 
 
 RETRIEVAL_PATH_SUCCESS = "success"
@@ -49,6 +50,10 @@ def build_skipped_retrieval_summary(reason_code: str) -> dict[str, Any]:
         "evidence_refs": [],
         "reason_chain": [],
         "degraded": False,
+        "agentic_meta": {
+            "skipped": True,
+            "reason_code": str(reason_code or "HOST_CHAT_RETRIEVAL_DISABLED"),
+        },
     }
 
 
@@ -128,6 +133,8 @@ def _extract_evidence_items(*, rerank_output: Mapping[str, Any]) -> list[dict[st
 
 def _classify_retrieval_path(*, summary: Mapping[str, Any], evidence_items: list[dict[str, Any]]) -> str:
     status = str(summary.get("status") or "").strip().upper()
+    if status == "SKIPPED":
+        return RETRIEVAL_PATH_SUCCESS
     degraded = bool(summary.get("degraded", False))
     route_count = int(summary.get("route_count") or 0)
     candidate_count = int(summary.get("candidate_count") or 0)
@@ -143,6 +150,9 @@ def build_summary_from_pipeline_result(result: RetrievalPipelineResult) -> tuple
     recall_output = dict(result.output.get("recall") or {})
     rerank_output = dict(result.output.get("rerank") or {})
     evidence_pack = dict(result.output.get("evidence_pack") or {})
+    query_plan = dict(result.output.get("query_plan") or {})
+    agentic_meta = dict(result.output.get("agentic_meta") or {})
+    adaptive_budget = dict(result.output.get("adaptive_budget") or {})
     evidence_items = _extract_evidence_items(rerank_output=rerank_output)
 
     summary: dict[str, Any] = {
@@ -157,6 +167,10 @@ def build_summary_from_pipeline_result(result: RetrievalPipelineResult) -> tuple
         "evidence_refs": list(evidence_pack.get("evidence_refs") or []),
         "reason_chain": list(result.output.get("reason_chain") or []),
         "degraded": bool(result.output.get("degraded", False)),
+        "query_plan": query_plan,
+        "agentic_meta": agentic_meta,
+        "adaptive_budget": adaptive_budget,
+        "slot_budget_overrides": dict(adaptive_budget.get("adjusted_budget") or {}),
     }
     path = _classify_retrieval_path(summary=summary, evidence_items=evidence_items)
     return summary, evidence_items, path
@@ -174,6 +188,8 @@ class RetrievalOrchestratorRequest:
     ts_ms: int | None = None
     emotion_context: str | None = None
     render_target_lang: str | None = None
+    turn_index: int = 0
+    query_plan: QueryPlan | Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +249,13 @@ class RetrievalOrchestrator:
     ) -> str:
         session_state = dict(request.session_state or {})
         session_id = str(request.session_id or session_state.get("session_id") or "").strip()
+        query_plan_raw = request.query_plan
+        if isinstance(query_plan_raw, QueryPlan):
+            query_plan_payload: dict[str, Any] = query_plan_raw.as_dict()
+        elif isinstance(query_plan_raw, Mapping):
+            query_plan_payload = dict(query_plan_raw)
+        else:
+            query_plan_payload = {}
         payload = {
             "session_id": session_id,
             "query": str(request.query or "").strip(),
@@ -240,6 +263,8 @@ class RetrievalOrchestrator:
             "intent_id": str(request.intent_id or "").strip(),
             "emotion_context": str(request.emotion_context or "").strip(),
             "render_target_lang": str(request.render_target_lang or "").strip().lower(),
+            "turn_index": int(request.turn_index),
+            "query_plan": query_plan_payload,
             "session_state": session_state,
         }
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -301,7 +326,7 @@ class RetrievalOrchestrator:
         summary["cache_hit"] = bool(cache_hit and self._cache_enabled)
         summary["cache_ttl_ms"] = int(self._cache_ttl_ms if self._cache_enabled else 0)
         summary["cache_age_ms"] = max(0, int(cache_age_ms))
-        summary["cache_key_scope"] = "session_id+query+top_k+intent_id+emotion_context+render_target_lang"
+        summary["cache_key_scope"] = "session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan"
         evidence_items = [
             dict(item) if isinstance(item, Mapping) else item
             for item in list(result.retrieval_evidence_items or [])
@@ -316,7 +341,7 @@ class RetrievalOrchestrator:
             "ttl_ms": int(self._cache_ttl_ms if self._cache_enabled else 0),
             "age_ms": max(0, int(cache_age_ms)),
             "max_entries": int(self._cache_max_entries),
-            "key_scope": "session_id+query+top_k+intent_id+emotion_context+render_target_lang",
+            "key_scope": "session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan",
         }
         return RetrievalOrchestratorResult(
             success=bool(result.success),
@@ -339,9 +364,67 @@ class RetrievalOrchestrator:
         timeout_ms: int | None = None,
     ) -> RetrievalOrchestratorResult:
         normalized_top_k = _normalize_top_k(request.top_k)
+        planner = QueryPlanner()
+        resolved_query_plan = _resolve_query_plan(
+            planner=planner,
+            query=str(request.query or ""),
+            turn_index=int(request.turn_index),
+            query_plan=request.query_plan,
+        )
+        if resolved_query_plan.skip_retrieval:
+            summary = build_skipped_retrieval_summary("QUERY_PLANNER_SKIP_RETRIEVAL")
+            summary["query_plan"] = resolved_query_plan.as_dict()
+            summary["agentic_meta"] = {
+                **dict(summary.get("agentic_meta") or {}),
+                "mode": "QUERY_PLANNER",
+                "intent": resolved_query_plan.intent,
+                "turn_index": int(request.turn_index),
+            }
+            out = RetrievalOrchestratorResult(
+                success=True,
+                status="SKIPPED",
+                reason_code=(str(summary.get("reason_code") or "").strip() or None),
+                path=RETRIEVAL_PATH_SUCCESS,
+                detail="retrieval skipped by query planner",
+                trace_id=str(request.trace_id or request.request_id),
+                query=str(request.query or ""),
+                session_state=dict(request.session_state or {}),
+                retrieval_summary=dict(summary),
+                retrieval_evidence_items=[],
+                retrieval_bundle={
+                    "trace_id": str(request.trace_id or request.request_id),
+                    "query": str(request.query or ""),
+                    "session_state": dict(request.session_state or {}),
+                    "path": RETRIEVAL_PATH_SUCCESS,
+                    "summary": dict(summary),
+                    "evidence_items": [],
+                    "query_plan": resolved_query_plan.as_dict(),
+                },
+            )
+            return self._with_cache_meta(
+                result=out,
+                cache_hit=False,
+                cache_age_ms=0,
+            )
         cache_key: str | None = None
         if self._cache_enabled:
-            cache_key = self._build_cache_key(request=request, normalized_top_k=normalized_top_k)
+            cache_key = self._build_cache_key(
+                request=RetrievalOrchestratorRequest(
+                    trace_id=request.trace_id,
+                    query=request.query,
+                    session_state=request.session_state,
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    intent_id=request.intent_id,
+                    top_k=request.top_k,
+                    ts_ms=request.ts_ms,
+                    emotion_context=request.emotion_context,
+                    render_target_lang=request.render_target_lang,
+                    turn_index=request.turn_index,
+                    query_plan=resolved_query_plan,
+                ),
+                normalized_top_k=normalized_top_k,
+            )
             cached_row = self._cache_get(cache_key=cache_key)
             if cached_row is not None:
                 cached_result, cache_age_ms = cached_row
@@ -361,6 +444,8 @@ class RetrievalOrchestrator:
                 ts_ms=request.ts_ms,
                 emotion_context=request.emotion_context,
                 render_target_lang=request.render_target_lang,
+                turn_index=int(request.turn_index),
+                query_plan=resolved_query_plan,
             ),
         )
         try:
@@ -388,6 +473,7 @@ class RetrievalOrchestrator:
             "path": path,
             "summary": dict(summary),
             "evidence_items": list(evidence_items),
+            "query_plan": resolved_query_plan.as_dict(),
         }
         out = RetrievalOrchestratorResult(
             success=success,
@@ -409,3 +495,40 @@ class RetrievalOrchestrator:
             cache_hit=False,
             cache_age_ms=0,
         )
+
+
+def _resolve_query_plan(
+    *,
+    planner: QueryPlanner,
+    query: str,
+    turn_index: int,
+    query_plan: QueryPlan | Mapping[str, Any] | None,
+) -> QueryPlan:
+    if isinstance(query_plan, QueryPlan):
+        return query_plan
+    if isinstance(query_plan, Mapping):
+        try:
+            return QueryPlan(
+                original_query=str(query_plan.get("original_query") or query or "").strip(),
+                rewritten_queries=[
+                    str(item).strip()
+                    for item in list(query_plan.get("rewritten_queries") or [])
+                    if str(item).strip()
+                ],
+                intent=str(query_plan.get("intent") or "").strip() or "chat",
+                target_stores=[
+                    str(item).strip()
+                    for item in list(query_plan.get("target_stores") or [])
+                    if str(item).strip()
+                ],
+                skip_retrieval=bool(query_plan.get("skip_retrieval", False)),
+                max_rounds=max(0, int(query_plan.get("max_rounds") or 1)),
+                time_lookback_days=(
+                    int(query_plan["time_lookback_days"])
+                    if query_plan.get("time_lookback_days") is not None
+                    else None
+                ),
+            )
+        except Exception:
+            pass
+    return planner.plan(str(query or ""), turn_index=int(turn_index))

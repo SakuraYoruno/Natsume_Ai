@@ -44,6 +44,7 @@ function EventCard({ event, index }) {
 }
 
 export default function ChatDebug() {
+  const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
   const [message, setMessage] = useState('')
   const [chatHistory, setChatHistory] = useState([])
   const [sseEvents, setSseEvents] = useState([])
@@ -66,6 +67,7 @@ export default function ChatDebug() {
     setChatHistory(prev => [...prev, { role: 'user', content: userMsg }])
     setSseEvents([])
     setCurrentResponse('')
+    setRequestId(null)
     setStreaming(true)
     setStats(null)
 
@@ -101,7 +103,10 @@ export default function ChatDebug() {
           setSseEvents(prev => [...prev, { ...ev, ts_ms: Date.now() }])
 
           // 提取 request_id
-          if (ev.request_id && !requestId) setRequestId(ev.request_id)
+          if (ev.request_id) {
+            setRequestId(ev.request_id)
+            setSelectedRequestId(ev.request_id)
+          }
 
           // 提取文本内容
           if (ev.token) fullText += ev.token
@@ -127,7 +132,7 @@ export default function ChatDebug() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [message, streaming])
+  }, [message, streaming, setSelectedRequestId])
 
   const stopStream = () => { abortRef.current?.abort() }
 
