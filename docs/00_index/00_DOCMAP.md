@@ -105,6 +105,10 @@
   用途：Phase X 智能编排层升级六大方案技术文档（2026-03-29）。在 Agentic RAG 基础上的六大方案：(1)智能记忆写入MemoryWorthEvaluator——评估对话价值减少30-50%无效写入；(2)自适应Prompt预算——按意图动态调整7槽位token分配；(3)语义去重SemanticDedup——Jaccard n-gram去除近似重复召回；(4)关系感知风格BondAwareStyleEngine——6级Bond阶段完整风格profile含禁用词/撒娇/吐槽控制；(5)主动记忆整合ConsolidationTrigger——量级触发+话题触发动态蒸馏；(6)TTS路由TtsContextRouter——7种情感风格动态调整语速/音调/能量+Bond亲密度微调+中日语言检测。
   读者：MASTER、实现层（查阅对齐）。
 
+- docs/50_project/arch/PHASE_XI_AGENT_ARCHITECTURE_UPGRADE.md
+  用途：Phase XI 智能体架构升级七大方案技术文档（2026-03-29）。(1)ReflectionChain自我反思链——5维结构化评估+Generate→Reflect→Revise循环；(2)EpisodicMemoryGraph情景记忆图谱——话题聚类+主题线链接+graph walk召回；(3)PredictiveState预测性状态——6时段周期性模式预测+主动行为提示；(4)PlanningAgent任务规划——ReAct式分解+reason/act/ask/synthesize四步骤；(5)MetaLearningLoop元学习——模块指标EMA+自动调参+Evolution Report；(6)SkillComposer技能编排——DAG规划+拓扑排序+并行执行；(7)MultimodalProcessor多模态——emoji情绪信号+Vision LLM接口+颜文字建议。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
