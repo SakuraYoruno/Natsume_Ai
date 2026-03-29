@@ -518,6 +518,43 @@ class RecallFusionNode(ChainNode):
             logger.warning("[%s] EvidenceCircuitBreaker 初始化失败（降级）: %s", ctx.request_id, _cb_init_exc)
             _circuit_breaker = None
 
+        # ── Agentic RAG: 查询规划（Phase X）───────────────────────────────
+        _agentic_plan = None
+        _agentic_meta: dict[str, Any] = {"mode": "DISABLED"}
+        try:
+            from host_brain.retrieval.query_planner import QueryPlanner  # noqa: PLC0415
+            _qp = QueryPlanner()
+            _turn_index = int(ctx.metadata.get("turn_index", 0) or 0)
+            _agentic_plan = _qp.plan(ctx.user_message, turn_index=_turn_index)
+            _agentic_meta = {
+                "mode": "ACTIVE",
+                "intent": _agentic_plan.intent,
+                "target_stores": _agentic_plan.target_stores,
+                "skip_retrieval": _agentic_plan.skip_retrieval,
+                "max_rounds": _agentic_plan.max_rounds,
+                "rewritten_queries_count": len(_agentic_plan.rewritten_queries),
+            }
+            if _agentic_plan.skip_retrieval:
+                # 简单寒暄：跳过整个七路召回
+                ctx.recall_payload = {
+                    "prompt_context": None,
+                    "evidence_empty": True,
+                    "evidence_count": 0,
+                    "agentic_rag": _agentic_meta,
+                }
+                ctx.audit_tags.append("AGENTIC_SKIP_RETRIEVAL")
+                logger.info(
+                    "[%s] Agentic RAG: 跳过检索 intent=%s",
+                    ctx.request_id, _agentic_plan.intent,
+                )
+                return True
+        except Exception as _qp_exc:
+            logger.debug(
+                "[%s] QueryPlanner 不可用（降级到原有流程）: %s",
+                ctx.request_id, _qp_exc,
+            )
+            _agentic_meta = {"mode": "DEGRADED", "error": str(_qp_exc)[:100]}
+
         # ── 真实七路召回（接入 RetrievalOrchestrator）────────────────────
         recall_mode = "DEGRADED_FALLBACK"
         try:
@@ -832,6 +869,7 @@ class RecallFusionNode(ChainNode):
             ctx.metadata.setdefault("audit_refs", {})["context_compressor"] = context_compressor_meta
             ctx.metadata.setdefault("audit_refs", {})["state_arbiter"] = state_arbiter_meta
             ctx.metadata.setdefault("audit_refs", {})["recall_pack_trace"] = recall_pack_trace_meta
+            ctx.metadata.setdefault("audit_refs", {})["agentic_rag"] = _agentic_meta
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:

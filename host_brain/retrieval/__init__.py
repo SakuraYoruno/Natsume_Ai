@@ -70,6 +70,18 @@ from host_brain.retrieval.orchestrator import (
     build_skipped_retrieval_summary,
     build_summary_from_pipeline_result,
 )
+from host_brain.retrieval.query_planner import (
+    QueryPlanner,
+    QueryPlan,
+)
+from host_brain.retrieval.evidence_evaluator import (
+    EvidenceEvaluator,
+    EvidenceEvaluation,
+)
+from host_brain.retrieval.agentic_retrieval_loop import (
+    AgenticRetrievalLoop,
+    AgenticRetrievalResult,
+)
 
 __all__ = [
     "RET_OP_EMBEDDING",
@@ -130,4 +142,11 @@ __all__ = [
     "build_reranker_dependency_status",
     "load_reranker_runtime_config",
     "resolve_reranker_route",
+    # Agentic RAG (Phase X)
+    "QueryPlanner",
+    "QueryPlan",
+    "EvidenceEvaluator",
+    "EvidenceEvaluation",
+    "AgenticRetrievalLoop",
+    "AgenticRetrievalResult",
 ]
