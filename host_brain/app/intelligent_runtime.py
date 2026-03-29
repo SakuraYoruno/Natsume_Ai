@@ -12,16 +12,31 @@ _EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
 
 _TTS_EMOTION_MAP: dict[str, str] = {
     "NEUTRAL": "neutral",
+    "HAPPY": "happiness",
     "HAPPINESS": "happiness",
     "JOY": "happiness",
+    "GRATEFUL": "happiness",
+    "PROUD": "happiness",
+    "SURPRISED": "happiness",
+    "EXCITED": "excitement",
     "EXCITEMENT": "excitement",
     "PLAYFUL": "playful",
+    "SAD": "sadness",
     "SADNESS": "sadness",
+    "ANXIOUS": "sadness",
+    "BORED": "sadness",
+    "CALM": "comfort",
     "COMFORT": "comfort",
+    "THINKING": "serious",
+    "CONFUSED": "serious",
+    "ANGRY": "serious",
     "ANGER": "serious",
+    "FRUSTRATED": "serious",
     "SERIOUS": "serious",
     "LOVING": "coquettish",
+    "EMBARRASSED": "coquettish",
     "AFFECTION": "coquettish",
+    "COQUETTISH": "coquettish",
 }
 
 _CAPABILITY_KEYWORDS: dict[str, tuple[str, ...]] = {

@@ -294,6 +294,62 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         assert result.start_result is not None
         self.assertTrue(result.start_result.success, msg=result.start_result)
 
+    def test_t_edge_voice_02_enqueue_while_active_is_reported_as_queued(self) -> None:
+        rpc = VoiceRpcContract(asr_min_interval_ms=0)
+        queue = SpeechPlaybackQueue(
+            rpc=rpc,
+            synthesizer=lambda _: {"audio_ref": "mem://audio"},
+            playback_starter=lambda _s, _a: None,
+        )
+        reporter = EdgeEventReporter(
+            transport_fn=lambda events: _success_batch(len(events)),
+            max_retry=1,
+        )
+        pipeline = EdgeVoicePipeline(
+            voice_rpc=rpc,
+            speech_queue=queue,
+            event_reporter=reporter,
+            vts_driver=_MockVtsDriver(),
+        )
+
+        first = pipeline.enqueue_speak(
+            request_id="req_edge_voice_active_1",
+            payload={
+                "session_id": "sess_edge_voice_active",
+                "utterance_id": "utt_edge_voice_active_1",
+                "text": "第一条语音",
+            },
+            ts_ms=1_800_102_210_000,
+            auto_start=True,
+        )
+        self.assertTrue(first.success, msg=first)
+        self.assertIsNotNone(queue.active_playback)
+
+        second = pipeline.enqueue_speak(
+            request_id="req_edge_voice_active_2",
+            payload={
+                "session_id": "sess_edge_voice_active",
+                "utterance_id": "utt_edge_voice_active_2",
+                "text": "第二条语音",
+            },
+            ts_ms=1_800_102_210_001,
+            auto_start=True,
+        )
+
+        self.assertTrue(second.success, msg=second)
+        self.assertIsNotNone(second.start_result)
+        assert second.start_result is not None
+        self.assertTrue(second.start_result.success, msg=second.start_result)
+        self.assertTrue(second.start_result.event.get("waiting_for_active_playback"))
+        self.assertEqual("waiting for active playback to finish", second.start_result.detail)
+
+        done = pipeline.complete_playback(ts_ms=1_800_102_210_002)
+        self.assertIsNotNone(done)
+        active = queue.active_playback
+        self.assertIsNotNone(active)
+        assert active is not None
+        self.assertEqual("req_edge_voice_active_2", active.get("request_id"))
+
     def test_t_edge_voice_02_invalid_barge_in_payload_rejected(self) -> None:
         fixture = _load_json(FIXTURES / "bad" / "barge_in_missing_session_reject.json")
         rpc = VoiceRpcContract(asr_min_interval_ms=0)

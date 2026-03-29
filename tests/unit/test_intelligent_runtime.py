@@ -7,6 +7,7 @@ from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.intelligent_runtime import (
     apply_response_intelligence,
     build_prompt_intelligence,
+    resolve_tts_route,
 )
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
@@ -155,3 +156,27 @@ def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> Non
     assert reflection.get("revised") is True
     assert reflection.get("revision_mode") == "reflection_revise"
     assert float(after.get("overall_score") or 0.0) >= float(before.get("overall_score") or 0.0)
+
+
+def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    route = resolve_tts_route(
+        text="你今天很难过啊。是发生什么事了吗？",
+        emotion_context={"emotion_tag": "SAD"},
+        bond_summary={"stage": "STRANGER"},
+    )
+
+    assert route.get("emotion_tag") == "sadness"
+
+
+def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    route = resolve_tts_route(
+        text="没关系的，我会陪着你。",
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER"},
+    )
+
+    assert route.get("emotion_tag") == "comfort"

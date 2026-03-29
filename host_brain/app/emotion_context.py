@@ -30,6 +30,23 @@ from host_brain.core.metabolism import (
 
 logger = logging.getLogger(__name__)
 
+_SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {
+    "HAPPINESS": "HAPPY",
+    "JOY": "HAPPY",
+    "DELIGHT": "HAPPY",
+    "EXCITEMENT": "EXCITED",
+    "SADNESS": "SAD",
+    "GRIEF": "SAD",
+    "COMFORT": "CALM",
+    "SOOTHING": "CALM",
+    "SERIOUS": "THINKING",
+    "ANGER": "ANGRY",
+    "PLAYFUL": "HAPPY",
+    "COQUETTISH": "LOVING",
+    "AFFECTION": "LOVING",
+    "LOVE": "LOVING",
+}
+
 # ---------------------------------------------------------------------------
 # 线程安全锁——保护所有全局可变状态（Fix: 全局单例在 FastAPI 异步环境中的竞态条件）
 # ---------------------------------------------------------------------------
@@ -152,7 +169,7 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
     hard_snapshot = build_hard_snapshot(state)
     allowed_emotion_tags = list(hard_snapshot.allowed_emotion_tags)
 
-    emotion_tag = str(source.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    emotion_tag = _normalize_runtime_emotion_tag(source.get("emotion_tag")) or "NEUTRAL"
     if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags:
         emotion_tag = allowed_emotion_tags[0]
 
@@ -231,6 +248,14 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         # 方向 C：上一次 emotion_tag（供 VTS 渐变过渡帧计算）
         "_prev_emotion_tag": prev_tag,
     }
+
+
+def _normalize_runtime_emotion_tag(value: Any) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    normalized = normalized.replace("-", "_").replace(" ", "_")
+    return _SEMANTIC_EMOTION_TAG_ALIASES.get(normalized, normalized)
 
 
 def resolve_chat_emotion_context(*, request_body: Any) -> dict[str, Any]:

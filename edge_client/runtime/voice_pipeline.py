@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from edge_client.actuators.speech import (
+    EVENT_TTS_QUEUED,
     EVENT_TTS_PLAYBACK_FINISHED,
     EVENT_TTS_PLAYBACK_STARTED,
     SpeechPlaybackQueue,
@@ -20,7 +21,7 @@ from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
 from edge_client.runtime.emotion_inference import infer_asr_emotion
-from host_brain.core.errors import VOICE_INTERRUPTED
+from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED
 from host_brain.core.ids import now_ms
 
 LOGGER = logging.getLogger("Natsume.edge.voice_pipeline")
@@ -144,6 +145,20 @@ class EdgeVoicePipeline:
             # 重置 VTS 钩子的结果缓存，准备接收本次播放的 VTS 结果
             self._pending_vts_result: dict[str, Any] = {}
             start_result = self.speech_queue.start_next(ts_ms=event_ts)
+            if self._is_waiting_for_active_playback(start_result):
+                start_result = SpeechQueueResult(
+                    success=True,
+                    status=queue_result.status,
+                    reason_code=None,
+                    stage=queue_result.stage,
+                    detail="waiting for active playback to finish",
+                    event={
+                        **dict(queue_result.event),
+                        "event_type": EVENT_TTS_QUEUED,
+                        "waiting_for_active_playback": True,
+                        "ts_ms": event_ts,
+                    },
+                )
             self._report_voice_queue_result(request_id=request_id, result=start_result)
             if (
                 start_result is not None
@@ -178,6 +193,14 @@ class EdgeVoicePipeline:
             talk_result=talk_result,
             mouth_sync_debug=mouth_sync_debug,
         )
+
+    @staticmethod
+    def _is_waiting_for_active_playback(result: SpeechQueueResult | None) -> bool:
+        if result is None or result.success:
+            return False
+        if result.reason_code != VOICE_PLAYBACK_FAILED:
+            return False
+        return "while playback is active" in str(result.detail or "").strip().lower()
 
     def complete_playback(self, *, ts_ms: int | None = None) -> SpeechQueueResult | None:
         event_ts = int(ts_ms if ts_ms is not None else now_ms())

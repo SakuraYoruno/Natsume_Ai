@@ -36,3 +36,23 @@ def test_build_chat_emotion_snapshot_includes_age_and_context() -> None:
     emotion_context = dict(snapshot.get("emotion_context") or {})
     assert emotion_context.get("emotion_tag") == "HAPPY"
     assert float(emotion_context.get("emotion_intensity") or 0.0) == 0.83
+
+
+def test_normalize_chat_emotion_context_accepts_semantic_aliases() -> None:
+    sadness = normalize_chat_emotion_context(
+        {
+            "mood_state": "steady",
+            "emotion_tag": "sadness",
+            "emotion_ts_ms": 1000,
+        }
+    )
+    comfort = normalize_chat_emotion_context(
+        {
+            "mood_state": "steady",
+            "emotion_tag": "comfort",
+            "emotion_ts_ms": 1000,
+        }
+    )
+
+    assert sadness.get("emotion_tag") == "SAD"
+    assert comfort.get("emotion_tag") == "CALM"
