@@ -130,6 +130,9 @@ class EdgeVoicePipeline:
             request_id=request_id,
             payload=payload,
             ts_ms=event_ts,
+            # Queueing and playback start are orchestrated here; keep enqueue side-effect free
+            # so we do not trigger start_next() twice on the same utterance.
+            auto_start=False,
         )
         self._report_voice_queue_result(request_id=request_id, result=queue_result)
         start_result: SpeechQueueResult | None = None

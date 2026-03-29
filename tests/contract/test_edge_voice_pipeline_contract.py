@@ -56,6 +56,16 @@ class _MockVtsDriver:
         return VtsDriverResult(success=True, reason_code=None, detail="connected", action="CONNECT")
 
 
+class _SpySpeechPlaybackQueue(SpeechPlaybackQueue):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.start_next_calls = 0
+
+    def start_next(self, *, ts_ms: int | None = None):  # type: ignore[override]
+        self.start_next_calls += 1
+        return super().start_next(ts_ms=ts_ms)
+
+
 def _success_batch(total: int) -> BatchReportResult:
     return BatchReportResult(
         success=True,
@@ -248,6 +258,41 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         assert done is not None
         self.assertTrue(done.success)
         self.assertEqual(1, vts.talk_end_calls)
+
+    def test_t_edge_voice_02_enqueue_autostart_invokes_start_once(self) -> None:
+        rpc = VoiceRpcContract(asr_min_interval_ms=0)
+        queue = _SpySpeechPlaybackQueue(
+            rpc=rpc,
+            synthesizer=lambda _: {"audio_ref": "mem://audio"},
+            playback_starter=lambda _s, _a: None,
+        )
+        reporter = EdgeEventReporter(
+            transport_fn=lambda events: _success_batch(len(events)),
+            max_retry=1,
+        )
+        pipeline = EdgeVoicePipeline(
+            voice_rpc=rpc,
+            speech_queue=queue,
+            event_reporter=reporter,
+            vts_driver=_MockVtsDriver(),
+        )
+
+        result = pipeline.enqueue_speak(
+            request_id="req_edge_voice_once",
+            payload={
+                "session_id": "sess_edge_voice_once",
+                "utterance_id": "utt_edge_voice_once",
+                "text": "联调语音播放",
+            },
+            ts_ms=1_800_102_200_000,
+            auto_start=True,
+        )
+
+        self.assertTrue(result.success, msg=result)
+        self.assertEqual(1, queue.start_next_calls)
+        self.assertIsNotNone(result.start_result)
+        assert result.start_result is not None
+        self.assertTrue(result.start_result.success, msg=result.start_result)
 
     def test_t_edge_voice_02_invalid_barge_in_payload_rejected(self) -> None:
         fixture = _load_json(FIXTURES / "bad" / "barge_in_missing_session_reject.json")
