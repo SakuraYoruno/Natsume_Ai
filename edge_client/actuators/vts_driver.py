@@ -68,6 +68,21 @@ EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
     "PROUD": "exp_proud_01",
     "GRATEFUL": "exp_grateful_01",
 }
+EMOTION_TAG_ALIASES: dict[str, str] = {
+    "HAPPINESS": "HAPPY",
+    "JOY": "HAPPY",
+    "DELIGHT": "HAPPY",
+    "SADNESS": "SAD",
+    "GRIEF": "SAD",
+    "COMFORT": "CALM",
+    "SOOTHING": "CALM",
+    "EXCITEMENT": "EXCITED",
+    "PLAYFUL": "HAPPY",
+    "SERIOUS": "THINKING",
+    "COQUETTISH": "LOVING",
+    "AFFECTION": "LOVING",
+    "LOVE": "LOVING",
+}
 
 # VTS mouth/lip related input parameters.
 VTS_MOUTH_PARAM = "MouthOpen"
@@ -151,6 +166,14 @@ def normalize_vts_plugin_name(plugin_name: str | None) -> str:
         )
         return alias
     return normalized
+
+
+def normalize_expression_emotion_tag(emotion_tag: str | None) -> str | None:
+    normalized = str(emotion_tag or "").strip().upper()
+    if not normalized:
+        return None
+    normalized = normalized.replace("-", "_").replace(" ", "_")
+    return EMOTION_TAG_ALIASES.get(normalized, normalized)
 
 
 class VtsState(str, Enum):
@@ -566,7 +589,7 @@ class VTubeStudioDriver:
 
         Rejects unknown tags and free-form parameters.
         """
-        normalized = str(emotion_tag or "").strip().upper()
+        normalized = normalize_expression_emotion_tag(emotion_tag)
         if not normalized:
             return VtsDriverResult(
                 success=False,

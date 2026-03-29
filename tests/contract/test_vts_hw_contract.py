@@ -200,6 +200,37 @@ class TestVtsExpressionMapping:
         assert result.success
         assert result.expression_id == EMOTION_TO_EXPRESSION_ID["HAPPY"]
 
+    @pytest.mark.parametrize(
+        ("tag", "expected_tag"),
+        [
+            ("sadness", "SAD"),
+            ("comfort", "CALM"),
+            ("happiness", "HAPPY"),
+            ("excitement", "EXCITED"),
+            ("playful", "HAPPY"),
+            ("serious", "THINKING"),
+            ("coquettish", "LOVING"),
+        ],
+    )
+    def test_semantic_alias_tags_normalize_to_supported_expression_ids(
+        self,
+        tag: str,
+        expected_tag: str,
+    ) -> None:
+        driver = VTubeStudioDriver(VtsConfig())
+        driver._state = VtsState.AUTHENTICATED
+        driver._vts = MagicMock()
+        with patch("edge_client.actuators.vts_driver._trigger_vts_hotkey") as mocked_hotkey:
+            result = driver.set_expression(tag)
+        assert result.success
+        assert result.expression_id == EMOTION_TO_EXPRESSION_ID[expected_tag]
+        assert result.emotion_tag == expected_tag
+        mocked_hotkey.assert_called_once_with(
+            vts=driver._vts,
+            hotkey_id=EMOTION_TO_EXPRESSION_ID[expected_tag],
+            timeout_s=driver._config.api_timeout_s,
+        )
+
     def test_invalid_tag_rejected(self) -> None:
         driver = VTubeStudioDriver(VtsConfig())
         result = driver.set_expression("UNKNOWN_EMOTION")
