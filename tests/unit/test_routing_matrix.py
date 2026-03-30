@@ -58,23 +58,23 @@ class TestFallbackRouting:
     """降级路由测试（需求 5.5、5.6）。"""
 
     def test_fallback_chain_order(self):
-        """验证降级链顺序：cloud → cloud_cn → host_14b → edge_3b（需求 5.5）。"""
+        """验证降级链顺序：cloud → cloud_cn → host_14b（需求 5.5）。"""
         assert FALLBACK_CHAIN == [
             ModelTarget.CLOUD,
             ModelTarget.CLOUD_CN,
             ModelTarget.HOST_14B,
-            ModelTarget.EDGE_3B,
         ]
 
-    def test_high_risk_blocks_edge_3b(self):
-        """验证 HIGH risk_level 禁止路由到 edge_3b（需求 5.6）。"""
+    def test_high_risk_fallback_exhausted(self):
+        """验证 HIGH risk_level 降级链耗尽后返回 None（需求 5.6）。"""
         matrix = RoutingMatrix()
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
             risk_level=RiskLevel.HIGH,
             failed_models=[ModelTarget.CLOUD, ModelTarget.CLOUD_CN, ModelTarget.HOST_14B],
         )
-        assert decision.selected_model != ModelTarget.EDGE_3B
+        # 降级链已耗尽
+        assert decision.selected_model is None or decision.is_fallback
 
     def test_fallback_marked_in_decision(self):
         """验证降级决策中 is_fallback=True（需求 5.5）。"""

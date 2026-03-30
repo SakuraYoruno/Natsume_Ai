@@ -59,8 +59,6 @@ class ModelTarget(str, Enum):
     """云端 API（Gemini Primary）"""
     CLOUD_CN = "cloud_cn"
     """国内云端 API（DeepSeek，低延迟，Gaming 场景首选）"""
-    EDGE_3B = "edge_3b"
-    """边缘端 3B 模型（低风险场景）"""
     SKILLS = "skills"
     """专用 Skills 路由（dream/diary）"""
 

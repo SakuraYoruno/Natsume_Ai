@@ -1231,127 +1231,15 @@ def _handle_automate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGat
 
 
 def _handle_visual_locate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
-    """处理视觉定位请求：截图 → VLM 推理 → 返回坐标，可选自动点击。"""
-    try:
-        from edge_client.actuators.desktop_controller import DesktopController
-        from edge_client.actuators.vision_locator import (
-            REASON_VLM_UNAVAILABLE,
-            VisionLocator,
-            VisionLocatorConfig,
-        )
-
-        instruction = str(envelope.payload.get("instruction") or "").strip()
-        if not instruction:
-            return EdgeGatewayResult(
-                success=False,
-                status=STATUS_REJECTED,
-                reason_code=EDGE_RPC_SCHEMA_INVALID,
-                stage="S_EDGE_VISUAL_LOCATE",
-                detail="visual_locate requires non-empty instruction",
-                event={},
-            )
-
-        monitor_index = int(envelope.payload.get("monitor_index") or 1)
-        auto_click = bool(envelope.payload.get("auto_click", False))
-
-        # ── 1. 截图 ──────────────────────────────────────────────────
-        controller = DesktopController(monitor_index=monitor_index)
-        screenshot = controller.capture_screenshot()
-        if not screenshot.success:
-            return EdgeGatewayResult(
-                success=False,
-                status=STATUS_REJECTED,
-                reason_code=screenshot.reason_code or "DESKTOP_SCREENSHOT_FAILED",
-                stage="S_EDGE_VISUAL_LOCATE",
-                detail=f"截图失败: {screenshot.detail}",
-                event={"screenshot_latency_ms": screenshot.latency_ms},
-            )
-
-        # ── 2. VLM 定位 ───────────────────────────────────────────────
-        locator: VisionLocator | None = getattr(runtime, "vision_locator", None)
-        if locator is None:
-            # runtime 未注入时按配置临时构建（兜底）
-            cfg = runtime.config
-            locator = VisionLocator(
-                VisionLocatorConfig(
-                    ollama_base_url=cfg.vlm_base_url,
-                    model=cfg.vlm_model,
-                    timeout_s=cfg.vlm_timeout_s,
-                    confidence_threshold=cfg.vlm_confidence_threshold,
-                    max_image_width=cfg.vlm_max_image_width,
-                )
-            )
-
-        locate_result = locator.locate(
-            screenshot.image_b64,
-            instruction,
-            image_mime=screenshot.image_mime,
-            image_width=screenshot.width,
-            image_height=screenshot.height,
-        )
-
-        event: dict[str, Any] = {
-            "found": locate_result.found,
-            "x": locate_result.x,
-            "y": locate_result.y,
-            "confidence": locate_result.confidence,
-            "description": locate_result.description,
-            "screenshot_latency_ms": screenshot.latency_ms,
-            "locate_latency_ms": locate_result.latency_ms,
-            "instruction": instruction,
-        }
-
-        if not locate_result.success:
-            return EdgeGatewayResult(
-                success=False,
-                status=STATUS_REJECTED,
-                reason_code=locate_result.reason_code or REASON_VLM_UNAVAILABLE,
-                stage="S_EDGE_VISUAL_LOCATE",
-                detail=locate_result.description,
-                event=event,
-            )
-
-        if not locate_result.found:
-            return EdgeGatewayResult(
-                success=True,
-                status=STATUS_ACCEPTED,
-                reason_code=locate_result.reason_code,
-                stage="S_EDGE_VISUAL_LOCATE",
-                detail=f"目标未找到: {locate_result.description}",
-                event=event,
-            )
-
-        # ── 3. 可选自动点击 ───────────────────────────────────────────
-        if auto_click:
-            from edge_client.actuators.desktop_controller import DesktopAction, DesktopActionType
-            click_report = controller.execute_actions(
-                [DesktopAction(type=DesktopActionType.CLICK, x=locate_result.x, y=locate_result.y)],
-                stop_on_error=True,
-            )
-            event["auto_click"] = True
-            event["click_success"] = click_report.all_success
-            event["click_detail"] = (
-                click_report.results[0].detail if click_report.results else "no result"
-            )
-
-        return EdgeGatewayResult(
-            success=True,
-            status=STATUS_ACCEPTED,
-            reason_code=None,
-            stage="S_EDGE_VISUAL_LOCATE",
-            detail=f"定位成功: ({locate_result.x}, {locate_result.y}) confidence={locate_result.confidence:.2f}",
-            event=event,
-        )
-
-    except Exception as exc:
-        return EdgeGatewayResult(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=SERVICE_UNAVAILABLE_GENERIC,
-            stage="S_EDGE_VISUAL_LOCATE",
-            detail=f"visual_locate failed: {exc}",
-            event={},
-        )
+    """视觉定位请求：Edge 端 VLM 已移除，返回不可用。"""
+    return EdgeGatewayResult(
+        success=False,
+        status=STATUS_REJECTED,
+        reason_code="VLM_REMOVED",
+        stage="S_EDGE_VISUAL_LOCATE",
+        detail="Edge 端 VLM 模型已移除，视觉定位功能不可用",
+        event={},
+    )
 
 
 def _response(

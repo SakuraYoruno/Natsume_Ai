@@ -106,7 +106,6 @@ ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
 
 HOST_CHAT_ROUTE_HOST_14B = "host_14b"
 HOST_CHAT_ROUTE_CLOUD = "cloud"
-HOST_CHAT_ROUTE_EDGE_3B = "edge_3b"
 HOST_CHAT_ROUTE_SKILLS = "skills"
 
 ROUTE_DECISION_VERSION = "route.v1"
@@ -551,8 +550,6 @@ def _resolve_route_target_family(*, route_target: str, scene_type: str, next_nod
     normalized_target = str(route_target or "").strip().lower()
     resolved_scene = _normalize_scene_type(scene_type)
     resolved_next_node = str(next_node or "").strip()
-    if normalized_target == HOST_CHAT_ROUTE_EDGE_3B:
-        return ROUTE_TARGET_EDGE
     if normalized_target == HOST_CHAT_ROUTE_SKILLS:
         return ROUTE_TARGET_SKILLS
     if normalized_target == HOST_CHAT_ROUTE_HOST_14B:

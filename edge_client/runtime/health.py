@@ -45,7 +45,6 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
             detail_when_disabled="edge voice pipeline unavailable",
             component=getattr(runtime, "voice_pipeline", None),
         ),
-        "fallback": _fallback_snapshot(runtime),
         "event_reporter": _component_snapshot(
             enabled=True,
             detail_when_disabled="edge event reporter disabled",
@@ -143,34 +142,6 @@ def _component_snapshot(
         "detail": "component loaded",
         "health": health,
     }
-
-
-def _fallback_snapshot(runtime: EdgeRuntime) -> dict[str, Any]:
-    enabled = bool(getattr(runtime.config, "fallback_llm_enabled", False))
-    fallback = getattr(runtime, "fallback", None)
-    available = bool(getattr(fallback, "available", enabled))
-    status = "ok" if (not enabled or available) else "down"
-    row = {
-        "enabled": enabled,
-        "available": available,
-        "status": status,
-        "detail": (
-            "edge fallback llm enabled"
-            if enabled
-            else "edge fallback llm disabled by default"
-        ),
-        "default_unloaded": bool(getattr(fallback, "default_unloaded", not enabled)),
-        "model_id": str(getattr(fallback, "model_id", "")),
-    }
-    if enabled and fallback is not None:
-        health, error = _safe_health(fallback)
-        if error is not None:
-            row["status"] = "error"
-            row["detail"] = f"health() failed: {error}"
-        elif health:
-            row["health"] = health
-            row["status"] = _extract_component_status(health)
-    return row
 
 
 def _collect_resource_gate(

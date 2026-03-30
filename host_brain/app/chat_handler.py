@@ -8,7 +8,6 @@
 _unified_chat_sse_generator 只负责 Governor 鉴权 + 场景分类，路由委托给 SceneRouter。
 
 子模块职责：
-  - chat_handler_edge.py    — Gaming Edge RPC 路由（_gaming_edge_chat_sse_generator）
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
   - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator，任务4）
   - graph/main_chain.py     — SceneRouter.route_sse()（场景路由分发，任务3）
@@ -43,11 +42,6 @@ from host_brain.app.graph_config_builder import (
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
 
-# 从子模块导入，供测试 monkeypatch 使用
-from host_brain.app.chat_handler_edge import (  # noqa: F401
-    _run_gaming_edge_chat,
-    _post_edge_fallback_rpc,
-)
 from host_brain.app.dependencies import (  # noqa: F401
     get_retrieval_orchestrator,
     get_episodic_store,

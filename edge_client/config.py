@@ -44,10 +44,7 @@ EDGE_FIELD_TO_ENV_KEY = {
     "asr_enabled": "EDGE_ASR_ENABLED",
     "tts_enabled": "EDGE_TTS_ENABLED",
     "barge_in_enabled": "EDGE_BARGE_IN_ENABLED",
-    "fallback_llm_enabled": "EDGE_FALLBACK_LLM_ENABLED",
     "resource_gate_enabled": "EDGE_RESOURCE_GATE_ENABLED",
-    "max_vram_mb": "EDGE_MAX_VRAM_MB",
-    "max_queue_length": "EDGE_MAX_QUEUE_LENGTH",
     # Unified Message Gateway
     "gateway_enabled": "EDGE_GATEWAY_ENABLED",
     "gateway_port": "EDGE_GATEWAY_PORT",
@@ -84,13 +81,6 @@ EDGE_FIELD_TO_ENV_KEY = {
     # LINE Messaging API
     "line_channel_access_token": "LINE_CHANNEL_ACCESS_TOKEN",
     "line_channel_secret": "LINE_CHANNEL_SECRET",
-    # VLM 视觉定位
-    "vlm_enabled": "EDGE_VLM_ENABLED",
-    "vlm_model": "EDGE_VLM_MODEL",
-    "vlm_base_url": "EDGE_VLM_BASE_URL",
-    "vlm_timeout_s": "EDGE_VLM_TIMEOUT_S",
-    "vlm_confidence_threshold": "EDGE_VLM_CONFIDENCE_THRESHOLD",
-    "vlm_max_image_width": "EDGE_VLM_MAX_IMAGE_WIDTH",
 }
 EDGE_SECRET_ENV_KEYS = {"EDGE_HMAC_SHARED_KEY"}
 
@@ -117,7 +107,6 @@ class EdgeConfig:
     asr_enabled: bool
     tts_enabled: bool
     barge_in_enabled: bool
-    fallback_llm_enabled: bool
     resource_gate_enabled: bool
     max_vram_mb: int
     max_queue_length: int
@@ -157,13 +146,6 @@ class EdgeConfig:
     # LINE Messaging API
     line_channel_access_token: str | None = None
     line_channel_secret: str | None = None
-    # VLM 视觉定位
-    vlm_enabled: bool = False
-    vlm_model: str = "qwen2.5vl:7b"
-    vlm_base_url: str = "http://localhost:11434"
-    vlm_timeout_s: float = 30.0
-    vlm_confidence_threshold: float = 0.3
-    vlm_max_image_width: int = 1280
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -180,7 +162,6 @@ class EdgeConfig:
             "asr_enabled": self.asr_enabled,
             "tts_enabled": self.tts_enabled,
             "barge_in_enabled": self.barge_in_enabled,
-            "fallback_llm_enabled": self.fallback_llm_enabled,
             "resource_gate_enabled": self.resource_gate_enabled,
             "max_vram_mb": self.max_vram_mb,
             "max_queue_length": self.max_queue_length,
@@ -220,13 +201,6 @@ class EdgeConfig:
             # LINE Messaging API
             "line_channel_access_token": bool(self.line_channel_access_token),
             "line_channel_secret": bool(self.line_channel_secret),
-            # VLM 视觉定位
-            "vlm_enabled": self.vlm_enabled,
-            "vlm_model": self.vlm_model,
-            "vlm_base_url": self.vlm_base_url,
-            "vlm_timeout_s": self.vlm_timeout_s,
-            "vlm_confidence_threshold": self.vlm_confidence_threshold,
-            "vlm_max_image_width": self.vlm_max_image_width,
         }
 
 
@@ -401,7 +375,6 @@ def load_edge_config(
     asr_enabled = _parse_bool(_env_get(env_lookup, "EDGE_ASR_ENABLED"), default=True)
     tts_enabled = _parse_bool(_env_get(env_lookup, "EDGE_TTS_ENABLED"), default=True)
     barge_in_enabled = _parse_bool(_env_get(env_lookup, "EDGE_BARGE_IN_ENABLED"), default=True)
-    fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=True)
     resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
 
     # Unified Message Gateway
@@ -493,31 +466,6 @@ def load_edge_config(
     line_channel_access_token = _as_optional_text(_env_get(env_lookup, "LINE_CHANNEL_ACCESS_TOKEN"))
     line_channel_secret = _as_optional_text(_env_get(env_lookup, "LINE_CHANNEL_SECRET"))
 
-    # VLM 视觉定位
-    vlm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_VLM_ENABLED"), default=False)
-    vlm_model = _as_text(_env_get(env_lookup, "EDGE_VLM_MODEL"), "qwen2.5vl:7b")
-    vlm_base_url = _as_text(_env_get(env_lookup, "EDGE_VLM_BASE_URL"), "http://localhost:11434")
-    vlm_timeout_s_raw = _env_get(env_lookup, "EDGE_VLM_TIMEOUT_S")
-    try:
-        vlm_timeout_s = float(vlm_timeout_s_raw) if vlm_timeout_s_raw else 30.0
-        vlm_timeout_s = max(1.0, min(vlm_timeout_s, 300.0))
-    except (TypeError, ValueError):
-        vlm_timeout_s = 30.0
-    vlm_confidence_threshold_raw = _env_get(env_lookup, "EDGE_VLM_CONFIDENCE_THRESHOLD")
-    try:
-        vlm_confidence_threshold = float(vlm_confidence_threshold_raw) if vlm_confidence_threshold_raw else 0.3
-        vlm_confidence_threshold = max(0.0, min(vlm_confidence_threshold, 1.0))
-    except (TypeError, ValueError):
-        vlm_confidence_threshold = 0.3
-    vlm_max_image_width = _parse_int(
-        _env_get(env_lookup, "EDGE_VLM_MAX_IMAGE_WIDTH"),
-        default=1280,
-        field_name="EDGE_VLM_MAX_IMAGE_WIDTH",
-        min_value=320,
-        max_value=3840,
-        issues=issues,
-    )
-
     if issues:
         return _failure(issues)
 
@@ -535,7 +483,6 @@ def load_edge_config(
         asr_enabled=bool(asr_enabled),
         tts_enabled=bool(tts_enabled),
         barge_in_enabled=bool(barge_in_enabled),
-        fallback_llm_enabled=bool(fallback_llm_enabled),
         resource_gate_enabled=bool(resource_gate_enabled),
         max_vram_mb=max_vram_mb,
         max_queue_length=max_queue_length,
@@ -575,13 +522,6 @@ def load_edge_config(
         # LINE Messaging API
         line_channel_access_token=line_channel_access_token,
         line_channel_secret=line_channel_secret,
-        # VLM 视觉定位
-        vlm_enabled=bool(vlm_enabled),
-        vlm_model=vlm_model,
-        vlm_base_url=vlm_base_url,
-        vlm_timeout_s=float(vlm_timeout_s),
-        vlm_confidence_threshold=float(vlm_confidence_threshold),
-        vlm_max_image_width=int(vlm_max_image_width),
     )
     return EdgeConfigLoadResult(
         success=True,
@@ -669,7 +609,6 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         statuses["edge.rpc.asr"] = dict(gateway_down)
         statuses["edge.rpc.tts"] = dict(gateway_down)
         statuses["edge.rpc.barge_in"] = dict(gateway_down)
-        statuses["edge.rpc.fallback_llm"] = dict(gateway_down)
         statuses["edge.rpc.resource_gate"] = dict(gateway_down)
         return statuses
 
@@ -689,26 +628,10 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         detail="edge barge-in enabled",
         disabled_detail="edge barge-in requires EDGE_BARGE_IN_ENABLED and EDGE_TTS_ENABLED",
     )
-    if config.fallback_llm_enabled:
-        statuses["edge.rpc.fallback_llm"] = {
-            "available": True,
-            "detail": "edge fallback llm enabled",
-        }
-    else:
-        statuses["edge.rpc.fallback_llm"] = {
-            "available": False,
-            "unavailable_kind": "dependency",
-            "detail": "edge fallback llm disabled by config (EDGE_FALLBACK_LLM_ENABLED=false)",
-        }
     statuses["edge.rpc.resource_gate"] = _service_status(
         enabled=config.resource_gate_enabled,
         detail="edge resource gate enabled",
         disabled_detail="edge resource gate disabled by config",
-    )
-    statuses["edge.vlm"] = _service_status(
-        enabled=config.vlm_enabled,
-        detail=f"edge vlm enabled (model={config.vlm_model})",
-        disabled_detail="edge vlm disabled by config (EDGE_VLM_ENABLED=false)",
     )
     return statuses
 

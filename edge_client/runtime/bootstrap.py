@@ -20,7 +20,6 @@ from edge_client.actuators.tts_engine import (
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
-from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
@@ -36,7 +35,6 @@ class EdgeRuntime:
 
     config: EdgeConfig
     voice_rpc: VoiceRpcContract
-    fallback_rpc: EdgeFallbackRpcContract
     speech_queue: SpeechPlaybackQueue
     event_reporter: EdgeEventReporter
     voice_pipeline: EdgeVoicePipeline
@@ -46,12 +44,6 @@ class EdgeRuntime:
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
     wechat_listener: Any | None = None
-    vision_locator: Any | None = None  # VisionLocator（按需加载）
-
-    @property
-    def vlm(self) -> Any | None:
-        """VisionLocator 实例（若 VLM 已启用）。"""
-        return self.vision_locator
 
     @property
     def asr(self) -> AsrService | None:
@@ -64,10 +56,6 @@ class EdgeRuntime:
     @property
     def vts(self) -> VTubeStudioDriver | None:
         return self.vts_driver
-
-    @property
-    def fallback(self) -> EdgeFallbackRpcContract:
-        return self.fallback_rpc
 
     @property
     def rpc_client(self) -> VoiceRpcContract:
@@ -135,7 +123,6 @@ class EdgeRuntime:
                 outcome["errors"].append(f"gateway stop failed: {exc}")
 
         outcome["vlm_released"] = True
-        # VisionLocator 无需显式释放（无常驻资源）
 
         return outcome
 
@@ -216,13 +203,6 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         resource_gate=resource_gate,
         synthesizer=synthesizer,
         playback_starter=playback_starter,
-    )
-
-    fallback_rpc = EdgeFallbackRpcContract(
-        resource_gate=resource_gate,
-        available=config.fallback_llm_enabled,
-        default_unloaded=(not config.fallback_llm_enabled),
-        model_id=_as_text(_env_get(env_lookup, "EDGE_FALLBACK_LLM_MODEL_ID"), "ollama:3b-q4"),
     )
 
     vts_cfg = VtsConfig(
@@ -471,31 +451,9 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
 
     wechat_listener = None
 
-    # VisionLocator（按需初始化，仅在 vlm_enabled=True 时加载）
-    vision_locator = None
-    if config.vlm_enabled:
-        try:
-            from edge_client.actuators.vision_locator import VisionLocator, VisionLocatorConfig
-            vision_locator = VisionLocator(
-                VisionLocatorConfig(
-                    ollama_base_url=config.vlm_base_url,
-                    model=config.vlm_model,
-                    timeout_s=config.vlm_timeout_s,
-                    confidence_threshold=config.vlm_confidence_threshold,
-                    max_image_width=config.vlm_max_image_width,
-                )
-            )
-            LOGGER.info(
-                "VisionLocator 已初始化: model=%s base_url=%s",
-                config.vlm_model, config.vlm_base_url,
-            )
-        except Exception as exc:
-            LOGGER.warning("VisionLocator 初始化失败（非致命）: %s", exc)
-
     return EdgeRuntime(
         config=config,
         voice_rpc=voice_rpc,
-        fallback_rpc=fallback_rpc,
         speech_queue=speech_queue,
         event_reporter=event_reporter,
         voice_pipeline=voice_pipeline,
@@ -505,7 +463,6 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
         wechat_listener=wechat_listener,
-        vision_locator=vision_locator,
     )
 
 
@@ -608,7 +565,6 @@ def _iter_lifecycle_components(runtime: EdgeRuntime) -> list[tuple[str, Any]]:
         "tts",
         "vts",
         "asr",
-        "fallback",
         "resource_gate",
         "rpc_client",
     )

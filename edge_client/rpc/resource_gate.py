@@ -18,13 +18,11 @@ from host_brain.core.ids import now_ms
 TASK_ASR_INGRESS = "ASR_INGRESS"
 TASK_PLAYBACK = "PLAYBACK"
 TASK_TTS_SYNTH = "TTS_SYNTH"
-TASK_FALLBACK_LLM = "FALLBACK_LLM"
 
 TASK_PRIORITY = {
     TASK_ASR_INGRESS: 0,
     TASK_PLAYBACK: 1,
     TASK_TTS_SYNTH: 2,
-    TASK_FALLBACK_LLM: 3,
 }
 
 EVENT_VOICE_RESOURCE_GATE = "VOICE_RESOURCE_GATE"
@@ -62,7 +60,7 @@ class ResourcePreemptionEvent:
     - 含 preemptor/preempted/reason_code/evidence_ref
     """
     event_id: str
-    preemptor: str                  # 抢占者（"ASR" | "PLAYBACK" | "TTS_SYNTH" | "FALLBACK_LLM"）
+    preemptor: str                  # 抢占者（"ASR" | "PLAYBACK" | "TTS_SYNTH"）
     preempted: str                  # 被抢占者
     reason_code: str                # RESOURCE_GATE_PREEMPTED
     ts_ms: int
@@ -287,7 +285,6 @@ class VoiceResourceGate:
                 TASK_ASR_INGRESS,
                 TASK_PLAYBACK,
                 TASK_TTS_SYNTH,
-                TASK_FALLBACK_LLM,
             ],
             "active_tasks": self._active_task_summary(),
             "metrics": {
@@ -341,10 +338,8 @@ class VoiceResourceGate:
         queue_depth = int(metrics.get("queue_depth", 0))
         utilization = float(metrics.get("vram_utilization", 0.0))
 
-        lower_priority_task = task in {TASK_TTS_SYNTH, TASK_FALLBACK_LLM}
+        lower_priority_task = task in {TASK_TTS_SYNTH}
         if lower_priority_task and total > 0 and utilization >= self.vram_soft_limit_ratio:
-            return True
-        if task == TASK_FALLBACK_LLM and queue_depth > self.max_fallback_queue_depth:
             return True
         if used > total > 0 and lower_priority_task:
             return True

@@ -7,8 +7,7 @@ routing_matrix.py —— 模型路由矩阵
 - chat + <2s + gaming → cloud_cn（国内低延迟，DeepSeek）
 - reasoning / >16k → cloud（需求 5.3）
 - dream/diary → skills（需求 5.4）
-- HIGH risk_level 禁止路由到 edge_3b（需求 5.6）
-- 标准降级链：cloud → cloud_cn → host_14b → edge_3b（需求 5.5）
+- 标准降级链：cloud → cloud_cn → host_14b（需求 5.5）
 - Gaming 降级链：cloud_cn → cloud（禁用本地模型，避免炸显存）
 - 路由决策写入 llm_route_log（需求 5.5）
 """
@@ -32,12 +31,11 @@ logger = logging.getLogger(__name__)
 # 降级链定义
 # ---------------------------------------------------------------------------
 
-# 标准降级链：cloud → cloud_cn → host_14b → edge_3b
+# 标准降级链：cloud → cloud_cn → host_14b
 FALLBACK_CHAIN: List[ModelTarget] = [
     ModelTarget.CLOUD,
     ModelTarget.CLOUD_CN,
     ModelTarget.HOST_14B,
-    ModelTarget.EDGE_3B,
 ]
 
 # Gaming 降级链：cloud_cn → cloud（禁用本地模型，Gaming 时 GPU 全负载跑游戏，本地推理会炸显存）
@@ -177,8 +175,7 @@ class RoutingMatrix:
         """
         带降级链的路由选择。
 
-        当主路由失败时，按 cloud → cloud_cn → host_14b → edge_3b 顺序降级（需求 5.5）。
-        HIGH risk_level 禁止路由到 edge_3b（需求 5.6）。
+        当主路由失败时，按 cloud → cloud_cn → host_14b 顺序降级（需求 5.5）。
 
         Args:
             failed_models: 已失败的模型列表，降级时跳过这些模型。
@@ -203,13 +200,6 @@ class RoutingMatrix:
 
         for fallback_model in chain:
             if fallback_model in failed_models:
-                continue
-
-            # HIGH risk_level 禁止路由到 edge_3b（需求 5.6）
-            if risk_level == RiskLevel.HIGH and fallback_model == ModelTarget.EDGE_3B:
-                logger.warning(
-                    "HIGH risk_level 禁止路由到 edge_3b，跳过该降级目标"
-                )
                 continue
 
             # 检查模型可用性
@@ -280,7 +270,6 @@ class RoutingMatrix:
         "cloud": 1.0,
         "cloud_cn": 0.08,
         "host_14b": 0.05,
-        "edge_3b": 0.01,
         "skills": 0.02,
     }
 
@@ -359,10 +348,6 @@ class RoutingMatrix:
                 continue
 
             if model_target in _failed:
-                continue
-
-            # HIGH risk_level 禁止路由到 edge_3b
-            if _risk == RiskLevel.HIGH and model_name == "edge_3b":
                 continue
 
             # 检查模型可用性

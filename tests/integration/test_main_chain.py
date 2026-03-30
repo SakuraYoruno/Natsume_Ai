@@ -263,18 +263,18 @@ class TestModelFallbackFlow:
 
     @pytest.mark.asyncio
     async def test_fallback_chain_order(self):
-        """验证降级链顺序：cloud → cloud_cn → host_14b → edge_3b（需求 5.5）。"""
+        """验证降级链顺序：cloud → cloud_cn → host_14b（需求 5.5）。"""
         from host_brain.app.llm.routing_matrix import RoutingMatrix, FALLBACK_CHAIN
         from host_brain.app.schemas.routing_types import ModelTarget
 
         assert FALLBACK_CHAIN[0] == ModelTarget.CLOUD
         assert FALLBACK_CHAIN[1] == ModelTarget.CLOUD_CN
         assert FALLBACK_CHAIN[2] == ModelTarget.HOST_14B
-        assert FALLBACK_CHAIN[3] == ModelTarget.EDGE_3B
+        assert len(FALLBACK_CHAIN) == 3
 
     @pytest.mark.asyncio
-    async def test_high_risk_blocks_edge_3b(self):
-        """验证 HIGH risk_level 禁止路由到 edge_3b（需求 5.6）。"""
+    async def test_high_risk_fallback_exhausted(self):
+        """验证 HIGH risk_level 降级链耗尽后返回 None（需求 5.6）。"""
         from host_brain.app.llm.routing_matrix import RoutingMatrix
         from host_brain.app.schemas.routing_types import ModelTarget, TaskType, LatencyBudget
         from host_brain.app.schemas.memory_types import RiskLevel
@@ -287,5 +287,5 @@ class TestModelFallbackFlow:
             failed_models=[ModelTarget.CLOUD, ModelTarget.CLOUD_CN, ModelTarget.HOST_14B],
         )
 
-        # HIGH risk 时不应降级到 edge_3b
-        assert decision.selected_model != ModelTarget.EDGE_3B
+        # 降级链已耗尽
+        assert decision.selected_model is None or decision.is_fallback

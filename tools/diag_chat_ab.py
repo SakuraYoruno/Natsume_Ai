@@ -53,18 +53,10 @@ PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "HOST_CHAT_HOST_8B_ENABLED": "true",
         "HOST_CHAT_FORCE_CLOUD": "false",
         "HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED": "false",
-        "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
-    },
-    "edge3b": {
-        "HOST_SYS_MODE": "gaming",
-        "HOST_GAMING_EDGE_CHAT_ENABLED": "true",
-        "HOST_ENABLE_EDGE_RPC": "true",
-        "HOST_CHAT_FORCE_CLOUD": "false",
     },
     "cloud": {
         "HOST_SYS_MODE": "normal",
         "HOST_CHAT_FORCE_CLOUD": "true",
-        "HOST_GAMING_EDGE_CHAT_ENABLED": "false",
     },
 }
 

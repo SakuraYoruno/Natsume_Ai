@@ -55,10 +55,6 @@ def _rollback_commands() -> list[dict[str, str]]:
             "command": "$env:HOST_CHAT_FORCE_CLOUD='true'; $env:HOST_CHAT_HOST_8B_ENABLED='false'",
         },
         {
-            "label": "Disable gaming edge chat",
-            "command": "$env:HOST_GAMING_EDGE_CHAT_ENABLED='false'",
-        },
-        {
             "label": "Disable gray rollout",
             "command": "$env:HOST_CHAT_GRAY_ENABLED='false'; $env:HOST_CHAT_GRAY_PERCENT='100'",
         },

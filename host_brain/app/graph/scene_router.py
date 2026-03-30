@@ -221,7 +221,6 @@ class SceneRouter:
         metrics: Any,
         # SCENE_CHAT 专用参数
         sys_mode: str = "normal",
-        gaming_edge_enabled: bool = False,
         # 预召回结果（来自 MainChain.RecallFusionNode），传入时跳过 _sse_event_generator 内部重复召回
         _pre_recall_evidence: list[dict] | None = None,
     ):
@@ -250,17 +249,13 @@ class SceneRouter:
             reason_code: 原因码
             metrics: MetricsCollector 实例
             sys_mode: 系统模式（"normal"/"gaming"）
-            gaming_edge_enabled: 是否启用 Gaming Edge 路由
+            gaming_edge_enabled: 是否启用 Gaming Edge 路由（已废弃，保留参数兼容性）
 
         Yields:
             SSE 事件字符串
         """
         # 延迟导入，避免循环依赖
         from host_brain.app.chat_stream_handler import _sse_event_generator  # noqa: PLC0415
-        from host_brain.app.chat_handler_edge import (  # noqa: PLC0415
-            _gaming_edge_chat_sse_generator,
-            _parse_bool,
-        )
         from host_brain.app.chat_handler_complex import _complex_scene_sse_generator  # noqa: PLC0415
         from host_brain.app.chat_handler_vision import _vision_ui_sse_generator  # noqa: PLC0415
         from host_brain.app.graph_config_builder import (  # noqa: PLC0415
@@ -372,42 +367,8 @@ class SceneRouter:
                 yield event
             return
 
-        # ── 3. SCENE_CHAT：token 级流式（含 Gaming Edge 分支）─────────────
+        # ── 3. SCENE_CHAT：token 级流式 ─────────────────────────
         if normalized_scene == SCENE_CHAT:
-            import os as _os  # noqa: PLC0415
-            _sys_mode = str(_os.environ.get("HOST_SYS_MODE") or sys_mode).strip().lower() or "normal"
-            _gaming_edge_chat_enabled = _parse_bool(
-                _os.environ.get("HOST_GAMING_EDGE_CHAT_ENABLED"),
-                default=False,
-            )
-            _host_edge_rpc_enabled = _parse_bool(
-                _os.environ.get("HOST_ENABLE_EDGE_RPC"),
-                default=True,
-            )
-            _use_gaming_edge = bool(
-                _sys_mode == "gaming"
-                and _gaming_edge_chat_enabled
-                and _host_edge_rpc_enabled
-            )
-            if _use_gaming_edge:
-                logger.info("[%s] SceneRouter → SCENE_CHAT (Gaming Edge)", request_id)
-                async for event in _gaming_edge_chat_sse_generator(
-                    request_body=request_body,
-                    request_id=request_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    intent_draft=intent_draft,
-                    governor_result=governor_result,
-                    emotion_context=emotion_context,
-                    emotion_snapshot=emotion_snapshot,
-                    intent_id=intent_id,
-                    reason_code=reason_code,
-                    sys_mode=_sys_mode,
-                    metrics=metrics,
-                ):
-                    yield event
-                return
-
             logger.info("[%s] SceneRouter → SCENE_CHAT (token stream)", request_id)
             async for event in _sse_event_generator(
                 message=request_body.message,
