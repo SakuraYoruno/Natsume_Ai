@@ -4,15 +4,48 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 
-RECALL_SLOT_TOKEN_BUDGET: Dict[str, int] = {
-    "world_canon": 800,
-    "episodic_vector": 800,      # Phase XIII: +200（从 style_canon 释放）
-    "bond_graph": 500,           # Phase XIII: +200（从 persona_utterance 释放）
-    "artifact_vault": 200,
-    "sqlite_ledger": 400,        # Phase XIII: +200（从释放预算重分配）
-}
+# ---------------------------------------------------------------------------
+# 预算双路由：本地 14B 和云端 Gemini 使用不同的 token 预算
+# ---------------------------------------------------------------------------
+# 本地 14B（Qwen3:14B，32K 上下文）：总 prompt 控制在 ~5000t 以内
+# 云端 Gemini（2.5 Flash，1M 上下文）：充裕预算，让检索质量最大化
+# ---------------------------------------------------------------------------
 
-RECALL_PACK_TOKEN_BUDGET: int = 2700
+RECALL_SLOT_BUDGET_LOCAL: Dict[str, int] = {
+    "world_canon": 1000,
+    "episodic_vector": 1200,
+    "bond_graph": 600,
+    "artifact_vault": 300,
+    "sqlite_ledger": 500,
+}
+RECALL_BUDGET_LOCAL: int = 3600  # 本地 14B 总检索预算
+
+RECALL_SLOT_BUDGET_CLOUD: Dict[str, int] = {
+    "world_canon": 2000,
+    "episodic_vector": 3000,
+    "bond_graph": 1500,
+    "artifact_vault": 800,
+    "sqlite_ledger": 1200,
+}
+RECALL_BUDGET_CLOUD: int = 8500  # 云端 Gemini 总检索预算
+
+# 默认使用本地预算（向后兼容）
+RECALL_SLOT_TOKEN_BUDGET: Dict[str, int] = dict(RECALL_SLOT_BUDGET_LOCAL)
+RECALL_PACK_TOKEN_BUDGET: int = RECALL_BUDGET_LOCAL
+
+
+def get_budget_for_route(route_target: str) -> tuple[Dict[str, int], int]:
+    """根据 LLM 路由目标返回对应的预算配置。
+
+    Args:
+        route_target: "host_8b" → 本地预算, "cloud" / 其他 → 云端预算
+
+    Returns:
+        (slot_budget_dict, total_budget)
+    """
+    if route_target == "host_8b":
+        return dict(RECALL_SLOT_BUDGET_LOCAL), RECALL_BUDGET_LOCAL
+    return dict(RECALL_SLOT_BUDGET_CLOUD), RECALL_BUDGET_CLOUD
 
 # Higher-priority slots survive truncation longer.
 RECALL_SLOT_PRIORITY: List[str] = [

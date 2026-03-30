@@ -154,6 +154,7 @@ class RetrievalPipelineContract:
         render_target_lang: str | None = None,
         turn_index: int = 0,
         query_plan: QueryPlan | Mapping[str, Any] | None = None,
+        route_target: str = "",
     ) -> RetrievalPipelineResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         normalized_query = str(query or "").strip()
@@ -203,7 +204,7 @@ class RetrievalPipelineContract:
             # M28-P（OPT-41）：透传情感上下文给 reranker
             emotion_context=emotion_context,
         )
-        adaptive_budget = self.adaptive_budget.compute(resolved_query_plan.intent)
+        adaptive_budget = self.adaptive_budget.compute(resolved_query_plan.intent, route_target=route_target)
 
         stage_reasons = [
             reason

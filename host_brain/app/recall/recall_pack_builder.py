@@ -83,8 +83,10 @@ class RecallPackBuilder:
         recall_results: dict[str, Optional[str]],
         task_type: Optional[str] = None,
         slot_budget_overrides: dict[str, int] | None = None,
+        total_budget_override: int | None = None,
     ) -> RecallPack:
         pack = RecallPack()
+        effective_total_budget = int(total_budget_override) if total_budget_override else RECALL_PACK_TOKEN_BUDGET
         resolved_slot_budget = {
             **RECALL_SLOT_TOKEN_BUDGET,
             **{
@@ -124,14 +126,14 @@ class RecallPackBuilder:
             self._check_style_task_conflict(pack, task_type)
 
         total = pack.recalculate_total()
-        if total > RECALL_PACK_TOKEN_BUDGET:
-            self._apply_global_truncation(pack, total)
+        if total > effective_total_budget:
+            self._apply_global_truncation(pack, total, effective_total_budget)
         pack.recalculate_total()
 
         logger.info(
             "RecallPack assembled: total_tokens=%d budget=%d conflict_events=%d",
             pack.total_token_count,
-            RECALL_PACK_TOKEN_BUDGET,
+            effective_total_budget,
             len(pack.conflict_events),
         )
         return pack
@@ -228,14 +230,15 @@ class RecallPackBuilder:
         self._emit_audit("recall_conflict_suppressed", conflict_event)
         logger.info("world_canon and episodic_vector conflicted; episodic slot suppressed")
 
-    def _apply_global_truncation(self, pack: RecallPack, current_total: int) -> None:
+    def _apply_global_truncation(self, pack: RecallPack, current_total: int, total_budget: int | None = None) -> None:
+        effective_budget = total_budget or RECALL_PACK_TOKEN_BUDGET
         drop_order = list(reversed(RECALL_SLOT_PRIORITY))
-        excess = current_total - RECALL_PACK_TOKEN_BUDGET
+        excess = current_total - effective_budget
 
         logger.warning(
             "RecallPack exceeded total budget: total=%d budget=%d excess=%d",
             current_total,
-            RECALL_PACK_TOKEN_BUDGET,
+            effective_budget,
             excess,
         )
 

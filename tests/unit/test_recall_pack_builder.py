@@ -50,17 +50,17 @@ class TestRecallPackBuilderTokenBudget:
         pack = builder.build(
             {
                 "world_canon": long_text,
-                "style_canon": long_text,
                 "episodic_vector": long_text,
+                "bond_graph": long_text,
             }
         )
 
         if pack.world_canon:
             assert pack.world_canon.token_count <= RECALL_SLOT_TOKEN_BUDGET["world_canon"]
-        if pack.style_canon:
-            assert pack.style_canon.token_count <= RECALL_SLOT_TOKEN_BUDGET["style_canon"]
         if pack.episodic_vector:
             assert pack.episodic_vector.token_count <= RECALL_SLOT_TOKEN_BUDGET["episodic_vector"]
+        if pack.bond_graph:
+            assert pack.bond_graph.token_count <= RECALL_SLOT_TOKEN_BUDGET["bond_graph"]
 
     def test_total_does_not_exceed_budget(self) -> None:
         builder = RecallPackBuilder()
