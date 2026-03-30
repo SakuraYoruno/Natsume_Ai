@@ -30,9 +30,11 @@ ALL_STORE_IDS: tuple[str, ...] = (
 # 意图标签
 # ---------------------------------------------------------------------------
 INTENT_GREETING = "greeting"
+INTENT_PHATIC = "phatic"
 INTENT_CHAT = "chat"
 INTENT_RECALL = "recall_memory"
 INTENT_EMOTION = "emotion"
+INTENT_AFFECTION = "affection"
 INTENT_KNOWLEDGE = "knowledge"
 INTENT_TOOL = "tool"
 INTENT_COMPLEX = "complex"
@@ -42,9 +44,12 @@ INTENT_COMPLEX = "complex"
 # ---------------------------------------------------------------------------
 INTENT_STORE_MAP: dict[str, list[str] | None] = {
     INTENT_GREETING:  [],  # 跳过检索
+    # 多轮寒暄仍可读取最近对话痕迹；风格本身由 v5 常驻注入保证。
+    INTENT_PHATIC:    ["episodic_vector"],
     INTENT_CHAT:      ["episodic_vector"],
     INTENT_RECALL:    ["episodic_vector", "sqlite_ledger"],
     INTENT_EMOTION:   ["neo4j_bond", "episodic_vector"],
+    INTENT_AFFECTION: ["neo4j_bond", "episodic_vector"],
     INTENT_KNOWLEDGE: ["world_canon"],
     INTENT_TOOL:      ["artifact_vault"],
     INTENT_COMPLEX:   None,  # None = 全量 5 路
@@ -53,9 +58,11 @@ INTENT_STORE_MAP: dict[str, list[str] | None] = {
 # 意图 → 最大检索轮次
 INTENT_MAX_ROUNDS: dict[str, int] = {
     INTENT_GREETING:  0,
+    INTENT_PHATIC:    1,
     INTENT_CHAT:      1,
     INTENT_RECALL:    2,
     INTENT_EMOTION:   2,
+    INTENT_AFFECTION: 1,
     INTENT_KNOWLEDGE: 1,
     INTENT_TOOL:      1,
     INTENT_COMPLEX:   3,
@@ -70,6 +77,15 @@ _GREETING_PATTERN = re.compile(
 )
 _SIMPLE_ACK_PATTERN = re.compile(
     r"^[\s]*(嗯|哦|好的|ok|好|是的|对|行|知道了|了解|收到|嗯嗯|好哒|okk)[\s!！。.~～]*$",
+    re.IGNORECASE,
+)
+_PHATIC_PATTERN = re.compile(
+    r"^[\s]*(hello|hi|hey|yo|嗨|哈喽|哈囉|喂|在吗|在么|在嘛|早|早呀|早啊|晚安|晚安啦|嘿)[\s!！。.?？~～]*$",
+    re.IGNORECASE,
+)
+_AFFECTION_PATTERN = re.compile(
+    r"(我爱你|爱你|喜欢你|好喜欢你|我好喜欢你|想你|抱抱|抱一下|亲亲|陪陪我|想和你在一起|"
+    r"愛してる|好きだよ|好きです|会いたい|ぎゅっ)",
     re.IGNORECASE,
 )
 
@@ -247,9 +263,12 @@ class QueryPlanner:
         if turn_index == 0 and self._is_greeting(text):
             return INTENT_GREETING
 
-        # 多轮中的简单回应（"嗯""好的"）→ chat，不跳过检索
-        if _SIMPLE_ACK_PATTERN.match(text):
-            return INTENT_CHAT
+        # 多轮中的短促社交互动（寒暄、回应、试探）：保留风格，不再让随机台词召回污染 prompt
+        if self._is_phatic(text):
+            return INTENT_PHATIC
+
+        if self._is_affection(text):
+            return INTENT_AFFECTION
 
         # 复杂度判定
         if len(text) > 100 or text.count("？") + text.count("?") > 1:
@@ -276,6 +295,26 @@ class QueryPlanner:
     def _is_greeting(text: str) -> bool:
         """判定是否为简单寒暄。"""
         return bool(_GREETING_PATTERN.match(text.strip()))
+
+    @staticmethod
+    def _is_phatic(text: str) -> bool:
+        """判定是否为短消息社交互动。"""
+        normalized = str(text or "").strip()
+        if not normalized:
+            return False
+        if _SIMPLE_ACK_PATTERN.match(normalized):
+            return True
+        if _PHATIC_PATTERN.match(normalized):
+            return True
+        return False
+
+    @staticmethod
+    def _is_affection(text: str) -> bool:
+        """判定是否为直接的亲密表达或告白。"""
+        normalized = str(text or "").strip()
+        if not normalized:
+            return False
+        return bool(_AFFECTION_PATTERN.search(normalized))
 
     # ── Query 改写 ────────────────────────────────────────────────────────
 

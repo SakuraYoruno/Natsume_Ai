@@ -98,6 +98,36 @@ class TestRetrievalPipelineContract(unittest.TestCase):
         self.assertTrue(result.output["evidence_pack"]["degraded"])
         self.assertGreater(len(result.output["evidence_pack"]["topk"]), 0)
 
+    def test_pipeline_affection_intent_uses_fast_path_rerank(self) -> None:
+        pipeline = self._build_pipeline(node_id="host-01", reranker_available=False)
+        result = pipeline.run(
+            request_id="req_pipe_affection_001",
+            intent_id="intent_pipe_affection_001",
+            query="我爱你",
+            top_k=2,
+            ts_ms=self.now_ms + 20,
+            query_plan={
+                "original_query": "我爱你",
+                "rewritten_queries": [],
+                "intent": "affection",
+                "target_stores": ["episodic_vector", "style_canon", "neo4j_bond"],
+                "skip_retrieval": False,
+                "max_rounds": 1,
+                "time_lookback_days": None,
+            },
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(STATUS_OK, result.status)
+        self.assertEqual("fast_path_heuristic", result.output["rerank"]["effective_provider"])
+        self.assertEqual("FAST_PATH_HEURISTIC", result.output["rerank"]["fallback_reason_code"])
+        self.assertGreater(len(result.output["rerank"]["topk"]), 0)
+        rerank_row = next(
+            row for row in self.ledger.retrieval_event_log
+            if row["request_id"] == "req_pipe_affection_001" and row["op_kind"] == "RERANK"
+        )
+        self.assertEqual("fast_path_heuristic", rerank_row["payload"]["effective_provider"])
+
     def test_pipeline_recall_unavailable_keeps_root_reason_without_input_invalid_drift(self) -> None:
         pipeline = self._build_pipeline(
             node_id="host-01",

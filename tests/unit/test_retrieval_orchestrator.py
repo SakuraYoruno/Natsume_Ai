@@ -105,6 +105,8 @@ def test_retrieval_orchestrator_success_path() -> None:
     assert out.retrieval_bundle["query"] == "Natsume retrieval pipeline"
     assert out.retrieval_bundle["session_state"]["session_id"] == "s1"
     assert out.retrieval_summary["route_count"] == 2
+    assert len(out.retrieval_summary["topk"]) == 1
+    assert out.retrieval_summary["evidence_topk"] == []
     assert len(out.retrieval_evidence_items) == 1
 
 

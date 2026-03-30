@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any
 
 from host_brain.retrieval.reranker_schemas import RerankRouteConfig
@@ -14,7 +15,17 @@ from typing import Callable
 RerankProvider = Callable[..., tuple[list[float], str]]
 def _build_cross_encoder_provider(*, device: str) -> RerankProvider:
     cache: dict[str, Any] = {}
+    cache_lock = threading.Lock()
+    model_locks: dict[str, threading.Lock] = {}
     runtime_device = str(device or "cpu").strip() or "cpu"
+
+    def _get_model_lock(model_id: str) -> threading.Lock:
+        with cache_lock:
+            lock = model_locks.get(model_id)
+            if lock is None:
+                lock = threading.Lock()
+                model_locks[model_id] = lock
+            return lock
 
     def _provider(
         query: str,
@@ -29,8 +40,13 @@ def _build_cross_encoder_provider(*, device: str) -> RerankProvider:
 
         model = cache.get(model_id)
         if model is None:
-            model = CrossEncoder(model_name_or_path=model_id, device=runtime_device)
-            cache[model_id] = model
+            model_lock = _get_model_lock(model_id)
+            with model_lock:
+                model = cache.get(model_id)
+                if model is None:
+                    model = CrossEncoder(model_name_or_path=model_id, device=runtime_device)
+                    with cache_lock:
+                        cache[model_id] = model
 
         pairs = [
             [query, str(candidate.get("snippet") or candidate.get("text") or "")]
@@ -59,6 +75,8 @@ def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
         - 本地路径：models/Qwen3-Reranker-0.6B
     """
     cache: dict[str, Any] = {}
+    cache_lock = threading.Lock()
+    model_locks: dict[str, threading.Lock] = {}
     runtime_device = str(device or "cpu").strip() or "cpu"
 
     _SYSTEM_PROMPT = (
@@ -69,34 +87,50 @@ def _build_qwen3_reranker_provider(*, device: str) -> RerankProvider:
     _SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
     _QUERY_DOC_TEMPLATE = "Query: {query}\nCandidate Document: {doc}"
 
+    def _get_model_lock(model_id: str) -> threading.Lock:
+        with cache_lock:
+            lock = model_locks.get(model_id)
+            if lock is None:
+                lock = threading.Lock()
+                model_locks[model_id] = lock
+            return lock
+
     def _get_model_and_tokenizer(model_id: str) -> tuple[Any, Any, int, int]:
         """加载并缓存模型与 tokenizer，返回 (model, tokenizer, yes_token_id, no_token_id)。"""
-        if model_id in cache:
-            return cache[model_id]
-        try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-        except Exception as exc:
-            raise RuntimeError(f"transformers/torch 包不可用: {exc}") from exc
+        cached = cache.get(model_id)
+        if cached is not None:
+            return cached
+        model_lock = _get_model_lock(model_id)
+        with model_lock:
+            cached = cache.get(model_id)
+            if cached is not None:
+                return cached
+            try:
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+            except Exception as exc:
+                raise RuntimeError(f"transformers/torch 包不可用: {exc}") from exc
 
-        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
-        )
-        model.to(runtime_device)
-        model.eval()
+            tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16 if "cuda" in runtime_device else torch.float32,
+            )
+            model.to(runtime_device)
+            model.eval()
 
-        # 获取 "yes" / "no" 对应的 token id（Qwen3 tokenizer 中为单 token）
-        yes_token_id = tokenizer.convert_tokens_to_ids("yes")
-        no_token_id = tokenizer.convert_tokens_to_ids("no")
-        if yes_token_id == tokenizer.unk_token_id or no_token_id == tokenizer.unk_token_id:
-            # 部分 tokenizer 版本使用大写
-            yes_token_id = tokenizer.convert_tokens_to_ids("Yes")
-            no_token_id = tokenizer.convert_tokens_to_ids("No")
+            # 获取 "yes" / "no" 对应的 token id（Qwen3 tokenizer 中为单 token）
+            yes_token_id = tokenizer.convert_tokens_to_ids("yes")
+            no_token_id = tokenizer.convert_tokens_to_ids("no")
+            if yes_token_id == tokenizer.unk_token_id or no_token_id == tokenizer.unk_token_id:
+                # 部分 tokenizer 版本使用大写
+                yes_token_id = tokenizer.convert_tokens_to_ids("Yes")
+                no_token_id = tokenizer.convert_tokens_to_ids("No")
 
-        cache[model_id] = (model, tokenizer, yes_token_id, no_token_id)
-        return model, tokenizer, yes_token_id, no_token_id
+            resolved = (model, tokenizer, yes_token_id, no_token_id)
+            with cache_lock:
+                cache[model_id] = resolved
+            return resolved
 
     def _provider(
         query: str,

@@ -149,6 +149,7 @@ class TestRecallFusionNodeDeepBusiness:
     def test_recall_degraded_fallback_when_orchestrator_unavailable(self):
         """RetrievalOrchestrator 不可用时，降级为最小状态语义并继续。"""
         ctx = _make_ctx()
+        ctx.metadata["turn_index"] = 1
         node = RecallFusionNode()
 
         with patch("host_brain.app.dependencies.get_retrieval_orchestrator", side_effect=RuntimeError("not ready")):
@@ -163,6 +164,7 @@ class TestRecallFusionNodeDeepBusiness:
         from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
 
         ctx = _make_ctx()
+        ctx.metadata["turn_index"] = 1
         node = RecallFusionNode()
 
         mock_result = RetrievalOrchestratorResult(
@@ -198,6 +200,7 @@ class TestRecallFusionNodeDeepBusiness:
         from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
 
         ctx = _make_ctx()
+        ctx.metadata["turn_index"] = 1
         node = RecallFusionNode()
 
         mock_result = RetrievalOrchestratorResult(
@@ -223,6 +226,85 @@ class TestRecallFusionNodeDeepBusiness:
         assert result is True
         assert ctx.metadata["recall_fusion"]["mode"] == "ACTIVE"
         assert "RECALL_EVIDENCE_EMPTY" in ctx.audit_tags
+
+    def test_recall_recovers_evidence_from_summary_topk(self):
+        """当 retrieval_evidence_items 为空但 summary.topk 有内容时，应恢复 evidence。"""
+        from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
+
+        ctx = _make_ctx(user_message="hello")
+        ctx.metadata["turn_index"] = 4
+        node = RecallFusionNode()
+
+        mock_result = RetrievalOrchestratorResult(
+            success=True,
+            status="OK",
+            reason_code=None,
+            path="success",
+            detail="ok",
+            trace_id="req-test-001",
+            query="hello",
+            session_state={},
+            retrieval_summary={
+                "status": "OK",
+                "topk": [
+                    {
+                        "doc_id": "persona_utterance::demo",
+                        "source_ref": "persona_utterance://demo",
+                        "snippet": "在呢，别光丢一句 hello 啊。",
+                        "score": 0.42,
+                        "confidence": 0.42,
+                        "metadata": {"store_id": "persona_utterance"},
+                    }
+                ],
+            },
+            retrieval_evidence_items=[],
+            retrieval_bundle={},
+        )
+
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.arun.return_value = mock_result
+
+        with patch("host_brain.app.dependencies.get_retrieval_orchestrator", return_value=mock_orchestrator):
+            result = _run(node.execute(ctx))
+
+        assert result is True
+        assert ctx.metadata["recall_fusion"]["evidence_count"] == 1
+        assert "RECALL_EVIDENCE_COUNT:1" in ctx.audit_tags
+        assert ctx.recall_payload["retrieval_evidence_items"][0]["source_ref"] == "persona_utterance://demo"
+
+    def test_recall_forwards_turn_index_to_orchestrator(self):
+        """RecallFusionNode 应将上下文 turn_index 透传给 RetrievalOrchestrator。"""
+        from host_brain.retrieval.orchestrator import RetrievalOrchestratorResult
+
+        ctx = _make_ctx(user_message="hello")
+        ctx.metadata["turn_index"] = 4
+        node = RecallFusionNode()
+
+        mock_result = RetrievalOrchestratorResult(
+            success=True,
+            status="OK",
+            reason_code=None,
+            path="success",
+            detail="ok",
+            trace_id="req-test-001",
+            query="hello",
+            session_state={},
+            retrieval_summary={"status": "OK"},
+            retrieval_evidence_items=[
+                {"slot_name": "persona_utterance", "text": "在呢。", "snippet": "在呢。"}
+            ],
+            retrieval_bundle={},
+        )
+
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.arun.return_value = mock_result
+
+        with patch("host_brain.app.dependencies.get_retrieval_orchestrator", return_value=mock_orchestrator):
+            result = _run(node.execute(ctx))
+
+        assert result is True
+        request = mock_orchestrator.arun.await_args.kwargs["request"]
+        assert request.turn_index == 4
 
 
 # ---------------------------------------------------------------------------
@@ -485,4 +567,3 @@ class TestPreRecallInjection:
                 assert len(_pre_recall) > 0
             else:
                 assert _pre_recall is None, f"pack={pack} 不应该提取到 _pre_recall"
-

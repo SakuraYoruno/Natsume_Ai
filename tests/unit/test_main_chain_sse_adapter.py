@@ -62,6 +62,17 @@ class _TrackingNode(ChainNode):
         return True
 
 
+class _MetadataCaptureNode(ChainNode):
+    def __init__(self, metadata_snapshots: list[dict[str, object]]):
+        self.name = "recall_fusion"
+        self.timeout = 3.0
+        self._metadata_snapshots = metadata_snapshots
+
+    async def execute(self, ctx: ChainContext) -> bool:
+        self._metadata_snapshots.append(dict(ctx.metadata))
+        return True
+
+
 class TestMainChainSseAdapter:
     def test_adapter_yields_events_from_unified_generator(self):
         fake_events = [
@@ -223,6 +234,49 @@ class TestMainChainSseAdapter:
         assert "MODULE_TIMEOUT" in failure_events
         payload = json.loads(collected[0].removeprefix("data: ").strip())
         assert payload.get("reason_code") == "MAIN_CHAIN_PRECHECK_FAILED"
+
+    def test_adapter_derives_turn_index_from_intent_seq(self):
+        fake_events = [
+            'data: {"phase": "COMMIT", "done": true, "decision": "APPROVE"}\n\n',
+        ]
+
+        async def _fake_generator(**kwargs):
+            for event in fake_events:
+                yield event
+
+        metadata_snapshots: list[dict[str, object]] = []
+        chain = MainChain()
+        chain.MAIN_NODES = [
+            _TrackingNode("airlock_quarantine", []),
+            _TrackingNode("governor", []),
+            _TrackingNode("graph_executor", []),
+            _MetadataCaptureNode(metadata_snapshots),
+            _TrackingNode("llm_gateway", []),
+            _TrackingNode("qa_contract", []),
+            _TrackingNode("episodic_store", []),
+            _TrackingNode("audit", []),
+            _TrackingNode("airlock_sanitizer", []),
+        ]
+        request_body = _make_request_body(message="hello")
+        metrics = _make_metrics()
+
+        with patch(
+            "host_brain.app.chat_handler._unified_chat_sse_generator",
+            side_effect=_fake_generator,
+        ):
+            collected = asyncio.run(_collect_events(chain.run_as_sse_adapter(
+                request_body=request_body,
+                request_id="req-006",
+                session_id="session-006",
+                ts_ms=6000,
+                intent_draft={"id": "intent-006", "action": "narrative_only", "seq": 5},
+                metrics=metrics,
+            )))
+
+        assert collected == fake_events
+        assert metadata_snapshots
+        assert metadata_snapshots[0]["intent_seq"] == 5
+        assert metadata_snapshots[0]["turn_index"] == 4
 
 
 class TestRunChatViaMainChain:

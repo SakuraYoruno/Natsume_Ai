@@ -218,6 +218,26 @@ def _build_direct_response_priority(
 
     if _contains_any_token(
         user_message,
+        (
+            "我爱你", "爱你", "喜欢你", "好喜欢你", "想你", "抱抱", "亲亲", "陪陪我",
+            "愛してる", "好き", "会いたい",
+        ),
+    ):
+        rules.append(
+            "For affection or confession messages, answer like a real person being addressed directly: "
+            "show an immediate felt reaction first, then give your stance."
+        )
+        rules.append(
+            "Avoid generic acknowledgement formulas such as '我很开心听到你这么说'. "
+            "Use a more personal, slightly shy or candid reaction when natural."
+        )
+        rules.append(
+            "If the relationship is still distant, keep boundaries softly and personally; "
+            "do not sound like customer support, therapy boilerplate, or a generic assistant."
+        )
+
+    if _contains_any_token(
+        user_message,
         ("優先", "优先", "priority", "prioritize", "まず"),
     ):
         rules.append("优先级相关的请求，直接给出推荐结果。")

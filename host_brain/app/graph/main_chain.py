@@ -583,6 +583,7 @@ class RecallFusionNode(ChainNode):
                     ts_ms=_ts_ms,
                     emotion_context=_emotion_tag,
                     render_target_lang=_render_target_lang,
+                    turn_index=_turn_index,
                     query_plan=_agentic_plan,
                 ),
                 timeout_ms=_retrieval_timeout_ms,
@@ -596,6 +597,44 @@ class RecallFusionNode(ChainNode):
                     pass
 
             raw_evidence_items = list(orchestrator_result.retrieval_evidence_items)
+            if not raw_evidence_items:
+                _summary_payload = dict(orchestrator_result.retrieval_summary or {})
+                _fallback_topk = list(
+                    _summary_payload.get("evidence_topk")
+                    or _summary_payload.get("topk")
+                    or []
+                )
+                _recovered_items: list[dict[str, Any]] = []
+                for _item in _fallback_topk:
+                    if not isinstance(_item, dict):
+                        continue
+                    _snippet = str(_item.get("snippet") or "").strip()
+                    if not _snippet:
+                        continue
+                    _metadata_raw = _item.get("metadata")
+                    _metadata = dict(_metadata_raw) if isinstance(_metadata_raw, dict) else {}
+                    _recovered_items.append(
+                        {
+                            "evidence_ref": str(
+                                _item.get("evidence_ref")
+                                or _item.get("doc_id")
+                                or ""
+                            ).strip(),
+                            "source_ref": str(_item.get("source_ref") or "").strip(),
+                            "snippet": _snippet,
+                            "score": _item.get("score"),
+                            "confidence": _item.get("confidence"),
+                            "metadata": _metadata,
+                            "store_id": str(_metadata.get("store_id") or "").strip() or None,
+                        }
+                    )
+                if _recovered_items:
+                    raw_evidence_items = _recovered_items
+                    logger.warning(
+                        "[%s] RecallFusion 从 retrieval_summary 恢复 evidence_items=%d",
+                        ctx.request_id,
+                        len(raw_evidence_items),
+                    )
 
             # ── TODO-21：MemoryGuard 过滤召回证据 ────────────────────────
             filtered_evidence_items = raw_evidence_items
@@ -635,6 +674,19 @@ class RecallFusionNode(ChainNode):
                         logger.info(
                             "[%s] MemoryGuard 过滤了 %d 条 NARRATIVE_ONLY 证据",
                             ctx.request_id, _rejected_count,
+                        )
+                    elif raw_evidence_items and not filtered_evidence_items:
+                        filtered_evidence_items = list(raw_evidence_items)
+                        memory_guard_meta = {
+                            "mode": "RECOVERED_EMPTY_FALLBACK",
+                            "raw_count": len(raw_evidence_items),
+                            "filtered_count": len(filtered_evidence_items),
+                            "rejected_count": 0,
+                        }
+                        logger.warning(
+                            "[%s] RecallFusion 检测到 evidence 误清空，回退使用原始 evidence_items=%d",
+                            ctx.request_id,
+                            len(filtered_evidence_items),
                         )
             except (ImportError, AttributeError):
                 memory_guard_meta["mode"] = "SKIPPED_NOT_WIRED"
@@ -877,6 +929,19 @@ class RecallFusionNode(ChainNode):
             ctx.metadata.setdefault("audit_refs", {})["state_arbiter"] = state_arbiter_meta
             ctx.metadata.setdefault("audit_refs", {})["recall_pack_trace"] = recall_pack_trace_meta
             ctx.metadata.setdefault("audit_refs", {})["agentic_rag"] = _agentic_meta
+            logger.info(
+                "[%s] RecallFusion evidence raw=%d filtered=%d summary_topk=%d",
+                ctx.request_id,
+                len(raw_evidence_items),
+                len(filtered_evidence_items),
+                len(
+                    list(
+                        (orchestrator_result.retrieval_summary or {}).get("evidence_topk")
+                        or (orchestrator_result.retrieval_summary or {}).get("topk")
+                        or []
+                    )
+                ),
+            )
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
             else:
@@ -3012,6 +3077,7 @@ class MainChain:
             _intent_seq = int(_intent_seq_raw)
             if _intent_seq > 0:
                 ctx.metadata["intent_seq"] = _intent_seq
+                ctx.metadata["turn_index"] = max(0, _intent_seq - 1)
         except (TypeError, ValueError):
             pass
 

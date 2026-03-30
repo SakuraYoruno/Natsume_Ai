@@ -34,6 +34,9 @@ CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
     "bare_llm",
 )
 
+_LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
+_SHORT_CHAT_PERSONA_SCORE_FLOOR = 0.12
+
 
 def normalize_node_style_bindings(
     style_bindings: Mapping[str, Mapping[str, Any]] | None,
@@ -247,6 +250,8 @@ def build_chat_context_pack(
             authoritative_rows = []
 
     retrieval_rows: list[dict[str, Any]] = []
+    query_plan_intent = _extract_query_plan_intent(retrieval_summary)
+    query_plan_text_len = _extract_query_plan_text_len(retrieval_summary)
     for row in retrieval_evidence_items[:10]:
         if not isinstance(row, Mapping):
             continue
@@ -260,6 +265,14 @@ def build_chat_context_pack(
             or metadata.get("store_id")
             or ""
         ).strip().lower()
+        if _should_drop_persona_row(
+            store_id=store_id,
+            score=row.get("score"),
+            confidence=row.get("confidence"),
+            query_plan_intent=query_plan_intent,
+            query_plan_text_len=query_plan_text_len,
+        ):
+            continue
         retrieval_kind = "persona_utterance" if store_id == "persona_utterance" else "episodic"
         retrieval_rows.append(
             {
@@ -432,6 +445,48 @@ def _coerce_non_negative_int(value: Any, *, default: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = int(default)
     return max(0, parsed)
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_query_plan_intent(retrieval_summary: Mapping[str, Any]) -> str:
+    query_plan_raw = retrieval_summary.get("query_plan")
+    query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
+    return str(query_plan.get("intent") or "").strip().lower()
+
+
+def _extract_query_plan_text_len(retrieval_summary: Mapping[str, Any]) -> int:
+    query_plan_raw = retrieval_summary.get("query_plan")
+    query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
+    return len(str(query_plan.get("original_query") or "").strip())
+
+
+def _should_drop_persona_row(
+    *,
+    store_id: str,
+    score: Any,
+    confidence: Any,
+    query_plan_intent: str,
+    query_plan_text_len: int,
+) -> bool:
+    if str(store_id or "").strip().lower() != "persona_utterance":
+        return False
+    if query_plan_intent in _LOW_SIGNAL_PERSONA_INTENTS:
+        return True
+    if query_plan_intent == "chat" and 0 < query_plan_text_len <= 8:
+        row_score = _coerce_optional_float(confidence)
+        if row_score is None:
+            row_score = _coerce_optional_float(score)
+        if row_score is not None and row_score < _SHORT_CHAT_PERSONA_SCORE_FLOOR:
+            return True
+    return False
 
 
 def _count_kind(rows: list[Any]) -> dict[str, int]:

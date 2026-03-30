@@ -416,12 +416,12 @@ def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
 
 
 def _resolve_stream_retrieval_timeout_ms() -> int:
-    raw = str(os.environ.get("HOST_STREAM_RETRIEVAL_TIMEOUT_MS") or "1200").strip()
+    raw = str(os.environ.get("HOST_STREAM_RETRIEVAL_TIMEOUT_MS") or "5000").strip()
     try:
         value = int(raw)
     except ValueError:
-        value = 1200
-    return max(100, min(value, 5000))
+        value = 5000
+    return max(250, min(value, 15000))
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:

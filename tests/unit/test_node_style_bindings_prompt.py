@@ -233,6 +233,82 @@ def test_build_chat_prompt_runtime_payload_marks_persona_utterance_rows() -> Non
     assert top.get("speaker") == "Natsume"
 
 
+def test_build_chat_prompt_runtime_payload_drops_persona_examples_for_affection() -> None:
+    payload = _make_runtime_payload(
+        request_id="req_prompt_context_affection",
+        session_id="session_prompt_context_affection",
+        user_message="我爱你",
+        retrieval_summary={
+            "status": "OK",
+            "reason_code": "NONE",
+            "route_count": 3,
+            "candidate_count": 2,
+            "rerank_topk": 2,
+            "degraded": False,
+            "query_plan": {
+                "intent": "affection",
+                "original_query": "我爱你",
+            },
+        },
+        retrieval_evidence_items=[
+            {
+                "evidence_ref": "evd://persona_utterance/natsume_ai_cn/cn/01",
+                "source_ref": "persona_utterance://natsume_ai_cn/cn/01",
+                "snippet": "你真烦……要你管！",
+                "score": 0.08,
+                "confidence": 0.08,
+                "metadata": {
+                    "store_id": "persona_utterance",
+                    "canon_id": "natsume_ai_cn",
+                    "lang": "zh",
+                    "speaker": "蓝",
+                },
+            },
+            {
+                "evidence_ref": "evd://episodic/test",
+                "source_ref": "memory://episodic/test",
+                "snippet": "shared memory",
+                "score": 0.72,
+                "confidence": 0.72,
+                "metadata": {"store_id": "episodic_vector"},
+            },
+        ],
+        recall_slot_text={"style_canon": "CN_STYLE_HINT"},
+        render_target_lang="zh",
+    )
+
+    prompt_context = dict(dict(payload.get("prompt_context") or {}).get("payload") or {})
+    retrieval_rows = list(prompt_context.get("retrieval") or [])
+    assert retrieval_rows
+    assert all(str(row.get("kind") or "") != "persona_utterance" for row in retrieval_rows)
+
+
+def test_render_node_prompt_adds_affection_reply_guidance() -> None:
+    from host_brain.app.prompt_builder import CHAT_DIRECT_NODE_ID, render_node_generation_prompt
+
+    runtime_payload = _make_runtime_payload(
+        request_id="req_affection_prompt",
+        session_id="session_affection_prompt",
+        user_message="我爱你",
+        retrieval_summary={
+            "status": "OK",
+            "reason_code": "NONE",
+            "route_count": 1,
+            "candidate_count": 1,
+            "rerank_topk": 1,
+            "degraded": False,
+        },
+        retrieval_evidence_items=[],
+        recall_slot_text={"style_canon": "CN_STYLE_HINT"},
+        render_target_lang="zh",
+    )
+
+    prompt = render_node_generation_prompt(node_id=CHAT_DIRECT_NODE_ID, runtime_payload=runtime_payload)
+
+    assert "Avoid generic acknowledgement formulas" in prompt
+    assert "For affection or confession messages" in prompt
+
+
 def test_prompt_context_observability_marks_bare_llm_when_minimal_fallback() -> None:
     from host_brain.app.chat_context_builder import build_prompt_context_observability
 
@@ -387,9 +463,9 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
         runtime_payload=runtime_payload,
     )
 
-    assert "PROMPT_CONTEXT_VALIDATION" in prompt
-    assert "valid: True" in prompt
-    assert "WORLD_CANON_BINDING" in prompt
+    assert "【上下文校验】" in prompt
+    assert "- 有效: True" in prompt
+    assert "【世界观设定】" in prompt
     assert "world_canon:wc-003-persona-core" in prompt
     assert "JA_STYLE_HINT_FROM_PROMPT_CONTEXT" in prompt
     assert "user prefers concise replies" in prompt
@@ -446,16 +522,16 @@ def test_render_node_prompt_contains_node_role_binding_for_all_known_nodes() -> 
         "safety_verifier": {"payload": {"narrative": {"text": "safety"}}},
     }
     expected_role_markers = {
-        "chat_direct_ja": "Role: chat_direct_ja",
-        "core_reasoner_primary": "Role: core_reasoner_primary",
-        "core_reasoner_secondary": "Role: core_reasoner_secondary",
-        "planner_constraints": "Role: planner_constraints",
-        "tool_planner": "Role: tool_planner",
-        "safety_verifier": "Role: safety_verifier",
-        "consistency_verifier": "Role: consistency_verifier",
-        "workbench_translate": "Role: workbench_translate",
-        "workbench_code_assist": "Role: workbench_code_assist",
-        "renderer_ja_c_style": "Role: renderer_ja_c_style",
+        "chat_direct_ja": "角色：chat_direct",
+        "core_reasoner_primary": "角色：core_reasoner_primary",
+        "core_reasoner_secondary": "角色：core_reasoner_secondary",
+        "planner_constraints": "角色：planner_constraints",
+        "tool_planner": "角色：tool_planner",
+        "safety_verifier": "角色：safety_verifier",
+        "consistency_verifier": "角色：consistency_verifier",
+        "workbench_translate": "角色：workbench_translate",
+        "workbench_code_assist": "角色：workbench_code_assist",
+        "renderer_ja_c_style": "角色：renderer",
     }
 
     for node_id, marker in expected_role_markers.items():

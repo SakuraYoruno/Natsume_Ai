@@ -33,15 +33,21 @@ from host_brain.retrieval.reranker import (
     RerankerServiceContract,
     build_reranker_provider_registry,
     load_reranker_runtime_config,
+    resolve_reranker_route,
 )
+from host_brain.retrieval.reranker_schemas import RerankerResult
 from host_brain.retrieval.semantic_dedup import SemanticDedup
 
 
 S_RET_PIPELINE = "S_RET_PIPELINE"
 RET_OP_PIPELINE = "PIPELINE"
+S_RET_RERANK = "S_RET_RERANK"
+RET_OP_RERANK = "RERANK"
 
 STATUS_OK = "OK"
 STATUS_DEGRADED = "DEGRADED"
+
+_FAST_PATH_RERANK_INTENTS = frozenset({"phatic", "affection"})
 
 
 @dataclass(frozen=True)
@@ -194,17 +200,40 @@ class RetrievalPipelineContract:
         recall_candidates = list(recall_output.get("candidates") or agentic_result.evidence_items or [])
         dedup_result = self.semantic_dedup.dedup(recall_candidates)
         dedup_candidates = list(dedup_result.candidates)
-        rerank_result = self.reranker_service.rerank(
-            request_id=request_id,
-            query=normalized_query,
+        if _should_use_fast_path_rerank(
+            intent=resolved_query_plan.intent,
             candidates=dedup_candidates,
-            intent_id=intent_id,
-            top_k=top_k,
-            ts_ms=now_value,
-            # M28-P（OPT-41）：透传情感上下文给 reranker
-            emotion_context=emotion_context,
+        ):
+            rerank_result = _build_fast_path_rerank_result(
+                reranker_service=self.reranker_service,
+                request_id=request_id,
+                query=normalized_query,
+                candidates=dedup_candidates,
+                intent_id=intent_id,
+                top_k=top_k,
+                ts_ms=now_value,
+            )
+            self._log_fast_path_rerank(
+                request_id=request_id,
+                intent_id=intent_id,
+                rerank_result=rerank_result,
+                ts_ms=now_value,
+            )
+        else:
+            rerank_result = self.reranker_service.rerank(
+                request_id=request_id,
+                query=normalized_query,
+                candidates=dedup_candidates,
+                intent_id=intent_id,
+                top_k=top_k,
+                ts_ms=now_value,
+                # M28-P（OPT-41）：透传情感上下文给 reranker
+                emotion_context=emotion_context,
+            )
+        adaptive_budget = self.adaptive_budget.compute(
+            resolved_query_plan.intent,
+            route_target=route_target,
         )
-        adaptive_budget = self.adaptive_budget.compute(resolved_query_plan.intent, route_target=route_target)
 
         stage_reasons = [
             reason
@@ -373,6 +402,115 @@ class RetrievalPipelineContract:
                 reason_code=reason_code,
                 detail=detail,
             )
+
+    def _log_fast_path_rerank(
+        self,
+        *,
+        request_id: str,
+        intent_id: str | None,
+        rerank_result: RerankerResult,
+        ts_ms: int,
+    ) -> None:
+        if self.ledger is None or not hasattr(self.ledger, "log_retrieval_event"):
+            return
+        self.ledger.log_retrieval_event(
+            {
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "op_kind": RET_OP_RERANK,
+                "status": rerank_result.status,
+                "reason_code": rerank_result.reason_code,
+                "stage": S_RET_RERANK,
+                "payload": dict(rerank_result.output or {}),
+                "detail": str(rerank_result.detail or "rerank completed via fast-path heuristic"),
+                "ts_ms": ts_ms,
+            }
+        )
+
+
+def _should_use_fast_path_rerank(*, intent: str, candidates: list[dict[str, Any]]) -> bool:
+    return str(intent or "").strip().lower() in _FAST_PATH_RERANK_INTENTS and len(candidates) <= 8
+
+
+def _build_fast_path_rerank_result(
+    *,
+    reranker_service: RerankerServiceContract,
+    request_id: str,
+    query: str,
+    candidates: list[dict[str, Any]],
+    intent_id: str | None,
+    top_k: int | None,
+    ts_ms: int,
+) -> RerankerResult:
+    route = resolve_reranker_route(reranker_service.runtime_config, node_id=reranker_service.node_id)
+    normalized_candidates = [dict(candidate) for candidate in list(candidates or []) if isinstance(candidate, Mapping)]
+    requested_top_k = route.top_k if top_k is None else int(top_k)
+    topk_value = max(1, min(requested_top_k, len(normalized_candidates)))
+    scored_candidates: list[dict[str, Any]] = []
+    for ordinal, candidate in enumerate(normalized_candidates):
+        row = dict(candidate)
+        score = _score_fast_path_candidate(row=row, ordinal=ordinal)
+        row["score"] = score
+        row["confidence"] = score
+        scored_candidates.append(row)
+    scored_candidates.sort(
+        key=lambda item: (
+            -float(item.get("score") or 0.0),
+            str(item.get("source_ref") or item.get("doc_id") or ""),
+        )
+    )
+    topk = scored_candidates[:topk_value]
+    output = {
+        "candidate_count": len(normalized_candidates),
+        "effective_provider": "fast_path_heuristic",
+        "expected_top_k": topk_value,
+        "fallback_reason_code": "FAST_PATH_HEURISTIC",
+        "fallback_used": True,
+        "latency_ms": 0,
+        "node_selector": route.node_selector,
+        "output_status": STATUS_OK,
+        "provider": route.provider,
+        "query_length": len(str(query or "")),
+        "route_id": route.route_id,
+        "topk": topk,
+        "topk_count": len(topk),
+        "warm_retry_used": False,
+        "rerank_model_id": route.model_id,
+        "request_id": request_id,
+        "intent_id": intent_id,
+        "ts_ms": ts_ms,
+    }
+    return RerankerResult(
+        success=True,
+        status=STATUS_OK,
+        reason_code=None,
+        stage=S_RET_RERANK,
+        detail="rerank completed via fast-path heuristic",
+        output=output,
+    )
+
+
+def _score_fast_path_candidate(*, row: Mapping[str, Any], ordinal: int) -> float:
+    metadata_raw = row.get("metadata")
+    metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+    base_score = row.get("confidence")
+    if base_score in (None, ""):
+        base_score = row.get("score")
+    try:
+        score = float(base_score or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    store_id = str(metadata.get("store_id") or row.get("store_id") or "").strip().lower()
+    if store_id == "style_canon":
+        score += 0.15
+    elif store_id == "neo4j_bond":
+        score += 0.08
+    elif store_id == "episodic_vector":
+        score += 0.03
+    elif store_id == "persona_utterance":
+        score -= 0.05
+    score -= min(ordinal, 5) * 0.001
+    return round(score, 6)
 
 
 def _normalize_query_plan(
