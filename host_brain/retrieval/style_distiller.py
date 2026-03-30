@@ -671,6 +671,8 @@ def distill_style_profile(
     ja_path: str | Path = DEFAULT_JA_LINES_PATH,
 ) -> StyleProfile:
     """从台词语料中蒸馏完整风格画像。"""
+    global _ja_lines_cache  # noqa: PLW0603
+
     # 1. 加载台词
     lines = load_utterance_lines(cn_path, ja_path)
     if not lines:
@@ -678,6 +680,7 @@ def distill_style_profile(
 
     # 2. 打情感标签
     lines = tag_all_lines(lines)
+    _ja_lines_cache = lines  # 缓存供日语渲染函数使用
 
     # 3. 句式模板分析
     sentence_patterns = analyze_sentence_patterns(lines)
@@ -803,6 +806,121 @@ def render_style_instruction_v5(profile: StyleProfile) -> str:
     )
 
     return "\n".join(parts)
+
+
+def render_style_instruction_v5_ja(profile: StyleProfile) -> str:
+    """将 StyleProfile 渲染为日语版 v5 风格指导文本。
+
+    与中文版的关键差异：
+    - 示例台词使用日语原文
+    - 语气词统计使用日语（か/よ/な/ね）
+    - 节奏统计基于日语字符长度
+    - 边界约束用日语表述
+    """
+    parts: list[str] = []
+
+    # ── 日语台词的独立统计 ──
+    ja_lines = [l for l in _ja_lines_cache if l.jp_text]
+    ja_total = len(ja_lines) or 1
+    ja_lengths = [_clean_length(l.jp_text) for l in ja_lines]
+    ja_short = sum(1 for n in ja_lengths if n <= 12) / ja_total if ja_lengths else 0
+    ja_medium = sum(1 for n in ja_lengths if 13 <= n <= 35) / ja_total if ja_lengths else 0
+    ja_long = sum(1 for n in ja_lengths if n > 35) / ja_total if ja_lengths else 0
+    ja_q_ratio = sum(1 for l in ja_lines if _is_question(l.jp_text)) / ja_total
+    ja_ex_ratio = sum(1 for l in ja_lines if _is_exclaim(l.jp_text)) / ja_total
+    ja_el_ratio = sum(1 for l in ja_lines if _has_ellipsis(l.jp_text)) / ja_total
+
+    parts.append(
+        "あなたは夏目藍（NatsumeAi）です。以下は彼女の {ja} 本の日本語台詞から抽出した"
+        "話し方のスタイルルールです（tone_only、事実の根拠としては使用不可）。".format(
+            ja=profile.total_ja,
+        )
+    )
+
+    # ── 核心語感 ──
+    parts.append("\n【核心語感】")
+    parts.append("- 控えめで穏やか、押しつけがましくない。まず相手の気持ちを受け止めてから応答する。")
+    parts.append("- 自然な話し言葉。書き言葉ではなく、対面で話しているように。")
+    parts.append(f"- リズム：{profile.rhythm_description}。")
+    parts.append(
+        f"- 文長分布：短文（≤12字）{ja_short:.0%}、"
+        f"中文（13-35字）{ja_medium:.0%}、"
+        f"長文（>35字）{ja_long:.0%}。"
+    )
+
+    # ── 句式テンプレート ──
+    if profile.sentence_patterns:
+        parts.append("\n【よく使う文型】")
+        # 日语版的句式类型映射
+        ja_pattern_map = {
+            "短句应答": "短い応答：1-10字の簡潔な返事。相槌、確認、感嘆に使用",
+            "省略号停顿": "省略号の間：「……」で呼吸感や躊躇を表現",
+            "轻追问": "軽い問いかけ：疑問文で会話を進める。相手を気遣うか情報を確認、押しつけない語気",
+            "情绪感叹": "感情の感嘆：驚き・決意・興奮を感嘆符で表現するが、多用しない",
+            "温柔转折": "柔らかい転換：相手の意見を受け止めてから婉曲に転換。「でも」「けど」「ただ」を使用",
+            "口语化表达": "口語的表現：感嘆詞・終助詞で自然な日常会話に近づける",
+        }
+        for sp in profile.sentence_patterns[:6]:
+            ja_desc = ja_pattern_map.get(sp.pattern.split("：")[0], sp.pattern)
+            examples = sp.examples_ja[:3] if sp.examples_ja else sp.examples_cn[:3]
+            examples_str = "、".join(f"「{e}」" for e in examples)
+            parts.append(f"- {ja_desc}（{sp.frequency:.0%}）：{examples_str}")
+
+    # ── 感情応答パターン ──
+    if profile.emotion_patterns:
+        parts.append("\n【場面別の話し方】")
+        ja_strategy_map = {
+            "comfort": "まず気持ちを受け止め（短文で共感）、温かく応答する。急いでアドバイスしない",
+            "happy": "明るい語気で喜びを共有。感嘆詞を添えてもよいが、自然に",
+            "tsundere": "否定文から始めて＋でも＋実は心配。口先と本心のギャップ",
+            "sadness": "控えめで穏やか、慰めすぎない。省略号で寄り添いの間を作る",
+            "anger": "語気は毅然としているが取り乱さない。短文で力強く、底線を示す",
+            "surprise": "自然な驚きの反応。短い感嘆のあとに問いかけ",
+            "affection": "控えめに表現。直接的な告白より行動で暗示。時々照れる",
+            "daily": "自然で気楽な日常会話。短文中心、軽い語気",
+        }
+        for ep in profile.emotion_patterns:
+            examples = ep.examples_ja[:3] if ep.examples_ja else ep.examples_cn[:3]
+            if not examples:
+                continue
+            ja_strategy = ja_strategy_map.get(ep.scene, ep.strategy)
+            examples_str = "；".join(f"「{e}」" for e in examples)
+            pattern_hint = "、".join(ep.sentence_patterns[:3]) if ep.sentence_patterns else ""
+            parts.append(f"- {ep.scene}（{ja_strategy}）{'[' + pattern_hint + ']' if pattern_hint else ''}：{examples_str}")
+
+    # ── 終助詞 ──
+    if profile.particle_freq_ja:
+        top_particles = list(profile.particle_freq_ja.items())[:5]
+        particle_str = "、".join(f"「{p}」{f:.0%}" for p, f in top_particles)
+        parts.append(f"\n【終助詞の傾向】\n- 文末によく使う：{particle_str}。一文に最大一つ。")
+
+    # ── 特徴的な表現 ──
+    if profile.signature_phrases_ja:
+        sig_str = "、".join(f"「{p}」" for p in profile.signature_phrases_ja[:10])
+        parts.append(f"\n【特徴的な表現】\n- 高頻度：{sig_str}")
+
+    # ── 句読点リズム ──
+    parts.append(
+        f"\n【句読点リズム】\n"
+        f"- 疑問文 {ja_q_ratio:.0%}（軽い問いかけ、圧迫しない）。\n"
+        f"- 省略号 {ja_el_ratio:.0%}（呼吸感と躊躇を演出）。\n"
+        f"- 感嘆文 {ja_ex_ratio:.0%}（感情が本当に高まった時だけ）。"
+    )
+
+    # ── 絶対禁止 ──
+    parts.append(
+        "\n【絶対禁止】\n"
+        "- 自分を AI、人工知能、仮想アシスタント、システム、プログラムと言ってはいけない。\n"
+        "- カスタマーサポート調、システム通知調、技術サポート調の言い回しは使わない。\n"
+        "- 原作の台詞をそのまま再現しない。語気・リズム・構文の傾向だけを参考にする。\n"
+        "- ストーリーの事実を述べない。システム完了報告をしない。"
+    )
+
+    return "\n".join(parts)
+
+
+# 日语蒸馏用的缓存（在 distill_style_profile 调用后设置）
+_ja_lines_cache: list[UtteranceLine] = []
 
 
 # ---------------------------------------------------------------------------

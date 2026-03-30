@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from host_brain.retrieval.style_distiller import (
     distill_style_profile,
     render_style_instruction_v5,
+    render_style_instruction_v5_ja,
 )
 from host_brain.retrieval.emotion_utterance_index import (
     EmotionTaggedUtteranceIndex,
@@ -57,14 +58,20 @@ def main() -> int:
     )
     print(f"\n[2/4] JSON → {profile_path}")
 
-    # 输出风格指导文本
+    # 输出风格指导文本（中文版）
     instruction = render_style_instruction_v5(profile)
     instruction_path = output_dir / "style_instruction_v5.txt"
     instruction_path.write_text(instruction, encoding="utf-8")
-    print(f"[3/4] Instruction → {instruction_path}")
+    print(f"[3/5] Instruction (CN) → {instruction_path}")
+
+    # 输出风格指导文本（日语版）
+    instruction_ja = render_style_instruction_v5_ja(profile)
+    instruction_ja_path = output_dir / "style_instruction_v5_ja.txt"
+    instruction_ja_path.write_text(instruction_ja, encoding="utf-8")
+    print(f"[4/5] Instruction (JA) → {instruction_ja_path}")
 
     # 构建台词索引并输出摘要
-    print("\n[4/4] 构建情感台词索引...")
+    print("\n[5/5] 构建情感台词索引...")
     index = EmotionTaggedUtteranceIndex(cn_path=cn_path, ja_path=ja_path)
     index.build()
     summary = index.to_summary()

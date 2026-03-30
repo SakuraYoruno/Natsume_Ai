@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
@@ -54,9 +55,31 @@ def normalize_node_style_bindings(
 
 
 def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
+    resolved_render_lang = str(render_target_lang or "").strip().lower()
+
+    # ── Phase XIII v5 优先：从蒸馏产物直接读取风格指导文本 ────────────
+    # v5 蒸馏产物比旧版 JSON 更丰富（句式模板+情感回应模式+真实台词示例）
+    v5_instruction = _load_v5_style_instruction(resolved_render_lang)
+    if v5_instruction:
+        v5_entry = {
+            "canon_id": f"natsume_ai_{'ja' if resolved_render_lang == 'ja' else 'cn'}_v5",
+            "version": 5,
+            "hash": "",
+            "tone_only": True,
+            "unsafe_as_fact": True,
+            "style_instruction": v5_instruction,
+            "citation": f"style_canon:v5_distilled:{'ja' if resolved_render_lang == 'ja' else 'cn'}",
+        }
+        return {
+            "core_reasoner_primary": v5_entry,
+            "core_reasoner_secondary": v5_entry,
+            CHAT_DIRECT_NODE_ID: v5_entry,
+            "renderer_ja_c_style": v5_entry,
+        }
+
+    # ── Fallback：旧版 JSON 文件（v4 及以前）────────────────────────────
     style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
     core_canon_id = str(os.environ.get("HOST_STYLE_CORE_CANON_ID") or "natsume_ai_cn").strip()
-    resolved_render_lang = str(render_target_lang or "").strip().lower()
     explicit_render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_CANON_ID") or "").strip()
     if explicit_render_canon_id:
         render_canon_id = explicit_render_canon_id
@@ -97,6 +120,27 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
             "citation": f"style_canon:{entry.canon_id}@v{entry.version}:{entry.hash[:12]}",
         }
     return resolved
+
+
+def _load_v5_style_instruction(render_lang: str) -> str:
+    """尝试从 runtime/style_canon/ 加载 v5 蒸馏产物。
+
+    返回空字符串表示 v5 不可用，应走旧版 fallback。
+    """
+    v5_root = Path(os.environ.get("STYLE_V5_ROOT") or "runtime/style_canon")
+    if render_lang == "ja":
+        v5_path = v5_root / "style_instruction_v5_ja.txt"
+    else:
+        v5_path = v5_root / "style_instruction_v5.txt"
+
+    if not v5_path.exists():
+        return ""
+
+    try:
+        text = v5_path.read_text(encoding="utf-8").strip()
+        return text if len(text) > 100 else ""  # 至少 100 字才算有效
+    except Exception:
+        return ""
 
 
 def build_chat_context_pack(
