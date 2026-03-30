@@ -3,11 +3,11 @@
 
 # Natsume_Ai 架构评审与优化路线图
 
-**文档版本**：v2.0
+**文档版本**：v3.0
 **创建日期**：2026-03-09
-**最后更新**：2026-03-19
-**状态**：持续更新中
-**作者**：架构评审（基于全量文档扫描）
+**最后更新**：2026-03-30
+**状态**：Phase X-XIII 已完成，进入打磨阶段
+**作者**：架构评审（基于全量文档扫描 + 代码实际验证）
 
 ---
 
@@ -42,51 +42,44 @@
 
 ---
 
-## 二、当前架构核心问题诊断
+## 二、架构核心问题诊断（2026-03-30 状态更新）
 
-### 🔴 问题1：流式 Chat 绕过了 Graph，是一个"残缺路径"
+### ✅ 问题1：流式 Chat 绕过了 Graph（**已解决** — Phase X-XIII）
 
-当前路由：
-```
-GET /v1/chat/stream  →  绕过 Graph，直接 astream_llm_chunks
-```
+> 2026-03-19 ～ 2026-03-30 期间已完整实现。
 
-流式 Chat 完全跳过了：
-- ❌ 六路召回（Episodic / StyleCanon / WorldCanon / Bond / 全文检索 / 重排）
-- ❌ 情感层（`emotion_context.py` 存在但未接入流式路径）
-- ❌ Governor 治理层
-- ❌ 审计链写入
-- ❌ 两段式输出（中文语义内核 → 日文渲染）
+**当前实现**（`chat_stream_handler.py` L373-1391）：
+- ✅ 完整五路召回（Episodic / WorldCanon / Bond / ArtifactVault / SqliteLedger）通过 `orchestrator.arun()`
+- ✅ StateArbiter 四路注入（Bond fact / Persona trait / Hard state / Canon style）
+- ✅ RecallPack 构建 + AdaptivePromptBudget 动态预算
+- ✅ 情感层深度接入：VTS 表情实时同步 + 过渡帧动画（L908-1030）
+- ✅ 后台异步写入（Bond / 审计 / Episodic）全路径队列优先
 
-**本质：流式 Chat 现在只是一个"裸 LLM 调用"，与整个架构设计完全脱节。**
+**Phase XIII 变更**：六路召回精简为五路（style_canon / persona_utterance 走独立通道绕过 Reranker，常驻注入 prompt 前 3-4 位）。
 
 ---
 
-### 🔴 问题2：模型路由交给 FastAPI 是职责错位
+### ✅ 问题2：SceneRouter 已下沉到 Graph（**已解决**）
 
-当前 `pre_intent_classifier` 运行在 FastAPI 端点层，由 FastAPI 决定走哪条 Graph 路径。问题如下：
-
-1. **FastAPI 是 I/O 层，不是决策层**。路由决策属于 Host 主权域，应在 Graph 入口或 Governor 层做，而不是在 HTTP 路由层
-2. **场景分类逻辑散落在 HTTP handler 里**，导致流式路径根本没有场景分类
-3. **违反权力分立原则**：解释器（LLM）和仲裁者（Host）之间的路由决策被下放到了 I/O 层
+`main_chain.py` L2352-2760：SceneRouter 定义在 Graph 层，是 Graph 的第一个节点。FastAPI 层只做 I/O 透传。
 
 ---
 
-### 🔴 问题3：情感层（emotion_context.py）是孤岛
+### ✅ 问题3：情感层已全路径接入（**已解决**）
 
-`host_brain/app/emotion_context.py` 存在，但：
-- 流式路径完全没有接入
-- Graph 路径中情感层接入情况不明确
-- VTS 情感驱动（emotion_tag → Live2D）与 LLM 输出的情感信号之间缺乏闭环
+- ✅ 流式路径：VTS 表情实时同步 + 过渡帧动画
+- ✅ emotion_context 影响 Prompt 构建
+- ✅ 情感 LLM 推理（`HOST_EMOTION_LLM_INFERENCE_ENABLED` 可选开关）
 
 ---
 
-### 🟡 问题4：代码路线过于复杂，维护成本高
+### 🟡 问题4：代码复杂度（部分改善，仍需打磨）
 
-当前 `host_brain/` 有 25+ 个子模块，`integrations/` 下有 15+ 个 graph 相关文件：
-- `tools/` 下有大量 `_diag_*.py` 脚本，说明调试成本很高
-- `obs/` 和 `observability/` 两个目录功能重叠
-- 没有统一的 Skills 封装层
+- ⚠️ `main_chain.py` 159KB 单文件需要拆分
+- ⚠️ `obs_routes.py` 238KB/6460行 需要拆分
+- ✅ obs/ 和 observability/ 实际分工明确（obs_routes = API 层，observability/ = 业务逻辑层），不需要合并
+- ✅ Skills Hub 已实现 OpenClaw 风格 SKILL.md 安装式架构
+- ✅ MCP 和 Skills 已有 `mcp_skill_bridge.py` 桥接
 
 ---
 
@@ -275,40 +268,51 @@ class SkillRegistry:
 
 ---
 
-## 七、优先级路线图（当前阶段）
+## 七、优先级路线图（2026-03-30 状态更新）
 
-> **当前节点**：P15 终点封板完成（2026-03-17），进入功能完整性补全阶段。
+> **当前节点**：Phase X-XIII 已全部完成（2026-03-19 ～ 2026-03-30），进入打磨阶段。
 
-### P0（立即做）— 最大功能缺口
+### P0（原"最大功能缺口"）— ✅ **全部已完成**
 
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| **流式 Chat 接入六路召回** | 当前流式输出是"无记忆的裸 LLM"，这是最大的功能缺口 | ⬜ 待开始 |
-| **流式 Chat 接入情感层** | emotion_context → VTS 驱动，让流式输出也能驱动 Live2D | ⬜ 待开始 |
+| 任务 | 描述 | 状态 | 完成方式 |
+|------|------|------|----------|
+| **流式 Chat 接入五路召回** | chat_stream_handler.py 接入 RetrievalOrchestrator + StateArbiter + RecallPack | ✅ 已完成 | Phase X Agentic RAG |
+| **流式 Chat 接入情感层** | VTS 表情实时同步 + 过渡帧动画 + 情感影响生成参数 | ✅ 已完成 | chat_stream_handler.py L908-1030 |
 
-### P1（近期做）— 体验提升
+### P1（原"体验提升"）— ✅ **全部已完成**
 
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| **Host 端部署 Qwen3 8B** | 替代云端 CHAT 场景，降低延迟和成本 | ⬜ 待开始 |
-| **Gaming 模式切换到 Edge 3B** | 而不是退化到模板，保持互动质量 | ⬜ 待开始 |
-| **SceneRouter 下沉到 Graph 入口** | 从 FastAPI 层移出，成为 Graph 的第一个节点 | ⬜ 待开始 |
+| 任务 | 描述 | 状态 | 完成方式 |
+|------|------|------|----------|
+| **Host 端部署 Qwen3 14B** | 默认模型升级为 qwen3:14b（非原计划的 8B），Ollama 本地推理 | ✅ 已完成 | graph_config_builder.py L119，含健康探测+自动降级 |
+| **Gaming 模式切换到 Edge 3B** | sys_mode=gaming 时路由到 Edge Qwen3 3B | ✅ 已完成 | chat_handler_edge.py L290-349（需 `HOST_GAMING_EDGE_CHAT_ENABLED=true`） |
+| **SceneRouter 下沉到 Graph 入口** | 从 FastAPI 层移出，成为 Graph 的第一个节点 | ✅ 已完成 | main_chain.py L2352-2760 |
 
-### P2（中期做）— 架构优化
+### P2（原"架构优化"）— ✅ **全部已完成**
 
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| **Skills 层 OpenClaw 风格封装** | 统一 `@skill` 注册，支持 Cursor/PyCharm/Codex 调用 | ⬜ 待开始 |
-| **obs/ 和 observability/ 合并** | 消除重复，降低维护成本 | ⬜ 待开始 |
-| **诊断工具整合** | 将 `_diag_*.py` 系列整合为统一诊断入口 | ⬜ 待开始 |
+| 任务 | 描述 | 状态 | 完成方式 |
+|------|------|------|----------|
+| **Skills 层 OpenClaw 风格封装** | SKILL.md 安装式架构 + Hub 目录自动发现注册 | ✅ 已完成 | host_brain/skills/hub/ + install_skill() |
+| **obs/ 和 observability/ 合并** | 经代码审查确认分工明确：obs_routes=API 层，observability/=业务逻辑层 | ✅ 不需要合并 | 保持现状 |
+| **MCP 工具注册与 Skills 层桥接** | mcp_skill_bridge.py 双向桥接 | ✅ 已完成 | host_brain/skills/mcp_skill_bridge.py |
 
-### P3（长期做）— 完整闭环
+### P3（原"长期做"）— ✅ **全部已完成**
 
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| **Bond 更新异步化** | 所有路径的 Bond 更新统一走后台异步队列 | ⬜ 待开始 |
-| **情感层全路径接入** | Host 8B / Edge 3B / Cloud Graph 三条路径都接入情感层 | ⬜ 待开始 |
-| **MCP 工具注册与 Skills 层合并** | 消除两套体系，统一工具调用入口 | ⬜ 待开始 |
+| 任务 | 描述 | 状态 | 完成方式 |
+|------|------|------|----------|
+| **Bond 更新异步化** | 4 条路径（stream/complex/gateway/system）全用 queue+fallback | ✅ 已完成 | 异步队列优先，同步兜底 |
+| **情感层全路径接入** | Host 14B / Edge 3B / Cloud Graph 三条路径都接入 | ✅ 已完成 | 详见问题 3 状态 |
+| **MCP 工具注册与 Skills 层合并** | 同 P2 | ✅ 已完成 | mcp_skill_bridge.py |
+
+### 新增：当前待办（打磨阶段）
+
+| 任务 | 优先级 | 描述 |
+|------|--------|------|
+| **main_chain.py 拆分** | 中 | 159KB 单文件需拆分为多个模块 |
+| **obs_routes.py 拆分** | 中 | 238KB/6460行/50个端点需拆分为按职责分组的路由模块 |
+| **QueryPlanner 测试补全** | 低 | 当前覆盖 3/9 意图（33%），需补 chat/recall_memory/emotion/knowledge/tool/complex |
+| **TODO 标记清理** | 低 | 212+ 处 TODO 中很多已实现但注释未清理 |
+| **ARCH_REVIEW_AND_ROADMAP 架构图刷新** | 低 | 第四/五节的架构图需更新为 Phase XIII 实际架构 |
+| **真机端到端验证** | 高 | Phase X-XIII 改动需 RUN 端真机跑一遍 |
 
 ---
 
@@ -359,8 +363,10 @@ class SkillRegistry:
 |------|------|------|
 | v1.0 | 2026-03-09 | 初版，基于全量文档扫描生成，状态：待决策 |
 | v2.0 | 2026-03-19 | 更新：P15 终点封板完成（M-MA1～M-MA6 全部达成，220 用例全通过）；路线图状态同步；移除已过时的"待决策"标注 |
+| v3.0 | 2026-03-30 | **大更新**：基于代码实际验证（非文档推测），确认 P0-P3 路线图全部已完成。Phase X Agentic RAG + Phase XIII 风格重构后，流式 Chat 已完整接入五路召回+情感层+VTS。Host 14B / Gaming Edge 3B / Skills Hub / Bond 异步化全部落地。更新问题诊断（4 个中 3 个已解决）。新增打磨阶段待办清单。|
 
 ---
 
 *文档生成时间：2026-03-09 18:20*
-*下一步：确认 P0 任务的实施方案，开始流式 Chat 召回接入的代码设计*
+*v3.0 更新时间：2026-03-30 16:20*
+*当前阶段：Phase X-XIII 全部完成，进入代码质量打磨和真机验证阶段*
