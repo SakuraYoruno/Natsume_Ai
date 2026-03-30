@@ -1088,36 +1088,48 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
         )
 
-    persona_example_rows: list[Mapping[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, Mapping):
-            continue
-        if str(row.get("kind") or "").strip().lower() != "persona_utterance":
-            continue
-        persona_example_rows.append(row)
+    # ── Phase XIII：台词风格参考独立通道（绕过 Reranker）─────────────────
+    # 不再从 Reranker 后的 rows 中提取 persona_utterance 条目（那条路径几乎
+    # 100% 被 Reranker 杀死），而是直接从 EmotionTaggedUtteranceIndex 按当前
+    # emotion_tag 检索，走独立通道注入。
+    persona_examples_block = ""
+    try:
+        from host_brain.retrieval.emotion_utterance_index import get_utterance_index  # noqa: PLC0415
+        _emotion_tag_for_style = str(
+            merged_emotion_context.get("emotion_tag")
+            or emotion_context.get("emotion_tag")
+            or "NEUTRAL"
+        ).strip().upper()
+        _style_lang = "ja" if render_target_lang == "ja" else "cn"
+        _utt_index = get_utterance_index()
+        if _utt_index.is_built:
+            _utt_result = _utt_index.retrieve_multi_scene(
+                _emotion_tag_for_style,
+                lang=_style_lang,
+                primary_n=3,
+                daily_n=2,
+                max_chars=400,
+            )
+            persona_examples_block = _utt_index.render_for_prompt(
+                _utt_result, lang=_style_lang,
+            )
+            if persona_examples_block:
+                persona_examples_block += "\n"
+    except Exception:
+        pass  # 降级：不注入台词参考
 
-    persona_lines: list[str] = []
-    preferred_lang_tokens: set[str] = set()
-    if render_target_lang == "ja":
-        preferred_lang_tokens = {"ja", "jp", "japanese"}
-    elif render_target_lang == "zh":
-        preferred_lang_tokens = {"zh", "cn", "chinese"}
-
-    if preferred_lang_tokens and rows:
-        filtered_evidence_rows: list[Mapping[str, Any]] = []
+    # 从 evidence rows 中过滤掉 persona_utterance 类型（已走独立通道）
+    if rows:
+        _filtered_evidence_rows: list[Mapping[str, Any]] = []
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            if str(row.get("kind") or "").strip().lower() != "persona_utterance":
-                filtered_evidence_rows.append(row)
-                continue
-            lang = str(row.get("lang") or "").strip().lower()
-            if lang and lang not in preferred_lang_tokens:
-                continue
-            filtered_evidence_rows.append(row)
-        if filtered_evidence_rows:
+            if str(row.get("kind") or "").strip().lower() == "persona_utterance":
+                continue  # 跳过，已由独立通道处理
+            _filtered_evidence_rows.append(row)
+        if _filtered_evidence_rows:
             evidence_lines = []
-            for row in filtered_evidence_rows[:6]:
+            for row in _filtered_evidence_rows[:6]:
                 if not isinstance(row, Mapping):
                     continue
                 evidence_ref = _truncate_for_prompt(
@@ -1129,46 +1141,6 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                     continue
                 evidence_lines.append(f"- [{evidence_ref}] {snippet}")
             evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
-
-    for row in persona_example_rows:
-        lang = str(row.get("lang") or "").strip().lower()
-        if preferred_lang_tokens and lang and lang not in preferred_lang_tokens:
-            continue
-        citation = _truncate_for_prompt(
-            row.get("evidence_ref") or row.get("source_ref") or "unknown",
-            limit=96,
-        )
-        speaker = _truncate_for_prompt(row.get("speaker") or "夏目藍", limit=24)
-        utterance = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=200)
-        if not utterance:
-            continue
-        persona_lines.append(f"- [{citation}] {speaker}: {utterance}")
-        if len(persona_lines) >= 4:
-            break
-
-    if not persona_lines:
-        for row in persona_example_rows:
-            citation = _truncate_for_prompt(
-                row.get("evidence_ref") or row.get("source_ref") or "unknown",
-                limit=96,
-            )
-            speaker = _truncate_for_prompt(row.get("speaker") or "夏目藍", limit=24)
-            utterance = _truncate_for_prompt(row.get("content") or row.get("snippet"), limit=200)
-            if not utterance:
-                continue
-            persona_lines.append(f"- [{citation}] {speaker}: {utterance}")
-            if len(persona_lines) >= 3:
-                break
-
-    persona_examples_block = ""
-    if persona_lines:
-        persona_examples_block = (
-            "DIALOGUE_EXAMPLES_BINDING:\n"
-            "- These are persona style-transfer references only.\n"
-            "- NEVER quote any example verbatim; adapt to current user message.\n"
-            "- Keep safety/factual constraints above stylistic imitation.\n"
-            f"{chr(10).join(persona_lines)}\n\n"
-        )
 
     role_instruction = _build_node_role_instruction(
         node_id,
@@ -1200,6 +1172,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{role_instruction}\n\n"
         f"{direct_response_block}"
         f"{style_block}"
+        f"{persona_examples_block}"
         f"{bond_aware_style_block}"
         f"{predictive_state_block}"
         f"{planning_block}"
@@ -1218,7 +1191,6 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- reason_code: {prompt_context_reason}\n"
         f"- violation_count: {prompt_context_violation_count}\n\n"
         f"WORLD_CANON_BINDING:\n{world_block}\n\n"
-        f"{persona_examples_block}"
         f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
         f"NODE_ID: {node_id}\n"
         f"RENDER_TARGET_LANG: {render_target_lang}\n"

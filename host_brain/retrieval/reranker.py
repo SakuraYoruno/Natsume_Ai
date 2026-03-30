@@ -871,25 +871,51 @@ def _build_topk(
     scores: list[float],
     top_k: int,
 ) -> list[dict[str, Any]]:
+    # ── Phase XIII 保底机制：style_canon 至少保留 1 条 ──────────────────
+    # style_canon 的内容与用户 query 的词汇重叠度天然极低（风格规则 vs 用户消息），
+    # 导致 heuristic reranker 几乎必定把它排到最后被淘汰。
+    # 保底策略：先预留 style_canon 的最高分候选，剩余名额正常竞争。
+    GUARANTEED_STORE_IDS = frozenset({"style_canon"})
+    # 注意：persona_utterance 已走独立通道（EmotionTaggedUtteranceIndex），
+    # 不再需要在 Reranker 中保底。
+
     ranked: list[tuple[float, int, dict[str, Any]]] = []
+    guaranteed: list[tuple[float, int, dict[str, Any]]] = []
+    guaranteed_store_seen: set[str] = set()
+
     for index, candidate in enumerate(candidates):
         score = float(scores[index]) if index < len(scores) else _fallback_score_by_rank(index, len(candidates))
-        ranked.append(
-            (
-                score,
-                index,
-                {
-                    "doc_id": str(candidate.get("doc_id") or f"cand_{index + 1:03d}"),
-                    "source_ref": str(candidate.get("source_ref") or f"source://candidate/{index + 1}"),
-                    "snippet": str(candidate.get("snippet") or ""),
-                    "score": round(score, 6),
-                    "confidence": _score_to_confidence(score),
-                    "metadata": dict(candidate.get("metadata") or {}),
-                },
-            )
+        entry = (
+            score,
+            index,
+            {
+                "doc_id": str(candidate.get("doc_id") or f"cand_{index + 1:03d}"),
+                "source_ref": str(candidate.get("source_ref") or f"source://candidate/{index + 1}"),
+                "snippet": str(candidate.get("snippet") or ""),
+                "score": round(score, 6),
+                "confidence": _score_to_confidence(score),
+                "metadata": dict(candidate.get("metadata") or {}),
+            },
         )
+
+        # 检查是否属于保底 store
+        store_id = str((candidate.get("metadata") or {}).get("store_id") or "").strip().lower()
+        if store_id in GUARANTEED_STORE_IDS and store_id not in guaranteed_store_seen:
+            guaranteed.append(entry)
+            guaranteed_store_seen.add(store_id)
+        else:
+            ranked.append(entry)
+
+    # 保底的按分数降序排列
+    guaranteed.sort(key=lambda item: (-item[0], item[1]))
+    # 正常竞争的按分数降序排列
     ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [item[2] for item in ranked[: max(0, top_k)]]
+
+    # 合并：保底的先占位，剩余名额给正常竞争
+    remaining_slots = max(0, top_k - len(guaranteed))
+    result = [item[2] for item in guaranteed]
+    result.extend([item[2] for item in ranked[:remaining_slots]])
+    return result
 
 
 def _score_to_confidence(score: float) -> float:
