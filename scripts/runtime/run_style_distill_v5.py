@@ -47,31 +47,30 @@ def main() -> int:
     print(f"  节奏: {profile.rhythm_description}")
     print(f"  短/中/长: {profile.short_ratio:.1%} / {profile.medium_ratio:.1%} / {profile.long_ratio:.1%}")
 
-    # 输出 JSON
+    # 输出 JSON（含中日两版渲染文本）
     output_dir = REPO_ROOT / "runtime" / "style_canon"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    instruction_cn = render_style_instruction_v5(profile)
+    instruction_ja = render_style_instruction_v5_ja(profile)
+
+    profile_dict = profile.to_dict()
+    profile_dict["instruction_cn"] = instruction_cn
+    profile_dict["instruction_ja"] = instruction_ja
+    profile_dict["v5_version"] = 5
+    profile_dict["distill_date"] = __import__("datetime").date.today().isoformat()
+
     profile_path = output_dir / "style_profile_v5.json"
     profile_path.write_text(
-        json.dumps(profile.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(profile_dict, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    print(f"\n[2/4] JSON → {profile_path}")
-
-    # 输出风格指导文本（中文版）
-    instruction = render_style_instruction_v5(profile)
-    instruction_path = output_dir / "style_instruction_v5.txt"
-    instruction_path.write_text(instruction, encoding="utf-8")
-    print(f"[3/5] Instruction (CN) → {instruction_path}")
-
-    # 输出风格指导文本（日语版）
-    instruction_ja = render_style_instruction_v5_ja(profile)
-    instruction_ja_path = output_dir / "style_instruction_v5_ja.txt"
-    instruction_ja_path.write_text(instruction_ja, encoding="utf-8")
-    print(f"[4/5] Instruction (JA) → {instruction_ja_path}")
+    print(f"\n[2/3] JSON (含 instruction_cn/ja) → {profile_path}")
+    print(f"  instruction_cn: {len(instruction_cn)} 字")
+    print(f"  instruction_ja: {len(instruction_ja)} 字")
 
     # 构建台词索引并输出摘要
-    print("\n[5/5] 构建情感台词索引...")
+    print("\n[3/3] 构建情感台词索引...")
     index = EmotionTaggedUtteranceIndex(cn_path=cn_path, ja_path=ja_path)
     index.build()
     summary = index.to_summary()
@@ -86,9 +85,17 @@ def main() -> int:
         for t in texts:
             print(f"    「{t}」")
 
-    print(f"\n[完成] 风格指导文本预览:\n{'='*60}")
-    print(instruction[:1000])
-    print(f"{'='*60}\n...（共 {len(instruction)} 字）")
+    print(f"\n[完成] 中文风格指导预览:\n{'='*60}")
+    print(instruction_cn[:800].encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
+    print(f"{'='*60}\n...（共 {len(instruction_cn)} 字）")
+
+    print(f"\n日语风格指导预览:\n{'='*60}")
+    # Windows GBK 控制台无法显示部分日语字符，用 replace 降级
+    try:
+        print(instruction_ja[:800])
+    except UnicodeEncodeError:
+        print(instruction_ja[:800].encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
+    print(f"{'='*60}\n...（共 {len(instruction_ja)} 字）")
 
     return 0
 

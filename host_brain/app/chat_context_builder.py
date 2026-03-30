@@ -123,21 +123,29 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
 
 
 def _load_v5_style_instruction(render_lang: str) -> str:
-    """尝试从 runtime/style_canon/ 加载 v5 蒸馏产物。
+    """从 style_profile_v5.json 加载对应语言的渲染文本。
+
+    JSON 结构：
+      {
+        "instruction_cn": "你是夏目藍...(中文风格指导)",
+        "instruction_ja": "あなたは夏目藍...(日语风格指导)",
+        ...其他统计数据...
+      }
 
     返回空字符串表示 v5 不可用，应走旧版 fallback。
     """
+    import json as _json
+
     v5_root = Path(os.environ.get("STYLE_V5_ROOT") or "runtime/style_canon")
-    if render_lang == "ja":
-        v5_path = v5_root / "style_instruction_v5_ja.txt"
-    else:
-        v5_path = v5_root / "style_instruction_v5.txt"
+    v5_path = v5_root / "style_profile_v5.json"
 
     if not v5_path.exists():
         return ""
 
     try:
-        text = v5_path.read_text(encoding="utf-8").strip()
+        data = _json.loads(v5_path.read_text(encoding="utf-8"))
+        key = "instruction_ja" if render_lang == "ja" else "instruction_cn"
+        text = str(data.get(key) or "").strip()
         return text if len(text) > 100 else ""  # 至少 100 字才算有效
     except Exception:
         return ""
