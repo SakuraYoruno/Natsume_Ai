@@ -10,39 +10,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from host_brain.observability.service_registry import ALL_SERVICES
+
 logger = logging.getLogger("Natsume.obs.health")
-
-# ---------------------------------------------------------------------------
-# 服务注册表
-# ---------------------------------------------------------------------------
-_HOST_SERVICES: List[Dict[str, str]] = [
-    {"service_id": "llm_gateway",           "name": "LLM Gateway",            "side": "host"},
-    {"service_id": "neo4j",                 "name": "Neo4j Bond SSOT",        "side": "host"},
-    {"service_id": "sqlite_ledger",         "name": "SQLite Ledger",          "side": "host"},
-    {"service_id": "chroma",                "name": "Chroma Vector Store",    "side": "host"},
-    {"service_id": "scheduler",             "name": "Scheduler",              "side": "host"},
-    {"service_id": "bond_engine",           "name": "Bond Engine",            "side": "host"},
-    {"service_id": "memory_distiller",      "name": "Memory Distiller",       "side": "host"},
-    {"service_id": "mcp_provider",          "name": "MCP Provider",           "side": "host"},
-    {"service_id": "embedding",             "name": "Embedding Service",      "side": "host"},
-    {"service_id": "reranker",              "name": "Reranker Service",       "side": "host"},
-    # 新模块（M-新增）
-    {"service_id": "main_chain",            "name": "MainChain Orchestrator", "side": "host"},
-    {"service_id": "routing_matrix",        "name": "LLM Routing Matrix",     "side": "host"},
-    {"service_id": "memory_guard",          "name": "Memory Guard",           "side": "host"},
-    {"service_id": "state_arbiter",         "name": "State Arbiter",          "side": "host"},
-    {"service_id": "recall_pack_builder",   "name": "Recall Pack Builder",    "side": "host"},
-]
-
-_EDGE_SERVICES: List[Dict[str, str]] = [
-    {"service_id": "asr",               "name": "ASR (Whisper)",      "side": "edge"},
-    {"service_id": "tts",               "name": "TTS (GPT-SoVITS)",   "side": "edge"},
-    {"service_id": "vts",               "name": "VTS / Live2D",       "side": "edge"},
-    {"service_id": "audio_playback",    "name": "Audio Playback",     "side": "edge"},
-    {"service_id": "edge_rpc",          "name": "Edge RPC Server",    "side": "edge"},
-]
-
-ALL_SERVICES = _HOST_SERVICES + _EDGE_SERVICES
 
 # ---------------------------------------------------------------------------
 # 健康探测结果结构

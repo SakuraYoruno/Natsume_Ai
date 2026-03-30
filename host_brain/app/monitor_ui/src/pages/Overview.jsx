@@ -75,8 +75,14 @@ export default function Overview() {
   const [wsConnected, setWsConnected] = useState(false)
   const [wsAlerts, setWsAlerts] = useState([])
   const wsRef = useRef(null)
-  useEffect(() => {
-    // 尝试建立 WebSocket 连接（优雅降级：失败时完全依赖轮询）
+  const wsReconnectTimer = useRef(null)
+  const wsReconnectDelay = useRef(1000) // 初始重连延迟 1s
+
+  const connectWs = useCallback(() => {
+    // 清理旧连接
+    wsRef.current?.close()
+    clearTimeout(wsReconnectTimer.current)
+
     try {
       const conn = connectHealthWebSocket(
         (msg) => {
@@ -87,23 +93,50 @@ export default function Overview() {
             setWsAlerts(prev => [...msg.alerts, ...prev].slice(0, 20))
           }
         },
-        () => setWsConnected(false),
-        () => setWsConnected(false),
+        () => {
+          // onError
+          setWsConnected(false)
+          // 指数退避重连
+          const delay = wsReconnectDelay.current
+          wsReconnectDelay.current = Math.min(delay * 2, 30000) // 最大 30s
+          console.log(`[WS] Reconnecting in ${delay}ms...`)
+          wsReconnectTimer.current = setTimeout(connectWs, delay)
+        },
+        () => {
+          // onClose
+          setWsConnected(false)
+          // 指数退避重连
+          const delay = wsReconnectDelay.current
+          wsReconnectDelay.current = Math.min(delay * 2, 30000)
+          console.log(`[WS] Reconnecting in ${delay}ms...`)
+          wsReconnectTimer.current = setTimeout(connectWs, delay)
+        },
       )
       wsRef.current = conn
       setWsConnected(true)
+      wsReconnectDelay.current = 1000 // 连接成功后重置延迟
     } catch (e) {
-      // WebSocket 不可用，降级到纯轮询
       console.warn('[Overview] WebSocket not available, falling back to polling')
     }
-    return () => { wsRef.current?.close() }
   }, [])
+
+  useEffect(() => {
+    connectWs()
+    return () => {
+      wsRef.current?.close()
+      clearTimeout(wsReconnectTimer.current)
+    }
+  }, [connectWs])
 
   const load = useCallback(async () => {
     try {
       setError(null)
+      // WS 连接成功时跳过 fetchServicesHealth（由 WS 推送 health_snapshot），避免竞态覆盖
+      const healthPromise = wsConnected
+        ? Promise.resolve(null)
+        : fetchServicesHealth({ window_minutes: windowMinutes })
       const [res, subsysRes, agentLoopRes, obsMetricsRes, dispRes, pbRes, canonRes, chainRes] = await Promise.all([
-        fetchServicesHealth({ window_minutes: windowMinutes }),
+        healthPromise,
         fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 5 }).catch(() => null),
         fetchObsMetrics().catch(() => null),
@@ -112,7 +145,7 @@ export default function Overview() {
         fetchCanonProposalStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchChainStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
-      setData(res)
+      if (res) setData(res)  // 仅在 HTTP 获取到数据时更新（WS 模式下为 null）
       setSubsysData(subsysRes)
       setAgentLoopData(agentLoopRes)
       setObsMetricsData(obsMetricsRes)
@@ -125,7 +158,7 @@ export default function Overview() {
     } finally {
       setLoading(false)
     }
-  }, [windowMinutes])
+  }, [windowMinutes, wsConnected])
 
   useEffect(() => {
     setLoading(true)

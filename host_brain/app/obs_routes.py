@@ -26,35 +26,14 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
 from host_brain.observability.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
+from host_brain.observability.service_registry import (
+    LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
+    EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
-
-# ---------------------------------------------------------------------------
-# 9 个 LLM 云节点静态注册表（来自 node_registry.yaml）
-# ---------------------------------------------------------------------------
-_LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
-    "chat_direct_ja":           {"role": "聊天直出",      "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "core_reasoner_primary":    {"role": "主推理",      "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "core_reasoner_secondary":  {"role": "备用推理",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "planner_constraints":      {"role": "规划约束",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "tool_planner":             {"role": "工具规划",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "safety_verifier":          {"role": "安全验证",    "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
-    "consistency_verifier":     {"role": "一致性验证",  "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
-    "renderer_ja_c_style":      {"role": "日文渲染",    "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "workbench_translate":      {"role": "翻译工作台",  "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "workbench_code_assist":    {"role": "代码辅助",    "provider": "gemini", "model_id": "gemini-2.5-pro"},
-}
-
-# 边缘服务：与 ServiceHealthAggregator 的 _EDGE_SERVICES 一致（service_id）；value 为 voice_event_log 的 event_type 前缀列表
-_EDGE_SERVICE_EVENT_PREFIXES: Dict[str, List[str]] = {
-    "asr": ["ASR"],
-    "tts": ["TTS"],
-    "vts": ["VTS"],
-    "audio_playback": ["VOICE_RESOURCE_GATE", "AUDIO", "AUDIO_PLAYBACK"],
-    "edge_rpc": ["EDGE", "RPC", "GOVERNOR", "AIRLOCK"],
-}
 
 # ---------------------------------------------------------------------------
 # 依赖注入
@@ -6128,10 +6107,16 @@ async def ws_health(websocket: WebSocket):
     try:
         while True:
             try:
-                # 获取最新健康数据
-                aggregator = ServiceHealthAggregator()
+                # 获取最新健康数据（与 GET /obs/services/health 逻辑一致）
                 ledger = _get_ledger_instance()
-                health_data = aggregator.aggregate(ledger=ledger) if ledger else {"services": [], "status": "DEGRADED"}
+                if ledger:
+                    now_ms = _now_ms()
+                    since_ms = now_ms - 60 * 60 * 1000  # 默认 1h 窗口
+                    probe_registry, _extra = _build_probe_registry(ledger, since_ms)
+                    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
+                    health_data = await aggregator.aggregate()
+                else:
+                    health_data = {"services": [], "total": 0, "up": 0, "down": 0, "degraded": 0, "unknown": 0, "timestamp": _now_ms()}
 
                 services = health_data.get("services", [])
                 current_statuses: Dict[str, str] = {}

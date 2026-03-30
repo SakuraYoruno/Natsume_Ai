@@ -11,6 +11,15 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from host_brain.observability.service_registry import (
+    EDGE_SERVICE_IDS,
+    EDGE_DISPLAY_NAMES as _EDGE_DISPLAY_NAMES,
+    HOST_SERVICE_IDS as _HOST_SERVICE_IDS,
+    HOST_DISPLAY_NAMES as _HOST_DISPLAY_NAMES,
+    LLM_NODE_IDS,
+    LLM_NODE_DISPLAY_NAMES,
+)
+
 logger = logging.getLogger("Natsume.obs.heartbeat")
 
 # 缓存：service_id -> { "status", "latency_ms", "last_check_ts", "name", "side" }
@@ -20,55 +29,49 @@ _cache_lock = threading.Lock()
 # 缓存有效期（秒），超过则 GET /obs/services/health 仍回退到 ledger
 CACHE_TTL_SEC = 90
 
-# 与 ServiceHealthAggregator / obs_routes 一致：边缘 5 个 + Host 侧用 LLM 节点 id（registry 的 key）
-EDGE_SERVICE_IDS = ["asr", "tts", "vts", "audio_playback", "edge_rpc"]
-# obs_routes 的 registry 用 _LLM_NODE_REGISTRY 的 key，心跳需覆盖以便 get_cached(node_id) 命中
-LLM_NODE_IDS = [
-    "chat_direct_ja", "core_reasoner_primary", "core_reasoner_secondary",
-    "planner_constraints", "tool_planner", "safety_verifier", "consistency_verifier",
-    "renderer_ja_c_style", "workbench_translate", "workbench_code_assist",
-]
-LLM_NODE_DISPLAY_NAMES = {
-    "chat_direct_ja": "聊天直出",
-    "core_reasoner_primary": "主推理",
-    "core_reasoner_secondary": "备用推理",
-    "planner_constraints": "规划约束",
-    "tool_planner": "工具规划",
-    "safety_verifier": "安全验证",
-    "consistency_verifier": "一致性验证",
-    "renderer_ja_c_style": "日文渲染",
-    "workbench_translate": "翻译工作台",
-    "workbench_code_assist": "代码辅助",
+
+# /health 端点返回的 service_id → 心跳模块 service_id 映射
+# /health 使用 "host.audit.sqlite_ledger" 格式，心跳模块使用 "sqlite_ledger" 格式
+_HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
+    "host.audit.sqlite_ledger":       "sqlite_ledger",
+    "host.governor.decision":         "llm_gateway",       # governor 依赖 LLM，映射到 llm_gateway
+    "host.skills.loader":             "scheduler",          # skills loader 映射到 scheduler
+    "host.integrations.llm_gateway":  "llm_gateway",
+    "host.retrieval.embedding":       "embedding",
+    "host.retrieval.reranker":        "reranker",
+    # Edge 侧映射
+    "edge.rpc.gateway":               "edge_rpc",
+    "edge.rpc.asr":                   "asr",
+    "edge.rpc.tts":                   "tts",
+    "edge.rpc.barge_in":              "audio_playback",
+    "edge.rpc.resource_gate":         "audio_playback",
 }
-_HOST_SERVICE_IDS = [
-    "llm_gateway", "neo4j", "sqlite_ledger", "chroma", "scheduler",
-    "bond_engine", "memory_distiller", "mcp_provider", "embedding", "reranker",
-    "main_chain", "routing_matrix", "memory_guard", "state_arbiter", "recall_pack_builder",
-]
-_HOST_DISPLAY_NAMES = {
-    "llm_gateway": "LLM Gateway",
-    "neo4j": "Neo4j Bond SSOT",
-    "sqlite_ledger": "SQLite Ledger",
-    "chroma": "Chroma Vector Store",
-    "scheduler": "Scheduler",
-    "bond_engine": "Bond Engine",
-    "memory_distiller": "Memory Distiller",
-    "mcp_provider": "MCP Provider",
-    "embedding": "Embedding Service",
-    "reranker": "Reranker Service",
-    "main_chain": "MainChain Orchestrator",
-    "routing_matrix": "LLM Routing Matrix",
-    "memory_guard": "Memory Guard",
-    "state_arbiter": "State Arbiter",
-    "recall_pack_builder": "Recall Pack Builder",
-}
-_EDGE_DISPLAY_NAMES = {
-    "asr": "ASR (Whisper)",
-    "tts": "TTS (GPT-SoVITS)",
-    "vts": "VTS / Live2D",
-    "audio_playback": "Audio Playback",
-    "edge_rpc": "Edge RPC Server",
-}
+
+# 模块级 httpx.AsyncClient 单例（复用 TCP 连接，避免每次探测都创建/销毁）
+_http_client: Optional[Any] = None
+_http_client_lock = threading.Lock()
+
+
+def _get_http_client():
+    """获取或创建模块级 httpx.AsyncClient 单例。"""
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None:
+            import httpx
+            _http_client = httpx.AsyncClient(timeout=5.0)
+        return _http_client
+
+
+async def close_http_client() -> None:
+    """关闭 httpx 客户端（shutdown 时调用）。"""
+    global _http_client
+    with _http_client_lock:
+        if _http_client is not None:
+            try:
+                await _http_client.aclose()
+            except Exception:
+                pass
+            _http_client = None
 
 
 def _get_host_health_url() -> str:
@@ -94,29 +97,64 @@ async def _probe_edge() -> Dict[str, Any]:
 
 
 async def _probe_host() -> Dict[str, Any]:
-    """探测 Host 进程：GET /health。返回 { status, latency_ms } 或 DOWN。启动阶段失败时重试一次。"""
+    """探测 Host 进程：GET /health，解析返回的 details.services 获取各子服务独立状态。
+
+    返回结构：
+    {
+        "overall_status": "UP"|"DEGRADED"|"DOWN",
+        "latency_ms": int,
+        "sub_services": {  # 各子服务独立状态
+            "sqlite_ledger": {"status": "UP", ...},
+            "llm_gateway": {"status": "DOWN", ...},
+            ...
+        }
+    }
+    """
     url = _get_host_health_url()
+    client = _get_http_client()
     for attempt in (0, 1):
         t0 = time.monotonic()
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(url)
+            resp = await client.get(url)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             if resp.status_code == 200:
-                return {"status": "UP", "latency_ms": elapsed_ms}
-            return {"status": "DEGRADED", "latency_ms": elapsed_ms}
+                body = resp.json()
+                details = body.get("details") or {}
+                services_list = details.get("services") or []
+                sub_services: Dict[str, Dict[str, Any]] = {}
+                for svc in services_list:
+                    health_sid = svc.get("service_id", "")
+                    heartbeat_sid = _HEALTH_SID_TO_HEARTBEAT_SID.get(health_sid)
+                    if not heartbeat_sid:
+                        continue
+                    svc_status = str(svc.get("status", "UNKNOWN")).strip().upper()
+                    sub_services[heartbeat_sid] = {
+                        "status": svc_status,
+                        "detail": svc.get("detail"),
+                    }
+                return {
+                    "overall_status": "UP",
+                    "latency_ms": elapsed_ms,
+                    "sub_services": sub_services,
+                }
+            return {"overall_status": "DEGRADED", "latency_ms": elapsed_ms, "sub_services": {}}
         except Exception as exc:
             logger.debug("Heartbeat Host probe attempt %s failed: %s", attempt + 1, exc)
             if attempt == 0:
                 await asyncio.sleep(3.0)
                 continue
-            return {"status": "DOWN", "latency_ms": None}
-    return {"status": "DOWN", "latency_ms": None}
+            return {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
+    return {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
 
 async def run_once() -> None:
-    """执行一轮心跳探测并更新缓存。Edge/Host 分别探测，任一侧失败也写入该侧缓存，避免单侧异常导致整轮不写缓存。"""
+    """执行一轮心跳探测并更新缓存。
+
+    Edge/Host 分别探测，任一侧失败也写入该侧缓存，避免单侧异常导致整轮不写缓存。
+    Host 侧：解析 /health 返回的各子服务独立状态，不再一刀切广播。
+    Edge 侧：从 /health 返回的 edge.rpc.* 子服务中提取独立状态。
+    LLM 节点：使用 Host 整体状态（LLM 云节点的可用性取决于 Host 进程是否存活）。
+    """
     now_ts = int(time.time() * 1000)
     try:
         edge_result = await _probe_edge()
@@ -127,29 +165,46 @@ async def run_once() -> None:
         host_result = await _probe_host()
     except Exception as exc:
         logger.debug("Heartbeat Host probe failed (will cache DOWN): %s", exc)
-        host_result = {"status": "DOWN", "latency_ms": None}
+        host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
+
+    host_overall = host_result.get("overall_status", "DOWN")
+    host_latency = host_result.get("latency_ms")
+    sub_services = host_result.get("sub_services") or {}
 
     with _cache_lock:
+        # Edge 服务：优先使用 /health 返回的子服务独立状态，否则回退到 Edge 整体探测结果
         for sid in EDGE_SERVICE_IDS:
+            sub = sub_services.get(sid)
+            if sub:
+                status = sub["status"]
+            else:
+                status = edge_result["status"]
             _cache[sid] = {
-                "status": edge_result["status"],
+                "status": status,
                 "latency_ms": edge_result.get("latency_ms"),
                 "last_check_ts": now_ts,
                 "name": _EDGE_DISPLAY_NAMES.get(sid, sid),
                 "side": "edge",
             }
+        # Host 服务：使用各子服务独立状态，无映射的回退到 Host 整体状态
         for sid in _HOST_SERVICE_IDS:
+            sub = sub_services.get(sid)
+            if sub:
+                status = sub["status"]
+            else:
+                status = host_overall
             _cache[sid] = {
-                "status": host_result["status"],
-                "latency_ms": host_result.get("latency_ms"),
+                "status": status,
+                "latency_ms": host_latency,
                 "last_check_ts": now_ts,
                 "name": _HOST_DISPLAY_NAMES.get(sid, sid),
                 "side": "host",
             }
+        # LLM 节点：使用 Host 整体状态（LLM 云节点可用性取决于 Host 进程）
         for sid in LLM_NODE_IDS:
             _cache[sid] = {
-                "status": host_result["status"],
-                "latency_ms": host_result.get("latency_ms"),
+                "status": host_overall,
+                "latency_ms": host_latency,
                 "last_check_ts": now_ts,
                 "name": LLM_NODE_DISPLAY_NAMES.get(sid, sid),
                 "side": "host",
@@ -199,7 +254,7 @@ def start_heartbeat(interval_sec: float = 30.0) -> asyncio.Task:
 
 
 async def stop_heartbeat() -> None:
-    """停止心跳任务（shutdown 时调用）。"""
+    """停止心跳任务并关闭 HTTP 客户端（shutdown 时调用）。"""
     global _heartbeat_task
     if _heartbeat_task is None:
         return
@@ -209,3 +264,4 @@ async def stop_heartbeat() -> None:
     except asyncio.CancelledError:
         pass
     _heartbeat_task = None
+    await close_http_client()
