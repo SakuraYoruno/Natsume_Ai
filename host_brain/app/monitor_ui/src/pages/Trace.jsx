@@ -724,54 +724,6 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
   )
 }
 
-const MOCK_TRACE = {
-  request_id: 'mock-req-001',
-  status: 'OK',
-  total_latency_ms: 1580,
-  nodes: [
-    { node_id: 'asr',             node_type: 'asr',       display_name: 'ASR 语音识别',       status: 'OK', latency_ms: 35,  layer: 'edge' },
-    { node_id: 'host_input',      node_type: 'router',    display_name: 'Host Input 路由',    status: 'OK', latency_ms: 5,   layer: 'host' },
-    { node_id: 'pre_classifier',  node_type: 'intent',    display_name: '预分类器',            status: 'OK', latency_ms: 8,   layer: 'host' },
-    { node_id: 'governor',        node_type: 'governor',  display_name: 'Governor 鉴权',      status: 'OK', latency_ms: 22,  layer: 'host' },
-    { node_id: 'scene_router',    node_type: 'router',    display_name: 'Scene Router',       status: 'OK', latency_ms: 6,   layer: 'host' },
-    { node_id: 'recall_episodic', node_type: 'recall',    display_name: '情节记忆召回',        status: 'OK', latency_ms: 45,  layer: 'host' },
-    { node_id: 'recall_semantic', node_type: 'recall',    display_name: '语义向量召回',        status: 'OK', latency_ms: 120, layer: 'host' },
-    { node_id: 'recall_bond',     node_type: 'recall',    display_name: 'Bond 关系召回',      status: 'OK', latency_ms: 18,  layer: 'host' },
-    { node_id: 'recall_emotion',  node_type: 'recall',    display_name: '情感上下文召回',      status: 'OK', latency_ms: 12,  layer: 'host' },
-    { node_id: 'recall_rerank',   node_type: 'retrieval', display_name: 'Rerank 融合',        status: 'OK', latency_ms: 35,  layer: 'host' },
-    { node_id: 'llm_local',       node_type: 'llm',       display_name: 'LLM 本地 (qwen3:8b)', status: 'OK', latency_ms: 820, layer: 'host', provider: 'openai', model_id: 'qwen3:8b' },
-    { node_id: 'airlock',         node_type: 'governor',  display_name: 'Airlock 检疫',       status: 'OK', latency_ms: 15,  layer: 'host' },
-    { node_id: 'episodic_write',  node_type: 'memory',    display_name: '情节记忆写入',        status: 'OK', latency_ms: 28,  layer: 'host' },
-    { node_id: 'bond_update',     node_type: 'bond',      display_name: 'Bond 积分更新',      status: 'OK', latency_ms: 12,  layer: 'host' },
-    { node_id: 'vts_ctrl',        node_type: 'vts',       display_name: 'VTS 控制',           status: 'OK', latency_ms: 8,   layer: 'host' },
-    { node_id: 'chat_render',     node_type: 'system',    display_name: 'Chat Render 输出',   status: 'OK', latency_ms: 5,   layer: 'host' },
-    { node_id: 'tts',             node_type: 'tts',       display_name: 'TTS 语音合成',       status: 'OK', latency_ms: 180, layer: 'edge' },
-    { node_id: 'vts_driver',      node_type: 'vts',       display_name: 'VTS 表情驱动',       status: 'OK', latency_ms: 22,  layer: 'edge' },
-  ],
-  edges: [
-    { source: 'asr',             target: 'host_input'       },
-    { source: 'host_input',      target: 'pre_classifier'   },
-    { source: 'pre_classifier',  target: 'governor'         },
-    { source: 'governor',        target: 'scene_router'     },
-    { source: 'scene_router',    target: 'recall_episodic'  },
-    { source: 'scene_router',    target: 'recall_semantic'  },
-    { source: 'scene_router',    target: 'recall_bond'      },
-    { source: 'scene_router',    target: 'recall_emotion'   },
-    { source: 'recall_episodic', target: 'recall_rerank'    },
-    { source: 'recall_semantic', target: 'recall_rerank'    },
-    { source: 'recall_bond',     target: 'recall_rerank'    },
-    { source: 'recall_emotion',  target: 'recall_rerank'    },
-    { source: 'recall_rerank',   target: 'llm_local'        },
-    { source: 'llm_local',       target: 'airlock'          },
-    { source: 'airlock',         target: 'episodic_write'   },
-    { source: 'airlock',         target: 'bond_update'      },
-    { source: 'airlock',         target: 'vts_ctrl'         },
-    { source: 'airlock',         target: 'chat_render'      },
-    { source: 'chat_render',     target: 'tts'              },
-    { source: 'vts_ctrl',        target: 'vts_driver'       },
-  ],
-}
-
 // ===== 构建 Flow 数据 =====
 function buildFlowData(schemaNodes, schemaEdges, onSelect, activeNodeIds = null, traceNodeMap = {}) {
   const activeSet = activeNodeIds ? new Set(activeNodeIds) : null
@@ -1289,12 +1241,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     setLoading(true)
     setError(null)
     try {
-      let data
-      if (id === 'mock-req-001' || id.startsWith('mock')) {
-        data = MOCK_TRACE
-      } else {
-        data = await fetchTraceNodes(id)
-      }
+      const data = await fetchTraceNodes(id)
       setSelectedRequestId(id)
       setTraceData(data)
       setTraceInfo({ status: data.status, latency: data.total_latency_ms, nodeCount: (data.nodes ?? []).length })
@@ -1350,9 +1297,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       const items = await Promise.all(
         candidates.map(async (session) => {
           try {
-            const trace = session.request_id === 'mock-req-001'
-              ? MOCK_TRACE
-              : await fetchTraceNodes(session.request_id)
+            const trace = await fetchTraceNodes(session.request_id)
             return { session, trace }
           } catch (loadError) {
             return { session, trace: null, error: loadError.message }
@@ -1383,6 +1328,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         {
           limit: liveTraceLimit,
           window_minutes: 1440,
+          active_within_ms: 60000,
           interval_ms: 1000,
           keyword: recentKeyword || undefined,
         },
@@ -1530,7 +1476,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
   const latestRequest = recentRequests[0] ?? null
   const searchValue = inputId.trim()
-  const searchLooksLikeRequestId = searchValue.startsWith('req_') || searchValue.startsWith('mock')
+  const searchLooksLikeRequestId = searchValue.startsWith('req_')
 
   const handleTraceSearch = () => {
     const value = searchValue

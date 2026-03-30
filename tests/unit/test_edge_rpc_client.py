@@ -530,7 +530,19 @@ class TestProbeEdgeRpcHealth(unittest.TestCase):
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"status": "OK"}
+        mock_response.json.return_value = {
+            "status": "OK",
+            "event": {
+                "components": {
+                    "asr": {
+                        "enabled": True,
+                        "available": True,
+                        "status": "ok",
+                        "detail": "component loaded",
+                    }
+                }
+            },
+        }
         mock_response.headers = {"content-type": "application/json"}
 
         mock_client = AsyncMock()
@@ -543,6 +555,7 @@ class TestProbeEdgeRpcHealth(unittest.TestCase):
 
         self.assertTrue(result["available"])
         self.assertEqual(result["status"], "OK")
+        self.assertEqual("component loaded", result["event"]["components"]["asr"]["detail"])
 
     def test_probe_returns_degraded_on_connection_error(self):
         from host_brain.app.dependencies import probe_edge_rpc_health
@@ -557,6 +570,50 @@ class TestProbeEdgeRpcHealth(unittest.TestCase):
 
         self.assertFalse(result["available"])
         self.assertEqual(result["status"], "DEGRADED")
+
+    def test_build_edge_dependency_probe_statuses_uses_component_health_for_asr(self):
+        from host_brain.app.dependencies import build_edge_dependency_probe_statuses
+
+        statuses = build_edge_dependency_probe_statuses(
+            {
+                "available": True,
+                "detail": "edge rpc reachable",
+                "latency_ms": 18,
+                "event": {
+                    "services": {
+                        "edge.rpc.asr": {
+                            "available": True,
+                            "detail": "edge asr enabled",
+                        },
+                        "edge.rpc.tts": {
+                            "available": True,
+                            "detail": "edge tts enabled",
+                        },
+                    },
+                    "components": {
+                        "asr": {
+                            "enabled": True,
+                            "available": False,
+                            "status": "down",
+                            "detail": "component unavailable",
+                        },
+                        "tts": {
+                            "enabled": True,
+                            "available": True,
+                            "status": "ok",
+                            "detail": "component loaded",
+                        },
+                    },
+                },
+            }
+        )
+
+        self.assertTrue(statuses["edge.rpc.gateway"]["available"])
+        self.assertFalse(statuses["edge.rpc.asr"]["available"])
+        self.assertEqual("dependency", statuses["edge.rpc.asr"]["unavailable_kind"])
+        self.assertIn("component unavailable", statuses["edge.rpc.asr"]["detail"])
+        self.assertTrue(statuses["edge.rpc.tts"]["available"])
+        self.assertIn("component loaded", statuses["edge.rpc.tts"]["detail"])
 
 
 if __name__ == "__main__":

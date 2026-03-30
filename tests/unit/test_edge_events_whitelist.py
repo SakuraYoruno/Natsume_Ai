@@ -103,14 +103,12 @@ def test_edge_events_rejects_unknown_event_source_with_400() -> None:
     assert "Unknown edge event source" in str(exc_info.value.detail)
 
 
-def test_edge_events_confident_asr_chunk_collects_bridge_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_edge_events_final_asr_chunk_collects_bridge_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = _LedgerStub()
     logger = _LedgerStub()
     scheduled: list[dict] = []
 
     monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", "true")
-    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", "0.60")
     monkeypatch.setattr(
         system_handler,
         "_schedule_edge_asr_bridge",
@@ -127,7 +125,7 @@ def test_edge_events_confident_asr_chunk_collects_bridge_candidate(monkeypatch: 
                 "payload": {
                     "text": "hello bridge",
                     "confidence": 0.93,
-                    "final": False,
+                    "final": True,
                     "seq": 7,
                 },
             }
@@ -148,8 +146,47 @@ def test_edge_events_confident_asr_chunk_collects_bridge_candidate(monkeypatch: 
     assert candidate["text"] == "hello bridge"
     assert candidate["event_type"] == "ASR_CHUNK"
     assert candidate["payload"]["confidence"] == 0.93
-    assert candidate["payload"]["is_final"] is False
+    assert candidate["payload"]["is_final"] is True
     assert candidate["payload"]["seq"] == 7
+
+
+def test_edge_events_non_final_asr_chunk_skips_bridge_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = _LedgerStub()
+    logger = _LedgerStub()
+    scheduled: list[dict] = []
+
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", "true")
+    monkeypatch.setattr(
+        system_handler,
+        "_schedule_edge_asr_bridge",
+        lambda *, candidate, logger: scheduled.append(dict(candidate)),
+    )
+
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "ASR_CHUNK",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-bridge-non-final",
+                "session_id": "sess-edge-bridge-non-final",
+                "payload": {
+                    "text": "partial bridge",
+                    "confidence": 0.93,
+                    "final": False,
+                    "seq": 8,
+                },
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=logger,
+    )
+
+    assert response.accepted == 1
+    assert scheduled == []
 
 
 def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,8 +195,6 @@ def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: py
     scheduled: list[dict] = []
 
     monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", "true")
-    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", "0.60")
     monkeypatch.setattr(
         system_handler,
         "_schedule_edge_asr_bridge",

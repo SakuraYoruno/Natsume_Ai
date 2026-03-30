@@ -187,13 +187,8 @@ def _extract_edge_asr_bridge_candidate(
         payload.get("is_final", payload.get("final", raw.get("is_final", raw.get("final")))),
         default=(normalized_event_type in _EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES),
     )
-    allow_chunk = _parse_bool_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", default=True)
-    min_confidence = _parse_float_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", default=0.60)
-    if normalized_event_type == "ASR_CHUNK" and not is_final and not allow_chunk:
-        return None
     if not is_final:
-        if confidence is None or confidence < min_confidence:
-            return None
+        return None
 
     request_id = str(raw.get("request_id") or "").strip()
     session_id = str(raw.get("session_id") or "").strip()

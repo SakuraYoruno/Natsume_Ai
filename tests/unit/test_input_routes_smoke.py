@@ -59,3 +59,27 @@ def test_receive_input_smoke_asr_dispatches_to_graph():
     assert kwargs["source"] == "ASR"
     assert kwargs["session_id"] == "asr_session_1"
     assert kwargs["text"] == "hello from mic"
+
+
+def test_receive_input_smoke_asr_non_final_is_ignored():
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock):
+        response = asyncio.run(
+            receive_input(
+                body=InputPayload(
+                    source="ASR",
+                    session_id="asr_session_partial",
+                    text="partial mic text",
+                    confidence=0.92,
+                    is_final=False,
+                    seq=8,
+                ),
+                request=MagicMock(),
+            )
+        )
+
+    assert response.success is True
+    assert response.status == "IGNORED"
+    assert response.source == "ASR"
+    assert dispatch_mock.await_count == 0

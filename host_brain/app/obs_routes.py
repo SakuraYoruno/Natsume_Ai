@@ -1198,6 +1198,7 @@ def _build_trace_live_feed_snapshot(
     limit: int,
     window_minutes: int,
     keyword: Optional[str],
+    active_within_ms: int,
 ) -> TraceLiveFeedSnapshot:
     # 多拉一些候选（去重后可能缩减），确保去重后仍有足够条目
     fetch_size = min(limit * 3, 36)
@@ -1213,22 +1214,65 @@ def _build_trace_live_feed_snapshot(
     # 噪声去重：同 session_id + 相同 input_preview 只保留最新一条
     deduped_sessions = _dedup_sessions_by_content(sessions_response.items)[:limit]
 
-    items: List[LiveTraceFeedItem] = []
+    active_cutoff_ms = _now_ms() - max(0, int(active_within_ms))
+    ranked_items: List[tuple[int, LiveTraceFeedItem]] = []
     for session in deduped_sessions:
         try:
             trace = _build_trace_response(ledger, session.request_id)
-            items.append(LiveTraceFeedItem(session=session, trace=trace))
+            item = LiveTraceFeedItem(session=session, trace=trace)
+            last_active_ts = _resolve_trace_live_feed_last_active_ts(item)
+            if keyword is None and last_active_ts < active_cutoff_ms:
+                continue
+            ranked_items.append((last_active_ts, item))
         except HTTPException as exc:
             if exc.status_code == 404:
-                items.append(LiveTraceFeedItem(session=session, trace=None, error="not_found"))
+                item = LiveTraceFeedItem(session=session, trace=None, error="not_found")
+                last_active_ts = _resolve_trace_live_feed_last_active_ts(item)
+                if keyword is None and last_active_ts < active_cutoff_ms:
+                    continue
+                ranked_items.append((last_active_ts, item))
                 continue
             raise
+
+    ranked_items.sort(
+        key=lambda pair: (
+            int(pair[0] or 0),
+            str(pair[1].session.request_id or ""),
+        ),
+        reverse=True,
+    )
+    items = [item for _, item in ranked_items[:limit]]
 
     return TraceLiveFeedSnapshot(
         items=items,
         count=len(items),
         timestamp=_now_ms(),
     )
+
+
+def _resolve_trace_live_feed_last_active_ts(item: LiveTraceFeedItem) -> int:
+    timestamps: List[int] = []
+    session = item.session
+    if session and session.ts_ms is not None:
+        try:
+            timestamps.append(int(session.ts_ms))
+        except (TypeError, ValueError):
+            pass
+    trace = item.trace
+    if trace is not None:
+        if trace.ts_ms is not None:
+            try:
+                timestamps.append(int(trace.ts_ms))
+            except (TypeError, ValueError):
+                pass
+        for node in trace.nodes or []:
+            if node.ts_ms is None:
+                continue
+            try:
+                timestamps.append(int(node.ts_ms))
+            except (TypeError, ValueError):
+                continue
+    return max(timestamps) if timestamps else 0
 
 
 def _trace_live_feed_signature(snapshot: TraceLiveFeedSnapshot) -> str:
@@ -1797,6 +1841,7 @@ async def stream_trace_live_feed(
     request: Request,
     limit: int = Query(6, ge=1, le=12),
     window_minutes: int = Query(1440, ge=1, le=10080),
+    active_within_ms: int = Query(60000, ge=1000, le=3600000),
     interval_ms: int = Query(1000, ge=250, le=10000),
     keyword: Optional[str] = Query(None),
     once: bool = Query(False),
@@ -1817,6 +1862,7 @@ async def stream_trace_live_feed(
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
+                    active_within_ms=active_within_ms,
                 )
                 signature = _trace_live_feed_signature(snapshot)
                 if signature != last_signature:

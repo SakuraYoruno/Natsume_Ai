@@ -117,6 +117,15 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             )
         text = str(body.text).strip()
         session_id = str(body.session_id).strip()
+        if body.is_final is not True:
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="IGNORED",
+                detail="ASR non-final segment ignored",
+                ts_ms=ts_ms,
+            )
     elif source == "GATEWAY":
         if not body.content or not body.conversation_id or not body.platform:
             return InputResponse(

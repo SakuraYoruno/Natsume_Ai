@@ -1,9 +1,12 @@
+from host_brain.app import obs_routes
 from host_brain.app.obs_routes import (
     LiveTraceFeedItem,
     SessionItem,
+    SessionsResponse,
     TraceLiveFeedSnapshot,
     TraceNode,
     TraceResponse,
+    _build_trace_live_feed_snapshot,
     _build_trace_live_feed_delta,
 )
 
@@ -118,3 +121,65 @@ def test_trace_live_feed_delta_returns_none_without_node_changes():
     )
 
     assert _build_trace_live_feed_delta(previous, current) is None
+
+
+def test_trace_live_feed_snapshot_filters_stale_items_without_keyword(monkeypatch):
+    now_ms = 10_000
+    sessions = SessionsResponse(
+        total=2,
+        page=1,
+        page_size=2,
+        items=[
+            _make_session("req-stale", ts_ms=8_900),
+            _make_session("req-fresh", ts_ms=9_200),
+        ],
+        timestamp=now_ms,
+    )
+    traces = {
+        "req-stale": _make_trace("req-stale", [_make_node("asr", ts_ms=8_950)], ts_ms=8_950),
+        "req-fresh": _make_trace("req-fresh", [_make_node("asr", ts_ms=9_850)], ts_ms=9_850),
+    }
+
+    monkeypatch.setattr(obs_routes, "_now_ms", lambda: now_ms)
+    monkeypatch.setattr(obs_routes, "_build_sessions_response", lambda *args, **kwargs: sessions)
+    monkeypatch.setattr(obs_routes, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
+
+    snapshot = _build_trace_live_feed_snapshot(
+        object(),
+        limit=2,
+        window_minutes=1440,
+        keyword=None,
+        active_within_ms=1_000,
+    )
+
+    assert snapshot.count == 1
+    assert [item.session.request_id for item in snapshot.items] == ["req-fresh"]
+
+
+def test_trace_live_feed_snapshot_keeps_keyword_matches_even_if_stale(monkeypatch):
+    now_ms = 10_000
+    sessions = SessionsResponse(
+        total=1,
+        page=1,
+        page_size=1,
+        items=[_make_session("req-history", ts_ms=1_000)],
+        timestamp=now_ms,
+    )
+    traces = {
+        "req-history": _make_trace("req-history", [_make_node("asr", ts_ms=1_200)], ts_ms=1_200),
+    }
+
+    monkeypatch.setattr(obs_routes, "_now_ms", lambda: now_ms)
+    monkeypatch.setattr(obs_routes, "_build_sessions_response", lambda *args, **kwargs: sessions)
+    monkeypatch.setattr(obs_routes, "_build_trace_response", lambda _ledger, request_id: traces[request_id])
+
+    snapshot = _build_trace_live_feed_snapshot(
+        object(),
+        limit=1,
+        window_minutes=10080,
+        keyword="req-history",
+        active_within_ms=1_000,
+    )
+
+    assert snapshot.count == 1
+    assert snapshot.items[0].session.request_id == "req-history"

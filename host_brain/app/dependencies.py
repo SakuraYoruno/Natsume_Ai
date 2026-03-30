@@ -78,6 +78,12 @@ _EDGE_RPC_DEPENDENCY_SERVICE_IDS = (
     "edge.rpc.barge_in",
     "edge.rpc.resource_gate",
 )
+_EDGE_RPC_COMPONENT_BY_SERVICE_ID = {
+    "edge.rpc.asr": "asr",
+    "edge.rpc.tts": "tts",
+    "edge.rpc.barge_in": "voice_pipeline",
+    "edge.rpc.resource_gate": "resource_gate",
+}
 
 # 全局单例
 _ledger: Optional[SQLiteLedger] = None
@@ -1092,6 +1098,7 @@ async def probe_edge_rpc_health() -> dict:
                         "detail": "edge rpc reachable",
                         "latency_ms": latency_ms,
                         "base_url": candidate,
+                        "event": dict(body.get("event") or {}) if isinstance(body, Mapping) and isinstance(body.get("event"), Mapping) else {},
                     }
                 last_error_detail = f"edge health returned HTTP {resp.status_code}"
                 attempts.append(f"{candidate}:HTTP{resp.status_code}")
@@ -1148,21 +1155,100 @@ def build_edge_dependency_probe_statuses(
     if available and latency_ms > 0:
         detail = f"{detail} ({latency_ms}ms)"
 
-    status = (
-        {
-            "available": True,
-            "detail": detail,
-        }
-        if available
-        else {
+    event = probe.get("event")
+    event_payload = event if isinstance(event, Mapping) else {}
+    service_payloads = event_payload.get("services")
+    services = service_payloads if isinstance(service_payloads, Mapping) else {}
+    component_payloads = event_payload.get("components")
+    components = component_payloads if isinstance(component_payloads, Mapping) else {}
+
+    if not available:
+        status = {
             "available": False,
             "unavailable_kind": "edge_rpc",
             "detail": detail,
         }
-    )
+        return {
+            service_id: dict(status)
+            for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS
+        }
+
+    statuses: dict[str, dict[str, Any]] = {
+        "edge.rpc.gateway": {
+            "available": True,
+            "detail": detail,
+        }
+    }
+    for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS:
+        if service_id == "edge.rpc.gateway":
+            continue
+        service_row = services.get(service_id)
+        service_probe = service_row if isinstance(service_row, Mapping) else {}
+        component_name = _EDGE_RPC_COMPONENT_BY_SERVICE_ID.get(service_id)
+        component_row = components.get(component_name) if component_name else None
+        component_probe = component_row if isinstance(component_row, Mapping) else {}
+        statuses[service_id] = _build_edge_component_probe_status(
+            gateway_detail=detail,
+            service_probe=service_probe,
+            component_probe=component_probe,
+        )
+    return statuses
+
+
+def _build_edge_component_probe_status(
+    *,
+    gateway_detail: str,
+    service_probe: Mapping[str, Any],
+    component_probe: Mapping[str, Any],
+) -> dict[str, Any]:
+    service_detail = str(service_probe.get("detail") or "").strip()
+    component_detail = str(component_probe.get("detail") or "").strip()
+    component_status = str(component_probe.get("status") or "").strip().lower()
+    component_enabled = bool(component_probe.get("enabled", True)) if component_probe else True
+    component_available = bool(component_probe.get("available", False)) if component_probe else False
+
+    if service_probe and not bool(service_probe.get("available", False)):
+        return {
+            "available": False,
+            "unavailable_kind": "dependency",
+            "detail": service_detail or gateway_detail,
+        }
+
+    if component_probe:
+        if not component_enabled:
+            return {
+                "available": False,
+                "unavailable_kind": "dependency",
+                "detail": component_detail or service_detail or "edge component disabled by config",
+            }
+        if (not component_available) or (component_status and component_status != "ok"):
+            return {
+                "available": False,
+                "unavailable_kind": "dependency",
+                "detail": component_detail or service_detail or gateway_detail,
+            }
+        detail_parts: list[str] = []
+        if component_detail:
+            detail_parts.append(component_detail)
+        elif service_detail:
+            detail_parts.append(service_detail)
+        if gateway_detail:
+            detail_parts.append(gateway_detail)
+        return {
+            "available": True,
+            "detail": "; ".join(detail_parts),
+        }
+
+    if service_probe:
+        detail_parts = [part for part in (service_detail, gateway_detail) if part]
+        return {
+            "available": True,
+            "detail": "; ".join(detail_parts),
+        }
+
     return {
-        service_id: dict(status)
-        for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS
+        "available": True,
+        "detail": gateway_detail,
     }
 
 
