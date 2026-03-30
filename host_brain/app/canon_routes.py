@@ -645,7 +645,7 @@ async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
 
 
 # ---------------------------------------------------------------------------
-# GET /canon/proposals/stats — TODO-76: 提案统计端点
+# GET /canon/proposals/stats — Ref #76: 提案统计端点
 # ---------------------------------------------------------------------------
 
 class CanonProposalStatsItem(BaseModel):

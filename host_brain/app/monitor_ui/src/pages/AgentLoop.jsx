@@ -31,7 +31,7 @@ export default function AgentLoop() {
   const [roundTimeout, setRoundTimeout] = useState(30)
   const [totalTimeout, setTotalTimeout] = useState(180)
   const [uiAssertionData, setUiAssertionData] = useState(null)
-  const [loopHistory, setLoopHistory] = useState([])  // TODO-86: 历史执行记录
+  const [loopHistory, setLoopHistory] = useState([])  // Ref #86: 历史执行记录
   const [useMock, setUseMock]     = useState(false)
   const [useEdgeRpc, setUseEdgeRpc] = useState(false)
   const [imageConsent, setImageConsent] = useState(false)
@@ -45,7 +45,7 @@ export default function AgentLoop() {
   const abortRef = useRef(null)
   const eventsEndRef = useRef(null)
 
-  // TODO-63: 加载 UIAssertion 统计数据（近 1h）
+  // Ref #63: 加载 UIAssertion 统计数据（近 1h）
   useEffect(() => {
     fetchUIAssertionStats({ window_minutes: 60 })
       .then(setUiAssertionData)
@@ -59,7 +59,7 @@ export default function AgentLoop() {
     return () => clearInterval(timer)
   }, [])
 
-  // TODO-86: 加载 Agent Loop 历史执行记录
+  // Ref #86: 加载 Agent Loop 历史执行记录
   useEffect(() => {
     fetchAgentLoopHistory({ window_minutes: 1440, limit: 10 })
       .then(d => setLoopHistory(d?.items ?? []))
@@ -310,7 +310,7 @@ export default function AgentLoop() {
 
         {/* 右侧：SSE 事件流 */}
         <div className="lg:col-span-2">
-          {/* TODO-50: UIAssertion 统计侧边栏 */}
+          {/* Ref #50: UIAssertion 统计侧边栏 */}
           {uiAssertionData && (uiAssertionData.total_assertions > 0) && (
             <div className="card p-3 mb-3 border border-red-100 bg-red-50">
               <div className="flex items-center gap-1.5 mb-2">
@@ -373,7 +373,7 @@ export default function AgentLoop() {
         </div>
       </div>
 
-      {/* TODO-86: Agent Loop 历史执行记录面板 */}
+      {/* Ref #86: Agent Loop 历史执行记录面板 */}
       {loopHistory.length > 0 && (
         <div className="card overflow-hidden">
           <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">

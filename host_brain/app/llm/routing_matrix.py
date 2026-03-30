@@ -251,7 +251,7 @@ class RoutingMatrix:
             logger.error("路由日志写入失败: %s", exc)
 
     # ------------------------------------------------------------------
-    # TODO-98: 按 token 成本预算路由
+    # Ref #98: 按 token 成本预算路由
     # ------------------------------------------------------------------
 
     # 各模型每 1000 token 的相对成本（归一化，cloud=1.0 为基准）
@@ -273,7 +273,7 @@ class RoutingMatrix:
         failed_models: Optional[List["ModelTarget"]] = None,
     ) -> "RouteDecision":
         """
-        按 token 成本预算路由（TODO-98）。
+        按 token 成本预算路由（Ref #98）。
 
         在满足任务需求的前提下，优先选择成本不超过 max_cost_per_1k 的模型。
         若主路由模型成本超出预算，自动降级到成本更低的模型。

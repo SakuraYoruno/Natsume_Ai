@@ -300,7 +300,7 @@ class SemanticRecaller:
         })
 
     # ------------------------------------------------------------------
-    # TODO-112: 运行时动态添加文档
+    # Ref #112: 运行时动态添加文档
     # ------------------------------------------------------------------
 
     async def add_document(
@@ -310,7 +310,7 @@ class SemanticRecaller:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        运行时动态添加单条文档（TODO-112）。
+        运行时动态添加单条文档（Ref #112）。
 
         Mock 模式下写入内存存储；ChromaDB 模式下写入向量数据库。
         幂等：相同 doc_id 会覆盖已有文档。
@@ -374,7 +374,7 @@ class SemanticRecaller:
         documents: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """
-        批量添加文档（TODO-112）。
+        批量添加文档（Ref #112）。
 
         Args:
             documents: 文档列表，每项格式为：

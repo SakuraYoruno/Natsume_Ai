@@ -78,7 +78,7 @@ function ProposalRow({ item, onApprove, onReject, onRollback }) {
                 </button>
               </>
             )}
-            {/* TODO-81: 回滚按钮（仅 APPLIED 状态） */}
+            {/* Ref #81: 回滚按钮（仅 APPLIED 状态） */}
             {item.status === 'APPLIED' && (
               <button
                 className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 transition-colors"
@@ -297,8 +297,8 @@ export default function Canon() {
   const [error, setError] = useState('')
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [activeTab, setActiveTab] = useState('proposals') // 'proposals' | 'documents'
-  const [vaultData, setVaultData] = useState(null)        // TODO-44: Vault 统计
-  const [docKeyword, setDocKeyword] = useState('')         // TODO-85: 文档搜索关键词
+  const [vaultData, setVaultData] = useState(null)        // Ref #44: Vault 统计
+  const [docKeyword, setDocKeyword] = useState('')         // Ref #85: 文档搜索关键词
   const PAGE_SIZE = 20
 
   const loadProposals = useCallback(async () => {
@@ -327,7 +327,7 @@ export default function Canon() {
     }
   }, [])
 
-  // TODO-44: 加载 Vault 统计
+  // Ref #44: 加载 Vault 统计
   const loadVaultStats = useCallback(async () => {
     try {
       const data = await fetchVaultStats({ limit: 10 })
@@ -368,7 +368,7 @@ export default function Canon() {
     }
   }
 
-  // TODO-81: 回滚已 APPLIED 的提案
+  // Ref #81: 回滚已 APPLIED 的提案
   const handleRollback = async (item) => {
     const reason = window.prompt(`确认回滚提案 ${item.proposal_id?.slice(0, 16)}… 到 base_version？\n请输入回滚原因（可选）：`)
     if (reason === null) return
@@ -413,7 +413,7 @@ export default function Canon() {
         </div>
       </div>
 
-      {/* TODO-44: Vault 统计侧边栏 */}
+      {/* Ref #44: Vault 统计侧边栏 */}
       {vaultData && (
         <div className="card p-4 border border-gray-200">
           <div className="flex items-center gap-2 mb-3">
@@ -602,7 +602,7 @@ export default function Canon() {
       {/* SSOT 文档列表 */}
       {activeTab === 'documents' && (
         <div>
-          {/* TODO-85: 文档搜索过滤 */}
+          {/* Ref #85: 文档搜索过滤 */}
           <div className="mb-3 relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input

@@ -1604,7 +1604,7 @@ async def get_sessions(
     )
 
 # ---------------------------------------------------------------------------
-# GET /obs/sessions/export  — TODO-75: 会话列表 CSV 导出
+# GET /obs/sessions/export  — Ref #75: 会话列表 CSV 导出
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
 async def export_sessions_csv(
@@ -2618,7 +2618,7 @@ async def get_agent_loop_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-26: GET /obs/memory/stats  — Memory 子系统详细统计
+# Ref #26: GET /obs/memory/stats  — Memory 子系统详细统计
 # ---------------------------------------------------------------------------
 class MemorySubsystemItem(BaseModel):
     subsystem: str
@@ -2645,7 +2645,7 @@ class MemoryStatsResponse(BaseModel):
 async def get_memory_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-26: Memory 子系统详细统计。
+    """Ref #26: Memory 子系统详细统计。
 
     覆盖四个 Memory 子系统：
     - EpisodicStore：写入量、成功率
@@ -2790,7 +2790,7 @@ async def get_memory_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-30: GET /obs/vts/stats  — VTS 通道统计
+# Ref #30: GET /obs/vts/stats  — VTS 通道统计
 # ---------------------------------------------------------------------------
 class VtsEmotionItem(BaseModel):
     emotion_tag: str
@@ -2816,7 +2816,7 @@ class VtsStatsResponse(BaseModel):
 async def get_vts_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
+    """Ref #30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -2906,7 +2906,7 @@ async def get_vts_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-31: GET /obs/distillation/stats  — LongTermDistiller 蒸馏统计
+# Ref #31: GET /obs/distillation/stats  — LongTermDistiller 蒸馏统计
 # ---------------------------------------------------------------------------
 class DistillationCycleItem(BaseModel):
     cycle_id: str
@@ -2934,7 +2934,7 @@ async def get_distillation_stats(
     window_minutes: int = Query(1440, ge=1, le=43200, description="统计窗口（分钟，默认 24h）"),
     limit: int = Query(10, ge=1, le=50, description="最近循环条数"),
 ):
-    """TODO-31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
+    """Ref #31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -2993,7 +2993,7 @@ async def get_distillation_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-37: GET /obs/wechat/stats  — WeChat 通道统计
+# Ref #37: GET /obs/wechat/stats  — WeChat 通道统计
 # ---------------------------------------------------------------------------
 class WeChatRateLimitItem(BaseModel):
     wxid: str
@@ -3029,7 +3029,7 @@ async def get_wechat_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近事件条数"),
 ):
-    """TODO-37: WeChat 通道统计 — 通道健康状态、频率限制统计、最近 channel_io_log 事件。"""
+    """Ref #37: WeChat 通道统计 — 通道健康状态、频率限制统计、最近 channel_io_log 事件。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -3155,7 +3155,7 @@ async def get_wechat_stats(
 async def reset_wechat_channel(
     reason: Optional[str] = Query(None, description="重置原因"),
 ):
-    """TODO-37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
+    """Ref #37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
     try:
         from host_brain.channels.wechat import WeChatChannel  # noqa: PLC0415
         _channel = WeChatChannel.get_instance()
@@ -3186,7 +3186,7 @@ async def reset_wechat_channel(
 
 
 # ---------------------------------------------------------------------------
-# TODO-34: GET /obs/retention/stats  — AuditRetention 保留策略统计
+# Ref #34: GET /obs/retention/stats  — AuditRetention 保留策略统计
 # ---------------------------------------------------------------------------
 class RetentionTableItem(BaseModel):
     table: str
@@ -3207,7 +3207,7 @@ class RetentionStatsResponse(BaseModel):
 async def get_retention_stats(
     limit: int = Query(5, ge=1, le=20, description="最近执行记录条数"),
 ):
-    """TODO-34: AuditRetention 保留策略执行统计。"""
+    """Ref #34: AuditRetention 保留策略执行统计。"""
     ledger = _get_ledger()
     now = _now_ms()
 
@@ -3269,7 +3269,7 @@ async def get_retention_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-40: GET /obs/qa/stats  — QA 违规统计
+# Ref #40: GET /obs/qa/stats  — QA 违规统计
 # ---------------------------------------------------------------------------
 class QaViolationCodeItem(BaseModel):
     violation_code: str
@@ -3295,7 +3295,7 @@ async def get_qa_stats(
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近违规条数"),
 ):
-    """TODO-40: QA 违规统计 — 违规码分布、降级率、重写成功率、时序趋势、最近违规列表。"""
+    """Ref #40: QA 违规统计 — 违规码分布、降级率、重写成功率、时序趋势、最近违规列表。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -3390,7 +3390,7 @@ async def get_qa_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-41: GET /obs/llm/call-stats  — LLM 调用成本统计
+# Ref #41: GET /obs/llm/call-stats  — LLM 调用成本统计
 # ---------------------------------------------------------------------------
 class LlmModelCallItem(BaseModel):
     model_id: str
@@ -3420,7 +3420,7 @@ async def get_llm_call_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
-    """TODO-41: LLM 调用成本统计 — 按 model_id 分组的 token 消耗/平均延迟/调用次数。"""
+    """Ref #41: LLM 调用成本统计 — 按 model_id 分组的 token 消耗/平均延迟/调用次数。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -3512,7 +3512,7 @@ async def get_llm_call_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-42: GET /obs/checkpoints  — CheckpointManager 状态查询
+# Ref #42: GET /obs/checkpoints  — CheckpointManager 状态查询
 # ---------------------------------------------------------------------------
 class CheckpointItem(BaseModel):
     checkpoint_id: str
@@ -3543,7 +3543,7 @@ async def get_checkpoints(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
     include_expired: bool = Query(False, description="是否包含已超时的 checkpoint"),
 ):
-    """TODO-42: 最近 checkpoint 列表（checkpoint_id/request_id/interrupt_reason/resume_deadline_at/是否已超时）。"""
+    """Ref #42: 最近 checkpoint 列表（checkpoint_id/request_id/interrupt_reason/resume_deadline_at/是否已超时）。"""
     ledger = _get_ledger()
     now = _now_ms()
 
@@ -3593,7 +3593,7 @@ async def get_checkpoints(
 
 @router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
 async def get_checkpoint_detail(checkpoint_id: str):
-    """TODO-42: 单个 checkpoint 详情（含完整 payload）。"""
+    """Ref #42: 单个 checkpoint 详情（含完整 payload）。"""
     ledger = _get_ledger()
     now = _now_ms()
 
@@ -3635,7 +3635,7 @@ async def get_checkpoint_detail(checkpoint_id: str):
 
 
 # ---------------------------------------------------------------------------
-# TODO-43: GET /obs/rate-limit/backend-stats  — RateLimitStore 后端状态
+# Ref #43: GET /obs/rate-limit/backend-stats  — RateLimitStore 后端状态
 # ---------------------------------------------------------------------------
 class RateLimitKeyItem(BaseModel):
     key: str
@@ -3656,7 +3656,7 @@ class RateLimitBackendStatsResponse(BaseModel):
 async def get_rate_limit_backend_stats(
     top_k: int = Query(20, ge=1, le=100, description="返回 Top-K 活跃 key"),
 ):
-    """TODO-43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
+    """Ref #43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
     ledger = _get_ledger()
     now = _now_ms()
 
@@ -3716,7 +3716,7 @@ async def get_rate_limit_backend_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-44: GET /obs/vault/stats  — ArtifactVault Manifest 统计
+# Ref #44: GET /obs/vault/stats  — ArtifactVault Manifest 统计
 # ---------------------------------------------------------------------------
 class VaultManifestItem(BaseModel):
     manifest_id: str
@@ -3742,7 +3742,7 @@ class VaultStatsResponse(BaseModel):
 async def get_vault_stats(
     limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
 ):
-    """TODO-44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
+    """Ref #44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
     ledger = _get_ledger()
     now = _now_ms()
 
@@ -3794,7 +3794,7 @@ async def get_vault_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-47: GET /obs/llm/route-stats  — RoutingMatrix 路由决策统计
+# Ref #47: GET /obs/llm/route-stats  — RoutingMatrix 路由决策统计
 # ---------------------------------------------------------------------------
 class RouteModelItem(BaseModel):
     model_target: str
@@ -3820,7 +3820,7 @@ class LlmRouteStatsResponse(BaseModel):
 async def get_llm_route_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
+    """Ref #47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -3879,7 +3879,7 @@ async def get_llm_route_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-48: GET /obs/input/dispatch-stats  — InputDispatch 生命周期统计
+# Ref #48: GET /obs/input/dispatch-stats  — InputDispatch 生命周期统计
 # ---------------------------------------------------------------------------
 class InputSourceItem(BaseModel):
     source: str
@@ -3908,7 +3908,7 @@ async def get_input_dispatch_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
-    """TODO-48: InputDispatch 生命周期统计 — 按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量、成功率、平均延迟。"""
+    """Ref #48: InputDispatch 生命周期统计 — 按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量、成功率、平均延迟。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4014,7 +4014,7 @@ async def get_input_dispatch_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-49: GET /obs/recall-pack/stats  — RecallPack token 预算统计
+# Ref #49: GET /obs/recall-pack/stats  — RecallPack token 预算统计
 # ---------------------------------------------------------------------------
 class RecallPackSlotItem(BaseModel):
     slot: str
@@ -4035,7 +4035,7 @@ class RecallPackStatsResponse(BaseModel):
 async def get_recall_pack_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-49: RecallPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
+    """Ref #49: RecallPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4130,7 +4130,7 @@ async def get_recall_pack_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-50: GET /obs/ui-assertion/stats  — UIAssertionGuard 统计
+# Ref #50: GET /obs/ui-assertion/stats  — UIAssertionGuard 统计
 # ---------------------------------------------------------------------------
 class UIAssertionEventItem(BaseModel):
     audit_event: str
@@ -4152,7 +4152,7 @@ class UIAssertionStatsResponse(BaseModel):
 async def get_ui_assertion_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-50: UIAssertionGuard 统计 — SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布。"""
+    """Ref #50: UIAssertionGuard 统计 — SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4240,7 +4240,7 @@ async def get_ui_assertion_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-53: GET /obs/failure/stats  — FailureMatrix 失败事件统计
+# Ref #53: GET /obs/failure/stats  — FailureMatrix 失败事件统计
 # ---------------------------------------------------------------------------
 class FailureEventItem(BaseModel):
     event: str
@@ -4262,7 +4262,7 @@ class FailureStatsResponse(BaseModel):
 async def get_failure_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-53: FailureMatrix 失败事件统计 — 7 种失败事件分布、中止率、降级模式分布。"""
+    """Ref #53: FailureMatrix 失败事件统计 — 7 种失败事件分布、中止率、降级模式分布。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4350,7 +4350,7 @@ async def get_failure_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-54: GET /obs/permission/stats  — PermissionGuard 权限拒绝统计
+# Ref #54: GET /obs/permission/stats  — PermissionGuard 权限拒绝统计
 # ---------------------------------------------------------------------------
 class PermissionDeniedItem(BaseModel):
     tool_name: str
@@ -4372,7 +4372,7 @@ class PermissionStatsResponse(BaseModel):
 async def get_permission_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-54: PermissionGuard 权限拒绝统计 — 工具调用允许/拒绝分布、SCHEDULER 拒绝次数、Top 拒绝工具。"""
+    """Ref #54: PermissionGuard 权限拒绝统计 — 工具调用允许/拒绝分布、SCHEDULER 拒绝次数、Top 拒绝工具。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4443,7 +4443,7 @@ async def get_permission_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-55: GET /obs/scheduler/history  — TaskScheduler 执行历史趋势
+# Ref #55: GET /obs/scheduler/history  — TaskScheduler 执行历史趋势
 # ---------------------------------------------------------------------------
 class SchedulerTaskItem(BaseModel):
     task_id: str
@@ -4471,7 +4471,7 @@ class SchedulerHistoryResponse(BaseModel):
 async def get_scheduler_history(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-55: TaskScheduler 执行历史趋势 — 任务状态分布、run_count/error_count 趋势。"""
+    """Ref #55: TaskScheduler 执行历史趋势 — 任务状态分布、run_count/error_count 趋势。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4578,7 +4578,7 @@ async def get_scheduler_history(
 
 
 # ---------------------------------------------------------------------------
-# TODO-56: GET /obs/action-plan/stats  — ActionPlan 执行成功率/指令类型分布
+# Ref #56: GET /obs/action-plan/stats  — ActionPlan 执行成功率/指令类型分布
 # ---------------------------------------------------------------------------
 class ActionTypeItem(BaseModel):
     action_type: str
@@ -4601,7 +4601,7 @@ class ActionPlanStatsResponse(BaseModel):
 async def get_action_plan_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-56: ActionPlan 执行成功率/指令类型分布 — 成功率、平均置信度、指令类型分布、降级原因。"""
+    """Ref #56: ActionPlan 执行成功率/指令类型分布 — 成功率、平均置信度、指令类型分布、降级原因。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4702,7 +4702,7 @@ async def get_action_plan_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-59: GET /obs/memory-guard/stats  — MemoryGuard 宪法校验统计
+# Ref #59: GET /obs/memory-guard/stats  — MemoryGuard 宪法校验统计
 # ---------------------------------------------------------------------------
 class MemoryGuardRejectItem(BaseModel):
     reason: str
@@ -4725,7 +4725,7 @@ class MemoryGuardStatsResponse(BaseModel):
 async def get_memory_guard_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-59: MemoryGuard 宪法校验统计 — 过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格。"""
+    """Ref #59: MemoryGuard 宪法校验统计 — 过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4815,7 +4815,7 @@ async def get_memory_guard_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-60: GET /obs/state-arbiter/stats  — StateArbiter 事实仲裁统计
+# Ref #60: GET /obs/state-arbiter/stats  — StateArbiter 事实仲裁统计
 # ---------------------------------------------------------------------------
 class StateSourceItem(BaseModel):
     source: str
@@ -4838,7 +4838,7 @@ class StateArbiterStatsResponse(BaseModel):
 async def get_state_arbiter_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-60: StateArbiter 事实仲裁统计 — 冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数。"""
+    """Ref #60: StateArbiter 事实仲裁统计 — 冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -4916,7 +4916,7 @@ async def get_state_arbiter_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-61: GET /obs/context-compressor/stats  — ContextCompressor 压缩效率统计
+# Ref #61: GET /obs/context-compressor/stats  — ContextCompressor 压缩效率统计
 # ---------------------------------------------------------------------------
 class ContextCompressorStatsResponse(BaseModel):
     window_minutes: int
@@ -4934,7 +4934,7 @@ class ContextCompressorStatsResponse(BaseModel):
 async def get_context_compressor_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-61: ContextCompressor 压缩效率统计 — 压缩率/token 节省/策略分布/摘要生成次数。"""
+    """Ref #61: ContextCompressor 压缩效率统计 — 压缩率/token 节省/策略分布/摘要生成次数。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -5020,7 +5020,7 @@ async def get_context_compressor_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-65: GET /obs/prompt-builder/stats  — PromptBuilder 构建统计
+# Ref #65: GET /obs/prompt-builder/stats  — PromptBuilder 构建统计
 # ---------------------------------------------------------------------------
 class PromptBuilderStatsResponse(BaseModel):
     window_minutes: int
@@ -5039,7 +5039,7 @@ class PromptBuilderStatsResponse(BaseModel):
 async def get_prompt_builder_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-65: PromptBuilder 构建统计 — 注入检测率/slot 填充分布/高风险消息比例。"""
+    """Ref #65: PromptBuilder 构建统计 — 注入检测率/slot 填充分布/高风险消息比例。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -5123,7 +5123,7 @@ async def get_prompt_builder_stats(
 
 
 # ---------------------------------------------------------------------------
-# TODO-66: GET /obs/episodic-store/stats  — EpisodicStore 写入统计
+# Ref #66: GET /obs/episodic-store/stats  — EpisodicStore 写入统计
 # ---------------------------------------------------------------------------
 class EpisodicStoreStatsResponse(BaseModel):
     window_minutes: int
@@ -5142,7 +5142,7 @@ class EpisodicStoreStatsResponse(BaseModel):
 async def get_episodic_store_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-66: EpisodicStore 写入统计 — 写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数。"""
+    """Ref #66: EpisodicStore 写入统计 — 写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数。"""
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
@@ -5224,7 +5224,7 @@ async def get_episodic_store_stats(
 
 
 # ---------------------------------------------------------------------------
-# GET /obs/chain/stats — TODO-82: 主链路节点统计
+# GET /obs/chain/stats — Ref #82: 主链路节点统计
 # ---------------------------------------------------------------------------
 
 class ChainNodeStatItem(BaseModel):
@@ -5254,7 +5254,7 @@ class ChainStatsResponse(BaseModel):
 async def get_chain_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """TODO-82: 主链路节点统计（各节点耗时分布/降级率/失败率）。
+    """Ref #82: 主链路节点统计（各节点耗时分布/降级率/失败率）。
 
     从 audit_log（AUDIT_SNAPSHOT 阶段）中提取 audit_tags 和 node_timings，
     聚合各节点的调用次数、降级率、平均耗时、P95 耗时、超时次数。
@@ -5384,7 +5384,7 @@ async def get_chain_stats(
 
 
 # ---------------------------------------------------------------------------
-# GET /obs/agent-loop/history — TODO-86: Agent Loop 历史执行记录
+# GET /obs/agent-loop/history — Ref #86: Agent Loop 历史执行记录
 # ---------------------------------------------------------------------------
 
 class AgentLoopHistoryItem(BaseModel):
@@ -5410,7 +5410,7 @@ async def get_agent_loop_history(
     window_minutes: int = Query(1440, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(10, ge=1, le=50, description="最大返回条数"),
 ):
-    """TODO-86: Agent Loop 历史执行记录（最近 N 次执行结果）。
+    """Ref #86: Agent Loop 历史执行记录（最近 N 次执行结果）。
 
     从 audit_log 中拉取 LOOP_DONE 阶段的记录，返回最近 limit 条。
     """
@@ -5456,7 +5456,7 @@ async def get_agent_loop_history(
 
 
 # ---------------------------------------------------------------------------
-# GET /obs/error-heatmap — TODO-88: 错误热力图端点（按小时/节点分布）
+# GET /obs/error-heatmap — Ref #88: 错误热力图端点（按小时/节点分布）
 # ---------------------------------------------------------------------------
 
 class ErrorHeatmapCell(BaseModel):
@@ -5481,7 +5481,7 @@ class ErrorHeatmapResponse(BaseModel):
 async def get_error_heatmap(
     window_hours: int = Query(24, ge=1, le=168, description="统计窗口（小时），最大 7 天"),
 ):
-    """TODO-88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。
+    """Ref #88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。
 
     从 error_log 中拉取近 window_hours 小时的错误记录，
     按 (hour, node_name) 聚合，返回热力图数据。
@@ -5547,7 +5547,7 @@ async def get_error_heatmap(
 
 
 # ---------------------------------------------------------------------------
-# TODO-103: GET /obs/semantic-recall/stats — 语义召回器统计
+# Ref #103: GET /obs/semantic-recall/stats — 语义召回器统计
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -5568,7 +5568,7 @@ class SemanticRecallStatsResponse:
 
 @router.get("/semantic-recall/stats")
 async def get_semantic_recall_stats():
-    """TODO-103: 语义召回器统计端点 — 返回 SemanticRecaller 的配置和状态信息。"""
+    """Ref #103: 语义召回器统计端点 — 返回 SemanticRecaller 的配置和状态信息。"""
     now = _now_ms()
     try:
         from host_brain.app.dependencies import get_semantic_recaller  # noqa: PLC0415
@@ -5601,7 +5601,7 @@ async def get_semantic_recall_stats():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TODO-115: GET /obs/failure-events — 失败事件统计（按事件类型分组）
+# Ref #115: GET /obs/failure-events — 失败事件统计（按事件类型分组）
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/failure-events")
@@ -5612,7 +5612,7 @@ async def get_failure_events(
     ledger: "SQLiteLedger" = Depends(_get_ledger),
 ):
     """
-    TODO-115: 失败事件统计端点。
+    Ref #115: 失败事件统计端点。
 
     从 audit_log 中按 audit_tag 聚合失败事件，返回：
     - 各事件类型的发生次数

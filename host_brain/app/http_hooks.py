@@ -175,7 +175,7 @@ async def runtime_lifespan(
             new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
             logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
 
-        # [TODO-100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
+        # [Ref #100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
         try:
             from host_brain.app.dependencies import get_distillation_engine  # noqa: PLC0415
             from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
@@ -216,7 +216,7 @@ async def runtime_lifespan(
             new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
             logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
 
-        # [TODO-31] LongTermDistiller 蒸馏任务注册到调度器
+        # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
         try:
             from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415
             from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
@@ -236,7 +236,7 @@ async def runtime_lifespan(
             new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
             logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
 
-        # [TODO-34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
+        # [Ref #34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
         try:
             from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
             from host_brain.scheduler.task_registry import SchedulerTaskRegistry, SchedulerTaskConfig  # noqa: PLC0415

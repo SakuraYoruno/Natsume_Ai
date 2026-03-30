@@ -677,7 +677,7 @@ async def _resolve_state_arbiter_style_fact(
     session_id: str,
     request_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """[TODO-17] 查询 StyleCanon 风格规范，注入 prompt 作为风格约束。"""
+    """[Ref #17] 查询 StyleCanon 风格规范，注入 prompt 作为风格约束。"""
     summary: dict[str, Any] = {
         "status": "SKIPPED",
         "reason_code": "NOT_AVAILABLE",
@@ -737,7 +737,7 @@ async def _resolve_state_arbiter_bond_fact(
     session_id: str,
     request_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """[TODO-18] 查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
+    """[Ref #18] 查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
 
     BondGraph 记录了 Host 与用户之间的情感关系阶段（bond_stage）和互动强度，
     注入后可让 LLM 根据当前关系阶段调整回应风格（亲密度感知）。
@@ -822,7 +822,7 @@ async def _resolve_state_arbiter_episodic_fact(
     session_id: str,
     request_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """[TODO-17] 查询最新情节记忆，注入 prompt 作为近期记忆上下文。"""
+    """[Ref #17] 查询最新情节记忆，注入 prompt 作为近期记忆上下文。"""
     summary: dict[str, Any] = {
         "status": "SKIPPED",
         "reason_code": "NOT_AVAILABLE",
@@ -1265,7 +1265,7 @@ async def _sse_event_generator(
                 "fact_key": str(state_arbiter_summary.get("fact_key") or "world_canon_facts"),
             }
 
-        # [TODO-17/18] 扩展 StateArbiter 查询：style_canon_facts + episodic_latest + bond_graph
+        # [Ref #17/18] 扩展 StateArbiter 查询：style_canon_facts + episodic_latest + bond_graph
         # 并行查询，降级时不阻断主链路
         (
             (_style_summary, _style_evidence_item),
@@ -1429,7 +1429,7 @@ async def _sse_event_generator(
         else:
             prompt_text, system_prompt, gen_params, _ = prompt_build_result  # type: ignore[misc]
 
-        # ── TODO-70: 读取 PromptBuilder 注入检测结果，写入 Ledger audit_log ──
+        # ── Ref #70: 读取 PromptBuilder 注入检测结果，写入 Ledger audit_log ──
         try:
             from host_brain.app.prompt_builder import get_last_injection_meta  # noqa: PLC0415
             _inj_meta = get_last_injection_meta()

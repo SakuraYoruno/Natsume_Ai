@@ -418,7 +418,7 @@ class UIAssertionGuard:
             logger.error("审计写入失败（event=%s）: %s", event, exc)
 
     # ------------------------------------------------------------------
-    # TODO-114: 批量前置断言（多步骤操作序列）
+    # Ref #114: 批量前置断言（多步骤操作序列）
     # ------------------------------------------------------------------
 
     async def batch_pre_check(
@@ -428,7 +428,7 @@ class UIAssertionGuard:
         stop_on_first_failure: bool = True,
     ) -> Dict[str, Any]:
         """
-        批量前置断言（TODO-114）。
+        批量前置断言（Ref #114）。
 
         对多步骤操作序列中的每个动作执行前置断言，
         适用于需要在执行前验证整个操作序列合法性的场景。

@@ -478,7 +478,7 @@ class RecallFusionNode(ChainNode):
     降级策略：RetrievalOrchestrator 不可用时，退回最小状态语义（仅记录空证据），
     并在 audit_tags 中标记 RECALL_DEGRADED_FALLBACK。
 
-    [TODO-36] 接入 EvidenceCircuitBreaker：
+    [Ref #36] 接入 EvidenceCircuitBreaker：
     - 召回前检查熔断器状态：OPEN 时直接跳过召回，返回空证据（RECALL_CIRCUIT_OPEN）
     - 召回成功时重置失败计数
     - 召回失败时记录失败，触发熔断（failure_threshold=3, recovery_timeout_ms=30_000）
@@ -487,7 +487,7 @@ class RecallFusionNode(ChainNode):
     timeout = NODE_TIMEOUT["recall_fusion"]
 
     async def execute(self, ctx: ChainContext) -> bool:
-        # ── TODO-36：EvidenceCircuitBreaker 熔断检查 ─────────────────────
+        # ── Ref #36：EvidenceCircuitBreaker 熔断检查 ─────────────────────
         _circuit_breaker = None
         _cb_state = "UNKNOWN"
         try:
@@ -636,7 +636,7 @@ class RecallFusionNode(ChainNode):
                         len(raw_evidence_items),
                     )
 
-            # ── TODO-21：MemoryGuard 过滤召回证据 ────────────────────────
+            # ── Ref #21：MemoryGuard 过滤召回证据 ────────────────────────
             filtered_evidence_items = raw_evidence_items
             memory_guard_meta: dict[str, Any] = {
                 "mode": "SKIPPED",
@@ -695,7 +695,7 @@ class RecallFusionNode(ChainNode):
                 memory_guard_meta["error"] = str(_mg_exc)[:100]
                 logger.warning("[%s] MemoryGuard 过滤异常（降级）: %s", ctx.request_id, _mg_exc)
 
-            # ── TODO-28：ContextCompressor 压缩历史轮次 ──────────────────
+            # ── Ref #28：ContextCompressor 压缩历史轮次 ──────────────────
             context_compressor_meta: dict[str, Any] = {"mode": "SKIPPED"}
             try:
                 from host_brain.app.dependencies import get_context_compressor  # noqa: PLC0415
@@ -777,7 +777,7 @@ class RecallFusionNode(ChainNode):
                 context_compressor_meta = {"mode": "DEGRADED", "error": str(_cc_exc)[:100]}
                 logger.warning("[%s] ContextCompressor 压缩异常（降级）: %s", ctx.request_id, _cc_exc)
 
-            # ── TODO-45：StateArbiter 事实仲裁 ──────────────────────────────
+            # ── Ref #45：StateArbiter 事实仲裁 ──────────────────────────────
             state_arbiter_meta: dict[str, Any] = {"mode": "SKIPPED"}
             try:
                 from host_brain.app.memory.state_arbiter import StateArbiter  # noqa: PLC0415
@@ -991,7 +991,7 @@ class RecallFusionNode(ChainNode):
             if evidence_empty:
                 ctx.audit_tags.append("RECALL_EVIDENCE_EMPTY")
 
-        # ── TODO-52：FailureHandler 统一失败语义处理 ─────────────────────
+        # ── Ref #52：FailureHandler 统一失败语义处理 ─────────────────────
         failure_handler_meta: dict[str, Any] = {"mode": "SKIPPED"}
         try:
             from host_brain.app.failure_matrix import FailureHandler, FailureEvent  # noqa: PLC0415
@@ -1053,7 +1053,7 @@ class RecallFusionNode(ChainNode):
 class LlmGatewayNode(ChainNode):
     """LLM 网关节点：按路由矩阵选择模型并生成响应。
 
-    [TODO-27] 接入 EmotionTimeline：
+    [Ref #27] 接入 EmotionTimeline：
     - 从 ctx.metadata 提取 emotion_tag，调用 EmotionTimeline.append() 追踪情感事件
     - 调用 EmotionTimeline.rebuild_summary() 生成情感轨迹摘要，注入 ctx.metadata["emotion_timeline"]
     - 调用 compute_emotion_echo() 生成情感回声，注入 ctx.metadata["emotion_echo"]
@@ -1073,7 +1073,7 @@ class LlmGatewayNode(ChainNode):
         if not has_raw_output:
             ctx.audit_tags.append("LLM_GATEWAY_DELEGATED_STREAM")
 
-        # ── TODO-46：RoutingMatrix 路由决策 ──────────────────────────────
+        # ── Ref #46：RoutingMatrix 路由决策 ──────────────────────────────
         routing_matrix_meta: dict[str, Any] = {"mode": "SKIPPED"}
         try:
             from host_brain.app.llm.routing_matrix import RoutingMatrix  # noqa: PLC0415
@@ -1150,7 +1150,7 @@ class LlmGatewayNode(ChainNode):
             routing_matrix_meta = {"mode": "DEGRADED", "error": str(_rm_exc)[:100]}
             logger.warning("[%s] RoutingMatrix 路由决策异常（降级）: %s", ctx.request_id, _rm_exc)
 
-        # ── TODO-51：PermissionGuard 工具调用权限校验 ────────────────────
+        # ── Ref #51：PermissionGuard 工具调用权限校验 ────────────────────
         permission_guard_meta: dict[str, Any] = {"mode": "SKIPPED"}
         try:
             from host_brain.skills.registry import PermissionGuard, PermissionGuardError, AccessLevel, SkillMeta as _SkillMeta  # noqa: PLC0415
@@ -1218,7 +1218,7 @@ class LlmGatewayNode(ChainNode):
             permission_guard_meta = {"mode": "DEGRADED", "error": str(_pg_exc)[:100]}
             logger.warning("[%s] PermissionGuard 校验异常（降级）: %s", ctx.request_id, _pg_exc)
 
-        # ── TODO-27：EmotionTimeline 追踪 ────────────────────────────────
+        # ── Ref #27：EmotionTimeline 追踪 ────────────────────────────────
         _emotion_tag = str(ctx.metadata.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         try:
             from host_brain.core.emotion_timeline import EmotionTimeline, compute_emotion_echo  # noqa: PLC0415
@@ -1507,7 +1507,7 @@ class LlmGatewayNode(ChainNode):
             ctx.metadata["inferred_emotion"] = inferred_emotion_meta
             logger.warning("[%s] Phase 6 情感推理异常（降级）: %s", ctx.request_id, _ie_exc)
 
-        # ── TODO-58：StateArbiter SESSION_OVERRIDE 写入 ──────────────────
+        # ── Ref #58：StateArbiter SESSION_OVERRIDE 写入 ──────────────────
         # 将 LLM 输出中提取的新事实写入 SESSION_OVERRIDE（不直接写 Canon，等待蒸馏周期）
         session_override_meta: dict[str, Any] = {"mode": "SKIPPED"}
         try:
@@ -1816,7 +1816,7 @@ class QAContractNode(ChainNode):
 class EpisodicStoreNode(ChainNode):
     """情节记忆存储节点：按宪法规则决定是否写入 EpisodicStore。
 
-    [TODO-15] 已接入真实 persist_chat_episodic_memory，执行 MemoryGuard 宪法校验后写入。
+    [Ref #15] 已接入真实 persist_chat_episodic_memory，执行 MemoryGuard 宪法校验后写入。
     降级策略：EpisodicStore 不可用或 MemoryGuard 拒绝时，标记 SKIPPED/DEGRADED，不阻断主链路。
     """
     name = "episodic_store"
@@ -1850,7 +1850,7 @@ class EpisodicStoreNode(ChainNode):
                 logger.debug("[%s] EpisodicStore 跳过：store 不可用", ctx.request_id)
                 return True
 
-            # ── TODO-57：MemoryGuard 宪法校验增强 ────────────────────────
+            # ── Ref #57：MemoryGuard 宪法校验增强 ────────────────────────
             # 在写入前执行 dream 内容过滤 + 蒸馏资格预判
             memory_guard_write_meta: dict[str, Any] = {"mode": "SKIPPED"}
             _should_skip_write = False
@@ -2048,7 +2048,7 @@ class EpisodicStoreNode(ChainNode):
 class AuditNode(ChainNode):
     """审计节点：向 ledger 写入 ChainContext 审计快照。
 
-    [TODO-16] 已接入真实 ledger 写入：将 ctx.audit_tags、ctx.node_timings、
+    [Ref #16] 已接入真实 ledger 写入：将 ctx.audit_tags、ctx.node_timings、
     ctx.metadata 摘要写入 ledger.log_error（stage=AUDIT_SNAPSHOT）。
     降级策略：ledger 不可用时仅记录本地日志，不阻断主链路。
     """
@@ -2110,7 +2110,7 @@ class AuditNode(ChainNode):
 class CanonProposalNode(ChainNode):
     """Canon 提案节点：当 LLM 输出包含世界观更新信号时，自动提交 Canon 提案。
 
-    [TODO-20] 接入真实 canon_routes.submit_proposal 逻辑：
+    [Ref #20] 接入真实 canon_routes.submit_proposal 逻辑：
     - 检测 final_response 中是否包含世界观更新信号（关键词/标记）
     - 若检测到，构建提案并通过 WorldCanonStore.submit_proposal 写入 ledger
     - 降级策略：WorldCanonStore 不可用或提案重复时，标记 SKIPPED/DEGRADED，不阻断主链路
@@ -2246,7 +2246,7 @@ class CanonProposalNode(ChainNode):
                 ctx.request_id, proposal_id, trigger_source,
             )
 
-            # ── TODO-35：触发 CanonVectorAutoSync（best-effort，不阻断主链路）──
+            # ── Ref #35：触发 CanonVectorAutoSync（best-effort，不阻断主链路）──
             try:
                 from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync  # noqa: PLC0415
                 _sync_result = trigger_canon_vector_auto_sync(
@@ -2844,7 +2844,7 @@ class MainChain:
                     ctx.failure_event = FailureEvent.MODULE_TIMEOUT.value
                     ctx.failure_detail = f"节点 {node.name} 返回 False 但未设置 failure_event"
 
-                # 统一失败处理（TODO-22：通过 _invoke_failure_handler 写入 FailureMatrix 分类结果）
+                # 统一失败处理（Ref #22：通过 _invoke_failure_handler 写入 FailureMatrix 分类结果）
                 await self._invoke_failure_handler(ctx=ctx)
                 logger.warning(
                     "[%s] 链路在节点 %s 中止，failure_event=%s",
@@ -2910,7 +2910,7 @@ class MainChain:
         return None
 
     async def _invoke_failure_handler(self, *, ctx: ChainContext) -> None:
-        """TODO-22：调用 FailureHandler 并将 FailureMatrix 分类结果写入 ctx.metadata。
+        """Ref #22：调用 FailureHandler 并将 FailureMatrix 分类结果写入 ctx.metadata。
 
         FailureHandler.handle() 返回 FailureResult，包含：
           - should_abort: 是否中止链路

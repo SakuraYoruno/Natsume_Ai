@@ -36,7 +36,7 @@ class TaskStatus(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# TODO-97: 任务优先级
+# Ref #97: 任务优先级
 # ---------------------------------------------------------------------------
 
 class TaskPriority(int, Enum):
@@ -64,7 +64,7 @@ class ScheduledTask:
     max_retries: int = 3               # 失败最大重试次数
     retry_delay_s: float = 5.0         # 重试间隔（秒）
     enabled: bool = True               # 是否启用
-    # TODO-97: 优先级和依赖链
+    # Ref #97: 优先级和依赖链
     priority: TaskPriority = TaskPriority.P2
     """任务优先级（P0 最高，P3 最低）"""
     depends_on: list[str] = field(default_factory=list)
@@ -200,7 +200,7 @@ class HostTaskScheduler:
         depends_on: Optional[list] = None,
     ) -> ScheduledTask:
         """
-        便捷注册方法（TODO-102）：直接传入参数构建 ScheduledTask 并注册。
+        便捷注册方法（Ref #102）：直接传入参数构建 ScheduledTask 并注册。
 
         等价于：
             task = ScheduledTask(task_id=..., name=..., fn=..., ...)
@@ -225,7 +225,7 @@ class HostTaskScheduler:
 
     def get_all_tasks_status(self) -> list[dict[str, Any]]:
         """
-        返回所有任务的状态快照（TODO-102）。
+        返回所有任务的状态快照（Ref #102）。
 
         Returns:
             按优先级排序的任务状态列表，每项包含 task_id/name/status/priority/
@@ -247,10 +247,10 @@ class HostTaskScheduler:
     # ------------------------------------------------------------------
 
     async def _scheduler_loop(self) -> None:
-        """主调度循环：每秒检查一次，按优先级触发到期任务（TODO-97）。"""
+        """主调度循环：每秒检查一次，按优先级触发到期任务（Ref #97）。"""
         while self._running:
             now = time.monotonic()
-            # TODO-97: 按优先级排序（P0 最先触发）
+            # Ref #97: 按优先级排序（P0 最先触发）
             ready_tasks = []
             for task in list(self._tasks.values()):
                 if not task.enabled:
@@ -261,7 +261,7 @@ class HostTaskScheduler:
                 elapsed = now - task.last_run_ts
                 if elapsed < task.interval_s:
                     continue
-                # TODO-97: 检查依赖链
+                # Ref #97: 检查依赖链
                 if not self._check_dependencies(task):
                     task.status = TaskStatus.BLOCKED
                     continue
@@ -278,7 +278,7 @@ class HostTaskScheduler:
             await asyncio.sleep(1.0)
 
     def _check_dependencies(self, task: ScheduledTask) -> bool:
-        """TODO-97: 检查任务依赖链是否满足（所有依赖任务最近一次执行成功）。"""
+        """Ref #97: 检查任务依赖链是否满足（所有依赖任务最近一次执行成功）。"""
         if not task.depends_on:
             return True
         for dep_id in task.depends_on:

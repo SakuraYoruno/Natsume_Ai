@@ -593,16 +593,16 @@ export default function Tools() {
 
       <CustomSkillInstaller />
 
-      {/* ===== TODO-54: PermissionGuard 权限拒绝统计 ===== */}
+      {/* ===== Ref #54: PermissionGuard 权限拒绝统计 ===== */}
       <PermissionGuardStats />
 
-      {/* ===== TODO-56: ActionPlan 执行统计 ===== */}
+      {/* ===== Ref #56: ActionPlan 执行统计 ===== */}
       <ActionPlanStats />
     </div>
   )
 }
 
-// ── TODO-54: PermissionGuard 权限拒绝统计子组件 ────────────────────────
+// ── Ref #54: PermissionGuard 权限拒绝统计子组件 ────────────────────────
 function PermissionGuardStats() {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -645,7 +645,7 @@ function PermissionGuardStats() {
   )
 }
 
-// ── TODO-56: ActionPlan 执行统计子组件 ───────────────────────────────
+// ── Ref #56: ActionPlan 执行统计子组件 ───────────────────────────────
 function ActionPlanStats() {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {

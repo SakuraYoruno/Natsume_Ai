@@ -313,7 +313,7 @@ class MemoryGuard:
         self._emotion_aggregator.clear_session(session_id)
 
     # ------------------------------------------------------------------
-    # TODO-96：提示词注入检测（需求 8.x）
+    # Ref #96：提示词注入检测（需求 8.x）
     # ------------------------------------------------------------------
 
     # 注入攻击特征模式（按风险等级分组）
@@ -354,7 +354,7 @@ class MemoryGuard:
         strict_mode: bool = False,
     ) -> Dict[str, Any]:
         """
-        基于规则的提示词注入检测（TODO-96）。
+        基于规则的提示词注入检测（Ref #96）。
 
         检测用户消息中是否包含提示词注入攻击特征，
         按风险等级（CRITICAL / HIGH / MEDIUM / LOW）分级返回结果。

@@ -251,7 +251,7 @@ class DistillationEngine:
         )
 
     # ------------------------------------------------------------------
-    # TODO-111: 单条强制蒸馏（跳过频次门槛）
+    # Ref #111: 单条强制蒸馏（跳过频次门槛）
     # ------------------------------------------------------------------
 
     async def distill_single(
@@ -262,7 +262,7 @@ class DistillationEngine:
         clear_session_override: bool = False,
     ) -> DistillationResult:
         """
-        单条记忆强制蒸馏（TODO-111）。
+        单条记忆强制蒸馏（Ref #111）。
 
         与 run_batch() 不同，此方法跳过频次门槛（min_occurrence），
         直接对指定记录执行蒸馏，适用于：

@@ -235,13 +235,13 @@ export default function Automation() {
         </div>
       )}
 
-      {/* ===== TODO-55: TaskScheduler 执行历史趋势 ===== */}
+      {/* ===== Ref #55: TaskScheduler 执行历史趋势 ===== */}
       <SchedulerHistorySection />
     </div>
   )
 }
 
-// ── TODO-87: 调度器执行历史时序图 ─────────────────────────────────────────
+// ── Ref #87: 调度器执行历史时序图 ─────────────────────────────────────────
 function SchedulerTimelineChart({ tasks }) {
   // 将各任务的 run_count/error_count 渲染为简单的水平条形图
   if (!tasks || tasks.length === 0) return null
@@ -290,7 +290,7 @@ function SchedulerTimelineChart({ tasks }) {
   )
 }
 
-// ── TODO-55: TaskScheduler 执行历史趋势子组件 ─────────────────────────────
+// ── Ref #55: TaskScheduler 执行历史趋势子组件 ─────────────────────────────
 function SchedulerHistorySection() {
   const [data, setData] = React.useState(null)
   const [loading, setLoading] = React.useState(false)
@@ -365,7 +365,7 @@ function SchedulerHistorySection() {
         </div>
       )}
 
-      {/* TODO-87: 调度器执行历史时序图 */}
+      {/* Ref #87: 调度器执行历史时序图 */}
       {(data?.tasks ?? []).length > 0 && (
         <SchedulerTimelineChart tasks={data.tasks} />
       )}

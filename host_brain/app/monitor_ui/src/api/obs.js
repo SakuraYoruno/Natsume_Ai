@@ -302,7 +302,7 @@ export function rejectCanonProposal(proposalId, body) {
 }
 
 /**
- * TODO-81: 回滚已 APPLIED 的 Canon 提案（恢复到 base_version）
+ * Ref #81: 回滚已 APPLIED 的 Canon 提案（恢复到 base_version）
  * @param {string} proposalId
  * @param {object} body - { rollback_reason, operator_node_id }
  */
@@ -314,7 +314,7 @@ export function rollbackCanonProposal(proposalId, body = {}) {
 }
 
 /**
- * TODO-44: ArtifactVault Manifest 统计（ACTIVE/UNDONE/GC、可逆比例、最近 manifest 列表）
+ * Ref #44: ArtifactVault Manifest 统计（ACTIVE/UNDONE/GC、可逆比例、最近 manifest 列表）
  * @param {object} params - { limit }
  */
 export function fetchVaultStats(params = {}) {
@@ -324,7 +324,7 @@ export function fetchVaultStats(params = {}) {
   return request(`/obs/vault/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-82: 主链路节点统计 =====
+// ===== Ref #82: 主链路节点统计 =====
 
 /**
  * 主链路节点统计（各节点耗时分布/降级率/失败率）
@@ -337,7 +337,7 @@ export function fetchChainStats(params = {}) {
   return request(`/obs/chain/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-23: Bond 管理 =====
+// ===== Ref #23: Bond 管理 =====
 
 /** BondStageEngine 健康状态 */
 export function fetchBondHealth() {
@@ -376,7 +376,7 @@ export function submitBondEvent(body) {
   })
 }
 
-// ===== TODO-24: Tools 管理 =====
+// ===== Ref #24: Tools 管理 =====
 
 /** ToolBroker 健康状态 */
 export function fetchToolHealth() {
@@ -428,7 +428,7 @@ export function installCustomSkillProvider(body) {
   })
 }
 
-// ===== TODO-26: Memory 子系统统计 =====
+// ===== Ref #26: Memory 子系统统计 =====
 
 /**
  * Memory 子系统详细统计（EpisodicStore/MemoryGuard/ContextCompressor/LongTermDistiller）
@@ -441,7 +441,7 @@ export function fetchMemoryStats(params = {}) {
   return request(`/obs/memory/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-25: Scheduler 调度器管理 =====
+// ===== Ref #25: Scheduler 调度器管理 =====
 
 /** 列出所有调度任务（含健康状态） */
 export function fetchSchedulerTasks() {
@@ -481,7 +481,7 @@ export function triggerSchedulerTask(taskId) {
   })
 }
 
-// ===== TODO-30: VTS 通道统计 =====
+// ===== Ref #30: VTS 通道统计 =====
 
 /**
  * VTS 通道统计（表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计）
@@ -494,7 +494,7 @@ export function fetchVtsStats(params = {}) {
   return request(`/obs/vts/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-31: 蒸馏统计 =====
+// ===== Ref #31: 蒸馏统计 =====
 
 /**
  * LongTermDistiller 蒸馏统计（循环次数、提案提交量、蒸馏成功率）
@@ -507,7 +507,7 @@ export function fetchDistillationStats(params = {}) {
   return request(`/obs/distillation/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-37: WeChat 通道管理 =====
+// ===== Ref #37: WeChat 通道管理 =====
 
 /**
  * WeChat 通道统计（通道健康状态、频率限制统计、最近事件）
@@ -531,7 +531,7 @@ export function resetWeChatChannel(params = {}) {
   return request(`/obs/wechat/reset${qs ? '?' + qs : ''}`, { method: 'POST' })
 }
 
-// ===== TODO-34: AuditRetention 保留策略统计 =====
+// ===== Ref #34: AuditRetention 保留策略统计 =====
 
 /**
  * AuditRetention 保留策略执行统计
@@ -544,7 +544,7 @@ export function fetchRetentionStats(params = {}) {
   return request(`/obs/retention/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-40: QA 违规统计 =====
+// ===== Ref #40: QA 违规统计 =====
 
 /**
  * QA 违规统计（违规码分布、降级率、重写成功率、时序趋势、最近违规列表）
@@ -557,7 +557,7 @@ export function fetchQaStats(params = {}) {
   return request(`/obs/qa/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-41: LLM 调用成本统计 =====
+// ===== Ref #41: LLM 调用成本统计 =====
 
 /**
  * LLM 调用成本统计（按 model_id 分组的 token 消耗/平均延迟/调用次数）
@@ -570,7 +570,7 @@ export function fetchLlmCallStats(params = {}) {
   return request(`/obs/llm/call-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-42: Checkpoint 状态查询 =====
+// ===== Ref #42: Checkpoint 状态查询 =====
 
 /**
  * 最近 checkpoint 列表
@@ -591,7 +591,7 @@ export function fetchCheckpointDetail(checkpointId) {
   return request(`/obs/checkpoints/${encodeURIComponent(checkpointId)}`)
 }
 
-// ===== TODO-43: RateLimitStore 后端状态 =====
+// ===== Ref #43: RateLimitStore 后端状态 =====
 
 /**
  * RateLimitStore 后端状态（当前后端类型/是否降级/各 key 当前计数/TTL）
@@ -604,7 +604,7 @@ export function fetchRateLimitBackendStats(params = {}) {
   return request(`/obs/rate-limit/backend-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-47: RoutingMatrix 路由决策统计 =====
+// ===== Ref #47: RoutingMatrix 路由决策统计 =====
 
 /**
  * RoutingMatrix 路由决策统计（按 model_id 分组的选择次数/降级次数/降级率/task_type 分布）
@@ -617,7 +617,7 @@ export function fetchLlmRouteStats(params = {}) {
   return request(`/obs/llm/route-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-48: InputDispatch 生命周期统计 =====
+// ===== Ref #48: InputDispatch 生命周期统计 =====
 
 /**
  * InputDispatch 生命周期统计（按 source 分组的 ACCEPTED/COMPLETED/FAILED/NOT_WIRED 数量）
@@ -630,7 +630,7 @@ export function fetchInputDispatchStats(params = {}) {
   return request(`/obs/input/dispatch-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-49: RecallPack token budget stats =====
+// ===== Ref #49: RecallPack token budget stats =====
 
 /**
  * RecallPack token budget stats.
@@ -643,7 +643,7 @@ export function fetchRecallPackStats(params = {}) {
   return request(`/obs/recall-pack/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-50: UIAssertionGuard 统计 =====
+// ===== Ref #50: UIAssertionGuard 统计 =====
 
 /**
  * UIAssertionGuard 统计（SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布）
@@ -656,7 +656,7 @@ export function fetchUIAssertionStats(params = {}) {
   return request(`/obs/ui-assertion/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-53: FailureMatrix 失败事件统计 =====
+// ===== Ref #53: FailureMatrix 失败事件统计 =====
 
 /**
  * FailureMatrix 失败事件统计（7 种失败事件分布、中止率、降级模式分布）
@@ -669,7 +669,7 @@ export function fetchFailureStats(params = {}) {
   return request(`/obs/failure/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-54: PermissionGuard 权限拒绝统计 =====
+// ===== Ref #54: PermissionGuard 权限拒绝统计 =====
 
 /**
  * PermissionGuard 权限拒绝统计（工具调用允许/拒绝分布、SCHEDULER 拒绝次数）
@@ -682,7 +682,7 @@ export function fetchPermissionStats(params = {}) {
   return request(`/obs/permission/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-55: TaskScheduler 执行历史趋势 =====
+// ===== Ref #55: TaskScheduler 执行历史趋势 =====
 
 /**
  * TaskScheduler 执行历史趋势（任务状态分布、run_count/error_count 趋势）
@@ -695,7 +695,7 @@ export function fetchSchedulerHistory(params = {}) {
   return request(`/obs/scheduler/history${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-56: ActionPlan 执行成功率/指令类型分布 =====
+// ===== Ref #56: ActionPlan 执行成功率/指令类型分布 =====
 
 /**
  * ActionPlan 执行成功率/指令类型分布（成功率、平均置信度、指令类型分布、降级原因）
@@ -708,7 +708,7 @@ export function fetchActionPlanStats(params = {}) {
   return request(`/obs/action-plan/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-59: MemoryGuard 宪法校验统计 =====
+// ===== Ref #59: MemoryGuard 宪法校验统计 =====
 
 /**
  * MemoryGuard 宪法校验统计（过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格）
@@ -721,7 +721,7 @@ export function fetchMemoryGuardStats(params = {}) {
   return request(`/obs/memory-guard/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-60: StateArbiter 事实仲裁统计 =====
+// ===== Ref #60: StateArbiter 事实仲裁统计 =====
 
 /**
  * StateArbiter 事实仲裁统计（冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数）
@@ -734,7 +734,7 @@ export function fetchStateArbiterStats(params = {}) {
   return request(`/obs/state-arbiter/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-61: ContextCompressor 压缩效率统计 =====
+// ===== Ref #61: ContextCompressor 压缩效率统计 =====
 
 /**
  * ContextCompressor 压缩效率统计（压缩率/token 节省/策略分布/摘要生成次数）
@@ -747,7 +747,7 @@ export function fetchContextCompressorStats(params = {}) {
   return request(`/obs/context-compressor/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-65: PromptBuilder 构建统计 =====
+// ===== Ref #65: PromptBuilder 构建统计 =====
 
 /**
  * PromptBuilder 构建统计（注入检测率/slot 填充分布/高风险消息比例）
@@ -760,7 +760,7 @@ export function fetchPromptBuilderStats(params = {}) {
   return request(`/obs/prompt-builder/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-66: EpisodicStore 写入统计 =====
+// ===== Ref #66: EpisodicStore 写入统计 =====
 
 /**
  * EpisodicStore 写入统计（写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数）
@@ -773,7 +773,7 @@ export function fetchEpisodicStoreStats(params = {}) {
   return request(`/obs/episodic-store/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-75: 会话列表 CSV 导出 =====
+// ===== Ref #75: 会话列表 CSV 导出 =====
 
 /**
  * 触发会话列表 CSV 导出（直接下载文件）
@@ -796,7 +796,7 @@ export async function exportSessionsCsv(params = {}) {
   URL.revokeObjectURL(url)
 }
 
-// ===== TODO-76: Canon 提案统计 =====
+// ===== Ref #76: Canon 提案统计 =====
 
 /**
  * Canon 提案统计（pending/applied/rejected 分布 + 最近提案列表）
@@ -809,7 +809,7 @@ export function fetchCanonProposalStats(params = {}) {
   return request(`/canon/proposals/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-86: Agent Loop 历史执行记录 =====
+// ===== Ref #86: Agent Loop 历史执行记录 =====
 
 /**
  * Agent Loop 历史执行记录（最近 N 次执行结果）
@@ -822,7 +822,7 @@ export function fetchAgentLoopHistory(params = {}) {
   return request(`/obs/agent-loop/history${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-88: 错误热力图 =====
+// ===== Ref #88: 错误热力图 =====
 
 /**
  * 错误热力图（按小时 × 节点维度统计错误分布）
@@ -835,7 +835,7 @@ export function fetchErrorHeatmap(params = {}) {
   return request(`/obs/error-heatmap${qs ? '?' + qs : ''}`)
 }
 
-// ===== TODO-105: 语义召回器统计 =====
+// ===== Ref #105: 语义召回器统计 =====
 
 /**
  * SemanticRecaller 配置和状态统计（use_mock/chroma/top_k/threshold/mock_doc_count）

@@ -1,4 +1,4 @@
-"""调度器管理路由（TODO-107）。
+"""调度器管理路由（Ref #107）。
 
 提供 HostTaskScheduler 的 REST 管理接口：
   GET  /scheduler/tasks          — 列出所有任务（含状态）
@@ -110,7 +110,7 @@ async def trigger_scheduler_task(task_id: str) -> dict[str, Any]:
 @router.patch("/tasks/{task_id}")
 async def patch_scheduler_task(task_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """
-    更新任务配置（TODO-107）。
+    更新任务配置（Ref #107）。
 
     前端通过 PATCH + { trigger_config: { next_run_ts: 0 } } 实现立即触发。
     """

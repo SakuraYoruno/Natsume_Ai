@@ -76,7 +76,7 @@ export default function Sessions() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">会话列表</h1>
         <div className="flex items-center gap-2">
-          {/* TODO-78: CSV 导出按钮 */}
+          {/* Ref #78: CSV 导出按钮 */}
           <button
             className="btn-secondary"
             disabled={exporting}
@@ -169,7 +169,7 @@ export default function Sessions() {
                 key={s.request_id}
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => {
-                  // TODO-69: 写入 useAppStore，确保 Trace 页面能自动加载
+                  // Ref #69: 写入 useAppStore，确保 Trace 页面能自动加载
                   setSelectedRequestId(s.request_id)
                   navigate(`/trace/${s.request_id}`)
                 }}

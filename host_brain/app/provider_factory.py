@@ -283,7 +283,7 @@ def build_langchain_chat_provider_fn(
         else:
             prompt_text = render_host_generation_prompt(runtime_payload)
 
-        # TODO-70: 读取注入检测结果，写入 runtime_payload 供上层写入 audit_tags
+        # Ref #70: 读取注入检测结果，写入 runtime_payload 供上层写入 audit_tags
         try:
             from host_brain.app.prompt_builder import get_last_injection_meta  # noqa: PLC0415
             _inj_meta = get_last_injection_meta()

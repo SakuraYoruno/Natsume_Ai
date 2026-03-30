@@ -467,7 +467,7 @@ export default function Overview() {
             <div className="text-center py-16 text-gray-400 text-sm">暂无服务数据</div>
           )}
 
-          {/* TODO-48: InputDispatch 统计卡片 */}
+          {/* Ref #48: InputDispatch 统计卡片 */}
           {dispatchData && (
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -518,7 +518,7 @@ export default function Overview() {
             </div>
           )}
 
-          {/* TODO-73: PromptBuilder 注入检测摘要卡片 */}
+          {/* Ref #73: PromptBuilder 注入检测摘要卡片 */}
           {pbData && (
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -561,7 +561,7 @@ export default function Overview() {
             </div>
           )}
 
-          {/* TODO-79: Canon 提案待审核警告徽章 */}
+          {/* Ref #79: Canon 提案待审核警告徽章 */}
           {canonData && (
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -603,7 +603,7 @@ export default function Overview() {
             </div>
           )}
 
-          {/* TODO-90: 实时健康评分卡片 */}
+          {/* Ref #90: 实时健康评分卡片 */}
           {(chainData || dispatchData || pbData) && (() => {
             // 综合健康评分算法（满分 100）
             let score = 100

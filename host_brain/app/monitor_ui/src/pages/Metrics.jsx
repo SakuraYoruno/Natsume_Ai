@@ -91,7 +91,7 @@ export default function Metrics() {
   const [loading, setLoading] = React.useState(true)
   const [error, setError]     = React.useState(null)
   const [isMock, setIsMock]   = React.useState(false)
-  const [rlData, setRlData]   = React.useState(null)  // TODO-43: 速率限制后端状态
+  const [rlData, setRlData]   = React.useState(null)  // Ref #43: 速率限制后端状态
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -109,7 +109,7 @@ export default function Metrics() {
         setIsMock(true)
       }
       setData(res)
-      // TODO-43: 加载速率限制后端状态
+      // Ref #43: 加载速率限制后端状态
       try {
         const rl = await fetchRateLimitBackendStats({ top_k: 10 })
         setRlData(rl)
@@ -259,7 +259,7 @@ export default function Metrics() {
         </div>
       </div>
 
-      {/* TODO-43: 速率限制后端状态 */}
+      {/* Ref #43: 速率限制后端状态 */}
       {rlData && (
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -322,29 +322,29 @@ export default function Metrics() {
         </div>
       )}
 
-      {/* ===== TODO-62: MemoryGuard / StateArbiter / ContextCompressor 迷你卡片 ===== */}
+      {/* ===== Ref #62: MemoryGuard / StateArbiter / ContextCompressor 迷你卡片 ===== */}
       <MemoryGuardMiniCard />
       <StateArbiterMiniCard />
       <ContextCompressorMiniCard />
 
-      {/* ===== TODO-74: PromptBuilder / EpisodicStore 迷你卡片 ===== */}
+      {/* ===== Ref #74: PromptBuilder / EpisodicStore 迷你卡片 ===== */}
       <PromptBuilderMiniCard />
       <EpisodicStoreMiniCard />
 
-      {/* ===== TODO-80: Canon 提案迷你卡片 ===== */}
+      {/* ===== Ref #80: Canon 提案迷你卡片 ===== */}
       <CanonProposalMiniCard />
 
-      {/* ===== TODO-92: Chain 主链路迷你卡片 ===== */}
+      {/* ===== Ref #92: Chain 主链路迷你卡片 ===== */}
       <ChainMiniCard />
 
-      {/* ===== TODO-106: 蒸馏统计 + 语义召回迷你卡片 ===== */}
+      {/* ===== Ref #106: 蒸馏统计 + 语义召回迷你卡片 ===== */}
       <DistillationMiniCard />
       <SemanticRecallMiniCard />
     </div>
   )
 }
 
-// ── TODO-62: MemoryGuard 迷你卡片 ──────────────────────────────────────────
+// ── Ref #62: MemoryGuard 迷你卡片 ──────────────────────────────────────────
 function MemoryGuardMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -384,7 +384,7 @@ function MemoryGuardMiniCard() {
   )
 }
 
-// ── TODO-62: StateArbiter 迷你卡片 ─────────────────────────────────────────
+// ── Ref #62: StateArbiter 迷你卡片 ─────────────────────────────────────────
 function StateArbiterMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -413,7 +413,7 @@ function StateArbiterMiniCard() {
   )
 }
 
-// ── TODO-62: ContextCompressor 迷你卡片 ────────────────────────────────────
+// ── Ref #62: ContextCompressor 迷你卡片 ────────────────────────────────────
 function ContextCompressorMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -453,7 +453,7 @@ function ContextCompressorMiniCard() {
   )
 }
 
-// ── TODO-74: PromptBuilder 迷你卡片 ────────────────────────────────────────
+// ── Ref #74: PromptBuilder 迷你卡片 ────────────────────────────────────────
 function PromptBuilderMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -498,7 +498,7 @@ function PromptBuilderMiniCard() {
   )
 }
 
-// ── TODO-74: EpisodicStore 迷你卡片 ────────────────────────────────────────
+// ── Ref #74: EpisodicStore 迷你卡片 ────────────────────────────────────────
 function EpisodicStoreMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -540,7 +540,7 @@ function EpisodicStoreMiniCard() {
   )
 }
 
-// ── TODO-80: Canon 提案迷你卡片 ────────────────────────────────────────────
+// ── Ref #80: Canon 提案迷你卡片 ────────────────────────────────────────────
 function CanonProposalMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -587,7 +587,7 @@ function CanonProposalMiniCard() {
   )
 }
 
-// ── TODO-106: 蒸馏统计迷你卡片 ───────────────────────────────────────────
+// ── Ref #106: 蒸馏统计迷你卡片 ───────────────────────────────────────────
 function DistillationMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -629,7 +629,7 @@ function DistillationMiniCard() {
   )
 }
 
-// ── TODO-106: 语义召回迷你卡片 ────────────────────────────────────────────
+// ── Ref #106: 语义召回迷你卡片 ────────────────────────────────────────────
 function SemanticRecallMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -678,7 +678,7 @@ function SemanticRecallMiniCard() {
   )
 }
 
-// ── TODO-92: Chain 主链路迷你卡片 ──────────────────────────────────────────
+// ── Ref #92: Chain 主链路迷你卡片 ──────────────────────────────────────────
 function ChainMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {

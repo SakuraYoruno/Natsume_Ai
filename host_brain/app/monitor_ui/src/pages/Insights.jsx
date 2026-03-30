@@ -384,7 +384,7 @@ export default function Insights() {
           )}
         </div>
       </section>
-              {/* ===== TODO-32: Memory 子系统统计 ===== */}
+              {/* ===== Ref #32: Memory 子系统统计 ===== */}
       <section>
         <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
         {/* 聚合指标卡片 */}
@@ -516,7 +516,7 @@ export default function Insights() {
           </div>
         )}
       </section>
-              {/* ===== TODO-41: LLM 调用成本统计 ===== */}
+              {/* ===== Ref #41: LLM 调用成本统计 ===== */}
       <section>
         <SectionTitle icon={Zap} title="LLM 调用成本统计" color="text-amber-600" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -608,7 +608,7 @@ export default function Insights() {
 
           {currentGroup === 'safety' && (
             <>
-              {/* ===== TODO-40: QA 违规统计 ===== */}
+              {/* ===== Ref #40: QA 违规统计 ===== */}
       <section>
         <SectionTitle icon={FileWarning} title="QA 违规统计" color="text-red-600" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -704,7 +704,7 @@ export default function Insights() {
 
           {currentGroup === 'vts' && (
             <>
-              {/* ===== TODO-38: VTS 通道统计 ===== */}
+              {/* ===== Ref #38: VTS 通道统计 ===== */}
       <section>
         <SectionTitle icon={Tv} title="VTS 通道统计" color="text-pink-600" />
         {/* 聚合指标卡片 */}
@@ -795,7 +795,7 @@ export default function Insights() {
   )
 }
 
-// ===== TODO-47: 路由决策统计子组件 =====
+// ===== Ref #47: 路由决策统计子组件 =====
 function RouteStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -853,7 +853,7 @@ function RouteStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-49: RecallPack budget stats =====
+// ===== Ref #49: RecallPack budget stats =====
 function RecallPackSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -890,7 +890,7 @@ function RecallPackSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-53: FailureMatrix 失败事件统计子组件 =====
+// ===== Ref #53: FailureMatrix 失败事件统计子组件 =====
 function FailureStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -926,7 +926,7 @@ function FailureStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-54: PermissionGuard 权限拒绝统计子组件 =====
+// ===== Ref #54: PermissionGuard 权限拒绝统计子组件 =====
 function PermissionStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -962,7 +962,7 @@ function PermissionStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-59: MemoryGuard 宪法校验统计子组件 =====
+// ===== Ref #59: MemoryGuard 宪法校验统计子组件 =====
 function MemoryGuardStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1002,7 +1002,7 @@ function MemoryGuardStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-60: StateArbiter 事实仲裁统计子组件 =====
+// ===== Ref #60: StateArbiter 事实仲裁统计子组件 =====
 function StateArbiterStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1037,7 +1037,7 @@ function StateArbiterStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-61: ContextCompressor 压缩效率统计子组件 =====
+// ===== Ref #61: ContextCompressor 压缩效率统计子组件 =====
 function ContextCompressorStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1077,7 +1077,7 @@ function ContextCompressorStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-65: PromptBuilder 构建统计子组件 =====
+// ===== Ref #65: PromptBuilder 构建统计子组件 =====
 function PromptBuilderStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1117,7 +1117,7 @@ function PromptBuilderStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-66: EpisodicStore 写入统计子组件 =====
+// ===== Ref #66: EpisodicStore 写入统计子组件 =====
 function EpisodicStoreStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1142,7 +1142,7 @@ function EpisodicStoreStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-50: UIAssertion 统计子组件 =====
+// ===== Ref #50: UIAssertion 统计子组件 =====
 function UIAssertionSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1177,7 +1177,7 @@ function UIAssertionSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-84: 主链路节点统计子组件 =====
+// ===== Ref #84: 主链路节点统计子组件 =====
 function ChainStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1342,7 +1342,7 @@ function CanonProposalStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== TODO-89: 错误热力图子组件 =====
+// ===== Ref #89: 错误热力图子组件 =====
 function ErrorHeatmapSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
