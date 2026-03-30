@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.app.chat_runtime_input import (
@@ -35,6 +36,46 @@ SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
 SCENE_WORK_CODE = "WORK_CODE"
 SCENE_VISION_UI = "VISION_UI"
 SCENE_GATEWAY = "GATEWAY"
+
+# ---------------------------------------------------------------------------
+# 常驻角色人设（不走检索，每次对话注入 prompt 最前位置）
+# ---------------------------------------------------------------------------
+_CHARACTER_PROFILE_CACHE: dict[str, str] = {}
+
+
+def _load_character_profile(render_lang: str) -> str:
+    """加载常驻角色人设文本。
+
+    从 canon/character/character_profile.json 读取对应语言的 instruction。
+    缓存在内存中，首次加载后不再读文件。
+
+    Args:
+        render_lang: "zh" 或 "ja"
+
+    Returns:
+        角色人设文本（空字符串表示不可用，降级跳过）
+    """
+    cache_key = render_lang or "zh"
+    if cache_key in _CHARACTER_PROFILE_CACHE:
+        return _CHARACTER_PROFILE_CACHE[cache_key]
+
+    profile_path = Path(
+        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
+        or str(Path(__file__).resolve().parent.parent / "canon" / "character" / "character_profile.json")
+    )
+    try:
+        if profile_path.exists():
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
+            key = "instruction_ja" if cache_key == "ja" else "instruction_cn"
+            text = str(data.get(key) or "").strip()
+            if len(text) > 100:
+                _CHARACTER_PROFILE_CACHE[cache_key] = text
+                return text
+    except Exception:
+        pass
+    _CHARACTER_PROFILE_CACHE[cache_key] = ""
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # TODO-70: 线程局部变量 — 存储最近一次注入检测结果，供调用方读取并写入 audit_tags
@@ -1132,7 +1173,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             bond_stage=_bond_stage_for_prompt,
         )
 
+    # ── 常驻角色人设（prompt 最高优先位置）─────────────────────────────
+    character_profile_block = ""
+    _cp_text = _load_character_profile(render_target_lang)
+    if _cp_text:
+        character_profile_block = f"【角色人设】\n{_cp_text}\n\n"
+
     return (
+        f"{character_profile_block}"
         "输出格式：返回一个 JSON 对象，包含 narrative、intent_draft、meta 三个键。\n"
         "格式：{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
         "核心规则：\n"
