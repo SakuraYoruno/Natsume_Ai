@@ -14,16 +14,16 @@ from typing import Any
 _logger = logging.getLogger("Natsume.retrieval.query_planner")
 
 # ---------------------------------------------------------------------------
-# 7 路 Store ID 常量
+# 5 路 Store ID 常量（Phase XIII 精简：剔除 style_canon + persona_utterance）
+# style_canon → StyleCanon v5 常驻注入（不走检索）
+# persona_utterance → EmotionTaggedUtteranceIndex 独立通道（不走检索）
 # ---------------------------------------------------------------------------
 ALL_STORE_IDS: tuple[str, ...] = (
     "episodic_vector",
     "sqlite_ledger",
     "neo4j_bond",
-    "style_canon",
     "world_canon",
     "artifact_vault",
-    "persona_utterance",
 )
 
 # ---------------------------------------------------------------------------
@@ -42,12 +42,12 @@ INTENT_COMPLEX = "complex"
 # ---------------------------------------------------------------------------
 INTENT_STORE_MAP: dict[str, list[str] | None] = {
     INTENT_GREETING:  [],  # 跳过检索
-    INTENT_CHAT:      ["episodic_vector", "persona_utterance"],
-    INTENT_RECALL:    ["episodic_vector", "sqlite_ledger", "persona_utterance"],
-    INTENT_EMOTION:   ["neo4j_bond", "episodic_vector", "persona_utterance"],
-    INTENT_KNOWLEDGE: ["world_canon", "style_canon"],
+    INTENT_CHAT:      ["episodic_vector"],
+    INTENT_RECALL:    ["episodic_vector", "sqlite_ledger"],
+    INTENT_EMOTION:   ["neo4j_bond", "episodic_vector"],
+    INTENT_KNOWLEDGE: ["world_canon"],
     INTENT_TOOL:      ["artifact_vault"],
-    INTENT_COMPLEX:   None,  # None = 全量 7 路
+    INTENT_COMPLEX:   None,  # None = 全量 5 路
 }
 
 # 意图 → 最大检索轮次

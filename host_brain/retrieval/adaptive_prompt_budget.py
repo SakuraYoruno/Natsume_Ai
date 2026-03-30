@@ -22,38 +22,35 @@ _logger = logging.getLogger("Natsume.retrieval.adaptive_budget")
 # ---------------------------------------------------------------------------
 # 格式：{intent: {slot_name: delta_tokens}}
 # 正值=增加预算，负值=减少预算，总和始终为 0（零和调整）
+# Phase XIII 精简：剔除 style_canon/persona_utterance（已走独立通道）
 INTENT_BUDGET_ADJUSTMENTS: dict[str, dict[str, int]] = {
     "greeting": {},  # 跳过检索，不需要调整
     "chat": {
-        "world_canon": -300,        # 闲聊不需要太多设定
+        "world_canon": -200,        # 闲聊不需要太多设定
         "artifact_vault": -100,     # 不需要制品
         "episodic_vector": +200,    # 对话历史更重要
-        "persona_utterance": +100,  # 台词参考更重要
         "sqlite_ledger": +100,      # 意图日志可能有用
     },
     "recall_memory": {
-        "world_canon": -400,        # 回忆场景不需要设定
-        "artifact_vault": -100,     # 不需要制品
+        "world_canon": -300,        # 回忆场景不需要设定
+        "artifact_vault": -200,     # 不需要制品
         "episodic_vector": +300,    # 情景记忆是核心
         "sqlite_ledger": +200,      # 事件日志是核心
     },
     "emotion": {
         "world_canon": -300,        # 情感场景不太需要设定
         "artifact_vault": -200,     # 不需要制品
-        "episodic_vector": +200,    # 相关情感记忆
+        "episodic_vector": +300,    # 相关情感记忆
         "bond_graph": +200,         # Bond 历史更重要
-        "persona_utterance": +100,  # 台词参考
     },
     "knowledge": {
-        "world_canon": +200,        # 设定查询核心
-        "style_canon": +100,        # 风格也可能相关
+        "world_canon": +300,        # 设定查询核心
         "episodic_vector": -200,    # 不太需要对话历史
         "sqlite_ledger": -100,      # 不太需要事件日志
     },
     "tool": {
         "artifact_vault": +300,     # 制品库核心
-        "world_canon": -200,        # 不需要设定
-        "style_canon": -100,        # 不需要风格
+        "world_canon": -300,        # 不需要设定
     },
     "complex": {},  # 复杂查询用默认预算
 }
