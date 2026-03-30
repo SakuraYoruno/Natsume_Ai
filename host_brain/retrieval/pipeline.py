@@ -501,14 +501,11 @@ def _score_fast_path_candidate(*, row: Mapping[str, Any], ordinal: int) -> float
     except (TypeError, ValueError):
         score = 0.0
     store_id = str(metadata.get("store_id") or row.get("store_id") or "").strip().lower()
-    if store_id == "style_canon":
-        score += 0.15
-    elif store_id == "neo4j_bond":
+    # Phase XIII: 只有 5 个有效 store（style_canon/persona_utterance 已废弃）
+    if store_id == "neo4j_bond":
         score += 0.08
     elif store_id == "episodic_vector":
         score += 0.03
-    elif store_id == "persona_utterance":
-        score -= 0.05
     score -= min(ordinal, 5) * 0.001
     return round(score, 6)
 
