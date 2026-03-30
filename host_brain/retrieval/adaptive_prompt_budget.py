@@ -32,12 +32,11 @@ _logger = logging.getLogger("Natsume.retrieval.adaptive_budget")
 INTENT_BUDGET_ADJUSTMENTS: dict[str, dict[str, float]] = {
     "greeting": {},  # 跳过检索，不需要调整
     "phatic": {
-        "world_canon": -400,
-        "artifact_vault": -200,
-        "episodic_vector": -200,
-        "sqlite_ledger": -100,
-        "style_canon": +500,
-        "persona_utterance": +100,
+        "world_canon": -0.40,       # 寒暄不需要设定
+        "artifact_vault": -0.50,    # 不需要制品
+        "episodic_vector": -0.15,   # 少量历史即可
+        "sqlite_ledger": -0.20,     # 不太需要日志
+        "bond_graph": +0.10,        # Bond 状态有用
     },
     "chat": {
         "world_canon": -0.20,       # 闲聊不需要太多设定
@@ -58,13 +57,11 @@ INTENT_BUDGET_ADJUSTMENTS: dict[str, dict[str, float]] = {
         "bond_graph": +0.30,        # Bond 历史更重要
     },
     "affection": {
-        "world_canon": -400,
-        "artifact_vault": -200,
-        "sqlite_ledger": -100,
-        "persona_utterance": -100,
-        "style_canon": +300,
-        "bond_graph": +300,
-        "episodic_vector": +200,
+        "world_canon": -0.40,       # 亲密对话不需要设定
+        "artifact_vault": -0.50,    # 不需要制品
+        "sqlite_ledger": -0.20,     # 不太需要日志
+        "bond_graph": +0.40,        # Bond 关系是核心
+        "episodic_vector": +0.20,   # 共同记忆重要
     },
     "knowledge": {
         "world_canon": +0.25,       # 设定查询核心
