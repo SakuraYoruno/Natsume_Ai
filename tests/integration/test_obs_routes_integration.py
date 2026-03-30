@@ -240,7 +240,7 @@ def ledger():
                 "task_type": "chat",
                 "audit_tags": [
                     "RECALL_EVIDENCE_EMPTY",
-                    "ROUTING_SELECTED:ModelTarget.HOST_8B",
+                    "ROUTING_SELECTED:ModelTarget.HOST_14B",
                     "EMOTION_INFERRED:NEUTRAL",
                 ],
                 "node_timings_ms": {

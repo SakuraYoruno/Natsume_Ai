@@ -111,7 +111,7 @@ class AdaptivePromptBudget:
 
         budget_mgr = AdaptivePromptBudget()
         # 自动根据路由选择预算档位
-        result = budget_mgr.compute(intent="emotion", route_target="host_8b")
+        result = budget_mgr.compute(intent="emotion", route_target="host_14b")
         # result.adjusted_budget → 本地14B档位的情感预算
         result = budget_mgr.compute(intent="knowledge", route_target="cloud")
         # result.adjusted_budget → 云端Gemini档位的知识预算
@@ -134,7 +134,7 @@ class AdaptivePromptBudget:
 
         Args:
             intent: 意图类型（greeting/chat/emotion/knowledge/tool/complex）
-            route_target: LLM 路由目标（"host_8b" / "cloud" / ""）
+            route_target: LLM 路由目标（"host_14b" / "cloud" / ""）
         """
         # 选择基础预算档位
         if self._fixed_base is not None:

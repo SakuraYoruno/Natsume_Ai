@@ -57,24 +57,37 @@ HOST_SERVICE_IDS: List[str] = [s["service_id"] for s in HOST_SERVICES]
 HOST_DISPLAY_NAMES: Dict[str, str] = {s["service_id"]: s["name"] for s in HOST_SERVICES}
 
 # ---------------------------------------------------------------------------
-# LLM 云节点（10 个）
+# LLM 节点（云端 10 个 + 本地 1 个）
 # ---------------------------------------------------------------------------
+# deploy_type: "cloud" = 云端 API（Gemini/OpenAI/DeepSeek），"local" = 本地推理（Ollama）
 LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
-    "chat_direct_ja":          {"role": "聊天直出",     "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "core_reasoner_primary":   {"role": "主推理",       "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "core_reasoner_secondary": {"role": "备用推理",     "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "planner_constraints":     {"role": "规划约束",     "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "tool_planner":            {"role": "工具规划",     "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "safety_verifier":         {"role": "安全验证",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
-    "consistency_verifier":    {"role": "一致性验证",   "provider": "gemini", "model_id": "gemini-2.5-flash-lite"},
-    "renderer_ja_c_style":     {"role": "日文渲染",     "provider": "gemini", "model_id": "gemini-2.5-flash"},
-    "workbench_translate":     {"role": "翻译工作台",   "provider": "gemini", "model_id": "gemini-2.5-pro"},
-    "workbench_code_assist":   {"role": "代码辅助",     "provider": "gemini", "model_id": "gemini-2.5-pro"},
+    # 云端节点
+    "chat_direct_ja":          {"role": "聊天直出",     "provider": "gemini", "model_id": "gemini-2.5-flash",      "deploy_type": "cloud"},
+    "core_reasoner_primary":   {"role": "主推理",       "provider": "gemini", "model_id": "gemini-2.5-pro-preview-03-25", "deploy_type": "cloud"},
+    "core_reasoner_secondary": {"role": "备用推理",     "provider": "gemini", "model_id": "gemini-2.5-flash",      "deploy_type": "cloud"},
+    "planner_constraints":     {"role": "规划约束",     "provider": "gemini", "model_id": "gemini-2.5-pro-preview-03-25", "deploy_type": "cloud"},
+    "tool_planner":            {"role": "工具规划",     "provider": "gemini", "model_id": "gemini-2.5-flash",      "deploy_type": "cloud"},
+    "safety_verifier":         {"role": "安全验证",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
+    "consistency_verifier":    {"role": "一致性验证",   "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
+    "renderer_ja_c_style":     {"role": "日文渲染",     "provider": "gemini", "model_id": "gemini-2.5-flash",      "deploy_type": "cloud"},
+    "workbench_translate":     {"role": "翻译工作台",   "provider": "gemini", "model_id": "gemini-2.5-pro-preview-03-25", "deploy_type": "cloud"},
+    "workbench_code_assist":   {"role": "代码辅助",     "provider": "gemini", "model_id": "gemini-2.5-pro-preview-03-25", "deploy_type": "cloud"},
+    # 国内云端节点（DeepSeek）
+    "cloud_cn_deepseek":       {"role": "国内云端 Gaming", "provider": "deepseek", "model_id": "deepseek-chat",       "deploy_type": "cloud"},
+    # 本地节点（Ollama）
+    "host_local_14b":          {"role": "本地推理 14B", "provider": "ollama", "model_id": "qwen3:14b",             "deploy_type": "local"},
 }
 
 LLM_NODE_IDS: List[str] = list(LLM_NODE_REGISTRY.keys())
 
 LLM_NODE_DISPLAY_NAMES: Dict[str, str] = {nid: meta["role"] for nid, meta in LLM_NODE_REGISTRY.items()}
+
+# 按部署类型分组
+LLM_CLOUD_NODE_IDS: List[str] = [nid for nid, m in LLM_NODE_REGISTRY.items() if m["deploy_type"] == "cloud"]
+LLM_LOCAL_NODE_IDS: List[str] = [nid for nid, m in LLM_NODE_REGISTRY.items() if m["deploy_type"] == "local"]
+
+# 本地推理服务（Ollama）默认端点
+OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
 # ---------------------------------------------------------------------------
 # 聚合列表

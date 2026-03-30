@@ -18,6 +18,10 @@ from host_brain.observability.service_registry import (
     HOST_DISPLAY_NAMES as _HOST_DISPLAY_NAMES,
     LLM_NODE_IDS,
     LLM_NODE_DISPLAY_NAMES,
+    LLM_NODE_REGISTRY,
+    LLM_CLOUD_NODE_IDS,
+    LLM_LOCAL_NODE_IDS,
+    OLLAMA_DEFAULT_BASE_URL,
 )
 
 logger = logging.getLogger("Natsume.obs.heartbeat")
@@ -79,6 +83,136 @@ def _get_host_health_url() -> str:
     port = os.environ.get("HOST_HTTP_PORT", "18080").strip()
     return f"http://{host}:{port}/health"
 
+
+def _get_ollama_base_url() -> str:
+    """获取 Ollama 服务的 base URL（不含 /v1 后缀）。"""
+    raw = str(os.environ.get("HOST_CHAT_HOST_14B_BASE_URL") or "").strip()
+    if not raw:
+        raw = OLLAMA_DEFAULT_BASE_URL
+    # 去掉 /v1 后缀，因为 Ollama 原生 API 不在 /v1 路径下
+    if raw.rstrip("/").lower().endswith("/v1"):
+        raw = raw.rstrip("/")[:-3].rstrip("/")
+    return raw
+
+
+def _get_gemini_api_key() -> str | None:
+    """获取 Gemini API Key（用于云端模型探活）。"""
+    return str(os.environ.get("GEMINI_API_KEY") or "").strip() or None
+
+
+# ---------------------------------------------------------------------------
+# LLM 节点独立探活
+# ---------------------------------------------------------------------------
+
+async def _probe_ollama_local(model_id: str) -> Dict[str, Any]:
+    """探测本地 Ollama 推理服务：GET /api/tags 检查服务是否在线，并验证目标模型是否已加载。
+
+    返回 { status, latency_ms, detail }。
+    """
+    base_url = _get_ollama_base_url()
+    client = _get_http_client()
+    t0 = time.monotonic()
+    try:
+        resp = await client.get(f"{base_url}/api/tags", timeout=5.0)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        if resp.status_code != 200:
+            return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": f"Ollama HTTP {resp.status_code}"}
+        body = resp.json()
+        models = body.get("models") or []
+        # 检查目标模型是否在已加载的模型列表中
+        model_base = model_id.split(":")[0].lower() if ":" in model_id else model_id.lower()
+        found = any(
+            model_id.lower() in str(m.get("name") or "").lower()
+            or model_base in str(m.get("name") or "").lower()
+            for m in models
+        )
+        if found:
+            return {"status": "UP", "latency_ms": elapsed_ms, "detail": f"model '{model_id}' available"}
+        else:
+            available_names = [str(m.get("name") or "") for m in models[:5]]
+            return {
+                "status": "DEGRADED",
+                "latency_ms": elapsed_ms,
+                "detail": f"Ollama online but model '{model_id}' not found; available: {available_names}",
+            }
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.debug("Ollama probe failed: %s", exc)
+        return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": str(exc)}
+
+
+async def _probe_gemini_cloud() -> Dict[str, Any]:
+    """探测 Gemini 云端 API：GET /v1beta/models 验证 API Key 有效性和端点可达性。
+
+    使用 models.list 端点（不消耗 token，仅验证认证和网络连通性）。
+    返回 { status, latency_ms, detail }。
+    """
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        return {"status": "DEGRADED", "latency_ms": None, "detail": "GEMINI_API_KEY not configured"}
+    client = _get_http_client()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
+    t0 = time.monotonic()
+    try:
+        resp = await client.get(url, timeout=8.0)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        if resp.status_code == 200:
+            return {"status": "UP", "latency_ms": elapsed_ms, "detail": "API key valid, endpoint reachable"}
+        elif resp.status_code == 429:
+            return {"status": "DEGRADED", "latency_ms": elapsed_ms, "detail": "rate limited (429)"}
+        elif resp.status_code in (401, 403):
+            return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": f"auth failed ({resp.status_code})"}
+        else:
+            return {"status": "DEGRADED", "latency_ms": elapsed_ms, "detail": f"HTTP {resp.status_code}"}
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.debug("Gemini cloud probe failed: %s", exc)
+        return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": str(exc)}
+
+
+async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
+    """并发探测所有 LLM 节点，返回 { node_id: { status, latency_ms, detail } }。
+
+    - 云端节点（Gemini）：共享一次 models.list 探活结果（同一 provider 只探一次）
+    - 本地节点（Ollama）：每个模型独立探测（检查模型是否已加载）
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+
+    # 云端探活：同一 provider 只探一次
+    cloud_probe_cache: Dict[str, Dict[str, Any]] = {}
+    local_tasks: Dict[str, asyncio.Task] = {}
+
+    # 启动本地模型探测任务
+    for nid in LLM_LOCAL_NODE_IDS:
+        meta = LLM_NODE_REGISTRY[nid]
+        local_tasks[nid] = asyncio.create_task(_probe_ollama_local(meta["model_id"]))
+
+    # 云端模型：按 provider 分组，每个 provider 只探一次
+    for nid in LLM_CLOUD_NODE_IDS:
+        meta = LLM_NODE_REGISTRY[nid]
+        provider = meta["provider"]
+        if provider not in cloud_probe_cache:
+            if provider == "gemini":
+                cloud_probe_cache[provider] = await _probe_gemini_cloud()
+            else:
+                # 未知云端 provider，标记为 UNKNOWN
+                cloud_probe_cache[provider] = {"status": "UNKNOWN", "latency_ms": None, "detail": f"unsupported provider: {provider}"}
+        results[nid] = cloud_probe_cache[provider]
+
+    # 收集本地模型探测结果
+    for nid, task in local_tasks.items():
+        try:
+            results[nid] = await task
+        except Exception as exc:
+            logger.debug("LLM local probe task failed for %s: %s", nid, exc)
+            results[nid] = {"status": "DOWN", "latency_ms": None, "detail": str(exc)}
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Edge / Host 探测
+# ---------------------------------------------------------------------------
 
 async def _probe_edge() -> Dict[str, Any]:
     """探测 Edge RPC：GET /v1/edge/health。返回 { status, latency_ms } 或 DOWN。Edge 正常时返回 status=ACCEPTED，视为 UP。"""
@@ -153,7 +287,7 @@ async def run_once() -> None:
     Edge/Host 分别探测，任一侧失败也写入该侧缓存，避免单侧异常导致整轮不写缓存。
     Host 侧：解析 /health 返回的各子服务独立状态，不再一刀切广播。
     Edge 侧：从 /health 返回的 edge.rpc.* 子服务中提取独立状态。
-    LLM 节点：使用 Host 整体状态（LLM 云节点的可用性取决于 Host 进程是否存活）。
+    LLM 节点：独立探活 — 云端用 API 端点验证，本地用 Ollama /api/tags 验证。
     """
     now_ts = int(time.time() * 1000)
     try:
@@ -166,6 +300,13 @@ async def run_once() -> None:
     except Exception as exc:
         logger.debug("Heartbeat Host probe failed (will cache DOWN): %s", exc)
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
+
+    # LLM 节点独立探活
+    try:
+        llm_results = await _probe_llm_nodes()
+    except Exception as exc:
+        logger.debug("Heartbeat LLM probe failed (will cache DOWN): %s", exc)
+        llm_results = {}
 
     host_overall = host_result.get("overall_status", "DOWN")
     host_latency = host_result.get("latency_ms")
@@ -200,14 +341,30 @@ async def run_once() -> None:
                 "name": _HOST_DISPLAY_NAMES.get(sid, sid),
                 "side": "host",
             }
-        # LLM 节点：使用 Host 整体状态（LLM 云节点可用性取决于 Host 进程）
+        # LLM 节点：使用独立探活结果，Host 进程 DOWN 时所有 LLM 节点也标记为 DOWN
         for sid in LLM_NODE_IDS:
+            if host_overall == "DOWN":
+                # Host 进程不可用，LLM 节点无法工作
+                status = "DOWN"
+                latency = None
+                detail = "Host process unavailable"
+            elif sid in llm_results:
+                probe = llm_results[sid]
+                status = probe.get("status", "UNKNOWN")
+                latency = probe.get("latency_ms")
+                detail = probe.get("detail")
+            else:
+                status = "UNKNOWN"
+                latency = None
+                detail = "no probe result"
             _cache[sid] = {
-                "status": host_overall,
-                "latency_ms": host_latency,
+                "status": status,
+                "latency_ms": latency,
                 "last_check_ts": now_ts,
                 "name": LLM_NODE_DISPLAY_NAMES.get(sid, sid),
                 "side": "host",
+                "detail": detail,
+                "deploy_type": LLM_NODE_REGISTRY.get(sid, {}).get("deploy_type", "unknown"),
             }
 
 

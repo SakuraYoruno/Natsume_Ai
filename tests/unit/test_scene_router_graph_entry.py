@@ -33,7 +33,7 @@ def test_scene_router_entry_handler_defaults_to_chat(monkeypatch) -> None:
     assert out["scene_type_source"] in {"graph_pre_classifier", "graph_default_chat"}
     route_decision = dict(out.get("route_decision") or {})
     assert route_decision.get("target") == "host"
-    assert route_decision.get("route_target") == "host_8b"
+    assert route_decision.get("route_target") == "host_14b"
     assert dict(route_decision.get("targets") or {}).get("host") is True
 
 

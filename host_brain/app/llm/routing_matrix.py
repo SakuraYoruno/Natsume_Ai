@@ -3,11 +3,13 @@ routing_matrix.py —— 模型路由矩阵
 
 按任务类型、延迟预算、风险等级进行能力路由（需求 5），
 而不仅仅是故障切换：
-- chat + <2s → host_8b（需求 5.2）
+- chat + <2s → host_14b（需求 5.2）
+- chat + <2s + gaming → cloud_cn（国内低延迟，DeepSeek）
 - reasoning / >16k → cloud（需求 5.3）
 - dream/diary → skills（需求 5.4）
 - HIGH risk_level 禁止路由到 edge_3b（需求 5.6）
-- 降级链：cloud → host_8b → edge_3b（需求 5.5）
+- 标准降级链：cloud → cloud_cn → host_14b → edge_3b（需求 5.5）
+- Gaming 降级链：cloud_cn → cloud（禁用本地模型，避免炸显存）
 - 路由决策写入 llm_route_log（需求 5.5）
 """
 from __future__ import annotations
@@ -30,11 +32,18 @@ logger = logging.getLogger(__name__)
 # 降级链定义
 # ---------------------------------------------------------------------------
 
-# 标准降级链：cloud → host_8b → edge_3b
+# 标准降级链：cloud → cloud_cn → host_14b → edge_3b
 FALLBACK_CHAIN: List[ModelTarget] = [
     ModelTarget.CLOUD,
-    ModelTarget.HOST_8B,
+    ModelTarget.CLOUD_CN,
+    ModelTarget.HOST_14B,
     ModelTarget.EDGE_3B,
+]
+
+# Gaming 降级链：cloud_cn → cloud（禁用本地模型，Gaming 时 GPU 全负载跑游戏，本地推理会炸显存）
+GAMING_FALLBACK_CHAIN: List[ModelTarget] = [
+    ModelTarget.CLOUD_CN,
+    ModelTarget.CLOUD,
 ]
 
 
@@ -119,9 +128,10 @@ class RoutingMatrix:
         规则优先级（从高到低）：
         1. dream/diary → skills（需求 5.4）
         2. reasoning OR context > 16k → cloud（需求 5.3）
-        3. chat + <2s → host_8b（需求 5.2）
-        4. 结构化输出 → cloud（保证质量）
-        5. 默认 → host_8b
+        3. chat + <2s + gaming → cloud_cn（国内低延迟 DeepSeek）
+        4. chat + <2s → host_14b（需求 5.2）
+        5. 结构化输出 → cloud（保证质量）
+        6. 默认 → host_14b
         """
         # 规则 1：dream/diary 专用路由（需求 5.4）
         if task_type in (TaskType.DREAM, TaskType.DIARY):
@@ -131,20 +141,29 @@ class RoutingMatrix:
         if task_type == TaskType.REASONING or context_length > 16000:
             return ModelTarget.CLOUD
 
-        # 规则 3：chat + 快速响应 → host_8b（需求 5.2）
+        # 规则 3：chat + 快速响应 + gaming 模式 → cloud_cn（国内低延迟 DeepSeek）
+        # Gaming 模式下本地模型被禁用（GPU 全负载跑游戏），使用国内云端 API 保证 <2s 响应
         if task_type == TaskType.CHAT and latency_budget == LatencyBudget.FAST:
-            return ModelTarget.HOST_8B
+            if self._is_gaming_mode():
+                return ModelTarget.CLOUD_CN
+            return ModelTarget.HOST_14B
 
         # 规则 4：需要结构化输出 → cloud（保证 JSON 格式稳定性）
         if requires_structured_output:
             return ModelTarget.CLOUD
 
-        # 规则 5：code/translate 默认 → host_8b
+        # 规则 5：code/translate 默认 → host_14b
         if task_type in (TaskType.CODE, TaskType.TRANSLATE):
-            return ModelTarget.HOST_8B
+            return ModelTarget.HOST_14B
 
-        # 默认：host_8b
-        return ModelTarget.HOST_8B
+        # 默认：host_14b
+        return ModelTarget.HOST_14B
+
+    @staticmethod
+    def _is_gaming_mode() -> bool:
+        """检测当前是否处于 gaming 模式（读取 HOST_SYS_MODE 环境变量）。"""
+        import os
+        return os.environ.get("HOST_SYS_MODE", "normal").strip().lower() == "gaming"
 
     def select_with_fallback(
         self,
@@ -158,7 +177,7 @@ class RoutingMatrix:
         """
         带降级链的路由选择。
 
-        当主路由失败时，按 cloud → host_8b → edge_3b 顺序降级（需求 5.5）。
+        当主路由失败时，按 cloud → cloud_cn → host_14b → edge_3b 顺序降级（需求 5.5）。
         HIGH risk_level 禁止路由到 edge_3b（需求 5.6）。
 
         Args:
@@ -178,9 +197,11 @@ class RoutingMatrix:
             return primary_decision
 
         # 主路由失败，走降级链（需求 5.5）
+        # Gaming 模式使用专用降级链（跳过海外云端，保证低延迟）
         original_model = primary_decision.selected_model
+        chain = GAMING_FALLBACK_CHAIN if self._is_gaming_mode() else FALLBACK_CHAIN
 
-        for fallback_model in FALLBACK_CHAIN:
+        for fallback_model in chain:
             if fallback_model in failed_models:
                 continue
 
@@ -230,7 +251,7 @@ class RoutingMatrix:
         # 修复：兜底决策同样需要写入路由日志，确保运维可感知"所有模型均不可用"的异常情况
         exhausted_decision = RouteDecision(
             task_type=task_type,
-            selected_model=ModelTarget.HOST_8B,
+            selected_model=ModelTarget.HOST_14B,
             latency_budget=latency_budget,
             risk_level=risk_level,
             context_length=context_length,
@@ -257,7 +278,8 @@ class RoutingMatrix:
     # 各模型每 1000 token 的相对成本（归一化，cloud=1.0 为基准）
     _MODEL_COST_PER_1K: dict = {
         "cloud": 1.0,
-        "host_8b": 0.05,
+        "cloud_cn": 0.08,
+        "host_14b": 0.05,
         "edge_3b": 0.01,
         "skills": 0.02,
     }

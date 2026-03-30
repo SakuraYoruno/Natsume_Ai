@@ -192,7 +192,7 @@ class RetrievalOrchestratorRequest:
     render_target_lang: str | None = None
     turn_index: int = 0
     query_plan: QueryPlan | Mapping[str, Any] | None = None
-    route_target: str = ""  # Phase XIII: 预算双路由（host_8b / cloud）
+    route_target: str = ""  # Phase XIII: 预算双路由（host_14b / cloud）
 
 
 @dataclass(frozen=True)

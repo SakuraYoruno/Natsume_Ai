@@ -174,10 +174,10 @@ def test_chat_gaming_mode_routes_to_edge_fast_path(monkeypatch, tmp_path) -> Non
     # edge_route 字段在 llm.model_control 中
     model_control = list(llm.get("model_control") or [])
     assert model_control
-    assert model_control[0].get("route") == "gaming_edge_3b"
+    assert model_control[0].get("route") == "gaming_cloud_cn"
     assert route_decision.get("target") == "edge"
-    assert route_decision.get("route_target") == "edge_3b"
-    assert dict(llm.get("route_decision") or {}).get("route_target") == "edge_3b"
+    assert route_decision.get("route_target") == "cloud_cn"
+    assert dict(llm.get("route_decision") or {}).get("route_target") == "cloud_cn"
     assert model_control[0].get("emotion_tag") == "HAPPY"
     llm_nodes = list(llm.get("nodes") or [])
     assert llm_nodes

@@ -6,7 +6,7 @@ import host_brain.app.graph_config_builder as graph_builder
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
-    HOST_CHAT_ROUTE_HOST_8B,
+    HOST_CHAT_ROUTE_HOST_14B,
     SCENE_EXEC_INTENT,
     SCENE_TYPE_AUTO,
     build_chat_graph_config,
@@ -45,22 +45,22 @@ def _patch_runtime_dependencies(monkeypatch, *, provider: str = "gemini", api_ke
     )
 
 
-def test_resolve_host_llm_runtime_defaults_to_host_8b_in_non_gaming(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_defaults_to_host_14b_in_non_gaming(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_PROVIDER", "openai")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_MODEL_ID", "qwen3:8b-q4_k_m")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_PROVIDER", "openai")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:8b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-    monkeypatch.delenv("HOST_CHAT_HOST_8B_API_KEY", raising=False)
+    monkeypatch.delenv("HOST_CHAT_HOST_14B_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_8B
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_8B_ACTIVE"
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
+    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_ACTIVE"
     assert runtime["provider_name"] == "openai"
     assert runtime["model_id"] == "qwen3:8b-q4_k_m"
     assert runtime["llm_api_key"] == "host-local-placeholder-key"
@@ -73,14 +73,14 @@ def test_resolve_host_llm_runtime_defaults_to_host_8b_in_non_gaming(monkeypatch)
 def test_resolve_host_llm_runtime_gaming_mode_forces_cloud(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "gaming")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_8B_DISABLED_GAMING_MODE"
+    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_DISABLED_GAMING_MODE"
     assert runtime["provider_name"] == "gemini"
     assert runtime["model_id"] == "gemini-cloud-model"
 
@@ -88,7 +88,7 @@ def test_resolve_host_llm_runtime_gaming_mode_forces_cloud(monkeypatch) -> None:
 def test_resolve_host_llm_runtime_force_cloud_switch(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_FORCE_CLOUD", "true")
 
     runtime = graph_builder.resolve_host_llm_runtime()
@@ -98,26 +98,26 @@ def test_resolve_host_llm_runtime_force_cloud_switch(monkeypatch) -> None:
     assert runtime["provider_name"] == "gemini"
 
 
-def test_resolve_host_llm_runtime_unhealthy_host_8b_falls_back_to_cloud(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_unhealthy_host_14b_falls_back_to_cloud(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_READY", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_READY", "false")
     monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_8B_UNHEALTHY"
+    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_UNHEALTHY"
     assert runtime["provider_name"] == "gemini"
 
 
 def test_resolve_host_llm_runtime_gray_rollout_bucket_excluded_forces_cloud(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
     monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
@@ -138,8 +138,8 @@ def test_resolve_host_llm_runtime_gray_rollout_bucket_excluded_forces_cloud(monk
 def test_resolve_host_llm_runtime_gray_rollout_allowlist_overrides_percent(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
     monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
@@ -151,8 +151,8 @@ def test_resolve_host_llm_runtime_gray_rollout_allowlist_overrides_percent(monke
         scene_type="CHAT",
     )
 
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_8B
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_8B_ACTIVE"
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
+    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_ACTIVE"
     assert bool(runtime["gray_rollout"]["allowlist_hit"]) is True
     assert runtime["gray_rollout"]["reason_code"] == "HOST_CHAT_GRAY_ALLOWLIST_MATCH"
 
@@ -160,8 +160,8 @@ def test_resolve_host_llm_runtime_gray_rollout_allowlist_overrides_percent(monke
 def test_resolve_host_llm_runtime_gray_rollout_scene_excluded_forces_cloud(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "100")
     monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
@@ -181,10 +181,10 @@ def test_resolve_host_llm_runtime_gray_rollout_scene_excluded_forces_cloud(monke
 def test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cloud(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
     monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_PROVIDER", "openai")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_MODEL_ID", "qwen3:8b-q4_k_m")
-    monkeypatch.setenv("HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_PROVIDER", "openai")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:8b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
     monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_EXEC_INTENT)
@@ -199,7 +199,7 @@ def test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cl
     assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_CLOUD
 
 
-def test_build_chat_graph_config_uses_host_8b_only_for_chat_direct(monkeypatch) -> None:
+def test_build_chat_graph_config_uses_host_14b_only_for_chat_direct(monkeypatch) -> None:
     captured_calls: list[dict] = []
 
     def _capture_provider_for_node(**kwargs):

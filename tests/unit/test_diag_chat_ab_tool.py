@@ -37,7 +37,7 @@ def _run(
         provider="openai",
         model_id="qwen3:8b-q4_k_m",
         route_target=route_target,
-        route_reason_code="HOST_CHAT_HOST_8B_ACTIVE",
+        route_reason_code="HOST_CHAT_HOST_14B_ACTIVE",
         error=error,
     )
 
@@ -71,7 +71,7 @@ def test_summarize_profile_aggregates_rates_and_histograms() -> None:
             latency_ms=100.0,
             decision="APPROVE",
             llm_status="OK",
-            route_target="host_8b",
+            route_target="host_14b",
             ok=True,
             quality_score=0.95,
         ),
@@ -93,4 +93,4 @@ def test_summarize_profile_aggregates_rates_and_histograms() -> None:
     assert summary["approve_rate"] == 0.5
     assert summary["errors"] == 1
     assert summary["route_target_hist"]["cloud"] == 1
-    assert summary["route_target_hist"]["host_8b"] == 1
+    assert summary["route_target_hist"]["host_14b"] == 1

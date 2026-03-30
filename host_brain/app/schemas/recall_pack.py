@@ -38,12 +38,12 @@ def get_budget_for_route(route_target: str) -> tuple[Dict[str, int], int]:
     """根据 LLM 路由目标返回对应的预算配置。
 
     Args:
-        route_target: "host_8b" → 本地预算, "cloud" / 其他 → 云端预算
+        route_target: "host_14b" → 本地预算, "cloud" / 其他 → 云端预算
 
     Returns:
         (slot_budget_dict, total_budget)
     """
-    if route_target == "host_8b":
+    if route_target == "host_14b":
         return dict(RECALL_SLOT_BUDGET_LOCAL), RECALL_BUDGET_LOCAL
     return dict(RECALL_SLOT_BUDGET_CLOUD), RECALL_BUDGET_CLOUD
 
