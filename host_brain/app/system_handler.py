@@ -85,6 +85,8 @@ _EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES: frozenset[str] = frozenset(
 _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS: frozenset[str] = frozenset({"[ASR_VAD_NO_SPEECH]"})
 _EDGE_ASR_BRIDGE_RECENT: dict[str, int] = {}
 _EDGE_ASR_BRIDGE_RECENT_LOCK = threading.Lock()
+# 同 session_id 下最近一次 bridge 的文本和时间戳（用于文本相似度去重）
+_EDGE_ASR_BRIDGE_LAST_TEXT: dict[str, tuple[str, int]] = {}  # session_id -> (text, ts_ms)
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -264,7 +266,7 @@ def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> N
 
     dedup_window_ms = max(
         0,
-        _parse_int_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", default=6000),
+        _parse_int_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", default=15000),
     )
     if dedup_window_ms > 0:
         dedup_key = f"{session_id}::{text.casefold()}"
@@ -273,18 +275,38 @@ def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> N
             stale_keys = [key for key, seen_at in _EDGE_ASR_BRIDGE_RECENT.items() if seen_at < cutoff]
             for stale_key in stale_keys:
                 _EDGE_ASR_BRIDGE_RECENT.pop(stale_key, None)
+            # 精确文本去重
             last_seen = _EDGE_ASR_BRIDGE_RECENT.get(dedup_key)
             if last_seen is not None and (ts_ms - last_seen) <= dedup_window_ms:
                 _log_if_available(
                     logger,
                     "debug",
-                    "edge event ASR bridge deduped request_id=%s session_id=%s event_type=%s",
+                    "edge event ASR bridge deduped (exact) request_id=%s session_id=%s",
                     request_id,
                     session_id,
-                    candidate.get("event_type"),
                 )
                 return
+            # 同 session_id 文本相似度去重：如果上一次 bridge 的文本与本次相同或为子串关系，
+            # 且时间差在窗口内，视为重复（防止 ASR 反复识别同一段语音产生噪声链路）
+            last_entry = _EDGE_ASR_BRIDGE_LAST_TEXT.get(session_id)
+            if last_entry is not None:
+                last_text, last_ts = last_entry
+                if (ts_ms - last_ts) <= dedup_window_ms:
+                    cur = text.casefold()
+                    prev = last_text.casefold()
+                    if cur == prev or cur in prev or prev in cur:
+                        _log_if_available(
+                            logger,
+                            "debug",
+                            "edge event ASR bridge deduped (similar) request_id=%s session_id=%s text=%.40s prev=%.40s",
+                            request_id,
+                            session_id,
+                            text,
+                            last_text,
+                        )
+                        return
             _EDGE_ASR_BRIDGE_RECENT[dedup_key] = ts_ms
+            _EDGE_ASR_BRIDGE_LAST_TEXT[session_id] = (text, ts_ms)
 
     async def _dispatch() -> None:
         try:

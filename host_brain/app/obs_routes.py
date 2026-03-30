@@ -1163,6 +1163,35 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     )
 
 
+def _dedup_sessions_by_content(sessions: List[SessionItem]) -> List[SessionItem]:
+    """同 session_id + 相同 input_preview 的多条请求只保留最新的一条，抑制 ASR 重复识别噪声。
+
+    去重规则：
+    1. session_id 为空的请求不参与去重（保留全部）
+    2. 同一 session_id 下，input_preview 完全相同的请求视为噪声重复，只保留 ts_ms 最大的
+    3. input_preview 为空时以空字符串作为 key（同 session_id 的空预览请求也会被合并）
+    """
+    # dedup_key = (session_id, input_preview_normalized) -> 最新的 SessionItem
+    best: Dict[str, SessionItem] = {}
+    no_session: List[SessionItem] = []
+
+    for session in sessions:
+        sid = (session.session_id or "").strip()
+        if not sid:
+            no_session.append(session)
+            continue
+        preview = (session.input_preview or "").strip().casefold()
+        key = f"{sid}::{preview}"
+        existing = best.get(key)
+        if existing is None or session.ts_ms > existing.ts_ms:
+            best[key] = session
+
+    # 保持原始时间倒序
+    deduped = sorted(best.values(), key=lambda s: s.ts_ms, reverse=True)
+    # 无 session_id 的放在最前面（通常是手动触发的请求）
+    return no_session + deduped
+
+
 def _build_trace_live_feed_snapshot(
     ledger: SQLiteLedger,
     *,
@@ -1170,17 +1199,22 @@ def _build_trace_live_feed_snapshot(
     window_minutes: int,
     keyword: Optional[str],
 ) -> TraceLiveFeedSnapshot:
+    # 多拉一些候选（去重后可能缩减），确保去重后仍有足够条目
+    fetch_size = min(limit * 3, 36)
     sessions_response = _build_sessions_response(
         ledger,
         page=1,
-        page_size=limit,
+        page_size=fetch_size,
         status=None,
         window_minutes=window_minutes,
         keyword=keyword,
     )
 
+    # 噪声去重：同 session_id + 相同 input_preview 只保留最新一条
+    deduped_sessions = _dedup_sessions_by_content(sessions_response.items)[:limit]
+
     items: List[LiveTraceFeedItem] = []
-    for session in sessions_response.items:
+    for session in deduped_sessions:
         try:
             trace = _build_trace_response(ledger, session.request_id)
             items.append(LiveTraceFeedItem(session=session, trace=trace))
