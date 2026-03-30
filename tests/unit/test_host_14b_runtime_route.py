@@ -13,27 +13,43 @@ from host_brain.app.graph_config_builder import (
 )
 
 
-def _mock_config_result(*, provider: str = "gemini", timeout_ms: int = 15_000, api_key: str | None = "sk-gemini"):
+def _mock_config_result(
+    *,
+    timeout_ms: int = 15_000,
+    gemini_api_key: str | None = "sk-gemini",
+    codex_api_key: str | None = "sk-codex",
+    deepseek_api_key: str | None = "sk-deepseek",
+):
     return SimpleNamespace(
         success=True,
         config=SimpleNamespace(
-            llm_provider=provider,
+            llm_provider="gemini",
             llm_timeout_ms=timeout_ms,
-            llm_api_key=api_key,
+            llm_api_key=gemini_api_key,
+            gemini_api_key=gemini_api_key,
+            codex_api_key=codex_api_key,
+            deepseek_api_key=deepseek_api_key,
         ),
     )
 
 
-def _patch_runtime_dependencies(monkeypatch, *, provider: str = "gemini", api_key: str | None = "sk-gemini") -> None:
+def _patch_runtime_dependencies(
+    monkeypatch,
+    *,
+    timeout_ms: int = 15_000,
+    gemini_api_key: str | None = "sk-gemini",
+    codex_api_key: str | None = "sk-codex",
+    deepseek_api_key: str | None = "sk-deepseek",
+) -> None:
     monkeypatch.setattr(
         graph_builder,
         "load_host_config",
-        lambda: _mock_config_result(provider=provider, api_key=api_key),
-    )
-    monkeypatch.setattr(
-        graph_builder,
-        "resolve_host_llm_model_id",
-        lambda provider_name: f"{provider_name}-cloud-model",
+        lambda: _mock_config_result(
+            timeout_ms=timeout_ms,
+            gemini_api_key=gemini_api_key,
+            codex_api_key=codex_api_key,
+            deepseek_api_key=deepseek_api_key,
+        ),
     )
     monkeypatch.setattr(
         graph_builder,
@@ -41,165 +57,109 @@ def _patch_runtime_dependencies(monkeypatch, *, provider: str = "gemini", api_ke
         lambda **kwargs: {
             "provider_name": kwargs.get("provider_name"),
             "model_id": kwargs.get("model_id"),
+            "base_url_override": kwargs.get("base_url_override"),
         },
+    )
+    monkeypatch.setattr(
+        graph_builder,
+        "_resolve_host_14b_health_status",
+        lambda **kwargs: (True, "ok"),
+    )
+    monkeypatch.setattr(
+        graph_builder,
+        "_resolve_host_14b_health_status_async",
+        lambda **kwargs: (True, "ok"),
     )
 
 
-def test_resolve_host_llm_runtime_defaults_to_host_14b_in_non_gaming(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch)
+    monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
+    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+
+    runtime = graph_builder.resolve_host_llm_runtime()
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_PRIMARY_GEMINI"
+    assert runtime["provider_name"] == "gemini"
+    assert runtime["model_id"] == "gemini-2.5-flash"
+    assert runtime["available"] is True
+    assert runtime["remote_chain_status"][0]["chain_name"] == "gemini"
+    assert runtime["remote_chain_status"][0]["available"] is True
+
+
+def test_resolve_host_llm_runtime_falls_back_to_codex(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex")
+    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
+    monkeypatch.setenv("HOST_CODEX_BASE_URL", "https://codex-relay.example.com")
+
+    runtime = graph_builder.resolve_host_llm_runtime()
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_CODEX"
+    assert runtime["provider_name"] == "codex"
+    assert runtime["model_id"] == "gpt-4o-mini"
+    assert runtime["base_url_override"] == "https://codex-relay.example.com/v1"
+    assert runtime["remote_chain_status"][0]["available"] is False
+    assert runtime["remote_chain_status"][1]["chain_name"] == "codex"
+    assert runtime["remote_chain_status"][1]["provider_name"] == "codex"
+    assert runtime["remote_chain_status"][1]["available"] is True
+
+
+def test_resolve_host_llm_runtime_falls_back_to_deepseek(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+
+    runtime = graph_builder.resolve_host_llm_runtime()
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK"
+    assert runtime["provider_name"] == "deepseek"
+    assert runtime["model_id"] == "deepseek-chat"
+    assert runtime["remote_chain_status"][0]["available"] is False
+    assert runtime["remote_chain_status"][1]["available"] is False
+    assert runtime["remote_chain_status"][2]["available"] is True
+
+
+def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key=None)
     monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_HOST_14B_PROVIDER", "openai")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:8b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:14b-q4_k_m")
     monkeypatch.setenv("HOST_CHAT_HOST_14B_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
     monkeypatch.delenv("HOST_CHAT_HOST_14B_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_ACTIVE"
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_LOCAL"
     assert runtime["provider_name"] == "openai"
-    assert runtime["model_id"] == "qwen3:8b-q4_k_m"
+    assert runtime["model_id"] == "qwen3:14b-q4_k_m"
     assert runtime["llm_api_key"] == "host-local-placeholder-key"
-    assert runtime["chat_base_url_override"] == "http://127.0.0.1:11434/v1"
     assert runtime["base_url_override"] == "http://127.0.0.1:11434/v1"
-    assert runtime["cloud_provider_name"] == "gemini"
-    assert runtime["cloud_model_id"] == "gemini-cloud-model"
+    assert runtime["remote_chain_status"][0]["available"] is False
+    assert runtime["remote_chain_status"][1]["available"] is False
+    assert runtime["remote_chain_status"][2]["available"] is False
 
 
-def test_resolve_host_llm_runtime_gaming_mode_forces_cloud(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "gaming")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-
-    runtime = graph_builder.resolve_host_llm_runtime()
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_DISABLED_GAMING_MODE"
-    assert runtime["provider_name"] == "gemini"
-    assert runtime["model_id"] == "gemini-cloud-model"
-
-
-def test_resolve_host_llm_runtime_force_cloud_switch(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_FORCE_CLOUD", "true")
-
-    runtime = graph_builder.resolve_host_llm_runtime()
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_FORCE_CLOUD"
-    assert runtime["provider_name"] == "gemini"
-
-
-def test_resolve_host_llm_runtime_unhealthy_host_14b_falls_back_to_cloud(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_READY", "false")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-
-    runtime = graph_builder.resolve_host_llm_runtime()
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_UNHEALTHY"
-    assert runtime["provider_name"] == "gemini"
-
-
-def test_resolve_host_llm_runtime_gray_rollout_bucket_excluded_forces_cloud(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
-    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-    monkeypatch.delenv("HOST_CHAT_GRAY_USER_ALLOWLIST", raising=False)
-
-    runtime = graph_builder.resolve_host_llm_runtime(
-        rollout_key="session::gray::excluded",
-        scene_type="CHAT",
-    )
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_GRAY_BUCKET_EXCLUDED"
-    assert bool(runtime["gray_rollout"]["enabled"]) is True
-    assert bool(runtime["gray_rollout"]["in_rollout"]) is False
-
-
-def test_resolve_host_llm_runtime_gray_rollout_allowlist_overrides_percent(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "0")
-    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
-    monkeypatch.setenv("HOST_CHAT_GRAY_USER_ALLOWLIST", "session::gray::allow")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-
-    runtime = graph_builder.resolve_host_llm_runtime(
-        rollout_key="session::gray::allow",
-        scene_type="CHAT",
-    )
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
-    assert runtime["route_reason_code"] == "HOST_CHAT_HOST_14B_ACTIVE"
-    assert bool(runtime["gray_rollout"]["allowlist_hit"]) is True
-    assert runtime["gray_rollout"]["reason_code"] == "HOST_CHAT_GRAY_ALLOWLIST_MATCH"
-
-
-def test_resolve_host_llm_runtime_gray_rollout_scene_excluded_forces_cloud(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.setenv("HOST_CHAT_GRAY_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_GRAY_PERCENT", "100")
-    monkeypatch.setenv("HOST_CHAT_GRAY_SCENES", "CHAT")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
-    monkeypatch.delenv("HOST_CHAT_GRAY_USER_ALLOWLIST", raising=False)
-
-    runtime = graph_builder.resolve_host_llm_runtime(
-        rollout_key="session::gray::work-code",
-        scene_type="WORK_CODE",
-    )
-
-    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CHAT_GRAY_SCENE_EXCLUDED"
-    assert runtime["gray_rollout"]["scene_type"] == "WORK_CODE"
-
-
-def test_resolve_host_llm_runtime_routing_matrix_reasoning_scene_overrides_to_cloud(monkeypatch) -> None:
-    _patch_runtime_dependencies(monkeypatch, provider="gemini", api_key="sk-gemini")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_PROVIDER", "openai")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:8b-q4_k_m")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_FORCE_CLOUD", raising=False)
+def test_resolve_host_llm_runtime_reasoning_scene_still_uses_remote_chain(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex", deepseek_api_key="sk-deepseek")
+    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
 
     runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_EXEC_INTENT)
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["provider_name"] == "gemini"
-    assert runtime["model_id"] == "gemini-cloud-model"
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_CODEX"
     routing_matrix_decision = dict(runtime.get("routing_matrix_decision") or {})
     assert routing_matrix_decision.get("task_type") == "reasoning"
     assert routing_matrix_decision.get("selected_model") == "cloud"
-    assert bool(routing_matrix_decision.get("runtime_applied")) is True
     assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_CLOUD
 
 
-def test_build_chat_graph_config_uses_host_14b_only_for_chat_direct(monkeypatch) -> None:
+def test_build_chat_graph_config_keeps_explicit_chat_runtime_binding(monkeypatch) -> None:
     captured_calls: list[dict] = []
 
     def _capture_provider_for_node(**kwargs):
@@ -219,7 +179,7 @@ def test_build_chat_graph_config_uses_host_14b_only_for_chat_direct(monkeypatch)
 
     cfg = build_chat_graph_config(
         provider_name="openai",
-        model_id="qwen3:8b-q4_k_m",
+        model_id="qwen3:14b-q4_k_m",
         timeout_ms=10_000,
         available=True,
         api_key="host-local-placeholder-key",
@@ -236,12 +196,10 @@ def test_build_chat_graph_config_uses_host_14b_only_for_chat_direct(monkeypatch)
 
     overrides = cfg["model_node_overrides"]
     assert overrides[CHAT_DIRECT_NODE_ID]["provider"] == "openai"
-    assert overrides[CHAT_DIRECT_NODE_ID]["model_id"] == "qwen3:8b-q4_k_m"
+    assert overrides[CHAT_DIRECT_NODE_ID]["model_id"] == "qwen3:14b-q4_k_m"
     assert overrides[CHAT_DIRECT_NODE_ID]["provider_fn"]["base_url_override"] == "http://127.0.0.1:11434/v1"
     assert overrides["core_reasoner_primary"]["provider"] == "gemini"
     assert overrides["core_reasoner_primary"]["provider_fn"]["base_url_override"] is None
-    assert cfg["graph_meta"]["chat_provider"] == "openai"
-    assert cfg["graph_meta"]["cloud_provider"] == "gemini"
     assert any(
         row.get("node_id") == CHAT_DIRECT_NODE_ID and row.get("base_url_override") == "http://127.0.0.1:11434/v1"
         for row in captured_calls

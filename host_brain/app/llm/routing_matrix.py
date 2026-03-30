@@ -31,11 +31,10 @@ logger = logging.getLogger(__name__)
 # 降级链定义
 # ---------------------------------------------------------------------------
 
-# 标准降级链：cloud → cloud_cn → host_14b
+# 标准降级链：cloud → cloud_cn
 FALLBACK_CHAIN: List[ModelTarget] = [
     ModelTarget.CLOUD,
     ModelTarget.CLOUD_CN,
-    ModelTarget.HOST_14B,
 ]
 
 # Gaming 降级链：cloud_cn → cloud（禁用本地模型，Gaming 时 GPU 全负载跑游戏，本地推理会炸显存）
@@ -140,22 +139,20 @@ class RoutingMatrix:
             return ModelTarget.CLOUD
 
         # 规则 3：chat + 快速响应 + gaming 模式 → cloud_cn（国内低延迟 DeepSeek）
-        # Gaming 模式下本地模型被禁用（GPU 全负载跑游戏），使用国内云端 API 保证 <2s 响应
+        # 全局云端策略：非 gaming 的 chat 也默认走 cloud，避免本地 14B 慢且答非所问
         if task_type == TaskType.CHAT and latency_budget == LatencyBudget.FAST:
-            if self._is_gaming_mode():
-                return ModelTarget.CLOUD_CN
-            return ModelTarget.HOST_14B
+            return ModelTarget.CLOUD
 
         # 规则 4：需要结构化输出 → cloud（保证 JSON 格式稳定性）
         if requires_structured_output:
             return ModelTarget.CLOUD
 
-        # 规则 5：code/translate 默认 → host_14b
+        # 规则 5：code/translate 默认 → cloud
         if task_type in (TaskType.CODE, TaskType.TRANSLATE):
-            return ModelTarget.HOST_14B
+            return ModelTarget.CLOUD
 
-        # 默认：host_14b
-        return ModelTarget.HOST_14B
+        # 默认：cloud
+        return ModelTarget.CLOUD
 
     @staticmethod
     def _is_gaming_mode() -> bool:
@@ -241,7 +238,7 @@ class RoutingMatrix:
         # 修复：兜底决策同样需要写入路由日志，确保运维可感知"所有模型均不可用"的异常情况
         exhausted_decision = RouteDecision(
             task_type=task_type,
-            selected_model=ModelTarget.HOST_14B,
+            selected_model=ModelTarget.CLOUD,
             latency_budget=latency_budget,
             risk_level=risk_level,
             context_length=context_length,

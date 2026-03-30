@@ -29,6 +29,7 @@ ENV_PROD = "prod"
 ALLOWED_ENVS = {ENV_DEV, ENV_TEST, ENV_PROD}
 
 PROVIDER_OPENAI = "openai"
+PROVIDER_CODEX = "codex"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_MOCK = "mock"
@@ -36,6 +37,7 @@ PROVIDER_DISABLED = "disabled"
 
 ALLOWED_LLM_PROVIDERS = {
     PROVIDER_OPENAI,
+    PROVIDER_CODEX,
     PROVIDER_GEMINI,
     PROVIDER_DEEPSEEK,
     PROVIDER_MOCK,
@@ -57,6 +59,9 @@ HOST_FIELD_TO_ENV_KEY = {
     "openai_api_key_set": "OPENAI_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_api_key_ref": "OPENAI_API_KEY_REF",
+    "codex_api_key_set": "CODEX_API_KEY",
+    "codex_api_key": "CODEX_API_KEY",
+    "codex_api_key_ref": "CODEX_API_KEY_REF",
     "gemini_api_key_set": "GEMINI_API_KEY",
     "gemini_api_key": "GEMINI_API_KEY",
     "gemini_api_key_ref": "GEMINI_API_KEY_REF",
@@ -74,7 +79,7 @@ HOST_FIELD_TO_ENV_KEY = {
     "rate_limit_window_ms": "HOST_RATE_LIMIT_WINDOW_MS",
     "rate_limit_max_requests": "HOST_RATE_LIMIT_MAX_REQUESTS",
 }
-HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"}
+HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"}
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,8 @@ class HostConfig:
     llm_provider: str
     openai_api_key: str | None
     openai_api_key_ref: str | None
+    codex_api_key: str | None
+    codex_api_key_ref: str | None
     gemini_api_key: str | None
     gemini_api_key_ref: str | None
     deepseek_api_key: str | None
@@ -113,6 +120,8 @@ class HostConfig:
             "llm_provider": self.llm_provider,
             "openai_api_key_set": bool(self.openai_api_key),
             "openai_api_key_ref": self.openai_api_key_ref,
+            "codex_api_key_set": bool(self.codex_api_key),
+            "codex_api_key_ref": self.codex_api_key_ref,
             "gemini_api_key_set": bool(self.gemini_api_key),
             "gemini_api_key_ref": self.gemini_api_key_ref,
             "deepseek_api_key_set": bool(self.deepseek_api_key),
@@ -284,6 +293,8 @@ def load_host_config(
 
     openai_api_key = _as_optional_text(merged.get("OPENAI_API_KEY"))
     openai_api_key_ref = _as_optional_text(merged.get("OPENAI_API_KEY_REF"))
+    codex_api_key = _as_optional_text(merged.get("CODEX_API_KEY"))
+    codex_api_key_ref = _as_optional_text(merged.get("CODEX_API_KEY_REF"))
     gemini_api_key = _as_optional_text(merged.get("GEMINI_API_KEY"))
     gemini_api_key_ref = _as_optional_text(merged.get("GEMINI_API_KEY_REF"))
     deepseek_api_key = _as_optional_text(merged.get("DEEPSEEK_API_KEY"))
@@ -294,6 +305,7 @@ def load_host_config(
 
     provider_to_runtime_keys: dict[str, tuple[str | None, str | None, str, str]] = {
         PROVIDER_OPENAI: (openai_api_key, openai_api_key_ref, "OPENAI_API_KEY", "OPENAI_API_KEY_REF"),
+        PROVIDER_CODEX: (codex_api_key, codex_api_key_ref, "CODEX_API_KEY", "CODEX_API_KEY_REF"),
         PROVIDER_GEMINI: (gemini_api_key, gemini_api_key_ref, "GEMINI_API_KEY", "GEMINI_API_KEY_REF"),
         PROVIDER_DEEPSEEK: (deepseek_api_key, deepseek_api_key_ref, "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY_REF"),
     }
@@ -302,7 +314,7 @@ def load_host_config(
     else:
         llm_api_key, llm_api_key_ref, llm_key_env_name, llm_ref_env_name = (None, None, "", "")
 
-    if llm_provider in {PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and llm_api_key_ref:
+    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and llm_api_key_ref:
         resolved = resolve_secret_from_profiles(
             provider=llm_provider,
             node_id=resolved_node_id,
@@ -329,6 +341,9 @@ def load_host_config(
     if llm_provider == PROVIDER_OPENAI:
         openai_api_key = llm_api_key
         openai_api_key_ref = llm_api_key_ref
+    elif llm_provider == PROVIDER_CODEX:
+        codex_api_key = llm_api_key
+        codex_api_key_ref = llm_api_key_ref
     elif llm_provider == PROVIDER_GEMINI:
         gemini_api_key = llm_api_key
         gemini_api_key_ref = llm_api_key_ref
@@ -336,7 +351,7 @@ def load_host_config(
         deepseek_api_key = llm_api_key
         deepseek_api_key_ref = llm_api_key_ref
 
-    if llm_provider in {PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and not cold_start_allowed:
+    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and not cold_start_allowed:
         missing_detail = f"{llm_key_env_name} is required when HOST_COLD_START_ALLOWED=false"
         issues.append(
             ConfigIssue(
@@ -360,6 +375,8 @@ def load_host_config(
         llm_provider=llm_provider,
         openai_api_key=openai_api_key,
         openai_api_key_ref=openai_api_key_ref,
+        codex_api_key=codex_api_key,
+        codex_api_key_ref=codex_api_key_ref,
         gemini_api_key=gemini_api_key,
         gemini_api_key_ref=gemini_api_key_ref,
         deepseek_api_key=deepseek_api_key,
@@ -418,6 +435,7 @@ def export_host_config_snapshot(
     config = load_result.config
     values = config.as_dict()
     values["openai_api_key"] = redact_secret(config.openai_api_key)
+    values["codex_api_key"] = redact_secret(config.codex_api_key)
     values["gemini_api_key"] = redact_secret(config.gemini_api_key)
     values["deepseek_api_key"] = redact_secret(config.deepseek_api_key)
     values["llm_api_key"] = redact_secret(config.llm_api_key)
@@ -429,6 +447,8 @@ def export_host_config_snapshot(
     )
     if config.openai_api_key and "OPENAI_API_KEY" not in redacted_keys:
         redacted_keys.append("OPENAI_API_KEY")
+    if config.codex_api_key and "CODEX_API_KEY" not in redacted_keys:
+        redacted_keys.append("CODEX_API_KEY")
     if config.gemini_api_key and "GEMINI_API_KEY" not in redacted_keys:
         redacted_keys.append("GEMINI_API_KEY")
     if config.deepseek_api_key and "DEEPSEEK_API_KEY" not in redacted_keys:
@@ -505,6 +525,7 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
     # --- host.integrations.llm_gateway ---
     provider_to_env_key = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
     }
@@ -703,6 +724,7 @@ def _inject_resolved_llm_key(*, provider: str, api_key: str | None) -> None:
         return
     provider_to_env_key = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
     }

@@ -17,14 +17,14 @@ from host_brain.app.schemas.routing_types import (
 class TestPrimaryRouting:
     """主路由规则测试（需求 5.2、5.3、5.4）。"""
 
-    def test_chat_fast_routes_to_host_14b(self):
-        """验证 chat + <2s → host_14b（需求 5.2）。"""
+    def test_chat_fast_routes_to_cloud(self):
+        """验证 chat + <2s 默认走 cloud。"""
         matrix = RoutingMatrix()
         decision = matrix.select(
             task_type=TaskType.CHAT,
             latency_budget=LatencyBudget.FAST,
         )
-        assert decision.selected_model == ModelTarget.HOST_14B
+        assert decision.selected_model == ModelTarget.CLOUD
 
     def test_reasoning_routes_to_cloud(self):
         """验证 reasoning → cloud（需求 5.3）。"""
@@ -58,11 +58,10 @@ class TestFallbackRouting:
     """降级路由测试（需求 5.5、5.6）。"""
 
     def test_fallback_chain_order(self):
-        """验证降级链顺序：cloud → cloud_cn → host_14b（需求 5.5）。"""
+        """验证降级链顺序：cloud → cloud_cn。"""
         assert FALLBACK_CHAIN == [
             ModelTarget.CLOUD,
             ModelTarget.CLOUD_CN,
-            ModelTarget.HOST_14B,
         ]
 
     def test_high_risk_fallback_exhausted(self):
@@ -71,21 +70,22 @@ class TestFallbackRouting:
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
             risk_level=RiskLevel.HIGH,
-            failed_models=[ModelTarget.CLOUD, ModelTarget.CLOUD_CN, ModelTarget.HOST_14B],
+            failed_models=[ModelTarget.CLOUD, ModelTarget.CLOUD_CN],
         )
-        # 降级链已耗尽
-        assert decision.selected_model is None or decision.is_fallback
+        assert decision.selected_model == ModelTarget.CLOUD
+        assert decision.is_fallback
 
     def test_fallback_marked_in_decision(self):
         """验证降级决策中 is_fallback=True（需求 5.5）。"""
         matrix = RoutingMatrix()
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
-        failed_models=[ModelTarget.HOST_14B],
+            failed_models=[ModelTarget.CLOUD],
         )
-        if decision.is_fallback:
-            assert decision.fallback_reason is not None
-            assert decision.original_model is not None
+        assert decision.is_fallback
+        assert decision.selected_model == ModelTarget.CLOUD_CN
+        assert decision.fallback_reason is not None
+        assert decision.original_model == ModelTarget.CLOUD
 
     def test_route_log_written(self):
         """验证路由决策写入 llm_route_log（需求 5.5）。"""

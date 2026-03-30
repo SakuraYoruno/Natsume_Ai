@@ -16,6 +16,7 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_user_message,
 )
 from host_brain.integrations.llm_gateway import (
+    PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
@@ -85,6 +86,8 @@ def resolve_host_llm_model_id(provider_name: str) -> str:
         return override_model
     if provider == PROVIDER_GEMINI:
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    if provider == PROVIDER_CODEX:
+        return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_OPENAI:
         return str(os.environ.get("HOST_OPENAI_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_DEEPSEEK:
@@ -247,6 +250,12 @@ def build_langchain_chat_provider_fn(
             base_url = str(
                 os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
             ).strip()
+        elif provider == PROVIDER_CODEX:
+            base_url = str(
+                os.environ.get("HOST_CODEX_BASE_URL")
+                or os.environ.get("HOST_OPENAI_BASE_URL")
+                or ""
+            ).strip() or None
         else:
             base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
@@ -355,7 +364,7 @@ def build_host_provider_fn(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
         return build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,
@@ -377,7 +386,7 @@ def build_host_provider_fn_for_node(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
         provider_fn = build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,

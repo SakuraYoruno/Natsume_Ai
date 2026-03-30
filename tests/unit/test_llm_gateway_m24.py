@@ -13,6 +13,7 @@ import pytest
 
 from host_brain.integrations.llm_gateway import (
     LlmGatewayContract,
+    PROVIDER_CODEX,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
     _load_api_key_from_env,
@@ -319,6 +320,12 @@ class TestLLMGatewayMultiModelRoute:
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-from-env"}):
             key = _load_api_key_from_env("openai")
         assert key == "sk-from-env", "应从环境变量读取 API Key"
+
+    def test_t_llm_gw_14c_codex_api_key_from_env(self):
+        """T-LLM-GW-14c：Codex relay 使用独立的 CODEX_API_KEY。"""
+        with patch.dict(os.environ, {"CODEX_API_KEY": "sk-codex-env"}):
+            key = _load_api_key_from_env(PROVIDER_CODEX)
+        assert key == "sk-codex-env"
 
     def test_t_llm_gw_14b_api_key_env_missing_returns_none(self):
         """T-LLM-GW-14b：环境变量未设置时返回 None。"""

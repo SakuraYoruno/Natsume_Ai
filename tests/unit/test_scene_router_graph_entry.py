@@ -32,9 +32,9 @@ def test_scene_router_entry_handler_defaults_to_chat(monkeypatch) -> None:
     assert out["__next_node__"] == CHAT_DIRECT_NODE_ID
     assert out["scene_type_source"] in {"graph_pre_classifier", "graph_default_chat"}
     route_decision = dict(out.get("route_decision") or {})
-    assert route_decision.get("target") == "host"
-    assert route_decision.get("route_target") == "host_14b"
-    assert dict(route_decision.get("targets") or {}).get("host") is True
+    assert route_decision.get("target") == "cloud"
+    assert route_decision.get("route_target") == "cloud"
+    assert dict(route_decision.get("targets") or {}).get("cloud") is True
 
 
 def test_scene_router_entry_handler_routes_code_request(monkeypatch) -> None:

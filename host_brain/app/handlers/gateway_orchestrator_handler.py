@@ -12,12 +12,12 @@
   RecallFusionNode 预召回 → StateArbiter 四路查询（world_canon/style_canon/episodic/bond）
   → RecallPackBuilder slot 分配 → build_chat_runtime_input → _build_stream_chat_prompt
   → adjust_gen_params_for_emotion → astream_llm_chunks → SentenceSplitter
-  → Airlock Ingress 检疫 → 情节记忆写入 → Bond 动态写入 → COMMIT
+  → 响应内容分类 → 情节记忆写入 → Bond 动态写入 → COMMIT
 
 安全保证：
 - 本 handler 通过 SceneRouter.route_sse(SCENE_GATEWAY) 调用
 - 上游已经过 AirlockQuarantine → Governor → RecallFusion 等前置安全节点
-- 下游经过 Airlock Ingress 检疫 → QAContract → EpisodicStore → Audit
+- 下游经过 响应内容分类 → QAContract → EpisodicStore → Audit
 - 不绕过任何安全审计环节
 
 与 SCENE_CHAT 的差异点：
@@ -216,6 +216,77 @@ def _sse_commit(
     return _sse_event(payload)
 
 
+def _build_gateway_llm_summary(
+    *,
+    node_id: str,
+    provider_name: str,
+    model_id: str,
+    llm_runtime: Mapping[str, Any],
+    resolved_message: str,
+    narrative: str,
+    retrieval_summary: Mapping[str, Any] | None,
+    prompt_context_validation: Mapping[str, Any] | None,
+    prompt_context_observability: Mapping[str, Any] | None,
+    emotion_snapshot: Mapping[str, Any] | None,
+    response_intelligence_meta: Mapping[str, Any] | None,
+    llm_total_latency_ms: int,
+    first_token_latency_ms: int | None,
+    llm_failed: bool = False,
+    failure_reason_code: str | None = None,
+) -> dict[str, Any]:
+    final_narrative = str(narrative or "")
+    llm_status = "DEGRADED" if llm_failed else ("OK" if final_narrative.strip() else "DEGRADED")
+    llm_reason_code = (
+        str(failure_reason_code or "").strip()
+        or (None if final_narrative.strip() else "LLM_EMPTY_OUTPUT")
+    )
+    route_target = str(llm_runtime.get("route_target") or "cloud")
+    route_reason_code = str(llm_runtime.get("route_reason_code") or "")
+    retrieval_status = None
+    if isinstance(retrieval_summary, Mapping):
+        retrieval_status = retrieval_summary.get("status")
+    validation_payload = dict(prompt_context_validation or {})
+    observability_payload = dict(prompt_context_observability or {})
+    emotion_snapshot_payload = dict(emotion_snapshot or {})
+    response_intelligence_payload = dict(response_intelligence_meta or {})
+    return {
+        "status": llm_status,
+        "reason_code": llm_reason_code,
+        "provider": provider_name,
+        "model_id": model_id,
+        "scene_type": "GATEWAY",
+        "route_target": route_target,
+        "route_reason_code": route_reason_code,
+        "emotion_snapshot": emotion_snapshot_payload,
+        "prompt_context_validation": validation_payload,
+        "prompt_context_observability": observability_payload,
+        "latency_ms": llm_total_latency_ms,
+        "first_token_latency_ms": first_token_latency_ms,
+        "node_count": 1,
+        "nodes": [
+            {
+                "node_id": node_id,
+                "status": llm_status,
+                "reason_code": llm_reason_code,
+                "provider": provider_name,
+                "model_id": model_id,
+                "latency_ms": llm_total_latency_ms,
+                "input": {
+                    "user_message": resolved_message,
+                    "render_target_lang": "zh",
+                    "retrieval_status": retrieval_status,
+                    "prompt_context_validation": validation_payload,
+                },
+                "output": {
+                    "narrative": final_narrative,
+                    "emotion_snapshot": emotion_snapshot_payload,
+                    "response_intelligence": response_intelligence_payload,
+                },
+            }
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # StateArbiter 四路查询（world_canon / style_canon / episodic / bond）
 # 复用 chat_stream_handler 的同名函数
@@ -350,7 +421,7 @@ def _build_recall_pack(
 
 
 # ---------------------------------------------------------------------------
-# 后置任务：Airlock 检疫 / 情节记忆写入 / Bond 动态写入
+# 后置任务：响应分类 / 情节记忆写入 / Bond 动态写入
 # ---------------------------------------------------------------------------
 
 async def _run_post_generation_tasks(
@@ -372,23 +443,17 @@ async def _run_post_generation_tasks(
         t0 = int(time.time() * 1000)
         refs: dict[str, Any] = {}
         try:
-            from host_brain.airlock.quarantine import quarantine_ingress  # noqa: PLC0415
-            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-            ingress_result = await asyncio.to_thread(
-                quarantine_ingress,
-                narrative,
-                request_id=request_id,
-                ledger=get_ledger(),
-                ts_ms=ts_ms,
-            )
-            if ingress_result is not None:
+            from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
+            classification = await asyncio.to_thread(classify_ingress, narrative)
+            if classification:
                 refs = {
-                    "ingress_classification": ingress_result.classification,
-                    "quarantine_digest": ingress_result.quarantine_digest,
+                    "ingress_classification": classification,
+                    "quarantine_digest": None,
+                    "airlock_mode": "OBSERVE_ONLY",
                 }
         except Exception as exc:
             logger.warning(
-                "[%s] Gateway Airlock 入口检疫失败（降级）: %s",
+                "[%s] Gateway 响应分类失败（降级）: %s",
                 request_id, exc,
             )
         return refs, max(0, int(time.time() * 1000) - t0)
@@ -429,7 +494,6 @@ async def _run_post_generation_tasks(
         try:
             from host_brain.app.dependencies import get_bond_stage_engine, get_bond_update_queue  # noqa: PLC0415
             from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
-            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
 
             etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
             intensity = float(emotion_context.get("emotion_intensity") or 0.5)
@@ -832,6 +896,10 @@ async def gateway_orchestrator_sse_generator(
     rendered_text = ""
     sentence_index = 0
     token_index = 0
+    llm_stream_started_ms = int(time.time() * 1000)
+    first_token_latency_ms: int | None = None
+    llm_failed = False
+    llm_failure_reason_code: str | None = None
 
     try:
         async for chunk in astream_llm_chunks(
@@ -846,6 +914,8 @@ async def gateway_orchestrator_sse_generator(
         ):
             if not chunk:
                 continue
+            if first_token_latency_ms is None:
+                first_token_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
             full_text += chunk
 
             # TOKEN 事件
@@ -859,6 +929,7 @@ async def gateway_orchestrator_sse_generator(
                 visible_text = full_text
             if not visible_text:
                 continue
+            rendered_text = visible_text
 
             # 句子边界检测
             for sentence in splitter.feed(chunk):
@@ -872,12 +943,15 @@ async def gateway_orchestrator_sse_generator(
             sentence_index += 1
 
     except Exception as exc:
+        llm_failed = True
+        llm_failure_reason_code = "LLM_STREAM_FAILED"
         logger.error(
             "[%s] GatewayOrchestrator LLM 生成异常: %s",
             request_id, exc,
         )
         if not full_text.strip():
             full_text = "抱歉，处理出了点问题，请稍后再试。"
+            rendered_text = full_text
             yield _sse_sentence(request_id, full_text, 0)
 
     narrative = _normalize_gateway_commit_narrative(
@@ -901,6 +975,25 @@ async def gateway_orchestrator_sse_generator(
             "reflection": {"status": "DEGRADED", "reason_code": "POSTPROCESS_FAILED", "detail": str(exc)},
             "multimodal_output": {"status": "SKIPPED", "reason_code": "POSTPROCESS_FAILED"},
         }
+
+    llm_total_latency_ms = max(0, int(time.time() * 1000) - llm_stream_started_ms)
+    llm_summary = _build_gateway_llm_summary(
+        node_id=CHAT_DIRECT_NODE_ID,
+        provider_name=provider_name,
+        model_id=model_id,
+        llm_runtime=llm_runtime,
+        resolved_message=resolved_message,
+        narrative=narrative,
+        retrieval_summary=retrieval_summary,
+        prompt_context_validation=prompt_context_validation,
+        prompt_context_observability=prompt_context_observability,
+        emotion_snapshot=emotion_snapshot_resolved,
+        response_intelligence_meta=response_intelligence_meta,
+        llm_total_latency_ms=llm_total_latency_ms,
+        first_token_latency_ms=first_token_latency_ms,
+        llm_failed=llm_failed,
+        failure_reason_code=llm_failure_reason_code,
+    )
 
     # ── 4. 后置任务：Airlock 检疫 + 情节记忆 + Bond 动态（并行）──
     post_task_refs = await _run_post_generation_tasks(
@@ -937,13 +1030,9 @@ async def gateway_orchestrator_sse_generator(
             ledger=get_ledger(),
             request_id=request_id,
             session_id=session_id,
-            llm_summary={
-                "status": "OK" if narrative else "DEGRADED",
-                "provider": provider_name,
-                "model_id": model_id,
-                "scene_type": "GATEWAY",
-            },
+            llm_summary=llm_summary,
             ts_ms=ts_ms,
+            fallback_reason_code=str(llm_summary.get("route_reason_code") or "") or None,
         )
     except Exception as exc:
         logger.debug(
@@ -967,6 +1056,7 @@ async def gateway_orchestrator_sse_generator(
         audit_refs={
             "intent_id": intent_id,
             "retrieval": retrieval_summary,
+            "llm": llm_summary,
             "recall_pack_builder": recall_pack_summary,
             "prompt_context_validation": prompt_context_validation,
             "prompt_context_observability": prompt_context_observability,
@@ -976,6 +1066,8 @@ async def gateway_orchestrator_sse_generator(
             "response_intelligence": response_intelligence_meta,
             "trace_metrics": {
                 "elapsed_ms": elapsed_ms,
+                "llm_total_latency_ms": llm_total_latency_ms,
+                "first_token_latency_ms": first_token_latency_ms,
                 "render_target_lang": "zh",
             },
         },

@@ -62,24 +62,24 @@ class TestRoutingMatrixIntegration:
         from host_brain.app.llm.routing_matrix import RoutingMatrix
         return RoutingMatrix()
 
-    def test_chat_normal_routes_to_host_14b(self):
+    def test_chat_normal_routes_to_cloud(self):
         from host_brain.app.schemas.routing_types import TaskType, LatencyBudget, ModelTarget
         matrix = self._make_matrix()
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
             latency_budget=LatencyBudget.NORMAL,
         )
-        assert decision.selected_model == ModelTarget.HOST_14B
+        assert decision.selected_model == ModelTarget.CLOUD
         assert not decision.is_fallback
 
-    def test_chat_fast_routes_to_host_14b(self):
+    def test_chat_fast_routes_to_cloud(self):
         from host_brain.app.schemas.routing_types import TaskType, LatencyBudget, ModelTarget
         matrix = self._make_matrix()
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
             latency_budget=LatencyBudget.FAST,
         )
-        assert decision.selected_model == ModelTarget.HOST_14B
+        assert decision.selected_model == ModelTarget.CLOUD
 
     def test_reasoning_routes_to_cloud(self):
         from host_brain.app.schemas.routing_types import TaskType, LatencyBudget, ModelTarget
@@ -90,14 +90,14 @@ class TestRoutingMatrixIntegration:
     def test_fallback_chain_skips_failed_model(self):
         from host_brain.app.schemas.routing_types import TaskType, LatencyBudget, ModelTarget
         matrix = self._make_matrix()
-        # 主路由 HOST_14B 失败，应降级到 CLOUD
+        # 主路由 CLOUD 失败，应降级到 CLOUD_CN
         decision = matrix.select_with_fallback(
             task_type=TaskType.CHAT,
             latency_budget=LatencyBudget.NORMAL,
-            failed_models=[ModelTarget.HOST_14B],
+            failed_models=[ModelTarget.CLOUD],
         )
         assert decision.is_fallback
-        assert decision.selected_model == ModelTarget.CLOUD
+        assert decision.selected_model == ModelTarget.CLOUD_CN
 
     def test_route_log_writer_called(self):
         from host_brain.app.schemas.routing_types import TaskType

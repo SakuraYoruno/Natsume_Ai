@@ -9,6 +9,7 @@ from threading import Thread
 from typing import TYPE_CHECKING, Any, Callable
 
 PROVIDER_OPENAI = "openai"
+PROVIDER_CODEX = "codex"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
 
@@ -78,6 +79,7 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     """
     provider_to_env: dict[str, str] = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_CODEX: "CODEX_API_KEY",
         "gemini": "GEMINI_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
@@ -186,6 +188,12 @@ def stream_llm_chunks(
             base_url = str(
                 os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai"
             ).strip()
+        elif provider == PROVIDER_CODEX:
+            base_url = str(
+                os.environ.get("HOST_CODEX_BASE_URL")
+                or os.environ.get("HOST_OPENAI_BASE_URL")
+                or ""
+            ).strip() or None
         else:
             base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
