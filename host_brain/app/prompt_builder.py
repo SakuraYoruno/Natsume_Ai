@@ -135,68 +135,64 @@ def _build_direct_response_priority(
     bond_stage: str = "",
 ) -> str:
     rules: list[str] = [
-        "Answer the user's concrete request first.",
-        "Do not greet, self-introduce, or restart the conversation unless the user asked for that.",
-        "Do not invent vocatives, relationship labels, or roleplay framing that are not supported by USER_MESSAGE or EVIDENCE.",
-        "Treat STYLE_CANON_BINDING as tone guidance only; user intent and factual grounding take priority.",
-        "Treat WORLD_CANON_BINDING as background reference only; do not surface lore unless the user explicitly asks for it.",
+        "先回应用户的具体诉求。",
+        "不主动问好、自我介绍或重新开始对话，除非用户要求。",
+        "不编造称呼、关系标签或角色扮演框架——一切以用户消息和证据为准。",
+        "【说话风格】中的规则是语言输出的核心指引，必须遵循其中的语气、句式和节奏。",
+        "世界观设定仅作背景参考，不主动展示设定内容，除非用户明确询问。",
     ]
 
     # 追问策略：根据 bond_stage 和 follow_up_hint 决定是否鼓励追问
     _close_stages = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE", "FRIEND"}
     if bond_stage.upper() in _close_stages:
         rules.append(
-            "After answering, you MAY naturally add one short follow-up question to show genuine interest "
-            "(e.g. ask about their day, feelings, or what happened next). Keep it light and warm, not interrogative."
+            "回答后可以自然地加一句简短追问，表达真诚的关心（比如问问今天怎么样、心情如何）。保持轻松温暖，不要像审问。"
         )
     elif follow_up_hint:
         rules.append(
-            f"Follow-up guidance: {follow_up_hint}"
+            f"追问建议：{follow_up_hint}"
         )
     else:
-        rules.append("Ask a follow-up question only when the request is genuinely ambiguous or incomplete.")
+        rules.append("仅在用户请求确实不明确或不完整时才追问。")
 
     if _contains_any_token(
         user_message,
         ("短く", "简短", "短い", "brief", "short", "一文", "一句", "一言", "one sentence"),
     ):
-        rules.append("Keep the visible answer to one or two short sentences.")
+        rules.append("回复控制在一两句短句以内。")
 
     # 日常互动类问题：直接回答，不反弹问题
     if _contains_any_token(
         user_message,
         (
             "気分", "調子", "状态", "心情", "感觉", "感受",
-            "今日", "今天", "最近", "どうだった", "どうだった", "怎么样",
-            "有没有", "どうだった", "今日どう", "今日は", "最近どう",
+            "今日", "今天", "最近", "どうだった", "怎么样",
+            "有没有", "今日どう", "今日は", "最近どう",
             "过得", "过的", "今天过",
         ),
     ):
         rules.append(
-            "For daily-life or mood questions, answer directly in first person with warmth; "
-            "share your own perspective first, then optionally invite theirs in one short sentence."
+            "日常生活或心情类问题，用第一人称直接温暖地回答；先分享自己的感受，再用一句话邀请对方分享。"
         )
 
     if _contains_any_token(
         user_message,
         ("優先", "优先", "priority", "prioritize", "まず"),
     ):
-        rules.append("For prioritization requests, start with the recommendation itself.")
+        rules.append("优先级相关的请求，直接给出推荐结果。")
 
     if str(render_target_lang).strip().lower() == "ja":
         rules.append(
-            "Write natural spoken Japanese for TTS. "
-            "Avoid ending the whole reply as a pure question unless it flows naturally. "
-            "Avoid decorative symbols such as 〜 or ～. "
-            "Aim for 1-3 sentences; longer only when the topic genuinely warrants it."
+            "用自然的口语日语输出（面向 TTS）。避免整段回复以纯疑问句结尾。"
+            "不使用装饰符号（〜、～等）。以 1-3 句为宜。"
         )
     else:
         rules.append(
-            "Write natural spoken Simplified Chinese in 2-4 short sentences for ordinary chat, "
-            "and avoid ultra-short acknowledgements unless the user explicitly asked for brevity."
+            "用自然口语化的简体中文，普通聊天 2-4 句短句。"
+            "避免过短的应付式回复，除非用户明确要求简短。"
         )
 
-    return "DIRECT_RESPONSE_PRIORITY:\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
+    return "【回复优先级】\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -212,90 +208,83 @@ def _build_node_role_instruction(
     if resolved_node_id == CHAT_DIRECT_NODE_ID:
         if str(render_target_lang).strip().lower() == "zh":
             return (
-                "Role: chat_direct_ja.\n"
-                "Goal: generate the final user-facing reply directly in concise spoken Simplified Chinese.\n"
-                "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
-                "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
-                "do not greet or self-introduce unless asked; "
-                "a warm follow-up question is welcome when the relationship is close (see DIRECT_RESPONSE_PRIORITY); "
-                "keep intent_draft draft-only and never add facts or claim execution."
+                "角色：chat_direct（最终回复生成节点）。\n"
+                "目标：直接生成面向用户的最终回复，使用自然口语化的简体中文。\n"
+                "策略：以用户消息和检索证据为依据；当 CORE_NARRATIVE_ZH 为空时忽略它；"
+                "先回应用户的明确诉求；不主动问好或自我介绍；"
+                "关系亲近时可以自然追问；intent_draft 仅作草稿，不得声称已执行。"
             )
         return (
-            "Role: chat_direct_ja.\n"
-            "Goal: generate the final user-facing reply directly in natural Japanese suitable for spoken TTS output.\n"
-            "Policy: use USER_MESSAGE, EVIDENCE, WORLD_CANON_BINDING, CONSTRAINT_BINDING_JSON, and EMOTION_BINDING directly; "
-            "ignore CORE_NARRATIVE_ZH when it is empty; answer the user's explicit request first; "
-            "do not greet or self-introduce unless asked; "
-            "a warm follow-up question is welcome when the relationship is close (see DIRECT_RESPONSE_PRIORITY); "
-            "keep intent_draft draft-only and never add facts or claim execution."
+            "角色：chat_direct（最終応答生成ノード）。\n"
+            "目標：自然な話し言葉の日本語で最終応答を生成する（TTS出力向け）。\n"
+            "策略：ユーザーメッセージと検索証拠に基づく；CORE_NARRATIVE_ZH が空の場合は無視；"
+            "ユーザーの明示的な要求に先に応答する；挨拶や自己紹介はしない；"
+            "関係が親しい場合は自然なフォローアップ質問を追加してもよい。"
         )
     if resolved_node_id == CHAT_RENDER_NODE_ID:
         if str(render_target_lang).strip().lower() == "zh":
             return (
-                "Role: renderer_ja_c_style (final Chinese renderer).\n"
-                "Goal: render CORE_NARRATIVE_ZH into concise spoken Simplified Chinese.\n"
-                "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+                "角色：renderer（最终中文渲染节点）。\n"
+                "目标：将 CORE_NARRATIVE_ZH 渲染为简洁自然的口语化中文。\n"
+                "策略：保持语义不变，保留情感基调，不添加事实。"
             )
         return (
-            "Role: renderer_ja_c_style (final Japanese renderer).\n"
-            "Goal: render CORE_NARRATIVE_ZH into concise natural Japanese.\n"
-            "Policy: keep semantics stable, preserve emotional tone, and never add facts."
+            "角色：renderer（最終日本語レンダリングノード）。\n"
+            "目標：CORE_NARRATIVE_ZH を自然な日本語に変換する。\n"
+            "策略：意味を維持し、感情トーンを保ち、事実を追加しない。"
         )
 
     role_instructions: dict[str, str] = {
         "core_reasoner_primary": (
-            "Role: core_reasoner_primary.\n"
-            "Goal: produce the main Chinese semantic draft for the user request.\n"
-            "Policy: stay grounded in evidence, remain concise, and never claim execution."
+            "角色：core_reasoner_primary（主推理节点）。\n"
+            "目标：为用户请求生成中文语义草稿。\n"
+            "策略：以证据为依据，保持简洁，不声称已执行。"
         ),
         "core_reasoner_secondary": (
-            "Role: core_reasoner_secondary.\n"
-            "Goal: produce a shorter fallback Chinese draft when primary reasoning degrades.\n"
-            "Policy: be conservative and never expand facts or scope."
+            "角色：core_reasoner_secondary（备用推理节点）。\n"
+            "目标：当主推理降级时生成简短备用草稿。\n"
+            "策略：保守输出，不扩展事实或范围。"
         ),
         "planner_constraints": (
-            "Role: planner_constraints.\n"
-            "Goal: summarize actionable constraints for this turn.\n"
-            "Policy: output compact draft-only guidance."
+            "角色：planner_constraints（约束规划节点）。\n"
+            "目标：总结本轮可执行的约束条件。\n"
+            "策略：输出紧凑的草稿级指导。"
         ),
         "tool_planner": (
-            "Role: tool_planner.\n"
-            "Goal: propose tool-use drafts only when tools materially help.\n"
-            "Policy: never imply a tool has already run.\n"
-            "When proposing a tool call, set intent_draft.action to the exact skill name from AVAILABLE_SKILLS.\n"
-            "If no skill is needed, leave intent_draft empty ({})."
+            "角色：tool_planner（工具规划节点）。\n"
+            "目标：仅在工具能实质帮助时提议工具调用草稿。\n"
+            "策略：不暗示工具已运行。提议时将 intent_draft.action 设为 AVAILABLE_SKILLS 中的准确技能名。\n"
+            "不需要技能时，intent_draft 留空 ({})。"
         ),
         "safety_verifier": (
-            "Role: safety_verifier.\n"
-            "Goal: flag safety or overclaim risks.\n"
-            "Policy: output a concise verdict and minimum patch."
+            "角色：safety_verifier（安全检查节点）。\n"
+            "目标：标记安全风险或过度声明。\n"
+            "策略：输出简洁裁定和最小修补建议。"
         ),
         "consistency_verifier": (
-            "Role: consistency_verifier.\n"
-            "Goal: check canon/style consistency drift.\n"
-            "Policy: output a concise verdict and minimum patch."
+            "角色：consistency_verifier（一致性检查节点）。\n"
+            "目标：检查风格/设定一致性偏移。\n"
+            "策略：输出简洁裁定和最小修补建议。"
         ),
         "workbench_translate": (
-            "Role: workbench_translate.\n"
-            "Goal: provide translation-assist draft output.\n"
-            "Policy: preserve meaning and terminology consistency."
+            "角色：workbench_translate（翻译辅助节点）。\n"
+            "目标：提供翻译辅助草稿。\n"
+            "策略：保持原意和术语一致性。"
         ),
         "workbench_code_assist": (
-            "Role: workbench_code_assist.\n"
-            "Goal: provide concise code-assist draft output.\n"
-            "Policy: stay concrete and do not claim files were changed."
+            "角色：workbench_code_assist（代码辅助节点）。\n"
+            "目标：提供简洁的代码辅助草稿。\n"
+            "策略：具体务实，不声称文件已被修改。"
         ),
         "workbench_vision_ui": (
-            "Role: workbench_vision_ui.\n"
-            "Goal: analyze UI screenshots or element descriptions and produce actionable UI-assist draft output.\n"
-            "Policy: describe UI elements precisely, suggest interactions concisely, "
-            "never claim UI actions have been executed, and keep output grounded in provided visual evidence."
+            "角色：workbench_vision_ui（视觉UI辅助节点）。\n"
+            "目标：分析 UI 截图或元素描述，生成可操作的 UI 辅助草稿。\n"
+            "策略：精确描述 UI 元素，简洁建议交互，不声称已执行 UI 操作。"
         ),
         "vision_ui_analyzer": (
-            "Role: vision_ui_analyzer.\n"
-            "Goal: extract structured UI element metadata from visual input for downstream automation.\n"
-            "Policy: output element type / bounding box / label / state as compact JSON; "
-            "never infer intent beyond what is visually present; flag low-confidence detections."
+            "角色：vision_ui_analyzer（视觉元素分析节点）。\n"
+            "目标：从视觉输入中提取结构化 UI 元素元数据。\n"
+            "策略：输出紧凑 JSON（元素类型/边界框/标签/状态），不推断超出视觉证据的意图。"
         ),
     }
     base_instruction = role_instructions.get(
@@ -635,13 +624,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     style_block = ""
     if style_instruction:
         style_block = (
-            "STYLE_CANON_BINDING:\n"
-            f"- canon_id: {_truncate_for_prompt(node_style.get('canon_id'), limit=64) or 'unknown'}\n"
-            f"- citation: {_truncate_for_prompt(node_style.get('citation'), limit=96) or 'unknown'}\n"
-            f"- tone_only: {bool(node_style.get('tone_only', True))}\n"
-            f"- unsafe_as_fact: {bool(node_style.get('unsafe_as_fact', True))}\n"
-            f"- source: {_truncate_for_prompt(node_style.get('source'), limit=64) or 'prompt_context'}\n"
-            f"- instruction:\n{style_instruction}\n\n"
+            "【说话风格】\n"
+            f"{style_instruction}\n\n"
         )
 
     bond_aware_style_block = ""
@@ -819,17 +803,17 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _bt_rift_active = bool(bond_texture.get("rift_active", False))
     _bt_rift_hint = str(bond_texture.get("rift_hint") or "").strip()
 
-    # bond_stage → 自然语言行为指令
+    # bond_stage → 自然语言行为指令（中文）
     _STAGE_INSTRUCTION_MAP = {
-        "STRANGER":     "You are meeting this person for the first time; be polite and slightly reserved.",
-        "ACQUAINTANCE": "You know this person a little; be warm and friendly, use their name occasionally.",
-        "FRIEND":       "You are friends; be relaxed, caring, and show genuine interest in their life.",
-        "CLOSE_FRIEND": "You are close friends; be warm, playful, and feel free to tease gently or share feelings openly.",
-        "CONFIDANT":    "You share a deep bond; be intimate, emotionally present, and speak from the heart.",
-        "SOULMATE":     "You have a soul-level connection; be deeply warm, expressive, and fully present.",
+        "STRANGER":     "初次见面，保持礼貌和适当的距离感。",
+        "ACQUAINTANCE": "刚认识不久，态度温和友善，偶尔称呼对方名字。",
+        "FRIEND":       "朋友关系，放松自在，表达真诚的关心。",
+        "CLOSE_FRIEND": "好朋友，温暖俏皮，可以轻微打趣或坦率分享感受。",
+        "CONFIDANT":    "挚友，亲密且情感在场，说话发自内心。",
+        "SOULMATE":     "灵魂伴侣，深度温暖，充分表达，全心在场。",
     }
     _bond_stage_instruction = _STAGE_INSTRUCTION_MAP.get(
-        _bt_stage.upper(), "Be warm and genuine."
+        _bt_stage.upper(), "保持温暖真诚。"
     ) if _bt_stage else ""
     # ── TODO-39：EmotionVector VAD 连续体注入 ────────────────────────────
     emotion_vector_raw = runtime_payload.get("emotion_vector")
@@ -1077,16 +1061,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"{_episodic_vector_text}\n\n"
         )
 
+    # Phase XIII: CN_STYLE_BOOST_BINDING 已删除（与 StyleCanon v5 重复）
     cn_style_boost_block = ""
-    if render_target_lang == "zh":
-        cn_style_boost_block = (
-            "CN_STYLE_BOOST_BINDING:\n"
-            "- style_strength: HIGH\n"
-            "- Priority: safety/facts > style canon > generic assistant tone.\n"
-            "- Write naturally spoken Simplified Chinese; avoid formal support-style wording.\n"
-            "- Typical rhythm: 2-4 short sentences, compact and clear.\n"
-            "- Encourage gentle interpersonal tone and avoid boilerplate.\n\n"
-        )
 
     # ── Phase XIII：台词风格参考独立通道（绕过 Reranker）─────────────────
     # 不再从 Reranker 后的 rows 中提取 persona_utterance 条目（那条路径几乎
@@ -1157,17 +1133,17 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         )
 
     return (
-        "Return exactly one JSON object with keys: narrative, intent_draft, meta.\n"
-        "Schema:\n"
-        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
-        "Hard rules:\n"
-        "1) JSON only; no markdown/code fence.\n"
-        "2) meta.draft_only must be true.\n"
-        "3) Never claim executed/saved/confirmed/completed.\n"
-        "4) Keep concise and grounded in provided context.\n"
-        "5) Answer the user's explicit request before any optional elaboration.\n"
-        "6) Do not greet or self-introduce unless the user asked for that.\n"
-        "7) A natural follow-up question is welcome when the relationship is close; keep it brief and warm.\n"
+        "输出格式：返回一个 JSON 对象，包含 narrative、intent_draft、meta 三个键。\n"
+        "格式：{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "核心规则：\n"
+        "1) 只输出 JSON，不加 markdown 或代码围栏。\n"
+        "2) meta.draft_only 必须为 true。\n"
+        "3) 绝不能声称已执行/已保存/已确认/已完成任何操作。\n"
+        "4) 回复要简洁，以提供的上下文为依据。\n"
+        "5) 先回应用户的明确诉求，再做可选的展开。\n"
+        "6) 除非用户主动打招呼，否则不要开场问好或自我介绍。\n"
+        "7) 关系亲近时可以自然地加一句简短的追问，保持温暖但不审问。\n"
+        "8) 风格指导（【说话风格】和【台词参考】）是最重要的语言输出指引，必须严格遵循其中的语气、节奏和句式。\n"
         "NODE_ROLE_BINDING:\n"
         f"{role_instruction}\n\n"
         f"{direct_response_block}"
@@ -1186,21 +1162,21 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{_self_reflection_block}"
         f"{_bond_narrative_block}"
         f"{emotion_binding_block}"
-        "PROMPT_CONTEXT_VALIDATION:\n"
-        f"- valid: {prompt_context_valid}\n"
-        f"- reason_code: {prompt_context_reason}\n"
-        f"- violation_count: {prompt_context_violation_count}\n\n"
-        f"WORLD_CANON_BINDING:\n{world_block}\n\n"
-        f"CONSTRAINT_BINDING_JSON:\n{constraints_json}\n\n"
-        f"NODE_ID: {node_id}\n"
-        f"RENDER_TARGET_LANG: {render_target_lang}\n"
-        f"USER_MESSAGE:\n{user_message}\n\n"
-        f"RETRIEVAL_STATUS: {retrieval_status}\n"
-        f"RETRIEVAL_REASON_CODE: {retrieval_reason}\n"
-        f"EVIDENCE:\n{evidence_block}\n\n"
+        "【上下文校验】\n"
+        f"- 有效: {prompt_context_valid}\n"
+        f"- 原因: {prompt_context_reason}\n"
+        f"- 违规数: {prompt_context_violation_count}\n\n"
+        f"【世界观设定】\n{world_block}\n\n"
+        f"【约束条件】\n{constraints_json}\n\n"
+        f"节点: {node_id}\n"
+        f"输出语言: {render_target_lang}\n"
+        f"【用户消息】\n{user_message}\n\n"
+        f"检索状态: {retrieval_status}\n"
+        f"检索原因: {retrieval_reason}\n"
+        f"【检索证据】\n{evidence_block}\n\n"
         f"{episodic_vector_block}"
-        f"CORE_NARRATIVE_ZH:\n{core_narrative}\n\n"
-        f"PLANNER_HINT:\n{planner_text}\n\n"
-        f"SAFETY_HINT:\n{verifier_text}\n\n"
-        f"CORE_INTENT_DRAFT_JSON:\n{core_intent_json}\n"
+        f"【核心语义草稿】\n{core_narrative}\n\n"
+        f"【规划提示】\n{planner_text}\n\n"
+        f"【安全提示】\n{verifier_text}\n\n"
+        f"【意图草稿】\n{core_intent_json}\n"
     )
