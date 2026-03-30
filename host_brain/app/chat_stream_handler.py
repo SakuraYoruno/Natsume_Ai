@@ -438,8 +438,7 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
 _RECALL_PACK_SLOT_ALIASES: dict[str, str] = {
     "world": "world_canon",
     "world_canon": "world_canon",
-    "style": "style_canon",
-    "style_canon": "style_canon",
+    # Phase XIII: style_canon/persona_utterance 已走独立通道，不再作为 RecallPack slot
     "episodic": "episodic_vector",
     "episodic_store": "episodic_vector",
     "episodic_vector": "episodic_vector",
@@ -447,8 +446,6 @@ _RECALL_PACK_SLOT_ALIASES: dict[str, str] = {
     "bond_graph": "bond_graph",
     "artifact": "artifact_vault",
     "artifact_vault": "artifact_vault",
-    "persona": "persona_utterance",
-    "persona_utterance": "persona_utterance",
     "sqlite": "sqlite_ledger",
     "sqlite_ledger": "sqlite_ledger",
     "ledger": "sqlite_ledger",
@@ -456,11 +453,9 @@ _RECALL_PACK_SLOT_ALIASES: dict[str, str] = {
 
 _RECALL_PACK_SLOT_TO_STORE_ID: dict[str, str] = {
     "world_canon": "world_canon",
-    "style_canon": "style_canon",
     "episodic_vector": "episodic_vector",
     "bond_graph": "bond_graph",
     "artifact_vault": "artifact_vault",
-    "persona_utterance": "persona_utterance",
     "sqlite_ledger": "sqlite_ledger",
 }
 
