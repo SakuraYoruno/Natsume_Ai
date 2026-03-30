@@ -109,6 +109,10 @@
   用途：Phase XI 智能体架构升级七大方案技术文档（2026-03-29）。(1)ReflectionChain自我反思链——5维结构化评估+Generate→Reflect→Revise循环；(2)EpisodicMemoryGraph情景记忆图谱——话题聚类+主题线链接+graph walk召回；(3)PredictiveState预测性状态——6时段周期性模式预测+主动行为提示；(4)PlanningAgent任务规划——ReAct式分解+reason/act/ask/synthesize四步骤；(5)MetaLearningLoop元学习——模块指标EMA+自动调参+Evolution Report；(6)SkillComposer技能编排——DAG规划+拓扑排序+并行执行；(7)MultimodalProcessor多模态——emoji情绪信号+Vision LLM接口+颜文字建议。
   读者：MASTER、实现层（查阅对齐）。
 
+- docs/50_project/arch/PHASE_XII_HOST_LOCAL_CONTROL.md
+  用途：Phase XII Host 本地操控能力技术文档（2026-03-29）。五阶段实现：(1)HostCommandExecutor安全命令执行——4级安全分层(L0只读/L1白名单写/L2需确认/L3双重确认/L4禁止)+命令白名单+沙箱目录+审计日志；(2)SecretVault加密密钥保险库——PBKDF2+XOR加密+按名称分类存取；(3)FileForensics智能文件处理——24种magic bytes签名检测+后缀自动修复+批量解压+密码列表尝试+递归解压；(4)BrowserAutomation浏览器自动化——Playwright封装+域名黑名单+敏感字段保护+每步截图留证+脚本编排；(5)FileOrganizer高级文件整理——9类70+后缀分类+日期归档+MD5去重+空目录清理；(6)SystemMonitor系统监控+ProcessGuard进程守护——CPU/内存/GPU/网络快照+进程管理+崩溃自动重启。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
