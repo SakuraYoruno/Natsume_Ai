@@ -1,13 +1,16 @@
-"""七路召回 Store 搜索方法模块。
+"""五路召回 Store 搜索方法模块（Phase XIII 精简后）。
 
 从 recall_fusion.py 拆分，包含 RecallFusionServiceContract 的各路 store 搜索实现：
   - Route 1: episodic_vector（Chroma 向量检索）
   - Route 2: sqlite_ledger（SQLite 意图日志 + 记忆操作日志）
   - Route 3: neo4j_bond（Neo4j 关系图 / SQLite bond 日志降级）
-  - Route 4: style_canon（风格典籍向量投影 + 文件降级）
-  - Route 5: world_canon（世界观典籍向量投影 + 文件降级）
-  - Route 6: artifact_vault（制品库 SSOT 接口）
-  - Route 7: persona_utterance（人格话语向量投影）
+  - Route 4: world_canon（世界观典籍向量投影 + 文件降级）
+  - Route 5: artifact_vault（制品库 SSOT 接口）
+
+已废弃（Phase XIII 走独立通道，不再作为检索路由）：
+  - style_canon → StyleCanon v5 常驻注入
+  - persona_utterance → EmotionTaggedUtteranceIndex 独立通道
+  搜索方法保留供向后兼容，但不再有路由配置指向它们。
 """
 
 from __future__ import annotations

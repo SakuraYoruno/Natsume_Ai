@@ -7,7 +7,7 @@
 
 子模块职责：
   - recall_fusion_utils.py   — 纯工具函数（评分、文本相似度、向量归一化等）
-  - recall_fusion_stores.py  — 七路 store 搜索方法
+  - recall_fusion_stores.py  — 五路 store 搜索方法（Phase XIII 精简后）
   - recall_fusion_config.py  — 配置加载与路由解析
 """
 

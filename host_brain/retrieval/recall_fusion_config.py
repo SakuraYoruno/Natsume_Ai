@@ -38,10 +38,9 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
     "neo4j_bond",
     "episodic_vector",
-    "style_canon",
     "world_canon",
     "artifact_vault",
-    "persona_utterance",
+    # Phase XIII: style_canon / persona_utterance 已走独立通道，不再作为检索路由
 })
 
 

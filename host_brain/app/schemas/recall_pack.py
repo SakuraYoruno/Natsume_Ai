@@ -6,12 +6,10 @@ from typing import Dict, List, Optional
 
 RECALL_SLOT_TOKEN_BUDGET: Dict[str, int] = {
     "world_canon": 800,
-    "style_canon": 400,
-    "episodic_vector": 600,
-    "bond_graph": 300,
+    "episodic_vector": 800,      # Phase XIII: +200（从 style_canon 释放）
+    "bond_graph": 500,           # Phase XIII: +200（从 persona_utterance 释放）
     "artifact_vault": 200,
-    "persona_utterance": 200,
-    "sqlite_ledger": 200,
+    "sqlite_ledger": 400,        # Phase XIII: +200（从释放预算重分配）
 }
 
 RECALL_PACK_TOKEN_BUDGET: int = 2700
@@ -19,11 +17,9 @@ RECALL_PACK_TOKEN_BUDGET: int = 2700
 # Higher-priority slots survive truncation longer.
 RECALL_SLOT_PRIORITY: List[str] = [
     "world_canon",
-    "style_canon",
     "episodic_vector",
     "bond_graph",
     "artifact_vault",
-    "persona_utterance",
     "sqlite_ledger",
 ]
 
@@ -42,11 +38,9 @@ class RecallPack:
     """Internal recall container. Prompt-facing context pack is built elsewhere."""
 
     world_canon: Optional[RecallSlot] = None
-    style_canon: Optional[RecallSlot] = None
     episodic_vector: Optional[RecallSlot] = None
     bond_graph: Optional[RecallSlot] = None
     artifact_vault: Optional[RecallSlot] = None
-    persona_utterance: Optional[RecallSlot] = None
     sqlite_ledger: Optional[RecallSlot] = None
 
     total_token_count: int = 0
