@@ -247,7 +247,30 @@ async def _unified_chat_sse_generator(
             },
         )
 
-        # ── [任务3] SceneRouter 节点化路由：替换 if-else 硬编码分流 ─────────
+        # ── Phase XIV v4：顶级 Agent 统一入口 ────────────────────────────
+        # HOST_TOP_AGENT_ENABLED=true 时走新架构（顶级 Agent 统一处理所有场景）。
+        # 闲聊路径：Airlock → LLM → Airlock → 异步后处理（零 Governor/审计）
+        # 执行路径：顶级 Agent 调度子 Agent → 子 Agent 内部走治理
+        # 关闭时走旧链路（SceneRouter）——灰度开关，随时可回退。
+        _top_agent_enabled = str(os.environ.get("HOST_TOP_AGENT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+        if _top_agent_enabled:
+            from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+            async for event in top_agent_sse_generator(
+                request_body=request_body,
+                request_id=request_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                intent_draft=intent_draft,
+                emotion_context=emotion_context,
+                emotion_snapshot=emotion_snapshot,
+                governor_result=governor_result,
+                intent_id=intent_id,
+                metrics=metrics,
+            ):
+                yield event
+            return
+
+        # ── [旧链路] SceneRouter 节点化路由 ─────────────────────────────
         # 非 SCENE_CHAT 场景通知客户端已路由
         if scene_type != SCENE_CHAT:
             yield _sse({
