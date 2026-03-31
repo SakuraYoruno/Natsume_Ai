@@ -57,8 +57,8 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     """POST /v1/chat 统一入口。
 
     Governor 鉴权后由 pre_intent_classifier 分类场景：
-    - SCENE_CHAT（日常対話）→ 本地 qwen8B 单节点，token 级流式 SSE
-    - 複雑場景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT）→ 云端 Gemini 多节点，节点级进度 SSE
+    - SCENE_CHAT（日常対話）→ 云优先单节点（Gemini → Codex → DeepSeek → host_14b），token 级流式 SSE
+    - 複雑場景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT）→ 多节点编排，节点级进度 SSE
 
     模式门控：
     - locked 模式下拒绝所有 chat 请求（返回 403 提示）

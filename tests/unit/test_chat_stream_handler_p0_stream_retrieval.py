@@ -70,9 +70,8 @@ class _FakeIntentEngine:
         }
 
 
-class _FakeIngress:
-    classification = "ALLOW"
-    quarantine_digest = None
+def _fake_ingress_classification(*_args: Any, **_kwargs: Any) -> str:
+    return "FACT"
 
 
 class _DummyMetaLearning:
@@ -220,7 +219,7 @@ def test_stream_prompt_injects_retrieval_before_render(monkeypatch: Any) -> None
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(
         stream_mod,
@@ -293,7 +292,7 @@ def test_stream_retrieval_timeout_degrades_but_keeps_streaming(monkeypatch: Any)
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(
         stream_mod,
@@ -357,7 +356,7 @@ def test_stream_high_risk_turn_buffers_until_reflection_revision(monkeypatch: An
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
@@ -480,7 +479,7 @@ def test_stream_commit_exposes_prompt_context_observability_and_logs_degrade_ord
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
@@ -542,7 +541,7 @@ def test_stream_commit_contains_vts_summary(monkeypatch: Any) -> None:
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
     monkeypatch.setattr(stream_mod, "get_episodic_store", lambda: object())
@@ -640,7 +639,7 @@ def test_stream_context_pack_builder_active_rewrites_prompt_inputs(monkeypatch: 
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
@@ -750,7 +749,7 @@ def test_stream_state_arbiter_resolve_injects_world_canon_into_prompt(monkeypatc
         "available": True,
     })
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _FakeIngress())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK"})
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())

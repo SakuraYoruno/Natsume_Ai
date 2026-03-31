@@ -5,7 +5,7 @@
 
 完整链路：
   [Governor 鉴权（由调用方预完成）] → 并行 Retrieval → stream_llm_chunks → SentenceSplitter
-  → Airlock Ingress 检疫 → episodic memory 写入 → COMMIT 事件
+  → 响应内容分类 → episodic memory 写入 → COMMIT 事件
 
 注意：/v1/chat/stream 接口已删除，统一走 POST /v1/chat（SSE 流式响应）。
 """
@@ -68,7 +68,7 @@ from host_brain.app.prompt_builder import (
 )
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.sentence_splitter import SentenceSplitter
-from host_brain.airlock.quarantine import quarantine_ingress
+from host_brain.airlock.quarantine import classify_ingress
 from host_brain.channels.vts import TRIGGER_HOST, resolve_vts_expression
 from host_brain.channels.vts_rate_limiter import VTSRateLimiter
 from host_brain.core.ids import new_request_id
@@ -1694,22 +1694,17 @@ async def _sse_event_generator(
 
         async def _run_airlock() -> tuple[Dict[str, Any], int]:
             _t0 = int(time.time() * 1000)
-            _ingress_result = None
+            _classification = None
             try:
-                _ingress_result = await asyncio.to_thread(
-                    quarantine_ingress,
-                    narrative,
-                    request_id=request_id,
-                    ledger=get_ledger(),
-                    ts_ms=ts_ms,
-                )
+                _classification = await asyncio.to_thread(classify_ingress, narrative)
             except Exception as exc:
-                _logger.warning("Airlock 入口检疫失败: %s", exc, extra={"request_id": request_id})
+                _logger.warning("响应分类失败: %s", exc, extra={"request_id": request_id})
             _refs: Dict[str, Any] = {}
-            if _ingress_result is not None:
+            if _classification:
                 _refs = {
-                    "ingress_classification": _ingress_result.classification,
-                    "quarantine_digest": _ingress_result.quarantine_digest,
+                    "ingress_classification": _classification,
+                    "quarantine_digest": None,
+                    "airlock_mode": "OBSERVE_ONLY",
                 }
             return _refs, max(0, int(time.time() * 1000) - _t0)
 

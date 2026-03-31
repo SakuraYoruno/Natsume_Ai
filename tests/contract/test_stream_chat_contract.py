@@ -12,7 +12,6 @@ T-STREAM-02:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -33,10 +32,8 @@ requires_test_client = pytest.mark.skipif(
 )
 
 
-@dataclass(frozen=True)
-class _IngressResult:
-    classification: str = "ALLOW"
-    quarantine_digest: str | None = None
+def _fake_ingress_classification(*_args: Any, **_kwargs: Any) -> str:
+    return "FACT"
 
 
 class _FakeIntentEngine:
@@ -169,7 +166,7 @@ def _install_stream_contract_stubs(monkeypatch: Any) -> dict[str, Any]:
         },
     )
     monkeypatch.setattr(stream_mod, "astream_llm_chunks", _fake_stream_chunks)
-    monkeypatch.setattr(stream_mod, "quarantine_ingress", lambda *args, **kwargs: _IngressResult())
+    monkeypatch.setattr(stream_mod, "classify_ingress", _fake_ingress_classification)
     monkeypatch.setattr(stream_mod, "persist_chat_episodic_memory", lambda **kwargs: {"status": "OK", "memory_id": "mem://1"})
     monkeypatch.setattr(stream_mod, "_drive_stream_vts_emotion", _fake_drive_vts)
     monkeypatch.setattr(stream_mod, "get_ledger", lambda: object())
@@ -233,4 +230,3 @@ def test_t_stream_02_post_stream_accepts_intent_draft_and_terminates_with_commit
     assert commit.get("phase") == "COMMIT"
     assert commit.get("done") is True
     assert "request_id" in commit
-
