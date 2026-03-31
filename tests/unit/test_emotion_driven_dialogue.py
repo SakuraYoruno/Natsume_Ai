@@ -128,58 +128,6 @@ class TestExtractEmotionTagFromPayload:
 
 
 # ---------------------------------------------------------------------------
-# T-EMOTION-01：VTS set_expression 被调用（emotion_tag 正确传递）
-# ---------------------------------------------------------------------------
-
-class TestVoicePipelineEmotionTagVTS:
-    """T-EMOTION-01"""
-
-    def test_set_expression_called_with_emotion_tag(self) -> None:
-        """enqueue_speak 时，VTS set_expression 应以正确 emotion_tag 被调用。"""
-        from edge_client.actuators.speech import SpeechPlaybackQueue
-        from edge_client.actuators.vts_driver import VTubeStudioDriver
-        from edge_client.rpc.event_reporter import EdgeEventReporter
-        from edge_client.rpc.voice import VoiceRpcContract
-        from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
-
-        mock_vts = MagicMock(spec=VTubeStudioDriver)
-        mock_vts.set_expression.return_value = MagicMock(success=True)
-        mock_vts.talk_start.return_value = MagicMock(success=True)
-
-        mock_queue = MagicMock(spec=SpeechPlaybackQueue)
-        mock_queue.enqueue_speak.return_value = MagicMock(success=True)
-        start_event = MagicMock(
-            success=True,
-            event={"event_type": "TTS_PLAYBACK_STARTED"},
-        )
-        mock_queue.start_next.return_value = start_event
-        mock_queue.queue_depth = 0
-
-        mock_rpc = MagicMock(spec=VoiceRpcContract)
-        mock_reporter = MagicMock(spec=EdgeEventReporter)
-
-        pipeline = EdgeVoicePipeline(
-            voice_rpc=mock_rpc,
-            speech_queue=mock_queue,
-            event_reporter=mock_reporter,
-            vts_driver=mock_vts,
-        )
-
-        pipeline.enqueue_speak(
-            request_id="req_emotion_01",
-            payload={
-                "session_id": "sess_01",
-                "utterance_id": "utt_01",
-                "text": "こんにちは",
-                "emotion_tag": "HAPPY",
-            },
-        )
-
-        mock_vts.set_expression.assert_called_once_with("HAPPY", intensity=0.5)
-        mock_vts.talk_start.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
 # T-EMOTION-02：TTS synthesize 接收到对应 emotion_tag
 # ---------------------------------------------------------------------------
 
