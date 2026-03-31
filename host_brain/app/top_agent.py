@@ -222,11 +222,16 @@ async def top_agent_sse_generator(
     """顶级 Agent SSE 生成器（Phase XIV v4 核心）。
 
     流程：
-      Airlock → 轻量 Governor → 检索 + StateArbiter + RecallPack
-      → prompt 构建（完整管线含 build_prompt_intelligence）
+      Airlock → 轻量 Governor → RecallFusion 五路检索 + StateArbiter(bond only)
+      → RecallPack 槽位预算 → prompt 构建（完整管线含 build_prompt_intelligence）
       → LLM 流式 + SentenceSplitter
       → apply_response_intelligence（反思链 + 多模态后缀）
       → Airlock + 安全分类 → COMMIT → 异步后处理
+
+    去重策略（Phase XIV v4）：
+      - world_canon / episodic_vector：仅走 RecallFusion（语义检索），不走 StateArbiter（避免同源重复）
+      - style_canon：仅走 style_pack 常驻注入（prompt #5 位），不走 StateArbiter / RecallFusion
+      - bond_graph：StateArbiter 提供结构化快照（stage/score），RecallFusion 提供历史事件（互补保留）
     """
     user_message = str(request_body.message or "").strip()
     thread_id = getattr(request_body, "thread_id", None)
@@ -289,28 +294,25 @@ async def top_agent_sse_generator(
             retrieval_summary = {"status": "DEGRADED", "error": str(_retr_exc)[:100]}
             _logger.debug("[%s] top_agent retrieval failed/timeout: %s", request_id, _retr_exc)
 
-    # StateArbiter 四路并行查询（world_canon / style_canon / episodic_latest / bond_graph）
+    # StateArbiter 精简查询（Phase XIV v4 去重）
+    # ────────────────────────────────────────────────────────────────────
+    # 旧链路做了四路并行查询：world_canon / style_canon / episodic / bond
+    # 但 world_canon 和 episodic 已经通过 RecallFusion 五路召回覆盖（同源），
+    # style_canon 通过 style_pack 常驻注入覆盖（同源 style_profile_v5.json），
+    # 保留它们只会在 prompt 中产生重复内容浪费 token。
+    #
+    # 只保留 bond_graph：它提供的是当前关系阶段/分数的结构化快照，
+    # 与 RecallFusion 的 neo4j_bond（历史关系事件语义检索）是互补的。
+    # ────────────────────────────────────────────────────────────────────
     try:
         from host_brain.app.state_arbiter_queries import (  # noqa: PLC0415
-            _resolve_state_arbiter_world_fact,
-            _resolve_state_arbiter_style_fact,
-            _resolve_state_arbiter_episodic_fact,
             _resolve_state_arbiter_bond_fact,
         )
-        (
-            (world_summary, world_evidence),
-            (style_summary, style_evidence),
-            (episodic_summary, episodic_evidence),
-            (bond_summary_raw, bond_evidence),
-        ) = await asyncio.gather(
-            _resolve_state_arbiter_world_fact(session_id=session_id, request_id=request_id),
-            _resolve_state_arbiter_style_fact(session_id=session_id, request_id=request_id),
-            _resolve_state_arbiter_episodic_fact(session_id=session_id, request_id=request_id),
-            _resolve_state_arbiter_bond_fact(session_id=session_id, request_id=request_id),
+        bond_summary_raw, bond_evidence = await _resolve_state_arbiter_bond_fact(
+            session_id=session_id, request_id=request_id,
         )
-        for item in (world_evidence, style_evidence, episodic_evidence, bond_evidence):
-            if item is not None:
-                retrieval_evidence_items.append(item)
+        if bond_evidence is not None:
+            retrieval_evidence_items.append(bond_evidence)
         bond_stage = str(bond_summary_raw.get("bond_stage") or "").strip()
         if bond_stage:
             bond_summary = {
