@@ -10,11 +10,16 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor':   ['react', 'react-dom', 'react-router-dom'],
-          'flow-vendor':    ['@xyflow/react'],
-          'echarts-vendor': ['echarts', 'echarts-for-react'],
-          'ui-vendor':      ['zustand', 'lucide-react'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (
+            id.includes('/react/') ||
+            id.includes('/react-dom/') ||
+            id.includes('/react-router-dom/')
+          ) return 'react-vendor'
+          if (id.includes('/@xyflow/react/')) return 'flow-vendor'
+          if (id.includes('/echarts/') || id.includes('/echarts-for-react/')) return 'echarts-vendor'
+          if (id.includes('/zustand/') || id.includes('/lucide-react/')) return 'ui-vendor'
         },
       },
     },

@@ -4,7 +4,6 @@ import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats, fetchDistillationStats, fetchSemanticRecallStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
-import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
   { label: '1h',  value: '1h',  minutes: 60    },
