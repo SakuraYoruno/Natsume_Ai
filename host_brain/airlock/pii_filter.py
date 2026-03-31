@@ -1,21 +1,24 @@
-"""AIRLOCK PII 过滤器。
+"""AIRLOCK 凭证/敏感信息过滤器。
 
-对文本中的个人身份信息（PII）进行检测和脱敏。
+对文本中的凭证类敏感信息进行检测和脱敏，防止通过云端 LLM 泄露。
 纯正则实现，零外部依赖，延迟 < 1ms。
 
-支持的 PII 类型：
-  - 中国手机号（11 位）
+设计哲学：
+  对于 AI 伴侣来说，知道主人的手机号、邮箱、地址是很自然的事。
+  真正需要拦截的是**凭证类信息**——密码、API 密钥、身份证号、银行卡号等，
+  这些信息一旦泄露给云端 LLM 提供商可能造成实际损失。
+
+支持的敏感类型：
+  - 密码/口令（明文出现在对话中的 password=xxx 等模式）
+  - API 密钥/Token（sk-xxx, ghp_xxx, AKIA 等常见格式）
   - 身份证号（18 位）
   - 银行卡号（16-19 位）
-  - 邮箱地址
-  - IPv4 地址
-  - 中国车牌号
-  - 含敏感参数的 URL
+  - 含敏感参数的 URL（带 token/key/secret/password 参数的 URL）
 
 配置（环境变量）：
   HOST_PII_FILTER_ENABLED   — 功能开关（默认 false）
   HOST_PII_FILTER_MODE      — redact / log_only / block（默认 redact）
-  HOST_PII_FILTER_RULES     — 启用的规则（逗号分隔，默认 cn_phone,cn_id_card,cn_bank_card,email）
+  HOST_PII_FILTER_RULES     — 启用的规则（逗号分隔，默认全部凭证规则）
   HOST_PII_FILTER_INGRESS   — 入口脱敏开关（默认 true）
   HOST_PII_FILTER_EGRESS    — 出口脱敏开关（默认 true）
   HOST_PII_FILTER_RETRIEVAL — 检索结果脱敏开关（默认 true）
@@ -49,11 +52,36 @@ class PiiRule:
 
 # 预编译规则集（模块加载时一次性编译）
 _ALL_RULES: dict[str, PiiRule] = {
-    "cn_phone": PiiRule(
-        rule_id="cn_phone",
-        label="中国手机号",
-        pattern=re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
-        placeholder="[手机号]",
+    # ── 凭证类（真正不该泄露给云端的）─────────────────────────────
+    "password": PiiRule(
+        rule_id="password",
+        label="密码/口令",
+        pattern=re.compile(
+            r"(?i)"
+            r"(?:password|passwd|pwd|口令|密码)"
+            r"\s*[:=：]\s*"
+            r"(\S{4,64})",
+        ),
+        placeholder="[密码]",
+    ),
+    "api_key": PiiRule(
+        rule_id="api_key",
+        label="API密钥/Token",
+        pattern=re.compile(
+            r"(?:"
+            # OpenAI / Anthropic style
+            r"sk-[a-zA-Z0-9_-]{20,}"
+            # GitHub PAT
+            r"|ghp_[a-zA-Z0-9]{36,}"
+            r"|gho_[a-zA-Z0-9]{36,}"
+            r"|github_pat_[a-zA-Z0-9_]{22,}"
+            # AWS
+            r"|AKIA[0-9A-Z]{16}"
+            # Generic long hex/base64 tokens (32+ chars after key= or token=)
+            r"|(?i:(?:api[_-]?key|secret[_-]?key|access[_-]?token|bearer)\s*[:=]\s*)[a-zA-Z0-9_/+=-]{20,}"
+            r")",
+        ),
+        placeholder="[密钥]",
     ),
     "cn_id_card": PiiRule(
         rule_id="cn_id_card",
@@ -73,32 +101,6 @@ _ALL_RULES: dict[str, PiiRule] = {
         pattern=re.compile(r"(?<!\d)(?:62|4\d|5[1-5])\d{13,17}(?!\d)"),
         placeholder="[银行卡]",
     ),
-    "email": PiiRule(
-        rule_id="email",
-        label="邮箱地址",
-        pattern=re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
-        placeholder="[邮箱]",
-    ),
-    "ip_addr": PiiRule(
-        rule_id="ip_addr",
-        label="IP地址",
-        pattern=re.compile(
-            r"(?<!\d)"
-            r"(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
-            r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-            r"(?!\d)"
-        ),
-        placeholder="[IP]",
-    ),
-    "cn_plate": PiiRule(
-        rule_id="cn_plate",
-        label="车牌号",
-        pattern=re.compile(
-            r"[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁]"
-            r"[A-Z][A-HJ-NP-Z0-9]{4,5}[A-HJ-NP-Z0-9挂学警港澳]"
-        ),
-        placeholder="[车牌]",
-    ),
     "url_with_params": PiiRule(
         rule_id="url_with_params",
         label="敏感URL",
@@ -110,7 +112,7 @@ _ALL_RULES: dict[str, PiiRule] = {
     ),
 }
 
-_DEFAULT_RULE_IDS = ("cn_phone", "cn_id_card", "cn_bank_card", "email")
+_DEFAULT_RULE_IDS = ("password", "api_key", "cn_id_card", "cn_bank_card", "url_with_params")
 
 # ---------------------------------------------------------------------------
 # 配置读取
