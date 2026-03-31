@@ -35,7 +35,7 @@ def _run(
         narrative_len=32,
         llm_status=llm_status,
         provider="openai",
-        model_id="qwen3:8b-q4_k_m",
+        model_id="qwen3:14b-q4_k_m",
         route_target=route_target,
         route_reason_code="HOST_CHAT_HOST_14B_ACTIVE",
         error=error,

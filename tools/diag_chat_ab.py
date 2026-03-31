@@ -1,11 +1,11 @@
-"""In-process chat A/B benchmark for Host 8B rollout.
+"""In-process chat A/B benchmark for Host 14B rollout.
 
 Runs `handle_chat` under two environment profiles, collects latency/quality
 signals, and writes JSON + Markdown reports.
 
 Default comparison:
-- profile A: `host8b` (non-gaming, Host 8B preferred)
-- profile B: `edge3b` (gaming mode, Edge 3B route preferred)
+- profile A: `host14b` (non-gaming, Host 14B preferred)
+- profile B: `cloud` (force cloud route for comparison)
 
 Usage example:
     python tools/diag_chat_ab.py --repeat 2 --disable-retrieval
@@ -48,11 +48,11 @@ DEFAULT_MESSAGES: list[str] = [
 ]
 
 PROFILE_PRESETS: dict[str, dict[str, str]] = {
-    "host8b": {
+    "host14b": {
         "HOST_SYS_MODE": "normal",
-        "HOST_CHAT_HOST_8B_ENABLED": "true",
+        "HOST_CHAT_HOST_14B_ENABLED": "true",
         "HOST_CHAT_FORCE_CLOUD": "false",
-        "HOST_CHAT_HOST_8B_HEALTHCHECK_ENABLED": "false",
+        "HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED": "false",
     },
     "cloud": {
         "HOST_SYS_MODE": "normal",
@@ -416,8 +416,8 @@ def _resolve_profile_env(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run in-process chat A/B benchmark across two profiles.")
-    parser.add_argument("--profile-a", choices=sorted(PROFILE_PRESETS.keys()), default="host8b")
-    parser.add_argument("--profile-b", choices=sorted(PROFILE_PRESETS.keys()), default="edge3b")
+    parser.add_argument("--profile-a", choices=sorted(PROFILE_PRESETS.keys()), default="host14b")
+    parser.add_argument("--profile-b", choices=sorted(PROFILE_PRESETS.keys()), default="cloud")
     parser.add_argument("--profile-a-name", default="A")
     parser.add_argument("--profile-b-name", default="B")
     parser.add_argument("--profile-a-env", action="append", default=[], help="Extra env override KEY=VALUE")

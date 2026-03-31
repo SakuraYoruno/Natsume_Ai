@@ -76,7 +76,7 @@ def _seed_dashboard_rows(db_path: Path) -> None:
                 model_id = "edge-3b"
             elif idx == 7:
                 provider = "host.local"
-                model_id = "qwen3:8b"
+                model_id = "qwen3:14b"
             ledger.log_llm_node_call(
                 {
                     "request_id": request_id,

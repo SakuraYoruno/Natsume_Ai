@@ -1993,16 +1993,16 @@ async def get_graph_schema():
         from host_brain.app.graph_config_builder import (
             CHAT_GRAPH_NODE_ORDER,
             _build_graph_config_by_profile,
-            _HOST_CHAT_8B_DEFAULT_PROVIDER,
-            _HOST_CHAT_8B_DEFAULT_MODEL_ID,
+            _HOST_CHAT_14B_DEFAULT_PROVIDER,
+            _HOST_CHAT_14B_DEFAULT_MODEL_ID,
         )
         from host_brain.app.execution_profile import PROFILE_CHAT_FAST
 
         # 使用默认参数构建图结构（不依赖运行时 LLM），仅用于展示拓扑
         graph_config = _build_graph_config_by_profile(
             execution_profile=PROFILE_CHAT_FAST,
-            provider_name=_HOST_CHAT_8B_DEFAULT_PROVIDER,
-            model_id=_HOST_CHAT_8B_DEFAULT_MODEL_ID or "gemini-2.5-flash",
+            provider_name=_HOST_CHAT_14B_DEFAULT_PROVIDER,
+            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash",
             timeout_ms=60000,
             available=False,
             api_key=None,
