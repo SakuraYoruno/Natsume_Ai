@@ -3208,7 +3208,7 @@ async def get_chain_stats(
     聚合各阶段的调用次数、降级率、平均耗时、P95 耗时、超时次数。
 
     Phase XIV v4 变更：
-      - 旧链路固定 10 节点（MainChain）已废弃
+      - 旧固定 10 节点链路已废弃
       - 新架构阶段：airlock → governor → retrieval → prompt_builder → llm_stream
         → response_intelligence → airlock_output → episodic_store
       - 委托路径新增 sub_agent 阶段

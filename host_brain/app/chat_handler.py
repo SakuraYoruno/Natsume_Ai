@@ -4,13 +4,13 @@
   - handle_chat：POST /v1/chat 统一入口
   - _unified_chat_sse_generator：统一 SSE 生成器（Governor 鉴权 + 场景分类 + 路由分发）
 
-[任务3] 场景路由已迁入 SceneRouter.route_sse()，不再使用 if-else 硬编码分流。
-_unified_chat_sse_generator 只负责 Governor 鉴权 + 场景分类，路由委托给 SceneRouter。
+Phase XIV v4 架构：
+  top_agent.py 处理 80% 闲聊直通路径，本模块负责剩余场景的 SSE 生成。
+  场景分类由 pre_intent_classifier 完成，按场景类型分发到对应 handler。
 
 子模块职责：
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
-  - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator，任务4）
-  - graph/main_chain.py     — SceneRouter.route_sse()（场景路由分发，任务3）
+  - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator）
 """
 
 from __future__ import annotations
@@ -151,7 +151,7 @@ async def _unified_chat_sse_generator(
       → Governor 鉴权（若 _pre_approved_governor_result 传入则跳过重复鉴权）
       → PRESENCE(GOV_APPROVED)
       → pre_intent_classifier 分类（鉴权后）
-      → [任务3] SceneRouter.route_sse() 节点化路由分发：
+      → 按场景类型分发：
           SCENE_VISION_UI  → _vision_ui_sse_generator（视觉分析）
           SCENE_CHAT       → _sse_event_generator（token 级流式）
           复杂场景         → _complex_scene_sse_generator（LangGraph 多节点）
@@ -175,7 +175,7 @@ async def _unified_chat_sse_generator(
 
         # ── Governor 鉴权 ─────────────────────────────────────────────────
         if _pre_approved_governor_result is not None:
-            # GovernorNode（MainChain 适配层）已完成真实鉴权，直接复用结果，避免重复鉴权
+            # 上游已完成真实鉴权，直接复用结果，避免重复鉴权
             governor_result = _pre_approved_governor_result
             _logger.debug(
                 "unified_chat_sse_generator 使用预鉴权结果（来自 GovernorNode），跳过重复鉴权",

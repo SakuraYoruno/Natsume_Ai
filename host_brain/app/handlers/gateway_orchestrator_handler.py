@@ -8,17 +8,15 @@
 - TTS 行为：suppress_local_play=True, suppress_vts=True（不驱动本地扬声器/VTS）
 - 遵守 SSE 事件协议：SCENE_ROUTED → TOKEN → SENTENCE → COMMIT
 
-完整链路（与 SCENE_CHAT 对齐）：
-  RecallFusionNode 预召回 → StateArbiter 四路查询（world_canon/style_canon/episodic/bond）
+完整链路（Phase XIV v4）：
+  RecallFusion 预召回 → StateArbiter 查询（bond 为主，world_canon/style_canon/episodic 辅助）
   → RecallPackBuilder slot 分配 → build_chat_runtime_input → _build_stream_chat_prompt
   → adjust_gen_params_for_emotion → astream_llm_chunks → SentenceSplitter
   → 响应内容分类 → 情节记忆写入 → Bond 动态写入 → COMMIT
 
 安全保证：
-- 本 handler 通过 SceneRouter.route_sse(SCENE_GATEWAY) 调用
-- 上游已经过 AirlockQuarantine → Governor → RecallFusion 等前置安全节点
-- 下游经过 响应内容分类 → QAContract → EpisodicStore → Audit
-- 不绕过任何安全审计环节
+- 上游已经过 Airlock → Governor → RecallFusion 等前置安全节点
+- 下游经过 响应内容分类 → 情节记忆写入 → Bond 更新 → 审计
 
 与 SCENE_CHAT 的差异点：
 - render_target_lang 强制为 "zh"（中文回复）
@@ -288,8 +286,8 @@ def _build_gateway_llm_summary(
 
 
 # ---------------------------------------------------------------------------
-# StateArbiter 四路查询（world_canon / style_canon / episodic / bond）
-# 复用 chat_stream_handler 的同名函数
+# StateArbiter 查询（world_canon / style_canon / episodic / bond）
+# Note: Gateway 场景仍需四路查询以构建完整上下文
 # ---------------------------------------------------------------------------
 
 async def _resolve_state_arbiter_all(

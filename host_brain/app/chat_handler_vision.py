@@ -252,7 +252,7 @@ async def _call_vision_llm(
     """调用 LLM 进行视觉分析（优先使用 Gemini Vision，降级为文本模式）。
 
     Args:
-        image_upload_allowed:    是否允许将图片发送给云端 API（由 SceneRouter 策略决定）。
+        image_upload_allowed:    是否允许将图片发送给云端 API。
                                  False 时即使 vision_context 中有 image_base64/image_url
                                  也不会上传，自动降级为纯文字模式。
         image_upload_deny_reason: 禁止上传的原因（用于日志记录）。
@@ -587,20 +587,9 @@ async def _vision_ui_sse_generator(
             "request_id": request_id,
         })
 
-        # 图片上传策略检查（基于场景，屏幕截图属高敏隐私内容）
-        # Phase XIV v4：SceneRouter 已废弃，图片上传策略降级为默认允许
-        try:
-            from host_brain.app.graph.main_chain import SceneRouter  # noqa: PLC0415  # type: ignore[import-not-found]
-        except ImportError:
-            SceneRouter = None  # type: ignore[misc,assignment]
+        # 图片上传策略（Phase XIV v4：SceneRouter 已移除，默认允许上传）
         _user_consent = bool(getattr(request_body, "image_upload_consent", False))
-        if SceneRouter is not None:
-            _img_allowed, _img_deny_reason = SceneRouter.check_image_upload_allowed(
-                SCENE_VISION_UI,
-                user_consent=_user_consent,
-            )
-        else:
-            _img_allowed, _img_deny_reason = True, None
+        _img_allowed, _img_deny_reason = True, None
 
         llm_runtime = await resolve_host_llm_runtime_async(
             rollout_key=session_id,
@@ -652,7 +641,7 @@ async def _vision_ui_sse_generator(
             "model_id": llm_result.get("model_used"),
             "latency_ms": analysis_latency_ms,
             "image_upload_allowed": _img_allowed,
-            "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value if SceneRouter is not None else "ALLOW_WITH_CONSENT",
+            "image_upload_policy": "ALLOW_WITH_CONSENT",
             "image_filter_decision": llm_result.get("image_filter_decision"),
             "image_filter_risks": llm_result.get("image_filter_risks"),
             "request_id": request_id,
@@ -773,7 +762,7 @@ async def _vision_ui_sse_generator(
                     "input_mode": input_mode,
                     "has_image": has_image,
                     "image_upload_allowed": _img_allowed,
-                    "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value if SceneRouter is not None else "ALLOW_WITH_CONSENT",
+                    "image_upload_policy": "ALLOW_WITH_CONSENT",
                     "user_consent": _user_consent,
                     "response_format": response_format,
                     "image_filter_decision": llm_result.get("image_filter_decision"),

@@ -313,49 +313,6 @@ async def _dispatch_to_graph(
     ).add_done_callback(_log_dispatch_task_exception)
 
 
-async def _run_main_chain_dispatch(
-    *,
-    request_id: str,
-    session_id: str,
-    source: str,
-    text: str,
-    payload: dict[str, Any],
-    ts_ms: int,
-    run_in_thread: bool,
-) -> None:
-    try:
-        from host_brain.app.graph.main_chain import run_main_chain_from_input  # type: ignore[import-not-found]
-    except ImportError:
-        _logger.warning("[%s] MainChain 已废弃，input_routes 走降级路径", request_id)
-        return
-
-    if not run_in_thread:
-        await run_main_chain_from_input(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-        )
-        return
-
-    # Isolate heavy/possibly blocking chain work from FastAPI main event loop.
-    def _thread_entry() -> None:
-        asyncio.run(
-            run_main_chain_from_input(
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-            )
-        )
-
-    await asyncio.to_thread(_thread_entry)
-
-
 async def _dispatch_to_graph_worker(
     *,
     request_id: str,
@@ -368,6 +325,11 @@ async def _dispatch_to_graph_worker(
     dispatch_mode: str,
     run_in_thread: bool,
 ) -> None:
+    """Phase XIV v4：MainChain 已废弃。
+
+    input_routes 的 dispatch 链路尚未迁移到 top_agent，
+    当前仅记录日志标记 NOT_WIRED，待后续接入 top_agent 后恢复。
+    """
     dispatch_ts = int(time.time() * 1000)
     _log_input_event(
         ledger=ledger,
@@ -380,70 +342,21 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
-    try:
-        await _run_main_chain_dispatch(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            run_in_thread=run_in_thread,
-        )
-        complete_ts = int(time.time() * 1000)
-        latency_ms = complete_ts - dispatch_ts
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload=payload,
-            phase="COMPLETED",
-            status="OK",
-            detail=f"main_chain completed source={source} latency_ms={latency_ms}",
-            latency_ms=latency_ms,
-            ts_ms=complete_ts,
-        )
-        _logger.info(
-            "input_routes: graph completed request_id=%s source=%s latency_ms=%d mode=%s",
-            request_id,
-            source,
-            latency_ms,
-            dispatch_mode,
-        )
-    except ImportError:
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload=payload,
-            phase="NOT_WIRED",
-            status="DEGRADED",
-            reason_code="INPUT_MAIN_CHAIN_NOT_WIRED",
-            detail="run_main_chain_from_input not implemented",
-            ts_ms=int(time.time() * 1000),
-        )
-        _logger.info(
-            "input_routes: main_chain.run_main_chain_from_input not implemented, request_id=%s source=%s text=%.60s",
-            request_id,
-            source,
-            text,
-        )
-    except Exception as exc:
-        fail_ts = int(time.time() * 1000)
-        latency_ms = fail_ts - dispatch_ts
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload=payload,
-            phase="FAILED",
-            status="FAILED",
-            reason_code="INPUT_GRAPH_ERROR",
-            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
-            latency_ms=latency_ms,
-            ts_ms=fail_ts,
-        )
-        _logger.error("input_routes: graph failed request_id=%s: %s", request_id, exc)
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload=payload,
+        phase="NOT_WIRED",
+        status="DEGRADED",
+        reason_code="INPUT_MAIN_CHAIN_REMOVED",
+        detail="MainChain removed in Phase XIV v4; input dispatch pending top_agent migration",
+        ts_ms=int(time.time() * 1000),
+    )
+    _logger.info(
+        "input_routes: MainChain removed, dispatch no-op request_id=%s source=%s text=%.60s",
+        request_id,
+        source,
+        text,
+    )

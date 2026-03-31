@@ -62,11 +62,6 @@ from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
 # 新模块导入（优化计划新增模块）
-# Phase XIV v4：MainChain 已废弃删除，保留类型占位避免其他代码 NameError
-try:
-    from host_brain.app.graph.main_chain import MainChain  # type: ignore[import-not-found]
-except ImportError:
-    MainChain = None  # type: ignore[misc,assignment]
 from host_brain.app.llm.routing_matrix import RoutingMatrix
 from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
@@ -107,7 +102,6 @@ _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
 
 # 新模块单例
-_main_chain: Optional[MainChain] = None
 _routing_matrix: Optional[RoutingMatrix] = None
 _recall_pack_builder: Optional[RecallPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
@@ -524,81 +518,6 @@ def get_intent_engine() -> IntentDecisionEngine:
 # ---------------------------------------------------------------------------
 # 新模块工厂函数（优化计划新增）
 # ---------------------------------------------------------------------------
-
-def get_main_chain() -> MainChain:
-    """获取主链路编排器单例（延迟初始化）。
-
-    [审计修复 #4] MainChain 已从死代码迁移为 _unified_chat_sse_generator 的适配层。
-    通过 MainChain.run_as_sse_adapter() 可将请求委托给真实的 SSE 路由逻辑，
-    同时保留 ChainContext 审计追踪能力。
-
-    路由层调用示例：
-        chain = get_main_chain()
-        async for event in chain.run_as_sse_adapter(request_body=..., ...):
-            yield event
-    """
-    global _main_chain
-    if _main_chain is None:
-        from host_brain.app.failure_matrix import FailureHandler
-
-        ledger = get_ledger()
-
-        async def _audit_writer(tag: str, detail: dict) -> None:
-            try:
-                ledger.log_error(
-                    request_id=str(detail.get("request_id") or "main_chain"),
-                    stage=tag,
-                    reason_code=str(detail.get("event") or tag),
-                    detail=str(detail),
-                )
-            except Exception as exc:
-                _logger.warning("MainChain 审计写入失败: %s", exc)
-
-        failure_handler = FailureHandler(audit_writer=_audit_writer)
-        _main_chain = MainChain(failure_handler=failure_handler.handle)
-        _logger.info("MainChain 已初始化（含审计写入，适配层模式）")
-    return _main_chain
-
-
-async def run_chat_via_main_chain(
-    *,
-    request_body: object,
-    request_id: str,
-    session_id: str,
-    ts_ms: int,
-    intent_draft: dict,
-    metrics: object,
-    _pre_classified_scene: str | None = None,
-):
-    """[审计修复 #4] 通过 MainChain 适配层执行聊天 SSE 路由。
-
-    这是 MainChain 的标准调用入口，供路由层（如 canon_routes.py）使用。
-    内部委托给 MainChain.run_as_sse_adapter → _unified_chat_sse_generator。
-
-    Args:
-        request_body: ChatRequest 实例
-        request_id: 请求唯一 ID
-        session_id: 会话 ID
-        ts_ms: 请求时间戳（毫秒）
-        intent_draft: Governor 意图草稿
-        metrics: MetricsCollector 实例
-        _pre_classified_scene: 预分类场景（可选，避免重复分类）
-
-    Yields:
-        SSE 事件字符串
-    """
-    chain = get_main_chain()
-    async for event in chain.run_as_sse_adapter(
-        request_body=request_body,
-        request_id=request_id,
-        session_id=session_id,
-        ts_ms=ts_ms,
-        intent_draft=intent_draft,
-        metrics=metrics,
-        _pre_classified_scene=_pre_classified_scene,
-    ):
-        yield event
-
 
 def get_routing_matrix() -> RoutingMatrix:
     """获取模型路由矩阵单例（延迟初始化）。"""
