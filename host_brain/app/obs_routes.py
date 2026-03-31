@@ -14,6 +14,7 @@ from host_brain.app.obs_routes_core import router, set_ledger_provider  # noqa: 
 # 子系统统计端点（import 后自动注册到 router）
 import host_brain.app.obs_routes_stats  # noqa: F401
 # 平台 + WebSocket 端点
+from host_brain.app.obs_routes_platform import _fetch_remote_gateway_health  # noqa: F401
 import host_brain.app.obs_routes_platform  # noqa: F401
 # 系统运行模式
 import host_brain.app.obs_routes_sysmode  # noqa: F401

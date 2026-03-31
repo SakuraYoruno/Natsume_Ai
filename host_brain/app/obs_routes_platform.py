@@ -241,6 +241,16 @@ async def _fetch_remote_gateway_health() -> Dict[str, Any]:
 
     return stale
 
+
+def _resolve_remote_gateway_health_fetcher():
+    try:
+        import host_brain.app.obs_routes as obs_routes_module
+    except Exception:
+        return _fetch_remote_gateway_health
+    fetcher = getattr(obs_routes_module, "_fetch_remote_gateway_health", None)
+    return fetcher if callable(fetcher) else _fetch_remote_gateway_health
+
+
 @router.get("/gateway/stats", response_model=GatewayStatsResponse)
 async def get_gateway_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
@@ -261,7 +271,7 @@ async def get_gateway_stats(
     total_in = 0
     total_out = 0
     total_err = 0
-    remote_gateway_health = await _fetch_remote_gateway_health()
+    remote_gateway_health = await _resolve_remote_gateway_health_fetcher()()
     remote_gateway_body = (
         remote_gateway_health.get("body")
         if isinstance(remote_gateway_health, dict)
@@ -640,4 +650,3 @@ def _get_ledger_instance():
     except Exception:
         pass
     return None
-
