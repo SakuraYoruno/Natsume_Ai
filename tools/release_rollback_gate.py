@@ -52,7 +52,7 @@ def _rollback_commands() -> list[dict[str, str]]:
     return [
         {
             "label": "Force cloud route",
-            "command": "$env:HOST_CHAT_FORCE_CLOUD='true'; $env:HOST_CHAT_HOST_8B_ENABLED='false'",
+            "command": "$env:HOST_CHAT_FORCE_CLOUD='true'; $env:HOST_CHAT_HOST_14B_ENABLED='false'",
         },
         {
             "label": "Disable gray rollout",
