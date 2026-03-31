@@ -12,9 +12,22 @@ from enum import Enum
 from typing import Any, AsyncGenerator, Callable, Dict, Optional
 
 from .chain_types import ChainContext
-from ...schemas import TaskType
+from ..schemas import TaskType
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 # ---------------------------------------------------------------------------
 # 场景路由器
@@ -405,4 +418,3 @@ class SceneRouter:
             metrics=metrics,
         ):
             yield event
-

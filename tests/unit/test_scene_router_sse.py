@@ -31,6 +31,10 @@ def _make_request_body(message: str = "你好", scene_type: str | None = None) -
     req.scene_type = scene_type
     req.emotion_context = None
     req.vision_context = None
+    req.input_source = None
+    req.reply_channel = None
+    req.suppress_edge_tts = None
+    req.suppress_edge_vts = None
     return req
 
 
@@ -214,6 +218,41 @@ class TestSceneRouterSse:
                 emotion_context={},
                 emotion_snapshot={},
                 intent_id="intent-005",
+                reason_code=None,
+                metrics=metrics,
+            ):
+                collected.append(event)
+
+        assert len(collected) == 1
+
+    @pytest.mark.asyncio
+    async def test_scene_gateway_routes_to_gateway_orchestrator(self):
+        """验证 SCENE_GATEWAY 路由到 gateway_orchestrator_sse_generator。"""
+        request_body = _make_request_body(message="在吗，蓝")
+        request_body.input_source = "GATEWAY"
+        request_body.reply_channel = "GATEWAY"
+        request_body.suppress_edge_tts = True
+        request_body.suppress_edge_vts = True
+        metrics = _make_metrics()
+        governor_result = _make_governor_result()
+
+        with patch(
+            "host_brain.app.handlers.gateway_orchestrator_handler.gateway_orchestrator_sse_generator",
+            side_effect=_fake_sse_generator,
+        ):
+            collected = []
+            async for event in SceneRouter.route_sse(
+                scene_type="GATEWAY",
+                request_body=request_body,
+                request_id="req-005-gateway",
+                session_id="session-005-gateway",
+                ts_ms=1000000,
+                intent_draft={"id": "intent-005-gateway", "action": "narrative_only"},
+                scene_type_source="pre_classifier",
+                governor_result=governor_result,
+                emotion_context={},
+                emotion_snapshot={},
+                intent_id="intent-005-gateway",
                 reason_code=None,
                 metrics=metrics,
             ):
