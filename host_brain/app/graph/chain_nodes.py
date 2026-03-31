@@ -6,20 +6,23 @@ chain_nodes.py —— 主链路具体节点实现
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os as _os
 import time
 from typing import Any, Dict, List, Optional
 
+from host_brain.app.intent_seq import allocate_intent_seq, sync_intent_seq
+
 from .chain_types import (
     ChainContext,
     ChainNode,
     NODE_TIMEOUT,
 )
-from ...schemas import TaskType
-from ...schemas.memory_types import ProposerClass
-from ...failure_matrix import FailureHandler, FailureEvent
+from ..schemas import TaskType
+from ..schemas.memory_types import ProposerClass
+from ..failure_matrix import FailureHandler, FailureEvent
 
 logger = logging.getLogger(__name__)
 
@@ -2133,4 +2136,3 @@ class AirlockSanitizerNode(ChainNode):
             ctx.audit_tags.append("AIRLOCK_OUTPUT_SANITIZED")
         logger.debug("[%s] 出口净化完成 changed=%s", ctx.request_id, changed)
         return True
-

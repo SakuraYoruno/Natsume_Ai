@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -3537,4 +3538,3 @@ async def get_semantic_recall_stats():
             status=f"DEGRADED: {exc}",
             timestamp=now,
         )
-
