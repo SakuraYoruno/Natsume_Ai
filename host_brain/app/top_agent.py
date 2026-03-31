@@ -259,7 +259,7 @@ async def top_agent_sse_generator(
     render_target_lang = "ja"
 
     try:
-        from host_brain.app.chat_stream_handler import _run_retrieval  # noqa: PLC0415
+        from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
         from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
 
         render_target_lang = infer_render_target_lang(user_message=sanitized_message)
@@ -291,7 +291,7 @@ async def top_agent_sse_generator(
 
     # StateArbiter 四路并行查询（world_canon / style_canon / episodic_latest / bond_graph）
     try:
-        from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+        from host_brain.app.state_arbiter_queries import (  # noqa: PLC0415
             _resolve_state_arbiter_world_fact,
             _resolve_state_arbiter_style_fact,
             _resolve_state_arbiter_episodic_fact,
@@ -683,7 +683,7 @@ async def _async_post_process(
 
     # ── VTS 情感驱动 ─────────────────────────────────────────────────
     try:
-        from host_brain.app.chat_stream_handler import _drive_stream_vts_emotion  # noqa: PLC0415
+        from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
         await _drive_stream_vts_emotion(
             request_id=request_id, emotion_context=emotion_context, ts_ms=ts_ms,
         )

@@ -757,7 +757,7 @@ def receive_edge_events_response(
                 _vts_enabled = str(os.environ.get("HOST_STREAM_VTS_EMOTION_ENABLED") or "true").strip().lower()
                 if _vts_enabled in {"1", "true", "yes", "on"}:
                     try:
-                        from host_brain.app.chat_stream_handler import _drive_stream_vts_emotion  # noqa: PLC0415
+                        from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
 
                         async def _fire_vts(req_id: str, etag: str, intensity: float, ev_ts: int) -> None:
                             try:

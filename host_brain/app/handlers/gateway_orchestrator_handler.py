@@ -302,7 +302,7 @@ async def _resolve_state_arbiter_all(
     dict[str, Any],  # bond_summary（用于 runtime_input）
 ]:
     """并行查询 StateArbiter 四路事实，返回汇总的 retrieval_summary 和 evidence_items。"""
-    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+    from host_brain.app.state_arbiter_queries import (  # noqa: PLC0415
         _resolve_state_arbiter_world_fact,
         _resolve_state_arbiter_style_fact,
         _resolve_state_arbiter_episodic_fact,
@@ -356,7 +356,7 @@ def _build_recall_pack(
     retrieval_summary: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Any]]:
     """构建 RecallPack，返回 (rewritten_items, recall_slot_text, summary)。"""
-    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+    from host_brain.app.chat_retrieval_helpers import (  # noqa: PLC0415
         _build_recall_pack_inputs,
         _recall_pack_to_retrieval_evidence_items,
     )
@@ -691,7 +691,7 @@ async def gateway_orchestrator_sse_generator(
     from host_brain.app.chat_runtime_input import (  # noqa: PLC0415
         build_chat_runtime_input,
     )
-    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415  # TODO: Phase XIV cleanup — migrate to new module
         _build_stream_chat_prompt,
     )
     from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
@@ -699,7 +699,7 @@ async def gateway_orchestrator_sse_generator(
         astream_llm_chunks,
     )
     from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
-    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+    from host_brain.app.chat_stream_handler import (  # noqa: PLC0415  # TODO: Phase XIV cleanup — migrate
         _extract_stream_render_text,
     )
 
