@@ -48,7 +48,7 @@ def main() -> int:
     print(f"  短/中/长: {profile.short_ratio:.1%} / {profile.medium_ratio:.1%} / {profile.long_ratio:.1%}")
 
     # 输出 JSON（含中日两版渲染文本）
-    output_dir = REPO_ROOT / "runtime" / "style_canon"
+    output_dir = REPO_ROOT / "host_brain" / "canon" / "style"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     instruction_cn = render_style_instruction_v5(profile)

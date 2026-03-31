@@ -66,7 +66,7 @@ class SpeakerLine:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract Natsume speaker lines from corpus and upsert Style Canon."
+        description="Extract Natsume speaker lines from corpus and upsert canonical Style v5 profile."
     )
     parser.add_argument("--cn-dir", default="", help="CN corpus root (translated_cn).")
     parser.add_argument("--jp-dir", default="", help="JP corpus root (raw_jp).")
@@ -768,7 +768,7 @@ def main() -> int:
                     "version": entry.version,
                     "hash": entry.hash,
                     "proposal_id": proposal_id,
-                    "style_path": str(Path(args.style_root).resolve() / f"{entry.canon_id}.json"),
+                    "style_path": str(Path(args.style_root).resolve() / "style_profile_v5.json"),
                 },
                 ensure_ascii=False,
             )

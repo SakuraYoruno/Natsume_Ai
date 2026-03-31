@@ -80,7 +80,7 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
             "renderer_ja_c_style": v5_entry,
         }
 
-    # ── Fallback：旧版 JSON 文件（v4 及以前）────────────────────────────
+    # ── Canonical v5 source（host_brain/canon/style/style_profile_v5.json）──
     style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
     core_canon_id = str(os.environ.get("HOST_STYLE_CORE_CANON_ID") or "natsume_ai_cn").strip()
     explicit_render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_CANON_ID") or "").strip()
@@ -139,8 +139,15 @@ def _load_v5_style_instruction(render_lang: str) -> str:
     """
     import json as _json
 
-    v5_root = Path(os.environ.get("STYLE_V5_ROOT") or "runtime/style_canon")
-    v5_path = v5_root / "style_profile_v5.json"
+    raw_v5_path = str(
+        os.environ.get("NATSUME_STYLE_V5_PATH")
+        or os.environ.get("STYLE_V5_PATH")
+        or os.environ.get("STYLE_V5_ROOT")
+        or "host_brain/canon/style/style_profile_v5.json"
+    ).strip()
+    v5_path = Path(raw_v5_path)
+    if v5_path.suffix.lower() != ".json":
+        v5_path = v5_path / "style_profile_v5.json"
 
     if not v5_path.exists():
         return ""

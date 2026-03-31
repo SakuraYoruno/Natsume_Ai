@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from host_brain.core.key_profiles import resolve_secret_from_profiles
 from host_brain.memory.chroma_client import load_chroma_runtime_config
+from host_brain.memory.canon_style_store import STYLE_CANON_KEY_MAP, STYLE_V5_FILE_NAME, StyleCanonStore
 from host_brain.retrieval.embedding import (
     EmbeddingServiceContract,
     build_embedding_provider_registry,
@@ -247,30 +248,73 @@ def _collect_style_docs(style_root: Path) -> tuple[list[CanonProjectionDocument]
         )
         return docs, issues
 
+    entries: list[Any] = []
+    seen_ids: set[str] = set()
+    store = StyleCanonStore(style_root=style_root)
+    v5_path = style_root / STYLE_V5_FILE_NAME
+    if v5_path.exists():
+        try:
+            for canon_id in STYLE_CANON_KEY_MAP:
+                entry = store.get(canon_id)
+                if entry is not None:
+                    entries.append(entry)
+                    seen_ids.add(str(entry.canon_id))
+        except Exception as exc:
+            issues.append(
+                {
+                    "code": "STYLE_SCHEMA_INVALID",
+                    "source_path": str(v5_path),
+                    "detail": f"failed to load style canonical v5 profile: {exc}",
+                }
+            )
+            return docs, issues
+        if not seen_ids:
+            issues.append(
+                {
+                    "code": "STYLE_SCHEMA_INVALID",
+                    "source_path": str(v5_path),
+                    "detail": "style_profile_v5.json missing or invalid",
+                }
+            )
+
     for path in sorted(style_root.glob("*.json")):
+        if path.name == STYLE_V5_FILE_NAME:
+            continue
         payload, issue = _read_json_file(path)
         if issue is not None:
             issues.append(issue)
             continue
         canon_id = str(payload.get("canon_id") or "").strip()
         content = str(payload.get("content") or "").strip()
-        if not canon_id or not content:
+        if not canon_id or not content or canon_id in seen_ids:
+            continue
+        try:
+            entry = store.get(canon_id)
+        except Exception as exc:
             issues.append(
                 {
                     "code": "STYLE_SCHEMA_INVALID",
                     "source_path": str(path),
-                    "detail": "canon_id/content is required",
+                    "detail": str(exc),
                 }
             )
             continue
+        if entry is not None:
+            entries.append(entry)
+            seen_ids.add(canon_id)
 
-        version = int(payload.get("version") or 0)
-        hash_value = str(payload.get("hash") or "")
-        tags = payload.get("tags")
-        tag_list = [str(v) for v in tags] if isinstance(tags, list) else []
+    for entry in entries:
+        canon_id = str(entry.canon_id).strip()
+        content = str(entry.content).strip()
+        if not canon_id or not content:
+            continue
+
+        version = int(entry.version)
+        hash_value = str(entry.hash or "")
+        tag_list = [str(v) for v in list(entry.tags or [])]
         tags_csv = ",".join(tag_list)
-        tone_only = bool(payload.get("tone_only", True))
-        unsafe_as_fact = bool(payload.get("unsafe_as_fact", True))
+        tone_only = bool(entry.tone_only)
+        unsafe_as_fact = bool(entry.unsafe_as_fact)
         source_ref = f"canon://style/{canon_id}"
         evidence_ref = f"evd://canon/style/{canon_id}@v{version}"
         vector_id = f"canon_style::{canon_id}"
@@ -295,11 +339,10 @@ def _collect_style_docs(style_root: Path) -> tuple[list[CanonProjectionDocument]
             "unsafe_as_fact": unsafe_as_fact,
             "source_ref": source_ref,
             "evidence_ref": evidence_ref,
-            "source_path": str(path),
+            "source_path": str(v5_path if canon_id in STYLE_CANON_KEY_MAP else style_root / f"{canon_id}.json"),
         }
         docs.append(CanonProjectionDocument(vector_id=vector_id, text=text, metadata=metadata))
     return docs, issues
-
 
 def _collect_world_docs(world_root: Path) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
     docs: list[CanonProjectionDocument] = []
