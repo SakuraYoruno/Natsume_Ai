@@ -62,7 +62,11 @@ from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
 # 新模块导入（优化计划新增模块）
-from host_brain.app.graph.main_chain import MainChain
+# Phase XIV v4：MainChain 已废弃删除，保留类型占位避免其他代码 NameError
+try:
+    from host_brain.app.graph.main_chain import MainChain  # type: ignore[import-not-found]
+except ImportError:
+    MainChain = None  # type: ignore[misc,assignment]
 from host_brain.app.llm.routing_matrix import RoutingMatrix
 from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard

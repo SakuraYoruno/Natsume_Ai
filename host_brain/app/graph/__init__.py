@@ -1,22 +1,16 @@
 """
-graph 包 —— 主聊天链路时序编排
+graph 包 —— 图配置和类型定义
 
-Phase XIV 拆分：
-  - chain_types.py: ChainContext / TypedDict / ChainNode / NODE_TIMEOUT
-  - chain_nodes.py: 10 个具体节点实现
-  - scene_router.py: SceneRouter + ImageUploadPolicy
-  - main_chain.py: MainChain 编排器 + run_main_chain_from_input
+Phase XIV v4 重构：MainChain/SceneRouter/chain_nodes/input_source_strategy 已废弃删除。
+所有场景统一由 top_agent.py 处理。
+
+保留：
+  - chain_types.py: ChainContext / TypedDict / ChainNode / NODE_TIMEOUT（框架级类型）
 """
 from .chain_types import ChainContext, ChainNode, NODE_TIMEOUT
-from .scene_router import SceneRouter, ImageUploadPolicy
-from .main_chain import MainChain, run_main_chain_from_input
 
 __all__ = [
     "ChainContext",
     "ChainNode",
     "NODE_TIMEOUT",
-    "SceneRouter",
-    "ImageUploadPolicy",
-    "MainChain",
-    "run_main_chain_from_input",
 ]

@@ -323,7 +323,11 @@ async def _run_main_chain_dispatch(
     ts_ms: int,
     run_in_thread: bool,
 ) -> None:
-    from host_brain.app.graph.main_chain import run_main_chain_from_input
+    try:
+        from host_brain.app.graph.main_chain import run_main_chain_from_input  # type: ignore[import-not-found]
+    except ImportError:
+        _logger.warning("[%s] MainChain 已废弃，input_routes 走降级路径", request_id)
+        return
 
     if not run_in_thread:
         await run_main_chain_from_input(

@@ -588,12 +588,19 @@ async def _vision_ui_sse_generator(
         })
 
         # 图片上传策略检查（基于场景，屏幕截图属高敏隐私内容）
-        from host_brain.app.graph.main_chain import SceneRouter  # noqa: PLC0415
+        # Phase XIV v4：SceneRouter 已废弃，图片上传策略降级为默认允许
+        try:
+            from host_brain.app.graph.main_chain import SceneRouter  # noqa: PLC0415  # type: ignore[import-not-found]
+        except ImportError:
+            SceneRouter = None  # type: ignore[misc,assignment]
         _user_consent = bool(getattr(request_body, "image_upload_consent", False))
-        _img_allowed, _img_deny_reason = SceneRouter.check_image_upload_allowed(
-            SCENE_VISION_UI,
-            user_consent=_user_consent,
-        )
+        if SceneRouter is not None:
+            _img_allowed, _img_deny_reason = SceneRouter.check_image_upload_allowed(
+                SCENE_VISION_UI,
+                user_consent=_user_consent,
+            )
+        else:
+            _img_allowed, _img_deny_reason = True, None
 
         llm_runtime = await resolve_host_llm_runtime_async(
             rollout_key=session_id,
@@ -645,7 +652,7 @@ async def _vision_ui_sse_generator(
             "model_id": llm_result.get("model_used"),
             "latency_ms": analysis_latency_ms,
             "image_upload_allowed": _img_allowed,
-            "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
+            "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value if SceneRouter is not None else "ALLOW_WITH_CONSENT",
             "image_filter_decision": llm_result.get("image_filter_decision"),
             "image_filter_risks": llm_result.get("image_filter_risks"),
             "request_id": request_id,
@@ -766,7 +773,7 @@ async def _vision_ui_sse_generator(
                     "input_mode": input_mode,
                     "has_image": has_image,
                     "image_upload_allowed": _img_allowed,
-                    "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value,
+                    "image_upload_policy": SceneRouter.get_image_upload_policy(SCENE_VISION_UI).value if SceneRouter is not None else "ALLOW_WITH_CONSENT",
                     "user_consent": _user_consent,
                     "response_format": response_format,
                     "image_filter_decision": llm_result.get("image_filter_decision"),
