@@ -30,7 +30,7 @@ def _read_only_status(args: dict, _ctx: dict | None) -> dict:
     return {"status": "ok", "scope": args.get("scope", "unknown")}
 
 
-class TestMainChainE2E(unittest.TestCase):
+class TestGovernorSkillGatewayE2E(unittest.TestCase):
     def setUp(self) -> None:
         self.now_ms = 1_800_050_000_000
         self.ledger = SQLiteLedger(db_path=":memory:")
