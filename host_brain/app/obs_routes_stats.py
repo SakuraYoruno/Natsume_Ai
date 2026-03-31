@@ -19,7 +19,15 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 logger = logging.getLogger("Natsume.obs")
 
 
-from .obs_routes_core import router, _get_ledger, _now_ms, _safe_json
+from .obs_routes_core import (
+    router,
+    _extract_input_dispatch_latency_ms,
+    _get_ledger,
+    _is_input_dispatch_event,
+    _normalize_input_dispatch_source,
+    _now_ms,
+    _safe_json,
+)
 
 # ---------------------------------------------------------------------------
 # P1: GET /obs/governor/stats  — Governor 决策漏斗 + reason_code 分布

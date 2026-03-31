@@ -1,20 +1,63 @@
-"""obs_routes.py — Observability REST API 聚合入口（瘦身版）。
+"""obs_routes.py — Observability router aggregation and compatibility layer.
 
-Phase XIV 拆分：
-  - obs_routes_core.py: 依赖注入 + 工具函数 + Pydantic 模型 + 核心端点（health/sessions/trace/graph/metrics）
-  - obs_routes_stats.py: 33 个子系统统计端点
-  - obs_routes_platform.py: 平台统计（gateway/skills-hub）+ WebSocket + failure-events
-  - obs_routes_sysmode.py: 系统运行模式管理（sys-mode 全套）
-
-本文件仅负责聚合，确保 FastAPI app.include_router(router) 时所有端点自动注册。
+Phase XIV split modules:
+  - obs_routes_core.py: core endpoints/models/helpers
+  - obs_routes_stats.py: subsystem stats endpoints
+  - obs_routes_platform.py: platform/ws endpoints
+  - obs_routes_sysmode.py: system mode endpoints
 """
-# 核心模块（定义 router + 依赖注入 + 工具函数 + 核心端点）
-from host_brain.app.obs_routes_core import router, set_ledger_provider  # noqa: F401
 
-# 子系统统计端点（import 后自动注册到 router）
+from __future__ import annotations
+
+from typing import Optional
+
+import host_brain.app.obs_routes_core as _obs_routes_core
+from host_brain.app.obs_routes_core import (  # noqa: F401
+    LiveTraceFeedItem,
+    SessionItem,
+    SessionsResponse,
+    TraceLiveFeedSnapshot,
+    TraceNode,
+    TraceResponse,
+    _build_sessions_response,
+    _build_trace_live_feed_delta,
+    _build_trace_response,
+    _now_ms,
+    _safe_json,
+    router,
+    set_ledger_provider,
+)
+
 import host_brain.app.obs_routes_stats  # noqa: F401
-# 平台 + WebSocket 端点
 from host_brain.app.obs_routes_platform import _fetch_remote_gateway_health  # noqa: F401
 import host_brain.app.obs_routes_platform  # noqa: F401
-# 系统运行模式
 import host_brain.app.obs_routes_sysmode  # noqa: F401
+
+
+def _build_trace_live_feed_snapshot(
+    ledger,
+    *,
+    limit: int,
+    window_minutes: int,
+    keyword: Optional[str],
+    active_within_ms: int,
+):
+    """Compatibility wrapper for tests/legacy patches on obs_routes module."""
+    original_build_sessions = _obs_routes_core._build_sessions_response
+    original_build_trace = _obs_routes_core._build_trace_response
+    original_now_ms = _obs_routes_core._now_ms
+    try:
+        _obs_routes_core._build_sessions_response = _build_sessions_response
+        _obs_routes_core._build_trace_response = _build_trace_response
+        _obs_routes_core._now_ms = _now_ms
+        return _obs_routes_core._build_trace_live_feed_snapshot(
+            ledger,
+            limit=limit,
+            window_minutes=window_minutes,
+            keyword=keyword,
+            active_within_ms=active_within_ms,
+        )
+    finally:
+        _obs_routes_core._build_sessions_response = original_build_sessions
+        _obs_routes_core._build_trace_response = original_build_trace
+        _obs_routes_core._now_ms = original_now_ms
