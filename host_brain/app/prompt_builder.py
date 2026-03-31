@@ -672,6 +672,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         evidence_lines.append(f"- [{evidence_ref}] {snippet}")
     evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
 
+    # PII 检索结果脱敏（历史记忆可能含用户 PII）
+    try:
+        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+        if _check_channel("RETRIEVAL"):
+            evidence_block = pii_scrub_if_enabled(evidence_block, context="retrieval_evidence")
+    except Exception:
+        pass
+
     authoritative_rows = prompt_context.get("authoritative")
     world_rows = authoritative_rows if isinstance(authoritative_rows, list) else []
     world_lines: list[str] = []
@@ -1171,6 +1179,17 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- Use as soft context only; do not quote verbatim.\n"
             f"{_episodic_vector_text}\n\n"
         )
+
+    # PII 情节记忆脱敏（历史对话可能含用户 PII）
+    if episodic_vector_block:
+        try:
+            from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+            if _check_channel("RETRIEVAL"):
+                episodic_vector_block = pii_scrub_if_enabled(
+                    episodic_vector_block, context="retrieval_episodic",
+                )
+        except Exception:
+            pass
 
     # Phase XIII: CN_STYLE_BOOST_BINDING 已删除（与 StyleCanon v5 重复）
     cn_style_boost_block = ""

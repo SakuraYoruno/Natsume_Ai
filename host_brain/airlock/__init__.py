@@ -34,6 +34,12 @@ from host_brain.airlock.image_filter import (
     ImageEgressReport,
     filter_image_egress,
 )
+from host_brain.airlock.pii_filter import (
+    PiiRule,
+    PiiScrubResult,
+    pii_scrub_if_enabled,
+    pii_scrub_text,
+)
 
 __all__ = [
     "CLASS_DRAFT_CODE",
@@ -62,4 +68,8 @@ __all__ = [
     "IMAGE_EGRESS_WARN",
     "ImageEgressReport",
     "filter_image_egress",
+    "PiiRule",
+    "PiiScrubResult",
+    "pii_scrub_if_enabled",
+    "pii_scrub_text",
 ]

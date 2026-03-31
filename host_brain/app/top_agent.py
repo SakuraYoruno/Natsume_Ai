@@ -245,6 +245,21 @@ async def top_agent_sse_generator(
         })
         return
 
+    # ── 1.5 PII 入口脱敏 ─────────────────────────────────────────────
+    _pii_ingress_stats: dict[str, Any] = {}
+    try:
+        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
+        if _check_channel("INGRESS"):
+            _pii_result = pii_scrub_text(sanitized_message, context="ingress")
+            sanitized_message = _pii_result.scrubbed_text
+            if _pii_result.has_pii:
+                _pii_ingress_stats = {
+                    "detections": _pii_result.total_detections,
+                    "rules": sorted({d["rule_id"] for d in _pii_result.detections}),
+                }
+    except Exception:
+        pass  # 降级：PII 过滤不影响主流程
+
     yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
     # ── 2. 极轻量 Governor（速率限制 + sys_mode）──────────────────────
@@ -560,6 +575,21 @@ async def top_agent_sse_generator(
     # ── 9. 出口净化 ──────────────────────────────────────────────────
     narrative = _airlock_sanitize_output(narrative)
 
+    # ── 9.5 PII 出口检查（防止 LLM 重放 PII）────────────────────────
+    _pii_egress_stats: dict[str, Any] = {}
+    try:
+        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
+        if _check_channel("EGRESS"):
+            _pii_eg = pii_scrub_text(narrative, context="egress")
+            narrative = _pii_eg.scrubbed_text
+            if _pii_eg.has_pii:
+                _pii_egress_stats = {
+                    "detections": _pii_eg.total_detections,
+                    "rules": sorted({d["rule_id"] for d in _pii_eg.detections}),
+                }
+    except Exception:
+        pass
+
     # ── 10. COMMIT 事件 ──────────────────────────────────────────────
     total_latency_ms = int(time.time() * 1000) - ts_ms
     llm_latency_ms = int(time.time() * 1000) - llm_started_ms
@@ -583,6 +613,10 @@ async def top_agent_sse_generator(
                 k: v for k, v in response_intelligence_meta.items()
                 if k in ("reflection", "multimodal_output")
             } if response_intelligence_meta else {},
+            "pii_stats": {
+                "ingress": _pii_ingress_stats,
+                "egress": _pii_egress_stats,
+            } if (_pii_ingress_stats or _pii_egress_stats) else {},
         },
     })
 
@@ -634,13 +668,24 @@ async def _async_post_process(
 
         store = get_episodic_store()
         if store is not None:
+            # PII 记忆写入脱敏（防止 PII 持久化到向量数据库）
+            _mem_user = user_message
+            _mem_narrative = narrative
+            try:
+                from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+                if _check_channel("MEMORY"):
+                    _mem_user = pii_scrub_if_enabled(user_message, context="memory_write_user")
+                    _mem_narrative = pii_scrub_if_enabled(narrative, context="memory_write_ai")
+            except Exception:
+                pass  # 降级：PII 过滤不影响记忆写入
+
             await asyncio.to_thread(
                 persist_chat_episodic_memory,
                 request_id=request_id,
                 intent_id=request_id,
                 session_id=session_id,
-                user_message=user_message,
-                assistant_reply=narrative,
+                user_message=_mem_user,
+                assistant_reply=_mem_narrative,
                 emotion_context=emotion_context,
                 ts_ms=ts_ms,
                 episodic_store=store,
