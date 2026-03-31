@@ -270,21 +270,19 @@ graph TD
 ```mermaid
 graph LR
     REQ[请求] --> LGW
-    LGW -->|主模型| CLOUD[Cloud API<br/>Gemini/OpenAI/DeepSeek]
-    LGW -->|备用| HOST8B[Host 14B<br/>Qwen3:14b Ollama]
-    LGW -->|本地兜底| EDGE3B[Edge 3B<br/>本地小模型]
+    LGW -->|主模型| CLOUD[Cloud API<br/>Gemini/Codex relay/DeepSeek]
+    LGW -->|最终兜底| HOST14B[Host 14B<br/>Qwen3:14b Ollama]
     LGW -->|Mock| MOCK[Mock Provider<br/>测试]
-    CLOUD -->|失败| HOST8B
-    HOST8B -->|失败| EDGE3B
+    CLOUD -->|全部远端失败| HOST14B
 ```
 
 **路由决策：**
 
 | 路由 | 说明 |
 |------|------|
-| `host_14b` | 本地 Ollama（`http://127.0.0.1:11434/v1`，Qwen3:14b） |
-| `cloud` | 云端 API（Gemini Primary → Gemini Retry → OpenAI → DeepSeek） |
-| `edge_3b` | Edge 端本地小模型 |
+| `host_14b` | 本地 Ollama 最终兜底（`http://127.0.0.1:11434/v1`，Qwen3:14b） |
+| `cloud` | 云端回退链（Gemini → Codex relay → DeepSeek） |
+| `edge_3b` | 历史/预留节点；当前 Host 主链默认不使用 |
 | `skills` | 技能专用路由 |
 
 > `adjust_gen_params_for_emotion`：根据 VAD 情绪向量动态调整 `temperature`、`top_p` 等生成参数。
@@ -741,7 +739,7 @@ sequenceDiagram
 | ASR | Whisper（本地） |
 | Live2D | VTube Studio（WebSocket） |
 | 本地 LLM | Ollama（Qwen3:14b） |
-| 云端 LLM | Gemini / OpenAI / DeepSeek |
+| 云端 LLM | Gemini / Codex relay / DeepSeek |
 | 容器沙箱 | Docker |
 
 ---

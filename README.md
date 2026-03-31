@@ -251,7 +251,7 @@ Natsume_Ai/
 │   │   ├── handlers/        #    多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
 │   │   ├── memory/          #    状态源仲裁器（StateArbiter）+ 记忆写入宪法守卫（MemoryGuard）
 │   │   ├── recall/          #    ContextPack 组装器（token 预算截断 + 冲突检测）
-│   │   ├── llm/             #    模型路由矩阵（能力路由 + cloud→host_14b→edge_3b 降级链）
+│   │   ├── llm/             #    模型路由矩阵（能力路由 + Gemini→Codex→DeepSeek→host_14b 回退链）
 │   │   ├── skills/          #    Skill/MCP 权限模型（PermissionGuard + HotLoader）
 │   │   ├── vision/          #    UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
 │   │   └── failure_matrix.py #   统一失败语义矩阵（主线失败事件 + 注入防护扩展）
@@ -377,7 +377,7 @@ Natsume_Ai/
 |------|------|------|
 | **语言** | Python 3.11+ | 主开发语言 |
 | **AI 编排** | LangGraph | Agent 编排与工作流引擎（多场景路由 + 治理运行时契约）|
-| **LLM 网关** | OpenAI / DeepSeek / Gemini | 多模型支持 + 降级策略 |
+| **LLM 网关** | Gemini / Codex relay / DeepSeek / Ollama | 多模型支持 + 云优先降级策略 |
 | **关系图谱** | Neo4j 6.x | Bond 关系动力学（SSOT） |
 | **向量存储** | ChromaDB 1.4+ | 情景记忆 / Canon 存储 |
 | **语音识别** | faster-whisper large-v3 | Edge 端 ASR（流式/分段） |
@@ -734,11 +734,11 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 
 | 条件 | 路由目标 |
 |------|---------|
-| `chat` + `<2s` 延迟预算 | `host_14b`（本地 Ollama）|
+| `chat` + `<2s` 延迟预算 | `cloud`（Gemini Primary，失败时按 Codex → DeepSeek → host_14b 回退）|
 | `reasoning` 或 context > 16k | `cloud`（Gemini Primary）|
 | `dream` / `diary` | `skills`（专用路由）|
 | `HIGH` risk_level | 禁止路由到 `edge_3b` |
-| 主路由失败 | `cloud → host_14b → edge_3b` 降级链 |
+| 主路由失败 | `Gemini → Codex → DeepSeek → host_14b`，仅全部远端失败才本地 |
 
 ### 🚨 统一失败语义矩阵（FailureHandler）
 

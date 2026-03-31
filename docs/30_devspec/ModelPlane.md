@@ -130,13 +130,13 @@
 - provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1
 
-3.2 Host 本地 14B 模型（chat_direct 优先路由）
+3.2 Host 本地 14B 模型（最终兜底）
 - host_14b（role=chat_direct）
-- 用途：聊天直回场景默认优先走本地 14B（延迟低、零出网、省成本）
+- 用途：仅在 Gemini / Codex relay / DeepSeek 全部不可用时作为最终本地兜底
 - provider/model_id：openai / qwen3:14b（Ollama 本地推理）
 - base_url：http://127.0.0.1:11434/v1
-- 路由条件：chat 场景 + 非 gaming 模式 + 健康检查通过
-- 降级链：host_14b → cloud（Gemini）→ edge_3b
+- 路由条件：远端回退链全部失败 + 本地健康检查通过
+- 回退链：Gemini → Codex relay → DeepSeek → host_14b
 - 约束：延迟预算 < 2s；高 risk_level 请求禁止路由到本地
 
 3.3 Host 常驻兜底（不计入云节点，但属于模型平面）
@@ -169,7 +169,7 @@
 - `graph_meta.scene_type_source` 字段记录来源，供审计追踪
 
 4.1 场景枚举（最小）
-- CHAT：闲聊/陪伴（Host 14B 优先 → Cloud 降级）
+- CHAT：闲聊/陪伴（云优先：Gemini → Codex relay → DeepSeek → Host 14B）
 - EXEC_INTENT：执行意图（需要 Governor）
 - WORK_TRANSLATE：翻译流水线
 - WORK_CODE：代码协作
@@ -246,7 +246,7 @@
 - T-Intent-02：proposal/decision/exec 分离（intent_log 不得支撑完成性表述）
 - T-Perf-01：超时退化链路（在场回应→主→备→兜底）输出结构稳定
 - T-Gaming-01：Gaming 模式下 Host 不依赖本地 GPU（仅兜底策略可用）
-- T-Host14B-01：CHAT 场景默认路由到 Host 14B（qwen3:14b），健康检查失败时降级到 Cloud
+- T-Host14B-01：CHAT 场景仅在 Gemini / Codex relay / DeepSeek 全部失败后才回退到 Host 14B（qwen3:14b）
 - T-Host14B-02：high risk_level 请求禁止路由到 Host 14B 和 Edge 3B
 - T-Gateway-01：CHANNEL_IO 场景 Gateway 入站消息正确路由到 Host Brain 处理链路
 - T-Call-01：voice_call/video_call/cancel_call 通过 Gateway reply → WeChatAdapter → wxautox4 bridge 完整链路可达
