@@ -1,84 +1,56 @@
 from __future__ import annotations
 
 import asyncio
-import threading
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from host_brain.app import input_routes
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.input_routes import InputPayload, _log_input_event, receive_input
 
 
 def _run(coro):
     return asyncio.run(coro)
 
 
-def test_run_main_chain_dispatch_thread_mode_uses_to_thread() -> None:
-    main_chain_mock = AsyncMock(return_value=None)
-    to_thread_called = {"count": 0}
+def test_receive_input_rejects_placeholder_gateway_conversation_id() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="current_chat",
+        content="hello",
+    )
 
-    async def _fake_to_thread(func, /, *args, **kwargs):
-        to_thread_called["count"] += 1
-        errors: list[BaseException] = []
+    response = _run(receive_input(body, SimpleNamespace()))
 
-        def _target() -> None:
-            try:
-                func(*args, **kwargs)
-            except BaseException as exc:  # pragma: no cover - defensive propagation
-                errors.append(exc)
-
-        worker = threading.Thread(target=_target, daemon=True)
-        worker.start()
-        worker.join(timeout=5)
-        if worker.is_alive():
-            raise TimeoutError("thread dispatch did not finish")
-        if errors:
-            raise errors[0]
-
-    with patch("host_brain.app.graph.main_chain.run_main_chain_from_input", new=main_chain_mock):
-        with patch("asyncio.to_thread", new=_fake_to_thread):
-            _run(
-                input_routes._run_main_chain_dispatch(
-                    request_id="req_test_thread",
-                    session_id="sess_test_thread",
-                    source="GATEWAY",
-                    text="hello",
-                    payload={"source": "GATEWAY", "content": "hello"},
-                    ts_ms=1,
-                    run_in_thread=True,
-                )
-            )
-
-    assert to_thread_called["count"] == 1
-    assert main_chain_mock.await_count == 1
+    assert response.status == "REJECTED"
+    assert "invalid gateway conversation_id" in response.detail
 
 
-def test_run_main_chain_dispatch_inline_mode_skips_to_thread() -> None:
-    main_chain_mock = AsyncMock(return_value=None)
+def test_receive_input_dispatches_final_asr_payload() -> None:
+    body = InputPayload(
+        source="ASR",
+        session_id="session-001",
+        text="hello world",
+        is_final=True,
+    )
+    dispatch_mock = AsyncMock(return_value=None)
 
-    async def _fail_to_thread(*_args, **_kwargs):
-        raise AssertionError("asyncio.to_thread should not be used in inline mode")
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.dependencies.notify_user_interaction",
+        return_value=None,
+    ):
+        response = _run(receive_input(body, SimpleNamespace()))
 
-    with patch("host_brain.app.graph.main_chain.run_main_chain_from_input", new=main_chain_mock):
-        with patch("asyncio.to_thread", new=_fail_to_thread):
-            _run(
-                input_routes._run_main_chain_dispatch(
-                    request_id="req_test_inline",
-                    session_id="sess_test_inline",
-                    source="ASR",
-                    text="ping",
-                    payload={"source": "ASR", "text": "ping"},
-                    ts_ms=1,
-                    run_in_thread=False,
-                )
-            )
-
-    assert main_chain_mock.await_count == 1
+    assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 1
+    assert dispatch_mock.await_args.kwargs["source"] == "ASR"
+    assert dispatch_mock.await_args.kwargs["text"] == "hello world"
 
 
 def test_log_input_event_persists_gateway_platform_metadata() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
-        input_routes._log_input_event(
+        _log_input_event(
             ledger=ledger,
             request_id="req_gateway_platform",
             session_id="conv_generic_001",

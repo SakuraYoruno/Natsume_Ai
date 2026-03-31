@@ -1,69 +1,46 @@
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-
-from host_brain.app.graph.input_source_strategy import (
-    CommitResult,
-    GatewayInputSourceStrategy,
-    InputSourceRuntimeContext,
-)
 from host_brain.app.handlers.gateway_orchestrator_handler import (
+    _augment_gateway_prompt_for_reply_depth,
     _normalize_gateway_commit_narrative,
 )
 
 
-def test_gateway_commit_narrative_extracts_visible_text_from_contract_json() -> None:
-    raw_text = (
-        '{"narrative":{"text":"你好呀。"},"intent_draft":{},'
-        '"meta":{"draft_only":true}}'
-    )
-
-    narrative = _normalize_gateway_commit_narrative(raw_text=raw_text)
-
-    assert narrative == "你好呀。"
-
-
-def test_gateway_post_chain_sends_normalized_text_reply() -> None:
-    strategy = GatewayInputSourceStrategy()
-    context = InputSourceRuntimeContext(
-        request_id="req-gateway-normalize",
-        source_upper="GATEWAY",
-        payload={
-            "platform": "qq",
-            "conversation_id": "qq_dm_1",
-        },
-        environ={
-            "HOST_INPUT_GATEWAY_AUTO_REPLY": "true",
-            "HOST_INPUT_GATEWAY_DIRECT_REPLY_ONLY": "false",
-        },
-    )
-    policy = strategy.build_policy(context=context)
-    commit_result = CommitResult(
-        decision="APPROVE",
-        reply_narrative=(
-            '{"narrative":{"text":"你好呀。"},"intent_draft":{},'
+class TestGatewayReplyTextNormalization:
+    def test_extracts_visible_text_from_contract_json(self) -> None:
+        raw_text = (
+            '{"narrative":{"text":"你好，世界"},"intent_draft":{},'
             '"meta":{"draft_only":true}}'
-        ),
-    )
-    post_gateway_reply = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="sent",
-            reason_code=None,
-            detail="",
-        )
-    )
-
-    with patch("host_brain.channels.edge_rpc_client.post_gateway_reply", post_gateway_reply):
-        asyncio.run(
-            strategy.post_chain(
-                context=context,
-                policy=policy,
-                commit_result=commit_result,
-            )
         )
 
-    assert post_gateway_reply.await_count == 1
-    assert post_gateway_reply.await_args.kwargs["content"] == "你好呀。"
+        narrative = _normalize_gateway_commit_narrative(raw_text=raw_text)
+
+        assert narrative == "你好，世界"
+
+    def test_falls_back_to_rendered_text_when_raw_is_not_json(self) -> None:
+        narrative = _normalize_gateway_commit_narrative(
+            raw_text="not json",
+            rendered_text="fallback text",
+        )
+
+        assert narrative == "fallback text"
+
+    def test_augment_gateway_prompt_uses_brief_policy_for_short_requests(self) -> None:
+        prompt = _augment_gateway_prompt_for_reply_depth(
+            prompt_text="BASE_PROMPT",
+            user_message="please short answer",
+        )
+
+        assert prompt.startswith("BASE_PROMPT")
+        assert "The user requested a brief answer." in prompt
+        assert "Keep the visible reply concise" in prompt
+
+    def test_augment_gateway_prompt_uses_default_depth_policy(self) -> None:
+        prompt = _augment_gateway_prompt_for_reply_depth(
+            prompt_text="BASE_PROMPT",
+            user_message="普通聊天",
+        )
+
+        assert prompt.startswith("BASE_PROMPT")
+        assert "Default to 2-4 short sentences" in prompt
+        assert "avoid one-line shallow replies" in prompt

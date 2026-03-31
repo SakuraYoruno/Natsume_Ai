@@ -1,109 +1,135 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
-from tests.unit.conftest import parse_sse_commit, mock_llm_runtime
+from host_brain.app.top_agent import top_agent_sse_generator
 
 
-def _mount_chat_runtime(monkeypatch, dep) -> None:  # noqa: ANN001
-    class _FakeIntentEngine:
-        def evaluate_intent(self, raw_intent, **kwargs):  # noqa: ANN001
-            return {
-                "decision": "APPROVE",
-                "reason_code": None,
-                "intent_id": "intent::retrieval::001",
-                "tokens": {"approval_token_ref": "approval::retrieval::001"},
-                "stage": "S_INTENT_OK",
-                "committed_route_token_ref": "GOV_OK_RENDER",
-                "committed_route_token": {
-                    "token": "GOV_OK_RENDER",
-                    "reason_code": "APPROVE",
-                    "approval_tier": "full",
-                },
-            }
+def _run(coro):
+    return asyncio.run(coro)
 
-    class _FakeGraphRuntime:
-        def run_graph(self, **kwargs):  # noqa: ANN003
-            return SimpleNamespace(
-                status="OK",
-                reason_code=None,
-                stage="S_ORCH_RUN",
-                detail="ok",
-                output={
-                    "payload": {
-                        "chat_direct_ja": {
-                            "gateway_status": "OK",
-                            "reason_code": None,
-                            "provider": "mock",
-                            "model_id": "chat-direct-model",
-                            "payload": {
-                                "narrative": {"text": "retrieval degraded but chat continues"},
-                                "intent_draft": {"action": "narrative_only", "args": {}},
-                                "meta": {"draft_only": True},
-                            },
-                        },
-                    },
-                    "model_control": [],
-                },
+
+async def _collect_events(async_iterable) -> list[str]:
+    events: list[str] = []
+    async for item in async_iterable:
+        events.append(item)
+    return events
+
+
+async def _failing_retrieval(**_kwargs):  # noqa: ANN001
+    raise RuntimeError("chromadb package unavailable")
+
+
+async def _fake_state_arbiter(**_kwargs):  # noqa: ANN001
+    return {}, None
+
+
+async def _fake_runtime(**_kwargs):  # noqa: ANN001
+    return {
+        "available": True,
+        "provider_name": "mock",
+        "model_id": "mock-model",
+        "timeout_ms": 1000,
+        "llm_api_key": "",
+        "base_url_override": "",
+    }
+
+
+def _fake_apply_response_intelligence(**_kwargs):  # noqa: ANN001
+    return "final answer", {}
+
+
+async def _empty_chunks(**_kwargs):  # noqa: ANN001
+    if False:
+        yield ""
+
+
+async def _noop_async(**_kwargs):  # noqa: ANN001
+    return None
+
+
+class _FakeRecallPackBuilder:
+    def build(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("recall pack should not be built when retrieval fails early")
+
+
+class _FakeBondQueue:
+    def enqueue(self, _payload):  # noqa: ANN001
+        return {"status": "QUEUED"}
+
+
+class TestChatRetrievalInitFailureDegrade:
+    def test_retrieval_init_failure_degrades_without_breaking_chat(self, monkeypatch) -> None:
+        monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+        monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+
+        request_body = SimpleNamespace(message="hello", session_id="session-001", thread_id=None)
+        metrics = MagicMock()
+        captured: dict[str, object] = {}
+
+        def _fake_prompt(**kwargs):  # noqa: ANN001
+            captured["retrieval_summary"] = dict(kwargs["retrieval_summary"])
+            return "PROMPT_TEXT", "SYSTEM_PROMPT", {"temperature": 0.2}
+
+        with patch(
+            "host_brain.app.top_agent.chat_lite_governor",
+            return_value={"decision": "APPROVE", "reason_code": None, "intent_id": "intent-001"},
+        ), patch(
+            "host_brain.app.chat_retrieval_helpers._run_retrieval",
+            new=_failing_retrieval,
+        ), patch(
+            "host_brain.app.prompt_builder.infer_render_target_lang",
+            return_value="ja",
+        ), patch(
+            "host_brain.app.state_arbiter_queries._resolve_state_arbiter_bond_fact",
+            new=_fake_state_arbiter,
+        ), patch(
+            "host_brain.app.dependencies.get_recall_pack_builder",
+            return_value=_FakeRecallPackBuilder(),
+        ), patch(
+            "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+            side_effect=_fake_prompt,
+        ), patch(
+            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
+            new=_fake_runtime,
+        ), patch(
+            "host_brain.integrations.llm_helpers.astream_llm_chunks",
+            new=_empty_chunks,
+        ), patch(
+            "host_brain.app.intelligent_runtime.apply_response_intelligence",
+            new=_fake_apply_response_intelligence,
+        ), patch(
+            "host_brain.app.top_agent._async_post_process",
+            new=_noop_async,
+        ), patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=None,
+        ), patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ):
+            events = _run(
+                _collect_events(
+                    top_agent_sse_generator(
+                        request_body=request_body,
+                        request_id="req-retrieval",
+                        session_id="session-001",
+                        ts_ms=1000,
+                        intent_draft={"id": "intent-001"},
+                        emotion_context={},
+                        emotion_snapshot={},
+                        governor_result={"decision": "APPROVE"},
+                        intent_id="intent-001",
+                        metrics=metrics,
+                    ),
+                ),
             )
 
-    monkeypatch.setattr(dep, "_ledger", None)
-    monkeypatch.setattr(dep, "_intent_engine", _FakeIntentEngine())
-    monkeypatch.setattr(dep, "_retrieval_pipeline", None)
-    monkeypatch.setattr(dep, "_retrieval_orchestrator", None)
-    monkeypatch.setattr(dep, "_graph_runtime", _FakeGraphRuntime())
-    monkeypatch.setattr(dep, "_episodic_store", None)
-
-
-def test_chat_retrieval_init_failure_degrades_without_internal_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("Natsume_AUDIT_DB", str(tmp_path / "audit.sqlite3"))
-    monkeypatch.setenv("HOST_COLD_START_ALLOWED", "true")
-    monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "true")
-    monkeypatch.setenv("HOST_CHAT_DISABLE_RETRIEVAL", "false")
-    monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
-    monkeypatch.setenv("HOST_SYS_MODE", "normal")
-    monkeypatch.setenv("HOST_GAMING_EDGE_CHAT_ENABLED", "false")
-
-    from host_brain.app import fastapi_app as appmod
-    import host_brain.app.dependencies as dep
-
-    _mount_chat_runtime(monkeypatch, dep)
-
-    def _raise_retrieval_init_error():  # noqa: ANN202
-        raise RuntimeError("chromadb package unavailable: cannot import name 'Space'")
-
-    monkeypatch.setattr("host_brain.app.chat_handler_complex.get_retrieval_orchestrator",
-        _raise_retrieval_init_error,
-    )
-    # _sse_event_generator 使用 chat_stream_handler.get_retrieval_orchestrator
-    monkeypatch.setattr("host_brain.app.chat_stream_handler.get_retrieval_orchestrator",
-        _raise_retrieval_init_error,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.chat_handler_complex.persist_chat_episodic_memory",
-        lambda **kwargs: {"status": "OK", "memory_id": "mem::ok"},
-    )
-    monkeypatch.setattr("host_brain.app.chat_handler_complex.get_episodic_store", lambda: object())
-    mock_llm_runtime(monkeypatch)
-
-    client = TestClient(appmod.app)
-    response = client.post(
-        "/v1/chat",
-        json={
-            "message": "retrieval init failure should not break main chat path",
-            "session_id": "sess::retrieval::init-fail",
-        },
-    )
-    assert response.status_code == 200
-    body = parse_sse_commit(response)
-
-    assert body.get("decision") == "APPROVE"
-    # _sse_event_generator 在 retrieval 失败时不在 COMMIT 事件中设置 reason_code
-    assert "INTERNAL_SERVER_ERROR" != body.get("reason_code")
-
-    retrieval = dict(dict(body.get("audit_refs") or {}).get("retrieval") or {})
-    assert retrieval.get("status") == "DEGRADED"
-    # retrieval 失败时 reason_code 为 RETRIEVAL_FAILED 或 RETRIEVAL_INIT_FAILED
-    assert retrieval.get("reason_code") in {"RETRIEVAL_FAILED", "RETRIEVAL_INIT_FAILED", "HOST_CHAT_RETRIEVAL_DISABLED"}
-    assert retrieval.get("degraded") is True
+        assert captured["retrieval_summary"]["status"] == "DEGRADED"
+        assert "chromadb" in str(captured["retrieval_summary"]["error"])
+        commit = json.loads(events[-1].removeprefix("data: ").strip())
+        assert commit["decision"] == "APPROVE"
+        assert commit["narrative"] == "final answer"
