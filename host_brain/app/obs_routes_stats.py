@@ -3172,7 +3172,7 @@ async def get_episodic_store_stats(
 
 
 # ---------------------------------------------------------------------------
-# GET /obs/chain/stats — Ref #82: 主链路节点统计
+# GET /obs/chain/stats — Ref #82: 请求处理阶段统计（Phase XIV v4）
 # ---------------------------------------------------------------------------
 
 class ChainNodeStatItem(BaseModel):
@@ -3202,19 +3202,29 @@ class ChainStatsResponse(BaseModel):
 async def get_chain_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """Ref #82: 主链路节点统计（各节点耗时分布/降级率/失败率）。
+    """Ref #82: 请求处理阶段统计（Phase XIV v4 顶级 Agent 架构）。
 
-    从 audit_log（AUDIT_SNAPSHOT 阶段）中提取 audit_tags 和 node_timings，
-    聚合各节点的调用次数、降级率、平均耗时、P95 耗时、超时次数。
+    从 audit_log（AUDIT_SNAPSHOT / COMMIT 阶段）中提取 audit_tags 和 node_timings，
+    聚合各阶段的调用次数、降级率、平均耗时、P95 耗时、超时次数。
+
+    Phase XIV v4 变更：
+      - 旧链路固定 10 节点（MainChain）已废弃
+      - 新架构阶段：airlock → governor → retrieval → prompt_builder → llm_stream
+        → response_intelligence → airlock_output → episodic_store
+      - 委托路径新增 sub_agent 阶段
+      - 保留动态发现：audit_log 中出现的未预定义节点也会被统计
     """
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # 从 audit_log 中拉取 AUDIT_SNAPSHOT 记录
+    # 从 audit_log 中拉取 AUDIT_SNAPSHOT / COMMIT 记录
     try:
         rows = ledger.fetch_by_time_range("audit_log", start_ms=since_ms, end_ms=now)
-        audit_rows = [r for r in rows if str(r.get("stage") or "").upper() == "AUDIT_SNAPSHOT"]
+        audit_rows = [
+            r for r in rows
+            if str(r.get("stage") or "").upper() in ("AUDIT_SNAPSHOT", "COMMIT")
+        ]
     except Exception:
         audit_rows = []
 
@@ -3233,10 +3243,17 @@ async def get_chain_stats(
     node_timeout: dict[str, int] = {}
     node_calls: dict[str, int] = {}
 
+    # Phase XIV v4 顶级 Agent 架构阶段名（预定义，保证前端有数据）
     _KNOWN_NODES = [
-        "airlock_quarantine", "governor", "graph_executor", "recall_fusion",
-        "llm_gateway", "qa_contract", "episodic_store", "audit",
-        "canon_proposal", "airlock_sanitizer",
+        "airlock",              # 入口净化（含 PII 过滤）
+        "governor",             # 轻量 Governor（速率限制 + sys_mode）
+        "retrieval",            # RecallFusion 五路检索 + StateArbiter(bond)
+        "prompt_builder",       # 完整 prompt 管线（20+ 槽位）
+        "llm_stream",           # LLM 流式生成 + SentenceSplitter
+        "response_intelligence",  # 反思链 + AI 话术清理 + 多模态后缀
+        "sub_agent",            # 子 Agent 委托执行（code/translate/intent/vision）
+        "airlock_output",       # 出口净化（含 PII 过滤）
+        "episodic_store",       # 记忆写入（EpisodicStore + Bond）
     ]
     for n in _KNOWN_NODES:
         node_latencies[n] = []

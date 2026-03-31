@@ -1002,7 +1002,7 @@ function MemoryGuardStatsSection({ windowMinutes }) {
   )
 }
 
-// ===== Ref #60: StateArbiter 事实仲裁统计子组件 =====
+// ===== Ref #60: StateArbiter Bond 查询统计子组件（Phase XIV v4: 仅 bond_graph）=====
 function StateArbiterStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1010,12 +1010,12 @@ function StateArbiterStatsSection({ windowMinutes }) {
   }, [windowMinutes])
   return (
     <section>
-      <SectionTitle icon={GitMerge} title="StateArbiter 事实仲裁统计" color="text-cyan-600" />
+      <SectionTitle icon={GitMerge} title="StateArbiter Bond 查询统计" color="text-cyan-600" />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="总仲裁次数" value={data?.total_resolutions ?? '—'} color="text-gray-700" />
+        <StatCard label="总查询次数" value={data?.total_resolutions ?? '—'} color="text-gray-700" />
         <StatCard label="冲突次数" value={data?.conflict_count ?? '—'} color="text-red-600" />
         <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color="text-orange-500" />
-        <StatCard label="SESSION_OVERRIDE" value={data?.session_override_count ?? '—'} color="text-blue-600" />
+        <StatCard label="Bond 快照" value={data?.session_override_count ?? '—'} color="text-blue-600" />
       </div>
       {(data?.top_sources ?? []).length > 0 && (
         <div className="card p-4">

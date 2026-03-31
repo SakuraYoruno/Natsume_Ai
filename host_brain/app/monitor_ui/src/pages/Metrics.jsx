@@ -384,7 +384,7 @@ function MemoryGuardMiniCard() {
   )
 }
 
-// ── Ref #62: StateArbiter 迷你卡片 ─────────────────────────────────────────
+// ── Ref #62: StateArbiter 迷你卡片（Phase XIV v4: 精简为仅 bond 查询）────────
 function StateArbiterMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -394,14 +394,15 @@ function StateArbiterMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <GitMerge size={14} className="text-cyan-600" />
-        <span className="text-sm font-semibold text-gray-700">StateArbiter 事实仲裁（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">StateArbiter Bond 查询（近 1h）</span>
+        <span className="text-xs text-gray-400">仅 bond_graph 快照</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
-          { label: '总仲裁', value: data?.total_resolutions, color: 'text-gray-700' },
+          { label: '总查询', value: data?.total_resolutions, color: 'text-gray-700' },
           { label: '冲突', value: data?.conflict_count, color: 'text-red-600' },
           { label: '降级', value: data?.fallback_count, color: 'text-orange-500' },
-          { label: 'SESSION覆盖', value: data?.session_override_count, color: 'text-blue-600' },
+          { label: 'Bond快照', value: data?.session_override_count, color: 'text-blue-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>

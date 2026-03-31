@@ -25,9 +25,8 @@ async def runtime_lifespan(
     ledger = get_ledger()
     try:
         # 预初始化新模块，确保启动时即可感知降级状态
+        # Phase XIV v4：移除 main_chain 和 routing_matrix（已被顶级 Agent 架构取代）
         from host_brain.app.dependencies import (
-            get_main_chain,
-            get_routing_matrix,
             get_recall_pack_builder,
             get_memory_guard,
             get_state_arbiter,
@@ -36,8 +35,6 @@ async def runtime_lifespan(
         )
         new_module_statuses: dict[str, str] = {}
         for name, factory in [
-            ("main_chain", get_main_chain),
-            ("routing_matrix", get_routing_matrix),
             ("recall_pack_builder", get_recall_pack_builder),
             ("memory_guard", get_memory_guard),
             ("state_arbiter", get_state_arbiter),
