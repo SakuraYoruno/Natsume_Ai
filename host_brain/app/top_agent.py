@@ -200,7 +200,10 @@ async def top_agent_sse_generator(
         _logger.debug("[%s] top_agent retrieval init failed: %s", request_id, _retr_exc)
         render_target_lang = "ja"
 
-    # ── 4. 等检索结果（最多 3 秒）───────────────────────────────────
+    # ── 4. 等检索结果（最多 3 秒）+ StateArbiter ────────────────────
+    recall_slot_text: dict[str, str] = {}
+    bond_summary: dict[str, Any] = {}
+
     if retrieval_task is not None:
         try:
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
@@ -210,6 +213,60 @@ async def top_agent_sse_generator(
             retrieval_summary = {"status": "DEGRADED", "error": str(_retr_exc)[:100]}
             _logger.debug("[%s] top_agent retrieval failed/timeout: %s", request_id, _retr_exc)
 
+    # StateArbiter 查询：world_canon + style_canon + episodic_latest + bond_graph
+    try:
+        from host_brain.app.chat_stream_handler import (  # noqa: PLC0415
+            _resolve_state_arbiter_world_fact,
+            _resolve_state_arbiter_style_fact,
+            _resolve_state_arbiter_episodic_fact,
+            _resolve_state_arbiter_bond_fact,
+        )
+        (
+            (world_summary, world_evidence),
+            (style_summary, style_evidence),
+            (episodic_summary, episodic_evidence),
+            (bond_summary_raw, bond_evidence),
+        ) = await asyncio.gather(
+            _resolve_state_arbiter_world_fact(session_id=session_id, request_id=request_id),
+            _resolve_state_arbiter_style_fact(session_id=session_id, request_id=request_id),
+            _resolve_state_arbiter_episodic_fact(session_id=session_id, request_id=request_id),
+            _resolve_state_arbiter_bond_fact(session_id=session_id, request_id=request_id),
+        )
+        # 注入到 evidence_items
+        for item in (world_evidence, style_evidence, episodic_evidence, bond_evidence):
+            if item is not None:
+                retrieval_evidence_items.append(item)
+        # Bond 摘要
+        bond_stage = str(bond_summary_raw.get("bond_stage") or "").strip()
+        if bond_stage:
+            bond_summary = {
+                "stage": bond_stage,
+                "trend": str(bond_summary_raw.get("trend") or ""),
+            }
+    except Exception as _sa_exc:
+        _logger.debug("[%s] top_agent state_arbiter failed: %s", request_id, _sa_exc)
+
+    # RecallPack 构建（槽位预算分配）
+    try:
+        from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
+        cpb = get_recall_pack_builder()
+        if retrieval_evidence_items:
+            _recall_results: dict[str, str] = {}
+            for item in retrieval_evidence_items:
+                slot = str(item.get("kind") or item.get("source_type") or "retrieval").lower()
+                content = str(item.get("content") or item.get("snippet") or "")
+                if content:
+                    _recall_results[slot] = (_recall_results.get(slot, "") + "\n" + content).strip()
+            if _recall_results:
+                from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
+                pack = cpb.build(_recall_results, task_type="chat")
+                for slot_name in RECALL_SLOT_PRIORITY:
+                    slot = pack.get_slot(slot_name)
+                    if slot and str(getattr(slot, "content", "") or "").strip():
+                        recall_slot_text[slot_name] = str(slot.content).strip()
+    except Exception as _cpb_exc:
+        _logger.debug("[%s] top_agent recall_pack failed: %s", request_id, _cpb_exc)
+
     # ── 5. 构建 prompt + 流式 LLM 调用 ──────────────────────────────
     from host_brain.app.top_agent_prompt import build_top_agent_prompt  # noqa: PLC0415
 
@@ -218,9 +275,12 @@ async def top_agent_sse_generator(
         render_target_lang=render_target_lang,
         emotion_context=emotion_context,
         emotion_snapshot=emotion_snapshot,
+        retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
         session_id=session_id,
         request_id=request_id,
+        bond_summary=bond_summary,
+        recall_slot_text=recall_slot_text if recall_slot_text else None,
     )
 
     # 解析 LLM 运行时

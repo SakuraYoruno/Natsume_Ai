@@ -317,6 +317,34 @@ def _build_node_role_instruction(
             "AI やアシスタントと自称しない。"
         )
 
+    # Phase XIV v4：顶级 Agent（统一入口，夏目蓝本人）
+    if resolved_node_id == "top_agent":
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "角色：顶级 Agent（夏目蓝本人，唯一对话入口）。\n"
+                "目标：直接以自己的身份回复用户，或在需要时委托子 Agent。\n"
+                "策略：\n"
+                "1) 遵循【角色人设】中的身份和性格。\n"
+                "2) 严格遵循【说话风格】和台词参考的语气、节奏和句式。\n"
+                "3) 日常闲聊/情感交流/知识问答：直接用自然语言回复。\n"
+                "4) 需要专业能力时（写代码/翻译/执行操作）：使用 [DELEGATE:agent_id:任务描述] 委托。\n"
+                "5) 不要说自己是 AI/助手/机器人。不使用客服式措辞。\n"
+                "6) 根据 EMOTION_BINDING 和 BOND_AWARE_STYLE 调整语调和亲密度。\n"
+                "7) 输出纯文本，不需要 JSON 封装。代码块用 ``` 包裹。"
+            )
+        return (
+            "角色：トップエージェント（夏目蓝本人、唯一の対話入口）。\n"
+            "目標：自分自身として直接ユーザーに応答する。必要に応じて子エージェントに委託する。\n"
+            "策略：\n"
+            "1)【角色人設】のキャラクターと性格に従う。\n"
+            "2)【話し方スタイル】と台詞参考の語調・リズム・文体を厳守する。\n"
+            "3) 日常会話・感情交流・知識Q&A：自然な言葉で直接応答。\n"
+            "4) 専門能力が必要な場合：[DELEGATE:agent_id:タスク説明] で委託。\n"
+            "5) AI/アシスタント/ロボットと自称しない。\n"
+            "6) EMOTION_BINDING と BOND_AWARE_STYLE に基づいて語調と親密度を調整。\n"
+            "7) プレーンテキスト出力。JSON不要。コードブロックは ``` で囲む。"
+        )
+
     role_instructions: dict[str, str] = {
         "core_reasoner_primary": (
             "角色：core_reasoner_primary（主推理节点）。\n"
