@@ -109,16 +109,19 @@ class SubAgentDispatcher:
 
         在独立线程中运行同步 handler，带超时保护。
         子 Agent 内部的 Governor + 审计在 handler 内完成。
+        执行结果写入 skill_exec_log 供链路追踪。
         """
         self._ensure_handlers()
 
         handler = self._handler_map.get(req.agent_id)
         if handler is None:
-            return SubAgentResponse(
+            resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
                 error=f"unknown agent_id: {req.agent_id}",
             )
+            self._log_dispatch(req, resp)
+            return resp
 
         started_ms = int(time.time() * 1000)
 
@@ -161,7 +164,7 @@ class SubAgentDispatcher:
                 elif isinstance(narrative_raw, str):
                     final_answer = narrative_raw.strip()
 
-            return SubAgentResponse(
+            resp = SubAgentResponse(
                 success=bool(final_answer),
                 agent_id=req.agent_id,
                 result=final_answer,
@@ -172,6 +175,8 @@ class SubAgentDispatcher:
                 },
                 latency_ms=latency_ms,
             )
+            self._log_dispatch(req, resp)
+            return resp
 
         except asyncio.TimeoutError:
             latency_ms = int(time.time() * 1000) - started_ms
@@ -179,23 +184,51 @@ class SubAgentDispatcher:
                 "[%s] sub_agent timeout agent=%s timeout_ms=%d",
                 req.request_id, req.agent_id, req.timeout_ms,
             )
-            return SubAgentResponse(
+            resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
                 error=f"timeout after {req.timeout_ms}ms",
                 latency_ms=latency_ms,
             )
+            self._log_dispatch(req, resp)
+            return resp
         except Exception as exc:
             latency_ms = int(time.time() * 1000) - started_ms
             _logger.warning(
                 "[%s] sub_agent failed agent=%s: %s",
                 req.request_id, req.agent_id, exc,
             )
-            return SubAgentResponse(
+            resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
                 error=str(exc)[:200],
                 latency_ms=latency_ms,
+            )
+            self._log_dispatch(req, resp)
+            return resp
+
+    def _log_dispatch(self, req: SubAgentRequest, resp: SubAgentResponse) -> None:
+        """将子 Agent 调度结果写入 skill_exec_log 供链路追踪。"""
+        try:
+            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+            ledger = get_ledger()
+            ledger.log_skill_exec({
+                "request_id": req.request_id,
+                "session_id": req.session_id,
+                "skill_name": f"sub_agent:{resp.agent_id}",
+                "result_status": "OK" if resp.success else "FAILED",
+                "reason_code": resp.error[:120] if resp.error else None,
+                "latency_ms": resp.latency_ms,
+                "payload": {
+                    "task": req.task[:200],
+                    "agent_id": resp.agent_id,
+                    "success": resp.success,
+                    "audit_refs": resp.audit_refs,
+                },
+                "ts_ms": int(time.time() * 1000),
+            })
+        except Exception:
+            pass  # 审计不影响主流程
             )
 
     async def dispatch_parallel(

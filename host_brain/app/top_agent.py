@@ -631,6 +631,18 @@ async def top_agent_sse_generator(
             bond_summary=bond_summary,
             ts_ms=ts_ms,
             render_target_lang=render_target_lang,
+            # 链路追踪审计数据
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=llm_latency_ms,
+            first_token_ms=first_token_ms,
+            provider_name=provider_name,
+            model_id=model_id,
+            buffer_stream=buffer_stream,
+            delegated_agents=delegated_agents,
+            retrieval_summary=retrieval_summary,
+            gov_decision=gov,
+            pii_ingress_stats=_pii_ingress_stats,
+            pii_egress_stats=_pii_egress_stats,
         )
     )
 
@@ -649,11 +661,110 @@ async def _async_post_process(
     bond_summary: dict[str, Any] | None,
     ts_ms: int,
     render_target_lang: str,
+    # 链路追踪审计数据
+    total_latency_ms: int = 0,
+    llm_latency_ms: int = 0,
+    first_token_ms: int | None = None,
+    provider_name: str = "",
+    model_id: str = "",
+    buffer_stream: bool = False,
+    delegated_agents: list[dict[str, Any]] | None = None,
+    retrieval_summary: dict[str, Any] | None = None,
+    gov_decision: dict[str, Any] | None = None,
+    pii_ingress_stats: dict[str, Any] | None = None,
+    pii_egress_stats: dict[str, Any] | None = None,
 ) -> None:
-    """异步后处理：Airlock 安全分类 + 记忆写入 + Bond 更新 + VTS + TTS。
+    """异步后处理：审计写入 + Airlock 安全分类 + 记忆写入 + Bond 更新 + VTS + TTS。
 
     fire-and-forget，不阻塞主回复流。
     """
+    # ── 链路追踪审计持久化 ────────────────────────────────────────────
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+        ledger = get_ledger()
+        _now = int(time.time() * 1000)
+
+        # (1) governor_log — chat_lite_governor 决策
+        if gov_decision:
+            ledger.log_governor({
+                "request_id": request_id,
+                "intent_id": request_id,
+                "session_id": session_id,
+                "decision": gov_decision.get("decision", "APPROVE"),
+                "reason_code": gov_decision.get("reason_code"),
+                "rule_trace": json.dumps(gov_decision.get("rule_trace", []), ensure_ascii=False, default=str),
+                "latency_ms": gov_decision.get("latency_ms", 0),
+                "ts_ms": ts_ms,
+            })
+
+        # (2) llm_node_call_log — LLM 流式调用记录
+        ledger.log_llm_node_call({
+            "request_id": request_id,
+            "node_id": "top_agent_llm_stream",
+            "provider": provider_name,
+            "model_id": model_id,
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None if narrative.strip() else "LLM_EMPTY_OUTPUT",
+            "latency_ms": llm_latency_ms,
+            "ts_ms": _now,
+        })
+
+        # (3) graph_run_trace — 端到端链路汇总
+        _path = "delegate" if delegated_agents else "chat_direct"
+        _retrieval_status = (retrieval_summary or {}).get("status", "SKIPPED")
+        _retrieval_count = (retrieval_summary or {}).get("candidate_count", 0)
+
+        # 构建 nodes_json：记录每个处理阶段的耗时和状态
+        trace_nodes: list[dict[str, Any]] = [
+            {"node_id": "airlock_ingress", "status": "OK", "ts_ms": ts_ms},
+            {"node_id": "governor", "status": gov_decision.get("decision", "APPROVE") if gov_decision else "OK", "ts_ms": ts_ms},
+            {"node_id": "retrieval", "status": _retrieval_status, "detail": f"candidates={_retrieval_count}", "ts_ms": ts_ms},
+            {"node_id": "prompt_builder", "status": "OK", "ts_ms": ts_ms},
+            {"node_id": "llm_stream", "status": "OK" if narrative.strip() else "DEGRADED",
+             "latency_ms": llm_latency_ms, "first_token_ms": first_token_ms,
+             "provider": provider_name, "model_id": model_id, "ts_ms": ts_ms},
+        ]
+        # 子 Agent 委托阶段
+        for da in (delegated_agents or []):
+            trace_nodes.append({
+                "node_id": f"sub_agent:{da.get('agent_id', '?')}",
+                "status": "OK" if da.get("success") else "FAILED",
+                "latency_ms": da.get("latency_ms", 0),
+                "error": da.get("error"),
+                "ts_ms": ts_ms,
+            })
+        trace_nodes.append({"node_id": "airlock_egress", "status": "OK", "ts_ms": _now})
+
+        # PII 统计（如果有）
+        _pii_detail = {}
+        if pii_ingress_stats:
+            _pii_detail["ingress"] = pii_ingress_stats
+        if pii_egress_stats:
+            _pii_detail["egress"] = pii_egress_stats
+        if _pii_detail:
+            trace_nodes.append({"node_id": "pii_filter", "status": "OK", "detail": json.dumps(_pii_detail, ensure_ascii=False, default=str), "ts_ms": _now})
+
+        trace_edges = [
+            {"source": trace_nodes[i]["node_id"], "target": trace_nodes[i + 1]["node_id"]}
+            for i in range(len(trace_nodes) - 1)
+        ]
+
+        ledger.log_graph_run_trace({
+            "request_id": request_id,
+            "session_id": session_id,
+            "total_latency_ms": total_latency_ms,
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None,
+            "node_count": len(trace_nodes),
+            "nodes_json": trace_nodes,
+            "edges_json": trace_edges,
+            "ts_ms": _now,
+        })
+
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process audit persist failed: %s", request_id, exc)
+
     # ── Airlock 出口安全分类 ──────────────────────────────────────────
     try:
         from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
@@ -758,7 +869,8 @@ async def _async_post_process(
                     _intensity = max(0.0, min(1.0, float(_intensity_raw)))
                 except (TypeError, ValueError):
                     pass
-            await post_speak(
+            _tts_started = int(time.time() * 1000)
+            _tts_result = await post_speak(
                 text=narrative,
                 request_id=request_id,
                 session_id=session_id,
@@ -769,5 +881,27 @@ async def _async_post_process(
                 style_note=str(tts_route.get("style_note") or ""),
                 lang_hint=str(tts_route.get("lang_hint") or render_target_lang),
             )
+
+            # TTS 出站审计写入 voice_event_log
+            try:
+                from host_brain.app.dependencies import get_ledger as _get_tts_ledger  # noqa: PLC0415
+                _get_tts_ledger().log_voice_event({
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "event_type": "TTS_SPEAK",
+                    "direction": "EGRESS",
+                    "status": str(getattr(_tts_result, "status", "OK")),
+                    "latency_ms": int(getattr(_tts_result, "latency_ms", 0)),
+                    "payload": {
+                        "text_len": len(narrative),
+                        "emotion_tag": etag,
+                        "speed": float(tts_route.get("speed") or 1.0),
+                        "pitch": float(tts_route.get("pitch") or 0.0),
+                        "lang_hint": str(tts_route.get("lang_hint") or render_target_lang),
+                    },
+                    "ts_ms": int(time.time() * 1000),
+                })
+            except Exception:
+                pass  # 审计不影响 TTS 流程
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process tts failed: %s", request_id, exc)

@@ -290,6 +290,7 @@ class RecallFusionServiceContract:
 
         fused_candidates: dict[str, dict[str, Any]] = {}
         for route in routes:
+            _route_start_ms = now_ms()
             try:
                 rows = self._search_route(
                     route=route,
@@ -300,6 +301,7 @@ class RecallFusionServiceContract:
                     now_ts_ms=now_value,
                 )
             except Exception as exc:
+                _route_latency_ms = now_ms() - _route_start_ms
                 reason_code = _map_route_exception(exc, store_id=route.store_id)
                 route_errors.append({
                     "route_id": route.route_id,
@@ -308,6 +310,7 @@ class RecallFusionServiceContract:
                     "render_target_lang_selector": route.render_target_lang_selector,
                     "reason_code": reason_code,
                     "detail": str(exc),
+                    "latency_ms": _route_latency_ms,
                 })
                 route_rows.append({
                     "route_id": route.route_id,
@@ -318,9 +321,11 @@ class RecallFusionServiceContract:
                     "reason_code": reason_code,
                     "detail": str(exc),
                     "candidate_count": 0,
+                    "latency_ms": _route_latency_ms,
                 })
                 continue
 
+            _route_latency_ms = now_ms() - _route_start_ms
             route_rows.append({
                 "route_id": route.route_id,
                 "store_id": route.store_id,
@@ -330,6 +335,7 @@ class RecallFusionServiceContract:
                 "reason_code": None,
                 "detail": "recall route completed",
                 "candidate_count": len(rows),
+                "latency_ms": _route_latency_ms,
             })
 
             for rank, raw in enumerate(rows):
@@ -433,6 +439,12 @@ class RecallFusionServiceContract:
                 "candidate_count": len(candidates),
                 "items": build_retrieval_items_preview(candidates),
                 "output_status": status,
+                "latency_ms": sum(r.get("latency_ms", 0) for r in route_rows),
+                "route_latencies": [
+                    {"store_id": r["store_id"], "latency_ms": r.get("latency_ms", 0),
+                     "candidate_count": r.get("candidate_count", 0), "status": r.get("status", "OK")}
+                    for r in route_rows
+                ],
             },
             ts_ms=now_value,
         )
@@ -485,6 +497,12 @@ class RecallFusionServiceContract:
                 "candidate_count": len(candidates),
                 "items": build_retrieval_items_preview(candidates),
                 "output_status": STATUS_DEGRADED,
+                "latency_ms": sum(r.get("latency_ms", 0) for r in route_rows),
+                "route_latencies": [
+                    {"store_id": r["store_id"], "latency_ms": r.get("latency_ms", 0),
+                     "candidate_count": r.get("candidate_count", 0), "status": r.get("status", "DEGRADED")}
+                    for r in route_rows
+                ],
             },
             ts_ms=ts_ms,
         )
