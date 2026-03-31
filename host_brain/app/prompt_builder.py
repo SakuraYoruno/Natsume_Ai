@@ -29,6 +29,7 @@ from host_brain.app.chat_runtime_input import (
 CHAT_DIRECT_NODE_ID = "chat_direct_ja"
 CHAT_RENDER_NODE_ID = "renderer_ja_c_style"
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
+PERSONA_RENDERER_NODE_ID = "persona_renderer"  # Phase XIV：拟人化渲染节点
 
 SCENE_CHAT = "CHAT"
 SCENE_EXEC_INTENT = "EXEC_INTENT"
@@ -293,6 +294,27 @@ def _build_node_role_instruction(
             "角色：renderer（最終日本語レンダリングノード）。\n"
             "目標：CORE_NARRATIVE_ZH を自然な日本語に変換する。\n"
             "策略：意味を維持し、感情トーンを保ち、事実を追加しない。"
+        )
+
+    # Phase XIV：拟人化渲染节点（父子级 Agent 架构）
+    if resolved_node_id == PERSONA_RENDERER_NODE_ID:
+        if str(render_target_lang).strip().lower() == "zh":
+            return (
+                "角色：persona_renderer（拟人化渲染节点）。\n"
+                "目标：将子 Agent 的技术产出转化为你自己风格的自然回复。\n"
+                "策略：以 SCENE_CONTEXT 中的技术结果为事实依据；"
+                "代码块、翻译原文等专业内容原样保留；"
+                "只改变"说话的方式"——用你的语气、节奏和句式来表达；"
+                "遵循【说话风格】和【台词参考】中的语言指导；"
+                "不要说自己是 AI 或助手；不使用客服式措辞。"
+            )
+        return (
+            "角色：persona_renderer（拟人化レンダリングノード）。\n"
+            "目標：子エージェントの技術出力を自然な話し言葉に変換する。\n"
+            "策略：SCENE_CONTEXT の技術結果を事実根拠とする；"
+            "コードブロック、翻訳原文などの専門コンテンツはそのまま保持；"
+            "「話し方」だけを変える；【話し方スタイル】と【台詞参考】に従う；"
+            "AI やアシスタントと自称しない。"
         )
 
     role_instructions: dict[str, str] = {

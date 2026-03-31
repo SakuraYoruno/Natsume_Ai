@@ -534,6 +534,54 @@ async def _complex_scene_sse_generator(
         narrative = repair_utf8_latin1_mojibake(narrative)
         if not narrative:
             narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+
+        # ── Phase XIV：父子级 Agent 拟人化渲染 ─────────────────────────
+        # 子 Agent 产出技术结果（raw_narrative），由父 Agent（CHAT 管线）进行拟人化渲染。
+        # 复用 SCENE_CHAT 完整 prompt 管线：character_profile + style_canon v5
+        # + 台词参考 + Bond + 情感 + 场景感知指令。
+        # 降级策略：渲染失败时直接返回原始 narrative，不阻断流程。
+        persona_rendering_meta: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_ATTEMPTED"}
+        try:
+            from host_brain.app.handlers.persona_rendering_orchestrator import (  # noqa: PLC0415
+                is_persona_rendering_enabled,
+                render_with_persona,
+            )
+            if is_persona_rendering_enabled(scene_type):
+                _rendering_started_ms = int(time.time() * 1000)
+                narrative, persona_rendering_meta = await render_with_persona(
+                    raw_narrative=narrative,
+                    scene_type=scene_type,
+                    request_id=request_id,
+                    session_id=session_id,
+                    thread_id=request_body.thread_id,
+                    user_message=request_body.message,
+                    render_target_lang=render_target_lang,
+                    emotion_context=emotion_context,
+                    emotion_snapshot=emotion_snapshot,
+                    retrieval_summary=retrieval_summary,
+                    retrieval_evidence_items=retrieval_evidence_items,
+                )
+                _logger.info(
+                    "persona rendering completed",
+                    extra={
+                        "request_id": request_id,
+                        "scene_type": scene_type,
+                        "status": persona_rendering_meta.get("status"),
+                        "latency_ms": persona_rendering_meta.get("latency_ms"),
+                    },
+                )
+        except Exception as _pr_exc:
+            persona_rendering_meta = {
+                "status": "DEGRADED",
+                "reason_code": "RENDERING_IMPORT_FAILED",
+                "detail": str(_pr_exc)[:200],
+            }
+            _logger.debug(
+                "persona rendering skipped (import/call failed): %s",
+                _pr_exc,
+                extra={"request_id": request_id},
+            )
+
         try:
             from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
 
@@ -878,6 +926,7 @@ async def _complex_scene_sse_generator(
                 "tts": tts_summary,
                 "episodic_memory": dict(episodic_summary),
                 "response_intelligence": response_intelligence_meta,
+                "persona_rendering": persona_rendering_meta,
                 "trace_metrics": trace_metrics,
             },
         })

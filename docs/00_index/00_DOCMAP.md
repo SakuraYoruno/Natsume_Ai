@@ -113,6 +113,10 @@
   用途：Phase XII Host 本地操控能力技术文档（2026-03-29）。五阶段实现：(1)HostCommandExecutor安全命令执行——4级安全分层(L0只读/L1白名单写/L2需确认/L3双重确认/L4禁止)+命令白名单+沙箱目录+审计日志；(2)SecretVault加密密钥保险库——PBKDF2+XOR加密+按名称分类存取；(3)FileForensics智能文件处理——24种magic bytes签名检测+后缀自动修复+批量解压+密码列表尝试+递归解压；(4)BrowserAutomation浏览器自动化——Playwright封装+域名黑名单+敏感字段保护+每步截图留证+脚本编排；(5)FileOrganizer高级文件整理——9类70+后缀分类+日期归档+MD5去重+空目录清理；(6)SystemMonitor系统监控+ProcessGuard进程守护——CPU/内存/GPU/网络快照+进程管理+崩溃自动重启。
   读者：MASTER、实现层（查阅对齐）。
 
+- docs/50_project/arch/PARENT_CHILD_AGENT_PERSONA_RENDERING.md
+  用途：Phase XIV 父子级 Agent 拟人化渲染架构升级方案（2026-03-31）。解决复杂场景（WORK_CODE/WORK_TRANSLATE/EXEC_INTENT/VISION_UI）回复缺乏角色人设的问题。设计父子级 Agent 架构：子 Agent 只负责"做事"（代码/翻译/执行），父 Agent（CHAT）负责拟人化渲染，复用 SCENE_CHAT 完整 prompt 管线（character_profile + style_canon v5 + 台词参考 + Bond + 情感）。含场景感知指令模板、延迟分析、配置开关、降级策略。
+  读者：MASTER、实现层（查阅对齐）。
+
 - docs/50_project/arch/PHASE_XIII_STYLE_SYSTEM_OVERHAUL.md
   用途：Phase XIII 风格系统彻底重构技术文档（2026-03-30）。修复"台词库/风格指导对最终生成文本无影响"的根本问题。核心改变：台词库不再做语义检索，改为情感场景匹配+独立通道直注入。(1)StyleDistiller深度台词蒸馏——从1742条台词提取6种句式模板+8种情感回应模式+特征词汇+节奏模式，替代旧版纯统计数字；(2)EmotionTaggedUtteranceIndex情感标签台词索引——按emotion_tag场景匹配替代embedding检索，延迟<1ms，100%到达prompt；(3)PromptBuilder改造——台词独立通道绕过Reranker+位置从第16上移到第3-4位（紧跟STYLE_CANON_BINDING）；(4)Reranker保底——style_canon至少保留1条不被淘汰。
   读者：MASTER、实现层（查阅对齐）。
