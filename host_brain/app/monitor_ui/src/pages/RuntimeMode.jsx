@@ -11,7 +11,7 @@ import {
 const MODE_DEFS = {
   normal:      { emoji: '🟢', color: 'green',  label: '正常',   desc: '全功能开放，所有子系统正常运作' },
   focus:       { emoji: '🎯', color: 'blue',   label: '专注',   desc: '抑制主动对话和 LOW 优先级调度，仅保留被动响应' },
-  gaming:      { emoji: '🎮', color: 'purple', label: '游戏',   desc: 'Host 8B 禁用、OCR 屏蔽、VTS/Bond/记忆跳过、延迟预算 <2s' },
+  gaming:      { emoji: '🎮', color: 'purple', label: '游戏',   desc: '禁用本地 14B，强制 Gemini→Codex→DeepSeek 云端链，OCR/VTS/Bond/记忆跳过，延迟预算 <2s' },
   sleep:       { emoji: '💤', color: 'indigo',  label: '睡眠',   desc: '梦境生成触发、仅 HIGH+MEDIUM 优先级，CONTROL 类执行禁止' },
   maintenance: { emoji: '🔧', color: 'yellow', label: '维护',   desc: '阻断所有执行路径，系统维护中' },
   locked:      { emoji: '🔒', color: 'red',    label: '锁定',   desc: '阻断所有执行路径，系统锁定' },
@@ -332,7 +332,7 @@ export default function RuntimeMode() {
               <tr className="border-b border-gray-50">
                 <td className="py-2 px-3">🎮 游戏</td>
                 <td className="py-2 px-3"><span className="text-purple-600">仅 HIGH</span></td>
-                <td className="py-2 px-3 text-gray-500">Host 8B 禁用→Cloud/Edge 3B、OCR 屏蔽、VTS/Bond 跳过</td>
+                <td className="py-2 px-3 text-gray-500">禁用本地 14B→强制 Gemini/Codex/DeepSeek 云端链、OCR 屏蔽、VTS/Bond 跳过</td>
               </tr>
               <tr className="border-b border-gray-50">
                 <td className="py-2 px-3">💤 睡眠</td>
