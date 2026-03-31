@@ -334,7 +334,7 @@ export default function Metrics() {
       {/* ===== Ref #80: Canon 提案迷你卡片 ===== */}
       <CanonProposalMiniCard />
 
-      {/* ===== Ref #92: Chain 主链路迷你卡片 ===== */}
+      {/* ===== Ref #92: 请求链路迷你卡片 ===== */}
       <ChainMiniCard />
 
       {/* ===== Ref #106: 蒸馏统计 + 语义召回迷你卡片 ===== */}
@@ -679,7 +679,7 @@ function SemanticRecallMiniCard() {
   )
 }
 
-// ── Ref #92: Chain 主链路迷你卡片 ──────────────────────────────────────────
+// ── Ref #92: 请求链路迷你卡片（Phase XIV v4）──────────────────────────────
 function ChainMiniCard() {
   const [data, setData] = React.useState(null)
   useEffect(() => {
@@ -689,7 +689,7 @@ function ChainMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Activity size={14} className="text-blue-600" />
-        <span className="text-sm font-semibold text-gray-700">主链路统计（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">请求链路统计（近 1h）</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[

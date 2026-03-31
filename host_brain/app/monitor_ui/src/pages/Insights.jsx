@@ -83,11 +83,11 @@ const WINDOW_OPTIONS = [
 ]
 
 const INSIGHT_GROUPS = [
-  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: 'Governor决策、全局错误追踪、热力图、主链路节点、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
+  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: 'Governor决策、全局错误追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
   { id: 'memory', title: '子系统与记忆', icon: Database, desc: '子系统健康、Memory统计、EpisodicStore、ContextCompressor', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
   { id: 'llm', title: 'Agent与LLM', icon: Bot, desc: 'Agent Loop、LLM成本、路由决策、Prompt构建、RecallPack', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
   { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: 'QA违规、权限拒绝、宪法校验、UI断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
-  { id: 'state', title: '状态与规范', icon: GitMerge, desc: '事实仲裁、Canon提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
+  { id: 'state', title: '状态与规范', icon: GitMerge, desc: 'Bond 查询统计、Canon提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
   { id: 'vts', title: 'VTS通道', icon: Tv, desc: 'VTS通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },
 ]
 
@@ -1177,7 +1177,7 @@ function UIAssertionSection({ windowMinutes }) {
   )
 }
 
-// ===== Ref #84: 主链路节点统计子组件 =====
+// ===== Ref #84: 请求链路统计子组件（Phase XIV v4）=====
 function ChainStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -1188,15 +1188,20 @@ function ChainStatsSection({ windowMinutes }) {
   const maxAvg = Math.max(...nodes.map(n => n.avg_latency_ms ?? 0), 1)
 
   const NODE_COLOR = {
-    airlock_quarantine: '#667085', governor: '#7A5AF8', graph_executor: '#2970FF',
-    recall_fusion: '#0BA5EC', llm_gateway: '#F79009', qa_contract: '#12B76A',
-    episodic_store: '#EE46BC', audit: '#667085', canon_proposal: '#6366F1',
-    airlock_sanitizer: '#667085',
+    airlock_ingress: '#667085', airlock_egress: '#667085', airlock: '#667085',
+    governor: '#7A5AF8', recall_fusion: '#0BA5EC',
+    prompt_builder: '#475467', llm_stream: '#F79009', llm_gateway: '#F79009',
+    episodic_store: '#EE46BC', bond_update: '#D97706', pii_filter: '#667085',
+    sub_agent: '#7C3AED', audit_snapshot: '#667085',
+    // 保留旧名称兼容（后端仍可能返回旧 chain/stats 数据）
+    airlock_quarantine: '#667085', airlock_sanitizer: '#667085',
+    graph_executor: '#2970FF', qa_contract: '#12B76A',
+    canon_proposal: '#6366F1', audit: '#667085',
   }
 
   return (
     <section>
-      <SectionTitle icon={Activity} title="主链路节点统计" color="text-blue-600" />
+      <SectionTitle icon={Activity} title="请求链路统计" color="text-blue-600" />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总请求数" value={data?.total_requests ?? '—'} color="text-gray-700" />
         <StatCard label="Governor 拦截率" value={data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—'} color={data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700'} />

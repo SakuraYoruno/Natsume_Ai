@@ -324,10 +324,10 @@ export function fetchVaultStats(params = {}) {
   return request(`/obs/vault/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== Ref #82: 主链路节点统计 =====
+// ===== Ref #82: 请求链路统计（Phase XIV v4）=====
 
 /**
- * 主链路节点统计（各节点耗时分布/降级率/失败率）
+ * 请求链路统计（各阶段耗时分布/降级率/失败率）
  * @param {object} params - { window_minutes }
  */
 export function fetchChainStats(params = {}) {
@@ -604,10 +604,10 @@ export function fetchRateLimitBackendStats(params = {}) {
   return request(`/obs/rate-limit/backend-stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== Ref #47: RoutingMatrix 路由决策统计 =====
+// ===== Ref #47: LLM 路由决策统计 =====
 
 /**
- * RoutingMatrix 路由决策统计（按 model_id 分组的选择次数/降级次数/降级率/task_type 分布）
+ * LLM 路由决策统计（按 model_id 分组的选择次数/降级次数/降级率/task_type 分布）
  * @param {object} params - { window_minutes }
  */
 export function fetchLlmRouteStats(params = {}) {
@@ -721,10 +721,10 @@ export function fetchMemoryGuardStats(params = {}) {
   return request(`/obs/memory-guard/stats${qs ? '?' + qs : ''}`)
 }
 
-// ===== Ref #60: StateArbiter 事实仲裁统计 =====
+// ===== Ref #60: StateArbiter Bond 查询统计（Phase XIV v4: 仅 bond_graph）=====
 
 /**
- * StateArbiter 事实仲裁统计（冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数）
+ * StateArbiter Bond 查询统计（仅 bond_graph 快照查询）
  * @param {object} params - { window_minutes }
  */
 export function fetchStateArbiterStats(params = {}) {
