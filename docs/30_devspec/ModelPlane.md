@@ -6,7 +6,7 @@
 日期：2026-03-27
 
 定位：本文件属于 DevSpec 子规格，只写"怎么做 + 如何验证（测试点/日志点/契约点）"。
-目标：把"9 云节点 + Host 本地 8B 怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放"写成稳定契约，允许你以后换模型但不换治理。
+目标：把"9 云节点 + Host 本地 14B 怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放"写成稳定契约，允许你以后换模型但不换治理。
 
 ---
 
@@ -130,13 +130,13 @@
 - provider/model_id：gemini / gemini-2.5-pro
 - 输出：CoreDraft.v1
 
-3.2 Host 本地 8B 模型（chat_direct 优先路由）
-- host_8b（role=chat_direct）
-- 用途：聊天直回场景默认优先走本地 8B（延迟低、零出网、省成本）
-- provider/model_id：openai / qwen3:8b（Ollama 本地推理）
+3.2 Host 本地 14B 模型（chat_direct 优先路由）
+- host_14b（role=chat_direct）
+- 用途：聊天直回场景默认优先走本地 14B（延迟低、零出网、省成本）
+- provider/model_id：openai / qwen3:14b（Ollama 本地推理）
 - base_url：http://127.0.0.1:11434/v1
 - 路由条件：chat 场景 + 非 gaming 模式 + 健康检查通过
-- 降级链：host_8b → cloud（Gemini）→ edge_3b
+- 降级链：host_14b → cloud（Gemini）→ edge_3b
 - 约束：延迟预算 < 2s；高 risk_level 请求禁止路由到本地
 
 3.3 Host 常驻兜底（不计入云节点，但属于模型平面）
@@ -169,7 +169,7 @@
 - `graph_meta.scene_type_source` 字段记录来源，供审计追踪
 
 4.1 场景枚举（最小）
-- CHAT：闲聊/陪伴（Host 8B 优先 → Cloud 降级）
+- CHAT：闲聊/陪伴（Host 14B 优先 → Cloud 降级）
 - EXEC_INTENT：执行意图（需要 Governor）
 - WORK_TRANSLATE：翻译流水线
 - WORK_CODE：代码协作
@@ -246,8 +246,8 @@
 - T-Intent-02：proposal/decision/exec 分离（intent_log 不得支撑完成性表述）
 - T-Perf-01：超时退化链路（在场回应→主→备→兜底）输出结构稳定
 - T-Gaming-01：Gaming 模式下 Host 不依赖本地 GPU（仅兜底策略可用）
-- T-Host8B-01：CHAT 场景默认路由到 Host 8B（qwen3:8b），健康检查失败时降级到 Cloud
-- T-Host8B-02：high risk_level 请求禁止路由到 Host 8B 和 Edge 3B
+- T-Host14B-01：CHAT 场景默认路由到 Host 14B（qwen3:14b），健康检查失败时降级到 Cloud
+- T-Host14B-02：high risk_level 请求禁止路由到 Host 14B 和 Edge 3B
 - T-Gateway-01：CHANNEL_IO 场景 Gateway 入站消息正确路由到 Host Brain 处理链路
 - T-Call-01：voice_call/video_call/cancel_call 通过 Gateway reply → WeChatAdapter → wxautox4 bridge 完整链路可达
 
@@ -491,3 +491,12 @@ agent 内部路由状态维护在：
 6. 带副作用的并行 agent
 7. 子 agent 直接 commit
 8. agent 之间投票后直接输出
+
+---
+
+## 2026-03-31 Host 聊天回退链更新
+
+- `host_14b` 的定位已调整为最终兜底，而非 CHAT 默认首选
+- Host 当前运行时回退顺序固定为 `Gemini -> Codex relay -> DeepSeek -> host_14b`
+- `codex` 已提升为正式 provider，配置入口为 `HOST_CODEX_BASE_URL`、`HOST_CODEX_MODEL_ID`、`CODEX_API_KEY`、`CODEX_API_KEY_REF`
+- 本文前文若仍出现“CHAT 默认优先本地 14B”或 `host_14b -> cloud -> edge_3b`，以本节和现网运行时代码为准

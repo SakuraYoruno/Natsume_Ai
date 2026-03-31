@@ -271,7 +271,7 @@ graph TD
 graph LR
     REQ[请求] --> LGW
     LGW -->|主模型| CLOUD[Cloud API<br/>Gemini/OpenAI/DeepSeek]
-    LGW -->|备用| HOST8B[Host 8B<br/>Qwen3:8b Ollama]
+    LGW -->|备用| HOST8B[Host 14B<br/>Qwen3:14b Ollama]
     LGW -->|本地兜底| EDGE3B[Edge 3B<br/>本地小模型]
     LGW -->|Mock| MOCK[Mock Provider<br/>测试]
     CLOUD -->|失败| HOST8B
@@ -282,7 +282,7 @@ graph LR
 
 | 路由 | 说明 |
 |------|------|
-| `host_8b` | 本地 Ollama（`http://127.0.0.1:11434/v1`，Qwen3:8b） |
+| `host_14b` | 本地 Ollama（`http://127.0.0.1:11434/v1`，Qwen3:14b） |
 | `cloud` | 云端 API（Gemini Primary → Gemini Retry → OpenAI → DeepSeek） |
 | `edge_3b` | Edge 端本地小模型 |
 | `skills` | 技能专用路由 |
@@ -740,6 +740,14 @@ sequenceDiagram
 | TTS | GPT-SoVITS（GPU） |
 | ASR | Whisper（本地） |
 | Live2D | VTube Studio（WebSocket） |
-| 本地 LLM | Ollama（Qwen3:8b） |
+| 本地 LLM | Ollama（Qwen3:14b） |
 | 云端 LLM | Gemini / OpenAI / DeepSeek |
 | 容器沙箱 | Docker |
+
+---
+
+## 2026-03-31 路由更新
+
+- LlmGateway 当前默认远端链路为 `Gemini -> Codex relay -> DeepSeek`
+- 仅当三个远端提供商全部不可用时，Host 才回退到本地 `host_14b`
+- 旧图示中如出现 `Gemini/OpenAI/DeepSeek` 或 `cloud -> host_14b -> edge_3b`，应理解为历史示意；当前实现以 `host_brain/app/graph_config_builder.py` 的运行时选择逻辑为准

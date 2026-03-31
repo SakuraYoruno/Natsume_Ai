@@ -69,7 +69,7 @@
 
 ### 3.4 Host 本地模型与 Skills Hub
 
-- Host 8B 本地模型：`HOST_CHAT_HOST_8B_*`（ENABLED / MODEL_ID / BASE_URL / TIMEOUT_MS / HEALTHCHECK_*）
+- Host 14B 本地模型：`HOST_CHAT_HOST_14B_*`（ENABLED / MODEL_ID / BASE_URL / TIMEOUT_MS / HEALTHCHECK_*）
 - Skills Hub：`HOST_SKILL_HUB_*`（ENABLED / DIR / REGISTRY_URL）
 - 外部 Skill 扫描：`HOST_SKILL_SCAN_EXTERNAL` / `HOST_SKILL_EXTERNAL_DIRS`
 
@@ -138,3 +138,11 @@ python scripts/runtime/generate_env_readiness_report.py
 ## 6. 冲突判定
 
 当文档描述与代码行为不一致时，以“脚本实际加载顺序（`.env` -> `.env.example`）”为准；随后必须回补文档。
+
+---
+
+## 2026-03-31 LLM 回退链补充
+
+- Host 云端主链新增 Codex relay，远端优先顺序为 `Gemini -> Codex relay -> DeepSeek`
+- 需要补齐的环境变量：`HOST_GEMINI_BASE_URL`、`HOST_GEMINI_MODEL_ID`、`GEMINI_API_KEY`、`HOST_CODEX_BASE_URL`、`HOST_CODEX_MODEL_ID`、`CODEX_API_KEY`、`HOST_DEEPSEEK_BASE_URL`、`HOST_DEEPSEEK_MODEL_ID`、`DEEPSEEK_API_KEY`
+- 本地模型继续使用 `HOST_CHAT_HOST_14B_*`，但仅在全部远端失败时兜底

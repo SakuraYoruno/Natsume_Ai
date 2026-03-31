@@ -251,7 +251,7 @@ Natsume_Ai/
 │   │   ├── handlers/        #    多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
 │   │   ├── memory/          #    状态源仲裁器（StateArbiter）+ 记忆写入宪法守卫（MemoryGuard）
 │   │   ├── recall/          #    ContextPack 组装器（token 预算截断 + 冲突检测）
-│   │   ├── llm/             #    模型路由矩阵（能力路由 + cloud→host_8b→edge_3b 降级链）
+│   │   ├── llm/             #    模型路由矩阵（能力路由 + cloud→host_14b→edge_3b 降级链）
 │   │   ├── skills/          #    Skill/MCP 权限模型（PermissionGuard + HotLoader）
 │   │   ├── vision/          #    UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
 │   │   └── failure_matrix.py #   统一失败语义矩阵（主线失败事件 + 注入防护扩展）
@@ -487,6 +487,8 @@ pytest tests/
 # 拉起 Neo4j + Chroma + Host API
 .\scripts\runtime\start_host_side.ps1
 ```
+
+若 `.env` 中的 Host 本地 14B 指向本机 Ollama（默认 `http://127.0.0.1:11434/v1`），脚本会尝试拉起 `ollama serve` 并预热 `HOST_CHAT_HOST_14B_MODEL_ID`；若模型缺失且设置 `HOST_OLLAMA_AUTO_PULL=true`，会自动拉取。
 
 默认会自动探测 Neo4j Desktop 目录（`~/.Neo4jDesktop2/Data/dbmss/*`）；也可用 `-Neo4jHome` 手工指定。
 
@@ -732,11 +734,11 @@ AirlockQuarantine → Governor → GraphExecutor → RecallFusion
 
 | 条件 | 路由目标 |
 |------|---------|
-| `chat` + `<2s` 延迟预算 | `host_8b`（本地 Ollama）|
+| `chat` + `<2s` 延迟预算 | `host_14b`（本地 Ollama）|
 | `reasoning` 或 context > 16k | `cloud`（Gemini Primary）|
 | `dream` / `diary` | `skills`（专用路由）|
 | `HIGH` risk_level | 禁止路由到 `edge_3b` |
-| 主路由失败 | `cloud → host_8b → edge_3b` 降级链 |
+| 主路由失败 | `cloud → host_14b → edge_3b` 降级链 |
 
 ### 🚨 统一失败语义矩阵（FailureHandler）
 
@@ -1403,3 +1405,13 @@ python tools/doc_lint/delivery_gate.py --root . --checks contract,e2e,static_sca
 | **PROJECT** | 文档生产与一致性维护 | `docs/50_project/PROJECT_TASKS.md` |
 
 > ⚠️ 实现层任务来源只能是 `docs/30_devspec/**` 和 `docs/40_agents/**`，其他文档不得作为任务来源。
+
+---
+
+## 2026-03-31 路由更新说明
+
+- 当前 Host 聊天主链已经改为云优先：`Gemini -> Codex relay -> DeepSeek -> host_14b`
+- `cloud` 在运行时不再代表单一厂商，而是代表上述远端回退链
+- `host_14b` 不再是默认聊天首选；只有全部远端提供商不可用时才作为最终兜底
+- `codex` 现在是正式 provider，独立使用 `HOST_CODEX_BASE_URL`、`HOST_CODEX_MODEL_ID`、`CODEX_API_KEY`、`CODEX_API_KEY_REF`
+- 本文中若仍出现旧的 `cloud -> host_14b -> edge_3b` 或“CHAT 默认优先本地 14B”的示意，以本节与运行时代码为准
