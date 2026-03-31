@@ -717,24 +717,40 @@ async def _async_post_process(
 
         # 构建 nodes_json：记录每个处理阶段的耗时和状态
         trace_nodes: list[dict[str, Any]] = [
-            {"node_id": "airlock_ingress", "status": "OK", "ts_ms": ts_ms},
-            {"node_id": "governor", "status": gov_decision.get("decision", "APPROVE") if gov_decision else "OK", "ts_ms": ts_ms},
-            {"node_id": "retrieval", "status": _retrieval_status, "detail": f"candidates={_retrieval_count}", "ts_ms": ts_ms},
-            {"node_id": "prompt_builder", "status": "OK", "ts_ms": ts_ms},
-            {"node_id": "llm_stream", "status": "OK" if narrative.strip() else "DEGRADED",
-             "latency_ms": llm_latency_ms, "first_token_ms": first_token_ms,
-             "provider": provider_name, "model_id": model_id, "ts_ms": ts_ms},
+            {"node_id": "airlock_ingress", "node_type": "governor", "display_name": "Airlock 入口",
+             "side": "host", "status": "OK", "ts_ms": ts_ms},
+            {"node_id": "governor", "node_type": "governor", "display_name": "Governor",
+             "side": "host", "status": gov_decision.get("decision", "APPROVE") if gov_decision else "OK",
+             "latency_ms": gov_decision.get("latency_ms", 0) if gov_decision else 0, "ts_ms": ts_ms},
+            {"node_id": "recall_fusion", "node_type": "recall", "display_name": "Recall Fusion",
+             "side": "host", "status": _retrieval_status,
+             "output_data": {"candidate_count": _retrieval_count}, "ts_ms": ts_ms},
+            {"node_id": "prompt_builder", "node_type": "system", "display_name": "Prompt Builder",
+             "side": "host", "status": "OK", "ts_ms": ts_ms},
+            {"node_id": "llm_stream", "node_type": "llm", "display_name": "LLM 流式生成",
+             "side": "host", "status": "OK" if narrative.strip() else "DEGRADED",
+             "latency_ms": llm_latency_ms, "provider": provider_name, "model_id": model_id,
+             "input_data": {"first_token_ms": first_token_ms, "buffer_stream": buffer_stream},
+             "ts_ms": ts_ms},
         ]
         # 子 Agent 委托阶段
         for da in (delegated_agents or []):
+            _agent_id = da.get("agent_id", "?")
             trace_nodes.append({
-                "node_id": f"sub_agent:{da.get('agent_id', '?')}",
+                "node_id": f"sub_agent:{_agent_id}",
+                "node_type": "agent",
+                "display_name": f"Sub Agent: {_agent_id}",
+                "side": "host",
                 "status": "OK" if da.get("success") else "FAILED",
                 "latency_ms": da.get("latency_ms", 0),
                 "error": da.get("error"),
+                "output_data": da.get("audit_refs"),
                 "ts_ms": ts_ms,
             })
-        trace_nodes.append({"node_id": "airlock_egress", "status": "OK", "ts_ms": _now})
+        trace_nodes.append({
+            "node_id": "airlock_egress", "node_type": "governor", "display_name": "Airlock 出口",
+            "side": "host", "status": "OK", "ts_ms": _now,
+        })
 
         # PII 统计（如果有）
         _pii_detail = {}
@@ -743,7 +759,11 @@ async def _async_post_process(
         if pii_egress_stats:
             _pii_detail["egress"] = pii_egress_stats
         if _pii_detail:
-            trace_nodes.append({"node_id": "pii_filter", "status": "OK", "detail": json.dumps(_pii_detail, ensure_ascii=False, default=str), "ts_ms": _now})
+            trace_nodes.append({
+                "node_id": "pii_filter", "node_type": "governor", "display_name": "PII 过滤",
+                "side": "host", "status": "OK",
+                "output_data": _pii_detail, "ts_ms": _now,
+            })
 
         trace_edges = [
             {"source": trace_nodes[i]["node_id"], "target": trace_nodes[i + 1]["node_id"]}

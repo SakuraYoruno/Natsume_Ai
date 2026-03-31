@@ -26,7 +26,7 @@ import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
 
-// ===== 分组定义 =====
+// ===== 分组定义（Phase XIV v4 顶级 Agent 架构）=====
 const GROUPS = [
   {
     id: 'edge',
@@ -41,139 +41,109 @@ const GROUPS = [
   },
   {
     id: 'entry',
-    label: '入口链路',
-    desc: 'Host Input 路由 · 预分类器 · Governor 鉴权 · Scene Router',
+    label: '入口 & 检索',
+    desc: 'Airlock 入口净化 · Governor 鉴权 · Recall Fusion 多路召回',
     icon: ArrowRightLeft,
     color: '#475467',
     bg: '#F8FAFC',
     border: '#CBD5E1',
-    nodeIds: ['host_input', 'pre_classifier', 'governor', 'scene_router'],
-    traceNodeIds: ['host_input', 'governor'],
-  },
-  {
-    id: 'recall',
-    label: '七路召回',
-    desc: '情节/语义/关键词/Bond/Canon/Skill/情感 → Rerank 融合',
-    icon: Filter,
-    color: '#0891B2',
-    bg: '#ECFEFF',
-    border: '#67E8F9',
-    nodeIds: ['recall_episodic', 'recall_semantic', 'recall_keyword', 'recall_bond', 'recall_canon', 'recall_skill', 'recall_emotion', 'recall_rerank'],
-    traceNodeIds: ['retrieval_embedding', 'recall_fusion', 'retrieval_rerank', 'retrieval_evidence_pack', 'retrieval_pipeline'],
-  },
-  {
-    id: 'agent',
-    label: 'Agent 编排',
-    desc: 'Supervisor → Dispatch → Chat/Code/Translate/Retrieval → Judge',
-    icon: Users,
-    color: '#7C3AED',
-    bg: '#F5F3FF',
-    border: '#C4B5FD',
-    nodeIds: ['supervisor_dispatch', 'agent_dispatch', 'chat_agent', 'code_agent', 'translate_agent', 'retrieval_agent', 'judge_agent'],
+    nodeIds: ['airlock_ingress', 'governor', 'recall_fusion'],
+    traceNodeIds: ['airlock_ingress', 'governor', 'recall_fusion', 'host_input'],
   },
   {
     id: 'llm',
-    label: 'LLM 推理',
-    desc: 'LLM 云端链 (Gemini → Codex → DeepSeek) · 本地最终兜底 (qwen3:14b)',
+    label: 'Prompt & LLM',
+    desc: 'Prompt 组装 · LLM 流式生成',
     icon: Brain,
     color: '#2970FF',
     bg: '#EEF4FF',
     border: '#93C5FD',
-    nodeIds: ['llm_local', 'llm_cloud'],
-    traceNodeIds: ['llm_gateway'],
+    nodeIds: ['prompt_builder', 'llm_stream'],
+    traceNodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'top_agent_llm_stream'],
+  },
+  {
+    id: 'agent',
+    label: '子 Agent 委托',
+    desc: 'Code / Translate / Intent / Vision Agent',
+    icon: Users,
+    color: '#7C3AED',
+    bg: '#F5F3FF',
+    border: '#C4B5FD',
+    nodeIds: ['sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision'],
+    traceNodeIds: [],
   },
   {
     id: 'postprocess',
     label: '后处理 & 输出',
-    desc: 'Airlock 检疫 · 记忆写入 · Bond 更新 · VTS 控制 · TTS · VTS 驱动',
+    desc: 'Airlock 出口 · PII 过滤 · 记忆写入 · Bond 更新 · TTS · VTS',
     icon: Zap,
     color: '#D97706',
     bg: '#FFFBEB',
     border: '#FCD34D',
-    nodeIds: ['airlock', 'episodic_write', 'bond_update', 'vts_ctrl', 'chat_render', 'tts', 'vts_driver'],
-    traceNodeIds: ['airlock', 'episodic_store', 'bond_update', 'audit_snapshot', 'tts', 'vts_driver'],
+    nodeIds: ['airlock_egress', 'pii_filter', 'episodic_store', 'bond_update', 'tts', 'vts_driver'],
+    traceNodeIds: ['airlock_egress', 'airlock', 'pii_filter', 'episodic_store', 'bond_update', 'audit_snapshot'],
   },
 ]
 
-// ===== 双端全链路静态图定义 =====
+// ===== 双端全链路静态图定义（Phase XIV v4 顶级 Agent 架构）=====
 const FULL_CHAIN_SCHEMA = {
-  graph_id: 'natsume.full_chain',
+  graph_id: 'natsume.top_agent_v4',
   nodes: [
+    // Edge 端输入
     { node_id: 'asr',              node_type: 'asr',       display_name: 'ASR 语音识别',       layer: 'edge' },
     { node_id: 'wechat_listener',  node_type: 'system',    display_name: '微信监听',            layer: 'edge' },
     { node_id: 'input_reporter',   node_type: 'system',    display_name: '输入上报',            layer: 'edge' },
-    { node_id: 'host_input',       node_type: 'router',    display_name: 'Host Input 路由',    layer: 'host' },
-    { node_id: 'pre_classifier',   node_type: 'intent',    display_name: '预分类器',            layer: 'host' },
-    { node_id: 'governor',         node_type: 'governor',  display_name: 'Governor 鉴权',      layer: 'host' },
-    { node_id: 'scene_router',     node_type: 'router',    display_name: 'Scene Router',       layer: 'host' },
-    { node_id: 'recall_episodic',  node_type: 'recall',    display_name: '情节记忆召回',        layer: 'host' },
-    { node_id: 'recall_semantic',  node_type: 'recall',    display_name: '语义向量召回',        layer: 'host' },
-    { node_id: 'recall_keyword',   node_type: 'recall',    display_name: '关键词召回',          layer: 'host' },
-    { node_id: 'recall_bond',      node_type: 'recall',    display_name: 'Bond 关系召回',      layer: 'host' },
-    { node_id: 'recall_canon',     node_type: 'recall',    display_name: 'Canon 世界观召回',   layer: 'host' },
-    { node_id: 'recall_skill',     node_type: 'recall',    display_name: 'Skill 工具召回',     layer: 'host' },
-    { node_id: 'recall_emotion',   node_type: 'recall',    display_name: '情感上下文召回',      layer: 'host' },
-    { node_id: 'recall_rerank',    node_type: 'retrieval', display_name: 'Rerank 融合',        layer: 'host' },
-    { node_id: 'supervisor_dispatch', node_type: 'agent',  display_name: 'Supervisor 分派',   layer: 'host' },
-    { node_id: 'agent_dispatch',   node_type: 'agent',     display_name: 'Agent Dispatch',    layer: 'host' },
-    { node_id: 'chat_agent',       node_type: 'agent',     display_name: 'Chat Agent',        layer: 'host' },
-    { node_id: 'code_agent',       node_type: 'agent',     display_name: 'Code Agent',        layer: 'host' },
-    { node_id: 'translate_agent',  node_type: 'agent',     display_name: 'Translate Agent',   layer: 'host' },
-    { node_id: 'retrieval_agent',  node_type: 'agent',     display_name: 'Retrieval Agent',   layer: 'host' },
-    { node_id: 'judge_agent',      node_type: 'judge',     display_name: 'Judge Agent',       layer: 'host' },
-    { node_id: 'llm_local',        node_type: 'llm',       display_name: 'LLM 本地兜底 (qwen3:14b)', layer: 'host', provider: 'openai', model_id: 'qwen3:14b' },
-    { node_id: 'llm_cloud',        node_type: 'llm',       display_name: 'LLM 云端链 (Gemini → Codex → DeepSeek)',  layer: 'host', provider: 'gemini', model_id: 'gemini-2.5-flash' },
-    { node_id: 'airlock',          node_type: 'governor',  display_name: 'Airlock 检疫',       layer: 'host' },
-    { node_id: 'episodic_write',   node_type: 'memory',    display_name: '情节记忆写入',        layer: 'host' },
-    { node_id: 'bond_update',      node_type: 'bond',      display_name: 'Bond 积分更新',      layer: 'host' },
-    { node_id: 'vts_ctrl',         node_type: 'vts',       display_name: 'VTS 控制',           layer: 'host' },
-    { node_id: 'chat_render',      node_type: 'system',    display_name: 'Chat Render 输出',   layer: 'host' },
+    // Host 入口
+    { node_id: 'airlock_ingress',  node_type: 'governor',  display_name: 'Airlock 入口',       layer: 'host' },
+    { node_id: 'governor',         node_type: 'governor',  display_name: 'Governor',           layer: 'host' },
+    // 检索
+    { node_id: 'recall_fusion',    node_type: 'recall',    display_name: 'Recall Fusion',      layer: 'host' },
+    // Prompt + LLM
+    { node_id: 'prompt_builder',   node_type: 'system',    display_name: 'Prompt Builder',     layer: 'host' },
+    { node_id: 'llm_stream',       node_type: 'llm',       display_name: 'LLM 流式生成',       layer: 'host' },
+    // 子 Agent（委托路径分叉）
+    { node_id: 'sub_agent_code',      node_type: 'agent',  display_name: 'Code Agent',         layer: 'host' },
+    { node_id: 'sub_agent_translate', node_type: 'agent',  display_name: 'Translate Agent',    layer: 'host' },
+    { node_id: 'sub_agent_intent',    node_type: 'agent',  display_name: 'Intent Agent',       layer: 'host' },
+    { node_id: 'sub_agent_vision',    node_type: 'agent',  display_name: 'Vision Agent',       layer: 'host' },
+    // 后处理
+    { node_id: 'airlock_egress',   node_type: 'governor',  display_name: 'Airlock 出口',       layer: 'host' },
+    { node_id: 'pii_filter',       node_type: 'governor',  display_name: 'PII 过滤',           layer: 'host' },
+    { node_id: 'episodic_store',   node_type: 'memory',    display_name: '记忆写入',            layer: 'host' },
+    { node_id: 'bond_update',      node_type: 'bond',      display_name: 'Bond 更新',          layer: 'host' },
+    // Edge 端输出
     { node_id: 'tts',              node_type: 'tts',       display_name: 'TTS 语音合成',       layer: 'edge' },
     { node_id: 'vts_driver',       node_type: 'vts',       display_name: 'VTS 表情驱动',       layer: 'edge' },
   ],
   edges: [
-    { source: 'asr',             target: 'host_input'       },
-    { source: 'wechat_listener', target: 'host_input'       },
-    { source: 'input_reporter',  target: 'host_input'       },
-    { source: 'host_input',      target: 'pre_classifier'   },
-    { source: 'pre_classifier',  target: 'governor'         },
-    { source: 'governor',        target: 'scene_router'     },
-    { source: 'scene_router',    target: 'recall_episodic'  },
-    { source: 'scene_router',    target: 'recall_semantic'  },
-    { source: 'scene_router',    target: 'recall_keyword'   },
-    { source: 'scene_router',    target: 'recall_bond'      },
-    { source: 'scene_router',    target: 'recall_canon'     },
-    { source: 'scene_router',    target: 'recall_skill'     },
-    { source: 'scene_router',    target: 'recall_emotion'   },
-    { source: 'recall_episodic', target: 'recall_rerank'    },
-    { source: 'recall_semantic', target: 'recall_rerank'    },
-    { source: 'recall_keyword',  target: 'recall_rerank'    },
-    { source: 'recall_bond',     target: 'recall_rerank'    },
-    { source: 'recall_canon',    target: 'recall_rerank'    },
-    { source: 'recall_skill',    target: 'recall_rerank'    },
-    { source: 'recall_emotion',  target: 'recall_rerank'    },
-    { source: 'scene_router',    target: 'supervisor_dispatch' },
-    { source: 'supervisor_dispatch', target: 'agent_dispatch' },
-    { source: 'agent_dispatch',  target: 'chat_agent'       },
-    { source: 'agent_dispatch',  target: 'code_agent'       },
-    { source: 'agent_dispatch',  target: 'translate_agent'  },
-    { source: 'agent_dispatch',  target: 'retrieval_agent'  },
-    { source: 'chat_agent',      target: 'judge_agent'      },
-    { source: 'code_agent',      target: 'judge_agent'      },
-    { source: 'translate_agent', target: 'judge_agent'      },
-    { source: 'retrieval_agent', target: 'judge_agent'      },
-    { source: 'recall_rerank',   target: 'llm_local'        },
-    { source: 'recall_rerank',   target: 'llm_cloud'        },
-    { source: 'judge_agent',     target: 'llm_local'        },
-    { source: 'judge_agent',     target: 'llm_cloud'        },
-    { source: 'llm_local',       target: 'airlock'          },
-    { source: 'llm_cloud',       target: 'airlock'          },
-    { source: 'airlock',         target: 'episodic_write'   },
-    { source: 'airlock',         target: 'bond_update'      },
-    { source: 'airlock',         target: 'vts_ctrl'         },
-    { source: 'airlock',         target: 'chat_render'      },
-    { source: 'chat_render',     target: 'tts'              },
-    { source: 'vts_ctrl',        target: 'vts_driver'       },
+    // 入站
+    { source: 'asr',              target: 'airlock_ingress'  },
+    { source: 'wechat_listener',  target: 'airlock_ingress'  },
+    { source: 'input_reporter',   target: 'airlock_ingress'  },
+    // 入口链路
+    { source: 'airlock_ingress',  target: 'governor'         },
+    { source: 'governor',         target: 'recall_fusion'    },
+    // 检索 → Prompt → LLM
+    { source: 'recall_fusion',    target: 'prompt_builder'   },
+    { source: 'prompt_builder',   target: 'llm_stream'       },
+    // LLM → 闲聊直出 → 后处理
+    { source: 'llm_stream',       target: 'airlock_egress'   },
+    // LLM → 委托路径分叉
+    { source: 'llm_stream',       target: 'sub_agent_code'      },
+    { source: 'llm_stream',       target: 'sub_agent_translate' },
+    { source: 'llm_stream',       target: 'sub_agent_intent'    },
+    { source: 'llm_stream',       target: 'sub_agent_vision'    },
+    // 子 Agent → 后处理
+    { source: 'sub_agent_code',      target: 'airlock_egress'   },
+    { source: 'sub_agent_translate', target: 'airlock_egress'   },
+    { source: 'sub_agent_intent',    target: 'airlock_egress'   },
+    { source: 'sub_agent_vision',    target: 'airlock_egress'   },
+    // 后处理
+    { source: 'airlock_egress',   target: 'pii_filter'       },
+    { source: 'airlock_egress',   target: 'episodic_store'   },
+    { source: 'airlock_egress',   target: 'bond_update'      },
+    { source: 'airlock_egress',   target: 'tts'              },
+    { source: 'airlock_egress',   target: 'vts_driver'       },
   ],
 }
 
@@ -186,6 +156,15 @@ function normalizeTraceGroupNodeId(nodeId = '') {
   if (nodeId.startsWith('voice_')) return 'input_reporter'
   if (nodeId.startsWith('episodic_store')) return 'episodic_store'
   if (nodeId.startsWith('bond_update')) return 'bond_update'
+  if (nodeId.startsWith('sub_agent:code') || nodeId === 'sub_agent_code') return 'sub_agent_code'
+  if (nodeId.startsWith('sub_agent:translate') || nodeId === 'sub_agent_translate') return 'sub_agent_translate'
+  if (nodeId.startsWith('sub_agent:intent') || nodeId === 'sub_agent_intent') return 'sub_agent_intent'
+  if (nodeId.startsWith('sub_agent:vision') || nodeId === 'sub_agent_vision') return 'sub_agent_vision'
+  if (nodeId.startsWith('sub_agent:')) return 'sub_agent_intent'
+  if (nodeId.startsWith('airlock')) return nodeId.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
+  if (nodeId === 'host_input') return 'airlock_ingress'
+  if (nodeId === 'llm_gateway' || nodeId === 'top_agent_llm_stream') return 'llm_stream'
+  if (nodeId.startsWith('retrieval_') || nodeId === 'recall_fusion') return 'recall_fusion'
   return nodeId
 }
 
@@ -800,7 +779,11 @@ function computeGanttTimeline(traceData) {
 
 const NODE_TYPE_COLOR = {
   intent: '#2970FF', governor: '#7A5AF8', memory: '#0BA5EC',
-  llm: '#F79009', tts: '#12B76A', vts: '#EE46BC', default: '#667085',
+  llm: '#F79009', tts: '#12B76A', vts: '#EE46BC',
+  recall: '#0891B2', retrieval: '#0891B2', bond: '#D97706',
+  asr: '#059669', system: '#475467', agent: '#7C3AED',
+  skill: '#0891B2', router: '#475467', judge: '#059669',
+  edge: '#667085', branch: '#0891B2', default: '#667085',
 }
 function nodeColor(t) { return NODE_TYPE_COLOR[t] ?? NODE_TYPE_COLOR.default }
 

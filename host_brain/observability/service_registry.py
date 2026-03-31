@@ -45,8 +45,6 @@ HOST_SERVICES: List[Dict[str, str]] = [
     {"service_id": "mcp_provider",        "name": "MCP Provider",           "side": "host"},
     {"service_id": "embedding",           "name": "Embedding Service",      "side": "host"},
     {"service_id": "reranker",            "name": "Reranker Service",       "side": "host"},
-    {"service_id": "main_chain",          "name": "MainChain Orchestrator", "side": "host"},
-    {"service_id": "routing_matrix",      "name": "LLM Routing Matrix",     "side": "host"},
     {"service_id": "memory_guard",        "name": "Memory Guard",           "side": "host"},
     {"service_id": "state_arbiter",       "name": "State Arbiter",          "side": "host"},
     {"service_id": "recall_pack_builder", "name": "Recall Pack Builder",    "side": "host"},

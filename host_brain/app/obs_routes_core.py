@@ -725,25 +725,27 @@ def _sort_trace_nodes(nodes: List[TraceNode]) -> List[TraceNode]:
 
 
 def _trace_node_order_rank(node: TraceNode) -> int:
+    """Phase XIV v4 节点排序权重。"""
     node_id = str(node.node_id or "")
+    # Edge 入站事件（voice_event_log）
     if node_id.startswith("voice_"):
         event_type = str((node.input_data or {}).get("event_type") or "").upper()
         if "ACCEPTED" in event_type:
             return 0
         if "DISPATCHED" in event_type:
             return 5
-        if "COMPLETED" in event_type:
+        if "COMPLETED" in event_type or "TTS" in event_type:
             return 90
         return 1
-    if node_id == "host_input":
+    # Host 入口
+    if node_id in ("host_input", "airlock_ingress"):
         return 10
-    if node_id.startswith("airlock"):
-        return 15
     if node_id == "governor":
         return 20
+    # 检索
     if node_id.startswith("retrieval_embedding"):
         return 30
-    if node_id.startswith("recall_fusion"):
+    if node_id in ("recall_fusion",) or node_id.startswith("recall_fusion"):
         return 31
     if node_id.startswith("retrieval_rerank"):
         return 32
@@ -751,15 +753,31 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 33
     if node_id.startswith("retrieval_pipeline"):
         return 34
-    if node_id.startswith("llm_"):
+    # Prompt + LLM
+    if node_id == "prompt_builder":
+        return 40
+    if node_id in ("llm_stream", "llm_gateway", "top_agent_llm_stream"):
         return 50
-    if node_id.startswith("episodic_store"):
+    if node_id.startswith("llm_"):
+        return 51
+    # 子 Agent
+    if node_id.startswith("sub_agent"):
+        return 55
+    # 出口
+    if node_id == "airlock_egress":
         return 60
+    if node_id.startswith("airlock"):
+        return 15
+    if node_id == "pii_filter":
+        return 62
+    # 记忆 + Bond
+    if node_id.startswith("episodic_store"):
+        return 65
     if node_id.startswith("bond_update"):
         return 70
     if node_id == "audit_snapshot":
         return 80
-    return 40
+    return 45
 
 
 def _build_linear_trace_edges(nodes: List[TraceNode]) -> List[TraceEdge]:
@@ -1719,118 +1737,8 @@ async def export_sessions_csv(
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)
 async def get_trace(request_id: str):
-    return _build_trace_response(_get_ledger(), request_id)
     """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    ledger = _get_ledger()
-
-    trace_rows = _fetch_request_rows(ledger, "graph_run_trace", request_id)
-    intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
-    governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
-    retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
-    airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
-    bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
-    memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
-    error_rows = _fetch_request_rows(ledger, "error_log", request_id)
-    voice_rows = _fetch_request_rows(ledger, "voice_event_log", request_id)
-
-    if not trace_rows and not governor_rows and not intent_rows and not voice_rows:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "not_found", "request_id": request_id},
-        )
-
-    summary = _build_trace_summary(
-        request_id=request_id,
-        intent_rows=intent_rows,
-        governor_rows=governor_rows,
-        retrieval_rows=retrieval_rows,
-        llm_rows=llm_rows,
-        airlock_rows=airlock_rows,
-        bond_rows=bond_rows,
-        memory_rows=memory_rows,
-        error_rows=error_rows,
-        voice_rows=voice_rows,
-    )
-
-    # 2) 解析完整链路（fetch_by_request_id 已通过 _decode_row 自动反序列化 JSON 字段）
-    if trace_rows:
-        row_dict = trace_rows[-1]
-        nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
-        edges_raw = _safe_json(row_dict.get("edges_json")) or []
-
-        nodes = []
-        for n in nodes_raw:
-            nodes.append(TraceNode(
-                node_id=n.get("node_id", ""),
-                node_type=n.get("node_type", "system"),
-                display_name=n.get("display_name", n.get("node_id", "")),
-                side=n.get("side"),
-                provider=n.get("provider"),
-                model_id=n.get("model_id"),
-                status=n.get("status", "OK"),
-                reason_code=n.get("reason_code"),
-                latency_ms=n.get("latency_ms"),
-                input_data=n.get("input_data"),
-                output_data=n.get("output_data"),
-                ts_ms=n.get("ts_ms"),
-                error=n.get("error"),
-            ))
-
-        edges = [TraceEdge(source=e.get("source", ""), target=e.get("target", "")) for e in edges_raw]
-        voice_nodes = _build_voice_trace_nodes(voice_rows)
-        edges = _build_trace_edges(nodes, edges, voice_nodes)
-        nodes.extend(voice_nodes)
-        trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
-
-        return TraceResponse(
-            request_id=request_id,
-            session_id=_first_present(row_dict.get("session_id"), summary.get("session_id")),
-            status=trace_status,
-            total_latency_ms=_first_present(row_dict.get("total_latency_ms"), summary.get("total_latency_ms")),
-            node_count=len(nodes),
-            nodes=nodes,
-            edges=edges,
-            summary=summary,
-            ts_ms=row_dict.get("ts_ms", _now_ms()),
-            timestamp=_now_ms(),
-        )
-
-    synthesized_nodes = _build_voice_trace_nodes(voice_rows)
-    intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
-    if intent_node is not None:
-        synthesized_nodes.append(intent_node)
-    governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
-    if governor_node is not None:
-        synthesized_nodes.append(governor_node)
-    synthesized_nodes.extend(_build_airlock_trace_nodes(airlock_rows, summary))
-    synthesized_nodes.extend(_build_retrieval_trace_nodes(retrieval_rows, summary))
-    synthesized_nodes.extend(_build_llm_trace_nodes(llm_rows, summary))
-    synthesized_nodes.extend(_build_bond_trace_nodes(bond_rows))
-    synthesized_nodes.extend(_build_memory_trace_nodes(memory_rows, summary))
-    audit_snapshot_node = _build_audit_snapshot_node(summary)
-    if audit_snapshot_node is not None:
-        synthesized_nodes.append(audit_snapshot_node)
-
-    nodes = _sort_trace_nodes(synthesized_nodes)
-    edges = _build_linear_trace_edges(nodes)
-    decision = str(summary.get("decision") or "").strip().upper()
-    base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
-    trace_status = _coalesce_trace_status(base_status, nodes)
-    trace_ts = next((node.ts_ms for node in nodes if node.ts_ms is not None), _now_ms())
-
-    return TraceResponse(
-        request_id=request_id,
-        session_id=summary.get("session_id"),
-        status=trace_status,
-        total_latency_ms=summary.get("total_latency_ms"),
-        node_count=len(nodes),
-        nodes=nodes,
-        edges=edges,
-        summary=summary,
-        ts_ms=trace_ts,
-        timestamp=_now_ms(),
-    )
+    return _build_trace_response(_get_ledger(), request_id)
 
 
 # ---------------------------------------------------------------------------
