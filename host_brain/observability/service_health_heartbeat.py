@@ -32,6 +32,7 @@ _cache_lock = threading.Lock()
 
 # 缓存有效期（秒），超过则 GET /obs/services/health 仍回退到 ledger
 CACHE_TTL_SEC = 90
+LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC = 12.0
 
 
 # /health 端点返回的 service_id → 心跳模块 service_id 映射
@@ -54,6 +55,34 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
 # 模块级 httpx.AsyncClient 单例（复用 TCP 连接，避免每次探测都创建/销毁）
 _http_client: Optional[Any] = None
 _http_client_lock = threading.Lock()
+_keepalive_task: Optional[asyncio.Task] = None
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _parse_float_env(name: str, *, default: float, min_value: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return max(min_value, float(default))
+    try:
+        return max(min_value, float(raw))
+    except (TypeError, ValueError):
+        return max(min_value, float(default))
+
+
+def _parse_int_env(name: str, *, default: int, min_value: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return max(min_value, int(default))
+    try:
+        return max(min_value, int(raw))
+    except (TypeError, ValueError):
+        return max(min_value, int(default))
 
 
 def _get_http_client():
@@ -81,7 +110,7 @@ async def close_http_client() -> None:
 def _get_host_health_url() -> str:
     host = os.environ.get("HOST_HTTP_HOST", "127.0.0.1").strip()
     port = os.environ.get("HOST_HTTP_PORT", "18080").strip()
-    return f"http://{host}:{port}/health"
+    return f"http://{host}:{port}/health?skip_dependency_probes=1"
 
 
 def _get_ollama_base_url() -> str:
@@ -95,6 +124,41 @@ def _get_ollama_base_url() -> str:
     return raw
 
 
+def _is_local_ollama_keepalive_enabled() -> bool:
+    return _parse_bool_env("HOST_LOCAL_14B_KEEPALIVE_ENABLED", default=False)
+
+
+def _get_local_ollama_keepalive_interval_sec() -> float:
+    return _parse_float_env("HOST_LOCAL_14B_KEEPALIVE_INTERVAL_SEC", default=150.0, min_value=15.0)
+
+
+def _get_local_ollama_keepalive_timeout_ms() -> int:
+    return _parse_int_env("HOST_LOCAL_14B_KEEPALIVE_TIMEOUT_MS", default=45_000, min_value=1_000)
+
+
+def _get_local_ollama_keepalive_ttl() -> str:
+    raw = str(
+        os.environ.get("HOST_LOCAL_14B_KEEPALIVE_TTL")
+        or os.environ.get("OLLAMA_KEEP_ALIVE")
+        or "720h"
+    ).strip()
+    if not raw or raw == "-1":
+        return "720h"
+    return raw
+
+
+def _model_name_matches(candidate: str | None, model_id: str) -> bool:
+    candidate_text = str(candidate or "").strip().lower()
+    target_text = str(model_id or "").strip().lower()
+    if not candidate_text or not target_text:
+        return False
+    if candidate_text == target_text:
+        return True
+    candidate_base = candidate_text.split(":", 1)[0]
+    target_base = target_text.split(":", 1)[0]
+    return candidate_base == target_base
+
+
 def _get_gemini_api_key() -> str | None:
     """获取 Gemini API Key（用于云端模型探活）。"""
     return str(os.environ.get("GEMINI_API_KEY") or "").strip() or None
@@ -105,40 +169,120 @@ def _get_gemini_api_key() -> str | None:
 # ---------------------------------------------------------------------------
 
 async def _probe_ollama_local(model_id: str) -> Dict[str, Any]:
-    """探测本地 Ollama 推理服务：GET /api/tags 检查服务是否在线，并验证目标模型是否已加载。
-
-    返回 { status, latency_ms, detail }。
-    """
+    """探测本地 Ollama 推理服务，区分“已安装”与“已驻留内存”状态。"""
     base_url = _get_ollama_base_url()
     client = _get_http_client()
     t0 = time.monotonic()
     try:
-        resp = await client.get(f"{base_url}/api/tags", timeout=5.0)
+        loaded_resp = await client.get(f"{base_url}/api/ps", timeout=5.0)
+        if loaded_resp.status_code not in {200, 404}:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            return {
+                "status": "DOWN",
+                "latency_ms": elapsed_ms,
+                "detail": f"Ollama /api/ps HTTP {loaded_resp.status_code}",
+            }
+
+        loaded_models = []
+        if loaded_resp.status_code == 200:
+            loaded_models = loaded_resp.json().get("models") or []
+
+        tags_resp = await client.get(f"{base_url}/api/tags", timeout=5.0)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        if resp.status_code != 200:
-            return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": f"Ollama HTTP {resp.status_code}"}
-        body = resp.json()
-        models = body.get("models") or []
-        # 检查目标模型是否在已加载的模型列表中
-        model_base = model_id.split(":")[0].lower() if ":" in model_id else model_id.lower()
-        found = any(
-            model_id.lower() in str(m.get("name") or "").lower()
-            or model_base in str(m.get("name") or "").lower()
-            for m in models
+        if tags_resp.status_code != 200:
+            return {
+                "status": "DOWN",
+                "latency_ms": elapsed_ms,
+                "detail": f"Ollama /api/tags HTTP {tags_resp.status_code}",
+            }
+
+        installed_models = tags_resp.json().get("models") or []
+        loaded = any(
+            _model_name_matches(m.get("name") or m.get("model"), model_id)
+            for m in loaded_models
         )
-        if found:
-            return {"status": "UP", "latency_ms": elapsed_ms, "detail": f"model '{model_id}' available"}
-        else:
-            available_names = [str(m.get("name") or "") for m in models[:5]]
+        installed = any(
+            _model_name_matches(m.get("name") or m.get("model"), model_id)
+            for m in installed_models
+        )
+        if loaded:
+            return {"status": "UP", "latency_ms": elapsed_ms, "detail": f"model '{model_id}' loaded in memory"}
+        if installed:
             return {
                 "status": "DEGRADED",
                 "latency_ms": elapsed_ms,
-                "detail": f"Ollama online but model '{model_id}' not found; available: {available_names}",
+                "detail": f"model '{model_id}' installed but not loaded",
             }
+        available_names = [str(m.get("name") or m.get("model") or "") for m in installed_models[:5]]
+        return {
+            "status": "DEGRADED",
+            "latency_ms": elapsed_ms,
+            "detail": f"model '{model_id}' missing; installed: {available_names}",
+        }
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.debug("Ollama probe failed: %s", exc)
         return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": str(exc)}
+
+
+async def _keepalive_ollama_local_model(model_id: str) -> Dict[str, Any]:
+    """使用 Ollama native API 发起 keep_alive 保活，不走 OpenAI 兼容层。"""
+    base_url = _get_ollama_base_url()
+    client = _get_http_client()
+    keep_alive = _get_local_ollama_keepalive_ttl()
+    timeout_ms = _get_local_ollama_keepalive_timeout_ms()
+    payload = {
+        "model": model_id,
+        "prompt": "",
+        "stream": False,
+        "keep_alive": keep_alive,
+    }
+    t0 = time.monotonic()
+    try:
+        resp = await client.post(
+            f"{base_url}/api/generate",
+            json=payload,
+            timeout=max(1.0, float(timeout_ms) / 1000.0),
+        )
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        if resp.status_code != 200:
+            return {
+                "success": False,
+                "latency_ms": elapsed_ms,
+                "detail": f"Ollama keepalive HTTP {resp.status_code}",
+            }
+        return {
+            "success": True,
+            "latency_ms": elapsed_ms,
+            "detail": f"keep_alive={keep_alive}",
+        }
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.debug("Ollama keepalive failed for %s: %s", model_id, exc)
+        return {
+            "success": False,
+            "latency_ms": elapsed_ms,
+            "detail": str(exc),
+        }
+
+
+async def keep_local_ollama_models_alive_once() -> Dict[str, Dict[str, Any]]:
+    """对本地 Ollama 模型执行一轮 keepalive。"""
+    if not _is_local_ollama_keepalive_enabled():
+        return {}
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for nid in LLM_LOCAL_NODE_IDS:
+        meta = LLM_NODE_REGISTRY.get(nid) or {}
+        if str(meta.get("provider") or "").strip().lower() != "ollama":
+            continue
+        model_id = str(meta.get("model_id") or "").strip()
+        if not model_id:
+            continue
+        result = await _keepalive_ollama_local_model(model_id)
+        result["model_id"] = model_id
+        results[nid] = result
+    return results
 
 
 async def _probe_gemini_cloud() -> Dict[str, Any]:
@@ -401,24 +545,59 @@ async def heartbeat_loop(interval_sec: float = 30.0) -> None:
 _heartbeat_task: Optional[asyncio.Task] = None
 
 
+async def local_ollama_keepalive_loop(interval_sec: float | None = None) -> None:
+    """后台保活本地 Ollama 14B 模型，避免默认 5 分钟自动卸载。"""
+    resolved_interval = (
+        float(interval_sec)
+        if interval_sec is not None
+        else _get_local_ollama_keepalive_interval_sec()
+    )
+    logger.info(
+        "Local Ollama keepalive started (interval=%.0fs, initial_delay=%.0fs, ttl=%s)",
+        resolved_interval,
+        LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC,
+        _get_local_ollama_keepalive_ttl(),
+    )
+    await asyncio.sleep(LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC)
+    while True:
+        try:
+            await keep_local_ollama_models_alive_once()
+        except asyncio.CancelledError:
+            logger.info("Local Ollama keepalive stopped")
+            raise
+        except Exception as exc:
+            logger.warning("Local Ollama keepalive failed: %s", exc)
+        await asyncio.sleep(resolved_interval)
+
+
 def start_heartbeat(interval_sec: float = 30.0) -> asyncio.Task:
-    """启动心跳后台任务。应在 FastAPI lifespan 中调用。"""
-    global _heartbeat_task
+    """启动观测心跳，并按需附带本地 Ollama 保活任务。"""
+    global _heartbeat_task, _keepalive_task
     if _heartbeat_task is not None and not _heartbeat_task.done():
+        if _is_local_ollama_keepalive_enabled() and (_keepalive_task is None or _keepalive_task.done()):
+            _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
         return _heartbeat_task
     _heartbeat_task = asyncio.create_task(heartbeat_loop(interval_sec))
+    if _is_local_ollama_keepalive_enabled():
+        _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
     return _heartbeat_task
 
 
 async def stop_heartbeat() -> None:
     """停止心跳任务并关闭 HTTP 客户端（shutdown 时调用）。"""
-    global _heartbeat_task
-    if _heartbeat_task is None:
-        return
-    _heartbeat_task.cancel()
-    try:
-        await _heartbeat_task
-    except asyncio.CancelledError:
-        pass
-    _heartbeat_task = None
+    global _heartbeat_task, _keepalive_task
+    if _keepalive_task is not None:
+        _keepalive_task.cancel()
+        try:
+            await _keepalive_task
+        except asyncio.CancelledError:
+            pass
+        _keepalive_task = None
+    if _heartbeat_task is not None:
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        _heartbeat_task = None
     await close_http_client()

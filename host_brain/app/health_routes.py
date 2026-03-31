@@ -12,7 +12,7 @@ from json import loads as json_loads
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from host_brain.app.dependencies import collect_dependency_probes, get_ledger, get_obs_metrics_collector
 from host_brain.app.main import (
@@ -90,7 +90,12 @@ def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None,
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
+async def health_check(
+    skip_dependency_probes: bool = Query(
+        False,
+        description="Skip external dependency probes and return a lightweight host-only health snapshot.",
+    ),
+) -> HealthResponse:
     """Health endpoint."""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -100,24 +105,26 @@ async def health_check() -> HealthResponse:
         _runtime_statuses: dict[str, Any] = {}
         if _host_result.success and _host_result.config is not None:
             _runtime_statuses = build_host_runtime_statuses(_host_result.config)
-        try:
-            _dep_probes = await collect_dependency_probes()
-            _runtime_statuses.update(_dep_probes)
-            _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
-            _runtime_statuses.update(
-                build_edge_transport_probe_statuses(
-                    available=bool(_edge_gateway.get("available", False)),
-                    detail=str(_edge_gateway.get("detail") or "").strip() or None,
+
+        if not skip_dependency_probes:
+            try:
+                _dep_probes = await collect_dependency_probes()
+                _runtime_statuses.update(_dep_probes)
+                _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
+                _runtime_statuses.update(
+                    build_edge_transport_probe_statuses(
+                        available=bool(_edge_gateway.get("available", False)),
+                        detail=str(_edge_gateway.get("detail") or "").strip() or None,
+                    )
                 )
-            )
-        except Exception as _edge_exc:
-            _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
-            _runtime_statuses.update(
-                build_edge_transport_probe_statuses(
-                    available=False,
-                    detail=str(_edge_exc),
+            except Exception as _edge_exc:
+                _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
+                _runtime_statuses.update(
+                    build_edge_transport_probe_statuses(
+                        available=False,
+                        detail=str(_edge_exc),
+                    )
                 )
-            )
         health_report = build_service_health_report(
             runtime_statuses=_runtime_statuses,
             request_id=request_id,

@@ -72,3 +72,17 @@ class TestHealthEndpointEdgeProbeContract:
         required_fields = {"status", "version", "timestamp", "details"}
         missing = required_fields - set(data.keys())
         assert not missing, f"/health 响应缺少字段: {missing}"
+
+    def test_t_health_ep_03_skip_dependency_probes_bypasses_edge_probe(self, client):
+        """T-HEALTH-EP-03：/health?skip_dependency_probes=true 不应触发外部依赖探针。"""
+
+        with patch(
+            "host_brain.app.health_routes.collect_dependency_probes",
+            side_effect=AssertionError("collect_dependency_probes should be skipped"),
+        ), patch(
+            "host_brain.app.health_routes.build_edge_transport_probe_statuses",
+            side_effect=AssertionError("build_edge_transport_probe_statuses should be skipped"),
+        ):
+            response = client.get("/health?skip_dependency_probes=true")
+
+        assert response.status_code == 200

@@ -104,6 +104,233 @@ function Wait-Http {
   return $false
 }
 
+function Parse-BoolValue {
+  param(
+    [AllowNull()][object]$Value,
+    [bool]$Default = $false
+  )
+  if ($null -eq $Value) {
+    return $Default
+  }
+  $raw = ([string]$Value).Trim().ToLowerInvariant()
+  if (-not $raw) {
+    return $Default
+  }
+  return $raw -in @("1", "true", "yes", "on")
+}
+
+function Resolve-Host14BBaseUrl {
+  param([hashtable]$EnvValues)
+  $raw = ""
+  if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_BASE_URL")) {
+    $raw = [string]$EnvValues["HOST_CHAT_HOST_14B_BASE_URL"]
+  } elseif ($env:HOST_CHAT_HOST_14B_BASE_URL) {
+    $raw = [string]$env:HOST_CHAT_HOST_14B_BASE_URL
+  } elseif ($EnvValues.ContainsKey("HOST_OPENAI_BASE_URL")) {
+    $raw = [string]$EnvValues["HOST_OPENAI_BASE_URL"]
+  } elseif ($env:HOST_OPENAI_BASE_URL) {
+    $raw = [string]$env:HOST_OPENAI_BASE_URL
+  } else {
+    $raw = "http://127.0.0.1:11434/v1"
+  }
+  return $raw.Trim().TrimEnd('/')
+}
+
+function Split-ApiAndRootBaseUrl {
+  param([string]$BaseUrl)
+  $normalized = ([string]$BaseUrl).Trim().TrimEnd('/')
+  if (-not $normalized) {
+    return @{ api = $null; root = $null }
+  }
+  $root = if ($normalized.ToLowerInvariant().EndsWith('/v1')) {
+    $normalized.Substring(0, $normalized.Length - 3).TrimEnd('/')
+  } else {
+    $normalized
+  }
+  return @{ api = $normalized; root = $root }
+}
+
+function Use-ManagedLocalOllama {
+  param([hashtable]$EnvValues)
+  $host14bEnabled = Parse-BoolValue -Value ($(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_ENABLED")) { $EnvValues["HOST_CHAT_HOST_14B_ENABLED"] } else { $env:HOST_CHAT_HOST_14B_ENABLED })) -Default $true
+  if (-not $host14bEnabled) {
+    return $false
+  }
+  $forceCloud = Parse-BoolValue -Value ($(if ($EnvValues.ContainsKey("HOST_CHAT_FORCE_CLOUD")) { $EnvValues["HOST_CHAT_FORCE_CLOUD"] } else { $env:HOST_CHAT_FORCE_CLOUD })) -Default $false
+  if ($forceCloud) {
+    return $false
+  }
+  $provider = ($(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_PROVIDER")) { $EnvValues["HOST_CHAT_HOST_14B_PROVIDER"] } else { $env:HOST_CHAT_HOST_14B_PROVIDER }))
+  $provider = ([string]$provider).Trim().ToLowerInvariant()
+  if (-not $provider) {
+    $provider = 'openai'
+  }
+  if ($provider -ne 'openai') {
+    return $false
+  }
+  $baseUrl = Resolve-Host14BBaseUrl -EnvValues $EnvValues
+  if (-not $baseUrl) {
+    return $false
+  }
+  try {
+    $uri = [Uri]$baseUrl
+  } catch {
+    return $false
+  }
+  $hostName = $uri.Host.ToLowerInvariant()
+  return ($hostName -in @('127.0.0.1', 'localhost') -and $uri.Port -eq 11434)
+}
+
+function Get-Host14BModelId {
+  param([hashtable]$EnvValues)
+  $value = $(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_MODEL_ID")) { $EnvValues["HOST_CHAT_HOST_14B_MODEL_ID"] } else { $env:HOST_CHAT_HOST_14B_MODEL_ID })
+  $resolved = ([string]$value).Trim()
+  if (-not $resolved) {
+    $resolved = 'qwen3:14b'
+  }
+  return $resolved
+}
+
+function Test-OllamaReady {
+  param([string]$RootBaseUrl)
+  try {
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri ($RootBaseUrl.TrimEnd('/') + '/api/tags') -TimeoutSec 3
+    return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+  } catch {
+    return $false
+  }
+}
+
+function Wait-OllamaReady {
+  param(
+    [string]$RootBaseUrl,
+    [int]$TimeoutSec = 45
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-OllamaReady -RootBaseUrl $RootBaseUrl) {
+      return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
+function Test-OllamaModelPresent {
+  param(
+    [string]$RootBaseUrl,
+    [Parameter(Mandatory = $true)]
+    [string]$ModelName
+  )
+  try {
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri ($RootBaseUrl.TrimEnd('/') + '/api/tags') -TimeoutSec 5
+    $body = $resp.Content | ConvertFrom-Json
+    foreach ($row in @($body.models)) {
+      $candidate = [string]($row.name)
+      if ($candidate -eq $ModelName) {
+        return $true
+      }
+      if ($candidate -and $candidate.Split(':')[0] -eq $ModelName.Split(':')[0]) {
+        return $true
+      }
+    }
+  } catch {
+  }
+  return $false
+}
+
+function Ensure-LocalOllamaRuntime {
+  param(
+    [string]$RepoRoot,
+    [hashtable]$EnvValues
+  )
+
+  if (-not (Use-ManagedLocalOllama -EnvValues $EnvValues)) {
+    return [ordered]@{
+      status = 'skipped'
+      reason = 'host_14b_not_managed_by_local_ollama'
+    }
+  }
+
+  $apiBaseUrl = $null
+  $rootBaseUrl = $null
+  $modelId = Get-Host14BModelId -EnvValues $EnvValues
+  $serviceStarted = $false
+  $modelWarmed = $false
+
+  try {
+    $baseUrls = Split-ApiAndRootBaseUrl -BaseUrl (Resolve-Host14BBaseUrl -EnvValues $EnvValues)
+    $apiBaseUrl = [string]$baseUrls.api
+    $rootBaseUrl = [string]$baseUrls.root
+    $result = [ordered]@{
+      status = 'ready'
+      provider = 'ollama'
+      model_id = $modelId
+      api_base_url = $apiBaseUrl
+      root_base_url = $rootBaseUrl
+      service_started = $serviceStarted
+      model_warmed = $modelWarmed
+    }
+
+    $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
+    if (-not $ollamaCmd) {
+      throw 'ollama command not found while local host 14B runtime is configured'
+    }
+
+    if (-not (Test-OllamaReady -RootBaseUrl $rootBaseUrl)) {
+      $ollamaProc = Get-Process -Name ollama -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $ollamaProc) {
+        Start-Process -FilePath $ollamaCmd.Source -ArgumentList @('serve') -WorkingDirectory $RepoRoot -WindowStyle Hidden | Out-Null
+        $serviceStarted = $true
+        $result.service_started = $true
+      }
+    }
+
+    if (-not (Wait-OllamaReady -RootBaseUrl $rootBaseUrl -TimeoutSec 45)) {
+      throw 'local ollama service did not become ready within 45 seconds'
+    }
+
+    if (-not (Test-OllamaModelPresent -RootBaseUrl $rootBaseUrl -ModelName $modelId)) {
+      $autoPullValue = $(if ($EnvValues.ContainsKey('HOST_OLLAMA_AUTO_PULL')) { $EnvValues['HOST_OLLAMA_AUTO_PULL'] } else { $env:HOST_OLLAMA_AUTO_PULL })
+      $autoPullEnabled = Parse-BoolValue -Value $autoPullValue -Default $false
+      if (-not $autoPullEnabled) {
+        throw "local ollama model missing: $modelId (set HOST_OLLAMA_AUTO_PULL=true to auto-pull)"
+      }
+      & $ollamaCmd.Source pull $modelId
+      if ($LASTEXITCODE -ne 0 -or -not (Test-OllamaModelPresent -RootBaseUrl $rootBaseUrl -ModelName $modelId)) {
+        throw "local ollama model pull failed: $modelId"
+      }
+      $result.status = 'pulled'
+    }
+
+    $warmupBody = @{
+      model = $modelId
+      messages = @(@{ role = 'user'; content = 'host bootstrap warmup' })
+      stream = $false
+      max_tokens = 8
+    } | ConvertTo-Json -Depth 6 -Compress
+
+    Invoke-WebRequest -UseBasicParsing -Method Post -Uri ($apiBaseUrl.TrimEnd('/') + '/chat/completions') -ContentType 'application/json' -Body $warmupBody -TimeoutSec 120 | Out-Null
+    $modelWarmed = $true
+    $result.model_warmed = $true
+    if ($result.status -eq 'ready') {
+      $result.status = 'warmed'
+    }
+    return $result
+  } catch {
+    return [ordered]@{
+      status = 'degraded'
+      provider = 'ollama'
+      model_id = $modelId
+      api_base_url = $apiBaseUrl
+      root_base_url = $rootBaseUrl
+      service_started = $serviceStarted
+      model_warmed = $modelWarmed
+      detail = [string]$_.Exception.Message
+    }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
@@ -203,6 +430,7 @@ if ($Port -le 0) {
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
 
 $localServices = $null
+$localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
 $startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
 if (-not (Test-Path -Path $startDockerScript)) {
   throw "start_docker_services.ps1 not found: $startDockerScript"
@@ -241,6 +469,7 @@ if (Test-Path -Path $pidFile) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        local_ollama = $localOllama
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -270,6 +499,7 @@ if ($null -ne $listeningPid) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        local_ollama = $localOllama
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -323,11 +553,15 @@ if (-not $ShowConsoleWindow.IsPresent) {
 }
 $proc = Start-Process @startProcessArgs
 
-$healthUrl = "http://$probeHost`:$Port/health"
+$healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
 $healthOk = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds
 if (-not $healthOk) {
   $readyUrl = "http://$probeHost`:$Port/ready"
   $healthOk = Wait-Http -Url $readyUrl -TimeoutSeconds 8
+}
+if (-not $healthOk) {
+  $metricsUrl = "http://$probeHost`:$Port/obs/metrics"
+  $healthOk = Wait-Http -Url $metricsUrl -TimeoutSeconds 8
 }
 if (-not $healthOk) {
   $listeningPid = Get-ListeningPid -ProbePort $Port
@@ -432,6 +666,7 @@ $result = [ordered]@{
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices
+  local_ollama = $localOllama
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus
   canon_sync_status = $canonSyncStatus
