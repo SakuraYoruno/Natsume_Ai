@@ -4,6 +4,7 @@ import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats, fetchDistillationStats, fetchSemanticRecallStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
+import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
   { label: '1h',  value: '1h',  minutes: 60    },
@@ -124,6 +125,15 @@ export default function Metrics() {
   }, [timeRange])
 
   useEffect(() => { load() }, [load])
+
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+
+  useEffect(() => {
+    if (!pollingEnabled) return
+    const timer = setInterval(load, pollingInterval * 1000)
+    return () => clearInterval(timer)
+  }, [load, pollingEnabled, pollingInterval])
 
   const ts       = data?.timeseries ?? {}
   const xData    = ts.timestamps ?? []

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { memo } from 'react'
 import StatusBadge from './StatusBadge.jsx'
 
 /**
@@ -10,7 +10,7 @@ import StatusBadge from './StatusBadge.jsx'
  * @param {string} [props.detail] - 附加说明（call_count）
  * @param {React.ReactNode} [props.icon] - Lucide 图标
  */
-export default function ServiceCard({ name, status = 'unknown', latency, detail, icon }) {
+export default memo(function ServiceCard({ name, status = 'unknown', latency, detail, icon }) {
   // 兼容后端大写（UP/DEGRADED/DOWN/UNKNOWN）和前端小写（healthy/degraded/error/unknown）
   const normalizedStatus = status?.toLowerCase()
   const borderColor = {
@@ -41,4 +41,4 @@ export default function ServiceCard({ name, status = 'unknown', latency, detail,
       )}
     </div>
   )
-}
+})

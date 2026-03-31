@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { RefreshCw, Wifi, Brain, ArrowDownToLine, ShieldAlert, ScrollText, HeartPulse, Cpu, Users, AlertTriangle, WifiOff } from 'lucide-react'
 import ServiceCard from '../components/ServiceCard.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import { SkeletonCard, SkeletonServiceCards } from '../components/Skeleton.jsx'
 import { fetchServicesHealth, fetchSubsystemsStats, fetchAgentLoopStats, fetchObsMetrics, fetchInputDispatchStats, fetchPromptBuilderStats, fetchCanonProposalStats, fetchChainStats, connectHealthWebSocket } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -175,9 +176,16 @@ export default function Overview() {
   const down     = data?.down     ?? '—'
   const unknown  = data?.unknown  ?? '—'
 
-  // 分组：边缘服务 vs LLM 节点
-  const edgeServices = services.filter((s) => s.service_type === 'edge')
-  const llmNodes     = services.filter((s) => s.service_type !== 'edge')
+  // 分组：边缘服务 vs LLM 节点（故障/降级排在前面）
+  const statusPriority = (s) => {
+    const st = (s.status || '').toUpperCase()
+    if (st === 'DOWN' || st === 'FAIL' || st === 'ERROR') return 0
+    if (st === 'DEGRADED' || st === 'WARN') return 1
+    if (st === 'UNKNOWN') return 3
+    return 2
+  }
+  const edgeServices = services.filter((s) => s.service_type === 'edge').sort((a, b) => statusPriority(a) - statusPriority(b))
+  const llmNodes     = services.filter((s) => s.service_type !== 'edge').sort((a, b) => statusPriority(a) - statusPriority(b))
   const subsystemItems = subsysData?.subsystems ?? []
   const activeSubsystems = [...subsystemItems]
     .filter((item) => (item?.total ?? 0) > 0)
@@ -232,6 +240,37 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* 实时告警横幅（WS 推送的 alerts） */}
+      {wsAlerts.length > 0 && (
+        <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="text-orange-500" />
+              <span className="text-sm font-semibold text-orange-700">实时告警 ({wsAlerts.length})</span>
+            </div>
+            <button
+              className="text-xs text-orange-500 hover:text-orange-700 transition-colors"
+              onClick={() => setWsAlerts([])}
+            >
+              清空
+            </button>
+          </div>
+          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+            {wsAlerts.slice(0, 10).map((alert, i) => (
+              <div key={`alert-${i}-${alert.ts_ms || i}`} className="flex items-start gap-2 text-xs text-orange-700">
+                <span className="text-orange-400 shrink-0">
+                  {alert.ts_ms ? new Date(alert.ts_ms).toLocaleTimeString('zh-CN') : '—'}
+                </span>
+                <span className="break-all">
+                  {alert.code && <span className="font-medium mr-1">[{alert.code}]</span>}
+                  {alert.message || alert.detail || JSON.stringify(alert)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 汇总统计行（含未知：窗口内无记录时由后端 7 日回退计算，仍无则显示未知数） */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
         {[
@@ -250,9 +289,12 @@ export default function Overview() {
 
       {/* 加载/错误状态 */}
       {loading && (
-        <div className="text-center py-16 text-gray-400 text-sm">
-          <RefreshCw size={20} className="animate-spin mx-auto mb-2" />
-          加载中…
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+            {Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={`sk-${i}`} />)}
+          </div>
+          <SkeletonServiceCards count={6} />
+          <SkeletonServiceCards count={4} />
         </div>
       )}
       {error && (

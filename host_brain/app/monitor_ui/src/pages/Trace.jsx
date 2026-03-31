@@ -431,7 +431,7 @@ function getLiveTraceChangeBadgeClass(changeType) {
   return 'border-gray-200 bg-gray-50 text-gray-500'
 }
 
-function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
+const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
   const { session, trace } = item
   const metrics = buildLiveTraceMetrics(session, trace)
   const inputPreview = session?.input_preview || trace?.summary?.input_text || session?.request_id
@@ -488,7 +488,7 @@ function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
       </button>
     </div>
   )
-}
+})
 
 function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetail }) {
   if (!item) {
@@ -788,7 +788,7 @@ const NODE_TYPE_COLOR = {
 function nodeColor(t) { return NODE_TYPE_COLOR[t] ?? NODE_TYPE_COLOR.default }
 
 function GanttView({ traceData, onSelectNode }) {
-  const timeline = computeGanttTimeline(traceData)
+  const timeline = React.useMemo(() => computeGanttTimeline(traceData), [traceData])
   const [filter, setFilter] = React.useState('')
   if (timeline.length === 0) return null
   const totalMs = timeline[0]?.total_ms ?? 1
@@ -821,6 +821,7 @@ function GanttView({ traceData, onSelectNode }) {
               className="flex items-center gap-2 rounded border cursor-pointer hover:shadow-sm transition-shadow bg-gray-50 border-gray-200"
               style={{ padding: '4px 8px' }}
               onClick={() => onSelectNode?.(node)}
+              title={`${node.display_name || node.node_id}: ${node.start_ms}ms → ${node.end_ms}ms (${node.latency_ms ?? 0}ms) [${node.status ?? 'UNKNOWN'}]`}
             >
               <div className="w-36 shrink-0">
                 <div className="text-xs font-medium text-gray-700 truncate">{node.display_name || node.node_id}</div>
@@ -828,6 +829,7 @@ function GanttView({ traceData, onSelectNode }) {
               </div>
               <div className="flex-1 relative h-6 bg-gray-100 rounded overflow-hidden">
                 <div className="absolute top-0 h-full rounded"
+                  title={`${node.latency_ms ?? 0}ms`}
                   style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: color, opacity: 0.85, minWidth: '4px' }} />
               </div>
               <span className={`text-xs font-medium w-10 text-right shrink-0 ${(node.status ?? '').toUpperCase() === 'OK' ? 'text-green-600' : 'text-red-500'}`}>
@@ -1202,6 +1204,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const [recentRequests, setRecentRequests] = useState([])
   const [recentLoading, setRecentLoading] = useState(false)
   const [recentKeyword, setRecentKeyword] = useState('')
+  const [recentStatusFilter, setRecentStatusFilter] = useState('')
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [inlineOverviewVisible, setInlineOverviewVisible] = useState(false)
   const [advancedViewsExpanded, setAdvancedViewsExpanded] = useState(false)
@@ -1246,13 +1249,14 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         page_size: 12,
         time_range: '24h',
         keyword: keyword || undefined,
+        status: recentStatusFilter || undefined,
       })
       setRecentRequests(data.items ?? [])
       setRecentKeyword(keyword)
     } finally {
       setRecentLoading(false)
     }
-  }, [])
+  }, [recentStatusFilter])
 
   useEffect(() => {
     loadRecentRequests()
@@ -1554,6 +1558,16 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           <button className="btn-primary shrink-0" onClick={handleTraceSearch} disabled={loading || recentLoading}>
             {(loading || recentLoading) ? <RefreshCw size={13} className="animate-spin" /> : (searchLooksLikeRequestId ? '显示总览图' : '筛选请求')}
           </button>
+          <select
+            className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-200 shrink-0"
+            value={recentStatusFilter}
+            onChange={(e) => { setRecentStatusFilter(e.target.value); loadRecentRequests(recentKeyword) }}
+          >
+            <option value="">全部状态</option>
+            <option value="ok">成功</option>
+            <option value="rejected">拒绝</option>
+            <option value="error">错误</option>
+          </select>
           {isHistorySearchMode && (
             <button
               className="btn-secondary shrink-0 text-xs"

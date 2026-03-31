@@ -1,5 +1,5 @@
-import React from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import React, { useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   MessageSquare,
@@ -22,6 +22,8 @@ import {
   Database,
   Settings,
   Zap,
+  Menu,
+  X,
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
 
@@ -57,20 +59,34 @@ export default function Layout() {
   const pollingInterval = useAppStore((s) => s.pollingInterval)
   const setPollingEnabled  = useAppStore((s) => s.setPollingEnabled)
   const setPollingInterval = useAppStore((s) => s.setPollingInterval)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const location = useLocation()
+
+  // 路由变化时自动关闭移动菜单
+  React.useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* 顶部导航栏 */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
         <div className="w-full mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          {/* Logo */}
+          {/* 左侧：汉堡按钮 + Logo */}
           <div className="flex items-center gap-2">
+            <button
+              className="lg:hidden p-1.5 rounded text-gray-500 hover:bg-gray-100 transition-colors"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="切换导航菜单"
+            >
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
             <span className="text-primary font-bold text-lg tracking-tight">Natsume AI</span>
-            <span className="text-gray-400 text-sm">监控面板</span>
+            <span className="text-gray-400 text-sm hidden sm:inline">监控面板</span>
           </div>
 
-          {/* 导航 — 水平滚动适配多页面 */}
-          <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide max-w-[70vw]">
+          {/* 桌面端导航 — lg 以上显示 */}
+          <nav className="hidden lg:flex items-center gap-0.5 overflow-x-auto scrollbar-hide max-w-[70vw]" role="navigation" aria-label="主导航">
             {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}
@@ -118,6 +134,41 @@ export default function Layout() {
           </div>
         </div>
       </header>
+
+      {/* 移动端侧边栏抽屉 — lg 以下显示 */}
+      {mobileMenuOpen && (
+        <>
+          {/* 遮罩 */}
+          <div
+            className="fixed inset-0 z-40 bg-black/30 lg:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          {/* 抽屉 */}
+          <nav
+            className="fixed top-14 left-0 bottom-0 z-50 w-56 bg-white border-r border-gray-200 shadow-xl overflow-y-auto lg:hidden"
+            role="navigation"
+            aria-label="移动端导航"
+          >
+            <div className="p-3 space-y-0.5">
+              {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ` +
+                    (isActive
+                      ? 'bg-primary-50 text-primary'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800')
+                  }
+                >
+                  <Icon size={16} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          </nav>
+        </>
+      )}
 
       {/* 页面内容 */}
       <main className="flex-1 w-full min-w-0 mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col">

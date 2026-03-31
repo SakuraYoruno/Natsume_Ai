@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { Search, RefreshCw, ExternalLink, Download } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
+import { SkeletonTable } from '../components/Skeleton.jsx'
 import { fetchSessions, exportSessionsCsv } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -61,7 +63,15 @@ export default function Sessions() {
     }
   }, [page, keyword, status, timeRange])
 
-  useEffect(() => { load() }, [load])
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+
+  useEffect(() => {
+    load()
+    if (!pollingEnabled) return
+    const timer = setInterval(() => load(), pollingInterval * 1000)
+    return () => clearInterval(timer)
+  }, [load, pollingEnabled, pollingInterval])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -89,7 +99,7 @@ export default function Sessions() {
                   keyword: keyword || undefined,
                 })
               } catch (e) {
-                alert('导出失败：' + e.message)
+                toast.error('导出失败：' + e.message)
               } finally {
                 setExporting(false)
               }
@@ -111,7 +121,7 @@ export default function Sessions() {
           <input
             className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded
                        focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary"
-            placeholder="搜索 request_id…"
+            placeholder="搜索 request_id、内容或 session_id…"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -145,7 +155,7 @@ export default function Sessions() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              {['Request ID', '时间', '状态', '耗时', '拒绝码'].map((h) => (
+              {['Request ID', '内容摘要', '时间', '状态', '耗时', '拒绝码'].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -154,15 +164,15 @@ export default function Sessions() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">
-                <RefreshCw size={16} className="animate-spin inline mr-2" />加载中…
+              <tr><td colSpan={6} className="p-0">
+                <SkeletonTable rows={5} cols={6} />
               </td></tr>
             )}
             {error && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-red-500">{error}</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-red-500">{error}</td></tr>
             )}
             {!loading && !error && sessions.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">暂无数据</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">暂无数据</td></tr>
             )}
             {!loading && sessions.map((s) => (
               <tr
@@ -178,6 +188,11 @@ export default function Sessions() {
                   <span className="flex items-center gap-1">
                     {s.request_id?.slice(0, 16)}…
                     <ExternalLink size={11} className="text-gray-300 group-hover:text-blue-400" />
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-gray-700 text-xs max-w-[240px]">
+                  <span className="block truncate" title={s.input_preview || ''}>
+                    {s.input_preview || <span className="text-gray-300">—</span>}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-gray-600 text-xs whitespace-nowrap">

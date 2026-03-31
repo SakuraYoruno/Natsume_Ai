@@ -1,5 +1,7 @@
 import React from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Layout from './components/Layout.jsx'
 import Overview from './pages/Overview.jsx'
 import Sessions from './pages/Sessions.jsx'
@@ -23,10 +25,11 @@ import RuntimeMode from './pages/RuntimeMode.jsx'
 
 export default function App() {
   return (
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/overview" replace />} />
+    <ErrorBoundary>
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Navigate to="/overview" replace />} />
           <Route path="overview" element={<Overview />} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="trace/*" element={<Trace />} />
@@ -50,6 +53,8 @@ export default function App() {
           <Route path="wechat" element={<Navigate to="/gateway" replace />} />
         </Route>
       </Routes>
+      <Toaster position="top-right" toastOptions={{ duration: 4000, style: { fontSize: '13px' } }} />
     </HashRouter>
+    </ErrorBoundary>
   )
 }

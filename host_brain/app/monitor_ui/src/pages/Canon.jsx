@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import toast from 'react-hot-toast'
 import {
   fetchCanonProposals,
   fetchCanonDocuments,
@@ -353,7 +354,7 @@ export default function Canon() {
       })
       loadProposals()
     } catch (err) {
-      alert(`审核失败：${err.message}`)
+      toast.error(`审核失败：${err.message}`)
     }
   }
 
@@ -364,7 +365,7 @@ export default function Canon() {
       await rejectCanonProposal(item.proposal_id, { reason })
       loadProposals()
     } catch (err) {
-      alert(`拒绝失败：${err.message}`)
+      toast.error(`拒绝失败：${err.message}`)
     }
   }
 
@@ -376,7 +377,7 @@ export default function Canon() {
       await rollbackCanonProposal(item.proposal_id, { rollback_reason: reason })
       loadProposals()
     } catch (err) {
-      alert(`回滚失败：${err.message}`)
+      toast.error(`回滚失败：${err.message}`)
     }
   }
 
