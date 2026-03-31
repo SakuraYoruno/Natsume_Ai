@@ -103,26 +103,39 @@ def test_session_query_empty_result():
     assert "timestamp" in result
 
 
-def test_session_query_fetches_all_pages_with_keyword_args():
+def test_session_query_pages_governor_rows_and_reads_intent_preview():
     first_page = _make_rows(10_000, id_offset=0)
     second_page = _make_rows(1, id_offset=10_000)
+    intent_rows = [
+        {
+            "request_id": "req-10000",
+            "session_id": "sess-10000",
+            "ts_ms": first_page[0]["ts_ms"],
+            "raw_text": "latest intent preview from intent log",
+        }
+    ]
     ledger = MagicMock()
-    ledger.fetch_by_time_range.side_effect = [first_page, second_page]
+    ledger.fetch_by_time_range.side_effect = [first_page, second_page, intent_rows]
 
     svc = SessionQueryService(ledger)
     result = svc.query(page=1, page_size=20)
 
     assert result["total"] == 10_001
-    assert ledger.fetch_by_time_range.call_count == 2
+    assert ledger.fetch_by_time_range.call_count == 3
 
-    first_call = ledger.fetch_by_time_range.call_args_list[0]
-    second_call = ledger.fetch_by_time_range.call_args_list[1]
+    governor_first = ledger.fetch_by_time_range.call_args_list[0]
+    governor_second = ledger.fetch_by_time_range.call_args_list[1]
+    intent_call = ledger.fetch_by_time_range.call_args_list[2]
 
-    for call in (first_call, second_call):
+    for call in (governor_first, governor_second, intent_call):
         assert "start_ms" in call.kwargs
         assert "end_ms" in call.kwargs
         assert "limit" in call.kwargs
         assert "offset" in call.kwargs
 
-    assert first_call.kwargs["offset"] == 0
-    assert second_call.kwargs["offset"] == 10_000
+    assert governor_first.args[0] == "governor_log"
+    assert governor_second.args[0] == "governor_log"
+    assert intent_call.args[0] == "intent_log"
+    assert governor_first.kwargs["offset"] == 0
+    assert governor_second.kwargs["offset"] == 10_000
+    assert intent_call.kwargs["offset"] == 0
