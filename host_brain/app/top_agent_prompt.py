@@ -387,18 +387,35 @@ def build_top_agent_prompt(
     full_prompt = full_prompt + "\n\n" + agent_block
 
     # ── 5. 拆分 system_prompt 和 prompt_text ─────────────────────────
-    # Phase XV：角色人设必须在 system_prompt 中（LLM 最高优先级），
-    # 而不仅仅在 prompt_text 里（容易被 20+ 个槽位块稀释）
+    # Phase XV：角色人设 + 风格蒸馏必须在 system_prompt 中（LLM 最高优先级），
+    # 不走检索，确保每次对话都能生效。
     from host_brain.app.prompt_builder import _load_character_profile  # noqa: PLC0415
-    _cp_text = _load_character_profile("zh")  # 固定中文版人设
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    _cp_text = _load_character_profile("zh")
+
+    # 常驻风格蒸馏（从 runtime/style_canon/style_instruction_v5.txt 读取）
+    _style_text = ""
+    try:
+        _style_path = _Path(__file__).resolve().parent.parent / "runtime" / "style_canon" / "style_instruction_v5.txt"
+        if _style_path.exists():
+            _style_text = _style_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
     _node_role = _build_node_role_instruction(
         TOP_AGENT_NODE_ID,
         render_target_lang=render_target_lang,
     )
+
+    _parts = []
     if _cp_text:
-        system_prompt = f"【角色人设】\n{_cp_text}\n\n{_node_role}"
-    else:
-        system_prompt = _node_role
+        _parts.append(f"【角色人设】\n{_cp_text}")
+    if _style_text:
+        _parts.append(f"【说话风格（必须遵守）】\n{_style_text}")
+    _parts.append(_node_role)
+    system_prompt = "\n\n".join(_parts)
+
     prompt_text = full_prompt + "\n\n" + f"【用户消息】\n{user_message}"
 
     return prompt_text, system_prompt, gen_params
