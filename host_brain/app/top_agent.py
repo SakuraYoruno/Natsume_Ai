@@ -719,6 +719,8 @@ async def _async_post_process(
             "status": "OK" if narrative.strip() else "DEGRADED",
             "reason_code": None if narrative.strip() else "LLM_EMPTY_OUTPUT",
             "latency_ms": llm_latency_ms,
+            # output_digest = LLM 回复摘要（前 400 字），供 WebUI 节点详情显示
+            "output_digest": (narrative or "")[:400] or None,
             "ts_ms": _now,
         })
 
@@ -751,11 +753,23 @@ async def _async_post_process(
              "output_data": _retrieval_output, "ts_ms": ts_ms},
             {"node_id": "prompt_builder", "node_type": "system", "display_name": "Prompt Builder",
              "side": "host", "status": "OK", "ts_ms": ts_ms},
-            {"node_id": "llm_stream", "node_type": "llm", "display_name": "LLM 流式生成",
-             "side": "host", "status": "OK" if narrative.strip() else "DEGRADED",
-             "latency_ms": llm_latency_ms, "provider": provider_name, "model_id": model_id,
-             "input_data": {"first_token_ms": first_token_ms, "buffer_stream": buffer_stream},
-             "ts_ms": ts_ms},
+            {
+                "node_id": "llm_stream", "node_type": "llm", "display_name": "LLM 流式生成",
+                "side": "host",
+                "status": "OK" if narrative.strip() else "DEGRADED",
+                "latency_ms": llm_latency_ms,
+                "provider": provider_name,
+                "model_id": model_id,
+                "input_data": {
+                    "first_token_ms": first_token_ms,
+                    "buffer_stream": buffer_stream,
+                },
+                # Phase XV：写入 narrative 供 WebUI trace Output 面板显示（截断至 800 字）
+                "output_data": {
+                    "final_response": (narrative or "")[:800] or None,
+                },
+                "ts_ms": ts_ms,
+            },
         ]
         # 子 Agent 委托阶段
         for da in (delegated_agents or []):
