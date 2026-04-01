@@ -7,7 +7,7 @@ import logging
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
-from host_brain.retrieval.recall_config import (
+from host_brain.retrieval.recall_fusion_utils import (
     _apply_sqlite_ledger_boost,
     _coerce_non_negative_int,
     _coerce_score,

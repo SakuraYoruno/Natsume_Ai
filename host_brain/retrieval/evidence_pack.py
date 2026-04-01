@@ -73,6 +73,51 @@ class EvidencePackServiceContract:
                 ts_ms=now_value,
             )
         if not normalized_topk:
+            if not final_reason and not final_degraded:
+                output = {
+                    "request_id": request_id,
+                    "intent_id": intent_id,
+                    "query": merged_query,
+                    "topk": [],
+                    "evidence_refs": [],
+                    "pack_id": _compute_pack_id(
+                        request_id=request_id,
+                        intent_id=intent_id,
+                        query=merged_query,
+                        topk=[],
+                    ),
+                    "serialization_version": SERIALIZATION_VERSION,
+                    "degraded": False,
+                    "stage": S_RET_EVIDENCE_PACK,
+                    "reason_code": None,
+                    "status": STATUS_OK,
+                    "ts_ms": now_value,
+                }
+                self._log_event(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    status=STATUS_OK,
+                    reason_code=None,
+                    detail="evidence pack skipped: empty topk",
+                    payload={
+                        "query_length": len(merged_query),
+                        "topk_count": 0,
+                        "evidence_refs_count": 0,
+                        "items": [],
+                        "evidence_refs": [],
+                        "output_status": STATUS_OK,
+                    },
+                    ts_ms=now_value,
+                )
+                return EvidencePackResult(
+                    success=True,
+                    status=STATUS_OK,
+                    reason_code=None,
+                    stage=S_RET_EVIDENCE_PACK,
+                    detail="evidence pack skipped: empty topk",
+                    output=output,
+                )
+
             reason_for_empty_topk = str(final_reason or "").strip() or RETR_EPACK_INPUT_INVALID
             detail_for_empty_topk = (
                 "evidence pack skipped: empty topk from upstream degraded stage"

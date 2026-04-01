@@ -118,23 +118,51 @@ class RerankerServiceContract:
                 ts_ms=now_value,
             )
         if not normalized_candidates:
-            fallback_scores = _build_fallback_scores(normalized_candidates)
-            fallback_topk = _build_topk(normalized_candidates, fallback_scores, topk_value)
-            return self._degrade(
+            output = {
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "query": normalized_query,
+                "scores": [],
+                "rerank_model_id": str(route.model_id),
+                "provider": str(route.provider),
+                "route_id": str(route.route_id),
+                "node_id": self.node_id,
+                "node_selector": str(route.node_selector),
+                "expected_top_k": int(topk_value),
+                "latency_ms": 0,
+                "status": STATUS_OK,
+                "stage": S_RET_RERANK,
+                "reason_code": None,
+                "degraded": False,
+                "topk": [],
+            }
+            self._log_event(
                 request_id=request_id,
                 intent_id=intent_id,
-                reason_code=RETR_RERANK_UNAVAILABLE,
+                status=STATUS_OK,
+                reason_code=None,
                 detail="reranker skipped: no candidates from recall stage",
-                latency_ms=0,
-                model_id=route.model_id,
-                provider=route.provider,
-                route_id=route.route_id,
-                query=normalized_query,
-                scores=fallback_scores,
-                topk=fallback_topk,
-                expected_top_k=topk_value,
-                node_selector=route.node_selector,
+                payload={
+                    "query_length": len(normalized_query),
+                    "candidate_count": 0,
+                    "topk_count": 0,
+                    "expected_top_k": int(topk_value),
+                    "provider": str(route.provider),
+                    "route_id": str(route.route_id),
+                    "node_selector": str(route.node_selector),
+                    "latency_ms": 0,
+                    "topk": [],
+                    "output_status": STATUS_OK,
+                },
                 ts_ms=now_value,
+            )
+            return RerankerResult(
+                success=True,
+                status=STATUS_OK,
+                reason_code=None,
+                stage=S_RET_RERANK,
+                detail="reranker skipped: no candidates from recall stage",
+                output=output,
             )
 
         if not self.runtime_config.enabled:

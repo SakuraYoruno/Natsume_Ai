@@ -25,6 +25,7 @@ from host_brain.retrieval.recall_schemas import (
 from host_brain.retrieval.recall_fusion_utils import _parse_bool
 
 S_RET_RECALL_CONFIG = "S_RET_RECALL_CONFIG"
+S_RET_RECALL_CONFIG = "S_RET_RECALL_CONFIG"
 
 DEFAULT_RECALL_ROUTE = "default"
 DEFAULT_RECALL_COLLECTION = "episodic"
@@ -38,10 +39,12 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
     "neo4j_bond",
     "episodic_vector",
+    "style_canon",
     "world_canon",
     "artifact_vault",
-    # Phase XIII: style_canon / persona_utterance 已走独立通道，不再作为检索路由
+    "persona_utterance",
 })
+
 
 
 def load_recall_runtime_config(

@@ -402,15 +402,58 @@ class RecallFusionServiceContract:
             candidates = matched + unmatched
 
         if not candidates:
-            reason_code = route_errors[0]["reason_code"] if route_errors else RETR_RECALL_UNAVAILABLE
-            detail = (
-                route_errors[0]["detail"] if route_errors
-                else "no recall candidates from configured routes"
+            if route_errors:
+                reason_code = route_errors[0]["reason_code"]
+                detail = route_errors[0]["detail"]
+                return self._degrade(
+                    request_id=request_id, intent_id=intent_id, query=normalized_query,
+                    routes=routes, candidates=[], route_rows=route_rows, route_errors=route_errors,
+                    reason_code=reason_code, detail=detail, ts_ms=now_value,
+                )
+
+            output = {
+                "request_id": request_id,
+                "intent_id": intent_id,
+                "query": normalized_query,
+                "node_id": self.node_id,
+                "status": STATUS_OK,
+                "stage": S_RET_RECALL,
+                "reason_code": None,
+                "degraded": False,
+                "routes": [route.as_dict() for route in routes],
+                "route_rows": route_rows,
+                "route_errors": [],
+                "candidate_count": 0,
+                "candidates": [],
+                "ts_ms": now_value,
+            }
+            detail = "recall completed with no candidates"
+            self._log_event(
+                request_id=request_id, intent_id=intent_id, status=STATUS_OK,
+                reason_code=None, detail=detail,
+                payload={
+                    "query_length": len(normalized_query),
+                    "route_count": len(routes),
+                    "route_error_count": 0,
+                    "candidate_count": 0,
+                    "items": [],
+                    "output_status": STATUS_OK,
+                    "latency_ms": sum(r.get("latency_ms", 0) for r in route_rows),
+                    "route_latencies": [
+                        {"store_id": r["store_id"], "latency_ms": r.get("latency_ms", 0),
+                         "candidate_count": r.get("candidate_count", 0), "status": r.get("status", "OK")}
+                        for r in route_rows
+                    ],
+                },
+                ts_ms=now_value,
             )
-            return self._degrade(
-                request_id=request_id, intent_id=intent_id, query=normalized_query,
-                routes=routes, candidates=[], route_rows=route_rows, route_errors=route_errors,
-                reason_code=reason_code, detail=detail, ts_ms=now_value,
+            return RecallFusionResult(
+                success=True,
+                status=STATUS_OK,
+                reason_code=None,
+                stage=S_RET_RECALL,
+                detail=detail,
+                output=output,
             )
 
         degraded = len(route_errors) > 0
