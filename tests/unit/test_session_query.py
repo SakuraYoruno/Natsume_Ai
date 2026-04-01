@@ -115,17 +115,19 @@ def test_session_query_pages_governor_rows_and_reads_intent_preview():
         }
     ]
     ledger = MagicMock()
-    ledger.fetch_by_time_range.side_effect = [first_page, second_page, intent_rows]
+    ledger.fetch_by_time_range.side_effect = [first_page, second_page, intent_rows, [], []]
 
     svc = SessionQueryService(ledger)
     result = svc.query(page=1, page_size=20)
 
     assert result["total"] == 10_001
-    assert ledger.fetch_by_time_range.call_count == 3
+    assert ledger.fetch_by_time_range.call_count == 5
 
     governor_first = ledger.fetch_by_time_range.call_args_list[0]
     governor_second = ledger.fetch_by_time_range.call_args_list[1]
     intent_call = ledger.fetch_by_time_range.call_args_list[2]
+    voice_call = ledger.fetch_by_time_range.call_args_list[3]
+    bond_call = ledger.fetch_by_time_range.call_args_list[4]
 
     for call in (governor_first, governor_second, intent_call):
         assert "start_ms" in call.kwargs
@@ -136,6 +138,118 @@ def test_session_query_pages_governor_rows_and_reads_intent_preview():
     assert governor_first.args[0] == "governor_log"
     assert governor_second.args[0] == "governor_log"
     assert intent_call.args[0] == "intent_log"
+    assert voice_call.args[0] == "voice_event_log"
+    assert bond_call.args[0] == "bond_update_log"
     assert governor_first.kwargs["offset"] == 0
     assert governor_second.kwargs["offset"] == 10_000
     assert intent_call.kwargs["offset"] == 0
+
+
+def test_session_query_reads_voice_input_preview_when_intent_missing():
+    now = int(time.time() * 1000)
+    ledger = MagicMock()
+    ledger.fetch_by_time_range.side_effect = [
+        [
+            {
+                "request_id": "req-voice-0001",
+                "session_id": None,
+                "ts_ms": now,
+                "decision": "APPROVE",
+                "reason_code": None,
+                "channel": "voice",
+            }
+        ],
+        [],
+        [
+            {
+                "request_id": "req-voice-0001",
+                "session_id": "qq_dm_123",
+                "event_type": "INPUT_ACCEPTED",
+                "payload": {"input_preview": "这是用户刚刚发来的消息"},
+                "ts_ms": now,
+            }
+        ],
+        [],
+    ]
+
+    svc = SessionQueryService(ledger)
+    result = svc.query(page=1, page_size=10)
+
+    assert result["total"] == 1
+    assert result["items"][0]["input_preview"] == "这是用户刚刚发来的消息"
+    assert result["items"][0]["session_id"] == "qq_dm_123"
+
+
+def test_session_query_never_uses_reply_preview_as_input_preview():
+    now = int(time.time() * 1000)
+    ledger = MagicMock()
+    ledger.fetch_by_time_range.side_effect = [
+        [
+            {
+                "request_id": "req-voice-0002",
+                "session_id": "qq_dm_456",
+                "ts_ms": now,
+                "decision": "APPROVE",
+                "reason_code": None,
+                "channel": "voice",
+            }
+        ],
+        [],
+        [
+            {
+                "request_id": "req-voice-0002",
+                "session_id": "qq_dm_456",
+                "event_type": "INPUT_COMPLETED",
+                "payload": {"reply_preview": "assistant reply only"},
+                "ts_ms": now,
+            }
+        ],
+        [],
+    ]
+
+    svc = SessionQueryService(ledger)
+    result = svc.query(page=1, page_size=10)
+
+    assert result["total"] == 1
+    assert result["items"][0]["input_preview"] is None
+
+
+def test_session_query_falls_back_to_bond_topic_when_input_missing():
+    now = int(time.time() * 1000)
+    ledger = MagicMock()
+    ledger.fetch_by_time_range.side_effect = [
+        [
+            {
+                "request_id": "req-voice-0003",
+                "session_id": None,
+                "ts_ms": now,
+                "decision": "APPROVE",
+                "reason_code": None,
+                "channel": "voice",
+            }
+        ],
+        [],
+        [
+            {
+                "request_id": "req-voice-0003",
+                "session_id": "qq_dm_789",
+                "event_type": "INPUT_ACCEPTED",
+                "payload": {"input_preview": "??????"},
+                "ts_ms": now,
+            }
+        ],
+        [
+            {
+                "request_id": "req-voice-0003",
+                "topic_id": "贪吃蛇",
+                "ts_ms": now,
+            }
+        ],
+    ]
+
+    svc = SessionQueryService(ledger)
+    result = svc.query(page=1, page_size=10)
+
+    assert result["total"] == 1
+    assert result["items"][0]["input_preview"] == "贪吃蛇"
+    assert result["items"][0]["session_id"] == "qq_dm_789"

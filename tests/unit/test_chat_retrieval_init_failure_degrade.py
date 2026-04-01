@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from host_brain.app.top_agent import top_agent_sse_generator
+from host_brain.app.top_agent import _async_post_process, top_agent_sse_generator
 
 
 def _run(coro):
@@ -133,3 +133,51 @@ class TestChatRetrievalInitFailureDegrade:
         commit = json.loads(events[-1].removeprefix("data: ").strip())
         assert commit["decision"] == "APPROVE"
         assert commit["narrative"] == "final answer"
+
+    def test_async_post_process_persists_recall_failure_details_into_trace(self) -> None:
+        ledger = MagicMock()
+
+        with patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ), patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="safe",
+        ), patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=None,
+        ):
+            _run(
+                _async_post_process(
+                    request_id="req-trace-recall-failed",
+                    session_id="session-001",
+                    user_message="贪吃蛇",
+                    narrative="先给你普通回复",
+                    emotion_context={},
+                    bond_summary=None,
+                    ts_ms=1000,
+                    render_target_lang="zh",
+                    total_latency_ms=100,
+                    llm_latency_ms=50,
+                    provider_name="gemini",
+                    model_id="gemini-2.5-flash",
+                    retrieval_summary={
+                        "status": "DEGRADED",
+                        "candidate_count": 0,
+                        "reason_code": "RETRIEVAL_FAILED",
+                        "error": "Connection refused",
+                        "route_count": 0,
+                        "rerank_topk": 0,
+                        "degraded": True,
+                        "target_stores": ["episodic_vector"],
+                        "query_plan": {"intent": "chat", "skip_retrieval": False},
+                    },
+                    gov_decision={"decision": "APPROVE", "latency_ms": 0},
+                )
+            )
+
+        graph_row = ledger.log_graph_run_trace.call_args.args[0]
+        recall_node = next(node for node in graph_row["nodes_json"] if node["node_id"] == "recall_fusion")
+        assert recall_node["output_data"]["reason_code"] == "RETRIEVAL_FAILED"
+        assert recall_node["output_data"]["error"] == "Connection refused"
+        assert recall_node["output_data"]["target_stores"] == ["episodic_vector"]

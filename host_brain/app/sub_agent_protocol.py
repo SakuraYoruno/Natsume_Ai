@@ -229,7 +229,6 @@ class SubAgentDispatcher:
             })
         except Exception:
             pass  # 审计不影响主流程
-            )
 
     async def dispatch_parallel(
         self, requests: list[SubAgentRequest],

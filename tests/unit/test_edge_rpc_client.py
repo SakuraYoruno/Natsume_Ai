@@ -571,6 +571,26 @@ class TestProbeEdgeRpcHealth(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertEqual(result["status"], "DEGRADED")
 
+    def test_probe_returns_skipped_when_edge_rpc_disabled(self):
+        from host_brain.app.dependencies import probe_edge_rpc_health
+
+        with patch.dict(
+            "os.environ",
+            {
+                "HOST_ENABLE_EDGE_RPC": "false",
+                "EDGE_RPC_HOST": "192.168.1.101",
+                "EDGE_GATEWAY_PORT": "19000",
+            },
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client:
+                result = self._run(probe_edge_rpc_health())
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "SKIPPED")
+        self.assertIn("gateway-only mode", result["detail"])
+        mock_client.assert_not_called()
+
     def test_build_edge_dependency_probe_statuses_uses_component_health_for_asr(self):
         from host_brain.app.dependencies import build_edge_dependency_probe_statuses
 
@@ -614,6 +634,21 @@ class TestProbeEdgeRpcHealth(unittest.TestCase):
         self.assertIn("component unavailable", statuses["edge.rpc.asr"]["detail"])
         self.assertTrue(statuses["edge.rpc.tts"]["available"])
         self.assertIn("component loaded", statuses["edge.rpc.tts"]["detail"])
+
+    def test_build_edge_dependency_probe_statuses_treats_skipped_probe_as_healthy(self):
+        from host_brain.app.dependencies import build_edge_dependency_probe_statuses
+
+        statuses = build_edge_dependency_probe_statuses(
+            {
+                "available": True,
+                "status": "SKIPPED",
+                "detail": "edge rpc skipped: gateway-only mode (http://192.168.1.101:19000)",
+            }
+        )
+
+        self.assertTrue(statuses["edge.rpc.gateway"]["available"])
+        self.assertTrue(statuses["edge.rpc.asr"]["available"])
+        self.assertIn("gateway-only mode", statuses["edge.rpc.gateway"]["detail"])
 
 
 if __name__ == "__main__":

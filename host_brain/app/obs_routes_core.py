@@ -92,7 +92,12 @@ def _build_voice_trace_nodes(rows: List[Dict[str, Any]]) -> List[TraceNode]:
         payload_dict = dict(payload) if isinstance(payload, dict) else {}
         event_type = str(row.get("event_type") or "").strip()
         node_type, display_name = _voice_event_node_type(event_type)
-        status = str(payload_dict.get("status") or row.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        status = _normalize_trace_node_status(
+            payload_dict.get("status") or row.get("status") or "UNKNOWN",
+            node_type=node_type,
+            reason_code=payload_dict.get("reason_code") or row.get("reason_code"),
+            output_data=payload_dict,
+        )
         reason_code = (
             str(payload_dict.get("reason_code") or row.get("reason_code") or "").strip()
             or None
@@ -173,22 +178,161 @@ def _coalesce_trace_status(base_status: str, nodes: List[TraceNode]) -> str:
     success_statuses = {
         "OK",
         "UP",
+        "APPROVE",
+        "APPROVED",
         "APPLIED",
         "ACCEPTED",
+        "RECEIVED",
+        "DISPATCHED",
         "QUEUED",
         "STARTED",
         "PLAYING",
         "SUCCESS",
+        "SENT",
         "SKIPPED",
     }
     for node in nodes:
         node_status = str(node.status or "").strip().upper()
         if not node_status or node_status in success_statuses:
             continue
+        if _is_optional_node_degradation(node=node, node_status=node_status):
+            continue
         if normalized_base == "FAIL":
             return normalized_base
         return "DEGRADED"
     return normalized_base
+
+
+def _normalize_trace_node_status(
+    raw_status: Any,
+    *,
+    node_type: str = "",
+    reason_code: Any = None,
+    output_data: Any = None,
+    input_data: Any = None,
+) -> str:
+    normalized = _normalize_trace_status(raw_status, default="UNKNOWN")
+    if normalized in {
+        "APPROVE",
+        "APPROVED",
+        "APPLIED",
+        "ACCEPTED",
+        "RECEIVED",
+        "DISPATCHED",
+        "QUEUED",
+        "SENT",
+    }:
+        return "OK"
+    if normalized == "REJECT":
+        return "FAIL"
+
+    candidate_count = None
+    if isinstance(output_data, dict):
+        candidate_count = output_data.get("candidate_count")
+        if candidate_count is None and isinstance(output_data.get("payload"), dict):
+            candidate_count = output_data["payload"].get("candidate_count")
+    if (
+        normalized == "DEGRADED"
+        and str(node_type or "").strip().lower() == "recall"
+        and not str(reason_code or "").strip()
+    ):
+        try:
+            if int(candidate_count or 0) == 0:
+                return "OK"
+        except (TypeError, ValueError):
+            pass
+
+    _ = input_data
+    return normalized
+
+
+def _is_optional_node_degradation(*, node: TraceNode, node_status: str) -> bool:
+    normalized = str(node_status or "").strip().upper()
+    if normalized in {"OK", "UP", "SUCCESS", "SENT"}:
+        return False
+    node_type = str(getattr(node, "node_type", "") or "").strip().lower()
+    if node_type in {"tts", "vts"}:
+        return True
+    if node_type == "recall":
+        if str(getattr(node, "reason_code", "") or "").strip():
+            return False
+        output_data = getattr(node, "output_data", None)
+        if isinstance(output_data, dict):
+            candidate_count = output_data.get("candidate_count")
+            try:
+                if int(candidate_count or 0) == 0:
+                    return True
+            except (TypeError, ValueError):
+                return False
+    input_data = getattr(node, "input_data", None)
+    if isinstance(input_data, dict):
+        event_type = str(input_data.get("event_type") or "").strip().upper()
+        if "TTS" in event_type or "VTS" in event_type:
+            return True
+    return False
+
+
+def _extract_output_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]) -> Optional[str]:
+    for node_row in reversed(nodes_raw or []):
+        if not isinstance(node_row, dict):
+            continue
+        output_data = node_row.get("output_data")
+        if not isinstance(output_data, dict):
+            continue
+        for key in ("final_response", "narrative", "output_text", "reply_preview", "text", "content"):
+            value = output_data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_recall_summary_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    recall_node = None
+    for node_row in reversed(nodes_raw or []):
+        if not isinstance(node_row, dict):
+            continue
+        node_id = str(node_row.get("node_id") or "").strip().lower()
+        node_type = str(node_row.get("node_type") or "").strip().lower()
+        if node_id == "recall_fusion" or node_type == "recall":
+            recall_node = node_row
+            break
+    if not isinstance(recall_node, dict):
+        return None
+
+    output_data = recall_node.get("output_data")
+    output_dict = dict(output_data) if isinstance(output_data, dict) else {}
+    payload = output_dict.get("payload")
+    payload_dict = dict(payload) if isinstance(payload, dict) else {}
+    source = payload_dict or output_dict
+
+    candidate_count = source.get("candidate_count")
+    route_count = source.get("route_count")
+    route_error_count = source.get("route_error_count")
+    if candidate_count is None and route_count is None and route_error_count is None and not output_dict:
+        return None
+
+    return {
+        "candidate_count": candidate_count,
+        "route_count": route_count,
+        "route_error_count": route_error_count,
+        "content_available": _payload_contains_recall_content(source),
+        "message": "Retrieval events were not persisted for this request; showing trace snapshot only.",
+        "stages": [
+            {
+                "op_kind": "RECALL",
+                "status": _normalize_trace_node_status(
+                    recall_node.get("status"),
+                    node_type="recall",
+                    reason_code=recall_node.get("reason_code"),
+                    output_data=output_dict,
+                ),
+                "reason_code": recall_node.get("reason_code"),
+                "detail": output_dict.get("detail"),
+                "payload": source,
+                "ts_ms": recall_node.get("ts_ms"),
+            }
+        ],
+    }
 
 
 def _fetch_request_rows(ledger: SQLiteLedger, table: str, request_id: str) -> List[Dict[str, Any]]:
@@ -242,6 +386,40 @@ def _extract_input_text(intent_row: Dict[str, Any]) -> tuple[Optional[str], Opti
     return (str(text).strip() if isinstance(text, str) and text.strip() else None, normalized_dict)
 
 
+def _extract_input_text_from_voice_rows(voice_rows: List[Dict[str, Any]]) -> Optional[str]:
+    for row in reversed(voice_rows):
+        event_type = str(row.get("event_type") or "").strip().upper()
+        if event_type not in {"INPUT_ACCEPTED", "INPUT_DISPATCHED", "INPUT_COMPLETED"}:
+            continue
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        for key in ("input_preview", "content_preview", "text_preview"):
+            value = payload_dict.get(key)
+            if isinstance(value, str):
+                preview = value.strip()
+                if preview and not _is_placeholder_preview(preview):
+                    return preview
+    return None
+
+
+def _extract_bond_input_hint(bond_rows: List[Dict[str, Any]]) -> Optional[str]:
+    for row in reversed(bond_rows):
+        topic_id = row.get("topic_id")
+        if not isinstance(topic_id, str):
+            continue
+        preview = topic_id.strip()
+        if preview and not _is_placeholder_preview(preview):
+            return preview
+    return None
+
+
+def _is_placeholder_preview(value: str) -> bool:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return True
+    return all(ch in {"?", "？"} for ch in normalized)
+
+
 def _extract_dialogue_pair(memory_rows: List[Dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
     for row in reversed(memory_rows):
         detail = str(row.get("detail") or "").strip()
@@ -253,6 +431,26 @@ def _extract_dialogue_pair(memory_rows: List[Dict[str, Any]]) -> tuple[Optional[
         reply_text = reply_text.strip() or None
         return user_text, reply_text
     return None, None
+
+
+def _extract_output_from_voice_rows(voice_rows: List[Dict[str, Any]]) -> Optional[str]:
+    for row in reversed(voice_rows):
+        event_type = str(row.get("event_type") or "").strip().upper()
+        if event_type != "INPUT_COMPLETED":
+            continue
+        payload = _safe_json(row.get("payload"))
+        payload_dict = dict(payload) if isinstance(payload, dict) else {}
+        for key in ("reply_preview", "reply_text", "output_text", "content"):
+            value = payload_dict.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        detail = str(row.get("detail") or "").strip()
+        marker = "reply_preview="
+        if marker in detail:
+            preview = detail.split(marker, 1)[1].strip()
+            if preview:
+                return preview
+    return None
 
 
 def _extract_latest_audit_snapshot(error_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -360,7 +558,10 @@ def _build_trace_summary(
     intent_row = intent_rows[-1] if intent_rows else {}
     governor_row = governor_rows[-1] if governor_rows else {}
     input_text, normalized_intent = _extract_input_text(intent_row)
+    voice_input_text = _extract_input_text_from_voice_rows(voice_rows)
+    bond_input_hint = _extract_bond_input_hint(bond_rows)
     memory_input_text, output_text = _extract_dialogue_pair(memory_rows)
+    voice_output_text = _extract_output_from_voice_rows(voice_rows)
     audit_snapshot = _extract_latest_audit_snapshot(error_rows) or {}
     recall_summary = _summarize_recall(retrieval_rows)
 
@@ -410,8 +611,8 @@ def _build_trace_summary(
             audit_snapshot.get("session_id"),
             (bond_rows[-1] if bond_rows else {}).get("session_id"),
         ),
-        "input_text": _first_present(input_text, memory_input_text),
-        "output_text": output_text,
+        "input_text": _first_present(input_text, memory_input_text, voice_input_text, bond_input_hint),
+        "output_text": _first_present(output_text, voice_output_text),
         "intent": normalized_intent,
         "task_type": audit_snapshot.get("task_type"),
         "decision": governor_row.get("decision"),
@@ -526,7 +727,16 @@ def _build_retrieval_trace_nodes(
                 node_type="recall" if op_kind == "RECALL" else "retrieval",
                 display_name=display_names.get(op_kind, op_kind.title()),
                 side="host",
-                status=_normalize_trace_status(row.get("status"), default="OK"),
+                status=_normalize_trace_node_status(
+                    row.get("status"),
+                    node_type="recall" if op_kind == "RECALL" else "retrieval",
+                    reason_code=row.get("reason_code"),
+                    output_data={
+                        "payload": payload_dict if payload_dict else payload,
+                        "detail": row.get("detail"),
+                        "content_available": _payload_contains_recall_content(payload_dict),
+                    },
+                ),
                 reason_code=row.get("reason_code"),
                 latency_ms=latency_ms,
                 input_data={
@@ -1106,9 +1316,19 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         row_dict = trace_rows[-1]
         nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
         edges_raw = _safe_json(row_dict.get("edges_json")) or []
+        if not summary.get("output_text"):
+            trace_output_text = _extract_output_from_trace_nodes_raw(nodes_raw if isinstance(nodes_raw, list) else [])
+            if trace_output_text:
+                summary["output_text"] = trace_output_text
+        if not summary.get("recall"):
+            trace_recall = _extract_recall_summary_from_trace_nodes_raw(nodes_raw if isinstance(nodes_raw, list) else [])
+            if trace_recall:
+                summary["recall"] = trace_recall
 
         nodes = []
         for node_row in nodes_raw:
+            output_data = node_row.get("output_data")
+            input_data = node_row.get("input_data")
             nodes.append(TraceNode(
                 node_id=node_row.get("node_id", ""),
                 node_type=node_row.get("node_type", "system"),
@@ -1116,11 +1336,17 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
                 side=node_row.get("side"),
                 provider=node_row.get("provider"),
                 model_id=node_row.get("model_id"),
-                status=node_row.get("status", "OK"),
+                status=_normalize_trace_node_status(
+                    node_row.get("status", "OK"),
+                    node_type=node_row.get("node_type", "system"),
+                    reason_code=node_row.get("reason_code"),
+                    output_data=output_data,
+                    input_data=input_data,
+                ),
                 reason_code=node_row.get("reason_code"),
                 latency_ms=node_row.get("latency_ms"),
-                input_data=node_row.get("input_data"),
-                output_data=node_row.get("output_data"),
+                input_data=input_data,
+                output_data=output_data,
                 ts_ms=node_row.get("ts_ms"),
                 error=node_row.get("error"),
             ))
@@ -2034,4 +2260,3 @@ async def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
-

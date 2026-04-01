@@ -82,6 +82,8 @@ def create_edge_fastapi_app(
     replay_value = replay_cache or NonceReplayCache(
         window_ms=runtime_config.rpc_nonce_window_ms
     )
+    fallback_llm_enabled = bool(getattr(runtime_config, "fallback_llm_enabled", False))
+    vlm_enabled = bool(getattr(runtime_config, "vlm_enabled", False))
     clock = now_fn or now_ms
     startup_runner = startup_hook or runtime_startup
     shutdown_runner = shutdown_hook or runtime_shutdown
@@ -177,7 +179,7 @@ def create_edge_fastapi_app(
             clock=clock,
             enabled=(
                 runtime_config.rpc_gateway_enabled
-                and runtime_config.fallback_llm_enabled
+                and fallback_llm_enabled
             ),
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_presence,
@@ -193,7 +195,7 @@ def create_edge_fastapi_app(
             clock=clock,
             enabled=(
                 runtime_config.rpc_gateway_enabled
-                and runtime_config.fallback_llm_enabled
+                and fallback_llm_enabled
             ),
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_asr_compile,
@@ -209,7 +211,7 @@ def create_edge_fastapi_app(
             clock=clock,
             enabled=(
                 runtime_config.rpc_gateway_enabled
-                and runtime_config.fallback_llm_enabled
+                and fallback_llm_enabled
             ),
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_retrieval_hints,
@@ -225,7 +227,7 @@ def create_edge_fastapi_app(
             clock=clock,
             enabled=(
                 runtime_config.rpc_gateway_enabled
-                and runtime_config.fallback_llm_enabled
+                and fallback_llm_enabled
             ),
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_context_compress,
@@ -324,7 +326,7 @@ def create_edge_fastapi_app(
             runtime=runtime_value,
             replay=replay_value,
             clock=clock,
-            enabled=runtime_config.rpc_gateway_enabled and runtime_config.vlm_enabled,
+            enabled=runtime_config.rpc_gateway_enabled and vlm_enabled,
             disabled_detail="edge visual locate disabled (check EDGE_VLM_ENABLED and EDGE_RPC_GATEWAY_ENABLED)",
             handler=_handle_visual_locate,
         )

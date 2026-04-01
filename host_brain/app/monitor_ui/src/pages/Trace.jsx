@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+﻿import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import {
   ReactFlow,
@@ -209,10 +209,10 @@ const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'recall', 'agent', 'llm', 'post
 
 function normalizeBadgeStatus(status) {
   const value = String(status || '').toUpperCase()
-  if (['OK', 'UP', 'SUCCESS'].includes(value)) return 'healthy'
-  if (['RUNNING', 'STARTED', 'ACCEPTED', 'DISPATCHED'].includes(value)) return 'running'
+  if (['OK', 'UP', 'SUCCESS', 'APPROVE', 'APPROVED', 'APPLIED', 'ACCEPTED', 'RECEIVED', 'DISPATCHED', 'QUEUED', 'SENT', 'SKIPPED'].includes(value)) return 'healthy'
+  if (['RUNNING', 'STARTED'].includes(value)) return 'running'
   if (['DEGRADED'].includes(value)) return 'degraded'
-  if (['FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECTED'].includes(value)) return 'error'
+  if (['FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECTED', 'REJECT'].includes(value)) return 'error'
   return 'unknown'
 }
 
@@ -234,8 +234,28 @@ function getLatestTraceNode(traceData) {
   return nodes[nodes.length - 1]
 }
 
+function isOptionalTraceNode(node) {
+  const nodeType = String(node?.node_type || '').toLowerCase()
+  if (nodeType === 'tts' || nodeType === 'vts') return true
+  if (nodeType === 'recall') {
+    const candidateCount = node?.output_data?.candidate_count
+    return !node?.reason_code && Number(candidateCount || 0) === 0
+  }
+  return false
+}
+
+function getLatestPrimaryTraceNode(traceData) {
+  const nodes = Array.isArray(traceData?.nodes) ? [...traceData.nodes] : []
+  if (nodes.length === 0) return null
+  nodes.sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    if (!isOptionalTraceNode(nodes[index])) return nodes[index]
+  }
+  return nodes[nodes.length - 1]
+}
+
 function getLiveTraceFlow(traceData) {
-  const latestNode = getLatestTraceNode(traceData)
+  const latestNode = getLatestPrimaryTraceNode(traceData)
   const latestNormalizedNodeId = latestNode ? normalizeTraceGroupNodeId(latestNode.node_id) : null
 
   return LIVE_TRACE_GROUP_ORDER
@@ -277,14 +297,14 @@ function getLiveTraceOutputPreview(traceData) {
   const output = summary.output_text
   if (typeof output === 'string' && output.trim()) return output.trim()
   if (typeof summary.failure_event === 'string' && summary.failure_event.trim()) return summary.failure_event.trim()
-  const latestNode = getLatestTraceNode(traceData)
+  const latestNode = getLatestPrimaryTraceNode(traceData) || getLatestTraceNode(traceData)
   if (typeof latestNode?.reason_code === 'string' && latestNode.reason_code.trim()) return latestNode.reason_code.trim()
   if (typeof latestNode?.error === 'string' && latestNode.error.trim()) return latestNode.error.trim()
   return ''
 }
 
 function getLiveTraceCurrentLabel(traceData) {
-  const latestNode = getLatestTraceNode(traceData)
+  const latestNode = getLatestPrimaryTraceNode(traceData) || getLatestTraceNode(traceData)
   if (!latestNode) return '等待节点上报'
   const status = String(latestNode.status || '').toUpperCase()
   return `${latestNode.display_name || latestNode.node_id} · ${status || 'UNKNOWN'}`
@@ -300,6 +320,17 @@ function buildLiveTraceMetrics(session, traceData) {
     latencyMs: traceData?.total_latency_ms ?? session?.total_latency_ms ?? null,
     status: traceData?.status ?? session?.status ?? 'UNKNOWN',
   }
+}
+
+function getSessionDisplayTitle(session, traceData) {
+  const summary = traceData?.summary ?? {}
+  return (
+    summary.input_text
+    || session?.input_preview
+    || session?.request_id
+    || traceData?.request_id
+    || '未命名请求'
+  )
 }
 
 function truncateLiveTraceText(value, maxLength = 140) {
@@ -434,7 +465,7 @@ function getLiveTraceChangeBadgeClass(changeType) {
 const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
   const { session, trace } = item
   const metrics = buildLiveTraceMetrics(session, trace)
-  const inputPreview = session?.input_preview || trace?.summary?.input_text || session?.request_id
+  const inputPreview = getSessionDisplayTitle(session, trace)
 
   return (
     <div
@@ -503,13 +534,14 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
   const { session, trace } = item
   const metrics = buildLiveTraceMetrics(session, trace)
   const summary = trace?.summary ?? {}
+  const displayTitle = getSessionDisplayTitle(session, trace)
   const recentTimelineEntries = getLiveTraceTimelineEntries(item, timelineEntries)
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-gray-900 break-all">{session.input_preview || summary.input_text || session.request_id}</div>
+          <div className="text-sm font-semibold text-gray-900 break-all">{displayTitle}</div>
           <div className="mt-1 text-xs text-gray-500 font-mono break-all">{session.request_id}</div>
         </div>
         <StatusBadge status={normalizeBadgeStatus(metrics.status)} label={getRecentRequestStatusMeta(metrics.status).label} />
@@ -554,7 +586,7 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
           <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
-            {summary.input_text || session.input_preview || session.request_id}
+            {displayTitle}
           </div>
         </div>
         <div>
@@ -604,13 +636,14 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
   const { session, trace } = item
   const metrics = buildLiveTraceMetrics(session, trace)
   const summary = trace?.summary ?? {}
+  const displayTitle = getSessionDisplayTitle(session, trace)
   const recentTimelineEntries = getLiveTraceTimelineEntries(item, timelineEntries)
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-gray-900 break-all">{session.input_preview || summary.input_text || session.request_id}</div>
+          <div className="text-sm font-semibold text-gray-900 break-all">{displayTitle}</div>
           <div className="mt-1 text-xs text-gray-500 font-mono break-all">{session.request_id}</div>
         </div>
         <StatusBadge status={normalizeBadgeStatus(metrics.status)} label={getRecentRequestStatusMeta(metrics.status).label} />
@@ -655,7 +688,7 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
           <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
-            {summary.input_text || session.input_preview || session.request_id}
+            {displayTitle}
           </div>
         </div>
         <div>
@@ -1495,6 +1528,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const selectedLiveTraceItem = liveTraceItems.find((item) => item.session.request_id === selectedRequestId)
     ?? liveTraceItems[0]
     ?? null
+  const selectedLiveTraceTitle = selectedLiveTraceItem
+    ? getSessionDisplayTitle(selectedLiveTraceItem.session, selectedLiveTraceItem.trace)
+    : selectedRequestId
   const selectedLiveTraceTimelineEntries = selectedLiveTraceItem?.session?.request_id
     ? (liveTraceTimelineEntries[selectedLiveTraceItem.session.request_id] ?? [])
     : []
@@ -1604,8 +1640,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       {selectedRequestId && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center gap-3 flex-wrap">
           <div className="min-w-0">
-            <div className="text-xs font-medium text-blue-700">当前会话 request_id</div>
-            <div className="font-mono text-sm text-blue-900 break-all">{selectedRequestId}</div>
+            <div className="text-xs font-medium text-blue-700">当前会话</div>
+            <div className="text-sm font-semibold text-blue-900 break-all">{selectedLiveTraceTitle}</div>
+            <div className="mt-1 font-mono text-xs text-blue-800 break-all">{selectedRequestId}</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button className="btn-secondary text-xs" onClick={() => focusRequestOverview(selectedRequestId)} disabled={loading}>

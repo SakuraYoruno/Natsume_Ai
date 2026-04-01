@@ -30,10 +30,10 @@ function MetricCard({ label, value, hint = null }) {
 
 function normalizeStatus(status) {
   const value = String(status || '').toUpperCase()
-  if (['OK', 'UP', 'SUCCESS'].includes(value)) return 'healthy'
-  if (['RUNNING', 'STARTED', 'ACCEPTED', 'DISPATCHED'].includes(value)) return 'running'
+  if (['OK', 'UP', 'SUCCESS', 'APPROVE', 'APPROVED', 'APPLIED', 'ACCEPTED', 'RECEIVED', 'DISPATCHED', 'QUEUED', 'SENT', 'SKIPPED'].includes(value)) return 'healthy'
+  if (['RUNNING', 'STARTED'].includes(value)) return 'running'
   if (['DEGRADED'].includes(value)) return 'degraded'
-  if (['FAIL', 'FAILED', 'ERROR', 'DOWN'].includes(value)) return 'error'
+  if (['FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECT', 'REJECTED'].includes(value)) return 'error'
   return 'unknown'
 }
 
