@@ -1,22 +1,18 @@
-"""top_agent.py — 顶级 Agent SSE 生成器（Phase XIV v4 核心）。
+"""top_agent.py — 顶级 Agent SSE 生成器入口（Phase XV）。
 
-夏目蓝本人，唯一入口。
+Phase XV 架构：
+  Airlock → Governor → 检索 → StateArbiter → RecallPack
+  → DispatchAgent（路由决策 + 子 Agent/Skill 调度）
+  → ChatAgent（人格渲染 + LLM 流式 + COMMIT）
 
-闲聊路径（80%）：Airlock → LLM 流式 → 反思链 → Airlock → 异步后处理
-执行路径（20%）：Airlock → LLM 判断 → 调度子 Agent → 组织回复 → Airlock → 异步后处理
+三层职责分离：
+  top_agent  : 前置处理（净化/限速/检索/上下文装配），无 LLM 调用
+  dispatch_agent : 路由决策（硬规则优先，LLM 兜底），轻量快速
+  chat_agent : 人格渲染（完整 prompt + 流式 LLM + 反思链 + 净化）
 
-治理原则：
-  - 闲聊不需要 Governor/审计（说话不是执行动作）
-  - 执行治理下沉到子 Agent 内部（白皮书合规）
-  - 只保留极轻量 Governor（速率限制 + sys_mode）
-
-归并自旧链路的能力（chat_stream_handler._sse_event_generator）：
-  - SentenceSplitter + SENTENCE 事件（前端 TTS 实时跟读）
-  - apply_response_intelligence（反思链 + AI 话术清理 + 多模态后缀）
-  - _should_buffer_stream_output（高风险对话缓冲）
-  - classify_ingress（出口 Airlock 安全分类）
-  - _infer_emotion_tag_for_tts（回复文案情感推断）
-  - thread_id 传递
+向后兼容：
+  _async_post_process、_SubAgentGatewayAdapter 等工具函数保留，
+  被 dispatch_agent 和 chat_agent 依赖。
 """
 
 from __future__ import annotations
@@ -357,7 +353,7 @@ def _extract_delegate_from_llm_output(
 
 
 def _extract_visible_text(raw: str) -> str:
-    """从 LLM 原始输出中提取可见文本。"""
+    """从 LLM 原始输出中提取文字通道文本（Phase XV P6: 取 text_zh）。"""
     text = raw.strip()
     if not text:
         return ""
@@ -367,9 +363,8 @@ def _extract_visible_text(raw: str) -> str:
             if isinstance(parsed, dict):
                 narrative = parsed.get("narrative")
                 if isinstance(narrative, dict):
-                    return str(narrative.get("text") or "").strip()
-                if isinstance(narrative, str):
-                    return narrative.strip()
+                    # Phase XV P6：双轨语言，文字通道取 text_zh
+                    return str(narrative.get("text_zh") or "").strip()
         except (json.JSONDecodeError, ValueError):
             pass
     return text
@@ -529,13 +524,18 @@ async def top_agent_sse_generator(
     retrieval_task: asyncio.Task | None = None
     retrieval_evidence_items: list[dict[str, Any]] = []
     retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
-    render_target_lang = "ja"
+    # Phase XV P4：Gateway 通道已注入 render_target_lang="zh"（永远中文）
+    # 其他通道回退到 infer_render_target_lang() 根据输入语言推断
+    _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
+    render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
 
     try:
         from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
         from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
 
-        render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+        # 只在未注入 render_target_lang 时才推断（Gateway 通道已注入 "zh"）
+        if not _injected_lang:
+            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
         retrieval_task = asyncio.create_task(
             _run_retrieval(
                 request_id=request_id,
@@ -613,35 +613,12 @@ async def top_agent_sse_generator(
     except Exception as _cpb_exc:
         _logger.debug("[%s] top_agent recall_pack failed: %s", request_id, _cpb_exc)
 
-    # ── 5. 构建 prompt（完整管线含 build_prompt_intelligence）──────────
-    from host_brain.app.top_agent_prompt import build_top_agent_prompt  # noqa: PLC0415
-
-    prompt_text, system_prompt, gen_params = build_top_agent_prompt(
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
-        emotion_context=emotion_context,
-        emotion_snapshot=emotion_snapshot,
-        retrieval_summary=retrieval_summary,
-        retrieval_evidence_items=retrieval_evidence_items,
-        person_id=person_id,
-        session_id=session_id,
-        request_id=request_id,
-        thread_id=thread_id,
-        bond_summary=bond_summary,
-        recall_slot_text=recall_slot_text if recall_slot_text else None,
-    )
-
-    # 解析 LLM 运行时
+    # ── 5. 构建 prompt 前的 LLM 运行时解析（供 DispatchAgent + ChatAgent 共用）──
     from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
     llm_runtime = await resolve_host_llm_runtime_async(
         rollout_key=session_id,
         scene_type="CHAT",
     )
-    provider_name = str(llm_runtime["provider_name"])
-    model_id = str(llm_runtime["model_id"])
-    timeout_ms = int(llm_runtime["timeout_ms"])
-    api_key = str(llm_runtime.get("llm_api_key") or "").strip()
-    base_url = str(llm_runtime.get("base_url_override") or "").strip() or None
 
     if not llm_runtime.get("available"):
         yield _sse({
@@ -651,283 +628,34 @@ async def top_agent_sse_generator(
         })
         return
 
-    # ── 6. 流式生成 + SentenceSplitter + 反思缓冲 ────────────────────
-    from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
-    from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake  # noqa: PLC0415
-    from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
+    # ── 6. 交给 DispatchAgent（Phase XV 核心）────────────────────────
+    # DispatchAgent 负责路由决策，ChatAgent 负责人格渲染，
+    # top_agent 只做前置处理（净化/限速/检索/上下文装配）。
+    from host_brain.app.dispatch_agent import dispatch_agent_sse_generator  # noqa: PLC0415
 
-    splitter = SentenceSplitter()
-    full_text = ""
-    rendered_text = ""
-    first_token_ms: int | None = None
-    sentence_index = 0
-    llm_started_ms = int(time.time() * 1000)
-
-    # 反思缓冲：高风险对话先缓冲，等 apply_response_intelligence 改写后再推送
-    buffer_stream = _should_buffer_stream_output(
+    async for event in dispatch_agent_sse_generator(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
         emotion_context=emotion_context,
-        bond_summary=bond_summary or None,
-    )
-
-    try:
-        async for chunk in astream_llm_chunks(
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=api_key,
-            timeout_ms=timeout_ms,
-            prompt_text=prompt_text,
-            system_prompt=system_prompt,
-            gen_params=gen_params,
-            base_url_override=base_url,
-        ):
-            if first_token_ms is None:
-                first_token_ms = int(time.time() * 1000) - llm_started_ms
-
-            full_text += chunk
-            visible = _extract_visible_text(full_text)
-            if not visible:
-                continue
-
-            # 委托标记检测——有委托时不流式推送
-            if "[DELEGATE:" in full_text or '"delegate"' in full_text:
-                continue
-
-            if visible.startswith(rendered_text):
-                new_chunk = visible[len(rendered_text):]
-            else:
-                new_chunk = visible
-            if not new_chunk:
-                continue
-
-            rendered_text = visible
-
-            # 反思缓冲模式下跳过实时推送
-            if buffer_stream:
-                continue
-
-            yield _sse({"phase": "RENDER", "chunk": new_chunk})
-
-            # 句子边界检测 → SENTENCE 事件（前端 TTS 实时跟读）
-            for sentence in splitter.feed(new_chunk):
-                yield _sse({
-                    "phase": "SENTENCE",
-                    "sentence": sentence,
-                    "sentence_index": sentence_index,
-                })
-                sentence_index += 1
-
-    except (TimeoutError, Exception) as _llm_exc:
-        _logger.warning("[%s] top_agent LLM failed: %s", request_id, _llm_exc)
-        if not full_text.strip():
-            full_text = "ちょっと待ってね…"
-            if not buffer_stream:
-                yield _sse({"phase": "RENDER", "chunk": full_text})
-                for sentence in splitter.feed(full_text):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
-
-    # ── 7. 解析委托标记 ──────────────────────────────────────────────
-    narrative = repair_utf8_latin1_mojibake(full_text) or full_text
-    narrative = _extract_visible_text(narrative) or narrative
-
-    delegate_agent, delegate_task, reply_template = _extract_delegate_from_llm_output(full_text)
-    delegated_agents: list[dict[str, Any]] = []
-
-    if delegate_agent and delegate_task:
-        _logger.info(
-            "[%s] top_agent delegate -> %s task=%s",
-            request_id, delegate_agent, delegate_task[:60],
-        )
-        yield _sse({
-            "phase": "PRESENCE", "event": "DELEGATING",
-            "agent": delegate_agent, "request_id": request_id,
-        })
-
-        dispatcher = get_sub_agent_dispatcher()
-        subagent_gateway = _build_subagent_gateway_from_runtime(llm_runtime)
-        sub_resp = await dispatcher.dispatch(SubAgentRequest(
-            agent_id=delegate_agent,
-            task=delegate_task or sanitized_message,
-            user_message=sanitized_message,
-            request_id=request_id,
-            session_id=session_id,
-            context={"gateway": subagent_gateway} if subagent_gateway is not None else {},
-        ))
-
-        delegated_agents.append({
-            "agent_id": sub_resp.agent_id,
-            "success": sub_resp.success,
-            "latency_ms": sub_resp.latency_ms,
-        })
-
-        if sub_resp.success and sub_resp.result:
-            narrative = _render_delegated_result_naturally(
-                agent_id=delegate_agent,
-                result_text=sub_resp.result,
-                reply_template=reply_template,
-            )
-            yield _sse({"phase": "RENDER", "chunk": narrative})
-        else:
-            narrative = f"啊啦，{delegate_agent} 这边好像出了点状况呢…要不过会儿再试试？"
-            yield _sse({"phase": "RENDER", "chunk": narrative})
-
-    # ── 8. apply_response_intelligence（反思链 + 多模态后缀）──────────
-    response_intelligence_meta: dict[str, Any] = {}
-    try:
-        from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
-
-        narrative, response_intelligence_meta = apply_response_intelligence(
-            request_id=request_id,
-            user_message=sanitized_message,
-            narrative=narrative,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary or None,
-            render_lang=render_target_lang,
-            allow_rewrite=buffer_stream,
-        )
-
-        # 缓冲模式：改写后一次性推送
-        if buffer_stream and narrative:
-            rendered_text = narrative
-            yield _sse({"phase": "RENDER", "chunk": narrative})
-            for sentence in splitter.feed(narrative):
-                yield _sse({
-                    "phase": "SENTENCE",
-                    "sentence": sentence,
-                    "sentence_index": sentence_index,
-                })
-                sentence_index += 1
-        elif narrative.startswith(rendered_text):
-            # 非缓冲模式：推送反思链可能追加的后缀（如 emoji）
-            postprocess_chunk = narrative[len(rendered_text):]
-            if postprocess_chunk:
-                rendered_text = narrative
-                yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
-                for sentence in splitter.feed(postprocess_chunk):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
-    except Exception as _ri_exc:
-        response_intelligence_meta = {
-            "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
-        }
-        _logger.debug("[%s] top_agent response_intelligence failed: %s", request_id, _ri_exc)
-
-    # flush 剩余未成句文本
-    remainder = splitter.flush()
-    if remainder:
-        yield _sse({
-            "phase": "SENTENCE",
-            "sentence": remainder,
-            "sentence_index": sentence_index,
-        })
-        sentence_index += 1
-
-    # ── 9. 出口净化 ──────────────────────────────────────────────────
-    narrative = _airlock_sanitize_output(narrative)
-
-    # ── 9.5 PII 出口检查（防止 LLM 重放 PII）────────────────────────
-    _pii_egress_stats: dict[str, Any] = {}
-    try:
-        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
-        if _check_channel("EGRESS"):
-            _pii_eg = pii_scrub_text(narrative, context="egress")
-            narrative = _pii_eg.scrubbed_text
-            if _pii_eg.has_pii:
-                _pii_egress_stats = {
-                    "detections": _pii_eg.total_detections,
-                    "rules": sorted({d["rule_id"] for d in _pii_eg.detections}),
-                }
-    except Exception:
-        pass
-
-    # ── 10. COMMIT 事件 ──────────────────────────────────────────────
-    total_latency_ms = int(time.time() * 1000) - ts_ms
-    llm_latency_ms = int(time.time() * 1000) - llm_started_ms
-
-    # ── 同步写入 INPUT_COMPLETED（确保下一轮对话可查历史）────────────
-    try:
-        from host_brain.app.dependencies import get_ledger as _get_pre_ledger  # noqa: PLC0415
-        _get_pre_ledger().log_voice_event({
-            "request_id": request_id,
-            "session_id": session_id,
-            "event_type": "INPUT_COMPLETED",
-            "direction": "HOST_INTERNAL",
-            "status": "OK" if narrative.strip() else "DEGRADED",
-            "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
-            "stage": "top_agent.pre_commit",
-            "detail": f"source=CHAT_API text_len={len(sanitized_message)} reply_len={len(narrative)}",
-            "payload": {
-                "source": "CHAT_API",
-                "person_id": person_id,
-                "input_preview": _build_reply_preview(sanitized_message, limit=160),
-                "reply_preview": _build_reply_preview(narrative, limit=160),
-                "render_target_lang": render_target_lang,
-            },
-            "ts_ms": int(time.time() * 1000),
-        })
-    except Exception as _ve_exc:
-        _logger.debug("[%s] pre-commit INPUT_COMPLETED failed: %s", request_id, _ve_exc)
-
-    yield _sse({
-        "phase": "COMMIT",
-        "done": True,
-        "decision": "APPROVE",
-        "narrative": narrative,
-        "request_id": request_id,
-        "audit_refs": {
-            "request_id": request_id,
-            "path": "delegate" if delegated_agents else "chat_direct",
-            "latency_ms": total_latency_ms,
-            "first_token_ms": first_token_ms,
-            "llm_latency_ms": llm_latency_ms,
-            "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-            "stream_buffered": buffer_stream,
-            "delegated_agents": delegated_agents,
-            "response_intelligence": {
-                k: v for k, v in response_intelligence_meta.items()
-                if k in ("reflection", "multimodal_output")
-            } if response_intelligence_meta else {},
-            "pii_stats": {
-                "ingress": _pii_ingress_stats,
-                "egress": _pii_egress_stats,
-            } if (_pii_ingress_stats or _pii_egress_stats) else {},
-        },
-    })
-
-    # ── 11. 异步后处理（不阻塞回复）─────────────────────────────────
-    asyncio.create_task(
-        _async_post_process(
-            request_id=request_id,
-            person_id=person_id,
-            session_id=session_id,
-            user_message=sanitized_message,
-            narrative=narrative,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary,
-            ts_ms=ts_ms,
-            render_target_lang=render_target_lang,
-            # 链路追踪审计数据
-            total_latency_ms=total_latency_ms,
-            llm_latency_ms=llm_latency_ms,
-            first_token_ms=first_token_ms,
-            provider_name=provider_name,
-            model_id=model_id,
-            buffer_stream=buffer_stream,
-            delegated_agents=delegated_agents,
-            retrieval_summary=retrieval_summary,
-            gov_decision=gov,
-            pii_ingress_stats=_pii_ingress_stats,
-            pii_egress_stats=_pii_egress_stats,
-        )
-    )
+        emotion_snapshot=emotion_snapshot,
+        governor_result=gov,
+        intent_id=intent_id,
+        metrics=metrics,
+        # 预处理数据
+        person_id=person_id,
+        sanitized_message=sanitized_message,
+        recall_slot_text=recall_slot_text,
+        bond_summary=bond_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        retrieval_summary=retrieval_summary,
+        render_target_lang=render_target_lang,
+        llm_runtime=llm_runtime,
+        pii_ingress_stats=_pii_ingress_stats,
+    ):
+        yield event
 
 
 # ---------------------------------------------------------------------------
@@ -1171,7 +899,10 @@ async def _async_post_process(
     # ── TTS 语音播报 ─────────────────────────────────────────────────
     try:
         tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
-        if tts_enabled in ("1", "true", "yes", "on") and narrative.strip():
+        # Phase XV P7：分句流式 TTS 已在流式阶段逐句触发，跳过整段 TTS（避免重复播放）
+        tts_sentence_stream = str(os.environ.get("HOST_TTS_SENTENCE_STREAM_ENABLED") or "true").strip().lower()
+        _skip_bulk_tts = tts_sentence_stream in ("1", "true", "yes", "on")
+        if tts_enabled in ("1", "true", "yes", "on") and narrative.strip() and not _skip_bulk_tts:
             from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
             from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
 

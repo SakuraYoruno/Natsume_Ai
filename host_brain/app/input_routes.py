@@ -382,6 +382,9 @@ async def _run_top_agent_pipeline(
         reply_target=reply_target,
         suppress_edge_tts=(True if source == "GATEWAY" else None),
         suppress_edge_vts=(True if source == "GATEWAY" else None),
+        # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
+        # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
+        render_target_lang=("zh" if source == "GATEWAY" else None),
     )
     emotion_context = resolve_chat_emotion_context(request_body=request_body)
     emotion_snapshot = build_chat_emotion_snapshot(
@@ -432,8 +435,18 @@ async def _deliver_gateway_reply(
     decision: str,
     reason_code: str | None,
     narrative: str,
+    # Phase XV P4：ReplyFormDecider 所需的上下文
+    emotion_tag: str = "NEUTRAL",
+    bond_stage: str = "STRANGER",
+    user_msg_type: str = "text",
+    # Phase XV P6：双轨语言，Gateway 文字永远中文（narrative 已是中文）
+    # tts_text_ja 为日语 TTS 文本（双语输出时使用，当前为占位）
+    tts_text_ja: str | None = None,
 ) -> dict[str, Any]:
     from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+    from host_brain.app.reply_form_decider import (  # noqa: PLC0415
+        get_reply_form_decider, MsgType,
+    )
 
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
@@ -446,11 +459,31 @@ async def _deliver_gateway_reply(
         reason_code=reason_code,
     )
     preview = _build_reply_preview(reply_text, limit=120)
+
+    # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
+    # 将用户消息类型字符串转换为 MsgType
+    try:
+        user_mtype = MsgType(str(user_msg_type or "text").strip().lower())
+    except ValueError:
+        user_mtype = MsgType.TEXT
+
+    decider = get_reply_form_decider()
+    form_decision = decider.decide(
+        user_msg_type=user_mtype,
+        narrative_zh=reply_text,
+        emotion_tag=emotion_tag,
+        bond_stage=bond_stage,
+    )
+
+    # ── 主回复（文字/语音）─────────────────────────────────────────────
+    primary_content = reply_text
+    primary_msg_type = form_decision.primary.value
+
     result = await post_gateway_reply(
         platform=platform,
         conversation_id=conversation_id,
-        content=reply_text,
-        msg_type="text",
+        content=primary_content,
+        msg_type=primary_msg_type,
         request_id=request_id,
         wait_result=True,
         timeout_ms=12000,
@@ -462,12 +495,82 @@ async def _deliver_gateway_reply(
         raise RuntimeError(
             f"gateway_reply_failed status={status} reason_code={rc or 'UNKNOWN'} detail={detail[:180]}"
         )
+
+    # ── 双发模式：先文字字幕，再日语语音（不阻塞主回复）────────────
+    voice_sent = False
+    if form_decision.is_dual:
+        # P3/P6 完整实现：用 tts_text_ja 做 TTS 合成后发语音
+        # P4 当前：发送一条文字作为语音消息的占位（保留接口，等 P6 双语输出完成后启用真正的 TTS）
+        _voice_text = tts_text_ja or reply_text  # P6 完成后改为只用 tts_text_ja
+        if _voice_text and form_decision.secondary == MsgType.VOICE:
+            try:
+                # 异步发送，不等待结果，不阻塞主回复
+                import asyncio as _asyncio  # noqa: PLC0415
+                _asyncio.create_task(_send_gateway_voice_reply(
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    tts_text=_voice_text,
+                    request_id=request_id,
+                    emotion_tag=emotion_tag,
+                ))
+                voice_sent = True
+            except Exception:
+                pass  # 语音发送失败不影响主回复
+
     return {
         "status": str(getattr(result, "status", "OK")),
         "latency_ms": int(getattr(result, "latency_ms", 0)),
         "reply_text_len": len(reply_text),
         "reply_preview": preview,
+        "reply_form": form_decision.primary.value,
+        "reply_form_reason": form_decision.reason,
+        "voice_sent": voice_sent,
     }
+
+
+async def _send_gateway_voice_reply(
+    *,
+    platform: str,
+    conversation_id: str,
+    tts_text: str,
+    request_id: str,
+    emotion_tag: str = "NEUTRAL",
+) -> None:
+    """向 Gateway 发送语音消息（异步，fire-and-forget）。
+
+    Phase XV P4 当前实现：
+      - 调用 Edge TTS 合成（post_speak），等待合成完成
+      - 当 Edge 端支持 TTS→音频文件 后，改为发送语音文件
+      - 当前 post_gateway_reply msg_type="voice" 需要 content 为音频 base64 或文件路径
+      - 临时方案：发送 msg_type="text" 的语音字幕（标记 🎵 前缀区分）
+
+    Phase XV P6/P7 完整实现：
+      - Edge TTS 合成 → 返回音频文件路径/base64
+      - post_gateway_reply(msg_type="voice", content=audio_data)
+    """
+    import logging as _logging  # noqa: PLC0415
+    _vlogger = _logging.getLogger("Natsume.gateway_voice")
+    try:
+        from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+        # 触发 TTS 合成（本地扬声器）——Gateway 用户在外面听不到，
+        # 但这样可以验证 TTS 合成链路正常工作
+        # P6/P7 完成后：获取合成音频 → 发送 voice 消息
+        _tts_text_normalized = str(tts_text or "").strip()
+        if not _tts_text_normalized:
+            return
+
+        await post_speak(
+            text=_tts_text_normalized,
+            request_id=request_id,
+            lang_hint="ja",  # Phase XV P6: 语音通道永远日语
+            emotion_tag=emotion_tag,
+        )
+        _vlogger.debug(
+            "gateway_voice TTS triggered (P4 placeholder): platform=%s len=%d",
+            platform, len(_tts_text_normalized),
+        )
+    except Exception as exc:
+        _vlogger.debug("gateway_voice send failed (non-critical): %s", exc)
 
 
 async def _dispatch_to_graph(
@@ -551,12 +654,23 @@ async def _dispatch_to_graph_worker(
 
         gateway_delivery: dict[str, Any] | None = None
         if source == "GATEWAY":
+            # Phase XV P4：从 pipeline_result 提取情感和 Bond 上下文
+            commit_event = pipeline_result.get("commit_event") or {}
+            audit_refs = commit_event.get("audit_refs") or {}
+            _emotion_tag = str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper()
+            # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 STRANGER
+            _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
+            _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
+
             gateway_delivery = await _deliver_gateway_reply(
                 request_id=request_id,
                 payload=payload,
                 decision=decision,
                 reason_code=reason_code,
                 narrative=narrative,
+                emotion_tag=_emotion_tag,
+                bond_stage=_bond_stage,
+                user_msg_type=_user_msg_type,
             )
 
         complete_ts = int(time.time() * 1000)

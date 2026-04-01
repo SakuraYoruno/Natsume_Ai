@@ -83,3 +83,34 @@ nodes:
     temperature: 0.20
     max_output_tokens: 340
     node_allowlist_envs: [dev, staging, prod]
+
+  # ---- Phase XV: 三套 Agent 专用节点 ----
+  # ChatAgent（夏目蓝本人）—— 高质量，支持双语输出，流式
+  chat_agent_node:
+    description: "ChatAgent 人格渲染节点（Phase XV）"
+    provider: gemini
+    model_id: gemini-2.5-pro
+    temperature: 0.80
+    max_output_tokens: 1500
+    node_allowlist_envs: [dev, staging, prod]
+    # 环境变量覆盖：HOST_CHAT_AGENT_MODEL_ID / HOST_CHAT_AGENT_TIMEOUT_MS
+
+  # DispatchAgent（调度器）—— 轻量快速，JSON 输出，低延迟
+  dispatch_agent_node:
+    description: "DispatchAgent 意图路由节点（Phase XV）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.10
+    max_output_tokens: 400
+    node_allowlist_envs: [dev, staging, prod]
+    # 环境变量覆盖：HOST_DISPATCH_AGENT_MODEL_ID / HOST_DISPATCH_AGENT_TIMEOUT_MS
+
+  # SubAgent（code/translate/intent/vision）—— 准确，多轮工具调用
+  sub_agent_node:
+    description: "SubAgent ReAct 循环节点（Phase XV）"
+    provider: gemini
+    model_id: gemini-2.5-flash
+    temperature: 0.30
+    max_output_tokens: 4000
+    node_allowlist_envs: [dev, staging, prod]
+    # 环境变量覆盖：HOST_SUBAGENT_MODEL_ID / HOST_SUBAGENT_TIMEOUT_MS

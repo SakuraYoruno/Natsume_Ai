@@ -56,6 +56,16 @@ class ChatRequest(BaseModel):
     suppress_edge_vts: Optional[bool] = Field(None, description="Optional per-request flag to suppress edge VTS")
     reply_channel: Optional[str] = Field(None, description="Optional reply channel, e.g. WECHAT")
     reply_target: Optional[str] = Field(None, description="Optional reply target id for channel delivery")
+    # Phase XV: 新增字段
+    person_id: Optional[str] = Field(None, description="Optional canonical person id (resolved by input_routes)")
+    render_target_lang: Optional[str] = Field(
+        None,
+        description=(
+            "Phase XV: 文字通道输出语言。"
+            "Gateway 通道固定注入 'zh'（永远中文）；"
+            "未指定时由 infer_render_target_lang() 根据输入语言推断（向后兼容）。"
+        ),
+    )
 
 
 class ChatResponse(BaseModel):

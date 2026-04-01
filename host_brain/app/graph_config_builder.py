@@ -1673,3 +1673,115 @@ def _build_graph_config_by_profile(
             "active_nodes": list(scene_node_sequence),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase XV: 三套 Agent 专用 LLM 运行时解析
+# ---------------------------------------------------------------------------
+
+def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+    """ChatAgent（夏目蓝本人）的 LLM 运行时配置。
+
+    追求「好」：高质量模型 + 高温度 + 流式输出 + 双语生成能力。
+    默认使用 gemini-2.5-pro，可通过 HOST_CHAT_AGENT_MODEL_ID 覆盖。
+
+    Args:
+        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
+
+    Returns:
+        ChatAgent 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
+    """
+    model_id = str(
+        os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
+    ).strip() or "gemini-2.5-pro"
+    timeout_ms = max(800, _parse_int(
+        os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
+        default=30_000,
+        min_value=800,
+        max_value=120_000,
+    ))
+    return {
+        **base_runtime,
+        "model_id": model_id,
+        "chat_model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "chat_timeout_ms": timeout_ms,
+        # ChatAgent 专属 gen_params：高温度让回复更自然有变化
+        "agent_gen_params": {
+            "temperature": 0.8,
+            "top_p": 0.92,
+        },
+        "agent_role": "chat_agent",
+    }
+
+
+def resolve_dispatch_agent_llm_runtime(*, base_runtime: dict) -> dict:
+    """DispatchAgent（调度器）的 LLM 运行时配置。
+
+    追求「快」：轻量模型 + 低温度 + 非流式 + 严格 JSON 输出。
+    默认使用 gemini-2.5-flash，可通过 HOST_DISPATCH_AGENT_MODEL_ID 覆盖。
+
+    Args:
+        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
+
+    Returns:
+        DispatchAgent 专用 LLM 运行时 dict
+    """
+    model_id = str(
+        os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID") or "gemini-2.5-flash"
+    ).strip() or "gemini-2.5-flash"
+    timeout_ms = max(800, _parse_int(
+        os.environ.get("HOST_DISPATCH_AGENT_TIMEOUT_MS"),
+        default=5_000,
+        min_value=800,
+        max_value=30_000,
+    ))
+    return {
+        **base_runtime,
+        "model_id": model_id,
+        "chat_model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "chat_timeout_ms": timeout_ms,
+        # DispatchAgent 专属 gen_params：低温度确保路由判断稳定可预测
+        "agent_gen_params": {
+            "temperature": 0.1,
+            "top_p": 0.80,
+        },
+        "agent_role": "dispatch_agent",
+    }
+
+
+def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
+    """SubAgent（code/translate/intent/vision）的 LLM 运行时配置。
+
+    追求「准」：中等质量模型 + 低温度 + 非流式 + 多轮工具调用。
+    默认使用 gemini-2.5-flash，可通过 HOST_SUBAGENT_MODEL_ID 覆盖。
+
+    Args:
+        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
+
+    Returns:
+        SubAgent 专用 LLM 运行时 dict，可直接传给 ReAct 循环的 gateway 构建
+    """
+    model_id = str(
+        os.environ.get("HOST_SUBAGENT_MODEL_ID") or "gemini-2.5-flash"
+    ).strip() or "gemini-2.5-flash"
+    timeout_ms = max(800, _parse_int(
+        os.environ.get("HOST_SUBAGENT_TIMEOUT_MS"),
+        default=30_000,
+        min_value=800,
+        max_value=120_000,
+    ))
+    return {
+        **base_runtime,
+        "model_id": model_id,
+        "chat_model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "chat_timeout_ms": timeout_ms,
+        # SubAgent 专属 gen_params：低温度保证代码/翻译准确性
+        "agent_gen_params": {
+            "temperature": 0.3,
+            "top_p": 0.85,
+        },
+        "agent_role": "sub_agent",
+    }

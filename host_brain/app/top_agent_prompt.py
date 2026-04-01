@@ -387,10 +387,18 @@ def build_top_agent_prompt(
     full_prompt = full_prompt + "\n\n" + agent_block
 
     # ── 5. 拆分 system_prompt 和 prompt_text ─────────────────────────
-    system_prompt = _build_node_role_instruction(
+    # Phase XV：角色人设必须在 system_prompt 中（LLM 最高优先级），
+    # 而不仅仅在 prompt_text 里（容易被 20+ 个槽位块稀释）
+    from host_brain.app.prompt_builder import _load_character_profile  # noqa: PLC0415
+    _cp_text = _load_character_profile("zh")  # 固定中文版人设
+    _node_role = _build_node_role_instruction(
         TOP_AGENT_NODE_ID,
         render_target_lang=render_target_lang,
     )
+    if _cp_text:
+        system_prompt = f"【角色人设】\n{_cp_text}\n\n{_node_role}"
+    else:
+        system_prompt = _node_role
     prompt_text = full_prompt + "\n\n" + f"【用户消息】\n{user_message}"
 
     return prompt_text, system_prompt, gen_params

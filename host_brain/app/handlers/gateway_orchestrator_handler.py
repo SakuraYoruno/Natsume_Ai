@@ -656,21 +656,26 @@ async def gateway_orchestrator_sse_generator(
 ):
     """SCENE_GATEWAY 专用 SSE 生成器。
 
-    由 SceneRouter.route_sse() 在 scene_type == "GATEWAY" 时调用。
-    上游已通过 Airlock/Governor/Recall 等前置安全节点。
-
-    完整链路（与 SCENE_CHAT 对齐）：
-    1. 意图识别（复用 pre_intent_classifier）
-    2. 场景决策：CHAT → 完整中文回复生成；其他 → 委托复杂场景处理器
-    3. 预召回证据 + StateArbiter 四路查询 + RecallPackBuilder
-    4. build_chat_runtime_input → _build_stream_chat_prompt（完整 prompt 构建）
-    5. adjust_gen_params_for_emotion（情感→LLM 参数）
-    6. 流式输出 TOKEN/SENTENCE 事件
-    7. 后置任务：Airlock 检疫 + 情节记忆 + Bond 动态
-    8. 可选 TTS 异步生成
-    9. 发出 COMMIT 事件
+    Phase XV：直接接入 top_agent_sse_generator 新链路（DispatchAgent + ChatAgent）。
+    旧链路（_build_stream_chat_prompt）已废弃，保留在文件后半部分备查。
     """
-    from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+    # Phase XV：接入新链路（top_agent → dispatch_agent → chat_agent）
+    # 旧的 gateway_orchestrator 逻辑已被 Phase XV 的三层架构取代
+    from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+
+    async for event in top_agent_sse_generator(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        governor_result=governor_result,
+        intent_id=intent_id,
+        metrics=metrics,
+    ):
+        yield event
         pre_intent_classifier,
         CHAT_DIRECT_NODE_ID,
         resolve_host_llm_runtime_async,

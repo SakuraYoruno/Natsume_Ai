@@ -45,18 +45,18 @@ _CHARACTER_PROFILE_CACHE: dict[str, str] = {}
 
 
 def _load_character_profile(render_lang: str) -> str:
-    """加载常驻角色人设文本。
+    """加载常驻角色人设文本（固定中文版）。
 
-    从 canon/character/character_profile.json 读取对应语言的 instruction。
-    缓存在内存中，首次加载后不再读文件。
-
-    Args:
-        render_lang: "zh" 或 "ja"
+    Phase XV 架构决定：
+    - 文字通道永远中文 → 人设永远加载 instruction_cn
+    - TTS 语音通道永远日语 → 语气/风格由台词库控制，不靠人设
+    - instruction_ja 已废弃，不再读取
+    - render_lang 参数保留但忽略（向后兼容，不会报错）
 
     Returns:
-        角色人设文本（空字符串表示不可用，降级跳过）
+        中文版角色人设文本（空字符串表示不可用，降级跳过）
     """
-    cache_key = render_lang or "zh"
+    cache_key = "zh"
     if cache_key in _CHARACTER_PROFILE_CACHE:
         return _CHARACTER_PROFILE_CACHE[cache_key]
 
@@ -67,8 +67,7 @@ def _load_character_profile(render_lang: str) -> str:
     try:
         if profile_path.exists():
             data = json.loads(profile_path.read_text(encoding="utf-8"))
-            key = "instruction_ja" if cache_key == "ja" else "instruction_cn"
-            text = str(data.get(key) or "").strip()
+            text = str(data.get("instruction_cn") or "").strip()
             if len(text) > 100:
                 _CHARACTER_PROFILE_CACHE[cache_key] = text
                 return text
@@ -145,6 +144,24 @@ def repair_utf8_latin1_mojibake(text: str) -> str:
     if _contains_cjk_or_kana(repaired):
         return repaired
     return raw
+
+
+# ---------------------------------------------------------------------------
+# Phase XV：双轨语言常量
+# ---------------------------------------------------------------------------
+# 文字通道永远中文（用户看的文字，中文是母语）
+TEXT_OUTPUT_LANG: str = "zh"
+# 语音通道永远日语（TTS 声线模型是日语训练的，必须日语文本）
+TTS_INPUT_LANG: str = "ja"
+
+
+def is_dual_lang_enabled() -> bool:
+    """Phase XV P6：双轨语言输出永久启用。
+
+    文字通道永远中文（text_zh），TTS 语音通道永远日语（text_ja）。
+    这不是灰度开关，而是架构决定——旧的单语逻辑已删除。
+    """
+    return True
 
 
 def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
@@ -587,23 +604,28 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
         evidence_lines.append(f"- [{evidence_ref}] {snippet}")
     evidence_block = "\n".join(evidence_lines) if evidence_lines else "- (none)"
 
-    if render_target_lang == "zh":
-        language_rule = "4. Reply in concise spoken Simplified Chinese."
-    else:
-        language_rule = "4. Reply in concise natural Japanese."
+    # Phase XV P6：双轨语言输出（永久生效，不再有旧的单语分支）
+    # text_zh = 文字通道（用户看的，永远中文）
+    # text_ja = TTS 语音通道（声线模型是日语训练的，永远日语）
+    language_rule = (
+        "4. Output DUAL LANGUAGE: narrative must contain BOTH text_zh (Simplified Chinese, "
+        "for text display) AND text_ja (natural Japanese, for TTS voice synthesis). "
+        "Schema: {\"narrative\":{\"text_zh\":\"...\",\"text_ja\":\"...\"}, ...}. "
+        "text_zh: concise spoken Simplified Chinese. "
+        "text_ja: natural conversational Japanese, TTS-friendly (no 〜 decorators, 1-3 sentences)."
+    )
 
     return (
         "You are the Natsume core reasoning node.\n"
         "Return exactly one JSON object with top-level keys: narrative, intent_draft, meta.\n"
         "Required schema:\n"
-        "{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "{\"narrative\":{\"text_zh\":\"...\",\"text_ja\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
         "Rules:\n"
         "1. Output JSON only. No markdown. No code fences.\n"
         "2. Keep draft_only=true.\n"
         "3. Do not claim execution/saving/confirmation has happened.\n"
         f"{language_rule}\n"
         "5. Ground the output in user message and evidence only.\n\n"
-        f"Render target lang: {render_target_lang}\n"
         f"User message:\n{user_message}\n\n"
         f"Retrieval status: {retrieval_status}\n"
         f"Retrieval reason_code: {retrieval_reason}\n"
@@ -1271,7 +1293,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     return (
         f"{character_profile_block}"
         "输出格式：返回一个 JSON 对象，包含 narrative、intent_draft、meta 三个键。\n"
-        "格式：{\"narrative\":{\"text\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "格式：{\"narrative\":{\"text_zh\":\"...\",\"text_ja\":\"...\"},\"intent_draft\":{},\"meta\":{\"draft_only\":true}}\n"
+        "其中 text_zh 是面向用户的中文回复，text_ja 是用于 TTS 语音合成的日语文本（两者语义相同但语言不同）。\n"
         "核心规则：\n"
         "1) 只输出 JSON，不加 markdown 或代码围栏。\n"
         "2) meta.draft_only 必须为 true。\n"
