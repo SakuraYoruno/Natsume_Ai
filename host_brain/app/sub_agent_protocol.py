@@ -137,6 +137,7 @@ class SubAgentDispatcher:
             "session_id": req.session_id,
             "source": "top_agent_dispatch",
         }
+        context.update(dict(req.context or {}))
 
         try:
             timeout_sec = max(1.0, req.timeout_ms / 1000.0)

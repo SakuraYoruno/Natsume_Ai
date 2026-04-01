@@ -158,6 +158,38 @@ def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> Non
     assert float(after.get("overall_score") or 0.0) >= float(before.get("overall_score") or 0.0)
 
 
+def test_apply_response_intelligence_extracts_narrative_text_from_structured_json(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    revised_text, _meta = apply_response_intelligence(
+        request_id="req-draft-json",
+        user_message="上一句是什么",
+        narrative='{"narrative":{"text":"嗯……你是指，之前那一句吗？"},"intent_draft":{},"meta":{"draft_only":true}}',
+        emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
+        bond_summary={"stage": "STRANGER"},
+        render_lang="zh",
+        allow_rewrite=False,
+    )
+
+    assert revised_text == "嗯……你是指，之前那一句吗？"
+
+
+def test_apply_response_intelligence_extracts_narrative_text_from_fenced_json(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    revised_text, _meta = apply_response_intelligence(
+        request_id="req-draft-fence",
+        user_message="那现在呢",
+        narrative='```json\n{"narrative":{"text":"嗯，是这样啊……不过，我这边还没看到上一句。"},"intent_draft":{},"meta":{"draft_only":true}}\n```',
+        emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
+        bond_summary={"stage": "STRANGER"},
+        render_lang="zh",
+        allow_rewrite=False,
+    )
+
+    assert revised_text == "嗯，是这样啊……不过，我这边还没看到上一句。"
+
+
 def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
 

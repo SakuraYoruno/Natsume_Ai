@@ -45,6 +45,10 @@ _DELEGATE_RE = re.compile(
     r"\[DELEGATE:(\w+?)(?::(.+?))?\]",
     re.DOTALL,
 )
+_RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
+_RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
+_RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+_DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
 
 # 回复内容简单情感推断（从旧链路 chat_stream_handler 归并）
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
@@ -95,6 +99,167 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     if len(normalized) <= int(limit):
         return normalized
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
+
+
+def _extract_delegate_visible_text(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    try:
+        from host_brain.app.intelligent_runtime import _normalize_narrative_payload  # noqa: PLC0415
+
+        normalized = _normalize_narrative_payload(normalized)
+    except Exception:
+        pass
+    return str(normalized or "").strip()
+
+
+def _render_delegated_result_naturally(*, agent_id: str, result_text: str, reply_template: str | None) -> str:
+    visible = _extract_delegate_visible_text(result_text)
+    if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
+        if agent_id == "code_agent":
+            return "我先帮你整理个更自然一点的大致思路吧。不过刚才那条代码侧结果不稳定，这次我不直接把内部草稿发给你。"
+        return "我先帮你把刚才那个结果整理成正常说话的版本，不过上一条子流程返回得不太稳定。"
+
+    if reply_template and "{agent_result}" in reply_template:
+        rendered = reply_template.replace("{agent_result}", visible).strip()
+        if rendered:
+            return rendered
+    if agent_id == "code_agent":
+        return f"我先帮你整理一个大致思路：{visible}".strip()
+    return visible
+
+
+class _SubAgentGatewayAdapter:
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        model_id: str,
+        api_key: str,
+        timeout_ms: int,
+        base_url_override: str | None,
+    ) -> None:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: PLC0415
+        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+        from host_brain.app.prompt_builder import extract_langchain_content_text  # noqa: PLC0415
+
+        self._human_message = HumanMessage
+        self._system_message = SystemMessage
+        self._ai_message = AIMessage
+        self._extract_text = extract_langchain_content_text
+        self._llm = ChatOpenAI(
+            model=str(model_id or "").strip() or "default",
+            api_key=api_key,
+            base_url=(str(base_url_override or "").strip() or None),
+            timeout=max(1.0, float(timeout_ms) / 1000.0),
+            max_retries=1,
+            temperature=0.3,
+        )
+        self.provider_name = str(provider_name or "").strip().lower()
+
+    def complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        lc_messages: list[Any] = []
+        for row in list(messages or []):
+            if not isinstance(row, Mapping):
+                continue
+            role = str(row.get("role") or "user").strip().lower()
+            content = str(row.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                lc_messages.append(self._system_message(content=content))
+            elif role == "assistant":
+                lc_messages.append(self._ai_message(content=content))
+            else:
+                lc_messages.append(self._human_message(content=content))
+        response = self._llm.invoke(lc_messages)
+        return {"content": self._extract_text(getattr(response, "content", ""))}
+
+
+def _build_subagent_gateway_from_runtime(llm_runtime: Mapping[str, Any]) -> Any | None:
+    try:
+        if not bool(llm_runtime.get("available")):
+            return None
+        provider_name = str(llm_runtime.get("provider_name") or "").strip()
+        model_id = str(llm_runtime.get("model_id") or "").strip()
+        api_key = str(llm_runtime.get("llm_api_key") or "").strip()
+        timeout_ms = int(llm_runtime.get("timeout_ms") or 30_000)
+        base_url_override = str(llm_runtime.get("base_url_override") or "").strip() or None
+        if not provider_name or not model_id:
+            return None
+        return _SubAgentGatewayAdapter(
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            base_url_override=base_url_override,
+        )
+    except Exception as exc:
+        _logger.debug("sub-agent gateway adapter unavailable: %s", exc)
+        return None
+
+
+def _detect_recent_turn_query_role(user_message: str) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return None
+    if _RECENT_TURN_USER_QUERY_RE.search(normalized):
+        return "user"
+    if _RECENT_TURN_ASSISTANT_QUERY_RE.search(normalized):
+        return "assistant"
+    if _RECENT_TURN_GENERIC_QUERY_RE.search(normalized):
+        return "both"
+    return None
+
+
+def _maybe_build_recent_turn_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+) -> str | None:
+    query_role = _detect_recent_turn_query_role(user_message)
+    if query_role is None:
+        return None
+
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.top_agent_prompt import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
+
+        rows = _fetch_continuity_rows(
+            ledger=get_ledger(),
+            session_id=session_id,
+            person_id=person_id,
+            request_id=request_id,
+            fetch_limit=24,
+        )
+        turns = _voice_rows_to_turns(rows=rows, render_target_lang=render_target_lang)
+    except Exception as exc:
+        _logger.debug("[%s] recent turn continuity lookup failed: %s", request_id, exc)
+        return None
+
+    if not turns:
+        return None
+
+    latest_user = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "user" and str(turn.get("content") or "").strip()), "")
+    latest_assistant = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant" and str(turn.get("content") or "").strip()), "")
+
+    if query_role == "user" and latest_user:
+        return f"你刚才发的是：「{latest_user}」"
+    if query_role == "assistant" and latest_assistant:
+        return f"我刚才回的是：「{latest_assistant}」"
+    if query_role == "both":
+        parts: list[str] = []
+        if latest_user:
+            parts.append(f"你刚才发的是：「{latest_user}」")
+        if latest_assistant:
+            parts.append(f"我刚才回的是：「{latest_assistant}」")
+        if parts:
+            return "；".join(parts)
+    return None
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -284,6 +449,55 @@ async def top_agent_sse_generator(
             "reason_code": gov.get("reason_code", "REJECTED"),
             "request_id": request_id,
         })
+        return
+
+    recent_turn_answer = _maybe_build_recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if recent_turn_answer:
+        narrative = _airlock_sanitize_output(recent_turn_answer)
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _sse({
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": narrative,
+            "request_id": request_id,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "chat_recent_turn_direct",
+                "latency_ms": total_latency_ms,
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+            },
+        })
+        asyncio.create_task(
+            _async_post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang="zh",
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
+                gov_decision=gov,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+            )
+        )
         return
 
     # ── 3. 并行启动检索 ──────────────────────────────────────────────
@@ -509,12 +723,14 @@ async def top_agent_sse_generator(
         })
 
         dispatcher = get_sub_agent_dispatcher()
+        subagent_gateway = _build_subagent_gateway_from_runtime(llm_runtime)
         sub_resp = await dispatcher.dispatch(SubAgentRequest(
             agent_id=delegate_agent,
             task=delegate_task or sanitized_message,
             user_message=sanitized_message,
             request_id=request_id,
             session_id=session_id,
+            context={"gateway": subagent_gateway} if subagent_gateway is not None else {},
         ))
 
         delegated_agents.append({
@@ -524,10 +740,11 @@ async def top_agent_sse_generator(
         })
 
         if sub_resp.success and sub_resp.result:
-            if reply_template and "{agent_result}" in reply_template:
-                narrative = reply_template.replace("{agent_result}", sub_resp.result)
-            else:
-                narrative = sub_resp.result
+            narrative = _render_delegated_result_naturally(
+                agent_id=delegate_agent,
+                result_text=sub_resp.result,
+                reply_template=reply_template,
+            )
             yield _sse({"phase": "RENDER", "chunk": narrative})
         else:
             narrative = f"啊啦，{delegate_agent} 这边好像出了点状况呢…要不过会儿再试试？"

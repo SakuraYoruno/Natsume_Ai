@@ -53,7 +53,7 @@ def code_agent_handler(
         tools = get_tools_for_agent(AGENT_ID_CODE, allow_side_effects=False)
 
         # 获取 LLM gateway（从 context 或 payload 中读取）
-        gateway = ctx.get("gateway") or payload.get("_gateway")
+        gateway = ctx.get("gateway") or payload.get("gateway") or payload.get("_gateway")
 
         # 执行 ReAct 循环（最多 3 步，代码场景无需多步推理）
         react_result = run_react_loop(

@@ -210,6 +210,18 @@ class TestReActMode:
         assert trace.get("stopped_reason") == "NO_LLM"
         assert trace.get("artifact_ref", "").startswith("artifact://")
 
+    def test_gateway_can_be_read_from_payload_context_fallback(self):
+        from host_brain.app.handlers.code_agent_handler import code_agent_handler
+        gateway = _make_gateway("代码思路草案")
+        payload = _make_payload()
+        payload["gateway"] = gateway
+        result = code_agent_handler(
+            payload,
+            context={},
+        )
+        trace = result.get("code_agent_trace") or {}
+        assert trace.get("stopped_reason") == "FINAL_ANSWER"
+
     def test_only_readonly_tools(self):
         """code_agent 只读工具集不含有副作用工具。"""
         from host_brain.app.agents.agent_registry import AGENT_ID_CODE

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Mapping
@@ -9,6 +10,7 @@ from host_brain.skills.skill_composer import SkillComposer, SkillSpec
 logger = logging.getLogger("Natsume.app.intelligent_runtime")
 
 _EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
+_JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 
 _TTS_EMOTION_MAP: dict[str, str] = {
     "NEUTRAL": "neutral",
@@ -269,7 +271,7 @@ def apply_response_intelligence(
 
     reflection = get_reflection_chain()
     meta_learning = get_meta_learning_loop()
-    raw_text = str(narrative or "").strip()
+    raw_text = _normalize_narrative_payload(str(narrative or "").strip())
     if not raw_text:
         return raw_text, {
             "reflection": {"status": "SKIPPED", "reason_code": "EMPTY_NARRATIVE"},
@@ -528,7 +530,7 @@ def _summarize_skill_result(*, skill_name: str, result: Any) -> dict[str, Any]:
 
 
 def _sanitize_narrative(*, text: str, bond_stage: str, render_lang: str) -> str:
-    sanitized = str(text or "").strip()
+    sanitized = _normalize_narrative_payload(str(text or "").strip())
     replacements = (
         (r"作为(一个)?AI[^，。！？]*[，。！？]?", ""),
         (r"我是(一个)?AI[^，。！？]*[，。！？]?", ""),
@@ -544,6 +546,53 @@ def _sanitize_narrative(*, text: str, bond_stage: str, render_lang: str) -> str:
     if bond_stage == "STRANGER" and render_lang == "zh":
         sanitized = sanitized.replace("呢。", "。").replace("呀。", "。")
     return sanitized
+
+
+def _normalize_narrative_payload(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+
+    candidates = [normalized]
+    fenced = _JSON_FENCE_PATTERN.search(normalized)
+    if fenced:
+        fenced_payload = str(fenced.group(1) or "").strip()
+        if fenced_payload:
+            candidates.insert(0, fenced_payload)
+
+    for candidate in candidates:
+        extracted = _try_extract_narrative_text(candidate)
+        if extracted:
+            return extracted
+    return normalized
+
+
+def _try_extract_narrative_text(candidate: str) -> str | None:
+    text = str(candidate or "").strip()
+    if not text or not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+
+    narrative = payload.get("narrative")
+    if isinstance(narrative, Mapping):
+        extracted = str(
+            narrative.get("text")
+            or narrative.get("content")
+            or narrative.get("reply")
+            or ""
+        ).strip()
+        return extracted or None
+    if isinstance(narrative, str):
+        extracted = narrative.strip()
+        return extracted or None
+
+    direct_text = str(payload.get("text") or "").strip()
+    return direct_text or None
 
 
 def _apply_multimodal_suffix(text: str, multimodal_output: Any) -> str:
