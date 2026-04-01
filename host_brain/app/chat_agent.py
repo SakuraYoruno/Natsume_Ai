@@ -374,6 +374,13 @@ async def chat_agent_sse_generator(
     from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake  # noqa: PLC0415
     from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
 
+    # 诊断日志：确认 system_prompt 是否包含人设（前 150 字）
+    _logger.info(
+        "[%s] ChatAgent system_prompt preview: %s",
+        request_id,
+        (system_prompt or "")[:150].replace("\n", "↵"),
+    )
+
     splitter = SentenceSplitter()
     full_text = ""
     rendered_text = ""
