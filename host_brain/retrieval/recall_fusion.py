@@ -138,6 +138,7 @@ class RecallFusionServiceContract:
         query: str,
         query_embedding: list[float],
         render_target_lang: str | None = None,
+        person_id: str | None = None,
         session_id: str | None = None,
         now_ts_ms: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -147,14 +148,15 @@ class RecallFusionServiceContract:
             query=query,
             query_embedding=query_embedding,
             render_target_lang=render_target_lang,
+            person_id=person_id,
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
 
     # ── 各路 store 方法（委托给 recall_fusion_stores）────────────────────
-    def _search_sqlite_ledger(self, *, query: str, top_k: int, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+    def _search_sqlite_ledger(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_sqlite_ledger
-        return search_sqlite_ledger(self, query=query, top_k=top_k, session_id=session_id, now_ts_ms=now_ts_ms)
+        return search_sqlite_ledger(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
 
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
@@ -241,6 +243,7 @@ class RecallFusionServiceContract:
         query: str,
         query_embedding: list[float] | tuple[float, ...] | Any,
         intent_id: str | None = None,
+        person_id: str | None = None,
         session_id: str | None = None,
         ts_ms: int | None = None,
         emotion_filter: str | None = None,
@@ -297,6 +300,7 @@ class RecallFusionServiceContract:
                     query=normalized_query,
                     query_embedding=normalized_vector,
                     render_target_lang=render_target_lang,
+                    person_id=person_id,
                     session_id=session_id,
                     now_ts_ms=now_value,
                 )

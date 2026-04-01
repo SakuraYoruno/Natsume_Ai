@@ -29,6 +29,7 @@ import re
 import time
 from typing import Any, AsyncGenerator, Dict, Mapping
 
+from host_brain.bond.user_identity import resolve_person_id
 from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import (
     AGENT_CAPABILITIES,
@@ -87,6 +88,13 @@ def _airlock_sanitize_output(text: str) -> str:
                 break
         text = truncated
     return text
+
+
+def _build_reply_preview(text: str, *, limit: int = 120) -> str:
+    normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
+    if len(normalized) <= int(limit):
+        return normalized
+    return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -235,6 +243,12 @@ async def top_agent_sse_generator(
     """
     user_message = str(request_body.message or "").strip()
     thread_id = getattr(request_body, "thread_id", None)
+    person_id = resolve_person_id(
+        getattr(request_body, "person_id", None),
+        session_id=session_id,
+        platform=getattr(request_body, "reply_channel", None),
+        conversation_id=getattr(request_body, "reply_target", None),
+    )
 
     # ── 1. Airlock 入口净化 ──────────────────────────────────────────
     sanitized_message, airlock_passed = _airlock_sanitize_input(user_message)
@@ -287,6 +301,7 @@ async def top_agent_sse_generator(
             _run_retrieval(
                 request_id=request_id,
                 message=sanitized_message,
+                person_id=person_id,
                 session_id=session_id,
                 ts_ms=ts_ms,
                 emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
@@ -369,6 +384,7 @@ async def top_agent_sse_generator(
         emotion_snapshot=emotion_snapshot,
         retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
+        person_id=person_id,
         session_id=session_id,
         request_id=request_id,
         thread_id=thread_id,
@@ -624,6 +640,7 @@ async def top_agent_sse_generator(
     asyncio.create_task(
         _async_post_process(
             request_id=request_id,
+            person_id=person_id,
             session_id=session_id,
             user_message=sanitized_message,
             narrative=narrative,
@@ -654,6 +671,7 @@ async def top_agent_sse_generator(
 async def _async_post_process(
     *,
     request_id: str,
+    person_id: str,
     session_id: str,
     user_message: str,
     narrative: str,
@@ -714,6 +732,18 @@ async def _async_post_process(
         _path = "delegate" if delegated_agents else "chat_direct"
         _retrieval_status = (retrieval_summary or {}).get("status", "SKIPPED")
         _retrieval_count = (retrieval_summary or {}).get("candidate_count", 0)
+        _retrieval_output = {
+            "candidate_count": _retrieval_count,
+            "status": _retrieval_status,
+            "reason_code": (retrieval_summary or {}).get("reason_code"),
+            "error": (retrieval_summary or {}).get("error"),
+            "route_count": (retrieval_summary or {}).get("route_count"),
+            "rerank_topk": (retrieval_summary or {}).get("rerank_topk"),
+            "degraded": (retrieval_summary or {}).get("degraded"),
+            "target_stores": (retrieval_summary or {}).get("target_stores"),
+            "query_plan": (retrieval_summary or {}).get("query_plan"),
+            "agentic_meta": (retrieval_summary or {}).get("agentic_meta"),
+        }
 
         # 构建 nodes_json：记录每个处理阶段的耗时和状态
         trace_nodes: list[dict[str, Any]] = [
@@ -724,7 +754,7 @@ async def _async_post_process(
              "latency_ms": gov_decision.get("latency_ms", 0) if gov_decision else 0, "ts_ms": ts_ms},
             {"node_id": "recall_fusion", "node_type": "recall", "display_name": "Recall Fusion",
              "side": "host", "status": _retrieval_status,
-             "output_data": {"candidate_count": _retrieval_count}, "ts_ms": ts_ms},
+             "output_data": _retrieval_output, "ts_ms": ts_ms},
             {"node_id": "prompt_builder", "node_type": "system", "display_name": "Prompt Builder",
              "side": "host", "status": "OK", "ts_ms": ts_ms},
             {"node_id": "llm_stream", "node_type": "llm", "display_name": "LLM 流式生成",
@@ -782,6 +812,25 @@ async def _async_post_process(
             "ts_ms": _now,
         })
 
+        ledger.log_voice_event({
+            "request_id": request_id,
+            "session_id": session_id,
+            "event_type": "INPUT_COMPLETED",
+            "direction": "HOST_INTERNAL",
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
+            "stage": "top_agent.post_process",
+            "detail": f"source=CHAT_API text_len={len(user_message)} reply_len={len(narrative)}",
+            "payload": {
+                "source": "CHAT_API",
+                "person_id": person_id,
+                "input_preview": _build_reply_preview(user_message, limit=160),
+                "reply_preview": _build_reply_preview(narrative, limit=160),
+                "render_target_lang": render_target_lang,
+            },
+            "ts_ms": _now,
+        })
+
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process audit persist failed: %s", request_id, exc)
 
@@ -814,6 +863,7 @@ async def _async_post_process(
                 persist_chat_episodic_memory,
                 request_id=request_id,
                 intent_id=request_id,
+                person_id=person_id,
                 session_id=session_id,
                 user_message=_mem_user,
                 assistant_reply=_mem_narrative,

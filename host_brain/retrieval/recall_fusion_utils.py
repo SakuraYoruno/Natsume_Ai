@@ -30,10 +30,12 @@ STORE_ARTIFACT_VAULT = "artifact_vault"
 STORE_PERSONA_UTTERANCE = "persona_utterance"
 
 SQLITE_SESSION_BOOST = 0.25
+SQLITE_PERSON_BOOST = 0.35
 SQLITE_RECENCY_BOOST_5M = 0.20
 SQLITE_RECENCY_BOOST_1H = 0.10
 SQLITE_RECENCY_BOOST_1D = 0.05
 _SESSION_REF_PREFIX = "chat://session/"
+_PERSON_REF_PREFIX = "chat://person/"
 
 
 def _truncate_text_for_recall(text: str, *, limit: int = 512) -> str:
@@ -72,6 +74,17 @@ def _extract_session_id_from_refs(refs: list[str]) -> str | None:
     return None
 
 
+def _extract_person_id_from_refs(refs: list[str]) -> str | None:
+    prefix = _PERSON_REF_PREFIX
+    for ref in refs:
+        value = str(ref or "").strip()
+        if value.startswith(prefix):
+            person_id = value[len(prefix):].strip()
+            if person_id:
+                return person_id
+    return None
+
+
 def _compute_recency_boost(*, row_ts_ms: int, now_ts_ms: int) -> float:
     if row_ts_ms <= 0 or now_ts_ms <= 0:
         return 0.0
@@ -90,9 +103,18 @@ def _apply_sqlite_ledger_boost(
     base_score: float,
     row_ts_ms: int,
     now_ts_ms: int,
+    row_person_id: str | None,
+    target_person_id: str | None,
     row_session_id: str | None,
     target_session_id: str | None,
 ) -> tuple[float, dict[str, Any]]:
+    normalized_row_person = str(row_person_id or "").strip()
+    normalized_target_person = str(target_person_id or "").strip()
+    person_boost = (
+        SQLITE_PERSON_BOOST
+        if normalized_row_person and normalized_row_person == normalized_target_person
+        else 0.0
+    )
     normalized_row_session = str(row_session_id or "").strip()
     normalized_target_session = str(target_session_id or "").strip()
     session_boost = (
@@ -101,8 +123,9 @@ def _apply_sqlite_ledger_boost(
         else 0.0
     )
     recency_boost = _compute_recency_boost(row_ts_ms=row_ts_ms, now_ts_ms=now_ts_ms)
-    boosted = round(min(1.0, max(0.0, float(base_score) + session_boost + recency_boost)), 6)
+    boosted = round(min(1.0, max(0.0, float(base_score) + person_boost + session_boost + recency_boost)), 6)
     return boosted, {
+        "person_boost": round(person_boost, 6),
         "session_boost": round(session_boost, 6),
         "recency_boost": round(recency_boost, 6),
         "row_ts_ms": int(row_ts_ms),

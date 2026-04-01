@@ -245,89 +245,12 @@ function Ensure-LocalOllamaRuntime {
     [hashtable]$EnvValues
   )
 
-  if (-not (Use-ManagedLocalOllama -EnvValues $EnvValues)) {
-    return [ordered]@{
-      status = 'skipped'
-      reason = 'host_14b_not_managed_by_local_ollama'
-    }
-  }
-
-  $apiBaseUrl = $null
-  $rootBaseUrl = $null
-  $modelId = Get-Host14BModelId -EnvValues $EnvValues
-  $serviceStarted = $false
-  $modelWarmed = $false
-
-  try {
-    $baseUrls = Split-ApiAndRootBaseUrl -BaseUrl (Resolve-Host14BBaseUrl -EnvValues $EnvValues)
-    $apiBaseUrl = [string]$baseUrls.api
-    $rootBaseUrl = [string]$baseUrls.root
-    $result = [ordered]@{
-      status = 'ready'
-      provider = 'ollama'
-      model_id = $modelId
-      api_base_url = $apiBaseUrl
-      root_base_url = $rootBaseUrl
-      service_started = $serviceStarted
-      model_warmed = $modelWarmed
-    }
-
-    $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
-    if (-not $ollamaCmd) {
-      throw 'ollama command not found while local host 14B runtime is configured'
-    }
-
-    if (-not (Test-OllamaReady -RootBaseUrl $rootBaseUrl)) {
-      $ollamaProc = Get-Process -Name ollama -ErrorAction SilentlyContinue | Select-Object -First 1
-      if (-not $ollamaProc) {
-        Start-Process -FilePath $ollamaCmd.Source -ArgumentList @('serve') -WorkingDirectory $RepoRoot -WindowStyle Hidden | Out-Null
-        $serviceStarted = $true
-        $result.service_started = $true
-      }
-    }
-
-    if (-not (Wait-OllamaReady -RootBaseUrl $rootBaseUrl -TimeoutSec 45)) {
-      throw 'local ollama service did not become ready within 45 seconds'
-    }
-
-    if (-not (Test-OllamaModelPresent -RootBaseUrl $rootBaseUrl -ModelName $modelId)) {
-      $autoPullValue = $(if ($EnvValues.ContainsKey('HOST_OLLAMA_AUTO_PULL')) { $EnvValues['HOST_OLLAMA_AUTO_PULL'] } else { $env:HOST_OLLAMA_AUTO_PULL })
-      $autoPullEnabled = Parse-BoolValue -Value $autoPullValue -Default $false
-      if (-not $autoPullEnabled) {
-        throw "local ollama model missing: $modelId (set HOST_OLLAMA_AUTO_PULL=true to auto-pull)"
-      }
-      & $ollamaCmd.Source pull $modelId
-      if ($LASTEXITCODE -ne 0 -or -not (Test-OllamaModelPresent -RootBaseUrl $rootBaseUrl -ModelName $modelId)) {
-        throw "local ollama model pull failed: $modelId"
-      }
-      $result.status = 'pulled'
-    }
-
-    $warmupBody = @{
-      model = $modelId
-      messages = @(@{ role = 'user'; content = 'host bootstrap warmup' })
-      stream = $false
-      max_tokens = 8
-    } | ConvertTo-Json -Depth 6 -Compress
-
-    Invoke-WebRequest -UseBasicParsing -Method Post -Uri ($apiBaseUrl.TrimEnd('/') + '/chat/completions') -ContentType 'application/json' -Body $warmupBody -TimeoutSec 120 | Out-Null
-    $modelWarmed = $true
-    $result.model_warmed = $true
-    if ($result.status -eq 'ready') {
-      $result.status = 'warmed'
-    }
-    return $result
-  } catch {
-    return [ordered]@{
-      status = 'degraded'
-      provider = 'ollama'
-      model_id = $modelId
-      api_base_url = $apiBaseUrl
-      root_base_url = $rootBaseUrl
-      service_started = $serviceStarted
-      model_warmed = $modelWarmed
-      detail = [string]$_.Exception.Message
-    }
+  return [ordered]@{
+    status = 'disabled'
+    provider = 'ollama'
+    reason = 'local_ollama_autostart_removed'
+    service_started = $false
+    model_warmed = $false
   }
 }
 

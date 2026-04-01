@@ -8,6 +8,7 @@ import math
 import json
 import os
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from host_brain.core.errors import (
     CHROMA_COLLECTION_MISSING,
@@ -158,6 +159,161 @@ class InMemoryChromaClient:
                 }
             )
         return results
+
+    def validate_collection(self, collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
+        collection_name = str(collection or "").strip()
+        if not collection_name:
+            return False, CHROMA_COLLECTION_MISSING
+        expected_dim = self._collection_profiles.get(collection_name)
+        if expected_dim is None:
+            return False, CHROMA_COLLECTION_MISSING
+        if vector_dim is not None and int(vector_dim) != int(expected_dim):
+            return False, CHROMA_VECTOR_DIM_MISMATCH
+        return True, None
+
+    def _validate_collection_embedding(self, collection: str, embedding: list[float] | tuple[float, ...]) -> None:
+        ok, reason = self.validate_collection(collection, vector_dim=len(embedding))
+        if ok:
+            return
+        if reason == CHROMA_COLLECTION_MISSING:
+            raise ValueError(CHROMA_COLLECTION_MISSING)
+        raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
+
+
+class PersistentChromaClient:
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        tenant: str,
+        database: str,
+        collection_profiles: Mapping[str, int] | None = None,
+        default_collection: str = DEFAULT_COLLECTION,
+    ) -> None:
+        parsed = urlparse(str(endpoint).strip() or "http://127.0.0.1:8000")
+        self._host = parsed.hostname or "127.0.0.1"
+        self._port = int(parsed.port or 8000)
+        self._ssl = parsed.scheme.lower() == "https"
+        self._tenant = str(tenant or "default_tenant").strip() or "default_tenant"
+        self._database = str(database or "default_database").strip() or "default_database"
+        self._default_collection = str(default_collection or DEFAULT_COLLECTION)
+        self._collection_profiles: dict[str, int] = dict(collection_profiles or {self._default_collection: 16})
+        try:
+            import chromadb
+        except Exception as exc:  # pragma: no cover - runtime dependency
+            raise RuntimeError(f"chromadb package unavailable: {exc}") from exc
+        try:
+            self._client = chromadb.HttpClient(
+                host=self._host,
+                port=self._port,
+                ssl=self._ssl,
+                tenant=self._tenant,
+                database=self._database,
+            )
+        except TypeError:
+            self._client = chromadb.HttpClient(
+                host=self._host,
+                port=self._port,
+                ssl=self._ssl,
+            )
+
+    @classmethod
+    def from_runtime_config(cls, config: ChromaRuntimeConfig) -> "PersistentChromaClient":
+        return cls(
+            endpoint=config.endpoint,
+            tenant=config.tenant,
+            database=config.database,
+            collection_profiles=config.collection_profiles,
+            default_collection=config.default_collection,
+        )
+
+    def upsert(
+        self,
+        *,
+        memory_id: str,
+        text: str,
+        embedding: list[float],
+        metadata: dict[str, Any] | None = None,
+        collection: str | None = None,
+    ) -> None:
+        collection_name = str(collection or self._default_collection)
+        self._validate_collection_embedding(collection_name, embedding)
+        coll = self._client.get_or_create_collection(name=collection_name)
+        coll.upsert(
+            ids=[str(memory_id)],
+            documents=[str(text)],
+            embeddings=[list(float(v) for v in embedding)],
+            metadatas=[_sanitize_chroma_metadata(metadata or {})],
+        )
+
+    def delete(self, memory_id: str, *, collection: str | None = None) -> None:
+        collection_name = str(collection or self._default_collection)
+        coll = self._client.get_or_create_collection(name=collection_name)
+        coll.delete(ids=[str(memory_id)])
+
+    def get(self, memory_id: str, *, collection: str | None = None) -> ChromaEntry | None:
+        collection_name = str(collection or self._default_collection)
+        coll = self._client.get_or_create_collection(name=collection_name)
+        result = coll.get(ids=[str(memory_id)], include=["documents", "embeddings", "metadatas"])
+        ids = list(result.get("ids") or [])
+        if not ids:
+            return None
+        documents = list(result.get("documents") or [])
+        embeddings = list(result.get("embeddings") or [])
+        metadatas = list(result.get("metadatas") or [])
+        text = str(documents[0]) if documents else ""
+        raw_embedding = list(embeddings[0] or []) if embeddings else []
+        metadata = dict(metadatas[0] or {}) if metadatas and isinstance(metadatas[0], Mapping) else {}
+        return ChromaEntry(
+            memory_id=str(ids[0]),
+            text=text,
+            embedding=tuple(float(v) for v in raw_embedding),
+            metadata=metadata,
+            collection=collection_name,
+        )
+
+    def search(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int = 5,
+        collection: str | None = None,
+    ) -> list[dict[str, Any]]:
+        collection_name = str(collection or self._default_collection)
+        self._validate_collection_embedding(collection_name, query_embedding)
+        coll = self._client.get_or_create_collection(name=collection_name)
+        result = coll.query(
+            query_embeddings=[list(float(v) for v in query_embedding)],
+            n_results=max(1, int(top_k)),
+            include=["documents", "metadatas", "distances"],
+        )
+
+        ids = ((result.get("ids") or [[]])[0])
+        docs = ((result.get("documents") or [[]])[0])
+        metas = ((result.get("metadatas") or [[]])[0])
+        distances = ((result.get("distances") or [[]])[0])
+
+        rows: list[dict[str, Any]] = []
+        for idx, row_id in enumerate(ids):
+            text = str(docs[idx]) if idx < len(docs) and docs[idx] is not None else ""
+            metadata = dict(metas[idx] or {}) if idx < len(metas) and isinstance(metas[idx], Mapping) else {}
+            distance = 1.0
+            if idx < len(distances) and distances[idx] is not None:
+                try:
+                    distance = float(distances[idx])
+                except (TypeError, ValueError):
+                    distance = 1.0
+            rows.append(
+                {
+                    "memory_id": str(row_id),
+                    "text": text,
+                    "score": _distance_to_score(distance),
+                    "metadata": metadata,
+                    "collection": collection_name,
+                }
+            )
+        return rows
 
     def validate_collection(self, collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
         collection_name = str(collection or "").strip()
@@ -441,3 +597,26 @@ def _parse_bool(value: Any, *, default: bool) -> bool:
 
 def _row_key(collection: str, memory_id: str) -> str:
     return f"{str(collection).strip()}::{str(memory_id).strip()}"
+
+
+def _distance_to_score(distance: float) -> float:
+    value = max(0.0, float(distance))
+    return round(max(0.0, min(1.0, 1.0 - value)), 6)
+
+
+def _sanitize_chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, raw_value in dict(metadata or {}).items():
+        normalized_key = str(key or "").strip()
+        if not normalized_key:
+            continue
+        if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+            sanitized[normalized_key] = raw_value
+            continue
+        if isinstance(raw_value, tuple):
+            raw_value = list(raw_value)
+        if isinstance(raw_value, (list, dict)):
+            sanitized[normalized_key] = json.dumps(raw_value, ensure_ascii=False, sort_keys=True)
+            continue
+        sanitized[normalized_key] = str(raw_value)
+    return sanitized

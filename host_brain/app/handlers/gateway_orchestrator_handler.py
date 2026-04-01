@@ -466,6 +466,7 @@ async def _run_post_generation_tasks(
                 persist_chat_episodic_memory,
                 request_id=request_id,
                 intent_id=str(intent_id or request_id),
+                person_id=getattr(request_body, "person_id", None),
                 session_id=session_id,
                 user_message=user_message,
                 assistant_reply=narrative,
@@ -820,6 +821,7 @@ async def gateway_orchestrator_sse_generator(
     # ── 3e. 构建完整 runtime_input + prompt（复用 SCENE_CHAT 的完整管线）──
     runtime_input = build_chat_runtime_input(
         request_id=request_id,
+        person_id=str(getattr(request_body, "person_id", "") or "").strip(),
         session_id=session_id,
         thread_id=thread_id,
         user_message=resolved_message,

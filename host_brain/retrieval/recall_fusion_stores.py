@@ -50,6 +50,7 @@ def search_route(
     query: str,
     query_embedding: list[float],
     render_target_lang: str | None = None,
+    person_id: str | None = None,
     session_id: str | None = None,
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -67,6 +68,7 @@ def search_route(
             self,
             query=query,
             top_k=int(route.top_k),
+            person_id=person_id,
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
@@ -156,6 +158,7 @@ def search_sqlite_ledger(
     *,
     query: str,
     top_k: int,
+    person_id: str | None = None,
     session_id: str | None = None,
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -164,6 +167,7 @@ def search_sqlite_ledger(
     from host_brain.retrieval.recall_fusion_utils import (
         _apply_sqlite_ledger_boost,
         _coerce_non_negative_int,
+        _extract_person_id_from_refs,
         _normalize_recall_refs,
         _extract_session_id_from_refs,
         _sqlite_candidate_sort_key,
@@ -174,6 +178,7 @@ def search_sqlite_ledger(
     if self.ledger is None:
         raise RuntimeError("sqlite ledger unavailable")
     current_ts = int(now_ts_ms if now_ts_ms is not None else now_ms())
+    normalized_person_id = str(person_id or "").strip()
     normalized_session_id = str(session_id or "").strip()
     scored: list[tuple[float, dict[str, Any]]] = []
 
@@ -197,6 +202,8 @@ def search_sqlite_ledger(
             base_score=score,
             row_ts_ms=row_ts,
             now_ts_ms=current_ts,
+            row_person_id=(str(normalized.get("person_id") or "").strip() if isinstance(normalized, Mapping) else None),
+            target_person_id=normalized_person_id,
             row_session_id=row_session_id,
             target_session_id=normalized_session_id,
         )
@@ -217,6 +224,7 @@ def search_sqlite_ledger(
                     "store_id": STORE_SQLITE_LEDGER,
                     "request_id": request_id,
                     "intent_id": intent_id,
+                    "person_id": (str(normalized.get("person_id") or "").strip() if isinstance(normalized, Mapping) else None),
                     "session_id": row_session_id,
                     "event_id": (str(row.get("event_id") or "").strip() or None),
                     "base_score": score,
@@ -245,6 +253,7 @@ def search_sqlite_ledger(
             row.get("evidence_refs"),
             fallback=(f"memory://episodic/{memory_id}" if memory_id else None),
         )
+        row_person_id = _extract_person_id_from_refs(evidence_refs)
         row_session_id = _extract_session_id_from_refs(evidence_refs)
         row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
 
@@ -283,6 +292,8 @@ def search_sqlite_ledger(
             base_score=score,
             row_ts_ms=row_ts,
             now_ts_ms=current_ts,
+            row_person_id=row_person_id,
+            target_person_id=normalized_person_id,
             row_session_id=row_session_id,
             target_session_id=normalized_session_id,
         )
@@ -296,6 +307,7 @@ def search_sqlite_ledger(
                     "store_id": STORE_SQLITE_LEDGER,
                     "request_id": request_id,
                     "intent_id": intent_id,
+                    "person_id": row_person_id,
                     "session_id": row_session_id,
                     "op_kind": op_kind,
                     "status": status or None,

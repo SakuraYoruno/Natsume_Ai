@@ -85,7 +85,7 @@ def test_probe_ollama_local_reports_installed_but_not_loaded_as_degraded() -> No
     assert "installed but not loaded" in result["detail"]
 
 
-def test_keepalive_ollama_local_model_posts_generate_with_keep_alive() -> None:
+def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
     from host_brain.observability import service_health_heartbeat as heartbeat
 
     client = _MockClient()
@@ -103,13 +103,12 @@ def test_keepalive_ollama_local_model_posts_generate_with_keep_alive() -> None:
     ):
         result = asyncio.run(heartbeat.keep_local_ollama_models_alive_once())
 
-    assert "host_local_14b" in result
-    assert result["host_local_14b"]["success"] is True
-    assert client.posts, "keepalive should issue one POST request"
-    url, payload, timeout = client.posts[0]
-    assert url.endswith("/api/generate")
-    assert payload is not None
-    assert payload["model"] == "qwen3:14b"
-    assert payload["keep_alive"] == "720h"
-    assert payload["stream"] is False
-    assert timeout == 9.0
+    assert result == {}
+    assert client.posts == []
+
+
+def test_local_ollama_keepalive_flag_is_forced_off() -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    with patch.dict("os.environ", {"HOST_LOCAL_14B_KEEPALIVE_ENABLED": "true"}, clear=False):
+        assert heartbeat._is_local_ollama_keepalive_enabled() is False

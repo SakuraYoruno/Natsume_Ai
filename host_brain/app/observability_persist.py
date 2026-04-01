@@ -143,6 +143,7 @@ def persist_chat_episodic_memory(
     *,
     request_id: str,
     intent_id: str | None,
+    person_id: str | None,
     session_id: str,
     user_message: str,
     assistant_reply: str,
@@ -260,6 +261,7 @@ def persist_chat_episodic_memory(
 
     evidence_refs = [
         f"chat://request/{request_id}",
+        f"chat://person/{str(person_id or '').strip() or 'default'}",
         f"chat://session/{session_id}",
         f"chat://intent/{str(intent_id or request_id)}",
     ]

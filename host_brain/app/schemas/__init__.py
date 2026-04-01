@@ -59,6 +59,7 @@ class ObservabilityResponse(BaseModel):
 class ChatRequest(BaseModel):
     """POST /v1/chat request body."""
     message: str = Field(..., description="User message")
+    person_id: Optional[str] = Field(None, description="Optional canonical person id")
     session_id: Optional[str] = Field(None, description="Optional session id")
     thread_id: Optional[str] = Field(None, description="Optional thread id")
     intent_draft: Optional[Dict[str, Any]] = Field(None, description="Optional intent draft")

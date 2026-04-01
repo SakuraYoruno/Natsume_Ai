@@ -183,7 +183,18 @@ def get_ledger() -> SQLiteLedger:
 def get_episodic_store() -> EpisodicStore:
     global _episodic_store
     if _episodic_store is None:
-        _episodic_store = EpisodicStore(ledger=get_ledger())
+        from host_brain.memory.chroma_client import (  # noqa: PLC0415
+            PersistentChromaClient,
+            load_chroma_runtime_config,
+        )
+
+        cfg_result = load_chroma_runtime_config(env=os.environ)
+        if not cfg_result.success or cfg_result.config is None:
+            raise RuntimeError(f"episodic chroma runtime config invalid: {cfg_result.as_dict()}")
+        _episodic_store = EpisodicStore(
+            ledger=get_ledger(),
+            chroma_client=PersistentChromaClient.from_runtime_config(cfg_result.config),
+        )
     return _episodic_store
 
 
@@ -993,6 +1004,30 @@ def _resolve_edge_probe_timeout_s() -> float:
     return max(1.0, min(float(timeout_ms) / 1000.0, 10.0))
 
 
+def _is_edge_rpc_enabled() -> bool:
+    raw = str(os.environ.get("HOST_ENABLE_EDGE_RPC") or "true").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _build_edge_rpc_skip_detail() -> str:
+    gateway_url = str(
+        os.environ.get("HOST_EDGE_GATEWAY_BASE_URL")
+        or os.environ.get("HOST_GATEWAY_BASE_URL")
+        or ""
+    ).strip()
+    gateway_host = (
+        str(
+            os.environ.get("EDGE_GATEWAY_HOST")
+            or os.environ.get("EDGE_RPC_HOST")
+            or "127.0.0.1"
+        ).strip()
+        or "127.0.0.1"
+    )
+    gateway_port = str(os.environ.get("EDGE_GATEWAY_PORT") or "19000").strip() or "19000"
+    target = gateway_url or f"http://{gateway_host}:{gateway_port}"
+    return f"edge rpc skipped: gateway-only mode ({target})"
+
+
 async def probe_edge_rpc_health() -> dict:
     """探测 Edge RPC 服务健康状态（GET /v1/edge/health）。
 
@@ -1002,6 +1037,15 @@ async def probe_edge_rpc_health() -> dict:
     import time
 
     t0 = int(time.time() * 1000)
+    if not _is_edge_rpc_enabled():
+        return {
+            "available": True,
+            "status": "SKIPPED",
+            "detail": _build_edge_rpc_skip_detail(),
+            "latency_ms": 0,
+            "base_url": "",
+            "event": {},
+        }
     base_urls = get_edge_base_urls()
     base_url = base_urls[0] if base_urls else get_edge_base_url()
     try:
@@ -1066,12 +1110,24 @@ def build_edge_dependency_probe_statuses(
         return {}
 
     available = bool(probe.get("available", False))
+    status = str(probe.get("status") or "").strip().upper()
     detail = str(probe.get("detail") or "").strip()
     latency_raw = probe.get("latency_ms")
     try:
         latency_ms = max(0, int(latency_raw))
     except (TypeError, ValueError):
         latency_ms = 0
+
+    if status == "SKIPPED":
+        if not detail:
+            detail = _build_edge_rpc_skip_detail()
+        return {
+            service_id: {
+                "available": True,
+                "detail": detail,
+            }
+            for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS
+        }
 
     if not detail:
         detail = "edge rpc reachable" if available else "edge rpc unreachable"

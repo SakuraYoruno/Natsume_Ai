@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -40,8 +41,8 @@ class InputPayload(BaseModel):
     """Ingress payload reported by Edge."""
 
     source: str = Field(..., description="Input source: ASR or GATEWAY")
+    person_id: str | None = Field(None, description="Optional canonical person id")
 
-    # ── ASR 专属字段 ──
     session_id: str | None = Field(None, description="[ASR] Session ID")
     text: str | None = Field(None, description="[ASR] Transcript")
     confidence: float | None = Field(None, description="[ASR] Confidence 0~1")
@@ -50,7 +51,6 @@ class InputPayload(BaseModel):
     alternates: list[dict[str, Any]] | None = Field(None, description="[ASR] N-best candidates")
     evidence_ref: str | None = Field(None, description="[ASR] Evidence ref")
 
-    # ── GATEWAY 专属字段（来自 UnifiedMessage.as_report_payload()）──
     platform: str | None = Field(None, description="[GATEWAY] Platform: wechat/qq/feishu/wecom")
     msg_id: str | None = Field(None, description="[GATEWAY] Message ID")
     from_id: str | None = Field(None, description="[GATEWAY] Sender ID")
@@ -157,12 +157,21 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             ts_ms=ts_ms,
         )
 
+    payload = body.model_dump(exclude_none=True)
     try:
-        # 通知 ActivityMonitor 有用户互动（触发 sleep→normal 唤醒 + 空闲计时器重置）
+        from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
         from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415
+
+        payload["person_id"] = resolve_person_id(
+            str(body.person_id or "").strip() or None,
+            session_id=session_id,
+            platform=str(body.platform or "").strip() or None,
+            from_id=str(body.from_id or "").strip() or None,
+            conversation_id=str(body.conversation_id or "").strip() or None,
+        )
         notify_user_interaction()
     except Exception:
-        pass  # 降级：通知失败不影响消息处理
+        pass
 
     try:
         await _dispatch_to_graph(
@@ -170,7 +179,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             session_id=session_id,
             source=source,
             text=text,
-            payload=body.model_dump(exclude_none=True),
+            payload=payload,
             ts_ms=ts_ms,
         )
         return InputResponse(
@@ -224,6 +233,12 @@ def _log_input_event(
             "phase": phase,
             "latency_ms": latency_ms,
         }
+        input_preview = _build_input_preview(input_payload, source=source)
+        if input_preview:
+            payload["input_preview"] = input_preview
+        person_id = str((input_payload or {}).get("person_id") or "").strip()
+        if person_id:
+            payload["person_id"] = person_id
         if source == "GATEWAY":
             gateway_fields = (
                 "platform",
@@ -236,6 +251,11 @@ def _log_input_event(
                 "media_url",
                 "reply_to_msg_id",
                 "is_group",
+                "decision",
+                "gateway_status",
+                "gateway_latency_ms",
+                "reply_text_len",
+                "reply_preview",
             )
             for field in gateway_fields:
                 value = (input_payload or {}).get(field)
@@ -260,17 +280,194 @@ def _log_input_event(
 
 
 def _log_dispatch_task_exception(task: asyncio.Task) -> None:
-    """fire-and-forget task 异常日志回调——防止 asyncio 静默吞掉异常。"""
+    """Log fire-and-forget task exceptions."""
+
     try:
         exc = task.exception()
     except asyncio.CancelledError:
         return
     if exc is not None:
-        _logger.error(
-            "input_routes: dispatch task failed silently: %s",
-            exc,
-            exc_info=exc,
+        _logger.error("input_routes: dispatch task failed silently: %s", exc, exc_info=exc)
+
+
+class _NoopMetrics:
+    """Minimal metrics shim for top_agent direct invocation."""
+
+    def __getattr__(self, _name: str):
+        def _noop(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        return _noop
+
+
+def _build_input_preview(payload: dict[str, Any] | None, *, source: str, limit: int = 120) -> str | None:
+    payload_dict = dict(payload or {})
+    preview_source = None
+    if str(source or "").upper() == "GATEWAY":
+        preview_source = payload_dict.get("content")
+    elif str(source or "").upper() == "ASR":
+        preview_source = payload_dict.get("text")
+    preview = _build_reply_preview(str(preview_source or ""), limit=limit).strip()
+    return preview or None
+
+
+def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
+    line = str(raw_event or "").strip()
+    if not line.startswith("data:"):
+        return None
+    payload = line.removeprefix("data:").strip()
+    if not payload:
+        return None
+    try:
+        obj = json.loads(payload)
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _build_gateway_reply_text(
+    *,
+    decision: str,
+    narrative: str,
+    reason_code: str | None,
+) -> str:
+    reply_text = str(narrative or "").strip()
+    if reply_text:
+        return reply_text
+    if str(decision or "").upper() != "APPROVE":
+        return "抱歉，刚刚处理失败了，请稍后再试一次。"
+    _ = reason_code
+    return "收到。"
+
+
+def _build_reply_preview(text: str, *, limit: int = 120) -> str:
+    normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: max(0, limit - 3)]}..."
+
+
+async def _run_top_agent_pipeline(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+) -> dict[str, Any]:
+    from host_brain.app.emotion_context import (  # noqa: PLC0415
+        build_chat_emotion_snapshot,
+        resolve_chat_emotion_context,
+    )
+    from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+    from host_brain.app.schemas import ChatRequest  # noqa: PLC0415
+    from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+
+    reply_channel = str(payload.get("platform") or "").strip() or None
+    reply_target = str(payload.get("conversation_id") or "").strip() or None
+    person_id = resolve_person_id(
+        str(payload.get("person_id") or "").strip() or None,
+        session_id=session_id,
+        platform=reply_channel,
+        from_id=str(payload.get("from_id") or "").strip() or None,
+        conversation_id=reply_target,
+    )
+    request_body = ChatRequest(
+        message=text,
+        person_id=person_id,
+        session_id=session_id,
+        input_source=source,
+        reply_channel=reply_channel,
+        reply_target=reply_target,
+        suppress_edge_tts=(True if source == "GATEWAY" else None),
+        suppress_edge_vts=(True if source == "GATEWAY" else None),
+    )
+    emotion_context = resolve_chat_emotion_context(request_body=request_body)
+    emotion_snapshot = build_chat_emotion_snapshot(
+        emotion_context=emotion_context,
+        source=f"input_routes.{str(source or '').lower()}",
+        ts_ms=ts_ms,
+    )
+    intent_draft: dict[str, Any] = {
+        "id": f"intent::{request_id}",
+        "action": "narrative_only",
+        "source": "input_routes",
+        "input_source": source,
+    }
+    governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
+
+    commit_event: dict[str, Any] | None = None
+    async for event in top_agent_sse_generator(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        governor_result=governor_result,
+        intent_id=request_id,
+        metrics=_NoopMetrics(),
+    ):
+        parsed = _parse_sse_data_event(event)
+        if parsed and str(parsed.get("phase") or "").upper() == "COMMIT":
+            commit_event = parsed
+
+    if commit_event is None:
+        raise RuntimeError("top_agent_commit_missing")
+
+    return {
+        "decision": str(commit_event.get("decision") or "").strip().upper() or "REJECT",
+        "reason_code": str(commit_event.get("reason_code") or "").strip() or None,
+        "narrative": str(commit_event.get("narrative") or "").strip(),
+        "commit_event": commit_event,
+    }
+
+
+async def _deliver_gateway_reply(
+    *,
+    request_id: str,
+    payload: dict[str, Any],
+    decision: str,
+    reason_code: str | None,
+    narrative: str,
+) -> dict[str, Any]:
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        raise RuntimeError("gateway_reply_missing_platform_or_conversation")
+
+    reply_text = _build_gateway_reply_text(
+        decision=decision,
+        narrative=narrative,
+        reason_code=reason_code,
+    )
+    preview = _build_reply_preview(reply_text, limit=120)
+    result = await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id,
+        content=reply_text,
+        msg_type="text",
+        request_id=request_id,
+        wait_result=True,
+        timeout_ms=12000,
+    )
+    if not bool(getattr(result, "success", False)):
+        status = str(getattr(result, "status", "FAILED"))
+        rc = str(getattr(result, "reason_code", "") or "")
+        detail = str(getattr(result, "detail", "") or "")
+        raise RuntimeError(
+            f"gateway_reply_failed status={status} reason_code={rc or 'UNKNOWN'} detail={detail[:180]}"
         )
+    return {
+        "status": str(getattr(result, "status", "OK")),
+        "latency_ms": int(getattr(result, "latency_ms", 0)),
+        "reply_text_len": len(reply_text),
+        "reply_preview": preview,
+    }
 
 
 async def _dispatch_to_graph(
@@ -325,11 +522,8 @@ async def _dispatch_to_graph_worker(
     dispatch_mode: str,
     run_in_thread: bool,
 ) -> None:
-    """Phase XIV v4：MainChain 已废弃。
+    """Run top_agent pipeline and optionally deliver Gateway reply."""
 
-    input_routes 的 dispatch 链路尚未迁移到 top_agent，
-    当前仅记录日志标记 NOT_WIRED，待后续接入 top_agent 后恢复。
-    """
     dispatch_ts = int(time.time() * 1000)
     _log_input_event(
         ledger=ledger,
@@ -342,21 +536,90 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
-    _log_input_event(
-        ledger=ledger,
-        request_id=request_id,
-        session_id=session_id,
-        source=source,
-        input_payload=payload,
-        phase="NOT_WIRED",
-        status="DEGRADED",
-        reason_code="INPUT_MAIN_CHAIN_REMOVED",
-        detail="MainChain removed in Phase XIV v4; input dispatch pending top_agent migration",
-        ts_ms=int(time.time() * 1000),
-    )
-    _logger.info(
-        "input_routes: MainChain removed, dispatch no-op request_id=%s source=%s text=%.60s",
-        request_id,
-        source,
-        text,
-    )
+    try:
+        pipeline_result = await _run_top_agent_pipeline(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+        )
+        decision = str(pipeline_result.get("decision") or "REJECT").strip().upper()
+        reason_code = str(pipeline_result.get("reason_code") or "").strip() or None
+        narrative = str(pipeline_result.get("narrative") or "").strip()
+
+        gateway_delivery: dict[str, Any] | None = None
+        if source == "GATEWAY":
+            gateway_delivery = await _deliver_gateway_reply(
+                request_id=request_id,
+                payload=payload,
+                decision=decision,
+                reason_code=reason_code,
+                narrative=narrative,
+            )
+
+        complete_ts = int(time.time() * 1000)
+        latency_ms = complete_ts - dispatch_ts
+        completion_status = "OK" if decision == "APPROVE" else "DEGRADED"
+        detail_parts = [
+            f"top_agent decision={decision}",
+            f"mode={dispatch_mode}",
+            f"thread_flag={str(bool(run_in_thread)).lower()}",
+            f"latency_ms={latency_ms}",
+        ]
+        if reason_code:
+            detail_parts.append(f"reason_code={reason_code}")
+        if gateway_delivery is not None:
+            detail_parts.append(f"gateway_status={gateway_delivery.get('status')}")
+            detail_parts.append(f"gateway_latency_ms={gateway_delivery.get('latency_ms')}")
+            detail_parts.append(f"reply_text_len={gateway_delivery.get('reply_text_len')}")
+            detail_parts.append(f"reply_preview={gateway_delivery.get('reply_preview')}")
+
+        completed_payload = dict(payload or {})
+        completed_payload["decision"] = decision
+        if reason_code:
+            completed_payload["reason_code"] = reason_code
+        if gateway_delivery is not None:
+            completed_payload["gateway_status"] = gateway_delivery.get("status")
+            completed_payload["gateway_latency_ms"] = gateway_delivery.get("latency_ms")
+            completed_payload["reply_text_len"] = gateway_delivery.get("reply_text_len")
+            completed_payload["reply_preview"] = gateway_delivery.get("reply_preview")
+
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=completed_payload,
+            phase="COMPLETED",
+            status=completion_status,
+            detail=" ".join(detail_parts),
+            latency_ms=latency_ms,
+            ts_ms=complete_ts,
+        )
+        _logger.info(
+            "input_routes: dispatch completed request_id=%s source=%s decision=%s latency_ms=%d mode=%s",
+            request_id,
+            source,
+            decision,
+            latency_ms,
+            dispatch_mode,
+        )
+    except Exception as exc:
+        fail_ts = int(time.time() * 1000)
+        latency_ms = fail_ts - dispatch_ts
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="FAILED",
+            status="FAILED",
+            reason_code="INPUT_GRAPH_ERROR",
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            latency_ms=latency_ms,
+            ts_ms=fail_ts,
+        )
+        _logger.error("input_routes: dispatch failed request_id=%s: %s", request_id, exc)

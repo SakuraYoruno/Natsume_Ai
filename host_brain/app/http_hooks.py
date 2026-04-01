@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Callable
@@ -13,6 +14,75 @@ from fastapi.responses import JSONResponse
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.app.schemas import ErrorResponse
 from host_brain.core.ids import new_request_id
+
+
+def _startup_status_is_degraded(value: Any) -> bool:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return False
+    return normalized.startswith("DEGRADED") or normalized.startswith("FAIL")
+
+
+def _build_audit_retention_task_config() -> Any:
+    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+        SchedulerTaskConfig,
+        TaskPriority,
+        TriggerMode,
+    )
+
+    return SchedulerTaskConfig(
+        task_id="audit_retention_daily",
+        trigger_mode=TriggerMode.CRON,
+        trigger_config={"hour": 2, "minute": 0},
+        intent_template={
+            "skill_name": "audit_retention",
+            "args": {},
+            "proposer_node_id": "scheduler",
+        },
+        priority=TaskPriority.LOW,
+        mode_allowlist=["normal", "sleep"],
+        enabled=True,
+        description="审计数据保留策略：每日 02:00 清理过期审计数据",
+    )
+
+
+def _sync_world_canon_index_on_startup(
+    *,
+    ledger: Any,
+    logger: Any,
+    world_root: str | None = None,
+    ts_ms: int | None = None,
+) -> str:
+    resolved_world_root = str(
+        world_root or os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world"
+    ).strip() or "host_brain/canon/world"
+    sync_ts = int(ts_ms if ts_ms is not None else time.time() * 1000)
+
+    try:
+        from host_brain.memory.canon_sync import sync_world_canon_index  # noqa: PLC0415
+
+        records = sync_world_canon_index(
+            world_root=resolved_world_root,
+            ledger=ledger,
+            ts_ms=sync_ts,
+        )
+        changed_count = sum(1 for record in records if bool(getattr(record, "changed", False)))
+        logger.info(
+            "World canon startup sync completed",
+            extra={
+                "world_root": resolved_world_root,
+                "synced_count": len(records),
+                "changed_count": changed_count,
+            },
+        )
+        return f"OK (synced={len(records)}, changed={changed_count})"
+    except Exception as exc:
+        logger.warning(
+            "World canon startup sync degraded: %s",
+            exc,
+            extra={"world_root": resolved_world_root, "error": str(exc)},
+        )
+        return f"DEGRADED: {exc}"
 
 
 @asynccontextmanager
@@ -34,6 +104,11 @@ async def runtime_lifespan(
             get_semantic_recaller,
         )
         new_module_statuses: dict[str, str] = {}
+        _retention_policy: Any | None = None
+        new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
+            ledger=ledger,
+            logger=logger,
+        )
         for name, factory in [
             ("recall_pack_builder", get_recall_pack_builder),
             ("memory_guard", get_memory_guard),
@@ -143,6 +218,8 @@ async def runtime_lifespan(
             logger.warning("StateArbiter 状态源注册失败（降级）: %s", _sa_exc)
             new_module_statuses["state_arbiter_sources"] = f"DEGRADED: {_sa_exc}"
 
+        _edge_health: dict[str, Any] | None = None
+
         # [P1] Edge RPC 健康探测：启动时检查 Edge 是否可达
         try:
             from host_brain.app.dependencies import (  # noqa: PLC0415
@@ -151,18 +228,19 @@ async def runtime_lifespan(
             )
             _edge_health = await probe_edge_rpc_health()
             _edge_available = bool(_edge_health.get("available", False))
-            new_module_statuses["edge_rpc"] = (
-                f"OK (latency={_edge_health.get('latency_ms', 0)}ms)"
-                if _edge_available
-                else f"DEGRADED: {_edge_health.get('detail', 'unreachable')}"
-            )
-            if _edge_available:
+            _edge_status = str(_edge_health.get("status") or "").strip().upper()
+            if _edge_status == "SKIPPED":
+                new_module_statuses["edge_rpc"] = f"SKIPPED: {_edge_health.get('detail', 'gateway-only mode')}"
+                logger.info("Edge RPC 启动探针已跳过: %s", _edge_health.get("detail", ""))
+            elif _edge_available:
+                new_module_statuses["edge_rpc"] = f"OK (latency={_edge_health.get('latency_ms', 0)}ms)"
                 logger.info(
                     "Edge RPC 可达: %s (latency=%dms)",
                     _edge_health.get("base_url", ""),
                     _edge_health.get("latency_ms", 0),
                 )
             else:
+                new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_health.get('detail', 'unreachable')}"
                 logger.warning(
                     "⚠️ Edge RPC 不可达（降级模式）: %s",
                     _edge_health.get("detail", ""),
@@ -236,34 +314,13 @@ async def runtime_lifespan(
         # [Ref #34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
         try:
             from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
-            from host_brain.scheduler.task_registry import SchedulerTaskRegistry, SchedulerTaskConfig  # noqa: PLC0415
+            from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
 
             _retention_policy = RetentionPolicy()
             _retention_registry = SchedulerTaskRegistry.get_instance()
-
-            async def _run_audit_retention_task() -> dict:
-                """AuditRetention 调度任务执行体。"""
-                import time as _time  # noqa: PLC0415
-                from host_brain.audit.retention import run_retention_policy  # noqa: PLC0415
-                from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
-                _req_id = _new_id()
-                _result = run_retention_policy(
-                    ledger=get_ledger(),
-                    policy=_retention_policy,
-                    request_id=_req_id,
-                    now_ts_ms=int(_time.time() * 1000),
-                )
-                return _result.as_dict()
-
-            _retention_task = SchedulerTaskConfig(
-                task_id="audit_retention_daily",
-                display_name="审计数据保留策略（每日清理）",
-                trigger_mode="cron",
-                trigger_config={"cron": "0 2 * * *"},
-                task_fn=_run_audit_retention_task,
-                enabled=True,
-            )
-            _retention_registry.register(_retention_task)
+            _retention_task = _build_audit_retention_task_config()
+            if _retention_registry.get(_retention_task.task_id) is None:
+                _retention_registry.register(_retention_task)
             new_module_statuses["audit_retention_scheduler"] = (
                 f"OK (task_id={_retention_task.task_id})"
             )
@@ -315,11 +372,38 @@ async def runtime_lifespan(
             from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
 
             def _proactive_intent_dispatcher(system_intent: dict) -> dict:
-                """将 scheduler 生成的 system_intent 路由到 proactive_talk skill。"""
+                """将 scheduler 生成的 system_intent 路由到具体技能。"""
                 import time as _time  # noqa: PLC0415
                 import sqlite3 as _sqlite3  # noqa: PLC0415
 
                 skill_name = system_intent.get("skill_name", "")
+                if skill_name == "audit_retention":
+                    try:
+                        from host_brain.audit.retention import run_retention_policy  # noqa: PLC0415
+                        from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
+
+                        _policy = _retention_policy
+                        if _policy is None:
+                            from host_brain.audit.retention import RetentionPolicy as _RetentionPolicy  # noqa: PLC0415
+
+                            _policy = _RetentionPolicy()
+                        _request_id = str(system_intent.get("request_id") or _new_id())
+                        _result = run_retention_policy(
+                            ledger=get_ledger(),
+                            policy=_policy,
+                            request_id=_request_id,
+                            now_ts_ms=int(_time.time() * 1000),
+                        )
+                        _payload = _result.as_dict()
+                        _payload["status"] = "OK" if _result.success else "FAILED"
+                        return _payload
+                    except Exception as _retention_exc:
+                        logger.warning("audit_retention 调度执行失败: %s", _retention_exc)
+                        return {
+                            "status": "FAILED",
+                            "reason_code": "AUDIT_RETENTION_FAILED",
+                            "detail": str(_retention_exc),
+                        }
                 if skill_name != "proactive_talk":
                     return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
                 args = dict(system_intent.get("args") or {})
@@ -730,7 +814,9 @@ async def runtime_lifespan(
             new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
             logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
 
-        dependency_probes = await probe_edge_rpc_health()
+        dependency_probes = _edge_health
+        if dependency_probes is None:
+            dependency_probes = await probe_edge_rpc_health()
         report = build_startup_report(
             runtime_statuses=new_module_statuses,
             dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -742,7 +828,7 @@ async def runtime_lifespan(
         logger.info("Startup probe completed", extra={"status": report.get("status", "UNKNOWN")})
 
         # 新模块中有降级时，明显提示
-        degraded_modules = [k for k, v in new_module_statuses.items() if v != "OK"]
+        degraded_modules = [k for k, v in new_module_statuses.items() if _startup_status_is_degraded(v)]
         if degraded_modules:
             logger.warning(
                 "⚠️ 以下新模块启动时处于降级状态，请检查配置: %s",
@@ -782,7 +868,7 @@ async def runtime_lifespan(
             # 确保 /obs/sys-mode API 端点和 ActivityMonitor 共享同一实例
             # （避免历史记录/规则开关各自独立的问题）
             try:
-                import host_brain.app.obs_routes as _obs_mod  # noqa: PLC0415
+                import host_brain.app.obs_routes_sysmode as _obs_mod  # noqa: PLC0415
                 with _obs_mod._mode_transition_lock:
                     _obs_mod._mode_transition_service = _mode_service
                 logger.info("ModeTransitionService 已注入 obs_routes（单例共享）")

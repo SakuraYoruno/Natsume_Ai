@@ -91,6 +91,7 @@ def _copy_skill_manifest(skill_manifest: list[dict[str, Any]] | None) -> list[di
 @dataclass(slots=True)
 class ChatRuntimeInput:
     request_id: str
+    person_id: str
     session_id: str
     thread_id: str | None
     user_message: str
@@ -130,6 +131,7 @@ class ChatRuntimeInput:
             "version": CHAT_RUNTIME_INPUT_VERSION,
             "request": {
                 "request_id": self.request_id,
+                "person_id": self.person_id,
                 "session_id": self.session_id,
                 "thread_id": self.thread_id,
                 "user_message": self.user_message,
@@ -157,6 +159,7 @@ class ChatRuntimeInput:
 def build_chat_runtime_input(
     *,
     request_id: str,
+    person_id: str = "",
     session_id: str,
     thread_id: str | None,
     user_message: str,
@@ -184,6 +187,7 @@ def build_chat_runtime_input(
     )
     return ChatRuntimeInput(
         request_id=str(request_id or "").strip(),
+        person_id=str(person_id or "").strip(),
         session_id=str(session_id or "").strip(),
         thread_id=(str(thread_id).strip() if thread_id else None),
         user_message=str(user_message or ""),

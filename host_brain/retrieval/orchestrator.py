@@ -184,6 +184,7 @@ class RetrievalOrchestratorRequest:
     query: str
     session_state: dict[str, Any]
     request_id: str
+    person_id: str | None = None
     session_id: str | None = None
     intent_id: str | None = None
     top_k: int = 8
@@ -251,6 +252,7 @@ class RetrievalOrchestrator:
         normalized_top_k: int,
     ) -> str:
         session_state = dict(request.session_state or {})
+        person_id = str(request.person_id or session_state.get("person_id") or "").strip()
         session_id = str(request.session_id or session_state.get("session_id") or "").strip()
         query_plan_raw = request.query_plan
         if isinstance(query_plan_raw, QueryPlan):
@@ -260,6 +262,7 @@ class RetrievalOrchestrator:
         else:
             query_plan_payload = {}
         payload = {
+            "person_id": person_id,
             "session_id": session_id,
             "query": str(request.query or "").strip(),
             "top_k": int(normalized_top_k),
@@ -329,7 +332,7 @@ class RetrievalOrchestrator:
         summary["cache_hit"] = bool(cache_hit and self._cache_enabled)
         summary["cache_ttl_ms"] = int(self._cache_ttl_ms if self._cache_enabled else 0)
         summary["cache_age_ms"] = max(0, int(cache_age_ms))
-        summary["cache_key_scope"] = "session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan"
+        summary["cache_key_scope"] = "person_id+session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan"
         evidence_items = [
             dict(item) if isinstance(item, Mapping) else item
             for item in list(result.retrieval_evidence_items or [])
@@ -344,7 +347,7 @@ class RetrievalOrchestrator:
             "ttl_ms": int(self._cache_ttl_ms if self._cache_enabled else 0),
             "age_ms": max(0, int(cache_age_ms)),
             "max_entries": int(self._cache_max_entries),
-            "key_scope": "session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan",
+            "key_scope": "person_id+session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan",
         }
         return RetrievalOrchestratorResult(
             success=bool(result.success),
@@ -417,6 +420,7 @@ class RetrievalOrchestrator:
                     query=request.query,
                     session_state=request.session_state,
                     request_id=request.request_id,
+                    person_id=request.person_id,
                     session_id=request.session_id,
                     intent_id=request.intent_id,
                     top_k=request.top_k,
@@ -442,6 +446,7 @@ class RetrievalOrchestrator:
                 request_id=request.request_id,
                 query=request.query,
                 intent_id=request.intent_id,
+                person_id=request.person_id,
                 session_id=request.session_id,
                 top_k=normalized_top_k,
                 ts_ms=request.ts_ms,

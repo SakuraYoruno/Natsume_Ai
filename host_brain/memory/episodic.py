@@ -16,7 +16,7 @@ from host_brain.core.errors import (
     MEMORY_NOT_FOUND,
 )
 from host_brain.core.ids import now_ms
-from host_brain.memory.chroma_client import InMemoryChromaClient, embed_text
+from host_brain.memory.chroma_client import InMemoryChromaClient, PersistentChromaClient, embed_text
 
 _logger = logging.getLogger("Natsume.episodic")
 
@@ -74,7 +74,7 @@ class EpisodicStore:
         self,
         *,
         ledger: SQLiteLedger | None = None,
-        chroma_client: InMemoryChromaClient | None = None,
+        chroma_client: InMemoryChromaClient | PersistentChromaClient | None = None,
     ) -> None:
         self.ledger = ledger or SQLiteLedger()
         self.chroma = chroma_client or InMemoryChromaClient()

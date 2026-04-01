@@ -724,6 +724,7 @@ async def _vision_ui_sse_generator(
             episodic_summary = persist_chat_episodic_memory(
                 request_id=request_id,
                 intent_id=str(intent_id or request_id),
+                person_id=getattr(request_body, "person_id", None),
                 session_id=session_id,
                 user_message=request_body.message,
                 assistant_reply=narrative,

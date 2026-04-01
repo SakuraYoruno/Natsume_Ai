@@ -398,7 +398,7 @@ async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool
 
 
 def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    if not _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=True):
+    if not _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
         return True, "HOST_14B_HEALTHCHECK_DISABLED"
 
     ready_value = os.environ.get("HOST_CHAT_HOST_14B_READY")
@@ -882,7 +882,7 @@ async def _resolve_host_llm_runtime_core(
     host_14b_ready = False
     host_14b_unavailable_reason = "HOST_14B_NOT_EVALUATED"
 
-    host_14b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ENABLED"), default=True)
+    host_14b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ENABLED"), default=False)
     gray_rollout = _evaluate_host_chat_gray_rollout(
         rollout_key=rollout_key,
         scene_type=scene_type,

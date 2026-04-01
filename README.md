@@ -488,7 +488,7 @@ pytest tests/
 .\scripts\runtime\start_host_side.ps1
 ```
 
-若 `.env` 中的 Host 本地 14B 指向本机 Ollama（默认 `http://127.0.0.1:11434/v1`），脚本会尝试拉起 `ollama serve` 并预热 `HOST_CHAT_HOST_14B_MODEL_ID`；若模型缺失且设置 `HOST_OLLAMA_AUTO_PULL=true`，会自动拉取。
+当前启动脚本不再自动拉起 `Ollama`、不再自动预热或拉取本地模型；若仍需使用本地 `host_14b`，请先自行保证对应推理服务已就绪。
 
 默认会自动探测 Neo4j Desktop 目录（`~/.Neo4jDesktop2/Data/dbmss/*`）；也可用 `-Neo4jHome` 手工指定。
 

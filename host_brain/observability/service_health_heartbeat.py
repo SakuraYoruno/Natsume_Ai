@@ -125,7 +125,7 @@ def _get_ollama_base_url() -> str:
 
 
 def _is_local_ollama_keepalive_enabled() -> bool:
-    return _parse_bool_env("HOST_LOCAL_14B_KEEPALIVE_ENABLED", default=False)
+    return False
 
 
 def _get_local_ollama_keepalive_interval_sec() -> float:

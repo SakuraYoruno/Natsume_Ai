@@ -25,6 +25,7 @@ from typing import Any, AsyncGenerator, Dict
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from host_brain.app.dependencies import get_intent_engine
+from host_brain.bond.user_identity import resolve_person_id
 from host_brain.app.emotion_context import (
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
@@ -68,6 +69,12 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     ts_ms = int(time.time() * 1000)
     session_id = request_body.session_id or f"session::{request_id}"
+    request_body.person_id = resolve_person_id(
+        getattr(request_body, "person_id", None),
+        session_id=session_id,
+        platform=getattr(request_body, "reply_channel", None),
+        conversation_id=getattr(request_body, "reply_target", None),
+    )
 
     # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
     _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
@@ -107,6 +114,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
             "ts_ms": ts_ms,
             "session_id": session_id,
             "seq": _intent_seq,
+            "person_id": request_body.person_id,
             "type": "query",
             "action": _draft_action,
             "target": "host",

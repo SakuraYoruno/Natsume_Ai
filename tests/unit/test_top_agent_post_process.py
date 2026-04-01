@@ -28,10 +28,28 @@ class _FakeBondWriter:
         return None
 
 
+class _FakeLedger:
+    def __init__(self) -> None:
+        self.voice_events: list[dict[str, object]] = []
+
+    def log_governor(self, _row):  # noqa: ANN001
+        return None
+
+    def log_llm_node_call(self, _row):  # noqa: ANN001
+        return None
+
+    def log_graph_run_trace(self, _row):  # noqa: ANN001
+        return None
+
+    def log_voice_event(self, row):  # noqa: ANN001
+        self.voice_events.append(dict(row))
+
+
 class TestTopAgentPostProcess:
     def test_async_post_process_writes_episodic_memory(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
         captured: dict[str, object] = {}
+        ledger = _FakeLedger()
 
         def _fake_persist_chat_episodic_memory(**kwargs):  # noqa: ANN001
             captured.update(kwargs)
@@ -48,7 +66,7 @@ class TestTopAgentPostProcess:
             return_value=SimpleNamespace(),
         ), patch(
             "host_brain.app.dependencies.get_ledger",
-            return_value=SimpleNamespace(),
+            return_value=ledger,
         ), patch(
             "host_brain.app.dependencies.get_bond_stage_engine",
             return_value=SimpleNamespace(),
@@ -68,6 +86,7 @@ class TestTopAgentPostProcess:
             _run(
                 _async_post_process(
                     request_id="req-001",
+                    person_id="person-001",
                     session_id="session-001",
                     user_message="remember me",
                     narrative="hello from natsume",
@@ -81,9 +100,13 @@ class TestTopAgentPostProcess:
         assert captured["request_id"] == "req-001"
         assert captured["assistant_reply"] == "hello from natsume"
         assert captured["user_message"] == "remember me"
+        assert ledger.voice_events
+        assert ledger.voice_events[0]["event_type"] == "INPUT_COMPLETED"
+        assert ledger.voice_events[0]["payload"]["person_id"] == "person-001"
 
     def test_async_post_process_swallow_persistence_failure(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+        ledger = _FakeLedger()
 
         with patch(
             "host_brain.airlock.quarantine.classify_ingress",
@@ -96,7 +119,7 @@ class TestTopAgentPostProcess:
             return_value=SimpleNamespace(),
         ), patch(
             "host_brain.app.dependencies.get_ledger",
-            return_value=SimpleNamespace(),
+            return_value=ledger,
         ), patch(
             "host_brain.app.dependencies.get_bond_stage_engine",
             return_value=SimpleNamespace(),
@@ -116,6 +139,7 @@ class TestTopAgentPostProcess:
             _run(
                 _async_post_process(
                     request_id="req-002",
+                    person_id="person-002",
                     session_id="session-002",
                     user_message="remember me",
                     narrative="hello from natsume",
