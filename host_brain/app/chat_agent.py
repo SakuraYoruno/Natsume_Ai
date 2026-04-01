@@ -646,6 +646,9 @@ async def chat_agent_sse_generator(
                 gov_decision={"decision": "APPROVE"},
                 pii_ingress_stats={},
                 pii_egress_stats=_pii_egress_stats,
+                # Phase XV trace 增强：传入 LLM 输入摘要和召回证据
+                llm_input_digest=(system_prompt or "")[:500] or None,
+                retrieval_evidence_items=list(retrieval_evidence_items or []),
             )
         )
     except Exception as _pp_exc:

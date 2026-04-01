@@ -685,6 +685,9 @@ async def _async_post_process(
     gov_decision: dict[str, Any] | None = None,
     pii_ingress_stats: dict[str, Any] | None = None,
     pii_egress_stats: dict[str, Any] | None = None,
+    # Phase XV trace 增强：LLM 输入摘要 + 召回证据
+    llm_input_digest: str | None = None,       # system_prompt 前 500 字
+    retrieval_evidence_items: list[dict[str, Any]] | None = None,  # 召回文档片段
 ) -> None:
     """异步后处理：审计写入 + Airlock 安全分类 + 记忆写入 + Bond 更新 + VTS + TTS。
 
@@ -719,10 +722,51 @@ async def _async_post_process(
             "status": "OK" if narrative.strip() else "DEGRADED",
             "reason_code": None if narrative.strip() else "LLM_EMPTY_OUTPUT",
             "latency_ms": llm_latency_ms,
+            # Phase XV trace 增强：LLM 输入摘要（system_prompt 前 500 字）
+            "input_digest": (llm_input_digest or "")[:500] or None,
             # output_digest = LLM 回复摘要（前 400 字），供 WebUI 节点详情显示
             "output_digest": (narrative or "")[:400] or None,
             "ts_ms": _now,
         })
+
+        # (2.5) retrieval_event_log — 召回结果落盘（Phase XV trace 增强）
+        # 只在有实际召回证据时写入，避免空行污染
+        _evidence_items = list(retrieval_evidence_items or [])
+        _rs = retrieval_summary or {}
+        if _evidence_items or _rs.get("status") == "OK":
+            _query_plan = _rs.get("query_plan") or {}
+            _topk_snippets = [
+                {
+                    "evidence_ref": str(item.get("evidence_ref") or ""),
+                    "store_id": str(item.get("store_id") or ""),
+                    "snippet": str(item.get("snippet") or "")[:200],
+                    "score": item.get("score"),
+                }
+                for item in _evidence_items[:8]  # 最多记 8 条，控制体积
+            ]
+            ledger.log_retrieval_event({
+                "request_id": request_id,
+                "intent_id": request_id,
+                "op_kind": "PIPELINE",
+                "status": _rs.get("status", "OK"),
+                "reason_code": _rs.get("reason_code"),
+                "stage": "top_agent._async_post_process",
+                "payload": {
+                    "candidate_count": _rs.get("candidate_count", 0),
+                    "route_count": _rs.get("route_count", 0),
+                    "rerank_topk": _rs.get("rerank_topk", 0),
+                    "degraded": bool(_rs.get("degraded", False)),
+                    "query_plan": _query_plan,
+                    "topk": _topk_snippets,
+                    "agentic_meta": _rs.get("agentic_meta"),
+                },
+                "detail": (
+                    f"candidate={_rs.get('candidate_count', 0)} "
+                    f"topk={len(_topk_snippets)} "
+                    f"intent={_query_plan.get('intent', 'unknown')}"
+                ),
+                "ts_ms": _now,
+            })
 
         # (3) graph_run_trace — 端到端链路汇总
         _path = "delegate" if delegated_agents else "chat_direct"
@@ -763,6 +807,8 @@ async def _async_post_process(
                 "input_data": {
                     "first_token_ms": first_token_ms,
                     "buffer_stream": buffer_stream,
+                    # Phase XV：system_prompt 摘要（前 300 字），供 WebUI Input 面板显示
+                    "input_digest": (llm_input_digest or "")[:300] or None,
                 },
                 # Phase XV：写入 narrative 供 WebUI trace Output 面板显示（截断至 800 字）
                 "output_data": {
