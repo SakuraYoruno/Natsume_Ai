@@ -461,6 +461,31 @@ async def top_agent_sse_generator(
     if recent_turn_answer:
         narrative = _airlock_sanitize_output(recent_turn_answer)
         total_latency_ms = int(time.time() * 1000) - ts_ms
+
+        # ── 同步写入 INPUT_COMPLETED（确保下一轮对话可查历史）────────
+        try:
+            from host_brain.app.dependencies import get_ledger as _get_pre_ledger  # noqa: PLC0415
+            _get_pre_ledger().log_voice_event({
+                "request_id": request_id,
+                "session_id": session_id,
+                "event_type": "INPUT_COMPLETED",
+                "direction": "HOST_INTERNAL",
+                "status": "OK" if narrative.strip() else "DEGRADED",
+                "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
+                "stage": "top_agent.pre_commit",
+                "detail": f"source=CHAT_API text_len={len(sanitized_message)} reply_len={len(narrative)}",
+                "payload": {
+                    "source": "CHAT_API",
+                    "person_id": person_id,
+                    "input_preview": _build_reply_preview(sanitized_message, limit=160),
+                    "reply_preview": _build_reply_preview(narrative, limit=160),
+                    "render_target_lang": "zh",
+                },
+                "ts_ms": int(time.time() * 1000),
+            })
+        except Exception as _ve_exc:
+            _logger.debug("[%s] pre-commit INPUT_COMPLETED failed: %s", request_id, _ve_exc)
+
         yield _sse({
             "phase": "COMMIT",
             "done": True,
@@ -827,6 +852,30 @@ async def top_agent_sse_generator(
     total_latency_ms = int(time.time() * 1000) - ts_ms
     llm_latency_ms = int(time.time() * 1000) - llm_started_ms
 
+    # ── 同步写入 INPUT_COMPLETED（确保下一轮对话可查历史）────────────
+    try:
+        from host_brain.app.dependencies import get_ledger as _get_pre_ledger  # noqa: PLC0415
+        _get_pre_ledger().log_voice_event({
+            "request_id": request_id,
+            "session_id": session_id,
+            "event_type": "INPUT_COMPLETED",
+            "direction": "HOST_INTERNAL",
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
+            "stage": "top_agent.pre_commit",
+            "detail": f"source=CHAT_API text_len={len(sanitized_message)} reply_len={len(narrative)}",
+            "payload": {
+                "source": "CHAT_API",
+                "person_id": person_id,
+                "input_preview": _build_reply_preview(sanitized_message, limit=160),
+                "reply_preview": _build_reply_preview(narrative, limit=160),
+                "render_target_lang": render_target_lang,
+            },
+            "ts_ms": int(time.time() * 1000),
+        })
+    except Exception as _ve_exc:
+        _logger.debug("[%s] pre-commit INPUT_COMPLETED failed: %s", request_id, _ve_exc)
+
     yield _sse({
         "phase": "COMMIT",
         "done": True,
@@ -1029,24 +1078,8 @@ async def _async_post_process(
             "ts_ms": _now,
         })
 
-        ledger.log_voice_event({
-            "request_id": request_id,
-            "session_id": session_id,
-            "event_type": "INPUT_COMPLETED",
-            "direction": "HOST_INTERNAL",
-            "status": "OK" if narrative.strip() else "DEGRADED",
-            "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
-            "stage": "top_agent.post_process",
-            "detail": f"source=CHAT_API text_len={len(user_message)} reply_len={len(narrative)}",
-            "payload": {
-                "source": "CHAT_API",
-                "person_id": person_id,
-                "input_preview": _build_reply_preview(user_message, limit=160),
-                "reply_preview": _build_reply_preview(narrative, limit=160),
-                "render_target_lang": render_target_lang,
-            },
-            "ts_ms": _now,
-        })
+        # NOTE: INPUT_COMPLETED 已在 COMMIT SSE 之前同步写入（pre_commit 阶段），
+        # 此处不再重复写入，避免 voice_event_log 出现重复条目。
 
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process audit persist failed: %s", request_id, exc)

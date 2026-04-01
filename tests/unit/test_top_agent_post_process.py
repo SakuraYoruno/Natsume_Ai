@@ -100,9 +100,12 @@ class TestTopAgentPostProcess:
         assert captured["request_id"] == "req-001"
         assert captured["assistant_reply"] == "hello from natsume"
         assert captured["user_message"] == "remember me"
-        assert ledger.voice_events
-        assert ledger.voice_events[0]["event_type"] == "INPUT_COMPLETED"
-        assert ledger.voice_events[0]["payload"]["person_id"] == "person-001"
+        # INPUT_COMPLETED 已移至主流程同步写入（pre_commit 阶段），
+        # _async_post_process 不再写入 INPUT_COMPLETED。
+        # 验证 graph_run_trace 等审计日志仍正常写入。
+        assert not any(
+            ve.get("event_type") == "INPUT_COMPLETED" for ve in ledger.voice_events
+        ), "INPUT_COMPLETED should no longer be written in _async_post_process"
 
     def test_async_post_process_swallow_persistence_failure(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")

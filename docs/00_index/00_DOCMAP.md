@@ -271,6 +271,10 @@
   用途：wxautox4 Bridge 集成开发实测报告（2026-03-27）。新增 wxautox4 作为微信自动化 bridge 后端（替代自研 UIA Bridge），外部协议完全兼容（JSONL 命令队列 + webhook POST）。改动 5 个文件，含 8 项真机测试清单（P0×4 / P1×2 / P2×2），涵盖环境安装、独立启动、inbound 消息转发、outbound 命令执行、热切换回退、图片发送、消息去重、群聊识别。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/45_testing/dev_test_reports/DEV_TEST_REPORT_continuity_memory_sync_write_20260401.md
+  用途：连续性记忆同步写入修复报告（2026-04-01）。将 INPUT_COMPLETED 事件写入从异步后处理（_async_post_process）提前到 COMMIT SSE 发送之前同步执行，修复"每次问夏目蓝刚才说了什么，她回复不知道"的记忆断层问题。覆盖快速路径（recent_turn_direct）和正常 LLM 路径两个出口。14 项单元测试全部通过。
+  读者：MASTER、运行节点（按用例验证）。
+
 - docs/50_release/changelog/UI_UPGRADE_CHANGELOG.md
   用途：UI 升级变更日志。
   读者：MASTER、Project（文档代理）。
