@@ -990,6 +990,66 @@ def build_chat_prompt_runtime_payload(
     except (ImportError, AttributeError, Exception) as _bn_exc:
         logger.debug("BondNarrativeLayer 接入降级: %s", _bn_exc)
 
+    # ── 接入 BondAwareStyleEngine：Bond 阶段感知风格指令 ──────────────
+    # prompt_builder 通过 runtime_payload.get("bond_style_instruction") 读取
+    try:
+        from host_brain.persona.bond_aware_style import BondAwareStyleEngine  # noqa: PLC0415
+        _bas_engine = BondAwareStyleEngine()
+        _bas_user_id = get_canonical_bond_user_id()
+        _bas_bond_stage = "STRANGER"
+        _bas_intimacy = 0.0
+        _bas_rift_active = False
+        _bas_rift_severity = "medium"
+        _bas_rift_progress = 0.0
+        _bas_bond_trend = ""
+        _bas_shared_hints: list[str] = []
+        try:
+            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+            _bse_bas = get_bond_stage_engine()
+            if _bse_bas is not None:
+                _bas_state = _bse_bas.get_state(_bas_user_id)
+                _bas_bond_stage = _bas_state.current_stage
+                _bas_intimacy = float(getattr(_bas_state, "intimacy_score", 0.0) or 0.0)
+                _bas_bond_trend = str(getattr(_bas_state, "trend", "") or "")
+                # 裂痕状态
+                _bas_rift = getattr(_bas_state, "rift", None)
+                if _bas_rift is not None and getattr(_bas_rift, "is_active", lambda: False)():
+                    _bas_rift_active = True
+                    _bas_rift_severity = str(getattr(_bas_rift, "severity", "medium") or "medium")
+                    _bas_rift_progress = float(getattr(_bas_rift, "repair_progress", 0.0) or 0.0)
+        except Exception:
+            pass
+        # 从 bond_narrative 中提取共同记忆提示
+        _bas_bn = runtime_payload.get("bond_narrative") or {}
+        if isinstance(_bas_bn, dict):
+            _bas_shared_hints = [str(h) for h in (_bas_bn.get("shared_memory_hints") or []) if h]
+        # 用户情绪方向
+        _bas_mood = "neutral"
+        _bas_vad = _full_emotion_ctx.get("vad_vector") or {}
+        if _bas_vad:
+            _bas_v = float(_bas_vad.get("valence") or 0.0)
+            if _bas_v > 0.15:
+                _bas_mood = "positive"
+            elif _bas_v < -0.15:
+                _bas_mood = "negative"
+        # Natsume 自身情绪标签
+        _bas_natsume_mood = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
+        _bas_result = _bas_engine.generate(
+            bond_stage=_bas_bond_stage,
+            intimacy_score=_bas_intimacy,
+            mood_state=_bas_mood,
+            natsume_mood=_bas_natsume_mood,
+            rift_active=_bas_rift_active,
+            rift_severity=_bas_rift_severity,
+            rift_progress=_bas_rift_progress,
+            bond_trend=_bas_bond_trend,
+            shared_memory_hints=_bas_shared_hints or None,
+        )
+        if _bas_result.prompt_injection:
+            runtime_payload["bond_style_instruction"] = _bas_result.prompt_injection
+    except (ImportError, AttributeError, Exception) as _bas_exc:
+        logger.debug("BondAwareStyleEngine 接入降级: %s", _bas_exc)
+
     return runtime_payload
 
 

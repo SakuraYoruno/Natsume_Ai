@@ -864,6 +864,26 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 f"- prompt: {_truncate_for_prompt(bond_aware.get('prompt_injection'), limit=600) or 'NONE'}\n"
                 f"- forbidden_patterns: {', '.join(list(bond_aware.get('forbidden_patterns') or [])[:5]) or 'NONE'}\n\n"
             )
+        # 兼容新版 BondAwareStyleEngine 写入的 bond_style_instruction 字符串字段
+        if not bond_aware_style_block:
+            _bsi = str(runtime_payload.get("bond_style_instruction") or "").strip()
+            if _bsi:
+                bond_aware_style_block = (
+                    "BOND_AWARE_STYLE:\n"
+                    f"{_truncate_for_prompt(_bsi, limit=800)}\n\n"
+                )
+    except Exception:
+        pass
+
+    # ── 人格漂移校正提示（PersonaDriftDetector）────────────────────────
+    _drift_correction_block = ""
+    try:
+        _dch = str(runtime_payload.get("drift_correction_hint") or "").strip()
+        if _dch:
+            _drift_correction_block = (
+                "PERSONA_DRIFT_CORRECTION:\n"
+                f"{_truncate_for_prompt(_dch, limit=400)}\n\n"
+            )
     except Exception:
         pass
     try:
@@ -1459,6 +1479,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{_persona_expression_hint_block}"
         f"{_self_reflection_block}"
         f"{_bond_narrative_block}"
+        f"{_drift_correction_block}"
         f"{emotion_binding_block}"
         "【上下文校验】\n"
         f"- 有效: {prompt_context_valid}\n"
