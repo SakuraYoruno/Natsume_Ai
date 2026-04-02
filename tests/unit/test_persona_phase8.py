@@ -21,6 +21,7 @@ from host_brain.persona.proactive_voice import (
     SCENE_LATE_NIGHT,
     SCENE_LONG_ABSENT,
     SCENE_POST_INTENSE,
+    SCENE_TOPIC_FOLLOWUP,
     SCENE_MORNING_GREET,
     SCENE_HOLIDAY_GREET,
     DEFAULT_COOLDOWN_MS,
@@ -377,3 +378,175 @@ class TestOtherScenes:
             },
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# V-VIII-6: 话题延续主动发声
+# ---------------------------------------------------------------------------
+
+class TestVVIII6_TopicFollowup:
+    """V-VIII-6: 话题延续场景。"""
+
+    def test_topic_followup_trigger(self):
+        """存在待跟进话题时触发话题延续。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "面试", "topic_keywords": ["面试", "工作"]},
+                ],
+            },
+        )
+        assert result is not None
+        assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+
+    def test_topic_label_in_content(self):
+        """话题标签被嵌入到表达内容中。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "搬家", "topic_keywords": ["搬家"]},
+                ],
+            },
+        )
+        assert result is not None
+        assert "搬家" in result.content
+
+    def test_no_topics_no_trigger(self):
+        """无待跟进话题时不触发。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [],
+            },
+        )
+        assert result is None
+
+    def test_empty_label_no_trigger(self):
+        """话题标签为空时不触发。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "", "topic_keywords": []},
+                ],
+            },
+        )
+        assert result is None
+
+    def test_topic_followup_emotion_tag(self):
+        """话题延续场景的情感标签为 THINKING。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "考试", "topic_keywords": ["考试"]},
+                ],
+            },
+        )
+        assert result is not None
+        assert result.emotion_tag == "THINKING"
+
+    def test_topic_followup_bond_deep(self):
+        """深层关系的话题延续表达更亲密。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "bond_stage": "SOULMATE",
+                "pending_followup_topics": [
+                    {"topic_label": "旅行", "topic_keywords": ["旅行"]},
+                ],
+            },
+        )
+        assert result is not None
+        assert "旅行" in result.content
+        # 深层关系应有更亲密的表达
+        assert any(kw in result.content for kw in ("惦记", "记在心里", "放在心上", "急死", "快快快"))
+
+    def test_topic_followup_cooldown(self):
+        """话题延续场景受冷却期限制。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        ctx_base = {
+            "user_online": False,
+            "last_interaction_ts_ms": ts - 1000,
+            "last_emotion_intensity": 0.3,
+            "pending_followup_topics": [
+                {"topic_label": "面试", "topic_keywords": ["面试"]},
+            ],
+        }
+
+        # 第一次触发
+        r1 = voice.evaluate_scene(
+            user_id="u1",
+            context={**ctx_base, "current_ts_ms": ts},
+        )
+        assert r1 is not None
+        assert r1.scene_type == SCENE_TOPIC_FOLLOWUP
+
+        # 1小时后再次触发（应被冷却）
+        ts2 = ts + 1 * 3600 * 1000
+        r2 = voice.evaluate_scene(
+            user_id="u1",
+            context={**ctx_base, "current_ts_ms": ts2},
+        )
+        if r2 is not None:
+            assert r2.scene_type != SCENE_TOPIC_FOLLOWUP
+
+    def test_topic_followup_serializable(self):
+        """话题延续表达结果可序列化。"""
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "项目", "topic_keywords": ["项目"]},
+                ],
+            },
+        )
+        assert result is not None
+        d = result.as_dict()
+        assert d["scene_type"] == SCENE_TOPIC_FOLLOWUP
+        assert "项目" in d["content"]

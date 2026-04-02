@@ -1,7 +1,7 @@
 """PersonaProactiveVoice：人格驱动的主动表达——Phase VIII（优化版）。
 
 职责：
-  1. 场景感知（深夜陪伴 / 节日问候 / 离线久归 / 情感高潮后 / 早安问候）
+  1. 场景感知（深夜陪伴 / 节日问候 / 离线久归 / 情感高潮后 / 话题延续 / 早安问候）
   2. 根据人格特质（PersonalityTraits）生成个性化主动表达
   3. 频率控制（同类型触发间隔 ≥ 24h）
   4. 输出主动表达内容 + 触发类型 + 情感标签
@@ -10,6 +10,7 @@
   - LATE_NIGHT: 23:00-02:00 + 用户在线
   - LONG_ABSENT: 用户 > 3 天未互动
   - POST_INTENSE: 前一次对话 emotion_intensity > 0.8
+  - TOPIC_FOLLOWUP: 存在待跟进话题（由外部提供 pending_followup_topics）
   - MORNING_GREET: 首次日间互动（06:00-10:00）
   - HOLIDAY_GREET: 检测到节日（由外部提供）
 
@@ -21,6 +22,7 @@
   - 离线时长感知：3天/1周/1个月说不同的话
   - 季节感知：冬天早安 vs 夏天早安
   - 节日专属文案：春节/圣诞/情人节各有专属内容
+  - 话题延续：主动跟进之前未完结的话题，让用户感受到被记住
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ _logger = logging.getLogger("Natsume.proactive_voice")
 SCENE_LATE_NIGHT = "LATE_NIGHT"
 SCENE_LONG_ABSENT = "LONG_ABSENT"
 SCENE_POST_INTENSE = "POST_INTENSE"
+SCENE_TOPIC_FOLLOWUP = "TOPIC_FOLLOWUP"
 SCENE_MORNING_GREET = "MORNING_GREET"
 SCENE_HOLIDAY_GREET = "HOLIDAY_GREET"
 
@@ -66,7 +69,7 @@ _ABSENT_LONG_MS = 30 * 24 * 60 * 60 * 1000    # 1个月
 
 @dataclass(frozen=True)
 class ProactiveExpression:
-    """主动表达内容。"""
+    """主动表达内容."""
     scene_type: str       # 场景类型
     content: str          # 表达内容
     emotion_tag: str      # 建议情感标签
@@ -368,6 +371,66 @@ _POST_INTENSE_TEMPLATES: dict[str, dict[str, list[str]]] = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# 话题延续模板（按 bond_stage深度 × 风格）
+# 模板中 {topic} 占位符会被替换为实际话题标签
+# ---------------------------------------------------------------------------
+
+_TOPIC_FOLLOWUP_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": [
+            "对了，之前你提到{topic}，后来怎么样了",
+            "突然想起来，你之前说的{topic}，还顺利吗",
+        ],
+        "playful": [
+            "话说，之前聊到的{topic}，后来呢后来呢～",
+            "我记得你之前提到{topic}，有后续吗？",
+        ],
+        "caring": [
+            "之前你提到{topic}，一直有点在意，后来怎么样了",
+            "想起你之前说的{topic}，还好吗",
+        ],
+        "default": ["对了，之前你提到{topic}，后来怎么样了"],
+    },
+    "mid": {
+        "warm": [
+            "对了，之前你跟我说的{topic}，后来怎么样了呀",
+            "突然想起来你之前提到{topic}……一直有点惦记",
+            "你之前说的{topic}，我一直记着呢，后来顺利吗",
+        ],
+        "playful": [
+            "哎对了！之前聊到的{topic}，后来怎么样了，快跟我说说～",
+            "我一直惦记着你之前说的{topic}呢，有新进展吗？",
+            "话说{topic}那件事，后来呢后来呢，好好奇呀",
+        ],
+        "caring": [
+            "之前你提到{topic}，我一直有点担心，后来还好吗",
+            "想起你之前说的{topic}……你现在还在忙那个吗",
+            "你之前跟我聊的{topic}，后来怎么样了，有没有好一点",
+        ],
+        "default": ["对了，之前你提到{topic}，后来怎么样了"],
+    },
+    "deep": {
+        "warm": [
+            "对了，之前你跟我说的{topic}……我一直惦记着，后来怎么样了",
+            "突然想起你之前提到{topic}，不知道现在怎么样了……有点想知道",
+            "你之前说的{topic}，我一直记在心里呢，后来顺利吗",
+        ],
+        "playful": [
+            "哎！之前聊到的{topic}，你还没跟我说后续呢，快快快～",
+            "我可一直惦记着你说的{topic}呢！后来怎么样了呀",
+            "话说{topic}那件事，我都快急死了，后来到底怎么样了！",
+        ],
+        "caring": [
+            "之前你提到{topic}……我一直放在心上，后来还好吗",
+            "想起你之前说的{topic}，有点担心你……现在怎么样了",
+            "你之前跟我聊的{topic}，我一直在想你后来有没有好好处理",
+        ],
+        "default": ["对了，之前你提到{topic}，我一直惦记着，后来怎么样了"],
+    },
+}
+
+
 # 早安问候模板（按季节 × bond_stage深度 × 风格）
 _MORNING_GREET_TEMPLATES: dict[str, dict[str, dict[str, list[str]]]] = {
     "spring": {
@@ -602,6 +665,8 @@ class PersonaProactiveVoice:
                 - holiday_name: 节日名称
                 - user_online: 用户是否在线
                 - bond_stage: 当前关系阶段
+                - pending_followup_topics: 待跟进话题列表（可选）
+                    每项为 dict，含 topic_label(str) 和 topic_keywords(list[str])
 
         Returns:
             ProactiveExpression 或 None（不触发）
@@ -616,6 +681,7 @@ class PersonaProactiveVoice:
             (SCENE_LATE_NIGHT, self._check_late_night),
             (SCENE_LONG_ABSENT, self._check_long_absent),
             (SCENE_POST_INTENSE, self._check_post_intense),
+            (SCENE_TOPIC_FOLLOWUP, self._check_topic_followup),
             (SCENE_MORNING_GREET, self._check_morning),
         ]
 
@@ -680,6 +746,22 @@ class PersonaProactiveVoice:
         except Exception:
             return False
 
+    def _check_topic_followup(self, ctx: dict[str, Any], now_ts: int) -> bool:
+        """话题延续：存在待跟进话题。
+
+        context 需提供 pending_followup_topics 列表，每项包含：
+          - topic_label: str  话题标签（如"面试"、"搬家"）
+          - topic_keywords: list[str]  话题关键词（可选）
+        """
+        topics = ctx.get("pending_followup_topics")
+        if not topics or not isinstance(topics, list):
+            return False
+        # 至少有一个有效话题（含非空 label）
+        return any(
+            isinstance(t, dict) and str(t.get("topic_label", "")).strip()
+            for t in topics
+        )
+
     def _check_holiday(self, ctx: dict[str, Any], now_ts: int) -> bool:
         """节日问候：外部提供节日标志。"""
         return bool(ctx.get("is_holiday", False))
@@ -738,6 +820,14 @@ class PersonaProactiveVoice:
             variants = depth_templates.get(style) or depth_templates.get("default", ["昨天的对话很有意义呢"])
             return _pick_variant(variants, seed)
 
+        elif scene_type == SCENE_TOPIC_FOLLOWUP:
+            depth_templates = _TOPIC_FOLLOWUP_TEMPLATES.get(depth, _TOPIC_FOLLOWUP_TEMPLATES["mid"])
+            variants = depth_templates.get(style) or depth_templates.get("default", ["对了，之前你提到{topic}，后来怎么样了"])
+            raw = _pick_variant(variants, seed)
+            # 从 context 中取第一个有效话题标签填充模板
+            topic_label = self._extract_topic_label(ctx)
+            return raw.replace("{topic}", topic_label)
+
         elif scene_type == SCENE_MORNING_GREET:
             dt = datetime.datetime.fromtimestamp(now_ts / 1000)
             season = _get_season(dt.month)
@@ -770,12 +860,24 @@ class PersonaProactiveVoice:
 
         return content
 
+    @staticmethod
+    def _extract_topic_label(ctx: dict[str, Any]) -> str:
+        """从 context 的 pending_followup_topics 中提取第一个有效话题标签。"""
+        topics = ctx.get("pending_followup_topics") or []
+        for t in topics:
+            if isinstance(t, dict):
+                label = str(t.get("topic_label", "")).strip()
+                if label:
+                    return label
+        return "那件事"
+
     def _scene_emotion(self, scene_type: str) -> str:
         """场景对应的情感标签。"""
         emotion_map: dict[str, str] = {
             SCENE_LATE_NIGHT: "CARING",
             SCENE_LONG_ABSENT: "LOVING",
             SCENE_POST_INTENSE: "THINKING",
+            SCENE_TOPIC_FOLLOWUP: "THINKING",
             SCENE_MORNING_GREET: "HAPPY",
             SCENE_HOLIDAY_GREET: "HAPPY",
         }
