@@ -64,6 +64,8 @@ from host_brain.persona.proactive_voice import (
 from host_brain.persona.interaction_growth_analyzer import (
     InteractionGrowthAnalyzer,
     InteractionGrowthResult,
+    InteractionQualityEvaluator,
+    InteractionQualityScore,
     make_interaction_growth_task_config,
 )
 from host_brain.persona.growth_feedback_collector import (
@@ -117,6 +119,8 @@ __all__ = [
     # interaction_growth_analyzer.py (Phase IX)
     "InteractionGrowthAnalyzer",
     "InteractionGrowthResult",
+    "InteractionQualityEvaluator",
+    "InteractionQualityScore",
     "make_interaction_growth_task_config",
     # growth_feedback_collector.py (Phase IX-C)
     "GrowthFeedbackCollector",
