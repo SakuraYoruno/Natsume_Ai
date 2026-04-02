@@ -1016,3 +1016,68 @@ async def _async_post_process(
                 pass  # 审计不影响 TTS 流程
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process tts failed: %s", request_id, exc)
+
+    # ── PersonaDriftDetector：人格漂移检测 ───────────────────────────
+    # 每轮对话后检测 LLM 输出是否偏离人格基线，生成校正提示供下轮注入
+    try:
+        from host_brain.persona.drift_detector import PersonaDriftDetector  # noqa: PLC0415
+        if not hasattr(_async_post_process, "_drift_detector"):
+            _async_post_process._drift_detector = PersonaDriftDetector()
+        _dd: PersonaDriftDetector = _async_post_process._drift_detector
+        _drift_result = await asyncio.to_thread(
+            _dd.on_turn,
+            llm_output_text=narrative,
+            user_input_text=user_message,
+        )
+        if _drift_result is not None and _drift_result.alert_level in ("MODERATE", "SEVERE"):
+            # 将校正提示写入全局状态，供下轮 chat_context_builder 注入
+            try:
+                from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+                _hs = get_hard_state()
+                if _hs is not None:
+                    _hs.set("drift_correction_hint", _drift_result.correction_hint or "")
+            except Exception:
+                pass
+            _logger.info(
+                "[%s] 人格漂移检测: level=%s dims=%s",
+                request_id, _drift_result.alert_level, _drift_result.drift_dims,
+            )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process drift_detector failed: %s", request_id, exc)
+
+    # ── GrowthFeedbackCollector：隐式成长反馈 ────────────────────────
+    # 从用户消息中提取隐式参与度信号，驱动 PersonaGrowthTracker 微调人格特质
+    try:
+        from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector  # noqa: PLC0415
+        from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+        if not hasattr(_async_post_process, "_growth_feedback_collector"):
+            _async_post_process._growth_feedback_collector = GrowthFeedbackCollector()
+        if not hasattr(_async_post_process, "_persona_growth_tracker"):
+            _async_post_process._persona_growth_tracker = PersonaGrowthTracker()
+        _gfc: GrowthFeedbackCollector = _async_post_process._growth_feedback_collector
+        _pgt: PersonaGrowthTracker = _async_post_process._persona_growth_tracker
+        _gfc_user_id = resolve_bond_user_id(session_id=session_id)
+        # 提取隐式反馈信号
+        _feedbacks = await asyncio.to_thread(
+            GrowthFeedbackCollector.extract_engagement_signals,
+            user_message,
+        )
+        for _fb in _feedbacks:
+            _gfc.add_feedback(_gfc_user_id, _fb)
+        # 触发成长周期（每轮对话）
+        if _feedbacks:
+            _growth_result = await asyncio.to_thread(
+                _pgt.on_interaction_cycle,
+                user_id=_gfc_user_id,
+                feedback_collector=_gfc,
+                user_message=user_message,
+                assistant_reply=narrative,
+            )
+            if _growth_result and _growth_result.applied:
+                _logger.info(
+                    "[%s] 人格成长: user=%s rules=%s",
+                    request_id, _gfc_user_id, _growth_result.triggered_rules,
+                )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process growth_feedback failed: %s", request_id, exc)
