@@ -858,16 +858,51 @@ def build_chat_prompt_runtime_payload(
         from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
         from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
         from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+        from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
         _adapter = PersonaExpressionAdapter()
         _traits = PersonalityTraits.default()
         # 获取当前 EmotionVector
         _vad = _full_emotion_ctx.get("vad_vector") or {}
+        _cur_valence = float(_vad.get("valence") or 0.0)
+        _cur_arousal = float(_vad.get("arousal") or 0.0)
+        _cur_dominance = float(_vad.get("dominance") or 0.0)
+
+        # ── 接入 EmotionPersistence：恢复跨会话情感状态 ──────────────
+        # 用跨会话恢复值与当前 VAD 融合（当前 VAD 权重 0.7，历史恢复权重 0.3）
+        # 若当前 VAD 为零向量（无情感信号），则完全使用恢复值
+        try:
+            if not hasattr(build_chat_prompt_runtime_payload, "_emotion_persistence"):
+                build_chat_prompt_runtime_payload._emotion_persistence = EmotionPersistence()
+            _ep: EmotionPersistence = build_chat_prompt_runtime_payload._emotion_persistence
+            _ep_user_id = get_canonical_bond_user_id()
+            _restored = _ep.restore(user_id=_ep_user_id)
+            if not _restored.from_baseline:
+                # 有历史情感记录：与当前 VAD 加权融合
+                _has_cur_signal = abs(_cur_valence) > 0.05 or abs(_cur_arousal - 0.3) > 0.05
+                _w_cur = 0.7 if _has_cur_signal else 0.0
+                _w_hist = 1.0 - _w_cur
+                _cur_valence = _cur_valence * _w_cur + _restored.valence * _w_hist
+                _cur_arousal = _cur_arousal * _w_cur + _restored.arousal * _w_hist
+                _cur_dominance = _cur_dominance * _w_cur + _restored.dominance * _w_hist
+            # 注入重逢信息到 runtime_payload（供 prompt_builder 使用）
+            if _restored.reunion_type:
+                runtime_payload["emotion_reunion_type"] = _restored.reunion_type
+            # 持久化当前情感（用融合后的值，以便下次恢复）
+            _ep.persist(
+                user_id=_ep_user_id,
+                valence=_cur_valence,
+                arousal=_cur_arousal,
+                dominance=_cur_dominance,
+            )
+        except Exception as _ep_exc:
+            logger.debug("EmotionPersistence 接入降级: %s", _ep_exc)
+
         _emo_vec = EmotionVector(
-            valence=float(_vad.get("valence") or 0.0),
-            arousal=float(_vad.get("arousal") or 0.0),
-            dominance=float(_vad.get("dominance") or 0.0),
+            valence=_cur_valence,
+            arousal=_cur_arousal,
+            dominance=_cur_dominance,
             ts_ms=int(_vad.get("ts_ms") or 0),
-        ) if _vad else None
+        ) if (_vad or True) else None
         # 获取 bond_stage
         _bond_stage = "STRANGER"
         try:
