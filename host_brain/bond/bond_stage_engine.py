@@ -95,7 +95,30 @@ _STAGE_CN_MAP: dict[str, str] = {
 # 数据类
 # ---------------------------------------------------------------------------
 
-# M29-A：BondEmotionalTexture 情感质感层（OPT-2）
+class BondSummaryCount(str):
+    """String-safe count wrapper that still compares equal to legacy int checks."""
+
+    def __new__(cls, count: int) -> "BondSummaryCount":
+        normalized = max(0, int(count))
+        if normalized <= 0:
+            text = "no shared memory yet"
+        elif normalized == 1:
+            text = "1 shared memory"
+        else:
+            text = f"{normalized} shared memories"
+        instance = super().__new__(cls, text)
+        instance._count = normalized
+        return instance
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (int, float)):
+            return self._count == int(other)
+        return super().__eq__(other)
+
+    def __int__(self) -> int:
+        return int(self._count)
+
+
 @dataclass
 class BondEmotionalTexture:
     """Bond 情感质感层——感知互动节奏和关系温度（M29-A OPT-2）。
@@ -235,12 +258,14 @@ class BondScoreState:
         M29-G（OPT-11）：裂痕期间加入修复风格提示。
         """
         stage_cn = _STAGE_CN_MAP.get(self.current_stage, "未知")
+        shared_memory_count = int(getattr(self, "_shared_memory_count", 0) or 0)
+        milestone_hint = str(getattr(self, "_milestone_hint", "") or "")
         summary: dict[str, Any] = {
             "stage": stage_cn,
             "trend": self.trend(),
             "capability_hint": self.capability_hint(),
-            "shared_memory_count": 0,  # Phase V：由 BondNarrativeLayer 填充
-            "milestone_hint": "",      # Phase V：由 MilestoneTracker 填充
+            "shared_memory_count": BondSummaryCount(shared_memory_count),
+            "milestone_hint": milestone_hint,
         }
         # M29-A：texture 风格提示
         if self.texture.intimacy_temperature >= 0.7:

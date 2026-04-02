@@ -935,7 +935,7 @@ def main() -> None:
     ja_path = repo_root / DEFAULT_JA_LINES_PATH
 
     if not cn_path.exists() and not ja_path.exists():
-        print(f"[error] 台词文件不存在: {cn_path} / {ja_path}", file=sys.stderr)
+        sys.stderr.write(f"[error] 台词文件不存在: {cn_path} / {ja_path}\n")
         sys.exit(1)
 
     profile = distill_style_profile(cn_path, ja_path)
@@ -955,12 +955,12 @@ def main() -> None:
     instruction_path = output_dir / "style_instruction_v5.txt"
     instruction_path.write_text(instruction, encoding="utf-8")
 
-    print(f"[OK] StyleProfile → {profile_path}")
-    print(f"[OK] StyleInstruction v5 → {instruction_path}")
-    print(f"[stats] CN: {profile.total_cn}, JA: {profile.total_ja}")
-    print(f"[stats] Emotion patterns: {len(profile.emotion_patterns)}")
-    print(f"[stats] Sentence patterns: {len(profile.sentence_patterns)}")
-    print(f"[instruction preview]\n{instruction[:500]}...")
+    sys.stdout.write(f"[OK] StyleProfile → {profile_path}\n")
+    sys.stdout.write(f"[OK] StyleInstruction v5 → {instruction_path}\n")
+    sys.stdout.write(f"[stats] CN: {profile.total_cn}, JA: {profile.total_ja}\n")
+    sys.stdout.write(f"[stats] Emotion patterns: {len(profile.emotion_patterns)}\n")
+    sys.stdout.write(f"[stats] Sentence patterns: {len(profile.sentence_patterns)}\n")
+    sys.stdout.write(f"[instruction preview]\n{instruction[:500]}...\n")
 
 
 if __name__ == "__main__":

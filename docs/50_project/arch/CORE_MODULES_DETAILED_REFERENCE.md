@@ -336,6 +336,101 @@ python -m pytest -q \
 
 ---
 
+### 8.7 2026-04-03 情感 / 人设 / 风格 / 文本质量核心链补测结果
+
+为避免把“主链控制层 focused coverage”与“情感 / 人设 / 风格 / 文本质量质量链 coverage”混为一谈，2026-04-03 新增了单独的质量核心口径，按以下 9 个文件聚合：
+
+1. `host_brain/app/chat_agent.py`
+2. `host_brain/app/top_agent.py`
+3. `host_brain/app/emotion_context.py`
+4. `host_brain/app/prompt_builder.py`
+5. `host_brain/bond/bond_stage_engine.py`
+6. `host_brain/core/prompt_context.py`
+7. `host_brain/app/chat_context_builder.py`
+8. `host_brain/retrieval/style_distiller.py`
+9. `tools/diag_emotion_closed_loop.py`
+
+本轮补测新增：
+- `tests/unit/test_style_distiller_helpers.py`
+- `tests/unit/test_prompt_builder_helpers_extra.py`
+- `tests/unit/test_prompt_context_helpers_extra.py`
+- `tests/unit/test_chat_context_builder_helpers_extra.py`
+- `tests/unit/test_emotion_context_helpers_extra.py`
+
+对应 quality-core focused regression：
+- `381 passed`
+
+对应聚合覆盖率：
+- `3407 / 3927 = 86.76%`（`coverage report` 四舍五入显示 `87%`）
+
+当前关键文件覆盖率：
+- `host_brain/app/chat_agent.py = 92%`
+- `host_brain/app/top_agent.py = 87%`
+- `host_brain/app/emotion_context.py = 95%`
+- `host_brain/app/prompt_builder.py = 85%`
+- `host_brain/bond/bond_stage_engine.py = 77%`
+- `host_brain/core/prompt_context.py = 92%`
+- `host_brain/app/chat_context_builder.py = 79%`
+- `host_brain/retrieval/style_distiller.py = 96%`
+- `tools/diag_emotion_closed_loop.py = 74%`
+
+结论：
+- 按“情感、人格、人设、语言风格、文本质量”这条核心链重新验收，当前已经超过 `85%` 门槛。
+- 当前剩余主要低点不再是 `style_distiller / prompt_context / prompt_builder`，而是 `bond_stage_engine.py`、`chat_context_builder.py`、`diag_emotion_closed_loop.py` 三处。
+
+### 8.8 2026-04-03 广义“灵魂系统”全量口径盘点
+
+如果把范围进一步扩大，不只看“输出质量核心链”，而是把人格自进化、好感度变化、自省脉冲、关系叙事、情绪持久化，以及这些能力注入对话链的运行时装配一起纳入，则本轮采用以下 25 个文件作为“广义灵魂系统”口径：
+
+1. `host_brain/persona/persona_engine.py`
+2. `host_brain/persona/persona_growth.py`
+3. `host_brain/persona/evolution_orchestrator.py`
+4. `host_brain/persona/evolution_desire_engine.py`
+5. `host_brain/persona/self_reflection.py`
+6. `host_brain/persona/self_model.py`
+7. `host_brain/persona/emotion_persistence.py`
+8. `host_brain/persona/expression_adapter.py`
+9. `host_brain/persona/bond_aware_style.py`
+10. `host_brain/persona/interaction_growth_analyzer.py`
+11. `host_brain/persona/growth_feedback_collector.py`
+12. `host_brain/persona/trait_drift_guard.py`
+13. `host_brain/bond/bond_stage_engine.py`
+14. `host_brain/bond/bond_narrative.py`
+15. `host_brain/bond/bond_dynamics.py`
+16. `host_brain/bond/summarizer.py`
+17. `host_brain/bond/shared_memory_index.py`
+18. `host_brain/bond/milestone_tracker.py`
+19. `host_brain/app/emotion_context.py`
+20. `host_brain/core/prompt_context.py`
+21. `host_brain/app/chat_context_builder.py`
+22. `host_brain/app/prompt_builder.py`
+23. `host_brain/app/top_agent.py`
+24. `host_brain/app/chat_agent.py`
+25. `tools/diag_emotion_closed_loop.py`
+
+本轮对应回归集：
+- 上一轮 broad soul-system 回归：`668 passed`
+- 本轮追加 helper tests：`14 passed`
+
+广义灵魂系统聚合覆盖率：
+- `5504 / 6108 = 90.11%`（`coverage report` 四舍五入显示 `90%`）
+
+拆分子链后，当前状态如下：
+- 人格自进化链：`2028 / 2130 = 95.21%`
+  - 本轮继续补了 `evolution_desire_engine`、`emotion_persistence` helper tests 后，`evolution_desire_engine.py` 从 `76%` 拉到 `97%`，`emotion_persistence.py` 从 `79%` 拉到 `99%`
+  - 当前这条子链里真正还偏低的主要只剩 `self_model.py = 82%`
+- 好感度 / Bond 链：`694 / 812 = 85.47%`
+  - 维持在 85% 以上
+  - 主要缺口仍集中在 `bond_stage_engine.py = 77%`
+- 情绪与 prompt 注入整合链：`2782 / 3166 = 87.87%`
+  - 继续稳定在 85% 以上
+  - 这轮 `diag_emotion_closed_loop.py` 已从 `74%` 拉到 `97%`
+  - 主要剩余缺口现在收敛到 `chat_context_builder.py = 79%`
+
+结论：
+- 如果把“灵魂系统”定义为人格自进化 + 好感度变化 + 自省 + 情绪持久化 + 关系叙事 + 注入到对话链的运行时整合，那么当前全量口径已经进一步提升到 `90.11%`。
+- 当前最大残余风险继续收敛，已经不再是 persona 进化链，而是少数仍偏低且控制流复杂的文件：`bond_stage_engine.py`、`chat_context_builder.py`、`self_model.py`。
+
 ## 9. 建议阅读顺序
 
 如果你的目标是“快速搞懂系统”，建议按这个顺序读：

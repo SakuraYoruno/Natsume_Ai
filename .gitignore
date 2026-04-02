@@ -45,6 +45,8 @@ pip-wheel-metadata/
 .coverage.*
 coverage.xml
 coverage-*.json
+docs/60_trace/diag_test_report.json
+docs/60_trace/diag_test_report.md
 htmlcov/
 artifacts/trial_run_reports/*.json
 
