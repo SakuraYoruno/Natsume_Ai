@@ -12,6 +12,7 @@
 from host_brain.persona.personality_traits import (
     DEFAULT_BASELINE,
     TRAIT_NAMES,
+    CONTEXT_TRAIT_MODIFIERS,
     ExpressionHint,
     PersonalityTraits,
     TraitsDelta,
@@ -75,6 +76,7 @@ __all__ = [
     # personality_traits.py
     "TRAIT_NAMES",
     "DEFAULT_BASELINE",
+    "CONTEXT_TRAIT_MODIFIERS",
     "PersonalityTraits",
     "TraitsDelta",
     "ExpressionHint",

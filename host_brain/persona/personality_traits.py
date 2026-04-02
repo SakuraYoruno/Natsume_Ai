@@ -74,6 +74,69 @@ TRAIT_CN_NAMES: dict[str, str] = {
     "resilience": "韧性",
 }
 
+# ---------------------------------------------------------------------------
+# 情境激活调制表——不同情境对特质的增强/抑制效果
+# ---------------------------------------------------------------------------
+# 设计原则：
+#   - 真实人格在不同情境下有不同的激活程度
+#   - humor 在轻松场景下更容易激活，在严肃场景下被抑制
+#   - sensitivity 在安慰场景下增强，在日常闲聊中降低
+#   - 调制值为加法偏移量（正=增强，负=抑制），应用后仍截断到 [0, 1]
+#   - 调制幅度控制在 ±0.15 以内，避免人格剧变
+CONTEXT_TRAIT_MODIFIERS: dict[str, dict[str, float]] = {
+    # 轻松闲聊：humor/playfulness 增强，sensitivity 降低
+    "casual": {
+        "humor": 0.10,
+        "playfulness": 0.12,
+        "sensitivity": -0.08,
+        "assertiveness": -0.05,
+    },
+    # 深度倾诉/安慰：warmth/sensitivity 增强，humor/playfulness 抑制
+    "comforting": {
+        "warmth": 0.12,
+        "sensitivity": 0.15,
+        "resilience": 0.08,
+        "humor": -0.12,
+        "playfulness": -0.10,
+    },
+    # 严肃讨论：assertiveness 增强，playfulness/humor 抑制
+    "serious": {
+        "assertiveness": 0.12,
+        "curiosity": 0.08,
+        "humor": -0.10,
+        "playfulness": -0.12,
+        "sensitivity": -0.05,
+    },
+    # 好奇探索/学习：curiosity 增强
+    "exploring": {
+        "curiosity": 0.15,
+        "assertiveness": 0.05,
+        "humor": 0.05,
+    },
+    # 撒娇/亲密互动：playfulness/warmth 增强
+    "intimate": {
+        "playfulness": 0.15,
+        "warmth": 0.10,
+        "humor": 0.08,
+        "assertiveness": -0.08,
+    },
+    # 鼓励/打气：resilience/warmth 增强
+    "encouraging": {
+        "resilience": 0.15,
+        "warmth": 0.10,
+        "assertiveness": 0.08,
+        "sensitivity": -0.05,
+    },
+    # 争论/冲突：assertiveness/resilience 增强，warmth 略降
+    "conflict": {
+        "assertiveness": 0.15,
+        "resilience": 0.10,
+        "sensitivity": 0.08,
+        "warmth": -0.05,
+        "playfulness": -0.10,
+    },
+}
+
 
 def _clamp_trait(value: float) -> float:
     """将特质值截断到 [0.0, 1.0] 范围。"""
@@ -205,6 +268,49 @@ class PersonalityTraits:
             "expressive": expressive_cn,
             "suppressed": suppressed_cn,
         }
+
+    def get_contextual_traits(
+        self,
+        context_tag: str,
+        intensity: float = 1.0,
+    ) -> "PersonalityTraits":
+        """根据情境标签返回调制后的特质向量。
+
+        不同情境对不同特质有增强/抑制效果，模拟真实人格在不同场景下的
+        自然表现差异。例如：
+          - 轻松闲聊时 humor/playfulness 增强
+          - 安慰场景时 warmth/sensitivity 增强、humor 抑制
+          - 严肃讨论时 assertiveness 增强、playfulness 抑制
+
+        Args:
+            context_tag: 情境标签，支持的值：
+                "casual"      — 轻松闲聊
+                "comforting"  — 深度倾诉/安慰
+                "serious"     — 严肃讨论
+                "exploring"   — 好奇探索/学习
+                "intimate"    — 撒娇/亲密互动
+                "encouraging" — 鼓励/打气
+                "conflict"    — 争论/冲突
+            intensity: 调制强度 [0.0, 1.0]，默认 1.0（完全调制）。
+                0.0 = 不调制（返回原始特质），0.5 = 半强度调制。
+
+        Returns:
+            调制后的新 PersonalityTraits 实例（原实例不变）。
+            如果 context_tag 未知，返回原始特质的副本。
+        """
+        modifiers = CONTEXT_TRAIT_MODIFIERS.get(context_tag)
+        if not modifiers:
+            # 未知情境：返回原始副本
+            return PersonalityTraits(**self.as_dict())
+
+        intensity = max(0.0, min(1.0, float(intensity)))
+        adjusted = {}
+        for name in TRAIT_NAMES:
+            base_val = getattr(self, name)
+            modifier = modifiers.get(name, 0.0) * intensity
+            adjusted[name] = base_val + modifier
+
+        return PersonalityTraits(**adjusted)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PersonalityTraits":
