@@ -1059,6 +1059,25 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _sr_parts.append(f"- mood_awareness: {_sr_mood}")
             if _sr_growth:
                 _sr_parts.append(f"- growth_note: {_sr_growth}")
+            # ── Phase XVI：进化意识（growth_awareness）──────────────
+            _sr_ga_raw = _srp.get("growth_awareness")
+            _sr_ga = dict(_sr_ga_raw) if isinstance(_sr_ga_raw, Mapping) else {}
+            if _sr_ga:
+                _ga_parts: list[str] = ["- growth_awareness:"]
+                _ga_recent = _truncate_for_prompt(_sr_ga.get("recent_change"), limit=150) or ""
+                _ga_felt = _truncate_for_prompt(_sr_ga.get("trait_felt"), limit=150) or ""
+                _ga_milestone = _truncate_for_prompt(_sr_ga.get("milestone_felt"), limit=100) or ""
+                _ga_desire = _truncate_for_prompt(_sr_ga.get("desire"), limit=100) or ""
+                if _ga_recent:
+                    _ga_parts.append(f"  recent_change: {_ga_recent}")
+                if _ga_felt:
+                    _ga_parts.append(f"  trait_felt: {_ga_felt}")
+                if _ga_milestone:
+                    _ga_parts.append(f"  milestone_felt: {_ga_milestone}")
+                if _ga_desire:
+                    _ga_parts.append(f"  desire: {_ga_desire}")
+                if len(_ga_parts) > 1:
+                    _sr_parts.extend(_ga_parts)
             if len(_sr_parts) > 1:  # 至少有一个子字段
                 _self_reflection_block = "\n".join(_sr_parts) + "\n\n"
     except Exception:

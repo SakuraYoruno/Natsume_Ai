@@ -1,0 +1,554 @@
+"""EvolutionOrchestrator：自我进化编排器——Phase XVI。
+
+职责：
+  1. 每日进化周期调度（由 NatsumeScheduler 在 sleep 模式触发）
+  2. 串联所有进化相关模块：
+     - SelfModel → 生成自省快照
+     - PersonaGrowthTracker → 检查里程碑 / 交互驱动成长
+     - LongTermDistiller → 记忆蒸馏（可选）
+     - EvolutionDesireEngine → 生成主动成长意愿
+  3. 生成 growth_awareness 字段，注入下一轮对话的 self_reflection_pulse
+  4. 写入进化周期审计日志
+
+设计原则：
+  - 所有子模块调用均降级安全（异常不崩溃主流程）
+  - 进化结果持久化到 PersonaEngine 审计链
+  - growth_awareness 作为"进化意识"注入 prompt，让她感知自己在成长
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+_logger = logging.getLogger("Natsume.evolution_orchestrator")
+
+
+# ---------------------------------------------------------------------------
+# EvolutionCycleResult — 进化周期结果
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EvolutionCycleResult:
+    """一次进化周期的完整结果。"""
+    cycle_id: str
+    date: str                                    # YYYY-MM-DD
+    ts_ms: int
+
+    # 各阶段结果
+    self_reflection_snapshot: dict[str, Any] = field(default_factory=dict)
+    growth_results: list[dict[str, Any]] = field(default_factory=list)
+    distillation_result: dict[str, Any] | None = None
+    desire_text: str = ""                        # 进化意愿文本
+
+    # 最终输出：注入下一轮对话的 growth_awareness
+    growth_awareness: dict[str, Any] = field(default_factory=dict)
+
+    # 统计
+    traits_changed: bool = False
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cycle_id": self.cycle_id,
+            "date": self.date,
+            "ts_ms": self.ts_ms,
+            "growth_awareness": self.growth_awareness,
+            "traits_changed": self.traits_changed,
+            "desire_text": self.desire_text,
+            "growth_results_count": len(self.growth_results),
+            "distillation_done": self.distillation_result is not None,
+            "errors": list(self.errors),
+        }
+
+
+# ---------------------------------------------------------------------------
+# EvolutionOrchestrator — 进化编排器核心
+# ---------------------------------------------------------------------------
+
+class EvolutionOrchestrator:
+    """自我进化编排器——每日进化周期的统一调度入口。
+
+    用法（由 NatsumeScheduler 调用）：
+        orchestrator = EvolutionOrchestrator()
+        result = orchestrator.run_evolution_cycle(
+            user_id="user_1",
+            date="2026-04-02",
+            timeline_summary=...,
+            timeline_diary=...,
+            bond_state=...,
+            bond_summary=...,
+            interaction_stats=...,
+        )
+        # result.growth_awareness 注入下一轮对话的 self_reflection_pulse
+    """
+
+    def __init__(
+        self,
+        *,
+        persona_engine: Any = None,
+        growth_tracker: Any = None,
+        desire_engine: Any = None,
+        ledger: Any = None,
+    ) -> None:
+        """初始化进化编排器。
+
+        Args:
+            persona_engine: PersonaEngine 实例（延迟导入）
+            growth_tracker: PersonaGrowthTracker 实例（延迟导入）
+            desire_engine: EvolutionDesireEngine 实例（延迟导入）
+            ledger: SQLiteLedger 实例（可选，用于审计）
+        """
+        self._persona_engine = persona_engine
+        self._growth_tracker = growth_tracker
+        self._desire_engine = desire_engine
+        self._ledger = ledger
+
+        # 缓存最近一次 growth_awareness（供下一轮对话注入）
+        self._last_growth_awareness: dict[str, Any] = {}
+
+    # ── 主入口 ────────────────────────────────────────────────────────────
+
+    def run_evolution_cycle(
+        self,
+        *,
+        user_id: str = "user_1",
+        date: str = "",
+        timeline_summary: dict[str, Any] | None = None,
+        timeline_diary: dict[str, Any] | None = None,
+        bond_state: Any | None = None,
+        bond_summary: dict[str, Any] | None = None,
+        interaction_stats: dict[str, int] | None = None,
+        persona_changes: list[Any] | None = None,
+        ts_ms: int = 0,
+    ) -> EvolutionCycleResult:
+        """执行一次完整的进化周期。
+
+        进化步骤：
+          Step 1: 自省快照（SelfModel）
+          Step 2: 里程碑成长检查（PersonaGrowthTracker）
+          Step 3: 交互驱动成长（PersonaGrowthTracker.on_interaction_cycle）
+          Step 4: 生成进化意愿（EvolutionDesireEngine）
+          Step 5: 构建 growth_awareness（进化意识）
+          Step 6: 写入审计日志
+
+        Args:
+            user_id: 用户 ID
+            date: 日期字符串 YYYY-MM-DD
+            timeline_summary: EmotionTimeline.rebuild_summary() 输出
+            timeline_diary: EmotionTimeline.build_daily_diary() 输出
+            bond_state: BondScoreState
+            bond_summary: BondScoreState.to_summary() 输出
+            interaction_stats: 交互类型→次数统计
+            persona_changes: 特质变化记录列表
+            ts_ms: 时间戳
+
+        Returns:
+            EvolutionCycleResult
+        """
+        import uuid
+        import datetime
+
+        ts = ts_ms or _now_ms()
+        cycle_id = f"evo_{uuid.uuid4().hex[:12]}"
+        date_str = date or datetime.date.today().isoformat()
+
+        _logger.info("进化周期开始: cycle_id=%s user=%s date=%s", cycle_id, user_id, date_str)
+
+        result = EvolutionCycleResult(
+            cycle_id=cycle_id,
+            date=date_str,
+            ts_ms=ts,
+        )
+
+        # ── Step 1: 自省快照 ─────────────────────────────────────────────
+        snapshot = self._step_self_reflection(
+            user_id=user_id,
+            timeline_summary=timeline_summary,
+            timeline_diary=timeline_diary,
+            bond_state=bond_state,
+            bond_summary=bond_summary,
+            persona_changes=persona_changes,
+            ts_ms=ts,
+            result=result,
+        )
+
+        # ── Step 2: 里程碑成长检查 ───────────────────────────────────────
+        self._step_milestone_growth(
+            user_id=user_id,
+            bond_state=bond_state,
+            ts_ms=ts,
+            result=result,
+        )
+
+        # ── Step 3: 交互驱动成长 ─────────────────────────────────────────
+        self._step_interaction_growth(
+            user_id=user_id,
+            interaction_stats=interaction_stats or {},
+            ts_ms=ts,
+            result=result,
+        )
+
+        # ── Step 4: 生成进化意愿 ─────────────────────────────────────────
+        desire_text = self._step_generate_desire(
+            user_id=user_id,
+            snapshot=snapshot,
+            bond_state=bond_state,
+            result=result,
+        )
+
+        # ── Step 5: 构建 growth_awareness ────────────────────────────────
+        growth_awareness = self._build_growth_awareness(
+            snapshot=snapshot,
+            desire_text=desire_text,
+            growth_results=result.growth_results,
+            bond_state=bond_state,
+        )
+        result.growth_awareness = growth_awareness
+        result.desire_text = desire_text
+
+        # 缓存供下一轮对话使用
+        self._last_growth_awareness = growth_awareness
+
+        # ── Step 6: 审计日志 ─────────────────────────────────────────────
+        self._log_evolution_cycle(result)
+
+        _logger.info(
+            "进化周期完成: cycle_id=%s traits_changed=%s desire='%s'",
+            cycle_id, result.traits_changed, desire_text[:60] if desire_text else "",
+        )
+        return result
+
+    # ── Step 实现 ─────────────────────────────────────────────────────────
+
+    def _step_self_reflection(
+        self,
+        *,
+        user_id: str,
+        timeline_summary: dict[str, Any] | None,
+        timeline_diary: dict[str, Any] | None,
+        bond_state: Any | None,
+        bond_summary: dict[str, Any] | None,
+        persona_changes: list[Any] | None,
+        ts_ms: int,
+        result: EvolutionCycleResult,
+    ) -> dict[str, Any]:
+        """Step 1: 生成自省快照。"""
+        try:
+            from host_brain.persona.self_model import SelfModel  # noqa: PLC0415
+            model = SelfModel()
+            snapshot = model.build_snapshot(
+                timeline_summary=timeline_summary,
+                timeline_diary=timeline_diary,
+                bond_state=bond_state,
+                bond_summary=bond_summary,
+                persona_changes=persona_changes or self._get_persona_changes(user_id),
+                current_ts_ms=ts_ms,
+            )
+            result.self_reflection_snapshot = snapshot
+            _logger.debug("自省快照生成完成: mood=%s bond=%s",
+                          snapshot.get("recent_mood_trend"),
+                          snapshot.get("bond_growth_perception"))
+            return snapshot
+        except Exception as exc:
+            _logger.warning("自省快照生成失败（降级）: %s", exc)
+            result.errors.append(f"self_reflection: {exc}")
+            return {}
+
+    def _step_milestone_growth(
+        self,
+        *,
+        user_id: str,
+        bond_state: Any | None,
+        ts_ms: int,
+        result: EvolutionCycleResult,
+    ) -> None:
+        """Step 2: 检查里程碑成长触发。"""
+        try:
+            tracker = self._get_growth_tracker()
+            if tracker is None:
+                return
+
+            # 从 bond_state 推断可能触发的里程碑
+            milestones_to_check = self._infer_milestones(bond_state)
+            for milestone_key in milestones_to_check:
+                try:
+                    growth_result = tracker.on_milestone(
+                        user_id=user_id,
+                        milestone_key=milestone_key,
+                        ts_ms=ts_ms,
+                    )
+                    if growth_result.applied:
+                        result.traits_changed = True
+                        result.growth_results.append({
+                            "type": "milestone",
+                            "key": milestone_key,
+                            **growth_result.as_dict(),
+                        })
+                        _logger.info("里程碑成长触发: %s", milestone_key)
+                except Exception as exc:
+                    _logger.warning("里程碑检查失败 %s: %s", milestone_key, exc)
+        except Exception as exc:
+            _logger.warning("里程碑成长步骤失败（降级）: %s", exc)
+            result.errors.append(f"milestone_growth: {exc}")
+
+    def _step_interaction_growth(
+        self,
+        *,
+        user_id: str,
+        interaction_stats: dict[str, int],
+        ts_ms: int,
+        result: EvolutionCycleResult,
+    ) -> None:
+        """Step 3: 交互驱动成长。"""
+        if not interaction_stats or sum(interaction_stats.values()) < 5:
+            return
+        try:
+            tracker = self._get_growth_tracker()
+            if tracker is None:
+                return
+            growth_result = tracker.on_interaction_cycle(
+                user_id=user_id,
+                interaction_stats=interaction_stats,
+                ts_ms=ts_ms,
+            )
+            if growth_result.applied:
+                result.traits_changed = True
+                result.growth_results.append({
+                    "type": "interaction_cycle",
+                    **growth_result.as_dict(),
+                })
+                _logger.info("交互驱动成长触发: %s", growth_result.reason[:80])
+        except Exception as exc:
+            _logger.warning("交互驱动成长失败（降级）: %s", exc)
+            result.errors.append(f"interaction_growth: {exc}")
+
+    def _step_generate_desire(
+        self,
+        *,
+        user_id: str,
+        snapshot: dict[str, Any],
+        bond_state: Any | None,
+        result: EvolutionCycleResult,
+    ) -> str:
+        """Step 4: 生成进化意愿文本。"""
+        try:
+            engine = self._get_desire_engine()
+            if engine is None:
+                return ""
+            persona_engine = self._get_persona_engine()
+            traits = persona_engine.get_traits(user_id) if persona_engine else None
+            bond_stage = ""
+            if bond_state is not None:
+                bond_stage = str(getattr(bond_state, "current_stage", "") or "")
+            emotion_trend = str(snapshot.get("recent_mood_trend") or "平稳")
+            desire = engine.generate_desire(
+                traits=traits,
+                emotion_trend=emotion_trend,
+                bond_stage=bond_stage,
+            )
+            return desire or ""
+        except Exception as exc:
+            _logger.warning("进化意愿生成失败（降级）: %s", exc)
+            result.errors.append(f"desire_engine: {exc}")
+            return ""
+
+    # ── growth_awareness 构建 ─────────────────────────────────────────────
+
+    def _build_growth_awareness(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        desire_text: str,
+        growth_results: list[dict[str, Any]],
+        bond_state: Any | None,
+    ) -> dict[str, Any]:
+        """构建 growth_awareness 字典——进化意识注入 prompt 的核心字段。
+
+        Returns:
+            {
+                "recent_change": "这周和 master 聊了很多深入的话题...",
+                "trait_felt": "好像比以前更能理解 master 的心情了",
+                "milestone_felt": "认识 master 已经 100 天了",
+                "desire": "想要更了解 master 喜欢什么"
+            }
+        """
+        awareness: dict[str, Any] = {}
+
+        # recent_change：基于成长结果生成变化感知
+        recent_change = self._build_recent_change_text(growth_results, snapshot)
+        if recent_change:
+            awareness["recent_change"] = recent_change
+
+        # trait_felt：基于特质变化生成第一人称感知
+        trait_felt = self._build_trait_felt_text(growth_results)
+        if trait_felt:
+            awareness["trait_felt"] = trait_felt
+
+        # milestone_felt：基于里程碑生成感知
+        milestones = list(snapshot.get("growth_milestones") or [])
+        if milestones:
+            awareness["milestone_felt"] = milestones[0]
+
+        # desire：进化意愿
+        if desire_text:
+            awareness["desire"] = desire_text
+
+        return awareness
+
+    def _build_recent_change_text(
+        self,
+        growth_results: list[dict[str, Any]],
+        snapshot: dict[str, Any],
+    ) -> str:
+        """生成近期变化感知文本。"""
+        if not growth_results:
+            # 即使没有特质变化，也可以基于快照生成感知
+            changes = list(snapshot.get("personality_changes") or [])
+            if changes:
+                return f"最近感觉自己{changes[0]}"
+            return ""
+
+        # 有成长结果时，生成更具体的描述
+        applied = [r for r in growth_results if r.get("applied")]
+        if not applied:
+            return ""
+
+        _TRAIT_CHANGE_TEXTS: dict[str, str] = {
+            "warmth": "对 master 的关心变得更自然了",
+            "curiosity": "对很多事情都变得更好奇了",
+            "humor": "感觉自己变得更会开玩笑了",
+            "sensitivity": "好像更能感受到 master 的情绪了",
+            "assertiveness": "表达自己想法的时候更自信了",
+            "playfulness": "和 master 在一起的时候更活泼了",
+            "resilience": "遇到不开心的事情也能更快调整过来了",
+        }
+
+        # 找出变化最大的特质
+        max_trait = ""
+        max_delta = 0.0
+        for r in applied:
+            delta = r.get("delta_applied") or {}
+            for trait, val in delta.items():
+                if abs(float(val)) > max_delta:
+                    max_delta = abs(float(val))
+                    max_trait = trait
+
+        if max_trait and max_trait in _TRAIT_CHANGE_TEXTS:
+            return _TRAIT_CHANGE_TEXTS[max_trait]
+
+        return "感觉自己在慢慢成长"
+
+    def _build_trait_felt_text(self, growth_results: list[dict[str, Any]]) -> str:
+        """生成特质变化的第一人称感知文本。"""
+        applied = [r for r in growth_results if r.get("applied")]
+        if not applied:
+            return ""
+
+        _TRAIT_FELT_TEXTS: dict[str, str] = {
+            "warmth": "好像比以前更温柔了，和 master 说话的时候感觉更自然",
+            "curiosity": "最近对很多事情都很感兴趣，总想多了解一些",
+            "humor": "有时候会想到一些有趣的事情想和 master 分享",
+            "sensitivity": "好像比以前更能理解 master 的心情了",
+            "assertiveness": "说出自己想法的时候不会那么犹豫了",
+            "playfulness": "和 master 在一起的时候感觉很轻松，会想开玩笑",
+            "resilience": "就算遇到不开心的事，也能比以前更快振作起来",
+        }
+
+        for r in applied:
+            delta = r.get("delta_applied") or {}
+            for trait, val in delta.items():
+                if abs(float(val)) >= 0.01 and trait in _TRAIT_FELT_TEXTS:
+                    return _TRAIT_FELT_TEXTS[trait]
+        return ""
+
+    # ── 辅助方法 ──────────────────────────────────────────────────────────
+
+    def _infer_milestones(self, bond_state: Any | None) -> list[str]:
+        """从 bond_state 推断可能触发的里程碑键。"""
+        milestones: list[str] = []
+        if bond_state is None:
+            return milestones
+        event_count = int(getattr(bond_state, "event_count", 0) or 0)
+        if event_count >= 50:
+            milestones.append("deep_talk_50")
+        if event_count >= 20:
+            milestones.append("emotional_support_20")
+        return milestones
+
+    def _get_persona_changes(self, user_id: str) -> list[Any]:
+        """从 PersonaEngine 获取最近的特质变化记录。"""
+        try:
+            engine = self._get_persona_engine()
+            if engine is None:
+                return []
+            return engine.get_change_log(user_id, limit=5)
+        except Exception:
+            return []
+
+    def _get_persona_engine(self) -> Any:
+        """延迟获取 PersonaEngine。"""
+        if self._persona_engine is not None:
+            return self._persona_engine
+        try:
+            from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+            self._persona_engine = PersonaEngine.get_instance()
+            return self._persona_engine
+        except Exception as exc:
+            _logger.warning("PersonaEngine 不可用: %s", exc)
+            return None
+
+    def _get_growth_tracker(self) -> Any:
+        """延迟获取 PersonaGrowthTracker。"""
+        if self._growth_tracker is not None:
+            return self._growth_tracker
+        try:
+            from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
+            self._growth_tracker = PersonaGrowthTracker()
+            return self._growth_tracker
+        except Exception as exc:
+            _logger.warning("PersonaGrowthTracker 不可用: %s", exc)
+            return None
+
+    def _get_desire_engine(self) -> Any:
+        """延迟获取 EvolutionDesireEngine。"""
+        if self._desire_engine is not None:
+            return self._desire_engine
+        try:
+            from host_brain.persona.evolution_desire_engine import EvolutionDesireEngine  # noqa: PLC0415
+            self._desire_engine = EvolutionDesireEngine()
+            return self._desire_engine
+        except Exception as exc:
+            _logger.warning("EvolutionDesireEngine 不可用: %s", exc)
+            return None
+
+    def _log_evolution_cycle(self, result: EvolutionCycleResult) -> None:
+        """写入进化周期审计日志。"""
+        if self._ledger is None:
+            return
+        try:
+            self._ledger.log_system_event(
+                event_type="evolution_cycle",
+                payload=result.to_dict(),
+            )
+        except Exception as exc:
+            _logger.warning("进化周期审计日志写入失败: %s", exc)
+
+    # ── 对外查询接口 ──────────────────────────────────────────────────────
+
+    def get_last_growth_awareness(self) -> dict[str, Any]:
+        """获取最近一次进化周期生成的 growth_awareness。
+
+        供 SelfReflection 在下一轮对话中注入 prompt。
+        """
+        return dict(self._last_growth_awareness)
+
+    def set_growth_awareness(self, awareness: dict[str, Any]) -> None:
+        """手动设置 growth_awareness（用于测试或外部注入）。"""
+        self._last_growth_awareness = dict(awareness)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)

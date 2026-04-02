@@ -618,6 +618,73 @@ async def runtime_lifespan(
                 }
                 return execute_proactive_talk(args=args, context=context)
 
+            # ── evolution_cycle：每日进化周期（Phase XVI）──────────────
+            if skill_name == "evolution_cycle":
+                try:
+                    from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
+                    from host_brain.app.emotion_context import _global_emotion_timeline  # noqa: PLC0415
+                    from host_brain.app.dependencies import get_bond_stage_engine as _get_bse_evo  # noqa: PLC0415
+                    import datetime as _dt_evo  # noqa: PLC0415
+
+                    _evo_orchestrator = EvolutionOrchestrator()
+                    _evo_args = dict(system_intent.get("args") or {})
+                    _evo_user_id = str(_evo_args.get("user_id") or "user_1")
+                    _evo_date = str(_evo_args.get("date") or _dt_evo.date.today().isoformat())
+
+                    # 收集情感时间线数据
+                    _evo_tl_summary: dict = {}
+                    _evo_tl_diary: dict = {}
+                    try:
+                        _evo_tl_summary = _global_emotion_timeline.rebuild_summary(
+                            window_ms=24 * 3600 * 1000
+                        )
+                        _evo_tl_diary = _global_emotion_timeline.build_daily_diary(
+                            window_ms=24 * 3600 * 1000
+                        )
+                    except Exception:
+                        pass
+
+                    # 收集 Bond 状态
+                    _evo_bond_state = None
+                    _evo_bond_summary: dict = {}
+                    try:
+                        _evo_bse = _get_bse_evo()
+                        if _evo_bse is not None:
+                            _evo_bond_state = _evo_bse.get_bond_state(session_id="default")
+                            if _evo_bond_state is not None:
+                                _evo_bond_summary = {
+                                    "stage": str(getattr(_evo_bond_state, "stage", "") or ""),
+                                    "trend": str(getattr(_evo_bond_state, "trend", "") or ""),
+                                    "capability_hint": str(
+                                        getattr(_evo_bond_state, "capability_hint", "") or ""
+                                    ),
+                                }
+                    except Exception:
+                        pass
+
+                    _evo_result = _evo_orchestrator.run_evolution_cycle(
+                        user_id=_evo_user_id,
+                        date=_evo_date,
+                        timeline_summary=_evo_tl_summary,
+                        timeline_diary=_evo_tl_diary,
+                        bond_state=_evo_bond_state,
+                        bond_summary=_evo_bond_summary,
+                    )
+                    logger.info(
+                        "进化周期完成: date=%s traits_changed=%s errors=%d",
+                        _evo_date, _evo_result.traits_changed, len(_evo_result.errors),
+                    )
+                    return {
+                        "status": "OK",
+                        "cycle_id": _evo_result.cycle_id,
+                        "traits_changed": _evo_result.traits_changed,
+                        "growth_awareness": _evo_result.growth_awareness,
+                        "errors": _evo_result.errors,
+                    }
+                except Exception as _evo_exc:
+                    logger.warning("evolution_cycle 执行失败（降级）: %s", _evo_exc)
+                    return {"status": "DEGRADED", "reason_code": "EVOLUTION_CYCLE_FAILED", "detail": str(_evo_exc)}
+
             # 启动 NatsumeScheduler，并注入 /scheduler 路由 providers
             from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
             from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
@@ -633,6 +700,28 @@ async def runtime_lifespan(
                 intent_dispatcher=_proactive_intent_dispatcher,
             )
             _natsume_scheduler.start()
+
+            # ── 注册进化周期任务（Phase XVI）：每日凌晨 3:00 触发 ──────
+            try:
+                _evolution_task = SchedulerTaskConfig(
+                    task_id="evolution_cycle_daily",
+                    trigger_mode=TriggerMode.CRON,
+                    trigger_config={"hour": 3, "minute": 0},
+                    intent_template={
+                        "skill_name": "evolution_cycle",
+                        "args": {"user_id": "user_1"},
+                        "proposer_node_id": "scheduler",
+                    },
+                    priority=TaskPriority.NORMAL,
+                    mode_allowlist=["normal", "sleep"],
+                    enabled=True,
+                    description="每日进化周期：自省→里程碑成长→交互驱动成长→进化意识更新",
+                )
+                if _proactive_registry.get("evolution_cycle_daily") is None:
+                    _proactive_registry.register(_evolution_task)
+                    logger.info("进化周期任务已注册: task_id=evolution_cycle_daily, cron=03:00")
+            except Exception as _evo_task_exc:
+                logger.warning("进化周期任务注册失败（降级）: %s", _evo_task_exc)
 
             new_module_statuses["proactive_talk_scheduler"] = (
                 f"OK (task_id={_proactive_task.task_id}, interval=180s, idle_threshold=45min)"

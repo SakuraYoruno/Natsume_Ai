@@ -98,6 +98,7 @@ class SelfReflection:
         persona_changes: list[Any] | None = None,
         last_deep_talk_ts_ms: int = 0,
         current_ts_ms: int = 0,
+        growth_awareness: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """尝试生成自省脉冲。
 
@@ -107,6 +108,8 @@ class SelfReflection:
         Args:
             turn_count: 当前对话轮次
             其他参数同 SelfModel.build_snapshot()
+            growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成，Phase XVI）。
+                包含 recent_change / trait_felt / milestone_felt / desire 字段。
 
         Returns:
             self_reflection_pulse 字典或 None
@@ -132,11 +135,12 @@ class SelfReflection:
             # 一致性校验：Bond 阶段 × 关系感知
             snapshot = self._validate_consistency(snapshot, bond_state)
 
-            pulse = build_self_reflection_pulse(snapshot)
+            pulse = build_self_reflection_pulse(snapshot, growth_awareness=growth_awareness)
             _logger.info(
-                "自省触发 (turn=%d): self_awareness='%s'",
+                "自省触发 (turn=%d): self_awareness='%s'%s",
                 turn_count,
                 pulse.get("self_awareness", "")[:60],
+                " [含进化意识]" if growth_awareness else "",
             )
             return pulse
 
@@ -192,18 +196,36 @@ class SelfReflection:
 # self_reflection_pulse 构建函数
 # ---------------------------------------------------------------------------
 
-def build_self_reflection_pulse(snapshot: dict[str, Any]) -> dict[str, Any]:
+def build_self_reflection_pulse(
+    snapshot: dict[str, Any],
+    *,
+    growth_awareness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """将 SelfModelSnapshot 转化为 self_reflection_pulse 槽位数据。
 
+    Args:
+        snapshot: SelfModelSnapshot.as_dict() 格式的字典
+        growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成），可选。
+            包含 recent_change / trait_felt / milestone_felt / desire 字段。
+
     Returns:
-        包含 self_awareness、mood_awareness、growth_note 的字典
+        包含 self_awareness、mood_awareness、growth_note、growth_awareness 的字典
     """
     self_awareness = build_self_awareness_text(snapshot)
     mood_awareness = build_mood_awareness_text(snapshot)
     growth_note = build_growth_note_text(snapshot)
 
-    return {
+    pulse: dict[str, Any] = {
         "self_awareness": self_awareness,
         "mood_awareness": mood_awareness,
         "growth_note": growth_note,
     }
+
+    # 注入进化意识（Phase XVI）
+    if growth_awareness and isinstance(growth_awareness, dict):
+        # 过滤空值，只注入有内容的字段
+        filtered = {k: v for k, v in growth_awareness.items() if v}
+        if filtered:
+            pulse["growth_awareness"] = filtered
+
+    return pulse
