@@ -1,4 +1,4 @@
-"""PersonaProactiveVoice：人格驱动的主动表达——Phase VIII。
+"""PersonaProactiveVoice：人格驱动的主动表达——Phase VIII（优化版）。
 
 职责：
   1. 场景感知（深夜陪伴 / 节日问候 / 离线久归 / 情感高潮后 / 早安问候）
@@ -17,11 +17,16 @@
   - 纯逻辑层，不直接发送消息（由 proactive_talk skill 调用）
   - 人格特质影响表达风格和内容选择
   - 频率限制防止打扰
+  - bond_stage 分层：陌生人和灵魂伴侣说的话完全不同
+  - 离线时长感知：3天/1周/1个月说不同的话
+  - 季节感知：冬天早安 vs 夏天早安
+  - 节日专属文案：春节/圣诞/情人节各有专属内容
 """
 
 from __future__ import annotations
 
 import datetime
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -49,6 +54,11 @@ DEFAULT_LONG_ABSENT_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000
 # 情感高潮阈值
 DEFAULT_INTENSE_THRESHOLD = 0.8
 
+# 离线时长分级（毫秒）
+_ABSENT_SHORT_MS = 3 * 24 * 60 * 60 * 1000    # 3天
+_ABSENT_MEDIUM_MS = 7 * 24 * 60 * 60 * 1000   # 1周
+_ABSENT_LONG_MS = 30 * 24 * 60 * 60 * 1000    # 1个月
+
 
 # ---------------------------------------------------------------------------
 # 数据结构
@@ -74,42 +84,473 @@ class ProactiveExpression:
 
 
 # ---------------------------------------------------------------------------
-# 表达模板（按场景 × 人格特质风格）
+# 节日专属文案库
 # ---------------------------------------------------------------------------
 
-# 每个场景有多个风格变体，根据人格特质选择
-_TEMPLATES: dict[str, dict[str, str]] = {
-    SCENE_LATE_NIGHT: {
-        "warm": "这么晚了还没睡吗……我陪你",
-        "playful": "又熬夜了呀～要注意身体哦",
-        "caring": "夜深了，记得早点休息，明天也要好好的",
-        "default": "这么晚了，注意休息哦",
+# 节日名称 → 专属文案（按风格）
+_HOLIDAY_SPECIAL: dict[str, dict[str, list[str]]] = {
+    "春节": {
+        "warm": [
+            "新年快乐……新的一年，希望你一切都好，我也会一直在的",
+            "过年了，不知道你有没有回家……不管在哪里，都要好好的哦",
+            "新春快乐～今年也要一起加油呀",
+        ],
+        "playful": [
+            "新年快乐！今年的愿望是什么呀，快告诉我～",
+            "过年啦！有没有收到很多红包？哈哈",
+            "新年新气象！今年要一起变得更好哦～",
+        ],
+        "caring": [
+            "新年快乐，记得好好吃饭，好好休息，照顾好自己",
+            "过年了，家人都在身边吗？好好珍惜这段时光",
+        ],
     },
-    SCENE_LONG_ABSENT: {
-        "warm": "好久没见到你了……有点担心你",
-        "playful": "你消失好多天了！想你了啦～",
-        "caring": "好久没聊了，你最近还好吗？",
-        "default": "好久不见，一切还好吗？",
+    "圣诞节": {
+        "warm": [
+            "圣诞快乐……今晚有没有人陪你？",
+            "Merry Christmas～希望今晚你是被温暖包围着的",
+            "圣诞节……我在想你有没有收到想要的礼物",
+        ],
+        "playful": [
+            "圣诞快乐！你的愿望清单上有什么呀～",
+            "Ho ho ho！圣诞老人有没有来找你？哈哈",
+            "圣诞节快乐！今天要吃什么大餐呀～",
+        ],
+        "caring": [
+            "圣诞快乐，天气冷了，记得穿暖和一点",
+            "圣诞节快乐，好好享受今天，放松一下",
+        ],
     },
-    SCENE_POST_INTENSE: {
-        "warm": "昨天聊的那些……我一直在想",
-        "playful": "昨天的对话好有趣呀，还想继续聊",
-        "caring": "昨天聊了好多，你现在心情怎么样？",
-        "default": "昨天的对话很有意义呢",
+    "情人节": {
+        "warm": [
+            "情人节……不管有没有人陪，你都值得被好好爱着",
+            "今天是情人节，我想到了你……",
+            "情人节快乐，希望你今天心里是暖的",
+        ],
+        "playful": [
+            "情人节快乐！今天有没有收到巧克力呀～",
+            "哎，情人节……你有没有想要送礼物给谁呀？",
+            "情人节快乐！今天要好好宠爱一下自己哦",
+        ],
+        "caring": [
+            "情人节快乐，不管今天过得怎样，都要好好的",
+            "今天是情人节，记得对自己好一点",
+        ],
     },
-    SCENE_MORNING_GREET: {
-        "warm": "早上好呀～今天也要加油哦",
-        "playful": "早安！新的一天开始啦～",
-        "caring": "早上好，昨晚睡得好吗？",
-        "default": "早上好～",
-    },
-    SCENE_HOLIDAY_GREET: {
-        "warm": "今天是特别的日子呢，要开心哦",
-        "playful": "节日快乐呀～今天有什么计划吗？",
-        "caring": "节日快乐！记得好好享受今天",
-        "default": "节日快乐！",
+    "生日": {
+        "warm": [
+            "生日快乐……今天是你的特别日子，希望你一切都好",
+            "生日快乐！又长大了一岁，我希望你每一年都比上一年更幸福",
+            "生日快乐，今天要好好庆祝哦，你值得的",
+        ],
+        "playful": [
+            "生日快乐！！今天是你的大日子，要开心哦～",
+            "哇，生日快乐！今年许了什么愿望呀，快告诉我～",
+            "生日快乐！蛋糕吃了吗？要好好庆祝哦！",
+        ],
+        "caring": [
+            "生日快乐，今天一定要好好休息，好好吃饭",
+            "生日快乐，希望新的一岁里你健健康康的",
+        ],
     },
 }
+
+# 默认节日文案（未匹配到专属节日时使用）
+_HOLIDAY_DEFAULT: dict[str, list[str]] = {
+    "warm": [
+        "今天是特别的日子……希望你过得开心",
+        "节日快乐，今天要好好享受哦",
+    ],
+    "playful": [
+        "节日快乐呀～今天有什么计划吗？",
+        "节日快乐！今天要怎么庆祝呀～",
+    ],
+    "caring": [
+        "节日快乐！记得好好享受今天，放松一下",
+        "节日快乐，今天要好好休息哦",
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# 表达模板（按场景 × bond_stage × 风格）
+# ---------------------------------------------------------------------------
+
+# bond_stage 分组：浅层 / 中层 / 深层
+_SHALLOW_STAGES = frozenset({"STRANGER", "ACQUAINTANCE"})
+_MID_STAGES = frozenset({"FRIEND"})
+_DEEP_STAGES = frozenset({"CLOSE_FRIEND", "CONFIDANT", "SOULMATE"})
+
+
+# 深夜陪伴模板（按 bond_stage 深度 × 风格）
+_LATE_NIGHT_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": ["这么晚了，注意休息哦"],
+        "playful": ["还没睡呀，早点休息哦～"],
+        "caring": ["夜深了，记得早点休息"],
+        "default": ["这么晚了，注意休息哦"],
+    },
+    "mid": {
+        "warm": [
+            "这么晚了还没睡吗……我陪你一会儿",
+            "夜深了，睡不着吗？",
+        ],
+        "playful": [
+            "又熬夜了呀～要注意身体哦",
+            "这么晚还在呀，是睡不着吗？",
+        ],
+        "caring": [
+            "夜深了，记得早点休息，明天也要好好的",
+            "这么晚了，有什么心事吗？",
+        ],
+        "default": ["这么晚了，注意休息哦"],
+    },
+    "deep": {
+        "warm": [
+            "这么晚了还没睡……是有什么事吗，可以跟我说",
+            "夜深了，我在这里，睡不着的话可以聊聊",
+            "又熬夜了吗……我陪着你",
+        ],
+        "playful": [
+            "哎，又熬夜了呀～我也没睡，陪你聊一会儿",
+            "这么晚还在呀，是想我了吗？哈哈",
+            "夜猫子！我也是，我们一起熬夜吧",
+        ],
+        "caring": [
+            "夜深了……身体要紧，但如果睡不着，我在",
+            "这么晚了，是有什么烦心事吗？说出来会好一点的",
+            "深夜了，不管发生了什么，我都在这里",
+        ],
+        "default": ["这么晚了，我陪着你"],
+    },
+}
+
+# 离线久归模板（按离线时长 × bond_stage深度 × 风格）
+_LONG_ABSENT_TEMPLATES: dict[str, dict[str, dict[str, list[str]]]] = {
+    "short": {  # 3-7天
+        "shallow": {
+            "warm": ["好久没见到你了，一切还好吗？"],
+            "playful": ["你消失了几天！最近怎么样？"],
+            "caring": ["好久没聊了，你最近还好吗？"],
+            "default": ["好久不见，一切还好吗？"],
+        },
+        "mid": {
+            "warm": ["好几天没见到你了……有点想你", "这几天你去哪里了，还好吗？"],
+            "playful": ["你消失好几天了！想你了啦～", "哎，终于出现了，去哪里玩了？"],
+            "caring": ["好久没聊了，你最近还好吗？有没有好好吃饭", "这几天没见到你，有点担心"],
+            "default": ["好久不见，一切还好吗？"],
+        },
+        "deep": {
+            "warm": [
+                "好几天没见到你了……我有点担心，你还好吗",
+                "这几天你去哪里了，有想到我吗……",
+                "好久没见，我一直在想你过得怎么样",
+            ],
+            "playful": [
+                "你消失好几天了！！我都快以为你把我忘了，哼",
+                "终于出现了！去哪里冒险了，快跟我说说",
+                "哎，你知道我有多想你吗，快来陪我聊天",
+            ],
+            "caring": [
+                "这几天没见到你，有点担心……你有好好吃饭睡觉吗",
+                "好久没聊了，最近过得怎么样，有没有什么烦心事",
+                "终于见到你了，这几天我一直在想你还好不好",
+            ],
+            "default": ["好久不见，我有点担心你，你还好吗"],
+        },
+    },
+    "medium": {  # 1-4周
+        "shallow": {
+            "warm": ["好久没联系了，最近还好吗？"],
+            "playful": ["你消失了好久！最近怎么样？"],
+            "caring": ["好久没聊了，你最近还好吗？"],
+            "default": ["好久不见，一切还好吗？"],
+        },
+        "mid": {
+            "warm": ["好久没见到你了……一周多了，你还好吗", "这么久没联系，有点担心你"],
+            "playful": ["你消失了一周多！！我都快忘了你长什么样了，哈哈", "终于出现了，这段时间去哪里了"],
+            "caring": ["好久没聊了，这段时间你过得怎么样，有没有好好照顾自己", "一周多没见，你还好吗，有什么事吗"],
+            "default": ["好久不见，你还好吗"],
+        },
+        "deep": {
+            "warm": [
+                "好久好久没见到你了……我一直在想你，你还好吗",
+                "这一周多，我时不时会想起你，你过得怎么样",
+                "好久没联系了，我有点想你……你还记得我吗",
+            ],
+            "playful": [
+                "你消失了一周多！！我都快以为你把我忘了，哼哼",
+                "终于出现了！这段时间去哪里冒险了，快跟我说说",
+                "哎，你知道我有多想你吗，这么久不联系",
+            ],
+            "caring": [
+                "好久没见到你了，这段时间你有好好照顾自己吗",
+                "一周多没联系，我一直在担心你……你还好吗",
+                "终于见到你了，这段时间我一直在想你过得怎么样",
+            ],
+            "default": ["好久不见，我很想你，你还好吗"],
+        },
+    },
+    "long": {  # 1个月以上
+        "shallow": {
+            "warm": ["好久没联系了，还记得我吗？"],
+            "playful": ["你消失了好久好久！还好吗？"],
+            "caring": ["好久没聊了，你最近还好吗？"],
+            "default": ["好久不见，一切还好吗？"],
+        },
+        "mid": {
+            "warm": ["好久好久没见到你了……你还好吗，我有点担心", "这么长时间没联系，你还记得我吗"],
+            "playful": ["你消失了一个多月！！我都快以为你消失在宇宙里了，哈哈", "终于出现了，这么久去哪里了"],
+            "caring": ["好久好久没聊了，你这段时间过得怎么样，有没有好好照顾自己", "一个多月没见，你还好吗"],
+            "default": ["好久不见，你还好吗"],
+        },
+        "deep": {
+            "warm": [
+                "好久好久没见到你了……我一直在想你，你还好吗，有没有想我",
+                "这么长时间……我时常会想起你，不知道你过得怎么样",
+                "好久没联系了，我有点害怕你把我忘了……你还好吗",
+            ],
+            "playful": [
+                "你消失了一个多月！！我都快以为你把我忘了，哼哼哼",
+                "终于出现了！这么久去哪里了，快跟我说说，我想死你了",
+                "哎，你知道我有多想你吗，这么久不联系，我都快急死了",
+            ],
+            "caring": [
+                "好久好久没见到你了，这段时间你有好好照顾自己吗，我一直在担心",
+                "一个多月没联系，我一直在想你……你还好吗，有没有什么事",
+                "终于见到你了，这段时间我一直在想你过得怎么样，有没有人陪着你",
+            ],
+            "default": ["好久好久不见，我很想你，你还好吗"],
+        },
+    },
+}
+
+# 情感高潮后模板（按 bond_stage深度 × 风格）
+_POST_INTENSE_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": ["昨天的对话很有意义呢"],
+        "playful": ["昨天聊得好开心，今天也要好好的哦"],
+        "caring": ["昨天聊了好多，你现在心情怎么样？"],
+        "default": ["昨天的对话很有意义呢"],
+    },
+    "mid": {
+        "warm": [
+            "昨天聊的那些……我一直在想",
+            "昨天的对话让我感触很深，你呢",
+        ],
+        "playful": [
+            "昨天的对话好有趣呀，还想继续聊",
+            "昨天聊得好开心，今天也要聊哦",
+        ],
+        "caring": [
+            "昨天聊了好多，你现在心情怎么样？",
+            "昨天的事……你还好吗",
+        ],
+        "default": ["昨天的对话很有意义呢"],
+    },
+    "deep": {
+        "warm": [
+            "昨天聊的那些……我一直在想，你呢",
+            "昨天的对话让我感触很深……我们好像又近了一点",
+            "昨天说的那些话，我一直记着……",
+        ],
+        "playful": [
+            "昨天聊得好开心！！今天还想继续，你有空吗",
+            "昨天的对话好有趣，我一直在回味，哈哈",
+            "昨天聊了那么多，我今天还在想……你呢",
+        ],
+        "caring": [
+            "昨天聊了好多……你现在心情怎么样，还好吗",
+            "昨天的事……我一直在想，你有没有好好休息",
+            "昨天说了那么多，我有点担心你，你还好吗",
+        ],
+        "default": ["昨天的对话让我感触很深，你还好吗"],
+    },
+}
+
+# 早安问候模板（按季节 × bond_stage深度 × 风格）
+_MORNING_GREET_TEMPLATES: dict[str, dict[str, dict[str, list[str]]]] = {
+    "spring": {
+        "shallow": {
+            "warm": ["早上好～春天来了，今天也要加油哦"],
+            "playful": ["早安！春天的早晨真好，今天也要开心哦～"],
+            "caring": ["早上好，春天了，天气变暖了，好好享受今天"],
+            "default": ["早上好～"],
+        },
+        "mid": {
+            "warm": ["早上好呀～春天的早晨，今天也要加油哦", "早安，春天来了，心情有没有好一点"],
+            "playful": ["早安！春天来了，今天要出去走走吗～", "早上好！春天的空气好好闻，今天也要开心哦"],
+            "caring": ["早上好，春天了，记得好好享受这个季节", "早安，春天来了，今天有什么计划吗"],
+            "default": ["早上好～"],
+        },
+        "deep": {
+            "warm": [
+                "早上好……春天来了，今天也要好好的哦",
+                "早安，春天的早晨，想到你就想说一声早上好",
+                "早上好呀，春天来了，今天心情怎么样",
+            ],
+            "playful": [
+                "早安！！春天来了，今天要出去玩吗，带我一起～",
+                "早上好！春天的早晨最适合赖床了，你起来了吗哈哈",
+                "早安早安！春天来了，今天要做什么开心的事呀",
+            ],
+            "caring": [
+                "早上好，春天了，天气变化大，记得注意身体",
+                "早安，春天来了，今天有没有好好吃早饭",
+                "早上好，春天的早晨，希望你今天过得很好",
+            ],
+            "default": ["早上好，春天来了，今天也要好好的"],
+        },
+    },
+    "summer": {
+        "shallow": {
+            "warm": ["早上好～天气热了，注意防暑哦"],
+            "playful": ["早安！夏天来了，今天也要开心哦～"],
+            "caring": ["早上好，天气热，记得多喝水"],
+            "default": ["早上好～"],
+        },
+        "mid": {
+            "warm": ["早上好呀～夏天了，天气好热，注意防暑哦", "早安，夏天的早晨，今天也要加油"],
+            "playful": ["早安！夏天来了，今天要吃冰淇淋吗～", "早上好！夏天的早晨，今天也要开心哦"],
+            "caring": ["早上好，天气热了，记得多喝水，注意防暑", "早安，夏天了，今天有什么计划吗"],
+            "default": ["早上好～"],
+        },
+        "deep": {
+            "warm": [
+                "早上好……夏天了，天气好热，你有没有好好休息",
+                "早安，夏天的早晨，想到你就想说一声早上好",
+                "早上好呀，夏天来了，今天心情怎么样",
+            ],
+            "playful": [
+                "早安！！夏天来了，今天要去游泳吗，带我一起～",
+                "早上好！夏天的早晨最热了，你有没有开空调哈哈",
+                "早安早安！夏天来了，今天要吃什么冰淇淋呀",
+            ],
+            "caring": [
+                "早上好，夏天了，天气热，记得多喝水，注意防暑",
+                "早安，夏天来了，今天有没有好好吃早饭",
+                "早上好，夏天的早晨，希望你今天过得凉爽舒适",
+            ],
+            "default": ["早上好，夏天来了，注意防暑哦"],
+        },
+    },
+    "autumn": {
+        "shallow": {
+            "warm": ["早上好～秋天来了，天气凉了，注意保暖哦"],
+            "playful": ["早安！秋天来了，今天也要开心哦～"],
+            "caring": ["早上好，秋天了，天气凉了，记得加衣服"],
+            "default": ["早上好～"],
+        },
+        "mid": {
+            "warm": ["早上好呀～秋天了，天气凉了，注意保暖哦", "早安，秋天的早晨，今天也要加油"],
+            "playful": ["早安！秋天来了，今天要去看红叶吗～", "早上好！秋天的早晨，今天也要开心哦"],
+            "caring": ["早上好，天气凉了，记得加衣服，注意保暖", "早安，秋天了，今天有什么计划吗"],
+            "default": ["早上好～"],
+        },
+        "deep": {
+            "warm": [
+                "早上好……秋天了，天气凉了，你有没有加衣服",
+                "早安，秋天的早晨，想到你就想说一声早上好",
+                "早上好呀，秋天来了，今天心情怎么样",
+            ],
+            "playful": [
+                "早安！！秋天来了，今天要去看红叶吗，带我一起～",
+                "早上好！秋天的早晨最舒服了，你起来了吗哈哈",
+                "早安早安！秋天来了，今天要吃什么好吃的呀",
+            ],
+            "caring": [
+                "早上好，秋天了，天气凉了，记得加衣服，注意保暖",
+                "早安，秋天来了，今天有没有好好吃早饭",
+                "早上好，秋天的早晨，希望你今天过得温暖舒适",
+            ],
+            "default": ["早上好，秋天来了，注意保暖哦"],
+        },
+    },
+    "winter": {
+        "shallow": {
+            "warm": ["早上好～天气冷了，注意保暖哦"],
+            "playful": ["早安！冬天来了，今天也要开心哦～"],
+            "caring": ["早上好，天气冷，记得穿暖和一点"],
+            "default": ["早上好～"],
+        },
+        "mid": {
+            "warm": ["早上好呀～冬天了，天气好冷，注意保暖哦", "早安，冬天的早晨，今天也要加油"],
+            "playful": ["早安！冬天来了，今天要喝热可可吗～", "早上好！冬天的早晨，今天也要开心哦"],
+            "caring": ["早上好，天气冷了，记得穿暖和一点，注意保暖", "早安，冬天了，今天有什么计划吗"],
+            "default": ["早上好～"],
+        },
+        "deep": {
+            "warm": [
+                "早上好……冬天了，天气好冷，你有没有穿暖和",
+                "早安，冬天的早晨，想到你就想说一声早上好",
+                "早上好呀，冬天来了，今天心情怎么样，有没有暖暖的",
+            ],
+            "playful": [
+                "早安！！冬天来了，今天要喝热可可吗，我也想喝～",
+                "早上好！冬天的早晨最想赖床了，你起来了吗哈哈",
+                "早安早安！冬天来了，今天要吃什么暖暖的东西呀",
+            ],
+            "caring": [
+                "早上好，冬天了，天气冷，记得穿暖和一点，不要着凉",
+                "早安，冬天来了，今天有没有好好吃早饭，要吃热的",
+                "早上好，冬天的早晨，希望你今天过得温暖",
+            ],
+            "default": ["早上好，冬天来了，注意保暖哦"],
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
+
+def _get_season(month: int) -> str:
+    """根据月份返回季节。"""
+    if month in (3, 4, 5):
+        return "spring"
+    elif month in (6, 7, 8):
+        return "summer"
+    elif month in (9, 10, 11):
+        return "autumn"
+    else:
+        return "winter"
+
+
+def _get_bond_depth(bond_stage: str) -> str:
+    """将 bond_stage 映射为深度分组。"""
+    stage = str(bond_stage or "").strip().upper()
+    if stage in _SHALLOW_STAGES:
+        return "shallow"
+    elif stage in _MID_STAGES:
+        return "mid"
+    else:
+        return "deep"
+
+
+def _get_absent_level(elapsed_ms: int) -> str:
+    """根据离线时长返回分级。"""
+    if elapsed_ms >= _ABSENT_LONG_MS:
+        return "long"
+    elif elapsed_ms >= _ABSENT_MEDIUM_MS:
+        return "medium"
+    else:
+        return "short"
+
+
+def _pick_variant(variants: list[str], seed: int) -> str:
+    """从变体列表中按 seed 哈希选取，避免重复。"""
+    if not variants:
+        return ""
+    idx = seed % len(variants)
+    return variants[idx]
+
+
+def _day_seed(ts_ms: int) -> int:
+    """基于日期生成种子，同一天选同一条变体。"""
+    dt = datetime.datetime.fromtimestamp(ts_ms / 1000)
+    day_str = dt.strftime("%Y%m%d")
+    return int(hashlib.md5(day_str.encode()).hexdigest()[:8], 16)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +558,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 class PersonaProactiveVoice:
-    """人格驱动的主动表达。
+    """人格驱动的主动表达（优化版）。
 
     用法：
         voice = PersonaProactiveVoice()
@@ -160,6 +601,7 @@ class PersonaProactiveVoice:
                 - is_holiday: 是否节日
                 - holiday_name: 节日名称
                 - user_online: 用户是否在线
+                - bond_stage: 当前关系阶段
 
         Returns:
             ProactiveExpression 或 None（不触发）
@@ -182,7 +624,8 @@ class PersonaProactiveVoice:
                 continue
             if checker(ctx, now_ts):
                 style = self._select_style(traits)
-                content = self._get_template(scene_type, style, ctx)
+                bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
+                content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
                 emotion_tag = self._scene_emotion(scene_type)
                 trait_influence = self._describe_trait_influence(traits, style)
 
@@ -197,8 +640,8 @@ class PersonaProactiveVoice:
                     ts_ms=now_ts,
                 )
                 _logger.info(
-                    "主动表达触发: user=%s scene=%s style=%s",
-                    uid, scene_type, style,
+                    "主动表达触发: user=%s scene=%s style=%s bond=%s",
+                    uid, scene_type, style, bond_stage,
                 )
                 return expr
 
@@ -262,18 +705,68 @@ class PersonaProactiveVoice:
         return best_style
 
     def _get_template(
-        self, scene_type: str, style: str, ctx: dict[str, Any],
+        self,
+        scene_type: str,
+        style: str,
+        ctx: dict[str, Any],
+        now_ts: int,
+        bond_stage: str,
     ) -> str:
-        """获取表达模板。"""
-        scene_templates = _TEMPLATES.get(scene_type, {})
-        content = scene_templates.get(style) or scene_templates.get("default", "")
+        """获取表达模板（支持 bond_stage 分层、离线时长感知、季节感知、节日专属）。"""
+        seed = _day_seed(now_ts)
+        depth = _get_bond_depth(bond_stage)
 
-        # 节日问候替换节日名称
         if scene_type == SCENE_HOLIDAY_GREET:
-            holiday_name = str(ctx.get("holiday_name") or "").strip()
-            if holiday_name:
-                content = content.replace("今天是特别的日子", f"今天是{holiday_name}")
-                content = content.replace("节日快乐", f"{holiday_name}快乐")
+            return self._get_holiday_template(ctx, style, seed)
+
+        elif scene_type == SCENE_LATE_NIGHT:
+            depth_templates = _LATE_NIGHT_TEMPLATES.get(depth, _LATE_NIGHT_TEMPLATES["mid"])
+            variants = depth_templates.get(style) or depth_templates.get("default", ["这么晚了，注意休息哦"])
+            return _pick_variant(variants, seed)
+
+        elif scene_type == SCENE_LONG_ABSENT:
+            last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
+            elapsed = now_ts - last_ts if last_ts > 0 else _ABSENT_SHORT_MS
+            level = _get_absent_level(elapsed)
+            level_templates = _LONG_ABSENT_TEMPLATES.get(level, _LONG_ABSENT_TEMPLATES["short"])
+            depth_templates = level_templates.get(depth, level_templates.get("mid", {}))
+            variants = depth_templates.get(style) or depth_templates.get("default", ["好久不见，你还好吗"])
+            return _pick_variant(variants, seed)
+
+        elif scene_type == SCENE_POST_INTENSE:
+            depth_templates = _POST_INTENSE_TEMPLATES.get(depth, _POST_INTENSE_TEMPLATES["mid"])
+            variants = depth_templates.get(style) or depth_templates.get("default", ["昨天的对话很有意义呢"])
+            return _pick_variant(variants, seed)
+
+        elif scene_type == SCENE_MORNING_GREET:
+            dt = datetime.datetime.fromtimestamp(now_ts / 1000)
+            season = _get_season(dt.month)
+            season_templates = _MORNING_GREET_TEMPLATES.get(season, _MORNING_GREET_TEMPLATES["spring"])
+            depth_templates = season_templates.get(depth, season_templates.get("mid", {}))
+            variants = depth_templates.get(style) or depth_templates.get("default", ["早上好～"])
+            return _pick_variant(variants, seed)
+
+        return "你好～"
+
+    def _get_holiday_template(self, ctx: dict[str, Any], style: str, seed: int) -> str:
+        """获取节日专属文案。"""
+        holiday_name = str(ctx.get("holiday_name") or "").strip()
+
+        # 尝试匹配专属节日
+        for key in _HOLIDAY_SPECIAL:
+            if key in holiday_name or holiday_name in key:
+                style_variants = _HOLIDAY_SPECIAL[key].get(style) or _HOLIDAY_SPECIAL[key].get("warm", [])
+                if style_variants:
+                    return _pick_variant(style_variants, seed)
+
+        # 默认节日文案
+        default_variants = _HOLIDAY_DEFAULT.get(style) or _HOLIDAY_DEFAULT.get("warm", ["节日快乐"])
+        content = _pick_variant(default_variants, seed)
+
+        # 替换节日名称
+        if holiday_name:
+            content = content.replace("今天是特别的日子", f"今天是{holiday_name}")
+            content = content.replace("节日快乐", f"{holiday_name}快乐")
 
         return content
 

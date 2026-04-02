@@ -187,18 +187,13 @@ class PersonaExpressionAdapter:
     def build_prompt_section(self, hint: ExpressionHint) -> str:
         """将 ExpressionHint 格式化为 prompt 注入段落。
 
+        移除纯数值字段（echo_weight_modifier / follow_up_tendency），
+        全部转为自然语言描述，减少 LLM 注意力被数字分散。
+
         Returns:
             可直接嵌入 system prompt 的文本段落
         """
-        lines: list[str] = [
-            "PERSONA_EXPRESSION_HINT:",
-            f"- style_hint: {hint.style_hint}",
-            f"- tone: {hint.tone}",
-            f"- echo_weight_modifier: {hint.echo_weight_modifier:+.3f}",
-            f"- follow_up_tendency: {hint.追问倾向:.3f}",
-        ]
-
-        # 追加行为指导（根据 tone 生成自然语言指导）
+        # ── tone → 行为指导 ──────────────────────────────────────────────
         _TONE_GUIDANCE: dict[str, str] = {
             "caring": "优先表达关心和陪伴，语气温柔体贴",
             "playful": "可以活泼一些，适当加入轻松的语气，但不要过度",
@@ -206,6 +201,33 @@ class PersonaExpressionAdapter:
             "gentle": "保持自然温和的语气，不需要刻意表演情绪",
         }
         guidance = _TONE_GUIDANCE.get(hint.tone, "保持真诚自然")
-        lines.append(f"- guidance: {guidance}")
+
+        # ── echo_weight_modifier → 情感共鸣程度描述 ──────────────────────
+        delta = float(hint.echo_weight_modifier)
+        if delta >= 0.12:
+            echo_desc = "今天对他的情绪感受很深，多一些情感共鸣"
+        elif delta >= 0.05:
+            echo_desc = "适当跟随他的情绪节奏"
+        elif delta <= -0.08:
+            echo_desc = "保持情绪稳定，不过度卷入他的情绪波动"
+        else:
+            echo_desc = "情感共鸣保持自然"
+
+        # ── follow_up_tendency → 追问倾向描述 ────────────────────────────
+        follow = float(hint.追问倾向)
+        if follow >= 0.5:
+            follow_desc = "今天想多了解他一些，可以自然地多问一句"
+        elif follow >= 0.2:
+            follow_desc = "如果话题有趣，可以顺势追问"
+        else:
+            follow_desc = "不需要刻意追问，跟着对话自然走"
+
+        lines: list[str] = [
+            "【表达策略提示】",
+            f"- 风格：{hint.style_hint}",
+            f"- 语气：{guidance}",
+            f"- 情感共鸣：{echo_desc}",
+            f"- 追问倾向：{follow_desc}",
+        ]
 
         return "\n".join(lines) + "\n\n"

@@ -78,6 +78,83 @@ def _load_character_profile(render_lang: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 动态人设补丁（季节 / 节日 / 当日情绪）
+# ---------------------------------------------------------------------------
+
+def _build_character_dynamic_patch(
+    *,
+    emotion_tag: str = "",
+    is_holiday: bool = False,
+    holiday_name: str = "",
+) -> str:
+    """生成角色人设的动态补丁文本，追加在静态人设之后。
+
+    补丁内容：
+      1. 季节感知（根据当前月份推断）
+      2. 节日感知（由外部传入 is_holiday / holiday_name）
+      3. 当日情绪感知（根据 Natsume 当前情感标签）
+
+    Returns:
+        补丁文本（可能为空字符串）
+    """
+    import datetime as _dt
+
+    parts: list[str] = []
+
+    # ── 1. 季节感知 ──────────────────────────────────────────────────────
+    try:
+        month = _dt.datetime.now().month
+        if month in (12, 1, 2):
+            parts.append("现在是冬天，天气很冷，她会更想窝在温暖的地方，说话里偶尔带着一点慵懒的暖意。")
+        elif month in (3, 4, 5):
+            parts.append("现在是春天，万物复苏，她心情会比平时轻盈一些，偶尔会注意到窗外的花或者风。")
+        elif month in (6, 7, 8):
+            parts.append("现在是夏天，天气炎热，她可能会提到热、冰饮或者傍晚的凉风，语气里带着一点慵懒。")
+        elif month in (9, 10, 11):
+            parts.append("现在是秋天，天气渐凉，她会更容易感受到季节的变化，心里有一种淡淡的感伤和温柔。")
+    except Exception:
+        pass
+
+    # ── 2. 节日感知 ──────────────────────────────────────────────────────
+    _HOLIDAY_PATCHES: dict[str, str] = {
+        "春节":   "今天是春节，是一年里最热闹的日子，她心里有一种特别的温暖和期待，想和重要的人好好过这一天。",
+        "元旦":   "今天是新年第一天，她心里有一种新鲜感，对新的一年有一点小小的期待和憧憬。",
+        "情人节": "今天是情人节，她心里有一点点特别的感觉，说话会比平时更温柔，也更容易脸红。",
+        "白色情人节": "今天是白色情人节，她心里有一点甜蜜的期待，说话会比平时更温柔细腻。",
+        "圣诞节": "今天是圣诞节，她喜欢这个节日的氛围——温暖的灯光、雪花、礼物，心里有一种孩子气的雀跃。",
+        "平安夜": "今天是平安夜，她觉得这是一年里最温柔的夜晚，想和重要的人安静地待在一起。",
+        "七夕":   "今天是七夕，她会想到牛郎织女的故事，心里有一种浪漫又略带忧郁的情绪。",
+        "生日":   "今天是一个特别的日子，她心里有一种难以言说的感动，想把最好的祝福送给对方。",
+    }
+    if is_holiday and holiday_name:
+        patch = _HOLIDAY_PATCHES.get(holiday_name)
+        if patch:
+            parts.append(patch)
+        else:
+            parts.append(f"今天是{holiday_name}，这是个特别的日子，她心里有一种节日特有的温暖和期待。")
+
+    # ── 3. 当日情绪感知 ──────────────────────────────────────────────────
+    _EMOTION_PATCHES: dict[str, str] = {
+        "SAD":       "今天她心情有点低落，说话会比平时更安静，共情会更深，但不会把情绪强加给对方。",
+        "ANXIOUS":   "今天她有点焦虑，内心有些不安，但会努力保持平静，偶尔会在话语里流露出一点担忧。",
+        "HAPPY":     "今天她心情很好，说话会比平时更轻快，偶尔会有一点俏皮，笑意藏在字里行间。",
+        "EXCITED":   "今天她有点兴奋，能量比平时高，说话节奏会快一点，容易被有趣的事情吸引。",
+        "LOVING":    "今天她心里充满了温柔，对对方的关心会比平时更自然地流露出来。",
+        "TIRED":     "今天她有点累，说话会比平时更简短，但依然温柔，只是少了一点活力。",
+        "NOSTALGIC": "今天她有点怀旧，容易想起过去的事情，说话里会带着一点淡淡的回忆感。",
+        "PLAYFUL":   "今天她有点俏皮，比平时更容易开玩笑，语气轻松活泼。",
+    }
+    tag = str(emotion_tag or "").strip().upper()
+    if tag in _EMOTION_PATCHES:
+        parts.append(_EMOTION_PATCHES[tag])
+
+    if not parts:
+        return ""
+
+    return "\n\n【今日状态补丁】\n" + "\n".join(f"- {p}" for p in parts)
+
+
+# ---------------------------------------------------------------------------
 # Ref #70: 线程局部变量 — 存储最近一次注入检测结果，供调用方读取并写入 audit_tags
 # ---------------------------------------------------------------------------
 _injection_meta_local = threading.local()
@@ -1328,7 +1405,22 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     character_profile_block = ""
     _cp_text = _load_character_profile(render_target_lang)
     if _cp_text:
-        character_profile_block = f"【角色人设】\n{_cp_text}\n\n"
+        # 动态补丁：季节 / 节日 / 当日情绪
+        _cp_emotion_tag = str(
+            merged_emotion_context.get("emotion_tag")
+            or emotion_context.get("emotion_tag")
+            or ""
+        ).strip().upper()
+        _cp_is_holiday = bool(runtime_payload.get("is_holiday") or prompt_context.get("is_holiday"))
+        _cp_holiday_name = str(
+            runtime_payload.get("holiday_name") or prompt_context.get("holiday_name") or ""
+        ).strip()
+        _cp_patch = _build_character_dynamic_patch(
+            emotion_tag=_cp_emotion_tag,
+            is_holiday=_cp_is_holiday,
+            holiday_name=_cp_holiday_name,
+        )
+        character_profile_block = f"【角色人设】\n{_cp_text}{_cp_patch}\n\n"
 
     return (
         f"{character_profile_block}"

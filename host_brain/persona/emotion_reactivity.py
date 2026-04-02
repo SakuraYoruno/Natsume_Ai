@@ -97,6 +97,7 @@ class EmotionReactivityProfile:
         traits: PersonalityTraits,
         user_emotion_tag: str,
         bond_stage: str = "",
+        natsume_arousal: float = 0.5,
     ) -> ReactivityModifiers:
         """计算情感反应调制系数。
 
@@ -104,12 +105,14 @@ class EmotionReactivityProfile:
             traits: 当前人格特质（7 维向量）
             user_emotion_tag: 用户当前情感标签
             bond_stage: 当前 Bond 阶段
+            natsume_arousal: Natsume 自身当前唤醒度（0-1），影响规则8
 
         Returns:
             ReactivityModifiers 调制系数
         """
         tag = str(user_emotion_tag or "").strip().upper()
         stage = str(bond_stage or "").strip().upper()
+        natsume_ar = max(0.0, min(1.0, float(natsume_arousal)))
 
         echo_weight_delta = 0.0
         arousal_delta = 0.0
@@ -155,6 +158,30 @@ class EmotionReactivityProfile:
         if traits.resilience >= 0.6 and tag in {"ANGRY", "SAD"}:
             # 韧性抵消部分 echo_weight 增量
             echo_weight_delta -= (traits.resilience - 0.5) * 0.15
+
+        # ── 规则 8：Natsume 自身 arousal 高 + 用户消极 → 共情适当收敛 ────
+        # 她也有自己的情绪，不是无限配合的情绪容器
+        if natsume_ar >= 0.7 and tag in _NEGATIVE_EMOTIONS:
+            # arousal 越高，共情提升越受抑制（最多抵消 0.1）
+            empathy_boost -= (natsume_ar - 0.6) * 0.25
+            # echo_weight 也略微收敛
+            echo_weight_delta -= (natsume_ar - 0.6) * 0.1
+
+        # ── 规则 9：用户 GRATEFUL → 高温柔度 Natsume 轻微害羞反应 ────────
+        if tag == "GRATEFUL" and traits.warmth >= 0.6:
+            # 被感谢时有点不好意思：dominance 微降（不那么主导），playfulness 微升
+            dominance_delta -= 0.08
+            arousal_delta += 0.04  # 心跳加速一点点
+            # 深层关系阶段更明显
+            if stage in _DEEP_STAGES:
+                dominance_delta -= 0.05
+                arousal_delta += 0.03
+
+        # ── 规则 10：用户 THINKING → 高好奇心 Natsume 追问欲大幅提升 ────
+        if tag == "THINKING" and traits.curiosity >= 0.5:
+            curiosity_follow_up += (traits.curiosity - 0.3) * 0.8
+            # 思考状态下 arousal 微升（被激发了兴趣）
+            arousal_delta += 0.04
 
         return ReactivityModifiers(
             echo_weight_delta=max(-0.2, min(0.2, echo_weight_delta)),

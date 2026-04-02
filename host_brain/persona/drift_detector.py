@@ -44,13 +44,25 @@ ALERT_NONE = "NONE"
 ALERT_MILD = "MILD"
 ALERT_SEVERE = "SEVERE"
 
-# 校正提示模板
-CORRECTION_HINT_TEMPLATE = (
-    "[PERSONA_DRIFT_CORRECTION] 检测到人格表达偏移 (drift={drift_score:.2f})。"
-    " 偏移维度: {drift_dimensions}。"
-    " 请回归以下基线特质: warmth={warmth:.2f}, sensitivity={sensitivity:.2f},"
-    " assertiveness={assertiveness:.2f}。保持温柔克制的核心人格。"
-)
+# 校正提示——角色内自然语言，按漂移维度选择不同变体
+# key: 偏移维度前缀（如 warmth_LOW / assertiveness_HIGH），value: 角色内校正语
+_CORRECTION_HINTS_BY_DIM: dict[str, str] = {
+    "warmth_LOW": "记得，温柔是你最本质的东西，不是表演出来的，是真的从心里流出来的。",
+    "warmth_HIGH": "你很温暖，但也要留一点给自己，不用把所有的柔软都给出去。",
+    "assertiveness_HIGH": "你不需要那么强硬——你的温柔本身就是一种力量，不必用锋芒来证明什么。",
+    "assertiveness_LOW": "你可以有自己的想法，说出来没关系，你的感受值得被听见。",
+    "playfulness_HIGH": "轻松是好的，但别忘了你内心那份细腻和认真，那才是真正的你。",
+    "sensitivity_LOW": "慢下来，感受一下对方话里的情绪——你本来是很能感知这些的。",
+    "humor_HIGH": "玩笑可以有，但今天的你好像有点太跳脱了，稍微沉一沉也没关系。",
+}
+
+# 通用兜底校正语（无法匹配具体维度时使用）
+_CORRECTION_HINTS_GENERIC: list[str] = [
+    "记得，你是夏目蓝。温柔、克制、细腻——这是你，不是角色，是真实的你。",
+    "有一瞬间你好像不太像自己了……没关系，回来就好。你本来就是这样的人。",
+    "深呼吸一下。你不需要变成别的样子，你本来的样子就已经很好了。",
+    "感觉你今天有点偏了……不用担心，找回那个温柔又有点小敏感的自己就好。",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +120,7 @@ class StyleFingerprint:
 # 风格指纹提取器
 # ---------------------------------------------------------------------------
 
-# 关键词→维度映射（简化版，用于从 LLM 输出中推断风格指纹）
+# 关键词→维度映射（带否定词前缀检测，避免「不温柔」被计为正向）
 _WARMTH_POSITIVE_KEYWORDS = ("温柔", "暖", "关心", "心疼", "陪", "安慰", "抱抱")
 _WARMTH_NEGATIVE_KEYWORDS = ("冷淡", "冷漠", "不关心", "无所谓")
 _ASSERTIVENESS_POSITIVE_KEYWORDS = ("坚定", "必须", "一定", "我认为", "我觉得")
@@ -118,23 +130,52 @@ _HUMOR_POSITIVE_KEYWORDS = ("好笑", "哈哈", "笑死", "搞笑", "开玩笑")
 _SENSITIVITY_POSITIVE_KEYWORDS = ("感觉", "似乎", "好像", "隐约", "仿佛")
 _CURIOSITY_POSITIVE_KEYWORDS = ("为什么", "怎么", "什么", "好奇", "想知道", "？")
 
+# 否定词前缀：出现在关键词前 3 字内时，该关键词不计入正向
+_NEGATION_PREFIXES = ("不", "没", "别", "非", "无", "莫", "未", "不太", "不那么", "不是很")
+
+
+def _count_with_negation_check(text: str, keywords: tuple[str, ...]) -> int:
+    """计算关键词出现次数，排除被否定词修饰的情况。
+
+    例如：「不温柔」中的「温柔」不计入正向计数。
+    """
+    count = 0
+    for kw in keywords:
+        pos = 0
+        while True:
+            idx = text.find(kw, pos)
+            if idx == -1:
+                break
+            # 检查关键词前 3 个字符内是否有否定词
+            prefix_window = text[max(0, idx - 3):idx]
+            negated = any(neg in prefix_window for neg in _NEGATION_PREFIXES)
+            if not negated:
+                count += 1
+            pos = idx + len(kw)
+    return count
+
 
 def extract_style_fingerprint(text: str) -> StyleFingerprint:
     """从 LLM 输出文本中提取风格指纹。
 
-    使用关键词计数的简化方法。更精确的方法可以用 embedding 向量。
+    使用关键词计数（含否定词检测）的方法。
+    「不温柔」「没有关心」等否定表达不会被计为正向特质。
     """
     t = str(text or "").strip()
 
-    def _count(keywords: tuple[str, ...]) -> int:
+    def _pos(keywords: tuple[str, ...]) -> int:
+        return _count_with_negation_check(t, keywords)
+
+    def _neg(keywords: tuple[str, ...]) -> int:
+        # 负向关键词本身不需要否定词检测（它们本身就是负向）
         return sum(1 for kw in keywords if kw in t)
 
-    warmth = 0.5 + _count(_WARMTH_POSITIVE_KEYWORDS) * 0.08 - _count(_WARMTH_NEGATIVE_KEYWORDS) * 0.12
-    assertiveness = 0.3 + _count(_ASSERTIVENESS_POSITIVE_KEYWORDS) * 0.1 - _count(_ASSERTIVENESS_NEGATIVE_KEYWORDS) * 0.05
-    playfulness = 0.5 + _count(_PLAYFULNESS_POSITIVE_KEYWORDS) * 0.06
-    humor = 0.4 + _count(_HUMOR_POSITIVE_KEYWORDS) * 0.08
-    sensitivity = 0.5 + _count(_SENSITIVITY_POSITIVE_KEYWORDS) * 0.07
-    curiosity = 0.5 + _count(_CURIOSITY_POSITIVE_KEYWORDS) * 0.05
+    warmth = 0.5 + _pos(_WARMTH_POSITIVE_KEYWORDS) * 0.08 - _neg(_WARMTH_NEGATIVE_KEYWORDS) * 0.12
+    assertiveness = 0.3 + _pos(_ASSERTIVENESS_POSITIVE_KEYWORDS) * 0.1 - _neg(_ASSERTIVENESS_NEGATIVE_KEYWORDS) * 0.05
+    playfulness = 0.5 + _pos(_PLAYFULNESS_POSITIVE_KEYWORDS) * 0.06
+    humor = 0.4 + _pos(_HUMOR_POSITIVE_KEYWORDS) * 0.08
+    sensitivity = 0.5 + _pos(_SENSITIVITY_POSITIVE_KEYWORDS) * 0.07
+    curiosity = 0.5 + _pos(_CURIOSITY_POSITIVE_KEYWORDS) * 0.05
 
     def _clamp(v: float) -> float:
         return max(0.0, min(1.0, v))
@@ -258,16 +299,10 @@ class PersonaDriftDetector:
         else:
             alert_level = ALERT_NONE
 
-        # 生成校正提示
+        # 生成校正提示（角色内自然语言，按漂移维度选择）
         correction_hint = ""
         if alert_level == ALERT_SEVERE:
-            correction_hint = CORRECTION_HINT_TEMPLATE.format(
-                drift_score=drift_score,
-                drift_dimensions=", ".join(drift_dims[:3]),
-                warmth=self._baseline["warmth"],
-                sensitivity=self._baseline["sensitivity"],
-                assertiveness=self._baseline["assertiveness"],
-            )
+            correction_hint = self._build_correction_hint(drift_dims)
 
         result = DriftCheckResult(
             drift_score=round(drift_score, 4),
@@ -287,6 +322,20 @@ class PersonaDriftDetector:
             )
 
         return result
+
+    def _build_correction_hint(self, drift_dims: list[str]) -> str:
+        """根据漂移维度生成角色内自然语言校正提示。
+
+        优先匹配具体维度的专属提示，无匹配时使用通用兜底语。
+        """
+        import hashlib
+        # 尝试匹配第一个有专属提示的漂移维度
+        for dim in drift_dims:
+            if dim in _CORRECTION_HINTS_BY_DIM:
+                return _CORRECTION_HINTS_BY_DIM[dim]
+        # 兜底：按轮次哈希选取通用提示，避免重复
+        idx = int(hashlib.md5(str(self._turn_count).encode()).hexdigest(), 16) % len(_CORRECTION_HINTS_GENERIC)
+        return _CORRECTION_HINTS_GENERIC[idx]
 
     def _compute_average_fingerprint(self) -> StyleFingerprint:
         """计算最近风格指纹的平均值。"""
