@@ -321,7 +321,7 @@ async def chat_agent_sse_generator(
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "REJECT",
             "reason_code": "PROMPT_BUILD_FAILED", "request_id": request_id,
-            "narrative": "七海这边出了点状况呢，要不等一下再试试？",
+            "narrative": "……嗯，蓝这边有点小状况，等一下再来找我好不好？",
         })
         return
 
@@ -343,7 +343,7 @@ async def chat_agent_sse_generator(
             yield _sse({
                 "phase": "COMMIT", "done": True, "decision": "REJECT",
                 "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-                "narrative": "服务暂时不可用，请稍后再试。",
+                "narrative": "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
             })
             return
 
@@ -351,7 +351,7 @@ async def chat_agent_sse_generator(
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "REJECT",
             "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-            "narrative": "服务暂时不可用，请稍后再试。",
+            "narrative": "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
         })
         return
 

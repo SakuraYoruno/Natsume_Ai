@@ -335,7 +335,7 @@ def _build_gateway_reply_text(
     if reply_text:
         return reply_text
     if str(decision or "").upper() != "APPROVE":
-        return "抱歉，刚刚处理失败了，请稍后再试一次。"
+        return "唔…刚刚好像出了点小问题，等一下再试试好吗？"
     _ = reason_code
     return "收到。"
 

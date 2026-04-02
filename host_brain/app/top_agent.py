@@ -624,7 +624,7 @@ async def top_agent_sse_generator(
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "REJECT",
             "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-            "narrative": "服务暂时不可用，请稍后再试。",
+            "narrative": "嗯……蓝现在脑子有点转不动，等一下再来找我好不好？",
         })
         return
 

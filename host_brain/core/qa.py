@@ -328,17 +328,17 @@ def _build_emotion_aware_fallback_text(
 ) -> str:
     """M29-M（OPT-?）：根据情感上下文生成情感感知的降级文本。"""
     if not emotion_context:
-        return "当前无法确认执行结果，我会先保持草案回复并等待后续治理。"
+        return "嗯…脑子有点转不过来，等我缓一下再回你。"
     emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str(emotion_context.get("mood_state") or "steady").lower()
     # 根据情感状态选择合适的降级文本
     if emotion_tag in ("SAD", "ANXIOUS") or mood_state in ("tired", "critical"):
         return "我现在有点状态不太好，让我稍微缓一缓，稍后再好好回应你。"
     if emotion_tag in ("ANGRY", "FRUSTRATED"):
-        return "我需要冷静一下，稍后再来处理这个请求。"
+        return "我需要冷静一下…等会儿再好好说。"
     if emotion_tag in ("HAPPY", "EXCITED"):
         return "哎呀，现在有点小问题，不过没关系，我马上就好！"
-    return "当前无法确认执行结果，我会先保持草案回复并等待后续治理。"
+    return "嗯…脑子有点转不过来，等我缓一下再回你。"
 
 
 def _validate_required_fields(payload: dict[str, Any], result: LintResult) -> None:

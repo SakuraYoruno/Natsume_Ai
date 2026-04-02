@@ -80,7 +80,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
     if _current_sys_mode == "locked":
         async def _locked_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': '系统当前处于锁定模式，暂时无法响应。请联系管理员解锁后再试。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': '抱歉……蓝现在被锁住了，没办法回应你。等那边解除之后我再来找你。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _locked_sse(),
             media_type="text/event-stream",
@@ -88,7 +88,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
         )
     if _current_sys_mode == "maintenance":
         async def _maintenance_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': '系统正在维护中，请稍后再试。维护完成后会自动恢复。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': '蓝这会儿在调整一些东西……等弄好了就回来，稍等我一下。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _maintenance_sse(),
             media_type="text/event-stream",

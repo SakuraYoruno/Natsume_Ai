@@ -75,10 +75,10 @@ class FailureResult:
 # 各事件的标准化用户响应文本（不暴露内部规则细节）
 USER_RESPONSES: Dict[FailureEvent, str] = {
     FailureEvent.GOVERNOR_BLOCK: (
-        "抱歉，我无法处理这个请求。"
+        "……这个，蓝没办法回答呢。"
     ),
     FailureEvent.EVIDENCE_EMPTY: (
-        "我目前没有足够的信息来回答这个问题，请提供更多背景。"
+        "嗯……蓝对这个不太了解，能再多告诉蓝一些吗？"
     ),
     FailureEvent.MODEL_FALLBACK: (
         # MODEL_FALLBACK 不向用户展示，由 meta 标注
@@ -89,16 +89,16 @@ USER_RESPONSES: Dict[FailureEvent, str] = {
         ""
     ),
     FailureEvent.EDGE_UNREACHABLE: (
-        "语音功能暂时不可用，已切换到文字模式。"
+        "声音好像传不过去了……先用文字聊吧。"
     ),
     FailureEvent.VISION_LOW_CONFIDENCE: (
-        "我无法确认当前界面状态，请确认后再试，或告诉我您想要执行的操作。"
+        "蓝看不太清楚……能再描述一下，或者重新发一次吗？"
     ),
     FailureEvent.MODULE_TIMEOUT: (
-        "处理超时，请稍后重试。"
+        "等了好久都没反应……再试一次好吗？"
     ),
     FailureEvent.PROMPT_INJECTION: (
-        "抱歉，我无法处理这个请求。"
+        "……这个，蓝没办法回答呢。"
     ),
 }
 

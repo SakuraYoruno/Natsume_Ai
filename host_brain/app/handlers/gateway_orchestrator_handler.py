@@ -886,7 +886,7 @@ async def gateway_orchestrator_sse_generator(
         yield _sse_commit(
             request_id=request_id,
             decision="REJECT",
-            narrative="服务暂时不可用，请稍后再试。",
+            narrative="嗯…蓝现在有点转不过来，等一下再找我好不好。",
             reason_code="LLM_UNAVAILABLE",
         )
         return
@@ -955,7 +955,7 @@ async def gateway_orchestrator_sse_generator(
             request_id, exc,
         )
         if not full_text.strip():
-            full_text = "抱歉，处理出了点问题，请稍后再试。"
+            full_text = "啊…刚才好像哪里不太对，等我缓一下再说。"
             rendered_text = full_text
             yield _sse_sentence(request_id, full_text, 0)
 

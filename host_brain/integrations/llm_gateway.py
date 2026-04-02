@@ -511,7 +511,7 @@ class LlmGatewayContract:
             payload
             if payload is not None
             else {
-                "narrative": {"text": "当前外部语义服务不可用，我先给出草案回复。"},
+                "narrative": {"text": "嗯…脑子有点转不过来，蓝先试着回你。"},
                 "intent_draft": {},
                 "meta": {
                     "draft_only": True,
