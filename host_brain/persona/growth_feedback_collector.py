@@ -9,6 +9,7 @@
   隐式（低信度，需累积）：
   - 用户对特定风格回复的情感反应
   - 用户话题主动转向/回避
+  - 对话参与度信号（回复速度/消息长度/追问行为/主动发起）
 
 设计原则：
   - 显式信号权重 = confidence × 1.0
@@ -49,6 +50,37 @@ DEFAULT_MIN_SIGNALS = 3
 DEFAULT_SIGNAL_THRESHOLD = 0.2
 DEFAULT_FEEDBACK_DELTA = 0.01
 
+# ---------------------------------------------------------------------------
+# 对话参与度信号阈值
+# ---------------------------------------------------------------------------
+
+# 回复速度阈值（毫秒）
+_FAST_REPLY_MS = 10_000       # <=10秒 = 快速回复（高参与度）
+_SLOW_REPLY_MS = 120_000      # >=2分钟 = 慢速回复（低参与度）
+
+# 消息长度阈值（字符数）
+_SHORT_MSG_LEN = 10           # <=10字 = 敷衍/简短
+_LONG_MSG_LEN = 80            # >=80字 = 深度参与
+_VERY_LONG_MSG_LEN = 200      # >=200字 = 极深度参与（倾诉）
+
+# 追问关键词模式
+_FOLLOWUP_PATTERNS = (
+    r"(然后呢|后来呢|接着呢|还有呢|继续说|再说说|多说一点|详细说说)",
+    r"(为什么|怎么回事|什么意思|怎么说|怎么想)",
+    r"(真的吗|是吗|确定吗|不会吧)",
+    r"(你觉得呢|你怎么看|你认为呢)",
+)
+
+
+def _detect_followup(text: str) -> bool:
+    """检测用户文本中是否包含追问行为."""
+    if not text:
+        return False
+    for pattern in _FOLLOWUP_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # 用户文本 → 反馈信号 关键词规则
@@ -76,6 +108,27 @@ FEEDBACK_KEYWORD_RULES: list[tuple[str, str, float, float]] = [
 # ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
+
+@dataclass
+class EngagementMetrics:
+    """单轮对话参与度指标."""
+    reply_speed_ms: int = 0       # 用户回复耗时（毫秒），0=未知
+    user_msg_len: int = 0         # 用户消息长度（字符数）
+    has_followup: bool = False    # 用户是否在追问
+    is_user_initiated: bool = False  # 是否用户主动发起的对话
+    user_emotion_tag: str = ""    # 用户当前情感标签
+    natsume_msg_len: int = 0      # Natsume 回复长度（用于计算长度比）
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "reply_speed_ms": self.reply_speed_ms,
+            "user_msg_len": self.user_msg_len,
+            "has_followup": self.has_followup,
+            "is_user_initiated": self.is_user_initiated,
+            "user_emotion_tag": self.user_emotion_tag,
+            "natsume_msg_len": self.natsume_msg_len,
+        }
+
 
 @dataclass
 class GrowthFeedback:
@@ -167,7 +220,168 @@ class GrowthFeedbackCollector:
             feedback_delta=float(p.get("base_delta", DEFAULT_FEEDBACK_DELTA)),
         )
 
-    # ── 信号提取 ──────────────────────────────────────────────────────────
+    # ── 对话参与度信号提取 ─────────────────────────────────────────────────
+
+    @staticmethod
+    def extract_engagement_signals(
+        user_text: str,
+        *,
+        metrics: EngagementMetrics | None = None,
+        ts_ms: int = 0,
+    ) -> list[GrowthFeedback]:
+        """从对话参与度元数据中自动提取隐式反馈信号.
+
+        分析维度：
+        1. 回复速度 → warmth/sensitivity 正反馈（快速回复说明用户喜欢当前互动风格）
+        2. 消息长度 → sensitivity/warmth 正反馈（长消息说明用户愿意深度交流）
+        3. 追问行为 → curiosity/humor 正反馈（追问说明用户对内容感兴趣）
+        4. 主动发起 → warmth/playfulness 正反馈（主动找说明用户喜欢互动）
+        5. 敷衍信号 → 对应特质负反馈（短消息+慢回复=可能不感兴趣）
+
+        Args:
+            user_text: 用户消息文本
+            metrics: 对话参与度指标（回复速度、消息长度等）
+            ts_ms: 时间戳
+
+        Returns:
+            提取到的隐式反馈信号列表
+        """
+        text = str(user_text or "").strip()
+        ts = ts_ms or int(time.time() * 1000)
+        m = metrics or EngagementMetrics(user_msg_len=len(text))
+        signals: list[GrowthFeedback] = []
+
+        # ── 1. 回复速度信号 ──────────────────────────────────────────
+        if m.reply_speed_ms > 0:
+            if m.reply_speed_ms <= _FAST_REPLY_MS:
+                # 快速回复 → 用户对当前互动风格满意
+                signals.append(GrowthFeedback(
+                    trait_name="warmth",
+                    direction=+1.0,
+                    confidence=0.25,
+                    source=SOURCE_IMPLICIT_BEHAVIOR,
+                    ts_ms=ts,
+                    text_hint="fast_reply:{}ms".format(m.reply_speed_ms),
+                ))
+            elif m.reply_speed_ms >= _SLOW_REPLY_MS:
+                # 慢速回复 → 可能对当前互动不太感兴趣（低置信度）
+                signals.append(GrowthFeedback(
+                    trait_name="warmth",
+                    direction=-1.0,
+                    confidence=0.15,  # 慢回复原因很多，置信度更低
+                    source=SOURCE_IMPLICIT_BEHAVIOR,
+                    ts_ms=ts,
+                    text_hint="slow_reply:{}ms".format(m.reply_speed_ms),
+                ))
+
+        # ── 2. 消息长度信号 ──────────────────────────────────────────
+        msg_len = m.user_msg_len or len(text)
+        if msg_len >= _VERY_LONG_MSG_LEN:
+            # 极长消息 → 用户在倾诉，sensitivity 和 warmth 正反馈
+            signals.append(GrowthFeedback(
+                trait_name="sensitivity",
+                direction=+1.0,
+                confidence=0.35,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="very_long_msg:{}chars".format(msg_len),
+            ))
+            signals.append(GrowthFeedback(
+                trait_name="warmth",
+                direction=+1.0,
+                confidence=0.30,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="very_long_msg:{}chars".format(msg_len),
+            ))
+        elif msg_len >= _LONG_MSG_LEN:
+            # 长消息 → 深度参与
+            signals.append(GrowthFeedback(
+                trait_name="sensitivity",
+                direction=+1.0,
+                confidence=0.25,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="long_msg:{}chars".format(msg_len),
+            ))
+        elif msg_len <= _SHORT_MSG_LEN and m.reply_speed_ms >= _SLOW_REPLY_MS:
+            # 短消息 + 慢回复 = 敷衍信号（组合判断，单独短消息不算）
+            signals.append(GrowthFeedback(
+                trait_name="playfulness",
+                direction=-1.0,
+                confidence=0.20,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="short_slow_msg:{}chars_{}ms".format(msg_len, m.reply_speed_ms),
+            ))
+
+        # ── 3. 追问行为信号 ──────────────────────────────────────────
+        if m.has_followup or _detect_followup(text):
+            # 追问 → 用户对内容感兴趣
+            signals.append(GrowthFeedback(
+                trait_name="curiosity",
+                direction=+1.0,
+                confidence=0.30,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="followup_question",
+            ))
+            # 如果追问的是有趣的内容，humor 也有正反馈
+            if m.user_emotion_tag in ("HAPPY", "EXCITED", "SURPRISED"):
+                signals.append(GrowthFeedback(
+                    trait_name="humor",
+                    direction=+1.0,
+                    confidence=0.20,
+                    source=SOURCE_IMPLICIT_BEHAVIOR,
+                    ts_ms=ts,
+                    text_hint="followup_positive_emotion",
+                ))
+
+        # ── 4. 主动发起对话信号 ──────────────────────────────────────
+        if m.is_user_initiated:
+            # 用户主动找 Natsume → warmth 和 playfulness 正反馈
+            signals.append(GrowthFeedback(
+                trait_name="warmth",
+                direction=+1.0,
+                confidence=0.30,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="user_initiated_chat",
+            ))
+            signals.append(GrowthFeedback(
+                trait_name="playfulness",
+                direction=+1.0,
+                confidence=0.20,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="user_initiated_chat",
+            ))
+
+        # ── 5. 情感反应信号 ──────────────────────────────────────────
+        # 用户在互动中表现出积极情感 → 当前风格受欢迎
+        if m.user_emotion_tag in ("HAPPY", "EXCITED", "LOVING", "GRATEFUL"):
+            signals.append(GrowthFeedback(
+                trait_name="warmth",
+                direction=+1.0,
+                confidence=0.20,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="positive_emotion:{}".format(m.user_emotion_tag),
+            ))
+        elif m.user_emotion_tag in ("BORED", "FRUSTRATED"):
+            # 无聊/沮丧 → 当前风格可能不合适
+            signals.append(GrowthFeedback(
+                trait_name="playfulness",
+                direction=+1.0,  # 可能需要更活泼
+                confidence=0.15,
+                source=SOURCE_IMPLICIT_BEHAVIOR,
+                ts_ms=ts,
+                text_hint="negative_engagement:{}".format(m.user_emotion_tag),
+            ))
+
+        return signals
+
+    # ── 显式信号提取 ──────────────────────────────────────────────────────
 
     @staticmethod
     def extract_from_text(
