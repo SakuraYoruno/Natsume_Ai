@@ -1,9 +1,10 @@
-"""EmotionPersistence：跨会话情感连续性——Phase VII。
+"""EmotionPersistence：跨会话情感连续性——Phase VII + 情感惯性模型。
 
 职责：
   1. 会话结束时持久化当前情感向量
   2. 新会话开始时恢复情感向量（带离线衰减模型）
   3. 衰减模型：指数衰减向基线回归（约 7 小时半衰期）
+  4. 情感惯性：连续多天同向情感时衰减更慢（情感有"重量"）
 
 衰减模型特性：
   - 离线 1 小时：保留约 90% 上次情感
@@ -11,9 +12,17 @@
   - 离线 24 小时：保留约 9%，接近基线
   - 离线 48 小时+：完全回归基线
 
+情感惯性模型：
+  - 连续 1 天同向情感：无惯性加成（正常衰减）
+  - 连续 2 天：衰减率 × 0.85（衰减略慢）
+  - 连续 3 天：衰减率 × 0.70（衰减明显变慢）
+  - 连续 5 天+：衰减率 × 0.50（半衰期翻倍，情感根深蒂固）
+  - 惯性方向：正向（valence > 0.1）/ 负向（valence < -0.1）/ 中性
+  - 方向翻转时惯性重置为 0
+
 设计原则：
   - 持久化到 JSON 文件（进程重启后可恢复）
-  - 恢复时自动应用衰减
+  - 恢复时自动应用衰减 + 惯性调整
   - 无持久化记录时从中性基线启动
 """
 
@@ -61,6 +70,18 @@ _DEFAULT_PERSISTENCE_DIR = os.environ.get(
     os.path.join(os.path.expanduser("~"), ".natsume", "emotion"),
 )
 
+# ── 情感惯性常量 ─────────────────────────────────────────────────────────
+# 效价方向判定阈值：|valence| > 此值才算有方向性
+_MOMENTUM_DIRECTION_THRESHOLD = 0.1
+# 惯性天数 → 衰减率乘数（天数越多衰减越慢）
+_MOMENTUM_DECAY_MULTIPLIERS: list[tuple[int, float]] = [
+    (5, 0.50),   # >= 5 天：衰减率 × 0.50（半衰期翻倍）
+    (3, 0.70),   # >= 3 天：衰减率 × 0.70
+    (2, 0.85),   # >= 2 天：衰减率 × 0.85
+]
+# 惯性最大天数上限（防止无限累积）
+_MOMENTUM_MAX_DAYS = 14
+
 
 # ---------------------------------------------------------------------------
 # 数据结构
@@ -75,9 +96,12 @@ class PersistedEmotionState:
     dominance: float = 0.0     # 上次会话结束时的支配感
     last_session_end_ts_ms: int = 0  # 上次会话结束时间
     mood_baseline: float = DEFAULT_MOOD_BASELINE  # 长期心情基线
+    # ── 情感惯性字段 ──
+    momentum_days: int = 0           # 连续同向情感的天数
+    momentum_direction: str = ""     # 惯性方向："positive" / "negative" / ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "user_id": self.user_id,
             "valence": round(self.valence, 4),
             "arousal": round(self.arousal, 4),
@@ -85,6 +109,11 @@ class PersistedEmotionState:
             "last_session_end_ts_ms": self.last_session_end_ts_ms,
             "mood_baseline": round(self.mood_baseline, 4),
         }
+        # 仅在有惯性时写入（向后兼容旧版本）
+        if self.momentum_days > 0:
+            d["momentum_days"] = self.momentum_days
+            d["momentum_direction"] = self.momentum_direction
+        return d
 
 
 @dataclass(frozen=True)
@@ -98,6 +127,8 @@ class RestoredEmotionState:
     from_baseline: bool         # 是否从基线启动（无持久化记录）
     reunion_type: str = ""      # 重逢类型："reunion"=久别重逢 / "short_absence"=短暂分离 / ""=正常
     anchor_active: bool = False # 是否触发了情感记忆锚点（强情感衰减减缓）
+    momentum_active: bool = False  # 是否触发了情感惯性（连续同向情感减缓衰减）
+    momentum_days: int = 0         # 当前惯性天数
 
     def as_dict(self) -> dict[str, Any]:
         d = {
@@ -112,6 +143,9 @@ class RestoredEmotionState:
             d["reunion_type"] = self.reunion_type
         if self.anchor_active:
             d["anchor_active"] = True
+        if self.momentum_active:
+            d["momentum_active"] = True
+            d["momentum_days"] = self.momentum_days
         return d
 
     @property
@@ -211,6 +245,9 @@ class EmotionPersistence:
                 dominance=float(data.get("dominance", 0.0)),
                 last_session_end_ts_ms=int(data.get("last_session_end_ts_ms", 0)),
                 mood_baseline=float(data.get("mood_baseline", self._baseline_valence)),
+                # 情感惯性字段（向后兼容：旧文件无此字段时默认 0/""）
+                momentum_days=int(data.get("momentum_days", 0)),
+                momentum_direction=str(data.get("momentum_direction", "")),
             )
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             _logger.warning("情感状态文件读取失败 user=%s: %s", user_id, exc)
@@ -253,6 +290,21 @@ class EmotionPersistence:
                 else (existing.mood_baseline if existing else self._baseline_valence)
             )
 
+            # ── 情感惯性更新 ──────────────────────────────────────────
+            new_direction = _classify_valence_direction(float(valence))
+            if existing and existing.momentum_direction and new_direction:
+                if new_direction == existing.momentum_direction:
+                    # 同向：惯性天数 +1（上限 _MOMENTUM_MAX_DAYS）
+                    new_momentum_days = min(
+                        existing.momentum_days + 1, _MOMENTUM_MAX_DAYS
+                    )
+                else:
+                    # 方向翻转：惯性重置
+                    new_momentum_days = 1
+            else:
+                # 首次记录或中性状态：初始化
+                new_momentum_days = 1 if new_direction else 0
+
             state = PersistedEmotionState(
                 user_id=uid,
                 valence=float(valence),
@@ -260,6 +312,8 @@ class EmotionPersistence:
                 dominance=float(dominance),
                 last_session_end_ts_ms=ts,
                 mood_baseline=float(baseline),
+                momentum_days=new_momentum_days,
+                momentum_direction=new_direction,
             )
             self._states[uid] = state
 
@@ -337,6 +391,23 @@ class EmotionPersistence:
             else self._decay_rate
         )
 
+        # ── 情感惯性：连续同向情感减缓衰减 ────────────────────────────
+        momentum_active = False
+        momentum_multiplier = 1.0
+        if state.momentum_days >= 2 and state.momentum_direction:
+            for threshold_days, multiplier in _MOMENTUM_DECAY_MULTIPLIERS:
+                if state.momentum_days >= threshold_days:
+                    momentum_multiplier = multiplier
+                    momentum_active = True
+                    break
+            if momentum_active:
+                effective_decay_rate *= momentum_multiplier
+                _logger.debug(
+                    "情感惯性生效: user=%s days=%d dir=%s multiplier=%.2f",
+                    uid, state.momentum_days, state.momentum_direction,
+                    momentum_multiplier,
+                )
+
         # 计算衰减因子（使用有效衰减率）
         decay_factor = math.exp(-effective_decay_rate * hours_elapsed)
         decay_factor = max(0.0, min(1.0, decay_factor))
@@ -384,6 +455,12 @@ class EmotionPersistence:
             anchor_active, reunion_type or "none",
         )
 
+        _logger.info(
+            "情感惯性状态: user=%s momentum_days=%d momentum_dir=%s momentum_active=%s",
+            uid, state.momentum_days, state.momentum_direction or "none",
+            momentum_active,
+        )
+
         return RestoredEmotionState(
             valence=round(restored_valence, 4),
             arousal=round(restored_arousal, 4),
@@ -393,6 +470,8 @@ class EmotionPersistence:
             from_baseline=False,
             reunion_type=reunion_type,
             anchor_active=anchor_active,
+            momentum_active=momentum_active,
+            momentum_days=state.momentum_days,
         )
 
     # ── 查询 ──────────────────────────────────────────────────────────────
@@ -438,3 +517,36 @@ class EmotionPersistence:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _classify_valence_direction(valence: float) -> str:
+    """将效价值分类为方向标签。
+
+    Args:
+        valence: 效价值 [-1.0, 1.0]
+
+    Returns:
+        "positive" / "negative" / ""（中性）
+    """
+    if valence > _MOMENTUM_DIRECTION_THRESHOLD:
+        return "positive"
+    elif valence < -_MOMENTUM_DIRECTION_THRESHOLD:
+        return "negative"
+    return ""
+
+
+def compute_momentum_decay_multiplier(momentum_days: int) -> float:
+    """根据惯性天数计算衰减率乘数（供外部模块查询）。
+
+    Args:
+        momentum_days: 连续同向情感天数
+
+    Returns:
+        衰减率乘数（1.0=无惯性，越小衰减越慢）
+    """
+    if momentum_days < 2:
+        return 1.0
+    for threshold_days, multiplier in _MOMENTUM_DECAY_MULTIPLIERS:
+        if momentum_days >= threshold_days:
+            return multiplier
+    return 1.0

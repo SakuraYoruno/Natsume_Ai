@@ -54,6 +54,7 @@ from host_brain.persona.emotion_persistence import (
     EmotionPersistence,
     PersistedEmotionState,
     RestoredEmotionState,
+    compute_momentum_decay_multiplier,
 )
 from host_brain.persona.proactive_voice import (
     PersonaProactiveVoice,
@@ -107,6 +108,7 @@ __all__ = [
     "EmotionPersistence",
     "PersistedEmotionState",
     "RestoredEmotionState",
+    "compute_momentum_decay_multiplier",
     # proactive_voice.py (Phase VIII)
     "PersonaProactiveVoice",
     "ProactiveExpression",
