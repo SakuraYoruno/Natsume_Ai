@@ -38,6 +38,13 @@ from host_brain.skills.custom_provider_installer import (
     load_provider_template,
     write_provider_source,
 )
+from host_brain.skills.hub.hub_installer import (
+    install_skill as install_hub_skill,
+    list_installed_skills as list_installed_hub_skills,
+    remove_skill as remove_hub_skill,
+    search_remote_skills,
+)
+from host_brain.skills.install_repair import repair_skill_loading_failure
 
 _logger = logging.getLogger("Natsume.tool_routes")
 
@@ -192,6 +199,61 @@ class CustomSkillProviderInstallResponse(BaseModel):
     request_id: str = Field(..., description="请求 ID")
     timestamp: int = Field(..., description="响应时间戳（毫秒）")
 
+
+
+
+class HubSkillInstallRequest(BaseModel):
+    source: str = Field(..., description="Hub skill source: github:owner/repo/slug or local directory path")
+    force: bool = Field(default=False, description="Whether to overwrite existing installation")
+    activate_now: bool = Field(default=True, description="Whether to refresh SkillRegistry immediately")
+
+
+class HubSkillInstallResponse(BaseModel):
+    status: str = Field(..., description="Install status: INSTALLED/ERROR")
+    name: str = Field(..., description="Installed skill name")
+    version: str = Field(..., description="Installed skill version")
+    source: str = Field(..., description="Original source")
+    install_dir: str = Field(..., description="Installed directory")
+    activated: bool = Field(..., description="Whether the skill is active after refresh")
+    repair_attempted: bool = Field(default=False, description="Whether auto-repair was attempted after install")
+    repair_succeeded: bool = Field(default=False, description="Whether auto-repair succeeded")
+    repair_actions: int = Field(default=0, description="How many repair actions were attempted")
+    active_skill_names: List[str] = Field(default_factory=list, description="Currently active skill names")
+    message: str = Field(..., description="Result summary")
+    request_id: str = Field(..., description="Request ID")
+    timestamp: int = Field(..., description="Response timestamp")
+
+
+class HubSkillEntryResponse(BaseModel):
+    name: str = Field(..., description="Skill name")
+    version: str = Field(default="", description="Skill version")
+    description: str = Field(default="", description="Skill description")
+    author: str = Field(default="", description="Skill author")
+    source: str = Field(default="", description="Install source")
+    installed_at: str = Field(default="", description="Installed time")
+    dir: str = Field(default="", description="Installed directory")
+
+
+class HubSkillListResponse(BaseModel):
+    total: int = Field(..., description="Installed skill count")
+    skills: List[HubSkillEntryResponse] = Field(default_factory=list, description="Installed hub skills")
+    request_id: str = Field(..., description="Request ID")
+    timestamp: int = Field(..., description="Response timestamp")
+
+
+class HubSkillRemoveResponse(BaseModel):
+    status: str = Field(..., description="Remove status: REMOVED/ERROR")
+    name: str = Field(..., description="Removed skill name")
+    message: str = Field(..., description="Result summary")
+    request_id: str = Field(..., description="Request ID")
+    timestamp: int = Field(..., description="Response timestamp")
+
+
+class HubSkillSearchResponse(BaseModel):
+    total: int = Field(..., description="Matched remote skill count")
+    skills: List[HubSkillEntryResponse] = Field(default_factory=list, description="Remote matching skills")
+    request_id: str = Field(..., description="Request ID")
+    timestamp: int = Field(..., description="Response timestamp")
 
 # ---------------------------------------------------------------------------
 # GET /tools/health — ToolBroker 健康状态
@@ -445,6 +507,33 @@ def _get_active_skill_names() -> set[str]:
         return set()
 
 
+def _attempt_activate_hub_skill(*, install_dir: str, skill_name: str) -> tuple[bool, list[str], bool, bool, int, str]:
+    from host_brain.app.dependencies import refresh_skill_registry  # noqa: PLC0415
+
+    registry = refresh_skill_registry()
+    active_skill_names = list(registry.list_skill_names())
+    activated = bool(skill_name and skill_name in active_skill_names)
+    if activated:
+        return True, active_skill_names, False, False, 0, "skill installed and registry refreshed"
+
+    auto_repair_enabled = str(os.environ.get("HOST_SKILL_AUTO_REPAIR_ENABLED") or "true").strip().lower() not in {"0", "false", "no", "off"}
+    if not auto_repair_enabled or not install_dir or not Path(install_dir).exists():
+        return False, active_skill_names, False, False, 0, "skill installed but not active after refresh"
+
+    repair = repair_skill_loading_failure(skill_dir=Path(install_dir), exc=f"hub skill installed but inactive after refresh: {skill_name}")
+    repair_attempted = True
+    repair_succeeded = bool(repair.get("success"))
+    repair_actions = len(list(repair.get("actions") or []))
+    if repair_succeeded:
+        registry = refresh_skill_registry()
+        active_skill_names = list(registry.list_skill_names())
+        activated = bool(skill_name and skill_name in active_skill_names)
+        if activated:
+            return True, active_skill_names, repair_attempted, True, repair_actions, "skill installed, auto-repaired, and activated"
+        return False, active_skill_names, repair_attempted, True, repair_actions, "auto-repair ran but skill still inactive after refresh"
+    return False, active_skill_names, repair_attempted, False, repair_actions, "auto-repair attempted but failed to activate skill"
+
+
 @router.get("/skills/custom-providers", response_model=CustomSkillProviderListResponse)
 async def list_custom_skill_providers() -> CustomSkillProviderListResponse:
     request_id = new_request_id()
@@ -541,4 +630,118 @@ async def install_custom_skill_provider(body: CustomSkillProviderInstallRequest)
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         _logger.error("install_custom_skill_provider failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/skills/hub", response_model=HubSkillListResponse)
+async def list_hub_skills() -> HubSkillListResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+    try:
+        rows = list_installed_hub_skills()
+        skills = [HubSkillEntryResponse(**dict(row)) for row in rows]
+        return HubSkillListResponse(
+            total=len(skills),
+            skills=skills,
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("list_hub_skills failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/skills/hub/search", response_model=HubSkillSearchResponse)
+async def search_hub_skills(query: str) -> HubSkillSearchResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+    try:
+        rows = search_remote_skills(query)
+        skills = [
+            HubSkillEntryResponse(
+                name=str(item.name),
+                version=str(item.version),
+                description=str(item.description),
+                author=str(item.author),
+                source="remote",
+                installed_at="",
+                dir="",
+            )
+            for item in rows
+        ]
+        return HubSkillSearchResponse(
+            total=len(skills),
+            skills=skills,
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("search_hub_skills failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/skills/hub/install", response_model=HubSkillInstallResponse, status_code=200)
+async def install_hub_skill_route(body: HubSkillInstallRequest) -> HubSkillInstallResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+    try:
+        result = install_hub_skill(body.source, force=body.force)
+        active_skill_names: list[str] = []
+        activated = False
+        repair_attempted = False
+        repair_succeeded = False
+        repair_actions = 0
+        if result.success and body.activate_now:
+            activated, active_skill_names, repair_attempted, repair_succeeded, repair_actions, activation_message = _attempt_activate_hub_skill(
+                install_dir=str(result.install_dir),
+                skill_name=str(result.name),
+            )
+        else:
+            active_skill_names = sorted(_get_active_skill_names())
+            activated = result.name in active_skill_names if result.name else False
+            activation_message = str(result.detail or result.error or "install failed")
+
+        status_text = "INSTALLED" if result.success else "ERROR"
+        message = activation_message if result.success else str(result.error or result.detail or "install failed")
+        return HubSkillInstallResponse(
+            status=status_text,
+            name=str(result.name),
+            version=str(result.version),
+            source=str(result.source),
+            install_dir=str(result.install_dir),
+            activated=activated,
+            repair_attempted=repair_attempted,
+            repair_succeeded=repair_succeeded,
+            repair_actions=repair_actions,
+            active_skill_names=active_skill_names,
+            message=message,
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("install_hub_skill_route failed: %s", exc, extra={"request_id": request_id})
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/skills/hub/{skill_name}", response_model=HubSkillRemoveResponse)
+async def remove_hub_skill_route(skill_name: str) -> HubSkillRemoveResponse:
+    request_id = new_request_id()
+    ts_ms = int(time.time() * 1000)
+    try:
+        result = remove_hub_skill(skill_name)
+        if result.success:
+            try:
+                from host_brain.app.dependencies import refresh_skill_registry  # noqa: PLC0415
+                refresh_skill_registry()
+            except Exception:
+                pass
+        return HubSkillRemoveResponse(
+            status="REMOVED" if result.success else "ERROR",
+            name=str(result.name),
+            message=str(result.detail or result.error or "remove failed"),
+            request_id=request_id,
+            timestamp=ts_ms,
+        )
+    except Exception as exc:
+        _logger.error("remove_hub_skill_route failed: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))

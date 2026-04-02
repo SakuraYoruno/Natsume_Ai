@@ -31,12 +31,12 @@ const GROUPS = [
   {
     id: 'edge',
     label: 'Edge 端输入',
-    desc: 'ASR 语音识别 · 微信监听 · 输入上报',
+    desc: 'ASR 语音识别 · Gateway Webhook · 输入上报',
     icon: Mic,
     color: '#059669',
     bg: '#ECFDF5',
     border: '#6EE7B7',
-    nodeIds: ['asr', 'wechat_listener', 'input_reporter'],
+    nodeIds: ['asr', 'gateway_webhook', 'input_reporter'],
     traceNodeIds: ['input_reporter'],
   },
   {
@@ -91,7 +91,7 @@ const FULL_CHAIN_SCHEMA = {
   nodes: [
     // Edge 端输入
     { node_id: 'asr',              node_type: 'asr',       display_name: 'ASR 语音识别',       layer: 'edge' },
-    { node_id: 'wechat_listener',  node_type: 'system',    display_name: '微信监听',            layer: 'edge' },
+    { node_id: 'gateway_webhook',  node_type: 'system',    display_name: 'Gateway Webhook',    layer: 'edge' },
     { node_id: 'input_reporter',   node_type: 'system',    display_name: '输入上报',            layer: 'edge' },
     // Host 入口
     { node_id: 'airlock_ingress',  node_type: 'governor',  display_name: 'Airlock 入口',       layer: 'host' },
@@ -118,7 +118,7 @@ const FULL_CHAIN_SCHEMA = {
   edges: [
     // 入站
     { source: 'asr',              target: 'airlock_ingress'  },
-    { source: 'wechat_listener',  target: 'airlock_ingress'  },
+    { source: 'gateway_webhook',  target: 'airlock_ingress'  },
     { source: 'input_reporter',   target: 'airlock_ingress'  },
     // 入口链路
     { source: 'airlock_ingress',  target: 'governor'         },

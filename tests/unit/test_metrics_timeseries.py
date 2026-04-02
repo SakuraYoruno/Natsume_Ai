@@ -8,7 +8,7 @@ import time
 import pytest
 from unittest.mock import MagicMock
 
-from host_brain.obs.metrics_timeseries import MetricsTimeseriesService, MAX_DATA_POINTS
+from host_brain.observability.metrics_timeseries import MetricsTimeseriesService, MAX_DATA_POINTS
 
 
 def _make_ledger(gov_rows=None, trace_rows=None):

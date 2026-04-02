@@ -14,6 +14,14 @@ from host_brain.retrieval.recall_fusion import (
 )
 
 
+def _embed_for_dim(text: str, dim: int) -> list[float]:
+    values, _ = embed_text(text)
+    normalized = list(values[:dim])
+    if len(normalized) < dim:
+        normalized.extend([0.0] * (dim - len(normalized)))
+    return normalized
+
+
 class TestRetrievalRecallFusionContract(unittest.TestCase):
     def setUp(self) -> None:
         self.now_ms = 1_800_180_000_000
@@ -63,7 +71,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             available=True,
         )
         query = "Natsume retrieval fusion"
-        query_embedding, _ = embed_text(query)
+        query_embedding = _embed_for_dim(query, 16)
 
         result = svc.recall(
             request_id="req_recall_001",
@@ -139,7 +147,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             available=True,
         )
         query = "Natsume retrieval fusion"
-        query_embedding, _ = embed_text(query)
+        query_embedding = _embed_for_dim(query, 16)
 
         result = svc.recall(
             request_id="req_recall_002",
@@ -165,9 +173,9 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
 
     def _seed_collections(self) -> None:
         query = "Natsume retrieval fusion"
-        emb_query, _ = embed_text(query)
+        emb_query = _embed_for_dim(query, 16)
 
-        emb_episodic, _ = embed_text("episodic memory around retrieval fusion")
+        emb_episodic = _embed_for_dim("episodic memory around retrieval fusion", 16)
         self.chroma.upsert(
             memory_id="mem_epi_001",
             text="episodic memory around retrieval fusion",
@@ -192,7 +200,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
             metadata={"source_ref": "memo://shared", "evidence_ref": "evd://shared/canon"},
         )
 
-        emb_canon, _ = embed_text("canon policy retrieval detail")
+        emb_canon = _embed_for_dim("canon policy retrieval detail", 16)
         self.chroma.upsert(
             memory_id="mem_can_001",
             text="canon policy retrieval detail",

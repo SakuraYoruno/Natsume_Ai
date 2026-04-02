@@ -210,7 +210,7 @@ def build_neo4j_dependency_status(probe_report: Mapping[str, Any]) -> dict[str, 
 
 
 class Neo4jBondClient:
-    """Neo4j driver-backed bond reader for retrieval routes."""
+    """Neo4j driver-backed bond reader/writer for production bond graph."""
 
     _EVENTS_QUERY = """
     MATCH (e:Event)
@@ -226,6 +226,58 @@ class Neo4jBondClient:
     ORDER BY coalesce(e.ts_ms, 0) DESC
     LIMIT $limit
     """
+    _EVENT_BY_ID_QUERY = """
+    MATCH (e:Event {event_id: $event_id})
+    OPTIONAL MATCH (e)-[:ABOUT]->(t:Topic)
+    OPTIONAL MATCH (e)-[:AFFECTS]->(c:CapabilityHint)
+    RETURN
+      e.event_id AS event_id,
+      coalesce(t.topic_id, e.topic_id, "") AS topic_id,
+      coalesce(c.capability_hint, e.capability_hint, "") AS capability_hint,
+      e.evidence_refs AS evidence_refs,
+      e.payload AS payload,
+      e.ts_ms AS ts_ms
+    LIMIT 1
+    """
+    _USER_EVENTS_QUERY = """
+    MATCH (:User {user_id: $user_id})-[:HAS_EVENT]->(e:Event)
+    OPTIONAL MATCH (e)-[:ABOUT]->(t:Topic)
+    OPTIONAL MATCH (e)-[:AFFECTS]->(c:CapabilityHint)
+    RETURN
+      e.event_id AS event_id,
+      coalesce(t.topic_id, e.topic_id, "") AS topic_id,
+      coalesce(c.capability_hint, e.capability_hint, "") AS capability_hint,
+      e.evidence_refs AS evidence_refs,
+      e.payload AS payload,
+      e.ts_ms AS ts_ms
+    ORDER BY coalesce(e.ts_ms, 0) ASC
+    LIMIT $limit
+    """
+    _WRITE_EVENT_QUERY = """
+    MERGE (u:User {user_id: $user_id})
+    MERGE (s:Session {session_id: $session_id})
+    MERGE (t:Topic {topic_id: $topic_id})
+    MERGE (c:CapabilityHint {capability_hint: $capability_hint})
+    MERGE (e:Event {event_id: $event_id})
+    SET e.user_id = $user_id,
+        e.session_id = $session_id,
+        e.topic_id = $topic_id,
+        e.capability_hint = $capability_hint,
+        e.evidence_refs = $evidence_refs,
+        e.payload = $payload,
+        e.ts_ms = $ts_ms
+    MERGE (u)-[:HAS_EVENT]->(e)
+    MERGE (s)-[:HAS_EVENT]->(e)
+    MERGE (e)-[:ABOUT]->(t)
+    MERGE (e)-[:AFFECTS]->(c)
+    RETURN
+      e.event_id AS event_id,
+      e.topic_id AS topic_id,
+      e.capability_hint AS capability_hint,
+      e.evidence_refs AS evidence_refs,
+      e.payload AS payload,
+      e.ts_ms AS ts_ms
+    """
 
     def __init__(
         self,
@@ -236,6 +288,7 @@ class Neo4jBondClient:
         pool_size: int,
         tls_enabled: bool,
         fetch_limit: int = 256,
+        constraint_assets: list[str | Path] | None = None,
     ) -> None:
         username, password = _parse_basic_auth(auth_value)
         try:
@@ -245,12 +298,21 @@ class Neo4jBondClient:
 
         self._database = str(database).strip() or "neo4j"
         self._fetch_limit = max(1, int(fetch_limit))
+        asset_paths = list(
+            constraint_assets
+            or [Path(__file__).parent / "migrations" / "0001_bond_constraints.cypher"]
+        )
+        self._constraint_statements = _load_constraint_statements(asset_paths)
         self._driver = GraphDatabase.driver(
             str(uri).strip(),
             auth=(username, password),
             max_connection_pool_size=max(1, int(pool_size)),
             encrypted=bool(tls_enabled),
         )
+
+    @property
+    def constraint_statements(self) -> list[str]:
+        return list(self._constraint_statements)
 
     @property
     def events(self) -> list[dict[str, Any]]:
@@ -261,6 +323,65 @@ class Neo4jBondClient:
         rows: list[dict[str, Any]] = []
         with self._driver.session(database=self._database) as session:
             result = session.run(self._EVENTS_QUERY, limit=row_limit)
+            for record in result:
+                payload = record.data() if hasattr(record, "data") else dict(record)
+                normalized = _normalize_bond_event_row(payload)
+                if normalized is not None:
+                    rows.append(normalized)
+        return rows
+
+    def write_bond_event(
+        self,
+        *,
+        writer_id: str,
+        event_id: str,
+        user_id: str,
+        session_id: str,
+        topic_id: str,
+        capability_hint: str,
+        evidence_refs: list[str] | tuple[str, ...],
+        payload: dict[str, Any] | None,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        if str(writer_id).strip() != BOND_WRITER_ID:
+            raise PermissionError(BOND_SINGLE_WRITER_VIOLATION)
+        normalized_refs = _normalize_evidence_refs(evidence_refs)
+        if not normalized_refs:
+            raise ValueError(BOND_EVIDENCE_REQUIRED)
+        params = {
+            "event_id": str(event_id).strip(),
+            "user_id": str(user_id).strip(),
+            "session_id": str(session_id).strip(),
+            "topic_id": str(topic_id).strip(),
+            "capability_hint": str(capability_hint).strip(),
+            "evidence_refs": list(normalized_refs),
+            "payload": json.dumps(dict(payload or {}), ensure_ascii=False),
+            "ts_ms": int(ts_ms),
+        }
+        with self._driver.session(database=self._database) as session:
+            record = session.run(self._WRITE_EVENT_QUERY, **params).single()
+        row = record.data() if hasattr(record, "data") else dict(record or {})
+        normalized = _normalize_bond_event_row(row)
+        if normalized is None:
+            raise RuntimeError("neo4j write_bond_event returned empty row")
+        return {
+            **normalized,
+            "user_id": params["user_id"],
+            "session_id": params["session_id"],
+        }
+
+    def get_event(self, event_id: str) -> dict[str, Any] | None:
+        with self._driver.session(database=self._database) as session:
+            record = session.run(self._EVENT_BY_ID_QUERY, event_id=str(event_id).strip()).single()
+        if record is None:
+            return None
+        row = record.data() if hasattr(record, "data") else dict(record)
+        return _normalize_bond_event_row(row)
+
+    def trace_user_events(self, user_id: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        with self._driver.session(database=self._database) as session:
+            result = session.run(self._USER_EVENTS_QUERY, user_id=str(user_id).strip(), limit=self._fetch_limit)
             for record in result:
                 payload = record.data() if hasattr(record, "data") else dict(record)
                 normalized = _normalize_bond_event_row(payload)

@@ -20,6 +20,7 @@ from edge_client.actuators.tts_engine import (
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
+from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
@@ -35,6 +36,7 @@ class EdgeRuntime:
 
     config: EdgeConfig
     voice_rpc: VoiceRpcContract
+    fallback_rpc: EdgeFallbackRpcContract
     speech_queue: SpeechPlaybackQueue
     event_reporter: EdgeEventReporter
     voice_pipeline: EdgeVoicePipeline
@@ -43,7 +45,6 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
-    wechat_listener: Any | None = None
 
     @property
     def asr(self) -> AsrService | None:
@@ -78,7 +79,6 @@ class EdgeRuntime:
             "tts_playback_stopped": True,
             "tts_unloaded": True,
             "vts_disconnected": True,
-            "wechat_listener_stopped": True,
             "gateway_stopped": True,
             "errors": [],
         }
@@ -151,6 +151,11 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     )
     voice_rpc = VoiceRpcContract(
         resource_gate=resource_gate,
+    )
+    fallback_rpc = EdgeFallbackRpcContract(
+        resource_gate=resource_gate,
+        available=bool(getattr(config, "fallback_llm_enabled", False)),
+        default_unloaded=not bool(getattr(config, "fallback_llm_enabled", False)),
     )
 
     tts_cfg = TtsConfig(
@@ -449,11 +454,10 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
     if asr_service is not None:
         asr_service.set_rpc_event_callback(voice_pipeline.on_asr_rpc_result)
 
-    wechat_listener = None
-
     return EdgeRuntime(
         config=config,
         voice_rpc=voice_rpc,
+        fallback_rpc=fallback_rpc,
         speech_queue=speech_queue,
         event_reporter=event_reporter,
         voice_pipeline=voice_pipeline,
@@ -462,7 +466,6 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_model=tts_model,
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
-        wechat_listener=wechat_listener,
     )
 
 

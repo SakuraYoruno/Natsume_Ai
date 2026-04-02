@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import unittest
 from typing import Any
@@ -398,6 +399,33 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual(200, resp.status_code)
         self.assertEqual("ignored", resp.json()["status"])
 
+    def test_t_gw_server_03a_webhook_invalid_json_400(self) -> None:
+        client, _, _ = self._make_client()
+        resp = client.post(
+            "/v1/gateway/wechat/webhook",
+            data="{bad json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(400, resp.status_code)
+
+    def test_t_gw_server_03b_webhook_adapter_error_500(self) -> None:
+        client, adapter, _ = self._make_client()
+        adapter.parse_inbound.side_effect = RuntimeError("bad parse")
+        resp = client.post(
+            "/v1/gateway/wechat/webhook",
+            json={"type": "1", "content": "hello"},
+        )
+        self.assertEqual(500, resp.status_code)
+
+    def test_t_gw_server_03c_webhook_route_failure_returns_cached(self) -> None:
+        client, _, _ = self._make_client(route_success=False)
+        resp = client.post(
+            "/v1/gateway/wechat/webhook",
+            json={"type": "1", "content": "hello"},
+        )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("cached", resp.json()["status"])
+
     def test_t_gw_server_04_health_returns_ok(self) -> None:
         """T-GW-SERVER-04: GET /health 返回 status=ok。"""
         client, _, _ = self._make_client()
@@ -407,6 +435,13 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual("ok", data["status"])
         self.assertIn("uptime_s", data)
         self.assertIn("adapters", data)
+
+    def test_t_gw_server_04a_health_adapter_error_is_reported(self) -> None:
+        client, adapter, _ = self._make_client()
+        adapter.health.side_effect = RuntimeError("health fail")
+        resp = client.get("/v1/gateway/health")
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("error", resp.json()["adapters"]["wechat"]["status"])
 
     def test_t_gw_server_05_stats_returns_normalizer_and_router(self) -> None:
         """T-GW-SERVER-05: GET /stats 返回 normalizer 和 router 统计。"""
@@ -442,6 +477,76 @@ class TestGatewayServer(unittest.TestCase):
         data = resp.json()
         self.assertEqual("sent", data["status"])
         outbound.dispatch.assert_called_once()
+
+    def test_t_gw_server_07a_reply_invalid_json_400(self) -> None:
+        client, _, _ = self._make_client(with_outbound=True)
+        resp = client.post(
+            "/v1/gateway/reply",
+            data="{bad json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(400, resp.status_code)
+
+    def test_t_gw_server_07b_reply_invalid_platform_400(self) -> None:
+        client, _, _ = self._make_client(with_outbound=True)
+        resp = client.post(
+            "/v1/gateway/reply",
+            json={"platform": "invalid", "conversation_id": "conv_001", "content": "hi"},
+        )
+        self.assertEqual(400, resp.status_code)
+
+    def test_t_gw_server_07c_reply_wait_false_returns_queued(self) -> None:
+        client, _, _ = self._make_client(with_outbound=True)
+        resp = client.post(
+            "/v1/gateway/reply",
+            json={
+                "platform": "wechat",
+                "conversation_id": "conv_queued",
+                "content": "hi",
+                "wait_result": False,
+            },
+        )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("queued", resp.json()["status"])
+
+    def test_t_gw_server_07d_reply_timeout_returns_failed(self) -> None:
+        client, _, _ = self._make_client(with_outbound=True)
+
+        async def _raise_timeout(*_args, **_kwargs):
+            raise asyncio.TimeoutError
+
+        with patch("edge_client.gateway.server.asyncio.to_thread", side_effect=_raise_timeout):
+            resp = client.post(
+                "/v1/gateway/reply",
+                json={
+                    "platform": "wechat",
+                    "conversation_id": "conv_timeout",
+                    "content": "hi",
+                    "timeout_ms": 5,
+                },
+            )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("failed", resp.json()["status"])
+        self.assertIn("timeout", resp.json()["detail"])
+
+    def test_t_gw_server_07e_reply_dispatch_error_returns_failed(self) -> None:
+        client, _, _ = self._make_client(with_outbound=True)
+
+        async def _raise_dispatch_error(*_args, **_kwargs):
+            raise RuntimeError("dispatch boom")
+
+        with patch("edge_client.gateway.server.asyncio.to_thread", side_effect=_raise_dispatch_error):
+            resp = client.post(
+                "/v1/gateway/reply",
+                json={
+                    "platform": "wechat",
+                    "conversation_id": "conv_error",
+                    "content": "hi",
+                },
+            )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("failed", resp.json()["status"])
+        self.assertEqual("dispatch boom", resp.json()["detail"])
 
 
 # ===========================================================================

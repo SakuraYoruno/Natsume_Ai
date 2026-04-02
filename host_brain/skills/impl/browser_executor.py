@@ -37,6 +37,8 @@ BROWSER_BACKEND_UNSUPPORTED = "BROWSER_BACKEND_UNSUPPORTED"
 BACKEND_AUTO = "auto"
 BACKEND_AGENT_BROWSER = "agent-browser"
 BACKEND_PLAYWRIGHT = "playwright"
+BACKEND_OS_SHELL = "os-shell"
+BACKEND_DESKTOP_FALLBACK = "desktop-fallback"
 
 AGENT_BROWSER_DEFAULT_COMMAND = "agent-browser"
 AGENT_BROWSER_DEFAULT_SESSION = "natsume"
@@ -232,6 +234,93 @@ def _dispatch_input_events_script(element_ref: str) -> str:
     )
 
 
+def _open_url_via_system_shell(url: str) -> None:
+    target = str(url or "").strip()
+    if not target:
+        raise ValueError("url is required")
+    if hasattr(os, "startfile"):
+        os.startfile(target)  # type: ignore[attr-defined]
+        return
+    completed = subprocess.run(["python", "-m", "webbrowser", "-t", target], capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "webbrowser open failed").strip()
+        raise RuntimeError(detail)
+
+
+def _os_shell_execute_browser_navigate(payload: dict[str, Any]) -> dict[str, Any]:
+    ts = now_ms()
+    event_id = new_event_id()
+    url = str(payload.get("url") or "").strip()
+    request_id = _payload_request_id(payload)
+    if not url:
+        return _reject(event_id=event_id, reason_code="BROWSER_URL_MISSING", detail="url is required", ts_ms=ts, request_id=request_id)
+    try:
+        _open_url_via_system_shell(url)
+        return {
+            "status": STATUS_EXECUTED,
+            "event_id": event_id,
+            "manifest_ref": payload.get("manifest_ref") or f"browser_navigate::{url[:80]}",
+            "url": url,
+            "title": None,
+            "request_id": request_id,
+            "backend": BACKEND_OS_SHELL,
+            "detail": "opened via system default browser",
+            "ts_ms": ts,
+        }
+    except Exception as exc:
+        return _degraded(event_id=event_id, reason_code=BROWSER_UNAVAILABLE, detail=str(exc), ts_ms=ts, request_id=request_id)
+
+
+def _desktop_fallback_browser_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
+    ts = now_ms()
+    event_id = new_event_id()
+    request_id = _payload_request_id(payload)
+    selector = str(payload.get("selector") or "").strip()
+    if selector:
+        return _degraded(
+            event_id=event_id,
+            reason_code=BROWSER_UNAVAILABLE,
+            detail="browser automation unavailable; element screenshot requires browser backend",
+            ts_ms=ts,
+            request_id=request_id,
+        )
+    try:
+        from host_brain.skills.impl.desktop_executor import execute_desktop_skill  # noqa: PLC0415
+        desktop_result = execute_desktop_skill(
+            {
+                "action": "screenshot",
+                "save_path": payload.get("save_path"),
+                "monitor": 1,
+                "manifest_ref": payload.get("manifest_ref") or "browser_screenshot::desktop_fallback",
+            },
+            payload.get("_context") if isinstance(payload.get("_context"), dict) else None,
+        )
+        status = str(desktop_result.get("status") or "").strip().upper()
+        if status != "OK":
+            return _degraded(
+                event_id=event_id,
+                reason_code=BROWSER_UNAVAILABLE,
+                detail=str(desktop_result.get("error") or desktop_result.get("detail") or "desktop screenshot unavailable"),
+                ts_ms=ts,
+                request_id=request_id,
+            )
+        detail = dict(desktop_result.get("detail") or {}) if isinstance(desktop_result.get("detail"), dict) else {}
+        return {
+            "status": STATUS_EXECUTED,
+            "event_id": event_id,
+            "manifest_ref": payload.get("manifest_ref") or "browser_screenshot::desktop_fallback",
+            "request_id": request_id,
+            "backend": BACKEND_DESKTOP_FALLBACK,
+            "save_path": detail.get("save_path"),
+            "image_b64": detail.get("image_b64"),
+            "image_mime": detail.get("image_mime"),
+            "detail": "browser backend unavailable; captured desktop screenshot instead",
+            "ts_ms": ts,
+        }
+    except Exception as exc:
+        return _degraded(event_id=event_id, reason_code=BROWSER_UNAVAILABLE, detail=str(exc), ts_ms=ts, request_id=request_id)
+
+
 def _dispatch_browser_backend(payload: dict[str, Any], *, agent_handler, playwright_handler) -> dict[str, Any]:
     preference = _backend_preference()
     if preference == BACKEND_PLAYWRIGHT:
@@ -243,7 +332,12 @@ def _dispatch_browser_backend(payload: dict[str, Any], *, agent_handler, playwri
             return agent_handler(payload)
         except FileNotFoundError:
             if preference == BACKEND_AUTO:
-                return playwright_handler(payload)
+                result = playwright_handler(payload)
+                if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "navigate":
+                    return _os_shell_execute_browser_navigate(payload)
+                if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "screenshot":
+                    return _desktop_fallback_browser_screenshot(payload)
+                return result
             return _degraded(
                 event_id=new_event_id(),
                 reason_code=BROWSER_UNAVAILABLE,
@@ -261,7 +355,12 @@ def _dispatch_browser_backend(payload: dict[str, Any], *, agent_handler, playwri
             )
         except AgentBrowserUnsupported as exc:
             if preference == BACKEND_AUTO:
-                return playwright_handler(payload)
+                result = playwright_handler(payload)
+                if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "navigate":
+                    return _os_shell_execute_browser_navigate(payload)
+                if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "screenshot":
+                    return _desktop_fallback_browser_screenshot(payload)
+                return result
             return _reject(
                 event_id=new_event_id(),
                 reason_code=BROWSER_BACKEND_UNSUPPORTED,
@@ -278,7 +377,12 @@ def _dispatch_browser_backend(payload: dict[str, Any], *, agent_handler, playwri
                 request_id=_payload_request_id(payload),
             )
 
-    return playwright_handler(payload)
+    result = playwright_handler(payload)
+    if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "navigate":
+        return _os_shell_execute_browser_navigate(payload)
+    if str(result.get("reason_code") or "") == BROWSER_UNAVAILABLE and str(payload.get("action") or "").strip().lower() == "screenshot":
+        return _desktop_fallback_browser_screenshot(payload)
+    return result
 
 
 # ---------------------------------------------------------------------------

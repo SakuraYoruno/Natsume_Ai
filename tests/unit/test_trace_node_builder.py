@@ -8,7 +8,7 @@ import time
 import pytest
 from unittest.mock import MagicMock
 
-from host_brain.obs.trace_node_builder import TraceNodeBuilder, _IO_MAX_BYTES
+from host_brain.observability.trace_node_builder import TraceNodeBuilder, _IO_MAX_BYTES
 
 
 def _make_ledger(table_data: dict):

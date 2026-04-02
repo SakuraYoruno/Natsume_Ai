@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from host_brain.obs.service_health_aggregator import (
+from host_brain.observability.service_health_aggregator import (
     ALL_SERVICES,
     ServiceHealthAggregator,
     ServiceHealthResult,

@@ -29,6 +29,7 @@ STATUS_REJECTED = "REJECTED"
 S_VOICE_ASR_INGRESS = "S_VOICE_ASR_INGRESS"
 S_VOICE_SPEAK_EGRESS = "S_VOICE_SPEAK_EGRESS"
 S_VOICE_BARGE_IN = "S_VOICE_BARGE_IN"
+_JAPANESE_TTS_LANGUAGE_ALIASES = frozenset({"ja", "jp", "ja-jp"})
 
 
 @dataclass(frozen=True)
@@ -215,6 +216,21 @@ class VoiceRpcContract:
                 ts_ms=now_value,
             )
 
+        lang_hint = _normalize_tts_lang_hint(payload.get("lang_hint"))
+        if lang_hint is None:
+            return self._reject(
+                request_id=request_id,
+                session_id=session_id,
+                event_type=EVENT_SPEAK,
+                direction=DIRECTION_HOST_TO_EDGE,
+                seq=int(seq) if isinstance(seq, int) else None,
+                stage=S_VOICE_SPEAK_EGRESS,
+                reason_code=VOICE_SCHEMA_INVALID,
+                detail="speak lang_hint must be ja when provided",
+                payload=payload,
+                ts_ms=now_value,
+            )
+
         raw_intensity = payload.get("emotion_intensity")
         emotion_intensity: float | None = None
         if raw_intensity is not None:
@@ -232,6 +248,7 @@ class VoiceRpcContract:
             "emotion_tag": str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
             "interruptible": bool(payload.get("interruptible", True)),
             "voice_profile": str(payload.get("voice_profile") or "default"),
+            "lang_hint": lang_hint,
             "ts_ms": now_value,
         }
         if emotion_intensity is not None:
@@ -421,3 +438,12 @@ def _normalize_alternates(value: Any) -> list[dict[str, Any]]:
             continue
         out.append({"text": text, "confidence": float(conf)})
     return out
+
+
+def _normalize_tts_lang_hint(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return "ja"
+    if normalized in _JAPANESE_TTS_LANGUAGE_ALIASES:
+        return "ja"
+    return None

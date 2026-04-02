@@ -1,0 +1,572 @@
+from __future__ import annotations
+
+import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from edge_client.actuators.speech import (
+    EVENT_TTS_PLAYBACK_STARTED,
+    EVENT_TTS_QUEUED,
+    S_VOICE_TTS_QUEUE,
+    SpeechPlaybackQueue,
+    SpeechQueueResult,
+)
+from edge_client.actuators.vts_driver import VtsDriverResult, VtsState
+from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
+from edge_client.rpc.voice import EVENT_ASR_CHUNK, STATUS_ACCEPTED, VoiceRpcContract, VoiceRpcResult
+from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
+from host_brain.core.errors import VOICE_PLAYBACK_FAILED
+
+
+def _success_batch(total: int) -> BatchReportResult:
+    return BatchReportResult(
+        success=True,
+        total=total,
+        accepted=total,
+        rejected=0,
+    )
+
+
+class _MockVtsDriver:
+    def __init__(self) -> None:
+        self.state = VtsState.AUTHENTICATED
+        self.transition_calls: list[tuple[str, list[dict[str, str]]]] = []
+        self.expression_calls: list[tuple[str, float]] = []
+        self.hotkey_calls: list[str] = []
+        self.talk_start_calls = 0
+        self.connect_result = VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="connected",
+            action="CONNECT",
+        )
+        self._mouth_parameter_plan = {"selected": ["ParamMouthOpenY"]}
+        self.mouth_values: list[float] = []
+        self.fail_probe = False
+
+    def connect(self) -> VtsDriverResult:
+        return self.connect_result
+
+    def reset_to_neutral(self) -> VtsDriverResult:
+        return VtsDriverResult(success=True, reason_code=None, detail="reset", action="RESET")
+
+    def transition_expression(
+        self,
+        emotion_tag: str,
+        *,
+        transition_frames: list[dict[str, str]],
+    ) -> VtsDriverResult:
+        self.transition_calls.append((emotion_tag, list(transition_frames)))
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="transition",
+            action="TRANSITION",
+        )
+
+    def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
+        self.expression_calls.append((emotion_tag, intensity))
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="set_expression",
+            action="SET_EXPRESSION",
+        )
+
+    def trigger_hotkey(self, hotkey_id: str) -> VtsDriverResult:
+        self.hotkey_calls.append(hotkey_id)
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="trigger_hotkey",
+            action="TRIGGER_HOTKEY",
+        )
+
+    def talk_start(self) -> VtsDriverResult:
+        self.talk_start_calls += 1
+        return VtsDriverResult(success=True, reason_code=None, detail="talk_start", action="TALK_START")
+
+    def health(self) -> dict[str, object]:
+        return {"mouth_parameters": {"ParamMouthOpenY": 0.0}}
+
+    def set_mouth_open_level(self, value: float) -> VtsDriverResult:
+        self.mouth_values.append(float(value))
+        if self.fail_probe and len(self.mouth_values) == 1:
+            return VtsDriverResult(
+                success=False,
+                reason_code="MOUTH_BLOCKED",
+                detail="probe failed",
+                action="SET_MOUTH_OPEN_LEVEL",
+            )
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="mouth level set",
+            action="SET_MOUTH_OPEN_LEVEL",
+        )
+
+
+class _ImmediateThread:
+    def __init__(self, *, target, name: str, daemon: bool) -> None:
+        self._target = target
+        self.name = name
+        self.daemon = daemon
+        self.join_called = False
+        self._alive = False
+
+    def start(self) -> None:
+        self._alive = True
+        self._target()
+        self._alive = False
+
+    def join(self, timeout: float | None = None) -> None:
+        self.join_called = True
+        self._alive = False
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+
+class _AliveThread:
+    def __init__(self) -> None:
+        self.join_called = False
+
+    def join(self, timeout: float | None = None) -> None:
+        self.join_called = True
+
+    def is_alive(self) -> bool:
+        return True
+
+
+class TestEdgeVoicePipelineHelpers(unittest.TestCase):
+    def setUp(self) -> None:
+        self.rpc = VoiceRpcContract(asr_min_interval_ms=0)
+        self.queue = SpeechPlaybackQueue(
+            rpc=self.rpc,
+            synthesizer=lambda _: {"audio_ref": "mem://audio"},
+            playback_starter=lambda _s, _a: None,
+        )
+        self.reporter = EdgeEventReporter(
+            transport_fn=lambda events: _success_batch(len(events)),
+            max_retry=1,
+        )
+
+    def _build_pipeline(self, *, vts_driver: _MockVtsDriver | None = None) -> EdgeVoicePipeline:
+        return EdgeVoicePipeline(
+            voice_rpc=self.rpc,
+            speech_queue=self.queue,
+            event_reporter=self.reporter,
+            vts_driver=vts_driver,
+        )
+
+    def test_on_asr_rpc_result_flushes_and_report_helpers_guard_missing_session(self) -> None:
+        pipeline = self._build_pipeline()
+        rpc_result = VoiceRpcResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_VOICE_ASR_INGRESS",
+            detail="ok",
+            event={"event_type": EVENT_ASR_CHUNK, "seq": 1},
+        )
+        self.assertIsNone(
+            pipeline._report_asr_rpc_result(
+                request_id="req-asr-missing-session",
+                rpc_result=rpc_result,
+            )
+        )
+
+        flush_mock = MagicMock()
+        pipeline.event_reporter.flush_cache = flush_mock
+        with patch.object(
+            pipeline,
+            "_report_asr_rpc_result",
+            return_value=_success_batch(1),
+        ) as report_mock:
+            pipeline.on_asr_rpc_result("req-asr-flush", rpc_result)
+
+        report_mock.assert_called_once()
+        flush_mock.assert_called_once()
+
+    def test_waiting_for_active_playback_and_queue_report_paths(self) -> None:
+        pipeline = self._build_pipeline()
+        waiting = SpeechQueueResult(
+            success=False,
+            status="REJECTED",
+            reason_code=VOICE_PLAYBACK_FAILED,
+            stage=S_VOICE_TTS_QUEUE,
+            detail="cannot start while playback is active",
+            event={},
+        )
+        self.assertTrue(pipeline._is_waiting_for_active_playback(waiting))
+        self.assertFalse(
+            pipeline._is_waiting_for_active_playback(
+                SpeechQueueResult(
+                    success=False,
+                    status="REJECTED",
+                    reason_code="OTHER_FAILURE",
+                    stage=S_VOICE_TTS_QUEUE,
+                    detail="cannot start while playback is active",
+                    event={},
+                )
+            )
+        )
+
+        self.assertIsNone(
+            pipeline._report_voice_queue_result(
+                request_id="req-no-session",
+                result=SpeechQueueResult(
+                    success=True,
+                    status=STATUS_ACCEPTED,
+                    reason_code=None,
+                    stage=S_VOICE_TTS_QUEUE,
+                    detail="queued",
+                    event={"event_type": EVENT_TTS_QUEUED},
+                ),
+            )
+        )
+
+        flush_mock = MagicMock()
+        pipeline.event_reporter.flush_cache = flush_mock
+        report = pipeline._report_voice_queue_result(
+            request_id="req-report",
+            result=SpeechQueueResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage=S_VOICE_TTS_QUEUE,
+                detail="queued",
+                event={
+                    "event_type": EVENT_TTS_QUEUED,
+                    "request_id": "req-report",
+                    "session_id": "sess-report",
+                    "ts_ms": 1234,
+                },
+            ),
+        )
+        self.assertIsNotNone(report)
+        assert report is not None
+        self.assertTrue(report.success)
+        flush_mock.assert_called_once()
+
+    def test_enqueue_speak_uses_manual_vts_hook_when_queue_start_skips_hook(self) -> None:
+        pipeline = self._build_pipeline(vts_driver=_MockVtsDriver())
+        pipeline.speech_queue.enqueue_speak = MagicMock(
+            return_value=SpeechQueueResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage=S_VOICE_TTS_QUEUE,
+                detail="queued",
+                event={
+                    "event_type": EVENT_TTS_QUEUED,
+                    "request_id": "req-manual-hook",
+                    "session_id": "sess-manual-hook",
+                    "ts_ms": 1234,
+                },
+            )
+        )
+        pipeline.speech_queue.start_next = MagicMock(
+            return_value=SpeechQueueResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage=S_VOICE_TTS_QUEUE,
+                detail="started",
+                event={
+                    "event_type": EVENT_TTS_PLAYBACK_STARTED,
+                    "request_id": "req-manual-hook",
+                    "session_id": "sess-manual-hook",
+                    "ts_ms": 1235,
+                },
+            )
+        )
+        pipeline._report_voice_queue_result = MagicMock(return_value=_success_batch(1))
+
+        def _manual_hook(*, speak_event, synth_event) -> None:
+            self.assertEqual("hello voice", speak_event["text"])
+            self.assertEqual({}, synth_event)
+            pipeline._pending_vts_result = {
+                "expression_result": "expr",
+                "talk_result": "talk",
+                "mouth_sync_debug": {"state": "manual"},
+            }
+
+        pipeline._vts_before_playback_hook = _manual_hook
+
+        result = pipeline.enqueue_speak(
+            request_id="req-manual-hook",
+            payload={
+                "session_id": "sess-manual-hook",
+                "utterance_id": "utt-manual-hook",
+                "text": "hello voice",
+            },
+            ts_ms=1234,
+            auto_start=True,
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual("expr", result.expression_result)
+        self.assertEqual("talk", result.talk_result)
+        self.assertEqual({"state": "manual"}, result.mouth_sync_debug)
+        self.assertEqual(2, pipeline._report_voice_queue_result.call_count)
+
+    def test_vts_hook_transition_hotkey_and_missing_audio_reason(self) -> None:
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        with patch(
+            "host_brain.channels.vts_mapping_store.sub_emotion_to_hotkey",
+            return_value="hotkey-smile",
+        ):
+            pipeline._vts_before_playback_hook(
+                speak_event={
+                    "emotion_tag": "happy",
+                    "sub_emotion": "playful",
+                    "transition_frames": [
+                        {"emotion_tag": "neutral"},
+                        {"emotion_tag": "happy"},
+                    ],
+                },
+                synth_event={},
+            )
+
+        cached = pipeline._pending_vts_result
+        self.assertEqual(1, len(vts.transition_calls))
+        self.assertEqual("HAPPY", vts.transition_calls[0][0])
+        self.assertEqual(["hotkey-smile"], vts.hotkey_calls)
+        self.assertEqual(1, vts.talk_start_calls)
+        self.assertEqual("missing_synth_event", cached["mouth_sync_debug"]["reason"])
+        self.assertEqual("talk_started", cached["mouth_sync_debug"]["state"])
+
+    def test_start_vts_for_payload_handles_connect_failure_and_invalid_intensity(self) -> None:
+        blocked_vts = _MockVtsDriver()
+        blocked_vts.state = VtsState.DISCONNECTED
+        blocked_vts.connect_result = VtsDriverResult(
+            success=False,
+            reason_code="VTS_CONNECT_FAILED",
+            detail="connect failed",
+            action="CONNECT",
+        )
+        pipeline = self._build_pipeline(vts_driver=blocked_vts)
+        expression_result, talk_result, debug = pipeline._start_vts_for_payload(
+            {"emotion_tag": "sad"},
+            synth_event=None,
+        )
+        self.assertFalse(expression_result.success)
+        self.assertIsNone(talk_result)
+        self.assertEqual("vts_connect_failed", debug["reason"])
+
+        healthy_vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=healthy_vts)
+        expression_result, talk_result, debug = pipeline._start_vts_for_payload(
+            {
+                "emotion_tag": "joy",
+                "emotion_intensity": "bad-value",
+            },
+            synth_event={},
+        )
+        self.assertTrue(expression_result.success)
+        self.assertTrue(talk_result.success)
+        self.assertEqual(("JOY", 0.5), healthy_vts.expression_calls[0])
+        self.assertEqual("missing_synth_event", debug["reason"])
+
+    def test_start_vts_for_payload_without_driver_and_with_audio_path(self) -> None:
+        no_vts_pipeline = self._build_pipeline(vts_driver=None)
+        expression_result, talk_result, debug = no_vts_pipeline._start_vts_for_payload(
+            {"emotion_tag": "sad"},
+            synth_event={"audio_data": [0.2], "sample_rate": 24000},
+        )
+        self.assertIsNone(expression_result)
+        self.assertIsNone(talk_result)
+        self.assertEqual("vts_driver_unavailable", debug["reason"])
+
+        healthy_vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=healthy_vts)
+        with patch.object(
+            pipeline,
+            "_start_mouth_sync",
+            return_value={"state": "running", "started": True},
+        ) as mouth_sync_mock:
+            expression_result, talk_result, debug = pipeline._start_vts_for_payload(
+                {"emotion_tag": "happy", "emotion_intensity": 0.8},
+                synth_event={"audio_data": [0.1, 0.4], "sample_rate": 24000},
+            )
+
+        self.assertTrue(expression_result.success)
+        self.assertTrue(talk_result.success)
+        self.assertEqual("running", debug["state"])
+        mouth_sync_mock.assert_called_once()
+
+    def test_synth_event_has_audio_variants(self) -> None:
+        class _SizedAudio:
+            def __init__(self, size: int) -> None:
+                self.size = size
+
+        class _ExplodingLen:
+            def __len__(self) -> int:
+                raise RuntimeError("len exploded")
+
+        self.assertFalse(EdgeVoicePipeline._synth_event_has_audio({}))
+        self.assertFalse(EdgeVoicePipeline._synth_event_has_audio({"audio_data": None}))
+        self.assertFalse(EdgeVoicePipeline._synth_event_has_audio({"audio_data": _SizedAudio(0)}))
+        self.assertTrue(EdgeVoicePipeline._synth_event_has_audio({"audio_data": _SizedAudio(4)}))
+        self.assertFalse(EdgeVoicePipeline._synth_event_has_audio({"audio_data": b""}))
+        self.assertTrue(EdgeVoicePipeline._synth_event_has_audio({"audio_data": b"x"}))
+        self.assertTrue(EdgeVoicePipeline._synth_event_has_audio({"audio_data": _ExplodingLen()}))
+
+    def test_start_and_stop_mouth_sync_cover_empty_probe_failure_and_success(self) -> None:
+        pipeline = self._build_pipeline(vts_driver=None)
+        debug = pipeline._start_mouth_sync({"audio_data": [0.1], "sample_rate": 24000})
+        self.assertEqual("vts_driver_unavailable", debug["reason"])
+
+        empty_vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=empty_vts)
+        with patch.object(pipeline, "_build_mouth_envelope", return_value=[]):
+            debug = pipeline._start_mouth_sync({"audio_data": [0.1], "sample_rate": 24000})
+        self.assertEqual("empty_envelope", debug["reason"])
+
+        blocked_vts = _MockVtsDriver()
+        blocked_vts.fail_probe = True
+        pipeline = self._build_pipeline(vts_driver=blocked_vts)
+        with patch.object(pipeline, "_build_mouth_envelope", return_value=[0.3]):
+            debug = pipeline._start_mouth_sync({"audio_data": [0.1], "sample_rate": 24000})
+        self.assertEqual("mouth_param_unwritable", debug["reason"])
+
+        success_vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=success_vts)
+        with patch.object(pipeline, "_build_mouth_envelope", return_value=[0.2, 0.4]):
+            with patch("edge_client.runtime.voice_pipeline.time.sleep", return_value=None):
+                with patch(
+                    "edge_client.runtime.voice_pipeline.threading.Thread",
+                    side_effect=lambda **kwargs: _ImmediateThread(**kwargs),
+                ):
+                    debug = pipeline._start_mouth_sync(
+                        {"audio_data": [0.1], "sample_rate": 24000}
+                    )
+
+        self.assertTrue(debug["started"])
+        self.assertEqual("finished", debug["state"])
+        self.assertEqual("finished", pipeline._mouth_sync_debug["state"])
+        self.assertEqual(5, len(success_vts.mouth_values))
+
+        alive_thread = _AliveThread()
+        pipeline._mouth_sync_thread = alive_thread
+        pipeline._mouth_sync_debug = {"state": "running"}
+        pipeline._stop_mouth_sync()
+        self.assertTrue(alive_thread.join_called)
+        self.assertEqual("stopped", pipeline._mouth_sync_debug["state"])
+
+    def test_report_asr_rpc_result_ignores_non_asr_event(self) -> None:
+        pipeline = self._build_pipeline()
+        rpc_result = VoiceRpcResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_OTHER",
+            detail="ignored",
+            event={"event_type": "OTHER_EVENT", "session_id": "sess-other"},
+        )
+        self.assertIsNone(
+            pipeline._report_asr_rpc_result(
+                request_id="req-other-event",
+                rpc_result=rpc_result,
+            )
+        )
+
+    def test_build_mouth_envelope_variants(self) -> None:
+        self.assertEqual([], EdgeVoicePipeline._build_mouth_envelope(None, 24000))
+        self.assertEqual([], EdgeVoicePipeline._build_mouth_envelope([0.1, 0.2], 0))
+        self.assertEqual([], EdgeVoicePipeline._build_mouth_envelope([0.0, 0.0], 24000))
+
+        envelope = EdgeVoicePipeline._build_mouth_envelope([0.0, 0.5, 1.0], 24)
+        self.assertEqual(3, len(envelope))
+        self.assertTrue(all(0.0 <= value <= 1.0 for value in envelope))
+        self.assertGreater(envelope[-1], envelope[0])
+
+    def test_coerce_audio_samples_covers_numpy_and_fallback_paths(self) -> None:
+        class _FakeArray:
+            def __init__(self, values):
+                self._values = values
+                if values and isinstance(values[0], list):
+                    self.ndim = 2
+                    self.size = sum(len(row) for row in values)
+                else:
+                    self.ndim = 1
+                    self.size = len(values)
+
+            def tolist(self):
+                return list(self._values)
+
+        class _FakeNumpy:
+            @staticmethod
+            def asarray(audio_data, dtype=float):
+                del dtype
+                return _FakeArray(audio_data)
+
+            @staticmethod
+            def abs(arr):
+                values = arr._values
+                if arr.ndim > 1:
+                    return _FakeArray([[abs(item) for item in row] for row in values])
+                return _FakeArray([abs(item) for item in values])
+
+            @staticmethod
+            def mean(arr, axis=1):
+                self.assertEqual(1, axis)
+                return _FakeArray([sum(row) / len(row) for row in arr._values])
+
+        with patch.dict("sys.modules", {"numpy": _FakeNumpy()}):
+            samples = EdgeVoicePipeline._coerce_audio_samples([[-1.0, 1.0], [2.0, -2.0]])
+        self.assertEqual([1.0, 2.0], samples)
+
+        class _BrokenToList:
+            def tolist(self):
+                raise RuntimeError("tolist exploded")
+
+        self.assertEqual([], EdgeVoicePipeline._coerce_audio_samples(_BrokenToList()))
+        self.assertEqual([], EdgeVoicePipeline._coerce_audio_samples(b"\x00\x01"))
+        self.assertEqual([2.5], EdgeVoicePipeline._coerce_audio_samples(-2.5))
+        self.assertEqual(
+            [1.0, 2.0],
+            EdgeVoicePipeline._coerce_audio_samples([1.0, (1.0, 3.0), "skip"]),
+        )
+
+    def test_health_and_resolve_asr_emotion_report_helpers(self) -> None:
+        pipeline = self._build_pipeline(vts_driver=_MockVtsDriver())
+        pipeline._mouth_sync_debug = {"state": "running", "started": True}
+        pipeline._mouth_sync_thread = _AliveThread()
+        health = pipeline.health()
+        self.assertTrue(health["mouth_sync_thread_alive"])
+        self.assertEqual("running", health["mouth_sync"]["state"])
+
+        explicit = pipeline._resolve_asr_emotion_report(
+            {
+                "emotion_tag": "happy",
+                "emotion_intensity": 2.0,
+                "mood_state": "joyful",
+            }
+        )
+        self.assertEqual("HAPPY", explicit["emotion_tag"])
+        self.assertEqual("edge_explicit", explicit["emotion_source"])
+        self.assertEqual(1.0, explicit["emotion_intensity"])
+        self.assertEqual("joyful", explicit["mood_state"])
+
+        explicit_default = pipeline._resolve_asr_emotion_report(
+            {"emotion_tag": "sad", "emotion_intensity": "bad-value"}
+        )
+        self.assertEqual(0.5, explicit_default["emotion_intensity"])
+
+        with patch(
+            "edge_client.runtime.voice_pipeline.infer_asr_emotion",
+            return_value={"emotion_tag": "CALM", "emotion_intensity": 0.3, "emotion_source": "inferred"},
+        ) as infer_mock:
+            inferred = pipeline._resolve_asr_emotion_report(
+                {"text": "慢慢说", "confidence": 0.8, "final": True}
+            )
+        infer_mock.assert_called_once_with(text="慢慢说", confidence=0.8, final=True)
+        self.assertEqual("CALM", inferred["emotion_tag"])
+
+
+if __name__ == "__main__":
+    unittest.main()

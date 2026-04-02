@@ -14,7 +14,7 @@
 
 | 方案 | 文件 | 核心问题 |
 |------|------|---------|
-| **A: WeChatFerry Hook** | `edge_client/channels/wechat_listener.py` | wcferry 原仓库停更，新版微信兼容性差，注入失败率高 |
+| **A: WeChatFerry Hook（已移除）** | `edge_client/channels/wechat_listener.py` | wcferry 原仓库停更，新版微信兼容性差，注入失败率高 |
 | **B: UIA 桌面自动化** | `tools/wechat_uia_bridge.py`（215KB/5878行） | **当前微信 4.x 主路径**：负责 inbound webhook + outbound command queue，`uia_hook/uia_ocr/win_notify/vision_notify` 为可选后端 |
 
 ### 1.2 具体问题根因
@@ -32,11 +32,11 @@
 
 | 资产 | 文件 | 复用方式 |
 |------|------|---------|
-| ✅ `WeChatMessage` 数据结构 | `channels/wechat_listener.py` | 升级为 `UnifiedMessage` |
+| ✅ 历史 `WeChatMessage` 数据结构 | `channels/wechat_listener.py` | 已升级为 `UnifiedMessage` |
 | ✅ `EdgeInputReporter` HTTP POST 通道 | `channels/input_reporter.py` | 直接复用，上报到 `/v1/host/input` |
-| ✅ `WeChatListener._parse_raw()` 消息解析 | `channels/wechat_listener.py` | 提炼为微信适配器基底 |
-| ✅ `_MessageDeduplicator` 去重器 | `channels/wechat_listener.py` | 上移到 Gateway 公共层 |
-| ✅ `desensitize_content()` 脱敏函数 | `channels/wechat_listener.py` | 上移到 Gateway 公共层 |
+| ✅ 历史 `WeChatListener._parse_raw()` 消息解析 | `channels/wechat_listener.py` | 已提炼为微信适配器基底 |
+| ✅ 历史 `_MessageDeduplicator` 去重器 | `channels/wechat_listener.py` | 已上移到 Gateway 公共层 |
+| ✅ 历史 `desensitize_content()` 脱敏函数 | `channels/wechat_listener.py` | 已上移到 Gateway 公共层 |
 | ✅ `wechat_uia_bridge.py` | `tools/wechat_uia_bridge.py` | **当前保留并接入 Gateway** |
 
 ---
@@ -253,7 +253,7 @@ class WxDbService:
         """轮询增量消息，供 Gateway 实时推送"""
 ```
 
-**消息类型映射**（复用现有 `wechat_listener.py` 的 `_TYPE_MAP`）：
+**消息类型映射**（沿用旧 `wechat_listener.py` 的 `_TYPE_MAP` 语义）：
 
 ```python
 _WX_TYPE_MAP = {
@@ -665,7 +665,7 @@ def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
 - [x] `gateway/adapters/wechat_adapter.py` — 撤回消息支持（`recall_message()`，`pywinauto` 右键菜单，2分钟内有效）
 - [ ] 语音消息发送（TTS + pysilk）— `encode_pcm_to_silk()` 已实现，发送路径待实测验证
 - [x] 保留 `tools/wechat_uia_bridge.py`，并切换到 Gateway webhook + command queue 主链路
-- [x] 废弃 `edge_client/channels/wechat_listener.py`（已添加 `@deprecated` 标记）
+- [x] 删除 `edge_client/channels/wechat_listener.py`（历史逻辑已完成迁移）
 - [x] `gateway/bootstrap.py` — `start_gateway()` 一键启动，`bootstrap.py` 集成到 EdgeRuntime
 
 ### Phase 6：Telegram Userbot 适配器（✅ 已完成）
@@ -691,9 +691,9 @@ def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
 
 所有第三方 Hook 方案均依赖特定微信版本的内存布局或 COM 接口，微信 4.x 升级后全部失效。本项目已有自研的 `wx4_decrypt.py` 解密脚本，通过 `pymem` 提取密钥、解密 SQLite 数据库，**版本无关、无需第三方依赖**，是当前唯一可用的微信数据接入方案。
 
-### 决策 1b：为什么不复用现有 `wechat_listener.py`？
+### 决策 1b：为什么不复用旧 `wechat_listener.py`？
 
-`wechat_listener.py` 是为 wcferry 单一平台设计的，数据结构（`WeChatMessage`）和路由逻辑都是微信专用的。Gateway 需要跨平台统一抽象，因此选择**提炼其中的通用逻辑**（去重、脱敏、类型映射）而非直接复用整个文件。
+`wechat_listener.py` 是为 wcferry 单一平台设计的，数据结构（`WeChatMessage`）和路由逻辑都是微信专用的。Gateway 需要跨平台统一抽象，因此选择**提炼其中的通用逻辑**（去重、脱敏、类型映射）而非复用整个文件；该历史文件现已从仓库删除。
 
 ### 决策 2：为什么 Gateway 独立运行在 :19000 而非复用 :17800？
 
@@ -714,7 +714,7 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 | 文件 | 废弃时间 | 替代方案 |
 |------|---------|------|
 | `tools/wechat_uia_bridge.py` | 保留 | 微信 4.x UIAutomation bridge（Gateway webhook + command queue） |
-| `edge_client/channels/wechat_listener.py` | Phase 2 完成后（部分逻辑上移） | `gateway/adapters/wechat_adapter.py` + `gateway/normalizer.py` |
+| `edge_client/channels/wechat_listener.py` | 已删除（历史逻辑已上移） | `gateway/adapters/wechat_adapter.py` + `gateway/normalizer.py` |
 
 ---
 
@@ -723,6 +723,7 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 > 日期：2026-03-24
 > 状态：**已实施完成**
 > 关联模块：`host_brain/app/handlers/gateway_orchestrator_handler.py`
+> 当前运行时说明：该模块已收敛为薄适配层，实际回复生成委托 `top_agent.py`。以下内容保留历史方案背景。
 
 ### 13.1 问题背景
 

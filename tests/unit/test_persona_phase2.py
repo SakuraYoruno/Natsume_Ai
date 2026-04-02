@@ -157,9 +157,10 @@ class TestVII2_ExpressionAdapter:
         adapter = PersonaExpressionAdapter()
         hint = ExpressionHint(style_hint="温柔共情", tone="caring")
         section = adapter.build_prompt_section(hint)
-        assert "表达策略提示" in section
+        assert "【表达策略提示】" in section
         assert "温柔共情" in section
-        assert "关心" in section or "caring" in section.lower()
+        assert "优先表达关心和陪伴" in section
+
 
     def test_expression_hint_as_dict(self):
         """ExpressionHint.as_dict() 输出正确。"""
@@ -289,9 +290,9 @@ class TestVII4_PromptBuilderIntegration:
                 追问倾向=hint_data["follow_up_tendency"],
             )
         )
-        assert "表达策略提示" in section
+        assert "【表达策略提示】" in section
         assert "深度共情" in section
-        assert "关心" in section or "caring" in section.lower()
+        assert "优先表达关心和陪伴" in section
 
 
 # ---------------------------------------------------------------------------

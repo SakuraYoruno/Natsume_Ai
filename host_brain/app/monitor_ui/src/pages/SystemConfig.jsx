@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Settings, Cpu, GitBranch, Gauge, Shield, Clock, Database, Zap } from 'lucide-react'
+import { RefreshCw, Settings, Cpu, GitBranch, Gauge, Shield, Clock, Database, Zap, SearchCheck, Layers3 } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
-import { fetchLlmRouteStats, fetchLlmCallStats, fetchRateLimitBackendStats, fetchServicesHealth, fetchMetricsTimeseries } from '../api/obs.js'
+import { fetchLlmRouteStats, fetchLlmCallStats, fetchRateLimitBackendStats, fetchServicesHealth, fetchMetricsTimeseries, fetchRetrievalRuntime } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 function StatCard({ label, value, sub, color = 'text-gray-800', icon: Icon }) {
@@ -31,19 +31,21 @@ export default function SystemConfig() {
   const [rateData, setRateData] = useState(null)
   const [healthData, setHealthData] = useState(null)
   const [tsData, setTsData] = useState(null)
+  const [retrievalRuntime, setRetrievalRuntime] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [route, call, rate, health, ts] = await Promise.all([
+      const [route, call, rate, health, ts, retrievalRt] = await Promise.all([
         fetchLlmRouteStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchLlmCallStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchRateLimitBackendStats({}).catch(() => null),
         fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
         fetchMetricsTimeseries({ time_range: timeRange }).catch(() => null),
+        fetchRetrievalRuntime({ limit: 5 }).catch(() => null),
       ])
       setRouteData(route); setCallData(call); setRateData(rate)
-      setHealthData(health); setTsData(ts)
+      setHealthData(health); setTsData(ts); setRetrievalRuntime(retrievalRt)
     } catch {} finally { setLoading(false) }
   }, [windowMinutes, timeRange])
 
@@ -88,6 +90,18 @@ export default function SystemConfig() {
         </div>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Write Embedding" value={retrievalRuntime?.episodic_write_embedding_model_id || '—'} icon={Database}
+          color={retrievalRuntime?.read_write_model_aligned ? 'text-green-600' : 'text-orange-500'}
+          sub={retrievalRuntime?.episodic_write_embedding_provider || 'unknown'} />
+        <StatCard label="Read Embedding" value={retrievalRuntime?.latest?.embedding_model_id || '—'} icon={SearchCheck}
+          color={retrievalRuntime?.latest?.fallback_embedding_used ? 'text-orange-500' : 'text-blue-600'}
+          sub={retrievalRuntime?.latest?.effective_embedding_provider || 'unknown'} />
+        <StatCard label="Reranker" value={retrievalRuntime?.latest?.rerank_model_id || retrievalRuntime?.reranker?.routes?.[0]?.model_id || '—'} icon={Layers3}
+          color={retrievalRuntime?.latest?.fallback_reranker_used ? 'text-orange-500' : 'text-purple-600'}
+          sub={retrievalRuntime?.latest?.effective_rerank_provider || retrievalRuntime?.reranker?.routes?.[0]?.provider || 'unknown'} />
+        <StatCard label="Read/Write" value={retrievalRuntime?.read_write_model_aligned ? 'Aligned' : 'Drift'} icon={Zap}
+          color={retrievalRuntime?.read_write_model_aligned ? 'text-green-600' : 'text-orange-500'}
+          sub={retrievalRuntime?.suite_profile || 'custom'} />
         <StatCard label="RateLimit 后端" value={rateData?.backend_type || '—'} icon={Shield}
           color={rateData?.is_degraded ? 'text-orange-500' : 'text-green-600'}
           sub={rateData?.is_degraded ? `降级: ${rateData.degrade_reason}` : '正常'} />

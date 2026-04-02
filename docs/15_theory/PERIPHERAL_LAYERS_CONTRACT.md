@@ -511,7 +511,7 @@ Airlock → app/chat_handler.py
 Bond → integrations/graph_contract.py
   BondDynamicsWriter.apply_update() 由 graph 节点调用，evidence_ref 来自 EvidencePlane
 
-Channels/VTS → app/chat_stream_handler.py
+Channels/VTS → app/vts_emotion_driver.py + app/top_agent.py
   流式输出时同步触发 VTS 表情控制
 
 Vision → app/chat_handler_vision.py

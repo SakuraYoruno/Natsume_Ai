@@ -22,6 +22,7 @@ from host_brain.core.errors import (
     RETR_RERANK_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
+from host_brain.retrieval.model_suite import apply_retrieval_model_suite_env_defaults
 from host_brain.retrieval.reranker_schemas import (
     RerankConfigIssue,
     RerankConfigLoadResult,
@@ -533,6 +534,7 @@ def load_reranker_runtime_config(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    merged = apply_retrieval_model_suite_env_defaults(merged)
 
     issues: list[RerankConfigIssue] = []
     enabled = _parse_bool(merged.get("RETR_RERANK_ENABLED"), default=True)

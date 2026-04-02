@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
-from host_brain.obs.metrics import MetricsCollector, ObsMode, get_obs_mode
-from host_brain.obs.routes import build_obs_metrics_response
+from host_brain.observability.metrics import MetricsCollector, ObsMode, get_obs_mode
+from host_brain.observability.routes import build_obs_metrics_response
 
 
 ROOT = Path(__file__).resolve().parents[2]

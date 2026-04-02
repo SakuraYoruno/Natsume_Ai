@@ -10,7 +10,9 @@
 
 ## 一、链路总览
 
-Gateway 中文链路有**两条入口路径**，最终殊途同归进入 `gateway_orchestrator_sse_generator`：
+Gateway 中文链路当前在运行时已收敛为 `gateway_orchestrator_sse_generator` 薄适配层，实际回复生成转交 `top_agent.py`。
+
+下文保留的是旧 Gateway 中文生成链分析，供历史排障参考：
 
 ```
 路径A：POST /v1/chat（HTTP API 直连）
@@ -633,10 +635,10 @@ post_node_order = (
 | `host_brain/app/fastapi_app.py` | HTTP 路由入口 |
 | `host_brain/app/chat_handler.py` | 统一 SSE 编排 + Governor 鉴权 |
 | `host_brain/app/graph/main_chain.py` | MainChain 10 节点编排 + SceneRouter + SSE 适配层 |
-| `host_brain/app/handlers/gateway_orchestrator_handler.py` | Gateway 中文核心 SSE 生成器 |
+| `host_brain/app/handlers/gateway_orchestrator_handler.py` | Gateway 薄适配层（委托 `top_agent.py`） |
 | `host_brain/app/handlers/supervisor_dispatch_handler.py` | Supervisor Agent 分派 |
 | `host_brain/app/handlers/emotion_agent_handler.py` | 深度情感分析 Agent |
-| `host_brain/app/chat_stream_handler.py` | SCENE_CHAT token 级 SSE + prompt 构建 |
+| `host_brain/app/chat_stream_prompt_helpers.py` | 流式结构化输出的可见文本提取 |
 | `host_brain/app/chat_context_builder.py` | context_pack + prompt_payload 构建 |
 | `host_brain/app/prompt_builder.py` | Prompt 渲染 + 语言推断 + 角色指令 |
 | `host_brain/app/emotion_context.py` | 情感状态归一化 + VAD + 时间线 + 回声 |

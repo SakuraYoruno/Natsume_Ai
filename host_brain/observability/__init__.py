@@ -1,8 +1,4 @@
-"""Unified observability package (canonical path).
-
-This package consolidates previous `host_brain.obs` and `host_brain.observability`
-capabilities. Legacy imports under `host_brain.obs` are kept as compatibility shims.
-"""
+"""Unified observability package (canonical path)."""
 
 from host_brain.observability.cross_timeline import (
     CrossTimelineAggregator,

@@ -21,6 +21,7 @@ from host_brain.skills.impl.scheduler_executor import execute_scheduler_skill
 from host_brain.skills.impl.shell_executor import execute_shell_skill
 from host_brain.skills.impl.system_executor import execute_system_skill
 from host_brain.skills.impl.web_executor import execute_web_skill
+from host_brain.skills.impl.hub_skill_executor import execute_hub_skill
 
 
 ExecutorFn = Callable[[dict[str, Any]], Any]
@@ -101,6 +102,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("scheduler", _with_context(execute_scheduler_skill)),
         ToolExecutorSpec("system", _with_context(execute_system_skill)),
         ToolExecutorSpec("web", _with_context(execute_web_skill)),
+        ToolExecutorSpec("hub_skill", _with_context(execute_hub_skill)),
     )
     for spec in specs:
         registry.register(spec)

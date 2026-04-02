@@ -8,7 +8,7 @@ import time
 import pytest
 from unittest.mock import MagicMock
 
-from host_brain.obs.session_query import SessionQueryService
+from host_brain.observability.session_query import SessionQueryService
 
 
 def _make_ledger(rows):

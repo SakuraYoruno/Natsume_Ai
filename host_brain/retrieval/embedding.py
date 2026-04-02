@@ -19,7 +19,8 @@ from host_brain.core.errors import (
     RETR_EMBED_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
-from host_brain.memory.chroma_client import EMBEDDING_MODEL_ID, embed_text
+from host_brain.memory.chroma_client import EMBEDDING_MODEL_ID, embed_text, hash_embed_text
+from host_brain.retrieval.model_suite import apply_retrieval_model_suite_env_defaults
 @dataclass(frozen=True)
 class EmbeddingRouteConfig:
     route_id: str
@@ -135,10 +136,12 @@ class EmbeddingServiceContract:
         timeout_ms: int = DEFAULT_EMBED_TIMEOUT_MS,
     ) -> None:
         self.ledger = ledger
-        self.provider = provider or embed_text
+        self.provider = provider or hash_embed_text
         self.provider_registry: dict[str, EmbeddingProvider] = dict(provider_registry or {})
         if DEFAULT_EMBED_PROVIDER not in self.provider_registry:
-            self.provider_registry[DEFAULT_EMBED_PROVIDER] = self.provider
+            self.provider_registry[DEFAULT_EMBED_PROVIDER] = (
+                lambda text, route=None: _invoke_default_embedding_provider(self.provider, text, route)
+            )
         self.runtime_config = runtime_config or _default_runtime_config(timeout_ms=timeout_ms)
         self.node_id = (str(node_id).strip() if node_id is not None else None)
         self.available = bool(available)
@@ -529,6 +532,7 @@ def load_embedding_runtime_config(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    merged = apply_retrieval_model_suite_env_defaults(merged)
 
     issues: list[EmbeddingConfigIssue] = []
     enabled = _parse_bool(merged.get("RETR_EMBED_ENABLED"), default=True)
@@ -627,7 +631,7 @@ def build_embedding_provider_registry(
         merged.update(dict(local_overrides))
 
     registry: dict[str, EmbeddingProvider] = {
-        DEFAULT_EMBED_PROVIDER: lambda text, route=None: embed_text(text, dim=_resolve_route_embedding_dim(route)),
+        DEFAULT_EMBED_PROVIDER: lambda text, route=None: hash_embed_text(text, dim=_resolve_route_embedding_dim(route)),
     }
     embed_device = str(merged.get("RETR_EMBED_DEVICE") or "cpu").strip() or "cpu"
     registry["sentence_transformers"] = _build_sentence_transformers_embedding_provider(device=embed_device)
@@ -853,9 +857,42 @@ def _invoke_embedding_provider(
     text: str,
     route: EmbeddingRouteConfig,
 ) -> tuple[list[float], str]:
+    if _provider_accepts_keyword(provider, "route"):
+        return provider(text, route=route)  # type: ignore[misc]
     if _provider_accepts_route(provider):
         return provider(text, route)
     return provider(text)
+
+
+def _invoke_default_embedding_provider(
+    provider: EmbeddingProvider,
+    text: str,
+    route: EmbeddingRouteConfig | None,
+) -> tuple[list[float], str]:
+    if _provider_accepts_keyword(provider, "route"):
+        return provider(text, route=route)  # type: ignore[misc]
+    if _provider_accepts_keyword(provider, "dim"):
+        return provider(text, dim=_resolve_route_embedding_dim(route))  # type: ignore[misc]
+    if _provider_accepts_route(provider):
+        return provider(text, route)
+    return provider(text)
+
+
+def _provider_accepts_keyword(provider: EmbeddingProvider, name: str) -> bool:
+    try:
+        signature = inspect.signature(provider)
+    except (TypeError, ValueError):
+        return False
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if param.name != name:
+            continue
+        return param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    return False
 
 
 def _provider_accepts_route(provider: EmbeddingProvider) -> bool:
@@ -898,7 +935,7 @@ def _build_timeout_fallback_embedding(
     text: str,
     route: EmbeddingRouteConfig,
 ) -> tuple[list[float], str]:
-    return embed_text(text, dim=_resolve_route_embedding_dim(route))
+    return hash_embed_text(text, dim=_resolve_route_embedding_dim(route))
 
 
 def _build_openai_embedding_provider(*, api_key: str) -> EmbeddingProvider:
@@ -927,9 +964,9 @@ def _build_sentence_transformers_embedding_provider(*, device: str) -> Embedding
     runtime_device = str(device or "cpu").strip() or "cpu"
 
     def _provider(text: str, route: EmbeddingRouteConfig | None = None) -> tuple[list[float], str]:
-        model_id = str(route.model_id).strip() if route is not None else "sentence-transformers/all-MiniLM-L6-v2"
+        model_id = str(route.model_id).strip() if route is not None else "models/Qwen3-Embedding-0.6B"
         if not model_id:
-            model_id = "sentence-transformers/all-MiniLM-L6-v2"
+            model_id = "models/Qwen3-Embedding-0.6B"
         try:
             from sentence_transformers import SentenceTransformer
         except Exception as exc:  # pragma: no cover - guarded by runtime dependency check

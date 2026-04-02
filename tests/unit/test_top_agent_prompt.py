@@ -46,7 +46,7 @@ class TestTopAgentPrompt:
                 recall_slot_text={"world": "slot"},
             )
 
-        assert system_prompt == "SYSTEM_PROMPT"
+        assert "SYSTEM_PROMPT" in system_prompt
         assert gen_params == {"temperature": 0.42}
         assert prompt_text.startswith("PROMPT_BODY")
         assert "【可用能力" in prompt_text
@@ -61,6 +61,7 @@ class TestTopAgentPrompt:
         assert build_runtime_input.call_args.kwargs["scene_type"] == "CHAT"
         assert build_runtime_input.call_args.kwargs["render_target_lang"] == "ja"
         assert recent_context.call_args.kwargs["render_target_lang"] == "ja"
+        assert "話し方の補正（高優先度）" in system_prompt
 
     def test_build_recent_session_context_block_formats_previous_turns(self) -> None:
         class _FakeLedger:

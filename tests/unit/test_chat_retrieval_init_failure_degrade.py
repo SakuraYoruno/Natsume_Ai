@@ -153,6 +153,7 @@ class TestChatRetrievalInitFailureDegrade:
                     session_id="session-001",
                     user_message="贪吃蛇",
                     narrative="先给你普通回复",
+                    person_id="user_global_test",
                     emotion_context={},
                     bond_summary=None,
                     ts_ms=1000,

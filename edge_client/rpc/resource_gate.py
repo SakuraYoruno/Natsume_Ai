@@ -17,12 +17,14 @@ from host_brain.core.ids import now_ms
 
 TASK_ASR_INGRESS = "ASR_INGRESS"
 TASK_PLAYBACK = "PLAYBACK"
+TASK_FALLBACK_LLM = "FALLBACK_LLM"
 TASK_TTS_SYNTH = "TTS_SYNTH"
 
 TASK_PRIORITY = {
     TASK_ASR_INGRESS: 0,
     TASK_PLAYBACK: 1,
-    TASK_TTS_SYNTH: 2,
+    TASK_FALLBACK_LLM: 2,
+    TASK_TTS_SYNTH: 3,
 }
 
 EVENT_VOICE_RESOURCE_GATE = "VOICE_RESOURCE_GATE"
@@ -284,6 +286,7 @@ class VoiceResourceGate:
             "priority_order": [
                 TASK_ASR_INGRESS,
                 TASK_PLAYBACK,
+                TASK_FALLBACK_LLM,
                 TASK_TTS_SYNTH,
             ],
             "active_tasks": self._active_task_summary(),
@@ -338,10 +341,12 @@ class VoiceResourceGate:
         queue_depth = int(metrics.get("queue_depth", 0))
         utilization = float(metrics.get("vram_utilization", 0.0))
 
-        lower_priority_task = task in {TASK_TTS_SYNTH}
+        lower_priority_task = task in {TASK_FALLBACK_LLM, TASK_TTS_SYNTH}
         if lower_priority_task and total > 0 and utilization >= self.vram_soft_limit_ratio:
             return True
         if used > total > 0 and lower_priority_task:
+            return True
+        if task == TASK_FALLBACK_LLM and queue_depth > self.max_fallback_queue_depth:
             return True
         return False
 

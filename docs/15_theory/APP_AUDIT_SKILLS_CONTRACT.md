@@ -16,7 +16,7 @@
 | App | `app/` | FastAPI 应用入口、聊天处理、Prompt 构建、场景路由 |
 | Audit | `audit/` | SQLiteLedger 审计账本（全系统唯一写入口） |
 | Skills | `skills/` | 技能注册表与执行层（SkillRegistry） |
-| Observability | `obs/` + `observability/` | 指标采集与观测面 HTTP 路由 |
+| Observability | `observability/` | 指标采集与观测面 HTTP 路由 |
 
 ---
 
@@ -32,7 +32,7 @@
 | `chat_handler_complex.py` | 复杂场景 LangGraph 编排（`_complex_scene_sse_generator`） |
 | `chat_handler_edge.py` | Gaming Edge RPC 路由（`_gaming_edge_chat_sse_generator`） |
 | `chat_handler_vision.py` | 视觉界面场景（`_vision_ui_sse_generator`） |
-| `chat_stream_handler.py` | SSE 流式输出处理 |
+| `top_agent.py` | SSE 流式输出处理 |
 | `prompt_builder.py` | LLM 提示词渲染（从 fastapi_app.py 拆分） |
 | `entry_routing.py` | 入口路由工具（fast-pass、narrative 判定） |
 | `graph_config_builder.py` | 场景分类关键词配置与 pre_intent_classifier |
@@ -355,8 +355,6 @@ SkillRegistry.execute(skill_name, args, context)
 | `observability/trace_node_builder.py` | 追踪节点构建 |
 | `observability/cross_timeline.py` | 跨时间线分析 |
 | `observability/p8_extended_metrics.py` | P8 扩展指标 |
-| `obs/` | 兼容性包装层（重导出 observability/ 的接口） |
-
 ### 4.2 ObsMode（观测模式）
 
 ```python
@@ -404,17 +402,11 @@ response = build_obs_metrics_response(
 
 **安全约束**：`prod` 模式下 `debug_trace` 强制清除，防止敏感信息泄露。
 
-### 4.4 obs/ 兼容性包装
+### 4.4 Observability 规范路径
 
-`host_brain/obs/` 是 `host_brain/observability/` 的兼容性包装层：
+`host_brain/observability/` 是唯一保留的观测实现路径。
 
-```python
-# obs/routes.py
-from host_brain.observability.routes import build_obs_metrics_response
-__all__ = ["build_obs_metrics_response"]
-```
-
-所有新代码应直接使用 `host_brain.observability`，`obs/` 仅为向后兼容保留。
+所有新旧代码均应直接使用 `host_brain.observability`；历史 `host_brain/obs/` 兼容层已删除。
 
 ---
 

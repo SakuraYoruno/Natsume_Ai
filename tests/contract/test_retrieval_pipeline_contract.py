@@ -17,6 +17,14 @@ from host_brain.retrieval.recall_fusion import RecallFusionServiceContract, load
 from host_brain.retrieval.reranker import RerankerServiceContract, load_reranker_runtime_config
 
 
+def _embed_for_dim(text: str, dim: int) -> list[float]:
+    values, _ = embed_text(text)
+    normalized = list(values[:dim])
+    if len(normalized) < dim:
+        normalized.extend([0.0] * (dim - len(normalized)))
+    return normalized
+
+
 class TestRetrievalPipelineContract(unittest.TestCase):
     def setUp(self) -> None:
         self.now_ms = 1_800_190_000_000
@@ -238,7 +246,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
             node_id=node_id,
             available=True,
             provider_registry={
-                "mock_openai": lambda text: (embed_text(text)[0], "text-embedding-3-large"),
+                "mock_openai": lambda text: (_embed_for_dim(text, 16), "text-embedding-3-large"),
             },
         )
         recall_service = RecallFusionServiceContract(
@@ -272,7 +280,7 @@ class TestRetrievalPipelineContract(unittest.TestCase):
 
     def _seed_collections(self) -> None:
         query = "Natsume retrieval pipeline"
-        emb_query, _ = embed_text(query)
+        emb_query = _embed_for_dim(query, 16)
 
         self.chroma.upsert(
             memory_id="mem_epi_001",

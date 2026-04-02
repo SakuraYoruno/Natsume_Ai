@@ -854,7 +854,7 @@ Phase XV:
 - [ ] `_deliver_gateway_reply` 改为从 ReplyFormDecider 获取 msg_type，不再写死 "text"
 - [ ] 双发模式实现：先 `post_gateway_reply(msg_type="text")` 发中文字幕，再 `post_gateway_reply(msg_type="voice")` 发日语短语音
 - [ ] 环境变量 `HOST_GATEWAY_VOICE_REPLY_ENABLED`（默认 true）+ `HOST_GATEWAY_VOICE_PROBABILITY_SCALE`（默认 1.0）
-- [ ] 删除 `gateway_orchestrator_handler.py`（1075 行死代码）
+- [x] 删除 `gateway_orchestrator_handler.py`（死代码已移除）
 
 ### P5: Agent 上下文管理改造（解决缺陷 E）
 
@@ -901,7 +901,7 @@ Phase XV:
 - **不动 Gateway Server**（已支持 `msg_type=voice`）
 - **不动 Bond/Emotion/Memory 子系统**
 - **不动 `input_routes.py` 的外层调度**（只改 ChatRequest 构造参数）
-- **废弃 `gateway_orchestrator_handler.py`**（1075 行死代码，运行时无调用者）
+- **已删除 `gateway_orchestrator_handler.py`**（原死代码入口已移除）
 
 ---
 

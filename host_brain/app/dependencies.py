@@ -14,7 +14,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.async_queue import BondUpdateQueue
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
-from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient  # 修复审计问题 #10
+from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient, build_neo4j_bond_client, load_neo4j_runtime_config  # 修复审计问题 #10
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
@@ -54,6 +54,7 @@ from host_brain.core.predictive_state import PredictiveStateEngine
 from host_brain.core.meta_learning_loop import MetaLearningLoop
 from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.skills.skill_composer import SkillComposer
+from host_brain.app.runtime_task_registry import RuntimeTaskRegistry
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
@@ -121,6 +122,7 @@ _predictive_state_engine: Optional[PredictiveStateEngine] = None
 _meta_learning_loop: Optional[MetaLearningLoop] = None
 _planning_agent: Optional[PlanningAgent] = None
 _skill_composer: Optional[SkillComposer] = None
+_runtime_task_registry: Optional[RuntimeTaskRegistry] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -180,6 +182,39 @@ def get_ledger() -> SQLiteLedger:
     return _ledger
 
 
+def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:
+    from host_brain.retrieval.embedding import (  # noqa: PLC0415
+        _invoke_embedding_provider,
+        build_embedding_provider_registry,
+        load_embedding_runtime_config,
+        resolve_embedding_route,
+    )
+
+    cfg_result = load_embedding_runtime_config(env=os.environ)
+    if not cfg_result.success or cfg_result.config is None:
+        raise RuntimeError(f"episodic embedding runtime config invalid: {cfg_result.as_dict()}")
+    node_id = str(
+        os.environ.get("HOST_RETR_NODE_ID")
+        or os.environ.get("Natsume_HOST_NODE_ID")
+        or "natsu-node-01"
+    ).strip() or "natsu-node-01"
+    route = resolve_embedding_route(cfg_result.config, node_id=node_id)
+    provider_registry = build_embedding_provider_registry(env=os.environ)
+    provider = provider_registry.get(route.provider)
+    if provider is None:
+        raise RuntimeError(f"episodic embedding provider unavailable: {route.provider}")
+
+    def _embed(text: str) -> tuple[list[float], str]:
+        return _invoke_embedding_provider(provider, str(text or "").strip(), route)
+
+    return _embed, str(route.model_id), str(route.provider)
+
+
+def _build_episodic_embedding_callable() -> Any:
+    embedder, _model_id, _provider = _resolve_episodic_embedding_binding()
+    return embedder
+
+
 def get_episodic_store() -> EpisodicStore:
     global _episodic_store
     if _episodic_store is None:
@@ -191,9 +226,13 @@ def get_episodic_store() -> EpisodicStore:
         cfg_result = load_chroma_runtime_config(env=os.environ)
         if not cfg_result.success or cfg_result.config is None:
             raise RuntimeError(f"episodic chroma runtime config invalid: {cfg_result.as_dict()}")
+        _embedding_fn, _embedding_model_id, _embedding_provider = _resolve_episodic_embedding_binding()
         _episodic_store = EpisodicStore(
             ledger=get_ledger(),
             chroma_client=PersistentChromaClient.from_runtime_config(cfg_result.config),
+            embedding_fn=_embedding_fn,
+            embedding_model_id_hint=_embedding_model_id,
+            embedding_provider_hint=_embedding_provider,
         )
     return _episodic_store
 
@@ -411,16 +450,36 @@ def get_bond_stage_engine() -> BondStageEngine:
 
 
 def get_bond_neo4j_client():
-    """修复审计问题 #10：根据环境变量自动选择持久化 Bond 客户端。
+    """根据生产配置选择 Bond SSOT 客户端。
 
     优先级：
-    1. HOST_BOND_BACKEND=sqlite → SqliteBondClient（持久化，推荐）
-    2. HOST_BOND_BACKEND=memory（默认）→ InMemoryNeo4jBondClient（内存，重启丢失）
-    3. HOST_BOND_SQLITE_PATH 有值 → 自动升级为 SqliteBondClient
+    1. HOST_BOND_BACKEND=sqlite → SqliteBondClient
+    2. HOST_BOND_BACKEND=memory → InMemoryNeo4jBondClient
+    3. HOST_BOND_BACKEND=neo4j → Neo4jBondClient
+    4. 未显式指定时：prod + BOND_NEO4J_ENABLED=true → Neo4jBondClient
+    5. 其它情况回退 sqlite / memory
     """
-    backend = str(os.environ.get("HOST_BOND_BACKEND") or "memory").strip().lower()
+    backend_raw = str(os.environ.get("HOST_BOND_BACKEND") or "").strip().lower()
+    runtime_env = str(os.environ.get("Natsume_ENV") or "dev").strip().lower()
     sqlite_path = str(os.environ.get("HOST_BOND_SQLITE_PATH") or "").strip()
-    if backend == "sqlite" or sqlite_path:
+
+    if backend_raw == "sqlite" or (sqlite_path and backend_raw != "neo4j"):
+        return SqliteBondClient(db_path=sqlite_path or None)
+    if backend_raw == "memory":
+        return InMemoryNeo4jBondClient()
+
+    config_result = load_neo4j_runtime_config()
+    if config_result.success and config_result.config is not None:
+        prefers_neo4j = backend_raw == "neo4j" or (not backend_raw and runtime_env == "prod")
+        if prefers_neo4j:
+            try:
+                client = build_neo4j_bond_client(config=config_result.config)
+                if client is not None:
+                    return client
+            except Exception:
+                pass
+
+    if sqlite_path:
         return SqliteBondClient(db_path=sqlite_path or None)
     return InMemoryNeo4jBondClient()
 
@@ -750,6 +809,13 @@ def get_planning_agent() -> PlanningAgent:
     if _planning_agent is None:
         _planning_agent = PlanningAgent()
     return _planning_agent
+
+
+def get_runtime_task_registry() -> RuntimeTaskRegistry:
+    global _runtime_task_registry
+    if _runtime_task_registry is None:
+        _runtime_task_registry = RuntimeTaskRegistry()
+    return _runtime_task_registry
 
 
 def get_skill_composer() -> SkillComposer:

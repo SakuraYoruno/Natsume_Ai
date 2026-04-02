@@ -127,7 +127,7 @@ class TestPerfBaselineCollector:
 
     def test_collect_latency_baseline_structure(self):
         """collect_latency_baseline() 返回包含所有必须字段的 dict。"""
-        from host_brain.obs.metrics import MetricsCollector
+        from host_brain.observability.metrics import MetricsCollector
 
         ledger = self._make_ledger_with_data()
         collector = MetricsCollector(ledger=ledger)
@@ -138,7 +138,7 @@ class TestPerfBaselineCollector:
 
     def test_collect_latency_baseline_sample_count(self):
         """有数据时 sample_count > 0。"""
-        from host_brain.obs.metrics import MetricsCollector
+        from host_brain.observability.metrics import MetricsCollector
 
         ledger = self._make_ledger_with_data()
         collector = MetricsCollector(ledger=ledger)
@@ -150,7 +150,7 @@ class TestPerfBaselineCollector:
         """空 ledger 时 sample_count=0，stale=True，stale_reason_code=PERF_BASELINE_STALE。"""
         from host_brain.audit.sqlite_ledger import SQLiteLedger
         from host_brain.core.errors import PERF_BASELINE_STALE
-        from host_brain.obs.metrics import MetricsCollector
+        from host_brain.observability.metrics import MetricsCollector
 
         ledger = SQLiteLedger(db_path=":memory:")
         collector = MetricsCollector(ledger=ledger)
@@ -162,7 +162,7 @@ class TestPerfBaselineCollector:
 
     def test_collect_latency_baseline_p50_lte_p95(self):
         """p50 ≤ p95（基本单调性）。"""
-        from host_brain.obs.metrics import MetricsCollector
+        from host_brain.observability.metrics import MetricsCollector
 
         ledger = self._make_ledger_with_data()
         collector = MetricsCollector(ledger=ledger)
@@ -176,7 +176,7 @@ class TestPerfBaselineCollector:
 
     def test_collect_method_includes_latency_baseline(self):
         """MetricsCollector.collect() 返回的 payload 包含 latency_baseline 字段。"""
-        from host_brain.obs.metrics import MetricsCollector
+        from host_brain.observability.metrics import MetricsCollector
 
         ledger = self._make_ledger_with_data()
         collector = MetricsCollector(ledger=ledger)

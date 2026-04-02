@@ -44,6 +44,7 @@ EDGE_FIELD_TO_ENV_KEY = {
     "asr_enabled": "EDGE_ASR_ENABLED",
     "tts_enabled": "EDGE_TTS_ENABLED",
     "barge_in_enabled": "EDGE_BARGE_IN_ENABLED",
+    "fallback_llm_enabled": "EDGE_FALLBACK_LLM_ENABLED",
     "resource_gate_enabled": "EDGE_RESOURCE_GATE_ENABLED",
     # Unified Message Gateway
     "gateway_enabled": "EDGE_GATEWAY_ENABLED",
@@ -107,6 +108,7 @@ class EdgeConfig:
     asr_enabled: bool
     tts_enabled: bool
     barge_in_enabled: bool
+    fallback_llm_enabled: bool
     resource_gate_enabled: bool
     max_vram_mb: int
     max_queue_length: int
@@ -162,6 +164,7 @@ class EdgeConfig:
             "asr_enabled": self.asr_enabled,
             "tts_enabled": self.tts_enabled,
             "barge_in_enabled": self.barge_in_enabled,
+            "fallback_llm_enabled": self.fallback_llm_enabled,
             "resource_gate_enabled": self.resource_gate_enabled,
             "max_vram_mb": self.max_vram_mb,
             "max_queue_length": self.max_queue_length,
@@ -375,6 +378,7 @@ def load_edge_config(
     asr_enabled = _parse_bool(_env_get(env_lookup, "EDGE_ASR_ENABLED"), default=True)
     tts_enabled = _parse_bool(_env_get(env_lookup, "EDGE_TTS_ENABLED"), default=True)
     barge_in_enabled = _parse_bool(_env_get(env_lookup, "EDGE_BARGE_IN_ENABLED"), default=True)
+    fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=False)
     resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
 
     # Unified Message Gateway
@@ -483,6 +487,7 @@ def load_edge_config(
         asr_enabled=bool(asr_enabled),
         tts_enabled=bool(tts_enabled),
         barge_in_enabled=bool(barge_in_enabled),
+        fallback_llm_enabled=bool(fallback_llm_enabled),
         resource_gate_enabled=bool(resource_gate_enabled),
         max_vram_mb=max_vram_mb,
         max_queue_length=max_queue_length,
@@ -609,6 +614,7 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         statuses["edge.rpc.asr"] = dict(gateway_down)
         statuses["edge.rpc.tts"] = dict(gateway_down)
         statuses["edge.rpc.barge_in"] = dict(gateway_down)
+        statuses["edge.rpc.fallback_llm"] = dict(gateway_down)
         statuses["edge.rpc.resource_gate"] = dict(gateway_down)
         return statuses
 
@@ -627,6 +633,11 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         enabled=(config.barge_in_enabled and config.tts_enabled),
         detail="edge barge-in enabled",
         disabled_detail="edge barge-in requires EDGE_BARGE_IN_ENABLED and EDGE_TTS_ENABLED",
+    )
+    statuses["edge.rpc.fallback_llm"] = _service_status(
+        enabled=config.fallback_llm_enabled,
+        detail="edge fallback llm enabled",
+        disabled_detail="edge fallback llm disabled by config",
     )
     statuses["edge.rpc.resource_gate"] = _service_status(
         enabled=config.resource_gate_enabled,

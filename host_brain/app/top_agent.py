@@ -45,6 +45,21 @@ _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我�
 _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
 _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
 _DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
+_GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+_PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+_ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢)[!！。…~]*$")
+
+_TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
+
+_TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
+_TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
+
+_TASK_CONTEXT_KEYWORDS = (
+    "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
+    "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
+    "贪吃蛇", "codeagent", "code_agent", "agent", "work", "tool", "翻译", "实现思路",
+)
 
 # 回复内容简单情感推断（从旧链路 chat_stream_handler 归并）
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
@@ -97,6 +112,115 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
 
 
+def _load_continuity_turns(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    render_target_lang: str,
+    fetch_limit: int = 24,
+) -> list[dict[str, str]]:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.top_agent_prompt import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
+
+        rows = _fetch_continuity_rows(
+            ledger=get_ledger(),
+            session_id=session_id,
+            person_id=person_id,
+            request_id=request_id,
+            fetch_limit=fetch_limit,
+        )
+        return _voice_rows_to_turns(rows=rows, render_target_lang=render_target_lang)
+    except Exception as exc:
+        _logger.debug("[%s] continuity lookup failed: %s", request_id, exc)
+        return []
+
+
+def _looks_like_active_task_context(turns: list[dict[str, str]]) -> bool:
+    if not turns:
+        return False
+    recent_turns = list(turns[-8:])
+    joined = "\n".join(str(turn.get("content") or "") for turn in recent_turns).lower()
+    if any(keyword.lower() in joined for keyword in _TASK_CONTEXT_KEYWORDS):
+        return True
+    latest_assistant = next(
+        (str(turn.get("content") or "").strip() for turn in reversed(recent_turns) if str(turn.get("role") or "").strip().lower() == "assistant"),
+        "",
+    )
+    if len(latest_assistant) >= 40 and any(
+        phrase in latest_assistant
+        for phrase in ("从哪里开始", "具体", "下一步", "准备好", "继续", "展开", "思路", "方案")
+    ):
+        return True
+    return False
+
+
+def _pick_non_repeating_variant(*, variants: list[str], last_reply: str, request_id: str) -> str:
+    if not variants:
+        return "嗯……我在呢。"
+    normalized_last = str(last_reply or "").strip()
+    start = sum(ord(ch) for ch in str(request_id or "")) % len(variants)
+    ordered = variants[start:] + variants[:start]
+    for variant in ordered:
+        if str(variant).strip() != normalized_last:
+            return variant
+    return ordered[0]
+
+
+def _maybe_build_phatic_fastpath_reply(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return None
+
+    turns = _load_continuity_turns(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        render_target_lang=render_target_lang,
+        fetch_limit=24,
+    )
+    active_task = _looks_like_active_task_context(turns)
+
+    if _CONTINUATION_QUERY_RE.match(normalized):
+        if active_task:
+            return None
+        category = "followup"
+    elif _GREETING_FASTPATH_RE.match(normalized):
+        category = "greeting"
+    elif _PRESENCE_FASTPATH_RE.match(normalized):
+        category = "presence"
+    elif _ACK_FASTPATH_RE.match(normalized):
+        if active_task:
+            return None
+        category = "ack"
+    else:
+        return None
+
+    last_assistant = next(
+        (str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant"),
+        "",
+    )
+
+    category_notes = {
+        "greeting": "场景：用户在打招呼。目标：自然回应问候，并轻轻把话题接住。不要机械复读上一条问候。",
+        "presence": "场景：用户在确认你在不在。目标：先简洁回应自己在，再自然追问一句。不要显得黏腻或过度撒娇。",
+        "ack": "场景：用户在轻量确认或附和。目标：简短接住，不要像模板客服，可轻轻推进一句。",
+        "followup": "场景：用户在普通延续接话，但当前没有明显任务上下文。目标：自然接住对话，并邀请对方继续。",
+    }
+    repeated_warning = ""
+    if last_assistant:
+        repeated_warning = f" 上一条你的回复是：{last_assistant}。不要重复这个句子。"
+    return str(category_notes.get(category) or "") + repeated_warning
+
+
 def _extract_delegate_visible_text(text: str) -> str:
     normalized = str(text or "").strip()
     if not normalized:
@@ -124,6 +248,49 @@ def _render_delegated_result_naturally(*, agent_id: str, result_text: str, reply
     if agent_id == "code_agent":
         return f"我先帮你整理一个大致思路：{visible}".strip()
     return visible
+
+
+def _resolve_retrieval_timeout_seconds() -> float:
+    raw = str(os.environ.get("HOST_TOP_AGENT_RETRIEVAL_TIMEOUT_MS") or "").strip()
+    try:
+        timeout_ms = int(raw) if raw else 20_000
+    except ValueError:
+        timeout_ms = 20_000
+    timeout_ms = max(500, min(timeout_ms, 60_000))
+    return timeout_ms / 1000.0
+
+
+def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = dict(summary or {})
+    route_rows = list(raw.get("route_rows") or []) if isinstance(raw.get("route_rows"), list) else []
+    route_count = raw.get("route_count")
+    if route_count in (None, ""):
+        route_count = len(route_rows)
+    candidate_count = int(raw.get("candidate_count") or 0)
+    rerank_topk = int(raw.get("rerank_topk") or 0)
+    reason_code = str(raw.get("reason_code") or "").strip() or None
+    error_text = str(raw.get("error") or "").strip() or None
+    explicit_status = str(raw.get("status") or "").strip().upper()
+
+    if explicit_status in {"OK", "SKIPPED", "DEGRADED"}:
+        status = explicit_status
+    elif reason_code or error_text or bool(raw.get("degraded", False)):
+        status = "DEGRADED"
+    elif candidate_count > 0 or int(route_count) > 0 or rerank_topk > 0 or route_rows:
+        status = "OK"
+    else:
+        status = "SKIPPED"
+
+    degraded = status == "DEGRADED" or bool(raw.get("degraded", False))
+
+    raw["status"] = status
+    raw["route_count"] = int(route_count)
+    raw["candidate_count"] = candidate_count
+    raw["rerank_topk"] = rerank_topk
+    raw["degraded"] = degraded
+    raw["reason_code"] = reason_code
+    raw["error"] = error_text
+    return raw
 
 
 class _SubAgentGatewayAdapter:
@@ -209,6 +376,98 @@ def _detect_recent_turn_query_role(user_message: str) -> str | None:
     return None
 
 
+def _maybe_build_task_progress_fastpath(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized or not (_TASK_PROGRESS_QUERY_RE.search(normalized) or _TASK_FAILURE_QUERY_RE.search(normalized)):
+        return None
+    try:
+        from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+        summary = get_runtime_task_registry().summarize_for_chat(
+            person_id=person_id,
+            session_id=session_id,
+            exclude_request_id=request_id,
+        )
+    except Exception:
+        summary = None
+    if not summary:
+        return "现在没有正在执行，或者刚结束但还值得汇报的任务。"
+
+    child_tasks = [dict(item or {}) for item in list(summary.get("child_tasks") or []) if isinstance(item, dict)]
+    step_match = _TASK_STEP_INDEX_RE.search(normalized)
+    ask_failure = bool(_TASK_FAILURE_QUERY_RE.search(normalized))
+
+    selected_child = None
+    if step_match:
+        wanted_step = int(step_match.group(1))
+        for child in child_tasks:
+            meta = dict(child.get("meta") or {}) if isinstance(child.get("meta"), dict) else {}
+            if int(meta.get("step_index") or 0) == wanted_step:
+                selected_child = child
+                break
+    elif ask_failure:
+        for child in child_tasks:
+            if str(child.get("status") or "").strip().upper() in {"FAILED", "RECOVERING"}:
+                selected_child = child
+                break
+
+    if selected_child is not None:
+        meta = dict(selected_child.get("meta") or {}) if isinstance(selected_child.get("meta"), dict) else {}
+        step_index = int(meta.get("step_index") or 0)
+        target_id = str(selected_child.get("target_id") or meta.get("target_id") or "步骤").strip() or "步骤"
+        step_desc = str(meta.get("description") or selected_child.get("detail") or "").strip()
+        child_status = str(selected_child.get("status") or "UNKNOWN").strip().upper()
+        child_error = str(selected_child.get("error") or "").strip()
+        recovery_text = str(selected_child.get("recovery_result_text") or "").strip()
+        if child_status in {"FAILED", "RECOVERING"}:
+            parts = [f"第{step_index}步是 {target_id}。", "那一步没有顺利完成。"]
+            if step_desc:
+                parts.append(f"它本来是在处理：{step_desc}。")
+            if child_error:
+                parts.append(f"原因大概是：{child_error}。")
+            if recovery_text:
+                parts.append(f"我后来整理出的补救建议是：{recovery_text}。")
+            return "".join(parts)
+        parts = [f"第{step_index}步是 {target_id}。", "这一步已经处理好了。"]
+        if step_desc:
+            parts.append(f"当时处理的是：{step_desc}。")
+        return "".join(parts)
+
+    status = str(summary.get("status") or "UNKNOWN").strip().upper()
+    if ask_failure and status in {"FAILED", "RECOVERING"}:
+        target_id = str(summary.get("target_id") or "任务").strip() or "任务"
+        error_text = str(summary.get("error") or "").strip()
+        recovery_text = str(summary.get("recovery_result_text") or "").strip()
+        parts = [f"刚才失败的是 {target_id}。"]
+        if error_text:
+            parts.append(f"原因大概是：{error_text}。")
+        if recovery_text:
+            parts.append(f"我整理出的补救建议是：{recovery_text}。")
+        return "".join(parts)
+    target_id = str(summary.get("target_id") or "任务").strip() or "任务"
+    progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
+    recovery_result_text = str(summary.get("recovery_result_text") or "").strip()
+    if status in {"RUNNING", "RECOVERING"}:
+        parts = [f"当前有个任务还在进行，是 {target_id}。"]
+        if progress_message:
+            parts.append(progress_message)
+        if recovery_result_text:
+            parts.append(f"补救分析里提到：{recovery_result_text}")
+        return "".join(parts)
+    parts = [f"上个任务是 {target_id}，现在已经 {status.lower()} 了。"]
+    if progress_message:
+        parts.append(progress_message)
+    if recovery_result_text:
+        parts.append(f"自动补救的建议是：{recovery_result_text}")
+    return "".join(parts)
+
+
 def _maybe_build_recent_turn_answer(
     *,
     request_id: str,
@@ -244,17 +503,17 @@ def _maybe_build_recent_turn_answer(
     latest_assistant = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant" and str(turn.get("content") or "").strip()), "")
 
     if query_role == "user" and latest_user:
-        return f"你刚才发的是：「{latest_user}」"
+        return f"已确认事实：用户上一句是「{latest_user}」。请直接告诉用户，不要再说看不到或没看到。"
     if query_role == "assistant" and latest_assistant:
-        return f"我刚才回的是：「{latest_assistant}」"
+        return f"已确认事实：你上一句回复是「{latest_assistant}」。请直接告诉用户，不要再说看不到或没看到。"
     if query_role == "both":
         parts: list[str] = []
         if latest_user:
-            parts.append(f"你刚才发的是：「{latest_user}」")
+            parts.append(f"用户上一句是「{latest_user}」")
         if latest_assistant:
-            parts.append(f"我刚才回的是：「{latest_assistant}」")
+            parts.append(f"你上一句回复是「{latest_assistant}」")
         if parts:
-            return "；".join(parts)
+            return "已确认事实：" + "；".join(parts) + "。请直接回答，不要再说看不到或没看到。"
     return None
 
 
@@ -446,6 +705,41 @@ async def top_agent_sse_generator(
         })
         return
 
+    recall_slot_text: dict[str, str] = {}
+    bond_summary: dict[str, Any] = {}
+
+    task_progress_answer = _maybe_build_task_progress_fastpath(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+    )
+    if task_progress_answer:
+        narrative = _airlock_sanitize_output(str(task_progress_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _sse({
+            "phase": "COMMIT", "done": True, "decision": "APPROVE",
+            "narrative": narrative, "request_id": request_id,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "top_agent:task_progress_direct",
+                "latency_ms": total_latency_ms,
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+            },
+        })
+        asyncio.create_task(_async_post_process(
+            request_id=request_id, person_id=person_id, session_id=session_id,
+            user_message=sanitized_message, narrative=narrative,
+            emotion_context=emotion_context, bond_summary={}, ts_ms=ts_ms,
+            render_target_lang="zh", total_latency_ms=total_latency_ms,
+            llm_latency_ms=0, first_token_ms=None, provider_name="", model_id="",
+            buffer_stream=False, delegated_agents=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "TASK_PROGRESS_DIRECT"},
+            gov_decision=governor_result, pii_ingress_stats=_pii_ingress_stats,
+            pii_egress_stats={},
+        ))
+        return
+
     recent_turn_answer = _maybe_build_recent_turn_answer(
         request_id=request_id,
         session_id=session_id,
@@ -454,73 +748,118 @@ async def top_agent_sse_generator(
         render_target_lang="zh",
     )
     if recent_turn_answer:
-        narrative = _airlock_sanitize_output(recent_turn_answer)
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-
-        # ── 同步写入 INPUT_COMPLETED（确保下一轮对话可查历史）────────
-        try:
-            from host_brain.app.dependencies import get_ledger as _get_pre_ledger  # noqa: PLC0415
-            _get_pre_ledger().log_voice_event({
-                "request_id": request_id,
-                "session_id": session_id,
-                "event_type": "INPUT_COMPLETED",
-                "direction": "HOST_INTERNAL",
-                "status": "OK" if narrative.strip() else "DEGRADED",
-                "reason_code": None if narrative.strip() else "EMPTY_NARRATIVE",
-                "stage": "top_agent.pre_commit",
-                "detail": f"source=CHAT_API text_len={len(sanitized_message)} reply_len={len(narrative)}",
-                "payload": {
-                    "source": "CHAT_API",
-                    "person_id": person_id,
-                    "input_preview": _build_reply_preview(sanitized_message, limit=160),
-                    "reply_preview": _build_reply_preview(narrative, limit=160),
-                    "render_target_lang": "zh",
-                },
-                "ts_ms": int(time.time() * 1000),
-            })
-        except Exception as _ve_exc:
-            _logger.debug("[%s] pre-commit INPUT_COMPLETED failed: %s", request_id, _ve_exc)
-
-        yield _sse({
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE",
-            "narrative": narrative,
-            "request_id": request_id,
-            "audit_refs": {
-                "request_id": request_id,
-                "path": "chat_recent_turn_direct",
-                "latency_ms": total_latency_ms,
-                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-            },
-        })
-        asyncio.create_task(
-            _async_post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary={},
-                ts_ms=ts_ms,
-                render_target_lang="zh",
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="",
-                model_id="",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
-                gov_decision=gov,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-            )
+        from host_brain.app.chat_agent import (  # noqa: PLC0415
+            ChatAgentInput,
+            SubAgentContext,
+            chat_agent_sse_generator,
         )
+
+        recent_ctx = SubAgentContext(
+            agent_id="recent_turn_direct",
+            task="根据最近一轮对话给出直接回答",
+            result_text=str(recent_turn_answer).strip(),
+            success=True,
+            latency_ms=0,
+        )
+        chat_input = ChatAgentInput(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=sanitized_message,
+            person_id=person_id,
+            emotion_context=emotion_context,
+            emotion_snapshot=emotion_snapshot,
+            bond_summary={},
+            recall_slot_text=recall_slot_text,
+            retrieval_evidence_items=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
+            sub_agent_context=recent_ctx,
+            render_target_lang="zh",
+            reply_channel=getattr(request_body, "reply_channel", None),
+            suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
+            suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
+            reply_depth_policy=(
+                "gateway" if str(getattr(request_body, "reply_channel", "") or "").upper() == "GATEWAY"
+                else "normal"
+            ),
+            thread_id=thread_id,
+            ts_ms=ts_ms,
+            intent_draft={**intent_draft, "fastpath_type": "recent_turn"},
+            llm_runtime=None,
+        )
+        async for event in chat_agent_sse_generator(chat_input):
+            yield event
+        return
+
+    phatic_fastpath_reply = _maybe_build_phatic_fastpath_reply(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if phatic_fastpath_reply:
+        from host_brain.app.chat_agent import (  # noqa: PLC0415
+            ChatAgentInput,
+            SubAgentContext,
+            chat_agent_sse_generator,
+        )
+
+        phatic_ctx = SubAgentContext(
+            agent_id="phatic_fastpath",
+            task="根据当前寒暄语境生成简短自然回复",
+            result_text=str(phatic_fastpath_reply).strip(),
+            success=True,
+            latency_ms=0,
+        )
+        chat_input = ChatAgentInput(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=sanitized_message,
+            person_id=person_id,
+            emotion_context=emotion_context,
+            emotion_snapshot=emotion_snapshot,
+            bond_summary=bond_summary,
+            recall_slot_text=recall_slot_text,
+            retrieval_evidence_items=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "PHATIC_FASTPATH"},
+            sub_agent_context=phatic_ctx,
+            render_target_lang="zh",
+            reply_channel=getattr(request_body, "reply_channel", None),
+            suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
+            suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
+            reply_depth_policy=(
+                "gateway" if str(getattr(request_body, "reply_channel", "") or "").upper() == "GATEWAY"
+                else "normal"
+            ),
+            thread_id=thread_id,
+            ts_ms=ts_ms,
+            intent_draft={**intent_draft, "fastpath_type": "phatic"},
+            llm_runtime=None,
+        )
+        async for event in chat_agent_sse_generator(chat_input):
+            yield event
         return
 
     # ── 3. 并行启动检索 ──────────────────────────────────────────────
+    try:
+        from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+        runtime_task_registry = get_runtime_task_registry()
+        if runtime_task_registry.get_by_request_id(request_id) is None:
+            runtime_task_registry.create_task(
+                task_kind="chat_request",
+                target_id="top_agent",
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_message=sanitized_message,
+                detail="正在整理上下文和检索记忆。",
+                progress_message="我正在整理上下文和检索记忆。",
+                meta={"stage": "top_agent_pre_dispatch"},
+            )
+    except Exception as _task_exc:
+        _logger.debug("[%s] top_agent runtime task init failed: %s", request_id, _task_exc)
+
     retrieval_task: asyncio.Task | None = None
     retrieval_evidence_items: list[dict[str, Any]] = []
     retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
@@ -551,13 +890,10 @@ async def top_agent_sse_generator(
         _logger.debug("[%s] top_agent retrieval init failed: %s", request_id, _retr_exc)
 
     # ── 4. 等检索结果 + StateArbiter + RecallPack ────────────────────
-    recall_slot_text: dict[str, str] = {}
-    bond_summary: dict[str, Any] = {}
-
     if retrieval_task is not None:
         try:
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
-                retrieval_task, timeout=3.0,
+                retrieval_task, timeout=_resolve_retrieval_timeout_seconds(),
             )
         except (asyncio.TimeoutError, Exception) as _retr_exc:
             retrieval_summary = {"status": "DEGRADED", "error": str(_retr_exc)[:100]}
@@ -714,6 +1050,30 @@ async def _async_post_process(
             })
 
         # (2) llm_node_call_log — LLM 流式调用记录
+        try:
+            from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+            runtime_task_registry = get_runtime_task_registry()
+            runtime_task = runtime_task_registry.get_by_request_id(request_id)
+            if runtime_task is not None and str(runtime_task.status).upper() in {"RUNNING", "RECOVERING"}:
+                has_failure = bool(runtime_task.error or runtime_task.result_code)
+                if has_failure:
+                    runtime_task_registry.mark_failed(
+                        runtime_task.task_id,
+                        detail="整条回复已经完成，但执行阶段有失败。",
+                        error=str(runtime_task.error or "").strip(),
+                        result_code=str(runtime_task.result_code or "").strip() or None,
+                        result_text=narrative,
+                    )
+                else:
+                    runtime_task_registry.mark_completed(
+                        runtime_task.task_id,
+                        detail="整条回复已经完成。",
+                        result_text=narrative,
+                    )
+        except Exception as _task_finalize_exc:
+            _logger.debug("[%s] runtime task finalize failed: %s", request_id, _task_finalize_exc)
+
         ledger.log_llm_node_call({
             "request_id": request_id,
             "node_id": "top_agent_llm_stream",
@@ -730,9 +1090,10 @@ async def _async_post_process(
         })
 
         # (2.5) retrieval_event_log — 召回结果落盘（Phase XV trace 增强）
+        _normalized_retrieval_summary = _normalize_retrieval_summary_for_audit(retrieval_summary)
         # 只在有实际召回证据时写入，避免空行污染
         _evidence_items = list(retrieval_evidence_items or [])
-        _rs = retrieval_summary or {}
+        _rs = _normalized_retrieval_summary
         if _evidence_items or _rs.get("status") == "OK":
             _query_plan = _rs.get("query_plan") or {}
             _topk_snippets = [
@@ -759,6 +1120,16 @@ async def _async_post_process(
                     "query_plan": _query_plan,
                     "topk": _topk_snippets,
                     "agentic_meta": _rs.get("agentic_meta"),
+                    "embedding_model_id": _rs.get("embedding_model_id"),
+                    "embedding_provider": _rs.get("embedding_provider"),
+                    "effective_embedding_provider": _rs.get("effective_embedding_provider"),
+                    "fallback_embedding_used": bool(_rs.get("fallback_embedding_used", False)),
+                    "fallback_embedding_reason_code": _rs.get("fallback_embedding_reason_code"),
+                    "rerank_model_id": _rs.get("rerank_model_id"),
+                    "rerank_provider": _rs.get("rerank_provider"),
+                    "effective_rerank_provider": _rs.get("effective_rerank_provider"),
+                    "fallback_reranker_used": bool(_rs.get("fallback_reranker_used", False)),
+                    "fallback_reranker_reason_code": _rs.get("fallback_reranker_reason_code"),
                 },
                 "detail": (
                     f"candidate={_rs.get('candidate_count', 0)} "
@@ -770,19 +1141,29 @@ async def _async_post_process(
 
         # (3) graph_run_trace — 端到端链路汇总
         _path = "delegate" if delegated_agents else "chat_direct"
-        _retrieval_status = (retrieval_summary or {}).get("status", "SKIPPED")
-        _retrieval_count = (retrieval_summary or {}).get("candidate_count", 0)
+        _retrieval_status = _normalized_retrieval_summary.get("status", "SKIPPED")
+        _retrieval_count = _normalized_retrieval_summary.get("candidate_count", 0)
         _retrieval_output = {
             "candidate_count": _retrieval_count,
             "status": _retrieval_status,
-            "reason_code": (retrieval_summary or {}).get("reason_code"),
-            "error": (retrieval_summary or {}).get("error"),
-            "route_count": (retrieval_summary or {}).get("route_count"),
-            "rerank_topk": (retrieval_summary or {}).get("rerank_topk"),
-            "degraded": (retrieval_summary or {}).get("degraded"),
-            "target_stores": (retrieval_summary or {}).get("target_stores"),
-            "query_plan": (retrieval_summary or {}).get("query_plan"),
-            "agentic_meta": (retrieval_summary or {}).get("agentic_meta"),
+            "reason_code": _normalized_retrieval_summary.get("reason_code"),
+            "error": _normalized_retrieval_summary.get("error"),
+            "route_count": _normalized_retrieval_summary.get("route_count"),
+            "rerank_topk": _normalized_retrieval_summary.get("rerank_topk"),
+            "degraded": _normalized_retrieval_summary.get("degraded"),
+            "target_stores": _normalized_retrieval_summary.get("target_stores"),
+            "query_plan": _normalized_retrieval_summary.get("query_plan"),
+            "agentic_meta": _normalized_retrieval_summary.get("agentic_meta"),
+            "embedding_model_id": _normalized_retrieval_summary.get("embedding_model_id"),
+            "embedding_provider": _normalized_retrieval_summary.get("embedding_provider"),
+            "effective_embedding_provider": _normalized_retrieval_summary.get("effective_embedding_provider"),
+            "fallback_embedding_used": bool(_normalized_retrieval_summary.get("fallback_embedding_used", False)),
+            "fallback_embedding_reason_code": _normalized_retrieval_summary.get("fallback_embedding_reason_code"),
+            "rerank_model_id": _normalized_retrieval_summary.get("rerank_model_id"),
+            "rerank_provider": _normalized_retrieval_summary.get("rerank_provider"),
+            "effective_rerank_provider": _normalized_retrieval_summary.get("effective_rerank_provider"),
+            "fallback_reranker_used": bool(_normalized_retrieval_summary.get("fallback_reranker_used", False)),
+            "fallback_reranker_reason_code": _normalized_retrieval_summary.get("fallback_reranker_reason_code"),
         }
 
         # 构建 nodes_json：记录每个处理阶段的耗时和状态

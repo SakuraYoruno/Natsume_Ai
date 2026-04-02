@@ -10,6 +10,7 @@ import re
 from typing import Any, Callable, Mapping
 
 from host_brain.core.errors import CONFIG_REQUIRED_MISSING, CONFIG_VALUE_INVALID
+from host_brain.retrieval.model_suite import apply_retrieval_model_suite_env_defaults
 from host_brain.retrieval.reranker_schemas import (
     RerankConfigIssue,
     RerankConfigLoadResult,
@@ -41,6 +42,7 @@ def load_reranker_runtime_config(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    merged = apply_retrieval_model_suite_env_defaults(merged)
 
     issues: list[RerankConfigIssue] = []
     enabled = _parse_bool(merged.get("RETR_RERANK_ENABLED"), default=True)
@@ -132,6 +134,7 @@ def build_reranker_provider_registry(
     merged: dict[str, Any] = dict(env or os.environ)
     if local_overrides:
         merged.update(dict(local_overrides))
+    merged = apply_retrieval_model_suite_env_defaults(merged)
 
     registry: dict[str, RerankProvider] = {
         DEFAULT_RERANK_PROVIDER: _default_rerank_provider,

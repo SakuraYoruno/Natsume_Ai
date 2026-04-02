@@ -24,6 +24,7 @@ class SkillExecutionResult:
     manifest_ref: str | None
     undo_token_ref: str | None
     detail: dict[str, Any]
+    runtime_payload: dict[str, Any] | None = None
 
 
 class SkillLoader:
@@ -185,6 +186,29 @@ class SkillLoader:
         manifest_ref = None
         if isinstance(handler_result, dict):
             manifest_ref = handler_result.get("manifest_ref")
+            handler_status = str(handler_result.get("status") or "").strip().upper()
+            if handler_status in {"REJECTED", "FAILED", "DEGRADED"}:
+                mapped_status = "REJECTED" if handler_status == "REJECTED" else "FAILED"
+                mapped_code = str(handler_result.get("reason_code") or ("SKILL_DEGRADED" if handler_status == "DEGRADED" else "SKILL_EXECUTION_FAILED")).strip() or "SKILL_EXECUTION_FAILED"
+                mapped_digest = str(handler_result.get("detail") or handler_result)
+                return self._log_and_return(
+                    intent_id=intent_id,
+                    skill_name=skill_name,
+                    approval_token_ref=approval_token_ref,
+                    confirm_token_ref=confirm_token_ref,
+                    result_status=mapped_status,
+                    result_code=mapped_code,
+                    result_digest=mapped_digest,
+                    evidence_ref=None,
+                    manifest_ref=manifest_ref,
+                    undo_token_ref=None,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    ts_ms=now_value,
+                    governor_output=governor_output,
+                    runtime_payload=dict(handler_result),
+                )
 
         undo_token_ref = None
         if meta.reversible:
@@ -232,6 +256,7 @@ class SkillLoader:
             turn_id=turn_id,
             ts_ms=now_value,
             governor_output=governor_output,
+            runtime_payload=dict(handler_result) if isinstance(handler_result, dict) else None,
         )
 
     def _log_and_return(
@@ -252,6 +277,7 @@ class SkillLoader:
         turn_id: str | None,
         ts_ms: int,
         governor_output: dict[str, Any] | None = None,
+        runtime_payload: dict[str, Any] | None = None,
     ) -> SkillExecutionResult:
         # M42：分层审计——根据 approval_tier 选择审计级别
         audit_tier = _extract_audit_tier(governor_output)
@@ -291,6 +317,7 @@ class SkillLoader:
             manifest_ref=manifest_ref,
             undo_token_ref=undo_token_ref,
             detail=row,
+            runtime_payload=dict(runtime_payload) if isinstance(runtime_payload, dict) else None,
         )
 
 

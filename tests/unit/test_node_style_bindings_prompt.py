@@ -474,7 +474,7 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
     assert "emotion_tag: HAPPY" in prompt
     assert "mood_state: engaged" in prompt
     assert "emotion_intensity: 0.76" in prompt
-    assert "snapshot_source: test_case" in prompt
+    assert "Current affective layer: mood_state=engaged; emotion_tag=HAPPY." in prompt
 
 
 def test_infer_render_target_lang_detects_chinese_and_japanese_content() -> None:

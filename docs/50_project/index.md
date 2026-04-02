@@ -15,6 +15,7 @@
 ## 0. 相关入口（架构/链路）
 
 - 当前代码架构：`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+- 核心模块详解：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
 - 数据流全景：`docs/50_project/arch/dataflow_report.md`
 - 仓库总览入口：`README.md`
 

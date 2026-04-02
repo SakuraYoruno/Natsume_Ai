@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from host_brain.retrieval.model_suite import resolve_retrieval_model_suite
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
@@ -3563,3 +3564,207 @@ async def get_semantic_recall_stats():
             status=f"DEGRADED: {exc}",
             timestamp=now,
         )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/retrieval/runtime — 当前检索 embedding/rerank 配置 + 最近实际生效模型/降级情况
+# ---------------------------------------------------------------------------
+class RetrievalRuntimeRouteItem(BaseModel):
+    route_id: str
+    provider: str
+    model_id: str
+    dim: Optional[int] = None
+    top_k: Optional[int] = None
+    timeout_ms: int
+    node_selector: str
+
+
+class RetrievalRuntimeConfiguredSection(BaseModel):
+    enabled: bool
+    default_route: str
+    routes: List[RetrievalRuntimeRouteItem]
+
+
+class RetrievalRuntimeObservedItem(BaseModel):
+    request_id: str
+    status: str
+    reason_code: Optional[str]
+    detail: str
+    candidate_count: int
+    rerank_topk: int
+    embedding_model_id: Optional[str]
+    embedding_provider: Optional[str]
+    effective_embedding_provider: Optional[str]
+    fallback_embedding_used: bool
+    fallback_embedding_reason_code: Optional[str]
+    rerank_model_id: Optional[str]
+    rerank_provider: Optional[str]
+    effective_rerank_provider: Optional[str]
+    fallback_reranker_used: bool
+    fallback_reranker_reason_code: Optional[str]
+    runtime_fields_complete: bool = False
+    ts_ms: int
+
+
+class RetrievalRuntimeResponse(BaseModel):
+    suite_profile: Optional[str] = None
+    suite_force: bool = False
+    episodic_write_embedding_model_id: Optional[str] = None
+    episodic_write_embedding_provider: Optional[str] = None
+    read_write_model_aligned: bool = False
+    embedding: RetrievalRuntimeConfiguredSection
+    reranker: RetrievalRuntimeConfiguredSection
+    latest: Optional[RetrievalRuntimeObservedItem]
+    recent: List[RetrievalRuntimeObservedItem]
+    recent_total: int
+    recent_embedding_fallbacks: int
+    recent_reranker_fallbacks: int
+    timestamp: int
+
+
+def _build_retrieval_runtime_route_items(config: Any, *, kind: str) -> List[RetrievalRuntimeRouteItem]:
+    routes = []
+    for route_id, route in sorted(dict(getattr(config, "routes", {}) or {}).items()):
+        routes.append(
+            RetrievalRuntimeRouteItem(
+                route_id=str(route_id),
+                provider=str(getattr(route, "provider", "") or ""),
+                model_id=str(getattr(route, "model_id", "") or ""),
+                dim=(int(getattr(route, "dim", 0)) if kind == "embedding" and getattr(route, "dim", None) is not None else None),
+                top_k=(int(getattr(route, "top_k", 0)) if kind == "reranker" and getattr(route, "top_k", None) is not None else None),
+                timeout_ms=int(getattr(route, "timeout_ms", 0) or 0),
+                node_selector=str(getattr(route, "node_selector", "") or ""),
+            )
+        )
+    return routes
+
+
+def _build_retrieval_runtime_observed_item(row: dict[str, Any]) -> RetrievalRuntimeObservedItem:
+    payload = _safe_json(row.get("payload"))
+    payload_dict = dict(payload) if isinstance(payload, dict) else {}
+    embedding_model_id = (str(payload_dict.get("embedding_model_id") or "").strip() or None)
+    rerank_model_id = (str(payload_dict.get("rerank_model_id") or "").strip() or None)
+    runtime_fields_complete = bool(embedding_model_id or rerank_model_id)
+    return RetrievalRuntimeObservedItem(
+        request_id=str(row.get("request_id") or ""),
+        status=str(row.get("status") or "UNKNOWN"),
+        reason_code=(str(row.get("reason_code") or "").strip() or None),
+        detail=str(row.get("detail") or ""),
+        candidate_count=int(payload_dict.get("candidate_count") or 0),
+        rerank_topk=int(payload_dict.get("rerank_topk") or 0),
+        embedding_model_id=embedding_model_id,
+        embedding_provider=(str(payload_dict.get("embedding_provider") or "").strip() or None),
+        effective_embedding_provider=(str(payload_dict.get("effective_embedding_provider") or "").strip() or None),
+        fallback_embedding_used=bool(payload_dict.get("fallback_embedding_used", False)),
+        fallback_embedding_reason_code=(str(payload_dict.get("fallback_embedding_reason_code") or "").strip() or None),
+        rerank_model_id=rerank_model_id,
+        rerank_provider=(str(payload_dict.get("rerank_provider") or "").strip() or None),
+        effective_rerank_provider=(str(payload_dict.get("effective_rerank_provider") or "").strip() or None),
+        fallback_reranker_used=bool(payload_dict.get("fallback_reranker_used", False)),
+        fallback_reranker_reason_code=(str(payload_dict.get("fallback_reranker_reason_code") or "").strip() or None),
+        runtime_fields_complete=runtime_fields_complete,
+        ts_ms=int(row.get("ts_ms") or 0),
+    )
+
+
+@router.get("/retrieval/runtime", response_model=RetrievalRuntimeResponse)
+async def get_retrieval_runtime(
+    request_id: Optional[str] = Query(None, description="可选：指定 request_id，优先返回该请求的运行时模型信息"),
+    limit: int = Query(10, ge=1, le=100, description="最近返回多少条 PIPELINE 记录"),
+    include_legacy: bool = Query(False, description="是否包含缺少运行时模型字段的历史旧记录"),
+):
+    request_id = request_id if isinstance(request_id, str) else getattr(request_id, "default", None)
+    if request_id is not None:
+        request_id = str(request_id).strip() or None
+    limit = int(limit if isinstance(limit, int) else getattr(limit, "default", 10))
+    include_legacy = bool(include_legacy if isinstance(include_legacy, bool) else getattr(include_legacy, "default", False))
+
+    now = _now_ms()
+    ledger = _get_ledger()
+
+    from host_brain.retrieval.embedding import load_embedding_runtime_config  # noqa: PLC0415
+    from host_brain.retrieval.reranker_config import load_reranker_runtime_config  # noqa: PLC0415
+
+    suite = resolve_retrieval_model_suite(os.environ)
+    embed_cfg_result = load_embedding_runtime_config(env=os.environ)
+    rerank_cfg_result = load_reranker_runtime_config(env=os.environ)
+    embed_cfg = embed_cfg_result.config
+    rerank_cfg = rerank_cfg_result.config
+
+    rows = []
+    try:
+        rows = [
+            r for r in reversed(list(ledger.retrieval_event_log))
+            if str(r.get("op_kind") or "").strip().upper() == "PIPELINE"
+        ]
+    except Exception:
+        rows = []
+
+    recent_items: List[RetrievalRuntimeObservedItem] = []
+    seen_request_ids: set[str] = set()
+    for row in rows:
+        try:
+            item = _build_retrieval_runtime_observed_item(dict(row))
+        except Exception:
+            continue
+        if not include_legacy and not item.runtime_fields_complete:
+            continue
+        if item.request_id in seen_request_ids:
+            continue
+        seen_request_ids.add(item.request_id)
+        recent_items.append(item)
+        if len(recent_items) >= max(1, int(limit)):
+            break
+
+    latest_item: Optional[RetrievalRuntimeObservedItem] = None
+    if request_id:
+        normalized_request_id = str(request_id).strip()
+        for row in rows:
+            if str(row.get("request_id") or "").strip() != normalized_request_id:
+                continue
+            candidate = _build_retrieval_runtime_observed_item(dict(row))
+            if include_legacy or candidate.runtime_fields_complete:
+                latest_item = candidate
+                break
+        if latest_item is None:
+            for row in rows:
+                if str(row.get("request_id") or "").strip() == normalized_request_id:
+                    latest_item = _build_retrieval_runtime_observed_item(dict(row))
+                    break
+    if latest_item is None and recent_items:
+        latest_item = recent_items[0]
+
+    episodic_write_model_id = None
+    episodic_write_provider = None
+    try:
+        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+        episodic_store = get_episodic_store()
+        episodic_write_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
+        episodic_write_provider = getattr(episodic_store, "embedding_provider_hint", None)
+    except Exception:
+        episodic_store = None
+
+    latest_embed_model = latest_item.embedding_model_id if latest_item is not None else None
+    return RetrievalRuntimeResponse(
+        suite_profile=(suite.profile_id if suite is not None else None),
+        suite_force=bool(str(os.environ.get("RETR_MODEL_SUITE_FORCE") or "").strip().lower() in {"1", "true", "yes", "on"}),
+        episodic_write_embedding_model_id=episodic_write_model_id,
+        episodic_write_embedding_provider=episodic_write_provider,
+        read_write_model_aligned=bool(episodic_write_model_id and latest_embed_model and episodic_write_model_id == latest_embed_model),
+        embedding=RetrievalRuntimeConfiguredSection(
+            enabled=bool(getattr(embed_cfg, "enabled", False)),
+            default_route=str(getattr(embed_cfg, "default_route", "") or ""),
+            routes=_build_retrieval_runtime_route_items(embed_cfg, kind="embedding") if embed_cfg is not None else [],
+        ),
+        reranker=RetrievalRuntimeConfiguredSection(
+            enabled=bool(getattr(rerank_cfg, "enabled", False)),
+            default_route=str(getattr(rerank_cfg, "default_route", "") or ""),
+            routes=_build_retrieval_runtime_route_items(rerank_cfg, kind="reranker") if rerank_cfg is not None else [],
+        ),
+        latest=latest_item,
+        recent=recent_items,
+        recent_total=len(recent_items),
+        recent_embedding_fallbacks=sum(1 for item in recent_items if item.fallback_embedding_used),
+        recent_reranker_fallbacks=sum(1 for item in recent_items if item.fallback_reranker_used),
+        timestamp=now,
+    )

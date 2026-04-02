@@ -1,4 +1,4 @@
-"""Edge channels package: input reporting and WeChat listener."""
+"""Edge channels package: input reporting primitives."""
 
 from edge_client.channels.input_reporter import (
     EdgeInputReporter,

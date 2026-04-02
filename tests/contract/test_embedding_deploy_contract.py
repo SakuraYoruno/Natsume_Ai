@@ -53,6 +53,42 @@ class TestEmbeddingDeployContract(unittest.TestCase):
 
         self.assertEqual("host_default", fallback_route.route_id)
 
+    def test_t_embed_01_default_builtin_provider_respects_route_dim_without_registry_override(self) -> None:
+        dim_route_fixture = _load_json(FIXTURES / "bad" / "runtime_dim_drift.json")
+        config = load_embedding_runtime_config(env=dim_route_fixture["env"]).config
+        assert config is not None
+
+        requested_dims: list[int] = []
+
+        def _provider(_text: str, dim: int = -1) -> tuple[list[float], str]:
+            requested_dims.append(dim)
+            return ([0.25] * dim, f"mock-dim-{dim}")
+
+        ledger = SQLiteLedger(db_path=":memory:")
+        try:
+            svc = EmbeddingServiceContract(
+                ledger=ledger,
+                runtime_config=config,
+                provider=_provider,
+                node_id=dim_route_fixture["node_id"],
+                available=True,
+            )
+
+            result = svc.embed(
+                request_id="req_embed_rt_builtin_default",
+                text="route dim should reach default provider",
+                ts_ms=1_800_150_000_010,
+            )
+
+            self.assertTrue(result.success, msg=result.output)
+            self.assertEqual(STATUS_OK, result.status)
+            self.assertEqual(32, result.output["actual_dim"])
+            self.assertEqual(32, result.output["expected_dim"])
+            self.assertEqual("mock-dim-32", result.output["embedding_model_id"])
+            self.assertEqual([32], requested_dims)
+        finally:
+            ledger.close()
+
     def test_t_embed_01_invalid_routes_json_is_rejected(self) -> None:
         fixture = _load_json(FIXTURES / "bad" / "runtime_invalid_routes.json")
         result = load_embedding_runtime_config(env=fixture["env"])
@@ -122,9 +158,14 @@ class TestEmbeddingDeployContract(unittest.TestCase):
 
             dim_drift_config = load_embedding_runtime_config(env=dim_drift_fixture["env"]).config
             assert dim_drift_config is not None
+
+            def _provider_dim_drift(_text: str) -> tuple[list[float], str]:
+                return ([0.05] * 16, "hash-embed-v1")
+
             dim_svc = EmbeddingServiceContract(
                 ledger=ledger,
                 runtime_config=dim_drift_config,
+                provider=_provider_dim_drift,
                 node_id=dim_drift_fixture["node_id"],
                 available=True,
             )

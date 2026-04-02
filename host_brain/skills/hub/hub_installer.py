@@ -1,9 +1,14 @@
 """Skills Hub 远程安装器。
 
-支持从 GitHub 仓库安装 Skill：
-  natsume skills install github:koinosakura/natsume-skills-hub/weather-query
-  natsume skills install https://github.com/.../weather-query
+支持从官方兼容来源安装 Skill：
+  natsume skills install github:owner/repo/skill-slug
+  natsume skills install skillshub:owner/repo/skill-slug
+  natsume skills install https://github.com/owner/repo/tree/main/skill-slug
   natsume skills install ./local/path/to/skill-dir
+
+官方发现入口：
+  - ClawHub: https://clawhub.ai
+  - Skillshub: https://www.skillshubco.com
 
 安装流程：
   1. 解析来源（GitHub URL / 本地路径）
@@ -17,7 +22,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import subprocess
 import tempfile
 import time
 import urllib.request
@@ -37,6 +44,227 @@ from host_brain.skills.hub.hub_loader import (
 from host_brain.skills.hub.manifest_parser import parse_skill_md
 
 logger = logging.getLogger(__name__)
+
+
+OFFICIAL_CLAWHUB_HOME_URL = os.environ.get("HOST_SKILL_CLAWHUB_HOME_URL", "https://clawhub.ai").strip() or "https://clawhub.ai"
+OFFICIAL_CLAWHUB_DOCS_URL = os.environ.get("HOST_SKILL_CLAWHUB_DOCS_URL", "https://docs.openclaw.ai/tools/clawdhub").strip() or "https://docs.openclaw.ai/tools/clawdhub"
+OFFICIAL_SKILLSHUB_HOME_URL = os.environ.get("HOST_SKILL_SKILLSHUB_HOME_URL", "https://www.skillshubco.com").strip() or "https://www.skillshubco.com"
+OFFICIAL_SKILLSHUB_GITHUB_URL = os.environ.get("HOST_SKILL_SKILLSHUB_GITHUB_URL", "https://github.com/EYH0602/skillshub").strip() or "https://github.com/EYH0602/skillshub"
+OFFICIAL_SKILLSHUB_INSTALL_EXAMPLE = os.environ.get("HOST_SKILL_SKILLSHUB_INSTALL_EXAMPLE", "skillshub:anthropics/skills/frontend-design").strip() or "skillshub:anthropics/skills/frontend-design"
+
+
+OFFICIAL_CLAWHUB_NPX_PACKAGE = os.environ.get("HOST_SKILL_CLAWHUB_NPX_PACKAGE", "clawhub").strip() or "clawhub"
+HOST_SKILL_CLAWHUB_TIMEOUT_S = float(os.environ.get("HOST_SKILL_CLAWHUB_TIMEOUT_S", "120") or "120")
+HOST_SKILL_CLAWHUB_RETRY_LIMIT = int(os.environ.get("HOST_SKILL_CLAWHUB_RETRY_LIMIT", "2") or "2")
+HOST_SKILL_CLAWHUB_SEARCH_LIMIT = int(os.environ.get("HOST_SKILL_CLAWHUB_SEARCH_LIMIT", "8") or "8")
+
+
+def get_official_skill_hub_sources() -> list[dict[str, str]]:
+    return [
+        {"name": "ClawHub", "url": OFFICIAL_CLAWHUB_HOME_URL},
+        {"name": "ClawHub Docs", "url": OFFICIAL_CLAWHUB_DOCS_URL},
+        {"name": "Skillshub", "url": OFFICIAL_SKILLSHUB_HOME_URL},
+        {"name": "Skillshub GitHub", "url": OFFICIAL_SKILLSHUB_GITHUB_URL},
+    ]
+
+
+def _normalize_cli_output(*parts: str) -> str:
+    chunks: list[str] = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            chunks.append(text)
+    combined = "\n".join(chunks).strip()
+    combined = combined.replace("\r", "")
+    return re.sub(r"\x1b\[[0-9;]*m", "", combined)
+
+
+
+def _extract_retry_after_seconds(message: str) -> float:
+    import re as _re
+
+    match = _re.search(r"retry in\s+(\d+(?:\.\d+)?)s", str(message or ""), _re.IGNORECASE)
+    if not match:
+        return 1.0
+    try:
+        return max(0.5, float(match.group(1)))
+    except ValueError:
+        return 1.0
+
+
+
+def _resolve_npx_command() -> str:
+    candidates = ["npx.cmd", "npx"] if os.name == "nt" else ["npx"]
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return candidates[0]
+
+
+def _build_clawhub_base_command(*, workdir: Path, skills_dir: Path) -> list[str]:
+    return [
+        _resolve_npx_command(),
+        "-y",
+        OFFICIAL_CLAWHUB_NPX_PACKAGE,
+        "--no-input",
+        "--workdir",
+        str(workdir),
+        "--dir",
+        str(skills_dir.name),
+    ]
+
+
+
+def _run_clawhub_cli(
+    command_args: list[str],
+    *,
+    workdir: Path,
+    skills_dir: Path,
+    timeout_s: float | None = None,
+    retry_limit: int | None = None,
+) -> subprocess.CompletedProcess[str]:
+    timeout_value = float(timeout_s or HOST_SKILL_CLAWHUB_TIMEOUT_S)
+    max_retries = max(0, int(HOST_SKILL_CLAWHUB_RETRY_LIMIT if retry_limit is None else retry_limit))
+    base_cmd = _build_clawhub_base_command(workdir=workdir, skills_dir=skills_dir)
+    last_result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(max_retries + 1):
+        result = subprocess.run(
+            [*base_cmd, *command_args],
+            cwd=str(workdir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_value,
+            check=False,
+        )
+        last_result = result
+        output_text = _normalize_cli_output(result.stdout, result.stderr)
+        if result.returncode == 0:
+            return result
+        if "Rate limit exceeded" in output_text and attempt < max_retries:
+            time.sleep(_extract_retry_after_seconds(output_text))
+            continue
+        return result
+    assert last_result is not None
+    return last_result
+
+
+
+def _parse_clawhub_search_output(stdout: str) -> list[SearchResult]:
+    import re as _re
+
+    results: list[SearchResult] = []
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("-"):
+            continue
+        match = _re.match(r"^(?P<slug>\S+)\s{2,}(?P<title>.+?)\s+\((?P<score>[-+]?\d+(?:\.\d+)?)\)$", line)
+        if not match:
+            continue
+        slug = str(match.group("slug") or "").strip()
+        title = str(match.group("title") or slug).strip() or slug
+        if not slug:
+            continue
+        results.append(SearchResult(
+            name=slug,
+            version="",
+            description=title,
+            author="ClawHub",
+            tags=["clawhub"],
+        ))
+    return results
+
+
+
+def _search_skills_via_clawhub_cli(query: str, *, skills_dir: Path | None = None) -> SearchResponse:
+    hub_dir = skills_dir or _resolve_hub_skills_dir()
+    workdir = hub_dir.parent
+    result = _run_clawhub_cli(
+        ["search", str(query or "").strip(), "--limit", str(HOST_SKILL_CLAWHUB_SEARCH_LIMIT)],
+        workdir=workdir,
+        skills_dir=hub_dir,
+    )
+    output_text = _normalize_cli_output(result.stdout, result.stderr)
+    parsed = _parse_clawhub_search_output(result.stdout)
+    if result.returncode != 0:
+        return SearchResponse(
+            results=[],
+            registry_url=OFFICIAL_CLAWHUB_HOME_URL,
+            error=output_text or "clawhub search failed",
+            discovery_sources=get_official_skill_hub_sources(),
+        )
+    return SearchResponse(
+        results=parsed,
+        registry_url=OFFICIAL_CLAWHUB_HOME_URL,
+        error=None,
+        discovery_sources=get_official_skill_hub_sources(),
+    )
+
+
+
+def _install_from_clawhub(
+    *,
+    skill_slug: str,
+    hub_dir: Path,
+    source_str: str,
+    force: bool,
+) -> InstallResult:
+    workdir = hub_dir.parent
+    command = ["install", str(skill_slug or "").strip()]
+    if force:
+        command.append("--force")
+    result = _run_clawhub_cli(command, workdir=workdir, skills_dir=hub_dir)
+    output_text = _normalize_cli_output(result.stdout, result.stderr)
+    install_dir = hub_dir / skill_slug
+    if result.returncode != 0:
+        return InstallResult(
+            success=False,
+            name=skill_slug,
+            version="",
+            source=source_str,
+            install_dir=str(install_dir),
+            detail="",
+            error=output_text or "clawhub install failed",
+        )
+    skill_md = install_dir / SKILL_MD_FILENAME
+    if not skill_md.exists():
+        return InstallResult(
+            success=False,
+            name=skill_slug,
+            version="",
+            source=source_str,
+            install_dir=str(install_dir),
+            detail=output_text,
+            error=f"ClawHub install finished but SKILL.md was not found in {install_dir}",
+        )
+    try:
+        manifest = parse_skill_md(skill_md)
+    except Exception as exc:
+        return InstallResult(
+            success=False,
+            name=skill_slug,
+            version="",
+            source=source_str,
+            install_dir=str(install_dir),
+            detail=output_text,
+            error=f"SKILL.md parse error: {exc}",
+        )
+    update_lock_entry(
+        manifest.name,
+        manifest.version,
+        source_str,
+        skills_dir=hub_dir,
+    )
+    return InstallResult(
+        success=True,
+        name=manifest.name,
+        version=manifest.version,
+        source=source_str,
+        install_dir=str(install_dir),
+        detail=output_text or f"Installed {manifest.name} from ClawHub",
+    )
 
 
 @dataclass
@@ -69,6 +297,15 @@ class SearchResult:
     author: str
     tags: list[str]
 
+@dataclass
+class SearchResponse:
+    """远程技能搜索结果。"""
+    results: list[SearchResult]
+    registry_url: str
+    error: str | None = None
+    discovery_sources: list[dict[str, str]] | None = None
+
+
 
 def _parse_github_source(source: str) -> tuple[str, str, str] | None:
     """解析 GitHub 来源字符串。
@@ -76,14 +313,18 @@ def _parse_github_source(source: str) -> tuple[str, str, str] | None:
     支持格式：
     - github:owner/repo/skill-slug
     - github:owner/repo/skill-slug@branch
+    - skillshub:owner/repo/skill-slug
+    - skillshub:owner/repo/skill-slug@branch
     - https://github.com/owner/repo/tree/branch/skill-slug
 
     Returns:
         (owner/repo, branch, skill_slug) 或 None
     """
-    # github:owner/repo/slug[@branch]
-    if source.startswith("github:"):
-        rest = source[len("github:"):]
+    # github:owner/repo/slug[@branch] / skillshub:owner/repo/slug[@branch]
+    normalized_source = str(source or "").strip()
+    if normalized_source.startswith("github:") or normalized_source.startswith("skillshub:"):
+        prefix = "github:" if normalized_source.startswith("github:") else "skillshub:"
+        rest = normalized_source[len(prefix):]
         parts = rest.split("/", 2)
         if len(parts) < 3:
             return None
@@ -195,6 +436,12 @@ def install_skill(
 
     Returns:
         InstallResult
+
+    支持来源：
+        - github:owner/repo/skill-slug
+        - skillshub:owner/repo/skill-slug（Skillshub git-native tap 别名）
+        - https://github.com/owner/repo/tree/branch/skill-slug
+        - 本地目录路径
     """
     hub_dir = skills_dir or _resolve_hub_skills_dir()
     hub_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +451,16 @@ def install_skill(
     if local_path.exists() and local_path.is_dir():
         return _install_from_local(local_path, hub_dir=hub_dir, force=force)
 
-    # GitHub 安装
+    if str(source or "").strip().startswith("clawhub:"):
+        skill_slug = str(source or "").strip().split(":", 1)[-1].strip() or "unknown-skill"
+        return _install_from_clawhub(
+            skill_slug=skill_slug,
+            hub_dir=hub_dir,
+            source_str=str(source),
+            force=force,
+        )
+
+    # GitHub / Skillshub tap 安装
     github_info = _parse_github_source(source)
     if github_info:
         owner_repo, branch, slug = github_info
@@ -224,8 +480,11 @@ def install_skill(
         source=source,
         install_dir="",
         detail="",
-        error=f"Unsupported source format: {source}. "
-              f"Supported: github:owner/repo/slug, local directory path",
+        error=(
+            f"不支持的来源格式：{source}。支持 github:owner/repo/slug、"
+            f"skillshub:owner/repo/slug 和本地目录路径。"
+            f"你可以先去 {OFFICIAL_CLAWHUB_HOME_URL} 或 {OFFICIAL_SKILLSHUB_HOME_URL} 查找技能。"
+        ),
     )
 
 
@@ -442,53 +701,75 @@ def list_installed_skills(
     return result
 
 
+def search_remote_skills_with_status(
+    query: str,
+    *,
+    registry_url: str | None = None,
+    timeout_s: float = 10.0,
+) -> SearchResponse:
+    """从远程 registry 搜索可用 Skills，并在需要时回退到 ClawHub CLI。"""
+    env_registry_url = os.environ.get("HOST_SKILL_HUB_REGISTRY_URL", "").strip()
+    url = str(registry_url or env_registry_url).strip()
+    discovery_sources = get_official_skill_hub_sources()
+    registry_error: str | None = None
+
+    if url:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Natsume-Ai-Hub/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            logger.warning("Hub search: registry fetch failed (%s): %s", url, exc)
+            registry_error = str(exc)
+        else:
+            if isinstance(data, list):
+                query_lower = query.lower()
+                results: list[SearchResult] = []
+                for entry in data:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = str(entry.get("name") or "")
+                    desc = str(entry.get("description") or "")
+                    tags = list(entry.get("tags") or [])
+                    searchable = f"{name} {desc} {' '.join(tags)}".lower()
+                    if query_lower in searchable:
+                        results.append(SearchResult(
+                            name=name,
+                            version=str(entry.get("version") or ""),
+                            description=desc,
+                            author=str(entry.get("author") or ""),
+                            tags=tags,
+                        ))
+                return SearchResponse(results=results, registry_url=url, error=None, discovery_sources=discovery_sources)
+            registry_error = "registry payload is not a list"
+    else:
+        registry_error = (
+            f"当前还没有配置机器可读的技能 registry。"
+            f"你可以先去 ClawHub（{OFFICIAL_CLAWHUB_HOME_URL}）或 Skillshub（{OFFICIAL_SKILLSHUB_HOME_URL}）查找。"
+            f"安装时可使用 github:owner/repo/skill 或 {OFFICIAL_SKILLSHUB_INSTALL_EXAMPLE}。"
+        )
+
+    fallback = _search_skills_via_clawhub_cli(query)
+    if fallback.results:
+        return fallback
+    combined_error = _normalize_cli_output(registry_error or "", fallback.error or "") or None
+    return SearchResponse(
+        results=[],
+        registry_url=url or fallback.registry_url,
+        error=combined_error,
+        discovery_sources=discovery_sources,
+    )
+
+
 def search_remote_skills(
     query: str,
     *,
     registry_url: str | None = None,
     timeout_s: float = 10.0,
 ) -> list[SearchResult]:
-    """从远程 GitHub Hub 搜索可用 Skills。
+    return search_remote_skills_with_status(
+        query,
+        registry_url=registry_url,
+        timeout_s=timeout_s,
+    ).results
 
-    远程仓库约定：根目录有 registry.json：
-    [
-      {"name": "weather-query", "version": "1.0.0", "description": "...", "author": "...", "tags": ["天气"]},
-      ...
-    ]
-    """
-    url = registry_url or os.environ.get(
-        "HOST_SKILL_HUB_REGISTRY_URL",
-        "https://raw.githubusercontent.com/koinosakura/natsume-skills-hub/main/registry.json",
-    )
-
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Natsume-Ai-Hub/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
-        logger.warning("Hub search: registry fetch failed (%s): %s", url, exc)
-        return []
-
-    if not isinstance(data, list):
-        return []
-
-    query_lower = query.lower()
-    results: list[SearchResult] = []
-    for entry in data:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name") or "")
-        desc = str(entry.get("description") or "")
-        tags = list(entry.get("tags") or [])
-        # 简易匹配：名称、描述、标签中包含查询词
-        searchable = f"{name} {desc} {' '.join(tags)}".lower()
-        if query_lower in searchable:
-            results.append(SearchResult(
-                name=name,
-                version=str(entry.get("version") or ""),
-                description=desc,
-                author=str(entry.get("author") or ""),
-                tags=tags,
-            ))
-
-    return results

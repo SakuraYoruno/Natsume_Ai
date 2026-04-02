@@ -37,6 +37,7 @@ from typing import Any, Callable
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
 from host_brain.skills.hub.manifest_parser import SkillManifest, parse_skill_md
 from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.install_repair import repair_skill_loading_failure
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +185,6 @@ def _load_custom_executor(
         importlib.invalidate_caches()
         sys.modules.pop(module_name, None)
 
-        import importlib.util
-
         spec = importlib.util.spec_from_file_location(module_name, str(executor_file))
         if spec is None or spec.loader is None:
             return None
@@ -204,6 +203,28 @@ def _load_custom_executor(
         return executor_fn
     except Exception as exc:
         logger.warning("Hub: executor.py 加载失败 (%s): %s", executor_file, exc)
+        auto_repair_enabled = str(os.environ.get("HOST_SKILL_AUTO_REPAIR_ENABLED") or "true").strip().lower() not in {"0", "false", "no", "off"}
+        if auto_repair_enabled:
+            repair = repair_skill_loading_failure(skill_dir=skill_dir, exc=exc)
+            if repair.get("success"):
+                logger.info("Hub: executor auto-repair succeeded for %s", skill_dir)
+                try:
+                    if skill_dir_str not in sys.path:
+                        sys.path.insert(0, skill_dir_str)
+                    importlib.invalidate_caches()
+                    sys.modules.pop(module_name, None)
+                    spec = importlib.util.spec_from_file_location(module_name, str(executor_file))
+                    if spec is not None and spec.loader is not None:
+                        module = importlib.util.module_from_spec(spec)
+                        sys.modules[module_name] = module
+                        spec.loader.exec_module(module)
+                        executor_fn = getattr(module, "execute", None)
+                        if executor_fn is None:
+                            executor_fn = getattr(module, f"execute_{tool_name}", None)
+                        if callable(executor_fn):
+                            return executor_fn
+                except Exception as retry_exc:
+                    logger.warning("Hub: executor retry after repair still failed (%s): %s", executor_file, retry_exc)
         return None
 
 
@@ -434,6 +455,43 @@ def _load_single_skill(
                 manifest.name, skill_dir,
             )
     except Exception as exc:
+        auto_repair_enabled = str(os.environ.get("HOST_SKILL_AUTO_REPAIR_ENABLED") or "true").strip().lower() not in {"0", "false", "no", "off"}
+        if auto_repair_enabled:
+            repair = repair_skill_loading_failure(skill_dir=skill_dir, exc=exc)
+            if repair.get("success"):
+                try:
+                    custom_provider = _load_custom_provider(skill_dir)
+                    if custom_provider is not None:
+                        count = registry.register_decorated(custom_provider)
+                        provider_type = "custom_provider"
+                        declarative_entries = getattr(custom_provider, "__skill_meta_entries__", None)
+                        if callable(declarative_entries):
+                            skill_names = [e.skill_name for e in declarative_entries()]
+                        else:
+                            skill_names = [manifest.name]
+                        logger.info(
+                            "Hub: custom provider registered after repair skill=%s count=%d from %s",
+                            manifest.name, count, skill_dir,
+                        )
+                    else:
+                        auto_provider = _generate_provider_from_manifest(manifest)
+                        registry.register_decorated(auto_provider)
+                        skill_names = [manifest.name]
+                        logger.info(
+                            "Hub: auto-generated provider registered after repair skill=%s from %s",
+                            manifest.name, skill_dir,
+                        )
+                    return HubSkillInfo(
+                        name=manifest.name,
+                        version=manifest.version,
+                        source_dir=str(skill_dir),
+                        status="REGISTERED",
+                        provider_type=provider_type,
+                        has_executor=has_executor,
+                        skill_names=skill_names,
+                    )
+                except Exception as retry_exc:
+                    exc = retry_exc
         return HubSkillInfo(
             name=manifest.name,
             version=manifest.version,

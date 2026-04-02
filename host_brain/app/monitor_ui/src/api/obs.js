@@ -948,3 +948,17 @@ export function connectHealthWebSocket(onMessage, onError, onClose) {
     ws,
   }
 }
+
+
+// ===== Retrieval Runtime =====
+
+/**
+ * 当前 Retrieval embedding / reranker 实际运行模型与 fallback 统计。
+ * @param {object} params - { request_id, limit, include_legacy }
+ */
+export function fetchRetrievalRuntime(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/retrieval/runtime${qs ? '?' + qs : ''}`)
+}

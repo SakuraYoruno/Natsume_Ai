@@ -27,6 +27,7 @@ from host_brain.core.errors import (
     TTS_GPU_OOM,
     TTS_MODEL_UNAVAILABLE,
     TTS_SYNTH_TIMEOUT,
+    VOICE_SCHEMA_INVALID,
     VOICE_SYNTH_FAILED,
 )
 from edge_client.actuators.tts_engine import (
@@ -103,11 +104,29 @@ class TestTtsModelManagerLifecycle:
         assert not result.success
         assert result.reason_code == VOICE_SYNTH_FAILED
 
+    def test_synthesize_rejects_non_japanese_language(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        mgr._state = TtsState.READY
+        mgr._model = MagicMock()
+        result = mgr.synthesize("\u3053\u3093\u306b\u3061\u306f", language="en")
+        assert not result.success
+        assert result.reason_code == VOICE_SCHEMA_INVALID
+        mgr._model.synthesize.assert_not_called()
+
+    def test_synthesize_rejects_latin_text_before_backend_call(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        mgr._state = TtsState.READY
+        mgr._model = MagicMock()
+        result = mgr.synthesize("hello")
+        assert not result.success
+        assert result.reason_code == VOICE_SCHEMA_INVALID
+        mgr._model.synthesize.assert_not_called()
+
     def test_synthesize_when_model_not_ready_triggers_load(self):
         """When model is not ready, synthesize() attempts load first."""
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         # Model not installed, so load will fail
-        result = mgr.synthesize("hello")
+        result = mgr.synthesize("\u3053\u3093\u306b\u3061\u306f")
         assert not result.success
         assert result.reason_code == TTS_MODEL_UNAVAILABLE
 
@@ -249,6 +268,25 @@ class TestSynthesizerCallbackFactory:
         assert "audio_ref" in result
         assert "audio_data" in result
         assert result["sample_rate"] == 32000
+
+    def test_factory_callback_passes_lang_hint_to_engine(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=[0.0],
+            duration_s=0.1,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )) as synthesize_mock:
+            synth = make_sovits_synthesizer(mgr)
+            synth({
+                "text": "\u3053\u3093\u306b\u3061\u306f",
+                "lang_hint": "ja-jp",
+            })
+        assert synthesize_mock.call_args.kwargs["language"] == "ja-jp"
 
 
 # ---------------------------------------------------------------------------

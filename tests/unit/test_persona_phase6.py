@@ -210,7 +210,7 @@ class TestStyleFingerprint:
         """空文本返回基线。"""
         fp = extract_style_fingerprint("")
         assert fp.warmth == 0.5
-        assert fp.assertiveness == 0.3
+        assert fp.assertiveness == 0.38
 
     def test_fingerprint_as_dict(self):
         """风格指纹可序列化。"""

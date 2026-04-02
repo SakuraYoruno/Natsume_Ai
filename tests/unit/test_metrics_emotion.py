@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import MagicMock, patch
-from host_brain.obs.metrics import MetricsCollector
+from host_brain.observability.metrics import MetricsCollector
 
 
 def _make_collector_with_emotion_log(records: list[dict]) -> MetricsCollector:

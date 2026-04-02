@@ -190,7 +190,7 @@ graph TB
 
 动态路由入口：
 - `SceneRouter.route_sse()` 统一分发
-  - `SCENE_CHAT` → `chat_stream_handler`
+  - `SCENE_CHAT` → `top_agent`
   - `SCENE_VISION_UI` → `chat_handler_vision`
   - 其他复杂场景 → `chat_handler_complex`
 
@@ -269,7 +269,6 @@ Natsume_Ai/
 │   ├── lsp/                 #    Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
 │   ├── mcp/                 #    MCP 注册与桥接
 │   ├── memory/              #    记忆系统（Chroma 向量存储 / 情景记忆 / Persona 语料向量投影 / Canon 同步 / cursor-based 分页）
-│   ├── obs/                 #    观测数据适配层（向后兼容 shim，实体已迁移至 observability/）
 │   ├── observability/       #    可观测性（跨端时间线聚合 / 时钟漂移检测 / 阈值告警 / 长期 KPI 仪表盘）
 │   ├── release/             #    发布清单管理（model_plane digest 门禁）
 │   ├── retrieval/           #    检索链（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
@@ -859,7 +858,7 @@ POST /v1/chat
   -> _unified_chat_sse_generator
   -> IntentDecisionEngine.evaluate_intent
   -> SceneRouter.route_sse
-      -> SCENE_CHAT      : chat_stream_handler
+      -> SCENE_CHAT      : top_agent
       -> SCENE_VISION_UI : chat_handler_vision
       -> 复杂场景         : chat_handler_complex
           -> resolve_execution_profile
@@ -1079,7 +1078,7 @@ MCPToolRegistry（MCP 工具元数据）
 
 可观测性系统提供跨端时间线聚合与时钟漂移检测能力，支持 Host 与 Edge 的联合监控。
 
-> **迁移说明**：`host_brain/obs/` 模块已规范化迁移至 `host_brain/observability/`，旧包保留向后兼容 shim 层，外部代码无需修改导入路径。
+> **迁移说明**：`host_brain/observability/` 是当前唯一保留的观测模块路径；历史 `host_brain/obs/` 兼容层已删除。
 
 | 新增能力 | 说明 |
 |---------|------|
@@ -1158,8 +1157,17 @@ Skills Hub 是外部技能的发现、安装与注册系统，采用 SKILL.md �
 | 方式 | 说明 |
 |------|------|
 | **本地安装** | 将包含 `SKILL.md` 的目录放入 `skills/` 目录，重启自动发现 |
-| **GitHub 安装** | `install_skill("github:owner/repo/slug")` 远程下载并注册 |
+| **GitHub / Skillshub 安装** | `install_skill("github:owner/repo/slug")` 或 `install_skill("skillshub:owner/repo/slug")` 远程下载并注册 |
 | **外部目录扫描** | 自动扫描 `~/.skillhub/skills/`、`~/.openclaw/skills/`、`~/.codebuddy/skills/` |
+
+### 官方发现入口
+
+- **ClawHub**：`https://clawhub.ai`
+- **ClawHub Docs**：`https://docs.openclaw.ai/tools/clawdhub`
+- **Skillshub**：`https://www.skillshubco.com`
+- **Skillshub GitHub**：`https://github.com/EYH0602/skillshub`
+
+> 默认不再内置旧的 `koinosakura/natsume-skills-hub` registry 死链；如果需要机器可读搜索源，请自行配置 `HOST_SKILL_HUB_REGISTRY_URL`。
 
 ### SKILL.md 格式示例
 

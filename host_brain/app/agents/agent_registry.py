@@ -21,6 +21,7 @@ AGENT_ID_JUDGE = "judge_agent"
 AGENT_ID_RENDERER = "renderer_agent"
 AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
 AGENT_ID_EMOTION = "emotion_agent"    # 方向 G Phase 2 新增
+AGENT_ID_REPAIR = "repair_agent"
 
 # ---------------------------------------------------------------------------
 # Agent Allowlist（Supervisor 分派时的合法目标集合）
@@ -37,6 +38,7 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_JUDGE,
     AGENT_ID_RETRIEVAL,  # P11 新增
     AGENT_ID_EMOTION,    # 方向 G Phase 2 新增
+    AGENT_ID_REPAIR,
 })
 
 # ---------------------------------------------------------------------------
@@ -123,6 +125,16 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": False,
         "risk_level": "low",
         "description": "知识库检索，只读，产出检索工件",
+    },
+    AGENT_ID_REPAIR: {
+        "agent_id": AGENT_ID_REPAIR,
+        "display_name": "RepairAgent",
+        "node_id": "environment_repair",
+        "fast_path": False,
+        "allow_parallel": False,
+        "has_side_effects": True,
+        "risk_level": "high",
+        "description": "环境修复与依赖安装，负责补齐运行所需的浏览器/工具后端",
     },
     AGENT_ID_EMOTION: {  # 方向 G Phase 2 新增
         "agent_id": AGENT_ID_EMOTION,

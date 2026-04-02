@@ -155,6 +155,7 @@ def build_summary_from_pipeline_result(result: RetrievalPipelineResult) -> tuple
     adaptive_budget = dict(result.output.get("adaptive_budget") or {})
     evidence_items = _extract_evidence_items(rerank_output=rerank_output)
 
+    embedding_output = dict(result.output.get("embedding") or {})
     summary: dict[str, Any] = {
         "status": result.status,
         "reason_code": result.reason_code,
@@ -173,6 +174,16 @@ def build_summary_from_pipeline_result(result: RetrievalPipelineResult) -> tuple
         "agentic_meta": agentic_meta,
         "adaptive_budget": adaptive_budget,
         "slot_budget_overrides": dict(adaptive_budget.get("adjusted_budget") or {}),
+        "embedding_model_id": str(embedding_output.get("embedding_model_id") or "").strip() or None,
+        "embedding_provider": str(embedding_output.get("provider") or "").strip() or None,
+        "effective_embedding_provider": str(embedding_output.get("effective_provider") or "").strip() or None,
+        "fallback_embedding_used": bool(embedding_output.get("fallback_used", False)),
+        "fallback_embedding_reason_code": str(embedding_output.get("fallback_reason_code") or "").strip() or None,
+        "rerank_model_id": str(rerank_output.get("rerank_model_id") or "").strip() or None,
+        "rerank_provider": str(rerank_output.get("provider") or "").strip() or None,
+        "effective_rerank_provider": str(rerank_output.get("effective_provider") or "").strip() or None,
+        "fallback_reranker_used": bool(rerank_output.get("fallback_used", False)),
+        "fallback_reranker_reason_code": str(rerank_output.get("fallback_reason_code") or "").strip() or None,
     }
     path = _classify_retrieval_path(summary=summary, evidence_items=evidence_items)
     return summary, evidence_items, path

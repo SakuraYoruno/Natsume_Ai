@@ -20,8 +20,7 @@ from host_brain.core.errors import (
 
 
 EMBEDDING_MODEL_ID = "hash-embed-v1"
-SEMANTIC_EMBEDDING_MODEL_ID = "paraphrase-multilingual-MiniLM-L12-v2"
-SEMANTIC_EMBEDDING_DIM = 384  # 该模型输出维度
+SEMANTIC_EMBEDDING_MODEL_ID = "models/Qwen3-Embedding-0.6B"
 S_CHROMA_CONFIG = "S_CHROMA_CONFIG"
 S_CHROMA_PROBE = "S_CHROMA_PROBE"
 
@@ -213,7 +212,7 @@ class PersistentChromaClient:
                 tenant=self._tenant,
                 database=self._database,
             )
-        except TypeError:
+        except Exception:
             self._client = chromadb.HttpClient(
                 host=self._host,
                 port=self._port,
@@ -258,14 +257,21 @@ class PersistentChromaClient:
         collection_name = str(collection or self._default_collection)
         coll = self._client.get_or_create_collection(name=collection_name)
         result = coll.get(ids=[str(memory_id)], include=["documents", "embeddings", "metadatas"])
-        ids = list(result.get("ids") or [])
+        ids_raw = result.get("ids")
+        ids = list(ids_raw) if ids_raw is not None else []
         if not ids:
             return None
-        documents = list(result.get("documents") or [])
-        embeddings = list(result.get("embeddings") or [])
-        metadatas = list(result.get("metadatas") or [])
+        documents_raw = result.get("documents")
+        embeddings_raw = result.get("embeddings")
+        metadatas_raw = result.get("metadatas")
+        documents = list(documents_raw) if documents_raw is not None else []
+        embeddings = list(embeddings_raw) if embeddings_raw is not None else []
+        metadatas = list(metadatas_raw) if metadatas_raw is not None else []
         text = str(documents[0]) if documents else ""
-        raw_embedding = list(embeddings[0] or []) if embeddings else []
+        if embeddings and embeddings[0] is not None:
+            raw_embedding = list(embeddings[0])
+        else:
+            raw_embedding = []
         metadata = dict(metadatas[0] or {}) if metadatas and isinstance(metadatas[0], Mapping) else {}
         return ChromaEntry(
             memory_id=str(ids[0]),
@@ -336,11 +342,21 @@ class PersistentChromaClient:
             raise ValueError(CHROMA_COLLECTION_MISSING)
         raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
 
+def hash_embed_text(text: str, *, dim: int = 16) -> tuple[list[float], str]:
+    normalized = str(text).strip()
+    fallback_dim = int(dim) if dim is not None else 16
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    values = []
+    for idx in range(fallback_dim):
+        byte_value = digest[idx % len(digest)]
+        values.append(round(byte_value / 255.0, 6))
+    return values, EMBEDDING_MODEL_ID
+
 
 def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
     """将文本转换为语义嵌入向量。
 
-    优先使用 sentence-transformers 真实语义嵌入模型（paraphrase-multilingual-MiniLM-L12-v2）。
+    优先使用 sentence-transformers 真实语义嵌入模型（默认使用 Qwen3-Embedding-0.6B）。
     若依赖库不可用，则降级为 SHA-256 哈希伪嵌入（仅用于测试/离线场景）。
 
     Args:
@@ -357,9 +373,10 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
         model = _get_sentence_transformer_model()
         embedding = model.encode(normalized, normalize_embeddings=True)
         values = [round(float(v), 6) for v in embedding]
-        return values, SEMANTIC_EMBEDDING_MODEL_ID
+        return values, _resolve_semantic_embedding_model_id()
     except Exception:
         pass
+    return hash_embed_text(normalized, dim=(int(dim) if dim is not None else 16))
 
     # 降级：SHA-256 哈希伪嵌入（语义无关，仅用于测试/离线场景）
     fallback_dim = int(dim) if dim is not None else 16
@@ -372,16 +389,29 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
 
 
 # 模型单例缓存（避免每次调用重复加载）
-_sentence_transformer_model: Any = None
+_sentence_transformer_models: dict[str, Any] = {}
+
+
+def _resolve_semantic_embedding_model_id() -> str:
+    preferred = str(os.environ.get("RETR_MODEL_SUITE_EMBED_MODEL_ID") or "").strip()
+    if preferred:
+        return preferred
+    preferred = str(os.environ.get("RETR_EMBED_MODEL_ID") or "").strip()
+    if preferred and preferred != EMBEDDING_MODEL_ID:
+        return preferred
+    return SEMANTIC_EMBEDDING_MODEL_ID
 
 
 def _get_sentence_transformer_model() -> Any:
     """获取 SentenceTransformer 模型单例（懒加载 + 缓存）。"""
-    global _sentence_transformer_model
-    if _sentence_transformer_model is None:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
-        _sentence_transformer_model = SentenceTransformer(SEMANTIC_EMBEDDING_MODEL_ID)
-    return _sentence_transformer_model
+    model_id = _resolve_semantic_embedding_model_id()
+    cached = _sentence_transformer_models.get(model_id)
+    if cached is not None:
+        return cached
+    from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+    model = SentenceTransformer(model_id)
+    _sentence_transformer_models[model_id] = model
+    return model
 
 
 def load_chroma_runtime_config(

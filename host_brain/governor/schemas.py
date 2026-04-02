@@ -73,6 +73,7 @@ class IntentEnvelope:
     target: str
     args: dict[str, Any]
     nonce: str
+    person_id: str | None = None
 
 
 @dataclass(frozen=True)

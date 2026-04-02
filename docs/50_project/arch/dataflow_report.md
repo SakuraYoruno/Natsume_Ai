@@ -43,7 +43,7 @@ graph TB
         E_ASR["ASR 语音识别\nedge_client/senses/asr.py"]
         E_TTS["TTS 语音合成\nedge_client/actuators/tts_engine.py"]
         E_VTS["VTS 表情驱动\nedge_client/actuators/vts_driver.py"]
-        E_WECHAT["微信监听\nedge_client/channels/wechat_listener.py"]
+        E_WECHAT["Gateway Webhook\nedge_client/gateway/server.py"]
         E_DESKTOP["桌面控制\nedge_client/actuators/desktop_controller.py"]
         E_RPC["Edge RPC Gateway\nedge_client/app/fastapi_app.py"]
         E_FALLBACK["Fallback LLM\nedge_client/rpc/fallback_llm.py"]
@@ -171,7 +171,7 @@ sequenceDiagram
 
     Note over EDGE,HOST: 通道4：微信 Hook 回调（本地 Hook 工具 → Edge）
     Note right of EDGE: wcf 等工具推送
-    EDGE->>HOST: 内部转发（通过 WeChatListener）
+    EDGE->>HOST: 通过 Gateway Router / InputReporter 内部转发
 ```
 
 ### 2.3 双端 SSE 流式通信（核心聊天链路）

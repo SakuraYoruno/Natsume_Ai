@@ -9,7 +9,7 @@ SKILL.md 格式：
 name: "weather-query"
 version: "1.0.0"
 description: "查询天气信息"
-author: "koinosakura"
+author: "openclaw"
 tags: ["weather", "天气"]
 trigger_words: ["天气", "温度", "weather"]
 
@@ -227,7 +227,7 @@ def parse_skill_md(path: Path) -> SkillManifest:
     if not path.exists():
         raise FileNotFoundError(f"SKILL.md not found: {path}")
 
-    content = path.read_text(encoding="utf-8")
+    content = path.read_text(encoding="utf-8").lstrip("﻿")
     match = _FRONT_MATTER_RE.search(content)
     if not match:
         raise ValueError(f"SKILL.md missing YAML front matter (---): {path}")

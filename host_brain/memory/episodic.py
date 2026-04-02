@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 import logging
@@ -75,12 +75,34 @@ class EpisodicStore:
         *,
         ledger: SQLiteLedger | None = None,
         chroma_client: InMemoryChromaClient | PersistentChromaClient | None = None,
+        embedding_fn: Callable[[str], tuple[list[float], str]] | None = None,
+        embedding_model_id_hint: str | None = None,
+        embedding_provider_hint: str | None = None,
     ) -> None:
         self.ledger = ledger or SQLiteLedger()
         self.chroma = chroma_client or InMemoryChromaClient()
+        self._embedding_fn = embedding_fn
+        self.embedding_model_id_hint = str(embedding_model_id_hint or "").strip() or None
+        self.embedding_provider_hint = str(embedding_provider_hint or "").strip() or None
         # 使用 OrderedDict 实现 LRU：最近写入/访问的记录在末尾
         from collections import OrderedDict
         self._records: OrderedDict[str, EpisodicRecord] = OrderedDict()
+
+    def _embed_text(self, text: str) -> tuple[list[float], str]:
+        if self._embedding_fn is not None:
+            return self._embedding_fn(str(text or "").strip())
+        return embed_text(str(text or "").strip(), dim=self._resolve_embedding_dim())
+
+    def _resolve_embedding_dim(self) -> int:
+        profiles = getattr(self.chroma, "_collection_profiles", {}) or {}
+        default_collection = str(getattr(self.chroma, "_default_collection", "episodic") or "episodic")
+        raw_dim = profiles.get(default_collection)
+        if raw_dim is None and profiles:
+            raw_dim = next(iter(profiles.values()))
+        try:
+            return max(1, int(raw_dim))
+        except (TypeError, ValueError):
+            return 16
 
     def write_memory(
         self,
@@ -419,7 +441,7 @@ class EpisodicStore:
         emotion_context 匹配的记录分数加权 emotion_boost_factor（默认 1.3x）。
         emotion_filter 仍保留向后兼容（优先返回匹配情感的记录）。
         """
-        embedding, _ = embed_text(query_text)
+        embedding, _ = self._embed_text(query_text)
         results = self.chroma.search(query_embedding=embedding, top_k=top_k)
 
         # M29-B：情感上下文加权
@@ -510,7 +532,7 @@ class EpisodicStore:
         memory_id = f"mem_{uuid.uuid4().hex}"
         normalized_text = str(text).strip()
         text_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
-        embedding, model_id = embed_text(normalized_text)
+        embedding, model_id = self._embed_text(normalized_text)
         # 截断情感数值到合法范围
         valence = max(-1.0, min(1.0, float(emotion_valence)))
         arousal = max(0.0, min(1.0, float(emotion_arousal)))

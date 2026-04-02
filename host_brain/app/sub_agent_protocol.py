@@ -53,9 +53,10 @@ AGENT_CODE = "code_agent"
 AGENT_TRANSLATE = "translate_agent"
 AGENT_INTENT = "intent_agent"
 AGENT_VISION = "vision_agent"
+AGENT_REPAIR = "repair_agent"
 
 ALL_AGENT_IDS: frozenset[str] = frozenset({
-    AGENT_CODE, AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION,
+    AGENT_CODE, AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR,
 })
 
 # 子 Agent 能力描述（注入顶级 Agent prompt，供 LLM 判断调度）
@@ -64,6 +65,7 @@ AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_TRANSLATE: "翻译专家：中日英多语言翻译，含校对和润色（多步流程）",
     AGENT_INTENT: "执行专家：理解用户的执行意图，调用工具完成实际操作（文件/网络/系统）",
     AGENT_VISION: "视觉分析：分析图片/截图内容，提取 UI 元素信息",
+    AGENT_REPAIR: "环境修复专家：当缺少浏览器/依赖/运行环境时，尝试自动安装并恢复执行能力",
 }
 
 
@@ -103,6 +105,11 @@ class SubAgentDispatcher:
         # vision_agent 暂未实现独立 handler，复用 intent_agent
         if AGENT_VISION not in self._handler_map and AGENT_INTENT in self._handler_map:
             self._handler_map[AGENT_VISION] = self._handler_map[AGENT_INTENT]
+        try:
+            from host_brain.app.handlers.repair_agent_handler import repair_agent_handler
+            self._handler_map[AGENT_REPAIR] = repair_agent_handler
+        except ImportError:
+            pass
 
     async def dispatch(self, req: SubAgentRequest) -> SubAgentResponse:
         """调度子 Agent 执行任务。

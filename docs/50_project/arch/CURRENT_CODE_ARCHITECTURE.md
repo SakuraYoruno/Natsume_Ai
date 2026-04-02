@@ -34,7 +34,7 @@
 
 - Host API 入口：`host_brain/app/fastapi_app.py`
 - Chat 总入口：`host_brain/app/chat_handler.py`
-- Chat 流式链路：`host_brain/app/chat_stream_handler.py`
+- Chat 流式链路：`host_brain/app/top_agent.py`
 - 复杂场景链路：`host_brain/app/chat_handler_complex.py`
 - 场景路由与主链：`host_brain/app/graph/main_chain.py`
 - 图配置构建：`host_brain/app/graph_config_builder.py`
@@ -79,7 +79,6 @@ Natsume_Ai/
 │  ├─ lsp/             # Artifact Vault SSOT 接口层（产物仓库读写，唯一授权写入入口）
 │  ├─ mcp/             # MCP 注册与桥接（tool_broker / tool_registry）
 │  ├─ memory/          # 记忆系统（Chroma 向量存储 / 情景记忆 / Canon 同步 / 向量投影）
-│  ├─ obs/             # 观测数据适配层（向后兼容 shim，实体已迁移至 observability/）
 │  ├─ observability/   # 可观测性（跨端时间线 / 时钟漂移 / 阈值告警 / 长期 KPI）
 │  ├─ release/         # 发布清单管理（model_plane digest 门禁）
 │  ├─ retrieval/       # 检索管线（Orchestrator / 多路召回融合 / 混合检索 / 重排 / Evidence Pack）
@@ -102,7 +101,7 @@ Natsume_Ai/
 ├─ edge_client/
 │  ├─ app/             # Edge FastAPI RPC 网关（/v1/edge/*）
 │  ├─ actuators/       # TTS/VTS 执行（语音合成 + VTS WebSocket 驱动）
-│  ├─ channels/        # 本地渠道适配（wechat_listener 为 legacy；保留 input_reporter / command queue）
+│  ├─ channels/        # 本地渠道适配（保留 input_reporter / command queue）
 │  ├─ gateway/         # 统一消息网关（:19000，Phase 1-5 全部完成）
 │  │  ├─ adapters/     # 平台适配器（wechat/qq/feishu/wecom/telegram）
 │  │  ├─ media/        # 多媒体处理（image/voice/file handler）
@@ -169,7 +168,7 @@ Natsume_Ai/
 
 - 场景级分流：`SceneRouter.route_sse`
   - `SCENE_CHAT` → token stream
-  - `SCENE_GATEWAY` → Gateway 编排链路（中文回复 + 可选 TTS）
+  - `SCENE_GATEWAY` → Gateway 薄适配层（转交 `top_agent.py`）
   - `SCENE_VISION_UI` → vision 链路
   - 其他复杂场景 → graph 链路
 - 图构建层：`graph_config_builder.py`
@@ -194,10 +193,10 @@ Natsume_Ai/
 | 模块 | 代码位置 | 职责 |
 |---|---|---|
 | Chat 入口 | `host_brain/app/chat_handler.py` | Governor 鉴权 + 场景分类 + SceneRouter 分发 |
-| Chat 流式 | `host_brain/app/chat_stream_handler.py` | `SCENE_CHAT` token SSE、检索、后处理、COMMIT |
+| Chat 流式 | `host_brain/app/top_agent.py` | `SCENE_CHAT` token SSE、检索、后处理、COMMIT |
 | 复杂场景 | `host_brain/app/chat_handler_complex.py` | 构图、跑图、节点级进度 SSE、最终 COMMIT |
 | Scene Router | `host_brain/app/graph/main_chain.py` | 按 scene_type 路由到 gateway/vision/chat/complex |
-| Gateway 编排 | `host_brain/app/handlers/gateway_orchestrator_handler.py` | `SCENE_GATEWAY` 中文回复生成 + 可选 TTS + 意图子路由 |
+| Gateway 回复 | `host_brain/app/top_agent.py` | Gateway 文本回复复用共享 `top_agent` 主链 |
 | 多 Agent handlers | `host_brain/app/handlers/*.py` | supervisor/chat/code/translate/intent/retrieval/judge/gateway |
 | 图运行时 | `host_brain/integrations/graph_runtime.py` | 校验配置、解析模型、执行图、返回统一结果 |
 | 图执行器 | `host_brain/integrations/graph_executor.py` | 单步执行、动态分派、降级、trace 记录 |
@@ -210,7 +209,6 @@ Natsume_Ai/
 | Artifact Vault | `host_brain/lsp/vault.py` | 产物仓库读写（唯一授权写入入口）|
 | MCP 桥接 | `host_brain/mcp/tool_broker.py` | MCP 工具注册与桥接 |
 | 可观测性 | `host_brain/observability/` | 跨端时间线聚合 / 时钟漂移 / 阈值告警 / 长期 KPI |
-| 观测适配层 | `host_brain/obs/` | 向后兼容 shim（实体已迁移至 observability/）|
 | 发布清单 | `host_brain/release/` | model_plane digest 门禁与发布清单管理 |
 | 视觉链 | `host_brain/vision/` | 多检测器注册表 / 摄像头事件 / 屏幕 OCR |
 
@@ -248,7 +246,7 @@ flowchart TD
 
 #### 6.1.1 `SCENE_CHAT` 分支
 
-- 文件：`host_brain/app/chat_stream_handler.py`
+- 文件：`host_brain/app/top_agent.py`
 - 关键流程：
   1. 检索（可跳过/降级）
   2. 构建 prompt/context
@@ -415,7 +413,7 @@ flowchart LR
 - 当新增 Agent 或调整 dispatch/judge 规则时，需同步更新"7. 多 Agent 治理"。
 - 当新增顶层目录或 `host_brain/app/` 下新增子目录时，需同步更新"3. 目录结构"。
 - 当新增 Host 或 Edge 对外 API 端点时，需同步更新"9. 当前对外 API"。
-- 当 `host_brain/obs/` → `host_brain/observability/` 迁移完成（shim 层移除）后，需同步更新"3. 目录结构"与"5.1 功能模块拆分"。
+- `host_brain/obs/` 历史 shim 已删除；当前以 `host_brain/observability/` 为唯一观测实现路径。
 
 ## 11. 关联文档
 

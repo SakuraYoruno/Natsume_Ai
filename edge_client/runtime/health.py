@@ -35,6 +35,11 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
             detail_when_disabled="edge tts disabled by config",
             component=getattr(runtime, "tts", None),
         ),
+        "fallback": _component_snapshot(
+            enabled=bool(getattr(runtime.config, "fallback_llm_enabled", False)),
+            detail_when_disabled="edge fallback llm disabled by config",
+            component=getattr(runtime, "fallback_rpc", None),
+        ),
         "vts": _component_snapshot(
             enabled=True,
             detail_when_disabled="edge vts unavailable",

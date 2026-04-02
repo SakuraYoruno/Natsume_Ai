@@ -112,3 +112,48 @@ def test_auto_backend_falls_back_for_element_screenshot(monkeypatch: pytest.Monk
     )
 
     assert result is sentinel
+
+
+
+def test_auto_backend_falls_back_to_os_shell_for_navigation_when_browser_backend_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    monkeypatch.setenv("HOST_BROWSER_BACKEND", "auto")
+    monkeypatch.setattr(browser_executor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(browser_executor.os, "startfile", lambda url: calls.append(url), raising=False)
+
+    result = browser_executor.execute_browser_navigate(
+        {
+            "action": "navigate",
+            "url": "https://example.com",
+            "request_id": "req-os-shell",
+        }
+    )
+
+    assert result["status"] == browser_executor.STATUS_EXECUTED
+    assert result["backend"] == browser_executor.BACKEND_OS_SHELL
+    assert calls == ["https://example.com"]
+
+
+def test_auto_backend_falls_back_to_desktop_screenshot_when_browser_backend_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOST_BROWSER_BACKEND", "auto")
+    monkeypatch.setattr(browser_executor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        browser_executor,
+        "_desktop_fallback_browser_screenshot",
+        lambda payload: {
+            "status": browser_executor.STATUS_EXECUTED,
+            "backend": browser_executor.BACKEND_DESKTOP_FALLBACK,
+            "manifest_ref": payload.get("manifest_ref") or "browser_screenshot::desktop_fallback",
+        },
+    )
+
+    result = browser_executor.execute_browser_screenshot(
+        {
+            "action": "screenshot",
+            "request_id": "req-desktop-fallback",
+        }
+    )
+
+    assert result["status"] == browser_executor.STATUS_EXECUTED
+    assert result["backend"] == browser_executor.BACKEND_DESKTOP_FALLBACK

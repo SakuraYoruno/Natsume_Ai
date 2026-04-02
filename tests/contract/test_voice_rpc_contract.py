@@ -109,6 +109,7 @@ class TestVoiceRpcContract(unittest.TestCase):
     def test_t_voice_02_speak_schema_and_replayable_event(self) -> None:
         valid = _load_json(FIXTURES / "good" / "speak_valid.json")
         missing_text = _load_json(FIXTURES / "bad" / "speak_missing_text.json")
+        valid["payload"]["lang_hint"] = "JA-JP"
 
         ok = self.rpc.speak(
             request_id=valid["request_id"],
@@ -120,6 +121,7 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual(S_VOICE_SPEAK_EGRESS, ok.stage)
         self.assertEqual(EVENT_SPEAK, ok.event["event_type"])
         self.assertEqual(DIRECTION_HOST_TO_EDGE, ok.event["direction"])
+        self.assertEqual("ja", ok.event["lang_hint"])
 
         bad = self.rpc.speak(
             request_id=missing_text["request_id"],
@@ -136,6 +138,25 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual(valid["request_id"], rows[0]["request_id"])
         self.assertEqual(missing_text["request_id"], rows[1]["request_id"])
         self.assertEqual(S_VOICE_SPEAK_EGRESS, rows[0]["stage"])
+
+    def test_t_voice_02b_speak_rejects_non_japanese_lang_hint(self) -> None:
+        payload = {
+            "session_id": "sess-voice-002b",
+            "utterance_id": "utt-voice-002b",
+            "text": "\u3053\u3093\u306b\u3061\u306f",
+            "lang_hint": "en",
+        }
+
+        bad = self.rpc.speak(
+            request_id="req_voice_02b",
+            payload=payload,
+            ts_ms=self.now_ms + 12,
+        )
+
+        self.assertFalse(bad.success)
+        self.assertEqual(STATUS_REJECTED, bad.status)
+        self.assertEqual(VOICE_SCHEMA_INVALID, bad.reason_code)
+        self.assertEqual(S_VOICE_SPEAK_EGRESS, bad.stage)
 
     def test_t_voice_03_barge_in_schema_and_replayable_event(self) -> None:
         valid = _load_json(FIXTURES / "good" / "barge_in_valid.json")

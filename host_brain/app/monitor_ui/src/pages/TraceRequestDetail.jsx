@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, RefreshCw, Clock3, Database, Activity, FileSearch, Radio } from 'lucide-react'
-import { connectTraceRequestLive, fetchTraceNodes, fetchTraceStreamEvents } from '../api/obs.js'
+import { ArrowLeft, RefreshCw, Clock3, Database, Activity, FileSearch, Radio, SearchCheck, Layers3 } from 'lucide-react'
+import { connectTraceRequestLive, fetchTraceNodes, fetchTraceStreamEvents, fetchRetrievalRuntime } from '../api/obs.js'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 
@@ -363,6 +363,7 @@ export default function TraceRequestDetail() {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
+  const [retrievalRuntime, setRetrievalRuntime] = useState(null)
   const [liveConnected, setLiveConnected] = useState(false)
   const [liveLastTs, setLiveLastTs] = useState(null)
   const [liveError, setLiveError] = useState(null)
@@ -373,11 +374,16 @@ export default function TraceRequestDetail() {
     if (showLoading) setLoading(true)
     setError(null)
     try {
-      const data = await fetchTraceNodes(requestId)
+      const [data, runtimeData] = await Promise.all([
+        fetchTraceNodes(requestId),
+        fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true }).catch(() => null),
+      ])
       setTraceData(data)
+      setRetrievalRuntime(runtimeData)
     } catch (err) {
       setError(err.message)
       setTraceData(null)
+      setRetrievalRuntime(null)
     } finally {
       if (showLoading) setLoading(false)
     }
@@ -406,12 +412,14 @@ export default function TraceRequestDetail() {
       setLoading(true)
       setEventsLoading(true)
       try {
-        const [traceResponse, eventsResponse] = await Promise.all([
+        const [traceResponse, eventsResponse, runtimeResponse] = await Promise.all([
           fetchTraceNodes(requestId),
           fetchTraceStreamEvents(requestId),
+          fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true }).catch(() => null),
         ])
         if (cancelled) return
         setTraceData(traceResponse)
+        setRetrievalRuntime(runtimeResponse)
         setEvents(eventsResponse.events ?? [])
         setError(null)
         setEventsError(null)
@@ -458,6 +466,7 @@ export default function TraceRequestDetail() {
               setTraceData(matchedItem.trace)
               setLoading(false)
               setError(null)
+              fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true }).then(setRetrievalRuntime).catch(() => {})
             }
             void loadEvents()
           },
@@ -640,6 +649,42 @@ export default function TraceRequestDetail() {
                 </>
               ) : (
                 <div className="text-sm text-gray-400">No recall data for this request.</div>
+              )}
+            </div>
+
+
+            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <SearchCheck size={15} className="text-emerald-600" />
+                <div className="text-sm font-semibold text-gray-900">Retrieval Runtime</div>
+              </div>
+              {retrievalRuntime?.latest ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <MetricCard label="Write Embedding" value={retrievalRuntime.episodic_write_embedding_model_id} hint={retrievalRuntime.episodic_write_embedding_provider || '-'} />
+                    <MetricCard label="Read Embedding" value={retrievalRuntime.latest.embedding_model_id || '-'} hint={retrievalRuntime.latest.effective_embedding_provider || '-'} />
+                    <MetricCard label="Reranker" value={retrievalRuntime.latest.rerank_model_id || '-'} hint={retrievalRuntime.latest.effective_rerank_provider || '-'} />
+                    <MetricCard label="Aligned" value={retrievalRuntime.read_write_model_aligned ? 'Yes' : 'No'} hint={retrievalRuntime.suite_profile || 'custom'} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                      <div className="font-medium text-gray-700 mb-1">Embedding Runtime</div>
+                      <div>provider: <span className="font-mono">{retrievalRuntime.latest.embedding_provider || '-'}</span></div>
+                      <div>effective: <span className="font-mono">{retrievalRuntime.latest.effective_embedding_provider || '-'}</span></div>
+                      <div>fallback: <span className={retrievalRuntime.latest.fallback_embedding_used ? 'text-orange-600 font-medium' : 'text-green-600 font-medium'}>{String(!!retrievalRuntime.latest.fallback_embedding_used)}</span></div>
+                      <div>reason: <span className="font-mono">{retrievalRuntime.latest.fallback_embedding_reason_code || '-'}</span></div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                      <div className="font-medium text-gray-700 mb-1">Reranker Runtime</div>
+                      <div>provider: <span className="font-mono">{retrievalRuntime.latest.rerank_provider || '-'}</span></div>
+                      <div>effective: <span className="font-mono">{retrievalRuntime.latest.effective_rerank_provider || '-'}</span></div>
+                      <div>fallback: <span className={retrievalRuntime.latest.fallback_reranker_used ? 'text-orange-600 font-medium' : 'text-green-600 font-medium'}>{String(!!retrievalRuntime.latest.fallback_reranker_used)}</span></div>
+                      <div>reason: <span className="font-mono">{retrievalRuntime.latest.fallback_reranker_reason_code || '-'}</span></div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-gray-400">No retrieval runtime data for this request.</div>
               )}
             </div>
           </div>

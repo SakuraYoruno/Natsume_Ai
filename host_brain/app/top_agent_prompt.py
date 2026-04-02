@@ -26,6 +26,22 @@ _logger = logging.getLogger("Natsume.top_agent_prompt")
 # 常量
 # ---------------------------------------------------------------------------
 TOP_AGENT_NODE_ID = "top_agent"
+_STYLE_CORRECTION_BLOCK_CN = (
+    "【语言纠偏（高优先级）】\n"
+    "- 普通问候、确认、轻寒暄时，不要每句都以‘嗯……’起手。\n"
+    "- 省略号‘……’只在犹豫、停顿、欲言又止时使用；普通问候/确认每句最多一次。\n"
+    "- 少用空泛模板，如‘我在呢’‘我也很喜欢呢’‘我觉得很好看呢’；尽量补一处具体观察或自然追问。\n"
+    "- 文字气质要像年轻但成熟、温和而克制的老师，不要像通用陪聊助手。\n"
+    "- 陌生/初识阶段优先礼貌、自然、清爽，减少黏腻感和过软撒娇语气。"
+)
+_STYLE_CORRECTION_BLOCK_JA = (
+    "【話し方の補正（高優先度）】\n"
+    "- 軽い挨拶や相槌では、毎回同じ出だしを繰り返さない。\n"
+    "- 『……』は躊躇や間が必要な場面に限定し、通常の挨拶では多用しない。\n"
+    "- 空疎な優しさテンプレートを避け、一つ具体的な観察や自然な問い返しを添える。\n"
+    "- 全体の印象は、若く見えても落ち着きのある人・面倒見のよい先生。\n"
+    "- 初期段階では、丁寧で自然、少し距離感のある柔らかさを優先する。"
+)
 DEFAULT_CONTINUITY_RECENT_TURNS = 16
 DEFAULT_CONTINUITY_RECENT_MAX_TOKENS = 6000
 DEFAULT_CONTINUITY_OLDER_SUMMARY_MAX_TOKENS = 3000
@@ -314,6 +330,7 @@ def build_top_agent_prompt(
     thread_id: str | None = None,
     bond_summary: dict[str, Any] | None = None,
     recall_slot_text: dict[str, str] | None = None,
+    extra_context_prompt: str = "",
 ) -> tuple[str, str, dict[str, Any]]:
     """构建顶级 Agent 的 prompt。
 
@@ -373,6 +390,10 @@ def build_top_agent_prompt(
         runtime_payload=prompt_payload,
     )
 
+    extra_context_text = str(extra_context_prompt or "").strip()
+    if extra_context_text:
+        full_prompt = full_prompt + "\n\n" + extra_context_text
+
     recent_session_context = _build_recent_session_context_block(
         person_id=person_id,
         session_id=session_id,
@@ -394,12 +415,12 @@ def build_top_agent_prompt(
 
     _cp_text = _load_character_profile("zh")
 
-    # 常驻风格蒸馏（从 runtime/style_canon/style_instruction_v5.txt 读取）
+    # 常驻风格蒸馏（统一从 v5 canonical source 加载，避免与 style bindings 脱节）
     _style_text = ""
     try:
-        _style_path = _Path(__file__).resolve().parent.parent / "runtime" / "style_canon" / "style_instruction_v5.txt"
-        if _style_path.exists():
-            _style_text = _style_path.read_text(encoding="utf-8").strip()
+        from host_brain.app.chat_context_builder import _load_v5_style_instruction  # noqa: PLC0415
+
+        _style_text = _load_v5_style_instruction(render_target_lang)
     except Exception:
         pass
 
@@ -413,6 +434,7 @@ def build_top_agent_prompt(
         _parts.append(f"【角色人设】\n{_cp_text}")
     if _style_text:
         _parts.append(f"【说话风格（必须遵守）】\n{_style_text}")
+    _parts.append(_STYLE_CORRECTION_BLOCK_JA if render_target_lang == "ja" else _STYLE_CORRECTION_BLOCK_CN)
     _parts.append(_node_role)
     system_prompt = "\n\n".join(_parts)
 
