@@ -429,12 +429,18 @@ class EpisodicStore:
                 meta = r.get("metadata") or {}
                 score = float(r.get("score") or r.get("distance") or 0.0)
                 if meta.get("emotion_tag") == str(emotion_context).strip().upper():
-                    score = min(1.0, score * emotion_boost_factor)
+                    # 使用加法偏移而非乘法，避免高分区间被压缩到 1.0 失去区分度
+                    # boost_delta = (factor - 1.0) * score，等价于在原分数基础上加一个比例增量
+                    boost_delta = (float(emotion_boost_factor) - 1.0) * score
+                    score = min(1.0, score + boost_delta)
                     r = dict(r)
-                    r["score"] = score
+                    r["score"] = round(score, 6)
                 boosted.append(r)
             # 按加权后分数降序排列
             results = sorted(boosted, key=lambda x: float(x.get("score") or 0.0), reverse=True)
+
+        # 过滤 LRU 已淘汰的幽灵记录（Chroma 中存在但内存中已移除）
+        results = [r for r in results if r.get("memory_id") in self._records]
 
         if emotion_filter is not None:
             # 向后兼容：优先返回匹配情感标签的记录

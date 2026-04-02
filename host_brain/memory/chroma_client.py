@@ -20,6 +20,8 @@ from host_brain.core.errors import (
 
 
 EMBEDDING_MODEL_ID = "hash-embed-v1"
+SEMANTIC_EMBEDDING_MODEL_ID = "paraphrase-multilingual-MiniLM-L12-v2"
+SEMANTIC_EMBEDDING_DIM = 384  # 该模型输出维度
 S_CHROMA_CONFIG = "S_CHROMA_CONFIG"
 S_CHROMA_PROBE = "S_CHROMA_PROBE"
 
@@ -335,16 +337,51 @@ class PersistentChromaClient:
         raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
 
 
-def embed_text(text: str, *, dim: int = 16) -> tuple[list[float], str]:
-    """Create deterministic pseudo-embedding from text."""
+def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
+    """将文本转换为语义嵌入向量。
 
-    normalized = str(text).strip().encode("utf-8")
-    digest = hashlib.sha256(normalized).digest()
-    values: list[float] = []
-    for idx in range(dim):
+    优先使用 sentence-transformers 真实语义嵌入模型（paraphrase-multilingual-MiniLM-L12-v2）。
+    若依赖库不可用，则降级为 SHA-256 哈希伪嵌入（仅用于测试/离线场景）。
+
+    Args:
+        text: 待嵌入的文本。
+        dim: 仅在降级模式下生效，指定哈希嵌入维度（默认 16）。
+
+    Returns:
+        (embedding_values, model_id) 元组。
+    """
+    normalized = str(text).strip()
+    # 尝试使用真实语义嵌入模型
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        model = _get_sentence_transformer_model()
+        embedding = model.encode(normalized, normalize_embeddings=True)
+        values = [round(float(v), 6) for v in embedding]
+        return values, SEMANTIC_EMBEDDING_MODEL_ID
+    except Exception:
+        pass
+
+    # 降级：SHA-256 哈希伪嵌入（语义无关，仅用于测试/离线场景）
+    fallback_dim = int(dim) if dim is not None else 16
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    values = []
+    for idx in range(fallback_dim):
         byte_value = digest[idx % len(digest)]
         values.append(round(byte_value / 255.0, 6))
     return values, EMBEDDING_MODEL_ID
+
+
+# 模型单例缓存（避免每次调用重复加载）
+_sentence_transformer_model: Any = None
+
+
+def _get_sentence_transformer_model() -> Any:
+    """获取 SentenceTransformer 模型单例（懒加载 + 缓存）。"""
+    global _sentence_transformer_model
+    if _sentence_transformer_model is None:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        _sentence_transformer_model = SentenceTransformer(SEMANTIC_EMBEDDING_MODEL_ID)
+    return _sentence_transformer_model
 
 
 def load_chroma_runtime_config(

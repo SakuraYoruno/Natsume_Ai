@@ -20,6 +20,7 @@ DEFAULT_VOLUME_THRESHOLD = 50       # 24h 内累计 >50 条新记忆 → 紧急�
 DEFAULT_TOPIC_REPEAT_THRESHOLD = 5  # 同一话题出现 >5 次 → 专项蒸馏
 DEFAULT_COOLDOWN_HOURS = 4          # 两次触发之间最少间隔 4 小时
 DEFAULT_MIN_MEMORIES_FOR_TOPIC = 3  # 话题蒸馏最少需要 3 条相关记忆
+DEFAULT_MAX_TOPIC_KEYS = 200        # _topic_counter 最大条目数，防止无限增长
 
 # ---------------------------------------------------------------------------
 # 触发类型
@@ -79,10 +80,12 @@ class ConsolidationTrigger:
         volume_threshold: int = DEFAULT_VOLUME_THRESHOLD,
         topic_repeat_threshold: int = DEFAULT_TOPIC_REPEAT_THRESHOLD,
         cooldown_hours: float = DEFAULT_COOLDOWN_HOURS,
+        max_topic_keys: int = DEFAULT_MAX_TOPIC_KEYS,
     ) -> None:
         self._volume_threshold = int(volume_threshold)
         self._topic_threshold = int(topic_repeat_threshold)
         self._cooldown_s = float(cooldown_hours) * 3600
+        self._max_topic_keys = int(max_topic_keys)
 
         # 运行时状态
         self._memory_timestamps: list[float] = []  # 记忆写入时间戳
@@ -104,16 +107,21 @@ class ConsolidationTrigger:
         cutoff = now - 86400
         self._memory_timestamps = [ts for ts in self._memory_timestamps if ts > cutoff]
 
-        # 更新话题计数
+        # 更新话题计数（仅依赖语义 tags，不使用原始文本前缀）
         for tag in list(tags or []):
             tag_clean = str(tag).strip().lower()
             if tag_clean and tag_clean != "neutral":
                 self._topic_counter[tag_clean] = self._topic_counter.get(tag_clean, 0) + 1
 
-        # 从文本中提取简单话题关键词（取前 10 个字作为粗略 topic key）
-        preview = str(text_preview or "").strip()[:20]
-        if preview and len(preview) >= 5:
-            self._topic_counter[preview] = self._topic_counter.get(preview, 0) + 1
+        # 容量保护：超出上限时淘汰频次最低的条目
+        if len(self._topic_counter) > self._max_topic_keys:
+            # 保留频次最高的 max_topic_keys 条
+            sorted_items = sorted(self._topic_counter.items(), key=lambda kv: -kv[1])
+            self._topic_counter = dict(sorted_items[: self._max_topic_keys])
+            _logger.debug(
+                "ConsolidationTrigger: topic_counter 已裁剪至 %d 条",
+                self._max_topic_keys,
+            )
 
     def check(self) -> ConsolidationDecision:
         """检查是否需要触发蒸馏。"""

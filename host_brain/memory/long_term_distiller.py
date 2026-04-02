@@ -375,17 +375,26 @@ class LongTermMemoryDistiller:
             )
 
     def _get_semantic_summary(self, semantic_id: str) -> str | None:
-        """从 ledger 获取语义记忆摘要文本。"""
+        """从 ledger 获取语义记忆摘要文本（按 semantic_id 精确查询，O(1)）。"""
         if self._ledger is None:
             return f"[语义记忆 {semantic_id}]"
+        # 优先使用精确查询接口（避免全量扫描）
+        if hasattr(self._ledger, "get_semantic_memory_by_id"):
+            try:
+                mem = self._ledger.get_semantic_memory_by_id(semantic_id)
+                if mem is not None:
+                    return str(mem.get("summary", ""))
+                return f"[语义记忆 {semantic_id}]"
+            except Exception:
+                return f"[语义记忆 {semantic_id}]"
+        # 降级：旧版 ledger 不支持精确查询时，分页扫描（最多 200 条）
         if not hasattr(self._ledger, "list_semantic_memories"):
             return f"[语义记忆 {semantic_id}]"
         try:
-            memories, _ = self._ledger.list_semantic_memories(limit=100, offset=0)
+            memories, _ = self._ledger.list_semantic_memories(limit=200, offset=0)
             for mem in memories:
                 if mem.get("semantic_id") == semantic_id:
                     return str(mem.get("summary", ""))
-            # 未找到匹配记忆时，返回占位符（不阻塞提案生成）
             return f"[语义记忆 {semantic_id}]"
         except Exception:
             return f"[语义记忆 {semantic_id}]"
@@ -393,16 +402,15 @@ class LongTermMemoryDistiller:
     def _proposal_exists_for_semantic(self, semantic_id: str) -> bool:
         """检查是否已有相同 semantic_id 的 pending 提案（幂等保护）。
 
-        修复：
-        1. 原实现调用了不存在的 list_canon_proposals 方法，实际方法名为 list_proposals。
-        2. 原实现通过 `semantic_id in summary` 字符串包含检查，容易假阳性；
-           改为检查 proposal_id 前缀（distill_prop_{semantic_id[:16]}_*）或 summary 中的精确匹配。
+        优先通过 proposal_id 前缀精确匹配，避免全量扫描所有 pending 提案。
+        proposal_id 格式：distill_prop_{semantic_id[:16]}_{uuid8}
         """
         if self._ledger is None:
             return False
-        # 使用正确的方法名 list_proposals
         if not hasattr(self._ledger, "list_proposals"):
             return False
+        # 构造前缀，只拉取匹配该前缀的提案（若 ledger 支持 prefix 过滤则更优）
+        id_prefix = f"distill_prop_{semantic_id[:16]}_"
         try:
             proposals, _ = self._ledger.list_proposals(
                 status="pending",
@@ -410,13 +418,11 @@ class LongTermMemoryDistiller:
                 offset=0,
             )
             for p in proposals:
-                # 精确匹配：proposal_id 前缀包含 semantic_id 的前 16 位
                 proposal_id = str(p.get("proposal_id", ""))
-                if proposal_id.startswith(f"distill_prop_{semantic_id[:16]}_"):
+                if proposal_id.startswith(id_prefix):
                     return True
-                # 备用：summary 中精确匹配完整 semantic_id（不是子字符串包含）
-                summary = str(p.get("summary", ""))
-                if f"semantic_id={semantic_id}" in summary:
+                # 备用：summary 中精确匹配完整 semantic_id
+                if f"semantic_id={semantic_id}" in str(p.get("summary", "")):
                     return True
             return False
         except Exception:

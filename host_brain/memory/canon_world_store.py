@@ -181,6 +181,8 @@ class WorldCanonStore:
                 "after_version": next_version,
                 "before_hash": before_hash,
                 "after_hash": payload["hash"],
+                "before_body": current.body if current is not None else None,
+                "after_body": body,
                 "source_path": str(path),
                 "ts_ms": update_ts,
             }
@@ -534,17 +536,41 @@ class WorldCanonStore:
             after_hash = ""
             rolled_back_to_version = 0
         else:
-            # 回滚到 base_version：从 canon_change_log 中查找 before_hash
-            # 当前实现：将 SSOT 文件版本号降回 base_version，body 标记为 ROLLED_BACK
-            # 完整实现需要 change_log 存储完整 body（当前只存 hash），此处写入回滚标记
+            # 回滚到 base_version：从 canon_change_log 中查找 before_body
             path = self._doc_path(doc_id)
+
+            # 从 change_log 中取出该提案写入时保存的 before_body 快照
+            before_body: str | None = None
+            change_row = self.ledger.get_canon_change_by_proposal(proposal_id)
+            if change_row is not None:
+                before_body = change_row.get("before_body")
+
+            if not before_body and base_version == 0:
+                # base_version=0 且无快照：走删除分支（已在上方处理，此处不会到达）
+                before_body = None
+
+            if before_body:
+                restored_body = before_body
+                restored_status = "active"
+            else:
+                # 降级：无历史快照时写入明确的回滚标记，避免静默损坏
+                _logger.warning(
+                    "rollback_proposal: proposal %r 无 before_body 快照，写入回滚标记",
+                    proposal_id,
+                )
+                restored_body = (
+                    f"[ROLLED_BACK from v{current_doc.version} to v{base_version} "
+                    f"by {operator_node_id}] {rollback_reason}"
+                )
+                restored_status = "rolled_back"
+
             rollback_payload = {
                 "doc_id": doc_id,
                 "version": base_version,
-                "status": "rolled_back",
+                "status": restored_status,
                 "title": current_doc.title,
                 "tags": list(current_doc.tags),
-                "body": f"[ROLLED_BACK from v{current_doc.version} by {operator_node_id}] {rollback_reason}",
+                "body": restored_body,
                 "updated_by": proposal_id,
                 "ts_ms": rollback_ts,
             }

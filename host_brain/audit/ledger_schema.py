@@ -123,6 +123,8 @@ CREATE TABLE IF NOT EXISTS canon_change_log (
     after_version INTEGER,
     before_hash TEXT,
     after_hash TEXT,
+    before_body TEXT,
+    after_body TEXT,
     source_path TEXT,
     ts_ms INTEGER
 );

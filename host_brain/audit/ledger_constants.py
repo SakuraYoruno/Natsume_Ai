@@ -79,6 +79,8 @@ CANON_CHANGE_COLUMNS = (
     "after_version",
     "before_hash",
     "after_hash",
+    "before_body",
+    "after_body",
     "source_path",
     "ts_ms",
 )

@@ -408,6 +408,16 @@ class SQLiteLedger(
             return None
         return self._decode_row("canon_proposal_log", row)
 
+    def get_canon_change_by_proposal(self, proposal_id: str) -> dict[str, Any] | None:
+        """按 proposal_id 获取对应的 canon_change_log 行（含 before_body / after_body）。"""
+        row = self._conn.execute(
+            "SELECT * FROM canon_change_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._decode_row("canon_change_log", row)
+
     def list_proposals(
         self,
         *,
@@ -562,6 +572,16 @@ class SQLiteLedger(
         row = self._conn.execute(
             "SELECT * FROM semantic_memory WHERE source_hash = ? AND deleted_at IS NULL LIMIT 1",
             (str(source_hash),),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_semantic_memory(row)
+
+    def get_semantic_memory_by_id(self, semantic_id: str) -> dict[str, Any] | None:
+        """按 semantic_id 精确查询语义记忆（O(1) 索引查询，避免全量扫描）。"""
+        row = self._conn.execute(
+            "SELECT * FROM semantic_memory WHERE semantic_id = ? AND deleted_at IS NULL LIMIT 1",
+            (str(semantic_id),),
         ).fetchone()
         if row is None:
             return None
