@@ -164,12 +164,38 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
         )
 
     bond_stage = str(bond_summary.get("stage") or "STRANGER").strip().upper() or "STRANGER"
+
+    # ── 获取共同记忆叙事片段（安全降级）──────────────────────────
+    _shared_memory_hints: list[str] = []
+    try:
+        from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
+        from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
+        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+        _smi: Any = None
+        _mt: Any = None
+        try:
+            from host_brain.app.dependencies import get_shared_memory_index, get_milestone_tracker  # noqa: PLC0415
+            _smi = get_shared_memory_index()
+            _mt = get_milestone_tracker()
+        except (ImportError, AttributeError):
+            pass
+        if _smi is not None:
+            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt)
+            _uid = str(getattr(runtime_input, "user_id", "") or "default")
+            _bn_result = _bnl.build_narrative(user_id=_uid, bond_stage=bond_stage)
+            _shared_memory_hints = [
+                item.text for item in _bn_result.items if item.text.strip()
+            ][:3]
+    except Exception:
+        pass  # 共同记忆获取失败时安全降级，不影响主流程
+
     bond_style = get_bond_aware_style_engine().generate(
         bond_stage=bond_stage,
         mood_state=str(emotion_state.get("mood_state") or "neutral").strip().lower(),
         rift_active=bool(bond_summary.get("rift_active", False)),
         bond_trend=str(bond_summary.get("trend") or "").strip(),
         texture_hint=str(bond_summary.get("texture_hint") or "").strip(),
+        shared_memory_hints=_shared_memory_hints or None,
     )
     intelligence["bond_aware_style"] = {
         **bond_style.as_dict(),

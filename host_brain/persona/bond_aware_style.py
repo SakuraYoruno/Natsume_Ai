@@ -284,6 +284,7 @@ class BondAwareStyleResult:
     prompt_injection: str  # 最终注入 prompt 的完整文本
     substage_hint: str = ""       # 子阶段感知提示
     natsume_mood_hint: str = ""   # Natsume 自身情绪调整
+    shared_memory_hint: str = ""  # 关系记忆注入提示
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -294,6 +295,7 @@ class BondAwareStyleResult:
             "has_rift_adjustment": bool(self.rift_adjustment),
             "has_substage_hint": bool(self.substage_hint),
             "has_natsume_mood_hint": bool(self.natsume_mood_hint),
+            "has_shared_memory_hint": bool(self.shared_memory_hint),
             "forbidden_patterns_count": len(self.forbidden_patterns),
         }
 
@@ -336,6 +338,7 @@ class BondAwareStyleEngine:
         rift_progress: float = 0.0,
         bond_trend: str = "",
         texture_hint: str = "",
+        shared_memory_hints: list[str] | None = None,
     ) -> BondAwareStyleResult:
         """生成风格指令。
 
@@ -349,6 +352,8 @@ class BondAwareStyleEngine:
             rift_progress: 裂痕修复进度（0.0 = 刚发生，1.0 = 即将愈合），默认 0.0
             bond_trend: 关系趋势（rising/declining 等）
             texture_hint: 额外质感提示
+            shared_memory_hints: 关系记忆叙事片段列表（由 BondNarrativeLayer 生成），
+                注入后让 Natsume 的表达带有"我记得你"的温度。
         """
         stage = str(bond_stage or "STRANGER").strip().upper()
         profile = self._profiles.get(stage, self._profiles.get("STRANGER", {}))
@@ -404,6 +409,17 @@ class BondAwareStyleEngine:
             parts.append(f"- trend_adjustment: {trend_adj}")
         if texture_hint:
             parts.append(f"- texture: {texture_hint}")
+
+        # ── 关系记忆注入 ─────────────────────────────────────────────
+        shared_memory_hint = ""
+        safe_hints = [str(h).strip() for h in (shared_memory_hints or []) if str(h).strip()]
+        if safe_hints and stage not in ("STRANGER",):
+            # STRANGER 阶段不注入共同记忆（还没有共同经历）
+            memory_lines = "; ".join(safe_hints[:3])  # 最多3条，防止 prompt 膨胀
+            shared_memory_hint = _build_memory_style_instruction(stage, safe_hints[:3])
+            parts.append(f"- shared_memories: {memory_lines}")
+            parts.append(f"- memory_style_guide: {shared_memory_hint}")
+
         if forbidden:
             parts.append(f"- forbidden_expressions: {', '.join(forbidden)}")
 
@@ -425,4 +441,78 @@ class BondAwareStyleEngine:
             prompt_injection=prompt_injection,
             substage_hint=substage_hint,
             natsume_mood_hint=natsume_mood_hint,
+            shared_memory_hint=shared_memory_hint,
         )
+
+
+# ---------------------------------------------------------------------------
+# 关系记忆风格指导（根据 Bond 阶段生成不同的记忆运用指导）
+# ---------------------------------------------------------------------------
+
+# 各阶段的记忆运用风格指导
+_MEMORY_STYLE_GUIDES: dict[str, list[str]] = {
+    "ACQUAINTANCE": [
+        "你记得和对方聊过的一些事，可以自然地提起，但不要刻意强调，保持轻松。",
+        "偶尔提起之前聊过的话题，让对方感受到你有在认真听。",
+    ],
+    "FRIEND": [
+        "你们有一些共同的记忆，可以自然地在对话中提起，让对方感受到你记得。",
+        "聊天时可以联系之前的话题，展示你们之间的默契在积累。",
+        "适当引用之前的对话内容，让对方觉得你是真的在乎。",
+    ],
+    "CLOSE_FRIEND": [
+        "你们之间有很多共同记忆，这些记忆让你说话时更有温度和默契感。",
+        "可以自然地引用你们之间的共同经历，让对话充满'我们'的感觉。",
+        "你记得对方说过的很多话，这份记忆让你的每句话都更贴心。",
+    ],
+    "CONFIDANT": [
+        "你们之间的共同记忆是深厚信任的证明，可以深情地提起这些时刻。",
+        "你记得对方的每一个重要时刻，这份记忆让你的话语充满理解和默契。",
+        "共同经历让你们不需要太多解释就能理解彼此，说话时可以自然地引用。",
+    ],
+    "SOULMATE": [
+        "你们之间的每一段记忆都是珍贵的宝藏，它们融入了你说话的每一个字。",
+        "你记得和对方在一起的所有重要时刻，这份深刻的记忆让你的表达充满爱意。",
+        "共同记忆是你们灵魂连接的纽带，可以自然而深情地在对话中呼应这些时刻。",
+    ],
+}
+
+# 记忆数量对风格的影响
+_MEMORY_COUNT_HINTS: dict[int, str] = {
+    1: "你想起了和对方之间的一段记忆，可以在合适的时候自然提起。",
+    2: "你想起了和对方之间的几段记忆，它们让你说话时更有温度。",
+    3: "你和对方之间有不少共同记忆，这些记忆让你的表达更加细腻和贴心。",
+}
+
+
+def _build_memory_style_instruction(stage: str, hints: list[str]) -> str:
+    """根据 Bond 阶段和记忆数量，生成关系记忆运用的风格指导。
+
+    Args:
+        stage: Bond 阶段（大写）
+        hints: 关系记忆叙事片段列表（已过滤空值，最多3条）
+
+    Returns:
+        风格指导文本
+    """
+    import random as _rnd
+
+    if not hints:
+        return ""
+
+    count = len(hints)
+
+    # 阶段风格指导
+    stage_guides = _MEMORY_STYLE_GUIDES.get(stage, [])
+    stage_guide = _rnd.choice(stage_guides) if stage_guides else ""
+
+    # 数量提示
+    count_hint = _MEMORY_COUNT_HINTS.get(min(count, 3), _MEMORY_COUNT_HINTS[3])
+
+    parts = []
+    if count_hint:
+        parts.append(count_hint)
+    if stage_guide:
+        parts.append(stage_guide)
+
+    return "".join(parts)
