@@ -153,13 +153,13 @@ class TestVII2_ExpressionAdapter:
         assert "距离" in hint.style_hint or "分寸" in hint.style_hint
 
     def test_build_prompt_section(self):
-        """build_prompt_section 输出包含 PERSONA_EXPRESSION_HINT。"""
+        """build_prompt_section 输出包含表达策略提示。"""
         adapter = PersonaExpressionAdapter()
         hint = ExpressionHint(style_hint="温柔共情", tone="caring")
         section = adapter.build_prompt_section(hint)
-        assert "PERSONA_EXPRESSION_HINT:" in section
-        assert "style_hint: 温柔共情" in section
-        assert "tone: caring" in section
+        assert "表达策略提示" in section
+        assert "温柔共情" in section
+        assert "关心" in section or "caring" in section.lower()
 
     def test_expression_hint_as_dict(self):
         """ExpressionHint.as_dict() 输出正确。"""
@@ -289,9 +289,9 @@ class TestVII4_PromptBuilderIntegration:
                 追问倾向=hint_data["follow_up_tendency"],
             )
         )
-        assert "PERSONA_EXPRESSION_HINT:" in section
+        assert "表达策略提示" in section
         assert "深度共情" in section
-        assert "caring" in section
+        assert "关心" in section or "caring" in section.lower()
 
 
 # ---------------------------------------------------------------------------

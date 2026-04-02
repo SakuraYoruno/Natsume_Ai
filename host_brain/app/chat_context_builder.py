@@ -880,12 +880,19 @@ def build_chat_prompt_runtime_payload(
         except Exception:
             pass
         _user_tag = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
-        _hint = _adapter.adapt(_traits, _emo_vec, _bond_stage, user_emotion_tag=_user_tag)
+        # 获取当前用户消息（用于对话节奏推断）
+        _user_msg_for_pace = str(generation_payload.get("user_message") or "").strip()
+        _hint = _adapter.adapt(
+            _traits, _emo_vec, _bond_stage,
+            user_emotion_tag=_user_tag,
+            user_message=_user_msg_for_pace,
+        )
         runtime_payload["persona_expression_hint"] = {
             "style_hint": _hint.style_hint,
             "tone": _hint.tone,
             "echo_weight_modifier": _hint.echo_weight_modifier,
             "follow_up_tendency": _hint.追问倾向,
+            "pace_hint": _hint.pace_hint,
         }
     except (ImportError, AttributeError, Exception) as _pe_exc:
         logger.debug("PersonaExpressionAdapter 接入降级: %s", _pe_exc)

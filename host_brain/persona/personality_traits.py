@@ -278,6 +278,7 @@ class ExpressionHint:
     tone: str = "gentle"           # 语气（gentle / playful / serious / caring）
     echo_weight_modifier: float = 0.0  # 情感回声权重调整量（叠加到基础 echo_weight）
     追问倾向: float = 0.0          # 好奇心驱动的追问概率调整量
+    pace_hint: str = "normal"      # 对话节奏提示（rapid / normal / deep）
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -285,4 +286,5 @@ class ExpressionHint:
             "tone": self.tone,
             "echo_weight_modifier": round(self.echo_weight_modifier, 4),
             "follow_up_tendency": round(self.追问倾向, 4),
+            "pace_hint": self.pace_hint,
         }

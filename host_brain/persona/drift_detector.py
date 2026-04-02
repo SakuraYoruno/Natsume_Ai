@@ -133,6 +133,10 @@ _CURIOSITY_POSITIVE_KEYWORDS = ("为什么", "怎么", "什么", "好奇", "想�
 # 否定词前缀：出现在关键词前 3 字内时，该关键词不计入正向
 _NEGATION_PREFIXES = ("不", "没", "别", "非", "无", "莫", "未", "不太", "不那么", "不是很")
 
+# resilience 关键词（韧性/积极面对/自我调节）
+_RESILIENCE_POSITIVE_KEYWORDS = ("没关系", "会好的", "没事", "加油", "坚持", "撑住", "挺过", "振作", "可以的", "不怕")
+_RESILIENCE_NEGATIVE_KEYWORDS = ("算了", "放弃", "不行了", "撑不住", "崩溃", "受不了", "太难了")
+
 
 def _count_with_negation_check(text: str, keywords: tuple[str, ...]) -> int:
     """计算关键词出现次数，排除被否定词修饰的情况。
@@ -155,27 +159,166 @@ def _count_with_negation_check(text: str, keywords: tuple[str, ...]) -> int:
     return count
 
 
-def extract_style_fingerprint(text: str) -> StyleFingerprint:
+def _extract_sentence_patterns(text: str) -> dict[str, float]:
+    """提取句式模式特征。
+
+    分析文本的结构性特征，比关键词更能反映人格倾向：
+    - 疑问句比例 → curiosity 的间接指标
+    - 感叹句比例 → playfulness / expressiveness 的间接指标
+    - 平均句长 → sensitivity（长句=细腻）/ assertiveness（短句=果断）
+    - 省略号比例 → sensitivity（犹豫、细腻）
+    - 颜文字/emoji 比例 → playfulness
+    """
+    import re
+
+    if not text.strip():
+        return {"question_ratio": 0.0, "exclaim_ratio": 0.0,
+                "avg_sentence_len": 0.0, "ellipsis_ratio": 0.0,
+                "emoticon_density": 0.0}
+
+    # 按句末标点分句（中英文标点都考虑）
+    sentences = re.split(r'[。！？!?\n]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    total_sentences = max(len(sentences), 1)
+
+    # 疑问句比例
+    question_count = text.count("？") + text.count("?")
+    question_ratio = min(1.0, question_count / total_sentences)
+
+    # 感叹句比例
+    exclaim_count = text.count("！") + text.count("!")
+    exclaim_ratio = min(1.0, exclaim_count / total_sentences)
+
+    # 平均句长（字符数）
+    avg_sentence_len = sum(len(s) for s in sentences) / total_sentences
+
+    # 省略号比例（每句中含省略号的比例）
+    ellipsis_count = text.count("……") + text.count("...") + text.count("…")
+    ellipsis_ratio = min(1.0, ellipsis_count / total_sentences)
+
+    # 颜文字/表情符号密度（常见颜文字模式 + emoji）
+    emoticon_patterns = re.findall(
+        r'[（(][^）)]{1,6}[）)]|[>＞<＜][._][>＞<＜]|[≧≦><]{2}|'
+        r'[😀-😿🥰-🥹🤗-🤯💕-💞✨🌸🎀]|'
+        r'[～~]{2,}|[♪♫♬]|[☆★]|[><]{2}',
+        text,
+    )
+    emoticon_density = min(1.0, len(emoticon_patterns) / max(len(text) / 20, 1))
+
+    return {
+        "question_ratio": question_ratio,
+        "exclaim_ratio": exclaim_ratio,
+        "avg_sentence_len": avg_sentence_len,
+        "ellipsis_ratio": ellipsis_ratio,
+        "emoticon_density": emoticon_density,
+    }
+
+
+def _compute_reply_length_ratio(
+    reply_text: str,
+    user_text: str,
+) -> float:
+    """计算回复/用户输入的长度比。
+
+    长度比是 assertiveness 的间接指标：
+    - 比值 > 2.0 → 倾向于主导对话（assertiveness 偏高）
+    - 比值 < 0.5 → 倾向于简短回应（assertiveness 偏低）
+    - 比值 ≈ 1.0 → 平衡
+    """
+    reply_len = max(len(reply_text.strip()), 1)
+    user_len = max(len(user_text.strip()), 1)
+    return reply_len / user_len
+
+
+def extract_style_fingerprint(
+    text: str,
+    *,
+    user_input_text: str = "",
+) -> StyleFingerprint:
     """从 LLM 输出文本中提取风格指纹。
 
-    使用关键词计数（含否定词检测）的方法。
-    「不温柔」「没有关心」等否定表达不会被计为正向特质。
+    综合使用三层特征提取：
+    1. 关键词计数（含否定词检测）— 语义层
+    2. 句式模式分析（疑问/感叹/句长/省略号/颜文字）— 结构层
+    3. 回复长度比（回复/用户输入长度比）— 交互层
+
+    Args:
+        text: LLM 生成的回复文本
+        user_input_text: 用户输入文本（用于计算长度比，可选）
     """
     t = str(text or "").strip()
 
+    # ── 第一层：关键词计数（语义层）──
     def _pos(keywords: tuple[str, ...]) -> int:
         return _count_with_negation_check(t, keywords)
 
     def _neg(keywords: tuple[str, ...]) -> int:
-        # 负向关键词本身不需要否定词检测（它们本身就是负向）
         return sum(1 for kw in keywords if kw in t)
 
-    warmth = 0.5 + _pos(_WARMTH_POSITIVE_KEYWORDS) * 0.08 - _neg(_WARMTH_NEGATIVE_KEYWORDS) * 0.12
-    assertiveness = 0.3 + _pos(_ASSERTIVENESS_POSITIVE_KEYWORDS) * 0.1 - _neg(_ASSERTIVENESS_NEGATIVE_KEYWORDS) * 0.05
-    playfulness = 0.5 + _pos(_PLAYFULNESS_POSITIVE_KEYWORDS) * 0.06
-    humor = 0.4 + _pos(_HUMOR_POSITIVE_KEYWORDS) * 0.08
-    sensitivity = 0.5 + _pos(_SENSITIVITY_POSITIVE_KEYWORDS) * 0.07
-    curiosity = 0.5 + _pos(_CURIOSITY_POSITIVE_KEYWORDS) * 0.05
+    kw_warmth = _pos(_WARMTH_POSITIVE_KEYWORDS) * 0.08 - _neg(_WARMTH_NEGATIVE_KEYWORDS) * 0.12
+    kw_assertiveness = _pos(_ASSERTIVENESS_POSITIVE_KEYWORDS) * 0.10 - _neg(_ASSERTIVENESS_NEGATIVE_KEYWORDS) * 0.05
+    kw_playfulness = _pos(_PLAYFULNESS_POSITIVE_KEYWORDS) * 0.06
+    kw_humor = _pos(_HUMOR_POSITIVE_KEYWORDS) * 0.08
+    kw_sensitivity = _pos(_SENSITIVITY_POSITIVE_KEYWORDS) * 0.07
+    kw_curiosity = _pos(_CURIOSITY_POSITIVE_KEYWORDS) * 0.05
+    kw_resilience = _pos(_RESILIENCE_POSITIVE_KEYWORDS) * 0.08 - _neg(_RESILIENCE_NEGATIVE_KEYWORDS) * 0.10
+
+    # ── 第二层：句式模式分析（结构层）──
+    patterns = _extract_sentence_patterns(t)
+
+    # 疑问句比例 → curiosity 加成
+    struct_curiosity = patterns["question_ratio"] * 0.15
+
+    # 感叹句比例 → playfulness 加成
+    struct_playfulness = patterns["exclaim_ratio"] * 0.12
+
+    # 颜文字密度 → playfulness 加成
+    struct_playfulness += patterns["emoticon_density"] * 0.15
+
+    # 平均句长 → sensitivity（长句=细腻）
+    # 基准：20字/句为中性，超过30字加成，低于10字减成
+    avg_len = patterns["avg_sentence_len"]
+    if avg_len > 30:
+        struct_sensitivity = 0.10
+    elif avg_len > 20:
+        struct_sensitivity = 0.05
+    elif avg_len < 10:
+        struct_sensitivity = -0.08
+    else:
+        struct_sensitivity = 0.0
+
+    # 省略号比例 → sensitivity 加成（犹豫、细腻的表达）
+    struct_sensitivity += patterns["ellipsis_ratio"] * 0.10
+
+    # 平均句长 → assertiveness 反向（短句=果断）
+    if avg_len < 10:
+        struct_assertiveness = 0.08
+    elif avg_len > 30:
+        struct_assertiveness = -0.05
+    else:
+        struct_assertiveness = 0.0
+
+    # ── 第三层：回复长度比（交互层）──
+    length_assertiveness = 0.0
+    if user_input_text.strip():
+        ratio = _compute_reply_length_ratio(t, user_input_text)
+        if ratio > 2.0:
+            length_assertiveness = 0.08  # 回复远长于用户输入 → 主导倾向
+        elif ratio > 1.5:
+            length_assertiveness = 0.04
+        elif ratio < 0.5:
+            length_assertiveness = -0.06  # 回复远短于用户输入 → 被动倾向
+        elif ratio < 0.8:
+            length_assertiveness = -0.03
+
+    # ── 综合：基线 + 关键词 + 结构 + 交互 ──
+    warmth = 0.50 + kw_warmth
+    curiosity = 0.50 + kw_curiosity + struct_curiosity
+    humor = 0.40 + kw_humor
+    sensitivity = 0.50 + kw_sensitivity + struct_sensitivity
+    assertiveness = 0.30 + kw_assertiveness + struct_assertiveness + length_assertiveness
+    playfulness = 0.50 + kw_playfulness + struct_playfulness
+    resilience = 0.55 + kw_resilience  # 不再硬编码，通过关键词推断
 
     def _clamp(v: float) -> float:
         return max(0.0, min(1.0, v))
@@ -187,7 +330,7 @@ def extract_style_fingerprint(text: str) -> StyleFingerprint:
         sensitivity=_clamp(sensitivity),
         assertiveness=_clamp(assertiveness),
         playfulness=_clamp(playfulness),
-        resilience=0.6,  # 韧性无法从单次输出推断，保持基线
+        resilience=_clamp(resilience),
     )
 
 
@@ -241,11 +384,13 @@ class PersonaDriftDetector:
         self,
         *,
         llm_output_text: str = "",
+        user_input_text: str = "",
     ) -> DriftCheckResult | None:
         """每轮对话调用，积累风格指纹并在达到检测间隔时执行检测。
 
         Args:
             llm_output_text: LLM 生成的回复文本
+            user_input_text: 用户输入文本（用于计算回复长度比，提升 assertiveness 检测精度）
 
         Returns:
             到达检测间隔时返回 DriftCheckResult，否则返回 None
@@ -254,7 +399,10 @@ class PersonaDriftDetector:
 
         # 积累风格指纹
         if llm_output_text.strip():
-            fp = extract_style_fingerprint(llm_output_text)
+            fp = extract_style_fingerprint(
+                llm_output_text,
+                user_input_text=user_input_text,
+            )
             self._recent_fingerprints.append(fp)
             # 最多保留最近 N*2 条
             max_keep = self._check_interval * 2

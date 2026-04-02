@@ -46,6 +46,17 @@ _DEEP_STAGES: frozenset[str] = frozenset({
     "CLOSE_FRIEND", "CONFIDANT", "SOULMATE",
 })
 
+# ---------------------------------------------------------------------------
+# 情感转变方向分类
+# ---------------------------------------------------------------------------
+
+# 正→负 转变：需要惊觉共情（"怎么了？发生什么事了？"）
+_POSITIVE_TO_NEGATIVE_ALERT = "sudden_drop"
+# 负→正 转变：需要欣慰鼓励（"太好了，看到你好起来真开心"）
+_NEGATIVE_TO_POSITIVE_RELIEF = "recovery"
+# 持续负面：需要深度陪伴（"我一直在这里"）
+_SUSTAINED_NEGATIVE_COMPANION = "sustained_negative"
+
 
 # ---------------------------------------------------------------------------
 # ReactivtyModifiers — 调制系数数据结构
@@ -65,6 +76,8 @@ class ReactivityModifiers:
     empathy_boost: float = 0.0           # 共情提升（0-1）
     humor_deflection: float = 0.0        # 幽默化解倾向（0-1）
     curiosity_follow_up: float = 0.0     # 追问倾向（0-1）
+    transition_alert: str = ""           # 情感转变方向标记（sudden_drop/recovery/sustained_negative）
+    transition_intensity: float = 0.0    # 情感转变强度（0-1），越高说明转变越剧烈
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -74,6 +87,8 @@ class ReactivityModifiers:
             "empathy_boost": round(self.empathy_boost, 4),
             "humor_deflection": round(self.humor_deflection, 4),
             "curiosity_follow_up": round(self.curiosity_follow_up, 4),
+            "transition_alert": self.transition_alert,
+            "transition_intensity": round(self.transition_intensity, 4),
         }
 
 
@@ -98,6 +113,7 @@ class EmotionReactivityProfile:
         user_emotion_tag: str,
         bond_stage: str = "",
         natsume_arousal: float = 0.5,
+        prev_user_emotion_tag: str = "",
     ) -> ReactivityModifiers:
         """计算情感反应调制系数。
 
@@ -106,12 +122,14 @@ class EmotionReactivityProfile:
             user_emotion_tag: 用户当前情感标签
             bond_stage: 当前 Bond 阶段
             natsume_arousal: Natsume 自身当前唤醒度（0-1），影响规则8
+            prev_user_emotion_tag: 用户上一轮情感标签，用于感知情感转变方向
 
         Returns:
             ReactivityModifiers 调制系数
         """
         tag = str(user_emotion_tag or "").strip().upper()
         stage = str(bond_stage or "").strip().upper()
+        prev_tag = str(prev_user_emotion_tag or "").strip().upper()
         natsume_ar = max(0.0, min(1.0, float(natsume_arousal)))
 
         echo_weight_delta = 0.0
@@ -120,6 +138,8 @@ class EmotionReactivityProfile:
         empathy_boost = 0.0
         humor_deflection = 0.0
         curiosity_follow_up = 0.0
+        transition_alert = ""
+        transition_intensity = 0.0
 
         # ── 规则 1：高敏感度 + 用户消极情感 → echo_weight 提高 ──────────
         if traits.sensitivity >= 0.7 and tag in _NEGATIVE_EMOTIONS:
@@ -183,6 +203,57 @@ class EmotionReactivityProfile:
             # 思考状态下 arousal 微升（被激发了兴趣）
             arousal_delta += 0.04
 
+        # ── 规则 11：情感转变方向感知 — 正→负 突变（惊觉共情） ──────────
+        # 用户上一轮是积极情感，这一轮突然变成消极情感
+        # Natsume 应该表现出"怎么了？"的惊觉和关切
+        if prev_tag and prev_tag in _POSITIVE_EMOTIONS and tag in _NEGATIVE_EMOTIONS:
+            transition_alert = _POSITIVE_TO_NEGATIVE_ALERT
+            # 转变强度：基于敏感度，越敏感越能察觉到这种突变
+            transition_intensity = 0.6 + traits.sensitivity * 0.4
+            # 共情大幅提升——突然变差需要更多关注
+            empathy_boost += 0.15 + traits.warmth * 0.1
+            # echo_weight 提升——需要更强的情感回应
+            echo_weight_delta += 0.1
+            # arousal 微升——惊觉反应
+            arousal_delta += 0.06
+            # 深层关系阶段更敏锐
+            if stage in _DEEP_STAGES:
+                transition_intensity = min(1.0, transition_intensity + 0.15)
+                empathy_boost += 0.05
+
+        # ── 规则 12：情感转变方向感知 — 负→正 恢复（欣慰鼓励） ──────────
+        # 用户上一轮是消极情感，这一轮变成积极情感
+        # Natsume 应该表现出"太好了"的欣慰和鼓励
+        elif prev_tag and prev_tag in _NEGATIVE_EMOTIONS and tag in _POSITIVE_EMOTIONS:
+            transition_alert = _NEGATIVE_TO_POSITIVE_RELIEF
+            transition_intensity = 0.5 + traits.warmth * 0.3
+            # 共情微升——分享恢复的喜悦
+            empathy_boost += 0.08
+            # arousal 微升——开心的反应
+            arousal_delta += 0.04
+            # 幽默感高的话，可以用轻松的方式表达欣慰
+            if traits.humor >= 0.6:
+                humor_deflection += 0.1
+
+        # ── 规则 13：情感转变方向感知 — 持续消极（深度陪伴） ──────────────
+        # 用户连续两轮都是消极情感，需要更深层的陪伴而非表面安慰
+        elif prev_tag and prev_tag in _NEGATIVE_EMOTIONS and tag in _NEGATIVE_EMOTIONS:
+            transition_alert = _SUSTAINED_NEGATIVE_COMPANION
+            transition_intensity = 0.4 + traits.sensitivity * 0.3
+            # 持续消极时，echo_weight 进一步提升——需要持续的情感回应
+            echo_weight_delta += 0.05
+            # 共情持续但不过度——避免情绪传染
+            empathy_boost += 0.1
+            # arousal 降低——安静的陪伴比激动的安慰更好
+            arousal_delta -= 0.04
+            # 高韧性的 Natsume 在持续消极中更稳定
+            if traits.resilience >= 0.6:
+                arousal_delta -= 0.02  # 更加沉稳
+            # 深层关系阶段：更深的陪伴
+            if stage in _DEEP_STAGES:
+                empathy_boost += 0.08
+                transition_intensity = min(1.0, transition_intensity + 0.1)
+
         return ReactivityModifiers(
             echo_weight_delta=max(-0.2, min(0.2, echo_weight_delta)),
             arousal_delta=max(-0.15, min(0.15, arousal_delta)),
@@ -190,6 +261,8 @@ class EmotionReactivityProfile:
             empathy_boost=max(0.0, min(1.0, empathy_boost)),
             humor_deflection=max(0.0, min(1.0, humor_deflection)),
             curiosity_follow_up=max(0.0, min(1.0, curiosity_follow_up)),
+            transition_alert=transition_alert,
+            transition_intensity=max(0.0, min(1.0, transition_intensity)),
         )
 
     @staticmethod
