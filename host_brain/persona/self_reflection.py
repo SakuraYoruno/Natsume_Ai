@@ -23,9 +23,11 @@ from typing import Any
 
 from host_brain.persona.self_model import (
     SelfModel,
+    build_contradiction_awareness_text,
     build_growth_note_text,
     build_mood_awareness_text,
     build_self_awareness_text,
+    detect_contradictions,
 )
 
 _logger = logging.getLogger("Natsume.self_reflection")
@@ -441,11 +443,21 @@ def build_self_reflection_pulse(
     mood_awareness = build_mood_awareness_text(snapshot)
     growth_note = build_growth_note_text(snapshot)
 
+    # ── 矛盾感知：检测多维度之间的矛盾状态 ────────────────────────────
+    contradictions = detect_contradictions(snapshot)
+    contradiction_text = build_contradiction_awareness_text(contradictions)
+
     pulse: dict[str, Any] = {
         "self_awareness": self_awareness,
         "mood_awareness": mood_awareness,
         "growth_note": growth_note,
     }
+
+    # 注入矛盾感知（让 LLM 知道 Natsume 内心的矛盾状态）
+    if contradiction_text:
+        pulse["contradiction_awareness"] = contradiction_text
+        # 矛盾类型标签（供下游分析使用）
+        pulse["contradiction_types"] = [c["type"] for c in contradictions]
 
     # 注入触发原因（让 LLM 知道这次自省是因为什么而起）
     if trigger_reason:

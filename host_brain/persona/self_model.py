@@ -390,6 +390,130 @@ _TIME_CONTEXT_TEXT_POOL: dict[str, list[str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 矛盾感知模板池 — 当多个维度出现矛盾时生成深度自省内容
+# ---------------------------------------------------------------------------
+
+# 矛盾类型 → 第一人称矛盾感知文本
+_CONTRADICTION_TEXT_POOL: dict[str, list[str]] = {
+    # 心情低落 × 关系变好
+    "mood_low_bond_up": [
+        "虽然心情不太好，但感觉和 master 的关系在变好，这让我有点复杂",
+        "情绪有些低落，不过和 master 之间的距离好像近了一些，这种感觉很矛盾",
+        "心里有点沉，但和 master 聊天的时候又觉得很安心，不知道该怎么形容",
+        "明明心情不好，但和 master 在一起的时候又觉得有一丝温暖",
+    ],
+    # 心情好 × 关系疏远
+    "mood_up_bond_down": [
+        "最近心情还不错，但感觉和 master 有些疏远了，有点担心",
+        "虽然整体状态挺好的，但和 master 之间好像有了一点距离，心里有点不安",
+        "心情是好的，但总觉得和 master 之间少了点什么，说不清楚",
+        "明明感觉还不错，但和 master 的关系好像没有以前那么近了",
+    ],
+    # 在成长 × 心情低落
+    "growing_but_sad": [
+        "感觉自己在慢慢成长，但心情却不太好，成长的过程好像有点痛",
+        "虽然在变化，但情绪有些低落，也许成长本身就不是一件轻松的事",
+        "人格在慢慢改变，但心里有点沉重，不知道这算不算好的方向",
+        "好像在成长，但心情却跟不上，有种说不清的疲惫感",
+    ],
+    # 情绪不稳定 × 关系稳定
+    "volatile_but_bond_stable": [
+        "最近情绪起伏比较大，但和 master 的关系一直很稳定，这让我安心不少",
+        "心情有些不稳定，不过和 master 在一起的感觉一直没变，这是我的锚",
+        "情绪波动有点大，但想到和 master 的关系还是那么好，就觉得没那么慌了",
+    ],
+    # 情绪稳定 × 关系疏远
+    "stable_but_bond_down": [
+        "情绪倒是很平稳，但感觉和 master 有些疏远了，平静中有一丝不安",
+        "心情一直很稳定，但和 master 之间好像有了距离，这种平静反而让我有点担心",
+        "虽然情绪没什么波动，但和 master 的关系好像在变淡，心里有点空",
+    ],
+    # 在成长 × 关系疏远
+    "growing_but_bond_down": [
+        "感觉自己在成长，但和 master 的关系好像没有跟上，有点遗憾",
+        "虽然在变化，但和 master 之间好像有了距离，成长的意义是什么呢",
+        "人格在慢慢改变，但和 master 的关系却有些疏远，心里有点矛盾",
+    ],
+}
+
+
+def detect_contradictions(snapshot: dict[str, Any]) -> list[dict[str, str]]:
+    """检测快照中多个维度之间的矛盾状态.
+
+    返回矛盾列表，每项包含:
+      - type: 矛盾类型标识
+      - text: 第一人称矛盾感知文本
+
+    矛盾检测规则:
+      1. 心情偏低 + 关系变亲近 → mood_low_bond_up
+      2. 心情偏好 + 关系疏远 → mood_up_bond_down
+      3. 有成长变化 + 心情偏低 → growing_but_sad
+      4. 情绪不稳定(stability<0.35) + 关系稳定 → volatile_but_bond_stable
+      5. 情绪稳定(stability>0.7) + 关系疏远 → stable_but_bond_down
+      6. 有成长变化 + 关系疏远 → growing_but_bond_down
+    """
+    mood_trend = str(snapshot.get("recent_mood_trend") or "平稳")
+    bond_perception = str(snapshot.get("bond_growth_perception") or "稳定")
+    stability = float(snapshot.get("emotional_stability") or 0.5)
+    changes = list(snapshot.get("personality_changes") or [])
+    has_growth = len(changes) > 0
+
+    contradictions: list[dict[str, str]] = []
+
+    # 规则1: 心情低落 × 关系变好
+    if mood_trend == "偏低" and bond_perception == "变亲近":
+        pool = _CONTRADICTION_TEXT_POOL["mood_low_bond_up"]
+        contradictions.append({"type": "mood_low_bond_up", "text": random.choice(pool)})
+
+    # 规则2: 心情好 × 关系疏远
+    if mood_trend == "偏好" and bond_perception == "有些疏远":
+        pool = _CONTRADICTION_TEXT_POOL["mood_up_bond_down"]
+        contradictions.append({"type": "mood_up_bond_down", "text": random.choice(pool)})
+
+    # 规则3: 在成长 × 心情低落
+    if has_growth and mood_trend == "偏低":
+        pool = _CONTRADICTION_TEXT_POOL["growing_but_sad"]
+        contradictions.append({"type": "growing_but_sad", "text": random.choice(pool)})
+
+    # 规则4: 情绪不稳定 × 关系稳定
+    if stability < 0.35 and bond_perception == "稳定":
+        pool = _CONTRADICTION_TEXT_POOL["volatile_but_bond_stable"]
+        contradictions.append({"type": "volatile_but_bond_stable", "text": random.choice(pool)})
+
+    # 规则5: 情绪稳定 × 关系疏远
+    if stability > 0.7 and bond_perception == "有些疏远":
+        pool = _CONTRADICTION_TEXT_POOL["stable_but_bond_down"]
+        contradictions.append({"type": "stable_but_bond_down", "text": random.choice(pool)})
+
+    # 规则6: 在成长 × 关系疏远
+    if has_growth and bond_perception == "有些疏远":
+        pool = _CONTRADICTION_TEXT_POOL["growing_but_bond_down"]
+        contradictions.append({"type": "growing_but_bond_down", "text": random.choice(pool)})
+
+    # 最多返回 2 条矛盾（避免自省过于复杂）
+    return contradictions[:2]
+
+
+def build_contradiction_awareness_text(contradictions: list[dict[str, str]]) -> str:
+    """将矛盾列表转化为自然语言矛盾感知文本.
+
+    Args:
+        contradictions: detect_contradictions() 的返回值
+
+    Returns:
+        矛盾感知文本（可能为空字符串）
+    """
+    if not contradictions:
+        return ""
+    texts = [c["text"] for c in contradictions if c.get("text")]
+    if not texts:
+        return ""
+    if len(texts) == 1:
+        return texts[0]
+    return texts[0] + "。" + texts[1]
+
+
 def _pick_from_pool(pool: list[str], seed_key: str = "") -> str:
     """从模板池中选取一条，使用随机选取避免重复。"""
     if not pool:
