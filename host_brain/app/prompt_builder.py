@@ -1145,12 +1145,18 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _ga_felt = _truncate_for_prompt(_sr_ga.get("trait_felt"), limit=150) or ""
                 _ga_milestone = _truncate_for_prompt(_sr_ga.get("milestone_felt"), limit=100) or ""
                 _ga_desire = _truncate_for_prompt(_sr_ga.get("desire"), limit=100) or ""
+                _ga_stagnation = _truncate_for_prompt(_sr_ga.get("stagnation_felt"), limit=150) or ""
+                _ga_regression = _truncate_for_prompt(_sr_ga.get("regression_felt"), limit=150) or ""
                 if _ga_recent:
                     _ga_parts.append(f"  recent_change: {_ga_recent}")
                 if _ga_felt:
                     _ga_parts.append(f"  trait_felt: {_ga_felt}")
                 if _ga_milestone:
                     _ga_parts.append(f"  milestone_felt: {_ga_milestone}")
+                if _ga_stagnation:
+                    _ga_parts.append(f"  stagnation_felt: {_ga_stagnation}")
+                if _ga_regression:
+                    _ga_parts.append(f"  regression_felt: {_ga_regression}")
                 if _ga_desire:
                     _ga_parts.append(f"  desire: {_ga_desire}")
                 if len(_ga_parts) > 1:

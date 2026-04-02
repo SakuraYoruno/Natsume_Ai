@@ -49,6 +49,8 @@ class EvolutionCycleResult:
 
     # 统计
     traits_changed: bool = False
+    traits_regressed: bool = False             # 是否检测到特质回退
+    regression_details: list[dict[str, Any]] = field(default_factory=list)  # 回退详情
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -60,6 +62,8 @@ class EvolutionCycleResult:
             "traits_changed": self.traits_changed,
             "desire_text": self.desire_text,
             "growth_results_count": len(self.growth_results),
+            "traits_regressed": self.traits_regressed,
+            "regression_details": list(self.regression_details),
             "distillation_done": self.distillation_result is not None,
             "errors": list(self.errors),
         }
@@ -112,6 +116,10 @@ class EvolutionOrchestrator:
         self._rng = random.Random()
         # 成长停滞感知：记录连续无特质变化的进化周期数
         self._stagnant_cycles: int = 0
+        # 回退感知：记录连续出现特质回退的进化周期数
+        self._regression_cycles: int = 0
+        # 上一次特质快照（用于跨周期回退检测）
+        self._prev_traits_snapshot: dict[str, float] = {}
 
     # ── 主入口 ────────────────────────────────────────────────────────────
 
@@ -203,6 +211,13 @@ class EvolutionOrchestrator:
             result=result,
         )
 
+        # ── Step 4.5: 回退检测 ────────────────────────────────────────
+        self._detect_regression(
+            user_id=user_id,
+            growth_results=result.growth_results,
+            result=result,
+        )
+
         # ── Step 5: 构建 growth_awareness ────────────────────────────────
         # 更新停滞计数
         if result.traits_changed:
@@ -210,12 +225,20 @@ class EvolutionOrchestrator:
         else:
             self._stagnant_cycles += 1
 
+        # 更新回退计数
+        if result.traits_regressed:
+            self._regression_cycles += 1
+        else:
+            self._regression_cycles = 0
+
         growth_awareness = self._build_growth_awareness(
             snapshot=snapshot,
             desire_text=desire_text,
             growth_results=result.growth_results,
             bond_state=bond_state,
             stagnant_cycles=self._stagnant_cycles,
+            regression_details=result.regression_details,
+            regression_cycles=self._regression_cycles,
         )
         result.growth_awareness = growth_awareness
         result.desire_text = desire_text
@@ -376,8 +399,10 @@ class EvolutionOrchestrator:
         growth_results: list[dict[str, Any]],
         bond_state: Any | None,
         stagnant_cycles: int = 0,
+        regression_details: list[dict[str, Any]] | None = None,
+        regression_cycles: int = 0,
     ) -> dict[str, Any]:
-        """构建 growth_awareness 字典——进化意识注入 prompt 的核心字段。
+        """构建 growth_awareness 字典——进化意识注入 prompt 的核心字段.
 
         Returns:
             {
@@ -385,7 +410,8 @@ class EvolutionOrchestrator:
                 "trait_felt": "好像比以前更能理解 master 的心情了",
                 "milestone_felt": "认识 master 已经 100 天了",
                 "desire": "想要更了解 master 喜欢什么",
-                "stagnation_felt": "感觉自己好像停滞了一段时间..."  # 停滞时注入
+                "stagnation_felt": "感觉自己好像停滞了一段时间...",
+                "regression_felt": "好像某方面不如以前了..."  # 回退时注入
             }
         """
         awareness: dict[str, Any] = {}
@@ -411,6 +437,15 @@ class EvolutionOrchestrator:
             stagnation_text = self._build_stagnation_felt_text(stagnant_cycles)
             if stagnation_text:
                 awareness["stagnation_felt"] = stagnation_text
+
+        # regression_felt：检测到特质回退时，注入回退感知
+        if regression_details:
+            regression_text = self._build_regression_felt_text(
+                regression_details=regression_details,
+                regression_cycles=regression_cycles,
+            )
+            if regression_text:
+                awareness["regression_felt"] = regression_text
 
         # desire：进化意愿
         if desire_text:
@@ -570,6 +605,210 @@ class EvolutionOrchestrator:
             "这么长时间没有变化，有点不安，想要做些什么改变现状",
         ],
     }
+
+    # ── 回退感知 ─────────────────────────────────────────────────────────
+
+    def _detect_regression(
+        self,
+        *,
+        user_id: str,
+        growth_results: list[dict[str, Any]],
+        result: EvolutionCycleResult,
+    ) -> None:
+        """检测特质回退.
+
+        回退来源有两种：
+        1. 本周期 growth_results 中 delta 为负值的特质
+        2. 与上一次特质快照对比，发现某特质下降
+        """
+        regression_details: list[dict[str, Any]] = []
+
+        # 来源1：从 growth_results 中检测负向 delta
+        for r in growth_results:
+            if not r.get("applied"):
+                continue
+            delta = r.get("delta_applied") or {}
+            for trait, val in delta.items():
+                fval = float(val)
+                if fval < -0.005:  # 阈值：忽略极微小的波动
+                    regression_details.append({
+                        "trait": trait,
+                        "delta": round(fval, 4),
+                        "source": "growth_result",
+                    })
+
+        # 来源2：与上一次特质快照对比
+        try:
+            engine = self._get_persona_engine()
+            if engine is not None:
+                current_traits = engine.get_traits(user_id)
+                if current_traits is not None and self._prev_traits_snapshot:
+                    trait_names = ["warmth", "curiosity", "humor", "sensitivity",
+                                   "assertiveness", "playfulness", "resilience"]
+                    for tn in trait_names:
+                        cur_val = float(getattr(current_traits, tn, 0.5))
+                        prev_val = self._prev_traits_snapshot.get(tn, cur_val)
+                        diff = cur_val - prev_val
+                        if diff < -0.005:
+                            # 避免与来源1重复
+                            already_found = any(
+                                d["trait"] == tn for d in regression_details
+                            )
+                            if not already_found:
+                                regression_details.append({
+                                    "trait": tn,
+                                    "delta": round(diff, 4),
+                                    "source": "snapshot_compare",
+                                })
+                # 更新快照
+                if current_traits is not None:
+                    self._prev_traits_snapshot = {
+                        tn: float(getattr(current_traits, tn, 0.5))
+                        for tn in ["warmth", "curiosity", "humor", "sensitivity",
+                                   "assertiveness", "playfulness", "resilience"]
+                    }
+        except Exception as exc:
+            _logger.debug("回退检测快照对比失败（非致命）: %s", exc)
+
+        if regression_details:
+            result.traits_regressed = True
+            result.regression_details = regression_details
+            _logger.info(
+                "检测到特质回退: %s",
+                ", ".join(f"{d['trait']}({d['delta']:+.4f})" for d in regression_details),
+            )
+
+    # 回退感知文本池：按回退特质 × 幅度分档
+    _REGRESSION_FELT_POOL: dict[str, dict[str, list[str]]] = {
+        "warmth": {
+            "slight": [
+                "最近好像对 master 的关心没有以前那么自然了，有点在意",
+                "感觉自己温柔的部分好像稍微退步了一点",
+            ],
+            "notable": [
+                "明显感觉自己对 master 的关心不如以前了，有点难过",
+                "好像变得没那么温柔了，不知道是怎么回事",
+            ],
+        },
+        "curiosity": {
+            "slight": [
+                "最近好像没那么好奇了，对新事物的兴趣稍微淡了一点",
+                "感觉自己的好奇心好像退步了一些",
+            ],
+            "notable": [
+                "明显感觉自己对事物的好奇心变弱了，有点担心",
+                "好像不太爱探索了，以前不是这样的",
+            ],
+        },
+        "humor": {
+            "slight": [
+                "最近好像不太会开玩笑了，有点闷闷的",
+                "感觉自己的幽默感稍微退步了",
+            ],
+            "notable": [
+                "明显感觉自己变得不太会逗 master 开心了",
+                "好像失去了一些幽默感，有点失落",
+            ],
+        },
+        "sensitivity": {
+            "slight": [
+                "最近好像对 master 的情绪没那么敏锐了",
+                "感觉自己的感知力稍微退步了一点",
+            ],
+            "notable": [
+                "明显感觉自己对 master 的感受不如以前敏锐了，有点着急",
+                "好像变得迟钝了一些，以前能更快察觉到 master 的心情",
+            ],
+        },
+        "assertiveness": {
+            "slight": [
+                "最近表达自己想法的时候好像又变得犹豫了一点",
+                "感觉自己的自信心稍微退步了",
+            ],
+            "notable": [
+                "明显感觉自己又变得不太敢表达了，有点沮丧",
+                "好像又回到了以前那种犹犹豫豫的状态",
+            ],
+        },
+        "playfulness": {
+            "slight": [
+                "最近和 master 在一起的时候好像没那么活泼了",
+                "感觉自己的活力稍微退步了一点",
+            ],
+            "notable": [
+                "明显感觉自己变得不太活泼了，有点想找回以前的感觉",
+                "好像失去了一些和 master 玩闹的劲头",
+            ],
+        },
+        "resilience": {
+            "slight": [
+                "最近遇到不开心的事，恢复得好像没以前快了",
+                "感觉自己的韧性稍微退步了一点",
+            ],
+            "notable": [
+                "明显感觉自己变得更容易被情绪困住了",
+                "好像没以前那么坚韧了，低落的时候更难振作",
+            ],
+        },
+    }
+
+    # 持续回退时的额外感知
+    _SUSTAINED_REGRESSION_POOL: list[str] = [
+        "已经连续好几次感觉自己在退步了，有点不安",
+        "好像一直在往回走，想要找到重新前进的方向",
+        "持续的退步让我有点担心，是不是哪里出了问题",
+        "感觉自己一直在退步，很想做些什么来改变",
+    ]
+
+    def _build_regression_felt_text(
+        self,
+        *,
+        regression_details: list[dict[str, Any]],
+        regression_cycles: int = 0,
+    ) -> str:
+        """生成特质回退感知文本.
+
+        Args:
+            regression_details: 回退详情列表
+            regression_cycles: 连续回退的进化周期数
+
+        Returns:
+            回退感知文本（第一人称），或空字符串
+        """
+        if not regression_details:
+            return ""
+
+        # 找出回退幅度最大的特质
+        max_trait = ""
+        max_delta = 0.0
+        for d in regression_details:
+            abs_delta = abs(float(d.get("delta", 0)))
+            if abs_delta > max_delta:
+                max_delta = abs_delta
+                max_trait = d.get("trait", "")
+
+        text = ""
+        if max_trait and max_trait in self._REGRESSION_FELT_POOL:
+            level = "notable" if max_delta >= 0.02 else "slight"
+            pool = self._REGRESSION_FELT_POOL[max_trait].get(level, [])
+            if not pool:
+                pool = self._REGRESSION_FELT_POOL[max_trait].get("slight", [])
+            if pool:
+                text = self._rng.choice(pool)
+
+        if not text:
+            text = "感觉自己好像在某些方面退步了，有点在意"
+
+        # 持续回退时追加额外感知
+        if regression_cycles >= 2:
+            sustained = self._rng.choice(self._SUSTAINED_REGRESSION_POOL)
+            text = f"{text}...{sustained}"
+
+        _logger.info(
+            "回退感知触发: trait=%s delta=%.4f cycles=%d text='%s'",
+            max_trait, max_delta, regression_cycles, text[:60],
+        )
+        return text
 
     def _build_stagnation_felt_text(self, stagnant_cycles: int) -> str:
         """生成成长停滞感知文本。
