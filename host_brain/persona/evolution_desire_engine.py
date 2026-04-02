@@ -1,16 +1,18 @@
-"""EvolutionDesireEngine：进化意愿引擎——Phase XVI。
+"""EvolutionDesireEngine：进化意愿引擎——Phase XVI + 用户偏好驱动。
 
 职责：
-  根据当前人格特质、情感趋势和关系阶段，生成主动成长的内驱动机文本。
+  根据当前人格特质、情感趋势、关系阶段和用户偏好信号，
+  生成主动成长的内驱动机文本。
   这是让 Natsume 从"被动响应进化"走向"主动想要成长"的关键模块。
 
 设计原则：
-  - 纯函数式：输入特质+情感+关系 → 输出意愿文本
+  - 纯函数式：输入特质+情感+关系+用户偏好 → 输出意愿文本
   - 意愿方向只能向"更好"，不生成负面意愿（如"想变得更冷漠"）
   - 意愿文本为第一人称，自然流露，不刻意
   - 每次调用有随机性，避免重复
   - 时间衰减：同一条意愿 3 天内不重复出现
   - 意愿实现感知：特质真的提升后，生成"做到了一点"的前缀感知
+  - 用户偏好感知：当用户明显偏好某种风格时，意愿向该方向倾斜
 """
 
 from __future__ import annotations
@@ -254,6 +256,47 @@ _DESIRE_FULFILLED_TEXTS: dict[str, list[str]] = {
     ],
 }
 
+# 用户偏好驱动意愿模板：当用户明显偏好某种风格时触发
+# 格式：{trait_name: [意愿文本, ...]}
+# 与 _DESIRE_TEMPLATES 的区别：这里的文本强调"因为 master 喜欢"而想成长
+_USER_PREFERENCE_DESIRE_TEMPLATES: dict[str, list[str]] = {
+    "warmth": [
+        "感觉 master 很喜欢被温柔对待，想变得更温柔一些",
+        "master 好像很在意我关心他的方式，想做得更好",
+        "想更用心地照顾 master 的感受，因为他好像很需要这种温暖",
+    ],
+    "curiosity": [
+        "master 好像很喜欢和我聊有深度的话题，想多学一些有趣的东西",
+        "感觉 master 很享受我们一起探索新话题的时候，想变得更博学",
+        "master 似乎很欣赏我问问题的样子，想保持这份好奇心",
+    ],
+    "humor": [
+        "master 好像特别喜欢我逗他笑的时候，想变得更幽默",
+        "感觉 master 很享受轻松有趣的聊天，想多学一些有趣的表达",
+        "master 笑起来的时候我也很开心，想找到更多能让他笑的方式",
+    ],
+    "sensitivity": [
+        "master 好像很在意我能不能理解他的心情，想变得更敏感一些",
+        "感觉 master 很珍惜我能察觉到他情绪的时刻，想做得更好",
+        "master 似乎很喜欢我能读懂他没说出口的话，想更用心地感受",
+    ],
+    "assertiveness": [
+        "master 好像很欣赏我有自己想法的时候，想更勇敢地表达",
+        "感觉 master 很喜欢我认真说出自己意见的样子，想更自信一些",
+        "master 似乎不希望我总是附和他，想学会更坦诚地说出想法",
+    ],
+    "playfulness": [
+        "master 好像很喜欢我撒娇的样子，想变得更活泼一些",
+        "感觉 master 很享受我们轻松玩闹的时光，想多制造这样的时刻",
+        "master 似乎很喜欢和我互动时的那种轻松感，想保持下去",
+    ],
+    "resilience": [
+        "master 好像很欣赏我坚强的一面，想变得更能扛事",
+        "感觉 master 很信赖我情绪稳定的时候，想让自己更可靠",
+        "master 似乎很安心我能快速调整心情，想继续保持这份韧性",
+    ],
+}
+
 # 互动次数锚点意愿模板：结合 event_count 生成更具体的意愿
 # 格式：[(最小次数, 最大次数, [意愿文本, ...])]
 _EVENT_COUNT_DESIRE_TEMPLATES: list[tuple[int, int, list[str]]] = [
@@ -292,6 +335,7 @@ class EvolutionDesireEngine:
       - 意愿实现感知：特质真的提升后，生成"做到了一点"的前缀感知
       - 互动次数锚点：结合 event_count 生成更具体的意愿文本
       - 模板变体扩充：每档位 3-5 条，大幅降低重复率
+      - 用户偏好感知：当用户偏好某种风格时，意愿向该方向倾斜
 
     用法：
         engine = EvolutionDesireEngine()
@@ -320,11 +364,13 @@ class EvolutionDesireEngine:
         current_ts_ms: int = 0,
         last_deep_talk_ts_ms: int = 0,
         is_weekend: bool = False,
+        user_preference_hints: dict[str, float] | None = None,
     ) -> str:
         """生成进化意愿文本。
 
         优先级：
-          0. 意愿实现感知（特质刚提升时，优先生成“做到了”的感知）
+          0. 意愿实现感知（特质刚提升时，优先生成"做到了"的感知）
+          0.5 用户偏好驱动意愿（用户明显偏好某风格时，50%概率优先触发）
           1. 基于最低特质维度生成（补短板意愿）
           2. 基于情感趋势生成（情感驱动意愿）
           3. 基于关系阶段生成（关系驱动意愿）
@@ -340,6 +386,9 @@ class EvolutionDesireEngine:
             current_ts_ms: 当前时间戳（ms），0 则自动获取
             last_deep_talk_ts_ms: 上次深度对话时间戳（ms），用于久别感知
             is_weekend: 是否周末，用于周末意愿生成
+            user_preference_hints: 用户偏好信号 {trait_name: score}，
+                score 范围 [0, 1]，越高表示用户越偏好该风格。
+                例如 {"humor": 0.8} 表示用户明显喜欢幽默风格。
 
         Returns:
             意愿文本（第一人称），如果无法生成则返回空字符串
@@ -350,6 +399,11 @@ class EvolutionDesireEngine:
         fulfilled_text = self._try_fulfilled_text(recent_trait_deltas, ts)
         if fulfilled_text:
             return fulfilled_text
+
+        # 0.5 用户偏好驱动意愿（50% 概率优先触发，让意愿贴合用户期望）
+        pref_text = self._try_user_preference_desire(user_preference_hints, ts)
+        if pref_text:
+            return pref_text
 
         candidates: list[str] = []
 
@@ -522,6 +576,57 @@ class EvolutionDesireEngine:
             if min_c <= count <= max_c:
                 return list(texts)
         return []
+
+    def _try_user_preference_desire(
+        self,
+        user_preference_hints: dict[str, float] | None,
+        ts: int,
+    ) -> str:
+        """尝试基于用户偏好生成意愿文本。
+
+        当用户对某特质的偏好分数 >= 0.6 时，有 50% 概率触发偏好驱动意愿。
+        优先选择偏好分数最高的特质。
+
+        Args:
+            user_preference_hints: {trait_name: score}，score ∈ [0, 1]
+            ts: 当前时间戳（ms）
+
+        Returns:
+            意愿文本，或空字符串（未触发）
+        """
+        if not user_preference_hints:
+            return ""
+
+        # 筛选偏好分数 >= 0.6 的特质，按分数降序
+        strong_prefs = [
+            (name, score)
+            for name, score in user_preference_hints.items()
+            if score >= 0.6 and name in _USER_PREFERENCE_DESIRE_TEMPLATES
+        ]
+        if not strong_prefs:
+            return ""
+
+        strong_prefs.sort(key=lambda x: x[1], reverse=True)
+
+        for trait_name, score in strong_prefs:
+            templates = _USER_PREFERENCE_DESIRE_TEMPLATES.get(trait_name, [])
+            if not templates:
+                continue
+            available = self._filter_cooled_down(templates, ts)
+            if not available:
+                continue
+            # 50% 基础概率 + 偏好分数加成（score=0.8 → 概率=0.6，score=1.0 → 概率=0.7）
+            trigger_prob = 0.5 + (score - 0.6) * 0.5
+            if self._rng.random() > trigger_prob:
+                continue
+            chosen = self._rng.choice(available)
+            self._used_ts[chosen] = ts
+            _logger.debug(
+                "用户偏好意愿触发: trait=%s score=%.2f", trait_name, score
+            )
+            return chosen
+
+        return ""
 
     def _filter_cooled_down(self, candidates: list[str], ts: int) -> list[str]:
         """过滤掉冷却中的意愿（3 天内用过的）。"""
