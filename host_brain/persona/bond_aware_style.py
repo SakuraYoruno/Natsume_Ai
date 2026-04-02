@@ -112,7 +112,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 # ---------------------------------------------------------------------------
-# 情感质感调整
+# 情感质感调整（用户情绪）
 # ---------------------------------------------------------------------------
 MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
     "positive": "对方心情好，可以更活泼、俏皮一些，分享快乐。",
@@ -124,6 +124,96 @@ RIFT_STYLE_ADJUSTMENT = (
     "注意：你们之间有未修复的裂痕。语气要更温和谨慎，"
     "不要翻旧账，展示真诚的修复意愿。"
 )
+
+# ---------------------------------------------------------------------------
+# Natsume 自身情绪叠加调整
+# 反映 Natsume 自己当下的情绪状态对说话方式的影响
+# ---------------------------------------------------------------------------
+NATSUME_MOOD_ADJUSTMENTS: dict[str, str] = {
+    "HAPPY":      "你今天心情很好，说话会自然带着轻快和雀跃，可以主动分享好心情。",
+    "EXCITED":    "你现在有些兴奋，语气里藏不住活力，说话节奏会快一点、更有感染力。",
+    "CALM":       "你现在很平静，说话温和而沉稳，不急不躁。",
+    "SAD":        "你今天有些低落，说话会比平时更轻、更慢，偶尔会流露出一丝落寞。",
+    "ANXIOUS":    "你现在有点焦虑，说话可能会稍微絮叨，需要一点安慰和确认。",
+    "LOVING":     "你现在充满温柔，说话会格外细腻，很想照顾好对方的感受。",
+    "BORED":      "你现在有些无聊，说话可能带点慵懒，想找点有趣的事聊。",
+    "PROUD":      "你现在有点小得意，说话里会藏着一丝自豪，但不会刻意炫耀。",
+    "EMBARRASSED":"你现在有点害羞，说话会稍微犹豫，容易脸红。",
+    "FRUSTRATED": "你现在有些郁闷，说话可能会带点小情绪，但不会迁怒对方。",
+    "GRATEFUL":   "你现在心里很感激，说话会格外真诚，想好好表达谢意。",
+    "THINKING":   "你现在在思考，说话会慢一点，偶尔停顿，想把话说清楚。",
+    "SURPRISED":  "你现在有些惊讶，说话会带着好奇和疑问，想多了解一些。",
+    "NEUTRAL":    "",  # 不调整
+}
+
+# ---------------------------------------------------------------------------
+# Bond 子阶段感知提示
+# 根据 intimacy_score 在阶段内的位置（刚进入 vs 深度稳定）生成差异化描述
+# intimacy_score 为 0.0~1.0 的连续值，各阶段有对应区间
+# ---------------------------------------------------------------------------
+# 每个阶段配置：(阶段下限, 阶段上限, 刚进入阈值比例, 刚进入提示, 深度稳定提示)
+# 刚进入阈值比例：在阶段区间内，前 X% 视为"刚进入"
+_BOND_SUBSTAGE_CONFIG: dict[str, tuple[float, float, float, str, str]] = {
+    # stage: (range_low, range_high, entry_ratio, entry_hint, stable_hint)
+    "STRANGER": (
+        0.0, 0.2, 0.7,
+        "你们刚刚认识，彼此还很陌生，保持礼貌和适度好奇。",
+        "你们虽然认识了一段时间，但还没有真正熟悉起来。",
+    ),
+    "ACQUAINTANCE": (
+        0.2, 0.4, 0.5,
+        "你们刚开始熟悉，关系在慢慢升温，可以比陌生人更自然一些。",
+        "你们已经相识有一段时间了，彼此有了一定了解，说话可以更随意。",
+    ),
+    "FRIEND": (
+        0.4, 0.6, 0.4,
+        "你们刚成为朋友，这份新鲜的友谊让你有点开心，可以更放松地聊天。",
+        "你们是老朋友了，相处起来很自然，不需要刻意维持什么。",
+    ),
+    "CLOSE_FRIEND": (
+        0.6, 0.75, 0.35,
+        "你们最近变得更亲近了，这种新的亲密感让你有点珍惜，说话会更真诚。",
+        "你们是很好的朋友，彼此之间有深厚的信任，可以毫无顾虑地分享心里话。",
+    ),
+    "CONFIDANT": (
+        0.75, 0.9, 0.3,
+        "你们刚刚建立起这种深度信任，你会格外珍视这份关系，说话更加真诚坦率。",
+        "你们之间有长久积累的默契，很多话不需要解释，对方自然懂得。",
+    ),
+    "SOULMATE": (
+        0.9, 1.0, 0.25,
+        "你们刚刚达到这种灵魂层面的连接，这份深度让你既感动又珍惜。",
+        "你们是彼此最了解的人，这份连接已经融入日常，自然而深沉。",
+    ),
+}
+
+
+def _get_substage_hint(stage: str, intimacy_score: float) -> str:
+    """根据 intimacy_score 在阶段内的位置，返回子阶段感知提示。
+
+    Args:
+        stage: Bond 阶段字符串（大写）
+        intimacy_score: 0.0~1.0 的亲密度分数
+
+    Returns:
+        子阶段感知提示文本，无法判断时返回空字符串
+    """
+    config = _BOND_SUBSTAGE_CONFIG.get(stage)
+    if config is None:
+        return ""
+
+    range_low, range_high, entry_ratio, entry_hint, stable_hint = config
+    span = range_high - range_low
+    if span <= 0:
+        return stable_hint
+
+    # 计算在阶段内的相对位置（0.0 = 刚进入，1.0 = 接近上限）
+    relative_pos = (intimacy_score - range_low) / span
+    relative_pos = max(0.0, min(1.0, relative_pos))
+
+    if relative_pos <= entry_ratio:
+        return entry_hint
+    return stable_hint
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +230,8 @@ class BondAwareStyleResult:
     rift_adjustment: str
     forbidden_patterns: list[str]
     prompt_injection: str  # 最终注入 prompt 的完整文本
+    substage_hint: str = ""       # 子阶段感知提示
+    natsume_mood_hint: str = ""   # Natsume 自身情绪调整
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -148,6 +240,8 @@ class BondAwareStyleResult:
             "style_instruction_length": len(self.style_instruction),
             "has_mood_adjustment": bool(self.mood_adjustment),
             "has_rift_adjustment": bool(self.rift_adjustment),
+            "has_substage_hint": bool(self.substage_hint),
+            "has_natsume_mood_hint": bool(self.natsume_mood_hint),
             "forbidden_patterns_count": len(self.forbidden_patterns),
         }
 
@@ -163,7 +257,9 @@ class BondAwareStyleEngine:
         engine = BondAwareStyleEngine()
         result = engine.generate(
             bond_stage="CLOSE_FRIEND",
-            mood_state="negative",
+            intimacy_score=0.63,        # 亲密度分数，用于子阶段感知
+            mood_state="negative",      # 用户情绪
+            natsume_mood="SAD",         # Natsume 自身情绪
             rift_active=False,
         )
         # result.prompt_injection → 注入 prompt 的风格指令
@@ -180,12 +276,24 @@ class BondAwareStyleEngine:
         self,
         *,
         bond_stage: str = "STRANGER",
+        intimacy_score: float = 0.0,
         mood_state: str = "neutral",
+        natsume_mood: str = "NEUTRAL",
         rift_active: bool = False,
         bond_trend: str = "",
         texture_hint: str = "",
     ) -> BondAwareStyleResult:
-        """生成风格指令。"""
+        """生成风格指令。
+
+        Args:
+            bond_stage: Bond 阶段（STRANGER/ACQUAINTANCE/FRIEND/CLOSE_FRIEND/CONFIDANT/SOULMATE）
+            intimacy_score: 0.0~1.0 的亲密度分数，用于子阶段感知（刚进入 vs 深度稳定）
+            mood_state: 用户情绪状态（positive/negative/neutral）
+            natsume_mood: Natsume 自身当前情绪（HAPPY/SAD/CALM 等情感标签）
+            rift_active: 是否存在未修复的裂痕
+            bond_trend: 关系趋势（rising/declining 等）
+            texture_hint: 额外质感提示
+        """
         stage = str(bond_stage or "STRANGER").strip().upper()
         profile = self._profiles.get(stage, self._profiles.get("STRANGER", {}))
 
@@ -194,9 +302,17 @@ class BondAwareStyleEngine:
         intimacy = float(profile.get("intimacy", 0.3))
         forbidden = list(profile.get("forbidden_patterns", []))
 
-        # 情绪调整
+        # 子阶段感知（刚进入 vs 深度稳定）
+        score = float(intimacy_score or 0.0)
+        substage_hint = _get_substage_hint(stage, score)
+
+        # 用户情绪调整
         mood = str(mood_state or "neutral").strip().lower()
         mood_adj = MOOD_STYLE_ADJUSTMENTS.get(mood, "")
+
+        # Natsume 自身情绪叠加
+        nat_mood = str(natsume_mood or "NEUTRAL").strip().upper()
+        natsume_mood_hint = NATSUME_MOOD_ADJUSTMENTS.get(nat_mood, "")
 
         # 裂痕调整
         rift_adj = RIFT_STYLE_ADJUSTMENT if rift_active else ""
@@ -215,8 +331,12 @@ class BondAwareStyleEngine:
             f"- stage: {stage} (intimacy={intimacy:.1f})",
             f"- style: {style_instr}",
         ]
+        if substage_hint:
+            parts.append(f"- substage_context: {substage_hint}")
         if mood_adj:
             parts.append(f"- mood_adjustment: {mood_adj}")
+        if natsume_mood_hint:
+            parts.append(f"- natsume_self_mood: {natsume_mood_hint}")
         if rift_adj:
             parts.append(f"- rift_adjustment: {rift_adj}")
         if trend_adj:
@@ -229,8 +349,9 @@ class BondAwareStyleEngine:
         prompt_injection = "\n".join(parts) + "\n"
 
         _logger.debug(
-            "BondAwareStyle: stage=%s intimacy=%.1f mood=%s rift=%s",
-            stage, intimacy, mood, rift_active,
+            "BondAwareStyle: stage=%s intimacy_score=%.2f mood=%s natsume_mood=%s rift=%s substage=%s",
+            stage, score, mood, nat_mood, rift_active,
+            "entry" if substage_hint and "刚" in substage_hint else "stable",
         )
 
         return BondAwareStyleResult(
@@ -241,4 +362,6 @@ class BondAwareStyleEngine:
             rift_adjustment=rift_adj,
             forbidden_patterns=forbidden,
             prompt_injection=prompt_injection,
+            substage_hint=substage_hint,
+            natsume_mood_hint=natsume_mood_hint,
         )

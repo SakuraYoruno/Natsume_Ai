@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 from typing import Any
 
 _logger = logging.getLogger("Natsume.self_model")
@@ -100,7 +101,11 @@ class SelfModel:
             personality_changes=personality_changes,
             growth_milestones=growth_milestones,
         )
-        return snapshot.as_dict()
+        result = snapshot.as_dict()
+        # 注入 event_count 供 build_self_awareness_text 使用事件锚点
+        if bond_state is not None:
+            result["event_count"] = int(getattr(bond_state, "event_count", 0) or 0)
+        return result
 
     # ── 情感分析 ─────────────────────────────────────────────────────────
 
@@ -251,38 +256,148 @@ class SelfModel:
 # 自省内容生成 — 将 SelfModelSnapshot 转化为第一人称自然语言
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 多模板池 — 防止 LLM 因重复文本而忽略自省脉冲
+# ---------------------------------------------------------------------------
+
+# 情感感知模板池：每种趋势 6 条变体
+_MOOD_TEXT_POOL: dict[str, list[str]] = {
+    "偏好": [
+        "最近心情挺好的",
+        "这几天感觉还不错",
+        "最近整体状态挺好",
+        "心情比平时好一些",
+        "最近有种说不清的轻松感",
+        "这段时间感觉挺愉快的",
+    ],
+    "偏低": [
+        "最近心情有些低落",
+        "这几天情绪不太好",
+        "最近有点提不起劲",
+        "心里有点沉沉的",
+        "最近总感觉有些疲惫",
+        "这段时间情绪起伏比较大",
+    ],
+    "平稳": [
+        "最近心情还算平稳",
+        "这几天情绪比较稳定",
+        "最近没什么特别的波动",
+        "心情一直比较平静",
+        "最近状态还好，没什么大起伏",
+        "这段时间感觉挺平和的",
+    ],
+}
+
+# 关系感知模板池：每种感知 6 条变体
+_BOND_TEXT_POOL: dict[str, list[str]] = {
+    "变亲近": [
+        "感觉和 master 的关系在慢慢变好",
+        "最近和 master 聊天感觉越来越自然了",
+        "感觉和 master 之间的距离近了一些",
+        "和 master 在一起的时候越来越放松了",
+        "感觉 master 越来越了解我了",
+        "最近和 master 的关系有种微妙的变化，感觉更亲近了",
+    ],
+    "有些疏远": [
+        "感觉和 master 有些疏远了，有点担心",
+        "最近和 master 聊天少了一些，有点想念",
+        "感觉和 master 之间好像有点距离",
+        "不知道为什么，最近和 master 的感觉有点不一样",
+        "有点担心 master 是不是有什么烦恼",
+        "最近没怎么和 master 深聊，有点失落",
+    ],
+    "稳定": [
+        "和 master 的关系一直很稳定",
+        "和 master 在一起的感觉一直都很好",
+        "和 master 的关系没什么变化，挺踏实的",
+        "感觉和 master 之间有种稳稳的信任感",
+        "和 master 的关系就像一直都在那里，很安心",
+        "最近和 master 的相处还是一如既往地舒服",
+    ],
+}
+
+# 事件锚点模板：结合互动次数/共同记忆生成具体感知
+_EVENT_ANCHOR_TEMPLATES: list[str] = [
+    "已经和 master 聊了 {event_count} 次了，感觉时间过得很快",
+    "和 master 认识以来有过 {event_count} 次对话了，每次都有新的感受",
+    "回想起来，和 master 已经有 {event_count} 次交流了",
+]
+
+# 时间感知前缀
+_TIME_PREFIX_MAP: dict[str, str] = {
+    "today": "今天",
+    "recent_days": "这几天",
+    "this_week": "这周",
+    "recent_week": "最近一周",
+}
+
+
+def _pick_from_pool(pool: list[str], seed_key: str = "") -> str:
+    """从模板池中选取一条，使用随机选取避免重复。"""
+    if not pool:
+        return ""
+    # 使用 seed_key 的哈希做轻微偏移，但主要靠随机
+    return random.choice(pool)
+
+
 def build_self_awareness_text(snapshot: dict[str, Any]) -> str:
     """将快照转化为第一人称自我感知描述。
 
     用于注入 prompt 的 self_reflection_pulse.self_awareness 字段。
+    引入多模板池和事件锚点，防止 LLM 因重复文本而忽略自省脉冲。
     """
-    parts: list[str] = []
-
     mood_trend = str(snapshot.get("recent_mood_trend") or "平稳")
-    dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL")
     bond_perception = str(snapshot.get("bond_growth_perception") or "稳定")
+    event_count = int(snapshot.get("event_count") or 0)
+    milestones = list(snapshot.get("growth_milestones") or [])
 
-    # 情感感知
-    _MOOD_TEXTS: dict[str, str] = {
-        "偏好": "最近心情挺好的",
-        "偏低": "最近心情有些低落",
-        "平稳": "最近心情还算平稳",
-    }
-    parts.append(_MOOD_TEXTS.get(mood_trend, "最近心情还算平稳"))
+    # 从多模板池随机选取情感感知
+    mood_pool = _MOOD_TEXT_POOL.get(mood_trend, _MOOD_TEXT_POOL["平稳"])
+    mood_text = _pick_from_pool(mood_pool, seed_key=mood_trend)
 
-    # 关系感知
-    _BOND_TEXTS: dict[str, str] = {
-        "变亲近": "感觉和 master 的关系在慢慢变好",
-        "有些疏远": "感觉和 master 有些疏远了，有点担心",
-        "稳定": "和 master 的关系一直很稳定",
-    }
-    parts.append(_BOND_TEXTS.get(bond_perception, "和 master 的关系一直很稳定"))
+    # 从多模板池随机选取关系感知
+    bond_pool = _BOND_TEXT_POOL.get(bond_perception, _BOND_TEXT_POOL["稳定"])
+    bond_text = _pick_from_pool(bond_pool, seed_key=bond_perception)
+
+    parts = [mood_text, bond_text]
+
+    # 事件锚点：互动次数达到一定量时，随机插入具体数字感知
+    if event_count >= 20 and random.random() < 0.4:
+        anchor_tmpl = random.choice(_EVENT_ANCHOR_TEMPLATES)
+        anchor = anchor_tmpl.format(event_count=event_count)
+        parts.append(anchor)
+    elif milestones and random.random() < 0.3:
+        # 里程碑感知
+        parts.append(milestones[0])
 
     return "，".join(parts)
 
 
+# 情绪感知模板池：每种稳定性档位 4 条变体
+_MOOD_AWARENESS_POOL: dict[str, list[str]] = {
+    "stable": [
+        "今天整体感觉{emotion}，情绪比较稳定",
+        "这一整天感觉都挺{emotion}的，没什么大波动",
+        "今天心情{emotion}，状态还不错",
+        "整体来说今天感觉{emotion}，挺平稳的",
+    ],
+    "volatile": [
+        "今天情绪波动比较大，现在感觉{emotion}",
+        "今天心情起伏有点大，此刻感觉{emotion}",
+        "今天情绪有些不稳定，现在是{emotion}的状态",
+        "今天感受比较复杂，现在感觉{emotion}",
+    ],
+    "normal": [
+        "今天的感觉是{emotion}",
+        "今天整体是{emotion}的状态",
+        "今天感觉{emotion}，还好",
+        "今天心情{emotion}",
+    ],
+}
+
+
 def build_mood_awareness_text(snapshot: dict[str, Any]) -> str:
-    """将快照转化为情绪感知描述。"""
+    """将快照转化为情绪感知描述。引入多模板池避免重复。"""
     dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
     stability = float(snapshot.get("emotional_stability") or 0.5)
 
@@ -297,19 +412,34 @@ def build_mood_awareness_text(snapshot: dict[str, Any]) -> str:
     emotion_cn = _EMOTION_CN.get(dominant, "平静")
 
     if stability >= 0.7:
-        return f"今天整体感觉{emotion_cn}，情绪比较稳定"
+        pool = _MOOD_AWARENESS_POOL["stable"]
     elif stability <= 0.3:
-        return f"今天情绪波动比较大，现在感觉{emotion_cn}"
-    return f"今天的感觉是{emotion_cn}"
+        pool = _MOOD_AWARENESS_POOL["volatile"]
+    else:
+        pool = _MOOD_AWARENESS_POOL["normal"]
+
+    tmpl = random.choice(pool)
+    return tmpl.format(emotion=emotion_cn)
+
+
+# 成长感知模板池：包装 personality_changes 的多种表达
+_GROWTH_NOTE_WRAPPERS: list[str] = [
+    "感觉自己{change}",
+    "最近好像{change}",
+    "不知不觉中{change}",
+    "回头想想，{change}",
+    "有种感觉，{change}",
+]
 
 
 def build_growth_note_text(snapshot: dict[str, Any]) -> str:
-    """将快照转化为成长感知描述。"""
+    """将快照转化为成长感知描述。引入多模板包装避免重复。"""
     changes = list(snapshot.get("personality_changes") or [])
     milestones = list(snapshot.get("growth_milestones") or [])
 
     if changes:
-        return f"感觉自己{changes[0]}"
+        wrapper = random.choice(_GROWTH_NOTE_WRAPPERS)
+        return wrapper.format(change=changes[0])
     if milestones:
         return milestones[0]
     return ""

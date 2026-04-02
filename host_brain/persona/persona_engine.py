@@ -199,18 +199,74 @@ class PersonaEngine:
     ) -> ExpressionHint:
         """根据特质 + 情感 + 关系阶段生成表达策略提示。
 
-        Phase I 提供基础实现，Phase II 将引入 PersonaExpressionAdapter 完善。
+        升级实现：
+          - 接入 emotion 参数，情感状态直接影响风格和语气
+          - 加入特质组合效应（高 warmth + 高 sensitivity → 深度共情）
+          - Bond 阶段影响表达开放度
 
         Args:
             traits: 当前人格特质
-            emotion: EmotionVector（此处用 Any 避免循环导入）
+            emotion: EmotionVector 或含 label/valence/arousal 字段的对象/字典
             bond_stage: 当前 Bond 阶段
 
         Returns:
             ExpressionHint 表达策略提示
         """
-        # Phase I 基础实现：根据特质值简单映射
-        if traits.warmth >= 0.7:
+        # ── 解析 emotion 参数 ─────────────────────────────────────────────
+        emotion_label = "NEUTRAL"
+        emotion_valence = 0.0   # -1.0 ~ 1.0，负=消极，正=积极
+        emotion_arousal = 0.5   # 0.0 ~ 1.0，低=平静，高=激动
+
+        if emotion is not None:
+            if isinstance(emotion, dict):
+                emotion_label = str(emotion.get("label") or emotion.get("emotion") or "NEUTRAL").upper()
+                emotion_valence = float(emotion.get("valence") or 0.0)
+                emotion_arousal = float(emotion.get("arousal") or 0.5)
+            else:
+                emotion_label = str(getattr(emotion, "label", None) or getattr(emotion, "emotion", None) or "NEUTRAL").upper()
+                emotion_valence = float(getattr(emotion, "valence", 0.0) or 0.0)
+                emotion_arousal = float(getattr(emotion, "arousal", 0.5) or 0.5)
+
+        # ── Bond 阶段开放度系数 ───────────────────────────────────────────
+        # 越亲密，特质和情感对表达的影响越大
+        _BOND_OPENNESS: dict[str, float] = {
+            "STRANGER": 0.3,
+            "ACQUAINTANCE": 0.5,
+            "FRIEND": 0.7,
+            "CLOSE_FRIEND": 0.85,
+            "CONFIDANT": 0.95,
+            "SOULMATE": 1.0,
+        }
+        stage = str(bond_stage or "STRANGER").strip().upper()
+        openness = _BOND_OPENNESS.get(stage, 0.5)
+
+        # ── 特质组合效应 ──────────────────────────────────────────────────
+        # 组合效应优先于单特质判断，捕捉更细腻的人格表达
+        style = "自然温和"
+        tone = "gentle"
+
+        # 组合1：高 warmth + 高 sensitivity → 深度共情（最强共情模式）
+        if traits.warmth >= 0.7 and traits.sensitivity >= 0.7:
+            style = "深度共情"
+            tone = "deeply_caring"
+
+        # 组合2：高 warmth + 高 playfulness → 温柔俏皮（暖萌风格）
+        elif traits.warmth >= 0.65 and traits.playfulness >= 0.6:
+            style = "温柔俏皮"
+            tone = "warm_playful"
+
+        # 组合3：高 curiosity + 高 assertiveness → 主动探索（积极引导）
+        elif traits.curiosity >= 0.65 and traits.assertiveness >= 0.6:
+            style = "主动探索"
+            tone = "inquisitive"
+
+        # 组合4：高 humor + 高 playfulness → 轻松幽默（活泼风格）
+        elif traits.humor >= 0.6 and traits.playfulness >= 0.65:
+            style = "轻松幽默"
+            tone = "playful"
+
+        # 单特质兜底
+        elif traits.warmth >= 0.7:
             style = "温柔共情"
             tone = "caring"
         elif traits.playfulness >= 0.6:
@@ -219,17 +275,57 @@ class PersonaEngine:
         elif traits.assertiveness >= 0.6:
             style = "自信坚定"
             tone = "serious"
-        else:
-            style = "自然温和"
-            tone = "gentle"
 
+        # ── 情感状态叠加修正 ─────────────────────────────────────────────
+        # 当前情感会在 Bond 开放度允许的范围内修正风格
+        _NEGATIVE_EMOTIONS = {"SAD", "ANXIOUS", "FRUSTRATED", "ANGRY", "BORED"}
+        _POSITIVE_HIGH_AROUSAL = {"EXCITED", "HAPPY", "PROUD", "SURPRISED"}
+        _TENDER_EMOTIONS = {"LOVING", "GRATEFUL", "EMBARRASSED"}
+
+        if openness >= 0.7:
+            # 亲密关系下，情感对风格有显著影响
+            if emotion_label in _NEGATIVE_EMOTIONS or emotion_valence < -0.3:
+                # Natsume 自身情绪低落时，风格收敛、更内敛
+                tone = f"{tone}_subdued"
+                style = f"{style}（情绪偏低）"
+            elif emotion_label in _TENDER_EMOTIONS:
+                # 温柔/感激/害羞情绪 → 增加柔软质感
+                tone = f"{tone}_tender"
+                style = f"{style}（温柔质感）"
+            elif emotion_label in _POSITIVE_HIGH_AROUSAL and emotion_arousal >= 0.7:
+                # 高唤醒正面情绪 → 更活泼
+                tone = f"{tone}_bright"
+                style = f"{style}（活泼状态）"
+        elif openness >= 0.5:
+            # 中等亲密度下，只有强烈情感才影响风格
+            if emotion_valence < -0.5:
+                tone = f"{tone}_subdued"
+            elif emotion_arousal >= 0.8 and emotion_valence > 0.4:
+                tone = f"{tone}_bright"
+
+        # ── 回声权重（sensitivity 驱动，情感强化）────────────────────────
         echo_modifier = 0.0
         if traits.sensitivity >= 0.7:
-            echo_modifier = 0.1  # 高敏感度 → 回声权重提升
+            echo_modifier = 0.1
+        elif traits.sensitivity >= 0.5:
+            echo_modifier = 0.05
+        # 情感强烈时，回声权重额外提升（更关注对方感受）
+        if abs(emotion_valence) >= 0.5 and openness >= 0.6:
+            echo_modifier = min(0.25, echo_modifier + 0.08)
 
+        # ── 追问倾向（curiosity 驱动，Bond 阶段放大）────────────────────
         follow_up = 0.0
         if traits.curiosity >= 0.6:
-            follow_up = 0.1  # 高好奇心 → 追问倾向提升
+            follow_up = 0.1 * openness  # Bond 越亲密，追问越自然
+        elif traits.curiosity >= 0.4:
+            follow_up = 0.05 * openness
+
+        _logger.debug(
+            "ExpressionAdapter: stage=%s emotion=%s(v=%.2f,a=%.2f) "
+            "openness=%.2f → style=%s tone=%s echo=%.2f followup=%.2f",
+            stage, emotion_label, emotion_valence, emotion_arousal,
+            openness, style, tone, echo_modifier, follow_up,
+        )
 
         return ExpressionHint(
             style_hint=style,

@@ -1114,15 +1114,42 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     except Exception:
         pass  # 降级：不注入人格表达提示
 
+    # ── EMOTION_BINDING 数值字段转自然语言 ──────────────────────────────
+    # echo_intensity → 自然语言共鸣强度描述
+    def _echo_intensity_label(v: float) -> str:
+        if v >= 0.7:
+            return "强烈共鸣"
+        elif v >= 0.4:
+            return "明显共鸣"
+        elif v >= 0.15:
+            return "轻微共鸣"
+        return "无明显共鸣"
+
+    # VAD 三维数值 → 自然语言情感质感描述
+    def _vad_to_label(valence: float, arousal: float, dominance: float) -> str:
+        parts: list[str] = []
+        if valence >= 0.4:
+            parts.append("情绪偏正向")
+        elif valence <= -0.4:
+            parts.append("情绪偏负向")
+        else:
+            parts.append("情绪中性")
+        if arousal >= 0.5:
+            parts.append("激活度高")
+        elif arousal <= -0.3:
+            parts.append("激活度低")
+        if dominance >= 0.4:
+            parts.append("掌控感强")
+        elif dominance <= -0.4:
+            parts.append("掌控感弱")
+        return "，".join(parts) if parts else "情绪平稳"
+
     emotion_binding_block = (
         "EMOTION_BINDING:\n"
         f"- mood_state: {merged_emotion_context.get('mood_state')}\n"
         f"- emotion_tag: {merged_emotion_context.get('emotion_tag')}\n"
         f"- emotion_intensity: {merged_emotion_context.get('emotion_intensity')}\n"
         f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
-        f"- snapshot_source: {snapshot_source}\n"
-        f"- snapshot_captured_ts_ms: {snapshot_captured_ts_ms}\n"
-        f"- snapshot_age_ms: {snapshot_age_ms}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
         # Phase 3: 内心独白注入（替代机械 style_hint 的核心升级）
@@ -1143,31 +1170,25 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         + (
             f"- emotion_timeline_dominant: {_et_dominant}\n"
             f"- emotion_timeline_trend: {_et_trend}\n"
-            f"- emotion_timeline_entry_count: {_et_entry_count}\n"
             f"- emotion_echo_tag: {_echo_tag}\n"
             f"- emotion_echo_hint: {_echo_hint}\n"
-            f"- emotion_echo_intensity: {_echo_intensity:.3f}\n"
+            f"- emotion_echo_intensity: {_echo_intensity_label(_echo_intensity)}\n"
             f"- emotion_echo_bond_depth: {_echo_bond_depth}\n"
             if _et_active else
             "- emotion_timeline_dominant: NONE\n"
             "- emotion_timeline_trend: NONE\n"
         )
-        # ── Ref #39：VAD 连续体（valence/arousal/dominance）────────────
+        # ── Ref #39：VAD 连续体 → 自然语言情感质感 ──────────────────────
         + (
-            f"- emotion_vad_valence: {_vad_valence:.3f}\n"
-            f"- emotion_vad_arousal: {_vad_arousal:.3f}\n"
-            f"- emotion_vad_dominance: {_vad_dominance:.3f}\n"
+            f"- emotion_vad_quality: {_vad_to_label(_vad_valence, _vad_arousal, _vad_dominance)}\n"
             if _vad_active else
-            "- emotion_vad_valence: NONE\n"
-            "- emotion_vad_arousal: NONE\n"
-            "- emotion_vad_dominance: NONE\n"
+            ""
         )
         # ── Phase 6：情感推理结果（AI 自己判断的情绪）────────────────────
         + (
             f"- inferred_user_emotion: {_ie_user_emotion}\n"
             f"- inferred_natsume_emotion: {_ie_natsume_emotion}\n"
             f"- inferred_emotion_reason: {_ie_reason}\n"
-            f"- inferred_emotion_confidence: {_ie_confidence:.2f}\n"
             if _ie_active else
             ""
         )

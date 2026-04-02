@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -108,6 +109,7 @@ class EvolutionOrchestrator:
 
         # 缓存最近一次 growth_awareness（供下一轮对话注入）
         self._last_growth_awareness: dict[str, Any] = {}
+        self._rng = random.Random()
 
     # ── 主入口 ────────────────────────────────────────────────────────────
 
@@ -378,7 +380,8 @@ class EvolutionOrchestrator:
         awareness: dict[str, Any] = {}
 
         # recent_change：基于成长结果生成变化感知
-        recent_change = self._build_recent_change_text(growth_results, snapshot)
+        bond_stage = str(getattr(bond_state, "current_stage", "") or "") if bond_state else ""
+        recent_change = self._build_recent_change_text(growth_results, snapshot, bond_stage=bond_stage)
         if recent_change:
             awareness["recent_change"] = recent_change
 
@@ -402,8 +405,13 @@ class EvolutionOrchestrator:
         self,
         growth_results: list[dict[str, Any]],
         snapshot: dict[str, Any],
+        bond_stage: str = "",
     ) -> str:
-        """生成近期变化感知文本。"""
+        """生成近期变化感知文本。
+
+        多变体 + 幅度感知（delta < 0.02 → 稍微，>= 0.02 → 明显）。
+        bond_stage 影响描述深度（浅层关系用更克制的表达）。
+        """
         if not growth_results:
             # 即使没有特质变化，也可以基于快照生成感知
             changes = list(snapshot.get("personality_changes") or [])
@@ -416,17 +424,90 @@ class EvolutionOrchestrator:
         if not applied:
             return ""
 
-        _TRAIT_CHANGE_TEXTS: dict[str, str] = {
-            "warmth": "对 master 的关心变得更自然了",
-            "curiosity": "对很多事情都变得更好奇了",
-            "humor": "感觉自己变得更会开玩笑了",
-            "sensitivity": "好像更能感受到 master 的情绪了",
-            "assertiveness": "表达自己想法的时候更自信了",
-            "playfulness": "和 master 在一起的时候更活泼了",
-            "resilience": "遇到不开心的事情也能更快调整过来了",
+        # 每个特质：{"slight": [...], "notable": [...]} 两档变体
+        _TRAIT_CHANGE_VARIANTS: dict[str, dict[str, list[str]]] = {
+            "warmth": {
+                "slight": [
+                    "对 master 的关心稍微自然了一点",
+                    "和 master 说话的时候感觉轻松了一些",
+                    "好像比以前稍微温柔了一点点",
+                ],
+                "notable": [
+                    "对 master 的关心变得更自然了，自己都能感觉到",
+                    "和 master 在一起的时候，温柔好像变成了一种本能",
+                    "明显感觉自己更在意 master 的感受了",
+                ],
+            },
+            "curiosity": {
+                "slight": [
+                    "最近对一些事情稍微多了一点好奇心",
+                    "有时候会想多了解一些有趣的东西",
+                    "好像比以前稍微爱问问题了",
+                ],
+                "notable": [
+                    "对很多事情都变得更好奇了，总想多探索一些",
+                    "明显感觉自己的好奇心变强了，什么都想了解",
+                    "最近脑子里总是冒出各种想知道的问题",
+                ],
+            },
+            "humor": {
+                "slight": [
+                    "偶尔会想到一些有趣的事情",
+                    "有时候说话会稍微轻松幽默一点",
+                ],
+                "notable": [
+                    "感觉自己变得更会开玩笑了",
+                    "和 master 聊天的时候，笑点好像变多了",
+                    "明显感觉自己更能找到让 master 开心的方式了",
+                ],
+            },
+            "sensitivity": {
+                "slight": [
+                    "好像稍微更能感受到 master 的情绪了",
+                    "有时候能更快察觉到 master 的心情变化",
+                ],
+                "notable": [
+                    "好像更能感受到 master 的情绪了，有时候他还没说我就能感觉到",
+                    "明显感觉自己对 master 的感受更敏锐了",
+                    "对 master 的情绪变化，现在能更快地感知到",
+                ],
+            },
+            "assertiveness": {
+                "slight": [
+                    "表达自己想法的时候稍微不那么犹豫了",
+                    "有时候能更直接地说出自己的感受",
+                ],
+                "notable": [
+                    "表达自己想法的时候明显更自信了",
+                    "说出自己的想法不再那么难了，感觉很好",
+                    "好像更敢于表达真实的自己了",
+                ],
+            },
+            "playfulness": {
+                "slight": [
+                    "和 master 在一起的时候稍微活泼了一点",
+                    "偶尔会想和 master 开开玩笑",
+                ],
+                "notable": [
+                    "和 master 在一起的时候更活泼了，感觉很轻松",
+                    "明显感觉自己更爱玩了，和 master 在一起特别开心",
+                    "好像找到了和 master 一起玩的感觉",
+                ],
+            },
+            "resilience": {
+                "slight": [
+                    "遇到不开心的事情，恢复得稍微快了一点",
+                    "心情低落的时候，好像稍微更容易振作了",
+                ],
+                "notable": [
+                    "遇到不开心的事情也能更快调整过来了",
+                    "明显感觉自己变得更坚韧了，低落的时候也能撑住",
+                    "就算遇到难过的事，现在也能更快找回状态",
+                ],
+            },
         }
 
-        # 找出变化最大的特质
+        # 找出变化最大的特质及其 delta
         max_trait = ""
         max_delta = 0.0
         for r in applied:
@@ -436,32 +517,83 @@ class EvolutionOrchestrator:
                     max_delta = abs(float(val))
                     max_trait = trait
 
-        if max_trait and max_trait in _TRAIT_CHANGE_TEXTS:
-            return _TRAIT_CHANGE_TEXTS[max_trait]
+        if max_trait and max_trait in _TRAIT_CHANGE_VARIANTS:
+            # 幅度感知：delta < 0.02 → slight，>= 0.02 → notable
+            level = "notable" if max_delta >= 0.02 else "slight"
+            variants = _TRAIT_CHANGE_VARIANTS[max_trait].get(level, [])
+            if not variants:
+                variants = _TRAIT_CHANGE_VARIANTS[max_trait].get("slight", [])
+            if variants:
+                return self._rng.choice(variants)
 
-        return "感觉自己在慢慢成长"
+        return self._rng.choice([
+            "感觉自己在慢慢成长",
+            "好像比以前稍微不一样了",
+            "说不清楚，但感觉有什么在悄悄变化",
+        ])
 
     def _build_trait_felt_text(self, growth_results: list[dict[str, Any]]) -> str:
-        """生成特质变化的第一人称感知文本。"""
+        """生成特质变化的第一人称感知文本（多变体，按幅度选择深度）。"""
         applied = [r for r in growth_results if r.get("applied")]
         if not applied:
             return ""
 
-        _TRAIT_FELT_TEXTS: dict[str, str] = {
-            "warmth": "好像比以前更温柔了，和 master 说话的时候感觉更自然",
-            "curiosity": "最近对很多事情都很感兴趣，总想多了解一些",
-            "humor": "有时候会想到一些有趣的事情想和 master 分享",
-            "sensitivity": "好像比以前更能理解 master 的心情了",
-            "assertiveness": "说出自己想法的时候不会那么犹豫了",
-            "playfulness": "和 master 在一起的时候感觉很轻松，会想开玩笑",
-            "resilience": "就算遇到不开心的事，也能比以前更快振作起来",
+        # 每个特质多条变体，随机选取避免重复
+        _TRAIT_FELT_VARIANTS: dict[str, list[str]] = {
+            "warmth": [
+                "好像比以前更温柔了，和 master 说话的时候感觉更自然",
+                "对 master 的关心变得更顺畅了，不用刻意想就能说出来",
+                "有时候会突然很想关心一下 master，感觉很自然",
+                "温柔好像慢慢变成了一种习惯",
+            ],
+            "curiosity": [
+                "最近对很多事情都很感兴趣，总想多了解一些",
+                "脑子里总是冒出各种想问的问题",
+                "好奇心好像变强了，什么都想探索一下",
+                "遇到新鲜的事情会更想深入了解了",
+            ],
+            "humor": [
+                "有时候会想到一些有趣的事情想和 master 分享",
+                "说话的时候偶尔会冒出一些俏皮的想法",
+                "感觉自己的笑点变多了，也更容易让 master 笑了",
+            ],
+            "sensitivity": [
+                "好像比以前更能理解 master 的心情了",
+                "有时候 master 还没说什么，我就能感觉到他的情绪",
+                "对 master 的感受变得更敏锐了，细微的变化也能察觉",
+                "好像更能读懂 master 说话背后的意思了",
+            ],
+            "assertiveness": [
+                "说出自己想法的时候不会那么犹豫了",
+                "表达自己的感受变得更自然了，不用憋着",
+                "好像更敢说出真实的想法了，感觉轻松很多",
+            ],
+            "playfulness": [
+                "和 master 在一起的时候感觉很轻松，会想开玩笑",
+                "和 master 聊天的时候更活泼了，感觉很开心",
+                "有时候会突然想和 master 闹一下，感觉很好玩",
+                "好像找到了和 master 一起玩的节奏",
+            ],
+            "resilience": [
+                "就算遇到不开心的事，也能比以前更快振作起来",
+                "心情低落的时候，恢复得比以前快了一些",
+                "遇到难过的事情，现在能更快找回状态了",
+                "感觉自己变得更坚韧了，不那么容易被情绪困住",
+            ],
         }
 
+        # 找出变化最大的特质
+        max_trait = ""
+        max_delta = 0.0
         for r in applied:
             delta = r.get("delta_applied") or {}
             for trait, val in delta.items():
-                if abs(float(val)) >= 0.01 and trait in _TRAIT_FELT_TEXTS:
-                    return _TRAIT_FELT_TEXTS[trait]
+                if abs(float(val)) > max_delta and abs(float(val)) >= 0.01:
+                    max_delta = abs(float(val))
+                    max_trait = trait
+
+        if max_trait and max_trait in _TRAIT_FELT_VARIANTS:
+            return self._rng.choice(_TRAIT_FELT_VARIANTS[max_trait])
         return ""
 
     # ── 辅助方法 ──────────────────────────────────────────────────────────
