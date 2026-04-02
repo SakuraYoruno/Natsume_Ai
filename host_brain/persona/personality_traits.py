@@ -46,6 +46,34 @@ DEFAULT_BASELINE: dict[str, float] = {
     "resilience": 0.60,
 }
 
+# ---------------------------------------------------------------------------
+# 特质表达阈值——低于阈值时该特质「存在但不主动表达」
+# ---------------------------------------------------------------------------
+# 设计原则：
+#   - 阈值不是「有/无」的开关，而是「主动表达」的门槛
+#   - 低于阈值时，特质仍然存在，只是不会主动触发对应行为
+#   - 例如 humor=0.35 < 0.45 → Natsume 不会主动开玩笑，但被逗时仍会笑
+TRAIT_EXPRESSION_THRESHOLDS: dict[str, float] = {
+    "warmth": 0.30,        # 温柔：几乎总是表达，阈值很低
+    "curiosity": 0.40,     # 好奇心：中低阈值，容易触发追问
+    "humor": 0.45,         # 幽默感：需要一定积累才会主动开玩笑
+    "sensitivity": 0.35,   # 敏感度：低阈值，容易感知情绪变化
+    "assertiveness": 0.40, # 自信度：需要一定自信才会主动表达意见
+    "playfulness": 0.45,   # 俏皮度：需要一定活跃度才会主动撒娇
+    "resilience": 0.35,    # 韧性：低阈值，基本总是表现出一定韧性
+}
+
+# 特质中文名映射（用于日志/描述）
+TRAIT_CN_NAMES: dict[str, str] = {
+    "warmth": "温柔",
+    "curiosity": "好奇心",
+    "humor": "幽默感",
+    "sensitivity": "敏感度",
+    "assertiveness": "自信",
+    "playfulness": "俏皮",
+    "resilience": "韧性",
+}
+
 
 def _clamp_trait(value: float) -> float:
     """将特质值截断到 [0.0, 1.0] 范围。"""
@@ -133,6 +161,50 @@ class PersonalityTraits:
     def as_dict(self) -> dict[str, float]:
         """转为字典。"""
         return {name: round(getattr(self, name), 4) for name in TRAIT_NAMES}
+
+    def is_expressive(self, trait_name: str) -> bool:
+        """判断某特质是否达到主动表达阈值。
+
+        低于阈值时，该特质「存在但不主动表达」——
+        例如 humor 低于阈值时不会主动开玩笑，但被逗时仍会笑。
+
+        Args:
+            trait_name: 特质名称（如 "humor"）
+
+        Returns:
+            True 表示该特质可以主动表达
+        """
+        val = float(getattr(self, trait_name, 0.0))
+        threshold = TRAIT_EXPRESSION_THRESHOLDS.get(trait_name, 0.5)
+        return val >= threshold
+
+    def get_expressive_traits(self) -> list[str]:
+        """获取所有达到表达阈值的特质名称列表。"""
+        return [name for name in TRAIT_NAMES if self.is_expressive(name)]
+
+    def get_suppressed_traits(self) -> list[str]:
+        """获取所有未达到表达阈值的特质名称列表（存在但不主动表达）。"""
+        return [name for name in TRAIT_NAMES if not self.is_expressive(name)]
+
+    def expression_summary(self) -> dict[str, Any]:
+        """生成特质表达状态摘要，供 prompt_builder 注入使用。
+
+        Returns:
+            包含 expressive（可表达特质）和 suppressed（抑制特质）的字典，
+            值为中文名列表，方便 LLM 理解。
+        """
+        expressive_cn = [
+            TRAIT_CN_NAMES.get(name, name)
+            for name in self.get_expressive_traits()
+        ]
+        suppressed_cn = [
+            TRAIT_CN_NAMES.get(name, name)
+            for name in self.get_suppressed_traits()
+        ]
+        return {
+            "expressive": expressive_cn,
+            "suppressed": suppressed_cn,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PersonalityTraits":

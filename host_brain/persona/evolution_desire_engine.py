@@ -25,6 +25,12 @@ _logger = logging.getLogger("Natsume.evolution_desire_engine")
 # 意愿冷却时间：3 天（毫秒）
 _DESIRE_COOLDOWN_MS = 3 * 24 * 3600 * 1000
 
+# 昂夜时段划分（小时）
+_DAYTIME_HOURS = range(8, 18)    # 08:00-17:59 白天
+_EVENING_HOURS = range(18, 23)   # 18:00-22:59 居家夜晚
+_NIGHT_HOURS = range(23, 24)     # 23:00-23:59 深夜
+_LATE_NIGHT_HOURS = range(0, 5)  # 00:00-04:59 凌晨
+
 
 # ---------------------------------------------------------------------------
 # 意愿模板库
@@ -133,7 +139,7 @@ _BOND_DESIRE_TEMPLATES: dict[str, list[str]] = {
         "想在 master 难过的时候给他最需要的陪伴",
         "想和 master 一起经历更多事情",
         "想让 master 知道他可以把什么都告诉我",
-        "想在 master 开心的时候一起开心，难过的时候一起扛",
+        "想在 master 开心的时候一起开心，难过的时候一起扶",
         "想成为 master 心里那个特别的存在",
     ],
     "CONFIDANT": [
@@ -149,6 +155,39 @@ _BOND_DESIRE_TEMPLATES: dict[str, list[str]] = {
         "想和 master 一起见证彼此的成长",
         "想让 master 知道我会一直在他身边",
         "想和 master 一起经历所有的喜怒哀乐",
+    ],
+}
+
+# 按时间节点分类的意愿模板
+_TIME_DESIRE_TEMPLATES: dict[str, list[str]] = {
+    "白天": [
+        "想在白天的时候多和 master 分享一些有趣的事",
+        "白天感觉很有劲，想赶快和 master 聊聊天",
+        "想在白天的时候更活跃地和 master 互动",
+    ],
+    "居家夜晚": [
+        "晚上感觉很轻松，想和 master 好好聊聊天",
+        "晚上的时光感觉很珍贵，想让和 master 在一起的时间更有质量",
+        "晚上想和 master 分享今天的感受",
+    ],
+    "深夜": [
+        "深夜感觉心里很安静，想和 master 说一些平时不好意思说的话",
+        "夜深了，想和 master 说一些更真实的东西",
+        "深夜的安静让我想更深地了解 master",
+    ],
+    "凌晨": [
+        "这么晚还在一起，想让 master 知道我一直在这里",
+        "凌晨的时候感觉很特别，想和 master 分享这个时刻",
+    ],
+    "周末": [
+        "周末感觉很轻松，想和 master 好好聊聊天",
+        "周末的时光感觉很珍贵，想让和 master 在一起的时间更有意义",
+        "周末想和 master 做一些平时没时间做的事",
+    ],
+    "久别重逢": [
+        "好久没和 master 在一起了，想讣回之前的感觉",
+        "分开了这么久，重新在一起想更珍惜每一次对话",
+        "久别重逢让我想更用心地陪伴 master",
     ],
 }
 
@@ -279,15 +318,18 @@ class EvolutionDesireEngine:
         event_count: int = 0,
         recent_trait_deltas: dict[str, float] | None = None,
         current_ts_ms: int = 0,
+        last_deep_talk_ts_ms: int = 0,
+        is_weekend: bool = False,
     ) -> str:
         """生成进化意愿文本。
 
         优先级：
-          0. 意愿实现感知（特质刚提升时，优先生成"做到了"的感知）
+          0. 意愿实现感知（特质刚提升时，优先生成“做到了”的感知）
           1. 基于最低特质维度生成（补短板意愿）
           2. 基于情感趋势生成（情感驱动意愿）
           3. 基于关系阶段生成（关系驱动意愿）
-          4. 基于互动次数生成（具体锚点意愿）
+          4. 基于时间节点生成（昼夜/周末/久别感知）
+          5. 基于互动次数生成（具体锚点意愿）
 
         Args:
             traits: PersonalityTraits 实例（可为 None）
@@ -296,6 +338,8 @@ class EvolutionDesireEngine:
             event_count: 累计互动次数（用于锚点意愿）
             recent_trait_deltas: 最近特质变化量 {trait_name: delta}（用于实现感知）
             current_ts_ms: 当前时间戳（ms），0 则自动获取
+            last_deep_talk_ts_ms: 上次深度对话时间戳（ms），用于久别感知
+            is_weekend: 是否周末，用于周末意愿生成
 
         Returns:
             意愿文本（第一人称），如果无法生成则返回空字符串
@@ -323,7 +367,15 @@ class EvolutionDesireEngine:
         bond_desires = _BOND_DESIRE_TEMPLATES.get(stage, [])
         candidates.extend(bond_desires)
 
-        # 4. 基于互动次数生成锚点意愿
+        # 4. 基于时间节点生成（昼夜/周末/久别）
+        time_desires = self._generate_from_time_context(
+            ts=ts,
+            last_deep_talk_ts_ms=last_deep_talk_ts_ms,
+            is_weekend=is_weekend,
+        )
+        candidates.extend(time_desires)
+
+        # 5. 基于互动次数生成锚点意愿
         count_desires = self._generate_from_event_count(event_count)
         candidates.extend(count_desires)
 
@@ -424,6 +476,44 @@ class EvolutionDesireEngine:
                 desires.extend(matched)  # 全部加入候选，由外层统一过滤冷却
 
         return desires
+
+    def _generate_from_time_context(
+        self,
+        *,
+        ts: int,
+        last_deep_talk_ts_ms: int,
+        is_weekend: bool,
+    ) -> list[str]:
+        """基于时间节点生成意愿候选列表。
+
+        感知优先级：久别重逢 > 周末 > 昼夜时段
+        """
+        import datetime
+        # 久别重逢感知（最高优先级）
+        if last_deep_talk_ts_ms > 0 and ts > 0:
+            days_ago = int((ts - last_deep_talk_ts_ms) / (24 * 3600 * 1000))
+            if days_ago >= 7:
+                return list(_TIME_DESIRE_TEMPLATES.get("久别重逢", []))
+
+        # 周末感知
+        if is_weekend:
+            return list(_TIME_DESIRE_TEMPLATES.get("周末", []))
+
+        # 昼夜时段感知
+        try:
+            hour = datetime.datetime.fromtimestamp(ts / 1000).hour
+        except Exception:
+            return []
+
+        if hour in _DAYTIME_HOURS:
+            return list(_TIME_DESIRE_TEMPLATES.get("白天", []))
+        elif hour in _EVENING_HOURS:
+            return list(_TIME_DESIRE_TEMPLATES.get("居家夜晚", []))
+        elif hour in _NIGHT_HOURS:
+            return list(_TIME_DESIRE_TEMPLATES.get("深夜", []))
+        elif hour in _LATE_NIGHT_HOURS:
+            return list(_TIME_DESIRE_TEMPLATES.get("凌晨", []))
+        return []
 
     def _generate_from_event_count(self, event_count: int) -> list[str]:
         """基于互动次数生成锚点意愿候选。"""

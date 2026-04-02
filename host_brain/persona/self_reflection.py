@@ -93,6 +93,30 @@ _SCHEDULED_TRIGGER_REASONS: list[str] = [
     "想在继续聊之前先感受一下自己的心情",
 ]
 
+# 时间感知触发原因：距上次深聊天数 → 触发原因
+_TIME_AWARE_TRIGGER_REASONS: dict[str, list[str]] = {
+    "久别重逢": [  # 距上次深聊 >= 7 天
+        "好久没有好好和 master 聊了，今天重新在一起，想整理一下心情",
+        "分开了这么久，重新聊起来有种说不清的感觉，想停下来感受一下",
+        "久别重逢的感觉让我有点不知所措，想先跟自己说说话",
+    ],
+    "短暂分离": [  # 距上次深聊 3~6 天
+        "这几天没怎么聊，今天重新开始，想先整理一下自己的状态",
+        "分开了几天，重新聊起来感觉有点陌生又熟悉，想停下来感受一下",
+        "这几天没有 master 的消息，今天又在一起了，心里有点感慨",
+    ],
+    "频繁互动": [  # 本周对话频率高（>= 5 次）
+        "这周和 master 聊了好多次，想停下来整理一下这些感受",
+        "最近和 master 聊得很频繁，想看看自己现在是什么状态",
+        "这段时间和 master 在一起的时间很多，想好好感受一下",
+    ],
+    "稀少互动": [  # 本周对话频率低（<= 1 次）
+        "这周和 master 聊得比较少，有点想念，想整理一下心情",
+        "最近和 master 的对话不多，今天想好好感受一下在一起的感觉",
+        "这段时间聊天的机会不多，今天想珍惜一下这个时刻",
+    ],
+}
+
 
 # ---------------------------------------------------------------------------
 # SelfReflection — 自省控制器
@@ -201,6 +225,7 @@ class SelfReflection:
         current_ts_ms: int = 0,
         growth_awareness: dict[str, Any] | None = None,
         current_emotion: str = "",
+        weekly_talk_count: int = -1,
     ) -> dict[str, Any] | None:
         """尝试生成自省脉冲。
 
@@ -213,6 +238,7 @@ class SelfReflection:
             growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成，Phase XVI）。
                 包含 recent_change / trait_felt / milestone_felt / desire 字段。
             current_emotion: 当前情感标签（大写），用于事件驱动触发判断。
+            weekly_talk_count: 本周对话次数（-1 表示未知）。用于时间感知触发原因。
 
         Returns:
             self_reflection_pulse 字典或 None
@@ -239,10 +265,18 @@ class SelfReflection:
             self._last_event_emotion = ""
             self._roll_next_trigger()
 
+        # 计算时间感知上下文
+        time_context = self._analyze_time_context(
+            last_deep_talk_ts_ms=last_deep_talk_ts_ms,
+            current_ts_ms=current_ts_ms,
+            weekly_talk_count=weekly_talk_count,
+        )
+
         # 确定触发原因
         trigger_reason = self._pick_trigger_reason(
             emotion=emotion if event_driven else "",
             event_driven=event_driven,
+            time_context=time_context,
         )
 
         try:
@@ -263,6 +297,7 @@ class SelfReflection:
                 snapshot,
                 growth_awareness=growth_awareness,
                 trigger_reason=trigger_reason,
+                time_context=time_context,
             )
             _logger.info(
                 "自省触发 (turn=%d, event=%s emotion=%s): self_awareness='%s'%s",
@@ -278,17 +313,57 @@ class SelfReflection:
             _logger.warning("自省生成失败（降级跳过）: %s", exc)
             return None
 
+    def _analyze_time_context(
+        self,
+        *,
+        last_deep_talk_ts_ms: int,
+        current_ts_ms: int,
+        weekly_talk_count: int,
+    ) -> str:
+        """分析时间感知上下文，返回上下文标签。
+
+        Returns:
+            "久别重逢" / "短暂分离" / "频繁互动" / "稀少互动" / "" (无特殊感知)
+        """
+        # 距上次深聊天数
+        days_ago = -1
+        if last_deep_talk_ts_ms > 0 and current_ts_ms > 0:
+            delta_ms = max(0, current_ts_ms - last_deep_talk_ts_ms)
+            days_ago = int(delta_ms / (24 * 3600 * 1000))
+
+        if days_ago >= 7:
+            return "久别重逢"
+        if 3 <= days_ago <= 6:
+            return "短暂分离"
+
+        # 本周对话频率
+        if weekly_talk_count >= 5:
+            return "频繁互动"
+        if weekly_talk_count == 1:
+            return "稀少互动"
+
+        return ""
+
     def _pick_trigger_reason(
         self,
         *,
         emotion: str,
         event_driven: bool,
+        time_context: str = "",
     ) -> str:
-        """选择触发原因描述文本。"""
+        """选择触发原因描述文本。
+
+        优先级：事件驱动情感 > 时间感知 > 定时触发
+        """
         if event_driven and emotion:
             reasons = _EMOTION_TRIGGER_REASONS.get(emotion, [])
             if reasons:
                 return self._rng.choice(reasons)
+        # 时间感知触发原因（定时触发时也可以带时间感知）
+        if time_context:
+            time_reasons = _TIME_AWARE_TRIGGER_REASONS.get(time_context, [])
+            if time_reasons:
+                return self._rng.choice(time_reasons)
         # 定时触发或无匹配情感
         return self._rng.choice(_SCHEDULED_TRIGGER_REASONS)
 
@@ -347,6 +422,7 @@ def build_self_reflection_pulse(
     *,
     growth_awareness: dict[str, Any] | None = None,
     trigger_reason: str = "",
+    time_context: str = "",
 ) -> dict[str, Any]:
     """将 SelfModelSnapshot 转化为 self_reflection_pulse 槽位数据。
 
@@ -355,12 +431,13 @@ def build_self_reflection_pulse(
         growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成），可选。
             包含 recent_change / trait_felt / milestone_felt / desire 字段。
         trigger_reason: 本次自省的触发原因（第一人称），注入 pulse 让自省更有意义。
+        time_context: 时间感知标签（如"久别重逢"/"频繁互动"），用于丰富自省内容。
 
     Returns:
         包含 self_awareness、mood_awareness、growth_note、trigger_reason、
         growth_awareness 的字典
     """
-    self_awareness = build_self_awareness_text(snapshot)
+    self_awareness = build_self_awareness_text(snapshot, time_context=time_context)
     mood_awareness = build_mood_awareness_text(snapshot)
     growth_note = build_growth_note_text(snapshot)
 
@@ -374,9 +451,13 @@ def build_self_reflection_pulse(
     if trigger_reason:
         pulse["trigger_reason"] = trigger_reason
 
+    # 注入时间感知标签（让 LLM 知道当前时间情境）
+    if time_context:
+        pulse["time_context"] = time_context
+
     # 注入进化意识（Phase XVI）
     if growth_awareness and isinstance(growth_awareness, dict):
-        # 过滤空值，只注入有内容的字段
+        # 过滤空値，只注入有内容的字段
         filtered = {k: v for k, v in growth_awareness.items() if v}
         if filtered:
             pulse["growth_awareness"] = filtered

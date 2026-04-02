@@ -41,6 +41,15 @@ _logger = logging.getLogger("Natsume.emotion_persistence")
 # 可通过环境变量 HOST_EMOTION_PERSISTENCE_DECAY_RATE 覆盖
 DECAY_RATE = float(os.environ.get("HOST_EMOTION_PERSISTENCE_DECAY_RATE", "0.1"))
 
+# 情感记忆锚点：极强情感的衰减减缓系数（值越小衰减越慢）
+# 当上次情感效价绝对值 >= 此阈值时，视为「强情感记忆」，衰减率乘以此系数
+_ANCHOR_VALENCE_THRESHOLD = 0.6   # 效价绝对值 >= 0.6 触发锚点
+_ANCHOR_DECAY_MULTIPLIER = 0.5    # 衰减率 × 0.5，即半衰期翻倍（约 14 小时）
+
+# 久别重逢阈值（小时）
+_REUNION_THRESHOLD_HOURS = 7 * 24   # >= 7 天视为「久别重逢」
+_SHORT_ABSENCE_THRESHOLD_HOURS = 3 * 24  # >= 3 天视为「短暂分离」
+
 # 中性基线（可通过环境变量覆盖）
 DEFAULT_MOOD_BASELINE = float(os.environ.get("HOST_EMOTION_BASELINE_VALENCE", "0.0"))
 DEFAULT_BASELINE_AROUSAL = float(os.environ.get("HOST_EMOTION_BASELINE_AROUSAL", "0.3"))
@@ -87,9 +96,11 @@ class RestoredEmotionState:
     decay_factor: float         # 衰减因子（0~1，1=完全保留）
     hours_elapsed: float        # 离线时长（小时）
     from_baseline: bool         # 是否从基线启动（无持久化记录）
+    reunion_type: str = ""      # 重逢类型："reunion"=久别重逢 / "short_absence"=短暂分离 / ""=正常
+    anchor_active: bool = False # 是否触发了情感记忆锚点（强情感衰减减缓）
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "valence": round(self.valence, 4),
             "arousal": round(self.arousal, 4),
             "dominance": round(self.dominance, 4),
@@ -97,6 +108,21 @@ class RestoredEmotionState:
             "hours_elapsed": round(self.hours_elapsed, 2),
             "from_baseline": self.from_baseline,
         }
+        if self.reunion_type:
+            d["reunion_type"] = self.reunion_type
+        if self.anchor_active:
+            d["anchor_active"] = True
+        return d
+
+    @property
+    def is_reunion(self) -> bool:
+        """是否为久别重逢（>= 7 天）。"""
+        return self.reunion_type == "reunion"
+
+    @property
+    def is_short_absence(self) -> bool:
+        """是否为短暂分离（3~7 天）。"""
+        return self.reunion_type == "short_absence"
 
 
 # ---------------------------------------------------------------------------
@@ -296,28 +322,66 @@ class EmotionPersistence:
         elapsed_ms = max(0, now_ts - state.last_session_end_ts_ms)
         hours_elapsed = elapsed_ms / (3600.0 * 1000.0)
 
-        # 计算衰减因子
-        decay_factor = math.exp(-self._decay_rate * hours_elapsed)
+        # 判断重逢类型
+        reunion_type = ""
+        if hours_elapsed >= _REUNION_THRESHOLD_HOURS:
+            reunion_type = "reunion"
+        elif hours_elapsed >= _SHORT_ABSENCE_THRESHOLD_HOURS:
+            reunion_type = "short_absence"
+
+        # 情感记忆锚点：极强情感衰减减缓
+        anchor_active = abs(state.valence) >= _ANCHOR_VALENCE_THRESHOLD
+        effective_decay_rate = (
+            self._decay_rate * _ANCHOR_DECAY_MULTIPLIER
+            if anchor_active
+            else self._decay_rate
+        )
+
+        # 计算衰减因子（使用有效衰减率）
+        decay_factor = math.exp(-effective_decay_rate * hours_elapsed)
         decay_factor = max(0.0, min(1.0, decay_factor))
 
-        # 恢复：向基线回归
+        # 久别重逢：在基线回归基础上叠加「重逢唤醒」效果
+        # 久别重逢时 arousal 略微提升（期待感），valence 向正向偏移一点
+        reunion_valence_boost = 0.0
+        reunion_arousal_boost = 0.0
+        if reunion_type == "reunion":
+            # 久别重逢：无论上次情感如何，都有轻微的期待感唤醒
+            reunion_arousal_boost = 0.15
+            # 如果上次是正向情感，重逢时正向偏移；负向情感则不叠加（避免强制正向）
+            if state.valence >= 0:
+                reunion_valence_boost = 0.1
+        elif reunion_type == "short_absence":
+            reunion_arousal_boost = 0.08
+            if state.valence >= 0:
+                reunion_valence_boost = 0.05
+
+        # 恢复：向基线回归 + 重逢加成
         restored_valence = (
             state.valence * decay_factor
             + state.mood_baseline * (1.0 - decay_factor)
+            + reunion_valence_boost
         )
         restored_arousal = (
             state.arousal * decay_factor
             + self._baseline_arousal * (1.0 - decay_factor)
+            + reunion_arousal_boost
         )
         restored_dominance = (
             state.dominance * decay_factor
             + self._baseline_dominance * (1.0 - decay_factor)
         )
 
+        # 钳位到合理范围
+        restored_valence = max(-1.0, min(1.0, restored_valence))
+        restored_arousal = max(0.0, min(1.0, restored_arousal))
+        restored_dominance = max(-1.0, min(1.0, restored_dominance))
+
         _logger.info(
-            "情感恢复: user=%s hours=%.1f decay=%.3f v=%.3f→%.3f",
+            "情感恢复: user=%s hours=%.1f decay=%.3f v=%.3f→%.3f anchor=%s reunion=%s",
             uid, hours_elapsed, decay_factor,
             state.valence, restored_valence,
+            anchor_active, reunion_type or "none",
         )
 
         return RestoredEmotionState(
@@ -327,6 +391,8 @@ class EmotionPersistence:
             decay_factor=round(decay_factor, 4),
             hours_elapsed=round(hours_elapsed, 2),
             from_baseline=False,
+            reunion_type=reunion_type,
+            anchor_active=anchor_active,
         )
 
     # ── 查询 ──────────────────────────────────────────────────────────────

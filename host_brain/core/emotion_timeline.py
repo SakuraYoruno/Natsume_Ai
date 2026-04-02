@@ -143,6 +143,90 @@ class EmotionTimeline:
             "time_range_ms": (entries[0].ts_ms, entries[-1].ts_ms),
         }
 
+    def build_cross_day_comparison(
+        self,
+        *,
+        today_window_ms: int = 86_400_000,
+        yesterday_window_ms: int = 86_400_000,
+    ) -> dict[str, Any]:
+        """跨天情感对比——将今天与昨天的情感状态进行对比，生成自然语言描述。
+
+        返回字典包含：
+        - comparison_text: 第一人称跨天对比描述（自然语言）
+        - today_dominant: 今天主导情感
+        - yesterday_dominant: 昨天主导情感
+        - today_avg_valence: 今天平均效价
+        - yesterday_avg_valence: 昨天平均效价
+        - valence_delta: 效价变化量（今天 - 昨天）
+        - mood_shift: 情感变化方向（"better" / "worse" / "stable"）
+        """
+        from host_brain.core.ids import now_ms as _now_ms
+        now_value = _now_ms()
+
+        # 今天的条目（最近 24 小时）
+        today_entries = self.query(since_ms=now_value - today_window_ms, limit=200)
+        # 昨天的条目（24~48 小时前）
+        yesterday_entries = self.query(
+            since_ms=now_value - today_window_ms - yesterday_window_ms,
+            until_ms=now_value - today_window_ms,
+            limit=200,
+        )
+
+        # 如果昨天没有数据，返回空对比
+        if not yesterday_entries:
+            return {
+                "comparison_text": "",
+                "today_dominant": "NEUTRAL",
+                "yesterday_dominant": "NEUTRAL",
+                "today_avg_valence": 0.0,
+                "yesterday_avg_valence": 0.0,
+                "valence_delta": 0.0,
+                "mood_shift": "stable",
+            }
+
+        def _dominant(entries: list) -> str:
+            counts: dict[str, int] = {}
+            for e in entries:
+                counts[e.emotion_tag] = counts.get(e.emotion_tag, 0) + 1
+            return max(counts, key=lambda k: counts[k]) if counts else "NEUTRAL"
+
+        def _avg_valence(entries: list) -> float:
+            if not entries:
+                return 0.0
+            return sum(e.valence for e in entries) / len(entries)
+
+        today_dominant = _dominant(today_entries) if today_entries else "NEUTRAL"
+        yesterday_dominant = _dominant(yesterday_entries)
+        today_avg = _avg_valence(today_entries)
+        yesterday_avg = _avg_valence(yesterday_entries)
+        delta = today_avg - yesterday_avg
+
+        if delta > 0.15:
+            mood_shift = "better"
+        elif delta < -0.15:
+            mood_shift = "worse"
+        else:
+            mood_shift = "stable"
+
+        comparison_text = _build_cross_day_text(
+            today_dominant=today_dominant,
+            yesterday_dominant=yesterday_dominant,
+            today_avg=today_avg,
+            yesterday_avg=yesterday_avg,
+            mood_shift=mood_shift,
+            has_today=bool(today_entries),
+        )
+
+        return {
+            "comparison_text": comparison_text,
+            "today_dominant": today_dominant,
+            "yesterday_dominant": yesterday_dominant,
+            "today_avg_valence": round(today_avg, 3),
+            "yesterday_avg_valence": round(yesterday_avg, 3),
+            "valence_delta": round(delta, 3),
+            "mood_shift": mood_shift,
+        }
+
     def rebuild_summary(self, *, window_ms: int = 300_000) -> dict[str, Any]:
         """重建情感轨迹摘要（用于 LLM 上下文注入）（M29-E OPT-9）。
 
@@ -317,6 +401,36 @@ from host_brain.core.emotion_constants import (  # noqa: E402
     EMOTION_TAG_ZH as _EMOTION_ZH,
     EMOTION_TAG_TO_VAD as _SHARED_VAD_MAP,
 )
+
+
+def _build_cross_day_text(
+    *,
+    today_dominant: str,
+    yesterday_dominant: str,
+    today_avg: float,
+    yesterday_avg: float,
+    mood_shift: str,
+    has_today: bool,
+) -> str:
+    """生成跨天情感对比的第一人称自然语言描述。"""
+    today_zh = _EMOTION_ZH.get(today_dominant, "平静")
+    yesterday_zh = _EMOTION_ZH.get(yesterday_dominant, "平静")
+
+    if not has_today:
+        return f"昨天整体是{yesterday_zh}的状态，今天还没有太多感受。"
+
+    if mood_shift == "better":
+        if today_dominant == yesterday_dominant:
+            return f"今天和昨天一样都是{today_zh}的感觉，但整体比昨天好了一些。"
+        return f"昨天感觉{yesterday_zh}，今天变成了{today_zh}，心情比昨天好多了。"
+    elif mood_shift == "worse":
+        if today_dominant == yesterday_dominant:
+            return f"今天和昨天都是{today_zh}的状态，但感觉比昨天低落了一些。"
+        return f"昨天还是{yesterday_zh}的，今天变成了{today_zh}，心情比昨天差了一点。"
+    else:
+        if today_dominant == yesterday_dominant:
+            return f"今天和昨天差不多，都是{today_zh}的状态，挺稳定的。"
+        return f"昨天是{yesterday_zh}的感觉，今天是{today_zh}，整体变化不大。"
 
 
 def _arc_to_diary_text(

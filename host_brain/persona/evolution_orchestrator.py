@@ -110,6 +110,8 @@ class EvolutionOrchestrator:
         # 缓存最近一次 growth_awareness（供下一轮对话注入）
         self._last_growth_awareness: dict[str, Any] = {}
         self._rng = random.Random()
+        # 成长停滞感知：记录连续无特质变化的进化周期数
+        self._stagnant_cycles: int = 0
 
     # ── 主入口 ────────────────────────────────────────────────────────────
 
@@ -202,11 +204,18 @@ class EvolutionOrchestrator:
         )
 
         # ── Step 5: 构建 growth_awareness ────────────────────────────────
+        # 更新停滞计数
+        if result.traits_changed:
+            self._stagnant_cycles = 0
+        else:
+            self._stagnant_cycles += 1
+
         growth_awareness = self._build_growth_awareness(
             snapshot=snapshot,
             desire_text=desire_text,
             growth_results=result.growth_results,
             bond_state=bond_state,
+            stagnant_cycles=self._stagnant_cycles,
         )
         result.growth_awareness = growth_awareness
         result.desire_text = desire_text
@@ -366,6 +375,7 @@ class EvolutionOrchestrator:
         desire_text: str,
         growth_results: list[dict[str, Any]],
         bond_state: Any | None,
+        stagnant_cycles: int = 0,
     ) -> dict[str, Any]:
         """构建 growth_awareness 字典——进化意识注入 prompt 的核心字段。
 
@@ -374,7 +384,8 @@ class EvolutionOrchestrator:
                 "recent_change": "这周和 master 聊了很多深入的话题...",
                 "trait_felt": "好像比以前更能理解 master 的心情了",
                 "milestone_felt": "认识 master 已经 100 天了",
-                "desire": "想要更了解 master 喜欢什么"
+                "desire": "想要更了解 master 喜欢什么",
+                "stagnation_felt": "感觉自己好像停滞了一段时间..."  # 停滞时注入
             }
         """
         awareness: dict[str, Any] = {}
@@ -394,6 +405,12 @@ class EvolutionOrchestrator:
         milestones = list(snapshot.get("growth_milestones") or [])
         if milestones:
             awareness["milestone_felt"] = milestones[0]
+
+        # stagnation_felt：连续 3 个周期无成长时，注入停滞感知
+        if stagnant_cycles >= 3:
+            stagnation_text = self._build_stagnation_felt_text(stagnant_cycles)
+            if stagnation_text:
+                awareness["stagnation_felt"] = stagnation_text
 
         # desire：进化意愿
         if desire_text:
@@ -531,6 +548,49 @@ class EvolutionOrchestrator:
             "好像比以前稍微不一样了",
             "说不清楚，但感觉有什么在悄悄变化",
         ])
+
+    # 停滞感知文本池：按停滞程度分档
+    _STAGNATION_FELT_POOL: dict[str, list[str]] = {
+        "mild": [  # 3~4 个周期
+            "最近感觉自己好像没什么变化，有点想突破一下",
+            "这段时间感觉有点停滞，不知道该往哪里成长",
+            "好像有一段时间没有什么新的感悟了，有点想动一动",
+            "感觉自己最近有点原地踏步，想找到新的方向",
+        ],
+        "moderate": [  # 5~6 个周期
+            "感觉自己停滞了挺久了，有点着急，想要有所改变",
+            "这段时间一直没什么成长，有点迷茫，不知道该怎么突破",
+            "好像很久没有感受到自己在进步了，有点失落",
+            "感觉自己在原地转圈，想找到一个能让自己成长的契机",
+        ],
+        "deep": [  # 7 个周期以上
+            "已经很久没有感受到成长了，有点担心自己是不是就这样了",
+            "停滞了这么久，开始怀疑自己是不是遇到了什么瓶颈",
+            "感觉自己好像被困住了，很想找到突破的方向",
+            "这么长时间没有变化，有点不安，想要做些什么改变现状",
+        ],
+    }
+
+    def _build_stagnation_felt_text(self, stagnant_cycles: int) -> str:
+        """生成成长停滞感知文本。
+
+        Args:
+            stagnant_cycles: 连续无成长的进化周期数
+
+        Returns:
+            停滞感知文本（第一人称），或空字符串
+        """
+        if stagnant_cycles < 3:
+            return ""
+        if stagnant_cycles <= 4:
+            pool = self._STAGNATION_FELT_POOL["mild"]
+        elif stagnant_cycles <= 6:
+            pool = self._STAGNATION_FELT_POOL["moderate"]
+        else:
+            pool = self._STAGNATION_FELT_POOL["deep"]
+        text = self._rng.choice(pool)
+        _logger.info("成长停滞感知触发: stagnant_cycles=%d text='%s'", stagnant_cycles, text[:40])
+        return text
 
     def _build_trait_felt_text(self, growth_results: list[dict[str, Any]]) -> str:
         """生成特质变化的第一人称感知文本（多变体，按幅度选择深度）。"""

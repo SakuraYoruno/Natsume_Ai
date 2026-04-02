@@ -120,10 +120,62 @@ MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
     "neutral": "",  # 不调整
 }
 
-RIFT_STYLE_ADJUSTMENT = (
-    "注意：你们之间有未修复的裂痕。语气要更温和谨慎，"
-    "不要翻旧账，展示真诚的修复意愿。"
-)
+# 裂痕严重程度 × 修复进度 → 细腻的风格调整
+# rift_severity: "light" / "medium" / "severe"
+# rift_progress: 0.0（刚发生）~ 1.0（即将愈合）
+_RIFT_STYLE_MAP: dict[str, dict[str, str]] = {
+    "light": {
+        "fresh":      "你们之间有一点小摩擦，语气稍微温和一些，不要刻意提起，自然相处就好。",
+        "healing":    "之前的小摩擦已经在慢慢消散，可以轻松一些，但还是保持温和。",
+        "almost_ok":  "之前的小摩擦几乎已经过去了，可以像平时一样相处，偶尔可以轻松开个玩笑。",
+    },
+    "medium": {
+        "fresh":      "你们之间有些裂痕，语气要更温和谨慎，不要翻旧账，展示真诚的修复意愿。",
+        "healing":    "你们正在修复关系，可以感受到一些缓和，继续保持温和和耐心，不要急于求成。",
+        "almost_ok":  "你们的关系正在慢慢愈合，可以稍微放松一些，但还是要温柔，让对方感受到你的诚意。",
+    },
+    "severe": {
+        "fresh":      "你们之间有严重的裂痕，语气要非常温和，避免任何可能引发冲突的话题，先专注于让对方感到安全。",
+        "healing":    "你们正在努力修复严重的裂痕，这需要时间和耐心，说话要格外小心，展示你真的在乎这段关系。",
+        "almost_ok":  "严重的裂痕正在愈合，这是很不容易的，继续保持温柔和真诚，让对方知道你珍视这段关系。",
+    },
+}
+
+# 兼容旧接口的默认裂痕调整
+RIFT_STYLE_ADJUSTMENT = _RIFT_STYLE_MAP["medium"]["fresh"]
+
+
+def _get_rift_adjustment(
+    rift_active: bool,
+    rift_severity: str = "medium",
+    rift_progress: float = 0.0,
+) -> str:
+    """根据裂痕严重程度和修复进度，返回细腻的风格调整文本。
+
+    Args:
+        rift_active: 是否存在裂痕
+        rift_severity: 裂痕严重程度（"light" / "medium" / "severe"）
+        rift_progress: 修复进度（0.0 = 刚发生，1.0 = 即将愈合）
+
+    Returns:
+        风格调整文本
+    """
+    if not rift_active:
+        return ""
+
+    severity = str(rift_severity or "medium").strip().lower()
+    if severity not in _RIFT_STYLE_MAP:
+        severity = "medium"
+
+    progress = max(0.0, min(1.0, float(rift_progress or 0.0)))
+    if progress >= 0.7:
+        stage_key = "almost_ok"
+    elif progress >= 0.3:
+        stage_key = "healing"
+    else:
+        stage_key = "fresh"
+
+    return _RIFT_STYLE_MAP[severity][stage_key]
 
 # ---------------------------------------------------------------------------
 # Natsume 自身情绪叠加调整
@@ -280,6 +332,8 @@ class BondAwareStyleEngine:
         mood_state: str = "neutral",
         natsume_mood: str = "NEUTRAL",
         rift_active: bool = False,
+        rift_severity: str = "medium",
+        rift_progress: float = 0.0,
         bond_trend: str = "",
         texture_hint: str = "",
     ) -> BondAwareStyleResult:
@@ -291,6 +345,8 @@ class BondAwareStyleEngine:
             mood_state: 用户情绪状态（positive/negative/neutral）
             natsume_mood: Natsume 自身当前情绪（HAPPY/SAD/CALM 等情感标签）
             rift_active: 是否存在未修复的裂痕
+            rift_severity: 裂痕严重程度（"light" / "medium" / "severe"），默认 "medium"
+            rift_progress: 裂痕修复进度（0.0 = 刚发生，1.0 = 即将愈合），默认 0.0
             bond_trend: 关系趋势（rising/declining 等）
             texture_hint: 额外质感提示
         """
@@ -314,8 +370,12 @@ class BondAwareStyleEngine:
         nat_mood = str(natsume_mood or "NEUTRAL").strip().upper()
         natsume_mood_hint = NATSUME_MOOD_ADJUSTMENTS.get(nat_mood, "")
 
-        # 裂痕调整
-        rift_adj = RIFT_STYLE_ADJUSTMENT if rift_active else ""
+        # 裂痕调整（细腻的进度感知）
+        rift_adj = _get_rift_adjustment(
+            rift_active=rift_active,
+            rift_severity=rift_severity,
+            rift_progress=rift_progress,
+        )
 
         # 趋势调整
         trend_adj = ""
@@ -338,7 +398,8 @@ class BondAwareStyleEngine:
         if natsume_mood_hint:
             parts.append(f"- natsume_self_mood: {natsume_mood_hint}")
         if rift_adj:
-            parts.append(f"- rift_adjustment: {rift_adj}")
+            rift_progress_pct = int(rift_progress * 100)
+            parts.append(f"- rift_adjustment: {rift_adj} (severity={rift_severity}, progress={rift_progress_pct}%)")
         if trend_adj:
             parts.append(f"- trend_adjustment: {trend_adj}")
         if texture_hint:
@@ -349,8 +410,8 @@ class BondAwareStyleEngine:
         prompt_injection = "\n".join(parts) + "\n"
 
         _logger.debug(
-            "BondAwareStyle: stage=%s intimacy_score=%.2f mood=%s natsume_mood=%s rift=%s substage=%s",
-            stage, score, mood, nat_mood, rift_active,
+            "BondAwareStyle: stage=%s intimacy_score=%.2f mood=%s natsume_mood=%s rift=%s(sev=%s,prog=%.1f) substage=%s",
+            stage, score, mood, nat_mood, rift_active, rift_severity, rift_progress,
             "entry" if substage_hint and "刚" in substage_hint else "stable",
         )
 

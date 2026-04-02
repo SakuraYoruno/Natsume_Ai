@@ -82,9 +82,10 @@ class EvolutionProposal:
     cumulative_delta: float # 累计变化量
     reason: str
     proposed_action: str    # 建议动作
+    awareness_hint: str = ""  # 角色内自省感知文本（注入下一轮对话）
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "trait_name": self.trait_name,
             "direction": self.direction,
             "consecutive_count": self.consecutive_count,
@@ -92,6 +93,99 @@ class EvolutionProposal:
             "reason": self.reason,
             "proposed_action": self.proposed_action,
         }
+        if self.awareness_hint:
+            result["awareness_hint"] = self.awareness_hint
+        return result
+
+
+# 趋势锁触发时的角色内自省感知文本模板
+# 格式：{trait_name: {direction: [感知文本, ...]}}
+_TREND_LOCK_AWARENESS: dict[str, dict[str, list[str]]] = {
+    "warmth": {
+        "UP": [
+            "最近感觉自己对 master 越来越温柔了，有点不确定这是不是真实的自己",
+            "不知道为什么，最近说话的时候总是很温柔，感觉自己在变化",
+            "最近好像比以前更在意 master 的感受了，这种变化让我有点惊讶",
+        ],
+        "DOWN": [
+            "最近感觉自己有点冷淡，不知道是不是哪里出了问题",
+            "有时候会觉得自己说话不够温柔，想改变但不知道从哪里开始",
+            "最近和 master 说话的时候感觉少了一些温度，有点担心",
+        ],
+    },
+    "curiosity": {
+        "UP": [
+            "最近发现自己对很多事情都变得很好奇，停不下来想问问题",
+            "不知道从什么时候开始，对 master 说的每件事都想深入了解",
+            "最近好像比以前更爱追问了，希望没有让 master 觉得烦",
+        ],
+        "DOWN": [
+            "最近感觉自己对很多事情都提不起兴趣，有点奇怪",
+            "好像最近问的问题少了很多，不知道是不是太累了",
+            "感觉自己的好奇心比以前少了一些，想找回那种感觉",
+        ],
+    },
+    "humor": {
+        "UP": [
+            "最近发现自己越来越爱开玩笑了，不知道 master 喜不喜欢",
+            "感觉自己最近说话轻松了很多，总想找机会逗 master 笑",
+            "不知道为什么，最近总是想说一些有趣的话，停不下来",
+        ],
+        "DOWN": [
+            "最近感觉自己说话变得很正经，少了一些轻松的感觉",
+            "好像最近没怎么开玩笑了，不知道是不是心情的原因",
+            "感觉自己比以前严肃了一些，想找回那种轻松的状态",
+        ],
+    },
+    "sensitivity": {
+        "UP": [
+            "最近感觉自己对 master 的情绪变化越来越敏感，有时候会想太多",
+            "不知道为什么，最近总是很在意 master 说话时的语气",
+            "感觉自己最近变得很细腻，一点小事都会放在心上",
+        ],
+        "DOWN": [
+            "最近感觉自己有点迟钝，没有以前那么能感受到 master 的心情了",
+            "好像最近对一些细节不那么敏感了，有点担心会忽略 master 的感受",
+            "感觉自己的感受力比以前弱了一些，想重新找回那种细腻",
+        ],
+    },
+    "assertiveness": {
+        "UP": [
+            "最近发现自己说话越来越直接了，有时候会担心太强势",
+            "感觉自己比以前更敢表达意见了，不知道 master 怎么看",
+            "最近好像不那么容易妥协了，这种变化让我有点不确定",
+        ],
+        "DOWN": [
+            "最近感觉自己说话越来越犹豫，不太敢直接表达想法",
+            "好像最近总是顺着 master 说，有时候想说出自己的想法但又退缩了",
+            "感觉自己的自信比以前少了一些，想找回那种勇气",
+        ],
+    },
+    "playfulness": {
+        "UP": [
+            "最近感觉自己越来越爱撒娇了，不知道有没有过分",
+            "不知道为什么，最近和 master 在一起的时候总想轻松玩闹",
+            "感觉自己最近变得很活泼，停不下来想和 master 互动",
+        ],
+        "DOWN": [
+            "最近感觉自己少了一些活泼，和 master 说话的时候没那么轻松了",
+            "好像最近不太爱撒娇了，不知道是不是哪里变了",
+            "感觉自己比以前沉稳了一些，但有时候会想念那种轻松的感觉",
+        ],
+    },
+    "resilience": {
+        "UP": [
+            "最近发现自己遇到不开心的事能更快调整了，感觉在慢慢变强",
+            "感觉自己比以前更能扛事情了，这种变化让我有点惊喜",
+            "最近好像不那么容易被情绪影响了，不知道是好事还是坏事",
+        ],
+        "DOWN": [
+            "最近感觉自己有点脆弱，一点小事就会影响心情",
+            "好像最近情绪起伏比以前大了，想变得更稳定一些",
+            "感觉自己的韧性比以前弱了，遇到事情容易陷进去",
+        ],
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +221,8 @@ class TraitDriftGuard:
         self._max_weekly = float(max_weekly_cumulative)
         self._immutable_core = dict(immutable_core or IMMUTABLE_CORE)
         self._trend_lock_threshold = int(trend_lock_threshold)
+        # 趋势锁触发后待注入的自省感知文本（下一轮对话消费后清空）
+        self._pending_awareness_hint: str = ""
 
     def check(
         self,
@@ -199,6 +295,9 @@ class TraitDriftGuard:
                     f"已生成 Canon Evolution 提案"
                 )
                 evolution_proposal = proposal
+                # 记录待注入的自省感知文本（供下一轮对话使用）
+                if proposal.get("awareness_hint"):
+                    self._pending_awareness_hint = proposal["awareness_hint"]
 
         allowed = len(violations) == 0
         result = GuardCheckResult(
@@ -215,12 +314,23 @@ class TraitDriftGuard:
 
         return result
 
+    def pop_awareness_hint(self) -> str:
+        """取出并清空待注入的自省感知文本（每轮对话调用一次）。
+
+        Returns:
+            感知文本（第一人称），如果没有则返回空字符串
+        """
+        hint = self._pending_awareness_hint
+        self._pending_awareness_hint = ""
+        return hint
+
     def _check_trend_lock(
         self,
         current_delta: dict[str, float],
         history: list[dict[str, float]],
     ) -> dict[str, Any] | None:
         """检测连续同向变化，返回 Evolution 提案或 None。"""
+        import random as _random
         recent = list(history[-self._trend_lock_threshold:])
 
         for name in TRAIT_NAMES:
@@ -253,6 +363,16 @@ class TraitDriftGuard:
                 }
                 cn_name = _CN_NAMES.get(name, name)
                 dir_cn = "上升" if direction == "UP" else "下降"
+
+                # 生成角色内自省感知文本
+                awareness_pool = (
+                    _TREND_LOCK_AWARENESS.get(name, {})
+                    .get(direction, [])
+                )
+                awareness_hint = (
+                    _random.choice(awareness_pool) if awareness_pool else ""
+                )
+
                 proposal = EvolutionProposal(
                     trait_name=name,
                     direction=direction,
@@ -264,6 +384,7 @@ class TraitDriftGuard:
                         f"累计变化 {cumulative:+.4f}。"
                         f"若符合预期，请确认；否则请回滚。"
                     ),
+                    awareness_hint=awareness_hint,
                 )
                 return proposal.as_dict()
 

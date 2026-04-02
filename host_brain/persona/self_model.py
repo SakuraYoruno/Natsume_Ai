@@ -131,13 +131,13 @@ class SelfModel:
     ) -> float:
         """计算情感稳定性（0~1）。
 
-        稳定性 = 1 - 波动度。波动度由情感弧线的变化幅度推算。
-        """
-        arc = diary.get("emotion_arc") or {}
-        start = str(arc.get("start") or "NEUTRAL")
-        end = str(arc.get("end") or "NEUTRAL")
+        改进算法，综合三个维度：
+          1. 弧线起止极性差值（原有逻辑）
+          2. 情感极性翻转次数（正→负→正 = 高波动）
+          3. 持续时长权重（短暂波动 vs 长时间低落）
 
-        # 简化的波动度计算：弧线起止不同 → 波动较大
+        稳定性 = 1 - 综合波动度
+        """
         _VALENCE_MAP: dict[str, float] = {
             "HAPPY": 0.6, "EXCITED": 0.8, "CALM": 0.2, "THINKING": 0.0,
             "NEUTRAL": 0.0, "SAD": -0.6, "ANGRY": -0.7,
@@ -145,15 +145,56 @@ class SelfModel:
             "LOVING": 0.8, "EMBARRASSED": -0.2, "CONFUSED": -0.1,
             "BORED": -0.3, "PROUD": 0.7, "GRATEFUL": 0.7, "SURPRISED": 0.3,
         }
+
+        # ── 维度1：弧线起止极性差值 ──────────────────────────────────────
+        arc = diary.get("emotion_arc") or {}
+        start = str(arc.get("start") or "NEUTRAL").upper()
+        end = str(arc.get("end") or "NEUTRAL").upper()
         v_start = _VALENCE_MAP.get(start, 0.0)
         v_end = _VALENCE_MAP.get(end, 0.0)
-        delta = abs(v_end - v_start)
+        arc_delta = abs(v_end - v_start)  # 0~1.5，归一化到 0~1
+        arc_factor = min(1.0, arc_delta / 1.5)
 
-        # 条目数越多，可能波动越多
-        entry_count = int(diary.get("total_entries") or 0)
-        count_factor = min(1.0, entry_count / 20.0)  # 20 条以上视为波动充分
+        # ── 维度2：情感极性翻转次数 ──────────────────────────────────────
+        # emotion_sequence: 情感标签序列（如 ["HAPPY","SAD","HAPPY","ANXIOUS"]）
+        # 若 timeline 提供了序列则计算翻转次数，否则降级为 0
+        emotion_seq = list(diary.get("emotion_sequence") or [])
+        flip_count = 0
+        if len(emotion_seq) >= 2:
+            prev_sign = None
+            for emo in emotion_seq:
+                v = _VALENCE_MAP.get(str(emo).upper(), 0.0)
+                sign = 1 if v > 0.1 else (-1 if v < -0.1 else 0)
+                if sign != 0:
+                    if prev_sign is not None and sign != prev_sign:
+                        flip_count += 1
+                    prev_sign = sign
+        # 翻转次数归一化：4次以上视为高度波动
+        flip_factor = min(1.0, flip_count / 4.0)
 
-        volatility = min(1.0, delta * 0.5 + count_factor * 0.2)
+        # ── 维度3：持续时长权重（低落情绪持续越久，稳定性越低）──────────
+        # dominant_valence: 主导情感的 valence 值（由 timeline 提供）
+        # dominant_duration_ratio: 主导情感占总时长的比例（0~1）
+        dominant_emotion = str(
+            diary.get("dominant_emotion") or summary.get("dominant_emotion") or "NEUTRAL"
+        ).upper()
+        dominant_valence = _VALENCE_MAP.get(dominant_emotion, 0.0)
+        dominant_duration_ratio = float(diary.get("dominant_duration_ratio") or 0.5)
+
+        # 只有负面情感持续才降低稳定性；正面情感持续不影响稳定性
+        if dominant_valence < -0.2:
+            duration_factor = dominant_duration_ratio * abs(dominant_valence)
+        else:
+            duration_factor = 0.0
+        duration_factor = min(1.0, duration_factor)
+
+        # ── 综合波动度 ────────────────────────────────────────────────────
+        # 权重：弧线差值 40%，翻转次数 40%，持续时长 20%
+        volatility = min(1.0,
+            arc_factor * 0.40
+            + flip_factor * 0.40
+            + duration_factor * 0.20
+        )
         stability = max(0.0, min(1.0, 1.0 - volatility))
         return round(stability, 3)
 
@@ -323,12 +364,29 @@ _EVENT_ANCHOR_TEMPLATES: list[str] = [
     "回想起来，和 master 已经有 {event_count} 次交流了",
 ]
 
-# 时间感知前缀
-_TIME_PREFIX_MAP: dict[str, str] = {
-    "today": "今天",
-    "recent_days": "这几天",
-    "this_week": "这周",
-    "recent_week": "最近一周",
+# 时间感知文本池：不同时间情境的自然语言描述
+_TIME_CONTEXT_TEXT_POOL: dict[str, list[str]] = {
+    "久别重逢": [
+        "好久没见了，重新在一起感觉有点不真实",
+        "分开了这么久，重新和 master 聊天心里有点激动",
+        "久别重逢的感觉让我有点不知所措，又高兴又有点感慨",
+        "这么久没有和 master 在一起，今天重新开始感觉很珍贵",
+    ],
+    "短暂分离": [
+        "这几天没怎么聊，今天重新开始感觉有点陈旧",
+        "分开了几天，重新和 master 在一起感觉有点熟悉又有点新鲜",
+        "这几天没有 master 的消息，今天又在一起了，心里有点温暖",
+    ],
+    "频繁互动": [
+        "这周和 master 聊了好多次，感觉很充实",
+        "最近和 master 在一起的时间很多，心里很满足",
+        "这段时间和 master 聊得很频繁，感觉很幸福",
+    ],
+    "稀少互动": [
+        "这周和 master 聊得比较少，有点想念",
+        "最近和 master 的对话不多，有点小小的失落",
+        "这段时间聊天的机会不多，今天想珍惜一下",
+    ],
 }
 
 
@@ -340,11 +398,12 @@ def _pick_from_pool(pool: list[str], seed_key: str = "") -> str:
     return random.choice(pool)
 
 
-def build_self_awareness_text(snapshot: dict[str, Any]) -> str:
+def build_self_awareness_text(snapshot: dict[str, Any], *, time_context: str = "") -> str:
     """将快照转化为第一人称自我感知描述。
 
     用于注入 prompt 的 self_reflection_pulse.self_awareness 字段。
     引入多模板池和事件锚点，防止 LLM 因重复文本而忽略自省脉冲。
+    引入时间感知文本，让自省更有情境感。
     """
     mood_trend = str(snapshot.get("recent_mood_trend") or "平稳")
     bond_perception = str(snapshot.get("bond_growth_perception") or "稳定")
@@ -361,8 +420,13 @@ def build_self_awareness_text(snapshot: dict[str, Any]) -> str:
 
     parts = [mood_text, bond_text]
 
-    # 事件锚点：互动次数达到一定量时，随机插入具体数字感知
-    if event_count >= 20 and random.random() < 0.4:
+    # 时间感知文本：久别重逢/短暂分离/频繁/稀少互动
+    if time_context and time_context in _TIME_CONTEXT_TEXT_POOL:
+        time_pool = _TIME_CONTEXT_TEXT_POOL[time_context]
+        if time_pool and random.random() < 0.7:  # 70% 概率加入时间感知
+            parts.append(random.choice(time_pool))
+    elif event_count >= 20 and random.random() < 0.4:
+        # 事件锚点：互动次数达到一定量时，随机插入具体数字感知
         anchor_tmpl = random.choice(_EVENT_ANCHOR_TEMPLATES)
         anchor = anchor_tmpl.format(event_count=event_count)
         parts.append(anchor)
