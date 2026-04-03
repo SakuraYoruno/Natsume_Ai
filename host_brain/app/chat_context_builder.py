@@ -993,6 +993,25 @@ def build_chat_prompt_runtime_payload(
         except Exception as _bs_exc:
             logger.debug("BodySenseModel 接入降级: %s", _bs_exc)
 
+        # ── Phase XIX：涌现式成长叙事注入 self_reflection_pulse ──────────
+        try:
+            from host_brain.skills.impl.emergent_growth_skill import _get_growth_engine  # noqa: PLC0415
+            _eg_engine = _get_growth_engine()
+            _eg_note = _eg_engine.get_latest_growth_note(_persona_user_id)
+            if _eg_note:
+                # 注入到 self_reflection_pulse（如果已有则追加 emergent_growth_note 字段）
+                _existing_pulse = runtime_payload.get("self_reflection_pulse")
+                if isinstance(_existing_pulse, dict):
+                    _existing_pulse["emergent_growth_note"] = _eg_note
+                else:
+                    runtime_payload["emergent_growth_note"] = _eg_note
+                logger.debug(
+                    "EmergentGrowthEngine 成长叙事注入: user=%s note='%s'",
+                    _persona_user_id, _eg_note[:40],
+                )
+        except Exception as _eg_exc:
+            logger.debug("EmergentGrowthEngine 接入降级: %s", _eg_exc)
+
         _emo_vec = EmotionVector(
             valence=_cur_valence,
             arousal=_cur_arousal,

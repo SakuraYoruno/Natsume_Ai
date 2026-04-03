@@ -487,6 +487,32 @@ def runtime_lifespan(
                 except Exception as _gaming_exc:
                     logger.warning("gaming 陪玩识图 tick 任务注册失败（降级）: %s", _gaming_exc)
 
+                # [Phase XIX] 注册 emergent_growth_weekly 任务（每周日 03:00 涌现式人格成长）
+                try:
+                    _emergent_growth_task = SchedulerTaskConfig(
+                        task_id="emergent_growth_weekly",
+                        trigger_mode=TriggerMode.CRON,
+                        trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},  # 周日 03:00
+                        intent_template={
+                            "skill_name": "emergent_growth_weekly",
+                            "args": {
+                                "user_id": "user_1",
+                                "lookback_days": 7,
+                                "use_llm": False,
+                            },
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "sleep"],
+                        enabled=True,
+                        description="Phase XIX 涌现式成长：每周日 03:00 分析近期对话模式，自然浮现人格微调",
+                    )
+                    if _proactive_registry.get("emergent_growth_weekly") is None:
+                        _proactive_registry.register(_emergent_growth_task)
+                        logger.info("涌现式成长任务已注册: task_id=emergent_growth_weekly, cron=周日03:00")
+                except Exception as _emergent_exc:
+                    logger.warning("涌现式成长任务注册失败（降级）: %s", _emergent_exc)
+
             except Exception as _proactive_exc:
                 new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
                 logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)

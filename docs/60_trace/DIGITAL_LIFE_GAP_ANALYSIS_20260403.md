@@ -338,19 +338,25 @@
 
 ---
 
-### Phase XIX：涌现式成长（长期研究）
+### Phase XIX：涌现式成长 ✅ **已实装（2026-04-03）**
 
 **目标**：让成长从交互中涌现，而非规则触发。
 
 ```
-研究方向：
-  ├─ 定期（每周）对近期对话进行无监督主题归纳
-  ├─ LLM分析"这周的交互模式"，提取特质变化建议
-  ├─ 将建议与当前特质向量对比，决定是否接受漂移
-  └─ 成长日志记录"为什么变了"，而非"变了多少"
+实装内容：
+  ├─ interaction_pattern_analyzer.py：每周从 EpisodicStore 召回近期对话
+  │   ├─ LLM 分析"这周的交互模式"，提取特质变化建议（置信度 + 主导主题）
+  │   └─ LLM 不可用时降级到关键词规则归纳（完全向后兼容）
+  ├─ emergent_growth_engine.py：涌现式成长引擎
+  │   ├─ 置信度门控（< 0.3 直接跳过）
+  │   ├─ TraitDriftGuard 安全门控（幅度锁 + 趋势锁 + 不可变核心保护）
+  │   ├─ 成长日志记录"为什么变了"（EmergentGrowthRecord）
+  │   └─ 生成第一人称成长叙事（emergent_growth_note）
+  ├─ emergent_growth_skill.py：每周日 03:00 由 NatsumeScheduler 触发
+  └─ chat_context_builder.py：成长叙事注入 self_reflection_pulse
 ```
 
-**预估工作量**：4周（含研究）
+**实际工作量**：1天（复用 TraitDriftGuard + EpisodicStore 现有基础设施）
 
 ---
 
@@ -675,6 +681,7 @@ graph TD
 | v1.9 | 2026-04-03 | **技术债务 10.1 全部已解决**：自省文本模板化修复——`build_self_awareness_text` / `build_mood_awareness_text` / `build_growth_note_text` 均增加 `llm_fn` 参数，优先用 LLM 动态生成真实第一人称自省文本，降级到模板池；`build_self_reflection_pulse` 和 `maybe_generate` 均透传 `llm_fn`；确认其他 3 项高优先级债务已在历史 Phase 中解决（情绪离线演变、记忆衰减权重、进化规则 Canon 化）；自我感知维度大幅提升 |
 | v1.11 | 2026-04-03 | **低优先级债务：风格指纹无时间演变已解决**：`StyleFingerprint` 新增 `ts_ms` 字段；`PersonaDriftDetector` 新增 `_fingerprint_history` 长期历史（最多 100 条）和 `_compute_trend()` 方法；`DriftCheckResult` 新增 `style_trend` 字段（`{"warmth": "rising", ...}`）；`get_style_evolution_summary()` 接口供外部模块查询风格演变摘要；成长感真实度提升 |
 | v1.12 | 2026-04-03 | **低优先级债务：身体感知缺失已解决**：`BodySenseModel`（host_brain/persona/body_sense.py）实现疲劳/困倦/孤独三维感知近似；`body_sense_skill.py` 提供 body_sense_tick / conversation_start / conversation_end / update_loneliness 四个 handler；`EmotionalSilenceEngine.apply_body_sense_penalty()` 接入疲劳度惩罚（最多降低 35% 意愿）；`prompt_builder` 新增 body_sense 槽位注入 EMOTION_BINDING（fatigue_level / drowsiness_level / loneliness_level / body_sense_hint）；具身性维度从 5% 提升至 30% |
+| v1.13 | 2026-04-03 | **Phase XIX 涌现式成长实装完成**：`interaction_pattern_analyzer.py` 每周从 EpisodicStore 召回近期对话，LLM/关键词规则归纳特质变化建议（PatternAnalysisResult）；`emergent_growth_engine.py` 置信度门控 + TraitDriftGuard 安全校验 + 应用特质变化 + 成长日志（EmergentGrowthRecord）；`emergent_growth_skill.py` 每周日 03:00 由 NatsumeScheduler 触发；`chat_context_builder.py` 接入成长叙事注入 self_reflection_pulse；成长感真实度维度进一步提升 |
 
 ---
 

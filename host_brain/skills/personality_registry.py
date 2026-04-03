@@ -161,6 +161,7 @@ def build_personality_skill_registry(provider: PersonalitySkillProvider | None =
     _register_silence_skills(registry)
     _register_gaming_companion_skills(registry)
     _register_body_sense_skills(registry)
+    _register_emergent_growth_skills(registry)
     return registry
 
 
@@ -354,6 +355,49 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
         ),
     )
     for meta in _body_sense_skills:
+        try:
+            registry.register(meta)
+        except ValueError:
+            pass  # 已注册时跳过（重启时可能重复注册）
+
+
+def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
+    """注册涌现式成长 Skills（Phase XIX）。
+
+    使用直接 handler 注册方式（非 DeclarativeSkillSpec），
+    因为这些 skill 直接调用 InteractionPatternAnalyzer + EmergentGrowthEngine。
+    """
+    from host_brain.skills.impl.emergent_growth_skill import (  # noqa: PLC0415
+        execute_emergent_growth_weekly,
+        execute_emergent_growth_status,
+    )
+
+    _emergent_growth_skills = (
+        SkillMeta(
+            skill_name="emergent_growth_weekly",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=False,
+            handler=execute_emergent_growth_weekly,
+            description=(
+                "涌现式成长周期（Phase XIX）：每周日 03:00 由调度器调用，"
+                "分析近期对话模式 → LLM/关键词归纳特质变化建议 → 安全门控 → 应用特质微调。"
+            ),
+            scheduler_allowed=True,
+        ),
+        SkillMeta(
+            skill_name="emergent_growth_status",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=False,
+            handler=execute_emergent_growth_status,
+            description="涌现式成长状态查询：返回成长日志摘要（总周期数/最近主题/最新成长叙事）。",
+            scheduler_allowed=False,
+        ),
+    )
+    for meta in _emergent_growth_skills:
         try:
             registry.register(meta)
         except ValueError:
