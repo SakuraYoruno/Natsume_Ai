@@ -7593,3 +7593,100 @@ TASK-XXXX 标题
   - 全量测试无回归。
 - 涉及文件路径：`docs/35_quality/code_reviews/code_review_m45_2026-03-06.md`（新增）。
 - 关联需求：ModelPlane.md §8；DevSpec §5；FR-EDGE-001；FR-EDGE-002。
+
+---
+
+## M46：数字生命差距收口 v2
+> **里程碑目标**：围绕 `docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md` 收口当前项目与“数字生命”目标态之间的关键落差，优先解决“开机后人格驱动不真正运行、对话结束缺少统一收口、response_policy / motive_state 已产出但未进入主行为链”三个核心缺口。
+> **背景**：当前仓库已经具备 `motive_engine`、`response_policy`、`chat_context_builder` 注入等基础能力，但运行链条中仍存在“数据已生成、行为未消费”“任务已注册、调度未真正启动”的断点；需要按 P0/P1/P2/P3 拆成可执行任务并逐项落地。
+> **约束**：优先做可验证、可回归、低风险的链路收口；避免一次性重构 Prompt/Agent 总线；所有变更必须有最小可复现验证。
+
+---
+
+### TASK-0445 M46-A：P0 人格 tick 运行态校验与可观测性补齐
+
+- 状态：DONE（2026-04-03，已在启动阶段补充核心人格 tick 注册状态与 scheduler 启动状态上报，并补充生命周期/单元回归测试）
+- 任务描述：为 `inner_world_tick`、`silence_tick`、`body_sense_tick`、`proactive_talk_periodic` 建立统一的“已注册 / 已调度 / 最近一次触发 / 最近一次失败”运行态验证入口，确保数字生命核心 tick 不是“代码存在但运行缺证据”。
+- 输入：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；`host_brain/scheduler/`；现有 startup report / scheduler health 机制。
+- 输出：
+  - `host_brain/app/http_hooks.py`（补充启动状态汇总）；
+  - `tests/unit/test_http_hooks_startup_status.py`、`tests/integration/test_chat_agent_soul_pipeline.py`（补充）。
+- 验收标准：
+  - 启动完成后可确认核心人格 tick 已进入 scheduler 有效任务集合；
+  - 至少能在测试或健康查询中同时看到 `task_id / enabled / scheduled(or started)` 级别证据；
+  - 当核心 tick 缺失时，startup report 或日志中能给出明确降级信号；
+  - 不引入重复注册或误报。
+- 涉及文件路径：`host_brain/app/http_hooks.py`、`tests/integration/test_chat_agent_soul_pipeline.py`、`tests/unit/test_http_hooks_startup_status.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；DevSpec §5；FR-SCHED-001。
+
+---
+
+### TASK-0446 M46-B：P1 修复默认开机人格调度注册顺序
+
+- 状态：DONE（2026-04-03，已将 scheduler 启动延后到全部人格 seed tasks 注册完成之后，并补充生命周期回归测试）
+- 任务描述：修复 `host_brain/app/http_hooks.py` 中 `NatsumeScheduler.start()` 早于 `inner_world_tick` / `silence_tick` / `body_sense_tick` / `gaming_companion_tick` / `emergent_growth_weekly` 注册的顺序问题，确保默认开机后人格驱动任务会被真正调度，而不是仅写入 registry。
+- 输入：`host_brain/app/http_hooks.py` 当前启动链；`SchedulerTaskRegistry.register()` 与 `NatsumeScheduler.start()/register_task()` 合同；`tests/integration/test_chat_agent_soul_pipeline.py`。
+- 输出：
+  - `host_brain/app/http_hooks.py`（修改）；
+  - `tests/integration/test_chat_agent_soul_pipeline.py`（补充回归断言）。
+- 验收标准：
+  - `NatsumeScheduler.start()` 发生时，核心人格 seed tasks 已全部注册到 registry；
+  - 正常启动与 degraded 启动两条生命周期测试均能证明 scheduler 启动时已携带人格 tick 任务；
+  - 不改变现有任务定义、触发频率与 mode_allowlist；
+  - 不引入重复注册异常。
+- 涉及文件路径：`host_brain/app/http_hooks.py`、`tests/integration/test_chat_agent_soul_pipeline.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；DevSpec §5；FR-SCHED-001。
+
+---
+
+### TASK-0447 M46-C：P1 统一 session_end 触发挂钩
+
+- 状态：DONE（2026-04-03，已将统一 session_end/conversation_end 收口挂入 `host_brain.app.top_agent._async_post_process`，覆盖 `chat_agent` / `top_agent` 主回复完成路径，并补充单元回归测试）
+- 任务描述：在主对话提交链路中补齐统一的 `session_end`/`conversation_end` 收口触发点，让 `inner_world_session_end`、`body_sense_conversation_end` 等已存在技能能在一次对话完成后稳定执行，而不是散落在局部调用点或完全未触发。
+- 输入：`host_brain/app/chat_agent.py` 提交与 post-process 链路；`host_brain/skills/personality_registry.py` 中已注册的 conversation/session-end skills。
+- 输出：
+  - `host_brain/app/top_agent.py`（修改，统一 post-process 挂钩）；
+  - `tests/unit/test_top_agent_post_process.py`（补充）。
+- 验收标准：
+  - 一次正常对话完成后，session_end 类技能最多触发一次，且不阻塞主回复返回；
+  - SSE/非 SSE 路径行为一致；
+  - session_end 执行失败仅降级记录，不影响主链路提交；
+  - 测试可验证技能触发时机与幂等性。
+- 涉及文件路径：`host_brain/app/top_agent.py`、`tests/unit/test_top_agent_post_process.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-CHAT-POST-001。
+
+---
+
+### TASK-0448 M46-D：P2 将 response_policy 接入主输出链
+
+- 状态：DONE（2026-04-03，已将 `response_policy` 接入 `prompt_builder` 主提示词约束块，并补充行为回归测试）
+- 任务描述：把 `chat_context_builder` 已生成的 `response_policy` 真正接入 prompt / agent 输出约束链，至少覆盖“边界感、克制度、风险降级、亲密度约束”等对最终措辞有直接影响的策略位，避免 policy 只存在于上下文却不改变输出行为。
+- 输入：`host_brain/app/chat_context_builder.py`；`host_brain/persona/response_policy.py`；`host_brain/app/prompt_builder.py`、`host_brain/app/chat_agent.py`、`host_brain/top_agent.py`。
+- 输出：
+  - `host_brain/app/prompt_builder.py`（修改）；
+  - `tests/integration/test_prompt_builder_prod_env.py`（补充）。
+- 验收标准：
+  - `response_policy` 至少有一条清晰可测的消费路径进入最终提示词或输出后处理；
+  - policy 缺失时保持向后兼容；
+  - 测试可验证不同 policy 输入会改变最终行为约束；
+  - 不引入明显 prompt 膨胀或重复字段。
+- 涉及文件路径：`host_brain/app/prompt_builder.py`、`tests/integration/test_prompt_builder_prod_env.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-002。
+
+---
+
+### TASK-0449 M46-E：P3 将 motive_state 接入主动/静默行为链
+
+- 状态：DONE（2026-04-03，已在 `proactive_talk` 调度链中计算并消费 `motive_state`，用于主动行为拦截/放行与主动问候措辞提示，并补充单元/集成回归测试）
+- 任务描述：把 `motive_state` 从“上下文可见”推进到“主动行为可驱动”，优先接入 `proactive_talk` / `silence_tick` / `inner_world_tick` 等非用户显式输入场景，使角色的欲望、趋近/回避倾向能影响主动表达与静默期内在活动。
+- 输入：`host_brain/persona/motive_engine.py`；`host_brain/app/chat_context_builder.py`；`host_brain/app/prompt_builder.py`；主动/静默链相关模块。
+- 输出：
+  - `host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`（修改）；
+  - `tests/unit/test_proactive_skill.py`（补充）。
+- 验收标准：
+  - `motive_state` 至少驱动一条主动行为决策分支或表达风格分支；
+  - 无 `motive_state` 时仍能回退到当前稳定行为；
+  - 测试可验证 motive 高低或方向变化会改变主动输出；
+  - 不破坏现有离线状态、静默状态、身体感知拼装逻辑。
+- 涉及文件路径：`host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`、`tests/unit/test_proactive_skill.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001。

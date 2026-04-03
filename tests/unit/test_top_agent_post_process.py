@@ -45,6 +45,29 @@ class _FakeLedger:
         self.voice_events.append(dict(row))
 
 
+class _FakeInnerWorld:
+    def __init__(self, *, should_raise: bool = False) -> None:
+        self.should_raise = should_raise
+        self.calls: list[dict[str, object]] = []
+
+    def on_session_end(self, user_id, **kwargs):  # noqa: ANN001, ANN003
+        self.calls.append({"user_id": user_id, **kwargs})
+        if self.should_raise:
+            raise RuntimeError("inner world boom")
+
+
+class _FakeBodySenseModel:
+    def __init__(self, *, should_raise: bool = False) -> None:
+        self.should_raise = should_raise
+        self.calls = 0
+
+    def on_conversation_end(self, *, duration_minutes=None) -> None:
+        _ = duration_minutes
+        self.calls += 1
+        if self.should_raise:
+            raise RuntimeError("body sense boom")
+
+
 class TestTopAgentPostProcess:
     def test_async_post_process_writes_episodic_memory(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
@@ -152,3 +175,132 @@ class TestTopAgentPostProcess:
                     render_target_lang="ja",
                 ),
             )
+
+    def test_async_post_process_runs_persona_session_end_hooks(self, monkeypatch) -> None:
+        monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+        ledger = _FakeLedger()
+        inner_world = _FakeInnerWorld()
+        body_sense = _FakeBodySenseModel()
+
+        with patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="FACT",
+        ), patch(
+            "host_brain.app.observability_persist.persist_chat_episodic_memory",
+            return_value={"status": "OK", "memory_id": "mem::003"},
+        ), patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ), patch(
+            "host_brain.app.dependencies.get_bond_stage_engine",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ), patch(
+            "host_brain.bond.bond_dynamics.BondDynamicsWriter",
+            _FakeBondWriter,
+        ), patch(
+            "host_brain.bond.user_identity.resolve_bond_user_id",
+            return_value="user-001",
+        ), patch(
+            "host_brain.bond.user_identity.get_canonical_bond_user_id",
+            return_value="persona-user-001",
+        ), patch(
+            "host_brain.persona.inner_world.get_inner_world",
+            return_value=inner_world,
+        ), patch(
+            "host_brain.persona.body_sense.get_body_sense_model",
+            return_value=body_sense,
+        ), patch(
+            "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
+            return_value=None,
+        ):
+            _run(
+                _async_post_process(
+                    request_id="req-003",
+                    person_id="person-003",
+                    session_id="session-003",
+                    user_message="我们刚才聊的那个数字生命方案还要继续。",
+                    narrative="我会继续把它整理好。",
+                    emotion_context={
+                        "emotion_tag": "HAPPY",
+                        "emotion_intensity": 0.7,
+                        "valence": 0.42,
+                        "arousal": 0.55,
+                    },
+                    bond_summary={"stage": "FRIEND"},
+                    ts_ms=1000,
+                    render_target_lang="zh",
+                ),
+            )
+
+        assert body_sense.calls == 1
+        assert len(inner_world.calls) == 1
+        assert inner_world.calls[0]["user_id"] == "persona-user-001"
+        assert inner_world.calls[0]["valence"] == 0.42
+        assert inner_world.calls[0]["arousal"] == 0.55
+        assert inner_world.calls[0]["pending_topics"] == ["我们刚才聊的那个数字生命方案还要继续。"]
+
+    def test_async_post_process_persona_session_end_failure_does_not_block(self, monkeypatch) -> None:
+        monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+        ledger = _FakeLedger()
+        inner_world = _FakeInnerWorld(should_raise=True)
+        body_sense = _FakeBodySenseModel(should_raise=True)
+
+        with patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="FACT",
+        ), patch(
+            "host_brain.app.observability_persist.persist_chat_episodic_memory",
+            return_value={"status": "OK", "memory_id": "mem::004"},
+        ), patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ), patch(
+            "host_brain.app.dependencies.get_bond_stage_engine",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ), patch(
+            "host_brain.bond.bond_dynamics.BondDynamicsWriter",
+            _FakeBondWriter,
+        ), patch(
+            "host_brain.bond.user_identity.resolve_bond_user_id",
+            return_value="user-001",
+        ), patch(
+            "host_brain.bond.user_identity.get_canonical_bond_user_id",
+            return_value="persona-user-002",
+        ), patch(
+            "host_brain.persona.inner_world.get_inner_world",
+            return_value=inner_world,
+        ), patch(
+            "host_brain.persona.body_sense.get_body_sense_model",
+            return_value=body_sense,
+        ), patch(
+            "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
+            return_value=None,
+        ):
+            _run(
+                _async_post_process(
+                    request_id="req-004",
+                    person_id="person-004",
+                    session_id="session-004",
+                    user_message="继续",
+                    narrative="好，我继续。",
+                    emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.3},
+                    bond_summary={"stage": "FRIEND"},
+                    ts_ms=1000,
+                    render_target_lang="zh",
+                ),
+            )
+
+        assert len(inner_world.calls) == 1
+        assert body_sense.calls == 1

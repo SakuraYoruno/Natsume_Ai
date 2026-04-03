@@ -472,6 +472,10 @@
 
 ---
 
+- docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md
+  用途：数字生命差距清单 V2（2026-04-03）。基于 DIGITAL_LIFE_RUNTIME_AUDIT / ROADMAP / VERIFICATION_PLAN 与当前代码状态，重排 P0/P1/P2/P3 的可执行任务、交付物与验收标准。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
 附：实现层任务来源白名单（强约束）
 - 仅允许将以下目录作为"任务来源"读取并据此行动：
   - docs/30_devspec/**

@@ -150,6 +150,42 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
 
 
 
+def test_prompt_builder_prod_renders_response_policy_constraints() -> None:
+    assert str(os.environ.get('Natsume_ENV') or '').lower() == 'prod'
+    runtime_payload = _base_runtime_payload()
+    runtime_payload['response_policy'] = {
+        'max_chars': 120,
+        'max_sentences': 2,
+        'min_sentences': 1,
+        'allow_followup': False,
+        'allow_topic_shift': False,
+        'allow_proactive_after_reply': False,
+        'warmth_floor': 0.15,
+        'warmth_ceiling': 0.45,
+        'intimacy_ceiling': 0.30,
+        'humor_ceiling': 0.20,
+        'confession_guard': True,
+        'withdrawal_guard': True,
+        'should_be_brief': True,
+        'should_be_withdrawn': True,
+        'policy_reason_tags': ['willingness:LOW', 'confession_guard:shallow_bond'],
+    }
+
+    prompt = render_node_generation_prompt(node_id='renderer_ja_c_style', runtime_payload=runtime_payload)
+
+    assert 'response_policy_max_chars: 120' in prompt
+    assert 'response_policy_allow_followup: false' in prompt
+    assert 'response_policy_allow_topic_shift: false' in prompt
+    assert 'response_policy_confession_guard: true' in prompt
+    assert 'response_policy_should_be_withdrawn: true' in prompt
+    assert 'response_policy_directive:' in prompt
+    assert '本轮不要主动追问。' in prompt
+    assert '本轮不要擅自扩展或切换话题。' in prompt
+    assert '避免表白式、依赖式或越界亲密表达。' in prompt
+    assert 'response_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt
+
+
+
 def test_prompt_builder_prod_language_helper_paths(monkeypatch) -> None:
     assert str(os.environ.get('Natsume_ENV') or '').lower() == 'prod'
     monkeypatch.setenv('HOST_RENDER_TARGET_LANG', 'ja')

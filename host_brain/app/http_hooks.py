@@ -53,6 +53,25 @@ def _build_audit_retention_task_config() -> Any:
     )
 
 
+def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
+    registered: list[str] = []
+    missing: list[str] = []
+
+    for task_id in task_ids:
+        task = registry.get(task_id) if registry is not None else None
+        if task is None:
+            missing.append(task_id)
+            continue
+        enabled = bool(getattr(task, "enabled", False))
+        registered.append(f"{task_id}[{'enabled' if enabled else 'disabled'}]")
+
+    if missing:
+        registered_text = ",".join(registered) if registered else "none"
+        return f"DEGRADED: missing={','.join(missing)}; registered={registered_text}"
+
+    return f"OK (registered={len(registered)}/{len(task_ids)}; tasks={','.join(registered)})"
+
+
 def _sync_world_canon_index_on_startup(
     *,
     ledger: Any,
@@ -372,7 +391,6 @@ def runtime_lifespan(
                     health_reporter=_health_reporter,
                     intent_dispatcher=_proactive_intent_dispatcher,
                 )
-                _natsume_scheduler.start()
 
                 # ── 注册进化周期任务（Phase XVI）：每日凌晨 3:00 触发 ──────
                 try:
@@ -512,6 +530,23 @@ def runtime_lifespan(
                         logger.info("涌现式成长任务已注册: task_id=emergent_growth_weekly, cron=周日03:00")
                 except Exception as _emergent_exc:
                     logger.warning("涌现式成长任务注册失败（降级）: %s", _emergent_exc)
+
+                # 关键约束：必须在全部 seed tasks 注册完成后再 start，
+                # 否则后续仅写入 registry 的任务不会被运行中的 scheduler 真正调度。
+                _natsume_scheduler.start()
+                _core_personality_task_ids = [
+                    "proactive_talk_periodic",
+                    "inner_world_tick",
+                    "silence_tick",
+                    "body_sense_tick",
+                ]
+                new_module_statuses["proactive_talk_scheduler"] = (
+                    f"OK (started; core_ticks={len(_core_personality_task_ids)})"
+                )
+                new_module_statuses["personality_tick_registry"] = _build_personality_tick_status(
+                    registry=_proactive_registry,
+                    task_ids=_core_personality_task_ids,
+                )
 
             except Exception as _proactive_exc:
                 new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"

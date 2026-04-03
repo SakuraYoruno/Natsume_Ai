@@ -4,6 +4,7 @@ import json
 import logging
 
 from host_brain.app.http_hooks import _build_audit_retention_task_config
+from host_brain.app.http_hooks import _build_personality_tick_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -29,6 +30,59 @@ def test_build_audit_retention_task_config_uses_current_scheduler_contract() -> 
     assert task.intent_template["proposer_node_id"] == "scheduler"
     assert task.priority is TaskPriority.LOW
     assert task.enabled is True
+
+
+def test_build_personality_tick_status_reports_registered_enabled_tasks() -> None:
+    class _Task:
+        def __init__(self, *, enabled: bool) -> None:
+            self.enabled = enabled
+
+    class _Registry:
+        def __init__(self) -> None:
+            self._tasks = {
+                "proactive_talk_periodic": _Task(enabled=True),
+                "inner_world_tick": _Task(enabled=True),
+                "silence_tick": _Task(enabled=True),
+                "body_sense_tick": _Task(enabled=True),
+            }
+
+        def get(self, task_id: str):
+            return self._tasks.get(task_id)
+
+    status = _build_personality_tick_status(
+        registry=_Registry(),
+        task_ids=[
+            "proactive_talk_periodic",
+            "inner_world_tick",
+            "silence_tick",
+            "body_sense_tick",
+        ],
+    )
+
+    assert status.startswith("OK")
+    assert "registered=4/4" in status
+    assert "proactive_talk_periodic[enabled]" in status
+    assert "body_sense_tick[enabled]" in status
+
+
+def test_build_personality_tick_status_marks_missing_tasks_degraded() -> None:
+    class _Task:
+        def __init__(self, *, enabled: bool) -> None:
+            self.enabled = enabled
+
+    class _Registry:
+        def get(self, task_id: str):
+            if task_id == "proactive_talk_periodic":
+                return _Task(enabled=True)
+            return None
+
+    status = _build_personality_tick_status(
+        registry=_Registry(),
+        task_ids=["proactive_talk_periodic", "inner_world_tick"],
+    )
+
+    assert status.startswith("DEGRADED")
+    assert "missing=inner_world_tick" in status
 
 
 def test_world_canon_sync_on_startup_backfills_world_canon_index(tmp_path) -> None:

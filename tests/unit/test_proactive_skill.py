@@ -253,3 +253,61 @@ class TestProactiveTalkSleepMode:
 
     def test_normal_mode_allowed(self) -> None:
         assert "normal" in ALLOWED_MODES
+
+
+class TestProactiveTalkMotiveState:
+    def test_motive_pull_blocks_proactive_talk(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                llm_generator=_make_llm_generator("问候"),
+                ui_pusher=pusher,
+                motive_state={
+                    "reach_out_drive": 0.20,
+                    "continuity_drive": 0.18,
+                    "withdraw_drive": 0.82,
+                    "self_protect_drive": 0.88,
+                    "dominant_motive": "self_protect",
+                },
+            ),
+        )
+
+        assert result["status"] == STATUS_REJECTED
+        assert result["reason_code"] == SCHED_CONDITION_UNMET
+        assert "motive gate blocked proactive_talk" in result["detail"]
+        assert pushed == []
+
+    def test_motive_hint_flows_into_llm_input(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+        captured: dict[str, object] = {}
+
+        def _capturing_llm(inp: dict) -> dict:
+            captured.update(inp)
+            return {"greeting": "我有点想你了，就来看看你在不在。"}
+
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                llm_generator=_capturing_llm,
+                ui_pusher=pusher,
+                motive_state={
+                    "reach_out_drive": 0.78,
+                    "care_drive": 0.64,
+                    "continuity_drive": 0.61,
+                    "withdraw_drive": 0.22,
+                    "self_protect_drive": 0.18,
+                    "dominant_motive": "reach_out",
+                },
+            ),
+        )
+
+        assert result["status"] == STATUS_EXECUTED
+        assert result["motive_driven"] is True
+        assert result["motive_state"]["dominant_motive"] == "reach_out"
+        assert captured["motive_state"]["reach_out_drive"] == 0.78
+        assert "主动靠近对方" in str(captured["motive_hint"])
+        assert pushed[0]["dominant_motive"] == "reach_out"

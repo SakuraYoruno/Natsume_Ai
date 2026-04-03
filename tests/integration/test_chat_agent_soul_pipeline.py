@@ -391,6 +391,8 @@ def _patch_http_lifespan_runtime(
         "bond_queue_shutdown": 0,
         "world_sync_calls": 0,
         "scheduler_started": 0,
+        "scheduler_task_count_at_start": 0,
+        "scheduler_task_ids_at_start": [],
         "tool_registrations": 0,
         "handler_registrations": 0,
     }
@@ -425,10 +427,13 @@ def _patch_http_lifespan_runtime(
 
     class _FakeNatsumeScheduler:
         def __init__(self, **_kwargs: Any) -> None:
-            return None
+            self.registry = _kwargs.get("registry")
 
         def start(self) -> None:
             capture["scheduler_started"] += 1
+            task_ids = list(getattr(self.registry, "_tasks", {}).keys())
+            capture["scheduler_task_count_at_start"] = len(task_ids)
+            capture["scheduler_task_ids_at_start"] = task_ids
 
     class _FakeActivityMonitor:
         def __init__(self, **_kwargs: Any) -> None:
@@ -3526,9 +3531,21 @@ def test_fastapi_lifespan_wraps_edge_gateway_bridge_soul_pipeline(
 
         with TestClient(fastapi_app) as host_client:
             assert capture_lifespan["startup_reports"][-1]["status"] == "OK"
+            assert capture_lifespan["startup_reports"][-1]["runtime_statuses"]["proactive_talk_scheduler"].startswith("OK")
+            assert "proactive_talk_periodic[enabled]" in capture_lifespan["startup_reports"][-1]["runtime_statuses"]["personality_tick_registry"]
+            assert "inner_world_tick[enabled]" in capture_lifespan["startup_reports"][-1]["runtime_statuses"]["personality_tick_registry"]
             assert capture_lifespan["heartbeat_started"] == [30.0]
             assert capture_lifespan["activity_started"] == 1
             assert capture_lifespan["activity_set"] == 1
+            assert capture_lifespan["scheduler_started"] == 1
+            assert {
+                "proactive_talk_periodic",
+                "inner_world_tick",
+                "silence_tick",
+                "body_sense_tick",
+                "gaming_companion_tick",
+                "emergent_growth_weekly",
+            }.issubset(set(capture_lifespan["scheduler_task_ids_at_start"]))
             assert len(capture_lifespan["registered_loops"]) == 1
 
             reporter = _HostInputReporterBridge(host_client=host_client)
@@ -3702,6 +3719,17 @@ def test_fastapi_lifespan_degraded_startup_still_allows_edge_gateway_bridge_soul
 
         with TestClient(fastapi_app) as host_client:
             assert capture_lifespan["startup_reports"][-1]["status"] == "DEGRADED"
+            assert capture_lifespan["startup_reports"][-1]["runtime_statuses"]["proactive_talk_scheduler"].startswith("OK")
+            assert "silence_tick[enabled]" in capture_lifespan["startup_reports"][-1]["runtime_statuses"]["personality_tick_registry"]
+            assert capture_lifespan["scheduler_started"] == 1
+            assert {
+                "proactive_talk_periodic",
+                "inner_world_tick",
+                "silence_tick",
+                "body_sense_tick",
+                "gaming_companion_tick",
+                "emergent_growth_weekly",
+            }.issubset(set(capture_lifespan["scheduler_task_ids_at_start"]))
             reporter = _HostInputReporterBridge(host_client=host_client)
             adapter = _GatewayWebhookAdapter()
             gateway_app = create_gateway_app(

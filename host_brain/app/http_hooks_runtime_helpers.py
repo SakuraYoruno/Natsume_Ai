@@ -171,6 +171,40 @@ def run_proactive_intent_dispatch(
     except Exception as emotion_exc:
         logger.debug("方向B: 情感上下文读取异常（忽略）: %s", emotion_exc)
 
+    motive_state: dict[str, Any] = {}
+    try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+        from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
+
+        persona_user_id = get_canonical_bond_user_id()
+        current_topic = recent_topics[0] if recent_topics else ""
+        silence_state = get_silence_engine().get_silence_state(current_topic=current_topic).as_dict()
+        body_sense = get_body_sense_model().get_state().as_dict()
+        inner_state = get_inner_world().get_state(persona_user_id)
+        offline_state = {
+            "offline_hours": float(inner_state.get("total_offline_hours") or 0.0),
+            "loneliness_level": float(inner_state.get("loneliness") or 0.0),
+            "anticipation_level": float(inner_state.get("anticipation") or 0.0),
+            "anticipation_topics": list(inner_state.get("anticipation_topics") or []),
+        }
+        pending_topics = list(offline_state.get("anticipation_topics") or []) or list(recent_topics[:3])
+        motive_state = compute_motive_state(
+            MotiveInput(
+                silence_state=silence_state,
+                body_sense=body_sense,
+                offline_state=offline_state,
+                bond_summary=bond_summary,
+                emotion_context=emotion_context,
+                pending_followup_topics=pending_topics,
+                user_message="",
+            )
+        ).as_dict()
+    except Exception as motive_exc:
+        logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
+
     context = {
         "sys_mode": system_intent.get("mood_state", "normal"),
         "request_id": system_intent.get("request_id"),
@@ -181,6 +215,7 @@ def run_proactive_intent_dispatch(
         "llm_generator": llm_generator,
         "user_name": "主人",
         "emotion_context": emotion_context,
+        "motive_state": motive_state,
     }
     return execute_proactive_talk(args=args, context=context)
 
@@ -344,6 +379,7 @@ def _build_llm_generator(
         hint = bond.get("capability_hint", "")
         topics_str = "、".join(recent_topics[:3]) if recent_topics else ""
         emotion_hint = str(llm_input.get("emotion_hint") or "").strip()
+        motive_hint = str(llm_input.get("motive_hint") or "").strip()
 
         prompt_parts = [
             f"你是夏目藍，现在是{time_period}时段。",
@@ -353,6 +389,8 @@ def _build_llm_generator(
             prompt_parts.append(f"当前关系阶段：{stage}，{hint}。")
         if emotion_hint:
             prompt_parts.append(f"你的情感状态：{emotion_hint}")
+        if motive_hint:
+            prompt_parts.append(f"你当前的主动动机：{motive_hint}")
         if dream_snippet:
             prompt_parts.append(f"你昨晚做了一个梦，可以自然地提起：{dream_snippet[:60]}。")
         elif diary_snippet:

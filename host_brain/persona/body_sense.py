@@ -66,7 +66,7 @@ _FATIGUE_WILLINGNESS_PENALTY_MAX = 0.35   # 极度疲劳最多降低 35% 意愿
 _DROWSY_STYLE_HINTS: dict[str, str] = {
     "ALERT":   "",
     "SLEEPY":  "你有点困了，说话语气慵懒，偶尔会有些迟钝。",
-    "DROWSY":  "你很困，说话简短，反应慢一点，偶尔会说"好困"之类的话。",
+    "DROWSY":  "你很困，说话简短，反应慢一点，偶尔会说‘好困’之类的话。",
     "ASLEEP":  "你困到快睡着了，只能说很短的话，语气迷迷糊糊的。",
 }
 

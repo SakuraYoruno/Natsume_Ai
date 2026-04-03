@@ -112,6 +112,82 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
 
 
+def _resolve_persona_session_emotion(emotion_context: Mapping[str, Any]) -> tuple[float, float]:
+    """为人格 session_end 提取可用的 valence / arousal。"""
+    payload = dict(emotion_context or {})
+    vad_payload = payload.get("vad") if isinstance(payload.get("vad"), Mapping) else {}
+
+    raw_valence = payload.get("valence")
+    if raw_valence is None:
+        raw_valence = vad_payload.get("valence")
+
+    raw_arousal = payload.get("arousal")
+    if raw_arousal is None:
+        raw_arousal = vad_payload.get("arousal")
+
+    def _coerce(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    if raw_valence is not None or raw_arousal is not None:
+        valence = max(-1.0, min(1.0, _coerce(raw_valence, 0.0)))
+        arousal = max(0.0, min(1.0, _coerce(raw_arousal, 0.3)))
+        return valence, arousal
+
+    emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
+    intensity = max(0.0, min(1.0, _coerce(payload.get("emotion_intensity"), 0.5)))
+    fallback_vad = {
+        "HAPPY": (0.7, 0.65),
+        "LOVING": (0.8, 0.45),
+        "EXCITED": (0.75, 0.85),
+        "SURPRISED": (0.2, 0.8),
+        "SAD": (-0.6, 0.25),
+        "ANGRY": (-0.7, 0.8),
+        "NEUTRAL": (0.0, 0.3),
+    }
+    base_valence, base_arousal = fallback_vad.get(emotion_tag, (0.0, 0.3))
+    valence = max(-1.0, min(1.0, float(base_valence) * max(0.4, intensity)))
+    arousal = max(0.0, min(1.0, max(float(base_arousal), intensity)))
+    return valence, arousal
+
+
+async def _run_persona_session_end_hooks(
+    *,
+    request_id: str,
+    user_message: str,
+    emotion_context: Mapping[str, Any],
+) -> None:
+    """统一触发人格 session_end/conversation_end 收口。"""
+    try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+        persona_user_id = get_canonical_bond_user_id()
+        valence, arousal = _resolve_persona_session_emotion(emotion_context)
+        pending_topics = []
+        topic_preview = _build_reply_preview(user_message, limit=64)
+        if topic_preview:
+            pending_topics = [topic_preview]
+        await asyncio.to_thread(
+            get_inner_world().on_session_end,
+            persona_user_id,
+            valence=valence,
+            arousal=arousal,
+            pending_topics=pending_topics,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] persona inner_world session_end failed: %s", request_id, exc)
+
+    try:
+        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+
+        await asyncio.to_thread(get_body_sense_model().on_conversation_end)
+    except Exception as exc:
+        _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
+
+
 def _load_continuity_turns(
     *,
     request_id: str,
@@ -1292,6 +1368,16 @@ async def _async_post_process(
             )
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process episodic failed: %s", request_id, exc)
+
+    # ── Persona session_end 收口 ────────────────────────────────────────
+    try:
+        await _run_persona_session_end_hooks(
+            request_id=request_id,
+            user_message=user_message,
+            emotion_context=emotion_context,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process persona session_end failed: %s", request_id, exc)
 
     # ── Bond 更新 ────────────────────────────────────────────────────
     try:

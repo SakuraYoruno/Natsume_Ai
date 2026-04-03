@@ -79,6 +79,29 @@ def _build_emotion_hint_for_proactive(
 
     return "；".join(hints) + "。" if hints else ""
 
+
+def _build_motive_hint_for_proactive(
+    motive_state: dict[str, Any] | None,
+) -> str:
+    """把 motive_state 转成主动对话可消费的自然语言提示。"""
+    if not motive_state or not isinstance(motive_state, dict):
+        return ""
+
+    reach_out = float(motive_state.get("reach_out_drive") or 0.0)
+    care = float(motive_state.get("care_drive") or 0.0)
+    continuity = float(motive_state.get("continuity_drive") or 0.0)
+    withdraw = float(motive_state.get("withdraw_drive") or 0.0)
+    protect = float(motive_state.get("self_protect_drive") or 0.0)
+
+    hints: list[str] = []
+    if reach_out >= 0.6 or continuity >= 0.55:
+        hints.append("你现在其实想主动靠近对方，延续联系感")
+    if care >= 0.55:
+        hints.append("你会更想照顾和安抚对方")
+    if withdraw >= 0.6 or protect >= 0.6:
+        hints.append("但也要稍微收一点，不要显得打扰或越界")
+    return "；".join(hints) + "。" if hints else ""
+
 # Skill 元数据常量
 SKILL_NAME = "proactive_talk"
 SKILL_CLEARANCE = "LOW"
@@ -181,6 +204,30 @@ def execute_proactive_talk(
     # 方向 B：读取情感上下文
     emotion_context: dict[str, Any] | None = ctx.get("emotion_context")
     emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
+    motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
+    motive_hint = _build_motive_hint_for_proactive(motive_state)
+
+    if motive_state:
+        reach_out = float(motive_state.get("reach_out_drive") or 0.0)
+        continuity = float(motive_state.get("continuity_drive") or 0.0)
+        withdraw = float(motive_state.get("withdraw_drive") or 0.0)
+        self_protect = float(motive_state.get("self_protect_drive") or 0.0)
+        motive_push = max(reach_out, continuity)
+        motive_pull = max(withdraw, self_protect)
+
+        if motive_pull >= 0.75 and motive_push < 0.55:
+            return {
+                "status": STATUS_REJECTED,
+                "event_id": event_id,
+                "reason_code": SCHED_CONDITION_UNMET,
+                "detail": (
+                    "motive gate blocked proactive_talk: "
+                    f"push={motive_push:.2f}, pull={motive_pull:.2f}"
+                ),
+                "request_id": request_id,
+                "ts_ms": ts,
+                "motive_state": motive_state,
+            }
 
     # LLM 生成主动问候
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
@@ -198,6 +245,8 @@ def execute_proactive_talk(
                 # 方向 B：情感驱动问候上下文
                 "emotion_hint": emotion_hint,
                 "emotion_context": emotion_context or {},
+                "motive_state": motive_state,
+                "motive_hint": motive_hint,
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
@@ -240,6 +289,7 @@ def execute_proactive_talk(
         "ts_ms": ts,
         # 方向 B：携带情感上下文供 UI 渲染（如表情切换）
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
+        "dominant_motive": motive_state.get("dominant_motive"),
     }
 
     ui_pusher: UIPusher | None = ctx.get("ui_pusher")
@@ -264,4 +314,6 @@ def execute_proactive_talk(
         # 方向 B：审计字段
         "emotion_driven": bool(emotion_hint),
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
+        "motive_driven": bool(motive_hint),
+        "motive_state": motive_state,
     }

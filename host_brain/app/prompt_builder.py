@@ -1081,6 +1081,42 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     # 仅在有任何维度处于非基线状态时注入
     _bs_active = bool(_body_sense.get("is_active", False)) or bool(_bs_hint)
 
+    # ── M46：ResponsePolicyLayer 行为约束注入 ─────────────────────────────
+    _response_policy_raw = runtime_payload.get("response_policy") or prompt_context.get("response_policy")
+    _response_policy: dict = dict(_response_policy_raw) if isinstance(_response_policy_raw, Mapping) else {}
+    _rp_max_chars = int(_response_policy.get("max_chars") or 0)
+    _rp_max_sentences = int(_response_policy.get("max_sentences") or 0)
+    _rp_min_sentences = int(_response_policy.get("min_sentences") or 0)
+    _rp_allow_followup = bool(_response_policy.get("allow_followup", True))
+    _rp_allow_topic_shift = bool(_response_policy.get("allow_topic_shift", True))
+    _rp_allow_proactive = bool(_response_policy.get("allow_proactive_after_reply", True))
+    _rp_warmth_floor = float(_response_policy.get("warmth_floor") or 0.0)
+    _rp_warmth_ceiling = float(_response_policy.get("warmth_ceiling") or 1.0)
+    _rp_intimacy_ceiling = float(_response_policy.get("intimacy_ceiling") or 0.75)
+    _rp_humor_ceiling = float(_response_policy.get("humor_ceiling") or 0.8)
+    _rp_confession_guard = bool(_response_policy.get("confession_guard", False))
+    _rp_withdrawal_guard = bool(_response_policy.get("withdrawal_guard", False))
+    _rp_should_be_brief = bool(_response_policy.get("should_be_brief", False))
+    _rp_should_be_withdrawn = bool(_response_policy.get("should_be_withdrawn", False))
+    _rp_reasons = [str(item).strip() for item in (_response_policy.get("policy_reason_tags") or []) if str(item).strip()]
+    _rp_active = bool(_response_policy)
+    _rp_directives: list[str] = []
+    if _rp_should_be_brief or (_rp_max_sentences and _rp_max_sentences <= 3):
+        if _rp_max_sentences > 0:
+            _rp_directives.append(f"本轮尽量控制在 {_rp_max_sentences} 句以内，保持克制和简短。")
+        else:
+            _rp_directives.append("本轮保持克制和简短，不要展开过多。")
+    if not _rp_allow_followup:
+        _rp_directives.append("本轮不要主动追问。")
+    if not _rp_allow_topic_shift:
+        _rp_directives.append("本轮不要擅自扩展或切换话题。")
+    if not _rp_allow_proactive:
+        _rp_directives.append("回复结束后不要额外追加主动性表达。")
+    if _rp_confession_guard:
+        _rp_directives.append("避免表白式、依赖式或越界亲密表达。")
+    if _rp_should_be_withdrawn or _rp_withdrawal_guard:
+        _rp_directives.append("语气略收一点，保持边界感，不要过度外放。")
+
     # bond_stage → 自然语言行为指令（中文）
     _STAGE_INSTRUCTION_MAP = {
         "STRANGER":     "初次见面，保持礼貌和适当的距离感。",
@@ -1383,6 +1419,26 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             f"- loneliness_level: {_bs_loneliness_level}\n"
             + (f"- body_sense_hint: {_bs_hint}\n" if _bs_hint else "")
             if _bs_active else
+            ""
+        )
+        # ── M46：ResponsePolicyLayer 主输出约束 ───────────────────────────
+        + (
+            f"- response_policy_max_chars: {_rp_max_chars}\n"
+            f"- response_policy_max_sentences: {_rp_max_sentences}\n"
+            f"- response_policy_min_sentences: {_rp_min_sentences}\n"
+            f"- response_policy_allow_followup: {'true' if _rp_allow_followup else 'false'}\n"
+            f"- response_policy_allow_topic_shift: {'true' if _rp_allow_topic_shift else 'false'}\n"
+            f"- response_policy_allow_proactive_after_reply: {'true' if _rp_allow_proactive else 'false'}\n"
+            f"- response_policy_warmth_range: {_rp_warmth_floor:.2f}~{_rp_warmth_ceiling:.2f}\n"
+            f"- response_policy_intimacy_ceiling: {_rp_intimacy_ceiling:.2f}\n"
+            f"- response_policy_humor_ceiling: {_rp_humor_ceiling:.2f}\n"
+            f"- response_policy_confession_guard: {'true' if _rp_confession_guard else 'false'}\n"
+            f"- response_policy_withdrawal_guard: {'true' if _rp_withdrawal_guard else 'false'}\n"
+            f"- response_policy_should_be_brief: {'true' if _rp_should_be_brief else 'false'}\n"
+            f"- response_policy_should_be_withdrawn: {'true' if _rp_should_be_withdrawn else 'false'}\n"
+            + (f"- response_policy_directive: {' '.join(_rp_directives)}\n" if _rp_directives else "")
+            + (f"- response_policy_reasons: {', '.join(_rp_reasons)}\n" if _rp_reasons else "")
+            if _rp_active else
             ""
         )
         + "\n"
