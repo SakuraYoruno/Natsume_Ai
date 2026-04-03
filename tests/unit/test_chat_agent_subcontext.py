@@ -816,6 +816,16 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
 
 def test_chat_agent_helper_reflection_buffer_and_sub_agent_prompt_variants(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "off")
+    assert _should_buffer_stream_output(
+        emotion_context={},
+        bond_summary={},
+        response_policy={"allow_followup": False},
+    ) is True
+    assert _should_buffer_stream_output(
+        emotion_context={},
+        bond_summary={},
+        response_policy={"max_sentences": 1},
+    ) is False
     assert _should_buffer_stream_output(emotion_context={}, bond_summary={}) is False
 
     monkeypatch.delenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", raising=False)
@@ -1021,3 +1031,336 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     events = _run(_collect_events(chat_agent_sse_generator(unavailable_input)))
     commit = next(item for item in events if '"phase": "COMMIT"' in item)
     assert "LLM_UNAVAILABLE" in commit
+
+def test_chat_agent_commit_enforces_response_policy_max_sentences_from_runtime_payload(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"max_sentences": 1}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "第一句。第二句。"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-sentences",
+        session_id="sess-chat-policy-sentences",
+        user_message="继续说",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert '"narrative": "第一句。"' in commit
+    assert "第二句" not in joined
+
+
+def test_chat_agent_post_process_receives_prompt_runtime_trace_payload(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: (
+            "prompt",
+            "system prompt",
+            {},
+            {
+                "motive_state": {
+                    "dominant_motive": "continuity",
+                    "continuity_drive": 0.91,
+                },
+                "response_policy": {
+                    "allow_followup": False,
+                    "allow_proactive_after_reply": False,
+                    "max_sentences": 1,
+                },
+            },
+        ),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "ok. keep going."
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    captured: dict[str, object] = {}
+
+    def _fake_async_post_process(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+
+        async def _done() -> None:
+            return None
+
+        return _done()
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+    monkeypatch.setattr("host_brain.app.top_agent._async_post_process", _fake_async_post_process)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-trace-runtime-payload",
+        session_id="sess-chat-trace-runtime-payload",
+        user_message="continue",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    assert any('"phase": "COMMIT"' in item for item in events)
+    assert dict(captured.get("motive_state") or {})["dominant_motive"] == "continuity"
+    assert dict(captured.get("motive_state") or {})["continuity_drive"] == 0.91
+    assert dict(captured.get("response_policy") or {})["allow_followup"] is False
+    assert dict(captured.get("response_policy") or {})["allow_proactive_after_reply"] is False
+    assert dict(captured.get("response_policy") or {})["max_sentences"] == 1
+
+
+def test_chat_agent_commit_enforces_response_policy_max_chars_from_agent_input(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "你好呀。后面不该出现"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-chars",
+        session_id="sess-chat-policy-chars",
+        user_message="说一句",
+        person_id="person-001",
+        render_target_lang="zh",
+        response_policy={"max_chars": 4},
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert '"narrative": "你好呀。"' in commit
+    assert "后面不该出现" not in joined
+
+def test_chat_agent_commit_enforces_response_policy_followup_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"allow_followup": False}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "先这样吧。你呢？"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-followup",
+        session_id="sess-chat-policy-followup",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert '"narrative": "先这样吧。"' in commit
+    assert "你呢" not in joined
+
+
+def test_chat_agent_commit_enforces_response_policy_confession_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: (
+            "prompt",
+            "system",
+            {},
+            {"response_policy": {"confession_guard": True, "intimacy_ceiling": 0.15}},
+        ),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "我爱你。我好想你。"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-confession",
+        session_id="sess-chat-policy-confession",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert "我爱你" not in joined
+    assert "好想你" not in joined
+    assert "很在意你" in commit or "惦记你" in commit
+
+def test_chat_agent_commit_enforces_response_policy_topic_shift_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"allow_topic_shift": False}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "先把这件事说完。对了，今天天气也不错。"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-topic-shift",
+        session_id="sess-chat-policy-topic-shift",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert '"narrative": "先把这件事说完。"' in commit
+    assert "今天天气也不错" not in joined
+
+
+def test_chat_agent_commit_enforces_response_policy_withdrawal_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"withdrawal_guard": True}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "我会一直都在！！抱抱你~"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-withdrawn",
+        session_id="sess-chat-policy-withdrawn",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert "抱抱你" not in joined
+    assert "！！" not in joined
+    assert "我在" in commit or "缓一缓" in commit
+
+def test_chat_agent_commit_enforces_response_policy_intimacy_ceiling_lexical_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"intimacy_ceiling": 0.2}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "亲爱的，抱抱你。好喜欢你。"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-intimacy-lexical",
+        session_id="sess-chat-policy-intimacy-lexical",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert "亲爱的" not in joined
+    assert "抱抱你" not in joined
+    assert "好喜欢你" not in joined
+    assert "缓一缓" in commit or "在意你" in commit
+
+
+def test_chat_agent_commit_enforces_response_policy_humor_ceiling_lexical_guard(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: ("prompt", "system", {}, {"response_policy": {"humor_ceiling": 0.1}}),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "哈哈，那就先这样吧～"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-humor-lexical",
+        session_id="sess-chat-policy-humor-lexical",
+        user_message="继续",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert "哈哈" not in joined
+    assert "～" not in joined
+    assert '"narrative": "那就先这样吧。"' in commit
+

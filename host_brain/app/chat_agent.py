@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -92,6 +93,9 @@ class ChatAgentInput:
     # ── LLM 运行时（由调用者 resolve 后传入，避免重复 resolve）──
     llm_runtime: Optional[Dict[str, Any]] = None
 
+    # ── 行为约束策略（可由上游直接传入，缺省时从 prompt runtime_payload 回填）──
+    response_policy: Dict[str, Any] = field(default_factory=dict)
+
 
 # ---------------------------------------------------------------------------
 # 工具函数（从 top_agent.py 复用）
@@ -129,6 +133,376 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     if len(normalized) <= int(limit):
         return normalized
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
+
+
+def _coerce_response_policy(raw_policy: Any) -> Dict[str, Any]:
+    if isinstance(raw_policy, Mapping):
+        return dict(raw_policy)
+    return {}
+
+
+def _split_text_into_sentences(text: str) -> list[str]:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return []
+    from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
+
+    splitter = SentenceSplitter()
+    sentences = list(splitter.feed(normalized))
+    remainder = splitter.flush()
+    if remainder:
+        sentences.append(remainder)
+    return [str(sentence).strip() for sentence in sentences if str(sentence).strip()]
+
+
+def _truncate_text_to_sentence_limit(text: str, *, max_sentences: int) -> str:
+    normalized = str(text or "").strip()
+    if max_sentences <= 0 or not normalized:
+        return normalized
+
+    sentences = _split_text_into_sentences(normalized)
+    if len(sentences) <= max_sentences:
+        return normalized
+
+    search_start = 0
+    taken_end = 0
+    taken_count = 0
+    for sentence in sentences:
+        found_at = normalized.find(sentence, search_start)
+        if found_at < 0:
+            continue
+        taken_end = found_at + len(sentence)
+        search_start = taken_end
+        taken_count += 1
+        if taken_count >= max_sentences:
+            break
+
+    if taken_count >= max_sentences and taken_end > 0:
+        return normalized[:taken_end].strip()
+    return "".join(sentences[:max_sentences]).strip()
+
+
+def _truncate_text_to_char_limit(text: str, *, max_chars: int) -> str:
+    normalized = str(text or "").strip()
+    if max_chars <= 0 or len(normalized) <= max_chars:
+        return normalized
+
+    candidate = normalized[:max_chars].rstrip()
+    boundary_positions = [candidate.rfind(ch) for ch in "。！？!?…\n」）"]
+    boundary_index = max(boundary_positions) if boundary_positions else -1
+    if boundary_index >= max(0, max_chars // 2):
+        natural = candidate[: boundary_index + 1].strip()
+        if natural:
+            return natural
+    return candidate.rstrip("，,、；;：:-— ").strip()
+
+
+def _extract_response_policy_limits(response_policy: Any) -> tuple[Dict[str, Any], int, int, int]:
+    policy = _coerce_response_policy(response_policy)
+    try:
+        max_sentences = max(0, int(policy.get("max_sentences") or 0))
+    except (TypeError, ValueError):
+        max_sentences = 0
+    try:
+        max_chars = max(0, int(policy.get("max_chars") or 0))
+    except (TypeError, ValueError):
+        max_chars = 0
+    try:
+        min_sentences = max(0, int(policy.get("min_sentences") or 0))
+    except (TypeError, ValueError):
+        min_sentences = 0
+
+    if bool(policy.get("should_be_brief")):
+        if max_sentences <= 0:
+            max_sentences = 3
+        if max_chars <= 0:
+            max_chars = 120
+
+    return policy, max_chars, max_sentences, min_sentences
+
+
+def _coerce_response_policy_score(policy: Mapping[str, Any], key: str, *, default: float = 1.0) -> float:
+    try:
+        value = float(policy.get(key, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(0.0, min(1.0, value))
+
+
+def _looks_like_followup_sentence(sentence: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(sentence or "")).strip()
+    if not normalized:
+        return False
+    followup_markers = (
+        "你呢", "要不要", "想不想", "还要不要", "要继续吗", "如果你愿意",
+        "方便的话", "可以告诉我", "能不能", "要不要我", "要我继续", "还想",
+        "要聊聊吗", "愿意的话", "想继续", "要不要继续",
+    )
+    if any(marker in normalized for marker in followup_markers):
+        return True
+    return bool(re.search(r"[?？]$", normalized))
+
+
+def _soften_followup_sentence(sentence: str) -> str:
+    normalized = str(sentence or "").strip()
+    if not normalized:
+        return ""
+    patterns = [
+        r"[，,、]?(?:你呢|你觉得呢|你怎么看呢|你怎么看|你觉得怎么样呢|你觉得怎么样)[。！？!?？]*$",
+        r"[，,、]?(?:要不要|想不想|还要不要|要不要继续|要继续吗).*[。！？!?？]*$",
+        r"[，,、]?(?:如果你愿意|方便的话|愿意的话|可以的话).*[。！？!?？]*$",
+        r"[，,、]?(?:可以告诉我|能不能告诉我|要不要和我说说).*[。！？!?？]*$",
+    ]
+    softened = normalized
+    for pattern in patterns:
+        softened = re.sub(pattern, "", softened).strip()
+    softened = softened.rstrip("，,、；;：: ").strip()
+    if softened == normalized and _looks_like_followup_sentence(normalized):
+        return ""
+    if softened and softened[-1] not in "。！？!?":
+        softened += "。"
+    return softened
+
+
+def _looks_like_topic_shift_sentence(sentence: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(sentence or "")).strip()
+    if not normalized:
+        return False
+    return bool(re.match(r"^(?:对了|另外|顺便|说起来|还有|题外话|再补一句|补充一句)", normalized))
+
+
+def _contains_confession_marker(sentence: str) -> bool:
+    normalized = str(sentence or "")
+    markers = (
+        "我爱你", "爱你", "好喜欢你", "最喜欢你", "喜欢你", "好想你", "想你了",
+        "想你", "离不开你", "不能没有你", "只想和你", "属于你", "亲亲", "抱抱你",
+        "一直陪着你", "永远陪着你", "会一直等你",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _contains_intimacy_marker(sentence: str) -> bool:
+    normalized = str(sentence or "")
+    if _contains_confession_marker(normalized):
+        return True
+    markers = (
+        "亲爱的", "宝贝", "宝宝", "乖乖", "抱抱", "亲亲",
+        "喜欢你", "好喜欢你", "最喜欢你", "想你", "好想你", "想你了",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _soften_confession_sentence(sentence: str) -> str:
+    softened = str(sentence or "").strip()
+    if not softened:
+        return ""
+    replacements = [
+        ("我爱你", "我很在意你"),
+        ("爱你", "很在意你"),
+        ("最喜欢你", "会更在意你一点"),
+        ("好喜欢你", "挺在意你的"),
+        ("喜欢你", "挺在意你的"),
+        ("好想你", "有点惦记你"),
+        ("想你了", "有惦记过你"),
+        ("想你", "会惦记你"),
+        ("离不开你", "会很在意你的状态"),
+        ("不能没有你", "会很在意你的状态"),
+        ("永远陪着你", "会认真陪你把这段话说完"),
+        ("一直陪着你", "尽量陪你把这段话说完"),
+        ("会一直等你", "会记着这件事"),
+        ("只想和你", "现在想先和你"),
+        ("属于你", "会认真对待这份关系"),
+        ("抱抱你", "你先缓一缓"),
+        ("亲亲", ""),
+    ]
+    for source, target in replacements:
+        softened = softened.replace(source, target)
+    softened = re.sub(r"\s+", " ", softened).strip()
+    softened = softened.rstrip("，,、；;：: ").strip()
+    if softened and softened[-1] not in "。！？!?":
+        softened += "。"
+    return softened
+
+
+def _soften_intimacy_sentence(sentence: str) -> str:
+    softened = str(sentence or "").strip()
+    if not softened:
+        return ""
+    if _contains_confession_marker(softened):
+        softened = _soften_confession_sentence(softened)
+    replacements = [
+        ("亲爱的", ""),
+        ("宝贝", "你"),
+        ("宝宝", "你"),
+        ("乖乖", "先"),
+        ("抱抱你", "你先缓一缓"),
+        ("抱抱", "缓一缓"),
+        ("亲亲", ""),
+    ]
+    for source, target in replacements:
+        softened = softened.replace(source, target)
+    softened = softened.replace("你你", "你").replace("先先", "先")
+    softened = re.sub(r"\s+", " ", softened).strip()
+    softened = softened.lstrip("，,、；;：: ").strip()
+    softened = re.sub(r"([。！？!?])\1+", r"\1", softened)
+    softened = softened.rstrip("，,、；;：: ").strip()
+    if softened and softened[-1] not in "。！？!?":
+        softened += "。"
+    return softened
+
+
+def _soften_humor_tone(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"[~～]+", "", normalized)
+    normalized = re.sub(r"哈{2,}", "", normalized)
+    normalized = re.sub(r"呵{2,}", "", normalized)
+    normalized = re.sub(r"嘿{2,}", "", normalized)
+    normalized = re.sub(r"嘻{2,}", "", normalized)
+    normalized = re.sub(r"([。！？!?])[，,、 ]+", r"\1", normalized)
+    normalized = re.sub(r"[，,、 ]+([。！？!?])", r"\1", normalized)
+    normalized = re.sub(r"([。！？!?])\1+", r"\1", normalized)
+    normalized = re.sub(r"([，,、])\1+", r"\1", normalized)
+    normalized = normalized.lstrip("，,、。！？!? ").strip()
+    normalized = normalized.rstrip("，,、；;：: ").strip()
+    if not normalized:
+        return "嗯。"
+    if normalized[-1] not in "。！？!?":
+        normalized += "。"
+    return normalized
+
+
+def _soften_withdrawn_tone(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"[~～]+", "", normalized)
+    normalized = re.sub(r"(?:!|！){2,}", "。", normalized)
+    normalized = re.sub(r"(?:\?|？){2,}", "？", normalized)
+    normalized = normalized.replace("我一直都在", "我在").replace("我会一直在", "我在").replace("我永远在", "我在")
+    normalized = normalized.replace("抱抱你", "你先缓一缓")
+    normalized = re.sub(r"([。！？!?])\1+", r"\1", normalized)
+    return normalized.strip()
+
+
+def _drop_trailing_policy_sentences(
+    sentences: list[str],
+    *,
+    min_sentences: int,
+    predicate,
+) -> list[str]:
+    guarded = list(sentences or [])
+    floor = max(1, int(min_sentences or 0)) if guarded else 0
+    while len(guarded) > floor and predicate(guarded[-1]):
+        guarded.pop()
+    return guarded
+
+
+def _apply_response_policy_stream_guard(text: str, response_policy: Any) -> str:
+    normalized = str(text or "").strip()
+    policy, max_chars, max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    if not normalized or not policy:
+        return normalized
+    if max_sentences > 0:
+        normalized = _truncate_text_to_sentence_limit(normalized, max_sentences=max_sentences)
+    if max_chars > 0:
+        normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
+    return normalized.strip()
+
+
+def _response_policy_requires_buffering(response_policy: Any) -> bool:
+    policy, _max_chars, _max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    if not policy:
+        return False
+    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+    return any([
+        not bool(policy.get("allow_followup", True)),
+        not bool(policy.get("allow_topic_shift", True)),
+        bool(policy.get("confession_guard", False)),
+        bool(policy.get("withdrawal_guard", False)),
+        bool(policy.get("should_be_withdrawn", False)),
+        intimacy_ceiling <= 0.55,
+        humor_ceiling <= 0.35,
+    ])
+
+
+def _apply_response_policy_hard_guard(narrative: str, response_policy: Any) -> str:
+    normalized = str(narrative or "").strip()
+    policy, max_chars, max_sentences, min_sentences = _extract_response_policy_limits(response_policy)
+    if not normalized or not policy:
+        return normalized
+
+    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+
+    sentences = _split_text_into_sentences(normalized)
+    if sentences:
+        if not bool(policy.get("allow_topic_shift", True)):
+            sentences = _drop_trailing_policy_sentences(
+                sentences,
+                min_sentences=min_sentences,
+                predicate=_looks_like_topic_shift_sentence,
+            )
+        if not bool(policy.get("allow_followup", True)):
+            sentences = _drop_trailing_policy_sentences(
+                sentences,
+                min_sentences=min_sentences,
+                predicate=_looks_like_followup_sentence,
+            )
+            if sentences and _looks_like_followup_sentence(sentences[-1]):
+                softened = _soften_followup_sentence(sentences[-1])
+                if softened:
+                    sentences[-1] = softened
+                elif len(sentences) > max(1, int(min_sentences or 0)):
+                    sentences.pop()
+                else:
+                    sentences[-1] = "嗯。"
+
+        confession_guard = bool(policy.get("confession_guard", False)) or intimacy_ceiling <= 0.35
+        if confession_guard:
+            guarded_sentences: list[str] = []
+            total_sentences = len(sentences)
+            floor = max(1, int(min_sentences or 0)) if total_sentences else 0
+            for index, sentence in enumerate(sentences):
+                if _contains_confession_marker(sentence):
+                    remaining_after = total_sentences - index - 1
+                    if len(guarded_sentences) + remaining_after >= floor:
+                        continue
+                    sentence = _soften_confession_sentence(sentence)
+                if sentence:
+                    guarded_sentences.append(sentence)
+            sentences = guarded_sentences or sentences
+
+        if intimacy_ceiling <= 0.55:
+            guarded_sentences = []
+            total_sentences = len(sentences)
+            floor = max(1, int(min_sentences or 0)) if total_sentences else 0
+            for index, sentence in enumerate(sentences):
+                if _contains_intimacy_marker(sentence):
+                    sentence = _soften_intimacy_sentence(sentence)
+                if sentence:
+                    guarded_sentences.append(sentence)
+                    continue
+                remaining_after = total_sentences - index - 1
+                if len(guarded_sentences) + remaining_after < floor:
+                    guarded_sentences.append("嗯。")
+            sentences = guarded_sentences or sentences
+
+        normalized = "".join(str(sentence).strip() for sentence in sentences if str(sentence).strip()).strip()
+
+    if humor_ceiling <= 0.35:
+        normalized = _soften_humor_tone(normalized)
+
+    if bool(policy.get("withdrawal_guard", False)) or bool(policy.get("should_be_withdrawn", False)):
+        normalized = _soften_withdrawn_tone(normalized)
+
+    if max_sentences > 0:
+        normalized = _truncate_text_to_sentence_limit(normalized, max_sentences=max_sentences)
+    if max_chars > 0:
+        normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
+    return normalized.strip()
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -651,8 +1025,11 @@ def _should_buffer_stream_output(
     *,
     emotion_context: Any,
     bond_summary: Any,
+    response_policy: Any = None,
 ) -> bool:
     """高风险对话缓冲判断。"""
+    if _response_policy_requires_buffering(response_policy):
+        return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
     raw = str(os.environ.get(env_key, "")).strip().lower()
     if raw in ("0", "false", "no", "off"):
@@ -789,12 +1166,14 @@ async def chat_agent_sse_generator(
     thread_id = agent_input.thread_id
     ts_ms = agent_input.ts_ms or int(time.time() * 1000)
     intent_draft = agent_input.intent_draft or {}
+    response_policy = _coerce_response_policy(agent_input.response_policy)
     sub_agent_ctx = agent_input.sub_agent_context
     deterministic_reply = _build_deterministic_sub_agent_reply(sub_agent_ctx, render_target_lang=render_target_lang)
 
     prompt_text = ""
     system_prompt = ""
     gen_params: Dict[str, Any] = {}
+    prompt_runtime_payload: Dict[str, Any] = {}
 
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
     if not deterministic_reply:
@@ -820,7 +1199,7 @@ async def chat_agent_sse_generator(
             reply_depth_hint = "（回复简洁，12-60字，适合移动端消息）"
 
         try:
-            prompt_text, system_prompt, gen_params = build_top_agent_prompt(
+            prompt_result = build_top_agent_prompt(
                 user_message=effective_user_message + reply_depth_hint,
                 render_target_lang=render_target_lang,
                 emotion_context=emotion_context,
@@ -834,7 +1213,16 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 recall_slot_text=recall_slot_text if recall_slot_text else None,
                 extra_context_prompt=sub_agent_context_prompt,
+                include_runtime_payload=True,
             )
+            if isinstance(prompt_result, tuple) and len(prompt_result) >= 4:
+                prompt_text, system_prompt, gen_params, raw_prompt_runtime_payload = prompt_result[:4]
+                prompt_runtime_payload = dict(raw_prompt_runtime_payload or {}) if isinstance(raw_prompt_runtime_payload, Mapping) else {}
+            else:
+                prompt_text, system_prompt, gen_params = prompt_result
+                prompt_runtime_payload = {}
+            if not response_policy:
+                response_policy = _coerce_response_policy(prompt_runtime_payload.get("response_policy"))
         except Exception as _pb_exc:
             _logger.warning("[%s] ChatAgent prompt_builder failed: %s", request_id, _pb_exc)
             yield _sse({
@@ -920,6 +1308,7 @@ async def chat_agent_sse_generator(
     buffer_stream = _should_buffer_stream_output(
         emotion_context=emotion_context,
         bond_summary=bond_summary or None,
+        response_policy=response_policy,
     )
     if deterministic_reply:
         buffer_stream = False
@@ -946,11 +1335,12 @@ async def chat_agent_sse_generator(
     try:
         if deterministic_reply:
             full_text = str(deterministic_reply).strip()
-            rendered_text = full_text
+            visible = _apply_response_policy_stream_guard(full_text, response_policy)
+            rendered_text = visible
             first_token_ms = 0
-            if full_text:
-                yield _sse({"phase": "RENDER", "chunk": full_text})
-                for sentence in splitter.feed(full_text):
+            if visible:
+                yield _sse({"phase": "RENDER", "chunk": visible})
+                for sentence in splitter.feed(visible):
                     yield _sse({
                         "phase": "SENTENCE",
                         "sentence": sentence,
@@ -972,7 +1362,7 @@ async def chat_agent_sse_generator(
                     first_token_ms = int(time.time() * 1000) - llm_started_ms
 
                 full_text += chunk
-                visible = _extract_visible_text(full_text)
+                visible = _apply_response_policy_stream_guard(_extract_visible_text(full_text), response_policy)
                 if not visible:
                     continue
 
@@ -1029,8 +1419,9 @@ async def chat_agent_sse_generator(
                 render_target_lang=render_target_lang,
             )
             if not buffer_stream:
-                yield _sse({"phase": "RENDER", "chunk": full_text})
-                for sentence in splitter.feed(full_text):
+                visible_fallback = _apply_response_policy_stream_guard(full_text, response_policy)
+                yield _sse({"phase": "RENDER", "chunk": visible_fallback})
+                for sentence in splitter.feed(visible_fallback):
                     yield _sse({
                         "phase": "SENTENCE",
                         "sentence": sentence,
@@ -1059,6 +1450,7 @@ async def chat_agent_sse_generator(
             render_lang=render_target_lang,
             allow_rewrite=buffer_stream,
         )
+        narrative = _apply_response_policy_hard_guard(narrative, response_policy)
 
         if buffer_stream and narrative:
             rendered_text = narrative
@@ -1101,6 +1493,7 @@ async def chat_agent_sse_generator(
     # ── 6. 出口净化 ──────────────────────────────────────────────────
     narrative = _strip_internal_delegate_markers(narrative)
     narrative = _airlock_sanitize_output(narrative)
+    narrative = _apply_response_policy_hard_guard(narrative, response_policy)
 
     # PII 出口检查
     _pii_egress_stats: dict[str, Any] = {}
@@ -1109,6 +1502,7 @@ async def chat_agent_sse_generator(
         if _check_channel("EGRESS"):
             _pii_eg = pii_scrub_text(narrative, context="egress")
             narrative = _pii_eg.scrubbed_text
+            narrative = _apply_response_policy_hard_guard(narrative, response_policy)
             if _pii_eg.has_pii:
                 _pii_egress_stats = {
                     "detections": _pii_eg.total_detections,
@@ -1203,6 +1597,8 @@ async def chat_agent_sse_generator(
                 # Phase XV trace 增强：传入 LLM 输入摘要和召回证据
                 llm_input_digest=(system_prompt or "")[:500] or None,
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
+                motive_state=prompt_runtime_payload.get("motive_state"),
+                response_policy=response_policy,
             )
         )
     except Exception as _pp_exc:

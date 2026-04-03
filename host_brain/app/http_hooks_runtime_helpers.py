@@ -171,39 +171,57 @@ def run_proactive_intent_dispatch(
     except Exception as emotion_exc:
         logger.debug("方向B: 情感上下文读取异常（忽略）: %s", emotion_exc)
 
-    motive_state: dict[str, Any] = {}
+    persona_user_id = ""
     try:
         from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+
+        persona_user_id = str(get_canonical_bond_user_id() or "").strip()
+    except Exception:
+        persona_user_id = ""
+
+    motive_state: dict[str, Any] = {}
+    try:
+        from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+
+        current_topic = recent_topics[0] if recent_topics else ""
+        pending_topics = list(recent_topics[:3])
+        motive_state = compute_runtime_motive_state(
+            persona_user_id=persona_user_id,
+            current_topic=current_topic,
+            bond_summary=bond_summary,
+            emotion_context=emotion_context,
+            pending_topics=pending_topics,
+        )
+    except Exception as motive_exc:
+        logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
+
+    response_policy: dict[str, Any] = {}
+    try:
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
         from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-        from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+        from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy  # noqa: PLC0415
 
-        persona_user_id = get_canonical_bond_user_id()
         current_topic = recent_topics[0] if recent_topics else ""
+        inner_state = get_inner_world().get_state(persona_user_id or "user_1")
+        offline_state = build_offline_state_from_inner_state(inner_state)
         silence_state = get_silence_engine().get_silence_state(current_topic=current_topic).as_dict()
         body_sense = get_body_sense_model().get_state().as_dict()
-        inner_state = get_inner_world().get_state(persona_user_id)
-        offline_state = {
-            "offline_hours": float(inner_state.get("total_offline_hours") or 0.0),
-            "loneliness_level": float(inner_state.get("loneliness") or 0.0),
-            "anticipation_level": float(inner_state.get("anticipation") or 0.0),
-            "anticipation_topics": list(inner_state.get("anticipation_topics") or []),
-        }
-        pending_topics = list(offline_state.get("anticipation_topics") or []) or list(recent_topics[:3])
-        motive_state = compute_motive_state(
-            MotiveInput(
+        response_policy = decide_response_policy(
+            ResponsePolicyInput(
                 silence_state=silence_state,
                 body_sense=body_sense,
                 offline_state=offline_state,
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
-                pending_followup_topics=pending_topics,
-                user_message="",
+                motive_state=motive_state,
+                user_message=current_topic,
+                runtime_flags={"source": "proactive_talk"},
             )
         ).as_dict()
-    except Exception as motive_exc:
-        logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
+    except Exception as policy_exc:
+        logger.debug("proactive response_policy compute failed（忽略）: %s", policy_exc)
 
     context = {
         "sys_mode": system_intent.get("mood_state", "normal"),
@@ -216,6 +234,7 @@ def run_proactive_intent_dispatch(
         "user_name": "主人",
         "emotion_context": emotion_context,
         "motive_state": motive_state,
+        "response_policy": response_policy,
     }
     return execute_proactive_talk(args=args, context=context)
 

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import datetime
 import logging
 from typing import Any, Callable
@@ -101,6 +102,37 @@ def _build_motive_hint_for_proactive(
     if withdraw >= 0.6 or protect >= 0.6:
         hints.append("但也要稍微收一点，不要显得打扰或越界")
     return "；".join(hints) + "。" if hints else ""
+
+
+def _coerce_response_policy(raw_policy: Any) -> dict[str, Any]:
+    if isinstance(raw_policy, Mapping):
+        return dict(raw_policy)
+    return {}
+
+
+def _response_policy_blocks_proactive(response_policy: Mapping[str, Any] | None) -> bool:
+    policy = _coerce_response_policy(response_policy)
+    if not policy:
+        return False
+    return (
+        not bool(policy.get("allow_proactive_after_reply", True))
+        or bool(policy.get("should_be_withdrawn", False))
+    )
+
+
+def _apply_response_policy_to_proactive_text(text: str, response_policy: Mapping[str, Any] | None) -> str:
+    normalized = str(text or "").strip()
+    policy = _coerce_response_policy(response_policy)
+    if not normalized or not policy:
+        return normalized
+    try:
+        from host_brain.app.chat_agent import _apply_response_policy_hard_guard  # noqa: PLC0415
+
+        guarded = _apply_response_policy_hard_guard(normalized, policy)
+        return str(guarded or "").strip()
+    except Exception as exc:
+        logger.debug("proactive response_policy hard guard failed: %s", exc)
+        return normalized
 
 # Skill 元数据常量
 SKILL_NAME = "proactive_talk"
@@ -206,6 +238,23 @@ def execute_proactive_talk(
     emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
     motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
     motive_hint = _build_motive_hint_for_proactive(motive_state)
+    response_policy: dict[str, Any] = _coerce_response_policy(ctx.get("response_policy"))
+
+    if _response_policy_blocks_proactive(response_policy):
+        return {
+            "status": STATUS_REJECTED,
+            "event_id": event_id,
+            "reason_code": SCHED_CONDITION_UNMET,
+            "detail": (
+                "response_policy blocked proactive_talk: "
+                f"allow_proactive_after_reply={bool(response_policy.get('allow_proactive_after_reply', True))} "
+                f"should_be_withdrawn={bool(response_policy.get('should_be_withdrawn', False))}"
+            ),
+            "request_id": request_id,
+            "ts_ms": ts,
+            "motive_state": motive_state,
+            "response_policy": response_policy,
+        }
 
     if motive_state:
         reach_out = float(motive_state.get("reach_out_drive") or 0.0)
@@ -247,6 +296,7 @@ def execute_proactive_talk(
                 "emotion_context": emotion_context or {},
                 "motive_state": motive_state,
                 "motive_hint": motive_hint,
+                "response_policy": response_policy,
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
@@ -269,6 +319,8 @@ def execute_proactive_talk(
             "night": f"{user_name}夜深了，注意休息哦～",
         }
         greeting = templates.get(time_period, f"{user_name}，好久没聊了，在忙什么呢？")
+
+    greeting = _apply_response_policy_to_proactive_text(greeting, response_policy)
 
     if not greeting.strip():
         return {
@@ -316,4 +368,5 @@ def execute_proactive_talk(
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
         "motive_driven": bool(motive_hint),
         "motive_state": motive_state,
+        "response_policy": response_policy,
     }

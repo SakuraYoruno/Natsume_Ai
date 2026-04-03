@@ -369,6 +369,112 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
     return raw
 
 
+def _coerce_trace_mapping(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+    return dict(raw)
+
+
+def _coerce_trace_score(raw: Any) -> float | None:
+    try:
+        return round(float(raw), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_trace_bool(raw: Any) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+def _summarize_motive_state_for_trace(motive_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(motive_state)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+    dominant_motive = str(raw.get("dominant_motive") or "").strip()
+    if dominant_motive:
+        summary["dominant_motive"] = dominant_motive
+
+    drives: dict[str, float] = {}
+    for key in (
+        "reach_out_drive",
+        "care_drive",
+        "withdraw_drive",
+        "continuity_drive",
+        "self_protect_drive",
+    ):
+        score = _coerce_trace_score(raw.get(key))
+        if score is not None:
+            drives[key] = score
+    if drives:
+        summary["drives"] = drives
+
+    reason_tags = [
+        str(tag).strip()
+        for tag in list(raw.get("motive_reason_tags") or [])
+        if str(tag).strip()
+    ]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    return summary
+
+
+def _summarize_response_policy_for_trace(response_policy: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(response_policy)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+
+    for key in ("max_chars", "max_sentences", "min_sentences"):
+        try:
+            value = int(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        summary[key] = value
+
+    for key in (
+        "allow_followup",
+        "allow_topic_shift",
+        "allow_proactive_after_reply",
+        "should_be_brief",
+        "should_be_withdrawn",
+    ):
+        value = _coerce_trace_bool(raw.get(key))
+        if value is not None:
+            summary[key] = value
+
+    for key in ("warmth_floor", "warmth_ceiling", "intimacy_ceiling", "humor_ceiling"):
+        value = _coerce_trace_score(raw.get(key))
+        if value is not None:
+            summary[key] = value
+
+    for key in ("confession_guard", "withdrawal_guard"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+
+    reason_tags = [
+        str(tag).strip()
+        for tag in list(raw.get("policy_reason_tags") or [])
+        if str(tag).strip()
+    ]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    return summary
+
+
 class _SubAgentGatewayAdapter:
     def __init__(
         self,
@@ -1100,6 +1206,8 @@ async def _async_post_process(
     # Phase XV trace 增强：LLM 输入摘要 + 召回证据
     llm_input_digest: str | None = None,       # system_prompt 前 500 字
     retrieval_evidence_items: list[dict[str, Any]] | None = None,  # 召回文档片段
+    motive_state: Mapping[str, Any] | None = None,
+    response_policy: Mapping[str, Any] | None = None,
 ) -> None:
     """异步后处理：审计写入 + Airlock 安全分类 + 记忆写入 + Bond 更新 + VTS + TTS。
 
@@ -1241,6 +1349,23 @@ async def _async_post_process(
             "fallback_reranker_used": bool(_normalized_retrieval_summary.get("fallback_reranker_used", False)),
             "fallback_reranker_reason_code": _normalized_retrieval_summary.get("fallback_reranker_reason_code"),
         }
+        _prompt_builder_output: dict[str, Any] = {}
+        _motive_trace = _summarize_motive_state_for_trace(motive_state)
+        if _motive_trace:
+            _prompt_builder_output["motive_state"] = _motive_trace
+        _response_policy_trace = _summarize_response_policy_for_trace(response_policy)
+        if _response_policy_trace:
+            _prompt_builder_output["response_policy"] = _response_policy_trace
+        _prompt_builder_node = {
+            "node_id": "prompt_builder",
+            "node_type": "system",
+            "display_name": "Prompt Builder",
+            "side": "host",
+            "status": "OK",
+            "ts_ms": ts_ms,
+        }
+        if _prompt_builder_output:
+            _prompt_builder_node["output_data"] = _prompt_builder_output
 
         # 构建 nodes_json：记录每个处理阶段的耗时和状态
         trace_nodes: list[dict[str, Any]] = [
@@ -1252,8 +1377,7 @@ async def _async_post_process(
             {"node_id": "recall_fusion", "node_type": "recall", "display_name": "Recall Fusion",
              "side": "host", "status": _retrieval_status,
              "output_data": _retrieval_output, "ts_ms": ts_ms},
-            {"node_id": "prompt_builder", "node_type": "system", "display_name": "Prompt Builder",
-             "side": "host", "status": "OK", "ts_ms": ts_ms},
+            _prompt_builder_node,
             {
                 "node_id": "llm_stream", "node_type": "llm", "display_name": "LLM 流式生成",
                 "side": "host",

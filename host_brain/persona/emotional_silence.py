@@ -145,13 +145,13 @@ _SILENCE_HINT_MAP: dict[str, str] = {
     "NORMAL":    "",
     "SUBDUED":   "你现在情绪低落，回复偏短，语气平淡，不强撑热情。",
     "RELUCTANT": "你现在不太想说话，回复极简，可以用简短的句子或词语，不需要解释太多。",
-    "SILENT":    "你现在很沉默，只用极短的词语回复（如"嗯"、"不知道"、"……"），不超过10个字。",
-    "MUTE":      "你现在几乎不想说话，只用"……"或极短的一两个字回复，不解释原因。",
+    "SILENT":    "你现在很沉默，只用极短的词语回复（如‘嗯’、‘不知道’、‘……’），不超过10个字。",
+    "MUTE":      "你现在几乎不想说话，只用‘……’或极短的一两个字回复，不解释原因。",
 }
 
 # 话题抗拒 → 给 LLM 的抗拒指令
 _TOPIC_RESISTANCE_HINT_TEMPLATE = (
-    "你对"{topic}"这个话题有真实的抗拒感，不是礼貌转移，"
+    "你对‘{topic}’这个话题有真实的抗拒感，不是礼貌转移，"
     "而是真的不想谈这个。可以沉默、转移、或简短表达不想聊。"
 )
 
@@ -314,8 +314,19 @@ class EmotionalSilenceEngine:
 
     # ── Tick（自然恢复）──────────────────────────────────────────────────
 
-    def tick(self) -> dict[str, Any]:
+    def tick(
+        self,
+        *,
+        user_id: str = "user_1",
+        current_topic: str = "",
+        bond_summary: dict[str, Any] | None = None,
+        emotion_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """每分钟调用一次，驱动意愿自然恢复和话题抗拒衰减。
+
+        `motive_state` 会参与恢复/衰减速率调制：
+        - `reach_out` / `continuity` 高时，恢复更快、抗拒衰减更快；
+        - `withdraw` / `self_protect` 高时，恢复更慢、抗拒衰减更慢。
 
         Returns:
             {"willingness": float, "recovered": bool, "decayed_topics": list[str]}
@@ -323,6 +334,56 @@ class EmotionalSilenceEngine:
         now = _now_ms()
         elapsed_minutes = (now - self._last_tick_ms) / 60000.0
         self._last_tick_ms = now
+
+        motive_state: dict[str, Any] = {}
+        motive_recovery_factor = 1.0
+        resistance_decay_factor = 1.0
+        try:
+            from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+
+            runtime_emotion_context = dict(emotion_context or {})
+            runtime_emotion_context.setdefault("emotion_tag", self._current_emotion_tag)
+            runtime_emotion_context.setdefault(
+                "emotion_intensity",
+                max(abs(self._current_valence), abs(self._current_arousal)),
+            )
+            runtime_emotion_context.setdefault("mood_state", self._current_mood_state)
+
+            motive_state = compute_runtime_motive_state(
+                persona_user_id=str(user_id or "user_1").strip() or "user_1",
+                current_topic=current_topic,
+                bond_summary=bond_summary,
+                emotion_context=runtime_emotion_context,
+                silence_state=self.get_silence_state(current_topic=current_topic).as_dict(),
+                now_ms=now,
+            )
+            reach_out_drive = float(motive_state.get("reach_out_drive") or 0.0)
+            continuity_drive = float(motive_state.get("continuity_drive") or 0.0)
+            withdraw_drive = float(motive_state.get("withdraw_drive") or 0.0)
+            self_protect_drive = float(motive_state.get("self_protect_drive") or 0.0)
+            motive_recovery_factor = max(
+                0.35,
+                min(
+                    1.60,
+                    1.0
+                    + reach_out_drive * 0.30
+                    + continuity_drive * 0.10
+                    - withdraw_drive * 0.25
+                    - self_protect_drive * 0.20,
+                ),
+            )
+            resistance_decay_factor = max(
+                0.50,
+                min(
+                    1.50,
+                    1.0
+                    + reach_out_drive * 0.20
+                    - withdraw_drive * 0.20
+                    - self_protect_drive * 0.20,
+                ),
+            )
+        except Exception as motive_exc:
+            _logger.debug("沉默引擎 motive tick skipped: %s", motive_exc)
 
         recovered = False
         # 意愿自然恢复（仅在情绪不是极端负向时）
@@ -333,6 +394,7 @@ class EmotionalSilenceEngine:
                 recovery_factor = 0.3
             elif self._current_valence < -0.3:
                 recovery_factor = 0.6
+            recovery_factor *= motive_recovery_factor
 
             recovery = _RECOVERY_RATE_PER_MINUTE * elapsed_minutes * recovery_factor
             new_willingness = min(1.0, self._response_willingness + recovery)
@@ -343,7 +405,10 @@ class EmotionalSilenceEngine:
         # 话题抗拒衰减
         decayed_topics: list[str] = []
         for label in list(self._topic_resistance_map.keys()):
-            new_strength = self._topic_resistance_map[label] - _RESISTANCE_DECAY_PER_TICK * elapsed_minutes
+            new_strength = (
+                self._topic_resistance_map[label]
+                - _RESISTANCE_DECAY_PER_TICK * elapsed_minutes * resistance_decay_factor
+            )
             if new_strength <= 0.0:
                 del self._topic_resistance_map[label]
                 decayed_topics.append(label)
@@ -354,6 +419,9 @@ class EmotionalSilenceEngine:
             "willingness": self._response_willingness,
             "recovered": recovered,
             "decayed_topics": decayed_topics,
+            "motive_state": motive_state,
+            "motive_recovery_factor": round(motive_recovery_factor, 3),
+            "resistance_decay_factor": round(resistance_decay_factor, 3),
         }
 
     # ── 状态快照 ──────────────────────────────────────────────────────────

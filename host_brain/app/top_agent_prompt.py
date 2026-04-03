@@ -331,7 +331,8 @@ def build_top_agent_prompt(
     bond_summary: dict[str, Any] | None = None,
     recall_slot_text: dict[str, str] | None = None,
     extra_context_prompt: str = "",
-) -> tuple[str, str, dict[str, Any]]:
+    include_runtime_payload: bool = False,
+) -> tuple[str, str, dict[str, Any]] | tuple[str, str, dict[str, Any], dict[str, Any]]:
     """构建顶级 Agent 的 prompt。
 
     **走完整的 prompt 构建管线**（和旧链路 _build_stream_chat_prompt 等价）：
@@ -340,7 +341,8 @@ def build_top_agent_prompt(
     这确保 build_prompt_intelligence() 被调用，注入全部 20+ 个槽位。
 
     Returns:
-        (prompt_text, system_prompt, gen_params)
+        默认返回 `(prompt_text, system_prompt, gen_params)`；
+        当 `include_runtime_payload=True` 时，额外返回 `runtime_payload`。
     """
     from host_brain.app.chat_runtime_input import build_chat_runtime_input  # noqa: PLC0415
     from host_brain.app.chat_context_builder import (  # noqa: PLC0415
@@ -440,6 +442,8 @@ def build_top_agent_prompt(
 
     prompt_text = full_prompt + "\n\n" + f"【用户消息】\n{user_message}"
 
+    if include_runtime_payload:
+        return prompt_text, system_prompt, gen_params, dict(prompt_payload)
     return prompt_text, system_prompt, gen_params
 
 

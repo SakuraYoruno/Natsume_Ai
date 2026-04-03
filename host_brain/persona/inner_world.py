@@ -216,16 +216,51 @@ class OfflineInnerWorld:
                 or (now_ms - last_interaction) > 5 * 60 * 1000
             )
 
+            motive_state: dict[str, Any] = {}
+            loneliness_multiplier = 1.0
+            anticipation_multiplier = 1.0
+
             if is_offline:
+                try:
+                    from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+
+                    motive_state = compute_runtime_motive_state(
+                        persona_user_id=uid,
+                        pending_topics=list(state.anticipation_topics),
+                        inner_state=state.as_dict(),
+                        now_ms=now_ms,
+                    )
+                    reach_out_drive = float(motive_state.get("reach_out_drive") or 0.0)
+                    continuity_drive = float(motive_state.get("continuity_drive") or 0.0)
+                    withdraw_drive = float(motive_state.get("withdraw_drive") or 0.0)
+                    self_protect_drive = float(motive_state.get("self_protect_drive") or 0.0)
+                    loneliness_multiplier = max(
+                        0.75,
+                        min(1.35, 1.0 + reach_out_drive * 0.30 - self_protect_drive * 0.15),
+                    )
+                    anticipation_multiplier = max(
+                        0.60,
+                        min(
+                            1.50,
+                            1.0
+                            + continuity_drive * 0.45
+                            + reach_out_drive * 0.20
+                            - withdraw_drive * 0.20
+                            - self_protect_drive * 0.20,
+                        ),
+                    )
+                except Exception as motive_exc:
+                    _logger.debug("InnerWorld motive tick skipped: user=%s err=%s", uid, motive_exc)
+
                 # 孤独感积累
                 state.loneliness = min(
                     1.0,
-                    state.loneliness + _LONELINESS_RATE_PER_HOUR * elapsed_hours,
+                    state.loneliness + _LONELINESS_RATE_PER_HOUR * elapsed_hours * loneliness_multiplier,
                 )
                 # 期待值积累
                 state.anticipation = min(
                     1.0,
-                    state.anticipation + _ANTICIPATION_RATE_PER_HOUR * elapsed_hours,
+                    state.anticipation + _ANTICIPATION_RATE_PER_HOUR * elapsed_hours * anticipation_multiplier,
                 )
                 # 情绪漂移：向基线回归
                 decay_factor = math.exp(-_DRIFT_DECAY_RATE * elapsed_hours)
@@ -244,8 +279,9 @@ class OfflineInnerWorld:
             self._save_state(state)
 
         _logger.debug(
-            "InnerWorld tick: user=%s offline=%s loneliness=%.3f anticipation=%.3f",
+            "InnerWorld tick: user=%s offline=%s loneliness=%.3f anticipation=%.3f motive=%s",
             uid, is_offline, state.loneliness, state.anticipation,
+            str((motive_state or {}).get("dominant_motive") or "none"),
         )
         return {
             "status": "OK",
@@ -254,6 +290,9 @@ class OfflineInnerWorld:
             "loneliness": round(state.loneliness, 3),
             "anticipation": round(state.anticipation, 3),
             "drifted_valence": round(state.drifted_valence, 3),
+            "motive_state": motive_state,
+            "loneliness_rate_multiplier": round(loneliness_multiplier, 3),
+            "anticipation_rate_multiplier": round(anticipation_multiplier, 3),
         }
 
     # ── 唤醒事件 ──────────────────────────────────────────────────────────

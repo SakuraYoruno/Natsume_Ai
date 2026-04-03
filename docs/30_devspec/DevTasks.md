@@ -7659,34 +7659,70 @@ TASK-XXXX 标题
 
 ### TASK-0448 M46-D：P2 将 response_policy 接入主输出链
 
-- 状态：DONE（2026-04-03，已将 `response_policy` 接入 `prompt_builder` 主提示词约束块，并补充行为回归测试）
+- 状态：DONE（2026-04-03，已将 `response_policy` 接入 `prompt_builder` 主提示词约束块，并在 `chat_agent` 输出链增加 `max_chars` / `max_sentences` / `allow_followup` / `allow_topic_shift` / `confession_guard` / `withdrawal_guard` 的硬收口，补充单元与行为回归测试）
 - 任务描述：把 `chat_context_builder` 已生成的 `response_policy` 真正接入 prompt / agent 输出约束链，至少覆盖“边界感、克制度、风险降级、亲密度约束”等对最终措辞有直接影响的策略位，避免 policy 只存在于上下文却不改变输出行为。
 - 输入：`host_brain/app/chat_context_builder.py`；`host_brain/persona/response_policy.py`；`host_brain/app/prompt_builder.py`、`host_brain/app/chat_agent.py`、`host_brain/top_agent.py`。
 - 输出：
-  - `host_brain/app/prompt_builder.py`（修改）；
-  - `tests/integration/test_prompt_builder_prod_env.py`（补充）。
+  - `host_brain/app/prompt_builder.py`、`host_brain/app/chat_agent.py`、`host_brain/app/top_agent_prompt.py`（修改）；
+  - `tests/integration/test_prompt_builder_prod_env.py`、`tests/unit/test_chat_agent_subcontext.py`（补充）。
 - 验收标准：
   - `response_policy` 至少有一条清晰可测的消费路径进入最终提示词或输出后处理；
   - policy 缺失时保持向后兼容；
   - 测试可验证不同 policy 输入会改变最终行为约束；
   - 不引入明显 prompt 膨胀或重复字段。
-- 涉及文件路径：`host_brain/app/prompt_builder.py`、`tests/integration/test_prompt_builder_prod_env.py`。
+- 涉及文件路径：`host_brain/app/prompt_builder.py`、`host_brain/app/chat_agent.py`、`host_brain/app/top_agent_prompt.py`、`tests/integration/test_prompt_builder_prod_env.py`、`tests/unit/test_chat_agent_subcontext.py`。
 - 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-002。
 
 ---
 
 ### TASK-0449 M46-E：P3 将 motive_state 接入主动/静默行为链
 
-- 状态：DONE（2026-04-03，已在 `proactive_talk` 调度链中计算并消费 `motive_state`，用于主动行为拦截/放行与主动问候措辞提示，并补充单元/集成回归测试）
+- 状态：DONE（2026-04-03，已在 `proactive_talk` 调度链中计算并消费 `motive_state`，并进一步接入 `silence_tick` / `inner_world_tick` 的恢复与离线积累调制，用于主动行为拦截/放行、静默恢复速度、离线期待积累三类分支，并补充单元/集成回归测试）
 - 任务描述：把 `motive_state` 从“上下文可见”推进到“主动行为可驱动”，优先接入 `proactive_talk` / `silence_tick` / `inner_world_tick` 等非用户显式输入场景，使角色的欲望、趋近/回避倾向能影响主动表达与静默期内在活动。
 - 输入：`host_brain/persona/motive_engine.py`；`host_brain/app/chat_context_builder.py`；`host_brain/app/prompt_builder.py`；主动/静默链相关模块。
 - 输出：
-  - `host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`（修改）；
-  - `tests/unit/test_proactive_skill.py`（补充）。
+  - `host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/persona/motive_runtime.py`、`host_brain/persona/emotional_silence.py`、`host_brain/persona/inner_world.py`、`host_brain/skills/impl/proactive_talk.py`（修改）；
+  - `tests/unit/test_proactive_skill.py`、`tests/unit/test_motive_runtime_background.py`（补充）。
 - 验收标准：
   - `motive_state` 至少驱动一条主动行为决策分支或表达风格分支；
   - 无 `motive_state` 时仍能回退到当前稳定行为；
   - 测试可验证 motive 高低或方向变化会改变主动输出；
   - 不破坏现有离线状态、静默状态、身体感知拼装逻辑。
-- 涉及文件路径：`host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`、`tests/unit/test_proactive_skill.py`。
+- 涉及文件路径：`host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/persona/motive_runtime.py`、`host_brain/persona/emotional_silence.py`、`host_brain/persona/inner_world.py`、`host_brain/skills/impl/proactive_talk.py`、`tests/unit/test_proactive_skill.py`、`tests/unit/test_motive_runtime_background.py`。
 - 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001。
+
+---
+
+### TASK-0450 M46-F：P2 让 proactive_talk 消费 response_policy
+
+- 状态：DONE（2026-04-03，已在主动消息调度链计算 `response_policy`，并让 `proactive_talk` 消费 `allow_proactive_after_reply` / `should_be_withdrawn` 做拦截，同时复用输出后硬约束对主动文案做长度、亲密度、玩笑密度收口，补充单元回归测试）
+- 任务描述：把 `response_policy` 从主聊天回复链扩展到主动消息链，使系统在低意愿、收缩期或浅关系场景下，不再继续发出越界的主动问候。
+- 输入：`host_brain/persona/response_policy.py`；`host_brain/app/http_hooks_runtime_helpers.py`；`host_brain/skills/impl/proactive_talk.py`。
+- 输出：
+  - `host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`（修改）；
+  - `tests/unit/test_proactive_skill.py`、`tests/unit/test_http_hooks_runtime_helpers.py`（补充）。
+- 验收标准：
+  - `allow_proactive_after_reply=false` 或 `should_be_withdrawn=true` 时，主动消息链会稳定拒绝继续触发；
+  - 允许主动时，主动文案仍会经过 policy 后处理收口，避免出现过强亲密/玩笑表达；
+  - 无 `response_policy` 时保持当前主动调度兼容；
+  - 测试可验证 policy 透传、主动拦截与文案收口三类行为。
+- 涉及文件路径：`host_brain/app/http_hooks_runtime_helpers.py`、`host_brain/skills/impl/proactive_talk.py`、`tests/unit/test_proactive_skill.py`、`tests/unit/test_http_hooks_runtime_helpers.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-002。
+
+---
+
+### TASK-0451 M46-G：P1 将 motive_state / response_policy 摘要写入 graph_run_trace
+
+- 状态：DONE（2026-04-03，已在 `top_agent._async_post_process()` 中为 `prompt_builder` 节点补充 `motive_state` / `response_policy` 摘要输出，并由 `chat_agent` 将 prompt runtime 中生成的运行态透传到 post-process，补充单元回归测试）
+- 任务描述：把人格运行态从“仅 prompt 可见”推进到“obs/trace 可见”，让 `motive_state` 与 `response_policy` 在 `graph_run_trace.nodes_json` 中稳定可见，便于排查“为什么这一轮变短 / 不追问 / 不主动 / 更收缩”。
+- 输入：`host_brain/app/top_agent.py`、`host_brain/app/chat_agent.py`、prompt runtime payload 中的 `motive_state` / `response_policy`。
+- 输出：
+  - `host_brain/app/top_agent.py`、`host_brain/app/chat_agent.py`（修改）；
+  - `tests/unit/test_top_agent_post_process.py`、`tests/unit/test_chat_agent_subcontext.py`（补充）。
+- 验收标准：
+  - `graph_run_trace.nodes_json` 中的 `prompt_builder` 节点可看到 `motive_state` 摘要（如 `dominant_motive`、关键 drive、reason tags）；
+  - 同节点可看到 `response_policy` 摘要（如 `allow_followup`、`allow_proactive_after_reply`、`max_sentences`、`should_be_withdrawn` 等）；
+  - 未生成 runtime payload 时保持兼容，不影响已有 trace 结构与 post-process 流程；
+  - 测试可验证 `chat_agent` 透传与 `top_agent` 落盘两段行为。
+- 涉及文件路径：`host_brain/app/top_agent.py`、`host_brain/app/chat_agent.py`、`tests/unit/test_top_agent_post_process.py`、`tests/unit/test_chat_agent_subcontext.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-OBS-001；FR-PERSONA-001。

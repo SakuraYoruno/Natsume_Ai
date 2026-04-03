@@ -31,6 +31,7 @@ class _FakeBondWriter:
 class _FakeLedger:
     def __init__(self) -> None:
         self.voice_events: list[dict[str, object]] = []
+        self.graph_run_traces: list[dict[str, object]] = []
 
     def log_governor(self, _row):  # noqa: ANN001
         return None
@@ -39,6 +40,7 @@ class _FakeLedger:
         return None
 
     def log_graph_run_trace(self, _row):  # noqa: ANN001
+        self.graph_run_traces.append(dict(_row))
         return None
 
     def log_voice_event(self, row):  # noqa: ANN001
@@ -175,6 +177,85 @@ class TestTopAgentPostProcess:
                     render_target_lang="ja",
                 ),
             )
+
+    def test_async_post_process_writes_prompt_builder_runtime_trace_summary(self, monkeypatch) -> None:
+        monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+        ledger = _FakeLedger()
+
+        with patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="FACT",
+        ), patch(
+            "host_brain.app.observability_persist.persist_chat_episodic_memory",
+            return_value={"status": "OK", "memory_id": "mem::trace"},
+        ), patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ), patch(
+            "host_brain.app.dependencies.get_bond_stage_engine",
+            return_value=SimpleNamespace(),
+        ), patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ), patch(
+            "host_brain.bond.bond_dynamics.BondDynamicsWriter",
+            _FakeBondWriter,
+        ), patch(
+            "host_brain.bond.user_identity.resolve_bond_user_id",
+            return_value="user-001",
+        ), patch(
+            "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
+            return_value=None,
+        ):
+            _run(
+                _async_post_process(
+                    request_id="req-trace-001",
+                    person_id="person-trace-001",
+                    session_id="session-trace-001",
+                    user_message="continue",
+                    narrative="I will keep going.",
+                    emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.4},
+                    bond_summary={"stage": "FRIEND"},
+                    ts_ms=1000,
+                    render_target_lang="zh",
+                    motive_state={
+                        "dominant_motive": "reach_out",
+                        "reach_out_drive": 0.82,
+                        "care_drive": 0.67,
+                        "motive_reason_tags": ["followup_needed", "unfinished_context"],
+                    },
+                    response_policy={
+                        "allow_followup": True,
+                        "allow_proactive_after_reply": False,
+                        "should_be_withdrawn": True,
+                        "max_sentences": 2,
+                        "intimacy_ceiling": 0.2,
+                        "policy_reason_tags": ["recent_boundary_signal"],
+                    },
+                ),
+            )
+
+        assert len(ledger.graph_run_traces) == 1
+        trace = ledger.graph_run_traces[0]
+        prompt_builder = next(
+            node for node in list(trace["nodes_json"]) if node.get("node_id") == "prompt_builder"
+        )
+        output_data = dict(prompt_builder.get("output_data") or {})
+        motive_state = dict(output_data.get("motive_state") or {})
+        response_policy = dict(output_data.get("response_policy") or {})
+
+        assert motive_state["dominant_motive"] == "reach_out"
+        assert motive_state["drives"]["reach_out_drive"] == 0.82
+        assert motive_state["reason_tags"] == ["followup_needed", "unfinished_context"]
+        assert response_policy["allow_followup"] is True
+        assert response_policy["allow_proactive_after_reply"] is False
+        assert response_policy["should_be_withdrawn"] is True
+        assert response_policy["max_sentences"] == 2
+        assert response_policy["intimacy_ceiling"] == 0.2
+        assert response_policy["reason_tags"] == ["recent_boundary_signal"]
 
     def test_async_post_process_runs_persona_session_end_hooks(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
