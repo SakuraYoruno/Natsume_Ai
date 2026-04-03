@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import pytest
 
+from host_brain.app import chat_context_builder as ccb
 from host_brain.persona.emotional_silence import EmotionalSilenceEngine
 from host_brain.persona.inner_world import InnerWorldState, OfflineInnerWorld
 from host_brain.persona.motive_runtime import build_offline_state_from_inner_state
+from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_TOPIC_FOLLOWUP
 
 
 def test_build_offline_state_from_inner_state_uses_elapsed_hours() -> None:
@@ -134,3 +137,97 @@ def test_inner_world_tick_uses_motive_state_to_adjust_offline_growth(monkeypatch
     assert fast_result["loneliness"] > slow_result["loneliness"]
     assert fast_result["anticipation"] > slow_result["anticipation"]
     assert fast_result["anticipation_rate_multiplier"] > slow_result["anticipation_rate_multiplier"]
+
+
+def test_motive_behavior_matrix_changes_proactive_silence_and_expression_paths(monkeypatch) -> None:
+    import host_brain.persona.emotional_silence as emotional_silence_module
+
+    supportive_motive = {
+        "care_drive": 0.84,
+        "reach_out_drive": 0.72,
+        "continuity_drive": 0.78,
+        "withdraw_drive": 0.08,
+        "self_protect_drive": 0.06,
+        "dominant_motive": "care",
+    }
+    retreat_motive = {
+        "care_drive": 0.18,
+        "reach_out_drive": 0.14,
+        "continuity_drive": 0.16,
+        "withdraw_drive": 0.86,
+        "self_protect_drive": 0.89,
+        "dominant_motive": "self_protect",
+    }
+
+    now = datetime.datetime.now()
+    topic_ts = int(now.replace(hour=15, minute=0, second=0, microsecond=0).timestamp() * 1000)
+
+    voice = PersonaProactiveVoice()
+    base_topic_context = {
+        "current_ts_ms": topic_ts,
+        "user_online": False,
+        "last_interaction_ts_ms": topic_ts - 1000,
+        "last_emotion_intensity": 0.3,
+        "pending_followup_topics": [
+            {"topic_label": "project", "topic_keywords": ["project"]},
+        ],
+    }
+    supportive_expr = voice.evaluate_scene(
+        user_id="matrix-supportive",
+        context={**base_topic_context, "motive_state": supportive_motive},
+    )
+    retreat_expr = voice.evaluate_scene(
+        user_id="matrix-retreat",
+        context={**base_topic_context, "motive_state": retreat_motive},
+    )
+
+    assert supportive_expr is not None
+    assert supportive_expr.scene_type == SCENE_TOPIC_FOLLOWUP
+    assert retreat_expr is None
+
+    base_hint = {
+        "style_hint": "自然回应",
+        "tone": "gentle",
+        "echo_weight_modifier": 0.0,
+        "follow_up_tendency": 0.0,
+        "pace_hint": "steady",
+    }
+    supportive_hint = ccb._apply_motive_state_to_persona_expression_hint(base_hint, supportive_motive)
+    retreat_hint = ccb._apply_motive_state_to_persona_expression_hint(base_hint, retreat_motive)
+
+    assert supportive_hint["tone"] == "caring"
+    assert supportive_hint["follow_up_tendency"] > retreat_hint["follow_up_tendency"]
+    assert supportive_hint["echo_weight_modifier"] > retreat_hint["echo_weight_modifier"]
+    assert retreat_hint["tone"] == "gentle"
+
+    monkeypatch.setattr(emotional_silence_module, "_now_ms", lambda: 60_000)
+
+    supportive_engine = EmotionalSilenceEngine()
+    supportive_engine._response_willingness = 0.4
+    supportive_engine._last_tick_ms = 0
+    supportive_engine._topic_resistance_map = {"工作": 0.6}
+    supportive_engine._current_valence = -0.1
+    supportive_engine._current_arousal = 0.4
+
+    retreat_engine = EmotionalSilenceEngine()
+    retreat_engine._response_willingness = 0.4
+    retreat_engine._last_tick_ms = 0
+    retreat_engine._topic_resistance_map = {"工作": 0.6}
+    retreat_engine._current_valence = -0.1
+    retreat_engine._current_arousal = 0.4
+
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.compute_runtime_motive_state",
+        lambda **_kwargs: supportive_motive,
+    )
+    supportive_tick = supportive_engine.tick(user_id="matrix-user")
+
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.compute_runtime_motive_state",
+        lambda **_kwargs: retreat_motive,
+    )
+    retreat_tick = retreat_engine.tick(user_id="matrix-user")
+
+    assert supportive_tick["willingness"] > retreat_tick["willingness"]
+    assert supportive_tick["motive_recovery_factor"] > retreat_tick["motive_recovery_factor"]
+    assert supportive_tick["resistance_decay_factor"] > retreat_tick["resistance_decay_factor"]

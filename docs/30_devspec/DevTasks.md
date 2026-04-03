@@ -7726,3 +7726,56 @@ TASK-XXXX 标题
   - 测试可验证 `chat_agent` 透传与 `top_agent` 落盘两段行为。
 - 涉及文件路径：`host_brain/app/top_agent.py`、`host_brain/app/chat_agent.py`、`tests/unit/test_top_agent_post_process.py`、`tests/unit/test_chat_agent_subcontext.py`。
 - 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-OBS-001；FR-PERSONA-001。
+
+---
+
+### TASK-0452 M46-H：P3 让 proactive_voice 消费 motive_state
+
+- 状态：DONE（2026-04-03，已让 `PersonaProactiveVoice.evaluate_scene()` 读取 `motive_state`，对 `topic_followup` / `long_absent` / `post_intense` / greeting 类场景做基于 drive 的放行与拦截，并补充 `motive_influence` 输出与单元回归测试）
+- 任务描述：把 `proactive_voice` 从“只看场景条件和模板”推进到“真正受统一动机中枢驱动”，使 `reach_out_drive` / `continuity_drive` / `care_drive` / `withdraw_drive` / `self_protect_drive` 能解释主动表达为什么被放行或抑制。
+- 输入：`host_brain/persona/proactive_voice.py`、`host_brain/persona/motive_engine.py`、`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md` 中的 P3-T01。
+- 输出：
+  - `host_brain/persona/proactive_voice.py`（修改）；
+  - `tests/unit/test_persona_phase8.py`（补充）。
+- 验收标准：
+  - `motive_state` 缺失时保持现有 proactive scene 行为兼容；
+  - 高 `continuity_drive` / `reach_out_drive` 时，可稳定提升 `topic_followup` 等主动触发表达；
+  - 高 `withdraw_drive` / `self_protect_drive` 且明显压过外向驱动时，可稳定抑制主动触发；
+  - 返回结果中可看到 `motive_influence`，用于解释本次主动表达为何被放行。
+- 涉及文件路径：`host_brain/persona/proactive_voice.py`、`tests/unit/test_persona_phase8.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001。
+
+---
+
+### TASK-0453 M46-I：P3 让主回复表达消费 care / withdraw motive
+
+- 状态：DONE（2026-04-03，已在 `build_chat_prompt_runtime_payload()` 末端基于 `motive_state` 回写 `persona_expression_hint`，让高 `care_drive` 提升 caring tone / 共情镜像 / 轻微追问倾向，让高 `withdraw_drive` / `self_protect_drive` 压低追问与情绪镜像，并补充单元回归测试）
+- 任务描述：把 `care_drive` / `withdraw_drive` / `self_protect_drive` 从“只存在于运行态”推进到“直接影响主回复表达策略”，使主聊天链在需要安抚时更稳地先接情绪，在收缩期更稳地减少追问和情绪贴靠。
+- 输入：`host_brain/app/chat_context_builder.py`、`host_brain/app/prompt_builder.py` 的 `persona_expression_hint` 注入链路，以及 `docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md` 中的 P3-T02 / P3-T03。
+- 输出：
+  - `host_brain/app/chat_context_builder.py`（修改）；
+  - `tests/unit/test_chat_context_builder_helpers_extra.py`（补充）。
+- 验收标准：
+  - 高 `care_drive` 场景下，`persona_expression_hint.tone` 会稳定偏向 `caring`，并提升共情镜像与轻微追问倾向；
+  - 高 `withdraw_drive` / `self_protect_drive` 且明显压过外向驱动时，会稳定压低追问与情绪镜像；
+  - `motive_state` 缺失时保持原有 PersonaExpressionAdapter 输出兼容；
+  - 测试可验证 helper 规则与 runtime payload 集成两层行为。
+- 涉及文件路径：`host_brain/app/chat_context_builder.py`、`tests/unit/test_chat_context_builder_helpers_extra.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001；FR-PERSONA-002。
+
+---
+
+### TASK-0454 M46-J：P3 增加 motive 场景矩阵回归测试
+
+- 状态：DONE（2026-04-04，已补充跨模块 motive 场景矩阵回归：同一语境下切换 supportive / retreat motive 组合，可稳定改变 `proactive_voice` 主动触发、`EmotionalSilenceEngine` 恢复速度、`persona_expression_hint` 的 caring / follow-up 倾向）
+- 任务描述：把 `motive_state` 从“局部点状测试”推进到“跨模块矩阵验证”，确保主动、沉默、主回复表达三条链在不同 motive 组合下出现一致、可解释的行为差异。
+- 输入：`host_brain/persona/proactive_voice.py`、`host_brain/persona/emotional_silence.py`、`host_brain/app/chat_context_builder.py` 的既有动机消费链，以及 `docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md` 中的 P3-T05。
+- 输出：
+  - `tests/unit/test_motive_runtime_background.py`（补充）。
+- 验收标准：
+  - supportive motive 组合下，`topic_followup` 更容易被放行、主回复更偏 `caring`、沉默恢复更快；
+  - retreat motive 组合下，主动触发更容易被抑制、主回复更少追问、沉默恢复更慢；
+  - 同一组基线输入切换 motive 组合时，三条行为链的差异稳定且可回归；
+  - 不依赖外部在线服务即可在单元测试中复现。
+- 涉及文件路径：`tests/unit/test_motive_runtime_background.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001。

@@ -1284,6 +1284,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             _peh_tone = str(_peh.get("tone") or "gentle").strip()
             _peh_echo_mod = float(_peh.get("echo_weight_modifier") or 0.0)
             _peh_follow_up = float(_peh.get("follow_up_tendency") or 0.0)
+            _peh_motive_guidance = _truncate_for_prompt(_peh.get("motive_guidance"), limit=220) or ""
             _TONE_GUIDANCE = {
                 "caring": "优先表达关心和陪伴，语气温柔体贴",
                 "playful": "可以活泼一些，适当加入轻松的语气，但不要过度",
@@ -1297,7 +1298,8 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 f"- tone: {_peh_tone}\n"
                 f"- echo_weight_modifier: {_peh_echo_mod:+.3f}\n"
                 f"- follow_up_tendency: {_peh_follow_up:.3f}\n"
-                f"- guidance: {_peh_guidance}\n\n"
+                + (f"- motive_guidance: {_peh_motive_guidance}\n" if _peh_motive_guidance else "")
+                + f"- guidance: {_peh_guidance}\n\n"
             )
     except Exception:
         pass  # 降级：不注入人格表达提示

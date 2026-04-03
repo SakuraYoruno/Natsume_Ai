@@ -550,3 +550,80 @@ class TestVVIII6_TopicFollowup:
         d = result.as_dict()
         assert d["scene_type"] == SCENE_TOPIC_FOLLOWUP
         assert "项目" in d["content"]
+
+
+class TestMotiveDrivenProactiveVoice:
+    def test_topic_followup_is_blocked_when_continuity_and_reach_out_are_low(self):
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "project", "topic_keywords": ["project"]},
+                ],
+                "motive_state": {
+                    "reach_out_drive": 0.2,
+                    "care_drive": 0.22,
+                    "withdraw_drive": 0.3,
+                    "continuity_drive": 0.18,
+                    "self_protect_drive": 0.24,
+                    "dominant_motive": "withdraw",
+                },
+            },
+        )
+        assert result is None
+
+    def test_topic_followup_is_promoted_by_high_continuity_drive(self):
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": ts,
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "last_emotion_intensity": 0.3,
+                "pending_followup_topics": [
+                    {"topic_label": "project", "topic_keywords": ["project"]},
+                ],
+                "motive_state": {
+                    "reach_out_drive": 0.34,
+                    "care_drive": 0.28,
+                    "withdraw_drive": 0.1,
+                    "continuity_drive": 0.86,
+                    "self_protect_drive": 0.08,
+                    "dominant_motive": "continuity",
+                },
+            },
+        )
+        assert result is not None
+        assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+        assert result.motive_influence == "continuity/reach_out promotes topic follow-up"
+        assert result.as_dict()["motive_influence"] == "continuity/reach_out promotes topic follow-up"
+
+    def test_high_withdraw_drive_blocks_long_absent_outreach(self):
+        voice = PersonaProactiveVoice()
+        now_ts = _now_ms()
+        last_ts = now_ts - 5 * 24 * 60 * 60 * 1000
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": now_ts,
+                "last_interaction_ts_ms": last_ts,
+                "user_online": False,
+                "motive_state": {
+                    "reach_out_drive": 0.12,
+                    "care_drive": 0.18,
+                    "withdraw_drive": 0.88,
+                    "continuity_drive": 0.15,
+                    "self_protect_drive": 0.81,
+                    "dominant_motive": "self_protect",
+                },
+            },
+        )
+        assert result is None

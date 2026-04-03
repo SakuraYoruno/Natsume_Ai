@@ -209,3 +209,35 @@ def test_render_host_generation_prompt_covers_active_and_degraded_injection_path
 
     assert "You are the Natsume core reasoning node." in degraded_prompt
     assert pb.get_last_injection_meta()["mode"] == "DEGRADED"
+
+
+def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hint() -> None:
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "我有点难受",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "persona_expression_hint": {
+                "style_hint": "自然回应",
+                "tone": "caring",
+                "echo_weight_modifier": 0.08,
+                "follow_up_tendency": 0.08,
+                "motive_guidance": "先接住对方情绪，再回应内容，优先表达关心和陪伴",
+            },
+        },
+    )
+
+    assert "PERSONA_EXPRESSION_HINT" in prompt
+    assert "motive_guidance" in prompt
+    assert "先接住对方情绪" in prompt

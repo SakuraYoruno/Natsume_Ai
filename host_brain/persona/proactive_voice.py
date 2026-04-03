@@ -75,6 +75,7 @@ class ProactiveExpression:
     emotion_tag: str       # 建议情感标签
     trait_influence: str   # 人格特质影响说明
     ts_ms: int
+    motive_influence: str = ""  # 动机状态影响说明
     # ── 技术债务 10.2：等待感知字段（Phase XVI offline_state 注入）──────────
     wait_duration_ms: int = 0    # 距上次互动的等待时长（毫秒），0 表示未知
     loneliness_value: float = 0.0  # 孤独感 [0,1]，来自 LonelinessAccumulator
@@ -86,6 +87,7 @@ class ProactiveExpression:
             "content": self.content,
             "emotion_tag": self.emotion_tag,
             "trait_influence": self.trait_influence,
+            "motive_influence": self.motive_influence,
             "ts_ms": self.ts_ms,
             "wait_duration_ms": self.wait_duration_ms,
             "loneliness_value": self.loneliness_value,
@@ -683,6 +685,7 @@ class PersonaProactiveVoice:
         uid = str(user_id).strip()
         ctx = dict(context or {})
         now_ts = int(ctx.get("current_ts_ms") or _now_ms())
+        motive_state = dict(ctx.get("motive_state") or {}) if isinstance(ctx.get("motive_state"), dict) else {}
 
         # ── 技术债务 10.2：读取 Phase XVI offline_state 快照 ─────────────────
         offline_state: dict[str, Any] = {}
@@ -725,6 +728,15 @@ class PersonaProactiveVoice:
             if not self._check_cooldown(uid, scene_type, now_ts):
                 continue
             if checker(ctx, now_ts):
+                motive_allowed, motive_influence = self._motive_allows_scene(scene_type, motive_state)
+                if not motive_allowed:
+                    _logger.debug(
+                        "主动表达被 motive_state 拦截: user=%s scene=%s reason=%s",
+                        uid,
+                        scene_type,
+                        motive_influence,
+                    )
+                    continue
                 style = self._select_style(traits)
                 bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
                 content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
@@ -749,19 +761,79 @@ class PersonaProactiveVoice:
                     content=content,
                     emotion_tag=emotion_tag,
                     trait_influence=trait_influence,
+                    motive_influence=motive_influence,
                     ts_ms=now_ts,
                     wait_duration_ms=_wait_ms,
                     loneliness_value=_loneliness_value,
                     anticipation_value=_anticipation_value,
                 )
                 _logger.info(
-                    "主动表达触发: user=%s scene=%s style=%s bond=%s wait=%.1fh loneliness=%.2f",
+                    "主动表达触发: user=%s scene=%s style=%s bond=%s wait=%.1fh loneliness=%.2f motive=%s",
                     uid, scene_type, style, bond_stage,
                     _wait_ms / 3_600_000, _loneliness_value,
+                    motive_influence or "-",
                 )
                 return expr
 
         return None
+
+    def _motive_allows_scene(
+        self,
+        scene_type: str,
+        motive_state: dict[str, Any] | None,
+    ) -> tuple[bool, str]:
+        raw = dict(motive_state or {})
+        if not raw:
+            return True, ""
+
+        def _score(key: str) -> float:
+            try:
+                return float(raw.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        reach_out = _score("reach_out_drive")
+        care = _score("care_drive")
+        continuity = _score("continuity_drive")
+        withdraw = _score("withdraw_drive")
+        self_protect = _score("self_protect_drive")
+        dominant_motive = str(raw.get("dominant_motive") or "").strip()
+
+        active_drive = max(reach_out, care, continuity)
+        retreat_drive = max(withdraw, self_protect)
+
+        if retreat_drive >= 0.72 and retreat_drive >= active_drive + 0.1:
+            return False, "withdraw/self_protect suppresses proactive reach-out"
+
+        if scene_type == SCENE_TOPIC_FOLLOWUP:
+            followup_drive = max(continuity, reach_out)
+            if followup_drive < 0.45:
+                return False, "continuity/reach_out too low for topic follow-up"
+            return True, "continuity/reach_out promotes topic follow-up"
+
+        if scene_type == SCENE_LONG_ABSENT:
+            reconnect_drive = max(reach_out, care, continuity)
+            if reconnect_drive < 0.5:
+                return False, "reconnect drive too low for long-absent outreach"
+            return True, "reconnect drive promotes long-absent outreach"
+
+        if scene_type == SCENE_POST_INTENSE:
+            soothe_drive = max(care, continuity)
+            if soothe_drive < 0.5 and retreat_drive > active_drive:
+                return False, "care/continuity too low after intense turn"
+            if soothe_drive >= 0.55:
+                return True, "care/continuity promotes post-intense follow-up"
+
+        if scene_type in {SCENE_LATE_NIGHT, SCENE_MORNING_GREET, SCENE_HOLIDAY_GREET}:
+            greet_drive = max(reach_out, care)
+            if greet_drive < 0.45 and retreat_drive > active_drive:
+                return False, "reach_out/care weaker than retreat drive"
+            if greet_drive >= 0.6:
+                return True, "reach_out/care promotes greeting"
+
+        if dominant_motive:
+            return True, f"dominant_motive={dominant_motive}"
+        return True, ""
 
     # ── 场景检测 ──────────────────────────────────────────────────────────
 

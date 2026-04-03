@@ -479,6 +479,73 @@ def _coerce_optional_float(value: Any) -> float | None:
         return None
 
 
+def _clamp_float(value: float, *, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, float(value)))
+
+
+def _apply_motive_state_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    motive_state_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    motive_state = dict(motive_state_raw or {}) if isinstance(motive_state_raw, Mapping) else {}
+    if not hint or not motive_state:
+        return hint
+
+    def _score(key: str) -> float:
+        value = _coerce_optional_float(motive_state.get(key))
+        return float(value or 0.0)
+
+    care_drive = _score("care_drive")
+    reach_out_drive = _score("reach_out_drive")
+    continuity_drive = _score("continuity_drive")
+    withdraw_drive = _score("withdraw_drive")
+    self_protect_drive = _score("self_protect_drive")
+
+    active_drive = max(care_drive, reach_out_drive, continuity_drive)
+    retreat_drive = max(withdraw_drive, self_protect_drive)
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+    motive_guidance: list[str] = []
+
+    if care_drive >= 0.62 and care_drive >= retreat_drive:
+        tone = "caring"
+        follow_up_tendency = max(follow_up_tendency, 0.08)
+        echo_weight_modifier = max(echo_weight_modifier, 0.08)
+        if not pace_hint:
+            pace_hint = "steady"
+        motive_guidance.append("先接住对方情绪，再回应内容，优先表达关心和陪伴")
+
+    if continuity_drive >= 0.68 and continuity_drive >= retreat_drive:
+        follow_up_tendency = max(follow_up_tendency, 0.12)
+        motive_guidance.append("可以轻微延续当前话题，但保持柔和不过度追问")
+
+    if retreat_drive >= 0.72 and retreat_drive >= active_drive + 0.1:
+        tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.0)
+        echo_weight_modifier = min(echo_weight_modifier, 0.02)
+        if not pace_hint:
+            pace_hint = "slow"
+        motive_guidance.append("当前更偏向收缩和自我保护，减少追问，先保持边界和稳定")
+
+    if motive_guidance:
+        guidance_text = "；".join(dict.fromkeys(motive_guidance))
+        style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
+        hint["motive_guidance"] = guidance_text
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
 def _extract_query_plan_intent(retrieval_summary: Mapping[str, Any]) -> str:
     query_plan_raw = retrieval_summary.get("query_plan")
     query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
@@ -1256,6 +1323,10 @@ def build_chat_prompt_runtime_payload(
         )
         _policy_decision = decide_response_policy(_policy_inp)
         runtime_payload["response_policy"] = _policy_decision.as_dict()
+        runtime_payload["persona_expression_hint"] = _apply_motive_state_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("motive_state"),
+        )
 
     except (ImportError, AttributeError, Exception) as _motive_exc:
         logger.debug("MotiveEngine / ResponsePolicyLayer 接入降级: %s", _motive_exc)
