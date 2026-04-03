@@ -70,12 +70,8 @@ class TestConfigContract(unittest.TestCase):
             ),
             msg=report["services"],
         )
-        self.assertTrue(
-            any(
-                row["service_id"] == "edge.rpc.fallback_llm"
-                and row["reason_code"] in (SERVICE_UNAVAILABLE_COLD_START, SERVICE_UNAVAILABLE_DEPENDENCY)
-                for row in report["services"]
-            ),
+        self.assertFalse(
+            any(row["service_id"] == "edge.rpc.fallback_llm" for row in report["services"]),
             msg=report["services"],
         )
         json.loads(json.dumps(report, ensure_ascii=False))

@@ -87,7 +87,7 @@ def test_get_retrieval_runtime_returns_latest_and_counts(monkeypatch) -> None:
 
     assert response.latest is not None
     assert response.suite_profile is None
-    assert response.episodic_write_embedding_model_id is None
+    assert response.episodic_write_embedding_model_id == "embed-config"
     assert response.latest.request_id == "req-new"
     assert response.recent_total == 2
     assert response.recent_embedding_fallbacks == 1

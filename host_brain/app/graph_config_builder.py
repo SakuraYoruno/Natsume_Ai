@@ -747,15 +747,15 @@ def resolve_host_llm_runtime(
     )
     # 同步版本：在新事件循环中运行（仅供测试/非异步上下文）
     try:
-        loop = _asyncio.get_event_loop()
-        if loop.is_running():
+        _asyncio.get_running_loop()
+        if True:
             # 已在事件循环中：降级为同步健康探测（不通过 asyncio.to_thread）
             # 此路径仅在测试 mock 场景下触发
             import concurrent.futures as _cf
             with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
                 future = _pool.submit(_asyncio.run, coro)
                 return future.result()
-        return loop.run_until_complete(coro)
+        return _asyncio.run(coro)
     except RuntimeError:
         return _asyncio.run(coro)
 

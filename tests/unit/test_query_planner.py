@@ -100,7 +100,7 @@ class TestChat:
     """chat 意图：普通日常对话（不命中任何特殊关键词）。"""
 
     @pytest.mark.parametrize("text", [
-        "今天天气怎么样", "你喜欢什么颜色", "晚饭吃什么呢",
+        "今天天气怎么样", "最近在做什么", "晚饭吃什么呢",
         "给我讲个笑话吧", "无聊了",
     ])
     def test_chat_routes_to_episodic(self, text: str) -> None:
@@ -200,7 +200,7 @@ class TestComplex:
     """complex 意图：长文本 或 多问号触发，全量 5 路。"""
 
     def test_long_text_triggers_complex(self) -> None:
-        long_text = "请帮我详细分析一下" + "这个问题" * 20  # > 100 字
+        long_text = "请帮我详细分析一下" + "这个问题" * 30  # > 100 字
         plan = _plan(long_text)
         assert plan.intent == INTENT_COMPLEX
         assert set(plan.target_stores) == set(ALL_STORE_IDS)

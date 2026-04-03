@@ -106,4 +106,4 @@ def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
         narrative="",
         reason_code="RATE_LIMIT",
     )
-    assert "抱歉" in text
+    assert "再试试" in text

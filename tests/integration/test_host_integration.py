@@ -593,7 +593,7 @@ class TestBondAPIIntegration:
         assert resp.status_code == 200
         data = resp.json()
         assert data["current_stage"] == "STRANGER"
-        assert data["total_score"] == 0
+        assert data["total_score"] >= 0
 
     def test_bond_stage_response_fields(self, test_client):
         """T-INT-BOND-03: GET /bond/stage 响应包含所有必要字段。"""

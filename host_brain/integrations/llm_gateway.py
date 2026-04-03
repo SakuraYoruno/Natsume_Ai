@@ -8,7 +8,9 @@ M24-A 扩展：
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import inspect
 from queue import Empty, Queue
 from threading import Lock, Thread
 from time import perf_counter
@@ -80,7 +82,10 @@ def _invoke_provider_with_timeout(
 
     def _target() -> None:
         try:
-            result_queue.put((True, provider(payload)))
+            result = provider(payload)
+            if inspect.isawaitable(result):
+                result = asyncio.run(result)
+            result_queue.put((True, result))
         except Exception as exc:  # pragma: no cover - re-raised on caller thread
             result_queue.put((False, exc))
 

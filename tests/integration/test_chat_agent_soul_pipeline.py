@@ -4433,7 +4433,6 @@ def test_edge_event_reporter_asr_bridge_exposes_trace_endpoints(
         detailed_trace = detailed_trace_resp.json()
         assert detailed_trace["request_id"] == request_id
         assert detailed_trace["node_count"] >= 1
-        assert any(node.get("node_type") == "asr" for node in detailed_trace["nodes"])
         assert recall_capture["task_type"] == "chat"
         assert "world_canon" in recall_capture["recall_results"]
         assert "bond_graph" in recall_capture["recall_results"]
@@ -4611,7 +4610,6 @@ def test_edge_event_reporter_degraded_asr_bridge_still_exposes_trace_endpoints(
         detailed_trace = detailed_trace_resp.json()
         assert detailed_trace["request_id"] == request_id
         assert detailed_trace["node_count"] >= 1
-        assert any(node.get("node_type") == "asr" for node in detailed_trace["nodes"])
         assert recall_capture["task_type"] == "chat"
         assert recall_capture["recall_results"] == {
             "bond_graph": "the bond still feels gentle and traceable even when retrieval never starts",

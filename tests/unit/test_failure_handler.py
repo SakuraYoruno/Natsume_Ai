@@ -76,7 +76,7 @@ class TestFailureHandlerEvents:
         assert len(tts_disabled) == 1
         assert result.meta.get("tts_disabled") is True
         assert result.should_abort is False
-        assert "语音" in result.user_response
+        assert "文字" in result.user_response
 
     @pytest.mark.asyncio
     async def test_vision_low_confidence_aborts(self):

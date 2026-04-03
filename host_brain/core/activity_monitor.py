@@ -70,6 +70,9 @@ _DEFAULT_GAMING_PROCESSES: set[str] = {
     "eldenring.exe",
     "darksouls3.exe",
     "sekiro.exe",
+    "riotclientservices.exe",
+    "battlenet.exe",
+    "honkaiimpact3rd.exe",
     # Epic Games Launcher
     "epicgameslauncher.exe",
 }
@@ -94,6 +97,10 @@ _GAMING_TITLE_KEYWORDS: set[str] = {
     "apex legends",
     "永劫无间", "naraka",
 }
+
+# 向后兼容：保留历史公开常量名
+GAMING_PROCESS_NAMES = _DEFAULT_GAMING_PROCESSES
+GAMING_TITLE_KEYWORDS = _GAMING_TITLE_KEYWORDS
 
 
 # ---------------------------------------------------------------------------
@@ -206,14 +213,18 @@ class ActivityMonitor:
     def __init__(
         self,
         *,
+        mode_service: Any = None,
         mode_transition_service: Any = None,
         gaming_check_interval_s: float = 30.0,
         idle_check_interval_s: float = 300.0,
         on_activity_detected: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self._mode_service = mode_transition_service
+        self._mode_service = mode_transition_service if mode_transition_service is not None else mode_service
         self._gaming_interval = float(gaming_check_interval_s)
         self._idle_interval = float(idle_check_interval_s)
+        # 向后兼容旧测试和调用点的内部字段名
+        self._gaming_check_interval_s = self._gaming_interval
+        self._idle_check_interval_s = self._idle_interval
         self._on_activity = on_activity_detected
 
         # 运行状态

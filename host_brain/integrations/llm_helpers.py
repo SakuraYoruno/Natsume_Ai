@@ -208,7 +208,7 @@ def stream_llm_chunks(
         timeout=max(1.0, float(timeout_ms) / 1000.0),
         max_retries=1,
         temperature=temperature,
-        model_kwargs={"top_p": top_p},
+        top_p=top_p,
         streaming=True,
     )
 

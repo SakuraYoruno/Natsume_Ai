@@ -78,7 +78,16 @@ class _DummyBondStyle:
 
 
 class _DummyBondStyleEngine:
-    def generate(self, *, bond_stage: str, mood_state: str, rift_active: bool, bond_trend: str, texture_hint: str) -> _DummyBondStyle:
+    def generate(
+        self,
+        *,
+        bond_stage: str,
+        mood_state: str,
+        rift_active: bool,
+        bond_trend: str,
+        texture_hint: str,
+        shared_memory_hints: list[str] | None = None,
+    ) -> _DummyBondStyle:
         return _DummyBondStyle(bond_stage=bond_stage)
 
 

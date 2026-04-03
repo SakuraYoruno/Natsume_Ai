@@ -403,7 +403,7 @@ class TestGatewayServer(unittest.TestCase):
         client, _, _ = self._make_client()
         resp = client.post(
             "/v1/gateway/wechat/webhook",
-            data="{bad json",
+            content="{bad json",
             headers={"Content-Type": "application/json"},
         )
         self.assertEqual(400, resp.status_code)
@@ -482,7 +482,7 @@ class TestGatewayServer(unittest.TestCase):
         client, _, _ = self._make_client(with_outbound=True)
         resp = client.post(
             "/v1/gateway/reply",
-            data="{bad json",
+            content="{bad json",
             headers={"Content-Type": "application/json"},
         )
         self.assertEqual(400, resp.status_code)
